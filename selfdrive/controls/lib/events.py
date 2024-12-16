@@ -1062,6 +1062,11 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.PERMANENT: holiday_alert,
   },
 
+  EventName.hyundaiRadarTracksAvailable: {
+    ET.PERMANENT: NormalPermanentAlert("Radar tracks initialized. Restart the car and turn on OPLong to engage."),
+  },
+
+
   EventName.laneChangeBlockedLoud: {
     ET.WARNING: Alert(
       "Car detected in blindspot",

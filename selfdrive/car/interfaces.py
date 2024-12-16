@@ -5,6 +5,7 @@ import tomllib
 from abc import abstractmethod, ABC
 from difflib import SequenceMatcher
 from enum import StrEnum
+from types import SimpleNamespace
 from typing import Any, NamedTuple
 from collections.abc import Callable
 from functools import cache
@@ -14,8 +15,10 @@ from openpilot.common.basedir import BASEDIR
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.simple_kalman import KF1D, get_kalman_gain
 from openpilot.common.numpy_fast import clip
+from openpilot.common.params import Params
 from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.car import apply_hysteresis, gen_empty_fingerprint, scale_rot_inertia, scale_tire_stiffness, STD_CARGO_KG
+from openpilot.selfdrive.car.hyundai.hkg_additions import ParamManager
 from openpilot.selfdrive.car.values import PLATFORMS
 from openpilot.selfdrive.controls.lib.drive_helpers import CRUISE_LONG_PRESS, V_CRUISE_MAX, get_friction
 from openpilot.selfdrive.controls.lib.events import Events
@@ -223,6 +226,7 @@ class CarInterfaceBase(ABC):
     dbc_name = "" if self.cp is None else self.cp.dbc_name
     self.CC: CarControllerBase = CarController(dbc_name, CP, self.VM)
 
+    self.param_s = Params()
     # FrogPilot variables
     self.frogpilot_toggles = get_frogpilot_toggles()
 
@@ -286,6 +290,7 @@ class CarInterfaceBase(ABC):
     ret.minSteerSpeed = platform.config.specs.minSteerSpeed
     ret.tireStiffnessFactor = platform.config.specs.tireStiffnessFactor
     ret.flags |= int(platform.config.flags)
+    ret.fpFlags |= int(platform.config.fpFlags)
 
     ret = cls._get_params(ret, candidate, fingerprint, car_fw, disable_openpilot_long, experimental_long, docs)
 
@@ -387,11 +392,13 @@ class CarInterfaceBase(ABC):
   def _update(self, c: car.CarControl) -> car.CarState:
     pass
 
-  def update(self, c: car.CarControl, can_strings: list[bytes], frogpilot_toggles) -> car.CarState:
+  def update(self, c: car.CarControl, can_strings: list[bytes], params_list: SimpleNamespace, frogpilot_toggles) -> car.CarState:
     # parse can
     for cp in self.can_parsers:
       if cp is not None:
         cp.update_strings(can_strings)
+
+    self.CS.params_list = params_list
 
     # get CarState
     ret, fp_ret = self._update(c, frogpilot_toggles)
@@ -562,6 +569,8 @@ class CarStateBase(ABC):
     self.right_blinker_prev = False
     self.cluster_speed_hyst_gap = 0.0
     self.cluster_min_speed = 0.0  # min speed before dropping to 0
+
+    self.params_list: SimpleNamespace = ParamManager().get_params()
 
     Q = [[0.0, 0.0], [0.0, 100.0]]
     R = 0.3

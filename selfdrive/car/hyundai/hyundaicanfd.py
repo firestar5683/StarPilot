@@ -1,5 +1,6 @@
 from openpilot.common.numpy_fast import clip
 from openpilot.selfdrive.car import CanBusBase
+from openpilot.common.conversions import Conversions as CV
 from openpilot.selfdrive.car.hyundai.values import HyundaiFlags
 
 
@@ -120,8 +121,118 @@ def create_lfahda_cluster(packer, CAN, enabled, lat_active):
   }
   return packer.make_can_msg("LFAHDA_CLUSTER", CAN.ECAN, values)
 
+def create_msg_161(packer, CAN, enabled, msg_161, car_params, hud_control, car_state, car_control, frame):
+  values = msg_161.copy()
 
-def create_acc_control(packer, CAN, enabled, accel_last, accel, stopping, gas_override, set_speed, hud_control):
+  # HIDE ALERTS
+  if values.get("MUTE") == 3:
+    values["MUTE"] = 0
+  if values.get("ALERTS_5") == 5:  # USE SWITCH OR PEDAL TO ACCELERATE
+    values["ALERTS_5"] = 0
+  if values.get("ALERTS_2") == 5:  # CONSIDER TAKING A BREAK
+    values.update({"ALERTS_2": 0, "SOUNDS_2": 0, "DAW_ICON": 0})
+  if values.get("ALERTS_3") == 4:
+    values["ALERTS_3"] = 0
+  if values.get("ALERTS_4") == 9:  # SMART CRUISE CONTROL CONDITIONS NOT MET
+    values["ALERTS_4"] = 0
+  if values.get("ALERTS_1") == 6:
+    values["ALERTS_1"] = 0
+  values["LKA_WARNING"] = 0
+  # LANELINES
+  curvature = {
+    i: (31 if i == -1 else 13 - abs(i + 15)) if i < 0 else 15 + i
+    for i in range(-15, 16)
+  }
+  values.update({
+    "LANELINE_CURVATURE": curvature.get(max(-15, min(int(car_state.out.steeringAngleDeg / 3), 15)), 14) if enabled else 15,
+    "LFA_ICON": 2 if enabled else 0,
+    "LKA_ICON": 4 if enabled else 0,
+    "LANELINE_LEFT": 2 if enabled else 0,
+    "LANELINE_RIGHT": 2 if enabled else 0,
+    "CENTERLINE": 1 if enabled else 0,
+  })
+
+  # LCA
+  if enabled:
+    speed_below_threshold = car_state.out.vEgo < 8.94
+    values.update({
+      "LCA_LEFT_ICON": 0 if car_state.out.leftBlindspot or speed_below_threshold else 2 if car_control.leftBlinker else 1,
+      "LCA_RIGHT_ICON": 0 if car_state.out.rightBlindspot or speed_below_threshold else 2 if car_control.rightBlinker else 1,
+      "LCA_LEFT_ARROW": 2 if car_control.leftBlinker else 0,
+      "LCA_RIGHT_ARROW": 2 if car_control.rightBlinker else 0,
+    })
+
+  # LANE DEPARTURE
+  if hud_control.leftLaneDepart:
+    values["LANELINE_LEFT"] = 4 if (frame // 50) % 2 == 0 else 1
+  if hud_control.rightLaneDepart:
+    values["LANELINE_RIGHT"] = 4 if (frame // 50) % 2 == 0 else 1
+
+  if car_params.openpilotLongitudinalControl:
+    # HIDE ALERTS
+    if values.get("ALERTS_5") == 4:  # SMART CRUISE CONTROL CONDITIONS NOT MET
+      values["ALERTS_5"] = 0
+
+    # SETSPEED
+    values["SETSPEED"] = 3 if enabled else 1
+    values["SETSPEED_HUD"] = 2 if enabled else 1
+    values["SETSPEED_SPEED"] = 25 if (s := round(car_state.out.vCruiseCluster * CV.KPH_TO_MPH)) > 100 else s
+
+    # DISTANCE
+    if 1 <= hud_control.leadDistanceBars <= 3:
+      values["DISTANCE"] = hud_control.leadDistanceBars
+      values["DISTANCE_SPACING"] = 1 if enabled else 0
+      values["DISTANCE_LEAD"] = 2 if enabled and hud_control.leadVisible else 1 if enabled else 0
+      values["DISTANCE_CAR"] = 2 if enabled else 1
+      values["ALERTS_3"] = hud_control.leadDistanceBars + 6
+    else:
+      values["DISTANCE"] = 0
+      values["DISTANCE_SPACING"] = 0
+      values["DISTANCE_LEAD"] = 0
+      values["DISTANCE_CAR"] = 0
+
+    # BACKGROUND
+    values["BACKGROUND"] = 1 if enabled else 7
+
+  return packer.make_can_msg("MSG_161", CAN.ECAN, values)
+
+def create_msg_162(packer, CAN, enabled, msg_162, car_params, hud_control, car_state):
+  values = msg_162.copy()
+  TURN_ANGLE_THRESHOLD = 85
+  SPEED_THRESHOLD = 8.33
+  # HIDE FAULTS
+  values.update({
+    "LKA_FAULT": 0,
+    "FAULT_FSS": 0,  # Forward Safety System
+    "FAULT_LSS": 0,
+    "FAULT_SLA": 0,  # Speed Limit Assist
+    "FAULT_LFA": 0,  # Hide LFA errors
+    "FAULT_HDA": 0,
+    "FAULT_LCA": 0,  # Lane Change Assist
+    "FAULT_HDP": 0,  # Highway Driving Pilot
+    "FAULT_SCC": 0,  # Smart Cruise Control
+    "FAULT_DAS": 0 if (abs(car_state.out.steeringAngleDeg) < TURN_ANGLE_THRESHOLD or car_state.out.vEgo < SPEED_THRESHOLD) else values.get("FAULT_DAS", 0),
+  })
+
+  values["LKA_WARNING"] = 0
+  # LANE DEPARTURE
+  if hud_control.leftLaneDepart or hud_control.rightLaneDepart:
+    values["VIBRATE"] = 1
+
+  if car_params.openpilotLongitudinalControl:
+    # *** TODO *** LEAD_DISTANCE/LEAD_LATERAL
+    # LEAD
+    if hud_control.leadVisible:
+      values["LEAD"] = 2 if enabled else 1
+      values["LEAD_DISTANCE"] = 100
+    else:
+      values["LEAD"] = 0
+      values["LEAD_DISTANCE"] = 0
+
+  return packer.make_can_msg("MSG_162", CAN.ECAN, values)
+
+
+def create_acc_control(packer, CAN, CS, enabled, accel_last, accel, stopping, gas_override, set_speed, hud_control):
   jerk = 5
   jn = jerk / 50
   if not enabled or gas_override:
@@ -171,6 +282,18 @@ def create_spas_messages(packer, CAN, frame, left_blink, right_blink):
 
   return ret
 
+def create_fca_warning_light(packer, CAN, frame):
+  ret = []
+  if frame % 2 == 0:
+    values = {
+      'AEB_SETTING': 0x1,  # show AEB disabled icon
+      'SET_ME_2': 0x2,
+      'SET_ME_FF': 0xff,
+      'SET_ME_FC': 0xfc,
+      'SET_ME_9': 0x9,
+    }
+    ret.append(packer.make_can_msg("ADRV_0x160", CAN.ECAN, values))
+  return ret
 
 def create_adrv_messages(packer, CAN, frame):
   # messages needed to car happy after disabling
@@ -181,6 +304,8 @@ def create_adrv_messages(packer, CAN, frame):
   values = {
   }
   ret.append(packer.make_can_msg("ADRV_0x51", CAN.ACAN, values))
+
+  ret.extend(create_fca_warning_light(packer, CAN, frame))
 
   if frame % 2 == 0:
     values = {

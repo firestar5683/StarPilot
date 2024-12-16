@@ -417,6 +417,9 @@ void ui_update_frogpilot_params(UIState *s) {
   scene.radarless_model = scene.frogpilot_toggles.value("radarless_model").toBool();
   scene.random_events = scene.frogpilot_toggles.value("random_events").toBool();
   scene.rainbow_path = scene.frogpilot_toggles.value("rainbow_path").toBool();
+
+  scene.brake_signal = scene.frogpilot_toggles.value("brake_signal").toBool();
+
   scene.road_edge_width = scene.frogpilot_toggles.value("road_edge_width").toDouble();
   scene.road_name_ui = scene.frogpilot_toggles.value("road_name_ui").toBool();
   scene.rotating_wheel = scene.frogpilot_toggles.value("rotating_wheel").toBool();
