@@ -612,6 +612,23 @@ FW_VERSIONS = {
       b'\xf1\x00DL ESC \t 102"\x08\x10 58910-L3800',
     ],
   },
+   CAR.KIA_K5_2025: {
+    (Ecu.fwdRadar, 0x7d0, None): [
+      b'\xf1\x00DL3_ RDR -----      1.00 1.01 99110-L2500         ',
+    ],
+    (Ecu.fwdCamera, 0x7c4, None): [
+      b'\xf1\x00DL3 MFC  AT USA LHD 1.00 1.04 99210-L2500 240117',
+    ],
+    (Ecu.cornerRadar, 0x7b7, None): [
+        b'\xf1\x8b #\x12\x12',
+    ],
+    (Ecu.combinationMeter, 0x7c6, None): [
+        b'\xf1\x8b $\t#',
+    ],
+    (Ecu.hvac, 0x7b3, None): [
+        b'\xf1\x8b $\t%',
+    ],
+  },
   CAR.KIA_K5_HEV_2020: {
     (Ecu.fwdRadar, 0x7d0, None): [
       b'\xf1\x00DLhe SCC FHCUP      1.00 1.02 99110-L7000         ',

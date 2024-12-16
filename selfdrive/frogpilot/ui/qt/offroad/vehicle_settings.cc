@@ -141,6 +141,9 @@ FrogPilotVehiclesPanel::FrogPilotVehiclesPanel(FrogPilotSettingsWindow *parent) 
     {"LongPitch", tr("Uphill/Downhill Smoothing"), tr("Smoothens the gas and brake response when driving on slopes."), ""},
     {"NewLongAPIGM", tr("Use comma's New Longitudinal API"), tr("Enables comma's new control system that has shown great improvement with acceleration and braking, but has a few issues on some GM vehicles."), ""},
 
+    {"HyundaiRadarTracks", tr("Enable Radar Tracks"), tr("Enables the cars radar tracks along with OPLong for Hyundai/Kia/Genesis vehicles, which shows vast improvement in long control."), ""},
+    {"HKGtuning", tr("Chubbs' Custom Tuning"), tr("Chubbs' Custom tuning for Hyundai/Kia/Genesis vehicles, which smoothes acceleration and braking to help achieve a 'limo' stop."), ""},
+
     {"NewLongAPI", tr("Use comma's New Longitudinal API"), tr("Enables comma's new control system that has shown great improvement with acceleration and braking, but has a few issues on Hyundai/Kia/Genesis."), ""},
 
     {"CrosstrekTorque", tr("Subaru Crosstrek Torque Increase"), tr("Increases the maximum allowed torque for the Subaru Crosstrek."), ""},
@@ -181,7 +184,7 @@ FrogPilotVehiclesPanel::FrogPilotVehiclesPanel(FrogPilotSettingsWindow *parent) 
     clusterOffsetToggle->refresh();
   });
 
-  std::set<QString> rebootKeys = {"CrosstrekTorque", "ExperimentalGMTune", "FrogsGoMoosTweak", "NewLongAPI", "NewLongAPIGM"};
+  std::set<QString> rebootKeys = {"CrosstrekTorque", "ExperimentalGMTune", "FrogsGoMoosTweak", "HyundaiRadarTracks", "HKGtuning", "NewLongAPI", "NewLongAPIGM"};
   for (const QString &key : rebootKeys) {
     QObject::connect(static_cast<ToggleControl*>(toggles[key]), &ToggleControl::toggleFlipped, [this]() {
       if (started) {
