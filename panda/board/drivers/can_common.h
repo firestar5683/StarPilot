@@ -202,9 +202,9 @@ void ignition_can_hook(CANPacket_t *to_push) {
     int len = GET_LEN(to_push);
     
     // GM exception
-    if ((addr == 0x1F1) && (len == 8)) {
-      // SystemPowerMode (2=Run, 3=Crank Request)
-      ignition_can = (GET_BYTE(to_push, 0) & 0x2U) != 0U;
+    if ((addr == 0xC9) && (len == 8)) {
+      // Matches SystemPowerMode (1=Run, 0=Off)
+      ignition_can = (GET_BYTE(to_push, 6) & 0x10U) != 0U;
       ignition_can_cnt = 0U;
     }
 
