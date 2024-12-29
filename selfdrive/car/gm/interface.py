@@ -131,14 +131,14 @@ class CarInterface(CarInterfaceBase):
 
       # Tuning for experimental long
       if use_new_api:
-        ret.longitudinalTuning.kiV = [2.0, 1.5]
+        ret.longitudinalTuning.kiV = [.05, .07, .1]
         ret.vEgoStopping = 0.1
         ret.vEgoStarting = 0.1
       else:
         ret.longitudinalTuning.kpV = [2.0, 1.5]
         ret.longitudinalTuning.kiV = [0.72]
 
-      ret.stoppingDecelRate = 2.0  # reach brake quickly after enabling
+      ret.stoppingDecelRate = 0.1  # reach brake quickly after enabling
       ret.vEgoStopping = 0.25
       ret.vEgoStarting = 0.25
 
@@ -294,13 +294,13 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_PEDAL_LONG
         # Note: Low speed, stop and go not tested. Should be fairly smooth on highway
         if use_new_api:
-          ret.longitudinalTuning.kiBP = [0., 3., 6., 35.]
-          ret.longitudinalTuning.kiV = [0.125, 0.175, 0.225, 0.33]
-        else:
-          ret.longitudinalTuning.kpBP = [5., 35.]
-          ret.longitudinalTuning.kpV = [0.35, 0.5]
           ret.longitudinalTuning.kiBP = [0., 35.0]
-          ret.longitudinalTuning.kiV = [0.1, 0.1]
+          ret.longitudinalTuning.kiV = [0.05, 0.05]
+        else:
+          ret.longitudinalTuning.kpBP = [0., 3., 6., 35.]
+          ret.longitudinalTuning.kpV = [0.08, 0.175, 0.225, 0.33]
+          ret.longitudinalTuning.kiBP = [0., 35.0]
+          ret.longitudinalTuning.kiV = [0.07, 0.07]
         ret.longitudinalTuning.kf = 0.25
         ret.stoppingDecelRate = 0.8
       else:  # Pedal used for SNG, ACC for longitudinal control otherwise
@@ -383,9 +383,9 @@ class CarInterface(CarInterfaceBase):
     if self.resumeRequired_shown and not ret.cruiseState.standstill:
       self.disable_resumeRequired = True
 
-    if ret.vEgo < self.CP.minSteerSpeed and not self.disable_belowSteerSpeed:
-      events.add(EventName.belowSteerSpeed)
-      self.belowSteerSpeed_shown = True
+    #if ret.vEgo < self.CP.minSteerSpeed and not self.disable_belowSteerSpeed:
+      #events.add(EventName.belowSteerSpeed)
+      #self.belowSteerSpeed_shown = True
 
     # Disable the "belowSteerSpeed" event after it's been shown once to not annoy the driver
     if self.belowSteerSpeed_shown and ret.vEgo >= self.CP.minSteerSpeed:
