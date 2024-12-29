@@ -1,3 +1,4 @@
+from typing import Tuple
 from cereal import car
 from openpilot.common.conversions import Conversions as CV
 from openpilot.common.filter_simple import FirstOrderFilter
@@ -7,7 +8,7 @@ from openpilot.common.params_pyx import Params
 from opendbc.can.packer import CANPacker
 from openpilot.selfdrive.car import apply_driver_steer_torque_limits, create_gas_interceptor_command
 from openpilot.selfdrive.car.gm import gmcan
-from openpilot.selfdrive.car.gm.values import DBC, CanBus, CarControllerParams, CruiseButtons, GMFlags, CC_ONLY_CAR, SDGM_CAR, EV_CAR, AccState
+from openpilot.selfdrive.car.gm.values import DBC, CanBus, CarControllerParams, CruiseButtons, GMFlags, CC_ONLY_CAR, SDGM_CAR, EV_CAR, AccState, CC_REGEN_PADDLE_CAR
 from openpilot.selfdrive.car.interfaces import CarControllerBase
 from openpilot.selfdrive.controls.lib.drive_helpers import apply_deadzone
 from openpilot.selfdrive.controls.lib.vehicle_model import ACCELERATION_DUE_TO_GRAVITY
@@ -57,17 +58,24 @@ class CarController(CarControllerBase):
     self.accel_g = 0.0
 
   @staticmethod
-  def calc_pedal_command(accel: float, long_active: bool, car_velocity) -> float:
-    if not long_active: return 0.
+  def calc_pedal_command(accel: float, long_active: bool, car_velocity) -> Tuple[float, bool]:
+    if not long_active: return 0., False
+    press_regen_paddle = False
 
-    if accel < -0.5:
+    if accel < -0.30:
+      press_regen_paddle = True
       pedal_gas = 0
     else:
-
-      pedaloffset = interp(car_velocity, [0., 3, 6, 30], [0.10, 0.175, 0.240, 0.240])
+      # pedaloffset = 0.24
+      pedaloffset = interp(car_velocity, [0., 3, 6, 30], [0.08, 0.175, 0.240, 0.240])
       pedal_gas = clip((pedaloffset + accel * 0.6), 0.0, 1.0)
-      
-    return pedal_gas
+
+      ####for safety.
+      pedal_gas_max = interp(car_velocity, [0.0, 5, 30], [0.21, 0.3175,  0.3525])
+      pedal_gas = clip(pedal_gas, 0.0, pedal_gas_max)
+      ####for safety. end.
+
+    return pedal_gas, press_regen_paddle
 
 
   def update(self, CC, CS, now_nanos, frogpilot_toggles):
@@ -131,6 +139,7 @@ class CarController(CarControllerBase):
         at_full_stop = CC.longActive and CS.out.standstill
         near_stop = CC.longActive and (CS.out.vEgo < self.params.NEAR_STOP_BRAKE_PHASE)
         interceptor_gas_cmd = 0
+        press_regen_paddle = False
         if not CC.longActive:
           # ASCM sends max regen when not enabled
           self.apply_gas = self.params.INACTIVE_REGEN
@@ -138,6 +147,7 @@ class CarController(CarControllerBase):
         elif near_stop and stopping and not CC.cruiseControl.resume:
           self.apply_gas = self.params.INACTIVE_REGEN
           self.apply_brake = int(min(-100 * self.CP.stopAccel, self.params.MAX_BRAKE))
+          press_regen_paddle = True
         else:
           # Normal operation
           if self.CP.carFingerprint in EV_CAR:
@@ -159,12 +169,13 @@ class CarController(CarControllerBase):
             self.apply_gas = self.params.INACTIVE_REGEN
           if self.CP.carFingerprint in CC_ONLY_CAR:
             # gas interceptor only used for full long control on cars without ACC
-            interceptor_gas_cmd = self.calc_pedal_command(actuators.accel, CC.longActive, CS.out.vEgo)
+            interceptor_gas_cmd, press_regen_paddle = self.calc_pedal_command(actuators.accel, CC.longActive, CS.out.vEgo)
 
         if self.CP.enableGasInterceptor and self.apply_gas > self.params.INACTIVE_REGEN and CS.out.cruiseState.standstill:
           # "Tap" the accelerator pedal to re-engage ACC
           interceptor_gas_cmd = self.params.SNG_INTERCEPTOR_GAS
           self.apply_brake = 0
+          press_regen_paddle = False
           self.apply_gas = self.params.INACTIVE_REGEN
 
         idx = (self.frame // 4) % 4
@@ -175,6 +186,8 @@ class CarController(CarControllerBase):
             can_sends.extend(gmcan.create_gm_cc_spam_command(self.packer_pt, self, CS, actuators))
         if self.CP.enableGasInterceptor:
           can_sends.append(create_gas_interceptor_command(self.packer_pt, interceptor_gas_cmd, idx))
+          if self.CP.carFingerprint in CC_REGEN_PADDLE_CAR and press_regen_paddle:
+            can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN))
         if self.CP.carFingerprint not in CC_ONLY_CAR:
           friction_brake_bus = CanBus.CHASSIS
           # GM Camera exceptions
