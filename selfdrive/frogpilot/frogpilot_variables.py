@@ -581,7 +581,7 @@ class FrogPilotVariables:
     toggle.model_randomizer = params.get_bool("ModelRandomizer") if tuning_level >= level["ModelRandomizer"] else default.get_bool("ModelRandomizer")
     if available_models:
       if toggle.model_randomizer:
-        if not started or not hasattr(toggle, "model"):
+        if not started or not toggle.model:
           blacklisted_models = (params.get("BlacklistedModels", encoding='utf-8') or "").split(",")
           existing_models = [model for model in available_models.split(",") if model not in blacklisted_models and (MODELS_PATH / f"{model}.thneed").exists()]
           toggle.model = random.choice(existing_models) if existing_models else default.get("Model", encoding='utf-8')
