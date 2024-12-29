@@ -12,9 +12,9 @@ Ecu = car.CarParams.Ecu
 
 class CarControllerParams:
   STEER_MAX = 300  # GM limit is 3Nm. Used by carcontroller to generate LKA output
-  STEER_STEP = 4  # Active control frames per command (~33hz)
+  STEER_STEP = 3  # Active control frames per command (~33hz)
   INACTIVE_STEER_STEP = 10  # Inactive control frames per command (10hz)
-  STEER_DELTA_UP = 8  # Delta rates require review due to observed EPS weakness
+  STEER_DELTA_UP = 10  # Delta rates require review due to observed EPS weakness
   STEER_DELTA_DOWN = 15
   STEER_DRIVER_ALLOWANCE = 65
   STEER_DRIVER_MULTIPLIER = 4
@@ -185,17 +185,10 @@ class CAR(Platforms):
     [GMCarDocs("Chevrolet Volt 2017-18 - No-ACC", min_enable_speed=0)],
     CHEVROLET_VOLT.specs,
   )
-  CHEVROLET_BOLT_2017 = GMPlatformConfig(
-    [GMCarDocs("Chevrolet Bolt EV 2017")],
-    CHEVROLET_BOLT_EUV.specs,
-  )
-  CHEVROLET_BOLT_2018 = GMPlatformConfig(
-    [GMCarDocs("Chevrolet Bolt EV 2018-21")],
-    CHEVROLET_BOLT_EUV.specs,
-  )
   CHEVROLET_BOLT_CC = GMPlatformConfig(
     [
       GMCarDocs("Chevrolet Bolt EUV 2022-23 - No-ACC"),
+      GMCarDocs("Chevrolet Bolt EV 2017-23 - No-ACC"),
     ],
     CHEVROLET_BOLT_EUV.specs,
   )
@@ -245,7 +238,7 @@ class CAR(Platforms):
   )
   CHEVROLET_TRAX = GMPlatformConfig(
     [GMCarDocs("Chevrolet TRAX 2024")],
-    CarSpecs(mass=1365, wheelbase=2.7, steerRatio=15.7, centerToFrontRatio=0.4),
+    CarSpecs(mass=1365, wheelbase=2.7, steerRatio=16.4, centerToFrontRatio=0.4),
   )
 
 
@@ -328,9 +321,7 @@ FW_QUERY_CONFIG = FwQueryConfig(
 )
 
 EV_CAR = {CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_2019, CAR.CHEVROLET_BOLT_EUV, CAR.CHEVROLET_VOLT_CC, CAR.CHEVROLET_BOLT_2017, CAR.CHEVROLET_BOLT_2018, CAR.CHEVROLET_BOLT_CC}
-CC_ONLY_CAR = {CAR.CHEVROLET_VOLT_CC, CAR.CHEVROLET_BOLT_2017, CAR.CHEVROLET_BOLT_2018, CAR.CHEVROLET_BOLT_CC, CAR.CHEVROLET_EQUINOX_CC, CAR.CHEVROLET_SUBURBAN_CC, CAR.CADILLAC_CT6_CC, CAR.CHEVROLET_TRAILBLAZER_CC, CAR.CHEVROLET_MALIBU_CC, CAR.CADILLAC_XT5_CC}
-CC_REGEN_PADDLE_CAR = {CAR.CHEVROLET_BOLT_2017, CAR.CHEVROLET_BOLT_2018, CAR.CHEVROLET_BOLT_CC}
-# CC_ONLY_CAR = set(c for c in CAR if str(c).endswith('_CC'))
+CC_ONLY_CAR = {CAR.CHEVROLET_VOLT_CC, CAR.CHEVROLET_BOLT_2017, CAR.CHEVROLET_BOLT_2018, CAR.CHEVROLET_BOLT_CC, CAR.CHEVROLET_EQUINOX_CC, CAR.CHEVROLET_SUBURBAN_CC, CAR.CADILLAC_CT6_CC, CAR.CHEVROLET_TRAILBLAZER_CC, CAR.CHEVROLET_MALIBU_CC, CAR.CADILLAC_XT5_CC}# CC_ONLY_CAR = set(c for c in CAR if str(c).endswith('_CC'))
 
 # We're integrated at the Safety Data Gateway Module on these cars
 SDGM_CAR = {CAR.CADILLAC_XT4, CAR.CHEVROLET_TRAVERSE, CAR.BUICK_BABYENCLAVE}
