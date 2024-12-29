@@ -176,6 +176,18 @@ def create_lka_icon_command(bus, active, critical, steer):
   else:
     dat = b"\x00\x00\x00"
   return make_can_msg(0x104c006c, dat, bus)
+def create_regen_paddle_command(packer, bus):
+  values = {
+    # "RegenPaddle": 2
+    "RegenPaddle": 0x20,
+    "Byte1": 0x00,
+    "Byte2": 0x00,
+    "Byte3": 0x00,
+    "Byte4": 0x00,
+    "Byte5": 0x00,
+    "Byte6": 0x00
+  }
+  return packer.make_can_msg("EBCMRegenPaddle", bus, values)
 
 
 def create_gm_cc_spam_command(packer, controller, CS, actuators):
@@ -213,6 +225,7 @@ def create_gm_cc_spam_command(packer, controller, CS, actuators):
   else:
     controller.apply_speed = speedSetPoint
     rate = float('inf')
+
 
   # Check rlogs closely - our message shouldn't show up on the pt bus for us
   # Or bus 2, since we're forwarding... but I think it does

@@ -46,7 +46,7 @@ const int GM_STANDSTILL_THRSLD = 10;  // 0.311kph
 const int GM_GAS_INTERCEPTOR_THRESHOLD = 550; // (675 + 355) / 2 ratio between offset and gain from dbc file
 #define GM_GET_INTERCEPTOR(msg) (((GET_BYTE((msg), 0) << 8) + GET_BYTE((msg), 1) + (GET_BYTE((msg), 2) << 8) + GET_BYTE((msg), 3)) / 2U) // avg between 2 tracks
 
-const CanMsg GM_ASCM_TX_MSGS[] = {{0x180, 0, 4}, {0x409, 0, 7}, {0x40A, 0, 7}, {0x2CB, 0, 8}, {0x370, 0, 6}, {0x200, 0, 6},  // pt bus
+const CanMsg GM_ASCM_TX_MSGS[] = {{0x180, 0, 4}, {0x409, 0, 7}, {0x40A, 0, 7}, {0x2CB, 0, 8}, {0x370, 0, 6}, {0x200, 0, 6}, {0xBD, 0, 7},  // pt bus
                                   {0xA1, 1, 7}, {0x306, 1, 8}, {0x308, 1, 7}, {0x310, 1, 2},   // obs bus
                                   {0x315, 2, 5}};  // ch bus
 
@@ -186,8 +186,17 @@ static void gm_rx_hook(const CANPacket_t *to_push) {
       }
     }
 
+//    if (addr == 0xBD) {
+//      regen_braking = (GET_BYTE(to_push, 0) >> 4) != 0U;
+//    }
+
     if (addr == 0xBD) {
+      // 1. Check Regen Brake
       regen_braking = (GET_BYTE(to_push, 0) >> 4) != 0U;
+      // 2. Check Long Control
+      if (!get_longitudinal_allowed()) {
+        //tx = false;
+      }
     }
 
     // Pedal Interceptor
