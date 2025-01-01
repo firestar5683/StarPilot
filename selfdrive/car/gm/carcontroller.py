@@ -60,9 +60,9 @@ class CarController(CarControllerBase):
   @staticmethod
   def calc_pedal_command(accel: float, long_active: bool, car_velocity) -> Tuple[float, bool]:
     if not long_active: return 0., False
-    press_regen_paddle = True
+    press_regen_paddle = False
 
-    if accel < -0.25:
+    if accel < -0.30:
       press_regen_paddle = True
       pedal_gas = 0
     else:
@@ -144,10 +144,6 @@ class CarController(CarControllerBase):
           # ASCM sends max regen when not enabled
           self.apply_gas = self.params.INACTIVE_REGEN
           self.apply_brake = 0
-        elif at_full_stop:   #Press regen paddle when stopped to ensure brake lights are on
-         press_regen_paddle = True
-         self.apply_gas = self.params.INACTIVE_REGEN
-         self.apply_brake = 0 
         elif near_stop and stopping and not CC.cruiseControl.resume:
           self.apply_gas = self.params.INACTIVE_REGEN
           self.apply_brake = int(min(-100 * self.CP.stopAccel, self.params.MAX_BRAKE))
