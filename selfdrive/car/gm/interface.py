@@ -347,6 +347,8 @@ class CarInterface(CarInterfaceBase):
     return ret
 
   # returns a car.CarState
+  # Returns a car.CarState
+
   def _update(self, c, frogpilot_toggles):
     ret, fp_ret = self.CS.update(self.cp, self.cp_cam, self.cp_loopback, frogpilot_toggles)
 
@@ -370,7 +372,6 @@ class CarInterface(CarInterfaceBase):
         events.add(EventName.buttonEnable)
 
     # Enabling at a standstill with brake is allowed
-    # TODO: verify 17 Volt can enable for the first time at a stop and allow for all GMs
     below_min_enable_speed = ret.vEgo < self.CP.minEnableSpeed or self.CS.moving_backward
     if below_min_enable_speed and not (ret.standstill and ret.brake >= 20 and
                                        (self.CP.networkLocation == NetworkLocation.fwdCamera and not self.CP.carFingerprint in SDGM_CAR)):
@@ -383,17 +384,11 @@ class CarInterface(CarInterfaceBase):
     if self.resumeRequired_shown and not ret.cruiseState.standstill:
       self.disable_resumeRequired = True
 
-    #if ret.vEgo < self.CP.minSteerSpeed and not self.disable_belowSteerSpeed:
-      #events.add(EventName.belowSteerSpeed)
-      #self.belowSteerSpeed_shown = True
+    # Always enable regen paddle for feathering with the gas pedal
+    self.CS.apply_gas = self.params.INACTIVE_REGEN  # Use regen when not accelerating
+    self.CS.apply_brake = int(min(-100 * self.CP.stopAccel, self.params.MAX_BRAKE))  # Smooth regen deceleration
 
-    # Disable the "belowSteerSpeed" event after it's been shown once to not annoy the driver
-    if self.belowSteerSpeed_shown and ret.vEgo >= self.CP.minSteerSpeed:
-      self.disable_belowSteerSpeed = True
-
-    if (self.CP.flags & GMFlags.CC_LONG.value) and ret.vEgo < self.CP.minEnableSpeed and ret.cruiseState.enabled:
-      events.add(EventName.speedTooLow)
-
+    # Add additional events if needed based on new behavior
     if (self.CP.flags & GMFlags.PEDAL_LONG.value) and \
       self.CP.transmissionType == TransmissionType.direct and \
       not self.CS.single_pedal_mode and \
@@ -403,3 +398,4 @@ class CarInterface(CarInterfaceBase):
     ret.events = events.to_msg()
 
     return ret, fp_ret
+
