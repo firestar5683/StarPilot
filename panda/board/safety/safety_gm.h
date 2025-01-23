@@ -217,7 +217,7 @@ static bool gm_tx_hook(const CANPacket_t *to_send) {
     int brake = ((GET_BYTE(to_send, 0) & 0xFU) << 8) + GET_BYTE(to_send, 1);
     brake = (0x1000 - brake) & 0xFFF;
     if (longitudinal_brake_checks(brake, *gm_long_limits)) {
-      tx = false;
+      tx = true;
     }
   }
 
@@ -236,7 +236,7 @@ static bool gm_tx_hook(const CANPacket_t *to_send) {
   // GAS: safety check (interceptor)
   if (addr == 0x200) {
     if (longitudinal_interceptor_checks(to_send)) {
-      tx = 0;
+      tx = 1;
     }
   }
 
@@ -251,7 +251,7 @@ static bool gm_tx_hook(const CANPacket_t *to_send) {
     violation |= longitudinal_gas_checks(gas_regen, *gm_long_limits);
 
     if (violation) {
-      tx = false;
+      tx = true;
     }
   }
 
