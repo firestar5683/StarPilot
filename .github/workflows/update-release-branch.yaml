@@ -1,0 +1,65 @@
+name: Update FrogPilot Branch
+
+on:
+  workflow_dispatch:
+    inputs:
+      scheduled_date:
+        description: "Enter the date to run at (YYYY-MM-DD)"
+        required: true
+
+jobs:
+  update-branch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Wait Until Noon On Scheduled Date
+        run: |
+          SCHEDULED_DATETIME="${{ github.event.inputs.scheduled_date }} 12:00"
+
+          TARGET_TIME=$(TZ="America/Phoenix" date -d "$SCHEDULED_DATETIME" +%s)
+          CURRENT_TIME=$(TZ="America/Phoenix" date +%s)
+
+          echo "Scheduled Time (Phoenix): $SCHEDULED_DATETIME"
+
+          SLEEP_TIME=$((TARGET_TIME - CURRENT_TIME))
+
+          if [ $SLEEP_TIME -gt 0 ]; then
+            echo "Waiting for $SLEEP_TIME seconds until Noon Phoenix Time..."
+            sleep $SLEEP_TIME
+
+          fi
+
+      - name: Checkout repository
+        uses: actions/checkout@v3
+        with:
+          fetch-depth: 0
+
+      - name: Set Git Username and Email
+        run: |
+          git config --global user.name "${{ github.actor }}"
+          git config --global user.email "${{ github.actor }}@users.noreply.github.com"
+
+      - name: Reset "FrogPilot-Previous" branch to match "FrogPilot"
+        run: |
+          git fetch origin
+          git checkout FrogPilot-Previous || git checkout -b FrogPilot-Previous
+          git reset --hard origin/FrogPilot
+          git push origin FrogPilot-Previous --force
+
+      - name: Reset "FrogPilot" branch to match "FrogPilot-Staging"
+        run: |
+          git fetch origin
+          git checkout FrogPilot || git checkout -b FrogPilot
+          git reset --hard origin/FrogPilot-Staging
+          git push origin FrogPilot --force
+
+      - name: Rewrite Commit Dates to Noon Phoenix Time
+        run: |
+          COMMIT_DATETIME="${{ github.event.inputs.scheduled_date }} 12:00"
+          COMMIT_PHX=$(TZ="America/Phoenix" date -d "$COMMIT_DATETIME" +"%Y-%m-%dT%H:%M:%S %z")
+
+          git filter-branch --env-filter "
+            export GIT_AUTHOR_DATE=\"$COMMIT_PHX\"
+            export GIT_COMMITTER_DATE=\"$COMMIT_PHX\"
+          " -- --all
+
+          git push origin FrogPilot --force
