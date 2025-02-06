@@ -21,6 +21,8 @@ GITLAB_VERSION_URL = f"https://gitlab.com/FrogAi/FrogPilot-Resources/-/raw/Versi
 VERSION_PATH = Path("/data/media/0/osm/mapd_version")
 
 def download():
+  Path(MAPD_PATH).parent.mkdir(parents=True, exist_ok=True)
+
   while not (is_url_pingable("https://github.com") or is_url_pingable("https://gitlab.com")):
     time.sleep(60)
 
@@ -58,6 +60,9 @@ def get_latest_version():
   return "v0"
 
 def mapd_thread():
+  if os.path.exists(MAPD_PATH) and os.path.isdir(MAPD_PATH):
+    shutil.rmtree(MAPD_PATH)
+
   while True:
     if not os.path.exists(MAPD_PATH):
       print(f"{MAPD_PATH} not found. Downloading...")

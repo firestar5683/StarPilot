@@ -128,11 +128,11 @@ class ModelManager:
       shutil.copyfile(source_path, default_model_path)
       print(f"Copied the default model from {source_path} to {default_model_path}")
 
-    mlsim_default_model_path = MODELS_PATH / f"{DEFAULT_TINYGRAD_MODEL}.pkl"
+    tingrad_default_model_path = MODELS_PATH / f"{DEFAULT_TINYGRAD_MODEL}.pkl"
     source_path = Path(__file__).parents[2] / "tinygrad_modeld/models/supercombo_tinygrad.pkl"
-    if source_path.is_file() and not mlsim_default_model_path.is_file():
-      shutil.copyfile(source_path, mlsim_default_model_path)
-      print(f"Copied the default model from {source_path} to {mlsim_default_model_path}")
+    if source_path.is_file() and not tingrad_default_model_path.is_file():
+      shutil.copyfile(source_path, tingrad_default_model_path)
+      print(f"Copied the default tinygrad model from {source_path} to {tingrad_default_model_path}")
 
   def check_models(self, boot_run, repo_url):
     available_models = set(self.available_models) - {DEFAULT_MODEL, DEFAULT_CLASSIC_MODEL}
