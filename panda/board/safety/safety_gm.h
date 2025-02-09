@@ -236,7 +236,7 @@ static bool gm_tx_hook(const CANPacket_t *to_send) {
   // GAS: safety check (interceptor)
   if (addr == 0x200) {
     if (longitudinal_interceptor_checks(to_send)) {
-      tx = 1;
+      tx = 0;
     }
   }
 
