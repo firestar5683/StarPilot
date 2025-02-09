@@ -217,7 +217,7 @@ static bool gm_tx_hook(const CANPacket_t *to_send) {
     int brake = ((GET_BYTE(to_send, 0) & 0xFU) << 8) + GET_BYTE(to_send, 1);
     brake = (0x1000 - brake) & 0xFFF;
     if (longitudinal_brake_checks(brake, *gm_long_limits)) {
-      tx = true;
+      tx = false;
     }
   }
 
