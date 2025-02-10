@@ -11,13 +11,13 @@ Ecu = car.CarParams.Ecu
 
 
 class CarControllerParams:
-  STEER_MAX = 300  # GM limit is 3Nm. Used by carcontroller to generate LKA output
+  STEER_MAX = 450  # GM limit is 3Nm. Used by carcontroller to generate LKA output
   STEER_STEP = 3  # Active control frames per command (~33hz)
   INACTIVE_STEER_STEP = 10  # Inactive control frames per command (10hz)
-  STEER_DELTA_UP = 10  # Delta rates require review due to observed EPS weakness
-  STEER_DELTA_DOWN = 15
-  STEER_DRIVER_ALLOWANCE = 65
-  STEER_DRIVER_MULTIPLIER = 4
+  STEER_DELTA_UP = 15  # Delta rates require review due to observed EPS weakness
+  STEER_DELTA_DOWN = 34
+  STEER_DRIVER_ALLOWANCE = 78
+  STEER_DRIVER_MULTIPLIER = 6
   STEER_DRIVER_FACTOR = 100
   NEAR_STOP_BRAKE_PHASE = 0.25  # m/s
   SNG_INTERCEPTOR_GAS = 18. / 255.
@@ -205,15 +205,15 @@ class CAR(Platforms):
     CHEVROLET_SUBURBAN.specs,
   )
   GMC_YUKON_CC = GMPlatformConfig(
-    [GMCarDocs("GMC Yukon - No-ACC")],
+    [GMCarDocs("GMC Yukon No ACC")],
     CarSpecs(mass=2541, wheelbase=2.95, steerRatio=16.3, centerToFrontRatio=0.4),
   )
   CADILLAC_CT6_CC = GMPlatformConfig(
-    [GMCarDocs("Cadillac CT6 - No-ACC")],
+    [GMCarDocs("Cadillac CT6 No ACC")],
     CarSpecs(mass=2358, wheelbase=3.11, steerRatio=17.7, centerToFrontRatio=0.4),
   )
   CHEVROLET_TRAILBLAZER_CC = GMPlatformConfig(
-    [GMCarDocs("Chevrolet Trailblazer 2021-22 - No-ACC")],
+    [GMCarDocs("Chevrolet Trailblazer 2021-22")],
     CHEVROLET_TRAILBLAZER.specs,
   )
   CADILLAC_XT4 = GMPlatformConfig(
@@ -221,7 +221,7 @@ class CAR(Platforms):
     CarSpecs(mass=1660, wheelbase=2.78, steerRatio=14.4, centerToFrontRatio=0.4),
   )
   CADILLAC_XT5_CC = GMPlatformConfig(
-    [GMCarDocs("Cadillac XT5 - No-ACC")],
+    [GMCarDocs("Cadillac XT5 No ACC")],
     CarSpecs(mass=1810, wheelbase=2.86, steerRatio=16.34, centerToFrontRatio=0.5),
   )
   CHEVROLET_TRAVERSE = GMPlatformConfig(
@@ -233,7 +233,7 @@ class CAR(Platforms):
     CarSpecs(mass=2050, wheelbase=2.86, steerRatio=16.0, centerToFrontRatio=0.5),
   )
   CHEVROLET_MALIBU_CC = GMPlatformConfig(
-    [GMCarDocs("Chevrolet Malibu 2023 - No-ACC")],
+    [GMCarDocs("Chevrolet Malibu 2023 No ACC")],
     CarSpecs(mass=1450, wheelbase=2.8, steerRatio=15.8, centerToFrontRatio=0.4),
   )
   CHEVROLET_TRAX = GMPlatformConfig(
