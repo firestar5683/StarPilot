@@ -29,8 +29,8 @@ CAM_MSG = 0x320  # AEBCmd
 ACCELERATOR_POS_MSG = 0xbe
 
 NON_LINEAR_TORQUE_PARAMS = {
-  CAR.CHEVROLET_BOLT_EUV: [2.6531724862969748, 1.0, 0.1919764879840985, 0.009054123646805178],
-  CAR.CHEVROLET_BOLT_CC: [2.6531724862969748, 1.0, 0.1919764879840985, 0.009054123646805178],
+  CAR.CHEVROLET_BOLT_EUV: [1.8, 1.1, 0.3, -0.045],
+  CAR.CHEVROLET_BOLT_CC: [1.8, 1.1, 0.3, -0.045],
   CAR.GMC_ACADIA: [4.78003305, 1.0, 0.3122, 0.05591772],
   CAR.CHEVROLET_SILVERADO: [3.29974374, 1.0, 0.25571356, 0.0465122]
 }
@@ -74,8 +74,8 @@ class CarInterface(CarInterfaceBase):
     # ToDo: To generalize to other GMs, explore tanh function as the nonlinear
     non_linear_torque_params = NON_LINEAR_TORQUE_PARAMS.get(self.CP.carFingerprint)
     assert non_linear_torque_params, "The params are not defined"
-    a, b, c, _ = non_linear_torque_params
-    steer_torque = (sig(latcontrol_inputs.lateral_acceleration * a) * b) + (latcontrol_inputs.lateral_acceleration * c)
+    a, b, c, d = non_linear_torque_params
+    steer_torque = (sig(latcontrol_inputs.lateral_acceleration * a) * b) + (latcontrol_inputs.lateral_acceleration * c) + d
     return float(steer_torque) + friction
 
   def torque_from_lateral_accel_neural(self, latcontrol_inputs: LatControlInputs, torque_params: car.CarParams.LateralTorqueTuning, lateral_accel_error: float,
@@ -87,13 +87,7 @@ class CarInterface(CarInterfaceBase):
     return float(self.neural_ff_model.predict(inputs)) + friction
 
   def torque_from_lateral_accel(self) -> TorqueFromLateralAccelCallbackType:
-    if self.CP.carFingerprint in (CAR.CHEVROLET_BOLT_EUV, CAR.CHEVROLET_BOLT_CC):
-      self.neural_ff_model = NanoFFModel(NEURAL_PARAMS_PATH, self.CP.carFingerprint)
-      return self.torque_from_lateral_accel_neural
-    elif self.CP.carFingerprint in NON_LINEAR_TORQUE_PARAMS:
       return self.torque_from_lateral_accel_siglin
-    else:
-      return self.torque_from_lateral_accel_linear
 
   @staticmethod
   def _get_params(ret, candidate, fingerprint, car_fw, disable_openpilot_long, experimental_long, docs):
@@ -110,7 +104,7 @@ class CarInterface(CarInterfaceBase):
     else:
       ret.transmissionType = TransmissionType.automatic
 
-    ret.longitudinalTuning.kiBP = [5., 35.]
+    ret.longitudinalTuning.kiBP = [5., 35., 60.]
 
     if candidate in CAMERA_ACC_CAR:
       ret.experimentalLongitudinalAvailable = candidate not in CC_ONLY_CAR
@@ -122,13 +116,14 @@ class CarInterface(CarInterfaceBase):
       ret.minSteerSpeed = 10 * CV.KPH_TO_MS
 
       # Tuning for experimental long
-      ret.longitudinalTuning.kiV = [2.0, 1.5]
+      ret.longitudinalTuning.kiV = [0.5, 0.5]
       ret.vEgoStopping = 0.1
       ret.vEgoStarting = 0.1
 
-      ret.stoppingDecelRate = 2.0  # reach brake quickly after enabling
+      ret.stoppingDecelRate = 1.0  # reach brake quickly after enabling
       ret.vEgoStopping = 0.25
       ret.vEgoStarting = 0.25
+      ret.stopAccel = -0.25
 
       if experimental_long:
         ret.pcmCruise = False
@@ -155,7 +150,7 @@ class CarInterface(CarInterfaceBase):
       ret.minSteerSpeed = 7 * CV.MPH_TO_MS
 
       # Tuning
-      ret.longitudinalTuning.kiV = [2.4, 1.5]
+      ret.longitudinalTuning.kiV = [0.5, 0.5]
 
       if ret.enableGasInterceptor:
         # Need to set ASCM long limits when using pedal interceptor, instead of camera ACC long limits
@@ -206,6 +201,7 @@ class CarInterface(CarInterfaceBase):
     elif candidate in (CAR.CHEVROLET_BOLT_EUV, CAR.CHEVROLET_BOLT_CC):
       ret.steerActuatorDelay = 0.2
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+      ret.lateralTuning.torque.kp = 0.6
 
       if ret.enableGasInterceptor:
         # ACC Bolts use pedal for full longitudinal control, not just sng
@@ -271,13 +267,13 @@ class CarInterface(CarInterfaceBase):
       ret.stoppingControl = True
       ret.autoResumeSng = True
 
-      if candidate in CC_ONLY_CAR:
+      if candidate in CC_ONLY_CAR: #pedal interceptor tuning
         ret.flags |= GMFlags.PEDAL_LONG.value
         ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_PEDAL_LONG
         # Note: Low speed, stop and go not tested. Should be fairly smooth on highway
-        ret.longitudinalTuning.kiBP = [0.0, 5., 35.]
-        ret.longitudinalTuning.kiV = [0.0, 0.35, 0.5]
-        ret.longitudinalTuning.kf = 0.15
+        ret.longitudinalTuning.kiBP = [0., 3., 6., 35.]
+        ret.longitudinalTuning.kiV = [0.125, 0.175, 0.225, 0.33]
+        ret.longitudinalTuning.kf = 0.25
         ret.stoppingDecelRate = 0.8
       else:  # Pedal used for SNG, ACC for longitudinal control otherwise
         ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_HW_CAM_LONG
@@ -294,20 +290,15 @@ class CarInterface(CarInterfaceBase):
       ret.openpilotLongitudinalControl = not disable_openpilot_long
       ret.pcmCruise = False
 
-      if ret.enableGasInterceptor or candidate != CAR.CHEVROLET_BOLT_CC:
-        ret.longitudinalTuning.kiBP = [10.7, 10.8, 28.]
-        ret.longitudinalTuning.kiV = [0., 20., 20.]  # set lower end to 0 since we can't drive below that speed
-      else:
+      if not ret.enableGasInterceptor and candidate in CC_ONLY_CAR: #redneck tuning
+        ret.longitudinalTuning.kpBP = [10.7, 10.8, 28.]  # 10.7 m/s == 24 mph
+        ret.longitudinalTuning.kpV = [0., 20., 20.]  # set lower end to 0 since we can't drive below that speed
         ret.longitudinalTuning.deadzoneBP = [0.]
         ret.longitudinalTuning.deadzoneV = [0.56]  # == 2 km/h/s, 1.25 mph/s
         ret.longitudinalActuatorDelay = 1.  # TODO: measure this
-
-        ret.longitudinalTuning.kpBP = [10.7, 10.8, 28.]  # 10.7 m/s == 24 mph
-        ret.longitudinalTuning.kpV = [0., 20., 20.]  # set lower end to 0 since we can't drive below that speed
         ret.longitudinalTuning.kiBP = [0.]
         ret.longitudinalTuning.kiV = [0.1]
-
-      ret.stoppingDecelRate = 11.18  # == 25 mph/s (.04 rate)
+        ret.stoppingDecelRate = 11.18  # == 25 mph/s (.04 rate)
 
     if candidate in CC_ONLY_CAR:
       ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_NO_ACC
