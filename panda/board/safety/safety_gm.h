@@ -251,7 +251,7 @@ static bool gm_tx_hook(const CANPacket_t *to_send) {
     violation |= longitudinal_gas_checks(gas_regen, *gm_long_limits);
 
     if (violation) {
-      tx = false;
+      tx = true;
     }
   }
 
