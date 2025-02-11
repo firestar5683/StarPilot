@@ -122,13 +122,12 @@ class CarInterface(CarInterfaceBase):
       ret.minSteerSpeed = 10 * CV.KPH_TO_MS
 
       # Tuning for experimental long
-      ret.longitudinalTuning.kiV = [2.0, 1.5]
-      ret.vEgoStopping = 0.1
-      ret.vEgoStarting = 0.1
+      ret.longitudinalTuning.kiV = [1.0, 1.0]
 
-      ret.stoppingDecelRate = 2.0  # reach brake quickly after enabling
+      ret.stoppingDecelRate = 1.0  # reach brake quickly after enabling
       ret.vEgoStopping = 0.25
       ret.vEgoStarting = 0.25
+      ret.stopAccel = -0.20
 
       if experimental_long:
         ret.pcmCruise = False
@@ -155,7 +154,11 @@ class CarInterface(CarInterfaceBase):
       ret.minSteerSpeed = 7 * CV.MPH_TO_MS
 
       # Tuning
-      ret.longitudinalTuning.kiV = [2.4, 1.5]
+      ret.longitudinalTuning.kiV = [0.5, 0.5]
+      ret.stoppingDecelRate = 3
+      ret.vEgoStopping = 0.75
+      ret.vEgoStarting = 0.75
+      ret.stopAccel = -1.5
 
       if ret.enableGasInterceptor:
         # Need to set ASCM long limits when using pedal interceptor, instead of camera ACC long limits
