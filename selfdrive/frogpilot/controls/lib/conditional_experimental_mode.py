@@ -84,7 +84,7 @@ class ConditionalExperimentalMode:
 
       self.slow_lead_filter.update(slower_lead)
       self.stopped_lead_filter.update(stopped_lead)
-      self.slow_lead_detected = self.slow_lead_filter.x >= 0.80 or self.stopped_lead_filter.x >= 0.50
+      self.slow_lead_detected = self.slow_lead_filter.x >= 0.50 or self.stopped_lead_filter.x >= 0.40
     else:
       self.slow_lead_filter.x = 0
       self.stopped_lead_filter.x = 0
