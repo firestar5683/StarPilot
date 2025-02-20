@@ -5,7 +5,7 @@ const SteeringLimits GM_STEERING_LIMITS = {
   .driver_torque_allowance = 78,
   .driver_torque_factor = 6,
   .max_rt_delta = 345,
-  .max_rt_interval = 250000,
+  .max_rt_interval = 200000,
   .type = TorqueDriverLimited,
 };
 
@@ -211,6 +211,18 @@ static void gm_rx_hook(const CANPacket_t *to_push) {
 static bool gm_tx_hook(const CANPacket_t *to_send) {
   bool tx = true;
   int addr = GET_ADDR(to_send);
+
+  static uint64_t last_steer_msg_time = 0;
+
+  if (addr == 0x180) {
+    uint64_t now = microsecond_timer_get();
+
+    if ((now - last_steer_msg_time) < 20000) {
+      tx = false;
+    } else {
+      last_steer_msg_time = now;
+    }
+  }
 
   // BRAKE: safety check
   if (addr == 0x315) {
