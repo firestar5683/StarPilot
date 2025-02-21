@@ -1941,6 +1941,14 @@ This overrides &apos;Conditional Experimental Mode&apos;.</source>
         <source> second</source>
         <translation type="unfinished"></translation>
     </message>
+    <message>
+        <source>Status Widget</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show the current status in the onroad UI.</source>
+        <translation type="unfinished"></translation>
+    </message>
 </context>
 <context>
     <name>FrogPilotManageControl</name>
@@ -3175,14 +3183,6 @@ Want to submit your own animations? Share them in the &apos;custom-themes&apos; 
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>&apos;Conditional Experimental Mode&apos; Status</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
-        <source>Show &apos;Conditional Experimental Mode&apos;&apos;s current status in the onroad UI.</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Model Stopping Point</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3380,10 +3380,6 @@ Default matches half of the MUTCD standard lane line width of 4 inches.</source>
         <translation type="unfinished"></translation>
     </message>
     <message>
-        <source>Adjacent Leads</source>
-        <translation type="unfinished"></translation>
-    </message>
-    <message>
         <source>Lead Info</source>
         <translation type="unfinished"></translation>
     </message>
@@ -3469,6 +3465,22 @@ Default matches the MUTCD standard of 4 inches.</source>
         <source>Adjust how thick the road edges appear on the display.
 
 Default matches half of the MUTCD standard of 4 inches.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Adjacent Leads Tracking</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show adjacent leads being detected by the car&apos;s radar.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Radar Tracks</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Show all of the radar points being tracked by the car&apos;s radar.</source>
         <translation type="unfinished"></translation>
     </message>
 </context>
