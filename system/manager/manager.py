@@ -40,29 +40,12 @@ def manager_init() -> None:
   convert_params(params_cache)
 
   default_params: list[tuple[str, str | bytes]] = [
-    ("AlwaysOnDM", "0"),
-    ("CarParamsPersistent", ""),
     ("CompletedTrainingVersion", "0"),
     ("DisengageOnAccelerator", "0"),
-    ("ExperimentalLongitudinalEnabled", "0"),
-    ("ExperimentalMode", "0"),
-    ("ExperimentalModeConfirmed", "0"),
-    ("GithubSshKeys", ""),
-    ("GithubUsername", ""),
-    ("GsmApn", ""),
     ("GsmMetered", "1"),
-    ("GsmRoaming", "1"),
     ("HasAcceptedTerms", "0"),
-    ("IsLdwEnabled", "0"),
-    ("IsMetric", "0"),
     ("LanguageSetting", "main_en"),
-    ("NavSettingLeftSide", "0"),
-    ("NavSettingTime24h", "0"),
     ("OpenpilotEnabledToggle", "1"),
-    ("RecordFront", "0"),
-    ("SshEnabled", "0"),
-    ("TetheringEnabled", "0"),
-    ("UpdaterAvailableBranches", ""),
     ("LongitudinalPersonality", str(log.LongitudinalPersonality.standard)),
   ]
   if not PC:

@@ -421,6 +421,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"QOLLateral", PERSISTENT},
     {"QOLLongitudinal", PERSISTENT},
     {"QOLVisuals", PERSISTENT},
+    {"RadarTracksUI", PERSISTENT},
     {"RainbowPath", PERSISTENT},
     {"RandomEvents", PERSISTENT},
     {"RefuseVolume", PERSISTENT},
