@@ -357,6 +357,10 @@ misc_tuning_levels: list[tuple[str, str | bytes, int]] = [
   ("SLCPriority", "", 2)
 ]
 
+
+def scale_threshold(v_ego):
+  return np.interp(v_ego, [0, 17.9, 26.8, 35.8, 44.7], [0.63, 0.63, 0.65, 0.95, 0.95]) #Breakpoints for slower lead cem - in mph - 0, 40, 60, 80, 100
+
 class FrogPilotVariables:
   def __init__(self):
     self.frogpilot_toggles = get_frogpilot_toggles(block=False)

@@ -2,7 +2,7 @@
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import DT_MDL
 
-from openpilot.selfdrive.frogpilot.frogpilot_variables import CITY_SPEED_LIMIT, CRUISING_SPEED, THRESHOLD, params_memory
+from openpilot.selfdrive.frogpilot.frogpilot_variables import CITY_SPEED_LIMIT, CRUISING_SPEED, THRESHOLD, params_memory, scale_threshold
 
 class ConditionalExperimentalMode:
   def __init__(self, FrogPilotPlanner):
@@ -69,7 +69,7 @@ class ConditionalExperimentalMode:
 
   def update_conditions(self, frogpilotCarState, v_ego, v_lead, frogpilot_toggles):
     self.curve_detection(v_ego, frogpilot_toggles)
-    self.slow_lead(v_lead, frogpilot_toggles)
+    self.slow_lead(v_lead, frogpilot_toggles, v_ego)
     self.stop_sign_and_light(frogpilotCarState, v_ego, frogpilot_toggles)
 
   def curve_detection(self, v_ego, frogpilot_toggles):
@@ -78,13 +78,13 @@ class ConditionalExperimentalMode:
     self.curvature_filter.update(self.frogpilot_planner.road_curvature_detected or curve_active)
     self.curve_detected = self.curvature_filter.x >= THRESHOLD and v_ego > CRUISING_SPEED
 
-  def slow_lead(self, v_lead, frogpilot_toggles):
+  def slow_lead(self, v_lead, frogpilot_toggles, v_ego):
     if self.frogpilot_planner.tracking_lead:
       slower_lead = frogpilot_toggles.conditional_slower_lead and self.frogpilot_planner.frogpilot_following.slower_lead
       stopped_lead = frogpilot_toggles.conditional_stopped_lead and v_lead < 1
-
+      lead_threshold = scale_threshold(v_ego)
       self.slow_lead_filter.update(slower_lead or stopped_lead)
-      self.slow_lead_detected = self.slow_lead_filter.x >= 0.80
+      self.slow_lead_detected = self.slow_lead_filter.x >= lead_threshold
     else:
       self.slow_lead_filter.x = 0
       self.slow_lead_detected = False
