@@ -186,14 +186,16 @@ def match_vision_to_track(v_ego: float, lead: capnp._DynamicStructReader, tracks
 
 
 def get_RadarState_from_vision(lead_msg: capnp._DynamicStructReader, v_ego: float, model_v_ego: float):
-  lead_v_rel_pred = lead_msg.v[0] - model_v_ego
+  prev_aLeadK = getattr(get_RadarState_from_vision, "prev_aLeadK", 0.0)
+  blended_aLeadK = 0.8 * float(lead_msg.a[0]) + 0.2 * prev_aLeadK
+  get_RadarState_from_vision.prev_aLeadK = blended_aLeadK
   return {
     "dRel": float(lead_msg.x[0] - RADAR_TO_CAMERA),
     "yRel": float(-lead_msg.y[0]),
-    "vRel": float(lead_v_rel_pred),
-    "vLead": float(v_ego + lead_v_rel_pred),
-    "vLeadK": float(v_ego + lead_v_rel_pred),
-    "aLeadK": float(lead_msg.a[0]),
+    "vRel": float(lead_msg.v[0] - model_v_ego),
+    "vLead": float(v_ego + (lead_msg.v[0] - model_v_ego)),
+    "vLeadK": float(v_ego + (lead_msg.v[0] - model_v_ego)),
+    "aLeadK": blended_aLeadK,
     "aLeadTau": 0.3,
     "fcw": False,
     "modelProb": float(lead_msg.prob),
