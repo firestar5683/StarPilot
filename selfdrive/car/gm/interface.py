@@ -29,10 +29,10 @@ CAM_MSG = 0x320  # AEBCmd
 ACCELERATOR_POS_MSG = 0xbe
 
 NON_LINEAR_TORQUE_PARAMS = {
-  CAR.CHEVROLET_BOLT_EUV: [2.21, 0.81, 0.18, -0.045],
-  CAR.CHEVROLET_BOLT_CC: [2.21, 0.81, 0.18, -0.045],
-  CAR.GMC_ACADIA: [4.78003305, 1.0, 0.3122, 0.05591772],
-  CAR.CHEVROLET_SILVERADO: [3.29974374, 1.0, 0.25571356, 0.0465122]
+  CAR.CHEVROLET_BOLT_EUV: {"left": [2.2, 0.81, 0.175, -0.045], "right": [2.2, 0.81, 0.19, -0.045]},
+  CAR.CHEVROLET_BOLT_CC: {"left": [2.2, 0.81, 0.175, -0.045], "right": [2.2, 0.81, 0.19, -0.045]},
+  CAR.GMC_ACADIA: {"left": [4.78, 1.0, 0.31, 0.05], "right": [4.78, 1.0, 0.31, 0.05]},
+  CAR.CHEVROLET_SILVERADO: {"left": [3.30, 1.0, 0.25, 0.05], "right": [3.30, 1.0, 0.25, 0.05]}
 }
 
 NEURAL_PARAMS_PATH = os.path.join(BASEDIR, 'selfdrive/car/torque_data/neural_ff_weights.json')
@@ -74,7 +74,11 @@ class CarInterface(CarInterfaceBase):
     # ToDo: To generalize to other GMs, explore tanh function as the nonlinear
     non_linear_torque_params = NON_LINEAR_TORQUE_PARAMS.get(self.CP.carFingerprint)
     assert non_linear_torque_params, "The params are not defined"
-    a, b, c, d = non_linear_torque_params
+    if latcontrol_inputs.lateral_acceleration >= 0:
+      params = non_linear_torque_params["right"]
+    else:
+      params = non_linear_torque_params["left"]
+    a, b, c, d = params
     steer_torque = (sig(latcontrol_inputs.lateral_acceleration * a) * b) + (latcontrol_inputs.lateral_acceleration * c) + d
     return float(steer_torque) + friction
 
