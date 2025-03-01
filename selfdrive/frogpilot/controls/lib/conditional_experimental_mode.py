@@ -84,7 +84,7 @@ class ConditionalExperimentalMode:
       stopped_lead = frogpilot_toggles.conditional_stopped_lead and v_lead < 1
 
       self.slow_lead_filter.update(slower_lead or stopped_lead)
-      self.slow_lead_detected = self.slow_lead_filter.x >= THRESHOLD
+      self.slow_lead_detected = self.slow_lead_filter.x >= 0.80
     else:
       self.slow_lead_filter.x = 0
       self.slow_lead_detected = False
