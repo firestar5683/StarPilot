@@ -110,6 +110,14 @@ jobs:
           git commit -m "Update README last updated date to ${NEW_DATE}"
           git push origin HEAD
 
+      - name: Remove Update Trigger File
+        if: steps.check_update.outputs.update_due == 'true'
+        run: |
+          set -e
+          git rm -f "${{ env.UPDATE_FILE }}"
+          git commit -m "Remove update_date file after execution"
+          git push origin HEAD
+
       - name: Squash Last 3 Commits
         if: steps.check_update.outputs.update_due == 'true'
         run: |
