@@ -116,7 +116,7 @@ class CarInterface(CarInterfaceBase):
       ret.minSteerSpeed = 10 * CV.KPH_TO_MS
 
       # Tuning for experimental long
-      ret.longitudinalTuning.kiV = [0.5, 0.5]
+      ret.longitudinalTuning.kiV = [0.5, 0.5, 0.5]
       ret.vEgoStopping = 0.1
       ret.vEgoStarting = 0.1
 
@@ -131,7 +131,7 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_HW_CAM_LONG
 
     elif candidate in SDGM_CAR:
-      ret.longitudinalTuning.kiV = [0., 0.]  # TODO: tuning
+      ret.longitudinalTuning.kiV = [0., 0., 0.]  # TODO: tuning
       ret.experimentalLongitudinalAvailable = False
       ret.networkLocation = NetworkLocation.fwdCamera
       ret.pcmCruise = True
@@ -150,7 +150,7 @@ class CarInterface(CarInterfaceBase):
       ret.minSteerSpeed = 7 * CV.MPH_TO_MS
 
       # Tuning
-      ret.longitudinalTuning.kiV = [0.5, 0.5]
+      ret.longitudinalTuning.kiV = [0.5, 0.5, 0.5]
 
       if ret.enableGasInterceptor:
         # Need to set ASCM long limits when using pedal interceptor, instead of camera ACC long limits
