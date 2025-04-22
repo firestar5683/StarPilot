@@ -122,11 +122,16 @@ class CarController(CarControllerBase):
       self.regen_paddle_pressed
     )
 
+    # Time guard: PRNDL2 must be spaced out > 25ms (matches ~40Hz)
     if regen_active:
-      frames_since_last = self.frame - getattr(self, "last_trigger_frame_40hz", -4)
-      target_wait = 3 if getattr(self, "wait_long_40hz", False) else 2
-      if frames_since_last >= target_wait:
-        self.last_trigger_frame_40hz = self.frame
+      current_time_ms = now_nanos * 1e-6
+      last_sent_time_ms = getattr(self, "last_prndl2_sent_time_ms", -1000)
+      frames_since_last = self.frame - getattr(self, "last_prndl2_frame", -4)
+      frame_wait = 3 if getattr(self, "wait_long_40hz", False) else 2
+
+      if (frames_since_last >= frame_wait) and (current_time_ms - last_sent_time_ms >= 25):
+        self.last_prndl2_frame = self.frame
+        self.last_prndl2_sent_time_ms = current_time_ms
         self.wait_long_40hz = not getattr(self, "wait_long_40hz", False)
 
         prndl2_value = 7
