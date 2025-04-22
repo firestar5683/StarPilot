@@ -114,34 +114,29 @@ class CarController(CarControllerBase):
     # Send CAN commands.
     can_sends = []
 
-    # Send regen paddle and PRNDL2 commands at 40Hz using alternating 2/3 frame interval
-    frames_since_last = self.frame - getattr(self, "last_trigger_frame_40hz", -4)
-    target_wait = 3 if getattr(self, "wait_long_40hz", False) else 2
+    # Only send regen paddle and PRNDL2 commands at 40Hz when regen is active
+    regen_active = (
+      self.CP.carFingerprint in CC_REGEN_PADDLE_CAR and
+      self.CP.openpilotLongitudinalControl and
+      CC.longActive and
+      self.regen_paddle_pressed
+    )
 
-    if frames_since_last >= target_wait:
-      self.last_trigger_frame_40hz = self.frame
-      self.wait_long_40hz = not getattr(self, "wait_long_40hz", False)
+    if regen_active:
+      frames_since_last = self.frame - getattr(self, "last_trigger_frame_40hz", -4)
+      target_wait = 3 if getattr(self, "wait_long_40hz", False) else 2
+      if frames_since_last >= target_wait:
+        self.last_trigger_frame_40hz = self.frame
+        self.wait_long_40hz = not getattr(self, "wait_long_40hz", False)
 
-      regen_active = (
-        self.CP.carFingerprint in CC_REGEN_PADDLE_CAR and
-        self.CP.openpilotLongitudinalControl and
-        CC.longActive and
-        self.regen_paddle_pressed
-      )
-
-      # Always send PRNDL2 command when OpenPilot is in control
-      if regen_active:
         prndl2_value = 7
-      else:
-        prndl2_value = 6
- 
-      regen_paddle_value = 2 if regen_active else 0
-      manual_mode = 1 if prndl2_value == 7 else 0
- 
-      can_sends.append(gmcan.create_prndl2_command(
-        self.packer_pt, CanBus.POWERTRAIN, prndl2_value, manual_mode
-      ))
-      can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, regen_paddle_value))
+        regen_paddle_value = 2
+        manual_mode = 1
+
+        can_sends.append(gmcan.create_prndl2_command(
+          self.packer_pt, CanBus.POWERTRAIN, prndl2_value, manual_mode
+        ))
+        can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, regen_paddle_value))
 
 
     # Steering (Active: 50Hz, inactive: 10Hz)
