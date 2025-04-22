@@ -226,13 +226,13 @@ class CarState(CarStateBase):
 
     if CP.carFingerprint in SDGM_CAR:
       messages += [
-        ("ECMPRDNL2", 40),
+        ("ECMPRDNL2", 25),
         ("AcceleratorPedal2", 40),
         ("ECMEngineStatus", 80),
       ]
     else:
       messages += [
-        ("ECMPRDNL2", 40),
+        ("ECMPRDNL2", 25),
         ("AcceleratorPedal2", 33),
         ("ECMEngineStatus", 100),
         ("BCMTurnSignals", 1),
@@ -254,7 +254,7 @@ class CarState(CarStateBase):
 
     if CP.transmissionType == TransmissionType.direct:
       messages += [
-        ("EBCMRegenPaddle", 40),
+        ("EBCMRegenPaddle", 25),
         ("EVDriveMode", 0),
       ]
 
