@@ -194,6 +194,11 @@ void update_model(UIState *s,
   update_line_data(s, plan_position, scene.model_ui ? path_width : 0, path_offset_z, &scene.track_edge_vertices, max_idx, false);
 }
 
+void update_regen_paddle_icon(UIState *s, const cereal::CarControl::Reader &car_control) {
+  UIScene &scene = s->scene;
+  scene.regen_paddle = car_control.getActuators().getRegenPaddle();
+}
+
 void update_dmonitoring(UIState *s, const cereal::DriverStateV2::Reader &driverstate, float dm_fade_state, bool is_rhd) {
   UIScene &scene = s->scene;
   const auto driver_orient = is_rhd ? driverstate.getRightDriverData().getFaceOrientation() : driverstate.getLeftDriverData().getFaceOrientation();

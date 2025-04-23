@@ -40,7 +40,7 @@ AnnotatedCameraWidget::AnnotatedCameraWidget(VisionStreamType type, QWidget* par
   main_layout->addWidget(map_settings_btn, 0, Qt::AlignBottom | Qt::AlignRight);
 
   dm_img = loadPixmap("../assets/img_driver_face.png", {img_size + 5, img_size + 5});
-
+  regen_img = loadPixmap("../assets/img_regen_paddle.png", {img_size + 5, img_size + 5});
   // Initialize FrogPilot widgets
   initializeFrogPilotWidgets();
 }
@@ -53,6 +53,7 @@ void AnnotatedCameraWidget::updateState(int alert_height, const UIState &s) {
   const bool nav_alive = sm.alive("navInstruction") && sm["navInstruction"].getValid();
   const auto cs = sm["controlsState"].getControlsState();
   const auto car_state = sm["carState"].getCarState();
+//  const auto car_control = sm["carControl"].getCarControl();
   const auto nav_instruction = sm["navInstruction"].getNavInstruction();
 
   // Handle older routes where vCruiseCluster is not set
@@ -98,6 +99,12 @@ void AnnotatedCameraWidget::updateState(int alert_height, const UIState &s) {
   rightHandDM = dm_state.getIsRHD();
   // DM icon transition
   dm_fade_state = std::clamp(dm_fade_state+0.2*(0.5-dmActive), 0.0, 1.0);
+
+// update pedal icons
+// check the icon display is visiable.
+//  regenIconVisible = actuators.getRegenPaddle();
+//  regenIconVisible = true;
+
 
   // hide map settings button for alerts and flip for right hand DM
   if (map_settings_btn->isEnabled()) {
@@ -661,6 +668,23 @@ void AnnotatedCameraWidget::drawLaneLines(QPainter &painter, const UIState *s, f
   painter.restore();
 }
 
+void AnnotatedCameraWidget::drawRegenPaddle(QPainter &painter, const UIState *s) {
+
+  const UIScene &scene = s->scene;
+
+  painter.save();
+  // base icon
+
+  int offset = UI_BORDER_SIZE + btn_size / 2;
+  regenPadddleIconPostion.setX(dmIconPosition.x());
+  regenPadddleIconPostion.setY(dmIconPosition.y() - (btn_size + offset));
+  float opacity = scene.regen_paddle ? 0.85 : 0.25;
+  drawIcon(painter, regenPadddleIconPostion, regen_img, blackColor(70), opacity);
+
+  painter.restore();
+
+}
+
 void AnnotatedCameraWidget::drawDriverState(QPainter &painter, const UIState *s) {
   const UIScene &scene = s->scene;
 
@@ -895,6 +919,12 @@ void AnnotatedCameraWidget::paintEvent(QPaintEvent *event) {
   if (!hideBottomIcons && (sm.rcv_frame("driverStateV2") > s->scene.started_frame)) {
     update_dmonitoring(s, sm["driverStateV2"].getDriverStateV2(), dm_fade_state, rightHandDM);
     drawDriverState(painter, s);
+  }
+
+  //regen paddle icon
+  if (!hideBottomIcons && (sm.rcv_frame("carControl") > s->scene.started_frame) && regenIconVisible) {
+      update_regen_paddle_icon(s, sm["carControl"].getCarControl());
+      drawRegenPaddle(painter, s);
   }
 
   drawHud(painter);
