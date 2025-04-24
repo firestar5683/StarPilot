@@ -147,6 +147,17 @@ class CarController(CarControllerBase):
         self.packer_pt, CanBus.POWERTRAIN, prndl2_value, manual_mode
       ))
       can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, regen_paddle_value))
+      # Track last regen state
+      self.last_regen_active = regen_active
+    elif not regen_active and getattr(self, "last_regen_active", False):
+      # Regen just turned off, send PRNDL2 = 6 and paddle = 0 once
+      prndl2_value = 6
+      regen_paddle_value = 0
+      manual_mode = 1
+      can_sends.append(gmcan.create_prndl2_command(
+        self.packer_pt, CanBus.POWERTRAIN, prndl2_value, manual_mode
+      ))
+      can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, regen_paddle_value))
 
 
     # Steering (Active: 50Hz, inactive: 10Hz)
