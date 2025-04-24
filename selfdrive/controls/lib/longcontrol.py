@@ -92,11 +92,10 @@ class LongControl:
     self.CP = CP
     self.long_control_state = LongCtrlState.off
     self.experimental_mode = False
-    pos_p_limit = 0.0
     self.pid = PIDController((CP.longitudinalTuning.kpBP, CP.longitudinalTuning.kpV),
                              (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
                              k_f=CP.longitudinalTuning.kf, rate=1 / DT_CTRL,
-                             pos_p_limit=pos_p_limit)
+                             pos_p_limit=None)
     self.v_pid = 0.0
     self._mode_setup()
     self.last_output_accel = 0.0
