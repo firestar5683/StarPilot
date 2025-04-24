@@ -23,6 +23,7 @@ TransmissionType = car.CarParams.TransmissionType
 CAMERA_CANCEL_DELAY_FRAMES = 10
 # Enforce a minimum interval between steering messages to avoid a fault
 MIN_STEER_MSG_INTERVAL_MS = 15
+MIN_PRNDL_MSG_INTERVAL_MS = 20
 
 # Constants for pitch compensation
 PITCH_DEADZONE = 0.01  # [radians] 0.01 ≈ 1% grade
@@ -45,6 +46,8 @@ class CarController(CarControllerBase):
 
     self.lka_steering_cmd_counter = 0
     self.lka_icon_status_last = (False, False)
+    self.last_oem_prndl2_ts_nanos = 0
+    self.last_oem_regen_paddle_ts_nanos = 0
 
     self.params = CarControllerParams(self.CP)
     self.params_ = Params()
@@ -114,7 +117,12 @@ class CarController(CarControllerBase):
     # Send CAN commands.
     can_sends = []
 
-    # Only send regen paddle and PRNDL2 commands at 40Hz when regen is active
+    # Track last OEM message timestamps for PRNDL2 and Paddle
+    if hasattr(CS, "prndl2_ts_nanos") and CS.prndl2_ts_nanos != 0:
+      self.last_oem_prndl2_ts_nanos = CS.prndl2_ts_nanos
+    if hasattr(CS, "regen_paddle_ts_nanos") and CS.regen_paddle_ts_nanos != 0:
+      self.last_oem_regen_paddle_ts_nanos = CS.regen_paddle_ts_nanos
+
     regen_active = (
       self.CP.carFingerprint in CC_REGEN_PADDLE_CAR and
       self.CP.openpilotLongitudinalControl and
@@ -122,26 +130,23 @@ class CarController(CarControllerBase):
       self.regen_paddle_pressed
     )
 
-    # Time guard: PRNDL2 must be spaced out > 25ms (matches ~40Hz)
-    if regen_active:
-      current_time_ms = now_nanos * 1e-6
-      last_sent_time_ms = getattr(self, "last_prndl2_sent_time_ms", -1000)
-      frames_since_last = self.frame - getattr(self, "last_prndl2_frame", -4)
-      frame_wait = 3 if getattr(self, "wait_long_40hz", False) else 2
+    frames_since_last = self.frame - getattr(self, "last_prndl2_frame", -4)
+    frame_wait = 3 if getattr(self, "wait_long_40hz", False) else 2
+    
+    # Avoid spoofing PRNDL2/Paddle too soon after an OEM message (protect against fault overlap)
+    last_prndl2_msg_ms = (now_nanos - max(self.last_oem_prndl2_ts_nanos, self.last_oem_regen_paddle_ts_nanos)) * 1e-6
+    if regen_active and (frames_since_last >= frame_wait) and last_prndl2_msg_ms > MIN_PRNDL_MSG_INTERVAL_MS:
+      self.last_prndl2_frame = self.frame
+      self.wait_long_40hz = not getattr(self, "wait_long_40hz", False)
 
-      if (frames_since_last >= frame_wait) and (current_time_ms - last_sent_time_ms >= 25):
-        self.last_prndl2_frame = self.frame
-        self.last_prndl2_sent_time_ms = current_time_ms
-        self.wait_long_40hz = not getattr(self, "wait_long_40hz", False)
+      prndl2_value = 7
+      regen_paddle_value = 2
+      manual_mode = 1
 
-        prndl2_value = 7
-        regen_paddle_value = 2
-        manual_mode = 1
-
-        can_sends.append(gmcan.create_prndl2_command(
-          self.packer_pt, CanBus.POWERTRAIN, prndl2_value, manual_mode
-        ))
-        can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, regen_paddle_value))
+      can_sends.append(gmcan.create_prndl2_command(
+        self.packer_pt, CanBus.POWERTRAIN, prndl2_value, manual_mode
+      ))
+      can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, regen_paddle_value))
 
 
     # Steering (Active: 50Hz, inactive: 10Hz)
