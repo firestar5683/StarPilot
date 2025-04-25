@@ -117,11 +117,11 @@ class CarController(CarControllerBase):
     # Send CAN commands.
     can_sends = []
 
-    # Track last OEM message timestamps for PRNDL2 and Paddle
-    if hasattr(CS, "prndl2_ts_nanos") and CS.prndl2_ts_nanos != 0:
-      self.last_oem_prndl2_ts_nanos = CS.prndl2_ts_nanos
-    if hasattr(CS, "regen_paddle_ts_nanos") and CS.regen_paddle_ts_nanos != 0:
-      self.last_oem_regen_paddle_ts_nanos = CS.regen_paddle_ts_nanos
+    # # Track last OEM message timestamps for PRNDL2 and Paddle
+    # if hasattr(CS, "prndl2_ts_nanos") and CS.prndl2_ts_nanos != 0:
+    #   self.last_oem_prndl2_ts_nanos = CS.prndl2_ts_nanos
+    # if hasattr(CS, "regen_paddle_ts_nanos") and CS.regen_paddle_ts_nanos != 0:
+    #   self.last_oem_regen_paddle_ts_nanos = CS.regen_paddle_ts_nanos
 
     regen_active = (
       self.CP.carFingerprint in CC_REGEN_PADDLE_CAR and
@@ -130,12 +130,12 @@ class CarController(CarControllerBase):
       self.regen_paddle_pressed
     )
 
-    # Avoid spoofing PRNDL2/Paddle too soon after an OEM message (protect against fault overlap)
-    last_prndl2_msg_ms = (now_nanos - max(self.last_oem_prndl2_ts_nanos, self.last_oem_regen_paddle_ts_nanos)) * 1e-6
+    # NOTE: OEM timing protection temporarily disabled for testing
+    # last_prndl2_msg_ms = (now_nanos - max(self.last_oem_prndl2_ts_nanos, self.last_oem_regen_paddle_ts_nanos)) * 1e-6
     # Send PRNDL2/Paddle at the same rate as steering, but on a different frame (staggered)
     send_prndl_frame = self.frame % self.params.STEER_STEP == 1
     # Only send paddle=2 on rising edge of regen_active
-    if regen_active and send_prndl_frame and last_prndl2_msg_ms > MIN_PRNDL_MSG_INTERVAL_MS and not getattr(self, "last_regen_active", False):
+    if regen_active and send_prndl_frame and not getattr(self, "last_regen_active", False):
       self.last_prndl2_frame = self.frame
       prndl2_value = 7
       regen_paddle_value = 2
