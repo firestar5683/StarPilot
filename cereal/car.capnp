@@ -384,7 +384,7 @@ struct CarControl {
     steeringAngleDeg @3: Float32;
 
     curvature @7: Float32;
-    regenPaddle @9: Bool;
+
     speed @6: Float32; # m/s
     accel @4: Float32; # m/s^2
     longControlState @5: LongControlState;
