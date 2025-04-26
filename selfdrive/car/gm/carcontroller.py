@@ -134,8 +134,8 @@ class CarController(CarControllerBase):
     # last_prndl2_msg_ms = (now_nanos - max(self.last_oem_prndl2_ts_nanos, self.last_oem_regen_paddle_ts_nanos)) * 1e-6
     # Send PRNDL2/Paddle at the same rate as steering, but on a different frame (staggered)
     send_prndl_frame = self.frame % self.params.STEER_STEP == 1
-    # Only send paddle=2 on rising edge of regen_active
-    if regen_active and send_prndl_frame and not getattr(self, "last_regen_active", False):
+    # Send paddle=2 and PRNDL2 while regen_active is True, every 33.3Hz
+    if regen_active and send_prndl_frame:
       self.last_prndl2_frame = self.frame
       prndl2_value = 7
       regen_paddle_value = 2
