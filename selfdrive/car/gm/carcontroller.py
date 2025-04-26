@@ -130,11 +130,8 @@ class CarController(CarControllerBase):
       self.regen_paddle_pressed
     )
 
-    # NOTE: OEM timing protection temporarily disabled for testing
-    # last_prndl2_msg_ms = (now_nanos - max(self.last_oem_prndl2_ts_nanos, self.last_oem_regen_paddle_ts_nanos)) * 1e-6
-    # Send PRNDL2/Paddle at the same rate as steering, but on a different frame (staggered)
-    send_prndl_frame = self.frame % self.params.STEER_STEP == 1
-    # Send paddle=2 and PRNDL2 while regen_active is True, every 33.3Hz
+    # True 40Hz regen paddle sending
+    send_prndl_frame = (self.frame % 5) in (1, 3)  # Send twice every 5 frames (~40Hz)
     if regen_active and send_prndl_frame:
       self.last_prndl2_frame = self.frame
       prndl2_value = 7
@@ -144,9 +141,9 @@ class CarController(CarControllerBase):
       can_sends.append(gmcan.create_prndl2_command(
         self.packer_pt, CanBus.POWERTRAIN, prndl2_value, manual_mode
       ))
-      can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, regen_paddle_value))
-      # Track last regen state
-      self.last_regen_active = regen_active
+      can_sends.append(gmcan.create_regen_paddle_command(
+        self.packer_pt, CanBus.POWERTRAIN, regen_paddle_value
+      ))
     elif not regen_active and getattr(self, "last_regen_active", False):
       # Regen just turned off, send PRNDL2 = 6 and paddle = 0 once
       prndl2_value = 6
@@ -155,7 +152,9 @@ class CarController(CarControllerBase):
       can_sends.append(gmcan.create_prndl2_command(
         self.packer_pt, CanBus.POWERTRAIN, prndl2_value, manual_mode
       ))
-      can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, regen_paddle_value))
+      can_sends.append(gmcan.create_regen_paddle_command(
+        self.packer_pt, CanBus.POWERTRAIN, regen_paddle_value
+      ))
 
 
     # Steering (Active: 50Hz, inactive: 10Hz)
