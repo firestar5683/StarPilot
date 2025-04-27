@@ -130,9 +130,13 @@ class CarController(CarControllerBase):
       self.regen_paddle_pressed
     )
 
-    # True 40Hz regen paddle sending
-    send_prndl_frame = (self.frame % 5) in (1, 3)  # Send twice every 5 frames (~40Hz)
-    if regen_active and send_prndl_frame:
+    # True 40Hz regen paddle sending with minimum interval checking
+    send_prndl_frame = (self.frame % 5) in (1, 3)  # Still targeting ~40Hz
+
+    # Avoid PRNDL2/Paddle spoofing too soon after a steer command
+    frames_since_last_steer = self.frame - getattr(self, "last_steer_frame", -100)
+
+    if regen_active and send_prndl_frame and frames_since_last_steer >= 2:
       self.last_prndl2_frame = self.frame
       prndl2_value = 7
       regen_paddle_value = 2
