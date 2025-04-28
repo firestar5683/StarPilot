@@ -128,11 +128,8 @@ class CarController(CarControllerBase):
     self.regen_ready_to_send = getattr(self, "regen_ready_to_send", False)
 
     # If frame contains a steer command, wait to send
-    if regen_active and send_prndl_frame:
-      if frames_since_last_steer > 2:
-        self.regen_ready_to_send = True
-      else:
-        self.regen_ready_to_send = False
+    if regen_active and send_prndl_frame and frames_since_last_steer > 2:
+      self.regen_ready_to_send = True
 
     # Send at next available frame
     if regen_active and self.regen_ready_to_send and frames_since_last_steer > 2:
