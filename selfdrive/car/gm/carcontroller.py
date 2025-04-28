@@ -23,8 +23,6 @@ TransmissionType = car.CarParams.TransmissionType
 CAMERA_CANCEL_DELAY_FRAMES = 10
 # Enforce a minimum interval between steering messages to avoid a fault
 MIN_STEER_MSG_INTERVAL_MS = 15
-MIN_PRNDL_MSG_INTERVAL_MS = 20
-
 # Constants for pitch compensation
 PITCH_DEADZONE = 0.01  # [radians] 0.01 ≈ 1% grade
 BRAKE_PITCH_FACTOR_BP = [5., 10.]  # [m/s] smoothly revert to planned accel at low speeds
@@ -79,7 +77,7 @@ class CarController(CarControllerBase):
 
     press_regen_paddle = self.regen_paddle_pressed
 
-    # Updated regen gain ratios from bin-averaged 60–0 deceleration sweep
+    # Regen gain ratios from bin-averaged 60–0 deceleration sweep; Calculates stronger decel from paddle
     speed_mps = [0.559, 1.678, 2.797, 3.916, 5.035, 6.154, 7.273, 8.392, 9.511, 10.63,
                  11.749, 12.868, 13.987, 15.106, 16.225, 17.344, 18.463, 19.582, 20.701, 21.820,
                  22.939, 24.058, 25.177, 26.296]
@@ -93,12 +91,10 @@ class CarController(CarControllerBase):
     pedaloffset = interp(car_velocity, [0., 3, 6, 30], [0.10, 0.175, 0.240, 0.240])
     
     if press_regen_paddle:
-      pedal_gas = pedaloffset + (accel / gain) * 0.6
+      pedal_gas = clip((pedaloffset + (accel / gain) * 0.6), 0.0, 1.0)
     else:
       pedal_gas = clip((pedaloffset + accel * 0.6), 0.0, 1.0)
 
-
-    pedal_gas = min(pedal_gas, 1.0)
 
     return pedal_gas, press_regen_paddle
 
@@ -117,11 +113,6 @@ class CarController(CarControllerBase):
     # Send CAN commands.
     can_sends = []
 
-    # # Track last OEM message timestamps for PRNDL2 and Paddle
-    # if hasattr(CS, "prndl2_ts_nanos") and CS.prndl2_ts_nanos != 0:
-    #   self.last_oem_prndl2_ts_nanos = CS.prndl2_ts_nanos
-    # if hasattr(CS, "regen_paddle_ts_nanos") and CS.regen_paddle_ts_nanos != 0:
-    #   self.last_oem_regen_paddle_ts_nanos = CS.regen_paddle_ts_nanos
 
     regen_active = (
       self.CP.carFingerprint in CC_REGEN_PADDLE_CAR and
@@ -130,13 +121,21 @@ class CarController(CarControllerBase):
       self.regen_paddle_pressed
     )
 
-    # True 40Hz regen paddle sending with minimum interval checking
-    send_prndl_frame = (self.frame % 5) in (1, 3)  # Still targeting ~40Hz
-
-    # Avoid PRNDL2/Paddle spoofing too soon after a steer command
+    # Paddle must be sent at 40hz which clogs the bus and delays steer frames; Logic avoids steer frames to prevent LKAS faults
+    send_prndl_frame = (self.frame % 5) in (1, 3)
     frames_since_last_steer = self.frame - getattr(self, "last_steer_frame", -100)
 
-    if regen_active and send_prndl_frame and frames_since_last_steer >= 2:
+    self.regen_ready_to_send = getattr(self, "regen_ready_to_send", False)
+
+    # If frame contains a steer command, wait to send
+    if regen_active and send_prndl_frame:
+      if frames_since_last_steer > 2:
+        self.regen_ready_to_send = True
+      else:
+        self.regen_ready_to_send = False
+
+    # Send at next available frame
+    if regen_active and self.regen_ready_to_send and frames_since_last_steer > 2:
       self.last_prndl2_frame = self.frame
       prndl2_value = 7
       regen_paddle_value = 2
@@ -148,11 +147,12 @@ class CarController(CarControllerBase):
       can_sends.append(gmcan.create_regen_paddle_command(
         self.packer_pt, CanBus.POWERTRAIN, regen_paddle_value
       ))
+      self.regen_ready_to_send = False
     elif not regen_active and getattr(self, "last_regen_active", False):
-      # Regen just turned off, send PRNDL2 = 6 and paddle = 0 once
+      # When paddle is released, send one frame to return us to baseline
       prndl2_value = 6
       regen_paddle_value = 0
-      manual_mode = 1
+      manual_mode = 0
       can_sends.append(gmcan.create_prndl2_command(
         self.packer_pt, CanBus.POWERTRAIN, prndl2_value, manual_mode
       ))
