@@ -121,8 +121,8 @@ class CarController(CarControllerBase):
       self.regen_paddle_pressed
     )
 
-    # Send regen paddle and PRNDL2 commands at consistent 40Hz frame slot (2 of every 5 frames: %5 in (1,3))
-    send_prndl_frame = (self.frame % 5) in (1, 3)
+    # Send regen paddle and PRNDL2 commands at consistent 50Hz (every other frame)
+    send_prndl_frame = (self.frame % 2) == 0
 
     press_regen_paddle = None
     if regen_active and send_prndl_frame:
