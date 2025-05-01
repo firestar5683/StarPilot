@@ -22,7 +22,7 @@ TransmissionType = car.CarParams.TransmissionType
 # Camera cancels up to 0.1s after brake is pressed, ECM allows 0.5s
 CAMERA_CANCEL_DELAY_FRAMES = 10
 # Enforce a minimum interval between steering messages to avoid a fault
-MIN_STEER_MSG_INTERVAL_MS = 10
+MIN_STEER_MSG_INTERVAL_MS = 8
 # Constants for pitch compensation
 PITCH_DEADZONE = 0.01  # [radians] 0.01 ≈ 1% grade
 BRAKE_PITCH_FACTOR_BP = [5., 10.]  # [m/s] smoothly revert to planned accel at low speeds
