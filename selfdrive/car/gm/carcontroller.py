@@ -118,6 +118,7 @@ class CarController(CarControllerBase):
       self.CP.carFingerprint in CC_REGEN_PADDLE_CAR and
       self.CP.openpilotLongitudinalControl and
       CC.longActive and
+      self.CP.enableGasInterceptor and
       self.regen_paddle_pressed
     )
 
