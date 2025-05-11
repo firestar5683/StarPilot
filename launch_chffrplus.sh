@@ -1,12 +1,8 @@
 #!/usr/bin/bash
 
-
 if [ -z "$BASEDIR" ]; then
   BASEDIR="/data/openpilot"
 fi
-
-# One-time setup flag (reset on each overlay install)
-ONCE_FLAG_FILE="/data/openpilot/.one_time_setup_done"
 
 source "$BASEDIR/launch_env.sh"
 
@@ -32,22 +28,6 @@ function agnos_init {
       sudo reboot
     fi
     $DIR/system/hardware/tici/updater $AGNOS_PY $MANIFEST
-  fi
-}
-
-function one_time_setup {
-  if [ ! -f "$ONCE_FLAG_FILE" ]; then
-    echo "Performing one-time setup tasks..."
-    
-    # Run once:
-    echo "Wiping old params..."
-    rm /data/params/d/DongleId
-    rm /data/params/d/StockDongleId
-    echo "Old params wiped."
-
-    touch "$ONCE_FLAG_FILE"
-  else
-    echo "One-time setup already completed. Skipping."
   fi
 }
 
@@ -111,7 +91,5 @@ function launch {
   # if broken, keep on screen error
   while true; do sleep 1; done
 }
-
-one_time_setup
 
 launch
