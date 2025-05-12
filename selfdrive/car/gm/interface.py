@@ -130,10 +130,6 @@ class CarInterface(CarInterfaceBase):
         ret.openpilotLongitudinalControl = True
         ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_HW_CAM_LONG
 
-      # CAM_LONG flag only if camera-capable and conditional_experimental_mode enabled
-      if candidate in CAMERA_ACC_CAR and getattr(frogpilot_toggles, "conditional_experimental_mode", False):
-        ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_HW_CAM_LONG
-
     elif candidate in SDGM_CAR:
       ret.longitudinalTuning.kiV = [0., 0., 0.]  # TODO: tuning
       ret.experimentalLongitudinalAvailable = False
@@ -292,14 +288,12 @@ class CarInterface(CarInterfaceBase):
 
     elif candidate in CC_ONLY_CAR:
       ret.flags |= GMFlags.CC_LONG.value
+      ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_CC_LONG
       ret.radarUnavailable = True
       ret.experimentalLongitudinalAvailable = False
       ret.minEnableSpeed = 24 * CV.MPH_TO_MS
       ret.openpilotLongitudinalControl = not frogpilot_toggles.disable_openpilot_long
       ret.pcmCruise = False
-
-      if not ret.enableGasInterceptor:
-        ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_CC_LONG
 
       if not ret.enableGasInterceptor and candidate in CC_ONLY_CAR: #redneck tuning
         ret.longitudinalTuning.kpBP = [10.7, 10.8, 28.]  # 10.7 m/s == 24 mph
