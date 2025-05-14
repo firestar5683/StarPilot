@@ -125,7 +125,6 @@ class CarController(CarControllerBase):
     # Send regen paddle and PRNDL2 commands at ~66Hz, avoiding steer frame timing
     steer_phase = self.last_steer_frame % 3
     send_prndl_frame = (self.frame % 3) != steer_phase
-    send_paddle_frame = (self.frame % 3) != steer_phase
 
     press_regen_paddle = None
     if regen_active and send_prndl_frame:
@@ -135,8 +134,7 @@ class CarController(CarControllerBase):
 
     if press_regen_paddle is not None:
       can_sends.append(gmcan.create_prndl2_command(self.packer_pt, CanBus.POWERTRAIN, press_regen_paddle))
-      if send_paddle_frame:
-        can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, press_regen_paddle))
+      can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, press_regen_paddle))
     # Track last regen_active state for paddle spoof logic
     self.last_regen_active = regen_active
 
