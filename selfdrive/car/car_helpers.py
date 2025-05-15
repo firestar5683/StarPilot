@@ -209,7 +209,8 @@ def get_car(logcan, sendcan, experimental_long_allowed, params, num_pandas=1, fr
   CP.fingerprintSource = source
   CP.fuzzyFingerprint = not exact_match
 
-  return get_car_interface(CP, FPCP), CP, FPCP
+  interface_instance = get_car_interface(CP, None)
+  return interface_instance, CP, FPCP
 
 def write_car_param(platform=MOCK.MOCK):
   params = Params()
