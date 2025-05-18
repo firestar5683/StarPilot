@@ -99,6 +99,8 @@ class CarInterface(CarInterfaceBase):
     if PEDAL_MSG in fingerprint[0]:
       ret.enableGasInterceptor = True
       ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_GAS_INTERCEPTOR
+      # When a pedal interceptor is present, always use normal longitudinal (block stock cruise)
+      experimental_long = False
 
     if candidate in EV_CAR:
       ret.transmissionType = TransmissionType.direct
