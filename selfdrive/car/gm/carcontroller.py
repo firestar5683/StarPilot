@@ -59,7 +59,6 @@ class CarController(CarControllerBase):
     self.accel_g = 0.0
     self.regen_paddle_pressed = False
     self.aego = 0.0
-    self.regen_disable_until = 0  # frame index until which regen spoof is blocked after a fault
 
   def calc_pedal_command(self, accel: float, long_active: bool, car_velocity) -> Tuple[float, bool]:
     if not long_active:
@@ -123,12 +122,6 @@ class CarController(CarControllerBase):
       self.regen_paddle_pressed
     )
 
-    # If longActive just dropped (EPS error), block regen spoof for a cooldown period
-    if not CC.longActive and getattr(self, "last_regen_active", False):
-      # block for 50 frames (~0.5s)
-      self.regen_disable_until = self.frame + 50
-
-    regen_active = regen_active and (self.frame >= self.regen_disable_until)
 
     # Send regen paddle and PRNDL2 commands at ~66Hz, avoiding steer frame timing
     steer_phase = self.last_steer_frame % 3
