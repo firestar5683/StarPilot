@@ -89,7 +89,7 @@ class CarController(CarControllerBase):
     gain = interp(car_velocity, speed_mps, regen_gain_ratio)
 
     pedaloffset = interp(car_velocity, [0., 3, 6, 30], [0.10, 0.175, 0.240, 0.240])
-    
+
     if press_regen_paddle:
       pedal_gas = clip((pedaloffset + (accel / gain) * 0.6), 0.0, 1.0)
     else:
@@ -123,25 +123,41 @@ class CarController(CarControllerBase):
     )
 
 
-    # Send regen paddle and PRNDL2 commands at ~66Hz, avoiding steer frame timing
-    steer_phase = self.last_steer_frame % 3
-    send_prndl_frame = (self.frame % 3) != steer_phase
+    # Hybrid midpoint + overflow paddle/PRNDL2 scheduling (>=40Hz, avoid steer)
+    # Initialize spoof timer on first regen active
+    if regen_active and not hasattr(self, "last_spoof_frame"):
+      self.last_spoof_frame = self.frame
 
-    press_regen_paddle = None
-    if regen_active and send_prndl_frame:
-      press_regen_paddle = True
-    elif not regen_active and getattr(self, "last_regen_active", False):
-      press_regen_paddle = False
+    # Steer-frame tracking is handled in the steer-sending block below:
+    #   we update prev_steer_frame and last_steer_frame after sending steering.
 
-    # Enforce at least 3-frame gap after last steer to avoid EPS faults
-    frames_since_last_steer = self.frame - self.last_steer_frame
-    if frames_since_last_steer < 3:
-      press_regen_paddle = None
+    # Send midpoint spoof (halfway between last two steer frames)
+    send_spoof = False
+    if regen_active and hasattr(self, "prev_steer_frame"):
+      steer_interval = self.last_steer_frame - self.prev_steer_frame
+      half_interval = max(1, steer_interval // 2)
+      midpoint_frame = self.prev_steer_frame + half_interval
+      if self.frame == midpoint_frame:
+        send_spoof = True
 
-    if press_regen_paddle is not None:
-      can_sends.append(gmcan.create_prndl2_command(self.packer_pt, CanBus.POWERTRAIN, press_regen_paddle))
-      can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, press_regen_paddle))
-    # Track last regen_active state for paddle spoof logic
+    # Overflow spoof: ensure no gap >25 ms without spoof
+    if regen_active and hasattr(self, "last_spoof_frame"):
+      time_since_spoof = (self.frame - self.last_spoof_frame) * DT_CTRL
+      if time_since_spoof >= 0.025 and self.frame != self.last_steer_frame:
+        send_spoof = True
+
+    # Execute spoof sends
+    if send_spoof:
+      can_sends.append(gmcan.create_prndl2_command(self.packer_pt, CanBus.POWERTRAIN, True))
+      can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, True))
+      self.last_spoof_frame = self.frame
+
+    # Send off command once on regen release
+    if not regen_active and getattr(self, "last_regen_active", False):
+      can_sends.append(gmcan.create_prndl2_command(self.packer_pt, CanBus.POWERTRAIN, False))
+      can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, False))
+
+    # Update regen_active state
     self.last_regen_active = regen_active
 
 
@@ -177,6 +193,14 @@ class CarController(CarControllerBase):
       self.apply_steer_last = apply_steer
       idx = self.lka_steering_cmd_counter % 4
       can_sends.append(gmcan.create_steering_control(self.packer_pt, CanBus.POWERTRAIN, apply_steer, idx, CC.latActive))
+
+      # After sending steering control:
+      # Update steer-frame tracking for midpoint calculation
+      if not hasattr(self, "prev_steer_frame"):
+        self.prev_steer_frame = self.last_steer_frame
+      else:
+        self.prev_steer_frame = self.last_steer_frame
+      self.last_steer_frame = self.frame
 
     if self.CP.openpilotLongitudinalControl:
       # Gas/regen, brakes, and UI commands - all at 25Hz
