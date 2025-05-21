@@ -59,6 +59,8 @@ class CarController(CarControllerBase):
     self.accel_g = 0.0
     self.regen_paddle_pressed = False
     self.aego = 0.0
+    # Number of consecutive off-frames to send after regen release
+    self.off_spoof_frames = 0
 
   def calc_pedal_command(self, accel: float, long_active: bool, car_velocity) -> Tuple[float, bool]:
     if not long_active:
@@ -152,10 +154,16 @@ class CarController(CarControllerBase):
       can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, True))
       self.last_spoof_frame = self.frame
 
-    # Send off command once on regen release
+    # Send off commands for two consecutive frames on regen release
     if not regen_active and getattr(self, "last_regen_active", False):
-      can_sends.append(gmcan.create_prndl2_command(self.packer_pt, CanBus.POWERTRAIN, False))
-      can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, False))
+      # schedule two off-frames
+      self.off_spoof_frames = 3
+    # while frames remain, send off spoof if not colliding with steer
+    if getattr(self, "off_spoof_frames", 0) > 0:
+      if self.frame != self.last_steer_frame:
+        can_sends.append(gmcan.create_prndl2_command(self.packer_pt, CanBus.POWERTRAIN, False))
+        can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, False))
+      self.off_spoof_frames -= 1
 
     # Update regen_active state
     self.last_regen_active = regen_active
