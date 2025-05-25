@@ -66,16 +66,18 @@ class CarController(CarControllerBase):
     if not long_active:
       return 0., False
 
-    # Regen paddle hysteresis (200ms = 20 frames)
+    # Regen paddle hysteresis (frame-based): hold 30 frames, with decrement dead-zone
     if not hasattr(self, 'regen_paddle_timer'):
-      self.regen_paddle_timer = 0
+      self.regen_paddle_timer = 0  # frames
 
-    if self.aego < -0.7 and accel <= 0.0:
+    # Regen paddle hysteresis (frame‑based): count frames when decelerating hard, decrement only when truly released
+    if self.aego < -0.7:
       self.regen_paddle_timer += 1
-    else:
+    elif self.aego > -0.3:
       self.regen_paddle_timer = max(self.regen_paddle_timer - 1, 0)
+    # else: hold timer between -0.7 and -0.3
 
-    self.regen_paddle_pressed = self.regen_paddle_timer >= 20
+    self.regen_paddle_pressed = self.regen_paddle_timer >= 30  # 30 frames
 
     press_regen_paddle = self.regen_paddle_pressed
 
@@ -97,13 +99,14 @@ class CarController(CarControllerBase):
     else:
       pedal_gas = clip((pedaloffset + accel * 0.6), 0.0, 1.0)
 
-
     return pedal_gas, press_regen_paddle
 
 
   def update(self, CC, CS, now_nanos, frogpilot_toggles):
     self.CS = CS
     self.aego = CS.out.aEgo
+    # Track last regen paddle pressed state for off-schedule trigger
+    last_paddle_pressed = getattr(self, "last_regen_paddle_pressed", False)
     actuators = CC.actuators
     accel = brake_accel = actuators.accel
     hud_control = CC.hudControl
@@ -130,9 +133,6 @@ class CarController(CarControllerBase):
     if regen_active and not hasattr(self, "last_spoof_frame"):
       self.last_spoof_frame = self.frame
 
-    # Steer-frame tracking is handled in the steer-sending block below:
-    #   we update prev_steer_frame and last_steer_frame after sending steering.
-
     # Send midpoint spoof (halfway between last two steer frames)
     send_spoof = False
     if regen_active and hasattr(self, "prev_steer_frame"):
@@ -142,10 +142,14 @@ class CarController(CarControllerBase):
       if self.frame == midpoint_frame:
         send_spoof = True
 
-    # Overflow spoof: ensure no gap >25 ms without spoof
+    # Overflow spoof: ensure no gap >20 ms without spoof (2 frames)
     if regen_active and hasattr(self, "last_spoof_frame"):
-      time_since_spoof = (self.frame - self.last_spoof_frame) * DT_CTRL
-      if time_since_spoof >= 0.025 and self.frame != self.last_steer_frame:
+      if (self.frame - self.last_spoof_frame) >= 2 and self.frame != self.last_steer_frame:
+        send_spoof = True
+
+    # Overflow spoof: ensure no gap >30 ms without spoof (3 frames)
+    if regen_active and hasattr(self, "last_spoof_frame"):
+      if (self.frame - self.last_spoof_frame) >= 3 and self.frame != self.last_steer_frame:
         send_spoof = True
 
     # Execute spoof sends
@@ -154,21 +158,34 @@ class CarController(CarControllerBase):
       can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, True))
       self.last_spoof_frame = self.frame
 
-    # Send off commands for two consecutive frames on regen release
-    if not regen_active and getattr(self, "last_regen_active", False):
-      # schedule two off-frames
-      self.off_spoof_frames = 3
-    # while frames remain, send off spoof if not colliding with steer
-    if getattr(self, "off_spoof_frames", 0) > 0:
-      if self.frame != self.last_steer_frame:
-        # send off messages
-        can_sends.append(gmcan.create_prndl2_command(self.packer_pt, CanBus.POWERTRAIN, False))
-        can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, False))
-        # decrement only when sent
-        self.off_spoof_frames -= 1
+    # Schedule off-frames once when paddle-pressed flag clears
+    if last_paddle_pressed and not self.regen_paddle_pressed and not hasattr(self, "off_schedule"):
+      # Calculate steer interval
+      if hasattr(self, "prev_steer_frame"):
+        steer_interval = self.last_steer_frame - self.prev_steer_frame
+        half_interval = max(1, steer_interval // 2)
+        # Schedule two off-send frames: midpoint and just before next steer
+        midpoint = self.prev_steer_frame + half_interval
+        second = self.last_steer_frame + half_interval
+        self.off_schedule = [midpoint, second]
+        self.off_sent = [False, False]
 
-    # Update regen_active state
+    # Execute scheduled off sends
+    if hasattr(self, "off_schedule"):
+      for i, target in enumerate(self.off_schedule):
+        if not self.off_sent[i] and self.frame == target and self.frame != self.last_steer_frame:
+          # send off commands
+          can_sends.append(gmcan.create_prndl2_command(self.packer_pt, CanBus.POWERTRAIN, False))
+          can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, False))
+          self.off_sent[i] = True
+      # Once both off sends done, clean up schedule
+      if all(self.off_sent):
+        del self.off_schedule
+        del self.off_sent
+
+    # Update regen_active state and last_regen_paddle_pressed for next loop
     self.last_regen_active = regen_active
+    self.last_regen_paddle_pressed = self.regen_paddle_pressed
 
 
     # Steering (Active: 50Hz, inactive: 10Hz)
@@ -296,7 +313,7 @@ class CarController(CarControllerBase):
 
           # Send dashboard UI commands (ACC status)
           send_fcw = hud_alert == VisualAlert.fcw
-          if self.frame % 10 == 0:
+          if self.frame % 10 == 5:
             can_sends.append(gmcan.create_acc_dashboard_command(self.packer_pt, CanBus.POWERTRAIN, CC.enabled,
                                                               hud_v_cruise * CV.MS_TO_KPH, hud_control, send_fcw))
       else:
@@ -304,7 +321,7 @@ class CarController(CarControllerBase):
         accel += self.accel_g
 
       # Radar needs to know current speed and yaw rate (50hz),
-      # and that ADAS is alive (10hz)
+      # and that ADAS is alive (5hz, previously 10hz)
       if not self.CP.radarUnavailable:
         tt = self.frame * DT_CTRL
         time_and_headlights_step = 20
@@ -312,14 +329,10 @@ class CarController(CarControllerBase):
           idx = (self.frame // time_and_headlights_step) % 4
           can_sends.append(gmcan.create_adas_time_status(CanBus.OBSTACLE, int((tt - self.start_time) * 60), idx))
           can_sends.append(gmcan.create_adas_headlights_status(self.packer_obj, CanBus.OBSTACLE))
-
-        speed_and_accelerometer_step = 4
-        if self.frame % speed_and_accelerometer_step == 0:
-          idx = (self.frame // speed_and_accelerometer_step) % 4
           can_sends.append(gmcan.create_adas_steering_status(CanBus.OBSTACLE, idx))
           can_sends.append(gmcan.create_adas_accelerometer_speed_status(CanBus.OBSTACLE, CS.out.vEgo, idx))
 
-      if self.CP.networkLocation == NetworkLocation.gateway and self.frame % self.params.ADAS_KEEPALIVE_STEP == 0:
+      if self.CP.networkLocation == NetworkLocation.gateway and self.frame % (self.params.ADAS_KEEPALIVE_STEP * 2) == 0:
         can_sends += gmcan.create_adas_keepalive(CanBus.POWERTRAIN)
 
       # TODO: integrate this with the code block below?
