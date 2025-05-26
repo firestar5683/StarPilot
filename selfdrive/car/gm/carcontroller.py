@@ -22,7 +22,7 @@ TransmissionType = car.CarParams.TransmissionType
 # Camera cancels up to 0.1s after brake is pressed, ECM allows 0.5s
 CAMERA_CANCEL_DELAY_FRAMES = 10
 # Enforce a minimum interval between steering messages to avoid a fault
-MIN_STEER_MSG_INTERVAL_MS = 15
+MIN_STEER_MSG_INTERVAL_MS = 20
 # Constants for pitch compensation
 PITCH_DEADZONE = 0.01  # [radians] 0.01 ≈ 1% grade
 BRAKE_PITCH_FACTOR_BP = [5., 10.]  # [m/s] smoothly revert to planned accel at low speeds
@@ -118,6 +118,8 @@ class CarController(CarControllerBase):
     # Send CAN commands.
     can_sends = []
 
+    # === Pre-steer paddle-spoof phase ===
+    paddle_sends = []
 
     regen_active = (
       self.CP.carFingerprint in CC_REGEN_PADDLE_CAR and
@@ -126,7 +128,6 @@ class CarController(CarControllerBase):
       self.CP.enableGasInterceptor and
       self.regen_paddle_pressed
     )
-
 
     # Hybrid midpoint + overflow paddle/PRNDL2 scheduling (>=40Hz, avoid steer)
     # Initialize spoof timer on first regen active
@@ -154,8 +155,8 @@ class CarController(CarControllerBase):
 
     # Execute spoof sends
     if send_spoof:
-      can_sends.append(gmcan.create_prndl2_command(self.packer_pt, CanBus.POWERTRAIN, True))
-      can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, True))
+      paddle_sends.append(gmcan.create_prndl2_command(self.packer_pt, CanBus.POWERTRAIN, True))
+      paddle_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, True))
       self.last_spoof_frame = self.frame
 
     # Schedule off-frames once when paddle-pressed flag clears
@@ -175,8 +176,8 @@ class CarController(CarControllerBase):
       for i, target in enumerate(self.off_schedule):
         if not self.off_sent[i] and self.frame == target and self.frame != self.last_steer_frame:
           # send off commands
-          can_sends.append(gmcan.create_prndl2_command(self.packer_pt, CanBus.POWERTRAIN, False))
-          can_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, False))
+          paddle_sends.append(gmcan.create_prndl2_command(self.packer_pt, CanBus.POWERTRAIN, False))
+          paddle_sends.append(gmcan.create_regen_paddle_command(self.packer_pt, CanBus.POWERTRAIN, False))
           self.off_sent[i] = True
       # Once both off sends done, clean up schedule
       if all(self.off_sent):
@@ -186,6 +187,18 @@ class CarController(CarControllerBase):
     # Update regen_active state and last_regen_paddle_pressed for next loop
     self.last_regen_active = regen_active
     self.last_regen_paddle_pressed = self.regen_paddle_pressed
+
+    # Merge paddle spoof CAN frames, but skip if too close to last steer
+    if paddle_sends:
+      # Skip on steer frame and the next two frames
+      if (not hasattr(self, "last_steer_frame")
+          or (self.frame not in [self.last_steer_frame,
+                                 self.last_steer_frame + 1,
+                                 self.last_steer_frame + 2])):
+        can_sends.extend(paddle_sends)
+    # === End guarded paddle-spoof merge ===
+
+
 
 
     # Steering (Active: 50Hz, inactive: 10Hz)
