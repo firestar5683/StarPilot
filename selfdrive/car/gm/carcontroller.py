@@ -38,6 +38,7 @@ class CarController(CarControllerBase):
     self.apply_speed = 0
     self.frame = 0
     self.last_steer_frame = 0
+    self.last_steer_ts_ns = 0
     self.last_button_frame = 0
     self.cancel_counter = 0
     self.pedal_steady = 0.
@@ -185,8 +186,10 @@ class CarController(CarControllerBase):
 
     # Merge paddle spoof CAN frames, but skip if too close to last steer
     if paddle_sends:
-      # Skip on steer frame and the next frame (2-frame guard)
-      if not hasattr(self, "last_steer_frame") or self.frame not in (self.last_steer_frame, self.last_steer_frame + 1):
+      # Skip on steer frame + next frame, and wait 5 ms after steer send
+      if (not hasattr(self, "last_steer_frame")
+          or (self.frame not in (self.last_steer_frame, self.last_steer_frame + 1)
+              and (now_nanos - self.last_steer_ts_ns) >= 5_000_000)):
         can_sends.extend(paddle_sends)
     # === End guarded paddle-spoof merge ===
 
@@ -222,6 +225,7 @@ class CarController(CarControllerBase):
         apply_steer = 0
 
       self.last_steer_frame = self.frame
+      self.last_steer_ts_ns = now_nanos
       self.apply_steer_last = apply_steer
       idx = self.lka_steering_cmd_counter % 4
       can_sends.append(gmcan.create_steering_control(self.packer_pt, CanBus.POWERTRAIN, apply_steer, idx, CC.latActive))
