@@ -59,6 +59,11 @@ class CarController(CarControllerBase):
     self.pitch = FirstOrderFilter(0., 0.09 * 4, DT_CTRL * 4)  # runs at 25 Hz
     self.accel_g = 0.0
     self.regen_paddle_pressed = False
+    self.prev_regen_paddle_pressed = False  # Track previous state to detect changes
+    self.regen_paddle_pressed_changed = False  # Flag to indicate when the value changes
+    self.regen_paddle_pressed_changed_counter = 0 
+    self.prev_pedal_gas = 0.0
+    self.prev_pedal_gas_on_gap_filling = 0.0
     self.aego = 0.0
     # Number of consecutive off-frames to send after regen release
     self.off_spoof_frames = 0
@@ -80,6 +85,17 @@ class CarController(CarControllerBase):
 
     self.regen_paddle_pressed = self.regen_paddle_timer >= 30  # 30 frames
 
+    # Detect changes in regen_paddle_pressed
+    self.regen_paddle_pressed_changed = self.regen_paddle_pressed != self.prev_regen_paddle_pressed
+    self.prev_regen_paddle_pressed = self.regen_paddle_pressed
+
+    if self.regen_paddle_pressed_changed:
+      if self.regen_paddle_pressed_changed_counter > 0 : ## handliing changed status when filling is ongoing
+        self.prev_pedal_gas = self.prev_pedal_gas_on_gap_filling
+      self.regen_paddle_pressed_changed_counter = 200
+
+
+
     press_regen_paddle = self.regen_paddle_pressed
 
     # Regen gain ratios from bin-averaged 60–0 deceleration sweep; Calculates stronger decel from paddle
@@ -99,6 +115,17 @@ class CarController(CarControllerBase):
       pedal_gas = clip((pedaloffset + (accel / gain) * 0.6), 0.0, 1.0)
     else:
       pedal_gas = clip((pedaloffset + accel * 0.6), 0.0, 1.0)
+
+    if self.regen_paddle_pressed_changed and self.regen_paddle_pressed_changed_counter > 0 :
+      apply_ratio = interp(self.regen_paddle_pressed_changed_counter, [200, 0], [0.0, 1.0]) ### set 200 frames for fill the gap
+      pedal_gas = pedal_gas * apply_ratio + self.prev_pedal_gas * (1.0 - apply_ratio)
+      self.prev_pedal_gas_on_gap_filling = pedal_gas
+      self.regen_paddle_pressed_changed_counter = max(self.regen_paddle_pressed_changed_counter - 1, 0)
+    else: ## normal state, store pedal_gas
+      self.regen_paddle_pressed_changed = False
+      self.regen_paddle_pressed_changed_counter = 0
+      self.prev_pedal_gas = pedal_gas
+
 
     return pedal_gas, press_regen_paddle
 
