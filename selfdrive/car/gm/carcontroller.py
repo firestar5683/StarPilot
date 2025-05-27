@@ -22,7 +22,7 @@ TransmissionType = car.CarParams.TransmissionType
 # Camera cancels up to 0.1s after brake is pressed, ECM allows 0.5s
 CAMERA_CANCEL_DELAY_FRAMES = 10
 # Enforce a minimum interval between steering messages to avoid a fault
-MIN_STEER_MSG_INTERVAL_MS = 20
+MIN_STEER_MSG_INTERVAL_MS = 15
 # Constants for pitch compensation
 PITCH_DEADZONE = 0.01  # [radians] 0.01 ≈ 1% grade
 BRAKE_PITCH_FACTOR_BP = [5., 10.]  # [m/s] smoothly revert to planned accel at low speeds
@@ -148,11 +148,6 @@ class CarController(CarControllerBase):
       if (self.frame - self.last_spoof_frame) >= 2 and self.frame != self.last_steer_frame:
         send_spoof = True
 
-    # Overflow spoof: ensure no gap >30 ms without spoof (3 frames)
-    if regen_active and hasattr(self, "last_spoof_frame"):
-      if (self.frame - self.last_spoof_frame) >= 3 and self.frame != self.last_steer_frame:
-        send_spoof = True
-
     # Execute spoof sends
     if send_spoof:
       paddle_sends.append(gmcan.create_prndl2_command(self.packer_pt, CanBus.POWERTRAIN, True))
@@ -190,11 +185,8 @@ class CarController(CarControllerBase):
 
     # Merge paddle spoof CAN frames, but skip if too close to last steer
     if paddle_sends:
-      # Skip on steer frame and the next two frames
-      if (not hasattr(self, "last_steer_frame")
-          or (self.frame not in [self.last_steer_frame,
-                                 self.last_steer_frame + 1,
-                                 self.last_steer_frame + 2])):
+      # Skip on steer frame and the next frame (2-frame guard)
+      if not hasattr(self, "last_steer_frame") or self.frame not in (self.last_steer_frame, self.last_steer_frame + 1):
         can_sends.extend(paddle_sends)
     # === End guarded paddle-spoof merge ===
 
