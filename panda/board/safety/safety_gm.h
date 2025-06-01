@@ -309,10 +309,11 @@ static safety_config gm_init(uint16_t param) {
   sport_mode = alternative_experience & ALT_EXP_RAISE_LONGITUDINAL_LIMITS_TO_ISO_MAX;
 
   gm_hw = GET_FLAG(param, GM_PARAM_HW_CAM) ? GM_CAM : GM_ASCM;
+  const bool gm_ascm_int = GET_FLAG(param, GM_PARAM_ASCM_INT);
 
   gm_force_ascm = GET_FLAG(param, GM_PARAM_HW_ASCM_LONG);
 
-  if (gm_hw == GM_ASCM || gm_force_ascm) {
+  if (gm_hw == GM_ASCM || gm_force_ascm || gm_ascm_int) {
     if (sport_mode) {
       gm_long_limits = &GM_ASCM_LONG_LIMITS_SPORT;
     } else {
