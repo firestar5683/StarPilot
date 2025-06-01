@@ -8,7 +8,7 @@ from openpilot.common.basedir import BASEDIR
 from openpilot.common.conversions import Conversions as CV
 from openpilot.selfdrive.car import create_button_events, get_safety_config
 from openpilot.selfdrive.car.gm.radar_interface import RADAR_HEADER_MSG
-from openpilot.selfdrive.car.gm.values import CAR, CruiseButtons, CarControllerParams, EV_CAR, CAMERA_ACC_CAR, CanBus, GMFlags, CC_ONLY_CAR, SDGM_CAR
+from openpilot.selfdrive.car.gm.values import CAR, CruiseButtons, CarControllerParams, EV_CAR, CAMERA_ACC_CAR, CanBus, GMFlags, CC_ONLY_CAR, SDGM_CAR, ASCM_INT
 from openpilot.selfdrive.car.interfaces import CarInterfaceBase, TorqueFromLateralAccelCallbackType, FRICTION_THRESHOLD, LatControlInputs, NanoFFModel
 from openpilot.selfdrive.controls.lib.drive_helpers import get_friction
 
@@ -108,14 +108,17 @@ class CarInterface(CarInterfaceBase):
 
     ret.longitudinalTuning.kiBP = [5., 35., 60.]
 
-    if candidate in (CAMERA_ACC_CAR | SDGM_CAR):
-      ret.experimentalLongitudinalAvailable = candidate not in (CC_ONLY_CAR | SDGM_CAR)
+    if candidate in (CAMERA_ACC_CAR | SDGM_CAR | ASCM_INT):
+      ret.experimentalLongitudinalAvailable = candidate not in (CC_ONLY_CAR | SDGM_CAR | ASCM_INT)
       ret.networkLocation = NetworkLocation.fwdCamera
       ret.radarUnavailable = True  # no radar
       ret.pcmCruise = True
       ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_HW_CAM
       ret.minEnableSpeed = 5 * CV.KPH_TO_MS
       ret.minSteerSpeed = 10 * CV.KPH_TO_MS
+      if candidate in ASCM_INT:
+        ret.minSteerSpeed = 7 * CV.MPH_TO_MS
+        ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_ASCM_INT
 
       # Tuning for experimental long
       ret.longitudinalTuning.kiV = [0.5, 0.5, 0.5]
@@ -298,7 +301,7 @@ class CarInterface(CarInterfaceBase):
       ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_NO_ACC
 
     # Exception for flashed cars, or cars whose camera was removed
-    if (ret.networkLocation == NetworkLocation.fwdCamera or candidate in CC_ONLY_CAR) and CAM_MSG not in fingerprint[CanBus.CAMERA] and not candidate in SDGM_CAR:
+    if (ret.networkLocation == NetworkLocation.fwdCamera or candidate in CC_ONLY_CAR) and CAM_MSG not in fingerprint[CanBus.CAMERA] and not candidate in (SDGM_CAR | ASCM_INT):
       ret.flags |= GMFlags.NO_CAMERA.value
       ret.safetyConfigs[0].safetyParam |= Panda.FLAG_GM_NO_CAMERA
 

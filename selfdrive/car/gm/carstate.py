@@ -5,7 +5,7 @@ from openpilot.common.numpy_fast import mean
 from opendbc.can.can_define import CANDefine
 from opendbc.can.parser import CANParser
 from openpilot.selfdrive.car.interfaces import CarStateBase
-from openpilot.selfdrive.car.gm.values import DBC, AccState, CanBus, STEER_THRESHOLD, GMFlags, CC_ONLY_CAR, CAMERA_ACC_CAR, SDGM_CAR
+from openpilot.selfdrive.car.gm.values import DBC, AccState, CanBus, STEER_THRESHOLD, GMFlags, CC_ONLY_CAR, CAMERA_ACC_CAR, SDGM_CAR, ASCM_INT
 
 TransmissionType = car.CarParams.TransmissionType
 NetworkLocation = car.CarParams.NetworkLocation
@@ -75,10 +75,6 @@ class CarState(CarStateBase):
     else:
       ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(pt_cp.vl["ECMPRDNL2"]["PRNDL2"], None))
 
-    if self.CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG.value:
-      ret.brake = pt_cp.vl["EBCMBrakePedalPosition"]["BrakePedalPosition"] / 0xd0
-    else:
-      ret.brake = pt_cp.vl["ECMAcceleratorPos"]["BrakePedalPos"]
     if self.CP.networkLocation == NetworkLocation.fwdCamera:
       ret.brakePressed = pt_cp.vl["ECMEngineStatus"]["BrakePressed"] != 0
     else:
@@ -86,6 +82,10 @@ class CarState(CarStateBase):
       # that the brake is being intermittently pressed without user interaction.
       # To avoid a cruise fault we need to use a conservative brake position threshold
       # https://static.nhtsa.gov/odi/tsbs/2017/MC-10137629-9999.pdf
+      if self.CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG.value:
+        ret.brake = pt_cp.vl["EBCMBrakePedalPosition"]["BrakePedalPosition"] / 0xd0
+      else:
+        ret.brake = pt_cp.vl["ECMAcceleratorPos"]["BrakePedalPos"]
       ret.brakePressed = ret.brake >= 8
 
     # Regen braking is braking
@@ -139,10 +139,11 @@ class CarState(CarStateBase):
     if self.CP.networkLocation == NetworkLocation.fwdCamera and not self.CP.flags & GMFlags.NO_CAMERA.value:
       if self.CP.carFingerprint not in CC_ONLY_CAR:
         ret.cruiseState.speed = cam_cp.vl["ASCMActiveCruiseControlStatus"]["ACCSpeedSetpoint"] * CV.KPH_TO_MS
-      if self.CP.carFingerprint not in SDGM_CAR:
+      if self.CP.carFingerprint not in (SDGM_CAR|ASCM_INT):
         ret.stockAeb = cam_cp.vl["AEBCmd"]["AEBCmdActive"] != 0
       # openpilot controls nonAdaptive when not pcmCruise
-      if self.CP.pcmCruise:
+      # 2016-2018 Volt won't identify non-adaptive cruise state since switchable cruise state was not introduced till 2019 model year / SDGM Global A
+      if self.CP.pcmCruise and self.CP.carFingerprint not in ASCM_INT:
         ret.cruiseState.nonAdaptive = cam_cp.vl["ASCMActiveCruiseControlStatus"]["ACCCruiseState"] not in (2, 3)
     if self.CP.carFingerprint in CC_ONLY_CAR:
       ret.accFaulted = False
@@ -170,7 +171,7 @@ class CarState(CarStateBase):
       messages += [
         ("ASCMLKASteeringCmd", 10),
       ]
-      if CP.carFingerprint not in SDGM_CAR:
+      if CP.carFingerprint not in (SDGM_CAR|ASCM_INT):
         messages += [
           ("AEBCmd", 10),
         ]
@@ -197,7 +198,6 @@ class CarState(CarStateBase):
       ("ASCMSteeringButton", 33),
       ("ECMEngineStatus", 100),
       ("PSCMSteeringAngle", 100),
-      ("ECMAcceleratorPos", 80),
       ("SportMode", 0),
     ]
 
@@ -209,9 +209,6 @@ class CarState(CarStateBase):
       messages += [
         ("ASCMLKASteeringCmd", 0),
       ]
-      if CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG.value:
-        messages.remove(("ECMAcceleratorPos", 80))
-        messages.append(("EBCMBrakePedalPosition", 100))
 
     if CP.transmissionType == TransmissionType.direct:
       messages += [
@@ -228,6 +225,14 @@ class CarState(CarStateBase):
       messages += [
         ("GAS_SENSOR", 50),
       ]
+
+    if CP.networkLocation != NetworkLocation.fwdCamera:
+      messages += [
+        ("ECMAcceleratorPos", 80),
+      ]
+      if CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG.value:
+        messages.remove(("ECMAcceleratorPos", 80))
+        messages.append(("EBCMBrakePedalPosition", 100))
 
     return CANParser(DBC[CP.carFingerprint]["pt"], messages, CanBus.POWERTRAIN)
 

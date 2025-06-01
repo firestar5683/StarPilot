@@ -77,6 +77,7 @@ const uint16_t GM_PARAM_NO_CAMERA = 16;
 const uint16_t GM_PARAM_NO_ACC = 32;
 const uint16_t GM_PARAM_PEDAL_LONG = 64;  // TODO: this can be inferred
 const uint16_t GM_PARAM_PEDAL_INTERCEPTOR = 128;
+const uint16_t GM_PARAM_ASCM_INT = 256;
 
 enum {
   GM_BTN_UNPRESS = 1,
