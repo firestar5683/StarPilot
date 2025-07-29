@@ -15,14 +15,14 @@ class TestHyundaiCanfdBase(HyundaiButtonBase, common.PandaCarSafetyTest, common.
   FWD_BLACKLISTED_ADDRS = {2: [0x50, 0x2a4]}
   FWD_BUS_LOOKUP = {0: 2, 2: 0}
 
-  MAX_RATE_UP = 2
-  MAX_RATE_DOWN = 3
-  MAX_TORQUE = 270
+  MAX_RATE_UP = 10
+  MAX_RATE_DOWN = 10
+  MAX_TORQUE = 610
 
-  MAX_RT_DELTA = 112
+  MAX_RT_DELTA = 300
   RT_INTERVAL = 250000
 
-  DRIVER_TORQUE_ALLOWANCE = 250
+  DRIVER_TORQUE_ALLOWANCE = 100
   DRIVER_TORQUE_FACTOR = 2
 
   # Safety around steering req bit
