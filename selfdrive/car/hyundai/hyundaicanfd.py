@@ -49,6 +49,7 @@ def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_steer):
     "HAS_LANE_SAFETY": 0,  # hide LKAS settings
     "NEW_SIGNAL_1": 0,
     "NEW_SIGNAL_2": 0,
+    "DAMP_FACTOR": 100,  # can potentially tuned for better perf [3, 200]
   }
 
   if CP.flags & HyundaiFlags.CANFD_HDA2:
