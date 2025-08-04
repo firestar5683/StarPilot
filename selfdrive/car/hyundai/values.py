@@ -31,7 +31,7 @@ class CarControllerParams:
       self.STEER_DRIVER_MULTIPLIER = 2
       self.STEER_THRESHOLD = 250
       self.STEER_DELTA_UP = 3 if vEgoRaw < 11. else 2
-      self.STEER_DELTA_DOWN = 3 if vEgoRaw < 11. else 3
+      self.STEER_DELTA_DOWN = 5 if vEgoRaw < 11. else 3
     elif CP.carFingerprint in CANFD_CAR:
       self.STEER_MAX = 270
       self.STEER_DRIVER_ALLOWANCE = 250
