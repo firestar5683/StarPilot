@@ -79,7 +79,7 @@ FrogPilotLateralPanel::FrogPilotLateralPanel(FrogPilotSettingsWindow *parent) : 
       lateralToggle = new FrogPilotParamValueButtonControl(param, title, desc, icon, 0, 0.5, QString(), std::map<float, QString>(), 0.001, false, {}, steerFrictionButton, false, false);
     } else if (param == "SteerKP") {
       std::vector<QString> steerKPButton{"Reset"};
-      lateralToggle = new FrogPilotParamValueButtonControl(param, title, desc, icon, kpStock * 0.5, kpStock * 1.5, QString(), std::map<float, QString>(), 0.001, false, {}, steerKPButton, false, false);
+      lateralToggle = new FrogPilotParamValueButtonControl(param, title, desc, icon, kpStock * .25, kpStock * 1.5, QString(), std::map<float, QString>(), 0.01, false, {}, steerKPButton, false, false);
     } else if (param == "SteerLatAccel") {
       std::vector<QString> steerLatAccelButton{"Reset"};
       lateralToggle = new FrogPilotParamValueButtonControl(param, title, desc, icon, latAccelStock * 0.5, latAccelStock * 1.5, QString(), std::map<float, QString>(), 0.001, false, {}, steerLatAccelButton, false, false);
@@ -248,7 +248,7 @@ void FrogPilotLateralPanel::showEvent(QShowEvent *event) {
   steerDelayToggle->updateControl(delayStock * 0.5, delayStock * 5);
   steerFrictionToggle->setTitle(QString(tr("Friction (Default: %1)")).arg(QString::number(frictionStock, 'f', 2)));
   steerKPToggle->setTitle(QString(tr("Kp Factor (Default: %1)")).arg(QString::number(kpStock, 'f', 2)));
-  steerKPToggle->updateControl(kpStock * 0.5, kpStock * 1.5);
+  steerKPToggle->updateControl(kpStock * 0.25, kpStock * 1.5);
   steerLatAccelToggle->setTitle(QString(tr("Lateral Accel (Default: %1)")).arg(QString::number(latAccelStock, 'f', 2)));
   steerLatAccelToggle->updateControl(latAccelStock * 0.5, latAccelStock * 1.5);
   steerRatioToggle->setTitle(QString(tr("Steer Ratio (Default: %1)")).arg(QString::number(steerRatioStock, 'f', 2)));

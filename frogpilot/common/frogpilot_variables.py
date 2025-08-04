@@ -505,7 +505,7 @@ class FrogPilotVariables:
     toggle.steer_friction = np.clip(params.get_float("SteerFriction") if advanced_lateral_tuning and tuning_level >= level["SteerFriction"] else stock_steer_friction, 0, 0.5)
     toggle.use_custom_steer_friction = toggle.steer_friction != stock_steer_friction and is_torque_car and not toggle.force_auto_tune or toggle.force_auto_tune_off
     stock_steer_kp = params.get_float("SteerKPStock")
-    toggle.steer_kp = [[0], [np.clip(params.get_float("SteerKP") if advanced_lateral_tuning and is_torque_car and tuning_level >= level["SteerKP"] else stock_steer_kp, stock_steer_kp * 0.5, stock_steer_kp * 1.5)]]
+    toggle.steer_kp = [[0], [np.clip(params.get_float("SteerKP") if advanced_lateral_tuning and is_torque_car and tuning_level >= level["SteerKP"] else stock_steer_kp, stock_steer_kp * 0.25, stock_steer_kp * 1.5)]]
     stock_steer_lat_accel_factor = params.get_float("SteerLatAccelStock")
     toggle.steer_lat_accel_factor = np.clip(params.get_float("SteerLatAccel") if advanced_lateral_tuning and tuning_level >= level["SteerLatAccel"] else stock_steer_lat_accel_factor, stock_steer_lat_accel_factor * 0.5, stock_steer_lat_accel_factor * 1.5)
     toggle.use_custom_lat_accel_factor = toggle.steer_lat_accel_factor != stock_steer_lat_accel_factor and is_torque_car and not toggle.force_auto_tune or toggle.force_auto_tune_off
