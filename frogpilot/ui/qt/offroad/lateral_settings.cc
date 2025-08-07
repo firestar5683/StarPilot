@@ -82,10 +82,10 @@ FrogPilotLateralPanel::FrogPilotLateralPanel(FrogPilotSettingsWindow *parent) : 
       lateralToggle = new FrogPilotParamValueButtonControl(param, title, desc, icon, kpStock * .25, kpStock * 1.5, QString(), std::map<float, QString>(), 0.01, false, {}, steerKPButton, false, false);
     } else if (param == "SteerLatAccel") {
       std::vector<QString> steerLatAccelButton{"Reset"};
-      lateralToggle = new FrogPilotParamValueButtonControl(param, title, desc, icon, latAccelStock * 0.5, latAccelStock * 1.5, QString(), std::map<float, QString>(), 0.001, false, {}, steerLatAccelButton, false, false);
+      lateralToggle = new FrogPilotParamValueButtonControl(param, title, desc, icon, latAccelStock * 0.5, latAccelStock * 1.5, QString(), std::map<float, QString>(), 0.01, false, {}, steerLatAccelButton, false, false);
     } else if (param == "SteerRatio") {
       std::vector<QString> steerRatioButton{"Reset"};
-      lateralToggle = new FrogPilotParamValueButtonControl(param, title, desc, icon, steerRatioStock * 0.5, steerRatioStock * 1.5, QString(), std::map<float, QString>(), 0.001, false, {}, steerRatioButton, false, false);
+      lateralToggle = new FrogPilotParamValueButtonControl(param, title, desc, icon, steerRatioStock * 0.5, steerRatioStock * 1.5, QString(), std::map<float, QString>(), 0.01, false, {}, steerRatioButton, false, false);
 
     } else if (param == "AlwaysOnLateral") {
       FrogPilotManageControl *aolToggle = new FrogPilotManageControl(param, title, desc, icon);
