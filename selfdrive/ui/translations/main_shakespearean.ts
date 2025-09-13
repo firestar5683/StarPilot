@@ -2340,6 +2340,14 @@
         <translation type="unfinished"></translation>
     </message>
     <message>
+        <source>Stop Distance</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Adjust the model's stopping distance in meters (minimum 4 for safety). Most users prefer 6.</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
         <source>Manage Model Blacklist</source>
         <translation type="unfinished"></translation>
     </message>
@@ -2469,6 +2477,14 @@
     </message>
     <message>
         <source>The "Model Randomizer" only works with downloaded models. Do you want to download all the driving models?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Are you sure you want to reset your &lt;b&gt;Stop Distance&lt;/b&gt; to the default of 6 meters?</source>
+        <translation type="unfinished"></translation>
+    </message>
+    <message>
+        <source>Reset</source>
         <translation type="unfinished"></translation>
     </message>
     <message>

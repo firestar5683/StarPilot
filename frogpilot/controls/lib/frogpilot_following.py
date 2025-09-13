@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import numpy as np
 
-from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import COMFORT_BRAKE, STOP_DISTANCE, desired_follow_distance, get_jerk_factor, get_T_FOLLOW
+from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import COMFORT_BRAKE, desired_follow_distance, get_jerk_factor, get_T_FOLLOW
 
 from openpilot.frogpilot.common.frogpilot_variables import CITY_SPEED_LIMIT
 
@@ -75,7 +75,9 @@ class FrogPilotFollowing:
     # Offset by FrogAi for FrogPilot for a more natural approach to a faster lead
     if frogpilot_toggles.human_following and v_lead > v_ego:
       distance_factor = max(lead_distance - (v_ego * self.t_follow), 1)
-      acceleration_offset = float(np.clip(STOP_DISTANCE - v_ego, 1, distance_factor))
+      from frogpilot.common.frogpilot_variables import get_frogpilot_toggles
+      fp_toggles = get_frogpilot_toggles()
+      acceleration_offset = float(np.clip(fp_toggles.stop_distance - v_ego, 1, distance_factor))
       self.acceleration_jerk /= acceleration_offset
       self.speed_jerk /= acceleration_offset
       self.t_follow /= acceleration_offset
@@ -85,6 +87,8 @@ class FrogPilotFollowing:
       distance_factor = max(lead_distance - (v_lead * self.t_follow), 1)
       braking_offset = float(np.clip(min(v_ego - v_lead, v_lead) - COMFORT_BRAKE, 1, distance_factor))
       if frogpilot_toggles.human_following:
-        far_lead_offset = max(lead_distance - (v_ego * self.t_follow) - STOP_DISTANCE, 0)
+        from frogpilot.common.frogpilot_variables import get_frogpilot_toggles
+        fp_toggles = get_frogpilot_toggles()
+        far_lead_offset = max(lead_distance - (v_ego * self.t_follow) - fp_toggles.stop_distance, 0)
         self.t_follow /= braking_offset + far_lead_offset
       self.slower_lead = braking_offset > 1
