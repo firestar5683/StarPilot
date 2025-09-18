@@ -123,7 +123,7 @@ def get_driverstate_packet(model_output: np.ndarray, frame_id: int, location_ts:
   ds = msg.driverStateV2
   ds.frameId = frame_id
   ds.modelExecutionTime = execution_time
-  ds.gpuExecutionTime = gpu_execution_time
+  ds.dspExecutionTime = gpu_execution_time
   ds.poorVisionProb = float(sigmoid(model_result.poor_vision_prob))
   ds.wheelOnRightProb = float(sigmoid(model_result.wheel_on_right_prob))
   ds.rawPredictions = model_output.tobytes() if SEND_RAW_PRED else b''
@@ -172,9 +172,6 @@ def main():
     t1 = time.perf_counter()
     model_output, gpu_execution_time = model.run(buf, calib, model_transform)
     t2 = time.perf_counter()
-
-    # run one more time, just for the load
-    model.run(buf, calib, model_transform)
 
     pm.send("driverStateV2", get_driverstate_packet(model_output, vipc_client.frame_id, vipc_client.timestamp_sof, t2 - t1, gpu_execution_time))
 
