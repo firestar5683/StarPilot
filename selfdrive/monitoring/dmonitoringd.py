@@ -1,6 +1,5 @@
 #!/usr/bin/env python3
 import gc
-
 import cereal.messaging as messaging
 from openpilot.common.params import Params
 from openpilot.common.realtime import set_realtime_priority
@@ -9,7 +8,7 @@ from openpilot.selfdrive.monitoring.helpers import DriverMonitoring
 
 def dmonitoringd_thread():
   gc.disable()
-  set_realtime_priority(2)
+  set_realtime_priority(5)
 
   params = Params()
   pm = messaging.PubMaster(['driverMonitoringState'])
