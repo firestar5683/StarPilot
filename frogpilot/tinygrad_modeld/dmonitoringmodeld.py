@@ -157,10 +157,18 @@ def main():
   calib = np.zeros(CALIB_LEN, dtype=np.float32)
   model_transform = None
 
+  last_sof_ns = None
   while True:
     buf = vipc_client.recv()
     if buf is None:
       continue
+
+    # Track SOF deltas between frames (ns -> ms)
+    if last_sof_ns is not None:
+      dt_sof_ms = (vipc_client.timestamp_sof - last_sof_ns) * 1e-6
+    else:
+      dt_sof_ms = 0.0
+    last_sof_ns = vipc_client.timestamp_sof
 
     if model_transform is None:
       cam = _os_fisheye if buf.width == _os_fisheye.width else _ar_ox_fisheye
@@ -173,6 +181,13 @@ def main():
     t1 = time.perf_counter()
     model_output, gpu_execution_time = model.run(buf, calib, model_transform)
     t2 = time.perf_counter()
+
+    exec_ms = (t2 - t1) * 1e3
+    gpu_ms = gpu_execution_time * 1e3
+
+    # Log only when any step exceeds 5 ms to keep logs clean
+    if exec_ms > 5.0 or gpu_ms > 5.0:
+      cloudlog.error("DM_MODEL: exec=%.2fms gpu=%.2fms frame=%d Δsof=%.1fms", exec_ms, gpu_ms, vipc_client.frame_id, dt_sof_ms)
 
     pm.send("driverStateV2", get_driverstate_packet(model_output, vipc_client.frame_id, vipc_client.timestamp_sof, t2 - t1, gpu_execution_time))
 
