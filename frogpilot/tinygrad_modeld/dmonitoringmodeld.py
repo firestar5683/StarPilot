@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import gc
 import os
 from openpilot.system.hardware import TICI
 from tinygrad.tensor import Tensor
@@ -134,6 +135,7 @@ def get_driverstate_packet(model_output: np.ndarray, frame_id: int, location_ts:
 
 def main():
   setproctitle(PROCESS_NAME)
+  gc.disable()
   config_realtime_process(7, 5)
 
   sentry.set_tag("daemon", PROCESS_NAME)
