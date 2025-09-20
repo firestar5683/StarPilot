@@ -230,6 +230,10 @@ class CAR(Platforms):
     [GMCarDocs("Chevrolet Traverse 2023", "Driver Assist Package")],
     CarSpecs(mass=1955, wheelbase=3.07, steerRatio=17.9, centerToFrontRatio=0.4),
   )
+  CHEVROLET_MALIBU_SDGM = GMPlatformConfig(
+    [GMCarDocs("Chevrolet Malibu 2019", "SDGM Harness (Optional SASCM)")],
+    CHEVROLET_MALIBU.specs,
+  )
   BUICK_BABYENCLAVE = GMPlatformConfig(
     [GMCarDocs("Buick Baby Enclave 2020-23", "Driver Assist Package")],
     CarSpecs(mass=2050, wheelbase=2.86, steerRatio=16.0, centerToFrontRatio=0.5),
@@ -340,7 +344,7 @@ CC_ONLY_CAR = {CAR.CHEVROLET_VOLT_CC, CAR.CHEVROLET_BOLT_CC, CAR.CHEVROLET_EQUIN
 # CC_ONLY_CAR = set(c for c in CAR if str(c).endswith('_CC'))
 
 # We're integrated at the Safety Data Gateway Module on these cars
-SDGM_CAR = {CAR.CADILLAC_XT4, CAR.CADILLAC_XT6, CAR.CHEVROLET_TRAVERSE, CAR.BUICK_BABYENCLAVE, CAR.CHEVROLET_VOLT_2019}
+SDGM_CAR = {CAR.CADILLAC_XT4, CAR.CADILLAC_XT6, CAR.CHEVROLET_TRAVERSE, CAR.CHEVROLET_MALIBU_SDGM, CAR.BUICK_BABYENCLAVE, CAR.CHEVROLET_VOLT_2019}
 
 ASCM_INT = {CAR.CHEVROLET_VOLT_ASCM, CAR.GMC_ACADIA_ASCM}
 
