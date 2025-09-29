@@ -9,7 +9,7 @@ from openpilot.common.conversions import Conversions as CV
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.controls.lib.drive_helpers import V_CRUISE_MAX
-from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import A_CHANGE_COST, DANGER_ZONE_COST, J_EGO_COST, STOP_DISTANCE
+from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import A_CHANGE_COST, DANGER_ZONE_COST, J_EGO_COST
 
 from openpilot.frogpilot.common.frogpilot_utilities import calculate_lane_width, calculate_road_curvature
 from openpilot.frogpilot.common.frogpilot_variables import CRUISING_SPEED, MINIMUM_LATERAL_ACCELERATION, PLANNER_TIME, THRESHOLD, params, params_memory
@@ -115,7 +115,9 @@ class FrogPilotPlanner:
 
   def update_lead_status(self):
     following_lead = self.lead_one.status
-    following_lead &= self.lead_one.dRel < self.model_length + STOP_DISTANCE
+    from frogpilot.common.frogpilot_variables import get_frogpilot_toggles
+    fp_toggles = get_frogpilot_toggles()
+    following_lead &= self.lead_one.dRel < self.model_length + fp_toggles.stop_distance
 
     self.tracking_lead_filter.update(following_lead)
     return self.tracking_lead_filter.x >= THRESHOLD

@@ -92,6 +92,16 @@ def manager_init() -> None:
   params.put_bool("IsTestedBranch", build_metadata.tested_channel)
   params.put_bool("IsReleaseBranch", build_metadata.release_channel)
 
+  # One-time migration for HumanAcceleration and HumanFollowing to off
+  migration_flag_file = "/data/media/0/frogpilot_human_toggles_migrated.flag"
+  if not os.path.exists(migration_flag_file):
+    if params.get_bool("HumanAcceleration"):
+      params.put_bool("HumanAcceleration", False)
+    if params.get_bool("HumanFollowing"):
+      params.put_bool("HumanFollowing", False)
+    with open(migration_flag_file, "w") as f:
+      f.write("migrated")
+
   # set dongle id
   reg_res = register(show_spinner=True)
   if reg_res:

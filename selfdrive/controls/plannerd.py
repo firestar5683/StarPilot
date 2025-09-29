@@ -37,13 +37,11 @@ def plannerd_thread():
   # FrogPilot variables
   frogpilot_toggles = get_frogpilot_toggles()
 
-  classic_longitudinal = frogpilot_toggles.classic_longitudinal
-
   while True:
     sm.update()
     if sm.updated['modelV2']:
-      longitudinal_planner.update(sm, classic_longitudinal, frogpilot_toggles)
-      longitudinal_planner.publish(sm, pm)
+      longitudinal_planner.update(False, sm, frogpilot_toggles)
+      longitudinal_planner.publish(False, False, sm, pm, frogpilot_toggles)
       publish_ui_plan(sm, pm, longitudinal_planner)
 
     # Update FrogPilot variables

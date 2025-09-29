@@ -5,7 +5,7 @@ from openpilot.common.numpy_fast import mean
 from opendbc.can.can_define import CANDefine
 from opendbc.can.parser import CANParser
 from openpilot.selfdrive.car.interfaces import CarStateBase
-from openpilot.selfdrive.car.gm.values import DBC, AccState, CanBus, STEER_THRESHOLD, GMFlags, CC_ONLY_CAR, CAMERA_ACC_CAR, SDGM_CAR
+from openpilot.selfdrive.car.gm.values import DBC, AccState, CanBus, STEER_THRESHOLD, GMFlags, CC_ONLY_CAR, CAMERA_ACC_CAR, SDGM_CAR, CC_REGEN_PADDLE_CAR
 
 TransmissionType = car.CarParams.TransmissionType
 NetworkLocation = car.CarParams.NetworkLocation
@@ -56,6 +56,13 @@ class CarState(CarStateBase):
     self.loopback_lka_steering_cmd_updated = len(loopback_cp.vl_all["ASCMLKASteeringCmd"]["RollingCounter"]) > 0
     if self.loopback_lka_steering_cmd_updated:
       self.loopback_lka_steering_cmd_ts_nanos = loopback_cp.ts_nanos["ASCMLKASteeringCmd"]["RollingCounter"]
+
+    # Track timestamps for OEM PRNDL2 and Regen Paddle messages (used to sync spoofing timing)
+    self.prndl2_ts_nanos = pt_cp.ts_nanos["ECMPRDNL2"]["PRNDL2"]
+    if self.CP.carFingerprint in CC_REGEN_PADDLE_CAR:
+      self.regen_paddle_ts_nanos = pt_cp.ts_nanos["EBCMRegenPaddle"]["RegenPaddle"]
+    else:
+      self.regen_paddle_ts_nanos = 0
     if self.CP.networkLocation == NetworkLocation.fwdCamera and not self.CP.flags & GMFlags.NO_CAMERA.value:
       self.pt_lka_steering_cmd_counter = pt_cp.vl["ASCMLKASteeringCmd"]["RollingCounter"]
       self.cam_lka_steering_cmd_counter = cam_cp.vl["ASCMLKASteeringCmd"]["RollingCounter"]
@@ -71,10 +78,7 @@ class CarState(CarStateBase):
     # sample rear wheel speeds, standstill=True if ECM allows engagement with brake
     ret.standstill = ret.wheelSpeeds.rl <= STANDSTILL_THRESHOLD and ret.wheelSpeeds.rr <= STANDSTILL_THRESHOLD
 
-    if pt_cp.vl["ECMPRDNL2"]["ManualMode"] == 1:
-      ret.gearShifter = self.parse_gear_shifter("T")
-    else:
-      ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(pt_cp.vl["ECMPRDNL2"]["PRNDL2"], None))
+    ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(pt_cp.vl["ECMPRDNL2"]["PRNDL2"], None))
 
     if self.CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG.value:
       ret.brake = pt_cp.vl["EBCMBrakePedalPosition"]["BrakePedalPosition"] / 0xd0
@@ -96,7 +100,7 @@ class CarState(CarStateBase):
 
     if self.CP.enableGasInterceptor:
       ret.gas = (pt_cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS"] + pt_cp.vl["GAS_SENSOR"]["INTERCEPTOR_GAS2"]) / 2.
-      threshold = 10 if self.CP.carFingerprint in CAMERA_ACC_CAR else 4 # Panda 515 threshold = 10.88. Set lower to avoid panda blocking messages and GasInterceptor faulting.
+      threshold = 23 if self.CP.carFingerprint in CAMERA_ACC_CAR else 4 # Panda 595 threshold = 23.65. Set lower to avoid panda blocking messages and GasInterceptor faulting.
       ret.gasPressed = ret.gas > threshold
     else:
       ret.gas = pt_cp.vl["AcceleratorPedal2"]["AcceleratorPedal2"] / 254.
@@ -169,7 +173,7 @@ class CarState(CarStateBase):
         ret.leftBlindspot = cam_cp.vl["BCMBlindSpotMonitor"]["LeftBSM"] == 1
         ret.rightBlindspot = cam_cp.vl["BCMBlindSpotMonitor"]["RightBSM"] == 1
 
-    # FrogPilot CarState functions
+
     self.lkas_previously_enabled = self.lkas_enabled
     if self.CP.carFingerprint in SDGM_CAR:
       self.lkas_enabled = cam_cp.vl["ASCMSteeringButton"]["LKAButton"]
@@ -230,7 +234,7 @@ class CarState(CarStateBase):
       ]
     else:
       messages += [
-        ("ECMPRDNL2", 10),
+        ("ECMPRDNL2", 40),
         ("AcceleratorPedal2", 33),
         ("ECMEngineStatus", 100),
         ("BCMTurnSignals", 1),
@@ -252,7 +256,7 @@ class CarState(CarStateBase):
 
     if CP.transmissionType == TransmissionType.direct:
       messages += [
-        ("EBCMRegenPaddle", 50),
+        ("EBCMRegenPaddle", 40),
         ("EVDriveMode", 0),
       ]
 
