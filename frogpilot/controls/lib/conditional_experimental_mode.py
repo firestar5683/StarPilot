@@ -19,8 +19,8 @@ class ConditionalExperimentalMode:
   # HIGHWAY LIGHT DETECTION MULTIPLIERS
   # How much to increase model stop time at highway speeds
   LIGHT_BOOSTS = [1.0, 1.2, 1.1, 1.0]         # Keep conservative boost for highest speeds
-  LIGHT_SPEED_LOW = 22.2     # 50 mph threshold
-  LIGHT_SPEED_HIGH = 26.7    # 60 mph threshold
+  LIGHT_SPEED_LOW = 50 * CV.MPH_TO_MS     # 50 mph threshold
+  LIGHT_SPEED_HIGH = 60 * CV.MPH_TO_MS    # 60 mph threshold
   LIGHT_MAX_TIME = 9       # Balanced max time preserving city performance
 
   # ===== END TUNING PARAMETERS =====
