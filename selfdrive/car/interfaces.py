@@ -52,6 +52,7 @@ GEAR_SHIFTER_MAP: dict[str, car.CarState.GearShifter] = {
   'D': GearShifter.drive, 'DRIVE': GearShifter.drive,
   'S': GearShifter.sport, 'SPORT': GearShifter.sport,
   'L': GearShifter.low, 'LOW': GearShifter.low,
+  'L2': GearShifter.low, 'L3': GearShifter.low,
   'B': GearShifter.brake, 'BRAKE': GearShifter.brake,
 }
 
@@ -302,7 +303,7 @@ class CarInterfaceBase(ABC):
     tune.init('torque')
     tune.torque.useSteeringAngle = use_steering_angle
     tune.torque.kf = 1.0
-    tune.torque.kp = 1.0
+    tune.torque.kp = 0.6
     tune.torque.ki = 0.3
     tune.torque.friction = params['FRICTION']
     tune.torque.latAccelFactor = params['LAT_ACCEL_FACTOR']

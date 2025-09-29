@@ -150,7 +150,7 @@ def frogpilot_boot_functions(build_metadata, params_cache):
     params_cache.clear_all()
 
   FrogPilotVariables().update(holiday_theme="stock", started=False)
-  ModelManager(boot_run=True)
+  ModelManager()
   ThemeManager(boot_run=True).update_active_theme(time_validated=system_time_valid(), frogpilot_toggles=get_frogpilot_toggles(), boot_run=True)
 
   if VIDEO_CACHE_PATH.exists():

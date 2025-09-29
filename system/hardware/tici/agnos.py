@@ -168,17 +168,23 @@ def extract_compressed_image(target_slot_number: int, partition: dict, cloudlog)
         last_p = p
         print(f"Installing {partition['name']}: {p}", flush=True)
 
-    if raw_hash.hexdigest().lower() != partition['hash_raw'].lower():
-      raise Exception(f"Raw hash mismatch '{raw_hash.hexdigest().lower()}'")
+    written_size = out.tell()
+    expected_size = partition['size']
+    actual_raw_hash = raw_hash.hexdigest().lower()
+    expected_raw_hash = partition['hash_raw'].lower()
+    actual_final_hash = downloader.sha256.hexdigest().lower()
+    expected_final_hash = partition['hash'].lower()
 
-    if downloader.sha256.hexdigest().lower() != partition['hash'].lower():
-      raise Exception("Uncompressed hash mismatch")
+    if actual_raw_hash != expected_raw_hash:
+      raise Exception(f"Raw hash mismatch: got {actual_raw_hash}, expected {expected_raw_hash}")
 
-    if out.tell() != partition['size']:
-      raise Exception("Uncompressed size mismatch")
+    if actual_final_hash != expected_final_hash:
+      raise Exception(f"Uncompressed hash mismatch: got {actual_final_hash}, expected {expected_final_hash}")
+
+    if written_size != expected_size:
+      raise Exception(f"Uncompressed size mismatch: wrote {written_size} bytes, expected {expected_size} bytes")
 
     os.sync()
-
 
 def extract_casync_image(target_slot_number: int, partition: dict, cloudlog):
   path = get_partition_path(target_slot_number, partition)

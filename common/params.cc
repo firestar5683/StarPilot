@@ -240,6 +240,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"AutomaticallyDownloadModels", PERSISTENT},
     {"AutomaticUpdates", PERSISTENT},
     {"AvailableModelNames", PERSISTENT},
+    {"AvailableModelSeries", PERSISTENT},
     {"AvailableModels", PERSISTENT},
     {"BigMap", PERSISTENT},
     {"BlacklistedModels", PERSISTENT},
@@ -398,6 +399,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"MinimumBackupSize", PERSISTENT},
     {"MinimumLaneChangeSpeed", PERSISTENT},
     {"Model", PERSISTENT},
+    {"ModelVersion", PERSISTENT},
     {"ModelDownloadProgress", CLEAR_ON_MANAGER_START},
     {"ModelDrivesAndScores", PERSISTENT},
     {"ModelRandomizer", PERSISTENT},
@@ -576,6 +578,7 @@ std::unordered_map<std::string, uint32_t> keys = {
     {"WarningSoftVolume", PERSISTENT},
     {"WheelIcon", PERSISTENT},
     {"WheelSpeed", PERSISTENT},
+    {"StopDistance", PERSISTENT},
     {"WheelToDownload", CLEAR_ON_MANAGER_START},
 };
 

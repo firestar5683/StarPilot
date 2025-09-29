@@ -148,16 +148,17 @@ class TestGmSafetyBase(common.PandaCarSafetyTest, common.DriverTorqueSteeringSaf
 
 
 class TestGmAscmSafety(GmLongitudinalBase, TestGmSafetyBase):
-  TX_MSGS = [[0x180, 0], [0x409, 0], [0x40A, 0], [0x2CB, 0], [0x370, 0],  # pt bus
+  TX_MSGS = [[0x180, 0], [0x409, 0], [0x40A, 0], [0x2CB, 0], [0x370, 0], [0x1F5, 0],  # pt bus
              [0xA1, 1], [0x306, 1], [0x308, 1], [0x310, 1],  # obs bus
              [0x315, 2]]  # ch bus
   FWD_BLACKLISTED_ADDRS: dict[int, list[int]] = {}
   FWD_BUS_LOOKUP: dict[int, int] = {}
   BRAKE_BUS = 2
 
-  MAX_GAS = 3072
-  MIN_GAS = 1404 # maximum regen
-  INACTIVE_GAS = 1404
+  MAX_GAS = 7168
+  MIN_GAS = 5500 # maximum regen
+  INACTIVE_GAS = 5500
+  MAX_POSSIBLE_GAS = 8192
 
   def setUp(self):
     self.packer = CANPackerPanda("gm_global_a_powertrain_generated")
@@ -165,6 +166,22 @@ class TestGmAscmSafety(GmLongitudinalBase, TestGmSafetyBase):
     self.safety = libpanda_py.libpanda
     self.safety.set_safety_hooks(Panda.SAFETY_GM, 0)
     self.safety.init_tests()
+
+  def test_regen_paddle(self):
+    # Regen paddle should only be allowed when controls are allowed and regen is applied
+    regen_values = {"RegenPaddle": 16}  # Set bit 4 for regen apply
+    regen_msg = self.packer.make_can_msg_panda("EBCMRegenPaddle", 0, regen_values)
+
+    prndl_values = {"PRNDL2": 7, "ManualMode": 1}  # Transmission message
+    prndl_msg = self.packer.make_can_msg_panda("ECMPRDNL2", 0, prndl_values)
+
+    self.safety.set_controls_allowed(0)
+    self.assertTrue(self._tx(regen_msg))
+    self.assertFalse(self._tx(prndl_msg))
+
+    self.safety.set_controls_allowed(1)
+    self.assertTrue(self._tx(regen_msg))
+    self.assertTrue(self._tx(prndl_msg))
 
 
 class TestGmCameraSafetyBase(TestGmSafetyBase):
@@ -184,7 +201,7 @@ class TestGmCameraSafetyBase(TestGmSafetyBase):
 
 
 class TestGmCameraSafety(TestGmCameraSafetyBase):
-  TX_MSGS = [[0x180, 0],  # pt bus
+  TX_MSGS = [[0x180, 0], [0x1F5, 0],  # pt bus
              [0x184, 2]]  # camera bus
   FWD_BLACKLISTED_ADDRS = {2: [0x180], 0: [0x184]}  # block LKAS message and PSCMStatus
   BUTTONS_BUS = 2  # tx only
@@ -203,6 +220,7 @@ class TestGmCameraSafety(TestGmCameraSafetyBase):
       self.assertFalse(self._tx(self._button_msg(btn)))
 
     self.safety.set_controls_allowed(1)
+    self._rx(self._pcm_status_msg(False))
     for btn in range(8):
       self.assertFalse(self._tx(self._button_msg(btn)))
 
@@ -211,15 +229,17 @@ class TestGmCameraSafety(TestGmCameraSafetyBase):
       self.assertEqual(enabled, self._tx(self._button_msg(Buttons.CANCEL)))
 
 
+
 class TestGmCameraLongitudinalSafety(GmLongitudinalBase, TestGmCameraSafetyBase):
-  TX_MSGS = [[0x180, 0], [0x315, 0], [0x2CB, 0], [0x370, 0],  # pt bus
+  TX_MSGS = [[0x180, 0], [0x315, 0], [0x2CB, 0], [0x370, 0], [0x1F5, 0],  # pt bus
              [0x184, 2]]  # camera bus
   FWD_BLACKLISTED_ADDRS = {2: [0x180, 0x2CB, 0x370, 0x315], 0: [0x184]}  # block LKAS, ACC messages and PSCMStatus
   BUTTONS_BUS = 0  # rx only
 
-  MAX_GAS = 3400
-  MIN_GAS = 1514 # maximum regen
-  INACTIVE_GAS = 1554
+  MAX_GAS = 7496
+  MIN_GAS = 5610 # maximum regen
+  INACTIVE_GAS = 5650
+  MAX_POSSIBLE_GAS = 8192
 
   def setUp(self):
     self.packer = CANPackerPanda("gm_global_a_powertrain_generated")
@@ -228,10 +248,26 @@ class TestGmCameraLongitudinalSafety(GmLongitudinalBase, TestGmCameraSafetyBase)
     self.safety.set_safety_hooks(Panda.SAFETY_GM, Panda.FLAG_GM_HW_CAM | Panda.FLAG_GM_HW_CAM_LONG)
     self.safety.init_tests()
 
+  def test_regen_paddle(self):
+    # Regen paddle should only be allowed when controls are allowed and regen is applied
+    regen_values = {"RegenPaddle": 16}  # Set bit 4 for regen apply
+    regen_msg = self.packer.make_can_msg_panda("EBCMRegenPaddle", 0, regen_values)
+
+    prndl_values = {"PRNDL2": 7, "ManualMode": 1}  # Transmission message
+    prndl_msg = self.packer.make_can_msg_panda("ECMPRDNL2", 0, prndl_values)
+
+    self.safety.set_controls_allowed(0)
+    self.assertTrue(self._tx(regen_msg))
+    self.assertFalse(self._tx(prndl_msg))
+
+    self.safety.set_controls_allowed(1)
+    self.assertTrue(self._tx(regen_msg))
+    self.assertTrue(self._tx(prndl_msg))
+
 class TestGmSdgmSafety(TestGmSafetyBase):
   FWD_BUS_LOOKUP = {0: 2, 2: 0}
-  TX_MSGS = [[0x180, 0], [0x1E1, 0],  # pt bus
-             [0x184, 2]]  # obj bus
+  TX_MSGS = [[0x180, 0], [0x1E1, 0], [0x1F5, 0],  # pt bus
+              [0x184, 2]]  # obj bus
   FWD_BLACKLISTED_ADDRS = {2: [0x180], 0: [0x184]}  # block LKAS message and PSCMStatus
   BUTTONS_BUS = 0  # tx
 
@@ -272,7 +308,7 @@ def interceptor_msg(gas, addr):
 
 
 class TestGmInterceptorSafety(common.GasInterceptorSafetyTest, TestGmCameraSafety):
-  INTERCEPTOR_THRESHOLD = 515
+  INTERCEPTOR_THRESHOLD = 595
 
   def setUp(self):
     self.packer = CANPackerPanda("gm_global_a_powertrain_generated")
@@ -313,16 +349,20 @@ class TestGmInterceptorSafety(common.GasInterceptorSafetyTest, TestGmCameraSafet
     # Only CANCEL button is allowed while cruise is enabled
     self.safety.set_controls_allowed(0)
     for btn in range(8):
-      self.assertFalse(self._tx(self._button_msg(btn)))
+      expected = (btn == Buttons.CANCEL)
+      self.assertEqual(expected, self._tx(self._button_msg(btn)))
 
     self.safety.set_controls_allowed(1)
     for btn in range(8):
-      self.assertFalse(self._tx(self._button_msg(btn)))
+      # For GM interceptor with CAM hardware, CANCEL is always allowed
+      expected = (btn == Buttons.CANCEL)
+      self.assertEqual(expected, self._tx(self._button_msg(btn)))
 
     self.safety.set_controls_allowed(1)
     for enabled in (True, False):
       self._rx(self._pcm_status_msg(enabled))
-      self.assertEqual(enabled, self._tx(self._button_msg(Buttons.CANCEL)))
+      # For GM CAM with gas interceptor, CANCEL is always allowed
+      self.assertTrue(self._tx(self._button_msg(Buttons.CANCEL)))
       self.assertTrue(self.safety.get_controls_allowed())
 
   def test_fwd_hook(self):
@@ -346,7 +386,7 @@ class TestGmInterceptorSafety(common.GasInterceptorSafetyTest, TestGmCameraSafet
 
 
 class TestGmCcLongitudinalSafety(TestGmCameraSafety):
-  TX_MSGS = [[384, 0], [481, 0], [388, 2]]
+  TX_MSGS = [[384, 0], [481, 0], [0x1F5, 0], [388, 2]]
   FWD_BLACKLISTED_ADDRS = {2: [384], 0: [388]}  # block LKAS message and PSCMStatus
   BUTTONS_BUS = 0  # tx only
 
@@ -382,6 +422,13 @@ class TestGmCcLongitudinalSafety(TestGmCameraSafety):
       for btn in (Buttons.RES_ACCEL, Buttons.DECEL_SET, Buttons.CANCEL):
         self._rx(self._pcm_status_msg(enabled))
         self.assertEqual(enabled, self._tx(self._button_msg(btn)))
+
+
+  # FrogPilot tests
+  def _toggle_aol(self, toggle_on):
+    # ECMEngineStatus, bit 29 is CruiseMainOn
+    values = {"CruiseMainOn": 1 if toggle_on else 0}
+    return self.packer.make_can_msg_panda("ECMEngineStatus", 0, values)
 
 
 if __name__ == "__main__":

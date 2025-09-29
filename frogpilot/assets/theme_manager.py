@@ -96,7 +96,7 @@ class ThemeManager:
   def download_theme(self, theme_component, theme_name, asset_param, frogpilot_toggles):
     self.downloading_theme = True
 
-    repo_url = get_repository_url(self.session)
+    repo_url = get_repository_url()
     if not repo_url:
       handle_error(None, "GitHub and GitLab are offline...", "Repository unavailable", asset_param, DOWNLOAD_PROGRESS_PARAM)
       self.downloading_theme = False
@@ -252,7 +252,7 @@ class ThemeManager:
 
     except requests.exceptions.RequestException as error:
       print(f"Request failed: {error}")
-      handle_request_error(f"Failed to fetch theme sizes from {'GitHub' if is_github else 'GitLab'}: {error}", None, None, None)
+      handle_request_error(f"Failed to fetch theme sizes from {'GitHub' if is_github else 'GitLab'}: {error}", None, None, None, None)
       return {}
 
   @staticmethod
@@ -563,7 +563,7 @@ class ThemeManager:
     if self.downloading_theme:
       return
 
-    repo_url = get_repository_url(self.session)
+    repo_url = get_repository_url()
     if repo_url is None:
       print("GitHub and GitLab are offline...")
       return

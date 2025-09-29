@@ -17,7 +17,7 @@ from openpilot.frogpilot.common.frogpilot_variables import MAPD_PATH, RESOURCES_
 VERSION = "v2"
 
 GITHUB_VERSION_URL = f"https://github.com/{RESOURCES_REPO}/raw/Versions/mapd_version_{VERSION}.json"
-GITLAB_VERSION_URL = f"https://gitlab.com/{RESOURCES_REPO}/-/raw/Versions/mapd_version_{VERSION}.json"
+GITLAB_VERSION_URL = f"https://gitlab.com/firestar5683/FrogPilot-Resources/-/raw/Versions/mapd_version_{VERSION}.json"
 
 VERSION_PATH = Path("/data/media/0/osm/mapd_version")
 

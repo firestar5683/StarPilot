@@ -225,7 +225,7 @@ def get_speed_error(modelV2: log.ModelDataV2, v_ego: float) -> float:
   return 0.0
 
 
-def get_accel_from_plan(speeds, accels, t_idxs, action_t=DT_MDL, vEgoStopping=0.05):
+def get_accel_from_plan_tomb_raider(speeds, accels, t_idxs, action_t=DT_MDL, vEgoStopping=0.05):
   if len(speeds) == len(t_idxs):
     v_now = speeds[0]
     a_now = accels[0]

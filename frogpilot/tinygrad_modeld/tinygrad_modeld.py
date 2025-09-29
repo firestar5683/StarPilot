@@ -2,10 +2,6 @@
 import os
 from openpilot.system.hardware import TICI
 os.environ['DEV'] = 'QCOM' if TICI else 'LLVM'
-USBGPU = "USBGPU" in os.environ
-if USBGPU:
-  os.environ['DEV'] = 'AMD'
-  os.environ['AMD_IFACE'] = 'USB'
 from tinygrad.tensor import Tensor
 from tinygrad.dtype import dtypes
 import time
@@ -14,6 +10,7 @@ import numpy as np
 import cereal.messaging as messaging
 from cereal import car, log
 from pathlib import Path
+from setproctitle import setproctitle
 from cereal.messaging import PubMaster, SubMaster
 from msgq.visionipc import VisionIpcClient, VisionStreamType, VisionBuf
 from openpilot.common.swaglog import cloudlog
@@ -22,25 +19,21 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import config_realtime_process, DT_MDL
 from openpilot.common.transformations.camera import DEVICE_CAMERAS
 from openpilot.common.transformations.model import get_warp_matrix
+from openpilot.system import sentry
 from openpilot.selfdrive.car.car_helpers import get_demo_car_params
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
-from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, smooth_value, get_curvature_from_plan
+from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan_tomb_raider, smooth_value
 from openpilot.frogpilot.tinygrad_modeld.parse_model_outputs import Parser
-from openpilot.frogpilot.tinygrad_modeld.fill_model_msg import fill_model_msg, fill_pose_msg, PublishState
+from openpilot.frogpilot.tinygrad_modeld.fill_model_msg import fill_model_msg, fill_pose_msg, PublishState, get_curvature_from_output
 from openpilot.frogpilot.tinygrad_modeld.constants import ModelConstants, Plan
 from openpilot.frogpilot.tinygrad_modeld.models.commonmodel_pyx import DrivingModelFrame, CLContext
 from openpilot.frogpilot.tinygrad_modeld.runners.tinygrad_helpers import qcom_tensor_from_opencl_address
-
-from openpilot.frogpilot.common.frogpilot_variables import MODELS_PATH, get_frogpilot_toggles
+from openpilot.frogpilot.common.frogpilot_variables import get_frogpilot_toggles, MODELS_PATH
 
 
 PROCESS_NAME = "frogpilot.tinygrad_modeld.tinygrad_modeld"
 SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
 
-VISION_PKL_PATH = Path(__file__).parent / 'models/driving_vision_tinygrad.pkl'
-POLICY_PKL_PATH = Path(__file__).parent / 'models/driving_policy_tinygrad.pkl'
-VISION_METADATA_PATH = Path(__file__).parent / 'models/driving_vision_metadata.pkl'
-POLICY_METADATA_PATH = Path(__file__).parent / 'models/driving_policy_metadata.pkl'
 
 LAT_SMOOTH_SECONDS = 0.1
 LONG_SMOOTH_SECONDS = 0.3
@@ -48,23 +41,22 @@ MIN_LAT_CONTROL_SPEED = 0.3
 
 
 def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action,
-                          lat_action_t: float, long_action_t: float, v_ego: float, use_curvature_from_plan: bool) -> log.ModelDataV2.Action:
+                          lat_action_t: float, long_action_t: float, v_ego: float, mlsim: bool, is_v9: bool) -> log.ModelDataV2.Action:
     plan = model_output['plan'][0]
-    desired_accel, should_stop = get_accel_from_plan(plan[:,Plan.VELOCITY][:,0],
-                                                     plan[:,Plan.ACCELERATION][:,0],
-                                                     ModelConstants.T_IDXS,
-                                                     action_t=long_action_t)
+    desired_accel, should_stop = get_accel_from_plan_tomb_raider(plan[:,Plan.VELOCITY][:,0],
+                                                                 plan[:,Plan.ACCELERATION][:,0],
+                                                                 ModelConstants.T_IDXS,
+                                                                 action_t=long_action_t)
     desired_accel = smooth_value(desired_accel, prev_action.desiredAcceleration, LONG_SMOOTH_SECONDS)
 
-    if use_curvature_from_plan:
-      desired_curvature = get_curvature_from_plan(plan[:,Plan.T_FROM_CURRENT_EULER][:,2],
-                                                  plan[:,Plan.ORIENTATION_RATE][:,2],
-                                                  ModelConstants.T_IDXS,
-                                                  v_ego,
-                                                  lat_action_t)
+    if is_v9:
+      # V9: use desired_curvature if present; otherwise do NOT fall back to plan
+      if 'desired_curvature' in model_output:
+        desired_curvature = float(model_output['desired_curvature'][0, 0])
+      else:
+        desired_curvature = prev_action.desiredCurvature
     else:
-      desired_curvature = model_output['desired_curvature'][0, 0]
-
+      desired_curvature = get_curvature_from_output(model_output, v_ego, lat_action_t, mlsim=mlsim)
     if v_ego > MIN_LAT_CONTROL_SPEED:
       desired_curvature = smooth_value(desired_curvature, prev_action.desiredCurvature, LAT_SMOOTH_SECONDS)
     else:
@@ -83,112 +75,137 @@ class FrameMeta:
     if vipc is not None:
       self.frame_id, self.timestamp_sof, self.timestamp_eof = vipc.frame_id, vipc.timestamp_sof, vipc.timestamp_eof
 
-class InputQueues:
-  def __init__ (self, model_fps, env_fps, n_frames_input):
-    assert env_fps % model_fps == 0
-    assert env_fps >= model_fps
-    self.model_fps = model_fps
-    self.env_fps = env_fps
-    self.n_frames_input = n_frames_input
-
-    self.dtypes = {}
-    self.shapes = {}
-    self.q = {}
-
-  def update_dtypes_and_shapes(self, input_dtypes, input_shapes) -> None:
-    self.dtypes.update(input_dtypes)
-    if self.env_fps == self.model_fps:
-      self.shapes.update(input_shapes)
-    else:
-      for k in input_shapes:
-        shape = list(input_shapes[k])
-        if 'img' in k:
-          n_channels = shape[1] // self.n_frames_input
-          shape[1] = (self.env_fps // self.model_fps + (self.n_frames_input - 1)) * n_channels
-        else:
-          shape[1] = (self.env_fps // self.model_fps) * shape[1]
-        self.shapes[k] = tuple(shape)
-
-  def reset(self) -> None:
-    self.q = {k: np.zeros(self.shapes[k], dtype=self.dtypes[k]) for k in self.dtypes.keys()}
-
-  def enqueue(self, inputs:dict[str, np.ndarray]) -> None:
-    for k in inputs.keys():
-      if inputs[k].dtype != self.dtypes[k]:
-        raise ValueError(f'supplied input <{k}({inputs[k].dtype})> has wrong dtype, expected {self.dtypes[k]}')
-      input_shape = list(self.shapes[k])
-      input_shape[1] = -1
-      single_input = inputs[k].reshape(tuple(input_shape))
-      sz = single_input.shape[1]
-      self.q[k][:,:-sz] = self.q[k][:,sz:]
-      self.q[k][:,-sz:] = single_input
-
-  def get(self, *names) -> dict[str, np.ndarray]:
-    if self.env_fps == self.model_fps:
-      return {k: self.q[k] for k in names}
-    else:
-      out = {}
-      for k in names:
-        shape = self.shapes[k]
-        if 'img' in k:
-          n_channels = shape[1] // (self.env_fps // self.model_fps + (self.n_frames_input - 1))
-          out[k] = np.concatenate([self.q[k][:, s:s+n_channels] for s in np.linspace(0, shape[1] - n_channels, self.n_frames_input, dtype=int)], axis=1)
-        elif 'pulse' in k:
-          # any pulse within interval counts
-          out[k] = self.q[k].reshape((shape[0], shape[1] * self.model_fps // self.env_fps, self.env_fps // self.model_fps, -1)).max(axis=2)
-        else:
-          idxs = np.arange(-1, -shape[1], -self.env_fps // self.model_fps)[::-1]
-          out[k] = self.q[k][:, idxs]
-      return out
-
 class ModelState:
   frames: dict[str, DrivingModelFrame]
   inputs: dict[str, np.ndarray]
   output: np.ndarray
   prev_desire: np.ndarray  # for tracking the rising edge of the pulse
 
-  def __init__(self, context: CLContext, model: str):
-    with open(MODELS_PATH / f'{model}_driving_vision_metadata.pkl', 'rb') as f:
-      vision_metadata = pickle.load(f)
-      self.vision_input_shapes =  vision_metadata['input_shapes']
-      self.vision_input_names = list(self.vision_input_shapes.keys())
-      self.vision_output_slices = vision_metadata['output_slices']
-      vision_output_size = vision_metadata['output_shapes']['outputs'][1]
+  def __init__(self, context: CLContext):
+    # Dynamically build paths based on current model ID
+    params = Params()
+    model_id = params.get("Model", encoding="utf-8")
 
-    with open(MODELS_PATH / f'{model}_driving_policy_metadata.pkl', 'rb') as f:
-      policy_metadata = pickle.load(f)
-      self.policy_input_shapes =  policy_metadata['input_shapes']
-      self.policy_output_slices = policy_metadata['output_slices']
-      policy_output_size = policy_metadata['output_shapes']['outputs'][1]
+    # Try to get ModelVersion, but handle case where parameter doesn't exist
+    model_version = None
+    try:
+      model_version = params.get("ModelVersion", encoding="utf-8")
+    except Exception as e:
+      cloudlog.warning(f"ModelVersion parameter not available: {e}")
 
-    self.desire_type = 'desire_pulse' if 'desire_pulse' in self.policy_input_shapes else 'desire'
-    self.use_lateral_control_params = 'lateral_control_params' in self.policy_input_shapes
+    model_dir = MODELS_PATH
+    VISION_PKL_PATH = model_dir / f"{model_id}_driving_vision_tinygrad.pkl"
+    POLICY_PKL_PATH = model_dir / f"{model_id}_driving_policy_tinygrad.pkl"
+    VISION_METADATA_PATH = model_dir / f"{model_id}_driving_vision_metadata.pkl"
+    POLICY_METADATA_PATH = model_dir / f"{model_id}_driving_policy_metadata.pkl"
 
-    self.frames = {name: DrivingModelFrame(context, ModelConstants.MODEL_RUN_FREQ//ModelConstants.MODEL_CONTEXT_FREQ) for name in self.vision_input_names}
+    # If ModelVersion is not set or not available, try to determine it from available model data
+    if not model_version:
+      cloudlog.warning(f"ModelVersion not available for model {model_id}, attempting to determine from model data")
+      try:
+        # Try to get version from the model versions JSON file
+        versions_file = model_dir / ".model_versions.json"
+        if versions_file.is_file():
+          import json
+          with open(versions_file, "r") as f:
+            version_map = json.load(f)
+          if model_id in version_map:
+            model_version = version_map[model_id]
+            cloudlog.warning(f"Determined model version from JSON: {model_version}")
+        else:
+          cloudlog.error("Model versions JSON file not found, defaulting to v8")
+          model_version = "v8"
+      except Exception as e:
+        cloudlog.error(f"Failed to determine model version: {e}, defaulting to v8")
+        model_version = "v8"
+
+    try:
+      with open(VISION_METADATA_PATH, 'rb') as f:
+        vision_metadata = pickle.load(f)
+    except FileNotFoundError:
+      cloudlog.error(f"Missing metadata {VISION_METADATA_PATH}, downloading...")
+      from openpilot.frogpilot.assets.model_manager import ModelManager
+      ModelManager().download_model(model_id)
+      with open(VISION_METADATA_PATH, 'rb') as f:
+        vision_metadata = pickle.load(f)
+    self.vision_input_shapes =  vision_metadata['input_shapes']
+    self.vision_input_names = list(self.vision_input_shapes.keys())
+    self.vision_output_slices = vision_metadata['output_slices']
+    vision_output_size = vision_metadata['output_shapes']['outputs'][1]
+
+    try:
+      with open(POLICY_METADATA_PATH, 'rb') as f:
+        policy_metadata = pickle.load(f)
+    except FileNotFoundError:
+      cloudlog.error(f"Missing metadata {POLICY_METADATA_PATH}, downloading...")
+      from openpilot.frogpilot.assets.model_manager import ModelManager
+      ModelManager().download_model(model_id)
+      with open(POLICY_METADATA_PATH, 'rb') as f:
+        policy_metadata = pickle.load(f)
+    self.policy_input_shapes =  policy_metadata['input_shapes']
+    self.policy_output_slices = policy_metadata['output_slices']
+    policy_output_size = policy_metadata['output_shapes']['outputs'][1]
+    # Add policy_generation attribute after loading policy_metadata
+    self.policy_generation = model_version or "v8"
+    self.is_v11 = (self.policy_generation == "v11")
+    self.is_v9 = (self.policy_generation == "v9")
+    self.mlsim = (self.policy_generation in ("v8", "v10", "v11"))
+
+    self.frames = {name: DrivingModelFrame(context, ModelConstants.TEMPORAL_SKIP) for name in self.vision_input_names}
     self.prev_desire = np.zeros(ModelConstants.DESIRE_LEN, dtype=np.float32)
 
-    self.full_prev_desired_curv = np.zeros((1, ModelConstants.FULL_HISTORY_BUFFER_LEN, ModelConstants.PREV_DESIRED_CURV_LEN), dtype=np.float32)
-    self.temporal_idxs = slice(-1-(ModelConstants.TEMPORAL_SKIP*(ModelConstants.FULL_HISTORY_BUFFER_LEN-1)), None, ModelConstants.TEMPORAL_SKIP)
+    self.full_features_buffer = np.zeros((1, ModelConstants.FULL_HISTORY_BUFFER_LEN,  ModelConstants.FEATURE_LEN), dtype=np.float32)
+    self.full_desire = np.zeros((1, ModelConstants.FULL_HISTORY_BUFFER_LEN, ModelConstants.DESIRE_LEN), dtype=np.float32)
+    self.temporal_idxs = slice(-1-(ModelConstants.TEMPORAL_SKIP*(ModelConstants.INPUT_HISTORY_BUFFER_LEN-1)), None, ModelConstants.TEMPORAL_SKIP)
 
-    # policy inputs
-    self.numpy_inputs = {k: np.zeros(self.policy_input_shapes[k], dtype=np.float32) for k in self.policy_input_shapes}
-    self.full_input_queues = InputQueues(ModelConstants.MODEL_CONTEXT_FREQ, ModelConstants.MODEL_RUN_FREQ, ModelConstants.N_FRAMES)
-    for k in [self.desire_type, 'features_buffer']:
-      self.full_input_queues.update_dtypes_and_shapes({k: self.numpy_inputs[k].dtype}, {k: self.numpy_inputs[k].shape})
-    self.full_input_queues.reset()
+
+    # policy inputs (built dynamically to support all generations)
+    self.numpy_inputs = {}
+
+    # Always-supported inputs (if model expects them)
+    desire_key_init = next((k for k in self.policy_input_shapes if k.startswith('desire')), None)
+    if desire_key_init:
+      self.numpy_inputs[desire_key_init] = np.zeros((1, ModelConstants.INPUT_HISTORY_BUFFER_LEN, ModelConstants.DESIRE_LEN), dtype=np.float32)
+    if 'traffic_convention' in self.policy_input_shapes:
+      self.numpy_inputs['traffic_convention'] = np.zeros((1, ModelConstants.TRAFFIC_CONVENTION_LEN), dtype=np.float32)
+    if 'features_buffer' in self.policy_input_shapes:
+      self.numpy_inputs['features_buffer'] = np.zeros((1, ModelConstants.INPUT_HISTORY_BUFFER_LEN,  ModelConstants.FEATURE_LEN), dtype=np.float32)
+
+    # Optional inputs for non-v11 (and some v10/v9 variants)
+    # Lateral control params
+    if 'lateral_control_params' in self.policy_input_shapes:
+      self.numpy_inputs['lateral_control_params'] = np.zeros((1, ModelConstants.LATERAL_CONTROL_PARAMS_LEN), dtype=np.float32)
+
+    # Previous desired curvature: handle both singular and plural key names across model versions
+    self.prev_desired_curv_key = None
+    if 'prev_desired_curv' in self.policy_input_shapes:
+      self.prev_desired_curv_key = 'prev_desired_curv'
+      self.numpy_inputs['prev_desired_curv'] = np.zeros((1, ModelConstants.INPUT_HISTORY_BUFFER_LEN, ModelConstants.PREV_DESIRED_CURV_LEN), dtype=np.float32)
+    elif 'prev_desired_curvs' in self.policy_input_shapes:
+      self.prev_desired_curv_key = 'prev_desired_curvs'
+      self.numpy_inputs['prev_desired_curvs'] = np.zeros((1, ModelConstants.INPUT_HISTORY_BUFFER_LEN, ModelConstants.PREV_DESIRED_CURV_LEN), dtype=np.float32)
+
+    # Optional temporal buffer for previous desired curvature (allocate only if the policy expects it)
+    if getattr(self, 'prev_desired_curv_key', None) is not None:
+      self.full_prev_desired_curv = np.zeros((1, ModelConstants.FULL_HISTORY_BUFFER_LEN, ModelConstants.PREV_DESIRED_CURV_LEN), dtype=np.float32)
+
 
     # img buffers are managed in openCL transform code
     self.vision_inputs: dict[str, Tensor] = {}
     self.vision_output = np.zeros(vision_output_size, dtype=np.float32)
     self.policy_inputs = {k: Tensor(v, device='NPY').realize() for k,v in self.numpy_inputs.items()}
     self.policy_output = np.zeros(policy_output_size, dtype=np.float32)
-    self.parser = Parser(ignore_missing=True)
+    self.parser = Parser()
 
-    with open(MODELS_PATH / f'{model}_driving_vision_tinygrad.pkl', "rb") as f:
+    with open(VISION_PKL_PATH, "rb") as f:
       self.vision_run = pickle.load(f)
 
-    with open(MODELS_PATH / f'{model}_driving_policy_tinygrad.pkl', "rb") as f:
+    with open(POLICY_PKL_PATH, "rb") as f:
       self.policy_run = pickle.load(f)
+
+  @property
+  def desire_key(self) -> str:
+    return next(key for key in self.numpy_inputs if key.startswith('desire'))
 
   def slice_outputs(self, model_outputs: np.ndarray, output_slices: dict[str, slice]) -> dict[str, np.ndarray]:
     parsed_model_outputs = {k: model_outputs[np.newaxis, v] for k,v in output_slices.items()}
@@ -197,15 +214,24 @@ class ModelState:
   def run(self, bufs: dict[str, VisionBuf], transforms: dict[str, np.ndarray],
                 inputs: dict[str, np.ndarray], prepare_only: bool) -> dict[str, np.ndarray] | None:
     # Model decides when action is completed, so desire input is just a pulse triggered on rising edge
-    inputs[self.desire_type][0] = 0
-    new_desire = np.where(inputs[self.desire_type] - self.prev_desire > .99, inputs[self.desire_type], 0)
-    self.prev_desire[:] = inputs[self.desire_type]
+    inputs[self.desire_key][0] = 0
+    new_desire = np.where(inputs[self.desire_key] - self.prev_desire > .99, inputs[self.desire_key], 0)
+    self.prev_desire[:] = inputs[self.desire_key]
 
-    if self.use_lateral_control_params:
+    self.full_desire[0,:-1] = self.full_desire[0,1:]
+    self.full_desire[0,-1] = new_desire
+    self.numpy_inputs[self.desire_key][:] = self.full_desire.reshape((1,ModelConstants.INPUT_HISTORY_BUFFER_LEN,ModelConstants.TEMPORAL_SKIP,-1)).max(axis=2)
+
+    self.numpy_inputs['traffic_convention'][:] = inputs['traffic_convention']
+    if 'lateral_control_params' in self.numpy_inputs:
       self.numpy_inputs['lateral_control_params'][:] = inputs['lateral_control_params']
+
+    if prepare_only:
+      return None
+
     imgs_cl = {name: self.frames[name].prepare(bufs[name], transforms[name].flatten()) for name in self.vision_input_names}
 
-    if TICI and not USBGPU:
+    if TICI:
       # The imgs tensors are backed by opencl memory, only need init once
       for key in imgs_cl:
         if key not in self.vision_inputs:
@@ -215,25 +241,27 @@ class ModelState:
         frame_input = self.frames[key].buffer_from_cl(imgs_cl[key]).reshape(self.vision_input_shapes[key])
         self.vision_inputs[key] = Tensor(frame_input, dtype=dtypes.uint8).realize()
 
-    if prepare_only:
-      return None
-
     self.vision_output = self.vision_run(**self.vision_inputs).contiguous().realize().uop.base.buffer.numpy()
     vision_outputs_dict = self.parser.parse_vision_outputs(self.slice_outputs(self.vision_output, self.vision_output_slices))
 
-    self.full_input_queues.enqueue({'features_buffer': vision_outputs_dict['hidden_state'], self.desire_type: new_desire})
-    for k in [self.desire_type, 'features_buffer']:
-      self.numpy_inputs[k][:] = self.full_input_queues.get(k)[k]
-    self.numpy_inputs['traffic_convention'][:] = inputs['traffic_convention']
+    self.full_features_buffer[0,:-1] = self.full_features_buffer[0,1:]
+    self.full_features_buffer[0,-1] = vision_outputs_dict['hidden_state'][0, :]
+    self.numpy_inputs['features_buffer'][:] = self.full_features_buffer[0, self.temporal_idxs]
 
     self.policy_output = self.policy_run(**self.policy_inputs).contiguous().realize().uop.base.buffer.numpy()
     policy_outputs_dict = self.parser.parse_policy_outputs(self.slice_outputs(self.policy_output, self.policy_output_slices))
 
-    if self.use_lateral_control_params:
-      # TODO model only uses last value now
+    # TODO model only uses last value now
+    if hasattr(self, 'full_prev_desired_curv') and 'desired_curvature' in policy_outputs_dict:
       self.full_prev_desired_curv[0,:-1] = self.full_prev_desired_curv[0,1:]
       self.full_prev_desired_curv[0,-1,:] = policy_outputs_dict['desired_curvature'][0, :]
-      self.numpy_inputs['prev_desired_curv'][:] = 0*self.full_prev_desired_curv[0, self.temporal_idxs]
+
+      if self.prev_desired_curv_key is not None:
+        # v9 models expect zeros for prev_desired_curv(s); others use history
+        if self.is_v9:
+          self.numpy_inputs[self.prev_desired_curv_key][:] = 0 * self.full_prev_desired_curv[0, self.temporal_idxs]
+        else:
+          self.numpy_inputs[self.prev_desired_curv_key][:] = self.full_prev_desired_curv[0, self.temporal_idxs]
 
     combined_outputs_dict = {**vision_outputs_dict, **policy_outputs_dict}
     if SEND_RAW_PRED:
@@ -243,26 +271,18 @@ class ModelState:
 
 
 def main(demo=False):
-  # FrogPilot variables
-  frogpilot_toggles = get_frogpilot_toggles()
+  cloudlog.warning("modeld init")
 
-  model_name = frogpilot_toggles.model
-  model_version = frogpilot_toggles.model_version
-  use_curvature_from_plan = frogpilot_toggles.model_version != "v7"
+  sentry.set_tag("daemon", PROCESS_NAME)
+  cloudlog.bind(daemon=PROCESS_NAME)
+  setproctitle(PROCESS_NAME)
+  config_realtime_process(7, 54)
 
-  cloudlog.warning("tinygrad_modeld init")
-
-  if not USBGPU:
-    # USB GPU currently saturates a core so can't do this yet,
-    # also need to move the aux USB interrupts for good timings
-    config_realtime_process(7, 54)
-
-  st = time.monotonic()
   cloudlog.warning("setting up CL context")
   cl_context = CLContext()
   cloudlog.warning("CL context ready; loading model")
-  model = ModelState(cl_context, model_name)
-  cloudlog.warning(f"models loaded in {time.monotonic() - st:.1f}s, tinygrad_modeld starting")
+  model = ModelState(cl_context)
+  cloudlog.warning("models loaded, modeld starting")
 
   # visionipc clients
   while True:
@@ -295,7 +315,7 @@ def main(demo=False):
   params = Params()
 
   # setup filter to track dropped frames
-  frame_dropped_filter = FirstOrderFilter(0., 10., 1. / ModelConstants.MODEL_RUN_FREQ)
+  frame_dropped_filter = FirstOrderFilter(0., 10., 1. / ModelConstants.MODEL_FREQ)
   frame_id = 0
   last_vipc_frame_id = 0
   run_count = 0
@@ -321,6 +341,9 @@ def main(demo=False):
   prev_action = log.ModelDataV2.Action()
 
   DH = DesireHelper()
+
+  # FrogPilot variables
+  frogpilot_toggles = get_frogpilot_toggles()
 
   while True:
     # Keep receiving frames until we are at least 1 frame ahead of previous extra frame
@@ -391,11 +414,14 @@ def main(demo=False):
 
     bufs = {name: buf_extra if 'big' in name else buf_main for name in model.vision_input_names}
     transforms = {name: model_transform_extra if 'big' in name else model_transform_main for name in model.vision_input_names}
+
     inputs:dict[str, np.ndarray] = {
-      model.desire_type: vec_desire,
+      model.desire_key: vec_desire,
       'traffic_convention': traffic_convention,
-      **({'lateral_control_params': lateral_control_params} if model.use_lateral_control_params else {}),
     }
+    # Include optional inputs only if the loaded model expects them
+    if 'lateral_control_params' in model.numpy_inputs:
+      inputs['lateral_control_params'] = lateral_control_params
 
     mt1 = time.perf_counter()
     model_output = model.run(bufs, transforms, inputs, prepare_only)
@@ -408,7 +434,7 @@ def main(demo=False):
       drivingdata_send = messaging.new_message('drivingModelData')
       posenet_send = messaging.new_message('cameraOdometry')
 
-      action = get_action_from_model(model_output, prev_action, lat_delay + DT_MDL, long_delay + DT_MDL, v_ego, use_curvature_from_plan)
+      action = get_action_from_model(model_output, prev_action, lat_delay + DT_MDL, long_delay + DT_MDL, v_ego, model.mlsim, model.is_v9)
       prev_action = action
       fill_model_msg(drivingdata_send, modelv2_send, model_output, action,
                      publish_state, meta_main.frame_id, meta_extra.frame_id, frame_id,
@@ -432,7 +458,7 @@ def main(demo=False):
       pm.send('cameraOdometry', posenet_send)
     last_vipc_frame_id = meta_main.frame_id
 
-    # Update FrogPilot variables
+    # Update FrogPilot parameters
     if sm['frogpilotPlan'].togglesUpdated:
       frogpilot_toggles = get_frogpilot_toggles()
 
@@ -444,4 +470,7 @@ if __name__ == "__main__":
     args = parser.parse_args()
     main(demo=args.demo)
   except KeyboardInterrupt:
-    cloudlog.warning("got SIGINT")
+    cloudlog.warning(f"child {PROCESS_NAME} got SIGINT")
+  except Exception:
+    sentry.capture_exception()
+    raise

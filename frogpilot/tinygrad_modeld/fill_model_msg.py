@@ -3,10 +3,25 @@ import capnp
 import numpy as np
 from cereal import log
 from openpilot.frogpilot.tinygrad_modeld.constants import ModelConstants, Plan, Meta
+from openpilot.selfdrive.controls.lib.drive_helpers import get_curvature_from_plan
 
 SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
 
 ConfidenceClass = log.ModelDataV2.ConfidenceClass
+
+# Return curvature for lateral action. If the model outputs desired_curvature and we're not in mlsim mode,
+# use it directly; otherwise derive from the plan using yaw and yaw-rate.
+def get_curvature_from_output(output: dict, v_ego: float, lat_action_t: float, mlsim: bool) -> float:
+  if not mlsim:
+    desired = output.get('desired_curvature')
+    if desired is not None:
+      return float(desired[0, 0])
+
+  plan_out = output['plan'][0]
+  # Use yaw (index 2) and yaw_rate (index 2)
+  theta = plan_out[:, Plan.T_FROM_CURRENT_EULER][:, 2]
+  theta_dot = plan_out[:, Plan.ORIENTATION_RATE][:, 2]
+  return float(get_curvature_from_plan(theta, theta_dot, ModelConstants.T_IDXS, v_ego, lat_action_t))
 
 
 class PublishState:
@@ -82,15 +97,32 @@ def fill_model_msg(base_msg: capnp._DynamicStructBuilder, extended_msg: capnp._D
   modelV2.timestampEof = timestamp_eof
   modelV2.modelExecutionTime = model_execution_time
 
+  # normalize plan tensors to (IDX_N, WIDTH)
+  plan_arr = net_output_data['plan'][0]
+  plan_stds_arr = net_output_data['plan_stds'][0]
+
   # plan
-  fill_xyzt(modelV2.position, ModelConstants.T_IDXS, *net_output_data['plan'][0,:,Plan.POSITION].T, *net_output_data['plan_stds'][0,:,Plan.POSITION].T)
-  fill_xyzt(modelV2.velocity, ModelConstants.T_IDXS, *net_output_data['plan'][0,:,Plan.VELOCITY].T)
-  fill_xyzt(modelV2.acceleration, ModelConstants.T_IDXS, *net_output_data['plan'][0,:,Plan.ACCELERATION].T)
-  fill_xyzt(modelV2.orientation, ModelConstants.T_IDXS, *net_output_data['plan'][0,:,Plan.T_FROM_CURRENT_EULER].T)
-  fill_xyzt(modelV2.orientationRate, ModelConstants.T_IDXS, *net_output_data['plan'][0,:,Plan.ORIENTATION_RATE].T)
+  fill_xyzt(modelV2.position, ModelConstants.T_IDXS, *plan_arr[:,Plan.POSITION].T, *plan_stds_arr[:,Plan.POSITION].T)
+  fill_xyzt(modelV2.velocity, ModelConstants.T_IDXS, *plan_arr[:,Plan.VELOCITY].T)
+  fill_xyzt(modelV2.acceleration, ModelConstants.T_IDXS, *plan_arr[:,Plan.ACCELERATION].T)
+  fill_xyzt(modelV2.orientation, ModelConstants.T_IDXS, *plan_arr[:,Plan.T_FROM_CURRENT_EULER].T)
+  fill_xyzt(modelV2.orientationRate, ModelConstants.T_IDXS, *plan_arr[:,Plan.ORIENTATION_RATE].T)
+
+  # temporal pose
+  temporal_pose = modelV2.temporalPose
+  if 'sim_pose' in net_output_data:
+    temporal_pose.trans = net_output_data['sim_pose'][0,:ModelConstants.POSE_WIDTH//2].tolist()
+    temporal_pose.transStd = net_output_data['sim_pose_stds'][0,:ModelConstants.POSE_WIDTH//2].tolist()
+    temporal_pose.rot = net_output_data['sim_pose'][0,ModelConstants.POSE_WIDTH//2:].tolist()
+    temporal_pose.rotStd = net_output_data['sim_pose_stds'][0,ModelConstants.POSE_WIDTH//2:].tolist()
+  else:
+    temporal_pose.trans = plan_arr[0,Plan.VELOCITY].tolist()
+    temporal_pose.transStd = plan_stds_arr[0,Plan.VELOCITY].tolist()
+    temporal_pose.rot = plan_arr[0,Plan.ORIENTATION_RATE].tolist()
+    temporal_pose.rotStd = plan_stds_arr[0,Plan.ORIENTATION_RATE].tolist()
 
   # poly path
-  fill_xyz_poly(driving_model_data.path, ModelConstants.POLY_PATH_DEGREE, *net_output_data['plan'][0,:,Plan.POSITION].T)
+  fill_xyz_poly(driving_model_data.path, ModelConstants.POLY_PATH_DEGREE, *plan_arr[:,Plan.POSITION].T)
 
   # action
   modelV2.action = action
