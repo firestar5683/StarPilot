@@ -1,4 +1,4 @@
-import numpy as np
+from numpy import sign
 from numbers import Number
 
 from openpilot.common.numpy_fast import clip, interp
@@ -70,7 +70,7 @@ class PIDController:
     self.d = error_rate * self.k_d
 
     if override:
-      self.i -= self.i_unwind_rate * float(np.sign(self.i))
+      self.i -= self.i_unwind_rate * float(sign(self.i))
     else:
       if not freeze_integrator:
         self.i = self.i + error * self.k_i * self.i_rate
