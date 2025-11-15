@@ -114,33 +114,38 @@ FrogPilotModelPanel::FrogPilotModelPanel(FrogPilotSettingsWindow *parent) : Frog
 
             cancellingDownload = true;
         } else {
-          QStringList downloadableModels = availableModelNames;
-          for (const QString &modelKey : modelFileToNameMap.keys()) {
-            QString modelName = modelFileToNameMap.value(modelKey);
-            if (isModelInstalled(modelKey)) {
-              downloadableModels.removeAll(modelName);
+          QMap<QString, QStringList> downloadableSeriesToModels;
+          QStringList downloadableModelNames;
+
+          for (auto it = modelFileToNameMap.constBegin(); it != modelFileToNameMap.constEnd(); ++it) {
+            const QString &modelKey = it.key();
+            const QString &modelName = it.value();
+            if (modelName.isEmpty() || isModelInstalled(modelKey)) {
+              continue;
+            }
+
+            QString series = modelSeriesMap.value(modelKey, tr("Custom Series"));
+            downloadableSeriesToModels[series].append(modelName);
+            if (!downloadableModelNames.contains(modelName)) {
+              downloadableModelNames.append(modelName);
             }
           }
-            downloadableModels.removeAll("Space Lab 👀📡");
-            allModelsDownloaded = downloadableModels.isEmpty();
 
-            // Group downloadable models by series
-            QMap<QString, QStringList> downloadableSeriesToModels;
-            for (const QString &modelName : downloadableModels) {
-              QString modelKey = modelFileToNameMap.key(modelName);
-              QString series = modelSeriesMap.value(modelKey, "Custom Series");
-              downloadableSeriesToModels[series].append(modelName);
-            }
+          allModelsDownloaded = downloadableModelNames.isEmpty();
+          if (allModelsDownloaded) {
+            return;
+          }
 
-            // Sort models within each series
-            for (QString &series : downloadableSeriesToModels.keys()) {
-              downloadableSeriesToModels[series].sort();
-            }
+          for (QString &series : downloadableSeriesToModels.keys()) {
+            QStringList &models = downloadableSeriesToModels[series];
+            models.removeDuplicates();
+            std::sort(models.begin(), models.end());
+          }
 
-            QString modelToDownload = ExpandableMultiOptionDialog::getSelection(tr("Select a driving model to download"), downloadableSeriesToModels, "", this);
-            if (!modelToDownload.isEmpty()) {
-              QString modelKey = modelFileToNameMap.key(modelToDownload);
-              params_memory.put("ModelToDownload", modelKey.toStdString());
+          QString modelToDownload = ExpandableMultiOptionDialog::getSelection(tr("Select a driving model to download"), downloadableSeriesToModels, "", this);
+          if (!modelToDownload.isEmpty()) {
+            QString modelKey = modelFileToNameMap.key(modelToDownload);
+            params_memory.put("ModelToDownload", modelKey.toStdString());
               // Also persist the version for this downloaded model if known
               {
                 QFile vf("/data/models/.model_versions.json");
@@ -303,14 +308,6 @@ FrogPilotModelPanel::FrogPilotModelPanel(FrogPilotSettingsWindow *parent) : Frog
 
           QString series = modelSeriesMap.value(modelKey, "Custom Series");
           seriesToModels[series].append(modelName);
-        }
-
-        // Add Space Lab to Custom Series
-        QString spaceLabName = modelFileToNameMap.value("space-lab");
-        if (!spaceLabName.isEmpty() && isModelInstalled("space-lab")) {
-          installedModelFileToNameMap.insert("space-lab", spaceLabName);
-          installedReleasedDates.insert("space-lab", modelReleasedDates.value("space-lab"));
-          seriesToModels["Custom Series"].append(spaceLabName);
         }
 
         // Sort models alphabetically within each series
@@ -520,28 +517,43 @@ void FrogPilotModelPanel::showEvent(QShowEvent *event) {
   modelFileToNameMapProcessed.clear();
   modelSeriesMap.clear();
   modelReleasedDates.clear();
-  int size = qMin(qMin(qMin(availableModels.size(), availableModelNames.size()), availableModelSeries.size()), releasedDatesParam.size());
+  int size = qMin(availableModels.size(), availableModelNames.size());
   for (int i = 0; i < size; ++i) {
-    modelFileToNameMap.insert(availableModels[i], availableModelNames[i]);
-    modelFileToNameMapProcessed.insert(availableModels[i], processModelName(availableModelNames[i]));
-    modelSeriesMap.insert(availableModels[i], availableModelSeries[i]);
-    if (i < releasedDatesParam.size()) {
-      this->modelReleasedDates.insert(availableModels[i], releasedDatesParam[i]);
+    const QString modelKey = availableModels[i].trimmed();
+    const QString modelName = availableModelNames[i].trimmed();
+    if (modelKey.isEmpty() || modelName.isEmpty()) {
+      continue;
     }
-  }
-  modelFileToNameMap.insert("space-lab", "Space Lab 👀📡");
-  modelFileToNameMapProcessed.insert("space-lab", "Space Lab");
-  modelSeriesMap.insert("space-lab", "Dom Forgot To Label Me");
-  this->modelReleasedDates.insert("space-lab", "2023-01-01");
 
-  QStringList downloadableModels = availableModelNames;
-  for (const QString &modelKey : modelFileToNameMap.keys()) {
-    QString modelName = modelFileToNameMap.value(modelKey);
-    if (isModelInstalled(modelKey)) {
-      downloadableModels.removeAll(modelName);
+    QString series;
+    if (i < availableModelSeries.size()) {
+      series = availableModelSeries[i].trimmed();
+    }
+    if (series.isEmpty()) {
+      series = tr("Custom Series");
+    }
+
+    modelFileToNameMap.insert(modelKey, modelName);
+    modelFileToNameMapProcessed.insert(modelKey, processModelName(modelName));
+    modelSeriesMap.insert(modelKey, series);
+
+    if (i < releasedDatesParam.size()) {
+      const QString released = releasedDatesParam[i].trimmed();
+      if (!released.isEmpty()) {
+        this->modelReleasedDates.insert(modelKey, released);
+      }
     }
   }
-  allModelsDownloaded = downloadableModels.isEmpty();
+  allModelsDownloaded = true;
+  for (auto it = modelFileToNameMap.constBegin(); it != modelFileToNameMap.constEnd(); ++it) {
+    if (it.value().isEmpty()) {
+      continue;
+    }
+    if (!isModelInstalled(it.key())) {
+      allModelsDownloaded = false;
+      break;
+    }
+  }
 
   QStringList deletableModels;
   for (const QString &file : modelDir.entryList(QDir::Files)) {

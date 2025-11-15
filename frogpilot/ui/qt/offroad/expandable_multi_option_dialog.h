@@ -48,7 +48,7 @@ private:
   QMap<QString, QWidget*> seriesWidgets;
   QMap<QString, bool> seriesExpanded;
   QMap<QString, QPushButton*> modelButtons;
-  QMap<QString, QPushButton*> starButtons;
+  QMap<QString, QPushButton*> favoriteButtons;
 
   QStringList userFavorites;
   QStringList communityFavorites;

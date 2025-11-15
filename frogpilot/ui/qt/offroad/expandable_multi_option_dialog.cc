@@ -11,6 +11,9 @@
 #include <QSpacerItem>
 #include <QLayout>
 #include <QLayoutItem>
+#include <QGridLayout>
+#include <QPoint>
+#include <QSizePolicy>
 #include <QSet>
 #include <QVector>
 #include <QAbstractButton>
@@ -74,7 +77,7 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
       padding-left: 80px;
     }
     QPushButton.series-header:hover { background-color: #404040; }
-    QPushButton.star-button {
+    QPushButton.favorite-button {
       background-color: transparent;
       border: none;
       font-size: 60px;
@@ -83,7 +86,7 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
       min-width: 80px;
       max-width: 80px;
     }
-    QPushButton.star-button:hover { background-color: #404040; }
+    QPushButton.favorite-button:hover { background-color: #404040; }
     QComboBox {
       background-color: #4F4F4F;
       border: 2px solid transparent;
@@ -123,6 +126,8 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
 
   // Sort controls - simple cycling button
   QHBoxLayout *sortLayout = new QHBoxLayout();
+  sortLayout->setContentsMargins(0, 0, 0, 0);
+  sortLayout->setSpacing(20);
   sortLayout->addStretch(); // Push to the right
 
   QLabel *sortLabel = new QLabel(tr("Sort by:"), this);
@@ -168,12 +173,15 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
   });
 
   sortLayout->addWidget(sortButton);
-  main_layout->addLayout(sortLayout);
-  main_layout->addSpacing(15);
+
+  QWidget *sortWidget = new QWidget(container);
+  sortWidget->setLayout(sortLayout);
+  sortWidget->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Maximum);
 
   QWidget *listWidget = new QWidget(this);
   listLayout = new QVBoxLayout(listWidget);
   listLayout->setSpacing(10);
+  listLayout->setContentsMargins(0, 0, 0, 0);
 
   buttonGroup = new QButtonGroup(listWidget);
   buttonGroup->setExclusive(true);
@@ -185,10 +193,19 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
   scrollView = new ScrollView(listWidget, this);
   scrollView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
 
+  QWidget *listContainer = new QWidget(container);
+  QGridLayout *overlayLayout = new QGridLayout(listContainer);
+  overlayLayout->setContentsMargins(0, 0, 0, 0);
+  overlayLayout->setSpacing(0);
+  overlayLayout->addWidget(scrollView, 0, 0);
+  overlayLayout->setRowStretch(0, 1);
+  overlayLayout->setColumnStretch(0, 1);
+  overlayLayout->addWidget(sortWidget, 0, 0, Qt::AlignRight | Qt::AlignTop);
+
   // Create series headers and their expandable content
   rebuildModelList(seriesToModels.keys(), seriesToModels);
 
-  main_layout->addWidget(scrollView);
+  main_layout->addWidget(listContainer);
   main_layout->addSpacing(35);
 
   // Cancel + confirm buttons
@@ -224,21 +241,16 @@ void ExpandableMultiOptionDialog::toggleSeries(const QString &series, QPushButto
     seriesExpanded[series] = true;
     headerButton->setText("▼ " + seriesName);
 
-    // Auto-scroll to show expanded content
+    // Auto-scroll to place the series at the top of the viewport when expanded
     if (scrollView) {
-      QTimer::singleShot(50, [container, this]() {
-        QRect containerRect = container->geometry();
-        QScrollBar *vScrollBar = this->scrollView->verticalScrollBar();
-        if (vScrollBar) {
-          int currentValue = vScrollBar->value();
-          int containerBottom = containerRect.bottom();
-          int viewportHeight = this->scrollView->viewport()->height();
-
-          // If container extends beyond viewport, scroll to show it
-          if (containerBottom > currentValue + viewportHeight) {
-            int targetValue = containerBottom - viewportHeight + 50; // Add some padding
-            vScrollBar->setValue(targetValue);
-          }
+      QTimer::singleShot(50, [headerButton, this]() {
+        if (!scrollView) return;
+        QWidget *contents = scrollView->widget();
+        if (!contents) return;
+        if (QScrollBar *vScrollBar = scrollView->verticalScrollBar()) {
+          QPoint headerTop = headerButton->mapTo(contents, QPoint(0, 0));
+          int targetValue = qMax(headerTop.y() - 20, 0);
+          vScrollBar->setValue(targetValue);
         }
       });
     }
@@ -286,8 +298,10 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, con
 
   // Star button
   QPushButton *starButton = new QPushButton();
-  starButton->setProperty("class", "star-button");
+  starButton->setProperty("class", "favorite-button");
   starButton->setCheckable(true);
+  starButton->setCursor(Qt::PointingHandCursor);
+  starButton->setFocusPolicy(Qt::NoFocus);
 
   // Check if this model is a favorite
   bool isCommunityFav = communityFavorites.contains(modelKey);
@@ -295,13 +309,13 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, con
   bool isFavorite = isCommunityFav || isUserFav;
 
   starButton->setChecked(isFavorite);
-  starButton->setText(isFavorite ? "♥" : "♡");
+  starButton->setText(isFavorite ? QString::fromUtf16(u"\u2665") : QString::fromUtf16(u"\u2661"));
 
   QObject::connect(starButton, &QPushButton::clicked, [this, modelKey]() {
     toggleFavorite(modelKey);
   });
 
-  starButtons[modelKey] = starButton;
+  favoriteButtons[modelKey] = starButton;
   modelLayout->addWidget(starButton);
 
   // Model button
@@ -366,7 +380,7 @@ void ExpandableMultiOptionDialog::toggleFavorite(const QString &modelKey) {
 }
 
 void ExpandableMultiOptionDialog::updateSorting() {
-  const QString favoritesSeriesName = QStringLiteral("⭐ Favorites");
+  const QString favoritesSeriesName = QStringLiteral("♥ Favorites");
   QMap<QString, QStringList> newSeriesToModels;
   QStringList orderedSeries;
   QSet<QString> validSeries;
@@ -508,7 +522,7 @@ void ExpandableMultiOptionDialog::rebuildModelList(const QStringList &orderedSer
 
   seriesWidgets.clear();
   modelButtons.clear();
-  starButtons.clear();
+  favoriteButtons.clear();
 
   for (const QString &series : orderedSeries) {
     const QStringList models = newSeriesToModels.value(series);
@@ -557,7 +571,7 @@ void ExpandableMultiOptionDialog::rebuildModelList(const QStringList &orderedSer
 }
 
 void ExpandableMultiOptionDialog::refreshFavoriteIcons() {
-  for (auto it = starButtons.begin(); it != starButtons.end(); ++it) {
+  for (auto it = favoriteButtons.begin(); it != favoriteButtons.end(); ++it) {
     const QString &modelKey = it.key();
     QPushButton *button = it.value();
     if (!button) continue;
@@ -567,7 +581,7 @@ void ExpandableMultiOptionDialog::refreshFavoriteIcons() {
     bool isFavorite = isCommunityFav || isUserFav;
 
     button->setChecked(isFavorite);
-    button->setText(isFavorite ? "♥" : "♡");
+    button->setText(isFavorite ? QString::fromUtf16(u"\u2665") : QString::fromUtf16(u"\u2661"));
   }
 
   if (confirmButton && !selection.isEmpty()) {
