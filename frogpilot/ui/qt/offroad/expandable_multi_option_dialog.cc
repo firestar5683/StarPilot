@@ -565,7 +565,11 @@ void ExpandableMultiOptionDialog::rebuildModelList(const QStringList &orderedSer
   if (buttonGroupConnection)
     QObject::disconnect(buttonGroupConnection);
 
-  buttonGroupConnection = QObject::connect(buttonGroup, &QButtonGroup::buttonClicked, this, [this](QAbstractButton *button) {
+  buttonGroupConnection = QObject::connect(
+      buttonGroup,
+      static_cast<void (QButtonGroup::*)(QAbstractButton *)>(&QButtonGroup::buttonClicked),
+      this,
+      [this](QAbstractButton *button) {
     if (!button) return;
     const QString modelKey = button->property("modelKey").toString();
     if (modelKey.isEmpty()) return;
