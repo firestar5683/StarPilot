@@ -14,8 +14,6 @@
 #include "selfdrive/ui/qt/widgets/scrollview.h"
 
 class QPushButton;
-class QEvent;
-
 class ExpandableMultiOptionDialog : public DialogBase {
   Q_OBJECT
 
@@ -40,7 +38,6 @@ public:
   QStringList getUserFavorites() const;
 
 private:
-  bool eventFilter(QObject *obj, QEvent *event) override;
   void toggleSeries(const QString &series, QPushButton *headerButton);
   void toggleFavorite(const QString &modelKey);
   void updateSorting();

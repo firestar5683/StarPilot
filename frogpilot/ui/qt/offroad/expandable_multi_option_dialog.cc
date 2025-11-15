@@ -16,7 +16,6 @@
 #include <QSizePolicy>
 #include <QSet>
 #include <QVector>
-#include <QEvent>
 #include <QSignalBlocker>
 #include <QScroller>
 #include <QPointer>
@@ -234,7 +233,7 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
   scrollView = new ScrollView(listWidgetContainer, this);
   scrollView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
   if (scrollView->viewport()) {
-    scrollView->viewport()->installEventFilter(this);
+    scrollView->viewport()->setAttribute(Qt::WA_AcceptTouchEvents, true);
   }
 
   QWidget *listContainer = new QWidget(container);
@@ -336,25 +335,6 @@ QStringList ExpandableMultiOptionDialog::getUserFavorites() const {
   return filteredFavorites;
 }
 
-bool ExpandableMultiOptionDialog::eventFilter(QObject *obj, QEvent *event) {
-  if (scrollView && obj == scrollView->viewport() && event) {
-    switch (event->type()) {
-      case QEvent::MouseButtonPress:
-      case QEvent::MouseButtonRelease:
-      case QEvent::Wheel:
-      case QEvent::TouchBegin:
-      case QEvent::TouchEnd:
-      case QEvent::Gesture:
-      case QEvent::GestureOverride:
-        stopActiveScroll();
-        break;
-      default:
-        break;
-    }
-  }
-  return DialogBase::eventFilter(obj, event);
-}
-
 void ExpandableMultiOptionDialog::stopActiveScroll() {
   if (!scrollView) {
     return;
@@ -416,8 +396,8 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, con
   starButton->setChecked(isFavorite);
   starButton->setText(isFavorite ? QString::fromUtf16(u"\u2665") : QString::fromUtf16(u"\u2661"));
 
-  QObject::connect(starButton, &QPushButton::pressed, this, &ExpandableMultiOptionDialog::stopActiveScrollForInteraction);
   QObject::connect(starButton, &QPushButton::clicked, [this, effectiveKey]() {
+    stopActiveScrollForInteraction();
     toggleFavorite(effectiveKey);
   });
 
@@ -442,8 +422,8 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, con
 
   const QString resolvedSelection = modelFileToNameMap.value(effectiveKey, !modelName.isEmpty() ? modelName : displayName);
 
-  QObject::connect(modelButton, &QPushButton::pressed, this, &ExpandableMultiOptionDialog::stopActiveScrollForInteraction);
   QObject::connect(modelButton, &QPushButton::clicked, this, [this, effectiveKey, modelButton, resolvedSelection]() {
+    stopActiveScrollForInteraction();
     selectionKey = effectiveKey;
     currentSelectionKey = effectiveKey;
     selection = resolvedSelection;
