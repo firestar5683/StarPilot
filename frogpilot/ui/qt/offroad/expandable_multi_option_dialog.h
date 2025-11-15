@@ -6,6 +6,7 @@
 #include <QWidget>
 #include <QMap>
 #include <QList>
+#include <QPointer>
 #include <QComboBox>
 #include <QMenu>
 #include <QMetaObject>
@@ -55,8 +56,8 @@ private:
   QMap<QString, QStringList> baseSeriesToModels;
   QMap<QString, QWidget*> seriesWidgets;
   QMap<QString, bool> seriesExpanded;
-  QMap<QString, QPushButton*> modelButtons;
-  QMap<QString, QPushButton*> favoriteButtons;
+  QMap<QString, QList<QPushButton*>> modelButtons;
+  QMap<QString, QList<QPushButton*>> favoriteButtons;
 
   QStringList userFavorites;
   QStringList communityFavorites;
@@ -76,4 +77,5 @@ private:
   QPushButton *confirmButton = nullptr;
   QWidget *listWidgetContainer = nullptr;
   QMetaObject::Connection buttonGroupConnection;
+  QPointer<QPushButton> currentSelectionButton;
 };

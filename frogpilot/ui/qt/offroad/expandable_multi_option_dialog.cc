@@ -22,6 +22,7 @@
 #include <QSignalBlocker>
 #include <QScroller>
 #include <QPointer>
+#include <QObject>
 
 #include <algorithm>
 
@@ -372,7 +373,7 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, con
     toggleFavorite(modelKey);
   });
 
-  favoriteButtons[modelKey] = starButton;
+  favoriteButtons[modelKey].append(starButton);
   modelLayout->addWidget(starButton);
 
   // Model button
@@ -386,7 +387,10 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, con
   modelButton->setProperty("modelName", modelName);
 
   group->addButton(modelButton);
-  modelButtons[modelKey] = modelButton;
+  modelButtons[modelKey].append(modelButton);
+  if (selectionKey == modelKey && currentSelectionButton.isNull()) {
+    currentSelectionButton = modelButton;
+  }
   modelLayout->addWidget(modelButton);
 
   layout->addWidget(modelWidget);
@@ -575,6 +579,7 @@ void ExpandableMultiOptionDialog::rebuildModelList(const QStringList &orderedSer
   seriesWidgets.clear();
   modelButtons.clear();
   favoriteButtons.clear();
+  currentSelectionButton = nullptr;
 
   for (const QString &series : orderedSeries) {
     const QStringList models = newSeriesToModels.value(series);
@@ -648,6 +653,11 @@ void ExpandableMultiOptionDialog::rebuildModelList(const QStringList &orderedSer
     currentSelectionKey = modelKey;
     selection = modelFileToNameMap.value(modelKey, selection);
     currentSelection = selection;
+    if (QPushButton *pushButton = qobject_cast<QPushButton *>(button)) {
+      currentSelectionButton = pushButton;
+    } else {
+      currentSelectionButton = nullptr;
+    }
     if (confirmButton) {
       confirmButton->setEnabled(true);
     }
@@ -661,15 +671,16 @@ void ExpandableMultiOptionDialog::rebuildModelList(const QStringList &orderedSer
 void ExpandableMultiOptionDialog::refreshFavoriteIcons() {
   for (auto it = favoriteButtons.begin(); it != favoriteButtons.end(); ++it) {
     const QString &modelKey = it.key();
-    QPushButton *button = it.value();
-    if (!button) continue;
-
+    const QList<QPushButton*> &buttons = it.value();
     bool isCommunityFav = communityFavorites.contains(modelKey);
     bool isUserFav = userFavorites.contains(modelKey);
     bool isFavorite = isCommunityFav || isUserFav;
 
-    button->setChecked(isFavorite);
-    button->setText(isFavorite ? QString::fromUtf16(u"\u2665") : QString::fromUtf16(u"\u2661"));
+    for (QPushButton *button : buttons) {
+      if (!button) continue;
+      button->setChecked(isFavorite);
+      button->setText(isFavorite ? QString::fromUtf16(u"\u2665") : QString::fromUtf16(u"\u2661"));
+    }
   }
 
   if (confirmButton && !selectionKey.isEmpty()) {
@@ -694,14 +705,36 @@ void ExpandableMultiOptionDialog::updateButtonStyles() {
       "border-radius: 10px;"
       "}");
 
+  if (selectedKey.isEmpty()) {
+    currentSelectionButton = nullptr;
+  }
+
+  QPushButton *explicitButton = currentSelectionButton.data();
+  if (explicitButton && explicitButton->property("modelKey").toString() != selectedKey) {
+    explicitButton = nullptr;
+  }
+
   for (auto it = modelButtons.begin(); it != modelButtons.end(); ++it) {
     const QString &modelKey = it.key();
-    QPushButton *button = it.value();
-    if (!button) continue;
+    const QList<QPushButton*> &buttons = it.value();
+    const bool keyMatches = (!selectedKey.isEmpty() && modelKey == selectedKey);
+    bool activatedForKey = false;
 
-    const bool isSelected = (!selectedKey.isEmpty() && modelKey == selectedKey);
-    QSignalBlocker blocker(button);
-    button->setChecked(isSelected);
-    button->setStyleSheet(isSelected ? selectedStyle : QString());
+    for (QPushButton *button : buttons) {
+      if (!button) continue;
+
+      bool isActive = false;
+      if (explicitButton) {
+        isActive = (button == explicitButton);
+      } else if (keyMatches && !activatedForKey) {
+        isActive = true;
+        activatedForKey = true;
+        currentSelectionButton = button;
+      }
+
+      QSignalBlocker blocker(button);
+      button->setChecked(isActive);
+      button->setStyleSheet(isActive ? selectedStyle : QString());
+    }
   }
 }
