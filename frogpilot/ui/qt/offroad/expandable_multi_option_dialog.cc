@@ -13,6 +13,7 @@
 #include <QLayoutItem>
 #include <QGridLayout>
 #include <QPoint>
+#include <QSize>
 #include <QSizePolicy>
 #include <QSet>
 #include <QVector>
@@ -168,7 +169,22 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
     sortButton->setText(tr("Alphabetical"));
   }
 
-  QObject::connect(sortButton, &QPushButton::clicked, [this, sortButton]() {
+  QWidget *sortWidget = new QWidget(container);
+  sortWidget->setLayout(sortLayout);
+  sortWidget->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Maximum);
+  sortLayout->setSizeConstraint(QLayout::SetFixedSize);
+  sortWidget->setStyleSheet("background: transparent;");
+
+  sortLayout->addWidget(sortButton);
+
+  auto updateSortOverlayGeometry = [sortWidget, sortLayout]() {
+    if (!sortWidget) return;
+    const QSize hint = sortLayout->sizeHint();
+    sortWidget->setFixedSize(hint);
+  };
+  updateSortOverlayGeometry();
+
+  QObject::connect(sortButton, &QPushButton::clicked, [this, sortButton, updateSortOverlayGeometry]() {
     if (currentSortMode == "alphabetical") {
       currentSortMode = "date";
       sortButton->setText(tr("Date (Newest)"));
@@ -179,14 +195,9 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
       currentSortMode = "alphabetical";
       sortButton->setText(tr("Alphabetical"));
     }
+    updateSortOverlayGeometry();
     updateSorting();
   });
-
-  sortLayout->addWidget(sortButton);
-
-  QWidget *sortWidget = new QWidget(container);
-  sortWidget->setLayout(sortLayout);
-  sortWidget->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Maximum);
 
   listWidgetContainer = new QWidget(this);
   listLayout = new QVBoxLayout(listWidgetContainer);
@@ -561,6 +572,9 @@ void ExpandableMultiOptionDialog::rebuildModelList(const QStringList &orderedSer
   listLayout->addStretch(1);
 
   seriesToModels = newSeriesToModels;
+
+  listWidgetContainer->updateGeometry();
+  listWidgetContainer->adjustSize();
 
   if (buttonGroupConnection)
     QObject::disconnect(buttonGroupConnection);
