@@ -20,6 +20,8 @@ private:
   void updateModelLabels(FrogPilotListWidget *labelsList);
   void updateState(const UIState &s, const FrogPilotUIState &fs);
   void updateToggles();
+  bool isModelInstalled(const QString &key) const;
+  QMap<QString, QString> getDeletableModelDisplayNames();
 
   bool allModelsDownloaded;
   bool allModelsDownloading;
@@ -55,9 +57,11 @@ private:
 
   QMap<QString, QString> modelFileToNameMap;
   QMap<QString, QString> modelFileToNameMapProcessed;
+  QMap<QString, QString> modelReleasedDates;
   QMap<QString, QString> modelSeriesMap;
 
   QString currentModel;
+
 
   QStringList availableModelNames;
   QStringList availableModelSeries;
