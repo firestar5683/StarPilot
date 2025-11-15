@@ -19,6 +19,7 @@
 #include <QVector>
 #include <QAbstractButton>
 #include <QSignalBlocker>
+#include <QScroller>
 
 #include <algorithm>
 
@@ -499,6 +500,12 @@ void ExpandableMultiOptionDialog::updateSorting() {
 
 void ExpandableMultiOptionDialog::rebuildModelList(const QStringList &orderedSeries, const QMap<QString, QStringList> &newSeriesToModels) {
   if (!listLayout) return;
+
+  if (scrollView) {
+    if (QScroller *scroller = QScroller::scroller(scrollView->viewport())) {
+      scroller->stop();
+    }
+  }
 
   while (QLayoutItem *item = listLayout->takeAt(0)) {
     if (QWidget *w = item->widget()) {
