@@ -6,6 +6,7 @@
 #include <QJsonObject>
 #include <QDoubleSpinBox>
 #include <QPushButton>
+#include <QDialog>
 #include <algorithm>
 
 FrogPilotModelPanel::FrogPilotModelPanel(FrogPilotSettingsWindow *parent) : FrogPilotListWidget(parent), parent(parent) {
@@ -352,16 +353,17 @@ FrogPilotModelPanel::FrogPilotModelPanel(FrogPilotSettingsWindow *parent) : Frog
                                           seriesToModels, currentModel, this,
                                           userFavs, communityFavs, installedReleasedDates, installedModelFileToNameMap, savedSortMode);
 
-        if (dialog.exec()) {
+        int dialogResult = dialog.exec();
+
+        // Persist sort mode and user favorites even if no selection was made
+        QString sortMode = dialog.getCurrentSortMode();
+        QStringList newUserFavs = dialog.getUserFavorites();
+        params.put("ModelSortMode", sortMode.toStdString());
+        params.put("UserFavorites", newUserFavs.join(",").toStdString());
+
+        if (dialogResult == QDialog::Accepted) {
           QString modelToSelect = dialog.selection;
           if (!modelToSelect.isEmpty()) {
-            // Persist sort mode and user favorites
-            QString sortMode = dialog.getCurrentSortMode();
-            QStringList newUserFavs = dialog.getUserFavorites();
-
-            params.put("ModelSortMode", sortMode.toStdString());
-            params.put("UserFavorites", newUserFavs.join(",").toStdString());
-
             currentModel = modelToSelect;
 
             params.put("Model", modelFileToNameMap.key(modelToSelect).toStdString());
