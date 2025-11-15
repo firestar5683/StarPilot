@@ -1,7 +1,6 @@
 #include "frogpilot/ui/qt/offroad/expandable_multi_option_dialog.h"
 
 #include <QPushButton>
-#include <QButtonGroup>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -9,6 +8,21 @@
 #include <QTimer>
 #include <QHBoxLayout>
 #include <QSpacerItem>
+#include <QLayout>
+#include <QLayoutItem>
+#include <QGridLayout>
+#include <QPoint>
+#include <QSize>
+#include <QSizePolicy>
+#include <QSet>
+#include <QVector>
+#include <QEvent>
+#include <QSignalBlocker>
+#include <QScroller>
+#include <QPointer>
+#include <QObject>
+
+#include <algorithm>
 
 #include "selfdrive/ui/qt/widgets/scrollview.h"
 
@@ -23,6 +37,28 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
   : DialogBase(parent), seriesToModels(seriesToModels), currentSortMode(initialSortMode.isEmpty() ? QString("alphabetical") : initialSortMode),
     userFavorites(userFavorites), communityFavorites(communityFavorites), modelReleasedDates(modelReleasedDates),
     modelFileToNameMap(modelFileToNameMap), currentSelection(current) {
+
+  baseSeriesToModels = seriesToModels;
+
+  for (auto it = modelFileToNameMap.constBegin(); it != modelFileToNameMap.constEnd(); ++it) {
+    modelNameToFileMap.insert(it.value(), it.key());
+  }
+
+  currentSelectionKey = modelNameToFileMap.value(currentSelection);
+  if (!currentSelectionKey.isEmpty()) {
+    selectionKey = currentSelectionKey;
+    selection = modelFileToNameMap.value(currentSelectionKey, currentSelection);
+    currentSelection = selection;
+  } else {
+    selectionKey.clear();
+    selection.clear();
+    currentSelection.clear();
+  }
+
+  if (currentSortMode != "alphabetical" && currentSortMode != "date" &&
+      currentSortMode != "favorites" && currentSortMode != "date_oldest") {
+    currentSortMode = "alphabetical";
+  }
 
   QFrame *container = new QFrame(this);
   container->setStyleSheet(R"(
@@ -59,7 +95,7 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
       padding-left: 80px;
     }
     QPushButton.series-header:hover { background-color: #404040; }
-    QPushButton.star-button {
+    QPushButton.favorite-button {
       background-color: transparent;
       border: none;
       font-size: 60px;
@@ -68,7 +104,7 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
       min-width: 80px;
       max-width: 80px;
     }
-    QPushButton.star-button:hover { background-color: #404040; }
+    QPushButton.favorite-button:hover { background-color: #404040; }
     QComboBox {
       background-color: #4F4F4F;
       border: 2px solid transparent;
@@ -108,6 +144,8 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
 
   // Sort controls - simple cycling button
   QHBoxLayout *sortLayout = new QHBoxLayout();
+  sortLayout->setContentsMargins(0, 0, 0, 0);
+  sortLayout->setSpacing(20);
   sortLayout->addStretch(); // Push to the right
 
   QLabel *sortLabel = new QLabel(tr("Sort by:"), this);
@@ -132,78 +170,75 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
   // Set initial button text based on sort mode
   if (currentSortMode == "date") {
     sortButton->setText(tr("Date (Newest)"));
+  } else if (currentSortMode == "date_oldest") {
+    sortButton->setText(tr("Date (Oldest)"));
   } else if (currentSortMode == "favorites") {
     sortButton->setText(tr("Favorites First"));
   } else {
     sortButton->setText(tr("Alphabetical"));
   }
 
-  QObject::connect(sortButton, &QPushButton::clicked, [this, sortButton]() {
+  QWidget *sortWidget = new QWidget(container);
+  sortWidget->setLayout(sortLayout);
+  sortWidget->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Maximum);
+  sortLayout->setSizeConstraint(QLayout::SetFixedSize);
+  sortWidget->setStyleSheet("background: transparent;");
+
+  sortLayout->addWidget(sortButton);
+
+  auto updateSortOverlayGeometry = [sortWidget, sortLayout]() {
+    if (!sortWidget) return;
+    const QSize hint = sortLayout->sizeHint();
+    sortWidget->setFixedSize(hint);
+  };
+  updateSortOverlayGeometry();
+
+  QObject::connect(sortButton, &QPushButton::clicked, [this, sortButton, updateSortOverlayGeometry]() {
     if (currentSortMode == "alphabetical") {
       currentSortMode = "date";
       sortButton->setText(tr("Date (Newest)"));
     } else if (currentSortMode == "date") {
+      currentSortMode = "date_oldest";
+      sortButton->setText(tr("Date (Oldest)"));
+    } else if (currentSortMode == "date_oldest") {
       currentSortMode = "favorites";
       sortButton->setText(tr("Favorites First"));
     } else {
       currentSortMode = "alphabetical";
       sortButton->setText(tr("Alphabetical"));
     }
+    updateSortOverlayGeometry();
     updateSorting();
   });
 
-  sortLayout->addWidget(sortButton);
-  main_layout->addLayout(sortLayout);
-  main_layout->addSpacing(15);
-
-  QWidget *listWidget = new QWidget(this);
-  QVBoxLayout *listLayout = new QVBoxLayout(listWidget);
+  listWidgetContainer = new QWidget(this);
+  listLayout = new QVBoxLayout(listWidgetContainer);
   listLayout->setSpacing(10);
+  listLayout->setContentsMargins(0, 0, 0, 0);
 
-  QButtonGroup *group = new QButtonGroup(listWidget);
-  group->setExclusive(true);
+  confirmButton = new QPushButton(tr("Select"));
+  confirmButton->setObjectName("confirm_btn");
+  confirmButton->setEnabled(!selectionKey.isEmpty());
 
-  QPushButton *confirm_btn = new QPushButton(tr("Select"));
-  confirm_btn->setObjectName("confirm_btn");
-  confirm_btn->setEnabled(false);
-
-  ScrollView *scroll_view = new ScrollView(listWidget, this);
-  scroll_view->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
-
-  // Create series headers and their expandable content
-  for (const QString &series : seriesToModels.keys()) {
-    // Series header button
-    QPushButton *seriesHeader = new QPushButton("▶ " + series);
-    seriesHeader->setProperty("class", "series-header");
-    seriesHeader->setCheckable(false);
-    seriesExpanded[series] = false;
-
-    QObject::connect(seriesHeader, &QPushButton::clicked, [this, series, seriesHeader, scroll_view]() {
-      toggleSeries(series, seriesHeader, scroll_view);
-    });
-
-    listLayout->addWidget(seriesHeader);
-
-    // Container for series models (initially hidden)
-    QWidget *seriesContainer = new QWidget();
-    QVBoxLayout *seriesLayout = new QVBoxLayout(seriesContainer);
-    seriesLayout->setContentsMargins(20, 0, 0, 0);
-    seriesLayout->setSpacing(10);
-    seriesContainer->hide();
-
-    // Add models for this series
-    for (const QString &model : seriesToModels[series]) {
-      createModelButton(model, seriesLayout, group);
-    }
-
-    seriesWidgets[series] = seriesContainer;
-    listLayout->addWidget(seriesContainer);
+  scrollView = new ScrollView(listWidgetContainer, this);
+  scrollView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+  if (scrollView->viewport()) {
+    scrollView->viewport()->installEventFilter(this);
   }
 
-  // Add stretch to keep buttons spaced correctly
-  listLayout->addStretch(1);
+  QWidget *listContainer = new QWidget(container);
+  QGridLayout *overlayLayout = new QGridLayout(listContainer);
+  overlayLayout->setContentsMargins(0, 0, 0, 0);
+  overlayLayout->setSpacing(0);
+  overlayLayout->addWidget(scrollView, 0, 0);
+  overlayLayout->setRowStretch(0, 1);
+  overlayLayout->setColumnStretch(0, 1);
+  overlayLayout->addWidget(sortWidget, 0, 0, Qt::AlignRight | Qt::AlignTop);
 
-  main_layout->addWidget(scroll_view);
+  // Create series headers and their expandable content
+  rebuildModelList(seriesToModels.keys(), seriesToModels);
+
+  main_layout->addWidget(listContainer);
   main_layout->addSpacing(35);
 
   // Cancel + confirm buttons
@@ -213,9 +248,9 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
 
   QPushButton *cancel_btn = new QPushButton(tr("Cancel"));
   QObject::connect(cancel_btn, &QPushButton::clicked, this, &ConfirmationDialog::reject);
-  QObject::connect(confirm_btn, &QPushButton::clicked, this, &ConfirmationDialog::accept);
+  QObject::connect(confirmButton, &QPushButton::clicked, this, &ConfirmationDialog::accept);
   blayout->addWidget(cancel_btn);
-  blayout->addWidget(confirm_btn);
+  blayout->addWidget(confirmButton);
 
   QVBoxLayout *outer_layout = new QVBoxLayout(this);
   outer_layout->setContentsMargins(50, 50, 50, 50);
@@ -225,9 +260,13 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
   updateSorting();
 }
 
-void ExpandableMultiOptionDialog::toggleSeries(const QString &series, QPushButton *headerButton, ScrollView *scrollView) {
+void ExpandableMultiOptionDialog::toggleSeries(const QString &series, QPushButton *headerButton) {
+  if (!headerButton) return;
+
+  QWidget *container = seriesWidgets.value(series, nullptr);
+  if (!container) return;
+
   bool expanded = seriesExpanded[series];
-  QWidget *container = seriesWidgets[series];
   QString seriesName = series;
 
   if (expanded) {
@@ -239,21 +278,18 @@ void ExpandableMultiOptionDialog::toggleSeries(const QString &series, QPushButto
     seriesExpanded[series] = true;
     headerButton->setText("▼ " + seriesName);
 
-    // Auto-scroll to show expanded content
+    // Auto-scroll to place the series at the top of the viewport when expanded
     if (scrollView) {
-      QTimer::singleShot(50, [container, scrollView]() {
-        QRect containerRect = container->geometry();
-        QScrollBar *vScrollBar = scrollView->verticalScrollBar();
-        if (vScrollBar) {
-          int currentValue = vScrollBar->value();
-          int containerBottom = containerRect.bottom();
-          int viewportHeight = scrollView->viewport()->height();
-
-          // If container extends beyond viewport, scroll to show it
-          if (containerBottom > currentValue + viewportHeight) {
-            int targetValue = containerBottom - viewportHeight + 50; // Add some padding
-            vScrollBar->setValue(targetValue);
-          }
+      QPointer<QPushButton> headerPtr(headerButton);
+      QPointer<ScrollView> scrollPtr(scrollView);
+      QTimer::singleShot(50, [headerPtr, scrollPtr]() {
+        if (!scrollPtr || !headerPtr) return;
+        QWidget *contents = scrollPtr->widget();
+        if (!contents) return;
+        if (QScrollBar *vScrollBar = scrollPtr->verticalScrollBar()) {
+          QPoint headerTop = headerPtr->mapTo(contents, QPoint(0, 0));
+          int targetValue = qMax(headerTop.y() - 20, 0);
+          vScrollBar->setValue(targetValue);
         }
       });
     }
@@ -279,7 +315,46 @@ QString ExpandableMultiOptionDialog::getSelection(const QString &prompt_text,
   return "";
 }
 
-void ExpandableMultiOptionDialog::createModelButton(const QString &modelName, QVBoxLayout *layout, QButtonGroup *group) {
+QStringList ExpandableMultiOptionDialog::getUserFavorites() const {
+  QStringList filteredFavorites;
+  for (const QString &fav : userFavorites) {
+    if (modelFileToNameMap.contains(fav) && !filteredFavorites.contains(fav)) {
+      filteredFavorites.append(fav);
+    }
+  }
+  return filteredFavorites;
+}
+
+bool ExpandableMultiOptionDialog::eventFilter(QObject *obj, QEvent *event) {
+  if (scrollView && obj == scrollView->viewport() && event) {
+    switch (event->type()) {
+      case QEvent::MouseButtonPress:
+      case QEvent::MouseButtonRelease:
+      case QEvent::MouseButtonDblClick:
+      case QEvent::Wheel:
+      case QEvent::TouchBegin:
+      case QEvent::TouchEnd:
+      case QEvent::TouchUpdate:
+      case QEvent::Gesture:
+        if (QScroller *scroller = QScroller::scroller(scrollView->viewport())) {
+          if (scroller->state() == QScroller::Scrolling) {
+            scroller->stop();
+          }
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  return DialogBase::eventFilter(obj, event);
+}
+
+void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, const QString &modelName, const QString &displayName,
+                                                    QVBoxLayout *layout) {
+  if (modelKey.isEmpty()) {
+    return;
+  }
+
   QWidget *modelWidget = new QWidget();
   QHBoxLayout *modelLayout = new QHBoxLayout(modelWidget);
   modelLayout->setContentsMargins(0, 0, 0, 0);
@@ -287,156 +362,384 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelName, QV
 
   // Star button
   QPushButton *starButton = new QPushButton();
-  starButton->setProperty("class", "star-button");
+  starButton->setProperty("class", "favorite-button");
   starButton->setCheckable(true);
+  starButton->setCursor(Qt::PointingHandCursor);
+  starButton->setFocusPolicy(Qt::NoFocus);
 
   // Check if this model is a favorite
-  bool isCommunityFav = communityFavorites.contains(modelName);
-  bool isUserFav = userFavorites.contains(modelName);
+  bool isCommunityFav = communityFavorites.contains(modelKey);
+  bool isUserFav = userFavorites.contains(modelKey);
   bool isFavorite = isCommunityFav || isUserFav;
 
   starButton->setChecked(isFavorite);
-  starButton->setText(isFavorite ? "♥" : "♡");
+  starButton->setText(isFavorite ? QString::fromUtf16(u"\u2665") : QString::fromUtf16(u"\u2661"));
 
-  QObject::connect(starButton, &QPushButton::clicked, [this, modelName, starButton]() {
-    // Prevent event propagation to model button
-    toggleFavorite(modelName);
-    bool isCommunityFav = communityFavorites.contains(modelName);
-    bool isUserFav = userFavorites.contains(modelName);
-    bool isFavorite = isCommunityFav || isUserFav;
-    starButton->setText(isFavorite ? "♥" : "♡");
+  QObject::connect(starButton, &QPushButton::clicked, [this, modelKey]() {
+    toggleFavorite(modelKey);
   });
 
-  starButtons[modelName] = starButton;
+  favoriteButtons[modelKey].append(starButton);
   modelLayout->addWidget(starButton);
 
   // Model button
-  QPushButton *modelButton = new QPushButton(modelName);
+  QPushButton *modelButton = new QPushButton(displayName);
   modelButton->setCheckable(true);
-  modelButton->setChecked(modelName == currentSelection);
   modelButton->setProperty("class", "model-option");
   modelButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+  modelButton->setCursor(Qt::PointingHandCursor);
+  modelButton->setFocusPolicy(Qt::NoFocus);
+  modelButton->setProperty("modelKey", modelKey);
+  modelButton->setProperty("modelName", modelName);
 
-  QObject::connect(modelButton, &QPushButton::toggled, [=](bool checked) mutable {
-    if (checked) {
-      selection = modelName;
-      // Enable confirm button logic would go here
-      // Manually apply selected style
-      modelButton->setStyleSheet("QPushButton {"
-        "background-color: #465BEA;"
-        "border: 3px solid #FFFFFF;"
-        "color: white;"
-        "font-weight: 500;"
-        "height: 135;"
-        "padding: 0px 50px;"
-        "text-align: left;"
-        "font-size: 55px;"
-        "border-radius: 10px;"
-        "}");
-    } else {
-      if (selection == modelName) {
-        // Disable confirm button logic would go here
-      }
-      // Reset to default style
-      modelButton->setStyleSheet("");
-    }
-  });
-
-  group->addButton(modelButton);
-  modelButtons[modelName] = modelButton;
+  modelButtons[modelKey].append(modelButton);
+  if (selectionKey == modelKey && currentSelectionButton.isNull()) {
+    currentSelectionButton = modelButton;
+  }
   modelLayout->addWidget(modelButton);
+
+  QObject::connect(modelButton, &QPushButton::clicked, this, [this, modelKey, modelButton]() {
+    selectionKey = modelKey;
+    currentSelectionKey = modelKey;
+    selection = modelFileToNameMap.value(modelKey, selection);
+    currentSelection = selection;
+    currentSelectionButton = modelButton;
+    if (confirmButton) {
+      confirmButton->setEnabled(true);
+    }
+
+    updateButtonStyles();
+  });
 
   layout->addWidget(modelWidget);
 }
 
-void ExpandableMultiOptionDialog::toggleFavorite(const QString &modelName) {
+void ExpandableMultiOptionDialog::toggleFavorite(const QString &modelKey) {
   // Update local state
-  if (userFavorites.contains(modelName)) {
-    userFavorites.removeAll(modelName);
-  } else {
-    userFavorites.append(modelName);
+  if (modelKey.isEmpty()) {
+    return;
   }
 
-  // Persist to params
-  // Note: This would need access to params, which we don't have in this dialog
-  // The parent should handle persistence when the dialog is accepted
+  if (userFavorites.contains(modelKey)) {
+    userFavorites.removeAll(modelKey);
+  } else {
+    userFavorites.append(modelKey);
+  }
+
+  updateSorting();
 }
 
 void ExpandableMultiOptionDialog::updateSorting() {
-  // Rebuild the series with new sorting
+  const QString favoritesSeriesName = QStringLiteral("♥ Favorites");
   QMap<QString, QStringList> newSeriesToModels;
+  QStringList orderedSeries;
+  QSet<QString> validSeries;
+  QSet<QString> favoriteModelKeys;
+  QSet<QString> availableModelKeys;
+  displayOverrides.clear();
+
+  const bool sortByDate = (currentSortMode == "date" || currentSortMode == "date_oldest");
+  const bool sortDateNewestFirst = (currentSortMode == "date");
+
+  for (auto it = baseSeriesToModels.constBegin(); it != baseSeriesToModels.constEnd(); ++it) {
+    const QStringList &models = it.value();
+    for (const QString &modelName : models) {
+      const QString modelKey = modelNameToFileMap.value(modelName);
+      if (!modelKey.isEmpty()) {
+        availableModelKeys.insert(modelKey);
+      }
+    }
+  }
 
   if (currentSortMode == "favorites") {
-    // Create favorites section
     QStringList favoritesList;
-    QSet<QString> favoriteModelKeys;
 
-    // Add community favorites
     for (const QString &modelKey : communityFavorites) {
-      if (this->modelFileToNameMap.contains(modelKey)) {
-        QString modelName = this->modelFileToNameMap.value(modelKey);
-        if (!favoritesList.contains(modelName)) {
-          favoritesList.append(modelName);
-          favoriteModelKeys.insert(modelKey);
-        }
+      if (availableModelKeys.contains(modelKey)) {
+        const QString modelName = modelFileToNameMap.value(modelKey);
+        favoritesList.append(modelName);
+        favoriteModelKeys.insert(modelKey);
+        displayOverrides.insert(modelKey, tr("%1 (Community Fav)").arg(modelName));
       }
     }
 
-    // Add user favorites
     for (const QString &modelKey : userFavorites) {
-      if (this->modelFileToNameMap.contains(modelKey) && !favoriteModelKeys.contains(modelKey)) {
-        QString modelName = this->modelFileToNameMap.value(modelKey);
-        if (!favoritesList.contains(modelName)) {
-          favoritesList.append(modelName);
-          favoriteModelKeys.insert(modelKey);
-        }
+      if (availableModelKeys.contains(modelKey) && !favoriteModelKeys.contains(modelKey)) {
+        favoritesList.append(modelFileToNameMap.value(modelKey));
+        favoriteModelKeys.insert(modelKey);
       }
     }
 
     if (!favoritesList.isEmpty()) {
-      newSeriesToModels["⭐ Favorites"] = favoritesList;
-    }
-
-    // Add other models by series
-    for (const QString &series : seriesToModels.keys()) {
-      QStringList models = seriesToModels[series];
-      QStringList filteredModels;
-      for (const QString &model : models) {
-        if (!favoriteModelKeys.contains(this->modelFileToNameMap.key(model))) {
-          filteredModels.append(model);
-        }
-      }
-      if (!filteredModels.isEmpty()) {
-        newSeriesToModels[series] = filteredModels;
-      }
+      std::sort(favoritesList.begin(), favoritesList.end());
+      newSeriesToModels.insert(favoritesSeriesName, favoritesList);
+      orderedSeries.append(favoritesSeriesName);
+      validSeries.insert(favoritesSeriesName);
+      seriesExpanded.insert(favoritesSeriesName, true);
+    } else {
+      seriesExpanded.remove(favoritesSeriesName);
     }
   } else {
-    // Copy existing series
-    newSeriesToModels = seriesToModels;
+    seriesExpanded.remove(favoritesSeriesName);
+  }
 
-    // Sort within each series
-    for (QString &series : newSeriesToModels.keys()) {
-      if (series == "⭐ Favorites") continue; // Don't sort favorites
+  struct SeriesInfo {
+    QString name;
+    QStringList models;
+    QString newestDate;
+    QString oldestDate;
+  };
 
-      QStringList &models = newSeriesToModels[series];
-      if (currentSortMode == "date") {
-        // Sort by release date (newest first)
-        std::sort(models.begin(), models.end(), [this](const QString &a, const QString &b) {
-          QString keyA = this->modelFileToNameMap.key(a);
-          QString keyB = this->modelFileToNameMap.key(b);
-          QString dateA = this->modelReleasedDates.value(keyA, "2023-01-01");
-          QString dateB = this->modelReleasedDates.value(keyB, "2023-01-01");
-          return dateA > dateB; // Newest first
-        });
-      } else {
-        // Alphabetical sort
-        models.sort();
+  QVector<SeriesInfo> seriesInfos;
+
+  for (auto it = baseSeriesToModels.constBegin(); it != baseSeriesToModels.constEnd(); ++it) {
+    QString series = it.key();
+    QStringList models = it.value();
+
+    if (sortByDate) {
+      std::sort(models.begin(), models.end(), [this, sortDateNewestFirst](const QString &a, const QString &b) {
+        QString keyA = modelNameToFileMap.value(a);
+        QString keyB = modelNameToFileMap.value(b);
+        QString dateA = modelReleasedDates.value(keyA, QStringLiteral("1970-01-01"));
+        QString dateB = modelReleasedDates.value(keyB, QStringLiteral("1970-01-01"));
+        if (dateA == dateB) {
+          return a < b;
+        }
+        return sortDateNewestFirst ? (dateA > dateB) : (dateA < dateB);
+      });
+    } else {
+      std::sort(models.begin(), models.end());
+    }
+
+    if (currentSortMode == "favorites" && !favoriteModelKeys.isEmpty()) {
+      QStringList filteredModels;
+      for (const QString &modelName : models) {
+        QString key = modelNameToFileMap.value(modelName);
+        if (!favoriteModelKeys.contains(key)) {
+          filteredModels.append(modelName);
+        }
       }
+      models = filteredModels;
+    }
+
+    if (models.isEmpty()) {
+      continue;
+    }
+
+    QString newestDate = QStringLiteral("1970-01-01");
+    QString oldestDate = QStringLiteral("1970-01-01");
+    bool hasDate = false;
+    for (const QString &modelName : models) {
+      const QString key = modelNameToFileMap.value(modelName);
+      const QString date = modelReleasedDates.value(key, QStringLiteral("1970-01-01"));
+      if (!hasDate) {
+        newestDate = date;
+        oldestDate = date;
+        hasDate = true;
+      } else {
+        if (date > newestDate) {
+          newestDate = date;
+        }
+        if (date < oldestDate) {
+          oldestDate = date;
+        }
+      }
+    }
+
+    if (!hasDate) {
+      oldestDate = QStringLiteral("1970-01-01");
+    }
+
+    seriesInfos.push_back({series, models, newestDate, oldestDate});
+    newSeriesToModels.insert(series, models);
+  }
+
+  if (sortByDate) {
+    std::sort(seriesInfos.begin(), seriesInfos.end(), [sortDateNewestFirst](const SeriesInfo &a, const SeriesInfo &b) {
+      if (sortDateNewestFirst) {
+        if (a.newestDate == b.newestDate) {
+          return a.name < b.name;
+        }
+        return a.newestDate > b.newestDate;
+      } else {
+        if (a.oldestDate == b.oldestDate) {
+          return a.name < b.name;
+        }
+        return a.oldestDate < b.oldestDate;
+      }
+    });
+  } else {
+    std::sort(seriesInfos.begin(), seriesInfos.end(), [](const SeriesInfo &a, const SeriesInfo &b) {
+      return a.name < b.name;
+    });
+  }
+
+  for (const SeriesInfo &info : seriesInfos) {
+    orderedSeries.append(info.name);
+    validSeries.insert(info.name);
+  }
+
+  for (auto it = seriesExpanded.begin(); it != seriesExpanded.end(); ) {
+    if (!validSeries.contains(it.key())) {
+      it = seriesExpanded.erase(it);
+    } else {
+      ++it;
     }
   }
 
-  // Update the UI with new sorting
-  // This would require rebuilding the series containers
-  // For now, just update the seriesToModels for reference
+  rebuildModelList(orderedSeries, newSeriesToModels);
+  refreshFavoriteIcons();
+}
+
+void ExpandableMultiOptionDialog::rebuildModelList(const QStringList &orderedSeries, const QMap<QString, QStringList> &newSeriesToModels) {
+  if (!listLayout) return;
+
+  if (scrollView) {
+    if (QScroller *scroller = QScroller::scroller(scrollView->viewport())) {
+      scroller->stop();
+    }
+  }
+
+  while (QLayoutItem *item = listLayout->takeAt(0)) {
+    if (QWidget *w = item->widget()) {
+      delete w;
+    } else if (QLayout *layout = item->layout()) {
+      delete layout;
+    }
+    delete item;
+  }
+
+  seriesWidgets.clear();
+  modelButtons.clear();
+  favoriteButtons.clear();
+  currentSelectionButton = nullptr;
+
+  for (const QString &series : orderedSeries) {
+    const QStringList models = newSeriesToModels.value(series);
+    if (models.isEmpty()) {
+      continue;
+    }
+
+    QPushButton *seriesHeader = new QPushButton("▶ " + series);
+    seriesHeader->setProperty("class", "series-header");
+    seriesHeader->setCheckable(false);
+
+    bool expanded = seriesExpanded.value(series, false);
+    seriesExpanded.insert(series, expanded);
+
+    QObject::connect(seriesHeader, &QPushButton::clicked, [this, series, seriesHeader]() {
+      toggleSeries(series, seriesHeader);
+    });
+
+    QWidget *seriesContainer = new QWidget();
+    QVBoxLayout *seriesLayout = new QVBoxLayout(seriesContainer);
+    seriesLayout->setContentsMargins(20, 0, 0, 0);
+    seriesLayout->setSpacing(10);
+
+    for (const QString &modelName : models) {
+      QString modelKey = modelNameToFileMap.value(modelName);
+      if (modelKey.isEmpty()) {
+        continue;
+      }
+      QString displayName = displayOverrides.value(modelKey, modelName);
+      createModelButton(modelKey, modelName, displayName, seriesLayout);
+    }
+
+    if (expanded) {
+      seriesContainer->show();
+      seriesHeader->setText("▼ " + series);
+    } else {
+      seriesContainer->hide();
+      seriesHeader->setText("▶ " + series);
+    }
+
+    seriesWidgets.insert(series, seriesContainer);
+
+    listLayout->addWidget(seriesHeader);
+    listLayout->addWidget(seriesContainer);
+  }
+
+  listLayout->addStretch(1);
+
   seriesToModels = newSeriesToModels;
+
+  listWidgetContainer->updateGeometry();
+  listWidgetContainer->adjustSize();
+  if (scrollView && scrollView->widget()) {
+    scrollView->widget()->updateGeometry();
+    scrollView->widget()->adjustSize();
+  }
+
+  updateButtonStyles();
+}
+
+void ExpandableMultiOptionDialog::refreshFavoriteIcons() {
+  for (auto it = favoriteButtons.begin(); it != favoriteButtons.end(); ++it) {
+    const QString &modelKey = it.key();
+    const QList<QPushButton*> &buttons = it.value();
+    bool isCommunityFav = communityFavorites.contains(modelKey);
+    bool isUserFav = userFavorites.contains(modelKey);
+    bool isFavorite = isCommunityFav || isUserFav;
+
+    for (QPushButton *button : buttons) {
+      if (!button) continue;
+      button->setChecked(isFavorite);
+      button->setText(isFavorite ? QString::fromUtf16(u"\u2665") : QString::fromUtf16(u"\u2661"));
+    }
+  }
+
+  if (confirmButton && !selectionKey.isEmpty()) {
+    confirmButton->setEnabled(true);
+  }
+
+  updateButtonStyles();
+}
+
+void ExpandableMultiOptionDialog::updateButtonStyles() {
+  const QString selectedKey = selectionKey;
+  const QString selectedStyle = QStringLiteral(
+      "QPushButton {"
+      "background-color: #465BEA;"
+      "border: 3px solid #FFFFFF;"
+      "color: white;"
+      "font-weight: 500;"
+      "height: 135;"
+      "padding: 0px 50px;"
+      "text-align: left;"
+      "font-size: 55px;"
+      "border-radius: 10px;"
+      "}");
+
+  if (selectedKey.isEmpty()) {
+    currentSelectionButton = nullptr;
+  }
+
+  QPushButton *explicitButton = currentSelectionButton.data();
+  if (explicitButton && explicitButton->property("modelKey").toString() != selectedKey) {
+    explicitButton = nullptr;
+  }
+
+  for (auto it = modelButtons.begin(); it != modelButtons.end(); ++it) {
+    const QString &modelKey = it.key();
+    const QList<QPushButton*> &buttons = it.value();
+    const bool keyMatches = (!selectedKey.isEmpty() && modelKey == selectedKey);
+    bool activatedForKey = false;
+
+    for (QPushButton *button : buttons) {
+      if (!button) continue;
+
+      bool isActive = false;
+      if (explicitButton) {
+        isActive = (button == explicitButton);
+      } else if (keyMatches && !activatedForKey) {
+        isActive = true;
+        activatedForKey = true;
+        currentSelectionButton = button;
+      }
+
+      QSignalBlocker blocker(button);
+      button->setChecked(isActive);
+      button->setStyleSheet(isActive ? selectedStyle : QString());
+    }
+  }
 }
