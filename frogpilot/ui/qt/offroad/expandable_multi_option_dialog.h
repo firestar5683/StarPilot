@@ -8,9 +8,14 @@
 #include <QList>
 #include <QComboBox>
 #include <QMenu>
+#include <QMetaObject>
 
 #include "selfdrive/ui/qt/widgets/input.h"
 #include "selfdrive/ui/qt/widgets/scrollview.h"
+
+class QButtonGroup;
+class QPushButton;
+class QEvent;
 
 class ExpandableMultiOptionDialog : public DialogBase {
   Q_OBJECT
@@ -33,25 +38,42 @@ public:
   QString selection;
 
   QString getCurrentSortMode() const { return currentSortMode; }
-  QStringList getUserFavorites() const { return userFavorites; }
+  QStringList getUserFavorites() const;
 
 private:
-  void toggleSeries(const QString &series, QPushButton *headerButton, ScrollView *scrollView);
-  void toggleFavorite(const QString &modelName);
+  bool eventFilter(QObject *obj, QEvent *event) override;
+  void toggleSeries(const QString &series, QPushButton *headerButton);
+  void toggleFavorite(const QString &modelKey);
   void updateSorting();
-  void createModelButton(const QString &modelName, QVBoxLayout *layout, QButtonGroup *group);
+  void rebuildModelList(const QStringList &orderedSeries, const QMap<QString, QStringList> &newSeriesToModels);
+  void createModelButton(const QString &modelKey, const QString &modelName, const QString &displayName,
+                         QVBoxLayout *layout, QButtonGroup *group);
+  void refreshFavoriteIcons();
+  void updateButtonStyles();
 
   QMap<QString, QStringList> seriesToModels;
+  QMap<QString, QStringList> baseSeriesToModels;
   QMap<QString, QWidget*> seriesWidgets;
   QMap<QString, bool> seriesExpanded;
   QMap<QString, QPushButton*> modelButtons;
-  QMap<QString, QPushButton*> starButtons;
+  QMap<QString, QPushButton*> favoriteButtons;
 
   QStringList userFavorites;
   QStringList communityFavorites;
   QMap<QString, QString> modelReleasedDates;
   QMap<QString, QString> modelFileToNameMap;
+  QMap<QString, QString> modelNameToFileMap;
+  QMap<QString, QString> displayOverrides;
 
   QString currentSortMode;
   QString currentSelection;
+  QString currentSelectionKey;
+  QString selectionKey;
+
+  ScrollView *scrollView = nullptr;
+  QVBoxLayout *listLayout = nullptr;
+  QButtonGroup *buttonGroup = nullptr;
+  QPushButton *confirmButton = nullptr;
+  QWidget *listWidgetContainer = nullptr;
+  QMetaObject::Connection buttonGroupConnection;
 };
