@@ -367,6 +367,19 @@ void ExpandableMultiOptionDialog::stopActiveScroll() {
   }
 }
 
+void ExpandableMultiOptionDialog::stopActiveScrollForInteraction() {
+  if (!scrollView) {
+    return;
+  }
+
+  if (QScroller *scroller = QScroller::scroller(scrollView->viewport())) {
+    const QScroller::State state = scroller->state();
+    if (state == QScroller::Scrolling || state == QScroller::Dragging || state == QScroller::Pressed) {
+      scroller->stop();
+    }
+  }
+}
+
 void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, const QString &modelName, const QString &displayName,
                                                     QVBoxLayout *layout) {
   QString effectiveKey = modelKey.isEmpty() ? modelName : modelKey;
@@ -403,7 +416,7 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, con
   starButton->setChecked(isFavorite);
   starButton->setText(isFavorite ? QString::fromUtf16(u"\u2665") : QString::fromUtf16(u"\u2661"));
 
-  QObject::connect(starButton, &QPushButton::pressed, this, &ExpandableMultiOptionDialog::stopActiveScroll);
+  QObject::connect(starButton, &QPushButton::pressed, this, &ExpandableMultiOptionDialog::stopActiveScrollForInteraction);
   QObject::connect(starButton, &QPushButton::clicked, [this, effectiveKey]() {
     toggleFavorite(effectiveKey);
   });
@@ -429,7 +442,7 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, con
 
   const QString resolvedSelection = modelFileToNameMap.value(effectiveKey, !modelName.isEmpty() ? modelName : displayName);
 
-  QObject::connect(modelButton, &QPushButton::pressed, this, &ExpandableMultiOptionDialog::stopActiveScroll);
+  QObject::connect(modelButton, &QPushButton::pressed, this, &ExpandableMultiOptionDialog::stopActiveScrollForInteraction);
   QObject::connect(modelButton, &QPushButton::clicked, this, [this, effectiveKey, modelButton, resolvedSelection]() {
     selectionKey = effectiveKey;
     currentSelectionKey = effectiveKey;
