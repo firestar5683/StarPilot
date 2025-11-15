@@ -379,13 +379,24 @@ void ExpandableMultiOptionDialog::updateSorting() {
   QStringList orderedSeries;
   QSet<QString> validSeries;
   QSet<QString> favoriteModelKeys;
+  QSet<QString> availableModelKeys;
   displayOverrides.clear();
+
+  for (auto it = baseSeriesToModels.constBegin(); it != baseSeriesToModels.constEnd(); ++it) {
+    const QStringList &models = it.value();
+    for (const QString &modelName : models) {
+      const QString modelKey = modelNameToFileMap.value(modelName);
+      if (!modelKey.isEmpty()) {
+        availableModelKeys.insert(modelKey);
+      }
+    }
+  }
 
   if (currentSortMode == "favorites") {
     QStringList favoritesList;
 
     for (const QString &modelKey : communityFavorites) {
-      if (modelFileToNameMap.contains(modelKey)) {
+      if (availableModelKeys.contains(modelKey)) {
         const QString modelName = modelFileToNameMap.value(modelKey);
         favoritesList.append(modelName);
         favoriteModelKeys.insert(modelKey);
@@ -394,7 +405,7 @@ void ExpandableMultiOptionDialog::updateSorting() {
     }
 
     for (const QString &modelKey : userFavorites) {
-      if (modelFileToNameMap.contains(modelKey) && !favoriteModelKeys.contains(modelKey)) {
+      if (availableModelKeys.contains(modelKey) && !favoriteModelKeys.contains(modelKey)) {
         favoritesList.append(modelFileToNameMap.value(modelKey));
         favoriteModelKeys.insert(modelKey);
       }
