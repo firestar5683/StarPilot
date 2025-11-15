@@ -465,6 +465,7 @@ bool FrogPilotModelPanel::isModelInstalled(const QString &key) const {
   bool has_policy_tg = false;
   bool has_vision_meta = false;
   bool has_vision_tg = false;
+  bool foundAny = false;
 
   for (const QString &file : modelDir.entryList(QDir::Files)) {
     QFileInfo fi(modelDir.filePath(file));
@@ -472,6 +473,8 @@ bool FrogPilotModelPanel::isModelInstalled(const QString &key) const {
     const QString ext = fi.suffix();
 
     if (!(base.startsWith(key) || base.startsWith(key + "_"))) continue;
+
+    foundAny = true;
 
     if (ext == "thneed") {
       has_thneed = true;
@@ -492,7 +495,11 @@ bool FrogPilotModelPanel::isModelInstalled(const QString &key) const {
     return true;
   }
 
-  return has_policy_meta && has_policy_tg && has_vision_meta && has_vision_tg;
+  if (has_policy_meta && has_policy_tg && has_vision_meta && has_vision_tg) {
+    return true;
+  }
+
+  return foundAny;
 }
 
 void FrogPilotModelPanel::showEvent(QShowEvent *event) {

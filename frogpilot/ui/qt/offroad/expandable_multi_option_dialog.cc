@@ -575,6 +575,10 @@ void ExpandableMultiOptionDialog::rebuildModelList(const QStringList &orderedSer
 
   listWidgetContainer->updateGeometry();
   listWidgetContainer->adjustSize();
+  if (scrollView && scrollView->widget()) {
+    scrollView->widget()->updateGeometry();
+    scrollView->widget()->adjustSize();
+  }
 
   if (buttonGroupConnection)
     QObject::disconnect(buttonGroupConnection);
