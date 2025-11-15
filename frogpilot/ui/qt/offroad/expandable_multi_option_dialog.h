@@ -9,12 +9,10 @@
 #include <QPointer>
 #include <QComboBox>
 #include <QMenu>
-#include <QMetaObject>
 
 #include "selfdrive/ui/qt/widgets/input.h"
 #include "selfdrive/ui/qt/widgets/scrollview.h"
 
-class QButtonGroup;
 class QPushButton;
 class QEvent;
 
@@ -48,7 +46,7 @@ private:
   void updateSorting();
   void rebuildModelList(const QStringList &orderedSeries, const QMap<QString, QStringList> &newSeriesToModels);
   void createModelButton(const QString &modelKey, const QString &modelName, const QString &displayName,
-                         QVBoxLayout *layout, QButtonGroup *group);
+                         QVBoxLayout *layout);
   void refreshFavoriteIcons();
   void updateButtonStyles();
 
@@ -73,9 +71,7 @@ private:
 
   ScrollView *scrollView = nullptr;
   QVBoxLayout *listLayout = nullptr;
-  QButtonGroup *buttonGroup = nullptr;
   QPushButton *confirmButton = nullptr;
   QWidget *listWidgetContainer = nullptr;
-  QMetaObject::Connection buttonGroupConnection;
   QPointer<QPushButton> currentSelectionButton;
 };

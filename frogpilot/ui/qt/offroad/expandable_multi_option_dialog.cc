@@ -1,7 +1,6 @@
 #include "frogpilot/ui/qt/offroad/expandable_multi_option_dialog.h"
 
 #include <QPushButton>
-#include <QButtonGroup>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
@@ -17,7 +16,6 @@
 #include <QSizePolicy>
 #include <QSet>
 #include <QVector>
-#include <QAbstractButton>
 #include <QEvent>
 #include <QSignalBlocker>
 #include <QScroller>
@@ -208,9 +206,6 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
   listLayout->setSpacing(10);
   listLayout->setContentsMargins(0, 0, 0, 0);
 
-  buttonGroup = new QButtonGroup(listWidgetContainer);
-  buttonGroup->setExclusive(true);
-
   confirmButton = new QPushButton(tr("Select"));
   confirmButton->setObjectName("confirm_btn");
   confirmButton->setEnabled(!selectionKey.isEmpty());
@@ -344,7 +339,7 @@ bool ExpandableMultiOptionDialog::eventFilter(QObject *obj, QEvent *event) {
 }
 
 void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, const QString &modelName, const QString &displayName,
-                                                    QVBoxLayout *layout, QButtonGroup *group) {
+                                                    QVBoxLayout *layout) {
   if (modelKey.isEmpty()) {
     return;
   }
@@ -386,12 +381,24 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, con
   modelButton->setProperty("modelKey", modelKey);
   modelButton->setProperty("modelName", modelName);
 
-  group->addButton(modelButton);
   modelButtons[modelKey].append(modelButton);
   if (selectionKey == modelKey && currentSelectionButton.isNull()) {
     currentSelectionButton = modelButton;
   }
   modelLayout->addWidget(modelButton);
+
+  QObject::connect(modelButton, &QPushButton::clicked, this, [this, modelKey, modelButton]() {
+    selectionKey = modelKey;
+    currentSelectionKey = modelKey;
+    selection = modelFileToNameMap.value(modelKey, selection);
+    currentSelection = selection;
+    currentSelectionButton = modelButton;
+    if (confirmButton) {
+      confirmButton->setEnabled(true);
+    }
+
+    updateButtonStyles();
+  });
 
   layout->addWidget(modelWidget);
 }
@@ -565,17 +572,6 @@ void ExpandableMultiOptionDialog::rebuildModelList(const QStringList &orderedSer
     delete item;
   }
 
-  if (buttonGroup) {
-    if (buttonGroupConnection)
-      QObject::disconnect(buttonGroupConnection);
-    buttonGroupConnection = QMetaObject::Connection();
-    delete buttonGroup;
-    buttonGroup = nullptr;
-  }
-
-  buttonGroup = new QButtonGroup(listWidgetContainer);
-  buttonGroup->setExclusive(true);
-
   seriesWidgets.clear();
   modelButtons.clear();
   favoriteButtons.clear();
@@ -609,7 +605,7 @@ void ExpandableMultiOptionDialog::rebuildModelList(const QStringList &orderedSer
         continue;
       }
       QString displayName = displayOverrides.value(modelKey, modelName);
-      createModelButton(modelKey, modelName, displayName, seriesLayout, buttonGroup);
+      createModelButton(modelKey, modelName, displayName, seriesLayout);
     }
 
     if (expanded) {
@@ -636,34 +632,6 @@ void ExpandableMultiOptionDialog::rebuildModelList(const QStringList &orderedSer
     scrollView->widget()->updateGeometry();
     scrollView->widget()->adjustSize();
   }
-
-  if (buttonGroupConnection)
-    QObject::disconnect(buttonGroupConnection);
-
-  buttonGroupConnection = QObject::connect(
-      buttonGroup,
-      static_cast<void (QButtonGroup::*)(QAbstractButton *)>(&QButtonGroup::buttonClicked),
-      this,
-      [this](QAbstractButton *button) {
-    if (!button) return;
-    const QString modelKey = button->property("modelKey").toString();
-    if (modelKey.isEmpty()) return;
-
-    selectionKey = modelKey;
-    currentSelectionKey = modelKey;
-    selection = modelFileToNameMap.value(modelKey, selection);
-    currentSelection = selection;
-    if (QPushButton *pushButton = qobject_cast<QPushButton *>(button)) {
-      currentSelectionButton = pushButton;
-    } else {
-      currentSelectionButton = nullptr;
-    }
-    if (confirmButton) {
-      confirmButton->setEnabled(true);
-    }
-
-    updateButtonStyles();
-  });
 
   updateButtonStyles();
 }
