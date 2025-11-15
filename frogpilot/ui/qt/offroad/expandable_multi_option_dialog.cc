@@ -346,15 +346,25 @@ bool ExpandableMultiOptionDialog::eventFilter(QObject *obj, QEvent *event) {
       case QEvent::TouchEnd:
       case QEvent::Gesture:
       case QEvent::GestureOverride:
-        if (QScroller *scroller = QScroller::scroller(scrollView->viewport())) {
-          scroller->stop();
-        }
+        stopActiveScroll();
         break;
       default:
         break;
     }
   }
   return DialogBase::eventFilter(obj, event);
+}
+
+void ExpandableMultiOptionDialog::stopActiveScroll() {
+  if (!scrollView) {
+    return;
+  }
+
+  if (QScroller *scroller = QScroller::scroller(scrollView->viewport())) {
+    if (scroller->state() != QScroller::Inactive) {
+      scroller->stop();
+    }
+  }
 }
 
 void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, const QString &modelName, const QString &displayName,
@@ -393,6 +403,7 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, con
   starButton->setChecked(isFavorite);
   starButton->setText(isFavorite ? QString::fromUtf16(u"\u2665") : QString::fromUtf16(u"\u2661"));
 
+  QObject::connect(starButton, &QPushButton::pressed, this, &ExpandableMultiOptionDialog::stopActiveScroll);
   QObject::connect(starButton, &QPushButton::clicked, [this, effectiveKey]() {
     toggleFavorite(effectiveKey);
   });
@@ -418,6 +429,7 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, con
 
   const QString resolvedSelection = modelFileToNameMap.value(effectiveKey, !modelName.isEmpty() ? modelName : displayName);
 
+  QObject::connect(modelButton, &QPushButton::pressed, this, &ExpandableMultiOptionDialog::stopActiveScroll);
   QObject::connect(modelButton, &QPushButton::clicked, this, [this, effectiveKey, modelButton, resolvedSelection]() {
     selectionKey = effectiveKey;
     currentSelectionKey = effectiveKey;
@@ -614,11 +626,7 @@ void ExpandableMultiOptionDialog::updateSorting() {
 void ExpandableMultiOptionDialog::rebuildModelList(const QStringList &orderedSeries, const QMap<QString, QStringList> &newSeriesToModels) {
   if (!listLayout) return;
 
-  if (scrollView) {
-    if (QScroller *scroller = QScroller::scroller(scrollView->viewport())) {
-      scroller->stop();
-    }
-  }
+  stopActiveScroll();
 
   while (QLayoutItem *item = listLayout->takeAt(0)) {
     if (QWidget *w = item->widget()) {

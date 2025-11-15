@@ -49,6 +49,7 @@ private:
                          QVBoxLayout *layout);
   void refreshFavoriteIcons();
   void updateButtonStyles();
+  void stopActiveScroll();
 
   QMap<QString, QStringList> seriesToModels;
   QMap<QString, QStringList> baseSeriesToModels;
