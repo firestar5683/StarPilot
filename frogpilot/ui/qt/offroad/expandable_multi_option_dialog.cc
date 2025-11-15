@@ -160,6 +160,7 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
 
   QLabel *sortLabel = new QLabel(tr("Sort by:"), this);
   sortLabel->setStyleSheet("font-size: 50px; color: white;");
+  sortLabel->setAttribute(Qt::WA_TransparentForMouseEvents, true);
   sortLayout->addWidget(sortLabel);
 
   QPushButton *sortButton = new QPushButton(tr("Alphabetical"), this);
@@ -193,8 +194,10 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
   sortWidget->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Maximum);
   sortLayout->setSizeConstraint(QLayout::SetFixedSize);
   sortWidget->setStyleSheet("background: transparent;");
+  sortWidget->setAttribute(Qt::WA_TransparentForMouseEvents, true);
 
   sortLayout->addWidget(sortButton);
+  sortButton->setAttribute(Qt::WA_TransparentForMouseEvents, false);
 
   auto updateSortOverlayGeometry = [sortWidget, sortLayout]() {
     if (!sortWidget) return;
