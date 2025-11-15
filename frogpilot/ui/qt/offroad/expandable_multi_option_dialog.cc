@@ -361,7 +361,7 @@ void ExpandableMultiOptionDialog::stopActiveScroll() {
   }
 
   if (QScroller *scroller = QScroller::scroller(scrollView->viewport())) {
-    if (scroller->state() != QScroller::Inactive) {
+    if (scroller->state() == QScroller::Scrolling) {
       scroller->stop();
     }
   }
