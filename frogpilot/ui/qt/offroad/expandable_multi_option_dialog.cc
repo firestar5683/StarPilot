@@ -396,6 +396,10 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, con
   starButton->setChecked(isFavorite);
   starButton->setText(isFavorite ? QString::fromUtf16(u"\u2665") : QString::fromUtf16(u"\u2661"));
 
+  QObject::connect(starButton, &QPushButton::pressed, this, [this]() {
+    stopActiveScrollForInteraction();
+  });
+
   QObject::connect(starButton, &QPushButton::clicked, [this, effectiveKey]() {
     stopActiveScrollForInteraction();
     toggleFavorite(effectiveKey);
@@ -421,6 +425,10 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, con
   modelLayout->addWidget(modelButton);
 
   const QString resolvedSelection = modelFileToNameMap.value(effectiveKey, !modelName.isEmpty() ? modelName : displayName);
+
+  QObject::connect(modelButton, &QPushButton::pressed, this, [this]() {
+    stopActiveScrollForInteraction();
+  });
 
   QObject::connect(modelButton, &QPushButton::clicked, this, [this, effectiveKey, modelButton, resolvedSelection]() {
     stopActiveScrollForInteraction();
