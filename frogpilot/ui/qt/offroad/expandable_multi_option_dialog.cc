@@ -40,7 +40,7 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
 
   baseSeriesToModels = seriesToModels;
 
-  for (auto it = modelFileToNameMap.constBegin(); it != modelFileToNameMap.constEnd(); ++it) {
+  for (auto it = this->modelFileToNameMap.constBegin(); it != this->modelFileToNameMap.constEnd(); ++it) {
     modelNameToFileMap.insert(it.value(), it.key());
   }
 
@@ -50,7 +50,7 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
       if (modelName.isEmpty() || modelNameToFileMap.contains(modelName)) {
         continue;
       }
-      modelFileToNameMap.insert(modelName, modelName);
+      this->modelFileToNameMap.insert(modelName, modelName);
       modelNameToFileMap.insert(modelName, modelName);
     }
   }
@@ -58,7 +58,7 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
   currentSelectionKey = modelNameToFileMap.value(currentSelection);
   if (!currentSelectionKey.isEmpty()) {
     selectionKey = currentSelectionKey;
-    selection = modelFileToNameMap.value(currentSelectionKey, currentSelection);
+    selection = this->modelFileToNameMap.value(currentSelectionKey, currentSelection);
     currentSelection = selection;
   } else {
     selectionKey.clear();
