@@ -12,6 +12,7 @@
 #include <QLayout>
 #include <QLayoutItem>
 #include <QSet>
+#include <QVector>
 #include <QAbstractButton>
 
 #include <algorithm>
@@ -185,7 +186,7 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
   scrollView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
 
   // Create series headers and their expandable content
-  rebuildModelList(seriesToModels);
+  rebuildModelList(seriesToModels.keys(), seriesToModels);
 
   main_layout->addWidget(scrollView);
   main_layout->addSpacing(35);
@@ -261,6 +262,16 @@ QString ExpandableMultiOptionDialog::getSelection(const QString &prompt_text,
     return d.selection;
   }
   return "";
+}
+
+QStringList ExpandableMultiOptionDialog::getUserFavorites() const {
+  QStringList filteredFavorites;
+  for (const QString &fav : userFavorites) {
+    if (modelFileToNameMap.contains(fav) && !filteredFavorites.contains(fav)) {
+      filteredFavorites.append(fav);
+    }
+  }
+  return filteredFavorites;
 }
 
 void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, const QString &modelName, QVBoxLayout *layout, QButtonGroup *group) {
@@ -355,7 +366,10 @@ void ExpandableMultiOptionDialog::toggleFavorite(const QString &modelKey) {
 }
 
 void ExpandableMultiOptionDialog::updateSorting() {
+  const QString favoritesSeriesName = QStringLiteral("⭐ Favorites");
   QMap<QString, QStringList> newSeriesToModels;
+  QStringList orderedSeries;
+  QSet<QString> validSeries;
   QSet<QString> favoriteModelKeys;
 
   if (currentSortMode == "favorites") {
@@ -377,10 +391,24 @@ void ExpandableMultiOptionDialog::updateSorting() {
 
     if (!favoritesList.isEmpty()) {
       std::sort(favoritesList.begin(), favoritesList.end());
-      newSeriesToModels.insert("⭐ Favorites", favoritesList);
-      seriesExpanded.insert("⭐ Favorites", true);
+      newSeriesToModels.insert(favoritesSeriesName, favoritesList);
+      orderedSeries.append(favoritesSeriesName);
+      validSeries.insert(favoritesSeriesName);
+      seriesExpanded.insert(favoritesSeriesName, true);
+    } else {
+      seriesExpanded.remove(favoritesSeriesName);
     }
+  } else {
+    seriesExpanded.remove(favoritesSeriesName);
   }
+
+  struct SeriesInfo {
+    QString name;
+    QStringList models;
+    QString newestDate;
+  };
+
+  QVector<SeriesInfo> seriesInfos;
 
   for (auto it = baseSeriesToModels.constBegin(); it != baseSeriesToModels.constEnd(); ++it) {
     QString series = it.key();
@@ -390,8 +418,11 @@ void ExpandableMultiOptionDialog::updateSorting() {
       std::sort(models.begin(), models.end(), [this](const QString &a, const QString &b) {
         QString keyA = modelNameToFileMap.value(a);
         QString keyB = modelNameToFileMap.value(b);
-        QString dateA = modelReleasedDates.value(keyA, "2023-01-01");
-        QString dateB = modelReleasedDates.value(keyB, "2023-01-01");
+        QString dateA = modelReleasedDates.value(keyA, QStringLiteral("1970-01-01"));
+        QString dateB = modelReleasedDates.value(keyB, QStringLiteral("1970-01-01"));
+        if (dateA == dateB) {
+          return a < b;
+        }
         return dateA > dateB;
       });
     } else {
@@ -409,16 +440,54 @@ void ExpandableMultiOptionDialog::updateSorting() {
       models = filteredModels;
     }
 
-    if (!models.isEmpty()) {
-      newSeriesToModels.insert(series, models);
+    if (models.isEmpty()) {
+      continue;
+    }
+
+    QString newestDate = QStringLiteral("1970-01-01");
+    for (const QString &modelName : models) {
+      const QString key = modelNameToFileMap.value(modelName);
+      const QString date = modelReleasedDates.value(key, QStringLiteral("1970-01-01"));
+      if (date > newestDate) {
+        newestDate = date;
+      }
+    }
+
+    seriesInfos.push_back({series, models, newestDate});
+    newSeriesToModels.insert(series, models);
+  }
+
+  if (currentSortMode == "date") {
+    std::sort(seriesInfos.begin(), seriesInfos.end(), [](const SeriesInfo &a, const SeriesInfo &b) {
+      if (a.newestDate == b.newestDate) {
+        return a.name < b.name;
+      }
+      return a.newestDate > b.newestDate;
+    });
+  } else {
+    std::sort(seriesInfos.begin(), seriesInfos.end(), [](const SeriesInfo &a, const SeriesInfo &b) {
+      return a.name < b.name;
+    });
+  }
+
+  for (const SeriesInfo &info : seriesInfos) {
+    orderedSeries.append(info.name);
+    validSeries.insert(info.name);
+  }
+
+  for (auto it = seriesExpanded.begin(); it != seriesExpanded.end(); ) {
+    if (!validSeries.contains(it.key())) {
+      it = seriesExpanded.erase(it);
+    } else {
+      ++it;
     }
   }
 
-  rebuildModelList(newSeriesToModels);
+  rebuildModelList(orderedSeries, newSeriesToModels);
   refreshFavoriteIcons();
 }
 
-void ExpandableMultiOptionDialog::rebuildModelList(const QMap<QString, QStringList> &newSeriesToModels) {
+void ExpandableMultiOptionDialog::rebuildModelList(const QStringList &orderedSeries, const QMap<QString, QStringList> &newSeriesToModels) {
   if (!listLayout) return;
 
   if (buttonGroup) {
@@ -430,7 +499,7 @@ void ExpandableMultiOptionDialog::rebuildModelList(const QMap<QString, QStringLi
 
   while (QLayoutItem *item = listLayout->takeAt(0)) {
     if (QWidget *w = item->widget()) {
-      w->deleteLater();
+      delete w;
     } else if (QLayout *layout = item->layout()) {
       delete layout;
     }
@@ -441,9 +510,11 @@ void ExpandableMultiOptionDialog::rebuildModelList(const QMap<QString, QStringLi
   modelButtons.clear();
   starButtons.clear();
 
-  for (auto it = newSeriesToModels.constBegin(); it != newSeriesToModels.constEnd(); ++it) {
-    const QString &series = it.key();
-    const QStringList &models = it.value();
+  for (const QString &series : orderedSeries) {
+    const QStringList models = newSeriesToModels.value(series);
+    if (models.isEmpty()) {
+      continue;
+    }
 
     QPushButton *seriesHeader = new QPushButton("▶ " + series);
     seriesHeader->setProperty("class", "series-header");

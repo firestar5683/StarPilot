@@ -33,13 +33,13 @@ public:
   QString selection;
 
   QString getCurrentSortMode() const { return currentSortMode; }
-  QStringList getUserFavorites() const { return userFavorites; }
+  QStringList getUserFavorites() const;
 
 private:
   void toggleSeries(const QString &series, QPushButton *headerButton);
   void toggleFavorite(const QString &modelKey);
   void updateSorting();
-  void rebuildModelList(const QMap<QString, QStringList> &newSeriesToModels);
+  void rebuildModelList(const QStringList &orderedSeries, const QMap<QString, QStringList> &newSeriesToModels);
   void createModelButton(const QString &modelKey, const QString &modelName, QVBoxLayout *layout, QButtonGroup *group);
   void refreshFavoriteIcons();
 

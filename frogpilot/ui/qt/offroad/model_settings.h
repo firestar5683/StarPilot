@@ -20,6 +20,7 @@ private:
   void updateModelLabels(FrogPilotListWidget *labelsList);
   void updateState(const UIState &s, const FrogPilotUIState &fs);
   void updateToggles();
+  bool isModelInstalled(const QString &key) const;
 
   bool allModelsDownloaded;
   bool allModelsDownloading;

@@ -1,6 +1,7 @@
 #include "frogpilot/ui/qt/offroad/model_settings.h"
 #include "frogpilot/ui/qt/offroad/expandable_multi_option_dialog.h"
 #include <QFile>
+#include <QFileInfo>
 #include <QJsonDocument>
 #include <QJsonObject>
 #include <QDoubleSpinBox>
@@ -107,49 +108,19 @@ FrogPilotModelPanel::FrogPilotModelPanel(FrogPilotSettingsWindow *parent) : Frog
     } else if (param == "DownloadModel") {
       downloadModelButton = new FrogPilotButtonsControl(title, desc, icon, {tr("DOWNLOAD"), tr("DOWNLOAD ALL")});
       QObject::connect(downloadModelButton, &FrogPilotButtonsControl::buttonClicked, [this](int id) {
-        auto isInstalled = [this](const QString &key) {
-          bool has_thneed = false;
-          bool has_policy_meta = false;
-          bool has_policy_tg = false;
-          bool has_vision_meta = false;
-          bool has_vision_tg = false;
-
-          for (const QString &file : modelDir.entryList(QDir::Files)) {
-            QFileInfo fi(modelDir.filePath(file));
-            const QString base = fi.baseName();
-            const QString ext = fi.suffix();
-            if (!(base.startsWith(key) || base.startsWith(key + "_"))) continue;
-
-            if (ext == "thneed") {
-              // Classic model (WD-40 etc.)
-              has_thneed = true;
-            } else if (ext == "pkl") {
-              // TinyGrad bundle uses these four exact suffixes
-              if (base.contains("_driving_policy_metadata"))       has_policy_meta  = true;
-              else if (base.contains("_driving_policy_tinygrad"))  has_policy_tg    = true;
-              else if (base.contains("_driving_vision_metadata"))  has_vision_meta  = true;
-              else if (base.contains("_driving_vision_tinygrad"))  has_vision_tg    = true;
-            }
-          }
-
-          // Classic models: any matching .thneed counts as installed
-          if (has_thneed) return true;
-          // TinyGrad models: require all four policy/vision files to be present
-          return has_policy_meta && has_policy_tg && has_vision_meta && has_vision_tg;
-        };
         if (id == 0) {
           if (modelDownloading) {
             params_memory.putBool("CancelModelDownload", true);
 
             cancellingDownload = true;
-          } else {
-            QStringList downloadableModels = availableModelNames;
-            for (const QString &modelKey : modelFileToNameMap.keys()) {
-              QString modelName = modelFileToNameMap.value(modelKey);
-              if (isInstalled(modelKey)) {
-                downloadableModels.removeAll(modelName);
-              }
+        } else {
+          QStringList downloadableModels = availableModelNames;
+          for (const QString &modelKey : modelFileToNameMap.keys()) {
+            QString modelName = modelFileToNameMap.value(modelKey);
+            if (isModelInstalled(modelKey)) {
+              downloadableModels.removeAll(modelName);
             }
+          }
             downloadableModels.removeAll("Space Lab 👀📡");
             allModelsDownloaded = downloadableModels.isEmpty();
 
@@ -311,12 +282,23 @@ FrogPilotModelPanel::FrogPilotModelPanel(FrogPilotSettingsWindow *parent) : Frog
       QObject::connect(selectModelButton, &ButtonControl::clicked, [this]() {
         // Group models by series for the enhanced dialog
         QMap<QString, QStringList> seriesToModels;
+        QMap<QString, QString> installedModelFileToNameMap;
+        QMap<QString, QString> installedReleasedDates;
 
         // Add all available models by series
         for (const QString &modelKey : modelFileToNameMap.keys()) {
+          if (!isModelInstalled(modelKey)) {
+            continue;
+          }
+
           QString modelName = modelFileToNameMap.value(modelKey);
           if (modelName.contains("(Default)")) {
             continue;
+          }
+
+          installedModelFileToNameMap.insert(modelKey, modelName);
+          if (modelReleasedDates.contains(modelKey)) {
+            installedReleasedDates.insert(modelKey, modelReleasedDates.value(modelKey));
           }
 
           QString series = modelSeriesMap.value(modelKey, "Custom Series");
@@ -325,7 +307,11 @@ FrogPilotModelPanel::FrogPilotModelPanel(FrogPilotSettingsWindow *parent) : Frog
 
         // Add Space Lab to Custom Series
         QString spaceLabName = modelFileToNameMap.value("space-lab");
-        seriesToModels["Custom Series"].append(spaceLabName);
+        if (!spaceLabName.isEmpty() && isModelInstalled("space-lab")) {
+          installedModelFileToNameMap.insert("space-lab", spaceLabName);
+          installedReleasedDates.insert("space-lab", modelReleasedDates.value("space-lab"));
+          seriesToModels["Custom Series"].append(spaceLabName);
+        }
 
         // Sort models alphabetically within each series
         for (QString &series : seriesToModels.keys()) {
@@ -347,20 +333,13 @@ FrogPilotModelPanel::FrogPilotModelPanel(FrogPilotSettingsWindow *parent) : Frog
         QStringList communityFavs = QString::fromStdString(params.get("CommunityFavorites")).split(",");
         communityFavs.removeAll("");
 
-        QMap<QString, QString> releasedDates;
-        QStringList availableModels = QString::fromStdString(params.get("AvailableModels")).split(",");
-        QStringList releasedDatesList = QString::fromStdString(params.get("ModelReleasedDates")).split(",");
-        for (int i = 0; i < qMin(availableModels.size(), releasedDatesList.size()); ++i) {
-          releasedDates[availableModels[i]] = releasedDatesList[i];
-        }
-
         // Create dialog instance to access sort mode and favorites after selection
         QString savedSortMode = QString::fromStdString(params.get("ModelSortMode"));
         if (savedSortMode.isEmpty()) savedSortMode = "alphabetical";
 
         ExpandableMultiOptionDialog dialog(tr("Select a model - 🗺️ = Navigation | 📡 = Radar | 👀 = VOACC"),
                                           seriesToModels, currentModel, this,
-                                          userFavs, communityFavs, releasedDates, modelFileToNameMap, savedSortMode);
+                                          userFavs, communityFavs, installedReleasedDates, installedModelFileToNameMap, savedSortMode);
 
         if (dialog.exec()) {
           QString modelToSelect = dialog.selection;
@@ -465,6 +444,46 @@ FrogPilotModelPanel::FrogPilotModelPanel(FrogPilotSettingsWindow *parent) : Frog
   QObject::connect(uiState(), &UIState::uiUpdate, this, &FrogPilotModelPanel::updateState);
 }
 
+bool FrogPilotModelPanel::isModelInstalled(const QString &key) const {
+  if (key.isEmpty()) {
+    return false;
+  }
+
+  bool has_thneed = false;
+  bool has_policy_meta = false;
+  bool has_policy_tg = false;
+  bool has_vision_meta = false;
+  bool has_vision_tg = false;
+
+  for (const QString &file : modelDir.entryList(QDir::Files)) {
+    QFileInfo fi(modelDir.filePath(file));
+    const QString base = fi.baseName();
+    const QString ext = fi.suffix();
+
+    if (!(base.startsWith(key) || base.startsWith(key + "_"))) continue;
+
+    if (ext == "thneed") {
+      has_thneed = true;
+    } else if (ext == "pkl") {
+      if (base.contains("_driving_policy_metadata")) {
+        has_policy_meta = true;
+      } else if (base.contains("_driving_policy_tinygrad")) {
+        has_policy_tg = true;
+      } else if (base.contains("_driving_vision_metadata")) {
+        has_vision_meta = true;
+      } else if (base.contains("_driving_vision_tinygrad")) {
+        has_vision_tg = true;
+      }
+    }
+  }
+
+  if (has_thneed) {
+    return true;
+  }
+
+  return has_policy_meta && has_policy_tg && has_vision_meta && has_vision_tg;
+}
+
 void FrogPilotModelPanel::showEvent(QShowEvent *event) {
   FrogPilotUIState &fs = *frogpilotUIState();
   UIState &s = *uiState();
@@ -515,41 +534,10 @@ void FrogPilotModelPanel::showEvent(QShowEvent *event) {
   modelSeriesMap.insert("space-lab", "Dom Forgot To Label Me");
   this->modelReleasedDates.insert("space-lab", "2023-01-01");
 
-
-  auto isInstalled = [this](const QString &key) {
-    bool has_thneed = false;
-    bool has_policy_meta = false;
-    bool has_policy_tg = false;
-    bool has_vision_meta = false;
-    bool has_vision_tg = false;
-
-    for (const QString &file : modelDir.entryList(QDir::Files)) {
-      QFileInfo fi(modelDir.filePath(file));
-      const QString base = fi.baseName();
-      const QString ext = fi.suffix();
-      if (!(base.startsWith(key) || base.startsWith(key + "_"))) continue;
-
-      if (ext == "thneed") {
-        // Classic model (WD-40 etc.)
-        has_thneed = true;
-      } else if (ext == "pkl") {
-        // TinyGrad bundle uses these four exact suffixes
-        if (base.contains("_driving_policy_metadata"))       has_policy_meta  = true;
-        else if (base.contains("_driving_policy_tinygrad"))  has_policy_tg    = true;
-        else if (base.contains("_driving_vision_metadata"))  has_vision_meta  = true;
-        else if (base.contains("_driving_vision_tinygrad"))  has_vision_tg    = true;
-      }
-    }
-
-    // Classic models: any matching .thneed counts as installed
-    if (has_thneed) return true;
-    // TinyGrad models: require all four policy/vision files to be present
-    return has_policy_meta && has_policy_tg && has_vision_meta && has_vision_tg;
-  };
   QStringList downloadableModels = availableModelNames;
   for (const QString &modelKey : modelFileToNameMap.keys()) {
     QString modelName = modelFileToNameMap.value(modelKey);
-    if (isInstalled(modelKey)) {
+    if (isModelInstalled(modelKey)) {
       downloadableModels.removeAll(modelName);
     }
   }
@@ -572,7 +560,7 @@ void FrogPilotModelPanel::showEvent(QShowEvent *event) {
   noModelsDownloaded = deletableModels.isEmpty();
 
   QString modelKey = QString::fromStdString(params.get("Model"));
-  if (!isInstalled(modelKey)) {
+  if (!isModelInstalled(modelKey)) {
     modelKey = QString::fromStdString(params_default.get("Model"));
   }
   currentModel = modelFileToNameMap.value(modelKey);
