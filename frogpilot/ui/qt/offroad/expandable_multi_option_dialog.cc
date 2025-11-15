@@ -55,6 +55,11 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
     currentSelection.clear();
   }
 
+  if (currentSortMode != "alphabetical" && currentSortMode != "date" &&
+      currentSortMode != "favorites" && currentSortMode != "date_oldest") {
+    currentSortMode = "alphabetical";
+  }
+
   QFrame *container = new QFrame(this);
   container->setStyleSheet(R"(
     QFrame { background-color: #1B1B1B; }
@@ -165,6 +170,8 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
   // Set initial button text based on sort mode
   if (currentSortMode == "date") {
     sortButton->setText(tr("Date (Newest)"));
+  } else if (currentSortMode == "date_oldest") {
+    sortButton->setText(tr("Date (Oldest)"));
   } else if (currentSortMode == "favorites") {
     sortButton->setText(tr("Favorites First"));
   } else {
@@ -191,6 +198,9 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
       currentSortMode = "date";
       sortButton->setText(tr("Date (Newest)"));
     } else if (currentSortMode == "date") {
+      currentSortMode = "date_oldest";
+      sortButton->setText(tr("Date (Oldest)"));
+    } else if (currentSortMode == "date_oldest") {
       currentSortMode = "favorites";
       sortButton->setText(tr("Favorites First"));
     } else {
@@ -429,6 +439,9 @@ void ExpandableMultiOptionDialog::updateSorting() {
   QSet<QString> availableModelKeys;
   displayOverrides.clear();
 
+  const bool sortByDate = (currentSortMode == "date" || currentSortMode == "date_oldest");
+  const bool sortDateNewestFirst = (currentSortMode == "date");
+
   for (auto it = baseSeriesToModels.constBegin(); it != baseSeriesToModels.constEnd(); ++it) {
     const QStringList &models = it.value();
     for (const QString &modelName : models) {
@@ -475,6 +488,7 @@ void ExpandableMultiOptionDialog::updateSorting() {
     QString name;
     QStringList models;
     QString newestDate;
+    QString oldestDate;
   };
 
   QVector<SeriesInfo> seriesInfos;
@@ -483,8 +497,8 @@ void ExpandableMultiOptionDialog::updateSorting() {
     QString series = it.key();
     QStringList models = it.value();
 
-    if (currentSortMode == "date") {
-      std::sort(models.begin(), models.end(), [this](const QString &a, const QString &b) {
+    if (sortByDate) {
+      std::sort(models.begin(), models.end(), [this, sortDateNewestFirst](const QString &a, const QString &b) {
         QString keyA = modelNameToFileMap.value(a);
         QString keyB = modelNameToFileMap.value(b);
         QString dateA = modelReleasedDates.value(keyA, QStringLiteral("1970-01-01"));
@@ -492,7 +506,7 @@ void ExpandableMultiOptionDialog::updateSorting() {
         if (dateA == dateB) {
           return a < b;
         }
-        return dateA > dateB;
+        return sortDateNewestFirst ? (dateA > dateB) : (dateA < dateB);
       });
     } else {
       std::sort(models.begin(), models.end());
@@ -514,24 +528,46 @@ void ExpandableMultiOptionDialog::updateSorting() {
     }
 
     QString newestDate = QStringLiteral("1970-01-01");
+    QString oldestDate = QStringLiteral("1970-01-01");
+    bool hasDate = false;
     for (const QString &modelName : models) {
       const QString key = modelNameToFileMap.value(modelName);
       const QString date = modelReleasedDates.value(key, QStringLiteral("1970-01-01"));
-      if (date > newestDate) {
+      if (!hasDate) {
         newestDate = date;
+        oldestDate = date;
+        hasDate = true;
+      } else {
+        if (date > newestDate) {
+          newestDate = date;
+        }
+        if (date < oldestDate) {
+          oldestDate = date;
+        }
       }
     }
 
-    seriesInfos.push_back({series, models, newestDate});
+    if (!hasDate) {
+      oldestDate = QStringLiteral("1970-01-01");
+    }
+
+    seriesInfos.push_back({series, models, newestDate, oldestDate});
     newSeriesToModels.insert(series, models);
   }
 
-  if (currentSortMode == "date") {
-    std::sort(seriesInfos.begin(), seriesInfos.end(), [](const SeriesInfo &a, const SeriesInfo &b) {
-      if (a.newestDate == b.newestDate) {
-        return a.name < b.name;
+  if (sortByDate) {
+    std::sort(seriesInfos.begin(), seriesInfos.end(), [sortDateNewestFirst](const SeriesInfo &a, const SeriesInfo &b) {
+      if (sortDateNewestFirst) {
+        if (a.newestDate == b.newestDate) {
+          return a.name < b.name;
+        }
+        return a.newestDate > b.newestDate;
+      } else {
+        if (a.oldestDate == b.oldestDate) {
+          return a.name < b.name;
+        }
+        return a.oldestDate < b.oldestDate;
       }
-      return a.newestDate > b.newestDate;
     });
   } else {
     std::sort(seriesInfos.begin(), seriesInfos.end(), [](const SeriesInfo &a, const SeriesInfo &b) {

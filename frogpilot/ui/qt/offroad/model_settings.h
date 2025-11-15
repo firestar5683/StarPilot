@@ -21,6 +21,7 @@ private:
   void updateState(const UIState &s, const FrogPilotUIState &fs);
   void updateToggles();
   bool isModelInstalled(const QString &key) const;
+  QMap<QString, QString> getDeletableModelDisplayNames();
 
   bool allModelsDownloaded;
   bool allModelsDownloading;
