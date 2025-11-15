@@ -330,7 +330,7 @@ bool ExpandableMultiOptionDialog::eventFilter(QObject *obj, QEvent *event) {
       case QEvent::TouchUpdate:
       case QEvent::Gesture:
         if (QScroller *scroller = QScroller::scroller(scrollView->viewport())) {
-          if (scroller->state() != QScroller::Inactive) {
+          if (scroller->state() == QScroller::Scrolling) {
             scroller->stop();
           }
         }
