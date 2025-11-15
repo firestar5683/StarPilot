@@ -13,13 +13,14 @@
 #include "selfdrive/ui/qt/widgets/scrollview.h"
 
 ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_text,
-                                                          const QMap<QString, QStringList> &seriesToModels,
-                                                          const QString &current, QWidget *parent,
-                                                          const QStringList &userFavorites,
-                                                          const QStringList &communityFavorites,
-                                                          const QMap<QString, QString> &modelReleasedDates,
-                                                          const QMap<QString, QString> &modelFileToNameMap)
-  : DialogBase(parent), seriesToModels(seriesToModels), currentSortMode("alphabetical"),
+                                                           const QMap<QString, QStringList> &seriesToModels,
+                                                           const QString &current, QWidget *parent,
+                                                           const QStringList &userFavorites,
+                                                           const QStringList &communityFavorites,
+                                                           const QMap<QString, QString> &modelReleasedDates,
+                                                           const QMap<QString, QString> &modelFileToNameMap,
+                                                           const QString &initialSortMode)
+  : DialogBase(parent), seriesToModels(seriesToModels), currentSortMode(initialSortMode.isEmpty() ? QString("alphabetical") : initialSortMode),
     userFavorites(userFavorites), communityFavorites(communityFavorites), modelReleasedDates(modelReleasedDates),
     modelFileToNameMap(modelFileToNameMap), currentSelection(current) {
 
