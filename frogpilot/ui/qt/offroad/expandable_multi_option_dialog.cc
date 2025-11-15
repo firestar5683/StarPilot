@@ -18,6 +18,7 @@
 #include <QSet>
 #include <QVector>
 #include <QAbstractButton>
+#include <QEvent>
 #include <QSignalBlocker>
 #include <QScroller>
 #include <QPointer>
@@ -215,6 +216,9 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
 
   scrollView = new ScrollView(listWidgetContainer, this);
   scrollView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+  if (scrollView->viewport()) {
+    scrollView->viewport()->installEventFilter(this);
+  }
 
   QWidget *listContainer = new QWidget(container);
   QGridLayout *overlayLayout = new QGridLayout(listContainer);
@@ -313,6 +317,29 @@ QStringList ExpandableMultiOptionDialog::getUserFavorites() const {
     }
   }
   return filteredFavorites;
+}
+
+bool ExpandableMultiOptionDialog::eventFilter(QObject *obj, QEvent *event) {
+  if (scrollView && obj == scrollView->viewport() && event) {
+    switch (event->type()) {
+      case QEvent::MouseButtonPress:
+      case QEvent::MouseButtonRelease:
+      case QEvent::MouseButtonDblClick:
+      case QEvent::TouchBegin:
+      case QEvent::TouchEnd:
+      case QEvent::TouchUpdate:
+      case QEvent::Gesture:
+        if (QScroller *scroller = QScroller::scroller(scrollView->viewport())) {
+          if (scroller->state() != QScroller::Inactive) {
+            scroller->stop();
+          }
+        }
+        break;
+      default:
+        break;
+    }
+  }
+  return DialogBase::eventFilter(obj, event);
 }
 
 void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, const QString &modelName, const QString &displayName,
