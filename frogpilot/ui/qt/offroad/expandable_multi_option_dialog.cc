@@ -340,16 +340,11 @@ bool ExpandableMultiOptionDialog::eventFilter(QObject *obj, QEvent *event) {
   if (scrollView && obj == scrollView->viewport() && event) {
     switch (event->type()) {
       case QEvent::MouseButtonPress:
-      case QEvent::MouseButtonRelease:
-      case QEvent::MouseButtonDblClick:
       case QEvent::Wheel:
       case QEvent::TouchBegin:
-      case QEvent::TouchEnd:
-      case QEvent::TouchUpdate:
       case QEvent::Gesture:
         if (QScroller *scroller = QScroller::scroller(scrollView->viewport())) {
-          const QScroller::State state = scroller->state();
-          if (state == QScroller::Scrolling || state == QScroller::Dragging || state == QScroller::Pressed) {
+          if (scroller->state() == QScroller::Scrolling) {
             scroller->stop();
           }
         }
