@@ -10,14 +10,12 @@
 #include <QSpacerItem>
 #include <QLayout>
 #include <QLayoutItem>
-#include <QGridLayout>
 #include <QPoint>
 #include <QSize>
 #include <QSizePolicy>
 #include <QSet>
 #include <QVector>
 #include <QSignalBlocker>
-#include <QScroller>
 #include <QPointer>
 #include <QObject>
 
@@ -156,7 +154,7 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
   QHBoxLayout *sortLayout = new QHBoxLayout();
   sortLayout->setContentsMargins(0, 0, 0, 0);
   sortLayout->setSpacing(20);
-  sortLayout->addStretch(); // Push to the right
+  sortLayout->addStretch();
 
   QLabel *sortLabel = new QLabel(tr("Sort by:"), this);
   sortLabel->setStyleSheet("font-size: 50px; color: white;");
@@ -188,22 +186,10 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
     sortButton->setText(tr("Alphabetical"));
   }
 
-  QWidget *sortWidget = new QWidget(container);
-  sortWidget->setLayout(sortLayout);
-  sortWidget->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Maximum);
-  sortLayout->setSizeConstraint(QLayout::SetFixedSize);
-  sortWidget->setStyleSheet("background: transparent;");
-
   sortLayout->addWidget(sortButton);
+  main_layout->addLayout(sortLayout);
 
-  auto updateSortOverlayGeometry = [sortWidget, sortLayout]() {
-    if (!sortWidget) return;
-    const QSize hint = sortLayout->sizeHint();
-    sortWidget->setFixedSize(hint);
-  };
-  updateSortOverlayGeometry();
-
-  QObject::connect(sortButton, &QPushButton::clicked, [this, sortButton, updateSortOverlayGeometry]() {
+  QObject::connect(sortButton, &QPushButton::clicked, [this, sortButton]() {
     if (currentSortMode == "alphabetical") {
       currentSortMode = "date";
       sortButton->setText(tr("Date (Newest)"));
@@ -217,7 +203,6 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
       currentSortMode = "alphabetical";
       sortButton->setText(tr("Alphabetical"));
     }
-    updateSortOverlayGeometry();
     updateSorting();
   });
 
@@ -236,19 +221,10 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
     scrollView->viewport()->setAttribute(Qt::WA_AcceptTouchEvents, true);
   }
 
-  QWidget *listContainer = new QWidget(container);
-  QGridLayout *overlayLayout = new QGridLayout(listContainer);
-  overlayLayout->setContentsMargins(0, 0, 0, 0);
-  overlayLayout->setSpacing(0);
-  overlayLayout->addWidget(scrollView, 0, 0);
-  overlayLayout->setRowStretch(0, 1);
-  overlayLayout->setColumnStretch(0, 1);
-  overlayLayout->addWidget(sortWidget, 0, 0, Qt::AlignRight | Qt::AlignTop);
-
   // Create series headers and their expandable content
   rebuildModelList(seriesToModels.keys(), seriesToModels);
 
-  main_layout->addWidget(listContainer);
+  main_layout->addWidget(scrollView);
   main_layout->addSpacing(35);
 
   // Cancel + confirm buttons
@@ -335,31 +311,6 @@ QStringList ExpandableMultiOptionDialog::getUserFavorites() const {
   return filteredFavorites;
 }
 
-void ExpandableMultiOptionDialog::stopActiveScroll() {
-  if (!scrollView) {
-    return;
-  }
-
-  if (QScroller *scroller = QScroller::scroller(scrollView->viewport())) {
-    if (scroller->state() == QScroller::Scrolling) {
-      scroller->stop();
-    }
-  }
-}
-
-void ExpandableMultiOptionDialog::stopActiveScrollForInteraction() {
-  if (!scrollView) {
-    return;
-  }
-
-  if (QScroller *scroller = QScroller::scroller(scrollView->viewport())) {
-    const QScroller::State state = scroller->state();
-    if (state == QScroller::Scrolling || state == QScroller::Dragging || state == QScroller::Pressed) {
-      scroller->stop();
-    }
-  }
-}
-
 void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, const QString &modelName, const QString &displayName,
                                                     QVBoxLayout *layout) {
   QString effectiveKey = modelKey.isEmpty() ? modelName : modelKey;
@@ -397,7 +348,6 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, con
   starButton->setText(isFavorite ? QString::fromUtf16(u"\u2665") : QString::fromUtf16(u"\u2661"));
 
   QObject::connect(starButton, &QPushButton::clicked, [this, effectiveKey]() {
-    stopActiveScrollForInteraction();
     toggleFavorite(effectiveKey);
   });
 
@@ -423,7 +373,6 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, con
   const QString resolvedSelection = modelFileToNameMap.value(effectiveKey, !modelName.isEmpty() ? modelName : displayName);
 
   QObject::connect(modelButton, &QPushButton::clicked, this, [this, effectiveKey, modelButton, resolvedSelection]() {
-    stopActiveScrollForInteraction();
     selectionKey = effectiveKey;
     currentSelectionKey = effectiveKey;
     selection = resolvedSelection;
@@ -618,8 +567,6 @@ void ExpandableMultiOptionDialog::updateSorting() {
 
 void ExpandableMultiOptionDialog::rebuildModelList(const QStringList &orderedSeries, const QMap<QString, QStringList> &newSeriesToModels) {
   if (!listLayout) return;
-
-  stopActiveScroll();
 
   while (QLayoutItem *item = listLayout->takeAt(0)) {
     if (QWidget *w = item->widget()) {

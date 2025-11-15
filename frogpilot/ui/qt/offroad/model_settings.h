@@ -22,6 +22,7 @@ private:
   void updateToggles();
   bool isModelInstalled(const QString &key) const;
   QMap<QString, QString> getDeletableModelDisplayNames();
+  void reloadAvailableModelCatalog();
 
   bool allModelsDownloaded;
   bool allModelsDownloading;
@@ -62,7 +63,7 @@ private:
 
   QString currentModel;
 
-
+  QStringList availableModelKeys;
   QStringList availableModelNames;
   QStringList availableModelSeries;
 };

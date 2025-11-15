@@ -98,6 +98,10 @@ FrogPilotModelPanel::FrogPilotModelPanel(FrogPilotSettingsWindow *parent) : Frog
                 }
               }
 
+              modelDir.refresh();
+
+              reloadAvailableModelCatalog();
+
               allModelsDownloaded = false;
               noModelsDownloaded = getDeletableModelDisplayNames().isEmpty();
               deleteModelButton->setEnabled(!(allModelsDownloading || modelDownloading || noModelsDownloaded));
@@ -115,6 +119,10 @@ FrogPilotModelPanel::FrogPilotModelPanel(FrogPilotSettingsWindow *parent) : Frog
                 }
               }
             }
+
+            modelDir.refresh();
+
+            reloadAvailableModelCatalog();
 
             allModelsDownloaded = false;
             noModelsDownloaded = true;
@@ -558,53 +566,32 @@ QMap<QString, QString> FrogPilotModelPanel::getDeletableModelDisplayNames() {
   return deletable;
 }
 
-void FrogPilotModelPanel::showEvent(QShowEvent *event) {
-  FrogPilotUIState &fs = *frogpilotUIState();
-  UIState &s = *uiState();
-
-  frogpilotToggleLevels = parent->frogpilotToggleLevels;
-  tuningLevel = parent->tuningLevel;
-
-  allModelsDownloading = params_memory.getBool("DownloadAllModels");
-  modelDownloading = !params_memory.get("ModelToDownload").empty();
-
-  QStringList availableModels = QString::fromStdString(params.get("AvailableModels")).split(",");
+void FrogPilotModelPanel::reloadAvailableModelCatalog() {
+  availableModelKeys = QString::fromStdString(params.get("AvailableModels")).split(",");
   availableModelNames = QString::fromStdString(params.get("AvailableModelNames")).split(",");
   availableModelSeries = QString::fromStdString(params.get("AvailableModelSeries")).split(",");
   QStringList releasedDatesParam = QString::fromStdString(params.get("ModelReleasedDates")).split(",");
-  QStringList communityFavsParam = QString::fromStdString(params.get("CommunityFavorites")).split(",");
-  QStringList userFavsParam = QString::fromStdString(params.get("UserFavorites")).split(",");
-
-  // Build a simple model->version map for quick lookups elsewhere
-  {
-    QStringList versionList = QString::fromStdString(params.get("ModelVersions")).split(",");
-    QJsonObject versionObj;
-    int verCount = qMin(availableModels.size(), versionList.size());
-    for (int i = 0; i < verCount; ++i) {
-      versionObj.insert(availableModels[i], versionList[i]);
-    }
-    QFile out("/data/models/.model_versions.json");
-    if (out.open(QIODevice::WriteOnly)) {
-      out.write(QJsonDocument(versionObj).toJson());
-      out.close();
-    }
-  }
 
   modelFileToNameMap.clear();
   modelFileToNameMapProcessed.clear();
   modelSeriesMap.clear();
   modelReleasedDates.clear();
-  int size = qMin(availableModels.size(), availableModelNames.size());
+
+  int size = qMin(availableModelKeys.size(), availableModelNames.size());
   for (int i = 0; i < size; ++i) {
-    const QString modelKey = availableModels[i].trimmed();
-    const QString modelName = availableModelNames[i].trimmed();
+    QString modelKey = availableModelKeys[i].trimmed();
+    QString modelName = availableModelNames[i].trimmed();
     if (modelKey.isEmpty() || modelName.isEmpty()) {
       continue;
     }
 
+    availableModelKeys[i] = modelKey;
+    availableModelNames[i] = modelName;
+
     QString series;
     if (i < availableModelSeries.size()) {
       series = availableModelSeries[i].trimmed();
+      availableModelSeries[i] = series;
     }
     if (series.isEmpty()) {
       series = tr("Custom Series");
@@ -617,8 +604,36 @@ void FrogPilotModelPanel::showEvent(QShowEvent *event) {
     if (i < releasedDatesParam.size()) {
       const QString released = releasedDatesParam[i].trimmed();
       if (!released.isEmpty()) {
-        this->modelReleasedDates.insert(modelKey, released);
+        modelReleasedDates.insert(modelKey, released);
       }
+    }
+  }
+}
+
+void FrogPilotModelPanel::showEvent(QShowEvent *event) {
+  FrogPilotUIState &fs = *frogpilotUIState();
+  UIState &s = *uiState();
+
+  frogpilotToggleLevels = parent->frogpilotToggleLevels;
+  tuningLevel = parent->tuningLevel;
+
+  allModelsDownloading = params_memory.getBool("DownloadAllModels");
+  modelDownloading = !params_memory.get("ModelToDownload").empty();
+
+  reloadAvailableModelCatalog();
+
+  // Build a simple model->version map for quick lookups elsewhere
+  {
+    QStringList versionList = QString::fromStdString(params.get("ModelVersions")).split(",");
+    QJsonObject versionObj;
+    int verCount = qMin(availableModelKeys.size(), versionList.size());
+    for (int i = 0; i < verCount; ++i) {
+      versionObj.insert(availableModelKeys[i], versionList[i]);
+    }
+    QFile out("/data/models/.model_versions.json");
+    if (out.open(QIODevice::WriteOnly)) {
+      out.write(QJsonDocument(versionObj).toJson());
+      out.close();
     }
   }
   allModelsDownloaded = true;
