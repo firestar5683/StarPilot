@@ -296,7 +296,10 @@ class ModelManager:
       params.put("AvailableModels", ",".join(self.available_models))
       params.put("AvailableModelNames", ",".join([model["name"] for model in model_info]))
       params.put("AvailableModelSeries", ",".join(self.model_series))
+      params.put("CommunityFavorites", ",".join([model["id"] for model in model_info if model.get("community_favorite", False)]))
+      params.put("ModelReleasedDates", ",".join([model.get("released", "2023-01-01") for model in model_info]))
       params.put("ModelVersions", ",".join(self.model_versions))
+      params.put("CommunityFavorites", ",".join([model["id"] for model in model_info if model.get("community_favorite", False)]))
       params.put("AvailableModelSeries", ",".join(self.model_series))
       print("Models list updated successfully")
 

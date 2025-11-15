@@ -55,9 +55,11 @@ private:
 
   QMap<QString, QString> modelFileToNameMap;
   QMap<QString, QString> modelFileToNameMapProcessed;
+  QMap<QString, QString> modelReleasedDates;
   QMap<QString, QString> modelSeriesMap;
 
   QString currentModel;
+
 
   QStringList availableModelNames;
   QStringList availableModelSeries;
