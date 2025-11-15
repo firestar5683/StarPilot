@@ -40,7 +40,8 @@ private:
   void toggleFavorite(const QString &modelKey);
   void updateSorting();
   void rebuildModelList(const QStringList &orderedSeries, const QMap<QString, QStringList> &newSeriesToModels);
-  void createModelButton(const QString &modelKey, const QString &modelName, QVBoxLayout *layout, QButtonGroup *group);
+  void createModelButton(const QString &modelKey, const QString &modelName, const QString &displayName,
+                         QVBoxLayout *layout, QButtonGroup *group);
   void refreshFavoriteIcons();
 
   QMap<QString, QStringList> seriesToModels;
@@ -55,12 +56,16 @@ private:
   QMap<QString, QString> modelReleasedDates;
   QMap<QString, QString> modelFileToNameMap;
   QMap<QString, QString> modelNameToFileMap;
+  QMap<QString, QString> displayOverrides;
 
   QString currentSortMode;
   QString currentSelection;
+  QString currentSelectionKey;
+  QString selectionKey;
 
   ScrollView *scrollView = nullptr;
   QVBoxLayout *listLayout = nullptr;
   QButtonGroup *buttonGroup = nullptr;
   QPushButton *confirmButton = nullptr;
+  QWidget *listWidgetContainer = nullptr;
 };

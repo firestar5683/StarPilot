@@ -34,12 +34,21 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
     userFavorites(userFavorites), communityFavorites(communityFavorites), modelReleasedDates(modelReleasedDates),
     modelFileToNameMap(modelFileToNameMap), currentSelection(current) {
 
-  selection = currentSelection;
-
   baseSeriesToModels = seriesToModels;
 
   for (auto it = modelFileToNameMap.constBegin(); it != modelFileToNameMap.constEnd(); ++it) {
     modelNameToFileMap.insert(it.value(), it.key());
+  }
+
+  currentSelectionKey = modelNameToFileMap.value(currentSelection);
+  if (!currentSelectionKey.isEmpty()) {
+    selectionKey = currentSelectionKey;
+    selection = modelFileToNameMap.value(currentSelectionKey, currentSelection);
+    currentSelection = selection;
+  } else {
+    selectionKey.clear();
+    selection.clear();
+    currentSelection.clear();
   }
 
   QFrame *container = new QFrame(this);
@@ -178,19 +187,19 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
   sortWidget->setLayout(sortLayout);
   sortWidget->setSizePolicy(QSizePolicy::Maximum, QSizePolicy::Maximum);
 
-  QWidget *listWidget = new QWidget(this);
-  listLayout = new QVBoxLayout(listWidget);
+  listWidgetContainer = new QWidget(this);
+  listLayout = new QVBoxLayout(listWidgetContainer);
   listLayout->setSpacing(10);
   listLayout->setContentsMargins(0, 0, 0, 0);
 
-  buttonGroup = new QButtonGroup(listWidget);
+  buttonGroup = new QButtonGroup(listWidgetContainer);
   buttonGroup->setExclusive(true);
 
   confirmButton = new QPushButton(tr("Select"));
   confirmButton->setObjectName("confirm_btn");
-  confirmButton->setEnabled(!currentSelection.isEmpty());
+  confirmButton->setEnabled(!selectionKey.isEmpty());
 
-  scrollView = new ScrollView(listWidget, this);
+  scrollView = new ScrollView(listWidgetContainer, this);
   scrollView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
 
   QWidget *listContainer = new QWidget(container);
@@ -286,7 +295,8 @@ QStringList ExpandableMultiOptionDialog::getUserFavorites() const {
   return filteredFavorites;
 }
 
-void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, const QString &modelName, QVBoxLayout *layout, QButtonGroup *group) {
+void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, const QString &modelName, const QString &displayName,
+                                                    QVBoxLayout *layout, QButtonGroup *group) {
   if (modelKey.isEmpty()) {
     return;
   }
@@ -319,9 +329,9 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, con
   modelLayout->addWidget(starButton);
 
   // Model button
-  QPushButton *modelButton = new QPushButton(modelName);
+  QPushButton *modelButton = new QPushButton(displayName);
   modelButton->setCheckable(true);
-  modelButton->setChecked(modelName == currentSelection);
+  modelButton->setChecked(modelKey == currentSelectionKey);
   modelButton->setProperty("class", "model-option");
   modelButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
 
@@ -329,6 +339,8 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, con
     if (checked) {
       selection = modelName;
       currentSelection = modelName;
+      selectionKey = modelKey;
+      currentSelectionKey = modelKey;
       if (confirmButton) {
         confirmButton->setEnabled(true);
       }
@@ -346,12 +358,6 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, con
         "border-radius: 10px;"
         "}");
     } else {
-      if (selection == modelName) {
-        // Disable confirm button logic would go here
-        if (confirmButton) {
-          confirmButton->setEnabled(false);
-        }
-      }
       // Reset to default style
       modelButton->setStyleSheet("");
     }
@@ -360,6 +366,20 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, con
   group->addButton(modelButton);
   modelButtons[modelKey] = modelButton;
   modelLayout->addWidget(modelButton);
+
+  if (modelButton->isChecked()) {
+    modelButton->setStyleSheet("QPushButton {"
+      "background-color: #465BEA;"
+      "border: 3px solid #FFFFFF;"
+      "color: white;"
+      "font-weight: 500;"
+      "height: 135;"
+      "padding: 0px 50px;"
+      "text-align: left;"
+      "font-size: 55px;"
+      "border-radius: 10px;"
+      "}");
+  }
 
   layout->addWidget(modelWidget);
 }
@@ -385,14 +405,17 @@ void ExpandableMultiOptionDialog::updateSorting() {
   QStringList orderedSeries;
   QSet<QString> validSeries;
   QSet<QString> favoriteModelKeys;
+  displayOverrides.clear();
 
   if (currentSortMode == "favorites") {
     QStringList favoritesList;
 
     for (const QString &modelKey : communityFavorites) {
       if (modelFileToNameMap.contains(modelKey)) {
-        favoritesList.append(modelFileToNameMap.value(modelKey));
+        const QString modelName = modelFileToNameMap.value(modelKey);
+        favoritesList.append(modelName);
         favoriteModelKeys.insert(modelKey);
+        displayOverrides.insert(modelKey, tr("%1 (Community Fav)").arg(modelName));
       }
     }
 
@@ -504,13 +527,6 @@ void ExpandableMultiOptionDialog::updateSorting() {
 void ExpandableMultiOptionDialog::rebuildModelList(const QStringList &orderedSeries, const QMap<QString, QStringList> &newSeriesToModels) {
   if (!listLayout) return;
 
-  if (buttonGroup) {
-    const auto buttons = buttonGroup->buttons();
-    for (QAbstractButton *button : buttons) {
-      buttonGroup->removeButton(button);
-    }
-  }
-
   while (QLayoutItem *item = listLayout->takeAt(0)) {
     if (QWidget *w = item->widget()) {
       delete w;
@@ -519,6 +535,14 @@ void ExpandableMultiOptionDialog::rebuildModelList(const QStringList &orderedSer
     }
     delete item;
   }
+
+  if (buttonGroup) {
+    delete buttonGroup;
+    buttonGroup = nullptr;
+  }
+
+  buttonGroup = new QButtonGroup(listWidgetContainer);
+  buttonGroup->setExclusive(true);
 
   seriesWidgets.clear();
   modelButtons.clear();
@@ -548,7 +572,11 @@ void ExpandableMultiOptionDialog::rebuildModelList(const QStringList &orderedSer
 
     for (const QString &modelName : models) {
       QString modelKey = modelNameToFileMap.value(modelName);
-      createModelButton(modelKey, modelName, seriesLayout, buttonGroup);
+      if (modelKey.isEmpty()) {
+        continue;
+      }
+      QString displayName = displayOverrides.value(modelKey, modelName);
+      createModelButton(modelKey, modelName, displayName, seriesLayout, buttonGroup);
     }
 
     if (expanded) {
@@ -584,7 +612,7 @@ void ExpandableMultiOptionDialog::refreshFavoriteIcons() {
     button->setText(isFavorite ? QString::fromUtf16(u"\u2665") : QString::fromUtf16(u"\u2661"));
   }
 
-  if (confirmButton && !selection.isEmpty()) {
+  if (confirmButton && !selectionKey.isEmpty()) {
     confirmButton->setEnabled(true);
   }
 }
