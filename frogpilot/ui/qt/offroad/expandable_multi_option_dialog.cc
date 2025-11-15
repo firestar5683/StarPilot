@@ -44,6 +44,17 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
     modelNameToFileMap.insert(it.value(), it.key());
   }
 
+  for (auto it = seriesToModels.constBegin(); it != seriesToModels.constEnd(); ++it) {
+    const QStringList &models = it.value();
+    for (const QString &modelName : models) {
+      if (modelName.isEmpty() || modelNameToFileMap.contains(modelName)) {
+        continue;
+      }
+      modelFileToNameMap.insert(modelName, modelName);
+      modelNameToFileMap.insert(modelName, modelName);
+    }
+  }
+
   currentSelectionKey = modelNameToFileMap.value(currentSelection);
   if (!currentSelectionKey.isEmpty()) {
     selectionKey = currentSelectionKey;
@@ -337,7 +348,8 @@ bool ExpandableMultiOptionDialog::eventFilter(QObject *obj, QEvent *event) {
       case QEvent::TouchUpdate:
       case QEvent::Gesture:
         if (QScroller *scroller = QScroller::scroller(scrollView->viewport())) {
-          if (scroller->state() == QScroller::Scrolling) {
+          const QScroller::State state = scroller->state();
+          if (state == QScroller::Scrolling || state == QScroller::Dragging || state == QScroller::Pressed) {
             scroller->stop();
           }
         }
@@ -351,8 +363,18 @@ bool ExpandableMultiOptionDialog::eventFilter(QObject *obj, QEvent *event) {
 
 void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, const QString &modelName, const QString &displayName,
                                                     QVBoxLayout *layout) {
-  if (modelKey.isEmpty()) {
+  QString effectiveKey = modelKey.isEmpty() ? modelName : modelKey;
+  if (effectiveKey.isEmpty()) {
     return;
+  }
+
+  if (!modelFileToNameMap.contains(effectiveKey)) {
+    const QString storedName = !modelName.isEmpty() ? modelName : displayName;
+    modelFileToNameMap.insert(effectiveKey, storedName);
+  }
+
+  if (!modelName.isEmpty()) {
+    modelNameToFileMap.insert(modelName, effectiveKey);
   }
 
   QWidget *modelWidget = new QWidget();
@@ -368,18 +390,18 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, con
   starButton->setFocusPolicy(Qt::NoFocus);
 
   // Check if this model is a favorite
-  bool isCommunityFav = communityFavorites.contains(modelKey);
-  bool isUserFav = userFavorites.contains(modelKey);
+  bool isCommunityFav = communityFavorites.contains(effectiveKey);
+  bool isUserFav = userFavorites.contains(effectiveKey);
   bool isFavorite = isCommunityFav || isUserFav;
 
   starButton->setChecked(isFavorite);
   starButton->setText(isFavorite ? QString::fromUtf16(u"\u2665") : QString::fromUtf16(u"\u2661"));
 
-  QObject::connect(starButton, &QPushButton::clicked, [this, modelKey]() {
-    toggleFavorite(modelKey);
+  QObject::connect(starButton, &QPushButton::clicked, [this, effectiveKey]() {
+    toggleFavorite(effectiveKey);
   });
 
-  favoriteButtons[modelKey].append(starButton);
+  favoriteButtons[effectiveKey].append(starButton);
   modelLayout->addWidget(starButton);
 
   // Model button
@@ -389,20 +411,22 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, con
   modelButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
   modelButton->setCursor(Qt::PointingHandCursor);
   modelButton->setFocusPolicy(Qt::NoFocus);
-  modelButton->setProperty("modelKey", modelKey);
+  modelButton->setProperty("modelKey", effectiveKey);
   modelButton->setProperty("modelName", modelName);
 
-  modelButtons[modelKey].append(modelButton);
-  if (selectionKey == modelKey && currentSelectionButton.isNull()) {
+  modelButtons[effectiveKey].append(modelButton);
+  if (selectionKey == effectiveKey && currentSelectionButton.isNull()) {
     currentSelectionButton = modelButton;
   }
   modelLayout->addWidget(modelButton);
 
-  QObject::connect(modelButton, &QPushButton::clicked, this, [this, modelKey, modelButton]() {
-    selectionKey = modelKey;
-    currentSelectionKey = modelKey;
-    selection = modelFileToNameMap.value(modelKey, selection);
-    currentSelection = selection;
+  const QString resolvedSelection = modelFileToNameMap.value(effectiveKey, !modelName.isEmpty() ? modelName : displayName);
+
+  QObject::connect(modelButton, &QPushButton::clicked, this, [this, effectiveKey, modelButton, resolvedSelection]() {
+    selectionKey = effectiveKey;
+    currentSelectionKey = effectiveKey;
+    selection = resolvedSelection;
+    currentSelection = resolvedSelection;
     currentSelectionButton = modelButton;
     if (confirmButton) {
       confirmButton->setEnabled(true);
@@ -444,7 +468,7 @@ void ExpandableMultiOptionDialog::updateSorting() {
   for (auto it = baseSeriesToModels.constBegin(); it != baseSeriesToModels.constEnd(); ++it) {
     const QStringList &models = it.value();
     for (const QString &modelName : models) {
-      const QString modelKey = modelNameToFileMap.value(modelName);
+      const QString modelKey = modelNameToFileMap.value(modelName, modelName);
       if (!modelKey.isEmpty()) {
         availableModelKeys.insert(modelKey);
       }
@@ -498,8 +522,8 @@ void ExpandableMultiOptionDialog::updateSorting() {
 
     if (sortByDate) {
       std::sort(models.begin(), models.end(), [this, sortDateNewestFirst](const QString &a, const QString &b) {
-        QString keyA = modelNameToFileMap.value(a);
-        QString keyB = modelNameToFileMap.value(b);
+        QString keyA = modelNameToFileMap.value(a, a);
+        QString keyB = modelNameToFileMap.value(b, b);
         QString dateA = modelReleasedDates.value(keyA, QStringLiteral("1970-01-01"));
         QString dateB = modelReleasedDates.value(keyB, QStringLiteral("1970-01-01"));
         if (dateA == dateB) {
@@ -514,7 +538,7 @@ void ExpandableMultiOptionDialog::updateSorting() {
     if (currentSortMode == "favorites" && !favoriteModelKeys.isEmpty()) {
       QStringList filteredModels;
       for (const QString &modelName : models) {
-        QString key = modelNameToFileMap.value(modelName);
+        QString key = modelNameToFileMap.value(modelName, modelName);
         if (!favoriteModelKeys.contains(key)) {
           filteredModels.append(modelName);
         }
@@ -530,7 +554,7 @@ void ExpandableMultiOptionDialog::updateSorting() {
     QString oldestDate = QStringLiteral("1970-01-01");
     bool hasDate = false;
     for (const QString &modelName : models) {
-      const QString key = modelNameToFileMap.value(modelName);
+      const QString key = modelNameToFileMap.value(modelName, modelName);
       const QString date = modelReleasedDates.value(key, QStringLiteral("1970-01-01"));
       if (!hasDate) {
         newestDate = date;
@@ -637,9 +661,9 @@ void ExpandableMultiOptionDialog::rebuildModelList(const QStringList &orderedSer
     seriesLayout->setSpacing(10);
 
     for (const QString &modelName : models) {
-      QString modelKey = modelNameToFileMap.value(modelName);
-      if (modelKey.isEmpty()) {
-        continue;
+      QString modelKey = modelNameToFileMap.value(modelName, modelName);
+      if (!modelFileToNameMap.contains(modelKey)) {
+        modelFileToNameMap.insert(modelKey, modelName);
       }
       QString displayName = displayOverrides.value(modelKey, modelName);
       createModelButton(modelKey, modelName, displayName, seriesLayout);

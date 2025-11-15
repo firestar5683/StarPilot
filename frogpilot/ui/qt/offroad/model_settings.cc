@@ -55,12 +55,14 @@ FrogPilotModelPanel::FrogPilotModelPanel(FrogPilotSettingsWindow *parent) : Frog
           // Group deletable models by series and keep a lookup for selected names
           QMap<QString, QStringList> deletableSeriesToModels;
           QMap<QString, QString> displayNameToKey;
+          QMap<QString, QString> deletableFileToNameMap;
           for (auto it = deletableModelsMap.constBegin(); it != deletableModelsMap.constEnd(); ++it) {
             const QString &modelKey = it.key();
             const QString &displayName = it.value();
             QString series = modelSeriesMap.value(modelKey, tr("Custom Series"));
             deletableSeriesToModels[series].append(displayName);
             displayNameToKey.insert(displayName, modelKey);
+            deletableFileToNameMap.insert(modelKey, displayName);
           }
 
           // Sort models within each series
@@ -70,7 +72,12 @@ FrogPilotModelPanel::FrogPilotModelPanel(FrogPilotSettingsWindow *parent) : Frog
             std::sort(models.begin(), models.end());
           }
 
-          QString modelToDelete = ExpandableMultiOptionDialog::getSelection(tr("Select a driving model to delete"), deletableSeriesToModels, "", this);
+          QString savedSortMode = QString::fromStdString(params.get("ModelSortMode"));
+          if (savedSortMode.isEmpty()) savedSortMode = "alphabetical";
+
+          QString modelToDelete = ExpandableMultiOptionDialog::getSelection(tr("Select a driving model to delete"), deletableSeriesToModels, "", this,
+                                                                           QStringList(), QStringList(), QMap<QString, QString>(),
+                                                                           deletableFileToNameMap, savedSortMode);
           if (!modelToDelete.isEmpty()) {
             QString modelKey = displayNameToKey.value(modelToDelete);
             if (modelKey.isEmpty()) {
