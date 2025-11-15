@@ -9,6 +9,12 @@
 #include <QTimer>
 #include <QHBoxLayout>
 #include <QSpacerItem>
+#include <QLayout>
+#include <QLayoutItem>
+#include <QSet>
+#include <QAbstractButton>
+
+#include <algorithm>
 
 #include "selfdrive/ui/qt/widgets/scrollview.h"
 
@@ -23,6 +29,14 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
   : DialogBase(parent), seriesToModels(seriesToModels), currentSortMode(initialSortMode.isEmpty() ? QString("alphabetical") : initialSortMode),
     userFavorites(userFavorites), communityFavorites(communityFavorites), modelReleasedDates(modelReleasedDates),
     modelFileToNameMap(modelFileToNameMap), currentSelection(current) {
+
+  selection = currentSelection;
+
+  baseSeriesToModels = seriesToModels;
+
+  for (auto it = modelFileToNameMap.constBegin(); it != modelFileToNameMap.constEnd(); ++it) {
+    modelNameToFileMap.insert(it.value(), it.key());
+  }
 
   QFrame *container = new QFrame(this);
   container->setStyleSheet(R"(
@@ -157,53 +171,23 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
   main_layout->addSpacing(15);
 
   QWidget *listWidget = new QWidget(this);
-  QVBoxLayout *listLayout = new QVBoxLayout(listWidget);
+  listLayout = new QVBoxLayout(listWidget);
   listLayout->setSpacing(10);
 
-  QButtonGroup *group = new QButtonGroup(listWidget);
-  group->setExclusive(true);
+  buttonGroup = new QButtonGroup(listWidget);
+  buttonGroup->setExclusive(true);
 
-  QPushButton *confirm_btn = new QPushButton(tr("Select"));
-  confirm_btn->setObjectName("confirm_btn");
-  confirm_btn->setEnabled(false);
+  confirmButton = new QPushButton(tr("Select"));
+  confirmButton->setObjectName("confirm_btn");
+  confirmButton->setEnabled(!currentSelection.isEmpty());
 
-  ScrollView *scroll_view = new ScrollView(listWidget, this);
-  scroll_view->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
+  scrollView = new ScrollView(listWidget, this);
+  scrollView->setVerticalScrollBarPolicy(Qt::ScrollBarAsNeeded);
 
   // Create series headers and their expandable content
-  for (const QString &series : seriesToModels.keys()) {
-    // Series header button
-    QPushButton *seriesHeader = new QPushButton("▶ " + series);
-    seriesHeader->setProperty("class", "series-header");
-    seriesHeader->setCheckable(false);
-    seriesExpanded[series] = false;
+  rebuildModelList(seriesToModels);
 
-    QObject::connect(seriesHeader, &QPushButton::clicked, [this, series, seriesHeader, scroll_view]() {
-      toggleSeries(series, seriesHeader, scroll_view);
-    });
-
-    listLayout->addWidget(seriesHeader);
-
-    // Container for series models (initially hidden)
-    QWidget *seriesContainer = new QWidget();
-    QVBoxLayout *seriesLayout = new QVBoxLayout(seriesContainer);
-    seriesLayout->setContentsMargins(20, 0, 0, 0);
-    seriesLayout->setSpacing(10);
-    seriesContainer->hide();
-
-    // Add models for this series
-    for (const QString &model : seriesToModels[series]) {
-      createModelButton(model, seriesLayout, group);
-    }
-
-    seriesWidgets[series] = seriesContainer;
-    listLayout->addWidget(seriesContainer);
-  }
-
-  // Add stretch to keep buttons spaced correctly
-  listLayout->addStretch(1);
-
-  main_layout->addWidget(scroll_view);
+  main_layout->addWidget(scrollView);
   main_layout->addSpacing(35);
 
   // Cancel + confirm buttons
@@ -213,9 +197,9 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
 
   QPushButton *cancel_btn = new QPushButton(tr("Cancel"));
   QObject::connect(cancel_btn, &QPushButton::clicked, this, &ConfirmationDialog::reject);
-  QObject::connect(confirm_btn, &QPushButton::clicked, this, &ConfirmationDialog::accept);
+  QObject::connect(confirmButton, &QPushButton::clicked, this, &ConfirmationDialog::accept);
   blayout->addWidget(cancel_btn);
-  blayout->addWidget(confirm_btn);
+  blayout->addWidget(confirmButton);
 
   QVBoxLayout *outer_layout = new QVBoxLayout(this);
   outer_layout->setContentsMargins(50, 50, 50, 50);
@@ -279,7 +263,11 @@ QString ExpandableMultiOptionDialog::getSelection(const QString &prompt_text,
   return "";
 }
 
-void ExpandableMultiOptionDialog::createModelButton(const QString &modelName, QVBoxLayout *layout, QButtonGroup *group) {
+void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, const QString &modelName, QVBoxLayout *layout, QButtonGroup *group) {
+  if (modelKey.isEmpty()) {
+    return;
+  }
+
   QWidget *modelWidget = new QWidget();
   QHBoxLayout *modelLayout = new QHBoxLayout(modelWidget);
   modelLayout->setContentsMargins(0, 0, 0, 0);
@@ -291,23 +279,18 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelName, QV
   starButton->setCheckable(true);
 
   // Check if this model is a favorite
-  bool isCommunityFav = communityFavorites.contains(modelName);
-  bool isUserFav = userFavorites.contains(modelName);
+  bool isCommunityFav = communityFavorites.contains(modelKey);
+  bool isUserFav = userFavorites.contains(modelKey);
   bool isFavorite = isCommunityFav || isUserFav;
 
   starButton->setChecked(isFavorite);
   starButton->setText(isFavorite ? "♥" : "♡");
 
-  QObject::connect(starButton, &QPushButton::clicked, [this, modelName, starButton]() {
-    // Prevent event propagation to model button
-    toggleFavorite(modelName);
-    bool isCommunityFav = communityFavorites.contains(modelName);
-    bool isUserFav = userFavorites.contains(modelName);
-    bool isFavorite = isCommunityFav || isUserFav;
-    starButton->setText(isFavorite ? "♥" : "♡");
+  QObject::connect(starButton, &QPushButton::clicked, [this, modelKey]() {
+    toggleFavorite(modelKey);
   });
 
-  starButtons[modelName] = starButton;
+  starButtons[modelKey] = starButton;
   modelLayout->addWidget(starButton);
 
   // Model button
@@ -320,6 +303,10 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelName, QV
   QObject::connect(modelButton, &QPushButton::toggled, [=](bool checked) mutable {
     if (checked) {
       selection = modelName;
+      currentSelection = modelName;
+      if (confirmButton) {
+        confirmButton->setEnabled(true);
+      }
       // Enable confirm button logic would go here
       // Manually apply selected style
       modelButton->setStyleSheet("QPushButton {"
@@ -336,6 +323,9 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelName, QV
     } else {
       if (selection == modelName) {
         // Disable confirm button logic would go here
+        if (confirmButton) {
+          confirmButton->setEnabled(false);
+        }
       }
       // Reset to default style
       modelButton->setStyleSheet("");
@@ -343,100 +333,173 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelName, QV
   });
 
   group->addButton(modelButton);
-  modelButtons[modelName] = modelButton;
+  modelButtons[modelKey] = modelButton;
   modelLayout->addWidget(modelButton);
 
   layout->addWidget(modelWidget);
 }
 
-void ExpandableMultiOptionDialog::toggleFavorite(const QString &modelName) {
+void ExpandableMultiOptionDialog::toggleFavorite(const QString &modelKey) {
   // Update local state
-  if (userFavorites.contains(modelName)) {
-    userFavorites.removeAll(modelName);
-  } else {
-    userFavorites.append(modelName);
+  if (modelKey.isEmpty()) {
+    return;
   }
 
-  // Persist to params
-  // Note: This would need access to params, which we don't have in this dialog
-  // The parent should handle persistence when the dialog is accepted
+  if (userFavorites.contains(modelKey)) {
+    userFavorites.removeAll(modelKey);
+  } else {
+    userFavorites.append(modelKey);
+  }
+
+  updateSorting();
 }
 
 void ExpandableMultiOptionDialog::updateSorting() {
-  // Rebuild the series with new sorting
   QMap<QString, QStringList> newSeriesToModels;
+  QSet<QString> favoriteModelKeys;
 
   if (currentSortMode == "favorites") {
-    // Create favorites section
     QStringList favoritesList;
-    QSet<QString> favoriteModelKeys;
 
-    // Add community favorites
     for (const QString &modelKey : communityFavorites) {
-      if (this->modelFileToNameMap.contains(modelKey)) {
-        QString modelName = this->modelFileToNameMap.value(modelKey);
-        if (!favoritesList.contains(modelName)) {
-          favoritesList.append(modelName);
-          favoriteModelKeys.insert(modelKey);
-        }
+      if (modelFileToNameMap.contains(modelKey)) {
+        favoritesList.append(modelFileToNameMap.value(modelKey));
+        favoriteModelKeys.insert(modelKey);
       }
     }
 
-    // Add user favorites
     for (const QString &modelKey : userFavorites) {
-      if (this->modelFileToNameMap.contains(modelKey) && !favoriteModelKeys.contains(modelKey)) {
-        QString modelName = this->modelFileToNameMap.value(modelKey);
-        if (!favoritesList.contains(modelName)) {
-          favoritesList.append(modelName);
-          favoriteModelKeys.insert(modelKey);
-        }
+      if (modelFileToNameMap.contains(modelKey) && !favoriteModelKeys.contains(modelKey)) {
+        favoritesList.append(modelFileToNameMap.value(modelKey));
+        favoriteModelKeys.insert(modelKey);
       }
     }
 
     if (!favoritesList.isEmpty()) {
-      newSeriesToModels["⭐ Favorites"] = favoritesList;
-    }
-
-    // Add other models by series
-    for (const QString &series : seriesToModels.keys()) {
-      QStringList models = seriesToModels[series];
-      QStringList filteredModels;
-      for (const QString &model : models) {
-        if (!favoriteModelKeys.contains(this->modelFileToNameMap.key(model))) {
-          filteredModels.append(model);
-        }
-      }
-      if (!filteredModels.isEmpty()) {
-        newSeriesToModels[series] = filteredModels;
-      }
-    }
-  } else {
-    // Copy existing series
-    newSeriesToModels = seriesToModels;
-
-    // Sort within each series
-    for (QString &series : newSeriesToModels.keys()) {
-      if (series == "⭐ Favorites") continue; // Don't sort favorites
-
-      QStringList &models = newSeriesToModels[series];
-      if (currentSortMode == "date") {
-        // Sort by release date (newest first)
-        std::sort(models.begin(), models.end(), [this](const QString &a, const QString &b) {
-          QString keyA = this->modelFileToNameMap.key(a);
-          QString keyB = this->modelFileToNameMap.key(b);
-          QString dateA = this->modelReleasedDates.value(keyA, "2023-01-01");
-          QString dateB = this->modelReleasedDates.value(keyB, "2023-01-01");
-          return dateA > dateB; // Newest first
-        });
-      } else {
-        // Alphabetical sort
-        models.sort();
-      }
+      std::sort(favoritesList.begin(), favoritesList.end());
+      newSeriesToModels.insert("⭐ Favorites", favoritesList);
+      seriesExpanded.insert("⭐ Favorites", true);
     }
   }
 
-  // Update the UI with new sorting
-  // This would require rebuilding the series containers
-  // For now, just update the seriesToModels for reference
+  for (auto it = baseSeriesToModels.constBegin(); it != baseSeriesToModels.constEnd(); ++it) {
+    QString series = it.key();
+    QStringList models = it.value();
+
+    if (currentSortMode == "date") {
+      std::sort(models.begin(), models.end(), [this](const QString &a, const QString &b) {
+        QString keyA = modelNameToFileMap.value(a);
+        QString keyB = modelNameToFileMap.value(b);
+        QString dateA = modelReleasedDates.value(keyA, "2023-01-01");
+        QString dateB = modelReleasedDates.value(keyB, "2023-01-01");
+        return dateA > dateB;
+      });
+    } else {
+      std::sort(models.begin(), models.end());
+    }
+
+    if (currentSortMode == "favorites" && !favoriteModelKeys.isEmpty()) {
+      QStringList filteredModels;
+      for (const QString &modelName : models) {
+        QString key = modelNameToFileMap.value(modelName);
+        if (!favoriteModelKeys.contains(key)) {
+          filteredModels.append(modelName);
+        }
+      }
+      models = filteredModels;
+    }
+
+    if (!models.isEmpty()) {
+      newSeriesToModels.insert(series, models);
+    }
+  }
+
+  rebuildModelList(newSeriesToModels);
+  refreshFavoriteIcons();
+}
+
+void ExpandableMultiOptionDialog::rebuildModelList(const QMap<QString, QStringList> &newSeriesToModels) {
+  if (!listLayout) return;
+
+  if (buttonGroup) {
+    const auto buttons = buttonGroup->buttons();
+    for (QAbstractButton *button : buttons) {
+      buttonGroup->removeButton(button);
+    }
+  }
+
+  while (QLayoutItem *item = listLayout->takeAt(0)) {
+    if (QWidget *w = item->widget()) {
+      w->deleteLater();
+    } else if (QLayout *layout = item->layout()) {
+      delete layout;
+    }
+    delete item;
+  }
+
+  seriesWidgets.clear();
+  modelButtons.clear();
+  starButtons.clear();
+
+  for (auto it = newSeriesToModels.constBegin(); it != newSeriesToModels.constEnd(); ++it) {
+    const QString &series = it.key();
+    const QStringList &models = it.value();
+
+    QPushButton *seriesHeader = new QPushButton("▶ " + series);
+    seriesHeader->setProperty("class", "series-header");
+    seriesHeader->setCheckable(false);
+
+    bool expanded = seriesExpanded.value(series, false);
+    seriesExpanded.insert(series, expanded);
+
+    QObject::connect(seriesHeader, &QPushButton::clicked, [this, series, seriesHeader]() {
+      toggleSeries(series, seriesHeader, scrollView);
+    });
+
+    QWidget *seriesContainer = new QWidget();
+    QVBoxLayout *seriesLayout = new QVBoxLayout(seriesContainer);
+    seriesLayout->setContentsMargins(20, 0, 0, 0);
+    seriesLayout->setSpacing(10);
+
+    for (const QString &modelName : models) {
+      QString modelKey = modelNameToFileMap.value(modelName);
+      createModelButton(modelKey, modelName, seriesLayout, buttonGroup);
+    }
+
+    if (expanded) {
+      seriesContainer->show();
+      seriesHeader->setText("▼ " + series);
+    } else {
+      seriesContainer->hide();
+      seriesHeader->setText("▶ " + series);
+    }
+
+    seriesWidgets.insert(series, seriesContainer);
+
+    listLayout->addWidget(seriesHeader);
+    listLayout->addWidget(seriesContainer);
+  }
+
+  listLayout->addStretch(1);
+
   seriesToModels = newSeriesToModels;
+}
+
+void ExpandableMultiOptionDialog::refreshFavoriteIcons() {
+  for (auto it = starButtons.begin(); it != starButtons.end(); ++it) {
+    const QString &modelKey = it.key();
+    QPushButton *button = it.value();
+    if (!button) continue;
+
+    bool isCommunityFav = communityFavorites.contains(modelKey);
+    bool isUserFav = userFavorites.contains(modelKey);
+    bool isFavorite = isCommunityFav || isUserFav;
+
+    button->setChecked(isFavorite);
+    button->setText(isFavorite ? "♥" : "♡");
+  }
+
+  if (confirmButton && !selection.isEmpty()) {
+    confirmButton->setEnabled(true);
+  }
 }
