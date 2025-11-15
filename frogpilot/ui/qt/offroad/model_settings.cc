@@ -149,7 +149,10 @@ FrogPilotModelPanel::FrogPilotModelPanel(FrogPilotSettingsWindow *parent) : Frog
           QStringList communityFavorites = QString::fromStdString(params.get("CommunityFavorites")).split(",");
           communityFavorites.removeAll("");
 
-          QString modelToDownload = ExpandableMultiOptionDialog::getSelection(
+          QString savedSortMode = QString::fromStdString(params.get("ModelSortMode"));
+          if (savedSortMode.isEmpty()) savedSortMode = "alphabetical";
+
+          ExpandableMultiOptionDialog dialog(
               tr("Select a driving model to download"),
               downloadableSeriesToModels,
               "",
@@ -157,10 +160,22 @@ FrogPilotModelPanel::FrogPilotModelPanel(FrogPilotSettingsWindow *parent) : Frog
               userFavorites,
               communityFavorites,
               modelReleasedDates,
-              modelFileToNameMap);
-          if (!modelToDownload.isEmpty()) {
-            QString modelKey = modelFileToNameMap.key(modelToDownload);
-            params_memory.put("ModelToDownload", modelKey.toStdString());
+              modelFileToNameMap,
+              savedSortMode);
+
+          int dialogResult = dialog.exec();
+
+          QString sortMode = dialog.getCurrentSortMode();
+          QStringList newUserFavs = dialog.getUserFavorites();
+          params.put("ModelSortMode", sortMode.toStdString());
+          params.put("UserFavorites", newUserFavs.join(",").toStdString());
+          userFavorites = newUserFavs;
+
+          if (dialogResult == QDialog::Accepted) {
+            QString modelToDownload = dialog.selection;
+            if (!modelToDownload.isEmpty()) {
+              QString modelKey = modelFileToNameMap.key(modelToDownload);
+              params_memory.put("ModelToDownload", modelKey.toStdString());
               // Also persist the version for this downloaded model if known
               {
                 QFile vf("/data/models/.model_versions.json");
@@ -174,15 +189,16 @@ FrogPilotModelPanel::FrogPilotModelPanel(FrogPilotSettingsWindow *parent) : Frog
                   }
                 }
               }
-              params_memory.put("ModelDownloadProgress", "Downloading...");
+                params_memory.put("ModelDownloadProgress", "Downloading...");
 
-              downloadModelButton->setText(0, tr("CANCEL"));
+                downloadModelButton->setText(0, tr("CANCEL"));
 
-              downloadModelButton->setValue("Downloading...");
+                downloadModelButton->setValue("Downloading...");
 
-              downloadModelButton->setVisibleButton(1, false);
+                downloadModelButton->setVisibleButton(1, false);
 
-              modelDownloading = true;
+                modelDownloading = true;
+              }
             }
           }
         } else if (id == 1) {
