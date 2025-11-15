@@ -20,6 +20,7 @@
 #include <QAbstractButton>
 #include <QSignalBlocker>
 #include <QScroller>
+#include <QPointer>
 
 #include <algorithm>
 
@@ -250,8 +251,12 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
 }
 
 void ExpandableMultiOptionDialog::toggleSeries(const QString &series, QPushButton *headerButton) {
+  if (!headerButton) return;
+
+  QWidget *container = seriesWidgets.value(series, nullptr);
+  if (!container) return;
+
   bool expanded = seriesExpanded[series];
-  QWidget *container = seriesWidgets[series];
   QString seriesName = series;
 
   if (expanded) {
@@ -265,12 +270,14 @@ void ExpandableMultiOptionDialog::toggleSeries(const QString &series, QPushButto
 
     // Auto-scroll to place the series at the top of the viewport when expanded
     if (scrollView) {
-      QTimer::singleShot(50, [headerButton, this]() {
-        if (!scrollView) return;
-        QWidget *contents = scrollView->widget();
+      QPointer<QPushButton> headerPtr(headerButton);
+      QPointer<ScrollView> scrollPtr(scrollView);
+      QTimer::singleShot(50, [headerPtr, scrollPtr]() {
+        if (!scrollPtr || !headerPtr) return;
+        QWidget *contents = scrollPtr->widget();
         if (!contents) return;
-        if (QScrollBar *vScrollBar = scrollView->verticalScrollBar()) {
-          QPoint headerTop = headerButton->mapTo(contents, QPoint(0, 0));
+        if (QScrollBar *vScrollBar = scrollPtr->verticalScrollBar()) {
+          QPoint headerTop = headerPtr->mapTo(contents, QPoint(0, 0));
           int targetValue = qMax(headerTop.y() - 20, 0);
           vScrollBar->setValue(targetValue);
         }
