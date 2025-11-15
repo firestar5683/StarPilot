@@ -8,9 +8,13 @@
 #include <QList>
 #include <QComboBox>
 #include <QMenu>
+#include <QMetaObject>
 
 #include "selfdrive/ui/qt/widgets/input.h"
 #include "selfdrive/ui/qt/widgets/scrollview.h"
+
+class QButtonGroup;
+class QPushButton;
 
 class ExpandableMultiOptionDialog : public DialogBase {
   Q_OBJECT
@@ -43,6 +47,7 @@ private:
   void createModelButton(const QString &modelKey, const QString &modelName, const QString &displayName,
                          QVBoxLayout *layout, QButtonGroup *group);
   void refreshFavoriteIcons();
+  void updateButtonStyles();
 
   QMap<QString, QStringList> seriesToModels;
   QMap<QString, QStringList> baseSeriesToModels;
@@ -68,4 +73,5 @@ private:
   QButtonGroup *buttonGroup = nullptr;
   QPushButton *confirmButton = nullptr;
   QWidget *listWidgetContainer = nullptr;
+  QMetaObject::Connection buttonGroupConnection;
 };

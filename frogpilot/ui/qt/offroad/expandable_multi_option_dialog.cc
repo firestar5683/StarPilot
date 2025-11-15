@@ -17,6 +17,7 @@
 #include <QSet>
 #include <QVector>
 #include <QAbstractButton>
+#include <QSignalBlocker>
 
 #include <algorithm>
 
@@ -331,55 +332,16 @@ void ExpandableMultiOptionDialog::createModelButton(const QString &modelKey, con
   // Model button
   QPushButton *modelButton = new QPushButton(displayName);
   modelButton->setCheckable(true);
-  modelButton->setChecked(modelKey == currentSelectionKey);
   modelButton->setProperty("class", "model-option");
   modelButton->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-
-  QObject::connect(modelButton, &QPushButton::toggled, [=](bool checked) mutable {
-    if (checked) {
-      selection = modelName;
-      currentSelection = modelName;
-      selectionKey = modelKey;
-      currentSelectionKey = modelKey;
-      if (confirmButton) {
-        confirmButton->setEnabled(true);
-      }
-      // Enable confirm button logic would go here
-      // Manually apply selected style
-      modelButton->setStyleSheet("QPushButton {"
-        "background-color: #465BEA;"
-        "border: 3px solid #FFFFFF;"
-        "color: white;"
-        "font-weight: 500;"
-        "height: 135;"
-        "padding: 0px 50px;"
-        "text-align: left;"
-        "font-size: 55px;"
-        "border-radius: 10px;"
-        "}");
-    } else {
-      // Reset to default style
-      modelButton->setStyleSheet("");
-    }
-  });
+  modelButton->setCursor(Qt::PointingHandCursor);
+  modelButton->setFocusPolicy(Qt::NoFocus);
+  modelButton->setProperty("modelKey", modelKey);
+  modelButton->setProperty("modelName", modelName);
 
   group->addButton(modelButton);
   modelButtons[modelKey] = modelButton;
   modelLayout->addWidget(modelButton);
-
-  if (modelButton->isChecked()) {
-    modelButton->setStyleSheet("QPushButton {"
-      "background-color: #465BEA;"
-      "border: 3px solid #FFFFFF;"
-      "color: white;"
-      "font-weight: 500;"
-      "height: 135;"
-      "padding: 0px 50px;"
-      "text-align: left;"
-      "font-size: 55px;"
-      "border-radius: 10px;"
-      "}");
-  }
 
   layout->addWidget(modelWidget);
 }
@@ -537,6 +499,9 @@ void ExpandableMultiOptionDialog::rebuildModelList(const QStringList &orderedSer
   }
 
   if (buttonGroup) {
+    if (buttonGroupConnection)
+      QObject::disconnect(buttonGroupConnection);
+    buttonGroupConnection = QMetaObject::Connection();
     delete buttonGroup;
     buttonGroup = nullptr;
   }
@@ -596,6 +561,27 @@ void ExpandableMultiOptionDialog::rebuildModelList(const QStringList &orderedSer
   listLayout->addStretch(1);
 
   seriesToModels = newSeriesToModels;
+
+  if (buttonGroupConnection)
+    QObject::disconnect(buttonGroupConnection);
+
+  buttonGroupConnection = QObject::connect(buttonGroup, &QButtonGroup::buttonClicked, this, [this](QAbstractButton *button) {
+    if (!button) return;
+    const QString modelKey = button->property("modelKey").toString();
+    if (modelKey.isEmpty()) return;
+
+    selectionKey = modelKey;
+    currentSelectionKey = modelKey;
+    selection = modelFileToNameMap.value(modelKey, selection);
+    currentSelection = selection;
+    if (confirmButton) {
+      confirmButton->setEnabled(true);
+    }
+
+    updateButtonStyles();
+  });
+
+  updateButtonStyles();
 }
 
 void ExpandableMultiOptionDialog::refreshFavoriteIcons() {
@@ -614,5 +600,34 @@ void ExpandableMultiOptionDialog::refreshFavoriteIcons() {
 
   if (confirmButton && !selectionKey.isEmpty()) {
     confirmButton->setEnabled(true);
+  }
+
+  updateButtonStyles();
+}
+
+void ExpandableMultiOptionDialog::updateButtonStyles() {
+  const QString selectedKey = selectionKey;
+  const QString selectedStyle = QStringLiteral(
+      "QPushButton {"
+      "background-color: #465BEA;"
+      "border: 3px solid #FFFFFF;"
+      "color: white;"
+      "font-weight: 500;"
+      "height: 135;"
+      "padding: 0px 50px;"
+      "text-align: left;"
+      "font-size: 55px;"
+      "border-radius: 10px;"
+      "}");
+
+  for (auto it = modelButtons.begin(); it != modelButtons.end(); ++it) {
+    const QString &modelKey = it.key();
+    QPushButton *button = it.value();
+    if (!button) continue;
+
+    const bool isSelected = (!selectedKey.isEmpty() && modelKey == selectedKey);
+    QSignalBlocker blocker(button);
+    button->setChecked(isSelected);
+    button->setStyleSheet(isSelected ? selectedStyle : QString());
   }
 }

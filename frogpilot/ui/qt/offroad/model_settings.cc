@@ -142,7 +142,21 @@ FrogPilotModelPanel::FrogPilotModelPanel(FrogPilotSettingsWindow *parent) : Frog
             std::sort(models.begin(), models.end());
           }
 
-          QString modelToDownload = ExpandableMultiOptionDialog::getSelection(tr("Select a driving model to download"), downloadableSeriesToModels, "", this);
+          QStringList userFavorites = QString::fromStdString(params.get("UserFavorites")).split(",");
+          userFavorites.removeAll("");
+
+          QStringList communityFavorites = QString::fromStdString(params.get("CommunityFavorites")).split(",");
+          communityFavorites.removeAll("");
+
+          QString modelToDownload = ExpandableMultiOptionDialog::getSelection(
+              tr("Select a driving model to download"),
+              downloadableSeriesToModels,
+              "",
+              this,
+              userFavorites,
+              communityFavorites,
+              modelReleasedDates,
+              modelFileToNameMap);
           if (!modelToDownload.isEmpty()) {
             QString modelKey = modelFileToNameMap.key(modelToDownload);
             params_memory.put("ModelToDownload", modelKey.toStdString());
