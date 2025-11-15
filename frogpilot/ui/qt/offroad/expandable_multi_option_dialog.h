@@ -36,7 +36,7 @@ public:
   QStringList getUserFavorites() const { return userFavorites; }
 
 private:
-  void toggleSeries(const QString &series, QPushButton *headerButton, ScrollView *scrollView);
+  void toggleSeries(const QString &series, QPushButton *headerButton);
   void toggleFavorite(const QString &modelKey);
   void updateSorting();
   void rebuildModelList(const QMap<QString, QStringList> &newSeriesToModels);

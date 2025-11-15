@@ -209,7 +209,7 @@ ExpandableMultiOptionDialog::ExpandableMultiOptionDialog(const QString &prompt_t
   updateSorting();
 }
 
-void ExpandableMultiOptionDialog::toggleSeries(const QString &series, QPushButton *headerButton, ScrollView *scrollView) {
+void ExpandableMultiOptionDialog::toggleSeries(const QString &series, QPushButton *headerButton) {
   bool expanded = seriesExpanded[series];
   QWidget *container = seriesWidgets[series];
   QString seriesName = series;
@@ -225,13 +225,13 @@ void ExpandableMultiOptionDialog::toggleSeries(const QString &series, QPushButto
 
     // Auto-scroll to show expanded content
     if (scrollView) {
-      QTimer::singleShot(50, [container, scrollView]() {
+      QTimer::singleShot(50, [container, this]() {
         QRect containerRect = container->geometry();
-        QScrollBar *vScrollBar = scrollView->verticalScrollBar();
+        QScrollBar *vScrollBar = this->scrollView->verticalScrollBar();
         if (vScrollBar) {
           int currentValue = vScrollBar->value();
           int containerBottom = containerRect.bottom();
-          int viewportHeight = scrollView->viewport()->height();
+          int viewportHeight = this->scrollView->viewport()->height();
 
           // If container extends beyond viewport, scroll to show it
           if (containerBottom > currentValue + viewportHeight) {
@@ -453,7 +453,7 @@ void ExpandableMultiOptionDialog::rebuildModelList(const QMap<QString, QStringLi
     seriesExpanded.insert(series, expanded);
 
     QObject::connect(seriesHeader, &QPushButton::clicked, [this, series, seriesHeader]() {
-      toggleSeries(series, seriesHeader, scrollView);
+      toggleSeries(series, seriesHeader);
     });
 
     QWidget *seriesContainer = new QWidget();
