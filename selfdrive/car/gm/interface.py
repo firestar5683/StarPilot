@@ -28,6 +28,18 @@ CAM_MSG = 0x320  # AEBCmd
                  # TODO: Is this always linked to camera presence?
 ACCELERATOR_POS_MSG = 0xbe
 
+VOLT_LIKE_CARS = (
+  CAR.CHEVROLET_VOLT,
+  CAR.CHEVROLET_VOLT_2019,
+  CAR.CHEVROLET_VOLT_CC,
+  CAR.CHEVROLET_VOLT_CAMERA,
+  CAR.CHEVROLET_VOLT_ASCM,
+  CAR.CHEVROLET_MALIBU,
+  CAR.CHEVROLET_MALIBU_SDGM,
+  CAR.CHEVROLET_MALIBU_CC,
+  CAR.CHEVROLET_MALIBU_HYBRID_CC,
+)
+
 NON_LINEAR_TORQUE_PARAMS = {
   CAR.CHEVROLET_BOLT_EUV: [2.6531724862969748, 1.0, 0.1919764879840985, 0.009054123646805178],
   CAR.CHEVROLET_BOLT_CC: [2.6531724862969748, 1.0, 0.1919764879840985, 0.009054123646805178],
@@ -50,7 +62,7 @@ class CarInterface(CarInterfaceBase):
     return 0.10006696 * sigmoid * (v_ego + 3.12485927)
 
   def get_steer_feedforward_function(self):
-    if self.CP.carFingerprint in (CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_2019, CAR.CHEVROLET_VOLT_CC, CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_ASCM):
+    if self.CP.carFingerprint in VOLT_LIKE_CARS:
       return self.get_steer_feedforward_volt
     else:
       return CarInterfaceBase.get_steer_feedforward_default
@@ -182,6 +194,11 @@ class CarInterface(CarInterfaceBase):
 
     if candidate in (CAR.CHEVROLET_VOLT, CAR.CHEVROLET_VOLT_CC, CAR.CHEVROLET_VOLT_CAMERA):
       ret.minEnableSpeed = -1
+
+    if candidate == CAR.CHEVROLET_VOLT_2019 and not ret.openpilotLongitudinalControl:
+      ret.minEnableSpeed = -1
+
+    if candidate in VOLT_LIKE_CARS:
       ret.lateralTuning.pid.kpBP = [0., 40.]
       ret.lateralTuning.pid.kpV = [0., 0.17]
       ret.lateralTuning.pid.kiBP = [0.]
@@ -264,7 +281,7 @@ class CarInterface(CarInterfaceBase):
       ret.steerActuatorDelay = 0.2
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
-    elif candidate in (CAR.CHEVROLET_TRAVERSE, CAR.CHEVROLET_BLAZER, CAR.CHEVROLET_MALIBU_SDGM):
+    elif candidate in (CAR.CHEVROLET_TRAVERSE, CAR.CHEVROLET_BLAZER):
       ret.steerActuatorDelay = 0.2
       if not ret.openpilotLongitudinalControl:
         ret.minEnableSpeed = -1.  # engage speed is decided by pcm
@@ -282,17 +299,7 @@ class CarInterface(CarInterfaceBase):
     elif candidate == CAR.CADILLAC_CT6_CC:
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
  
-    elif candidate in (CAR.CHEVROLET_MALIBU_CC, CAR.CHEVROLET_MALIBU_HYBRID_CC):
-      ret.steerActuatorDelay = 0.2
-      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
- 
     elif candidate == CAR.CHEVROLET_TRAX:
-      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
-
-    elif candidate == CAR.CHEVROLET_VOLT_2019:
-      ret.steerActuatorDelay = 0.2
-      if not ret.openpilotLongitudinalControl:
-        ret.minEnableSpeed = -1.  # engage speed is decided by pcm
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     if ret.enableGasInterceptor and frogpilot_toggles.gm_pedal_longitudinal:
