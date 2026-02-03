@@ -290,6 +290,7 @@ static bool gm_tx_hook(const CANPacket_t *to_send) {
       tx = false;
     }
   }
+
   return tx;
 }
 
@@ -306,14 +307,17 @@ static int gm_fwd_hook(int bus_num, int addr) {
     }
 
     if (bus_num == 2) {
-      // block lkas message and acc messages
-      // Block 0x370 only for experimental long without pedal interceptor
+      // block lkas message and acc messages if gm_cam_long, forward all others
       bool is_lkas_msg = (addr == 0x180);
-      bool is_acc_msg = (addr == 0x315) || (addr == 0x2CB);
-      if (gm_cam_long && !enable_gas_interceptor) {
-        is_acc_msg = is_acc_msg || (addr == 0x370);
-      }
+      bool is_acc_msg = (addr == 0x315) || (addr == 0x2CB) || (addr == 0x370);
       bool block_msg = is_lkas_msg || (is_acc_msg && gm_cam_long);
+
+      // Block camera 0x370 when using pedal longitudinal (dashboard control)
+      // This is separate from gm_cam_long to avoid blocking 0x315/0x2CB
+      if (gm_pedal_long && (addr == 0x370)) {
+        block_msg = true;
+      }
+
       if (!block_msg) {
         bus_fwd = 0;
       }
@@ -344,10 +348,6 @@ static safety_config gm_init(uint16_t param) {
   gm_pedal_long = GET_FLAG(param, GM_PARAM_PEDAL_LONG);
   gm_cc_long = GET_FLAG(param, GM_PARAM_CC_LONG);
   gm_cam_long = GET_FLAG(param, GM_PARAM_HW_CAM_LONG) && !gm_cc_long;
-  // Block ACC messages when pedal interceptor is active on ACC models
-  if (gm_hw == GM_CAM && enable_gas_interceptor) {
-    gm_cam_long = true;
-  }
   gm_pcm_cruise = ((gm_hw == GM_CAM) && (!gm_cam_long || gm_cc_long) && !gm_force_ascm && !gm_pedal_long) || (gm_hw == GM_SDGM);
   gm_skip_relay_check = GET_FLAG(param, GM_PARAM_NO_CAMERA);
   gm_has_acc = !GET_FLAG(param, GM_PARAM_NO_ACC);
@@ -358,6 +358,9 @@ static safety_config gm_init(uint16_t param) {
     if (gm_cc_long) {
       ret = BUILD_SAFETY_CFG(gm_rx_checks, GM_CC_LONG_TX_MSGS);
     } else if (gm_cam_long) {
+      ret = BUILD_SAFETY_CFG(gm_rx_checks, GM_CAM_LONG_TX_MSGS);
+    } else if (gm_pedal_long) {
+      // Pedal long needs 0x370 for dashboard control
       ret = BUILD_SAFETY_CFG(gm_rx_checks, GM_CAM_LONG_TX_MSGS);
     } else {
       ret = BUILD_SAFETY_CFG(gm_rx_checks, GM_CAM_TX_MSGS);

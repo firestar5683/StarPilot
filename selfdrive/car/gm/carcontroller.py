@@ -377,10 +377,10 @@ class CarController(CarControllerBase):
 
           gas_max = self.params.MAX_GAS
           accel_max = self.params.ACCEL_MAX
-          
+
           accel = clip(actuators.accel + accel_due_to_pitch, self.params.ACCEL_MIN, accel_max)
           torque = self.tireRadius * ((self.mass*accel) + (0.5*self.coeffDrag*self.frontalArea*self.airDensity*CS.out.vEgo**2))
-          
+
           scaled_torque = torque + self.params.ZERO_GAS
           apply_gas_torque = clip(scaled_torque, self.params.MAX_ACC_REGEN, gas_max)
           BRAKE_SWITCH = int(round(interp(CS.out.vEgo, self.params.BRAKE_SWITCH_LOOKUP_BP, self.params.BRAKE_SWITCH_LOOKUP_V)))
@@ -415,6 +415,11 @@ class CarController(CarControllerBase):
             can_sends.append(gmcan.create_buttons(self.packer_pt, CanBus.POWERTRAIN, (CS.buttons_counter + 1) % 4, CruiseButtons.DECEL_SET))
         if self.CP.enableGasInterceptor:
           can_sends.append(create_gas_interceptor_command(self.packer_pt, interceptor_gas_cmd, idx))
+          # Dashboard display for PEDAL_LONG (matches BOLT_EUV behavior)
+          if self.CP.flags & GMFlags.PEDAL_LONG.value:
+            send_fcw = hud_alert == VisualAlert.fcw
+            can_sends.append(gmcan.create_acc_dashboard_command(self.packer_pt, CanBus.POWERTRAIN, CC.enabled,
+                                                                hud_v_cruise * CV.MS_TO_KPH, hud_control, send_fcw))
         if self.CP.carFingerprint not in CC_ONLY_CAR:
           friction_brake_bus = CanBus.CHASSIS
           # GM Camera exceptions
