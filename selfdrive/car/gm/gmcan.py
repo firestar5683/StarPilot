@@ -6,6 +6,56 @@ from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.car import make_can_msg
 from openpilot.selfdrive.car.gm.values import CAR, CruiseButtons, CanBus
 
+MALIBU_BUTTON_TABLE = {
+  0: [0x2FBC, 0x25DE, 0x15EE, 0x1FCC],
+  1: [0x55AE, 0x5F8C, 0x6F7C, 0x659E],
+  4: [0x2ACD, 0x20EF, 0x1ADD, 0x10FF],
+  5: [0x50BF, 0x5A9D, 0x60AF, 0x6A8D],
+}
+
+MALIBU_BUTTON_MAP = {
+  CruiseButtons.UNPRESS: 0,
+  CruiseButtons.RES_ACCEL: 1,
+  CruiseButtons.MAIN: 4,
+  CruiseButtons.CANCEL: 5,
+}
+
+
+def malibu_phase_map_for_button(button):
+  key = MALIBU_BUTTON_MAP.get(button, None)
+  if key is None or key not in MALIBU_BUTTON_TABLE:
+    return None
+  return {v: i for i, v in enumerate(MALIBU_BUTTON_TABLE[key])}
+
+
+def malibu_phase_map_for_acc(acc_value):
+  seq = MALIBU_BUTTON_TABLE.get(acc_value)
+  if not seq:
+    return None
+  return {v: i for i, v in enumerate(seq)}
+
+
+def create_buttons_malibu(packer, bus, button, phase, prefix=0x41):
+  key = MALIBU_BUTTON_MAP.get(button, None)
+  if key is None or key not in MALIBU_BUTTON_TABLE:
+    # fallback to standard checksum for unsupported buttons
+    return create_buttons(packer, bus, 0, button)
+
+  values = {
+    "ACCButtons": button,
+    "RollingCounter": 0,
+    "ACCAlwaysOne": 1,
+    "DistanceButton": 0,
+  }
+  dat = packer.make_can_msg("ASCMSteeringButton", bus, values)[2]
+  data = bytearray(dat)
+  data[3] = prefix & 0xFF
+
+  seq = MALIBU_BUTTON_TABLE[key]
+  val = seq[phase % len(seq)]
+  data[5] = (val >> 8) & 0xFF
+  data[6] = val & 0xFF
+  return make_can_msg(0x1e1, bytes(data), bus)
 
 def create_buttons(packer, bus, idx, button):
   values = {
@@ -22,6 +72,17 @@ def create_buttons(packer, bus, idx, button):
 
   values["SteeringButtonChecksum"] = checksum
   return packer.make_can_msg("ASCMSteeringButton", bus, values)
+
+def create_buttons_malibu_cancel(bus, phase, prefix=0x41):
+  # Malibu Hybrid CC cancel frames use a 4-value pattern in the last 2 bytes.
+  data = bytearray(7)
+  data[3] = prefix & 0xFF
+  data[4] = 0x00
+  cancel_bytes = (0x60, 0xAF, 0x65, 0x9E, 0x6A, 0x8D, 0x6F, 0x7C)
+  idx = (phase % 4) * 2
+  data[5] = cancel_bytes[idx]
+  data[6] = cancel_bytes[idx + 1]
+  return make_can_msg(0x1e1, bytes(data), bus)
 
 
 def create_pscm_status(packer, bus, pscm_status):
@@ -66,6 +127,7 @@ def create_gas_regen_command(packer, bus, throttle, idx, enabled, at_full_stop):
     "GasRegenFullStopActive": at_full_stop,
     "GasRegenAlwaysOne": 1,
     "GasRegenAlwaysOne2": 1,
+    "GasRegenAlwaysOne3": 1,
   }
 
   dat = packer.make_can_msg("ASCMGasRegenCmd", bus, values)[2]
@@ -244,6 +306,13 @@ def create_gm_cc_spam_command(packer, controller, CS, actuators, frogpilot_toggl
   # TODO: Cleanup the timing - normal is every 30ms...
   if (cruiseBtn != CruiseButtons.INIT) and ((controller.frame - controller.last_button_frame) * DT_CTRL > rate):
     controller.last_button_frame = controller.frame
+    if CS.CP.carFingerprint == CAR.CHEVROLET_MALIBU_HYBRID_CC:
+      phase_map = malibu_phase_map_for_button(cruiseBtn)
+      if phase_map:
+        msgs = [create_buttons_malibu(packer, CanBus.POWERTRAIN, cruiseBtn, controller.malibu_button_phase,
+                                      CS.steering_button_prefix)]
+        controller.malibu_button_phase = (controller.malibu_button_phase + 1) % 4
+        return msgs
     idx = (CS.buttons_counter + 1) % 4  # Need to predict the next idx for '22-23 EUV
     return [create_buttons(packer, CanBus.POWERTRAIN, idx, cruiseBtn)]
   else:
