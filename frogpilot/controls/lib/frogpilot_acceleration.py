@@ -55,8 +55,8 @@ A_CRUISE_MIN_SPORT = A_CRUISE_MIN * 2
 A_CRUISE_MAX_BP_CUSTOM =       [0.0,  5., 10., 15., 20., 25., 40.]
 A_CRUISE_MAX_VALS_ECO_EV =     [1.0, 1.0, 1.0, 1.0, 1.0, 1.0, 1.0]
 A_CRUISE_MAX_VALS_SPORT_EV =   [1.25, 1.25, 1.25, 1.25, 1.5, 1.5, 2.0]
-A_CRUISE_MAX_VALS_ECO_GAS =    [5.5, 1.25, 0.70, 0.65, 0.60, 0.55, 0.42]
-A_CRUISE_MAX_VALS_SPORT_GAS =  [6.0, 1.50, 0.80, 0.75, 0.70, 0.65, 0.50]
+A_CRUISE_MAX_VALS_ECO_GAS =    [6.0, 1.40, 0.90, 0.65, 0.60, 0.55, 0.42]
+A_CRUISE_MAX_VALS_SPORT_GAS =  [6.0, 1.50, 1.00, 0.72, 0.65, 0.60, 0.45]
 
 def get_max_accel_eco(v_ego, ev_tuning=True):
   cruise_vals = A_CRUISE_MAX_VALS_ECO_EV if ev_tuning else A_CRUISE_MAX_VALS_ECO_GAS
