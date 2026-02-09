@@ -151,8 +151,11 @@ class CarInterface(CarInterfaceBase):
     ret.autoResumeSng = False
     ret.enableBsm = 0x142 in fingerprint[CanBus.POWERTRAIN]
 
+    def has_sascm(fingerprint):
+      return any(0x2FF in bus for bus in fingerprint)
+
     # Detect Beartech SASCM allows openpilot longitudinal control on SDGM and ASCM_INT vehicles
-    if 0x2FF in fingerprint[0]:
+    if has_sascm(fingerprint):
       ret.flags |= GMFlags.SASCM.value
 
     if PEDAL_MSG in fingerprint[0]:
@@ -176,7 +179,7 @@ class CarInterface(CarInterfaceBase):
     is_bolt_2022_2023_pedal = candidate == CAR.CHEVROLET_BOLT_CC_2022_2023 and ret.enableGasInterceptor
 
     if candidate in (CAMERA_ACC_CAR | SDGM_CAR | ASCM_INT) or candidate == CAR.CHEVROLET_VOLT_CAMERA:
-      ret.experimentalLongitudinalAvailable = candidate not in (CC_ONLY_CAR | ASCM_INT | SDGM_CAR) or 0x2FF in fingerprint[CanBus.POWERTRAIN]
+      ret.experimentalLongitudinalAvailable = candidate not in (CC_ONLY_CAR | ASCM_INT | SDGM_CAR) or has_sascm(fingerprint)
       ret.networkLocation = NetworkLocation.fwdCamera
       ret.radarUnavailable = 0x460 not in fingerprint[CanBus.OBSTACLE]
       ret.pcmCruise = True
