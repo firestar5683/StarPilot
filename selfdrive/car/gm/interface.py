@@ -411,7 +411,7 @@ class CarInterface(CarInterfaceBase):
       ret.pcmCruise = False
       ret.openpilotLongitudinalControl = not frogpilot_toggles.disable_openpilot_long
 
-    elif candidate in CC_ONLY_CAR:
+    elif candidate in CC_ONLY_CAR and not ret.enableGasInterceptor:
       ret.flags |= GMFlags.CC_LONG.value
       gm_safety_cfg.safetyParam |= Panda.FLAG_GM_CC_LONG
       ret.radarUnavailable = True
