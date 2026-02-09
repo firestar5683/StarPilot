@@ -85,6 +85,7 @@ const uint16_t GM_PARAM_BOLT_2017 = 512;
 const uint16_t GM_PARAM_BOLT_2022_PEDAL = 1024;
 const uint16_t GM_PARAM_ASCM_INT = 2048;
 const uint16_t GM_PARAM_FORCE_BRAKE_C9 = 4096;
+const uint16_t GM_PARAM_REMOTE_START_BOOTS_COMMA = 8192;
 
 enum {
   GM_BTN_UNPRESS = 1,
@@ -108,6 +109,7 @@ bool gm_skip_relay_check = false;
 bool gm_force_ascm = false;
 bool gm_bolt_2022_pedal = false;
 bool gm_force_brake_c9 = false;
+bool gm_remote_start_boots_comma = false;
 
 static void handle_gm_wheel_buttons(const CANPacket_t *to_push) {
   int button = (GET_BYTE(to_push, 5) & 0x70U) >> 4;
@@ -376,6 +378,7 @@ static safety_config gm_init(uint16_t param) {
   gm_has_acc = !GET_FLAG(param, GM_PARAM_NO_ACC);
   enable_gas_interceptor = GET_FLAG(param, GM_PARAM_PEDAL_INTERCEPTOR);
   gm_force_brake_c9 = GET_FLAG(param, GM_PARAM_FORCE_BRAKE_C9);
+  gm_remote_start_boots_comma = GET_FLAG(param, GM_PARAM_REMOTE_START_BOOTS_COMMA);
 
   safety_config ret = BUILD_SAFETY_CFG(gm_rx_checks, GM_ASCM_TX_MSGS);
   if (gm_hw == GM_CAM) {

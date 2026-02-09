@@ -170,6 +170,8 @@ FrogPilotVehiclesPanel::FrogPilotVehiclesPanel(FrogPilotSettingsWindow *parent) 
     {"ExperimentalGMTune", tr("FrogsGoMoo's Experimental Tune"), tr("<b>Experimental GM tune by FrogsGoMoo</b> that attempts to smoothen stopping and takeoff control. Use at your own risk!"), ""},
     {"GMPedalLongitudinal", tr("Use Pedal for Longitudinal Control"), tr("<b>Use the pedal interceptor for longitudinal control</b> instead of camera ACC/Redneck when available."), ""},
     {"LongPitch", tr("Smooth Pedal Response on Hills"), tr("<b>Smoothen acceleration and braking</b> when driving downhill/uphill."), ""},
+    {"RedPanda", tr("Red Panda"), tr("<b>Enable Red Panda behavior</b> for GM (alternate safety config and bus numbering). Requires a reboot to take effect."), ""},
+    {"RemoteStartBootsComma", tr("Remote Start Boots Comma"), tr("<b>Use GM C9 SystemPowerMode</b> for ignition detection. Toggle requires a panda firmware update and a reboot to take effect."), ""},
     {"VoltSNG", tr("Stop-and-Go Hack"), tr("<b>Force stop-and-go</b> on the 2017 Chevy Volt."), ""},
 
     {"HKGToggles", tr("Hyundai/Kia/Genesis Settings"), tr("<b>FrogPilot features for Genesis, Hyundai, and Kia vehicles.</b>"), ""},

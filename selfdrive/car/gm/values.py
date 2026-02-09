@@ -333,6 +333,22 @@ class CanBus:
   LOOPBACK = 128
   DROPPED = 192
 
+def set_red_panda_canbus(enabled: bool) -> None:
+  if enabled:
+    CanBus.POWERTRAIN = 4
+    CanBus.OBSTACLE = 5
+    CanBus.CAMERA = 6
+    CanBus.CHASSIS = 6
+    CanBus.LOOPBACK = 132
+    CanBus.DROPPED = 196
+  else:
+    CanBus.POWERTRAIN = 0
+    CanBus.OBSTACLE = 1
+    CanBus.CAMERA = 2
+    CanBus.CHASSIS = 2
+    CanBus.LOOPBACK = 128
+    CanBus.DROPPED = 192
+
 class GMFlags(IntFlag):
   PEDAL_LONG = 1
   CC_LONG = 2
