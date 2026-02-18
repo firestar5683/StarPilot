@@ -34,6 +34,8 @@ class CarState(CarStateBase):
 
     self.single_pedal_mode = False
     self.pedal_steady = 0.
+    self.ecm_cruise_control_ts_nanos = 0
+    self.accelerator_pedal2_ts_nanos = 0
 
   def update(self, pt_cp, cam_cp, loopback_cp, frogpilot_toggles):
     ret = car.CarState.new_message()
@@ -193,6 +195,8 @@ class CarState(CarStateBase):
       if self.CP.pcmCruise and self.CP.carFingerprint not in ASCM_INT:
         ret.cruiseState.nonAdaptive = cam_cp.vl["ASCMActiveCruiseControlStatus"]["ACCCruiseState"] not in (2, 3)
     if self.CP.carFingerprint in CC_ONLY_CAR:
+      self.ecm_cruise_control_ts_nanos = pt_cp.ts_nanos["ECMCruiseControl"]["CruiseActive"]
+      self.accelerator_pedal2_ts_nanos = pt_cp.ts_nanos["AcceleratorPedal2"]["CruiseState"]
       ret.accFaulted = False
       ret.cruiseState.speed = pt_cp.vl["ECMCruiseControl"]["CruiseSetSpeed"] * CV.KPH_TO_MS
       if self.CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL:
@@ -206,6 +210,9 @@ class CarState(CarStateBase):
           ret.cruiseState.enabled = pt_cp.vl["ECMCruiseControl"]["CruiseActive"] != 0
         except:
           ret.cruiseState.enabled = cam_cp.vl["ASCMActiveCruiseControlStatus"]["ACCCmdActive"] != 0
+    else:
+      self.ecm_cruise_control_ts_nanos = 0
+      self.accelerator_pedal2_ts_nanos = 0
 
     if self.CP.enableBsm:
       if not sdgm_non_volt:
