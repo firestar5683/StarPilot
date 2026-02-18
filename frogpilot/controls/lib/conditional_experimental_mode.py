@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import time
+
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import DT_MDL
 from openpilot.common.numpy_fast import interp
@@ -32,6 +34,10 @@ class ConditionalExperimentalMode:
   LIGHT_BOOST_LOW = 1.15
   LIGHT_BOOST_HIGH = 1.2
 
+  # Small latch to avoid frame-to-frame mode chatter.
+  CEM_TRANSITION_GUARD_TIME = 0.50
+  CEM_TRANSITION_BUFFER_TIME = 0.25
+
   @staticmethod
   def get_speed_based_param(speed_mph, param_array):
     """Get parameter value based on current speed using smooth interpolation between breakpoints [0, 35, 55, 70]"""
@@ -49,8 +55,12 @@ class ConditionalExperimentalMode:
     self.experimental_mode = False
     self.stop_light_detected = False
     self.prev_experimental_mode = False  # For hysteresis
+    self.mode_hold_until = 0.0
+    self.mode_false_since = 0.0
 
   def update(self, v_ego, sm, frogpilot_toggles):
+    now = time.monotonic()
+
     if frogpilot_toggles.experimental_mode_via_press:
       self.status_value = params_memory.get_int("CEStatus")
     else:
@@ -58,28 +68,23 @@ class ConditionalExperimentalMode:
 
     if self.status_value not in {1, 2} and not sm["carState"].standstill:
       self.update_conditions(v_ego, sm, frogpilot_toggles)
-      new_experimental_mode = self.check_conditions(v_ego, sm, frogpilot_toggles)
 
-      # Add hysteresis to prevent rapid toggling
-      if new_experimental_mode and not self.prev_experimental_mode:
-        # Require weaker conditions to turn on
-        hysteresis_factor = 0.9
-      elif not new_experimental_mode and self.prev_experimental_mode:
-        # Require stronger conditions to turn off
-        hysteresis_factor = 1.2
-      else:
-        hysteresis_factor = 1.0
+      triggered = self.check_conditions(v_ego, sm, frogpilot_toggles)
+      if triggered:
+        self.mode_hold_until = now + self.CEM_TRANSITION_GUARD_TIME
+        self.mode_false_since = 0.0
+      elif self.mode_false_since == 0.0:
+        self.mode_false_since = now
 
-      # Apply hysteresis to key conditions
-      if hasattr(self, 'slow_lead_detected'):
-        self.slow_lead_detected = self.slow_lead_detected if hysteresis_factor == 1.0 else (self.slow_lead_filter.x >= scale_threshold(v_ego) * hysteresis_factor)
-      if hasattr(self, 'curve_detected'):
-        self.curve_detected = self.curve_detected if hysteresis_factor == 1.0 else (self.curvature_filter.x >= THRESHOLD * hysteresis_factor)
+      hold_active = now < self.mode_hold_until
+      transition_buffer_active = self.mode_false_since != 0.0 and (now - self.mode_false_since) < self.CEM_TRANSITION_BUFFER_TIME
 
-      self.experimental_mode = self.check_conditions(v_ego, sm, frogpilot_toggles)
+      self.experimental_mode = triggered or hold_active or transition_buffer_active
       self.prev_experimental_mode = self.experimental_mode
       params_memory.put_int("CEStatus", self.status_value if self.experimental_mode else 0)
     else:
+      self.mode_hold_until = 0.0
+      self.mode_false_since = 0.0
       self.experimental_mode = self.status_value == 2 or sm["carState"].standstill and self.experimental_mode and self.frogpilot_planner.model_stopped
       self.stop_light_detected &= self.status_value not in {1, 2}
       self.stop_light_filter.x = 0
