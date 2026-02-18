@@ -273,7 +273,7 @@ class CAR(Platforms):
     CHEVROLET_VOLT.specs,
   )
   CHEVROLET_BOLT_CC_2019_2021 = GMPlatformConfig(
-    [GMCarDocs("Chevrolet Bolt EV 2019-2021 - No-ACC")],
+    [GMCarDocs("Chevrolet Bolt EV 2018-2021 - No-ACC")],
     CHEVROLET_BOLT_ACC_2022_2023.specs,
   )
   CHEVROLET_BOLT_ACC_2022_2023_PEDAL = GMPlatformConfig(
