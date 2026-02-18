@@ -70,8 +70,9 @@ interface_names = _get_interface_names()
 interfaces = load_interfaces(interface_names)
 
 
-def can_fingerprint(next_can: Callable) -> tuple[str | None, dict[int, dict]]:
+def can_fingerprint(next_can: Callable) -> tuple[str | None, dict[int, dict], dict[int, set[int]]]:
   finger = gen_empty_fingerprint()
+  nonzero_addrs = {bus: set() for bus in finger}
   candidate_cars = {i: all_legacy_fingerprint_cars() for i in [0, 1]}  # attempt fingerprint on both bus 0 and 1
   frame = 0
   car_fingerprint = None
@@ -86,7 +87,10 @@ def can_fingerprint(next_can: Callable) -> tuple[str | None, dict[int, dict]]:
       if can.src < 128:
         if can.src not in finger:
           finger[can.src] = {}
+          nonzero_addrs[can.src] = set()
         finger[can.src][can.address] = len(can.dat)
+        if any(can.dat):
+          nonzero_addrs[can.src].add(can.address)
 
       for b in candidate_cars:
         # Ignore extended messages and VIN query response.
@@ -107,7 +111,7 @@ def can_fingerprint(next_can: Callable) -> tuple[str | None, dict[int, dict]]:
 
     frame += 1
 
-  return car_fingerprint, finger
+  return car_fingerprint, finger, nonzero_addrs
 
 
 # **** for use live only ****
@@ -164,7 +168,7 @@ def fingerprint(logcan, sendcan, num_pandas):
   # CAN fingerprint
   # drain CAN socket so we get the latest messages
   messaging.drain_sock_raw(logcan)
-  car_fingerprint, finger = can_fingerprint(lambda: get_one_can(logcan))
+  car_fingerprint, finger, nonzero_addrs = can_fingerprint(lambda: get_one_can(logcan))
 
   exact_match = True
   source = car.CarParams.FingerprintSource.can
@@ -183,7 +187,7 @@ def fingerprint(logcan, sendcan, num_pandas):
                  fw_count=len(car_fw), ecu_responses=list(ecu_rx_addrs), vin_rx_addr=vin_rx_addr, vin_rx_bus=vin_rx_bus,
                  fingerprints=repr(finger), fw_query_time=fw_query_time, error=True)
 
-  return car_fingerprint, finger, vin, car_fw, source, exact_match
+  return car_fingerprint, finger, nonzero_addrs, vin, car_fw, source, exact_match
 
 
 def get_car_interface(CP, FPCP):
@@ -250,7 +254,7 @@ def migrate_legacy_bolt_candidate(candidate: str) -> str:
 
 
 def get_car(logcan, sendcan, experimental_long_allowed, params, num_pandas=1, frogpilot_toggles=None):
-  candidate, fingerprints, vin, car_fw, source, exact_match = fingerprint(logcan, sendcan, num_pandas)
+  candidate, fingerprints, nonzero_addrs, vin, car_fw, source, exact_match = fingerprint(logcan, sendcan, num_pandas)
 
   if candidate is None or frogpilot_toggles.force_fingerprint:
     if frogpilot_toggles.car_model is not None:
@@ -299,12 +303,12 @@ def get_car(logcan, sendcan, experimental_long_allowed, params, num_pandas=1, fr
       if year_code in year_map:
         vin_candidate = year_map[year_code]
         if vin_candidate == GM_CAR.CHEVROLET_BOLT_ACC_2022_2023:
-          has_acc_msg = (
-            0x370 in fingerprints.get(GMCanBus.CAMERA, {}) or
-            0x370 in fingerprints.get(GMCanBus.POWERTRAIN, {})
+          has_acc_data = (
+            0x370 in nonzero_addrs.get(GMCanBus.CAMERA, set()) or
+            0x370 in nonzero_addrs.get(GMCanBus.POWERTRAIN, set())
           )
           has_pedal_msg = 0x201 in fingerprints.get(GMCanBus.POWERTRAIN, {})
-          if has_acc_msg:
+          if has_acc_data:
             vin_candidate = GM_CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL if has_pedal_msg else GM_CAR.CHEVROLET_BOLT_ACC_2022_2023
           else:
             vin_candidate = GM_CAR.CHEVROLET_BOLT_CC_2022_2023
