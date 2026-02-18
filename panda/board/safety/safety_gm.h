@@ -48,7 +48,7 @@ const CanMsg GM_ASCM_TX_MSGS[] = {{0x180, 0, 4}, {0x409, 0, 7}, {0x40A, 0, 7}, {
                                   {0xA1, 1, 7}, {0x306, 1, 8}, {0x308, 1, 7}, {0x310, 1, 2},   // obs bus
                                   {0x315, 2, 5}};  // ch bus
 
-const CanMsg GM_CAM_TX_MSGS[] = {{0x180, 0, 4}, {0x200, 0, 6}, {0x1E1, 0, 7}, {0xBD, 0, 7}, {0x1F5, 0, 8}, // pt bus
+const CanMsg GM_CAM_TX_MSGS[] = {{0x180, 0, 4}, {0x370, 0, 6}, {0x200, 0, 6}, {0x1E1, 0, 7}, {0x3D1, 0, 8}, {0xBD, 0, 7}, {0x1F5, 0, 8}, // pt bus
                                  {0x1E1, 2, 7}, {0x184, 2, 8}};  // camera bus
 
 const CanMsg GM_CAM_LONG_TX_MSGS[] = {{0x180, 0, 4}, {0x315, 0, 5}, {0x2CB, 0, 8}, {0x370, 0, 6}, {0x200, 0, 6}, {0xBD, 0, 7}, {0x1F5, 0, 8},   // pt bus
@@ -57,7 +57,7 @@ const CanMsg GM_CAM_LONG_TX_MSGS[] = {{0x180, 0, 4}, {0x315, 0, 5}, {0x2CB, 0, 8
 const CanMsg GM_SDGM_TX_MSGS[] = {{0x180, 0, 4}, {0x1E1, 0, 7}, {0xBD, 0, 7}, {0x1F5, 0, 8}, // pt bus
                                   {0x184, 2, 8}};  // camera bus
 
-const CanMsg GM_CC_LONG_TX_MSGS[] = {{0x180, 0, 4}, {0x1E1, 0, 7}, {0xBD, 0, 7}, {0x1F5, 0, 8},  // pt bus
+const CanMsg GM_CC_LONG_TX_MSGS[] = {{0x180, 0, 4}, {0x370, 0, 6}, {0x1E1, 0, 7}, {0xBD, 0, 7}, {0x1F5, 0, 8},  // pt bus
                                      {0x184, 2, 8}, {0x1E1, 2, 7}};  // camera bus
 
 // TODO: do checksum and counter checks. Add correct timestep, 0.1s for now.
@@ -291,6 +291,14 @@ static bool gm_tx_hook(const CANPacket_t *to_send) {
     }
   }
 
+  // Cruise status spoofing only for non-ACC (CC-only) paths
+  if (addr == 0x3D1) {
+    bool allowed_cruise_status = !gm_has_acc;
+    if (!allowed_cruise_status) {
+      tx = false;
+    }
+  }
+
   // REGEN PADDLE
   if (addr == 0xBD) {
     bool regen_apply = GET_BIT(to_send, 7) || GET_BIT(to_send, 6) || GET_BIT(to_send, 5) || GET_BIT(to_send, 4);
@@ -317,26 +325,32 @@ static int gm_fwd_hook(int bus_num, int addr) {
     if (bus_num == 0) {
       // block PSCMStatus; forwarded through openpilot to hide an alert from the camera
       bool is_pscm_msg = (addr == 0x184);
-      if (!is_pscm_msg) {
+      // For non-ACC camera/SDGM paths, keep stock ECMCruiseControl off camera side
+      // so openpilot's spoofed 0x3D1 is the only cruise-status source there.
+      bool is_ecm_cruise_status_msg = (addr == 0x3D1) && !gm_has_acc;
+      if (!is_pscm_msg && !is_ecm_cruise_status_msg) {
         bus_fwd = 2;
       }
     }
 
     if (bus_num == 2) {
       bool is_lkas_msg = (addr == 0x180);
-      bool block_msg = false;
-      if (gm_bolt_2022_pedal) {
-        // Block 0x370 only for experimental long without pedal interceptor
-        bool is_acc_msg = (addr == 0x315) || (addr == 0x2CB);
-        if (gm_cam_long && !enable_gas_interceptor) {
-          is_acc_msg = is_acc_msg || (addr == 0x370);
-        }
-        block_msg = is_lkas_msg || (is_acc_msg && gm_cam_long);
-      } else {
-        // block lkas message and acc messages if gm_cam_long, forward all others
-        bool is_acc_msg = (addr == 0x315) || (addr == 0x2CB) || (addr == 0x370);
-        block_msg = is_lkas_msg || (is_acc_msg && gm_cam_long);
+      bool is_acc_status_msg = (addr == 0x370);
+      bool is_acc_actuation_msg = (addr == 0x315) || (addr == 0x2CB);
+
+      // Block steering if we are controlling LKA
+      bool block_msg = is_lkas_msg;
+
+      // Block Dashboard Status if we are in Native Long OR Pedal Long
+      if (gm_cam_long || gm_pedal_long) {
+        block_msg |= is_acc_status_msg;
       }
+
+      // Block Native Actuation ONLY if we are in Native Long (not Pedal)
+      if (gm_cam_long) {
+        block_msg |= is_acc_actuation_msg;
+      }
+
       if (!block_msg) {
         bus_fwd = 0;
       }
