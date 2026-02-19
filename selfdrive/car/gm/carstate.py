@@ -109,20 +109,17 @@ class CarState(CarStateBase):
         ret.brake = pt_cp.vl.get("ECMAcceleratorPos", {}).get("BrakePedalPos", 0)
       else:
         ret.brake = pt_cp.vl["ECMAcceleratorPos"]["BrakePedalPos"]
-    if self.CP.carFingerprint == CAR.CHEVROLET_BLAZER:
-      # Blazer can miss light taps on analog threshold; include digital brake switch.
-      ret.brakePressed = (pt_cp.vl["ECMEngineStatus"]["BrakePressed"] != 0) or (ret.brake >= 0.7)
-    elif self.CP.carFingerprint == CAR.CHEVROLET_MALIBU_CC:
+    if self.CP.carFingerprint == CAR.CHEVROLET_MALIBU_CC:
       # Malibu CC: keep strict opgm behavior using BrakePedalPos >= 8.
       ret.brakePressed = ret.brake >= 8
-    elif (self.CP.flags & GMFlags.FORCE_BRAKE_C9.value) or (self.CP.networkLocation == NetworkLocation.fwdCamera):
+    elif (self.CP.flags & GMFlags.FORCE_BRAKE_C9.value) or ((self.CP.networkLocation == NetworkLocation.fwdCamera) and (self.CP.carFingerprint != CAR.CHEVROLET_BLAZER)):
       ret.brakePressed = pt_cp.vl["ECMEngineStatus"]["BrakePressed"] != 0
     else:
       # Some Volt 2016-17 have loose brake pedal push rod retainers which causes the ECM to believe
       # that the brake is being intermittently pressed without user interaction.
       # To avoid a cruise fault we need to use a conservative brake position threshold
       # https://static.nhtsa.gov/odi/tsbs/2017/MC-10137629-9999.pdf
-      analog_thresh = 0.15 if (self.CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG.value) else 8
+      analog_thresh = 0.10 if (self.CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG.value) else 8
       ret.brakePressed = ret.brake >= analog_thresh
 
     # Regen braking is braking
