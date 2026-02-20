@@ -400,12 +400,9 @@ class CarController(CarControllerBase):
         sent_ecm_this_frame = False
 
         accel_pedal2_edge = False
-        if accel_pedal2_ts_ns > 0:
-          # Derive phase from absolute AcceleratorPedal2 timestamp to avoid drift when the control loop
-          # occasionally misses one or more 40Hz edges.
-          self.ecm_anchor_tick_mod = int((accel_pedal2_ts_ns // ECM_ACCEL_PEDAL2_TICK_NS) % ECM_CRUISE_ANCHOR_TICKS)
         if accel_pedal2_ts_ns > self.last_accel_pedal2_ts_ns:
           self.last_accel_pedal2_ts_ns = accel_pedal2_ts_ns
+          self.ecm_anchor_tick_mod = (self.ecm_anchor_tick_mod + 1) % ECM_CRUISE_ANCHOR_TICKS
           accel_pedal2_edge = True
         if (accel_pedal2_edge and anchor_locked and self.ecm_anchor_tick_mod == self.ecm_anchor_phase_mod and
             (now_nanos - self.last_ecm_cruise_spoof_ts_ns) >= ECM_CRUISE_ANCHOR_GAP_NS):
