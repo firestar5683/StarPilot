@@ -40,7 +40,6 @@ ECM_CRUISE_STALE_NS     = 300_000_000  # reset lock if no new stock edge arrives
 ECM_CRUISE_PERIOD_NS    = 100_000_000  # 10Hz spoof cadence aligned to stock cycle
 ECM_CRUISE_ANCHOR_TICKS = 4            # AcceleratorPedal2 (~40Hz) ticks per 3D1 cycle
 ECM_CRUISE_ANCHOR_HITS  = 6            # require repeated agreement before using anchor
-ECM_ACCEL_PEDAL2_TICK_NS = 25_000_000  # AcceleratorPedal2 period (~40Hz) used for absolute phase derivation
 ECM_CRUISE_PHASE_MISS_TOLERANCE = 2    # ignore occasional single-tick phase misses before relocking
 ECM_CRUISE_ANCHOR_GAP_NS = 80_000_000  # min gap for anchor sends (~10Hz target)
 ECM_CRUISE_RETRY_NS     = 12_000_000   # one extra retry shortly after each stock edge
