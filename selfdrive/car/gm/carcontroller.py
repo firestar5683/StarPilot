@@ -419,7 +419,7 @@ class CarController(CarControllerBase):
 
             gas_max = self.params.MAX_GAS
             accel_max = self.params.ACCEL_MAX
-            
+
             accel = clip(actuators.accel + accel_due_to_pitch, self.params.ACCEL_MIN, accel_max)
             torque = self.tireRadius * ((self.mass*accel) + (0.5*self.coeffDrag*self.frontalArea*self.airDensity*CS.out.vEgo**2))
             
@@ -501,7 +501,10 @@ class CarController(CarControllerBase):
       if not self.CP.radarUnavailable:
         send_adas = True
         if self.CP.carFingerprint in kaofui_cars:
-          send_adas = (self.CP.networkLocation != NetworkLocation.fwdCamera) and (self.CP.carFingerprint not in SDGM_CAR)
+          if self.CP.carFingerprint in ASCM_INT:
+            send_adas = True
+          else:
+            send_adas = (self.CP.networkLocation != NetworkLocation.fwdCamera) and (self.CP.carFingerprint not in SDGM_CAR)
 
         if send_adas:
           tt = self.frame * DT_CTRL
