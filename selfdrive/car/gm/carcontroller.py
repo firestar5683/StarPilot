@@ -40,6 +40,8 @@ ECM_CRUISE_STALE_NS     = 300_000_000  # reset lock if no new stock edge arrives
 ECM_CRUISE_PERIOD_NS    = 100_000_000  # 10Hz spoof cadence aligned to stock cycle
 ECM_CRUISE_ANCHOR_TICKS = 4            # AcceleratorPedal2 (~40Hz) ticks per 3D1 cycle
 ECM_CRUISE_ANCHOR_HITS  = 6            # require repeated agreement before using anchor
+ECM_ACCEL_PEDAL2_TICK_NS = 25_000_000  # AcceleratorPedal2 period (~40Hz) used for absolute phase derivation
+ECM_CRUISE_PHASE_MISS_TOLERANCE = 2    # ignore occasional single-tick phase misses before relocking
 ECM_CRUISE_ANCHOR_GAP_NS = 80_000_000  # min gap for anchor sends (~10Hz target)
 ECM_CRUISE_RETRY_NS     = 12_000_000   # one extra retry shortly after each stock edge
 # Constants for pitch compensation
@@ -114,6 +116,7 @@ class CarController(CarControllerBase):
     self.ecm_anchor_tick_mod = 0
     self.ecm_anchor_phase_mod = -1
     self.ecm_anchor_phase_hits = 0
+    self.ecm_anchor_phase_misses = 0
 
   def calc_pedal_command(self, accel: float, long_active: bool, car_velocity) -> Tuple[float, bool]:
     if not long_active:
@@ -398,9 +401,12 @@ class CarController(CarControllerBase):
         sent_ecm_this_frame = False
 
         accel_pedal2_edge = False
+        if accel_pedal2_ts_ns > 0:
+          # Derive phase from absolute AcceleratorPedal2 timestamp to avoid drift when the control loop
+          # occasionally misses one or more 40Hz edges.
+          self.ecm_anchor_tick_mod = int((accel_pedal2_ts_ns // ECM_ACCEL_PEDAL2_TICK_NS) % ECM_CRUISE_ANCHOR_TICKS)
         if accel_pedal2_ts_ns > self.last_accel_pedal2_ts_ns:
           self.last_accel_pedal2_ts_ns = accel_pedal2_ts_ns
-          self.ecm_anchor_tick_mod = (self.ecm_anchor_tick_mod + 1) % ECM_CRUISE_ANCHOR_TICKS
           accel_pedal2_edge = True
         if (accel_pedal2_edge and anchor_locked and self.ecm_anchor_tick_mod == self.ecm_anchor_phase_mod and
             (now_nanos - self.last_ecm_cruise_spoof_ts_ns) >= ECM_CRUISE_ANCHOR_GAP_NS):
@@ -414,16 +420,25 @@ class CarController(CarControllerBase):
           self.last_ecm_cruise_stock_ts_ns = stock_ts_ns
           if self.ecm_anchor_tick_mod == self.ecm_anchor_phase_mod:
             self.ecm_anchor_phase_hits += 1
+            self.ecm_anchor_phase_misses = 0
           else:
-            self.ecm_anchor_phase_mod = self.ecm_anchor_tick_mod
-            self.ecm_anchor_phase_hits = 1
+            self.ecm_anchor_phase_misses += 1
+            if self.ecm_anchor_phase_misses >= ECM_CRUISE_PHASE_MISS_TOLERANCE:
+              self.ecm_anchor_phase_mod = self.ecm_anchor_tick_mod
+              self.ecm_anchor_phase_hits = 1
+              self.ecm_anchor_phase_misses = 0
 
           if not sent_ecm_this_frame:
             can_sends.append(gmcan.create_ecm_cruise_control_command(
               self.packer_pt, CanBus.POWERTRAIN, spoof_enabled, spoof_set_speed_kph))
             self.last_ecm_cruise_spoof_ts_ns = now_nanos
             sent_ecm_this_frame = True
-          self.ecm_cruise_retry_ts_ns = now_nanos + ECM_CRUISE_RETRY_NS
+
+          # Retries help during startup/unlock, but can add jitter when phase lock is stable.
+          if self.ecm_anchor_phase_hits < ECM_CRUISE_ANCHOR_HITS:
+            self.ecm_cruise_retry_ts_ns = now_nanos + ECM_CRUISE_RETRY_NS
+          else:
+            self.ecm_cruise_retry_ts_ns = 0
 
         if self.ecm_cruise_retry_ts_ns > 0 and now_nanos >= self.ecm_cruise_retry_ts_ns and (now_nanos - self.last_ecm_cruise_spoof_ts_ns) >= 5_000_000:
           can_sends.append(gmcan.create_ecm_cruise_control_command(
@@ -434,6 +449,7 @@ class CarController(CarControllerBase):
         if self.last_ecm_cruise_stock_ts_ns > 0 and (now_nanos - self.last_ecm_cruise_stock_ts_ns) > ECM_CRUISE_STALE_NS:
           self.last_ecm_cruise_stock_ts_ns = 0
           self.ecm_anchor_phase_hits = 0
+          self.ecm_anchor_phase_misses = 0
           self.ecm_cruise_retry_ts_ns = 0
 
         if self.last_ecm_cruise_stock_ts_ns == 0 and self.ecm_anchor_phase_hits < ECM_CRUISE_ANCHOR_HITS and self.frame % 10 == 0:
