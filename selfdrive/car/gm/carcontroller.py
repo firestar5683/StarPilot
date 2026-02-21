@@ -36,12 +36,7 @@ PADDLE_NONBLOCK_GAP_NS  = 1_000_000   # ≥1 ms since last paddle send
 PADDLE_SLOT_EARLY_NS    = 1_000_000   # allow firing up to 1 ms before slot
 OVERFLOW_THRESH         = 1.00        # fire one extra slot whenever credits ≥ 1.0
 PADDLE_TARGET_HZ        = 42.0        # desired paddle rate (Hz) when regen active; steer is ~33 Hz
-ECM_CRUISE_STALE_NS     = 300_000_000  # reset lock if no new stock edge arrives
-ECM_CRUISE_PERIOD_NS    = 100_000_000  # 10Hz spoof cadence aligned to stock cycle
-ECM_CRUISE_LOCK_EDGES   = 3            # stock edges needed before entering holdover mode
-ECM_CRUISE_ERR_NS       = 20_000_000   # stock-edge error threshold before counting a miss
-ECM_CRUISE_ERR_COUNT    = 3            # consecutive stock-edge misses to force relock
-ECM_CRUISE_RETRY_NS     = 12_000_000   # one extra retry shortly after each stock edge
+ECM_CRUISE_PERIOD_NS    = 10_000_000   # 100Hz spoof cadence (10 ms)
 # Constants for pitch compensation
 BRAKE_PITCH_FACTOR_BP = [5., 10.]  # [m/s] smoothly revert to planned accel at low speeds
 BRAKE_PITCH_FACTOR_V = [0., 1.]  # [unitless in [0,1]]; don't touch
@@ -108,13 +103,7 @@ class CarController(CarControllerBase):
     self.spoof_over_sent = False
     self.last_interval_ns = 0
     self.last_ecm_cruise_stock_ts_ns = 0
-    self.last_ecm_cruise_spoof_ts_ns = 0
-    self.ecm_cruise_retry_ts_ns = 0
     self.ecm_cruise_locked = False
-    self.ecm_cruise_acq_edges = 0
-    self.ecm_cruise_prev_stock_ts_ns = 0
-    self.ecm_cruise_expected_stock_ts_ns = 0
-    self.ecm_cruise_bad_edge_count = 0
     self.ecm_cruise_next_send_ts_ns = 0
 
   def calc_pedal_command(self, accel: float, long_active: bool, car_velocity) -> Tuple[float, bool]:
@@ -395,72 +384,23 @@ class CarController(CarControllerBase):
         spoof_enabled = bool(CC.enabled)
         spoof_set_speed_kph = hud_v_cruise * CV.MS_TO_KPH if spoof_enabled else 0.0
         stock_ts_ns = getattr(CS, "ecm_cruise_control_ts_nanos", 0)
-        new_stock_edge = stock_ts_ns > self.last_ecm_cruise_stock_ts_ns
-        if new_stock_edge:
+        if stock_ts_ns > self.last_ecm_cruise_stock_ts_ns:
           self.last_ecm_cruise_stock_ts_ns = stock_ts_ns
           if not self.ecm_cruise_locked:
-            can_sends.append(gmcan.create_ecm_cruise_control_command(
-              self.packer_pt, CanBus.POWERTRAIN, spoof_enabled, spoof_set_speed_kph))
-            self.last_ecm_cruise_spoof_ts_ns = now_nanos
-            self.ecm_cruise_retry_ts_ns = now_nanos + ECM_CRUISE_RETRY_NS
-
-            stock_period_ns = stock_ts_ns - self.ecm_cruise_prev_stock_ts_ns if self.ecm_cruise_prev_stock_ts_ns > 0 else ECM_CRUISE_PERIOD_NS
-            if 80_000_000 <= stock_period_ns <= 130_000_000:
-              self.ecm_cruise_acq_edges += 1
-            else:
-              self.ecm_cruise_acq_edges = 1
-            self.ecm_cruise_prev_stock_ts_ns = stock_ts_ns
-
-            if self.ecm_cruise_acq_edges >= ECM_CRUISE_LOCK_EDGES:
-              self.ecm_cruise_locked = True
-              self.ecm_cruise_bad_edge_count = 0
-              self.ecm_cruise_expected_stock_ts_ns = stock_ts_ns + ECM_CRUISE_PERIOD_NS
-              self.ecm_cruise_next_send_ts_ns = now_nanos + ECM_CRUISE_PERIOD_NS
-          else:
-            phase_err_ns = stock_ts_ns - self.ecm_cruise_expected_stock_ts_ns
-            if abs(phase_err_ns) > ECM_CRUISE_ERR_NS:
-              self.ecm_cruise_bad_edge_count += 1
-            else:
-              self.ecm_cruise_bad_edge_count = 0
-            self.ecm_cruise_expected_stock_ts_ns += ECM_CRUISE_PERIOD_NS
-
-            if self.ecm_cruise_bad_edge_count >= ECM_CRUISE_ERR_COUNT:
-              self.ecm_cruise_locked = False
-              self.ecm_cruise_acq_edges = 0
-              self.ecm_cruise_prev_stock_ts_ns = stock_ts_ns
-              self.ecm_cruise_expected_stock_ts_ns = 0
-              self.ecm_cruise_next_send_ts_ns = 0
-              self.ecm_cruise_retry_ts_ns = 0
-
-        if self.ecm_cruise_retry_ts_ns > 0 and now_nanos >= self.ecm_cruise_retry_ts_ns and (now_nanos - self.last_ecm_cruise_spoof_ts_ns) >= 5_000_000:
-          can_sends.append(gmcan.create_ecm_cruise_control_command(
-            self.packer_pt, CanBus.POWERTRAIN, spoof_enabled, spoof_set_speed_kph))
-          self.last_ecm_cruise_spoof_ts_ns = now_nanos
-          self.ecm_cruise_retry_ts_ns = 0
+            self.ecm_cruise_locked = True
+            self.ecm_cruise_next_send_ts_ns = now_nanos
 
         if self.ecm_cruise_locked and self.ecm_cruise_next_send_ts_ns > 0 and now_nanos >= self.ecm_cruise_next_send_ts_ns:
           send_count = 0
           while now_nanos >= self.ecm_cruise_next_send_ts_ns and send_count < 2:
             can_sends.append(gmcan.create_ecm_cruise_control_command(
               self.packer_pt, CanBus.POWERTRAIN, spoof_enabled, spoof_set_speed_kph))
-            self.last_ecm_cruise_spoof_ts_ns = now_nanos
             self.ecm_cruise_next_send_ts_ns += ECM_CRUISE_PERIOD_NS
             send_count += 1
 
-        if self.last_ecm_cruise_stock_ts_ns > 0 and (now_nanos - self.last_ecm_cruise_stock_ts_ns) > ECM_CRUISE_STALE_NS:
-          self.last_ecm_cruise_stock_ts_ns = 0
-          self.ecm_cruise_locked = False
-          self.ecm_cruise_acq_edges = 0
-          self.ecm_cruise_prev_stock_ts_ns = 0
-          self.ecm_cruise_expected_stock_ts_ns = 0
-          self.ecm_cruise_bad_edge_count = 0
-          self.ecm_cruise_next_send_ts_ns = 0
-          self.ecm_cruise_retry_ts_ns = 0
-
-        if not self.ecm_cruise_locked and self.last_ecm_cruise_stock_ts_ns == 0 and self.frame % 10 == 0:
+        if not self.ecm_cruise_locked and self.frame % 2 == 0:
           can_sends.append(gmcan.create_ecm_cruise_control_command(
             self.packer_pt, CanBus.POWERTRAIN, spoof_enabled, spoof_set_speed_kph))
-          self.last_ecm_cruise_spoof_ts_ns = now_nanos
 
       # Gas/regen, brakes, and UI commands - all at 25Hz
       if self.frame % 4 == 0:
