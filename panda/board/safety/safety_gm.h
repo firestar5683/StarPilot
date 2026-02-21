@@ -89,9 +89,6 @@ const uint16_t GM_PARAM_REMOTE_START_BOOTS_COMMA = 8192;
 const uint16_t GM_PARAM_PANDA_3D1_SCHED = 16384;
 
 const uint32_t GM_3D1_PERIOD_US = 100000U;
-const uint32_t GM_3D1_TX_OFFSET_US = 0U;
-const uint32_t GM_3D1_LOCK_TOLERANCE_US = 20000U;
-
 void can_send(CANPacket_t *to_push, uint8_t bus_number, bool skip_tx_hook);
 
 enum {
@@ -124,8 +121,6 @@ bool gm_3d1_spoof_valid = false;
 bool gm_3d1_internal_tx = false;
 uint8_t gm_3d1_spoof_data[8] = {0U};
 uint32_t gm_3d1_next_tx_us = 0U;
-uint32_t gm_3d1_expected_stock_us = 0U;
-bool gm_3d1_phase_locked = false;
 
 static void gm_try_send_3d1_spoof(uint32_t now_us) {
   if (!(gm_panda_3d1_sched && gm_3d1_spoof_valid && (gm_3d1_next_tx_us != 0U))) {
@@ -227,7 +222,6 @@ static void gm_rx_hook(const CANPacket_t *to_push) {
 
     // Cruise check for CC only cars
     if ((addr == 0x3D1) && !gm_has_acc) {
-      uint32_t now_us = microsecond_timer_get();
       bool cruise_engaged = (GET_BYTE(to_push, 4) >> 7) != 0U;
       if (gm_cc_long) {
         pcm_cruise_check(cruise_engaged);
@@ -235,26 +229,6 @@ static void gm_rx_hook(const CANPacket_t *to_push) {
         cruise_engaged_prev = cruise_engaged;
       }
 
-      if (gm_panda_3d1_sched) {
-        if (!gm_3d1_phase_locked) {
-          gm_3d1_phase_locked = true;
-          gm_3d1_expected_stock_us = now_us + GM_3D1_PERIOD_US;
-        } else {
-          int32_t phase_err_us = (int32_t)(now_us - gm_3d1_expected_stock_us);
-          if (phase_err_us < 0) {
-            phase_err_us = -phase_err_us;
-          }
-
-          if ((uint32_t)phase_err_us <= GM_3D1_LOCK_TOLERANCE_US) {
-            gm_3d1_expected_stock_us += GM_3D1_PERIOD_US;
-          } else {
-            gm_3d1_expected_stock_us = now_us + GM_3D1_PERIOD_US;
-          }
-        }
-
-        gm_3d1_next_tx_us = now_us + GM_3D1_TX_OFFSET_US;
-        gm_try_send_3d1_spoof(now_us);
-      }
     }
 
     if (addr == 0xBD) {
@@ -368,6 +342,13 @@ static bool gm_tx_hook(const CANPacket_t *to_send) {
       } else {
         (void)memcpy(gm_3d1_spoof_data, to_send->data, 8U);
         gm_3d1_spoof_valid = true;
+
+        uint32_t now_us = microsecond_timer_get();
+        if (gm_3d1_next_tx_us == 0U) {
+          gm_3d1_next_tx_us = now_us;
+        }
+        gm_try_send_3d1_spoof(now_us);
+
         tx = false;
       }
     }
@@ -469,8 +450,6 @@ static safety_config gm_init(uint16_t param) {
   gm_3d1_spoof_valid = false;
   gm_3d1_internal_tx = false;
   gm_3d1_next_tx_us = 0U;
-  gm_3d1_expected_stock_us = 0U;
-  gm_3d1_phase_locked = false;
 
   safety_config ret = BUILD_SAFETY_CFG(gm_rx_checks, GM_ASCM_TX_MSGS);
   if (gm_hw == GM_CAM) {
