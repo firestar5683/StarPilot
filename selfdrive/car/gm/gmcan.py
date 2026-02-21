@@ -188,8 +188,10 @@ def create_acc_dashboard_command(packer, bus, enabled, target_speed_kph, hud_con
 def create_ecm_cruise_control_command(packer, bus, enabled, target_speed_kph):
   dat = bytearray(8)
   dat[0] = 0x01
-  # Mirror stock engage semantics: bit7 carries cruise active state.
-  dat[4] = 0x80 if enabled else 0x00
+  # Match observed stock shape on non-ACC CC paths: byte4 is usually 0x00
+  # (with occasional 0x80 from stock state transitions). Keep this spoofed
+  # path at 0x00 to avoid plausibility mismatch on non-speed bits.
+  dat[4] = 0x00
 
   set_speed_raw = 0
   if enabled:
