@@ -37,6 +37,8 @@ PADDLE_SLOT_EARLY_NS    = 1_000_000   # allow firing up to 1 ms before slot
 OVERFLOW_THRESH         = 1.00        # fire one extra slot whenever credits ≥ 1.0
 PADDLE_TARGET_HZ        = 42.0        # desired paddle rate (Hz) when regen active; steer is ~33 Hz
 ECM_CRUISE_PERIOD_NS    = 10_000_000   # 100Hz spoof cadence (10 ms)
+ECM_CRUISE_OVERRIDE_DELAY_NS = 2_000_000  # send slightly after stock (2 ms) to consistently override
+ECM_CRUISE_MAX_CATCH_UP = 4              # cap burst sends per control tick to avoid queue spikes
 # Constants for pitch compensation
 BRAKE_PITCH_FACTOR_BP = [5., 10.]  # [m/s] smoothly revert to planned accel at low speeds
 BRAKE_PITCH_FACTOR_V = [0., 1.]  # [unitless in [0,1]]; don't touch
@@ -388,17 +390,24 @@ class CarController(CarControllerBase):
           self.last_ecm_cruise_stock_ts_ns = stock_ts_ns
           if not self.ecm_cruise_locked:
             self.ecm_cruise_locked = True
-            self.ecm_cruise_next_send_ts_ns = now_nanos
+            self.ecm_cruise_next_send_ts_ns = stock_ts_ns + ECM_CRUISE_OVERRIDE_DELAY_NS
+            if self.ecm_cruise_next_send_ts_ns <= now_nanos:
+              missed = ((now_nanos - self.ecm_cruise_next_send_ts_ns) // ECM_CRUISE_PERIOD_NS) + 1
+              self.ecm_cruise_next_send_ts_ns += missed * ECM_CRUISE_PERIOD_NS
 
         if self.ecm_cruise_locked and self.ecm_cruise_next_send_ts_ns > 0 and now_nanos >= self.ecm_cruise_next_send_ts_ns:
           send_count = 0
-          while now_nanos >= self.ecm_cruise_next_send_ts_ns and send_count < 2:
+          while now_nanos >= self.ecm_cruise_next_send_ts_ns and send_count < ECM_CRUISE_MAX_CATCH_UP:
             can_sends.append(gmcan.create_ecm_cruise_control_command(
               self.packer_pt, CanBus.POWERTRAIN, spoof_enabled, spoof_set_speed_kph))
             self.ecm_cruise_next_send_ts_ns += ECM_CRUISE_PERIOD_NS
             send_count += 1
 
-        if not self.ecm_cruise_locked and self.frame % 2 == 0:
+          if now_nanos >= self.ecm_cruise_next_send_ts_ns:
+            missed = ((now_nanos - self.ecm_cruise_next_send_ts_ns) // ECM_CRUISE_PERIOD_NS) + 1
+            self.ecm_cruise_next_send_ts_ns += missed * ECM_CRUISE_PERIOD_NS
+
+        if not self.ecm_cruise_locked:
           can_sends.append(gmcan.create_ecm_cruise_control_command(
             self.packer_pt, CanBus.POWERTRAIN, spoof_enabled, spoof_set_speed_kph))
 
