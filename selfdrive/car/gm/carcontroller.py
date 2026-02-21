@@ -368,20 +368,20 @@ class CarController(CarControllerBase):
       if now_nanos - self.last_steer_ts_ns >= flush_gap_ns:
         can_sends.extend(paddle_sends)
 
+    spoof_ecm_cruise_cars = {
+      CAR.CHEVROLET_BOLT_CC_2017,
+      CAR.CHEVROLET_BOLT_CC_2019_2021,
+      CAR.CHEVROLET_BOLT_CC_2022_2023,
+      CAR.CHEVROLET_MALIBU_HYBRID_CC,
+    }
+    non_acc_pedal_long = (self.CP.flags & GMFlags.PEDAL_LONG.value) and self.CP.carFingerprint in spoof_ecm_cruise_cars and self.CP.enableGasInterceptor
+    if non_acc_pedal_long and self.frame % 4 == 0:
+      spoof_enabled = bool(CC.enabled)
+      spoof_set_speed_kph = hud_v_cruise * CV.MS_TO_KPH if spoof_enabled else 0.0
+      can_sends.append(gmcan.create_ecm_cruise_control_command(
+        self.packer_pt, CanBus.POWERTRAIN, spoof_enabled, spoof_set_speed_kph))
+
     if self.CP.openpilotLongitudinalControl:
-      spoof_ecm_cruise_cars = {
-        CAR.CHEVROLET_BOLT_CC_2017,
-        CAR.CHEVROLET_BOLT_CC_2019_2021,
-        CAR.CHEVROLET_BOLT_CC_2022_2023,
-        CAR.CHEVROLET_MALIBU_HYBRID_CC,
-      }
-      non_acc_pedal_long = (self.CP.flags & GMFlags.PEDAL_LONG.value) and self.CP.carFingerprint in spoof_ecm_cruise_cars and self.CP.enableGasInterceptor
-      if non_acc_pedal_long:
-        if self.frame % 4 == 0:
-          spoof_enabled = bool(CC.enabled)
-          spoof_set_speed_kph = hud_v_cruise * CV.MS_TO_KPH if spoof_enabled else 0.0
-          can_sends.append(gmcan.create_ecm_cruise_control_command(
-            self.packer_pt, CanBus.POWERTRAIN, spoof_enabled, spoof_set_speed_kph))
 
       # Gas/regen, brakes, and UI commands - all at 25Hz
       if self.frame % 4 == 0:
