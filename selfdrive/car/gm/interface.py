@@ -534,6 +534,16 @@ class CarInterface(CarInterfaceBase):
     if ACCELERATOR_POS_MSG not in fingerprint.get(CanBus.POWERTRAIN, {}):
       ret.flags |= GMFlags.NO_ACCELERATOR_POS_MSG.value
 
+    use_panda_3d1_sched = (
+      ret.openpilotLongitudinalControl and
+      ret.enableGasInterceptor and
+      bool(ret.flags & GMFlags.PEDAL_LONG.value) and
+      candidate in CC_ONLY_CAR and
+      candidate != CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL
+    )
+    if use_panda_3d1_sched:
+      gm_safety_cfg.safetyParam |= Panda.FLAG_GM_PANDA_3D1_SCHED
+
     return ret
 
   # returns a car.CarState

@@ -36,14 +36,6 @@ PADDLE_NONBLOCK_GAP_NS  = 1_000_000   # ≥1 ms since last paddle send
 PADDLE_SLOT_EARLY_NS    = 1_000_000   # allow firing up to 1 ms before slot
 OVERFLOW_THRESH         = 1.00        # fire one extra slot whenever credits ≥ 1.0
 PADDLE_TARGET_HZ        = 42.0        # desired paddle rate (Hz) when regen active; steer is ~33 Hz
-ECM_CRUISE_STALE_NS     = 300_000_000  # reset lock if no new stock edge arrives
-ECM_CRUISE_PERIOD_NS    = 100_000_000  # 10Hz spoof cadence aligned to stock cycle
-ECM_CRUISE_ANCHOR_TICKS = 4            # AcceleratorPedal2 (~40Hz) ticks per 3D1 cycle
-ECM_CRUISE_ANCHOR_HITS  = 6            # require repeated agreement before using anchor
-ECM_ACCEL_PEDAL2_TICK_NS = 25_000_000  # AcceleratorPedal2 period (~40Hz) used for absolute phase derivation
-ECM_CRUISE_PHASE_MISS_TOLERANCE = 2    # ignore occasional single-tick phase misses before relocking
-ECM_CRUISE_ANCHOR_GAP_NS = 80_000_000  # min gap for anchor sends (~10Hz target)
-ECM_CRUISE_RETRY_NS     = 12_000_000   # one extra retry shortly after each stock edge
 # Constants for pitch compensation
 BRAKE_PITCH_FACTOR_BP = [5., 10.]  # [m/s] smoothly revert to planned accel at low speeds
 BRAKE_PITCH_FACTOR_V = [0., 1.]  # [unitless in [0,1]]; don't touch
@@ -109,14 +101,6 @@ class CarController(CarControllerBase):
     self.spoof_mid_sent = False
     self.spoof_over_sent = False
     self.last_interval_ns = 0
-    self.last_ecm_cruise_stock_ts_ns = 0
-    self.last_ecm_cruise_spoof_ts_ns = 0
-    self.ecm_cruise_retry_ts_ns = 0
-    self.last_accel_pedal2_ts_ns = 0
-    self.ecm_anchor_tick_mod = 0
-    self.ecm_anchor_phase_mod = -1
-    self.ecm_anchor_phase_hits = 0
-    self.ecm_anchor_phase_misses = 0
 
   def calc_pedal_command(self, accel: float, long_active: bool, car_velocity) -> Tuple[float, bool]:
     if not long_active:
@@ -393,71 +377,11 @@ class CarController(CarControllerBase):
       }
       non_acc_pedal_long = (self.CP.flags & GMFlags.PEDAL_LONG.value) and self.CP.carFingerprint in spoof_ecm_cruise_cars and self.CP.enableGasInterceptor
       if non_acc_pedal_long:
-        spoof_enabled = bool(CC.enabled)
-        spoof_set_speed_kph = hud_v_cruise * CV.MS_TO_KPH if spoof_enabled else 0.0
-        stock_ts_ns = getattr(CS, "ecm_cruise_control_ts_nanos", 0)
-        accel_pedal2_ts_ns = getattr(CS, "accelerator_pedal2_ts_nanos", 0)
-        sent_ecm_this_frame = False
-
-        accel_pedal2_edge = False
-        if accel_pedal2_ts_ns > 0:
-          # Derive phase from absolute AcceleratorPedal2 timestamp to avoid drift when the control loop
-          # occasionally misses one or more 40Hz edges.
-          self.ecm_anchor_tick_mod = int((accel_pedal2_ts_ns // ECM_ACCEL_PEDAL2_TICK_NS) % ECM_CRUISE_ANCHOR_TICKS)
-        if accel_pedal2_ts_ns > self.last_accel_pedal2_ts_ns:
-          self.last_accel_pedal2_ts_ns = accel_pedal2_ts_ns
-          accel_pedal2_edge = True
-        anchor_locked = self.ecm_anchor_phase_hits >= ECM_CRUISE_ANCHOR_HITS
-        if (accel_pedal2_edge and anchor_locked and self.ecm_anchor_tick_mod == self.ecm_anchor_phase_mod and
-            (now_nanos - self.last_ecm_cruise_spoof_ts_ns) >= ECM_CRUISE_ANCHOR_GAP_NS):
+        if self.frame % 4 == 0:
+          spoof_enabled = bool(CC.enabled)
+          spoof_set_speed_kph = hud_v_cruise * CV.MS_TO_KPH if spoof_enabled else 0.0
           can_sends.append(gmcan.create_ecm_cruise_control_command(
             self.packer_pt, CanBus.POWERTRAIN, spoof_enabled, spoof_set_speed_kph))
-          self.last_ecm_cruise_spoof_ts_ns = now_nanos
-          sent_ecm_this_frame = True
-
-        new_stock_edge = stock_ts_ns > self.last_ecm_cruise_stock_ts_ns
-        if new_stock_edge:
-          self.last_ecm_cruise_stock_ts_ns = stock_ts_ns
-          if self.ecm_anchor_tick_mod == self.ecm_anchor_phase_mod:
-            self.ecm_anchor_phase_hits += 1
-            self.ecm_anchor_phase_misses = 0
-          else:
-            self.ecm_anchor_phase_misses += 1
-            if self.ecm_anchor_phase_misses >= ECM_CRUISE_PHASE_MISS_TOLERANCE:
-              self.ecm_anchor_phase_mod = self.ecm_anchor_tick_mod
-              self.ecm_anchor_phase_hits = 1
-              self.ecm_anchor_phase_misses = 0
-
-          # In steady lock, use a single send path (anchor) to reduce jitter/overlap.
-          anchor_locked = self.ecm_anchor_phase_hits >= ECM_CRUISE_ANCHOR_HITS
-          if not anchor_locked and not sent_ecm_this_frame:
-            can_sends.append(gmcan.create_ecm_cruise_control_command(
-              self.packer_pt, CanBus.POWERTRAIN, spoof_enabled, spoof_set_speed_kph))
-            self.last_ecm_cruise_spoof_ts_ns = now_nanos
-            sent_ecm_this_frame = True
-
-          # Retries help during startup/unlock, but can add jitter when phase lock is stable.
-          if self.ecm_anchor_phase_hits < ECM_CRUISE_ANCHOR_HITS:
-            self.ecm_cruise_retry_ts_ns = now_nanos + ECM_CRUISE_RETRY_NS
-          else:
-            self.ecm_cruise_retry_ts_ns = 0
-
-        if self.ecm_cruise_retry_ts_ns > 0 and now_nanos >= self.ecm_cruise_retry_ts_ns and (now_nanos - self.last_ecm_cruise_spoof_ts_ns) >= 5_000_000:
-          can_sends.append(gmcan.create_ecm_cruise_control_command(
-            self.packer_pt, CanBus.POWERTRAIN, spoof_enabled, spoof_set_speed_kph))
-          self.last_ecm_cruise_spoof_ts_ns = now_nanos
-          self.ecm_cruise_retry_ts_ns = 0
-
-        if self.last_ecm_cruise_stock_ts_ns > 0 and (now_nanos - self.last_ecm_cruise_stock_ts_ns) > ECM_CRUISE_STALE_NS:
-          self.last_ecm_cruise_stock_ts_ns = 0
-          self.ecm_anchor_phase_hits = 0
-          self.ecm_anchor_phase_misses = 0
-          self.ecm_cruise_retry_ts_ns = 0
-
-        if self.last_ecm_cruise_stock_ts_ns == 0 and self.ecm_anchor_phase_hits < ECM_CRUISE_ANCHOR_HITS and self.frame % 10 == 0:
-          can_sends.append(gmcan.create_ecm_cruise_control_command(
-            self.packer_pt, CanBus.POWERTRAIN, spoof_enabled, spoof_set_speed_kph))
-          self.last_ecm_cruise_spoof_ts_ns = now_nanos
 
       # Gas/regen, brakes, and UI commands - all at 25Hz
       if self.frame % 4 == 0:
