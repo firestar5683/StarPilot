@@ -386,7 +386,7 @@ class TestGmInterceptorSafety(common.GasInterceptorSafetyTest, TestGmCameraSafet
 
 
 class TestGmCcLongitudinalSafety(TestGmCameraSafety):
-  TX_MSGS = [[384, 0], [481, 0], [0x1F5, 0], [388, 2]]
+  TX_MSGS = [[384, 0], [481, 0], [0x3D1, 0], [0x1F5, 0], [388, 2]]
   FWD_BLACKLISTED_ADDRS = {2: [384], 0: [388]}  # block LKAS message and PSCMStatus
   BUTTONS_BUS = 0  # tx only
 
