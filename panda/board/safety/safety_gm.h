@@ -366,8 +366,13 @@ static bool gm_tx_hook(const CANPacket_t *to_send) {
       if (gm_3d1_internal_tx) {
         tx = true;
       } else {
+        uint32_t now_us = microsecond_timer_get();
         (void)memcpy(gm_3d1_spoof_data, to_send->data, 8U);
         gm_3d1_spoof_valid = true;
+        if (gm_3d1_next_tx_us == 0U) {
+          gm_3d1_next_tx_us = now_us + GM_3D1_TX_OFFSET_US;
+        }
+        gm_try_send_3d1_spoof(now_us);
         tx = false;
       }
     }
