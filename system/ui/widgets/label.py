@@ -1,3 +1,4 @@
+import math
 from enum import IntEnum
 from collections.abc import Callable
 from itertools import zip_longest
@@ -401,6 +402,12 @@ class UnifiedLabel(Widget):
   - Proper multiline vertical alignment
   - Height calculation for layout purposes
   """
+  SHIMMER_BAND_WIDTH = 0.3
+  SHIMMER_BLUR_RADIUS = 0.12
+  SHIMMER_CYCLE_PERIOD = 2.5
+  SHIMMER_SWEEP_FRACTION = 0.9
+  SHIMMER_LOW_OPACITY = 0.65
+
   def __init__(self,
                text: str | Callable[[], str],
                font_size: int = DEFAULT_TEXT_SIZE,
@@ -414,7 +421,8 @@ class UnifiedLabel(Widget):
                wrap_text: bool = True,
                scroll: bool = False,
                line_height: float = 1.0,
-               letter_spacing: float = 0.0):
+               letter_spacing: float = 0.0,
+               shimmer: bool = False):
     super().__init__()
     self._text = text
     self._font_size = font_size
@@ -431,6 +439,8 @@ class UnifiedLabel(Widget):
     self._line_height = line_height * 0.9
     self._letter_spacing = letter_spacing  # 0.1 = 10%
     self._spacing_pixels = font_size * letter_spacing
+    self._shimmer = shimmer
+    self._shimmer_start_time = 0.0
 
     # Scroll state
     self._scroll = scroll
@@ -489,6 +499,13 @@ class UnifiedLabel(Widget):
       self._spacing_pixels = self._font_size * letter_spacing
       self._cached_text = None  # Invalidate cache
 
+  def set_line_height(self, line_height: float):
+    """Update line height (multiplier, e.g., 1.0 = default)."""
+    new_line_height = line_height * 0.9
+    if self._line_height != new_line_height:
+      self._line_height = new_line_height
+      self._cached_text = None
+
   def set_font_weight(self, font_weight: FontWeight):
     """Update the font weight."""
     if self._font_weight != font_weight:
@@ -509,6 +526,9 @@ class UnifiedLabel(Widget):
     self._scroll_offset = 0
     self._scroll_pause_t = None
     self._scroll_state = ScrollState.STARTING
+
+  def reset_shimmer(self, offset: float = 0.0):
+    self._shimmer_start_time = rl.get_time() + offset
 
   def set_max_width(self, max_width: int | None):
     """Set the maximum width constraint for wrapping/eliding."""
@@ -626,6 +646,25 @@ class UnifiedLabel(Widget):
     if self._cached_total_height is not None:
       return self._cached_total_height
     return 0.0
+
+  def _compute_shimmer_alpha(self, char_center_x: float, text_left: float, text_width: float) -> float:
+    if text_width <= 0:
+      return self.SHIMMER_LOW_OPACITY
+
+    elapsed = rl.get_time() - self._shimmer_start_time
+    sigma = text_width * self.SHIMMER_BLUR_RADIUS
+
+    t_raw = (elapsed % self.SHIMMER_CYCLE_PERIOD) / self.SHIMMER_CYCLE_PERIOD
+    t_clamped = max(0.0, min(t_raw / self.SHIMMER_SWEEP_FRACTION, 1.0))
+    t = t_clamped * t_clamped * (3.0 - 2.0 * t_clamped)
+
+    margin = text_width * self.SHIMMER_BAND_WIDTH
+    text_right = text_left + text_width
+    center = text_right + margin - t * (text_width + 2.0 * margin)
+
+    d = char_center_x - center
+    shimmer = math.exp(-0.5 * d * d / (sigma * sigma)) if sigma > 0 else 0.0
+    return self.SHIMMER_LOW_OPACITY + (1.0 - self.SHIMMER_LOW_OPACITY) * shimmer
 
   def _render(self, _):
     """Render the label."""
@@ -769,6 +808,20 @@ class UnifiedLabel(Widget):
     else:
       line_x = self._rect.x + self._text_padding
     line_x += self._scroll_offset + x_offset
+
+    if self._shimmer and not emojis and line:
+      base_alpha = self._text_color.a / 255.0
+      text_width = max(size.x, 1.0)
+      cursor_x = line_x
+      for char in line:
+        char_width = measure_text_cached(self._font, char, self._font_size, self._spacing_pixels).x
+        char_center_x = cursor_x + char_width / 2.0
+        shimmer_alpha = self._compute_shimmer_alpha(char_center_x, line_x, text_width)
+        char_alpha = int(255 * base_alpha * shimmer_alpha)
+        char_color = rl.Color(self._text_color.r, self._text_color.g, self._text_color.b, char_alpha)
+        rl.draw_text_ex(self._font, char, rl.Vector2(cursor_x, current_y), self._font_size, self._spacing_pixels, char_color)
+        cursor_x += char_width
+      return
 
     # Render line with emojis
     line_pos = rl.Vector2(line_x, current_y)

@@ -524,8 +524,8 @@ export function UpdateManager() {
             <input
               type="checkbox"
               class="ds-toggle"
-              ?checked="${!!state.status?.automaticUpdates}"
-              ?disabled="${!!state.status?.isOnroad || state.toggleBusy || !!state.status?.running}"
+              checked="${() => !!state.status?.automaticUpdates || false}"
+              disabled="${() => !!state.status?.isOnroad || state.toggleBusy || !!state.status?.running || false}"
               @change="${(event) => setAutomaticUpdates(!!event.target.checked)}"
             />
           </label>
@@ -535,7 +535,7 @@ export function UpdateManager() {
             <input
               type="checkbox"
               class="ds-toggle"
-              ?checked="${() => state.showAdvancedOptions}"
+              checked="${() => state.showAdvancedOptions || false}"
               @change="${(event) => setAdvancedOptions(!!event.target.checked)}"
             />
           </label>
@@ -552,19 +552,19 @@ export function UpdateManager() {
               <div class="updateBranchRow">
                 <select
                   class="updateSelect"
-                  ?disabled="${!!state.status?.isOnroad || !!state.status?.running || state.switchBusy || state.branchesBusy || state.branches.length === 0}"
+                  disabled="${() => !!state.status?.isOnroad || !!state.status?.running || state.switchBusy || state.branchesBusy || state.branches.length === 0 || false}"
                   @change="${(event) => {
                     state.selectedBranch = String(event.target.value || "")
                     state.hasManualBranchSelection = true
                   }}">
                   ${() => state.branches.length
-                    ? state.branches.map((branch) => html`<option value="${branch}" ${branch === state.selectedBranch ? "selected" : ""}>${branch}${branch === state.status?.branch ? " (current)" : ""}</option>`)
+                    ? state.branches.map((branch) => html`<option value="${branch}" selected="${() => branch === state.selectedBranch || false}">${branch}${branch === state.status?.branch ? " (current)" : ""}</option>`)
                     : html`<option value="">No branches found</option>`
                   }
                 </select>
                 <button
                   class="updateButton"
-                  ?disabled="${state.branchesBusy || !!state.status?.running}"
+                  disabled="${() => state.branchesBusy || !!state.status?.running || false}"
                   @click="${() => fetchBranches(true)}">
                   ${state.branchesBusy ? "Refreshing..." : "Refresh Branches"}
                 </button>
@@ -587,7 +587,7 @@ export function UpdateManager() {
             ${() => shouldShowPrimaryUpdateAction() ? html`
               <button
                 class="updateButton danger"
-                ?disabled="${!!state.status?.isOnroad || !!state.status?.running || (isSelectedBranchDifferent() ? state.switchBusy : state.updateBusy)}"
+                disabled="${() => !!state.status?.isOnroad || !!state.status?.running || (isSelectedBranchDifferent() ? state.switchBusy : state.updateBusy) || false}"
                 @click="${() => isSelectedBranchDifferent() ? runBranchSwitch() : runFastUpdate()}">
                 ${state.status?.running
                   ? "Update Running..."

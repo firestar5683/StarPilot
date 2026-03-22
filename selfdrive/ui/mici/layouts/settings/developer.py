@@ -91,7 +91,7 @@ class DeveloperLayoutMici(NavWidget):
       self._long_maneuver_toggle,
       self._alpha_long_toggle,
       self._debug_mode_toggle,
-    ], snap_items=False)
+    ], snap_items=False, scroll_indicator=True, edge_shadows=True)
 
     # Toggle lists
     self._refresh_toggles = (

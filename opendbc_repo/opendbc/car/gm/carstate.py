@@ -319,8 +319,15 @@ class CarState(CarStateBase):
       self.cruise_buttons in (CruiseButtons.CANCEL, CruiseButtons.MAIN) or
       prev_cruise_buttons in (CruiseButtons.CANCEL, CruiseButtons.MAIN)
     )
+    suppress_bolt_cancel_lkas = bolt_cancel_personality and (
+      self.cruise_buttons == CruiseButtons.CANCEL or
+      prev_cruise_buttons == CruiseButtons.CANCEL
+    )
     distance_events = [] if suppress_malibu_side_buttons else create_button_events(
       self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise}
+    )
+    lkas_events = [] if (suppress_malibu_side_buttons or suppress_bolt_cancel_lkas) else create_button_events(
+      self.lkas_enabled, self.lkas_previously_enabled, {1: ButtonType.lkas}
     )
 
     # Don't add events if transitioning from INIT, unless it's to an actual button.
@@ -329,6 +336,7 @@ class CarState(CarStateBase):
         *cruise_events,
         *cancel_gap_events,
         *distance_events,
+        *lkas_events,
       ]
 
     if ret.vEgo < self.CP.minSteerSpeed:

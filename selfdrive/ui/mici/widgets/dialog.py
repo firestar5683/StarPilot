@@ -113,6 +113,14 @@ class BigConfirmationDialogV2(BigDialogBase):
       self._slider = BigSlider(title, icon_txt, confirm_callback=self._on_confirm)
     self._slider.set_enabled(lambda: not self._swiping_away)
 
+  def show_event(self):
+    super().show_event()
+    self._slider.show_event()
+
+  def hide_event(self):
+    super().hide_event()
+    self._slider.hide_event()
+
   def _on_confirm(self):
     if self._confirm_callback:
       self._confirm_callback()
@@ -122,7 +130,7 @@ class BigConfirmationDialogV2(BigDialogBase):
   def _update_state(self):
     super()._update_state()
     if self._swiping_away and not self._slider.confirmed:
-      self._slider.reset()
+      self._slider.reset(reset_shimmer=False)
 
   def _render(self, _) -> DialogResult:
     self._slider.render(self._rect)

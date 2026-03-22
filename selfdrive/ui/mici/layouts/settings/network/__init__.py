@@ -3,7 +3,7 @@ from enum import IntEnum
 from collections.abc import Callable
 
 from openpilot.system.ui.widgets.scroller import Scroller
-from openpilot.selfdrive.ui.mici.layouts.settings.network.wifi_ui import WifiUIMici
+from openpilot.selfdrive.ui.mici.layouts.settings.network.wifi_ui import WifiUIMici, WifiIcon, normalize_ssid
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton, BigMultiToggle, BigToggle, BigParamControl
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigInputDialog
 from openpilot.selfdrive.ui.ui_state import ui_state
@@ -75,8 +75,14 @@ class NetworkLayoutMici(NavWidget):
     self._network_metered_btn = BigMultiToggle("network usage", ["default", "metered", "unmetered"], select_callback=network_metered_callback)
     self._network_metered_btn.set_enabled(False)
 
-    wifi_button = BigButton("wi-fi")
+    self._wifi_slash_txt = gui_app.texture("icons_mici/settings/network/wifi_strength_slash.png", 64, 56)
+    self._wifi_low_txt = gui_app.texture("icons_mici/settings/network/wifi_strength_low.png", 64, 47)
+    self._wifi_medium_txt = gui_app.texture("icons_mici/settings/network/wifi_strength_medium.png", 64, 47)
+    self._wifi_full_txt = gui_app.texture("icons_mici/settings/network/wifi_strength_full.png", 64, 47)
+
+    wifi_button = BigButton("wi-fi", "not connected", self._wifi_slash_txt)
     wifi_button.set_click_callback(lambda: self._switch_to_panel(NetworkPanelType.WIFI))
+    self._wifi_button = wifi_button
 
     # ******** Advanced settings ********
     # ******** Roaming toggle ********
@@ -101,7 +107,7 @@ class NetworkLayoutMici(NavWidget):
       self._cellular_metered_btn,
       # */
       self._ip_address_btn,
-    ], snap_items=False)
+    ], snap_items=False, scroll_indicator=True, edge_shadows=True)
 
     # Set initial config
     roaming_enabled = ui_state.params.get_bool("GsmRoaming")

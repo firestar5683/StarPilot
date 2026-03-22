@@ -1,6 +1,7 @@
 import os
 import time
 import datetime
+from pathlib import Path
 from openpilot.common.time_helpers import system_time_valid
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app
@@ -76,15 +77,20 @@ class SoftwareLayout(Widget):
     self._branch_btn.action_item.set_value(ui_state.params.get("UpdaterTargetBranch") or "")
     self._branch_dialog: MultiOptionDialog | None = None
 
-    self._scroller = Scroller([
-      self._onroad_label,
-      self._version_item,
-      self._auto_updates_toggle,
-      self._download_btn,
-      self._install_btn,
-      self._branch_btn,
-      button_item(lambda: tr("Uninstall"), lambda: tr("UNINSTALL"), callback=self._on_uninstall),
-    ], line_separator=True, spacing=0)
+    self._scroller = Scroller(
+      [
+        self._onroad_label,
+        self._version_item,
+        self._auto_updates_toggle,
+        self._download_btn,
+        self._install_btn,
+        self._branch_btn,
+        button_item(lambda: tr("Uninstall"), lambda: tr("UNINSTALL"), callback=self._on_uninstall),
+        button_item(lambda: tr("Error Log"), lambda: tr("VIEW"), callback=self._on_error_log),
+      ],
+      line_separator=True,
+      spacing=0,
+    )
 
   def show_event(self):
     self._scroller.show_event()
@@ -170,18 +176,43 @@ class SoftwareLayout(Widget):
       # Start downloading
       self._waiting_for_updater = True
       self._waiting_start_ts = time.monotonic()
+      ui_state.params_memory.put_bool("ManualUpdateInitiated", True)
       os.system("pkill -SIGHUP -f system.updated.updated")
 
   def _on_auto_updates_toggle(self, enabled: bool):
     ui_state.params.put_bool("AutomaticUpdates", enabled)
 
   def _on_uninstall(self):
-    def handle_uninstall_confirmation(result):
+    def handle_step1(result):
       if result == DialogResult.CONFIRM:
-        ui_state.params.put_bool("DoUninstall", True)
+
+        def handle_step2(result2):
+          if result2 == DialogResult.CONFIRM:
+
+            def handle_step3(result3):
+              if result3 == DialogResult.CONFIRM:
+                ui_state.params.clear_all()
+              ui_state.params.put_bool("DoUninstall", True)
+
+            dialog = ConfirmDialog(tr("This is a complete factory reset and cannot be undone. Are you absolutely sure?"), tr("Reset"))
+            gui_app.set_modal_overlay(dialog, callback=handle_step3)
+          else:
+            ui_state.params.put_bool("DoUninstall", True)
+
+        dialog = ConfirmDialog(
+          tr("Do you want to perform a full factory reset? All saved assets and settings will be permanently deleted!"), tr("Factory Reset"), tr("Skip")
+        )
+        gui_app.set_modal_overlay(dialog, callback=handle_step2)
 
     dialog = ConfirmDialog(tr("Are you sure you want to uninstall?"), tr("Uninstall"))
-    gui_app.set_modal_overlay(dialog, callback=handle_uninstall_confirmation)
+    gui_app.set_modal_overlay(dialog, callback=handle_step1)
+
+  def _on_error_log(self):
+    try:
+      txt = Path("/data/error_logs/error.txt").read_text(encoding='utf-8', errors='replace')
+    except Exception:
+      txt = tr("No error log found.")
+    gui_app.set_modal_overlay(ConfirmDialog(txt, tr("OK"), on_close=lambda r: None, rich=True))
 
   def _on_install_update(self):
     # Trigger reboot to install update

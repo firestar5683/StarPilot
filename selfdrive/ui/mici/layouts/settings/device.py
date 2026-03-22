@@ -514,7 +514,7 @@ class DeviceLayoutMici(NavWidget):
       regulatory_btn,
       reboot_btn,
       self._power_off_btn,
-    ], snap_items=False)
+    ], snap_items=False, scroll_indicator=True, edge_shadows=True)
 
     # Set up back navigation
     self.set_back_callback(back_callback)

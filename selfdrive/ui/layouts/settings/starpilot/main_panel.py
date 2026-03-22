@@ -5,8 +5,7 @@ import pyray as rl
 from openpilot.common.params import Params
 from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.lib.multilang import tr, tr_noop
-from openpilot.system.ui.widgets.scroller_tici import Scroller
-from openpilot.system.ui.widgets.list_view import multiple_button_item, category_buttons_item
+from openpilot.system.ui.lib.application import MousePos
 
 from openpilot.selfdrive.ui.layouts.settings.starpilot.panel import StarPilotPanelType, StarPilotPanelInfo
 from openpilot.selfdrive.ui.layouts.settings.starpilot.sounds import StarPilotSoundsLayout
@@ -23,6 +22,8 @@ from openpilot.selfdrive.ui.layouts.settings.starpilot.themes import StarPilotTh
 from openpilot.selfdrive.ui.layouts.settings.starpilot.vehicle import StarPilotVehicleSettingsLayout
 from openpilot.selfdrive.ui.layouts.settings.starpilot.wheel import StarPilotWheelLayout
 
+from openpilot.selfdrive.ui.layouts.settings.starpilot.metro import TileGrid, HubTile, RadioTileGroup
+
 STARPILOT_ICONS_DIR = "toggle_icons"
 
 class StarPilotLayout(Widget):
@@ -30,38 +31,44 @@ class StarPilotLayout(Widget):
     {
       "title": "Alerts and Sounds",
       "icon": "icon_sound.png",
-      "desc": "<b>Adjust alert volumes and enable custom notifications.</b>",
+      "desc": "Adjust alert volumes and enable custom notifications.",
       "buttons": [("MANAGE", "SOUNDS", 0)],
+      "color": "#FF0097",
     },
     {
       "title": "Driving Controls",
       "icon": "icon_steering.png",
-      "desc": "<b>Fine-tune custom StarPilot acceleration, braking, and steering controls.</b>",
+      "desc": "Fine-tune custom StarPilot acceleration, braking, and steering controls.",
       "buttons": [("DRIVING MODEL", "DRIVING_MODEL", 0), ("GAS / BRAKE", "LONGITUDINAL", 0), ("STEERING", "LATERAL", 0)],
+      "color": "#1BA1E2",
     },
     {
       "title": "Navigation",
       "icon": "icon_navigate.png",
-      "desc": "<b>Download map data for the Speed Limit Controller.</b>",
-      "buttons": [("MAP DATA", "MAPS", 0), ("NAVIGATION", "NAVIGATION", 1)],
+      "desc": "Download map data for the Speed Limit Controller.",
+      "buttons": [("MAP DATA", "MAPS", 0), ("NAVIGATION", "NAVIGATION", 0)],
+      "color": "#8CBF26",
     },
     {
       "title": "System Settings",
       "icon": "icon_system.png",
-      "desc": "<b>Manage backups, device settings, screen options, storage, and tools to keep StarPilot running smoothly.</b>",
-      "buttons": [("DATA", "DATA", 0), ("DEVICE CONTROLS", "DEVICE", 2), ("UTILITIES", "UTILITIES", 0)],
+      "desc": "Manage backups, device settings, screen options, storage, and tools to keep StarPilot running smoothly.",
+      "buttons": [("DATA", "DATA", 0), ("DEVICE CONTROLS", "DEVICE", 0), ("UTILITIES", "UTILITIES", 0)],
+      "color": "#FA6800",
     },
     {
       "title": "Theme and Appearance",
       "icon": "icon_display.png",
-      "desc": "<b>Customize the look of the driving screen and interface, including themes!</b>",
+      "desc": "Customize the look of the driving screen and interface, including themes!",
       "buttons": [("APPEARANCE", "VISUALS", 0), ("THEME", "THEMES", 0)],
+      "color": "#A200FF",
     },
     {
       "title": "Vehicle Settings",
       "icon": "icon_vehicle.png",
-      "desc": "<b>Configure car-specific options and steering wheel button mappings.</b>",
-      "buttons": [("VEHICLE SETTINGS", "VEHICLE", 0), ("WHEEL CONTROLS", "WHEEL", 1)],
+      "desc": "Configure car-specific options and steering wheel button mappings.",
+      "buttons": [("VEHICLE SETTINGS", "VEHICLE", 0), ("WHEEL CONTROLS", "WHEEL", 0)],
+      "color": "#FFC40D",
     },
   ]
 
@@ -70,18 +77,12 @@ class StarPilotLayout(Widget):
     self._params = Params()
 
     self._current_panel = StarPilotPanelType.MAIN
+    self._current_category_idx: int | None = None
     self._depth_callback: Callable | None = None
     self._settings_layout = None
 
     self._panel_stack: list[tuple[StarPilotPanelType, str]] = []  
     self._sub_panel_callbacks: dict[str, Callable] = {}  
-
-    self._toggle_tuning_levels: dict[str, int] = {}
-    all_keys = self._params.all_keys()
-    for key in all_keys:
-      level = self._params.get_tuning_level(key)
-      if level is not None:
-        self._toggle_tuning_levels[key] = level
 
     self._panels = {
       StarPilotPanelType.MAIN: StarPilotPanelInfo("", None),
@@ -103,73 +104,11 @@ class StarPilotLayout(Widget):
     self._setup_longitudinal_sub_panels()
     self._setup_sounds_sub_panels()
     self._setup_lateral_sub_panels()
+    self._setup_navigation_sub_panels()
+    self._setup_maps_sub_panels()
 
-    for panel_type in [
-      StarPilotPanelType.SOUNDS,
-      StarPilotPanelType.DRIVING_MODEL,
-    ]:
-      panel = self._panels[panel_type].instance
-      if panel and hasattr(panel, 'set_tuning_levels'):
-        panel.set_tuning_levels(self._toggle_tuning_levels)
-
-    tuning_levels = [tr("Minimal"), tr("Standard"), tr("Advanced"), tr("Developer")]
-    tuning_level_str = self._params.get("TuningLevel", return_default=True, default="1")
-    current_tuning_level = int(tuning_level_str) if tuning_level_str else 1
-
-    items = [
-      multiple_button_item(
-        tr_noop("Tuning Level"),
-        tr_noop(
-          "Choose your tuning level. Lower levels keep it simple; higher levels unlock more toggles for finer control.\n\n"
-          "Minimal - Ideal for those who prefer simplicity or ease of use\n"
-          "Standard - Recommended for most users for a balanced experience\n"
-          "Advanced - Fine-tuning for experienced users\n"
-          "Developer - Highly customizable settings for seasoned enthusiasts"
-        ),
-        tuning_levels,
-        current_tuning_level,
-        callback=self._on_tuning_level_changed,
-        icon=f"{STARPILOT_ICONS_DIR}/icon_tuning.png",
-        starpilot_icon=True,
-      ),
-    ]
-
-    panel_type_map = {
-      "SOUNDS": StarPilotPanelType.SOUNDS,
-      "DRIVING_MODEL": StarPilotPanelType.DRIVING_MODEL,
-      "LONGITUDINAL": StarPilotPanelType.LONGITUDINAL,
-      "LATERAL": StarPilotPanelType.LATERAL,
-      "MAPS": StarPilotPanelType.MAPS,
-      "NAVIGATION": StarPilotPanelType.NAVIGATION,
-      "DATA": StarPilotPanelType.DATA,
-      "DEVICE": StarPilotPanelType.DEVICE,
-      "UTILITIES": StarPilotPanelType.UTILITIES,
-      "VISUALS": StarPilotPanelType.VISUALS,
-      "THEMES": StarPilotPanelType.THEMES,
-      "VEHICLE": StarPilotPanelType.VEHICLE,
-      "WHEEL": StarPilotPanelType.WHEEL,
-    }
-
-    for cat in self.CATEGORIES:
-      filtered_buttons = []
-      for btn_label, panel_key, min_level in cat["buttons"]:
-        if current_tuning_level >= min_level:
-          panel_type = panel_type_map[panel_key]
-          callback = lambda p=panel_type: self._set_current_panel(p)
-          filtered_buttons.append((tr(btn_label), callback))
-
-      if filtered_buttons:
-        full_icon_path = f"{STARPILOT_ICONS_DIR}/{cat['icon']}"
-        item = category_buttons_item(
-          title=tr(cat["title"]),
-          buttons=filtered_buttons,
-          description=tr(cat["desc"]),
-          icon=full_icon_path,
-          starpilot_icon=True,
-        )
-        items.append(item)
-
-    self._main_scroller = Scroller(items, line_separator=True, spacing=0)
+    self._main_grid = TileGrid(columns=None, padding=20)
+    self._rebuild_grid()
 
   def set_depth_callback(self, callback: Callable):
     self._depth_callback = callback
@@ -180,14 +119,47 @@ class StarPilotLayout(Widget):
   def navigate_back(self):
     if self._panel_stack:
       self._panel_stack.pop()
-    if self._panel_stack:
       self._update_sub_panel_visibility()
-    else:
-      self._set_current_panel(StarPilotPanelType.MAIN)
+      self._update_depth()
+    elif self._current_panel != StarPilotPanelType.MAIN:
+      if self._current_category_idx is not None:
+        cat_info = self.CATEGORIES[self._current_category_idx]
+        vis_btns = cat_info["buttons"]
+        if len(vis_btns) > 1:
+          self._set_current_panel(StarPilotPanelType.MAIN)
+        else:
+          self._current_category_idx = None
+          self._set_current_panel(StarPilotPanelType.MAIN)
+      else:
+        self._set_current_panel(StarPilotPanelType.MAIN)
+    elif self._current_category_idx is not None:
+      self._current_category_idx = None
+      self._rebuild_grid()
+      if self._depth_callback:
+        self._depth_callback(0)
+
+  def _update_depth(self):
+    depth = 0
+    if self._current_panel != StarPilotPanelType.MAIN:
+      if self._current_category_idx is not None:
+        cat_info = self.CATEGORIES[self._current_category_idx]
+        vis_btns = cat_info["buttons"]
+        depth = 2 if len(vis_btns) > 1 else 1
+      else:
+        depth = 1
+      # Deep nesting check
+      if self._panel_stack:
+        depth += len(self._panel_stack)
+    elif self._current_category_idx is not None:
+      depth = 1
+    
+    if self._depth_callback:
+      self._depth_callback(depth)
 
   def _push_sub_panel(self, sub_panel_name: str):
     self._panel_stack.append((self._current_panel, sub_panel_name))
     self._update_sub_panel_visibility()
+    self._update_depth()
 
   def _update_sub_panel_visibility(self):
     if self._current_panel == StarPilotPanelType.LONGITUDINAL:
@@ -202,6 +174,18 @@ class StarPilotLayout(Widget):
         current_sub = self._get_current_sub_panel()
         if hasattr(sounds, '_navigate_to'):
           sounds._current_sub_panel = current_sub
+    elif self._current_panel == StarPilotPanelType.NAVIGATION:
+      nav = self._panels[StarPilotPanelType.NAVIGATION].instance
+      if nav:
+        current_sub = self._get_current_sub_panel()
+        if hasattr(nav, '_navigate_to'):
+          nav._current_sub_panel = current_sub
+    elif self._current_panel == StarPilotPanelType.MAPS:
+      maps = self._panels[StarPilotPanelType.MAPS].instance
+      if maps:
+        current_sub = self._get_current_sub_panel()
+        if hasattr(maps, '_navigate_to'):
+          maps._current_sub_panel = current_sub
 
   def _get_current_sub_panel(self) -> str:
     if self._panel_stack and self._panel_stack[-1][0] == self._current_panel:
@@ -223,37 +207,19 @@ class StarPilotLayout(Widget):
     if lateral and hasattr(lateral, 'set_navigate_callback'):
       lateral.set_navigate_callback(self._push_sub_panel)
 
-  def _on_tuning_level_changed(self, index: int):
-    self._params.put_nonblocking("TuningLevel", index)
-    if self._settings_layout:
-      self._settings_layout.refresh_developer_visibility()
-    for panel_info in self._panels.values():
-      panel = panel_info.instance
-      if panel and hasattr(panel, 'refresh_visibility'):
-        panel.refresh_visibility()
-    self._rebuild_main_scroller(index)
+  def _setup_navigation_sub_panels(self):
+    nav = self._panels[StarPilotPanelType.NAVIGATION].instance
+    if nav and hasattr(nav, 'set_navigate_callback'):
+      nav.set_navigate_callback(self._push_sub_panel)
 
-  def _rebuild_main_scroller(self, tuning_level: int):
-    tuning_levels = [tr("Minimal"), tr("Standard"), tr("Advanced"), tr("Developer")]
+  def _setup_maps_sub_panels(self):
+    maps = self._panels[StarPilotPanelType.MAPS].instance
+    if maps and hasattr(maps, 'set_navigate_callback'):
+      maps.set_navigate_callback(self._push_sub_panel)
 
-    items = [
-      multiple_button_item(
-        tr_noop("Tuning Level"),
-        tr_noop(
-          "Choose your tuning level. Lower levels keep it simple; higher levels unlock more toggles for finer control.\n\n"
-          "Minimal - Ideal for those who prefer simplicity or ease of use\n"
-          "Standard - Recommended for most users for a balanced experience\n"
-          "Advanced - Fine-tuning for experienced users\n"
-          "Developer - Highly customizable settings for seasoned enthusiasts"
-        ),
-        tuning_levels,
-        tuning_level,
-        callback=self._on_tuning_level_changed,
-        icon=f"{STARPILOT_ICONS_DIR}/icon_tuning.png",
-        starpilot_icon=True,
-      ),
-    ]
-
+  def _rebuild_grid(self):
+    self._main_grid.clear()
+    
     panel_type_map = {
       "SOUNDS": StarPilotPanelType.SOUNDS,
       "DRIVING_MODEL": StarPilotPanelType.DRIVING_MODEL,
@@ -270,26 +236,53 @@ class StarPilotLayout(Widget):
       "WHEEL": StarPilotPanelType.WHEEL,
     }
 
-    for cat in self.CATEGORIES:
-      filtered_buttons = []
-      for btn_label, panel_key, min_level in cat["buttons"]:
-        if tuning_level >= min_level:
-          panel_type = panel_type_map[panel_key]
-          callback = lambda p=panel_type: self._set_current_panel(p)
-          filtered_buttons.append((tr(btn_label), callback))
+    if self._current_category_idx is None:
+      # Main Categories Grid
+      for i, cat in enumerate(self.CATEGORIES):
+        visible_buttons = cat["buttons"]
+        if not visible_buttons:
+          continue
+          
+        def on_click(idx=i):
+          cat_info = self.CATEGORIES[idx]
+          vis_btns = cat_info["buttons"]
+          if len(vis_btns) == 1:
+            self._current_category_idx = idx
+            self._set_current_panel(panel_type_map[vis_btns[0][1]])
+          else:
+            self._current_category_idx = idx
+            self._rebuild_grid()
+            if self._depth_callback:
+              self._depth_callback(1)
 
-      if filtered_buttons:
-        full_icon_path = f"{STARPILOT_ICONS_DIR}/{cat['icon']}"
-        item = category_buttons_item(
+        tile = HubTile(
           title=tr(cat["title"]),
-          buttons=filtered_buttons,
-          description=tr(cat["desc"]),
-          icon=full_icon_path,
+          desc=tr(cat["desc"]),
+          icon_path=f"{STARPILOT_ICONS_DIR}/{cat['icon']}",
+          on_click=on_click,
           starpilot_icon=True,
+          bg_color=cat.get("color")
         )
-        items.append(item)
+        self._main_grid.add_tile(tile)
+    else:
+      # Sub-buttons Grid for selected Category
+      cat = self.CATEGORIES[self._current_category_idx]
+      visible_buttons = cat["buttons"]
+      
+      for label, panel_key, _ in visible_buttons:
+        p_type = panel_type_map[panel_key]
+        def on_btn_click(p=p_type):
+          self._set_current_panel(p)
 
-    self._main_scroller = Scroller(items, line_separator=True, spacing=0)
+        tile = HubTile(
+          title=tr(label),
+          desc="",
+          icon_path=f"{STARPILOT_ICONS_DIR}/{cat['icon']}", # Reuse category icon for sub-tiles
+          on_click=on_btn_click,
+          starpilot_icon=True,
+          bg_color=cat.get("color")
+        )
+        self._main_grid.add_tile(tile)
 
   def _set_current_panel(self, panel_type: StarPilotPanelType):
     if panel_type != self._current_panel:
@@ -298,14 +291,14 @@ class StarPilotLayout(Widget):
       self._current_panel = panel_type
       if panel_type != StarPilotPanelType.MAIN:
         self._panels[panel_type].instance.show_event()
+      else:
+        self._rebuild_grid()
 
-    depth = 1 if panel_type != StarPilotPanelType.MAIN else 0
-    if self._depth_callback:
-      self._depth_callback(depth)
+    self._update_depth()
 
   def _render(self, rect: rl.Rectangle):
     if self._current_panel == StarPilotPanelType.MAIN:
-      self._main_scroller.render(rect)
+      self._main_grid.render(rect)
     else:
       panel = self._panels[self._current_panel]
       if panel.instance:
@@ -313,9 +306,7 @@ class StarPilotLayout(Widget):
 
   def show_event(self):
     super().show_event()
-    if self._current_panel == StarPilotPanelType.MAIN:
-      self._main_scroller.show_event()
-    else:
+    if self._current_panel != StarPilotPanelType.MAIN:
       self._panels[self._current_panel].instance.show_event()
 
   def hide_event(self):

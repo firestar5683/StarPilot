@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 # PFEIFER - SLC - Modified by FrogAi for FrogPilot
 import calendar
+import json
 import numpy as np
 import requests
 
@@ -36,6 +37,7 @@ OFFSET_MAP_METRIC = [
 class SpeedLimitController:
   def __init__(self, FrogPilotVCruise):
     self.frogpilot_planner = FrogPilotVCruise.frogpilot_planner
+    self.frogpilot_toggles = None
 
     self.calling_mapbox = False
     self.override_slc = False
@@ -53,14 +55,18 @@ class SpeedLimitController:
     self.previous_source = "None"
     self.source = "None"
 
-    self.mapbox_requests = self.frogpilot_planner.params.get("MapBoxRequests")
+    mapbox_requests_raw = self.frogpilot_planner.params.get("MapBoxRequests", encoding="utf-8")
+    try:
+      self.mapbox_requests = json.loads(mapbox_requests_raw or "{}")
+    except (TypeError, ValueError):
+      self.mapbox_requests = {}
     self.mapbox_requests.setdefault("total_requests", 0)
     self.mapbox_requests.setdefault("max_requests", FREE_MAPBOX_REQUESTS - (28 * 100))
 
     self.mapbox_host = "https://api.mapbox.com"
-    self.mapbox_token = self.frogpilot_planner.params.get("MapboxSecretKey")
+    self.mapbox_token = self.frogpilot_planner.params.get("MapboxSecretKey", encoding="utf-8")
 
-    self.previous_target = self.frogpilot_planner.params.get("PreviousSpeedLimit")
+    self.previous_target = self.frogpilot_planner.params.get_float("PreviousSpeedLimit")
 
     self.executor = ThreadPoolExecutor(max_workers=1)
 
@@ -70,10 +76,12 @@ class SpeedLimitController:
 
   @property
   def experimental_mode(self):
-    return self.target == 0 and self.frogpilot_toggles.slc_fallback_experimental_mode
+    return self.target == 0 and bool(getattr(self.frogpilot_toggles, "slc_fallback_experimental_mode", False))
 
   @property
   def offset(self):
+    if self.frogpilot_toggles is None:
+      return 0
     offset_map = OFFSET_MAP_METRIC if self.frogpilot_toggles.is_metric else OFFSET_MAP_IMPERIAL
     return next((getattr(self.frogpilot_toggles, offset) for low, high, offset in offset_map if low < self.target < high), 0)
 

@@ -124,15 +124,14 @@ export function LongitudinalManeuvers() {
         <div class="longManeuverActions">
           <button
             class="longManeuverButton"
-            ?disabled="${state.busy}"
+            disabled="${() => state.busy || false}"
             @click="${() => runAction("start")}">
             Start / Arm
           </button>
           <button
             class="longManeuverButton danger"
-            ?disabled="${state.busy}"
-            @click="${() => runAction("stop")}">
-            Stop
+            disabled="${() => state.busy || false}"
+            @click="${() => runAction("stop")}">            Stop
           </button>
         </div>
 

@@ -30,6 +30,23 @@ def make_msg(face_detected, distracted=False, model_uncertain=False):
   return ds
 
 
+def make_dual_msg(left_face_prob, right_face_prob, wheel_on_right_prob=0., model_uncertain=False):
+  ds = log.DriverStateV2.new_message()
+  ds.wheelOnRightProb = wheel_on_right_prob
+  for side, face_prob in ((ds.leftDriverData, left_face_prob), (ds.rightDriverData, right_face_prob)):
+    side.faceOrientation = [0., 0., 0.]
+    side.facePosition = [0., 0.]
+    side.faceProb = face_prob
+    side.leftEyeProb = 1.
+    side.rightEyeProb = 1.
+    side.leftBlinkProb = 0.
+    side.rightBlinkProb = 0.
+    side.faceOrientationStd = [1.*model_uncertain, 1.*model_uncertain, 1.*model_uncertain]
+    side.facePositionStd = [1.*model_uncertain, 1.*model_uncertain]
+    side.phoneProb = 0.
+  return ds
+
+
 # driver state from neural net, 10Hz
 msg_NO_FACE_DETECTED = make_msg(False)
 msg_ATTENTIVE = make_msg(True)
@@ -70,6 +87,16 @@ class TestMonitoring:
   def test_fully_aware_driver(self):
     events, _ = self._run_seq(always_attentive, always_false, always_true, always_false)
     self._assert_no_events(events)
+
+  def test_saved_rhd_recovers_to_lhd_with_strong_left_face(self):
+    settings = DRIVER_MONITOR_SETTINGS(device_type='mici')
+    DM = DriverMonitoring(rhd_saved=True, settings=settings)
+    msg = make_dual_msg(left_face_prob=0.95, right_face_prob=0.2, wheel_on_right_prob=0.35)
+
+    DM._update_states(msg, [0, 0, 0], 0, False, False)
+
+    assert not DM.wheel_on_right
+    assert DM.face_detected
 
   # engaged, driver is distracted and does nothing
   def test_fully_distracted_driver(self):
@@ -203,4 +230,3 @@ class TestMonitoring:
                               events[int((INVISIBLE_SECONDS_TO_ORANGE-1+DT_DMON*d_status.settings._HI_STD_FALLBACK_TIME+0.1)/DT_DMON)].names
     assert EventName.driverUnresponsive in \
                               events[int((INVISIBLE_SECONDS_TO_RED-1+DT_DMON*d_status.settings._HI_STD_FALLBACK_TIME+0.1)/DT_DMON)].names
-

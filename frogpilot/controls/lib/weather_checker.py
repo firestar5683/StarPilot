@@ -56,7 +56,7 @@ class WeatherChecker:
     self.last_updated = None
     self.requesting = False
 
-    self.user_api_key = self.frogpilot_planner.params.get("WeatherToken")
+    self.user_api_key = self.frogpilot_planner.params.get("WeatherToken", encoding="utf-8")
 
     if self.user_api_key:
       self.check_interval = 60

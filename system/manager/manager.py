@@ -250,6 +250,21 @@ def migrate_param_type_canonicalization(params: Params) -> None:
     cloudlog.exception(f"Failed to write migration flag: {STARPILOT_PARAM_CANONICALIZATION_MIGRATION_FLAG}")
 
 
+def migrate_legacy_experimental_longitudinal(params: Params, params_cache: Params) -> None:
+  legacy_value = params.get("ExperimentalLongitudinalEnabled")
+  if legacy_value is None:
+    return
+
+  if params.get("AlphaLongitudinalEnabled") is None:
+    alpha_long_enabled = params.get_bool("ExperimentalLongitudinalEnabled")
+    params.put_bool("AlphaLongitudinalEnabled", alpha_long_enabled)
+    params_cache.put_bool("AlphaLongitudinalEnabled", alpha_long_enabled)
+    cloudlog.warning("Migrated legacy ExperimentalLongitudinalEnabled to AlphaLongitudinalEnabled")
+
+  params.remove("ExperimentalLongitudinalEnabled")
+  params_cache.remove("ExperimentalLongitudinalEnabled")
+
+
 def manager_init() -> None:
   save_bootlog()
 
@@ -271,6 +286,9 @@ def manager_init() -> None:
   if HARDWARE.get_device_type() == "pc":
     cache_params_path = os.path.join(Paths.comma_home(), "cache", "params")
   params_cache = Params(cache_params_path, return_defaults=True)
+
+  # Preserve StarPilot's legacy longitudinal toggle when switching branches.
+  migrate_legacy_experimental_longitudinal(params, params_cache)
 
   # Canonicalize legacy string encodings (e.g. INT params stored as "26.000000")
   # before bulk reads below to avoid repeated cast warnings and UI-side churn.

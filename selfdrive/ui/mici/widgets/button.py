@@ -110,6 +110,7 @@ class BigButton(Widget):
     self.text = text
     self.value = value
     self.set_icon(icon)
+    self._label_font_size_override: int | None = None
 
     self._scale_filter = BounceFilter(1.0, 0.1, 1 / gui_app.target_fps)
 
@@ -135,6 +136,18 @@ class BigButton(Widget):
 
   def set_icon(self, icon: Union[str, rl.Texture]):
     self._txt_icon = gui_app.texture(icon, 64, 64) if isinstance(icon, str) and len(icon) else icon
+
+  def _refresh_label_metrics(self):
+    font_size = self._label_font_size_override if self._label_font_size_override is not None else self._get_label_font_size()
+    self._label.set_font_size(font_size)
+    self._needs_scroll = measure_text_cached(self._label_font, self.text, font_size).x + 25 > self._rect.width
+    self._scroll_offset = 0
+    self._scroll_timer = 0
+    self._scroll_state = ScrollState.PRE_SCROLL
+
+  def _set_label_font_size_override(self, font_size: int | None):
+    self._label_font_size_override = font_size
+    self._refresh_label_metrics()
 
   def set_rotate_icon(self, rotate: bool):
     if rotate and self._rotate_icon_t is not None:
@@ -165,10 +178,12 @@ class BigButton(Widget):
   def set_text(self, text: str):
     self.text = text
     self._label.set_text(text)
+    self._refresh_label_metrics()
 
   def set_value(self, value: str):
     self.value = value
     self._sub_label.set_text(value)
+    self._refresh_label_metrics()
 
   def get_value(self) -> str:
     return self.value
@@ -256,7 +271,7 @@ class BigToggle(BigButton):
     self._checked = initial_state
     self._toggle_callback = toggle_callback
 
-    self._label.set_font_size(48)
+    self._set_label_font_size_override(48)
 
   def _load_images(self):
     super()._load_images()
@@ -296,8 +311,8 @@ class BigMultiToggle(BigToggle):
     self._select_callback = select_callback
 
     self._label.set_width(int(self._rect.width - LABEL_HORIZONTAL_PADDING * 2 - self._txt_enabled_toggle.width))
-    # TODO: why isn't this automatic?
-    self._label.set_font_size(self._get_label_font_size())
+    # Keep the title size stable when the selected option changes.
+    self._set_label_font_size_override(self._get_label_font_size())
 
     self.set_value(self._options[0])
 

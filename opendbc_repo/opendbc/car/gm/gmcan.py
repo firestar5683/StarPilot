@@ -116,23 +116,24 @@ def create_adas_keepalive(bus):
 
 
 def create_gas_regen_command(packer, bus, throttle, idx, enabled, at_full_stop, include_always_one3=False):
-  # Legacy callsites may still pass include_always_one3; this DBC encodes ACC type explicitly instead.
-  _ = include_always_one3
-  values = {
-    "GasRegenCmdActive": enabled,
-    "RollingCounter": idx,
-    "GasRegenCmd": throttle,
-    "GasRegenFullStopActive": at_full_stop,
-    "GasRegenAccType": 1,
-  }
+  # Keep GM camera-long GasRegen bytes aligned with StarPilot's legacy layout.
+  # The regenerated DBC shape does not pack to the same wire format on Global A.
+  dat = bytearray(8)
+  dat[0] = ((idx & 0x3) << 6) | int(enabled)
+  dat[1] = 0x42 | (0x20 if at_full_stop else 0x00)
 
-  dat = packer.make_can_msg("ASCMGasRegenCmd", bus, values)[1]
-  values["GasRegenChecksum"] = ((1 - int(enabled)) << 24) | \
-                               (((0xff - dat[1]) & 0xff) << 16) | \
-                               (((0xff - dat[2]) & 0xff) << 8) | \
-                               ((0x100 - dat[3] - idx) & 0xff)
+  cmd = int(throttle) << 3
+  dat[2] = (cmd >> 8) & 0xFF
+  dat[3] = cmd & 0xFF
+  if include_always_one3:
+    dat[2] |= 0x80
 
-  return packer.make_can_msg("ASCMGasRegenCmd", bus, values)
+  dat[4] = 0x00 if enabled else 0x01
+  dat[5] = (0xFF - dat[1]) & 0xFF
+  dat[6] = (0xFF - dat[2]) & 0xFF
+  dat[7] = (0x100 - dat[3] - idx) & 0xFF
+
+  return CanData(0x2CB, bytes(dat), bus)
 
 
 def create_ecm_cruise_control_command(packer, bus, enabled, target_speed_kph):

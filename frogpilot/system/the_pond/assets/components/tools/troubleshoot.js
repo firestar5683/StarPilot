@@ -156,8 +156,7 @@ export function Troubleshoot() {
             Quick diagnostics snapshot for weird behavior reports and copy-ready debug logs.
           </p>
           <div class="troubleshootActionRow">
-            <button class="troubleshootButton" ?disabled="${state.refreshing}" @click="${() => fetchTroubleshoot(true)}">
-              ${state.refreshing ? "Refreshing..." : "Refresh"}
+            <button class="troubleshootButton" disabled="${() => state.refreshing || false}" @click="${() => fetchTroubleshoot(true)}">              ${state.refreshing ? "Refreshing..." : "Refresh"}
             </button>
             <button class="troubleshootButton" @click="${copyToClipboard}">
               Copy to Clipboard
@@ -188,9 +187,8 @@ export function Troubleshoot() {
               ${section.resettable ? html`
                 <button
                   class="troubleshootButton troubleshootDanger"
-                  ?disabled="${state.busySection === section.id}"
-                  @click="${() => resetSection(section)}">
-                  ${state.busySection === section.id ? "Resetting..." : "Reset to Default"}
+                  disabled="${() => state.busySection === section.id || false}"
+                  @click="${() => resetSection(section)}">                  ${state.busySection === section.id ? "Resetting..." : "Reset to Default"}
                 </button>
               ` : ""}
             </div>

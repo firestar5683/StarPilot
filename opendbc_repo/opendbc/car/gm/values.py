@@ -287,6 +287,10 @@ class CAR(Platforms):
     [GMCarDocs("Cadillac Escalade 2017", "Driver Assist Package")],
     GMCarSpecs(mass=2564, wheelbase=2.95, steerRatio=17.3),
   )
+  CADILLAC_ESCALADE_ASCM = GMPlatformConfig(
+    [GMCarDocs("Cadillac Escalade 2018 ASCM Harness", "Driver Assist Package")],
+    CADILLAC_ESCALADE.specs,
+  )
   CADILLAC_ESCALADE_ESV = GMASCMPlatformConfig(
     [GMCarDocs("Cadillac Escalade ESV 2016", "Adaptive Cruise Control (ACC) & LKAS")],
     GMCarSpecs(mass=2739, wheelbase=3.302, steerRatio=17.3, tireStiffnessFactor=1.0),
@@ -557,7 +561,7 @@ CC_REGEN_PADDLE_CAR = {
 CAMERA_ACC_CAR.update(CC_ONLY_CAR)
 
 # ASCM-INT paths are only enabled when SASCM (0x2FF) is detected at runtime
-ASCM_INT = {CAR.CHEVROLET_VOLT_ASCM, CAR.GMC_ACADIA_ASCM, CAR.CHEVROLET_MALIBU_ASCM}
+ASCM_INT = {CAR.CHEVROLET_VOLT_ASCM, CAR.GMC_ACADIA_ASCM, CAR.CHEVROLET_MALIBU_ASCM, CAR.CADILLAC_ESCALADE_ASCM}
 
 STEER_THRESHOLD = 1.0
 

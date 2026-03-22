@@ -242,12 +242,12 @@ export function TestingGround() {
           <div class="testingGroundSelectionRow">
             <select
               class="testingGroundSelect"
-              ?disabled="${state.busy || getSelectableSlots().length === 0}"
+              disabled="${() => state.busy || getSelectableSlots().length === 0 || false}"
               @change="${(event) => {
                 selectSlot(String(event.target.value || ""))
               }}">
               ${() => getSelectableSlots().length
-                ? getSelectableSlots().map((slot) => html`<option value="${slotId(slot)}" ${slotId(slot) === state.selectedSlot ? "selected" : ""}>${slot.id}. ${slot.name}</option>`)
+                ? getSelectableSlots().map((slot) => html`<option value="${slotId(slot)}" selected="${() => slotId(slot) === state.selectedSlot || false}">${slot.id}. ${slot.name}</option>`)
                 : html`<option value="">No active test slots</option>`
               }
             </select>
@@ -265,7 +265,7 @@ export function TestingGround() {
               ${() => getVariantModes(getSelectedSlot()).map((mode) => html`
                 <button
                   class="${modeButtonClass(mode)}"
-                  ?disabled="${state.busy}"
+                  disabled="${() => state.busy || false}"
                   @click="${() => selectMode(mode)}">
                   <span class="testingGroundModeLetter">${mode}</span>
                   <span class="testingGroundModeLabel">${toModeLabel(getSelectedSlot(), mode)}</span>

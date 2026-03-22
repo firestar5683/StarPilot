@@ -133,11 +133,17 @@ class SoftwareSelectionPage(Widget):
     super().__init__()
 
     self._openpilot_slider = LargerSlider("slide to use\nstarpilot", use_openpilot_callback)
-    self._custom_software_slider = LargerSlider("slide to use\ncustom software", use_custom_software_callback, green=False)
+    self._custom_software_slider = LargerSlider("slide to use\ncustom software", use_custom_software_callback,
+                                                green=False, shimmer_offset=0.4)
+
+  def show_event(self):
+    super().show_event()
+    self._openpilot_slider.show_event()
+    self._custom_software_slider.show_event()
 
   def reset(self):
-    self._openpilot_slider.reset()
-    self._custom_software_slider.reset()
+    self._openpilot_slider.reset(reset_shimmer=False)
+    self._custom_software_slider.reset(reset_shimmer=False)
 
   def _render(self, rect: rl.Rectangle):
     self._openpilot_slider.set_opacity(1.0 - self._custom_software_slider.slider_percentage)

@@ -21,6 +21,7 @@ from opendbc.car.psa.values import CAR as PSA
 non_tested_cars = [
   MOCK.MOCK,
   GM.CADILLAC_ATS,
+  GM.CADILLAC_ESCALADE_ASCM,
   GM.HOLDEN_ASTRA,
   GM.CHEVROLET_MALIBU,
   HYUNDAI.GENESIS_G90,

@@ -51,6 +51,40 @@ class TestManager:
     assert params.get("OpenpilotEnabledToggle")
     assert params.get("RouteCount") == 0
 
+  def test_migrate_legacy_experimental_longitudinal(self):
+    class FakeParams:
+      def __init__(self, values):
+        self.values = dict(values)
+
+      def get(self, key):
+        return self.values.get(key)
+
+      def get_bool(self, key):
+        value = self.values.get(key)
+        if value is None:
+          return False
+        if isinstance(value, bytes):
+          value = value.decode("utf-8", errors="ignore")
+        if isinstance(value, str):
+          return value.strip().lower() in ("1", "true", "yes", "on")
+        return bool(value)
+
+      def put_bool(self, key, value):
+        self.values[key] = b"1" if value else b"0"
+
+      def remove(self, key):
+        self.values.pop(key, None)
+
+    params = FakeParams({"ExperimentalLongitudinalEnabled": b"1"})
+    params_cache = FakeParams({})
+
+    manager.migrate_legacy_experimental_longitudinal(params, params_cache)
+
+    assert params.get_bool("AlphaLongitudinalEnabled")
+    assert params_cache.get_bool("AlphaLongitudinalEnabled")
+    assert params.get("ExperimentalLongitudinalEnabled") is None
+    assert params_cache.get("ExperimentalLongitudinalEnabled") is None
+
   @pytest.mark.skip("this test is flaky the way it's currently written, should be moved to test_onroad")
   def test_clean_exit(self, subtests):
     """

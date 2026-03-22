@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+import json
+
 import numpy as np
 
 from openpilot.common.realtime import DT_MDL
@@ -21,7 +23,11 @@ class CurveSpeedController:
 
     self.training_timer = 0
 
-    self.curvature_data = self.frogpilot_planner.params.get("CurvatureData")
+    curvature_data_raw = self.frogpilot_planner.params.get("CurvatureData", encoding="utf-8")
+    try:
+      self.curvature_data = json.loads(curvature_data_raw or "{}")
+    except (TypeError, ValueError):
+      self.curvature_data = {}
 
     self.calculate_weights()
     self.update_lateral_acceleration()

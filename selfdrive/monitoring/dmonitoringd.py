@@ -48,11 +48,16 @@ def dmonitoringd_thread():
       DM.always_on = params.get_bool("AlwaysOnDM")
       demo_mode = params.get_bool("IsDriverViewEnabled") and sm["carState"].gearShifter != GearShifter.reverse
 
-    # save rhd virtual toggle every 5 mins
+    # save rhd virtual toggle every 5 mins, but only with clear confidence.
     if (sm['driverStateV2'].frameId % 6000 == 0 and not demo_mode and
-     DM.wheelpos.prob_offseter.filtered_stat.n > DM.settings._WHEELPOS_FILTER_MIN_COUNT and
-     DM.wheel_on_right == (DM.wheelpos.prob_offseter.filtered_stat.M > DM.settings._WHEELPOS_THRESHOLD)):
-      params.put_bool_nonblocking("IsRhdDetected", DM.wheel_on_right)
+        DM.wheelpos.prob_offseter.filtered_stat.n > DM.settings._WHEELPOS_FILTER_MIN_COUNT):
+      wheelpos_mean = DM.wheelpos.prob_offseter.filtered_stat.M
+      save_rhd = DM.settings._WHEELPOS_THRESHOLD_ENTER_RHD + DM.settings._WHEELPOS_SAVE_MARGIN
+      save_lhd = DM.settings._WHEELPOS_THRESHOLD_ENTER_LHD - DM.settings._WHEELPOS_SAVE_MARGIN
+      if wheelpos_mean >= save_rhd:
+        params.put_bool_nonblocking("IsRhdDetected", True)
+      elif wheelpos_mean <= save_lhd:
+        params.put_bool_nonblocking("IsRhdDetected", False)
 
 def main():
   dmonitoringd_thread()

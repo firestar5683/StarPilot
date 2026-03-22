@@ -20,6 +20,13 @@ CAMERA_CANCEL_DELAY_FRAMES = 10
 MIN_STEER_MSG_INTERVAL_MS = 15
 
 
+def get_stock_cc_active_for_cancel(CP, CS):
+  stock_cc_active = CS.out.cruiseState.enabled or CS.pcm_acc_status != AccState.OFF
+  if CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL:
+    return CS.out.cruiseState.enabled
+  return stock_cc_active
+
+
 class CarController(CarControllerBase):
   def __init__(self, dbc_names, CP):
     super().__init__(dbc_names, CP)
@@ -528,21 +535,14 @@ class CarController(CarControllerBase):
       if self.CP.networkLocation == NetworkLocation.gateway and self.frame % keepalive_step == 0:
         can_sends += gmcan.create_adas_keepalive(CanBus.POWERTRAIN)
 
-      # Pedal interceptor: continuously spam CANCEL while OP longitudinal is active.
-      if (self.CP.flags & GMFlags.PEDAL_LONG.value) and CC.longActive:
-        if self.CP.carFingerprint == CAR.CHEVROLET_MALIBU_HYBRID_CC:
-          malibu_cancel_requested = True
-        elif (self.frame - self.last_button_frame) * DT_CTRL > 0.04:
-          self.last_button_frame = self.frame
-          cancel_bus = CanBus.CAMERA if self.CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL else CanBus.POWERTRAIN
-          can_sends.append(gmcan.create_buttons(self.packer_pt, cancel_bus, (CS.buttons_counter + 1) % 4, CruiseButtons.CANCEL))
-      # CC_LONG: only send CANCEL on OP disengage while cruise is still on.
-      elif (
-        (self.CP.flags & GMFlags.CC_LONG.value) and
-        self.prev_op_enabled and
-        not CC.enabled and
-        CS.out.cruiseState.enabled
-      ):
+      # - CC_LONG: cancel stock CC if OP is not active
+      stock_cc_active = get_stock_cc_active_for_cancel(self.CP, CS)
+      pedal_cancel = bool(self.CP.flags & GMFlags.PEDAL_LONG.value)
+      if self.CP.carFingerprint == CAR.CHEVROLET_MALIBU_HYBRID_CC:
+        pedal_cancel = pedal_cancel and CC.longActive
+
+      if ((pedal_cancel and stock_cc_active) or
+          (((self.CP.flags & GMFlags.CC_LONG.value) and not CC.enabled) and stock_cc_active)):
         if self.CP.carFingerprint == CAR.CHEVROLET_MALIBU_HYBRID_CC:
           malibu_cancel_requested = True
         elif (self.frame - self.last_button_frame) * DT_CTRL > 0.04:

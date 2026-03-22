@@ -34,6 +34,7 @@ class Widget(abc.ABC):
     self._click_callback: Callable[[], None] | None = None
     self._multi_touch = False
     self.__was_awake = True
+    self._children: list = []
 
   @property
   def rect(self) -> rl.Rectangle:
@@ -180,9 +181,25 @@ class Widget(abc.ABC):
 
   def show_event(self):
     """Optionally handle show event. Parent must manually call this"""
+    for child in self._children:
+      child.show_event()
 
   def hide_event(self):
     """Optionally handle hide event. Parent must manually call this"""
+    for child in self._children:
+      child.hide_event()
+
+  def _child(self, widget):
+    """Register a child widget for lifecycle propagation."""
+    assert widget not in self._children, f"{type(widget).__name__} already a child of {type(self).__name__}"
+    self._children.append(widget)
+    return widget
+
+  def dismiss(self, callback: Callable[[], None] | None = None):
+    """Dismiss this widget from the nav stack."""
+    gui_app.pop_widget()
+    if callback:
+      callback()
 
 
 SWIPE_AWAY_THRESHOLD = 80  # px to dismiss after releasing

@@ -538,27 +538,26 @@ export function ModelManager() {
 
             return orderedInstalled.length > 0
               ? orderedInstalled.map(model => html`
-                <option value="${safeText(model.value)}" ${safeText(model.value) === state.currentModel ? "selected" : ""}>
+                <option value="${safeText(model.value)}" selected="${() => safeText(model.value) === state.currentModel || false}">
                   ${safeText(model.label, model.value)}
-                </option>
-              `)
+                </option>              `)
               : html`<option value="">No installed models</option>`;
           })()}
         </select>
 
         <label class="mm-filter-label" for="mm-sort-mode-select">Sort</label>
         <select class="mm-select" id="mm-sort-mode-select">
-          <option value="alphabetical" ${state.sortMode === "alphabetical" ? "selected" : ""}>Alphabetical</option>
-          <option value="release_date" ${state.sortMode === "release_date" ? "selected" : ""}>Release Date</option>
+          <option value="alphabetical" selected="${() => state.sortMode === "alphabetical" || false}">Alphabetical</option>
+          <option value="release_date" selected="${() => state.sortMode === "release_date" || false}">Release Date</option>
         </select>
 
         <div class="mm-filter-break"></div>
 
         <label class="mm-filter-label" for="mm-community-filter-select">Community Favorite</label>
         <select class="mm-select" id="mm-community-filter-select">
-          <option value="all" ${state.communityFavoriteFilter === "all" ? "selected" : ""}>All</option>
-          <option value="yes" ${state.communityFavoriteFilter === "yes" ? "selected" : ""}>Yes</option>
-          <option value="no" ${state.communityFavoriteFilter === "no" ? "selected" : ""}>No</option>
+          <option value="all" selected="${() => state.communityFavoriteFilter === "all" || false}">All</option>
+          <option value="yes" selected="${() => state.communityFavoriteFilter === "yes" || false}">Yes</option>
+          <option value="no" selected="${() => state.communityFavoriteFilter === "no"}">No</option>
         </select>
       </div>
 

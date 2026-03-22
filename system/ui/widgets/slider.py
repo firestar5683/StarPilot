@@ -5,17 +5,19 @@ import pyray as rl
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.label import UnifiedLabel
-from openpilot.common.filter_simple import FirstOrderFilter
+from openpilot.common.filter_simple import BounceFilter, FirstOrderFilter
 
 
 class SmallSlider(Widget):
   HORIZONTAL_PADDING = 8
   CONFIRM_DELAY = 0.2
+  PRESSED_SCALE = 1.07
 
-  def __init__(self, title: str, confirm_callback: Callable | None = None):
+  def __init__(self, title: str, confirm_callback: Callable | None = None, shimmer_offset: float = 0.0):
     # TODO: unify this with BigConfirmationDialogV2
     super().__init__()
     self._confirm_callback = confirm_callback
+    self._shimmer_offset = shimmer_offset
 
     self._font = gui_app.font(FontWeight.DISPLAY)
 
@@ -30,29 +32,40 @@ class SmallSlider(Widget):
     self._start_x_circle = 0.0
     self._scroll_x_circle = 0.0
     self._scroll_x_circle_filter = FirstOrderFilter(0, 0.05, 1 / gui_app.target_fps)
+    self._circle_scale_filter = BounceFilter(1.0, 0.1, 1 / gui_app.target_fps)
+    self._circle_press_time: float | None = None
 
     self._is_dragging_circle = False
 
-    self._label = UnifiedLabel(title, font_size=36, font_weight=FontWeight.MEDIUM, text_color=rl.Color(255, 255, 255, int(255 * 0.65)),
+    self._label = UnifiedLabel(title, font_size=36, font_weight=FontWeight.SEMI_BOLD, text_color=rl.WHITE,
                                alignment=rl.GuiTextAlignment.TEXT_ALIGN_RIGHT,
-                               alignment_vertical=rl.GuiTextAlignmentVertical.TEXT_ALIGN_MIDDLE, line_height=0.9)
+                               alignment_vertical=rl.GuiTextAlignmentVertical.TEXT_ALIGN_MIDDLE, line_height=0.9, shimmer=True)
 
   def _load_assets(self):
     self.set_rect(rl.Rectangle(0, 0, 316 + self.HORIZONTAL_PADDING * 2, 100))
 
     self._bg_txt = gui_app.texture("icons_mici/setup/small_slider/slider_bg.png", 316, 100)
     self._circle_bg_txt = gui_app.texture("icons_mici/setup/small_slider/slider_red_circle.png", 100, 100)
+    self._circle_bg_pressed_txt = self._circle_bg_txt
     self._circle_arrow_txt = gui_app.texture("icons_mici/setup/small_slider/slider_arrow.png", 37, 32)
 
   @property
   def confirmed(self) -> bool:
     return self._confirmed_time > 0.0
 
-  def reset(self):
+  def show_event(self):
+    super().show_event()
+    self.reset()
+
+  def reset(self, reset_shimmer: bool = True):
     # reset all slider state
     self._is_dragging_circle = False
     self._confirmed_time = 0.0
     self._confirm_callback_called = False
+    self._circle_press_time = None
+    self._circle_scale_filter.x = 1.0
+    if reset_shimmer:
+      self._label.reset_shimmer(self._shimmer_offset)
 
   def set_opacity(self, opacity: float, smooth: bool = False):
     if smooth:
@@ -83,6 +96,7 @@ class SmallSlider(Widget):
       if rl.check_collision_point_rec(mouse_event.pos, circle_button_rect):
         self._start_x_circle = mouse_event.pos.x
         self._is_dragging_circle = True
+        self._circle_press_time = rl.get_time()
 
     elif mouse_event.left_released:
       # swiped to left
@@ -129,8 +143,9 @@ class SmallSlider(Widget):
     btn_x = bg_txt_x + self._bg_txt.width - self._circle_bg_txt.width + self._scroll_x_circle_filter.x
     btn_y = self._rect.y + (self._rect.height - self._circle_bg_txt.height) / 2
 
-    if self._confirmed_time == 0.0 or self._scroll_x_circle > 0:
-      self._label.set_text_color(rl.Color(255, 255, 255, int(255 * 0.65 * (1.0 - self.slider_percentage) * self._opacity_filter.x)))
+    label_alpha = int(255 * (1.0 - self.slider_percentage) * self._opacity_filter.x)
+    if label_alpha > 0:
+      self._label.set_text_color(rl.Color(255, 255, 255, label_alpha))
       label_rect = rl.Rectangle(
         self._rect.x + 20,
         self._rect.y,
@@ -139,18 +154,24 @@ class SmallSlider(Widget):
       )
       self._label.render(label_rect)
 
-    # circle and arrow
-    rl.draw_texture_ex(self._circle_bg_txt, rl.Vector2(btn_x, btn_y), 0.0, 1.0, white)
+    circle_pressed = self._is_dragging_circle or self.confirmed or (
+      self._circle_press_time is not None and rl.get_time() - self._circle_press_time < 0.075
+    )
+    circle_bg_txt = self._circle_bg_pressed_txt if circle_pressed else self._circle_bg_txt
+    scale = self._circle_scale_filter.update(self.PRESSED_SCALE if circle_pressed else 1.0)
+    scaled_btn_x = btn_x + (self._circle_bg_txt.width * (1 - scale)) / 2
+    scaled_btn_y = btn_y + (self._circle_bg_txt.height * (1 - scale)) / 2
+    rl.draw_texture_ex(circle_bg_txt, rl.Vector2(scaled_btn_x, scaled_btn_y), 0.0, scale, white)
 
-    arrow_x = btn_x + (self._circle_bg_txt.width - self._circle_arrow_txt.width) / 2
-    arrow_y = btn_y + (self._circle_bg_txt.height - self._circle_arrow_txt.height) / 2
+    arrow_x = scaled_btn_x + (self._circle_bg_txt.width * scale - self._circle_arrow_txt.width) / 2
+    arrow_y = scaled_btn_y + (self._circle_bg_txt.height * scale - self._circle_arrow_txt.height) / 2
     rl.draw_texture_ex(self._circle_arrow_txt, rl.Vector2(arrow_x, arrow_y), 0.0, 1.0, white)
 
 
 class LargerSlider(SmallSlider):
-  def __init__(self, title: str, confirm_callback: Callable | None = None, green: bool = True):
+  def __init__(self, title: str, confirm_callback: Callable | None = None, green: bool = True, shimmer_offset: float = 0.0):
     self._green = green
-    super().__init__(title, confirm_callback=confirm_callback)
+    super().__init__(title, confirm_callback=confirm_callback, shimmer_offset=shimmer_offset)
 
   def _load_assets(self):
     self.set_rect(rl.Rectangle(0, 0, 520 + self.HORIZONTAL_PADDING * 2, 115))
@@ -158,6 +179,7 @@ class LargerSlider(SmallSlider):
     self._bg_txt = gui_app.texture("icons_mici/setup/small_slider/slider_bg_larger.png", 520, 115)
     circle_fn = "slider_green_rounded_rectangle" if self._green else "slider_black_rounded_rectangle"
     self._circle_bg_txt = gui_app.texture(f"icons_mici/setup/small_slider/{circle_fn}.png", 180, 115)
+    self._circle_bg_pressed_txt = self._circle_bg_txt
     self._circle_arrow_txt = gui_app.texture("icons_mici/setup/small_slider/slider_arrow.png", 64, 55)
 
 
@@ -165,15 +187,16 @@ class BigSlider(SmallSlider):
   def __init__(self, title: str, icon: rl.Texture, confirm_callback: Callable | None = None):
     self._icon = icon
     super().__init__(title, confirm_callback=confirm_callback)
-    self._label = UnifiedLabel(title, font_size=48, font_weight=FontWeight.DISPLAY, text_color=rl.Color(255, 255, 255, int(255 * 0.65)),
+    self._label = UnifiedLabel(title, font_size=48, font_weight=FontWeight.DISPLAY, text_color=rl.WHITE,
                                alignment=rl.GuiTextAlignment.TEXT_ALIGN_RIGHT, alignment_vertical=rl.GuiTextAlignmentVertical.TEXT_ALIGN_MIDDLE,
-                               line_height=0.875)
+                               line_height=0.875, shimmer=True)
 
   def _load_assets(self):
     self.set_rect(rl.Rectangle(0, 0, 520 + self.HORIZONTAL_PADDING * 2, 180))
 
     self._bg_txt = gui_app.texture("icons_mici/buttons/slider_bg.png", 520, 180)
     self._circle_bg_txt = gui_app.texture("icons_mici/buttons/button_circle.png", 180, 180)
+    self._circle_bg_pressed_txt = gui_app.texture("icons_mici/buttons/button_circle_hover.png", 180, 180)
     self._circle_arrow_txt = self._icon
 
 
@@ -183,4 +206,5 @@ class RedBigSlider(BigSlider):
 
     self._bg_txt = gui_app.texture("icons_mici/buttons/slider_bg.png", 520, 180)
     self._circle_bg_txt = gui_app.texture("icons_mici/buttons/button_circle_red.png", 180, 180)
+    self._circle_bg_pressed_txt = gui_app.texture("icons_mici/buttons/button_circle_red_hover.png", 180, 180)
     self._circle_arrow_txt = self._icon

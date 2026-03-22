@@ -225,6 +225,7 @@ class GuiApplication:
     self._modal_overlay = ModalOverlay()
     self._modal_overlay_shown = False
     self._modal_overlay_tick: Callable[[], None] | None = None
+    self._nav_stack: list = []
 
     self._mouse = MouseState(self._scale)
     self._mouse_events: list[MouseEvent] = []
@@ -368,6 +369,41 @@ class GuiApplication:
 
   def set_modal_overlay_tick(self, tick_function: Callable | None):
     self._modal_overlay_tick = tick_function
+
+  def push_widget(self, widget):
+    if widget in self._nav_stack:
+      return
+    if self._nav_stack:
+      prev = self._nav_stack[-1]
+      if hasattr(prev, 'set_enabled'):
+        prev.set_enabled(False)
+    self._nav_stack.append(widget)
+    if hasattr(widget, 'show_event'):
+      widget.show_event()
+    if hasattr(widget, 'set_enabled'):
+      widget.set_enabled(True)
+
+  def pop_widget(self, idx: int | None = None):
+    if len(self._nav_stack) < 2:
+      return
+    idx_to_pop = len(self._nav_stack) - 1 if idx is None else idx
+    if idx_to_pop <= 0 or idx_to_pop >= len(self._nav_stack):
+      return
+    if idx_to_pop == len(self._nav_stack) - 1:
+      prev = self._nav_stack[idx_to_pop - 1]
+      if hasattr(prev, 'set_enabled'):
+        prev.set_enabled(True)
+    widget = self._nav_stack.pop(idx_to_pop)
+    if hasattr(widget, 'hide_event'):
+      widget.hide_event()
+
+  def _render_nav_stack(self) -> bool:
+    if not self._nav_stack:
+      return False
+    widget = self._nav_stack[-1]
+    if hasattr(widget, 'render'):
+      widget.render(rl.Rectangle(0, 0, self.width, self.height))
+    return True
 
   def set_should_render(self, should_render: bool):
     self._should_render = should_render
@@ -523,7 +559,9 @@ class GuiApplication:
           rl.clear_background(rl.BLACK)
 
         # Handle modal overlay rendering and input processing
-        if self._handle_modal_overlay():
+        if self._render_nav_stack():
+          yield False
+        elif self._handle_modal_overlay():
           # Allow a Widget to still run a function while overlay is shown
           if self._modal_overlay_tick is not None:
             self._modal_overlay_tick()

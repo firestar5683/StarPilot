@@ -11,6 +11,7 @@ ITEM_SPACING = 20
 LINE_COLOR = rl.GRAY
 LINE_PADDING = 40
 ANIMATION_SCALE = 0.6
+EDGE_SHADOW_WIDTH = 20
 
 MIN_ZOOM_ANIMATION_TIME = 0.075  # seconds
 DO_ZOOM = False
@@ -33,9 +34,50 @@ class LineSeparator(Widget):
                  LINE_COLOR)
 
 
+class ScrollIndicator(Widget):
+  def __init__(self):
+    super().__init__()
+    self._txt_scroll_indicator = gui_app.texture("icons_mici/settings/horizontal_scroll_indicator.png", 96, 48)
+    self._scroll_offset: float = 0.0
+    self._content_size: float = 0.0
+    self._viewport: rl.Rectangle = rl.Rectangle(0, 0, 0, 0)
+
+  def update(self, scroll_offset: float, content_size: float, viewport: rl.Rectangle) -> None:
+    self._scroll_offset = scroll_offset
+    self._content_size = content_size
+    self._viewport = viewport
+
+  def _render(self, _):
+    if self._viewport.width <= 0 or self._viewport.height <= 0:
+      return
+
+    indicator_w = min(float(np.interp(self._content_size, [1000, 3000], [300, 100])), self._viewport.width)
+    max_scroll = self._content_size - self._viewport.width
+    if max_scroll > 0:
+      scroll_ratio = -self._scroll_offset / max_scroll
+      slide_range = max(self._viewport.width - indicator_w, 0.0)
+      x = self._viewport.x + scroll_ratio * slide_range
+    else:
+      x = self._viewport.x + (self._viewport.width - indicator_w) / 2
+    y = max(self._viewport.y, 0) + self._viewport.height - self._txt_scroll_indicator.height / 2
+
+    dest_left = max(x, self._viewport.x)
+    dest_right = min(x + indicator_w, self._viewport.x + self._viewport.width)
+    dest_w = max(indicator_w / 2, dest_right - dest_left)
+
+    dest_left = min(dest_left, self._viewport.x + self._viewport.width - dest_w)
+    dest_left = max(dest_left, self._viewport.x)
+
+    src_rec = rl.Rectangle(0, 0, self._txt_scroll_indicator.width, self._txt_scroll_indicator.height)
+    dest_rec = rl.Rectangle(dest_left, y, dest_w, self._txt_scroll_indicator.height)
+    rl.draw_texture_pro(self._txt_scroll_indicator, src_rec, dest_rec, rl.Vector2(0, 0), 0.0,
+                        rl.Color(255, 255, 255, int(255 * 0.45)))
+
+
 class Scroller(Widget):
   def __init__(self, items: list[Widget], horizontal: bool = True, snap_items: bool = True, spacing: int = ITEM_SPACING,
-               line_separator: bool = False, pad_start: int = ITEM_SPACING, pad_end: int = ITEM_SPACING):
+               line_separator: bool = False, pad_start: int = ITEM_SPACING, pad_end: int = ITEM_SPACING,
+               scroll_indicator: bool = False, edge_shadows: bool = False):
     super().__init__()
     self._items: list[Widget] = []
     self._horizontal = horizontal
@@ -65,10 +107,17 @@ class Scroller(Widget):
     self.scroll_panel = GuiScrollPanel2(self._horizontal, handle_out_of_bounds=not self._snap_items)
     self._scroll_enabled: bool | Callable[[], bool] = True
 
-    self._txt_scroll_indicator = gui_app.texture("icons_mici/settings/vertical_scroll_indicator.png", 40, 80)
+    self._txt_vertical_scroll_indicator = gui_app.texture("icons_mici/settings/vertical_scroll_indicator.png", 40, 80)
+    self._show_scroll_indicator = scroll_indicator and self._horizontal
+    self._scroll_indicator = ScrollIndicator()
+    self._edge_shadows = edge_shadows and self._horizontal
 
     for item in items:
       self.add_widget(item)
+
+  @property
+  def items(self) -> list[Widget]:
+    return self._items
 
   def set_reset_scroll_at_show(self, scroll: bool):
     self._reset_scroll_at_show = scroll
@@ -92,6 +141,14 @@ class Scroller(Widget):
   def add_widget(self, item: Widget) -> None:
     self._items.append(item)
     item.set_touch_valid_callback(lambda: self.scroll_panel.is_touch_valid() and self.enabled)
+
+  def move_item(self, from_index: int, to_index: int) -> None:
+    if from_index == to_index:
+      return
+    if not (0 <= from_index < len(self._items) and 0 <= to_index < len(self._items)):
+      return
+    item = self._items.pop(from_index)
+    self._items.insert(to_index, item)
 
   def set_scrolling_enabled(self, enabled: bool | Callable[[], bool]) -> None:
     """Set whether scrolling is enabled (does not affect widget enabled state)."""
@@ -243,12 +300,26 @@ class Scroller(Widget):
 
     # Draw scroll indicator
     if SCROLL_BAR and not self._horizontal and len(self._visible_items) > 0:
-      _real_content_size = self._content_size - self._rect.height + self._txt_scroll_indicator.height
+      _real_content_size = self._content_size - self._rect.height + self._txt_vertical_scroll_indicator.height
       scroll_bar_y = -self._scroll_offset / _real_content_size * self._rect.height
-      scroll_bar_y = min(max(scroll_bar_y, self._rect.y), self._rect.y + self._rect.height - self._txt_scroll_indicator.height)
-      rl.draw_texture_ex(self._txt_scroll_indicator, rl.Vector2(self._rect.x, scroll_bar_y), 0, 1.0, rl.WHITE)
+      scroll_bar_y = min(max(scroll_bar_y, self._rect.y), self._rect.y + self._rect.height - self._txt_vertical_scroll_indicator.height)
+      rl.draw_texture_ex(self._txt_vertical_scroll_indicator, rl.Vector2(self._rect.x, scroll_bar_y), 0, 1.0, rl.WHITE)
 
     rl.end_scissor_mode()
+
+    if self._edge_shadows:
+      rl.draw_rectangle_gradient_h(int(self._rect.x), int(self._rect.y),
+                                   EDGE_SHADOW_WIDTH, int(self._rect.height),
+                                   rl.Color(0, 0, 0, 166), rl.BLANK)
+
+      right_x = int(self._rect.x + self._rect.width - EDGE_SHADOW_WIDTH)
+      rl.draw_rectangle_gradient_h(right_x, int(self._rect.y),
+                                   EDGE_SHADOW_WIDTH, int(self._rect.height),
+                                   rl.BLANK, rl.Color(0, 0, 0, 166))
+
+    if self._show_scroll_indicator and len(self._visible_items) > 0:
+      self._scroll_indicator.update(self._scroll_offset, self._content_size, self._rect)
+      self._scroll_indicator.render()
 
   def show_event(self):
     super().show_event()

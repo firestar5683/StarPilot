@@ -10,6 +10,7 @@ from opendbc.car import DT_CTRL, CanData, structs
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.fingerprints import FW_VERSIONS
 from opendbc.car.fw_versions import FW_QUERY_CONFIGS
+from opendbc.car.gm.values import CAR as GM_CAR, CanBus as GMCanBus, GMSafetyFlags
 from opendbc.car.interfaces import CarInterfaceBase, get_interface_attr
 from opendbc.car.mock.values import CAR as MOCK
 from opendbc.car.values import PLATFORMS
@@ -57,6 +58,33 @@ def get_fuzzy_car_interface(car_name: str, draw: DrawType) -> CarInterfaceBase:
 
 
 class TestCarInterfaces:
+  def test_gm_bolt_gen2_pedal_safety_flags(self):
+    CarInterface = interfaces[GM_CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL]
+
+    pedal_fingerprint = {bus: {} for bus in range(8)}
+    pedal_fingerprint[GMCanBus.POWERTRAIN][0x201] = 6
+    pedal_params = CarInterface.get_params(
+      GM_CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL,
+      pedal_fingerprint,
+      [],
+      alpha_long=False,
+      is_release=False,
+      docs=False,
+    )
+    assert pedal_params.safetyConfigs[0].safetyParam & GMSafetyFlags.FLAG_GM_NO_ACC.value
+    assert pedal_params.safetyConfigs[0].safetyParam & GMSafetyFlags.FLAG_GM_BOLT_2022_PEDAL.value
+
+    acc_fingerprint = {bus: {} for bus in range(8)}
+    acc_params = CarInterface.get_params(
+      GM_CAR.CHEVROLET_BOLT_ACC_2022_2023,
+      acc_fingerprint,
+      [],
+      alpha_long=False,
+      is_release=False,
+      docs=False,
+    )
+    assert not (acc_params.safetyConfigs[0].safetyParam & GMSafetyFlags.FLAG_GM_NO_ACC.value)
+
   # FIXME: Due to the lists used in carParams, Phase.target is very slow and will cause
   #  many generated examples to overrun when max_examples > ~20, don't use it
   @pytest.mark.parametrize("car_name", sorted(PLATFORMS))

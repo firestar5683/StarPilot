@@ -148,6 +148,33 @@ class TestGmEVSafetyBase(TestGmSafetyBase):
     return self.packer.make_can_msg_safety("EBCMRegenPaddle", 0, values)
 
 
+class GmCameraAccEVRegenMixin:
+  # Camera-ACC EV modes don't track 0xBD in their RX checks, so regen paddle
+  # input should be ignored by safety state in these modes.
+  def test_prev_user_regen(self):
+    self.assertFalse(self.safety.get_regen_braking_prev())
+    for pressed in (False, True, False):
+      self._rx(self._user_regen_msg(pressed))
+      self.assertFalse(self.safety.get_regen_braking_prev())
+
+  def test_allow_user_regen_at_zero_speed(self):
+    self._rx(self._vehicle_moving_msg(0))
+    self.safety.set_controls_allowed(True)
+    self._rx(self._user_regen_msg(True))
+    self.assertTrue(self.safety.get_controls_allowed())
+    self.assertTrue(self.safety.get_longitudinal_allowed())
+    self.assertFalse(self.safety.get_regen_braking_prev())
+
+  def test_not_allow_user_regen_when_moving(self):
+    self._rx(self._vehicle_moving_msg(self.STANDSTILL_THRESHOLD + 1))
+    self.safety.set_controls_allowed(True)
+    self._rx(self._user_regen_msg(True))
+    self.assertTrue(self.safety.get_controls_allowed())
+    self.assertTrue(self.safety.get_longitudinal_allowed())
+    self.assertFalse(self.safety.get_regen_braking_prev())
+    self._rx(self._vehicle_moving_msg(0))
+
+
 class TestGmAscmSafety(GmLongitudinalBase, TestGmSafetyBase):
   TX_MSGS = [[0x180, 0], [0x409, 0], [0x40A, 0], [0x2CB, 0], [0x370, 0], [0x200, 0], [0x1E1, 0], [0xBD, 0], [0x1F5, 0],  # pt bus
              [0xA1, 1], [0x306, 1], [0x308, 1], [0x310, 1],  # obs bus
@@ -207,7 +234,35 @@ class TestGmCameraSafety(TestGmCameraSafetyBase):
       self.assertEqual(enabled, self._tx(self._button_msg(Buttons.CANCEL)))
 
 
-class TestGmCameraEVSafety(TestGmCameraSafety, TestGmEVSafetyBase):
+def _prime_gm_ascm_int_stock_cam_rx_checks(safety, f1_bus: int) -> None:
+  # This path should only accept the Volt/Malibu ASCM_INT stock-camera status on bus 0.
+  for bus, addr, length in (
+    (0, 0x184, 8),
+    (0, 0x34A, 5),
+    (0, 0x1E1, 7),
+    (f1_bus, 0xF1, 6),
+    (0, 0x1C4, 8),
+    (0, 0xC9, 8),
+  ):
+    safety.safety_rx_hook(common.make_msg(bus, addr, length))
+
+
+def test_gm_ascm_int_stock_cam_f1_rx_pinning():
+  safety = libsafety_py.libsafety
+  safety.set_safety_hooks(CarParams.SafetyModel.gm, GMSafetyFlags.HW_CAM | GMSafetyFlags.HW_ASCM_INT)
+  safety.init_tests()
+
+  _prime_gm_ascm_int_stock_cam_rx_checks(safety, 0)
+  assert safety.safety_config_valid()
+
+  safety.set_safety_hooks(CarParams.SafetyModel.gm, GMSafetyFlags.HW_CAM | GMSafetyFlags.HW_ASCM_INT)
+  safety.init_tests()
+
+  _prime_gm_ascm_int_stock_cam_rx_checks(safety, 2)
+  assert not safety.safety_config_valid()
+
+
+class TestGmCameraEVSafety(GmCameraAccEVRegenMixin, TestGmCameraSafety, TestGmEVSafetyBase):
   pass
 
 
@@ -230,7 +285,7 @@ class TestGmCameraLongitudinalSafety(GmLongitudinalBase, TestGmCameraSafetyBase)
     self.safety.init_tests()
 
 
-class TestGmCameraLongitudinalEVSafety(TestGmCameraLongitudinalSafety, TestGmEVSafetyBase):
+class TestGmCameraLongitudinalEVSafety(GmCameraAccEVRegenMixin, TestGmCameraLongitudinalSafety, TestGmEVSafetyBase):
   pass
 
 
@@ -246,6 +301,7 @@ def interceptor_msg(gas, addr):
 
 class TestGmInterceptorSafety(common.GasInterceptorSafetyTest, TestGmCameraSafety, TestGmEVSafetyBase):
   INTERCEPTOR_THRESHOLD = 550
+  FWD_BLACKLISTED_ADDRS = {2: [0x180, 0x370], 0: [0x184, 0x3D1]}
 
   def setUp(self):
     self.packer = CANPackerPanda("gm_global_a_powertrain_generated")
@@ -277,23 +333,14 @@ class TestGmInterceptorSafety(common.GasInterceptorSafetyTest, TestGmCameraSafet
       self.assertEqual(enable, self.safety.get_controls_allowed())
 
   def test_buttons(self):
-    # Only CANCEL button is allowed while cruise is enabled
+    # Pedal-long non-ACC only allows CANCEL while controls are active.
     self.safety.set_controls_allowed(False)
     for btn in range(8):
       self.assertFalse(self._tx(self._button_msg(btn)))
 
     self.safety.set_controls_allowed(True)
     for btn in range(8):
-      self.assertFalse(self._tx(self._button_msg(btn)))
-
-    self.safety.set_controls_allowed(True)
-    for enabled in (True, False):
-      self._rx(self._pcm_status_msg(enabled))
-      self.assertEqual(enabled, self._tx(self._button_msg(Buttons.CANCEL)))
-      self.assertTrue(self.safety.get_controls_allowed())
-
-  def test_fwd_hook(self):
-    pass
+      self.assertEqual(btn == Buttons.CANCEL, self._tx(self._button_msg(btn)))
 
   def test_disable_control_allowed_from_cruise(self):
     pass
@@ -308,13 +355,15 @@ class TestGmInterceptorSafety(common.GasInterceptorSafetyTest, TestGmCameraSafet
     return interceptor_msg(gas, 0x201)
 
   def _pcm_status_msg(self, enable):
-    values = {"CruiseActive": enable}
-    return self.packer.make_can_msg_panda("ECMCruiseControl", 0, values)
+    to_send = common.make_msg(0, 0x3D1, 8)
+    if enable:
+      to_send[0].data[4] |= 0x80
+    return to_send
 
 
 class TestGmCcLongitudinalSafety(TestGmCameraSafety):
   TX_MSGS = [[0x180, 0], [0x370, 0], [0x1E1, 0], [0x3D1, 0], [0xBD, 0], [0x1F5, 0], [0x184, 2], [0x1E1, 2]]
-  FWD_BLACKLISTED_ADDRS = {2: [0x180], 0: [0x184]}  # block LKAS message and PSCMStatus
+  FWD_BLACKLISTED_ADDRS = {2: [0x180], 0: [0x184, 0x3D1]}  # block LKAS, PSCMStatus, and stock cruise status
   BUTTONS_BUS = 0  # tx only
 
   def setUp(self):
@@ -327,9 +376,6 @@ class TestGmCcLongitudinalSafety(TestGmCameraSafety):
   def _pcm_status_msg(self, enable):
     values = {"CruiseActive": enable}
     return self.packer.make_can_msg_panda("ECMCruiseControl", 0, values)
-
-  def test_fwd_hook(self):
-    pass
 
   def test_buttons(self):
     self.safety.set_controls_allowed(0)

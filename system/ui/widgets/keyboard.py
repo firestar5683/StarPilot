@@ -1,12 +1,13 @@
 from functools import partial
 import time
 from typing import Literal
+from collections.abc import Callable
 
 import pyray as rl
 
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.multilang import tr
-from openpilot.system.ui.widgets import Widget
+from openpilot.system.ui.widgets import Widget, DialogResult
 from openpilot.system.ui.widgets.button import ButtonStyle, Button
 from openpilot.system.ui.widgets.inputbox import InputBox
 from openpilot.system.ui.widgets.label import Label
@@ -58,7 +59,14 @@ KEYBOARD_LAYOUTS = {
 
 
 class Keyboard(Widget):
-  def __init__(self, max_text_size: int = 255, min_text_size: int = 0, password_mode: bool = False, show_password_toggle: bool = False):
+  def __init__(
+    self,
+    max_text_size: int = 255,
+    min_text_size: int = 0,
+    password_mode: bool = False,
+    show_password_toggle: bool = False,
+    callback: Callable[[DialogResult], None] | None = None,
+  ):
     super().__init__()
     self._layout_name: Literal["lowercase", "uppercase", "numbers", "specials"] = "lowercase"
     self._caps_lock = False
@@ -71,6 +79,7 @@ class Keyboard(Widget):
     self._input_box = InputBox(max_text_size)
     self._password_mode = password_mode
     self._show_password_toggle = show_password_toggle
+    self._callback = callback
 
     # Backspace key repeat tracking
     self._backspace_pressed: bool = False
@@ -78,6 +87,8 @@ class Keyboard(Widget):
     self._backspace_last_repeat: float = 0.0
 
     self._render_return_status = -1
+    self._first_render = False
+    self._skip_input = False
     self._cancel_button = Button(lambda: tr("Cancel"), self._cancel_button_callback)
 
     self._eye_button = Button("", self._eye_button_callback, button_style=ButtonStyle.TRANSPARENT)
@@ -98,12 +109,18 @@ class Keyboard(Widget):
         for _, key in enumerate(keys):
           if key in self._key_icons:
             texture = self._key_icons[key]
-            self._all_keys[key] = Button("", partial(self._key_callback, key), icon=texture,
-                                         button_style=ButtonStyle.PRIMARY if key == ENTER_KEY else ButtonStyle.KEYBOARD, multi_touch=True)
+            self._all_keys[key] = Button(
+              "",
+              partial(self._key_callback, key),
+              icon=texture,
+              button_style=ButtonStyle.PRIMARY if key == ENTER_KEY else ButtonStyle.KEYBOARD,
+              multi_touch=True,
+            )
           else:
             self._all_keys[key] = Button(key, partial(self._key_callback, key), button_style=ButtonStyle.KEYBOARD, font_size=85, multi_touch=True)
-    self._all_keys[CAPS_LOCK_KEY] = Button("", partial(self._key_callback, CAPS_LOCK_KEY), icon=self._key_icons[CAPS_LOCK_KEY],
-                                           button_style=ButtonStyle.KEYBOARD, multi_touch=True)
+    self._all_keys[CAPS_LOCK_KEY] = Button(
+      "", partial(self._key_callback, CAPS_LOCK_KEY), icon=self._key_icons[CAPS_LOCK_KEY], button_style=ButtonStyle.KEYBOARD, multi_touch=True
+    )
 
   def set_text(self, text: str):
     self._input_box.text = text
@@ -122,20 +139,42 @@ class Keyboard(Widget):
     self._title.set_text(title)
     self._sub_title.set_text(sub_title)
 
-  def _eye_button_callback(self):
-    self._password_mode = not self._password_mode
+  def set_callback(self, callback: Callable[[DialogResult], None] | None):
+    self._callback = callback
+
+  def show_event(self):
+    super().show_event()
+    self._skip_input = True
+
+  def _process_mouse_events(self):
+    if not self._skip_input:
+      super()._process_mouse_events()
 
   def _cancel_button_callback(self):
     self.clear()
-    self._render_return_status = 0
+    if self in gui_app._nav_stack:
+      gui_app.pop_widget()
+    else:
+      self._render_return_status = 0
+    if self._callback:
+      self._callback(DialogResult.CANCEL)
+
+  def _eye_button_callback(self):
+    self._password_mode = not self._password_mode
 
   def _key_callback(self, k):
     if k == ENTER_KEY:
-      self._render_return_status = 1
+      if self in gui_app._nav_stack:
+        gui_app.pop_widget()
+      else:
+        self._render_return_status = 1
+      if self._callback:
+        self._callback(DialogResult.CONFIRM)
     else:
       self.handle_key_press(k)
 
   def _render(self, rect: rl.Rectangle):
+    self._skip_input = False
     rect = rl.Rectangle(rect.x + CONTENT_MARGIN, rect.y + CONTENT_MARGIN, rect.width - 2 * CONTENT_MARGIN, rect.height - 2 * CONTENT_MARGIN)
     self._title.render(rl.Rectangle(rect.x, rect.y, rect.width, 95))
     self._sub_title.render(rl.Rectangle(rect.x, rect.y + 95, rect.width, 60))

@@ -37,13 +37,13 @@ class FrogPilotCard:
   def handle_button_event(self, key, sm, frogpilot_toggles):
     if sm["carControl"].longActive and getattr(frogpilot_toggles, f"experimental_mode_via_{key}"):
       self.handle_experimental_mode(sm, frogpilot_toggles)
-    elif sm["carControl"].longActive and getattr(frogpilot_toggles, f"force_coast_via_{key}"):
+    elif getattr(frogpilot_toggles, f"force_coast_via_{key}"):
       self.force_coast = not self.force_coast
     elif getattr(frogpilot_toggles, f"pause_lateral_via_{key}"):
       self.pause_lateral = not self.pause_lateral
-    elif sm["carControl"].longActive and getattr(frogpilot_toggles, f"pause_longitudinal_via_{key}"):
+    elif getattr(frogpilot_toggles, f"pause_longitudinal_via_{key}"):
       self.pause_longitudinal = not self.pause_longitudinal
-    elif getattr(frogpilot_toggles, f"traffic_mode_via_{key}"):
+    elif sm["carControl"].longActive and getattr(frogpilot_toggles, f"traffic_mode_via_{key}"):
       self.traffic_mode_enabled = not self.traffic_mode_enabled
 
   def handle_experimental_mode(self, sm, frogpilot_toggles):
@@ -82,6 +82,8 @@ class FrogPilotCard:
 
     if sm.updated["frogpilotPlan"] or any(be.type == ButtonType.decelCruise for be in carState.buttonEvents):
       self.decel_pressed = any(be.type == ButtonType.decelCruise for be in carState.buttonEvents)
+
+    frogpilotCarState.distancePressed |= self.params_memory.get_bool("OnroadDistanceButtonPressed")
 
     if frogpilotCarState.distancePressed:
       self.gap_counter += 1

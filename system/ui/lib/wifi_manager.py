@@ -325,6 +325,14 @@ class WifiManager:
     return self._ipv4_address
 
   @property
+  def networks(self) -> list[Network]:
+    return list(self._networks)
+
+  @property
+  def connecting_to_ssid(self) -> str:
+    return self._connecting_to_ssid
+
+  @property
   def current_network_metered(self) -> MeteredType:
     return self._current_network_metered
 
