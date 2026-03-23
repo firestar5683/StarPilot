@@ -1,0 +1,7 @@
+#!/usr/bin/env bash
+set -eo pipefail
+
+DIR="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+set +u
+source "$DIR/launch_env.sh"
+exec python3 "$DIR/scripts/model_compiler.py" "$@"
