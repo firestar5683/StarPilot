@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 import numpy as np
 
-from openpilot.selfdrive.controls.lib.longitudinal_planner import ACCEL_MIN, get_max_accel
+from openpilot.selfdrive.controls.lib.longitudinal_planner import A_CRUISE_MIN, get_max_accel
 
 from openpilot.frogpilot.common.frogpilot_variables import CITY_SPEED_LIMIT
 
@@ -33,8 +33,8 @@ def akima_interp(x, xp, fp):
   return (fp[i] * (1 - 10 * t3 + 15 * t4 - 6 * t3 * t2)
           + fp[i + 1] * (10 * t3 - 15 * t4 + 6 * t3 * t2))
 
-A_CRUISE_MIN_ECO = ACCEL_MIN / 2
-A_CRUISE_MIN_SPORT = ACCEL_MIN * 2
+A_CRUISE_MIN_ECO = A_CRUISE_MIN / 2
+A_CRUISE_MIN_SPORT = A_CRUISE_MIN * 2
 
                        # MPH = [0.0,  11,  22,  34,  45,  56,  89]
 A_CRUISE_MAX_BP_CUSTOM =        [0.0,  5., 10., 15., 20., 25., 40.]
@@ -153,4 +153,4 @@ class FrogPilotAcceleration:
       elif frogpilot_toggles.deceleration_profile == DECELERATION_PROFILES["SPORT"]:
         self.min_accel = A_CRUISE_MIN_SPORT
       else:
-        self.min_accel = ACCEL_MIN
+        self.min_accel = A_CRUISE_MIN

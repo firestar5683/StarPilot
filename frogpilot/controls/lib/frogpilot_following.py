@@ -108,24 +108,20 @@ class FrogPilotFollowing:
     # Offset by FrogAi for FrogPilot for a more natural approach to a faster lead
     if frogpilot_toggles.human_following and v_lead > v_ego:
       distance_factor = max(lead_distance - (v_ego * self.t_follow), 1)
-      accelerating_offset = np.clip(stop_distance - v_ego, 1, distance_factor)
-
-      self.acceleration_jerk /= accelerating_offset
-      self.danger_factor -= ((v_lead - v_ego) / 100)
-      self.speed_jerk /= accelerating_offset
-      self.t_follow /= accelerating_offset
+      acceleration_offset = np.clip(stop_distance - v_ego, 1, distance_factor)
+      self.acceleration_jerk /= acceleration_offset
+      self.speed_jerk /= acceleration_offset
+      self.t_follow /= acceleration_offset
 
     # Offset by FrogAi for FrogPilot for a more natural approach to a slower lead
     if (frogpilot_toggles.conditional_slower_lead or frogpilot_toggles.human_following) and v_lead < v_ego:
       distance_factor = max(lead_distance - (v_lead * self.t_follow), 1)
       braking_offset = np.clip(min(v_ego - v_lead, v_lead) - COMFORT_BRAKE, 1, distance_factor)
 
-      if frogpilot_toggles.human_following and lead_distance >= 100:
+      if frogpilot_toggles.human_following:
         far_lead_offset = max(lead_distance - (v_ego * self.t_follow) - stop_distance, 0)
-        braking_offset += far_lead_offset
+        self.t_follow /= braking_offset + far_lead_offset
+      else:
+        self.t_follow /= braking_offset
 
-      if self.frogpilot_planner.tracking_lead_filter.x >= 0.9:
-        self.danger_factor += ((v_ego - v_lead) / 100)
-
-      self.t_follow /= braking_offset
       self.slower_lead = braking_offset > 1
