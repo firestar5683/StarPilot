@@ -67,6 +67,8 @@ class LongitudinalPlanner:
     self.a_desired = init_a
     self.v_desired_filter = FirstOrderFilter(init_v, 2.0, self.dt)
     self.v_model_error = 0.0
+    self.output_a_target = 0.0
+    self.output_should_stop = False
 
     self.v_desired_trajectory = np.zeros(CONTROL_N)
     self.a_desired_trajectory = np.zeros(CONTROL_N)
@@ -90,8 +92,9 @@ class LongitudinalPlanner:
 
   @staticmethod
   def get_model_speed_error(model_msg, v_ego):
-    if len(model_msg.temporalPose.trans):
-      return float(np.clip(model_msg.temporalPose.trans[0] - v_ego, -5.0, 5.0))
+    temporal_pose = getattr(model_msg, "temporalPose", None)
+    if temporal_pose is not None and len(temporal_pose.trans):
+      return float(np.clip(temporal_pose.trans[0] - v_ego, -5.0, 5.0))
     if len(model_msg.velocity.x) == ModelConstants.IDX_N:
       return float(np.clip(model_msg.velocity.x[0] - v_ego, -5.0, 5.0))
     return 0.0
@@ -123,14 +126,14 @@ class LongitudinalPlanner:
 
     return x, v, a, j, throttle_prob
 
-  def update(self, sm, frogpilot_toggles):
+  def update(self, sm, frogpilot_toggles=None):
     self.generation = getattr(frogpilot_toggles, "model_version", None)
     self.mode = 'blended' if sm['selfdriveState'].experimentalMode else 'acc'
     self.mpc.mode = 'acc'
     if not self.mlsim:
       self.mpc.mode = self.mode
-    self.v_ego_stopping = frogpilot_toggles.vEgoStopping
-    self.longitudinal_actuator_delay = frogpilot_toggles.longitudinalActuatorDelay
+    self.v_ego_stopping = getattr(frogpilot_toggles, "vEgoStopping", self.v_ego_stopping)
+    self.longitudinal_actuator_delay = getattr(frogpilot_toggles, "longitudinalActuatorDelay", self.longitudinal_actuator_delay)
 
     if len(sm['carControl'].orientationNED) == 3:
       accel_coast = get_coast_accel(sm['carControl'].orientationNED[1])
@@ -168,7 +171,7 @@ class LongitudinalPlanner:
     # Prevent divergence, smooth in current v_ego
     self.v_desired_filter.x = max(0.0, self.v_desired_filter.update(v_ego))
     self.v_model_error = self.get_model_speed_error(sm['modelV2'], v_ego)
-    x, v, a, j, throttle_prob = self.parse_model(sm['modelV2'], self.v_model_error, v_ego, frogpilot_toggles.taco_tune)
+    x, v, a, j, throttle_prob = self.parse_model(sm['modelV2'], self.v_model_error, v_ego, getattr(frogpilot_toggles, "taco_tune", False))
     # Don't clip at low speeds since throttle_prob doesn't account for creep
     self.allow_throttle = throttle_prob > ALLOW_THROTTLE_THRESHOLD or v_ego <= MIN_ALLOW_THROTTLE_SPEED
     self.allow_throttle &= not sm['frogpilotPlan'].disableThrottle
@@ -335,8 +338,10 @@ class LongitudinalPlanner:
       a_target = min(output_a_target_mpc, output_a_target_e2e)
       should_stop = output_should_stop_e2e or output_should_stop_mpc
 
-    longitudinalPlan.aTarget = float(a_target)
-    longitudinalPlan.shouldStop = bool(should_stop) or sm['frogpilotPlan'].forcingStopLength < 1
+    self.output_a_target = float(a_target)
+    self.output_should_stop = bool(should_stop) or sm['frogpilotPlan'].forcingStopLength < 1
+    longitudinalPlan.aTarget = self.output_a_target
+    longitudinalPlan.shouldStop = self.output_should_stop
     longitudinalPlan.allowBrake = True
     longitudinalPlan.allowThrottle = bool(self.allow_throttle)
 
