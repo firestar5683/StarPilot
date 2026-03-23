@@ -469,7 +469,7 @@ class DeviceLayoutMici(NavWidget):
     def uninstall_openpilot_callback():
       ui_state.params.put_bool("DoUninstall", True)
 
-    reset_driver_monitoring_btn = BigButton("reset driver monitoring", "wheel-side calibration", "icons_mici/settings/device/cameras.png")
+    reset_driver_monitoring_btn = BigButton("reset driver monitoring calibration", "", "icons_mici/settings/device/cameras.png")
     reset_driver_monitoring_btn.set_click_callback(lambda: _engaged_confirmation_callback(reset_driver_monitoring_callback, "reset driver monitoring"))
 
     reset_calibration_btn = BigButton("reset calibration", "", "icons_mici/settings/device/lkas.png")
