@@ -295,7 +295,7 @@ def out_of_space_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMas
 def posenet_invalid_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality, frogpilot_toggles: SimpleNamespace) -> Alert:
   mdl = sm['modelV2'].velocity.x[0] if len(sm['modelV2'].velocity.x) else math.nan
   err = CS.vEgo - mdl
-  msg = f"Speed Error: {err:.1f} m/s"
+  msg = f"Speed Error: {err:.1f} m/s" if math.isfinite(err) else "Speed Error: unavailable"
   return NoEntryAlert(msg, alert_text_1="Posenet Speed Invalid")
 
 
