@@ -485,7 +485,6 @@ class CarInterface(CarInterfaceBase):
     elif candidate == CAR.GMC_YUKON:
       ret.steerActuatorDelay = 0.5
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
-      ret.dashcamOnly = True  # Needs steerRatio, tireStiffness, and lat accel factor tuning
 
     # OPGM variables
     elif candidate in (CAR.CHEVROLET_MALIBU, CAR.CHEVROLET_MALIBU_CC, CAR.CHEVROLET_MALIBU_HYBRID_CC):

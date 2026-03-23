@@ -363,6 +363,26 @@ DevicePanel::DevicePanel(SettingsWindow *parent) : ListWidget(parent) {
   connect(dcamBtn, &ButtonControl::clicked, [=]() { emit showDriverView(); });
   addItem(dcamBtn);
 
+  resetDmCalibBtn = new ButtonControl(
+    tr("Reset Driver Monitoring"),
+    tr("RESET"),
+    tr("Clears the saved driver monitoring wheel-side calibration if the device thinks you're seated on the wrong side. "
+       "Resetting will restart openpilot if the car is powered on.")
+  );
+  connect(resetDmCalibBtn, &ButtonControl::clicked, [&]() {
+    if (!uiState()->engaged()) {
+      if (ConfirmationDialog::confirm(tr("Are you sure you want to reset driver monitoring calibration?"), tr("Reset"), this)) {
+        if (!uiState()->engaged()) {
+          params.remove("IsRhdDetected");
+          params.putBool("OnroadCycleRequested", true);
+        }
+      }
+    } else {
+      ConfirmationDialog::alert(tr("Disengage to Reset Driver Monitoring"), this);
+    }
+  });
+  addItem(resetDmCalibBtn);
+
   resetCalibBtn = new ButtonControl(tr("Reset Calibration"), tr("RESET"), "");
   connect(resetCalibBtn, &ButtonControl::showDescriptionEvent, this, &DevicePanel::updateCalibDescription);
   connect(resetCalibBtn, &ButtonControl::clicked, [&]() {
@@ -420,7 +440,7 @@ DevicePanel::DevicePanel(SettingsWindow *parent) : ListWidget(parent) {
   });
   QObject::connect(uiState(), &UIState::offroadTransition, [=](bool offroad) {
     for (auto btn : findChildren<ButtonControl *>()) {
-      if (btn != pair_device && btn != resetCalibBtn) {
+      if (btn != pair_device && btn != resetCalibBtn && btn != resetDmCalibBtn) {
         btn->setEnabled(offroad);
       }
     }

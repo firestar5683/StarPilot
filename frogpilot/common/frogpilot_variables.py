@@ -249,10 +249,17 @@ def get_frogpilot_toggles(sm=messaging.SubMaster(["frogpilotPlan"])):
   return toggles
 
 @cache
+def _process_frogpilot_plan_toggles(toggles):
+  return SimpleNamespace(**json.loads(toggles))
+
+
 def process_frogpilot_toggles(toggles):
   if toggles:
-    return SimpleNamespace(**json.loads(toggles))
+    return _process_frogpilot_plan_toggles(toggles)
   return FrogPilotVariables().frogpilot_toggles
+
+
+process_frogpilot_toggles.cache_clear = _process_frogpilot_plan_toggles.cache_clear
 
 def update_frogpilot_toggles():
   if not hasattr(update_frogpilot_toggles, "_params_memory"):

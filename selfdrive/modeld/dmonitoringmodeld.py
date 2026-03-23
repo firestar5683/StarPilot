@@ -25,7 +25,6 @@ MODEL_PKL_PATH = Path(__file__).parent / 'models/dmonitoring_model_tinygrad.pkl'
 METADATA_PATH = Path(__file__).parent / 'models/dmonitoring_model_metadata.pkl'
 MODELS_DIR = Path(__file__).parent / 'models'
 
-
 class ModelState:
   inputs: dict[str, np.ndarray]
   output: np.ndarray
@@ -46,41 +45,7 @@ class ModelState:
     self.tensor_inputs = {k: Tensor(v, device='NPY').realize() for k,v in self.numpy_inputs.items()}
     self._blob_cache : dict[int, Tensor] = {}
     self.image_warp = None
-    self._warp_rebuild_attempted: set[tuple[int, int]] = set()
-    self._warp_backend_rebuild_attempted: set[tuple[int, int]] = set()
     self.model_run = pickle.loads(read_file_chunked(str(MODEL_PKL_PATH)))
-
-  def _load_or_rebuild_dm_warp(self, width: int, height: int):
-    warp_path = MODELS_DIR / f'dm_warp_{width}x{height}_tinygrad.pkl'
-    resolution_key = (width, height)
-
-    def load_warp():
-      with open(warp_path, "rb") as f:
-        return pickle.load(f)
-
-    try:
-      return load_warp()
-    except Exception as error:
-      if resolution_key in self._warp_rebuild_attempted:
-        raise
-
-      self._warp_rebuild_attempted.add(resolution_key)
-      cloudlog.exception(f"Failed to load DM warp artifact {warp_path}: {error}")
-      cloudlog.warning(f"Rebuilding DM warp artifact for {width}x{height}")
-
-      try:
-        warp_path.unlink(missing_ok=True)
-      except Exception:
-        pass
-
-      from openpilot.selfdrive.modeld.compile_warp import compile_dm_warp
-      compile_dm_warp(width, height)
-
-      try:
-        return load_warp()
-      except Exception as retry_error:
-        cloudlog.exception(f"Reload failed after rebuilding {warp_path}: {retry_error}")
-        raise
 
   def run(self, buf: VisionBuf, calib: np.ndarray, transform: np.ndarray) -> tuple[np.ndarray, float]:
     self.numpy_inputs['calib'][0,:] = calib
@@ -89,33 +54,16 @@ class ModelState:
 
     if self.image_warp is None:
       self.frame_buf_params = get_nv12_info(buf.width, buf.height)
-      self.image_warp = self._load_or_rebuild_dm_warp(buf.width, buf.height)
+      warp_path = MODELS_DIR / f'dm_warp_{buf.width}x{buf.height}_tinygrad.pkl'
+      with open(warp_path, "rb") as f:
+        self.image_warp = pickle.load(f)
     ptr = buf.data.ctypes.data
     # There is a ringbuffer of imgs, just cache tensors pointing to all of them
     if ptr not in self._blob_cache:
       self._blob_cache[ptr] = Tensor.from_blob(ptr, (self.frame_buf_params[3],), dtype='uint8')
 
     self.warp_inputs_np['transform'][:] = transform[:]
-    resolution_key = (buf.width, buf.height)
-    try:
-      self.tensor_inputs['input_img'] = self.image_warp(self._blob_cache[ptr], self.warp_inputs['transform']).realize()
-    except AssertionError as error:
-      # Handle runtime backend mismatch (e.g. CPU-captured warp artifact on QCOM device).
-      if "args mismatch in JIT" not in str(error) or resolution_key in self._warp_backend_rebuild_attempted:
-        raise
-
-      self._warp_backend_rebuild_attempted.add(resolution_key)
-      cloudlog.warning(f"DM warp JIT backend mismatch for {buf.width}x{buf.height}; rebuilding artifact for active backend")
-      warp_path = MODELS_DIR / f'dm_warp_{buf.width}x{buf.height}_tinygrad.pkl'
-      try:
-        warp_path.unlink(missing_ok=True)
-      except Exception:
-        pass
-
-      from openpilot.selfdrive.modeld.compile_warp import compile_dm_warp
-      compile_dm_warp(buf.width, buf.height)
-      self.image_warp = self._load_or_rebuild_dm_warp(buf.width, buf.height)
-      self.tensor_inputs['input_img'] = self.image_warp(self._blob_cache[ptr], self.warp_inputs['transform']).realize()
+    self.tensor_inputs['input_img'] = self.image_warp(self._blob_cache[ptr], self.warp_inputs['transform']).realize()
 
     output = self.model_run(**self.tensor_inputs).contiguous().realize().uop.base.buffer.numpy().flatten()
 

@@ -76,6 +76,8 @@ def _engaged_confirmation_callback(callback: Callable, action_text: str):
       icon = "icons_mici/settings/device/reboot.png"
     elif action_text == "reset":
       icon = "icons_mici/settings/device/lkas.png"
+    elif action_text == "reset driver monitoring":
+      icon = "icons_mici/settings/device/cameras.png"
     elif action_text == "uninstall":
       icon = "icons_mici/settings/device/uninstall.png"
     else:
@@ -83,7 +85,7 @@ def _engaged_confirmation_callback(callback: Callable, action_text: str):
       icon = "icons_mici/settings/comma_icon.png"
 
     dlg: BigConfirmationDialogV2 | BigDialog = BigConfirmationDialogV2(f"slide to\n{action_text.lower()}", icon, red=red,
-                                                                       exit_on_confirm=action_text == "reset",
+                                                                       exit_on_confirm=action_text in {"reset", "reset driver monitoring"},
                                                                        confirm_callback=confirm_callback)
     gui_app.set_modal_overlay(dlg)
   else:
@@ -459,8 +461,16 @@ class DeviceLayoutMici(NavWidget):
       params.remove("LiveDelay")
       params.put_bool("OnroadCycleRequested", True)
 
+    def reset_driver_monitoring_callback():
+      params = ui_state.params
+      params.remove("IsRhdDetected")
+      params.put_bool("OnroadCycleRequested", True)
+
     def uninstall_openpilot_callback():
       ui_state.params.put_bool("DoUninstall", True)
+
+    reset_driver_monitoring_btn = BigButton("reset driver monitoring", "wheel-side calibration", "icons_mici/settings/device/cameras.png")
+    reset_driver_monitoring_btn.set_click_callback(lambda: _engaged_confirmation_callback(reset_driver_monitoring_callback, "reset driver monitoring"))
 
     reset_calibration_btn = BigButton("reset calibration", "", "icons_mici/settings/device/lkas.png")
     reset_calibration_btn.set_click_callback(lambda: _engaged_confirmation_callback(reset_calibration_callback, "reset"))
@@ -508,6 +518,7 @@ class DeviceLayoutMici(NavWidget):
       PairBigButton(),
       review_training_guide_btn,
       driver_cam_btn,
+      reset_driver_monitoring_btn,
       # lang_button,
       reset_calibration_btn,
       uninstall_openpilot_btn,

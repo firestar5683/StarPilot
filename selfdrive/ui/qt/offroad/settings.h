@@ -94,6 +94,7 @@ private:
   ButtonControl *pair_galaxy;
   QPushButton *galaxy_qr_btn;
   ButtonControl *resetCalibBtn;
+  ButtonControl *resetDmCalibBtn;
 };
 
 class TogglesPanel : public ListWidget {
