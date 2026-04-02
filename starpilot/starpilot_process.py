@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import datetime
+import hashlib
 import json
 import requests
 import time
@@ -29,6 +30,27 @@ from openpilot.starpilot.system.starpilot_tracking import StarPilotTracking
 
 ASSET_CHECK_RATE = (1 / DT_MDL)
 DRIVE_STATS_SYNC_RATE = 30
+UPDATE_CHECK_INTERVAL_SECONDS = 60 * 60
+
+
+def get_update_check_phase_seconds(params_raw):
+  for key in ("DongleId", "HardwareSerial"):
+    value = params_raw.get(key)
+    if isinstance(value, bytes):
+      value = value.decode("utf-8", errors="ignore")
+    if value and value != UNREGISTERED_DONGLE_ID:
+      digest = hashlib.sha1(value.encode("utf-8")).digest()
+      return int.from_bytes(digest[:4], "big") % UPDATE_CHECK_INTERVAL_SECONDS
+
+  return 0
+
+
+def get_next_periodic_update_check(monotonic_now, phase_seconds):
+  current_period_start = int(monotonic_now // UPDATE_CHECK_INTERVAL_SECONDS) * UPDATE_CHECK_INTERVAL_SECONDS
+  next_check = current_period_start + phase_seconds
+  if next_check <= monotonic_now:
+    next_check += UPDATE_CHECK_INTERVAL_SECONDS
+  return next_check
 
 def check_assets(now, model_manager, theme_manager, thread_manager, params, params_memory, starpilot_toggles):
   if params_memory.get_bool(MODEL_DOWNLOAD_ALL_PARAM):
@@ -162,6 +184,8 @@ def starpilot_thread():
 
   drive_stats_session = requests.Session()
   next_drive_stats_sync = 0.0
+  periodic_update_phase = get_update_check_phase_seconds(params_raw)
+  next_periodic_update_check = get_next_periodic_update_check(time.monotonic(), periodic_update_phase)
 
   run_update_checks = False
   safe_mode_active = safe_mode_enabled(params_raw)
@@ -179,6 +203,7 @@ def starpilot_thread():
     sm.update()
 
     now = datetime.datetime.now(datetime.timezone.utc)
+    monotonic_now = time.monotonic()
 
     started = sm["deviceState"].started
 
@@ -209,7 +234,6 @@ def starpilot_thread():
     started_previously = started
 
     if not started and time_validated and sm["deviceState"].screenBrightnessPercent > 0:
-      monotonic_now = time.monotonic()
       if monotonic_now >= next_drive_stats_sync:
         thread_manager.run_with_lock(sync_drive_stats, (params, drive_stats_session), report=False)
         next_drive_stats_sync = monotonic_now + DRIVE_STATS_SYNC_RATE
@@ -233,8 +257,12 @@ def starpilot_thread():
     if params_memory.get_bool("StarPilotTogglesUpdated") or theme_manager.theme_updated:
       starpilot_toggles = update_toggles(starpilot_variables, started, theme_manager, thread_manager, time_validated, params, starpilot_toggles)
 
+    periodic_update_due = monotonic_now >= next_periodic_update_check
+    if periodic_update_due:
+      next_periodic_update_check = get_next_periodic_update_check(monotonic_now, periodic_update_phase)
+
     run_update_checks |= params_memory.get_bool("ManualUpdateInitiated")
-    run_update_checks |= now.second == 0 and (now.minute % 60 == 0 or (now.minute % 5 == 0 and starpilot_variables.frogs_go_moo))
+    run_update_checks |= periodic_update_due
     run_update_checks &= time_validated
 
     if run_update_checks:
