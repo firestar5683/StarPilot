@@ -28,6 +28,7 @@ SPEED_LIMIT_PROMPT_CARD_PADDING = 34
 SPEED_LIMIT_PROMPT_US_SIGN_WIDTH = 132
 SPEED_LIMIT_PROMPT_US_SIGN_HEIGHT = 150
 SPEED_LIMIT_PROMPT_EU_SIGN_SIZE = 148
+SPEED_LIMIT_PROMPT_CENTER_OFFSET_X = -26
 
 
 @dataclass(frozen=True)
@@ -243,7 +244,6 @@ class HudRenderer(Widget):
   def render_background(self) -> None:
     """Draw HUD elements that should sit behind alerts."""
     self._draw_speed_limit(self._rect)
-    self._draw_speed_limit_prompt(self._rect)
 
   def render_foreground(self) -> None:
     """Draw HUD elements that should sit above alerts."""
@@ -254,6 +254,7 @@ class HudRenderer(Widget):
       self._draw_set_speed(self._rect)
 
     self._draw_steering_wheel(self._rect)
+    self._draw_speed_limit_prompt(self._rect)
 
   def _render(self, rect: rl.Rectangle) -> None:
     """Render HUD elements to the screen."""
@@ -413,17 +414,18 @@ class HudRenderer(Widget):
 
     sign_alpha = 72 if self._speed_limit_overridden and self._pending_speed_limit <= 0 else 255
     use_vienna_speed_limit = ui_state.params.get_bool("UseVienna")
-    sign_width = 118 if use_vienna_speed_limit else 116
-    sign_height = 118 if use_vienna_speed_limit else 132
-    base_x = rect.x + rect.width - sign_width - 28
-    sign_x = base_x
-    sign_y = rect.y + (28 if use_vienna_speed_limit else 20)
-
     speed_text = str(round(display_speed))
     offset_text = ""
     if self._show_speed_limit_offset and not self._speed_limit_overridden:
       rounded_offset = round(self._speed_limit_offset)
       offset_text = "–" if rounded_offset == 0 else f"{rounded_offset:+d}"
+
+    sign_width = 118 if use_vienna_speed_limit else 116
+    sign_height = 118 if use_vienna_speed_limit else (142 if offset_text else 132)
+    base_x = rect.x + rect.width - sign_width - 28
+    sign_x = base_x
+    sign_y = rect.y + (28 if use_vienna_speed_limit else 20)
+
     if use_vienna_speed_limit:
       center_x = sign_x + sign_width / 2
       center_y = sign_y + sign_height / 2
@@ -478,21 +480,29 @@ class HudRenderer(Widget):
     sign_width = SPEED_LIMIT_PROMPT_EU_SIGN_SIZE if use_vienna_speed_limit else SPEED_LIMIT_PROMPT_US_SIGN_WIDTH
     sign_height = SPEED_LIMIT_PROMPT_EU_SIGN_SIZE if use_vienna_speed_limit else SPEED_LIMIT_PROMPT_US_SIGN_HEIGHT
     button_size = SPEED_LIMIT_PROMPT_BUTTON_SIZE
+    card_margin_x = 8
+    card_margin_y = 8
+    card_x = rect.x + card_margin_x + SPEED_LIMIT_PROMPT_CENTER_OFFSET_X
+    card_y = rect.y + card_margin_y
     card_width = max(
       SPEED_LIMIT_PROMPT_CARD_WIDTH,
-      SPEED_LIMIT_PROMPT_CARD_PADDING * 2 + sign_width + button_size * 2 + SPEED_LIMIT_PROMPT_BUTTON_GAP * 2,
+      rect.width - card_margin_x * 2,
     )
-    card_x = rect.x + (rect.width - card_width) / 2
-    card_y = rect.y + rect.height * 0.34
-    card_rect = rl.Rectangle(card_x, card_y, card_width, SPEED_LIMIT_PROMPT_CARD_HEIGHT)
+    card_height = max(
+      SPEED_LIMIT_PROMPT_CARD_HEIGHT,
+      rect.height - card_margin_y * 2,
+    )
+    card_rect = rl.Rectangle(card_x, card_y, card_width, card_height)
 
-    controls_y = card_y + 68
+    controls_center_y = card_y + card_height * 0.72
+    controls_y = controls_center_y - button_size / 2
     deny_x = card_x + SPEED_LIMIT_PROMPT_CARD_PADDING
     sign_x = card_x + (card_width - sign_width) / 2
+    sign_y = controls_center_y - sign_height / 2
     accept_x = card_x + card_width - SPEED_LIMIT_PROMPT_CARD_PADDING - button_size
 
     self._prompt_card_rect = card_rect
-    self._prompt_sign_rect = rl.Rectangle(sign_x, controls_y - (sign_height - button_size) / 2, sign_width, sign_height)
+    self._prompt_sign_rect = rl.Rectangle(sign_x, sign_y, sign_width, sign_height)
     self._prompt_deny_rect = rl.Rectangle(deny_x, controls_y, button_size, button_size)
     self._prompt_accept_rect = rl.Rectangle(accept_x, controls_y, button_size, button_size)
 
@@ -563,8 +573,8 @@ class HudRenderer(Widget):
         header_font_size=24,
         header_gap=20,
         speed_font_size=72 if len(speed_text) <= 2 else 60,
-        header_top=20,
-        speed_top=80,
+        header_top=14,
+        speed_top=66,
       )
 
     self._draw_prompt_button(
@@ -584,7 +594,7 @@ class HudRenderer(Widget):
 
     hint_text = tr("SET/+ TO CONFIRM  RES/- TO DENY")
     hint_size = measure_text_cached(self._font_medium, hint_text, 24)
-    hint_pos = rl.Vector2(card_rect.x + card_rect.width / 2 - hint_size.x / 2, card_rect.y + card_rect.height - 34)
+    hint_pos = rl.Vector2(card_rect.x + card_rect.width / 2 - hint_size.x / 2, card_rect.y + 60)
     rl.draw_text_ex(self._font_medium, hint_text, hint_pos, 24, 0, rl.Color(255, 255, 255, 180))
 
   def _draw_current_speed(self, rect: rl.Rectangle) -> None:
