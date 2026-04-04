@@ -118,6 +118,8 @@ class HudRenderer(Widget):
     self._engaged: bool = False
     self._show_speed_limit: bool = False
     self._speed_limit: float = 0.0
+    self._speed_limit_offset: float = 0.0
+    self._show_speed_limit_offset: bool = False
     self._speed_limit_overridden: bool = False
     self._pending_speed_limit: float = 0.0
     self._prompt_visible: bool = False
@@ -194,6 +196,7 @@ class HudRenderer(Widget):
       if self._show_speed_limit:
         dashboard_speed_limit = sm["starpilotCarState"].dashboardSpeedLimit if sm.valid.get("starpilotCarState", False) else 0.0
         vision_speed_limit = ui_state.params_memory.get_float("VisionSpeedLimit") if ui_state.params.get_bool("VisionSpeedLimitDetection") else 0.0
+        self._show_speed_limit_offset = ui_state.params.get_bool("ShowSLCOffset")
         primary_priority = ui_state.params.get("SLCPriority1", encoding='utf-8') or "Map Data"
         secondary_priority = ui_state.params.get("SLCPriority2", encoding='utf-8') or "None"
         source_limits = {
@@ -210,16 +213,23 @@ class HudRenderer(Widget):
           secondary_priority=secondary_priority,
         )
         self._speed_limit = max(0.0, resolved_speed_limit * speed_conversion)
+        self._speed_limit_offset = starpilot_plan.slcSpeedLimitOffset * speed_conversion
         self._speed_limit_overridden = bool(starpilot_plan.slcOverriddenSpeed > 0 and starpilot_plan.slcSpeedLimit > 0)
+        if self._speed_limit > 0 and not self._speed_limit_overridden and not self._show_speed_limit_offset:
+          self._speed_limit += self._speed_limit_offset
         self._pending_speed_limit = max(0.0, starpilot_plan.unconfirmedSlcSpeedLimit * speed_conversion)
       else:
         self._speed_limit = 0.0
+        self._speed_limit_offset = 0.0
+        self._show_speed_limit_offset = False
         self._speed_limit_overridden = False
         self._pending_speed_limit = 0.0
       self._prompt_visible = self._pending_speed_limit > 0
     else:
       self._show_speed_limit = False
       self._speed_limit = 0.0
+      self._speed_limit_offset = 0.0
+      self._show_speed_limit_offset = False
       self._speed_limit_overridden = False
       self._pending_speed_limit = 0.0
       self._prompt_visible = False
@@ -335,6 +345,64 @@ class HudRenderer(Widget):
       max_color,
     )
 
+  def _draw_us_speed_limit_sign(
+    self,
+    sign_rect: rl.Rectangle,
+    speed_text: str,
+    sign_alpha: int,
+    *,
+    border_thickness: float,
+    header_font_size: int,
+    header_gap: int,
+    speed_font_size: int,
+    header_top: float,
+    speed_top: float,
+    footer_text: str = "",
+    footer_font_size: int = 0,
+    footer_top: float = 0.0,
+  ) -> None:
+    border_color = rl.Color(255, 255, 255, sign_alpha)
+    text_color = rl.Color(255, 255, 255, sign_alpha)
+
+    inner_border_rect = rl.Rectangle(
+      sign_rect.x + 8,
+      sign_rect.y + 8,
+      sign_rect.width - 16,
+      sign_rect.height - 16,
+    )
+    rl.draw_rectangle_rounded_lines_ex(inner_border_rect, 0.14, 16, max(border_thickness - 2, 1), border_color)
+
+    speed_label = tr("SPEED")
+    limit_label = tr("LIMIT")
+    speed_label_size = measure_text_cached(self._font_semi_bold, speed_label, header_font_size)
+    limit_label_size = measure_text_cached(self._font_semi_bold, limit_label, header_font_size)
+
+    rl.draw_text_ex(
+      self._font_semi_bold,
+      speed_label,
+      rl.Vector2(sign_rect.x + sign_rect.width / 2 - speed_label_size.x / 2, sign_rect.y + header_top),
+      header_font_size,
+      0,
+      text_color,
+    )
+    rl.draw_text_ex(
+      self._font_semi_bold,
+      limit_label,
+      rl.Vector2(sign_rect.x + sign_rect.width / 2 - limit_label_size.x / 2, sign_rect.y + header_top + header_gap),
+      header_font_size,
+      0,
+      text_color,
+    )
+
+    speed_text_size = measure_text_cached(self._font_bold, speed_text, speed_font_size)
+    speed_text_pos = rl.Vector2(sign_rect.x + sign_rect.width / 2 - speed_text_size.x / 2, sign_rect.y + speed_top)
+    rl.draw_text_ex(self._font_bold, speed_text, speed_text_pos, speed_font_size, 0, text_color)
+
+    if footer_text and footer_font_size > 0:
+      footer_size = measure_text_cached(self._font_semi_bold, footer_text, footer_font_size)
+      footer_pos = rl.Vector2(sign_rect.x + sign_rect.width / 2 - footer_size.x / 2, sign_rect.y + footer_top)
+      rl.draw_text_ex(self._font_semi_bold, footer_text, footer_pos, footer_font_size, 0, text_color)
+
   def _draw_speed_limit(self, rect: rl.Rectangle) -> None:
     if not self._show_speed_limit:
       return
@@ -352,6 +420,10 @@ class HudRenderer(Widget):
     sign_y = rect.y + (28 if use_vienna_speed_limit else 20)
 
     speed_text = str(round(display_speed))
+    offset_text = ""
+    if self._show_speed_limit_offset and not self._speed_limit_overridden:
+      rounded_offset = round(self._speed_limit_offset)
+      offset_text = "–" if rounded_offset == 0 else f"{rounded_offset:+d}"
     if use_vienna_speed_limit:
       center_x = sign_x + sign_width / 2
       center_y = sign_y + sign_height / 2
@@ -370,30 +442,29 @@ class HudRenderer(Widget):
 
       font_size = 58 if len(speed_text) <= 2 else 48
       text_size = measure_text_cached(self._font_bold, speed_text, font_size)
-      text_pos = rl.Vector2(center_x - text_size.x / 2, center_y - text_size.y / 2 + 4)
+      text_pos = rl.Vector2(center_x - text_size.x / 2, center_y - text_size.y / 2 + (-14 if offset_text else 4))
       rl.draw_text_ex(self._font_bold, speed_text, text_pos, font_size, 0, rl.Color(0, 0, 0, sign_alpha))
+      if offset_text:
+        offset_font_size = 34
+        offset_size = measure_text_cached(self._font_semi_bold, offset_text, offset_font_size)
+        offset_pos = rl.Vector2(center_x - offset_size.x / 2, sign_y + sign_height - 42)
+        rl.draw_text_ex(self._font_semi_bold, offset_text, offset_pos, offset_font_size, 0, rl.Color(0, 0, 0, sign_alpha))
     else:
       sign_rect = rl.Rectangle(sign_x, sign_y, sign_width, sign_height)
-      border_rect = rl.Rectangle(sign_x + 6, sign_y + 6, sign_width - 12, sign_height - 12)
-      rl.draw_rectangle_rounded(sign_rect, 0.18, 16, rl.Color(255, 255, 255, sign_alpha))
-      rl.draw_rectangle_rounded_lines_ex(border_rect, 0.14, 16, 4, rl.Color(0, 0, 0, sign_alpha))
-
-      header_font_size = 20
-      header_gap = 18
-      speed_font_size = 50 if len(speed_text) <= 2 else 42
-
-      speed_label = tr("SPEED")
-      limit_label = tr("LIMIT")
-      speed_label_size = measure_text_cached(self._font_semi_bold, speed_label, header_font_size)
-      limit_label_size = measure_text_cached(self._font_semi_bold, limit_label, header_font_size)
-      speed_label_pos = rl.Vector2(sign_x + sign_width / 2 - speed_label_size.x / 2, sign_y + 18)
-      limit_label_pos = rl.Vector2(sign_x + sign_width / 2 - limit_label_size.x / 2, sign_y + 18 + header_gap)
-      rl.draw_text_ex(self._font_semi_bold, speed_label, speed_label_pos, header_font_size, 0, rl.Color(0, 0, 0, sign_alpha))
-      rl.draw_text_ex(self._font_semi_bold, limit_label, limit_label_pos, header_font_size, 0, rl.Color(0, 0, 0, sign_alpha))
-
-      speed_text_size = measure_text_cached(self._font_bold, speed_text, speed_font_size)
-      speed_text_pos = rl.Vector2(sign_x + sign_width / 2 - speed_text_size.x / 2, sign_y + 66)
-      rl.draw_text_ex(self._font_bold, speed_text, speed_text_pos, speed_font_size, 0, rl.Color(0, 0, 0, sign_alpha))
+      self._draw_us_speed_limit_sign(
+        sign_rect,
+        speed_text,
+        sign_alpha,
+        border_thickness=4,
+        header_font_size=20,
+        header_gap=18,
+        speed_font_size=44 if offset_text else (50 if len(speed_text) <= 2 else 42),
+        header_top=18,
+        speed_top=58 if offset_text else 66,
+        footer_text=offset_text,
+        footer_font_size=28 if offset_text else 0,
+        footer_top=100,
+      )
 
   def _update_prompt_layout(self, rect: rl.Rectangle) -> None:
     if not self._prompt_visible:
@@ -484,38 +555,17 @@ class HudRenderer(Widget):
       text_pos = rl.Vector2(center_x - text_size.x / 2, center_y - text_size.y / 2 + 4)
       rl.draw_text_ex(self._font_bold, speed_text, text_pos, font_size, 0, rl.BLACK)
     else:
-      border_rect = rl.Rectangle(sign_rect.x + 8, sign_rect.y + 8, sign_rect.width - 16, sign_rect.height - 16)
-      rl.draw_rectangle_rounded(sign_rect, 0.18, 16, rl.WHITE)
-      rl.draw_rectangle_rounded_lines_ex(border_rect, 0.14, 16, 5, rl.BLACK)
-
-      header_font_size = 24
-      header_gap = 20
-      speed_font_size = 72 if len(speed_text) <= 2 else 60
-
-      speed_label = tr("SPEED")
-      limit_label = tr("LIMIT")
-      speed_label_size = measure_text_cached(self._font_semi_bold, speed_label, header_font_size)
-      limit_label_size = measure_text_cached(self._font_semi_bold, limit_label, header_font_size)
-      rl.draw_text_ex(
-        self._font_semi_bold,
-        speed_label,
-        rl.Vector2(sign_rect.x + sign_rect.width / 2 - speed_label_size.x / 2, sign_rect.y + 20),
-        header_font_size,
-        0,
-        rl.BLACK,
+      self._draw_us_speed_limit_sign(
+        sign_rect,
+        speed_text,
+        255,
+        border_thickness=5,
+        header_font_size=24,
+        header_gap=20,
+        speed_font_size=72 if len(speed_text) <= 2 else 60,
+        header_top=20,
+        speed_top=80,
       )
-      rl.draw_text_ex(
-        self._font_semi_bold,
-        limit_label,
-        rl.Vector2(sign_rect.x + sign_rect.width / 2 - limit_label_size.x / 2, sign_rect.y + 20 + header_gap),
-        header_font_size,
-        0,
-        rl.BLACK,
-      )
-
-      speed_size = measure_text_cached(self._font_bold, speed_text, speed_font_size)
-      speed_pos = rl.Vector2(sign_rect.x + sign_rect.width / 2 - speed_size.x / 2, sign_rect.y + 80)
-      rl.draw_text_ex(self._font_bold, speed_text, speed_pos, speed_font_size, 0, rl.BLACK)
 
     self._draw_prompt_button(
       self._prompt_deny_rect,
@@ -532,7 +582,7 @@ class HudRenderer(Widget):
       False,
     )
 
-    hint_text = tr("USE WHEEL - / +")
+    hint_text = tr("SET/+ TO CONFIRM  RES/- TO DENY")
     hint_size = measure_text_cached(self._font_medium, hint_text, 24)
     hint_pos = rl.Vector2(card_rect.x + card_rect.width / 2 - hint_size.x / 2, card_rect.y + card_rect.height - 34)
     rl.draw_text_ex(self._font_medium, hint_text, hint_pos, 24, 0, rl.Color(255, 255, 255, 180))

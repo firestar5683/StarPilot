@@ -1181,7 +1181,24 @@
         "description": "Ask before changing to a new speed limit. To accept, tap the flashing on-screen widget or press the Cruise Increase button. To deny, press the Cruise Decrease button or ignore the prompt for 30 seconds.",
         "data_type": "bool",
         "ui_type": "toggle",
+        "is_parent_toggle": true,
         "parent_key": "SpeedLimitController"
+      },
+      {
+        "key": "SLCConfirmationLower",
+        "label": "Confirm Lower Limits",
+        "description": "Require confirmation before applying a newly detected lower speed limit.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "SLCConfirmation"
+      },
+      {
+        "key": "SLCConfirmationHigher",
+        "label": "Confirm Higher Limits",
+        "description": "Require confirmation before applying a newly detected higher speed limit.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "SLCConfirmation"
       },
       {
         "key": "SLCLookaheadHigher",
@@ -1209,6 +1226,50 @@
         "description": "When openpilot is first enabled, automatically set the max speed to the current posted limit.",
         "data_type": "bool",
         "ui_type": "toggle",
+        "parent_key": "SpeedLimitController"
+      },
+      {
+        "key": "SLCFallback",
+        "label": "Fallback Speed",
+        "description": "Choose the speed to use when no speed limit source is currently available.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "Set Speed"
+          },
+          {
+            "value": 1,
+            "label": "Experimental Mode"
+          },
+          {
+            "value": 2,
+            "label": "Previous Limit"
+          }
+        ],
+        "parent_key": "SpeedLimitController"
+      },
+      {
+        "key": "SLCOverride",
+        "label": "Override Speed",
+        "description": "Choose how SLC behaves after you manually drive faster than the posted speed limit.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "None"
+          },
+          {
+            "value": 1,
+            "label": "Set With Gas Pedal"
+          },
+          {
+            "value": 2,
+            "label": "Max Set Speed"
+          }
+        ],
         "parent_key": "SpeedLimitController"
       },
       {

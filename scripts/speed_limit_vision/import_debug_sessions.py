@@ -41,7 +41,7 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("--latest", type=int, default=1, help="How many latest sessions to import when no session ids are provided.")
   parser.add_argument("--mode", choices=("symlink", "copy"), default="symlink", help="How to place snapshots into the workspace review/images directory.")
   parser.add_argument("--force", action="store_true", help="Overwrite snapshot links/files if they already exist.")
-  parser.add_argument("--events", nargs="+", default=["bookmark", "auto_bookmark", "training_candidate", "publish", "candidate"], help="Event types to include in the manifest.")
+  parser.add_argument("--events", nargs="+", default=["bookmark", "auto_bookmark", "training_candidate", "map_transition_miss", "publish", "candidate"], help="Event types to include in the manifest.")
   return parser.parse_args()
 
 
@@ -106,8 +106,18 @@ def event_row(event: dict, session_id: str, session_path: Path, event_index: int
     "candidate_confidence": str(event.get("candidateConfidence") or ""),
     "speed_limit_mph": str(event.get("speedLimitMph") or ""),
     "confidence": str(event.get("confidence") or ""),
+    "source_confidence": str(event.get("sourceConfidence") or ""),
+    "source_event": str(event.get("sourceEvent") or ""),
     "published_speed_limit_mph": str(event.get("publishedSpeedLimitMph") or ""),
     "published_confidence": str(event.get("publishedConfidence") or ""),
+    "map_source": str(event.get("mapSource") or ""),
+    "map_current_speed_limit_mph": str(event.get("mapCurrentSpeedLimitMph") or ""),
+    "map_next_speed_limit_mph": str(event.get("mapNextSpeedLimitMph") or ""),
+    "map_next_speed_limit_distance_m": str(event.get("mapNextSpeedLimitDistanceM") or ""),
+    "map_expected_speed_limit_mph": str(event.get("mapExpectedSpeedLimitMph") or ""),
+    "map_relation": str(event.get("mapRelation") or ""),
+    "previous_map_speed_limit_mph": str(event.get("previousMapSpeedLimitMph") or ""),
+    "review_bucket": str(event.get("reviewBucket") or ""),
     "bookmark_count": str(event.get("bookmarkCount") or ""),
     "snapshot_path": snapshot_path,
     "source_session_path": str(session_path),

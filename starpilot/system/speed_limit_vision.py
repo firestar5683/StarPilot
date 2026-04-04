@@ -34,6 +34,9 @@ AUTO_BOOKMARK_MIN_CONFIDENCE = 0.62
 TRAINING_COLLECTOR_CONFIRM_DELAY_SECONDS = 0.7
 TRAINING_COLLECTOR_COOLDOWN_SECONDS = 2.5
 TRAINING_COLLECTOR_MIN_CONFIDENCE = 0.40
+MAP_NEXT_REVIEW_DISTANCE_METERS = 120.0
+MAP_TRANSITION_MISS_CAPTURE_COOLDOWN_SECONDS = 8.0
+MAP_VISION_MATCH_WINDOW_SECONDS = 2.5
 MODEL_PROPOSAL_MIN_CONFIDENCE = 0.0001
 MODEL_PROPOSAL_MAX_COUNT = 16
 MODEL_PROPOSAL_MAX_AREA_RATIO = 0.18
@@ -229,6 +232,9 @@ class SpeedLimitVisionDaemon:
     self.last_training_capture_at = 0.0
     self.last_training_capture_speed_limit_mph = 0
     self.pending_training_capture = None
+    self.last_map_speed_limit_mph = 0
+    self.last_map_transition_miss_at = 0.0
+    self.last_map_transition_miss_speed_limit_mph = 0
     self.ignore_next_user_bookmark = False
     self.current_frame_bgr = None
 
@@ -286,6 +292,120 @@ class SpeedLimitVisionDaemon:
     self.last_logged_status = ""
     self.last_logged_candidate = None
 
+  def _read_next_map_speed_limit(self):
+    if self.params_memory is None:
+      return {}
+
+    next_map_speed_limit = self.params_memory.get("NextMapSpeedLimit") or {}
+    if isinstance(next_map_speed_limit, (bytes, str)):
+      try:
+        next_map_speed_limit = json.loads(next_map_speed_limit)
+      except Exception:
+        next_map_speed_limit = {}
+    return next_map_speed_limit if isinstance(next_map_speed_limit, dict) else {}
+
+  def _get_map_context(self):
+    current_limit_ms = 0.0
+    next_limit_ms = 0.0
+    next_distance_m = 0.0
+    source = "none"
+
+    if self.sm is not None:
+      try:
+        current_limit_ms = float(self.sm["mapdOut"].speedLimit or 0.0)
+        next_limit_ms = float(self.sm["mapdOut"].nextSpeedLimit or 0.0)
+        next_distance_m = float(self.sm["mapdOut"].nextSpeedLimitDistance or 0.0)
+        if current_limit_ms > 0.0 or next_limit_ms > 0.0:
+          source = "mapd"
+      except Exception:
+        current_limit_ms = 0.0
+        next_limit_ms = 0.0
+        next_distance_m = 0.0
+
+    if self.params_memory is not None:
+      filler_current_limit_ms = float(self.params_memory.get_float("MapSpeedLimit") or 0.0)
+      next_map_speed_limit = self._read_next_map_speed_limit()
+      filler_next_limit_ms = float(next_map_speed_limit.get("speedlimit") or 0.0)
+      filler_next_distance_m = float(next_map_speed_limit.get("distance") or 0.0)
+      if filler_current_limit_ms > 0.0 or filler_next_limit_ms > 0.0:
+        current_limit_ms = filler_current_limit_ms if filler_current_limit_ms > 0.0 else current_limit_ms
+        next_limit_ms = filler_next_limit_ms if filler_next_limit_ms > 0.0 else next_limit_ms
+        next_distance_m = filler_next_distance_m if filler_next_distance_m > 0.0 else next_distance_m
+        source = "filler"
+
+    current_limit_mph = int(round(current_limit_ms * CV.MS_TO_MPH)) if current_limit_ms > 0.0 else 0
+    next_limit_mph = int(round(next_limit_ms * CV.MS_TO_MPH)) if next_limit_ms > 0.0 else 0
+    next_distance_m = round(next_distance_m, 1) if next_distance_m > 0.0 else 0.0
+
+    return {
+      "source": source,
+      "current_speed_limit_mph": current_limit_mph,
+      "next_speed_limit_mph": next_limit_mph,
+      "next_speed_limit_distance_m": next_distance_m,
+    }
+
+  def _map_fields(self, speed_limit_mph=0):
+    map_context = self._get_map_context()
+    current_limit_mph = int(map_context["current_speed_limit_mph"])
+    next_limit_mph = int(map_context["next_speed_limit_mph"])
+    next_distance_m = float(map_context["next_speed_limit_distance_m"])
+    map_source = str(map_context["source"])
+
+    expected_speed_limit_mph = current_limit_mph if current_limit_mph > 0 else 0
+    map_relation = "no_map"
+    review_bucket = "vision_only"
+
+    next_is_relevant = next_limit_mph > 0 and next_limit_mph != current_limit_mph and 0.0 < next_distance_m <= MAP_NEXT_REVIEW_DISTANCE_METERS
+
+    if current_limit_mph > 0:
+      if speed_limit_mph > 0 and speed_limit_mph == current_limit_mph:
+        map_relation = "agree_current"
+        review_bucket = "map_agreement"
+      else:
+        map_relation = "disagree_current"
+        review_bucket = "map_disagreement"
+
+    if next_is_relevant:
+      if speed_limit_mph > 0 and speed_limit_mph == next_limit_mph:
+        expected_speed_limit_mph = next_limit_mph
+        map_relation = "agree_next"
+        review_bucket = "map_agreement"
+      elif current_limit_mph <= 0:
+        expected_speed_limit_mph = next_limit_mph
+        map_relation = "disagree_next"
+        review_bucket = "map_disagreement"
+
+    if speed_limit_mph <= 0:
+      if next_is_relevant:
+        expected_speed_limit_mph = next_limit_mph
+        map_relation = "map_transition_pending"
+        review_bucket = "map_transition_review"
+      elif current_limit_mph > 0:
+        map_relation = "map_present"
+        review_bucket = "map_context_only"
+
+    return {
+      "mapSource": map_source,
+      "mapCurrentSpeedLimitMph": current_limit_mph,
+      "mapNextSpeedLimitMph": next_limit_mph,
+      "mapNextSpeedLimitDistanceM": next_distance_m,
+      "mapExpectedSpeedLimitMph": expected_speed_limit_mph,
+      "mapRelation": map_relation,
+      "reviewBucket": review_bucket,
+    }
+
+  def _vision_recently_supported(self, speed_limit_mph, now):
+    if speed_limit_mph <= 0:
+      return False
+    if self.last_candidate_speed_limit_mph == speed_limit_mph and now - self.last_candidate_at <= MAP_VISION_MATCH_WINDOW_SECONDS:
+      return True
+    if self.published_speed_limit_mph == speed_limit_mph and now - self.last_detection_at <= MAP_VISION_MATCH_WINDOW_SECONDS:
+      return True
+    return any(
+      entry.speed_limit_mph == speed_limit_mph and now - entry.created_at <= MAP_VISION_MATCH_WINDOW_SECONDS
+      for entry in self.history
+    )
+
   def _write_debug_event(self, event_type, frame_bgr=None, snapshot_prefix=None, **fields):
     if not self.use_runtime or self.params_memory is None:
       return
@@ -307,6 +427,7 @@ class SpeedLimitVisionDaemon:
     }
     if self.debug_session_started_at > 0.0:
       event["sessionSeconds"] = round(max(time.monotonic() - self.debug_session_started_at, 0.0), 3)
+    event.update(self._map_fields(int(fields.get("speedLimitMph") or fields.get("candidateSpeedLimitMph") or 0)))
     event.update(fields)
 
     if frame_bgr is not None and self.debug_capture_dir is not None and snapshot_prefix:
@@ -388,6 +509,24 @@ class SpeedLimitVisionDaemon:
       confidence=round(confidence, 4),
       sourceConfidence=round(source_confidence, 4),
       sourceEvent=source_event,
+    )
+
+  def _record_map_transition_miss(self, speed_limit_mph, previous_speed_limit_mph):
+    if not self.use_runtime or self.params_memory is None or not self.debug_log_path:
+      return
+
+    self._write_debug_event(
+      "map_transition_miss",
+      frame_bgr=self.current_frame_bgr,
+      snapshot_prefix=f"map_transition_miss_{speed_limit_mph:03d}",
+      speedLimitMph=speed_limit_mph,
+      previousMapSpeedLimitMph=previous_speed_limit_mph,
+      candidateSpeedLimitMph=self.last_candidate_speed_limit_mph,
+      candidateConfidence=round(self.last_candidate_confidence, 4),
+      publishedSpeedLimitMph=self.published_speed_limit_mph,
+      publishedConfidence=round(self.published_confidence, 4),
+      reason="map_change_without_vision_support",
+      reviewBucket="map_transition_miss",
     )
 
   def _schedule_auto_bookmark(self, speed_limit_mph, confidence, published_at):
@@ -502,6 +641,27 @@ class SpeedLimitVisionDaemon:
     self.last_training_capture_at = now
     self.last_training_capture_speed_limit_mph = speed_limit_mph
     self._record_training_candidate(speed_limit_mph, confidence, source_confidence, source_event)
+
+  def _maybe_capture_map_transition_miss(self, now):
+    map_context = self._get_map_context()
+    current_speed_limit_mph = int(map_context["current_speed_limit_mph"])
+    previous_speed_limit_mph = self.last_map_speed_limit_mph
+
+    if current_speed_limit_mph != previous_speed_limit_mph:
+      self.last_map_speed_limit_mph = current_speed_limit_mph
+
+    if current_speed_limit_mph <= 0 or current_speed_limit_mph == previous_speed_limit_mph or previous_speed_limit_mph <= 0:
+      return
+    if self.current_frame_bgr is None:
+      return
+    if now - self.last_map_transition_miss_at < MAP_TRANSITION_MISS_CAPTURE_COOLDOWN_SECONDS and current_speed_limit_mph == self.last_map_transition_miss_speed_limit_mph:
+      return
+    if self._vision_recently_supported(current_speed_limit_mph, now):
+      return
+
+    self.last_map_transition_miss_at = now
+    self.last_map_transition_miss_speed_limit_mph = current_speed_limit_mph
+    self._record_map_transition_miss(current_speed_limit_mph, previous_speed_limit_mph)
 
   def _published_detection_stale(self, now):
     return self.published_speed_limit_mph > 0 and now - self.last_detection_at > PUBLISHED_HOLD_SECONDS
@@ -1617,6 +1777,7 @@ class SpeedLimitVisionDaemon:
 
       self._maybe_commit_auto_bookmark(now)
       self._maybe_commit_training_capture(now)
+      self._maybe_capture_map_transition_miss(now)
 
       ratekeeper.keep_time()
 
