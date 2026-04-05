@@ -18,7 +18,7 @@ from opendbc.car.common.basedir import BASEDIR
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.common.simple_kalman import KF1D, get_kalman_gain
 from opendbc.car.gm.values import CAR as GM
-from opendbc.car.honda.values import CAR as HONDA, HONDA_BOSCH, HondaSafetyFlags
+from opendbc.car.honda.values import CAR as HONDA, HONDA_BOSCH, HONDA_CAMERA_MESSAGE_CARS, HondaSafetyFlags, HondaStarPilotFlags
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.values import CAR as HYUNDAI, CANFD_CAR, HyundaiFlags, HyundaiStarPilotSafetyFlags
 from opendbc.car.mock.values import CAR as MOCK
@@ -205,6 +205,9 @@ class CarInterfaceBase(ABC):
 
       elif platform in HONDA:
         fp_ret.canUsePedal = candidate not in HONDA_BOSCH
+        # Only enable TSR parsing on Hondas confirmed to publish CAMERA_MESSAGES.
+        if candidate in HONDA_CAMERA_MESSAGE_CARS:
+          fp_ret.flags |= int(HondaStarPilotFlags.HAS_CAMERA_MESSAGES)
 
       elif platform in HYUNDAI:
         if candidate in CANFD_CAR:

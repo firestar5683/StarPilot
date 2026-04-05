@@ -362,7 +362,7 @@ void StarPilotSettingsWindow::updateVariables() {
     friction = CP.getLateralTuning().getTorque().getFriction();
     hasAlphaLongitudinal = CP.getAlphaLongitudinalAvailable();
     hasBSM = CP.getEnableBsm();
-    hasDashSpeedLimits = carMake == "ford" || carMake == "hyundai" || carMake == "toyota";
+    hasDashSpeedLimits = carMake == "ford" || carMake == "hyundai" || carMake == "toyota" || carMake == "honda";
     hasNNFFLog = nnffLogFileExists(QString::fromStdString(carFingerprint));
     hasOpenpilotLongitudinal = hasLongitudinalControl(CP);
     hasPCMCruise = CP.getPcmCruise();

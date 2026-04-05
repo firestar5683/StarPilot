@@ -94,6 +94,10 @@ class CruiseSettings:
   LKAS = 1
 
 
+class HondaStarPilotFlags(IntFlag):
+  HAS_CAMERA_MESSAGES = 8
+
+
 @dataclass
 class HondaCarDocs(CarDocs):
   package: str = "Honda Sensing"
@@ -360,6 +364,15 @@ HONDA_BOSCH_RADARLESS = CAR.with_flags(HondaFlags.BOSCH_RADARLESS)
 HONDA_BOSCH_CANFD = CAR.with_flags(HondaFlags.BOSCH_CANFD)
 HONDA_BOSCH_ALT_RADAR = CAR.with_flags(HondaFlags.BOSCH_ALT_RADAR)
 HONDA_BOSCH_TJA_CONTROL = CAR.with_flags(HondaFlags.BOSCH_TJA_CONTROL)
+HONDA_CAMERA_MESSAGE_CARS = {
+  CAR.HONDA_ACCORD,
+  CAR.HONDA_CIVIC_BOSCH,
+  CAR.HONDA_CIVIC_2022,
+  CAR.HONDA_CRV_5G,
+  CAR.HONDA_CRV_HYBRID,
+  CAR.HONDA_HRV_3G,
+  CAR.HONDA_INSIGHT,
+}
 
 
 DBC = CAR.create_dbc_map()

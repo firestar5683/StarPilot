@@ -8,7 +8,7 @@ from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.honda.hondacan import CanBus
 from opendbc.car.honda.values import CAR, DBC, STEER_THRESHOLD, HONDA_BOSCH, HONDA_BOSCH_ALT_RADAR, HONDA_BOSCH_CANFD, \
                                                  HONDA_NIDEC_ALT_SCM_MESSAGES, HONDA_BOSCH_RADARLESS, \
-                                                 HondaFlags, CruiseButtons, CruiseSettings, GearShifter, CarControllerParams
+                                                 HondaFlags, CruiseButtons, CruiseSettings, GearShifter, CarControllerParams, HondaStarPilotFlags
 from opendbc.car.interfaces import CarStateBase
 
 TransmissionType = structs.CarParams.TransmissionType
@@ -17,6 +17,18 @@ ButtonType = structs.CarState.ButtonEvent.Type
 BUTTONS_DICT = {CruiseButtons.RES_ACCEL: ButtonType.accelCruise, CruiseButtons.DECEL_SET: ButtonType.decelCruise,
                 CruiseButtons.MAIN: ButtonType.mainCruise, CruiseButtons.CANCEL: ButtonType.cancel}
 SETTINGS_BUTTONS_DICT = {CruiseSettings.DISTANCE: ButtonType.gapAdjustCruise, CruiseSettings.LKAS: ButtonType.lkas}
+
+
+# Dashboard Speed Limit / Traffic Sign Recognition (TSR) for Speed Limit Controller (SLC)
+def calculate_speed_limit(CP, FPCP, cp, cp_cam):
+  if not (FPCP.flags & HondaStarPilotFlags.HAS_CAMERA_MESSAGES):
+    return 0.0
+  speed_bus = cp if (CP.carFingerprint in (HONDA_BOSCH - HONDA_BOSCH_RADARLESS - HONDA_BOSCH_CANFD)) else cp_cam
+  try:
+    speed_limit_raw = speed_bus.vl["CAMERA_MESSAGES"]["SPEED_LIMIT_SIGN"] % 32
+    return speed_limit_raw * 5.0 * CV.MPH_TO_MS if 1 <= speed_limit_raw <= 17 else 0.0
+  except (KeyError, ValueError):
+    return 0.0
 
 
 class CarState(CarStateBase):
@@ -221,6 +233,8 @@ class CarState(CarStateBase):
     ]
 
     fp_ret = custom.StarPilotCarState.new_message()
+
+    fp_ret.dashboardSpeedLimit = calculate_speed_limit(self.CP, self.FPCP, cp, cp_cam)
 
     return ret, fp_ret
 
