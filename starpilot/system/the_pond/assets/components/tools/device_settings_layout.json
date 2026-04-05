@@ -2317,6 +2317,8 @@
         "description": "The screen brightness while not driving.",
         "data_type": "int",
         "ui_type": "numeric",
+        "min": 1.0,
+        "max": 101.0,
         "step": 1.0,
         "parent_key": "ScreenManagement"
       },
@@ -2326,6 +2328,8 @@
         "description": "The screen brightness while driving.",
         "data_type": "int",
         "ui_type": "numeric",
+        "min": 1.0,
+        "max": 101.0,
         "step": 1.0,
         "parent_key": "ScreenManagement"
       },

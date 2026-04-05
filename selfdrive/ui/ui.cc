@@ -107,7 +107,20 @@ void UIState::updateStatus(StarPilotUIState *fs) {
       status = ss.getEnabled() ? STATUS_ENGAGED : STATUS_DISENGAGED;
     }
 
-    starpilot_scene.wake_up_screen = ss.getAlertStatus() != cereal::SelfdriveState::AlertStatus::NORMAL || (status != previous_status && status != STATUS_OVERRIDE);
+    const bool selfdrive_visible_alert = ss.getAlertSize() != cereal::SelfdriveState::AlertSize::NONE;
+    bool starpilot_visible_alert = false;
+    if (fs->sm->rcv_frame("starpilotSelfdriveState") > 0) {
+      const auto fpss = (*fs->sm)["starpilotSelfdriveState"].getStarpilotSelfdriveState();
+      starpilot_visible_alert = fpss.getAlertSize() != cereal::StarPilotSelfdriveState::AlertSize::NONE;
+    }
+
+    // Standby mode should wake for any visible onroad alert, not just elevated
+    // alert statuses. Calibration uses NORMAL status but still needs to wake.
+    starpilot_scene.wake_up_screen =
+      selfdrive_visible_alert ||
+      starpilot_visible_alert ||
+      ss.getAlertStatus() != cereal::SelfdriveState::AlertStatus::NORMAL ||
+      (status != previous_status && status != STATUS_OVERRIDE);
   }
 
   if (engaged() != engaged_prev) {
@@ -199,6 +212,8 @@ void Device::resetInteractiveTimeout(int timeout, int timeout_onroad) {
 void Device::updateBrightness(const UIState &s, const StarPilotUIState &fs) {
   const StarPilotUIScene &starpilot_scene = fs.starpilot_scene;
   const QJsonObject &starpilot_toggles = starpilot_scene.starpilot_toggles;
+  const int screen_brightness_onroad = starpilot_toggles.value("screen_brightness_onroad").toInt();
+  const int clamped_onroad_brightness = std::clamp(screen_brightness_onroad, 1, 100);
 
   float clipped_brightness = offroad_brightness;
   if (s.scene.started && s.scene.light_sensor >= 0) {
@@ -220,8 +235,10 @@ void Device::updateBrightness(const UIState &s, const StarPilotUIState &fs) {
     brightness = 0;
   } else if (s.scene.started && !starpilot_scene.wake_up_screen && interactive_timeout == 0 && starpilot_toggles.value("standby_mode").toBool()) {
     brightness = 0;
-  } else if (s.scene.started && starpilot_toggles.value("screen_brightness_onroad").toInt() != 101) {
-    brightness = interactive_timeout > 0 ? fmax(5, starpilot_toggles.value("screen_brightness_onroad").toInt()) : starpilot_toggles.value("screen_brightness_onroad").toInt();
+  } else if (s.scene.started && screen_brightness_onroad != 101) {
+    // Guard against stale params that may still contain the old onroad "off"
+    // value. Standby mode is the only supported way to blank the screen onroad.
+    brightness = interactive_timeout > 0 ? std::max(5, clamped_onroad_brightness) : clamped_onroad_brightness;
   } else if (starpilot_toggles.value("screen_brightness").toInt() != 101) {
     brightness = starpilot_toggles.value("screen_brightness").toInt();
   }
@@ -252,11 +269,7 @@ void Device::updateWakefulness(const UIState &s, const StarPilotUIState &fs) {
   }
 
   if (ignition_state_changed) {
-    if (ignition_on && starpilot_toggles.value("screen_brightness_onroad").toInt() == 0 && !standby_mode) {
-      resetInteractiveTimeout(0, 0);
-    } else {
-      resetInteractiveTimeout(screen_timeout, screen_timeout_onroad);
-    }
+    resetInteractiveTimeout(screen_timeout, screen_timeout_onroad);
   } else if (interactive_timeout > 0 && --interactive_timeout == 0) {
     emit interactiveTimeout();
   }
