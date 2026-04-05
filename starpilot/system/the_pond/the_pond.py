@@ -42,8 +42,10 @@ from panda import Panda
 
 from openpilot.starpilot.assets.theme_manager import HOLIDAY_THEME_PATH, THEME_COMPONENT_PARAMS
 from openpilot.starpilot.common.accel_profile import (
+  CUSTOM_ACCEL_PROFILE_INITIALIZED_KEY,
   CUSTOM_ACCEL_PROFILE_PARAM_KEYS,
   build_custom_accel_profile_defaults,
+  custom_accel_profile_is_initialized,
   normalize_acceleration_profile,
 )
 from openpilot.starpilot.common.maps_catalog import (
@@ -1858,12 +1860,31 @@ def _get_runtime_default_param_overrides():
   return overrides
 
 def _get_current_param_value(key, value_type, defaults_lookup=None):
+  if key == CUSTOM_ACCEL_PROFILE_INITIALIZED_KEY:
+    return _get_custom_accel_profile_initialized()
+
+  if key in CUSTOM_ACCEL_PROFILE_PARAM_KEYS and not _get_custom_accel_profile_initialized():
+    if defaults_lookup is None:
+      defaults_lookup = _get_default_param_values()
+    return _coerce_param_value(defaults_lookup.get(key), value_type)
+
   raw_value = _safe_params_get_live_raw(key)
   if _is_blank_param_raw(raw_value):
     if defaults_lookup is None:
       defaults_lookup = _get_default_param_values()
     raw_value = defaults_lookup.get(key)
   return _coerce_param_value(raw_value, value_type)
+
+
+def _get_custom_accel_profile_initialized():
+  raw_values = {
+    key: _safe_params_get_live_raw(key)
+    for key in CUSTOM_ACCEL_PROFILE_PARAM_KEYS
+  }
+  return custom_accel_profile_is_initialized(
+    _safe_params_get_live_raw(CUSTOM_ACCEL_PROFILE_INITIALIZED_KEY),
+    raw_values,
+  )
 
 def _serialize_param_write_value(raw_value):
   if isinstance(raw_value, bool):
@@ -3156,6 +3177,25 @@ def setup(app):
           "updated": updated,
         }), 200
 
+      if key == "CustomAccelProfile":
+        enabled = str_val.strip() in ("1", "true", "True")
+        params.put_bool(key, enabled)
+
+        updated = {key: enabled}
+        if enabled and not _get_custom_accel_profile_initialized():
+          defaults_lookup = _get_default_param_values()
+          for custom_key in CUSTOM_ACCEL_PROFILE_PARAM_KEYS:
+            custom_value = defaults_lookup[custom_key]
+            params.put(custom_key, _serialize_param_write_value(custom_value))
+            updated[custom_key] = float(custom_value)
+          params.put_bool(CUSTOM_ACCEL_PROFILE_INITIALIZED_KEY, True)
+
+        update_starpilot_toggles()
+        return jsonify({
+          "message": f"Parameter '{key}' updated successfully.",
+          "updated": updated,
+        }), 200
+
       if key == "CarMake":
         catalog = _get_fingerprint_catalog()
         normalized_make = _normalize_fingerprint_make_key(str_val)
@@ -3232,6 +3272,9 @@ def setup(app):
       elif key in ("ModelVersion", "DrivingModelVersion"):
         params.put("ModelVersion", str_val)
         params.put("DrivingModelVersion", str_val)
+      elif key in CUSTOM_ACCEL_PROFILE_PARAM_KEYS:
+        params.put(key, str_val)
+        params.put_bool(CUSTOM_ACCEL_PROFILE_INITIALIZED_KEY, True)
       else:
         params.put(key, str_val)
 
@@ -3267,7 +3310,13 @@ def setup(app):
 
       return jsonify(response), 200
 
-    return params.get(request.args.get("key")) or "", 200
+    request_key = request.args.get("key")
+    if request_key in CUSTOM_ACCEL_PROFILE_PARAM_KEYS and not _get_custom_accel_profile_initialized():
+      defaults_lookup = _get_default_param_values()
+      return _serialize_param_write_value(defaults_lookup.get(request_key)), 200
+    if request_key == CUSTOM_ACCEL_PROFILE_INITIALIZED_KEY:
+      return _serialize_param_write_value(_get_custom_accel_profile_initialized()), 200
+    return params.get(request_key) or "", 200
 
   @app.route("/api/params/all", methods=["GET"])
   def get_all_params():

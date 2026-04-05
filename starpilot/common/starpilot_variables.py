@@ -29,10 +29,12 @@ from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.starpilot.common.accel_profile import (
   ACCELERATION_PROFILES,
   CUSTOM_ACCEL_PROFILE_PARAM_KEYS,
+  CUSTOM_ACCEL_PROFILE_INITIALIZED_KEY,
   CUSTOM_ACCEL_PROFILE_VALUE_MAX,
   CUSTOM_ACCEL_PROFILE_VALUE_MIN,
   DECELERATION_PROFILES,
   build_custom_accel_profile_defaults,
+  custom_accel_profile_is_initialized,
   normalize_acceleration_profile,
   normalize_deceleration_profile,
 )
@@ -806,11 +808,19 @@ class StarPilotVariables:
     )
     toggle.custom_accel_profile = self.get_value("CustomAccelProfile", condition=longitudinal_tuning)
     custom_accel_defaults = build_custom_accel_profile_defaults(toggle.acceleration_profile, toggle.ev_tuning, toggle.truck_tuning)
-    toggle.custom_accel_profile_values = [
-      self.get_value(key, cast=float, condition=longitudinal_tuning, default=custom_accel_defaults[key],
-                     min=CUSTOM_ACCEL_PROFILE_VALUE_MIN, max=CUSTOM_ACCEL_PROFILE_VALUE_MAX)
-      for key in CUSTOM_ACCEL_PROFILE_PARAM_KEYS
-    ]
+    custom_accel_raw_values = {key: self.params_raw.get(key) for key in CUSTOM_ACCEL_PROFILE_PARAM_KEYS}
+    custom_accel_initialized = custom_accel_profile_is_initialized(
+      self.params_raw.get(CUSTOM_ACCEL_PROFILE_INITIALIZED_KEY),
+      custom_accel_raw_values,
+    )
+    if custom_accel_initialized:
+      toggle.custom_accel_profile_values = [
+        self.get_value(key, cast=float, condition=longitudinal_tuning, default=custom_accel_defaults[key],
+                       min=CUSTOM_ACCEL_PROFILE_VALUE_MIN, max=CUSTOM_ACCEL_PROFILE_VALUE_MAX)
+        for key in CUSTOM_ACCEL_PROFILE_PARAM_KEYS
+      ]
+    else:
+      toggle.custom_accel_profile_values = [custom_accel_defaults[key] for key in CUSTOM_ACCEL_PROFILE_PARAM_KEYS]
     toggle.human_acceleration = self.get_value("HumanAcceleration", condition=longitudinal_tuning)
     toggle.human_following = self.get_value("HumanFollowing", condition=longitudinal_tuning)
     toggle.human_lane_changes = has_radar and self.get_value("HumanLaneChanges", condition=longitudinal_tuning)

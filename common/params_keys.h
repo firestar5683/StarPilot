@@ -200,6 +200,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"CurveSpeedController", {PERSISTENT, BOOL, "1", "0", 1}},
     {"CustomAlerts", {PERSISTENT, BOOL, "0", "0", 0}},
     {"CustomAccelProfile", {PERSISTENT, BOOL, "0", "0", 3}},
+    {"CustomAccelProfileInitialized", {PERSISTENT, BOOL, "0", "0", 3}},
     {"CustomAccelProfile0MPH", {PERSISTENT, FLOAT, "3.0", "3.0", 3}},
     {"CustomAccelProfile11MPH", {PERSISTENT, FLOAT, "2.5", "2.5", 3}},
     {"CustomAccelProfile22MPH", {PERSISTENT, FLOAT, "2.0", "2.0", 3}},

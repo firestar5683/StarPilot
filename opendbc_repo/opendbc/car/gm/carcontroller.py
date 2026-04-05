@@ -184,7 +184,7 @@ class CarController(CarControllerBase):
     else:
       small_cmd_scale = np.interp(abs(accel), [0.0, 0.35, 0.8, 1.5, 2.5], [0.44, 0.54, 0.70, 0.89, 1.0])
     accel_cmd = accel * small_cmd_scale
-    if (not press_regen_paddle) and accel < -2.0:
+    if accel < -2.0:
       accel_cmd *= np.interp(abs(accel), [2.0, 2.5, 3.0], [1.0, 1.03, 1.06])
     raw_pedal_gas = float(np.clip(pedaloffset + accel_cmd * accel_gain * accel_term_scale, 0.0, 1.0))
 

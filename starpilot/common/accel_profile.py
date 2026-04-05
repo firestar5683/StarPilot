@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 from __future__ import annotations
 
+import math
+
 from openpilot.selfdrive.controls.lib.longitudinal_planner import get_max_accel
 
 ACCELERATION_PROFILES = {
@@ -29,6 +31,7 @@ CUSTOM_ACCEL_PROFILE_PARAM_SPECS = [
   ("CustomAccelProfile89MPH", 89),
 ]
 CUSTOM_ACCEL_PROFILE_PARAM_KEYS = [key for key, _ in CUSTOM_ACCEL_PROFILE_PARAM_SPECS]
+CUSTOM_ACCEL_PROFILE_INITIALIZED_KEY = "CustomAccelProfileInitialized"
 CUSTOM_ACCEL_PROFILE_VALUE_MIN = 0.0
 CUSTOM_ACCEL_PROFILE_VALUE_MAX = 6.0
 
@@ -116,6 +119,35 @@ def build_custom_accel_profile_defaults(acceleration_profile, ev_tuning=True, tr
   }
 
 
+CUSTOM_ACCEL_PROFILE_STATIC_DEFAULTS = {
+  key: float(A_CRUISE_MAX_VALS_SPORT_GAS[idx])
+  for idx, key in enumerate(CUSTOM_ACCEL_PROFILE_PARAM_KEYS)
+}
+
+
+def custom_accel_profile_is_initialized(initialized_flag, raw_values_by_key):
+  if _coerce_bool(initialized_flag):
+    return True
+
+  if not isinstance(raw_values_by_key, dict):
+    return False
+
+  for key in CUSTOM_ACCEL_PROFILE_PARAM_KEYS:
+    raw_value = raw_values_by_key.get(key)
+    if raw_value is None:
+      return False
+
+    try:
+      value = float(raw_value.decode("utf-8", errors="replace") if isinstance(raw_value, bytes) else raw_value)
+    except (TypeError, ValueError):
+      return False
+
+    if not math.isclose(value, CUSTOM_ACCEL_PROFILE_STATIC_DEFAULTS[key], abs_tol=1e-6):
+      return True
+
+  return False
+
+
 def coerce_custom_accel_profile_values(raw_values, acceleration_profile, ev_tuning=True, truck_tuning=False):
   defaults = get_accel_profile_curve_values(acceleration_profile, ev_tuning, truck_tuning)
   values = []
@@ -141,3 +173,13 @@ def _normalize_profile(value, profile_map, fallback):
     return int(float(value))
   except (TypeError, ValueError):
     return fallback
+
+
+def _coerce_bool(value):
+  if isinstance(value, bytes):
+    value = value.decode("utf-8", errors="replace")
+
+  if isinstance(value, str):
+    return value.strip() in ("1", "true", "True")
+
+  return bool(value)

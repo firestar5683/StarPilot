@@ -49,6 +49,7 @@ SAFE_MODE_MANAGED_KEYS = (
   "EVTuning",
   "TruckTuning",
   "CustomAccelProfile",
+  "CustomAccelProfileInitialized",
   "CustomAccelProfile0MPH",
   "CustomAccelProfile11MPH",
   "CustomAccelProfile22MPH",
