@@ -622,7 +622,7 @@ export function NavDestination() {
                 <div class="keys-required-widget">
                   <div class="keys-required-title">Mapbox Keys Required</div>
                   <p class="keys-required-text">You must set both your public and secret Mapbox keys before using navigation features.</p>
-                  <a href="/navigation_keys" class="keys-required-button">Go to "Manage Keys"</a>
+                  <a href="/manage_navigation_keys" class="keys-required-button">Go to "Manage Keys"</a>
                 </div>
               </section>
             `
