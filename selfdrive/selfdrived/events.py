@@ -266,11 +266,10 @@ def below_steer_speed_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.S
 
 
 def speed_limit_changed_alert(CP: car.CarParams, CS: car.CarState, sm: messaging.SubMaster, metric: bool, soft_disable_time: int, personality, starpilot_toggles: SimpleNamespace) -> Alert:
-  speed_limit = sm["starpilotPlan"].unconfirmedSlcSpeedLimit or sm["starpilotPlan"].slcSpeedLimit
   return Alert(
-    "Speed limit detected",
-    f"Confirm {get_display_speed(speed_limit, metric)}?",
-    StarPilotAlertStatus.starpilot, AlertSize.mid,
+    "Speed limit changed",
+    "",
+    StarPilotAlertStatus.starpilot, AlertSize.small,
     Priority.LOW, VisualAlert.none, AudibleAlert.prompt, 3.0)
 
 
