@@ -169,6 +169,8 @@ class StarPilotScreenLayout(StarPilotPanel):
 
   def _get_brightness(self, key):
     v = self._params.get_int(key)
+    if key == "ScreenBrightnessOnroad" and v == 0:
+      v = 1
     if v == 0:
       return tr("Off")
     if v == 101:
@@ -179,12 +181,20 @@ class StarPilotScreenLayout(StarPilotPanel):
     def on_close(res, val):
       if res == DialogResult.CONFIRM:
         new_v = int(val)
+        if key == "ScreenBrightnessOnroad":
+          new_v = max(new_v, 1)
         self._params.put_int(key, new_v)
         HARDWARE.set_brightness(new_v)
         self._rebuild_grid()
 
+    min_value = 1 if key == "ScreenBrightnessOnroad" else 0
+    current_value = max(self._params.get_int(key), min_value)
+    labels = {101: tr("Auto")}
+    if min_value == 0:
+      labels[0] = tr("Off")
+
     gui_app.set_modal_overlay(
-      AetherSliderDialog(tr(key), 0, 101, 1, self._params.get_int(key), on_close, unit="%", labels={0: tr("Off"), 101: tr("Auto")}, color="#D43D8A")
+      AetherSliderDialog(tr(key), min_value, 101, 1, current_value, on_close, unit="%", labels=labels, color="#D43D8A")
     )
 
   def _show_timeout_selector(self, key):

@@ -268,7 +268,7 @@ function numericBounds(param) {
     return { min: 1, max: 101, step: 1 }
   }
   if (param.key === "ScreenBrightnessOnroad") {
-    return { min: 0, max: 101, step: 1 }
+    return { min: 1, max: 101, step: 1 }
   }
 
   // Personality jerk params are stored as percentage-style integers (25..200).

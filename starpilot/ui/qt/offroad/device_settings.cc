@@ -74,9 +74,9 @@ StarPilotDevicePanel::StarPilotDevicePanel(StarPilotSettingsWindow *parent, bool
       deviceToggle = screenToggle;
     } else if (param == "ScreenBrightness" || param == "ScreenBrightnessOnroad") {
       std::map<float, QString> brightnessLabels;
-      int minBrightness = (param == "ScreenBrightnessOnroad") ? 0 : 1;
-      for (int i = 0; i <= 101; ++i) {
-        brightnessLabels[i] = i == 0 ? tr("Screen Off") : i == 101 ? tr("Auto") : QString::number(i) + "%";
+      const int minBrightness = 1;
+      for (int i = minBrightness; i <= 101; ++i) {
+        brightnessLabels[i] = i == 101 ? tr("Auto") : QString::number(i) + "%";
       }
       deviceToggle = new StarPilotParamValueControl(param, title, desc, icon, minBrightness, 101, QString(), brightnessLabels, 1, true);
     } else if (param == "ScreenRecorder") {
