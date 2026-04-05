@@ -10,6 +10,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 import cereal.messaging as messaging
+import numpy as np
 
 from cereal import car, custom, log
 from opendbc.car import gen_empty_fingerprint
@@ -25,6 +26,16 @@ from openpilot.common.constants import CV
 from openpilot.common.params import Params
 from openpilot.selfdrive.controls.lib.latcontrol_torque import KP
 from openpilot.selfdrive.modeld.constants import ModelConstants
+from openpilot.starpilot.common.accel_profile import (
+  ACCELERATION_PROFILES,
+  CUSTOM_ACCEL_PROFILE_PARAM_KEYS,
+  CUSTOM_ACCEL_PROFILE_VALUE_MAX,
+  CUSTOM_ACCEL_PROFILE_VALUE_MIN,
+  DECELERATION_PROFILES,
+  build_custom_accel_profile_defaults,
+  normalize_acceleration_profile,
+  normalize_deceleration_profile,
+)
 from openpilot.system.hardware import HARDWARE
 from openpilot.system.hardware.hw import Paths
 from openpilot.system.hardware.power_monitoring import VBATT_PAUSE_CHARGING
@@ -787,8 +798,19 @@ class StarPilotVariables:
     toggle.lock_doors_timer = self.get_value("LockDoorsTimer", cast=float, condition=(toggle.car_make == "toyota"))
 
     longitudinal_tuning = toggle.openpilot_longitudinal and self.get_value("LongitudinalTune")
-    toggle.acceleration_profile = self.get_value("AccelerationProfile", cast=float, condition=longitudinal_tuning)
-    toggle.deceleration_profile = self.get_value("DecelerationProfile", cast=float, condition=longitudinal_tuning)
+    toggle.acceleration_profile = normalize_acceleration_profile(
+      self.get_value("AccelerationProfile", cast=None, condition=longitudinal_tuning, default=ACCELERATION_PROFILES["SPORT"])
+    )
+    toggle.deceleration_profile = normalize_deceleration_profile(
+      self.get_value("DecelerationProfile", cast=None, condition=longitudinal_tuning, default=DECELERATION_PROFILES["ECO"])
+    )
+    toggle.custom_accel_profile = self.get_value("CustomAccelProfile", condition=longitudinal_tuning)
+    custom_accel_defaults = build_custom_accel_profile_defaults(toggle.acceleration_profile, toggle.ev_tuning, toggle.truck_tuning)
+    toggle.custom_accel_profile_values = [
+      self.get_value(key, cast=float, condition=longitudinal_tuning, default=custom_accel_defaults[key],
+                     min=CUSTOM_ACCEL_PROFILE_VALUE_MIN, max=CUSTOM_ACCEL_PROFILE_VALUE_MAX)
+      for key in CUSTOM_ACCEL_PROFILE_PARAM_KEYS
+    ]
     toggle.human_acceleration = self.get_value("HumanAcceleration", condition=longitudinal_tuning)
     toggle.human_following = self.get_value("HumanFollowing", condition=longitudinal_tuning)
     toggle.human_lane_changes = has_radar and self.get_value("HumanLaneChanges", condition=longitudinal_tuning)

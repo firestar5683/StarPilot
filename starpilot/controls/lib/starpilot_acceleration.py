@@ -3,6 +3,14 @@ import numpy as np
 
 from openpilot.selfdrive.controls.lib.longitudinal_planner import A_CRUISE_MIN, get_max_accel
 
+from openpilot.starpilot.common.accel_profile import (
+  ACCELERATION_PROFILES,
+  DECELERATION_PROFILES,
+  coerce_custom_accel_profile_values,
+  get_accel_profile_curve_values,
+  get_max_allowed_accel as get_profile_max_allowed_accel,
+  interpolate_accel_profile,
+)
 from openpilot.starpilot.common.starpilot_variables import CITY_SPEED_LIMIT
 
 def cubic_interp(x, xp, fp):
@@ -45,56 +53,20 @@ def akima_interp(x, xp, fp):
 A_CRUISE_MIN_ECO = A_CRUISE_MIN / 2
 A_CRUISE_MIN_SPORT = A_CRUISE_MIN * 2
 
-                       # MPH = [0.0,  11,  22,  34,  45,  56,  89]
-A_CRUISE_MAX_BP_CUSTOM =       [0.0,  5., 10., 15., 20., 25., 40.]
-A_CRUISE_MAX_VALS_ECO_EV =      [1.25, 1.25, 1.25, 1.25, 1.45, 1.50, 2.00]
-A_CRUISE_MAX_VALS_STANDARD_EV = [1.35, 1.35, 1.35, 1.35, 1.60, 1.60, 2.10]
-A_CRUISE_MAX_VALS_SPORT_EV =    [1.55, 1.55, 1.55, 1.55, 1.84, 1.84, 2.42]
-A_CRUISE_MAX_VALS_SPORT_PLUS_EV = [1.7825, 1.7825, 1.7825, 1.7825, 2.116, 2.116, 2.783]
-A_CRUISE_MAX_VALS_ECO_GAS =    [2.0, 1.5, 1.0, 0.8, 0.6, 0.4, 0.2]
-A_CRUISE_MAX_VALS_SPORT_GAS =  [3.0, 2.5, 2.0, 1.5, 1.0, 0.8, 0.6]
-A_CRUISE_MAX_VALS_ECO_TRUCK =       [3.00, 1.05, 0.60, 0.50, 0.50, 0.45, 0.35]
-A_CRUISE_MAX_VALS_STANDARD_TRUCK =  [6.00, 1.10, 0.70, 0.60, 0.55, 0.45, 0.35]
-A_CRUISE_MAX_VALS_SPORT_TRUCK =     [6.00, 1.15, 0.75, 0.70, 0.60, 0.50, 0.40]
-A_CRUISE_MAX_VALS_SPORT_PLUS_TRUCK = [6.00, 1.30, 0.90, 0.80, 0.70, 0.60, 0.45]
-
-ACCELERATION_PROFILES = {
-  "STANDARD": 0,
-  "ECO": 1,
-  "SPORT": 2,
-  "SPORT_PLUS": 3
-}
-
-DECELERATION_PROFILES = {
-  "STANDARD": 0,
-  "ECO": 1,
-  "SPORT": 2
-}
-
 def get_max_accel_eco(v_ego, ev_tuning=True, truck_tuning=False):
-  if ev_tuning:
-    cruise_vals = A_CRUISE_MAX_VALS_ECO_EV
-  elif truck_tuning:
-    cruise_vals = A_CRUISE_MAX_VALS_ECO_TRUCK
-  else:
-    cruise_vals = A_CRUISE_MAX_VALS_ECO_GAS
-  return float(akima_interp(v_ego, A_CRUISE_MAX_BP_CUSTOM, cruise_vals))
+  return interpolate_accel_profile(v_ego, get_accel_profile_curve_values(ACCELERATION_PROFILES["ECO"], ev_tuning, truck_tuning))
 
 def get_max_accel_sport(v_ego, ev_tuning=True, truck_tuning=False):
-  if ev_tuning:
-    cruise_vals = A_CRUISE_MAX_VALS_SPORT_EV
-  elif truck_tuning:
-    cruise_vals = A_CRUISE_MAX_VALS_SPORT_TRUCK
-  else:
-    cruise_vals = A_CRUISE_MAX_VALS_SPORT_GAS
-  return float(akima_interp(v_ego, A_CRUISE_MAX_BP_CUSTOM, cruise_vals))
+  return interpolate_accel_profile(v_ego, get_accel_profile_curve_values(ACCELERATION_PROFILES["SPORT"], ev_tuning, truck_tuning))
 
 def get_max_accel_standard(v_ego, ev_tuning=True, truck_tuning=False):
-  if ev_tuning:
-    return float(akima_interp(v_ego, A_CRUISE_MAX_BP_CUSTOM, A_CRUISE_MAX_VALS_STANDARD_EV))
-  if truck_tuning:
-    return float(akima_interp(v_ego, A_CRUISE_MAX_BP_CUSTOM, A_CRUISE_MAX_VALS_STANDARD_TRUCK))
-  return get_max_accel(v_ego)
+  if ev_tuning or truck_tuning:
+    return interpolate_accel_profile(v_ego, get_accel_profile_curve_values(ACCELERATION_PROFILES["STANDARD"], ev_tuning, truck_tuning))
+  return float(get_max_accel(v_ego))
+
+def get_max_accel_custom(v_ego, custom_curve, acceleration_profile, ev_tuning=True, truck_tuning=False):
+  curve_values = coerce_custom_accel_profile_values(custom_curve, acceleration_profile, ev_tuning, truck_tuning)
+  return interpolate_accel_profile(v_ego, curve_values)
 
 def get_max_accel_low_speeds(max_accel, v_cruise):
   return float(akima_interp(v_cruise, [0., CITY_SPEED_LIMIT / 2, CITY_SPEED_LIMIT], [max_accel / 4, max_accel / 2, max_accel]))
@@ -103,11 +75,7 @@ def get_max_accel_ramp_off(max_accel, v_cruise, v_ego):
   return float(akima_interp(v_cruise - v_ego, [0., 1., 5., 10.], [0., 0.5, 1.0, max_accel]))
 
 def get_max_allowed_accel(v_ego, ev_tuning=True, truck_tuning=False):
-  if ev_tuning:
-    return float(akima_interp(v_ego, A_CRUISE_MAX_BP_CUSTOM, A_CRUISE_MAX_VALS_SPORT_PLUS_EV))
-  if truck_tuning:
-    return float(akima_interp(v_ego, A_CRUISE_MAX_BP_CUSTOM, A_CRUISE_MAX_VALS_SPORT_PLUS_TRUCK))
-  return float(akima_interp(v_ego, [0., 5., 20.], [4.0, 4.0, 2.0]))  # ISO 15622:2018
+  return float(get_profile_max_allowed_accel(v_ego, ev_tuning, truck_tuning))
 
 class StarPilotAcceleration:
   def __init__(self, StarPilotPlanner):
@@ -121,8 +89,12 @@ class StarPilotAcceleration:
     sport_gear = sm["starpilotCarState"].sportGear
     ev_tuning = getattr(starpilot_toggles, "ev_tuning", True)
     truck_tuning = getattr(starpilot_toggles, "truck_tuning", False)
+    custom_accel_profile = getattr(starpilot_toggles, "custom_accel_profile", False)
+    custom_accel_profile_values = getattr(starpilot_toggles, "custom_accel_profile_values", [])
 
-    if sm["starpilotCarState"].trafficModeEnabled:
+    if custom_accel_profile:
+      self.max_accel = get_max_accel_custom(v_ego, custom_accel_profile_values, starpilot_toggles.acceleration_profile, ev_tuning, truck_tuning)
+    elif sm["starpilotCarState"].trafficModeEnabled:
       self.max_accel = get_max_accel_standard(v_ego, ev_tuning, truck_tuning)
     elif starpilot_toggles.map_acceleration and (eco_gear or sport_gear):
       if eco_gear:

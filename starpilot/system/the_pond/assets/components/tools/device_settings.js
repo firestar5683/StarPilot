@@ -6,6 +6,7 @@ const endpointOptionsInflight = {}
 // Plain variables — scheduling/routing flags that must NOT be reactive
 let syncScheduled = false
 let lastParams = null
+const DYNAMIC_DEFAULT_DEP_KEYS = new Set(["AccelerationProfile", "EVTuning", "TruckTuning"])
 
 // Module-level state (persists across route changes)
 const state = reactive({
@@ -141,6 +142,21 @@ async function fetchDefaultValues() {
   }
 }
 
+async function refreshParamsAndDefaults() {
+  await fetchDefaultValues()
+
+  try {
+    const valuesRes = await fetch("/api/params/all")
+    if (valuesRes.ok) {
+      const data = await valuesRes.json()
+      state.values = data || {}
+    }
+  } catch (e) {
+    console.error("Failed to refresh param values:", e)
+  }
+  scheduleSyncInputs()
+}
+
 async function fetchLayoutAndParams() {
   state.loadingLayout = true
   state.loadingValues = true
@@ -176,14 +192,13 @@ async function fetchLayoutAndParams() {
 
   // Pull params once at page load; local state handles subsequent edits.
   try {
-    const valuesRes = await fetch("/api/params/all")
-
-    const data = await valuesRes.json()
-    state.values = data
-
     if (!(await fetchDefaultValues())) {
       state.defaultValues = {}
     }
+
+    const valuesRes = await fetch("/api/params/all")
+    const data = await valuesRes.json()
+    state.values = data
   } catch (e) {
     console.error("Failed to fetch param values:", e)
     state.defaultValues = {}
@@ -520,7 +535,11 @@ async function updateParam(key, elType) {
       const updated = (data.updated && typeof data.updated === "object") ? data.updated : {}
       state.values = { ...state.values, [key]: formattedVal, ...updated }
       showParamSnackbar(data.message || `Parameter '${key}' updated.`)
-      scheduleSyncInputs()
+      if (DYNAMIC_DEFAULT_DEP_KEYS.has(key)) {
+        await refreshParamsAndDefaults()
+      } else {
+        scheduleSyncInputs()
+      }
     } else {
       revertInput(key, current, elType)
       showParamSnackbar(data.error || "Failed to update parameter", "error")

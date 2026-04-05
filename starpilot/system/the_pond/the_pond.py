@@ -41,6 +41,11 @@ from openpilot.system.version import get_build_metadata
 from panda import Panda
 
 from openpilot.starpilot.assets.theme_manager import HOLIDAY_THEME_PATH, THEME_COMPONENT_PARAMS
+from openpilot.starpilot.common.accel_profile import (
+  CUSTOM_ACCEL_PROFILE_PARAM_KEYS,
+  build_custom_accel_profile_defaults,
+  normalize_acceleration_profile,
+)
 from openpilot.starpilot.common.maps_catalog import (
   MAPS_CATALOG,
   MAP_SCHEDULE_OPTIONS,
@@ -629,6 +634,8 @@ _TROUBLESHOOT_ADVANCED_LONGITUDINAL_KEYS = [
   "AdvancedLongitudinalTune",
   "EVTuning",
   "TruckTuning",
+  "CustomAccelProfile",
+  *CUSTOM_ACCEL_PROFILE_PARAM_KEYS,
   "LongitudinalActuatorDelay",
   "StartAccel",
   "VEgoStarting",
@@ -1663,6 +1670,7 @@ def _get_layout_type_overrides():
 _cached_allowed_keys = None
 _cached_param_types = None
 _cached_default_values = None
+_cached_static_default_values = None
 
 def _get_param_type_info():
   global _cached_allowed_keys, _cached_param_types
@@ -1699,15 +1707,18 @@ def _get_param_type_info():
     _cached_param_types = types
   return _cached_allowed_keys, _cached_param_types
 
-def _get_default_param_values():
-  global _cached_default_values
-  if _cached_default_values is None:
-    _cached_default_values = {
+def _get_static_default_param_values():
+  global _cached_static_default_values
+  if _cached_static_default_values is None:
+    _cached_static_default_values = {
       key: default_val
       for key, default_val, _, _ in starpilot_default_params
       if key not in EXCLUDED_KEYS
     }
-  default_values = dict(_cached_default_values)
+  return _cached_static_default_values
+
+def _get_default_param_values():
+  default_values = dict(_get_static_default_param_values())
   default_values.update(_get_runtime_default_param_overrides())
   return default_values
 
@@ -1790,6 +1801,7 @@ def _has_runtime_default_value(key, raw_value):
 
 def _get_runtime_default_param_overrides():
   overrides = {}
+  static_defaults = _get_static_default_param_values()
 
   for key, stock_key in _RUNTIME_DEFAULT_STOCK_KEYS.items():
     stock_raw = _safe_params_get_live_raw(stock_key)
@@ -1798,40 +1810,60 @@ def _get_runtime_default_param_overrides():
       overrides[stock_key] = stock_raw
 
   cp_bytes = _safe_params_get_live_raw("CarParamsPersistent")
-  if not cp_bytes:
-    return overrides
+  if cp_bytes:
+    try:
+      with car.CarParams.from_bytes(cp_bytes) as cp:
+        overrides["EVTuning"] = default_ev_tuning_enabled(cp)
 
-  try:
-    with car.CarParams.from_bytes(cp_bytes) as cp:
-      overrides["EVTuning"] = default_ev_tuning_enabled(cp)
+        car_param_defaults = {
+          "SteerDelay": getattr(cp, "steerActuatorDelay", None),
+          "SteerRatio": getattr(cp, "steerRatio", None),
+          "LongitudinalActuatorDelay": getattr(cp, "longitudinalActuatorDelay", None),
+          "StartAccel": getattr(cp, "startAccel", None),
+          "StopAccel": getattr(cp, "stopAccel", None),
+          "StoppingDecelRate": getattr(cp, "stoppingDecelRate", None),
+          "VEgoStarting": getattr(cp, "vEgoStarting", None),
+          "VEgoStopping": getattr(cp, "vEgoStopping", None),
+        }
 
-      car_param_defaults = {
-        "SteerDelay": getattr(cp, "steerActuatorDelay", None),
-        "SteerRatio": getattr(cp, "steerRatio", None),
-        "LongitudinalActuatorDelay": getattr(cp, "longitudinalActuatorDelay", None),
-        "StartAccel": getattr(cp, "startAccel", None),
-        "StopAccel": getattr(cp, "stopAccel", None),
-        "StoppingDecelRate": getattr(cp, "stoppingDecelRate", None),
-        "VEgoStarting": getattr(cp, "vEgoStarting", None),
-        "VEgoStopping": getattr(cp, "vEgoStopping", None),
-      }
+        for key, value in car_param_defaults.items():
+          if key in overrides or value is None:
+            continue
+          if key not in _RUNTIME_DEFAULT_ZERO_OK_KEYS and float(value) == 0.0:
+            continue
+          overrides[key] = value
+    except Exception:
+      pass
 
-      for key, value in car_param_defaults.items():
-        if key in overrides or value is None:
-          continue
-        if key not in _RUNTIME_DEFAULT_ZERO_OK_KEYS and float(value) == 0.0:
-          continue
-        overrides[key] = value
-  except Exception:
-    pass
+  ev_tuning_raw = _safe_params_get_live_raw("EVTuning")
+  truck_tuning_raw = _safe_params_get_live_raw("TruckTuning")
+  acceleration_profile_raw = _safe_params_get_live_raw("AccelerationProfile")
+
+  ev_tuning = _coerce_param_value(
+    ev_tuning_raw if not _is_blank_param_raw(ev_tuning_raw) else overrides.get("EVTuning", static_defaults.get("EVTuning", "0")),
+    bool,
+  )
+  truck_tuning = _coerce_param_value(
+    truck_tuning_raw if not _is_blank_param_raw(truck_tuning_raw) else static_defaults.get("TruckTuning", "0"),
+    bool,
+  )
+  if truck_tuning:
+    ev_tuning = False
+
+  acceleration_profile = normalize_acceleration_profile(
+    acceleration_profile_raw if not _is_blank_param_raw(acceleration_profile_raw) else static_defaults.get("AccelerationProfile", "0")
+  )
+  overrides.update(build_custom_accel_profile_defaults(acceleration_profile, ev_tuning, truck_tuning))
 
   return overrides
 
-def _get_current_param_value(key, value_type):
-  safe_type = value_type or str
-  if safe_type == bool:
-    return params.get_bool(key)
-  return _coerce_param_value(params.get(key), safe_type)
+def _get_current_param_value(key, value_type, defaults_lookup=None):
+  raw_value = _safe_params_get_live_raw(key)
+  if _is_blank_param_raw(raw_value):
+    if defaults_lookup is None:
+      defaults_lookup = _get_default_param_values()
+    raw_value = defaults_lookup.get(key)
+  return _coerce_param_value(raw_value, value_type)
 
 def _serialize_param_write_value(raw_value):
   if isinstance(raw_value, bool):
@@ -3108,6 +3140,22 @@ def setup(app):
       if key == "AutomaticUpdates" and params.get_bool("IsOnroad"):
         return jsonify({"error": "Cannot change Automatic Updates while driving."}), 403
 
+      if key in {"EVTuning", "TruckTuning"}:
+        enabled = str_val.strip() in ("1", "true", "True")
+        params.put_bool(key, enabled)
+
+        updated = {key: enabled}
+        if enabled:
+          other_key = "TruckTuning" if key == "EVTuning" else "EVTuning"
+          params.put_bool(other_key, False)
+          updated[other_key] = False
+
+        update_starpilot_toggles()
+        return jsonify({
+          "message": f"Parameter '{key}' updated successfully.",
+          "updated": updated,
+        }), 200
+
       if key == "CarMake":
         catalog = _get_fingerprint_catalog()
         normalized_make = _normalize_fingerprint_make_key(str_val)
@@ -3225,25 +3273,13 @@ def setup(app):
   def get_all_params():
     _enforce_cancel_remap_lkas_lock()
     allowed_keys, types = _get_param_type_info()
+    defaults_lookup = _get_default_param_values()
 
     result = {}
     for key in allowed_keys:
       t = types.get(key, str)
       try:
-        if t == bool:
-          result[key] = params.get_bool(key)
-        else:
-          raw = params.get(key)
-          raw_str = raw.decode("utf-8", errors="replace") if isinstance(raw, bytes) else str(raw or "")
-
-          if not raw_str:
-             result[key] = 0.0 if t == float else (0 if t == int else "")
-          elif t == float:
-             result[key] = float(raw_str)
-          elif t == int:
-             result[key] = int(float(raw_str))
-          else:
-             result[key] = raw_str
+        result[key] = _get_current_param_value(key, t, defaults_lookup)
       except Exception:
         result[key] = None
 

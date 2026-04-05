@@ -237,20 +237,26 @@ void Device::updateBrightness(const UIState &s, const StarPilotUIState &fs) {
 void Device::updateWakefulness(const UIState &s, const StarPilotUIState &fs) {
   const StarPilotUIScene &starpilot_scene = fs.starpilot_scene;
   const QJsonObject &starpilot_toggles = starpilot_scene.starpilot_toggles;
+  const bool standby_mode = starpilot_toggles.value("standby_mode").toBool();
+  const int screen_timeout = starpilot_toggles.value("screen_timeout").toInt();
+  const int screen_timeout_onroad = starpilot_toggles.value("screen_timeout_onroad").toInt();
 
-  bool ignition_just_turned_off = !s.scene.ignition && ignition_on;
+  bool ignition_state_changed = s.scene.ignition != ignition_on;
   ignition_on = s.scene.ignition;
 
-  if (ignition_on && starpilot_toggles.value("standby_mode").toBool()) {
-    if (starpilot_scene.wake_up_screen) {
-      resetInteractiveTimeout(starpilot_toggles.value("screen_timeout").toInt(), starpilot_toggles.value("screen_timeout_onroad").toInt());
-    } else {
+  // Standby mode should extend the current wake window for alerts and status
+  // changes, but it must not clear the timer every frame or manual wakes will
+  // collapse immediately.
+  if (ignition_on && standby_mode && starpilot_scene.wake_up_screen) {
+    resetInteractiveTimeout(screen_timeout, screen_timeout_onroad);
+  }
+
+  if (ignition_state_changed) {
+    if (ignition_on && starpilot_toggles.value("screen_brightness_onroad").toInt() == 0 && !standby_mode) {
       resetInteractiveTimeout(0, 0);
+    } else {
+      resetInteractiveTimeout(screen_timeout, screen_timeout_onroad);
     }
-  } else if (ignition_just_turned_off) {
-    resetInteractiveTimeout(starpilot_toggles.value("screen_timeout").toInt(), starpilot_toggles.value("screen_timeout_onroad").toInt());
-  } else if (ignition_on && starpilot_toggles.value("screen_brightness_onroad").toInt() == 0) {
-    resetInteractiveTimeout(0, 0);
   } else if (interactive_timeout > 0 && --interactive_timeout == 0) {
     emit interactiveTimeout();
   }
