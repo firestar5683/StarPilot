@@ -6,7 +6,6 @@ from opendbc.car.structs import CarParams
 from opendbc.car import gen_empty_fingerprint
 from opendbc.car.honda.interface import CarInterface
 from opendbc.car.honda.carcontroller import (
-  get_clarity_eps_modified_steering_pressed,
   get_civic_bosch_modified_steering_pressed,
   get_civic_bosch_modified_torque_lpf_tau,
   get_honda_bosch_wind_brake_mps2,
@@ -55,11 +54,6 @@ class TestHondaFingerprint:
     filter_s, pressed = get_civic_bosch_modified_steering_pressed(True, -1500.0, 0.8, 0.10, False)
     assert pressed
 
-  def test_modified_clarity_steering_pressed_filter_allows_opposing_driver_torque_quickly(self):
-    filter_s, pressed = get_clarity_eps_modified_steering_pressed(True, -1500.0, 0.8, 0.10, False)
-    assert pressed
-    assert filter_s > 0.10
-
   def test_honda_bosch_wind_brake_curve_matches_reference_points(self):
     assert get_honda_bosch_wind_brake_mps2(0.0) == pytest.approx(0.0)
     assert get_honda_bosch_wind_brake_mps2(22.4) == pytest.approx(0.136)
@@ -105,7 +99,7 @@ class TestHondaFingerprint:
     assert b'39990-TGG,A020\x00\x00' in FW_VERSIONS[CAR.HONDA_CIVIC_BOSCH][(CarParams.Ecu.eps, 0x18DA30F1, None)]
     assert b'39990-TLA,A040\x00\x00' in FW_VERSIONS[CAR.HONDA_CRV_5G][(CarParams.Ecu.eps, 0x18DA30F1, None)]
 
-  def test_modified_eps_candidates_keep_support_and_restore_upstream_tunes(self, monkeypatch):
+  def test_modified_eps_candidates_keep_support_and_restore_upstream_tunes(self):
     toggles = SimpleNamespace(force_torque_controller=False, nnff=False, nnff_lite=False)
 
     civic_fw = [CarParams.CarFw(ecu=CarParams.Ecu.eps, fwVersion=b'39990-TBA,A030\x00\x00', address=0x18DA30F1, subAddress=0)]
@@ -132,20 +126,6 @@ class TestHondaFingerprint:
     assert list(crv_cp.lateralParams.torqueV) == [0, 2560, 3840]
     assert list(crv_cp.lateralTuning.pid.kpV) == pytest.approx([0.21])
     assert list(crv_cp.lateralTuning.pid.kiV) == pytest.approx([0.07])
-
-    clarity_fw = [CarParams.CarFw(ecu=CarParams.Ecu.eps, fwVersion=b'39990-TRW,A020\x00\x00', address=0x18DA30F1, subAddress=0)]
-    monkeypatch.setattr("openpilot.common.params.Params.get_bool", lambda self, key: key == "ClarityAnglePIDControl")
-    clarity_cp = CarInterface.get_params(CAR.HONDA_CLARITY, gen_empty_fingerprint(), clarity_fw, False, False, False, toggles)
-    assert not clarity_cp.dashcamOnly
-    assert clarity_cp.flags & HondaFlags.EPS_MODIFIED
-    assert clarity_cp.autoResumeSng
-    assert clarity_cp.minEnableSpeed == pytest.approx(-1.0)
-    assert list(clarity_cp.lateralParams.torqueBP) == [0, 1663]
-    assert list(clarity_cp.lateralParams.torqueV) == [0, 1663]
-    assert clarity_cp.lateralTuning.which() == "pid"
-    assert list(clarity_cp.lateralTuning.pid.kpV) == pytest.approx([0.04])
-    assert list(clarity_cp.lateralTuning.pid.kiV) == pytest.approx([0.05])
-    assert clarity_cp.lateralTuning.pid.kf == pytest.approx(0.000075)
 
   def test_modified_civic_bosch_keeps_official_support(self):
     toggles = SimpleNamespace(force_torque_controller=False, nnff=False, nnff_lite=False)

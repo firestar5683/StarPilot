@@ -89,55 +89,6 @@ def get_civic_bosch_modified_steering_pressed(
   return filter_s, steering_pressed
 
 
-def get_clarity_eps_modified_steering_pressed(
-  raw_pressed: bool, steering_torque: float, torque_cmd: float, filter_s: float, was_pressed: bool
-) -> tuple[float, bool]:
-  if not raw_pressed:
-    filter_s = max(0.0, filter_s - 8.0 * DT_CTRL)
-    return filter_s, filter_s > 0.04 and was_pressed
-
-  torque_product = steering_torque * torque_cmd
-  torque_cmd_abs = abs(torque_cmd)
-
-  if torque_product < 0.0:
-    trigger_s = 0.08 if was_pressed else 0.10
-    filter_s = min(1.0, filter_s + DT_CTRL)
-    return filter_s, filter_s >= trigger_s
-
-  if torque_cmd_abs < 0.05:
-    trigger_s = 0.25 if was_pressed else 0.30
-    filter_s = min(1.0, filter_s + 0.75 * DT_CTRL)
-    return filter_s, filter_s >= trigger_s
-
-  filter_s = max(0.0, filter_s - 3.0 * DT_CTRL)
-  return filter_s, False
-
-
-def get_clarity_eps_modified_torque_lpf_tau(torque_cmd: float, prev_torque_cmd: float, v_ego: float) -> float:
-  if v_ego > 45.0 * 0.44704:
-    return 0.1
-
-  torque_delta = abs(float(torque_cmd) - float(prev_torque_cmd))
-  sign_change = (float(torque_cmd) * float(prev_torque_cmd)) < 0.0
-
-  if sign_change:
-    if torque_delta > 0.15:
-      return 0.000
-    elif torque_delta > 0.05:
-      return 0.050
-    else:
-      return 0.100
-
-  if torque_delta > 0.50:
-    return 0.020
-  elif torque_delta > 0.20:
-    return 0.050
-  elif torque_delta > 0.05:
-    return 0.075
-  else:
-    return 0.100
-
-
 def get_honda_bosch_wind_brake_mps2(v_ego: float) -> float:
   return float(np.interp(v_ego, [0.0, 13.4, 22.4, 31.3, 40.2], [0.000, 0.049, 0.136, 0.267, 0.441]))
 
@@ -274,8 +225,6 @@ class CarController(CarControllerBase):
     self.prev_torque_cmd = 0.0
     self.steering_pressed_filter_s = 0.0
     self.steering_pressed_robust_prev = False
-    self.is_clarity_eps_modified = CP.carFingerprint == CAR.HONDA_CLARITY and bool(CP.flags & HondaFlags.EPS_MODIFIED)
-    self.is_clarity_angle_pid = self.is_clarity_eps_modified and CP.lateralTuning.which() == 'pid'
     self.bosch_gas_factor = 1.0
     self.bosch_wind_factor = 1.0
     self.bosch_wind_factor_before_brake = 0.0
@@ -285,26 +234,13 @@ class CarController(CarControllerBase):
     return self.CP.carFingerprint == CAR.HONDA_CIVIC_BOSCH and bool(self.CP.flags & HondaFlags.EPS_MODIFIED)
 
   def _filtered_steering_pressed(self, CS, torque_cmd: float) -> bool:
-    raw_pressed = bool(CS.out.steeringPressed)
-    steering_torque = float(getattr(CS.out, "steeringTorque", 0.0))
-    torque_cmd = float(torque_cmd)
-
-    if self.is_clarity_eps_modified:
-      self.steering_pressed_filter_s, steering_pressed = get_clarity_eps_modified_steering_pressed(
-        raw_pressed,
-        steering_torque,
-        torque_cmd,
-        self.steering_pressed_filter_s,
-        self.steering_pressed_robust_prev,
-      )
-    else:
-      self.steering_pressed_filter_s, steering_pressed = get_civic_bosch_modified_steering_pressed(
-        raw_pressed,
-        steering_torque,
-        torque_cmd,
-        self.steering_pressed_filter_s,
-        self.steering_pressed_robust_prev,
-      )
+    self.steering_pressed_filter_s, steering_pressed = get_civic_bosch_modified_steering_pressed(
+      bool(CS.out.steeringPressed),
+      float(getattr(CS.out, "steeringTorque", 0.0)),
+      float(torque_cmd),
+      self.steering_pressed_filter_s,
+      self.steering_pressed_robust_prev,
+    )
     self.steering_pressed_robust_prev = steering_pressed
     return steering_pressed
 
@@ -339,27 +275,6 @@ class CarController(CarControllerBase):
           self.torque_lpf = alpha * torque_cmd + ((1.0 - alpha) * self.torque_lpf)
           self.prev_torque_cmd = torque_cmd
           torque_cmd = self.torque_lpf
-      else:
-        self.torque_lpf = 0.0
-        self.prev_torque_cmd = 0.0
-        self.steering_pressed_filter_s = 0.0
-        self.steering_pressed_robust_prev = False
-    elif self.is_clarity_eps_modified:
-      if CC.latActive:
-        filtered_steering_pressed = self._filtered_steering_pressed(CS, torque_cmd)
-        if filtered_steering_pressed:
-          self.torque_lpf = 0.0
-          self.prev_torque_cmd = 0.0
-          torque_cmd = 0.0
-        elif not self.is_clarity_angle_pid:
-          tau = get_clarity_eps_modified_torque_lpf_tau(torque_cmd, self.prev_torque_cmd, CS.out.vEgo)
-          alpha = DT_CTRL / (tau + DT_CTRL)
-          self.torque_lpf = alpha * torque_cmd + ((1.0 - alpha) * self.torque_lpf)
-          self.prev_torque_cmd = torque_cmd
-          torque_cmd = self.torque_lpf
-        else:
-          self.torque_lpf = float(torque_cmd)
-          self.prev_torque_cmd = float(torque_cmd)
       else:
         self.torque_lpf = 0.0
         self.prev_torque_cmd = 0.0
