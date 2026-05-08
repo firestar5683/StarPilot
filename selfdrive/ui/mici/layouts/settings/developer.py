@@ -1,13 +1,7 @@
 from openpilot.common.time_helpers import system_time_valid
 from openpilot.system.ui.widgets.scroller import NavScroller
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton, BigToggle, BigParamControl, BigCircleParamControl
-from openpilot.selfdrive.ui.mici.widgets.dialog import BigDialog, BigInputDialog, BigMultiOptionDialog
-from openpilot.selfdrive.ui.mici.layouts.settings.fingerprint_catalog import (
-  FingerprintModelOption,
-  format_fingerprint_value,
-  get_fingerprint_catalog,
-  shorten_model_label,
-)
+from openpilot.selfdrive.ui.mici.widgets.dialog import BigDialog, BigInputDialog
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.selfdrive.ui.layouts.settings.common import restart_needed_callback
 from openpilot.selfdrive.ui.ui_state import ui_state
@@ -18,7 +12,6 @@ class DeveloperLayoutMici(NavScroller):
   def __init__(self):
     super().__init__()
     self._ssh_fetcher = SshKeyFetcher(ui_state.params)
-    self._make_options, self._models_by_make, self._models_by_value, self._make_by_model = get_fingerprint_catalog()
 
     def github_username_callback(username: str):
       if username:
@@ -52,14 +45,6 @@ class DeveloperLayoutMici(NavScroller):
     self._ssh_keys_btn = BigButton("SSH keys", "Not set" if not github_username else github_username, icon=txt_ssh)
     self._ssh_keys_btn.set_click_callback(ssh_keys_callback)
 
-    self._car_make_btn = BigButton("car make", self._get_display_make())
-    self._car_make_btn.set_click_callback(self._open_make_selector)
-    self._car_model_btn = BigButton("car model", self._get_display_model())
-    self._car_model_btn.set_click_callback(self._open_model_selector)
-    self._force_fingerprint_toggle = BigParamControl(
-      "disable auto fingerprint", "ForceFingerprint", toggle_callback=restart_needed_callback,
-    )
-
     # adb, ssh, ssh keys, debug mode, joystick debug mode, longitudinal maneuver mode, ip address
     # ******** Main Scroller ********
     self._adb_toggle = BigCircleParamControl(gui_app.texture("icons_mici/adb_short.png", 82, 82), "AdbEnabled", icon_offset=(0, 12))
@@ -85,9 +70,6 @@ class DeveloperLayoutMici(NavScroller):
       self._adb_toggle,
       self._ssh_toggle,
       self._ssh_keys_btn,
-      self._car_make_btn,
-      self._car_model_btn,
-      self._force_fingerprint_toggle,
       self._use_prebuilt_toggle,
       self._joystick_toggle,
       self._long_maneuver_toggle,
@@ -100,7 +82,6 @@ class DeveloperLayoutMici(NavScroller):
     self._refresh_toggles = (
       ("AdbEnabled", self._adb_toggle),
       ("SshEnabled", self._ssh_toggle),
-      ("ForceFingerprint", self._force_fingerprint_toggle),
       ("UsePrebuilt", self._use_prebuilt_toggle),
       ("JoystickDebugMode", self._joystick_toggle),
       ("LongitudinalManeuverMode", self._long_maneuver_toggle),
@@ -110,9 +91,6 @@ class DeveloperLayoutMici(NavScroller):
     )
     onroad_blocked_toggles = (
       self._adb_toggle,
-      self._car_make_btn,
-      self._car_model_btn,
-      self._force_fingerprint_toggle,
       self._use_prebuilt_toggle,
       self._joystick_toggle,
     )
@@ -136,126 +114,6 @@ class DeveloperLayoutMici(NavScroller):
   def _update_state(self):
     super()._update_state()
     self._ssh_fetcher.update()
-
-  def show_event(self):
-    super().show_event()
-    self._car_make_btn.set_value(self._get_display_make())
-    self._car_model_btn.set_value(self._get_display_model())
-    self._update_toggles()
-
-  def _show_option_dialog(self, title: str, options: list[str], current: str, on_selected):
-    dialog_holder: dict[str, BigMultiOptionDialog] = {}
-
-    def on_confirm():
-      on_selected(dialog_holder["dialog"].get_selected_option())
-
-    dialog = BigMultiOptionDialog(options=options, default=current, right_btn_callback=on_confirm)
-    dialog_holder["dialog"] = dialog
-    gui_app.push_widget(dialog)
-
-  def _get_display_make(self) -> str:
-    make = ui_state.params.get("CarMake", encoding="utf-8") or ""
-    if make:
-      return make
-
-    model = ui_state.params.get("CarModel", encoding="utf-8") or ""
-    if model:
-      return self._make_by_model.get(model, format_fingerprint_value(model.split("_", 1)[0]))
-    return "Select"
-
-  def _get_selected_model_option(self) -> FingerprintModelOption | None:
-    model = ui_state.params.get("CarModel", encoding="utf-8") or ""
-    if not model:
-      return None
-
-    model_name = ui_state.params.get("CarModelName", encoding="utf-8") or ""
-    make = ui_state.params.get("CarMake", encoding="utf-8") or self._make_by_model.get(model, "")
-    if make and model_name:
-      for option in self._models_by_make.get(make, ()):
-        if option.value == model and option.label == model_name:
-          return option
-
-    return self._models_by_value.get(model)
-
-  def _get_display_model(self) -> str:
-    selected_option = self._get_selected_model_option()
-    if selected_option is not None:
-      return selected_option.button_label
-
-    model = ui_state.params.get("CarModel", encoding="utf-8") or ""
-    model_name = ui_state.params.get("CarModelName", encoding="utf-8") or ""
-    if model:
-      model_option = self._models_by_value.get(model)
-      if model_option is not None:
-        return model_option.button_label
-
-    if model_name:
-      return shorten_model_label(self._get_display_make(), model_name)
-    if model:
-      return format_fingerprint_value(model)
-    return "Select"
-
-  def _set_car_make(self, make: str):
-    ui_state.params.put("CarMake", make)
-    self._car_make_btn.set_value(make)
-
-  def _set_car_model(self, model: str | FingerprintModelOption):
-    if isinstance(model, FingerprintModelOption):
-      model_option = model
-      model_value = model.value
-      model_name = model.label
-    else:
-      model_value = model
-      model_option = self._models_by_value.get(model_value)
-      model_name = model_option.label if model_option is not None else format_fingerprint_value(model_value)
-
-    make = self._make_by_model.get(model_value)
-    if make is not None:
-      ui_state.params.put("CarMake", make)
-      self._car_make_btn.set_value(make)
-
-    ui_state.params.put("CarModel", model_value)
-    ui_state.params.put("CarModelName", model_name)
-    self._car_model_btn.set_value(self._get_display_model())
-    restart_needed_callback(True)
-
-  def _open_make_selector(self):
-    options = list(self._make_options)
-    if not options:
-      gui_app.push_widget(BigDialog("", "No fingerprint list available"))
-      return
-
-    current_make = self._get_display_make()
-    default_make = current_make if current_make in options else options[0]
-
-    def on_selected(selected_make: str):
-      self._set_car_make(selected_make)
-      current_model = ui_state.params.get("CarModel", encoding="utf-8") or ""
-      available_models = {option.value for option in self._models_by_make.get(selected_make, ())}
-      if current_model not in available_models and self._models_by_make.get(selected_make):
-        self._set_car_model(self._models_by_make[selected_make][0])
-
-    self._show_option_dialog("select make", options, default_make, on_selected)
-
-  def _open_model_selector(self):
-    make = self._get_display_make()
-    model_options = self._models_by_make.get(make, ())
-    if not model_options:
-      gui_app.push_widget(BigDialog("", "Select a car make first"))
-      return
-
-    current_model = ui_state.params.get("CarModel", encoding="utf-8") or ""
-    current_model_name = ui_state.params.get("CarModelName", encoding="utf-8") or ""
-    option_labels = [option.option_label for option in model_options]
-    selected_by_label = {option.option_label: option for option in model_options}
-    default_model = next((option.option_label for option in model_options if option.value == current_model and option.label == current_model_name), None)
-    if default_model is None:
-      default_model = next((option.option_label for option in model_options if option.value == current_model), option_labels[0])
-
-    def on_selected(selected_label: str):
-      self._set_car_model(selected_by_label[selected_label])
-
-    self._show_option_dialog("select model", option_labels, default_model, on_selected)
 
   def _update_toggles(self):
     ui_state.update_params()
@@ -285,9 +143,6 @@ class DeveloperLayoutMici(NavScroller):
     # Refresh toggles from params to mirror external changes
     for key, item in self._refresh_toggles:
       item.set_checked(ui_state.params.get_bool(key))
-
-    self._car_make_btn.set_value(self._get_display_make())
-    self._car_model_btn.set_value(self._get_display_model())
 
   def _on_joystick_debug_mode(self, state: bool):
     ui_state.params.put_bool("JoystickDebugMode", state)

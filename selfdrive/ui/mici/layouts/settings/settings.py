@@ -3,6 +3,7 @@ from openpilot.system.ui.widgets.scroller import NavScroller
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton, BigMultiToggle
 from openpilot.selfdrive.ui.mici.layouts.settings.toggles import TogglesLayoutMici
 from openpilot.selfdrive.ui.mici.layouts.settings.network.network_layout import NetworkLayoutMici
+from openpilot.selfdrive.ui.mici.layouts.settings.vehicle import VehicleLayoutMici
 from openpilot.selfdrive.ui.mici.layouts.settings.device import DeviceLayoutMici, PairBigButton
 from openpilot.selfdrive.ui.mici.layouts.settings.developer import DeveloperLayoutMici
 from openpilot.selfdrive.ui.mici.layouts.settings.driving_model import DrivingModelBigButton
@@ -65,6 +66,10 @@ class SettingsLayout(NavScroller):
     network_btn = SettingsBigButton("network", "", gui_app.texture("icons_mici/settings/network/wifi_strength_full.png", 76, 56))
     network_btn.set_click_callback(lambda: gui_app.push_widget(network_panel))
 
+    vehicle_panel = VehicleLayoutMici()
+    vehicle_btn = SettingsBigButton("vehicle", "", gui_app.texture("icons_mici/settings/vehicle.png", 64, 57))
+    vehicle_btn.set_click_callback(lambda: gui_app.push_widget(vehicle_panel))
+
     visuals_panel = VisualsLayoutMici()
     visuals_btn = SettingsBigButton("visuals", "", gui_app.texture("icons_mici/settings/device/cameras.png", 64, 64))
     visuals_btn.set_click_callback(lambda: gui_app.push_widget(visuals_panel))
@@ -85,6 +90,7 @@ class SettingsLayout(NavScroller):
       toggles_btn,
       network_btn,
       self._force_drive_state_btn,
+      vehicle_btn,
       device_btn,
       self._driving_model_btn,
       visuals_btn,
