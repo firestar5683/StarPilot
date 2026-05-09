@@ -75,3 +75,6 @@ Download models, change settings, update software, visualize live model outputs 
 Uses your comma's sysroot/toolchain
 * Toggle: "Use Precompiled Binaries" to allow switching between fast boot / editable builds
 * Custom long maneuver tests, specifically designed for regen-only vehicles
+
+## Third-Party Notices
+* Portions of this software include modified versions of the Material Design Icons provided by Google under the Apache License 2.0. A copy of the license is included in the `LICENSE-MDI` file.
