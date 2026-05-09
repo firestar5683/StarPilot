@@ -37,6 +37,12 @@ AUTO_HOLD_MIN_BRAKE = 80
 AUTO_HOLD_MAX_BRAKE = 240
 AUTO_HOLD_MIN_DRIVE_TIME_S = 3.0
 
+# Volt Engine commands
+VOLT_ENGINE_RELEASE_CMD = b"\x07\xae\x00\x00\x00\x00\x00\x00\x00"
+VOLT_ENGINE_ON_CMD = b"\x07\xae\x31\x06\x00\x00\x00\x00\x00"
+VOLT_ENGINE_OFF_CMD = b"\x07\xae\x31\x05\x00\x00\x00\x00\x00"
+VOLT_ENGINE_SEND = b"\x01\x3e"
+
 
 def get_stock_cc_active_for_cancel(CP, CS):
   stock_cc_active = CS.out.cruiseState.enabled or CS.pcm_acc_status != AccState.OFF

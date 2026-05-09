@@ -31,6 +31,12 @@ from urllib.parse import quote
 from cereal import car, log, messaging
 from opendbc.can.parser import CANParser
 from opendbc.car.gm.values import GMFlags
+from opendbc.car.gm.carcontroller import (
+  VOLT_ENGINE_RELEASE_CMD,
+  VOLT_ENGINE_ON_CMD,
+  VOLT_ENGINE_OFF_CMD,
+  VOLT_ENGINE_SEND
+)
 from opendbc.car.toyota.carcontroller import LOCK_CMD, UNLOCK_CMD
 from openpilot.common.constants import CV
 from openpilot.common.params import ParamKeyType, Params
@@ -96,6 +102,8 @@ render_template = None
 request = None
 send_file = None
 send_from_directory = None
+engine_thread = None
+engine_lock = threading.Lock()
 
 _POND_WEB_DEPS_READY = False
 _POND_WEB_DEPS_ERROR = None
@@ -3363,6 +3371,8 @@ def setup(app):
           return jsonify({"result": HARDWARE.get_device_type() != "tici" and cp.carName == "toyota"})
         elif tool == "tsk":
           return jsonify({"result": cp.secOcRequired})
+        elif tool == "engine":
+          return jsonify({"result": True}) # FIXME: check cp and return proper bool
     except Exception:
       pass
     return jsonify({"result": False})
@@ -3404,6 +3414,85 @@ def setup(app):
         break
 
     return {"message": "Doors unlocked!"}
+
+  def engine_release():
+    with Panda(disable_checks=True) as panda:
+      panda.can_send(0x7E1, VOLT_ENGINE_RELEASE_CMD, 0)
+      panda.can_send(0x7E1, VOLT_ENGINE_SEND, 0)
+
+  class StoppableThread(threading.Thread):
+    def __init__(self, *args, **kwargs):
+      super().__init__(*args, **kwargs)
+
+      self.running = True
+
+    def stop(self):
+      self.running = False
+
+  class EngineOnThread(StoppableThread):
+    def run(self):
+      while self.running:
+        with Panda(disable_checks=True) as panda:
+          panda.can_send(0x7E1, VOLT_ENGINE_ON_CMD, 0)
+          panda.can_send(0x7E1, VOLT_ENGINE_SEND, 0)
+        time.sleep(2)
+
+  class EngineOffThread(StoppableThread):
+    def run(self):
+      while self.running:
+        with Panda(disable_checks=True) as panda:
+          panda.can_send(0x7E1, VOLT_ENGINE_OFF_CMD, 0)
+          panda.can_send(0x7E1, VOLT_ENGINE_SEND, 0)
+        time.sleep(2)
+
+  @app.route("/api/engine/release", methods=["POST"])
+  def volt_engine_release():
+    global engine_thread
+
+    with engine_lock:
+      if engine_thread is not None:
+          engine_thread.stop()
+          engine_thread.join()
+          engine_thread = None
+
+      engine_release()
+
+    return {"message": "Control Released!"}
+
+  @app.route("/api/engine/on", methods=["POST"])
+  def volt_engine_on():
+    global engine_thread
+
+    with engine_lock:
+      if engine_thread is not None:
+        if engine_thread.name == "engine_on":
+          return {"message": "Engine already running."}
+
+        engine_thread.stop()
+        engine_thread.join()
+
+      engine_thread = EngineOnThread(name="engine_on")
+      engine_thread.start()
+
+
+    return {"message": "Engine ON!"}
+
+  @app.route("/api/engine/off", methods=["POST"])
+  def volt_engine_off():
+    global engine_thread
+
+    with engine_lock:
+      if engine_thread is not None:
+        if engine_thread.name == "engine_off":
+          return {"message": "Engine already off."}
+
+        engine_thread.stop()
+        engine_thread.join()
+
+      engine_thread = EngineOffThread(name="engine_off")
+      engine_thread.start()
+
+    return {"message": "Engine OFF!"}
 
   @app.route("/api/error_logs", methods=["GET"])
   def get_error_logs():
@@ -5163,10 +5252,10 @@ def setup(app):
     pw_hash = hashlib.sha256(password.encode()).hexdigest()
     GALAXY_DIR.mkdir(parents=True, exist_ok=True)
     GALAXY_AUTH_FILE.write_text(pw_hash)
-    
+
     # Generate 256-bit secure session token
     (GALAXY_DIR / "glxysession").write_text(secrets.token_hex(32))
-    
+
     # Generate 16-character alphanumeric routing slug
     charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     slug = ''.join(secrets.choice(charset) for _ in range(16))

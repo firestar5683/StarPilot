@@ -1,6 +1,7 @@
 import { html, reactive } from "/assets/vendor/arrow-core.js"
 import { DoorControl } from "/assets/components/tools/doors.js"
 import { TSKManager } from "/assets/components/tools/tsk_manager.js"
+import { VoltEngineCtl } from "/assets/components/tools/volt_engine_ctl.js"
 
 const state = reactive({
   activeTool: null,
@@ -127,6 +128,11 @@ export function VehicleFeatures() {
                 <h3>Toyota Security Keys</h3>
                 <p>Manage and apply security keys for secOC protected devices.</p>
               </div>
+              <div class="vf-card" @click="${() => checkToolAvailability('engine')}">
+                <i class="bi bi-key-fill"></i>
+                <h3>Volt Engine Control</h3>
+                <p>Force the engine on/off when the vehicle is on.</p>
+              </div>
             </div>
           `;
       }
@@ -153,6 +159,7 @@ export function VehicleFeatures() {
 
           if (state.activeTool === "doors") return DoorControl();
           if (state.activeTool === "tsk") return TSKManager();
+          if (state.activeTool === "engine") return VoltEngineCtl();
           return "";
         }}
         `;
