@@ -47,6 +47,8 @@ class FingerprintLayoutMici(NavScroller):
 
     ui_state.add_offroad_transition_callback(self._update_toggles)
 
+    self._update_toggles()
+
   def _show_option_dialog(self, title: str, options: list[str], current: str, on_selected):
     dialog_holder: dict[str, BigMultiOptionDialog] = {}
 
