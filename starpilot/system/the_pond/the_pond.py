@@ -3417,9 +3417,10 @@ def setup(app):
 
   def engine_release():
     with Panda(disable_checks=True) as panda:
-      panda.can_send(0x7E1, VOLT_ENGINE_RELEASE_CMD, 0)
-      time.sleep(0.35)
-      panda.can_send(0x7E1, VOLT_ENGINE_SEND, 0)
+      panda.can_send_many([
+            [0x7E1, VOLT_ENGINE_RELEASE_CMD, 0],
+            [0x7E1, VOLT_ENGINE_SEND, 0]
+          ])
 
   class StoppableThread(threading.Thread):
     def __init__(self, *args, **kwargs):
@@ -3434,18 +3435,20 @@ def setup(app):
     def run(self):
       while self.running:
         with Panda(disable_checks=True) as panda:
-          panda.can_send(0x7E1, VOLT_ENGINE_ON_CMD, 0)
-          time.sleep(0.35)
-          panda.can_send(0x7E1, VOLT_ENGINE_SEND, 0)
+          panda.can_send_many([
+            [0x7E1, VOLT_ENGINE_ON_CMD, 0],
+            [0x7E1, VOLT_ENGINE_SEND, 0]
+          ])
         time.sleep(2)
 
   class EngineOffThread(StoppableThread):
     def run(self):
       while self.running:
         with Panda(disable_checks=True) as panda:
-          panda.can_send(0x7E1, VOLT_ENGINE_OFF_CMD, 0)
-          time.sleep(0.35)
-          panda.can_send(0x7E1, VOLT_ENGINE_SEND, 0)
+          panda.can_send_many([
+            [0x7E1, VOLT_ENGINE_OFF_CMD, 0],
+            [0x7E1, VOLT_ENGINE_SEND, 0]
+          ])
         time.sleep(2)
 
   @app.route("/api/engine/release", methods=["POST"])
