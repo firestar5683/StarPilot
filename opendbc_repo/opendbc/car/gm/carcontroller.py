@@ -38,10 +38,10 @@ AUTO_HOLD_MAX_BRAKE = 240
 AUTO_HOLD_MIN_DRIVE_TIME_S = 3.0
 
 # Volt Engine commands
-VOLT_ENGINE_RELEASE_CMD = b"\x07\xae\x00\x00\x00\x00\x00\x00\x00"
-VOLT_ENGINE_ON_CMD = b"\x07\xae\x31\x06\x00\x00\x00\x00\x00"
-VOLT_ENGINE_OFF_CMD = b"\x07\xae\x31\x05\x00\x00\x00\x00\x00"
-VOLT_ENGINE_SEND = b"\x01\x3e\x00\x00\x00\x00\x00\x00"
+VOLT_ENGINE_RELEASE_CMD = b"\xae\x00\x00\x00\x00\x00\x00"
+VOLT_ENGINE_ON_CMD = b"\xae\x31\x06\x00\x00\x00\x00"
+VOLT_ENGINE_OFF_CMD = b"\xae\x31\x05\x00\x00\x00\x00"
+VOLT_ENGINE_SEND = b"\x3e"
 
 
 def get_stock_cc_active_for_cancel(CP, CS):
