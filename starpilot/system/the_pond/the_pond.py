@@ -3418,7 +3418,7 @@ def setup(app):
   def engine_release():
     with Panda(disable_checks=True) as panda:
       panda.can_send(0x7E1, VOLT_ENGINE_RELEASE_CMD, 0, timeout=10)
-      time.sleep(0.35)
+      time.sleep(0.1)
       panda.can_send(0x7E1, VOLT_ENGINE_SEND, 0, timeout=10)
 
   class StoppableThread(threading.Thread):
@@ -3435,7 +3435,7 @@ def setup(app):
       while self.running:
         with Panda(disable_checks=True) as panda:
           panda.can_send(0x7E1, VOLT_ENGINE_ON_CMD, 0, timeout=10)
-          time.sleep(0.35)
+          time.sleep(0.1)
           panda.can_send(0x7E1, VOLT_ENGINE_SEND, 0, timeout=10)
         time.sleep(2)
 
@@ -3444,7 +3444,7 @@ def setup(app):
       while self.running:
         with Panda(disable_checks=True) as panda:
           panda.can_send(0x7E1, VOLT_ENGINE_OFF_CMD, 0, timeout=10)
-          time.sleep(0.35)
+          time.sleep(0.1)
           panda.can_send(0x7E1, VOLT_ENGINE_SEND, 0, timeout=10)
         time.sleep(2)
 
