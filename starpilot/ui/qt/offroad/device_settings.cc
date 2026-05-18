@@ -49,6 +49,7 @@ StarPilotDevicePanel::StarPilotDevicePanel(StarPilotSettingsWindow *parent, bool
   const std::vector<std::tuple<QString, QString, QString, QString>> deviceToggles {
     {"DeviceManagement", tr("Device Settings"), tr("<b>Settings that control how the device runs, powers off, and manages driving data.</b>"), "../../starpilot/assets/toggle_icons/icon_device.png"},
     {"DeviceShutdown", tr("Device Shutdown Timer"), tr("<b>Keep the device on for the set amount of time after a drive</b> before it shuts down automatically."), ""},
+    {"DisableWideRoad", tr("Disable Wide Road Camera"), QString("<b>%1</b><br><br>%2").arg(tr("WARNING: Only use this if the wide camera is malfunctioning or for development purposes. This may cause instability!")).arg(tr("Requires a reboot to take effect.")), ""},
     {"NoLogging", tr("Disable Logging"), QString("<b>%1</b><br><br>%2").arg(tr("WARNING: This will prevent your drives from being recorded and all data will be unobtainable!")).arg(tr("<b>Prevent the device from saving driving data.</b>")), ""},
     {"NoUploads", tr("Disable Uploads"), QString("<b>%1</b><br><br>%2").arg(tr("WARNING: This will prevent your drives from being uploaded to <b>comma connect</b> which will impact debugging and official support from comma!")).arg(tr("<b>Prevent the device from uploading driving data.</b>")), ""},
     {"HigherBitrate", tr("High-Quality Recording"), tr("<b>Save drive footage in higher video quality.</b>"), ""},
@@ -178,7 +179,7 @@ StarPilotDevicePanel::StarPilotDevicePanel(StarPilotSettingsWindow *parent, bool
     QObject::connect(static_cast<ToggleControl*>(toggles[key]), &ToggleControl::toggleFlipped, this, &StarPilotDevicePanel::updateToggles);
   }
 
-  QSet<QString> rebootKeys = {"HigherBitrate", "UseKonikServer"};
+  QSet<QString> rebootKeys = {"DisableWideRoad", "HigherBitrate", "UseKonikServer"};
   for (const QString &key : rebootKeys) {
     QObject::connect(static_cast<ToggleControl*>(toggles[key]), &ToggleControl::toggleFlipped, [key, this](bool state) {
       QString filePath;

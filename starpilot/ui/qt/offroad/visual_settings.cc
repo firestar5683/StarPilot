@@ -69,7 +69,9 @@ StarPilotVisualsPanel::StarPilotVisualsPanel(StarPilotSettingsWindow *parent, bo
     {"QOLVisuals", tr("Quality of Life"), tr("<b>Miscellaneous visual changes</b> to fine-tune how the driving screen looks."), "../../starpilot/assets/toggle_icons/icon_quality_of_life.png"},
     {"CameraView", tr("Camera View"), tr("<b>Select the active camera view.</b> This is purely a visual change and doesn't impact how openpilot drives!"), ""},
     {"DriverCamera", tr("Show Driver Camera When In Reverse"), tr("<b>Show the driver camera feed</b> when the vehicle is in reverse."), ""},
-    {"StoppedTimer", tr("Stopped Timer"), tr("<b>Show a timer when stopped</b> in place of the current speed to indicate how long the vehicle has been stopped."), ""}
+    {"StoppedTimer", tr("Stopped Timer"), tr("<b>Show a timer when stopped</b> in place of the current speed to indicate how long the vehicle has been stopped."), ""},
+
+    {"DisableWideRoad", tr("Disable Wide Road Camera"), QString("<b>%1</b><br><br>%2").arg(tr("Only enable this if the wide camera is broken or for development!")).arg(tr("<b>Disabling the wide camera may degrade driving performance and cause instability.</b><br><br>Requires a reboot to take effect.")), "../../starpilot/assets/toggle_icons/icon_advanced_device.png"}
   };
 
   for (const auto &[param, title, desc, icon] : visualToggles) {
@@ -177,6 +179,13 @@ StarPilotVisualsPanel::StarPilotVisualsPanel(StarPilotSettingsWindow *parent, bo
   for (const QString &key : forceUpdateKeys) {
     QObject::connect(static_cast<ToggleControl*>(toggles[key]), &ToggleControl::toggleFlipped, this, &StarPilotVisualsPanel::updateToggles);
   }
+
+  static_cast<ParamControl*>(toggles["DisableWideRoad"])->setConfirmation(true, false);
+  QObject::connect(static_cast<ToggleControl*>(toggles["DisableWideRoad"]), &ToggleControl::toggleFlipped, [this](bool state) {
+    if (StarPilotConfirmationDialog::toggleReboot(this)) {
+      Hardware::reboot();
+    }
+  });
 
   openDescriptions(forceOpenDescriptions, toggles);
 

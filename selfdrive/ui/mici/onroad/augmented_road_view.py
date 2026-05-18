@@ -576,7 +576,7 @@ class AugmentedRoadView(CameraView):
     elif camera_view == CAMERA_VIEW_STANDARD:
       target = ROAD_CAM
     elif camera_view == CAMERA_VIEW_WIDE:
-      target = WIDE_CAM
+      target = WIDE_CAM if WIDE_CAM in self.available_streams else ROAD_CAM
     elif sm['selfdriveState'].experimentalMode and WIDE_CAM in self.available_streams:
       v_ego = sm['carState'].vEgo
       if v_ego < WIDE_CAM_MAX_SPEED:

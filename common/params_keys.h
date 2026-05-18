@@ -179,6 +179,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"CalibrationProgress", {PERSISTENT, FLOAT, "0.0", "0.0", 3}},
     {"CameraView", {PERSISTENT, INT, "3", "0", 2}},
     {"CancelDownloadMaps", {CLEAR_ON_MANAGER_START, BOOL, "0", "0"}},
+    {"DisableWideRoad", {PERSISTENT, BOOL, "0", "0", 3}},
     {"CancelModelDownload", {CLEAR_ON_MANAGER_START, BOOL, "0", "0"}},
     {"CancelThemeDownload", {CLEAR_ON_MANAGER_START, BOOL, "0", "0"}},
     {"CarMake", {PERSISTENT, STRING, "mock", "mock", 0}},

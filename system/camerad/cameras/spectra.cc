@@ -234,8 +234,18 @@ void SpectraMaster::init() {
 
 SpectraCamera::SpectraCamera(SpectraMaster *master, const CameraConfig &config)
   : m(master),
-    enabled(config.enabled),
     cc(config) {
+  // Runtime check for disable environment variables (must happen after main() sets them)
+  bool should_disable = false;
+  if (config.camera_num == 0 && getenv("DISABLE_WIDE_ROAD")) {
+    should_disable = true;
+  } else if (config.camera_num == 1 && getenv("DISABLE_ROAD")) {
+    should_disable = true;
+  } else if (config.camera_num == 2 && getenv("DISABLE_DRIVER")) {
+    should_disable = true;
+  }
+  enabled = !should_disable;
+
   ife_buf_depth = VIPC_BUFFER_COUNT;
   assert(ife_buf_depth < MAX_IFE_BUFS);
 }

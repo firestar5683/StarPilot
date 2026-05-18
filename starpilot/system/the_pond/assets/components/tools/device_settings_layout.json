@@ -3140,5 +3140,18 @@
         "options_endpoint": "/api/models/installed"
       }
     ]
+  },
+  {
+    "name": "Developer",
+    "icon": "bi-exclamation-triangle",
+    "params": [
+      {
+        "key": "DisableWideRoad",
+        "label": "Disable Wide Road Camera",
+        "description": "Only enable this if the wide camera is broken or for development!\n\nDisabling the wide camera may degrade driving performance and cause instability.\n\nRequires a reboot to take effect.",
+        "data_type": "bool",
+        "ui_type": "toggle"
+      }
+    ]
   }
 ]
