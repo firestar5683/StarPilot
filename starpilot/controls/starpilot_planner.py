@@ -61,6 +61,13 @@ class StarPilotPlanner:
     self.tracking_lead = False
     self._prev_gps_bearing = 0
 
+    # Blinker-based lateral resume delay state
+    self.blinker_min_speed = float('inf')
+    self.blinker_delay_active = False
+    self.blinker_delay_frame = 0
+    self.CS_prev_left_blinker = False
+    self.CS_prev_right_blinker = False
+
     self.lane_width_left = 0
     self.lane_width_right = 0
     self._lane_width_counter = 0
@@ -127,6 +134,37 @@ class StarPilotPlanner:
     self.lateral_check |= not (sm["carState"].leftBlinker or sm["carState"].rightBlinker) and starpilot_toggles.pause_lateral_below_signal
     self.lateral_check |= sm["carState"].standstill
     self.lateral_check &= not sm["starpilotCarState"].pauseLateral
+
+    # Blinker-based lateral resume delay: after blinker turns off, delay lateral
+    # resumption if the vehicle went below half the pause speed during the blinker.
+    # This lets the driver manually straighten the wheel after a turn without
+    # openpilot fighting them.
+    CS = sm["carState"]
+    blinker_on = CS.leftBlinker or CS.rightBlinker
+    prev_blinker_on = self.CS_prev_left_blinker or self.CS_prev_right_blinker
+
+    if blinker_on:
+      # Track minimum speed while blinker is active
+      if not prev_blinker_on:
+        self.blinker_min_speed = CS.vEgo
+      else:
+        self.blinker_min_speed = min(self.blinker_min_speed, CS.vEgo)
+      self.blinker_delay_active = False
+    elif prev_blinker_on and starpilot_toggles.pause_lateral_below_signal and starpilot_toggles.pause_lateral_signal_delay > 0:
+      # Blinker just turned off — start the delay timer
+      self.blinker_delay_active = True
+      self.blinker_delay_frame = sm.frame
+
+    if self.blinker_delay_active:
+      time_since_blinker = (sm.frame - self.blinker_delay_frame) * DT_MDL
+      if time_since_blinker < starpilot_toggles.pause_lateral_signal_delay and \
+         self.blinker_min_speed < starpilot_toggles.pause_lateral_below_speed / 2:
+        self.lateral_check = False
+      else:
+        self.blinker_delay_active = False
+
+    self.CS_prev_left_blinker = CS.leftBlinker
+    self.CS_prev_right_blinker = CS.rightBlinker
 
     self.model_length = sm["modelV2"].position.x[-1]
 

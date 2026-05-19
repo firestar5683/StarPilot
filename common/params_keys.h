@@ -424,6 +424,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"PauseAOLOnBrake", {PERSISTENT, BOOL, "0", "0", 1}},
     {"PauseLateralOnSignal", {PERSISTENT, BOOL, "0", "0", 1}},
     {"PauseLateralSpeed", {PERSISTENT, FLOAT, "0.0", "0.0", 1}},
+    {"LateralResumeDelay", {PERSISTENT, FLOAT, "0.0", "0.0", 1}},
     {"PedalsOnUI", {PERSISTENT, BOOL, "0", "0", 1}},
     {"PondPaired", {PERSISTENT, BOOL, "0", "0", 0}},
     {"PondUploadPending", {PERSISTENT, BOOL, "0", "0", 0}},

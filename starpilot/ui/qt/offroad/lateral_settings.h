@@ -28,7 +28,7 @@ private:
   QSet<QString> aolKeys = {"AlwaysOnLateralLKAS", "PauseAOLOnBrake"};
   QSet<QString> laneChangeKeys = {"LaneChangeSmoothing", "LaneChangeTime", "LaneDetectionWidth", "MinimumLaneChangeSpeed", "NudgelessLaneChange", "OneLaneChange"};
   QSet<QString> lateralTuneKeys = {"NNFF", "NNFFLite", "TurnDesires"};
-  QSet<QString> qolKeys = {"PauseLateralSpeed"};
+  QSet<QString> qolKeys = {"PauseLateralSpeed", "LateralResumeDelay"};
 
   QSet<QString> parentKeys;
 
