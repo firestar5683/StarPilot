@@ -218,6 +218,8 @@ void fill_panda_can_state(cereal::PandaState::PandaCanState::Builder &cs, const 
 }
 
 std::optional<bool> send_panda_states(PubMaster *pm, const std::vector<Panda *> &pandas, bool is_onroad, bool spoofing_started) {
+  static Params params;
+  const bool is_bolt = params.get("CarParams").find("CHEVROLET_BOLT") != std::string::npos;
   bool ignition_local = false;
   const uint32_t pandas_cnt = pandas.size();
 
@@ -262,6 +264,13 @@ std::optional<bool> send_panda_states(PubMaster *pm, const std::vector<Panda *> 
     // get false positive ignitions due to the harness box
     // without a harness connector, so ignore it
     if (red_panda_comma_three && (panda->hw_type == cereal::PandaState::PandaType::DOS)) {
+      health.ignition_line_pkt = 0;
+    }
+
+    // TODO: Temporary workaround for onroad issues with a faulty harness box.
+    // Ignore physical ignition line for all Chevrolet Bolt varieties and rely on CAN ignition instead.
+    // This hardware issue will be fixed later, at which point this block can be removed.
+    if (is_bolt) {
       health.ignition_line_pkt = 0;
     }
 
