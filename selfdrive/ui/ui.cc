@@ -301,6 +301,7 @@ static void update_state(UIState *s, StarPilotUIState *fs) {
 void ui_update_params(UIState *s) {
   auto params = Params();
   s->scene.is_metric = params.getBool("IsMetric");
+  s->scene.navigation_enabled = params.getBool("NavigationUI");
 }
 
 void UIState::updateStatus(StarPilotUIState *fs) {

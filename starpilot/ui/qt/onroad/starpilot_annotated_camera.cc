@@ -224,7 +224,8 @@ void StarPilotAnnotatedCameraWidget::updateState(const UIState &s, const StarPil
   speedLimitSource = starpilotPlan.getSlcSpeedLimitSource();
   stoppingDistance = modelV2.getPosition().getX().size() > 33 - 1 ? modelV2.getPosition().getX()[33 - 1] : 0.0;
   unconfirmedSpeedLimit = starpilotPlan.getUnconfirmedSlcSpeedLimit();
-  visionSpeedLimit = params.getBool("VisionSpeedLimitDetection") ? params_memory.getFloat("VisionSpeedLimit") : 0.0;
+  const bool cachedVisionSpeedLimitDetection = starpilot_toggles.value("vision_speed_limit_detection").toBool();
+  visionSpeedLimit = cachedVisionSpeedLimitDetection ? params_memory.getFloat("VisionSpeedLimit") : 0.0;
   weatherDaytime = starpilotPlan.getWeatherDaytime();
   weatherId = starpilotPlan.getWeatherId();
 
