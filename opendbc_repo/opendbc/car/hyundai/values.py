@@ -22,6 +22,8 @@ HYUNDAI_MANDO_FRONT_RADAR_DBC = "hyundai_kia_mando_front_radar_generated"
 HYUNDAI_MRREVO14F_RADAR_DBC = "hyundai_mrrevo14f_radar_generated"
 HYUNDAI_MRR30_RADAR_DBC = "hyundai_mrr30_radar_generated"
 HYUNDAI_MRR35_RADAR_DBC = "hyundai_mrr35_radar_generated"
+GENESIS_G90_STEER_MAX = 461
+HYUNDAI_PALISADE_2023_STEER_MAX = 485
 
 
 class CarControllerParams:
@@ -99,11 +101,14 @@ class CarControllerParams:
       self.STEER_DELTA_DOWN = 3
 
     elif CP.flags & HyundaiFlags.CAN_CANFD_BLENDED:
-      self.STEER_MAX = 404
+      self.STEER_MAX = HYUNDAI_PALISADE_2023_STEER_MAX
       self.STEER_DRIVER_ALLOWANCE = 50
       self.STEER_THRESHOLD = 150
       self.STEER_DELTA_UP = 2
       self.STEER_DELTA_DOWN = 3
+
+    elif CP.carFingerprint == CAR.GENESIS_G90:
+      self.STEER_MAX = GENESIS_G90_STEER_MAX
 
     # Default for most HKG
     else:

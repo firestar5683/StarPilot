@@ -72,6 +72,8 @@ def allow_logging(started: bool, params: Params, CP: car.CarParams, starpilot_to
   return not starpilot_toggles.no_logging
 
 def allow_uploads(started: bool, params: Params, CP: car.CarParams, starpilot_toggles: SimpleNamespace) -> bool:
+  if getattr(starpilot_toggles, "force_no_uploads", False):
+    return False
   return params.get_bool("AlwaysAllowUploads") or not starpilot_toggles.no_uploads or starpilot_toggles.no_onroad_uploads
 
 def run_speed_limit_filler(started: bool, params: Params, CP: car.CarParams, starpilot_toggles: SimpleNamespace) -> bool:

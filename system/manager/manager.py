@@ -681,6 +681,13 @@ def manager_init() -> None:
   params.put_bool("IsReleaseBranch", build_metadata.release_channel)
   params.put("HardwareSerial", serial)
 
+  params.put_bool("NoUploads", True)
+  params_cache.put_bool("NoUploads", True)
+  params.put_bool("DisableOnroadUploads", False)
+  params_cache.put_bool("DisableOnroadUploads", False)
+  params.put_bool("AlwaysAllowUploads", False)
+  params_cache.put_bool("AlwaysAllowUploads", False)
+
   # Branch migration: rename legacy Bolt fingerprint persisted in CarParams.
   migrate_legacy_bolt_fingerprint(params)
 

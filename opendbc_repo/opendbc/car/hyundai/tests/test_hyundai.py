@@ -20,7 +20,7 @@ from opendbc.car.hyundai.values import CAMERA_SCC_CAR, CANFD_CAR, CAN_GEARS, CAR
                                          HYBRID_CAR, EV_CAR, FW_QUERY_CONFIG, LEGACY_SAFETY_MODE_CAR, CANFD_FUZZY_WHITELIST, \
                                          UNSUPPORTED_LONGITUDINAL_CAR, PLATFORM_CODE_ECUS, HYUNDAI_VERSION_REQUEST_LONG, \
                                          CarControllerParams, DBC, HyundaiFlags, get_platform_codes, HyundaiSafetyFlags, \
-                                         HyundaiStarPilotSafetyFlags, Buttons
+                                         HyundaiStarPilotSafetyFlags, Buttons, GENESIS_G90_STEER_MAX, HYUNDAI_PALISADE_2023_STEER_MAX
 
 LongCtrlState = CarControl.Actuators.LongControlState
 from opendbc.car.hyundai.fingerprints import FW_VERSIONS
@@ -278,6 +278,7 @@ class TestHyundaiFingerprint:
 
     g90 = CarInterface.get_params(CAR.GENESIS_G90, gen_empty_fingerprint(), [], False, False, False, None)
     assert g90.safetyConfigs[-1].safetyParam & HyundaiStarPilotSafetyFlags.HAS_LDA_BUTTON
+    assert g90.safetyConfigs[-1].safetyParam & HyundaiStarPilotSafetyFlags.AOL_LKAS_ON_ENGAGE
 
     sonata_without_lda = CarInterface.get_params(CAR.HYUNDAI_SONATA, gen_empty_fingerprint(), [], False, False, False, None)
     assert not (sonata_without_lda.safetyConfigs[-1].safetyParam & HyundaiStarPilotSafetyFlags.HAS_LDA_BUTTON)
@@ -1501,6 +1502,16 @@ class TestHyundaiFingerprint:
     assert sportage_params.ANGLE_LIMITS.MAX_LATERAL_ACCEL > comparison_params.ANGLE_LIMITS.MAX_LATERAL_ACCEL
     assert sportage_params.ANGLE_LIMITS.MAX_ANGLE_RATE > comparison_params.ANGLE_LIMITS.MAX_ANGLE_RATE
     assert comparison_params.ANGLE_LIMITS.MAX_LATERAL_JERK == ioniq6_params.ANGLE_LIMITS.MAX_LATERAL_JERK
+
+  def test_g90_and_palisade_2023_steer_max_limits(self):
+    g90 = CarParams.new_message()
+    g90.carFingerprint = CAR.GENESIS_G90
+    assert CarControllerParams(g90).STEER_MAX == GENESIS_G90_STEER_MAX
+
+    palisade_2023 = CarParams.new_message()
+    palisade_2023.carFingerprint = CAR.HYUNDAI_PALISADE_2023
+    palisade_2023.flags = int(HyundaiFlags.CAN_CANFD_BLENDED)
+    assert CarControllerParams(palisade_2023).STEER_MAX == HYUNDAI_PALISADE_2023_STEER_MAX
 
   def test_ioniq_5_canfd_aux_messages_are_optional(self):
     toggles = get_test_toggles()

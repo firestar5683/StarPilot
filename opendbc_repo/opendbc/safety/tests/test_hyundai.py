@@ -151,6 +151,17 @@ class TestHyundaiSafetyAltLimits2(TestHyundaiSafety):
     self.safety.init_tests()
 
 
+class TestHyundaiSafetyGenesisG90(TestHyundaiSafety):
+  MAX_TORQUE_LOOKUP = [0], [461]
+
+  def setUp(self):
+    self.packer = CANPackerSafety("hyundai_kia_generic")
+    self.safety = libsafety_py.libsafety
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundai,
+                                 HyundaiStarPilotSafetyFlags.HAS_LDA_BUTTON | HyundaiStarPilotSafetyFlags.AOL_LKAS_ON_ENGAGE)
+    self.safety.init_tests()
+
+
 class TestHyundaiSafetyCameraSCC(TestHyundaiSafety):
   BUTTONS_TX_BUS = 2  # tx on 2, rx on 0
   SCC_BUS = 2  # rx on 2
@@ -213,7 +224,7 @@ class TestHyundaiCanCanfdBlendedSafety(TestHyundaiSafety):
   FWD_BLACKLISTED_ADDRS = {2: [0x340, 0x485, 0x364]}
   MAX_RATE_UP = 2
   MAX_RATE_DOWN = 3
-  MAX_TORQUE_LOOKUP = [0], [404]
+  MAX_TORQUE_LOOKUP = [0], [485]
 
   def setUp(self):
     self.packer = CANPackerSafety("hyundai_palisade_2023_generated")

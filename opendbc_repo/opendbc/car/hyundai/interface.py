@@ -214,6 +214,8 @@ class CarInterface(CarInterfaceBase):
     # Car specific configuration overrides
 
     if candidate == CAR.GENESIS_G90:
+      ret.safetyConfigs[-1].safetyParam |= HyundaiStarPilotSafetyFlags.HAS_LDA_BUTTON.value
+      ret.safetyConfigs[-1].safetyParam |= HyundaiStarPilotSafetyFlags.AOL_LKAS_ON_ENGAGE.value
       ret.stoppingDecelRate = 0.55
       ret.vEgoStopping = 0.8
 

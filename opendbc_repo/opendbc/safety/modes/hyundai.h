@@ -239,9 +239,10 @@ static void hyundai_rx_hook(const CANPacket_t *msg) {
 
 static bool hyundai_tx_hook(const CANPacket_t *msg) {
   const TorqueSteeringLimits HYUNDAI_STEERING_LIMITS = HYUNDAI_LIMITS(384, 3, 7);
+  const TorqueSteeringLimits HYUNDAI_STEERING_LIMITS_G90 = HYUNDAI_LIMITS(461, 3, 7);
   const TorqueSteeringLimits HYUNDAI_STEERING_LIMITS_ALT = HYUNDAI_LIMITS(270, 2, 3);
   const TorqueSteeringLimits HYUNDAI_STEERING_LIMITS_ALT_2 = HYUNDAI_LIMITS(170, 2, 3);
-  const TorqueSteeringLimits HYUNDAI_STEERING_LIMITS_CAN_CANFD_BLENDED = HYUNDAI_LIMITS(404, 2, 3);
+  const TorqueSteeringLimits HYUNDAI_STEERING_LIMITS_CAN_CANFD_BLENDED = HYUNDAI_LIMITS(485, 2, 3);
 
   bool tx = true;
 
@@ -290,7 +291,9 @@ static bool hyundai_tx_hook(const CANPacket_t *msg) {
     int desired_torque = ((GET_BYTES(msg, 0, 4) >> 16) & 0x7ffU) - 1024U;
     bool steer_req = GET_BIT(msg, 27U);
 
-    const TorqueSteeringLimits limits = hyundai_can_canfd_blended ? HYUNDAI_STEERING_LIMITS_CAN_CANFD_BLENDED :
+    const bool hyundai_g90_limits = hyundai_has_lda_button && hyundai_aol_lkas_on_engage;  // G90 path sets both bits
+    const TorqueSteeringLimits limits = hyundai_g90_limits ? HYUNDAI_STEERING_LIMITS_G90 :
+                                        hyundai_can_canfd_blended ? HYUNDAI_STEERING_LIMITS_CAN_CANFD_BLENDED :
                                         hyundai_alt_limits_2 ? HYUNDAI_STEERING_LIMITS_ALT_2 :
                                         hyundai_alt_limits ? HYUNDAI_STEERING_LIMITS_ALT : HYUNDAI_STEERING_LIMITS;
 

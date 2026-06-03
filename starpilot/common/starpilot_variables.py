@@ -377,6 +377,8 @@ class StarPilotVariables:
     self.staging_branch = branch == "StarPilot-Staging"
     self.testing_branch = branch == "StarPilot-Testing"
     self.vetting_branch = branch == "StarPilot-Vetting"
+    self.force_no_uploads = True
+    toggle.force_no_uploads = self.force_no_uploads
 
     self.frogs_go_moo = FROGS_GO_MOO_PATH.is_file()
     # Development/vetting branches are no longer gated into dashcam mode.
@@ -833,8 +835,8 @@ class StarPilotVariables:
     # Keep force-onroad desktop simulations from polluting logs, but never disable
     # loggerd/encoderd on real devices because that breaks route continuity/uploads.
     toggle.no_logging = self.get_value("NoLogging", condition=device_management and not self.vetting_branch) or (toggle.force_onroad and HARDWARE.get_device_type() == "pc")
-    toggle.no_uploads = self.get_value("NoUploads", condition=device_management and not self.vetting_branch)
-    toggle.no_onroad_uploads = self.get_value("DisableOnroadUploads", condition=toggle.no_uploads)
+    toggle.no_uploads = self.force_no_uploads or self.get_value("NoUploads", condition=device_management and not self.vetting_branch)
+    toggle.no_onroad_uploads = (not self.force_no_uploads) and self.get_value("DisableOnroadUploads", condition=toggle.no_uploads)
 
     toggle.nostalgia_mode = self.get_value("NostalgiaMode", condition=toggle.openpilot_longitudinal and toggle.car_model == HYUNDAI_CAR.HYUNDAI_IONIQ_6)
     toggle.remap_cancel_to_distance = self.get_value(
