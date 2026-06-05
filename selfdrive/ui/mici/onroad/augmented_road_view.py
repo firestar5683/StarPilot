@@ -307,14 +307,6 @@ class StandstillTimerOverlay:
 
     self._standstill_duration = int(now - self._standstill_started_at)
 
-  @staticmethod
-  def _format_duration_text(total_seconds: int) -> tuple[str, str]:
-    minutes = total_seconds // 60
-    seconds = total_seconds % 60
-    minute_text = f"{minutes} minute" if minutes == 1 else f"{minutes} minutes"
-    second_text = f"{seconds} second" if seconds == 1 else f"{seconds} seconds"
-    return minute_text, second_text
-
   def _draw_centered_text(self, rect: rl.Rectangle, text: str, y: float, font: rl.Font, font_size: int, color: rl.Color) -> None:
     text_size = rl.measure_text_ex(font, text, font_size, 0)
     text_pos = rl.Vector2(rect.x + rect.width / 2 - text_size.x / 2, rect.y + y - text_size.y / 2)
@@ -334,13 +326,14 @@ class StandstillTimerOverlay:
     if self._standstill_duration == 0:
       return False
 
-    minute_text, second_text = self._format_duration_text(self._standstill_duration)
+    minutes = self._standstill_duration // 60
+    seconds = self._standstill_duration % 60
+    duration_text = f"{minutes:02d}:{seconds:02d}"
     duration_color = self._get_duration_color()
     max_text_width = max(rect.width - 36, 120)
-    minute_font_size = self._fit_font_size(self._font_bold, minute_text, int(rect.height * 0.34), max_text_width, 28)
-    second_font_size = self._fit_font_size(self._font_medium, second_text, int(rect.height * 0.15), max_text_width, 16)
-    self._draw_centered_text(rect, minute_text, rect.height * 0.42, self._font_bold, minute_font_size, duration_color)
-    self._draw_centered_text(rect, second_text, rect.height * 0.62, self._font_medium, second_font_size, rl.Color(255, 255, 255, 242))
+
+    duration_font_size = self._fit_font_size(self._font_bold, duration_text, int(rect.height * 0.34), max_text_width, 28)
+    self._draw_centered_text(rect, duration_text, rect.height * 0.42, self._font_bold, duration_font_size, duration_color)
     return True
 
 
