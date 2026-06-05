@@ -4,7 +4,7 @@ from __future__ import annotations
 import os
 import pickle
 import time
-from pathlib import Path
+from pathlib import Path #I hate this
 
 from openpilot.system.hardware import TICI
 
