@@ -191,9 +191,12 @@ class DesireHelper:
     v_ego = carstate.vEgo
     one_blinker = carstate.leftBlinker != carstate.rightBlinker
     below_lane_change_speed = v_ego < starpilot_toggles.minimum_lane_change_speed
+    cruise_state = getattr(carstate, "cruiseState", None)
+    lane_changes_allowed = starpilot_toggles.lane_changes
+    lane_changes_allowed &= not getattr(starpilot_toggles, "lane_changes_require_cruise", False) or bool(getattr(cruise_state, "enabled", False))
 
     lane_change_time_max = getattr(starpilot_toggles, 'lane_change_time_max', LANE_CHANGE_TIME_MAX)
-    if not lateral_active or self.lane_change_timer > lane_change_time_max or not starpilot_toggles.lane_changes:
+    if not lateral_active or self.lane_change_timer > lane_change_time_max or not lane_changes_allowed:
       self.lane_change_state = LaneChangeState.off
       self.lane_change_direction = LaneChangeDirection.none
     else:

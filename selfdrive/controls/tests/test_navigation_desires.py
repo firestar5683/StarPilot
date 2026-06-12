@@ -15,6 +15,7 @@ def make_car_state(**overrides):
     "steeringPressed": False,
     "steeringTorque": 0.0,
     "standstill": False,
+    "cruiseState": SimpleNamespace(enabled=True),
   }
   defaults.update(overrides)
   return SimpleNamespace(**defaults)
@@ -29,6 +30,7 @@ def make_toggles(**overrides):
     "nudgeless": True,
     "one_lane_change": False,
     "use_turn_desires": False,
+    "lane_changes_require_cruise": False,
   }
   defaults.update(overrides)
   return SimpleNamespace(**defaults)
@@ -227,6 +229,52 @@ def test_nav_desires_do_not_override_lane_change_state_machine():
   )
 
   assert helper.desire == log.Desire.laneChangeLeft
+
+
+def test_lane_changes_require_cruise_blocks_blinker_lane_change_without_cruise():
+  helper = DesireHelper()
+
+  helper.update(
+    make_car_state(leftBlinker=True, cruiseState=SimpleNamespace(enabled=False)),
+    True,
+    0.0,
+    make_plan(),
+    make_toggles(lane_changes_require_cruise=True),
+  )
+
+  assert helper.lane_change_state == LaneChangeState.off
+  assert helper.lane_change_direction == LaneChangeDirection.none
+  assert helper.desire == log.Desire.none
+
+
+def test_lane_changes_require_cruise_allows_blinker_lane_change_with_cruise():
+  helper = DesireHelper()
+
+  helper.update(
+    make_car_state(leftBlinker=True, cruiseState=SimpleNamespace(enabled=True)),
+    True,
+    0.0,
+    make_plan(),
+    make_toggles(lane_changes_require_cruise=True),
+  )
+
+  assert helper.lane_change_state == LaneChangeState.preLaneChange
+  assert helper.lane_change_direction == LaneChangeDirection.left
+
+
+def test_lane_changes_without_cruise_requirement_keep_existing_behavior():
+  helper = DesireHelper()
+
+  helper.update(
+    make_car_state(leftBlinker=True, cruiseState=SimpleNamespace(enabled=False)),
+    True,
+    0.0,
+    make_plan(),
+    make_toggles(lane_changes_require_cruise=False),
+  )
+
+  assert helper.lane_change_state == LaneChangeState.preLaneChange
+  assert helper.lane_change_direction == LaneChangeDirection.left
 
 
 def test_nav_desires_disabled_leave_desire_unchanged():

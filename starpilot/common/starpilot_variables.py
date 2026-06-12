@@ -955,6 +955,7 @@ class StarPilotVariables:
       toggle.wheel_image = toggle.current_holiday_theme
 
     toggle.lane_changes = self.get_value("LaneChanges")
+    toggle.lane_changes_require_cruise = toggle.car_model == HYUNDAI_CAR.KIA_XCEED_PHEV
     toggle.lane_change_delay = self.get_value("LaneChangeTime", cast=float, condition=toggle.lane_changes)
     toggle.lane_detection_width = self.get_value("LaneDetectionWidth", cast=float, condition=toggle.lane_changes, conversion=distance_conversion)
     toggle.minimum_lane_change_speed = self.get_value("MinimumLaneChangeSpeed", cast=float, condition=toggle.lane_changes, conversion=speed_conversion)
