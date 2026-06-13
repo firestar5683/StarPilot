@@ -626,7 +626,7 @@ class CarInterface(CarInterfaceBase):
 
     # Exception for flashed cars, or cars whose camera was removed.
     missing_camera_msg = CAM_MSG not in fingerprint.get(CanBus.CAMERA, {})
-    if (ret.networkLocation == NetworkLocation.fwdCamera or candidate in CC_ONLY_CAR) and missing_camera_msg and candidate not in SDGM_CAR:
+    if (ret.networkLocation == NetworkLocation.fwdCamera or candidate in CC_ONLY_CAR) and missing_camera_msg and candidate not in (ASCM_INT | SDGM_CAR):
       ret.flags |= GMFlags.NO_CAMERA.value
       ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.FLAG_GM_NO_CAMERA.value
 
