@@ -50,6 +50,13 @@ INJECTED_SECTION_PARAMS = {
             "data_type": "bool",
             "ui_type": "toggle",
         },
+        {
+            "key": "IsRHD",
+            "label": "Right Hand Driving",
+            "description": "Use right-hand-drive driver monitoring. This follows the auto-detected side until changed manually.",
+            "data_type": "bool",
+            "ui_type": "toggle",
+        },
     ],
 }
 

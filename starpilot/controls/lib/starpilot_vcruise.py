@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 import math
 
 from openpilot.common.constants import CV
@@ -10,6 +11,16 @@ from openpilot.starpilot.controls.lib.speed_limit_controller import SpeedLimitCo
 
 CSC_MIN_SPEED = CITY_SPEED_LIMIT * CV.MPH_TO_MS
 OVERRIDE_FORCE_STOP_TIMER = 10
+NAV_TURN_COMFORT_DECEL = 1.25
+NAV_TURN_DISTANCE_BUFFER = 8.0
+NAV_TURN_MIN_TARGET_DELTA = 0.25
+NAV_TURN_TARGET_SPEEDS = {
+  "uturn": 5.0 * CV.MPH_TO_MS,
+  "sharpLeft": 10.0 * CV.MPH_TO_MS,
+  "sharpRight": 10.0 * CV.MPH_TO_MS,
+  "left": 14.0 * CV.MPH_TO_MS,
+  "right": 14.0 * CV.MPH_TO_MS,
+}
 
 # Force-stop kinematic profile. The user tunes one signed knob (ForceStopDistanceOffset,
 # in feet); positive = stop later/longer, negative = stop sooner/shorter. All other
@@ -58,6 +69,104 @@ class StarPilotVCruise:
     self.tracked_model_length = 0.0
 
     self.stop_sign_confirmed = False
+    self.nav_turn_target = 0.0
+    self._nav_instruction_state_raw = None
+    self._nav_instruction_state = {}
+
+  def _update_nav_instruction_state(self):
+    raw = self.starpilot_planner.params_memory.get("NavInstructionState") or {}
+    if raw == self._nav_instruction_state_raw:
+      return
+
+    self._nav_instruction_state_raw = raw
+    if not raw:
+      self._nav_instruction_state = {}
+      return
+
+    if isinstance(raw, dict):
+      self._nav_instruction_state = raw
+      return
+
+    if isinstance(raw, str):
+      try:
+        parsed = json.loads(raw)
+        self._nav_instruction_state = parsed if isinstance(parsed, dict) else {}
+        return
+      except Exception:
+        pass
+
+    self._nav_instruction_state = {}
+
+  @staticmethod
+  def _nav_maneuver_target_speed(maneuver_type, maneuver_modifier):
+    maneuver_type = str(maneuver_type or "").strip().lower()
+    maneuver_modifier = str(maneuver_modifier or "").strip()
+
+    if not maneuver_modifier and not maneuver_type:
+      return None
+
+    if maneuver_modifier == "uturn" or "uturn" in maneuver_type or "u-turn" in maneuver_type:
+      return NAV_TURN_TARGET_SPEEDS["uturn"]
+
+    if "roundabout" in maneuver_type or "rotary" in maneuver_type:
+      return 12.0 * CV.MPH_TO_MS
+
+    if maneuver_type == "turn":
+      return NAV_TURN_TARGET_SPEEDS.get(maneuver_modifier)
+
+    return None
+
+  @staticmethod
+  def _nav_target_for_distance(target_speed, maneuver_distance):
+    try:
+      remaining_distance = max(float(maneuver_distance) - NAV_TURN_DISTANCE_BUFFER, 0.0)
+    except (TypeError, ValueError):
+      return 0.0
+
+    return math.sqrt(max(target_speed * target_speed + (2.0 * NAV_TURN_COMFORT_DECEL * remaining_distance), 0.0))
+
+  @staticmethod
+  def _get_nav_long_min_target_speed(sm):
+    car_params = None
+    try:
+      car_params = sm["carParams"]
+    except Exception:
+      if hasattr(sm, "get"):
+        car_params = sm.get("carParams")
+    return max(float(getattr(car_params, "minSteerSpeed", 0.0) or 0.0), 0.0)
+
+  def _get_nav_turn_control_target(self, v_cruise, sm, starpilot_toggles):
+    self._update_nav_instruction_state()
+    if not getattr(starpilot_toggles, "nav_longitudinal_allowed", False):
+      return 0.0
+    if not bool(self._nav_instruction_state.get("valid", False)):
+      return 0.0
+
+    nav_long_min_target_speed = self._get_nav_long_min_target_speed(sm)
+
+    candidates = [
+      (
+        self._nav_instruction_state.get("maneuverType"),
+        self._nav_instruction_state.get("maneuverModifier"),
+        self._nav_instruction_state.get("maneuverDistance"),
+      ),
+      (
+        self._nav_instruction_state.get("nextManeuverType"),
+        self._nav_instruction_state.get("nextManeuverModifier"),
+        self._nav_instruction_state.get("nextManeuverDistance"),
+      ),
+    ]
+    for maneuver_type, maneuver_modifier, maneuver_distance in candidates:
+      target_speed = self._nav_maneuver_target_speed(maneuver_type, maneuver_modifier)
+      if target_speed is None:
+        continue
+      target_speed = max(target_speed, nav_long_min_target_speed)
+
+      target = max(target_speed, self._nav_target_for_distance(target_speed, maneuver_distance))
+      if target + NAV_TURN_MIN_TARGET_DELTA < v_cruise:
+        return target
+
+    return 0.0
 
   # ===== Main update =====
 
@@ -176,6 +285,8 @@ class StarPilotVCruise:
       self.slc_offset = 0
       self.slc_target = 0
 
+    self.nav_turn_target = self._get_nav_turn_control_target(v_cruise, sm, starpilot_toggles)
+
     # Single tuning knob (signed feet -> meters). Defense clamp on top of UI bounds.
     offset_ft_raw = int(getattr(starpilot_toggles, 'force_stop_distance_offset', 0) or 0)
     offset_ft = max(OFFSET_FT_MIN, min(OFFSET_FT_MAX, offset_ft_raw))
@@ -215,7 +326,9 @@ class StarPilotVCruise:
 
       self.tracked_model_length = self.starpilot_planner.model_length
 
-      targets = [self.csc_target, v_cruise]
+      targets = [v_cruise]
+      if self.csc_target >= CSC_MIN_SPEED:
+        targets.append(self.csc_target)
       slc_control_target = get_active_slc_control_target(
         starpilot_toggles.speed_limit_controller,
         getattr(starpilot_toggles, "set_speed_limit", False),
@@ -224,8 +337,10 @@ class StarPilotVCruise:
         self.slc.overridden_speed,
         v_ego_diff,
       )
-      if slc_control_target > 0.0:
+      if slc_control_target >= CSC_MIN_SPEED:
         targets.append(slc_control_target)
-      v_cruise = min([target if target >= CSC_MIN_SPEED else v_cruise for target in targets])
+      if self.nav_turn_target > 0.0:
+        targets.append(self.nav_turn_target)
+      v_cruise = min(targets)
 
     return v_cruise

@@ -12,6 +12,11 @@ PERSONALITY_TO_INT = log.LongitudinalPersonality.schema.enumerants
 class TogglesLayoutMici(NavScroller):
   def __init__(self):
     super().__init__()
+    self._sync_rhd_toggle()
+
+    def rhd_toggle_callback(checked: bool):
+      ui_state.params.put_bool("IsRHD", checked)
+      ui_state.params.put_bool("IsRHDOverride", True)
 
     self._personality_toggle = BigMultiParamToggle("driving personality", "LongitudinalPersonality", ["aggressive", "standard", "relaxed"])
     self._safe_mode_btn = BigParamControl("safe mode", "SafeMode", toggle_callback=restart_needed_callback)
@@ -19,6 +24,7 @@ class TogglesLayoutMici(NavScroller):
     is_metric_toggle = BigParamControl("use metric units", "IsMetric")
     ldw_toggle = BigParamControl("lane departure warnings", "IsLdwEnabled")
     always_on_dm_toggle = BigParamControl("always-on driver monitor", "AlwaysOnDM")
+    rhd_toggle = BigParamControl("right hand driving", "IsRHD", toggle_callback=rhd_toggle_callback)
     record_front = BigParamControl("record & upload driver camera", "RecordFront", toggle_callback=restart_needed_callback)
     record_mic = BigParamControl("record & upload mic audio", "RecordAudio", toggle_callback=restart_needed_callback)
     enable_openpilot = BigParamControl("enable openpilot", "OpenpilotEnabledToggle", toggle_callback=restart_needed_callback)
@@ -30,6 +36,7 @@ class TogglesLayoutMici(NavScroller):
       is_metric_toggle,
       ldw_toggle,
       always_on_dm_toggle,
+      rhd_toggle,
       record_front,
       record_mic,
       enable_openpilot,
@@ -42,6 +49,7 @@ class TogglesLayoutMici(NavScroller):
       ("IsMetric", is_metric_toggle),
       ("IsLdwEnabled", ldw_toggle),
       ("AlwaysOnDM", always_on_dm_toggle),
+      ("IsRHD", rhd_toggle),
       ("RecordFront", record_front),
       ("RecordAudio", record_mic),
       ("OpenpilotEnabledToggle", enable_openpilot),
@@ -72,6 +80,7 @@ class TogglesLayoutMici(NavScroller):
 
   def _update_toggles(self):
     ui_state.update_params()
+    self._sync_rhd_toggle()
     safe_mode = ui_state.params.get_bool("SafeMode")
     self._experimental_btn.set_enabled(not safe_mode)
     self._personality_toggle.set_enabled(not safe_mode)
@@ -100,3 +109,7 @@ class TogglesLayoutMici(NavScroller):
     # Refresh toggles from params to mirror external changes
     for key, item in self._refresh_toggles:
       item.set_checked(ui_state.params.get_bool(key))
+
+  def _sync_rhd_toggle(self):
+    if not ui_state.params.get_bool("IsRHDOverride"):
+      ui_state.params.put_bool("IsRHD", ui_state.params.get_bool("IsRhdDetected"))

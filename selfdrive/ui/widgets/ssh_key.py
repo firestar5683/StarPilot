@@ -84,7 +84,7 @@ class SshKeyAction(ItemAction):
   def __init__(self):
     super().__init__(self.MAX_WIDTH, True)
 
-    self._keyboard = Keyboard(min_text_size=1)
+    self._keyboard = Keyboard(min_text_size=1, callback=self._on_username_submit)
     self._params = Params()
     self._error_message: str = ""
     self._text_font = gui_app.font(FontWeight.NORMAL)
@@ -105,7 +105,7 @@ class SshKeyAction(ItemAction):
     # Show error dialog if there's an error
     if self._error_message:
       message = copy.copy(self._error_message)
-      gui_app.set_modal_overlay(alert_dialog(message))
+      gui_app.push_widget(alert_dialog(message))
       self._username = ""
       self._error_message = ""
 
@@ -133,7 +133,7 @@ class SshKeyAction(ItemAction):
     if self._state == SshKeyActionState.ADD:
       self._keyboard.reset()
       self._keyboard.set_title(tr("Enter your GitHub username"))
-      gui_app.set_modal_overlay(self._keyboard, callback=self._on_username_submit)
+      gui_app.push_widget(self._keyboard)
     elif self._state == SshKeyActionState.REMOVE:
       self._params.remove("GithubUsername")
       self._params.remove("GithubSshKeys")

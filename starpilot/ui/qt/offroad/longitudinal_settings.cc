@@ -147,10 +147,11 @@ StarPilotLongitudinalPanel::StarPilotLongitudinalPanel(StarPilotSettingsWindow *
     {"AccelerationProfile", tr("Acceleration Profile"), tr("<b>How quickly openpilot speeds up.</b> \"Eco\" is gentle and efficient, \"Sport\" is firmer and more responsive, and \"Sport+\" accelerates at the maximum rate allowed."), ""},
     {"DecelerationProfile", tr("Deceleration Profile"), tr("<b>How firmly openpilot slows down.</b> \"Eco\" favors coasting, \"Sport\" applies stronger braking."), ""},
     {"HumanAcceleration", tr("Human-Like Acceleration"), tr("<b>Acceleration that mimics human behavior</b> by easing the throttle at low speeds and adding extra power when taking off from a stop."), ""},
-    {"CoastUpToLeads", tr("Coast Up To Leads"), tr("<b>Allow openpilot to coast toward far leads before resuming normal throttle.</b> Disable this if your vehicle shows noticeable gas/brake alternation while approaching distant traffic."), ""},
+    {"CoastUpToLeads", tr("Coast Up To Leads"), tr("<b>Keep the optional far-lead comfort logic enabled, including gentle coasting and matched-follow smoothing for distant leads.</b> Recommended to leave on unless your vehicle shows lead-follow stutter or springy gas/brake behavior."), ""},
     {"HumanLaneChanges", tr("Human-Like Lane Changes"), tr("<b>Lane-change behavior that mimics human drivers</b> by anticipating and tracking adjacent vehicles during lane changes."), ""},
     {"LeadDetectionThreshold", tr("Lead Detection Sensitivity"), tr("<b>How sensitive openpilot is to detecting vehicles.</b> Higher sensitivity allows quicker detection at longer distances but may react to non-vehicle objects; lower sensitivity is more conservative and reduces false detections."), ""},
     {"TacoTune", tr("\"Taco Bell Run\" Turn Speed Hack"), tr("<b>The turn-speed hack from comma's 2022 \"Taco Bell Run\".</b> Designed to slow down for left and right turns."), ""},
+    {"NavLongitudinalAllowed", tr("Use Route Speed Control"), tr("<b>Allow an active navigation route to reduce cruise speed for upcoming turns, ramps, and roundabouts.</b>"), ""},
 
     {"QOLLongitudinal", tr("Quality of Life"), tr("<b>Miscellaneous acceleration and braking control changes</b> to fine-tune how openpilot drives."), "../../starpilot/assets/toggle_icons/icon_quality_of_life.png"},
     {"CustomCruise", tr("Cruise Interval"), tr("<b>How much the set speed increases or decreases</b> for each + or – cruise control button press."), ""},
@@ -158,6 +159,7 @@ StarPilotLongitudinalPanel::StarPilotLongitudinalPanel(StarPilotSettingsWindow *
     {"ForceStops", tr("Force Stop at \"Detected\" Stop Lights/Signs"), tr("<b>Force openpilot to stop whenever the driving model \"detects\" a red light or stop sign.</b><br><br><i><b>Disclaimer</b>: openpilot does not explicitly detect traffic lights or stop signs. In \"Experimental Mode\", openpilot makes end-to-end driving decisions from camera input, which means it may stop even when there's no clear reason!</i>"), ""},
     {"ForceStopDistanceOffset", tr("Force Stop Distance Offset"), tr("<b>Tune where Force Stops bring the car to rest.</b> Positive values let the car roll further before stopping (longer stop, closer to the line). Negative values stop the car sooner (more buffer before the line)."), ""},
     {"ForceStandstill", tr("Force Standstill State"), tr("<b>Keep openpilot in the standstill state until you press the gas pedal or the Resume/+ cruise button.</b><br><br>This applies to any engaged stop, not just red lights or stop signs."), ""},
+    {"RadarTakeoffs", tr("Radar for Takeoffs"), tr("<b>Turns on/off using radar data to track leads at standstill</b>, making following/takeoffs more responsive once leads move."), ""},
     {"IncreasedStoppedDistance", tr("Increase Stopped Distance by:"), tr("<b>Add extra space when stopped behind vehicles.</b> Increase for more room; decrease for shorter gaps."), ""},
     {"MapGears", tr("Map Accel/Decel to Gears"), tr("<b>Map the Acceleration or Deceleration profiles to the vehicle's \"Eco\" and \"Sport\" gear modes.</b>"), ""},
     {"SetSpeedOffset", tr("Offset Set Speed by:"), tr("<b>Increase the set speed by the chosen offset.</b> For example, set +5 if you usually drive 5 over the limit."), ""},
@@ -996,6 +998,10 @@ void StarPilotLongitudinalPanel::updateToggles() {
       }
 
       else if (key == "HumanLaneChanges") {
+        setVisible &= parent->hasRadar;
+      }
+
+      else if (key == "RadarTakeoffs") {
         setVisible &= parent->hasRadar;
       }
 

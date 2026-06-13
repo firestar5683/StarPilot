@@ -58,9 +58,13 @@ NON_LINEAR_TORQUE_PARAMS = {
     "left": [3.8, 0.81, 0.24, 0.0465122],
     "right": [3.8, 0.81, 0.24, 0.0465122],
   },
+  CAR.CHEVROLET_SILVERADO_CC: {
+    "left": [3.8, 0.81, 0.24, 0.0465122],
+    "right": [3.8, 0.81, 0.24, 0.0465122],
+  },
   CAR.CHEVROLET_VOLT: {
-    "left": [1.5, 1.0, 0.155, 0.0],
-    "right": [1.5, 1.0, 0.155, 0.0],
+    "left": [1.525, 1.05, 0.155, 0.0],
+    "right": [1.525, 0.95, 0.150, 0.0],
   },
 }
 
@@ -82,6 +86,14 @@ VOLT_LIKE_CARS = {
 }
 
 VOLT_LONG_TEST_TUNE_CARS = {
+  CAR.CHEVROLET_VOLT,
+  CAR.CHEVROLET_VOLT_2019,
+  CAR.CHEVROLET_VOLT_ASCM,
+  CAR.CHEVROLET_VOLT_CAMERA,
+  CAR.CHEVROLET_VOLT_CC,
+}
+
+VOLT_BSM_CARS = {
   CAR.CHEVROLET_VOLT,
   CAR.CHEVROLET_VOLT_2019,
   CAR.CHEVROLET_VOLT_ASCM,
@@ -205,7 +217,8 @@ class CarInterface(CarInterfaceBase):
     ret.brand = "gm"
     ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.gm)]
     ret.autoResumeSng = False
-    ret.enableBsm = 0x142 in fingerprint[CanBus.POWERTRAIN]
+    # Some Volt installs don't expose the BSM frame during startup fingerprinting.
+    ret.enableBsm = 0x142 in fingerprint[CanBus.POWERTRAIN] or candidate in VOLT_BSM_CARS
     has_sascm = 0x2FF in fingerprint[CanBus.POWERTRAIN]
     if has_sascm:
       ret.flags |= GMFlags.SASCM.value
@@ -397,8 +410,8 @@ class CarInterface(CarInterfaceBase):
       ret.steerActuatorDelay = 0.2
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
-    elif candidate == CAR.BUICK_LACROSSE:
-      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+    elif candidate in (CAR.BUICK_LACROSSE, CAR.BUICK_LACROSSE_ASCM):
+      CarInterfaceBase.configure_torque_tune(CAR.BUICK_LACROSSE, ret.lateralTuning)
 
     elif candidate == CAR.CADILLAC_ESCALADE:
       ret.minEnableSpeed = -1.  # engage speed is decided by pcm
@@ -456,7 +469,7 @@ class CarInterface(CarInterfaceBase):
         # ACC Bolts use pedal for full longitudinal control, not just SNG.
         ret.flags |= GMFlags.PEDAL_LONG.value
 
-    elif candidate == CAR.CHEVROLET_SILVERADO:
+    elif candidate in (CAR.CHEVROLET_SILVERADO, CAR.CHEVROLET_SILVERADO_CC):
       # On the Bolt, the ECM and camera independently check that you are either above 5 kph or at a stop
       # with foot on brake to allow engagement, but this platform only has that check in the camera.
       # TODO: check if this is split by EV/ICE with more platforms in the future
@@ -493,7 +506,7 @@ class CarInterface(CarInterfaceBase):
       ret.minSteerSpeed = 7 * CV.MPH_TO_MS
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
-    elif candidate == CAR.CADILLAC_XT5_CC:
+    elif candidate in (CAR.CADILLAC_XT5, CAR.CADILLAC_XT5_CC):
       ret.steerActuatorDelay = 0.2
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
@@ -596,6 +609,12 @@ class CarInterface(CarInterfaceBase):
       ret.startAccel = 1.15
       ret.vEgoStarting = max(ret.vEgoStarting, 0.35)
 
+    if ret.openpilotLongitudinalControl and candidate in (CAR.CHEVROLET_SILVERADO, CAR.CHEVROLET_SILVERADO_CC) and not ret.enableGasInterceptorDEPRECATED:
+      ret.longitudinalTuning.kpBP = [0.0, 5.0, 15.0, 35.0]
+      ret.longitudinalTuning.kpV = [0.02, 0.03, 0.028, 0.022]
+      ret.longitudinalTuning.kiBP = [0.0, 5.0, 15.0, 35.0]
+      ret.longitudinalTuning.kiV = [0.28, 0.26, 0.20, 0.16]
+
     elif candidate in CC_ONLY_CAR and not ret.enableGasInterceptorDEPRECATED:
       ret.flags |= GMFlags.CC_LONG.value
       ret.alphaLongitudinalAvailable = False
@@ -646,7 +665,6 @@ class CarInterface(CarInterfaceBase):
 
     volt_stock_auto_hold_safety = (
       gm_auto_hold and
-      not ret.openpilotLongitudinalControl and
       candidate in {
         CAR.CHEVROLET_VOLT,
         CAR.CHEVROLET_VOLT_2019,
@@ -655,8 +673,10 @@ class CarInterface(CarInterfaceBase):
       }
     )
     if volt_stock_auto_hold_safety:
-      # Reuse the paddle-scheduler safety bit as a stock-Volt auto-hold marker on
-      # non-pedal paths. The scheduler logic remains inactive without pedal-long.
+      # Reuse the paddle-scheduler safety bit as a Volt auto-hold marker on
+      # non-pedal paths. Hold can run while OP longitudinal is configured but
+      # not currently active, so the bit must be present regardless of the
+      # current long-control mode.
       ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.FLAG_GM_PANDA_PADDLE_SCHED.value
 
     use_panda_3d1_sched = (

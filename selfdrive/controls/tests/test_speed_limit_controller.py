@@ -114,11 +114,129 @@ def test_new_source_limit_clears_override_until_gas_release():
 
     assert controller.overridden_speed == pytest.approx(mph(65))
     assert controller.override_slc
+
+    # --- Dropout / Fallback Test Condition ---
+    controller.starpilot_toggles = make_toggles(slc_fallback_set_speed=True)
+    # No limit available → falls back to v_cruise (75 mph) with source "None".
+    # Override persists because target_to_use resolves to last_valid_limit (45 mph) which is
+    # below overridden_speed (65 mph) — the sticky override_slc chain stays True.
+    controller.update_limits(0.0, datetime.now(timezone.utc), False, mph(75), mph(65), sm)
+    controller.update_override(mph(75), 0.0, mph(65), 0.0, sm)
+
+    assert controller.target == pytest.approx(mph(75))
+    assert controller.source == "None"
+    assert controller.overridden_speed == pytest.approx(mph(65))
+    assert controller.override_slc
+
+    # Recovery to a confirmed limit (55 mph) clears the override: this is a genuinely new
+    # speed zone (55 != last_valid 45), so clear_override_for_source_limit fires correctly.
+    controller.update_limits(mph(55), datetime.now(timezone.utc), False, mph(75), mph(65), sm)
+    controller.update_override(mph(75), 0.0, mph(65), 0.0, sm)
+
+    assert controller.target == pytest.approx(mph(55))
+    assert controller.source == "Dashboard"
+    assert controller.overridden_speed == 0
+    assert not controller.override_slc
+
+      # --- Override Clipping Check (set-speed fallback) ---
+      # Separate controller: active override, then fallback to v_cruise that is BELOW the override.
+      # overridden_speed clips to v_cruise (override_slc stays True via sticky chain, but
+      # np.clip clamps overridden_speed to the new target+offset).
+    clip_controller = make_controller(slc_fallback_set_speed=True)
+    try:
+      clip_controller.source = "Dashboard"
+      clip_controller.target = mph(55)
+      clip_controller.previous_source = "Dashboard"
+      clip_controller.previous_target = mph(55)
+      clip_controller.last_valid_limit = mph(55)
+      clip_controller.override_slc = True
+      clip_controller.overridden_speed = mph(65)
+
+      sm_no_gas = make_sm(gas_pressed=False)
+      # v_cruise = 30 mph (below last_valid 55), so target_to_use returns mph(30).
+      # override_slc sticky: overridden_speed=65 > 30+0=30 > 0 — still True from chain.
+      # np.clip(65, 30, 30) = 30, so overridden_speed clips to mph(30).
+      clip_controller.update_limits(0.0, datetime.now(timezone.utc), False, mph(30), mph(30), sm_no_gas)
+      clip_controller.update_override(mph(30), 0.0, mph(30), 0.0, sm_no_gas)
+
+      assert clip_controller.target == pytest.approx(mph(30))
+      # Clipped to v_cruise — not locked at mph(55) or mph(65)
+      assert clip_controller.overridden_speed == pytest.approx(mph(30))
+      assert clip_controller.override_slc
+    finally:
+      clip_controller.shutdown()
+
+    # --- Lost Speed Limit (no fallback) clears target to 0 ---
+    # When all limit sources drop to 0 with no fallback, target becomes 0
+    # and override_slc is False (target_to_use=0, chain evaluates False).
+    lost_controller = make_controller(slc_fallback_set_speed=False, slc_fallback_previous_speed_limit=False)
+    try:
+      lost_controller.source = "Dashboard"
+      lost_controller.target = mph(45)
+      lost_controller.previous_source = "Dashboard"
+      lost_controller.previous_target = mph(45)
+
+      sm_on = make_sm(gas_pressed=False)
+      lost_controller.update_limits(0.0, datetime.now(timezone.utc), False, mph(75), mph(65), sm_on)
+      lost_controller.update_override(mph(75), 0.0, mph(65), 0.0, sm_on)
+
+      assert lost_controller.target == 0
+      assert lost_controller.overridden_speed == 0
+      assert not lost_controller.override_slc
+    finally:
+      lost_controller.shutdown()
   finally:
     controller.shutdown()
 
 
 def test_unconfirmed_lower_limit_keeps_existing_override():
+  # First, verify startup behavior where target is 0 and priority limit is detected
+  startup_controller = make_controller(
+    speed_limit_priority1="Dashboard",
+    slc_fallback_previous_speed_limit=True,
+  )
+  try:
+    startup_controller.previous_target = mph(55)
+    startup_controller.previous_source = "Dashboard"
+    startup_controller.target = 0
+
+    sm = make_sm(gas_pressed=False)
+    startup_controller.update_limits(mph(45), datetime.now(timezone.utc), False, mph(75), mph(65), sm)
+
+    assert startup_controller.target == pytest.approx(mph(45))
+    assert startup_controller.source == "Dashboard"
+  finally:
+    startup_controller.shutdown()
+
+  # Verify Bug 3: Fallback transitions should bypass confirmation checks
+  fallback_confirm_controller = make_controller(
+    slc_fallback_set_speed=True,
+    speed_limit_confirmation_higher=True
+  )
+  try:
+    fallback_confirm_controller.source = "Dashboard"
+    fallback_confirm_controller.target = mph(35)
+    fallback_confirm_controller.previous_target = mph(35)
+
+    sm = make_sm(gas_pressed=False)
+    fallback_confirm_controller.update_limits(0.0, datetime.now(timezone.utc), False, mph(60), mph(35), sm)
+
+    assert fallback_confirm_controller.target == pytest.approx(mph(60))
+    assert fallback_confirm_controller.source == "None"
+    assert fallback_confirm_controller.unconfirmed_speed_limit == 0
+  finally:
+    fallback_confirm_controller.shutdown()
+
+  # Verify Bug 1: Boundaries are correctly mapped and not falling back to 0
+  boundary_controller = make_controller()
+  boundary_controller.starpilot_toggles.speed_limit_offset1 = 1.0
+  boundary_controller.starpilot_toggles.speed_limit_offset2 = 2.0
+
+  # Exact boundary speed: 11.2 m/s is the *start* of band 2 (25–34 mph range).
+  # With low <= target < high: 11.2 <= 11.2 < 15.2 → True → maps to offset2 (not 0).
+  offset = boundary_controller.get_offset(11.2)
+  assert offset != 0.0
+
   controller = make_controller(speed_limit_confirmation_lower=True)
   try:
     controller.source = "Dashboard"

@@ -13,7 +13,7 @@ from openpilot.selfdrive.ui.onroad.starpilot.slc_speed_limit import (
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.selfdrive.ui.onroad.starpilot.aethergauge import AetherGauge
 from openpilot.selfdrive.ui.lib.starpilot_status import (
-    get_screen_edge_color, CEM_OVERRIDE_COLOR, ENGAGED_COLOR,
+    get_screen_edge_color, ENGAGED_COLOR,
     EXPERIMENTAL_COLOR, TRAFFIC_COLOR,
 )
 from openpilot.system.ui.lib.application import MousePos, gui_app, FontWeight
@@ -57,10 +57,18 @@ class StarPilotOnroadView(AugmentedRoadView):
   def _render_overlays(self):
     self._position_personality_button()
     self._personality_button.render()
-    self._render_road_name()
     self._render_standstill_timer()
     self._render_developer_metrics()
-    self._aethergauge.render(self._content_rect, self._font_bold, self._font_medium, current_speed=self._hud_renderer.speed)
+    dm = self.driver_state_renderer
+    if dm and dm.is_visible and dm.position_x != 0.0:
+      dm_top = dm.position_y - 96  # top of DM icon
+      self._aethergauge.render(
+        self._content_rect, self._font_bold, self._font_medium,
+        current_speed=self._hud_renderer.speed,
+        cx=dm.position_x, bottom=dm_top - 105
+      )
+    else:
+      self._aethergauge.render(self._content_rect, self._font_bold, self._font_medium, current_speed=self._hud_renderer.speed)
     self._render_bottom_row_widgets()
     self._render_pedals()
 
@@ -115,35 +123,6 @@ class StarPilotOnroadView(AugmentedRoadView):
 
     self._personality_button.set_visible(
       lambda: ui_state.started and ui_state.has_longitudinal_control
-    )
-
-  def _render_road_name(self):
-    if not self._params.get_bool("RoadNameUI"):
-      return
-    if not ui_state.sm.valid.get("mapdOut", False):
-      return
-
-    road_name = getattr(ui_state.sm["mapdOut"], "roadName", "")
-    if not road_name:
-      return
-
-    text_size = measure_text_cached(self._font_bold, road_name, 52)
-    pad_x, pad_y = 28, 18
-    box_w = int(text_size.x + pad_x * 2)
-    box_h = int(text_size.y + pad_y * 2)
-    x = int(self._content_rect.x + (self._content_rect.width - box_w) / 2)
-    y = int(self._content_rect.y + self._content_rect.height - box_h - 22)
-
-    rect = rl.Rectangle(x, y, box_w, box_h)
-    rl.draw_rectangle_rounded(rect, 0.35, 10, rl.Color(0, 0, 0, 166))
-    rl.draw_rectangle_rounded_lines_ex(rect, 0.35, 10, 3, rl.Color(255, 255, 255, 50))
-    rl.draw_text_ex(
-      self._font_bold,
-      road_name,
-      rl.Vector2(x + (box_w - text_size.x) / 2, y + (box_h - text_size.y) / 2),
-      52,
-      0,
-      rl.WHITE,
     )
 
   def _render_standstill_timer(self):
@@ -325,17 +304,14 @@ class StarPilotOnroadView(AugmentedRoadView):
     starpilot_car_state = ui_state.sm["starpilotCarState"] if ui_state.sm.valid.get("starpilotCarState", False) else None
     lateral_paused = starpilot_car_state.pauseLateral if starpilot_car_state else False
     longitudinal_paused = (starpilot_car_state.pauseLongitudinal or starpilot_car_state.forceCoast) if starpilot_car_state else False
-    show_cem_status = self._params.get_bool("ShowCEMStatus")
 
     # Build the list of active left-side (DM-adjacent) badges in order of priority:
-    # 1. Lateral Paused, 2. Longitudinal Paused, 3. CEM Status
+    # 1. Lateral Paused, 2. Longitudinal Paused
     active_badges = []
     if lateral_paused:
       active_badges.append("lateral_paused")
     if longitudinal_paused:
       active_badges.append("longitudinal_paused")
-    if show_cem_status:
-      active_badges.append("cem_status")
 
     # Dimensions
     badge_w = 120
@@ -363,9 +339,6 @@ class StarPilotOnroadView(AugmentedRoadView):
       elif badge == "longitudinal_paused":
         from openpilot.selfdrive.ui.onroad.starpilot.pause_indicators import render_longitudinal_paused
         render_longitudinal_paused(badge_rect)
-      elif badge == "cem_status":
-        from openpilot.selfdrive.ui.onroad.starpilot.cem_status import render_cem_status
-        render_cem_status(badge_rect, self._font_medium)
 
     # 2. Render Compass & Weather (on the opposite side of DM icon)
     # Dimensions

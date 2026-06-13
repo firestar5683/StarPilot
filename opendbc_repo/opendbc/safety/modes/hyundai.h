@@ -56,7 +56,9 @@ const LongitudinalLimits HYUNDAI_LONG_LIMITS = {
   {.msg = {{0x91,  0, 8, 100U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}}, \
 
 #define HYUNDAI_LDA_BUTTON_ADDR_CHECK \
-  {.msg = {{0x391, 0, 8, 100U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}}, \
+  {.msg = {{0x391, 0, 8, 100U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, \
+           {0x50C, 0, 8, 50U,  .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, \
+           {0x50C, 1, 8, 50U,  .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}}}, \
 
 #define HYUNDAI_NON_SCC_HEV_ADDR_CHECK \
   {.msg = {{0x595U, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}}, \
@@ -225,6 +227,10 @@ static void hyundai_rx_hook(const CANPacket_t *msg) {
 
     if (msg->addr == 0x391U) {
       hyundai_lkas_button_check(GET_BIT(msg, 4U));
+    }
+
+    if ((msg->addr == 0x50CU) && ((msg->bus == 0U) || (msg->bus == 1U))) {
+      hyundai_lkas_button_check(GET_BIT(msg, 56U));
     }
   }
 

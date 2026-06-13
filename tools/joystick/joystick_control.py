@@ -52,7 +52,7 @@ class Joystick:
       self.flip_map = {'ABS_RZ': accel_axis}
     else:
       accel_axis = 'ABS_RX'
-      steer_axis = 'ABS_Z'
+      steer_axis = 'ABS_X'
       self.flip_map = {'ABS_RY': accel_axis}
 
     self.min_axis_value = {accel_axis: 0., steer_axis: 0.}

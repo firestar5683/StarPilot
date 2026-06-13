@@ -102,6 +102,7 @@ class ConditionalExperimentalMode:
     self.mode_hold_until = 0.0
     self.mode_false_since = 0.0
     self._prev_ce_status = None
+    self.close_stopped_lead_since = 0.0
 
   def update(self, v_ego, sm, starpilot_toggles):
     now = time.monotonic()
@@ -157,7 +158,18 @@ class ConditionalExperimentalMode:
       self.stop_light_detected &= not is_manual_ce_status(self.status_value)
       self.stop_light_filter.x = 0
 
+  # At standstill behind a close, stopped lead, prefer Chill over CEM.
+  # Why: CEM is slow to release when the lead pulls away (waits on stop-light
+  # filter + STOP_LIGHT_DETECTED_HOLD_TIME). Chill reacts to lead departure faster.
+  STANDSTILL_LEAD_OVERRIDE_MAX_DISTANCE = 15.0  # meters
+  STANDSTILL_LEAD_OVERRIDE_MAX_SPEED = 1.0      # m/s
+  # Persistence required before handing off CEM->Chill. Cross-traffic (cars passing
+  # perpendicular in front) briefly registers as a close, stopped lead and would
+  # otherwise flap CEM out of EXP. Real queue-mates persist much longer than this.
+  STANDSTILL_LEAD_OVERRIDE_PERSIST_TIME = 0.5  # seconds
+
   def get_standstill_stop_hold(self, sm):
+    now = time.monotonic()
     dash_stop_sign = (
       bool(getattr(self.starpilot_planner.starpilot_vcruise, "stop_sign_confirmed", False)) or
       bool(getattr(sm["starpilotCarState"], "dashboardStopSign", 0) > 0)
@@ -168,6 +180,7 @@ class ConditionalExperimentalMode:
 
     if pedal_override or not bool(sm["carState"].standstill):
       self.standstill_stop_reason = None
+      self.close_stopped_lead_since = 0.0
       return False
 
     if dash_stop_sign:
@@ -179,7 +192,23 @@ class ConditionalExperimentalMode:
       self.standstill_stop_reason = None
 
     if self.standstill_stop_reason == "sign":
+      self.close_stopped_lead_since = 0.0
       return True
+
+    lead = getattr(self.starpilot_planner, "lead_one", None)
+    close_stopped_lead = bool(
+      lead is not None and
+      getattr(lead, "status", False) and
+      float(getattr(lead, "dRel", float("inf"))) < self.STANDSTILL_LEAD_OVERRIDE_MAX_DISTANCE and
+      float(getattr(lead, "vLead", float("inf"))) < self.STANDSTILL_LEAD_OVERRIDE_MAX_SPEED
+    )
+    if close_stopped_lead:
+      if self.close_stopped_lead_since == 0.0:
+        self.close_stopped_lead_since = now
+      if (now - self.close_stopped_lead_since) >= self.STANDSTILL_LEAD_OVERRIDE_PERSIST_TIME:
+        return False
+    else:
+      self.close_stopped_lead_since = 0.0
 
     return bool(self.stop_light_detected or force_stop_active or model_stopped)
 

@@ -57,7 +57,7 @@ class DRIVER_MONITOR_SETTINGS:
     self._YAW_MIN_OFFSET = -0.0246
 
     self._DCAM_UNCERTAIN_ALERT_THRESHOLD = 0.1
-    self._DCAM_UNCERTAIN_RESET_COUNT = int(20  / self._DT_DMON)
+    self._DCAM_UNCERTAIN_RESET_COUNT = int(2  / self._DT_DMON)
     self._POSESTD_THRESHOLD = 0.3
     self._HI_STD_FALLBACK_TIME = int(10  / self._DT_DMON)  # fall back to wheel touch if model is uncertain for 10s
     self._DISTRACTED_FILTER_TS = 0.25  # 0.6Hz
@@ -141,7 +141,7 @@ def face_orientation_from_net(angles_desc, pos_desc, rpy_calib):
 
 
 class DriverMonitoring:
-  def __init__(self, rhd_saved=False, settings=None, always_on=False):
+  def __init__(self, rhd_saved=False, settings=None, always_on=False, rhd_override=None):
     # init policy settings
     self.settings = settings if settings is not None else DRIVER_MONITOR_SETTINGS(device_type=HARDWARE.get_device_type())
 
@@ -159,6 +159,7 @@ class DriverMonitoring:
     self.wheel_on_right = False
     self.wheel_on_right_last = None
     self.wheel_on_right_default = rhd_saved
+    self.wheel_on_right_override = rhd_override
     self.face_detected = False
     self.terminal_alert_cnt = 0
     self.terminal_time = 0
@@ -268,12 +269,15 @@ class DriverMonitoring:
       self.wheelpos.prob_offseter.push_and_update(rhd_pred)
 
     self.wheelpos.prob_calibrated = self.wheelpos.prob_offseter.filtered_stat.n > self.settings._WHEELPOS_FILTER_MIN_COUNT
-    if self.wheelpos.prob_calibrated or demo_mode:
+    if self.wheel_on_right_override is not None and not demo_mode:
+      self.wheel_on_right = self.wheel_on_right_override
+    elif self.wheelpos.prob_calibrated or demo_mode:
       self.wheel_on_right = self.wheelpos.prob_offseter.filtered_stat.M > self.settings._WHEELPOS_THRESHOLD
     else:
       self.wheel_on_right = self.wheel_on_right_default # use default/saved if calibration is unfinished
     # make sure no switching when engaged
-    if op_engaged and self.wheel_on_right_last is not None and self.wheel_on_right_last != self.wheel_on_right and not demo_mode:
+    if (self.wheel_on_right_override is None and op_engaged and self.wheel_on_right_last is not None and
+        self.wheel_on_right_last != self.wheel_on_right and not demo_mode):
       self.wheel_on_right = self.wheel_on_right_last
     driver_data = driver_state.rightDriverData if self.wheel_on_right else driver_state.leftDriverData
     if not all(len(x) > 0 for x in (driver_data.faceOrientation, driver_data.facePosition,

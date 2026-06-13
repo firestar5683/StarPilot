@@ -19,43 +19,41 @@ from openpilot.selfdrive.ui.layouts.settings.starpilot.vehicle import StarPilotV
 
 from openpilot.selfdrive.ui.layouts.settings.starpilot.aethergrid import TileGrid, HubTile, RadioTileGroup, SPACING
 
-STARPILOT_ICONS_DIR = "toggle_icons"
-
 class StarPilotLayout(Widget):
   CATEGORIES = [
     {
       "title": "Alerts & Sounds",
-      "icon": "icon_sound.png",
+      "icon": "sound",
       "panel": "SOUNDS",
       "color": "#E63956",
     },
     {
       "title": "Driving Controls",
-      "icon": "icon_steering.png",
+      "icon": "steering",
       "buttons": [("DRIVING MODEL", "DRIVING_MODEL"), ("GAS / BRAKE", "LONGITUDINAL"), ("STEERING", "LATERAL")],
       "color": "#3B82F6",
     },
     {
       "title": "Map Data",
-      "icon": "icon_navigate.png",
+      "icon": "navigate",
       "panel": "MAPS",
       "color": "#10B981",
     },
     {
       "title": "System",
-      "icon": "icon_system.png",
+      "icon": "system",
       "panel": "SYSTEM",
       "color": "#D946EF",
     },
     {
       "title": "Appearance",
-      "icon": "icon_display.png",
+      "icon": "display",
       "panel": "VISUALS",
       "color": "#8B5CF6",
     },
     {
       "title": "Vehicle Settings",
-      "icon": "icon_vehicle.png",
+      "icon": "vehicle",
       "panel": "VEHICLE",
       "color": "#64748B",
     },
@@ -199,9 +197,8 @@ class StarPilotLayout(Widget):
         tile = HubTile(
           title=tr(cat["title"]),
           desc=tr(cat.get("desc", "")),
-          icon_path=f"{STARPILOT_ICONS_DIR}/{cat['icon']}",
+          icon_key=cat["icon"],
           on_click=on_click,
-          starpilot_icon=True,
           bg_color=cat.get("color")
         )
         self._main_grid.add_tile(tile)
@@ -218,9 +215,8 @@ class StarPilotLayout(Widget):
         tile = HubTile(
           title=tr(label),
           desc="",
-          icon_path=f"{STARPILOT_ICONS_DIR}/{cat['icon']}",
+          icon_key=cat["icon"],
           on_click=on_btn_click,
-          starpilot_icon=True,
           bg_color=cat.get("color")
         )
         self._main_grid.add_tile(tile)

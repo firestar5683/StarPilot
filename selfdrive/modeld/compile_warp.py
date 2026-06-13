@@ -66,7 +66,7 @@ def dm_warp_pkl_path(w, h):
   return MODELS_DIR / f'dm_warp_{w}x{h}_tinygrad.pkl'
 
 
-def warp_perspective_tinygrad(src_flat, M_inv, dst_shape, src_shape, stride_pad):
+def warp_perspective_tinygrad(src_flat, M_inv, dst_shape, src_shape, stride_pad, border_fill_val=None):
   w_dst, h_dst = dst_shape
   h_src, w_src = src_shape
 
@@ -81,11 +81,19 @@ def warp_perspective_tinygrad(src_flat, M_inv, dst_shape, src_shape, stride_pad)
   src_x = src_x / src_w
   src_y = src_y / src_w
 
-  x_nn_clipped = Tensor.round(src_x).clip(0, w_src - 1).cast('int')
-  y_nn_clipped = Tensor.round(src_y).clip(0, h_src - 1).cast('int')
+  x_round = Tensor.round(src_x)
+  y_round = Tensor.round(src_y)
+  x_nn_clipped = x_round.clip(0, w_src - 1).cast('int')
+  y_nn_clipped = y_round.clip(0, h_src - 1).cast('int')
   idx = y_nn_clipped * (w_src + stride_pad) + x_nn_clipped
 
-  return src_flat[idx]
+  sampled = src_flat[idx]
+  if border_fill_val is None:
+    return sampled
+
+  in_bounds = ((x_round >= 0) & (x_round <= w_src - 1) &
+               (y_round >= 0) & (y_round <= h_src - 1)).cast(sampled.dtype)
+  return sampled * in_bounds + Tensor(border_fill_val, dtype=sampled.dtype) * (1 - in_bounds)
 
 
 def frames_to_tensor(frames, model_w, model_h):
@@ -152,7 +160,9 @@ def make_warp_dm(cam_w, cam_h, dm_w, dm_h):
 
   def warp_dm(input_frame, M_inv):
     M_inv = M_inv.to(Device.DEFAULT)
-    result = warp_perspective_tinygrad(input_frame[:cam_h*stride], M_inv, (dm_w, dm_h), (cam_h, cam_w), stride_pad).reshape(-1, dm_h * dm_w)
+    result = warp_perspective_tinygrad(
+      input_frame[:cam_h*stride], M_inv, (dm_w, dm_h), (cam_h, cam_w), stride_pad, border_fill_val=16
+    ).reshape(-1, dm_h * dm_w)
     return result
   return warp_dm
 

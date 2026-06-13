@@ -6,7 +6,7 @@ from opendbc.can import CANPacker, CANParser
 from opendbc.car import Bus, DT_CTRL, structs
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.gm import gmcan
-from opendbc.car.gm.carstate import CarState as GMCarState
+from opendbc.car.gm.carstate import CarState as GMCarState, get_hard_cruise_buttons
 from opendbc.car.gm.carcontroller import (
   VisualAlert,
   get_acc_dashboard_fcw_alert,
@@ -18,7 +18,7 @@ from opendbc.car.gm.carcontroller import (
 import opendbc.car.gm.interface as gm_interface
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.gm.fingerprints import FINGERPRINTS
-from opendbc.car.gm.values import CAMERA_ACC_CAR, CAR, CC_ONLY_CAR, DBC, GM_RX_OFFSET, GMFlags, GMSafetyFlags
+from opendbc.car.gm.values import CAMERA_ACC_CAR, CAR, CC_ONLY_CAR, DBC, GM_RX_OFFSET, CruiseButtons, GMFlags, GMSafetyFlags
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
 from openpilot.common.params import Params
 
@@ -63,6 +63,10 @@ class TestGMFingerprint:
 
 
 class TestGMInterface:
+  def test_missing_hard_cruise_signal_defaults_to_init(self):
+    assert get_hard_cruise_buttons({"ACCButtons": CruiseButtons.RES_ACCEL}) == CruiseButtons.INIT
+    assert get_hard_cruise_buttons({"ACCButtonsHard": CruiseButtons.DECEL_SET}) == CruiseButtons.DECEL_SET
+
   @parameterized.expand(VOLT_CARS)
   def test_volt_min_steer_speed_is_7_mph(self, car_model):
     CarInterface = interfaces[car_model]
@@ -117,6 +121,21 @@ class TestGMInterface:
     assert car_params.flags & GMFlags.NO_CAMERA.value
     assert car_params.safetyConfigs[0].safetyParam & GMSafetyFlags.FLAG_GM_NO_CAMERA.value
 
+  def test_silverado_alpha_long_uses_trimmed_longitudinal_tune(self):
+    CarInterface = interfaces[CAR.CHEVROLET_SILVERADO]
+    fingerprint = _empty_fingerprint()
+    fingerprint[0] = FINGERPRINTS[CAR.CHEVROLET_SILVERADO][0].copy()
+
+    car_params = CarInterface.get_params(CAR.CHEVROLET_SILVERADO, fingerprint, [], alpha_long=True, is_release=False,
+                                         docs=False, starpilot_toggles=_test_starpilot_toggles())
+
+    assert car_params.openpilotLongitudinalControl
+    assert not car_params.enableGasInterceptorDEPRECATED
+    assert list(car_params.longitudinalTuning.kpBP) == pytest.approx([0.0, 5.0, 15.0, 35.0])
+    assert list(car_params.longitudinalTuning.kpV) == pytest.approx([0.02, 0.03, 0.028, 0.022])
+    assert list(car_params.longitudinalTuning.kiBP) == pytest.approx([0.0, 5.0, 15.0, 35.0])
+    assert list(car_params.longitudinalTuning.kiV) == pytest.approx([0.28, 0.26, 0.20, 0.16])
+
   def test_volt_gateway_without_accel_pos_uses_brake_pedal_message(self):
     CarInterface = interfaces[CAR.CHEVROLET_VOLT]
     fingerprint = _empty_fingerprint()
@@ -131,6 +150,46 @@ class TestGMInterface:
     pt_parser = CarInterface.CarState.get_can_parsers(car_params)[Bus.pt]
     assert "ECMAcceleratorPos" not in pt_parser.vl
     assert "EBCMBrakePedalPosition" in pt_parser.vl
+
+  def test_volt_auto_hold_sets_stock_hold_safety_bit_with_op_long_enabled(self):
+    CarInterface = interfaces[CAR.CHEVROLET_VOLT_ASCM]
+    fingerprint = _empty_fingerprint()
+    fingerprint[0][0x2FF] = 8
+
+    params = Params()
+    try:
+      params.put_bool("GMAutoHold", True)
+      car_params = CarInterface.get_params(CAR.CHEVROLET_VOLT_ASCM, fingerprint, [], alpha_long=True, is_release=False,
+                                           docs=False, starpilot_toggles=_test_starpilot_toggles())
+    finally:
+      params.remove("GMAutoHold")
+
+    assert car_params.openpilotLongitudinalControl
+    assert car_params.safetyConfigs[0].safetyParam & GMSafetyFlags.FLAG_GM_PANDA_PADDLE_SCHED.value
+
+  @parameterized.expand(VOLT_CARS)
+  def test_volt_bsm_is_enabled_without_fingerprint_match(self, car_model):
+    CarInterface = interfaces[car_model]
+    car_params = CarInterface.get_params(car_model, _empty_fingerprint(), [], alpha_long=False, is_release=False, docs=False,
+                                         starpilot_toggles=_test_starpilot_toggles())
+
+    assert car_params.enableBsm
+
+  def test_volt_bsm_parser_is_optional(self):
+    cp = SimpleNamespace(
+      carFingerprint=CAR.CHEVROLET_VOLT_ASCM,
+      networkLocation=structs.CarParams.NetworkLocation.fwdCamera,
+      flags=0,
+      transmissionType=structs.CarParams.TransmissionType.direct,
+      enableGasInterceptorDEPRECATED=False,
+      enableBsm=True,
+    )
+
+    pt_parser = GMCarState.get_can_parsers(cp)[Bus.pt]
+    bsm_addr = pt_parser.dbc.name_to_msg["BCMBlindSpotMonitor"].address
+
+    assert "BCMBlindSpotMonitor" in pt_parser.vl
+    assert pt_parser.message_states[bsm_addr].ignore_alive
 
   def test_volt_ascm_cam_parser_includes_optional_aeb_cmd(self):
     cam_parser = GMCarState.get_can_parsers(SimpleNamespace(
@@ -162,6 +221,30 @@ class TestGMInterface:
 
     assert car_params.alternativeExperience & ALTERNATIVE_EXPERIENCE.GM_REMAP_CANCEL_TO_DISTANCE
     assert car_params.safetyConfigs[0].safetyParam & GMSafetyFlags.FLAG_GM_BOLT_2022_PEDAL.value
+
+  def test_cadillac_xt5_sdgm_sascm_gates_alpha_long(self):
+    CarInterface = interfaces[CAR.CADILLAC_XT5]
+    fingerprint = _empty_fingerprint()
+    fingerprint[0][0xBE] = 6
+
+    stock_params = CarInterface.get_params(CAR.CADILLAC_XT5, fingerprint, [], alpha_long=True, is_release=False,
+                                           docs=False, starpilot_toggles=_test_starpilot_toggles())
+
+    assert stock_params.networkLocation == structs.CarParams.NetworkLocation.fwdCamera
+    assert stock_params.pcmCruise
+    assert stock_params.alphaLongitudinalAvailable is False
+    assert stock_params.openpilotLongitudinalControl is False
+    assert stock_params.safetyConfigs[0].safetyParam & GMSafetyFlags.HW_SDGM.value
+
+    fingerprint[0][0x2FF] = 8
+    sascm_params = CarInterface.get_params(CAR.CADILLAC_XT5, fingerprint, [], alpha_long=True, is_release=False,
+                                           docs=False, starpilot_toggles=_test_starpilot_toggles())
+
+    assert sascm_params.flags & GMFlags.SASCM.value
+    assert sascm_params.alphaLongitudinalAvailable
+    assert sascm_params.openpilotLongitudinalControl
+    assert not sascm_params.pcmCruise
+    assert sascm_params.safetyConfigs[0].safetyParam & GMSafetyFlags.HW_CAM_LONG.value
 
 
 class TestGMCarController:

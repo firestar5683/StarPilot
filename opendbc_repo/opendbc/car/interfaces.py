@@ -20,7 +20,7 @@ from opendbc.car.common.simple_kalman import KF1D, get_kalman_gain
 from opendbc.car.gm.values import CAR as GM
 from opendbc.car.honda.values import CAR as HONDA, HONDA_BOSCH, HondaFlags, HondaSafetyFlags, HondaStarPilotFlags
 from opendbc.car.hyundai.hyundaicanfd import CanBus
-from opendbc.car.hyundai.values import CAR as HYUNDAI, CANFD_CAR, HyundaiFlags, HyundaiStarPilotFlags, HyundaiStarPilotSafetyFlags
+from opendbc.car.hyundai.values import CAR as HYUNDAI, CANFD_CAR, HyundaiFlags, HyundaiStarPilotFlags, HyundaiStarPilotSafetyFlags, ALT_BUS_LDA_BUTTON_CARS
 from opendbc.car.mock.values import CAR as MOCK
 from opendbc.car.toyota.values import CAR as TOYOTA, NO_DSU_CAR, TSS2_CAR, UNSUPPORTED_DSU_CAR, ToyotaStarPilotFlags, ToyotaSafetyFlags
 from opendbc.car.values import PLATFORMS
@@ -199,6 +199,7 @@ class CarInterfaceBase(ABC):
   def get_starpilot_params(cls, candidate: str, fingerprint: dict[int, dict[int, int]], car_fw: list[structs.CarParams.CarFw], CP: structs.CarParams, starpilot_toggles: SimpleNamespace):
     fp_ret = custom.StarPilotCarParams.new_message()
     fp_ret.pcmCruiseSpeed = True
+    params = Params(return_defaults=True)
 
     platform = PLATFORMS[candidate]
 
@@ -228,14 +229,22 @@ class CarInterfaceBase(ABC):
           if 0x1FA in fingerprint[CAN.ECAN]:
             fp_ret.flags |= HyundaiStarPilotFlags.SPEED_LIMIT_AVAILABLE.value
 
-        fp_ret.redneckCruiseAvailable = not bool(CP.flags & HyundaiFlags.CANFD_ALT_BUTTONS)
-        if fp_ret.redneckCruiseAvailable and Params(return_defaults=True).get_bool("RedneckCruise") and \
+        fp_ret.redneckCruiseAvailable = bool(CP.flags & HyundaiFlags.NON_SCC) and not bool(CP.flags & HyundaiFlags.CANFD_ALT_BUTTONS)
+        if fp_ret.redneckCruiseAvailable and params.get_bool("RedneckCruise") and \
             not CP.openpilotLongitudinalControl:
           fp_ret.pcmCruiseSpeed = False
 
-        if 0x391 in fingerprint[0] or CP.flags & HyundaiFlags.CAN_CANFD_BLENDED:
+        hyundai_has_lda_button = (
+          0x391 in fingerprint[0] or
+          0x50C in fingerprint[0] or
+          candidate in ALT_BUS_LDA_BUTTON_CARS or
+          bool(CP.flags & HyundaiFlags.CAN_CANFD_BLENDED)
+        )
+        if hyundai_has_lda_button:
           fp_ret.safetyConfigs[-1].safetyParam |= HyundaiStarPilotSafetyFlags.HAS_LDA_BUTTON.value
-        if starpilot_toggles.always_on_lateral_lkas:
+
+        # LKASButtonControl == 9 means BUTTON_FUNCTIONS["AOL_TOGGLE"] in starpilot_variables.
+        if params.get_bool("AlwaysOnLateral") and params.get_int("LKASButtonControl") == 9:
           fp_ret.safetyConfigs[-1].safetyParam |= HyundaiStarPilotSafetyFlags.AOL_LKAS_ON_ENGAGE.value
       elif platform in TOYOTA:
         fp_ret.canUsePedal = not CP.autoResumeSng

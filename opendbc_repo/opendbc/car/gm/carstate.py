@@ -33,6 +33,13 @@ AUTO_HOLD_REGEN_RELEASE_COOLDOWN_S = 1.0
 
 BUTTONS_DICT = {CruiseButtons.RES_ACCEL: ButtonType.accelCruise, CruiseButtons.DECEL_SET: ButtonType.decelCruise,
                 CruiseButtons.MAIN: ButtonType.mainCruise, CruiseButtons.CANCEL: ButtonType.cancel}
+HARD_BUTTONS_DICT = {CruiseButtons.RES_ACCEL: ButtonType.accelHardCruise, CruiseButtons.DECEL_SET: ButtonType.decelHardCruise}
+NORMAL_CRUISE_BUTTONS = (CruiseButtons.RES_ACCEL, CruiseButtons.DECEL_SET)
+
+
+def get_hard_cruise_buttons(steering_button_msg: dict) -> int:
+  return steering_button_msg.get("ACCButtonsHard", CruiseButtons.INIT)
+
 
 GearShifter = structs.CarState.GearShifter
 BOLT_GEN1_CANCEL_PERSONALITY_CARS = {
@@ -64,6 +71,8 @@ class CarState(CarStateBase):
 
     self.prev_distance_button = 0
     self.distance_button = 0
+    self.hard_cruise_buttons = CruiseButtons.INIT
+    self.force_reset_cruise_buttons = False
 
     self.single_pedal_mode = False
     self.auto_hold_armed = False
@@ -92,8 +101,8 @@ class CarState(CarStateBase):
     if not self.CP.pcmCruise:
       for b in buttonEvents:
         # The ECM allows enabling on falling edge of set, but only rising edge of resume
-        if (b.type == ButtonType.accelCruise and b.pressed) or \
-          (b.type == ButtonType.decelCruise and not b.pressed):
+        if (b.type in (ButtonType.accelCruise, ButtonType.accelHardCruise) and b.pressed) or \
+          (b.type in (ButtonType.decelCruise, ButtonType.decelHardCruise) and not b.pressed):
           return True
     return False
 
@@ -119,21 +128,36 @@ class CarState(CarStateBase):
     sdgm_non_volt = self.CP.carFingerprint in SDGM_CAR and self.CP.carFingerprint not in kaofui_state_cars
 
     prev_cruise_buttons = self.cruise_buttons
+    prev_hard_cruise_buttons = self.hard_cruise_buttons
     prev_distance_button = self.distance_button
     if not sdgm_non_volt:
-      self.cruise_buttons = pt_cp.vl["ASCMSteeringButton"]["ACCButtons"]
-      self.distance_button = pt_cp.vl["ASCMSteeringButton"]["DistanceButton"]
-      self.buttons_counter = pt_cp.vl["ASCMSteeringButton"]["RollingCounter"]
-      self.steering_button_checksum = pt_cp.vl["ASCMSteeringButton"]["SteeringButtonChecksum"]
+      steering_button_msg = pt_cp.vl["ASCMSteeringButton"]
+      self.cruise_buttons = steering_button_msg["ACCButtons"]
+      self.hard_cruise_buttons = get_hard_cruise_buttons(steering_button_msg)
+      self.distance_button = steering_button_msg["DistanceButton"]
+      self.buttons_counter = steering_button_msg["RollingCounter"]
+      self.steering_button_checksum = steering_button_msg["SteeringButtonChecksum"]
       self.steering_button_ts_nanos = pt_cp.ts_nanos["ASCMSteeringButton"]["ACCButtons"]
-      acc_always_one = pt_cp.vl["ASCMSteeringButton"]["ACCAlwaysOne"]
-      acc_hidden_bit = pt_cp.vl["ASCMSteeringButton"].get("ACCHiddenBit", 0)
+      acc_always_one = steering_button_msg["ACCAlwaysOne"]
+      acc_hidden_bit = steering_button_msg.get("ACCHiddenBit", 0)
       self.steering_button_prefix = (int(acc_always_one) & 1) | ((int(acc_hidden_bit) & 1) << 6)
     else:
-      self.cruise_buttons = cam_cp.vl["ASCMSteeringButton"]["ACCButtons"]
-      self.distance_button = cam_cp.vl["ASCMSteeringButton"]["DistanceButton"]
-      self.buttons_counter = cam_cp.vl["ASCMSteeringButton"]["RollingCounter"]
+      steering_button_msg = cam_cp.vl["ASCMSteeringButton"]
+      self.cruise_buttons = steering_button_msg["ACCButtons"]
+      self.hard_cruise_buttons = get_hard_cruise_buttons(steering_button_msg)
+      self.distance_button = steering_button_msg["DistanceButton"]
+      self.buttons_counter = steering_button_msg["RollingCounter"]
       self.steering_button_ts_nanos = cam_cp.ts_nanos["ASCMSteeringButton"]["ACCButtons"]
+
+    # A GM hard press keeps the normal cruise button signal active too. Suppress
+    # the normal button until the wheel reports a different normal state.
+    if self.hard_cruise_buttons != CruiseButtons.INIT and self.cruise_buttons in NORMAL_CRUISE_BUTTONS:
+      self.force_reset_cruise_buttons = True
+    if self.force_reset_cruise_buttons and self.cruise_buttons in NORMAL_CRUISE_BUTTONS:
+      self.cruise_buttons = CruiseButtons.UNPRESS
+    elif self.force_reset_cruise_buttons and self.cruise_buttons not in NORMAL_CRUISE_BUTTONS:
+      self.force_reset_cruise_buttons = False
+
     self.pscm_status = copy.copy(pt_cp.vl["PSCMStatus"])
     self.moving_backward = (pt_cp.vl["EBCMWheelSpdRear"]["RLWheelDir"] == 2) or (pt_cp.vl["EBCMWheelSpdRear"]["RRWheelDir"] == 2)
 
@@ -178,7 +202,10 @@ class CarState(CarStateBase):
       ret.brakePressed = ret.brake >= VOLT_EBCM_BRAKE_PRESSED_THRESHOLD
     elif self.CP.carFingerprint in {CAR.CHEVROLET_MALIBU_CC} or (self.CP.carFingerprint == CAR.CHEVROLET_BLAZER and not no_accel_pos):
       ret.brakePressed = ret.brake >= 8
-    elif (self.CP.flags & GMFlags.FORCE_BRAKE_C9.value) or ((self.CP.networkLocation == NetworkLocation.fwdCamera) and (self.CP.carFingerprint != CAR.CHEVROLET_BLAZER)):
+    elif (self.CP.flags & GMFlags.FORCE_BRAKE_C9.value) or (
+      self.CP.networkLocation == NetworkLocation.fwdCamera and
+      self.CP.carFingerprint not in (SDGM_CAR | ASCM_INT | {CAR.CHEVROLET_BLAZER})
+    ):
       ret.brakePressed = pt_cp.vl["ECMEngineStatus"]["BrakePressed"] != 0
     else:
       # Some Volt 2016-17 have loose brake pedal push rod retainers which causes the ECM to believe
@@ -374,13 +401,18 @@ class CarState(CarStateBase):
     lkas_events = [] if (suppress_malibu_side_buttons or suppress_bolt_cancel_lkas) else create_button_events(
       self.lkas_enabled, self.lkas_previously_enabled, {1: ButtonType.lkas}
     )
+    hard_cruise_events = create_button_events(
+      self.hard_cruise_buttons, prev_hard_cruise_buttons, HARD_BUTTONS_DICT, unpressed_btn=CruiseButtons.INIT
+    )
 
     # Don't add events if transitioning from INIT, unless it's to an actual button.
-    if self.cruise_buttons != CruiseButtons.UNPRESS or prev_cruise_buttons != CruiseButtons.INIT:
+    if (self.cruise_buttons != CruiseButtons.UNPRESS or prev_cruise_buttons != CruiseButtons.INIT or
+        self.hard_cruise_buttons != CruiseButtons.INIT or prev_hard_cruise_buttons != CruiseButtons.INIT):
       ret.buttonEvents = [
         *cruise_events,
         *distance_events,
         *lkas_events,
+        *hard_cruise_events,
       ]
 
     if ret.vEgo < self.CP.minSteerSpeed:
@@ -438,7 +470,7 @@ class CarState(CarStateBase):
         ("ASCMSteeringButton", 33),
       ]
       if CP.enableBsm:
-        pt_messages.append(("BCMBlindSpotMonitor", 10))
+        pt_messages.append(("BCMBlindSpotMonitor", 0))
 
     if CP.flags & GMFlags.NO_ACCELERATOR_POS_MSG.value:
       if ("ECMAcceleratorPos", 80) in pt_messages:
@@ -480,7 +512,7 @@ class CarState(CarStateBase):
           ("ASCMSteeringButton", 33),
         ]
         if CP.enableBsm:
-          cam_messages.append(("BCMBlindSpotMonitor", 10))
+          cam_messages.append(("BCMBlindSpotMonitor", 0))
       elif CP.carFingerprint in ASCM_INT:
         # Volt/ASCM-int variants don't reliably have AEBCmd present at startup,
         # but when it appears we still want to surface OEM AEB state.

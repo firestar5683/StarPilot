@@ -17,6 +17,7 @@ const MENU_ITEMS = {
     { name: "Lateral Maneuvers", link: "/lateral_maneuvers", icon: "bi-sign-turn-right" },
     { name: "Long Maneuvers", link: "/longitudinal_maneuvers", icon: "bi-signpost-split" },
     { name: "Maps", link: "/manage_maps", icon: "bi-map" },
+    { name: "Navigation", link: "/set_navigation_destination", icon: "bi-geo-alt-fill" },
     { name: "Navigation Keys", link: "/manage_navigation_keys", icon: "bi-key-fill" },
     { name: "Model Manager", link: "/manage_models", icon: "bi-cpu" },
     { name: "Plots", link: "/plots", icon: "bi-graph-up-arrow" },

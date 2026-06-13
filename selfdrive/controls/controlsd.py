@@ -23,6 +23,7 @@ from openpilot.selfdrive.controls.lib.latcontrol_torque import (
   get_bolt_2017_steer_ratio_scale,
 )
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
+from openpilot.selfdrive.car.cruise_state import should_cancel_stock_cruise
 from openpilot.selfdrive.modeld.modeld import LAT_SMOOTH_SECONDS
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 
@@ -44,6 +45,30 @@ def get_gm_hud_set_speed(set_speed_ms: float, starpilot_toggles) -> float:
     spoofed_speed += set_speed_offset * CV.KPH_TO_MS
 
   return spoofed_speed
+
+
+def get_torque_control_params(CP, torque_params, starpilot_toggles, use_live_params: bool) -> tuple[float, float, float]:
+  torque_tune = CP.lateralTuning.torque
+  lat_accel_factor = torque_tune.latAccelFactor
+  lat_accel_offset = torque_tune.latAccelOffset
+  friction = torque_tune.friction
+
+  use_custom_lat_accel = getattr(starpilot_toggles, "use_custom_latAccelFactor", False)
+  use_custom_friction = getattr(starpilot_toggles, "use_custom_friction", False)
+
+  if use_live_params:
+    if not use_custom_lat_accel:
+      lat_accel_factor = torque_params.latAccelFactorFiltered
+      lat_accel_offset = torque_params.latAccelOffsetFiltered
+    if not use_custom_friction:
+      friction = torque_params.frictionCoefficientFiltered
+
+  if use_custom_lat_accel:
+    lat_accel_factor = starpilot_toggles.latAccelFactor
+  if use_custom_friction:
+    friction = starpilot_toggles.friction
+
+  return lat_accel_factor, lat_accel_offset, friction
 
 
 class Controls:
@@ -82,6 +107,8 @@ class Controls:
     self.sm = self.sm.extend(['liveDelay', 'starpilotCarState', 'starpilotPlan'])
 
     self.starpilot_toggles = get_starpilot_toggles()
+    self.ecu_disable_failed = False
+    self.ecu_disable_failed_checked = not self.CP.openpilotLongitudinalControl
 
     if self.CP.lateralTuning.which() == "torque" and (self.starpilot_toggles.nnff or self.starpilot_toggles.nnff_lite):
       self.LaC = LatControlNNFF(self.CP, self.CI, DT_CTRL)
@@ -102,6 +129,16 @@ class Controls:
 
     self.starpilot_toggles = get_starpilot_toggles(self.sm)
 
+  def update_ecu_disable_failed(self):
+    if self.ecu_disable_failed_checked:
+      return
+
+    # ControlsReady is set after CarInterface.init(), where Hyundai ECU disable
+    # writes EcuDisableFailed. Once init has completed, the value is stable.
+    if self.params.get_bool("ControlsReady"):
+      self.ecu_disable_failed = self.params.get_bool("EcuDisableFailed")
+      self.ecu_disable_failed_checked = True
+
   def state_control(self):
     CS = self.sm['carState']
 
@@ -121,9 +158,15 @@ class Controls:
     # Update Torque Params
     if self.CP.lateralTuning.which() == 'torque':
       torque_params = self.sm['liveTorqueParameters']
-      if self.sm.all_checks(['liveTorqueParameters']) and (torque_params.useParams or self.starpilot_toggles.force_auto_tune):
-        self.LaC.update_live_torque_params(torque_params.latAccelFactorFiltered, torque_params.latAccelOffsetFiltered,
-                                           torque_params.frictionCoefficientFiltered)
+      force_auto_tune = getattr(self.starpilot_toggles, "force_auto_tune", False)
+      use_live_params = self.sm.all_checks(['liveTorqueParameters']) and (torque_params.useParams or force_auto_tune)
+      use_custom_torque_params = (
+        getattr(self.starpilot_toggles, "use_custom_latAccelFactor", False) or
+        getattr(self.starpilot_toggles, "use_custom_friction", False)
+      )
+      if use_live_params or use_custom_torque_params:
+        lat_accel_factor, lat_accel_offset, friction = get_torque_control_params(self.CP, torque_params, self.starpilot_toggles, use_live_params)
+        self.LaC.update_live_torque_params(lat_accel_factor, lat_accel_offset, friction)
 
     long_plan = self.sm['longitudinalPlan']
     model_v2 = self.sm['modelV2']
@@ -140,8 +183,8 @@ class Controls:
                                       self.sm['starpilotPlan'].lateralCheck)
     # EcuDisableFailed is set when car started in READY mode (ECU disable was rejected)
     # Disable longitudinal so stock ACC works instead
-    ecu_disable_failed = self.params.get_bool("EcuDisableFailed")
-    CC.longActive = CC.enabled and not any(e.overrideLongitudinal for e in self.sm['onroadEvents']) and not self.sm['starpilotCarState'].pauseLongitudinal and self.CP.openpilotLongitudinalControl and not ecu_disable_failed
+    self.update_ecu_disable_failed()
+    CC.longActive = CC.enabled and not any(e.overrideLongitudinal for e in self.sm['onroadEvents']) and not self.sm['starpilotCarState'].pauseLongitudinal and self.CP.openpilotLongitudinalControl and not self.ecu_disable_failed
 
     actuators = CC.actuators
     actuators.longControlState = self.LoC.long_control_state
@@ -233,7 +276,7 @@ class Controls:
       CC.enabled,
       self.sm['starpilotCarState'].alwaysOnLateralEnabled,
     )
-    cancel_requested = CS.cruiseState.enabled and (not CC.enabled or not self.CP.pcmCruise)
+    cancel_requested = should_cancel_stock_cruise(self.CP, CS.cruiseState.enabled, CC.enabled)
     CC.cruiseControl.cancel = cancel_requested and not pacifica_hybrid_aol
 
     legacy_resume_hack = False

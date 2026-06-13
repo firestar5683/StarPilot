@@ -190,7 +190,7 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *msg) {
     .has_steer_req_tolerance = true,
   };
   const AngleSteeringLimits HYUNDAI_CANFD_ANGLE_STEERING_LIMITS = {
-    .max_angle = 1800,
+    .max_angle = 3600,
     .angle_deg_to_can = 10,
     .frequency = 100U,
   };
@@ -230,9 +230,16 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *msg) {
       int desired_angle = (msg->data[11] << 6U) | (msg->data[10] >> 2U);
       desired_angle = to_signed(desired_angle, 14);
 
+      // ADAS_ACIAnglTqRedcGainVal: bit 96, 8 bits, unsigned. Raw 0-250 valid, 251-255 reserved.
+      const uint8_t gain_raw = msg->data[12];
+      bool gain_violation = gain_raw > 250U;
+      if (!steer_angle_req && (gain_raw != 0U)) {
+        gain_violation = true;
+      }
+
       if (steer_angle_cmd_checks_vm(desired_angle, steer_angle_req,
                                     HYUNDAI_CANFD_ANGLE_STEERING_LIMITS,
-                                    HYUNDAI_CANFD_ANGLE_STEERING_PARAMS)) {
+                                    HYUNDAI_CANFD_ANGLE_STEERING_PARAMS) || gain_violation) {
         tx = false;
       }
     } else {

@@ -19,6 +19,7 @@ private:
   QHBoxLayout* split;
 
   void mousePressEvent(QMouseEvent* mouseEvent);
+  void mouseReleaseEvent(QMouseEvent* mouseEvent);
 
   StarPilotAnnotatedCameraWidget *starpilot_nvg;
   StarPilotOnroadWindow *starpilot_onroad;

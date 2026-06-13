@@ -127,6 +127,10 @@ def _install_aethergrid_stubs():
   widgets_mod.DialogResult = types.SimpleNamespace(CONFIRM=1, CANCEL=0, NO_ACTION=-1)
   sys.modules["openpilot.system.ui.widgets"] = widgets_mod
 
+  option_dialog_mod = types.ModuleType("openpilot.system.ui.widgets.option_dialog")
+  option_dialog_mod.MultiOptionDialog = type("MultiOptionDialog", (), {})
+  sys.modules["openpilot.system.ui.widgets.option_dialog"] = option_dialog_mod
+
   label_mod = types.ModuleType("openpilot.system.ui.widgets.label")
   label_mod.gui_label = lambda *a, **k: None
   sys.modules["openpilot.system.ui.widgets.label"] = label_mod
@@ -143,7 +147,7 @@ def _install_panel_stubs(aethergrid):
 
   _register_modules({
     SECTIONED_PANEL_MODULE_NAME: sectioned_mod,
-    "openpilot.common.params": types.SimpleNamespace(Params=type("Params", (), {})),
+    "openpilot.common.params": types.SimpleNamespace(Params=type("Params", (), {}), UnknownKeyName=Exception),
     MODULE_NAME: aethergrid,
   })
 
@@ -262,7 +266,7 @@ class TestAethergridContracts(unittest.TestCase):
 
   def test_hub_tile_preserves_status_progress_api(self):
     mod = _import_aethergrid()
-    tile = mod.HubTile("Driving Controls", "Desc", "", bg_color="#3B82F6", get_status=lambda: "Download 50%")
+    tile = mod.HubTile("Driving Controls", "Desc", bg_color="#3B82F6", get_status=lambda: "Download 50%")
 
     self.assertEqual(tile.get_status(), "Download 50%")
 
@@ -353,6 +357,44 @@ class TestAethergridContracts(unittest.TestCase):
 
     self.assertGreaterEqual(row_h, 0)
     self.assertLessEqual(title_h, layout._title_height)
+
+  def test_slider_dialog_on_change_callback(self):
+    mod = _import_aethergrid()
+    captured_changes = []
+    captured_close = []
+
+    dialog = mod.AetherSliderDialog(
+      "Test", 0, 10, 1, 5,
+      on_close=lambda res, val: captured_close.append((res, val)),
+      color="#8B5CF6",
+      on_change=lambda val: captured_changes.append(val)
+    )
+
+    # Run render to compute button and track rects
+    dialog._render(mod.rl.Rectangle(0, 0, 1920, 1080))
+
+    # Mock mouse position hitting the plus rect and press it
+    plus_center = mod.rl.Vector2(
+      dialog._plus_rect.x + dialog._plus_rect.width / 2,
+      dialog._plus_rect.y + dialog._plus_rect.height / 2
+    )
+
+    # Mock collision detection to return True when checking the plus button
+    old_collision = mod.rl.check_collision_point_rec
+    def mock_collision(point, rec):
+      if rec == dialog._plus_rect:
+        return True
+      return False
+    mod.rl.check_collision_point_rec = mock_collision
+
+    try:
+      dialog._handle_mouse_press(plus_center)
+      dialog._handle_mouse_release(plus_center)
+    finally:
+      mod.rl.check_collision_point_rec = old_collision
+
+    self.assertEqual(dialog._current_val, 6)
+    self.assertEqual(captured_changes, [6])
 
 
 if __name__ == "__main__":

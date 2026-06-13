@@ -120,6 +120,12 @@ class Parser:
     if 'lead_prob' in outs:
       self.parse_binary_crossentropy('lead_prob', outs)
 
+  def parse_off_policy_outputs(self, outs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
+    self.split_outputs(outs)
+    if 'desire_state' in outs:
+      self.parse_categorical_crossentropy('desire_state', outs, out_shape=(ModelConstants.DESIRE_PRED_WIDTH,))
+    return outs
+
   def parse_vision_outputs(self, outs: dict[str, np.ndarray]) -> dict[str, np.ndarray]:
     self.parse_mdn('pose', outs, in_N=0, out_N=0, out_shape=(ModelConstants.POSE_WIDTH,))
     self.parse_mdn('wide_from_device_euler', outs, in_N=0, out_N=0, out_shape=(ModelConstants.WIDE_FROM_DEVICE_WIDTH,))

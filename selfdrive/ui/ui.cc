@@ -391,6 +391,11 @@ void UIState::update() {
     if (!watchdog_kick(nanos_since_boot())) {
       LOGE("UI watchdog kick failed at frame %llu", static_cast<unsigned long long>(sm->frame));
     }
+    // Re-pin to the little cores: power-save can offline our core and the
+    // kernel may rebalance us onto core 4 (the realtime control loop).
+    if (!Hardware::PC()) {
+      util::set_core_affinity({0, 1, 2, 3});
+    }
   }
   ui_stall_progress(UIStallPhase::AFTER_WATCHDOG, sm->frame);
   emit uiUpdate(*this, *starpilotUIState());

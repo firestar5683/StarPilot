@@ -25,7 +25,7 @@ ACCEL_WINDUP_LIMIT = 4.0 * DT_CTRL * 3  # m/s^2 / frame
 ACCEL_WINDDOWN_LIMIT = -4.0 * DT_CTRL * 3  # m/s^2 / frame
 ACCEL_PID_UNWIND = 0.03 * DT_CTRL * 3  # m/s^2 / frame
 PRIUS_INTEGRAL_MISMATCH_UNWIND = 8.0
-PRIUS_POSITIVE_FEEDFORWARD_SCALE = 0.5
+PRIUS_POSITIVE_FEEDFORWARD_SCALE = 0.7
 
 MAX_PITCH_COMPENSATION = 1.5  # m/s^2
 TOYOTA_COAST_BRAKE_MIN_SPEED = 15.0  # m/s
@@ -138,6 +138,25 @@ def limit_interceptor_stopping_accel(pcm_accel_cmd: float, target_accel: float, 
   # current planner target instead of shoving through zero.
   stop_floor = float(np.interp(v_ego, [0.0, 0.2, 0.5, 0.9, 1.5, 2.5], [-0.72, -0.76, -0.82, -0.92, -1.05, -1.20]))
   target_buffer = float(np.interp(v_ego, [0.0, 0.5, 1.5, 2.5], [0.08, 0.10, 0.15, 0.20]))
+  planner_floor = float(target_accel) - target_buffer
+  return max(pcm_accel_cmd, max(stop_floor, planner_floor))
+
+
+def limit_prius_stopping_accel(pcm_accel_cmd: float, target_accel: float, stopping: bool, v_ego: float, lead_visible: bool) -> float:
+  if not stopping or pcm_accel_cmd >= 0.0 or v_ego >= 1.5:
+    return pcm_accel_cmd
+
+  # Prius can hold onto a stale full negative stop command at standstill even after the
+  # planner has already softened. Keep enough brake to hold the stop, but let the command
+  # unwind toward the live planner target so launches are not delayed and stop transitions
+  # are less abrupt.
+  if target_accel <= -1.8:
+    return pcm_accel_cmd
+
+  stop_floor = float(np.interp(v_ego,
+                               [0.0, 0.2, 0.5, 0.9, 1.5],
+                               [-0.96, -1.00, -1.08, -1.18, -1.35] if lead_visible else [-0.84, -0.88, -0.96, -1.08, -1.24]))
+  target_buffer = float(np.interp(v_ego, [0.0, 0.5, 1.5], [0.06, 0.10, 0.16]))
   planner_floor = float(target_accel) - target_buffer
   return max(pcm_accel_cmd, max(stop_floor, planner_floor))
 
@@ -410,6 +429,8 @@ class CarController(CarControllerBase):
         if self.CP.enableGasInterceptorDEPRECATED:
           pcm_accel_cmd = limit_interceptor_pcm_accel(pcm_accel_cmd, actuators.accel, stopping, CS.out.vEgo)
           pcm_accel_cmd = limit_interceptor_stopping_accel(pcm_accel_cmd, actuators.accel, stopping, CS.out.vEgo, bool(hud_control.leadVisible))
+        elif self.CP.carFingerprint == CAR.TOYOTA_PRIUS:
+          pcm_accel_cmd = limit_prius_stopping_accel(pcm_accel_cmd, actuators.accel, stopping, CS.out.vEgo, lead)
 
         pcm_accel_cmd = float(np.clip(pcm_accel_cmd, self.params.ACCEL_MIN, self.params.ACCEL_MAX))
 

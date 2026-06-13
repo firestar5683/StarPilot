@@ -10,7 +10,7 @@ from openpilot.system.hardware import HARDWARE, PC, TICI
 from openpilot.system.manager.process import PythonProcess, NativeProcess, DaemonProcess
 
 WEBCAM = os.getenv("USE_WEBCAM") is not None
-UI_WATCHDOG_MAX_DT = int(os.getenv("UI_WATCHDOG_MAX_DT", "5"))
+UI_WATCHDOG_MAX_DT = int(os.getenv("UI_WATCHDOG_MAX_DT", "10"))
 
 def driverview(started: bool, params: Params, CP: car.CarParams, starpilot_toggles: SimpleNamespace) -> bool:
   return started or params.get_bool("IsDriverViewEnabled")
@@ -79,6 +79,9 @@ def run_speed_limit_filler(started: bool, params: Params, CP: car.CarParams, sta
 
 def run_speed_limit_vision(started: bool, params: Params, CP: car.CarParams, starpilot_toggles: SimpleNamespace) -> bool:
   return starpilot_toggles.vision_speed_limit_detection
+
+def run_navigationd(started: bool, params: Params, CP: car.CarParams, starpilot_toggles: SimpleNamespace) -> bool:
+  return started and params.get("NavDestination") is not None
 
 procs = [
   DaemonProcess("manage_athenad", "system.athena.manage_athenad", "AthenadPid"),
@@ -150,7 +153,8 @@ else:
 procs += [
   PythonProcess("device_syncd", "starpilot.system.device_syncd", always_run),
   PythonProcess("starpilot_process", "starpilot.starpilot_process", always_run),
-  PythonProcess("mapd", "starpilot.navigation.mapd_wrapper", always_run),
+  PythonProcess("mapd", "starpilot.navigation.mapd_wrapper", always_run, nice=19),
+  PythonProcess("navigationd", "starpilot.navigation.navigationd", run_navigationd, nice=19),
   PythonProcess("speed_limit_filler", "starpilot.system.speed_limit_filler", run_speed_limit_filler, nice=19),
   PythonProcess("speed_limit_vision", "starpilot.system.speed_limit_vision", run_speed_limit_vision, nice=19),
 ]

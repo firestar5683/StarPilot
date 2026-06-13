@@ -125,7 +125,11 @@ class ModelRenderer(Widget):
 
     # StarPilot lead indicator visibility conditions
     hide_lead_marker = self._params.get_bool("HideLeadMarker")
-    lead_info_enabled = self._params.get_bool("LeadInfo")
+    self._lead_info_enabled = self._params.get_bool("LeadInfo")
+    self._use_rainbow = self._params.get_bool('RainbowPath', default=False)
+    self._use_accel_path = self._params.get_bool('AccelerationPath', default=True)
+    self._is_metric = self._params.get_bool('IsMetric')
+    lead_info_enabled = self._lead_info_enabled
     render_lead_indicator = (self._longitudinal_control or lead_info_enabled) and radar_state is not None and not hide_lead_marker
 
     # Update model data when needed
@@ -154,7 +158,9 @@ class ModelRenderer(Widget):
 
     if render_lead_indicator and radar_state:
       self._draw_lead_indicator(radar_state)
-      if sm.valid.get("starpilotRadarState", False):
+      # Adjacent leads may be published by radard for non-UI consumers (e.g. HumanLaneChanges),
+      # so gate drawing on the AdjacentLeadsUI param directly.
+      if sm.valid.get("starpilotRadarState", False) and self._params.get_bool("AdjacentLeadsUI"):
         self._draw_adjacent_leads()
 
     self._draw_radar_tracks()
@@ -261,13 +267,12 @@ class ModelRenderer(Widget):
 
   def _update_experimental_gradient(self):
     """Pre-calculate experimental mode gradient colors"""
-    use_rainbow = self._params.get_bool('RainbowPath', default=False)
-    if use_rainbow:
+    if self._use_rainbow:
       gradient_bottom, gradient_top = self._get_visible_gradient_bounds()
       self._exp_gradient = self._build_rainbow_gradient(gradient_bottom, gradient_top)
       return
 
-    if not self._experimental_mode or not self._params.get_bool('AccelerationPath', default=True):
+    if not self._experimental_mode or not self._use_accel_path:
       return
 
     max_len = min(len(self._path.projected_points) // 2, len(self._acceleration_x))
@@ -399,8 +404,8 @@ class ModelRenderer(Widget):
     allow_throttle = sm['longitudinalPlan'].allowThrottle or not self._longitudinal_control
     self._blend_filter.update(int(allow_throttle))
 
-    use_rainbow = self._params.get_bool('RainbowPath', default=False)
-    use_accel_path = not use_rainbow and self._params.get_bool('AccelerationPath', default=True)
+    use_rainbow = self._use_rainbow
+    use_accel_path = not use_rainbow and self._use_accel_path
     if use_rainbow:
       if len(self._exp_gradient.colors) > 1:
         draw_polygon(self._rect, self._path.projected_points, gradient=self._exp_gradient)
@@ -466,8 +471,7 @@ class ModelRenderer(Widget):
       rl.draw_triangle_fan(lead.chevron, len(lead.chevron), with_alpha(color, lead.fill_alpha))
 
       # Draw metrics if enabled
-      lead_info_enabled = self._params.get_bool("LeadInfo")
-      if lead_info_enabled and i < len(leads) and leads[i] and leads[i].status:
+      if self._lead_info_enabled and i < len(leads) and leads[i] and leads[i].status:
         self._draw_lead_metrics(False, lead.chevron, leads[i])
 
   def _update_adjacent_leads(self, starpilot_radar_state, path_x_array):
@@ -511,8 +515,7 @@ class ModelRenderer(Widget):
       rl.draw_triangle_fan(lead.chevron, len(lead.chevron), with_alpha(color, lead.fill_alpha))
 
       # Draw metrics if enabled
-      lead_info_enabled = self._params.get_bool("LeadInfo")
-      if lead_info_enabled:
+      if self._lead_info_enabled:
         self._draw_lead_metrics(True, lead.chevron, lead_data)
 
   def _draw_lead_metrics(self, adjacent, chevron, lead_data):
@@ -894,14 +897,14 @@ class ModelRenderer(Widget):
   def _small_distance_to_half_m(self, value: float) -> float:
     if value <= 0:
       return 0.0
-    if self._params.get_bool("IsMetric"):
+    if self._is_metric:
       return value / 200.0
     return value * (CV.INCH_TO_CM / 100.0) / 2.0
 
   def _path_width_to_half_m(self, value: float) -> float:
     if value <= 0:
       return 0.0
-    if self._params.get_bool("IsMetric"):
+    if self._is_metric:
       return value / 2.0
     return value * CV.FOOT_TO_METER / 2.0
 

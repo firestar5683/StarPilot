@@ -5,9 +5,11 @@ from opendbc.car.hyundai.values import HyundaiFlags, CAR, CarControllerParams, \
                                                    CANFD_UNSUPPORTED_LONGITUDINAL_CAR, \
                                                    CANFD_SECURITYACCESS_CAR, \
                                                    CANFD_RADAR_LIVE_LONGITUDINAL_CAR, \
+                                                   RADAR_LIVE_LONGITUDINAL_CAR, \
                                                    UNSUPPORTED_LONGITUDINAL_CAR, HyundaiSafetyFlags, \
+                                                   HyundaiStarPilotSafetyFlags, \
                                                    hyundai_cancel_button_enables_cruise
-from opendbc.car.hyundai.radar_interface import get_radar_track_config
+from opendbc.car.hyundai.radar_interface import get_radar_track_config, radar_tracks_available
 from opendbc.car.interfaces import CarInterfaceBase, ACCEL_MIN
 from opendbc.car.disable_ecu import disable_ecu, ecu_log
 from opendbc.car.hyundai.carcontroller import CarController
@@ -22,6 +24,7 @@ ENABLE_BUTTONS = (ButtonType.accelCruise, ButtonType.decelCruise, ButtonType.can
 
 # Track when ECU disable happened - used to permanently suppress CAN errors from disabled ECU
 ECU_DISABLE_TIMESTAMP = 0.0
+KONA_NON_SCC_FCA_RADAR_ADDR = 0x602
 
 
 def apply_platform_longitudinal_params(ret: structs.CarParams) -> None:
@@ -41,6 +44,18 @@ def apply_ecu_disable_failure_fallback(CP: structs.CarParams, params) -> None:
   CP.safetyConfigs[-1].safetyParam &= ~HyundaiSafetyFlags.LONG.value
   CP.openpilotLongitudinalControl = False
   CP.pcmCruise = True
+
+
+def detect_kona_non_scc_radar_fca(candidate, fingerprint, car_fw) -> bool:
+  if candidate != CAR.HYUNDAI_KONA_NON_SCC:
+    return False
+
+  if any(fw.ecu == Ecu.fwdRadar for fw in car_fw):
+    return True
+
+  # Some non-SCC Kona trims have FCA radar tracks without SCC. Use PT FCA11
+  # status on those cars; camera-bus FCA11 is not continuously published.
+  return KONA_NON_SCC_FCA_RADAR_ADDR in fingerprint[1]
 
 
 class CarInterface(CarInterfaceBase):
@@ -134,6 +149,8 @@ class CarInterface(CarInterfaceBase):
       # These cars use the FCA11 message for the AEB and FCW signals, all others use SCC12
       if 0x38d in fingerprint[CAN.ECAN] or 0x38d in fingerprint[CAN.CAM]:
         ret.flags |= HyundaiFlags.USE_FCA.value
+      if detect_kona_non_scc_radar_fca(candidate, fingerprint, car_fw):
+        ret.flags |= HyundaiFlags.NON_SCC_RADAR_FCA.value
 
       if ret.flags & HyundaiFlags.LEGACY:
         # these cars require a special panda safety mode due to missing counters and checksums in the messages
@@ -144,7 +161,9 @@ class CarInterface(CarInterfaceBase):
       if ret.flags & HyundaiFlags.CAMERA_SCC:
         ret.safetyConfigs[0].safetyParam |= HyundaiSafetyFlags.CAMERA_SCC.value
 
-      # These cars have the LFA button on the steering wheel
+      # These cars expose an LKAS/LFA steering-wheel button that StarPilot can customize.
+      if 0x391 in fingerprint[0] or ret.flags & HyundaiFlags.CAN_CANFD_BLENDED:
+        ret.safetyConfigs[-1].safetyParam |= HyundaiStarPilotSafetyFlags.HAS_LDA_BUTTON.value
       if ret.flags & HyundaiFlags.CAN_CANFD_BLENDED:
         ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.CAN_CANFD_BLENDED.value
       if hyundai_cancel_button_enables_cruise(candidate):
@@ -172,13 +191,13 @@ class CarInterface(CarInterfaceBase):
 
     # Common longitudinal control setup
 
-    radar_config = get_radar_track_config(ret.carFingerprint)
-    radar_tracks_available = radar_config is not None and radar_config.start_addr in fingerprint[radar_config.bus]
-    ret.radarUnavailable = not radar_tracks_available
+    radar_config = get_radar_track_config(ret.carFingerprint, ret.flags)
+    radar_available = radar_tracks_available(radar_config, fingerprint)
+    ret.radarUnavailable = not radar_available
     if ret.flags & HyundaiFlags.NON_SCC:
       ret.alphaLongitudinalAvailable = False
     ret.openpilotLongitudinalControl = alpha_long and ret.alphaLongitudinalAvailable
-    if ret.openpilotLongitudinalControl and not (candidate in CANFD_RADAR_LIVE_LONGITUDINAL_CAR and radar_tracks_available):
+    if ret.openpilotLongitudinalControl and not (candidate in RADAR_LIVE_LONGITUDINAL_CAR and radar_available):
       ret.radarUnavailable = True
     ret.pcmCruise = not ret.openpilotLongitudinalControl
     apply_platform_longitudinal_params(ret)

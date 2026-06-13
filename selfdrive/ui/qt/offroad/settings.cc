@@ -20,11 +20,12 @@
 #include "selfdrive/ui/qt/widgets/prime.h"
 #include "selfdrive/ui/qt/widgets/scrollview.h"
 #include "selfdrive/ui/qt/offroad/developer_panel.h"
-#include "selfdrive/ui/qt/offroad/firehose.h"
 
 #include "starpilot/ui/qt/offroad/starpilot_settings.h"
 
 TogglesPanel::TogglesPanel(SettingsWindow *parent) : ListWidget(parent) {
+  syncRhdToggle();
+
   // param, title, desc, icon, restart needed
   std::vector<std::tuple<QString, QString, QString, QString, bool>> toggle_defs{
     {
@@ -73,6 +74,13 @@ TogglesPanel::TogglesPanel(SettingsWindow *parent) : ListWidget(parent) {
       "AlwaysOnDM",
       tr("Always-On Driver Monitoring"),
       tr("Enable driver monitoring even when openpilot is not engaged."),
+      "../assets/icons/monitoring.png",
+      false,
+    },
+    {
+      "IsRHD",
+      tr("Right Hand Driving"),
+      tr("Use right-hand-drive driver monitoring. This follows the auto-detected side until changed manually."),
       "../assets/icons/monitoring.png",
       false,
     },
@@ -136,6 +144,13 @@ TogglesPanel::TogglesPanel(SettingsWindow *parent) : ListWidget(parent) {
       });
     }
 
+    if (param == "IsRHD") {
+      QObject::connect(toggle, &ParamControl::toggleFlipped, this, [this](bool state) {
+        params.putBool("IsRHD", state);
+        params.putBool("IsRHDOverride", true);
+      });
+    }
+
     addItem(toggle);
     toggles[param.toStdString()] = toggle;
 
@@ -152,6 +167,12 @@ TogglesPanel::TogglesPanel(SettingsWindow *parent) : ListWidget(parent) {
   connect(toggles["IsMetric"], &ToggleControl::toggleFlipped, [=](bool isMetric) {
     updateMetric(isMetric);
   });
+}
+
+void TogglesPanel::syncRhdToggle() {
+  if (!params.getBool("IsRHDOverride")) {
+    params.putBool("IsRHD", params.getBool("IsRhdDetected"));
+  }
 }
 
 void TogglesPanel::updateState(const UIState &s) {
@@ -184,6 +205,8 @@ void TogglesPanel::showEvent(QShowEvent *event) {
 }
 
 void TogglesPanel::updateToggles() {
+  syncRhdToggle();
+
   const bool showAllToggles = params.getBool("ShowAllToggles");
   const bool safe_mode = params.getBool("SafeMode");
   const bool simple_mode = params.getBool("SimpleMode");
@@ -266,6 +289,7 @@ void TogglesPanel::updateToggles() {
   experimental_mode_toggle->setVisible(showAllToggles || !starpilot_toggles.value("conditional_experimental_mode").toBool());
   auto record_audio_toggle = toggles["RecordAudio"];
   record_audio_toggle->setVisible(showAllToggles || !starpilot_toggles.value("no_logging").toBool());
+  toggles["IsRHD"]->refresh();
 
   auto safe_mode_toggle = toggles["SafeMode"];
   if (safe_mode_toggle != nullptr) {
@@ -410,7 +434,7 @@ DevicePanel::DevicePanel(SettingsWindow *parent) : ListWidget(parent) {
   resetDmCalibBtn = new ButtonControl(
     tr("Reset Driver Monitoring"),
     tr("RESET"),
-    tr("Clears the saved driver monitoring wheel-side calibration if the device thinks you're seated on the wrong side. "
+    tr("Clears the saved driver monitoring wheel-side calibration and any manual right-hand-driving override if the device thinks you're seated on the wrong side. "
        "Resetting will restart openpilot if the car is powered on.")
   );
   connect(resetDmCalibBtn, &ButtonControl::clicked, [&]() {
@@ -418,6 +442,8 @@ DevicePanel::DevicePanel(SettingsWindow *parent) : ListWidget(parent) {
       if (ConfirmationDialog::confirm(tr("Are you sure you want to reset driver monitoring calibration?"), tr("Reset"), this)) {
         if (!uiState()->engaged()) {
           params.remove("IsRhdDetected");
+          params.remove("IsRHD");
+          params.remove("IsRHDOverride");
           params.putBool("OnroadCycleRequested", true);
         }
       }

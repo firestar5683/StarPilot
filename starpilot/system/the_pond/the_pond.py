@@ -77,6 +77,8 @@ from openpilot.starpilot.common.testing_grounds import (
   TESTING_GROUNDS_SLOT_DEFINITIONS as SHARED_TESTING_GROUNDS_SLOT_DEFINITIONS,
   TESTING_GROUNDS_STATE_PATH as SHARED_TESTING_GROUNDS_STATE_PATH,
 )
+from openpilot.starpilot.navigation.destination_store import normalize_destination_payload, update_recent_destinations
+from openpilot.starpilot.system.the_pond.factory_reset import remove_path as _run_factory_reset_delete
 from openpilot.starpilot.system.the_pond import utilities
 
 DISCORD_WEBHOOK_URL = os.getenv("DISCORD_WEBHOOK_URL")
@@ -461,6 +463,9 @@ KEYS = {
   "secret": ("secret", "sk.", "MapboxSecretKey", "Secret key", 80),
 }
 
+NAVIGATION_MEMORY_LOCATION_STALE_SECONDS = 10.0
+NAVIGATION_PERSISTED_LOCATION_BOOT_SKEW_SECONDS = 5.0
+
 TMUX_LOGS_PATH = Path("/data/tmux_logs")
 
 MODEL_DOWNLOAD_PARAM = "ModelToDownload"
@@ -471,6 +476,82 @@ MODEL_SORT_MODE_PARAM = "ModelSortMode"
 MODEL_USER_FAVORITES_PARAM = "UserFavorites"
 MAPS_DOWNLOAD_PARAM = "DownloadMaps"
 MAPS_CANCEL_DOWNLOAD_PARAM = "CancelDownloadMaps"
+
+
+def _parse_last_gps_position(raw_value):
+  if not raw_value:
+    return None
+
+  try:
+    payload = json.loads(raw_value)
+  except (TypeError, ValueError, json.JSONDecodeError):
+    return None
+
+  if not isinstance(payload, dict):
+    return None
+
+  latitude = payload.get("latitude")
+  longitude = payload.get("longitude")
+  has_fix = payload.get("hasFix", False)
+  try:
+    latitude = float(latitude or 0.0)
+    longitude = float(longitude or 0.0)
+  except (TypeError, ValueError):
+    return None
+
+  if not has_fix or (abs(latitude) < 1e-6 and abs(longitude) < 1e-6):
+    return None
+
+  payload["latitude"] = latitude
+  payload["longitude"] = longitude
+  return payload
+
+
+def _last_gps_position_is_live(payload):
+  if not isinstance(payload, dict):
+    return False
+
+  try:
+    updated_at_monotonic = float(payload.get("updatedAtMonotonic", 0.0) or 0.0)
+  except (TypeError, ValueError):
+    updated_at_monotonic = 0.0
+
+  if updated_at_monotonic <= 0.0:
+    return False
+
+  return (time.monotonic() - updated_at_monotonic) <= NAVIGATION_MEMORY_LOCATION_STALE_SECONDS
+
+
+def _last_gps_position_is_current_boot(payload):
+  if not isinstance(payload, dict):
+    return False
+
+  try:
+    updated_at_sec = float(payload.get("updatedAtSec", 0.0) or 0.0)
+  except (TypeError, ValueError):
+    updated_at_sec = 0.0
+
+  if updated_at_sec <= 0.0:
+    return False
+
+  now_sec = time.time()
+  boot_started_at_sec = now_sec - time.monotonic()
+  if updated_at_sec > (now_sec + 60.0):
+    return False
+
+  return updated_at_sec >= (boot_started_at_sec - NAVIGATION_PERSISTED_LOCATION_BOOT_SKEW_SECONDS)
+
+
+def _get_navigation_last_position():
+  memory_position = _parse_last_gps_position(params_memory.get("LastGPSPosition", encoding="utf8") or "")
+  if _last_gps_position_is_live(memory_position):
+    return memory_position
+
+  persisted_position = _parse_last_gps_position(params.get("LastGPSPosition", encoding="utf8") or "")
+  if _last_gps_position_is_current_boot(persisted_position):
+    return persisted_position
+
+  return None
 
 FINGERPRINT_MAKE_LABELS = [
   "Acura",
@@ -553,7 +634,6 @@ _FAST_UPDATE_REBOOT_NOTICE_SECONDS = 6.0
 _FAST_UPDATE_FETCH_TIMEOUT_S = 60
 _FAST_BRANCH_SWITCH_FETCH_TIMEOUT_S = 60
 _FAST_ROLLBACK_FETCH_TIMEOUT_S = 60
-_FACTORY_RESET_DELETE_TIMEOUT_S = 1800
 _GIT_PROGRESS_PERCENT_RE = re.compile(r'([A-Za-z][A-Za-z /_-]+):\s*([0-9]{1,3})%')
 _GIT_SUBMODULE_SECTION_RE = re.compile(r'^\s*\[submodule\s+"[^"]+"\]\s*$', re.MULTILINE)
 _ROLLBACK_REF = "refs/starpilot/rollback"
@@ -1492,18 +1572,6 @@ def _set_fast_update_error_state(message, exception):
     progressDetail="Update failed. See Last Error below.",
   )
 
-def _run_factory_reset_delete(path):
-  result = subprocess.run(
-    ["sudo", "rm", "-rf", path],
-    capture_output=True,
-    text=True,
-    timeout=_FACTORY_RESET_DELETE_TIMEOUT_S,
-    check=False,
-  )
-  if result.returncode != 0:
-    error_text = (result.stderr or result.stdout or "sudo rm -rf failed").strip()
-    raise RuntimeError(f"Failed to remove {path}: {error_text}")
-
 def _factory_reset_worker():
   started_at = time.time()
 
@@ -1949,6 +2017,8 @@ _cached_param_types = None
 _cached_default_values = None
 _cached_static_default_values = None
 
+POND_MANUAL_BOOL_PARAM_KEYS = {"IsRHD", "IsRHDOverride"}
+
 def _get_param_type_info():
   global _cached_allowed_keys, _cached_param_types
   if _cached_allowed_keys is None:
@@ -1969,6 +2039,12 @@ def _get_param_type_info():
     for k, dt in _get_layout_type_overrides().items():
       if k in types and dt in ("int", "float") and types[k] == bool:
         types[k] = float if dt == "float" else int
+      elif k in types and dt == "bool":
+        types[k] = bool
+
+    for k in POND_MANUAL_BOOL_PARAM_KEYS:
+      if k in _cached_allowed_keys:
+        types[k] = bool
 
     # Keep legacy aliases editable for older payloads/UI clients.
     alias_to_key = {
@@ -2143,6 +2219,9 @@ def _get_current_param_value(key, value_type, defaults_lookup=None):
   if key == CUSTOM_ACCEL_PROFILE_INITIALIZED_KEY:
     return _get_custom_accel_profile_initialized()
 
+  if key == "IsRHD" and not _safe_params_get_bool("IsRHDOverride"):
+    return _safe_params_get_bool("IsRhdDetected")
+
   if key in CUSTOM_ACCEL_PROFILE_PARAM_KEYS and not _get_custom_accel_profile_initialized():
     if defaults_lookup is None:
       defaults_lookup = _get_default_param_values()
@@ -2175,6 +2254,30 @@ def _serialize_param_write_value(raw_value):
   if isinstance(raw_value, bytes):
     return raw_value.decode("utf-8", errors="replace")
   return str(raw_value or "")
+
+def _offroad_excessive_actuation_type():
+  alert = _safe_params_get_live_raw("Offroad_ExcessiveActuation")
+  if not alert:
+    return ""
+
+  if isinstance(alert, bytes):
+    try:
+      alert = json.loads(alert.decode("utf-8", errors="replace"))
+    except json.JSONDecodeError:
+      return ""
+  elif isinstance(alert, str):
+    try:
+      alert = json.loads(alert)
+    except json.JSONDecodeError:
+      return ""
+
+  if not isinstance(alert, dict):
+    return ""
+
+  extra = alert.get("extra", "")
+  if isinstance(extra, bytes):
+    extra = extra.decode("utf-8", errors="replace")
+  return str(extra).strip().lower()
 
 def _apply_cellular_metered_setting(metered_enabled):
   """Apply GsmMetered changes to active NetworkManager GSM profiles."""
@@ -3443,10 +3546,7 @@ def setup(app):
 
   @app.route("/api/navigation", methods=["GET"])
   def navigation():
-    last_position = json.loads(
-      params.get("LastGPSPosition", encoding="utf8") or
-      "{\"latitude\": 51.276824158421331, \"longitude\": 30.221928335547232, \"altitude\": 111.0}"
-    )
+    last_position = _get_navigation_last_position() or {}
 
     return {
       "amap1Key": params.get("AMapKey1", encoding="utf8") or "",
@@ -3454,8 +3554,8 @@ def setup(app):
       "destination": params.get("NavDestination", encoding="utf8") or "",
       "isMetric": params.get_bool("IsMetric"),
       "lastPosition": {
-        "latitude": str(last_position["latitude"]),
-        "longitude": str(last_position["longitude"])
+        "latitude": str(last_position.get("latitude", "")),
+        "longitude": str(last_position.get("longitude", ""))
       },
       "mapboxPublic": params.get("MapboxPublicKey", encoding="utf8") or "",
       "mapboxSecret": params.get("MapboxSecretKey", encoding="utf8") or "",
@@ -3464,11 +3564,16 @@ def setup(app):
 
   @app.route("/api/navigation", methods=["POST"])
   def set_navigation():
-    params.remove("NavDestination")
+    destination = normalize_destination_payload(request.json)
+    if destination is None:
+      return {"message": "Invalid destination payload"}, 400
 
-    time.sleep(1)
-
-    params.put("NavDestination", json.dumps(request.json))
+    recent_destinations = update_recent_destinations(
+      params.get("ApiCache_NavDestinations", encoding="utf8") or "",
+      destination,
+    )
+    params.put("NavDestination", json.dumps(destination))
+    params.put("ApiCache_NavDestinations", json.dumps(recent_destinations))
     return {"message": "Destination set"}
 
   @app.route("/api/navigation/favorite", methods=["DELETE"])
@@ -3661,6 +3766,18 @@ def setup(app):
       if key == "AutomaticUpdates" and params.get_bool("IsOnroad"):
         return jsonify({"error": "Cannot change Automatic Updates while driving."}), 403
 
+      if key == "AllowImpossibleAcceleration":
+        enabled = str_val.strip() in ("1", "true", "True")
+        params.put_bool(key, enabled)
+        if enabled and _offroad_excessive_actuation_type() == "longitudinal":
+          params.remove("Offroad_ExcessiveActuation")
+
+        update_starpilot_toggles()
+        return jsonify({
+          "message": f"Parameter '{key}' updated successfully.",
+          "updated": {key: enabled},
+        }), 200
+
       if key in {"EVTuning", "TruckTuning"}:
         enabled = str_val.strip() in ("1", "true", "True")
         params.put_bool(key, enabled)
@@ -3706,6 +3823,32 @@ def setup(app):
             "PersistExperimentalState": enabled,
             "PersistedCEStatus": params.get_int("PersistedCEStatus", default=0),
           },
+        }), 200
+
+      if key == "IsRHD":
+        enabled = str_val.strip() in ("1", "true", "True")
+        params.put_bool("IsRHD", enabled)
+        params.put_bool("IsRHDOverride", True)
+        return jsonify({
+          "message": "Right Hand Driving override updated successfully.",
+          "updated": {
+            "IsRHD": enabled,
+            "IsRHDOverride": True,
+          },
+        }), 200
+
+      if key == "IsRHDOverride":
+        enabled = str_val.strip() in ("1", "true", "True")
+        params.put_bool("IsRHDOverride", enabled)
+        updated = {"IsRHDOverride": enabled}
+        if not enabled:
+          auto_rhd = params.get_bool("IsRhdDetected")
+          params.put_bool("IsRHD", auto_rhd)
+          updated["IsRHD"] = auto_rhd
+
+        return jsonify({
+          "message": "Right Hand Driving auto detection restored." if not enabled else "Right Hand Driving override enabled.",
+          "updated": updated,
         }), 200
 
       if key == "CarMake":
@@ -3851,6 +3994,8 @@ def setup(app):
       return _serialize_param_write_value(defaults_lookup.get(request_key)), 200
     if request_key == CUSTOM_ACCEL_PROFILE_INITIALIZED_KEY:
       return _serialize_param_write_value(_get_custom_accel_profile_initialized()), 200
+    if request_key == "IsRHD" and not params.get_bool("IsRHDOverride"):
+      return ("1" if params.get_bool("IsRhdDetected") else "0"), 200
     value = params.get(request_key) or ""
     if request_key in ("Model", "DrivingModel"):
       if isinstance(value, bytes):

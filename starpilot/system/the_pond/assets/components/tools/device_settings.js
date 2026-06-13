@@ -644,6 +644,31 @@ async function updateParam(key, elType) {
   }
 }
 
+async function restoreRhdAutoDetection() {
+  const currentValues = { ...state.values }
+  try {
+    const res = await fetch("/api/params", {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ key: "IsRHDOverride", value: false }),
+    })
+    const data = await res.json()
+
+    if (res.ok) {
+      const updated = (data.updated && typeof data.updated === "object") ? data.updated : {}
+      state.values = { ...state.values, IsRHDOverride: false, ...updated }
+      showParamSnackbar(data.message || "Right Hand Driving auto detection restored.")
+      scheduleSyncInputs()
+    } else {
+      state.values = currentValues
+      showParamSnackbar(data.error || "Failed to restore auto detection", "error")
+    }
+  } catch (e) {
+    state.values = currentValues
+    showParamSnackbar("Network error — is the device reachable?", "error")
+  }
+}
+
 function revertInput(key, current, elType) {
   const el = document.getElementById(`ds-${key}`)
   if (!el) return
@@ -847,13 +872,30 @@ function renderSettingRow(p) {
       </div>
     `
   } else if (!isGroup) {
-    rowControl = html`
-      <input
-        type="checkbox"
-        class="ds-toggle"
-        id="ds-${p.key}"
-        @change="${() => updateParam(p.key, "checkbox")}" />
-    `
+    if (p.key === "IsRHD") {
+      rowControl = html`
+        <div style="display:flex; align-items:center; gap:0.75rem;">
+          <input
+            type="checkbox"
+            class="ds-toggle"
+            id="ds-${p.key}"
+            @change="${() => updateParam(p.key, "checkbox")}" />
+          ${() => state.values.IsRHDOverride ? html`
+            <button
+              class="ds-reset-btn"
+              @click="${restoreRhdAutoDetection}">Auto</button>
+          ` : ""}
+        </div>
+      `
+    } else {
+      rowControl = html`
+        <input
+          type="checkbox"
+          class="ds-toggle"
+          id="ds-${p.key}"
+          @change="${() => updateParam(p.key, "checkbox")}" />
+      `
+    }
   }
 
   return html`

@@ -2,7 +2,7 @@ from openpilot.common.params import Params
 from openpilot.system.ui.widgets.scroller import NavScroller
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton, BigParamControl
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigDialog, BigMultiOptionDialog
-from openpilot.selfdrive.ui.mici.layouts.settings.fingerprint_catalog import (
+from openpilot.selfdrive.ui.lib.fingerprint_catalog import (
   FingerprintModelOption,
   format_fingerprint_value,
   get_fingerprint_catalog,

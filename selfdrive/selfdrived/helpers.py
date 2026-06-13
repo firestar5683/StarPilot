@@ -22,11 +22,15 @@ class ExcessiveActuationCheck:
     self._excessive_counter = 0
     self._engaged_counter = 0
 
-  def update(self, sm: messaging.SubMaster, CS: car.CarState, calibrated_pose: Pose) -> ExcessiveActuationType | None:
+  def update(self, sm: messaging.SubMaster, CS: car.CarState, calibrated_pose: Pose,
+             allow_impossible_acceleration: bool = False) -> ExcessiveActuationType | None:
     # CS.aEgo can be noisy to bumps in the road, transitioning from standstill, losing traction, etc.
     # longitudinal
     accel_calibrated = calibrated_pose.acceleration.x
-    excessive_long_actuation = sm['carControl'].longActive and (accel_calibrated > ACCEL_MAX * 2 or accel_calibrated < ACCEL_MIN * 2)
+    excessive_long_actuation = (
+      not allow_impossible_acceleration and sm['carControl'].longActive and
+      (accel_calibrated > ACCEL_MAX * 2 or accel_calibrated < ACCEL_MIN * 2)
+    )
 
     # lateral
     yaw_rate = calibrated_pose.angular_velocity.yaw

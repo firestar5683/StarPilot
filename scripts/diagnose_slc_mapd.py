@@ -28,12 +28,23 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+import types
 from typing import Any, Optional
 from urllib.parse import parse_qs, urlparse
 
 import requests
 
 # ── StarPilot / openpilot imports ──────────────────────────────────────────
+
+sys.path.insert(0, str(Path(__file__).resolve().parent.parent))
+
+# smbus2 is a hardware I2C library only present on comma's tici device.
+# On PC it's never installed, and SMBus is never called (the TICI flag is
+# False). Stub it so the eager import chain in openpilot.system.hardware
+# succeeds without installing tici-only platform dependencies.
+_smbus2 = types.ModuleType('smbus2')
+_smbus2.SMBus = None
+sys.modules['smbus2'] = _smbus2
 
 from openpilot.common.constants import CV
 from openpilot.tools.lib.auth import login as oauth_login
@@ -124,6 +135,16 @@ class ScsSample:
     log_mono_time: int
     accel_pressed: bool
     decel_pressed: bool
+
+
+@dataclass
+class LeadSample:
+    """One radarState lead-vehicle event from the log."""
+
+    log_mono_time: int
+    has_lead: bool
+    d_rel: float   # metres ahead
+    v_lead: float  # m/s absolute speed of lead
 
 
 @dataclass
@@ -241,6 +262,12 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         epilog=JWT_HELP,
     )
     p.add_argument(
+        "route_pos",
+        nargs="?",
+        default=None,
+        help="Route name (positional format alternative)."
+    )
+    p.add_argument(
         "--route",
         default=None,
         help=(
@@ -257,7 +284,10 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
         default=False,
         help="Display speeds in km/h (default: mph).",
     )
-    return p.parse_args(argv)
+    args = p.parse_args(argv)
+    if args.route_pos:
+        args.route = args.route_pos
+    return args
 
 
 def resolve_route_identifier(raw: str) -> str:
@@ -297,6 +327,8 @@ def resolve_route_identifier(raw: str) -> str:
             "Expected: dongle_id|log_id  (16 hex chars | identifier)"
         )
     dongle, log_id, suffix = m.group(1), m.group(2), m.group(3) or ""
+    if suffix:
+        suffix = re.sub(r"^/(\d+)/(\d+)$", r"/\1:\2", suffix)
     return f"{dongle}/{log_id}{suffix}"
 
 
@@ -354,18 +386,19 @@ def parse_route_logs(
     list[CarSample],
     list[GpsSample],
     list[ScsSample],
+    list[LeadSample],
     list[int],
 ]:
     """Use LogReader to parse qlog and extract all speed-related messages.
 
-    Returns (mapd_events, splan_events, car_events, gps_events, scs_events, segments).
+    Returns (mapd_events, splan_events, car_events, gps_events, scs_events, lead_events, segments).
     """
     mapd_events: list[MapdSample] = []
     splan_events: list[SplanSample] = []
     car_events: list[CarSample] = []
     gps_events: list[GpsSample] = []
     scs_events: list[ScsSample] = []
-    segments_found: set[int] = set()
+    lead_events: list[LeadSample] = []
     segments_found: set[int] = set()
     seg_of_msg: dict[int, int] = {}
 
@@ -448,6 +481,17 @@ def parse_route_logs(
                     decel_pressed=bool(s.decelPressed),
                 )
             )
+        elif which == "radarState":
+            r = msg.radarState
+            lead = r.leadOne
+            lead_events.append(
+                LeadSample(
+                    log_mono_time=t,
+                    has_lead=bool(lead.status),
+                    d_rel=float(lead.dRel or 0),
+                    v_lead=float(lead.vLead or 0),
+                )
+            )
 
     if not all_msgs:
         print("Warning: no messages found in route logs.", file=sys.stderr)
@@ -472,7 +516,7 @@ def parse_route_logs(
 
     segments = sorted(segments_found) if segments_found else [0]
 
-    return mapd_events, splan_events, car_events, gps_events, scs_events, segments
+    return mapd_events, splan_events, car_events, gps_events, scs_events, lead_events, segments
 
 
 # ============================================================================
@@ -874,9 +918,10 @@ def detect_changes(
     osm_ways: dict[int, OsmWay],
     gps_timeline: list[tuple[float, float, float]],
     base_time_ns: int,
+    lead_events: list[LeadSample] | None = None,
 ) -> list[ChangeRow]:
     """Walk starpilotPlan events to detect every SLC state transition,
-    correlating with mapd, carState, and starpilotCarState for full context.
+    correlating with mapd, carState, starpilotCarState, and radarState for full context.
 
     Produces a timeline of SLC decisions: limits, overrides, prompts, lookaheads.
     """
@@ -887,6 +932,9 @@ def detect_changes(
     splan_sorted = sorted(splan_events, key=lambda e: e.log_mono_time)
     mapd_sorted = (
         sorted(mapd_events, key=lambda e: e.log_mono_time) if mapd_events else []
+    )
+    lead_sorted = (
+        sorted(lead_events, key=lambda e: e.log_mono_time) if lead_events else []
     )
 
     prev_slc = -1.0
@@ -910,6 +958,7 @@ def detect_changes(
         m = _nearest(mapd_sorted, t_ns)
         c = _nearest(car_events, t_ns)
         s = _nearest(scs_events, t_ns)
+        lv = _nearest(lead_sorted, t_ns) if lead_sorted else None
 
         mapd_sl = m.speed_limit if m else 0
         mapd_next = m.next_speed_limit if m else 0
@@ -920,6 +969,9 @@ def detect_changes(
         gas = bool(c.gas_pressed) if c else False
         accel = bool(s.accel_pressed) if s else False
         decel = bool(s.decel_pressed) if s else False
+        has_lead = bool(lv.has_lead) if lv else False
+        lead_d_rel = lv.d_rel if lv and lv.has_lead else 0.0
+        lead_v = lv.v_lead if lv and lv.has_lead else 0.0
 
         lat, lon = gps_at_time(t_ns, gps_timeline) if gps_timeline else (0, 0)
         osm_sl, osm_name = (
@@ -1001,11 +1053,17 @@ def detect_changes(
             detail = f"gas pressed: {v_ego * KPH_TO_MPH * MS_TO_KPH:.0f} > {slc * KPH_TO_MPH * MS_TO_KPH:.0f}"
             if accel:
                 detail += " (accel)"
+            if has_lead:
+                detail += f" [lead {lead_d_rel:.0f}m ahead]"
+
+        elif ov_end and not limit_changed and has_lead and not gas:
+            event_type = "OVERRIDE CLEAR"
+            detail = f"ACC decel behind lead ({lead_d_rel:.0f}m, {lead_v * KPH_TO_MPH * MS_TO_KPH:.0f} mph) — not driver brake"
 
         elif ov_end and not limit_changed:
             if ov_phase:
                 event_type = "OVERRIDE CLEAR"
-                detail = "override ended"
+                detail = "override ended" + (f" [lead {lead_d_rel:.0f}m, {lead_v * KPH_TO_MPH * MS_TO_KPH:.0f} mph]" if has_lead else "")
 
         elif active_ov and ov_phase != "active":
             event_type = "OVERRIDE ACTIVE"
@@ -1014,6 +1072,8 @@ def detect_changes(
         elif stale_ov and ov_phase != "stale":
             event_type = "STALE OVERRIDE"
             detail = f"overridden > {slc * KPH_TO_MPH * MS_TO_KPH:.0f}, v_ego={v_ego * KPH_TO_MPH * MS_TO_KPH:.0f}"
+            if has_lead:
+                detail += f" [ACC: lead {lead_d_rel:.0f}m, {lead_v * KPH_TO_MPH * MS_TO_KPH:.0f} mph]"
 
         elif source_changed:
             event_type = "SOURCE"
@@ -1091,14 +1151,14 @@ def fmt_speed(mps: float, use_mph: bool, width: int = 5) -> str:
 
 
 def print_header(
-    route_name: str, mapd_n: int, splan_n: int, gps_n: int, scs_n: int
+    route_name: str, mapd_n: int, splan_n: int, gps_n: int, scs_n: int, lead_n: int = 0
 ) -> None:
     sep = "=" * 82
     print(f"\n{sep}")
     print(f"  SLC / mapd Diagnostic Timeline")
     print(f"  Route: {route_name}")
     print(
-        f"  Events: mapdOut={mapd_n} | starpilotPlan={splan_n} | starpilotCarState={scs_n} | GPS={gps_n}"
+        f"  Events: mapdOut={mapd_n} | starpilotPlan={splan_n} | starpilotCarState={scs_n} | GPS={gps_n} | radarState={lead_n}"
     )
     print(f"{sep}")
 
@@ -1197,7 +1257,7 @@ def main(argv: list[str] | None = None) -> int:
         print(f"\nProcessing route: {canonical}", file=sys.stderr)
 
         # ── Parse qlog ──────────────────────────────────────────────────
-        mapd_ev, splan_ev, car_ev, gps_ev, scs_ev, segments = parse_route_logs(
+        mapd_ev, splan_ev, car_ev, gps_ev, scs_ev, lead_ev, segments = parse_route_logs(
             canonical
         )
 
@@ -1226,11 +1286,12 @@ def main(argv: list[str] | None = None) -> int:
 
         # ── Detect changes ──────────────────────────────────────────
         rows = detect_changes(
-            mapd_ev, splan_ev, car_ev, scs_ev, osm_ways, gps_timeline, base_time
+            mapd_ev, splan_ev, car_ev, scs_ev, osm_ways, gps_timeline, base_time,
+            lead_events=lead_ev,
         )
 
         # ── Output ─────────────────────────────────────────────────
-        print_header(canonical, len(mapd_ev), len(splan_ev), len(gps_ev), len(scs_ev))
+        print_header(canonical, len(mapd_ev), len(splan_ev), len(gps_ev), len(scs_ev), len(lead_ev))
         print_table(rows, not args.kmh)
 
         stale = sum(1 for r in rows if r.stale)

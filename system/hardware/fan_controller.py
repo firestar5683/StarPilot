@@ -5,6 +5,11 @@ from abc import ABC, abstractmethod
 from openpilot.common.realtime import DT_HW
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.pid import PIDController
+from openpilot.system.hardware import HARDWARE
+
+# raise fan setpoint on tici/tizi to reduce noise
+# after raising LMH threshold in AGNOS 18.1 to prevent CPU throttling
+OFFSET = 0 if HARDWARE.get_device_type() == "mici" else 5
 
 class BaseFanController(ABC):
   @abstractmethod
@@ -27,12 +32,11 @@ class TiciFanController(BaseFanController):
     if ignition != self.last_ignition:
       self.controller.reset()
 
-    error = cur_temp - 75
+    error = cur_temp - (75 + OFFSET)
     fan_pwr_out = int(self.controller.update(
                       error=error,
-                      feedforward=np.interp(cur_temp, [60.0, 100.0], [0, 100])
+                      feedforward=np.interp(cur_temp, [60.0 + OFFSET, 100.0 + OFFSET], [0, 100])
                     ))
 
     self.last_ignition = ignition
     return fan_pwr_out
-

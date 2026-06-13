@@ -16,7 +16,7 @@ PrimeState::PrimeState(QObject* parent) : QObject(parent) {
 
   if (auto dongleId = getDongleId()) {
     QString url = CommaApi::BASE_URL + "/v1.1/devices/" + *dongleId + "/";
-    RequestRepeater* repeater = new RequestRepeater(this, url, "ApiCache_Device", 5);
+    RequestRepeater* repeater = new RequestRepeater(this, url, "ApiCache_Device", 60);
     QObject::connect(repeater, &RequestRepeater::requestDone, this, &PrimeState::handleReply);
   }
 

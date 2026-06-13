@@ -4,9 +4,13 @@
 #include <map>
 #include <string>
 #include <vector>
+#include <fstream>
+#include <sstream>
+#include <cstdio>
 
 #include "common/util.h"
 #include "common/prefix.h"
+#include "third_party/json11/json11.hpp"
 #include "tools/replay/consoleui.h"
 #include "tools/replay/replay.h"
 #include "tools/replay/util.h"
@@ -156,10 +160,63 @@ int main(int argc, char *argv[]) {
 
   if (config.headless) {
     replay.start(config.start_seconds);
+
+    std::string prefix = "default";
+    if (const char* env_prefix = getenv("OPENPILOT_PREFIX")) {
+      prefix = env_prefix;
+    }
+    std::string state_path = "/tmp/replay_state_" + prefix + ".json";
+    std::string cmd_path = "/tmp/replay_cmd_" + prefix + ".json";
+
+    // Clean up any leftover command/state files from previous runs
+    std::remove(state_path.c_str());
+    std::remove(cmd_path.c_str());
+
     ExitHandler do_exit;
     while (!do_exit) {
+      // 1. Check for commands from cmd_path
+      std::ifstream cmd_file(cmd_path);
+      if (cmd_file.good()) {
+        std::stringstream buffer;
+        buffer << cmd_file.rdbuf();
+        cmd_file.close();
+
+        std::string err;
+        auto json = json11::Json::parse(buffer.str(), err);
+        if (err.empty()) {
+          if (json["play"].is_bool()) {
+            replay.pause(!json["play"].bool_value());
+          }
+          if (json["seek"].is_number()) {
+            replay.seekTo(json["seek"].number_value(), false);
+          }
+          if (json["speed"].is_number()) {
+            replay.setSpeed(json["speed"].number_value());
+          }
+        }
+        std::remove(cmd_path.c_str());
+      }
+
+      // 2. Write current status to state_path
+      json11::Json state = json11::Json::object {
+        {"min_sec", replay.minSeconds()},
+        {"max_sec", replay.maxSeconds()},
+        {"cur_sec", replay.currentSeconds()},
+        {"paused", replay.isPaused()},
+        {"speed", replay.getSpeed()}
+      };
+      std::ofstream state_file(state_path);
+      if (state_file.is_open()) {
+        state_file << state.dump();
+        state_file.close();
+      }
+
       util::sleep_for(100);
     }
+
+    // Clean up on exit
+    std::remove(state_path.c_str());
+    std::remove(cmd_path.c_str());
     return 0;
   }
 

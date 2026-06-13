@@ -30,8 +30,24 @@ QMap<int, QString> getMergedWheelFunctionsMap() {
   return functionsMap;
 }
 
+QMap<int, QString> getMainCruiseFunctionsMap() {
+  return {
+    {0, QObject::tr("No Action")},
+    {9, QObject::tr("Toggle Always On Lateral")},
+    {10, QObject::tr("Adopt Current Speed Limit")},
+  };
+}
+
 QString getWheelFunctionLabel(Params &params, const QString &key) {
-  const QMap<int, QString> functionsMap = getMergedWheelFunctionsMap();
+  QMap<int, QString> functionsMap;
+  if (key == "MainCruiseButtonControl") {
+    functionsMap = getMainCruiseFunctionsMap();
+  } else {
+    functionsMap = getMergedWheelFunctionsMap();
+    if (key == "LKASButtonControl") {
+      functionsMap[9] = QObject::tr("Toggle Always On Lateral");
+    }
+  }
   return functionsMap.value(params.getInt(key.toStdString()), QObject::tr("No Action"));
 }
 
@@ -63,6 +79,7 @@ StarPilotWheelPanel::StarPilotWheelPanel(StarPilotSettingsWindow *parent, bool f
     {"VeryLongCancelButtonControl", tr("Cancel Button (Very Long Press)"), tr("<b>Action performed when the remapped \"Cancel\" button is pressed for more than 2.5 seconds.</b>"), "../../starpilot/assets/toggle_icons/icon_mute.png"},
     {"VeryLongDistanceButtonControl", tr("Distance Button (Very Long Press)"), tr("<b>Action performed when the \"Distance\" button is pressed for more than 2.5 seconds.</b>"), "../../starpilot/assets/toggle_icons/icon_mute.png"},
     {"LKASButtonControl", tr("LKAS Button"), tr("<b>Action performed when the \"LKAS\" button is pressed.</b>"), "../../starpilot/assets/toggle_icons/icon_mute.png"},
+    {"MainCruiseButtonControl", tr("CC Main Button"), tr("<b>Action performed when the cruise control main button is pressed.</b>"), "../../starpilot/assets/toggle_icons/icon_mute.png"},
     {"ModeButtonControl", tr("Mode Button"), tr("<b>Action performed when the \"Mode\" button is pressed.</b>"), "../../starpilot/assets/toggle_icons/icon_mute.png"},
     {"LongModeButtonControl", tr("Mode Button (Long Press)"), tr("<b>Action performed when the \"Mode\" button is pressed for more than 0.5 seconds.</b>"), "../../starpilot/assets/toggle_icons/icon_mute.png"},
     {"VeryLongModeButtonControl", tr("Mode Button (Very Long Press)"), tr("<b>Action performed when the \"Mode\" button is pressed for more than 2.5 seconds.</b>"), "../../starpilot/assets/toggle_icons/icon_mute.png"},
@@ -74,11 +91,19 @@ StarPilotWheelPanel::StarPilotWheelPanel(StarPilotSettingsWindow *parent, bool f
   for (const auto &[param, title, desc, icon] : wheelToggles) {
     ButtonControl *wheelToggle = new ButtonControl(title, tr("SELECT"), desc);
     QObject::connect(wheelToggle, &ButtonControl::clicked, [key = param, parent, wheelToggle, this]() {
-      QMap<int, QString> functionsMap = getWheelFunctionsMap();
-      if (parent->hasOpenpilotLongitudinal) {
-        const QMap<int, QString> longitudinalFunctionsMap = getLongitudinalWheelFunctionsMap();
-        for (auto it = longitudinalFunctionsMap.constBegin(); it != longitudinalFunctionsMap.constEnd(); ++it) {
-          functionsMap[it.key()] = it.value();
+      QMap<int, QString> functionsMap;
+      if (key == "MainCruiseButtonControl") {
+        functionsMap = getMainCruiseFunctionsMap();
+      } else {
+        functionsMap = getWheelFunctionsMap();
+        if (parent->hasOpenpilotLongitudinal) {
+          const QMap<int, QString> longitudinalFunctionsMap = getLongitudinalWheelFunctionsMap();
+          for (auto it = longitudinalFunctionsMap.constBegin(); it != longitudinalFunctionsMap.constEnd(); ++it) {
+            functionsMap[it.key()] = it.value();
+          }
+        }
+        if (key == "LKASButtonControl") {
+          functionsMap[9] = tr("Toggle Always On Lateral");
         }
       }
 
@@ -118,7 +143,6 @@ void StarPilotWheelPanel::updateToggles() {
 
     if (!showAllToggles && key == "LKASButtonControl") {
       setVisible &= !parent->isSubaru;
-      setVisible &= !parent->lkasAllowedForAOL || !(params.getBool("AlwaysOnLateral") && params.getBool("AlwaysOnLateralLKAS"));
     }
 
     if (!showAllToggles && (

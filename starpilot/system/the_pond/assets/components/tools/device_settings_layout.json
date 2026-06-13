@@ -98,14 +98,6 @@
         "is_parent_toggle": true
       },
       {
-        "key": "AlwaysOnLateralLKAS",
-        "label": "Enable With LKAS",
-        "description": "Enable \"Always On Lateral\" whenever \"LKAS\" is on, even when openpilot is not engaged.",
-        "data_type": "bool",
-        "ui_type": "toggle",
-        "parent_key": "AlwaysOnLateral"
-      },
-      {
         "key": "PauseAOLOnBrake",
         "label": "Pause on Brake Press Below",
         "description": "Pause \"Always On Lateral\" below the set speed while the brake pedal is pressed.",
@@ -196,6 +188,14 @@
         "key": "TurnDesires",
         "label": "Force Turn Desires Below Lane Change Speed",
         "description": "While driving below the minimum lane change speed with an active turn signal, instruct openpilot to turn left/right.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "LateralTune"
+      },
+      {
+        "key": "NavDesiresAllowed",
+        "label": "Use Route Desires",
+        "description": "Allow an active navigation route to request keep-left, keep-right, and low-speed turn desires.",
         "data_type": "bool",
         "ui_type": "toggle",
         "parent_key": "LateralTune"
@@ -992,7 +992,7 @@
       {
         "key": "CoastUpToLeads",
         "label": "Coast Up To Leads",
-        "description": "Allow openpilot to briefly coast toward far leads before resuming normal throttle. Disable this if your vehicle shows gas/brake alternation while approaching distant traffic.",
+        "description": "Keep the optional far-lead comfort logic enabled, including gentle coasting and matched-follow smoothing for distant leads. Recommended unless your car shows lead-follow stutter or springy gas/brake behavior.",
         "data_type": "bool",
         "ui_type": "toggle",
         "parent_key": "LongitudinalTune"
@@ -1019,6 +1019,14 @@
         "key": "TacoTune",
         "label": "\\\"Taco Bell Run\\\" Turn Speed Hack",
         "description": "The turn-speed hack from comma's 2022 \"Taco Bell Run\". Designed to slow down for left and right turns.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "LongitudinalTune"
+      },
+      {
+        "key": "NavLongitudinalAllowed",
+        "label": "Use Route Speed Control",
+        "description": "Allow an active navigation route to reduce cruise speed for upcoming turns, ramps, and roundabouts.",
         "data_type": "bool",
         "ui_type": "toggle",
         "parent_key": "LongitudinalTune"
@@ -1073,6 +1081,14 @@
         "key": "ForceStandstill",
         "label": "Force Standstill State",
         "description": "Keep openpilot in the standstill state until you press the gas pedal or the Resume/+ cruise button.\n\nThis applies to any engaged stop, not just red lights or stop signs.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "QOLLongitudinal"
+      },
+      {
+        "key": "RadarTakeoffs",
+        "label": "Radar for Takeoffs",
+        "description": "Turns on/off using radar data to track leads at standstill, making following/takeoffs more responsive once leads move.",
         "data_type": "bool",
         "ui_type": "toggle",
         "parent_key": "QOLLongitudinal"
@@ -2172,6 +2188,13 @@
         "ui_type": "toggle"
       },
       {
+        "key": "IsRHD",
+        "label": "Right Hand Driving",
+        "description": "Use right-hand-drive driver monitoring. This follows the auto-detected side until changed manually.",
+        "data_type": "bool",
+        "ui_type": "toggle"
+      },
+      {
         "key": "DisableOpenpilotLongitudinal",
         "label": "Disable openpilot Longitudinal",
         "description": "Use the vehicle's stock longitudinal control instead of openpilot longitudinal control. This can stop openpilot from sending cruise-control acceleration and braking commands on supported vehicles.",
@@ -2670,6 +2693,31 @@
           {
             "value": 8,
             "label": "Create Bookmark"
+          },
+          {
+            "value": 9,
+            "label": "Toggle Always On Lateral"
+          }
+        ]
+      },
+      {
+        "key": "MainCruiseButtonControl",
+        "label": "CC Main Button",
+        "description": "Action performed when the cruise control main button is pressed.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "No Action"
+          },
+          {
+            "value": 9,
+            "label": "Toggle Always On Lateral"
+          },
+          {
+            "value": 10,
+            "label": "Adopt Current Speed Limit"
           }
         ]
       },
@@ -3169,6 +3217,13 @@
         "key": "DisableWideRoad",
         "label": "Disable Wide Road Camera",
         "description": "Only enable this if the wide camera is broken or for development!\n\nDisabling the wide camera may degrade driving performance and cause instability.\n\nRequires a reboot to take effect.",
+        "data_type": "bool",
+        "ui_type": "toggle"
+      },
+      {
+        "key": "AllowImpossibleAcceleration",
+        "label": "Allow Impossible Acceleration",
+        "description": "WARNING: This suppresses openpilot's excessive longitudinal actuation diagnostic when measured acceleration looks impossible for the requested gas/brake command.\n\nLeave this OFF unless you are intentionally testing edge cases like shifting to neutral and understand that it can hide a real actuation problem.",
         "data_type": "bool",
         "ui_type": "toggle"
       }

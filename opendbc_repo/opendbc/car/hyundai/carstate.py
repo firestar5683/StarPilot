@@ -8,7 +8,7 @@ from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.values import HyundaiFlags, HyundaiStarPilotFlags, HyundaiStarPilotSafetyFlags, CAR, DBC, Buttons, CarControllerParams, \
-                                       hyundai_cancel_button_enables_cruise
+                                       hyundai_cancel_button_enables_cruise, ALT_BUS_LDA_BUTTON_CARS, ALT_BUS_LDA_BUTTON_SWL_STAT_CARS
 from opendbc.car.interfaces import CarStateBase
 
 ButtonType = structs.CarState.ButtonEvent.Type
@@ -25,6 +25,7 @@ BUTTONS_DICT = {Buttons.RES_ACCEL: ButtonType.accelCruise, Buttons.SET_DECEL: Bu
 IONIQ_6_BLINDSPOT_RIGHT_MASK = 0x08
 IONIQ_6_BLINDSPOT_LEFT_MASK = 0x10
 CANFD_CAMERA_LEAD_MIN_DISTANCE = 0.1
+ALT_BUS_LDA_BUTTON_BURST_DEBOUNCE_NS = int(1.3e9)
 
 
 def get_non_scc_cruise_signals(CP) -> tuple[str, str, str, str, str, str]:
@@ -74,6 +75,8 @@ class CarState(CarStateBase):
     self.cruise_buttons: deque = deque([Buttons.NONE] * PREV_BUTTON_SAMPLES, maxlen=PREV_BUTTON_SAMPLES)
     self.main_buttons: deque = deque([Buttons.NONE] * PREV_BUTTON_SAMPLES, maxlen=PREV_BUTTON_SAMPLES)
     self.lda_button = 0
+    self.lda_button_raw = 0
+    self.lda_button_last_raw_rise_ts_nanos = 0
     self.left_paddle = 0
     self.mode_button = 0
     self.custom_button = 0
@@ -171,9 +174,44 @@ class CarState(CarStateBase):
 
     return False
 
+  def create_alt_bus_lda_button_events(self, cp_source: CANParser) -> list[structs.CarState.ButtonEvent]:
+    if self.CP.carFingerprint in ALT_BUS_LDA_BUTTON_SWL_STAT_CARS:
+      raw_lda_button = int(cp_source.vl["CLU13"]["CF_Clu_SWL_Stat"] == 4)
+      raw_lda_button_ts_nanos = cp_source.ts_nanos["CLU13"]["CF_Clu_SWL_Stat"]
+    else:
+      raw_lda_button = int(cp_source.vl["CLU13"]["CF_Clu_LdwsLkasSW"])
+      raw_lda_button_ts_nanos = cp_source.ts_nanos["CLU13"]["CF_Clu_LdwsLkasSW"]
+    button_events: list[structs.CarState.ButtonEvent] = []
+
+    # Some alt-bus LKAS button layouts pulse several times per physical press burst.
+    # Collapse each burst into a single synthetic press/release pair.
+    if raw_lda_button and not self.lda_button_raw:
+      if self.lda_button_last_raw_rise_ts_nanos == 0 or \
+          raw_lda_button_ts_nanos - self.lda_button_last_raw_rise_ts_nanos > ALT_BUS_LDA_BUTTON_BURST_DEBOUNCE_NS:
+        button_events = [
+          structs.CarState.ButtonEvent(pressed=True, type=ButtonType.lkas),
+          structs.CarState.ButtonEvent(pressed=False, type=ButtonType.lkas),
+        ]
+      self.lda_button_last_raw_rise_ts_nanos = raw_lda_button_ts_nanos
+
+    self.lda_button_raw = raw_lda_button
+    return button_events
+
+  def create_lkas_button_events(self, cp: CANParser, prev_lda_button: int) -> list[structs.CarState.ButtonEvent]:
+    # Some classic HKG platforms publish the LKAS button on the cluster bus instead of BCM_PO_11.
+    if cp.ts_nanos["CLU13"]["CF_Clu_LdwsLkasSW"] > 0:
+      self.lda_button = int(cp.vl["CLU13"]["CF_Clu_LdwsLkasSW"])
+    elif cp.ts_nanos["BCM_PO_11"]["LDA_BTN"] > 0:
+      self.lda_button = int(cp.vl["BCM_PO_11"]["LDA_BTN"])
+    else:
+      self.lda_button = 0
+
+    return create_button_events(self.lda_button, prev_lda_button, {1: ButtonType.lkas})
+
   def update(self, can_parsers, starpilot_toggles) -> structs.CarState:
     cp = can_parsers[Bus.pt]
     cp_cam = can_parsers[Bus.cam]
+    cp_alt = can_parsers.get(Bus.alt)
 
     if self.CP.flags & HyundaiFlags.CANFD:
       return self.update_canfd(can_parsers)
@@ -307,14 +345,17 @@ class CarState(CarStateBase):
     prev_cruise_buttons = self.cruise_buttons[-1]
     prev_main_buttons = self.main_buttons[-1]
     prev_lda_button = self.lda_button
+    lkas_button_events = []
     self.cruise_buttons.extend(cp.vl_all["CLU11"]["CF_Clu_CruiseSwState"])
     self.main_buttons.extend(cp.vl_all["CLU11"]["CF_Clu_CruiseSwMain"])
-    if self.FPCP.safetyConfigs[-1].safetyParam & HyundaiStarPilotSafetyFlags.HAS_LDA_BUTTON:
-      self.lda_button = cp.vl["BCM_PO_11"]["LDA_BTN"]
+    if self.CP.carFingerprint in ALT_BUS_LDA_BUTTON_CARS and cp_alt is not None and cp_alt.ts_nanos["CLU13"]["CF_Clu_LdwsLkasSW"] > 0:
+      lkas_button_events = self.create_alt_bus_lda_button_events(cp_alt)
+    else:
+      lkas_button_events = self.create_lkas_button_events(cp, prev_lda_button)
 
     ret.buttonEvents = [*self.create_cruise_button_events(self.cruise_buttons[-1], prev_cruise_buttons),
                         *create_button_events(self.main_buttons[-1], prev_main_buttons, {1: ButtonType.mainCruise}),
-                        *create_button_events(self.lda_button, prev_lda_button, {1: ButtonType.lkas})]
+                        *lkas_button_events]
 
     ret.blockPcmEnable = not self.recent_button_interaction()
 
@@ -525,11 +566,17 @@ class CarState(CarStateBase):
     if CP.flags & HyundaiFlags.CANFD:
       return self.get_can_parsers_canfd(CP)
 
-    msgs = []
+    msgs = [
+      ("BCM_PO_11", 0),
+      ("CLU13", 0),
+    ]
     if CP.flags & HyundaiFlags.NON_SCC and not (CP.flags & HyundaiFlags.NON_SCC_NO_FCA):
       msgs.append(("FCA11", 0))  # Non-SCC trims can stop publishing FCA11; don't let it poison canValid
 
-    return {
+    parsers = {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], msgs, 0),
       Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], 2),
     }
+    if CP.carFingerprint in ALT_BUS_LDA_BUTTON_CARS:
+      parsers[Bus.alt] = CANParser(DBC[CP.carFingerprint][Bus.pt], [("CLU13", 0)], 1)
+    return parsers

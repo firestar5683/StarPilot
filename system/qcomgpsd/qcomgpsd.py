@@ -122,9 +122,13 @@ def downloader_loop(event):
   if alt_path is not None and os.path.exists(alt_path):
     shutil.copyfile(alt_path, ASSIST_DATA_FILE)
 
+  sm = messaging.SubMaster(['deviceState'])
+
   try:
     while not os.path.exists(ASSIST_DATA_FILE) and not event.is_set():
-      download_assistance()
+      sm.update(0)
+      if sm['deviceState'].networkType != log.DeviceState.NetworkType.none:
+        download_assistance()
       event.wait(timeout=10)
   except KeyboardInterrupt:
     pass

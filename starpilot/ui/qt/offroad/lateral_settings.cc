@@ -42,7 +42,6 @@ StarPilotLateralPanel::StarPilotLateralPanel(StarPilotSettingsWindow *parent, bo
     {"ForceTorqueController", tr("Force Torque Controller"), tr("<b>Use torque-based steering control instead of angle-based control for smoother lane keeping, especially in curves.</b>"), ""},
 
     {"AlwaysOnLateral", tr("Always On Lateral"), tr("<b>openpilot's steering remains active even when the accelerator or brake pedals are pressed.</b>"), "../../starpilot/assets/toggle_icons/icon_always_on_lateral.png"},
-    {"AlwaysOnLateralLKAS", tr("Enable With LKAS"), tr("<b>Enable \"Always On Lateral\" whenever \"LKAS\" is on, even when openpilot is not engaged.</b>"), ""},
     {"PauseAOLOnBrake", tr("Pause on Brake Press Below"), tr("<b>Pause \"Always On Lateral\" below the set speed while the brake pedal is pressed.</b>"), ""},
 
     {"LaneChanges", tr("Lane Changes"), tr("<b>Allow openpilot to change lanes.</b>"), "../../starpilot/assets/toggle_icons/icon_lane.png"},
@@ -55,6 +54,7 @@ StarPilotLateralPanel::StarPilotLateralPanel(StarPilotSettingsWindow *parent, bo
 
     {"LateralTune", tr("Lateral Tuning"), tr("<b>Miscellaneous steering control changes</b> to fine-tune how openpilot drives."), "../../starpilot/assets/toggle_icons/icon_lateral_tune.png"},
     {"TurnDesires", tr("Force Turn Desires Below Lane Change Speed"), tr("<b>While driving below the minimum lane change speed with an active turn signal, instruct openpilot to turn left/right.</b>"), ""},
+    {"NavDesiresAllowed", tr("Use Route Desires"), tr("<b>Allow an active navigation route to request keep-left, keep-right, and low-speed turn desires.</b>"), ""},
     {"NNFF", tr("Neural Network Feedforward (NNFF)"), tr("<b>Twilsonco's \"Neural Network FeedForward\" controller.</b> Uses a trained neural network model to predict steering torque based on vehicle speed, roll, and past/future planned path data for smoother, model-based steering."), ""},
     {"NNFFLite", tr("Neural Network Feedforward (NNFF) Lite"), tr("<b>A lightweight version of Twilsonco's \"Neural Network FeedForward\" controller.</b> Uses the \"look-ahead\" planned lateral jerk logic from the full model to help smoothen steering adjustments in curves, but does not use the full neural network for torque calculation."), ""},
 
@@ -357,11 +357,7 @@ void StarPilotLateralPanel::updateToggles() {
     bool setVisible = showAllToggles || parent->tuningLevel >= parent->starpilotToggleLevels[key].toDouble();
 
     if (!showAllToggles) {
-      if (key == "AlwaysOnLateralLKAS") {
-        setVisible &= parent->lkasAllowedForAOL;
-      }
-
-      else if (key == "ForceAutoTune") {
+      if (key == "ForceAutoTune") {
         setVisible &= !parent->hasAutoTune;
         setVisible &= !parent->isAngleCar;
         setVisible &= parent->isTorqueCar || forcingTorqueController || usingNNFF;

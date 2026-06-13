@@ -6,6 +6,7 @@ from cereal import log
 from opendbc.car.gm.values import CAR as GM_CAR
 from opendbc.car.honda.values import CAR as HONDA_CAR, HondaFlags
 from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR
+from opendbc.car.toyota.values import CAR as TOYOTA_CAR
 from opendbc.car.lateral import get_friction
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY, CV
 from openpilot.common.filter_simple import FirstOrderFilter
@@ -113,6 +114,10 @@ VOLT_STANDARD_CARS = (
 GENESIS_G90_CARS = (
   HYUNDAI_CAR.GENESIS_G90,
 )
+PALISADE_CARS = (
+  HYUNDAI_CAR.HYUNDAI_PALISADE,
+  HYUNDAI_CAR.HYUNDAI_PALISADE_2023,
+)
 IONIQ_5_CARS = (
   HYUNDAI_CAR.HYUNDAI_IONIQ_5,
 )
@@ -126,6 +131,9 @@ IONIQ_6_CARS = (
 SONATA_HYBRID_CARS = (
   HYUNDAI_CAR.HYUNDAI_SONATA_HYBRID,
 )
+SONATA_CARS = (
+  HYUNDAI_CAR.HYUNDAI_SONATA,
+)
 ELANTRA_NON_SCC_CARS = (
   HYUNDAI_CAR.HYUNDAI_ELANTRA_2022_NON_SCC,
   HYUNDAI_CAR.HYUNDAI_ELANTRA_HEV_2022_NON_SCC,
@@ -135,6 +143,9 @@ KIA_EV6_CARS = (
 )
 KIA_FORTE_CARS = (
   HYUNDAI_CAR.KIA_FORTE,
+)
+PRIUS_CARS = (
+  TOYOTA_CAR.TOYOTA_PRIUS,
 )
 
 BOLT_2017_LATERAL_TESTING_GROUND_ID = testing_ground.id_3
@@ -223,21 +234,21 @@ VOLT_STANDARD_FF_CUTOFF = 1.38
 VOLT_STANDARD_FF_CUTOFF_WIDTH = 0.28
 VOLT_STANDARD_TRANSITION_SPEED = 10.0
 VOLT_STANDARD_PHASE_SCALE = 0.10
-VOLT_STANDARD_TURN_IN_BOOST_LEFT = 0.32
-VOLT_STANDARD_TURN_IN_BOOST_RIGHT = 0.34
-VOLT_STANDARD_UNWIND_TAPER_LEFT = 0.28
-VOLT_STANDARD_UNWIND_TAPER_RIGHT = 0.82
-VOLT_STANDARD_FRICTION_MULT = 1.04
+VOLT_STANDARD_TURN_IN_BOOST_LEFT = 0.20
+VOLT_STANDARD_TURN_IN_BOOST_RIGHT = 0.20
+VOLT_STANDARD_UNWIND_TAPER_LEFT = 0.20
+VOLT_STANDARD_UNWIND_TAPER_RIGHT = 0.20
+VOLT_STANDARD_FRICTION_MULT = 1.00
 VOLT_STANDARD_FRICTION_LAT_RISE = 0.20
-VOLT_STANDARD_FRICTION_JERK_RISE = 0.24
-VOLT_STANDARD_TURN_IN_THRESHOLD_REDUCTION_LEFT = 0.18
-VOLT_STANDARD_TURN_IN_THRESHOLD_REDUCTION_RIGHT = 0.18
-VOLT_STANDARD_UNWIND_THRESHOLD_INCREASE_LEFT = 0.16
-VOLT_STANDARD_UNWIND_THRESHOLD_INCREASE_RIGHT = 0.68
-VOLT_STANDARD_TURN_IN_FRICTION_BOOST_LEFT = 0.09
-VOLT_STANDARD_TURN_IN_FRICTION_BOOST_RIGHT = 0.10
-VOLT_STANDARD_UNWIND_FRICTION_REDUCTION_LEFT = 0.18
-VOLT_STANDARD_UNWIND_FRICTION_REDUCTION_RIGHT = 0.62
+VOLT_STANDARD_FRICTION_JERK_RISE = 0.20
+VOLT_STANDARD_TURN_IN_THRESHOLD_REDUCTION_LEFT = 0.05
+VOLT_STANDARD_TURN_IN_THRESHOLD_REDUCTION_RIGHT = 0.05
+VOLT_STANDARD_UNWIND_THRESHOLD_INCREASE_LEFT = 0.05
+VOLT_STANDARD_UNWIND_THRESHOLD_INCREASE_RIGHT = 0.05
+VOLT_STANDARD_TURN_IN_FRICTION_BOOST_LEFT = 0.00
+VOLT_STANDARD_TURN_IN_FRICTION_BOOST_RIGHT = 0.00
+VOLT_STANDARD_UNWIND_FRICTION_REDUCTION_LEFT = 0.05
+VOLT_STANDARD_UNWIND_FRICTION_REDUCTION_RIGHT = 0.05
 VOLT_STANDARD_CENTER_TAPER_MAX = 0.12
 VOLT_STANDARD_CENTER_TAPER_LAT = 0.10
 VOLT_STANDARD_CENTER_TAPER_LAT_WIDTH = 0.018
@@ -268,6 +279,29 @@ SONATA_HYBRID_LOW_SPEED_CENTER_TAPER_LAT_WIDTH = 0.02
 SONATA_HYBRID_LOW_SPEED_CENTER_TAPER_SPEED_MAX = 7.5
 SONATA_HYBRID_LOW_SPEED_CENTER_TAPER_SPEED_WIDTH = 1.0
 
+SONATA_FF_REDUCTION_LEFT = 0.04
+SONATA_FF_REDUCTION_RIGHT = 0.26
+SONATA_FF_ONSET = 0.18
+SONATA_FF_ONSET_WIDTH = 0.08
+SONATA_FF_CUTOFF = 1.40
+SONATA_FF_CUTOFF_WIDTH = 0.42
+SONATA_TRANSITION_SPEED = 8.5
+SONATA_PHASE_SCALE = 0.12
+SONATA_TURN_IN_BOOST_LEFT = 0.18
+SONATA_TURN_IN_BOOST_RIGHT = 0.00
+SONATA_UNWIND_TAPER_LEFT = 0.28
+SONATA_UNWIND_TAPER_RIGHT = 0.00
+SONATA_CENTER_TAPER_MAX = 0.04
+SONATA_CENTER_TAPER_LAT = 0.15
+SONATA_CENTER_TAPER_LAT_WIDTH = 0.025
+SONATA_CENTER_TAPER_SPEED = 22.0
+SONATA_CENTER_TAPER_SPEED_WIDTH = 2.5
+SONATA_LOW_SPEED_CENTER_TAPER_MAX = 0.08
+SONATA_LOW_SPEED_CENTER_TAPER_LAT = 0.10
+SONATA_LOW_SPEED_CENTER_TAPER_LAT_WIDTH = 0.02
+SONATA_LOW_SPEED_CENTER_TAPER_SPEED_MAX = 7.0
+SONATA_LOW_SPEED_CENTER_TAPER_SPEED_WIDTH = 1.0
+
 ELANTRA_NON_SCC_FF_ADJUST_LEFT = 0.02
 ELANTRA_NON_SCC_FF_ADJUST_RIGHT = -0.02
 ELANTRA_NON_SCC_FF_ONSET = 0.14
@@ -294,11 +328,42 @@ KIA_FORTE_TURN_IN_BOOST_LEFT = 0.10
 KIA_FORTE_TURN_IN_BOOST_RIGHT = 0.00
 KIA_FORTE_UNWIND_TAPER_LEFT = 0.26
 KIA_FORTE_UNWIND_TAPER_RIGHT = 0.04
+KIA_FORTE_CRAWL_TURN_IN_FF_BOOST_LEFT = 0.10
+KIA_FORTE_CRAWL_TURN_IN_FF_BOOST_RIGHT = 0.14
+KIA_FORTE_CRAWL_TURN_IN_FF_SPEED = 4.5
+KIA_FORTE_CRAWL_TURN_IN_FF_SPEED_WIDTH = 0.8
+KIA_FORTE_CRAWL_TURN_IN_FF_LAT = 0.10
+KIA_FORTE_CRAWL_TURN_IN_FF_LAT_WIDTH = 0.05
 KIA_FORTE_CENTER_TAPER_MAX = 0.14
 KIA_FORTE_CENTER_TAPER_LAT = 0.16
 KIA_FORTE_CENTER_TAPER_LAT_WIDTH = 0.03
 KIA_FORTE_CENTER_TAPER_SPEED = 24.0
 KIA_FORTE_CENTER_TAPER_SPEED_WIDTH = 2.5
+
+PALISADE_BASE_LAT_ACCEL_FACTOR_MULT = 0.98
+PALISADE_FF_GAIN_LEFT = 0.14
+PALISADE_FF_GAIN_RIGHT = 0.12
+PALISADE_FF_ONSET = 0.08
+PALISADE_FF_ONSET_WIDTH = 0.04
+PALISADE_FF_CUTOFF = 1.25
+PALISADE_FF_CUTOFF_WIDTH = 0.36
+PALISADE_TRANSITION_SPEED = 9.0
+PALISADE_PHASE_SCALE = 0.11
+PALISADE_TURN_IN_BOOST_LEFT = 0.34
+PALISADE_TURN_IN_BOOST_RIGHT = 0.24
+PALISADE_UNWIND_TAPER_LEFT = 0.18
+PALISADE_UNWIND_TAPER_RIGHT = 0.30
+PALISADE_FRICTION_MULT = 1.02
+PALISADE_FRICTION_LAT_RISE = 0.20
+PALISADE_FRICTION_JERK_RISE = 0.24
+PALISADE_TURN_IN_THRESHOLD_REDUCTION_LEFT = 0.18
+PALISADE_TURN_IN_THRESHOLD_REDUCTION_RIGHT = 0.14
+PALISADE_UNWIND_THRESHOLD_INCREASE_LEFT = 0.14
+PALISADE_UNWIND_THRESHOLD_INCREASE_RIGHT = 0.22
+PALISADE_TURN_IN_FRICTION_BOOST_LEFT = 0.08
+PALISADE_TURN_IN_FRICTION_BOOST_RIGHT = 0.06
+PALISADE_UNWIND_FRICTION_REDUCTION_LEFT = 0.12
+PALISADE_UNWIND_FRICTION_REDUCTION_RIGHT = 0.20
 
 GENESIS_G90_LATERAL_TESTING_GROUND_ID = testing_ground.id_4
 GENESIS_G90_FF_GAIN_LEFT = 0.32
@@ -330,26 +395,26 @@ IONIQ_5_FF_ONSET = 0.10
 IONIQ_5_FF_ONSET_WIDTH = 0.05
 IONIQ_5_FF_CUTOFF = 1.20
 IONIQ_5_FF_CUTOFF_WIDTH = 0.30
-IONIQ_5_TRANSITION_SPEED = 11.0
+IONIQ_5_TRANSITION_SPEED = 12.5
 IONIQ_5_PHASE_SCALE = 0.10
-IONIQ_5_FF_REDUCTION_LEFT = 0.14
-IONIQ_5_FF_REDUCTION_RIGHT = 0.18
-IONIQ_5_TURN_IN_BOOST_LEFT = 0.04
-IONIQ_5_TURN_IN_BOOST_RIGHT = 0.00
-IONIQ_5_UNWIND_TAPER_LEFT = 0.52
-IONIQ_5_UNWIND_TAPER_RIGHT = 0.82
-IONIQ_5_TURN_IN_THRESHOLD_REDUCTION_LEFT = 0.05
-IONIQ_5_TURN_IN_THRESHOLD_REDUCTION_RIGHT = 0.00
-IONIQ_5_UNWIND_THRESHOLD_INCREASE_LEFT = 0.24
+IONIQ_5_FF_REDUCTION_LEFT = 0.12
+IONIQ_5_FF_REDUCTION_RIGHT = 0.22
+IONIQ_5_TURN_IN_BOOST_LEFT = 0.14
+IONIQ_5_TURN_IN_BOOST_RIGHT = 0.06
+IONIQ_5_UNWIND_TAPER_LEFT = 0.76
+IONIQ_5_UNWIND_TAPER_RIGHT = 0.86
+IONIQ_5_TURN_IN_THRESHOLD_REDUCTION_LEFT = 0.08
+IONIQ_5_TURN_IN_THRESHOLD_REDUCTION_RIGHT = 0.05
+IONIQ_5_UNWIND_THRESHOLD_INCREASE_LEFT = 0.36
 IONIQ_5_UNWIND_THRESHOLD_INCREASE_RIGHT = 0.38
-IONIQ_5_TURN_IN_FRICTION_BOOST_LEFT = 0.02
-IONIQ_5_TURN_IN_FRICTION_BOOST_RIGHT = 0.00
-IONIQ_5_UNWIND_FRICTION_REDUCTION_LEFT = 0.22
-IONIQ_5_UNWIND_FRICTION_REDUCTION_RIGHT = 0.32
-IONIQ_5_CENTER_TAPER_MAX = 0.08
-IONIQ_5_CENTER_TAPER_LAT = 0.16
+IONIQ_5_TURN_IN_FRICTION_BOOST_LEFT = 0.04
+IONIQ_5_TURN_IN_FRICTION_BOOST_RIGHT = 0.03
+IONIQ_5_UNWIND_FRICTION_REDUCTION_LEFT = 0.34
+IONIQ_5_UNWIND_FRICTION_REDUCTION_RIGHT = 0.34
+IONIQ_5_CENTER_TAPER_MAX = 0.14
+IONIQ_5_CENTER_TAPER_LAT = 0.12
 IONIQ_5_CENTER_TAPER_LAT_WIDTH = 0.03
-IONIQ_5_CENTER_TAPER_SPEED = 20.0
+IONIQ_5_CENTER_TAPER_SPEED = 16.0
 IONIQ_5_CENTER_TAPER_SPEED_WIDTH = 2.5
 
 IONIQ_EV_OLD_BASE_LAT_ACCEL_FACTOR_MULT = 1.16
@@ -425,11 +490,17 @@ IONIQ_6_DIRECTIONAL_TAPER_UNWIND_FLOOR_LEFT = 0.10
 IONIQ_6_DIRECTIONAL_TAPER_UNWIND_FLOOR_RIGHT = 0.04
 IONIQ_6_DIRECTIONAL_TAPER_JERK_ONSET = 0.60
 IONIQ_6_DIRECTIONAL_TAPER_JERK_WIDTH = 0.14
-IONIQ_6_DIRECTIONAL_TAPER_LOW_SPEED_RELIEF = 0.62
-IONIQ_6_DIRECTIONAL_TAPER_LOW_SPEED_RELIEF_SPEED = 17.0
-IONIQ_6_DIRECTIONAL_TAPER_LOW_SPEED_RELIEF_SPEED_WIDTH = 2.0
-IONIQ_6_DIRECTIONAL_TAPER_LOW_SPEED_RELIEF_LAT = 0.45
-IONIQ_6_DIRECTIONAL_TAPER_LOW_SPEED_RELIEF_LAT_WIDTH = 0.14
+IONIQ_6_DIRECTIONAL_TAPER_LOW_SPEED_RELIEF = 0.98
+IONIQ_6_DIRECTIONAL_TAPER_LOW_SPEED_RELIEF_SPEED = 11.2
+IONIQ_6_DIRECTIONAL_TAPER_LOW_SPEED_RELIEF_SPEED_WIDTH = 1.5
+IONIQ_6_DIRECTIONAL_TAPER_LOW_SPEED_RELIEF_LAT = 0.10
+IONIQ_6_DIRECTIONAL_TAPER_LOW_SPEED_RELIEF_LAT_WIDTH = 0.06
+IONIQ_6_CRAWL_TURN_IN_FF_BOOST_LEFT = 0.12
+IONIQ_6_CRAWL_TURN_IN_FF_BOOST_RIGHT = 0.16
+IONIQ_6_CRAWL_TURN_IN_FF_SPEED = 4.5
+IONIQ_6_CRAWL_TURN_IN_FF_SPEED_WIDTH = 0.8
+IONIQ_6_CRAWL_TURN_IN_FF_LAT = 0.10
+IONIQ_6_CRAWL_TURN_IN_FF_LAT_WIDTH = 0.05
 IONIQ_6_HEAVY_DIRECTIONAL_TAPER_LAT_START = 0.82
 IONIQ_6_HEAVY_DIRECTIONAL_TAPER_LAT_WIDTH = 0.12
 IONIQ_6_HEAVY_DIRECTIONAL_TAPER_BASE_LEFT = 0.10
@@ -443,28 +514,28 @@ IONIQ_6_OUTPUT_DIRECTIONAL_TAPER_BLEND = 0.97
 
 KIA_EV6_LATERAL_TESTING_GROUND_ID = testing_ground.id_6
 KIA_EV6_LATERAL_TESTING_GROUND_VARIANT = "C"
-KIA_EV6_FF_GAIN_LEFT = 0.07
-KIA_EV6_FF_GAIN_RIGHT = 0.085
+KIA_EV6_FF_GAIN_LEFT = 0.06
+KIA_EV6_FF_GAIN_RIGHT = 0.07
 KIA_EV6_FF_ONSET = 0.08
 KIA_EV6_FF_ONSET_WIDTH = 0.04
 KIA_EV6_FF_CUTOFF = 0.60
 KIA_EV6_FF_CUTOFF_WIDTH = 0.14
 KIA_EV6_TRANSITION_SPEED = 11.0
 KIA_EV6_PHASE_SCALE = 0.09
-KIA_EV6_TURN_IN_BOOST_LEFT = 0.14
-KIA_EV6_TURN_IN_BOOST_RIGHT = 0.22
-KIA_EV6_UNWIND_TAPER_LEFT = 0.34
-KIA_EV6_UNWIND_TAPER_RIGHT = 0.44
+KIA_EV6_TURN_IN_BOOST_LEFT = 0.18
+KIA_EV6_TURN_IN_BOOST_RIGHT = 0.12
+KIA_EV6_UNWIND_TAPER_LEFT = 0.48
+KIA_EV6_UNWIND_TAPER_RIGHT = 0.46
 KIA_EV6_FRICTION_MULT = 1.01
 KIA_EV6_FRICTION_LAT_RISE = 0.18
 KIA_EV6_FRICTION_JERK_RISE = 0.22
 KIA_EV6_TURN_IN_THRESHOLD_REDUCTION_LEFT = 0.10
 KIA_EV6_TURN_IN_THRESHOLD_REDUCTION_RIGHT = 0.14
-KIA_EV6_UNWIND_THRESHOLD_INCREASE_LEFT = 0.18
+KIA_EV6_UNWIND_THRESHOLD_INCREASE_LEFT = 0.28
 KIA_EV6_UNWIND_THRESHOLD_INCREASE_RIGHT = 0.24
-KIA_EV6_TURN_IN_FRICTION_BOOST_LEFT = 0.03
+KIA_EV6_TURN_IN_FRICTION_BOOST_LEFT = 0.04
 KIA_EV6_TURN_IN_FRICTION_BOOST_RIGHT = 0.05
-KIA_EV6_UNWIND_FRICTION_REDUCTION_LEFT = 0.18
+KIA_EV6_UNWIND_FRICTION_REDUCTION_LEFT = 0.28
 KIA_EV6_UNWIND_FRICTION_REDUCTION_RIGHT = 0.22
 KIA_EV6_CENTER_TAPER_MAX = 0.08
 KIA_EV6_CENTER_TAPER_LAT = 0.16
@@ -496,6 +567,28 @@ VOLT_PLEXY_TURN_IN_FRICTION_BOOST_LEFT = 0.08
 VOLT_PLEXY_TURN_IN_FRICTION_BOOST_RIGHT = 0.06
 VOLT_PLEXY_UNWIND_FRICTION_REDUCTION_LEFT = 0.16
 VOLT_PLEXY_UNWIND_FRICTION_REDUCTION_RIGHT = 0.40
+PRIUS_TRANSITION_SPEED = 10.0
+PRIUS_PHASE_SCALE = 0.09
+PRIUS_FF_GAIN_LEFT = 0.10
+PRIUS_FF_GAIN_RIGHT = 0.14
+PRIUS_FF_ONSET = 0.16
+PRIUS_FF_ONSET_WIDTH = 0.08
+PRIUS_FF_CUTOFF = 1.25
+PRIUS_FF_CUTOFF_WIDTH = 0.30
+PRIUS_FRICTION_LAT_RISE = 0.18
+PRIUS_FRICTION_JERK_RISE = 0.22
+PRIUS_TURN_IN_BOOST_LEFT = 0.48
+PRIUS_TURN_IN_BOOST_RIGHT = 0.62
+PRIUS_UNWIND_TAPER_LEFT = 0.44
+PRIUS_UNWIND_TAPER_RIGHT = 0.72
+PRIUS_TURN_IN_THRESHOLD_REDUCTION_LEFT = 0.18
+PRIUS_TURN_IN_THRESHOLD_REDUCTION_RIGHT = 0.24
+PRIUS_UNWIND_THRESHOLD_INCREASE_LEFT = 0.28
+PRIUS_UNWIND_THRESHOLD_INCREASE_RIGHT = 0.44
+PRIUS_TURN_IN_FRICTION_BOOST_LEFT = 0.08
+PRIUS_TURN_IN_FRICTION_BOOST_RIGHT = 0.12
+PRIUS_UNWIND_FRICTION_REDUCTION_LEFT = 0.14
+PRIUS_UNWIND_FRICTION_REDUCTION_RIGHT = 0.24
 
 
 def _sigmoid(x: float) -> float:
@@ -510,6 +603,74 @@ def _sigmoid(x: float) -> float:
 def get_friction_threshold(v_ego: float) -> float:
   # Keep the speed-scaled friction threshold behavior.
   return float(np.interp(v_ego, [1 * CV.MPH_TO_MS, 20 * CV.MPH_TO_MS, 75 * CV.MPH_TO_MS], [0.16, 0.19, 0.27]))
+
+
+def _prius_sigmoid(x: float) -> float:
+  return _sigmoid(x)
+
+
+def _prius_low_speed_factor(v_ego: float) -> float:
+  return 1.0 / (1.0 + (max(v_ego, 0.0) / PRIUS_TRANSITION_SPEED) ** 2)
+
+
+def _prius_transition_phase(desired_lateral_accel: float, desired_lateral_jerk: float) -> float:
+  return math.tanh((desired_lateral_accel * desired_lateral_jerk) / PRIUS_PHASE_SCALE)
+
+
+def _prius_side_value(desired_lateral_accel: float, left_value: float, right_value: float) -> float:
+  return left_value if desired_lateral_accel >= 0.0 else right_value
+
+
+def _prius_transition_envelope(v_ego: float, desired_lateral_accel: float, desired_lateral_jerk: float) -> float:
+  lat_factor = 1.0 - math.exp(-abs(desired_lateral_accel) / PRIUS_FRICTION_LAT_RISE)
+  jerk_factor = 1.0 - math.exp(-abs(desired_lateral_jerk) / PRIUS_FRICTION_JERK_RISE)
+  return _prius_low_speed_factor(v_ego) * lat_factor * jerk_factor
+
+
+def get_prius_ff_scale(desired_lateral_accel: float, desired_lateral_jerk: float, v_ego: float) -> float:
+  if desired_lateral_accel == 0.0:
+    return 1.0
+
+  gain = _prius_side_value(desired_lateral_accel, PRIUS_FF_GAIN_LEFT, PRIUS_FF_GAIN_RIGHT)
+  abs_lateral_accel = abs(desired_lateral_accel)
+  onset = _prius_sigmoid((abs_lateral_accel - PRIUS_FF_ONSET) / PRIUS_FF_ONSET_WIDTH)
+  cutoff = _prius_sigmoid((PRIUS_FF_CUTOFF - abs_lateral_accel) / PRIUS_FF_CUTOFF_WIDTH)
+  extra_scale = gain * onset * cutoff
+  phase = _prius_transition_phase(desired_lateral_accel, desired_lateral_jerk)
+  turn_in_weight = max(phase, 0.0)
+  unwind_weight = max(-phase, 0.0)
+  low_speed_factor = _prius_low_speed_factor(v_ego)
+  turn_in_boost = 1.0 + (_prius_side_value(desired_lateral_accel, PRIUS_TURN_IN_BOOST_LEFT, PRIUS_TURN_IN_BOOST_RIGHT) *
+                          turn_in_weight * (0.35 + 0.65 * low_speed_factor))
+  unwind_taper = 1.0 - (_prius_side_value(desired_lateral_accel, PRIUS_UNWIND_TAPER_LEFT, PRIUS_UNWIND_TAPER_RIGHT) *
+                         unwind_weight * (0.35 + 0.65 * low_speed_factor))
+  return 1.0 + (extra_scale * turn_in_boost * max(unwind_taper, 0.0))
+
+
+def get_prius_friction_threshold(v_ego: float, desired_lateral_accel: float = 0.0, desired_lateral_jerk: float = 0.0) -> float:
+  base_threshold = get_friction_threshold(v_ego)
+  transition_envelope = _prius_transition_envelope(v_ego, desired_lateral_accel, desired_lateral_jerk)
+  phase = _prius_transition_phase(desired_lateral_accel, desired_lateral_jerk)
+  turn_in_weight = max(phase, 0.0)
+  unwind_weight = max(-phase, 0.0)
+  threshold_scale = 1.0 - (_prius_side_value(desired_lateral_accel, PRIUS_TURN_IN_THRESHOLD_REDUCTION_LEFT, PRIUS_TURN_IN_THRESHOLD_REDUCTION_RIGHT) *
+                           transition_envelope * turn_in_weight)
+  threshold_scale += (_prius_side_value(desired_lateral_accel, PRIUS_UNWIND_THRESHOLD_INCREASE_LEFT, PRIUS_UNWIND_THRESHOLD_INCREASE_RIGHT) *
+                      transition_envelope * unwind_weight)
+  return base_threshold * min(max(threshold_scale, 0.86), 1.16)
+
+
+def get_prius_friction_scale(v_ego: float, desired_lateral_accel: float, desired_lateral_jerk: float) -> float:
+  transition_envelope = _prius_transition_envelope(v_ego, desired_lateral_accel, desired_lateral_jerk)
+  phase = _prius_transition_phase(desired_lateral_accel, desired_lateral_jerk)
+  turn_in_weight = max(phase, 0.0)
+  unwind_weight = max(-phase, 0.0)
+  friction_scale = 1.0
+  friction_scale += (_prius_side_value(desired_lateral_accel, PRIUS_TURN_IN_FRICTION_BOOST_LEFT, PRIUS_TURN_IN_FRICTION_BOOST_RIGHT) *
+                     transition_envelope * turn_in_weight)
+  friction_scale -= (_prius_side_value(desired_lateral_accel, PRIUS_UNWIND_FRICTION_REDUCTION_LEFT, PRIUS_UNWIND_FRICTION_REDUCTION_RIGHT) *
+                     transition_envelope * unwind_weight)
+  return min(max(friction_scale, 0.90), 1.14)
 
 
 def civic_bosch_modified_lateral_testing_ground_active() -> bool:
@@ -993,6 +1154,53 @@ def get_sonata_hybrid_center_taper_scale(desired_lateral_accel: float, v_ego: fl
   return 1.0 - reduction
 
 
+def _sonata_sigmoid(x: float) -> float:
+  return _sigmoid(x)
+
+
+def _sonata_low_speed_factor(v_ego: float) -> float:
+  return 1.0 / (1.0 + (max(v_ego, 0.0) / SONATA_TRANSITION_SPEED) ** 2)
+
+
+def _sonata_transition_phase(desired_lateral_accel: float, desired_lateral_jerk: float) -> float:
+  return math.tanh((desired_lateral_accel * desired_lateral_jerk) / SONATA_PHASE_SCALE)
+
+
+def _sonata_side_value(desired_lateral_accel: float, left_value: float, right_value: float) -> float:
+  return left_value if desired_lateral_accel >= 0.0 else right_value
+
+
+def get_sonata_ff_scale(desired_lateral_accel: float, desired_lateral_jerk: float, v_ego: float) -> float:
+  if desired_lateral_accel == 0.0:
+    return 1.0
+
+  abs_lateral_accel = abs(desired_lateral_accel)
+  onset = _sonata_sigmoid((abs_lateral_accel - SONATA_FF_ONSET) / SONATA_FF_ONSET_WIDTH)
+  cutoff = _sonata_sigmoid((SONATA_FF_CUTOFF - abs_lateral_accel) / SONATA_FF_CUTOFF_WIDTH)
+  base_reduction = _sonata_side_value(desired_lateral_accel, SONATA_FF_REDUCTION_LEFT, SONATA_FF_REDUCTION_RIGHT) * onset * cutoff
+  phase = _sonata_transition_phase(desired_lateral_accel, desired_lateral_jerk)
+  turn_in_weight = max(phase, 0.0)
+  unwind_weight = max(-phase, 0.0)
+  low_speed_factor = _sonata_low_speed_factor(v_ego)
+  turn_in_boost = 1.0 + (_sonata_side_value(desired_lateral_accel, SONATA_TURN_IN_BOOST_LEFT, SONATA_TURN_IN_BOOST_RIGHT) *
+                         turn_in_weight * low_speed_factor)
+  unwind_taper = 1.0 - (_sonata_side_value(desired_lateral_accel, SONATA_UNWIND_TAPER_LEFT, SONATA_UNWIND_TAPER_RIGHT) *
+                        unwind_weight * (0.35 + 0.65 * low_speed_factor))
+  return (1.0 - base_reduction) * turn_in_boost * max(unwind_taper, 0.0)
+
+
+def get_sonata_center_taper_scale(desired_lateral_accel: float, v_ego: float) -> float:
+  speed_weight = _sonata_sigmoid((v_ego - SONATA_CENTER_TAPER_SPEED) / SONATA_CENTER_TAPER_SPEED_WIDTH)
+  center_weight = _sonata_sigmoid((SONATA_CENTER_TAPER_LAT - abs(desired_lateral_accel)) / SONATA_CENTER_TAPER_LAT_WIDTH)
+  reduction = SONATA_CENTER_TAPER_MAX * speed_weight * center_weight
+  low_speed_weight = _sonata_sigmoid((SONATA_LOW_SPEED_CENTER_TAPER_SPEED_MAX - v_ego) /
+                                     SONATA_LOW_SPEED_CENTER_TAPER_SPEED_WIDTH)
+  low_speed_center_weight = _sonata_sigmoid((SONATA_LOW_SPEED_CENTER_TAPER_LAT - abs(desired_lateral_accel)) /
+                                            SONATA_LOW_SPEED_CENTER_TAPER_LAT_WIDTH)
+  reduction += SONATA_LOW_SPEED_CENTER_TAPER_MAX * low_speed_weight * low_speed_center_weight
+  return 1.0 - reduction
+
+
 def _elantra_non_scc_sigmoid(x: float) -> float:
   return _sigmoid(x)
 
@@ -1067,7 +1275,15 @@ def get_kia_forte_ff_scale(desired_lateral_accel: float, desired_lateral_jerk: f
                          turn_in_weight * (0.35 + 0.65 * low_speed_factor))
   unwind_taper = 1.0 - (_kia_forte_side_value(desired_lateral_accel, KIA_FORTE_UNWIND_TAPER_LEFT, KIA_FORTE_UNWIND_TAPER_RIGHT) *
                         unwind_weight * (0.35 + 0.65 * low_speed_factor))
-  return (1.0 - base_reduction) * turn_in_boost * max(unwind_taper, 0.0)
+  crawl_turn_in_scale = 0.0
+  if desired_lateral_accel * desired_lateral_jerk > 0.0:
+    crawl_speed_weight = _kia_forte_sigmoid((KIA_FORTE_CRAWL_TURN_IN_FF_SPEED - max(v_ego, 0.0)) /
+                                            KIA_FORTE_CRAWL_TURN_IN_FF_SPEED_WIDTH)
+    crawl_lat_weight = _kia_forte_sigmoid((abs_lateral_accel - KIA_FORTE_CRAWL_TURN_IN_FF_LAT) /
+                                          KIA_FORTE_CRAWL_TURN_IN_FF_LAT_WIDTH)
+    crawl_turn_in_scale = _kia_forte_side_value(desired_lateral_accel, KIA_FORTE_CRAWL_TURN_IN_FF_BOOST_LEFT,
+                                                KIA_FORTE_CRAWL_TURN_IN_FF_BOOST_RIGHT) * crawl_speed_weight * crawl_lat_weight
+  return ((1.0 - base_reduction) * turn_in_boost * max(unwind_taper, 0.0)) + crawl_turn_in_scale
 
 
 def get_kia_forte_center_taper_scale(desired_lateral_accel: float, v_ego: float) -> float:
@@ -1075,6 +1291,74 @@ def get_kia_forte_center_taper_scale(desired_lateral_accel: float, v_ego: float)
   center_weight = _kia_forte_sigmoid((KIA_FORTE_CENTER_TAPER_LAT - abs(desired_lateral_accel)) / KIA_FORTE_CENTER_TAPER_LAT_WIDTH)
   reduction = KIA_FORTE_CENTER_TAPER_MAX * speed_weight * center_weight
   return 1.0 - reduction
+
+
+def _palisade_sigmoid(x: float) -> float:
+  return _sigmoid(x)
+
+
+def _palisade_low_speed_factor(v_ego: float) -> float:
+  return 1.0 / (1.0 + (max(v_ego, 0.0) / PALISADE_TRANSITION_SPEED) ** 2)
+
+
+def _palisade_transition_phase(desired_lateral_accel: float, desired_lateral_jerk: float) -> float:
+  return math.tanh((desired_lateral_accel * desired_lateral_jerk) / PALISADE_PHASE_SCALE)
+
+
+def _palisade_side_value(desired_lateral_accel: float, left_value: float, right_value: float) -> float:
+  return left_value if desired_lateral_accel >= 0.0 else right_value
+
+
+def _palisade_transition_envelope(v_ego: float, desired_lateral_accel: float, desired_lateral_jerk: float) -> float:
+  lat_factor = 1.0 - math.exp(-abs(desired_lateral_accel) / PALISADE_FRICTION_LAT_RISE)
+  jerk_factor = 1.0 - math.exp(-abs(desired_lateral_jerk) / PALISADE_FRICTION_JERK_RISE)
+  return _palisade_low_speed_factor(v_ego) * lat_factor * jerk_factor
+
+
+def get_palisade_ff_scale(desired_lateral_accel: float, desired_lateral_jerk: float, v_ego: float) -> float:
+  if desired_lateral_accel == 0.0:
+    return 1.0
+
+  gain = _palisade_side_value(desired_lateral_accel, PALISADE_FF_GAIN_LEFT, PALISADE_FF_GAIN_RIGHT)
+  abs_lateral_accel = abs(desired_lateral_accel)
+  onset = _palisade_sigmoid((abs_lateral_accel - PALISADE_FF_ONSET) / PALISADE_FF_ONSET_WIDTH)
+  cutoff = _palisade_sigmoid((PALISADE_FF_CUTOFF - abs_lateral_accel) / PALISADE_FF_CUTOFF_WIDTH)
+  extra_scale = gain * onset * cutoff
+  phase = _palisade_transition_phase(desired_lateral_accel, desired_lateral_jerk)
+  turn_in_weight = max(phase, 0.0)
+  unwind_weight = max(-phase, 0.0)
+  low_speed_factor = _palisade_low_speed_factor(v_ego)
+  turn_in_boost = 1.0 + (_palisade_side_value(desired_lateral_accel, PALISADE_TURN_IN_BOOST_LEFT, PALISADE_TURN_IN_BOOST_RIGHT) *
+                          turn_in_weight * (0.35 + 0.65 * low_speed_factor))
+  unwind_taper = 1.0 - (_palisade_side_value(desired_lateral_accel, PALISADE_UNWIND_TAPER_LEFT, PALISADE_UNWIND_TAPER_RIGHT) *
+                         unwind_weight * (0.35 + 0.65 * low_speed_factor))
+  return 1.0 + (extra_scale * turn_in_boost * max(unwind_taper, 0.0))
+
+
+def get_palisade_friction_threshold(v_ego: float, desired_lateral_accel: float = 0.0, desired_lateral_jerk: float = 0.0) -> float:
+  base_threshold = get_friction_threshold(v_ego)
+  transition_envelope = _palisade_transition_envelope(v_ego, desired_lateral_accel, desired_lateral_jerk)
+  phase = _palisade_transition_phase(desired_lateral_accel, desired_lateral_jerk)
+  turn_in_weight = max(phase, 0.0)
+  unwind_weight = max(-phase, 0.0)
+  threshold_scale = 1.0 - (_palisade_side_value(desired_lateral_accel, PALISADE_TURN_IN_THRESHOLD_REDUCTION_LEFT, PALISADE_TURN_IN_THRESHOLD_REDUCTION_RIGHT) *
+                           transition_envelope * turn_in_weight)
+  threshold_scale += (_palisade_side_value(desired_lateral_accel, PALISADE_UNWIND_THRESHOLD_INCREASE_LEFT, PALISADE_UNWIND_THRESHOLD_INCREASE_RIGHT) *
+                      transition_envelope * unwind_weight)
+  return base_threshold * min(max(threshold_scale, 0.84), 1.14)
+
+
+def get_palisade_friction_scale(v_ego: float, desired_lateral_accel: float, desired_lateral_jerk: float) -> float:
+  transition_envelope = _palisade_transition_envelope(v_ego, desired_lateral_accel, desired_lateral_jerk)
+  phase = _palisade_transition_phase(desired_lateral_accel, desired_lateral_jerk)
+  turn_in_weight = max(phase, 0.0)
+  unwind_weight = max(-phase, 0.0)
+  friction_scale = PALISADE_FRICTION_MULT
+  friction_scale += (_palisade_side_value(desired_lateral_accel, PALISADE_TURN_IN_FRICTION_BOOST_LEFT, PALISADE_TURN_IN_FRICTION_BOOST_RIGHT) *
+                     transition_envelope * turn_in_weight)
+  friction_scale -= (_palisade_side_value(desired_lateral_accel, PALISADE_UNWIND_FRICTION_REDUCTION_LEFT, PALISADE_UNWIND_FRICTION_REDUCTION_RIGHT) *
+                     transition_envelope * unwind_weight)
+  return min(max(friction_scale, 0.92), 1.12)
 
 
 def genesis_g90_lateral_testing_ground_active() -> bool:
@@ -1309,7 +1593,15 @@ def get_ioniq_6_ff_scale(desired_lateral_accel: float, desired_lateral_jerk: flo
                           turn_in_weight * low_speed_factor)
   unwind_taper = 1.0 - (_ioniq_6_side_value(desired_lateral_accel, IONIQ_6_UNWIND_TAPER_LEFT, IONIQ_6_UNWIND_TAPER_RIGHT) *
                          unwind_weight * (0.30 + 0.70 * low_speed_factor))
-  return (1.0 + (extra_scale * turn_in_boost * max(unwind_taper, 0.0))) * get_ioniq_6_directional_taper_scale(desired_lateral_accel, desired_lateral_jerk, v_ego)
+  crawl_turn_in_scale = 0.0
+  if desired_lateral_accel * desired_lateral_jerk > 0.0:
+    crawl_speed_weight = _ioniq_6_sigmoid((IONIQ_6_CRAWL_TURN_IN_FF_SPEED - max(v_ego, 0.0)) /
+                                          IONIQ_6_CRAWL_TURN_IN_FF_SPEED_WIDTH)
+    crawl_lat_weight = _ioniq_6_sigmoid((abs_lateral_accel - IONIQ_6_CRAWL_TURN_IN_FF_LAT) /
+                                        IONIQ_6_CRAWL_TURN_IN_FF_LAT_WIDTH)
+    crawl_turn_in_scale = _ioniq_6_side_value(desired_lateral_accel, IONIQ_6_CRAWL_TURN_IN_FF_BOOST_LEFT,
+                                              IONIQ_6_CRAWL_TURN_IN_FF_BOOST_RIGHT) * crawl_speed_weight * crawl_lat_weight
+  return (1.0 + crawl_turn_in_scale + (extra_scale * turn_in_boost * max(unwind_taper, 0.0))) * get_ioniq_6_directional_taper_scale(desired_lateral_accel, desired_lateral_jerk, v_ego)
 
 
 def get_ioniq_6_friction_threshold(v_ego: float, desired_lateral_accel: float = 0.0, desired_lateral_jerk: float = 0.0) -> float:
@@ -1577,9 +1869,12 @@ class LatControlTorque(LatControl):
     self.is_bolt_2017 = CP.carFingerprint in BOLT_2017_CARS
     self.is_volt_standard = CP.carFingerprint in VOLT_STANDARD_CARS
     self.is_genesis_g90 = CP.carFingerprint in GENESIS_G90_CARS
+    self.is_palisade = CP.carFingerprint in PALISADE_CARS
+    self.is_prius = CP.carFingerprint in PRIUS_CARS
     self.is_ioniq_5 = CP.carFingerprint in IONIQ_5_CARS
     self.is_ioniq_ev_old = CP.carFingerprint in IONIQ_EV_OLD_CARS
     self.is_ioniq_6 = CP.carFingerprint in IONIQ_6_CARS
+    self.is_sonata = CP.carFingerprint in SONATA_CARS
     self.is_sonata_hybrid = CP.carFingerprint in SONATA_HYBRID_CARS
     self.is_elantra_non_scc = CP.carFingerprint in ELANTRA_NON_SCC_CARS
     self.is_kia_forte = CP.carFingerprint in KIA_FORTE_CARS
@@ -1593,6 +1888,8 @@ class LatControlTorque(LatControl):
     self.torque_ff_scale_neg = 1.0
     self.torque_deadzone_boost = float(getattr(self.torque_params, "kfDEPRECATED", 0.0))
     self.torque_ki_mult = 1.0
+    if self.is_palisade:
+      self.torque_params.latAccelFactor *= PALISADE_BASE_LAT_ACCEL_FACTOR_MULT
     if self.is_ioniq_5:
       self.torque_params.latAccelFactor *= IONIQ_5_BASE_LAT_ACCEL_FACTOR_MULT
     if self.is_ioniq_ev_old:
@@ -1620,6 +1917,8 @@ class LatControlTorque(LatControl):
         self.pid._k_i = [self.pid._k_i[0], [k * self.torque_ki_mult for k in self.pid._k_i[1]]]
 
   def update_live_torque_params(self, latAccelFactor, latAccelOffset, friction):
+    if self.is_palisade:
+      latAccelFactor *= PALISADE_BASE_LAT_ACCEL_FACTOR_MULT
     if self.is_ioniq_5:
       latAccelFactor *= IONIQ_5_BASE_LAT_ACCEL_FACTOR_MULT
     if self.is_ioniq_ev_old:
@@ -1703,9 +2002,12 @@ class LatControlTorque(LatControl):
       bolt_2018_2021_tuned_path_active = self.is_bolt_2018_2021
       volt_standard_test_active = self.is_volt_standard and volt_standard_lateral_testing_ground_active()
       genesis_g90_test_active = self.is_genesis_g90 and genesis_g90_lateral_testing_ground_active()
+      palisade_active = self.is_palisade
+      prius_active = self.is_prius
       ioniq_5_active = self.is_ioniq_5
       ioniq_ev_old_active = self.is_ioniq_ev_old
       ioniq_6_active = self.is_ioniq_6
+      sonata_active = self.is_sonata
       sonata_hybrid_active = self.is_sonata_hybrid
       elantra_non_scc_active = self.is_elantra_non_scc
       kia_forte_active = self.is_kia_forte
@@ -1715,6 +2017,7 @@ class LatControlTorque(LatControl):
       volt_standard_center_taper = get_volt_standard_center_taper_scale(setpoint, CS.vEgo) if volt_standard_test_active else 1.0
       ioniq_ev_old_center_taper = get_ioniq_ev_old_center_taper_scale(setpoint, CS.vEgo) if ioniq_ev_old_active else 1.0
       ioniq_6_center_taper = get_ioniq_6_center_taper_scale(setpoint, CS.vEgo) if ioniq_6_active else 1.0
+      sonata_center_taper = get_sonata_center_taper_scale(setpoint, CS.vEgo) if sonata_active else 1.0
       sonata_hybrid_center_taper = get_sonata_hybrid_center_taper_scale(setpoint, CS.vEgo) if sonata_hybrid_active else 1.0
       kia_forte_center_taper = get_kia_forte_center_taper_scale(setpoint, CS.vEgo) if kia_forte_active else 1.0
       kia_ev6_center_taper = get_kia_ev6_center_taper_scale(setpoint, CS.vEgo) if kia_ev6_test_active else 1.0
@@ -1739,6 +2042,14 @@ class LatControlTorque(LatControl):
         ff *= get_genesis_g90_ff_scale(setpoint, desired_lateral_jerk, CS.vEgo)
         friction_threshold = get_genesis_g90_friction_threshold(CS.vEgo, setpoint, desired_lateral_jerk)
         friction_scale = get_genesis_g90_friction_scale(CS.vEgo, setpoint, desired_lateral_jerk)
+      elif palisade_active:
+        ff *= get_palisade_ff_scale(setpoint, desired_lateral_jerk, CS.vEgo)
+        friction_threshold = get_palisade_friction_threshold(CS.vEgo, setpoint, desired_lateral_jerk)
+        friction_scale = get_palisade_friction_scale(CS.vEgo, setpoint, desired_lateral_jerk)
+      elif prius_active:
+        ff *= get_prius_ff_scale(setpoint, desired_lateral_jerk, CS.vEgo)
+        friction_threshold = get_prius_friction_threshold(CS.vEgo, setpoint, desired_lateral_jerk)
+        friction_scale = get_prius_friction_scale(CS.vEgo, setpoint, desired_lateral_jerk)
       elif ioniq_5_active:
         ff *= get_ioniq_5_ff_scale(setpoint, desired_lateral_jerk, CS.vEgo) * ioniq_5_center_taper
         friction_threshold = get_ioniq_5_friction_threshold(CS.vEgo, setpoint, desired_lateral_jerk)
@@ -1752,6 +2063,8 @@ class LatControlTorque(LatControl):
         friction_threshold = get_ioniq_6_friction_threshold(CS.vEgo, setpoint, desired_lateral_jerk) / max(ioniq_6_center_taper, 1e-3)
         friction_scale = get_ioniq_6_friction_scale(CS.vEgo, setpoint, desired_lateral_jerk)
         friction_scale = 1.0 + ((friction_scale - 1.0) * ioniq_6_center_taper)
+      elif sonata_active:
+        ff *= get_sonata_ff_scale(setpoint, desired_lateral_jerk, CS.vEgo) * sonata_center_taper
       elif sonata_hybrid_active:
         ff *= get_sonata_hybrid_ff_scale(setpoint, desired_lateral_jerk, CS.vEgo) * sonata_hybrid_center_taper
       elif elantra_non_scc_active:

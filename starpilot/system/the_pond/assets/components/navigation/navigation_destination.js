@@ -120,6 +120,26 @@ function loadMapboxGL() {
   return mapboxLoadPromise;
 }
 
+function parseJsonArray(value) {
+  if (Array.isArray(value)) return value;
+  if (typeof value !== "string" || value.trim() === "") return [];
+  try {
+    const parsed = JSON.parse(value);
+    return Array.isArray(parsed) ? parsed : [];
+  } catch {
+    return [];
+  }
+}
+
+function parseCoordinatePair(value) {
+  if (!value || typeof value !== "object") return null;
+  const latitude = Number.parseFloat(value.latitude);
+  const longitude = Number.parseFloat(value.longitude);
+  if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) return null;
+  if (Math.abs(latitude) < 1e-6 && Math.abs(longitude) < 1e-6) return null;
+  return { latitude, longitude };
+}
+
 export function NavDestination() {
   let map;
   let destinationMarker;
@@ -183,6 +203,9 @@ export function NavDestination() {
     try {
       const { name, longitude, latitude } = destination;
       const coords = [longitude, latitude];
+      if (!state.lastPosition) {
+        throw new Error("Current location unavailable.");
+      }
 
       const inputEl = document.getElementById("search-field");
       if (inputEl && !resume) {
@@ -275,13 +298,13 @@ export function NavDestination() {
     state.canToggleProvider = hasMapbox && hasAMap;
     state.searchProvider = hasMapbox ? "mapbox" : "";
     if (state.missingKeys) return;
-    state.lastPosition = {
-      latitude: parseFloat(data.lastPosition.latitude),
-      longitude: parseFloat(data.lastPosition.longitude)
-    };
+
     try {
       state.destination = JSON.parse(data.destination);
     } catch { }
+
+    state.lastPosition = parseCoordinatePair(data.lastPosition);
+
     try {
       const prev = JSON.parse(data.previousDestinations);
       state.previousDestinations = prev.map(d => ({ name: d.place_name }));
@@ -323,14 +346,15 @@ export function NavDestination() {
       state.confirmedRoute = null;
       state.suggestions = "[]";
       if (state.searchProvider === "mapbox") {
-        const prox = `${state.lastPosition.longitude},${state.lastPosition.latitude}`;
         const params = new URLSearchParams({
-          proximity: prox,
           access_token: state.mapboxPublic,
           session_token: sessionToken,
           q: val,
           limit: 4
         });
+        if (state.lastPosition) {
+          params.set("proximity", `${state.lastPosition.longitude},${state.lastPosition.latitude}`);
+        }
         const res = await fetch(`https://api.mapbox.com/search/searchbox/v1/suggest?${params}`);
         const data = await res.json();
         state.suggestions = JSON.stringify(data.suggestions);
@@ -479,14 +503,15 @@ export function NavDestination() {
       state.confirmedRoute = null;
       state.suggestions = "[]";
       if (state.searchProvider === "mapbox") {
-        const prox = `${state.lastPosition.longitude},${state.lastPosition.latitude}`;
         const params = new URLSearchParams({
-          proximity: prox,
           access_token: state.mapboxPublic,
           session_token: sessionToken,
           q: val,
           limit: 4
         });
+        if (state.lastPosition) {
+          params.set("proximity", `${state.lastPosition.longitude},${state.lastPosition.latitude}`);
+        }
         const res = await fetch(`https://api.mapbox.com/search/searchbox/v1/suggest?${params}`);
         const data = await res.json();
         state.suggestions = JSON.stringify(data.suggestions);
@@ -563,10 +588,16 @@ export function NavDestination() {
     }
     state.initialized = true;
     mapboxgl.accessToken = state.mapboxPublic;
+    const initialCenter = state.lastPosition
+      ? [state.lastPosition.longitude, state.lastPosition.latitude]
+      : (parseCoordinatePair(state.destination)
+        ? [state.destination.longitude, state.destination.latitude]
+        : [0, 0]);
+    const initialZoom = state.lastPosition ? 15 : 2;
     map = new mapboxgl.Map({
       container,
-      center: [state.lastPosition.longitude, state.lastPosition.latitude],
-      zoom: 15,
+      center: initialCenter,
+      zoom: initialZoom,
       pitch: 45,
       speed: 1,
       curve: 1,
@@ -574,15 +605,19 @@ export function NavDestination() {
       logoPosition: "bottom-right",
       style: "mapbox://styles/frogsgomoo/cmcfv151j000o01rcdxebhl76"
     });
-    new mapboxgl.Marker().setLngLat([state.lastPosition.longitude, state.lastPosition.latitude]).addTo(map);
+    if (state.lastPosition) {
+      new mapboxgl.Marker().setLngLat([state.lastPosition.longitude, state.lastPosition.latitude]).addTo(map);
+    }
     map.on("load", () => {
-      map.flyTo({
-        center: [state.lastPosition.longitude, state.lastPosition.latitude],
-        zoom: 18,
-        pitch: 45,
-        speed: 1,
-        curve: 1
-      });
+      if (state.lastPosition) {
+        map.flyTo({
+          center: [state.lastPosition.longitude, state.lastPosition.latitude],
+          zoom: 18,
+          pitch: 45,
+          speed: 1,
+          curve: 1
+        });
+      }
       if (state.destination) {
         const savedId = localStorage.getItem("activeRouteId");
         initiateNavigation({ ...state.destination, routeId: savedId }, { resume: true });
@@ -653,7 +688,7 @@ export function NavDestination() {
                 cancelNavigationFn: () => {
                   state.selectedRoute = null;
                   state.confirmedRoute = null;
-                  state.suggestions = state.previousDestinations;
+                  state.suggestions = JSON.stringify(state.previousDestinations);
                   if (destinationMarker) destinationMarker.remove();
                 },
                 onConfirm: () => {
@@ -665,9 +700,9 @@ export function NavDestination() {
                 searchFieldState,
                 favoriteRoutes: state.favoriteRoutes
               }, state.confirmedRouteRefresh);
-            } else if (JSON.parse(state.suggestions).length > 0) {
+            } else if (parseJsonArray(state.suggestions).length > 0) {
               return SearchSuggestions({
-                suggestions: JSON.parse(state.suggestions),
+                suggestions: parseJsonArray(state.suggestions),
                 selectSuggestion,
                 removeFavorite: confirmRemoveFavorite,
                 renameFavorite: confirmRenameFavorite,
@@ -755,7 +790,9 @@ function NavigationDestination({
     removeRouteFromMap(map);
     cancelNavigationFn();
     localStorage.removeItem("activeRouteId");
-    map.flyTo({ center: startingCoordinates, zoom: 15, pitch: 45, speed: 1, curve: 1 });
+    if (map && Array.isArray(startingCoordinates) && startingCoordinates.length === 2) {
+      map.flyTo({ center: startingCoordinates, zoom: 15, pitch: 45, speed: 1, curve: 1 });
+    }
     await fetch("/api/navigation", { method: "DELETE" });
   }
   async function confirmDestination() {

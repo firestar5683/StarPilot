@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+import json
 import os
 import time
 import threading
@@ -18,6 +19,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.common.gps import get_gps_location_service
 
 from openpilot.selfdrive.car.car_specific import CarSpecificEvents
+from openpilot.selfdrive.car.cruise_state import should_flag_cruise_mismatch
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 from openpilot.selfdrive.selfdrived.events import Events, ET
 from openpilot.selfdrive.selfdrived.helpers import ExcessiveActuationCheck
@@ -70,6 +72,9 @@ class SelfdriveD:
     self.pose_calibrator = PoseCalibrator()
     self.calibrated_pose: Pose | None = None
     self.excessive_actuation_check = ExcessiveActuationCheck()
+    self.allow_impossible_acceleration = self.params.get_bool("AllowImpossibleAcceleration")
+    if self.allow_impossible_acceleration:
+      self.clear_longitudinal_excessive_actuation_alert()
     self.excessive_actuation = self.params.get("Offroad_ExcessiveActuation") is not None
 
     # Setup sockets
@@ -161,7 +166,6 @@ class SelfdriveD:
 
     self.cancel_pressed_previously = False
     self.distance_pressed_previously = False
-
     self.display_timer = 0
     self.last_below_steer_speed_alert_time = -float("inf")
     self.last_steer_saturated_alert_time = -float("inf")
@@ -171,6 +175,32 @@ class SelfdriveD:
     self.has_menu = self.CP.brand == "gm" and not (self.CP.flags & GMFlags.NO_CAMERA.value)
 
     self.FPCP = messaging.log_from_bytes(self.params.get("StarPilotCarParams", block=True), custom.StarPilotCarParams)
+
+  def clear_longitudinal_excessive_actuation_alert(self):
+    alert = self.params.get("Offroad_ExcessiveActuation")
+    if not alert:
+      return
+
+    if isinstance(alert, bytes):
+      try:
+        alert = json.loads(alert.decode("utf-8", errors="replace"))
+      except json.JSONDecodeError:
+        return
+    elif isinstance(alert, str):
+      try:
+        alert = json.loads(alert)
+      except json.JSONDecodeError:
+        return
+
+    if not isinstance(alert, dict):
+      return
+
+    extra = alert.get("extra", "")
+    if isinstance(extra, bytes):
+      extra = extra.decode("utf-8", errors="replace")
+
+    if str(extra).strip().lower() == "longitudinal":
+      self.params.remove("Offroad_ExcessiveActuation")
 
   def update_events(self, CS):
     """Compute onroadEvents from carState"""
@@ -221,7 +251,7 @@ class SelfdriveD:
       return
 
     # Block resume if cruise never previously enabled
-    resume_pressed = any(be.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be in CS.buttonEvents)
+    resume_pressed = any(be.type in (ButtonType.accelCruise, ButtonType.accelHardCruise, ButtonType.resumeCruise) for be in CS.buttonEvents)
     if not self.CP.pcmCruise and CS.vCruise > 250 and resume_pressed:
       self.events.add(EventName.resumeBlocked)
 
@@ -332,7 +362,9 @@ class SelfdriveD:
       self.calibrated_pose = self.pose_calibrator.build_calibrated_pose(device_pose)
 
     if self.calibrated_pose is not None:
-      excessive_actuation = self.excessive_actuation_check.update(self.sm, CS, self.calibrated_pose)
+      excessive_actuation = self.excessive_actuation_check.update(
+        self.sm, CS, self.calibrated_pose, self.allow_impossible_acceleration
+      )
       if not self.excessive_actuation and excessive_actuation is not None:
         set_offroad_alert("Offroad_ExcessiveActuation", True, extra_text=str(excessive_actuation))
         self.excessive_actuation = True
@@ -464,7 +496,8 @@ class SelfdriveD:
         self.CP.openpilotLongitudinalControl and not self.CP.pcmCruise
       )
       effective_pcm_cruise = self.CP.pcmCruise or preap_software_cruise
-      cruise_mismatch = CS.cruiseState.enabled and (not self.enabled or not effective_pcm_cruise) and not pacifica_hybrid_aol
+      cruise_mismatch = should_flag_cruise_mismatch(self.CP, CS.cruiseState.enabled, self.enabled,
+                                                    effective_pcm_cruise) and not pacifica_hybrid_aol
       self.cruise_mismatch_counter = self.cruise_mismatch_counter + 1 if cruise_mismatch else 0
       if self.cruise_mismatch_counter > int(6. / DT_CTRL):
         self.events.add(EventName.cruiseMismatch)
@@ -722,7 +755,12 @@ class SelfdriveD:
 
 
 def main():
-  config_realtime_process(4, Priority.CTRL_HIGH)
+  # Run on core 5 (plannerd/radard, ~50% peak, FIFO prio 51) instead of sharing
+  # the saturated core 4 with card+controlsd. Core 4 at 100% was starving
+  # selfdrived's 100 Hz loop and firing selfdrivedLagging. selfdrived's higher
+  # FIFO prio (53 > 51) lets it preempt the 20 Hz planner/radar when needed.
+  # (Core 6 = camerad, core 7 = modeld are both timing-critical — avoid.)
+  config_realtime_process(5, Priority.CTRL_HIGH)
   s = SelfdriveD()
   s.run()
 

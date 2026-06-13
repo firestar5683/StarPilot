@@ -150,11 +150,6 @@ class StarPilotLateralLayout(_SettingsPage):
                    subtitle=tr_noop("Keep lateral control active even without openpilot engaged."),
                    get_state=lambda: self._params.get_bool("AlwaysOnLateral"),
                    set_state=lambda s: _confirm_reboot_toggle(self._params, "AlwaysOnLateral", s) if s else self._params.put_bool("AlwaysOnLateral", False)),
-        SettingRow("AlwaysOnLateralLKAS", "toggle", tr_noop("Enable With LKAS"),
-                   subtitle="",
-                   get_state=lambda: self._params.get_bool("AlwaysOnLateralLKAS"),
-                   set_state=lambda s: self._params.put_bool("AlwaysOnLateralLKAS", s),
-                   visible=lambda: self._params.get_bool("AlwaysOnLateral") and starpilot_state.car_state.lkasAllowedForAOL),
         SettingRow("PauseAOLOnBrake", "value", tr_noop("Pause Below"),
                    subtitle="",
                    get_value=lambda: f"{self._params.get_int('PauseAOLOnBrake')} mph",
@@ -242,6 +237,11 @@ class StarPilotLateralLayout(_SettingsPage):
                    get_state=lambda: self._params.get_bool("TurnDesires"),
                    set_state=lambda s: self._params.put_bool("TurnDesires", s),
                    visible=lambda: self._params.get_bool("LateralTune")),
+        SettingRow("NavDesiresAllowed", "toggle", tr_noop("Use Route Desires"),
+                   subtitle=tr_noop("Allow an active navigation route to request keep-left, keep-right, and low-speed turn desires."),
+                   get_state=lambda: self._params.get_bool("NavDesiresAllowed"),
+                   set_state=lambda s: self._params.put_bool("NavDesiresAllowed", s),
+                   visible=lambda: self._params.get_bool("LateralTune")),
         SettingRow("NNFF", "toggle", tr_noop("Neural Network Feedforward (NNFF)"),
                    subtitle=tr_noop("Use the full neural-network feedforward steering controller when available."),
                    get_state=lambda: self._params.get_bool("NNFF"),
@@ -269,4 +269,4 @@ class StarPilotLateralLayout(_SettingsPage):
       if res == DialogResult.CONFIRM:
         self._params.put_int("LaneChangeSmoothing", int(val))
     current = self._params.get_int("LaneChangeSmoothing") if self._params.get_int("LaneChangeSmoothing") > 0 else 10
-    gui_app.set_modal_overlay(AetherSliderDialog(tr("Lane Change Smoothing"), 1, 10, 1, current, on_close, color=PANEL_STYLE.accent))
+    gui_app.push_widget(AetherSliderDialog(tr("Lane Change Smoothing"), 1, 10, 1, current, on_close, color=PANEL_STYLE.accent))

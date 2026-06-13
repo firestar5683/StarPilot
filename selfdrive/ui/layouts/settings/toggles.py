@@ -29,6 +29,7 @@ DESCRIPTIONS = {
   ),
   "AlwaysOnDM": tr_noop("Enable driver monitoring even when openpilot is not engaged."),
   'RecordFront': tr_noop("Upload data from the driver facing camera and help improve the driver monitoring algorithm."),
+  "IsRHD": tr_noop("Use right-hand-drive driver monitoring. This follows the auto-detected side until changed manually."),
   "IsMetric": tr_noop("Display speed in km/h instead of mph."),
   "RecordAudio": tr_noop("Record and store microphone audio while driving. The audio will be included in the dashcam video in comma connect."),
 }
@@ -38,6 +39,7 @@ class TogglesLayout(Widget):
   def __init__(self):
     super().__init__()
     self._params = Params()
+    self._sync_rhd_toggle()
 
     # param, title, desc, icon, needs_restart
     self._toggle_defs = {
@@ -74,6 +76,12 @@ class TogglesLayout(Widget):
       "AlwaysOnDM": (
         lambda: tr("Always-On Driver Monitoring"),
         DESCRIPTIONS["AlwaysOnDM"],
+        "monitoring.png",
+        False,
+      ),
+      "IsRHD": (
+        lambda: tr("Right Hand Driving"),
+        DESCRIPTIONS["IsRHD"],
         "monitoring.png",
         False,
       ),
@@ -158,6 +166,7 @@ class TogglesLayout(Widget):
 
   def _update_toggles(self):
     ui_state.update_params()
+    self._sync_rhd_toggle()
     safe_mode = self._params.get_bool("SafeMode")
     if safe_mode:
       if self._params.get_bool("ExperimentalMode"):
@@ -234,8 +243,8 @@ class TogglesLayout(Widget):
       # show confirmation dialog
       content = (f"<h1>{self._toggles['ExperimentalMode'].title}</h1><br>" +
                  f"<p>{self._toggles['ExperimentalMode'].description}</p>")
-      dlg = ConfirmDialog(content, tr("Enable"), rich=True)
-      gui_app.set_modal_overlay(dlg, callback=confirm_callback)
+      dlg = ConfirmDialog(content, tr("Enable"), rich=True, callback=confirm_callback)
+      gui_app.push_widget(dlg)
     else:
       self._update_experimental_mode_icon()
       self._params.put_bool("ExperimentalMode", state)
@@ -246,8 +255,14 @@ class TogglesLayout(Widget):
       return
 
     self._params.put_bool(param, state)
+    if param == "IsRHD":
+      self._params.put_bool("IsRHDOverride", True)
     if self._toggle_defs[param][3]:
       self._params.put_bool("OnroadCycleRequested", True)
 
   def _set_longitudinal_personality(self, button_index: int):
     self._params.put("LongitudinalPersonality", button_index)
+
+  def _sync_rhd_toggle(self):
+    if not self._params.get_bool("IsRHDOverride"):
+      self._params.put_bool("IsRHD", self._params.get_bool("IsRhdDetected"))

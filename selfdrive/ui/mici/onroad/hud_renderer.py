@@ -3,6 +3,7 @@ from dataclasses import dataclass
 from openpilot.common.constants import CV
 from openpilot.selfdrive.ui.mici.onroad.torque_bar import TorqueBar
 from openpilot.selfdrive.ui.mici.onroad.speed_limit_utils import resolve_display_speed_limit_ms
+from openpilot.selfdrive.ui.onroad.starpilot.navigation_card import NavigationCardRenderer
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.multilang import tr
@@ -139,6 +140,7 @@ class HudRenderer(Widget):
 
     self._turn_intent = TurnIntent()
     self._torque_bar = TorqueBar()
+    self._navigation_card = NavigationCardRenderer("mici")
 
     self._txt_wheel: rl.Texture = gui_app.texture('icons_mici/wheel.png', 50, 50)
     self._txt_wheel_critical: rl.Texture = gui_app.texture('icons_mici/wheel_critical.png', 50, 50)
@@ -245,6 +247,7 @@ class HudRenderer(Widget):
   def render_background(self) -> None:
     """Draw HUD elements that should sit behind alerts."""
     self._draw_speed_limit(self._rect)
+    self._navigation_card.render(self._rect)
 
   def render_foreground(self) -> None:
     """Draw HUD elements that should sit above alerts."""
@@ -256,6 +259,9 @@ class HudRenderer(Widget):
 
     self._draw_steering_wheel(self._rect)
     self._draw_speed_limit_prompt(self._rect)
+
+  def user_interacting(self) -> bool:
+    return self._navigation_card.is_pressed
 
   def _render(self, rect: rl.Rectangle) -> None:
     """Render HUD elements to the screen."""

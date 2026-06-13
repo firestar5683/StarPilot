@@ -957,10 +957,16 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
   # ten times the regular interval, or the average interval is more than 10% too high.
   EventName.commIssue: {
     ET.SOFT_DISABLE: soft_disable_alert("Communication Issue Between Processes"),
+    ET.PERMANENT: Alert("Communication Issue Between Processes", "",
+                        AlertStatus.normal, AlertSize.small,
+                        Priority.LOWER, VisualAlert.none, AudibleAlert.none, 1., creation_delay=30.),
     ET.NO_ENTRY: comm_issue_alert,
   },
   EventName.commIssueAvgFreq: {
     ET.SOFT_DISABLE: soft_disable_alert("Low Communication Rate Between Processes"),
+    ET.PERMANENT: Alert("Low Communication Rate Between Processes", "",
+                        AlertStatus.normal, AlertSize.small,
+                        Priority.LOWER, VisualAlert.none, AudibleAlert.none, 1., creation_delay=30.),
     ET.NO_ENTRY: NoEntryAlert("Low Communication Rate Between Processes"),
   },
 
@@ -1077,7 +1083,7 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
       "",
       AlertStatus.normal, AlertSize.full,
       Priority.LOWEST, VisualAlert.none, AudibleAlert.none, .2, creation_delay=0.5),
-    ET.USER_DISABLE: ImmediateDisableAlert("Reverse Gear"),
+    ET.USER_DISABLE: EngagementAlert(AudibleAlert.disengage),
     ET.NO_ENTRY: NoEntryAlert("Reverse Gear"),
   },
 
@@ -1472,7 +1478,7 @@ if HARDWARE.get_device_type() == 'mici':
         "",
         AlertStatus.normal, AlertSize.full,
         Priority.LOWEST, VisualAlert.none, AudibleAlert.none, .2, creation_delay=0.5),
-      ET.USER_DISABLE: ImmediateDisableAlert("Reverse"),
+      ET.USER_DISABLE: EngagementAlert(AudibleAlert.disengage),
       ET.NO_ENTRY: NoEntryAlert("Reverse"),
     },
   })

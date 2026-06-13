@@ -7,7 +7,8 @@ from opendbc.can import CANPacker, CANParser
 from opendbc.car.structs import CarParams
 from opendbc.car.fw_versions import build_fw_dict
 from opendbc.car.toyota import toyotacan
-from opendbc.car.toyota.carcontroller import CarController, limit_interceptor_pcm_accel, limit_interceptor_stopping_accel, update_permit_braking
+from opendbc.car.toyota.carcontroller import CarController, limit_interceptor_pcm_accel, limit_interceptor_stopping_accel, \
+                                             limit_prius_stopping_accel, update_permit_braking
 from opendbc.car.toyota.carstate import calculate_interceptor_gas_pressed
 from opendbc.car.toyota.fingerprints import FW_VERSIONS
 from opendbc.car.toyota.interface import CarInterface
@@ -251,6 +252,14 @@ class TestToyotaCarController:
   def test_permit_braking_forces_on_when_stopping_or_inactive(self):
     assert update_permit_braking(False, 0.10, True, True, 25.0, False) is True
     assert update_permit_braking(False, 0.10, False, False, 25.0, False) is True
+
+  def test_prius_stopping_accel_unwinds_stale_stop_hold(self):
+    limited = limit_prius_stopping_accel(-3.28, -0.05, True, 0.0, True)
+    assert -1.5 < limited < 0.0
+
+  def test_prius_stopping_accel_keeps_hard_stop_commands(self):
+    limited = limit_prius_stopping_accel(-3.28, -2.0, True, 0.0, True)
+    assert limited == -3.28
 
   def test_sng_hack_clears_existing_standstill_latch(self):
     controller = self._make_controller(standstill_req=True, last_standstill=True)

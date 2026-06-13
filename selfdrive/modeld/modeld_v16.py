@@ -8,6 +8,7 @@ from pathlib import Path
 
 from openpilot.system.hardware import TICI
 
+os.environ["GMMU"] = "0"  # noop on qcom, improves load path when a USB GPU is present
 os.environ["DEV"] = "QCOM" if TICI else "LLVM"
 
 import cereal.messaging as messaging
@@ -16,7 +17,8 @@ from cereal import car, log
 from msgq.visionipc import VisionBuf, VisionIpcClient, VisionStreamType
 from opendbc.car.car_helpers import get_demo_car_params
 from setproctitle import setproctitle
-from tinygrad.device import Device
+from tinygrad.dtype import dtypes
+from tinygrad.engine.jit import get_out_buffers_for_ei
 from tinygrad.tensor import Tensor
 
 from openpilot.common.file_chunker import read_file_chunked
@@ -27,16 +29,18 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.common.transformations.camera import DEVICE_CAMERAS
 from openpilot.common.transformations.model import get_warp_matrix
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
-from openpilot.selfdrive.controls.lib.drive_helpers import smooth_value
-from openpilot.selfdrive.modeld.compile_modeld import POLICY_INPUTS, WARP_INPUTS, make_input_queues
-from openpilot.selfdrive.modeld.constants import ModelConstants
+from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, get_curvature_from_plan, smooth_value
+from openpilot.selfdrive.modeld.compile_modeld import POLICY_INPUTS, make_input_queues
+from openpilot.selfdrive.modeld.constants import ModelConstants, Plan
 from openpilot.selfdrive.modeld.fill_model_msg import PublishState, fill_model_msg, fill_pose_msg
+from openpilot.selfdrive.modeld.helpers import get_tg_input_devices
+from openpilot.selfdrive.modeld.models.commonmodel_pyx import CLContext, DrivingModelFrame
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
+from openpilot.selfdrive.modeld.runners.tinygrad_helpers import qcom_tensor_from_opencl_address
 from openpilot.starpilot.assets.model_manager import ModelManager
 from openpilot.starpilot.common.model_versions import uses_combined_driving_artifacts
 from openpilot.starpilot.common.starpilot_variables import MODELS_PATH, get_starpilot_toggles, params_memory
 from openpilot.system import sentry
-from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
 
 
 PROCESS_NAME = "selfdrive.modeld.modeld"
@@ -112,9 +116,25 @@ def _combined_model_path(model_id: str, use_builtin_model: bool) -> Path:
 
 
 def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.ModelDataV2.Action, v_ego: float) -> log.ModelDataV2.Action:
-  desired_curv_unscaled, desired_accel = model_output["action"][0]
-  desired_curvature = float(desired_curv_unscaled) / max(1.0, v_ego) ** 2
-  should_stop = (v_ego < 0.3 and desired_accel < 0.1)
+  if "action" in model_output:
+    desired_curv_unscaled, desired_accel = model_output["action"][0]
+    desired_curvature = float(desired_curv_unscaled) / max(1.0, v_ego) ** 2
+    should_stop = (v_ego < 0.3 and desired_accel < 0.1)
+  else:
+    plan = model_output["plan"][0]
+    desired_accel, should_stop = get_accel_from_plan(
+      plan[:, Plan.VELOCITY][:, 0],
+      plan[:, Plan.ACCELERATION][:, 0],
+      ModelConstants.T_IDXS,
+      action_t=DT_MDL,
+    )
+    desired_curvature = get_curvature_from_plan(
+      plan[:, Plan.T_FROM_CURRENT_EULER][:, 2],
+      plan[:, Plan.ORIENTATION_RATE][:, 2],
+      ModelConstants.T_IDXS,
+      v_ego,
+      DT_MDL,
+    )
 
   desired_accel = smooth_value(float(desired_accel), prev_action.desiredAcceleration, LONG_SMOOTH_SECONDS)
   if v_ego > MIN_LAT_CONTROL_SPEED:
@@ -142,7 +162,7 @@ class FrameMeta:
 class ModelState:
   prev_desire: np.ndarray
 
-  def __init__(self, cam_w: int, cam_h: int):
+  def __init__(self, context: CLContext, usbgpu: bool):
     params = Params()
     model_id_raw = _resolve_mirrored_param(params, "Model", "DrivingModel") or BUILTIN_MODEL_KEY
     self.model_id = _canonical_model_id(model_id_raw)
@@ -176,73 +196,83 @@ class ModelState:
     self.off_policy_output_slices = off_policy_metadata["output_slices"]
     self.policy_input_shapes = on_policy_metadata["input_shapes"]
     self.policy_output_slices = on_policy_metadata["output_slices"]
-    self.desire_key = next(key for key in self.policy_input_shapes if key.startswith("desire"))
+    self.desire_key = "desire_pulse" if "desire_pulse" in self.policy_input_shapes else next(
+      key for key in self.policy_input_shapes if key.startswith("desire")
+    )
 
     self.frame_skip = ModelConstants.MODEL_RUN_FREQ // ModelConstants.MODEL_CONTEXT_FREQ
-    self.dev = Device.DEFAULT
-    self.input_queues, self.npy = make_input_queues(self.vision_input_shapes, self.policy_input_shapes, self.frame_skip, device=self.dev)
-    self.full_frames: dict[str, Tensor] = {}
-    self._blob_cache: dict[tuple[str, int], Tensor] = {}
+    input_devices = get_tg_input_devices(PROCESS_NAME, usbgpu)
+    self.WARP_DEV, self.QUEUE_DEV = input_devices["WARP_DEV"], input_devices["QUEUE_DEV"]
+    self.input_queues, self.npy = make_input_queues(
+      self.vision_input_shapes, self.policy_input_shapes, self.frame_skip, device=self.QUEUE_DEV
+    )
+    self.frames = {name: DrivingModelFrame(context, ModelConstants.TEMPORAL_SKIP) for name in self.vision_input_names}
+    self.vision_inputs: dict[str, Tensor] = {}
     self.parser = Parser()
-    self.frame_buf_params = {key: get_nv12_info(cam_w, cam_h) for key in ("img", "big_img")}
     self.prev_desire = np.zeros(ModelConstants.DESIRE_LEN, dtype=np.float32)
-
-    camera_jit = jits[(cam_w, cam_h)]
-    self.split_warp_layout = "run_policy" in jits and not isinstance(camera_jit, dict)
-    if self.split_warp_layout:
-      self.run_policy = jits["run_policy"]
-      self.warp_enqueue = camera_jit
-    else:
-      self.run_policy = camera_jit["run_policy"]
-      self.warp_enqueue = camera_jit["warp_enqueue"]
+    self.run_policy = jits["run_policy"]
 
   def slice_outputs(self, model_outputs: np.ndarray, output_slices: dict[str, slice]) -> dict[str, np.ndarray]:
     return {key: model_outputs[np.newaxis, value] for key, value in output_slices.items()}
 
-  def run(self, bufs: dict[str, VisionBuf], transforms: dict[str, np.ndarray], inputs: dict[str, np.ndarray], prepare_only: bool) -> dict[str, np.ndarray] | None:
-    for key in bufs.keys():
-      ptr = np.frombuffer(bufs[key].data, dtype=np.uint8).ctypes.data
-      yuv_size = self.frame_buf_params[key][3]
-      cache_key = (key, ptr)
-      if cache_key not in self._blob_cache:
-        self._blob_cache[cache_key] = Tensor.from_blob(ptr, (yuv_size,), dtype="uint8", device=self.dev)
-      self.full_frames[key] = self._blob_cache[cache_key]
+  def read_captured_outputs(self) -> tuple[np.ndarray, np.ndarray, np.ndarray] | None:
+    captured = getattr(self.run_policy, "captured", None)
+    ret_output_map = getattr(captured, "ret_output_map", None)
+    if captured is None or ret_output_map is None or len(ret_output_map) != 3:
+      return None
 
+    jit_outs = []
+    for ji in captured.jit_cache:
+      jit_outs.extend(get_out_buffers_for_ei(ji))
+
+    outputs = []
+    for idx in ret_output_map:
+      if idx is None or idx >= len(jit_outs):
+        return None
+      outputs.append(np.frombuffer(bytes(jit_outs[idx].as_memoryview()), dtype=np.float32).copy())
+    return tuple(outputs)
+
+  def run(self, bufs: dict[str, VisionBuf], transforms: dict[str, np.ndarray], inputs: dict[str, np.ndarray], prepare_only: bool) -> dict[str, np.ndarray] | None:
     inputs[self.desire_key][0] = 0
     self.npy["desire"][:] = np.where(inputs[self.desire_key] - self.prev_desire > 0.99, inputs[self.desire_key], 0)
     self.prev_desire[:] = inputs[self.desire_key]
     self.npy["traffic_convention"][:] = inputs["traffic_convention"]
     if "action_t" in self.npy:
       self.npy["action_t"][:] = inputs["action_t"]
-    self.npy["tfm"][:, :] = transforms["img"][:, :]
-    self.npy["big_tfm"][:, :] = transforms["big_img"][:, :]
 
-    if self.split_warp_layout:
-      img, big_img = self.warp_enqueue(
-        **{key: self.input_queues[key] for key in WARP_INPUTS},
-        frame=self.full_frames["img"],
-        big_frame=self.full_frames["big_img"],
-      )
-      if prepare_only:
-        return None
-      policy_inputs = {key: self.input_queues[key] for key in POLICY_INPUTS if key in self.input_queues}
-      vision_output, policy_output, off_policy_output = self.run_policy(**policy_inputs, img=img, big_img=big_img)
+    if prepare_only:
+      return None
+
+    imgs_cl = {name: self.frames[name].prepare(bufs[name], transforms[name].flatten()) for name in self.vision_input_names}
+    if TICI:
+      for key in imgs_cl:
+        if key not in self.vision_inputs:
+          self.vision_inputs[key] = qcom_tensor_from_opencl_address(
+            imgs_cl[key].mem_address,
+            self.vision_input_shapes[key],
+            dtype=dtypes.uint8,
+          )
     else:
-      if prepare_only:
-        self.warp_enqueue(**self.input_queues, frame=self.full_frames["img"], big_frame=self.full_frames["big_img"])
-        return None
-      vision_output, policy_output, off_policy_output = self.run_policy(
-        **self.input_queues,
-        frame=self.full_frames["img"],
-        big_frame=self.full_frames["big_img"],
-      )
+      for key in imgs_cl:
+        frame_input = self.frames[key].buffer_from_cl(imgs_cl[key]).reshape(self.vision_input_shapes[key])
+        self.vision_inputs[key] = Tensor(frame_input, dtype=dtypes.uint8).realize()
 
-    vision_output = vision_output.numpy().flatten()
-    policy_output = policy_output.numpy().flatten()
-    off_policy_output = off_policy_output.numpy().flatten()
+    vision_output, policy_output, off_policy_output = self.run_policy(
+      **{key: self.input_queues[key] for key in POLICY_INPUTS if key in self.input_queues},
+      img=self.vision_inputs["img"],
+      big_img=self.vision_inputs["big_img"],
+    )
+
+    captured_outputs = self.read_captured_outputs()
+    if captured_outputs is not None:
+      vision_output, policy_output, off_policy_output = captured_outputs
+    else:
+      vision_output = vision_output.numpy().flatten()
+      policy_output = policy_output.numpy().flatten()
+      off_policy_output = off_policy_output.numpy().flatten()
 
     vision_outputs_dict = self.parser.parse_vision_outputs(self.slice_outputs(vision_output, self.vision_output_slices))
-    off_policy_outputs_dict = self.parser.parse_policy_outputs(self.slice_outputs(off_policy_output, self.off_policy_output_slices))
+    off_policy_outputs_dict = self.parser.parse_off_policy_outputs(self.slice_outputs(off_policy_output, self.off_policy_output_slices))
     policy_outputs_dict = self.parser.parse_policy_outputs(self.slice_outputs(policy_output, self.policy_output_slices))
     combined_outputs_dict = {**vision_outputs_dict, **off_policy_outputs_dict, **policy_outputs_dict}
 
@@ -258,6 +288,10 @@ def main(demo=False):
   cloudlog.bind(daemon=PROCESS_NAME)
   setproctitle(PROCESS_NAME)
   config_realtime_process(7, 54)
+
+  # Combined downloaded models currently ship one runtime artifact, so stay on the default
+  # queue profile until a separate USBGPU artifact path exists for custom models.
+  usbgpu = False
 
   while True:
     available_streams = VisionIpcClient.available_streams("camerad", block=False)
@@ -282,8 +316,10 @@ def main(demo=False):
     cloudlog.warning(f"connected extra cam with buffer size: {vipc_client_extra.buffer_len} ({vipc_client_extra.width} x {vipc_client_extra.height})")
 
   start_time = time.monotonic()
+  cloudlog.warning("setting up CL context")
+  cl_context = CLContext()
   cloudlog.warning("loading combined model")
-  model = ModelState(vipc_client_main.width, vipc_client_main.height)
+  model = ModelState(cl_context, usbgpu)
   cloudlog.warning(f"combined model loaded in {time.monotonic() - start_time:.1f}s, modeld starting")
 
   pm = messaging.PubMaster(["modelV2", "drivingModelData", "cameraOdometry", "starpilotModelV2"])

@@ -4,7 +4,6 @@ from enum import IntEnum
 from collections.abc import Callable
 from openpilot.selfdrive.ui.layouts.settings.developer import DeveloperLayout
 from openpilot.selfdrive.ui.layouts.settings.device import DeviceLayout
-from openpilot.selfdrive.ui.layouts.settings.firehose import FirehoseLayout
 from openpilot.selfdrive.ui.layouts.settings.starpilot.main_panel import StarPilotLayout
 from openpilot.selfdrive.ui.layouts.settings.software import SoftwareLayout
 from openpilot.selfdrive.ui.layouts.settings.toggles import TogglesLayout
@@ -37,8 +36,7 @@ class PanelType(IntEnum):
   NETWORK = 2
   TOGGLES = 3
   SOFTWARE = 4
-  FIREHOSE = 5
-  DEVELOPER = 6
+  DEVELOPER = 5
 
 
 @dataclass
@@ -67,7 +65,6 @@ class SettingsLayout(Widget):
       PanelType.NETWORK: PanelInfo(tr_noop("Network"), NetworkUI(wifi_manager)),
       PanelType.TOGGLES: PanelInfo(tr_noop("Toggles"), TogglesLayout()),
       PanelType.SOFTWARE: PanelInfo(tr_noop("Software"), SoftwareLayout()),
-      PanelType.FIREHOSE: PanelInfo(tr_noop("Firehose"), FirehoseLayout()),
       PanelType.DEVELOPER: PanelInfo(tr_noop("Developer"), DeveloperLayout()),
     }
 
@@ -143,9 +140,6 @@ class SettingsLayout(Widget):
     # Navigation buttons
     y = rect.y + 300
     for panel_type, panel_info in self._panels.items():
-      if panel_type == PanelType.FIREHOSE:
-        continue
-
       button_rect = rl.Rectangle(rect.x + 50, y, rect.width - 150, NAV_BTN_HEIGHT)
 
       # Button styling

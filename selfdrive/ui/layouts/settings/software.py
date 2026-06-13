@@ -194,25 +194,25 @@ class SoftwareLayout(Widget):
                 ui_state.params.clear_all()
               ui_state.params.put_bool("DoUninstall", True)
 
-            dialog = ConfirmDialog(tr("This is a complete factory reset and cannot be undone. Are you absolutely sure?"), tr("Reset"))
-            gui_app.set_modal_overlay(dialog, callback=handle_step3)
+            dialog = ConfirmDialog(tr("This is a complete factory reset and cannot be undone. Are you absolutely sure?"), tr("Reset"), callback=handle_step3)
+            gui_app.push_widget(dialog)
           else:
             ui_state.params.put_bool("DoUninstall", True)
 
         dialog = ConfirmDialog(
-          tr("Do you want to perform a full factory reset? All saved assets and settings will be permanently deleted!"), tr("Factory Reset"), tr("Skip")
+          tr("Do you want to perform a full factory reset? All saved assets and settings will be permanently deleted!"), tr("Factory Reset"), tr("Skip"), callback=handle_step2
         )
-        gui_app.set_modal_overlay(dialog, callback=handle_step2)
+        gui_app.push_widget(dialog)
 
-    dialog = ConfirmDialog(tr("Are you sure you want to uninstall?"), tr("Uninstall"))
-    gui_app.set_modal_overlay(dialog, callback=handle_step1)
+    dialog = ConfirmDialog(tr("Are you sure you want to uninstall?"), tr("Uninstall"), callback=handle_step1)
+    gui_app.push_widget(dialog)
 
   def _on_error_log(self):
     try:
       txt = Path("/data/error_logs/error.txt").read_text(encoding='utf-8', errors='replace')
     except Exception:
       txt = tr("No error log found.")
-    gui_app.set_modal_overlay(ConfirmDialog(txt, tr("OK"), on_close=lambda r: None, rich=True))
+    gui_app.push_widget(ConfirmDialog(txt, tr("OK"), rich=True))
 
   def _on_install_update(self):
     # Trigger reboot to install update
@@ -231,7 +231,6 @@ class SoftwareLayout(Widget):
         branches.insert(0, b)
 
     current_target = ui_state.params.get("UpdaterTargetBranch") or ""
-    self._branch_dialog = MultiOptionDialog(tr("Select a branch"), branches, current_target)
 
     def handle_selection(result):
       # Confirmed selection
@@ -242,4 +241,5 @@ class SoftwareLayout(Widget):
         os.system("pkill -SIGUSR1 -f system.updated.updated")
       self._branch_dialog = None
 
-    gui_app.set_modal_overlay(self._branch_dialog, callback=handle_selection)
+    self._branch_dialog = MultiOptionDialog(tr("Select a branch"), branches, current_target, callback=handle_selection)
+    gui_app.push_widget(self._branch_dialog)

@@ -2,7 +2,8 @@ from dataclasses import dataclass
 
 import numpy as np
 from opendbc.can import CANPacker
-from opendbc.car import Bus, DT_CTRL, make_tester_present_msg, structs
+from opendbc.car import Bus, DT_CTRL, make_tester_present_msg, rate_limit, structs
+from opendbc.car.common.filter_simple import FirstOrderFilter
 from opendbc.car.lateral import apply_driver_steer_torque_limits, apply_steer_angle_limits_vm, common_fault_avoidance
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai import hyundaicanfd, hyundaican
@@ -61,6 +62,7 @@ REDNECK_BUTTON_COPIES = 2
 REDNECK_BUTTON_COPIES_TIME = 7
 REDNECK_BUTTON_COPIES_TIME_IMPERIAL = [REDNECK_BUTTON_COPIES_TIME + 3, 70]
 REDNECK_BUTTON_COPIES_TIME_METRIC = [REDNECK_BUTTON_COPIES_TIME, 40]
+ANGLE_SAFETY_BASELINE_MODEL = str(CAR.KIA_SPORTAGE_HEV_2026)
 
 
 @dataclass
@@ -195,6 +197,28 @@ def update_genesis_g90_longitudinal_tuning(state: GenesisG90LongitudinalTuningSt
   return state
 
 
+def get_baseline_safety_cp():
+  from opendbc.car.hyundai.interface import CarInterface
+  return CarInterface.get_non_essential_params(ANGLE_SAFETY_BASELINE_MODEL)
+
+
+def compute_torque_reduction_gain(steering_torque, v_ego, lat_active, last_gain):
+  if lat_active:
+    ceiling = np.interp(v_ego, [0.5, 1.5], [1.0, 0.85])
+    shelf = np.interp(v_ego, [2.0, 11.0], [0.45, 0.6])
+    floor = np.interp(v_ego, [2.0, 22.0], [0.1, 0.3])
+    bp1 = np.interp(v_ego, [2.0, 11.0], [75.0, 125.0])
+    bp2 = np.interp(v_ego, [2.0, 11.0], [125.0, 150.0])
+    bp3 = np.interp(v_ego, [2.0, 11.0], [175.0, 275.0])
+    bp4 = np.interp(v_ego, [2.0, 22.0], [400.0, 700.0])
+    target = np.interp(abs(steering_torque), [bp1, bp2, bp3, bp4], [ceiling, shelf, shelf, floor])
+  else:
+    target = 0.0
+
+  gain = rate_limit(target, last_gain, -0.014, 0.004)
+  return round(gain / 0.004) * 0.004
+
+
 def process_hud_alert(enabled, fingerprint, hud_control):
   sys_warning = (hud_control.visualAlert in (VisualAlert.steerRequired, VisualAlert.ldw))
 
@@ -227,6 +251,8 @@ class CarController(CarControllerBase):
     self.packer = CANPacker(dbc_names[Bus.pt])
     self.angle_limit_counter = 0
     self.VM = VehicleModel(CP)
+    self.BASELINE_VM = VehicleModel(get_baseline_safety_cp()) if CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING else self.VM
+    self.angle_filter = FirstOrderFilter(0.0, 0.2, DT_CTRL)
 
     self.accel_last = 0
     self.apply_torque_last = 0
@@ -297,6 +323,7 @@ class CarController(CarControllerBase):
     copies_xp = REDNECK_BUTTON_COPIES_TIME_METRIC if CS.is_metric else REDNECK_BUTTON_COPIES_TIME_IMPERIAL
     copies = int(np.interp(REDNECK_BUTTON_COPIES_TIME, copies_xp, [1, REDNECK_BUTTON_COPIES]))
     can_sends = [hyundaican.create_clu11(self.packer, self.frame, CS.clu11, send_button, self.CP)] * copies
+    CS.redneck_last_sent_button = getattr(CS, "redneck_send_button", 0)
 
     if (self.frame - self.last_button_frame) * DT_CTRL >= 0.15:
       self.last_button_frame = self.frame
@@ -318,6 +345,7 @@ class CarController(CarControllerBase):
       hyundaicanfd.create_buttons(self.packer, self.CP, self.CAN, (CS.buttons_counter + button_counter_offset) % 0xF, send_button)
       for _ in range(20)
     ]
+    CS.redneck_last_sent_button = getattr(CS, "redneck_send_button", 0)
     self.last_button_frame = self.frame
     return can_sends
 
@@ -326,32 +354,41 @@ class CarController(CarControllerBase):
     hud_control = CC.hudControl
     lka_icon, lfa_icon = self._update_dash_icon_state(CC)
 
-    self.params = CarControllerParams(self.CP, CS.out.vEgoRaw)
+    if not self.CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING:
+      self.params = CarControllerParams(self.CP, CS.out.vEgoRaw)
     apply_angle = CS.out.steeringAngleDeg
 
     if self.CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING:
+      v_ego_raw = CS.out.vEgoRaw
       desired_angle = float(np.clip(actuators.steeringAngleDeg,
                                     -self.params.ANGLE_LIMITS.STEER_ANGLE_MAX,
                                     self.params.ANGLE_LIMITS.STEER_ANGLE_MAX))
-      apply_angle = apply_steer_angle_limits_vm(desired_angle, self.apply_angle_last, CS.out.vEgoRaw,
+
+      self.angle_filter.update_alpha(float(np.interp(CS.out.vEgo, [5.0, 10.0, 20.0], [0.2, 0.1, 0.0])))
+      desired_angle = self.angle_filter.update(desired_angle)
+
+      apply_angle = apply_steer_angle_limits_vm(desired_angle, self.apply_angle_last, v_ego_raw,
                                                 CS.out.steeringAngleDeg, CC.latActive, self.params, self.VM)
 
-      if CS.out.steeringPressed and abs(CS.out.steeringTorque) > self.params.STEER_THRESHOLD:
-        apply_torque = self.params.ANGLE_MIN_TORQUE_REDUCTION_GAIN
-      elif CC.latActive and CS.out.vEgoRaw < 0.3:
-        apply_torque = self.params.ANGLE_ACTIVE_TORQUE_REDUCTION_GAIN
-      else:
-        apply_torque = self.params.ANGLE_MAX_TORQUE_REDUCTION_GAIN if CC.latActive else 0.0
+      if str(self.CP.carFingerprint) != ANGLE_SAFETY_BASELINE_MODEL:
+        apply_angle = apply_steer_angle_limits_vm(apply_angle or desired_angle, self.apply_angle_last, v_ego_raw,
+                                                  CS.out.steeringAngleDeg, CC.latActive, self.params, self.BASELINE_VM)
 
-      apply_steer_req = CC.latActive and apply_torque > 0.0
+      apply_torque = compute_torque_reduction_gain(CS.out.steeringTorque, v_ego_raw, CC.latActive, self.apply_torque_last)
+      apply_steer_req = CC.latActive and apply_torque != 0.0
       torque_fault = False
 
       if apply_angle is None:
-        apply_torque = 0.0
+        apply_torque = 0
         apply_angle = CS.out.steeringAngleDeg
         apply_steer_req = False
 
       self.apply_angle_last = apply_angle
+      if not CC.latActive:
+        self.apply_angle_last = float(np.clip(CS.out.steeringAngleDeg,
+                                              -self.params.ANGLE_LIMITS.STEER_ANGLE_MAX,
+                                              self.params.ANGLE_LIMITS.STEER_ANGLE_MAX))
+        self.angle_filter.x = self.apply_angle_last
     else:
       # steering torque
       new_torque = int(round(actuators.torque * self.params.STEER_MAX))
@@ -376,6 +413,7 @@ class CarController(CarControllerBase):
     accel = accel_cmd
     stopping = actuators.longControlState == LongCtrlState.stopping
     set_speed_in_units = hud_control.setSpeed * (CV.MS_TO_KPH if CS.is_metric else CV.MS_TO_MPH)
+    CS.redneck_last_sent_button = 0
 
     can_sends = []
 

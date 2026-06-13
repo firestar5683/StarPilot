@@ -1,7 +1,7 @@
 # StarPilot
 
 [![Ask DeepWiki](https://deepwiki.com/badge.svg)](https://deepwiki.com/firestar5683/StarPilot)
-[![Discord](https://img.shields.io/discord/1137853399715549214?label=Discord)](https://firestar.link/discord)
+[![Discord](https://img.shields.io/discord/1387432184121393333?label=Discord)](https://firestar.link/discord)
 [![Last Updated](https://img.shields.io/github/last-commit/firestar5683/StarPilot/StarPilot)](https://github.com/firestar5683/StarPilot)
 [![Wiki](https://img.shields.io/badge/Wiki-StarPilot-blue?logo=wiki)](https://wiki.firestar.link)
 
@@ -15,11 +15,11 @@ Openpilot provides
 * Lane Change Assist
 * Driver Monitoring *without wheel nags*
 
-StarPilot adds support for many GM vehicles along with improved tuning,
-especially for radar-less (camera only) vehicles.
+StarPilot was formerly a GM targeted fork,
+but [has expanded to offer Quality-Of-Life improvements for all](#features)!
 
-StarPilot is built off of [StarPilot](https://github.com/FrogAi/StarPilot)
-and supports the major features StarPilot offers.
+StarPilot is built off of [FrogPilot](https://github.com/FrogAi/FrogPilot)
+and supports the major features FrogPilot offers.
 
 StarPilot has a vibrant, welcoming community [discord](https://firestar.link/discord).
 Stop by to chat or ask questions!
@@ -32,9 +32,9 @@ installation guides, and software configuration.
 ## Features
 
 * Full support for Comma C3, C3X, and C4
-  * C4 is currently in release testing. Join our fleet of C4 testers!
 * Model switcher with all of comma's tinygrad driving models
 * Special longitudinal planner tuning for VoACC (visual only, radar-less) vehicles
+* Custom-tuned torque controllers for an expanding list of cars.
 * Galaxy: StarPilot's portal to configure your comma device using your phone from anywhere.
 Download models, change settings, update software, visualize live model outputs for tuning.
 * Always On Lateral (full time steering assist)*
@@ -49,8 +49,9 @@ Download models, change settings, update software, visualize live model outputs 
 * ZSS support*
 * High quality dashcam recordings*
 * Enhanced tuning for CEM (dynamic experimental mode switching)
+* And more!
 
-\* [Inherited from StarPilot](https://github.com/FrogAi/StarPilot#openpilot-vs-starpilot)
+\* [Inherited from FrogPilot](https://github.com/FrogAi/FrogPilot#openpilot-vs-frogpilot)
 
 ## GM-only Features
 

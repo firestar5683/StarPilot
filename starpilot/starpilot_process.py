@@ -7,6 +7,7 @@ import time
 
 from cereal import messaging
 from openpilot.common.api import Api, api_get
+from openpilot.common.gps import get_gps_location_service
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL, Priority, Ratekeeper, config_realtime_process
 from openpilot.common.time_helpers import system_time_valid
@@ -30,6 +31,8 @@ from openpilot.starpilot.system.starpilot_tracking import StarPilotTracking
 
 ASSET_CHECK_RATE = (1 / DT_MDL)
 DRIVE_STATS_SYNC_RATE = 30
+OFFROAD_GPS_MEMORY_REFRESH_SECONDS = 1.0
+OFFROAD_GPS_PERSIST_REFRESH_SECONDS = 30.0
 TOGGLE_BROADCAST_INTERVAL_FRAMES = int(1 / DT_MDL)
 UPDATE_CHECK_INTERVAL_SECONDS = 60 * 60
 
@@ -52,6 +55,31 @@ def get_next_periodic_update_check(monotonic_now, phase_seconds):
   if next_check <= monotonic_now:
     next_check += UPDATE_CHECK_INTERVAL_SECONDS
   return next_check
+
+
+def build_gps_position(gps_location, speed):
+  return {
+    "latitude": gps_location.latitude,
+    "longitude": gps_location.longitude,
+    "bearing": gps_location.bearingDeg,
+    "speed": max(float(speed), 0.0),
+    "hasFix": bool(getattr(gps_location, "hasFix", False)),
+    "updatedAtMonotonic": time.monotonic(),
+    "updatedAtSec": time.time(),
+  }
+
+
+def gps_position_valid(gps_position):
+  return bool(gps_position["hasFix"]) and (gps_position["latitude"] != 0 or gps_position["longitude"] != 0)
+
+
+def gps_position_signature(gps_position):
+  return (
+    round(float(gps_position["latitude"]), 6),
+    round(float(gps_position["longitude"]), 6),
+    round(float(gps_position["bearing"]), 1),
+    bool(gps_position["hasFix"]),
+  )
 
 def check_assets(now, model_manager, theme_manager, thread_manager, params, params_memory, starpilot_toggles):
   if params_memory.get_bool(MODEL_DOWNLOAD_ALL_PARAM):
@@ -182,6 +210,7 @@ def starpilot_thread():
   model_manager = ModelManager(params, params_memory)
   theme_manager = ThemeManager(params, params_memory)
   thread_manager = ThreadManager()
+  gps_location_service = get_gps_location_service(params)
 
   starpilot_toggles = starpilot_variables.starpilot_toggles
   serialized_starpilot_toggles = serialize_starpilot_toggles(starpilot_toggles)
@@ -191,6 +220,9 @@ def starpilot_thread():
   next_drive_stats_sync = 0.0
   periodic_update_phase = get_update_check_phase_seconds(params_raw)
   next_periodic_update_check = get_next_periodic_update_check(time.monotonic(), periodic_update_phase)
+  last_offroad_gps_memory_write = 0.0
+  last_offroad_gps_persist_write = 0.0
+  last_offroad_gps_persist_signature = None
 
   run_update_checks = False
   safe_mode_active = safe_mode_enabled(params_raw)
@@ -242,6 +274,21 @@ def starpilot_thread():
       starpilot_plan_send.starpilotPlan.starpilotToggles = serialized_starpilot_toggles
       starpilot_plan_send.starpilotPlan.themeUpdated = theme_manager.theme_updated
       pm.send("starpilotPlan", starpilot_plan_send)
+
+      gps_position = build_gps_position(sm[gps_location_service], getattr(sm["carState"], "vEgo", 0.0))
+      if gps_position_valid(gps_position):
+        gps_memory_state = json.dumps(gps_position, allow_nan=False)
+        if (monotonic_now - last_offroad_gps_memory_write) >= OFFROAD_GPS_MEMORY_REFRESH_SECONDS:
+          params_memory.put_nonblocking("LastGPSPosition", gps_memory_state)
+          last_offroad_gps_memory_write = monotonic_now
+
+        gps_signature = gps_position_signature(gps_position)
+        persist_due = (monotonic_now - last_offroad_gps_persist_write) >= OFFROAD_GPS_PERSIST_REFRESH_SECONDS
+        first_persist = last_offroad_gps_persist_signature is None
+        if gps_signature != last_offroad_gps_persist_signature and (first_persist or persist_due):
+          params.put("LastGPSPosition", gps_memory_state)
+          last_offroad_gps_persist_signature = gps_signature
+          last_offroad_gps_persist_write = monotonic_now
 
     started_previously = started
 

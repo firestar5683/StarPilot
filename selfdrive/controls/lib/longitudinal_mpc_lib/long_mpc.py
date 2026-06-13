@@ -79,6 +79,13 @@ FAR_RADAR_LEAD_ACCEL_TAPER_FULL_GAP_EXCESS = 25.0
 FAR_RADAR_LEAD_ACCEL_TAPER_FULL_GAP_GAIN = 0.9
 RADARLESS_MATCHED_FOLLOW_CRUISE_HYSTERESIS_MIN = 2.5
 RADARLESS_MATCHED_FOLLOW_CRUISE_HYSTERESIS_GAIN = 0.10
+NEAR_DUPLICATE_LEAD_SOURCE_MIN_SPEED = 20.0
+NEAR_DUPLICATE_LEAD_SOURCE_MIN_MODEL_PROB = 0.9
+NEAR_DUPLICATE_LEAD_SOURCE_MAX_LEAD_BRAKE = 0.35
+NEAR_DUPLICATE_LEAD_SOURCE_MAX_DREL_DIFF = 1.5
+NEAR_DUPLICATE_LEAD_SOURCE_MAX_VREL_DIFF = 0.35
+NEAR_DUPLICATE_LEAD_SOURCE_HYSTERESIS_MIN = 0.75
+NEAR_DUPLICATE_LEAD_SOURCE_HYSTERESIS_MAX = 1.5
 
 # Function to get parameter value based on current speed
 def get_speed_based_param(speed_mph, param_array):
@@ -492,9 +499,9 @@ class LongitudinalMpc:
 
     # Adjust filter time constants for complex scenes
     if abs(filter_time_factor - getattr(self, 'prev_filter_time_factor', 1.0)) > 0.05:
+      new_filter_time = self.current_filter_time * filter_time_factor
       current_a = self.lead_a_filter.x if hasattr(self.lead_a_filter, 'x') else 0.0
       current_v = self.lead_v_filter.x if hasattr(self.lead_v_filter, 'x') else 0.0
-      new_filter_time = self.current_filter_time * filter_time_factor
       self.lead_a_filter = FirstOrderFilter(current_a, new_filter_time, self.dt)
       self.lead_v_filter = FirstOrderFilter(current_v, new_filter_time, self.dt)
       self.prev_filter_time_factor = filter_time_factor
@@ -583,6 +590,43 @@ class LongitudinalMpc:
     return max(RADARLESS_MATCHED_FOLLOW_CRUISE_HYSTERESIS_MIN,
                RADARLESS_MATCHED_FOLLOW_CRUISE_HYSTERESIS_GAIN * float(v_ego))
 
+  @staticmethod
+  def leads_are_near_duplicates(lead_one, lead_two, v_ego):
+    if lead_one is None or lead_two is None or not lead_one.status or not lead_two.status:
+      return False
+    if float(v_ego) < NEAR_DUPLICATE_LEAD_SOURCE_MIN_SPEED:
+      return False
+    if bool(getattr(lead_one, "radar", False)) or bool(getattr(lead_two, "radar", False)):
+      return False
+    if float(getattr(lead_one, "modelProb", 0.0)) < NEAR_DUPLICATE_LEAD_SOURCE_MIN_MODEL_PROB:
+      return False
+    if float(getattr(lead_two, "modelProb", 0.0)) < NEAR_DUPLICATE_LEAD_SOURCE_MIN_MODEL_PROB:
+      return False
+    if max(0.0, -float(getattr(lead_one, "aLeadK", 0.0))) > NEAR_DUPLICATE_LEAD_SOURCE_MAX_LEAD_BRAKE:
+      return False
+    if max(0.0, -float(getattr(lead_two, "aLeadK", 0.0))) > NEAR_DUPLICATE_LEAD_SOURCE_MAX_LEAD_BRAKE:
+      return False
+
+    return (
+      abs(float(lead_one.dRel) - float(lead_two.dRel)) <= NEAR_DUPLICATE_LEAD_SOURCE_MAX_DREL_DIFF and
+      abs(float(lead_one.vRel) - float(lead_two.vRel)) <= NEAR_DUPLICATE_LEAD_SOURCE_MAX_VREL_DIFF
+    )
+
+  def get_near_duplicate_lead_source_hysteresis(self, prev_source, lead_one, lead_two, v_ego):
+    if prev_source not in ("lead0", "lead1"):
+      return 0.0, 0.0
+    if not self.leads_are_near_duplicates(lead_one, lead_two, v_ego):
+      return 0.0, 0.0
+
+    hysteresis = float(np.interp(
+      float(v_ego),
+      [NEAR_DUPLICATE_LEAD_SOURCE_MIN_SPEED, 35.0],
+      [NEAR_DUPLICATE_LEAD_SOURCE_HYSTERESIS_MIN, NEAR_DUPLICATE_LEAD_SOURCE_HYSTERESIS_MAX],
+    ))
+    if prev_source == "lead0":
+      return 0.0, hysteresis
+    return hysteresis, 0.0
+
   def set_accel_limits(self, min_a, max_a):
     # TODO this sets a max accel limit, but the minimum limit is only for cruise decel
     # needs refactor
@@ -590,12 +634,12 @@ class LongitudinalMpc:
     self.max_a = max_a
 
   def update(self, radarstate, v_cruise, x, v, a, j, danger_factor, t_follow,
-             personality=log.LongitudinalPersonality.standard, tracking_lead=True):
+             personality=log.LongitudinalPersonality.standard, tracking_lead=True,
+             optional_far_lead_comfort=True):
     v_ego = self.x0[1]
     lead_one = radarstate.leadOne
     lead_two = radarstate.leadTwo
     self.status = tracking_lead and (lead_one.status or lead_two.status)
-
     lead_xv_0 = self.process_lead(lead_one, tracking_lead, t_follow=t_follow)
     lead_xv_1 = self.process_lead(lead_two, tracking_lead, t_follow=t_follow)
 
@@ -622,14 +666,19 @@ class LongitudinalMpc:
                                  v_upper)
       cruise_obstacle = np.cumsum(T_DIFFS * v_cruise_clipped) + get_safe_obstacle_distance(v_cruise_clipped, t_follow)
       prev_source = self.source
-      if prev_source == 'lead0':
-        cruise_obstacle += self.get_radarless_matched_follow_cruise_hysteresis(lead_one, v_ego, t_follow)
-      elif prev_source == 'lead1':
-        cruise_obstacle += self.get_radarless_matched_follow_cruise_hysteresis(lead_two, v_ego, t_follow)
-      if tracking_lead and lead_one.status:
+      if optional_far_lead_comfort:
+        if prev_source == 'lead0':
+          cruise_obstacle += self.get_radarless_matched_follow_cruise_hysteresis(lead_one, v_ego, t_follow)
+        elif prev_source == 'lead1':
+          cruise_obstacle += self.get_radarless_matched_follow_cruise_hysteresis(lead_two, v_ego, t_follow)
+      if optional_far_lead_comfort and tracking_lead and lead_one.status:
         desired_gap = desired_follow_distance(v_ego, lead_one.vLead, t_follow)
         closing_speed = max(0.0, v_ego - lead_one.vLead)
         cruise_obstacle += get_tracked_lead_catchup_bias(v_ego, lead_one.dRel, desired_gap, closing_speed, v_cruise=v_cruise)
+      if optional_far_lead_comfort:
+        lead_0_bias, lead_1_bias = self.get_near_duplicate_lead_source_hysteresis(prev_source, lead_one, lead_two, v_ego)
+        lead_0_obstacle = lead_0_obstacle + lead_0_bias
+        lead_1_obstacle = lead_1_obstacle + lead_1_bias
       x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle, cruise_obstacle])
       self.source = SOURCES[np.argmin(x_obstacles[0])]
 

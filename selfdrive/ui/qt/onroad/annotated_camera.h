@@ -17,6 +17,8 @@ class AnnotatedCameraWidget : public CameraWidget {
 public:
   explicit AnnotatedCameraWidget(VisionStreamType type, QWidget* parent = 0);
   void updateState(const UIState &s, const StarPilotUIState &fs);
+  bool handleHudPress(const QPoint &pos);
+  bool handleHudRelease(const QPoint &pos);
 
   double fps;
 

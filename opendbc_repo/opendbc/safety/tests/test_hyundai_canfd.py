@@ -174,7 +174,7 @@ class TestHyundaiCanfdAngleSteering(HyundaiButtonBase, common.CarSafetyTest):
   BUTTONS_TX_BUS = 2
   LATERAL_FREQUENCY = 100
   STANDSTILL_THRESHOLD = 12
-  STEER_ANGLE_MAX = 180
+  STEER_ANGLE_MAX = 360
   DEG_TO_CAN = 10
   GAS_MSG = ("ACCELERATOR_ALT", "ACCELERATOR_PEDAL")
   SAFETY_PARAM = HyundaiSafetyFlags.CANFD_ANGLE_STEERING | HyundaiSafetyFlags.CAMERA_SCC | HyundaiSafetyFlags.HYBRID_GAS
@@ -248,7 +248,7 @@ class TestHyundaiCanfdAngleSteering(HyundaiButtonBase, common.CarSafetyTest):
     checksum = sig_checksum.calc_checksum(addr, sig_checksum, dat)
     _set_value(dat, sig_checksum, checksum)
 
-  def _angle_cmd_msg(self, angle, enabled, increment_timer=True):
+  def _angle_cmd_msg(self, angle, enabled, increment_timer=True, gain_raw=250):
     if increment_timer:
       self.safety.set_timer(self.angle_cmd_cnt * int(1e6 / self.LATERAL_FREQUENCY))
       self.angle_cmd_cnt += 1
@@ -272,7 +272,7 @@ class TestHyundaiCanfdAngleSteering(HyundaiButtonBase, common.CarSafetyTest):
     dat[9] = (dat[9] & ~0x30) | (((2 if enabled else 1) & 0x3) << 4)
     dat[10] = (dat[10] & 0x03) | ((desired_angle & 0x3F) << 2)
     dat[11] = (desired_angle >> 6) & 0xFF
-    dat[12] = 250 if enabled else 0
+    dat[12] = gain_raw if enabled or gain_raw != 250 else 0
     self._update_checksum(addr, dat)
     return libsafety_py.make_CANPacket(addr, 0, bytes(dat))
 
@@ -334,6 +334,19 @@ class TestHyundaiCanfdAngleSteering(HyundaiButtonBase, common.CarSafetyTest):
     self.safety.set_timer(common.RT_INTERVAL)
     self.assertFalse(self._tx(self._angle_cmd_msg(0, True, increment_timer=False)))
     self.assertTrue(self._tx(self._angle_cmd_msg(0, True, increment_timer=False)))
+
+  def test_angle_torque_reduction_gain_limits(self):
+    if self.__class__.__name__ != "TestHyundaiCanfdAngleSteering":
+      return
+
+    self.safety.set_controls_allowed(True)
+    self._reset_speed_measurement(1)
+    self._set_prev_desired_angle(0)
+    self.assertTrue(self._tx(self._angle_cmd_msg(0, True, gain_raw=250)))
+    self._set_prev_desired_angle(0)
+    self.assertFalse(self._tx(self._angle_cmd_msg(0, True, gain_raw=251)))
+    self._set_prev_desired_angle(0)
+    self.assertFalse(self._tx(self._angle_cmd_msg(0, False, gain_raw=1)))
 
 
 class TestHyundaiCanfdAngleSteeringLfaAlt(TestHyundaiCanfdAngleSteering):

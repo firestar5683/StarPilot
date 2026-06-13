@@ -279,6 +279,10 @@ class CAR(Platforms):
     [GMCarDocs("Buick LaCrosse 2017-19", "Driver Confidence Package 2")],
     GMCarSpecs(mass=1712, wheelbase=2.91, steerRatio=15.8, centerToFrontRatio=0.4),
   )
+  BUICK_LACROSSE_ASCM = GMPlatformConfig(
+    [GMCarDocs("Buick LaCrosse 2017-19 ASCM Harness")],
+    BUICK_LACROSSE.specs,
+  )
   BUICK_REGAL = GMASCMPlatformConfig(
     [GMCarDocs("Buick Regal Essence 2018")],
     GMCarSpecs(mass=1714, wheelbase=2.83, steerRatio=14.4, centerToFrontRatio=0.4),
@@ -329,6 +333,13 @@ class CAR(Platforms):
     ],
     GMCarSpecs(mass=2994, wheelbase=3.75, steerRatio=16.3, tireStiffnessFactor=1.0),
   )
+  CHEVROLET_SILVERADO_CC = GMPlatformConfig(
+    [
+      GMCarDocs("Chevrolet Silverado 1500 - No-ACC"),
+      GMCarDocs("GMC Sierra 1500 - No-ACC"),
+    ],
+    CHEVROLET_SILVERADO.specs,
+  )
   CHEVROLET_EQUINOX = GMPlatformConfig(
     [GMCarDocs("Chevrolet Equinox 2019-22")],
     GMCarSpecs(mass=1588, wheelbase=2.72, steerRatio=14.4, centerToFrontRatio=0.4),
@@ -352,6 +363,10 @@ class CAR(Platforms):
   CADILLAC_XT4 = GMSDGMPlatformConfig(
     [GMCarDocs("Cadillac XT4 2023", "Driver Assist Package")],
     GMCarSpecs(mass=1660, wheelbase=2.78, steerRatio=14.4, centerToFrontRatio=0.4),
+  )
+  CADILLAC_XT5 = GMSDGMPlatformConfig(
+    [GMCarDocs("Cadillac XT5 2022", "Driver Assist Package")],
+    CarSpecs(mass=1810, wheelbase=2.86, steerRatio=16.34, centerToFrontRatio=0.5),
   )
   CADILLAC_XT6 = GMPlatformConfig(
     [GMCarDocs("Cadillac XT6 2020", "Driver Assist Package")],
@@ -383,7 +398,7 @@ class CAR(Platforms):
   )
   CADILLAC_XT5_CC = GMPlatformConfig(
     [GMCarDocs("Cadillac XT5 - No-ACC")],
-    CarSpecs(mass=1810, wheelbase=2.86, steerRatio=16.34, centerToFrontRatio=0.5),
+    CADILLAC_XT5.specs,
   )
   CHEVROLET_EQUINOX_CC = GMPlatformConfig(
     [GMCarDocs("Chevrolet Equinox 2019-22 - No-ACC")],
@@ -527,6 +542,7 @@ ALT_ACCS = {CAR.GMC_YUKON, CAR.GMC_YUKON_CC}
 # We're integrated at the Safety Data Gateway Module on these cars
 SDGM_CAR = {
   CAR.CADILLAC_XT4,
+  CAR.CADILLAC_XT5,
   CAR.CADILLAC_XT6,
   CAR.CHEVROLET_TRAVERSE,
   CAR.CHEVROLET_BLAZER,
@@ -549,6 +565,7 @@ CC_ONLY_CAR = {
   CAR.CADILLAC_XT5_CC,
   CAR.CHEVROLET_MALIBU_CC,
   CAR.CHEVROLET_MALIBU_HYBRID_CC,
+  CAR.CHEVROLET_SILVERADO_CC,
 }
 CC_REGEN_PADDLE_CAR = {
   CAR.CHEVROLET_BOLT_CC_2018_2021,
@@ -559,7 +576,7 @@ CC_REGEN_PADDLE_CAR = {
 CAMERA_ACC_CAR.update(CC_ONLY_CAR)
 
 # ASCM-INT paths are only enabled when SASCM (0x2FF) is detected at runtime
-ASCM_INT = {CAR.CHEVROLET_VOLT_ASCM, CAR.GMC_ACADIA_ASCM, CAR.CHEVROLET_MALIBU_ASCM, CAR.CADILLAC_ESCALADE_ASCM}
+ASCM_INT = {CAR.CHEVROLET_VOLT_ASCM, CAR.GMC_ACADIA_ASCM, CAR.CHEVROLET_MALIBU_ASCM, CAR.CADILLAC_ESCALADE_ASCM, CAR.BUICK_LACROSSE_ASCM}
 
 STEER_THRESHOLD = 1.0
 

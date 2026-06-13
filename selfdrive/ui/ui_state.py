@@ -164,9 +164,11 @@ class UIState:
       self.light_sensor = -1
 
     # Trust hardwared's filtered started state; raw ignition can flap on Toyota.
+    force_onroad = self.params.get_bool("ForceOnroad")
+    force_offroad = self.params.get_bool("ForceOffroad")
     started = self.sm["deviceState"].started
-    started |= self.params.get_bool("ForceOnroad")
-    started &= not self.params.get_bool("ForceOffroad")
+    started |= force_onroad
+    started &= not force_offroad
     self.started = started
 
     # Update recording audio state
@@ -197,8 +199,8 @@ class UIState:
         except Exception as e:
           cloudlog.warning(f"Error parsing starpilot_toggles: {e}")
 
-    self.starpilot_toggles["force_offroad"] = self.params.get_bool("ForceOffroad")
-    self.starpilot_toggles["force_onroad"] = self.params.get_bool("ForceOnroad")
+    self.starpilot_toggles["force_offroad"] = force_offroad
+    self.starpilot_toggles["force_onroad"] = force_onroad
 
   def _update_status(self) -> None:
     if self.started and self.sm.updated["selfdriveState"]:
@@ -249,6 +251,7 @@ class Device:
     self._interactive_timeout_callbacks: list[Callable] = []
     self._prev_timed_out = False
     self._awake: bool = True
+    self._params = Params()
 
     self._offroad_brightness: int = BACKLIGHT_OFFROAD
     self._last_brightness: int = 0
@@ -269,11 +272,21 @@ class Device:
     if self._override_interactive_timeout is not None:
       return self._override_interactive_timeout
 
-    ignition_timeout = 10 if gui_app.big_ui() else 5
-    return ignition_timeout if ui_state.ignition else 30
+    timeout_onroad = self._params.get_int("ScreenTimeoutOnroad", return_default=True)
+    timeout_offroad = self._params.get_int("ScreenTimeout", return_default=True)
+
+    if timeout_onroad <= 0:
+      timeout_onroad = 10 if gui_app.big_ui() else 5
+    if timeout_offroad <= 0:
+      timeout_offroad = 30
+
+    return int(timeout_onroad if ui_state.ignition else timeout_offroad)
 
   def _reset_interactive_timeout(self) -> None:
     self._interaction_time = time.monotonic() + self.interactive_timeout
+
+  def reset_interactive_timeout(self) -> None:
+    self._reset_interactive_timeout()
 
   def add_interactive_timeout_callback(self, callback: Callable):
     self._interactive_timeout_callbacks.append(callback)

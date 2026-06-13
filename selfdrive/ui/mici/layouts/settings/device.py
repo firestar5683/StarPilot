@@ -370,6 +370,8 @@ class DeviceLayoutMici(NavScroller):
     def reset_driver_monitoring_callback():
       params = ui_state.params
       params.remove("IsRhdDetected")
+      params.remove("IsRHD")
+      params.remove("IsRHDOverride")
       params.put_bool("OnroadCycleRequested", True)
 
     def uninstall_openpilot_callback():

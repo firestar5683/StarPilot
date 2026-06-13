@@ -59,6 +59,8 @@ class StarPilotPlanner:
     self.raw_model_stopped = False
     self.road_curvature_detected = False
     self.tracking_lead = False
+    self._last_gps_memory_state = ""
+    self._last_gps_memory_write = 0.0
     self._prev_gps_bearing = 0
 
     # Blinker-based lateral resume delay state
@@ -110,11 +112,23 @@ class StarPilotPlanner:
       "latitude": gps_location.latitude,
       "longitude": gps_location.longitude,
       "bearing": gps_location.bearingDeg,
+      "speed": v_ego,
+      "hasFix": bool(getattr(gps_location, "hasFix", False)),
+      "updatedAtMonotonic": time.monotonic(),
+      "updatedAtSec": time.time(),
     }
-    self.gps_valid = self.gps_position["latitude"] != 0 or self.gps_position["longitude"] != 0
+    self.gps_valid = self.gps_position["hasFix"] and (self.gps_position["latitude"] != 0 or self.gps_position["longitude"] != 0)
     bearing = self.gps_position["bearing"]
+    if self.gps_valid:
+      gps_memory_state = json.dumps(_sanitize_json_value(self.gps_position), allow_nan=False)
+      now_mono = self.gps_position["updatedAtMonotonic"]
+      should_refresh_memory = gps_memory_state != self._last_gps_memory_state and (now_mono - self._last_gps_memory_write) >= 0.25
+      if should_refresh_memory:
+        self.params_memory.put_nonblocking("LastGPSPosition", gps_memory_state)
+        self._last_gps_memory_state = gps_memory_state
+        self._last_gps_memory_write = now_mono
+
     if getattr(starpilot_toggles, "compass", False) and abs(bearing - self._prev_gps_bearing) > 0.5:
-      self.params_memory.put("LastGPSPosition", json.dumps(self.gps_position))
       self._prev_gps_bearing = bearing
 
     if v_ego >= starpilot_toggles.minimum_lane_change_speed:

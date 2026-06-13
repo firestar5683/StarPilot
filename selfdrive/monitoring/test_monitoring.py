@@ -66,6 +66,15 @@ class TestMonitoring:
   def _assert_no_events(self, events):
     assert all(not len(e) for e in events)
 
+  def test_rhd_manual_override_beats_saved_default(self):
+    DM = DriverMonitoring(rhd_saved=False, rhd_override=True)
+    DM._update_states(msg_ATTENTIVE, [0, 0, 0], 0, False, False)
+    assert DM.wheel_on_right
+
+    DM = DriverMonitoring(rhd_saved=True, rhd_override=False)
+    DM._update_states(msg_ATTENTIVE, [0, 0, 0], 0, False, False)
+    assert not DM.wheel_on_right
+
   # engaged, driver is attentive all the time
   def test_fully_aware_driver(self):
     events, _ = self._run_seq(always_attentive, always_false, always_true, always_false)

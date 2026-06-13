@@ -43,6 +43,7 @@ def make_sm():
 
 def make_toggles(**overrides):
   defaults = {
+    "always_on_lateral": False,
     "always_on_lateral_lkas": False,
     "always_on_lateral_main": False,
     "always_on_lateral_pause_speed": 0.0,
@@ -54,6 +55,8 @@ def make_toggles(**overrides):
     "experimental_mode_via_lkas": False,
     "force_coast_via_lkas": False,
     "lkas_allowed_for_aol": False,
+    "main_cruise_aol_toggle": False,
+    "main_cruise_slc_adopt": False,
     "pause_lateral_via_lkas": False,
     "pause_longitudinal_via_lkas": False,
     "speed_limit_controller": False,
@@ -92,6 +95,66 @@ def test_honda_lkas_button_can_toggle_always_on_lateral(monkeypatch, tmp_path):
 
   assert ret.alwaysOnLateralAllowed is True
   assert ret.pauseLateral is False
+
+
+def test_hyundai_lkas_button_still_toggles_aol_with_cruise_button_events(monkeypatch, tmp_path):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+
+  card = spc.StarPilotCard(SimpleNamespace(brand="hyundai"), SimpleNamespace(alternativeExperience=0))
+
+  car_state = make_car_state(button_events=[
+    SimpleNamespace(type=spc.ButtonType.decelCruise, pressed=True),
+    SimpleNamespace(type=spc.ButtonType.lkas, pressed=True),
+  ])
+  starpilot_car_state = SimpleNamespace(distancePressed=False)
+  sm = make_sm()
+  toggles = make_toggles(always_on_lateral=True, always_on_lateral_lkas=True)
+
+  ret = card.update(car_state, starpilot_car_state, sm, toggles)
+
+  assert ret.alwaysOnLateralAllowed is True
+  assert ret.pauseLateral is False
+
+
+def test_hyundai_main_cruise_button_toggles_aol_when_assigned_to_aol(monkeypatch, tmp_path):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+
+  card = spc.StarPilotCard(SimpleNamespace(brand="hyundai"), SimpleNamespace(alternativeExperience=0))
+
+  car_state = make_car_state(button_events=[SimpleNamespace(type=spc.ButtonType.mainCruise, pressed=True)])
+  starpilot_car_state = SimpleNamespace(distancePressed=False)
+  sm = make_sm()
+  toggles = make_toggles(always_on_lateral=True, always_on_lateral_lkas=True, main_cruise_aol_toggle=True)
+
+  ret = card.update(car_state, starpilot_car_state, sm, toggles)
+  assert ret.alwaysOnLateralAllowed is True
+
+  ret = card.update(car_state, starpilot_car_state, sm, toggles)
+  assert ret.alwaysOnLateralAllowed is False
+
+
+def test_hyundai_main_cruise_button_adopts_slc_when_assigned_to_slc(monkeypatch, tmp_path):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+
+  card = spc.StarPilotCard(SimpleNamespace(brand="hyundai"), SimpleNamespace(alternativeExperience=0))
+
+  car_state = make_car_state(button_events=[SimpleNamespace(type=spc.ButtonType.mainCruise, pressed=True)])
+  starpilot_car_state = SimpleNamespace(distancePressed=False)
+  sm = make_sm()
+  toggles = make_toggles(always_on_lateral=True, always_on_lateral_lkas=True,
+                         main_cruise_slc_adopt=True, speed_limit_controller=True)
+
+  initial_allowed = card.always_on_lateral_allowed
+  card.update(car_state, starpilot_car_state, sm, toggles)
+
+  assert card.always_on_lateral_allowed is initial_allowed
+  assert card.params_memory.get_bool("SLCAdoptSpeedLimit") is True
 
 
 def test_honda_lkas_button_pauses_lateral_when_cruise_is_active(monkeypatch, tmp_path):

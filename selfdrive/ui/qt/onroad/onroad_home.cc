@@ -113,6 +113,12 @@ void OnroadWindow::paintEvent(QPaintEvent *event) {
 }
 
 void OnroadWindow::mousePressEvent(QMouseEvent* mouseEvent) {
+  if (nvg->handleHudPress(mouseEvent->pos())) {
+    grabMouse();
+    mouseEvent->accept();
+    return;
+  }
+
   starpilot_nvg->mousePressEvent(mouseEvent);
 
   if (mouseEvent->isAccepted()) {
@@ -121,4 +127,18 @@ void OnroadWindow::mousePressEvent(QMouseEvent* mouseEvent) {
 
   // propagation event to parent(HomeWindow)
   QWidget::mousePressEvent(mouseEvent);
+}
+
+void OnroadWindow::mouseReleaseEvent(QMouseEvent* mouseEvent) {
+  const bool handled = nvg->handleHudRelease(mouseEvent->pos());
+  if (QWidget::mouseGrabber() == this) {
+    releaseMouse();
+  }
+
+  if (handled) {
+    mouseEvent->accept();
+    return;
+  }
+
+  QWidget::mouseReleaseEvent(mouseEvent);
 }

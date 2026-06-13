@@ -51,25 +51,29 @@ void ModelRenderer::draw(QPainter &painter, const QRect &surface_rect) {
       drawLead(painter, lead_two, lead_vertices[1], surface_rect, QColor(starpilot_toggles.value("lead_marker_color").toString()));
     }
 
-    SubMaster &fpsm = *(starpilotUIState()->sm);
-    const cereal::StarPilotRadarState::Reader &starpilot_radar_state = fpsm["starpilotRadarState"].getStarpilotRadarState();
+    // Adjacent leads may be published by radard for non-UI consumers (e.g. HumanLaneChanges),
+    // so gate drawing on the AdjacentLeadsUI toggle directly.
+    if (starpilot_toggles.value("adjacent_lead_tracking").toBool()) {
+      SubMaster &fpsm = *(starpilotUIState()->sm);
+      const cereal::StarPilotRadarState::Reader &starpilot_radar_state = fpsm["starpilotRadarState"].getStarpilotRadarState();
 
-    const cereal::StarPilotRadarState::LeadData::Reader &lead_left = starpilot_radar_state.getLeadLeft();
-    const cereal::StarPilotRadarState::LeadData::Reader &lead_right = starpilot_radar_state.getLeadRight();
+      const cereal::StarPilotRadarState::LeadData::Reader &lead_left = starpilot_radar_state.getLeadLeft();
+      const cereal::StarPilotRadarState::LeadData::Reader &lead_right = starpilot_radar_state.getLeadRight();
 
-    updateAdjacentLeads(starpilot_radar_state, model.getPosition());
+      updateAdjacentLeads(starpilot_radar_state, model.getPosition());
 
-    starpilot_nvg->adjacentLeadTextRect = QRect();
+      starpilot_nvg->adjacentLeadTextRect = QRect();
 
-    if (lead_left.getStatus() && lead_right.getStatus() && (lead_left.getDRel() < lead_right.getDRel())) {
-      drawLead(painter, reinterpret_cast<const cereal::RadarState::LeadData::Reader&>(lead_left), adjacent_lead_vertices[0], surface_rect, starpilot_nvg->blueColor(), true);
-      drawLead(painter, reinterpret_cast<const cereal::RadarState::LeadData::Reader&>(lead_right), adjacent_lead_vertices[1], surface_rect, starpilot_nvg->purpleColor(), true);
-    } else {
-      if (lead_left.getStatus()) {
+      if (lead_left.getStatus() && lead_right.getStatus() && (lead_left.getDRel() < lead_right.getDRel())) {
         drawLead(painter, reinterpret_cast<const cereal::RadarState::LeadData::Reader&>(lead_left), adjacent_lead_vertices[0], surface_rect, starpilot_nvg->blueColor(), true);
-      }
-      if (lead_right.getStatus()) {
         drawLead(painter, reinterpret_cast<const cereal::RadarState::LeadData::Reader&>(lead_right), adjacent_lead_vertices[1], surface_rect, starpilot_nvg->purpleColor(), true);
+      } else {
+        if (lead_left.getStatus()) {
+          drawLead(painter, reinterpret_cast<const cereal::RadarState::LeadData::Reader&>(lead_left), adjacent_lead_vertices[0], surface_rect, starpilot_nvg->blueColor(), true);
+        }
+        if (lead_right.getStatus()) {
+          drawLead(painter, reinterpret_cast<const cereal::RadarState::LeadData::Reader&>(lead_right), adjacent_lead_vertices[1], surface_rect, starpilot_nvg->purpleColor(), true);
+        }
       }
     }
   }
