@@ -196,27 +196,6 @@ def get_RadarState_from_vision(lead_msg: capnp._DynamicStructReader, v_ego: floa
   }
 
 
-def get_lead_field(lead: Any, field: str, default: Any) -> Any:
-  if isinstance(lead, dict):
-    return lead.get(field, default)
-  return getattr(lead, field, default)
-
-
-def leads_are_duplicate(lead_one: Any, lead_two: Any) -> bool:
-  if not get_lead_field(lead_one, "status", False) or not get_lead_field(lead_two, "status", False):
-    return False
-
-  lead_one_radar = bool(get_lead_field(lead_one, "radar", False))
-  lead_two_radar = bool(get_lead_field(lead_two, "radar", False))
-
-  if not lead_one_radar or not lead_two_radar:
-    return False
-
-  lead_one_track_id = int(get_lead_field(lead_one, "radarTrackId", -1))
-  lead_two_track_id = int(get_lead_field(lead_two, "radarTrackId", -1))
-  return lead_one_track_id != -1 and lead_one_track_id == lead_two_track_id
-
-
 def get_lead(v_ego: float, ready: bool, tracks: dict[int, Track], lead_msg: capnp._DynamicStructReader,
              model_v_ego: float, model_data: capnp._DynamicStructReader, standstill: bool,
              starpilot_plan: capnp._DynamicStructReader, starpilot_toggles: SimpleNamespace,
@@ -344,11 +323,6 @@ class RadarD:
       self.radar_state.leadTwo = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[1], model_v_ego, sm['modelV2'],
                                           sm['carState'].standstill, sm['starpilotPlan'], self.starpilot_toggles, low_speed_override=False,
                                           g90_radar_filter=self.g90_radar_filter, lead_prob=self.lead_prob_filters[1].x)
-      # The model exposes two lead slots, but both can occasionally fuse to the
-      # same radar object. Publishing that as two separate leads makes MPC churn
-      # between lead0/lead1 even though the scene only has one physical target.
-      if leads_are_duplicate(self.radar_state.leadOne, self.radar_state.leadTwo):
-        self.radar_state.leadTwo = {'status': False}
 
     if self.ready and (self.starpilot_toggles.adjacent_lead_tracking or self.starpilot_toggles.human_lane_changes):
       self.starpilot_radar_state.leadLeft = get_adjacent_lead(self.tracks, sm['carState'].standstill, sm['modelV2'], left=True)
