@@ -48,7 +48,7 @@ class TestLeads:
     assert not leads_are_duplicate(lead_one, different_track)
     assert not leads_are_duplicate(lead_one, vision_only)
 
-  def test_duplicate_vision_leads_are_deduped(self):
+  def test_vision_leads_are_not_force_deduped(self):
     lead_one = {
       "status": True,
       "radar": False,
@@ -77,27 +77,19 @@ class TestLeads:
       "modelProb": 0.99,
     }
 
-    assert leads_are_duplicate(lead_one, lead_two)
+    assert not leads_are_duplicate(lead_one, lead_two)
     assert not leads_are_duplicate(lead_one, distinct_lead)
 
   def test_duplicate_lead_helper_supports_attribute_objects(self):
     lead_one = SimpleNamespace(
       status=True,
-      radar=False,
-      radarTrackId=-1,
-      dRel=32.1,
-      vLead=14.2,
-      yRel=0.03,
-      modelProb=0.98,
+      radar=True,
+      radarTrackId=1234,
     )
     lead_two = SimpleNamespace(
       status=True,
-      radar=False,
-      radarTrackId=-1,
-      dRel=32.2,
-      vLead=14.1,
-      yRel=0.05,
-      modelProb=0.97,
+      radar=True,
+      radarTrackId=1234,
     )
 
     assert leads_are_duplicate(lead_one, lead_two)
