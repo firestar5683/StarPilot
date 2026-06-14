@@ -4,7 +4,7 @@ import cereal.messaging as messaging
 
 from opendbc.car.toyota.values import CAR as TOYOTA
 from openpilot.selfdrive.test.process_replay import replay_process_with_name
-from openpilot.selfdrive.controls.radard import g90_low_speed_radar_lead_sane, g90_radar_lead_lateral_sane
+from openpilot.selfdrive.controls.radard import g90_low_speed_radar_lead_sane, g90_radar_lead_lateral_sane, leads_are_duplicate
 
 
 class TestLeads:
@@ -21,6 +21,78 @@ class TestLeads:
     assert g90_radar_lead_lateral_sane(close_centered_track)
     assert g90_low_speed_radar_lead_sane(centered_track, 2.0)
     assert not g90_low_speed_radar_lead_sane(far_low_speed_track, 3.5)
+
+  def test_duplicate_radar_leads_share_track(self):
+    lead_one = {
+      "status": True,
+      "radar": True,
+      "radarTrackId": 20293,
+    }
+    lead_two = {
+      "status": True,
+      "radar": True,
+      "radarTrackId": 20293,
+    }
+    different_track = {
+      "status": True,
+      "radar": True,
+      "radarTrackId": 20326,
+    }
+    vision_only = {
+      "status": True,
+      "radar": False,
+      "radarTrackId": -1,
+    }
+
+    assert leads_are_duplicate(lead_one, lead_two)
+    assert not leads_are_duplicate(lead_one, different_track)
+    assert not leads_are_duplicate(lead_one, vision_only)
+
+  def test_vision_leads_are_not_force_deduped(self):
+    lead_one = {
+      "status": True,
+      "radar": False,
+      "radarTrackId": -1,
+      "dRel": 48.3,
+      "vLead": 18.9,
+      "yRel": 0.14,
+      "modelProb": 0.99,
+    }
+    lead_two = {
+      "status": True,
+      "radar": False,
+      "radarTrackId": -1,
+      "dRel": 48.4,
+      "vLead": 19.0,
+      "yRel": 0.14,
+      "modelProb": 1.00,
+    }
+    distinct_lead = {
+      "status": True,
+      "radar": False,
+      "radarTrackId": -1,
+      "dRel": 48.3,
+      "vLead": 18.9,
+      "yRel": 1.10,
+      "modelProb": 0.99,
+    }
+
+    assert not leads_are_duplicate(lead_one, lead_two)
+    assert not leads_are_duplicate(lead_one, distinct_lead)
+
+  def test_duplicate_lead_helper_supports_attribute_objects(self):
+    lead_one = SimpleNamespace(
+      status=True,
+      radar=True,
+      radarTrackId=1234,
+    )
+    lead_two = SimpleNamespace(
+      status=True,
+      radar=True,
+      radarTrackId=1234,
+    )
+
+    assert leads_are_duplicate(lead_one, lead_two)
 
   def test_radar_fault(self):
     # if there's no radar-related can traffic, radard should either not respond or respond with an error
