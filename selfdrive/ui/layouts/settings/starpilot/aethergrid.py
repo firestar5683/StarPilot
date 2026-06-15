@@ -567,7 +567,7 @@ class PanelManagerView(AetherInteractiveMixin, Widget):
       set_state=d.get("set_state", d.get("set")),
       bg_color=self.PANEL_STYLE.accent,
       desc=d.get("subtitle", d.get("desc", "")),
-      is_enabled=d.get("is_enabled"),
+      is_enabled=d.get("is_enabled", d.get("enabled")),
       disabled_label=d.get("disabled_label", ""),
     )
 
@@ -596,10 +596,11 @@ class PanelManagerView(AetherInteractiveMixin, Widget):
     return []
 
   def _on_page_changed(self) -> None:
-    if not self._has_pagination or self._page_grid is None:
+    if not getattr(self, '_toggle_pages', None) or self._page_grid is None:
       return
     self._page_grid.clear()
-    for d in self._get_page_defs():
+    page_idx = self._current_page if self._current_page < len(self._toggle_pages) else 0
+    for d in self._toggle_pages[page_idx]:
       self._page_grid.add_tile(self._make_toggle_tile(d))
 
   # ── scissor helpers ────────────────────────────────────────
@@ -674,7 +675,7 @@ class PanelManagerView(AetherInteractiveMixin, Widget):
 
       self._page_scissor_push(clip_rect)
       if self._page_anim_prev_tiles:
-        old_grid = TileGrid(columns=grid.get_column_count(), padding=grid.gap)
+        old_grid = TileGrid(columns=grid.get_column_count(), padding=grid.gap, tile_height=grid._tile_height)
         old_grid.tiles.extend(self._page_anim_prev_tiles)
         old_grid.set_parent_rect(self._scroll_rect)
         old_grid.render(rl.Rectangle(rect.x + prev_offset, rect.y, rect.width, rect.height))
@@ -2819,14 +2820,14 @@ class AetherTile(Widget):
       off = i * 2.5 * glow
       gr = rl.Rectangle(rx - off, ry - off, rw + off * 2, rh + off * 2)
       a = int(25 * (1.0 - i / 5) * glow)
-      _draw_rounded_fill(gr, rl.Color(accent.r, accent.g, accent.b, a), radius_px=100)
+      _draw_rounded_fill(gr, rl.Color(accent.r, accent.g, accent.b, max(0, min(255, a))), radius_px=100)
 
     _draw_rounded_fill(face, _HUD_BG_ON, radius_px=100)
 
     bc = rl.Color(
-      int(off_border.r + (accent.r - off_border.r) * glow),
-      int(off_border.g + (accent.g - off_border.g) * glow),
-      int(off_border.b + (accent.b - off_border.b) * glow),
+      max(0, min(255, int(off_border.r + (accent.r - off_border.r) * glow))),
+      max(0, min(255, int(off_border.g + (accent.g - off_border.g) * glow))),
+      max(0, min(255, int(off_border.b + (accent.b - off_border.b) * glow))),
       255)
     _draw_rounded_stroke(face, bc, radius_px=100)
 
@@ -2835,9 +2836,9 @@ class AetherTile(Widget):
     led_y = ry + 12
     led_base = _HUD_LED_BASE
     led_col = rl.Color(
-      int(led_base.r + (accent.r - led_base.r) * glow),
-      int(led_base.g + (accent.g - led_base.g) * glow),
-      int(led_base.b + (accent.b - led_base.b) * glow),
+      max(0, min(255, int(led_base.r + (accent.r - led_base.r) * glow))),
+      max(0, min(255, int(led_base.g + (accent.g - led_base.g) * glow))),
+      max(0, min(255, int(led_base.b + (accent.b - led_base.b) * glow))),
       255)
     rl.draw_rectangle(led_x, led_y, led_w, led_h, led_col)
 
@@ -3053,49 +3054,55 @@ class ToggleTile(AetherTile):
     self._animate_plate(rl.get_frame_time())
 
     if not enabled:
-      self.surface_color = self._disabled_color
       self._plate_offset = 0.0
       self._plate_target = 0.0
-      face = self._render_layers(rect)
-      state_text = tr(self._disabled_label) if self._disabled_label else tr("LOCKED")
-      self._draw_signal_edge(face, self.surface_color, width=TILE_SIGNAL_WIDTH, alpha=28)
-      self._render_tile_stack(face, title=self.title, primary=state_text, desc=self.desc,
-                              title_font=self._font, primary_font=self._font, desc_font=self._font_desc,
-                              title_size=28, primary_size=30)
-      return
 
     if not self._show_led:
-      self.surface_color = self._active_color if active else self._inactive_color
+      self.surface_color = self._disabled_color if not enabled else (self._active_color if active else self._inactive_color)
+      state_text = tr(self._disabled_label) if not enabled and self._disabled_label else (tr("LOCKED") if not enabled else (tr("ON") if active else tr("OFF")))
+      signal_color = self._active_color if (enabled and active) else self.surface_color
+      alpha = 62 if (enabled and active) else 28
+
       face = self._render_layers(rect)
-      state_text = tr("ON") if active else tr("OFF")
-      self._draw_signal_edge(face, self._active_color if active else self.surface_color,
-                             width=TILE_SIGNAL_WIDTH, alpha=62 if active else 28)
+      self._draw_signal_edge(face, signal_color, width=TILE_SIGNAL_WIDTH, alpha=alpha)
       self._render_tile_stack(face, title=self.title, primary=state_text, desc=self.desc,
                               title_font=self._font, primary_font=self._font, desc_font=self._font_desc,
                               title_size=28, primary_size=30)
       return
 
-    # --- HUD toggle path (show_led + enabled) ---
-    face, accent = self._render_hud_background(rect, self._active_color, self._glow)
+    # --- HUD toggle path (show_led) ---
+    color = self._active_color if enabled else self._disabled_color
+    glow = self._glow if enabled else 0.0
+    face, accent = self._render_hud_background(rect, color, glow)
     rx, ry, rw, rh = face.x, face.y, face.width, face.height
 
     content_pad = SPACING.tile_content
     max_w = rw - content_pad * 2
     text_scale = min(rw / 360.0, rh / 205.0)
     title_size = max(18, int(round(22 * text_scale)))
-    title_color = rl.WHITE if self.get_state() else _HUD_TEXT_DIM
-    self._draw_text_fit(self._font, self.title,
-                        rl.Vector2(rx + content_pad, ry + int(rh * 0.50)),
-                        max_w, title_size, align_center=True, color=title_color)
 
-    led_cx = rx + rw // 2
-    led_cy = ry + int(rh * 0.75)
-    if self.get_state():
-      rl.draw_circle(int(led_cx), int(led_cy), 11, rl.Color(accent.r, accent.g, accent.b, 24))
-      rl.draw_circle(int(led_cx), int(led_cy), 6, accent)
+    if not enabled:
+      self._draw_text_fit(self._font, self.title,
+                          rl.Vector2(rx + content_pad, ry + int(rh * 0.40)),
+                          max_w, title_size, align_center=True, color=_HUD_TEXT_DIM)
+      disabled_text = tr(self._disabled_label) if self._disabled_label else tr("LOCKED")
+      desc_size = max(14, int(round(16 * text_scale)))
+      self._draw_text_fit(self._font_desc, disabled_text,
+                          rl.Vector2(rx + content_pad, ry + int(rh * 0.68)),
+                          max_w, desc_size, align_center=True, color=_HUD_TEXT_DIM)
     else:
-      rl.draw_circle(int(led_cx), int(led_cy), 7, rl.Color(14, 16, 22, 255))
-      rl.draw_ring(rl.Vector2(led_cx, led_cy), 5, 6, 0, 360, 24, rl.Color(70, 78, 95, 140))
+      title_color = rl.WHITE if active else _HUD_TEXT_DIM
+      self._draw_text_fit(self._font, self.title,
+                          rl.Vector2(rx + content_pad, ry + int(rh * 0.50)),
+                          max_w, title_size, align_center=True, color=title_color)
+      led_cx = rx + rw // 2
+      led_cy = ry + int(rh * 0.75)
+      if active:
+        rl.draw_circle(int(led_cx), int(led_cy), 11, rl.Color(accent.r, accent.g, accent.b, 24))
+        rl.draw_circle(int(led_cx), int(led_cy), 6, accent)
+      else:
+        rl.draw_circle(int(led_cx), int(led_cy), 7, rl.Color(14, 16, 22, 255))
+        rl.draw_ring(rl.Vector2(led_cx, led_cy), 5, 6, 0, 360, 24, rl.Color(70, 78, 95, 140))
 
 
 class ValueTile(AetherTile):
@@ -3137,32 +3144,31 @@ class ValueTile(AetherTile):
     self._animate_plate(rl.get_frame_time())
 
     if not enabled:
-      self.surface_color = self._disabled_color
       self._plate_offset = 0.0
       self._plate_target = 0.0
-      face = self._render_layers(rect)
-      self._draw_signal_edge(face, self.surface_color, width=TILE_SIGNAL_WIDTH, alpha=28)
-      self._render_tile_stack(face, title=self.title, primary=self.get_value(), desc=self.desc,
-                              title_font=self._font, primary_font=self._font, desc_font=self._font_desc,
-                              title_size=28, primary_size=28)
-      return
 
-    face, accent = self._render_hud_background(rect, self._active_color)
+    color = self._active_color if enabled else self._disabled_color
+    glow = 1.0 if enabled else 0.0
+    face, accent = self._render_hud_background(rect, color, glow)
     rx, ry, rw, rh = face.x, face.y, face.width, face.height
 
     content_pad = SPACING.tile_content
     max_w = rw - content_pad * 2
     text_scale = min(rw / 360.0, rh / 205.0)
+
+    # Title
     title_size = max(18, int(round(22 * text_scale)))
     self._draw_text_fit(self._font, self.title,
                         rl.Vector2(rx + content_pad, ry + int(rh * 0.35)),
                         max_w, title_size, align_center=True, color=_HUD_TEXT_DIM)
 
+    # Value
     val_text = self.get_value()
     val_size = max(18, int(round(24 * text_scale)))
+    val_color = accent if enabled else _HUD_TEXT_DIM
     self._draw_text_fit(self._font, val_text,
                         rl.Vector2(rx + content_pad, ry + int(rh * 0.58)),
-                        max_w, val_size, align_center=True, color=accent)
+                        max_w, val_size, align_center=True, color=val_color)
 
 
 class SliderTile(AetherTile):
@@ -3282,34 +3288,33 @@ class SliderTile(AetherTile):
         self._animate_plate(dt)
 
         if not enabled:
-            self.surface_color = self._disabled_color
             self._plate_offset = 0.0
             self._plate_target = 0.0
-            face = self._render_layers(rect)
-            self._draw_signal_edge(face, self.surface_color, width=TILE_SIGNAL_WIDTH, alpha=28)
-            val_str = self.labels.get(current_val, f"{int(current_val)}{self.unit}")
-            self._render_tile_stack(face, title=self.title, primary=val_str, desc=self.desc,
-                                    title_font=self._font, primary_font=self._font, desc_font=self._font_desc,
-                                    title_size=28, primary_size=28)
-            return
 
-        face, accent = self._render_hud_background(rect, self._active_color)
+        color = self._active_color if enabled else self._disabled_color
+        glow = 1.0 if enabled else 0.0
+        face, accent = self._render_hud_background(rect, color, glow)
         rx, ry, rw, rh = face.x, face.y, face.width, face.height
 
         content_pad = SPACING.tile_content
         max_w = rw - content_pad * 2
         text_scale = min(rw / 360.0, rh / 205.0)
+
+        # Title
         title_size = max(18, int(round(22 * text_scale)))
         self._draw_text_fit(self._font, self.title,
                             rl.Vector2(rx + content_pad, ry + int(rh * 0.30)),
                             max_w, title_size, align_center=True, color=_HUD_TEXT_DIM)
 
+        # Value text
         val_str = self.labels.get(current_val, f"{int(current_val)}{self.unit}")
         val_size = max(18, int(round(24 * text_scale)))
+        val_color = accent if enabled else _HUD_TEXT_DIM
         self._draw_text_fit(self._font, val_str,
                             rl.Vector2(rx + content_pad, ry + int(rh * 0.52)),
-                            max_w, val_size, align_center=True, color=accent)
+                            max_w, val_size, align_center=True, color=val_color)
 
+        # Slider meter
         value_range = self.max_val - self.min_val
         frac = 0.0 if value_range == 0 else max(0.0, min(1.0, (self._smooth_value - self.min_val) / value_range))
         meter_h = 6
@@ -3318,7 +3323,8 @@ class SliderTile(AetherTile):
         rl.draw_rectangle_rec(_snap_rect(meter_rect), rl.Color(255, 255, 255, 14))
         if fill_w > 1:
             fill_rect = rl.Rectangle(meter_rect.x, meter_rect.y, fill_w, meter_rect.height)
-            rl.draw_rectangle_rec(_snap_rect(fill_rect), _with_alpha(accent, 176))
+            fill_color = _with_alpha(accent, 176) if enabled else rl.Color(120, 120, 120, 100)
+            rl.draw_rectangle_rec(_snap_rect(fill_rect), fill_color)
 
 
 class AetherSlider(Widget):
@@ -4113,13 +4119,16 @@ class AetherSegmentedControl(Widget):
 
 
 class TileGrid(Widget):
-  def __init__(self, columns: int | None = None, padding: int | None = None, uniform_width: bool = False, min_tile_width: int | None = None):
+  def __init__(self, columns: int | None = None, padding: int | None = None, uniform_width: bool = False, min_tile_width: int | None = None, tile_height: float | None = None, force_square: bool = False):
     super().__init__()
     self._columns = columns
     self._gap = padding if padding is not None else SPACING.tile_gap
     self.tiles = []
     self._uniform_width = uniform_width
     self._min_tile_width = min_tile_width if min_tile_width is not None else MIN_TILE_WIDTH
+    self._tile_height = tile_height
+    self.force_square = force_square
+
 
   @property
   def gap(self) -> int:
@@ -4165,7 +4174,8 @@ class TileGrid(Widget):
       return preferred
     min_tile_width = max(1, self._min_tile_width)
     max_cols_by_width = max(1, int((available_width + self._gap) / (min_tile_width + self._gap)))
-    return max(1, min(preferred, count, max_cols_by_width))
+    limit_by_count = count if self._columns is None else preferred
+    return max(1, min(preferred, limit_by_count, max_cols_by_width))
 
   def get_row_count(self, tile_count: int | None = None, available_width: float | None = None) -> int:
     count = len(self.tiles) if tile_count is None else tile_count
@@ -4178,6 +4188,19 @@ class TileGrid(Widget):
     rows = self.get_row_count(tile_count, available_width=available_width)
     return self._gap * max(0, rows - 1)
 
+  def measure_height(self, width: float) -> float:
+    if not self.tiles:
+      return 0.0
+    count = len(self.tiles)
+    rows = self.get_row_count(count, available_width=width)
+    if self.force_square:
+      cols = self.get_effective_column_count(width, count)
+      col_w = (width - (self._gap * (cols - 1))) / cols
+      h = col_w
+    else:
+      h = self._tile_height if self._tile_height is not None else 130.0
+    return rows * h + self.get_internal_gap_height(count, available_width=width)
+
   def _render(self, rect: rl.Rectangle):
     rect = _snap_rect(rect)
     self.set_rect(rect)
@@ -4187,18 +4210,24 @@ class TileGrid(Widget):
     count = len(tiles_to_render)
     cols = self.get_effective_column_count(rect.width, count)
     rows = self.get_row_count(count, available_width=rect.width)
-    tile_h = (rect.height - (self._gap * (rows - 1))) / rows
-    uniform_tile_w = (rect.width - (self._gap * (cols - 1))) / cols if self._uniform_width else 0
+    if self.force_square:
+      uniform_tile_w = (rect.width - (self._gap * (cols - 1))) / cols
+      tile_h = uniform_tile_w
+    else:
+      if self._tile_height is not None:
+        tile_h = self._tile_height
+      else:
+        tile_h = (rect.height - (self._gap * (rows - 1))) / rows
+      uniform_tile_w = (rect.width - (self._gap * (cols - 1))) / cols if self._uniform_width else 0
     tile_idx = 0
     for r in range(rows):
       remaining = count - tile_idx
       if remaining <= 0:
         break
       items_in_row = min(cols, remaining)
-      if self._uniform_width:
+      if self.force_square or self._uniform_width:
         row_tile_w = uniform_tile_w
-        row_width = (row_tile_w * items_in_row) + (self._gap * (items_in_row - 1))
-        row_x = rect.x + (rect.width - row_width) / 2
+        row_x = rect.x
       else:
         row_tile_w = (rect.width - (self._gap * (items_in_row - 1))) / items_in_row
         row_x = rect.x

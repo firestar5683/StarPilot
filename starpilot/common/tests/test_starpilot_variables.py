@@ -93,6 +93,28 @@ def test_cancel_button_migration_copies_distance_actions_once():
   assert params.get_int("CancelButtonControl") == 3
 
 
+def test_button_function_ignores_tuning_level_gate():
+  params = _FakeParams(ints={"LKASButtonControl": spv.BUTTON_FUNCTIONS["AOL_TOGGLE"]})
+  variables = object.__new__(spv.StarPilotVariables)
+  variables.params = params
+  variables.starpilot_toggles = SimpleNamespace(tuning_level=spv.TUNING_LEVELS["STANDARD"])
+  variables.tuning_levels = {"LKASButtonControl": spv.TUNING_LEVELS["ADVANCED"]}
+  variables.default_values = {"LKASButtonControl": str(spv.BUTTON_FUNCTIONS["EXPERIMENTAL_MODE"])}
+
+  assert variables.get_value("LKASButtonControl", cast=int) == spv.BUTTON_FUNCTIONS["EXPERIMENTAL_MODE"]
+  assert variables.get_button_function("LKASButtonControl") == spv.BUTTON_FUNCTIONS["AOL_TOGGLE"]
+
+
+def test_favorite_button_flags_map_to_three_slots():
+  toggle = SimpleNamespace()
+
+  spv.StarPilotVariables.set_favorite_button_flags(toggle, "lkas", spv.BUTTON_FUNCTIONS["FAVORITE_2"])
+
+  assert toggle.favorite_1_via_lkas is False
+  assert toggle.favorite_2_via_lkas is True
+  assert toggle.favorite_3_via_lkas is False
+
+
 def test_set_speed_limit_available_on_openpilot_longitudinal():
   assert spv.set_speed_limit_available(openpilot_longitudinal=True, has_cc_long=False, pcm_cruise_speed=True) is True
 

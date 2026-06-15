@@ -396,6 +396,129 @@ class TestAethergridContracts(unittest.TestCase):
     self.assertEqual(dialog._current_val, 6)
     self.assertEqual(captured_changes, [6])
 
+  def test_tile_grid_measure_height_with_explicit_tile_height(self):
+    mod = _import_aethergrid()
+    grid = mod.TileGrid(columns=2, padding=10, tile_height=140)
+    for _ in range(5):
+      grid.add_tile(RenderSpy())
+    
+    h = grid.measure_height(500)
+    self.assertEqual(h, 740)
+
+  def test_tile_grid_measure_height_default_fallback(self):
+    mod = _import_aethergrid()
+    grid = mod.TileGrid(columns=2, padding=10, tile_height=None)
+    for _ in range(5):
+      grid.add_tile(RenderSpy())
+    
+    h = grid.measure_height(500)
+    self.assertEqual(h, 690)
+
+  def test_tile_grid_render_top_left_aligned_with_tile_height(self):
+    mod = _import_aethergrid()
+    grid = mod.TileGrid(columns=2, padding=10, tile_height=140)
+    spy = RenderSpy()
+    grid.add_tile(spy)
+    
+    grid.render(mod.rl.Rectangle(0, 50, 500, 300))
+    self.assertTrue(spy.rects)
+    self.assertEqual(spy.rects[0].y, 50)
+    self.assertEqual(spy.rects[0].x, 0)
+
+  def test_disabled_tiles_hud_mode_rendering(self):
+    mod = _import_aethergrid()
+    
+    # ToggleTile disabled, show_led=True
+    toggle = mod.ToggleTile(
+      title="Test Loud",
+      get_state=lambda: True,
+      set_state=lambda s: None,
+      is_enabled=lambda: False,
+      show_led=True
+    )
+    # Spy on _render_hud_background
+    orig_hud_bg = toggle._render_hud_background
+    spy_called = []
+    def spy_hud_bg(*a, **k):
+      spy_called.append("toggle")
+      return orig_hud_bg(*a, **k)
+    toggle._render_hud_background = spy_hud_bg
+    toggle.render(mod.rl.Rectangle(0, 0, 150, 130))
+    self.assertIn("toggle", spy_called)
+
+    # ValueTile disabled
+    value_tile = mod.ValueTile(
+      title="Test Value",
+      get_value=lambda: "Off",
+      on_click=lambda: None,
+      is_enabled=lambda: False
+    )
+    orig_value_hud_bg = value_tile._render_hud_background
+    def spy_value_hud_bg(*a, **k):
+      spy_called.append("value")
+      return orig_value_hud_bg(*a, **k)
+    value_tile._render_hud_background = spy_value_hud_bg
+    value_tile.render(mod.rl.Rectangle(0, 0, 150, 130))
+    self.assertIn("value", spy_called)
+
+    # SliderTile disabled
+    slider_tile = mod.SliderTile(
+      title="Test Slider",
+      get_value=lambda: 50.0,
+      set_value=lambda v: None,
+      min_val=0.0,
+      max_val=100.0,
+      step=1.0,
+      is_enabled=lambda: False
+    )
+    orig_slider_hud_bg = slider_tile._render_hud_background
+    def spy_slider_hud_bg(*a, **k):
+      spy_called.append("slider")
+      return orig_slider_hud_bg(*a, **k)
+    slider_tile._render_hud_background = spy_slider_hud_bg
+    slider_tile.render(mod.rl.Rectangle(0, 0, 150, 130))
+    self.assertIn("slider", spy_called)
+
+  def test_tile_grid_force_square(self):
+    mod = _import_aethergrid()
+    grid = mod.TileGrid(columns=2, padding=10, min_tile_width=100, force_square=True)
+    spies = [RenderSpy() for _ in range(5)]
+    for spy in spies:
+      grid.add_tile(spy)
+    
+    # col_w = (500 - 10) / 2 = 245
+    # rows = 3, gap_h = 2 * 10 = 20
+    # expected height = 3 * 245 + 20 = 755
+    self.assertEqual(grid.measure_height(500), 755)
+    
+    grid.render(mod.rl.Rectangle(0, 0, 500, 300))
+    self.assertTrue(spies[0].rects)
+    self.assertEqual(spies[0].rects[0].width, 245)
+    self.assertEqual(spies[0].rects[0].height, 245)
+
+  def test_tile_grid_column_preservation_with_single_tile(self):
+    mod = _import_aethergrid()
+    grid = mod.TileGrid(columns=2, padding=10, min_tile_width=100, force_square=True)
+    spy = RenderSpy()
+    grid.add_tile(spy)
+
+    # With only 1 tile in a 2-column layout, it should still calculate the tile size based on 2 columns
+    # col_w = (500 - 10) / 2 = 245
+    grid.render(mod.rl.Rectangle(0, 0, 500, 300))
+    self.assertTrue(spy.rects)
+    self.assertEqual(spy.rects[0].width, 245)
+    self.assertEqual(spy.rects[0].height, 245)
+
+  def test_hud_background_glow_overflow_protection(self):
+    mod = _import_aethergrid()
+    tile = mod.ToggleTile("Test", lambda: True, lambda v: None)
+    # Test with extreme glow values (negative and large positive) to verify no OverflowError occurs
+    try:
+      tile._render_hud_background(mod.rl.Rectangle(0, 0, 150, 130), mod.rl.Color(255, 0, 0, 255), glow=5.0)
+      tile._render_hud_background(mod.rl.Rectangle(0, 0, 150, 130), mod.rl.Color(255, 0, 0, 255), glow=-2.0)
+    except OverflowError:
+      self.fail("OverflowError raised with extreme glow values")
+
 
 if __name__ == "__main__":
   unittest.main()

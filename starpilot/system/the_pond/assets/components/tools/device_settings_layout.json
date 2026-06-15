@@ -1,5 +1,18 @@
 [
   {
+    "name": "Favorites",
+    "icon": "bi-star",
+    "params": [
+      {
+        "key": "StarPilotFavoriteSlots",
+        "label": "Favorite Slots",
+        "description": "Configure up to three favorite toggles for on-road buttons and steering-wheel bindings.",
+        "data_type": "json",
+        "ui_type": "favorites"
+      }
+    ]
+  },
+  {
     "name": "Lateral (Steering)",
     "icon": "bi-arrows-move",
     "params": [
@@ -307,7 +320,7 @@
       {
         "key": "CustomAccelProfile0MPH",
         "label": "0 mph",
-        "description": "Max acceleration in m/s\u00b2 at the fixed 0 mph breakpoint.",
+        "description": "Max acceleration in m/s² at the fixed 0 mph breakpoint.",
         "data_type": "float",
         "ui_type": "numeric",
         "min": 0.0,
@@ -319,7 +332,7 @@
       {
         "key": "CustomAccelProfile11MPH",
         "label": "11 mph",
-        "description": "Max acceleration in m/s\u00b2 at the fixed 11 mph breakpoint.",
+        "description": "Max acceleration in m/s² at the fixed 11 mph breakpoint.",
         "data_type": "float",
         "ui_type": "numeric",
         "min": 0.0,
@@ -331,7 +344,7 @@
       {
         "key": "CustomAccelProfile22MPH",
         "label": "22 mph",
-        "description": "Max acceleration in m/s\u00b2 at the fixed 22 mph breakpoint.",
+        "description": "Max acceleration in m/s² at the fixed 22 mph breakpoint.",
         "data_type": "float",
         "ui_type": "numeric",
         "min": 0.0,
@@ -343,7 +356,7 @@
       {
         "key": "CustomAccelProfile34MPH",
         "label": "34 mph",
-        "description": "Max acceleration in m/s\u00b2 at the fixed 34 mph breakpoint.",
+        "description": "Max acceleration in m/s² at the fixed 34 mph breakpoint.",
         "data_type": "float",
         "ui_type": "numeric",
         "min": 0.0,
@@ -355,7 +368,7 @@
       {
         "key": "CustomAccelProfile45MPH",
         "label": "45 mph",
-        "description": "Max acceleration in m/s\u00b2 at the fixed 45 mph breakpoint.",
+        "description": "Max acceleration in m/s² at the fixed 45 mph breakpoint.",
         "data_type": "float",
         "ui_type": "numeric",
         "min": 0.0,
@@ -367,7 +380,7 @@
       {
         "key": "CustomAccelProfile56MPH",
         "label": "56 mph",
-        "description": "Max acceleration in m/s\u00b2 at the fixed 56 mph breakpoint.",
+        "description": "Max acceleration in m/s² at the fixed 56 mph breakpoint.",
         "data_type": "float",
         "ui_type": "numeric",
         "min": 0.0,
@@ -379,7 +392,7 @@
       {
         "key": "CustomAccelProfile89MPH",
         "label": "89 mph",
-        "description": "Max acceleration in m/s\u00b2 at the fixed 89 mph breakpoint.",
+        "description": "Max acceleration in m/s² at the fixed 89 mph breakpoint.",
         "data_type": "float",
         "ui_type": "numeric",
         "min": 0.0,
@@ -1053,7 +1066,7 @@
       {
         "key": "CustomCruise",
         "label": "Cruise Interval",
-        "description": "How much the set speed increases or decreases for each + or \u2013 cruise control button press.",
+        "description": "How much the set speed increases or decreases for each + or – cruise control button press.",
         "data_type": "float",
         "ui_type": "numeric",
         "min": 1.0,
@@ -1063,7 +1076,7 @@
       {
         "key": "CustomCruiseLong",
         "label": "Cruise Interval (Hold)",
-        "description": "How much the set speed increases or decreases while holding the + or \u2013 cruise control buttons.",
+        "description": "How much the set speed increases or decreases while holding the + or – cruise control buttons.",
         "data_type": "float",
         "ui_type": "numeric",
         "min": 1.0,
@@ -1562,7 +1575,7 @@
       },
       {
         "key": "Offset1",
-        "label": "Speed Offset (0\u201324 mph)",
+        "label": "Speed Offset (0–24 mph)",
         "description": "How much to offset posted speed-limits between 0 and 24 mph.",
         "data_type": "float",
         "ui_type": "numeric",
@@ -1572,7 +1585,7 @@
       },
       {
         "key": "Offset2",
-        "label": "Speed Offset (25\u201334 mph)",
+        "label": "Speed Offset (25–34 mph)",
         "description": "How much to offset posted speed-limits between 25 and 34 mph.",
         "data_type": "float",
         "ui_type": "numeric",
@@ -1582,7 +1595,7 @@
       },
       {
         "key": "Offset3",
-        "label": "Speed Offset (35\u201344 mph)",
+        "label": "Speed Offset (35–44 mph)",
         "description": "How much to offset posted speed-limits between 35 and 44 mph.",
         "data_type": "float",
         "ui_type": "numeric",
@@ -1592,7 +1605,7 @@
       },
       {
         "key": "Offset4",
-        "label": "Speed Offset (45\u201354 mph)",
+        "label": "Speed Offset (45–54 mph)",
         "description": "How much to offset posted speed-limits between 45 and 54 mph.",
         "data_type": "float",
         "ui_type": "numeric",
@@ -1602,7 +1615,7 @@
       },
       {
         "key": "Offset5",
-        "label": "Speed Offset (55\u201364 mph)",
+        "label": "Speed Offset (55–64 mph)",
         "description": "How much to offset posted speed-limits between 55 and 64 mph.",
         "data_type": "float",
         "ui_type": "numeric",
@@ -1612,7 +1625,7 @@
       },
       {
         "key": "Offset6",
-        "label": "Speed Offset (65\u201374 mph)",
+        "label": "Speed Offset (65–74 mph)",
         "description": "How much to offset posted speed-limits between 65 and 74 mph.",
         "data_type": "float",
         "ui_type": "numeric",
@@ -1622,7 +1635,7 @@
       },
       {
         "key": "Offset7",
-        "label": "Speed Offset (75\u201399 mph)",
+        "label": "Speed Offset (75–99 mph)",
         "description": "How much to offset posted speed-limits between 75 and 99 mph.",
         "data_type": "float",
         "ui_type": "numeric",
@@ -2236,7 +2249,7 @@
       {
         "key": "WarningImmediateVolume",
         "label": "Warning Immediate Volume",
-        "description": "Set the volume for the loudest warnings that require urgent attention.\n\nExamples include: \"DISENGAGE IMMEDIATELY \u2014 Driver Distracted\", \"DISENGAGE IMMEDIATELY \u2014 Driver Unresponsive\".",
+        "description": "Set the volume for the loudest warnings that require urgent attention.\n\nExamples include: \"DISENGAGE IMMEDIATELY — Driver Distracted\", \"DISENGAGE IMMEDIATELY — Driver Unresponsive\".",
         "data_type": "int",
         "ui_type": "numeric",
         "min": 25.0,
@@ -2594,6 +2607,18 @@
           {
             "value": 8,
             "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
           }
         ]
       },
@@ -2639,6 +2664,18 @@
           {
             "value": 8,
             "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
           }
         ]
       },
@@ -2684,6 +2721,18 @@
           {
             "value": 8,
             "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
           }
         ]
       },
@@ -2729,6 +2778,18 @@
           {
             "value": 8,
             "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
           }
         ]
       },
@@ -2774,6 +2835,18 @@
           {
             "value": 8,
             "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
           }
         ]
       },
@@ -2819,6 +2892,18 @@
           {
             "value": 8,
             "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
           }
         ]
       },
@@ -2868,6 +2953,18 @@
           {
             "value": 9,
             "label": "Toggle Always On Lateral"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
           }
         ]
       },
@@ -2889,6 +2986,18 @@
           {
             "value": 10,
             "label": "Adopt Current Speed Limit"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
           }
         ]
       },
@@ -2934,6 +3043,18 @@
           {
             "value": 8,
             "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
           }
         ]
       },
@@ -2979,6 +3100,18 @@
           {
             "value": 8,
             "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
           }
         ]
       },
@@ -3024,6 +3157,18 @@
           {
             "value": 8,
             "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
           }
         ]
       },
@@ -3069,6 +3214,18 @@
           {
             "value": 8,
             "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
           }
         ]
       },
@@ -3114,6 +3271,18 @@
           {
             "value": 8,
             "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
           }
         ]
       },
@@ -3159,6 +3328,18 @@
           {
             "value": 8,
             "label": "Create Bookmark"
+          },
+          {
+            "value": 11,
+            "label": "Favorite #1"
+          },
+          {
+            "value": 12,
+            "label": "Favorite #2"
+          },
+          {
+            "value": 13,
+            "label": "Favorite #3"
           }
         ]
       }
@@ -3393,6 +3574,17 @@
         "description": "Only enable this if the wide camera is broken or for development!\n\nDisabling the wide camera may degrade driving performance and cause instability.\n\nRequires a reboot to take effect.",
         "data_type": "bool",
         "ui_type": "toggle"
+      },
+      {
+        "key": "CameraOffset",
+        "label": "Camera Offset",
+        "description": "Virtually shift the camera perspective used by the driving model. Positive values bias the model center left; negative values bias it right. Use only for development.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": -0.35,
+        "max": 0.35,
+        "step": 0.01,
+        "precision": 2
       },
       {
         "key": "AllowImpossibleAcceleration",

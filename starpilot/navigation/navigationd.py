@@ -275,14 +275,18 @@ class Navigationd:
       active_lane_side = "right"
 
     same_side_lane_count = 0
+    active_lane_at_road_edge = False
+    has_shared_same_side_lane = False
     if active_lane_side:
       same_side_directions = {"slightLeft", "left", "sharpLeft"} if active_lane_side == "left" else {"slightRight", "right", "sharpRight"}
+      active_lane_at_road_edge = active_lane_index == 0 if active_lane_side == "left" else active_lane_index == len(lanes) - 1
       for lane in lanes:
         if not isinstance(lane, dict):
           continue
         directions = {str(direction) for direction in lane.get("directions") or [] if direction}
         if directions & same_side_directions:
           same_side_lane_count += 1
+          has_shared_same_side_lane |= len(directions - same_side_directions) > 0
 
     state = {
       "valid": True,
@@ -290,6 +294,8 @@ class Navigationd:
       "maneuverType": str(payload.get("maneuverType") or ""),
       "activeLaneDirection": active_lane_direction,
       "activeLaneIndex": active_lane_index,
+      "activeLaneAtRoadEdge": active_lane_at_road_edge,
+      "hasSharedSameSideLane": has_shared_same_side_lane,
       "sameSideLaneCount": same_side_lane_count,
       "maneuverPrimaryText": str(payload.get("maneuverPrimaryText") or ""),
       "maneuverSecondaryText": str(payload.get("maneuverSecondaryText") or ""),

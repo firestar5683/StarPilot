@@ -14,6 +14,7 @@ from openpilot.starpilot.common.experimental_state import (
   sync_manual_cc_state,
   sync_manual_ce_state,
 )
+from openpilot.starpilot.common.favorite_slots import toggle_favorite_slot
 from openpilot.starpilot.common.starpilot_utilities import is_FrogsGoMoo
 from openpilot.starpilot.common.starpilot_variables import ERROR_LOGS_PATH, GearShifter, NON_DRIVING_GEARS
 
@@ -82,6 +83,11 @@ class StarPilotCard:
       self.params_memory.put_bool("SwitchbackModeEnabled", self.switchback_mode_enabled)
     elif sm["carControl"].longActive and getattr(starpilot_toggles, f"traffic_mode_via_{key}"):
       self.traffic_mode_enabled = not self.traffic_mode_enabled
+    else:
+      for slot_index in range(3):
+        if getattr(starpilot_toggles, f"favorite_{slot_index + 1}_via_{key}", False):
+          toggle_favorite_slot(slot_index, self.params, self.params_memory)
+          break
 
   def handle_bookmark(self):
     counter = self.params_memory.get_int("WheelButtonBookmarkCounter")

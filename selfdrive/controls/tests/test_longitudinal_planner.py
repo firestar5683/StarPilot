@@ -2368,6 +2368,28 @@ def test_near_duplicate_lead_source_hysteresis_prefers_previous_source():
   assert lead_1_bias > 0.0
 
 
+def test_stable_follow_cruise_hysteresis_applies_for_radar_lead():
+  v_ego = 27.0
+  CP = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
+  planner = LongitudinalPlanner(CP, init_v=v_ego)
+  lead = make_lead(status=True, d_rel=40.5, v_lead=26.3, a_lead=-0.02, radar=True, model_prob=1.0)
+
+  hysteresis = planner.mpc.get_stable_follow_cruise_hysteresis(lead, v_ego, 1.45)
+
+  assert hysteresis > 0.0
+
+
+def test_stable_follow_cruise_hysteresis_skips_fast_closing_radar_lead():
+  v_ego = 27.0
+  CP = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
+  planner = LongitudinalPlanner(CP, init_v=v_ego)
+  lead = make_lead(status=True, d_rel=40.5, v_lead=21.5, a_lead=-0.02, radar=True, model_prob=1.0)
+
+  hysteresis = planner.mpc.get_stable_follow_cruise_hysteresis(lead, v_ego, 1.45)
+
+  assert hysteresis == 0.0
+
+
 def test_near_duplicate_lead_source_hysteresis_skips_distinct_leads():
   v_ego = 27.0
   CP = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)

@@ -14,7 +14,7 @@ public:
 
   StarPilotAnnotatedCameraWidget *starpilot_nvg;
 
-  bool onroad_distance_btn_enabled;
+  int onroad_controls_width = 0;
 
   QJsonObject starpilot_toggles;
 

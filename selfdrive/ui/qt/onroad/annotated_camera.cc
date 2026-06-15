@@ -6,6 +6,7 @@
 #include <cmath>
 #include <exception>
 #include <string>
+#include <vector>
 
 #include "common/params.h"
 #include "common/swaglog.h"
@@ -27,6 +28,11 @@ AnnotatedCameraWidget::AnnotatedCameraWidget(VisionStreamType type, QWidget *par
 
   personality_btn = new DrivingPersonalityButton(this);
   personality_btn->setVisible(false);
+
+  for (int i = 0; i < static_cast<int>(favorite_btns.size()); ++i) {
+    favorite_btns[i] = new FavoriteButton(i, this);
+    favorite_btns[i]->setVisible(false);
+  }
 
   screen_recorder = new ScreenRecorder(this);
   screen_recorder->setVisible(false);
@@ -58,14 +64,47 @@ void AnnotatedCameraWidget::updateState(const UIState &s, const StarPilotUIState
     : QPoint(experimental_btn->x(), experimental_btn->y());
   starpilot_nvg->experimentalButtonPosition = experimental_button_position;
 
-  bool onroad_distance_btn_enabled = starpilot_nvg->dmIconPosition != QPoint(0, 0) && !starpilot_nvg->hideBottomIcons && starpilot_toggles.value("onroad_distance_button").toBool();
-  personality_btn->setVisible(onroad_distance_btn_enabled);
-  if (onroad_distance_btn_enabled) {
-    personality_btn->move(starpilot_nvg->rightHandDM ? width() - UI_BORDER_SIZE - personality_btn->width() - (UI_BORDER_SIZE / 2) : UI_BORDER_SIZE, starpilot_nvg->dmIconPosition.y() - personality_btn->height() / 2);
-    personality_btn->updateState(s, fs);
+  std::vector<FavoriteButton*> visible_favorite_btns;
+  const bool favorites_anchor_ready = starpilot_nvg->dmIconPosition != QPoint(0, 0) && !starpilot_nvg->hideBottomIcons;
+  for (FavoriteButton *favorite_btn : favorite_btns) {
+    favorite_btn->updateState();
+    if (favorites_anchor_ready && favorite_btn->shouldShow()) {
+      visible_favorite_btns.push_back(favorite_btn);
+    } else {
+      favorite_btn->setVisible(false);
+    }
   }
 
-  dmon.onroad_distance_btn_enabled = onroad_distance_btn_enabled;
+  const bool onroad_distance_btn_enabled = favorites_anchor_ready && starpilot_toggles.value("onroad_distance_button").toBool();
+  const int gap = UI_BORDER_SIZE / 2;
+  int controls_width = 0;
+  if (!visible_favorite_btns.empty()) {
+    controls_width = visible_favorite_btns.size() * btn_size + (visible_favorite_btns.size() - 1) * gap;
+  }
+  if (onroad_distance_btn_enabled) {
+    controls_width += (controls_width > 0 ? gap : 0) + personality_btn->width();
+  }
+  dmon.onroad_controls_width = controls_width;
+
+  const int controls_y = favorites_anchor_ready
+    ? std::clamp(starpilot_nvg->dmIconPosition.y() - (btn_size / 2), UI_BORDER_SIZE, height() - UI_BORDER_SIZE - btn_size)
+    : 0;
+  int cursor_x = starpilot_nvg->rightHandDM ? width() - UI_BORDER_SIZE : UI_BORDER_SIZE;
+
+  personality_btn->setVisible(onroad_distance_btn_enabled);
+  if (onroad_distance_btn_enabled) {
+    const int personality_x = starpilot_nvg->rightHandDM ? cursor_x - personality_btn->width() : cursor_x;
+    personality_btn->move(personality_x, controls_y);
+    personality_btn->updateState(s, fs);
+    cursor_x += starpilot_nvg->rightHandDM ? -(personality_btn->width() + gap) : personality_btn->width() + gap;
+  }
+
+  for (FavoriteButton *favorite_btn : visible_favorite_btns) {
+    const int favorite_x = starpilot_nvg->rightHandDM ? cursor_x - favorite_btn->width() : cursor_x;
+    favorite_btn->move(favorite_x, controls_y);
+    favorite_btn->setVisible(true);
+    cursor_x += starpilot_nvg->rightHandDM ? -(favorite_btn->width() + gap) : favorite_btn->width() + gap;
+  }
 
   const QPoint screen_recorder_position = hide_steering_wheel
     ? experimental_button_position

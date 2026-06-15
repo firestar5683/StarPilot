@@ -67,6 +67,7 @@ from openpilot.starpilot.common.model_versions import (
   uses_split_off_policy_artifacts,
 )
 from openpilot.starpilot.common.experimental_state import sync_persist_chill_state, sync_persist_experimental_state
+from openpilot.starpilot.common.favorite_slots import FAVORITE_SLOTS_PARAM, normalize_favorite_slots
 from openpilot.starpilot.common.starpilot_utilities import delete_file, get_lock_status, run_cmd
 from openpilot.starpilot.common.starpilot_variables import ACTIVE_THEME_PATH, ERROR_LOGS_PATH, EXCLUDED_KEYS, LEGACY_STARPILOT_PARAM_RENAMES, MAPS_PATH, MODELS_PATH, RESOURCES_REPO, SCREEN_RECORDINGS_PATH, STOCK_THEME_PATH, THEME_SAVE_PATH,\
                                                            default_ev_tuning_enabled, migrate_cancel_button_controls, update_starpilot_toggles
@@ -1985,6 +1986,7 @@ def write_legacy_param_file(key, value):
 
 _layout_type_overrides = None
 _layout_param_metadata = None
+_favorite_slot_options = None
 
 def _get_layout_param_metadata():
   global _layout_param_metadata
@@ -2013,6 +2015,51 @@ def _get_layout_type_overrides():
       if param_data.get("data_type")
     }
   return _layout_type_overrides
+
+def _get_favorite_slot_options():
+  global _favorite_slot_options
+  if _favorite_slot_options is not None:
+    return _favorite_slot_options
+
+  allowed_keys, value_types = _get_param_type_info()
+  options = []
+  try:
+    layout_path = os.path.join(os.path.dirname(__file__), "assets", "components", "tools", "device_settings_layout.json")
+    with open(layout_path) as f:
+      layout_data = json.load(f)
+
+    seen = set()
+    for section in layout_data:
+      section_name = section.get("name", "")
+      for param_data in section.get("params", []):
+        key = str(param_data.get("key") or "").strip()
+        if not key or key in seen:
+          continue
+        if key not in allowed_keys or value_types.get(key) is not bool:
+          continue
+        if param_data.get("ui_type") != "toggle" or param_data.get("data_type") != "bool":
+          continue
+
+        seen.add(key)
+        options.append({
+          "key": key,
+          "label": str(param_data.get("label") or key),
+          "description": str(param_data.get("description") or ""),
+          "section": section_name,
+        })
+  except Exception:
+    options = []
+
+  options.sort(key=lambda option: (str(option.get("label") or option.get("key") or "").casefold(), str(option.get("key") or "").casefold()))
+  _favorite_slot_options = options
+  return _favorite_slot_options
+
+def _favorite_slot_values(options):
+  return {
+    option["key"]: _safe_params_get_bool(option["key"])
+    for option in options
+    if option.get("key")
+  }
 
 _cached_allowed_keys = None
 _cached_param_types = None
@@ -3433,6 +3480,19 @@ def setup(app):
     "last_empty_catalog_log_time": 0.0,
   }
 
+  @app.after_request
+  def disable_device_settings_asset_cache(response):
+    if request.path in {
+      "/assets/components/router.js",
+      "/assets/components/tools/device_settings.js",
+      "/assets/components/tools/device_settings.css",
+      "/assets/components/tools/device_settings_layout.json",
+    }:
+      response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+      response.headers["Pragma"] = "no-cache"
+      response.headers["Expires"] = "0"
+    return response
+
   @app.errorhandler(404)
   def not_found(_):
     response = make_response(render_template("index.html"))
@@ -3728,6 +3788,56 @@ def setup(app):
 
     return jsonify(models), 200
 
+  @app.route("/api/favorites/slots", methods=["GET", "PUT"])
+  def favorite_slots():
+    options = _get_favorite_slot_options()
+    option_by_key = {option["key"]: option for option in options}
+    eligible_keys = set(option_by_key)
+
+    if request.method == "PUT":
+      data = request.get_json() or {}
+      raw_slots = data.get("slots", data) if isinstance(data, dict) else data
+      if isinstance(raw_slots, dict):
+        raw_slots = raw_slots.get("slots", [])
+      if not isinstance(raw_slots, list):
+        return jsonify(error="Favorite slots payload must be a list."), 400
+
+      for idx, raw_slot in enumerate(raw_slots[:3]):
+        if not isinstance(raw_slot, dict):
+          continue
+        key = str(raw_slot.get("key") or "").strip()
+        if key and key not in eligible_keys:
+          return jsonify(error=f"Favorite #{idx + 1} must use a Galaxy-exposed boolean toggle."), 400
+
+      slots = normalize_favorite_slots(raw_slots, params=params, eligible_keys=eligible_keys)
+
+      for slot in slots:
+        key = slot.get("key")
+        if not key:
+          continue
+        slot["label"] = option_by_key[key]["label"]
+
+      params.put(FAVORITE_SLOTS_PARAM, slots)
+      update_starpilot_toggles()
+      return jsonify({
+        "message": "Favorite slots saved.",
+        "slots": slots,
+        "options": options,
+        "values": _favorite_slot_values(options),
+      }), 200
+
+    slots = normalize_favorite_slots(params.get(FAVORITE_SLOTS_PARAM), params=params, eligible_keys=eligible_keys)
+    for slot in slots:
+      key = slot.get("key")
+      if key in option_by_key:
+        slot["label"] = option_by_key[key]["label"]
+
+    return jsonify({
+      "slots": slots,
+      "options": options,
+      "values": _favorite_slot_values(options),
+    }), 200
+
   @app.route("/api/params", methods=["GET", "PUT"])
   def get_param():
     if request.method == "PUT":
@@ -3736,6 +3846,30 @@ def setup(app):
         return jsonify({"error": "Missing 'key' or 'value' in request body."}), 400
 
       key = str(data["key"]).strip()
+      if key.lower() == FAVORITE_SLOTS_PARAM.lower():
+        key = FAVORITE_SLOTS_PARAM
+        raw_slots = data["value"]
+        if isinstance(raw_slots, dict):
+          raw_slots = raw_slots.get("slots", raw_slots)
+        if not isinstance(raw_slots, list):
+          return jsonify({"error": "Favorite slots must be configured with the Favorites editor."}), 400
+
+        options = _get_favorite_slot_options()
+        option_by_key = {option["key"]: option for option in options}
+        eligible_keys = set(option_by_key)
+        slots = normalize_favorite_slots(raw_slots, params=params, eligible_keys=eligible_keys)
+        for slot in slots:
+          slot_key = slot.get("key")
+          if slot_key in option_by_key:
+            slot["label"] = option_by_key[slot_key]["label"]
+
+        params.put(FAVORITE_SLOTS_PARAM, slots)
+        update_starpilot_toggles()
+        return jsonify({
+          "message": "Favorite slots saved.",
+          "updated": {FAVORITE_SLOTS_PARAM: slots},
+        }), 200
+
       key = {
         "model": "Model",
         "modelversion": "ModelVersion",

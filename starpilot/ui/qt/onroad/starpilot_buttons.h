@@ -1,6 +1,16 @@
 #pragma once
 
+#include <array>
+
 #include "selfdrive/ui/qt/onroad/buttons.h"
+
+struct FavoriteSlotState {
+  bool enabled = false;
+  bool show_onroad = false;
+  bool value = false;
+  QString key;
+  QString label;
+};
 
 class DrivingPersonalityButton : public QPushButton {
   Q_OBJECT
@@ -27,4 +37,25 @@ private:
   QMovie *currentGif;
 
   QPixmap currentImg;
+};
+
+class FavoriteButton : public QPushButton {
+public:
+  explicit FavoriteButton(int slot_index, QWidget *parent = 0);
+
+  void updateState();
+  bool shouldShow() const;
+
+private:
+  void paintEvent(QPaintEvent *event) override;
+  void toggleFavorite();
+
+  FavoriteSlotState currentSlot();
+  QFont fittedLabelFont(QPainter &p, const QString &label, const QRect &text_rect) const;
+
+  int slot_index;
+  FavoriteSlotState slot;
+
+  Params params;
+  Params params_memory{"", true};
 };

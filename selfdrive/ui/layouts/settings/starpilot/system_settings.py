@@ -311,7 +311,7 @@ class SystemSettingsManagerView(PanelManagerView):
     self._connectivity_tile_grid.set_touch_valid_callback(lambda: self._scroll_panel.is_touch_valid())
     self._child(self._connectivity_tile_grid)
     self._page_grid = self._connectivity_tile_grid
-    self._set_toggle_pages([self._toggle_defs[i:i+4] for i in range(0, len(self._toggle_defs), 4)])
+    self._set_toggle_pages([self._toggle_defs[i:i+6] for i in range(0, len(self._toggle_defs), 6)])
 
     self._drive_mode_control = self._child(
       AetherSegmentedControl(
@@ -477,16 +477,17 @@ class SystemSettingsManagerView(PanelManagerView):
     display_h = self._section_block_height(self._slider_section_height(self._display_slider_keys, width))
     power_h = self._section_block_height(self._slider_section_height(self._power_slider_keys, width))
 
-    tile_rows = self._connectivity_tile_grid.get_row_count(
-      len(self._connectivity_tile_grid.tiles), available_width=width)
-    tile_gaps = self._connectivity_tile_grid.get_internal_gap_height(
-      len(self._connectivity_tile_grid.tiles), available_width=width)
-    tiles_content_h = tile_rows * 130 + tile_gaps
-
     if self._uses_two_columns(width):
+      column_w = self._column_width(width)
+      col_w = (column_w - 24 - 12) / 2
+      grid_h = 2 * col_w + 12
+      container_h = grid_h + 24
+      right_h = self._section_block_height(container_h)
+      left_h = display_h + SECTION_GAP + power_h
       min_h = self._scroll_rect.height if self._scroll_rect else 0.0
-      return max(min_h, display_h + SECTION_GAP + power_h)
+      return max(min_h, left_h, right_h)
     else:
+      tiles_content_h = self._connectivity_tile_grid.measure_height(width - 24)
       return self._stacked_section_height([display_h, power_h, tiles_content_h + 24])
 
   def _slider_section_height(self, keys: list[str], width: float) -> float:
@@ -513,10 +514,12 @@ class SystemSettingsManagerView(PanelManagerView):
 
       display_bottom = self._draw_slider_section(y, x, column_w, tr("Display"), self._display_slider_keys)
       power_y = display_bottom + section_gap
-      power_bottom = self._draw_slider_section(power_y, x, column_w, tr("Power"), self._power_slider_keys)
+      self._draw_slider_section(power_y, x, column_w, tr("Power"), self._power_slider_keys)
 
       container_top = y + SECTION_HEADER_HEIGHT + SECTION_HEADER_GAP
-      container_height = power_bottom - container_top
+      col_w = (column_w - 24 - 12) / 2
+      grid_h = 2 * col_w + 12
+      container_height = grid_h + 24
       self._draw_connectivity_tiles_column(container_top, x + column_w + self.COLUMN_GAP, column_w, container_height)
       return
     y = self._draw_slider_section(y, x, width, tr("Display"), self._display_slider_keys)
@@ -530,9 +533,7 @@ class SystemSettingsManagerView(PanelManagerView):
     self._render_page_grid(self._connectivity_tile_grid, rl.Rectangle(x + 12, y + 12, width - 24, height - 24))
 
   def _draw_connectivity_tiles_section(self, y: float, x: float, width: float):
-    tile_rows = self._connectivity_tile_grid.get_row_count(len(self._connectivity_tile_grid.tiles), available_width=width)
-    tile_gaps = self._connectivity_tile_grid.get_internal_gap_height(len(self._connectivity_tile_grid.tiles), available_width=width)
-    tiles_content_h = tile_rows * 130 + tile_gaps
+    tiles_content_h = self._connectivity_tile_grid.measure_height(width - 24)
 
     draw_list_group_shell(rl.Rectangle(x, y, width, tiles_content_h + 24), style=PANEL_STYLE)
     self._render_page_grid(self._connectivity_tile_grid, rl.Rectangle(x + 12, y + 12, width - 24, tiles_content_h))

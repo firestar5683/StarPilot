@@ -8,6 +8,9 @@ QMap<int, QString> getWheelFunctionsMap() {
     {3, QObject::tr("Pause Steering")},
     {7, QObject::tr("Toggle \"Switchback Mode\" On/Off")},
     {8, QObject::tr("Create Bookmark")},
+    {11, QObject::tr("Favorite #1")},
+    {12, QObject::tr("Favorite #2")},
+    {13, QObject::tr("Favorite #3")},
   };
 }
 
@@ -35,6 +38,9 @@ QMap<int, QString> getMainCruiseFunctionsMap() {
     {0, QObject::tr("No Action")},
     {9, QObject::tr("Toggle Always On Lateral")},
     {10, QObject::tr("Adopt Current Speed Limit")},
+    {11, QObject::tr("Favorite #1")},
+    {12, QObject::tr("Favorite #2")},
+    {13, QObject::tr("Favorite #3")},
   };
 }
 

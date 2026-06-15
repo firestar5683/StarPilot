@@ -728,7 +728,7 @@ class CAR(Platforms):
   KIA_XCEED_PHEV = HyundaiPlatformConfig(
     [HyundaiCarDocs("Kia XCeed Plug-in Hybrid 2021", car_parts=CarParts.common([CarHarness.hyundai_b]))],
     CarSpecs(mass=1650, wheelbase=2.65, steerRatio=13.75, tireStiffnessFactor=0.5),
-    flags=HyundaiFlags.LEGACY | HyundaiFlags.HYBRID,
+    flags=HyundaiFlags.LEGACY | HyundaiFlags.HYBRID | HyundaiFlags.MANDO_RADAR,
   )
   KIA_EV6 = HyundaiCanFDPlatformConfig(
     [
@@ -1126,6 +1126,7 @@ RADAR_LIVE_LONGITUDINAL_CAR = CANFD_RADAR_LIVE_LONGITUDINAL_CAR | {
   CAR.HYUNDAI_SANTA_FE_PHEV_2022,
   CAR.HYUNDAI_SONATA,
   CAR.HYUNDAI_SONATA_HYBRID,
+  CAR.KIA_XCEED_PHEV,
   CAR.GENESIS_G90,
 }
 
@@ -1142,5 +1143,7 @@ NON_SCC_CAR = CAR.with_flags(HyundaiFlags.NON_SCC)
 # TODO: another PR with (HyundaiFlags.LEGACY | HyundaiFlags.UNSUPPORTED_LONGITUDINAL | HyundaiFlags.CAMERA_SCC |
 #       HyundaiFlags.CANFD_RADAR_SCC | HyundaiFlags.CANFD_NO_RADAR_DISABLE | )
 UNSUPPORTED_LONGITUDINAL_CAR = CAR.with_flags(HyundaiFlags.LEGACY) | CAR.with_flags(HyundaiFlags.UNSUPPORTED_LONGITUDINAL)
+
+LEGACY_LONGITUDINAL_CAR = {CAR.KIA_XCEED_PHEV}
 
 DBC = CAR.create_dbc_map()

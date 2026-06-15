@@ -1,6 +1,7 @@
 #pragma once
 
 #include <QVBoxLayout>
+#include <array>
 #include <memory>
 #include "selfdrive/ui/qt/onroad/hud.h"
 #include "selfdrive/ui/qt/onroad/buttons.h"
@@ -42,6 +43,7 @@ private:
   void paintEvent(QPaintEvent *event) override;
 
   DrivingPersonalityButton *personality_btn;
+  std::array<FavoriteButton*, 3> favorite_btns;
   ScreenRecorder *screen_recorder;
 
 protected:

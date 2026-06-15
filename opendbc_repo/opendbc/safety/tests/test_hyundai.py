@@ -416,6 +416,14 @@ class TestHyundaiSafetyFCEVLong(TestHyundaiLongitudinalSafety, TestHyundaiSafety
     self.safety.init_tests()
 
 
+class TestHyundaiLegacyLongitudinalSafetyHEV(TestHyundaiLongitudinalSafety, TestHyundaiLegacySafetyHEV):
+  def setUp(self):
+    self.packer = CANPackerSafety("hyundai_kia_generic")
+    self.safety = libsafety_py.libsafety
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiLegacy, HyundaiSafetyFlags.HYBRID_GAS | HyundaiSafetyFlags.LONG)
+    self.safety.init_tests()
+
+
 class TestHyundaiLongitudinalAolLkasOnEngageSafety(HyundaiAolLkasOnEngageBase, TestHyundaiLongitudinalSafety):
   def setUp(self):
     self.packer = CANPackerSafety("hyundai_kia_generic")

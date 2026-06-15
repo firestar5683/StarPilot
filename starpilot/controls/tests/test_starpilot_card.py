@@ -2,18 +2,30 @@ from types import SimpleNamespace
 
 from opendbc.car.chrysler.values import CAR as CHRYSLER_CAR
 
+from openpilot.common.params import ParamKeyType
+from openpilot.starpilot.common.favorite_slots import FAVORITE_SLOTS_PARAM
 from openpilot.starpilot.controls import starpilot_card as spc
 
 
 class FakeParams:
   def __init__(self, *args, **kwargs):
     self._store = {}
+    self._types = {
+      FAVORITE_SLOTS_PARAM: ParamKeyType.JSON,
+      "RedneckCruise": ParamKeyType.BOOL,
+    }
+
+  def get(self, key):
+    return self._store.get(key)
 
   def get_bool(self, key):
     return bool(self._store.get(key, False))
 
   def put_bool(self, key, value):
     self._store[key] = bool(value)
+
+  def put(self, key, value):
+    self._store[key] = value
 
   def get_int(self, key, default=0):
     return int(self._store.get(key, default))
@@ -23,6 +35,9 @@ class FakeParams:
 
   def put_bool_nonblocking(self, key, value):
     self.put_bool(key, value)
+
+  def get_type(self, key):
+    return self._types.get(key, ParamKeyType.STRING)
 
 
 class FakeSM(dict):
@@ -407,3 +422,20 @@ def test_cancel_button_short_press_can_run_independent_mapping(monkeypatch, tmp_
   assert ret.cancelLongPressed is False
   assert ret.cancelVeryLongPressed is False
   assert card.params_memory.get_int("WheelButtonBookmarkCounter") == 1
+
+
+def test_favorite_wheel_action_toggles_hidden_onroad_slot(monkeypatch, tmp_path):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+
+  card = spc.StarPilotCard(SimpleNamespace(brand="gm"), SimpleNamespace(alternativeExperience=0))
+  card.params.put("RedneckCruise", False)
+  card.params.put(FAVORITE_SLOTS_PARAM, [
+    {"enabled": True, "show_onroad": False, "key": "RedneckCruise", "label": "Redneck Cruise"},
+  ])
+
+  card.handle_button_event("lkas", make_sm(), make_toggles(favorite_1_via_lkas=True))
+
+  assert card.params.get_bool("RedneckCruise") is True
+  assert card.params_memory.get_bool("StarPilotTogglesUpdated") is True

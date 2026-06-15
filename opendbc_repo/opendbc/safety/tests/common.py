@@ -984,7 +984,8 @@ class SafetyTest(SafetyTestBase):
               continue
             if {attr, current_test}.issubset({'TestHyundaiLongitudinalSafety', 'TestHyundaiLongitudinalSafetyCameraSCC',
                                               'TestHyundaiSafetyFCEVLong', 'TestHyundaiLongitudinalAolLkasOnEngageSafety',
-                                              'TestHyundaiCanCanfdBlendedLongitudinalSafety'}):
+                                              'TestHyundaiCanCanfdBlendedLongitudinalSafety',
+                                              'TestHyundaiLegacyLongitudinalSafetyHEV'}):
               continue
             volkswagen_shared = ('TestVolkswagenMqb', 'TestVolkswagenMlb')
             if attr.startswith(volkswagen_shared) and current_test.startswith(volkswagen_shared):
@@ -1017,7 +1018,8 @@ class SafetyTest(SafetyTestBase):
 
             if attr.startswith('TestHyundaiLongitudinal') or attr in ('TestHyundaiSafetyFCEVLong',
                                                                       'TestHyundaiLongitudinalAolLkasOnEngageSafety',
-                                                                      'TestHyundaiCanCanfdBlendedLongitudinalSafety'):
+                                                                      'TestHyundaiCanCanfdBlendedLongitudinalSafety',
+                                                                      'TestHyundaiLegacyLongitudinalSafetyHEV'):
               # exceptions for common msgs across different Hyundai CAN platforms
               tx = list(filter(lambda m: m[0] not in [0x420, 0x50A, 0x389, 0x4A2], tx))
             all_tx.append([[m[0], m[1], attr] for m in tx])

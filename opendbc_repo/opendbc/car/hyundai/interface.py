@@ -7,6 +7,7 @@ from opendbc.car.hyundai.values import HyundaiFlags, CAR, CarControllerParams, \
                                                    CANFD_RADAR_LIVE_LONGITUDINAL_CAR, \
                                                    RADAR_LIVE_LONGITUDINAL_CAR, \
                                                    UNSUPPORTED_LONGITUDINAL_CAR, HyundaiSafetyFlags, \
+                                                   LEGACY_LONGITUDINAL_CAR, \
                                                    HyundaiStarPilotSafetyFlags, \
                                                    hyundai_cancel_button_enables_cruise
 from opendbc.car.hyundai.radar_interface import get_radar_track_config, radar_tracks_available
@@ -139,7 +140,7 @@ class CarInterface(CarInterfaceBase):
 
     else:
       # Shared configuration for non CAN-FD cars
-      ret.alphaLongitudinalAvailable = candidate not in UNSUPPORTED_LONGITUDINAL_CAR
+      ret.alphaLongitudinalAvailable = candidate not in UNSUPPORTED_LONGITUDINAL_CAR or candidate in LEGACY_LONGITUDINAL_CAR
       ret.enableBsm = 0x58b in fingerprint[CAN.ECAN]
 
       # Send LFA message on cars with HDA

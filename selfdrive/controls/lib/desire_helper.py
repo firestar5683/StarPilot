@@ -132,21 +132,43 @@ class DesireHelper:
     return distance <= threshold
 
   @staticmethod
+  def _nav_should_suppress_edge_lane_keep(nav_instruction_state):
+    maneuver_type = str(nav_instruction_state.get("maneuverType", ""))
+    if maneuver_type not in ("off ramp", "fork"):
+      return False
+
+    active_lane_direction = str(nav_instruction_state.get("activeLaneDirection", ""))
+    if active_lane_direction not in ("slightLeft", "left", "sharpLeft", "slightRight", "right", "sharpRight"):
+      return False
+
+    return (
+      int(nav_instruction_state.get("sameSideLaneCount", 0) or 0) > 1 and
+      bool(nav_instruction_state.get("activeLaneAtRoadEdge", False)) and
+      bool(nav_instruction_state.get("hasSharedSameSideLane", False))
+    )
+
+  @staticmethod
   def _nav_effective_modifier(nav_instruction_state, carstate, maneuver_distance):
     modifier = str(nav_instruction_state.get("maneuverModifier", ""))
     maneuver_type = str(nav_instruction_state.get("maneuverType", ""))
     active_lane_direction = str(nav_instruction_state.get("activeLaneDirection", ""))
     same_side_lane_count = int(nav_instruction_state.get("sameSideLaneCount", 0) or 0)
 
-    if maneuver_type in ("off ramp", "fork") and modifier in ("slightLeft", "slightRight"):
+    if maneuver_type in ("off ramp", "fork") and modifier in ("slightLeft", "left", "sharpLeft", "slightRight", "right", "sharpRight"):
       if not DesireHelper._nav_keep_is_imminent(carstate, maneuver_distance, maneuver_type, same_side_lane_count):
         return ""
 
-    if modifier in ("left", "right") and maneuver_type in ("off ramp", "fork") and DesireHelper._nav_keep_is_imminent(carstate, maneuver_distance, maneuver_type, same_side_lane_count):
+      if DesireHelper._nav_should_suppress_edge_lane_keep(nav_instruction_state):
+        return ""
+
       if active_lane_direction in ("slightLeft", "left"):
         return "slightLeft"
       if active_lane_direction in ("slightRight", "right"):
         return "slightRight"
+
+      # If lane guidance says the active lane stays straight, don't reinterpret the
+      # broader fork/off-ramp maneuver as a late turn into another branch.
+      return ""
 
     return modifier
 

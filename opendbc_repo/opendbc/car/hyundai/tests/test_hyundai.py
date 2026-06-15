@@ -19,7 +19,7 @@ from opendbc.car.hyundai.radar_interface import MRREVO14F_RADAR_START_ADDR, MRR3
 from opendbc.car.hyundai.values import CAMERA_SCC_CAR, CANFD_CAR, CAN_GEARS, CAR, CHECKSUM, DATE_FW_ECUS, \
                                          HYBRID_CAR, EV_CAR, FW_QUERY_CONFIG, LEGACY_SAFETY_MODE_CAR, CANFD_FUZZY_WHITELIST, \
                                          UNSUPPORTED_LONGITUDINAL_CAR, PLATFORM_CODE_ECUS, HYUNDAI_VERSION_REQUEST_LONG, \
-                                         CarControllerParams, DBC, HyundaiFlags, get_platform_codes, HyundaiSafetyFlags, \
+                                         LEGACY_LONGITUDINAL_CAR, CarControllerParams, DBC, HyundaiFlags, get_platform_codes, HyundaiSafetyFlags, \
                                          HyundaiStarPilotSafetyFlags, Buttons
 
 LongCtrlState = CarControl.Actuators.LongControlState
@@ -131,6 +131,7 @@ class TestHyundaiFingerprint:
       CAR.HYUNDAI_SANTA_FE_PHEV_2022,
       CAR.HYUNDAI_SONATA,
       CAR.HYUNDAI_SONATA_HYBRID,
+      CAR.KIA_XCEED_PHEV,
       CAR.KIA_K5_HEV_2020,
       CAR.KIA_NIRO_EV,
       CAR.KIA_NIRO_PHEV,
@@ -152,7 +153,7 @@ class TestHyundaiFingerprint:
 
     fingerprint = gen_empty_fingerprint()
     fingerprint[1][RADAR_START_ADDR] = 8
-    for candidate in (CAR.HYUNDAI_SONATA, CAR.HYUNDAI_SONATA_HYBRID, CAR.GENESIS_G90):
+    for candidate in (CAR.HYUNDAI_SONATA, CAR.HYUNDAI_SONATA_HYBRID, CAR.KIA_XCEED_PHEV, CAR.GENESIS_G90):
       CP = CarInterface.get_params(candidate, fingerprint, [], True, False, False, None)
       assert CP.openpilotLongitudinalControl
       assert not CP.radarUnavailable
@@ -468,6 +469,54 @@ class TestHyundaiFingerprint:
     assert CP.pcmCruise
     assert not (CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.LONG)
 
+  def test_xceed_phev_alpha_long_is_isolated_legacy_experiment(self):
+    toggles = get_test_toggles()
+
+    ceed = CarInterface.get_params(CAR.KIA_CEED, gen_empty_fingerprint(), [], True, False, False, toggles)
+    assert CAR.KIA_CEED not in LEGACY_LONGITUDINAL_CAR
+    assert not ceed.alphaLongitudinalAvailable
+    assert not ceed.openpilotLongitudinalControl
+    assert ceed.pcmCruise
+    assert ceed.safetyConfigs[-1].safetyModel == CarParams.SafetyModel.hyundaiLegacy
+    assert not (ceed.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.LONG)
+
+    stock_xceed = CarInterface.get_params(CAR.KIA_XCEED_PHEV, gen_empty_fingerprint(), [], False, False, False, toggles)
+    assert CAR.KIA_XCEED_PHEV in LEGACY_LONGITUDINAL_CAR
+    assert stock_xceed.alphaLongitudinalAvailable
+    assert not stock_xceed.openpilotLongitudinalControl
+    assert stock_xceed.pcmCruise
+    assert stock_xceed.safetyConfigs[-1].safetyModel == CarParams.SafetyModel.hyundaiLegacy
+    assert stock_xceed.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.HYBRID_GAS
+    assert not (stock_xceed.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.LONG)
+
+    long_xceed = CarInterface.get_params(CAR.KIA_XCEED_PHEV, gen_empty_fingerprint(), [], True, False, False, toggles)
+    assert long_xceed.alphaLongitudinalAvailable
+    assert long_xceed.openpilotLongitudinalControl
+    assert not long_xceed.pcmCruise
+    assert long_xceed.safetyConfigs[-1].safetyModel == CarParams.SafetyModel.hyundaiLegacy
+    assert long_xceed.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.HYBRID_GAS
+    assert long_xceed.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.LONG
+
+  def test_xceed_phev_disable_failure_falls_back_to_stock_acc(self, monkeypatch):
+    toggles = get_test_toggles()
+    CP = CarInterface.get_params(CAR.KIA_XCEED_PHEV, gen_empty_fingerprint(), [], True, False, False, toggles)
+
+    called = {}
+
+    def fake_disable_ecu(*args, **kwargs):
+      called.update(kwargs)
+      return False
+
+    monkeypatch.setattr("opendbc.car.hyundai.interface.disable_ecu", fake_disable_ecu)
+    CarInterface.init(CP, None, None)
+
+    assert called["addr"] == 0x7d0
+    assert called["bus"] == 0
+    assert called["reset"] is False
+    assert not CP.openpilotLongitudinalControl
+    assert CP.pcmCruise
+    assert not (CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.LONG)
+
   def test_canfd_longitudinal_params_match_family_tune(self):
     toggles = get_test_toggles()
     CP = CarInterface.get_params(CAR.KIA_EV6, gen_empty_fingerprint(), [], True, False, False, toggles)
@@ -720,6 +769,37 @@ class TestHyundaiFingerprint:
     assert any(be.type == ButtonType.lkas and be.pressed for be in ret.buttonEvents)
 
     ret = update(0, 3)
+    assert any(be.type == ButtonType.lkas and not be.pressed for be in ret.buttonEvents)
+
+  def test_sonata_hybrid_prefers_bcm_lkas_button_over_dead_main_bus_clu13(self):
+    toggles = get_test_toggles()
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[0][0x391] = 8
+    fingerprint[1][0x50C] = 8
+    CP = CarInterface.get_params(CAR.HYUNDAI_SONATA_HYBRID, fingerprint, [], False, False, False, toggles)
+    FPCP = CarInterface.get_starpilot_params(CAR.HYUNDAI_SONATA_HYBRID, fingerprint, [], CP, toggles)
+
+    car_state = CarState(CP, FPCP)
+    can_parsers = car_state.get_can_parsers(CP)
+    packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
+
+    def update(clu13_lkas_button: int, bcm_lkas_button: int, frame: int):
+      msgs = [
+        packer.make_can_msg("CLU13", 0, {
+          "CF_Clu_LdwsLkasSW": clu13_lkas_button,
+        }),
+        packer.make_can_msg("BCM_PO_11", 0, {
+          "LDA_BTN": bcm_lkas_button,
+        }),
+      ]
+      can_parsers[Bus.pt].update([(frame, msgs)])
+      return car_state.update(can_parsers, toggles)[0]
+
+    update(0, 0, 1)
+    ret = update(0, 1, 2)
+    assert any(be.type == ButtonType.lkas and be.pressed for be in ret.buttonEvents)
+
+    ret = update(0, 0, 3)
     assert any(be.type == ButtonType.lkas and not be.pressed for be in ret.buttonEvents)
 
   def test_sonata_hybrid_ignores_noisy_alt_bus_clu13_lkas_button(self):

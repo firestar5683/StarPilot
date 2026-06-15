@@ -204,8 +204,12 @@ class CarState(CarStateBase):
     return button_events
 
   def create_lkas_button_events(self, cp: CANParser, prev_lda_button: int) -> list[structs.CarState.ButtonEvent]:
+    if self.CP.carFingerprint == CAR.HYUNDAI_SONATA_HYBRID and cp.ts_nanos["BCM_PO_11"]["LDA_BTN"] > 0:
+      # Route-proven: late-model Sonata Hybrid publishes a live LKAS button on BCM_PO_11
+      # while CLU13 is present on the main bus but does not carry the LKAS state.
+      self.lda_button = int(cp.vl["BCM_PO_11"]["LDA_BTN"])
     # Some classic HKG platforms publish the LKAS button on the cluster bus instead of BCM_PO_11.
-    if cp.ts_nanos["CLU13"]["CF_Clu_LdwsLkasSW"] > 0:
+    elif cp.ts_nanos["CLU13"]["CF_Clu_LdwsLkasSW"] > 0:
       self.lda_button = int(cp.vl["CLU13"]["CF_Clu_LdwsLkasSW"])
     elif cp.ts_nanos["BCM_PO_11"]["LDA_BTN"] > 0:
       self.lda_button = int(cp.vl["BCM_PO_11"]["LDA_BTN"])

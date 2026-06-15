@@ -67,8 +67,8 @@ NON_LINEAR_TORQUE_PARAMS = {
     "right": [2.4, 0.95, 0.28, 0.0],
   },
   CAR.CHEVROLET_VOLT: {
-    "left": [1.525, 1.05, 0.155, 0],
-    "right": [1.525, 0.95, 0.150, 0],
+    "left": [1.525, 1.05, 0.155, 0.0],
+    "right": [1.525, 0.95, 0.150, 0.0],
   },
 }
 
@@ -649,7 +649,7 @@ class CarInterface(CarInterfaceBase):
 
     # Exception for flashed cars, or cars whose camera was removed.
     missing_camera_msg = CAM_MSG not in fingerprint.get(CanBus.CAMERA, {})
-    if (ret.networkLocation == NetworkLocation.fwdCamera or candidate in CC_ONLY_CAR) and missing_camera_msg and candidate not in SDGM_CAR:
+    if (ret.networkLocation == NetworkLocation.fwdCamera or candidate in CC_ONLY_CAR) and missing_camera_msg and candidate not in (ASCM_INT | SDGM_CAR):
       ret.flags |= GMFlags.NO_CAMERA.value
       ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.FLAG_GM_NO_CAMERA.value
 
