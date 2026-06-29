@@ -333,6 +333,18 @@ def get_friction_brake_bus(CP):
 
   if CP.networkLocation == NetworkLocation.fwdCamera:
     if CP.carFingerprint in SDGM_CAR:
+      # With camera longitudinal the panda safety whitelists EBCMFrictionBrakeCmd (0x315) on
+      # the powertrain bus (GM_CAM_LONG_TX_MSGS), so the friction brake must go there to reach
+      # the EBCM and pass the TX check. Stock-long SDGM (e.g. Volt auto-hold) keeps it on the
+      # camera bus. Gate on the HW_CAM_LONG safety flag specifically -- the same bit the panda
+      # uses to select GM_CAM_LONG_TX_MSGS -- because an SDGM gas-interceptor install also sets
+      # openpilotLongitudinalControl but runs HW_CAM (not cam-long), where 0x315 must stay off
+      # the powertrain bus. Without this, cam-long SDGM brake commands hit the camera bus and
+      # the panda drops them, so openpilot can accelerate but cannot brake.
+      safety_cfg = getattr(CP, "safetyConfigs", ())
+      safety_param = safety_cfg[0].safetyParam if safety_cfg else 0
+      if safety_param & GMSafetyFlags.HW_CAM_LONG.value:
+        return CanBus.POWERTRAIN
       return CanBus.CAMERA
     return CanBus.POWERTRAIN
 
