@@ -283,6 +283,10 @@ class CAR(Platforms):
     [GMCarDocs("Buick LaCrosse 2017-19 ASCM Harness")],
     BUICK_LACROSSE.specs,
   )
+  BUICK_LACROSSE_ASCM_19US = GMPlatformConfig(
+    [GMCarDocs("Buick LaCrosse 2019 US ASCM Harness")],
+    BUICK_LACROSSE.specs,
+  )
   BUICK_REGAL = GMASCMPlatformConfig(
     [GMCarDocs("Buick Regal Essence 2018")],
     GMCarSpecs(mass=1714, wheelbase=2.83, steerRatio=14.4, centerToFrontRatio=0.4),
@@ -587,6 +591,7 @@ ASCM_INT = {
   CAR.CADILLAC_ESCALADE_ASCM,
   CAR.CADILLAC_ESCALADE_ESV_2019_ASCM,
   CAR.BUICK_LACROSSE_ASCM,
+  CAR.BUICK_LACROSSE_ASCM_19US,
 }
 
 STEER_THRESHOLD = 1.0
