@@ -344,6 +344,14 @@ def get_friction_brake_bus(CP):
       safety_cfg = getattr(CP, "safetyConfigs", ())
       safety_param = safety_cfg[0].safetyParam if safety_cfg else 0
       if safety_param & GMSafetyFlags.HW_CAM_LONG.value:
+        # A SASCM (SmartASCM) module, when installed, sits at the ASCM location and relays comma's
+        # 0x315 to the EBCM off its comma-feed leg, which is wired to the camera bus (bus2), NOT the
+        # powertrain bus. Route the friction brake to bus2 so the SASCM receives it (op_ctrl_mode)
+        # and forwards it to the EBCM; the panda cam-long whitelist allows 0x315 on both buses.
+        # Without a SASCM (0x2FF absent from the powertrain fingerprint) keep it on the powertrain
+        # bus, unchanged -- a bare SDGM camera car has no EBCM brake path either way.
+        if CP.flags & GMFlags.SASCM.value:
+          return CanBus.CAMERA
         return CanBus.POWERTRAIN
       return CanBus.CAMERA
     return CanBus.POWERTRAIN
