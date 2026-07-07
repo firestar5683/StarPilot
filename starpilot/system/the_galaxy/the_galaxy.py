@@ -618,14 +618,15 @@ def _build_ios_galaxy_pairing_payload(slug, token, local_base_url=""):
     payload["lanURL"] = local_base_url
     payload["localURL"] = local_base_url
   compact = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8")).decode("ascii").rstrip("=")
+  pairing_base_url = local_base_url or public_url
   return {
     "iosConnectUrl": f"galaxynav://galaxy/connect?code={quote(compact, safe='')}",
     "galaxyNavConnectUrl": f"galaxynav://galaxy/connect?code={quote(compact, safe='')}",
     "iosShortConnectUrl": f"galaxynav://galaxy/connect?shortCode={quote(short_code, safe='')}",
     "iosPairingCode": compact,
     "iosShortPairingCode": short_code,
-    "iosShortPairingUrl": f"{public_url}/api/galaxy/ios-pairing/{quote(short_code, safe='')}",
-    "iosPairingQRCodeUrl": f"{public_url}/api/galaxy/ios-pairing-qr",
+    "iosShortPairingUrl": f"{pairing_base_url}/api/galaxy/ios-pairing/{quote(short_code, safe='')}",
+    "iosPairingQRCodeUrl": f"{pairing_base_url}/api/galaxy/ios-pairing-qr",
     "pairingPayload": f"galaxy-vehicle-v1:{compact}",
     "portalURL": public_url,
     "localBaseURL": local_base_url,
