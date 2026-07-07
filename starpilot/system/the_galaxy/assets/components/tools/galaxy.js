@@ -5,6 +5,16 @@ import { Modal } from "/assets/components/modal.js"
 const state = reactive({
   paired: false,
   url: "",
+  iosConnectUrl: "",
+  iosPairingCode: "",
+  iosShortPairingCode: "",
+  iosShortPairingUrl: "",
+  iosPairingQRCodeUrl: "",
+  portalURL: "",
+  localBaseURL: "",
+  cookieName: "galaxy_session",
+  telemetryPath: "/api/galaxy/session",
+  vehicleTelemetryUrl: "",
   password: "",
   loading: true,
   submitting: false,
@@ -19,6 +29,16 @@ async function fetchStatus() {
     const data = await res.json()
     state.paired = data.paired
     state.url = data.url
+    state.iosConnectUrl = data.iosConnectUrl || ""
+    state.iosPairingCode = data.iosPairingCode || ""
+    state.iosShortPairingCode = data.iosShortPairingCode || ""
+    state.iosShortPairingUrl = data.iosShortPairingUrl || ""
+    state.iosPairingQRCodeUrl = data.iosPairingQRCodeUrl || ""
+    state.portalURL = data.portalURL || data.url || ""
+    state.localBaseURL = data.localBaseURL || ""
+    state.cookieName = data.cookieName || "galaxy_session"
+    state.telemetryPath = data.telemetryPath || "/api/galaxy/session"
+    state.vehicleTelemetryUrl = data.vehicleTelemetryUrl || ""
   } catch (e) {
     console.error("Failed to fetch Galaxy status:", e)
   }
@@ -44,6 +64,16 @@ async function pair() {
     if (res.ok) {
       state.paired = true
       state.url = data.url
+      state.iosConnectUrl = data.iosConnectUrl || state.iosConnectUrl
+      state.iosPairingCode = data.iosPairingCode || state.iosPairingCode
+      state.iosShortPairingCode = data.iosShortPairingCode || state.iosShortPairingCode
+      state.iosShortPairingUrl = data.iosShortPairingUrl || state.iosShortPairingUrl
+      state.iosPairingQRCodeUrl = data.iosPairingQRCodeUrl || state.iosPairingQRCodeUrl
+      state.portalURL = data.portalURL || data.url || state.portalURL
+      state.localBaseURL = data.localBaseURL || state.localBaseURL
+      state.cookieName = data.cookieName || state.cookieName
+      state.telemetryPath = data.telemetryPath || state.telemetryPath
+      state.vehicleTelemetryUrl = data.vehicleTelemetryUrl || state.vehicleTelemetryUrl
       state.password = ""
       // Clear the DOM input value directly (Arrow.js doesn't two-way bind)
       const input = document.querySelector(".galaxy-input")
@@ -67,6 +97,16 @@ async function unpair() {
     if (res.ok) {
       state.paired = false
       state.url = ""
+      state.iosConnectUrl = ""
+      state.iosPairingCode = ""
+      state.iosShortPairingCode = ""
+      state.iosShortPairingUrl = ""
+      state.iosPairingQRCodeUrl = ""
+      state.portalURL = ""
+      state.localBaseURL = ""
+      state.cookieName = "galaxy_session"
+      state.telemetryPath = "/api/galaxy/session"
+      state.vehicleTelemetryUrl = ""
       showSnackbar(data.message || "Unpaired!")
     } else {
       showSnackbar(data.error || "Unpairing failed.")
@@ -75,6 +115,29 @@ async function unpair() {
     showSnackbar("Network error — is the device reachable?")
   }
   state.submitting = false
+}
+
+async function copyText(text, label) {
+  if (!text) return
+  try {
+    if (navigator.clipboard?.writeText && window.isSecureContext) {
+      await navigator.clipboard.writeText(text)
+    } else {
+      const textarea = document.createElement("textarea")
+      textarea.value = text
+      textarea.setAttribute("readonly", "")
+      textarea.style.position = "fixed"
+      textarea.style.left = "-9999px"
+      textarea.style.opacity = "0"
+      document.body.appendChild(textarea)
+      textarea.select()
+      document.execCommand("copy")
+      textarea.remove()
+    }
+    showSnackbar(`${label} copied!`)
+  } catch (e) {
+    showSnackbar(`Failed to copy ${label.toLowerCase()}.`)
+  }
 }
 
 export function GalaxyPairing() {
@@ -114,6 +177,48 @@ export function GalaxyPairing() {
               <a class="galaxy-url" href="${state.url}" target="_blank" rel="noopener">
                 ${state.url}
               </a>
+              ${() => state.iosConnectUrl ? html`
+                <div class="galaxy-ios-box">
+                  <h3 class="galaxy-subtitle">Galaxy Nav setup</h3>
+                  <p class="galaxy-text">Open Galaxy Nav on your iPhone, then scan this code or enter the short code.</p>
+                  ${() => state.iosPairingQRCodeUrl ? html`
+                    <img
+                      class="galaxy-qr"
+                      src="${state.iosPairingQRCodeUrl}"
+                      alt="Galaxy Nav pairing QR code"
+                    />
+                  ` : ""}
+                  <label class="galaxy-code-label" for="galaxy-ios-short-code">Short Code</label>
+                  <div class="galaxy-copy-row">
+                    <input
+                      class="galaxy-code-input"
+                      id="galaxy-ios-short-code"
+                      readonly
+                      value="${() => state.iosShortPairingCode}"
+                    />
+                    <button
+                      class="galaxy-button galaxy-button-inline"
+                      @click="${() => copyText(state.iosShortPairingCode, "Galaxy Nav short code")}"
+                      disabled="${() => !state.iosShortPairingCode}">
+                      Copy
+                    </button>
+                  </div>
+                  <a class="galaxy-button galaxy-button-primary" href="${state.iosConnectUrl}">
+                    Open Galaxy Nav
+                  </a>
+                  <details class="galaxy-help">
+                    <summary>Where to find setup details</summary>
+                    <dl>
+                      <dt>Portal URL</dt>
+                      <dd>${() => state.portalURL || state.url || "Shown here after pairing."}</dd>
+                      <dt>LAN URL</dt>
+                      <dd>${() => state.localBaseURL || "Use Find Galaxy in the iPhone app while on the same Wi-Fi."}</dd>
+                      <dt>Galaxy Token</dt>
+                      <dd>Open App Keys and copy the session token.</dd>
+                    </dl>
+                  </details>
+                </div>
+              ` : ""}
               <button
                 class="galaxy-button galaxy-button-danger"
                 @click="${() => { state.showUnpairModal = true }}"
@@ -135,9 +240,6 @@ export function GalaxyPairing() {
 
       return html`
           <section class="galaxy-widget">
-            <div class="galaxy-status-badge galaxy-unpaired">
-              <i class="bi bi-x-circle-fill"></i> Not Paired
-            </div>
             <p class="galaxy-text">
               Pair your device with Galaxy to access The Galaxy remotely from anywhere.
               Set a password to secure your connection.

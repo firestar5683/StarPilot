@@ -6,6 +6,7 @@ import importlib
 import math
 import numbers
 import os
+import atexit
 import sys
 import tarfile
 
@@ -22,6 +23,7 @@ import secrets
 import selectors
 import shutil
 import signal
+import socket
 import subprocess
 import threading
 import time
@@ -115,6 +117,11 @@ _TESTING_GROUND_CUSTOM_RESERVED_INTERVAL_S = 15.0
 _TESTING_GROUND_CUSTOM_RESERVED_PM = None
 _TESTING_GROUND_CUSTOM_RESERVED_LOCK = threading.Lock()
 _TESTING_GROUND_CUSTOM_RESERVED_LAST_PUBLISH_MONO = 0.0
+_VEHICLE_TELEMETRY_CACHE_PATH = Path("/data/galaxy/vehicle_telemetry.json")
+_VEHICLE_TELEMETRY_SAMPLE_LOG_PATH = Path("/data/galaxy/vehicle_telemetry_samples.jsonl")
+_VEHICLE_TELEMETRY_SAMPLE_LOG_MAX_BYTES = 2 * 1024 * 1024
+_EGMP_EV9_USA_MAX_RANGE_KM = 450.6
+_EGMP_EV9_USA_BATTERY_KWH = 99.8
 PANDA_FIRMWARE_TOGGLE_KEYS = {"IgnoreIgnitionLine", "RemoteStartBootsComma", "HKGRemoteStartBootsComma"}
 PANDA_FIRMWARE_CONFIRMATION_FIELD = "confirmedPandaFirmwareFlash"
 _PANDA_FLASH_REBOOT_LOCK = threading.Lock()
@@ -552,6 +559,212 @@ def _build_galaxy_session_value(slug, token):
   if not slug or not token:
     return ""
   return quote(f"{slug}:{token}", safe="")
+
+def _build_ios_short_pairing_code(slug, token):
+  if not slug or not token:
+    return ""
+  digest = hashlib.sha256(f"{slug}:{token}:galaxynav".encode("utf-8")).digest()
+  check = base64.b32encode(digest).decode("ascii").rstrip("=")[:10]
+  return f"GN-{slug}-{check}"
+
+def _is_ios_short_pairing_code_valid(code, slug, token):
+  expected = _build_ios_short_pairing_code(slug, token)
+  return bool(code and expected and code.strip().upper() == expected.upper())
+
+def _galaxy_public_url(slug):
+  return f"https://galaxy.firestar.link/{slug}" if slug else ""
+
+def _galaxy_api_base_url():
+  return "https://galaxy.firestar.link"
+
+def _request_local_base_url():
+  if request is None:
+    return ""
+  try:
+    host = (request.host or "").split(":", 1)[0].lower()
+    if not host or host in ("galaxy.firestar.link", "www.galaxy.firestar.link"):
+      return ""
+    return request.host_url.rstrip("/")
+  except Exception:
+    return ""
+
+def _build_ios_galaxy_pairing_payload(slug, token, local_base_url=""):
+  public_url = _galaxy_public_url(slug)
+  api_base_url = _galaxy_api_base_url()
+  session_token = _build_galaxy_session_value(slug, token)
+  if not public_url or not session_token:
+    return {
+      "iosConnectUrl": "",
+      "iosPairingCode": "",
+      "iosShortPairingCode": "",
+      "iosShortPairingUrl": "",
+      "iosPairingQRCodeUrl": "",
+      "vehicleTelemetryUrl": "",
+    }
+
+  short_code = _build_ios_short_pairing_code(slug, token)
+  payload = {
+    "format": "galaxy-vehicle-v1",
+    "baseURL": api_base_url,
+    "portalURL": public_url,
+    "cookieName": GALAXY_COOKIE_NAME,
+    "sessionToken": session_token,
+    "appKey": session_token,
+    "token": session_token,
+    "telemetryPath": "/api/galaxy/session",
+  }
+  if local_base_url:
+    payload["localBaseURL"] = local_base_url
+    payload["lanURL"] = local_base_url
+    payload["localURL"] = local_base_url
+  compact = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8")).decode("ascii").rstrip("=")
+  return {
+    "iosConnectUrl": f"kiamaps://galaxy/connect?code={quote(compact, safe='')}",
+    "galaxyNavConnectUrl": f"galaxynav://galaxy/connect?code={quote(compact, safe='')}",
+    "iosShortConnectUrl": f"galaxynav://galaxy/connect?shortCode={quote(short_code, safe='')}",
+    "iosPairingCode": compact,
+    "iosShortPairingCode": short_code,
+    "iosShortPairingUrl": f"{public_url}/api/galaxy/ios-pairing/{quote(short_code, safe='')}",
+    "iosPairingQRCodeUrl": f"{public_url}/api/galaxy/ios-pairing-qr",
+    "pairingPayload": f"galaxy-vehicle-v1:{compact}",
+    "portalURL": public_url,
+    "localBaseURL": local_base_url,
+    "cookieName": GALAXY_COOKIE_NAME,
+    "telemetryPath": "/api/galaxy/session",
+    "vehicleTelemetryUrl": f"{api_base_url}/api/galaxy/session",
+  }
+
+_GALAXY_MDNS_SERVICE_TYPE = "_sp-galaxy._tcp.local."
+_GALAXY_MDNS_LOG_PATH = Path("/tmp/galaxy_mdns.log")
+_GALAXY_MDNS_LOCK = threading.Lock()
+_GALAXY_MDNS_ZEROCONF = None
+_GALAXY_MDNS_INFO = None
+_GALAXY_MDNS_RETRY_THREAD = None
+
+def _galaxy_mdns_log(message):
+  try:
+    line = f"{datetime.now(timezone.utc).isoformat()} {message}"
+    print(line, flush=True)
+    with open(_GALAXY_MDNS_LOG_PATH, "a") as f:
+      f.write(line + "\n")
+  except Exception:
+    pass
+
+def _local_ipv4_addresses():
+  addresses = []
+  try:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+      sock.connect(("8.8.8.8", 80))
+      candidate = sock.getsockname()[0]
+      if candidate and not candidate.startswith("127."):
+        addresses.append(candidate)
+  except Exception:
+    pass
+
+  try:
+    for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET, socket.SOCK_STREAM):
+      candidate = info[4][0]
+      if candidate and not candidate.startswith("127.") and candidate not in addresses:
+        addresses.append(candidate)
+  except Exception:
+    pass
+  return addresses
+
+def _galaxy_mdns_service_name():
+  hostname = socket.gethostname() or "comma"
+  safe_hostname = re.sub(r"[^A-Za-z0-9-]+", "-", hostname).strip("-") or "comma"
+  return f"StarPilot Galaxy {safe_hostname}.{_GALAXY_MDNS_SERVICE_TYPE}"
+
+def _stop_galaxy_mdns_advertiser():
+  global _GALAXY_MDNS_ZEROCONF, _GALAXY_MDNS_INFO
+  with _GALAXY_MDNS_LOCK:
+    if _GALAXY_MDNS_ZEROCONF is None:
+      return
+    try:
+      if _GALAXY_MDNS_INFO is not None:
+        _GALAXY_MDNS_ZEROCONF.unregister_service(_GALAXY_MDNS_INFO)
+    except Exception as e:
+      print(f"Galaxy mDNS unregister failed: {e}")
+    try:
+      _GALAXY_MDNS_ZEROCONF.close()
+    except Exception as e:
+      print(f"Galaxy mDNS close failed: {e}")
+    _GALAXY_MDNS_ZEROCONF = None
+    _GALAXY_MDNS_INFO = None
+
+def _start_galaxy_mdns_advertiser(port):
+  global _GALAXY_MDNS_ZEROCONF, _GALAXY_MDNS_INFO
+  with _GALAXY_MDNS_LOCK:
+    if _GALAXY_MDNS_ZEROCONF is not None:
+      return
+
+    try:
+      from zeroconf import ServiceInfo, Zeroconf
+    except Exception as e:
+      _galaxy_mdns_log(f"unavailable; install zeroconf to advertise Bonjour discovery ({e})")
+      return
+
+    addresses = []
+    for address in _local_ipv4_addresses():
+      try:
+        addresses.append(socket.inet_aton(address))
+      except OSError:
+        pass
+
+    if not addresses:
+      _galaxy_mdns_log("unavailable; no non-loopback IPv4 address found")
+      return
+
+    properties = {
+      "api": "galaxy",
+      "version": "1",
+      "statusPath": "/api/galaxy/status",
+      "sessionPath": "/api/galaxy/session",
+      "telemetryPath": "/api/galaxy/session",
+    }
+    service_name = _galaxy_mdns_service_name()
+    server_name = f"{re.sub(r'[^A-Za-z0-9-]+', '-', socket.gethostname() or 'comma').strip('-') or 'comma'}.local."
+    try:
+      info = ServiceInfo(
+        _GALAXY_MDNS_SERVICE_TYPE,
+        service_name,
+        addresses=addresses,
+        port=int(port),
+        properties=properties,
+        server=server_name,
+      )
+      zeroconf = Zeroconf()
+      try:
+        zeroconf.register_service(info, allow_name_change=True)
+      except TypeError:
+        zeroconf.register_service(info)
+      _GALAXY_MDNS_ZEROCONF = zeroconf
+      _GALAXY_MDNS_INFO = info
+      atexit.register(_stop_galaxy_mdns_advertiser)
+      _galaxy_mdns_log(f"advertised as {service_name} on port {port}")
+    except Exception as e:
+      _galaxy_mdns_log(f"advertise failed: {e}")
+
+def _ensure_galaxy_mdns_advertiser(port):
+  global _GALAXY_MDNS_RETRY_THREAD
+  with _GALAXY_MDNS_LOCK:
+    if _GALAXY_MDNS_ZEROCONF is not None or _GALAXY_MDNS_RETRY_THREAD is not None:
+      return
+
+    def retry_worker():
+      global _GALAXY_MDNS_RETRY_THREAD
+      try:
+        while _GALAXY_MDNS_ZEROCONF is None:
+          _start_galaxy_mdns_advertiser(port)
+          if _GALAXY_MDNS_ZEROCONF is not None:
+            return
+          time.sleep(30)
+      finally:
+        with _GALAXY_MDNS_LOCK:
+          _GALAXY_MDNS_RETRY_THREAD = None
+
+    _GALAXY_MDNS_RETRY_THREAD = threading.Thread(target=retry_worker, daemon=True)
+    _GALAXY_MDNS_RETRY_THREAD.start()
 
 
 def _parse_last_gps_position(raw_value):
@@ -2959,6 +3172,582 @@ def _build_vehicle_fault_status():
       "items": unavailable_items,
     }
 
+def _get_vehicle_telemetry_model_name():
+  cp_bytes = _safe_params_get_live_raw("CarParamsPersistent") or _safe_params_get("CarParamsPersistent")
+  car_fingerprint = ""
+  try:
+    if cp_bytes:
+      with car.CarParams.from_bytes(cp_bytes) as cp:
+        car_fingerprint = str(getattr(cp, "carFingerprint", "") or "").strip()
+  except Exception:
+    car_fingerprint = ""
+
+  model_name = str(_safe_params_get("CarModelName", encoding="utf-8", default="") or "").strip()
+  model_value = str(_safe_params_get("CarModel", encoding="utf-8", default="") or "").strip()
+  return {
+    "vehicleName": model_name or model_value or car_fingerprint or "EV9",
+    "carModel": model_value,
+    "carFingerprint": car_fingerprint,
+  }
+
+def _vehicle_telemetry_cache_load():
+  try:
+    with open(_VEHICLE_TELEMETRY_CACHE_PATH) as f:
+      payload = json.load(f)
+    if isinstance(payload, dict):
+      return payload
+  except Exception:
+    pass
+  return None
+
+def _vehicle_telemetry_cache_store(payload):
+  if not isinstance(payload, dict):
+    return
+  if payload.get("stateOfChargePercent") is None and payload.get("estimatedRangeKilometers") is None:
+    return
+  try:
+    _VEHICLE_TELEMETRY_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
+    tmp_path = _VEHICLE_TELEMETRY_CACHE_PATH.with_suffix(".tmp")
+    with open(tmp_path, "w") as f:
+      json.dump(payload, f, separators=(",", ":"), sort_keys=True)
+    os.replace(tmp_path, _VEHICLE_TELEMETRY_CACHE_PATH)
+  except Exception:
+    pass
+
+def _compact_can_frames(frames):
+  compact = {}
+  for frame in frames:
+    try:
+      if int(frame.get("src", -1)) != 1:
+        continue
+      key = f"0x{int(frame['address']):x}:{len(frame['data'])}"
+      compact[key] = bytes(frame["data"]).hex()
+    except Exception:
+      continue
+  return dict(sorted(compact.items()))
+
+def _vehicle_telemetry_sample_log_trim():
+  try:
+    if not _VEHICLE_TELEMETRY_SAMPLE_LOG_PATH.exists():
+      return
+    if _VEHICLE_TELEMETRY_SAMPLE_LOG_PATH.stat().st_size <= _VEHICLE_TELEMETRY_SAMPLE_LOG_MAX_BYTES:
+      return
+    with open(_VEHICLE_TELEMETRY_SAMPLE_LOG_PATH, "rb") as f:
+      f.seek(-_VEHICLE_TELEMETRY_SAMPLE_LOG_MAX_BYTES // 2, os.SEEK_END)
+      data = f.read()
+    first_newline = data.find(b"\n")
+    if first_newline >= 0:
+      data = data[first_newline + 1:]
+    tmp_path = _VEHICLE_TELEMETRY_SAMPLE_LOG_PATH.with_suffix(".tmp")
+    with open(tmp_path, "wb") as f:
+      f.write(data)
+    os.replace(tmp_path, _VEHICLE_TELEMETRY_SAMPLE_LOG_PATH)
+  except Exception:
+    pass
+
+def _vehicle_telemetry_sample_store(payload, frames, known_soc=None, note=""):
+  if not isinstance(payload, dict):
+    return
+  try:
+    sample = {
+      "capturedAt": time.time(),
+      "knownStateOfChargePercent": known_soc,
+      "note": str(note or "")[:200],
+      "stateOfChargePercent": payload.get("stateOfChargePercent"),
+      "distanceToEmptyKilometers": payload.get("distanceToEmptyKilometers"),
+      "estimatedRangeKilometers": payload.get("estimatedRangeKilometers"),
+      "chargingPowerKilowatts": payload.get("chargingPowerKilowatts"),
+      "isCharging": payload.get("isCharging"),
+      "isPluggedIn": payload.get("isPluggedIn"),
+      "source": payload.get("source"),
+      "status": payload.get("status"),
+      "parserVersion": (payload.get("rawValues") or {}).get("egmpParserVersion"),
+      "rawValues": payload.get("rawValues") or {},
+      "latestFrames": _compact_can_frames(frames),
+    }
+    _VEHICLE_TELEMETRY_SAMPLE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    with open(_VEHICLE_TELEMETRY_SAMPLE_LOG_PATH, "a") as f:
+      f.write(json.dumps(sample, separators=(",", ":"), sort_keys=True) + "\n")
+    _vehicle_telemetry_sample_log_trim()
+  except Exception:
+    pass
+
+def _vehicle_telemetry_sample_load(limit=50):
+  try:
+    with open(_VEHICLE_TELEMETRY_SAMPLE_LOG_PATH) as f:
+      lines = f.readlines()[-max(1, min(200, int(limit))):]
+    samples = []
+    for line in lines:
+      try:
+        samples.append(json.loads(line))
+      except Exception:
+        continue
+    return samples
+  except Exception:
+    return []
+
+def _read_uint_be(data, offset, length):
+  if offset < 0 or length <= 0 or offset + length > len(data):
+    return None
+  value = 0
+  for byte in data[offset:offset + length]:
+    value = (value << 8) | int(byte)
+  return value
+
+def _read_int_be(data, offset, length):
+  value = _read_uint_be(data, offset, length)
+  if value is None:
+    return None
+  sign_bit = 1 << (length * 8 - 1)
+  if value & sign_bit:
+    value -= 1 << (length * 8)
+  return value
+
+def _egmp_data_at(data, offset, length):
+  value = _read_uint_be(data, offset, length)
+  if value is not None:
+    return value
+  # Some UDS/ISOTP decoders keep the 0x62 + PID header; OVMS offsets refer to data bytes after that header.
+  return _read_uint_be(data, offset + 3, length)
+
+def _egmp_int_at(data, offset, length):
+  value = _read_int_be(data, offset, length)
+  if value is not None:
+    return value
+  return _read_int_be(data, offset + 3, length)
+
+def _normalize_uds_payload(raw_payload):
+  if not raw_payload:
+    return None, b""
+  payload = bytes(raw_payload)
+  if len(payload) >= 3 and payload[0] in (0x61, 0x62):
+    return (payload[1] << 8) | payload[2], payload[3:]
+  return None, payload
+
+def _capture_can_frames(sample_ms=10000):
+  frames = []
+  counts = {}
+  samples = {}
+  try:
+    sm = messaging.SubMaster(["can"], poll="can")
+    deadline = time.monotonic() + max(0.1, sample_ms / 1000.0)
+    while time.monotonic() < deadline:
+      sm.update(100)
+      if not sm.updated["can"]:
+        continue
+      for msg in sm["can"]:
+        data = bytes(msg.dat)
+        frame = {
+          "src": int(msg.src),
+          "address": int(msg.address),
+          "data": data,
+          "time": time.time(),
+        }
+        frames.append(frame)
+        key = (frame["src"], frame["address"], len(data))
+        counts[key] = counts.get(key, 0) + 1
+        samples.setdefault(key, data.hex())
+  except Exception as exception:
+    return [], {"error": str(exception)}
+
+  top = []
+  for key, count in sorted(counts.items(), key=lambda item: item[1], reverse=True)[:24]:
+    src, address, length = key
+    top.append({
+      "src": src,
+      "address": hex(address),
+      "length": length,
+      "count": count,
+      "sample": samples.get(key, ""),
+    })
+  return frames, {
+    "frameCount": len(frames),
+    "uniqueFrameCount": len(counts),
+    "topFrames": top,
+  }
+
+def _extract_uds_payloads(frames):
+  payloads = []
+  grouped = {}
+  for frame in frames:
+    grouped.setdefault((frame["src"], frame["address"]), []).append(frame["data"])
+
+  for (src, address), packets in grouped.items():
+    current = None
+    remaining = 0
+    for data in packets:
+      if not data:
+        continue
+      pci = data[0]
+      frame_type = pci >> 4
+      if frame_type == 0x0 and len(data) >= 2:
+        length = pci & 0x0F
+        payload = data[1:1 + length]
+        payloads.append({"src": src, "address": address, "payload": payload})
+      elif frame_type == 0x1 and len(data) >= 3:
+        total_length = ((pci & 0x0F) << 8) | data[1]
+        current = bytearray(data[2:])
+        remaining = max(0, total_length - len(current))
+        if remaining == 0:
+          payloads.append({"src": src, "address": address, "payload": bytes(current[:total_length])})
+          current = None
+      elif frame_type == 0x2 and current is not None:
+        chunk = data[1:]
+        current.extend(chunk)
+        remaining = max(0, remaining - len(chunk))
+        if remaining == 0:
+          payloads.append({"src": src, "address": address, "payload": bytes(current)})
+          current = None
+  return payloads
+
+def _latest_can_frame_map(frames):
+  latest = {}
+  for frame in frames:
+    latest[(int(frame["src"]), int(frame["address"]), len(frame["data"]))] = bytes(frame["data"])
+  return latest
+
+def _passive_candidate(data_by_addr, address, offset, scale=1.0, length=1, signed=False, little_endian=False):
+  data = data_by_addr.get(address)
+  if data is None or offset + length > len(data):
+    return None
+  if signed:
+    raw = int.from_bytes(data[offset:offset + length], byteorder="little" if little_endian else "big", signed=True)
+  elif little_endian:
+    raw = int.from_bytes(data[offset:offset + length], byteorder="little", signed=False)
+  else:
+    raw = _read_uint_be(data, offset, length)
+  if raw is None:
+    return None
+  return raw * scale
+
+def _consensus_value(candidates, tolerance):
+  valid = [(name, value) for name, value in candidates if isinstance(value, numbers.Number) and math.isfinite(float(value))]
+  for name, value in valid:
+    agreeing = [(candidate_name, candidate_value) for candidate_name, candidate_value in valid if abs(float(candidate_value) - float(value)) <= tolerance]
+    if len(agreeing) >= 2:
+      return round(sum(float(candidate_value) for _, candidate_value in agreeing) / len(agreeing), 2), [candidate_name for candidate_name, _ in agreeing]
+  return None, []
+
+def _candidate_debug_values(candidates):
+  values = []
+  for name, value in candidates:
+    if isinstance(value, numbers.Number) and math.isfinite(float(value)):
+      values.append(f"{name}={round(float(value), 2):g}")
+  return ",".join(values)
+
+def _display_integer_soc(value):
+  if not isinstance(value, numbers.Number) or not math.isfinite(float(value)):
+    return None
+  return float(math.floor(max(0.0, min(100.0, float(value))) + 1e-6))
+
+def _decode_egmp_passive_display_frames(frames):
+  latest = _latest_can_frame_map(frames)
+  data_by_addr = {}
+  for (src, address, length), data in latest.items():
+    if src == 1:
+      data_by_addr[address] = data
+
+  display_half_soc_candidates = [
+    ("0x320[7]/2", _passive_candidate(data_by_addr, 0x320, 7, 0.5)),
+    ("0x2fa[15]/2", _passive_candidate(data_by_addr, 0x2fa, 15, 0.5)),
+  ]
+  dte_kilometers = _passive_candidate(data_by_addr, 0x2b5, 8, 1.0, length=2, little_endian=True)
+  dte_miles = _passive_candidate(data_by_addr, 0x30a, 28, 1.0, length=2, little_endian=True)
+  valid_display_half_soc = [(name, value) for name, value in display_half_soc_candidates if value is not None and 0 <= value <= 100]
+  display_half_soc, display_half_soc_sources = _consensus_value(valid_display_half_soc, 0.25)
+  rejected_display_half_soc = None
+  if display_half_soc is None and len(valid_display_half_soc) == 1:
+    candidate_name, candidate_value = valid_display_half_soc[0]
+    # A lone zero from 0x320 has been observed while the EV9 is actually full.
+    # Require another SOC source before accepting a near-empty passive display value
+    # when any range counter still says the vehicle has meaningful range.
+    plausible_dte = (
+      (isinstance(dte_kilometers, numbers.Number) and dte_kilometers > 25)
+      or (isinstance(dte_miles, numbers.Number) and dte_miles > 15)
+    )
+    if float(candidate_value) <= 1.0 and plausible_dte:
+      rejected_display_half_soc = f"{candidate_name}={round(float(candidate_value), 2):g}"
+    else:
+      display_half_soc = round(float(candidate_value), 2)
+      display_half_soc_sources = [candidate_name]
+
+  power_candidates = [
+    ("0x405[0]/10", _passive_candidate(data_by_addr, 0x405, 0, 0.1)),
+    ("0x4f2[7]/10", _passive_candidate(data_by_addr, 0x4f2, 7, 0.1)),
+  ]
+  charge_power, power_sources = _consensus_value([(name, value) for name, value in power_candidates if value is not None and 0 <= value <= 25], 0.2)
+
+  if display_half_soc is not None:
+    soc = _display_integer_soc(display_half_soc)
+    soc_sources = display_half_soc_sources
+  else:
+    soc = None
+    soc_sources = []
+
+  legacy_dte_miles = _passive_candidate(data_by_addr, 0x4d8, 2, 1.0, length=2, little_endian=True)
+  charge_limit = _passive_candidate(data_by_addr, 0x414, 0, 1.0)
+
+  decoded = {}
+  raw_values = {}
+  if soc is not None:
+    decoded["stateOfChargePercent"] = soc
+    raw_values["passiveSocSources"] = ",".join(soc_sources)
+  display_half_soc_debug = _candidate_debug_values(display_half_soc_candidates)
+  if display_half_soc_debug:
+    raw_values["passiveDisplayHalfSocCandidates"] = display_half_soc_debug
+  if rejected_display_half_soc:
+    raw_values["passiveDisplayHalfSocRejected"] = rejected_display_half_soc
+  if display_half_soc is not None:
+    raw_values["passiveDisplayHalfSocConsensus"] = f"{display_half_soc:g}"
+  if dte_kilometers is not None and 50 < dte_kilometers < 900:
+    decoded["distanceToEmptyKilometers"] = round(float(dte_kilometers), 1)
+    decoded["estimatedRangeKilometers"] = decoded["distanceToEmptyKilometers"]
+    raw_values["passiveDteSource"] = "0x2b5[8:10] little-endian kilometers"
+    raw_values["passiveDteKilometers"] = str(int(dte_kilometers))
+  elif dte_miles is not None and 0 < dte_miles < 600:
+    raw_values["passiveRejectedDteMiles0x30a"] = str(int(dte_miles))
+  if legacy_dte_miles is not None and 0 < legacy_dte_miles < 600:
+    raw_values["passiveLegacyDteMiles0x4d8"] = str(int(legacy_dte_miles))
+  if charge_limit is not None and 50 <= charge_limit <= 100:
+    decoded["chargeLimitPercent"] = float(charge_limit)
+    raw_values["passiveChargeLimitSource"] = "0x414[0] tentative percent"
+  if charge_power is not None:
+    decoded["chargingPowerKilowatts"] = charge_power
+    decoded["isCharging"] = charge_power > 0.2
+    decoded["isPluggedIn"] = charge_power > 0.2
+    if charge_power > 25:
+      decoded["activeConnector"] = "nacsDC"
+      decoded["plugPowerType"] = "dc"
+    elif charge_power > 0.2:
+      decoded["activeConnector"] = "nacsAC"
+      decoded["plugPowerType"] = "ac"
+    raw_values["passiveChargePowerSources"] = ",".join(power_sources)
+  if decoded:
+    raw_values["egmpPassiveDecoder"] = "display_half_soc"
+
+  return decoded, raw_values
+
+def _decode_egmp_bms_payload(pid, data):
+  decoded = {}
+  raw_values = {}
+
+  if pid == 0x0101:
+    bms_soc_raw = _egmp_data_at(data, 4, 1)
+    if bms_soc_raw is not None and 0 <= bms_soc_raw <= 200:
+      decoded["bmsStateOfChargePercent"] = round(bms_soc_raw / 2.0, 1)
+      raw_values["bmsSocRaw0101"] = str(bms_soc_raw)
+
+    current_raw = _egmp_int_at(data, 10, 2)
+    if current_raw is not None:
+      decoded["currentAmps"] = round(current_raw / 10.0, 1)
+      raw_values["batteryCurrentRaw0101"] = str(current_raw)
+
+    voltage_raw = _egmp_data_at(data, 12, 2)
+    if voltage_raw is not None:
+      decoded["voltageVolts"] = round(voltage_raw / 10.0, 1)
+      raw_values["batteryVoltageRaw0101"] = str(voltage_raw)
+
+    relay_raw = _egmp_data_at(data, 9, 1)
+    if relay_raw is not None:
+      decoded["bmsRelayClosed"] = bool(relay_raw & 0x01)
+      raw_values["bmsRelayRaw0101"] = str(relay_raw)
+
+    ignition_raw = _egmp_data_at(data, 50, 1)
+    if ignition_raw is not None:
+      decoded["bmsIgnitionOn"] = bool(ignition_raw & 0x04)
+      raw_values["bmsIgnitionRaw0101"] = str(ignition_raw)
+
+    available_power_raw = _egmp_data_at(data, 5, 2)
+    if available_power_raw is not None:
+      decoded["availableChargePowerWatts"] = available_power_raw
+      raw_values["availablePowerRaw0101"] = str(available_power_raw)
+
+  elif pid == 0x0105:
+    display_soc_raw = _egmp_data_at(data, 31, 1)
+    if display_soc_raw is not None and 0 <= display_soc_raw <= 200:
+      decoded["stateOfChargePercent"] = round(display_soc_raw / 2.0, 1)
+      raw_values["displaySocRaw0105"] = str(display_soc_raw)
+
+    max_temp = _egmp_int_at(data, 23, 1)
+    if max_temp is not None:
+      decoded["batteryTemperatureCelsius"] = max_temp
+      raw_values["batteryTempRaw0105"] = str(max_temp)
+
+  elif pid == 0x0100:
+    speed_raw = _egmp_data_at(data, 6, 2)
+    if speed_raw is not None and speed_raw < 4000:
+      decoded["speedMetersPerSecond"] = round((speed_raw / 10.0) / 3.6, 3)
+      raw_values["speedRaw0100"] = str(speed_raw)
+
+  return decoded, raw_values
+
+def _build_egmp_can_telemetry_payload(model_info, position, known_soc=None, sample_note=""):
+  frames, can_summary = _capture_can_frames()
+  decoded = {}
+  raw_values = {
+    "egmpParserVersion": "2026.07.07.2",
+    "batteryCapacityKilowattHours": str(_EGMP_EV9_USA_BATTERY_KWH),
+    "maximumDistanceKilometers": str(_EGMP_EV9_USA_MAX_RANGE_KM),
+  }
+
+  for entry in _extract_uds_payloads(frames):
+    pid, data = _normalize_uds_payload(entry["payload"])
+    if pid not in (0x0100, 0x0101, 0x0105):
+      continue
+    partial, raw = _decode_egmp_bms_payload(pid, data)
+    decoded.update({key: value for key, value in partial.items() if value is not None})
+    raw_values.update(raw)
+    raw_values[f"udsSource{pid:04x}"] = f"{entry['src']}:{hex(entry['address'])}"
+
+  passive_decoded, passive_raw = _decode_egmp_passive_display_frames(frames)
+  passive_charging_soc = passive_decoded.get("stateOfChargePercent")
+  passive_charge_power = passive_decoded.get("chargingPowerKilowatts")
+  passive_should_override_soc = (
+    isinstance(passive_charging_soc, numbers.Number)
+    and isinstance(passive_charge_power, numbers.Number)
+    and passive_charge_power > 0.2
+    and bool(passive_raw.get("passiveChargingDisplaySocCandidates"))
+    and (
+      decoded.get("stateOfChargePercent") is None
+      or abs(float(passive_charging_soc) - float(decoded.get("stateOfChargePercent"))) <= 2.0
+    )
+  )
+  for key, value in passive_decoded.items():
+    if key == "stateOfChargePercent" and passive_should_override_soc:
+      decoded[key] = value
+    else:
+      decoded.setdefault(key, value)
+  raw_values.update(passive_raw)
+
+  if decoded.get("stateOfChargePercent") is None and decoded.get("bmsStateOfChargePercent") is not None:
+    decoded["stateOfChargePercent"] = decoded["bmsStateOfChargePercent"]
+
+  if decoded.get("voltageVolts") is not None and decoded.get("currentAmps") is not None:
+    decoded["powerKilowatts"] = round(decoded["voltageVolts"] * decoded["currentAmps"] / 1000.0, 2)
+
+  soc = decoded.get("stateOfChargePercent")
+  if isinstance(soc, numbers.Number):
+    soc = max(0.0, min(100.0, float(soc)))
+    decoded["stateOfChargePercent"] = round(soc, 1)
+    decoded.setdefault("estimatedRangeKilometers", round(_EGMP_EV9_USA_MAX_RANGE_KM * soc / 100.0, 1))
+
+  charge_power = decoded.get("chargingPowerKilowatts")
+  if isinstance(soc, numbers.Number) and isinstance(charge_power, numbers.Number) and charge_power > 0.1:
+    remaining_kwh = max(0.0, _EGMP_EV9_USA_BATTERY_KWH * (100.0 - float(soc)) / 100.0)
+    decoded.setdefault("minutesToFull", int(round(remaining_kwh / float(charge_power) * 60.0)))
+
+  charging = None
+  power = decoded.get("powerKilowatts")
+  if isinstance(power, numbers.Number):
+    # OVMS treats negative battery current/power as external charging.
+    charging = power < -0.5
+  if charging is None and "availableChargePowerWatts" in decoded:
+    charging = decoded["availableChargePowerWatts"] > 0
+  if charging is not None:
+    decoded["isCharging"] = bool(charging)
+    decoded["isPluggedIn"] = bool(charging) or decoded.get("availableChargePowerWatts", 0) > 0
+
+  has_maps_data = decoded.get("stateOfChargePercent") is not None or decoded.get("estimatedRangeKilometers") is not None
+  payload = {
+    **model_info,
+    "source": "StarPilot Galaxy E-GMP CAN",
+    "available": bool(has_maps_data),
+    "status": "ok" if has_maps_data else "waiting_for_egmp_bms_response",
+    "message": "Decoded E-GMP BMS telemetry from CAN." if has_maps_data else "Raw CAN is present, but no E-GMP BMS SOC/range payload has been observed yet.",
+    "updatedAt": time.time(),
+    "location": position,
+    "maximumBatteryCapacityKilowattHours": _EGMP_EV9_USA_BATTERY_KWH,
+    "canFrameCount": can_summary.get("frameCount", 0),
+    "canUniqueFrameCount": can_summary.get("uniqueFrameCount", 0),
+    "canTopFrames": can_summary.get("topFrames", []),
+    "rawValues": raw_values,
+    **decoded,
+  }
+
+  if has_maps_data:
+    _vehicle_telemetry_cache_store(payload)
+    _vehicle_telemetry_sample_store(payload, frames, known_soc=known_soc, note=sample_note)
+    return payload, 200
+
+  cached = _vehicle_telemetry_cache_load()
+  if cached:
+    cached = dict(cached)
+    cached.update({
+      "available": True,
+      "status": "stale_cache",
+      "message": "Using last decoded E-GMP CAN telemetry while waiting for a fresh BMS response.",
+      "canFrameCount": can_summary.get("frameCount", 0),
+      "canUniqueFrameCount": can_summary.get("uniqueFrameCount", 0),
+      "canTopFrames": can_summary.get("topFrames", []),
+      "location": position,
+    })
+    return cached, 200
+
+  return payload, 503
+
+def _build_vehicle_telemetry_payload(known_soc=None, sample_note=""):
+  model_info = _get_vehicle_telemetry_model_name()
+  position = _get_navigation_last_position()
+
+  try:
+    can_payload, can_status_code = _build_egmp_can_telemetry_payload(model_info, position, known_soc=known_soc, sample_note=sample_note)
+    if can_status_code == 200:
+      return can_payload, can_status_code
+
+    sm = messaging.SubMaster(["carState"], poll="carState")
+    sm.update(100)
+    has_live_car_state = sm.seen["carState"] and sm.alive["carState"] and sm.valid["carState"]
+    if not has_live_car_state:
+      can_payload.update({
+        **model_info,
+        "source": "StarPilot Galaxy E-GMP CAN",
+        "available": False,
+        "status": can_payload.get("status") or "waiting_for_live_car_state",
+        "message": can_payload.get("message") or "Waiting for live CAN-backed carState.",
+        "updatedAt": time.time(),
+        "location": position,
+      })
+      return can_payload, 503
+
+    car_state = sm["carState"]
+    fuel_gauge = _safe_float(getattr(car_state, "fuelGauge", float("nan")), float("nan"))
+    has_soc = math.isfinite(fuel_gauge) and 0.0 <= fuel_gauge <= 1.0
+    state_of_charge_percent = round(max(0.0, min(100.0, fuel_gauge * 100.0)), 1) if has_soc else None
+    can_valid = bool(getattr(car_state, "canValid", False))
+
+    payload = {
+      **model_info,
+      "source": "StarPilot Galaxy CAN",
+      "available": True,
+      "status": "ok" if has_soc else "missing_soc",
+      "message": "Live CAN-backed carState available." if has_soc else "Live carState is available, but fuelGauge is not populated.",
+      "updatedAt": time.time(),
+      "stateOfChargePercent": state_of_charge_percent,
+      "fuelGauge": round(fuel_gauge, 4) if has_soc else None,
+      "estimatedRangeKilometers": None,
+      "isCharging": bool(getattr(car_state, "charging", False)),
+      "isPluggedIn": bool(getattr(car_state, "charging", False)) if bool(getattr(car_state, "charging", False)) else None,
+      "speedMetersPerSecond": round(_safe_float(getattr(car_state, "vEgo", 0.0), 0.0), 3),
+      "standstill": bool(getattr(car_state, "standstill", False)),
+      "canValid": can_valid,
+      "canTimeout": bool(getattr(car_state, "canTimeout", False)),
+      "canErrorCounter": int(getattr(car_state, "canErrorCounter", 0) or 0),
+      "location": position,
+    }
+    _vehicle_telemetry_cache_store(payload)
+    _vehicle_telemetry_sample_store(payload, [], known_soc=known_soc, note=sample_note)
+    return payload, 200
+  except Exception as exception:
+    return {
+      **model_info,
+      "source": "StarPilot Galaxy CAN",
+      "available": False,
+      "status": "error",
+      "message": str(exception),
+      "updatedAt": time.time(),
+      "location": position,
+    }, 500
+
 def _get_starpilot_toggles_snapshot():
   raw_toggles = _safe_params_get_live_raw("StarPilotToggles")
   if not raw_toggles:
@@ -3779,6 +4568,8 @@ def _set_lateral_maneuver_mode(enabled):
   return _save_lateral_maneuver_status(status)
 
 def setup(app):
+  _ensure_galaxy_mdns_advertiser(8083 if not _is_comma_device_runtime() else 8082)
+
   model_status_debug = {
     "last_signature": None,
     "last_log_time": 0.0,
@@ -6115,9 +6906,12 @@ def setup(app):
   def galaxy_status():
     paired = len(_read_galaxy_text(GALAXY_AUTH_FILE)) == 64
     slug = _read_galaxy_text(GALAXY_SLUG_FILE)
+    token = _read_galaxy_text(GALAXY_SESSION_FILE)
+    ios_payload = _build_ios_galaxy_pairing_payload(slug, token, _request_local_base_url())
     return jsonify({
       "paired": paired,
-      "url": f"https://galaxy.firestar.link/{slug}" if slug else "",
+      "url": _galaxy_public_url(slug),
+      **ios_payload,
     })
 
   @app.route("/api/galaxy/session", methods=["GET"])
@@ -6125,12 +6919,74 @@ def setup(app):
     slug = _read_galaxy_text(GALAXY_SLUG_FILE)
     token = _read_galaxy_text(GALAXY_SESSION_FILE)
     paired = len(_read_galaxy_text(GALAXY_AUTH_FILE)) == 64 and bool(slug and token)
+    ios_payload = _build_ios_galaxy_pairing_payload(slug, token, _request_local_base_url())
+    vehicle_telemetry, _ = _build_vehicle_telemetry_payload()
     return jsonify({
       "appUrl": GALAXY_PLAY_STORE_URL,
       "cookieName": GALAXY_COOKIE_NAME,
       "paired": paired,
       "sessionToken": _build_galaxy_session_value(slug, token),
+      "vehicleTelemetry": vehicle_telemetry,
+      **ios_payload,
     })
+
+  @app.route("/api/galaxy/ios-pairing/<short_code>", methods=["GET"])
+  def galaxy_ios_pairing(short_code):
+    slug = _read_galaxy_text(GALAXY_SLUG_FILE)
+    token = _read_galaxy_text(GALAXY_SESSION_FILE)
+    if not _is_ios_short_pairing_code_valid(short_code, slug, token):
+      return jsonify({"error": "Pairing code not found."}), 404
+    return jsonify(_build_ios_galaxy_pairing_payload(slug, token, _request_local_base_url()))
+
+  @app.route("/api/galaxy/ios-pairing-qr", methods=["GET"])
+  def galaxy_ios_pairing_qr():
+    slug = _read_galaxy_text(GALAXY_SLUG_FILE)
+    token = _read_galaxy_text(GALAXY_SESSION_FILE)
+    ios_payload = _build_ios_galaxy_pairing_payload(slug, token, _request_local_base_url())
+    qr_value = ios_payload.get("galaxyNavConnectUrl") or ios_payload.get("iosConnectUrl") or ""
+    if not qr_value:
+      return jsonify({"error": "Pair Galaxy first."}), 404
+    try:
+      import qrcode
+      qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=3)
+      qr.add_data(qr_value)
+      qr.make(fit=True)
+      image = qr.make_image(fill_color="black", back_color="white").convert("RGB")
+      buffer = BytesIO()
+      image.save(buffer, format="PNG")
+      buffer.seek(0)
+      return send_file(buffer, mimetype="image/png")
+    except Exception as e:
+      return jsonify({"error": f"QR code unavailable: {e}"}), 500
+
+  @app.route("/api/vehicle/telemetry", methods=["GET"])
+  def vehicle_telemetry():
+    payload, status_code = _build_vehicle_telemetry_payload()
+    return jsonify(payload), status_code
+
+  @app.route("/api/vehicle/telemetry/samples", methods=["GET"])
+  def vehicle_telemetry_samples():
+    try:
+      limit = int(request.args.get("limit", 50))
+    except Exception:
+      limit = 50
+    return jsonify({
+      "samples": _vehicle_telemetry_sample_load(limit),
+    })
+
+  @app.route("/api/vehicle/telemetry/known", methods=["POST"])
+  def vehicle_telemetry_known_sample():
+    data = request.get_json(silent=True) or {}
+    try:
+      known_soc = float(data.get("stateOfChargePercent"))
+    except Exception:
+      return jsonify({"error": "stateOfChargePercent is required"}), 400
+    note = str(data.get("note") or "")
+    payload, status_code = _build_vehicle_telemetry_payload(known_soc=known_soc, sample_note=note)
+    return jsonify({
+      "knownStateOfChargePercent": known_soc,
+      "sample": payload,
+    }), status_code
 
   @app.route("/api/galaxy/pair", methods=["POST"])
   def galaxy_pair():
@@ -6154,6 +7010,7 @@ def setup(app):
     return jsonify({
       "message": "Pairing successful!",
       "url": f"https://galaxy.firestar.link/{slug}",
+      **_build_ios_galaxy_pairing_payload(slug, _read_galaxy_text(GALAXY_SESSION_FILE), _request_local_base_url()),
     })
 
   @app.route("/api/galaxy/unpair", methods=["POST"])
@@ -7249,6 +8106,7 @@ def main():
     print("\"The Galaxy\" is not running on a comma device, enabling debug mode")
 
   app.secret_key = secrets.token_hex(32)
+  _ensure_galaxy_mdns_advertiser(port)
   app.run(host=host, port=port, debug=debug, use_reloader=use_reloader)
 
 if __name__ == "__main__":

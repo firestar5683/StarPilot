@@ -129,6 +129,111 @@
   background-color: rgba(224, 85, 119, 0.35);
 }
 
+.galaxy-button-primary {
+  background-color: var(--main-fg);
+  color: var(--main-bg);
+  text-decoration: none;
+}
+
+.galaxy-ios-box {
+  align-items: stretch;
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-sm);
+  width: 100%;
+}
+
+.galaxy-subtitle {
+  color: var(--text-color);
+  font-size: var(--font-size-lg);
+  font-weight: var(--font-weight-bold);
+  margin: 0;
+  text-align: center;
+}
+
+.galaxy-qr {
+  align-self: center;
+  background: #fff;
+  border-radius: var(--border-radius-lg);
+  max-width: 14rem;
+  padding: var(--padding-sm);
+  width: min(100%, 14rem);
+}
+
+.galaxy-copy-row {
+  display: flex;
+  gap: var(--gap-sm);
+  width: 100%;
+}
+
+.galaxy-code-label {
+  color: var(--text-muted);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-demi-bold);
+}
+
+.galaxy-code-input {
+  background-color: var(--input-bg);
+  border: var(--border-style-input);
+  border-radius: var(--border-radius-lg);
+  box-sizing: border-box;
+  color: var(--text-color);
+  flex: 1;
+  font-family: var(--font-mono, monospace);
+  font-size: var(--font-size-base);
+  padding: var(--padding-sm) var(--padding-base);
+  width: 100%;
+}
+
+.galaxy-code {
+  background-color: var(--input-bg);
+  border: var(--border-style-input);
+  border-radius: var(--border-radius-lg);
+  box-sizing: border-box;
+  color: var(--text-color);
+  font-family: var(--font-mono, monospace);
+  min-height: 5rem;
+  padding: var(--padding-sm) var(--padding-base);
+  resize: vertical;
+  width: 100%;
+  word-break: break-all;
+}
+
+.galaxy-button-inline {
+  width: auto;
+}
+
+.galaxy-help {
+  background-color: var(--input-bg);
+  border-radius: var(--border-radius-lg);
+  color: var(--text-color);
+  padding: var(--padding-sm) var(--padding-base);
+  width: 100%;
+}
+
+.galaxy-help summary {
+  color: var(--text-color);
+  cursor: pointer;
+  font-weight: var(--font-weight-demi-bold);
+}
+
+.galaxy-help dl {
+  display: grid;
+  gap: var(--gap-xs);
+  margin: var(--gap-sm) 0 0;
+}
+
+.galaxy-help dt {
+  color: var(--text-color);
+  font-weight: var(--font-weight-demi-bold);
+}
+
+.galaxy-help dd {
+  color: var(--text-muted);
+  margin: 0 0 var(--gap-sm);
+  overflow-wrap: anywhere;
+}
+
 /* ――― Mobile ――― */
 @media only screen and (max-width: 768px) and (orientation: portrait) {
   .galaxy-wrapper {

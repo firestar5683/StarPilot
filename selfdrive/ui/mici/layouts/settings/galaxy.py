@@ -1,7 +1,11 @@
+import base64
 import hashlib
+import json
 import secrets
+import socket
 import string
 from pathlib import Path
+from urllib.parse import quote
 
 import numpy as np
 import pyray as rl
@@ -15,6 +19,53 @@ from openpilot.system.hardware.hw import Paths
 from openpilot.system.ui.lib.application import FontWeight, gui_app
 from openpilot.system.ui.widgets.label import UnifiedLabel
 from openpilot.system.ui.widgets.nav_widget import NavWidget
+
+
+GALAXY_COOKIE_NAME = "galaxy_session"
+GALAXY_PUBLIC_BASE_URL = "https://galaxy.firestar.link"
+
+
+def _build_galaxy_session_value(slug: str, token: str) -> str:
+  if not slug or not token:
+    return ""
+  return quote(f"{slug}:{token}", safe="")
+
+
+def _local_base_url() -> str:
+  try:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+      sock.connect(("8.8.8.8", 80))
+      address = sock.getsockname()[0]
+      if address and not address.startswith("127."):
+        return f"http://{address}:8082"
+  except Exception:
+    pass
+  return ""
+
+
+def _galaxy_pairing_payload_value(slug: str, token: str) -> str:
+  session_token = _build_galaxy_session_value(slug, token)
+  if not slug or not session_token:
+    return ""
+
+  payload = {
+    "format": "galaxy-vehicle-v1",
+    "baseURL": GALAXY_PUBLIC_BASE_URL,
+    "portalURL": f"{GALAXY_PUBLIC_BASE_URL}/{slug}",
+    "cookieName": GALAXY_COOKIE_NAME,
+    "sessionToken": session_token,
+    "appKey": session_token,
+    "token": session_token,
+    "telemetryPath": "/api/galaxy/session",
+  }
+  local_base_url = _local_base_url()
+  if local_base_url:
+    payload["localBaseURL"] = local_base_url
+    payload["lanURL"] = local_base_url
+    payload["localURL"] = local_base_url
+
+  encoded = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8")).decode("ascii").rstrip("=")
+  return f"galaxy-vehicle-v1:{encoded}"
 
 
 class GalaxyQRDialog(NavWidget):
@@ -92,12 +143,20 @@ class GalaxyBigButton(BigButton):
     except Exception:
       return ""
 
+  def _get_session_token(self) -> str:
+    try:
+      return self._session_path.read_text(encoding="utf-8").strip()
+    except Exception:
+      return ""
+
   def _show_qr(self):
     slug = self._get_slug()
-    if not slug:
+    token = self._get_session_token()
+    pairing_value = _galaxy_pairing_payload_value(slug, token)
+    if not pairing_value:
       gui_app.push_widget(BigDialog("", "Galaxy is not paired yet."))
       return
-    gui_app.push_widget(GalaxyQRDialog(f"https://galaxy.firestar.link/{slug}"))
+    gui_app.push_widget(GalaxyQRDialog(pairing_value))
 
   def _pair_with_password(self, password: str):
     clean_password = str(password or "").strip()
