@@ -403,29 +403,12 @@ export function NavKeys() {
         </button>
       </div>
 
-      <label class="navkeys-label" for="galaxy-ios-url">Galaxy Nav Setup URL</label>
-      <div class="navkeys-row">
-        <input
-          class="navkeys-input navkeys-token-input"
-          id="galaxy-ios-url"
-          placeholder="${() => state.galaxyPaired ? "Galaxy Nav setup URL unavailable..." : "Pair Galaxy to create a Galaxy Nav setup URL..."}"
-          readonly
-          value="${() => state.galaxyIOSConnectUrl}"
-        />
-        <a
-          class="${() => `navkeys-btn navkeys-link-btn ${state.galaxyIOSConnectUrl ? "" : "disabled"}`}"
-          href="${() => state.galaxyIOSConnectUrl || "#"}">
-          <i class="bi bi-box-arrow-up-right"></i>
-          <span>Open</span>
-        </a>
-        <button
-          class="navkeys-btn navkeys-copy-btn"
-          @click="${() => util.copyText(state.galaxyIOSConnectUrl).then(() => showMessage("message", "Galaxy Nav URL copied!", "app")).catch(() => showMessage("error", "Copy failed...", "app"))}"
-          disabled="${() => !state.galaxyIOSConnectUrl}">
-          <i class="bi bi-copy"></i>
-          <span>Copy</span>
-        </button>
-      </div>
+      <a
+        class="${() => `navkeys-btn navkeys-link-btn ${state.galaxyIOSConnectUrl ? "" : "disabled"}`}"
+        href="${() => state.galaxyIOSConnectUrl || "#"}">
+        <i class="bi bi-box-arrow-up-right"></i>
+        <span>Pair with Galaxy Nav</span>
+      </a>
 
       <label class="navkeys-label" for="galaxy-ios-short-code">Galaxy Nav Short Code</label>
       <div class="navkeys-row">
@@ -439,23 +422,6 @@ export function NavKeys() {
           class="navkeys-btn navkeys-copy-btn"
           @click="${() => util.copyText(state.galaxyIOSShortPairingCode).then(() => showMessage("message", "Galaxy Nav short code copied!", "app")).catch(() => showMessage("error", "Copy failed...", "app"))}"
           disabled="${() => !state.galaxyIOSShortPairingCode}">
-          <i class="bi bi-copy"></i>
-          <span>Copy</span>
-        </button>
-      </div>
-
-      <label class="navkeys-label" for="galaxy-ios-code">Galaxy Nav Pairing Code</label>
-      <div class="navkeys-row">
-        <input
-          class="navkeys-input navkeys-token-input"
-          id="galaxy-ios-code"
-          readonly
-          value="${() => state.galaxyIOSPairingCode}"
-        />
-        <button
-          class="navkeys-btn navkeys-copy-btn"
-          @click="${() => util.copyText(state.galaxyIOSPairingCode).then(() => showMessage("message", "Galaxy Nav code copied!", "app")).catch(() => showMessage("error", "Copy failed...", "app"))}"
-          disabled="${() => !state.galaxyIOSPairingCode}">
           <i class="bi bi-copy"></i>
           <span>Copy</span>
         </button>

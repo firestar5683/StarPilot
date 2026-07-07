@@ -179,32 +179,8 @@ export function GalaxyPairing() {
               </a>
               ${() => state.iosConnectUrl ? html`
                 <div class="galaxy-ios-box">
-                  <h3 class="galaxy-subtitle">Galaxy Nav setup</h3>
-                  <p class="galaxy-text">Open Galaxy Nav on your iPhone, then scan this code or enter the short code.</p>
-                  ${() => state.iosPairingQRCodeUrl ? html`
-                    <img
-                      class="galaxy-qr"
-                      src="${state.iosPairingQRCodeUrl}"
-                      alt="Galaxy Nav pairing QR code"
-                    />
-                  ` : ""}
-                  <label class="galaxy-code-label" for="galaxy-ios-short-code">Short Code</label>
-                  <div class="galaxy-copy-row">
-                    <input
-                      class="galaxy-code-input"
-                      id="galaxy-ios-short-code"
-                      readonly
-                      value="${() => state.iosShortPairingCode}"
-                    />
-                    <button
-                      class="galaxy-button galaxy-button-inline"
-                      @click="${() => copyText(state.iosShortPairingCode, "Galaxy Nav short code")}"
-                      disabled="${() => !state.iosShortPairingCode}">
-                      Copy
-                    </button>
-                  </div>
                   <a class="galaxy-button galaxy-button-primary" href="${state.iosConnectUrl}">
-                    Open Galaxy Nav
+                    Pair with Galaxy Nav
                   </a>
                   <details class="galaxy-help">
                     <summary>Where to find setup details</summary>

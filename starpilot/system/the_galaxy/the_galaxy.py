@@ -564,12 +564,12 @@ def _build_ios_short_pairing_code(slug, token):
   if not slug or not token:
     return ""
   digest = hashlib.sha256(f"{slug}:{token}:galaxynav".encode("utf-8")).digest()
-  check = base64.b32encode(digest).decode("ascii").rstrip("=")[:10]
-  return f"GN-{slug}-{check}"
+  return f"{int.from_bytes(digest[:4], 'big') % 1_000_000:06d}"
 
 def _is_ios_short_pairing_code_valid(code, slug, token):
   expected = _build_ios_short_pairing_code(slug, token)
-  return bool(code and expected and code.strip().upper() == expected.upper())
+  normalized = re.sub(r"[^0-9]", "", str(code or ""))
+  return bool(normalized and expected and normalized == expected)
 
 def _galaxy_public_url(slug):
   return f"https://galaxy.firestar.link/{slug}" if slug else ""
@@ -619,7 +619,7 @@ def _build_ios_galaxy_pairing_payload(slug, token, local_base_url=""):
     payload["localURL"] = local_base_url
   compact = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8")).decode("ascii").rstrip("=")
   return {
-    "iosConnectUrl": f"kiamaps://galaxy/connect?code={quote(compact, safe='')}",
+    "iosConnectUrl": f"galaxynav://galaxy/connect?code={quote(compact, safe='')}",
     "galaxyNavConnectUrl": f"galaxynav://galaxy/connect?code={quote(compact, safe='')}",
     "iosShortConnectUrl": f"galaxynav://galaxy/connect?shortCode={quote(short_code, safe='')}",
     "iosPairingCode": compact,
