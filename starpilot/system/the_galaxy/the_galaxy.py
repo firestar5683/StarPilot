@@ -2576,24 +2576,63 @@ def _galaxy_nav_confirmation_payload(key):
     "confirmText": "Flash and Reboot",
   }
 
+def _galaxy_nav_text(value):
+  return ParamsCompat._to_text(value).strip()
+
+def _galaxy_nav_model_label(key):
+  label = str(key or "").replace("_", " ").replace("-", " ").strip()
+  return label.title() if label else ""
+
+def _galaxy_nav_installed_model_options():
+  available = [model.strip() for model in (params.get("AvailableModels", encoding="utf-8") or "").split(",")]
+  names = [name.strip() for name in (params.get("AvailableModelNames", encoding="utf-8") or "").split(",")]
+
+  try:
+    on_disk_files = {entry.name for entry in MODELS_PATH.iterdir()} if MODELS_PATH.is_dir() else set()
+  except Exception:
+    on_disk_files = set()
+
+  options_by_key = {}
+
+  def add_model(key, label=None, require_installed=False):
+    canonical_key = canonical_model_key(key)
+    if not canonical_key:
+      return
+    if require_installed and not is_builtin_model_key(canonical_key) and f"{canonical_key}_driving_tinygrad.pkl" not in on_disk_files:
+      return
+    options_by_key.setdefault(canonical_key, {
+      "value": canonical_key,
+      "label": label or _galaxy_nav_model_label(canonical_key) or canonical_key,
+    })
+
+  for i, key in enumerate(available):
+    label = names[i] if i < len(names) and names[i] else None
+    add_model(key, label, require_installed=True)
+
+  model_suffix = "_driving_tinygrad.pkl"
+  for filename in sorted(on_disk_files):
+    if filename.endswith(model_suffix):
+      add_model(filename[:-len(model_suffix)])
+
+  default_key = canonical_model_key(
+    _galaxy_nav_text(params.get_default_value("Model") or params.get_default_value("DrivingModel"))
+  ) or "sc2"
+  default_label = _galaxy_nav_text(params.get_default_value("DrivingModelName")) or "South Carolina"
+  add_model(default_key, default_label)
+
+  current_model = canonical_model_key(params.get("Model", encoding="utf-8") or params.get("DrivingModel", encoding="utf-8"))
+  if current_model:
+    add_model(current_model)
+
+  return sorted(options_by_key.values(), key=lambda model: model["label"].lower())
+
 def _galaxy_nav_options_for_endpoint(endpoint):
   endpoint = str(endpoint or "").strip()
   if not endpoint:
     return []
 
   if endpoint == "/api/models/installed":
-    try:
-      catalog = get_model_catalog()
-      installed = [{"value": model["value"], "label": model["label"]} for model in catalog if model["installed"]]
-      current_model = _current_model_key()
-      if current_model and all(model["value"] != current_model for model in installed):
-        for model in catalog:
-          if model["value"] == current_model:
-            installed.append({"value": model["value"], "label": model["label"]})
-            break
-      return installed
-    except Exception:
-      return []
+    return _galaxy_nav_installed_model_options()
 
   if endpoint == "/api/fingerprints/makes":
     try:
