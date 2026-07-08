@@ -2583,31 +2583,53 @@ def _galaxy_nav_model_label(key):
   label = str(key or "").replace("_", " ").replace("-", " ").strip()
   return label.title() if label else ""
 
-def _galaxy_nav_installed_model_options():
+def _galaxy_nav_model_catalog():
   available = [model.strip() for model in (params.get("AvailableModels", encoding="utf-8") or "").split(",")]
   names = [name.strip() for name in (params.get("AvailableModelNames", encoding="utf-8") or "").split(",")]
+  series = [entry.strip() for entry in (params.get("AvailableModelSeries", encoding="utf-8") or "").split(",")]
+  versions = [entry.strip() for entry in (params.get("ModelVersions", encoding="utf-8") or "").split(",")]
+  released_dates = [entry.strip() for entry in (params.get("ModelReleasedDates", encoding="utf-8") or "").split(",")]
 
   try:
     on_disk_files = {entry.name for entry in MODELS_PATH.iterdir()} if MODELS_PATH.is_dir() else set()
   except Exception:
     on_disk_files = set()
 
-  options_by_key = {}
+  community_favorites = {canonical_model_key(entry.strip()) for entry in (params.get("CommunityFavorites", encoding="utf-8") or "").split(",") if entry.strip()}
+  user_favorites = {canonical_model_key(entry.strip()) for entry in (params.get(MODEL_USER_FAVORITES_PARAM, encoding="utf-8") or "").split(",") if entry.strip()}
+  models_by_key = {}
 
-  def add_model(key, label=None, require_installed=False):
+  def add_model(key, label=None, model_series=None, version=None, released=None, builtin=None):
     canonical_key = canonical_model_key(key)
     if not canonical_key:
       return
-    if require_installed and not is_builtin_model_key(canonical_key) and f"{canonical_key}_driving_tinygrad.pkl" not in on_disk_files:
-      return
-    options_by_key.setdefault(canonical_key, {
+    model = models_by_key.setdefault(canonical_key, {
       "value": canonical_key,
       "label": label or _galaxy_nav_model_label(canonical_key) or canonical_key,
+      "series": model_series or "Custom Series",
+      "version": version or "",
+      "released": released or "",
+      "builtin": bool(builtin) or is_builtin_model_key(canonical_key),
+      "communityFavorite": canonical_key in community_favorites,
+      "userFavorite": canonical_key in user_favorites,
     })
+    if label and (not model["label"] or model["label"] == model["value"]):
+      model["label"] = label
+    if model_series and (not model["series"] or model["series"] == "Custom Series"):
+      model["series"] = model_series
+    if version and not model["version"]:
+      model["version"] = version
+    if released and not model["released"]:
+      model["released"] = released
+    if builtin is not None:
+      model["builtin"] = model["builtin"] or bool(builtin)
 
   for i, key in enumerate(available):
     label = names[i] if i < len(names) and names[i] else None
-    add_model(key, label, require_installed=True)
+    model_series = series[i] if i < len(series) and series[i] else None
+    version = versions[i] if i < len(versions) and versions[i] else None
+    released = released_dates[i] if i < len(released_dates) and released_dates[i] else None
+    add_model(key, label=label, model_series=model_series, version=version, released=released)
 
   model_suffix = "_driving_tinygrad.pkl"
   for filename in sorted(on_disk_files):
@@ -2618,13 +2640,34 @@ def _galaxy_nav_installed_model_options():
     _galaxy_nav_text(params.get_default_value("Model") or params.get_default_value("DrivingModel"))
   ) or "sc2"
   default_label = _galaxy_nav_text(params.get_default_value("DrivingModelName")) or "South Carolina"
-  add_model(default_key, default_label)
+  add_model(default_key, label=default_label, version=_galaxy_nav_text(params.get_default_value("DrivingModelVersion")), builtin=True)
 
   current_model = canonical_model_key(params.get("Model", encoding="utf-8") or params.get("DrivingModel", encoding="utf-8"))
   if current_model:
     add_model(current_model)
 
-  return sorted(options_by_key.values(), key=lambda model: model["label"].lower())
+  models = []
+  for key, model in models_by_key.items():
+    installed = model["builtin"] or f"{key}_driving_tinygrad.pkl" in on_disk_files
+    partial = (not model["builtin"]) and (not installed) and any(file.startswith(f"{key}.") or file.startswith(f"{key}_") for file in on_disk_files)
+    models.append({
+      **model,
+      "installed": installed,
+      "partial": partial,
+    })
+
+  return sorted(models, key=lambda model: (model["series"].lower(), model["label"].lower()))
+
+def _galaxy_nav_installed_model_options():
+  catalog = _galaxy_nav_model_catalog()
+  installed = [{"value": model["value"], "label": model["label"]} for model in catalog if model["installed"]]
+  current_model = canonical_model_key(params.get("Model", encoding="utf-8") or params.get("DrivingModel", encoding="utf-8"))
+  if current_model and all(model["value"] != current_model for model in installed):
+    for model in catalog:
+      if model["value"] == current_model:
+        installed.append({"value": model["value"], "label": model["label"]})
+        break
+  return sorted(installed, key=lambda model: model["label"].lower())
 
 def _galaxy_nav_options_for_endpoint(endpoint):
   endpoint = str(endpoint or "").strip()
@@ -2659,6 +2702,118 @@ def _galaxy_nav_resolved_options(param_data):
   return _galaxy_nav_control_option_payload(
     _galaxy_nav_options_for_endpoint(param_data.get("options_endpoint"))
   )
+
+def _galaxy_nav_model_detail(model):
+  details = []
+  if model.get("installed"):
+    details.append("Installed")
+  else:
+    details.append("Not installed")
+  if model.get("series"):
+    details.append(str(model["series"]))
+  if model.get("version"):
+    details.append(f"Version {model['version']}")
+  if model.get("partial"):
+    details.append("Partial files")
+  return " - ".join(details)
+
+def _galaxy_nav_model_manager_section():
+  models = _galaxy_nav_model_catalog()
+  current_model = canonical_model_key(params.get("Model", encoding="utf-8") or params.get("DrivingModel", encoding="utf-8"))
+  model_to_download = canonical_model_key(params_memory.get(MODEL_DOWNLOAD_PARAM, encoding="utf-8") or "")
+  download_all = params_memory.get_bool(MODEL_DOWNLOAD_ALL_PARAM)
+  downloading = bool(model_to_download) or download_all
+  progress = params_memory.get(MODEL_DOWNLOAD_PROGRESS_PARAM, encoding="utf-8") or "Idle"
+  missing_models = [model for model in models if not model.get("installed")]
+  installed_models = [model for model in models if model.get("installed")]
+
+  controls = [{
+    "id": "models.status.progress",
+    "title": "Model Download Status",
+    "subtitle": f"{len(installed_models)} installed, {len(missing_models)} missing",
+    "value": progress,
+    "path": ["models", "status", "progress"],
+    "readOnly": True,
+  }, {
+    "id": "models.action.refresh_manifest",
+    "title": "Refresh Model List",
+    "subtitle": "Check Galaxy for newly available driving models.",
+    "value": None,
+    "path": ["models", "refresh_manifest"],
+    "endpoint": "/api/models/refresh_manifest",
+    "method": "POST",
+  }, {
+    "id": "models.action.download_all",
+    "title": "Download All Missing Models",
+    "subtitle": f"{len(missing_models)} model(s) missing.",
+    "value": None,
+    "path": ["models", "download_all"],
+    "endpoint": "/api/models/download_all",
+    "method": "POST",
+  }]
+
+  if downloading:
+    controls.append({
+      "id": "models.action.cancel",
+      "title": "Cancel Model Download",
+      "subtitle": progress,
+      "value": None,
+      "path": ["models", "cancel"],
+      "endpoint": "/api/models/cancel",
+      "method": "POST",
+    })
+
+  for model in models:
+    model_key = model.get("value")
+    label = str(model.get("label") or model_key or "Model")
+    if not model_key:
+      continue
+
+    if not model.get("installed"):
+      controls.append({
+        "id": f"models.download.{model_key}",
+        "title": f"Download {label}",
+        "subtitle": _galaxy_nav_model_detail(model),
+        "value": None,
+        "path": ["models", "download", model_key],
+        "endpoint": "/api/models/download",
+        "method": "POST",
+        "requestBody": {"model": model_key},
+      })
+    elif not model.get("builtin") and model_key != current_model:
+      controls.append({
+        "id": f"models.delete.{model_key}",
+        "title": f"Delete {label}",
+        "subtitle": _galaxy_nav_model_detail(model),
+        "value": None,
+        "path": ["models", "delete", model_key],
+        "endpoint": "/api/models/delete",
+        "method": "POST",
+        "requestBody": {"model": model_key},
+        "confirmation": {
+          "field": "confirmed",
+          "title": f"Delete {label}",
+          "message": "This removes the local model files from this comma.",
+          "confirmText": "Delete Model",
+        },
+      })
+
+  if len(controls) <= 3:
+    controls.append({
+      "id": "models.status.empty",
+      "title": "No Model Downloads Found",
+      "subtitle": "Refresh the model list to check for newly available downloads.",
+      "value": "Ready",
+      "path": ["models", "status", "empty"],
+      "readOnly": True,
+    })
+
+  return {
+    "id": "model_downloads",
+    "title": "Model Downloads",
+    "controls": controls,
+    "metrics": [],
+  }
 
 def _build_galaxy_nav_control_catalog():
   allowed_keys, value_types = _get_param_type_info()
@@ -2732,8 +2887,22 @@ def _build_galaxy_nav_control_catalog():
         "metrics": [],
       })
 
+  for section in [_galaxy_nav_model_manager_section()]:
+    section_controls = []
+    for control in section.get("controls", []):
+      control_id = str(control.get("id") or "").strip()
+      if not control_id or control_id in seen:
+        continue
+      seen.add(control_id)
+      section_controls.append(control)
+      controls.append(control)
+    if section_controls:
+      next_section = dict(section)
+      next_section["controls"] = section_controls
+      sections.append(next_section)
+
   return {
-    "version": 1,
+    "version": 2,
     "updatedAt": time.time(),
     "controls": controls,
     "sections": sections,
