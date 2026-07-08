@@ -2576,6 +2576,33 @@ def _galaxy_nav_confirmation_payload(key):
     "confirmText": "Flash and Reboot",
   }
 
+GALAXY_NAV_CONTROL_MAKE_SCOPES = {
+  "NAPRadarEnabled": ["Tesla"],
+  "NAPRadarBehindNosecone": ["Tesla"],
+  "NAPRadarOffset": ["Tesla"],
+  "NAPPedalEnabled": ["Tesla"],
+  "NAPPedalCanBus": ["Tesla"],
+  "NAPAdaptiveAccel": ["Tesla"],
+  "NAPPedalCalibDone": ["Tesla"],
+  "NAPPedalCalibFactor": ["Tesla"],
+  "NAPPedalCalibZero": ["Tesla"],
+  "GMPedalLongitudinal": ["GM", "GMC", "Chevrolet", "Cadillac", "Buick"],
+  "GMDashSpoofOffsets": ["GM", "GMC", "Chevrolet", "Cadillac", "Buick"],
+  "RemoteStartBootsComma": ["GM", "GMC", "Chevrolet", "Cadillac", "Buick"],
+  "VoltSNG": ["GM", "Chevrolet"],
+  "GMAutoHold": ["GM", "Chevrolet"],
+  "VoltOnePedalMode": ["GM", "Chevrolet"],
+  "RemapCancelToDistance": ["GM", "Chevrolet"],
+  "HKGRemoteStartBootsComma": ["Hyundai", "Kia", "Genesis"],
+  "SubaruSNG": ["Subaru"],
+  "SubaruSNGManualParkingBrake": ["Subaru"],
+  "SNGHack": ["Toyota", "Lexus"],
+  "ToyotaAutoHold": ["Toyota", "Lexus"],
+}
+
+def _galaxy_nav_make_scope_payload(key):
+  return GALAXY_NAV_CONTROL_MAKE_SCOPES.get(key)
+
 def _galaxy_nav_text(value):
   return ParamsCompat._to_text(value).strip()
 
@@ -2876,6 +2903,13 @@ def _build_galaxy_nav_control_catalog():
       confirmation = _galaxy_nav_confirmation_payload(key)
       if confirmation:
         control["confirmation"] = confirmation
+      make_scope = _galaxy_nav_make_scope_payload(key)
+      if make_scope:
+        control["makeScope"] = make_scope
+      if param_data.get("parent_key"):
+        control["parentKey"] = str(param_data.get("parent_key"))
+      if param_data.get("is_parent_toggle") is not None:
+        control["isParentToggle"] = bool(param_data.get("is_parent_toggle"))
       section_controls.append(control)
       controls.append(control)
 
@@ -2887,22 +2921,8 @@ def _build_galaxy_nav_control_catalog():
         "metrics": [],
       })
 
-  for section in [_galaxy_nav_model_manager_section()]:
-    section_controls = []
-    for control in section.get("controls", []):
-      control_id = str(control.get("id") or "").strip()
-      if not control_id or control_id in seen:
-        continue
-      seen.add(control_id)
-      section_controls.append(control)
-      controls.append(control)
-    if section_controls:
-      next_section = dict(section)
-      next_section["controls"] = section_controls
-      sections.append(next_section)
-
   return {
-    "version": 2,
+    "version": 3,
     "updatedAt": time.time(),
     "controls": controls,
     "sections": sections,
