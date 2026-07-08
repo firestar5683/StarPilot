@@ -2543,6 +2543,104 @@ def _favorite_slot_values(options):
     if option.get("key")
   }
 
+def _galaxy_nav_control_option_payload(raw_options):
+  options = []
+  if not isinstance(raw_options, list):
+    return options
+
+  for raw_option in raw_options:
+    if isinstance(raw_option, dict):
+      value = raw_option.get("value")
+      label = str(raw_option.get("label") or value or "").strip()
+    else:
+      value = raw_option
+      label = str(raw_option or "").strip()
+
+    if value is None or not label:
+      continue
+    options.append({
+      "value": _sanitize_json_value(value),
+      "label": label,
+    })
+
+  return options
+
+def _build_galaxy_nav_control_catalog():
+  allowed_keys, value_types = _get_param_type_info()
+  defaults_lookup = _get_default_param_values()
+
+  try:
+    layout_path = os.path.join(os.path.dirname(__file__), "assets", "components", "tools", "device_settings_layout.json")
+    with open(layout_path) as f:
+      layout_data = json.load(f)
+  except Exception:
+    layout_data = []
+
+  sections = []
+  controls = []
+  seen = set()
+
+  for section_index, section in enumerate(layout_data):
+    section_title = str(section.get("name") or section.get("title") or f"Section {section_index + 1}").strip()
+    section_id = str(section.get("id") or section_title.lower().replace(" ", "_").replace("&", "and")).strip() or f"section_{section_index + 1}"
+    section_controls = []
+
+    for param_data in section.get("params", []):
+      key = str(param_data.get("key") or "").strip()
+      if not key or key in seen or key not in allowed_keys:
+        continue
+
+      ui_type = str(param_data.get("ui_type") or "").strip().lower()
+      data_type = str(param_data.get("data_type") or "").strip().lower()
+      value_type = value_types.get(key, str)
+      options = _galaxy_nav_control_option_payload(param_data.get("options"))
+
+      if ui_type == "toggle" or data_type == "bool" or value_type is bool:
+        kind = "toggle"
+      elif ui_type == "dropdown" or options:
+        kind = "option"
+      else:
+        continue
+
+      try:
+        value = _get_current_param_value(key, value_type, defaults_lookup)
+      except Exception:
+        value = None
+
+      seen.add(key)
+      control = {
+        "id": key,
+        "key": key,
+        "title": str(param_data.get("label") or key),
+        "subtitle": str(param_data.get("description") or ""),
+        "kind": kind,
+        "value": _sanitize_json_value(value),
+        "options": options,
+        "path": ["params", key],
+        "endpoint": "/api/params",
+        "method": "PUT",
+        "isWritable": True,
+        "sectionID": section_id,
+        "sectionTitle": section_title,
+      }
+      section_controls.append(control)
+      controls.append(control)
+
+    if section_controls:
+      sections.append({
+        "id": section_id,
+        "title": section_title,
+        "controls": section_controls,
+        "metrics": [],
+      })
+
+  return {
+    "version": 1,
+    "updatedAt": time.time(),
+    "controls": controls,
+    "sections": sections,
+  }
+
 _cached_allowed_keys = None
 _cached_param_types = None
 _cached_default_values = None
@@ -6922,12 +7020,17 @@ def setup(app):
     paired = len(_read_galaxy_text(GALAXY_AUTH_FILE)) == 64 and bool(slug and token)
     ios_payload = _build_ios_galaxy_pairing_payload(slug, token, _request_local_base_url())
     vehicle_telemetry, _ = _build_vehicle_telemetry_payload()
+    control_catalog = _build_galaxy_nav_control_catalog()
     return jsonify({
       "appUrl": GALAXY_PLAY_STORE_URL,
       "cookieName": GALAXY_COOKIE_NAME,
       "paired": paired,
       "sessionToken": _build_galaxy_session_value(slug, token),
       "vehicleTelemetry": vehicle_telemetry,
+      "controls": control_catalog["controls"],
+      "sections": control_catalog["sections"],
+      "controlCatalogVersion": control_catalog["version"],
+      "controlCatalogUpdatedAt": control_catalog["updatedAt"],
       **ios_payload,
     })
 
