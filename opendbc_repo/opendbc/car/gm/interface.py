@@ -425,7 +425,7 @@ class CarInterface(CarInterfaceBase):
     elif candidate in (CAR.BUICK_LACROSSE, CAR.BUICK_LACROSSE_ASCM, CAR.BUICK_LACROSSE_ASCM_19US):
       CarInterfaceBase.configure_torque_tune(CAR.BUICK_LACROSSE, ret.lateralTuning)
       if candidate == CAR.BUICK_LACROSSE_ASCM_19US:
-        ret.minSteerSpeed = 26 * CV.MPH_TO_MS
+        ret.minSteerSpeed = 28 * CV.MPH_TO_MS
 
     elif candidate == CAR.CADILLAC_ESCALADE:
       ret.minEnableSpeed = -1.  # engage speed is decided by pcm
