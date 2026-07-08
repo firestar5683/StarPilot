@@ -2565,6 +2565,62 @@ def _galaxy_nav_control_option_payload(raw_options):
 
   return options
 
+def _galaxy_nav_confirmation_payload(key):
+  if key not in PANDA_FIRMWARE_TOGGLE_KEYS:
+    return None
+
+  return {
+    "field": PANDA_FIRMWARE_CONFIRMATION_FIELD,
+    "title": "Confirm Panda Firmware Flash",
+    "message": "This will flash Panda firmware and reboot the device when it finishes.",
+    "confirmText": "Flash and Reboot",
+  }
+
+def _galaxy_nav_options_for_endpoint(endpoint):
+  endpoint = str(endpoint or "").strip()
+  if not endpoint:
+    return []
+
+  if endpoint == "/api/models/installed":
+    try:
+      catalog = get_model_catalog()
+      installed = [{"value": model["value"], "label": model["label"]} for model in catalog if model["installed"]]
+      current_model = _current_model_key()
+      if current_model and all(model["value"] != current_model for model in installed):
+        for model in catalog:
+          if model["value"] == current_model:
+            installed.append({"value": model["value"], "label": model["label"]})
+            break
+      return installed
+    except Exception:
+      return []
+
+  if endpoint == "/api/fingerprints/makes":
+    try:
+      return _get_fingerprint_catalog()["makes"]
+    except Exception:
+      return []
+
+  if endpoint.startswith("/api/fingerprints/models"):
+    try:
+      catalog = _get_fingerprint_catalog()
+      make_key = _normalize_fingerprint_make_key(params.get("CarMake", encoding="utf-8") or "")
+      models = catalog["models_by_make"].get(make_key) if make_key else catalog["all_models"]
+      return models or catalog["all_models"]
+    except Exception:
+      return []
+
+  return []
+
+def _galaxy_nav_resolved_options(param_data):
+  options = _galaxy_nav_control_option_payload(param_data.get("options"))
+  if options:
+    return options
+
+  return _galaxy_nav_control_option_payload(
+    _galaxy_nav_options_for_endpoint(param_data.get("options_endpoint"))
+  )
+
 def _build_galaxy_nav_control_catalog():
   allowed_keys, value_types = _get_param_type_info()
   defaults_lookup = _get_default_param_values()
@@ -2593,7 +2649,7 @@ def _build_galaxy_nav_control_catalog():
       ui_type = str(param_data.get("ui_type") or "").strip().lower()
       data_type = str(param_data.get("data_type") or "").strip().lower()
       value_type = value_types.get(key, str)
-      options = _galaxy_nav_control_option_payload(param_data.get("options"))
+      options = _galaxy_nav_resolved_options(param_data)
 
       if ui_type == "toggle" or data_type == "bool" or value_type is bool:
         kind = "toggle"
@@ -2623,6 +2679,9 @@ def _build_galaxy_nav_control_catalog():
         "sectionID": section_id,
         "sectionTitle": section_title,
       }
+      confirmation = _galaxy_nav_confirmation_payload(key)
+      if confirmation:
+        control["confirmation"] = confirmation
       section_controls.append(control)
       controls.append(control)
 
@@ -5127,7 +5186,11 @@ def setup(app):
       if key in PANDA_FIRMWARE_TOGGLE_KEYS and params.get_bool("IsOnroad"):
         return jsonify({"error": "Cannot flash Panda firmware while driving."}), 403
       if key in PANDA_FIRMWARE_TOGGLE_KEYS and data.get(PANDA_FIRMWARE_CONFIRMATION_FIELD) is not True:
-        return jsonify({"error": "Panda firmware changes require confirmation before flashing."}), 409
+        return jsonify({
+          "error": "Panda firmware changes require confirmation before flashing.",
+          "confirmationRequired": True,
+          "confirmation": _galaxy_nav_confirmation_payload(key),
+        }), 409
 
       if key in {"LeadIndicator", "HideLeadMarker"}:
         enabled = str_val.strip() in ("1", "true", "True")
