@@ -223,7 +223,47 @@ def test_compact_vehicle_telemetry_payload_keeps_only_maps_fields():
     "vehicleName": "Kia EV9",
     "stateOfChargePercent": 82.0,
     "distanceToEmptyKilometers": 401.0,
+    "isCharging": False,
   }
+
+
+def test_vehicle_telemetry_updated_at_does_not_regress_during_boot_clock_sync(monkeypatch):
+  gnss_time = 1_783_624_171.0
+  cached_time = gnss_time + 2_463.0
+  monkeypatch.setattr(the_galaxy.time, "time", lambda: 1_751_465_133.0)
+  monkeypatch.setattr(the_galaxy, "_vehicle_telemetry_best_cache_load", lambda: {"updatedAt": cached_time})
+
+  assert the_galaxy._vehicle_telemetry_updated_at({"updatedAtSec": gnss_time}) == cached_time
+
+
+def test_ev9_passive_decoder_distinguishes_charge_states():
+  def decode(charge_status, energy_status, redundant_energy_status):
+    frames = [
+      {"src": 1, "address": 0x30A, "data": bytes.fromhex(charge_status)},
+      {"src": 1, "address": 0x320, "data": bytes.fromhex(energy_status)},
+      {"src": 1, "address": 0x2FA, "data": bytes.fromhex(redundant_energy_status)},
+    ]
+    return the_galaxy._decode_egmp_passive_display_frames(frames)[0]
+
+  charging = decode(
+    "4dc1150854011015006578000f00a00f0000000049820018000038402101003a",
+    "98921544000001baac0d88190001000f00000000000000000d003e004c040000",
+    "447b7404c31ecdcdf1ff1c1e000080ba00000000001414137c01720140280000",
+  )
+  charge_complete = decode(
+    "2c1a9508440000108068b6230f01a00f00000000477d0002000038402101003a",
+    "3e499544000000c8ac0d88190001000f0000000000000000000000004c040000",
+    "5cb801008f1dcece00001d1e00007ac80000000000140f0fffff720140280000",
+  )
+  unplugged = decode(
+    "c9174f000400000000000c002c00a00f0000000043000001000038402000000e",
+    "7f5a4f44000000c3ac0d88190001000f000000000000000000000000ef560000",
+    "a24e5104d81dcccd09001a1b000084c3000000000014100f0000720140280000",
+  )
+
+  assert (charging["isPluggedIn"], charging["isCharging"]) == (True, True)
+  assert (charge_complete["isPluggedIn"], charge_complete["isCharging"]) == (True, False)
+  assert (unplugged["isPluggedIn"], unplugged["isCharging"]) == (False, False)
 
 
 def test_galaxy_telemetry_route_reads_cache_without_sampling(monkeypatch):

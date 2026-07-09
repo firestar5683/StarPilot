@@ -3677,6 +3677,22 @@ def _vehicle_telemetry_cache_load(max_age_seconds=None):
 def _vehicle_telemetry_best_cache_load(max_age_seconds=None):
   return _vehicle_telemetry_live_load(max_age_seconds=max_age_seconds) or _vehicle_telemetry_cache_load(max_age_seconds=max_age_seconds)
 
+def _vehicle_telemetry_updated_at(position=None):
+  now = time.time()
+  candidates = [now]
+  if isinstance(position, dict):
+    position_updated_at = _safe_float(position.get("updatedAtSec"), 0.0)
+    if position_updated_at > 1_500_000_000:
+      candidates.append(position_updated_at)
+
+  reference_time = max(candidates)
+  cached = _vehicle_telemetry_best_cache_load()
+  cached_updated_at = _safe_float((cached or {}).get("updatedAt"), 0.0)
+  # The comma clock can start about a year behind before GNSS/network time sync.
+  if 0.0 < cached_updated_at <= reference_time + 86400.0:
+    candidates.append(cached_updated_at)
+  return max(candidates)
+
 def _compact_vehicle_telemetry_payload(payload):
   if not isinstance(payload, dict):
     return None
@@ -4109,6 +4125,7 @@ def _build_egmp_can_telemetry_payload(
   can_address_filter=None,
   can_source_filter=None,
 ):
+  sample_updated_at = _vehicle_telemetry_updated_at(position)
   frames, can_summary = _capture_can_frames(
     sample_ms=sample_ms,
     submaster=can_submaster,
@@ -4171,7 +4188,7 @@ def _build_egmp_can_telemetry_payload(
     "available": bool(has_maps_data),
     "status": "ok" if has_maps_data else "waiting_for_egmp_bms_response",
     "message": "Decoded E-GMP BMS telemetry from CAN." if has_maps_data else "Raw CAN is present, but no E-GMP BMS SOC/range payload has been observed yet.",
-    "updatedAt": time.time(),
+    "updatedAt": sample_updated_at,
     "location": position,
     "maximumBatteryCapacityKilowattHours": _EGMP_EV9_USA_BATTERY_KWH,
     "canFrameCount": can_summary.get("frameCount", 0),
@@ -4225,7 +4242,7 @@ def _build_car_state_telemetry_payload(model_info, position, known_soc=None, sam
     "available": True,
     "status": "ok",
     "message": "Live CAN-backed carState available.",
-    "updatedAt": time.time(),
+    "updatedAt": _vehicle_telemetry_updated_at(position),
     "stateOfChargePercent": state_of_charge_percent,
     "fuelGauge": round(fuel_gauge, 4) if has_soc else None,
     "distanceToEmptyKilometers": distance_to_empty_km,
