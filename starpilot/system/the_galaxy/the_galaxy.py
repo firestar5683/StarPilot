@@ -120,6 +120,11 @@ _TESTING_GROUND_CUSTOM_RESERVED_LAST_PUBLISH_MONO = 0.0
 _VEHICLE_TELEMETRY_CACHE_PATH = Path("/data/galaxy/vehicle_telemetry.json")
 _VEHICLE_TELEMETRY_SAMPLE_LOG_PATH = Path("/data/galaxy/vehicle_telemetry_samples.jsonl")
 _VEHICLE_TELEMETRY_SAMPLE_LOG_MAX_BYTES = 2 * 1024 * 1024
+_VEHICLE_TELEMETRY_BACKGROUND_SAMPLE_MS = 2500
+_VEHICLE_TELEMETRY_BACKGROUND_INTERVAL_S = 30.0
+_VEHICLE_TELEMETRY_CACHE_FIRST_MAX_AGE_S = 24.0 * 60.0 * 60.0
+_VEHICLE_TELEMETRY_BACKGROUND_LOCK = threading.Lock()
+_VEHICLE_TELEMETRY_BACKGROUND_THREAD = None
 _EGMP_EV9_USA_MAX_RANGE_KM = 450.6
 _EGMP_EV9_USA_BATTERY_KWH = 99.8
 PANDA_FIRMWARE_TOGGLE_KEYS = {"IgnoreIgnitionLine", "RemoteStartBootsComma", "HKGRemoteStartBootsComma"}
@@ -3576,11 +3581,24 @@ def _get_vehicle_telemetry_model_name():
     "carFingerprint": car_fingerprint,
   }
 
-def _vehicle_telemetry_cache_load():
+def _vehicle_telemetry_payload_age_seconds(payload):
+  try:
+    updated_at = float(payload.get("updatedAt"))
+  except Exception:
+    return None
+  if not math.isfinite(updated_at) or updated_at <= 0:
+    return None
+  return max(0.0, time.time() - updated_at)
+
+def _vehicle_telemetry_cache_load(max_age_seconds=None):
   try:
     with open(_VEHICLE_TELEMETRY_CACHE_PATH) as f:
       payload = json.load(f)
     if isinstance(payload, dict):
+      if max_age_seconds is not None:
+        age_seconds = _vehicle_telemetry_payload_age_seconds(payload)
+        if age_seconds is None or age_seconds > max_age_seconds:
+          return None
       return payload
   except Exception:
     pass
@@ -3967,8 +3985,8 @@ def _decode_egmp_bms_payload(pid, data):
 
   return decoded, raw_values
 
-def _build_egmp_can_telemetry_payload(model_info, position, known_soc=None, sample_note=""):
-  frames, can_summary = _capture_can_frames()
+def _build_egmp_can_telemetry_payload(model_info, position, known_soc=None, sample_note="", sample_ms=10000):
+  frames, can_summary = _capture_can_frames(sample_ms=sample_ms)
   decoded = {}
   raw_values = {
     "egmpParserVersion": "2026.07.07.2",
@@ -4071,12 +4089,23 @@ def _build_egmp_can_telemetry_payload(model_info, position, known_soc=None, samp
 
   return payload, 503
 
-def _build_vehicle_telemetry_payload(known_soc=None, sample_note=""):
+def _build_vehicle_telemetry_payload(known_soc=None, sample_note="", sample_ms=10000, cache_first_max_age_seconds=None):
   model_info = _get_vehicle_telemetry_model_name()
   position = _get_navigation_last_position()
 
+  if cache_first_max_age_seconds is not None:
+    cached = _vehicle_telemetry_cache_load(max_age_seconds=cache_first_max_age_seconds)
+    if cached:
+      return dict(cached), 200
+
   try:
-    can_payload, can_status_code = _build_egmp_can_telemetry_payload(model_info, position, known_soc=known_soc, sample_note=sample_note)
+    can_payload, can_status_code = _build_egmp_can_telemetry_payload(
+      model_info,
+      position,
+      known_soc=known_soc,
+      sample_note=sample_note,
+      sample_ms=sample_ms,
+    )
     if can_status_code == 200:
       return can_payload, can_status_code
 
@@ -4133,6 +4162,30 @@ def _build_vehicle_telemetry_payload(known_soc=None, sample_note=""):
       "updatedAt": time.time(),
       "location": position,
     }, 500
+
+def _vehicle_telemetry_background_worker():
+  while True:
+    try:
+      _build_vehicle_telemetry_payload(
+        sample_note="background_sampler",
+        sample_ms=_VEHICLE_TELEMETRY_BACKGROUND_SAMPLE_MS,
+        cache_first_max_age_seconds=None,
+      )
+    except Exception:
+      pass
+    time.sleep(_VEHICLE_TELEMETRY_BACKGROUND_INTERVAL_S)
+
+def _start_vehicle_telemetry_background_sampler():
+  global _VEHICLE_TELEMETRY_BACKGROUND_THREAD
+  with _VEHICLE_TELEMETRY_BACKGROUND_LOCK:
+    if _VEHICLE_TELEMETRY_BACKGROUND_THREAD is not None and _VEHICLE_TELEMETRY_BACKGROUND_THREAD.is_alive():
+      return
+    _VEHICLE_TELEMETRY_BACKGROUND_THREAD = threading.Thread(
+      target=_vehicle_telemetry_background_worker,
+      name="galaxy-vehicle-telemetry",
+      daemon=True,
+    )
+    _VEHICLE_TELEMETRY_BACKGROUND_THREAD.start()
 
 def _get_starpilot_toggles_snapshot():
   raw_toggles = _safe_params_get_live_raw("StarPilotToggles")
@@ -4955,6 +5008,7 @@ def _set_lateral_maneuver_mode(enabled):
 
 def setup(app):
   _ensure_galaxy_mdns_advertiser(8083 if not _is_comma_device_runtime() else 8082)
+  _start_vehicle_telemetry_background_sampler()
 
   model_status_debug = {
     "last_signature": None,
@@ -7304,13 +7358,26 @@ def setup(app):
       **ios_payload,
     })
 
+  def _request_vehicle_telemetry_sample_ms(default_ms=10000):
+    raw = request.args.get("sampleMs") or request.args.get("sample_ms") or request.args.get("timeoutMs")
+    if raw is None:
+      return default_ms
+    try:
+      sample_ms = int(float(raw))
+    except Exception:
+      return default_ms
+    return max(250, min(30000, sample_ms))
+
   @app.route("/api/galaxy/session", methods=["GET"])
   def galaxy_session():
     slug = _read_galaxy_text(GALAXY_SLUG_FILE)
     token = _read_galaxy_text(GALAXY_SESSION_FILE)
     paired = len(_read_galaxy_text(GALAXY_AUTH_FILE)) == 64 and bool(slug and token)
     ios_payload = _build_ios_galaxy_pairing_payload(slug, token, _request_local_base_url())
-    vehicle_telemetry, _ = _build_vehicle_telemetry_payload()
+    vehicle_telemetry, _ = _build_vehicle_telemetry_payload(
+      sample_ms=_request_vehicle_telemetry_sample_ms(),
+      cache_first_max_age_seconds=_VEHICLE_TELEMETRY_CACHE_FIRST_MAX_AGE_S,
+    )
     control_catalog = _build_galaxy_nav_control_catalog()
     return jsonify({
       "appUrl": GALAXY_PLAY_STORE_URL,
@@ -7356,7 +7423,10 @@ def setup(app):
 
   @app.route("/api/vehicle/telemetry", methods=["GET"])
   def vehicle_telemetry():
-    payload, status_code = _build_vehicle_telemetry_payload()
+    payload, status_code = _build_vehicle_telemetry_payload(
+      sample_ms=_request_vehicle_telemetry_sample_ms(),
+      cache_first_max_age_seconds=_VEHICLE_TELEMETRY_CACHE_FIRST_MAX_AGE_S,
+    )
     return jsonify(payload), status_code
 
   @app.route("/api/vehicle/telemetry/samples", methods=["GET"])
@@ -7377,7 +7447,11 @@ def setup(app):
     except Exception:
       return jsonify({"error": "stateOfChargePercent is required"}), 400
     note = str(data.get("note") or "")
-    payload, status_code = _build_vehicle_telemetry_payload(known_soc=known_soc, sample_note=note)
+    payload, status_code = _build_vehicle_telemetry_payload(
+      known_soc=known_soc,
+      sample_note=note,
+      sample_ms=_request_vehicle_telemetry_sample_ms(),
+    )
     return jsonify({
       "knownStateOfChargePercent": known_soc,
       "sample": payload,
