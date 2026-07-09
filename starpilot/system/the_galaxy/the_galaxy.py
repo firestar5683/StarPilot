@@ -120,11 +120,17 @@ _TESTING_GROUND_CUSTOM_RESERVED_LAST_PUBLISH_MONO = 0.0
 _VEHICLE_TELEMETRY_CACHE_PATH = Path("/data/galaxy/vehicle_telemetry.json")
 _VEHICLE_TELEMETRY_SAMPLE_LOG_PATH = Path("/data/galaxy/vehicle_telemetry_samples.jsonl")
 _VEHICLE_TELEMETRY_SAMPLE_LOG_MAX_BYTES = 2 * 1024 * 1024
-_VEHICLE_TELEMETRY_BACKGROUND_SAMPLE_MS = 2500
-_VEHICLE_TELEMETRY_BACKGROUND_INTERVAL_S = 30.0
+_VEHICLE_TELEMETRY_BACKGROUND_SAMPLE_MS = 1000
+_VEHICLE_TELEMETRY_BACKGROUND_INTERVAL_S = 10.0
 _VEHICLE_TELEMETRY_CACHE_FIRST_MAX_AGE_S = 120.0
+_VEHICLE_TELEMETRY_CACHE_WRITE_INTERVAL_S = 60.0
 _VEHICLE_TELEMETRY_BACKGROUND_LOCK = threading.Lock()
 _VEHICLE_TELEMETRY_BACKGROUND_THREAD = None
+_VEHICLE_TELEMETRY_LIVE_LOCK = threading.Lock()
+_VEHICLE_TELEMETRY_LIVE_PAYLOAD = None
+_VEHICLE_TELEMETRY_LIVE_SIGNATURE = None
+_VEHICLE_TELEMETRY_LIVE_LAST_STORE_MONO = 0.0
+_EGMP_PASSIVE_TELEMETRY_ADDRESSES = frozenset((0x2b5, 0x2fa, 0x30a, 0x320, 0x405, 0x414, 0x4d8, 0x4f2))
 _EGMP_EV9_USA_MAX_RANGE_KM = 450.6
 _EGMP_EV9_USA_BATTERY_KWH = 99.8
 PANDA_FIRMWARE_TOGGLE_KEYS = {"IgnoreIgnitionLine", "RemoteStartBootsComma", "HKGRemoteStartBootsComma"}
@@ -3590,6 +3596,70 @@ def _vehicle_telemetry_payload_age_seconds(payload):
     return None
   return max(0.0, time.time() - updated_at)
 
+def _vehicle_telemetry_has_maps_data(payload):
+  return (
+    isinstance(payload, dict)
+    and (payload.get("stateOfChargePercent") is not None or payload.get("estimatedRangeKilometers") is not None)
+  )
+
+def _vehicle_telemetry_payload_signature(payload):
+  if not isinstance(payload, dict):
+    return None
+  keys = (
+    "source",
+    "stateOfChargePercent",
+    "distanceToEmptyKilometers",
+    "estimatedRangeKilometers",
+    "chargingPowerKilowatts",
+    "isCharging",
+    "isPluggedIn",
+    "activeConnector",
+    "plugPowerType",
+    "chargeLimitPercent",
+  )
+  signature = {}
+  for key in keys:
+    value = payload.get(key)
+    if isinstance(value, numbers.Number) and math.isfinite(float(value)):
+      signature[key] = round(float(value), 3)
+    else:
+      signature[key] = value
+  return json.dumps(signature, separators=(",", ":"), sort_keys=True)
+
+def _vehicle_telemetry_live_load(max_age_seconds=None):
+  with _VEHICLE_TELEMETRY_LIVE_LOCK:
+    payload = dict(_VEHICLE_TELEMETRY_LIVE_PAYLOAD) if isinstance(_VEHICLE_TELEMETRY_LIVE_PAYLOAD, dict) else None
+  if not payload:
+    return None
+  if max_age_seconds is not None:
+    age_seconds = _vehicle_telemetry_payload_age_seconds(payload)
+    if age_seconds is None or age_seconds > max_age_seconds:
+      return None
+  return payload
+
+def _vehicle_telemetry_live_store(payload, frames=None, known_soc=None, note=""):
+  global _VEHICLE_TELEMETRY_LIVE_LAST_STORE_MONO, _VEHICLE_TELEMETRY_LIVE_PAYLOAD, _VEHICLE_TELEMETRY_LIVE_SIGNATURE
+  if not _vehicle_telemetry_has_maps_data(payload):
+    return
+
+  payload = dict(payload)
+  signature = _vehicle_telemetry_payload_signature(payload)
+  should_persist = False
+  with _VEHICLE_TELEMETRY_LIVE_LOCK:
+    _VEHICLE_TELEMETRY_LIVE_PAYLOAD = payload
+    now_mono = time.monotonic()
+    if (
+      signature != _VEHICLE_TELEMETRY_LIVE_SIGNATURE
+      or now_mono - _VEHICLE_TELEMETRY_LIVE_LAST_STORE_MONO >= _VEHICLE_TELEMETRY_CACHE_WRITE_INTERVAL_S
+    ):
+      _VEHICLE_TELEMETRY_LIVE_SIGNATURE = signature
+      _VEHICLE_TELEMETRY_LIVE_LAST_STORE_MONO = now_mono
+      should_persist = True
+
+  if should_persist:
+    _vehicle_telemetry_cache_store(payload)
+    _vehicle_telemetry_sample_store(payload, frames or [], known_soc=known_soc, note=note)
+
 def _vehicle_telemetry_cache_load(max_age_seconds=None):
   try:
     with open(_VEHICLE_TELEMETRY_CACHE_PATH) as f:
@@ -3603,6 +3673,9 @@ def _vehicle_telemetry_cache_load(max_age_seconds=None):
   except Exception:
     pass
   return None
+
+def _vehicle_telemetry_best_cache_load(max_age_seconds=None):
+  return _vehicle_telemetry_live_load(max_age_seconds=max_age_seconds) or _vehicle_telemetry_cache_load(max_age_seconds=max_age_seconds)
 
 def _vehicle_telemetry_cache_store(payload):
   if not isinstance(payload, dict):
@@ -3728,22 +3801,28 @@ def _normalize_uds_payload(raw_payload):
     return (payload[1] << 8) | payload[2], payload[3:]
   return None, payload
 
-def _capture_can_frames(sample_ms=10000):
+def _capture_can_frames(sample_ms=10000, submaster=None, address_filter=None, source_filter=None):
   frames = []
   counts = {}
   samples = {}
   try:
-    sm = messaging.SubMaster(["can"], poll="can")
+    sm = submaster if submaster is not None else messaging.SubMaster(["can"], poll="can")
     deadline = time.monotonic() + max(0.1, sample_ms / 1000.0)
     while time.monotonic() < deadline:
       sm.update(100)
       if not sm.updated["can"]:
         continue
       for msg in sm["can"]:
+        src = int(msg.src)
+        address = int(msg.address)
+        if source_filter is not None and src not in source_filter:
+          continue
+        if address_filter is not None and address not in address_filter:
+          continue
         data = bytes(msg.dat)
         frame = {
-          "src": int(msg.src),
-          "address": int(msg.address),
+          "src": src,
+          "address": address,
           "data": data,
           "time": time.time(),
         }
@@ -3985,8 +4064,22 @@ def _decode_egmp_bms_payload(pid, data):
 
   return decoded, raw_values
 
-def _build_egmp_can_telemetry_payload(model_info, position, known_soc=None, sample_note="", sample_ms=10000):
-  frames, can_summary = _capture_can_frames(sample_ms=sample_ms)
+def _build_egmp_can_telemetry_payload(
+  model_info,
+  position,
+  known_soc=None,
+  sample_note="",
+  sample_ms=10000,
+  can_submaster=None,
+  can_address_filter=None,
+  can_source_filter=None,
+):
+  frames, can_summary = _capture_can_frames(
+    sample_ms=sample_ms,
+    submaster=can_submaster,
+    address_filter=can_address_filter,
+    source_filter=can_source_filter,
+  )
   decoded = {}
   raw_values = {
     "egmpParserVersion": "2026.07.07.2",
@@ -4069,11 +4162,10 @@ def _build_egmp_can_telemetry_payload(model_info, position, known_soc=None, samp
   }
 
   if has_maps_data:
-    _vehicle_telemetry_cache_store(payload)
-    _vehicle_telemetry_sample_store(payload, frames, known_soc=known_soc, note=sample_note)
+    _vehicle_telemetry_live_store(payload, frames, known_soc=known_soc, note=sample_note)
     return payload, 200
 
-  cached = _vehicle_telemetry_cache_load()
+  cached = _vehicle_telemetry_best_cache_load()
   if cached:
     cached = dict(cached)
     cached.update({
@@ -4089,12 +4181,20 @@ def _build_egmp_can_telemetry_payload(model_info, position, known_soc=None, samp
 
   return payload, 503
 
-def _build_vehicle_telemetry_payload(known_soc=None, sample_note="", sample_ms=10000, cache_first_max_age_seconds=None):
+def _build_vehicle_telemetry_payload(
+  known_soc=None,
+  sample_note="",
+  sample_ms=10000,
+  cache_first_max_age_seconds=None,
+  can_submaster=None,
+  can_address_filter=None,
+  can_source_filter=None,
+):
   model_info = _get_vehicle_telemetry_model_name()
   position = _get_navigation_last_position()
 
   if cache_first_max_age_seconds is not None:
-    cached = _vehicle_telemetry_cache_load(max_age_seconds=cache_first_max_age_seconds)
+    cached = _vehicle_telemetry_best_cache_load(max_age_seconds=cache_first_max_age_seconds)
     if cached:
       return dict(cached), 200
 
@@ -4105,6 +4205,9 @@ def _build_vehicle_telemetry_payload(known_soc=None, sample_note="", sample_ms=1
       known_soc=known_soc,
       sample_note=sample_note,
       sample_ms=sample_ms,
+      can_submaster=can_submaster,
+      can_address_filter=can_address_filter,
+      can_source_filter=can_source_filter,
     )
     if can_status_code == 200:
       return can_payload, can_status_code
@@ -4149,8 +4252,7 @@ def _build_vehicle_telemetry_payload(known_soc=None, sample_note="", sample_ms=1
       "canErrorCounter": int(getattr(car_state, "canErrorCounter", 0) or 0),
       "location": position,
     }
-    _vehicle_telemetry_cache_store(payload)
-    _vehicle_telemetry_sample_store(payload, [], known_soc=known_soc, note=sample_note)
+    _vehicle_telemetry_live_store(payload, [], known_soc=known_soc, note=sample_note)
     return payload, 200
   except Exception as exception:
     return {
@@ -4167,9 +4269,11 @@ def _vehicle_telemetry_background_worker():
   while True:
     try:
       _build_vehicle_telemetry_payload(
-        sample_note="background_sampler",
+        sample_note="background_live_cache",
         sample_ms=_VEHICLE_TELEMETRY_BACKGROUND_SAMPLE_MS,
         cache_first_max_age_seconds=None,
+        can_address_filter=_EGMP_PASSIVE_TELEMETRY_ADDRESSES,
+        can_source_filter={1},
       )
     except Exception:
       pass
