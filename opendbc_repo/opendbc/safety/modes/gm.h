@@ -581,7 +581,7 @@ static safety_config gm_init(uint16_t param) {
 
   // block PSCMStatus (0x184); forwarded through openpilot to hide an alert from the camera
   static const CanMsg GM_CAM_LONG_TX_MSGS[] = {{0x180, 0, 4, .check_relay = true}, {0x315, 0, 5, .check_relay = true}, {0x2CB, 0, 8, .check_relay = true}, {0x2CD, 0, 5, .check_relay = true}, {0x370, 0, 6, .check_relay = true}, {0x3D1, 0, 8, .check_relay = false},  // pt bus
-                                               {0x184, 2, 8, .check_relay = true},  // camera bus
+                                               {0x184, 2, 8, .check_relay = true}, {0x315, 2, 5, .check_relay = false},  // camera bus (SASCM brake relay)
                                                {0x200, 0, 6, .check_relay = false}, {0x1E1, 0, 7, .check_relay = false},
                                                {0xBD, 0, 7, .check_relay = false}, {0x1F5, 0, 8, .check_relay = false}};  // pt bus
 

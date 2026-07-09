@@ -333,6 +333,14 @@ def get_friction_brake_bus(CP):
 
   if CP.networkLocation == NetworkLocation.fwdCamera:
     if CP.carFingerprint in SDGM_CAR:
+      # cam-long: 0x315 goes where the panda whitelist allows it and the EBCM hears it
+      safety_cfg = getattr(CP, "safetyConfigs", ())
+      safety_param = safety_cfg[0].safetyParam if safety_cfg else 0
+      if safety_param & GMSafetyFlags.HW_CAM_LONG.value:
+        # SASCM relays 0x315 to the EBCM off its camera-bus (bus2) leg; bare SDGM uses the pt bus
+        if CP.flags & GMFlags.SASCM.value:
+          return CanBus.CAMERA
+        return CanBus.POWERTRAIN
       return CanBus.CAMERA
     return CanBus.POWERTRAIN
 
