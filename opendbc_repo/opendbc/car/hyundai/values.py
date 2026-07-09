@@ -1145,6 +1145,8 @@ CAN_GEARS = {
 }
 
 CANFD_CAR = CAR.with_flags(HyundaiFlags.CANFD)
+# Energy telemetry is only validated on the EV9 CCNC bus layout for now.
+CANFD_EV_TELEMETRY_CAR = {CAR.KIA_EV9}
 CANFD_RADAR_SCC_CAR = CAR.with_flags(HyundaiFlags.RADAR_SCC)  # TODO: merge with UNSUPPORTED_LONGITUDINAL_CAR
 
 # CAN-FD cars with ADAS ECUs that work with the communication-control path.

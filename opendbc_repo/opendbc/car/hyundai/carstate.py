@@ -8,7 +8,8 @@ from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.values import HyundaiFlags, HyundaiStarPilotFlags, HyundaiStarPilotSafetyFlags, CAR, DBC, Buttons, CarControllerParams, \
-                                       hyundai_cancel_button_enables_cruise, ALT_BUS_LDA_BUTTON_CARS, ALT_BUS_LDA_BUTTON_SWL_STAT_CARS
+                                       hyundai_cancel_button_enables_cruise, ALT_BUS_LDA_BUTTON_CARS, ALT_BUS_LDA_BUTTON_SWL_STAT_CARS, \
+                                       CANFD_EV_TELEMETRY_CAR
 from opendbc.car.interfaces import CarStateBase
 
 ButtonType = structs.CarState.ButtonEvent.Type
@@ -429,6 +430,29 @@ class CarState(CarStateBase):
     ret.doorOpen = cp.vl["DOORS_SEATBELTS"]["DRIVER_DOOR"] == 1
     ret.seatbeltUnlatched = cp.vl["DOORS_SEATBELTS"]["DRIVER_SEATBELT"] == 0
 
+    if self.CP.carFingerprint in CANFD_EV_TELEMETRY_CAR:
+      primary_soc = cp.vl["EV_ENERGY_STATUS"]["BATTERY_SOC"]
+      redundant_soc = cp.vl["EV_ENERGY_STATUS_REDUNDANT"]["BATTERY_SOC_REDUNDANT"]
+      primary_soc_seen = cp.ts_nanos["EV_ENERGY_STATUS"]["BATTERY_SOC"] > 0
+      redundant_soc_seen = cp.ts_nanos["EV_ENERGY_STATUS_REDUNDANT"]["BATTERY_SOC_REDUNDANT"] > 0
+      soc_candidates = [soc for soc, seen in ((primary_soc, primary_soc_seen), (redundant_soc, redundant_soc_seen))
+                        if seen and 0.0 <= soc <= 100.0]
+      if soc_candidates and max(soc_candidates) - min(soc_candidates) <= 1.0:
+        ret.fuelGauge = sum(soc_candidates) / len(soc_candidates) / 100.0
+
+      dte_km = cp.vl["EV_RANGE_STATUS"]["DISTANCE_TO_EMPTY"]
+      if cp.ts_nanos["EV_RANGE_STATUS"]["DISTANCE_TO_EMPTY"] > 0 and 0.0 < dte_km < 900.0:
+        ret.distanceToEmpty = dte_km * 1000.0
+
+      primary_charging = cp.vl["EV_ENERGY_STATUS"]["CHARGING_ACTIVE"] == 1
+      redundant_charging = cp.vl["EV_ENERGY_STATUS_REDUNDANT"]["CHARGING_ACTIVE_REDUNDANT"] == 1
+      charging_signals_seen = (
+        cp.ts_nanos["EV_ENERGY_STATUS"]["CHARGING_ACTIVE"] > 0
+        and cp.ts_nanos["EV_ENERGY_STATUS_REDUNDANT"]["CHARGING_ACTIVE_REDUNDANT"] > 0
+      )
+      # Require both independently observed CCNC states to avoid publishing checksum noise as charging.
+      ret.charging = charging_signals_seen and primary_charging and redundant_charging
+
     gear = cp.vl[self.gear_msg_canfd]["GEAR"]
     ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(gear))
 
@@ -595,6 +619,12 @@ class CarState(CarStateBase):
     if CP.flags & HyundaiFlags.EV:
       msgs.append(("DRIVE_MODE_EV", 0))  # optional: not all CAN-FD EV variants publish drive mode
       msgs.append(("MANUAL_SPEED_LIMIT_ASSIST", 0))  # optional: used for non-adaptive cruise state and Ioniq 6 i-Pedal latch detection
+    if CP.carFingerprint in CANFD_EV_TELEMETRY_CAR:
+      msgs += [
+        ("EV_RANGE_STATUS", 0),
+        ("EV_ENERGY_STATUS_REDUNDANT", 0),
+        ("EV_ENERGY_STATUS", 0),
+      ]
     msgs.append(("STEERING_WHEEL_MEDIA_BUTTONS", 0))  # optional: absent or slower on some CAN-FD variants
     cam_msgs.append(("ADAS_0x380", 0))  # optional: dashboard stop-sign signal, only on ADAS-equipped HKG CANFD
     return {

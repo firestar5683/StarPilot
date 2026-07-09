@@ -556,6 +556,11 @@ BO_ 687 HOD_FD_01_100ms: 8 XXX
  SG_ NEW_SIGNAL_3 : 40|8@1+ (1,0) [0|255] "" XXX
  SG_ HOD_Option : 48|2@1+ (1,0) [0|255] "" XXX
 
+BO_ 693 EV_RANGE_STATUS: 32 XXX
+ SG_ DISTANCE_TO_EMPTY : 64|16@1+ (1,0) [0|900] "km" XXX
+
+CM_ SG_ 693 DISTANCE_TO_EMPTY "EV9 CCNC cluster DTE; matched displayed range across 154 captured samples.";
+
 BO_ 698 FR_CMR_04_40ms: 32 FR_CMR
  SG_ FR_CMR_Crc4Val : 0|16@1+ (1,0) [0|65535] "" Dummy
  SG_ FR_CMR_AlvCnt4Val : 16|8@1+ (1,0) [0|255] "" Dummy
@@ -600,6 +605,20 @@ BO_ 736 MANUAL_SPEED_LIMIT_ASSIST: 32 XXX
  SG_ MSLA_ENABLED : 38|1@1+ (1,0) [0|1] "" XXX
  SG_ MAX_SPEED : 55|8@0+ (1,0) [0|255] "" XXX
  SG_ MAX_SPEED_COPY : 144|8@1+ (1,0) [0|255] "" XXX
+
+BO_ 762 EV_ENERGY_STATUS_REDUNDANT: 32 XXX
+ SG_ BATTERY_SOC_REDUNDANT : 120|8@1+ (0.5,0) [0|100] "%" XXX
+ SG_ CHARGING_ACTIVE_REDUNDANT : 200|1@1+ (1,0) [0|1] "" XXX
+
+CM_ SG_ 762 BATTERY_SOC_REDUNDANT "EV9 CCNC display SOC redundancy; validated against user-observed SOC.";
+CM_ SG_ 762 CHARGING_ACTIVE_REDUNDANT "EV9 CCNC candidate active-charge state; use only with the agreeing 0x320 state.";
+
+BO_ 800 EV_ENERGY_STATUS: 32 XXX
+ SG_ CHARGING_ACTIVE : 48|1@1+ (1,0) [0|1] "" XXX
+ SG_ BATTERY_SOC : 56|8@1+ (0.5,0) [0|100] "%" XXX
+
+CM_ SG_ 800 BATTERY_SOC "EV9 CCNC display SOC; validated against user-observed SOC.";
+CM_ SG_ 800 CHARGING_ACTIVE "EV9 CCNC candidate active-charge state; set in charging captures and clear in driving captures.";
 
 BO_ 837 ADRV_0x345: 8 ADRV
  SG_ CHECKSUM : 0|16@1+ (1,0) [0|65535] "" XXX

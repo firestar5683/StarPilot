@@ -229,6 +229,7 @@ struct CarState {
 
   fuelGauge @41 :Float32; # battery or fuel tank level from [0.0, 1.0]
   charging @43 :Bool;
+  distanceToEmpty @61 :Float32; # remaining range in meters
 
   struct WheelSpeeds {
     # optional wheel speeds

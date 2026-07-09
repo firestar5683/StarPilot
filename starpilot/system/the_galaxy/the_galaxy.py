@@ -3687,7 +3687,6 @@ def _compact_vehicle_telemetry_payload(payload):
     "updatedAt",
     "source",
     "vehicleName",
-    "vin",
     "stateOfChargePercent",
     "fuelGauge",
     "distanceToEmptyKilometers",
@@ -3931,6 +3930,12 @@ def _passive_candidate(data_by_addr, address, offset, scale=1.0, length=1, signe
     return None
   return raw * scale
 
+def _passive_bit(data_by_addr, address, offset, bit):
+  data = data_by_addr.get(address)
+  if data is None or offset >= len(data) or not 0 <= bit <= 7:
+    return None
+  return (data[offset] >> bit) & 1
+
 def _consensus_value(candidates, tolerance):
   valid = [(name, value) for name, value in candidates if isinstance(value, numbers.Number) and math.isfinite(float(value))]
   for name, value in valid:
@@ -3982,11 +3987,11 @@ def _decode_egmp_passive_display_frames(frames):
       display_half_soc = round(float(candidate_value), 2)
       display_half_soc_sources = [candidate_name]
 
-  power_candidates = [
-    ("0x405[0]/10", _passive_candidate(data_by_addr, 0x405, 0, 0.1)),
-    ("0x4f2[7]/10", _passive_candidate(data_by_addr, 0x4f2, 7, 0.1)),
+  charging_candidates = [
+    ("0x320[6].0", _passive_bit(data_by_addr, 0x320, 6, 0)),
+    ("0x2fa[25].0", _passive_bit(data_by_addr, 0x2fa, 25, 0)),
   ]
-  charge_power, power_sources = _consensus_value([(name, value) for name, value in power_candidates if value is not None and 0 <= value <= 25], 0.2)
+  valid_charging_candidates = [(name, value) for name, value in charging_candidates if value in (0, 1)]
 
   if display_half_soc is not None:
     soc = _display_integer_soc(display_half_soc)
@@ -4022,17 +4027,14 @@ def _decode_egmp_passive_display_frames(frames):
   if charge_limit is not None and 50 <= charge_limit <= 100:
     decoded["chargeLimitPercent"] = float(charge_limit)
     raw_values["passiveChargeLimitSource"] = "0x414[0] tentative percent"
-  if charge_power is not None:
-    decoded["chargingPowerKilowatts"] = charge_power
-    decoded["isCharging"] = charge_power > 0.2
-    decoded["isPluggedIn"] = charge_power > 0.2
-    if charge_power > 25:
-      decoded["activeConnector"] = "nacsDC"
-      decoded["plugPowerType"] = "dc"
-    elif charge_power > 0.2:
-      decoded["activeConnector"] = "nacsAC"
-      decoded["plugPowerType"] = "ac"
-    raw_values["passiveChargePowerSources"] = ",".join(power_sources)
+  if len(valid_charging_candidates) == 2 and valid_charging_candidates[0][1] == valid_charging_candidates[1][1]:
+    charging = bool(valid_charging_candidates[0][1])
+    decoded["isCharging"] = charging
+    if charging:
+      decoded["isPluggedIn"] = True
+    raw_values["passiveChargingSources"] = ",".join(name for name, _ in valid_charging_candidates)
+  elif valid_charging_candidates:
+    raw_values["passiveChargingRejected"] = ",".join(f"{name}={value}" for name, value in valid_charging_candidates)
   if decoded:
     raw_values["egmpPassiveDecoder"] = "display_half_soc"
 
@@ -4110,7 +4112,7 @@ def _build_egmp_can_telemetry_payload(
   )
   decoded = {}
   raw_values = {
-    "egmpParserVersion": "2026.07.07.2",
+    "egmpParserVersion": "2026.07.09.1",
     "batteryCapacityKilowattHours": str(_EGMP_EV9_USA_BATTERY_KWH),
     "maximumDistanceKilometers": str(_EGMP_EV9_USA_MAX_RANGE_KM),
   }
@@ -4125,23 +4127,8 @@ def _build_egmp_can_telemetry_payload(
     raw_values[f"udsSource{pid:04x}"] = f"{entry['src']}:{hex(entry['address'])}"
 
   passive_decoded, passive_raw = _decode_egmp_passive_display_frames(frames)
-  passive_charging_soc = passive_decoded.get("stateOfChargePercent")
-  passive_charge_power = passive_decoded.get("chargingPowerKilowatts")
-  passive_should_override_soc = (
-    isinstance(passive_charging_soc, numbers.Number)
-    and isinstance(passive_charge_power, numbers.Number)
-    and passive_charge_power > 0.2
-    and bool(passive_raw.get("passiveChargingDisplaySocCandidates"))
-    and (
-      decoded.get("stateOfChargePercent") is None
-      or abs(float(passive_charging_soc) - float(decoded.get("stateOfChargePercent"))) <= 2.0
-    )
-  )
   for key, value in passive_decoded.items():
-    if key == "stateOfChargePercent" and passive_should_override_soc:
-      decoded[key] = value
-    else:
-      decoded.setdefault(key, value)
+    decoded.setdefault(key, value)
   raw_values.update(passive_raw)
 
   if decoded.get("stateOfChargePercent") is None and decoded.get("bmsStateOfChargePercent") is not None:
@@ -4209,6 +4196,48 @@ def _build_egmp_can_telemetry_payload(
 
   return payload, 503
 
+def _build_car_state_telemetry_payload(model_info, position, known_soc=None, sample_note=""):
+  sm = messaging.SubMaster(["carState"], poll="carState")
+  sm.update(100)
+  if not (sm.seen["carState"] and sm.alive["carState"] and sm.valid["carState"]):
+    return None
+
+  car_state = sm["carState"]
+  fuel_gauge = _safe_float(getattr(car_state, "fuelGauge", float("nan")), float("nan"))
+  has_soc = math.isfinite(fuel_gauge) and 0.0 < fuel_gauge <= 1.0
+  state_of_charge_percent = round(max(0.0, min(100.0, fuel_gauge * 100.0)), 1) if has_soc else None
+  distance_to_empty_meters = _safe_float(getattr(car_state, "distanceToEmpty", float("nan")), float("nan"))
+  has_dte = math.isfinite(distance_to_empty_meters) and 0.0 < distance_to_empty_meters < 900000.0
+  distance_to_empty_km = round(distance_to_empty_meters / 1000.0, 1) if has_dte else None
+  if not has_soc and not has_dte:
+    return None
+
+  charging = bool(getattr(car_state, "charging", False))
+  payload = {
+    **model_info,
+    "source": "StarPilot Galaxy CAN",
+    "available": True,
+    "status": "ok",
+    "message": "Live CAN-backed carState available.",
+    "updatedAt": time.time(),
+    "stateOfChargePercent": state_of_charge_percent,
+    "fuelGauge": round(fuel_gauge, 4) if has_soc else None,
+    "distanceToEmptyKilometers": distance_to_empty_km,
+    "estimatedRangeKilometers": distance_to_empty_km,
+    "isCharging": charging,
+    "isPluggedIn": True if charging else None,
+    "speedMetersPerSecond": round(_safe_float(getattr(car_state, "vEgo", 0.0), 0.0), 3),
+    "standstill": bool(getattr(car_state, "standstill", False)),
+    "canValid": bool(getattr(car_state, "canValid", False)),
+    "canTimeout": bool(getattr(car_state, "canTimeout", False)),
+    "canErrorCounter": int(getattr(car_state, "canErrorCounter", 0) or 0),
+    "location": position,
+  }
+  if model_info.get("carFingerprint") == "KIA_EV9":
+    payload["maximumBatteryCapacityKilowattHours"] = _EGMP_EV9_USA_BATTERY_KWH
+  _vehicle_telemetry_live_store(payload, [], known_soc=known_soc, note=sample_note)
+  return payload, 200
+
 def _build_vehicle_telemetry_payload(
   known_soc=None,
   sample_note="",
@@ -4227,6 +4256,15 @@ def _build_vehicle_telemetry_payload(
       return dict(cached), 200
 
   try:
+    car_state_result = _build_car_state_telemetry_payload(
+      model_info,
+      position,
+      known_soc=known_soc,
+      sample_note=sample_note,
+    )
+    if car_state_result is not None:
+      return car_state_result
+
     can_payload, can_status_code = _build_egmp_can_telemetry_payload(
       model_info,
       position,
@@ -4239,49 +4277,7 @@ def _build_vehicle_telemetry_payload(
     )
     if can_status_code == 200:
       return can_payload, can_status_code
-
-    sm = messaging.SubMaster(["carState"], poll="carState")
-    sm.update(100)
-    has_live_car_state = sm.seen["carState"] and sm.alive["carState"] and sm.valid["carState"]
-    if not has_live_car_state:
-      can_payload.update({
-        **model_info,
-        "source": "StarPilot Galaxy E-GMP CAN",
-        "available": False,
-        "status": can_payload.get("status") or "waiting_for_live_car_state",
-        "message": can_payload.get("message") or "Waiting for live CAN-backed carState.",
-        "updatedAt": time.time(),
-        "location": position,
-      })
-      return can_payload, 503
-
-    car_state = sm["carState"]
-    fuel_gauge = _safe_float(getattr(car_state, "fuelGauge", float("nan")), float("nan"))
-    has_soc = math.isfinite(fuel_gauge) and 0.0 <= fuel_gauge <= 1.0
-    state_of_charge_percent = round(max(0.0, min(100.0, fuel_gauge * 100.0)), 1) if has_soc else None
-    can_valid = bool(getattr(car_state, "canValid", False))
-
-    payload = {
-      **model_info,
-      "source": "StarPilot Galaxy CAN",
-      "available": True,
-      "status": "ok" if has_soc else "missing_soc",
-      "message": "Live CAN-backed carState available." if has_soc else "Live carState is available, but fuelGauge is not populated.",
-      "updatedAt": time.time(),
-      "stateOfChargePercent": state_of_charge_percent,
-      "fuelGauge": round(fuel_gauge, 4) if has_soc else None,
-      "estimatedRangeKilometers": None,
-      "isCharging": bool(getattr(car_state, "charging", False)),
-      "isPluggedIn": bool(getattr(car_state, "charging", False)) if bool(getattr(car_state, "charging", False)) else None,
-      "speedMetersPerSecond": round(_safe_float(getattr(car_state, "vEgo", 0.0), 0.0), 3),
-      "standstill": bool(getattr(car_state, "standstill", False)),
-      "canValid": can_valid,
-      "canTimeout": bool(getattr(car_state, "canTimeout", False)),
-      "canErrorCounter": int(getattr(car_state, "canErrorCounter", 0) or 0),
-      "location": position,
-    }
-    _vehicle_telemetry_live_store(payload, [], known_soc=known_soc, note=sample_note)
-    return payload, 200
+    return can_payload, can_status_code
   except Exception as exception:
     return {
       **model_info,
