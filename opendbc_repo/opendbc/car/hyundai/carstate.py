@@ -444,14 +444,21 @@ class CarState(CarStateBase):
       if cp.ts_nanos["EV_RANGE_STATUS"]["DISTANCE_TO_EMPTY"] > 0 and 0.0 < dte_km < 900.0:
         ret.distanceToEmpty = dte_km * 1000.0
 
+      plug_connected = cp.vl["EV_CHARGE_STATUS"]["CHARGE_PORT_CONNECTED"] == 1
+      plug_connected_redundant = cp.vl["EV_CHARGE_STATUS"]["CHARGE_PORT_CONNECTED_REDUNDANT"] == 1
+      plug_signals_seen = (
+        cp.ts_nanos["EV_CHARGE_STATUS"]["CHARGE_PORT_CONNECTED"] > 0
+        and cp.ts_nanos["EV_CHARGE_STATUS"]["CHARGE_PORT_CONNECTED_REDUNDANT"] > 0
+      )
+      ret.chargingPortConnected = plug_signals_seen and plug_connected and plug_connected_redundant
+
       primary_charging = cp.vl["EV_ENERGY_STATUS"]["CHARGING_ACTIVE"] == 1
-      redundant_charging = cp.vl["EV_ENERGY_STATUS_REDUNDANT"]["CHARGING_ACTIVE_REDUNDANT"] == 1
+      redundant_charging = cp.vl["EV_CHARGE_STATUS"]["CHARGING_ACTIVE_REDUNDANT"] == 1
       charging_signals_seen = (
         cp.ts_nanos["EV_ENERGY_STATUS"]["CHARGING_ACTIVE"] > 0
-        and cp.ts_nanos["EV_ENERGY_STATUS_REDUNDANT"]["CHARGING_ACTIVE_REDUNDANT"] > 0
+        and cp.ts_nanos["EV_CHARGE_STATUS"]["CHARGING_ACTIVE_REDUNDANT"] > 0
       )
-      # Require both independently observed CCNC states to avoid publishing checksum noise as charging.
-      ret.charging = charging_signals_seen and primary_charging and redundant_charging
+      ret.charging = ret.chargingPortConnected and charging_signals_seen and primary_charging and redundant_charging
 
     gear = cp.vl[self.gear_msg_canfd]["GEAR"]
     ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(gear))
@@ -623,6 +630,7 @@ class CarState(CarStateBase):
       msgs += [
         ("EV_RANGE_STATUS", 0),
         ("EV_ENERGY_STATUS_REDUNDANT", 0),
+        ("EV_CHARGE_STATUS", 0),
         ("EV_ENERGY_STATUS", 0),
       ]
     msgs.append(("STEERING_WHEEL_MEDIA_BUTTONS", 0))  # optional: absent or slower on some CAN-FD variants

@@ -120,7 +120,7 @@ _TESTING_GROUND_CUSTOM_RESERVED_LAST_PUBLISH_MONO = 0.0
 _VEHICLE_TELEMETRY_CACHE_PATH = Path("/data/galaxy/vehicle_telemetry.json")
 _VEHICLE_TELEMETRY_SAMPLE_LOG_PATH = Path("/data/galaxy/vehicle_telemetry_samples.jsonl")
 _VEHICLE_TELEMETRY_SAMPLE_LOG_MAX_BYTES = 2 * 1024 * 1024
-_VEHICLE_TELEMETRY_BACKGROUND_SAMPLE_MS = 1000
+_VEHICLE_TELEMETRY_BACKGROUND_SAMPLE_MS = 500
 _VEHICLE_TELEMETRY_BACKGROUND_INTERVAL_S = 10.0
 _VEHICLE_TELEMETRY_CACHE_FIRST_MAX_AGE_S = 120.0
 _VEHICLE_TELEMETRY_CACHE_WRITE_INTERVAL_S = 60.0
@@ -130,7 +130,7 @@ _VEHICLE_TELEMETRY_LIVE_LOCK = threading.Lock()
 _VEHICLE_TELEMETRY_LIVE_PAYLOAD = None
 _VEHICLE_TELEMETRY_LIVE_SIGNATURE = None
 _VEHICLE_TELEMETRY_LIVE_LAST_STORE_MONO = 0.0
-_EGMP_PASSIVE_TELEMETRY_ADDRESSES = frozenset((0x2b5, 0x2fa, 0x30a, 0x320, 0x405, 0x414, 0x4d8, 0x4f2))
+_EGMP_PASSIVE_TELEMETRY_ADDRESSES = frozenset((0x2b5, 0x2fa, 0x30a, 0x320))
 _EGMP_EV9_USA_MAX_RANGE_KM = 450.6
 _EGMP_EV9_USA_BATTERY_KWH = 99.8
 PANDA_FIRMWARE_TOGGLE_KEYS = {"IgnoreIgnitionLine", "RemoteStartBootsComma", "HKGRemoteStartBootsComma"}
@@ -3987,10 +3987,15 @@ def _decode_egmp_passive_display_frames(frames):
       display_half_soc = round(float(candidate_value), 2)
       display_half_soc_sources = [candidate_name]
 
+  plugged_candidates = [
+    ("0x30a[3].3", _passive_bit(data_by_addr, 0x30a, 3, 3)),
+    ("0x30a[29].0", _passive_bit(data_by_addr, 0x30a, 29, 0)),
+  ]
   charging_candidates = [
     ("0x320[6].0", _passive_bit(data_by_addr, 0x320, 6, 0)),
-    ("0x2fa[25].0", _passive_bit(data_by_addr, 0x2fa, 25, 0)),
+    ("0x30a[4].4", _passive_bit(data_by_addr, 0x30a, 4, 4)),
   ]
+  valid_plugged_candidates = [(name, value) for name, value in plugged_candidates if value in (0, 1)]
   valid_charging_candidates = [(name, value) for name, value in charging_candidates if value in (0, 1)]
 
   if display_half_soc is not None:
@@ -4001,8 +4006,6 @@ def _decode_egmp_passive_display_frames(frames):
     soc_sources = []
 
   legacy_dte_miles = _passive_candidate(data_by_addr, 0x4d8, 2, 1.0, length=2, little_endian=True)
-  charge_limit = _passive_candidate(data_by_addr, 0x414, 0, 1.0)
-
   decoded = {}
   raw_values = {}
   if soc is not None:
@@ -4024,14 +4027,16 @@ def _decode_egmp_passive_display_frames(frames):
     raw_values["passiveRejectedDteMiles0x30a"] = str(int(dte_miles))
   if legacy_dte_miles is not None and 0 < legacy_dte_miles < 600:
     raw_values["passiveLegacyDteMiles0x4d8"] = str(int(legacy_dte_miles))
-  if charge_limit is not None and 50 <= charge_limit <= 100:
-    decoded["chargeLimitPercent"] = float(charge_limit)
-    raw_values["passiveChargeLimitSource"] = "0x414[0] tentative percent"
+  plugged = None
+  if len(valid_plugged_candidates) == 2 and valid_plugged_candidates[0][1] == valid_plugged_candidates[1][1]:
+    plugged = bool(valid_plugged_candidates[0][1])
+    decoded["isPluggedIn"] = plugged
+    raw_values["passivePluggedSources"] = ",".join(name for name, _ in valid_plugged_candidates)
+  elif valid_plugged_candidates:
+    raw_values["passivePluggedRejected"] = ",".join(f"{name}={value}" for name, value in valid_plugged_candidates)
   if len(valid_charging_candidates) == 2 and valid_charging_candidates[0][1] == valid_charging_candidates[1][1]:
-    charging = bool(valid_charging_candidates[0][1])
+    charging = bool(valid_charging_candidates[0][1]) and plugged is True
     decoded["isCharging"] = charging
-    if charging:
-      decoded["isPluggedIn"] = True
     raw_values["passiveChargingSources"] = ",".join(name for name, _ in valid_charging_candidates)
   elif valid_charging_candidates:
     raw_values["passiveChargingRejected"] = ",".join(f"{name}={value}" for name, value in valid_charging_candidates)
@@ -4213,6 +4218,7 @@ def _build_car_state_telemetry_payload(model_info, position, known_soc=None, sam
     return None
 
   charging = bool(getattr(car_state, "charging", False))
+  charging_port_connected = bool(getattr(car_state, "chargingPortConnected", False))
   payload = {
     **model_info,
     "source": "StarPilot Galaxy CAN",
@@ -4225,7 +4231,7 @@ def _build_car_state_telemetry_payload(model_info, position, known_soc=None, sam
     "distanceToEmptyKilometers": distance_to_empty_km,
     "estimatedRangeKilometers": distance_to_empty_km,
     "isCharging": charging,
-    "isPluggedIn": True if charging else None,
+    "isPluggedIn": charging_port_connected,
     "speedMetersPerSecond": round(_safe_float(getattr(car_state, "vEgo", 0.0), 0.0), 3),
     "standstill": bool(getattr(car_state, "standstill", False)),
     "canValid": bool(getattr(car_state, "canValid", False)),

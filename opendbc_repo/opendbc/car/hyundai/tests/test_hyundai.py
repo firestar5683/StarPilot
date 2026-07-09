@@ -120,13 +120,19 @@ class TestEV9EnergyTelemetry:
     parser = CANParser(dbc, [
       ("EV_RANGE_STATUS", 0),
       ("EV_ENERGY_STATUS_REDUNDANT", 0),
+      ("EV_CHARGE_STATUS", 0),
       ("EV_ENERGY_STATUS", 0),
     ], 1)
     messages = [
       packer.make_can_msg("EV_RANGE_STATUS", 1, {"DISTANCE_TO_EMPTY": 511}),
       packer.make_can_msg("EV_ENERGY_STATUS_REDUNDANT", 1, {
         "BATTERY_SOC_REDUNDANT": 97.5,
+        "CHARGING_STATE_AUX": 0,
+      }),
+      packer.make_can_msg("EV_CHARGE_STATUS", 1, {
+        "CHARGE_PORT_CONNECTED": 0,
         "CHARGING_ACTIVE_REDUNDANT": 0,
+        "CHARGE_PORT_CONNECTED_REDUNDANT": 0,
       }),
       packer.make_can_msg("EV_ENERGY_STATUS", 1, {
         "BATTERY_SOC": 97.5,
@@ -140,7 +146,9 @@ class TestEV9EnergyTelemetry:
     assert parser.vl["EV_ENERGY_STATUS"]["BATTERY_SOC"] == 97.5
     assert parser.vl["EV_ENERGY_STATUS"]["CHARGING_ACTIVE"] == 0
     assert parser.vl["EV_ENERGY_STATUS_REDUNDANT"]["BATTERY_SOC_REDUNDANT"] == 97.5
-    assert parser.vl["EV_ENERGY_STATUS_REDUNDANT"]["CHARGING_ACTIVE_REDUNDANT"] == 0
+    assert parser.vl["EV_CHARGE_STATUS"]["CHARGE_PORT_CONNECTED"] == 0
+    assert parser.vl["EV_CHARGE_STATUS"]["CHARGING_ACTIVE_REDUNDANT"] == 0
+    assert parser.vl["EV_CHARGE_STATUS"]["CHARGE_PORT_CONNECTED_REDUNDANT"] == 0
 
 
 class TestHyundaiFingerprint:
