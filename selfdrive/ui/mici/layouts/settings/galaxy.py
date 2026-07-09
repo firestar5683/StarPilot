@@ -56,7 +56,7 @@ def _galaxy_pairing_payload_value(slug: str, token: str) -> str:
     "sessionToken": session_token,
     "appKey": session_token,
     "token": session_token,
-    "telemetryPath": "/api/galaxy/session",
+    "telemetryPath": "/api/galaxy/telemetry",
   }
   local_base_url = _local_base_url()
   if local_base_url:

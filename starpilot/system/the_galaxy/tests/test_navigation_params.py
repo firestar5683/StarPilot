@@ -188,6 +188,65 @@ def test_galaxy_session_value_matches_cookie_format():
   ) == f"testGalaxySlug01%3A{'a' * 64}"
 
 
+def test_ios_pairing_advertises_compact_telemetry_endpoint():
+  payload = the_galaxy._build_ios_galaxy_pairing_payload(
+    "testGalaxySlug01",
+    "a" * 64,
+    "http://192.168.0.75:8082",
+  )
+
+  assert payload["telemetryPath"] == "/api/galaxy/telemetry"
+  assert payload["vehicleTelemetryUrl"] == "https://galaxy.firestar.link/api/galaxy/telemetry"
+
+
+def test_compact_vehicle_telemetry_payload_keeps_only_maps_fields():
+  payload = the_galaxy._compact_vehicle_telemetry_payload({
+    "available": True,
+    "status": "ok",
+    "updatedAt": 1234.5,
+    "source": "StarPilot Galaxy E-GMP CAN",
+    "vehicleName": "Kia EV9",
+    "stateOfChargePercent": 82.0,
+    "distanceToEmptyKilometers": 401.0,
+    "isCharging": False,
+    "isPluggedIn": None,
+    "rawValues": {"large": "diagnostic payload"},
+    "canTopFrames": [{"address": "0x2b5"}],
+    "location": {"latitude": 41.0, "longitude": -87.0},
+  })
+
+  assert payload == {
+    "available": True,
+    "status": "ok",
+    "updatedAt": 1234.5,
+    "source": "StarPilot Galaxy E-GMP CAN",
+    "vehicleName": "Kia EV9",
+    "stateOfChargePercent": 82.0,
+    "distanceToEmptyKilometers": 401.0,
+  }
+
+
+def test_galaxy_telemetry_route_reads_cache_without_sampling(monkeypatch):
+  monkeypatch.setattr(the_galaxy, "_start_vehicle_telemetry_background_sampler", lambda: None)
+  client, _ = _params_client(monkeypatch, {"IsOnroad": False}, "tici")
+  monkeypatch.setattr(the_galaxy, "_vehicle_telemetry_best_cache_load", lambda: {
+    "updatedAt": 1234.5,
+    "stateOfChargePercent": 82.0,
+    "rawValues": {"large": "diagnostic payload"},
+  })
+  monkeypatch.setattr(the_galaxy, "_build_vehicle_telemetry_payload", lambda **_: (_ for _ in ()).throw(AssertionError("sampled CAN")))
+
+  response = client.get("/api/galaxy/telemetry")
+
+  assert response.status_code == 200
+  assert response.headers["Cache-Control"] == "no-store"
+  assert response.get_json() == {
+    "available": True,
+    "stateOfChargePercent": 82.0,
+    "updatedAt": 1234.5,
+  }
+
+
 def test_use_old_ui_is_noop_on_c4_mici(monkeypatch):
   client, fake_params = _params_client(monkeypatch, {"UseOldUI": False, "IsOnroad": False}, "mici")
 

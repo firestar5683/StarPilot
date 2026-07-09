@@ -13,7 +13,7 @@ const state = reactive({
   portalURL: "",
   localBaseURL: "",
   cookieName: "galaxy_session",
-  telemetryPath: "/api/galaxy/session",
+  telemetryPath: "/api/galaxy/telemetry",
   vehicleTelemetryUrl: "",
   password: "",
   loading: true,
@@ -37,7 +37,7 @@ async function fetchStatus() {
     state.portalURL = data.portalURL || data.url || ""
     state.localBaseURL = data.localBaseURL || ""
     state.cookieName = data.cookieName || "galaxy_session"
-    state.telemetryPath = data.telemetryPath || "/api/galaxy/session"
+    state.telemetryPath = data.telemetryPath || "/api/galaxy/telemetry"
     state.vehicleTelemetryUrl = data.vehicleTelemetryUrl || ""
   } catch (e) {
     console.error("Failed to fetch Galaxy status:", e)
@@ -105,7 +105,7 @@ async function unpair() {
       state.portalURL = ""
       state.localBaseURL = ""
       state.cookieName = "galaxy_session"
-      state.telemetryPath = "/api/galaxy/session"
+      state.telemetryPath = "/api/galaxy/telemetry"
       state.vehicleTelemetryUrl = ""
       showSnackbar(data.message || "Unpaired!")
     } else {

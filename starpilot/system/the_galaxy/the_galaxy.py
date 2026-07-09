@@ -622,7 +622,7 @@ def _build_ios_galaxy_pairing_payload(slug, token, local_base_url=""):
     "sessionToken": session_token,
     "appKey": session_token,
     "token": session_token,
-    "telemetryPath": "/api/galaxy/session",
+    "telemetryPath": "/api/galaxy/telemetry",
   }
   if local_base_url:
     payload["localBaseURL"] = local_base_url
@@ -642,8 +642,8 @@ def _build_ios_galaxy_pairing_payload(slug, token, local_base_url=""):
     "portalURL": public_url,
     "localBaseURL": local_base_url,
     "cookieName": GALAXY_COOKIE_NAME,
-    "telemetryPath": "/api/galaxy/session",
-    "vehicleTelemetryUrl": f"{api_base_url}/api/galaxy/session",
+    "telemetryPath": "/api/galaxy/telemetry",
+    "vehicleTelemetryUrl": f"{api_base_url}/api/galaxy/telemetry",
   }
 
 _GALAXY_MDNS_SERVICE_TYPE = "_sp-galaxy._tcp.local."
@@ -732,7 +732,7 @@ def _start_galaxy_mdns_advertiser(port):
       "version": "1",
       "statusPath": "/api/galaxy/status",
       "sessionPath": "/api/galaxy/session",
-      "telemetryPath": "/api/galaxy/session",
+      "telemetryPath": "/api/galaxy/telemetry",
     }
     service_name = _galaxy_mdns_service_name()
     server_name = f"{re.sub(r'[^A-Za-z0-9-]+', '-', socket.gethostname() or 'comma').strip('-') or 'comma'}.local."
@@ -3676,6 +3676,34 @@ def _vehicle_telemetry_cache_load(max_age_seconds=None):
 
 def _vehicle_telemetry_best_cache_load(max_age_seconds=None):
   return _vehicle_telemetry_live_load(max_age_seconds=max_age_seconds) or _vehicle_telemetry_cache_load(max_age_seconds=max_age_seconds)
+
+def _compact_vehicle_telemetry_payload(payload):
+  if not isinstance(payload, dict):
+    return None
+
+  keys = (
+    "available",
+    "status",
+    "updatedAt",
+    "source",
+    "vehicleName",
+    "vin",
+    "stateOfChargePercent",
+    "fuelGauge",
+    "distanceToEmptyKilometers",
+    "estimatedRangeKilometers",
+    "isCharging",
+    "isPluggedIn",
+    "chargingPowerKilowatts",
+    "minutesToFull",
+    "maximumBatteryCapacityKilowattHours",
+    "activeConnector",
+    "plugPowerType",
+    "chargeLimitPercent",
+  )
+  compact = {key: payload[key] for key in keys if payload.get(key) is not None}
+  compact["available"] = _vehicle_telemetry_has_maps_data(payload)
+  return compact
 
 def _vehicle_telemetry_cache_store(payload):
   if not isinstance(payload, dict):
@@ -7471,6 +7499,22 @@ def setup(app):
     except Exception:
       return default_ms
     return max(250, min(30000, sample_ms))
+
+  @app.route("/api/galaxy/telemetry", methods=["GET"])
+  def galaxy_telemetry():
+    payload = _compact_vehicle_telemetry_payload(_vehicle_telemetry_best_cache_load())
+    if payload is None:
+      payload = {
+        "available": False,
+        "status": "waiting_for_live_vehicle_data",
+      }
+      status_code = 503
+    else:
+      status_code = 200
+
+    response = jsonify(payload)
+    response.headers["Cache-Control"] = "no-store"
+    return response, status_code
 
   @app.route("/api/galaxy/session", methods=["GET"])
   def galaxy_session():
