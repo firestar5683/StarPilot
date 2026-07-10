@@ -3,6 +3,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
 
 import importlib
+import ipaddress
 import math
 import numbers
 import os
@@ -595,6 +596,8 @@ def _request_local_base_url():
     host = (request.host or "").split(":", 1)[0].lower()
     if not host or host in ("galaxy.firestar.link", "www.galaxy.firestar.link"):
       return ""
+    if not _is_galaxy_lan_host(host):
+      return ""
     return request.host_url.rstrip("/")
   except Exception:
     return ""
@@ -652,6 +655,13 @@ _GALAXY_MDNS_LOCK = threading.Lock()
 _GALAXY_MDNS_ZEROCONF = None
 _GALAXY_MDNS_INFO = None
 _GALAXY_MDNS_RETRY_THREAD = None
+_GALAXY_MDNS_ADDRESSES = ()
+_GALAXY_LAN_IPV4_NETWORKS = tuple(ipaddress.ip_network(value) for value in (
+  "10.0.0.0/8",
+  "172.16.0.0/12",
+  "192.168.0.0/16",
+  "169.254.0.0/16",
+))
 
 def _galaxy_mdns_log(message):
   try:
@@ -662,13 +672,28 @@ def _galaxy_mdns_log(message):
   except Exception:
     pass
 
+def _is_galaxy_lan_ipv4_address(value):
+  try:
+    address = ipaddress.ip_address(str(value or "").strip())
+  except ValueError:
+    return False
+  if address.version != 4:
+    return False
+  return any(address in network for network in _GALAXY_LAN_IPV4_NETWORKS)
+
+def _is_galaxy_lan_host(value):
+  host = str(value or "").strip().lower().rstrip(".")
+  if host.endswith(".local"):
+    return True
+  return _is_galaxy_lan_ipv4_address(host)
+
 def _local_ipv4_addresses():
   addresses = []
   try:
     with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
       sock.connect(("8.8.8.8", 80))
       candidate = sock.getsockname()[0]
-      if candidate and not candidate.startswith("127."):
+      if _is_galaxy_lan_ipv4_address(candidate):
         addresses.append(candidate)
   except Exception:
     pass
@@ -676,7 +701,7 @@ def _local_ipv4_addresses():
   try:
     for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET, socket.SOCK_STREAM):
       candidate = info[4][0]
-      if candidate and not candidate.startswith("127.") and candidate not in addresses:
+      if _is_galaxy_lan_ipv4_address(candidate) and candidate not in addresses:
         addresses.append(candidate)
   except Exception:
     pass
@@ -688,7 +713,7 @@ def _galaxy_mdns_service_name():
   return f"StarPilot Galaxy {safe_hostname}.{_GALAXY_MDNS_SERVICE_TYPE}"
 
 def _stop_galaxy_mdns_advertiser():
-  global _GALAXY_MDNS_ZEROCONF, _GALAXY_MDNS_INFO
+  global _GALAXY_MDNS_ZEROCONF, _GALAXY_MDNS_INFO, _GALAXY_MDNS_ADDRESSES
   with _GALAXY_MDNS_LOCK:
     if _GALAXY_MDNS_ZEROCONF is None:
       return
@@ -703,9 +728,10 @@ def _stop_galaxy_mdns_advertiser():
       print(f"Galaxy mDNS close failed: {e}")
     _GALAXY_MDNS_ZEROCONF = None
     _GALAXY_MDNS_INFO = None
+    _GALAXY_MDNS_ADDRESSES = ()
 
 def _start_galaxy_mdns_advertiser(port):
-  global _GALAXY_MDNS_ZEROCONF, _GALAXY_MDNS_INFO
+  global _GALAXY_MDNS_ZEROCONF, _GALAXY_MDNS_INFO, _GALAXY_MDNS_ADDRESSES
   with _GALAXY_MDNS_LOCK:
     if _GALAXY_MDNS_ZEROCONF is not None:
       return
@@ -716,8 +742,9 @@ def _start_galaxy_mdns_advertiser(port):
       _galaxy_mdns_log(f"unavailable; install zeroconf to advertise Bonjour discovery ({e})")
       return
 
+    address_strings = _local_ipv4_addresses()
     addresses = []
-    for address in _local_ipv4_addresses():
+    for address in address_strings:
       try:
         addresses.append(socket.inet_aton(address))
       except OSError:
@@ -752,8 +779,9 @@ def _start_galaxy_mdns_advertiser(port):
         zeroconf.register_service(info)
       _GALAXY_MDNS_ZEROCONF = zeroconf
       _GALAXY_MDNS_INFO = info
+      _GALAXY_MDNS_ADDRESSES = tuple(address_strings)
       atexit.register(_stop_galaxy_mdns_advertiser)
-      _galaxy_mdns_log(f"advertised as {service_name} on port {port}")
+      _galaxy_mdns_log(f"advertised as {service_name} on {','.join(address_strings)}:{port}")
     except Exception as e:
       _galaxy_mdns_log(f"advertise failed: {e}")
 
@@ -766,10 +794,17 @@ def _ensure_galaxy_mdns_advertiser(port):
     def retry_worker():
       global _GALAXY_MDNS_RETRY_THREAD
       try:
-        while _GALAXY_MDNS_ZEROCONF is None:
-          _start_galaxy_mdns_advertiser(port)
-          if _GALAXY_MDNS_ZEROCONF is not None:
-            return
+        while True:
+          current_addresses = tuple(_local_ipv4_addresses())
+          if _GALAXY_MDNS_ZEROCONF is None:
+            _start_galaxy_mdns_advertiser(port)
+          elif current_addresses != _GALAXY_MDNS_ADDRESSES:
+            _galaxy_mdns_log(
+              f"LAN addresses changed from {','.join(_GALAXY_MDNS_ADDRESSES) or 'none'} "
+              f"to {','.join(current_addresses) or 'none'}; refreshing advertisement"
+            )
+            _stop_galaxy_mdns_advertiser()
+            _start_galaxy_mdns_advertiser(port)
           time.sleep(30)
       finally:
         with _GALAXY_MDNS_LOCK:

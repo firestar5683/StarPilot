@@ -1,4 +1,5 @@
 import json
+from types import SimpleNamespace
 
 from openpilot.common.params import ParamKeyType
 
@@ -197,6 +198,31 @@ def test_ios_pairing_advertises_compact_telemetry_endpoint():
 
   assert payload["telemetryPath"] == "/api/galaxy/telemetry"
   assert payload["vehicleTelemetryUrl"] == "https://galaxy.firestar.link/api/galaxy/telemetry"
+
+
+def test_galaxy_lan_address_filter_rejects_cellular_and_accepts_wifi():
+  assert not the_galaxy._is_galaxy_lan_ipv4_address("30.9.31.4")
+  assert not the_galaxy._is_galaxy_lan_ipv4_address("25.73.76.228")
+  assert the_galaxy._is_galaxy_lan_ipv4_address("192.168.0.75")
+  assert the_galaxy._is_galaxy_lan_ipv4_address("10.0.0.2")
+
+
+def test_ios_pairing_rejects_public_request_host_as_local_base_url(monkeypatch):
+  monkeypatch.setattr(the_galaxy, "request", SimpleNamespace(
+    host="30.9.31.4:8082",
+    host_url="http://30.9.31.4:8082/",
+  ))
+
+  assert the_galaxy._request_local_base_url() == ""
+
+
+def test_ios_pairing_uses_private_request_host_as_local_base_url(monkeypatch):
+  monkeypatch.setattr(the_galaxy, "request", SimpleNamespace(
+    host="192.168.0.75:8082",
+    host_url="http://192.168.0.75:8082/",
+  ))
+
+  assert the_galaxy._request_local_base_url() == "http://192.168.0.75:8082"
 
 
 def test_compact_vehicle_telemetry_payload_keeps_only_maps_fields():
