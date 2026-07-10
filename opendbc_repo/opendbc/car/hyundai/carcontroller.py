@@ -70,7 +70,6 @@ DEFAULT_ANGLE_SMOOTHING_ALPHA_V = [0.2, 0.1, 0.0]
 EV9_HIGH_ANGLE_GAIN_BP = [70.0, 120.0, 220.0, 320.0]
 EV9_HIGH_ANGLE_GAIN_CAP_V = [0.85, 0.55, 0.30, 0.16]
 EV9_HIGH_ANGLE_GAIN_MIN = 0.004
-EV9_DRIVER_OVERRIDE_TORQUE_THRESHOLD = 175.0
 EV9_DRIVER_OVERRIDE_GAIN_BP = [0.0, 175.0, 350.0, 525.0]
 EV9_DRIVER_OVERRIDE_GAIN_CAP_V = [0.08, 0.08, 0.04, 0.004]
 EV9_DRIVER_OVERRIDE_RECOVERY_FRAMES = int(0.8 / DT_CTRL)
@@ -270,7 +269,7 @@ def apply_ev9_high_angle_gain_cap(CP, gain: float, steering_angle_deg: float, la
   cap = float(np.interp(abs(steering_angle_deg), EV9_HIGH_ANGLE_GAIN_BP, EV9_HIGH_ANGLE_GAIN_CAP_V))
   gain = max(EV9_HIGH_ANGLE_GAIN_MIN, min(gain, cap))
 
-  if steering_pressed or abs(steering_torque) >= EV9_DRIVER_OVERRIDE_TORQUE_THRESHOLD:
+  if steering_pressed:
     driver_override_cap = float(np.interp(abs(steering_torque), EV9_DRIVER_OVERRIDE_GAIN_BP,
                                           EV9_DRIVER_OVERRIDE_GAIN_CAP_V))
     gain = min(gain, driver_override_cap)
@@ -290,9 +289,9 @@ def get_ev9_driver_override_recovery_limits(CP, recovery_frames: int) -> tuple[f
   return angle_error_limit, gain_cap
 
 
-def ev9_driver_override_active(CP, steering_torque: float, steering_pressed: bool, lat_active: bool) -> bool:
+def ev9_driver_override_active(CP, steering_pressed: bool, lat_active: bool) -> bool:
   return CP.carFingerprint == CAR.KIA_EV9 and CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING and lat_active and \
-         (steering_pressed or abs(steering_torque) >= EV9_DRIVER_OVERRIDE_TORQUE_THRESHOLD)
+         steering_pressed
 
 
 def process_hud_alert(enabled, fingerprint, hud_control):
@@ -440,7 +439,7 @@ class CarController(CarControllerBase):
       desired_angle = float(np.clip(actuators.steeringAngleDeg,
                                     -self.params.ANGLE_LIMITS.STEER_ANGLE_MAX,
                                     self.params.ANGLE_LIMITS.STEER_ANGLE_MAX))
-      ev9_driver_override = ev9_driver_override_active(self.CP, CS.out.steeringTorque, CS.out.steeringPressed, CC.latActive)
+      ev9_driver_override = ev9_driver_override_active(self.CP, CS.out.steeringPressed, CC.latActive)
       if ev9_driver_override:
         self._ev9_driver_override_recovery_frames = EV9_DRIVER_OVERRIDE_RECOVERY_FRAMES
       elif self._ev9_driver_override_recovery_frames > 0:
