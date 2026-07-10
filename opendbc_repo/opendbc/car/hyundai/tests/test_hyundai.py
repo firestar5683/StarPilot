@@ -5,6 +5,7 @@ import pytest
 
 from opendbc.can import CANPacker, CANParser
 from opendbc.car import Bus, ButtonType, gen_empty_fingerprint, structs
+from opendbc.car.common.filter_simple import FirstOrderFilter
 from opendbc.car.structs import CarControl, CarParams
 from opendbc.car.fw_versions import build_fw_dict, match_fw_to_car
 from opendbc.car.hyundai.carcontroller import CarController, Ioniq6LongitudinalTuningState, GenesisG90LongitudinalTuningState, \
@@ -12,7 +13,7 @@ from opendbc.car.hyundai.carcontroller import CarController, Ioniq6LongitudinalT
                                              update_genesis_g90_longitudinal_tuning, egmp_dynamic_longitudinal_tuning, \
                                              should_reset_ev6_gt_line_longitudinal_tuning, reset_ev6_gt_line_longitudinal_tuning, \
                                              get_angle_smoothing_alpha, apply_ev9_high_angle_gain_cap, ev9_driver_override_active, \
-                                             get_ev9_driver_override_recovery_limits, should_use_ev6_gt_line_stop_direct_tracking
+                                             update_angle_command, should_use_ev6_gt_line_stop_direct_tracking
 from opendbc.car.hyundai.carstate import CarState, decode_canfd_camera_lead, decode_ioniq_6_blindspot_radar_state
 from opendbc.car.hyundai.interface import CarInterface
 from opendbc.car.hyundai import hyundaican, hyundaicanfd
@@ -336,24 +337,7 @@ class TestHyundaiFingerprint:
     assert apply_ev9_high_angle_gain_cap(ev9_cp, 0.70, 320.0, True) == pytest.approx(0.16)
     assert apply_ev9_high_angle_gain_cap(ev9_cp, 0.0, 320.0, True) > 0.0
     assert apply_ev9_high_angle_gain_cap(ev9_cp, 0.70, 320.0, False) == pytest.approx(0.70)
-    assert apply_ev9_high_angle_gain_cap(ev9_cp, 0.70, 30.0, True, 200.0, False) == pytest.approx(0.70)
-    assert apply_ev9_high_angle_gain_cap(ev9_cp, 0.70, 30.0, True, 150.0, True) == pytest.approx(0.08)
-    assert apply_ev9_high_angle_gain_cap(ev9_cp, 0.70, 30.0, True, 350.0, True) == pytest.approx(0.04)
-    assert apply_ev9_high_angle_gain_cap(ev9_cp, 0.70, 30.0, True, 600.0, True) == pytest.approx(0.004)
     assert apply_ev9_high_angle_gain_cap(sportage_cp, 0.70, 320.0, True) == pytest.approx(0.70)
-    assert apply_ev9_high_angle_gain_cap(sportage_cp, 0.70, 30.0, True, 400.0, True) == pytest.approx(0.70)
-
-  def test_ev9_driver_override_recovery_limits_are_ev9_only(self):
-    ev9_cp = SimpleNamespace(carFingerprint=CAR.KIA_EV9, flags=int(HyundaiFlags.CANFD_ANGLE_STEERING))
-    sportage_cp = SimpleNamespace(carFingerprint=CAR.KIA_SPORTAGE_HEV_2026, flags=int(HyundaiFlags.CANFD_ANGLE_STEERING))
-
-    assert get_ev9_driver_override_recovery_limits(sportage_cp, 80) == (None, None)
-    assert get_ev9_driver_override_recovery_limits(ev9_cp, 0) == (None, None)
-
-    angle_limit_start, gain_cap_start = get_ev9_driver_override_recovery_limits(ev9_cp, 80)
-    angle_limit_end, gain_cap_end = get_ev9_driver_override_recovery_limits(ev9_cp, 1)
-    assert angle_limit_start < angle_limit_end
-    assert gain_cap_start < gain_cap_end
 
   def test_ev9_driver_override_detection_is_ev9_only(self):
     ev9_cp = SimpleNamespace(carFingerprint=CAR.KIA_EV9, flags=int(HyundaiFlags.CANFD_ANGLE_STEERING))
@@ -363,6 +347,17 @@ class TestHyundaiFingerprint:
     assert not ev9_driver_override_active(ev9_cp, False, True)
     assert not ev9_driver_override_active(ev9_cp, True, False)
     assert not ev9_driver_override_active(sportage_cp, True, True)
+
+  def test_ev9_driver_override_syncs_and_releases_through_shared_filter(self):
+    ev9_cp = SimpleNamespace(carFingerprint=CAR.KIA_EV9, flags=int(HyundaiFlags.CANFD_ANGLE_STEERING))
+    angle_filter = FirstOrderFilter(0.0, 0.2, 0.01)
+
+    override_angle = update_angle_command(ev9_cp, angle_filter, -30.0, -8.0, 15.0, True, True)
+    released_angle = update_angle_command(ev9_cp, angle_filter, -30.0, -8.0, 15.0, False, True)
+
+    assert override_angle == pytest.approx(-8.0)
+    assert angle_filter.x == pytest.approx(released_angle)
+    assert -30.0 < released_angle < override_angle
 
   def test_ev9_allows_lateral_at_standstill_without_changing_other_angle_platforms(self):
     ev9_cp = CarInterface.get_params(CAR.KIA_EV9, gen_empty_fingerprint(), [], False, False, False, None)

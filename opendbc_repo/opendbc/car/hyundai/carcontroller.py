@@ -70,13 +70,6 @@ DEFAULT_ANGLE_SMOOTHING_ALPHA_V = [0.2, 0.1, 0.0]
 EV9_HIGH_ANGLE_GAIN_BP = [70.0, 120.0, 220.0, 320.0]
 EV9_HIGH_ANGLE_GAIN_CAP_V = [0.85, 0.55, 0.30, 0.16]
 EV9_HIGH_ANGLE_GAIN_MIN = 0.004
-EV9_DRIVER_OVERRIDE_GAIN_BP = [0.0, 175.0, 350.0, 525.0]
-EV9_DRIVER_OVERRIDE_GAIN_CAP_V = [0.08, 0.08, 0.04, 0.004]
-EV9_DRIVER_OVERRIDE_RECOVERY_FRAMES = int(0.8 / DT_CTRL)
-EV9_DRIVER_OVERRIDE_RECOVERY_ANGLE_BP = [0, EV9_DRIVER_OVERRIDE_RECOVERY_FRAMES // 2, EV9_DRIVER_OVERRIDE_RECOVERY_FRAMES]
-EV9_DRIVER_OVERRIDE_RECOVERY_ANGLE_V = [0.75, 2.0, 5.0]
-EV9_DRIVER_OVERRIDE_RECOVERY_GAIN_V = [0.08, 0.20, 0.45]
-EV9_DRIVER_OVERRIDE_RECOVERY_ALPHA = 0.02
 
 
 def egmp_dynamic_longitudinal_tuning(CP) -> bool:
@@ -261,37 +254,27 @@ def compute_torque_reduction_gain(steering_torque, v_ego, lat_active, last_gain)
   return round(gain / 0.004) * 0.004
 
 
-def apply_ev9_high_angle_gain_cap(CP, gain: float, steering_angle_deg: float, lat_active: bool,
-                                  steering_torque: float = 0.0, steering_pressed: bool = False) -> float:
+def apply_ev9_high_angle_gain_cap(CP, gain: float, steering_angle_deg: float, lat_active: bool) -> float:
   if CP.carFingerprint != CAR.KIA_EV9 or not CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING or not lat_active:
     return gain
 
   cap = float(np.interp(abs(steering_angle_deg), EV9_HIGH_ANGLE_GAIN_BP, EV9_HIGH_ANGLE_GAIN_CAP_V))
-  gain = max(EV9_HIGH_ANGLE_GAIN_MIN, min(gain, cap))
-
-  if steering_pressed:
-    driver_override_cap = float(np.interp(abs(steering_torque), EV9_DRIVER_OVERRIDE_GAIN_BP,
-                                          EV9_DRIVER_OVERRIDE_GAIN_CAP_V))
-    gain = min(gain, driver_override_cap)
-
-  return gain
-
-
-def get_ev9_driver_override_recovery_limits(CP, recovery_frames: int) -> tuple[float | None, float | None]:
-  if CP.carFingerprint != CAR.KIA_EV9 or not CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING or recovery_frames <= 0:
-    return None, None
-
-  elapsed_frames = EV9_DRIVER_OVERRIDE_RECOVERY_FRAMES - min(recovery_frames, EV9_DRIVER_OVERRIDE_RECOVERY_FRAMES)
-  angle_error_limit = float(np.interp(elapsed_frames, EV9_DRIVER_OVERRIDE_RECOVERY_ANGLE_BP,
-                                      EV9_DRIVER_OVERRIDE_RECOVERY_ANGLE_V))
-  gain_cap = float(np.interp(elapsed_frames, EV9_DRIVER_OVERRIDE_RECOVERY_ANGLE_BP,
-                             EV9_DRIVER_OVERRIDE_RECOVERY_GAIN_V))
-  return angle_error_limit, gain_cap
+  return max(EV9_HIGH_ANGLE_GAIN_MIN, min(gain, cap))
 
 
 def ev9_driver_override_active(CP, steering_pressed: bool, lat_active: bool) -> bool:
   return CP.carFingerprint == CAR.KIA_EV9 and CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING and lat_active and \
          steering_pressed
+
+
+def update_angle_command(CP, angle_filter, desired_angle: float, steering_angle_deg: float, v_ego: float,
+                         steering_pressed: bool, lat_active: bool) -> float:
+  if ev9_driver_override_active(CP, steering_pressed, lat_active):
+    angle_filter.x = steering_angle_deg
+    return steering_angle_deg
+
+  angle_filter.update_alpha(get_angle_smoothing_alpha(CP, v_ego))
+  return angle_filter.update(desired_angle)
 
 
 def process_hud_alert(enabled, fingerprint, hud_control):
@@ -346,7 +329,6 @@ class CarController(CarControllerBase):
     self._dash_lat_disengage_blink_frame = 0
     self._dash_lat_disengage_init = False
     self._dash_prev_lat_active = False
-    self._ev9_driver_override_recovery_frames = 0
 
   def _update_dash_icon_state(self, CC):
     if CC.latActive:
@@ -439,29 +421,11 @@ class CarController(CarControllerBase):
       desired_angle = float(np.clip(actuators.steeringAngleDeg,
                                     -self.params.ANGLE_LIMITS.STEER_ANGLE_MAX,
                                     self.params.ANGLE_LIMITS.STEER_ANGLE_MAX))
-      ev9_driver_override = ev9_driver_override_active(self.CP, CS.out.steeringPressed, CC.latActive)
-      if ev9_driver_override:
-        self._ev9_driver_override_recovery_frames = EV9_DRIVER_OVERRIDE_RECOVERY_FRAMES
-      elif self._ev9_driver_override_recovery_frames > 0:
-        self._ev9_driver_override_recovery_frames -= 1
-
-      if ev9_driver_override:
-        desired_angle = float(np.clip(CS.out.steeringAngleDeg,
-                                      -self.params.ANGLE_LIMITS.STEER_ANGLE_MAX,
-                                      self.params.ANGLE_LIMITS.STEER_ANGLE_MAX))
-        self.angle_filter.x = desired_angle
-      else:
-        angle_alpha = get_angle_smoothing_alpha(self.CP, CS.out.vEgo)
-        if self._ev9_driver_override_recovery_frames > 0 and self.CP.carFingerprint == CAR.KIA_EV9:
-          angle_alpha = min(angle_alpha, EV9_DRIVER_OVERRIDE_RECOVERY_ALPHA)
-        self.angle_filter.update_alpha(angle_alpha)
-        desired_angle = self.angle_filter.update(desired_angle)
-        recovery_angle_error, _ = get_ev9_driver_override_recovery_limits(self.CP, self._ev9_driver_override_recovery_frames)
-        if recovery_angle_error is not None:
-          desired_angle = float(np.clip(desired_angle,
-                                        CS.out.steeringAngleDeg - recovery_angle_error,
-                                        CS.out.steeringAngleDeg + recovery_angle_error))
-          self.angle_filter.x = desired_angle
+      steering_angle_deg = float(np.clip(CS.out.steeringAngleDeg,
+                                         -self.params.ANGLE_LIMITS.STEER_ANGLE_MAX,
+                                         self.params.ANGLE_LIMITS.STEER_ANGLE_MAX))
+      desired_angle = update_angle_command(self.CP, self.angle_filter, desired_angle, steering_angle_deg, CS.out.vEgo,
+                                           CS.out.steeringPressed, CC.latActive)
 
       apply_angle = apply_steer_angle_limits_vm(desired_angle, self.apply_angle_last, v_ego_raw,
                                                 CS.out.steeringAngleDeg, CC.latActive, self.params, self.VM)
@@ -471,11 +435,7 @@ class CarController(CarControllerBase):
                                                   CS.out.steeringAngleDeg, CC.latActive, self.params, self.BASELINE_VM)
 
       apply_torque = compute_torque_reduction_gain(CS.out.steeringTorque, v_ego_raw, CC.latActive, self.apply_torque_last)
-      apply_torque = apply_ev9_high_angle_gain_cap(self.CP, apply_torque, CS.out.steeringAngleDeg, CC.latActive,
-                                                   CS.out.steeringTorque, CS.out.steeringPressed)
-      _, recovery_gain_cap = get_ev9_driver_override_recovery_limits(self.CP, self._ev9_driver_override_recovery_frames)
-      if recovery_gain_cap is not None:
-        apply_torque = min(apply_torque, recovery_gain_cap)
+      apply_torque = apply_ev9_high_angle_gain_cap(self.CP, apply_torque, CS.out.steeringAngleDeg, CC.latActive)
       apply_steer_req = CC.latActive and apply_torque != 0.0
       torque_fault = False
 
@@ -490,7 +450,6 @@ class CarController(CarControllerBase):
                                               -self.params.ANGLE_LIMITS.STEER_ANGLE_MAX,
                                               self.params.ANGLE_LIMITS.STEER_ANGLE_MAX))
         self.angle_filter.x = self.apply_angle_last
-        self._ev9_driver_override_recovery_frames = 0
     else:
       # steering torque
       new_torque = int(round(actuators.torque * self.params.STEER_MAX))
