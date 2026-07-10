@@ -269,8 +269,7 @@ class HudRenderer(Widget):
 
   def render_foreground(self) -> None:
     """Draw HUD elements that should sit above alerts."""
-    if ui_state.sm['controlsState'].lateralControlState.which() != 'angleState' and \
-       ui_state.params.get_bool("EnableTorqueBarWidget", default=True):
+    if ui_state.params.get_bool("EnableTorqueBarWidget", default=True):
       self._torque_bar.render(self._rect)
 
     if self.is_cruise_set:
