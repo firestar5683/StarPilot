@@ -20,6 +20,20 @@ class EV9LongitudinalProbeMode(IntEnum):
 
 
 EV9_LONG_PROBE_HOLD_SECONDS = 5.0
+EV9_ACTUATION_ACCEL_MIN = -0.50
+EV9_ACTUATION_ACCEL_MAX = 0.30
+EV9_ACTUATION_MAX_SPEED = 5.0
+
+
+class EV9ActuationAbortReason(IntEnum):
+  NONE = 0
+  NOT_DRIVE = 1
+  BRAKE_PRESSED = 2
+  GAS_PRESSED = 3
+  CAN_INVALID = 4
+  RADAR_INVALID = 5
+  PANDA_FAULT = 6
+  SPEED_LIMIT = 7
 
 
 def ev9_communication_control_requests(probe_mode: EV9LongitudinalProbeMode) -> tuple[bytes, bytes]:
@@ -77,7 +91,8 @@ class EV9LongitudinalTestStage(IntEnum):
   ADRV_38C = 13             # 0x38C, captured 5 Hz ADAS status
   ADRV_57A = 14             # 0x57A, captured 10 Hz raw ADAS status
   STEERING_KEEPALIVE = 15   # 0x12A/0xCB, parked inactive steering status
-  ACTUATION = 16            # Explicitly permit requested acceleration/braking
+  ACTUATION_PREFLIGHT = 16  # Exercise health/abort gates while SCC remains inactive
+  ACTUATION = 17            # Explicitly permit tightly bounded acceleration/braking
 
 
 @dataclass(frozen=True)
@@ -93,6 +108,10 @@ class EV9LongitudinalTestConfig:
   @property
   def actuation_allowed(self) -> bool:
     return self.armed and self.stage >= EV9LongitudinalTestStage.ACTUATION
+
+  @property
+  def actuation_test_armed(self) -> bool:
+    return self.armed and self.stage >= EV9LongitudinalTestStage.ACTUATION_PREFLIGHT
 
   @property
   def persistent_suppression_allowed(self) -> bool:
@@ -158,8 +177,8 @@ def advance_ev9_longitudinal_support_stage(current: EV9LongitudinalTestConfig,
 
   Entering SCC_INACTIVE still requires a fresh controller instance (an ignition
   cycle in the parked test). Once that non-actuating SCC stage is already
-  latched, the remaining status-only frames may be added live. ACTUATION is
-  never reachable through this helper.
+  latched, the remaining status-only frames may be added live. Neither
+  ACTUATION_PREFLIGHT nor ACTUATION is reachable through this helper.
   """
   before_scc = current.stage <= requested.stage <= EV9LongitudinalTestStage.ADRV_345
   after_scc = EV9LongitudinalTestStage.SCC_INACTIVE <= current.stage <= requested.stage <= \
@@ -179,8 +198,33 @@ def filter_ev9_adrv_replay_messages(stage: EV9LongitudinalTestStage, messages: l
 
 
 def ev9_longitudinal_test_scc_command(config: EV9LongitudinalTestConfig, enabled: bool, accel: float,
-                                      stopping: bool, gas_override: bool) -> tuple[bool, float, bool, bool]:
+                                      stopping: bool, gas_override: bool,
+                                      actuation_permitted: bool = True) -> tuple[bool, float, bool, bool]:
   """Force a non-actuating SCC frame until the final explicit test stage."""
-  if config.actuation_allowed:
-    return enabled, accel, stopping, gas_override
+  if config.actuation_allowed and actuation_permitted:
+    limited_accel = max(EV9_ACTUATION_ACCEL_MIN, min(accel, EV9_ACTUATION_ACCEL_MAX))
+    return enabled, limited_accel, stopping, gas_override
   return False, 0.0, False, False
+
+
+def ev9_actuation_abort_reason(config: EV9LongitudinalTestConfig, control_requested: bool, was_active: bool,
+                               drive_gear: bool, brake_pressed: bool, gas_pressed: bool, can_valid: bool,
+                               radar_valid: bool, panda_faulted: bool, v_ego: float) -> EV9ActuationAbortReason:
+  """Return an ignition-latching reason to block the bounded EV9 actuation test."""
+  if not config.actuation_test_armed or not (control_requested or was_active):
+    return EV9ActuationAbortReason.NONE
+  if not drive_gear:
+    return EV9ActuationAbortReason.NOT_DRIVE
+  if brake_pressed:
+    return EV9ActuationAbortReason.BRAKE_PRESSED
+  if gas_pressed:
+    return EV9ActuationAbortReason.GAS_PRESSED
+  if not can_valid:
+    return EV9ActuationAbortReason.CAN_INVALID
+  if not radar_valid:
+    return EV9ActuationAbortReason.RADAR_INVALID
+  if panda_faulted:
+    return EV9ActuationAbortReason.PANDA_FAULT
+  if v_ego > EV9_ACTUATION_MAX_SPEED:
+    return EV9ActuationAbortReason.SPEED_LIMIT
+  return EV9ActuationAbortReason.NONE

@@ -9,13 +9,15 @@ from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai import hyundaicanfd, hyundaican
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.ev9_longitudinal import EV9_DTC_CAPTURE_PARAM, EV9LongitudinalTestConfig, EV9LongitudinalTestStage, \
-                                                   advance_ev9_longitudinal_support_stage, ev9_longitudinal_test_scc_command, \
+                                                   EV9ActuationAbortReason, advance_ev9_longitudinal_support_stage, \
+                                                   ev9_actuation_abort_reason, ev9_longitudinal_test_scc_command, \
                                                    ev9_dtc_capture_messages, \
                                                    filter_ev9_adrv_replay_messages, \
                                                    get_ev9_longitudinal_test_config
 from opendbc.car.hyundai.values import HyundaiFlags, Buttons, CarControllerParams, CAR, CANFD_RADAR_LIVE_LONGITUDINAL_CAR, \
                                         kia_ev6_gt_line_longitudinal_tuning
 from opendbc.car.interfaces import CarControllerBase
+from opendbc.car.carlog import carlog
 from opendbc.car.vehicle_model import VehicleModel
 from openpilot.common.params import Params
 
@@ -329,6 +331,8 @@ class CarController(CarControllerBase):
     self.ev9_long_test = get_ev9_longitudinal_test_config(self._params) if CP.carFingerprint == CAR.KIA_EV9 \
       else EV9LongitudinalTestConfig()
     self._ev9_dtc_capture_start_frame = None
+    self._ev9_actuation_aborted = False
+    self._ev9_actuation_was_active = False
     self.long_active_ecu = self.CP.openpilotLongitudinalControl
     self._ioniq_6_lane_change_ui_side = None
     self._ioniq_6_lane_change_ui_frames = 0
@@ -689,6 +693,30 @@ class CarController(CarControllerBase):
 
     gear = getattr(getattr(CS, "out", None), "gearShifter", None)
     drive_gear = gear == structs.CarState.GearShifter.drive
+    ev9_actuation_permitted = True
+    if ev9_long_test_active and self.ev9_long_test.actuation_test_armed:
+      abort_reason = ev9_actuation_abort_reason(
+        self.ev9_long_test,
+        bool(CC.enabled),
+        self._ev9_actuation_was_active,
+        drive_gear,
+        bool(CS.out.brakePressed),
+        bool(CS.out.gasPressed or CC.cruiseControl.override),
+        bool(CS.out.canValid),
+        bool(getattr(CS, "openpilot_radar_valid", False)),
+        bool(getattr(CS, "panda_faulted", True)),
+        float(CS.out.vEgo),
+      )
+      if abort_reason != EV9ActuationAbortReason.NONE and not self._ev9_actuation_aborted:
+        self._ev9_actuation_aborted = True
+        carlog.error(f"EV9 ACTUATION ABORT: {abort_reason.name}")
+      ev9_actuation_permitted = not self._ev9_actuation_aborted
+      if CC.enabled and ev9_actuation_permitted:
+        self._ev9_actuation_was_active = True
+      if self.frame % 100 == 0:
+        carlog.warning(f"EV9 ACTUATION {'TEST' if self.ev9_long_test.actuation_allowed else 'PREFLIGHT'}: "
+                       f"permitted={ev9_actuation_permitted}, enabled={CC.enabled}, "
+                       f"requestedAccel={accel:.3f}, vEgo={CS.out.vEgo:.3f}")
     if angle_lkas_alt:
       steering_msg_active = bool(steering_msg_active and drive_gear)
     openpilot_owns_lka_alt = angle_lkas_alt and drive_gear and (CC.latActive or CC.enabled)
@@ -811,6 +839,7 @@ class CarController(CarControllerBase):
         lead_visible, lead_distance, lead_rel_speed = self._get_canfd_scc_lead_state(CC, CS, now_nanos)
         scc_enabled, scc_accel, scc_stopping, scc_gas_override = ev9_longitudinal_test_scc_command(
           self.ev9_long_test, CC.enabled, accel, stopping, CC.cruiseControl.override,
+          actuation_permitted=ev9_actuation_permitted,
         ) if ev9_long_test_active else (CC.enabled, accel, stopping, CC.cruiseControl.override)
         acc_kwargs = {
           "main_mode_acc": int(CS.out.cruiseState.available),

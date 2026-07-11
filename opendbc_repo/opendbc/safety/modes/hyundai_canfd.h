@@ -70,6 +70,7 @@ static bool hyundai_canfd_alt_buttons = false;
 static bool hyundai_canfd_lka_steering_alt = false;
 static bool hyundai_canfd_angle_steering = false;
 static bool hyundai_ccnc = false;
+static bool hyundai_canfd_bounded_angle_long = false;
 static bool hyundai_canfd_lka_alt_drive_gear = false;
 
 static unsigned int hyundai_canfd_get_lka_addr(void) {
@@ -337,6 +338,10 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *msg) {
     if (hyundai_longitudinal) {
       violation |= longitudinal_accel_checks(desired_accel_raw, HYUNDAI_LONG_LIMITS);
       violation |= longitudinal_accel_checks(desired_accel_val, HYUNDAI_LONG_LIMITS);
+      if (hyundai_canfd_bounded_angle_long) {
+        violation |= (desired_accel_raw < -50) || (desired_accel_raw > 30);
+        violation |= (desired_accel_val < -50) || (desired_accel_val > 30);
+      }
     } else {
       // only used to cancel on here
       const int acc_mode = (msg->data[8] >> 4) & 0x7U;
@@ -453,6 +458,11 @@ static safety_config hyundai_canfd_init(uint16_t param) {
   hyundai_canfd_lka_steering_alt = GET_FLAG(param, HYUNDAI_PARAM_CANFD_LKA_STEERING_ALT);
   hyundai_canfd_angle_steering = GET_FLAG(param, HYUNDAI_PARAM_CANFD_ANGLE_STEERING);
   hyundai_ccnc = GET_FLAG(param, HYUNDAI_PARAM_CCNC);
+  // Angle-steering + LKA-alt longitudinal is currently enabled only by the
+  // gated EV9 test path. Keep its first actuation envelope much tighter than
+  // the generic Hyundai longitudinal limits.
+  hyundai_canfd_bounded_angle_long = hyundai_longitudinal && hyundai_canfd_angle_steering &&
+                                      hyundai_canfd_lka_steering_alt;
   hyundai_canfd_lka_alt_drive_gear = false;
 
   safety_config ret;

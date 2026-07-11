@@ -2350,7 +2350,7 @@ class TestHyundaiFingerprint:
     parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("LFA", 0), ("ADAS_CMD_35_10ms", 0)], can_bus.ECAN)
 
     msgs = hyundaicanfd.create_ev9_inactive_steering_messages(packer, can_bus, -12.3)
-    assert [msg.address for msg in msgs] == [0x12A, 0xCB]
+    assert [msg[0] for msg in msgs] == [0x12A, 0xCB]
     parser.update([(1, msgs)])
 
     assert parser.vl["LFA"]["STEER_REQ"] == 0

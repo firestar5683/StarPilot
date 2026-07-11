@@ -29,7 +29,7 @@ Progressive parked testing reconstructed every observed suppressed ADAS frame th
 ADAS status `0x160`, CCNC `0x161/0x162`, inactive SCC `0x1A0`, BSM `0x1BA/0x1E5`, cluster `0x1E0`, status frames
 `0x1DA/0x1EA/0x200/0x345/0x38C/0x57A`, and inactive steering messages `0x12A/0xCB`. Frame rates, counters, checksums,
 bus placement, and Panda acceptance were verified. No cumulative stage changed the 12 DTCs, warning icons, or dings.
-Stage 16 actuation was not entered.
+Stages 16 and 17 were not entered during the parked reconstruction ladder.
 
 The clean disarmed recovery route is `000000d3--78bb8fa04a`; it identified `KIA_EV9`, produced valid `carState` for
 985/985 sampled updates, and showed no vehicle DTCs. The feature flag, stage, probe mode, and alpha-longitudinal toggle
@@ -131,7 +131,8 @@ reboot before driving.
 | 13 | Add captured ADAS status `0x38C` |
 | 14 | Add captured raw ADAS status `0x57A` |
 | 15 | Add inactive steering status `0x12A/0xCB` |
-| 16 | Permit requested acceleration/braking; not a parked test stage |
+| 16 | Actuation preflight: evaluate and log every abort gate while SCC remains forcibly inactive/zero |
+| 17 | Permit tightly bounded requested acceleration/braking; closed-course test only |
 
 `0x51` is intentionally excluded because it was absent from the stock EV9 reference route. EV9 HDA2 also does not send
 the legacy `0x1E0` cluster replacement. Live CCNC `0x161/0x162` traffic should be observed, not duplicated.
@@ -180,9 +181,42 @@ Use `rlog` captures for decisions. `qlog` is downsampled and can make healthy me
 incomplete.
 
 The progressive ladder through stage 15 is complete and should not be repeated merely to reconfirm the unchanged warning
-state. All 32 MRR35 radar tracks remained live, while the ADAS-origin `0x1BA` BSM output disappeared and was reconstructed
-without clearing the vehicle faults. Do not use stage 16 without a separate reviewed drive-test plan, and do not enter it
-while any dashboard or CAN-validity fault remains.
+state. All 32 MRR35 radar tracks remained live. Stock driving routes `000000d4--5296076dfd` and
+`000000d6--f9d3fb2962` prove the EV9 `0x1BA` BSM encoding: `0x02` neither side, `0x0A` right, `0x12` left, and `0x1A`
+both sides. The reconstructed output preserves both the vehicle mirror warnings and openpilot BSM state. `0x162.VIBRATE`
+remained zero in those routes; steering-wheel vibration must not be claimed from that signal without new evidence.
+
+Stage 16 is the required preflight and cannot actuate. Stage 17 is limited in both controller code and Panda safety to
+`-0.50` through `+0.30 m/s²`, and the controller permanently aborts it for the rest of the ignition cycle on any of:
+not in Drive, brake pressed, accelerator/override, invalid CAN, invalid radar, Panda fault, or speed above `5.0 m/s`.
+These limits come from the active stock-SCC samples in the same two routes; no stock standstill/resume sample was captured,
+so stop-and-go testing is out of scope. Do not enter stage 17 with a dash warning, invalid comma vehicle state, or outside a
+flat closed private test area.
+
+## Actuation preflight and closed-course sequence
+
+Every stage change below is made while the vehicle is fully OFF, followed by a comma reboot. Do not change parameters
+while controls are running. Keep a clear path, seat belt fastened, service brake covered, and have a second person record
+the cluster/comma if available.
+
+### Run D: stage 16 non-actuating preflight
+
+1. Configure enable=true, stage=16, probe mode=2, and `AlphaLongitudinalEnabled=true`; reboot the comma.
+2. Turn ignition ON without READY. Confirm normal vehicle identification and no dash DTC/warning state.
+3. Enter READY in Park and wait 30 seconds. Confirm the comma remains normal and the dash remains clear.
+4. With the brake held, shift to Drive. Release the brake only on a flat, secured test surface, remain below `5 m/s`, and
+   engage openpilot briefly. The car must not accelerate or brake in response to openpilot at stage 16.
+5. Disengage, shift to Park, power fully OFF, and provide the route/segment plus whether any warning or motion occurred.
+
+The log must show `EV9 ACTUATION PREFLIGHT`, healthy radar/CAN/Panda inputs, and an inactive SCC command. Any abort or
+unexpected motion stops the test; do not proceed to stage 17.
+
+### Run E: stage 17 bounded actuation
+
+Only after Run D is reviewed, configure stage 17 offroad and reboot. The first test is a single straight-line engage below
+`5 m/s` on a flat closed course, with no lead vehicle, no stop/resume, and immediate manual brake takeover. Start from a
+stable slow roll rather than a standstill. One clean engage/disengage is enough for the first route; review requested versus
+actual acceleration and every safety/gate state before any follow-up test.
 
 ## First test sequence
 
