@@ -8,6 +8,11 @@ from opendbc.car.lateral import apply_driver_steer_torque_limits, apply_steer_an
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai import hyundaicanfd, hyundaican
 from opendbc.car.hyundai.hyundaicanfd import CanBus
+from opendbc.car.hyundai.ev9_longitudinal import EV9_DTC_CAPTURE_PARAM, EV9LongitudinalTestConfig, EV9LongitudinalTestStage, \
+                                                   advance_ev9_longitudinal_support_stage, ev9_longitudinal_test_scc_command, \
+                                                   ev9_dtc_capture_messages, \
+                                                   filter_ev9_adrv_replay_messages, \
+                                                   get_ev9_longitudinal_test_config
 from opendbc.car.hyundai.values import HyundaiFlags, Buttons, CarControllerParams, CAR, CANFD_RADAR_LIVE_LONGITUDINAL_CAR, \
                                         kia_ev6_gt_line_longitudinal_tuning
 from opendbc.car.interfaces import CarControllerBase
@@ -321,6 +326,9 @@ class CarController(CarControllerBase):
     self.ecu_disable_failed = False
     self._ecu_disable_checked = False
     self._params = Params()
+    self.ev9_long_test = get_ev9_longitudinal_test_config(self._params) if CP.carFingerprint == CAR.KIA_EV9 \
+      else EV9LongitudinalTestConfig()
+    self._ev9_dtc_capture_start_frame = None
     self.long_active_ecu = self.CP.openpilotLongitudinalControl
     self._ioniq_6_lane_change_ui_side = None
     self._ioniq_6_lane_change_ui_frames = 0
@@ -408,6 +416,18 @@ class CarController(CarControllerBase):
     return can_sends
 
   def update(self, CC, CS, now_nanos, starpilot_toggles):
+    if self.CP.carFingerprint == CAR.KIA_EV9 and self.frame % 100 == 0:
+      requested_ev9_stage = get_ev9_longitudinal_test_config(self._params)
+      self.ev9_long_test = advance_ev9_longitudinal_support_stage(self.ev9_long_test, requested_ev9_stage)
+
+      # Start only after suppression has had five seconds to settle. Diagnostic
+      # CAN is emitted below through this controller's existing sendcan
+      # publisher; a second publisher can evict card and drop Tester Present.
+      parked = CS.out.standstill and CS.out.gearShifter == structs.CarState.GearShifter.park
+      if self._ev9_dtc_capture_start_frame is None and self.frame >= 500 and parked and \
+          self.ev9_long_test.persistent_suppression_allowed and self._params.get_bool(EV9_DTC_CAPTURE_PARAM):
+        self._ev9_dtc_capture_start_frame = self.frame + 1
+
     actuators = CC.actuators
     hud_control = CC.hudControl
     lka_icon, lfa_icon = self._update_dash_icon_state(CC)
@@ -543,6 +563,19 @@ class CarController(CarControllerBase):
       if self.CP.flags & HyundaiFlags.ENABLE_BLINKERS:
         can_sends.append(make_tester_present_msg(0x7b1, self.CAN.ECAN, suppress_response=True))
 
+    if self._ev9_dtc_capture_start_frame is not None:
+      parked = CS.out.standstill and CS.out.gearShifter == structs.CarState.GearShifter.park
+      if parked:
+        dtc_sends, complete = ev9_dtc_capture_messages(self.frame - self._ev9_dtc_capture_start_frame, self.CAN.ECAN)
+        can_sends.extend(dtc_sends)
+        if complete:
+          self._params.put_bool(EV9_DTC_CAPTURE_PARAM, False)
+          self._ev9_dtc_capture_start_frame = None
+      else:
+        # Moving or leaving Park aborts immediately and requires explicit re-arm.
+        self._params.put_bool(EV9_DTC_CAPTURE_PARAM, False)
+        self._ev9_dtc_capture_start_frame = None
+
     # *** CAN/CAN FD specific ***
     if self.CP.flags & HyundaiFlags.CANFD:
       can_sends.extend(self.create_canfd_msgs(now_nanos, apply_steer_req, apply_torque, apply_angle, set_speed_in_units, accel,
@@ -635,6 +668,7 @@ class CarController(CarControllerBase):
     lka_steering = self.CP.flags & HyundaiFlags.CANFD_LKA_STEERING
     lka_steering_long = lka_steering and self.long_active_ecu
     ccnc_non_hda2 = self.CP.flags & HyundaiFlags.CCNC and not lka_steering
+    ev9_long_test_active = self.CP.carFingerprint == CAR.KIA_EV9 and self.ev9_long_test.armed
     use_egmp_dynamic_long_tuning = egmp_dynamic_longitudinal_tuning(self.CP) and self.long_active_ecu and \
                                    CC.actuators.longControlState in (LongCtrlState.starting, LongCtrlState.pid, LongCtrlState.stopping)
     use_egmp_smoothed_accel = use_egmp_dynamic_long_tuning and (
@@ -657,25 +691,35 @@ class CarController(CarControllerBase):
     drive_gear = gear == structs.CarState.GearShifter.drive
     if angle_lkas_alt:
       steering_msg_active = bool(steering_msg_active and drive_gear)
-    forward_stock_lkas = angle_lkas_alt and not (drive_gear and (CC.latActive or CC.enabled))
+    openpilot_owns_lka_alt = angle_lkas_alt and drive_gear and (CC.latActive or CC.enabled)
+    forward_stock_lkas = angle_lkas_alt and not openpilot_owns_lka_alt
     if not forward_stock_lkas:
       can_sends.extend(hyundaicanfd.create_steering_messages(self.packer, self.CP, self.CAN, CC.enabled,
                                                              steering_msg_active, apply_torque, apply_angle,
                                                              CS.stock_lfa_msg,
                                                              CS.stock_lkas_msg if preserve_stock_lkas else None,
                                                              lka_icon=lka_icon))
+    if ev9_long_test_active and self.ev9_long_test.stage >= EV9LongitudinalTestStage.STEERING_KEEPALIVE and not drive_gear:
+      can_sends.extend(hyundaicanfd.create_ev9_inactive_steering_messages(self.packer, self.CAN,
+                                                                          CS.out.steeringAngleDeg))
 
     # prevent LFA from activating on LKA steering cars by sending "no lane lines detected" to ADAS ECU
     suppress_lfa = bool(lka_steering)
     if angle_lkas_alt:
-      suppress_lfa = bool(lka_steering and CC.latActive and drive_gear)
+      # LKAS_ALT and its camera companion must move together: either openpilot
+      # owns both messages or panda forwards both stock messages.
+      suppress_lfa = bool(lka_steering and openpilot_owns_lka_alt)
     if self.frame % 5 == 0 and suppress_lfa:
       can_sends.append(hyundaicanfd.create_suppress_lfa(self.packer, self.CAN, CS.lfa_block_msg,
                                                         self.CP.flags & HyundaiFlags.CANFD_LKA_STEERING_ALT))
 
     # LFA and HDA icons
     if self.frame % 5 == 0 and (not lka_steering or lka_steering_long):
-      if ccnc_non_hda2:
+      if ev9_long_test_active:
+        # EV9 HDA2 uses live CCNC 0x161/0x162 rather than the legacy 0x1E0
+        # LFAHDA_CLUSTER message. Do not introduce an uncaptured replacement.
+        pass
+      elif ccnc_non_hda2:
         can_sends.extend(hyundaicanfd.create_ccnc(self.packer, self.CAN, self.long_active_ecu, CC.enabled, CC.hudControl,
                                                   CC.leftBlinker, CC.rightBlinker, CS.msg_161, CS.msg_162, CS.msg_1b5,
                                                   CS.is_metric, CS.out, CS.out.cruiseState.available, lfa_icon))
@@ -710,12 +754,38 @@ class CarController(CarControllerBase):
 
     if self.long_active_ecu:
       if lka_steering:
-        can_sends.extend(hyundaicanfd.create_adrv_messages(self.packer, self.CAN, self.frame))
+        adrv_messages = hyundaicanfd.create_adrv_messages(self.packer, self.CAN, self.frame)
+        if ev9_long_test_active:
+          adrv_messages = filter_ev9_adrv_replay_messages(self.ev9_long_test.stage, adrv_messages)
+          counter_divisors = {0x160: 2, 0x1DA: 100, 0x1EA: 5, 0x200: 5, 0x345: 20}
+          adrv_messages = [hyundaicanfd.create_ev9_adrv_message(msg[0], self.CAN.ECAN, self.frame // counter_divisors[msg[0]])
+                           for msg in adrv_messages]
+          staged_status_messages = {
+            EV9LongitudinalTestStage.CCNC_STATUS: ((0x161, 5), (0x162, 5)),
+            EV9LongitudinalTestStage.LFAHDA_STATUS: ((0x1E0, 5),),
+            EV9LongitudinalTestStage.ADRV_38C: ((0x38C, 20),),
+          }
+          for stage, messages in staged_status_messages.items():
+            if self.ev9_long_test.stage >= stage:
+              adrv_messages.extend(hyundaicanfd.create_ev9_adrv_message(address, self.CAN.ECAN, self.frame // divisor)
+                                   for address, divisor in messages if self.frame % divisor == 0)
+          if self.ev9_long_test.stage >= EV9LongitudinalTestStage.ADRV_57A and self.frame % 10 == 0:
+            adrv_messages.append(hyundaicanfd.create_ev9_raw_adrv_message(0x57A, self.CAN.ECAN))
+          if self.ev9_long_test.stage >= EV9LongitudinalTestStage.BSM_STATUS and self.frame % 5 == 0:
+            adrv_messages.extend(hyundaicanfd.create_ev9_blindspot_status_messages(
+              self.packer, self.CAN, self.frame // 5, CS.left_blindspot_from_radar, CS.right_blindspot_from_radar,
+              CC.leftBlinker, CC.rightBlinker,
+            ))
+        can_sends.extend(adrv_messages)
         # Ioniq 5/6: front radar treats ADAS_DRV's 0x100 broadcast as its host heartbeat
         # and stops publishing object tracks when it disappears. Spoof it periodically on
         # PT bus so the radar keeps tracking.
-        if self.CP.carFingerprint in CANFD_RADAR_LIVE_LONGITUDINAL_CAR and self.frame % 4 == 0:
-          can_sends.append(hyundaicanfd.create_accelerator_brake_alt_spoof(0, self.frame // 4, CS.out.brakePressed,
+        standard_radar_heartbeat = self.CP.carFingerprint in CANFD_RADAR_LIVE_LONGITUDINAL_CAR and self.frame % 4 == 0
+        ev9_test_radar_heartbeat = ev9_long_test_active and \
+          self.ev9_long_test.stage >= EV9LongitudinalTestStage.RADAR_HEARTBEAT
+        if standard_radar_heartbeat or ev9_test_radar_heartbeat:
+          heartbeat_counter = self.frame if ev9_test_radar_heartbeat else self.frame // 4
+          can_sends.append(hyundaicanfd.create_accelerator_brake_alt_spoof(0, heartbeat_counter, CS.out.brakePressed,
                                                                             CS.out.gasPressed, self.CP.carFingerprint))
       elif not ccnc_non_hda2:
         can_sends.extend(hyundaicanfd.create_fca_warning_light(self.packer, self.CAN, self.frame))
@@ -736,8 +806,12 @@ class CarController(CarControllerBase):
                                                                                  CS.right_blindspot_from_radar,
                                                                                  CC.leftBlinker,
                                                                                  CC.rightBlinker))
-      if self.frame % 2 == 0:
+      send_scc_control = not ev9_long_test_active or self.ev9_long_test.stage >= EV9LongitudinalTestStage.SCC_INACTIVE
+      if self.frame % 2 == 0 and send_scc_control:
         lead_visible, lead_distance, lead_rel_speed = self._get_canfd_scc_lead_state(CC, CS, now_nanos)
+        scc_enabled, scc_accel, scc_stopping, scc_gas_override = ev9_longitudinal_test_scc_command(
+          self.ev9_long_test, CC.enabled, accel, stopping, CC.cruiseControl.override,
+        ) if ev9_long_test_active else (CC.enabled, accel, stopping, CC.cruiseControl.override)
         acc_kwargs = {
           "main_mode_acc": int(CS.out.cruiseState.available),
           "direct_accel": True,
@@ -751,10 +825,11 @@ class CarController(CarControllerBase):
           if use_egmp_smoothed_accel:
             acc_kwargs["jerk_lower"] = self._ioniq_6_long_tuning.jerk_lower
             acc_kwargs["jerk_upper"] = self._ioniq_6_long_tuning.jerk_upper
-        can_sends.append(hyundaicanfd.create_acc_control(self.packer, self.CAN, CC.enabled, self.accel_last, accel, stopping, CC.cruiseControl.override,
+        can_sends.append(hyundaicanfd.create_acc_control(self.packer, self.CAN, scc_enabled, self.accel_last, scc_accel,
+                                                         scc_stopping, scc_gas_override,
                                                          set_speed_in_units, hud_control, cruise_info=CS.cruise_info if ccnc_non_hda2 else None,
                                                          **acc_kwargs))
-        self.accel_last = accel
+        self.accel_last = scc_accel
     else:
       # button presses
       if (self.frame - self.last_button_frame) * DT_CTRL > 0.25:

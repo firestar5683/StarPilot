@@ -34,6 +34,16 @@
   {0x3B5, e_can, 32, .check_relay = false},  /* cluster blindspot overlay */ \
   {0x3C1, e_can, 8, .check_relay = false},  /* cluster lane change overlay */ \
 
+// Read-only EV9 diagnostics. The tx hook accepts only UDS ReadDTCInformation
+// (19 02 FF) and ISO-TP flow control on these addresses. All state-changing
+// diagnostic services remain blocked.
+#define HYUNDAI_CANFD_EV9_DTC_TX_MSGS(e_can) \
+  {0x730, e_can, 8, .check_relay = false},  /* ADAS */ \
+  {0x7C4, e_can, 8, .check_relay = false},  /* forward camera */ \
+  {0x7C6, e_can, 8, .check_relay = false},  /* combination meter */ \
+  {0x7D0, e_can, 8, .check_relay = false},  /* forward radar */ \
+  {0x7D4, e_can, 8, .check_relay = false},  /* EPS */ \
+
 // *** Addresses checked in rx hook ***
 // EV, ICE, HYBRID: ACCELERATOR (0x35), ACCELERATOR_BRAKE_ALT (0x100), ACCELERATOR_ALT (0x105)
 #define HYUNDAI_CANFD_COMMON_RX_CHECKS(pt_bus)                                                                          \
@@ -91,6 +101,23 @@ static bool hyundai_canfd_lka_alt_openpilot_allowed(void) {
 
 static bool hyundai_canfd_lka_alt_stock_forwarding(void) {
   return hyundai_canfd_lka_steering_alt && hyundai_canfd_angle_steering && !hyundai_canfd_lka_alt_openpilot_allowed();
+}
+
+static bool hyundai_canfd_ev9_dtc_addr(const CANPacket_t *msg) {
+  return (msg->bus == 1U) && ((msg->addr == 0x730U) || (msg->addr == 0x7C4U) ||
+                             (msg->addr == 0x7C6U) || (msg->addr == 0x7D0U) ||
+                             (msg->addr == 0x7D4U));
+}
+
+static bool hyundai_canfd_ev9_read_dtc_msg(const CANPacket_t *msg) {
+  if ((GET_LEN(msg) != 8U) || !hyundai_canfd_ev9_dtc_addr(msg)) {
+    return false;
+  }
+
+  const uint32_t first_word = GET_BYTES(msg, 0, 4);
+  const bool read_all_dtcs = first_word == 0xFF021903U;  // ISO-TP SF: 03 19 02 FF
+  const bool flow_control = first_word == 0x00000030U;  // ISO-TP FC: 30 00 00 00
+  return (read_all_dtcs || flow_control) && (GET_BYTES(msg, 4, 4) == 0U);
 }
 
 static void hyundai_canfd_rx_all_hook(const CANPacket_t *msg) {
@@ -288,9 +315,14 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *msg) {
     }
   }
 
-  // UDS: only tester present ("\x02\x3E\x80\x00\x00\x00\x00\x00") allowed on diagnostics address
-  if (((msg->addr == 0x730U) && hyundai_canfd_lka_steering) || ((msg->addr == 0x7D0U) && !hyundai_camera_scc)) {
-    if ((GET_BYTES(msg, 0, 4) != 0x00803E02U) || (GET_BYTES(msg, 4, 4) != 0x0U)) {
+  // UDS: tester present remains available for ECU suppression. The EV9's
+  // known diagnostic endpoints additionally permit the exact read-only DTC
+  // request and ISO-TP flow-control response above.
+  const bool disabled_ecu_addr = ((msg->addr == 0x730U) && hyundai_canfd_lka_steering) ||
+                                 ((msg->addr == 0x7D0U) && !hyundai_camera_scc);
+  if (disabled_ecu_addr || hyundai_canfd_ev9_dtc_addr(msg)) {
+    const bool tester_present = (GET_BYTES(msg, 0, 4) == 0x00803E02U) && (GET_BYTES(msg, 4, 4) == 0U);
+    if (!(disabled_ecu_addr && tester_present) && !hyundai_canfd_ev9_read_dtc_msg(msg)) {
       tx = false;
     }
   }
@@ -336,10 +368,12 @@ static safety_config hyundai_canfd_init(uint16_t param) {
 
   static const CanMsg HYUNDAI_CANFD_LKA_STEERING_TX_MSGS[] = {
     HYUNDAI_CANFD_LKA_STEERING_COMMON_TX_MSGS(0, 1)
+    HYUNDAI_CANFD_EV9_DTC_TX_MSGS(1)
   };
 
   static const CanMsg HYUNDAI_CANFD_LKA_STEERING_ALT_TX_MSGS[] = {
     HYUNDAI_CANFD_LKA_STEERING_ALT_COMMON_TX_MSGS(0, 1)
+    HYUNDAI_CANFD_EV9_DTC_TX_MSGS(1)
   };
 
   static const CanMsg HYUNDAI_CANFD_LKA_STEERING_LONG_TX_MSGS[] = {
@@ -349,12 +383,16 @@ static safety_config hyundai_canfd_init(uint16_t param) {
     HYUNDAI_CANFD_BLINDSPOT_DASH_TX_MSGS(1)
     {0x51,  0, 32, .check_relay = false},  // ADRV_0x51
     {0x100, 0, 24, .check_relay = false},  // Ioniq 5/6: ACCELERATOR_BRAKE_ALT radar heartbeat spoof
-    {0x730, 1,  8, .check_relay = false},  // tester present for ADAS ECU disable
+    HYUNDAI_CANFD_EV9_DTC_TX_MSGS(1)
     {0x160, 1, 16, .check_relay = false},  // ADRV_0x160
     {0x1EA, 1, 32, .check_relay = false},  // ADRV_0x1ea
     {0x200, 1,  8, .check_relay = false},  // ADRV_0x200
     {0x345, 1,  8, .check_relay = false},  // ADRV_0x345
     {0x1DA, 1, 32, .check_relay = false},  // ADRV_0x1da
+    {0x161, 1, 32, .check_relay = false},  // EV9 CCNC_0x161 status reconstruction
+    {0x162, 1, 32, .check_relay = false},  // EV9 CCNC_0x162 status reconstruction
+    {0x38C, 1, 32, .check_relay = false},  // EV9 captured ADAS status
+    {0x57A, 1, 32, .check_relay = false},  // EV9 captured raw ADAS status
   };
 
   static const CanMsg HYUNDAI_CANFD_LKA_STEERING_ALT_LONG_TX_MSGS[] = {
@@ -364,12 +402,16 @@ static safety_config hyundai_canfd_init(uint16_t param) {
     HYUNDAI_CANFD_BLINDSPOT_DASH_TX_MSGS(1)
     {0x51,  0, 32, .check_relay = false},  // ADRV_0x51
     {0x100, 0, 24, .check_relay = false},  // ACCELERATOR_BRAKE_ALT radar heartbeat spoof
-    {0x730, 1,  8, .check_relay = false},  // tester present for ADAS ECU disable
+    HYUNDAI_CANFD_EV9_DTC_TX_MSGS(1)
     {0x160, 1, 16, .check_relay = false},  // ADRV_0x160
     {0x1EA, 1, 32, .check_relay = false},  // ADRV_0x1ea
     {0x200, 1,  8, .check_relay = false},  // ADRV_0x200
     {0x345, 1,  8, .check_relay = false},  // ADRV_0x345
     {0x1DA, 1, 32, .check_relay = false},  // ADRV_0x1da
+    {0x161, 1, 32, .check_relay = false},  // EV9 CCNC_0x161 status reconstruction
+    {0x162, 1, 32, .check_relay = false},  // EV9 CCNC_0x162 status reconstruction
+    {0x38C, 1, 32, .check_relay = false},  // EV9 captured ADAS status
+    {0x57A, 1, 32, .check_relay = false},  // EV9 captured raw ADAS status
   };
 
   static const CanMsg HYUNDAI_CANFD_LFA_STEERING_TX_MSGS[] = {

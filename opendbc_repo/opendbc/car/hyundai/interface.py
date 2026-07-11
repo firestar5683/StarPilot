@@ -13,8 +13,11 @@ from opendbc.car.hyundai.values import HyundaiFlags, CAR, CarControllerParams, \
                                                    hyundai_cancel_button_enables_cruise, \
                                                    kia_ev6_gt_line_longitudinal_tuning
 from opendbc.car.hyundai.radar_interface import get_radar_track_config, radar_tracks_available
+from opendbc.car.hyundai.ev9_longitudinal import EV9_LONG_PROBE_HOLD_SECONDS, EV9LongitudinalProbeMode, \
+                                                       EV9LongitudinalTestStage, ev9_communication_control_requests, \
+                                                       get_ev9_longitudinal_test_config
 from opendbc.car.interfaces import CarInterfaceBase, ACCEL_MIN
-from opendbc.car.disable_ecu import disable_ecu, ecu_log
+from opendbc.car.disable_ecu import disable_ecu, ecu_log, run_diagnostic_session_probe
 from opendbc.car.hyundai.carcontroller import CarController
 from opendbc.car.hyundai.carstate import CarState
 from opendbc.car.hyundai.radar_interface import RadarInterface
@@ -28,6 +31,8 @@ ENABLE_BUTTONS = (ButtonType.accelCruise, ButtonType.decelCruise, ButtonType.can
 # Track when ECU disable happened - used to permanently suppress CAN errors from disabled ECU
 ECU_DISABLE_TIMESTAMP = 0.0
 KONA_NON_SCC_FCA_RADAR_ADDR = 0x602
+EV9_LONG_DISABLE_VERIFY_ADDRS = (0x1A0,)
+EV9_LONG_DISABLE_VERIFY_SECONDS = 1.0
 
 
 def apply_platform_longitudinal_params(ret: structs.CarParams) -> None:
@@ -67,6 +72,19 @@ def detect_kona_non_scc_radar_fca(candidate, fingerprint, car_fw) -> bool:
   return KONA_NON_SCC_FCA_RADAR_ADDR in fingerprint[1]
 
 
+def ecu_messages_present(can_recv, bus: int, addresses: tuple[int, ...], timeout: float) -> bool:
+  """Return whether an ECU-originated message is still arriving after CommunicationControl."""
+  if can_recv is None:
+    return False
+
+  deadline = time.monotonic() + timeout
+  while time.monotonic() < deadline:
+    for packet in can_recv(wait_for_one=True):
+      if any(msg.src == bus and msg.address in addresses for msg in packet):
+        return True
+  return False
+
+
 class CarInterface(CarInterfaceBase):
   CarState = CarState
   CarController = CarController
@@ -84,6 +102,8 @@ class CarInterface(CarInterfaceBase):
   @staticmethod
   def _get_params(ret: structs.CarParams, candidate, fingerprint, car_fw, alpha_long, is_release, docs) -> structs.CarParams:
     ret.brand = "hyundai"
+    ev9_long_test = get_ev9_longitudinal_test_config() if candidate == CAR.KIA_EV9 else None
+    ev9_long_test_armed = ev9_long_test is not None and ev9_long_test.armed
 
     # "LKA steering" if LKAS or LKAS_ALT messages are seen coming from the camera.
     # Generally means our LKAS message is forwarded to another ECU (commonly ADAS ECU)
@@ -96,11 +116,13 @@ class CarInterface(CarInterfaceBase):
     if ret.flags & HyundaiFlags.CANFD:
       # Shared configuration for CAN-FD cars
       ret.alphaLongitudinalAvailable = candidate not in CANFD_UNSUPPORTED_LONGITUDINAL_CAR
-      if lka_steering and Ecu.adas not in [fw.ecu for fw in car_fw] and candidate not in CANFD_SECURITYACCESS_CAR:
+      if lka_steering and Ecu.adas not in [fw.ecu for fw in car_fw] and candidate not in CANFD_SECURITYACCESS_CAR and \
+          not ev9_long_test_armed:
         # this needs to be figured out for cars without an ADAS ECU
         # Cars in CANFD_SECURITYACCESS_CAR are known to have ADAS ECUs that work with SecurityAccess
         ret.alphaLongitudinalAvailable = False
-      if lka_steering and ret.flags & HyundaiFlags.CANFD_ANGLE_STEERING and candidate not in CANFD_ANGLE_LONGITUDINAL_CAR:
+      if lka_steering and ret.flags & HyundaiFlags.CANFD_ANGLE_STEERING and candidate not in CANFD_ANGLE_LONGITUDINAL_CAR and \
+          not ev9_long_test_armed:
         # Most angle-steering LKA platforms still need stock longitudinal validation.
         ret.alphaLongitudinalAvailable = False
 
@@ -263,18 +285,43 @@ class CarInterface(CarInterfaceBase):
     global ECU_DISABLE_TIMESTAMP
     from openpilot.common.params import Params
     params = Params()
+    ev9_long_test = get_ev9_longitudinal_test_config(params) if CP.carFingerprint == CAR.KIA_EV9 else None
+
+    # Defense in depth: an EV9 CarParams cache must never retain longitudinal
+    # ownership after the explicit developer gate is removed.
+    if communication_control is None and CP.carFingerprint == CAR.KIA_EV9 and CP.openpilotLongitudinalControl and \
+        (ev9_long_test is None or not ev9_long_test.armed):
+      apply_ecu_disable_failure_fallback(CP, params)
+      ecu_log("EV9 longitudinal test gate is not armed; retaining stock SCC")
+      return
+
+    if communication_control is None and CP.carFingerprint == CAR.KIA_EV9 and CP.openpilotLongitudinalControl and \
+        ev9_long_test is not None and ev9_long_test.probe_mode == EV9LongitudinalProbeMode.DIAGNOSTIC_SESSION_ONLY:
+      bus = CanBus(CP).ECAN
+      entered, restored = run_diagnostic_session_probe(can_recv, can_send, bus=bus, addr=0x730)
+      apply_ecu_disable_failure_fallback(CP, params)
+      ecu_log(f"EV9 diagnostic-only probe finished: entered={entered}, restored={restored}; stock SCC retained")
+      return
 
     if communication_control is None:
-      if CP.carFingerprint in CANFD_RADAR_LIVE_LONGITUDINAL_CAR:
+      if CP.carFingerprint in CANFD_RADAR_LIVE_LONGITUDINAL_CAR or \
+          (ev9_long_test is not None and ev9_long_test.stage >= EV9LongitudinalTestStage.TX_DISABLE):
         # Don't use 0x80 suppress bit so we can read the ECU response.
-        # Use ENABLE_RX_DISABLE_TX (0x01) so the ECU can still receive from rear radars for BSM
-        # while blocking SCC TX.
+        # Keep ADAS reception enabled while blocking its normal output. This preserves the
+        # inputs needed to study BSM, but does not itself preserve ADAS-originated BSM output.
         communication_control = bytes([uds.SERVICE_TYPE.COMMUNICATION_CONTROL, uds.CONTROL_TYPE.ENABLE_RX_DISABLE_TX, uds.MESSAGE_TYPE.NORMAL])
       else:
         # 0x80 silences response for other cars (original behavior)
         communication_control = bytes([uds.SERVICE_TYPE.COMMUNICATION_CONTROL, 0x80 | uds.CONTROL_TYPE.DISABLE_RX_DISABLE_TX, uds.MESSAGE_TYPE.NORMAL])
 
-    ecu_log(f"=== init() called: opLong={CP.openpilotLongitudinalControl}, flags=0x{CP.flags:x}, safetyParam={CP.safetyConfigs[-1].safetyParam} ===")
+    ev9_restore_communication = None
+    if ev9_long_test is not None and ev9_long_test.armed:
+      communication_control, ev9_restore_communication = ev9_communication_control_requests(ev9_long_test.probe_mode)
+
+    stage_log = f", ev9TestStage={ev9_long_test.stage.name}" if ev9_long_test is not None else ""
+    init_log = f"=== init() called: opLong={CP.openpilotLongitudinalControl}, flags=0x{CP.flags:x}, "
+    init_log += f"safetyParam={CP.safetyConfigs[-1].safetyParam}{stage_log} ==="
+    ecu_log(init_log)
 
     if CP.openpilotLongitudinalControl and not (CP.flags & (HyundaiFlags.CANFD_CAMERA_SCC | HyundaiFlags.CAMERA_SCC)):
       addr, bus = 0x7d0, CanBus(CP).ECAN if CP.flags & (HyundaiFlags.CANFD | HyundaiFlags.CAN_CANFD_BLENDED) else 0
@@ -287,6 +334,26 @@ class CarInterface(CarInterfaceBase):
       ecu_log(f"=== ECU DISABLE attempt: addr=0x{addr:x}, bus={bus} ===")
       ecu_disabled = disable_ecu(can_recv, can_send, bus=bus, addr=addr, com_cont_req=communication_control,
                                  reset=bool(CP.flags & HyundaiFlags.CAN_CANFD_BLENDED))
+
+      if ecu_disabled and ev9_long_test is not None and ev9_long_test.armed and \
+          not ev9_long_test.persistent_suppression_allowed:
+        # Probe only: the tested EV9 firmware acknowledges 28 01 01 with 68 01 but
+        # continues transmitting SCC_CONTROL at 50 Hz. IsoTP drains the card CAN
+        # socket while waiting for the response, so a local silence check alone is
+        # not authoritative. Always bound the probe, restore communication, and
+        # fall back to stock before controls become ready.
+        ecu_log(f"holding EV9 probe {communication_control.hex()} for {EV9_LONG_PROBE_HOLD_SECONDS:.1f} seconds")
+        time.sleep(EV9_LONG_PROBE_HOLD_SECONDS)
+        stock_scc_present = ecu_messages_present(can_recv, bus, EV9_LONG_DISABLE_VERIFY_ADDRS,
+                                                 EV9_LONG_DISABLE_VERIFY_SECONDS)
+        outcome = "stock 0x1A0 observed" if stock_scc_present else "no local 0x1A0 observation"
+        ecu_log(f"=== EV9 COMMUNICATION CONTROL PROBE COMPLETE - {outcome}; restoring communication ===")
+        disable_ecu(can_recv, can_send, bus=bus, addr=addr, com_cont_req=ev9_restore_communication, retry=1)
+        ecu_disabled = False
+      elif ecu_disabled and ev9_long_test is not None and ev9_long_test.persistent_suppression_allowed:
+        persistent_log = f"=== EV9 PERSISTENT COMMUNICATION CONTROL ACTIVE - request={communication_control.hex()}, "
+        persistent_log += f"stage={ev9_long_test.stage.name}; controller Tester Present required ==="
+        ecu_log(persistent_log)
 
       if CP.carFingerprint == CAR.HYUNDAI_IONIQ_6:
         # Ioniq 6: track success/failure to auto-switch between openpilot long and stock ACC

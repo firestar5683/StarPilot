@@ -97,6 +97,8 @@ def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_torque,
   if lka_icon is None:
     lka_icon = 2 if enabled else 1
   angle_lkas_alt = CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING and CP.flags & HyundaiFlags.CANFD_LKA_STEERING_ALT
+  if angle_lkas_alt and not lat_active:
+    lka_icon = 1
 
   control_values = {
     "LKA_MODE": 2,
@@ -125,63 +127,34 @@ def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_torque,
     lfa_values["NEW_SIGNAL_2"] = 0
     lfa_values["DAMP_FACTOR"] = 100  # can potentially tuned for better perf [3, 200]
 
-  if CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING and CP.flags & HyundaiFlags.CANFD_LKA_STEERING_ALT:
+  if angle_lkas_alt:
     lkas_values["ADAS_StrAnglReqVal"] = apply_angle
     lkas_values["LKAS_ANGLE_ACTIVE"] = 2 if lat_active else 1
     lkas_values["ADAS_ACIAnglTqRedcGainVal"] = apply_torque if lat_active else 0.0
-    if angle_lkas_alt:
-      if lat_active:
-        lkas_values = {
-          "LKA_OptUsmSta": 0,
-          "LKA_RcgSta": 3,
-          "LKA_LHLnWrnSta": 0,
-          "LKA_RHLnWrnSta": 0,
-          "LKA_HndsoffSnd": 0,
-          "LKA_StrSnd": 0,
-          "LKA_SysIndReq": 2,
-          "StrTqReqVal": 0,
-          "ActToiSta": 0,
-          "ToiFltSta": 0,
-          "LFA_BUTTON": 0,
-          "LKA_SysWrn": 0,
-          "Damping_Gain": 100,
-          "LKAS_ANGLE_ACTIVE": 2,
-          "LKA_UsmMod": 0,
-          "ADAS_StrAnglReqVal": apply_angle,
-          "ADAS_ACIAnglTqRedcGainVal": apply_torque,
-        }
-      else:
-        lkas_values.update({
-          "LKA_OptUsmSta": 0,
-          "LKA_MODE": 0,
-          "LKA_RcgSta": 0,
-          "LKA_AVAILABLE": 0,
-          "LKA_LHLnWrnSta": 0,
-          "LKA_RHLnWrnSta": 0,
-          "LKA_WARNING": 0,
-          "LKA_HndsoffSnd": 0,
-          "LKA_StrSnd": 2,
-          "LKA_SysIndReq": 1,
-          "LKA_ICON": 1,
-          "FCA_SYSWARN": 0,
-          "StrTqReqVal": 0,
-          "TORQUE_REQUEST": 0,
-          "ActToiSta": 0,
-          "STEER_REQ": 0,
-          "ToiFltSta": 0,
-          "LFA_BUTTON": 0,
-          "LKA_SysWrn": 0,
-          "LKA_ASSIST": 0,
-          "Damping_Gain": 0,
-          "STEER_MODE": 0,
-          "NEW_SIGNAL_2": 0,
-          "LKAS_ANGLE_ACTIVE": 1,
-          "LKA_UsmMod": 0,
-          "HAS_LANE_SAFETY": 0,
-          "ADAS_ACIAnglTqRedcGainVal": 0.0,
-          "DAMP_FACTOR": 0,
-        })
-        lkas_values["ADAS_StrAnglReqVal"] = lkas_base_values.get("ADAS_StrAnglReqVal", apply_angle) if lkas_base_values else apply_angle
+    if lat_active:
+      lkas_values = {
+        "LKA_OptUsmSta": 0,
+        "LKA_RcgSta": 3,
+        "LKA_LHLnWrnSta": 0,
+        "LKA_RHLnWrnSta": 0,
+        "LKA_HndsoffSnd": 0,
+        "LKA_StrSnd": 0,
+        "LKA_SysIndReq": 2,
+        "StrTqReqVal": 0,
+        "ActToiSta": 0,
+        "ToiFltSta": 0,
+        "LFA_BUTTON": 0,
+        "LKA_SysWrn": 0,
+        "Damping_Gain": 100,
+        "LKAS_ANGLE_ACTIVE": 2,
+        "LKA_UsmMod": 0,
+        "ADAS_StrAnglReqVal": apply_angle,
+        "ADAS_ACIAnglTqRedcGainVal": apply_torque,
+      }
+    elif lkas_base_values:
+      # Match the common HKG path: preserve the camera's UI/status template and
+      # override only the steering command fields while openpilot owns the bus.
+      lkas_values["ADAS_StrAnglReqVal"] = lkas_base_values.get("ADAS_StrAnglReqVal", apply_angle)
 
   ret = []
   if CP.flags & HyundaiFlags.CANFD_LKA_STEERING:
@@ -202,6 +175,31 @@ def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_torque,
       ret.append(packer.make_can_msg("LFA", CAN.ECAN, lfa_values))
 
   return ret
+
+
+def create_ev9_inactive_steering_messages(packer, CAN, steering_angle: float):
+  """Recreate the EV9's parked ECAN steering status without actuation.
+
+  The stock ADAS ECU broadcasts both frames at 100 Hz. Keep every actuation
+  bit inactive, use the live measured angle for the redundant angle field,
+  and request zero torque-reduction gain.
+  """
+  lfa_values = {
+    "LKA_MODE": 2,
+    "LKA_ICON": 1,
+    "TORQUE_REQUEST": 0,
+    "LKA_ASSIST": 0,
+    "STEER_REQ": 0,
+    "STEER_MODE": 0,
+    "HAS_LANE_SAFETY": 0,
+    "NEW_SIGNAL_1": 0,
+    "NEW_SIGNAL_2": 0,
+    "DAMP_FACTOR": 100,
+  }
+  return [
+    packer.make_can_msg("LFA", CAN.ECAN, lfa_values),
+    _create_angle_adas_cmd_msg(packer, CAN, steering_angle, False, 0.0),
+  ]
 
 
 def create_suppress_lfa(packer, CAN, lfa_block_msg, lka_steering_alt):
@@ -382,7 +380,7 @@ def create_blindspot_status_messages(packer, CAN, rear_values, front_corner_valu
   rear["BCW_Sta"] = int(left_blindspot or right_blindspot)
   rear["BCW_LtIndSta"] = left_state
   rear["BCW_RtIndSta"] = right_state
-  rear["BCW_IndSta"] = max(left_state, right_state)
+  rear["BCW_IndSta"] = max(int(rear.get("BCW_IndSta", 0)), left_state, right_state)
   rear["OSMrrLamp_LtIndSta"] = left_state
   rear["OSMrrLamp_RtIndSta"] = right_state
   # Keep the older fields aligned where they still correlate on some platforms.
@@ -394,6 +392,34 @@ def create_blindspot_status_messages(packer, CAN, rear_values, front_corner_valu
   return [
     packer.make_can_msg("BLINDSPOTS_REAR_CORNERS", CAN.ECAN, rear),
     packer.make_can_msg("BLINDSPOTS_FRONT_CORNER_1", CAN.ECAN, front),
+  ]
+
+
+def create_ev9_blindspot_status_messages(packer, CAN, counter, left_blindspot=False, right_blindspot=False,
+                                          left_blinker=False, right_blinker=False):
+  """Recreate EV9 BSM output from the still-live direct corner-radar state."""
+  # Use packer only to calculate the delta for decoded BSM fields, then apply
+  # that delta to the complete captured payload. This preserves unknown EV9
+  # bytes that a signal dictionary cannot represent.
+  rear = {"BCW_IndSta": 1, "BCA_OnOffEquip2Sta": 2}
+  front = {"NEW_SIGNAL_3": 1}
+  neutral_packed = create_blindspot_status_messages(packer, CAN, rear, front)[0]
+  desired_packed = create_blindspot_status_messages(packer, CAN, rear, front, left_blindspot, right_blindspot,
+                                                      left_blinker, right_blinker)[0]
+  neutral = bytes(neutral_packed[1])
+  desired = bytes(desired_packed[1])
+
+  rear_msg = create_ev9_adrv_message(0x1BA, CAN.ECAN, counter)
+  rear_dat = bytearray(rear_msg[1])
+  for i in range(3, len(rear_dat)):
+    rear_dat[i] ^= neutral[i] ^ desired[i]
+  crc = hkg_can_fd_checksum(0x1BA, None, rear_dat)
+  rear_dat[0] = crc & 0xFF
+  rear_dat[1] = (crc >> 8) & 0xFF
+
+  return [
+    CanData(0x1BA, bytes(rear_dat), CAN.ECAN),
+    create_ev9_adrv_message(0x1E5, CAN.ECAN, counter),
   ]
 
 
@@ -767,6 +793,28 @@ def hkg_can_fd_checksum(address: int, sig, d: bytearray) -> int:
 # brake, and accelerator bits are updated for the radar heartbeat.
 _ACCEL_BRAKE_ALT_TEMPLATE = bytes.fromhex("000000020000fcff000000000020000055ff000068000000")
 _KIA_EV9_ACCEL_BRAKE_ALT_TEMPLATE = bytes.fromhex("00000000ff006f00e80400001201030055ffff0000000000")
+_KIA_EV9_ADRV_TEMPLATES = {
+  0x160: bytes.fromhex("0000000100000000fffc0100a8001000"),
+  0x1DA: bytes.fromhex("0000002200110000000000000000000000000000000000000000000000000000"),
+  0x1EA: bytes.fromhex("000000080000000000000000000000ff000000000000000000000000000f0f00"),
+  0x200: bytes.fromhex("00000014801a0000"),
+  0x345: bytes.fromhex("0000001500560000"),
+  # Neutral parked-state bodies captured immediately before suppressing the
+  # EV9 ADAS ECU. Bytes 0-2 are regenerated as CRC/counter below.
+  0x161: bytes.fromhex("0000000000000000c0fff0c003000000000000000000000000ff000000000000"),
+  0x162: bytes.fromhex("0000002700000000c0ff00000000000000000000000000000000000000000000"),
+  0x1BA: bytes.fromhex("00000000000000880200000000000000000000000000000f"),
+  0x1E5: bytes.fromhex("00000000000000000000220300000080"),
+  0x1E0: bytes.fromhex("00000002000000000000000000000000"),
+  0x38C: bytes.fromhex("000000f71f000000000000000000000000000000000000000000000000000000"),
+}
+
+# 0x57A does not use the standard Hyundai CAN-FD CRC/counter convention. Both
+# checksum bytes and byte 2 remained constant in the stock route, so preserve
+# the complete ignition-on payload rather than fabricating a rolling counter.
+_KIA_EV9_RAW_ADRV_TEMPLATES = {
+  0x57A: bytes.fromhex("7a50000800000000000001000000000000000000000000000000000000000000"),
+}
 
 def create_accelerator_brake_alt_spoof(bus: int, counter: int, brake_pressed: bool, accelerator_pressed: bool,
                                        car_fingerprint=None) -> CanData:
@@ -779,3 +827,23 @@ def create_accelerator_brake_alt_spoof(bus: int, counter: int, brake_pressed: bo
   d[0] = crc & 0xFF
   d[1] = (crc >> 8) & 0xFF
   return CanData(0x100, bytes(d), bus)
+
+
+def create_ev9_adrv_message(address: int, bus: int, counter: int) -> CanData:
+  """Recreate a captured EV9 ADAS support payload with a fresh counter and CRC."""
+  d = bytearray(_KIA_EV9_ADRV_TEMPLATES[address])
+  d[2] = counter & 0xFF
+  crc = hkg_can_fd_checksum(address, None, d)
+  d[0] = crc & 0xFF
+  d[1] = (crc >> 8) & 0xFF
+  return CanData(address, bytes(d), bus)
+
+
+def create_ev9_adrv_160(bus: int, counter: int) -> CanData:
+  """Recreate EV9 0x160 while truthfully showing AEB disabled."""
+  return create_ev9_adrv_message(0x160, bus, counter)
+
+
+def create_ev9_raw_adrv_message(address: int, bus: int) -> CanData:
+  """Replay an EV9 ADAS status frame that has no standard rolling CRC."""
+  return CanData(address, _KIA_EV9_RAW_ADRV_TEMPLATES[address], bus)

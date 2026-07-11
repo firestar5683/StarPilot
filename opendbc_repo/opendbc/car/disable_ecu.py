@@ -7,6 +7,8 @@ EXT_DIAG_REQUEST = b'\x10\x03'
 EXT_DIAG_RESPONSE = b'\x50\x03'
 RESET_REQUEST = b'\x11\x01'
 RESET_RESPONSE = b''
+DEFAULT_DIAG_REQUEST = b'\x10\x01'
+DEFAULT_DIAG_RESPONSE = b'\x50\x01'
 
 # File-based logging for debugging
 ECU_LOG_FILE = "/data/ecu_disable.log"
@@ -21,6 +23,31 @@ def ecu_log(msg):
       f.write(log_line + "\n")
   except Exception:
     pass
+
+
+def run_diagnostic_session_probe(can_recv, can_send, bus=0, addr=0x7d0, sub_addr=None, hold_seconds=1.0, timeout=0.1):
+  """Briefly enter extended diagnostics and always attempt to restore the default session."""
+  entered = False
+  restored = False
+  ecu_log(f"=== DIAGNOSTIC SESSION PROBE START === addr={hex(addr)}, bus={bus}")
+  try:
+    query = IsoTpParallelQuery(can_send, can_recv, bus, [(addr, sub_addr)], [EXT_DIAG_REQUEST], [EXT_DIAG_RESPONSE])
+    entered = bool(query.get_data(timeout))
+    ecu_log(f"diagnostic session probe entered={entered}")
+    if entered:
+      time.sleep(hold_seconds)
+  except Exception as e:
+    ecu_log(f"diagnostic session probe exception: {e}")
+  finally:
+    try:
+      query = IsoTpParallelQuery(can_send, can_recv, bus, [(addr, sub_addr)], [DEFAULT_DIAG_REQUEST], [DEFAULT_DIAG_RESPONSE])
+      restored = bool(query.get_data(timeout))
+      ecu_log(f"diagnostic session probe restored={restored}")
+    except Exception as e:
+      ecu_log(f"diagnostic session restore exception: {e}")
+
+  ecu_log(f"=== DIAGNOSTIC SESSION PROBE COMPLETE === entered={entered}, restored={restored}")
+  return entered, restored
 
 
 def disable_ecu(can_recv, can_send, bus=0, addr=0x7d0, sub_addr=None, com_cont_req=b'\x28\x83\x01', timeout=0.1, retry=10, reset=False):
@@ -62,7 +89,7 @@ def disable_ecu(can_recv, can_send, bus=0, addr=0x7d0, sub_addr=None, com_cont_r
         cc_success = False
         cc_rejected = False
         cc_nrc = None
-        for (rx_addr, _), data in cc_response.items():
+        for (_rx_addr, _), data in cc_response.items():
           ecu_log(f"CC response: {data.hex() if data else 'empty'}")
           # Check for positive response (0x68 = 0x28 + 0x40)
           if len(data) >= 1 and data[0] == 0x68:

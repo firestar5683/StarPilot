@@ -471,7 +471,7 @@ class TestHyundaiCanfdCCNCSupportFrames(common.SafetyTestBase):
 
 class TestHyundaiCanfdLKASteeringEV(TestHyundaiCanfdBase):
 
-  TX_MSGS = [[0x50, 0], [0x1CF, 1], [0x2A4, 0]]
+  TX_MSGS = [[0x50, 0], [0x1CF, 1], [0x2A4, 0], [0x730, 1], [0x7C4, 1], [0x7C6, 1], [0x7D0, 1], [0x7D4, 1]]
   RELAY_MALFUNCTION_ADDRS = {0: (0x50, 0x2a4)}  # LKAS, CAM_0x2A4
   FWD_BLACKLISTED_ADDRS = {2: [0x50, 0x2a4]}
 
@@ -504,11 +504,21 @@ class TestHyundaiCanfdLKASteeringEV(TestHyundaiCanfdBase):
       self.safety.set_controls_allowed(controls_allowed)
       self.assertFalse(self._tx(self._paddle_msg(left_paddle=1)))
 
+  def test_ev9_read_dtc_diagnostics(self):
+    for addr in (0x730, 0x7C4, 0x7C6, 0x7D0, 0x7D4):
+      with self.subTest(addr=hex(addr)):
+        self.assertTrue(self._tx(libsafety_py.make_CANPacket(addr, 1, b"\x03\x19\x02\xFF\x00\x00\x00\x00")))
+        self.assertTrue(self._tx(libsafety_py.make_CANPacket(addr, 1, b"\x30\x00\x00\x00\x00\x00\x00\x00")))
+        self.assertFalse(self._tx(libsafety_py.make_CANPacket(addr, 1, b"\x04\x14\xFF\xFF\xFF\x00\x00\x00")))
+        self.assertFalse(self._tx(libsafety_py.make_CANPacket(addr, 1, b"\x02\x10\x03\x00\x00\x00\x00\x00")))
+        if addr not in (0x730, 0x7D0):
+          self.assertFalse(self._tx(libsafety_py.make_CANPacket(addr, 1, b"\x02\x3E\x80\x00\x00\x00\x00\x00")))
+
 
 # TODO: Handle ICE and HEV configurations once we see cars that use the new messages
 class TestHyundaiCanfdLKASteeringAltEV(TestHyundaiCanfdBase):
 
-  TX_MSGS = [[0x110, 0], [0x1CF, 1], [0x362, 0]]
+  TX_MSGS = [[0x110, 0], [0x1CF, 1], [0x362, 0], [0x730, 1], [0x7C4, 1], [0x7C6, 1], [0x7D0, 1], [0x7D4, 1]]
   RELAY_MALFUNCTION_ADDRS = {0: (0x110, 0x362)}  # LKAS_ALT, CAM_0x362
   FWD_BLACKLISTED_ADDRS = {2: [0x110, 0x362]}
 
@@ -524,12 +534,16 @@ class TestHyundaiCanfdLKASteeringAltEV(TestHyundaiCanfdBase):
                                  HyundaiSafetyFlags.CANFD_LKA_STEERING_ALT)
     self.safety.init_tests()
 
+  test_ev9_read_dtc_diagnostics = TestHyundaiCanfdLKASteeringEV.test_ev9_read_dtc_diagnostics
+
 
 class TestHyundaiCanfdLKASteeringLongEV(HyundaiLongitudinalBase, TestHyundaiCanfdLKASteeringEV):
 
   TX_MSGS = [[0x50, 0], [0x1CF, 1], [0x2A4, 0], [0x51, 0], [0x730, 1], [0x12a, 1], [0x160, 1],
              [0x1ba, 1], [0x1e0, 1], [0x1e5, 1], [0x31a, 1], [0x3b5, 1], [0x3c1, 1],
-             [0x1a0, 1], [0x1ea, 1], [0x200, 1], [0x345, 1], [0x1da, 1]]
+             [0x1a0, 1], [0x1ea, 1], [0x200, 1], [0x345, 1], [0x1da, 1],
+             [0x161, 1], [0x162, 1], [0x38c, 1], [0x57a, 1],
+             [0x7c4, 1], [0x7c6, 1], [0x7d0, 1], [0x7d4, 1]]
 
   RELAY_MALFUNCTION_ADDRS = {0: (0x50, 0x2a4), 1: (0x1a0,)}  # LKAS, CAM_0x2A4, SCC_CONTROL
   FWD_BLACKLISTED_ADDRS = {0: MRR35_RADAR_TRACK_ADDRS, 2: [0x50, 0x2a4]}
@@ -564,7 +578,9 @@ class TestHyundaiCanfdLKASteeringAltAngleLongEV(HyundaiLongitudinalBase, TestHyu
 
   TX_MSGS = [[0x110, 0], [0x1CF, 1], [0x362, 0], [0x51, 0], [0x100, 0], [0x730, 1], [0x12a, 1], [0x160, 1],
              [0x1ba, 1], [0x1e0, 1], [0x1e5, 1], [0x31a, 1], [0x3b5, 1], [0x3c1, 1],
-             [0x1a0, 1], [0x1ea, 1], [0x200, 1], [0x345, 1], [0x1da, 1]]
+             [0x1a0, 1], [0x1ea, 1], [0x200, 1], [0x345, 1], [0x1da, 1],
+             [0x161, 1], [0x162, 1], [0x38c, 1], [0x57a, 1],
+             [0x7c4, 1], [0x7c6, 1], [0x7d0, 1], [0x7d4, 1]]
 
   RELAY_MALFUNCTION_ADDRS = {0: (0x110, 0x362), 1: (0x1a0,)}  # LKAS_ALT, CAM_0x362, SCC_CONTROL
   FWD_BLACKLISTED_ADDRS = {0: MRR35_RADAR_TRACK_ADDRS}
@@ -583,6 +599,8 @@ class TestHyundaiCanfdLKASteeringAltAngleLongEV(HyundaiLongitudinalBase, TestHyu
   def setUp(self):
     super().setUp()
     self._rx(self._gear_msg(5))
+
+  test_ev9_read_dtc_diagnostics = TestHyundaiCanfdLKASteeringEV.test_ev9_read_dtc_diagnostics
 
   def _angle_cmd_msg(self, angle, enabled, increment_timer=True, gain_raw=250):
     if increment_timer:
@@ -769,8 +787,6 @@ class TestHyundaiCanfdLKASteeringAolLkasOnEngageEV(HyundaiAolLkasOnEngageStockBa
                                  HyundaiSafetyFlags.EV_GAS |
                                  HyundaiStarPilotSafetyFlags.AOL_LKAS_ON_ENGAGE)
     self.safety.init_tests()
-
-
 
 if __name__ == "__main__":
   unittest.main()

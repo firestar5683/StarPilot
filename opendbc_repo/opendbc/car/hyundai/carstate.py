@@ -50,6 +50,7 @@ def calculate_canfd_speed_limit(CP, FPCP, cp, cp_cam, speed_factor):
 
 
 def decode_ioniq_6_blindspot_radar_state(state: int) -> tuple[bool, bool]:
+  """Decode the shared HKG CAN-FD corner-radar side-detection bitmap."""
   state_int = int(state)
   return bool(state_int & IONIQ_6_BLINDSPOT_LEFT_MASK), bool(state_int & IONIQ_6_BLINDSPOT_RIGHT_MASK)
 
@@ -494,11 +495,12 @@ class CarState(CarStateBase):
                                                                       cp.vl["BLINKERS"][right_blinker_sig])
     self.left_blindspot_from_radar = False
     self.right_blindspot_from_radar = False
-    if self.CP.carFingerprint == CAR.HYUNDAI_IONIQ_6:
+    direct_radar_bsm = self.CP.carFingerprint in (CAR.HYUNDAI_IONIQ_6, CAR.KIA_EV9)
+    if direct_radar_bsm:
       self.left_blindspot_from_radar, self.right_blindspot_from_radar = decode_ioniq_6_blindspot_radar_state(
         cp.vl["BLINDSPOTS_FRONT_CORNER_2"]["SIDE_DETECT_STATE"])
     if self.CP.enableBsm:
-      if self.CP.carFingerprint == CAR.HYUNDAI_IONIQ_6:
+      if direct_radar_bsm:
         ret.leftBlindspot = (bool(cp.vl["BLINDSPOTS_REAR_CORNERS"]["BCW_LtIndSta"]) or
                              self.left_blindspot_from_radar)
         ret.rightBlindspot = (bool(cp.vl["BLINDSPOTS_REAR_CORNERS"]["BCW_RtIndSta"]) or
@@ -623,6 +625,18 @@ class CarState(CarStateBase):
       ("LFAHDA_CLUSTER", 0),  # optional: carries cluster icon state on some variants
       ("BLINKER_STALKS", 0),  # optional: some trims publish live stalk/light state on ECAN during turn camera events
     ]
+    if CP.enableBsm:
+      # Accessing an undeclared message dynamically registers it as required.
+      # HDA2 ADAS transmit-disable removes the stock 0x1BA source, while BSM
+      # may still be reconstructed from the corner-radar inputs. Keep this
+      # parser entry optional so that expected ADAS silence does not poison
+      # canValid; checksum/counter failures on all required messages remain.
+      msgs.append(("BLINDSPOTS_REAR_CORNERS", 0))
+    if CP.carFingerprint in (CAR.HYUNDAI_IONIQ_6, CAR.KIA_EV9):
+      # Direct corner-radar state remains live when ADAS_DRV transmission is
+      # disabled. It is optional across trims, but used as the authoritative
+      # BSM source on validated Ioniq 6 and staged EV9 support.
+      msgs.append(("BLINDSPOTS_FRONT_CORNER_2", 0))
     if CP.flags & HyundaiFlags.EV:
       msgs.append(("DRIVE_MODE_EV", 0))  # optional: not all CAN-FD EV variants publish drive mode
       msgs.append(("MANUAL_SPEED_LIMIT_ASSIST", 0))  # optional: used for non-adaptive cruise state and Ioniq 6 i-Pedal latch detection
