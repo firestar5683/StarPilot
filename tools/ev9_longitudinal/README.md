@@ -1,0 +1,255 @@
+# Kia EV9 longitudinal transmit-disable test framework
+
+This framework is developer-only and disabled by default. It is designed for parked testing that determines which EV9
+ADAS_DRV messages must be restored after UDS receive-enabled/transmit-disabled communication control is applied to ECU
+`0x730`.
+
+It does not preserve OEM FCA/AEB. Raw radar availability is not equivalent to retaining Hyundai's fused emergency-braking
+logic. BSM (blind-spot monitoring) must also be treated as unproven: `ENABLE_RX_DISABLE_TX` lets ADAS_DRV keep receiving
+corner-radar traffic, but prevents normal ADAS_DRV output. EV9 `BLINDSPOTS_REAR_CORNERS` (`0x1BA`) carries mirror-warning
+and blind-spot collision-avoidance fields and may disappear with the other ADAS outputs.
+
+Do not replay a frozen `0x1BA`: a valid counter/checksum with stale object state could falsely clear or assert a warning.
+Stage 2 must first establish whether `0x1BA` disappears, whether the mirror lamps continue through another path, and which
+live corner-radar inputs can safely regenerate it.
+
+## EV9 result: transmit-disable works, but static reconstruction does not satisfy the vehicle
+
+The 2026-07-10 probe showed that `28 01 01` can return a positive UDS response without silencing the EV9 ADAS ECU.
+The later 2026-07-11 parked test established that `28 01 03` (enable receive, disable transmit, normal and
+network-management messages) does suppress ADAS ECU `0x730` output. Persistent suppression requires Tester Present;
+the ECU resumes transmission about five seconds after Tester Present stops.
+
+With `28 01 03` active, the vehicle consistently displayed 12 ADAS DTCs, five orange warning icons, two warning dings,
+and the comma initially reported `Unknown Vehicle Variant`. The latter was independently traced to a stale parser that
+required suppressed BSM frame `0x1BA`; making the frame optional and performing a clean bytecode/reboot cycle restored
+`carState.canValid`. It did not change any vehicle warnings.
+
+Progressive parked testing reconstructed every observed suppressed ADAS frame through stage 15: radar heartbeat `0x100`,
+ADAS status `0x160`, CCNC `0x161/0x162`, inactive SCC `0x1A0`, BSM `0x1BA/0x1E5`, cluster `0x1E0`, status frames
+`0x1DA/0x1EA/0x200/0x345/0x38C/0x57A`, and inactive steering messages `0x12A/0xCB`. Frame rates, counters, checksums,
+bus placement, and Panda acceptance were verified. No cumulative stage changed the 12 DTCs, warning icons, or dings.
+Stage 16 actuation was not entered.
+
+The clean disarmed recovery route is `000000d3--78bb8fa04a`; it identified `KIA_EV9`, produced valid `carState` for
+985/985 sampled updates, and showed no vehicle DTCs. The feature flag, stage, probe mode, and alpha-longitudinal toggle
+were explicitly persisted as zero and verified again after reboot.
+
+A separate bounded diagnostic-only probe entered extended session with `10 03` (`50 03`), waited one second, and restored
+the default session with `10 01` (`50 01`). It produced no vehicle DTCs. This isolates the warning trigger to
+CommunicationControl `28 01 01`, not extended diagnostic session entry itself.
+
+StarPilot verifies that stock `0x1A0` actually stops after the positive response. If it remains live, the interface
+requests normal communication again and falls back to stock SCC before controls become ready. A positive UDS
+acknowledgement alone is never accepted as longitudinal ownership; the `28 01 03` test proved suppression through the
+disappearing address set and sustained message-rate measurements.
+
+EV9 CommunicationControl remains developer-only and parked-test-only. The successful suppression and reconstruction
+ladder demonstrate message-generation capability, not a driveable longitudinal implementation.
+
+The demonstrated CarrotPilot HDA2 approach uses a modified ADAS harness to place the ADAS E-CAN output on a separately
+controlled Panda bus, then selectively processes and retransmits live traffic. That physical isolation—not UDS-only
+CommunicationControl—is the evidence-backed next architecture for this EV9. CarrotPilot also clears selected CCNC alert,
+fault, and sound fields, so a clean dashboard alone must not be treated as proof that stock functionality was restored.
+
+Before another suppression run, capture DTCs from the receiving ECUs rather than replaying the same static ladder. Cached
+EV9 CarParams identified these physical diagnostic request/response pairs:
+
+| ECU | Request | Response |
+|---|---:|---:|
+| ADAS | `0x730` | `0x738` |
+| Forward camera | `0x7C4` | `0x7CC` |
+| Combination meter | `0x7C6` | `0x7CE` |
+| Forward radar | `0x7D0` | `0x7D8` |
+| EPS | `0x7D4` | `0x7DC` |
+
+The normal Hyundai CAN-FD Panda safety mode intentionally blocks arbitrary DTC requests. A diagnostic capture therefore
+needs a separately reviewed, fail-safe procedure that restores communication before restarting openpilot; do not modify
+the safety allowlist merely to hide this restriction.
+
+The staged `read_dtc_live.py` observer keeps `pandad` and route logging active. Panda permits only the exact UDS
+`ReadDTCInformation/DTCByStatusMask` request (`19 02 FF`) and ISO-TP flow control on the known EV9 addresses; clear-DTC,
+session-control, communication-control, memory access, and other diagnostic payloads remain blocked. The observer requires
+the EV9 to be stationary in Park, verifies cached firmware-query bus evidence, and always resets its one-shot authorization
+flag after success or failure. It never opens `sendcan`: `CarController` emits the one-shot requests through its existing
+publisher after suppression has been stable for five seconds. This is required because a second publisher can evict `card`,
+drop Tester Present, restore stock ADAS traffic, and latch a Panda relay fault.
+
+Run after suppression has stabilized in READY and the vehicle remains in Park:
+
+```bash
+cd /data/openpilot
+source ./launch_env.sh
+
+/usr/local/venv/bin/python3 tools/ev9_longitudinal/read_dtc_live.py --label suppressed
+```
+
+The observer arms `KiaEv9DtcCaptureEnabled`, passively reconstructs the replies, and appends results to
+`/data/ev9_dtc_capture.jsonl`. ADAS `0x730` is intentionally skipped to preserve CommunicationControl. The tool never
+clears DTCs. The clean-stock baseline is already captured; do not use a standalone diagnostic publisher while `card` runs.
+
+Use the resulting ECU/code list to maintain a functionality matrix:
+
+| Function | Evidence required | Allowed disposition |
+|---|---|---|
+| OEM FCA/AEB | ADAS/FCA DTCs and controlled functional evidence | Expected unavailable; show an honest unavailable state |
+| BSM mirror warnings | Live corner-radar input plus dynamic `0x1BA` output | Recreate dynamically or mark unavailable; never replay frozen object state |
+| EPS/lateral steering | EPS DTCs, `carState`, and parked steering checks | Must remain functional and fault-free |
+| ESC/service braking | ESC/brake DTCs and pedal/brake-state evidence | Must remain functional; do not suppress a real brake-system fault |
+| Radar perception | All MRR35 tracks and openpilot radar output | Retain and continuously validate |
+| Cluster-only ADAS UI | Receiving-ECU DTC mapped to decoded alert fields | May suppress only after the underlying function is classified |
+| DAW/sign/lane features | Source ECU, live inputs, and output messages identified | Recreate when evidence is sufficient; otherwise mark unavailable |
+
+## Gates
+
+Three conditions are required before StarPilot can request EV9 ADAS transmit-disable:
+
+1. The detected car is `KIA_EV9`.
+2. `KiaEv9LongitudinalTestEnabled` is true and the stage is at least 2.
+3. The normal `AlphaLongitudinalEnabled` developer toggle is true.
+
+Changing the stage while onroad is unsupported. Configure it offroad, reboot, run one parked test, restore stage 0, and
+reboot before driving.
+
+## Cumulative stages
+
+| Stage | Addition |
+|---:|---|
+| 0 | Disabled; stock SCC |
+| 1 | Shadow/log analysis only; no ECU command |
+| 2 | Confirmed `ENABLE_RX_DISABLE_TX` to `0x730`; no longitudinal/support replacements beyond Tester Present |
+| 3 | Add EV9 `0x100` radar heartbeat at 100 Hz |
+| 4 | Add `ADRV_0x160` at its stock rate |
+| 5 | Add `ADRV_0x1DA` |
+| 6 | Add `ADRV_0x1EA` |
+| 7 | Add `ADRV_0x200` |
+| 8 | Add `ADRV_0x345` |
+| 9 | Add `SCC_CONTROL` (`0x1A0`) at 50 Hz, forcibly inactive with zero requested acceleration |
+| 10 | Add neutral CCNC status `0x161/0x162` |
+| 11 | Add neutral BSM status `0x1BA/0x1E5` |
+| 12 | Add neutral cluster status `0x1E0` |
+| 13 | Add captured ADAS status `0x38C` |
+| 14 | Add captured raw ADAS status `0x57A` |
+| 15 | Add inactive steering status `0x12A/0xCB` |
+| 16 | Permit requested acceleration/braking; not a parked test stage |
+
+`0x51` is intentionally excluded because it was absent from the stock EV9 reference route. EV9 HDA2 also does not send
+the legacy `0x1E0` cluster replacement. Live CCNC `0x161/0x162` traffic should be observed, not duplicated.
+
+The already-established EV9 lateral path continues to transmit its steering ownership/status messages at every armed
+stage. Those are the test baseline, not part of this longitudinal replay ladder.
+
+## Configure offroad
+
+From `/data/openpilot` after sourcing `launch_env.sh`:
+
+```python
+from openpilot.common.params import Params
+
+params = Params()
+params.put_bool("KiaEv9LongitudinalTestEnabled", True)
+params.put_int("KiaEv9LongitudinalTestStage", 2)
+params.put_bool("AlphaLongitudinalEnabled", True)
+```
+
+Reboot after changing the configuration. To disarm:
+
+```python
+from openpilot.common.params import Params
+
+params = Params()
+params.put_bool("KiaEv9LongitudinalTestEnabled", False)
+params.put_int("KiaEv9LongitudinalTestStage", 0)
+params.put_bool("AlphaLongitudinalEnabled", False)
+```
+
+## Analyze captures
+
+Compare a stock baseline segment with a post-disable segment:
+
+```bash
+python3 tools/ev9_longitudinal/analyze_route_diff.py \
+  /data/media/0/realdata/ROUTE--0 \
+  /data/media/0/realdata/ROUTE--1
+```
+
+The report shows message rates, MRR35 track continuity, and nonzero CCNC `0x162` fault fields. Returned Panda buses are
+excluded by default so forwarded copies are not mistaken for independent transmitters.
+
+Use `rlog` captures for decisions. `qlog` is downsampled and can make healthy message rates or MRR35 address coverage look
+incomplete.
+
+The progressive ladder through stage 15 is complete and should not be repeated merely to reconfirm the unchanged warning
+state. All 32 MRR35 radar tracks remained live, while the ADAS-origin `0x1BA` BSM output disappeared and was reconstructed
+without clearing the vehicle faults. Do not use stage 16 without a separate reviewed drive-test plan, and do not enter it
+while any dashboard or CAN-validity fault remains.
+
+## First test sequence
+
+Do not drive on a public road during this sequence. Keep the vehicle in Park with room around it, and have a second person
+record the instrument cluster and both mirror indicators if possible.
+
+For every run, record the stage number, route name, wall-clock start time, whether the vehicle is OFF/IGN-ON/READY, and
+every visible or audible warning. Change only the stage between runs.
+
+### Run A: stock baseline (stage 0)
+
+1. Set `KiaEv9LongitudinalTestEnabled=false`, `KiaEv9LongitudinalTestStage=0`, and
+   `AlphaLongitudinalEnabled=false`; reboot the comma.
+2. Start with the vehicle fully off, then switch to IGN-ON without pressing the brake.
+3. Wait 30 seconds, transition to READY while remaining in Park, and wait 60 seconds.
+4. Hold the left turn signal for 10 seconds, wait 10 seconds, then hold the right signal for 10 seconds.
+5. Save every full `rlog.zst` segment covering the run plus a cluster/mirror video.
+
+### Run B: shadow baseline (stage 1)
+
+Repeat Run A with `KiaEv9LongitudinalTestEnabled=true`, `KiaEv9LongitudinalTestStage=1`, and
+`AlphaLongitudinalEnabled=true`. Stage 1 must not send CommunicationControl; its traffic should match stock behavior.
+
+### Run C: transmit-disable only (stage 2)
+
+1. Configure stage 2 offroad and reboot the comma while the vehicle is fully off.
+2. Switch to IGN-ON without pressing the brake. Wait at least 30 seconds so the confirmed `0x730` UDS transaction can
+   finish before entering READY.
+3. Record the exact time of the first dash warning. Do not clear warnings or change settings.
+4. Transition to READY while remaining in Park. Wait 60 seconds, then repeat the left/right turn-signal sequence.
+5. Power the vehicle fully off. Restore stage 0 and both enable flags to false, reboot the comma, and allow the vehicle to
+   complete a normal sleep/wake cycle before checking that warnings clear.
+
+Stop after Run C and compare its logs with A and B. Do not advance to stage 3 until the disappearing address set, UDS
+success, CCNC faults, `0x1BA`, and MRR35 continuity have been reviewed.
+
+## Capture markers and required bundle
+
+Normal route logging should be active whenever ignition is on. When SSH access is available, run the bounded helper in a
+second terminal to add precise markers (replace `DEVICE_IP` and the label):
+
+```bash
+python3 ~/.codex/skills/starpilot-can-log-capture/scripts/starpilot_can_capture.py \
+  --target comma@DEVICE_IP --ssh-key ~/.ssh/id_ed25519 \
+  start --label ev9-stage2 --duration 600
+
+python3 ~/.codex/skills/starpilot-can-log-capture/scripts/starpilot_can_capture.py \
+  --target comma@DEVICE_IP --ssh-key ~/.ssh/id_ed25519 \
+  mark --label ev9-stage2 --action ignition_on
+
+python3 ~/.codex/skills/starpilot-can-log-capture/scripts/starpilot_can_capture.py \
+  --target comma@DEVICE_IP --ssh-key ~/.ssh/id_ed25519 \
+  mark --label ev9-stage2 --action ready_in_park
+
+python3 ~/.codex/skills/starpilot-can-log-capture/scripts/starpilot_can_capture.py \
+  --target comma@DEVICE_IP --ssh-key ~/.ssh/id_ed25519 \
+  mark --label ev9-stage2 --action first_dash_warning
+
+python3 ~/.codex/skills/starpilot-can-log-capture/scripts/starpilot_can_capture.py \
+  --target comma@DEVICE_IP --ssh-key ~/.ssh/id_ed25519 \
+  stop --label ev9-stage2
+```
+
+For analysis, provide:
+
+- The route identifier and every full `rlog.zst` covering Runs A-C; do not substitute qlogs.
+- The helper capture/marker files when used.
+- Cluster and mirror video with the phone clock visible, or a timestamped written warning list.
+- A note confirming the three parameter values, the IGN-ON-to-READY timing, and whether UDS disable reported success.
+- No VIN, precise location, access token, SSH private key, or other credential.
