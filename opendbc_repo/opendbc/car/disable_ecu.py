@@ -50,7 +50,8 @@ def run_diagnostic_session_probe(can_recv, can_send, bus=0, addr=0x7d0, sub_addr
   return entered, restored
 
 
-def disable_ecu(can_recv, can_send, bus=0, addr=0x7d0, sub_addr=None, com_cont_req=b'\x28\x83\x01', timeout=0.1, retry=10, reset=False):
+def disable_ecu(can_recv, can_send, bus=0, addr=0x7d0, sub_addr=None, com_cont_req=b'\x28\x83\x01', timeout=0.1, retry=10,
+                reset=False, session_delay=0.05):
   """Silence an ECU by disabling sending and receiving messages using UDS 0x28.
   The ECU will stay silent as long as openpilot keeps sending Tester Present.
 
@@ -77,8 +78,11 @@ def disable_ecu(can_recv, can_send, bus=0, addr=0x7d0, sub_addr=None, com_cont_r
       for _, _ in query.get_data(timeout).items():
         ecu_log("diag session OK")
 
-        # Small delay to let ECU fully enter diagnostic mode
-        time.sleep(0.05)
+        # Some ECUs need a short settle time. The gated EV9 pre-fingerprint
+        # probe uses zero delay to reach CommunicationControl before READY
+        # conditions latch.
+        if session_delay > 0:
+          time.sleep(session_delay)
 
         # Send CC command and log the response
         ecu_log("sending CC...")

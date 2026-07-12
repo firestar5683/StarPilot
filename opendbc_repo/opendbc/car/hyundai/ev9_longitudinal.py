@@ -18,6 +18,7 @@ class EV9LongitudinalProbeMode(IntEnum):
   TX_DISABLE_ALL_MESSAGE_TYPES = 2
   RX_TX_DISABLE_NORMAL = 3
   RESET_TX_DISABLE_ALL_MESSAGE_TYPES = 4
+  FULL_DISABLE_THEN_RX_ENABLE = 5
 
 
 EV9_LONG_PROBE_HOLD_SECONDS = 5.0
@@ -45,7 +46,8 @@ def ev9_communication_control_requests(probe_mode: EV9LongitudinalProbeMode) -> 
   the diagnostic response.
   """
   if probe_mode in (EV9LongitudinalProbeMode.TX_DISABLE_ALL_MESSAGE_TYPES,
-                    EV9LongitudinalProbeMode.RESET_TX_DISABLE_ALL_MESSAGE_TYPES):
+                    EV9LongitudinalProbeMode.RESET_TX_DISABLE_ALL_MESSAGE_TYPES,
+                    EV9LongitudinalProbeMode.FULL_DISABLE_THEN_RX_ENABLE):
     return b"\x28\x01\x03", b"\x28\x00\x03"
   if probe_mode == EV9LongitudinalProbeMode.RX_TX_DISABLE_NORMAL:
     return b"\x28\x03\x01", b"\x28\x00\x01"
@@ -123,7 +125,8 @@ class EV9LongitudinalTestConfig:
     only the radar heartbeat; SCC_CONTROL is still withheld until SCC_INACTIVE.
     """
     return self.enabled and self.probe_mode in (EV9LongitudinalProbeMode.TX_DISABLE_ALL_MESSAGE_TYPES,
-                                                 EV9LongitudinalProbeMode.RESET_TX_DISABLE_ALL_MESSAGE_TYPES) and \
+                                                 EV9LongitudinalProbeMode.RESET_TX_DISABLE_ALL_MESSAGE_TYPES,
+                                                 EV9LongitudinalProbeMode.FULL_DISABLE_THEN_RX_ENABLE) and \
       self.stage >= EV9LongitudinalTestStage.RADAR_HEARTBEAT
 
 

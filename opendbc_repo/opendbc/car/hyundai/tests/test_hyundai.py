@@ -15,7 +15,7 @@ from opendbc.car.hyundai.carcontroller import CarController, Ioniq6LongitudinalT
                                              get_angle_smoothing_alpha, apply_ev9_high_angle_gain_cap, ev9_driver_override_active, \
                                              update_angle_command, should_use_ev6_gt_line_stop_direct_tracking
 from opendbc.car.hyundai.carstate import CarState, decode_canfd_camera_lead, decode_ioniq_6_blindspot_radar_state
-from opendbc.car.hyundai.interface import CarInterface
+from opendbc.car.hyundai.interface import CarInterface, attempt_ev9_pre_fingerprint_suppression
 from opendbc.car.hyundai import hyundaican, hyundaicanfd
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.ev9_longitudinal import EV9LongitudinalProbeMode, EV9LongitudinalTestConfig, EV9LongitudinalTestStage
@@ -316,6 +316,58 @@ class TestHyundaiFingerprint:
     assert not CP.pcmCruise
     assert CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.LONG
 
+  def test_ev9_pre_fingerprint_suppression_is_strictly_gated(self, monkeypatch):
+    config = EV9LongitudinalTestConfig(True, EV9LongitudinalTestStage.STEERING_KEEPALIVE,
+                                       EV9LongitudinalProbeMode.TX_DISABLE_ALL_MESSAGE_TYPES)
+    monkeypatch.setattr("opendbc.car.hyundai.interface.get_ev9_longitudinal_test_config", lambda *args, **kwargs: config)
+    calls = []
+    monkeypatch.setattr("opendbc.car.hyundai.interface.disable_ecu",
+                        lambda *args, **kwargs: calls.append(kwargs) or True)
+    fw = [SimpleNamespace(ecu=Ecu.adas, address=0x730)]
+    cache = SimpleNamespace(carFingerprint=CAR.KIA_EV9, brand="hyundai", carFw=fw,
+                            openpilotLongitudinalControl=True, pcmCruise=False)
+    params = SimpleNamespace(get_bool=lambda key: key == "AlphaLongitudinalEnabled")
+
+    assert attempt_ev9_pre_fingerprint_suppression(cache, params, None, None)
+    assert calls == [{"bus": 1, "addr": 0x730, "com_cont_req": b"\x28\x01\x03", "session_delay": 0.0}]
+
+    calls.clear()
+    cache.openpilotLongitudinalControl = False
+    assert not attempt_ev9_pre_fingerprint_suppression(cache, params, None, None)
+    assert calls == []
+
+  def test_ev9_ready_baselines_preserve_body_and_continue_counter(self):
+    stock_161 = bytes.fromhex("12343d0000000000c0fff0c003000040000000000000000000ff000000000000")
+    stock_57a = bytes.fromhex("7a50000400000000000001000000000000000000000000000000000000000000")
+    hyundaicanfd.set_ev9_adrv_baselines([CanData(0x161, stock_161, 1), CanData(0x57A, stock_57a, 1)])
+    try:
+      recreated = hyundaicanfd.create_ev9_adrv_message(0x161, 1, 0)
+      assert recreated.dat[2] == 0x3E
+      assert recreated.dat[3:] == stock_161[3:]
+      assert hyundaicanfd.create_ev9_raw_adrv_message(0x57A, 1).dat == stock_57a
+    finally:
+      hyundaicanfd.set_ev9_adrv_baselines([])
+
+  def test_ev9_pre_fingerprint_handoff_avoids_second_disable_and_verifier_delay(self, monkeypatch):
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[CanBus(None, fingerprint).CAM][0x110] = 32
+    ev9_car_fw = [CarParams.CarFw(ecu=Ecu.adas, fwVersion=b"", address=0x730, brand="hyundai")]
+    config = EV9LongitudinalTestConfig(True, EV9LongitudinalTestStage.STEERING_KEEPALIVE,
+                                       EV9LongitudinalProbeMode.TX_DISABLE_ALL_MESSAGE_TYPES)
+    monkeypatch.setattr("opendbc.car.hyundai.interface.get_ev9_longitudinal_test_config", lambda *args, **kwargs: config)
+    CP = CarInterface.get_params(CAR.KIA_EV9, fingerprint, ev9_car_fw, True, False, False, None)
+    monkeypatch.setattr("opendbc.car.hyundai.interface.EV9_EARLY_SUPPRESSION_ACTIVE", True)
+    monkeypatch.setattr("opendbc.car.hyundai.interface.ecu_suppression_verified",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not add a handoff delay")))
+    monkeypatch.setattr("opendbc.car.hyundai.interface.disable_ecu",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must not disable twice")))
+
+    CarInterface.init(CP, None, None)
+
+    assert CP.openpilotLongitudinalControl
+    assert not CP.pcmCruise
+    assert CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.LONG
+
   def test_ev9_test_uses_confirmed_rx_enabled_tx_disabled_request(self, monkeypatch):
     fingerprint = gen_empty_fingerprint()
     fingerprint[CanBus(None, fingerprint).CAM][0x110] = 32
@@ -412,6 +464,50 @@ class TestHyundaiFingerprint:
     assert requests[0]["reset"] is True
     assert CP.openpilotLongitudinalControl
     assert not CP.pcmCruise
+
+  def test_ev9_full_disable_transition_reenables_rx_before_persistent_suppression(self, monkeypatch):
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[CanBus(None, fingerprint).CAM][0x110] = 32
+    ev9_car_fw = [CarParams.CarFw(ecu=Ecu.adas, fwVersion=b"", address=0x730, brand="hyundai")]
+    config = EV9LongitudinalTestConfig(True, EV9LongitudinalTestStage.ACTUATION_PREFLIGHT,
+                                       EV9LongitudinalProbeMode.FULL_DISABLE_THEN_RX_ENABLE)
+    monkeypatch.setattr("opendbc.car.hyundai.interface.get_ev9_longitudinal_test_config", lambda *args, **kwargs: config)
+    CP = CarInterface.get_params(CAR.KIA_EV9, fingerprint, ev9_car_fw, True, False, False, None)
+    requests = []
+
+    def fake_disable_ecu(*args, **kwargs):
+      requests.append(kwargs["com_cont_req"])
+      return True
+
+    monkeypatch.setattr("opendbc.car.hyundai.interface.disable_ecu", fake_disable_ecu)
+    CarInterface.init(CP, None, None)
+
+    assert requests == [bytes([0x28, 0x03, 0x03]), bytes([0x28, 0x01, 0x03])]
+    assert CP.openpilotLongitudinalControl
+    assert not CP.pcmCruise
+
+  def test_ev9_full_disable_transition_restores_and_falls_back_when_rx_enable_fails(self, monkeypatch):
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[CanBus(None, fingerprint).CAM][0x110] = 32
+    ev9_car_fw = [CarParams.CarFw(ecu=Ecu.adas, fwVersion=b"", address=0x730, brand="hyundai")]
+    config = EV9LongitudinalTestConfig(True, EV9LongitudinalTestStage.ACTUATION_PREFLIGHT,
+                                       EV9LongitudinalProbeMode.FULL_DISABLE_THEN_RX_ENABLE)
+    monkeypatch.setattr("opendbc.car.hyundai.interface.get_ev9_longitudinal_test_config", lambda *args, **kwargs: config)
+    CP = CarInterface.get_params(CAR.KIA_EV9, fingerprint, ev9_car_fw, True, False, False, None)
+    requests = []
+    results = iter((True, False, True))
+
+    def fake_disable_ecu(*args, **kwargs):
+      requests.append(kwargs["com_cont_req"])
+      return next(results)
+
+    monkeypatch.setattr("opendbc.car.hyundai.interface.disable_ecu", fake_disable_ecu)
+    CarInterface.init(CP, None, None)
+
+    assert requests == [bytes([0x28, 0x03, 0x03]), bytes([0x28, 0x01, 0x03]), bytes([0x28, 0x00, 0x03])]
+    assert not CP.openpilotLongitudinalControl
+    assert CP.pcmCruise
+    assert not (CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.LONG)
 
   def test_ev9_deinit_restores_tx_even_if_test_gate_was_removed(self, monkeypatch):
     fingerprint = gen_empty_fingerprint()

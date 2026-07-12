@@ -18,6 +18,8 @@ from opendbc.car.can_definitions import CanData, CanRecvCallable, CanSendCallabl
 from opendbc.car.carlog import carlog
 from opendbc.car.fw_versions import ObdCallback
 from opendbc.car.car_helpers import get_car, interfaces
+from opendbc.car.hyundai.ev9_longitudinal import EV9LongitudinalTestStage, get_ev9_longitudinal_test_config
+from opendbc.car.hyundai.interface import attempt_ev9_pre_fingerprint_suppression
 from opendbc.car.interfaces import CarInterfaceBase, RadarInterfaceBase
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
 from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
@@ -85,6 +87,11 @@ class Car:
     self.CC_prev = car.CarControl.new_message()
     self.CS_prev = car.CarState.new_message()
     self.initialized_prev = False
+    self.interface_initialized = False
+    self.ev9_early_control_active = False
+    # CarController expects a reader (normal carControl messages come from a
+    # SubMaster). Passing a builder makes its nested actuators lack as_builder.
+    self.ev9_early_car_control = car.CarControl.new_message().as_reader()
 
     self.last_actuators_output = structs.CarControl.Actuators()
 
@@ -103,16 +110,46 @@ class Car:
         if len(can.can) > 0:
           break
 
+      initial_can_messages = [CanData(msg.address, msg.dat, msg.src) for msg in can.can]
+      # Preserve any additional frames already queued in the same wake-up
+      # burst. This does not wait or widen the UDS timing window.
+      for initial_event in messaging.drain_sock(self.can_sock, wait_for_one=False):
+        initial_can_messages.extend(CanData(msg.address, msg.dat, msg.src) for msg in initial_event.can)
+
       alpha_long_allowed = self.params.get_bool("AlphaLongitudinalEnabled")
       num_pandas = len(messaging.recv_one_retry(self.sm.sock['pandaStates']).pandaStates)
 
       cached_params = None
-      cached_params_raw = self.params.get("CarParamsCache")
+      # CarParamsCache is intentionally cleared when manager starts. The
+      # persistent copy lets the strictly gated EV9 pre-fingerprint request run
+      # on the first OFF -> READY transition after a comma reboot as well.
+      cached_params_raw = self.params.get("CarParamsCache") or self.params.get("CarParamsPersistent")
       if cached_params_raw is not None:
         with car.CarParams.from_bytes(cached_params_raw) as _cached_params:
-          cached_params = _cached_params
+          cached_params = _cached_params.as_builder()
 
-      self.CI = get_car(*self.can_callbacks, obd_callback(self.params), alpha_long_allowed, is_release, self.params, num_pandas, cached_params, get_starpilot_toggles())
+      cached_fpcp = None
+      cached_fpcp_raw = self.params.get("StarPilotCarParamsPersistent")
+      if cached_fpcp_raw is not None:
+        with custom.StarPilotCarParams.from_bytes(cached_fpcp_raw) as _cached_fpcp:
+          cached_fpcp = _cached_fpcp.as_builder()
+
+      # If the strictly gated pre-fingerprint request succeeds, use the exact
+      # persisted interface configuration instead of spending another second
+      # collecting a live fingerprint while the ADAS output is already muted.
+      # Both parameter blobs were produced by a verified EV9 route and the UDS
+      # helper independently checks identity, firmware, and developer gates.
+      pre_fingerprint_suppressed = False
+      if cached_fpcp is not None:
+        pre_fingerprint_suppressed = attempt_ev9_pre_fingerprint_suppression(cached_params, self.params, *self.can_callbacks,
+                                                                              initial_can_messages)
+
+      if pre_fingerprint_suppressed:
+        cloudlog.warning("EV9 using verified persistent interface after pre-fingerprint suppression")
+        self.CI = interfaces[cached_params.carFingerprint](cached_params, cached_fpcp)
+      else:
+        self.CI = get_car(*self.can_callbacks, obd_callback(self.params), alpha_long_allowed, is_release, self.params, num_pandas, cached_params,
+                          get_starpilot_toggles())
       self.RI = interfaces[self.CI.CP.carFingerprint].RadarInterface(self.CI.CP)
       self.CP = self.CI.CP
 
@@ -195,12 +232,56 @@ class Car:
     self.params.put("StarPilotCarParams", fpcp_bytes)
     self.params.put_nonblocking("StarPilotCarParamsPersistent", fpcp_bytes)
 
+    # OFF -> READY can put the EV9 ADAS ECU into a state that rejects
+    # CommunicationControl long before the rest of selfdrive is initialized.
+    # For the explicitly armed, fully reconstructed, non-actuating stage only,
+    # suppress the ECU immediately after fingerprinting and begin emitting the
+    # inactive replacement set while selfdrive finishes starting. This also
+    # avoids a second knockout at the normal controls-ready handoff.
+    ev9_test = get_ev9_longitudinal_test_config(self.params) if str(self.CP.carFingerprint) == "KIA_EV9" else None
+    ev9_early_requested = bool(not self.CP.passive and ev9_test is not None and
+                               ev9_test.stage == EV9LongitudinalTestStage.STEERING_KEEPALIVE and
+                               ev9_test.persistent_suppression_allowed)
+    if ev9_early_requested:
+      cloudlog.warning("EV9 early stage-15 interface initialization requested")
+      self._initialize_car_interface()
+      self.ev9_early_control_active = self.CP.openpilotLongitudinalControl and not self.params.get_bool("EcuDisableFailed")
+      cloudlog.warning(f"EV9 early inactive reconstruction active={self.ev9_early_control_active}")
+
     update_starpilot_toggles()
 
     self.starpilot_card = StarPilotCard(self.CP, self.FPCP)
 
     self.sm = self.sm.extend(['starpilotOnroadEvents', 'starpilotPlan', 'starpilotSelfdriveState', 'liveCalibration', 'selfdriveState'])
     self.pm = self.pm.extend(['starpilotCarState'])
+
+  def _initialize_car_interface(self) -> None:
+    if self.interface_initialized:
+      return
+
+    was_openpilot_long = self.CP.openpilotLongitudinalControl
+    self.CI.init(self.CP, *self.can_callbacks)
+    # If ECU disable was skipped/failed, strip LONG safety from both parameter
+    # sets before ControlsReady lets pandad select the vehicle safety model.
+    if was_openpilot_long and self.params.get_bool("EcuDisableFailed"):
+      long_flag = 4  # HyundaiSafetyFlags.LONG
+      for cfg in self.CP.safetyConfigs:
+        cfg.safetyParam &= ~long_flag
+      for cfg in self.FPCP.safetyConfigs:
+        cfg.safetyParam &= ~long_flag
+      self.CP.pcmCruise = True
+      self.CP.openpilotLongitudinalControl = False
+      self.params.put("CarParams", self.CP.to_bytes())
+      self.params.put("StarPilotCarParams", self.FPCP.to_bytes())
+
+    self.interface_initialized = True
+    self.params.put_bool_nonblocking("ControlsReady", True)
+
+  def _send_ev9_early_inactive_reconstruction(self, CS: car.CarState) -> None:
+    """Maintain the complete non-actuating EV9 replacement set during startup."""
+    now_nanos = self.can_log_mono_time if REPLAY else int(time.monotonic() * 1e9)
+    self.last_actuators_output, can_sends = self.CI.apply(self.ev9_early_car_control, now_nanos, self.starpilot_toggles)
+    self.pm.send('sendcan', can_list_to_can_capnp(can_sends, msgtype='sendcan', valid=CS.canValid))
 
   def state_update(self) -> tuple[car.CarState, structs.RadarDataT | None]:
     """carState update loop, driven by can"""
@@ -317,31 +398,10 @@ class Car:
   def controls_update(self, CS: car.CarState, CC: car.CarControl):
     """control update loop, driven by carControl"""
 
-    if not self.initialized_prev:
+    if not self.interface_initialized:
       # Initialize CarInterface, once controls are ready
       # TODO: this can make us miss at least a few cycles when doing an ECU knockout
-      was_openpilot_long = self.CP.openpilotLongitudinalControl
-      self.CI.init(self.CP, *self.can_callbacks)
-      # If ECU disable was skipped/failed, strip LONG safety flag from BOTH CarParams
-      # and StarPilotCarParams (pandad ORs both safetyParams together)
-      # Use the pre-init longitudinal state here, since Hyundai init() may already
-      # flip CP.openpilotLongitudinalControl to False as part of the fallback.
-      if was_openpilot_long and self.params.get_bool("EcuDisableFailed"):
-        # ECU disable failed/rejected - switch to lateral-only mode with stock ACC
-        LONG_FLAG = 4  # HyundaiSafetyFlags.LONG
-        for cfg in self.CP.safetyConfigs:
-          cfg.safetyParam &= ~LONG_FLAG
-        for cfg in self.FPCP.safetyConfigs:
-          cfg.safetyParam &= ~LONG_FLAG
-        # Let stock ACC manage cruise (prevents "controls mismatch" error)
-        # Clear openpilotLongitudinalControl so controlsd doesn't set
-        # cruiseControl.override=True (which fights stock ACC and causes engage flicker)
-        self.CP.pcmCruise = True
-        self.CP.openpilotLongitudinalControl = False
-        self.params.put("CarParams", self.CP.to_bytes())
-        self.params.put("StarPilotCarParams", self.FPCP.to_bytes())
-      # signal pandad to switch to car safety mode
-      self.params.put_bool_nonblocking("ControlsReady", True)
+      self._initialize_car_interface()
 
     if self.sm.all_alive(['carControl']):
       # send car controls over can
@@ -431,6 +491,8 @@ class Car:
                    self.sm.seen['onroadEvents'])
     if not self.CP.passive and initialized:
       self.controls_update(CS, self.sm['carControl'])
+    elif self.ev9_early_control_active:
+      self._send_ev9_early_inactive_reconstruction(CS)
 
     self.initialized_prev = initialized
     self.CS_prev = CS

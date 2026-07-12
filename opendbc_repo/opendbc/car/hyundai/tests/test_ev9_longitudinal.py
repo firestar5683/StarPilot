@@ -33,6 +33,7 @@ def test_stage_parser_fails_closed():
   assert parse_ev9_longitudinal_probe_mode(2) == EV9LongitudinalProbeMode.TX_DISABLE_ALL_MESSAGE_TYPES
   assert parse_ev9_longitudinal_probe_mode(3) == EV9LongitudinalProbeMode.RX_TX_DISABLE_NORMAL
   assert parse_ev9_longitudinal_probe_mode(4) == EV9LongitudinalProbeMode.RESET_TX_DISABLE_ALL_MESSAGE_TYPES
+  assert parse_ev9_longitudinal_probe_mode(5) == EV9LongitudinalProbeMode.FULL_DISABLE_THEN_RX_ENABLE
   assert parse_ev9_longitudinal_probe_mode(99) == EV9LongitudinalProbeMode.COMMUNICATION_CONTROL
 
 
@@ -44,6 +45,8 @@ def test_probe_requests_have_matching_restores():
   assert ev9_communication_control_requests(EV9LongitudinalProbeMode.RX_TX_DISABLE_NORMAL) == (
     b"\x28\x03\x01", b"\x28\x00\x01")
   assert ev9_communication_control_requests(EV9LongitudinalProbeMode.RESET_TX_DISABLE_ALL_MESSAGE_TYPES) == (
+    b"\x28\x01\x03", b"\x28\x00\x03")
+  assert ev9_communication_control_requests(EV9LongitudinalProbeMode.FULL_DISABLE_THEN_RX_ENABLE) == (
     b"\x28\x01\x03", b"\x28\x00\x03")
 
 
@@ -79,11 +82,14 @@ def test_persistent_suppression_requires_validated_request_and_heartbeat_stage()
                                     EV9LongitudinalProbeMode.RX_TX_DISABLE_NORMAL)
   reset_persistent = EV9LongitudinalTestConfig(True, EV9LongitudinalTestStage.RADAR_HEARTBEAT,
                                                EV9LongitudinalProbeMode.RESET_TX_DISABLE_ALL_MESSAGE_TYPES)
+  transitioned = EV9LongitudinalTestConfig(True, EV9LongitudinalTestStage.RADAR_HEARTBEAT,
+                                           EV9LongitudinalProbeMode.FULL_DISABLE_THEN_RX_ENABLE)
 
   assert not bounded.persistent_suppression_allowed
   assert persistent.persistent_suppression_allowed
   assert not broad.persistent_suppression_allowed
   assert reset_persistent.persistent_suppression_allowed
+  assert transitioned.persistent_suppression_allowed
 
 
 def test_live_support_stage_changes_are_monotonic_and_do_not_cross_safety_boundaries():

@@ -1,6 +1,7 @@
 import time
 from opendbc.car import get_safety_config, structs, uds
 from opendbc.car.hyundai.hyundaicanfd import CanBus
+from opendbc.car.hyundai import hyundaicanfd
 from opendbc.car.hyundai.values import HyundaiFlags, CAR, CarControllerParams, \
                                                    CANFD_UNSUPPORTED_LONGITUDINAL_CAR, \
                                                    CANFD_SECURITYACCESS_CAR, \
@@ -30,6 +31,7 @@ ENABLE_BUTTONS = (ButtonType.accelCruise, ButtonType.decelCruise, ButtonType.can
 
 # Track when ECU disable happened - used to permanently suppress CAN errors from disabled ECU
 ECU_DISABLE_TIMESTAMP = 0.0
+EV9_EARLY_SUPPRESSION_ACTIVE = False
 KONA_NON_SCC_FCA_RADAR_ADDR = 0x602
 EV9_LONG_DISABLE_VERIFY_ADDRS = (0x1A0,)
 EV9_LONG_DISABLE_VERIFY_SECONDS = 1.0
@@ -85,6 +87,72 @@ def ecu_messages_present(can_recv, bus: int, addresses: tuple[int, ...], timeout
   return False
 
 
+def ecu_suppression_verified(can_recv, bus: int, addresses: tuple[int, ...], timeout: float,
+                             minimum_bus_frames: int = 20) -> bool:
+  """Require live bus traffic while every suppressed address remains absent."""
+  if can_recv is None:
+    return False
+
+  bus_frames = 0
+  deadline = time.monotonic() + timeout
+  while time.monotonic() < deadline:
+    for packet in can_recv(wait_for_one=True):
+      for msg in packet:
+        if msg.src != bus:
+          continue
+        bus_frames += 1
+        if msg.address in addresses:
+          return False
+  return bus_frames >= minimum_bus_frames
+
+
+def attempt_ev9_pre_fingerprint_suppression(cached_params, params, can_recv, can_send,
+                                            initial_can_messages: list | None = None) -> bool:
+  """Attempt the parked EV9 stage-15 knockout immediately after first CAN.
+
+  This is deliberately narrower than normal fingerprinting: it requires a
+  verified cached EV9 identity, cached ADAS firmware at 0x730, and the complete
+  non-actuating reconstruction stage. A positive response is re-verified after
+  fingerprinting before longitudinal ownership is accepted.
+  """
+  global EV9_EARLY_SUPPRESSION_ACTIVE
+  EV9_EARLY_SUPPRESSION_ACTIVE = False
+  hyundaicanfd.set_ev9_adrv_baselines([])
+  if cached_params is None or str(cached_params.carFingerprint) != str(CAR.KIA_EV9) or cached_params.brand != "hyundai":
+    return False
+  if not params.get_bool("AlphaLongitudinalEnabled") or not cached_params.openpilotLongitudinalControl or cached_params.pcmCruise:
+    return False
+
+  has_adas_fw = any(fw.ecu == Ecu.adas and fw.address == 0x730 for fw in cached_params.carFw)
+  test = get_ev9_longitudinal_test_config(params)
+  if not has_adas_fw or test.stage != EV9LongitudinalTestStage.STEERING_KEEPALIVE or \
+      not test.persistent_suppression_allowed:
+    return False
+
+  request, _ = ev9_communication_control_requests(test.probe_mode)
+  observed_can_messages = list(initial_can_messages or [])
+
+  def observing_can_recv(wait_for_one=False):
+    packets = can_recv(wait_for_one=wait_for_one)
+    for packet in packets:
+      observed_can_messages.extend(packet)
+    return packets
+
+  ecu_log("=== EV9 PRE-FINGERPRINT SUPPRESSION ATTEMPT ===")
+  observed_recv = observing_can_recv if can_recv is not None else can_recv
+  EV9_EARLY_SUPPRESSION_ACTIVE = disable_ecu(observed_recv, can_send, bus=1, addr=0x730, com_cont_req=request,
+                                              session_delay=0.0)
+  if EV9_EARLY_SUPPRESSION_ACTIVE:
+    hyundaicanfd.set_ev9_adrv_baselines(observed_can_messages)
+    baseline_addresses = {0x160, 0x161, 0x162, 0x1BA, 0x1DA, 0x1E0, 0x1E5, 0x1EA, 0x200, 0x345, 0x38C, 0x57A}
+    observed_addresses = sorted({msg.address for msg in observed_can_messages if msg.src == 1 and msg.address in baseline_addresses})
+    ecu_log(f"=== EV9 READY BASELINES captured={[hex(address) for address in observed_addresses]} ===")
+  else:
+    hyundaicanfd.set_ev9_adrv_baselines([])
+  ecu_log(f"=== EV9 PRE-FINGERPRINT SUPPRESSION result={EV9_EARLY_SUPPRESSION_ACTIVE} ===")
+  return EV9_EARLY_SUPPRESSION_ACTIVE
+
+
 class CarInterface(CarInterfaceBase):
   CarState = CarState
   CarController = CarController
@@ -126,7 +194,10 @@ class CarInterface(CarInterfaceBase):
         # Most angle-steering LKA platforms still need stock longitudinal validation.
         ret.alphaLongitudinalAvailable = False
 
-      ret.enableBsm = 0x1ba in fingerprint[CAN.ECAN]
+      # Stage-15 suppression can remove ADAS-originated 0x1BA before live
+      # fingerprinting. The EV9 platform is known to have BSM and its parser
+      # keeps accepting the reconstructed status message.
+      ret.enableBsm = 0x1ba in fingerprint[CAN.ECAN] or candidate == CAR.KIA_EV9
 
       # Check if the car is hybrid. Only HEV/PHEV cars have 0xFA on E-CAN.
       if 0xFA in fingerprint[CAN.ECAN]:
@@ -282,7 +353,7 @@ class CarInterface(CarInterfaceBase):
 
   @staticmethod
   def init(CP, can_recv, can_send, communication_control=None):
-    global ECU_DISABLE_TIMESTAMP
+    global ECU_DISABLE_TIMESTAMP, EV9_EARLY_SUPPRESSION_ACTIVE
     from openpilot.common.params import Params
     params = Params()
     ev9_long_test = get_ev9_longitudinal_test_config(params) if CP.carFingerprint == CAR.KIA_EV9 else None
@@ -328,14 +399,52 @@ class CarInterface(CarInterfaceBase):
       if CP.flags & HyundaiFlags.CANFD_LKA_STEERING.value:
         addr, bus = 0x730, CanBus(CP).ECAN
 
+      # A direct OFF -> READY start may have completed the exact same verified
+      # request before fingerprinting. Prove the bus is live and stock SCC is
+      # still absent before accepting that handoff.
+      ecu_disabled = False
+      resume_early_suppression = CP.carFingerprint == CAR.KIA_EV9 and EV9_EARLY_SUPPRESSION_ACTIVE and \
+        ev9_long_test is not None and ev9_long_test.persistent_suppression_allowed
+      EV9_EARLY_SUPPRESSION_ACTIVE = False
+      if resume_early_suppression:
+        # This flag can only be set by a positive 0x68 response in this same
+        # card process. Mode 2 has also been validated on-route to remove stock
+        # SCC_CONTROL. Avoid another 250 ms receive-only window here: Panda
+        # cannot accept the replacement set until ControlsReady changes safety,
+        # and that gap is enough for EV9 startup DTCs to latch.
+        ecu_disabled = True
+        ecu_log("=== EV9 PRE-FINGERPRINT SUPPRESSION HANDOFF accepted positive response ===")
+
       # Try ECU disable. If it succeeds (IGN-ON mode), enable longitudinal.
       # If it fails (READY mode returns NRC 0x22, or timeout), strip LONG safety flag
       # so panda forwards stock SCC messages normally (lateral-only mode).
-      ecu_log(f"=== ECU DISABLE attempt: addr=0x{addr:x}, bus={bus} ===")
+      if not ecu_disabled:
+        ecu_log(f"=== ECU DISABLE attempt: addr=0x{addr:x}, bus={bus} ===")
       ev9_reset_probe = ev9_long_test is not None and \
         ev9_long_test.probe_mode == EV9LongitudinalProbeMode.RESET_TX_DISABLE_ALL_MESSAGE_TYPES
-      ecu_disabled = disable_ecu(can_recv, can_send, bus=bus, addr=addr, com_cont_req=communication_control,
-                                 reset=bool(CP.flags & HyundaiFlags.CAN_CANFD_BLENDED) or ev9_reset_probe)
+      ev9_full_disable_transition = ev9_long_test is not None and \
+        ev9_long_test.probe_mode == EV9LongitudinalProbeMode.FULL_DISABLE_THEN_RX_ENABLE
+      if not ecu_disabled and ev9_full_disable_transition:
+        # Some ECUs accept TX-disable only as a transition from a fully muted
+        # communication state. Verify both positive responses; if the second
+        # step fails, explicitly restore normal communication before fallback.
+        full_disable = bytes([uds.SERVICE_TYPE.COMMUNICATION_CONTROL,
+                              uds.CONTROL_TYPE.DISABLE_RX_DISABLE_TX,
+                              uds.MESSAGE_TYPE.NORMAL_AND_NETWORK_MANAGEMENT])
+        ecu_log(f"=== EV9 FULL-DISABLE TRANSITION START - request={full_disable.hex()} ===")
+        ecu_disabled = disable_ecu(can_recv, can_send, bus=bus, addr=addr, com_cont_req=full_disable)
+        if ecu_disabled:
+          ecu_log(f"=== EV9 RE-ENABLE RX TRANSITION - request={communication_control.hex()} ===")
+          ecu_disabled = disable_ecu(can_recv, can_send, bus=bus, addr=addr, com_cont_req=communication_control)
+          if not ecu_disabled:
+            restore_request = bytes([uds.SERVICE_TYPE.COMMUNICATION_CONTROL,
+                                     uds.CONTROL_TYPE.ENABLE_RX_ENABLE_TX,
+                                     uds.MESSAGE_TYPE.NORMAL_AND_NETWORK_MANAGEMENT])
+            ecu_log(f"=== EV9 TRANSITION FAILED - restoring={restore_request.hex()} ===")
+            disable_ecu(can_recv, can_send, bus=bus, addr=addr, com_cont_req=restore_request, retry=1)
+      elif not ecu_disabled:
+        ecu_disabled = disable_ecu(can_recv, can_send, bus=bus, addr=addr, com_cont_req=communication_control,
+                                   reset=bool(CP.flags & HyundaiFlags.CAN_CANFD_BLENDED) or ev9_reset_probe)
 
       if ecu_disabled and ev9_long_test is not None and ev9_long_test.armed and \
           not ev9_long_test.persistent_suppression_allowed:

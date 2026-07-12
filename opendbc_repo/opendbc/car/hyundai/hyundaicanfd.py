@@ -816,6 +816,33 @@ _KIA_EV9_RAW_ADRV_TEMPLATES = {
   0x57A: bytes.fromhex("7a50000800000000000001000000000000000000000000000000000000000000"),
 }
 
+# Per-process OFF -> READY continuity captured immediately before suppressing
+# ADAS_DRV. These are reset on every pre-fingerprint attempt. Preserve the
+# READY-state body and continue its rolling counter instead of jumping back to
+# an ignition-on template/counter zero.
+_KIA_EV9_ADRV_LIVE_TEMPLATES: dict[int, bytes] = {}
+_KIA_EV9_ADRV_COUNTER_BASES: dict[int, int] = {}
+_KIA_EV9_RAW_ADRV_LIVE_TEMPLATES: dict[int, bytes] = {}
+
+
+def set_ev9_adrv_baselines(messages: list[CanData]) -> None:
+  _KIA_EV9_ADRV_LIVE_TEMPLATES.clear()
+  _KIA_EV9_ADRV_COUNTER_BASES.clear()
+  _KIA_EV9_RAW_ADRV_LIVE_TEMPLATES.clear()
+  for msg in messages:
+    if msg.src != 1:
+      continue
+    dat = bytes(msg.dat)
+    if msg.address in _KIA_EV9_ADRV_TEMPLATES and len(dat) == len(_KIA_EV9_ADRV_TEMPLATES[msg.address]):
+      _KIA_EV9_ADRV_COUNTER_BASES[msg.address] = dat[2]
+      # 0x160 deliberately reports AEB unavailable after suppression; only
+      # inherit its counter. Every other support/status frame inherits the
+      # complete READY-state body.
+      if msg.address != 0x160:
+        _KIA_EV9_ADRV_LIVE_TEMPLATES[msg.address] = dat
+    elif msg.address in _KIA_EV9_RAW_ADRV_TEMPLATES and len(dat) == len(_KIA_EV9_RAW_ADRV_TEMPLATES[msg.address]):
+      _KIA_EV9_RAW_ADRV_LIVE_TEMPLATES[msg.address] = dat
+
 def create_accelerator_brake_alt_spoof(bus: int, counter: int, brake_pressed: bool, accelerator_pressed: bool,
                                        car_fingerprint=None) -> CanData:
   template = _KIA_EV9_ACCEL_BRAKE_ALT_TEMPLATE if str(car_fingerprint) == "KIA_EV9" else _ACCEL_BRAKE_ALT_TEMPLATE
@@ -831,7 +858,9 @@ def create_accelerator_brake_alt_spoof(bus: int, counter: int, brake_pressed: bo
 
 def create_ev9_adrv_message(address: int, bus: int, counter: int) -> CanData:
   """Recreate a captured EV9 ADAS support payload with a fresh counter and CRC."""
-  d = bytearray(_KIA_EV9_ADRV_TEMPLATES[address])
+  d = bytearray(_KIA_EV9_ADRV_LIVE_TEMPLATES.get(address, _KIA_EV9_ADRV_TEMPLATES[address]))
+  if address in _KIA_EV9_ADRV_COUNTER_BASES:
+    counter += _KIA_EV9_ADRV_COUNTER_BASES[address] + 1
   d[2] = counter & 0xFF
   crc = hkg_can_fd_checksum(address, None, d)
   d[0] = crc & 0xFF
@@ -846,4 +875,5 @@ def create_ev9_adrv_160(bus: int, counter: int) -> CanData:
 
 def create_ev9_raw_adrv_message(address: int, bus: int) -> CanData:
   """Replay an EV9 ADAS status frame that has no standard rolling CRC."""
-  return CanData(address, _KIA_EV9_RAW_ADRV_TEMPLATES[address], bus)
+  dat = _KIA_EV9_RAW_ADRV_LIVE_TEMPLATES.get(address, _KIA_EV9_RAW_ADRV_TEMPLATES[address])
+  return CanData(address, dat, bus)
