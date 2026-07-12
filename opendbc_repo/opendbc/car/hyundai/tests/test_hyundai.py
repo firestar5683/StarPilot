@@ -611,6 +611,25 @@ class TestHyundaiFingerprint:
     assert angle_filter.x == pytest.approx(released_angle)
     assert -30.0 < released_angle < override_angle
 
+  def test_ev9_soft_driver_override_preserves_bounded_path_authority(self):
+    ev9_cp = SimpleNamespace(carFingerprint=CAR.KIA_EV9, flags=int(HyundaiFlags.CANFD_ANGLE_STEERING))
+    angle_filter = FirstOrderFilter(-8.0, 0.2, 0.01)
+
+    first_angle = update_angle_command(ev9_cp, angle_filter, -30.0, -8.0, 15.0, True, True, True)
+    second_angle = update_angle_command(ev9_cp, angle_filter, -30.0, -8.0, 15.0, True, True, True)
+
+    assert -16.0 <= second_angle < first_angle < -8.0
+    assert angle_filter.x == pytest.approx(second_angle)
+
+  def test_ev9_soft_driver_override_flag_off_restores_hard_snap(self):
+    ev9_cp = SimpleNamespace(carFingerprint=CAR.KIA_EV9, flags=int(HyundaiFlags.CANFD_ANGLE_STEERING))
+    angle_filter = FirstOrderFilter(-20.0, 0.2, 0.01)
+
+    override_angle = update_angle_command(ev9_cp, angle_filter, -30.0, -8.0, 15.0, True, True, False)
+
+    assert override_angle == pytest.approx(-8.0)
+    assert angle_filter.x == pytest.approx(-8.0)
+
   def test_ev9_allows_lateral_at_standstill_without_changing_other_angle_platforms(self):
     ev9_cp = CarInterface.get_params(CAR.KIA_EV9, gen_empty_fingerprint(), [], False, False, False, None)
     sportage_cp = CarInterface.get_params(CAR.KIA_SPORTAGE_HEV_2026, gen_empty_fingerprint(), [], False, False, False, None)

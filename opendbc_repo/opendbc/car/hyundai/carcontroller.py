@@ -8,10 +8,12 @@ from opendbc.car.lateral import apply_driver_steer_torque_limits, apply_steer_an
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai import hyundaicanfd, hyundaican
 from opendbc.car.hyundai.hyundaicanfd import CanBus
-from opendbc.car.hyundai.ev9_longitudinal import EV9_DTC_CAPTURE_PARAM, EV9LongitudinalTestConfig, EV9LongitudinalTestStage, \
+from opendbc.car.hyundai.ev9_longitudinal import EV9_DTC_CAPTURE_PARAM, EV9_SOFT_DRIVER_STEERING_OVERRIDE_PARAM, \
+                                                   EV9LongitudinalTestConfig, EV9LongitudinalTestStage, \
                                                    EV9ActuationAbortReason, advance_ev9_longitudinal_support_stage, \
                                                    ev9_actuation_abort_reason, ev9_longitudinal_test_scc_command, \
                                                    ev9_dtc_capture_messages, \
+                                                   ev9_default_enabled_param, \
                                                    filter_ev9_adrv_replay_messages, \
                                                    get_ev9_longitudinal_test_config
 from opendbc.car.hyundai.values import HyundaiFlags, Buttons, CarControllerParams, CAR, CANFD_RADAR_LIVE_LONGITUDINAL_CAR, \
@@ -77,6 +79,8 @@ DEFAULT_ANGLE_SMOOTHING_ALPHA_V = [0.2, 0.1, 0.0]
 EV9_HIGH_ANGLE_GAIN_BP = [70.0, 120.0, 220.0, 320.0]
 EV9_HIGH_ANGLE_GAIN_CAP_V = [0.85, 0.55, 0.30, 0.16]
 EV9_HIGH_ANGLE_GAIN_MIN = 0.004
+EV9_SOFT_DRIVER_OVERRIDE_AUTHORITY = 0.35
+EV9_SOFT_DRIVER_OVERRIDE_MAX_DELTA = 8.0
 
 
 def egmp_dynamic_longitudinal_tuning(CP) -> bool:
@@ -275,10 +279,26 @@ def ev9_driver_override_active(CP, steering_pressed: bool, lat_active: bool) -> 
 
 
 def update_angle_command(CP, angle_filter, desired_angle: float, steering_angle_deg: float, v_ego: float,
-                         steering_pressed: bool, lat_active: bool) -> float:
+                         steering_pressed: bool, lat_active: bool, soft_driver_override_enabled: bool = False) -> float:
   if ev9_driver_override_active(CP, steering_pressed, lat_active):
-    angle_filter.x = steering_angle_deg
-    return steering_angle_deg
+    if not soft_driver_override_enabled:
+      angle_filter.x = steering_angle_deg
+      return steering_angle_deg
+
+    # Hands-on torque already reduces the requested EPS gain. Preserve a small,
+    # bounded portion of path authority instead of also snapping the requested
+    # angle to the measured wheel angle, which removes all useful correction.
+    desired_delta = (desired_angle - steering_angle_deg) * EV9_SOFT_DRIVER_OVERRIDE_AUTHORITY
+    override_target = steering_angle_deg + float(np.clip(desired_delta,
+                                                          -EV9_SOFT_DRIVER_OVERRIDE_MAX_DELTA,
+                                                          EV9_SOFT_DRIVER_OVERRIDE_MAX_DELTA))
+    angle_filter.update_alpha(get_angle_smoothing_alpha(CP, v_ego))
+    filtered_angle = angle_filter.update(override_target)
+    filtered_angle = float(np.clip(filtered_angle,
+                                   steering_angle_deg - EV9_SOFT_DRIVER_OVERRIDE_MAX_DELTA,
+                                   steering_angle_deg + EV9_SOFT_DRIVER_OVERRIDE_MAX_DELTA))
+    angle_filter.x = filtered_angle
+    return filtered_angle
 
   angle_filter.update_alpha(get_angle_smoothing_alpha(CP, v_ego))
   return angle_filter.update(desired_angle)
@@ -328,6 +348,8 @@ class CarController(CarControllerBase):
     self.ecu_disable_failed = False
     self._ecu_disable_checked = False
     self._params = Params()
+    self.ev9_soft_driver_override_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
+      ev9_default_enabled_param(self._params, EV9_SOFT_DRIVER_STEERING_OVERRIDE_PARAM)
     self.ev9_long_test = get_ev9_longitudinal_test_config(self._params) if CP.carFingerprint == CAR.KIA_EV9 \
       else EV9LongitudinalTestConfig()
     self._ev9_dtc_capture_start_frame = None
@@ -449,7 +471,7 @@ class CarController(CarControllerBase):
                                          -self.params.ANGLE_LIMITS.STEER_ANGLE_MAX,
                                          self.params.ANGLE_LIMITS.STEER_ANGLE_MAX))
       desired_angle = update_angle_command(self.CP, self.angle_filter, desired_angle, steering_angle_deg, CS.out.vEgo,
-                                           CS.out.steeringPressed, CC.latActive)
+                                           CS.out.steeringPressed, CC.latActive, self.ev9_soft_driver_override_enabled)
 
       apply_angle = apply_steer_angle_limits_vm(desired_angle, self.apply_angle_last, v_ego_raw,
                                                 CS.out.steeringAngleDeg, CC.latActive, self.params, self.VM)
@@ -677,7 +699,9 @@ class CarController(CarControllerBase):
     # harmless replacement frames are repeatedly attempted against the fallback
     # safety configuration while stock ADAS remains in charge.
     ev9_long_test_active = self.CP.carFingerprint == CAR.KIA_EV9 and self.ev9_long_test.armed and self.long_active_ecu
-    ev9_main_mode = bool(getattr(CS, "ev9_cruise_main_on", CS.out.cruiseState.available)) and not CS.out.accFaulted
+    cruise_state = getattr(CS.out, "cruiseState", None)
+    cruise_available = bool(getattr(cruise_state, "available", False))
+    ev9_main_mode = bool(getattr(CS, "ev9_cruise_main_on", cruise_available)) and not getattr(CS.out, "accFaulted", False)
     use_egmp_dynamic_long_tuning = egmp_dynamic_longitudinal_tuning(self.CP) and self.long_active_ecu and \
                                    CC.actuators.longControlState in (LongCtrlState.starting, LongCtrlState.pid, LongCtrlState.stopping)
     use_egmp_smoothed_accel = use_egmp_dynamic_long_tuning and (
