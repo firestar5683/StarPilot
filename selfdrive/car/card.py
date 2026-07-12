@@ -472,7 +472,9 @@ class Car:
 
     filtered_slots = None
     if ev9_filtered_objects and self.ev9_cluster_smoothing_enabled:
-      filtered_slots = self.ev9_cluster_slots
+      # The tracker holds brief raw-track dropouts itself. Once the complete
+      # radar service is invalid, fail closed instead of retaining stale cars.
+      filtered_slots = self.ev9_cluster_slots if radar_valid else ClusterObjectSlots()
       if filtered_slots.primary is not None:
         lead_visible = True
         lead_distance = filtered_slots.primary.distance
