@@ -101,6 +101,10 @@ class Car:
     self.params_memory = Params(memory=True)
     self.ev9_cluster_objects_enabled = self.params.get_bool("KiaEv9ClusterObjectsEnabled")
     self.ev9_cluster_alternate_enabled = self.params.get_bool("KiaEv9ClusterAlternateLeadEnabled")
+    if self.ev9_cluster_objects_enabled and str(self.CP.carFingerprint) == "KIA_EV9":
+      enable_ev9_live_radar_tracks = getattr(self.RI, "enable_ev9_live_radar_tracks", None)
+      if enable_ev9_live_radar_tracks is not None:
+        cloudlog.warning(f"EV9 cluster live radar tracks enabled={enable_ev9_live_radar_tracks()}")
 
     self.can_callbacks = can_comm_callbacks(self.can_sock, self.pm.sock['sendcan'])
 

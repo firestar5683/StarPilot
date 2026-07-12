@@ -113,6 +113,21 @@ class RadarInterface(RadarInterfaceBase):
                           for addr in range(self.radar_config.start_addr,
                                             self.radar_config.start_addr + self.radar_config.can_parser_msg_count)]
 
+  def enable_ev9_live_radar_tracks(self) -> bool:
+    """Enable EV9 MRR35 decoding when ADAS suppression leaves radar CAN alive.
+
+    Hyundai's common long-control setup marks radar unavailable for platforms
+    outside RADAR_LIVE_LONGITUDINAL_CAR because many ADAS knockouts also silence
+    their radar. EV9 stage-15 CommunicationControl does not: the complete MRR35
+    range remains on E-CAN. Keep this explicit so card can feature-gate the
+    behavior without changing any other Hyundai platform.
+    """
+    if self.CP.carFingerprint != CAR.KIA_EV9 or self.radar_config is None or self.rcp is None:
+      return False
+
+    self.radar_off_can = False
+    return True
+
   def update(self, can_strings):
     if self.ioniq_6_radar_probe and self.rcp is not None and not self.ioniq_6_radar_probe_logged:
       vls = self.rcp.update(can_strings)
