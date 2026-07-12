@@ -677,6 +677,7 @@ class CarController(CarControllerBase):
     # harmless replacement frames are repeatedly attempted against the fallback
     # safety configuration while stock ADAS remains in charge.
     ev9_long_test_active = self.CP.carFingerprint == CAR.KIA_EV9 and self.ev9_long_test.armed and self.long_active_ecu
+    ev9_main_mode = bool(getattr(CS, "ev9_cruise_main_on", CS.out.cruiseState.available)) and not CS.out.accFaulted
     use_egmp_dynamic_long_tuning = egmp_dynamic_longitudinal_tuning(self.CP) and self.long_active_ecu and \
                                    CC.actuators.longControlState in (LongCtrlState.starting, LongCtrlState.pid, LongCtrlState.stopping)
     use_egmp_smoothed_accel = use_egmp_dynamic_long_tuning and (
@@ -751,7 +752,7 @@ class CarController(CarControllerBase):
         if self.ev9_long_test.stage >= EV9LongitudinalTestStage.CCNC_STATUS:
           can_sends.extend(hyundaicanfd.create_ev9_ccnc_status_messages(
             self.packer, self.CAN, self.frame // 5, CC.enabled, CC.latActive, CC.hudControl, CS.out,
-            CS.out.cruiseState.available,
+            ev9_main_mode,
             bool(getattr(CS, "openpilot_lead_visible", False)),
             float(getattr(CS, "openpilot_lead_distance", 0.0)),
             bool(getattr(CS, "openpilot_lead_two_visible", False)),
@@ -859,7 +860,7 @@ class CarController(CarControllerBase):
           actuation_permitted=ev9_actuation_permitted,
         ) if ev9_long_test_active else (CC.enabled, accel, stopping, CC.cruiseControl.override)
         acc_kwargs = {
-          "main_mode_acc": int(CS.out.cruiseState.available),
+          "main_mode_acc": int(ev9_main_mode if ev9_long_test_active else CS.out.cruiseState.available),
           "direct_accel": True,
           "jerk_lower": 5.0,
           "jerk_upper": 3.0 if CC.actuators.longControlState == LongCtrlState.pid else 1.0,

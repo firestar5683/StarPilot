@@ -9,7 +9,18 @@ from opendbc.car.hyundai.ev9_longitudinal import EV9_DTC_CAPTURE_SLOT_FRAMES, EV
                                                     ev9_longitudinal_test_scc_command, \
                                                     filter_ev9_adrv_replay_messages, \
                                                     get_ev9_longitudinal_test_config, parse_ev9_longitudinal_probe_mode, \
-                                                    parse_ev9_longitudinal_test_stage
+                                                    parse_ev9_longitudinal_test_stage, update_ev9_cruise_main_latch
+
+
+def test_ev9_cruise_main_latch_toggles_only_on_rising_edges():
+  assert update_ev9_cruise_main_latch(False, 0, [0, 1, 1, 0], True)
+  assert not update_ev9_cruise_main_latch(True, 0, [1, 0], True)
+  assert update_ev9_cruise_main_latch(False, 1, [1, 0], True) is False
+  assert update_ev9_cruise_main_latch(False, 0, [0, 0], True) is False
+
+
+def test_ev9_cruise_main_latch_disabled_preserves_legacy_health_only_behavior():
+  assert update_ev9_cruise_main_latch(False, 0, [1, 0], False) is True
 
 
 class FakeParams:

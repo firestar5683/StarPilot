@@ -7,10 +7,13 @@ from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai.hyundaicanfd import CanBus
+from opendbc.car.hyundai.ev9_longitudinal import EV9_CRUISE_MAIN_STATE_PARAM, ev9_default_enabled_param, \
+                                                   update_ev9_cruise_main_latch
 from opendbc.car.hyundai.values import HyundaiFlags, HyundaiStarPilotFlags, HyundaiStarPilotSafetyFlags, CAR, DBC, Buttons, CarControllerParams, \
                                        hyundai_cancel_button_enables_cruise, ALT_BUS_LDA_BUTTON_CARS, ALT_BUS_LDA_BUTTON_SWL_STAT_CARS, \
                                        CANFD_EV_TELEMETRY_CAR
 from opendbc.car.interfaces import CarStateBase
+from openpilot.common.params import Params
 
 ButtonType = structs.CarState.ButtonEvent.Type
 
@@ -152,6 +155,9 @@ class CarState(CarStateBase):
     self.blindspots_front_corner_1_ts = 0
     self.left_blindspot_from_radar = False
     self.right_blindspot_from_radar = False
+    self.ev9_cruise_main_state_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
+      ev9_default_enabled_param(Params(), EV9_CRUISE_MAIN_STATE_PARAM)
+    self.ev9_cruise_main_on = not self.ev9_cruise_main_state_enabled
 
     # On some cars, CLU15->CF_Clu_VehicleSpeed can oscillate faster than the dash updates. Sample at 5 Hz
     self.cluster_speed = 0
@@ -532,9 +538,24 @@ class CarState(CarStateBase):
       self.blindspots_rear_corners_ts = cp.ts_nanos["BLINDSPOTS_REAR_CORNERS"]["CHECKSUM"]
       self.blindspots_front_corner_1_ts = cp.ts_nanos["BLINDSPOTS_FRONT_CORNER_1"]["CHECKSUM"]
 
+    prev_cruise_buttons = self.cruise_buttons[-1]
+    prev_main_buttons = self.main_buttons[-1]
+    prev_lda_button = self.lda_button
+    prev_left_paddle = self.left_paddle
+    cruise_button_samples = cp.vl_all[self.cruise_btns_msg_canfd]["CRUISE_BUTTONS"]
+    main_button_samples = cp.vl_all[self.cruise_btns_msg_canfd]["ADAPTIVE_CRUISE_MAIN_BTN"]
+    self.cruise_buttons.extend(cruise_button_samples)
+    self.main_buttons.extend(main_button_samples)
+    if self.CP.carFingerprint == CAR.KIA_EV9:
+      self.ev9_cruise_main_on = update_ev9_cruise_main_latch(
+        self.ev9_cruise_main_on, prev_main_buttons, main_button_samples, self.ev9_cruise_main_state_enabled,
+      )
+
     # cruise state
     # CAN FD cars enable on main button press, set available if no TCS faults preventing engagement
     ret.cruiseState.available = cp.vl["TCS"]["ACCEnable"] == 0
+    if self.CP.carFingerprint == CAR.KIA_EV9 and self.CP.openpilotLongitudinalControl and not self.CP.pcmCruise:
+      ret.cruiseState.available = ret.cruiseState.available and self.ev9_cruise_main_on
     if self.CP.openpilotLongitudinalControl and not self.CP.pcmCruise:
       # These are not used for engage/disengage since openpilot keeps track of state using the buttons
       ret.cruiseState.enabled = cp.vl["TCS"]["ACC_REQ"] == 1
@@ -553,12 +574,6 @@ class CarState(CarStateBase):
     # TODO: find this message on ICE & HYBRID cars + cruise control signals (if exists)
     if self.CP.flags & HyundaiFlags.EV:
       ret.cruiseState.nonAdaptive = cp.vl["MANUAL_SPEED_LIMIT_ASSIST"]["MSLA_ENABLED"] == 1
-    prev_cruise_buttons = self.cruise_buttons[-1]
-    prev_main_buttons = self.main_buttons[-1]
-    prev_lda_button = self.lda_button
-    prev_left_paddle = self.left_paddle
-    self.cruise_buttons.extend(cp.vl_all[self.cruise_btns_msg_canfd]["CRUISE_BUTTONS"])
-    self.main_buttons.extend(cp.vl_all[self.cruise_btns_msg_canfd]["ADAPTIVE_CRUISE_MAIN_BTN"])
     self.lda_button = cp.vl[self.cruise_btns_msg_canfd]["LDA_BTN"]
     self.left_paddle = 0
     if self.CP.carFingerprint == CAR.HYUNDAI_IONIQ_6:

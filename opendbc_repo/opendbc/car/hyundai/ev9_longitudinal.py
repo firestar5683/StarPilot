@@ -8,8 +8,30 @@ EV9_LONG_TEST_ENABLED_PARAM = "KiaEv9LongitudinalTestEnabled"
 EV9_LONG_TEST_STAGE_PARAM = "KiaEv9LongitudinalTestStage"
 EV9_LONG_TEST_PROBE_MODE_PARAM = "KiaEv9LongitudinalProbeMode"
 EV9_DTC_CAPTURE_PARAM = "KiaEv9DtcCaptureEnabled"
+EV9_CRUISE_MAIN_STATE_PARAM = "KiaEv9CruiseMainStateEnabled"
+EV9_SOFT_DRIVER_STEERING_OVERRIDE_PARAM = "KiaEv9SoftDriverSteeringOverrideEnabled"
 EV9_DTC_CAPTURE_TARGETS = (0x7C4, 0x7C6, 0x7D0, 0x7D4)
 EV9_DTC_CAPTURE_SLOT_FRAMES = 100
+
+
+def ev9_default_enabled_param(params, key: str) -> bool:
+  """Read a default-on feature before manager has materialized its default."""
+  value = params.get(key)
+  return value is None or params.get_bool(key)
+
+
+def update_ev9_cruise_main_latch(current: bool, previous_button: int, button_samples: list[int], enabled: bool) -> bool:
+  """Toggle the software cruise-main state once for every physical rising edge."""
+  if not enabled:
+    return True
+
+  previous = bool(previous_button)
+  for sample in button_samples:
+    pressed = bool(sample)
+    if pressed and not previous:
+      current = not current
+    previous = pressed
+  return current
 
 
 class EV9LongitudinalProbeMode(IntEnum):
