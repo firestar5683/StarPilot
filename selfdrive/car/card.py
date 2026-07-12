@@ -358,7 +358,8 @@ class Car:
     lead_distance = 0.0
     lead_rel_speed = 0.0
 
-    if self.sm.seen['radarState'] and self.sm.valid['radarState']:
+    radar_valid = self.sm.seen['radarState'] and self.sm.alive['radarState'] and self.sm.valid['radarState']
+    if radar_valid:
       lead = self.sm['radarState'].leadOne
       if lead.status:
         lead_visible = True
@@ -372,6 +373,8 @@ class Car:
     self.CI.CS.openpilot_lead_visible = lead_visible
     self.CI.CS.openpilot_lead_distance = lead_distance
     self.CI.CS.openpilot_lead_rel_speed = lead_rel_speed
+    self.CI.CS.openpilot_radar_valid = radar_valid
+    self.CI.CS.panda_faulted = not self.sm.seen['pandaStates'] or any(len(p.faults) > 0 for p in self.sm['pandaStates'])
 
   def _update_redneck_cruise(self, CS: car.CarState, CC: car.CarControl) -> None:
     if self.redneck_cruise is None:
