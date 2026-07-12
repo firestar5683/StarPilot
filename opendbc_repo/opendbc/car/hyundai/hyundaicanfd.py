@@ -898,37 +898,49 @@ def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, la
                                      lead_right_visible: bool = False, lead_right_distance: float = 0.0,
                                      lead_right_lateral: float = 0.0,
                                      left_blindspot: bool = False, right_blindspot: bool = False,
-                                     is_metric: bool = True) -> list[CanData]:
+                                     is_metric: bool = True, hud_enabled: bool | None = None,
+                                     objects_enabled: bool = True, alternate_enabled: bool = False,
+                                     rear_bsm_fallback_enabled: bool = False) -> list[CanData]:
   """Recreate EV9 CCNC engagement icons and the supported radar-object slots.
 
   This intentionally renders only fields whose stock EV9 meanings were seen in
   routes. It does not invent a target-distance value or claim that all radar
   tracks can be represented by the cluster's limited object slots.
   """
+  # Keep the legacy caller behavior until it supplies the independent HUD
+  # feature flag. Object rendering still requires the control state to be
+  # enabled; stock EV9 routes contain no object/icon claims while inactive.
+  hud_active = bool(enabled if hud_enabled is None else hud_enabled)
+  objects_active = bool(enabled and hud_active and objects_enabled)
   cruise_speed = round(out.vCruiseCluster * (1 if is_metric else CV.KPH_TO_MPH))
   display_speed = 255 if not main_cruise_enabled else \
     (40 if is_metric else 25) if cruise_speed > (145 if is_metric else 90) else max(cruise_speed, 0)
-  any_blinker = bool(out.leftBlinker or out.rightBlinker)
-  lfa_active = bool(lat_active)
+  lfa_active = bool(hud_active and lat_active)
+  alternate_active = bool(objects_active and alternate_enabled and lead_two_visible and
+                          (abs(lead_two_distance - lead_distance) > 0.5 or abs(lead_two_lateral) > 0.5))
   values_161 = {
     "DAW_ICON": 0,
     "LKA_ICON": 0,
     "LFA_ICON": 1 if lfa_active else 0,
-    "HDA_ICON": 2 if enabled else 0,
-    "CENTERLINE": 1 if lfa_active else 0,
-    "TARGET": 3 if enabled else 0,
-    "LANELINE_CURVATURE": 15,
-    "LANELINE_LEFT": 0 if not lfa_active else 1 if not hud.leftLaneVisible else 4 if hud.leftLaneDepart else 6 if any_blinker else 2,
-    "LANELINE_RIGHT": 0 if not lfa_active else 1 if not hud.rightLaneVisible else 4 if hud.rightLaneDepart else 6 if any_blinker else 2,
-    "LCA_LEFT_ICON": 1 if left_blindspot else 0,
-    "LCA_RIGHT_ICON": 1 if right_blindspot else 0,
-    "SETSPEED": 3 if enabled else 1,
-    "SETSPEED_HUD": 0 if not main_cruise_enabled else 2 if enabled else 1,
-    "SETSPEED_SPEED": display_speed,
-    "DISTANCE": hud.leadDistanceBars,
-    "DISTANCE_SPACING": 0 if not main_cruise_enabled else 1 if enabled else 3,
-    "DISTANCE_LEAD": 0 if not main_cruise_enabled else 2 if enabled and lead_visible else 1 if lead_visible else 0,
-    "DISTANCE_CAR": 0 if not main_cruise_enabled else 2 if enabled else 1,
+    "HDA_ICON": 2 if hud_active else 0,
+    # Stock EV9 HDA leaves these lane-rendering fields neutral. The cluster
+    # renders its own lane geometry from the HDA/LFA state.
+    "CENTERLINE": 0,
+    "TARGET": 3 if hud_active else 0,
+    "LANELINE_CURVATURE": 0,
+    "LANELINE_LEFT": 0,
+    "LANELINE_RIGHT": 0,
+    # Value 1 means that lane-change assistance is available, not that a
+    # vehicle occupies the corresponding blind spot.
+    "LCA_LEFT_ICON": 1 if hud_active else 0,
+    "LCA_RIGHT_ICON": 1 if hud_active else 0,
+    "SETSPEED": 3 if hud_active else 0,
+    "SETSPEED_HUD": 2 if hud_active and main_cruise_enabled else 0,
+    "SETSPEED_SPEED": display_speed if hud_active and main_cruise_enabled else 0,
+    "DISTANCE": hud.leadDistanceBars if hud_active and main_cruise_enabled else 0,
+    "DISTANCE_SPACING": 1 if hud_active and main_cruise_enabled else 0,
+    "DISTANCE_LEAD": 2 if objects_active and lead_visible else 0,
+    "DISTANCE_CAR": 2 if hud_active and main_cruise_enabled else 0,
     "SLA_ICON": 0,
     "NAV_ICON": 0,
   }
@@ -939,26 +951,26 @@ def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, la
     # EV9 stock routes observed this field at zero, including lane/BSM events.
     # Do not claim steering-wheel vibration until an EV9 route proves its use.
     "VIBRATE": 0,
-    "LEAD": 2 if enabled and lead_visible else 1 if lead_visible else 0,
-    "LEAD_DISTANCE": min(max(lead_distance, 0.0), 204.7) if lead_visible else 0.0,
+    "LEAD": 1 if objects_active and lead_visible else 0,
+    "LEAD_DISTANCE": min(max(lead_distance, 0.0), 204.7) if objects_active and lead_visible else 0.0,
     "LEAD_LATERAL": 0.0,
-    "LEAD_ALT": 1 if lead_two_visible else 0,
-    "LEAD_ALT_DISTANCE": min(max(lead_two_distance, 0.0), 204.7) if lead_two_visible else 0.0,
-    "LEAD_ALT_LATERAL": min(abs(lead_two_lateral), 12.7) if lead_two_visible else 0.0,
-    "LEAD_LEFT": 1 if lead_left_visible else 0,
-    "LEAD_LEFT_DISTANCE": min(max(lead_left_distance, 0.0), 204.7) if lead_left_visible else 0.0,
-    "LEAD_LEFT_LATERAL": min(abs(lead_left_lateral), 12.7) if lead_left_visible else 0.0,
-    "LEAD_RIGHT": 1 if lead_right_visible else 0,
-    "LEAD_RIGHT_DISTANCE": min(max(lead_right_distance, 0.0), 204.7) if lead_right_visible else 0.0,
-    "LEAD_RIGHT_LATERAL": min(abs(lead_right_lateral), 12.7) if lead_right_visible else 0.0,
+    "LEAD_ALT": 1 if alternate_active else 0,
+    "LEAD_ALT_DISTANCE": min(max(lead_two_distance, 0.0), 204.7) if alternate_active else 0.0,
+    "LEAD_ALT_LATERAL": min(abs(lead_two_lateral), 12.7) if alternate_active else 0.0,
+    "LEAD_LEFT": 1 if objects_active and lead_left_visible else 0,
+    "LEAD_LEFT_DISTANCE": min(max(lead_left_distance, 0.0), 204.7) if objects_active and lead_left_visible else 0.0,
+    "LEAD_LEFT_LATERAL": 3.0 if objects_active and lead_left_visible else 0.0,
+    "LEAD_RIGHT": 1 if objects_active and lead_right_visible else 0,
+    "LEAD_RIGHT_DISTANCE": min(max(lead_right_distance, 0.0), 204.7) if objects_active and lead_right_visible else 0.0,
+    "LEAD_RIGHT_LATERAL": 3.0 if objects_active and lead_right_visible else 0.0,
     # The stock route uses a fixed near-field marker for rear BSM objects; it
     # does not provide a measured range, so retain that honest UI convention.
-    "LEAD_LEFT_REAR_STATUS": 1 if left_blindspot else 0,
-    "LEAD_LEFT_REAR_DISTANCE": 25.0 if left_blindspot else 0.0,
-    "LEAD_LEFT_REAR_LATERAL": 3.0 if left_blindspot else 0.0,
-    "LEAD_RIGHT_REAR_STATUS": 1 if right_blindspot else 0,
-    "LEAD_RIGHT_REAR_DISTANCE": 25.0 if right_blindspot else 0.0,
-    "LEAD_RIGHT_REAR_LATERAL": 3.0 if right_blindspot else 0.0,
+    "LEAD_LEFT_REAR_STATUS": 1 if objects_active and rear_bsm_fallback_enabled and left_blindspot else 0,
+    "LEAD_LEFT_REAR_DISTANCE": 25.0 if objects_active and rear_bsm_fallback_enabled and left_blindspot else 0.0,
+    "LEAD_LEFT_REAR_LATERAL": 3.0 if objects_active and rear_bsm_fallback_enabled and left_blindspot else 0.0,
+    "LEAD_RIGHT_REAR_STATUS": 1 if objects_active and rear_bsm_fallback_enabled and right_blindspot else 0,
+    "LEAD_RIGHT_REAR_DISTANCE": 25.0 if objects_active and rear_bsm_fallback_enabled and right_blindspot else 0.0,
+    "LEAD_RIGHT_REAR_LATERAL": 3.0 if objects_active and rear_bsm_fallback_enabled and right_blindspot else 0.0,
   })
 
   return [

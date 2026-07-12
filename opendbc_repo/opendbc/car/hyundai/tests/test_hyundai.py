@@ -1674,16 +1674,67 @@ class TestHyundaiFingerprint:
     assert parser.vl["CCNC_0x161"]["HDA_ICON"] == 2
     assert parser.vl["CCNC_0x161"]["LFA_ICON"] == 1
     assert parser.vl["CCNC_0x161"]["TARGET"] == 3
+    assert parser.vl["CCNC_0x161"]["LKA_ICON"] == 0
+    assert parser.vl["CCNC_0x161"]["CENTERLINE"] == 0
+    assert parser.vl["CCNC_0x161"]["LANELINE_LEFT"] == 0
+    assert parser.vl["CCNC_0x161"]["LANELINE_RIGHT"] == 0
+    assert parser.vl["CCNC_0x161"]["LCA_LEFT_ICON"] == 1
+    assert parser.vl["CCNC_0x161"]["LCA_RIGHT_ICON"] == 1
     assert parser.vl["CCNC_0x161"]["SETSPEED_SPEED"] == 65
-    assert parser.vl["CCNC_0x162"]["LEAD"] == 2
+    assert parser.vl["CCNC_0x162"]["LEAD"] == 1
     assert parser.vl["CCNC_0x162"]["LEAD_DISTANCE"] == pytest.approx(42.0)
-    assert parser.vl["CCNC_0x162"]["LEAD_ALT_DISTANCE"] == pytest.approx(55.0)
+    assert parser.vl["CCNC_0x162"]["LEAD_ALT"] == 0
+    assert parser.vl["CCNC_0x162"]["LEAD_ALT_DISTANCE"] == pytest.approx(0.0)
     assert parser.vl["CCNC_0x162"]["LEAD_LEFT_DISTANCE"] == pytest.approx(30.0)
+    assert parser.vl["CCNC_0x162"]["LEAD_LEFT_LATERAL"] == pytest.approx(3.0)
     assert parser.vl["CCNC_0x162"]["LEAD_RIGHT_DISTANCE"] == pytest.approx(35.0)
-    assert parser.vl["CCNC_0x162"]["LEAD_LEFT_REAR_STATUS"] == 1
-    assert parser.vl["CCNC_0x162"]["LEAD_LEFT_REAR_DISTANCE"] == pytest.approx(25.0)
+    assert parser.vl["CCNC_0x162"]["LEAD_RIGHT_LATERAL"] == pytest.approx(3.0)
+    assert parser.vl["CCNC_0x162"]["LEAD_LEFT_REAR_STATUS"] == 0
+    assert parser.vl["CCNC_0x162"]["LEAD_LEFT_REAR_DISTANCE"] == pytest.approx(0.0)
     assert parser.vl["CCNC_0x162"]["LEAD_RIGHT_REAR_STATUS"] == 0
     assert parser.vl["CCNC_0x162"]["VIBRATE"] == 0
+
+  def test_ev9_ccnc_hud_inactive_and_independent_object_gates(self):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.KIA_EV9
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.CANFD_LKA_STEERING)
+    packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
+    can_bus = CanBus(CP)
+    parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("CCNC_0x161", 0), ("CCNC_0x162", 0)], can_bus.ECAN)
+    hud = SimpleNamespace(leftLaneVisible=True, rightLaneVisible=True, leftLaneDepart=False, rightLaneDepart=False,
+                          leadDistanceBars=3)
+    out = SimpleNamespace(vCruiseCluster=65.0, leftBlinker=False, rightBlinker=False)
+
+    msgs = hyundaicanfd.create_ev9_ccnc_status_messages(
+      packer, can_bus, 5, enabled=True, lat_active=True, hud=hud, out=out, main_cruise_enabled=True,
+      lead_visible=True, lead_distance=42.0,
+      lead_two_visible=True, lead_two_distance=55.0, lead_two_lateral=0.5,
+      lead_left_visible=True, lead_left_distance=30.0, lead_left_lateral=-3.0,
+      lead_right_visible=True, lead_right_distance=35.0, lead_right_lateral=3.0,
+      left_blindspot=True, right_blindspot=True, hud_enabled=False,
+      objects_enabled=True, alternate_enabled=True, rear_bsm_fallback_enabled=True,
+    )
+    parser.update([(1, msgs)])
+
+    assert parser.can_valid
+    for signal in ("HDA_ICON", "LFA_ICON", "TARGET", "LKA_ICON", "CENTERLINE", "LANELINE_LEFT", "LANELINE_RIGHT",
+                   "LCA_LEFT_ICON", "LCA_RIGHT_ICON", "SETSPEED", "SETSPEED_HUD", "SETSPEED_SPEED"):
+      assert parser.vl["CCNC_0x161"][signal] == 0
+    for signal in ("LEAD", "LEAD_ALT", "LEAD_LEFT", "LEAD_RIGHT", "LEAD_LEFT_REAR_STATUS", "LEAD_RIGHT_REAR_STATUS"):
+      assert parser.vl["CCNC_0x162"][signal] == 0
+
+    msgs = hyundaicanfd.create_ev9_ccnc_status_messages(
+      packer, can_bus, 6, enabled=True, lat_active=True, hud=hud, out=out, main_cruise_enabled=True,
+      lead_visible=True, lead_distance=42.0, lead_two_visible=True, lead_two_distance=55.0,
+      left_blindspot=True, objects_enabled=False, alternate_enabled=True, rear_bsm_fallback_enabled=True,
+    )
+    parser.update([(2, msgs)])
+    assert parser.vl["CCNC_0x161"]["HDA_ICON"] == 2
+    assert parser.vl["CCNC_0x161"]["LCA_LEFT_ICON"] == 1
+    assert parser.vl["CCNC_0x161"]["LCA_RIGHT_ICON"] == 1
+    assert parser.vl["CCNC_0x162"]["LEAD"] == 0
+    assert parser.vl["CCNC_0x162"]["LEAD_ALT"] == 0
+    assert parser.vl["CCNC_0x162"]["LEAD_LEFT_REAR_STATUS"] == 0
 
   def test_ccnc_hud_helper_generates_lane_position_animation_and_lca_arrows(self):
     CP = CarParams.new_message()
