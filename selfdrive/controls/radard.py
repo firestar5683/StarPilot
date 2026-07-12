@@ -386,9 +386,9 @@ def main() -> None:
   cloudlog.info("radard got CarParams")
 
   # *** setup messaging
-  sm = messaging.SubMaster(['modelV2', 'carState', 'liveTracks'], poll='modelV2',
+  sm = messaging.SubMaster(['modelV2', 'carState', 'liveTracks', 'starpilotPlan'], poll='modelV2',
                            ignore_valid=['starpilotPlan'])
-  pm = messaging.PubMaster(['radarState'])
+  pm = messaging.PubMaster(['radarState', 'starpilotRadarState'])
 
   radar_ts = float(getattr(CP, "radarTimeStepDEPRECATED", DT_MDL) or DT_MDL)
   if not 0.01 < radar_ts < 0.2:
@@ -396,9 +396,6 @@ def main() -> None:
 
   g90_radar_filter = CP.brand == "hyundai" and CP.carFingerprint == "GENESIS_G90"
   RD = RadarD(radar_ts=radar_ts, delay=CP.radarDelay, g90_radar_filter=g90_radar_filter)
-
-  sm = sm.extend(['starpilotPlan'])
-  pm = pm.extend(['starpilotRadarState'])
 
   while 1:
     sm.update()
