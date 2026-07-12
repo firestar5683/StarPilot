@@ -8,6 +8,65 @@ It does not preserve OEM FCA/AEB. Raw radar availability is not equivalent to re
 logic. EV9 BSM detection remains available directly from the corner-radar traffic and the validated stage-15 path
 dynamically recreates `0x1BA/0x1E5` for the vehicle. Blind-spot collision-avoidance braking requests remain disabled.
 
+## Current working state (2026-07-12)
+
+The verified software-only state is **stage 15, probe mode 2**, using UDS `28 01 03` against ADAS ECU `0x730`. ADAS
+reception remains enabled, normal/network-management transmission is disabled, and StarPilot continuously supplies the
+complete non-actuating replacement stream. The final parked validation is route `000000ff--4a1113195d`.
+
+Proven in both IGN-ON and READY/Park:
+
+- no vehicle DTC count, orange ADAS icons, warning dings, or comma vehicle error;
+- `KIA_EV9`, `openpilotLongitudinalControl=True`, `pcmCruise=False`, and `carState.canValid=True`;
+- positive CommunicationControl response, `EcuDisableFailed=False`, and Tester Present maintained at 1 Hz;
+- every staged replacement at its target rate: `0x100`, `0x12A`, `0xCB`, `0x160`, `0x161`, `0x162`, `0x1A0`,
+  `0x1BA`, `0x1E0`, `0x1E5`, `0x1EA`, `0x200`, `0x345`, `0x38C`, and `0x57A`;
+- all 32 MRR35 raw tracks, `radarState.valid=True`, active lead tracks, and no radar errors;
+- direct corner-radar BSM input plus dynamic vehicle-facing BSM status;
+- Panda Hyundai CAN-FD longitudinal safety with no faults, blocked transmissions, or invalid receive checks;
+- `SCC_CONTROL` forcibly inactive: `ACCMode=0`, zero acceleration, no stop request, and no longitudinal actuation.
+
+Intentionally unavailable or not yet validated:
+
+- OEM FCA/AEB and blind-spot collision-avoidance braking are not retained while ADAS transmission is disabled;
+- openpilot longitudinal actuation remains untested and unavailable at stage 15;
+- stage 16 is non-actuating preflight only; stage 17 is the separately gated bounded actuation stage;
+- direct OFF-to-READY ownership and verified `28 00 03` stock-restore behavior are not production-ready;
+- steering-wheel vibration was not found in `0x162.VIBRATE` and remains a separate investigation.
+
+### Why the changes were required
+
+1. **Complete, continuous reconstruction:** the 12 displayed DTCs are active missing-message faults. They appear whenever
+   ADAS remains transmit-disabled and reconstruction is absent or interrupted. Restoring the complete stage-15 stream
+   clears them without clearing DTC memory or sleeping the ECU.
+2. **Startup ownership and handoff:** cached EV9 identity and ADAS firmware permit the tightly gated suppression attempt
+   before normal controls initialization. The same process owns the diagnostic request, captures the last stock bodies and
+   counters, starts inactive reconstruction, and hands control to the normal interface without a second publisher.
+3. **Payload continuity:** live pre-suppression bodies preserve READY/IGN state and unknown equipment bits, while rolling
+   counters continue from stock. `0x160` deliberately reports AEB unavailable rather than copying an unavailable function.
+4. **BSM validity:** suppressed ADAS-originated `0x1BA` cannot remain a required receive-side parser input. BSM detection is
+   instead read from live corner-radar traffic and used to generate dynamic `0x1BA/0x1E5`; frozen object state is never
+   replayed and BCA brake-request fields remain zero.
+5. **Single CAN publisher:** diagnostic reads, Tester Present, reconstruction, and normal controls share the existing
+   `card` publisher. A second `sendcan` publisher can evict `card`, interrupt reconstruction, and trigger relay faults.
+6. **Radar messaging freshness:** polling only `modelV2` starved non-polled `carState` after its initial sample in this
+   messaging build. `radard` now polls every input but runs fusion only on model updates. It requires valid/fresh vehicle
+   state and full model/live-track checks while treating `starpilotPlan` as optional enrichment.
+7. **Real Params backend:** device arming must use `/usr/local/venv/bin/python`. Plain system Python can load the in-memory
+   source fallback and appear to write test parameters without updating `/data/params/d`.
+
+Relevant local checkpoints:
+
+- `86523c407` — gated EV9 HDA2 reconstruction and dynamic BSM foundation;
+- `810efa93c` — non-actuating preflight and bounded safety gates;
+- `9650efe5d` — startup continuity, payload/counter handoff, and fail-closed ownership;
+- `716c9c6d3` — keep all radar inputs fresh while publishing at model rate;
+- `645d2eb5f`, `e33eee65c` — verified stage-15 procedure and successful radar-valid route record.
+
+The comma used for route `000000ff--4a1113195d` remains configured with enable=true, stage=15, probe mode=2,
+`AlphaLongitudinalEnabled=true`, and DTC capture disabled. Do not disable reconstruction while ADAS transmission remains
+suppressed. Either keep stage 15 active for the next wake or first verify that stock ADAS transmission has been restored.
+
 Do not replay a frozen `0x1BA`: a valid counter/checksum with stale object state could falsely clear or assert a warning.
 Stage 2 must first establish whether `0x1BA` disappears, whether the mirror lamps continue through another path, and which
 live corner-radar inputs can safely regenerate it.
