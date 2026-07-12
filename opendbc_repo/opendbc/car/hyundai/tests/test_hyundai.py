@@ -1718,8 +1718,9 @@ class TestHyundaiFingerprint:
 
     assert parser.can_valid
     for signal in ("HDA_ICON", "LFA_ICON", "TARGET", "LKA_ICON", "CENTERLINE", "LANELINE_LEFT", "LANELINE_RIGHT",
-                   "LCA_LEFT_ICON", "LCA_RIGHT_ICON", "SETSPEED", "SETSPEED_HUD", "SETSPEED_SPEED"):
+                   "LCA_LEFT_ICON", "LCA_RIGHT_ICON", "SETSPEED", "SETSPEED_HUD"):
       assert parser.vl["CCNC_0x161"][signal] == 0
+    assert parser.vl["CCNC_0x161"]["SETSPEED_SPEED"] == 255
     for signal in ("LEAD", "LEAD_ALT", "LEAD_LEFT", "LEAD_RIGHT", "LEAD_LEFT_REAR_STATUS", "LEAD_RIGHT_REAR_STATUS"):
       assert parser.vl["CCNC_0x162"][signal] == 0
 
@@ -1735,6 +1736,19 @@ class TestHyundaiFingerprint:
     assert parser.vl["CCNC_0x162"]["LEAD"] == 0
     assert parser.vl["CCNC_0x162"]["LEAD_ALT"] == 0
     assert parser.vl["CCNC_0x162"]["LEAD_LEFT_REAR_STATUS"] == 0
+
+    # Main is a synthetic EV6-style standby state: it indicates availability
+    # without claiming active HDA or rendering radar objects before SET/RES.
+    msgs = hyundaicanfd.create_ev9_ccnc_status_messages(
+      packer, can_bus, 7, enabled=False, lat_active=False, hud=hud, out=out, main_cruise_enabled=True,
+      lead_visible=True, lead_distance=42.0,
+    )
+    parser.update([(3, msgs)])
+    assert parser.vl["CCNC_0x161"]["HDA_ICON"] == 0
+    assert parser.vl["CCNC_0x161"]["SETSPEED"] == 1
+    assert parser.vl["CCNC_0x161"]["SETSPEED_HUD"] == 1
+    assert parser.vl["CCNC_0x161"]["DISTANCE_CAR"] == 1
+    assert parser.vl["CCNC_0x162"]["LEAD"] == 0
 
   def test_ccnc_hud_helper_generates_lane_position_animation_and_lca_arrows(self):
     CP = CarParams.new_message()

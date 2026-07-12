@@ -907,40 +907,42 @@ def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, la
   routes. It does not invent a target-distance value or claim that all radar
   tracks can be represented by the cluster's limited object slots.
   """
-  # Keep the legacy caller behavior until it supplies the independent HUD
-  # feature flag. Object rendering still requires the control state to be
-  # enabled; stock EV9 routes contain no object/icon claims while inactive.
-  hud_active = bool(enabled if hud_enabled is None else hud_enabled)
-  objects_active = bool(enabled and hud_active and objects_enabled)
+  # Separate the reconstruction feature gate from vehicle state. This permits
+  # a synthetic EV6-style Main standby indication without falsely claiming
+  # active HDA, while matching stock active values after SET/RES engagement.
+  hud_feature_enabled = bool(True if hud_enabled is None else hud_enabled)
+  hda_active = bool(hud_feature_enabled and enabled)
+  main_standby = bool(hud_feature_enabled and main_cruise_enabled and not enabled)
+  objects_active = bool(hda_active and objects_enabled)
   cruise_speed = round(out.vCruiseCluster * (1 if is_metric else CV.KPH_TO_MPH))
   display_speed = 255 if not main_cruise_enabled else \
     (40 if is_metric else 25) if cruise_speed > (145 if is_metric else 90) else max(cruise_speed, 0)
-  lfa_active = bool(hud_active and lat_active)
+  lfa_active = bool(hud_feature_enabled and lat_active)
   alternate_active = bool(objects_active and alternate_enabled and lead_two_visible and
                           (abs(lead_two_distance - lead_distance) > 0.5 or abs(lead_two_lateral) > 0.5))
   values_161 = {
     "DAW_ICON": 0,
     "LKA_ICON": 0,
     "LFA_ICON": 1 if lfa_active else 0,
-    "HDA_ICON": 2 if hud_active else 0,
+    "HDA_ICON": 2 if hda_active else 0,
     # Stock EV9 HDA leaves these lane-rendering fields neutral. The cluster
     # renders its own lane geometry from the HDA/LFA state.
     "CENTERLINE": 0,
-    "TARGET": 3 if hud_active else 0,
+    "TARGET": 3 if hda_active else 0,
     "LANELINE_CURVATURE": 0,
     "LANELINE_LEFT": 0,
     "LANELINE_RIGHT": 0,
     # Value 1 means that lane-change assistance is available, not that a
     # vehicle occupies the corresponding blind spot.
-    "LCA_LEFT_ICON": 1 if hud_active else 0,
-    "LCA_RIGHT_ICON": 1 if hud_active else 0,
-    "SETSPEED": 3 if hud_active else 0,
-    "SETSPEED_HUD": 2 if hud_active and main_cruise_enabled else 0,
-    "SETSPEED_SPEED": display_speed if hud_active and main_cruise_enabled else 0,
-    "DISTANCE": hud.leadDistanceBars if hud_active and main_cruise_enabled else 0,
-    "DISTANCE_SPACING": 1 if hud_active and main_cruise_enabled else 0,
+    "LCA_LEFT_ICON": 1 if hda_active else 0,
+    "LCA_RIGHT_ICON": 1 if hda_active else 0,
+    "SETSPEED": 3 if hda_active else 1 if main_standby else 0,
+    "SETSPEED_HUD": 2 if hda_active else 1 if main_standby else 0,
+    "SETSPEED_SPEED": display_speed if hda_active or main_standby else 255,
+    "DISTANCE": hud.leadDistanceBars if hda_active else 0,
+    "DISTANCE_SPACING": 3 if hda_active or main_standby else 0,
     "DISTANCE_LEAD": 2 if objects_active and lead_visible else 0,
-    "DISTANCE_CAR": 2 if hud_active and main_cruise_enabled else 0,
+    "DISTANCE_CAR": 2 if hda_active else 1 if main_standby else 0,
     "SLA_ICON": 0,
     "NAV_ICON": 0,
   }
