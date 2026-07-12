@@ -52,6 +52,15 @@ def calculate_canfd_speed_limit(CP, FPCP, cp, cp_cam, speed_factor):
     return 0.0
 
 
+def read_canfd_speed_limit_raw(CP, cp, cp_cam) -> int:
+  """Preserve the camera's cluster-display value without unit conversion."""
+  speed_limit_bus = cp if CP.flags & HyundaiFlags.CANFD_LKA_STEERING else cp_cam
+  try:
+    return int(speed_limit_bus.vl["FR_CMR_02_100ms"]["ISLW_SpdCluMainDis"])
+  except (KeyError, TypeError, ValueError):
+    return 0
+
+
 def decode_ioniq_6_blindspot_radar_state(state: int) -> tuple[bool, bool]:
   """Decode the shared HKG CAN-FD corner-radar side-detection bitmap."""
   state_int = int(state)
@@ -134,6 +143,7 @@ class CarState(CarStateBase):
     self.stock_camera_lead_distance = 0.0
     self.stock_camera_lead_rel_speed = 0.0
     self.stock_camera_lead_ts = 0
+    self.ev9_cluster_speed_limit_raw = 0
     self.openpilot_lead_visible = False
     self.openpilot_lead_distance = 0.0
     self.openpilot_lead_rel_speed = 0.0
@@ -611,6 +621,8 @@ class CarState(CarStateBase):
 
     fp_ret = custom.StarPilotCarState.new_message()
     fp_ret.dashboardSpeedLimit = calculate_canfd_speed_limit(self.CP, self.FPCP, cp, cp_cam, speed_factor)
+    if self.CP.carFingerprint == CAR.KIA_EV9:
+      self.ev9_cluster_speed_limit_raw = read_canfd_speed_limit_raw(self.CP, cp, cp_cam)
 
     if self.CP.flags & HyundaiFlags.EV:
       drive_mode = cp.vl["DRIVE_MODE_EV"]["DRIVE_MODE"]

@@ -16,7 +16,8 @@ from opendbc.car.hyundai.carcontroller import CarController, Ioniq6LongitudinalT
                                              update_angle_command, update_ev9_high_angle_inhibit, ev9_dynamic_steering_icons, \
                                              should_use_ev6_gt_line_stop_direct_tracking
 from opendbc.car.lateral import apply_steer_angle_limits_vm
-from opendbc.car.hyundai.carstate import CarState, decode_canfd_camera_lead, decode_ioniq_6_blindspot_radar_state
+from opendbc.car.hyundai.carstate import CarState, decode_canfd_camera_lead, decode_ioniq_6_blindspot_radar_state, \
+                                         read_canfd_speed_limit_raw
 from opendbc.car.hyundai.interface import CarInterface, attempt_ev9_pre_fingerprint_suppression
 from opendbc.car.hyundai import hyundaican, hyundaicanfd
 from opendbc.car.hyundai.hyundaicanfd import CanBus
@@ -1695,6 +1696,52 @@ class TestHyundaiFingerprint:
     assert parser.vl["CCNC_0x162"]["LEAD_LEFT_REAR_DISTANCE"] == pytest.approx(0.0)
     assert parser.vl["CCNC_0x162"]["LEAD_RIGHT_REAR_STATUS"] == 0
     assert parser.vl["CCNC_0x162"]["VIBRATE"] == 0
+
+  @pytest.mark.parametrize(("raw_speed_limit", "expected"), [
+    (0, 0), (1, 1), (65, 65), (253, 253), (254, 0), (255, 0), (-1, 0),
+  ])
+  def test_ev9_ccnc_speed_limit_passthrough(self, raw_speed_limit, expected):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.KIA_EV9
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.CANFD_LKA_STEERING)
+    packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
+    can_bus = CanBus(CP)
+    parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("CCNC_0x162", 0)], can_bus.ECAN)
+    hud = SimpleNamespace(leadDistanceBars=3)
+    out = SimpleNamespace(vCruiseCluster=65.0)
+
+    msgs = hyundaicanfd.create_ev9_ccnc_status_messages(
+      packer, can_bus, 5, enabled=True, lat_active=True, hud=hud, out=out,
+      main_cruise_enabled=True, lead_visible=False, lead_distance=0.0,
+      speed_limit_raw=raw_speed_limit, speed_limit_enabled=True,
+    )
+    parser.update([(1, msgs)])
+    assert parser.vl["CCNC_0x162"]["SPEEDLIMIT"] == expected
+    assert parser.vl["CCNC_0x162"]["SPEEDLIMIT_FLASH"] == 2
+    assert parser.vl["CCNC_0x162"]["COUNTRY"] == 7
+    assert parser.vl["CCNC_0x162"]["SPEEDLIMIT_WEATHER"] == 0
+    assert parser.vl["CCNC_0x162"]["SIGNS"] == 0
+
+  def test_ev9_ccnc_speed_limit_flag_off_and_raw_camera_source(self):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.KIA_EV9
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.CANFD_LKA_STEERING)
+    pt = SimpleNamespace(vl={"FR_CMR_02_100ms": {"ISLW_SpdCluMainDis": 75}})
+    cam = SimpleNamespace(vl={"FR_CMR_02_100ms": {"ISLW_SpdCluMainDis": 45}})
+    assert read_canfd_speed_limit_raw(CP, pt, cam) == 75
+
+    packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
+    can_bus = CanBus(CP)
+    parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("CCNC_0x162", 0)], can_bus.ECAN)
+    msgs = hyundaicanfd.create_ev9_ccnc_status_messages(
+      packer, can_bus, 5, enabled=True, lat_active=True,
+      hud=SimpleNamespace(leadDistanceBars=3), out=SimpleNamespace(vCruiseCluster=65.0),
+      main_cruise_enabled=True, lead_visible=False, lead_distance=0.0,
+      speed_limit_raw=75, speed_limit_enabled=False,
+    )
+    parser.update([(1, msgs)])
+    for signal in ("SPEEDLIMIT", "SPEEDLIMIT_FLASH", "COUNTRY", "SPEEDLIMIT_WEATHER", "SIGNS"):
+      assert parser.vl["CCNC_0x162"][signal] == 0
 
   def test_ev9_ccnc_hud_inactive_and_independent_object_gates(self):
     CP = CarParams.new_message()

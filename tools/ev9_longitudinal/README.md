@@ -370,6 +370,12 @@ Additional stock semantics from the same references:
   presented as a measured rear distance.
 - `TARGET_DISTANCE` does not match the primary or adjacent object distances and must not be synthesized from radar.
 
+Those stock routes also establish the conservative speed-limit reconstruction. The camera-provided
+`FR_CMR_02_100ms.ISLW_SpdCluMainDis` value is copied literally to `CCNC_0x162.SPEEDLIMIT`; the accompanying stock state is
+`SPEEDLIMIT_FLASH=2`, `COUNTRY=7`, and `SPEEDLIMIT_WEATHER=0`. Values 254 and 255 are reserved/invalid and are rendered as
+zero. `SIGNS` remains zero because road-sign classes have not yet been mapped exactly. The independent default-on
+`KiaEv9ClusterSpeedLimitEnabled` flag can restore the prior all-zero/dashes output for isolated testing.
+
 Probe mode 4 is a reset-assisted diagnostic-only experiment using the validated mode-2 request. It sends an ADAS ECU
 reset before re-entering extended diagnostics and requesting `28 01 03`. The 2026-07-11 direct OFF-to-READY test entered
 extended diagnostics successfully after reset but returned NRC `0x22` for all ten CommunicationControl attempts. It then

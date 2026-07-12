@@ -889,6 +889,15 @@ def _create_ev9_adrv_message_with_signals(packer, CAN, address: int, counter: in
   return CanData(address, bytes(dat), CAN.ECAN)
 
 
+def sanitize_ev9_cluster_speed_limit(raw_speed_limit: int | float) -> int:
+  """CCNC reserves 254/255; camera values 0 through 253 are literal."""
+  try:
+    speed_limit = int(raw_speed_limit)
+  except (TypeError, ValueError):
+    return 0
+  return speed_limit if 0 <= speed_limit <= 253 else 0
+
+
 def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, lat_active: bool, hud, out,
                                      main_cruise_enabled: bool, lead_visible: bool, lead_distance: float,
                                      lead_two_visible: bool = False, lead_two_distance: float = 0.0,
@@ -901,7 +910,9 @@ def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, la
                                      is_metric: bool = True, hud_enabled: bool | None = None,
                                      objects_enabled: bool = True, alternate_enabled: bool = False,
                                      rear_bsm_fallback_enabled: bool = False,
-                                     steering_icon_active: bool | None = None) -> list[CanData]:
+                                     steering_icon_active: bool | None = None,
+                                     speed_limit_raw: int = 0,
+                                     speed_limit_enabled: bool = False) -> list[CanData]:
   """Recreate EV9 CCNC engagement icons and the supported radar-object slots.
 
   This intentionally renders only fields whose stock EV9 meanings were seen in
@@ -923,6 +934,7 @@ def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, la
     1 if lfa_active else 0
   alternate_active = bool(objects_active and alternate_enabled and lead_two_visible and
                           (abs(lead_two_distance - lead_distance) > 0.5 or abs(lead_two_lateral) > 0.5))
+  cluster_speed_limit = sanitize_ev9_cluster_speed_limit(speed_limit_raw) if speed_limit_enabled else 0
   values_161 = {
     "DAW_ICON": 0,
     "LKA_ICON": 0,
@@ -976,6 +988,13 @@ def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, la
     "LEAD_RIGHT_REAR_STATUS": 1 if objects_active and rear_bsm_fallback_enabled and right_blindspot else 0,
     "LEAD_RIGHT_REAR_DISTANCE": 25.0 if objects_active and rear_bsm_fallback_enabled and right_blindspot else 0.0,
     "LEAD_RIGHT_REAR_LATERAL": 3.0 if objects_active and rear_bsm_fallback_enabled and right_blindspot else 0.0,
+    # Stock EV9 passes the camera's displayed number through literally. Sign
+    # classes remain zero until their camera-to-CCNC mapping is decoded.
+    "SPEEDLIMIT": cluster_speed_limit,
+    "SPEEDLIMIT_FLASH": 2 if speed_limit_enabled else 0,
+    "COUNTRY": 7 if speed_limit_enabled else 0,
+    "SPEEDLIMIT_WEATHER": 0,
+    "SIGNS": 0,
   })
 
   return [
