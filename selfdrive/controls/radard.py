@@ -319,7 +319,13 @@ class RadarD:
       self.tracks[ids].update(rpt[0], rpt[1], rpt[2], v_lead, rpt[3])
 
     # *** publish radarState ***
-    self.radar_state_valid = sm.all_checks()
+    # carState is a 100 Hz service observed through the 20 Hz model poll, so
+    # its conflated average rate is not meaningful here. Require it to remain
+    # alive and valid, while retaining full checks for the model and raw radar
+    # tracks. starpilotPlan is optional enrichment and must not invalidate
+    # otherwise healthy radar perception.
+    self.radar_state_valid = sm.all_checks(['modelV2', 'liveTracks']) and \
+                             sm.all_alive(['carState']) and sm.all_valid(['carState'])
     self.radar_state = log.RadarState.new_message()
     self.radar_state.mdMonoTime = sm.logMonoTime['modelV2']
     self.radar_state.radarErrors = rr.errors
