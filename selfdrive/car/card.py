@@ -27,7 +27,7 @@ from openpilot.common.constants import CV
 from openpilot.selfdrive.car.cruise import VCruiseHelper, IMPERIAL_INCREMENT, V_CRUISE_MAX, V_CRUISE_MIN
 from openpilot.selfdrive.car.redneck_cruise import RedneckCruise, select_redneck_target_speed
 from openpilot.selfdrive.car.car_specific import MockCarState
-from openpilot.selfdrive.car.ev9_cluster_objects import filtered_radar_slots
+from openpilot.selfdrive.car.ev9_cluster_objects import ClusterObjectSlots, Ev9ClusterObjectTracker, filtered_radar_slots
 
 from openpilot.starpilot.common.starpilot_variables import get_starpilot_toggles, update_starpilot_toggles
 from openpilot.starpilot.controls.starpilot_card import StarPilotCard
@@ -101,6 +101,9 @@ class Car:
     self.params_memory = Params(memory=True)
     self.ev9_cluster_objects_enabled = self.params.get_bool("KiaEv9ClusterObjectsEnabled")
     self.ev9_cluster_alternate_enabled = self.params.get_bool("KiaEv9ClusterAlternateLeadEnabled")
+    self.ev9_cluster_smoothing_enabled = self.params.get_bool("KiaEv9ClusterObjectSmoothingEnabled")
+    self.ev9_cluster_tracker = Ev9ClusterObjectTracker()
+    self.ev9_cluster_slots = ClusterObjectSlots()
     if self.ev9_cluster_objects_enabled and str(self.CP.carFingerprint) == "KIA_EV9":
       enable_ev9_live_radar_tracks = getattr(self.RI, "enable_ev9_live_radar_tracks", None)
       if enable_ev9_live_radar_tracks is not None:
@@ -305,6 +308,17 @@ class Car:
     # Update radar tracks from CAN
     RD: structs.RadarDataT | None = self.RI.update(can_list)
 
+    if RD is not None and str(self.CP.carFingerprint) == "KIA_EV9" and self.ev9_cluster_objects_enabled and \
+       self.ev9_cluster_smoothing_enabled:
+      preferred_primary_track_id = -1
+      if self.sm.seen['radarState']:
+        fused_lead = self.sm['radarState'].leadOne
+        if fused_lead.status and getattr(fused_lead, "radar", False):
+          preferred_primary_track_id = int(getattr(fused_lead, "radarTrackId", -1))
+      self.ev9_cluster_slots = self.ev9_cluster_tracker.update(
+        list(RD.points), preferred_primary_track_id, self.ev9_cluster_alternate_enabled,
+      )
+
     self.sm.update(0)
 
     can_rcv_valid = len(can_strs) > 0
@@ -457,7 +471,20 @@ class Car:
       self.sm.valid['starpilotRadarState']
 
     filtered_slots = None
-    if ev9_filtered_objects and radar_valid:
+    if ev9_filtered_objects and self.ev9_cluster_smoothing_enabled:
+      filtered_slots = self.ev9_cluster_slots
+      if filtered_slots.primary is not None:
+        lead_visible = True
+        lead_distance = filtered_slots.primary.distance
+        lead_rel_speed = filtered_slots.primary.relative_speed
+      else:
+        lead_visible = False
+
+      if filtered_slots.alternate is not None:
+        lead_two_visible = True
+        lead_two_distance = filtered_slots.alternate.distance
+        lead_two_lateral = filtered_slots.alternate.lateral
+    elif ev9_filtered_objects and radar_valid:
       lead_left = self.sm['starpilotRadarState'].leadLeft if adjacent_valid else None
       lead_right = self.sm['starpilotRadarState'].leadRight if adjacent_valid else None
       filtered_slots = filtered_radar_slots(self.sm['radarState'].leadOne, self.sm['radarState'].leadTwo,
@@ -572,6 +599,7 @@ class Car:
       self.experimental_mode = self.params.get_bool("ExperimentalMode") and self.CP.openpilotLongitudinalControl and not self.safe_mode
       self.ev9_cluster_objects_enabled = self.params.get_bool("KiaEv9ClusterObjectsEnabled")
       self.ev9_cluster_alternate_enabled = self.params.get_bool("KiaEv9ClusterAlternateLeadEnabled")
+      self.ev9_cluster_smoothing_enabled = self.params.get_bool("KiaEv9ClusterObjectSmoothingEnabled")
       time.sleep(0.1)
 
   def card_thread(self):
