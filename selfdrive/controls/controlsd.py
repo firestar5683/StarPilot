@@ -47,6 +47,20 @@ LANE_CHANGE_SMOOTH_RELEASE_T = 2.0
 LANE_CHANGE_ARREST_JERK_FLOOR = 0.6
 
 
+def get_steer_limited_by_safety(steer_control_type, lat_active, requested_actuators, output_actuators) -> bool:
+  """Return the current controller/safety steering limit state.
+
+  AOL can keep lateral control active while selfdriveState.active is false, so
+  this must be refreshed from latActive rather than the engagement state.
+  """
+  if not lat_active:
+    return False
+  if steer_control_type == car.CarParams.SteerControlType.angle:
+    return abs(requested_actuators.steeringAngleDeg - output_actuators.steeringAngleDeg) > \
+           STEER_ANGLE_SATURATION_THRESHOLD
+  return abs(requested_actuators.torque - output_actuators.torque) > 1e-2
+
+
 def get_gm_hud_set_speed(set_speed_ms: float, starpilot_toggles) -> float:
   spoofed_speed = set_speed_ms
 
@@ -340,13 +354,10 @@ class Controls:
       hudControl.leftLaneDepart = self.sm['driverAssistance'].leftLaneDeparture
       hudControl.rightLaneDepart = self.sm['driverAssistance'].rightLaneDeparture
 
-    if self.sm['selfdriveState'].active:
-      CO = self.sm['carOutput']
-      if self.CP.steerControlType == car.CarParams.SteerControlType.angle:
-        self.steer_limited_by_safety = abs(CC.actuators.steeringAngleDeg - CO.actuatorsOutput.steeringAngleDeg) > \
-                                              STEER_ANGLE_SATURATION_THRESHOLD
-      else:
-        self.steer_limited_by_safety = abs(CC.actuators.torque - CO.actuatorsOutput.torque) > 1e-2
+    CO = self.sm['carOutput']
+    self.steer_limited_by_safety = get_steer_limited_by_safety(
+      self.CP.steerControlType, CC.latActive, CC.actuators, CO.actuatorsOutput,
+    )
 
     # TODO: both controlsState and carControl valids should be set by
     #       sm.all_checks(), but this creates a circular dependency
