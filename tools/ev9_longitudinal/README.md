@@ -43,6 +43,14 @@ Verified clean suppressed routes:
 - `000000fc--5aefd6f768`: stage 15 resumed while ADAS remained suppressed from the preceding test. The initial active
   12-DTC/unknown-variant state cleared immediately once reconstruction resumed; IGN-ON to READY remained clean. This
   proves ECU sleep and DTC clearing are not recovery requirements when the complete stream is restored.
+- `000000ff--4a1113195d`: stage 15 with the final radar messaging fix (`716c9c6d3`). IGN-ON and READY remained free of
+  dash/comma errors, `radarState.valid=True`, both leads were active, `carState.canValid=True`, Panda reported no faults
+  or blocked transmissions, and every reconstructed address plus Tester Present remained at its target rate.
+
+`radard` must poll all of `modelV2`, `carState`, `liveTracks`, and `starpilotPlan`, then run fusion only on model updates.
+Polling only `modelV2` starves the non-polled `carState` socket in this messaging build after its first sample. The radar
+validity envelope therefore enforces full model/live-track checks and fresh, valid `carState`, ignores only its conflated
+average-frequency estimate, and treats `starpilotPlan` as optional enrichment.
 
 The clean stock/disarmed recovery route is `000000d3--78bb8fa04a`; it identified `KIA_EV9`, produced valid `carState` for
 985/985 sampled updates, and showed no vehicle DTCs. The feature flag, stage, probe mode, and alpha-longitudinal toggle
