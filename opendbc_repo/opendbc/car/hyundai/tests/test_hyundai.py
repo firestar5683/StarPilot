@@ -2196,23 +2196,21 @@ class TestHyundaiFingerprint:
     assert parser.vl["LKAS_ALT"]["LKAS_ANGLE_ACTIVE"] == 2
     assert parser.vl["LKAS_ALT"]["ADAS_ACIAnglTqRedcGainVal"] == pytest.approx(0.0)
 
-  @pytest.mark.parametrize(("gain", "angle_delta", "override", "inhibited", "expected_icon", "expected_active"), [
-    (0.40, 0.251, False, False, 2, True),
-    (0.40, 0.0, False, False, 1, False),
-    (0.40, 0.25, False, False, 1, False),
-    (0.00, 1.0, False, False, 1, False),
-    (0.40, 1.0, True, False, 1, False),
-    (0.40, 1.0, False, True, 1, False),
+  @pytest.mark.parametrize(("gain", "override", "inhibited", "expected_icon", "expected_active"), [
+    (0.40, False, False, 2, True),
+    (0.00, False, False, 1, False),
+    (0.40, True, False, 1, False),
+    (0.40, False, True, 1, False),
   ])
-  def test_ev9_dynamic_steering_icons(self, gain, angle_delta, override, inhibited, expected_icon, expected_active):
+  def test_ev9_dynamic_steering_icons(self, gain, override, inhibited, expected_icon, expected_active):
     CP = CarParams.new_message()
     CP.carFingerprint = CAR.KIA_EV9
     CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.CANFD_ANGLE_STEERING)
-    lka, lfa, active = ev9_dynamic_steering_icons(CP, True, True, gain, angle_delta, override, inhibited, 3, 3)
+    lka, lfa, active = ev9_dynamic_steering_icons(CP, True, True, gain, override, inhibited, 3, 3)
     assert (lka, lfa, active) == (expected_icon, expected_icon, expected_active)
 
     # Disabling the feature exactly restores the pre-feature icon state.
-    assert ev9_dynamic_steering_icons(CP, False, True, gain, angle_delta, override, inhibited, 3, 2) == (3, 2, None)
+    assert ev9_dynamic_steering_icons(CP, False, True, gain, override, inhibited, 3, 2) == (3, 2, None)
 
   @pytest.mark.parametrize(("steering_active", "expected_icon"), [(False, 1), (True, 2)])
   def test_ev9_ccnc_dynamic_steering_icon(self, steering_active, expected_icon):
