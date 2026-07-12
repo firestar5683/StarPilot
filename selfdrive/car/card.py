@@ -79,7 +79,8 @@ class Car:
 
   def __init__(self, CI=None, RI=None) -> None:
     self.can_sock = messaging.sub_sock('can', timeout=20)
-    self.sm = messaging.SubMaster(['pandaStates', 'carControl', 'onroadEvents', 'radarState', 'longitudinalPlan'])
+    self.sm = messaging.SubMaster(['pandaStates', 'carControl', 'onroadEvents', 'radarState', 'starpilotRadarState',
+                                   'longitudinalPlan'])
     self.pm = messaging.PubMaster(['sendcan', 'carState', 'carParams', 'carOutput', 'liveTracks'])
 
     self.can_rcv_cum_timeout_counter = 0
@@ -433,6 +434,36 @@ class Car:
     self.CI.CS.openpilot_lead_visible = lead_visible
     self.CI.CS.openpilot_lead_distance = lead_distance
     self.CI.CS.openpilot_lead_rel_speed = lead_rel_speed
+
+    lead_two_visible = False
+    lead_two_distance = 0.0
+    lead_two_lateral = 0.0
+    if radar_valid:
+      lead_two = self.sm['radarState'].leadTwo
+      if lead_two.status and float(lead_two.dRel) > OPENPILOT_LEAD_MIN_DISTANCE:
+        lead_two_visible = True
+        lead_two_distance = max(float(lead_two.dRel), 0.0)
+        lead_two_lateral = float(lead_two.yRel)
+
+    adjacent_valid = self.sm.seen['starpilotRadarState'] and self.sm.alive['starpilotRadarState'] and \
+      self.sm.valid['starpilotRadarState']
+    for side in ('left', 'right'):
+      visible = False
+      distance = 0.0
+      lateral = 0.0
+      if adjacent_valid:
+        lead = getattr(self.sm['starpilotRadarState'], f'lead{side.title()}')
+        if lead.status and float(lead.dRel) > OPENPILOT_LEAD_MIN_DISTANCE:
+          visible = True
+          distance = max(float(lead.dRel), 0.0)
+          lateral = float(lead.yRel)
+      setattr(self.CI.CS, f'openpilot_lead_{side}_visible', visible)
+      setattr(self.CI.CS, f'openpilot_lead_{side}_distance', distance)
+      setattr(self.CI.CS, f'openpilot_lead_{side}_lateral', lateral)
+
+    self.CI.CS.openpilot_lead_two_visible = lead_two_visible
+    self.CI.CS.openpilot_lead_two_distance = lead_two_distance
+    self.CI.CS.openpilot_lead_two_lateral = lead_two_lateral
     self.CI.CS.openpilot_radar_valid = radar_valid
     self.CI.CS.panda_faulted = not self.sm.seen['pandaStates'] or any(len(p.faults) > 0 for p in self.sm['pandaStates'])
 

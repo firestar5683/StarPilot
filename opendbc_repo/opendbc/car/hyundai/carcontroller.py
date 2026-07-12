@@ -748,9 +748,23 @@ class CarController(CarControllerBase):
     # LFA and HDA icons
     if self.frame % 5 == 0 and (not lka_steering or lka_steering_long):
       if ev9_long_test_active:
-        # EV9 HDA2 uses live CCNC 0x161/0x162 rather than the legacy 0x1E0
-        # LFAHDA_CLUSTER message. Do not introduce an uncaptured replacement.
-        pass
+        if self.ev9_long_test.stage >= EV9LongitudinalTestStage.CCNC_STATUS:
+          can_sends.extend(hyundaicanfd.create_ev9_ccnc_status_messages(
+            self.packer, self.CAN, self.frame // 5, CC.enabled, CC.latActive, CC.hudControl, CS.out,
+            CS.out.cruiseState.available,
+            bool(getattr(CS, "openpilot_lead_visible", False)),
+            float(getattr(CS, "openpilot_lead_distance", 0.0)),
+            bool(getattr(CS, "openpilot_lead_two_visible", False)),
+            float(getattr(CS, "openpilot_lead_two_distance", 0.0)),
+            float(getattr(CS, "openpilot_lead_two_lateral", 0.0)),
+            bool(getattr(CS, "openpilot_lead_left_visible", False)),
+            float(getattr(CS, "openpilot_lead_left_distance", 0.0)),
+            float(getattr(CS, "openpilot_lead_left_lateral", 0.0)),
+            bool(getattr(CS, "openpilot_lead_right_visible", False)),
+            float(getattr(CS, "openpilot_lead_right_distance", 0.0)),
+            float(getattr(CS, "openpilot_lead_right_lateral", 0.0)),
+            CS.left_blindspot_from_radar, CS.right_blindspot_from_radar, CS.is_metric,
+          ))
       elif ccnc_non_hda2:
         can_sends.extend(hyundaicanfd.create_ccnc(self.packer, self.CAN, self.long_active_ecu, CC.enabled, CC.hudControl,
                                                   CC.leftBlinker, CC.rightBlinker, CS.msg_161, CS.msg_162, CS.msg_1b5,
@@ -793,7 +807,6 @@ class CarController(CarControllerBase):
           adrv_messages = [hyundaicanfd.create_ev9_adrv_message(msg[0], self.CAN.ECAN, self.frame // counter_divisors[msg[0]])
                            for msg in adrv_messages]
           staged_status_messages = {
-            EV9LongitudinalTestStage.CCNC_STATUS: ((0x161, 5), (0x162, 5)),
             EV9LongitudinalTestStage.LFAHDA_STATUS: ((0x1E0, 5),),
             EV9LongitudinalTestStage.ADRV_38C: ((0x38C, 20),),
           }

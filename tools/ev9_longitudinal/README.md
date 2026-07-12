@@ -242,7 +242,7 @@ return to stock ADAS transmission when a verified `28 00 03` restore path is una
 | 7 | Add `ADRV_0x200` |
 | 8 | Add `ADRV_0x345` |
 | 9 | Add `SCC_CONTROL` (`0x1A0`) at 50 Hz, forcibly inactive with zero requested acceleration |
-| 10 | Add neutral CCNC status `0x161/0x162` |
+| 10 | Add captured CCNC `0x161/0x162`; stage 15/16 can render engagement and supported radar-object slots |
 | 11 | Add neutral BSM status `0x1BA/0x1E5` |
 | 12 | Add neutral cluster status `0x1E0` |
 | 13 | Add captured ADAS status `0x38C` |
@@ -312,6 +312,26 @@ not in Drive, brake pressed, accelerator/override, invalid CAN, invalid radar, P
 These limits come from the active stock-SCC samples in the same two routes; no stock standstill/resume sample was captured,
 so stop-and-go testing is out of scope. Do not enter stage 17 with a dash warning, invalid comma vehicle state, or outside a
 flat closed private test area.
+
+## EV6-style engagement and EV9 CCNC display
+
+The EV9 keeps the existing Hyundai CAN-FD/openpilot engagement contract used by the EV6. CC Main is not an actuation
+enable edge. Pressing and releasing SET- or RES+ is the intentional openpilot enable edge enforced independently by both
+`CarState` and Panda safety. Cancel and the normal pedal rules disengage. Always On Lateral remains controlled by its
+normal StarPilot setting; CC Main is not remapped into an AOL or longitudinal enable command.
+
+At stage 15/16, dynamic `0x161/0x162` remains display-only because SCC is still forced inactive with zero requested
+acceleration. The reconstruction preserves the captured EV9 payload body, overwrites only named DBC fields, and
+regenerates the rolling counter and CRC. An enabled state uses the stock-route values `HDA_ICON=2`, `LFA_ICON=1`, and
+`TARGET=3`, along with set speed, following-distance display, and lane-state fields.
+
+The cluster has a finite object model rather than a raw radar point cloud. The reconstruction maps `radarState.leadOne`
+to the primary lead, `leadTwo` to the alternate slot, and valid `starpilotRadarState` adjacent leads to one left and one
+right slot. Radard keeps adjacent-lead extraction active for the EV9 cluster path even when the optional on-comma
+adjacent-lead visualization toggle is off. Rear BSM status uses the stock fixed 25 m / 3 m display convention because the
+retained corner-radar BSM
+signal does not contain a measured range. No precise rear distance is fabricated, and arbitrary extra MRR35 tracks are
+not rendered. `0x162.VIBRATE` remains zero until a route proves the EV9 uses that field for steering-wheel vibration.
 
 Probe mode 4 is a reset-assisted diagnostic-only experiment using the validated mode-2 request. It sends an ADAS ECU
 reset before re-entering extended diagnostics and requesting `28 01 03`. The 2026-07-11 direct OFF-to-READY test entered

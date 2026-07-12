@@ -868,6 +868,105 @@ def create_ev9_adrv_message(address: int, bus: int, counter: int) -> CanData:
   return CanData(address, bytes(d), bus)
 
 
+def _create_ev9_adrv_message_with_signals(packer, CAN, address: int, counter: int,
+                                           message_name: str, values: dict) -> CanData:
+  """Apply only decoded signal deltas to the complete captured EV9 payload."""
+  msg = create_ev9_adrv_message(address, CAN.ECAN, counter)
+  dat = bytearray(msg.dat)
+  dbc_msg = packer.dbc.name_to_msg[message_name]
+  # Preserve every unknown bit in the captured body and overwrite only the
+  # explicitly named DBC signals. XOR deltas are not valid when a captured
+  # field already contains a nonzero value.
+  for name, value in values.items():
+    sig = dbc_msg.sigs[name]
+    ival = int(np.floor((value - sig.offset) / sig.factor + 0.5))
+    if ival < 0:
+      ival = (1 << sig.size) + ival
+    _set_value(dat, sig, ival)
+  crc = hkg_can_fd_checksum(address, None, dat)
+  dat[0] = crc & 0xFF
+  dat[1] = (crc >> 8) & 0xFF
+  return CanData(address, bytes(dat), CAN.ECAN)
+
+
+def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, lat_active: bool, hud, out,
+                                     main_cruise_enabled: bool, lead_visible: bool, lead_distance: float,
+                                     lead_two_visible: bool = False, lead_two_distance: float = 0.0,
+                                     lead_two_lateral: float = 0.0,
+                                     lead_left_visible: bool = False, lead_left_distance: float = 0.0,
+                                     lead_left_lateral: float = 0.0,
+                                     lead_right_visible: bool = False, lead_right_distance: float = 0.0,
+                                     lead_right_lateral: float = 0.0,
+                                     left_blindspot: bool = False, right_blindspot: bool = False,
+                                     is_metric: bool = True) -> list[CanData]:
+  """Recreate EV9 CCNC engagement icons and the supported radar-object slots.
+
+  This intentionally renders only fields whose stock EV9 meanings were seen in
+  routes. It does not invent a target-distance value or claim that all radar
+  tracks can be represented by the cluster's limited object slots.
+  """
+  cruise_speed = round(out.vCruiseCluster * (1 if is_metric else CV.KPH_TO_MPH))
+  display_speed = 255 if not main_cruise_enabled else \
+    (40 if is_metric else 25) if cruise_speed > (145 if is_metric else 90) else max(cruise_speed, 0)
+  any_blinker = bool(out.leftBlinker or out.rightBlinker)
+  lfa_active = bool(lat_active)
+  values_161 = {
+    "DAW_ICON": 0,
+    "LKA_ICON": 0,
+    "LFA_ICON": 1 if lfa_active else 0,
+    "HDA_ICON": 2 if enabled else 0,
+    "CENTERLINE": 1 if lfa_active else 0,
+    "TARGET": 3 if enabled else 0,
+    "LANELINE_CURVATURE": 15,
+    "LANELINE_LEFT": 0 if not lfa_active else 1 if not hud.leftLaneVisible else 4 if hud.leftLaneDepart else 6 if any_blinker else 2,
+    "LANELINE_RIGHT": 0 if not lfa_active else 1 if not hud.rightLaneVisible else 4 if hud.rightLaneDepart else 6 if any_blinker else 2,
+    "LCA_LEFT_ICON": 1 if left_blindspot else 0,
+    "LCA_RIGHT_ICON": 1 if right_blindspot else 0,
+    "SETSPEED": 3 if enabled else 1,
+    "SETSPEED_HUD": 0 if not main_cruise_enabled else 2 if enabled else 1,
+    "SETSPEED_SPEED": display_speed,
+    "DISTANCE": hud.leadDistanceBars,
+    "DISTANCE_SPACING": 0 if not main_cruise_enabled else 1 if enabled else 3,
+    "DISTANCE_LEAD": 0 if not main_cruise_enabled else 2 if enabled and lead_visible else 1 if lead_visible else 0,
+    "DISTANCE_CAR": 0 if not main_cruise_enabled else 2 if enabled else 1,
+    "SLA_ICON": 0,
+    "NAV_ICON": 0,
+  }
+
+  values_162 = {fault: 0 for fault in ("FAULT_FSS", "FAULT_FCA", "FAULT_LSS", "FAULT_SLA",
+                                                   "FAULT_HDA", "FAULT_DAS", "FAULT_LFA", "FAULT_DAW", "FAULT_ESS")}
+  values_162.update({
+    # EV9 stock routes observed this field at zero, including lane/BSM events.
+    # Do not claim steering-wheel vibration until an EV9 route proves its use.
+    "VIBRATE": 0,
+    "LEAD": 2 if enabled and lead_visible else 1 if lead_visible else 0,
+    "LEAD_DISTANCE": min(max(lead_distance, 0.0), 204.7) if lead_visible else 0.0,
+    "LEAD_LATERAL": 0.0,
+    "LEAD_ALT": 1 if lead_two_visible else 0,
+    "LEAD_ALT_DISTANCE": min(max(lead_two_distance, 0.0), 204.7) if lead_two_visible else 0.0,
+    "LEAD_ALT_LATERAL": min(abs(lead_two_lateral), 12.7) if lead_two_visible else 0.0,
+    "LEAD_LEFT": 1 if lead_left_visible else 0,
+    "LEAD_LEFT_DISTANCE": min(max(lead_left_distance, 0.0), 204.7) if lead_left_visible else 0.0,
+    "LEAD_LEFT_LATERAL": min(abs(lead_left_lateral), 12.7) if lead_left_visible else 0.0,
+    "LEAD_RIGHT": 1 if lead_right_visible else 0,
+    "LEAD_RIGHT_DISTANCE": min(max(lead_right_distance, 0.0), 204.7) if lead_right_visible else 0.0,
+    "LEAD_RIGHT_LATERAL": min(abs(lead_right_lateral), 12.7) if lead_right_visible else 0.0,
+    # The stock route uses a fixed near-field marker for rear BSM objects; it
+    # does not provide a measured range, so retain that honest UI convention.
+    "LEAD_LEFT_REAR_STATUS": 1 if left_blindspot else 0,
+    "LEAD_LEFT_REAR_DISTANCE": 25.0 if left_blindspot else 0.0,
+    "LEAD_LEFT_REAR_LATERAL": 3.0 if left_blindspot else 0.0,
+    "LEAD_RIGHT_REAR_STATUS": 1 if right_blindspot else 0,
+    "LEAD_RIGHT_REAR_DISTANCE": 25.0 if right_blindspot else 0.0,
+    "LEAD_RIGHT_REAR_LATERAL": 3.0 if right_blindspot else 0.0,
+  })
+
+  return [
+    _create_ev9_adrv_message_with_signals(packer, CAN, 0x161, counter, "CCNC_0x161", values_161),
+    _create_ev9_adrv_message_with_signals(packer, CAN, 0x162, counter, "CCNC_0x162", values_162),
+  ]
+
+
 def create_ev9_adrv_160(bus: int, counter: int) -> CanData:
   """Recreate EV9 0x160 while truthfully showing AEB disabled."""
   return create_ev9_adrv_message(0x160, bus, counter)

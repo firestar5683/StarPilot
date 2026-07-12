@@ -271,12 +271,14 @@ def get_adjacent_lead(tracks: dict[int, Track], standstill: bool, model_data: ca
 
 
 class RadarD:
-  def __init__(self, radar_ts: float = DT_MDL, delay: float = 0.0, g90_radar_filter: bool = False):
+  def __init__(self, radar_ts: float = DT_MDL, delay: float = 0.0, g90_radar_filter: bool = False,
+               track_adjacent_always: bool = False):
     self.current_time = 0.0
 
     self.tracks: dict[int, Track] = {}
     self.kalman_params = KalmanParams(radar_ts)
     self.g90_radar_filter = g90_radar_filter
+    self.track_adjacent_always = track_adjacent_always
     self.lead_prob_filters = [FirstOrderFilter(0.0, 0.2, radar_ts) for _ in range(2)]
     self.prev_lead_track_ids = [-1, -1]
 
@@ -362,7 +364,8 @@ class RadarD:
         elif (not lead.status) or (self.prev_lead_track_ids[i] not in self.tracks):
           self.prev_lead_track_ids[i] = -1
 
-    if self.ready and (self.starpilot_toggles.adjacent_lead_tracking or self.starpilot_toggles.human_lane_changes):
+    if self.ready and (self.track_adjacent_always or self.starpilot_toggles.adjacent_lead_tracking or
+                       self.starpilot_toggles.human_lane_changes):
       self.starpilot_radar_state.leadLeft = get_adjacent_lead(self.tracks, sm['carState'].standstill, sm['modelV2'], left=True)
       self.starpilot_radar_state.leadRight = get_adjacent_lead(self.tracks, sm['carState'].standstill, sm['modelV2'], left=False)
 
@@ -401,7 +404,9 @@ def main() -> None:
     radar_ts = DT_MDL
 
   g90_radar_filter = CP.brand == "hyundai" and CP.carFingerprint == "GENESIS_G90"
-  RD = RadarD(radar_ts=radar_ts, delay=CP.radarDelay, g90_radar_filter=g90_radar_filter)
+  ev9_cluster_objects = CP.brand == "hyundai" and CP.carFingerprint == "KIA_EV9"
+  RD = RadarD(radar_ts=radar_ts, delay=CP.radarDelay, g90_radar_filter=g90_radar_filter,
+              track_adjacent_always=ev9_cluster_objects)
 
   while 1:
     sm.update()
