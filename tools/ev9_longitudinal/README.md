@@ -5,33 +5,46 @@ ADAS_DRV messages must be restored after UDS receive-enabled/transmit-disabled c
 `0x730`.
 
 It does not preserve OEM FCA/AEB. Raw radar availability is not equivalent to retaining Hyundai's fused emergency-braking
-logic. BSM (blind-spot monitoring) must also be treated as unproven: `ENABLE_RX_DISABLE_TX` lets ADAS_DRV keep receiving
-corner-radar traffic, but prevents normal ADAS_DRV output. EV9 `BLINDSPOTS_REAR_CORNERS` (`0x1BA`) carries mirror-warning
-and blind-spot collision-avoidance fields and may disappear with the other ADAS outputs.
+logic. EV9 BSM detection remains available directly from the corner-radar traffic and the validated stage-15 path
+dynamically recreates `0x1BA/0x1E5` for the vehicle. Blind-spot collision-avoidance braking requests remain disabled.
 
 Do not replay a frozen `0x1BA`: a valid counter/checksum with stale object state could falsely clear or assert a warning.
 Stage 2 must first establish whether `0x1BA` disappears, whether the mirror lamps continue through another path, and which
 live corner-radar inputs can safely regenerate it.
 
-## EV9 result: transmit-disable works, but static reconstruction does not satisfy the vehicle
+## EV9 result: continuous stage-15 reconstruction satisfies the parked vehicle
 
 The 2026-07-10 probe showed that `28 01 01` can return a positive UDS response without silencing the EV9 ADAS ECU.
 The later 2026-07-11 parked test established that `28 01 03` (enable receive, disable transmit, normal and
 network-management messages) does suppress ADAS ECU `0x730` output. Persistent suppression requires Tester Present;
 the ECU resumes transmission about five seconds after Tester Present stops.
 
-With `28 01 03` active, the vehicle consistently displayed 12 ADAS DTCs, five orange warning icons, two warning dings,
-and the comma initially reported `Unknown Vehicle Variant`. The latter was independently traced to a stale parser that
-required suppressed BSM frame `0x1BA`; making the frame optional and performing a clean bytecode/reboot cycle restored
-`carState.canValid`. It did not change any vehicle warnings.
+With `28 01 03` active but reconstruction absent or interrupted, the vehicle displays 12 active ADAS DTCs, five orange
+warning icons, two warning dings, and the comma reports `Unknown Vehicle Variant`. These are live missing-message faults,
+not DTCs that require a clear. Resuming the complete stage-15 replacement stream clears the dash and comma state without
+sleeping the vehicle or restoring stock ADAS transmission. The comma message was independently traced to suppressed BSM
+frame `0x1BA` being treated as required; the EV9 parser now treats that ADAS-originated frame as optional while reading
+live BSM state from the corner radar.
 
 Progressive parked testing reconstructed every observed suppressed ADAS frame through stage 15: radar heartbeat `0x100`,
 ADAS status `0x160`, CCNC `0x161/0x162`, inactive SCC `0x1A0`, BSM `0x1BA/0x1E5`, cluster `0x1E0`, status frames
 `0x1DA/0x1EA/0x200/0x345/0x38C/0x57A`, and inactive steering messages `0x12A/0xCB`. Frame rates, counters, checksums,
-bus placement, and Panda acceptance were verified. No cumulative stage changed the 12 DTCs, warning icons, or dings.
-Stages 16 and 17 were not entered during the parked reconstruction ladder.
+bus placement, and Panda acceptance were verified. Early incremental tests still showed the 12-DTC state because they
+started or changed reconstruction after the receiving ECUs had already detected missing traffic. The completed stage-15
+stream clears those active faults when it owns the startup continuously. Stages 16 and 17 are not required for this
+non-actuating parked result.
 
-The clean disarmed recovery route is `000000d3--78bb8fa04a`; it identified `KIA_EV9`, produced valid `carState` for
+Verified clean suppressed routes:
+
+- `000000dc--35ea20cd7b`: stage 15, successful `68 01`, no dash DTCs; the comma still showed the pre-fix optional-BSM
+  validity error.
+- `000000dd--496fbfd1d8`: stage 15, successful `68 01`, normal comma screen after the parser fix, no dash DTCs or
+  warnings, all reconstructed messages and Tester Present sustained.
+- `000000fc--5aefd6f768`: stage 15 resumed while ADAS remained suppressed from the preceding test. The initial active
+  12-DTC/unknown-variant state cleared immediately once reconstruction resumed; IGN-ON to READY remained clean. This
+  proves ECU sleep and DTC clearing are not recovery requirements when the complete stream is restored.
+
+The clean stock/disarmed recovery route is `000000d3--78bb8fa04a`; it identified `KIA_EV9`, produced valid `carState` for
 985/985 sampled updates, and showed no vehicle DTCs. The feature flag, stage, probe mode, and alpha-longitudinal toggle
 were explicitly persisted as zero and verified again after reboot.
 
@@ -108,8 +121,45 @@ Three conditions are required before StarPilot can request EV9 ADAS transmit-dis
 2. `KiaEv9LongitudinalTestEnabled` is true and the stage is at least 2.
 3. The normal `AlphaLongitudinalEnabled` developer toggle is true.
 
-Changing the stage while onroad is unsupported. Configure it offroad, reboot, run one parked test, restore stage 0, and
-reboot before driving.
+Changing the stage while onroad is unsupported. Configure it while the vehicle is OFF and verify the values before the
+next ignition transition. Never stop stage-15 reconstruction while ADAS remains transmit-disabled: doing so immediately
+recreates the active 12-DTC/unknown-variant state.
+
+## Verified stage-15 clean path
+
+This is the only currently verified software-only suppressed startup. It is non-actuating.
+
+1. Keep the vehicle OFF. Restart manager first if a restart/deployment is needed; do not restart it after arming without
+   re-verifying the parameters.
+2. Use the comma runtime Python. Plain system `python3` can load the source-tree in-memory Params fallback and appear to
+   write values without touching `/data/params/d`.
+3. Arm stage 15 and mode 2:
+
+   ```bash
+   cd /data/openpilot
+   /usr/local/venv/bin/python - <<'PY'
+   from openpilot.common.params import Params
+
+   p = Params()
+   p.put_bool("KiaEv9LongitudinalTestEnabled", True)
+   p.put_int("KiaEv9LongitudinalTestStage", 15)
+   p.put_int("KiaEv9LongitudinalProbeMode", 2)
+   p.put_bool("AlphaLongitudinalEnabled", True)
+   p.put_bool("KiaEv9DtcCaptureEnabled", False)
+   PY
+   ```
+
+4. Verify those exact values from `Params()` or `/data/params/d`. Do not proceed if any value is absent or different.
+5. Turn IGN-ON without pressing the brake. Require all of the following before READY:
+   `EcuDisableFailed=False`, `KIA_EV9`, `openpilotLongitudinalControl=True`, `carState.canValid=True`, Hyundai CAN-FD
+   LONG safety, no Panda faults/blocked transmissions, positive `68 01`, and the complete returned replacement set.
+6. Confirm the dash has no DTCs/icons/dings, then transition directly from IGN-ON to READY and remain in Park.
+7. Verify the same health state in READY. Stage 15 always forces `ACCMode=0`, zero requested acceleration, and no stop
+   request; it cannot command longitudinal motion.
+
+If ADAS remains suppressed from a prior cycle and reconstruction is absent, do not diagnose the resulting warnings as
+stored faults. Re-arm this exact stage-15 path while OFF and resume reconstruction. A full ECU sleep is needed only to
+return to stock ADAS transmission when a verified `28 00 03` restore path is unavailable.
 
 ## Cumulative stages
 
@@ -142,18 +192,20 @@ stage. Those are the test baseline, not part of this longitudinal replay ladder.
 
 ## Configure offroad
 
-From `/data/openpilot` after sourcing `launch_env.sh`:
+Use `/usr/local/venv/bin/python` as shown in the verified procedure above. The Python body is:
 
 ```python
 from openpilot.common.params import Params
 
 params = Params()
 params.put_bool("KiaEv9LongitudinalTestEnabled", True)
-params.put_int("KiaEv9LongitudinalTestStage", 2)
+params.put_int("KiaEv9LongitudinalTestStage", 15)
+params.put_int("KiaEv9LongitudinalProbeMode", 2)
 params.put_bool("AlphaLongitudinalEnabled", True)
+params.put_bool("KiaEv9DtcCaptureEnabled", False)
 ```
 
-Reboot after changing the configuration. To disarm:
+To disarm after stock ADAS transmission has been restored or the ECU has slept:
 
 ```python
 from openpilot.common.params import Params
@@ -180,8 +232,9 @@ excluded by default so forwarded copies are not mistaken for independent transmi
 Use `rlog` captures for decisions. `qlog` is downsampled and can make healthy message rates or MRR35 address coverage look
 incomplete.
 
-The progressive ladder through stage 15 is complete and should not be repeated merely to reconfirm the unchanged warning
-state. All 32 MRR35 radar tracks remained live. Stock driving routes `000000d4--5296076dfd` and
+The progressive ladder through stage 15 is complete and should not be repeated. The individual incremental stages did not
+clear the warning state, while the continuously owned completed stage-15 startup did. All 32 MRR35 radar tracks remained
+live. Stock driving routes `000000d4--5296076dfd` and
 `000000d6--f9d3fb2962` prove the EV9 `0x1BA` BSM encoding: `0x02` neither side, `0x0A` right, `0x12` left, and `0x1A`
 both sides. The reconstructed output preserves both the vehicle mirror warnings and openpilot BSM state. `0x162.VIBRATE`
 remained zero in those routes; steering-wheel vibration must not be claimed from that signal without new evidence.
@@ -202,6 +255,11 @@ negative result reproducible; it is not a working startup mode and must not be u
 The same test session ruled out the Ioniq-6-style `28 01 01` and community-style `28 03 01` requests in READY; both
 returned NRC `0x22`. With the vehicle OFF, neither immediate shutdown nor driver-door wake powered `0x730` enough to enter
 extended diagnostics. At present the EV9 accepts verified transmit-disable only in ignition-on/non-READY state.
+
+Probe mode 5 tests a distinct READY-state transition proposed after those results: `28 03 03` first disables reception
+and transmission for normal plus network-management communication, then `28 01 03` re-enables reception while keeping
+transmission disabled. Both responses must be positive. Failure of the second step explicitly sends `28 00 03` before
+the normal stock-SCC fallback. This mode is experimental, feature-gated, and non-actuating at stage 16.
 
 ## Actuation preflight and closed-course sequence
 
