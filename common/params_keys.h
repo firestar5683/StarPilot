@@ -44,6 +44,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"KiaEv9DtcCaptureEnabled", {PERSISTENT, BOOL, "0"}},
     {"KiaEv9CruiseMainStateEnabled", {PERSISTENT, BOOL, "1"}},
     {"KiaEv9SoftDriverSteeringOverrideEnabled", {PERSISTENT, BOOL, "1"}},
+    {"KiaEv9DynamicSteeringIconEnabled", {PERSISTENT, BOOL, "1"}},
+    {"KiaEv9HighAngleFaultProtectionEnabled", {PERSISTENT, BOOL, "1"}},
     {"KiaEv9ClusterHudEnabled", {PERSISTENT, BOOL, "1"}},
     {"KiaEv9ClusterObjectsEnabled", {PERSISTENT, BOOL, "1"}},
     {"KiaEv9ClusterAlternateLeadEnabled", {PERSISTENT, BOOL, "0"}},

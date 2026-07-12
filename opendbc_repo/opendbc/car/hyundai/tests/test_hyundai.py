@@ -13,7 +13,9 @@ from opendbc.car.hyundai.carcontroller import CarController, Ioniq6LongitudinalT
                                              update_genesis_g90_longitudinal_tuning, egmp_dynamic_longitudinal_tuning, \
                                              should_reset_ev6_gt_line_longitudinal_tuning, reset_ev6_gt_line_longitudinal_tuning, \
                                              get_angle_smoothing_alpha, apply_ev9_high_angle_gain_cap, ev9_driver_override_active, \
-                                             update_angle_command, should_use_ev6_gt_line_stop_direct_tracking
+                                             update_angle_command, update_ev9_high_angle_inhibit, ev9_dynamic_steering_icons, \
+                                             should_use_ev6_gt_line_stop_direct_tracking
+from opendbc.car.lateral import apply_steer_angle_limits_vm
 from opendbc.car.hyundai.carstate import CarState, decode_canfd_camera_lead, decode_ioniq_6_blindspot_radar_state
 from opendbc.car.hyundai.interface import CarInterface, attempt_ev9_pre_fingerprint_suppression
 from opendbc.car.hyundai import hyundaican, hyundaicanfd

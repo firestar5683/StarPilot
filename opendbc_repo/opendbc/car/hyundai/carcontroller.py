@@ -83,6 +83,10 @@ EV9_HIGH_ANGLE_GAIN_CAP_V = [0.85, 0.55, 0.30, 0.16]
 EV9_HIGH_ANGLE_GAIN_MIN = 0.004
 EV9_SOFT_DRIVER_OVERRIDE_AUTHORITY = 0.35
 EV9_SOFT_DRIVER_OVERRIDE_MAX_DELTA = 8.0
+EV9_DYNAMIC_STEERING_ICON_PARAM = "KiaEv9DynamicSteeringIconEnabled"
+EV9_HIGH_ANGLE_FAULT_PROTECTION_PARAM = "KiaEv9HighAngleFaultProtectionEnabled"
+EV9_HIGH_ANGLE_INHIBIT_ENTER = 85.0
+EV9_HIGH_ANGLE_INHIBIT_RELEASE = 70.0
 
 
 def egmp_dynamic_longitudinal_tuning(CP) -> bool:
@@ -280,6 +284,33 @@ def ev9_driver_override_active(CP, steering_pressed: bool, lat_active: bool) -> 
          steering_pressed
 
 
+def update_ev9_high_angle_inhibit(CP, inhibited: bool, steering_angle_deg: float, lat_active: bool,
+                                  protection_enabled: bool) -> bool:
+  """Latch EV9 angle actuation off before the EPS high-angle timer can fault."""
+  applicable = CP.carFingerprint == CAR.KIA_EV9 and CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING
+  if not applicable or not protection_enabled or not lat_active:
+    return False
+  if inhibited:
+    return abs(steering_angle_deg) > EV9_HIGH_ANGLE_INHIBIT_RELEASE
+  return abs(steering_angle_deg) >= EV9_HIGH_ANGLE_INHIBIT_ENTER
+
+
+def ev9_dynamic_steering_icons(CP, feature_enabled: bool, lat_active: bool, gain: float,
+                               driver_override: bool, high_angle_inhibited: bool,
+                               legacy_lka_icon: int, legacy_lfa_icon: int) -> tuple[int, int, bool | None]:
+  """Return EV9 grey/green steering state plus the CCNC actuation override."""
+  applicable = CP.carFingerprint == CAR.KIA_EV9 and CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING
+  if not applicable or not feature_enabled:
+    return legacy_lka_icon, legacy_lfa_icon, None
+
+  meaningfully_actuating = bool(lat_active and gain > EV9_HIGH_ANGLE_GAIN_MIN and
+                                not driver_override and not high_angle_inhibited)
+  if lat_active:
+    icon = 2 if meaningfully_actuating else 1
+    return icon, icon, meaningfully_actuating
+  return 1, 0, False
+
+
 def update_angle_command(CP, angle_filter, desired_angle: float, steering_angle_deg: float, v_ego: float,
                          steering_pressed: bool, lat_active: bool, soft_driver_override_enabled: bool = False) -> float:
   if ev9_driver_override_active(CP, steering_pressed, lat_active):
@@ -352,6 +383,11 @@ class CarController(CarControllerBase):
     self._params = Params()
     self.ev9_soft_driver_override_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
       ev9_default_enabled_param(self._params, EV9_SOFT_DRIVER_STEERING_OVERRIDE_PARAM)
+    self.ev9_dynamic_steering_icon_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
+      ev9_default_enabled_param(self._params, EV9_DYNAMIC_STEERING_ICON_PARAM)
+    self.ev9_high_angle_fault_protection_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
+      ev9_default_enabled_param(self._params, EV9_HIGH_ANGLE_FAULT_PROTECTION_PARAM)
+    self.ev9_high_angle_inhibited = False
     self.ev9_cluster_hud_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
       ev9_default_enabled_param(self._params, EV9_CLUSTER_HUD_PARAM)
     self.ev9_cluster_objects_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
@@ -480,8 +516,18 @@ class CarController(CarControllerBase):
       steering_angle_deg = float(np.clip(CS.out.steeringAngleDeg,
                                          -self.params.ANGLE_LIMITS.STEER_ANGLE_MAX,
                                          self.params.ANGLE_LIMITS.STEER_ANGLE_MAX))
-      desired_angle = update_angle_command(self.CP, self.angle_filter, desired_angle, steering_angle_deg, CS.out.vEgo,
-                                           CS.out.steeringPressed, CC.latActive, self.ev9_soft_driver_override_enabled)
+      self.ev9_high_angle_inhibited = update_ev9_high_angle_inhibit(
+        self.CP, self.ev9_high_angle_inhibited, CS.out.steeringAngleDeg, CC.latActive,
+        self.ev9_high_angle_fault_protection_enabled,
+      )
+      if self.ev9_high_angle_inhibited:
+        # Reset the smoother to measured angle, then let the existing vehicle-model
+        # limiters move the transmitted request toward it at a safety-bounded rate.
+        self.angle_filter.x = steering_angle_deg
+        desired_angle = steering_angle_deg
+      else:
+        desired_angle = update_angle_command(self.CP, self.angle_filter, desired_angle, steering_angle_deg, CS.out.vEgo,
+                                             CS.out.steeringPressed, CC.latActive, self.ev9_soft_driver_override_enabled)
 
       apply_angle = apply_steer_angle_limits_vm(desired_angle, self.apply_angle_last, v_ego_raw,
                                                 CS.out.steeringAngleDeg, CC.latActive, self.params, self.VM)
@@ -492,6 +538,8 @@ class CarController(CarControllerBase):
 
       apply_torque = compute_torque_reduction_gain(CS.out.steeringTorque, v_ego_raw, CC.latActive, self.apply_torque_last)
       apply_torque = apply_ev9_high_angle_gain_cap(self.CP, apply_torque, CS.out.steeringAngleDeg, CC.latActive)
+      if self.ev9_high_angle_inhibited:
+        apply_torque = 0.0
       apply_steer_req = CC.latActive and apply_torque != 0.0
       torque_fault = False
 
