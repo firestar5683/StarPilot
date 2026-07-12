@@ -104,10 +104,6 @@ class Car:
     self.ev9_cluster_smoothing_enabled = self.params.get_bool("KiaEv9ClusterObjectSmoothingEnabled")
     self.ev9_cluster_tracker = Ev9ClusterObjectTracker()
     self.ev9_cluster_slots = ClusterObjectSlots()
-    if self.ev9_cluster_objects_enabled and str(self.CP.carFingerprint) == "KIA_EV9":
-      enable_ev9_live_radar_tracks = getattr(self.RI, "enable_ev9_live_radar_tracks", None)
-      if enable_ev9_live_radar_tracks is not None:
-        cloudlog.warning(f"EV9 cluster live radar tracks enabled={enable_ev9_live_radar_tracks()}")
 
     self.can_callbacks = can_comm_callbacks(self.can_sock, self.pm.sock['sendcan'])
 
@@ -171,6 +167,13 @@ class Car:
     else:
       self.CI, self.CP, self.FPCP = CI, CI.CP, CI.FPCP
       self.RI = RI
+
+    # CP and RI do not exist until fingerprinting/interface construction above.
+    # Enabling EV9 live tracks earlier crashes card before controls can start.
+    if self.ev9_cluster_objects_enabled and str(self.CP.carFingerprint) == "KIA_EV9":
+      enable_ev9_live_radar_tracks = getattr(self.RI, "enable_ev9_live_radar_tracks", None)
+      if enable_ev9_live_radar_tracks is not None:
+        cloudlog.warning(f"EV9 cluster live radar tracks enabled={enable_ev9_live_radar_tracks()}")
 
     interface_alternative_experience = self.CP.alternativeExperience
     self.CP.alternativeExperience = interface_alternative_experience
