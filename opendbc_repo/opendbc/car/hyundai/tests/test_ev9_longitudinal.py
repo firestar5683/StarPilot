@@ -32,6 +32,7 @@ def test_stage_parser_fails_closed():
   assert parse_ev9_longitudinal_probe_mode(1) == EV9LongitudinalProbeMode.DIAGNOSTIC_SESSION_ONLY
   assert parse_ev9_longitudinal_probe_mode(2) == EV9LongitudinalProbeMode.TX_DISABLE_ALL_MESSAGE_TYPES
   assert parse_ev9_longitudinal_probe_mode(3) == EV9LongitudinalProbeMode.RX_TX_DISABLE_NORMAL
+  assert parse_ev9_longitudinal_probe_mode(4) == EV9LongitudinalProbeMode.RESET_TX_DISABLE_ALL_MESSAGE_TYPES
   assert parse_ev9_longitudinal_probe_mode(99) == EV9LongitudinalProbeMode.COMMUNICATION_CONTROL
 
 
@@ -42,6 +43,8 @@ def test_probe_requests_have_matching_restores():
     b"\x28\x01\x03", b"\x28\x00\x03")
   assert ev9_communication_control_requests(EV9LongitudinalProbeMode.RX_TX_DISABLE_NORMAL) == (
     b"\x28\x03\x01", b"\x28\x00\x01")
+  assert ev9_communication_control_requests(EV9LongitudinalProbeMode.RESET_TX_DISABLE_ALL_MESSAGE_TYPES) == (
+    b"\x28\x01\x03", b"\x28\x00\x03")
 
 
 def test_dtc_capture_is_one_shot_read_only_and_excludes_adas():
@@ -74,10 +77,13 @@ def test_persistent_suppression_requires_validated_request_and_heartbeat_stage()
                                          EV9LongitudinalProbeMode.TX_DISABLE_ALL_MESSAGE_TYPES)
   broad = EV9LongitudinalTestConfig(True, EV9LongitudinalTestStage.RADAR_HEARTBEAT,
                                     EV9LongitudinalProbeMode.RX_TX_DISABLE_NORMAL)
+  reset_persistent = EV9LongitudinalTestConfig(True, EV9LongitudinalTestStage.RADAR_HEARTBEAT,
+                                               EV9LongitudinalProbeMode.RESET_TX_DISABLE_ALL_MESSAGE_TYPES)
 
   assert not bounded.persistent_suppression_allowed
   assert persistent.persistent_suppression_allowed
   assert not broad.persistent_suppression_allowed
+  assert reset_persistent.persistent_suppression_allowed
 
 
 def test_live_support_stage_changes_are_monotonic_and_do_not_cross_safety_boundaries():

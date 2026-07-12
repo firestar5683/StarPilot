@@ -672,7 +672,11 @@ class CarController(CarControllerBase):
     lka_steering = self.CP.flags & HyundaiFlags.CANFD_LKA_STEERING
     lka_steering_long = lka_steering and self.long_active_ecu
     ccnc_non_hda2 = self.CP.flags & HyundaiFlags.CCNC and not lka_steering
-    ev9_long_test_active = self.CP.carFingerprint == CAR.KIA_EV9 and self.ev9_long_test.armed
+    # If diagnostic suppression fails, card.py strips longitudinal ownership and
+    # Panda's LONG flag. Stop the EV9 reconstruction ladder too; otherwise the
+    # harmless replacement frames are repeatedly attempted against the fallback
+    # safety configuration while stock ADAS remains in charge.
+    ev9_long_test_active = self.CP.carFingerprint == CAR.KIA_EV9 and self.ev9_long_test.armed and self.long_active_ecu
     use_egmp_dynamic_long_tuning = egmp_dynamic_longitudinal_tuning(self.CP) and self.long_active_ecu and \
                                    CC.actuators.longControlState in (LongCtrlState.starting, LongCtrlState.pid, LongCtrlState.stopping)
     use_egmp_smoothed_accel = use_egmp_dynamic_long_tuning and (

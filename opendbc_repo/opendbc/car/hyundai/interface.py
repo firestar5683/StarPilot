@@ -332,8 +332,10 @@ class CarInterface(CarInterfaceBase):
       # If it fails (READY mode returns NRC 0x22, or timeout), strip LONG safety flag
       # so panda forwards stock SCC messages normally (lateral-only mode).
       ecu_log(f"=== ECU DISABLE attempt: addr=0x{addr:x}, bus={bus} ===")
+      ev9_reset_probe = ev9_long_test is not None and \
+        ev9_long_test.probe_mode == EV9LongitudinalProbeMode.RESET_TX_DISABLE_ALL_MESSAGE_TYPES
       ecu_disabled = disable_ecu(can_recv, can_send, bus=bus, addr=addr, com_cont_req=communication_control,
-                                 reset=bool(CP.flags & HyundaiFlags.CAN_CANFD_BLENDED))
+                                 reset=bool(CP.flags & HyundaiFlags.CAN_CANFD_BLENDED) or ev9_reset_probe)
 
       if ecu_disabled and ev9_long_test is not None and ev9_long_test.armed and \
           not ev9_long_test.persistent_suppression_allowed:

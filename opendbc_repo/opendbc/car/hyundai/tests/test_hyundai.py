@@ -389,6 +389,30 @@ class TestHyundaiFingerprint:
     assert not CP.pcmCruise
     assert CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.LONG
 
+  def test_ev9_reset_assisted_probe_resets_before_validated_persistent_request(self, monkeypatch):
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[CanBus(None, fingerprint).CAM][0x110] = 32
+    ev9_car_fw = [CarParams.CarFw(ecu=Ecu.adas, fwVersion=b"", address=0x730, brand="hyundai")]
+    config = EV9LongitudinalTestConfig(True, EV9LongitudinalTestStage.ACTUATION_PREFLIGHT,
+                                       EV9LongitudinalProbeMode.RESET_TX_DISABLE_ALL_MESSAGE_TYPES)
+    monkeypatch.setattr("opendbc.car.hyundai.interface.get_ev9_longitudinal_test_config", lambda *args, **kwargs: config)
+    CP = CarInterface.get_params(CAR.KIA_EV9, fingerprint, ev9_car_fw, True, False, False, None)
+    requests = []
+
+    def fake_disable_ecu(*args, **kwargs):
+      requests.append(kwargs)
+      return True
+
+    monkeypatch.setattr("opendbc.car.hyundai.interface.disable_ecu", fake_disable_ecu)
+    CarInterface.init(CP, None, None)
+
+    assert len(requests) == 1
+    assert requests[0]["addr"] == 0x730
+    assert requests[0]["com_cont_req"] == bytes([0x28, 0x01, 0x03])
+    assert requests[0]["reset"] is True
+    assert CP.openpilotLongitudinalControl
+    assert not CP.pcmCruise
+
   def test_ev9_deinit_restores_tx_even_if_test_gate_was_removed(self, monkeypatch):
     fingerprint = gen_empty_fingerprint()
     fingerprint[CanBus(None, fingerprint).CAM][0x110] = 32

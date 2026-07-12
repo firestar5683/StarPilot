@@ -193,6 +193,16 @@ These limits come from the active stock-SCC samples in the same two routes; no s
 so stop-and-go testing is out of scope. Do not enter stage 17 with a dash warning, invalid comma vehicle state, or outside a
 flat closed private test area.
 
+Probe mode 4 is a reset-assisted diagnostic-only experiment using the validated mode-2 request. It sends an ADAS ECU
+reset before re-entering extended diagnostics and requesting `28 01 03`. The 2026-07-11 direct OFF-to-READY test entered
+extended diagnostics successfully after reset but returned NRC `0x22` for all ten CommunicationControl attempts. It then
+fell back cleanly to stock SCC with no dash DTC, Panda fault, or blocked transmission. Mode 4 is retained only to make that
+negative result reproducible; it is not a working startup mode and must not be used for actuation.
+
+The same test session ruled out the Ioniq-6-style `28 01 01` and community-style `28 03 01` requests in READY; both
+returned NRC `0x22`. With the vehicle OFF, neither immediate shutdown nor driver-door wake powered `0x730` enough to enter
+extended diagnostics. At present the EV9 accepts verified transmit-disable only in ignition-on/non-READY state.
+
 ## Actuation preflight and closed-course sequence
 
 Every stage change below is made while the vehicle is fully OFF, followed by a comma reboot. Do not change parameters
