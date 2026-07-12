@@ -900,7 +900,8 @@ def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, la
                                      left_blindspot: bool = False, right_blindspot: bool = False,
                                      is_metric: bool = True, hud_enabled: bool | None = None,
                                      objects_enabled: bool = True, alternate_enabled: bool = False,
-                                     rear_bsm_fallback_enabled: bool = False) -> list[CanData]:
+                                     rear_bsm_fallback_enabled: bool = False,
+                                     steering_icon_active: bool | None = None) -> list[CanData]:
   """Recreate EV9 CCNC engagement icons and the supported radar-object slots.
 
   This intentionally renders only fields whose stock EV9 meanings were seen in
@@ -918,12 +919,14 @@ def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, la
   display_speed = 255 if not main_cruise_enabled else \
     (40 if is_metric else 25) if cruise_speed > (145 if is_metric else 90) else max(cruise_speed, 0)
   lfa_active = bool(hud_feature_enabled and lat_active)
+  lfa_icon = (2 if steering_icon_active else 1) if lfa_active and steering_icon_active is not None else \
+    1 if lfa_active else 0
   alternate_active = bool(objects_active and alternate_enabled and lead_two_visible and
                           (abs(lead_two_distance - lead_distance) > 0.5 or abs(lead_two_lateral) > 0.5))
   values_161 = {
     "DAW_ICON": 0,
     "LKA_ICON": 0,
-    "LFA_ICON": 1 if lfa_active else 0,
+    "LFA_ICON": lfa_icon,
     "HDA_ICON": 2 if hda_active else 0,
     # Stock EV9 HDA leaves these lane-rendering fields neutral. The cluster
     # renders its own lane geometry from the HDA/LFA state.

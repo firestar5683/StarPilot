@@ -503,6 +503,7 @@ class CarController(CarControllerBase):
     actuators = CC.actuators
     hud_control = CC.hudControl
     lka_icon, lfa_icon = self._update_dash_icon_state(CC)
+    ev9_ccnc_steering_active = None
 
     if not self.CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING:
       self.params = CarControllerParams(self.CP, CS.out.vEgoRaw)
@@ -554,6 +555,11 @@ class CarController(CarControllerBase):
                                               -self.params.ANGLE_LIMITS.STEER_ANGLE_MAX,
                                               self.params.ANGLE_LIMITS.STEER_ANGLE_MAX))
         self.angle_filter.x = self.apply_angle_last
+      driver_override = ev9_driver_override_active(self.CP, CS.out.steeringPressed, CC.latActive)
+      lka_icon, lfa_icon, ev9_ccnc_steering_active = ev9_dynamic_steering_icons(
+        self.CP, self.ev9_dynamic_steering_icon_enabled, CC.latActive, apply_torque,
+        driver_override, self.ev9_high_angle_inhibited, lka_icon, lfa_icon,
+      )
     else:
       # steering torque
       new_torque = int(round(actuators.torque * self.params.STEER_MAX))
@@ -663,7 +669,8 @@ class CarController(CarControllerBase):
     # *** CAN/CAN FD specific ***
     if self.CP.flags & HyundaiFlags.CANFD:
       can_sends.extend(self.create_canfd_msgs(now_nanos, apply_steer_req, apply_torque, apply_angle, set_speed_in_units, accel,
-                                              stopping, hud_control, CS, CC, starpilot_toggles, lka_icon, lfa_icon))
+                                              stopping, hud_control, CS, CC, starpilot_toggles, lka_icon, lfa_icon,
+                                              ev9_ccnc_steering_active))
     else:
       can_sends.extend(self.create_can_msgs(apply_steer_req, apply_torque, torque_fault, set_speed_in_units, accel,
                                             stopping, hud_control, actuators, CS, CC, lfa_icon))
@@ -746,7 +753,7 @@ class CarController(CarControllerBase):
     return can_sends
 
   def create_canfd_msgs(self, now_nanos, apply_steer_req, apply_torque, apply_angle, set_speed_in_units, accel, stopping,
-                        hud_control, CS, CC, starpilot_toggles, lka_icon, lfa_icon):
+                        hud_control, CS, CC, starpilot_toggles, lka_icon, lfa_icon, ev9_ccnc_steering_active=None):
     can_sends = []
 
     lka_steering = self.CP.flags & HyundaiFlags.CANFD_LKA_STEERING
@@ -851,6 +858,7 @@ class CarController(CarControllerBase):
             objects_enabled=self.ev9_cluster_objects_enabled,
             alternate_enabled=self.ev9_cluster_alternate_enabled,
             rear_bsm_fallback_enabled=self.ev9_rear_bsm_cluster_fallback_enabled,
+            steering_icon_active=ev9_ccnc_steering_active,
           ))
       elif ccnc_non_hda2:
         can_sends.extend(hyundaicanfd.create_ccnc(self.packer, self.CAN, self.long_active_ecu, CC.enabled, CC.hudControl,

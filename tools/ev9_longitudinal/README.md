@@ -346,6 +346,13 @@ hard-snapped its applied angle back to measured steering angle whenever `steerin
 triggered that state for a substantial portion of the drive, reducing the commanded correction to zero. Any adjustment to
 this behavior must remain separately feature-gated and retain Panda angle, rate, driver, and Drive-gear limits.
 
+The default-on `KiaEv9HighAngleFaultProtectionEnabled` latch inhibits angle authority at 85 degrees and releases it only
+at or below 70 degrees. While inhibited, the angle-active status and camera LFA suppression stay continuous, gain is zero,
+and the existing vehicle-model rate limiter moves the command toward measured angle. It does not loosen Panda safety.
+The independent `KiaEv9DynamicSteeringIconEnabled` flag displays grey while lateral is engaged without meaningful gain,
+during driver override, or during high-angle inhibition; both LKAS_ALT and CCNC display green only while openpilot is
+meaningfully applying angle authority. Disabling either flag restores its prior behavior for isolated testing.
+
 The same route invalidated direct `radarState.leadTwo` cluster mapping. Both model leads were simultaneously valid 5,421
 times; 5,358 pairs described nearly the same object, and neither carried a radar track ID. This caused the duplicate front
 car. In stock EV9 routes `000000d4--5296076dfd` and `000000d6--f9d3fb2962`, `CCNC_0x162.LEAD_ALT` remained zero in all

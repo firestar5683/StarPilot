@@ -2089,6 +2089,100 @@ class TestHyundaiFingerprint:
     assert parser.vl["LKAS_ALT"]["ADAS_ACIAnglTqRedcGainVal"] == pytest.approx(0.44)
     assert parser.vl["LKAS_ALT"]["ADAS_StrAnglReqVal"] == pytest.approx(120.0)
 
+  def test_ev9_high_angle_protection_hysteresis_and_flag_gate(self):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.KIA_EV9
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.CANFD_ANGLE_STEERING)
+
+    inhibited = update_ev9_high_angle_inhibit(CP, False, 84.9, True, True)
+    assert not inhibited
+    inhibited = update_ev9_high_angle_inhibit(CP, inhibited, 85.0, True, True)
+    assert inhibited
+    assert update_ev9_high_angle_inhibit(CP, inhibited, 70.1, True, True)
+    assert not update_ev9_high_angle_inhibit(CP, inhibited, 70.0, True, True)
+    assert not update_ev9_high_angle_inhibit(CP, inhibited, 100.0, False, True)
+    assert not update_ev9_high_angle_inhibit(CP, inhibited, 100.0, True, False)
+
+  def test_ev9_high_angle_measured_target_remains_vm_bounded(self):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.KIA_EV9
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.EV | HyundaiFlags.CANFD_ANGLE_STEERING |
+                   HyundaiFlags.CANFD_LKA_STEERING | HyundaiFlags.CANFD_LKA_STEERING_ALT)
+    CP.mass = 2600.0
+    CP.wheelbase = 3.1
+    CP.centerToFront = 1.4
+    CP.steerRatio = 15.0
+    CP.tireStiffnessFront = 100000.0
+    CP.tireStiffnessRear = 100000.0
+    controller = CarController(DBC[CP.carFingerprint], CP)
+
+    # High-angle protection targets the measured 100 degrees, but the existing
+    # vehicle-model limiter permits only a bounded move from the prior command.
+    command = apply_steer_angle_limits_vm(100.0, 0.0, 10.0, 100.0, True,
+                                          controller.params, controller.VM)
+    assert command is not None
+    assert 0.0 < command < 100.0
+
+  def test_ev9_zero_gain_keeps_angle_status_and_lfa_suppression_active(self):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.KIA_EV9
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.EV | HyundaiFlags.CANFD_ANGLE_STEERING |
+                   HyundaiFlags.CANFD_LKA_STEERING | HyundaiFlags.CANFD_LKA_STEERING_ALT)
+    controller = CarController(DBC[CP.carFingerprint], CP)
+    controller.frame = 5
+    can_bus = CanBus(CP)
+    parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("LKAS_ALT", 0)], can_bus.ACAN)
+    cc = SimpleNamespace(enabled=True, latActive=True, actuators=SimpleNamespace(longControlState=LongCtrlState.off),
+                         leftBlinker=False, rightBlinker=False, hudControl=SimpleNamespace())
+    lfa_block_msg = {f"BYTE{i}": 0 for i in range(3, 32) if i != 7}
+    lfa_block_msg["COUNTER"] = 0
+    cs = SimpleNamespace(stock_lfa_msg=None, stock_lkas_msg={}, lfa_block_msg=lfa_block_msg,
+                         out=SimpleNamespace(steeringAngleDeg=90.0, gearShifter=structs.CarState.GearShifter.drive))
+
+    msgs = controller.create_canfd_msgs(0, False, 0.0, 80.0, 0.0, 0.0, False, cc.hudControl, cs, cc,
+                                        get_test_toggles(), lka_icon=1, lfa_icon=1,
+                                        ev9_ccnc_steering_active=False)
+    lkas_msgs = [msg for msg in msgs if msg[0] == 0x110]
+    suppress_msgs = [msg for msg in msgs if msg[0] == 0x362]
+    assert len(suppress_msgs) == 1
+    parser.update([(1, lkas_msgs)])
+    assert parser.vl["LKAS_ALT"]["LKAS_ANGLE_ACTIVE"] == 2
+    assert parser.vl["LKAS_ALT"]["ADAS_ACIAnglTqRedcGainVal"] == pytest.approx(0.0)
+
+  @pytest.mark.parametrize(("gain", "override", "inhibited", "expected_icon", "expected_active"), [
+    (0.40, False, False, 2, True),
+    (0.00, False, False, 1, False),
+    (0.40, True, False, 1, False),
+    (0.40, False, True, 1, False),
+  ])
+  def test_ev9_dynamic_steering_icons(self, gain, override, inhibited, expected_icon, expected_active):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.KIA_EV9
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.CANFD_ANGLE_STEERING)
+    lka, lfa, active = ev9_dynamic_steering_icons(CP, True, True, gain, override, inhibited, 3, 3)
+    assert (lka, lfa, active) == (expected_icon, expected_icon, expected_active)
+
+    # Disabling the feature exactly restores the pre-feature icon state.
+    assert ev9_dynamic_steering_icons(CP, False, True, gain, override, inhibited, 3, 2) == (3, 2, None)
+
+  @pytest.mark.parametrize(("steering_active", "expected_icon"), [(False, 1), (True, 2)])
+  def test_ev9_ccnc_dynamic_steering_icon(self, steering_active, expected_icon):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.KIA_EV9
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.CANFD_LKA_STEERING)
+    packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
+    can_bus = CanBus(CP)
+    parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("CCNC_0x161", 0)], can_bus.ECAN)
+    hud = SimpleNamespace(leadDistanceBars=3)
+    out = SimpleNamespace(vCruiseCluster=65.0)
+    msgs = hyundaicanfd.create_ev9_ccnc_status_messages(
+      packer, can_bus, 5, enabled=True, lat_active=True, hud=hud, out=out,
+      main_cruise_enabled=True, lead_visible=False, lead_distance=0.0,
+      steering_icon_active=steering_active,
+    )
+    parser.update([(1, msgs)])
+    assert parser.vl["CCNC_0x161"]["LFA_ICON"] == expected_icon
+
   def test_can_acc_commands_use_default_values(self):
     CP = CarParams.new_message()
     CP.carFingerprint = CAR.GENESIS_G90
