@@ -333,6 +333,36 @@ retained corner-radar BSM
 signal does not contain a measured range. No precise rear distance is fabricated, and arbitrary extra MRR35 tracks are
 not rendered. `0x162.VIBRATE` remains zero until a route proves the EV9 uses that field for steering-wheel vibration.
 
+### First driving validation: route `00000103--5353927d39`
+
+The 2026-07-12 stage-15 drive covered segments 0 through 18 with no dash DTCs or Panda faults. SET- successfully enabled
+openpilot from segment 6 monotonic time 405.165 through 422.565 (about 17.4 seconds). Stage 15 behaved as designed:
+`SCC_CONTROL.ACCMode`, `aReqRaw`, and `aReqValue` stayed zero, so the drive did not test longitudinal actuation.
+
+Panda was not the source of the reported weak lateral control. During the real engagement, `controlsAllowed` was true,
+`safetyTxBlocked` did not increment, and every active `0x110` angle command was received on CAN with
+`LKAS_ANGLE_ACTIVE=2`, `LKA_SysIndReq=2`, and a nonzero torque-reduction gain. The EV9-specific controller instead
+hard-snapped its applied angle back to measured steering angle whenever `steeringPressed` was true. Normal hands-on torque
+triggered that state for a substantial portion of the drive, reducing the commanded correction to zero. Any adjustment to
+this behavior must remain separately feature-gated and retain Panda angle, rate, driver, and Drive-gear limits.
+
+The same route invalidated direct `radarState.leadTwo` cluster mapping. Both model leads were simultaneously valid 5,421
+times; 5,358 pairs described nearly the same object, and neither carried a radar track ID. This caused the duplicate front
+car. In stock EV9 routes `000000d4--5296076dfd` and `000000d6--f9d3fb2962`, `CCNC_0x162.LEAD_ALT` remained zero in all
+2,400 inspected samples. Stock CCNC used stable, radar-backed, mutually exclusive primary/left/right slots, confirmed new
+objects for several samples, held short dropouts, and atomically promoted an adjacent track into the primary slot when it
+crossed lanes. Cluster reconstruction therefore needs its own feature-gated tracker rather than raw model-lead passthrough.
+
+Additional stock semantics from the same references:
+
+- Cluster objects stay off while HDA/SCC is inactive even if radar tracks exist.
+- Active stock values include `HDA_ICON=2`, `LFA_ICON=1`, `TARGET=3`, while `LKA_ICON`, `CENTERLINE`, and lane-line fields
+  remain zero.
+- `LCA_LEFT_ICON=LCA_RIGHT_ICON=1` represents feature availability, not a current blind-spot detection.
+- The OEM rear marker can precede the mirror BSM warning, so BSM is only an approximate optional fallback and must not be
+  presented as a measured rear distance.
+- `TARGET_DISTANCE` does not match the primary or adjacent object distances and must not be synthesized from radar.
+
 Probe mode 4 is a reset-assisted diagnostic-only experiment using the validated mode-2 request. It sends an ADAS ECU
 reset before re-entering extended diagnostics and requesting `28 01 03`. The 2026-07-11 direct OFF-to-READY test entered
 extended diagnostics successfully after reset but returned NRC `0x22` for all ten CommunicationControl attempts. It then
