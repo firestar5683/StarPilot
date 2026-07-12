@@ -27,6 +27,7 @@ from openpilot.common.constants import CV
 from openpilot.selfdrive.car.cruise import VCruiseHelper, IMPERIAL_INCREMENT, V_CRUISE_MAX, V_CRUISE_MIN
 from openpilot.selfdrive.car.redneck_cruise import RedneckCruise, select_redneck_target_speed
 from openpilot.selfdrive.car.car_specific import MockCarState
+from openpilot.selfdrive.car.ev9_cluster_objects import filtered_radar_slots
 
 from openpilot.starpilot.common.starpilot_variables import get_starpilot_toggles, update_starpilot_toggles
 from openpilot.starpilot.controls.starpilot_card import StarPilotCard
@@ -98,6 +99,8 @@ class Car:
 
     self.params = Params()
     self.params_memory = Params(memory=True)
+    self.ev9_cluster_objects_enabled = self.params.get_bool("KiaEv9ClusterObjectsEnabled")
+    self.ev9_cluster_alternate_enabled = self.params.get_bool("KiaEv9ClusterAlternateLeadEnabled")
 
     self.can_callbacks = can_comm_callbacks(self.can_sock, self.pm.sock['sendcan'])
 
@@ -415,12 +418,13 @@ class Car:
       self.CC_prev = CC
 
   def _update_openpilot_lead_state(self, CC: car.CarControl) -> None:
+    ev9_filtered_objects = str(self.CP.carFingerprint) == "KIA_EV9" and self.ev9_cluster_objects_enabled
     lead_visible = bool(CC.hudControl.leadVisible)
     lead_distance = 0.0
     lead_rel_speed = 0.0
 
     radar_valid = self.sm.seen['radarState'] and self.sm.alive['radarState'] and self.sm.valid['radarState']
-    if radar_valid:
+    if radar_valid and not ev9_filtered_objects:
       lead = self.sm['radarState'].leadOne
       if lead.status:
         lead_visible = True
@@ -438,7 +442,7 @@ class Car:
     lead_two_visible = False
     lead_two_distance = 0.0
     lead_two_lateral = 0.0
-    if radar_valid:
+    if radar_valid and not ev9_filtered_objects:
       lead_two = self.sm['radarState'].leadTwo
       if lead_two.status and float(lead_two.dRel) > OPENPILOT_LEAD_MIN_DISTANCE:
         lead_two_visible = True
@@ -447,11 +451,36 @@ class Car:
 
     adjacent_valid = self.sm.seen['starpilotRadarState'] and self.sm.alive['starpilotRadarState'] and \
       self.sm.valid['starpilotRadarState']
+
+    filtered_slots = None
+    if ev9_filtered_objects and radar_valid:
+      lead_left = self.sm['starpilotRadarState'].leadLeft if adjacent_valid else None
+      lead_right = self.sm['starpilotRadarState'].leadRight if adjacent_valid else None
+      filtered_slots = filtered_radar_slots(self.sm['radarState'].leadOne, self.sm['radarState'].leadTwo,
+                                            lead_left, lead_right, self.ev9_cluster_alternate_enabled)
+      if filtered_slots.primary is not None:
+        lead_visible = True
+        lead_distance = filtered_slots.primary.distance
+        lead_rel_speed = filtered_slots.primary.relative_speed
+      else:
+        # Do not turn a model-only HUD lead into a physical cluster object.
+        lead_visible = False
+
+      if filtered_slots.alternate is not None:
+        lead_two_visible = True
+        lead_two_distance = filtered_slots.alternate.distance
+        lead_two_lateral = filtered_slots.alternate.lateral
+
     for side in ('left', 'right'):
       visible = False
       distance = 0.0
       lateral = 0.0
-      if adjacent_valid:
+      filtered_object = getattr(filtered_slots, side) if filtered_slots is not None else None
+      if filtered_object is not None:
+        visible = True
+        distance = filtered_object.distance
+        lateral = filtered_object.lateral
+      elif adjacent_valid and not ev9_filtered_objects:
         lead = getattr(self.sm['starpilotRadarState'], f'lead{side.title()}')
         if lead.status and float(lead.dRel) > OPENPILOT_LEAD_MIN_DISTANCE:
           visible = True
@@ -537,6 +566,8 @@ class Car:
       self.safe_mode = self.params.get_bool("SafeMode")
       self.is_metric = self.params.get_bool("IsMetric")
       self.experimental_mode = self.params.get_bool("ExperimentalMode") and self.CP.openpilotLongitudinalControl and not self.safe_mode
+      self.ev9_cluster_objects_enabled = self.params.get_bool("KiaEv9ClusterObjectsEnabled")
+      self.ev9_cluster_alternate_enabled = self.params.get_bool("KiaEv9ClusterAlternateLeadEnabled")
       time.sleep(0.1)
 
   def card_thread(self):
