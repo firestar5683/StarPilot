@@ -87,6 +87,7 @@ EV9_DYNAMIC_STEERING_ICON_PARAM = "KiaEv9DynamicSteeringIconEnabled"
 EV9_HIGH_ANGLE_FAULT_PROTECTION_PARAM = "KiaEv9HighAngleFaultProtectionEnabled"
 EV9_HIGH_ANGLE_INHIBIT_ENTER = 85.0
 EV9_HIGH_ANGLE_INHIBIT_RELEASE = 70.0
+EV9_STEERING_ICON_ANGLE_DEADBAND = 0.25
 
 
 def egmp_dynamic_longitudinal_tuning(CP) -> bool:
@@ -295,7 +296,7 @@ def update_ev9_high_angle_inhibit(CP, inhibited: bool, steering_angle_deg: float
   return abs(steering_angle_deg) >= EV9_HIGH_ANGLE_INHIBIT_ENTER
 
 
-def ev9_dynamic_steering_icons(CP, feature_enabled: bool, lat_active: bool, gain: float,
+def ev9_dynamic_steering_icons(CP, feature_enabled: bool, lat_active: bool, gain: float, angle_command_delta: float,
                                driver_override: bool, high_angle_inhibited: bool,
                                legacy_lka_icon: int, legacy_lfa_icon: int) -> tuple[int, int, bool | None]:
   """Return EV9 grey/green steering state plus the CCNC actuation override."""
@@ -304,6 +305,7 @@ def ev9_dynamic_steering_icons(CP, feature_enabled: bool, lat_active: bool, gain
     return legacy_lka_icon, legacy_lfa_icon, None
 
   meaningfully_actuating = bool(lat_active and gain > EV9_HIGH_ANGLE_GAIN_MIN and
+                                abs(angle_command_delta) > EV9_STEERING_ICON_ANGLE_DEADBAND and
                                 not driver_override and not high_angle_inhibited)
   if lat_active:
     icon = 2 if meaningfully_actuating else 1
@@ -558,6 +560,7 @@ class CarController(CarControllerBase):
       driver_override = ev9_driver_override_active(self.CP, CS.out.steeringPressed, CC.latActive)
       lka_icon, lfa_icon, ev9_ccnc_steering_active = ev9_dynamic_steering_icons(
         self.CP, self.ev9_dynamic_steering_icon_enabled, CC.latActive, apply_torque,
+        apply_angle - CS.out.steeringAngleDeg,
         driver_override, self.ev9_high_angle_inhibited, lka_icon, lfa_icon,
       )
     else:
