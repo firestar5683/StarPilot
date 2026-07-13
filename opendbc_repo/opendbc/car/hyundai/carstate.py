@@ -71,7 +71,7 @@ def decode_ioniq_6_blindspot_radar_state(state: int) -> tuple[bool, bool]:
 
 def resolve_ev9_blindspot_state(raw_state: int, raw_ts: int, stock_left_state: int, stock_right_state: int,
                                 stock_ts: int, now_nanos: int, raw_reconstruction_enabled: bool,
-                                drive_gear: bool) -> tuple[bool, bool, str]:
+                                drive_gear: bool, v_ego: float) -> tuple[bool, bool, str]:
   """Prefer genuine fresh ADAS BSM; otherwise fail closed unless raw reconstruction is explicitly enabled."""
   raw_age = int(now_nanos) - int(raw_ts)
   raw_fresh = int(raw_ts) > 0 and 0 <= raw_age <= CANFD_BLINDSPOT_STALE_NS
@@ -80,7 +80,11 @@ def resolve_ev9_blindspot_state(raw_state: int, raw_ts: int, stock_left_state: i
     # Once raw reconstruction is selected, never fall back to 0x1BA: the
     # controller is transmitting that frame itself and treating it as stock
     # would latch a synthesized warning after the raw source went stale.
-    if drive_gear and raw_fresh and bool(state & CANFD_BLINDSPOT_BASE_MASK):
+    # Stock EV9 warnings were only observed while moving in Drive. The lowest
+    # active-lamp sample across the d4/d6 reference routes was 4.33 m/s. This
+    # gate removes the stationary/garage false warnings without discarding a
+    # validated stock warning sample; it does not claim raw 0x36A is faithful.
+    if drive_gear and float(v_ego) >= 4.3 and raw_fresh and bool(state & CANFD_BLINDSPOT_BASE_MASK):
       left, right = decode_ioniq_6_blindspot_radar_state(state)
       return left, right, "raw"
     return False, False, "neutral"
@@ -574,6 +578,7 @@ class CarState(CarStateBase):
           cp.vl["BLINDSPOTS_REAR_CORNERS"]["BCW_LtIndSta"],
           cp.vl["BLINDSPOTS_REAR_CORNERS"]["BCW_RtIndSta"], self.ev9_stock_blindspot_ts, now_nanos,
           self.ev9_raw_bsm_reconstruction_enabled, ret.gearShifter == structs.CarState.GearShifter.drive,
+          ret.vEgo,
         )
     if self.CP.enableBsm:
       if self.CP.carFingerprint == CAR.KIA_EV9:

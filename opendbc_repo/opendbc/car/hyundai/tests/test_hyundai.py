@@ -1721,6 +1721,29 @@ class TestHyundaiFingerprint:
     assert parser.vl["CCNC_0x161"]["LANELINE_CURVATURE"] == 0
     assert (int.from_bytes(msg_161.dat, "little") >> 100) & 0x1F == 17
 
+  def test_ev9_ccnc_rear_bsm_fallback_is_side_specific_and_feature_gated(self):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.KIA_EV9
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.CANFD_LKA_STEERING)
+    packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
+    can_bus = CanBus(CP)
+    parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("CCNC_0x162", 0)], can_bus.ECAN)
+
+    msgs = hyundaicanfd.create_ev9_ccnc_status_messages(
+      packer, can_bus, 5, enabled=True, lat_active=True,
+      hud=SimpleNamespace(leadDistanceBars=3), out=SimpleNamespace(vCruiseCluster=65.0),
+      main_cruise_enabled=True, lead_visible=False, lead_distance=0.0,
+      left_blindspot=True, right_blindspot=False,
+      objects_enabled=True, rear_bsm_fallback_enabled=True,
+    )
+    parser.update([(1, msgs)])
+    rear = parser.vl["CCNC_0x162"]
+    assert rear["LEAD_LEFT_REAR_STATUS"] == 1
+    assert rear["LEAD_LEFT_REAR_DISTANCE"] == pytest.approx(25.0)
+    assert rear["LEAD_LEFT_REAR_LATERAL"] == pytest.approx(3.0)
+    assert rear["LEAD_RIGHT_REAR_STATUS"] == 0
+    assert rear["LEAD_RIGHT_REAR_DISTANCE"] == pytest.approx(0.0)
+
   @pytest.mark.parametrize(("raw_speed_limit", "expected"), [
     (0, 0), (1, 1), (65, 65), (253, 253), (254, 0), (255, 0), (-1, 0),
   ])
@@ -2982,22 +3005,23 @@ class TestHyundaiFingerprint:
     assert decode_ioniq_6_blindspot_radar_state(10.0) == (False, True)
 
   def test_ev9_blindspot_prefers_fresh_genuine_stock_output(self):
-    assert resolve_ev9_blindspot_state(0x02, 1_000, 1, 0, 950, 1_000, False, True) == \
+    assert resolve_ev9_blindspot_state(0x02, 1_000, 1, 0, 950, 1_000, False, True, 0.0) == \
       (True, False, "stock")
 
   def test_ev9_blindspot_default_path_fails_closed_after_stock_stales(self):
-    assert resolve_ev9_blindspot_state(0x1A, 200_000_000, 1, 1, 1, 200_000_000, False, True) == \
+    assert resolve_ev9_blindspot_state(0x1A, 200_000_000, 1, 1, 1, 200_000_000, False, True, 20.0) == \
       (False, False, "neutral")
 
   def test_ev9_blindspot_raw_experiment_requires_fresh_drive_and_base_bit(self):
     now = 200_000_000
-    assert resolve_ev9_blindspot_state(0x12, now, 0, 0, 1, now, True, True) == (True, False, "raw")
-    assert resolve_ev9_blindspot_state(0x12, now, 0, 0, 1, now, True, False) == (False, False, "neutral")
-    assert resolve_ev9_blindspot_state(0x12, 1, 0, 0, 1, now, True, True) == (False, False, "neutral")
-    assert resolve_ev9_blindspot_state(0x10, now, 0, 0, 1, now, True, True) == (False, False, "neutral")
+    assert resolve_ev9_blindspot_state(0x12, now, 0, 0, 1, now, True, True, 4.3) == (True, False, "raw")
+    assert resolve_ev9_blindspot_state(0x12, now, 0, 0, 1, now, True, True, 4.29) == (False, False, "neutral")
+    assert resolve_ev9_blindspot_state(0x12, now, 0, 0, 1, now, True, False, 20.0) == (False, False, "neutral")
+    assert resolve_ev9_blindspot_state(0x12, 1, 0, 0, 1, now, True, True, 20.0) == (False, False, "neutral")
+    assert resolve_ev9_blindspot_state(0x10, now, 0, 0, 1, now, True, True, 20.0) == (False, False, "neutral")
     # A fresh warning in 0x1BA can be our own prior reconstruction. Raw mode
     # must not fall back to it after the raw source becomes stale.
-    assert resolve_ev9_blindspot_state(0x12, 1, 1, 1, now, now, True, True) == (False, False, "neutral")
+    assert resolve_ev9_blindspot_state(0x12, 1, 1, 1, now, now, True, True, 20.0) == (False, False, "neutral")
 
   def test_ev9_blindspot_status_uses_captured_neutral_and_live_radar_state(self):
     CP = CarParams.new_message()
@@ -3021,9 +3045,36 @@ class TestHyundaiFingerprint:
 
     live_left = hyundaicanfd.create_ev9_blindspot_status_messages(packer, can_bus, 1, left_blindspot=True)
     parser.update([(2, live_left)])
-    assert parser.vl["BLINDSPOTS_REAR_CORNERS"]["BCW_Sta"] == 1
-    assert parser.vl["BLINDSPOTS_REAR_CORNERS"]["BCW_LtIndSta"] == 1
-    assert parser.vl["BLINDSPOTS_REAR_CORNERS"]["BCW_RtIndSta"] == 0
+    rear = parser.vl["BLINDSPOTS_REAR_CORNERS"]
+    assert rear["BCW_Sta"] == 0
+    assert rear["BCW_LtIndSta"] == 1
+    assert rear["BCW_RtIndSta"] == 0
+    assert rear["OSMrrLamp_LtIndSta"] == 1
+    assert rear["OSMrrLamp_RtIndSta"] == 0
+    assert rear["BCW_IndSta"] == 1
+    assert rear["FL_INDICATOR"] == 0
+    assert rear["FR_INDICATOR"] == 0
+    assert rear["BCW_LtSndWrngSta"] == 0
+
+    signaled_left = hyundaicanfd.create_ev9_blindspot_status_messages(
+      packer, can_bus, 2, left_blindspot=True, left_blinker=True,
+    )
+    parser.update([(3, signaled_left)])
+    rear = parser.vl["BLINDSPOTS_REAR_CORNERS"]
+    assert rear["BCW_Sta"] == 0
+    assert rear["BCW_LtIndSta"] == 2
+    assert rear["OSMrrLamp_LtIndSta"] == 2
+    assert rear["FL_INDICATOR"] == 0
+    assert rear["FR_INDICATOR"] == 0
+    assert rear["BCW_LtSndWrngSta"] == 0
+
+    opposite_blinker = hyundaicanfd.create_ev9_blindspot_status_messages(
+      packer, can_bus, 3, left_blindspot=True, right_blinker=True,
+    )
+    parser.update([(4, opposite_blinker)])
+    rear = parser.vl["BLINDSPOTS_REAR_CORNERS"]
+    assert rear["BCW_LtIndSta"] == 1
+    assert rear["OSMrrLamp_LtIndSta"] == 1
 
   def test_canfd_camera_lead_decode(self):
     assert decode_canfd_camera_lead(0.0, -1.0) == (False, 0.0, 0.0)

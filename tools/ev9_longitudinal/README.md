@@ -417,7 +417,12 @@ not faithfully match genuine `0x1BA` mirror indications. The default-off
 `KiaEv9RawBsmReconstructionEnabled` experiment therefore preserves genuine
 `0x1BA` only while it is fresh (100 ms) and otherwise reconstructs neutral BSM.
 If explicitly enabled, raw `0x36A` is accepted only when fresh, the base bit is
-present, and the vehicle is in Drive. The still-live ACAN `0x235`–`0x248`
+present, the vehicle is in Drive, and speed is at least 4.3 m/s. That threshold
+is the lowest active-lamp speed observed across the complete d4/d6 stock routes
+and prevents the confirmed stationary false warnings. Synthetic EV9 `0x1BA`
+changes only the stock-correlated BCW/OSM left/right state fields; it leaves
+`BCW_Sta`, `FL_INDICATOR`, `FR_INDICATOR`, and sound/braking requests neutral.
+The still-live ACAN `0x235`–`0x248`
 corner-object group was evaluated against the July 11 stock-ADAS routes
 `000000d4--5296076dfd`, `000000d5--ed0c9e21bb`, and
 `000000d6--f9d3fb2962`. These routes have openpilot longitudinal disabled,

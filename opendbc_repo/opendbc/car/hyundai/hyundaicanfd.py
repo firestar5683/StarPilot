@@ -402,15 +402,27 @@ def create_blindspot_status_messages(packer, CAN, rear_values, front_corner_valu
 
 def create_ev9_blindspot_status_messages(packer, CAN, counter, left_blindspot=False, right_blindspot=False,
                                           left_blinker=False, right_blinker=False):
-  """Recreate EV9 BSM output from the still-live direct corner-radar state."""
-  # Use packer only to calculate the delta for decoded BSM fields, then apply
-  # that delta to the complete captured payload. This preserves unknown EV9
-  # bytes that a signal dictionary cannot represent.
-  rear = {"BCW_IndSta": 1, "BCA_OnOffEquip2Sta": 2}
-  front = {"NEW_SIGNAL_3": 1}
-  neutral_packed = create_blindspot_status_messages(packer, CAN, rear, front)[0]
-  desired_packed = create_blindspot_status_messages(packer, CAN, rear, front, left_blindspot, right_blindspot,
-                                                      left_blinker, right_blinker)[0]
+  """Recreate the stock-correlated subset of EV9 BSM output fields."""
+  # Use packer only to calculate the delta for verified EV9 fields, then apply
+  # that delta to the complete captured neutral payload. Unlike the generic
+  # Ioniq 6 helper, EV9 stock routes kept BCW_Sta and FL/FR_INDICATOR at zero
+  # through genuine lamp events, so they must not be synthesized here.
+  left_state = 2 if left_blindspot and left_blinker else (1 if left_blindspot else 0)
+  right_state = 2 if right_blindspot and right_blinker else (1 if right_blindspot else 0)
+  neutral_fields = {
+    "BCW_LtIndSta": 0,
+    "BCW_RtIndSta": 0,
+    "OSMrrLamp_LtIndSta": 0,
+    "OSMrrLamp_RtIndSta": 0,
+  }
+  desired_fields = neutral_fields | {
+    "BCW_LtIndSta": left_state,
+    "BCW_RtIndSta": right_state,
+    "OSMrrLamp_LtIndSta": left_state,
+    "OSMrrLamp_RtIndSta": right_state,
+  }
+  neutral_packed = packer.make_can_msg("BLINDSPOTS_REAR_CORNERS", CAN.ECAN, neutral_fields)
+  desired_packed = packer.make_can_msg("BLINDSPOTS_REAR_CORNERS", CAN.ECAN, desired_fields)
   neutral = bytes(neutral_packed[1])
   desired = bytes(desired_packed[1])
 
