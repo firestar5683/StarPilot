@@ -313,6 +313,75 @@ def test_galaxy_telemetry_route_reads_cache_without_sampling(monkeypatch):
   }
 
 
+class FakeTelemetrySubMaster:
+  def __init__(self, services, poll=None):
+    self.services = services
+    self.poll = poll
+    self.seen = {service: True for service in services}
+    self.alive = {service: True for service in services}
+    self.valid = {service: True for service in services}
+    self.updated = {service: False for service in services}
+    self.data = {
+      "carState": SimpleNamespace(to_dict=lambda: {"fuelGauge": 0.8}),
+      "can": [],
+    }
+
+  def update(self, _timeout):
+    return None
+
+  def __getitem__(self, service):
+    return self.data[service]
+
+
+def test_vehicle_telemetry_reuses_car_state_subscriber_and_preserves_health_checks(monkeypatch):
+  created = []
+
+  def submaster_factory(services, poll=None):
+    sm = FakeTelemetrySubMaster(services, poll=poll)
+    created.append(sm)
+    return sm
+
+  monkeypatch.setattr(the_galaxy.messaging, "SubMaster", submaster_factory)
+  monkeypatch.setattr(the_galaxy, "_VEHICLE_TELEMETRY_CAR_STATE_SM", None)
+  monkeypatch.setattr(the_galaxy, "_vehicle_telemetry_live_store", lambda *args, **kwargs: None)
+
+  first, _ = the_galaxy._build_car_state_telemetry_payload({}, None)
+  second, _ = the_galaxy._build_car_state_telemetry_payload({}, None)
+  assert first["stateOfChargePercent"] == 80.0
+  assert second["stateOfChargePercent"] == 80.0
+  assert len(created) == 1
+
+  created[0].seen["carState"] = False
+  assert the_galaxy._vehicle_telemetry_car_state_snapshot() is None
+  created[0].seen["carState"] = True
+  created[0].alive["carState"] = False
+  assert the_galaxy._vehicle_telemetry_car_state_snapshot() is None
+  created[0].alive["carState"] = True
+  created[0].valid["carState"] = False
+  assert the_galaxy._vehicle_telemetry_car_state_snapshot() is None
+
+
+def test_vehicle_telemetry_reuses_can_subscriber(monkeypatch):
+  created = []
+
+  def submaster_factory(services, poll=None):
+    sm = FakeTelemetrySubMaster(services, poll=poll)
+    created.append(sm)
+    return sm
+
+  monotonic_time = iter((0.0, 1.0, 2.0, 3.0))
+  monkeypatch.setattr(the_galaxy.messaging, "SubMaster", submaster_factory)
+  monkeypatch.setattr(the_galaxy.time, "monotonic", lambda: next(monotonic_time))
+  monkeypatch.setattr(the_galaxy, "_VEHICLE_TELEMETRY_CAN_SM", None)
+
+  the_galaxy._capture_can_frames(sample_ms=100)
+  the_galaxy._capture_can_frames(sample_ms=100)
+
+  assert len(created) == 1
+  assert created[0].services == ["can"]
+  assert created[0].poll == "can"
+
+
 def test_use_old_ui_is_noop_on_c4_mici(monkeypatch):
   client, fake_params = _params_client(monkeypatch, {"UseOldUI": False, "IsOnroad": False}, "mici")
 

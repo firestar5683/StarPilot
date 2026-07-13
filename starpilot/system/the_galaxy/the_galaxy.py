@@ -127,6 +127,10 @@ _VEHICLE_TELEMETRY_CACHE_FIRST_MAX_AGE_S = 120.0
 _VEHICLE_TELEMETRY_CACHE_WRITE_INTERVAL_S = 60.0
 _VEHICLE_TELEMETRY_BACKGROUND_LOCK = threading.Lock()
 _VEHICLE_TELEMETRY_BACKGROUND_THREAD = None
+_VEHICLE_TELEMETRY_CAR_STATE_LOCK = threading.Lock()
+_VEHICLE_TELEMETRY_CAR_STATE_SM = None
+_VEHICLE_TELEMETRY_CAN_LOCK = threading.Lock()
+_VEHICLE_TELEMETRY_CAN_SM = None
 _VEHICLE_TELEMETRY_LIVE_LOCK = threading.Lock()
 _VEHICLE_TELEMETRY_LIVE_PAYLOAD = None
 _VEHICLE_TELEMETRY_LIVE_SIGNATURE = None
@@ -3519,6 +3523,25 @@ def _snapshot_bool_text(value):
     return "No"
   return "Unavailable"
 
+def _car_state_snapshot_from_submaster(sm):
+  sm.update(100)
+  if not (sm.seen["carState"] and sm.alive["carState"] and sm.valid["carState"]):
+    return None
+  return sm["carState"].to_dict()
+
+def _vehicle_telemetry_car_state_snapshot(submaster=None):
+  global _VEHICLE_TELEMETRY_CAR_STATE_SM
+  if submaster is not None:
+    return _car_state_snapshot_from_submaster(submaster)
+
+  # Repeatedly constructing MSGQ subscribers leaks reader slots until MSGQ
+  # evicts all readers for the service. A process-lifetime reader avoids that
+  # eviction while retaining the original seen/alive/message-valid checks.
+  with _VEHICLE_TELEMETRY_CAR_STATE_LOCK:
+    if _VEHICLE_TELEMETRY_CAR_STATE_SM is None:
+      _VEHICLE_TELEMETRY_CAR_STATE_SM = messaging.SubMaster(["carState"], poll="carState")
+    return _car_state_snapshot_from_submaster(_VEHICLE_TELEMETRY_CAR_STATE_SM)
+
 def _build_vehicle_fault_status():
   unavailable_items = [
     {"label": "Cruise Fault", "value": "Unavailable", "severity": "neutral"},
@@ -3536,10 +3559,8 @@ def _build_vehicle_fault_status():
     unavailable_severity = "warn"
 
   try:
-    sm = messaging.SubMaster(["carState"], poll="carState")
-    sm.update(100)
-    has_live_car_state = sm.seen["carState"] and sm.alive["carState"] and sm.valid["carState"]
-    if not has_live_car_state:
+    car_state = _vehicle_telemetry_car_state_snapshot()
+    if car_state is None:
       return {
         "available": False,
         "summary": unavailable_summary,
@@ -3547,15 +3568,14 @@ def _build_vehicle_fault_status():
         "items": unavailable_items,
       }
 
-    car_state = sm["carState"]
-    cruise_state = getattr(car_state, "cruiseState", None)
+    cruise_state = car_state.get("cruiseState")
 
-    cruise_faulted = bool(getattr(car_state, "accFaulted", False))
-    steer_fault_temporary = bool(getattr(car_state, "steerFaultTemporary", False))
-    steer_fault_permanent = bool(getattr(car_state, "steerFaultPermanent", False))
-    can_valid = bool(getattr(car_state, "canValid", False))
-    cruise_available = bool(getattr(cruise_state, "available", False)) if cruise_state is not None else None
-    cruise_enabled = bool(getattr(cruise_state, "enabled", False)) if cruise_state is not None else None
+    cruise_faulted = bool(car_state.get("accFaulted", False))
+    steer_fault_temporary = bool(car_state.get("steerFaultTemporary", False))
+    steer_fault_permanent = bool(car_state.get("steerFaultPermanent", False))
+    can_valid = bool(car_state.get("canValid", False))
+    cruise_available = bool(cruise_state.get("available", False)) if cruise_state is not None else None
+    cruise_enabled = bool(cruise_state.get("enabled", False)) if cruise_state is not None else None
 
     if steer_fault_permanent:
       lkas_fault_value = "Permanent"
@@ -3879,12 +3899,11 @@ def _normalize_uds_payload(raw_payload):
     return (payload[1] << 8) | payload[2], payload[3:]
   return None, payload
 
-def _capture_can_frames(sample_ms=10000, submaster=None, address_filter=None, source_filter=None):
+def _capture_can_frames_with_submaster(sm, sample_ms, address_filter, source_filter):
   frames = []
   counts = {}
   samples = {}
   try:
-    sm = submaster if submaster is not None else messaging.SubMaster(["can"], poll="can")
     deadline = time.monotonic() + max(0.1, sample_ms / 1000.0)
     while time.monotonic() < deadline:
       sm.update(100)
@@ -3926,6 +3945,26 @@ def _capture_can_frames(sample_ms=10000, submaster=None, address_filter=None, so
     "uniqueFrameCount": len(counts),
     "topFrames": top,
   }
+
+def _capture_can_frames(sample_ms=10000, submaster=None, address_filter=None, source_filter=None):
+  global _VEHICLE_TELEMETRY_CAN_SM
+  if submaster is not None:
+    return _capture_can_frames_with_submaster(submaster, sample_ms, address_filter, source_filter)
+
+  # MSGQ only has a finite number of reader slots, and destroying a subscriber
+  # does not release its slot. Recreating this socket for every telemetry sample
+  # eventually evicts every existing CAN reader, including card. Keep one reader
+  # for the lifetime of The Galaxy and serialize its use across HTTP/background
+  # telemetry requests.
+  with _VEHICLE_TELEMETRY_CAN_LOCK:
+    if _VEHICLE_TELEMETRY_CAN_SM is None:
+      _VEHICLE_TELEMETRY_CAN_SM = messaging.SubMaster(["can"], poll="can")
+    return _capture_can_frames_with_submaster(
+      _VEHICLE_TELEMETRY_CAN_SM,
+      sample_ms,
+      address_filter,
+      source_filter,
+    )
 
 def _extract_uds_payloads(frames):
   payloads = []
@@ -4253,24 +4292,22 @@ def _build_egmp_can_telemetry_payload(
 
   return payload, 503
 
-def _build_car_state_telemetry_payload(model_info, position, known_soc=None, sample_note=""):
-  sm = messaging.SubMaster(["carState"], poll="carState")
-  sm.update(100)
-  if not (sm.seen["carState"] and sm.alive["carState"] and sm.valid["carState"]):
+def _build_car_state_telemetry_payload(model_info, position, known_soc=None, sample_note="", car_state_submaster=None):
+  car_state = _vehicle_telemetry_car_state_snapshot(car_state_submaster)
+  if car_state is None:
     return None
 
-  car_state = sm["carState"]
-  fuel_gauge = _safe_float(getattr(car_state, "fuelGauge", float("nan")), float("nan"))
+  fuel_gauge = _safe_float(car_state.get("fuelGauge", float("nan")), float("nan"))
   has_soc = math.isfinite(fuel_gauge) and 0.0 < fuel_gauge <= 1.0
   state_of_charge_percent = round(max(0.0, min(100.0, fuel_gauge * 100.0)), 1) if has_soc else None
-  distance_to_empty_meters = _safe_float(getattr(car_state, "distanceToEmpty", float("nan")), float("nan"))
+  distance_to_empty_meters = _safe_float(car_state.get("distanceToEmpty", float("nan")), float("nan"))
   has_dte = math.isfinite(distance_to_empty_meters) and 0.0 < distance_to_empty_meters < 900000.0
   distance_to_empty_km = round(distance_to_empty_meters / 1000.0, 1) if has_dte else None
   if not has_soc and not has_dte:
     return None
 
-  charging = bool(getattr(car_state, "charging", False))
-  charging_port_connected = bool(getattr(car_state, "chargingPortConnected", False))
+  charging = bool(car_state.get("charging", False))
+  charging_port_connected = bool(car_state.get("chargingPortConnected", False))
   payload = {
     **model_info,
     "source": "StarPilot Galaxy CAN",
@@ -4301,6 +4338,7 @@ def _build_vehicle_telemetry_payload(
   sample_note="",
   sample_ms=10000,
   cache_first_max_age_seconds=None,
+  car_state_submaster=None,
   can_submaster=None,
   can_address_filter=None,
   can_source_filter=None,
@@ -4319,6 +4357,7 @@ def _build_vehicle_telemetry_payload(
       position,
       known_soc=known_soc,
       sample_note=sample_note,
+      car_state_submaster=car_state_submaster,
     )
     if car_state_result is not None:
       return car_state_result
