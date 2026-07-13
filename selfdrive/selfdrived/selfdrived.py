@@ -12,6 +12,7 @@ from msgq.visionipc import VisionIpcClient, VisionStreamType
 
 from opendbc.car.chrysler.values import pacifica_hybrid_aol_stock_acc_mode
 from opendbc.car.gm.values import GMFlags
+from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR
 
 from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper, DT_CTRL
@@ -53,6 +54,28 @@ MonitoringPolicy = log.DriverMonitoringState.MonitoringPolicy
 StarPilotEventName = custom.StarPilotOnroadEvent.EventName
 
 IGNORED_SAFETY_MODES = (SafetyModel.silent, SafetyModel.noOutput)
+EV9_TRANSIENT_COMM_ISSUE_DEBOUNCE_PARAM = "KiaEv9TransientCommIssueDebounceEnabled"
+EV9_INVALID_ONLY_COMM_ISSUE_DEBOUNCE_FRAMES = int(0.5 / DT_CTRL)
+
+
+def ev9_transient_comm_issue_debounce_enabled(raw_value: bytes | None) -> bool:
+  # Default on even before a newly registered parameter has been materialized.
+  return raw_value is None or raw_value == b"1"
+
+
+def update_ev9_invalid_only_comm_issue_debounce(enabled: bool, is_ev9: bool, all_alive: bool, all_freq_ok: bool,
+                                                all_valid: bool, invalid_frames: int) -> tuple[int, bool]:
+  """Debounce EV9 service-validity blips without masking missing or slow services."""
+  if all_alive and all_freq_ok and all_valid:
+    return 0, False
+
+  invalid_only = all_alive and all_freq_ok and not all_valid
+  if enabled and is_ev9 and invalid_only:
+    invalid_frames += 1
+    return invalid_frames, invalid_frames >= EV9_INVALID_ONLY_COMM_ISSUE_DEBOUNCE_FRAMES
+
+  # Missing/dead/frequency failures remain immediate and reset any invalid-only burst.
+  return 0, True
 
 
 def should_loud_blindspot_alert_without_lateral(CS, sm, starpilot_toggles) -> bool:
@@ -144,6 +167,10 @@ class SelfdriveD:
       self.CP = CP
 
     self.car_events = CarSpecificEvents(self.CP)
+    self.ev9_transient_comm_issue_debounce_enabled = ev9_transient_comm_issue_debounce_enabled(
+      self.params.get(EV9_TRANSIENT_COMM_ISSUE_DEBOUNCE_PARAM),
+    )
+    self.ev9_invalid_only_comm_issue_frames = 0
 
     self.pose_calibrator = PoseCalibrator()
     self.calibrated_pose: Pose | None = None
@@ -580,22 +607,41 @@ class SelfdriveD:
                          (contains_event_type(self.events, self.starpilot_events, ET.SOFT_DISABLE) or
                           contains_event_type(self.events, self.starpilot_events, ET.IMMEDIATE_DISABLE))
     no_system_errors = (not has_disable_events) or (len(self.events) == num_events)
-    if not self.sm.all_checks() and no_system_errors:
-      if not self.sm.all_alive():
+    all_alive = self.sm.all_alive()
+    all_freq_ok = self.sm.all_freq_ok()
+    all_valid = self.sm.all_valid()
+    self.ev9_invalid_only_comm_issue_frames, add_comm_issue = update_ev9_invalid_only_comm_issue_debounce(
+      self.ev9_transient_comm_issue_debounce_enabled,
+      self.CP.carFingerprint == HYUNDAI_CAR.KIA_EV9,
+      all_alive,
+      all_freq_ok,
+      all_valid,
+      self.ev9_invalid_only_comm_issue_frames,
+    )
+    comm_checks_ok = all_alive and all_freq_ok and all_valid
+    comm_issue_added = False
+    if not comm_checks_ok and no_system_errors:
+      if not all_alive:
         self.events.add(EventName.commIssue)
-      elif not self.sm.all_freq_ok():
+        comm_issue_added = True
+      elif not all_freq_ok:
         self.events.add(EventName.commIssueAvgFreq)
-      else:
+        comm_issue_added = True
+      elif add_comm_issue:
         self.events.add(EventName.commIssue)
+        comm_issue_added = True
 
-      logs = {
-        'invalid': [s for s, valid in self.sm.valid.items() if not valid],
-        'not_alive': [s for s, alive in self.sm.alive.items() if not alive],
-        'not_freq_ok': [s for s, freq_ok in self.sm.freq_ok.items() if not freq_ok],
-      }
-      if logs != self.logged_comm_issue:
-        cloudlog.event("commIssue", error=True, **logs)
-        self.logged_comm_issue = logs
+      if comm_issue_added:
+        logs = {
+          'invalid': [s for s, valid in self.sm.valid.items() if not valid],
+          'not_alive': [s for s, alive in self.sm.alive.items() if not alive],
+          'not_freq_ok': [s for s, freq_ok in self.sm.freq_ok.items() if not freq_ok],
+        }
+        if logs != self.logged_comm_issue:
+          cloudlog.event("commIssue", error=True, **logs)
+          self.logged_comm_issue = logs
+      else:
+        self.logged_comm_issue = None
     else:
       self.logged_comm_issue = None
 
