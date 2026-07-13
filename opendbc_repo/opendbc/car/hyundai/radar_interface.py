@@ -19,18 +19,20 @@ MRR30_RADAR_START_ADDR = 0x210
 MRR30_RADAR_MSG_COUNT = 16
 MRR35_RADAR_START_ADDR = 0x3A5
 MRR35_RADAR_MSG_COUNT = 32
-EV9_CLUSTER_QUALITY_SIGNAL = "NEW_SIGNAL_7"
-EV9_CLUSTER_QUALITY_THRESHOLD = 200.0
-EV9_CLUSTER_QUALITY_REJECT_LOG_LIMIT = 5
+EV9_CLUSTER_DISPLAY_DISCRIMINATOR_SIGNAL = "UNKNOWN_7"
+EV9_CLUSTER_DISPLAY_DISCRIMINATOR_THRESHOLD = 200.0
+EV9_CLUSTER_DISPLAY_DISCRIMINATOR_REJECT_LOG_LIMIT = 5
 
 
-def ev9_mrr35_cluster_quality_valid(values) -> bool:
-  """Return whether an MRR35 track has the stock-correlated display quality.
+def ev9_mrr35_cluster_display_candidate(values) -> bool:
+  """Return whether an MRR35 track passes the stock-correlated display discriminator.
 
-  This signal is deliberately used only to qualify EV9 cluster reconstruction;
-  RadarData and liveTracks retain every track accepted by the normal STATE gate.
+  The physical meaning and units of this raw field remain unknown. It is used
+  only for EV9 cluster reconstruction; RadarData and liveTracks retain every
+  track accepted by the normal STATE gate.
   """
-  return float(values.get(EV9_CLUSTER_QUALITY_SIGNAL, 0.0)) > EV9_CLUSTER_QUALITY_THRESHOLD
+  return float(values.get(EV9_CLUSTER_DISPLAY_DISCRIMINATOR_SIGNAL, 0.0)) > \
+         EV9_CLUSTER_DISPLAY_DISCRIMINATOR_THRESHOLD
 
 
 @dataclass(frozen=True)
@@ -114,9 +116,11 @@ class RadarInterface(RadarInterfaceBase):
     self.ioniq_6_radar_probe = CP.carFingerprint == CAR.HYUNDAI_IONIQ_6 and CP.openpilotLongitudinalControl and self.radar_off_can
     self.ioniq_6_radar_probe_logged = False
     self.ioniq_6_radar_probe_updates = 0
+    # Retain this application-facing attribute name for card.py compatibility;
+    # its contents are display candidates, not a decoded radar quality metric.
     self.ev9_cluster_quality_track_ids: set[int] = set()
-    self.ev9_cluster_quality_reject_count = 0
-    self.ev9_cluster_quality_reject_logs = 0
+    self.ev9_cluster_display_discriminator_reject_count = 0
+    self.ev9_cluster_display_discriminator_reject_logs = 0
     self.rcp = get_radar_can_parser(CP, self.radar_config)
 
     # Precompute (addr, "RADAR_TRACK_xxx") pairs once. _update runs on the
@@ -229,7 +233,7 @@ class RadarInterface(RadarInterfaceBase):
 
     radar_type = self.radar_config.radar_type
     vl = self.rcp.vl
-    ev9_quality_track_ids: set[int] = set()
+    ev9_display_candidate_track_ids: set[int] = set()
 
     for addr, track_name in self.track_addrs:
       msg = vl[track_name]
@@ -294,15 +298,16 @@ class RadarInterface(RadarInterfaceBase):
           pt.aRel = msg["REL_ACCEL"]
           pt.yvRel = float("nan")
           if self.CP.carFingerprint == CAR.KIA_EV9 and addr in updated_messages:
-            if ev9_mrr35_cluster_quality_valid(msg):
-              ev9_quality_track_ids.add(pt.trackId)
+            if ev9_mrr35_cluster_display_candidate(msg):
+              ev9_display_candidate_track_ids.add(pt.trackId)
             else:
-              self.ev9_cluster_quality_reject_count += 1
-              if self.ev9_cluster_quality_reject_logs < EV9_CLUSTER_QUALITY_REJECT_LOG_LIMIT:
-                self.ev9_cluster_quality_reject_logs += 1
-                cloudlog.warning(f"EV9 cluster display rejected low-quality MRR35 track: "
-                                 f"addr=0x{addr:X}, quality={msg[EV9_CLUSTER_QUALITY_SIGNAL]:.0f}, "
-                                 f"rejected={self.ev9_cluster_quality_reject_count}")
+              self.ev9_cluster_display_discriminator_reject_count += 1
+              if self.ev9_cluster_display_discriminator_reject_logs < EV9_CLUSTER_DISPLAY_DISCRIMINATOR_REJECT_LOG_LIMIT:
+                self.ev9_cluster_display_discriminator_reject_logs += 1
+                cloudlog.warning(f"EV9 cluster display discriminator rejected MRR35 track: "
+                                 f"addr=0x{addr:X}, discriminator="
+                                 f"{msg[EV9_CLUSTER_DISPLAY_DISCRIMINATOR_SIGNAL]:.0f}, "
+                                 f"rejected={self.ev9_cluster_display_discriminator_reject_count}")
         elif addr in self.pts:
           del self.pts[addr]
         continue
@@ -328,7 +333,7 @@ class RadarInterface(RadarInterfaceBase):
     # A missing channel update or invalid parser must fail closed for display
     # qualification. This set never changes the RadarData returned to fusion.
     if self.CP.carFingerprint == CAR.KIA_EV9:
-      self.ev9_cluster_quality_track_ids = ev9_quality_track_ids if self.rcp.can_valid else set()
+      self.ev9_cluster_quality_track_ids = ev9_display_candidate_track_ids if self.rcp.can_valid else set()
 
     ret.points = list(self.pts.values())
     return ret

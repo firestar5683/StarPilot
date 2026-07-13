@@ -401,12 +401,13 @@ decoded by this DBC as physical `15`, even while the camera lane curvature chang
 CCNC rate. Disabling it restores the legacy physical `0` / raw `17` encoding strictly for A/B testing; no model, steering,
 or camera-derived lane animation is synthesized.
 
-`KiaEv9RadarQualityFilterEnabled` independently applies the stock-correlated MRR35
-`NEW_SIGNAL_7 > 200` quality gate only to reconstructed EV9 CCNC objects. It does not
-remove tracks from `RadarData`, `liveTracks`, fusion, or planning. Full stock-route
-comparison retained 99.23%/99.93% of displayed objects, while all 12,791 parked
-garage-track samples in route `00000106--2e49e586a6` measured 124–126 and were
-rejected. Disabling the flag restores the previous display-only tracker behavior.
+`KiaEv9RadarQualityFilterEnabled` is retained as the persisted compatibility key for a display-only discriminator; the
+name does not establish radar quality semantics. It independently applies the stock-correlated MRR35 raw field
+`UNKNOWN_7 > 200` only to reconstructed EV9 CCNC objects. The physical meaning and units of bit 152 remain unknown, so
+this discriminator is not used for validity, `RadarData`, `liveTracks`, fusion, planning, or safety decisions. Full
+stock-route comparison retained 99.23%/99.93% of displayed objects, while all 12,791 parked garage-track samples in route
+`00000106--2e49e586a6` measured 124–126 and were rejected. Disabling the flag restores the previous display-only tracker
+behavior.
 
 Probe mode 4 is a reset-assisted diagnostic-only experiment using the validated mode-2 request. It sends an ADAS ECU
 reset before re-entering extended diagnostics and requesting `28 01 03`. The 2026-07-11 direct OFF-to-READY test entered
