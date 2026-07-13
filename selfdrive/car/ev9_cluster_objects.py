@@ -66,7 +66,8 @@ class Ev9ClusterObjectTracker:
 
   def update(self, points: list[Any], preferred_primary_track_id: int = -1,
              alternate_enabled: bool = False,
-             qualified_track_ids: set[int] | None = None) -> ClusterObjectSlots:
+             qualified_track_ids: set[int] | None = None,
+             require_preferred_primary: bool = False) -> ClusterObjectSlots:
     # A non-None set is an explicit display allow-list. Evict disqualified
     # tracks immediately instead of applying the normal short dropout hold.
     if qualified_track_ids is not None:
@@ -125,9 +126,15 @@ class Ev9ClusterObjectTracker:
       self.slot_track_ids[slot] = chosen.track_id if chosen is not None else -1
       return chosen
 
-    primary = choose("primary", center, preferred_primary_track_id)
+    if require_preferred_primary:
+      primary = next((track for track in center if track.track_id == preferred_primary_track_id), None) \
+        if preferred_primary_track_id >= 0 else None
+      self.slot_track_ids["primary"] = primary.track_id if primary is not None else -1
+    else:
+      primary = choose("primary", center, preferred_primary_track_id)
     remaining_center = [track for track in center if primary is None or track.track_id != primary.track_id]
-    alternate = choose("alternate", remaining_center) if alternate_enabled else None
+    alternate = choose("alternate", remaining_center) if alternate_enabled and \
+      (primary is not None or not require_preferred_primary) else None
     if not alternate_enabled:
       self.slot_track_ids["alternate"] = -1
     left_object = choose("left", left)
@@ -141,6 +148,16 @@ class Ev9ClusterObjectTracker:
       left=self._as_cluster_object(left_object) if left_object is not None else None,
       right=self._as_cluster_object(right_object) if right_object is not None else None,
     )
+
+
+def bsm_gated_side_slots(slots: ClusterObjectSlots, left_blindspot: bool, right_blindspot: bool,
+                         gate_enabled: bool = True) -> ClusterObjectSlots:
+  """Fail closed on EV9 adjacent-lane objects without a matching BSM decision."""
+  if not gate_enabled:
+    return slots
+  return ClusterObjectSlots(slots.primary, slots.alternate,
+                            slots.left if left_blindspot else None,
+                            slots.right if right_blindspot else None)
 
 
 def radar_backed_object(lead: Any, qualified_track_ids: set[int] | None = None) -> ClusterObject | None:

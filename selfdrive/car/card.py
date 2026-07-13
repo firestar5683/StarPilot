@@ -28,7 +28,7 @@ from openpilot.common.constants import CV
 from openpilot.selfdrive.car.cruise import VCruiseHelper, IMPERIAL_INCREMENT, V_CRUISE_MAX, V_CRUISE_MIN
 from openpilot.selfdrive.car.redneck_cruise import RedneckCruise, select_redneck_target_speed
 from openpilot.selfdrive.car.car_specific import MockCarState
-from openpilot.selfdrive.car.ev9_cluster_objects import ClusterObjectSlots, Ev9ClusterObjectTracker, default_enabled_param, \
+from openpilot.selfdrive.car.ev9_cluster_objects import ClusterObjectSlots, Ev9ClusterObjectTracker, bsm_gated_side_slots, default_enabled_param, \
                                                          filtered_radar_slots
 
 from openpilot.starpilot.common.starpilot_variables import get_starpilot_toggles, update_starpilot_toggles
@@ -106,6 +106,10 @@ class Car:
     self.ev9_cluster_smoothing_enabled = self.params.get_bool("KiaEv9ClusterObjectSmoothingEnabled")
     self.ev9_cluster_map_speed_limit_fallback_enabled = self.params.get_bool("KiaEv9ClusterMapSpeedLimitFallbackEnabled")
     self.ev9_radar_quality_filter_enabled = default_enabled_param(self.params, "KiaEv9RadarQualityFilterEnabled")
+    self.ev9_cluster_fused_primary_required = default_enabled_param(self.params, "KiaEv9ClusterFusedPrimaryRequired")
+    self.ev9_cluster_side_objects_require_bsm = default_enabled_param(
+      self.params, "KiaEv9ClusterSideObjectsRequireBsmEnabled",
+    )
     self.ev9_cluster_tracker = Ev9ClusterObjectTracker()
     self.ev9_cluster_slots = ClusterObjectSlots()
 
@@ -326,6 +330,7 @@ class Car:
         if self.ev9_radar_quality_filter_enabled else None
       self.ev9_cluster_slots = self.ev9_cluster_tracker.update(
         list(RD.points), preferred_primary_track_id, self.ev9_cluster_alternate_enabled, qualified_track_ids,
+        self.ev9_cluster_fused_primary_required,
       )
 
     self.sm.update(0)
@@ -474,10 +479,6 @@ class Car:
       lead_distance = 0.0
       lead_rel_speed = 0.0
 
-    self.CI.CS.openpilot_lead_visible = lead_visible
-    self.CI.CS.openpilot_lead_distance = lead_distance
-    self.CI.CS.openpilot_lead_rel_speed = lead_rel_speed
-
     lead_two_visible = False
     lead_two_distance = 0.0
     lead_two_lateral = 0.0
@@ -528,6 +529,14 @@ class Car:
         lead_two_distance = filtered_slots.alternate.distance
         lead_two_lateral = filtered_slots.alternate.lateral
 
+    if ev9_filtered_objects and filtered_slots is not None:
+      filtered_slots = bsm_gated_side_slots(
+        filtered_slots,
+        bool(getattr(self.CI.CS, 'left_blindspot_from_radar', False)),
+        bool(getattr(self.CI.CS, 'right_blindspot_from_radar', False)),
+        self.ev9_cluster_side_objects_require_bsm,
+      )
+
     for side in ('left', 'right'):
       visible = False
       distance = 0.0
@@ -547,6 +556,12 @@ class Car:
       setattr(self.CI.CS, f'openpilot_lead_{side}_distance', distance)
       setattr(self.CI.CS, f'openpilot_lead_{side}_lateral', lateral)
 
+    # Publish the final filtered result. Assigning these before the EV9 tracker
+    # ran left hudControl's model-visible bit paired with a zero distance, which
+    # produced a persistent zero-metre front object throughout route 00000108.
+    self.CI.CS.openpilot_lead_visible = lead_visible
+    self.CI.CS.openpilot_lead_distance = lead_distance
+    self.CI.CS.openpilot_lead_rel_speed = lead_rel_speed
     self.CI.CS.openpilot_lead_two_visible = lead_two_visible
     self.CI.CS.openpilot_lead_two_distance = lead_two_distance
     self.CI.CS.openpilot_lead_two_lateral = lead_two_lateral
@@ -628,6 +643,10 @@ class Car:
       self.ev9_cluster_smoothing_enabled = self.params.get_bool("KiaEv9ClusterObjectSmoothingEnabled")
       self.ev9_cluster_map_speed_limit_fallback_enabled = self.params.get_bool("KiaEv9ClusterMapSpeedLimitFallbackEnabled")
       self.ev9_radar_quality_filter_enabled = default_enabled_param(self.params, "KiaEv9RadarQualityFilterEnabled")
+      self.ev9_cluster_fused_primary_required = default_enabled_param(self.params, "KiaEv9ClusterFusedPrimaryRequired")
+      self.ev9_cluster_side_objects_require_bsm = default_enabled_param(
+        self.params, "KiaEv9ClusterSideObjectsRequireBsmEnabled",
+      )
       time.sleep(0.1)
 
   def card_thread(self):

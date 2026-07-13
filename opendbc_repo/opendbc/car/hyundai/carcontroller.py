@@ -9,7 +9,8 @@ from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai import hyundaicanfd, hyundaican
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.ev9_longitudinal import EV9_CLUSTER_ALTERNATE_LEAD_PARAM, EV9_CLUSTER_HUD_PARAM, \
-                                                   EV9_CLUSTER_OBJECTS_PARAM, EV9_CLUSTER_SPEED_LIMIT_PARAM, \
+                                                   EV9_CLUSTER_OBJECTS_ON_MAIN_PARAM, EV9_CLUSTER_OBJECTS_PARAM, \
+                                                   EV9_CLUSTER_SPEED_LIMIT_PARAM, \
                                                    EV9_DIRECT_ANGLE_COMMAND_PARAM, EV9_DTC_CAPTURE_PARAM, \
                                                    EV9_NEUTRAL_LANE_CURVATURE_PARAM, \
                                                    EV9_REAR_BSM_CLUSTER_FALLBACK_PARAM, EV9_SOFT_DRIVER_STEERING_OVERRIDE_PARAM, \
@@ -397,6 +398,8 @@ class CarController(CarControllerBase):
       ev9_default_enabled_param(self._params, EV9_CLUSTER_HUD_PARAM)
     self.ev9_cluster_objects_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
       ev9_default_enabled_param(self._params, EV9_CLUSTER_OBJECTS_PARAM)
+    self.ev9_cluster_objects_on_main_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
+      ev9_default_enabled_param(self._params, EV9_CLUSTER_OBJECTS_ON_MAIN_PARAM)
     self.ev9_cluster_alternate_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
       self._params.get_bool(EV9_CLUSTER_ALTERNATE_LEAD_PARAM)
     self.ev9_cluster_speed_limit_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
@@ -883,6 +886,7 @@ class CarController(CarControllerBase):
             CS.left_blindspot_from_radar, CS.right_blindspot_from_radar, CS.is_metric,
             hud_enabled=self.ev9_cluster_hud_enabled,
             objects_enabled=self.ev9_cluster_objects_enabled,
+            objects_on_main_enabled=self.ev9_cluster_objects_on_main_enabled,
             alternate_enabled=self.ev9_cluster_alternate_enabled,
             rear_bsm_fallback_enabled=self.ev9_rear_bsm_cluster_fallback_enabled,
             steering_icon_active=ev9_ccnc_steering_active,

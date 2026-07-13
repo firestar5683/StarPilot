@@ -1878,6 +1878,18 @@ class TestHyundaiFingerprint:
     assert parser.vl["CCNC_0x161"]["DISTANCE_CAR"] == 1
     assert parser.vl["CCNC_0x162"]["LEAD"] == 0
 
+    # The independently gated Main-only display path may show a confirmed
+    # object without claiming active HDA or active steering.
+    msgs = hyundaicanfd.create_ev9_ccnc_status_messages(
+      packer, can_bus, 8, enabled=False, lat_active=False, hud=hud, out=out, main_cruise_enabled=True,
+      lead_visible=True, lead_distance=42.0, objects_on_main_enabled=True,
+    )
+    parser.update([(4, msgs)])
+    assert parser.vl["CCNC_0x161"]["HDA_ICON"] == 0
+    assert parser.vl["CCNC_0x161"]["SETSPEED_HUD"] == 1
+    assert parser.vl["CCNC_0x162"]["LEAD"] == 1
+    assert parser.vl["CCNC_0x162"]["LEAD_DISTANCE"] == pytest.approx(42.0)
+
   def test_ccnc_hud_helper_generates_lane_position_animation_and_lca_arrows(self):
     CP = CarParams.new_message()
     CP.carFingerprint = CAR.HYUNDAI_SONATA_2024
@@ -3040,6 +3052,10 @@ class TestHyundaiFingerprint:
     parser.update([(1, neutral)])
     assert parser.vl["BLINDSPOTS_REAR_CORNERS"]["BCW_Sta"] == 0
     assert parser.vl["BLINDSPOTS_REAR_CORNERS"]["BCW_IndSta"] == 1
+    assert parser.vl["BLINDSPOTS_REAR_CORNERS"]["BCW_LtIndSta"] == 0
+    assert parser.vl["BLINDSPOTS_REAR_CORNERS"]["BCW_RtIndSta"] == 0
+    assert parser.vl["BLINDSPOTS_REAR_CORNERS"]["OSMrrLamp_LtIndSta"] == 0
+    assert parser.vl["BLINDSPOTS_REAR_CORNERS"]["OSMrrLamp_RtIndSta"] == 0
     assert parser.vl["BLINDSPOTS_REAR_CORNERS"]["BCA_OnOffEquip2Sta"] == 2
     assert parser.vl["BLINDSPOTS_FRONT_CORNER_1"]["NEW_SIGNAL_3"] == 1
 
@@ -3075,6 +3091,37 @@ class TestHyundaiFingerprint:
     rear = parser.vl["BLINDSPOTS_REAR_CORNERS"]
     assert rear["BCW_LtIndSta"] == 1
     assert rear["OSMrrLamp_LtIndSta"] == 1
+
+  def test_ev9_blindspot_status_clears_nonzero_live_baseline_lamps(self):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.KIA_EV9
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.CANFD_LKA_STEERING)
+    packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
+    can_bus = CanBus(CP)
+    parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("BLINDSPOTS_REAR_CORNERS", 0)], can_bus.ECAN)
+    # Captured from route 00000108; both OSM fields decode as 3 even though
+    # BCW left/right are neutral. This is a valid startup baseline, but must
+    # never leak into the reconstructed lamp state.
+    live_body = bytes.fromhex("6fa35b000000008802000000000000000f0100000000000f")
+    try:
+      hyundaicanfd.set_ev9_adrv_baselines([CanData(0x1BA, live_body, can_bus.ECAN)])
+      neutral = hyundaicanfd.create_ev9_blindspot_status_messages(packer, can_bus, 0)
+      parser.update([(1, neutral)])
+      rear = parser.vl["BLINDSPOTS_REAR_CORNERS"]
+      assert rear["BCW_LtIndSta"] == 0
+      assert rear["BCW_RtIndSta"] == 0
+      assert rear["OSMrrLamp_LtIndSta"] == 0
+      assert rear["OSMrrLamp_RtIndSta"] == 0
+
+      left = hyundaicanfd.create_ev9_blindspot_status_messages(packer, can_bus, 1, left_blindspot=True)
+      parser.update([(2, left)])
+      rear = parser.vl["BLINDSPOTS_REAR_CORNERS"]
+      assert rear["BCW_LtIndSta"] == 1
+      assert rear["BCW_RtIndSta"] == 0
+      assert rear["OSMrrLamp_LtIndSta"] == 1
+      assert rear["OSMrrLamp_RtIndSta"] == 0
+    finally:
+      hyundaicanfd.set_ev9_adrv_baselines([])
 
   def test_canfd_camera_lead_decode(self):
     assert decode_canfd_camera_lead(0.0, -1.0) == (False, 0.0, 0.0)

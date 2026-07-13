@@ -1,6 +1,6 @@
 from types import SimpleNamespace
 
-from openpilot.selfdrive.car.ev9_cluster_objects import Ev9ClusterObjectTracker, default_enabled_param, filtered_radar_slots, \
+from openpilot.selfdrive.car.ev9_cluster_objects import Ev9ClusterObjectTracker, bsm_gated_side_slots, default_enabled_param, filtered_radar_slots, \
                                                          radar_backed_object
 
 
@@ -104,6 +104,26 @@ def test_tracker_keeps_slot_identity_when_another_track_appears():
   tracker = Ev9ClusterObjectTracker()
   slots = acquire(tracker, [point(track_id=1, distance=30.0)])
   assert slots.primary.track_id == 1
+
+
+def test_tracker_can_require_fused_primary_track():
+  tracker = Ev9ClusterObjectTracker()
+  objects = [point(track_id=1, distance=20.0), point(track_id=2, distance=35.0)]
+  slots = acquire(tracker, objects, require_preferred_primary=True)
+  assert slots.primary is None
+  slots = tracker.update(objects, preferred_primary_track_id=2, require_preferred_primary=True)
+  assert slots.primary is not None
+  assert slots.primary.track_id == 2
+
+
+def test_bsm_gate_removes_only_unconfirmed_side_slots():
+  tracker = Ev9ClusterObjectTracker()
+  slots = acquire(tracker, [point(track_id=1), point(track_id=2, lateral=2.5), point(track_id=3, lateral=-2.5)])
+  gated = bsm_gated_side_slots(slots, left_blindspot=True, right_blindspot=False)
+  assert gated.primary is not None
+  assert gated.left is not None
+  assert gated.right is None
+  assert bsm_gated_side_slots(slots, False, False, gate_enabled=False) == slots
   slots = acquire(tracker, [point(track_id=1, distance=30.0), point(track_id=2, distance=20.0)])
   assert slots.primary.track_id == 1
 

@@ -403,39 +403,25 @@ def create_blindspot_status_messages(packer, CAN, rear_values, front_corner_valu
 def create_ev9_blindspot_status_messages(packer, CAN, counter, left_blindspot=False, right_blindspot=False,
                                           left_blinker=False, right_blinker=False):
   """Recreate the stock-correlated subset of EV9 BSM output fields."""
-  # Use packer only to calculate the delta for verified EV9 fields, then apply
-  # that delta to the complete captured neutral payload. Unlike the generic
-  # Ioniq 6 helper, EV9 stock routes kept BCW_Sta and FL/FR_INDICATOR at zero
-  # through genuine lamp events, so they must not be synthesized here.
+  # Overwrite the verified fields in the complete captured payload. A delta
+  # cannot be XORed onto the body: the live pre-suppression payload can already
+  # contain nonzero OSM lamp state, which made a requested neutral value decode
+  # as 3 and held both mirror lamps on throughout route 00000108. Unlike the
+  # generic Ioniq 6 helper, EV9 stock routes kept BCW_Sta and FL/FR_INDICATOR at
+  # zero through genuine lamp events, so they must not be synthesized here.
   left_state = 2 if left_blindspot and left_blinker else (1 if left_blindspot else 0)
   right_state = 2 if right_blindspot and right_blinker else (1 if right_blindspot else 0)
-  neutral_fields = {
-    "BCW_LtIndSta": 0,
-    "BCW_RtIndSta": 0,
-    "OSMrrLamp_LtIndSta": 0,
-    "OSMrrLamp_RtIndSta": 0,
-  }
-  desired_fields = neutral_fields | {
+  desired_fields = {
     "BCW_LtIndSta": left_state,
     "BCW_RtIndSta": right_state,
     "OSMrrLamp_LtIndSta": left_state,
     "OSMrrLamp_RtIndSta": right_state,
   }
-  neutral_packed = packer.make_can_msg("BLINDSPOTS_REAR_CORNERS", CAN.ECAN, neutral_fields)
-  desired_packed = packer.make_can_msg("BLINDSPOTS_REAR_CORNERS", CAN.ECAN, desired_fields)
-  neutral = bytes(neutral_packed[1])
-  desired = bytes(desired_packed[1])
-
-  rear_msg = create_ev9_adrv_message(0x1BA, CAN.ECAN, counter)
-  rear_dat = bytearray(rear_msg[1])
-  for i in range(3, len(rear_dat)):
-    rear_dat[i] ^= neutral[i] ^ desired[i]
-  crc = hkg_can_fd_checksum(0x1BA, None, rear_dat)
-  rear_dat[0] = crc & 0xFF
-  rear_dat[1] = (crc >> 8) & 0xFF
 
   return [
-    CanData(0x1BA, bytes(rear_dat), CAN.ECAN),
+    _create_ev9_adrv_message_with_signals(
+      packer, CAN, 0x1BA, counter, "BLINDSPOTS_REAR_CORNERS", desired_fields,
+    ),
     create_ev9_adrv_message(0x1E5, CAN.ECAN, counter),
   ]
 
@@ -926,6 +912,7 @@ def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, la
                                      left_blindspot: bool = False, right_blindspot: bool = False,
                                      is_metric: bool = True, hud_enabled: bool | None = None,
                                      objects_enabled: bool = True, alternate_enabled: bool = False,
+                                     objects_on_main_enabled: bool = False,
                                      rear_bsm_fallback_enabled: bool = False,
                                      steering_icon_active: bool | None = None,
                                      speed_limit_raw: int = 0,
@@ -943,7 +930,7 @@ def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, la
   hud_feature_enabled = bool(True if hud_enabled is None else hud_enabled)
   hda_active = bool(hud_feature_enabled and enabled)
   main_standby = bool(hud_feature_enabled and main_cruise_enabled and not enabled)
-  objects_active = bool(hda_active and objects_enabled)
+  objects_active = bool(objects_enabled and (hda_active or (main_standby and objects_on_main_enabled)))
   cruise_speed = round(out.vCruiseCluster * (1 if is_metric else CV.KPH_TO_MPH))
   display_speed = 255 if not main_cruise_enabled else \
     (40 if is_metric else 25) if cruise_speed > (145 if is_metric else 90) else max(cruise_speed, 0)

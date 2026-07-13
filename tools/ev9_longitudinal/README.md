@@ -446,6 +446,28 @@ is guessed here. A single reverse event suggests `0x1E5` byte 4 value `0x11`
 may be an object-presence envelope for the stock 0.8 s on/0.2 s OSM flashing,
 but one event is insufficient to enable reconstruction.
 
+### Route 00000108 follow-up: fail-closed BSM and object rendering
+
+The 2026-07-13 drive `00000108--6951984998` validated the direct-angle steering path, but exposed three display issues.
+First, `0x36A` asserted the proposed left/right bits for about 46/10 seconds even though the stock-route comparison gives
+those bits only roughly 16–23% precision against genuine `0x1BA` warnings. It remains an experimental input and is not
+safe to enable as the device's BSM source. Side CCNC objects now require a matching BSM decision by default, so the
+fail-closed configuration renders neither false mirror warnings nor raw-track side cars.
+
+Second, the captured pre-suppression `0x1BA` body can contain `OSMrrLamp_* = 3`. The original delta overlay left those
+nonzero fields untouched: 15,321 of 16,357 synthetic frames in route 108 decoded as neutral BCW state but both OSM lamps
+at 3. Reconstruction now explicitly overwrites all four verified BCW/OSM left/right fields and recomputes the checksum.
+
+Third, the filtered primary object was calculated after `openpilot_lead_*` had already been copied into `CarState`.
+Consequently all 2,787 transmitted front-object samples had `LEAD_DISTANCE=0.0`. The final filtered result is now copied
+after tracking, and the default display path requires the fused radar-backed primary track instead of falling back to an
+arbitrary center raw track. A separate default-off `KiaEv9ClusterObjectsOnMainEnabled` flag permits confirmed objects in
+CC Main standby without claiming active HDA.
+
+The same route showed EV9-only invalid-message cascades lasting at most 0.651 seconds while every service remained alive
+and at frequency. The invalid-only debounce is one second; dead or slow services still trigger immediately. The separate
+`locationdTemporaryError` events are not hidden by this debounce.
+
 Probe mode 4 is a reset-assisted diagnostic-only experiment using the validated mode-2 request. It sends an ADAS ECU
 reset before re-entering extended diagnostics and requesting `28 01 03`. The 2026-07-11 direct OFF-to-READY test entered
 extended diagnostics successfully after reset but returned NRC `0x22` for all ten CommunicationControl attempts. It then

@@ -55,7 +55,12 @@ StarPilotEventName = custom.StarPilotOnroadEvent.EventName
 
 IGNORED_SAFETY_MODES = (SafetyModel.silent, SafetyModel.noOutput)
 EV9_TRANSIENT_COMM_ISSUE_DEBOUNCE_PARAM = "KiaEv9TransientCommIssueDebounceEnabled"
-EV9_INVALID_ONLY_COMM_ISSUE_DEBOUNCE_FRAMES = int(0.5 / DT_CTRL)
+# Route 00000108 showed a device-wide validity cascade every ten seconds while
+# every service remained alive and at its expected frequency. The longest
+# measured invalid-only interval was 0.651 s. Keep missing/slow services
+# immediate, but require a full second before this EV9-only validity path can
+# request a soft disable.
+EV9_INVALID_ONLY_COMM_ISSUE_DEBOUNCE_FRAMES = int(1.0 / DT_CTRL)
 
 
 def ev9_transient_comm_issue_debounce_enabled(raw_value: bytes | None) -> bool:
