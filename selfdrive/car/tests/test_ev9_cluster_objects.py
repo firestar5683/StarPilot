@@ -1,6 +1,7 @@
 from types import SimpleNamespace
 
-from openpilot.selfdrive.car.ev9_cluster_objects import Ev9ClusterObjectTracker, filtered_radar_slots, radar_backed_object
+from openpilot.selfdrive.car.ev9_cluster_objects import Ev9ClusterObjectTracker, default_enabled_param, filtered_radar_slots, \
+                                                         radar_backed_object
 
 
 def lead(*, track_id=1, distance=30.0, lateral=0.0, relative_speed=-1.0, status=True, radar=True):
@@ -18,6 +19,14 @@ def acquire(tracker, points, samples=3, **kwargs):
   for _ in range(samples):
     slots = tracker.update(points, **kwargs)
   return slots
+
+
+class FakeParams:
+  def __init__(self, value):
+    self.value = value
+
+  def get(self, key):
+    return self.value
 
 
 def test_rejects_vision_only_lead():
@@ -128,3 +137,9 @@ def test_fused_slot_quality_allowlist_is_display_only():
   slots = filtered_radar_slots(primary, lead(status=False), left, lead(status=False), False, {1})
   assert slots.primary is not None
   assert slots.left is None
+
+
+def test_quality_filter_param_defaults_on_when_missing_and_honors_explicit_off():
+  assert default_enabled_param(FakeParams(None), "KiaEv9RadarQualityFilterEnabled")
+  assert default_enabled_param(FakeParams(b"1"), "KiaEv9RadarQualityFilterEnabled")
+  assert not default_enabled_param(FakeParams(b"0"), "KiaEv9RadarQualityFilterEnabled")

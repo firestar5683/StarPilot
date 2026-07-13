@@ -6,6 +6,12 @@ from typing import Any
 MIN_OBJECT_DISTANCE = 0.1
 
 
+def default_enabled_param(params: Any, key: str) -> bool:
+  """Read a rollout flag where an absent value means enabled."""
+  raw = params.get(key)
+  return raw is None or raw == b"1" or raw == "1"
+
+
 @dataclass(frozen=True)
 class ClusterObject:
   track_id: int

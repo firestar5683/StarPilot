@@ -27,7 +27,8 @@ from openpilot.common.constants import CV
 from openpilot.selfdrive.car.cruise import VCruiseHelper, IMPERIAL_INCREMENT, V_CRUISE_MAX, V_CRUISE_MIN
 from openpilot.selfdrive.car.redneck_cruise import RedneckCruise, select_redneck_target_speed
 from openpilot.selfdrive.car.car_specific import MockCarState
-from openpilot.selfdrive.car.ev9_cluster_objects import ClusterObjectSlots, Ev9ClusterObjectTracker, filtered_radar_slots
+from openpilot.selfdrive.car.ev9_cluster_objects import ClusterObjectSlots, Ev9ClusterObjectTracker, default_enabled_param, \
+                                                         filtered_radar_slots
 
 from openpilot.starpilot.common.starpilot_variables import get_starpilot_toggles, update_starpilot_toggles
 from openpilot.starpilot.controls.starpilot_card import StarPilotCard
@@ -102,7 +103,7 @@ class Car:
     self.ev9_cluster_objects_enabled = self.params.get_bool("KiaEv9ClusterObjectsEnabled")
     self.ev9_cluster_alternate_enabled = self.params.get_bool("KiaEv9ClusterAlternateLeadEnabled")
     self.ev9_cluster_smoothing_enabled = self.params.get_bool("KiaEv9ClusterObjectSmoothingEnabled")
-    self.ev9_radar_quality_filter_enabled = self.params.get_bool("KiaEv9RadarQualityFilterEnabled")
+    self.ev9_radar_quality_filter_enabled = default_enabled_param(self.params, "KiaEv9RadarQualityFilterEnabled")
     self.ev9_cluster_tracker = Ev9ClusterObjectTracker()
     self.ev9_cluster_slots = ClusterObjectSlots()
 
@@ -611,7 +612,7 @@ class Car:
       self.ev9_cluster_objects_enabled = self.params.get_bool("KiaEv9ClusterObjectsEnabled")
       self.ev9_cluster_alternate_enabled = self.params.get_bool("KiaEv9ClusterAlternateLeadEnabled")
       self.ev9_cluster_smoothing_enabled = self.params.get_bool("KiaEv9ClusterObjectSmoothingEnabled")
-      self.ev9_radar_quality_filter_enabled = self.params.get_bool("KiaEv9RadarQualityFilterEnabled")
+      self.ev9_radar_quality_filter_enabled = default_enabled_param(self.params, "KiaEv9RadarQualityFilterEnabled")
       time.sleep(0.1)
 
   def card_thread(self):
