@@ -418,9 +418,28 @@ not faithfully match genuine `0x1BA` mirror indications. The default-off
 `0x1BA` only while it is fresh (100 ms) and otherwise reconstructs neutral BSM.
 If explicitly enabled, raw `0x36A` is accepted only when fresh, the base bit is
 present, and the vehicle is in Drive. The still-live ACAN `0x235`–`0x248`
-corner-object group is documented for future motion-qualified classification;
-its current quality value does not distinguish the route-106 garage wall from
-vehicles, so no classifier is guessed here.
+corner-object group was evaluated against the July 11 stock-ADAS routes
+`000000d4--5296076dfd`, `000000d5--ed0c9e21bb`, and
+`000000d6--f9d3fb2962`. These routes have openpilot longitudinal disabled,
+PCM cruise enabled, genuine bus-1 `0x1BA`, and no synthetic `sendcan 0x1BA`.
+Their 17 canonical `userBookmark` events include visually confirmed adjacent
+vehicles and genuine lamp transitions: both sides in d4 segment 7, right in d4
+segment 16, left across d4 segments 17/18, and left in d6 segment 13.
+
+Those labeled scenes disprove a geometry-only reconstruction. In d4 segment 7
+the near side tracks first enter `0x235`–`0x248` while or after both mirror
+warnings clear; d4 segment 9 likewise exposes its plausible left-side object
+only after the left warning ends. Across d4 segments 17/18 one continuous q35
+track persists through a stock on/off/on lamp sequence, while the route-106
+garage wall is also a stable q35 side-zone track. An exhaustive search across
+11 genuine BCW activations and 12,711 upstream bit-transition candidates found
+no side-specific ACAN/CAM decision bit with useful precision and recall. The
+best `0x235`–`0x248` candidates reached only 0.7%–4% precision. ADAS_DRV is
+therefore deriving `0x1BA` internally from information/history not faithfully
+available in the retained decoded streams, so no forward mirror-BSM classifier
+is guessed here. A single reverse event suggests `0x1E5` byte 4 value `0x11`
+may be an object-presence envelope for the stock 0.8 s on/0.2 s OSM flashing,
+but one event is insufficient to enable reconstruction.
 
 Probe mode 4 is a reset-assisted diagnostic-only experiment using the validated mode-2 request. It sends an ADAS ECU
 reset before re-entering extended diagnostics and requesting `28 01 03`. The 2026-07-11 direct OFF-to-READY test entered
