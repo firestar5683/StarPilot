@@ -97,3 +97,34 @@ def test_tracker_keeps_slot_identity_when_another_track_appears():
   assert slots.primary.track_id == 1
   slots = acquire(tracker, [point(track_id=1, distance=30.0), point(track_id=2, distance=20.0)])
   assert slots.primary.track_id == 1
+
+
+def test_quality_allowlist_rejects_garage_track_and_accepts_qualified_track():
+  tracker = Ev9ClusterObjectTracker()
+  garage_track = point(track_id=7, distance=7.1, lateral=1.9, relative_speed=0.0)
+  assert acquire(tracker, [garage_track], qualified_track_ids=set()).primary is None
+  assert acquire(tracker, [garage_track], qualified_track_ids={7}).left is not None
+
+
+def test_quality_allowlist_removes_deleted_or_stale_track_immediately():
+  tracker = Ev9ClusterObjectTracker()
+  obj = point(track_id=9)
+  assert acquire(tracker, [obj], qualified_track_ids={9}).primary is not None
+  assert tracker.update([obj], qualified_track_ids=set()).primary is None
+  assert 9 not in tracker.tracks
+  # Re-qualification starts a fresh acquisition instead of reviving stale UI state.
+  assert tracker.update([obj], qualified_track_ids={9}).primary is None
+
+
+def test_quality_filter_disabled_preserves_legacy_tracker_behavior():
+  tracker = Ev9ClusterObjectTracker()
+  garage_track = point(track_id=11, distance=4.5, lateral=-2.0, relative_speed=0.0)
+  assert acquire(tracker, [garage_track], qualified_track_ids=None).right is not None
+
+
+def test_fused_slot_quality_allowlist_is_display_only():
+  primary = lead(track_id=1)
+  left = lead(track_id=2, lateral=2.5)
+  slots = filtered_radar_slots(primary, lead(status=False), left, lead(status=False), False, {1})
+  assert slots.primary is not None
+  assert slots.left is None

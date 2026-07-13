@@ -102,6 +102,7 @@ class Car:
     self.ev9_cluster_objects_enabled = self.params.get_bool("KiaEv9ClusterObjectsEnabled")
     self.ev9_cluster_alternate_enabled = self.params.get_bool("KiaEv9ClusterAlternateLeadEnabled")
     self.ev9_cluster_smoothing_enabled = self.params.get_bool("KiaEv9ClusterObjectSmoothingEnabled")
+    self.ev9_radar_quality_filter_enabled = self.params.get_bool("KiaEv9RadarQualityFilterEnabled")
     self.ev9_cluster_tracker = Ev9ClusterObjectTracker()
     self.ev9_cluster_slots = ClusterObjectSlots()
 
@@ -318,8 +319,10 @@ class Car:
         fused_lead = self.sm['radarState'].leadOne
         if fused_lead.status and getattr(fused_lead, "radar", False):
           preferred_primary_track_id = int(getattr(fused_lead, "radarTrackId", -1))
+      qualified_track_ids = set(getattr(self.RI, "ev9_cluster_quality_track_ids", set())) \
+        if self.ev9_radar_quality_filter_enabled else None
       self.ev9_cluster_slots = self.ev9_cluster_tracker.update(
-        list(RD.points), preferred_primary_track_id, self.ev9_cluster_alternate_enabled,
+        list(RD.points), preferred_primary_track_id, self.ev9_cluster_alternate_enabled, qualified_track_ids,
       )
 
     self.sm.update(0)
@@ -474,6 +477,8 @@ class Car:
       self.sm.valid['starpilotRadarState']
 
     filtered_slots = None
+    qualified_track_ids = set(getattr(self.RI, "ev9_cluster_quality_track_ids", set())) \
+      if self.ev9_radar_quality_filter_enabled else None
     if ev9_filtered_objects and self.ev9_cluster_smoothing_enabled:
       # The tracker holds brief raw-track dropouts itself. Once the complete
       # radar service is invalid, fail closed instead of retaining stale cars.
@@ -493,7 +498,8 @@ class Car:
       lead_left = self.sm['starpilotRadarState'].leadLeft if adjacent_valid else None
       lead_right = self.sm['starpilotRadarState'].leadRight if adjacent_valid else None
       filtered_slots = filtered_radar_slots(self.sm['radarState'].leadOne, self.sm['radarState'].leadTwo,
-                                            lead_left, lead_right, self.ev9_cluster_alternate_enabled)
+                                            lead_left, lead_right, self.ev9_cluster_alternate_enabled,
+                                            qualified_track_ids)
       if filtered_slots.primary is not None:
         lead_visible = True
         lead_distance = filtered_slots.primary.distance
@@ -605,6 +611,7 @@ class Car:
       self.ev9_cluster_objects_enabled = self.params.get_bool("KiaEv9ClusterObjectsEnabled")
       self.ev9_cluster_alternate_enabled = self.params.get_bool("KiaEv9ClusterAlternateLeadEnabled")
       self.ev9_cluster_smoothing_enabled = self.params.get_bool("KiaEv9ClusterObjectSmoothingEnabled")
+      self.ev9_radar_quality_filter_enabled = self.params.get_bool("KiaEv9RadarQualityFilterEnabled")
       time.sleep(0.1)
 
   def card_thread(self):

@@ -385,6 +385,13 @@ Those stock routes also establish the conservative speed-limit reconstruction. T
 zero. `SIGNS` remains zero because road-sign classes have not yet been mapped exactly. The independent default-on
 `KiaEv9ClusterSpeedLimitEnabled` flag can restore the prior all-zero/dashes output for isolated testing.
 
+`KiaEv9RadarQualityFilterEnabled` independently applies the stock-correlated MRR35
+`NEW_SIGNAL_7 > 200` quality gate only to reconstructed EV9 CCNC objects. It does not
+remove tracks from `RadarData`, `liveTracks`, fusion, or planning. Full stock-route
+comparison retained 99.23%/99.93% of displayed objects, while all 12,791 parked
+garage-track samples in route `00000106--2e49e586a6` measured 124–126 and were
+rejected. Disabling the flag restores the previous display-only tracker behavior.
+
 Probe mode 4 is a reset-assisted diagnostic-only experiment using the validated mode-2 request. It sends an ADAS ECU
 reset before re-entering extended diagnostics and requesting `28 01 03`. The 2026-07-11 direct OFF-to-READY test entered
 extended diagnostics successfully after reset but returned NRC `0x22` for all ten CommunicationControl attempts. It then
