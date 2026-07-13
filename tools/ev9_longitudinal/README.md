@@ -354,6 +354,14 @@ during driver override, or during high-angle inhibition. Both LKAS_ALT and CCNC 
 authority, including while tracking straight with a zero-degree angle command. Disabling either flag restores its prior
 behavior for isolated testing.
 
+Route `00000106` showed that stage-15 Drive/AOL emitted active `LKAS_ALT` (`0x110`) with nonzero gain but no downstream
+`ADAS_CMD_35_10ms` (`0xCB`); EPS torque remained near zero hands-off. Stock EV9 routes instead keep `LKAS_ALT` inactive
+and use `0xCB` for actual steering. Once ADAS transmission is disabled it cannot perform that translation, so the
+default-on `KiaEv9DirectAngleCommandEnabled` path replaces synthetic active `0x110` with `0xCB` on ECAN in Drive while
+lateral is active. It uses the same vehicle-model/Panda-limited angle and gain; high-angle inhibition retains active
+status with zero gain. Inactive commands use the MDPS angle, and MDPS `LKA_ANGLE_FAULT` fails closed. This flag does not
+enable longitudinal actuation, and the cluster remains grey when the required downstream path is unavailable.
+
 The same route invalidated direct `radarState.leadTwo` cluster mapping. Both model leads were simultaneously valid 5,421
 times; 5,358 pairs described nearly the same object, and neither carried a radar track ID. This caused the duplicate front
 car. In stock EV9 routes `000000d4--5296076dfd` and `000000d6--f9d3fb2962`, `CCNC_0x162.LEAD_ALT` remained zero in all

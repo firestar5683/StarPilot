@@ -9,7 +9,8 @@ from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai import hyundaicanfd, hyundaican
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.ev9_longitudinal import EV9_CLUSTER_ALTERNATE_LEAD_PARAM, EV9_CLUSTER_HUD_PARAM, \
-                                                   EV9_CLUSTER_OBJECTS_PARAM, EV9_CLUSTER_SPEED_LIMIT_PARAM, EV9_DTC_CAPTURE_PARAM, \
+                                                   EV9_CLUSTER_OBJECTS_PARAM, EV9_CLUSTER_SPEED_LIMIT_PARAM, \
+                                                   EV9_DIRECT_ANGLE_COMMAND_PARAM, EV9_DTC_CAPTURE_PARAM, \
                                                    EV9_REAR_BSM_CLUSTER_FALLBACK_PARAM, EV9_SOFT_DRIVER_STEERING_OVERRIDE_PARAM, \
                                                    EV9LongitudinalTestConfig, EV9LongitudinalTestStage, \
                                                    EV9ActuationAbortReason, advance_ev9_longitudinal_support_stage, \
@@ -17,7 +18,7 @@ from opendbc.car.hyundai.ev9_longitudinal import EV9_CLUSTER_ALTERNATE_LEAD_PARA
                                                    ev9_dtc_capture_messages, \
                                                    ev9_default_enabled_param, \
                                                    filter_ev9_adrv_replay_messages, \
-                                                   get_ev9_longitudinal_test_config
+                                                   get_ev9_longitudinal_test_config, should_send_ev9_direct_angle_command
 from opendbc.car.hyundai.values import HyundaiFlags, Buttons, CarControllerParams, CAR, CANFD_RADAR_LIVE_LONGITUDINAL_CAR, \
                                         kia_ev6_gt_line_longitudinal_tuning
 from opendbc.car.interfaces import CarControllerBase
@@ -297,14 +298,15 @@ def update_ev9_high_angle_inhibit(CP, inhibited: bool, steering_angle_deg: float
 
 def ev9_dynamic_steering_icons(CP, feature_enabled: bool, lat_active: bool, gain: float,
                                driver_override: bool, high_angle_inhibited: bool,
-                               legacy_lka_icon: int, legacy_lfa_icon: int) -> tuple[int, int, bool | None]:
+                               legacy_lka_icon: int, legacy_lfa_icon: int,
+                               downstream_angle_command_available: bool = True) -> tuple[int, int, bool | None]:
   """Return EV9 grey/green steering state plus the CCNC actuation override."""
   applicable = CP.carFingerprint == CAR.KIA_EV9 and CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING
   if not applicable or not feature_enabled:
     return legacy_lka_icon, legacy_lfa_icon, None
 
   meaningfully_actuating = bool(lat_active and gain > EV9_HIGH_ANGLE_GAIN_MIN and
-                                not driver_override and not high_angle_inhibited)
+                                not driver_override and not high_angle_inhibited and downstream_angle_command_available)
   if lat_active:
     icon = 2 if meaningfully_actuating else 1
     return icon, icon, meaningfully_actuating
@@ -388,6 +390,8 @@ class CarController(CarControllerBase):
     self.ev9_high_angle_fault_protection_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
       ev9_default_enabled_param(self._params, EV9_HIGH_ANGLE_FAULT_PROTECTION_PARAM)
     self.ev9_high_angle_inhibited = False
+    self.ev9_direct_angle_command_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
+      ev9_default_enabled_param(self._params, EV9_DIRECT_ANGLE_COMMAND_PARAM)
     self.ev9_cluster_hud_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
       ev9_default_enabled_param(self._params, EV9_CLUSTER_HUD_PARAM)
     self.ev9_cluster_objects_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
@@ -558,9 +562,15 @@ class CarController(CarControllerBase):
                                               self.params.ANGLE_LIMITS.STEER_ANGLE_MAX))
         self.angle_filter.x = self.apply_angle_last
       driver_override = ev9_driver_override_active(self.CP, CS.out.steeringPressed, CC.latActive)
+      ev9_direct_path_required = self.CP.carFingerprint == CAR.KIA_EV9 and self.long_active_ecu and \
+        self.ev9_long_test.armed and self.ev9_long_test.stage >= EV9LongitudinalTestStage.STEERING_KEEPALIVE
+      ev9_direct_path_available = not ev9_direct_path_required or should_send_ev9_direct_angle_command(
+        self.ev9_long_test, self.ev9_direct_angle_command_enabled,
+        CS.out.gearShifter == structs.CarState.GearShifter.drive, CC.latActive,
+      ) and not getattr(CS, "mdps_lka_angle_fault", False)
       lka_icon, lfa_icon, ev9_ccnc_steering_active = ev9_dynamic_steering_icons(
         self.CP, self.ev9_dynamic_steering_icon_enabled, CC.latActive, apply_torque,
-        driver_override, self.ev9_high_angle_inhibited, lka_icon, lfa_icon,
+        driver_override, self.ev9_high_angle_inhibited, lka_icon, lfa_icon, ev9_direct_path_available,
       )
     else:
       # steering torque
@@ -817,15 +827,27 @@ class CarController(CarControllerBase):
       steering_msg_active = bool(steering_msg_active and drive_gear)
     openpilot_owns_lka_alt = angle_lkas_alt and drive_gear and (CC.latActive or CC.enabled)
     forward_stock_lkas = angle_lkas_alt and not openpilot_owns_lka_alt
-    if not forward_stock_lkas:
+    ev9_direct_angle_mode = self.CP.carFingerprint == CAR.KIA_EV9 and self.ev9_direct_angle_command_enabled and \
+      ev9_long_test_active and self.ev9_long_test.stage >= EV9LongitudinalTestStage.STEERING_KEEPALIVE
+    if not forward_stock_lkas and not ev9_direct_angle_mode:
       can_sends.extend(hyundaicanfd.create_steering_messages(self.packer, self.CP, self.CAN, CC.enabled,
                                                              steering_msg_active, apply_torque, apply_angle,
                                                              CS.stock_lfa_msg,
                                                              CS.stock_lkas_msg if preserve_stock_lkas else None,
                                                              lka_icon=lka_icon))
+    if ev9_direct_angle_mode and drive_gear:
+      direct_active = should_send_ev9_direct_angle_command(
+        self.ev9_long_test, self.ev9_direct_angle_command_enabled, drive_gear, CC.latActive,
+      ) and not getattr(CS, "mdps_lka_angle_fault", False)
+      can_sends.append(hyundaicanfd.create_ev9_direct_angle_command(
+        self.packer, self.CAN,
+        apply_angle if direct_active else float(getattr(CS, "mdps_steering_angle", CS.out.steeringAngleDeg)),
+        direct_active, apply_torque if direct_active else 0.0,
+      ))
     if ev9_long_test_active and self.ev9_long_test.stage >= EV9LongitudinalTestStage.STEERING_KEEPALIVE and not drive_gear:
       can_sends.extend(hyundaicanfd.create_ev9_inactive_steering_messages(self.packer, self.CAN,
-                                                                          CS.out.steeringAngleDeg))
+                                                                          float(getattr(CS, "mdps_steering_angle",
+                                                                                        CS.out.steeringAngleDeg))))
 
     # prevent LFA from activating on LKA steering cars by sending "no lane lines detected" to ADAS ECU
     suppress_lfa = bool(lka_steering)

@@ -15,6 +15,7 @@ EV9_CLUSTER_OBJECTS_PARAM = "KiaEv9ClusterObjectsEnabled"
 EV9_CLUSTER_ALTERNATE_LEAD_PARAM = "KiaEv9ClusterAlternateLeadEnabled"
 EV9_CLUSTER_SPEED_LIMIT_PARAM = "KiaEv9ClusterSpeedLimitEnabled"
 EV9_REAR_BSM_CLUSTER_FALLBACK_PARAM = "KiaEv9RearBsmClusterFallbackEnabled"
+EV9_DIRECT_ANGLE_COMMAND_PARAM = "KiaEv9DirectAngleCommandEnabled"
 EV9_DTC_CAPTURE_TARGETS = (0x7C4, 0x7C6, 0x7D0, 0x7D4)
 EV9_DTC_CAPTURE_SLOT_FRAMES = 100
 
@@ -155,6 +156,13 @@ class EV9LongitudinalTestConfig:
                                                  EV9LongitudinalProbeMode.RESET_TX_DISABLE_ALL_MESSAGE_TYPES,
                                                  EV9LongitudinalProbeMode.FULL_DISABLE_THEN_RX_ENABLE) and \
       self.stage >= EV9LongitudinalTestStage.RADAR_HEARTBEAT
+
+
+def should_send_ev9_direct_angle_command(config: EV9LongitudinalTestConfig, feature_enabled: bool,
+                                         drive_gear: bool, lat_active: bool) -> bool:
+  """Gate the downstream 0xCB command needed when ADAS translation is disabled."""
+  return feature_enabled and config.armed and config.stage >= EV9LongitudinalTestStage.STEERING_KEEPALIVE and \
+    drive_gear and lat_active
 
 
 EV9_REPLAY_STAGE_BY_ADDRESS: dict[int, EV9LongitudinalTestStage] = {

@@ -506,10 +506,12 @@ class CarState(CarStateBase):
 
     ret.steeringRateDeg = cp.vl["STEERING_SENSORS"]["STEERING_RATE"]
     ret.steeringAngleDeg = cp.vl["STEERING_SENSORS"]["STEERING_ANGLE"]
+    self.mdps_steering_angle = cp.vl["MDPS"]["STEERING_ANGLE"]
+    self.mdps_lka_angle_fault = cp.vl["MDPS"]["LKA_ANGLE_FAULT"] != 0
     ret.steeringTorque = cp.vl["MDPS"]["STEERING_COL_TORQUE"]
     ret.steeringTorqueEps = cp.vl["MDPS"]["STEERING_OUT_TORQUE"]
     ret.steeringPressed = self.update_steering_pressed(abs(ret.steeringTorque) > self.params.STEER_THRESHOLD, 5)
-    ret.steerFaultTemporary = cp.vl["MDPS"]["LKA_FAULT"] != 0
+    ret.steerFaultTemporary = cp.vl["MDPS"]["LKA_FAULT"] != 0 or self.mdps_lka_angle_fault
 
     ccnc_non_hda2 = self.CP.flags & HyundaiFlags.CCNC and not self.CP.flags & HyundaiFlags.CANFD_LKA_STEERING
     if ccnc_non_hda2:

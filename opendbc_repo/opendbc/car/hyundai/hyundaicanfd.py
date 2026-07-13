@@ -92,6 +92,11 @@ def _create_angle_adas_cmd_msg(packer, CAN, apply_angle: float, lat_active: bool
   return packer.make_can_msg("ADAS_CMD_35_10ms", CAN.ECAN, values)
 
 
+def create_ev9_direct_angle_command(packer, CAN, apply_angle: float, lat_active: bool, torque_reduction_gain: float):
+  """Send the safety-limited angle directly to EPS when EV9 ADAS TX is disabled."""
+  return _create_angle_adas_cmd_msg(packer, CAN, apply_angle, lat_active, torque_reduction_gain)
+
+
 def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_torque, apply_angle,
                              lfa_base_values=None, lkas_base_values=None, lka_icon=None):
   if lka_icon is None:

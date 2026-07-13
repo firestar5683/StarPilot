@@ -21,7 +21,8 @@ from opendbc.car.hyundai.carstate import CarState, decode_canfd_camera_lead, dec
 from opendbc.car.hyundai.interface import CarInterface, attempt_ev9_pre_fingerprint_suppression
 from opendbc.car.hyundai import hyundaican, hyundaicanfd
 from opendbc.car.hyundai.hyundaicanfd import CanBus
-from opendbc.car.hyundai.ev9_longitudinal import EV9LongitudinalProbeMode, EV9LongitudinalTestConfig, EV9LongitudinalTestStage
+from opendbc.car.hyundai.ev9_longitudinal import EV9LongitudinalProbeMode, EV9LongitudinalTestConfig, EV9LongitudinalTestStage, \
+                                                    should_send_ev9_direct_angle_command
 from opendbc.car.hyundai.radar_interface import MRREVO14F_RADAR_START_ADDR, MRR30_RADAR_START_ADDR, MRR35_RADAR_START_ADDR, \
                                              RADAR_START_ADDR, get_radar_track_config
 from opendbc.car.hyundai.values import CAMERA_SCC_CAR, CANFD_CAR, CAN_GEARS, CAR, CHECKSUM, DATE_FW_ECUS, \
@@ -1930,6 +1931,70 @@ class TestHyundaiFingerprint:
     assert parser.vl["LKAS_ALT"]["ADAS_ACIAnglTqRedcGainVal"] == pytest.approx(0.0)
     assert parser.vl["LKAS_ALT"]["ADAS_StrAnglReqVal"] == pytest.approx(8.5)
 
+  def test_ev9_direct_angle_command_gate(self):
+    stage15 = EV9LongitudinalTestConfig(True, EV9LongitudinalTestStage.STEERING_KEEPALIVE,
+                                        EV9LongitudinalProbeMode.TX_DISABLE_ALL_MESSAGE_TYPES)
+    stage14 = EV9LongitudinalTestConfig(True, EV9LongitudinalTestStage.ADRV_57A,
+                                        EV9LongitudinalProbeMode.TX_DISABLE_ALL_MESSAGE_TYPES)
+    assert should_send_ev9_direct_angle_command(stage15, True, True, True)
+    assert not should_send_ev9_direct_angle_command(stage15, False, True, True)
+    assert not should_send_ev9_direct_angle_command(stage15, True, False, True)
+    assert not should_send_ev9_direct_angle_command(stage15, True, True, False)
+    assert not should_send_ev9_direct_angle_command(stage14, True, True, True)
+
+  @pytest.mark.parametrize(("gain", "expected_gain"), [(0.44, 0.44), (0.0, 0.0)])
+  def test_ev9_direct_angle_command_is_active_with_safety_limited_values(self, gain, expected_gain):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.KIA_EV9
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.EV | HyundaiFlags.CANFD_ANGLE_STEERING |
+                   HyundaiFlags.CANFD_LKA_STEERING | HyundaiFlags.CANFD_LKA_STEERING_ALT)
+    packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
+    can_bus = CanBus(CP)
+    parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("ADAS_CMD_35_10ms", 0)], can_bus.ECAN)
+
+    msg = hyundaicanfd.create_ev9_direct_angle_command(packer, can_bus, -18.7, True, gain)
+    assert msg[0] == 0xCB
+    assert msg[2] == can_bus.ECAN
+    parser.update([(1, [msg])])
+    assert parser.can_valid
+    assert parser.vl["ADAS_CMD_35_10ms"]["ADAS_ActvACILvl2Sta"] == 2
+    assert parser.vl["ADAS_CMD_35_10ms"]["ADAS_StrAnglReqVal"] == pytest.approx(-18.7)
+    assert parser.vl["ADAS_CMD_35_10ms"]["ADAS_ACIAnglTqRedcGainVal"] == pytest.approx(expected_gain)
+
+  @pytest.mark.parametrize(("direct_enabled", "expected_address", "unexpected_address"), [
+    (True, 0xCB, 0x110),
+    (False, 0x110, 0xCB),
+  ])
+  def test_ev9_direct_angle_mode_replaces_active_lkas_alt(self, direct_enabled, expected_address, unexpected_address):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.KIA_EV9
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.EV | HyundaiFlags.CANFD_ANGLE_STEERING |
+                   HyundaiFlags.CANFD_LKA_STEERING | HyundaiFlags.CANFD_LKA_STEERING_ALT)
+    CP.openpilotLongitudinalControl = True
+    controller = CarController(DBC[CP.carFingerprint], CP)
+    controller.frame = 1
+    controller.ev9_long_test = EV9LongitudinalTestConfig(
+      True, EV9LongitudinalTestStage.STEERING_KEEPALIVE, EV9LongitudinalProbeMode.TX_DISABLE_ALL_MESSAGE_TYPES,
+    )
+    controller.ev9_direct_angle_command_enabled = direct_enabled
+    cc = SimpleNamespace(
+      enabled=True, latActive=True, leftBlinker=False, rightBlinker=False,
+      actuators=SimpleNamespace(longControlState=LongCtrlState.off),
+      hudControl=SimpleNamespace(), cruiseControl=SimpleNamespace(override=False),
+    )
+    cs = SimpleNamespace(
+      stock_lfa_msg=None, stock_lkas_msg={}, mdps_steering_angle=3.2, mdps_lka_angle_fault=False,
+      left_blindspot_from_radar=False, right_blindspot_from_radar=False, is_metric=True,
+      out=SimpleNamespace(steeringAngleDeg=3.0, gearShifter=structs.CarState.GearShifter.drive,
+                          cruiseState=SimpleNamespace(available=True), accFaulted=False,
+                          brakePressed=False, gasPressed=False),
+    )
+    msgs = controller.create_canfd_msgs(0, True, 0.44, 4.5, 0.0, 0.0, False, cc.hudControl, cs, cc,
+                                        get_test_toggles(), lka_icon=2, lfa_icon=2)
+    addresses = [msg[0] for msg in msgs]
+    assert expected_address in addresses
+    assert unexpected_address not in addresses
+
   def test_ev9_inactive_angle_steering_lets_safety_forward_stock_lkas(self):
     CP = CarParams.new_message()
     CP.carFingerprint = CAR.KIA_EV9
@@ -2211,6 +2276,13 @@ class TestHyundaiFingerprint:
 
     # Disabling the feature exactly restores the pre-feature icon state.
     assert ev9_dynamic_steering_icons(CP, False, True, gain, override, inhibited, 3, 2) == (3, 2, None)
+
+  def test_ev9_dynamic_steering_icon_requires_downstream_command_path(self):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.KIA_EV9
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.CANFD_ANGLE_STEERING)
+    assert ev9_dynamic_steering_icons(CP, True, True, 0.40, False, False, 1, 1, False) == (1, 1, False)
+    assert ev9_dynamic_steering_icons(CP, True, True, 0.40, False, False, 1, 1, True) == (2, 2, True)
 
   @pytest.mark.parametrize(("steering_active", "expected_icon"), [(False, 1), (True, 2)])
   def test_ev9_ccnc_dynamic_steering_icon(self, steering_active, expected_icon):

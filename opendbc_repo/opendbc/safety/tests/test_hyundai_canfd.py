@@ -579,7 +579,7 @@ class TestHyundaiCanfdLKASteeringAltAngleLongEV(HyundaiLongitudinalBase, TestHyu
   MAX_ACCEL = 0.30
   MIN_ACCEL = -0.50
 
-  TX_MSGS = [[0x110, 0], [0x1CF, 1], [0x362, 0], [0x51, 0], [0x100, 0], [0x730, 1], [0x12a, 1], [0x160, 1],
+  TX_MSGS = [[0x110, 0], [0xCB, 1], [0x1CF, 1], [0x362, 0], [0x51, 0], [0x100, 0], [0x730, 1], [0x12a, 1], [0x160, 1],
              [0x1ba, 1], [0x1e0, 1], [0x1e5, 1], [0x31a, 1], [0x3b5, 1], [0x3c1, 1],
              [0x1a0, 1], [0x1ea, 1], [0x200, 1], [0x345, 1], [0x1da, 1],
              [0x161, 1], [0x162, 1], [0x38c, 1], [0x57a, 1],
@@ -636,6 +636,31 @@ class TestHyundaiCanfdLKASteeringAltAngleLongEV(HyundaiLongitudinalBase, TestHyu
       "ADAS_ACIAnglTqRedcGainVal": gain_raw * 0.004 if enabled or gain_raw != 250 else 0.0,
     }
     return self.packer.make_can_msg_safety("LKAS_ALT", 0, values)
+
+  def _direct_angle_cmd_msg(self, angle, enabled, gain=1.0):
+    values = {
+      "ADAS_ActvACISta": 0,
+      "ADAS_ActvACILvl2Sta": 2 if enabled else 1,
+      "ADAS_StrAnglReqVal": angle,
+      "ADAS_ACIAnglTqRedcGainVal": gain if enabled else 0.0,
+      "FCA_ESA_ActvSta": 0,
+      "FCA_ESA_TqBstGainVal": 0.0,
+    }
+    return self.packer.make_can_msg_safety("ADAS_CMD_35_10ms", 1, values)
+
+  def test_ev9_direct_downstream_angle_command_allowed_and_checked(self):
+    self.safety.set_controls_allowed(True)
+    self._reset_angle_measurement(0)
+    self._reset_speed_measurement(1)
+    self._set_prev_desired_angle(0)
+    self.assertTrue(self._tx(self._direct_angle_cmd_msg(0, True)))
+    self._set_prev_desired_angle(0)
+    self.assertTrue(self._tx(self._direct_angle_cmd_msg(0, True, gain=0.0)))
+    self._rx(self._gear_msg(0))
+    self._set_prev_desired_angle(0)
+    self.assertFalse(self._tx(self._direct_angle_cmd_msg(0, True)))
+    self._set_prev_desired_angle(0)
+    self.assertFalse(self._tx(self._direct_angle_cmd_msg(400, True)))
 
   def _gear_msg(self, gear):
     values = {"GEAR": gear, "ACCELERATOR_PEDAL": 0}

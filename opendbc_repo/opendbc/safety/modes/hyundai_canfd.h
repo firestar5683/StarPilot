@@ -259,6 +259,10 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *msg) {
       const int lfa_angle_active = (msg->data[3] >> 4U) & 0xFU;
       const bool steer_angle_req = lfa_angle_active == 2;
 
+      if (steer_angle_req && hyundai_canfd_bounded_angle_long && !hyundai_canfd_lka_alt_openpilot_allowed()) {
+        tx = false;
+      }
+
       int desired_angle = (((uint32_t)(msg->data[5] & 0x3FU)) << 8) | (uint32_t)msg->data[4];
       desired_angle = to_signed(desired_angle, 14);
 
