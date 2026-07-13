@@ -18,7 +18,8 @@ from opendbc.car.can_definitions import CanData, CanRecvCallable, CanSendCallabl
 from opendbc.car.carlog import carlog
 from opendbc.car.fw_versions import ObdCallback
 from opendbc.car.car_helpers import get_car, interfaces
-from opendbc.car.hyundai.ev9_longitudinal import EV9LongitudinalTestStage, get_ev9_longitudinal_test_config
+from opendbc.car.hyundai.ev9_longitudinal import EV9LongitudinalTestStage, ev9_cluster_display_speed_limit_raw, \
+                                                   get_ev9_longitudinal_test_config
 from opendbc.car.hyundai.interface import attempt_ev9_pre_fingerprint_suppression
 from opendbc.car.interfaces import CarInterfaceBase, RadarInterfaceBase
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
@@ -103,6 +104,7 @@ class Car:
     self.ev9_cluster_objects_enabled = self.params.get_bool("KiaEv9ClusterObjectsEnabled")
     self.ev9_cluster_alternate_enabled = self.params.get_bool("KiaEv9ClusterAlternateLeadEnabled")
     self.ev9_cluster_smoothing_enabled = self.params.get_bool("KiaEv9ClusterObjectSmoothingEnabled")
+    self.ev9_cluster_map_speed_limit_fallback_enabled = self.params.get_bool("KiaEv9ClusterMapSpeedLimitFallbackEnabled")
     self.ev9_radar_quality_filter_enabled = default_enabled_param(self.params, "KiaEv9RadarQualityFilterEnabled")
     self.ev9_cluster_tracker = Ev9ClusterObjectTracker()
     self.ev9_cluster_slots = ClusterObjectSlots()
@@ -327,6 +329,18 @@ class Car:
       )
 
     self.sm.update(0)
+
+    if str(self.CP.carFingerprint) == "KIA_EV9":
+      plan_valid = self.sm.seen['starpilotPlan'] and self.sm.alive['starpilotPlan'] and self.sm.valid['starpilotPlan']
+      plan = self.sm['starpilotPlan']
+      self.CI.CS.ev9_cluster_speed_limit_raw = ev9_cluster_display_speed_limit_raw(
+        getattr(self.CI.CS, "ev9_cluster_speed_limit_raw", 0),
+        self.ev9_cluster_map_speed_limit_fallback_enabled,
+        plan_valid,
+        str(plan.slcSpeedLimitSource) if plan_valid else "None",
+        float(plan.slcSpeedLimit) if plan_valid else 0.0,
+        bool(getattr(self.CI.CS, "is_metric", self.is_metric)),
+      )
 
     can_rcv_valid = len(can_strs) > 0
 
@@ -612,6 +626,7 @@ class Car:
       self.ev9_cluster_objects_enabled = self.params.get_bool("KiaEv9ClusterObjectsEnabled")
       self.ev9_cluster_alternate_enabled = self.params.get_bool("KiaEv9ClusterAlternateLeadEnabled")
       self.ev9_cluster_smoothing_enabled = self.params.get_bool("KiaEv9ClusterObjectSmoothingEnabled")
+      self.ev9_cluster_map_speed_limit_fallback_enabled = self.params.get_bool("KiaEv9ClusterMapSpeedLimitFallbackEnabled")
       self.ev9_radar_quality_filter_enabled = default_enabled_param(self.params, "KiaEv9RadarQualityFilterEnabled")
       time.sleep(0.1)
 

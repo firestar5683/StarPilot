@@ -385,6 +385,14 @@ Those stock routes also establish the conservative speed-limit reconstruction. T
 zero. `SIGNS` remains zero because road-sign classes have not yet been mapped exactly. The independent default-on
 `KiaEv9ClusterSpeedLimitEnabled` flag can restore the prior all-zero/dashes output for isolated testing.
 
+Route `00000106--2e49e586a6` also demonstrated why camera recognition and map data must remain separate. During segment 6,
+the camera speed-limit field stayed zero while `starpilotPlan` selected a 25 mph `Map Data` limit for 111 of 120 qlog
+samples. The default-off `KiaEv9ClusterMapSpeedLimitFallbackEnabled` flag can use a valid, live selected Map Data,
+Mapbox, or Vision limit for the display only when the camera reports zero. Camera values always take precedence; the
+fallback uses neither the configured offset, next limit, cruise set speed, nor longitudinal plan, and clears immediately
+when the selected source becomes invalid. This changes the cluster from strict OEM camera semantics and is therefore kept
+independently opt-in for testing.
+
 `KiaEv9RadarQualityFilterEnabled` independently applies the stock-correlated MRR35
 `NEW_SIGNAL_7 > 200` quality gate only to reconstructed EV9 CCNC objects. It does not
 remove tracks from `RadarData`, `liveTracks`, fusion, or planning. Full stock-route

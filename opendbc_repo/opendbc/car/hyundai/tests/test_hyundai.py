@@ -22,7 +22,7 @@ from opendbc.car.hyundai.interface import CarInterface, attempt_ev9_pre_fingerpr
 from opendbc.car.hyundai import hyundaican, hyundaicanfd
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.ev9_longitudinal import EV9LongitudinalProbeMode, EV9LongitudinalTestConfig, EV9LongitudinalTestStage, \
-                                                    should_send_ev9_direct_angle_command
+                                                    ev9_cluster_display_speed_limit_raw, should_send_ev9_direct_angle_command
 from opendbc.car.hyundai.radar_interface import MRREVO14F_RADAR_START_ADDR, MRR30_RADAR_START_ADDR, MRR35_RADAR_START_ADDR, \
                                              RADAR_START_ADDR, get_radar_track_config
 from opendbc.car.hyundai.values import CAMERA_SCC_CAR, CANFD_CAR, CAN_GEARS, CAR, CHECKSUM, DATE_FW_ECUS, \
@@ -1743,6 +1743,38 @@ class TestHyundaiFingerprint:
     parser.update([(1, msgs)])
     for signal in ("SPEEDLIMIT", "SPEEDLIMIT_FLASH", "COUNTRY", "SPEEDLIMIT_WEATHER", "SIGNS"):
       assert parser.vl["CCNC_0x162"][signal] == 0
+
+  @pytest.mark.parametrize(("source", "is_metric", "speed_limit_ms", "expected"), [
+    ("Map Data", False, 25 * 0.44704, 25),
+    ("Mapbox", False, 55 * 0.44704, 55),
+    ("Vision", True, 50 / 3.6, 50),
+    ("Map Data", True, 300 / 3.6, 252),
+  ])
+  def test_ev9_ccnc_map_speed_limit_fallback(self, source, is_metric, speed_limit_ms, expected):
+    assert ev9_cluster_display_speed_limit_raw(
+      0, fallback_enabled=True, plan_valid=True, plan_source=source,
+      plan_speed_limit=speed_limit_ms, is_metric=is_metric,
+    ) == expected
+
+  @pytest.mark.parametrize(("fallback_enabled", "plan_valid", "source", "speed_limit_ms"), [
+    (False, True, "Map Data", 25 * 0.44704),
+    (True, False, "Map Data", 25 * 0.44704),
+    (True, True, "None", 25 * 0.44704),
+    (True, True, "Dashboard", 25 * 0.44704),
+    (True, True, "Map Data", 0.0),
+    (True, True, "Map Data", float("nan")),
+  ])
+  def test_ev9_ccnc_map_speed_limit_fallback_fails_closed(self, fallback_enabled, plan_valid, source, speed_limit_ms):
+    assert ev9_cluster_display_speed_limit_raw(
+      0, fallback_enabled=fallback_enabled, plan_valid=plan_valid, plan_source=source,
+      plan_speed_limit=speed_limit_ms, is_metric=False,
+    ) == 0
+
+  def test_ev9_ccnc_camera_speed_limit_overrides_map_fallback(self):
+    assert ev9_cluster_display_speed_limit_raw(
+      45, fallback_enabled=True, plan_valid=True, plan_source="Map Data",
+      plan_speed_limit=25 * 0.44704, is_metric=False,
+    ) == 45
 
   def test_ev9_ccnc_hud_inactive_and_independent_object_gates(self):
     CP = CarParams.new_message()

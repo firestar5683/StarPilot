@@ -1,7 +1,9 @@
 from dataclasses import dataclass
 from enum import IntEnum
+import math
 
 from opendbc.car import CanData
+from opendbc.car.common.conversions import Conversions as CV
 
 
 EV9_LONG_TEST_ENABLED_PARAM = "KiaEv9LongitudinalTestEnabled"
@@ -14,10 +16,40 @@ EV9_CLUSTER_HUD_PARAM = "KiaEv9ClusterHudEnabled"
 EV9_CLUSTER_OBJECTS_PARAM = "KiaEv9ClusterObjectsEnabled"
 EV9_CLUSTER_ALTERNATE_LEAD_PARAM = "KiaEv9ClusterAlternateLeadEnabled"
 EV9_CLUSTER_SPEED_LIMIT_PARAM = "KiaEv9ClusterSpeedLimitEnabled"
+EV9_CLUSTER_MAP_SPEED_LIMIT_FALLBACK_PARAM = "KiaEv9ClusterMapSpeedLimitFallbackEnabled"
 EV9_REAR_BSM_CLUSTER_FALLBACK_PARAM = "KiaEv9RearBsmClusterFallbackEnabled"
 EV9_DIRECT_ANGLE_COMMAND_PARAM = "KiaEv9DirectAngleCommandEnabled"
 EV9_DTC_CAPTURE_TARGETS = (0x7C4, 0x7C6, 0x7D0, 0x7D4)
 EV9_DTC_CAPTURE_SLOT_FRAMES = 100
+EV9_CLUSTER_MAP_SPEED_LIMIT_SOURCES = frozenset(("Map Data", "Mapbox", "Vision"))
+
+
+def ev9_cluster_display_speed_limit_raw(camera_raw: int | float, fallback_enabled: bool, plan_valid: bool,
+                                        plan_source: str, plan_speed_limit: float, is_metric: bool) -> int:
+  """Select an EV9 cluster speed-limit value without feeding it back into planning.
+
+  The camera's cluster-display value remains authoritative. Map/vision data is
+  used only when the camera explicitly reports no recognition (zero).
+  """
+  try:
+    camera_speed_limit = int(camera_raw)
+  except (TypeError, ValueError):
+    camera_speed_limit = 0
+
+  if camera_speed_limit != 0:
+    return camera_speed_limit
+  if not fallback_enabled or not plan_valid or plan_source not in EV9_CLUSTER_MAP_SPEED_LIMIT_SOURCES:
+    return 0
+
+  try:
+    speed_limit_ms = float(plan_speed_limit)
+  except (TypeError, ValueError):
+    return 0
+  if not math.isfinite(speed_limit_ms) or speed_limit_ms <= 0.0:
+    return 0
+
+  unit_factor = CV.MS_TO_KPH if is_metric else CV.MS_TO_MPH
+  return min(max(round(speed_limit_ms * unit_factor), 1), 252)
 
 
 def ev9_default_enabled_param(params, key: str) -> bool:
