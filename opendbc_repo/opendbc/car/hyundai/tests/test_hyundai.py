@@ -1680,6 +1680,7 @@ class TestHyundaiFingerprint:
     assert parser.vl["CCNC_0x161"]["TARGET"] == 3
     assert parser.vl["CCNC_0x161"]["LKA_ICON"] == 0
     assert parser.vl["CCNC_0x161"]["CENTERLINE"] == 0
+    assert parser.vl["CCNC_0x161"]["LANELINE_CURVATURE"] == 15
     assert parser.vl["CCNC_0x161"]["LANELINE_LEFT"] == 0
     assert parser.vl["CCNC_0x161"]["LANELINE_RIGHT"] == 0
     assert parser.vl["CCNC_0x161"]["LCA_LEFT_ICON"] == 1
@@ -1688,6 +1689,8 @@ class TestHyundaiFingerprint:
     assert parser.vl["CCNC_0x162"]["LEAD"] == 1
     assert parser.vl["CCNC_0x162"]["LEAD_DISTANCE"] == pytest.approx(42.0)
     assert parser.vl["CCNC_0x162"]["LEAD_ALT"] == 0
+    msg_161 = next(msg for msg in msgs if msg.address == 0x161)
+    assert (int.from_bytes(msg_161.dat, "little") >> 100) & 0x1F == 0
     assert parser.vl["CCNC_0x162"]["LEAD_ALT_DISTANCE"] == pytest.approx(0.0)
     assert parser.vl["CCNC_0x162"]["LEAD_LEFT_DISTANCE"] == pytest.approx(30.0)
     assert parser.vl["CCNC_0x162"]["LEAD_LEFT_LATERAL"] == pytest.approx(3.0)
@@ -1697,6 +1700,26 @@ class TestHyundaiFingerprint:
     assert parser.vl["CCNC_0x162"]["LEAD_LEFT_REAR_DISTANCE"] == pytest.approx(0.0)
     assert parser.vl["CCNC_0x162"]["LEAD_RIGHT_REAR_STATUS"] == 0
     assert parser.vl["CCNC_0x162"]["VIBRATE"] == 0
+
+  def test_ev9_ccnc_neutral_lane_curvature_flag_off_restores_legacy_encoding(self):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.KIA_EV9
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.CANFD_LKA_STEERING)
+    packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
+    can_bus = CanBus(CP)
+    parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("CCNC_0x161", 0)], can_bus.ECAN)
+
+    msgs = hyundaicanfd.create_ev9_ccnc_status_messages(
+      packer, can_bus, 5, enabled=True, lat_active=True,
+      hud=SimpleNamespace(leadDistanceBars=3), out=SimpleNamespace(vCruiseCluster=65.0),
+      main_cruise_enabled=True, lead_visible=False, lead_distance=0.0,
+      neutral_lane_curvature_enabled=False,
+    )
+    parser.update([(1, msgs)])
+
+    msg_161 = next(msg for msg in msgs if msg.address == 0x161)
+    assert parser.vl["CCNC_0x161"]["LANELINE_CURVATURE"] == 0
+    assert (int.from_bytes(msg_161.dat, "little") >> 100) & 0x1F == 17
 
   @pytest.mark.parametrize(("raw_speed_limit", "expected"), [
     (0, 0), (1, 1), (65, 65), (253, 253), (254, 0), (255, 0), (-1, 0),

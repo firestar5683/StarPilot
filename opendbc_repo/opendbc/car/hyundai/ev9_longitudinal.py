@@ -17,6 +17,7 @@ EV9_CLUSTER_OBJECTS_PARAM = "KiaEv9ClusterObjectsEnabled"
 EV9_CLUSTER_ALTERNATE_LEAD_PARAM = "KiaEv9ClusterAlternateLeadEnabled"
 EV9_CLUSTER_SPEED_LIMIT_PARAM = "KiaEv9ClusterSpeedLimitEnabled"
 EV9_CLUSTER_MAP_SPEED_LIMIT_FALLBACK_PARAM = "KiaEv9ClusterMapSpeedLimitFallbackEnabled"
+EV9_NEUTRAL_LANE_CURVATURE_PARAM = "KiaEv9NeutralLaneCurvatureEnabled"
 EV9_REAR_BSM_CLUSTER_FALLBACK_PARAM = "KiaEv9RearBsmClusterFallbackEnabled"
 EV9_DIRECT_ANGLE_COMMAND_PARAM = "KiaEv9DirectAngleCommandEnabled"
 EV9_DTC_CAPTURE_TARGETS = (0x7C4, 0x7C6, 0x7D0, 0x7D4)

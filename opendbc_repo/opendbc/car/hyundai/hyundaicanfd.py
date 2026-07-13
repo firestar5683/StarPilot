@@ -917,7 +917,8 @@ def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, la
                                      rear_bsm_fallback_enabled: bool = False,
                                      steering_icon_active: bool | None = None,
                                      speed_limit_raw: int = 0,
-                                     speed_limit_enabled: bool = False) -> list[CanData]:
+                                     speed_limit_enabled: bool = False,
+                                     neutral_lane_curvature_enabled: bool = True) -> list[CanData]:
   """Recreate EV9 CCNC engagement icons and the supported radar-object slots.
 
   This intentionally renders only fields whose stock EV9 meanings were seen in
@@ -949,7 +950,9 @@ def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, la
     # renders its own lane geometry from the HDA/LFA state.
     "CENTERLINE": 0,
     "TARGET": 3 if hda_active else 0,
-    "LANELINE_CURVATURE": 0,
+    # This DBC represents the stock raw-zero neutral value as physical 15.
+    # Physical zero packs raw 17, which the cluster renders as a right curve.
+    "LANELINE_CURVATURE": 15 if neutral_lane_curvature_enabled else 0,
     "LANELINE_LEFT": 0,
     "LANELINE_RIGHT": 0,
     # Value 1 means that lane-change assistance is available, not that a

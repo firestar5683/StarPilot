@@ -393,6 +393,14 @@ fallback uses neither the configured offset, next limit, cruise set speed, nor l
 when the selected source becomes invalid. This changes the cluster from strict OEM camera semantics and is therefore kept
 independently opt-in for testing.
 
+Route `00000106--2e49e586a6` exposed a distinct CCNC lane-curvature encoding issue. Its reconstructed `0x161` always used
+physical `LANELINE_CURVATURE=0`, which this DBC packs as raw bits `17` and the cluster renders as a right curve. All 3,600
+full-rlog stock samples inspected across routes `000000d4--5296076dfd` and `000000d6--f9d3fb2962` used raw bits `0`,
+decoded by this DBC as physical `15`, even while the camera lane curvature changed in both directions. The default-on
+`KiaEv9NeutralLaneCurvatureEnabled` flag restores that stock-neutral physical `15` / raw `0` value at the existing 20 Hz
+CCNC rate. Disabling it restores the legacy physical `0` / raw `17` encoding strictly for A/B testing; no model, steering,
+or camera-derived lane animation is synthesized.
+
 `KiaEv9RadarQualityFilterEnabled` independently applies the stock-correlated MRR35
 `NEW_SIGNAL_7 > 200` quality gate only to reconstructed EV9 CCNC objects. It does not
 remove tracks from `RadarData`, `liveTracks`, fusion, or planning. Full stock-route

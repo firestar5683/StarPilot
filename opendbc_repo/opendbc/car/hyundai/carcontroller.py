@@ -11,6 +11,7 @@ from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.ev9_longitudinal import EV9_CLUSTER_ALTERNATE_LEAD_PARAM, EV9_CLUSTER_HUD_PARAM, \
                                                    EV9_CLUSTER_OBJECTS_PARAM, EV9_CLUSTER_SPEED_LIMIT_PARAM, \
                                                    EV9_DIRECT_ANGLE_COMMAND_PARAM, EV9_DTC_CAPTURE_PARAM, \
+                                                   EV9_NEUTRAL_LANE_CURVATURE_PARAM, \
                                                    EV9_REAR_BSM_CLUSTER_FALLBACK_PARAM, EV9_SOFT_DRIVER_STEERING_OVERRIDE_PARAM, \
                                                    EV9LongitudinalTestConfig, EV9LongitudinalTestStage, \
                                                    EV9ActuationAbortReason, advance_ev9_longitudinal_support_stage, \
@@ -400,6 +401,8 @@ class CarController(CarControllerBase):
       self._params.get_bool(EV9_CLUSTER_ALTERNATE_LEAD_PARAM)
     self.ev9_cluster_speed_limit_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
       ev9_default_enabled_param(self._params, EV9_CLUSTER_SPEED_LIMIT_PARAM)
+    self.ev9_neutral_lane_curvature_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
+      ev9_default_enabled_param(self._params, EV9_NEUTRAL_LANE_CURVATURE_PARAM)
     self.ev9_rear_bsm_cluster_fallback_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
       self._params.get_bool(EV9_REAR_BSM_CLUSTER_FALLBACK_PARAM)
     self.ev9_long_test = get_ev9_longitudinal_test_config(self._params) if CP.carFingerprint == CAR.KIA_EV9 \
@@ -885,6 +888,7 @@ class CarController(CarControllerBase):
             steering_icon_active=ev9_ccnc_steering_active,
             speed_limit_raw=int(getattr(CS, "ev9_cluster_speed_limit_raw", 0)),
             speed_limit_enabled=self.ev9_cluster_speed_limit_enabled,
+            neutral_lane_curvature_enabled=self.ev9_neutral_lane_curvature_enabled,
           ))
       elif ccnc_non_hda2:
         can_sends.extend(hyundaicanfd.create_ccnc(self.packer, self.CAN, self.long_active_ecu, CC.enabled, CC.hudControl,
