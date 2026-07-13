@@ -17,7 +17,7 @@ from opendbc.car.hyundai.carcontroller import CarController, Ioniq6LongitudinalT
                                              should_use_ev6_gt_line_stop_direct_tracking
 from opendbc.car.lateral import apply_steer_angle_limits_vm
 from opendbc.car.hyundai.carstate import CarState, decode_canfd_camera_lead, decode_ioniq_6_blindspot_radar_state, \
-                                         read_canfd_speed_limit_raw
+                                         read_canfd_speed_limit_raw, resolve_ev9_blindspot_state
 from opendbc.car.hyundai.interface import CarInterface, attempt_ev9_pre_fingerprint_suppression
 from opendbc.car.hyundai import hyundaican, hyundaicanfd
 from opendbc.car.hyundai.hyundaicanfd import CanBus
@@ -2980,6 +2980,24 @@ class TestHyundaiFingerprint:
     assert decode_ioniq_6_blindspot_radar_state(0x12) == (True, False)
     assert decode_ioniq_6_blindspot_radar_state(0x1A) == (True, True)
     assert decode_ioniq_6_blindspot_radar_state(10.0) == (False, True)
+
+  def test_ev9_blindspot_prefers_fresh_genuine_stock_output(self):
+    assert resolve_ev9_blindspot_state(0x02, 1_000, 1, 0, 950, 1_000, False, True) == \
+      (True, False, "stock")
+
+  def test_ev9_blindspot_default_path_fails_closed_after_stock_stales(self):
+    assert resolve_ev9_blindspot_state(0x1A, 200_000_000, 1, 1, 1, 200_000_000, False, True) == \
+      (False, False, "neutral")
+
+  def test_ev9_blindspot_raw_experiment_requires_fresh_drive_and_base_bit(self):
+    now = 200_000_000
+    assert resolve_ev9_blindspot_state(0x12, now, 0, 0, 1, now, True, True) == (True, False, "raw")
+    assert resolve_ev9_blindspot_state(0x12, now, 0, 0, 1, now, True, False) == (False, False, "neutral")
+    assert resolve_ev9_blindspot_state(0x12, 1, 0, 0, 1, now, True, True) == (False, False, "neutral")
+    assert resolve_ev9_blindspot_state(0x10, now, 0, 0, 1, now, True, True) == (False, False, "neutral")
+    # A fresh warning in 0x1BA can be our own prior reconstruction. Raw mode
+    # must not fall back to it after the raw source becomes stale.
+    assert resolve_ev9_blindspot_state(0x12, 1, 1, 1, now, now, True, True) == (False, False, "neutral")
 
   def test_ev9_blindspot_status_uses_captured_neutral_and_live_radar_state(self):
     CP = CarParams.new_message()

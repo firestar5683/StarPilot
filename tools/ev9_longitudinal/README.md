@@ -409,6 +409,19 @@ stock-route comparison retained 99.23%/99.93% of displayed objects, while all 12
 `00000106--2e49e586a6` measured 124–126 and were rejected. Disabling the flag restores the previous display-only tracker
 behavior.
 
+Mirror BSM remains separate from CCNC adjacent-object rendering and the
+`LCA_LEFT_ICON`/`LCA_RIGHT_ICON` availability indicators. Stock routes show
+that `0x36A.SIDE_DETECT_STATE` uses `0x02` as a constant base/equipment bit plus
+`0x08` right and `0x10` left, but has no confidence or lifecycle fields and does
+not faithfully match genuine `0x1BA` mirror indications. The default-off
+`KiaEv9RawBsmReconstructionEnabled` experiment therefore preserves genuine
+`0x1BA` only while it is fresh (100 ms) and otherwise reconstructs neutral BSM.
+If explicitly enabled, raw `0x36A` is accepted only when fresh, the base bit is
+present, and the vehicle is in Drive. The still-live ACAN `0x235`–`0x248`
+corner-object group is documented for future motion-qualified classification;
+its current quality value does not distinguish the route-106 garage wall from
+vehicles, so no classifier is guessed here.
+
 Probe mode 4 is a reset-assisted diagnostic-only experiment using the validated mode-2 request. It sends an ADAS ECU
 reset before re-entering extended diagnostics and requesting `28 01 03`. The 2026-07-11 direct OFF-to-READY test entered
 extended diagnostics successfully after reset but returned NRC `0x22` for all ten CommunicationControl attempts. It then

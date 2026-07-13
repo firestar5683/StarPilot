@@ -7,8 +7,8 @@ from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai.hyundaicanfd import CanBus
-from opendbc.car.hyundai.ev9_longitudinal import EV9_CRUISE_MAIN_STATE_PARAM, ev9_default_enabled_param, \
-                                                   update_ev9_cruise_main_latch
+from opendbc.car.hyundai.ev9_longitudinal import EV9_CRUISE_MAIN_STATE_PARAM, EV9_RAW_BSM_RECONSTRUCTION_PARAM, \
+                                                   ev9_default_enabled_param, update_ev9_cruise_main_latch
 from opendbc.car.hyundai.values import HyundaiFlags, HyundaiStarPilotFlags, HyundaiStarPilotSafetyFlags, CAR, DBC, Buttons, CarControllerParams, \
                                        hyundai_cancel_button_enables_cruise, ALT_BUS_LDA_BUTTON_CARS, ALT_BUS_LDA_BUTTON_SWL_STAT_CARS, \
                                        CANFD_EV_TELEMETRY_CAR
@@ -28,6 +28,8 @@ BUTTONS_DICT = {Buttons.RES_ACCEL: ButtonType.accelCruise, Buttons.SET_DECEL: Bu
 
 IONIQ_6_BLINDSPOT_RIGHT_MASK = 0x08
 IONIQ_6_BLINDSPOT_LEFT_MASK = 0x10
+CANFD_BLINDSPOT_BASE_MASK = 0x02
+CANFD_BLINDSPOT_STALE_NS = 100_000_000
 CANFD_CAMERA_LEAD_MIN_DISTANCE = 0.1
 ALT_BUS_LDA_BUTTON_BURST_DEBOUNCE_NS = int(1.3e9)
 
@@ -65,6 +67,29 @@ def decode_ioniq_6_blindspot_radar_state(state: int) -> tuple[bool, bool]:
   """Decode the shared HKG CAN-FD corner-radar side-detection bitmap."""
   state_int = int(state)
   return bool(state_int & IONIQ_6_BLINDSPOT_LEFT_MASK), bool(state_int & IONIQ_6_BLINDSPOT_RIGHT_MASK)
+
+
+def resolve_ev9_blindspot_state(raw_state: int, raw_ts: int, stock_left_state: int, stock_right_state: int,
+                                stock_ts: int, now_nanos: int, raw_reconstruction_enabled: bool,
+                                drive_gear: bool) -> tuple[bool, bool, str]:
+  """Prefer genuine fresh ADAS BSM; otherwise fail closed unless raw reconstruction is explicitly enabled."""
+  raw_age = int(now_nanos) - int(raw_ts)
+  raw_fresh = int(raw_ts) > 0 and 0 <= raw_age <= CANFD_BLINDSPOT_STALE_NS
+  state = int(raw_state)
+  if raw_reconstruction_enabled:
+    # Once raw reconstruction is selected, never fall back to 0x1BA: the
+    # controller is transmitting that frame itself and treating it as stock
+    # would latch a synthesized warning after the raw source went stale.
+    if drive_gear and raw_fresh and bool(state & CANFD_BLINDSPOT_BASE_MASK):
+      left, right = decode_ioniq_6_blindspot_radar_state(state)
+      return left, right, "raw"
+    return False, False, "neutral"
+
+  stock_age = int(now_nanos) - int(stock_ts)
+  if int(stock_ts) > 0 and 0 <= stock_age <= CANFD_BLINDSPOT_STALE_NS:
+    return int(stock_left_state) in (1, 2), int(stock_right_state) in (1, 2), "stock"
+
+  return False, False, "neutral"
 
 
 def decode_canfd_camera_lead(distance: float, rel_speed: float) -> tuple[bool, float, float]:
@@ -165,6 +190,12 @@ class CarState(CarStateBase):
     self.blindspots_front_corner_1_ts = 0
     self.left_blindspot_from_radar = False
     self.right_blindspot_from_radar = False
+    self.ev9_raw_blindspot_state = 0
+    self.ev9_raw_blindspot_ts = 0
+    self.ev9_stock_blindspot_ts = 0
+    self.ev9_blindspot_source = "neutral"
+    self.ev9_raw_bsm_reconstruction_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
+      Params().get_bool(EV9_RAW_BSM_RECONSTRUCTION_PARAM)
     self.ev9_cruise_main_state_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
       ev9_default_enabled_param(Params(), EV9_CRUISE_MAIN_STATE_PARAM)
     self.ev9_cruise_main_on = not self.ev9_cruise_main_state_enabled
@@ -527,12 +558,28 @@ class CarState(CarStateBase):
                                                                       cp.vl["BLINKERS"][right_blinker_sig])
     self.left_blindspot_from_radar = False
     self.right_blindspot_from_radar = False
-    direct_radar_bsm = self.CP.carFingerprint in (CAR.HYUNDAI_IONIQ_6, CAR.KIA_EV9)
+    direct_radar_bsm = self.CP.carFingerprint == CAR.HYUNDAI_IONIQ_6
     if direct_radar_bsm:
       self.left_blindspot_from_radar, self.right_blindspot_from_radar = decode_ioniq_6_blindspot_radar_state(
         cp.vl["BLINDSPOTS_FRONT_CORNER_2"]["SIDE_DETECT_STATE"])
+    elif self.CP.carFingerprint == CAR.KIA_EV9:
+      self.ev9_raw_blindspot_state = int(cp.vl["BLINDSPOTS_FRONT_CORNER_2"]["SIDE_DETECT_STATE"])
+      self.ev9_raw_blindspot_ts = cp.ts_nanos["BLINDSPOTS_FRONT_CORNER_2"]["CHECKSUM"]
+      self.ev9_stock_blindspot_ts = cp.ts_nanos["BLINDSPOTS_REAR_CORNERS"]["CHECKSUM"]
+      now_nanos = max(cp.ts_nanos["WHEEL_SPEEDS"]["CHECKSUM"], self.ev9_raw_blindspot_ts,
+                      self.ev9_stock_blindspot_ts)
+      self.left_blindspot_from_radar, self.right_blindspot_from_radar, self.ev9_blindspot_source = \
+        resolve_ev9_blindspot_state(
+          self.ev9_raw_blindspot_state, self.ev9_raw_blindspot_ts,
+          cp.vl["BLINDSPOTS_REAR_CORNERS"]["BCW_LtIndSta"],
+          cp.vl["BLINDSPOTS_REAR_CORNERS"]["BCW_RtIndSta"], self.ev9_stock_blindspot_ts, now_nanos,
+          self.ev9_raw_bsm_reconstruction_enabled, ret.gearShifter == structs.CarState.GearShifter.drive,
+        )
     if self.CP.enableBsm:
-      if direct_radar_bsm:
+      if self.CP.carFingerprint == CAR.KIA_EV9:
+        ret.leftBlindspot = self.left_blindspot_from_radar
+        ret.rightBlindspot = self.right_blindspot_from_radar
+      elif direct_radar_bsm:
         ret.leftBlindspot = (bool(cp.vl["BLINDSPOTS_REAR_CORNERS"]["BCW_LtIndSta"]) or
                              self.left_blindspot_from_radar)
         ret.rightBlindspot = (bool(cp.vl["BLINDSPOTS_REAR_CORNERS"]["BCW_RtIndSta"]) or
@@ -676,9 +723,9 @@ class CarState(CarStateBase):
       # canValid; checksum/counter failures on all required messages remain.
       msgs.append(("BLINDSPOTS_REAR_CORNERS", 0))
     if CP.carFingerprint in (CAR.HYUNDAI_IONIQ_6, CAR.KIA_EV9):
-      # Direct corner-radar state remains live when ADAS_DRV transmission is
-      # disabled. It is optional across trims, but used as the authoritative
-      # BSM source on validated Ioniq 6 and staged EV9 support.
+      # This compact side-detection bitmap remains live when ADAS_DRV is
+      # disabled. EV9 retains it for an explicitly gated experiment only;
+      # genuine fresh 0x1BA remains authoritative there.
       msgs.append(("BLINDSPOTS_FRONT_CORNER_2", 0))
     if CP.flags & HyundaiFlags.EV:
       msgs.append(("DRIVE_MODE_EV", 0))  # optional: not all CAN-FD EV variants publish drive mode
