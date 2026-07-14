@@ -9,7 +9,7 @@ from opendbc.car.hyundai.ev9_longitudinal import EV9_DTC_CAPTURE_SLOT_FRAMES, EV
                                                     advance_ev9_longitudinal_support_stage, ev9_communication_control_requests, \
                                                     ev9_actuation_abort_reason, \
                                                     ev9_dtc_capture_messages, \
-                                                    ev9_jerk_upper, \
+                                                    ev9_jerk_upper, ev9_limit_stopping_accel, \
                                                     ev9_longitudinal_test_scc_command, \
                                                     ev9_rate_limit_accel, \
                                                     filter_ev9_adrv_replay_messages, \
@@ -203,9 +203,24 @@ def test_ev9_accel_value_uses_normal_and_comfort_launch_ramps():
   assert ev9_rate_limit_accel(0.10, 0.11) == 0.11
 
 
-def test_ev9_comfort_launch_does_not_change_stock_hold_jerk():
+def test_ev9_stock_route_stop_taper_caps_only_excessive_braking():
+  assert ev9_limit_stopping_accel(-3.0, 4.0) == -2.20
+  assert ev9_limit_stopping_accel(-3.0, 2.0) == -1.65
+  assert ev9_limit_stopping_accel(-2.0, 1.0) == -1.05
+  assert ev9_limit_stopping_accel(-2.0, 0.75) == -0.87
+  assert ev9_limit_stopping_accel(-0.5, 1.0) == -0.5
+  assert ev9_limit_stopping_accel(0.2, 1.0) == 0.0
+
+
+def test_ev9_stopping_taper_relaxes_braking_at_stock_route_rate():
+  assert round(ev9_rate_limit_accel(-1.0, -0.7, stopping=True), 3) == -0.98
+  assert round(ev9_rate_limit_accel(-0.7, -1.0, stopping=True), 3) == -0.714
+
+
+def test_ev9_selects_distinct_normal_launch_stop_and_hold_jerk():
   assert ev9_jerk_upper(False, False) == 0.7
   assert ev9_jerk_upper(False, True) == 0.5
+  assert ev9_jerk_upper(False, False, True) == 1.0
   assert ev9_jerk_upper(True, True) == 1.5
 
 

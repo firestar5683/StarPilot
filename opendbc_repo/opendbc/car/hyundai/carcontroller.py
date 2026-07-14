@@ -21,7 +21,7 @@ from opendbc.car.hyundai.ev9_longitudinal import EV9_ACTUATION_JERK_LOWER, \
                                                    EV9LongitudinalTestConfig, EV9LongitudinalTestStage, \
                                                    Ev9BsmWarningAnimator, \
                                                    EV9ActuationAbortReason, advance_ev9_longitudinal_support_stage, \
-                                                   ev9_actuation_abort_reason, ev9_jerk_upper, \
+                                                   ev9_actuation_abort_reason, ev9_jerk_upper, ev9_limit_stopping_accel, \
                                                    ev9_longitudinal_test_scc_command, \
                                                    ev9_rate_limit_accel, update_ev9_longitudinal_stop_state, \
                                                    ev9_dtc_capture_messages, \
@@ -1039,9 +1039,16 @@ class CarController(CarControllerBase):
           )
           scc_starting = CC.actuators.longControlState == LongCtrlState.starting and \
             not self._ev9_stop_state.stop_request
-          scc_accel_raw = scc_accel if scc_enabled and not scc_gas_override else 0.0
-          scc_accel_value = ev9_rate_limit_accel(self.accel_last, scc_accel_raw, starting=scc_starting) \
-            if scc_enabled and not scc_gas_override else 0.0
+          scc_stopping_taper = scc_stopping and not self._ev9_stop_state.stop_request
+          if scc_enabled and not scc_gas_override:
+            scc_accel_raw = ev9_limit_stopping_accel(scc_accel, float(CS.out.vEgo)) \
+              if scc_stopping_taper else scc_accel
+            scc_accel_value = ev9_rate_limit_accel(
+              self.accel_last, scc_accel_raw, starting=scc_starting, stopping=scc_stopping_taper,
+            )
+          else:
+            scc_accel_raw = 0.0
+            scc_accel_value = 0.0
           if self._ev9_stop_state.stop_request:
             scc_accel_raw = 0.0
             scc_accel_value = 0.0
@@ -1050,7 +1057,7 @@ class CarController(CarControllerBase):
             self._ev9_stop_state.stop_request, self._ev9_stop_state.cruise_standstill, scc_gas_override,
             set_speed_in_units, int(ev9_main_mode), lead_distance, lead_rel_speed, lead_visible, float(CS.out.vEgo),
             jerk_lower=EV9_ACTUATION_JERK_LOWER,
-            jerk_upper=ev9_jerk_upper(self._ev9_stop_state.stop_request, scc_starting),
+            jerk_upper=ev9_jerk_upper(self._ev9_stop_state.stop_request, scc_starting, scc_stopping_taper),
           ))
           self._ev9_scc_counter = (self._ev9_scc_counter + 1) & 0xFF
         else:

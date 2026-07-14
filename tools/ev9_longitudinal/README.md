@@ -337,6 +337,13 @@ EV9-observed `NEW_SIGNAL_3=2` and `OBJ_STATUS=2` tuple. Active control uses `SET
 The desired-headway field follows `NEW_SIGNAL_15 = 1.625 * vEgo`, rounded to 0.1 m and capped at 204.6 m, with the
 captured 3.5 m stationary floor.
 
+Stopping remains planner-driven until StarPilot enters its normal stopping state. At that point only the EV9 stage-17
+path applies a route-backed brake-magnitude ceiling: `-2.20 m/s²` at 4.0 m/s, `-2.10` at 3.0, `-1.65` at 2.0,
+`-1.35` at 1.5, `-1.05` at 1.0, `-0.87` at 0.75, and `-0.70` at 0.5. Gentler planner requests pass through
+unchanged. Brake application remains limited to 0.7 m/s³, while the low-speed brake-release side uses the stock
+1.0 m/s³ value so it can follow the taper before `StopReq` takes over. The shared Hyundai controller, Ioniq 6/EV6
+dynamic tuning, planner profiles, and Panda safety limits are unchanged.
+
 OFF-to-READY early suppression applies to the fully reconstructed stage 15 and the cumulative preflight/actuation stages.
 Previously it matched stage 15 exactly, which meant a stage-17 boot could miss the verified suppression window before the
 longitudinal command path ever started.
