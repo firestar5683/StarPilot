@@ -930,7 +930,7 @@ class TestHyundaiFingerprint:
     CP = CarInterface.get_params(CAR.KIA_EV9, fingerprint, ev9_car_fw, True, False, False, get_test_toggles())
 
     assert CP.startingState
-    assert CP.startAccel == pytest.approx(1.0)
+    assert CP.startAccel == pytest.approx(0.45)
     assert CP.stopAccel == pytest.approx(-2.0)
     assert CP.longitudinalActuatorDelay == pytest.approx(0.5)
     assert CP.vEgoStopping == pytest.approx(0.3)
@@ -1623,13 +1623,17 @@ class TestHyundaiFingerprint:
     assert parser.vl["SCC_CONTROL"]["ACC_ObjDist"] == pytest.approx(13.5)
     assert parser.vl["SCC_CONTROL"]["ACC_ObjRelSpd"] == pytest.approx(-0.4)
 
-  @pytest.mark.parametrize(("enabled", "stopping", "accel", "expected_mode", "expected_accel", "expected_stop"), [
-    (True, False, -0.4, 1, -0.4, 0),
-    (True, True, -0.4, 1, -0.4, 1),
-    (False, True, 0.3, 0, 0.0, 0),
+  @pytest.mark.parametrize(("enabled", "stop_request", "standstill", "accel_raw", "accel_value", "v_ego",
+                            "expected_mode", "expected_raw", "expected_value", "expected_stop",
+                            "expected_standstill"), [
+    (True, False, False, -0.4, -0.3, 10.0, 1, -0.4, -0.3, 0, 0),
+    (True, True, True, -2.0, -2.0, 0.0, 1, 0.0, 0.0, 1, 1),
+    (False, True, True, 0.3, 0.2, 0.0, 0, 0.0, 0.0, 0, 0),
   ])
-  def test_ev9_acc_control_preserves_stock_body_but_overwrites_command_fields(self, enabled, stopping, accel,
-                                                                               expected_mode, expected_accel, expected_stop):
+  def test_ev9_acc_control_preserves_stock_body_but_overwrites_command_fields(
+    self, enabled, stop_request, standstill, accel_raw, accel_value, v_ego,
+    expected_mode, expected_raw, expected_value, expected_stop, expected_standstill,
+  ):
     CP = CarParams.new_message()
     CP.carFingerprint = CAR.KIA_EV9
     CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.CANFD_LKA_STEERING)
@@ -1652,9 +1656,10 @@ class TestHyundaiFingerprint:
     try:
       assert hyundaicanfd.ev9_scc_control_baseline_available()
       msg = hyundaicanfd.create_ev9_acc_control(
-        packer, can_bus, counter=0, enabled=enabled, accel_raw=accel, accel_value=accel,
-        stopping=stopping, gas_override=False, set_speed=25,
-        main_mode_acc=1, lead_distance=18.0, lead_rel_speed=-0.5, lead_visible=True, v_ego=10.0,
+        packer, can_bus, counter=0, enabled=enabled, accel_raw=accel_raw, accel_value=accel_value,
+        stop_request=stop_request, cruise_standstill=standstill, gas_override=False, set_speed=25,
+        main_mode_acc=1, lead_distance=18.0, lead_rel_speed=-0.5, lead_visible=True, v_ego=v_ego,
+        jerk_lower=0.7, jerk_upper=1.5 if stop_request else 0.7,
       )
       parser.update([(1, [msg])])
 
@@ -1664,17 +1669,18 @@ class TestHyundaiFingerprint:
       assert values["NEW_SIGNAL_1"] == 2
       assert values["NEW_SIGNAL_8"] == 7
       assert values["ACCMode"] == expected_mode
-      assert values["aReqRaw"] == pytest.approx(expected_accel)
-      assert values["aReqValue"] == pytest.approx(expected_accel)
+      assert values["aReqRaw"] == pytest.approx(expected_raw)
+      assert values["aReqValue"] == pytest.approx(expected_value)
       assert values["StopReq"] == expected_stop
-      assert values["CRUISE_STANDSTILL"] == 0
-      assert values["SET_ME_2"] == (5 if enabled else 4)
+      assert values["CRUISE_STANDSTILL"] == expected_standstill
+      assert values["SET_ME_2"] == 4
       assert values["DISTANCE_SETTING"] == (7 if enabled else 0)
-      assert values["OBJ_STATUS"] == (5 if enabled else 0)
+      assert values["OBJ_STATUS"] == (2 if enabled else 0)
       assert values["NEW_SIGNAL_3"] == 2
-      assert values["NEW_SIGNAL_15"] == pytest.approx(16.2 if enabled else 204.6)
+      expected_headway = max(round(1.625 * v_ego, 1), 3.5) if enabled else 204.6
+      assert values["NEW_SIGNAL_15"] == pytest.approx(expected_headway)
       assert values["JerkLowerLimit"] == pytest.approx(0.7 if enabled else 1.0)
-      assert values["JerkUpperLimit"] == pytest.approx(0.7 if enabled else 3.0)
+      assert values["JerkUpperLimit"] == pytest.approx((1.5 if stop_request else 0.7) if enabled else 3.0)
     finally:
       hyundaicanfd.set_ev9_adrv_baselines([])
       assert not hyundaicanfd.ev9_scc_control_baseline_available()

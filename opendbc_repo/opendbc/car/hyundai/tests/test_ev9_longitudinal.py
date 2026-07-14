@@ -1,9 +1,11 @@
 from types import SimpleNamespace
 
 from opendbc.car.hyundai.ev9_longitudinal import EV9_DTC_CAPTURE_SLOT_FRAMES, EV9_DTC_CAPTURE_TARGETS, \
+                                                    EV9_STANDSTILL_DELAY_FRAMES, EV9_STOP_RELEASE_DELAY_FRAMES, \
                                                     EV9ActuationAbortReason, \
                                                     Ev9BsmWarningAnimator, \
-                                                    EV9LongitudinalProbeMode, EV9LongitudinalTestConfig, EV9LongitudinalTestStage, \
+                                                    EV9LongitudinalProbeMode, EV9LongitudinalStopState, \
+                                                    EV9LongitudinalTestConfig, EV9LongitudinalTestStage, \
                                                     advance_ev9_longitudinal_support_stage, ev9_communication_control_requests, \
                                                     ev9_actuation_abort_reason, \
                                                     ev9_dtc_capture_messages, \
@@ -11,7 +13,8 @@ from opendbc.car.hyundai.ev9_longitudinal import EV9_DTC_CAPTURE_SLOT_FRAMES, EV
                                                     ev9_rate_limit_accel, \
                                                     filter_ev9_adrv_replay_messages, \
                                                     get_ev9_longitudinal_test_config, parse_ev9_longitudinal_probe_mode, \
-                                                    parse_ev9_longitudinal_test_stage, update_ev9_cruise_main_latch
+                                                    parse_ev9_longitudinal_test_stage, update_ev9_cruise_main_latch, \
+                                                    update_ev9_longitudinal_stop_state
 
 
 def test_ev9_cruise_main_latch_toggles_only_on_rising_edges():
@@ -195,7 +198,37 @@ def test_scc_is_non_actuating_until_final_stage():
 def test_ev9_accel_value_uses_common_stock_ramp():
   assert round(ev9_rate_limit_accel(0.0, -0.5), 3) == -0.014
   assert round(ev9_rate_limit_accel(0.0, 0.18), 3) == 0.014
+  assert round(ev9_rate_limit_accel(0.0, 0.45, starting=True), 3) == 0.03
   assert ev9_rate_limit_accel(0.10, 0.11) == 0.11
+
+
+def test_ev9_stop_hold_and_release_match_stock_route_timing():
+  state = EV9LongitudinalStopState()
+
+  state = update_ev9_longitudinal_stop_state(state, True, True, 0.51)
+  assert not state.stop_request
+
+  state = update_ev9_longitudinal_stop_state(state, True, True, 0.5)
+  assert state.stop_request
+  assert not state.cruise_standstill
+  assert state.stop_request_frames == 0
+
+  for _ in range(EV9_STANDSTILL_DELAY_FRAMES):
+    state = update_ev9_longitudinal_stop_state(state, True, True, 0.0)
+  assert state.stop_request
+  assert state.cruise_standstill
+
+  for release_frame in range(1, EV9_STOP_RELEASE_DELAY_FRAMES + 1):
+    state = update_ev9_longitudinal_stop_state(state, True, False, 0.0)
+    assert state.stop_request
+    assert not state.cruise_standstill
+    assert state.release_frames == release_frame
+
+  state = update_ev9_longitudinal_stop_state(state, True, False, 0.0)
+  assert state == EV9LongitudinalStopState()
+
+  latched = update_ev9_longitudinal_stop_state(EV9LongitudinalStopState(), True, True, 0.0)
+  assert update_ev9_longitudinal_stop_state(latched, False, True, 0.0) == EV9LongitudinalStopState()
 
 
 def test_actuation_abort_gate_is_inactive_until_control_requested_and_then_fails_closed():

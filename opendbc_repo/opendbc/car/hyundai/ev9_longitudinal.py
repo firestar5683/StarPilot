@@ -146,7 +146,12 @@ class EV9LongitudinalProbeMode(IntEnum):
 EV9_LONG_PROBE_HOLD_SECONDS = 5.0
 EV9_ACTUATION_JERK_LOWER = 0.7
 EV9_ACTUATION_JERK_UPPER = 0.7
+EV9_STARTING_JERK_UPPER = 1.5
 EV9_SCC_CONTROL_FREQUENCY = 50.0
+EV9_STOP_REQUEST_SPEED = 0.5
+EV9_STANDSTILL_DELAY_FRAMES = 178
+EV9_STOP_RELEASE_DELAY_FRAMES = 6
+EV9_START_ACCEL = 0.45
 
 
 class EV9ActuationAbortReason(IntEnum):
@@ -158,6 +163,43 @@ class EV9ActuationAbortReason(IntEnum):
   RADAR_INVALID = 5
   PANDA_FAULT = 6
   STOCK_SCC_BASELINE_MISSING = 7
+
+
+@dataclass(frozen=True)
+class EV9LongitudinalStopState:
+  stop_request: bool = False
+  cruise_standstill: bool = False
+  stop_request_frames: int = 0
+  release_frames: int = 0
+
+
+def update_ev9_longitudinal_stop_state(state: EV9LongitudinalStopState, enabled: bool,
+                                        stopping: bool, v_ego: float) -> EV9LongitudinalStopState:
+  """Reproduce the stock EV9 stop/hold/release timing captured in route b4."""
+  if not enabled:
+    return EV9LongitudinalStopState()
+
+  if stopping:
+    if not state.stop_request and v_ego > EV9_STOP_REQUEST_SPEED:
+      return EV9LongitudinalStopState()
+    frames = state.stop_request_frames + 1 if state.stop_request else 0
+    return EV9LongitudinalStopState(
+      stop_request=True,
+      cruise_standstill=frames >= EV9_STANDSTILL_DELAY_FRAMES,
+      stop_request_frames=frames,
+    )
+
+  if state.stop_request:
+    release_frames = state.release_frames + 1
+    if release_frames <= EV9_STOP_RELEASE_DELAY_FRAMES:
+      return EV9LongitudinalStopState(
+        stop_request=True,
+        cruise_standstill=False,
+        stop_request_frames=state.stop_request_frames,
+        release_frames=release_frames,
+      )
+
+  return EV9LongitudinalStopState()
 
 
 def ev9_communication_control_requests(probe_mode: EV9LongitudinalProbeMode) -> tuple[bytes, bytes]:
@@ -337,8 +379,9 @@ def ev9_longitudinal_test_scc_command(config: EV9LongitudinalTestConfig, enabled
                                       actuation_permitted: bool = True) -> tuple[bool, float, bool, bool]:
   """Build the bounded EV9 actuation request for the explicit test stage.
 
-  Stop/hold/restart uses the established Hyundai CAN-FD SCC contract and safety
-  envelope while the EV9-specific builder preserves the EV9 payload body.
+  The EV9-specific controller converts the generic stopping state into the
+  route-backed stop/hold/restart sequence while preserving the common Hyundai
+  CAN-FD safety envelope.
   """
   if config.actuation_allowed and actuation_permitted:
     limited_accel = max(CarControllerParams.ACCEL_MIN, min(accel, CarControllerParams.ACCEL_MAX))
@@ -346,10 +389,11 @@ def ev9_longitudinal_test_scc_command(config: EV9LongitudinalTestConfig, enabled
   return False, 0.0, False, False
 
 
-def ev9_rate_limit_accel(accel_last: float, accel_raw: float) -> float:
-  """Use the common stock EV9 0.7 m/s^3 request ramp at 50 Hz."""
+def ev9_rate_limit_accel(accel_last: float, accel_raw: float, starting: bool = False) -> float:
+  """Apply the stock EV9 normal or launch aReqValue ramp at 50 Hz."""
+  jerk_upper = EV9_STARTING_JERK_UPPER if starting else EV9_ACTUATION_JERK_UPPER
   return max(accel_last - EV9_ACTUATION_JERK_LOWER / EV9_SCC_CONTROL_FREQUENCY,
-             min(accel_raw, accel_last + EV9_ACTUATION_JERK_UPPER / EV9_SCC_CONTROL_FREQUENCY))
+             min(accel_raw, accel_last + jerk_upper / EV9_SCC_CONTROL_FREQUENCY))
 
 
 def ev9_actuation_abort_reason(config: EV9LongitudinalTestConfig, control_requested: bool, was_active: bool,

@@ -311,25 +311,28 @@ envelope of `-3.5` through `+3.5 m/s²`, and the controller permanently aborts i
 not in Drive, brake pressed, accelerator/override, invalid CAN, invalid radar, or Panda fault. Actuation also fails closed
 when the startup capture did not contain a valid 32-byte stock `SCC_CONTROL` baseline from bus 1. There is no artificial
 vehicle-speed window; the same bounded envelope applies through stop and restart.
-The safety limits match the other Hyundai CAN-FD long-control platforms. No EV9 stock standstill/resume sample was captured;
-stage-17 stop/restart therefore follows the established Hyundai CAN-FD family contract and remains experimental.
+The safety limits match the other Hyundai CAN-FD long-control platforms. Stock route `000000b4--9576258deb`, segments
+13 and 14, contains a complete EV9 stop, 19.24-second standstill, and automatic restart. Stage 17 reproduces that observed
+state sequence while remaining experimental.
 Do not enter stage 17 with a dash warning, invalid comma vehicle state, or outside a flat closed private test area.
 
 The stage-17 command is EV9-specific even though it uses the normal Hyundai CAN-FD `SCC_CONTROL` transport. It runs at
 50 Hz, seeds currently unnamed fields from the last stock EV9 payload, then explicitly overwrites every actuation, mode,
-lead-object, set-speed, and distance-setting field. The CAN packer regenerates the counter and CRC. `CRUISE_STANDSTILL`
-remains zero. Stop and hold use the Hyundai CAN-FD family convention (`StopReq=1` with bounded negative acceleration), and
-restart clears `StopReq` and uses the bounded positive starting request. The EV9 uses the shared CAN-FD CarParams tune
-(`startAccel=1.0`, `vEgoStopping=0.3`, `vEgoStarting=0.1`, starting state enabled); EV6 and
+lead-object, set-speed, and distance-setting field. The CAN packer regenerates the counter and CRC. The captured EV9
+asserts `StopReq` near 0.46 m/s and sets both acceleration requests to zero, then asserts `CRUISE_STANDSTILL` 3.56
+seconds later. On restart it clears `CRUISE_STANDSTILL`, retains `StopReq` for another 120 ms, and only then clears
+`StopReq`. The controller mirrors this ordering. The EV9 uses the shared CAN-FD CarParams tune except for its
+route-backed launch target (`startAccel=0.45`, `vEgoStopping=0.3`, `vEgoStarting=0.1`, starting state enabled); EV6 and
 Ioniq 6 tuning predicates are unchanged. The shared default stationary hold request is `stopAccel=-2.0 m/s²`.
 
-The stock reference contained 39,002 valid 32-byte `SCC_CONTROL` frames at 50 Hz. Active `aReqRaw` ranged from -0.60
-to +0.18 m/s² while `aReqValue` ranged from -0.50 to +0.18 m/s² and ramped downward by at most 0.03 per frame. The
-command uses the shared Hyundai safety envelope and rate-limits `aReqValue` in both directions at the commonly observed
-EV9 0.7 m/s³ jerk value. The same limited value is sent in both `aReqRaw` and
-`aReqValue`; the stock-style stepped raw target can be enabled only after response is measured. A valid selected lead uses
-the EV9-observed `NEW_SIGNAL_3=2` and `OBJ_STATUS=5` tuple. The desired-headway field is reconstructed from its stock
-relationship `NEW_SIGNAL_15 = 1.625 * vEgo`, rounded to 0.1 m and capped at 204.6 m.
+The audited route contained 15,002 valid 32-byte `SCC_CONTROL` frames at 50 Hz. Active `aReqRaw` ranged from -2.24
+to +0.76 m/s² and `aReqValue` from -2.22 to +0.76 m/s², within the shared Hyundai safety envelope. Normal
+`aReqValue` changes are limited by the observed 0.7 m/s³ jerk value. Restart keeps the raw target separate from the
+rate-limited applied request: the first captured launch frame used `aReqRaw=0.45`, `aReqValue=0.03`,
+`JerkUpperLimit=1.5`, and `JerkLowerLimit=0.7`. A valid selected lead uses the EV9-observed
+`NEW_SIGNAL_3=2` and `OBJ_STATUS=2` tuple. Active control uses `SET_ME_2=4` and `DISTANCE_SETTING=7`.
+The desired-headway field follows `NEW_SIGNAL_15 = 1.625 * vEgo`, rounded to 0.1 m and capped at 204.6 m, with the
+captured 3.5 m stationary floor.
 
 OFF-to-READY early suppression applies to the fully reconstructed stage 15 and the cumulative preflight/actuation stages.
 Previously it matched stage 15 exactly, which meant a stage-17 boot could miss the verified suppression window before the

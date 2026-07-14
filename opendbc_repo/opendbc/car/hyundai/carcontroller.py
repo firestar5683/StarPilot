@@ -8,7 +8,8 @@ from opendbc.car.lateral import apply_driver_steer_torque_limits, apply_steer_an
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai import hyundaicanfd, hyundaican
 from opendbc.car.hyundai.hyundaicanfd import CanBus
-from opendbc.car.hyundai.ev9_longitudinal import EV9_CLUSTER_ALTERNATE_LEAD_PARAM, EV9_CLUSTER_HUD_PARAM, \
+from opendbc.car.hyundai.ev9_longitudinal import EV9_ACTUATION_JERK_LOWER, EV9_ACTUATION_JERK_UPPER, \
+                                                   EV9_CLUSTER_ALTERNATE_LEAD_PARAM, EV9_CLUSTER_HUD_PARAM, \
                                                    EV9_CLUSTER_OBJECTS_ON_MAIN_PARAM, EV9_CLUSTER_OBJECTS_PARAM, \
                                                    EV9_CLUSTER_SPEED_LIMIT_PARAM, \
                                                    EV9_DIRECT_ANGLE_COMMAND_PARAM, EV9_DTC_CAPTURE_PARAM, \
@@ -16,11 +17,12 @@ from opendbc.car.hyundai.ev9_longitudinal import EV9_CLUSTER_ALTERNATE_LEAD_PARA
                                                    EV9_REAR_BSM_CLUSTER_FALLBACK_PARAM, EV9_SOFT_DRIVER_STEERING_OVERRIDE_PARAM, \
                                                    EV9_SOFTWARE_BSM_VEHICLE_OUTPUT_PARAM, \
                                                    EV9_SOFTWARE_BSM_WARNING_OUTPUT_PARAM, \
+                                                   EV9_STARTING_JERK_UPPER, EV9LongitudinalStopState, \
                                                    EV9LongitudinalTestConfig, EV9LongitudinalTestStage, \
                                                    Ev9BsmWarningAnimator, \
                                                    EV9ActuationAbortReason, advance_ev9_longitudinal_support_stage, \
                                                    ev9_actuation_abort_reason, ev9_longitudinal_test_scc_command, \
-                                                   ev9_rate_limit_accel, \
+                                                   ev9_rate_limit_accel, update_ev9_longitudinal_stop_state, \
                                                    ev9_dtc_capture_messages, \
                                                    ev9_default_enabled_param, \
                                                    filter_ev9_adrv_replay_messages, \
@@ -423,6 +425,7 @@ class CarController(CarControllerBase):
     self._ev9_actuation_aborted = False
     self._ev9_actuation_was_active = False
     self._ev9_scc_counter = 0
+    self._ev9_stop_state = EV9LongitudinalStopState()
     self.long_active_ecu = self.CP.openpilotLongitudinalControl
     self._ioniq_6_lane_change_ui_side = None
     self._ioniq_6_lane_change_ui_frames = 0
@@ -1030,11 +1033,24 @@ class CarController(CarControllerBase):
             acc_kwargs["jerk_lower"] = self._ioniq_6_long_tuning.jerk_lower
             acc_kwargs["jerk_upper"] = self._ioniq_6_long_tuning.jerk_upper
         if ev9_long_test_active:
-          scc_accel_value = ev9_rate_limit_accel(self.accel_last, scc_accel) if scc_enabled and not scc_gas_override else 0.0
+          self._ev9_stop_state = update_ev9_longitudinal_stop_state(
+            self._ev9_stop_state, scc_enabled and not scc_gas_override, scc_stopping, float(CS.out.vEgo),
+          )
+          scc_starting = CC.actuators.longControlState == LongCtrlState.starting and \
+            not self._ev9_stop_state.stop_request
+          scc_accel_raw = scc_accel if scc_enabled and not scc_gas_override else 0.0
+          scc_accel_value = ev9_rate_limit_accel(self.accel_last, scc_accel_raw, starting=scc_starting) \
+            if scc_enabled and not scc_gas_override else 0.0
+          if self._ev9_stop_state.stop_request:
+            scc_accel_raw = 0.0
+            scc_accel_value = 0.0
           can_sends.append(hyundaicanfd.create_ev9_acc_control(
-            self.packer, self.CAN, self._ev9_scc_counter, scc_enabled, scc_accel_value, scc_accel_value,
-            scc_stopping, scc_gas_override, set_speed_in_units, int(ev9_main_mode), lead_distance, lead_rel_speed,
-            lead_visible, float(CS.out.vEgo),
+            self.packer, self.CAN, self._ev9_scc_counter, scc_enabled, scc_accel_raw, scc_accel_value,
+            self._ev9_stop_state.stop_request, self._ev9_stop_state.cruise_standstill, scc_gas_override,
+            set_speed_in_units, int(ev9_main_mode), lead_distance, lead_rel_speed, lead_visible, float(CS.out.vEgo),
+            jerk_lower=EV9_ACTUATION_JERK_LOWER,
+            jerk_upper=EV9_STARTING_JERK_UPPER if self._ev9_stop_state.stop_request or scc_starting
+            else EV9_ACTUATION_JERK_UPPER,
           ))
           self._ev9_scc_counter = (self._ev9_scc_counter + 1) & 0xFF
         else:

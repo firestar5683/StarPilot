@@ -14,7 +14,7 @@ from opendbc.car.hyundai.values import HyundaiFlags, CAR, CarControllerParams, \
                                                    hyundai_cancel_button_enables_cruise, \
                                                    kia_ev6_gt_line_longitudinal_tuning
 from opendbc.car.hyundai.radar_interface import get_radar_track_config, radar_tracks_available
-from opendbc.car.hyundai.ev9_longitudinal import EV9_LONG_PROBE_HOLD_SECONDS, EV9LongitudinalProbeMode, \
+from opendbc.car.hyundai.ev9_longitudinal import EV9_LONG_PROBE_HOLD_SECONDS, EV9_START_ACCEL, EV9LongitudinalProbeMode, \
                                                        EV9LongitudinalTestStage, ev9_communication_control_requests, \
                                                        get_ev9_longitudinal_test_config
 from opendbc.car.interfaces import CarInterfaceBase, ACCEL_MIN
@@ -53,6 +53,11 @@ def apply_kia_ev6_gt_line_longitudinal_params(ret: structs.CarParams) -> None:
   ret.startAccel = 1.4
   ret.longitudinalActuatorDelay = 0.35
   ret.vEgoStarting = 0.5
+
+
+def apply_kia_ev9_longitudinal_params(ret: structs.CarParams) -> None:
+  """Use the stock EV9 initial launch target while retaining family limits."""
+  ret.startAccel = EV9_START_ACCEL
 
 
 def apply_ecu_disable_failure_fallback(CP: structs.CarParams, params) -> None:
@@ -335,6 +340,9 @@ class CarInterface(CarInterfaceBase):
 
     if candidate == CAR.HYUNDAI_IONIQ_6:
       ret.longitudinalActuatorDelay = 0.6
+
+    if candidate == CAR.KIA_EV9 and ev9_long_test_armed:
+      apply_kia_ev9_longitudinal_params(ret)
 
     if candidate == CAR.KIA_NIRO_PHEV_2022:
       ret.stopAccel = -1.4

@@ -922,39 +922,38 @@ def _create_ev9_adrv_message_with_signals(packer, CAN, address: int, counter: in
 
 
 def create_ev9_acc_control(packer, CAN, counter: int, enabled: bool, accel_raw: float, accel_value: float,
-                           stopping: bool, gas_override: bool, set_speed: float, main_mode_acc: int, lead_distance: float,
-                           lead_rel_speed: float, lead_visible: bool, v_ego: float) -> CanData:
+                           stop_request: bool, cruise_standstill: bool, gas_override: bool, set_speed: float,
+                           main_mode_acc: int, lead_distance: float, lead_rel_speed: float, lead_visible: bool,
+                           v_ego: float, jerk_lower: float = 0.7, jerk_upper: float = 0.7) -> CanData:
   """Patch an EV9 SCC_CONTROL command into the last stock payload.
 
   The stock EV9 routes use different constants and object sentinels than the
   generic EV6 path. Preserve every unnamed bit, overwrite the complete command
   surface, continue the captured counter, and regenerate the CRC.
   """
-  if not enabled or gas_override:
+  if not enabled or gas_override or stop_request:
     accel_raw = 0.0
     accel_value = 0.0
 
   lead_visible = bool(lead_visible)
-  desired_headway = min(max(round(1.625 * max(v_ego, 0.0), 1), 0.1), 204.6) if enabled else 204.6
+  desired_headway = min(max(round(1.625 * max(v_ego, 0.0), 1), 3.5), 204.6) if enabled else 204.6
   values = {
     "ACCMode": 0 if not enabled else (2 if gas_override else 1),
     "MainMode_ACC": int(bool(main_mode_acc)),
-    "StopReq": 1 if stopping and enabled else 0,
-    "CRUISE_STANDSTILL": 0,
+    "StopReq": 1 if stop_request and enabled else 0,
+    "CRUISE_STANDSTILL": 1 if cruise_standstill and stop_request and enabled else 0,
     "aReqValue": accel_value,
     "aReqRaw": accel_raw,
     "VSetDis": set_speed,
-    "JerkLowerLimit": 0.7 if enabled else 1.0,
-    "JerkUpperLimit": 0.7 if enabled else 3.0,
+    "JerkLowerLimit": jerk_lower if enabled else 1.0,
+    "JerkUpperLimit": jerk_upper if enabled else 3.0,
     "ACC_ObjDist": float(np.clip(lead_distance, 0.0, 204.7)) if lead_visible else 204.6,
     "ACC_ObjRelSpd": float(np.clip(lead_rel_speed, -16.4, 34.7)) if lead_visible else 34.6,
     "ObjValid": 0 if lead_visible else 1,
-    # Status 2 is an EV6 convention never observed in the EV9 routes. The
-    # selected openpilot lead maps to the EV9's controlling-lead status 5.
-    "OBJ_STATUS": 5 if enabled and lead_visible else 0,
+    "OBJ_STATUS": 2 if enabled and lead_visible else 0,
     "NEW_SIGNAL_3": 2 if lead_visible else 0,
     "NEW_SIGNAL_15": desired_headway,
-    "SET_ME_2": 5 if enabled else 4,
+    "SET_ME_2": 4,
     "SET_ME_3": 3,
     "SET_ME_TMP_64": 0x64,
     # The EV9 stock routes use raw 7. The DBC's physical range is stale.
