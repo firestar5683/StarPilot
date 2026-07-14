@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from opendbc.car.hyundai.ev9_longitudinal import EV9_DTC_CAPTURE_SLOT_FRAMES, EV9_DTC_CAPTURE_TARGETS, \
                                                     EV9_STANDSTILL_DELAY_FRAMES, EV9_STOP_RELEASE_DELAY_FRAMES, \
                                                     EV9ActuationAbortReason, \
@@ -9,13 +11,12 @@ from opendbc.car.hyundai.ev9_longitudinal import EV9_DTC_CAPTURE_SLOT_FRAMES, EV
                                                     advance_ev9_longitudinal_support_stage, ev9_communication_control_requests, \
                                                     ev9_actuation_abort_reason, \
                                                     ev9_dtc_capture_messages, \
-                                                    ev9_jerk_upper, ev9_limit_stopping_accel, \
+                                                    ev9_limit_stopping_accel, \
                                                     ev9_longitudinal_test_scc_command, \
-                                                    ev9_rate_limit_accel, \
                                                     filter_ev9_adrv_replay_messages, \
                                                     get_ev9_longitudinal_test_config, parse_ev9_longitudinal_probe_mode, \
                                                     parse_ev9_longitudinal_test_stage, update_ev9_cruise_main_latch, \
-                                                    update_ev9_longitudinal_stop_state
+                                                    shape_ev9_longitudinal_accel, update_ev9_longitudinal_stop_state
 
 
 def test_ev9_cruise_main_latch_toggles_only_on_rising_edges():
@@ -197,10 +198,11 @@ def test_scc_is_non_actuating_until_final_stage():
 
 
 def test_ev9_accel_value_uses_normal_and_comfort_launch_ramps():
-  assert round(ev9_rate_limit_accel(0.0, -0.5), 3) == -0.014
-  assert round(ev9_rate_limit_accel(0.0, 0.18), 3) == 0.014
-  assert round(ev9_rate_limit_accel(0.0, 0.20, starting=True), 3) == 0.01
-  assert ev9_rate_limit_accel(0.10, 0.11) == 0.11
+  normal = shape_ev9_longitudinal_accel(0.0, 0.18, 10.0, False, False, EV9LongitudinalStopState())
+  launch = shape_ev9_longitudinal_accel(0.0, 0.20, 0.0, True, False, EV9LongitudinalStopState())
+
+  assert normal == pytest.approx((0.18, 0.014, 0.7))
+  assert launch == pytest.approx((0.20, 0.01, 0.5))
 
 
 def test_ev9_stock_route_stop_taper_caps_only_excessive_braking():
@@ -213,24 +215,32 @@ def test_ev9_stock_route_stop_taper_caps_only_excessive_braking():
 
 
 def test_ev9_stopping_taper_relaxes_braking_at_stock_route_rate():
-  assert round(ev9_rate_limit_accel(-1.0, -0.7, stopping=True), 3) == -0.98
-  assert round(ev9_rate_limit_accel(-0.7, -1.0, stopping=True), 3) == -0.714
+  applying = shape_ev9_longitudinal_accel(-1.0, -2.0, 1.0, False, True, EV9LongitudinalStopState())
+  relaxing = shape_ev9_longitudinal_accel(-1.5, -2.0, 1.0, False, True, EV9LongitudinalStopState())
+
+  assert applying == pytest.approx((-1.05, -1.014, 1.0))
+  assert relaxing == pytest.approx((-1.05, -1.48, 1.0))
 
 
 def test_ev9_selects_distinct_normal_launch_stop_and_hold_jerk():
-  assert ev9_jerk_upper(False, False) == 0.7
-  assert ev9_jerk_upper(False, True) == 0.5
-  assert ev9_jerk_upper(False, False, True) == 1.0
-  assert ev9_jerk_upper(True, True) == 1.5
+  initial_stop = EV9LongitudinalStopState(stop_request=True)
+  pre_standstill = EV9LongitudinalStopState(stop_request=True, stop_request_frames=1)
+  standstill = EV9LongitudinalStopState(stop_request=True, cruise_standstill=True)
+  release = EV9LongitudinalStopState(stop_request=True, release_frames=1)
+
+  assert shape_ev9_longitudinal_accel(-0.7, -0.7, 0.46, False, True, initial_stop) == (0.0, 0.0, 1.0)
+  assert shape_ev9_longitudinal_accel(0.0, 0.0, 0.45, False, True, pre_standstill) == (0.0, 0.0, 1.5)
+  assert shape_ev9_longitudinal_accel(0.0, 0.0, 0.0, False, True, standstill) == (0.0, 0.0, 1.5)
+  assert shape_ev9_longitudinal_accel(0.0, 0.2, 0.0, True, False, release) == (0.0, 0.0, 1.5)
 
 
 def test_ev9_stop_hold_and_release_match_stock_route_timing():
   state = EV9LongitudinalStopState()
 
-  state = update_ev9_longitudinal_stop_state(state, True, True, 0.51)
+  state = update_ev9_longitudinal_stop_state(state, True, True, 0.48)
   assert not state.stop_request
 
-  state = update_ev9_longitudinal_stop_state(state, True, True, 0.5)
+  state = update_ev9_longitudinal_stop_state(state, True, True, 0.47)
   assert state.stop_request
   assert not state.cruise_standstill
   assert state.stop_request_frames == 0

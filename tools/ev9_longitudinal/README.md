@@ -321,7 +321,8 @@ The stage-17 command is EV9-specific even though it uses the normal Hyundai CAN-
 lead-object, set-speed, and distance-setting field. The CAN packer regenerates the counter and CRC. The captured EV9
 asserts `StopReq` near 0.46 m/s and sets both acceleration requests to zero, then asserts `CRUISE_STANDSTILL` 3.56
 seconds later. On restart it clears `CRUISE_STANDSTILL`, retains `StopReq` for another 120 ms, and only then clears
-`StopReq`. The controller mirrors this ordering. The EV9 uses the shared CAN-FD CarParams tune except for its
+`StopReq`. The first `StopReq` frame uses `JerkUpperLimit=1.0`; all subsequent pre-standstill, held, and release
+frames use 1.5. The controller mirrors this ordering. The EV9 uses the shared CAN-FD CarParams tune except for its
 comfort-biased launch target (`startAccel=0.20`, `vEgoStopping=0.3`, `vEgoStarting=0.5`, starting state enabled); EV6 and
 Ioniq 6 tuning predicates are unchanged. The shared default stationary hold request is `stopAccel=-2.0 m/s²`.
 

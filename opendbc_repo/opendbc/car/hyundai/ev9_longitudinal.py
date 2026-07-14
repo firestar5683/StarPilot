@@ -4,7 +4,7 @@ import math
 
 import numpy as np
 
-from opendbc.car import CanData
+from opendbc.car import CanData, rate_limit
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai.values import CarControllerParams
 
@@ -152,15 +152,15 @@ EV9_HOLD_JERK_UPPER = 1.5
 EV9_STARTING_JERK_UPPER = 0.5
 EV9_STOPPING_JERK_UPPER = 1.0
 EV9_SCC_CONTROL_FREQUENCY = 50.0
-EV9_STOP_REQUEST_SPEED = 0.5
+EV9_STOP_REQUEST_SPEED = 0.47
 EV9_STANDSTILL_DELAY_FRAMES = 178
 EV9_STOP_RELEASE_DELAY_FRAMES = 6
 EV9_START_ACCEL = 0.20
 EV9_STARTING_SPEED = 0.5
-# StopReq owns the final handoff at 0.5 m/s; the lower points only provide a
+# StopReq owns the final handoff near 0.47 m/s; the lower points only provide a
 # continuous, fail-soft extrapolation if the state transition arrives late.
-EV9_STOP_BRAKE_CAP_SPEED_BP = (0.0, 0.46, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0)
-EV9_STOP_BRAKE_CAP_ACCEL_V = (0.0, -0.69, -0.70, -0.87, -1.05, -1.35, -1.65, -2.10, -2.20)
+EV9_STOP_BRAKE_CAP_SPEED_BP = [0.0, 0.46, 0.5, 0.75, 1.0, 1.5, 2.0, 3.0, 4.0]
+EV9_STOP_BRAKE_CAP_ACCEL_V = [0.0, -0.69, -0.70, -0.87, -1.05, -1.35, -1.65, -2.10, -2.20]
 
 
 class EV9ActuationAbortReason(IntEnum):
@@ -404,26 +404,31 @@ def ev9_limit_stopping_accel(accel_raw: float, v_ego: float) -> float:
   return min(0.0, max(accel_raw, brake_cap))
 
 
-def ev9_rate_limit_accel(accel_last: float, accel_raw: float, starting: bool = False,
-                         stopping: bool = False) -> float:
-  """Apply EV9-specific launch, normal, and stopping-release ramps at 50 Hz."""
+def shape_ev9_longitudinal_accel(accel_last: float, accel_raw: float, v_ego: float, starting: bool,
+                                 stopping: bool, stop_state: EV9LongitudinalStopState) -> tuple[float, float, float]:
+  """Return EV9 raw/applied acceleration and upper jerk for the current phase."""
+  if stop_state.stop_request:
+    first_stop_request = stop_state.stop_request_frames == 0 and stop_state.release_frames == 0 and \
+      not stop_state.cruise_standstill
+    jerk_upper = EV9_STOPPING_JERK_UPPER if first_stop_request else EV9_HOLD_JERK_UPPER
+    return 0.0, 0.0, jerk_upper
+
+  if stopping:
+    accel_raw = ev9_limit_stopping_accel(accel_raw, v_ego)
+
   if starting:
     jerk_upper = EV9_STARTING_JERK_UPPER
   elif stopping:
     jerk_upper = EV9_STOPPING_JERK_UPPER
   else:
     jerk_upper = EV9_ACTUATION_JERK_UPPER
-  return max(accel_last - EV9_ACTUATION_JERK_LOWER / EV9_SCC_CONTROL_FREQUENCY,
-             min(accel_raw, accel_last + jerk_upper / EV9_SCC_CONTROL_FREQUENCY))
 
-
-def ev9_jerk_upper(stop_request: bool, starting: bool, stopping: bool = False) -> float:
-  """Select route-backed hold/stop jerk without changing other platforms."""
-  if stop_request:
-    return EV9_HOLD_JERK_UPPER
-  if starting:
-    return EV9_STARTING_JERK_UPPER
-  return EV9_STOPPING_JERK_UPPER if stopping else EV9_ACTUATION_JERK_UPPER
+  accel_value = rate_limit(
+    accel_raw, accel_last,
+    -EV9_ACTUATION_JERK_LOWER / EV9_SCC_CONTROL_FREQUENCY,
+    jerk_upper / EV9_SCC_CONTROL_FREQUENCY,
+  )
+  return accel_raw, accel_value, jerk_upper
 
 
 def ev9_actuation_abort_reason(config: EV9LongitudinalTestConfig, control_requested: bool, was_active: bool,
