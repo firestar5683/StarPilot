@@ -1662,7 +1662,7 @@ class TestHyundaiFingerprint:
     parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("CCNC_0x161", 0), ("CCNC_0x162", 0)], can_bus.ECAN)
     hud = SimpleNamespace(leftLaneVisible=True, rightLaneVisible=True, leftLaneDepart=True, rightLaneDepart=False,
                           leadDistanceBars=3)
-    out = SimpleNamespace(vCruiseCluster=65.0, leftBlinker=False, rightBlinker=False)
+    out = SimpleNamespace(vCruiseCluster=65.0, vEgo=20.0, leftBlinker=False, rightBlinker=False)
 
     msgs = hyundaicanfd.create_ev9_ccnc_status_messages(
       packer, can_bus, 5, enabled=True, lat_active=True, hud=hud, out=out, main_cruise_enabled=True,
@@ -1671,6 +1671,7 @@ class TestHyundaiFingerprint:
       lead_left_visible=True, lead_left_distance=30.0, lead_left_lateral=-3.0,
       lead_right_visible=True, lead_right_distance=35.0, lead_right_lateral=3.0,
       left_blindspot=True, right_blindspot=False, is_metric=True,
+      lead_left_selected=True,
     )
     parser.update([(1, msgs)])
 
@@ -1678,6 +1679,7 @@ class TestHyundaiFingerprint:
     assert parser.vl["CCNC_0x161"]["HDA_ICON"] == 2
     assert parser.vl["CCNC_0x161"]["LFA_ICON"] == 1
     assert parser.vl["CCNC_0x161"]["TARGET"] == 3
+    assert parser.vl["CCNC_0x161"]["TARGET_DISTANCE"] == pytest.approx(32.5)
     assert parser.vl["CCNC_0x161"]["LKA_ICON"] == 0
     assert parser.vl["CCNC_0x161"]["CENTERLINE"] == 0
     assert parser.vl["CCNC_0x161"]["LANELINE_CURVATURE"] == 15
@@ -1695,7 +1697,7 @@ class TestHyundaiFingerprint:
     assert (int.from_bytes(msg_161.dat, "little") >> 100) & 0x1F == 0
     assert parser.vl["CCNC_0x162"]["LEAD_ALT_DISTANCE"] == pytest.approx(0.0)
     assert parser.vl["CCNC_0x162"]["LEAD_LEFT_DISTANCE"] == pytest.approx(29.8)
-    assert parser.vl["CCNC_0x162"]["LEAD_LEFT"] == 1
+    assert parser.vl["CCNC_0x162"]["LEAD_LEFT"] == 2
     assert parser.vl["CCNC_0x162"]["LEAD_LEFT_LATERAL"] == pytest.approx(3.0)
     assert parser.vl["CCNC_0x162"]["LEAD_RIGHT_DISTANCE"] == pytest.approx(34.8)
     assert parser.vl["CCNC_0x162"]["LEAD_RIGHT"] == 1
@@ -2981,7 +2983,7 @@ class TestHyundaiFingerprint:
       "COUNTER": 88,
       "REVERSING": 0,
       "NEW_SIGNAL_5": 0,
-      "NEW_SIGNAL_7": 0,
+      "RCTA_TARGET_STATE": 0,
       "NEW_SIGNAL_8": 0,
       "NEW_SIGNAL_9": 0,
       "NEW_SIGNAL_4": 0,
@@ -3078,8 +3080,15 @@ class TestHyundaiFingerprint:
     assert rear["FR_INDICATOR"] == 0
     assert rear["BCW_LtSndWrngSta"] == 0
 
-    signaled_left = hyundaicanfd.create_ev9_blindspot_status_messages(
+    signaled_left_sound = hyundaicanfd.create_ev9_blindspot_status_messages(
       packer, can_bus, 2, left_blindspot=True, left_escalated=True,
+      left_warning_active=True, left_sound_active=True,
+    )
+    parser.update([(3, signaled_left_sound)])
+    assert parser.vl["BLINDSPOTS_REAR_CORNERS"]["BCW_LtSndWrngSta"] == 1
+
+    signaled_left = hyundaicanfd.create_ev9_blindspot_status_messages(
+      packer, can_bus, 2, left_blindspot=True, left_escalated=True, left_warning_active=True,
     )
     parser.update([(3, signaled_left)])
     rear = parser.vl["BLINDSPOTS_REAR_CORNERS"]
@@ -3102,6 +3111,7 @@ class TestHyundaiFingerprint:
     for counter in range(20):
       warning = hyundaicanfd.create_ev9_blindspot_status_messages(
         packer, can_bus, counter, left_blindspot=True, left_escalated=True,
+        left_warning_active=True, left_flash_phase=counter,
       )
       parser.update([(5 + counter, warning)])
       rear = parser.vl["BLINDSPOTS_REAR_CORNERS"]

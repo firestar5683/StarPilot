@@ -113,6 +113,10 @@ class Car:
     self.ev9_radar_quality_filter_enabled = default_enabled_param(self.params, "KiaEv9RadarQualityFilterEnabled")
     self.ev9_cluster_fused_primary_required = default_enabled_param(self.params, "KiaEv9ClusterFusedPrimaryRequired")
     self.ev9_cluster_side_objects_require_bsm = self.params.get_bool("KiaEv9ClusterSideObjectsRequireBsmEnabled")
+    self.ev9_cluster_strict_side_filter_enabled = default_enabled_param(
+      self.params, "KiaEv9ClusterStrictSideObjectFilterEnabled",
+    )
+    self.ev9_cluster_right_objects_enabled = self.params.get_bool("KiaEv9ClusterRightObjectsEnabled")
     self.ev9_cluster_tracker = Ev9ClusterObjectTracker()
     self.ev9_cluster_slots = ClusterObjectSlots()
     self.ev9_software_bsm_enabled = self.params.get_bool(EV9_SOFTWARE_BSM_PARAM)
@@ -350,9 +354,12 @@ class Car:
           preferred_primary_track_id = int(getattr(fused_lead, "radarTrackId", -1))
         qualified_track_ids = set(getattr(self.RI, "ev9_cluster_quality_track_ids", set())) \
           if self.ev9_radar_quality_filter_enabled else None
+        side_qualified_track_ids = set(getattr(self.RI, "ev9_cluster_strict_side_track_ids", set())) \
+          if self.ev9_cluster_strict_side_filter_enabled else None
         self.ev9_cluster_slots = self.ev9_cluster_tracker.update(
           list(RD.points), preferred_primary_track_id, False, qualified_track_ids,
-          self.ev9_cluster_fused_primary_required,
+          self.ev9_cluster_fused_primary_required, side_qualified_track_ids,
+          self.ev9_cluster_right_objects_enabled,
         )
     elif str(self.CP.carFingerprint) == "KIA_EV9":
       self.ev9_cluster_slots = self.ev9_cluster_tracker.clear()
@@ -655,11 +662,13 @@ class Car:
       visible = False
       distance = 0.0
       lateral = 0.0
+      selected = False
       filtered_object = getattr(filtered_slots, side) if filtered_slots is not None else None
       if filtered_object is not None:
         visible = True
         distance = filtered_object.distance
         lateral = filtered_object.lateral
+        selected = filtered_object.selected
       elif adjacent_valid and not ev9_filtered_objects:
         lead = getattr(self.sm['starpilotRadarState'], f'lead{side.title()}')
         if lead.status and float(lead.dRel) > OPENPILOT_LEAD_MIN_DISTANCE:
@@ -669,6 +678,7 @@ class Car:
       setattr(self.CI.CS, f'openpilot_lead_{side}_visible', visible)
       setattr(self.CI.CS, f'openpilot_lead_{side}_distance', distance)
       setattr(self.CI.CS, f'openpilot_lead_{side}_lateral', lateral)
+      setattr(self.CI.CS, f'openpilot_lead_{side}_selected', selected)
 
     # Publish the final filtered result. Assigning these before the EV9 tracker
     # ran left hudControl's model-visible bit paired with a zero distance, which
@@ -759,6 +769,10 @@ class Car:
       self.ev9_radar_quality_filter_enabled = default_enabled_param(self.params, "KiaEv9RadarQualityFilterEnabled")
       self.ev9_cluster_fused_primary_required = default_enabled_param(self.params, "KiaEv9ClusterFusedPrimaryRequired")
       self.ev9_cluster_side_objects_require_bsm = self.params.get_bool("KiaEv9ClusterSideObjectsRequireBsmEnabled")
+      self.ev9_cluster_strict_side_filter_enabled = default_enabled_param(
+        self.params, "KiaEv9ClusterStrictSideObjectFilterEnabled",
+      )
+      self.ev9_cluster_right_objects_enabled = self.params.get_bool("KiaEv9ClusterRightObjectsEnabled")
       self.ev9_software_bsm_enabled = self.params.get_bool(EV9_SOFTWARE_BSM_PARAM)
       self.ev9_software_bsm_comma_output_enabled = self.params.get_bool(EV9_SOFTWARE_BSM_COMMA_OUTPUT_PARAM)
       self.ev9_software_bsm_vehicle_output_enabled = self.params.get_bool(EV9_SOFTWARE_BSM_VEHICLE_OUTPUT_PARAM)

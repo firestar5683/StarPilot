@@ -88,6 +88,17 @@ def test_tracker_assigns_each_track_to_only_one_slot():
   assert slots.left is None
 
 
+def test_selected_primary_retains_style_when_promoted_to_side_slot():
+  tracker = Ev9ClusterObjectTracker()
+  slots = acquire(tracker, [point(track_id=9)], preferred_primary_track_id=9)
+  assert slots.primary is not None and slots.primary.selected
+
+  for _ in range(6):
+    slots = tracker.update([point(track_id=9, lateral=2.5)], preferred_primary_track_id=9)
+  assert slots.primary is None
+  assert slots.left is not None and slots.left.selected
+
+
 def test_tracker_alternate_remains_suppressed():
   tracker = Ev9ClusterObjectTracker()
   objects = [point(track_id=1, distance=20.0), point(track_id=2, distance=35.0)]
@@ -168,6 +179,28 @@ def test_quality_filter_disabled_preserves_legacy_tracker_behavior():
   tracker = Ev9ClusterObjectTracker()
   garage_track = point(track_id=11, distance=4.5, lateral=-2.0, relative_speed=0.0)
   assert acquire(tracker, [garage_track], qualified_track_ids=None).right is not None
+
+
+def test_strict_side_allowlist_does_not_remove_qualified_primary():
+  tracker = Ev9ClusterObjectTracker()
+  objects = [point(track_id=1, distance=25.0), point(track_id=2, distance=35.0, lateral=2.5)]
+  slots = acquire(tracker, objects, qualified_track_ids={1, 2}, side_qualified_track_ids=set())
+  assert slots.primary is not None and slots.primary.track_id == 1
+  assert slots.left is None
+
+
+def test_strict_side_allowlist_and_geometry_accept_left_candidate():
+  tracker = Ev9ClusterObjectTracker()
+  obj = point(track_id=2, distance=35.0, lateral=2.5)
+  slots = acquire(tracker, [obj], qualified_track_ids={2}, side_qualified_track_ids={2})
+  assert slots.left is not None and slots.left.track_id == 2
+
+
+def test_right_side_can_fail_closed_independently():
+  tracker = Ev9ClusterObjectTracker()
+  obj = point(track_id=3, distance=20.0, lateral=-2.5)
+  slots = acquire(tracker, [obj], qualified_track_ids={3}, side_qualified_track_ids={3}, right_enabled=False)
+  assert slots.right is None
 
 
 def test_fused_slot_quality_allowlist_is_display_only():

@@ -472,10 +472,19 @@ the white-box type 2; unique adjacent tracks use gray-box type 1 with the fixed 
 disabled because no stock EV9 reference used it and fused `leadTwo` frequently duplicated `leadOne`. Displayed range
 applies the stock-correlated 0.2 m encoding offset.
 
-Adjacent display objects are independent from mirror BSM by default. `KiaEv9ClusterSideObjectsRequireBsmEnabled` can
-restore the stricter experimental BSM gate, but raw `0x36A` is too inaccurate to be its default permission source. Stock
-warning scenes kept `CCNC_0x161.BCA_LEFT/BCA_RIGHT`, lane-change arrows/sounds, and `CCNC_0x162.VIBRATE` at zero; those
-fields remain neutral. Mirror/dash BSM warnings continue to use only the separately reconstructed `0x1BA` path.
+Adjacent display objects are independent from mirror BSM by default. `KiaEv9ClusterStrictSideObjectFilterEnabled`
+uses the stock-correlated mature MRR35 lifecycle (`UNKNOWN_7 > 280`, states 2/10/2/1) plus the observed adjacent-lane
+geometry. Across the stock d4+d6 corpus this classified left-side display frames at 92.7% precision and 87.8% recall.
+The symmetric right rule reached only 42.8% precision and created multi-second ghosts in the d6 holdout, so
+`KiaEv9ClusterRightObjectsEnabled` defaults off. It is an independent experimental gate, not a claim that right BSM is
+unavailable. `KiaEv9ClusterSideObjectsRequireBsmEnabled` can additionally require an experimental BSM permission decision.
+
+Stock warning scenes kept `CCNC_0x161.BCA_LEFT/BCA_RIGHT`, lane-change arrows/sounds, and `CCNC_0x162.VIBRATE` at zero;
+those fields must remain neutral. Mirror/dash BSM warnings use `0x1BA`. When a trustworthy BSM decision exists, the
+reconstructed per-side warning animation now matches stock: BCW state 2 remains asserted, OSM flashes 0.8 seconds on and
+0.2 seconds off from a warning-relative phase, and a same-side signal starts the one-shot approximately 1.8-second
+`BCW_*SndWrngSta` envelope. The car produces its audible/steering-wheel-haptic warning downstream from that state; it does
+not require a synthetic CCNC `VIBRATE` command. `KiaEv9SoftwareBsmWarningOutputEnabled` is a separate default-off gate.
 
 An experimental software BSM estimator is staged behind three independent, persistent default-off gates:
 
@@ -488,9 +497,26 @@ Fresh native `0x1BA` remains authoritative. Without it, the estimator requires f
 20 km/h to retain (40 km/h to acquire), less than 10 degrees steering angle, and qualified measured radar tracks for
 the empirically weaker left-side signal. It never feeds longitudinal planning, braking, AEB, or BCA. When the separate
 comma-output flag is enabled, its `CarState` blind-spot state also conservatively blocks an openpilot lane change, just
-like native BSM; keep that output disabled during shadow validation. A same-side
-turn signal promotes BCW to persistent state 2 while the outside mirror lamp follows the observed 0.8-second-on,
-0.2-second-off cadence; hazards never escalate. Sound, brake, vibration, and BCA request fields remain untouched.
+like native BSM; keep that output disabled during shadow validation. A same-side turn signal promotes BCW to persistent
+state 2 while the outside mirror lamp follows the observed cadence; hazards never escalate. Brake and BCA request fields
+remain untouched.
+
+### Rear cross-traffic and CCNC headway decoding
+
+The Saturday reverse routes contain three clear right-side rear cross-traffic warning episodes. Their target decision is
+ADAS-originated `0x1E5.RCTA_TARGET_STATE=1` (`2` is the neutral state), followed by native `0x1BA` right OSM warning and
+retained downstream warning envelopes `0x449.SIDE_WARNING_ACTIVE=1` and
+`0x472.SIDE_WARNING_OUTPUT_STATE=0x80` (neutral `0x40`). Messages `0x449` and `0x472` still transmit when ADAS TX is
+suppressed, proving their output ECU remains online, but they become neutral because they are downstream consumers rather
+than independent target sensors. Cross-route testing of the retained raw rear-radar tracks could not reproduce the ADAS
+target decision: the best aggregate bit had only 29.1% precision, and route-held-out classifiers had zero recall. Thus
+RCCA warning and braking are currently lost with ADAS TX disabled. No braking-tier event was captured, so no synthetic
+RCCA braking request is staged.
+
+The horizontal line rendered ahead of the vehicle is `CCNC_0x161.TARGET=3` at `TARGET_DISTANCE`. Stock copies the SCC
+desired following-headway distance: it tracks ego speed at approximately 1.626 seconds and has essentially no correlation
+with lead range, requested acceleration, or braking. Reconstruction now sends that headway marker instead of the prior
+zero/sentinel placement. Front vehicle range continues to use the fused SCC/radar-selected lead independently.
 
 The same route showed EV9-only invalid-message cascades lasting at most 0.651 seconds while every service remained alive
 and at frequency. The invalid-only debounce is one second; dead or slow services still trigger immediately. The separate

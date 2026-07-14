@@ -401,7 +401,10 @@ def create_blindspot_status_messages(packer, CAN, rear_values, front_corner_valu
 
 
 def create_ev9_blindspot_status_messages(packer, CAN, counter, left_blindspot=False, right_blindspot=False,
-                                          left_escalated=False, right_escalated=False):
+                                          left_escalated=False, right_escalated=False,
+                                          left_warning_active=False, right_warning_active=False,
+                                          left_flash_phase=0, right_flash_phase=0,
+                                          left_sound_active=False, right_sound_active=False):
   """Recreate the stock-correlated subset of EV9 BSM output fields."""
   # Overwrite the verified fields in the complete captured payload. A delta
   # cannot be XORed onto the body: the live pre-suppression payload can already
@@ -416,12 +419,18 @@ def create_ev9_blindspot_status_messages(packer, CAN, counter, left_blindspot=Fa
   # 0.2 s off at this helper's 20 Hz call rate. Hazard suppression is decided
   # upstream; this helper accepts explicit escalation state and never infers it
   # from turn lamps.
-  flash_on = int(counter) % 20 < 16
-  left_osm_state = left_state if left_state != 2 or flash_on else 0
-  right_osm_state = right_state if right_state != 2 or flash_on else 0
+  # Each side owns a warning-relative 20-sample phase. Stock keeps the first
+  # 16 samples on and the next 4 off; using the global 8-bit rolling counter
+  # breaks this cadence whenever that counter wraps.
+  left_flash_on = int(left_flash_phase) % 20 < 16
+  right_flash_on = int(right_flash_phase) % 20 < 16
+  left_osm_state = 2 if left_warning_active and left_flash_on else 1 if left_state == 1 else 0
+  right_osm_state = 2 if right_warning_active and right_flash_on else 1 if right_state == 1 else 0
   desired_fields = {
     "BCW_LtIndSta": left_state,
     "BCW_RtIndSta": right_state,
+    "BCW_LtSndWrngSta": int(left_sound_active),
+    "BCW_RtSndWrngSta": int(right_sound_active),
     "OSMrrLamp_LtIndSta": left_osm_state,
     "OSMrrLamp_RtIndSta": right_osm_state,
   }
@@ -925,7 +934,9 @@ def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, la
                                      steering_icon_active: bool | None = None,
                                      speed_limit_raw: int = 0,
                                      speed_limit_enabled: bool = False,
-                                     neutral_lane_curvature_enabled: bool = True) -> list[CanData]:
+                                     neutral_lane_curvature_enabled: bool = True,
+                                     lead_left_selected: bool = False,
+                                     lead_right_selected: bool = False) -> list[CanData]:
   """Recreate EV9 CCNC engagement icons and the supported radar-object slots.
 
   This intentionally renders only fields whose stock EV9 meanings were seen in
@@ -961,6 +972,10 @@ def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, la
     # renders its own lane geometry from the HDA/LFA state.
     "CENTERLINE": 0,
     "TARGET": 3 if hda_active else 0,
+    # Stock copies SCC's desired following-headway marker. The captured EV9
+    # setting is 1.626 seconds and has near-unity correlation with ego speed,
+    # not lead range or stopping distance.
+    "TARGET_DISTANCE": min(max(float(getattr(out, "vEgo", 0.0)) * 1.626, 0.1), 204.7) if hda_active else 204.6,
     # This DBC represents the stock raw-zero neutral value as physical 15.
     # Physical zero packs raw 17, which the cluster renders as a right curve.
     "LANELINE_CURVATURE": 15 if neutral_lane_curvature_enabled else 0,
@@ -999,10 +1014,10 @@ def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, la
     "LEAD_ALT": 1 if alternate_active else 0,
     "LEAD_ALT_DISTANCE": min(max(lead_two_distance, 0.0), 204.7) if alternate_active else 0.0,
     "LEAD_ALT_LATERAL": min(abs(lead_two_lateral), 12.7) if alternate_active else 0.0,
-    "LEAD_LEFT": 1 if objects_active and lead_left_visible else 0,
+    "LEAD_LEFT": (2 if lead_left_selected else 1) if objects_active and lead_left_visible else 0,
     "LEAD_LEFT_DISTANCE": object_distance(lead_left_distance) if objects_active and lead_left_visible else 0.0,
     "LEAD_LEFT_LATERAL": 3.0 if objects_active and lead_left_visible else 0.0,
-    "LEAD_RIGHT": 1 if objects_active and lead_right_visible else 0,
+    "LEAD_RIGHT": (2 if lead_right_selected else 1) if objects_active and lead_right_visible else 0,
     "LEAD_RIGHT_DISTANCE": object_distance(lead_right_distance) if objects_active and lead_right_visible else 0.0,
     "LEAD_RIGHT_LATERAL": 3.0 if objects_active and lead_right_visible else 0.0,
     # The stock route uses a fixed near-field marker for rear BSM objects; it

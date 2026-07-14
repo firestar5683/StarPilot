@@ -21,6 +21,7 @@ MRR35_RADAR_START_ADDR = 0x3A5
 MRR35_RADAR_MSG_COUNT = 32
 EV9_CLUSTER_DISPLAY_DISCRIMINATOR_SIGNAL = "UNKNOWN_7"
 EV9_CLUSTER_DISPLAY_DISCRIMINATOR_THRESHOLD = 200.0
+EV9_CLUSTER_STRICT_SIDE_DISCRIMINATOR_THRESHOLD = 280.0
 EV9_CLUSTER_DISPLAY_DISCRIMINATOR_REJECT_LOG_LIMIT = 5
 
 
@@ -33,6 +34,20 @@ def ev9_mrr35_cluster_display_candidate(values) -> bool:
   """
   return float(values.get(EV9_CLUSTER_DISPLAY_DISCRIMINATOR_SIGNAL, 0.0)) > \
          EV9_CLUSTER_DISPLAY_DISCRIMINATOR_THRESHOLD
+
+
+def ev9_mrr35_strict_side_display_candidate(values) -> bool:
+  """Qualify the stock-correlated MRR35 lifecycle used for side display slots.
+
+  This is deliberately stricter than the primary-lead filter. It is a display
+  classifier only and must never be treated as an OEM BSM/RCTA decision.
+  """
+  return float(values.get(EV9_CLUSTER_DISPLAY_DISCRIMINATOR_SIGNAL, 0.0)) > \
+         EV9_CLUSTER_STRICT_SIDE_DISCRIMINATOR_THRESHOLD and \
+         int(values.get("NEW_SIGNAL_3", 0)) == 2 and \
+         int(values.get("NEW_SIGNAL_12", 0)) == 10 and \
+         int(values.get("NEW_SIGNAL_15", 0)) == 2 and \
+         int(values.get("NEW_SIGNAL_17", 0)) == 1
 
 
 @dataclass(frozen=True)
@@ -119,6 +134,7 @@ class RadarInterface(RadarInterfaceBase):
     # Retain this application-facing attribute name for card.py compatibility;
     # its contents are display candidates, not a decoded radar quality metric.
     self.ev9_cluster_quality_track_ids: set[int] = set()
+    self.ev9_cluster_strict_side_track_ids: set[int] = set()
     self.ev9_cluster_display_discriminator_reject_count = 0
     self.ev9_cluster_display_discriminator_reject_logs = 0
     self.rcp = get_radar_can_parser(CP, self.radar_config)
@@ -165,6 +181,7 @@ class RadarInterface(RadarInterfaceBase):
 
     if self.radar_off_can or (self.rcp is None):
       self.ev9_cluster_quality_track_ids.clear()
+      self.ev9_cluster_strict_side_track_ids.clear()
       return super().update(None)
 
     vls = self.rcp.update(can_strings)
@@ -234,6 +251,7 @@ class RadarInterface(RadarInterfaceBase):
     radar_type = self.radar_config.radar_type
     vl = self.rcp.vl
     ev9_display_candidate_track_ids: set[int] = set()
+    ev9_strict_side_track_ids: set[int] = set()
 
     for addr, track_name in self.track_addrs:
       msg = vl[track_name]
@@ -308,6 +326,8 @@ class RadarInterface(RadarInterfaceBase):
                                  f"addr=0x{addr:X}, discriminator="
                                  f"{msg[EV9_CLUSTER_DISPLAY_DISCRIMINATOR_SIGNAL]:.0f}, "
                                  f"rejected={self.ev9_cluster_display_discriminator_reject_count}")
+            if ev9_mrr35_strict_side_display_candidate(msg):
+              ev9_strict_side_track_ids.add(pt.trackId)
         elif addr in self.pts:
           del self.pts[addr]
         continue
@@ -334,6 +354,7 @@ class RadarInterface(RadarInterfaceBase):
     # qualification. This set never changes the RadarData returned to fusion.
     if self.CP.carFingerprint == CAR.KIA_EV9:
       self.ev9_cluster_quality_track_ids = ev9_display_candidate_track_ids if self.rcp.can_valid else set()
+      self.ev9_cluster_strict_side_track_ids = ev9_strict_side_track_ids if self.rcp.can_valid else set()
 
     ret.points = list(self.pts.values())
     return ret

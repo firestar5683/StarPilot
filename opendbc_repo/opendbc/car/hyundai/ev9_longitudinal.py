@@ -24,10 +24,65 @@ EV9_RAW_BSM_RECONSTRUCTION_PARAM = "KiaEv9RawBsmReconstructionEnabled"
 EV9_SOFTWARE_BSM_PARAM = "KiaEv9SoftwareBsmEnabled"
 EV9_SOFTWARE_BSM_COMMA_OUTPUT_PARAM = "KiaEv9SoftwareBsmCommaOutputEnabled"
 EV9_SOFTWARE_BSM_VEHICLE_OUTPUT_PARAM = "KiaEv9SoftwareBsmVehicleOutputEnabled"
+EV9_SOFTWARE_BSM_WARNING_OUTPUT_PARAM = "KiaEv9SoftwareBsmWarningOutputEnabled"
 EV9_DIRECT_ANGLE_COMMAND_PARAM = "KiaEv9DirectAngleCommandEnabled"
 EV9_DTC_CAPTURE_TARGETS = (0x7C4, 0x7C6, 0x7D0, 0x7D4)
 EV9_DTC_CAPTURE_SLOT_FRAMES = 100
 EV9_CLUSTER_MAP_SPEED_LIMIT_SOURCES = frozenset(("Map Data", "Mapbox", "Vision"))
+
+
+@dataclass(frozen=True)
+class Ev9BsmWarningOutput:
+  mirror_warning_active: bool = False
+  flash_phase: int = 0
+  sound_active: bool = False
+
+
+class Ev9BsmWarningAnimator:
+  """Reproduce the stock EV9 mirror and one-shot audible/haptic envelope."""
+
+  FLASH_SAMPLES = 20
+  FLASH_ON_SAMPLES = 16
+  SOUND_SAMPLES = 36
+
+  def __init__(self) -> None:
+    self.flash_phase = 0
+    self.mirror_warning_active = False
+    self.escalated_prev = False
+    self.sound_remaining = 0
+    self.sound_armed = True
+
+  def update(self, escalated: bool, blinker: bool, sound_enabled: bool) -> Ev9BsmWarningOutput:
+    if not blinker:
+      self.flash_phase = 0
+      self.mirror_warning_active = False
+      self.escalated_prev = False
+      self.sound_remaining = 0
+      self.sound_armed = True
+      return Ev9BsmWarningOutput()
+
+    rising = escalated and not self.escalated_prev
+    if rising:
+      self.flash_phase = 0
+      self.mirror_warning_active = True
+      if self.sound_armed and sound_enabled:
+        self.sound_remaining = self.SOUND_SAMPLES
+        self.sound_armed = False
+    elif escalated:
+      self.flash_phase = (self.flash_phase + 1) % self.FLASH_SAMPLES
+      self.mirror_warning_active = True
+    elif self.mirror_warning_active and self.flash_phase < self.FLASH_ON_SAMPLES - 1:
+      # Stock completes the current 0.8-second ON pulse after BCW clears.
+      self.flash_phase += 1
+    else:
+      self.flash_phase = 0
+      self.mirror_warning_active = False
+
+    self.escalated_prev = escalated
+    sound_active = bool(sound_enabled and self.sound_remaining > 0)
+    if self.sound_remaining > 0:
+      self.sound_remaining -= 1
+    return Ev9BsmWarningOutput(self.mirror_warning_active, self.flash_phase, sound_active)
 
 
 def ev9_cluster_display_speed_limit_raw(camera_raw: int | float, fallback_enabled: bool, plan_valid: bool,

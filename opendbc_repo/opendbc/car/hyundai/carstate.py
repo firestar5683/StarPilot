@@ -183,9 +183,11 @@ class CarState(CarStateBase):
     self.openpilot_lead_left_visible = False
     self.openpilot_lead_left_distance = 0.0
     self.openpilot_lead_left_lateral = 0.0
+    self.openpilot_lead_left_selected = False
     self.openpilot_lead_right_visible = False
     self.openpilot_lead_right_distance = 0.0
     self.openpilot_lead_right_lateral = 0.0
+    self.openpilot_lead_right_selected = False
     self.openpilot_radar_valid = False
     self.panda_faulted = True
     self.stock_blinker_stalks_ts = 0

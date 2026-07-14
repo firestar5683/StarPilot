@@ -15,7 +15,9 @@ from opendbc.car.hyundai.ev9_longitudinal import EV9_CLUSTER_ALTERNATE_LEAD_PARA
                                                    EV9_NEUTRAL_LANE_CURVATURE_PARAM, \
                                                    EV9_REAR_BSM_CLUSTER_FALLBACK_PARAM, EV9_SOFT_DRIVER_STEERING_OVERRIDE_PARAM, \
                                                    EV9_SOFTWARE_BSM_VEHICLE_OUTPUT_PARAM, \
+                                                   EV9_SOFTWARE_BSM_WARNING_OUTPUT_PARAM, \
                                                    EV9LongitudinalTestConfig, EV9LongitudinalTestStage, \
+                                                   Ev9BsmWarningAnimator, \
                                                    EV9ActuationAbortReason, advance_ev9_longitudinal_support_stage, \
                                                    ev9_actuation_abort_reason, ev9_longitudinal_test_scc_command, \
                                                    ev9_dtc_capture_messages, \
@@ -411,6 +413,9 @@ class CarController(CarControllerBase):
       self._params.get_bool(EV9_REAR_BSM_CLUSTER_FALLBACK_PARAM)
     self.ev9_software_bsm_vehicle_output_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
       self._params.get_bool(EV9_SOFTWARE_BSM_VEHICLE_OUTPUT_PARAM)
+    self.ev9_software_bsm_warning_output_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
+      self._params.get_bool(EV9_SOFTWARE_BSM_WARNING_OUTPUT_PARAM)
+    self._ev9_bsm_warning_animators = {"left": Ev9BsmWarningAnimator(), "right": Ev9BsmWarningAnimator()}
     self.ev9_long_test = get_ev9_longitudinal_test_config(self._params) if CP.carFingerprint == CAR.KIA_EV9 \
       else EV9LongitudinalTestConfig()
     self._ev9_dtc_capture_start_frame = None
@@ -898,6 +903,8 @@ class CarController(CarControllerBase):
             speed_limit_raw=int(getattr(CS, "ev9_cluster_speed_limit_raw", 0)),
             speed_limit_enabled=self.ev9_cluster_speed_limit_enabled,
             neutral_lane_curvature_enabled=self.ev9_neutral_lane_curvature_enabled,
+            lead_left_selected=bool(getattr(CS, "openpilot_lead_left_selected", False)),
+            lead_right_selected=bool(getattr(CS, "openpilot_lead_right_selected", False)),
           ))
       elif ccnc_non_hda2:
         can_sends.extend(hyundaicanfd.create_ccnc(self.packer, self.CAN, self.long_active_ecu, CC.enabled, CC.hudControl,
@@ -951,12 +958,24 @@ class CarController(CarControllerBase):
           if self.ev9_long_test.stage >= EV9LongitudinalTestStage.ADRV_57A and self.frame % 10 == 0:
             adrv_messages.append(hyundaicanfd.create_ev9_raw_adrv_message(0x57A, self.CAN.ECAN))
           if self.ev9_long_test.stage >= EV9LongitudinalTestStage.BSM_STATUS and self.frame % 5 == 0:
+            left_bsm = bool(getattr(CS, "ev9_vehicle_bsm_left", False)) if self.ev9_software_bsm_vehicle_output_enabled else False
+            right_bsm = bool(getattr(CS, "ev9_vehicle_bsm_right", False)) if self.ev9_software_bsm_vehicle_output_enabled else False
+            left_escalated = bool(getattr(CS, "ev9_vehicle_bsm_left_escalated", False)) \
+              if self.ev9_software_bsm_vehicle_output_enabled else False
+            right_escalated = bool(getattr(CS, "ev9_vehicle_bsm_right_escalated", False)) \
+              if self.ev9_software_bsm_vehicle_output_enabled else False
+            left_warning = self._ev9_bsm_warning_animators["left"].update(
+              left_escalated, bool(CS.out.leftBlinker), self.ev9_software_bsm_warning_output_enabled,
+            )
+            right_warning = self._ev9_bsm_warning_animators["right"].update(
+              right_escalated, bool(CS.out.rightBlinker), self.ev9_software_bsm_warning_output_enabled,
+            )
             adrv_messages.extend(hyundaicanfd.create_ev9_blindspot_status_messages(
               self.packer, self.CAN, self.frame // 5,
-              bool(getattr(CS, "ev9_vehicle_bsm_left", False)) if self.ev9_software_bsm_vehicle_output_enabled else False,
-              bool(getattr(CS, "ev9_vehicle_bsm_right", False)) if self.ev9_software_bsm_vehicle_output_enabled else False,
-              bool(getattr(CS, "ev9_vehicle_bsm_left_escalated", False)) if self.ev9_software_bsm_vehicle_output_enabled else False,
-              bool(getattr(CS, "ev9_vehicle_bsm_right_escalated", False)) if self.ev9_software_bsm_vehicle_output_enabled else False,
+              left_bsm, right_bsm, left_escalated, right_escalated,
+              left_warning.mirror_warning_active, right_warning.mirror_warning_active,
+              left_warning.flash_phase, right_warning.flash_phase,
+              left_warning.sound_active, right_warning.sound_active,
             ))
         can_sends.extend(adrv_messages)
         # Ioniq 5/6: front radar treats ADAS_DRV's 0x100 broadcast as its host heartbeat

@@ -24,6 +24,7 @@ class ClusterObject:
   distance: float
   lateral: float
   relative_speed: float
+  selected: bool = False
 
 
 @dataclass(frozen=True)
@@ -76,13 +77,15 @@ class Ev9ClusterObjectTracker:
       MIN_OBJECT_DISTANCE < values[0] <= Ev9ClusterObjectTracker.MAX_DISTANCE and all(math.isfinite(v) for v in values)
 
   @staticmethod
-  def _as_cluster_object(track: _TrackedObject) -> ClusterObject:
-    return ClusterObject(track.track_id, track.distance, track.lateral, track.relative_speed)
+  def _as_cluster_object(track: _TrackedObject, selected: bool = False) -> ClusterObject:
+    return ClusterObject(track.track_id, track.distance, track.lateral, track.relative_speed, selected)
 
   def update(self, points: list[Any], preferred_primary_track_id: int = -1,
              alternate_enabled: bool = False,
              qualified_track_ids: set[int] | None = None,
-             require_preferred_primary: bool = False) -> ClusterObjectSlots:
+             require_preferred_primary: bool = False,
+             side_qualified_track_ids: set[int] | None = None,
+             right_enabled: bool = True) -> ClusterObjectSlots:
     # A non-None set is an explicit display allow-list for points present in
     # this scan. Evict a present-but-disqualified track immediately, while a
     # genuinely missing point gets the bounded dropout hold below.
@@ -129,9 +132,17 @@ class Ev9ClusterObjectTracker:
     confirmed = [track for track in self.tracks.values() if track.confirmed]
     center = sorted((track for track in confirmed if abs(track.lateral) <= self.CENTER_HALF_WIDTH),
                     key=lambda track: track.distance)
-    left = sorted((track for track in confirmed if self.CENTER_HALF_WIDTH < track.lateral <= self.ADJACENT_OUTER_WIDTH),
+    def side_qualified(track: _TrackedObject) -> bool:
+      return side_qualified_track_ids is None or track.track_id in side_qualified_track_ids
+
+    # Stock-correlated side slots occupy the near adjacent lane and disappear
+    # beyond 80 m. This is intentionally separate from the wider primary-lead
+    # allow-list and does not claim to be a BSM target decision.
+    left = sorted((track for track in confirmed if side_qualified(track) and
+                   self.CENTER_HALF_WIDTH < track.lateral < 4.0 and track.distance < 80.0),
                   key=lambda track: track.distance)
-    right = sorted((track for track in confirmed if -self.ADJACENT_OUTER_WIDTH <= track.lateral < -self.CENTER_HALF_WIDTH),
+    right = sorted((track for track in confirmed if right_enabled and side_qualified(track) and
+                    -4.0 < track.lateral < -self.CENTER_HALF_WIDTH and track.distance < 80.0),
                    key=lambda track: track.distance)
 
     def choose(slot: str, candidates: list[_TrackedObject], preferred_track_id: int = -1) -> _TrackedObject | None:
@@ -160,10 +171,10 @@ class Ev9ClusterObjectTracker:
     # Slots are derived together from the current lane classification, so a
     # track moving from an adjacent lane to center cannot exist in both slots.
     return ClusterObjectSlots(
-      primary=self._as_cluster_object(primary) if primary is not None else None,
+      primary=self._as_cluster_object(primary, primary.track_id == preferred_primary_track_id) if primary is not None else None,
       alternate=self._as_cluster_object(alternate) if alternate is not None else None,
-      left=self._as_cluster_object(left_object) if left_object is not None else None,
-      right=self._as_cluster_object(right_object) if right_object is not None else None,
+      left=self._as_cluster_object(left_object, left_object.track_id == preferred_primary_track_id) if left_object is not None else None,
+      right=self._as_cluster_object(right_object, right_object.track_id == preferred_primary_track_id) if right_object is not None else None,
     )
 
 

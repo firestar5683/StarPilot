@@ -2,6 +2,7 @@ from types import SimpleNamespace
 
 from opendbc.car.hyundai.ev9_longitudinal import EV9_DTC_CAPTURE_SLOT_FRAMES, EV9_DTC_CAPTURE_TARGETS, \
                                                     EV9ActuationAbortReason, \
+                                                    Ev9BsmWarningAnimator, \
                                                     EV9LongitudinalProbeMode, EV9LongitudinalTestConfig, EV9LongitudinalTestStage, \
                                                     advance_ev9_longitudinal_support_stage, ev9_communication_control_requests, \
                                                     ev9_actuation_abort_reason, \
@@ -21,6 +22,30 @@ def test_ev9_cruise_main_latch_toggles_only_on_rising_edges():
 
 def test_ev9_cruise_main_latch_disabled_preserves_legacy_health_only_behavior():
   assert update_ev9_cruise_main_latch(False, 0, [1, 0], False) is True
+
+
+def test_bsm_warning_animator_finishes_pulse_and_sounds_once_per_blinker_session():
+  animator = Ev9BsmWarningAnimator()
+  outputs = [animator.update(escalated=i < 8, blinker=True, sound_enabled=True) for i in range(40)]
+
+  assert all(output.mirror_warning_active for output in outputs[:16])
+  assert not any(output.mirror_warning_active for output in outputs[16:])
+  assert sum(output.sound_active for output in outputs) == animator.SOUND_SAMPLES
+
+  # A second target during the same signal session flashes the mirror but
+  # does not replay the one-shot audible/haptic warning.
+  repeated = [animator.update(escalated=True, blinker=True, sound_enabled=True) for _ in range(4)]
+  assert all(output.mirror_warning_active for output in repeated)
+  assert not any(output.sound_active for output in repeated)
+
+  animator.update(escalated=False, blinker=False, sound_enabled=True)
+  assert animator.update(escalated=True, blinker=True, sound_enabled=True).sound_active
+
+
+def test_bsm_warning_animator_keeps_sound_disabled_without_output_gate():
+  animator = Ev9BsmWarningAnimator()
+  outputs = [animator.update(escalated=True, blinker=True, sound_enabled=False) for _ in range(40)]
+  assert not any(output.sound_active for output in outputs)
 
 
 class FakeParams:
