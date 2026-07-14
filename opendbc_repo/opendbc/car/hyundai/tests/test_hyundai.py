@@ -1685,16 +1685,20 @@ class TestHyundaiFingerprint:
     assert parser.vl["CCNC_0x161"]["LANELINE_RIGHT"] == 0
     assert parser.vl["CCNC_0x161"]["LCA_LEFT_ICON"] == 1
     assert parser.vl["CCNC_0x161"]["LCA_RIGHT_ICON"] == 1
+    assert parser.vl["CCNC_0x161"]["BCA_LEFT"] == 0
+    assert parser.vl["CCNC_0x161"]["BCA_RIGHT"] == 0
     assert parser.vl["CCNC_0x161"]["SETSPEED_SPEED"] == 65
-    assert parser.vl["CCNC_0x162"]["LEAD"] == 1
-    assert parser.vl["CCNC_0x162"]["LEAD_DISTANCE"] == pytest.approx(42.0)
+    assert parser.vl["CCNC_0x162"]["LEAD"] == 2
+    assert parser.vl["CCNC_0x162"]["LEAD_DISTANCE"] == pytest.approx(41.8)
     assert parser.vl["CCNC_0x162"]["LEAD_ALT"] == 0
     msg_161 = next(msg for msg in msgs if msg.address == 0x161)
     assert (int.from_bytes(msg_161.dat, "little") >> 100) & 0x1F == 0
     assert parser.vl["CCNC_0x162"]["LEAD_ALT_DISTANCE"] == pytest.approx(0.0)
-    assert parser.vl["CCNC_0x162"]["LEAD_LEFT_DISTANCE"] == pytest.approx(30.0)
+    assert parser.vl["CCNC_0x162"]["LEAD_LEFT_DISTANCE"] == pytest.approx(29.8)
+    assert parser.vl["CCNC_0x162"]["LEAD_LEFT"] == 1
     assert parser.vl["CCNC_0x162"]["LEAD_LEFT_LATERAL"] == pytest.approx(3.0)
-    assert parser.vl["CCNC_0x162"]["LEAD_RIGHT_DISTANCE"] == pytest.approx(35.0)
+    assert parser.vl["CCNC_0x162"]["LEAD_RIGHT_DISTANCE"] == pytest.approx(34.8)
+    assert parser.vl["CCNC_0x162"]["LEAD_RIGHT"] == 1
     assert parser.vl["CCNC_0x162"]["LEAD_RIGHT_LATERAL"] == pytest.approx(3.0)
     assert parser.vl["CCNC_0x162"]["LEAD_LEFT_REAR_STATUS"] == 0
     assert parser.vl["CCNC_0x162"]["LEAD_LEFT_REAR_DISTANCE"] == pytest.approx(0.0)
@@ -1872,7 +1876,9 @@ class TestHyundaiFingerprint:
       lead_visible=True, lead_distance=42.0,
     )
     parser.update([(3, msgs)])
-    assert parser.vl["CCNC_0x161"]["HDA_ICON"] == 0
+    assert parser.vl["CCNC_0x161"]["HDA_ICON"] == 1
+    assert parser.vl["CCNC_0x161"]["LCA_LEFT_ICON"] == 1
+    assert parser.vl["CCNC_0x161"]["LCA_RIGHT_ICON"] == 1
     assert parser.vl["CCNC_0x161"]["SETSPEED"] == 1
     assert parser.vl["CCNC_0x161"]["SETSPEED_HUD"] == 1
     assert parser.vl["CCNC_0x161"]["DISTANCE_CAR"] == 1
@@ -1885,10 +1891,10 @@ class TestHyundaiFingerprint:
       lead_visible=True, lead_distance=42.0, objects_on_main_enabled=True,
     )
     parser.update([(4, msgs)])
-    assert parser.vl["CCNC_0x161"]["HDA_ICON"] == 0
+    assert parser.vl["CCNC_0x161"]["HDA_ICON"] == 1
     assert parser.vl["CCNC_0x161"]["SETSPEED_HUD"] == 1
-    assert parser.vl["CCNC_0x162"]["LEAD"] == 1
-    assert parser.vl["CCNC_0x162"]["LEAD_DISTANCE"] == pytest.approx(42.0)
+    assert parser.vl["CCNC_0x162"]["LEAD"] == 2
+    assert parser.vl["CCNC_0x162"]["LEAD_DISTANCE"] == pytest.approx(41.8)
 
   def test_ccnc_hud_helper_generates_lane_position_animation_and_lca_arrows(self):
     CP = CarParams.new_message()
@@ -3073,7 +3079,7 @@ class TestHyundaiFingerprint:
     assert rear["BCW_LtSndWrngSta"] == 0
 
     signaled_left = hyundaicanfd.create_ev9_blindspot_status_messages(
-      packer, can_bus, 2, left_blindspot=True, left_blinker=True,
+      packer, can_bus, 2, left_blindspot=True, left_escalated=True,
     )
     parser.update([(3, signaled_left)])
     rear = parser.vl["BLINDSPOTS_REAR_CORNERS"]
@@ -3085,12 +3091,25 @@ class TestHyundaiFingerprint:
     assert rear["BCW_LtSndWrngSta"] == 0
 
     opposite_blinker = hyundaicanfd.create_ev9_blindspot_status_messages(
-      packer, can_bus, 3, left_blindspot=True, right_blinker=True,
+      packer, can_bus, 3, left_blindspot=True, right_escalated=True,
     )
     parser.update([(4, opposite_blinker)])
     rear = parser.vl["BLINDSPOTS_REAR_CORNERS"]
     assert rear["BCW_LtIndSta"] == 1
     assert rear["OSMrrLamp_LtIndSta"] == 1
+
+    osm_states = []
+    for counter in range(20):
+      warning = hyundaicanfd.create_ev9_blindspot_status_messages(
+        packer, can_bus, counter, left_blindspot=True, left_escalated=True,
+      )
+      parser.update([(5 + counter, warning)])
+      rear = parser.vl["BLINDSPOTS_REAR_CORNERS"]
+      # BCW state 2 remains persistent; only the outside mirror lamp flashes.
+      assert rear["BCW_LtIndSta"] == 2
+      assert rear["BCW_LtSndWrngSta"] == 0
+      osm_states.append(rear["OSMrrLamp_LtIndSta"])
+    assert osm_states == ([2] * 16) + ([0] * 4)
 
   def test_ev9_blindspot_status_clears_nonzero_live_baseline_lamps(self):
     CP = CarParams.new_message()

@@ -401,7 +401,7 @@ def create_blindspot_status_messages(packer, CAN, rear_values, front_corner_valu
 
 
 def create_ev9_blindspot_status_messages(packer, CAN, counter, left_blindspot=False, right_blindspot=False,
-                                          left_blinker=False, right_blinker=False):
+                                          left_escalated=False, right_escalated=False):
   """Recreate the stock-correlated subset of EV9 BSM output fields."""
   # Overwrite the verified fields in the complete captured payload. A delta
   # cannot be XORed onto the body: the live pre-suppression payload can already
@@ -409,13 +409,21 @@ def create_ev9_blindspot_status_messages(packer, CAN, counter, left_blindspot=Fa
   # as 3 and held both mirror lamps on throughout route 00000108. Unlike the
   # generic Ioniq 6 helper, EV9 stock routes kept BCW_Sta and FL/FR_INDICATOR at
   # zero through genuine lamp events, so they must not be synthesized here.
-  left_state = 2 if left_blindspot and left_blinker else (1 if left_blindspot else 0)
-  right_state = 2 if right_blindspot and right_blinker else (1 if right_blindspot else 0)
+  left_state = 2 if left_blindspot and left_escalated else (1 if left_blindspot else 0)
+  right_state = 2 if right_blindspot and right_escalated else (1 if right_blindspot else 0)
+  # The validated EV9 warning scene holds BCW at state 2 while the matching
+  # blinker is active, but flashes only the outside-mirror lamp: 0.8 s on,
+  # 0.2 s off at this helper's 20 Hz call rate. Hazard suppression is decided
+  # upstream; this helper accepts explicit escalation state and never infers it
+  # from turn lamps.
+  flash_on = int(counter) % 20 < 16
+  left_osm_state = left_state if left_state != 2 or flash_on else 0
+  right_osm_state = right_state if right_state != 2 or flash_on else 0
   desired_fields = {
     "BCW_LtIndSta": left_state,
     "BCW_RtIndSta": right_state,
-    "OSMrrLamp_LtIndSta": left_state,
-    "OSMrrLamp_RtIndSta": right_state,
+    "OSMrrLamp_LtIndSta": left_osm_state,
+    "OSMrrLamp_RtIndSta": right_osm_state,
   }
 
   return [
@@ -937,14 +945,18 @@ def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, la
   lfa_active = bool(hud_feature_enabled and lat_active)
   lfa_icon = (2 if steering_icon_active else 1) if lfa_active and steering_icon_active is not None else \
     1 if lfa_active else 0
-  alternate_active = bool(objects_active and alternate_enabled and lead_two_visible and
-                          (abs(lead_two_distance - lead_distance) > 0.5 or abs(lead_two_lateral) > 0.5))
+  # No stock EV9 reference used LEAD_ALT; leadTwo is often the same fused car.
+  alternate_active = False
+
+  def object_distance(distance: float) -> float:
+    return min(max(distance - 0.2, 0.1), 204.7)
+
   cluster_speed_limit = sanitize_ev9_cluster_speed_limit(speed_limit_raw) if speed_limit_enabled else 0
   values_161 = {
     "DAW_ICON": 0,
     "LKA_ICON": 0,
     "LFA_ICON": lfa_icon,
-    "HDA_ICON": 2 if hda_active else 0,
+    "HDA_ICON": 2 if hda_active else 1 if main_standby else 0,
     # Stock EV9 HDA leaves these lane-rendering fields neutral. The cluster
     # renders its own lane geometry from the HDA/LFA state.
     "CENTERLINE": 0,
@@ -956,8 +968,8 @@ def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, la
     "LANELINE_RIGHT": 0,
     # Value 1 means that lane-change assistance is available, not that a
     # vehicle occupies the corresponding blind spot.
-    "LCA_LEFT_ICON": 1 if hda_active else 0,
-    "LCA_RIGHT_ICON": 1 if hda_active else 0,
+    "LCA_LEFT_ICON": 1 if hda_active or main_standby else 0,
+    "LCA_RIGHT_ICON": 1 if hda_active or main_standby else 0,
     "SETSPEED": 3 if hda_active else 1 if main_standby else 0,
     "SETSPEED_HUD": 2 if hda_active else 1 if main_standby else 0,
     "SETSPEED_SPEED": display_speed if hda_active or main_standby else 255,
@@ -967,6 +979,10 @@ def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, la
     "DISTANCE_CAR": 2 if hda_active else 1 if main_standby else 0,
     "SLA_ICON": 0,
     "NAV_ICON": 0,
+    # Stock EV9 warning scenes kept BCA, arrows, sounds, and VIBRATE neutral.
+    # Genuine/synthetic 0x1BA is the independently reconstructed BSM path.
+    "BCA_LEFT": 0,
+    "BCA_RIGHT": 0,
   }
 
   values_162 = {fault: 0 for fault in ("FAULT_FSS", "FAULT_FCA", "FAULT_LSS", "FAULT_SLA",
@@ -975,17 +991,19 @@ def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, la
     # EV9 stock routes observed this field at zero, including lane/BSM events.
     # Do not claim steering-wheel vibration until an EV9 route proves its use.
     "VIBRATE": 0,
-    "LEAD": 1 if objects_active and lead_visible else 0,
-    "LEAD_DISTANCE": min(max(lead_distance, 0.0), 204.7) if objects_active and lead_visible else 0.0,
+    # The fused/selected primary is the white box used in stock display data;
+    # generic adjacent tracks remain gray boxes.
+    "LEAD": 2 if objects_active and lead_visible else 0,
+    "LEAD_DISTANCE": object_distance(lead_distance) if objects_active and lead_visible else 0.0,
     "LEAD_LATERAL": 0.0,
     "LEAD_ALT": 1 if alternate_active else 0,
     "LEAD_ALT_DISTANCE": min(max(lead_two_distance, 0.0), 204.7) if alternate_active else 0.0,
     "LEAD_ALT_LATERAL": min(abs(lead_two_lateral), 12.7) if alternate_active else 0.0,
     "LEAD_LEFT": 1 if objects_active and lead_left_visible else 0,
-    "LEAD_LEFT_DISTANCE": min(max(lead_left_distance, 0.0), 204.7) if objects_active and lead_left_visible else 0.0,
+    "LEAD_LEFT_DISTANCE": object_distance(lead_left_distance) if objects_active and lead_left_visible else 0.0,
     "LEAD_LEFT_LATERAL": 3.0 if objects_active and lead_left_visible else 0.0,
     "LEAD_RIGHT": 1 if objects_active and lead_right_visible else 0,
-    "LEAD_RIGHT_DISTANCE": min(max(lead_right_distance, 0.0), 204.7) if objects_active and lead_right_visible else 0.0,
+    "LEAD_RIGHT_DISTANCE": object_distance(lead_right_distance) if objects_active and lead_right_visible else 0.0,
     "LEAD_RIGHT_LATERAL": 3.0 if objects_active and lead_right_visible else 0.0,
     # The stock route uses a fixed near-field marker for rear BSM objects; it
     # does not provide a measured range, so retain that honest UI convention.

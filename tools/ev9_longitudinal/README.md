@@ -461,8 +461,36 @@ at 3. Reconstruction now explicitly overwrites all four verified BCW/OSM left/ri
 Third, the filtered primary object was calculated after `openpilot_lead_*` had already been copied into `CarState`.
 Consequently all 2,787 transmitted front-object samples had `LEAD_DISTANCE=0.0`. The final filtered result is now copied
 after tracking, and the default display path requires the fused radar-backed primary track instead of falling back to an
-arbitrary center raw track. A separate default-off `KiaEv9ClusterObjectsOnMainEnabled` flag permits confirmed objects in
-CC Main standby without claiming active HDA.
+arbitrary center raw track. `KiaEv9ClusterObjectsOnMainEnabled` permits confirmed objects in CC Main standby. CC Main
+renders the stock gray `HDA_ICON=1`; SET/RES engagement renders green `HDA_ICON=2`. The LCA icons remain gray availability
+indicators and never encode a blind-spot detection.
+
+The display tracker mirrors the observed stock lifecycle more closely: a stable physical radar track requires three
+samples to acquire, survives at most four missing 20 Hz radar frames, and is hard-cleared on Main-off, radar invalidity,
+standstill, or any gear other than Drive. The primary slot is reserved for the fused/selected radar-backed lead and uses
+the white-box type 2; unique adjacent tracks use gray-box type 1 with the fixed 3 m side marker. `LEAD_ALT` remains
+disabled because no stock EV9 reference used it and fused `leadTwo` frequently duplicated `leadOne`. Displayed range
+applies the stock-correlated 0.2 m encoding offset.
+
+Adjacent display objects are independent from mirror BSM by default. `KiaEv9ClusterSideObjectsRequireBsmEnabled` can
+restore the stricter experimental BSM gate, but raw `0x36A` is too inaccurate to be its default permission source. Stock
+warning scenes kept `CCNC_0x161.BCA_LEFT/BCA_RIGHT`, lane-change arrows/sounds, and `CCNC_0x162.VIBRATE` at zero; those
+fields remain neutral. Mirror/dash BSM warnings continue to use only the separately reconstructed `0x1BA` path.
+
+An experimental software BSM estimator is staged behind three independent, persistent default-off gates:
+
+- `KiaEv9SoftwareBsmEnabled` runs and logs the shadow estimator only.
+- `KiaEv9SoftwareBsmCommaOutputEnabled` permits that estimator to populate comma left/right blind-spot state.
+- `KiaEv9SoftwareBsmVehicleOutputEnabled` permits the estimator to feed the synthetic `0x1BA` mirror state and,
+  when the separate rear-display fallback is enabled, the CCNC rear object slots.
+
+Fresh native `0x1BA` remains authoritative. Without it, the estimator requires fresh raw `0x36A`, Drive, at least
+20 km/h to retain (40 km/h to acquire), less than 10 degrees steering angle, and qualified measured radar tracks for
+the empirically weaker left-side signal. It never feeds longitudinal planning, braking, AEB, or BCA. When the separate
+comma-output flag is enabled, its `CarState` blind-spot state also conservatively blocks an openpilot lane change, just
+like native BSM; keep that output disabled during shadow validation. A same-side
+turn signal promotes BCW to persistent state 2 while the outside mirror lamp follows the observed 0.8-second-on,
+0.2-second-off cadence; hazards never escalate. Sound, brake, vibration, and BCA request fields remain untouched.
 
 The same route showed EV9-only invalid-message cascades lasting at most 0.651 seconds while every service remained alive
 and at frequency. The invalid-only debounce is one second; dead or slow services still trigger immediately. The separate

@@ -1,7 +1,7 @@
 from types import SimpleNamespace
 
-from openpilot.selfdrive.car.ev9_cluster_objects import Ev9ClusterObjectTracker, bsm_gated_side_slots, default_enabled_param, filtered_radar_slots, \
-                                                         radar_backed_object
+from openpilot.selfdrive.car.ev9_cluster_objects import Ev9ClusterObjectTracker, bsm_gated_side_slots, default_enabled_param, \
+                                                         ev9_cluster_display_context_valid, filtered_radar_slots, radar_backed_object
 
 
 def lead(*, track_id=1, distance=30.0, lateral=0.0, relative_speed=-1.0, status=True, radar=True):
@@ -46,11 +46,10 @@ def test_duplicate_track_only_occupies_one_slot():
   assert slots.left is None
 
 
-def test_distinct_radar_alternate_can_be_enabled():
+def test_distinct_radar_alternate_remains_suppressed():
   slots = filtered_radar_slots(lead(track_id=1), lead(track_id=2, distance=42.0),
                                lead(status=False), lead(status=False), True)
-  assert slots.alternate is not None
-  assert slots.alternate.track_id == 2
+  assert slots.alternate is None
 
 
 def test_tracker_requires_acquisition_confirmation():
@@ -89,21 +88,32 @@ def test_tracker_assigns_each_track_to_only_one_slot():
   assert slots.left is None
 
 
-def test_tracker_alternate_is_distinct_and_opt_in():
+def test_tracker_alternate_remains_suppressed():
   tracker = Ev9ClusterObjectTracker()
   objects = [point(track_id=1, distance=20.0), point(track_id=2, distance=35.0)]
   slots = acquire(tracker, objects)
   assert slots.primary is not None
   assert slots.alternate is None
   slots = tracker.update(objects, alternate_enabled=True)
-  assert slots.alternate is not None
-  assert slots.primary.track_id != slots.alternate.track_id
+  assert slots.alternate is None
 
 
 def test_tracker_keeps_slot_identity_when_another_track_appears():
   tracker = Ev9ClusterObjectTracker()
   slots = acquire(tracker, [point(track_id=1, distance=30.0)])
   assert slots.primary.track_id == 1
+
+
+def test_tracker_hard_clear_discards_confirmed_and_pending_identity():
+  tracker = Ev9ClusterObjectTracker()
+  slots = acquire(tracker, [point(track_id=1), point(track_id=2, lateral=2.5)])
+  assert slots.primary is not None
+  assert slots.left is not None
+
+  assert tracker.clear() == type(slots)()
+  assert not tracker.tracks
+  assert all(track_id == -1 for track_id in tracker.slot_track_ids.values())
+  assert tracker.update([point(track_id=1)]).primary is None
 
 
 def test_tracker_can_require_fused_primary_track():
@@ -145,6 +155,15 @@ def test_quality_allowlist_removes_deleted_or_stale_track_immediately():
   assert tracker.update([obj], qualified_track_ids={9}).primary is None
 
 
+def test_missing_qualified_track_gets_only_bounded_dropout_hold():
+  tracker = Ev9ClusterObjectTracker()
+  obj = point(track_id=12)
+  assert acquire(tracker, [obj], qualified_track_ids={12}).primary is not None
+  for _ in range(tracker.DROPOUT_HOLD_SAMPLES):
+    assert tracker.update([], qualified_track_ids=set()).primary is not None
+  assert tracker.update([], qualified_track_ids=set()).primary is None
+
+
 def test_quality_filter_disabled_preserves_legacy_tracker_behavior():
   tracker = Ev9ClusterObjectTracker()
   garage_track = point(track_id=11, distance=4.5, lateral=-2.0, relative_speed=0.0)
@@ -163,3 +182,12 @@ def test_quality_filter_param_defaults_on_when_missing_and_honors_explicit_off()
   assert default_enabled_param(FakeParams(None), "KiaEv9RadarQualityFilterEnabled")
   assert default_enabled_param(FakeParams(b"1"), "KiaEv9RadarQualityFilterEnabled")
   assert not default_enabled_param(FakeParams(b"0"), "KiaEv9RadarQualityFilterEnabled")
+
+
+def test_display_context_requires_live_radar_main_drive_and_motion():
+  assert ev9_cluster_display_context_valid(True, True, True, False, 5.0)
+  assert not ev9_cluster_display_context_valid(False, True, True, False, 5.0)
+  assert not ev9_cluster_display_context_valid(True, False, True, False, 5.0)
+  assert not ev9_cluster_display_context_valid(True, True, False, False, 5.0)
+  assert not ev9_cluster_display_context_valid(True, True, True, True, 0.0)
+  assert not ev9_cluster_display_context_valid(True, True, True, False, 0.1)

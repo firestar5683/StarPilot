@@ -12,6 +12,12 @@ def default_enabled_param(params: Any, key: str) -> bool:
   return raw is None or raw == b"1" or raw == "1"
 
 
+def ev9_cluster_display_context_valid(radar_valid: bool, main_enabled: bool, drive_gear: bool,
+                                      standstill: bool, v_ego: float) -> bool:
+  """Gate display-only tracking to the moving Drive/Main context seen in stock routes."""
+  return bool(radar_valid and main_enabled and drive_gear and not standstill and v_ego > 0.1)
+
+
 @dataclass(frozen=True)
 class ClusterObject:
   track_id: int
@@ -43,7 +49,9 @@ class Ev9ClusterObjectTracker:
   """Small display tracker; it does not participate in planning or control."""
 
   ACQUISITION_SAMPLES = 3
-  DROPOUT_HOLD_SAMPLES = 3
+  # MRR35 is decoded at 20 Hz. Four missing frames suppress single-frame
+  # flicker while guaranteeing removal on the fifth frame (250 ms).
+  DROPOUT_HOLD_SAMPLES = 4
   EMA_ALPHA = 0.35
   CENTER_HALF_WIDTH = 1.8
   ADJACENT_OUTER_WIDTH = 5.5
@@ -52,6 +60,13 @@ class Ev9ClusterObjectTracker:
   def __init__(self) -> None:
     self.tracks: dict[int, _TrackedObject] = {}
     self.slot_track_ids: dict[str, int] = {"primary": -1, "alternate": -1, "left": -1, "right": -1}
+
+  def clear(self) -> ClusterObjectSlots:
+    """Hard-clear every pending and displayed object on a context transition."""
+    self.tracks.clear()
+    for slot in self.slot_track_ids:
+      self.slot_track_ids[slot] = -1
+    return ClusterObjectSlots()
 
   @staticmethod
   def _valid_point(point: Any) -> bool:
@@ -68,13 +83,15 @@ class Ev9ClusterObjectTracker:
              alternate_enabled: bool = False,
              qualified_track_ids: set[int] | None = None,
              require_preferred_primary: bool = False) -> ClusterObjectSlots:
-    # A non-None set is an explicit display allow-list. Evict disqualified
-    # tracks immediately instead of applying the normal short dropout hold.
+    # A non-None set is an explicit display allow-list for points present in
+    # this scan. Evict a present-but-disqualified track immediately, while a
+    # genuinely missing point gets the bounded dropout hold below.
     if qualified_track_ids is not None:
-      for track_id in set(self.tracks) - qualified_track_ids:
+      incoming_track_ids = {int(point.trackId) for point in points if self._valid_point(point)}
+      for track_id in set(self.tracks) & (incoming_track_ids - qualified_track_ids):
         del self.tracks[track_id]
       for slot, track_id in self.slot_track_ids.items():
-        if track_id not in qualified_track_ids:
+        if track_id in incoming_track_ids and track_id not in qualified_track_ids:
           self.slot_track_ids[slot] = -1
 
     seen: set[int] = set()
@@ -132,11 +149,11 @@ class Ev9ClusterObjectTracker:
       self.slot_track_ids["primary"] = primary.track_id if primary is not None else -1
     else:
       primary = choose("primary", center, preferred_primary_track_id)
-    remaining_center = [track for track in center if primary is None or track.track_id != primary.track_id]
-    alternate = choose("alternate", remaining_center) if alternate_enabled and \
-      (primary is not None or not require_preferred_primary) else None
-    if not alternate_enabled:
-      self.slot_track_ids["alternate"] = -1
+    # Stock EV9 routes never used LEAD_ALT. radarState.leadTwo frequently
+    # describes the same fused vehicle as leadOne, so this slot stays empty
+    # even when the legacy rollout argument is enabled.
+    alternate = None
+    self.slot_track_ids["alternate"] = -1
     left_object = choose("left", left)
     right_object = choose("right", right)
 
@@ -181,7 +198,9 @@ def filtered_radar_slots(lead_one: Any, lead_two: Any, lead_left: Any, lead_righ
                          qualified_track_ids: set[int] | None = None) -> ClusterObjectSlots:
   """Map fused leads without allowing vision-only or duplicate cluster ghosts."""
   primary = radar_backed_object(lead_one, qualified_track_ids)
-  alternate = radar_backed_object(lead_two, qualified_track_ids) if alternate_enabled else None
+  # LEAD_ALT is not a second selected lead on the EV9. Keep it empty rather
+  # than duplicating the fused primary object.
+  alternate = None
   left = radar_backed_object(lead_left, qualified_track_ids)
   right = radar_backed_object(lead_right, qualified_track_ids)
 

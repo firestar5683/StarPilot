@@ -14,6 +14,7 @@ from opendbc.car.hyundai.ev9_longitudinal import EV9_CLUSTER_ALTERNATE_LEAD_PARA
                                                    EV9_DIRECT_ANGLE_COMMAND_PARAM, EV9_DTC_CAPTURE_PARAM, \
                                                    EV9_NEUTRAL_LANE_CURVATURE_PARAM, \
                                                    EV9_REAR_BSM_CLUSTER_FALLBACK_PARAM, EV9_SOFT_DRIVER_STEERING_OVERRIDE_PARAM, \
+                                                   EV9_SOFTWARE_BSM_VEHICLE_OUTPUT_PARAM, \
                                                    EV9LongitudinalTestConfig, EV9LongitudinalTestStage, \
                                                    EV9ActuationAbortReason, advance_ev9_longitudinal_support_stage, \
                                                    ev9_actuation_abort_reason, ev9_longitudinal_test_scc_command, \
@@ -408,6 +409,8 @@ class CarController(CarControllerBase):
       ev9_default_enabled_param(self._params, EV9_NEUTRAL_LANE_CURVATURE_PARAM)
     self.ev9_rear_bsm_cluster_fallback_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
       self._params.get_bool(EV9_REAR_BSM_CLUSTER_FALLBACK_PARAM)
+    self.ev9_software_bsm_vehicle_output_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
+      self._params.get_bool(EV9_SOFTWARE_BSM_VEHICLE_OUTPUT_PARAM)
     self.ev9_long_test = get_ev9_longitudinal_test_config(self._params) if CP.carFingerprint == CAR.KIA_EV9 \
       else EV9LongitudinalTestConfig()
     self._ev9_dtc_capture_start_frame = None
@@ -883,12 +886,14 @@ class CarController(CarControllerBase):
             bool(getattr(CS, "openpilot_lead_right_visible", False)),
             float(getattr(CS, "openpilot_lead_right_distance", 0.0)),
             float(getattr(CS, "openpilot_lead_right_lateral", 0.0)),
-            CS.left_blindspot_from_radar, CS.right_blindspot_from_radar, CS.is_metric,
+            bool(getattr(CS, "ev9_vehicle_bsm_left", False)),
+            bool(getattr(CS, "ev9_vehicle_bsm_right", False)), CS.is_metric,
             hud_enabled=self.ev9_cluster_hud_enabled,
             objects_enabled=self.ev9_cluster_objects_enabled,
             objects_on_main_enabled=self.ev9_cluster_objects_on_main_enabled,
             alternate_enabled=self.ev9_cluster_alternate_enabled,
-            rear_bsm_fallback_enabled=self.ev9_rear_bsm_cluster_fallback_enabled,
+            rear_bsm_fallback_enabled=(self.ev9_software_bsm_vehicle_output_enabled and
+                                       self.ev9_rear_bsm_cluster_fallback_enabled),
             steering_icon_active=ev9_ccnc_steering_active,
             speed_limit_raw=int(getattr(CS, "ev9_cluster_speed_limit_raw", 0)),
             speed_limit_enabled=self.ev9_cluster_speed_limit_enabled,
@@ -947,8 +952,11 @@ class CarController(CarControllerBase):
             adrv_messages.append(hyundaicanfd.create_ev9_raw_adrv_message(0x57A, self.CAN.ECAN))
           if self.ev9_long_test.stage >= EV9LongitudinalTestStage.BSM_STATUS and self.frame % 5 == 0:
             adrv_messages.extend(hyundaicanfd.create_ev9_blindspot_status_messages(
-              self.packer, self.CAN, self.frame // 5, CS.left_blindspot_from_radar, CS.right_blindspot_from_radar,
-              CC.leftBlinker, CC.rightBlinker,
+              self.packer, self.CAN, self.frame // 5,
+              bool(getattr(CS, "ev9_vehicle_bsm_left", False)) if self.ev9_software_bsm_vehicle_output_enabled else False,
+              bool(getattr(CS, "ev9_vehicle_bsm_right", False)) if self.ev9_software_bsm_vehicle_output_enabled else False,
+              bool(getattr(CS, "ev9_vehicle_bsm_left_escalated", False)) if self.ev9_software_bsm_vehicle_output_enabled else False,
+              bool(getattr(CS, "ev9_vehicle_bsm_right_escalated", False)) if self.ev9_software_bsm_vehicle_output_enabled else False,
             ))
         can_sends.extend(adrv_messages)
         # Ioniq 5/6: front radar treats ADAS_DRV's 0x100 broadcast as its host heartbeat

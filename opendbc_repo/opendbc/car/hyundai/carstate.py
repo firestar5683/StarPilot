@@ -8,6 +8,7 @@ from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.ev9_longitudinal import EV9_CRUISE_MAIN_STATE_PARAM, EV9_RAW_BSM_RECONSTRUCTION_PARAM, \
+                                                   EV9_SOFTWARE_BSM_VEHICLE_OUTPUT_PARAM, \
                                                    ev9_default_enabled_param, update_ev9_cruise_main_latch
 from opendbc.car.hyundai.values import HyundaiFlags, HyundaiStarPilotFlags, HyundaiStarPilotSafetyFlags, CAR, DBC, Buttons, CarControllerParams, \
                                        hyundai_cancel_button_enables_cruise, ALT_BUS_LDA_BUTTON_CARS, ALT_BUS_LDA_BUTTON_SWL_STAT_CARS, \
@@ -197,9 +198,25 @@ class CarState(CarStateBase):
     self.ev9_raw_blindspot_state = 0
     self.ev9_raw_blindspot_ts = 0
     self.ev9_stock_blindspot_ts = 0
+    self.ev9_raw_blindspot_fresh = False
+    self.ev9_stock_blindspot_fresh = False
     self.ev9_blindspot_source = "neutral"
+    self.ev9_software_bsm_left = False
+    self.ev9_software_bsm_right = False
+    self.ev9_software_bsm_left_escalated = False
+    self.ev9_software_bsm_right_escalated = False
+    self.ev9_software_bsm_left_source = "neutral"
+    self.ev9_software_bsm_right_source = "neutral"
+    self.ev9_software_bsm_left_confidence = 0.0
+    self.ev9_software_bsm_right_confidence = 0.0
+    self.ev9_vehicle_bsm_left = False
+    self.ev9_vehicle_bsm_right = False
+    self.ev9_vehicle_bsm_left_escalated = False
+    self.ev9_vehicle_bsm_right_escalated = False
     self.ev9_raw_bsm_reconstruction_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
       Params().get_bool(EV9_RAW_BSM_RECONSTRUCTION_PARAM)
+    self.ev9_software_bsm_vehicle_output_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
+      Params().get_bool(EV9_SOFTWARE_BSM_VEHICLE_OUTPUT_PARAM)
     self.ev9_cruise_main_state_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
       ev9_default_enabled_param(Params(), EV9_CRUISE_MAIN_STATE_PARAM)
     self.ev9_cruise_main_on = not self.ev9_cruise_main_state_enabled
@@ -572,6 +589,15 @@ class CarState(CarStateBase):
       self.ev9_stock_blindspot_ts = cp.ts_nanos["BLINDSPOTS_REAR_CORNERS"]["CHECKSUM"]
       now_nanos = max(cp.ts_nanos["WHEEL_SPEEDS"]["CHECKSUM"], self.ev9_raw_blindspot_ts,
                       self.ev9_stock_blindspot_ts)
+      raw_age = now_nanos - self.ev9_raw_blindspot_ts
+      stock_age = now_nanos - self.ev9_stock_blindspot_ts
+      self.ev9_raw_blindspot_fresh = self.ev9_raw_blindspot_ts > 0 and 0 <= raw_age <= CANFD_BLINDSPOT_STALE_NS
+      # While the explicit vehicle-output experiment is active, received
+      # 0x1BA may be our own previous synthetic frame. Do not feed that frame
+      # back as a newly authoritative native decision. With output disabled,
+      # the unchanged native-fresh path below remains authoritative.
+      self.ev9_stock_blindspot_fresh = not self.ev9_software_bsm_vehicle_output_enabled and \
+        self.ev9_stock_blindspot_ts > 0 and 0 <= stock_age <= CANFD_BLINDSPOT_STALE_NS
       self.left_blindspot_from_radar, self.right_blindspot_from_radar, self.ev9_blindspot_source = \
         resolve_ev9_blindspot_state(
           self.ev9_raw_blindspot_state, self.ev9_raw_blindspot_ts,
@@ -580,6 +606,10 @@ class CarState(CarStateBase):
           self.ev9_raw_bsm_reconstruction_enabled, ret.gearShifter == structs.CarState.GearShifter.drive,
           ret.vEgo,
         )
+      if self.ev9_software_bsm_vehicle_output_enabled and self.ev9_blindspot_source == "stock":
+        self.left_blindspot_from_radar = False
+        self.right_blindspot_from_radar = False
+        self.ev9_blindspot_source = "neutral"
     if self.CP.enableBsm:
       if self.CP.carFingerprint == CAR.KIA_EV9:
         ret.leftBlindspot = self.left_blindspot_from_radar

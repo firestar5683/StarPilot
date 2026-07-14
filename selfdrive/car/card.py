@@ -18,7 +18,9 @@ from opendbc.car.can_definitions import CanData, CanRecvCallable, CanSendCallabl
 from opendbc.car.carlog import carlog
 from opendbc.car.fw_versions import ObdCallback
 from opendbc.car.car_helpers import get_car, interfaces
-from opendbc.car.hyundai.ev9_longitudinal import EV9LongitudinalTestStage, ev9_cluster_display_speed_limit_raw, \
+from opendbc.car.hyundai.ev9_longitudinal import EV9_SOFTWARE_BSM_COMMA_OUTPUT_PARAM, EV9_SOFTWARE_BSM_PARAM, \
+                                                   EV9_SOFTWARE_BSM_VEHICLE_OUTPUT_PARAM, EV9LongitudinalTestStage, \
+                                                   ev9_cluster_display_speed_limit_raw, \
                                                    get_ev9_longitudinal_test_config
 from opendbc.car.hyundai.interface import attempt_ev9_pre_fingerprint_suppression
 from opendbc.car.interfaces import CarInterfaceBase, RadarInterfaceBase
@@ -29,7 +31,9 @@ from openpilot.selfdrive.car.cruise import VCruiseHelper, IMPERIAL_INCREMENT, V_
 from openpilot.selfdrive.car.redneck_cruise import RedneckCruise, select_redneck_target_speed
 from openpilot.selfdrive.car.car_specific import MockCarState
 from openpilot.selfdrive.car.ev9_cluster_objects import ClusterObjectSlots, Ev9ClusterObjectTracker, bsm_gated_side_slots, default_enabled_param, \
-                                                         filtered_radar_slots
+                                                         ev9_cluster_display_context_valid, filtered_radar_slots
+from openpilot.selfdrive.car.ev9_software_bsm import RAW_BASE_MASK, RAW_LEFT_MASK, RAW_RIGHT_MASK, Ev9SoftwareBsmDetector, \
+                                                       select_ev9_software_bsm_outputs
 
 from openpilot.starpilot.common.starpilot_variables import get_starpilot_toggles, update_starpilot_toggles
 from openpilot.starpilot.controls.starpilot_card import StarPilotCard
@@ -37,6 +41,7 @@ from openpilot.starpilot.controls.starpilot_card import StarPilotCard
 REPLAY = "REPLAY" in os.environ
 OPENPILOT_LEAD_MIN_DISTANCE = 0.1
 REDNECK_DECREASE_LOOKAHEAD_POINTS = 10
+EV9_SOFTWARE_BSM_RADAR_STALE_S = 0.15
 
 EventName = log.OnroadEvent.EventName
 
@@ -107,11 +112,16 @@ class Car:
     self.ev9_cluster_map_speed_limit_fallback_enabled = self.params.get_bool("KiaEv9ClusterMapSpeedLimitFallbackEnabled")
     self.ev9_radar_quality_filter_enabled = default_enabled_param(self.params, "KiaEv9RadarQualityFilterEnabled")
     self.ev9_cluster_fused_primary_required = default_enabled_param(self.params, "KiaEv9ClusterFusedPrimaryRequired")
-    self.ev9_cluster_side_objects_require_bsm = default_enabled_param(
-      self.params, "KiaEv9ClusterSideObjectsRequireBsmEnabled",
-    )
+    self.ev9_cluster_side_objects_require_bsm = self.params.get_bool("KiaEv9ClusterSideObjectsRequireBsmEnabled")
     self.ev9_cluster_tracker = Ev9ClusterObjectTracker()
     self.ev9_cluster_slots = ClusterObjectSlots()
+    self.ev9_software_bsm_enabled = self.params.get_bool(EV9_SOFTWARE_BSM_PARAM)
+    self.ev9_software_bsm_comma_output_enabled = self.params.get_bool(EV9_SOFTWARE_BSM_COMMA_OUTPUT_PARAM)
+    self.ev9_software_bsm_vehicle_output_enabled = self.params.get_bool(EV9_SOFTWARE_BSM_VEHICLE_OUTPUT_PARAM)
+    self.ev9_software_bsm_detector = Ev9SoftwareBsmDetector()
+    self.ev9_software_bsm_last_state = (False, False, False, False)
+    self.ev9_software_bsm_last_log_time = 0.0
+    self.ev9_software_bsm_last_radar_time = 0.0
 
     self.can_callbacks = can_comm_callbacks(self.can_sock, self.pm.sock['sendcan'])
 
@@ -319,23 +329,127 @@ class Car:
     # Update radar tracks from CAN
     RD: structs.RadarDataT | None = self.RI.update(can_list)
 
-    if RD is not None and str(self.CP.carFingerprint) == "KIA_EV9" and self.ev9_cluster_objects_enabled and \
+    # Consume the current fused radar state before selecting a preferred EV9
+    # display track. The tracker is display-only and must fail closed whenever
+    # its vehicle/radar context is not valid.
+    self.sm.update(0)
+
+    if str(self.CP.carFingerprint) == "KIA_EV9" and self.ev9_cluster_objects_enabled and \
        self.ev9_cluster_smoothing_enabled:
-      preferred_primary_track_id = -1
-      if self.sm.seen['radarState']:
+      radar_valid = self.sm.seen['radarState'] and self.sm.alive['radarState'] and self.sm.valid['radarState']
+      main_enabled = bool(getattr(self.CI.CS, "ev9_cruise_main_on", CS.cruiseState.available))
+      display_context_valid = ev9_cluster_display_context_valid(
+        radar_valid, main_enabled, CS.gearShifter == structs.CarState.GearShifter.drive, CS.standstill, CS.vEgo,
+      )
+      if not display_context_valid:
+        self.ev9_cluster_slots = self.ev9_cluster_tracker.clear()
+      elif RD is not None:
+        preferred_primary_track_id = -1
         fused_lead = self.sm['radarState'].leadOne
         if fused_lead.status and getattr(fused_lead, "radar", False):
           preferred_primary_track_id = int(getattr(fused_lead, "radarTrackId", -1))
-      qualified_track_ids = set(getattr(self.RI, "ev9_cluster_quality_track_ids", set())) \
-        if self.ev9_radar_quality_filter_enabled else None
-      self.ev9_cluster_slots = self.ev9_cluster_tracker.update(
-        list(RD.points), preferred_primary_track_id, self.ev9_cluster_alternate_enabled, qualified_track_ids,
-        self.ev9_cluster_fused_primary_required,
-      )
-
-    self.sm.update(0)
+        qualified_track_ids = set(getattr(self.RI, "ev9_cluster_quality_track_ids", set())) \
+          if self.ev9_radar_quality_filter_enabled else None
+        self.ev9_cluster_slots = self.ev9_cluster_tracker.update(
+          list(RD.points), preferred_primary_track_id, False, qualified_track_ids,
+          self.ev9_cluster_fused_primary_required,
+        )
+    elif str(self.CP.carFingerprint) == "KIA_EV9":
+      self.ev9_cluster_slots = self.ev9_cluster_tracker.clear()
 
     if str(self.CP.carFingerprint) == "KIA_EV9":
+      if RD is not None:
+        self.ev9_software_bsm_last_radar_time = time.monotonic()
+        qualified_track_ids = set(getattr(self.RI, "ev9_cluster_quality_track_ids", set()))
+        qualified_tracks = [point for point in RD.points if int(getattr(point, "trackId", -1)) in qualified_track_ids]
+        raw_state = int(getattr(self.CI.CS, "ev9_raw_blindspot_state", 0))
+        raw_base_valid = bool(raw_state & RAW_BASE_MASK)
+        if self.ev9_software_bsm_enabled:
+          software_bsm = self.ev9_software_bsm_detector.update(
+            raw_left=raw_base_valid and bool(raw_state & RAW_LEFT_MASK),
+            raw_right=raw_base_valid and bool(raw_state & RAW_RIGHT_MASK),
+            fresh=bool(getattr(self.CI.CS, "ev9_raw_blindspot_fresh", False)),
+            drive=CS.gearShifter == structs.CarState.GearShifter.drive,
+            reverse=CS.gearShifter == structs.CarState.GearShifter.reverse,
+            v_ego=float(CS.vEgo),
+            steering_angle_deg=float(CS.steeringAngleDeg),
+            left_blinker=bool(CS.leftBlinker),
+            right_blinker=bool(CS.rightBlinker),
+            hazard=bool(CS.leftBlinker and CS.rightBlinker),
+            radar_tracks=qualified_tracks,
+          )
+        else:
+          self.ev9_software_bsm_detector.reset()
+          software_bsm = self.ev9_software_bsm_detector.update(
+            raw_left=False, raw_right=False, fresh=False, drive=False,
+            v_ego=0.0, steering_angle_deg=0.0,
+          )
+
+        self.CI.CS.ev9_software_bsm_left = software_bsm.left.detected
+        self.CI.CS.ev9_software_bsm_right = software_bsm.right.detected
+        self.CI.CS.ev9_software_bsm_left_escalated = software_bsm.left.escalated
+        self.CI.CS.ev9_software_bsm_right_escalated = software_bsm.right.escalated
+        self.CI.CS.ev9_software_bsm_left_source = software_bsm.left.source
+        self.CI.CS.ev9_software_bsm_right_source = software_bsm.right.source
+        self.CI.CS.ev9_software_bsm_left_confidence = software_bsm.left.confidence
+        self.CI.CS.ev9_software_bsm_right_confidence = software_bsm.right.confidence
+
+        native_fresh = bool(getattr(self.CI.CS, "ev9_stock_blindspot_fresh", False) and
+                            getattr(self.CI.CS, "ev9_blindspot_source", "neutral") == "stock")
+        native_left = bool(getattr(self.CI.CS, "left_blindspot_from_radar", False))
+        native_right = bool(getattr(self.CI.CS, "right_blindspot_from_radar", False))
+        bsm_outputs = select_ev9_software_bsm_outputs(
+          software_bsm,
+          detector_enabled=self.ev9_software_bsm_enabled,
+          comma_output_enabled=self.ev9_software_bsm_comma_output_enabled,
+          vehicle_output_enabled=self.ev9_software_bsm_vehicle_output_enabled,
+          native_fresh=native_fresh,
+          native_left=native_left,
+          native_right=native_right,
+        )
+        if bsm_outputs.comma_override:
+          CS.leftBlindspot = bsm_outputs.comma_left
+          CS.rightBlindspot = bsm_outputs.comma_right
+
+        self.CI.CS.ev9_vehicle_bsm_left = bsm_outputs.vehicle_left
+        self.CI.CS.ev9_vehicle_bsm_right = bsm_outputs.vehicle_right
+        self.CI.CS.ev9_vehicle_bsm_left_escalated = bsm_outputs.vehicle_left_escalated
+        self.CI.CS.ev9_vehicle_bsm_right_escalated = bsm_outputs.vehicle_right_escalated
+
+        detector_state = (software_bsm.left.detected, software_bsm.right.detected,
+                          software_bsm.left.escalated, software_bsm.right.escalated)
+        if detector_state != self.ev9_software_bsm_last_state:
+          now = time.monotonic()
+          if now - self.ev9_software_bsm_last_log_time >= 1.0:
+            cloudlog.info(
+              f"EV9 software BSM shadow left={software_bsm.left.detected}/{software_bsm.left.escalated} "
+              f"({software_bsm.left.source},{software_bsm.left.confidence:.2f}) "
+              f"right={software_bsm.right.detected}/{software_bsm.right.escalated} "
+              f"({software_bsm.right.source},{software_bsm.right.confidence:.2f})",
+            )
+            self.ev9_software_bsm_last_log_time = now
+          self.ev9_software_bsm_last_state = detector_state
+
+      elif not self.ev9_software_bsm_enabled or (self.ev9_software_bsm_last_radar_time > 0.0 and
+                                                  time.monotonic() - self.ev9_software_bsm_last_radar_time >
+                                                  EV9_SOFTWARE_BSM_RADAR_STALE_S):
+        # RD=None is normal between the 20 Hz radar trigger frames. Clear only
+        # once the complete radar update is actually stale; clearing every CAN
+        # tick would make the detector's two-sample acquisition impossible.
+        self.ev9_software_bsm_detector.reset()
+        self.CI.CS.ev9_software_bsm_left = False
+        self.CI.CS.ev9_software_bsm_right = False
+        self.CI.CS.ev9_software_bsm_left_escalated = False
+        self.CI.CS.ev9_software_bsm_right_escalated = False
+        self.CI.CS.ev9_software_bsm_left_source = "neutral"
+        self.CI.CS.ev9_software_bsm_right_source = "neutral"
+        self.CI.CS.ev9_software_bsm_left_confidence = 0.0
+        self.CI.CS.ev9_software_bsm_right_confidence = 0.0
+        self.CI.CS.ev9_vehicle_bsm_left = False
+        self.CI.CS.ev9_vehicle_bsm_right = False
+        self.CI.CS.ev9_vehicle_bsm_left_escalated = False
+        self.CI.CS.ev9_vehicle_bsm_right_escalated = False
+
       plan_valid = self.sm.seen['starpilotPlan'] and self.sm.alive['starpilotPlan'] and self.sm.valid['starpilotPlan']
       plan = self.sm['starpilotPlan']
       self.CI.CS.ev9_cluster_speed_limit_raw = ev9_cluster_display_speed_limit_raw(
@@ -532,8 +646,8 @@ class Car:
     if ev9_filtered_objects and filtered_slots is not None:
       filtered_slots = bsm_gated_side_slots(
         filtered_slots,
-        bool(getattr(self.CI.CS, 'left_blindspot_from_radar', False)),
-        bool(getattr(self.CI.CS, 'right_blindspot_from_radar', False)),
+        bool(getattr(self.CI.CS, 'ev9_vehicle_bsm_left', False)),
+        bool(getattr(self.CI.CS, 'ev9_vehicle_bsm_right', False)),
         self.ev9_cluster_side_objects_require_bsm,
       )
 
@@ -644,9 +758,10 @@ class Car:
       self.ev9_cluster_map_speed_limit_fallback_enabled = self.params.get_bool("KiaEv9ClusterMapSpeedLimitFallbackEnabled")
       self.ev9_radar_quality_filter_enabled = default_enabled_param(self.params, "KiaEv9RadarQualityFilterEnabled")
       self.ev9_cluster_fused_primary_required = default_enabled_param(self.params, "KiaEv9ClusterFusedPrimaryRequired")
-      self.ev9_cluster_side_objects_require_bsm = default_enabled_param(
-        self.params, "KiaEv9ClusterSideObjectsRequireBsmEnabled",
-      )
+      self.ev9_cluster_side_objects_require_bsm = self.params.get_bool("KiaEv9ClusterSideObjectsRequireBsmEnabled")
+      self.ev9_software_bsm_enabled = self.params.get_bool(EV9_SOFTWARE_BSM_PARAM)
+      self.ev9_software_bsm_comma_output_enabled = self.params.get_bool(EV9_SOFTWARE_BSM_COMMA_OUTPUT_PARAM)
+      self.ev9_software_bsm_vehicle_output_enabled = self.params.get_bool(EV9_SOFTWARE_BSM_VEHICLE_OUTPUT_PARAM)
       time.sleep(0.1)
 
   def card_thread(self):
