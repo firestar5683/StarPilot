@@ -604,7 +604,14 @@ BO_ 736 MANUAL_SPEED_LIMIT_ASSIST: 32 XXX
  SG_ MSLA_STATUS : 26|2@1+ (1,0) [0|3] "" XXX
  SG_ MSLA_ENABLED : 38|1@1+ (1,0) [0|1] "" XXX
  SG_ MAX_SPEED : 55|8@0+ (1,0) [0|255] "" XXX
+ SG_ SMART_REGEN_ACTIVE : 90|1@1+ (1,0) [0|1] "" XXX
+ SG_ SMART_REGEN_LEAD_DETECTED : 92|1@1+ (1,0) [0|1] "" XXX
+ SG_ REGEN_LEVEL_DISPLAY_RAW : 104|8@1+ (1,0) [0|255] "" XXX
  SG_ MAX_SPEED_COPY : 144|8@1+ (1,0) [0|255] "" XXX
+
+CM_ SG_ 736 SMART_REGEN_ACTIVE "EV9 AUTO regen active/visible state; stock clears it during SCC and on a right-paddle hold.";
+CM_ SG_ 736 SMART_REGEN_LEAD_DETECTED "EV9 Smart Regeneration lead-recognition state; stock-correlated with SCC_CONTROL ObjValid.";
+CM_ SG_ 736 REGEN_LEVEL_DISPLAY_RAW "EV9 cluster regen level: fixed levels use 0/20/40/60/80, AUTO also uses intermediate even values, and 126 is unavailable/hidden.";
 
 BO_ 762 EV_ENERGY_STATUS_REDUNDANT: 32 XXX
  SG_ BATTERY_SOC_REDUNDANT : 120|8@1+ (0.5,0) [0|100] "%" XXX

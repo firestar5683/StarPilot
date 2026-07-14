@@ -924,7 +924,8 @@ def _create_ev9_adrv_message_with_signals(packer, CAN, address: int, counter: in
 def create_ev9_acc_control(packer, CAN, counter: int, enabled: bool, accel_raw: float, accel_value: float,
                            stop_request: bool, cruise_standstill: bool, gas_override: bool, set_speed: float,
                            main_mode_acc: int, lead_distance: float, lead_rel_speed: float, lead_visible: bool,
-                           v_ego: float, jerk_lower: float = 0.7, jerk_upper: float = 0.7) -> CanData:
+                           v_ego: float, jerk_lower: float = 0.7, jerk_upper: float = 0.7,
+                           smart_regen_retention: bool = False) -> CanData:
   """Patch an EV9 SCC_CONTROL command into the last stock payload.
 
   The stock EV9 routes use different constants and object sentinels than the
@@ -950,7 +951,11 @@ def create_ev9_acc_control(packer, CAN, counter: int, enabled: bool, accel_raw: 
     "ACC_ObjDist": float(np.clip(lead_distance, 0.0, 204.7)) if lead_visible else 204.6,
     "ACC_ObjRelSpd": float(np.clip(lead_rel_speed, -16.4, 34.7)) if lead_visible else 34.6,
     "ObjValid": 0 if lead_visible else 1,
-    "OBJ_STATUS": 2 if enabled and lead_visible else 0,
+    # Stock EV9 keeps a qualified lead at status 2 while SCC is inactive so
+    # the downstream Smart Regeneration controller can vary coasting regen.
+    # This does not request acceleration or braking: ACCMode and both aReq
+    # fields remain zero whenever openpilot longitudinal is disengaged.
+    "OBJ_STATUS": 2 if lead_visible and (enabled or smart_regen_retention) else 0,
     "NEW_SIGNAL_3": 2 if lead_visible else 0,
     "NEW_SIGNAL_15": desired_headway,
     "SET_ME_2": 4,

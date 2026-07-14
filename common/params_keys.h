@@ -67,6 +67,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"KiaEv9SoftwareBsmCommaOutputEnabled", {PERSISTENT, BOOL, "0"}},
     {"KiaEv9SoftwareBsmVehicleOutputEnabled", {PERSISTENT, BOOL, "0"}},
     {"KiaEv9SoftwareBsmWarningOutputEnabled", {PERSISTENT, BOOL, "0"}},
+    {"KiaEv9SmartRegenRetentionEnabled", {PERSISTENT, BOOL, "0"}},
     {"AlphaLongitudinalEnabled", {PERSISTENT, BOOL}},
     {"ExperimentalLongitudinalEnabled", {PERSISTENT, BOOL}},
     {"ExperimentalMode", {PERSISTENT, BOOL}},

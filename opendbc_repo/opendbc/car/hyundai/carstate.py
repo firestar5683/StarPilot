@@ -222,6 +222,9 @@ class CarState(CarStateBase):
     self.ev9_cruise_main_state_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
       ev9_default_enabled_param(Params(), EV9_CRUISE_MAIN_STATE_PARAM)
     self.ev9_cruise_main_on = not self.ev9_cruise_main_state_enabled
+    self.ev9_smart_regen_active = False
+    self.ev9_smart_regen_lead_detected = False
+    self.ev9_regen_level_display_raw = 0
 
     # On some cars, CLU15->CF_Clu_VehicleSpeed can oscillate faster than the dash updates. Sample at 5 Hz
     self.cluster_speed = 0
@@ -670,6 +673,10 @@ class CarState(CarStateBase):
     # TODO: find this message on ICE & HYBRID cars + cruise control signals (if exists)
     if self.CP.flags & HyundaiFlags.EV:
       ret.cruiseState.nonAdaptive = cp.vl["MANUAL_SPEED_LIMIT_ASSIST"]["MSLA_ENABLED"] == 1
+      if self.CP.carFingerprint == CAR.KIA_EV9:
+        self.ev9_smart_regen_active = bool(cp.vl["MANUAL_SPEED_LIMIT_ASSIST"]["SMART_REGEN_ACTIVE"])
+        self.ev9_smart_regen_lead_detected = bool(cp.vl["MANUAL_SPEED_LIMIT_ASSIST"]["SMART_REGEN_LEAD_DETECTED"])
+        self.ev9_regen_level_display_raw = int(cp.vl["MANUAL_SPEED_LIMIT_ASSIST"]["REGEN_LEVEL_DISPLAY_RAW"])
     self.lda_button = cp.vl[self.cruise_btns_msg_canfd]["LDA_BTN"]
     self.left_paddle = 0
     if self.CP.carFingerprint == CAR.HYUNDAI_IONIQ_6:

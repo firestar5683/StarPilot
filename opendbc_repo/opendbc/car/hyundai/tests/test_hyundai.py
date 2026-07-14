@@ -1685,6 +1685,60 @@ class TestHyundaiFingerprint:
       hyundaicanfd.set_ev9_adrv_baselines([])
       assert not hyundaicanfd.ev9_scc_control_baseline_available()
 
+  @pytest.mark.parametrize(("retention_enabled", "lead_visible", "expected_status"), [
+    (False, True, 0),
+    (True, False, 0),
+    (True, True, 2),
+  ])
+  def test_ev9_inactive_acc_control_can_retain_smart_regen_lead_context(
+    self, retention_enabled, lead_visible, expected_status,
+  ):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.KIA_EV9
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.CANFD_LKA_STEERING)
+
+    packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
+    can_bus = CanBus(CP)
+    parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("SCC_CONTROL", 0)], can_bus.ECAN)
+    msg = hyundaicanfd.create_ev9_acc_control(
+      packer, can_bus, counter=0, enabled=False, accel_raw=-2.0, accel_value=-2.0,
+      stop_request=True, cruise_standstill=True, gas_override=False, set_speed=25,
+      main_mode_acc=0, lead_distance=18.0, lead_rel_speed=-0.5, lead_visible=lead_visible, v_ego=12.0,
+      smart_regen_retention=retention_enabled,
+    )
+    parser.update([(1, [msg])])
+
+    values = parser.vl["SCC_CONTROL"]
+    assert parser.can_valid
+    assert values["ACCMode"] == 0
+    assert values["aReqRaw"] == pytest.approx(0.0)
+    assert values["aReqValue"] == pytest.approx(0.0)
+    assert values["StopReq"] == 0
+    assert values["CRUISE_STANDSTILL"] == 0
+    assert values["ObjValid"] == int(not lead_visible)
+    assert values["OBJ_STATUS"] == expected_status
+
+  def test_ev9_smart_regen_feedback_decode(self):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.KIA_EV9
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.EV)
+
+    packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
+    can_bus = CanBus(CP)
+    parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("MANUAL_SPEED_LIMIT_ASSIST", 0)], can_bus.ECAN)
+    msg = packer.make_can_msg("MANUAL_SPEED_LIMIT_ASSIST", can_bus.ECAN, {
+      "SMART_REGEN_ACTIVE": 1,
+      "SMART_REGEN_LEAD_DETECTED": 1,
+      "REGEN_LEVEL_DISPLAY_RAW": 46,
+    })
+    parser.update([(1, [msg])])
+
+    assert parser.can_valid
+    values = parser.vl["MANUAL_SPEED_LIMIT_ASSIST"]
+    assert values["SMART_REGEN_ACTIVE"] == 1
+    assert values["SMART_REGEN_LEAD_DETECTED"] == 1
+    assert values["REGEN_LEVEL_DISPLAY_RAW"] == 46
+
   def test_ccnc_hud_helper_clears_faults_and_generates_ui_fields(self):
     CP = CarParams.new_message()
     CP.carFingerprint = CAR.HYUNDAI_SONATA_2024

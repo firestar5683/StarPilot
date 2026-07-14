@@ -17,6 +17,7 @@ from opendbc.car.hyundai.ev9_longitudinal import EV9_ACTUATION_JERK_LOWER, EV9_A
                                                    EV9_REAR_BSM_CLUSTER_FALLBACK_PARAM, EV9_SOFT_DRIVER_STEERING_OVERRIDE_PARAM, \
                                                    EV9_SOFTWARE_BSM_VEHICLE_OUTPUT_PARAM, \
                                                    EV9_SOFTWARE_BSM_WARNING_OUTPUT_PARAM, \
+                                                   EV9_SMART_REGEN_RETENTION_PARAM, \
                                                    EV9LongitudinalStopState, \
                                                    EV9LongitudinalTestConfig, EV9LongitudinalTestStage, \
                                                    Ev9BsmWarningAnimator, \
@@ -419,6 +420,8 @@ class CarController(CarControllerBase):
       self._params.get_bool(EV9_SOFTWARE_BSM_VEHICLE_OUTPUT_PARAM)
     self.ev9_software_bsm_warning_output_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
       self._params.get_bool(EV9_SOFTWARE_BSM_WARNING_OUTPUT_PARAM)
+    self.ev9_smart_regen_retention_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
+      self._params.get_bool(EV9_SMART_REGEN_RETENTION_PARAM)
     self._ev9_bsm_warning_animators = {"left": Ev9BsmWarningAnimator(), "right": Ev9BsmWarningAnimator()}
     self.ev9_long_test = get_ev9_longitudinal_test_config(self._params) if CP.carFingerprint == CAR.KIA_EV9 \
       else EV9LongitudinalTestConfig()
@@ -1052,6 +1055,7 @@ class CarController(CarControllerBase):
             set_speed_in_units, int(ev9_main_mode), lead_distance, lead_rel_speed, lead_visible, float(CS.out.vEgo),
             jerk_lower=EV9_ACTUATION_JERK_LOWER,
             jerk_upper=scc_jerk_upper,
+            smart_regen_retention=self.ev9_smart_regen_retention_enabled,
           ))
           self._ev9_scc_counter = (self._ev9_scc_counter + 1) & 0xFF
         else:
