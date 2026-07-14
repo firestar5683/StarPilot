@@ -576,7 +576,7 @@ class TestHyundaiCanfdLKASteeringLongEV(HyundaiLongitudinalBase, TestHyundaiCanf
 
 class TestHyundaiCanfdLKASteeringAltAngleLongEV(HyundaiLongitudinalBase, TestHyundaiCanfdAngleSteering):
 
-  MAX_ACCEL = 0.30
+  MAX_ACCEL = 0.18
   MIN_ACCEL = -0.50
 
   TX_MSGS = [[0x110, 0], [0xCB, 1], [0x1CF, 1], [0x362, 0], [0x51, 0], [0x100, 0], [0x730, 1], [0x12a, 1], [0x160, 1],
@@ -607,9 +607,9 @@ class TestHyundaiCanfdLKASteeringAltAngleLongEV(HyundaiLongitudinalBase, TestHyu
     self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiCanfd, self.SAFETY_PARAM)
     self.safety.init_tests()
     self.safety.set_controls_allowed(True)
-    for accel in (-0.50, 0.0, 0.30):
+    for accel in (-0.50, 0.0, 0.18):
       self.assertTrue(self._tx(self._accel_msg(accel)))
-    for accel in (-0.51, 0.31, -3.5, 3.5):
+    for accel in (-0.51, 0.19, -3.5, 3.5):
       self.assertFalse(self._tx(self._accel_msg(accel)))
 
   test_ev9_read_dtc_diagnostics = TestHyundaiCanfdLKASteeringEV.test_ev9_read_dtc_diagnostics

@@ -307,11 +307,32 @@ both sides. The reconstructed output preserves both the vehicle mirror warnings 
 remained zero in those routes; steering-wheel vibration must not be claimed from that signal without new evidence.
 
 Stage 16 is the required preflight and cannot actuate. Stage 17 is limited in both controller code and Panda safety to
-`-0.50` through `+0.30 m/s²`, and the controller permanently aborts it for the rest of the ignition cycle on any of:
-not in Drive, brake pressed, accelerator/override, invalid CAN, invalid radar, Panda fault, or speed above `5.0 m/s`.
+`-0.50` through `+0.18 m/s²`, and the controller permanently aborts it for the rest of the ignition cycle on any of:
+not in Drive, brake pressed, accelerator/override, invalid CAN, invalid radar, Panda fault, speed below `0.5 m/s`, or
+speed above `5.0 m/s`. Actuation also fails closed when the startup capture did not contain a valid 32-byte stock
+`SCC_CONTROL` baseline from bus 1.
 These limits come from the active stock-SCC samples in the same two routes; no stock standstill/resume sample was captured,
 so stop-and-go testing is out of scope. Do not enter stage 17 with a dash warning, invalid comma vehicle state, or outside a
 flat closed private test area.
+
+The stage-17 command is EV9-specific even though it uses the normal Hyundai CAN-FD `SCC_CONTROL` transport. It runs at
+50 Hz, seeds currently unnamed fields from the last stock EV9 payload, then explicitly overwrites every actuation, mode,
+lead-object, set-speed, and distance-setting field. The CAN packer regenerates the counter and CRC. `StopReq` and
+`CRUISE_STANDSTILL` are forced to zero because the reference routes did not capture a stock hold/resume event. Negative
+acceleration therefore tests rolling braking only. The EV9 also has a private CarParams tune (`startAccel=0.18`,
+`stopAccel=-0.50`, no starting state); EV6 and Ioniq 6 tuning predicates are unchanged.
+
+The stock reference contained 39,002 valid 32-byte `SCC_CONTROL` frames at 50 Hz. Active `aReqRaw` ranged from -0.60
+to +0.18 m/s² while `aReqValue` ranged from -0.50 to +0.18 m/s² and ramped downward by at most 0.03 per frame. The
+initial command therefore caps both requests at -0.50/+0.18 and rate-limits `aReqValue` in both directions at the commonly
+observed 0.7 m/s³ jerk value. For the first closed-course phase the same limited value is sent in both `aReqRaw` and
+`aReqValue`; the stock-style stepped raw target can be enabled only after response is measured. A valid selected lead uses
+the EV9-observed `NEW_SIGNAL_3=2` and `OBJ_STATUS=5` tuple. The desired-headway field is reconstructed from its stock
+relationship `NEW_SIGNAL_15 = 1.625 * vEgo`, rounded to 0.1 m and capped at 204.6 m.
+
+OFF-to-READY early suppression applies to the fully reconstructed stage 15 and the cumulative preflight/actuation stages.
+Previously it matched stage 15 exactly, which meant a stage-17 boot could miss the verified suppression window before the
+longitudinal command path ever started.
 
 ## EV6-style engagement and EV9 CCNC display
 

@@ -19,6 +19,7 @@ from opendbc.car.lateral import apply_steer_angle_limits_vm
 from opendbc.car.hyundai.carstate import CarState, decode_canfd_camera_lead, decode_ioniq_6_blindspot_radar_state, \
                                          read_canfd_speed_limit_raw, resolve_ev9_blindspot_state
 from opendbc.car.hyundai.interface import CarInterface, attempt_ev9_pre_fingerprint_suppression
+from opendbc.car.interfaces import ACCEL_MIN
 from opendbc.car.hyundai import hyundaican, hyundaicanfd
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.ev9_longitudinal import EV9LongitudinalProbeMode, EV9LongitudinalTestConfig, EV9LongitudinalTestStage, \
@@ -29,7 +30,7 @@ from opendbc.car.hyundai.values import CAMERA_SCC_CAR, CANFD_CAR, CAN_GEARS, CAR
                                          HYBRID_CAR, EV_CAR, FW_QUERY_CONFIG, LEGACY_SAFETY_MODE_CAR, CANFD_FUZZY_WHITELIST, \
                                          UNSUPPORTED_LONGITUDINAL_CAR, PLATFORM_CODE_ECUS, HYUNDAI_VERSION_REQUEST_LONG, \
                                          LEGACY_LONGITUDINAL_CAR, DBC, HyundaiFlags, get_platform_codes, HyundaiSafetyFlags, \
-                                         HyundaiStarPilotSafetyFlags, Buttons, kia_ev6_gt_line_longitudinal_tuning
+                                         HyundaiStarPilotSafetyFlags, Buttons, CarControllerParams, kia_ev6_gt_line_longitudinal_tuning
 
 LongCtrlState = CarControl.Actuators.LongControlState
 from opendbc.car.hyundai.fingerprints import FW_VERSIONS
@@ -332,6 +333,14 @@ class TestHyundaiFingerprint:
                             openpilotLongitudinalControl=True, pcmCruise=False)
     params = SimpleNamespace(get_bool=lambda key: key == "AlphaLongitudinalEnabled")
 
+    assert attempt_ev9_pre_fingerprint_suppression(cache, params, None, None)
+    assert calls == [{"bus": 1, "addr": 0x730, "com_cont_req": b"\x28\x01\x03", "session_delay": 0.0}]
+
+    calls.clear()
+    actuation_config = EV9LongitudinalTestConfig(True, EV9LongitudinalTestStage.ACTUATION,
+                                                 EV9LongitudinalProbeMode.TX_DISABLE_ALL_MESSAGE_TYPES)
+    monkeypatch.setattr("opendbc.car.hyundai.interface.get_ev9_longitudinal_test_config",
+                        lambda *args, **kwargs: actuation_config)
     assert attempt_ev9_pre_fingerprint_suppression(cache, params, None, None)
     assert calls == [{"bus": 1, "addr": 0x730, "com_cont_req": b"\x28\x01\x03", "session_delay": 0.0}]
 
@@ -908,6 +917,26 @@ class TestHyundaiFingerprint:
     assert CP.stoppingDecelRate == pytest.approx(0.4)
     assert CP.longitudinalActuatorDelay == pytest.approx(0.5)
     assert CP.startingState
+
+  def test_ev9_bounded_longitudinal_params_are_vehicle_specific(self, monkeypatch):
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[CanBus(None, fingerprint).CAM][0x110] = 32
+    ev9_car_fw = [CarParams.CarFw(ecu=Ecu.adas, fwVersion=b"", address=0x730, brand="hyundai")]
+    config = EV9LongitudinalTestConfig(True, EV9LongitudinalTestStage.ACTUATION,
+                                       EV9LongitudinalProbeMode.TX_DISABLE_ALL_MESSAGE_TYPES)
+    monkeypatch.setattr("opendbc.car.hyundai.interface.get_ev9_longitudinal_test_config",
+                        lambda *args, **kwargs: config)
+
+    CP = CarInterface.get_params(CAR.KIA_EV9, fingerprint, ev9_car_fw, True, False, False, get_test_toggles())
+
+    assert not CP.startingState
+    assert CP.startAccel == pytest.approx(0.18)
+    assert CP.stopAccel == pytest.approx(-0.50)
+    assert CP.longitudinalActuatorDelay == pytest.approx(0.5)
+    assert CarInterface.get_pid_accel_limits(CP, 1.0, 2.0) == pytest.approx((-0.50, 0.18))
+
+    ev6 = CarInterface.get_params(CAR.KIA_EV6, gen_empty_fingerprint(), [], True, False, False, get_test_toggles())
+    assert CarInterface.get_pid_accel_limits(ev6, 1.0, 2.0) == pytest.approx((ACCEL_MIN, CarControllerParams.ACCEL_MAX))
 
   def test_kia_ev6_gt_line_post_fingerprint_longitudinal_params(self):
     toggles = get_test_toggles()
@@ -1590,6 +1619,61 @@ class TestHyundaiFingerprint:
     assert parser.can_valid
     assert parser.vl["SCC_CONTROL"]["ACC_ObjDist"] == pytest.approx(13.5)
     assert parser.vl["SCC_CONTROL"]["ACC_ObjRelSpd"] == pytest.approx(-0.4)
+
+  @pytest.mark.parametrize(("enabled", "accel", "expected_mode", "expected_accel"), [
+    (True, -0.4, 1, -0.4),
+    (False, 0.3, 0, 0.0),
+  ])
+  def test_ev9_acc_control_preserves_stock_body_but_overwrites_command_fields(self, enabled, accel,
+                                                                               expected_mode, expected_accel):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.KIA_EV9
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.CANFD_LKA_STEERING)
+
+    packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
+    can_bus = CanBus(CP)
+    parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("SCC_CONTROL", 0)], can_bus.ECAN)
+    stock = {
+      "COUNTER": 211,
+      "NEW_SIGNAL_1": 2,
+      "NEW_SIGNAL_8": 7,
+      "ACCMode": 4,
+      "aReqRaw": 2.0,
+      "aReqValue": 2.0,
+      "StopReq": 1,
+      "CRUISE_STANDSTILL": 1,
+    }
+    stock_msg = packer.make_can_msg("SCC_CONTROL", can_bus.ECAN, stock)
+    hyundaicanfd.set_ev9_adrv_baselines([CanData(*stock_msg)])
+    try:
+      assert hyundaicanfd.ev9_scc_control_baseline_available()
+      msg = hyundaicanfd.create_ev9_acc_control(
+        packer, can_bus, counter=0, enabled=enabled, accel_raw=accel, accel_value=accel,
+        gas_override=False, set_speed=25,
+        main_mode_acc=1, lead_distance=18.0, lead_rel_speed=-0.5, lead_visible=True, v_ego=10.0,
+      )
+      parser.update([(1, [msg])])
+
+      values = parser.vl["SCC_CONTROL"]
+      assert parser.can_valid
+      assert values["COUNTER"] == 212
+      assert values["NEW_SIGNAL_1"] == 2
+      assert values["NEW_SIGNAL_8"] == 7
+      assert values["ACCMode"] == expected_mode
+      assert values["aReqRaw"] == pytest.approx(expected_accel)
+      assert values["aReqValue"] == pytest.approx(expected_accel)
+      assert values["StopReq"] == 0
+      assert values["CRUISE_STANDSTILL"] == 0
+      assert values["SET_ME_2"] == (5 if enabled else 4)
+      assert values["DISTANCE_SETTING"] == (7 if enabled else 0)
+      assert values["OBJ_STATUS"] == (5 if enabled else 0)
+      assert values["NEW_SIGNAL_3"] == 2
+      assert values["NEW_SIGNAL_15"] == pytest.approx(16.2 if enabled else 204.6)
+      assert values["JerkLowerLimit"] == pytest.approx(0.7 if enabled else 1.0)
+      assert values["JerkUpperLimit"] == pytest.approx(0.7 if enabled else 3.0)
+    finally:
+      hyundaicanfd.set_ev9_adrv_baselines([])
+      assert not hyundaicanfd.ev9_scc_control_baseline_available()
 
   def test_ccnc_hud_helper_clears_faults_and_generates_ui_fields(self):
     CP = CarParams.new_message()

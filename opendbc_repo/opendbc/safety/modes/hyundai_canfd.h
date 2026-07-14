@@ -343,8 +343,8 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *msg) {
       violation |= longitudinal_accel_checks(desired_accel_raw, HYUNDAI_LONG_LIMITS);
       violation |= longitudinal_accel_checks(desired_accel_val, HYUNDAI_LONG_LIMITS);
       if (hyundai_canfd_bounded_angle_long) {
-        violation |= (desired_accel_raw < -50) || (desired_accel_raw > 30);
-        violation |= (desired_accel_val < -50) || (desired_accel_val > 30);
+        violation |= (desired_accel_raw < -50) || (desired_accel_raw > 18);
+        violation |= (desired_accel_val < -50) || (desired_accel_val > 18);
       }
     } else {
       // only used to cancel on here

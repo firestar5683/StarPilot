@@ -270,16 +270,17 @@ class Car:
 
     # OFF -> READY can put the EV9 ADAS ECU into a state that rejects
     # CommunicationControl long before the rest of selfdrive is initialized.
-    # For the explicitly armed, fully reconstructed, non-actuating stage only,
+    # For any explicitly armed, fully reconstructed stage (including the
+    # separately gated preflight/actuation stages),
     # suppress the ECU immediately after fingerprinting and begin emitting the
     # inactive replacement set while selfdrive finishes starting. This also
     # avoids a second knockout at the normal controls-ready handoff.
     ev9_test = get_ev9_longitudinal_test_config(self.params) if str(self.CP.carFingerprint) == "KIA_EV9" else None
     ev9_early_requested = bool(not self.CP.passive and ev9_test is not None and
-                               ev9_test.stage == EV9LongitudinalTestStage.STEERING_KEEPALIVE and
+                               ev9_test.stage >= EV9LongitudinalTestStage.STEERING_KEEPALIVE and
                                ev9_test.persistent_suppression_allowed)
     if ev9_early_requested:
-      cloudlog.warning("EV9 early stage-15 interface initialization requested")
+      cloudlog.warning(f"EV9 early stage-{int(ev9_test.stage)} interface initialization requested")
       self._initialize_car_interface()
       self.ev9_early_control_active = self.CP.openpilotLongitudinalControl and not self.params.get_bool("EcuDisableFailed")
       cloudlog.warning(f"EV9 early inactive reconstruction active={self.ev9_early_control_active}")

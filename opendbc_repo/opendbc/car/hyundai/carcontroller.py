@@ -20,6 +20,7 @@ from opendbc.car.hyundai.ev9_longitudinal import EV9_CLUSTER_ALTERNATE_LEAD_PARA
                                                    Ev9BsmWarningAnimator, \
                                                    EV9ActuationAbortReason, advance_ev9_longitudinal_support_stage, \
                                                    ev9_actuation_abort_reason, ev9_longitudinal_test_scc_command, \
+                                                   ev9_rate_limit_accel, \
                                                    ev9_dtc_capture_messages, \
                                                    ev9_default_enabled_param, \
                                                    filter_ev9_adrv_replay_messages, \
@@ -421,6 +422,7 @@ class CarController(CarControllerBase):
     self._ev9_dtc_capture_start_frame = None
     self._ev9_actuation_aborted = False
     self._ev9_actuation_was_active = False
+    self._ev9_scc_counter = 0
     self.long_active_ecu = self.CP.openpilotLongitudinalControl
     self._ioniq_6_lane_change_ui_side = None
     self._ioniq_6_lane_change_ui_frames = 0
@@ -826,6 +828,7 @@ class CarController(CarControllerBase):
         bool(getattr(CS, "openpilot_radar_valid", False)),
         bool(getattr(CS, "panda_faulted", True)),
         float(CS.out.vEgo),
+        hyundaicanfd.ev9_scc_control_baseline_available(),
       )
       if abort_reason != EV9ActuationAbortReason.NONE and not self._ev9_actuation_aborted:
         self._ev9_actuation_aborted = True
@@ -1027,11 +1030,19 @@ class CarController(CarControllerBase):
           if use_egmp_smoothed_accel:
             acc_kwargs["jerk_lower"] = self._ioniq_6_long_tuning.jerk_lower
             acc_kwargs["jerk_upper"] = self._ioniq_6_long_tuning.jerk_upper
-        can_sends.append(hyundaicanfd.create_acc_control(self.packer, self.CAN, scc_enabled, self.accel_last, scc_accel,
-                                                         scc_stopping, scc_gas_override,
-                                                         set_speed_in_units, hud_control, cruise_info=CS.cruise_info if ccnc_non_hda2 else None,
-                                                         **acc_kwargs))
-        self.accel_last = scc_accel
+        if ev9_long_test_active:
+          scc_accel_value = ev9_rate_limit_accel(self.accel_last, scc_accel) if scc_enabled and not scc_gas_override else 0.0
+          can_sends.append(hyundaicanfd.create_ev9_acc_control(
+            self.packer, self.CAN, self._ev9_scc_counter, scc_enabled, scc_accel_value, scc_accel_value, scc_gas_override,
+            set_speed_in_units, int(ev9_main_mode), lead_distance, lead_rel_speed, lead_visible, float(CS.out.vEgo),
+          ))
+          self._ev9_scc_counter = (self._ev9_scc_counter + 1) & 0xFF
+        else:
+          can_sends.append(hyundaicanfd.create_acc_control(
+            self.packer, self.CAN, scc_enabled, self.accel_last, scc_accel, scc_stopping, scc_gas_override,
+            set_speed_in_units, hud_control, cruise_info=CS.cruise_info if ccnc_non_hda2 else None, **acc_kwargs,
+          ))
+        self.accel_last = scc_accel_value if ev9_long_test_active else scc_accel
     else:
       # button presses
       if (self.frame - self.last_button_frame) * DT_CTRL > 0.25:

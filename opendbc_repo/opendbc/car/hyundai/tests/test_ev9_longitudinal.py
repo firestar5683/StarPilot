@@ -8,6 +8,7 @@ from opendbc.car.hyundai.ev9_longitudinal import EV9_DTC_CAPTURE_SLOT_FRAMES, EV
                                                     ev9_actuation_abort_reason, \
                                                     ev9_dtc_capture_messages, \
                                                     ev9_longitudinal_test_scc_command, \
+                                                    ev9_rate_limit_accel, \
                                                     filter_ev9_adrv_replay_messages, \
                                                     get_ev9_longitudinal_test_config, parse_ev9_longitudinal_probe_mode, \
                                                     parse_ev9_longitudinal_test_stage, update_ev9_cruise_main_latch
@@ -186,9 +187,16 @@ def test_scc_is_non_actuating_until_final_stage():
   assert ev9_longitudinal_test_scc_command(preflight, True, 0.3, False, False) == (False, 0.0, False, False)
 
   active = EV9LongitudinalTestConfig(True, EV9LongitudinalTestStage.ACTUATION)
-  assert ev9_longitudinal_test_scc_command(active, True, -1.5, True, True) == (True, -0.5, True, True)
-  assert ev9_longitudinal_test_scc_command(active, True, 1.5, False, False) == (True, 0.3, False, False)
+  # Rolling braking is enabled, but the unvalidated EV9 StopReq remains off.
+  assert ev9_longitudinal_test_scc_command(active, True, -1.5, True, True) == (True, -0.5, False, True)
+  assert ev9_longitudinal_test_scc_command(active, True, 1.5, False, False) == (True, 0.18, False, False)
   assert ev9_longitudinal_test_scc_command(active, True, 0.1, False, False, False) == (False, 0.0, False, False)
+
+
+def test_ev9_accel_value_uses_common_stock_ramp():
+  assert round(ev9_rate_limit_accel(0.0, -0.5), 3) == -0.014
+  assert round(ev9_rate_limit_accel(0.0, 0.18), 3) == 0.014
+  assert ev9_rate_limit_accel(0.10, 0.11) == 0.11
 
 
 def test_actuation_abort_gate_is_inactive_until_control_requested_and_then_fails_closed():
@@ -210,6 +218,9 @@ def test_actuation_abort_gate_is_inactive_until_control_requested_and_then_fails
   ):
     values = healthy | {field: not healthy[field]}
     assert ev9_actuation_abort_reason(**values) == reason
+  assert ev9_actuation_abort_reason(**(healthy | {"scc_baseline_valid": False})) == \
+    EV9ActuationAbortReason.STOCK_SCC_BASELINE_MISSING
+  assert ev9_actuation_abort_reason(**(healthy | {"v_ego": 0.49})) == EV9ActuationAbortReason.SPEED_TOO_LOW
   assert ev9_actuation_abort_reason(**(healthy | {"v_ego": 5.01})) == EV9ActuationAbortReason.SPEED_LIMIT
 
   preflight = EV9LongitudinalTestConfig(True, EV9LongitudinalTestStage.ACTUATION_PREFLIGHT)

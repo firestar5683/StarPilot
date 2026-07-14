@@ -843,12 +843,21 @@ _KIA_EV9_RAW_ADRV_TEMPLATES = {
 _KIA_EV9_ADRV_LIVE_TEMPLATES: dict[int, bytes] = {}
 _KIA_EV9_ADRV_COUNTER_BASES: dict[int, int] = {}
 _KIA_EV9_RAW_ADRV_LIVE_TEMPLATES: dict[int, bytes] = {}
+_KIA_EV9_SCC_CONTROL_LIVE_TEMPLATE: bytes | None = None
+_KIA_EV9_SCC_CONTROL_COUNTER_BASE = 0
+
+
+def ev9_scc_control_baseline_available() -> bool:
+  return _KIA_EV9_SCC_CONTROL_LIVE_TEMPLATE is not None
 
 
 def set_ev9_adrv_baselines(messages: list[CanData]) -> None:
+  global _KIA_EV9_SCC_CONTROL_LIVE_TEMPLATE, _KIA_EV9_SCC_CONTROL_COUNTER_BASE
   _KIA_EV9_ADRV_LIVE_TEMPLATES.clear()
   _KIA_EV9_ADRV_COUNTER_BASES.clear()
   _KIA_EV9_RAW_ADRV_LIVE_TEMPLATES.clear()
+  _KIA_EV9_SCC_CONTROL_LIVE_TEMPLATE = None
+  _KIA_EV9_SCC_CONTROL_COUNTER_BASE = 0
   for msg in messages:
     if msg.src != 1:
       continue
@@ -862,6 +871,9 @@ def set_ev9_adrv_baselines(messages: list[CanData]) -> None:
         _KIA_EV9_ADRV_LIVE_TEMPLATES[msg.address] = dat
     elif msg.address in _KIA_EV9_RAW_ADRV_TEMPLATES and len(dat) == len(_KIA_EV9_RAW_ADRV_TEMPLATES[msg.address]):
       _KIA_EV9_RAW_ADRV_LIVE_TEMPLATES[msg.address] = dat
+    elif msg.address == 0x1A0 and len(dat) == 32:
+      _KIA_EV9_SCC_CONTROL_LIVE_TEMPLATE = dat
+      _KIA_EV9_SCC_CONTROL_COUNTER_BASE = dat[2]
 
 def create_accelerator_brake_alt_spoof(bus: int, counter: int, brake_pressed: bool, accelerator_pressed: bool,
                                        car_fingerprint=None) -> CanData:
@@ -907,6 +919,64 @@ def _create_ev9_adrv_message_with_signals(packer, CAN, address: int, counter: in
   dat[0] = crc & 0xFF
   dat[1] = (crc >> 8) & 0xFF
   return CanData(address, bytes(dat), CAN.ECAN)
+
+
+def create_ev9_acc_control(packer, CAN, counter: int, enabled: bool, accel_raw: float, accel_value: float, gas_override: bool,
+                           set_speed: float, main_mode_acc: int, lead_distance: float,
+                           lead_rel_speed: float, lead_visible: bool, v_ego: float) -> CanData:
+  """Patch an EV9 SCC_CONTROL command into the last stock payload.
+
+  The stock EV9 routes use different constants and object sentinels than the
+  generic EV6 path. Preserve every unnamed bit, overwrite the complete command
+  surface, continue the captured counter, and regenerate the CRC.
+  """
+  if not enabled or gas_override:
+    accel_raw = 0.0
+    accel_value = 0.0
+
+  lead_visible = bool(lead_visible)
+  desired_headway = min(max(round(1.625 * max(v_ego, 0.0), 1), 0.1), 204.6) if enabled else 204.6
+  values = {
+    "ACCMode": 0 if not enabled else (2 if gas_override else 1),
+    "MainMode_ACC": int(bool(main_mode_acc)),
+    "StopReq": 0,
+    "CRUISE_STANDSTILL": 0,
+    "aReqValue": accel_value,
+    "aReqRaw": accel_raw,
+    "VSetDis": set_speed,
+    "JerkLowerLimit": 0.7 if enabled else 1.0,
+    "JerkUpperLimit": 0.7 if enabled else 3.0,
+    "ACC_ObjDist": float(np.clip(lead_distance, 0.0, 204.7)) if lead_visible else 204.6,
+    "ACC_ObjRelSpd": float(np.clip(lead_rel_speed, -16.4, 34.7)) if lead_visible else 34.6,
+    "ObjValid": 0 if lead_visible else 1,
+    # Status 2 is an EV6 convention never observed in the EV9 routes. The
+    # selected openpilot lead maps to the EV9's controlling-lead status 5.
+    "OBJ_STATUS": 5 if enabled and lead_visible else 0,
+    "NEW_SIGNAL_3": 2 if lead_visible else 0,
+    "NEW_SIGNAL_15": desired_headway,
+    "SET_ME_2": 5 if enabled else 4,
+    "SET_ME_3": 3,
+    "SET_ME_TMP_64": 0x64,
+    # The EV9 stock routes use raw 7. The DBC's physical range is stale.
+    "DISTANCE_SETTING": 7 if enabled else 0,
+  }
+
+  if _KIA_EV9_SCC_CONTROL_LIVE_TEMPLATE is None:
+    return packer.make_can_msg("SCC_CONTROL", CAN.ECAN, values)
+
+  dat = bytearray(_KIA_EV9_SCC_CONTROL_LIVE_TEMPLATE)
+  dbc_msg = packer.dbc.name_to_msg["SCC_CONTROL"]
+  for name, value in values.items():
+    sig = dbc_msg.sigs[name]
+    ival = int(np.floor((value - sig.offset) / sig.factor + 0.5))
+    if ival < 0:
+      ival = (1 << sig.size) + ival
+    _set_value(dat, sig, ival)
+  dat[2] = (_KIA_EV9_SCC_CONTROL_COUNTER_BASE + counter + 1) & 0xFF
+  crc = hkg_can_fd_checksum(0x1A0, None, dat)
+  dat[0] = crc & 0xFF
+  dat[1] = (crc >> 8) & 0xFF
+  return CanData(0x1A0, bytes(dat), CAN.ECAN)
 
 
 def sanitize_ev9_cluster_speed_limit(raw_speed_limit: int | float) -> int:
