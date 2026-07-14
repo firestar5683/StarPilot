@@ -930,11 +930,11 @@ class TestHyundaiFingerprint:
     CP = CarInterface.get_params(CAR.KIA_EV9, fingerprint, ev9_car_fw, True, False, False, get_test_toggles())
 
     assert CP.startingState
-    assert CP.startAccel == pytest.approx(0.45)
+    assert CP.startAccel == pytest.approx(0.20)
     assert CP.stopAccel == pytest.approx(-2.0)
     assert CP.longitudinalActuatorDelay == pytest.approx(0.5)
     assert CP.vEgoStopping == pytest.approx(0.3)
-    assert CP.vEgoStarting == pytest.approx(0.1)
+    assert CP.vEgoStarting == pytest.approx(0.5)
     assert CP.stoppingDecelRate == pytest.approx(0.4)
     assert CarInterface.get_pid_accel_limits(CP, 1.0, 2.0) == pytest.approx((ACCEL_MIN, CarControllerParams.ACCEL_MAX))
 

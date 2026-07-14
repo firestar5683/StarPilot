@@ -8,7 +8,7 @@ from opendbc.car.lateral import apply_driver_steer_torque_limits, apply_steer_an
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai import hyundaicanfd, hyundaican
 from opendbc.car.hyundai.hyundaicanfd import CanBus
-from opendbc.car.hyundai.ev9_longitudinal import EV9_ACTUATION_JERK_LOWER, EV9_ACTUATION_JERK_UPPER, \
+from opendbc.car.hyundai.ev9_longitudinal import EV9_ACTUATION_JERK_LOWER, \
                                                    EV9_CLUSTER_ALTERNATE_LEAD_PARAM, EV9_CLUSTER_HUD_PARAM, \
                                                    EV9_CLUSTER_OBJECTS_ON_MAIN_PARAM, EV9_CLUSTER_OBJECTS_PARAM, \
                                                    EV9_CLUSTER_SPEED_LIMIT_PARAM, \
@@ -17,11 +17,12 @@ from opendbc.car.hyundai.ev9_longitudinal import EV9_ACTUATION_JERK_LOWER, EV9_A
                                                    EV9_REAR_BSM_CLUSTER_FALLBACK_PARAM, EV9_SOFT_DRIVER_STEERING_OVERRIDE_PARAM, \
                                                    EV9_SOFTWARE_BSM_VEHICLE_OUTPUT_PARAM, \
                                                    EV9_SOFTWARE_BSM_WARNING_OUTPUT_PARAM, \
-                                                   EV9_STARTING_JERK_UPPER, EV9LongitudinalStopState, \
+                                                   EV9LongitudinalStopState, \
                                                    EV9LongitudinalTestConfig, EV9LongitudinalTestStage, \
                                                    Ev9BsmWarningAnimator, \
                                                    EV9ActuationAbortReason, advance_ev9_longitudinal_support_stage, \
-                                                   ev9_actuation_abort_reason, ev9_longitudinal_test_scc_command, \
+                                                   ev9_actuation_abort_reason, ev9_jerk_upper, \
+                                                   ev9_longitudinal_test_scc_command, \
                                                    ev9_rate_limit_accel, update_ev9_longitudinal_stop_state, \
                                                    ev9_dtc_capture_messages, \
                                                    ev9_default_enabled_param, \
@@ -1049,8 +1050,7 @@ class CarController(CarControllerBase):
             self._ev9_stop_state.stop_request, self._ev9_stop_state.cruise_standstill, scc_gas_override,
             set_speed_in_units, int(ev9_main_mode), lead_distance, lead_rel_speed, lead_visible, float(CS.out.vEgo),
             jerk_lower=EV9_ACTUATION_JERK_LOWER,
-            jerk_upper=EV9_STARTING_JERK_UPPER if self._ev9_stop_state.stop_request or scc_starting
-            else EV9_ACTUATION_JERK_UPPER,
+            jerk_upper=ev9_jerk_upper(self._ev9_stop_state.stop_request, scc_starting),
           ))
           self._ev9_scc_counter = (self._ev9_scc_counter + 1) & 0xFF
         else:

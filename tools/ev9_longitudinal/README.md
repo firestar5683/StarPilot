@@ -322,15 +322,18 @@ lead-object, set-speed, and distance-setting field. The CAN packer regenerates t
 asserts `StopReq` near 0.46 m/s and sets both acceleration requests to zero, then asserts `CRUISE_STANDSTILL` 3.56
 seconds later. On restart it clears `CRUISE_STANDSTILL`, retains `StopReq` for another 120 ms, and only then clears
 `StopReq`. The controller mirrors this ordering. The EV9 uses the shared CAN-FD CarParams tune except for its
-route-backed launch target (`startAccel=0.45`, `vEgoStopping=0.3`, `vEgoStarting=0.1`, starting state enabled); EV6 and
+comfort-biased launch target (`startAccel=0.20`, `vEgoStopping=0.3`, `vEgoStarting=0.5`, starting state enabled); EV6 and
 Ioniq 6 tuning predicates are unchanged. The shared default stationary hold request is `stopAccel=-2.0 m/s²`.
 
 The audited route contained 15,002 valid 32-byte `SCC_CONTROL` frames at 50 Hz. Active `aReqRaw` ranged from -2.24
 to +0.76 m/s² and `aReqValue` from -2.22 to +0.76 m/s², within the shared Hyundai safety envelope. Normal
 `aReqValue` changes are limited by the observed 0.7 m/s³ jerk value. Restart keeps the raw target separate from the
-rate-limited applied request: the first captured launch frame used `aReqRaw=0.45`, `aReqValue=0.03`,
-`JerkUpperLimit=1.5`, and `JerkLowerLimit=0.7`. A valid selected lead uses the EV9-observed
-`NEW_SIGNAL_3=2` and `OBJ_STATUS=2` tuple. Active control uses `SET_ME_2=4` and `DISTANCE_SETTING=7`.
+rate-limited applied request. The stock route's first launch frame used `aReqRaw=0.45`, `aReqValue=0.03`, and
+`JerkUpperLimit=1.5`; because that stock launch was aggressive, StarPilot deliberately uses `aReqRaw=0.20` and ramps
+`aReqValue` by 0.01 per 20 ms frame with `JerkUpperLimit=0.5`. It remains in this comfort launch state through
+0.5 m/s before returning to model/PID control. `JerkLowerLimit` remains the stock 0.7. A valid selected lead uses the
+EV9-observed `NEW_SIGNAL_3=2` and `OBJ_STATUS=2` tuple. Active control uses `SET_ME_2=4` and
+`DISTANCE_SETTING=7`.
 The desired-headway field follows `NEW_SIGNAL_15 = 1.625 * vEgo`, rounded to 0.1 m and capped at 204.6 m, with the
 captured 3.5 m stationary floor.
 

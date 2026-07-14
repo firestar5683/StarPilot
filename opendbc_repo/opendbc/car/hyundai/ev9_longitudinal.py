@@ -146,12 +146,14 @@ class EV9LongitudinalProbeMode(IntEnum):
 EV9_LONG_PROBE_HOLD_SECONDS = 5.0
 EV9_ACTUATION_JERK_LOWER = 0.7
 EV9_ACTUATION_JERK_UPPER = 0.7
-EV9_STARTING_JERK_UPPER = 1.5
+EV9_HOLD_JERK_UPPER = 1.5
+EV9_STARTING_JERK_UPPER = 0.5
 EV9_SCC_CONTROL_FREQUENCY = 50.0
 EV9_STOP_REQUEST_SPEED = 0.5
 EV9_STANDSTILL_DELAY_FRAMES = 178
 EV9_STOP_RELEASE_DELAY_FRAMES = 6
-EV9_START_ACCEL = 0.45
+EV9_START_ACCEL = 0.20
+EV9_STARTING_SPEED = 0.5
 
 
 class EV9ActuationAbortReason(IntEnum):
@@ -390,10 +392,17 @@ def ev9_longitudinal_test_scc_command(config: EV9LongitudinalTestConfig, enabled
 
 
 def ev9_rate_limit_accel(accel_last: float, accel_raw: float, starting: bool = False) -> float:
-  """Apply the stock EV9 normal or launch aReqValue ramp at 50 Hz."""
+  """Apply the normal or comfort-biased launch aReqValue ramp at 50 Hz."""
   jerk_upper = EV9_STARTING_JERK_UPPER if starting else EV9_ACTUATION_JERK_UPPER
   return max(accel_last - EV9_ACTUATION_JERK_LOWER / EV9_SCC_CONTROL_FREQUENCY,
              min(accel_raw, accel_last + jerk_upper / EV9_SCC_CONTROL_FREQUENCY))
+
+
+def ev9_jerk_upper(stop_request: bool, starting: bool) -> float:
+  """Keep the stock hold value while softening only positive launch."""
+  if stop_request:
+    return EV9_HOLD_JERK_UPPER
+  return EV9_STARTING_JERK_UPPER if starting else EV9_ACTUATION_JERK_UPPER
 
 
 def ev9_actuation_abort_reason(config: EV9LongitudinalTestConfig, control_requested: bool, was_active: bool,

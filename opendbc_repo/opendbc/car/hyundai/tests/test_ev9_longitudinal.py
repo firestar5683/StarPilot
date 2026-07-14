@@ -9,6 +9,7 @@ from opendbc.car.hyundai.ev9_longitudinal import EV9_DTC_CAPTURE_SLOT_FRAMES, EV
                                                     advance_ev9_longitudinal_support_stage, ev9_communication_control_requests, \
                                                     ev9_actuation_abort_reason, \
                                                     ev9_dtc_capture_messages, \
+                                                    ev9_jerk_upper, \
                                                     ev9_longitudinal_test_scc_command, \
                                                     ev9_rate_limit_accel, \
                                                     filter_ev9_adrv_replay_messages, \
@@ -195,11 +196,17 @@ def test_scc_is_non_actuating_until_final_stage():
   assert ev9_longitudinal_test_scc_command(active, True, 0.1, False, False, False) == (False, 0.0, False, False)
 
 
-def test_ev9_accel_value_uses_common_stock_ramp():
+def test_ev9_accel_value_uses_normal_and_comfort_launch_ramps():
   assert round(ev9_rate_limit_accel(0.0, -0.5), 3) == -0.014
   assert round(ev9_rate_limit_accel(0.0, 0.18), 3) == 0.014
-  assert round(ev9_rate_limit_accel(0.0, 0.45, starting=True), 3) == 0.03
+  assert round(ev9_rate_limit_accel(0.0, 0.20, starting=True), 3) == 0.01
   assert ev9_rate_limit_accel(0.10, 0.11) == 0.11
+
+
+def test_ev9_comfort_launch_does_not_change_stock_hold_jerk():
+  assert ev9_jerk_upper(False, False) == 0.7
+  assert ev9_jerk_upper(False, True) == 0.5
+  assert ev9_jerk_upper(True, True) == 1.5
 
 
 def test_ev9_stop_hold_and_release_match_stock_route_timing():
