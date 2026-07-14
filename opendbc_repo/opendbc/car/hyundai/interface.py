@@ -14,8 +14,7 @@ from opendbc.car.hyundai.values import HyundaiFlags, CAR, CarControllerParams, \
                                                    hyundai_cancel_button_enables_cruise, \
                                                    kia_ev6_gt_line_longitudinal_tuning
 from opendbc.car.hyundai.radar_interface import get_radar_track_config, radar_tracks_available
-from opendbc.car.hyundai.ev9_longitudinal import EV9_ACTUATION_ACCEL_MAX, EV9_ACTUATION_ACCEL_MIN, \
-                                                       EV9_LONG_PROBE_HOLD_SECONDS, EV9LongitudinalProbeMode, \
+from opendbc.car.hyundai.ev9_longitudinal import EV9_LONG_PROBE_HOLD_SECONDS, EV9LongitudinalProbeMode, \
                                                        EV9LongitudinalTestStage, ev9_communication_control_requests, \
                                                        get_ev9_longitudinal_test_config
 from opendbc.car.interfaces import CarInterfaceBase, ACCEL_MIN
@@ -54,17 +53,6 @@ def apply_kia_ev6_gt_line_longitudinal_params(ret: structs.CarParams) -> None:
   ret.startAccel = 1.4
   ret.longitudinalActuatorDelay = 0.35
   ret.vEgoStarting = 0.5
-
-
-def apply_kia_ev9_longitudinal_params(ret: structs.CarParams) -> None:
-  """Keep the first EV9 command tune inside its route-validated envelope.
-
-  The captured stock routes do not cover standstill/resume, so this deliberately
-  does not opt the EV9 into the Ioniq 6/EV6 GT-Line launch tuning.
-  """
-  ret.startingState = False
-  ret.startAccel = EV9_ACTUATION_ACCEL_MAX
-  ret.stopAccel = EV9_ACTUATION_ACCEL_MIN
 
 
 def apply_ecu_disable_failure_fallback(CP: structs.CarParams, params) -> None:
@@ -172,8 +160,6 @@ class CarInterface(CarInterfaceBase):
 
   @staticmethod
   def get_pid_accel_limits(CP, current_speed, cruise_speed):
-    if CP.carFingerprint == CAR.KIA_EV9 and CP.openpilotLongitudinalControl:
-      return EV9_ACTUATION_ACCEL_MIN, EV9_ACTUATION_ACCEL_MAX
     return ACCEL_MIN, CarControllerParams.ACCEL_MAX
 
   @staticmethod
@@ -349,9 +335,6 @@ class CarInterface(CarInterfaceBase):
 
     if candidate == CAR.HYUNDAI_IONIQ_6:
       ret.longitudinalActuatorDelay = 0.6
-
-    if candidate == CAR.KIA_EV9 and ev9_long_test_armed:
-      apply_kia_ev9_longitudinal_params(ret)
 
     if candidate == CAR.KIA_NIRO_PHEV_2022:
       ret.stopAccel = -1.4

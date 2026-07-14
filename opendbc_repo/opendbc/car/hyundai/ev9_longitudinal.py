@@ -4,6 +4,7 @@ import math
 
 from opendbc.car import CanData
 from opendbc.car.common.conversions import Conversions as CV
+from opendbc.car.hyundai.values import CarControllerParams
 
 
 EV9_LONG_TEST_ENABLED_PARAM = "KiaEv9LongitudinalTestEnabled"
@@ -143,13 +144,9 @@ class EV9LongitudinalProbeMode(IntEnum):
 
 
 EV9_LONG_PROBE_HOLD_SECONDS = 5.0
-EV9_ACTUATION_ACCEL_MIN = -0.50
-EV9_ACTUATION_ACCEL_MAX = 0.18
 EV9_ACTUATION_JERK_LOWER = 0.7
 EV9_ACTUATION_JERK_UPPER = 0.7
 EV9_SCC_CONTROL_FREQUENCY = 50.0
-EV9_ACTUATION_MIN_SPEED = 0.5
-EV9_ACTUATION_MAX_SPEED = 5.0
 
 
 class EV9ActuationAbortReason(IntEnum):
@@ -160,9 +157,7 @@ class EV9ActuationAbortReason(IntEnum):
   CAN_INVALID = 4
   RADAR_INVALID = 5
   PANDA_FAULT = 6
-  SPEED_LIMIT = 7
-  SPEED_TOO_LOW = 8
-  STOCK_SCC_BASELINE_MISSING = 9
+  STOCK_SCC_BASELINE_MISSING = 7
 
 
 def ev9_communication_control_requests(probe_mode: EV9LongitudinalProbeMode) -> tuple[bytes, bytes]:
@@ -223,7 +218,7 @@ class EV9LongitudinalTestStage(IntEnum):
   ADRV_57A = 14             # 0x57A, captured 10 Hz raw ADAS status
   STEERING_KEEPALIVE = 15   # 0x12A/0xCB, parked inactive steering status
   ACTUATION_PREFLIGHT = 16  # Exercise health/abort gates while SCC remains inactive
-  ACTUATION = 17            # Explicitly permit tightly bounded acceleration/braking
+  ACTUATION = 17            # Explicitly permit shared-safety acceleration/braking
 
 
 @dataclass(frozen=True)
@@ -342,13 +337,12 @@ def ev9_longitudinal_test_scc_command(config: EV9LongitudinalTestConfig, enabled
                                       actuation_permitted: bool = True) -> tuple[bool, float, bool, bool]:
   """Build the bounded EV9 actuation request for the explicit test stage.
 
-  The stock routes used to establish the initial envelope contain moving ACC,
-  but no stop/hold/resume sequence. Negative acceleration is permitted while
-  rolling; StopReq remains off until an EV9 standstill route validates it.
+  Stop/hold/restart uses the established Hyundai CAN-FD SCC contract and safety
+  envelope while the EV9-specific builder preserves the EV9 payload body.
   """
   if config.actuation_allowed and actuation_permitted:
-    limited_accel = max(EV9_ACTUATION_ACCEL_MIN, min(accel, EV9_ACTUATION_ACCEL_MAX))
-    return enabled, limited_accel, False, gas_override
+    limited_accel = max(CarControllerParams.ACCEL_MIN, min(accel, CarControllerParams.ACCEL_MAX))
+    return enabled, limited_accel, stopping, gas_override
   return False, 0.0, False, False
 
 
@@ -360,7 +354,7 @@ def ev9_rate_limit_accel(accel_last: float, accel_raw: float) -> float:
 
 def ev9_actuation_abort_reason(config: EV9LongitudinalTestConfig, control_requested: bool, was_active: bool,
                                drive_gear: bool, brake_pressed: bool, gas_pressed: bool, can_valid: bool,
-                               radar_valid: bool, panda_faulted: bool, v_ego: float,
+                               radar_valid: bool, panda_faulted: bool,
                                scc_baseline_valid: bool = True) -> EV9ActuationAbortReason:
   """Return an ignition-latching reason to block the bounded EV9 actuation test."""
   if not config.actuation_test_armed or not (control_requested or was_active):
@@ -379,8 +373,4 @@ def ev9_actuation_abort_reason(config: EV9LongitudinalTestConfig, control_reques
     return EV9ActuationAbortReason.PANDA_FAULT
   if not scc_baseline_valid:
     return EV9ActuationAbortReason.STOCK_SCC_BASELINE_MISSING
-  if v_ego < EV9_ACTUATION_MIN_SPEED:
-    return EV9ActuationAbortReason.SPEED_TOO_LOW
-  if v_ego > EV9_ACTUATION_MAX_SPEED:
-    return EV9ActuationAbortReason.SPEED_LIMIT
   return EV9ActuationAbortReason.NONE

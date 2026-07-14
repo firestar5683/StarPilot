@@ -921,8 +921,8 @@ def _create_ev9_adrv_message_with_signals(packer, CAN, address: int, counter: in
   return CanData(address, bytes(dat), CAN.ECAN)
 
 
-def create_ev9_acc_control(packer, CAN, counter: int, enabled: bool, accel_raw: float, accel_value: float, gas_override: bool,
-                           set_speed: float, main_mode_acc: int, lead_distance: float,
+def create_ev9_acc_control(packer, CAN, counter: int, enabled: bool, accel_raw: float, accel_value: float,
+                           stopping: bool, gas_override: bool, set_speed: float, main_mode_acc: int, lead_distance: float,
                            lead_rel_speed: float, lead_visible: bool, v_ego: float) -> CanData:
   """Patch an EV9 SCC_CONTROL command into the last stock payload.
 
@@ -939,7 +939,7 @@ def create_ev9_acc_control(packer, CAN, counter: int, enabled: bool, accel_raw: 
   values = {
     "ACCMode": 0 if not enabled else (2 if gas_override else 1),
     "MainMode_ACC": int(bool(main_mode_acc)),
-    "StopReq": 0,
+    "StopReq": 1 if stopping and enabled else 0,
     "CRUISE_STANDSTILL": 0,
     "aReqValue": accel_value,
     "aReqRaw": accel_raw,

@@ -827,7 +827,6 @@ class CarController(CarControllerBase):
         bool(CS.out.canValid),
         bool(getattr(CS, "openpilot_radar_valid", False)),
         bool(getattr(CS, "panda_faulted", True)),
-        float(CS.out.vEgo),
         hyundaicanfd.ev9_scc_control_baseline_available(),
       )
       if abort_reason != EV9ActuationAbortReason.NONE and not self._ev9_actuation_aborted:
@@ -1033,8 +1032,9 @@ class CarController(CarControllerBase):
         if ev9_long_test_active:
           scc_accel_value = ev9_rate_limit_accel(self.accel_last, scc_accel) if scc_enabled and not scc_gas_override else 0.0
           can_sends.append(hyundaicanfd.create_ev9_acc_control(
-            self.packer, self.CAN, self._ev9_scc_counter, scc_enabled, scc_accel_value, scc_accel_value, scc_gas_override,
-            set_speed_in_units, int(ev9_main_mode), lead_distance, lead_rel_speed, lead_visible, float(CS.out.vEgo),
+            self.packer, self.CAN, self._ev9_scc_counter, scc_enabled, scc_accel_value, scc_accel_value,
+            scc_stopping, scc_gas_override, set_speed_in_units, int(ev9_main_mode), lead_distance, lead_rel_speed,
+            lead_visible, float(CS.out.vEgo),
           ))
           self._ev9_scc_counter = (self._ev9_scc_counter + 1) & 0xFF
         else:

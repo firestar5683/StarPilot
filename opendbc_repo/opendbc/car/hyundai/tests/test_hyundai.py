@@ -918,7 +918,7 @@ class TestHyundaiFingerprint:
     assert CP.longitudinalActuatorDelay == pytest.approx(0.5)
     assert CP.startingState
 
-  def test_ev9_bounded_longitudinal_params_are_vehicle_specific(self, monkeypatch):
+  def test_ev9_longitudinal_params_use_canfd_family_tune(self, monkeypatch):
     fingerprint = gen_empty_fingerprint()
     fingerprint[CanBus(None, fingerprint).CAM][0x110] = 32
     ev9_car_fw = [CarParams.CarFw(ecu=Ecu.adas, fwVersion=b"", address=0x730, brand="hyundai")]
@@ -929,11 +929,14 @@ class TestHyundaiFingerprint:
 
     CP = CarInterface.get_params(CAR.KIA_EV9, fingerprint, ev9_car_fw, True, False, False, get_test_toggles())
 
-    assert not CP.startingState
-    assert CP.startAccel == pytest.approx(0.18)
-    assert CP.stopAccel == pytest.approx(-0.50)
+    assert CP.startingState
+    assert CP.startAccel == pytest.approx(1.0)
+    assert CP.stopAccel == pytest.approx(-2.0)
     assert CP.longitudinalActuatorDelay == pytest.approx(0.5)
-    assert CarInterface.get_pid_accel_limits(CP, 1.0, 2.0) == pytest.approx((-0.50, 0.18))
+    assert CP.vEgoStopping == pytest.approx(0.3)
+    assert CP.vEgoStarting == pytest.approx(0.1)
+    assert CP.stoppingDecelRate == pytest.approx(0.4)
+    assert CarInterface.get_pid_accel_limits(CP, 1.0, 2.0) == pytest.approx((ACCEL_MIN, CarControllerParams.ACCEL_MAX))
 
     ev6 = CarInterface.get_params(CAR.KIA_EV6, gen_empty_fingerprint(), [], True, False, False, get_test_toggles())
     assert CarInterface.get_pid_accel_limits(ev6, 1.0, 2.0) == pytest.approx((ACCEL_MIN, CarControllerParams.ACCEL_MAX))
@@ -1620,12 +1623,13 @@ class TestHyundaiFingerprint:
     assert parser.vl["SCC_CONTROL"]["ACC_ObjDist"] == pytest.approx(13.5)
     assert parser.vl["SCC_CONTROL"]["ACC_ObjRelSpd"] == pytest.approx(-0.4)
 
-  @pytest.mark.parametrize(("enabled", "accel", "expected_mode", "expected_accel"), [
-    (True, -0.4, 1, -0.4),
-    (False, 0.3, 0, 0.0),
+  @pytest.mark.parametrize(("enabled", "stopping", "accel", "expected_mode", "expected_accel", "expected_stop"), [
+    (True, False, -0.4, 1, -0.4, 0),
+    (True, True, -0.4, 1, -0.4, 1),
+    (False, True, 0.3, 0, 0.0, 0),
   ])
-  def test_ev9_acc_control_preserves_stock_body_but_overwrites_command_fields(self, enabled, accel,
-                                                                               expected_mode, expected_accel):
+  def test_ev9_acc_control_preserves_stock_body_but_overwrites_command_fields(self, enabled, stopping, accel,
+                                                                               expected_mode, expected_accel, expected_stop):
     CP = CarParams.new_message()
     CP.carFingerprint = CAR.KIA_EV9
     CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.CANFD_LKA_STEERING)
@@ -1649,7 +1653,7 @@ class TestHyundaiFingerprint:
       assert hyundaicanfd.ev9_scc_control_baseline_available()
       msg = hyundaicanfd.create_ev9_acc_control(
         packer, can_bus, counter=0, enabled=enabled, accel_raw=accel, accel_value=accel,
-        gas_override=False, set_speed=25,
+        stopping=stopping, gas_override=False, set_speed=25,
         main_mode_acc=1, lead_distance=18.0, lead_rel_speed=-0.5, lead_visible=True, v_ego=10.0,
       )
       parser.update([(1, [msg])])
@@ -1662,7 +1666,7 @@ class TestHyundaiFingerprint:
       assert values["ACCMode"] == expected_mode
       assert values["aReqRaw"] == pytest.approx(expected_accel)
       assert values["aReqValue"] == pytest.approx(expected_accel)
-      assert values["StopReq"] == 0
+      assert values["StopReq"] == expected_stop
       assert values["CRUISE_STANDSTILL"] == 0
       assert values["SET_ME_2"] == (5 if enabled else 4)
       assert values["DISTANCE_SETTING"] == (7 if enabled else 0)

@@ -187,9 +187,8 @@ def test_scc_is_non_actuating_until_final_stage():
   assert ev9_longitudinal_test_scc_command(preflight, True, 0.3, False, False) == (False, 0.0, False, False)
 
   active = EV9LongitudinalTestConfig(True, EV9LongitudinalTestStage.ACTUATION)
-  # Rolling braking is enabled, but the unvalidated EV9 StopReq remains off.
-  assert ev9_longitudinal_test_scc_command(active, True, -1.5, True, True) == (True, -0.5, False, True)
-  assert ev9_longitudinal_test_scc_command(active, True, 1.5, False, False) == (True, 0.18, False, False)
+  assert ev9_longitudinal_test_scc_command(active, True, -4.0, True, True) == (True, -3.5, True, True)
+  assert ev9_longitudinal_test_scc_command(active, True, 4.0, False, False) == (True, 3.5, False, False)
   assert ev9_longitudinal_test_scc_command(active, True, 0.1, False, False, False) == (False, 0.0, False, False)
 
 
@@ -202,11 +201,11 @@ def test_ev9_accel_value_uses_common_stock_ramp():
 def test_actuation_abort_gate_is_inactive_until_control_requested_and_then_fails_closed():
   active = EV9LongitudinalTestConfig(True, EV9LongitudinalTestStage.ACTUATION)
   args = dict(config=active, control_requested=False, was_active=False, drive_gear=False, brake_pressed=True,
-              gas_pressed=True, can_valid=False, radar_valid=False, panda_faulted=True, v_ego=20.0)
+              gas_pressed=True, can_valid=False, radar_valid=False, panda_faulted=True)
   assert ev9_actuation_abort_reason(**args) == EV9ActuationAbortReason.NONE
 
   healthy = dict(config=active, control_requested=True, was_active=False, drive_gear=True, brake_pressed=False,
-                 gas_pressed=False, can_valid=True, radar_valid=True, panda_faulted=False, v_ego=1.0)
+                 gas_pressed=False, can_valid=True, radar_valid=True, panda_faulted=False)
   assert ev9_actuation_abort_reason(**healthy) == EV9ActuationAbortReason.NONE
   for field, reason in (
     ("drive_gear", EV9ActuationAbortReason.NOT_DRIVE),
@@ -220,8 +219,6 @@ def test_actuation_abort_gate_is_inactive_until_control_requested_and_then_fails
     assert ev9_actuation_abort_reason(**values) == reason
   assert ev9_actuation_abort_reason(**(healthy | {"scc_baseline_valid": False})) == \
     EV9ActuationAbortReason.STOCK_SCC_BASELINE_MISSING
-  assert ev9_actuation_abort_reason(**(healthy | {"v_ego": 0.49})) == EV9ActuationAbortReason.SPEED_TOO_LOW
-  assert ev9_actuation_abort_reason(**(healthy | {"v_ego": 5.01})) == EV9ActuationAbortReason.SPEED_LIMIT
 
   preflight = EV9LongitudinalTestConfig(True, EV9LongitudinalTestStage.ACTUATION_PREFLIGHT)
   assert ev9_actuation_abort_reason(**(healthy | {"config": preflight, "radar_valid": False})) == \
