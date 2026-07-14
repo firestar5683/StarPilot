@@ -137,6 +137,16 @@ def test_tracker_can_require_fused_primary_track():
   assert slots.primary.track_id == 2
 
 
+def test_centered_fused_lead_cannot_duplicate_into_side_slot():
+  tracker = Ev9ClusterObjectTracker()
+  obj = point(track_id=8, distance=30.0, lateral=2.0)
+  slots = acquire(tracker, [obj], preferred_primary_track_id=8, qualified_track_ids={8},
+                  side_qualified_track_ids={8}, side_retention_track_ids={8}, v_ego=20.0)
+  assert slots.primary is not None
+  assert slots.left is None
+  assert slots.right is None
+
+
 def test_bsm_gate_removes_only_unconfirmed_side_slots():
   tracker = Ev9ClusterObjectTracker()
   slots = acquire(tracker, [point(track_id=1), point(track_id=2, lateral=2.5), point(track_id=3, lateral=-2.5)])
@@ -152,8 +162,8 @@ def test_bsm_gate_removes_only_unconfirmed_side_slots():
 def test_quality_allowlist_rejects_garage_track_and_accepts_qualified_track():
   tracker = Ev9ClusterObjectTracker()
   garage_track = point(track_id=7, distance=7.1, lateral=1.9, relative_speed=0.0)
-  assert acquire(tracker, [garage_track], qualified_track_ids=set()).primary is None
-  assert acquire(tracker, [garage_track], qualified_track_ids={7}).left is not None
+  assert acquire(tracker, [garage_track], qualified_track_ids=set(), require_preferred_primary=True).primary is None
+  assert acquire(tracker, [garage_track], qualified_track_ids={7}, require_preferred_primary=True).left is not None
 
 
 def test_quality_allowlist_removes_deleted_or_stale_track_immediately():
@@ -177,7 +187,7 @@ def test_missing_qualified_track_gets_only_bounded_dropout_hold():
 
 def test_quality_filter_disabled_preserves_legacy_tracker_behavior():
   tracker = Ev9ClusterObjectTracker()
-  garage_track = point(track_id=11, distance=4.5, lateral=-2.0, relative_speed=0.0)
+  garage_track = point(track_id=11, distance=4.5, lateral=-2.5, relative_speed=0.0)
   assert acquire(tracker, [garage_track], qualified_track_ids=None).right is not None
 
 
@@ -201,6 +211,43 @@ def test_right_side_can_fail_closed_independently():
   obj = point(track_id=3, distance=20.0, lateral=-2.5)
   slots = acquire(tracker, [obj], qualified_track_ids={3}, side_qualified_track_ids={3}, right_enabled=False)
   assert slots.right is None
+
+
+def test_right_side_requires_deep_entry_then_uses_wider_retention_envelope():
+  tracker = Ev9ClusterObjectTracker()
+  shallow = point(track_id=3, distance=30.0, lateral=-1.7, relative_speed=0.0)
+  assert acquire(tracker, [shallow], qualified_track_ids={3}, side_qualified_track_ids={3},
+                 side_retention_track_ids={3}, v_ego=20.0).right is None
+
+  deep = point(track_id=3, distance=30.0, lateral=-3.0, relative_speed=0.0)
+  slots = acquire(tracker, [deep], qualified_track_ids={3}, side_qualified_track_ids={3},
+                  side_retention_track_ids={3}, v_ego=20.0)
+  assert slots.right is not None
+
+  deep_left = point(track_id=6, distance=30.0, lateral=3.0, relative_speed=0.0)
+  left_tracker = Ev9ClusterObjectTracker()
+  left_slots = acquire(left_tracker, [deep_left], qualified_track_ids={6}, side_qualified_track_ids={6},
+                       side_retention_track_ids={6}, v_ego=20.0)
+  assert left_slots.left is not None
+  assert left_slots.right is None
+
+  # Once selected, the same strong track remains visible closer to the lane
+  # edge; a new shallow track cannot acquire this slot.
+  slots = tracker.update([shallow], qualified_track_ids={3}, side_qualified_track_ids=set(),
+                         side_retention_track_ids={3}, v_ego=20.0)
+  assert slots.right is not None
+
+
+def test_right_side_rejects_far_deep_track_and_low_absolute_speed():
+  far_tracker = Ev9ClusterObjectTracker()
+  far = point(track_id=4, distance=78.0, lateral=-3.2, relative_speed=0.0)
+  assert acquire(far_tracker, [far], qualified_track_ids={4}, side_qualified_track_ids={4},
+                 side_retention_track_ids={4}, v_ego=20.0).right is None
+
+  slow_tracker = Ev9ClusterObjectTracker()
+  slow = point(track_id=5, distance=30.0, lateral=-3.2, relative_speed=-19.0)
+  assert acquire(slow_tracker, [slow], qualified_track_ids={5}, side_qualified_track_ids={5},
+                 side_retention_track_ids={5}, v_ego=20.0).right is None
 
 
 def test_fused_slot_quality_allowlist_is_display_only():

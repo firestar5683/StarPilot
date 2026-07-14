@@ -50,6 +50,12 @@ def ev9_mrr35_strict_side_display_candidate(values) -> bool:
          int(values.get("NEW_SIGNAL_17", 0)) == 1
 
 
+def ev9_mrr35_side_display_retention_candidate(values) -> bool:
+  """Retain an already-selected side object while its strong discriminator remains."""
+  return float(values.get(EV9_CLUSTER_DISPLAY_DISCRIMINATOR_SIGNAL, 0.0)) > \
+         EV9_CLUSTER_STRICT_SIDE_DISCRIMINATOR_THRESHOLD
+
+
 @dataclass(frozen=True)
 class RadarTrackConfig:
   start_addr: int
@@ -135,6 +141,7 @@ class RadarInterface(RadarInterfaceBase):
     # its contents are display candidates, not a decoded radar quality metric.
     self.ev9_cluster_quality_track_ids: set[int] = set()
     self.ev9_cluster_strict_side_track_ids: set[int] = set()
+    self.ev9_cluster_side_retention_track_ids: set[int] = set()
     self.ev9_cluster_display_discriminator_reject_count = 0
     self.ev9_cluster_display_discriminator_reject_logs = 0
     self.rcp = get_radar_can_parser(CP, self.radar_config)
@@ -182,6 +189,7 @@ class RadarInterface(RadarInterfaceBase):
     if self.radar_off_can or (self.rcp is None):
       self.ev9_cluster_quality_track_ids.clear()
       self.ev9_cluster_strict_side_track_ids.clear()
+      self.ev9_cluster_side_retention_track_ids.clear()
       return super().update(None)
 
     vls = self.rcp.update(can_strings)
@@ -252,6 +260,7 @@ class RadarInterface(RadarInterfaceBase):
     vl = self.rcp.vl
     ev9_display_candidate_track_ids: set[int] = set()
     ev9_strict_side_track_ids: set[int] = set()
+    ev9_side_retention_track_ids: set[int] = set()
 
     for addr, track_name in self.track_addrs:
       msg = vl[track_name]
@@ -328,6 +337,8 @@ class RadarInterface(RadarInterfaceBase):
                                  f"rejected={self.ev9_cluster_display_discriminator_reject_count}")
             if ev9_mrr35_strict_side_display_candidate(msg):
               ev9_strict_side_track_ids.add(pt.trackId)
+            if ev9_mrr35_side_display_retention_candidate(msg):
+              ev9_side_retention_track_ids.add(pt.trackId)
         elif addr in self.pts:
           del self.pts[addr]
         continue
@@ -355,6 +366,7 @@ class RadarInterface(RadarInterfaceBase):
     if self.CP.carFingerprint == CAR.KIA_EV9:
       self.ev9_cluster_quality_track_ids = ev9_display_candidate_track_ids if self.rcp.can_valid else set()
       self.ev9_cluster_strict_side_track_ids = ev9_strict_side_track_ids if self.rcp.can_valid else set()
+      self.ev9_cluster_side_retention_track_ids = ev9_side_retention_track_ids if self.rcp.can_valid else set()
 
     ret.points = list(self.pts.values())
     return ret

@@ -4,6 +4,7 @@ from opendbc.can.parser import CANParser
 
 from opendbc.car.hyundai.radar_interface import MRR35_RADAR_MSG_COUNT, MRR35_RADAR_START_ADDR, RadarInterface, \
                                                 ev9_mrr35_cluster_display_candidate, \
+                                                ev9_mrr35_side_display_retention_candidate, \
                                                 ev9_mrr35_strict_side_display_candidate
 from opendbc.car.hyundai.values import CAR
 
@@ -40,6 +41,8 @@ def test_ev9_strict_side_discriminator_requires_mature_lifecycle():
   assert ev9_mrr35_strict_side_display_candidate(mature)
   assert not ev9_mrr35_strict_side_display_candidate({**mature, "UNKNOWN_7": 280})
   assert not ev9_mrr35_strict_side_display_candidate({**mature, "NEW_SIGNAL_12": 9})
+  assert ev9_mrr35_side_display_retention_candidate({"UNKNOWN_7": 281})
+  assert not ev9_mrr35_side_display_retention_candidate({"UNKNOWN_7": 280})
 
 
 def test_mrr35_display_discriminator_uses_neutral_name_on_all_tracks():

@@ -44,6 +44,10 @@ class _TrackedObject:
   hits: int = 1
   misses: int = 0
   confirmed: bool = False
+  raw_distance: float = 0.0
+  raw_lateral: float = 0.0
+  raw_relative_speed: float = 0.0
+  right_entry_hits: int = 0
 
 
 class Ev9ClusterObjectTracker:
@@ -54,7 +58,8 @@ class Ev9ClusterObjectTracker:
   # flicker while guaranteeing removal on the fifth frame (250 ms).
   DROPOUT_HOLD_SAMPLES = 4
   EMA_ALPHA = 0.35
-  CENTER_HALF_WIDTH = 1.8
+  PRIMARY_HALF_WIDTH = 2.2
+  SIDE_INNER_WIDTH = 1.8
   ADJACENT_OUTER_WIDTH = 5.5
   MAX_DISTANCE = 180.0
 
@@ -85,7 +90,9 @@ class Ev9ClusterObjectTracker:
              qualified_track_ids: set[int] | None = None,
              require_preferred_primary: bool = False,
              side_qualified_track_ids: set[int] | None = None,
-             right_enabled: bool = True) -> ClusterObjectSlots:
+             side_retention_track_ids: set[int] | None = None,
+             right_enabled: bool = True,
+             v_ego: float = 0.0) -> ClusterObjectSlots:
     # A non-None set is an explicit display allow-list for points present in
     # this scan. Evict a present-but-disqualified track immediately, while a
     # genuinely missing point gets the bounded dropout hold below.
@@ -111,9 +118,15 @@ class Ev9ClusterObjectTracker:
       relative_speed = float(point.vRel)
       track = self.tracks.get(track_id)
       if track is None:
-        self.tracks[track_id] = _TrackedObject(track_id, distance, lateral, relative_speed)
+        self.tracks[track_id] = _TrackedObject(
+          track_id, distance, lateral, relative_speed,
+          raw_distance=distance, raw_lateral=lateral, raw_relative_speed=relative_speed,
+        )
         continue
 
+      track.raw_distance = distance
+      track.raw_lateral = lateral
+      track.raw_relative_speed = relative_speed
       alpha = self.EMA_ALPHA
       track.distance += alpha * (distance - track.distance)
       track.lateral += alpha * (lateral - track.lateral)
@@ -129,8 +142,19 @@ class Ev9ClusterObjectTracker:
         if track.misses > self.DROPOUT_HOLD_SAMPLES:
           del self.tracks[track_id]
 
+    # The stock right slot has asymmetric entry/exit behavior. Genuine right
+    # objects enter deep in the adjacent zone; tracks close to the lane edge
+    # are retained only after that entry. This rejects the long d6 ghosts that
+    # never crossed the demonstrated entry envelope.
+    if side_qualified_track_ids is not None:
+      for track in self.tracks.values():
+        right_entry = track.track_id in seen and track.track_id in side_qualified_track_ids and \
+          -4.3 < track.raw_lateral < -2.8 and track.raw_distance < 60.0 and \
+          abs(float(v_ego) + track.raw_relative_speed) >= 2.78
+        track.right_entry_hits = track.right_entry_hits + 1 if right_entry else 0
+
     confirmed = [track for track in self.tracks.values() if track.confirmed]
-    center = sorted((track for track in confirmed if abs(track.lateral) <= self.CENTER_HALF_WIDTH),
+    center = sorted((track for track in confirmed if abs(track.lateral) <= self.PRIMARY_HALF_WIDTH),
                     key=lambda track: track.distance)
     def side_qualified(track: _TrackedObject) -> bool:
       return side_qualified_track_ids is None or track.track_id in side_qualified_track_ids
@@ -139,11 +163,23 @@ class Ev9ClusterObjectTracker:
     # beyond 80 m. This is intentionally separate from the wider primary-lead
     # allow-list and does not claim to be a BSM target decision.
     left = sorted((track for track in confirmed if side_qualified(track) and
-                   self.CENTER_HALF_WIDTH < track.lateral < 4.0 and track.distance < 80.0),
+                   self.SIDE_INNER_WIDTH < track.lateral < 4.0 and track.distance < 80.0),
                   key=lambda track: track.distance)
-    right = sorted((track for track in confirmed if right_enabled and side_qualified(track) and
-                    -4.0 < track.lateral < -self.CENTER_HALF_WIDTH and track.distance < 80.0),
-                   key=lambda track: track.distance)
+    if side_qualified_track_ids is None:
+      right = sorted((track for track in confirmed if right_enabled and
+                      -self.ADJACENT_OUTER_WIDTH <= track.lateral < -self.SIDE_INNER_WIDTH),
+                     key=lambda track: track.distance)
+    else:
+      current_right_track_id = self.slot_track_ids["right"]
+
+      def right_candidate(track: _TrackedObject) -> bool:
+        retained = track.track_id == current_right_track_id and \
+          track.track_id in (side_retention_track_ids or set()) and \
+          -4.5 < track.raw_lateral < -1.5 and track.raw_distance < 62.0 and \
+          abs(float(v_ego) + track.raw_relative_speed) >= 2.78
+        return bool(right_enabled and (retained or track.right_entry_hits >= self.ACQUISITION_SAMPLES))
+
+      right = sorted((track for track in confirmed if right_candidate(track)), key=lambda track: track.distance)
 
     def choose(slot: str, candidates: list[_TrackedObject], preferred_track_id: int = -1) -> _TrackedObject | None:
       chosen = next((track for track in candidates if track.track_id == preferred_track_id), None)
@@ -165,6 +201,9 @@ class Ev9ClusterObjectTracker:
     # even when the legacy rollout argument is enabled.
     alternate = None
     self.slot_track_ids["alternate"] = -1
+    if primary is not None:
+      left = [track for track in left if track.track_id != primary.track_id]
+      right = [track for track in right if track.track_id != primary.track_id]
     left_object = choose("left", left)
     right_object = choose("right", right)
 

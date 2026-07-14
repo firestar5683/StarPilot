@@ -475,9 +475,12 @@ applies the stock-correlated 0.2 m encoding offset.
 Adjacent display objects are independent from mirror BSM by default. `KiaEv9ClusterStrictSideObjectFilterEnabled`
 uses the stock-correlated mature MRR35 lifecycle (`UNKNOWN_7 > 280`, states 2/10/2/1) plus the observed adjacent-lane
 geometry. Across the stock d4+d6 corpus this classified left-side display frames at 92.7% precision and 87.8% recall.
-The symmetric right rule reached only 42.8% precision and created multi-second ghosts in the d6 holdout, so
-`KiaEv9ClusterRightObjectsEnabled` defaults off. It is an independent experimental gate, not a claim that right BSM is
-unavailable. `KiaEv9ClusterSideObjectsRequireBsmEnabled` can additionally require an experimental BSM permission decision.
+The original symmetric right rule reached only 42.8% precision and created multi-second ghosts in the d6 holdout. A
+stateful asymmetric rule now requires a mature track to enter at `2.8 < |y| < 4.3 m`, below 60 m and with at least
+2.78 m/s absolute longitudinal motion, then retains the same address inside a wider exit envelope. With three-frame
+acquisition it reached 97.0% precision / 75.5% recall and produced zero d6 right ghosts. The display-only
+`KiaEv9ClusterRightObjectsEnabled` gate defaults on and remains independently disableable. It is not a BSM decision.
+`KiaEv9ClusterSideObjectsRequireBsmEnabled` can additionally require an experimental BSM permission decision.
 
 Stock warning scenes kept `CCNC_0x161.BCA_LEFT/BCA_RIGHT`, lane-change arrows/sounds, and `CCNC_0x162.VIBRATE` at zero;
 those fields must remain neutral. Mirror/dash BSM warnings use `0x1BA`. When a trustworthy BSM decision exists, the
@@ -500,6 +503,12 @@ comma-output flag is enabled, its `CarState` blind-spot state also conservativel
 like native BSM; keep that output disabled during shadow validation. A same-side turn signal promotes BCW to persistent
 state 2 while the outside mirror lamp follows the observed cadence; hazards never escalate. Brake and BCA request fields
 remain untouched.
+
+A second route-held-out search tested 82,780 samples with retained payload history at 0.1, 0.2, 0.5, 1, 2, 4, and 5
+seconds. No forward BSM precursor transferred between routes: useful-recall thresholds achieved only about 26%–32%
+precision, while high-precision pockets covered 1%–4% of native warnings. `0x449` and `0x472` are downstream generic
+warning envelopes without side identity; they did not precede ordinary state-1 BSM onset. This rules out treating raw
+track history as a decoded OEM warning bit. The software estimator remains explicitly heuristic.
 
 ### Rear cross-traffic and CCNC headway decoding
 

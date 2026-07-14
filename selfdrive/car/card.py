@@ -356,10 +356,16 @@ class Car:
           if self.ev9_radar_quality_filter_enabled else None
         side_qualified_track_ids = set(getattr(self.RI, "ev9_cluster_strict_side_track_ids", set())) \
           if self.ev9_cluster_strict_side_filter_enabled else None
+        side_retention_track_ids = set(getattr(self.RI, "ev9_cluster_side_retention_track_ids", set())) \
+          if self.ev9_cluster_strict_side_filter_enabled else None
         self.ev9_cluster_slots = self.ev9_cluster_tracker.update(
-          list(RD.points), preferred_primary_track_id, False, qualified_track_ids,
-          self.ev9_cluster_fused_primary_required, side_qualified_track_ids,
-          self.ev9_cluster_right_objects_enabled,
+          list(RD.points), preferred_primary_track_id, False,
+          qualified_track_ids=qualified_track_ids,
+          require_preferred_primary=self.ev9_cluster_fused_primary_required,
+          side_qualified_track_ids=side_qualified_track_ids,
+          side_retention_track_ids=side_retention_track_ids,
+          right_enabled=self.ev9_cluster_right_objects_enabled,
+          v_ego=float(CS.vEgo),
         )
     elif str(self.CP.carFingerprint) == "KIA_EV9":
       self.ev9_cluster_slots = self.ev9_cluster_tracker.clear()
