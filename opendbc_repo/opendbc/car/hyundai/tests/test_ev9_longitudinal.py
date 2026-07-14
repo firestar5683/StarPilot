@@ -263,19 +263,14 @@ def test_ev9_stop_hold_and_release_match_stock_route_timing():
   assert update_ev9_longitudinal_stop_state(latched, False, True, 0.0) == EV9LongitudinalStopState()
 
 
-def test_actuation_abort_gate_is_inactive_until_control_requested_and_then_fails_closed():
+def test_actuation_abort_gate_inhibits_only_current_integrity_faults():
   active = EV9LongitudinalTestConfig(True, EV9LongitudinalTestStage.ACTUATION)
-  args = dict(config=active, control_requested=False, was_active=False, drive_gear=False, brake_pressed=True,
-              gas_pressed=True, can_valid=False, radar_valid=False, panda_faulted=True)
+  args = dict(config=active, control_requested=False, can_valid=False, radar_valid=False, panda_faulted=True)
   assert ev9_actuation_abort_reason(**args) == EV9ActuationAbortReason.NONE
 
-  healthy = dict(config=active, control_requested=True, was_active=False, drive_gear=True, brake_pressed=False,
-                 gas_pressed=False, can_valid=True, radar_valid=True, panda_faulted=False)
+  healthy = dict(config=active, control_requested=True, can_valid=True, radar_valid=True, panda_faulted=False)
   assert ev9_actuation_abort_reason(**healthy) == EV9ActuationAbortReason.NONE
   for field, reason in (
-    ("drive_gear", EV9ActuationAbortReason.NOT_DRIVE),
-    ("brake_pressed", EV9ActuationAbortReason.BRAKE_PRESSED),
-    ("gas_pressed", EV9ActuationAbortReason.GAS_PRESSED),
     ("can_valid", EV9ActuationAbortReason.CAN_INVALID),
     ("radar_valid", EV9ActuationAbortReason.RADAR_INVALID),
     ("panda_faulted", EV9ActuationAbortReason.PANDA_FAULT),

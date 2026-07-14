@@ -166,13 +166,10 @@ EV9_STOP_BRAKE_CAP_ACCEL_V = [0.0, -0.69, -0.70, -0.87, -1.05, -1.35, -1.65, -2.
 
 class EV9ActuationAbortReason(IntEnum):
   NONE = 0
-  NOT_DRIVE = 1
-  BRAKE_PRESSED = 2
-  GAS_PRESSED = 3
-  CAN_INVALID = 4
-  RADAR_INVALID = 5
-  PANDA_FAULT = 6
-  STOCK_SCC_BASELINE_MISSING = 7
+  CAN_INVALID = 1
+  RADAR_INVALID = 2
+  PANDA_FAULT = 3
+  STOCK_SCC_BASELINE_MISSING = 4
 
 
 @dataclass(frozen=True)
@@ -432,19 +429,17 @@ def shape_ev9_longitudinal_accel(accel_last: float, accel_raw: float, v_ego: flo
   return accel_raw, accel_value, jerk_upper
 
 
-def ev9_actuation_abort_reason(config: EV9LongitudinalTestConfig, control_requested: bool, was_active: bool,
-                               drive_gear: bool, brake_pressed: bool, gas_pressed: bool, can_valid: bool,
-                               radar_valid: bool, panda_faulted: bool,
+def ev9_actuation_abort_reason(config: EV9LongitudinalTestConfig, control_requested: bool,
+                               can_valid: bool, radar_valid: bool, panda_faulted: bool,
                                scc_baseline_valid: bool = True) -> EV9ActuationAbortReason:
-  """Return an ignition-latching reason to block the bounded EV9 actuation test."""
-  if not config.actuation_test_armed or not (control_requested or was_active):
+  """Inhibit EV9 actuation while an integrity fault is present.
+
+  Normal driver interactions remain owned by the common controls and Panda safety paths: braking
+  disengages, accelerator input overrides, and leaving Drive prevents actuation. Integrity faults
+  fail closed for the current request and recover normally once the common controls permit it.
+  """
+  if not config.actuation_test_armed or not control_requested:
     return EV9ActuationAbortReason.NONE
-  if not drive_gear:
-    return EV9ActuationAbortReason.NOT_DRIVE
-  if brake_pressed:
-    return EV9ActuationAbortReason.BRAKE_PRESSED
-  if gas_pressed:
-    return EV9ActuationAbortReason.GAS_PRESSED
   if not can_valid:
     return EV9ActuationAbortReason.CAN_INVALID
   if not radar_valid:

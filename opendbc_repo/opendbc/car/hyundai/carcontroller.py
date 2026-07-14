@@ -426,8 +426,7 @@ class CarController(CarControllerBase):
     self.ev9_long_test = get_ev9_longitudinal_test_config(self._params) if CP.carFingerprint == CAR.KIA_EV9 \
       else EV9LongitudinalTestConfig()
     self._ev9_dtc_capture_start_frame = None
-    self._ev9_actuation_aborted = False
-    self._ev9_actuation_was_active = False
+    self._ev9_actuation_fault_reason = EV9ActuationAbortReason.NONE
     self._ev9_scc_counter = 0
     self._ev9_stop_state = EV9LongitudinalStopState()
     self.long_active_ecu = self.CP.openpilotLongitudinalControl
@@ -827,21 +826,18 @@ class CarController(CarControllerBase):
       abort_reason = ev9_actuation_abort_reason(
         self.ev9_long_test,
         bool(CC.enabled),
-        self._ev9_actuation_was_active,
-        drive_gear,
-        bool(CS.out.brakePressed),
-        bool(CS.out.gasPressed or CC.cruiseControl.override),
         bool(CS.out.canValid),
         bool(getattr(CS, "openpilot_radar_valid", False)),
         bool(getattr(CS, "panda_faulted", True)),
         hyundaicanfd.ev9_scc_control_baseline_available(),
       )
-      if abort_reason != EV9ActuationAbortReason.NONE and not self._ev9_actuation_aborted:
-        self._ev9_actuation_aborted = True
-        carlog.error(f"EV9 ACTUATION ABORT: {abort_reason.name}")
-      ev9_actuation_permitted = not self._ev9_actuation_aborted
-      if CC.enabled and ev9_actuation_permitted:
-        self._ev9_actuation_was_active = True
+      ev9_actuation_permitted = abort_reason == EV9ActuationAbortReason.NONE
+      if abort_reason != self._ev9_actuation_fault_reason:
+        if abort_reason == EV9ActuationAbortReason.NONE:
+          carlog.warning(f"EV9 ACTUATION INHIBIT CLEARED: {self._ev9_actuation_fault_reason.name}")
+        else:
+          carlog.error(f"EV9 ACTUATION INHIBITED: {abort_reason.name}")
+        self._ev9_actuation_fault_reason = abort_reason
       if self.frame % 100 == 0:
         carlog.warning(f"EV9 ACTUATION {'TEST' if self.ev9_long_test.actuation_allowed else 'PREFLIGHT'}: "
                        f"permitted={ev9_actuation_permitted}, enabled={CC.enabled}, "
