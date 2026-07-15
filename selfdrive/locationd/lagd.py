@@ -391,7 +391,9 @@ def main():
   DEBUG = bool(int(os.getenv("DEBUG", "0")))
 
   pm = messaging.PubMaster(['liveDelay'])
-  sm = messaging.SubMaster(['livePose', 'liveCalibration', 'carState', 'controlsState', 'carControl'], poll='livePose')
+  required_services = ['livePose', 'liveCalibration', 'carState', 'controlsState', 'carControl']
+  sm = messaging.SubMaster(required_services, poll='livePose',
+                           ignore_avg_freq=['carState', 'controlsState', 'carControl'])
 
   params = Params()
   CP = messaging.log_from_bytes(params.get("CarParams", block=True), car.CarParams)
@@ -407,7 +409,8 @@ def main():
 
   while True:
     sm.update()
-    if sm.all_checks():
+    inputs_valid = sm.all_checks(required_services)
+    if inputs_valid:
       for which in sorted(sm.updated.keys(), key=lambda x: sm.logMonoTime[x]):
         if sm.updated[which]:
           t = sm.logMonoTime[which] * 1e-9
@@ -417,7 +420,7 @@ def main():
     # 4Hz driven by livePose
     if sm.frame % 5 == 0:
       lag_learner.update_estimate()
-      lag_msg = lag_learner.get_msg(sm.all_checks(), DEBUG)
+      lag_msg = lag_learner.get_msg(inputs_valid, DEBUG)
       lag_msg_dat = lag_msg.to_bytes()
       pm.send('liveDelay', lag_msg_dat)
 

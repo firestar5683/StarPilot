@@ -248,7 +248,8 @@ def main(demo=False):
   DEBUG = bool(int(os.getenv("DEBUG", "0")))
 
   pm = messaging.PubMaster(['liveTorqueParameters'])
-  sm = messaging.SubMaster(['carControl', 'carOutput', 'carState', 'liveCalibration', 'livePose', 'liveDelay'], poll='livePose')
+  required_services = ['carControl', 'carOutput', 'carState', 'liveCalibration', 'livePose', 'liveDelay']
+  sm = messaging.SubMaster(required_services, poll='livePose', ignore_avg_freq=['carControl', 'carOutput', 'carState'])
 
   params = Params()
   estimator = TorqueEstimator(messaging.log_from_bytes(params.get("CarParams", block=True), car.CarParams))
@@ -264,7 +265,8 @@ def main(demo=False):
 
   while True:
     sm.update()
-    if sm.all_checks():
+    inputs_valid = sm.all_checks(required_services)
+    if inputs_valid:
       for which in sm.updated.keys():
         if sm.updated[which]:
           t = sm.logMonoTime[which] * 1e-9
@@ -272,11 +274,11 @@ def main(demo=False):
 
     # 4Hz driven by livePose
     if sm.frame % 5 == 0:
-      pm.send('liveTorqueParameters', estimator.get_msg(valid=sm.all_checks(), with_points=DEBUG))
+      pm.send('liveTorqueParameters', estimator.get_msg(valid=inputs_valid, with_points=DEBUG))
 
     # Cache points every 60 seconds while onroad
     if sm.frame % 240 == 0:
-      msg = estimator.get_msg(valid=sm.all_checks(), with_points=True)
+      msg = estimator.get_msg(valid=inputs_valid, with_points=True)
       params.put_nonblocking("LiveTorqueParameters", msg.to_bytes())
 
     estimator.starpilot_toggles = get_starpilot_toggles(sm)

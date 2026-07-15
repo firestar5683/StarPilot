@@ -273,7 +273,8 @@ def main():
   REPLAY = bool(int(os.getenv("REPLAY", "0")))
 
   pm = messaging.PubMaster(['liveParameters'])
-  sm = messaging.SubMaster(['livePose', 'liveCalibration', 'carState'], poll='livePose')
+  required_services = ['livePose', 'liveCalibration', 'carState']
+  sm = messaging.SubMaster(required_services, poll='livePose', ignore_avg_freq=['carState'])
 
   params = Params()
   CP = messaging.log_from_bytes(params.get("CarParams", block=True), car.CarParams)
@@ -289,14 +290,15 @@ def main():
 
   while True:
     sm.update()
-    if sm.all_checks():
+    inputs_valid = sm.all_checks(required_services)
+    if inputs_valid:
       for which in sorted(sm.updated.keys(), key=lambda x: sm.logMonoTime[x]):
         if sm.updated[which]:
           t = sm.logMonoTime[which] * 1e-9
           learner.handle_log(t, which, sm[which])
 
     if sm.updated['livePose']:
-      msg = learner.get_msg(sm.all_checks(), debug=DEBUG)
+      msg = learner.get_msg(inputs_valid, debug=DEBUG)
 
       msg_dat = msg.to_bytes()
       if sm.frame % 1200 == 0:  # once a minute

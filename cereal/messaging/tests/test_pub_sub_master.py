@@ -97,6 +97,19 @@ class TestSubMaster:
         else:
           assert not sm._check_avg_freq(service)
 
+  def test_ignore_avg_frequency_still_requires_alive_and_valid(self):
+    sm = messaging.SubMaster(["modelV2", "carState"], poll="modelV2", ignore_avg_freq=["carState"])
+    sm.alive.update(modelV2=True, carState=True)
+    sm.valid.update(modelV2=True, carState=True)
+    sm.freq_ok.update(modelV2=True, carState=False)
+
+    assert sm.all_checks()
+    sm.alive["carState"] = False
+    assert not sm.all_checks()
+    sm.alive["carState"] = True
+    sm.valid["carState"] = False
+    assert not sm.all_checks()
+
   def test_alive(self):
     pass
 

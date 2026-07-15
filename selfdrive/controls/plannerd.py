@@ -22,7 +22,7 @@ def main():
   longitudinal_planner = LongitudinalPlanner(CP)
   pm = messaging.PubMaster(['longitudinalPlan', 'driverAssistance'])
   sm = messaging.SubMaster(['carControl', 'carState', 'controlsState', 'liveParameters', 'radarState', 'modelV2', 'selfdriveState'],
-                           poll='modelV2')
+                           poll='modelV2', ignore_avg_freq=['carControl', 'carState', 'controlsState', 'selfdriveState'])
 
   sm = sm.extend(['starpilotCarState', 'starpilotPlan'])
 

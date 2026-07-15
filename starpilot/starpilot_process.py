@@ -234,7 +234,7 @@ def starpilot_thread():
                             "gpsLocation", "gpsLocationExternal", "liveParameters", "managerState", "modelV2",
                             "onroadEvents", "pandaStates", "radarState", "selfdriveState", "starpilotCarState",
                             "starpilotRadarState", "starpilotSelfdriveState", "starpilotModelV2", "starpilotOnroadEvents", "mapdOut"],
-                            poll="modelV2")
+                            poll="modelV2", ignore_avg_freq=["carState", "controlsState", "selfdriveState"])
 
   params = Params(return_defaults=True)
   params_raw = Params()

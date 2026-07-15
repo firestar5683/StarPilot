@@ -18,7 +18,7 @@ def dmonitoringd_thread():
     ['driverStateV2', 'liveCalibration', 'carState', 'selfdriveState', 'modelV2', 'starpilotCarState'],
     poll='driverStateV2',
     ignore_alive=['starpilotCarState'],
-    ignore_avg_freq=['starpilotCarState'],
+    ignore_avg_freq=['starpilotCarState', 'carState', 'selfdriveState'],
     ignore_valid=['starpilotCarState'],
   )
 
