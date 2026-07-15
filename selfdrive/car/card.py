@@ -31,7 +31,8 @@ from openpilot.selfdrive.car.cruise import VCruiseHelper, IMPERIAL_INCREMENT, V_
 from openpilot.selfdrive.car.redneck_cruise import RedneckCruise, select_redneck_target_speed
 from openpilot.selfdrive.car.car_specific import MockCarState
 from openpilot.selfdrive.car.ev9_cluster_objects import ClusterObjectSlots, Ev9ClusterObjectTracker, bsm_gated_side_slots, default_enabled_param, \
-                                                         ev9_cluster_display_context_valid, filtered_radar_slots
+                                                         ev9_cluster_display_context_valid, filtered_radar_slots, \
+                                                         validate_cluster_slots_for_output
 from openpilot.selfdrive.car.ev9_software_bsm import RAW_BASE_MASK, RAW_LEFT_MASK, RAW_RIGHT_MASK, Ev9SoftwareBsmDetector, \
                                                        select_ev9_software_bsm_outputs
 
@@ -367,6 +368,7 @@ class Car:
           side_retention_track_ids=side_retention_track_ids,
           right_enabled=self.ev9_cluster_right_objects_enabled,
           v_ego=float(CS.vEgo),
+          standstill=bool(CS.standstill),
         )
     elif str(self.CP.carFingerprint) == "KIA_EV9":
       self.ev9_cluster_slots = self.ev9_cluster_tracker.clear()
@@ -626,7 +628,14 @@ class Car:
     if ev9_filtered_objects and self.ev9_cluster_smoothing_enabled:
       # The tracker holds brief raw-track dropouts itself. Once the complete
       # radar service is invalid, fail closed instead of retaining stale cars.
-      filtered_slots = self.ev9_cluster_slots if radar_valid else ClusterObjectSlots()
+      filtered_slots = validate_cluster_slots_for_output(
+        self.ev9_cluster_slots,
+        self.sm['radarState'].leadOne,
+        float(self.CI.CS.out.vEgo),
+        bool(self.CI.CS.out.standstill),
+        require_fused_primary=self.ev9_cluster_fused_primary_required,
+        require_side_motion=self.ev9_cluster_strict_side_filter_enabled,
+      ) if radar_valid else ClusterObjectSlots()
       if filtered_slots.primary is not None:
         lead_visible = True
         lead_distance = filtered_slots.primary.distance

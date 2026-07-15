@@ -2129,6 +2129,31 @@ class TestHyundaiFingerprint:
     assert lead_distance == pytest.approx(20.0)
     assert lead_rel_speed == pytest.approx(0.0)
 
+  def test_ev9_scc_lead_state_does_not_invent_model_only_physical_object(self):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.KIA_EV9
+    CP.flags = int(HyundaiFlags.CANFD)
+
+    controller = CarController(DBC[CP.carFingerprint], CP)
+    cc = SimpleNamespace(hudControl=SimpleNamespace(leadVisible=True, leadDistanceBars=2))
+    cs = SimpleNamespace(
+      openpilot_lead_visible=False,
+      openpilot_lead_distance=0.0,
+      openpilot_lead_rel_speed=0.0,
+      stock_camera_lead_ts=0,
+      stock_camera_lead_visible=False,
+      stock_camera_lead_distance=0.0,
+      stock_camera_lead_rel_speed=0.0,
+    )
+
+    lead_visible, lead_distance, lead_rel_speed = controller._get_canfd_scc_lead_state(
+      cc, cs, now_nanos=1_000_000_000, physical_lead_only=True,
+    )
+
+    assert not lead_visible
+    assert lead_distance == 0.0
+    assert lead_rel_speed == 0.0
+
   def test_ev9_angle_status_stays_active_when_gain_is_zero(self):
     CP = CarParams.new_message()
     CP.carFingerprint = CAR.KIA_EV9

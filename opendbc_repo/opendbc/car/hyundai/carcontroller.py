@@ -456,8 +456,12 @@ class CarController(CarControllerBase):
 
     return lka_icon, lfa_icon
 
-  def _get_canfd_scc_lead_state(self, CC, CS, now_nanos):
-    openpilot_lead_visible = bool(getattr(CS, "openpilot_lead_visible", False) or CC.hudControl.leadVisible)
+  def _get_canfd_scc_lead_state(self, CC, CS, now_nanos, physical_lead_only: bool = False):
+    # EV9 reconstruction owns a radar-qualified physical-object path. Do not
+    # turn model-only hudControl visibility into a synthetic 20 m SCC object;
+    # other CAN-FD platforms retain the established fallback behavior.
+    openpilot_lead_visible = bool(getattr(CS, "openpilot_lead_visible", False) or
+                                  (CC.hudControl.leadVisible and not physical_lead_only))
     openpilot_lead_distance = float(np.clip(getattr(CS, "openpilot_lead_distance", 0.0), 0.0, 204.7))
     openpilot_lead_rel_speed = float(np.clip(getattr(CS, "openpilot_lead_rel_speed", 0.0), -16.4, 34.7))
     stock_camera_lead_fresh = now_nanos - getattr(CS, "stock_camera_lead_ts", 0) <= CANFD_CAMERA_LEAD_STALE_NS
@@ -1014,7 +1018,9 @@ class CarController(CarControllerBase):
                                                                                  CC.rightBlinker))
       send_scc_control = not ev9_long_test_active or self.ev9_long_test.stage >= EV9LongitudinalTestStage.SCC_INACTIVE
       if self.frame % 2 == 0 and send_scc_control:
-        lead_visible, lead_distance, lead_rel_speed = self._get_canfd_scc_lead_state(CC, CS, now_nanos)
+        lead_visible, lead_distance, lead_rel_speed = self._get_canfd_scc_lead_state(
+          CC, CS, now_nanos, physical_lead_only=ev9_long_test_active,
+        )
         scc_enabled, scc_accel, scc_stopping, scc_gas_override = ev9_longitudinal_test_scc_command(
           self.ev9_long_test, CC.enabled, accel, stopping, CC.cruiseControl.override,
           actuation_permitted=ev9_actuation_permitted,

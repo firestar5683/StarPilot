@@ -4,6 +4,7 @@ from typing import Any
 
 
 MIN_OBJECT_DISTANCE = 0.1
+SIDE_MOVING_OBJECT_MIN_SPEED = 2.78
 
 
 def default_enabled_param(params: Any, key: str) -> bool:
@@ -14,8 +15,13 @@ def default_enabled_param(params: Any, key: str) -> bool:
 
 def ev9_cluster_display_context_valid(radar_valid: bool, main_enabled: bool, drive_gear: bool,
                                       standstill: bool, v_ego: float) -> bool:
-  """Gate display-only tracking to the moving Drive/Main context seen in stock routes."""
-  return bool(radar_valid and main_enabled and drive_gear and not standstill and v_ego > 0.1)
+  """Gate display-only tracking to the live Drive/Main context.
+
+  Radar-backed objects remain useful at a stop. Acquisition and output
+  validation below prevent standstill from creating new stationary side
+  ghosts, so a speed gate here would only erase a real lead at a red light.
+  """
+  return bool(radar_valid and main_enabled and drive_gear)
 
 
 @dataclass(frozen=True)
@@ -25,6 +31,8 @@ class ClusterObject:
   lateral: float
   relative_speed: float
   selected: bool = False
+  motion_confirmed: bool = False
+  raw_relative_speed: float | None = None
 
 
 @dataclass(frozen=True)
@@ -48,6 +56,8 @@ class _TrackedObject:
   raw_lateral: float = 0.0
   raw_relative_speed: float = 0.0
   right_entry_hits: int = 0
+  side_motion_hits: int = 0
+  side_motion_confirmed: bool = False
 
 
 class Ev9ClusterObjectTracker:
@@ -83,7 +93,17 @@ class Ev9ClusterObjectTracker:
 
   @staticmethod
   def _as_cluster_object(track: _TrackedObject, selected: bool = False) -> ClusterObject:
-    return ClusterObject(track.track_id, track.distance, track.lateral, track.relative_speed, selected)
+    return ClusterObject(track.track_id, track.distance, track.lateral, track.relative_speed, selected,
+                         track.side_motion_confirmed, track.raw_relative_speed)
+
+  @staticmethod
+  def _side_motion_valid(track: _TrackedObject, v_ego: float, standstill: bool = False) -> bool:
+    # A stationary curb/wall has vRel ~= -vEgo. Require a non-trivial
+    # world-relative speed while moving. At a stop, retain only a track that
+    # established this identity before ego speed fell away.
+    if standstill or abs(float(v_ego)) <= 0.1:
+      return track.side_motion_confirmed
+    return abs(float(v_ego) + track.raw_relative_speed) >= SIDE_MOVING_OBJECT_MIN_SPEED
 
   def update(self, points: list[Any], preferred_primary_track_id: int = -1,
              alternate_enabled: bool = False,
@@ -92,7 +112,8 @@ class Ev9ClusterObjectTracker:
              side_qualified_track_ids: set[int] | None = None,
              side_retention_track_ids: set[int] | None = None,
              right_enabled: bool = True,
-             v_ego: float = 0.0) -> ClusterObjectSlots:
+             v_ego: float = 0.0,
+             standstill: bool = False) -> ClusterObjectSlots:
     # A non-None set is an explicit display allow-list for points present in
     # this scan. Evict a present-but-disqualified track immediately, while a
     # genuinely missing point gets the bounded dropout hold below.
@@ -118,9 +139,12 @@ class Ev9ClusterObjectTracker:
       relative_speed = float(point.vRel)
       track = self.tracks.get(track_id)
       if track is None:
+        side_motion = abs(float(v_ego)) > 0.1 and \
+          abs(float(v_ego) + relative_speed) >= SIDE_MOVING_OBJECT_MIN_SPEED
         self.tracks[track_id] = _TrackedObject(
           track_id, distance, lateral, relative_speed,
           raw_distance=distance, raw_lateral=lateral, raw_relative_speed=relative_speed,
+          side_motion_hits=int(side_motion),
         )
         continue
 
@@ -134,6 +158,12 @@ class Ev9ClusterObjectTracker:
       track.hits += 1
       track.misses = 0
       track.confirmed = track.confirmed or track.hits >= self.ACQUISITION_SAMPLES
+
+      if abs(float(v_ego)) > 0.1:
+        side_motion = abs(float(v_ego) + track.raw_relative_speed) >= SIDE_MOVING_OBJECT_MIN_SPEED
+        track.side_motion_hits = track.side_motion_hits + 1 if side_motion else 0
+        track.side_motion_confirmed = track.side_motion_confirmed or \
+          track.side_motion_hits >= self.ACQUISITION_SAMPLES
 
     for track_id, track in list(self.tracks.items()):
       if track_id not in seen:
@@ -150,7 +180,7 @@ class Ev9ClusterObjectTracker:
       for track in self.tracks.values():
         right_entry = track.track_id in seen and track.track_id in side_qualified_track_ids and \
           -4.3 < track.raw_lateral < -2.8 and track.raw_distance < 60.0 and \
-          abs(float(v_ego) + track.raw_relative_speed) >= 2.78
+          self._side_motion_valid(track, v_ego, standstill)
         track.right_entry_hits = track.right_entry_hits + 1 if right_entry else 0
 
     confirmed = [track for track in self.tracks.values() if track.confirmed]
@@ -163,7 +193,8 @@ class Ev9ClusterObjectTracker:
     # beyond 80 m. This is intentionally separate from the wider primary-lead
     # allow-list and does not claim to be a BSM target decision.
     left = sorted((track for track in confirmed if side_qualified(track) and
-                   self.SIDE_INNER_WIDTH < track.lateral < 4.0 and track.distance < 80.0),
+                   self.SIDE_INNER_WIDTH < track.lateral < 4.0 and track.distance < 80.0 and
+                   (side_qualified_track_ids is None or self._side_motion_valid(track, v_ego, standstill))),
                   key=lambda track: track.distance)
     if side_qualified_track_ids is None:
       right = sorted((track for track in confirmed if right_enabled and
@@ -176,8 +207,10 @@ class Ev9ClusterObjectTracker:
         retained = track.track_id == current_right_track_id and \
           track.track_id in (side_retention_track_ids or set()) and \
           -4.5 < track.raw_lateral < -1.5 and track.raw_distance < 62.0 and \
-          abs(float(v_ego) + track.raw_relative_speed) >= 2.78
-        return bool(right_enabled and (retained or track.right_entry_hits >= self.ACQUISITION_SAMPLES))
+          self._side_motion_valid(track, v_ego, standstill)
+        entered = track.right_entry_hits >= self.ACQUISITION_SAMPLES and \
+          self._side_motion_valid(track, v_ego, standstill)
+        return bool(right_enabled and (retained or entered))
 
       right = sorted((track for track in confirmed if right_candidate(track)), key=lambda track: track.distance)
 
@@ -241,6 +274,32 @@ def radar_backed_object(lead: Any, qualified_track_ids: set[int] | None = None) 
     return None
 
   return ClusterObject(track_id, distance, lateral, relative_speed)
+
+
+def validate_cluster_slots_for_output(slots: ClusterObjectSlots, lead_one: Any, v_ego: float,
+                                      standstill: bool, require_fused_primary: bool = True,
+                                      require_side_motion: bool = True) -> ClusterObjectSlots:
+  """Revalidate tracker output against the current control-cycle inputs.
+
+  The tracker intentionally smooths and briefly holds raw radar dropouts. That
+  state must not outlive the current fused primary decision, and side slots
+  must not render stationary-world returns such as curbs and walls.
+  """
+  primary = slots.primary
+  if require_fused_primary:
+    fused_primary = radar_backed_object(lead_one)
+    if fused_primary is None or primary is None or primary.track_id != fused_primary.track_id:
+      primary = None
+
+  def valid_side(obj: ClusterObject | None) -> ClusterObject | None:
+    if obj is None or not require_side_motion:
+      return obj
+    if standstill or abs(float(v_ego)) <= 0.1:
+      return obj if obj.motion_confirmed else None
+    relative_speed = obj.raw_relative_speed if obj.raw_relative_speed is not None else obj.relative_speed
+    return obj if abs(float(v_ego) + relative_speed) >= SIDE_MOVING_OBJECT_MIN_SPEED else None
+
+  return ClusterObjectSlots(primary, slots.alternate, valid_side(slots.left), valid_side(slots.right))
 
 
 def filtered_radar_slots(lead_one: Any, lead_two: Any, lead_left: Any, lead_right: Any,

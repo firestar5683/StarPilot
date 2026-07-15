@@ -1,7 +1,9 @@
 from types import SimpleNamespace
 
-from openpilot.selfdrive.car.ev9_cluster_objects import Ev9ClusterObjectTracker, bsm_gated_side_slots, default_enabled_param, \
-                                                         ev9_cluster_display_context_valid, filtered_radar_slots, radar_backed_object
+from openpilot.selfdrive.car.ev9_cluster_objects import ClusterObject, ClusterObjectSlots, Ev9ClusterObjectTracker, \
+                                                         bsm_gated_side_slots, default_enabled_param, \
+                                                         ev9_cluster_display_context_valid, filtered_radar_slots, radar_backed_object, \
+                                                         validate_cluster_slots_for_output
 
 
 def lead(*, track_id=1, distance=30.0, lateral=0.0, relative_speed=-1.0, status=True, radar=True):
@@ -202,7 +204,7 @@ def test_strict_side_allowlist_does_not_remove_qualified_primary():
 def test_strict_side_allowlist_and_geometry_accept_left_candidate():
   tracker = Ev9ClusterObjectTracker()
   obj = point(track_id=2, distance=35.0, lateral=2.5)
-  slots = acquire(tracker, [obj], qualified_track_ids={2}, side_qualified_track_ids={2})
+  slots = acquire(tracker, [obj], qualified_track_ids={2}, side_qualified_track_ids={2}, v_ego=20.0)
   assert slots.left is not None and slots.left.track_id == 2
 
 
@@ -250,6 +252,46 @@ def test_right_side_rejects_far_deep_track_and_low_absolute_speed():
                  side_retention_track_ids={5}, v_ego=20.0).right is None
 
 
+def test_left_side_rejects_stationary_world_return():
+  tracker = Ev9ClusterObjectTracker()
+  curb = point(track_id=8, distance=12.0, lateral=3.0, relative_speed=-20.0)
+  slots = acquire(tracker, [curb], qualified_track_ids={8}, side_qualified_track_ids={8}, v_ego=20.0)
+  assert slots.left is None
+
+
+def test_confirmed_side_vehicle_survives_stop_without_new_standstill_acquisition():
+  tracker = Ev9ClusterObjectTracker()
+  vehicle = point(track_id=8, distance=12.0, lateral=3.0, relative_speed=0.0)
+  slots = acquire(tracker, [vehicle], qualified_track_ids={8}, side_qualified_track_ids={8}, v_ego=20.0)
+  assert slots.left is not None and slots.left.motion_confirmed
+
+  slots = tracker.update([point(track_id=8, distance=12.0, lateral=3.0, relative_speed=0.0)],
+                         qualified_track_ids={8}, side_qualified_track_ids={8}, v_ego=0.0, standstill=True)
+  assert slots.left is not None
+
+  stopped_tracker = Ev9ClusterObjectTracker()
+  assert acquire(stopped_tracker, [vehicle], qualified_track_ids={8}, side_qualified_track_ids={8},
+                 v_ego=0.0, standstill=True).left is None
+
+
+def test_output_validation_requires_current_fused_primary():
+  tracker = Ev9ClusterObjectTracker()
+  slots = acquire(tracker, [point(track_id=4)], preferred_primary_track_id=4,
+                  require_preferred_primary=True)
+  assert validate_cluster_slots_for_output(slots, lead(track_id=4), 10.0, False).primary is not None
+  assert validate_cluster_slots_for_output(slots, lead(status=False), 10.0, False).primary is None
+  assert validate_cluster_slots_for_output(slots, lead(track_id=5), 10.0, False).primary is None
+
+
+def test_output_validation_rejects_stationary_side_return():
+  moving_side = ClusterObjectSlots(right=ClusterObject(
+    track_id=7, distance=5.0, lateral=-3.0, relative_speed=-10.0,
+    motion_confirmed=True, raw_relative_speed=-10.0,
+  ))
+  assert validate_cluster_slots_for_output(moving_side, lead(status=False), 10.0, False).right is None
+  assert validate_cluster_slots_for_output(moving_side, lead(status=False), 0.0, True).right is not None
+
+
 def test_fused_slot_quality_allowlist_is_display_only():
   primary = lead(track_id=1)
   left = lead(track_id=2, lateral=2.5)
@@ -264,10 +306,10 @@ def test_quality_filter_param_defaults_on_when_missing_and_honors_explicit_off()
   assert not default_enabled_param(FakeParams(b"0"), "KiaEv9RadarQualityFilterEnabled")
 
 
-def test_display_context_requires_live_radar_main_drive_and_motion():
+def test_display_context_requires_live_radar_main_and_drive_but_allows_stop():
   assert ev9_cluster_display_context_valid(True, True, True, False, 5.0)
   assert not ev9_cluster_display_context_valid(False, True, True, False, 5.0)
   assert not ev9_cluster_display_context_valid(True, False, True, False, 5.0)
   assert not ev9_cluster_display_context_valid(True, True, False, False, 5.0)
-  assert not ev9_cluster_display_context_valid(True, True, True, True, 0.0)
-  assert not ev9_cluster_display_context_valid(True, True, True, False, 0.1)
+  assert ev9_cluster_display_context_valid(True, True, True, True, 0.0)
+  assert ev9_cluster_display_context_valid(True, True, True, False, 0.1)
