@@ -3,6 +3,7 @@ import cereal.messaging as messaging
 from opendbc.car import DT_CTRL, structs
 from opendbc.car.chrysler.values import RAM_DT
 from opendbc.car.gm.values import CAR as GM_CAR, GMFlags, SDGM_CAR
+from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR
 from opendbc.car.interfaces import MAX_CTRL_SPEED
 
 from openpilot.selfdrive.selfdrived.events import Events
@@ -178,7 +179,15 @@ class CarSpecificEvents:
       events = self.create_common_events(CS, CS_prev, extra_gears=extra_gears)
 
     elif self.CP.brand == 'hyundai':
-      events = self.create_common_events(CS, CS_prev, extra_gears=extra_gears, pcm_enable=self.CP.pcmCruise, allow_button_cancel=False)
+      # EV9 angle steering reports its normal large-angle EPS lockout through
+      # steerFaultTemporary. AOL may still request lateral while selfdrive is
+      # disabled, so do not turn that inactive lockout into a takeover prompt.
+      # The fault remains in CarState and CarController continues to inhibit
+      # angle commands; enabled selfdrive sessions retain the normal warning.
+      suppress_inactive_steer_warning = self.CP.carFingerprint == HYUNDAI_CAR.KIA_EV9 and not CC.enabled
+      events = self.create_common_events(CS, CS_prev, extra_gears=extra_gears, pcm_enable=self.CP.pcmCruise,
+                                         allow_button_cancel=False,
+                                         suppress_temporary_steer_warning=suppress_inactive_steer_warning)
 
     else:
       events = self.create_common_events(CS, CS_prev, extra_gears=extra_gears)
@@ -186,7 +195,8 @@ class CarSpecificEvents:
     return events
 
   def create_common_events(self, CS: structs.CarState, CS_prev: car.CarState, extra_gears: list | None = None, pcm_enable=True,
-                           allow_button_cancel=True, suppress_low_speed_alert=False):
+                           allow_button_cancel=True, suppress_low_speed_alert=False,
+                           suppress_temporary_steer_warning=False):
     events = Events()
     preap_software_cruise = (self.CP.brand == "tesla" and self.CP.carFingerprint == "TESLA_MODEL_S_PREAP" and
                              self.CP.openpilotLongitudinalControl and not self.CP.pcmCruise)
@@ -248,7 +258,13 @@ class CarSpecificEvents:
     # Handle permanent and temporary steering faults
     self.steering_unpressed = 0 if CS.steeringPressed else self.steering_unpressed + 1
     if CS.steerFaultTemporary:
-      if CS.steeringPressed and (not CS_prev.steerFaultTemporary or self.no_steer_warning):
+      if suppress_temporary_steer_warning:
+        # Keep the no-entry/soft-disable semantics without feeding a WARNING
+        # into Always-On Lateral while selfdrive itself is inactive.
+        self.no_steer_warning = False
+        self.silent_steer_warning = True
+        events.add(EventName.steerTempUnavailable)
+      elif CS.steeringPressed and (not CS_prev.steerFaultTemporary or self.no_steer_warning):
         self.no_steer_warning = True
       else:
         self.no_steer_warning = False
