@@ -296,6 +296,19 @@ def test_confirmed_side_vehicle_survives_stop_without_new_standstill_acquisition
                  v_ego=0.0, standstill=True).left is None
 
 
+def test_moving_side_vehicle_can_acquire_at_standstill_without_admitting_static_return():
+  moving_tracker = Ev9ClusterObjectTracker()
+  moving_vehicle = point(track_id=9, distance=12.0, lateral=3.0, relative_speed=3.5)
+  moving_slots = acquire(moving_tracker, [moving_vehicle], qualified_track_ids={9}, side_qualified_track_ids={9},
+                         v_ego=0.0, standstill=True)
+  assert moving_slots.left is not None and moving_slots.left.motion_confirmed
+
+  static_tracker = Ev9ClusterObjectTracker()
+  static_return = point(track_id=10, distance=12.0, lateral=3.0, relative_speed=0.0)
+  assert acquire(static_tracker, [static_return], qualified_track_ids={10}, side_qualified_track_ids={10},
+                 v_ego=0.0, standstill=True).left is None
+
+
 def test_output_validation_requires_current_fused_primary():
   tracker = Ev9ClusterObjectTracker()
   slots = acquire(tracker, [point(track_id=4)], preferred_primary_track_id=4,

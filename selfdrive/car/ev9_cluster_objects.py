@@ -118,10 +118,10 @@ class Ev9ClusterObjectTracker:
   @staticmethod
   def _side_motion_valid(track: _TrackedObject, v_ego: float, standstill: bool = False) -> bool:
     # A stationary curb/wall has vRel ~= -vEgo. Require a non-trivial
-    # world-relative speed while moving. At a stop, retain only a track that
-    # established this identity before ego speed fell away.
+    # world-relative speed while moving. At a stop, retain an established
+    # vehicle or admit a currently moving target; static returns still fail.
     if standstill or abs(float(v_ego)) <= 0.1:
-      return track.side_motion_confirmed
+      return track.side_motion_confirmed or abs(track.raw_relative_speed) >= SIDE_MOVING_OBJECT_MIN_SPEED
     return abs(float(v_ego) + track.raw_relative_speed) >= SIDE_MOVING_OBJECT_MIN_SPEED
 
   def update(self, points: list[Any], preferred_primary_track_id: int = -1,
@@ -158,7 +158,7 @@ class Ev9ClusterObjectTracker:
       relative_speed = float(point.vRel)
       track = self.tracks.get(track_id)
       if track is None:
-        side_motion = abs(float(v_ego)) > 0.1 and \
+        side_motion = abs(relative_speed) >= SIDE_MOVING_OBJECT_MIN_SPEED if standstill or abs(float(v_ego)) <= 0.1 else \
           abs(float(v_ego) + relative_speed) >= SIDE_MOVING_OBJECT_MIN_SPEED
         self.tracks[track_id] = _TrackedObject(
           track_id, distance, lateral, relative_speed,
@@ -178,11 +178,12 @@ class Ev9ClusterObjectTracker:
       track.misses = 0
       track.confirmed = track.confirmed or track.hits >= self.ACQUISITION_SAMPLES
 
-      if abs(float(v_ego)) > 0.1:
-        side_motion = abs(float(v_ego) + track.raw_relative_speed) >= SIDE_MOVING_OBJECT_MIN_SPEED
-        track.side_motion_hits = track.side_motion_hits + 1 if side_motion else 0
-        track.side_motion_confirmed = track.side_motion_confirmed or \
-          track.side_motion_hits >= self.ACQUISITION_SAMPLES
+      side_motion = abs(track.raw_relative_speed) >= SIDE_MOVING_OBJECT_MIN_SPEED \
+        if standstill or abs(float(v_ego)) <= 0.1 else \
+        abs(float(v_ego) + track.raw_relative_speed) >= SIDE_MOVING_OBJECT_MIN_SPEED
+      track.side_motion_hits = track.side_motion_hits + 1 if side_motion else 0
+      track.side_motion_confirmed = track.side_motion_confirmed or \
+        track.side_motion_hits >= self.ACQUISITION_SAMPLES
 
     for track_id, track in list(self.tracks.items()):
       if track_id not in seen:
