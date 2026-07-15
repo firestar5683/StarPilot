@@ -74,6 +74,13 @@ result is a single 5.7-second event in `000000d5` and does not transfer to eithe
 Without the continuous model, an always-on 100%-recall baseline has only 5.9% pooled left precision and 2.7%
 pooled right precision.
 
+An episode-recall sweep is less pathological than full frame recall, but still highly sensitive. The least-false
+deployable rule reaching every corpus episode uses left raw-`0x36A` OR qualified MRR evidence with a 30-second
+hold, and right raw-`0x36A` evidence with a 25-second hold. It reaches roughly 46% episode precision, with about
+1,948 seconds of left false-on time and 826 seconds of right false-on time across the corpus. Because the long
+holds can merely overlap a later warning, this profile is deployed only as a second shadow estimator and is not
+connected to comma, cluster, mirror, sound, haptic, or lane-change-inhibition outputs.
+
 ## Engineering conclusion
 
 With the present bus access, a software estimator can provide low-confidence, usually late side-object evidence;

@@ -22,11 +22,14 @@ from __future__ import annotations
 
 import argparse
 from dataclasses import dataclass
+import math
 from pathlib import Path
 
 import numpy as np
 from sklearn.ensemble import ExtraTreesClassifier
 from sklearn.metrics import precision_recall_curve
+
+from openpilot.tools.ev9_longitudinal.evaluate_ev9_bsm_heuristics import evaluate
 
 
 @dataclass
@@ -246,6 +249,20 @@ def summarize(y: np.ndarray, scores: np.ndarray) -> dict[str, float]:
   return result
 
 
+def full_episode_recall_threshold(y: np.ndarray, scores: np.ndarray,
+                                  routes: np.ndarray, segments: np.ndarray) -> float:
+  """Return the highest score threshold that touches every truth episode."""
+  episode_maxima: list[float] = []
+  for route, segment in np.unique(np.column_stack((routes, segments)), axis=0):
+    idx = np.flatnonzero((routes == route) & (segments == segment))
+    active = y[idx]
+    starts = np.flatnonzero(active & ~np.r_[False, active[:-1]])
+    ends = np.flatnonzero(active & ~np.r_[active[1:], False])
+    episode_maxima.extend(float(np.max(scores[idx[start:end + 1]]))
+                          for start, end in zip(starts, ends, strict=True))
+  return min(episode_maxima) if episode_maxima else math.inf
+
+
 def main() -> None:
   parser = argparse.ArgumentParser()
   parser.add_argument("--can-npz", type=Path, required=True)
@@ -288,12 +305,30 @@ def main() -> None:
       reports = {name: summarize(y_all[test], score) for name, score in variants.items()}
       best_name = max(reports, key=lambda name: reports[name]["best_f1"])
       best = reports[best_name]
+      episode_reports = {}
+      for name, score in variants.items():
+        threshold = full_episode_recall_threshold(y_all[test], score, tr, ts)
+        prediction = np.zeros(len(y_all), dtype=bool)
+        prediction[test] = score >= threshold
+        metrics = evaluate(y_all, prediction, can, test)
+        episode_reports[name] = (threshold, metrics)
+      episode_name = max(episode_reports, key=lambda name: (
+        episode_reports[name][1].episode_precision,
+        -episode_reports[name][1].false_on_seconds,
+        episode_reports[name][1].frame_precision,
+      ))
+      episode_threshold, episode_metrics = episode_reports[episode_name]
       report = f"hold route {int(holdout)} positives={int(y_all[test].sum())} "
       report += f"best={best_name}: F1={best['best_f1']:.3f}, P={best['best_precision']:.3f}, "
       report += f"R={best['best_recall']:.3f}, P@R>=.95={best['best_precision_at_recall95']:.3f}, "
       report += f"P@R=1={best['best_precision_at_recall100']:.3f}, "
       report += f"R@P>=.95={best['best_recall_at_precision95']:.3f}, meets95={best['meets_95_95']}"
       print(report)
+      episode_report = f"  episode-recall=1 best={episode_name} threshold={episode_threshold:.4f}: "
+      episode_report += f"episode P/R={episode_metrics.episode_precision:.3f}/{episode_metrics.episode_recall:.3f}, "
+      episode_report += f"frame P/R={episode_metrics.frame_precision:.3f}/{episode_metrics.frame_recall:.3f}, "
+      episode_report += f"false-on={episode_metrics.false_on_seconds:.1f}s, lag-med={episode_metrics.onset_lag_median_s:+.2f}s"
+      print(episode_report)
 
 
 if __name__ == "__main__":
