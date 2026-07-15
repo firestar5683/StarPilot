@@ -411,6 +411,14 @@ class Car:
         self.CI.CS.ev9_software_bsm_right_source = software_bsm.right.source
         self.CI.CS.ev9_software_bsm_left_confidence = software_bsm.left.confidence
         self.CI.CS.ev9_software_bsm_right_confidence = software_bsm.right.confidence
+        for side_name, side_result in (("left", software_bsm.left), ("right", software_bsm.right)):
+          diagnostics = side_result.diagnostics
+          setattr(self.CI.CS, f"ev9_software_bsm_{side_name}_score", diagnostics.score)
+          setattr(self.CI.CS, f"ev9_software_bsm_{side_name}_raw_candidate", diagnostics.raw_candidate)
+          setattr(self.CI.CS, f"ev9_software_bsm_{side_name}_track_candidate", diagnostics.track_candidate)
+          setattr(self.CI.CS, f"ev9_software_bsm_{side_name}_candidate", diagnostics.candidate)
+          setattr(self.CI.CS, f"ev9_software_bsm_{side_name}_reject_reason", diagnostics.reject_reason)
+          setattr(self.CI.CS, f"ev9_software_bsm_{side_name}_profile_version", diagnostics.profile_version)
 
         native_fresh = bool(getattr(self.CI.CS, "ev9_stock_blindspot_fresh", False) and
                             getattr(self.CI.CS, "ev9_blindspot_source", "neutral") == "stock")
@@ -435,16 +443,21 @@ class Car:
         self.CI.CS.ev9_vehicle_bsm_right_escalated = bsm_outputs.vehicle_right_escalated
 
         detector_state = (software_bsm.left.detected, software_bsm.right.detected,
-                          software_bsm.left.escalated, software_bsm.right.escalated)
+                          software_bsm.left.escalated, software_bsm.right.escalated,
+                          software_bsm.left.diagnostics.candidate, software_bsm.right.diagnostics.candidate,
+                          software_bsm.left.diagnostics.reject_reason, software_bsm.right.diagnostics.reject_reason)
         if detector_state != self.ev9_software_bsm_last_state:
           now = time.monotonic()
           if now - self.ev9_software_bsm_last_log_time >= 1.0:
-            cloudlog.info(
-              f"EV9 software BSM shadow left={software_bsm.left.detected}/{software_bsm.left.escalated} "
-              f"({software_bsm.left.source},{software_bsm.left.confidence:.2f}) "
-              f"right={software_bsm.right.detected}/{software_bsm.right.escalated} "
-              f"({software_bsm.right.source},{software_bsm.right.confidence:.2f})",
-            )
+            left_diag = f"{software_bsm.left.source},score={software_bsm.left.diagnostics.score:.2f},"
+            left_diag += f"raw={software_bsm.left.diagnostics.raw_candidate},track={software_bsm.left.diagnostics.track_candidate},"
+            left_diag += f"reject={software_bsm.left.diagnostics.reject_reason}"
+            right_diag = f"{software_bsm.right.source},score={software_bsm.right.diagnostics.score:.2f},"
+            right_diag += f"raw={software_bsm.right.diagnostics.raw_candidate},track={software_bsm.right.diagnostics.track_candidate},"
+            right_diag += f"reject={software_bsm.right.diagnostics.reject_reason}"
+            log_message = f"EV9 software BSM shadow left={software_bsm.left.detected}/{software_bsm.left.escalated} ({left_diag}) "
+            log_message += f"right={software_bsm.right.detected}/{software_bsm.right.escalated} ({right_diag})"
+            cloudlog.info(log_message)
             self.ev9_software_bsm_last_log_time = now
           self.ev9_software_bsm_last_state = detector_state
 
@@ -463,6 +476,13 @@ class Car:
         self.CI.CS.ev9_software_bsm_right_source = "neutral"
         self.CI.CS.ev9_software_bsm_left_confidence = 0.0
         self.CI.CS.ev9_software_bsm_right_confidence = 0.0
+        for side_name in ("left", "right"):
+          setattr(self.CI.CS, f"ev9_software_bsm_{side_name}_score", 0.0)
+          setattr(self.CI.CS, f"ev9_software_bsm_{side_name}_raw_candidate", False)
+          setattr(self.CI.CS, f"ev9_software_bsm_{side_name}_track_candidate", False)
+          setattr(self.CI.CS, f"ev9_software_bsm_{side_name}_candidate", False)
+          setattr(self.CI.CS, f"ev9_software_bsm_{side_name}_reject_reason", "stale_radar")
+          setattr(self.CI.CS, f"ev9_software_bsm_{side_name}_profile_version", "")
         self.CI.CS.ev9_vehicle_bsm_left = False
         self.CI.CS.ev9_vehicle_bsm_right = False
         self.CI.CS.ev9_vehicle_bsm_left_escalated = False

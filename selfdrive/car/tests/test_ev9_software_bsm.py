@@ -1,6 +1,10 @@
+from dataclasses import FrozenInstanceError, replace
 from types import SimpleNamespace
 
-from openpilot.selfdrive.car.ev9_software_bsm import Ev9SoftwareBsmDetector, select_ev9_software_bsm_outputs
+import pytest
+
+from openpilot.selfdrive.car.ev9_software_bsm import EV9_SOFTWARE_BSM_PROFILE_V1, Ev9SoftwareBsmDetector, \
+                                                       select_ev9_software_bsm_outputs
 
 
 DRIVING_SPEED = 12.0
@@ -54,6 +58,86 @@ def test_acquire_and_short_dropout_hold():
 
   for _ in range(detector.HOLD_SAMPLES):
     assert update(detector).right.detected
+  assert not update(detector).right.detected
+
+
+def test_scored_diagnostics_explain_candidates_without_changing_detection():
+  detector = Ev9SoftwareBsmDetector()
+
+  right = update(detector, raw_right=True)
+  assert not right.right.detected
+  assert right.right.diagnostics.raw_candidate
+  assert not right.right.diagnostics.track_candidate
+  assert right.right.diagnostics.candidate
+  assert right.right.diagnostics.score == pytest.approx(0.54)
+  assert right.right.diagnostics.reject_reason == "acquiring"
+
+  left = update(detector, raw_left=True)
+  assert not left.left.detected
+  assert left.left.diagnostics.raw_candidate
+  assert not left.left.diagnostics.candidate
+  assert left.left.diagnostics.score == pytest.approx(0.34)
+  assert left.left.diagnostics.reject_reason == "track_required"
+
+  left_with_track = update(detector, raw_left=True, radar_tracks=[track(relative_speed=-9.0)])
+  assert not left_with_track.left.detected
+  assert left_with_track.left.diagnostics.track_candidate
+  assert left_with_track.left.diagnostics.candidate
+  assert left_with_track.left.diagnostics.score == pytest.approx(0.68)
+  assert left_with_track.left.diagnostics.reject_reason == "acquiring"
+
+
+@pytest.mark.parametrize(("kwargs", "reason"), [
+  ({"fresh": False}, "stale_raw"),
+  ({"drive": False}, "not_drive"),
+  ({"reverse": True}, "reverse"),
+  ({"v_ego": 0.0}, "below_reset_speed"),
+  ({"v_ego": float("nan")}, "invalid_speed"),
+  ({"steering_angle_deg": 10.0}, "steering_angle"),
+  ({"steering_angle_deg": float("nan")}, "invalid_steering_angle"),
+])
+def test_context_reject_reasons_fail_closed(kwargs, reason):
+  result = update(Ev9SoftwareBsmDetector(), raw_right=True, **kwargs)
+  assert not result.right.detected
+  assert not result.right.diagnostics.candidate
+  assert result.right.diagnostics.reject_reason == reason
+
+
+def test_profile_is_immutable_and_overrides_are_explicit():
+  with pytest.raises(FrozenInstanceError):
+    EV9_SOFTWARE_BSM_PROFILE_V1.acquire_samples = 1
+
+  profile = replace(
+    EV9_SOFTWARE_BSM_PROFILE_V1,
+    version="test-no-left-track-v2",
+    acquire_samples=1,
+    left_track_required=False,
+    left_candidate_score=EV9_SOFTWARE_BSM_PROFILE_V1.left_raw_score,
+  )
+  result = update(Ev9SoftwareBsmDetector(profile), raw_left=True)
+  assert result.left.detected
+  assert result.left.diagnostics.profile_version == "test-no-left-track-v2"
+  assert result.left.diagnostics.score == pytest.approx(profile.left_raw_score)
+
+
+def test_profile_controls_acquisition_and_hold_counts():
+  profile = replace(EV9_SOFTWARE_BSM_PROFILE_V1, version="test-timing-v2",
+                    acquire_samples=3, hold_samples=2)
+  detector = Ev9SoftwareBsmDetector(profile)
+  assert not update(detector, raw_right=True).right.detected
+  assert not update(detector, raw_right=True).right.detected
+  active = update(detector, raw_right=True).right
+  assert active.detected
+  assert active.diagnostics.acquire_samples == 3
+  assert active.diagnostics.hold_samples == 2
+
+  first_hold = update(detector).right
+  assert first_hold.detected
+  assert first_hold.diagnostics.reject_reason == "holding"
+  assert first_hold.diagnostics.hold_samples == 1
+  second_hold = update(detector).right
+  assert second_hold.detected
+  assert second_hold.diagnostics.hold_samples == 0
   assert not update(detector).right.detected
 
 

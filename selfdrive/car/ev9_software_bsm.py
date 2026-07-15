@@ -1,6 +1,7 @@
+from collections.abc import Sequence
 from dataclasses import dataclass
 import math
-from typing import Any, Sequence
+from typing import Any
 
 
 KPH_TO_MS = 1.0 / 3.6
@@ -10,11 +11,58 @@ RAW_LEFT_MASK = 0x10
 
 
 @dataclass(frozen=True)
+class Ev9SoftwareBsmProfile:
+  """Versioned, immutable thresholds for the EV9 shadow estimator.
+
+  Scores describe retained-signal evidence only. They are deliberately not a
+  probability or a claim that the result matches the missing ADAS_DRV fusion.
+  """
+  version: str = "ev9-retained-signals-v1"
+  update_hz: int = 20
+  acquire_samples: int = 2
+  hold_samples: int = 4
+  ego_acquire_speed: float = 40.0 * KPH_TO_MS
+  ego_reset_speed: float = 20.0 * KPH_TO_MS
+  target_min_abs_speed: float = 10.0 * KPH_TO_MS
+  max_steering_angle_deg: float = 10.0
+  track_min_distance: float = 0.0
+  track_max_distance: float = 50.0
+  left_track_min_lateral: float = 2.5
+  left_track_max_lateral: float = 3.5
+  right_track_min_lateral: float = -3.5
+  right_track_max_lateral: float = -2.5
+  left_track_required: bool = True
+  right_track_required: bool = False
+  left_raw_score: float = 0.34
+  right_raw_score: float = 0.54
+  left_track_score: float = 0.34
+  right_track_score: float = 0.06
+  left_candidate_score: float = 0.68
+  right_candidate_score: float = 0.54
+
+
+EV9_SOFTWARE_BSM_PROFILE_V1 = Ev9SoftwareBsmProfile()
+
+
+@dataclass(frozen=True)
+class Ev9SoftwareBsmSideDiagnostics:
+  profile_version: str = EV9_SOFTWARE_BSM_PROFILE_V1.version
+  raw_candidate: bool = False
+  track_candidate: bool = False
+  candidate: bool = False
+  score: float = 0.0
+  reject_reason: str = "not_evaluated"
+  acquire_samples: int = 0
+  hold_samples: int = 0
+
+
+@dataclass(frozen=True)
 class Ev9SoftwareBsmSideResult:
   detected: bool = False
   escalated: bool = False
   source: str = "neutral"
   confidence: float = 0.0
+  diagnostics: Ev9SoftwareBsmSideDiagnostics = Ev9SoftwareBsmSideDiagnostics()
 
 
 @dataclass(frozen=True)
@@ -109,7 +157,8 @@ class Ev9SoftwareBsmDetector:
   RIGHT_CONFIDENCE = 0.54
   RIGHT_TRACK_CONFIDENCE = 0.60
 
-  def __init__(self) -> None:
+  def __init__(self, profile: Ev9SoftwareBsmProfile = EV9_SOFTWARE_BSM_PROFILE_V1) -> None:
+    self.profile = profile
     self._left = _SideState()
     self._right = _SideState()
 
@@ -117,37 +166,34 @@ class Ev9SoftwareBsmDetector:
   def _value(track: Any, name: str, default: Any) -> Any:
     return track.get(name, default) if isinstance(track, dict) else getattr(track, name, default)
 
-  @classmethod
-  def _qualified_track(cls, track: Any, v_ego: float, left: bool) -> bool:
-    if not bool(cls._value(track, "measured", False)):
+  def _qualified_track(self, track: Any, v_ego: float, left: bool) -> bool:
+    if not bool(self._value(track, "measured", False)):
       return False
 
-    distance = float(cls._value(track, "dRel", math.nan))
-    lateral = float(cls._value(track, "yRel", math.nan))
-    relative_speed = float(cls._value(track, "vRel", math.nan))
+    distance = float(self._value(track, "dRel", math.nan))
+    lateral = float(self._value(track, "yRel", math.nan))
+    relative_speed = float(self._value(track, "vRel", math.nan))
     if not all(math.isfinite(value) for value in (distance, lateral, relative_speed)):
       return False
-    if not cls.TRACK_MIN_DISTANCE <= distance <= cls.TRACK_MAX_DISTANCE:
+    if not self.profile.track_min_distance <= distance <= self.profile.track_max_distance:
       return False
-    if v_ego + relative_speed < cls.TARGET_MIN_ABS_SPEED:
+    if v_ego + relative_speed < self.profile.target_min_abs_speed:
       return False
 
     if left:
-      return cls.LEFT_TRACK_MIN_LATERAL <= lateral <= cls.LEFT_TRACK_MAX_LATERAL
-    return -cls.LEFT_TRACK_MAX_LATERAL <= lateral <= -cls.LEFT_TRACK_MIN_LATERAL
+      return self.profile.left_track_min_lateral <= lateral <= self.profile.left_track_max_lateral
+    return self.profile.right_track_min_lateral <= lateral <= self.profile.right_track_max_lateral
 
-  @classmethod
-  def _track_sides(cls, tracks: Sequence[Any], v_ego: float) -> tuple[bool, bool]:
-    return (any(cls._qualified_track(track, v_ego, True) for track in tracks),
-            any(cls._qualified_track(track, v_ego, False) for track in tracks))
+  def _track_sides(self, tracks: Sequence[Any], v_ego: float) -> tuple[bool, bool]:
+    return (any(self._qualified_track(track, v_ego, True) for track in tracks),
+            any(self._qualified_track(track, v_ego, False) for track in tracks))
 
-  @classmethod
-  def _update_side(cls, state: _SideState, candidate: bool, acquire_allowed: bool) -> bool:
+  def _update_side(self, state: _SideState, candidate: bool, acquire_allowed: bool) -> bool:
     if candidate and (acquire_allowed or state.detected):
       state.acquire_samples += 1
-      if state.detected or state.acquire_samples >= cls.ACQUIRE_SAMPLES:
+      if state.detected or state.acquire_samples >= self.profile.acquire_samples:
         state.detected = True
-        state.hold_samples = cls.HOLD_SAMPLES
+        state.hold_samples = self.profile.hold_samples
       return state.detected
 
     state.acquire_samples = 0
@@ -163,26 +209,96 @@ class Ev9SoftwareBsmDetector:
     self._left.reset()
     self._right.reset()
 
+  def _diagnostics(self, state: _SideState, *, raw: bool, track: bool, left: bool,
+                   candidate: bool, score: float, context_reject_reason: str | None,
+                   acquire_allowed: bool) -> Ev9SoftwareBsmSideDiagnostics:
+    if context_reject_reason is not None:
+      reject_reason = context_reject_reason
+    elif state.detected and not candidate:
+      reject_reason = "holding"
+    elif not raw:
+      reject_reason = "no_raw_candidate"
+    elif (self.profile.left_track_required if left else self.profile.right_track_required) and not track:
+      reject_reason = "track_required"
+    elif not candidate:
+      reject_reason = "below_score_threshold"
+    elif not acquire_allowed and not state.detected:
+      reject_reason = "below_acquire_speed"
+    elif not state.detected:
+      reject_reason = "acquiring"
+    else:
+      reject_reason = "active"
+
+    return Ev9SoftwareBsmSideDiagnostics(
+      profile_version=self.profile.version,
+      raw_candidate=raw,
+      track_candidate=track,
+      candidate=candidate,
+      score=score,
+      reject_reason=reject_reason,
+      acquire_samples=state.acquire_samples,
+      hold_samples=state.hold_samples,
+    )
+
   def update(self, *, raw_left: bool, raw_right: bool, fresh: bool, drive: bool,
              v_ego: float, steering_angle_deg: float, left_blinker: bool = False,
              right_blinker: bool = False, hazard: bool = False, reverse: bool = False,
              radar_tracks: Sequence[Any] | None = None) -> Ev9SoftwareBsmResult:
     v_ego = float(v_ego)
     steering_angle_deg = float(steering_angle_deg)
-    valid = fresh and drive and not reverse and math.isfinite(v_ego) and math.isfinite(steering_angle_deg) and \
-      v_ego >= self.EGO_RESET_SPEED and abs(steering_angle_deg) < self.MAX_STEERING_ANGLE_DEG
-    if not valid:
+    context_reject_reason = None
+    if not fresh:
+      context_reject_reason = "stale_raw"
+    elif reverse:
+      context_reject_reason = "reverse"
+    elif not drive:
+      context_reject_reason = "not_drive"
+    elif not math.isfinite(v_ego):
+      context_reject_reason = "invalid_speed"
+    elif v_ego < self.profile.ego_reset_speed:
+      context_reject_reason = "below_reset_speed"
+    elif not math.isfinite(steering_angle_deg):
+      context_reject_reason = "invalid_steering_angle"
+    elif abs(steering_angle_deg) >= self.profile.max_steering_angle_deg:
+      context_reject_reason = "steering_angle"
+
+    if context_reject_reason is not None:
       self.reset()
-      return Ev9SoftwareBsmResult()
+      left_score = self.profile.left_raw_score if raw_left else 0.0
+      right_score = self.profile.right_raw_score if raw_right else 0.0
+      left_diagnostics = self._diagnostics(self._left, raw=bool(raw_left), track=False, left=True,
+                                           candidate=False, score=left_score,
+                                           context_reject_reason=context_reject_reason, acquire_allowed=False)
+      right_diagnostics = self._diagnostics(self._right, raw=bool(raw_right), track=False, left=False,
+                                            candidate=False, score=right_score,
+                                            context_reject_reason=context_reject_reason, acquire_allowed=False)
+      return Ev9SoftwareBsmResult(Ev9SoftwareBsmSideResult(diagnostics=left_diagnostics),
+                                  Ev9SoftwareBsmSideResult(diagnostics=right_diagnostics))
 
     tracks = radar_tracks or ()
     left_track, right_track = self._track_sides(tracks, v_ego)
-    acquire_allowed = v_ego >= self.EGO_ACQUIRE_SPEED
+    acquire_allowed = v_ego >= self.profile.ego_acquire_speed
+
+    left_score = min(1.0, (self.profile.left_raw_score if raw_left else 0.0) +
+                     (self.profile.left_track_score if left_track else 0.0))
+    right_score = min(1.0, (self.profile.right_raw_score if raw_right else 0.0) +
+                      (self.profile.right_track_score if right_track else 0.0))
+    left_candidate = bool(raw_left and (left_track or not self.profile.left_track_required) and
+                          left_score >= self.profile.left_candidate_score)
+    right_candidate = bool(raw_right and (right_track or not self.profile.right_track_required) and
+                           right_score >= self.profile.right_candidate_score)
 
     # The left raw bit alone produced repeated false positives in a route with
     # no native left warning. Keep its empirical measured-track gate mandatory.
-    left_detected = self._update_side(self._left, bool(raw_left and left_track), acquire_allowed)
-    right_detected = self._update_side(self._right, bool(raw_right), acquire_allowed)
+    left_detected = self._update_side(self._left, left_candidate, acquire_allowed)
+    right_detected = self._update_side(self._right, right_candidate, acquire_allowed)
+
+    left_diagnostics = self._diagnostics(self._left, raw=bool(raw_left), track=left_track, left=True,
+                                         candidate=left_candidate, score=left_score,
+                                         context_reject_reason=None, acquire_allowed=acquire_allowed)
+    right_diagnostics = self._diagnostics(self._right, raw=bool(raw_right), track=right_track, left=False,
+                                          candidate=right_candidate, score=right_score,
+                                          context_reject_reason=None, acquire_allowed=acquire_allowed)
 
     simultaneous_blinkers = bool(left_blinker and right_blinker)
     escalation_allowed = not hazard and not simultaneous_blinkers
@@ -191,10 +307,11 @@ class Ev9SoftwareBsmDetector:
 
     left = Ev9SoftwareBsmSideResult(left_detected, left_escalated,
                                     "raw36a_left+measured_track" if left_detected else "neutral",
-                                    self.LEFT_CONFIDENCE if left_detected else 0.0)
+                                    self.LEFT_CONFIDENCE if left_detected else 0.0, left_diagnostics)
     right_source = "raw36a_right+measured_track" if right_detected and right_track else \
       "raw36a_right" if right_detected else "neutral"
     right_confidence = self.RIGHT_TRACK_CONFIDENCE if right_detected and right_track else \
       self.RIGHT_CONFIDENCE if right_detected else 0.0
-    right = Ev9SoftwareBsmSideResult(right_detected, right_escalated, right_source, right_confidence)
+    right = Ev9SoftwareBsmSideResult(right_detected, right_escalated, right_source, right_confidence,
+                                     right_diagnostics)
     return Ev9SoftwareBsmResult(left, right)
