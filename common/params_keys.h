@@ -59,6 +59,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"KiaEv9ClusterSpeedLimitEnabled", {PERSISTENT, BOOL, "1"}},
     {"KiaEv9ClusterMapSpeedLimitFallbackEnabled", {PERSISTENT, BOOL, "0"}},
     {"KiaEv9ClusterPlannerStopTargetEnabled", {PERSISTENT, BOOL, "1"}},
+    {"KiaEv9ClusterLaneChangeAnimationEnabled", {PERSISTENT, BOOL, "0"}},
     {"KiaEv9NeutralLaneCurvatureEnabled", {PERSISTENT, BOOL, "1"}},
     {"KiaEv9ClusterObjectSmoothingEnabled", {PERSISTENT, BOOL, "1"}},
     {"KiaEv9RadarQualityFilterEnabled", {PERSISTENT, BOOL, "1"}},

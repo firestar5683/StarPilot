@@ -489,6 +489,20 @@ IONIQ_6_CLUSTER_LANE_CHANGE_3C1 = {
   },
 }
 
+# EV9 stock routes use the same semantic 0x3C1 direction states as the Ioniq 6,
+# but with different captured integrity bytes. Unlike 0x161, this message has a
+# discrete transition at every observed lane-change animation onset.
+EV9_CLUSTER_LANE_CHANGE_3C1 = {
+  "right": {
+    "trigger": bytes.fromhex("8630300041000000"),
+    "steady": bytes.fromhex("1a40300001000000"),
+  },
+  "left": {
+    "trigger": bytes.fromhex("25d0304010000000"),
+    "steady": bytes.fromhex("d6e0304000000000"),
+  },
+}
+
 # Captured from a stock Ioniq 6 route that shows the cluster lane-change animation
 # on ECAN after the trigger/hold 0x3C1 states above.
 IONIQ_6_CLUSTER_LANE_CHANGE_3B5 = {
@@ -656,6 +670,20 @@ def create_ioniq_6_cluster_lane_change_messages(CAN, frame, side=None):
     ret.append((0x31A, seq_31a[((frame - IONIQ_6_CLUSTER_LANE_CHANGE_31A_START) // 100) % len(seq_31a)], CAN.ECAN))
 
   return ret
+
+
+def create_ev9_cluster_lane_change_messages(CAN, frame, side=None):
+  """Replay only the route-proven EV9 0x3C1 animation trigger/hold family."""
+  if side not in EV9_CLUSTER_LANE_CHANGE_3C1:
+    return []
+
+  frame_phase = IONIQ_6_CLUSTER_LANE_CHANGE_3C1_BURST.get(frame)
+  if frame_phase is None and frame >= IONIQ_6_CLUSTER_LANE_CHANGE_3C1_STEADY_START and \
+     (frame - IONIQ_6_CLUSTER_LANE_CHANGE_3C1_STEADY_START) % 20 == 0:
+    frame_phase = "steady"
+  if frame_phase is None:
+    return []
+  return [(0x3C1, EV9_CLUSTER_LANE_CHANGE_3C1[side][frame_phase], CAN.ECAN)]
 
 
 def create_acc_control(packer, CAN, enabled, accel_last, accel, stopping, gas_override, set_speed, hud_control,

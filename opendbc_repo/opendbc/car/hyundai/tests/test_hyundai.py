@@ -3419,6 +3419,34 @@ class TestHyundaiFingerprint:
     ]
     assert hyundaicanfd.create_ioniq_6_cluster_lane_change_messages(can_bus, 5, "none") == []
 
+  def test_ev9_cluster_lane_change_helper_replays_only_route_proven_3c1_family(self):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.KIA_EV9
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.CANFD_LKA_STEERING)
+    can_bus = CanBus(CP)
+
+    assert hyundaicanfd.create_ev9_cluster_lane_change_messages(can_bus, 1, "right") == []
+    assert hyundaicanfd.create_ev9_cluster_lane_change_messages(can_bus, 0, "right") == [
+      (0x3C1, bytes.fromhex("8630300041000000"), can_bus.ECAN),
+    ]
+    assert hyundaicanfd.create_ev9_cluster_lane_change_messages(can_bus, 4, "right") == [
+      (0x3C1, bytes.fromhex("8630300041000000"), can_bus.ECAN),
+    ]
+    assert hyundaicanfd.create_ev9_cluster_lane_change_messages(can_bus, 7, "right") == [
+      (0x3C1, bytes.fromhex("1a40300001000000"), can_bus.ECAN),
+    ]
+    assert hyundaicanfd.create_ev9_cluster_lane_change_messages(can_bus, 34, "right") == [
+      (0x3C1, bytes.fromhex("1a40300001000000"), can_bus.ECAN),
+    ]
+
+    assert hyundaicanfd.create_ev9_cluster_lane_change_messages(can_bus, 0, "left") == [
+      (0x3C1, bytes.fromhex("25d0304010000000"), can_bus.ECAN),
+    ]
+    assert hyundaicanfd.create_ev9_cluster_lane_change_messages(can_bus, 7, "left") == [
+      (0x3C1, bytes.fromhex("d6e0304000000000"), can_bus.ECAN),
+    ]
+    assert hyundaicanfd.create_ev9_cluster_lane_change_messages(can_bus, 5, "none") == []
+
   def test_ioniq_5_canfd_aux_messages_are_optional(self):
     toggles = get_test_toggles()
     fingerprint = gen_empty_fingerprint()

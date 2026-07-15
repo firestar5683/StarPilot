@@ -10,6 +10,7 @@ from opendbc.car.hyundai import hyundaicanfd, hyundaican
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.ev9_longitudinal import EV9_ACTUATION_JERK_LOWER, EV9_ACTUATION_JERK_UPPER, \
                                                    EV9_CLUSTER_ALTERNATE_LEAD_PARAM, EV9_CLUSTER_HUD_PARAM, \
+                                                   EV9_CLUSTER_LANE_CHANGE_ANIMATION_PARAM, \
                                                    EV9_CLUSTER_OBJECTS_ON_MAIN_PARAM, EV9_CLUSTER_OBJECTS_PARAM, \
                                                    EV9_CLUSTER_SPEED_LIMIT_PARAM, \
                                                    EV9_DIRECT_ANGLE_COMMAND_PARAM, EV9_DTC_CAPTURE_PARAM, \
@@ -412,6 +413,8 @@ class CarController(CarControllerBase):
       self._params.get_bool(EV9_CLUSTER_ALTERNATE_LEAD_PARAM)
     self.ev9_cluster_speed_limit_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
       ev9_default_enabled_param(self._params, EV9_CLUSTER_SPEED_LIMIT_PARAM)
+    self.ev9_cluster_lane_change_animation_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
+      self._params.get_bool(EV9_CLUSTER_LANE_CHANGE_ANIMATION_PARAM)
     self.ev9_neutral_lane_curvature_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
       ev9_default_enabled_param(self._params, EV9_NEUTRAL_LANE_CURVATURE_PARAM)
     self.ev9_rear_bsm_cluster_fallback_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
@@ -432,6 +435,8 @@ class CarController(CarControllerBase):
     self.long_active_ecu = self.CP.openpilotLongitudinalControl
     self._ioniq_6_lane_change_ui_side = None
     self._ioniq_6_lane_change_ui_frames = 0
+    self._ev9_lane_change_ui_side = None
+    self._ev9_lane_change_ui_frames = 0
     self._ioniq_6_long_tuning = Ioniq6LongitudinalTuningState()
     self._genesis_g90_long_tuning = GenesisG90LongitudinalTuningState()
     self._dash_lat_disengage_blink_frame = 0
@@ -949,6 +954,27 @@ class CarController(CarControllerBase):
                                                                                    self._ioniq_6_lane_change_ui_frames,
                                                                                    lane_change_ui_side))
         self._ioniq_6_lane_change_ui_frames += 1
+
+    if self.CP.carFingerprint == CAR.KIA_EV9:
+      ev9_lane_change_ui_side = None
+      if self.ev9_cluster_lane_change_animation_enabled and ev9_long_test_active and \
+         self.ev9_long_test.stage >= EV9LongitudinalTestStage.CCNC_STATUS and CC.latActive:
+        if CC.leftBlinker and not CC.rightBlinker:
+          ev9_lane_change_ui_side = "left"
+        elif CC.rightBlinker and not CC.leftBlinker:
+          ev9_lane_change_ui_side = "right"
+
+      if ev9_lane_change_ui_side != self._ev9_lane_change_ui_side:
+        self._ev9_lane_change_ui_side = ev9_lane_change_ui_side
+        self._ev9_lane_change_ui_frames = 0
+
+      if ev9_lane_change_ui_side is None or not self.long_active_ecu:
+        self._ev9_lane_change_ui_frames = 0
+      else:
+        can_sends.extend(hyundaicanfd.create_ev9_cluster_lane_change_messages(
+          self.CAN, self._ev9_lane_change_ui_frames, ev9_lane_change_ui_side,
+        ))
+        self._ev9_lane_change_ui_frames += 1
 
     if self.long_active_ecu:
       if lka_steering:
