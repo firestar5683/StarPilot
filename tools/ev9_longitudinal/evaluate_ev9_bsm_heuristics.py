@@ -167,6 +167,38 @@ def validate_npz(data: np.lib.npyio.NpzFile) -> None:
       raise ValueError(f"timestamps decrease in route={route}, segment={segment}")
 
 
+def candidate_validity(data: np.lib.npyio.NpzFile) -> dict[str, np.ndarray]:
+  """Return rows with real, warmed inputs instead of extractor zero fill."""
+  all_valid = np.ones(len(data["X"]), dtype=bool)
+  car_valid = data["car_state_valid"].astype(bool) if "car_state_valid" in data.files else all_valid
+  if not {"payload_presence", "payload_names"}.issubset(data.files):
+    return {name: car_valid if name != "raw36a" else all_valid for name in ALL_CANDIDATES}
+
+  names = data["payload_names"].astype(str)
+  presence = data["payload_presence"].astype(bool)
+
+  def group_valid(prefix: str) -> np.ndarray:
+    columns = np.flatnonzero(np.char.startswith(names, prefix))
+    if not len(columns):
+      raise ValueError(f"payload_presence has no {prefix!r} columns")
+    return np.all(presence[:, columns], axis=1)
+
+  raw_valid = group_valid("front2:")
+  mrr_valid = group_valid("mrr35:")
+  camera_valid = group_valid("corner:")
+  rcta_valid = group_valid("front1:")
+  return {
+    "raw36a": raw_valid,
+    "gated36a": raw_valid & car_valid,
+    "current-proxy": raw_valid & mrr_valid & car_valid,
+    "mrr": mrr_valid & car_valid,
+    "raw-and-mrr": raw_valid & mrr_valid & car_valid,
+    "camera": camera_valid & car_valid,
+    "raw-and-camera": raw_valid & camera_valid & car_valid,
+    "stock-rcta-right": rcta_valid,
+  }
+
+
 def _little_endian_signal(payload: np.ndarray, start_bit: int, size: int, *, signed: bool = False,
                           factor: float = 1.0) -> np.ndarray:
   """Vectorized Intel signal extraction from payloads whose byte zero is CAN byte 3."""
@@ -546,6 +578,7 @@ def main() -> None:
   data = np.load(args.npz, allow_pickle=True)
   validate_npz(data)
   candidates = build_candidates(data, config)
+  valid_rows = candidate_validity(data)
   requested_candidates = args.candidate or list(ALL_CANDIDATES)
   routes = _resolve_routes(data, args.route)
   sides = (0, 1) if args.side == "both" else ((0,) if args.side == "left" else (1,))
@@ -554,7 +587,7 @@ def main() -> None:
   for candidate_name in requested_candidates:
     feature_class = "deployable" if candidate_name in DEPLOYABLE_CANDIDATES else "stock-only"
     for route in routes:
-      selected = data["routes"] == route
+      selected = (data["routes"] == route) & valid_rows[candidate_name]
       for side in sides:
         metrics = evaluate(data["Y"][:, side], candidates[candidate_name][side], data, selected)
         results.append({

@@ -22,13 +22,22 @@ import re
 import numpy as np
 
 from opendbc.can import CANParser
-from tools.lib.logreader import LogReader
+from openpilot.tools.lib.logreader import LogReader
 
 
 ROUTE_DIRECTORY_RE = re.compile(r"(?P<route>[^-]+)--.+--(?P<segment>\d+)$")
 LABEL_MESSAGE = "BLINDSPOTS_REAR_CORNERS"
 LABEL_ADDRESS = 0x1BA
 LABEL_BUS = 1
+LABEL_SIGNALS = (
+  "BCW_Sta", "BCW_OnOffEquipSta", "BCW_LtIndSta", "BCW_RtIndSta",
+  "BCW_LtSndWrngSta", "BCW_RtSndWrngSta", "FL_INDICATOR", "FR_INDICATOR",
+  "BCW_SnstvtyModRetVal", "BCW_IndSta", "BCA_OnOffEquip2Sta", "BCA_Sta",
+  "BCA_OnOffEquipSta", "BCA_DRV_WarnSta", "BCA_Plus_Deccel_Req",
+  "BCA_Plus_BrkCmdSta", "BCA_Plus_LtWrngSta", "BCA_Plus_RtWrngSta",
+  "BCA_Plus_FuncStat", "BCA_Plus_Sta", "Brake_Control_RL", "Brake_Control_RR",
+  "OSMrrLamp_LtIndSta", "OSMrrLamp_RtIndSta",
+)
 
 
 @dataclass(frozen=True)
@@ -57,6 +66,14 @@ def feature_names() -> np.ndarray:
     for group in PAYLOAD_GROUPS
     for address in group.addresses
     for byte_index in group.byte_indexes
+  ])
+
+
+def payload_names() -> np.ndarray:
+  return np.asarray([
+    f"{group.name}:b{group.bus}:0x{address:x}"
+    for group in PAYLOAD_GROUPS
+    for address in group.addresses
   ])
 
 
@@ -113,7 +130,7 @@ def main() -> None:
   parser = argparse.ArgumentParser()
   parser.add_argument("--rlog-root", type=Path, required=True)
   parser.add_argument("--output", type=Path, required=True)
-  parser.add_argument("--expected-rlogs", type=int, default=71,
+  parser.add_argument("--expected-rlogs", type=int, default=72,
                       help="fail if the discovered corpus size differs; use 0 to disable")
   args = parser.parse_args()
 
@@ -128,6 +145,10 @@ def main() -> None:
   times: list[int] = []
   vehicle_states: list[tuple[float, ...]] = []
   boundaries: list[bool] = []
+  label_values: list[tuple[int, ...]] = []
+  label_payloads: list[bytes] = []
+  payload_presence: list[tuple[bool, ...]] = []
+  car_state_valid: list[bool] = []
 
   target_keys = {
     (group.bus, address)
@@ -153,6 +174,7 @@ def main() -> None:
 
       now = int(event.logMonoTime)
       frames: list[tuple[int, bytes, int]] = []
+      label_payload: bytes | None = None
       for frame in event.can:
         bus = int(frame.src)
         # Returned Panda frames have src >= 128 and are not vehicle receive
@@ -162,6 +184,8 @@ def main() -> None:
         address = int(frame.address)
         payload = bytes(frame.dat)
         frames.append((address, payload, bus))
+        if bus == LABEL_BUS and address == LABEL_ADDRESS:
+          label_payload = payload
         if (bus, address) in target_keys:
           latest[(bus, address)] = payload
 
@@ -169,12 +193,21 @@ def main() -> None:
         continue
       values = label_parser.vl[LABEL_MESSAGE]
       rows.append(snapshot_payloads(latest))
+      payload_presence.append(tuple(
+        (group.bus, address) in latest
+        for group in PAYLOAD_GROUPS
+        for address in group.addresses
+      ))
       labels.append((int(values["BCW_LtIndSta"] in (1, 2)),
                      int(values["BCW_RtIndSta"] in (1, 2))))
+      label_values.append(tuple(int(values[name]) for name in LABEL_SIGNALS))
+      payload = label_payload or bytes(24)
+      label_payloads.append((payload + bytes(24))[:24])
       route_indices.append(route_index)
       segments.append(segment)
       times.append(now)
       vehicle_states.append(car_state_values(current_car_state))
+      car_state_valid.append(current_car_state is not None)
       boundaries.append(segment_rows == 0)
       segment_rows += 1
 
@@ -196,9 +229,16 @@ def main() -> None:
     boundaries=np.asarray(boundaries, dtype=bool),
     features=names,
     route_names=np.asarray(route_names),
+    label_values=np.asarray(label_values, dtype=np.uint16),
+    label_features=np.asarray(LABEL_SIGNALS),
+    label_raw=np.asarray([list(payload) for payload in label_payloads], dtype=np.uint8),
+    payload_presence=np.asarray(payload_presence, dtype=bool),
+    payload_names=payload_names(),
+    car_state_valid=np.asarray(car_state_valid, dtype=bool),
   )
-  print(f"wrote {args.output}: X={x.shape}, left={sum(y[0] for y in labels)}, "
-        f"right={sum(y[1] for y in labels)}, routes={len(route_names)}, rlogs={len(rlogs)}")
+  summary = f"wrote {args.output}: X={x.shape}, left={sum(y[0] for y in labels)}, "
+  summary += f"right={sum(y[1] for y in labels)}, routes={len(route_names)}, rlogs={len(rlogs)}"
+  print(summary)
 
 
 if __name__ == "__main__":
