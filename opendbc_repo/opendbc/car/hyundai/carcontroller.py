@@ -914,6 +914,8 @@ class CarController(CarControllerBase):
             neutral_lane_curvature_enabled=self.ev9_neutral_lane_curvature_enabled,
             lead_left_selected=bool(getattr(CS, "openpilot_lead_left_selected", False)),
             lead_right_selected=bool(getattr(CS, "openpilot_lead_right_selected", False)),
+            stop_target_active=bool(getattr(CS, "ev9_cluster_stop_target_active", False)),
+            stop_target_distance=float(getattr(CS, "ev9_cluster_stop_target_distance", 0.0)),
           ))
       elif ccnc_non_hda2:
         can_sends.extend(hyundaicanfd.create_ccnc(self.packer, self.CAN, self.long_active_ecu, CC.enabled, CC.hudControl,

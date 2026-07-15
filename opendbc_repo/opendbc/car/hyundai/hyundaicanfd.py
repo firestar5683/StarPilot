@@ -1010,7 +1010,9 @@ def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, la
                                      speed_limit_enabled: bool = False,
                                      neutral_lane_curvature_enabled: bool = True,
                                      lead_left_selected: bool = False,
-                                     lead_right_selected: bool = False) -> list[CanData]:
+                                     lead_right_selected: bool = False,
+                                     stop_target_active: bool = False,
+                                     stop_target_distance: float = 0.0) -> list[CanData]:
   """Recreate EV9 CCNC engagement icons and the supported radar-object slots.
 
   This intentionally renders only fields whose stock EV9 meanings were seen in
@@ -1032,6 +1034,8 @@ def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, la
     1 if lfa_active else 0
   # No stock EV9 reference used LEAD_ALT; leadTwo is often the same fused car.
   alternate_active = False
+  target_distance = min(max(float(stop_target_distance), 0.1), 204.7) if stop_target_active else \
+    min(max(float(getattr(out, "vEgo", 0.0)) * 1.626, 0.1), 204.7)
 
   def object_distance(distance: float) -> float:
     return min(max(distance - 0.2, 0.1), 204.7)
@@ -1049,7 +1053,7 @@ def create_ev9_ccnc_status_messages(packer, CAN, counter: int, enabled: bool, la
     # Stock copies SCC's desired following-headway marker. The captured EV9
     # setting is 1.626 seconds and has near-unity correlation with ego speed,
     # not lead range or stopping distance.
-    "TARGET_DISTANCE": min(max(float(getattr(out, "vEgo", 0.0)) * 1.626, 0.1), 204.7) if hda_active else 204.6,
+    "TARGET_DISTANCE": target_distance if hda_active else 204.6,
     # This DBC represents the stock raw-zero neutral value as physical 15.
     # Physical zero packs raw 17, which the cluster renders as a right curve.
     "LANELINE_CURVATURE": 15 if neutral_lane_curvature_enabled else 0,

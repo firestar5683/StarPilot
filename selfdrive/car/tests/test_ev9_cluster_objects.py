@@ -1,8 +1,10 @@
+import math
 from types import SimpleNamespace
 
 from openpilot.selfdrive.car.ev9_cluster_objects import ClusterObject, ClusterObjectSlots, Ev9ClusterObjectTracker, \
                                                          bsm_gated_side_slots, default_enabled_param, \
-                                                         ev9_cluster_display_context_valid, filtered_radar_slots, radar_backed_object, \
+                                                         ev9_cluster_display_context_valid, ev9_cluster_stop_target_state, \
+                                                         filtered_radar_slots, radar_backed_object, \
                                                          validate_cluster_slots_for_output
 
 
@@ -46,6 +48,26 @@ def test_duplicate_track_only_occupies_one_slot():
   assert slots.primary is not None
   assert slots.alternate is None
   assert slots.left is None
+
+
+def test_stop_target_requires_active_long_and_valid_planners():
+  active, distance = ev9_cluster_stop_target_state(True, True, True, True, True, False, False, True, 18.4)
+  assert active
+  assert distance == 18.4
+
+  for enabled, long_active, star_valid, long_valid in (
+    (False, True, True, True), (True, False, True, True),
+    (True, True, False, True), (True, True, True, False),
+  ):
+    assert ev9_cluster_stop_target_state(enabled, long_active, star_valid, long_valid,
+                                         True, False, False, True, 18.4) == (False, 0.0)
+
+
+def test_stop_target_requires_committed_stop_scene_and_clamps_distance():
+  assert ev9_cluster_stop_target_state(True, True, True, True, False, False, True, False, 20.0) == (False, 0.0)
+  assert ev9_cluster_stop_target_state(True, True, True, True, False, False, True, True, 0.0) == (True, 0.1)
+  assert ev9_cluster_stop_target_state(True, True, True, True, False, True, False, False, 500.0) == (True, 204.7)
+  assert ev9_cluster_stop_target_state(True, True, True, True, True, False, False, False, math.nan) == (False, 0.0)
 
 
 def test_distinct_radar_alternate_remains_suppressed():

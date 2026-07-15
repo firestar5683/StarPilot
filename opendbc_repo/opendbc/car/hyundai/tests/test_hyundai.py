@@ -1875,6 +1875,31 @@ class TestHyundaiFingerprint:
     assert parser.vl["CCNC_0x161"]["LANELINE_CURVATURE"] == 0
     assert (int.from_bytes(msg_161.dat, "little") >> 100) & 0x1F == 17
 
+  @pytest.mark.parametrize(("stop_target_active", "stop_target_distance", "enabled", "expected"), [
+    (True, 18.4, True, 18.4),
+    (True, 0.0, True, 0.1),
+    (False, 18.4, True, 32.5),
+    (True, 18.4, False, 204.6),
+  ])
+  def test_ev9_ccnc_planner_stop_target_override(self, stop_target_active, stop_target_distance, enabled, expected):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.KIA_EV9
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.CANFD_LKA_STEERING)
+    packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
+    can_bus = CanBus(CP)
+    parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("CCNC_0x161", 0)], can_bus.ECAN)
+
+    msgs = hyundaicanfd.create_ev9_ccnc_status_messages(
+      packer, can_bus, 5, enabled=enabled, lat_active=enabled,
+      hud=SimpleNamespace(leadDistanceBars=3),
+      out=SimpleNamespace(vCruiseCluster=65.0, vEgo=20.0),
+      main_cruise_enabled=True, lead_visible=False, lead_distance=0.0,
+      stop_target_active=stop_target_active,
+      stop_target_distance=stop_target_distance,
+    )
+    parser.update([(1, msgs)])
+    assert parser.vl["CCNC_0x161"]["TARGET_DISTANCE"] == pytest.approx(expected)
+
   def test_ev9_ccnc_rear_bsm_fallback_is_side_specific_and_feature_gated(self):
     CP = CarParams.new_message()
     CP.carFingerprint = CAR.KIA_EV9

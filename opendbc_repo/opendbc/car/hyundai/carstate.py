@@ -174,6 +174,8 @@ class CarState(CarStateBase):
     self.stock_camera_lead_rel_speed = 0.0
     self.stock_camera_lead_ts = 0
     self.ev9_cluster_speed_limit_raw = 0
+    self.ev9_cluster_stop_target_active = False
+    self.ev9_cluster_stop_target_distance = 0.0
     self.openpilot_lead_visible = False
     self.openpilot_lead_distance = 0.0
     self.openpilot_lead_rel_speed = 0.0

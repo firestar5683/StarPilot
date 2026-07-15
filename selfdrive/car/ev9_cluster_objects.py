@@ -24,6 +24,25 @@ def ev9_cluster_display_context_valid(radar_valid: bool, main_enabled: bool, dri
   return bool(radar_valid and main_enabled and drive_gear)
 
 
+def ev9_cluster_stop_target_state(feature_enabled: bool, long_active: bool,
+                                  starpilot_plan_valid: bool, longitudinal_plan_valid: bool,
+                                  forcing_stop: bool, stop_sign_confirmed: bool,
+                                  red_light: bool, should_stop: bool,
+                                  stop_distance: float) -> tuple[bool, float]:
+  """Select a truthful planner stop marker for the EV9 cluster.
+
+  A red-light classification alone is not a braking commitment. The target is
+  shown only while openpilot longitudinal is active and the planners agree on
+  a committed stop scene. Invalid or stale planner data fails back to the
+  stock captured time-headway marker in the CAN encoder.
+  """
+  stop_scene = bool(forcing_stop or stop_sign_confirmed or (red_light and should_stop))
+  valid = bool(feature_enabled and long_active and starpilot_plan_valid and longitudinal_plan_valid and stop_scene)
+  if not valid or not math.isfinite(float(stop_distance)):
+    return False, 0.0
+  return True, min(max(float(stop_distance), MIN_OBJECT_DISTANCE), 204.7)
+
+
 @dataclass(frozen=True)
 class ClusterObject:
   track_id: int

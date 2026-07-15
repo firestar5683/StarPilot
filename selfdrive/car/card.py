@@ -20,6 +20,7 @@ from opendbc.car.fw_versions import ObdCallback
 from opendbc.car.car_helpers import get_car, interfaces
 from opendbc.car.hyundai.ev9_longitudinal import EV9_SOFTWARE_BSM_COMMA_OUTPUT_PARAM, EV9_SOFTWARE_BSM_PARAM, \
                                                    EV9_SOFTWARE_BSM_VEHICLE_OUTPUT_PARAM, EV9LongitudinalTestStage, \
+                                                   EV9_CLUSTER_PLANNER_STOP_TARGET_PARAM, \
                                                    ev9_cluster_display_speed_limit_raw, \
                                                    get_ev9_longitudinal_test_config
 from opendbc.car.hyundai.interface import attempt_ev9_pre_fingerprint_suppression
@@ -31,7 +32,7 @@ from openpilot.selfdrive.car.cruise import VCruiseHelper, IMPERIAL_INCREMENT, V_
 from openpilot.selfdrive.car.redneck_cruise import RedneckCruise, select_redneck_target_speed
 from openpilot.selfdrive.car.car_specific import MockCarState
 from openpilot.selfdrive.car.ev9_cluster_objects import ClusterObjectSlots, Ev9ClusterObjectTracker, bsm_gated_side_slots, default_enabled_param, \
-                                                         ev9_cluster_display_context_valid, filtered_radar_slots, \
+                                                         ev9_cluster_display_context_valid, ev9_cluster_stop_target_state, filtered_radar_slots, \
                                                          validate_cluster_slots_for_output
 from openpilot.selfdrive.car.ev9_software_bsm import RAW_BASE_MASK, RAW_LEFT_MASK, RAW_RIGHT_MASK, Ev9SoftwareBsmDetector, \
                                                        select_ev9_software_bsm_outputs
@@ -111,6 +112,7 @@ class Car:
     self.ev9_cluster_alternate_enabled = self.params.get_bool("KiaEv9ClusterAlternateLeadEnabled")
     self.ev9_cluster_smoothing_enabled = self.params.get_bool("KiaEv9ClusterObjectSmoothingEnabled")
     self.ev9_cluster_map_speed_limit_fallback_enabled = self.params.get_bool("KiaEv9ClusterMapSpeedLimitFallbackEnabled")
+    self.ev9_cluster_planner_stop_target_enabled = default_enabled_param(self.params, EV9_CLUSTER_PLANNER_STOP_TARGET_PARAM)
     self.ev9_radar_quality_filter_enabled = default_enabled_param(self.params, "KiaEv9RadarQualityFilterEnabled")
     self.ev9_cluster_fused_primary_required = default_enabled_param(self.params, "KiaEv9ClusterFusedPrimaryRequired")
     self.ev9_cluster_side_objects_require_bsm = self.params.get_bool("KiaEv9ClusterSideObjectsRequireBsmEnabled")
@@ -586,6 +588,7 @@ class Car:
       now_nanos = self.can_log_mono_time if REPLAY else int(time.monotonic() * 1e9)
       self._update_redneck_cruise(CS, CC)
       self._update_openpilot_lead_state(CC)
+      self._update_ev9_cluster_stop_target_state(CC)
       self.last_actuators_output, can_sends = self.CI.apply(CC, now_nanos, self.starpilot_toggles)
       self.pm.send('sendcan', can_list_to_can_capnp(can_sends, msgtype='sendcan', valid=CS.canValid))
 
@@ -708,6 +711,29 @@ class Car:
     self.CI.CS.openpilot_radar_valid = radar_valid
     self.CI.CS.panda_faulted = not self.sm.seen['pandaStates'] or any(len(p.faults) > 0 for p in self.sm['pandaStates'])
 
+  def _update_ev9_cluster_stop_target_state(self, CC: car.CarControl) -> None:
+    if str(self.CP.carFingerprint) != "KIA_EV9":
+      return
+
+    starpilot_plan_valid = self.sm.seen['starpilotPlan'] and self.sm.alive['starpilotPlan'] and self.sm.valid['starpilotPlan']
+    longitudinal_plan_valid = self.sm.seen['longitudinalPlan'] and self.sm.alive['longitudinalPlan'] and \
+      self.sm.valid['longitudinalPlan']
+    starpilot_plan = self.sm['starpilotPlan']
+    longitudinal_plan = self.sm['longitudinalPlan']
+    active, distance = ev9_cluster_stop_target_state(
+      self.ev9_cluster_planner_stop_target_enabled,
+      bool(CC.longActive),
+      starpilot_plan_valid,
+      longitudinal_plan_valid,
+      bool(starpilot_plan.forcingStop),
+      bool(starpilot_plan.stopSignConfirmed),
+      bool(starpilot_plan.redLight),
+      bool(longitudinal_plan.shouldStop),
+      float(starpilot_plan.forcingStopLength),
+    )
+    self.CI.CS.ev9_cluster_stop_target_active = active
+    self.CI.CS.ev9_cluster_stop_target_distance = distance
+
   def _update_redneck_cruise(self, CS: car.CarState, CC: car.CarControl) -> None:
     if self.redneck_cruise is None:
       return
@@ -782,6 +808,9 @@ class Car:
       self.ev9_cluster_alternate_enabled = self.params.get_bool("KiaEv9ClusterAlternateLeadEnabled")
       self.ev9_cluster_smoothing_enabled = self.params.get_bool("KiaEv9ClusterObjectSmoothingEnabled")
       self.ev9_cluster_map_speed_limit_fallback_enabled = self.params.get_bool("KiaEv9ClusterMapSpeedLimitFallbackEnabled")
+      self.ev9_cluster_planner_stop_target_enabled = default_enabled_param(
+        self.params, EV9_CLUSTER_PLANNER_STOP_TARGET_PARAM,
+      )
       self.ev9_radar_quality_filter_enabled = default_enabled_param(self.params, "KiaEv9RadarQualityFilterEnabled")
       self.ev9_cluster_fused_primary_required = default_enabled_param(self.params, "KiaEv9ClusterFusedPrimaryRequired")
       self.ev9_cluster_side_objects_require_bsm = self.params.get_bool("KiaEv9ClusterSideObjectsRequireBsmEnabled")
