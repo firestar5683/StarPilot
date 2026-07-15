@@ -3,7 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
-from openpilot.selfdrive.car.ev9_software_bsm import EV9_SOFTWARE_BSM_PROFILE_V1, Ev9SoftwareBsmDetector, \
+from openpilot.selfdrive.car.ev9_software_bsm import EV9_SOFTWARE_BSM_EPISODE_PROFILE_V1, EV9_SOFTWARE_BSM_PROFILE_V1, \
+                                                       Ev9SoftwareBsmDetector, \
                                                        select_ev9_software_bsm_outputs
 
 
@@ -139,6 +140,46 @@ def test_profile_controls_acquisition_and_hold_counts():
   assert second_hold.detected
   assert second_hold.diagnostics.hold_samples == 0
   assert not update(detector).right.detected
+
+
+def test_episode_shadow_profile_uses_left_raw_or_track_and_right_raw():
+  left_raw = update(Ev9SoftwareBsmDetector(EV9_SOFTWARE_BSM_EPISODE_PROFILE_V1), raw_left=True).left
+  assert left_raw.detected
+  assert left_raw.diagnostics.profile_version == "ev9-episode-recall-shadow-v1"
+
+  left_track = update(
+    Ev9SoftwareBsmDetector(EV9_SOFTWARE_BSM_EPISODE_PROFILE_V1),
+    radar_tracks=[track(relative_speed=-9.0)],
+  ).left
+  assert left_track.detected
+  assert not left_track.diagnostics.raw_candidate
+  assert left_track.diagnostics.track_candidate
+  assert left_track.diagnostics.reject_reason == "active"
+
+  no_right_raw = update(
+    Ev9SoftwareBsmDetector(EV9_SOFTWARE_BSM_EPISODE_PROFILE_V1),
+    radar_tracks=[track(lateral=-3.0, relative_speed=-9.0)],
+  ).right
+  assert not no_right_raw.detected
+  assert no_right_raw.diagnostics.reject_reason == "no_raw_candidate"
+
+  right_raw = update(Ev9SoftwareBsmDetector(EV9_SOFTWARE_BSM_EPISODE_PROFILE_V1), raw_right=True).right
+  assert right_raw.detected
+
+
+def test_episode_shadow_profile_has_independent_side_holds():
+  profile = replace(EV9_SOFTWARE_BSM_EPISODE_PROFILE_V1, left_hold_samples=3, right_hold_samples=2)
+  detector = Ev9SoftwareBsmDetector(profile)
+  active = update(detector, raw_left=True, raw_right=True)
+  assert active.left.detected and active.right.detected
+
+  assert update(detector).left.detected
+  assert update(detector).left.detected
+  third_hold = update(detector)
+  assert third_hold.left.detected
+  assert not third_hold.right.detected
+  cleared = update(detector)
+  assert not cleared.left.detected
 
 
 def test_left_requires_qualified_measured_moving_track():

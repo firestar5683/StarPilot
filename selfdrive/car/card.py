@@ -34,8 +34,8 @@ from openpilot.selfdrive.car.car_specific import MockCarState
 from openpilot.selfdrive.car.ev9_cluster_objects import ClusterObjectSlots, Ev9ClusterObjectTracker, bsm_gated_side_slots, default_enabled_param, \
                                                          ev9_cluster_display_context_valid, ev9_cluster_stop_target_state, filtered_radar_slots, \
                                                          validate_cluster_slots_for_output
-from openpilot.selfdrive.car.ev9_software_bsm import RAW_BASE_MASK, RAW_LEFT_MASK, RAW_RIGHT_MASK, Ev9SoftwareBsmDetector, \
-                                                       select_ev9_software_bsm_outputs
+from openpilot.selfdrive.car.ev9_software_bsm import EV9_SOFTWARE_BSM_EPISODE_PROFILE_V1, RAW_BASE_MASK, RAW_LEFT_MASK, RAW_RIGHT_MASK, \
+                                                       Ev9SoftwareBsmDetector, select_ev9_software_bsm_outputs
 
 from openpilot.starpilot.common.starpilot_variables import get_starpilot_toggles, update_starpilot_toggles
 from openpilot.starpilot.controls.starpilot_card import StarPilotCard
@@ -126,8 +126,11 @@ class Car:
     self.ev9_software_bsm_comma_output_enabled = self.params.get_bool(EV9_SOFTWARE_BSM_COMMA_OUTPUT_PARAM)
     self.ev9_software_bsm_vehicle_output_enabled = self.params.get_bool(EV9_SOFTWARE_BSM_VEHICLE_OUTPUT_PARAM)
     self.ev9_software_bsm_detector = Ev9SoftwareBsmDetector()
+    self.ev9_software_bsm_episode_detector = Ev9SoftwareBsmDetector(EV9_SOFTWARE_BSM_EPISODE_PROFILE_V1)
     self.ev9_software_bsm_last_state = (False, False, False, False)
+    self.ev9_software_bsm_episode_last_state = (False, False, False, False)
     self.ev9_software_bsm_last_log_time = 0.0
+    self.ev9_software_bsm_episode_last_log_time = 0.0
     self.ev9_software_bsm_last_radar_time = 0.0
 
     self.can_callbacks = can_comm_callbacks(self.can_sock, self.pm.sock['sendcan'])
@@ -382,13 +385,18 @@ class Car:
         qualified_tracks = [point for point in RD.points if int(getattr(point, "trackId", -1)) in qualified_track_ids]
         raw_state = int(getattr(self.CI.CS, "ev9_raw_blindspot_state", 0))
         raw_base_valid = bool(raw_state & RAW_BASE_MASK)
+        raw_left = raw_base_valid and bool(raw_state & RAW_LEFT_MASK)
+        raw_right = raw_base_valid and bool(raw_state & RAW_RIGHT_MASK)
+        raw_fresh = bool(getattr(self.CI.CS, "ev9_raw_blindspot_fresh", False))
+        drive = CS.gearShifter == structs.CarState.GearShifter.drive
+        reverse = CS.gearShifter == structs.CarState.GearShifter.reverse
         if self.ev9_software_bsm_enabled:
           software_bsm = self.ev9_software_bsm_detector.update(
-            raw_left=raw_base_valid and bool(raw_state & RAW_LEFT_MASK),
-            raw_right=raw_base_valid and bool(raw_state & RAW_RIGHT_MASK),
-            fresh=bool(getattr(self.CI.CS, "ev9_raw_blindspot_fresh", False)),
-            drive=CS.gearShifter == structs.CarState.GearShifter.drive,
-            reverse=CS.gearShifter == structs.CarState.GearShifter.reverse,
+            raw_left=raw_left,
+            raw_right=raw_right,
+            fresh=raw_fresh,
+            drive=drive,
+            reverse=reverse,
             v_ego=float(CS.vEgo),
             steering_angle_deg=float(CS.steeringAngleDeg),
             left_blinker=bool(CS.leftBlinker),
@@ -396,9 +404,24 @@ class Car:
             hazard=bool(CS.leftBlinker and CS.rightBlinker),
             radar_tracks=qualified_tracks,
           )
+          episode_bsm = self.ev9_software_bsm_episode_detector.update(
+            raw_left=raw_left,
+            raw_right=raw_right,
+            fresh=raw_fresh,
+            drive=drive,
+            reverse=reverse,
+            v_ego=float(CS.vEgo),
+            steering_angle_deg=float(CS.steeringAngleDeg),
+            radar_tracks=list(RD.points),
+          )
         else:
           self.ev9_software_bsm_detector.reset()
+          self.ev9_software_bsm_episode_detector.reset()
           software_bsm = self.ev9_software_bsm_detector.update(
+            raw_left=False, raw_right=False, fresh=False, drive=False,
+            v_ego=0.0, steering_angle_deg=0.0,
+          )
+          episode_bsm = self.ev9_software_bsm_episode_detector.update(
             raw_left=False, raw_right=False, fresh=False, drive=False,
             v_ego=0.0, steering_angle_deg=0.0,
           )
@@ -419,6 +442,17 @@ class Car:
           setattr(self.CI.CS, f"ev9_software_bsm_{side_name}_candidate", diagnostics.candidate)
           setattr(self.CI.CS, f"ev9_software_bsm_{side_name}_reject_reason", diagnostics.reject_reason)
           setattr(self.CI.CS, f"ev9_software_bsm_{side_name}_profile_version", diagnostics.profile_version)
+        for side_name, side_result in (("left", episode_bsm.left), ("right", episode_bsm.right)):
+          diagnostics = side_result.diagnostics
+          setattr(self.CI.CS, f"ev9_episode_bsm_{side_name}", side_result.detected)
+          setattr(self.CI.CS, f"ev9_episode_bsm_{side_name}_source", side_result.source)
+          setattr(self.CI.CS, f"ev9_episode_bsm_{side_name}_score", diagnostics.score)
+          setattr(self.CI.CS, f"ev9_episode_bsm_{side_name}_raw_candidate", diagnostics.raw_candidate)
+          setattr(self.CI.CS, f"ev9_episode_bsm_{side_name}_track_candidate", diagnostics.track_candidate)
+          setattr(self.CI.CS, f"ev9_episode_bsm_{side_name}_candidate", diagnostics.candidate)
+          setattr(self.CI.CS, f"ev9_episode_bsm_{side_name}_reject_reason", diagnostics.reject_reason)
+          setattr(self.CI.CS, f"ev9_episode_bsm_{side_name}_hold_samples", diagnostics.hold_samples)
+          setattr(self.CI.CS, f"ev9_episode_bsm_{side_name}_profile_version", diagnostics.profile_version)
 
         native_fresh = bool(getattr(self.CI.CS, "ev9_stock_blindspot_fresh", False) and
                             getattr(self.CI.CS, "ev9_blindspot_source", "neutral") == "stock")
@@ -461,6 +495,22 @@ class Car:
             self.ev9_software_bsm_last_log_time = now
           self.ev9_software_bsm_last_state = detector_state
 
+        episode_state = (episode_bsm.left.detected, episode_bsm.right.detected,
+                         episode_bsm.left.diagnostics.candidate, episode_bsm.right.diagnostics.candidate,
+                         episode_bsm.left.diagnostics.reject_reason, episode_bsm.right.diagnostics.reject_reason)
+        if episode_state != self.ev9_software_bsm_episode_last_state:
+          now = time.monotonic()
+          if now - self.ev9_software_bsm_episode_last_log_time >= 1.0:
+            left_episode = f"{episode_bsm.left.source},score={episode_bsm.left.diagnostics.score:.2f},"
+            left_episode += f"hold={episode_bsm.left.diagnostics.hold_samples},reject={episode_bsm.left.diagnostics.reject_reason}"
+            right_episode = f"{episode_bsm.right.source},score={episode_bsm.right.diagnostics.score:.2f},"
+            right_episode += f"hold={episode_bsm.right.diagnostics.hold_samples},reject={episode_bsm.right.diagnostics.reject_reason}"
+            episode_message = f"EV9 BSM episode-recall shadow left={episode_bsm.left.detected} ({left_episode}) "
+            episode_message += f"right={episode_bsm.right.detected} ({right_episode})"
+            cloudlog.info(episode_message)
+            self.ev9_software_bsm_episode_last_log_time = now
+          self.ev9_software_bsm_episode_last_state = episode_state
+
       elif not self.ev9_software_bsm_enabled or (self.ev9_software_bsm_last_radar_time > 0.0 and
                                                   time.monotonic() - self.ev9_software_bsm_last_radar_time >
                                                   EV9_SOFTWARE_BSM_RADAR_STALE_S):
@@ -468,6 +518,7 @@ class Car:
         # once the complete radar update is actually stale; clearing every CAN
         # tick would make the detector's two-sample acquisition impossible.
         self.ev9_software_bsm_detector.reset()
+        self.ev9_software_bsm_episode_detector.reset()
         self.CI.CS.ev9_software_bsm_left = False
         self.CI.CS.ev9_software_bsm_right = False
         self.CI.CS.ev9_software_bsm_left_escalated = False
@@ -483,6 +534,15 @@ class Car:
           setattr(self.CI.CS, f"ev9_software_bsm_{side_name}_candidate", False)
           setattr(self.CI.CS, f"ev9_software_bsm_{side_name}_reject_reason", "stale_radar")
           setattr(self.CI.CS, f"ev9_software_bsm_{side_name}_profile_version", "")
+          setattr(self.CI.CS, f"ev9_episode_bsm_{side_name}", False)
+          setattr(self.CI.CS, f"ev9_episode_bsm_{side_name}_source", "neutral")
+          setattr(self.CI.CS, f"ev9_episode_bsm_{side_name}_score", 0.0)
+          setattr(self.CI.CS, f"ev9_episode_bsm_{side_name}_raw_candidate", False)
+          setattr(self.CI.CS, f"ev9_episode_bsm_{side_name}_track_candidate", False)
+          setattr(self.CI.CS, f"ev9_episode_bsm_{side_name}_candidate", False)
+          setattr(self.CI.CS, f"ev9_episode_bsm_{side_name}_reject_reason", "stale_radar")
+          setattr(self.CI.CS, f"ev9_episode_bsm_{side_name}_hold_samples", 0)
+          setattr(self.CI.CS, f"ev9_episode_bsm_{side_name}_profile_version", "")
         self.CI.CS.ev9_vehicle_bsm_left = False
         self.CI.CS.ev9_vehicle_bsm_right = False
         self.CI.CS.ev9_vehicle_bsm_left_escalated = False

@@ -21,10 +21,14 @@ class Ev9SoftwareBsmProfile:
   update_hz: int = 20
   acquire_samples: int = 2
   hold_samples: int = 4
+  left_hold_samples: int | None = None
+  right_hold_samples: int | None = None
   ego_acquire_speed: float = 40.0 * KPH_TO_MS
   ego_reset_speed: float = 20.0 * KPH_TO_MS
   target_min_abs_speed: float = 10.0 * KPH_TO_MS
   max_steering_angle_deg: float = 10.0
+  track_ego_min_speed: float = 0.0
+  track_max_steering_angle_deg: float = math.inf
   track_min_distance: float = 0.0
   track_max_distance: float = 50.0
   left_track_min_lateral: float = 2.5
@@ -33,6 +37,8 @@ class Ev9SoftwareBsmProfile:
   right_track_max_lateral: float = -2.5
   left_track_required: bool = True
   right_track_required: bool = False
+  left_raw_required: bool = True
+  right_raw_required: bool = True
   left_raw_score: float = 0.34
   right_raw_score: float = 0.54
   left_track_score: float = 0.34
@@ -42,6 +48,26 @@ class Ev9SoftwareBsmProfile:
 
 
 EV9_SOFTWARE_BSM_PROFILE_V1 = Ev9SoftwareBsmProfile()
+
+# Experimental second shadow only. This deliberately favors touching every
+# stock warning episode over matching the native lamp frame-by-frame. It is
+# never selected by any comma, vehicle, mirror, sound, or haptic output gate.
+EV9_SOFTWARE_BSM_EPISODE_PROFILE_V1 = Ev9SoftwareBsmProfile(
+  version="ev9-episode-recall-shadow-v1",
+  acquire_samples=1,
+  left_hold_samples=30 * 20,
+  right_hold_samples=25 * 20,
+  ego_acquire_speed=0.0,
+  ego_reset_speed=0.0,
+  max_steering_angle_deg=math.inf,
+  track_ego_min_speed=40.0 * KPH_TO_MS,
+  track_max_steering_angle_deg=10.0,
+  left_track_required=False,
+  left_raw_required=False,
+  left_raw_score=0.5,
+  left_track_score=0.5,
+  left_candidate_score=0.5,
+)
 
 
 @dataclass(frozen=True)
@@ -188,12 +214,12 @@ class Ev9SoftwareBsmDetector:
     return (any(self._qualified_track(track, v_ego, True) for track in tracks),
             any(self._qualified_track(track, v_ego, False) for track in tracks))
 
-  def _update_side(self, state: _SideState, candidate: bool, acquire_allowed: bool) -> bool:
+  def _update_side(self, state: _SideState, candidate: bool, acquire_allowed: bool, hold_samples: int) -> bool:
     if candidate and (acquire_allowed or state.detected):
       state.acquire_samples += 1
       if state.detected or state.acquire_samples >= self.profile.acquire_samples:
         state.detected = True
-        state.hold_samples = self.profile.hold_samples
+        state.hold_samples = hold_samples
       return state.detected
 
     state.acquire_samples = 0
@@ -209,6 +235,10 @@ class Ev9SoftwareBsmDetector:
     self._left.reset()
     self._right.reset()
 
+  def _hold_samples(self, left: bool) -> int:
+    side_override = self.profile.left_hold_samples if left else self.profile.right_hold_samples
+    return self.profile.hold_samples if side_override is None else side_override
+
   def _diagnostics(self, state: _SideState, *, raw: bool, track: bool, left: bool,
                    candidate: bool, score: float, context_reject_reason: str | None,
                    acquire_allowed: bool) -> Ev9SoftwareBsmSideDiagnostics:
@@ -216,10 +246,12 @@ class Ev9SoftwareBsmDetector:
       reject_reason = context_reject_reason
     elif state.detected and not candidate:
       reject_reason = "holding"
-    elif not raw:
+    elif (self.profile.left_raw_required if left else self.profile.right_raw_required) and not raw:
       reject_reason = "no_raw_candidate"
     elif (self.profile.left_track_required if left else self.profile.right_track_required) and not track:
       reject_reason = "track_required"
+    elif not raw and not track:
+      reject_reason = "no_evidence"
     elif not candidate:
       reject_reason = "below_score_threshold"
     elif not acquire_allowed and not state.detected:
@@ -277,21 +309,26 @@ class Ev9SoftwareBsmDetector:
 
     tracks = radar_tracks or ()
     left_track, right_track = self._track_sides(tracks, v_ego)
+    if v_ego < self.profile.track_ego_min_speed or abs(steering_angle_deg) >= self.profile.track_max_steering_angle_deg:
+      left_track = right_track = False
     acquire_allowed = v_ego >= self.profile.ego_acquire_speed
 
     left_score = min(1.0, (self.profile.left_raw_score if raw_left else 0.0) +
                      (self.profile.left_track_score if left_track else 0.0))
     right_score = min(1.0, (self.profile.right_raw_score if raw_right else 0.0) +
                       (self.profile.right_track_score if right_track else 0.0))
-    left_candidate = bool(raw_left and (left_track or not self.profile.left_track_required) and
+    left_candidate = bool((raw_left or not self.profile.left_raw_required) and
+                          (left_track or not self.profile.left_track_required) and
                           left_score >= self.profile.left_candidate_score)
-    right_candidate = bool(raw_right and (right_track or not self.profile.right_track_required) and
+    right_candidate = bool((raw_right or not self.profile.right_raw_required) and
+                           (right_track or not self.profile.right_track_required) and
                            right_score >= self.profile.right_candidate_score)
 
-    # The left raw bit alone produced repeated false positives in a route with
-    # no native left warning. Keep its empirical measured-track gate mandatory.
-    left_detected = self._update_side(self._left, left_candidate, acquire_allowed)
-    right_detected = self._update_side(self._right, right_candidate, acquire_allowed)
+    # The default profile keeps the empirical left measured-track gate that
+    # removed repeated raw-bit ghosts. Experimental profiles may deliberately
+    # choose a different evidence policy while remaining shadow-only.
+    left_detected = self._update_side(self._left, left_candidate, acquire_allowed, self._hold_samples(True))
+    right_detected = self._update_side(self._right, right_candidate, acquire_allowed, self._hold_samples(False))
 
     left_diagnostics = self._diagnostics(self._left, raw=bool(raw_left), track=left_track, left=True,
                                          candidate=left_candidate, score=left_score,
@@ -305,11 +342,13 @@ class Ev9SoftwareBsmDetector:
     left_escalated = bool(left_detected and left_blinker and escalation_allowed)
     right_escalated = bool(right_detected and right_blinker and escalation_allowed)
 
-    left = Ev9SoftwareBsmSideResult(left_detected, left_escalated,
-                                    "raw36a_left+measured_track" if left_detected else "neutral",
+    left_source = "raw36a_left+measured_track" if left_detected and raw_left and left_track else \
+      "raw36a_left" if left_detected and raw_left else "measured_track_left" if left_detected and left_track else \
+      "held" if left_detected else "neutral"
+    left = Ev9SoftwareBsmSideResult(left_detected, left_escalated, left_source,
                                     self.LEFT_CONFIDENCE if left_detected else 0.0, left_diagnostics)
     right_source = "raw36a_right+measured_track" if right_detected and right_track else \
-      "raw36a_right" if right_detected else "neutral"
+      "raw36a_right" if right_detected and raw_right else "held" if right_detected else "neutral"
     right_confidence = self.RIGHT_TRACK_CONFIDENCE if right_detected and right_track else \
       self.RIGHT_CONFIDENCE if right_detected else 0.0
     right = Ev9SoftwareBsmSideResult(right_detected, right_escalated, right_source, right_confidence,
