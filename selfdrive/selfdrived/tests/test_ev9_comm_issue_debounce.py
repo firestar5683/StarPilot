@@ -2,7 +2,7 @@ import ast
 from pathlib import Path
 
 
-DEBOUNCE_FRAMES = 100
+DEBOUNCE_FRAMES = 200
 
 
 def load_helpers():
@@ -29,15 +29,15 @@ def test_feature_defaults_on_when_param_is_missing():
   assert not feature_enabled(b"0")
 
 
-def test_ev9_invalid_only_requires_one_second():
+def test_ev9_invalid_only_requires_full_debounce_window():
   frames = 0
   for _ in range(DEBOUNCE_FRAMES - 1):
     frames, add_event = update_debounce(True, True, True, True, False, frames)
     assert not add_event
 
-  assert frames == 99
+  assert frames == DEBOUNCE_FRAMES - 1
   frames, add_event = update_debounce(True, True, True, True, False, frames)
-  assert frames == 100
+  assert frames == DEBOUNCE_FRAMES
   assert add_event
 
 
