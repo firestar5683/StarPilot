@@ -68,6 +68,12 @@ hindsight on each holdout, so the result is an upper bound rather than a deploya
 `00000015`, the best left result was only P=.227, R=.762, F1=.350. The other left holdouts were F1=.282 and
 F1=.229. No holdout met 95% precision and 95% recall.
 
+Forcing 100% frame recall makes the estimator nearly always-on. Optimistic holdout precision at 100% recall was
+12.9%, 11.0%, and 7.3% on the three left-positive routes. Right precision was 2.1%, 74.0%, and 6.6%; the 74.0%
+result is a single 5.7-second event in `000000d5` and does not transfer to either longer right-positive route.
+Without the continuous model, an always-on 100%-recall baseline has only 5.9% pooled left precision and 2.7%
+pooled right precision.
+
 ## Engineering conclusion
 
 With the present bus access, a software estimator can provide low-confidence, usually late side-object evidence;

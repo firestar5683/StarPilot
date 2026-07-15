@@ -232,12 +232,14 @@ def summarize(y: np.ndarray, scores: np.ndarray) -> dict[str, float]:
   f1 = 2 * precision * recall / np.maximum(precision + recall, 1e-12)
   best = int(np.nanargmax(f1))
   recall95 = recall >= 0.95
+  recall100 = recall >= 1.0 - 1e-12
   precision95 = precision >= 0.95
   result = {
     "best_f1": float(f1[best]), "best_precision": float(precision[best]),
     "best_recall": float(recall[best]),
     "threshold": float(thresholds[min(best, len(thresholds) - 1)]) if len(thresholds) else 1.0,
     "best_precision_at_recall95": float(np.max(precision[recall95])) if np.any(recall95) else 0.0,
+    "best_precision_at_recall100": float(np.max(precision[recall100])) if np.any(recall100) else 0.0,
     "best_recall_at_precision95": float(np.max(recall[precision95])) if np.any(precision95) else 0.0,
   }
   result["meets_95_95"] = bool(np.any(recall95 & (precision >= 0.95)))
@@ -286,10 +288,12 @@ def main() -> None:
       reports = {name: summarize(y_all[test], score) for name, score in variants.items()}
       best_name = max(reports, key=lambda name: reports[name]["best_f1"])
       best = reports[best_name]
-      print(f"hold route {int(holdout)} positives={int(y_all[test].sum())} "
-            f"best={best_name}: F1={best['best_f1']:.3f}, P={best['best_precision']:.3f}, "
-            f"R={best['best_recall']:.3f}, P@R>=.95={best['best_precision_at_recall95']:.3f}, "
-            f"R@P>=.95={best['best_recall_at_precision95']:.3f}, meets95={best['meets_95_95']}")
+      report = f"hold route {int(holdout)} positives={int(y_all[test].sum())} "
+      report += f"best={best_name}: F1={best['best_f1']:.3f}, P={best['best_precision']:.3f}, "
+      report += f"R={best['best_recall']:.3f}, P@R>=.95={best['best_precision_at_recall95']:.3f}, "
+      report += f"P@R=1={best['best_precision_at_recall100']:.3f}, "
+      report += f"R@P>=.95={best['best_recall_at_precision95']:.3f}, meets95={best['meets_95_95']}"
+      print(report)
 
 
 if __name__ == "__main__":
