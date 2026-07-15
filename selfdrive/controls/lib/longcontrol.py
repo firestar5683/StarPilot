@@ -93,7 +93,8 @@ def long_control_state_trans(CP, active, long_control_state, v_ego,
   # Once the planner has sustained a release request, allow LongControl to leave stopping
   # even if the standstill bit has not dropped yet.
   stopping_release_condition = release_condition and allow_stopping_release
-  started_condition = v_ego > starpilot_toggles.vEgoStarting
+  v_ego_starting = CP.vEgoStarting if CP.carFingerprint == "KIA_EV9" else starpilot_toggles.vEgoStarting
+  started_condition = v_ego > v_ego_starting
 
   if not active:
     long_control_state = LongCtrlState.off
@@ -135,7 +136,8 @@ def long_control_state_trans_old_long(CP, active, long_control_state, v_ego, v_t
                         accelerating and
                         not cruise_standstill and
                         not brake_pressed)
-  started_condition = v_ego > starpilot_toggles.vEgoStarting
+  v_ego_starting = CP.vEgoStarting if CP.carFingerprint == "KIA_EV9" else starpilot_toggles.vEgoStarting
+  started_condition = v_ego > v_ego_starting
 
   if not active:
     long_control_state = LongCtrlState.off
@@ -419,12 +421,13 @@ class LongControl:
       self.reset(preserve_stop_release=True)
 
     elif self.long_control_state == LongCtrlState.starting:
+      start_accel = self.CP.startAccel if self.CP.carFingerprint == "KIA_EV9" else starpilot_toggles.startAccel
       if starpilot_toggles.human_acceleration:
         output_accel = a_target
       elif getattr(starpilot_toggles, "custom_accel_profile", False):
-        output_accel = clip(a_target, 0.0, starpilot_toggles.startAccel)
+        output_accel = clip(a_target, 0.0, start_accel)
       else:
-        output_accel = starpilot_toggles.startAccel
+        output_accel = start_accel
       self.reset()
 
     else:  # LongCtrlState.pid
@@ -502,10 +505,11 @@ class LongControl:
       self.reset_old_long(CS.vEgo)
 
     elif self.long_control_state == LongCtrlState.starting:
+      start_accel = self.CP.startAccel if self.CP.carFingerprint == "KIA_EV9" else starpilot_toggles.startAccel
       if getattr(starpilot_toggles, "custom_accel_profile", False):
-        output_accel = clip(a_target, 0.0, starpilot_toggles.startAccel)
+        output_accel = clip(a_target, 0.0, start_accel)
       else:
-        output_accel = starpilot_toggles.startAccel
+        output_accel = start_accel
       self.reset_old_long(CS.vEgo)
 
     elif self.long_control_state == LongCtrlState.pid:

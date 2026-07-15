@@ -146,6 +146,33 @@ def test_starting_accel_unchanged_when_custom_profile_disabled():
   assert output_accel == 1.5
 
 
+def test_ev9_starting_uses_vehicle_specific_accel_and_speed():
+  CP = car.CarParams.new_message(startingState=True, vEgoStarting=0.5, startAccel=0.2)
+  CP.carFingerprint = "KIA_EV9"
+  CP.longitudinalTuning.kpBP = [0.0]
+  CP.longitudinalTuning.kpV = [0.1]
+  CP.longitudinalTuning.kiBP = [0.0]
+  CP.longitudinalTuning.kiV = [0.03]
+
+  lc = LongControl(CP)
+  CS = car.CarState.new_message(vEgo=0.0, aEgo=0.0, brakePressed=False)
+  CS.cruiseState.standstill = False
+  toggles = make_toggles(startAccel=1.0, vEgoStarting=0.1)
+
+  output_accel = lc.update(True, CS, 1.0, False, (-3.0, 2.0), toggles)
+  assert lc.long_control_state == LongCtrlState.starting
+  assert output_accel == pytest.approx(0.2)
+
+  CS.vEgo = 0.2
+  output_accel = lc.update(True, CS, 1.0, False, (-3.0, 2.0), toggles)
+  assert lc.long_control_state == LongCtrlState.starting
+  assert output_accel == pytest.approx(0.2)
+
+  CS.vEgo = 0.6
+  lc.update(True, CS, 1.0, False, (-3.0, 2.0), toggles)
+  assert lc.long_control_state == LongCtrlState.pid
+
+
 def test_starting_accel_obeys_a_target_cap_when_custom_profile_enabled():
   CP = car.CarParams.new_message(startingState=True, vEgoStarting=0.5)
   CP.longitudinalTuning.kpBP = [0.0]
