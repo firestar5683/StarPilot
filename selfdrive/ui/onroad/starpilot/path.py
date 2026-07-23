@@ -68,6 +68,10 @@ def render_adjacent_lanes(renderer) -> None:
     car_state = sm["carState"]
     blindspot_left = bool(car_state.leftBlindspot)
     blindspot_right = bool(car_state.rightBlindspot)
+    vasm_left = ui_state.params_memory.get("VASMLeftActive") == "1"
+    vasm_right = ui_state.params_memory.get("VASMRightActive") == "1"
+    blindspot_left = blindspot_left or vasm_left
+    blindspot_right = blindspot_right or vasm_right
 
   # Fetch adjacent lane widths if adjacent path is enabled
   lane_width_left = 0.0

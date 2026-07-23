@@ -3908,6 +3908,8 @@ def setup(app):
       "/assets/components/tools/device_settings.js",
       "/assets/components/tools/device_settings.css",
       "/assets/components/tools/device_settings_layout.json",
+      "/assets/components/tools/v_asm.js",
+      "/assets/components/tools/v_asm.css",
       "/assets/components/tools/toggles.js",
     }:
       response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
@@ -6297,10 +6299,10 @@ def setup(app):
     pw_hash = hashlib.sha256(password.encode()).hexdigest()
     GALAXY_DIR.mkdir(parents=True, exist_ok=True)
     GALAXY_AUTH_FILE.write_text(pw_hash)
-    
+
     # Generate 256-bit secure session token
     GALAXY_SESSION_FILE.write_text(secrets.token_hex(32))
-    
+
     # Generate 16-character alphanumeric routing slug
     charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     slug = ''.join(secrets.choice(charset) for _ in range(16))
@@ -7359,6 +7361,89 @@ def setup(app):
     update_starpilot_toggles()
     HARDWARE.reboot()
     return jsonify({"success": True, "message": "Toggles reset to default StarPilot values. Rebooting..."})
+
+  @app.route("/api/v_asm/snapshot", methods=["GET"])
+  def v_asm_snapshot():
+    # Block snapshot while driving — the annotation tool is for parked setup only
+    vasm_ts = params_memory.get("VASMTimestampEof")
+    if vasm_ts and vasm_ts not in (b"0", "0", "", None):
+      try:
+        if time.time() - float(vasm_ts) < 60.0:
+          return jsonify({"error": "Snapshot only available when parked."}), 409
+      except (ValueError, TypeError):
+        pass
+    driver_cam_names = ("dcamera.hevc", "qcamera.ts")
+    for footage_path in FOOTAGE_PATHS:
+      if not os.path.isdir(footage_path):
+        continue
+      try:
+        entries = sorted((e for e in os.listdir(footage_path) if utilities.SEGMENT_RE.fullmatch(e)), reverse=True)
+      except OSError:
+        continue
+      for entry in entries[1:3]:  # Check the last 2 segments for footage
+        seg_dir = os.path.join(footage_path, entry)
+        if not os.path.isdir(seg_dir):
+          continue
+        for cam_name in driver_cam_names:
+          cam_file = os.path.join(seg_dir, cam_name)
+          if not os.path.isfile(cam_file):
+            continue
+          try:
+            result = subprocess.run(
+              ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-i", str(cam_file), "-ss", "5", "-frames:v", "1", "-q:v", "2", "-f", "image2pipe", "-vcodec", "mjpeg", "-"],
+              capture_output=True, check=True, timeout=5, stdin=subprocess.DEVNULL,
+            )
+            return Response(result.stdout, mimetype="image/jpeg")
+          except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+            try:
+              result = subprocess.run(
+                ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-i", str(cam_file), "-ss", "2", "-frames:v", "1", "-q:v", "2", "-f", "image2pipe", "-vcodec", "mjpeg", "-"],
+                capture_output=True, check=True, timeout=5, stdin=subprocess.DEVNULL,
+              )
+              return Response(result.stdout, mimetype="image/jpeg")
+            except (subprocess.CalledProcessError, FileNotFoundError, subprocess.TimeoutExpired):
+              try:
+                result = subprocess.run(
+                  ["ffmpeg", "-hide_banner", "-loglevel", "error", "-nostdin", "-i", str(cam_file), "-frames:v", "1", "-q:v", "2", "-f", "image2pipe", "-vcodec", "mjpeg", "-"],
+                  capture_output=True, check=True, timeout=5, stdin=subprocess.DEVNULL,
+                )
+                return Response(result.stdout, mimetype="image/jpeg")
+              except Exception:
+                continue
+    return jsonify({"error": "No driver camera footage available."}), 404
+
+  @app.route("/api/v_asm/config", methods=["GET"])
+  def v_asm_get_config():
+    raw = params.get("VASMAnnotationConfig")
+    if raw:
+      try:
+        return jsonify(json.loads(raw))
+      except Exception:
+        pass
+    return jsonify({})
+
+  @app.route("/api/v_asm/config", methods=["POST"])
+  def v_asm_save_config():
+    try:
+      data = request.get_json()
+      if not data or "poly_left" not in data or "poly_right" not in data:
+        return jsonify({"error": "Missing poly_left or poly_right"}), 400
+      has_left = bool(data.get("poly_left"))
+      has_right = bool(data.get("poly_right"))
+      if not has_left and not has_right:
+        return jsonify({"error": "At least one window polygon is required"}), 400
+      params.put("VASMAnnotationConfig", data)
+      if has_left or has_right:
+        params.put_bool("VASMEnabled", True)
+      return jsonify({"success": True, "message": "Annotation config saved! V-ASM enabled."})
+    except Exception as e:
+      return jsonify({"error": str(e)}), 500
+
+  @app.route("/api/v_asm/config", methods=["DELETE"])
+  def v_asm_delete_config():
+    params.put("VASMAnnotationConfig", {})
+    params.put_bool("VASMEnabled", False)
+    return jsonify({"success": True, "message": "Annotation config cleared. V-ASM disabled."})
 
   @app.route("/mapbox-help/<path:filename>", methods=["GET"])
   def serve_mapbox_help(filename):

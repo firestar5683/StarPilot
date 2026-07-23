@@ -23,6 +23,7 @@ import { Tuning } from "/assets/components/tools/tuning.js?v=flm-workspace-9"
 import { Troubleshoot } from "/assets/components/tools/troubleshoot.js"
 import { TmuxLog } from "/assets/components/tools/tmux.js"
 import { ToggleControl } from "/assets/components/tools/toggles.js"
+import { VASMAnnotations } from "/assets/components/tools/v_asm.js"
 import { UpdateManager } from "/assets/components/tools/update_manager.js"
 
 let router, routerState
@@ -84,6 +85,7 @@ function Root() {
     createRoute("toggles", "/manage_toggles", ToggleControl),
     createRoute("updates", "/manage_updates", UpdateManager),
     createRoute("vehicle_features", "/vehicle_features", VehicleFeatures),
+    createRoute("v_asm", "/manage_v_asm", VASMAnnotations),
   ]
 
   router = createRouter({

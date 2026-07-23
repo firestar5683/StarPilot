@@ -13,6 +13,7 @@ import cv2
 import zstandard as zstd
 from cereal import log
 
+from openpilot.starpilot.common.starpilot_utilities import device_cpu_throttle_factor
 import starpilot.system.speed_limit_vision as slv
 
 if __package__ in (None, ""):
@@ -308,7 +309,7 @@ def build_runtime_context(qlogs: list[Path]) -> QlogRuntimeContext:
       if event_type == "deviceState":
         device_state = event.deviceState
         usage = list(device_state.cpuUsagePercent)
-        busy = slv.device_cpu_usage_busy(usage)
+        busy = device_cpu_throttle_factor(usage) > 1.05
         cpu_times.append(now)
         cpu_busy.append(busy)
         started_times.append(now)

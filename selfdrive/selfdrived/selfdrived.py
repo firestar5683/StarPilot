@@ -61,13 +61,13 @@ def commanded_torque_at_max_for_saturation(CP, output: float) -> bool:
   return torque_controller and abs(output) > 0.99
 
 
-def should_loud_blindspot_alert_without_lateral(CS, sm, starpilot_toggles) -> bool:
+def should_loud_blindspot_alert_without_lateral(CS, sm, starpilot_toggles, combined_left_bsm=False, combined_right_bsm=False) -> bool:
   if not (getattr(starpilot_toggles, "loud_blindspot_alert", False) and
           getattr(starpilot_toggles, "loud_blindspot_alert_when_disengaged", False)):
     return False
 
-  left_signal_blocked = bool(CS.leftBlinker and CS.leftBlindspot)
-  right_signal_blocked = bool(CS.rightBlinker and CS.rightBlindspot)
+  left_signal_blocked = bool(CS.leftBlinker and combined_left_bsm)
+  right_signal_blocked = bool(CS.rightBlinker and combined_right_bsm)
   one_blinker = bool(CS.leftBlinker) != bool(CS.rightBlinker)
   if not (one_blinker and (left_signal_blocked or right_signal_blocked)):
     return False
@@ -502,12 +502,14 @@ class SelfdriveD:
       self.events.add(EventName.excessiveActuation)
     # ******************************************************************************************
 
-    # Handle lane change
+    # Handle lane change — combine OEM BSM with VASM
     blindspot_alert_added = False
+    combined_left_bsm = CS.leftBlindspot or self.params_memory.get("VASMLeftActive") == "1"
+    combined_right_bsm = CS.rightBlindspot or self.params_memory.get("VASMRightActive") == "1"
     if self.sm['modelV2'].meta.laneChangeState == LaneChangeState.preLaneChange:
       direction = self.sm['modelV2'].meta.laneChangeDirection
-      if (CS.leftBlindspot and direction == LaneChangeDirection.left) or \
-         (CS.rightBlindspot and direction == LaneChangeDirection.right):
+      if (combined_left_bsm and direction == LaneChangeDirection.left) or \
+         (combined_right_bsm and direction == LaneChangeDirection.right):
         blindspot_alert_added = True
         if self.starpilot_toggles.loud_blindspot_alert:
           self.starpilot_events.add(StarPilotEventName.laneChangeBlockedLoud)
@@ -529,7 +531,7 @@ class SelfdriveD:
                                                     LaneChangeState.laneChangeFinishing):
       self.events.add(EventName.laneChange)
 
-    if not blindspot_alert_added and should_loud_blindspot_alert_without_lateral(CS, self.sm, self.starpilot_toggles):
+    if not blindspot_alert_added and should_loud_blindspot_alert_without_lateral(CS, self.sm, self.starpilot_toggles, combined_left_bsm, combined_right_bsm):
       self.starpilot_events.add(StarPilotEventName.laneChangeBlockedLoud)
 
     for i, pandaState in enumerate(self.sm['pandaStates']):

@@ -668,4 +668,13 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"WheelIcon", {PERSISTENT, STRING, "stock", "stock", 0}},
     {"WheelSpeed", {PERSISTENT, BOOL, "0", "0", 2, SETTINGS_SIMPLE}},
     {"WheelToDownload", {CLEAR_ON_MANAGER_START, STRING, "", ""}},
+    {"VASMEnabled", {PERSISTENT, BOOL, "0", "0", 1}},
+    {"VASMConfidenceThreshold", {PERSISTENT, FLOAT, "0.85", "0.85", 2}},
+    {"VASMSmoothSeconds", {PERSISTENT, FLOAT, "0.2", "0.2", 2}},
+    {"VASMAnnotationConfig", {PERSISTENT, JSON, "{}", "{}", 2}},
+    {"VASMLeftActive", {CLEAR_ON_MANAGER_START, STRING, "0", "0", 2}},
+    {"VASMRightActive", {CLEAR_ON_MANAGER_START, STRING, "0", "0", 2}},
+    {"VASMLeftConfidence", {CLEAR_ON_MANAGER_START, STRING, "0.0", "0.0", 2}},
+    {"VASMRightConfidence", {CLEAR_ON_MANAGER_START, STRING, "0.0", "0.0", 2}},
+    {"VASMTimestampEof", {CLEAR_ON_MANAGER_START, STRING, "0", "0", 2}},
 };

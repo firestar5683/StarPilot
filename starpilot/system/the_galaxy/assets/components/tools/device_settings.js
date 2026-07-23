@@ -1180,6 +1180,12 @@ function getSettingLockReason(param) {
   if (param?.disabled_when_key_true && state.values[param.disabled_when_key_true]) {
     return param.disabled_reason || "Disabled by another setting."
   }
+  if (param?.requires_nonempty_key) {
+    const val = state.values[param.requires_nonempty_key]
+    if (!val || val === "{}" || val === "") {
+      return param.disabled_reason || "Required configuration missing."
+    }
+  }
   return ""
 }
 
@@ -1530,6 +1536,7 @@ function renderSettingRow(p) {
           type="checkbox"
           class="ds-toggle"
           id="ds-${p.key}"
+          disabled="${() => isLocked()}"
           @change="${() => updateParam(p.key, "checkbox")}" />
       `
     }

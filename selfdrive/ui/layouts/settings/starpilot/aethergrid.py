@@ -3091,6 +3091,8 @@ class ParentToggle:
   get_state: Callable[[], bool]
   set_state: Callable[[bool], None]
   subtitle: str = ""
+  enabled: Callable[[], bool] | None = None
+  disabled_label: str = ""
 
 
 # ── AetherSettingsView — reusable list-panel ManagerView ──
@@ -3142,6 +3144,8 @@ class AetherSettingsView(PanelManagerView):
     if not target_id:
       return
     if target_id.startswith("parent_toggle:") and self._parent_toggle:
+      if self._parent_toggle.enabled is not None and not self._parent_toggle.enabled():
+        return
       self._parent_toggle.set_state(not self._parent_toggle.get_state())
       return
     if target_id.startswith("tab:") and self._tab_defs:
@@ -3233,7 +3237,10 @@ class AetherSettingsView(PanelManagerView):
       toggle = self._parent_toggle
 
       display_title = title if title else tr(toggle.label)
+      parent_enabled = toggle.enabled() if toggle.enabled is not None else True
       subtitle_text = subtitle if subtitle else (tr(toggle.subtitle) if toggle.subtitle else "")
+      if not parent_enabled and toggle.disabled_label:
+        subtitle_text = tr(toggle.disabled_label)
 
       toggle_take = AETHER_LIST_METRICS.toggle_width + AETHER_LIST_METRICS.toggle_right_inset + 16
       text_rect = rl.Rectangle(rect.x, rect.y, max(100.0, rect.width - toggle_take), rect.height)
@@ -3253,6 +3260,7 @@ class AetherSettingsView(PanelManagerView):
         toggle_value,
         knob_progress=1.0 if toggle_value else 0.0,
         track_color=self._panel_style.accent,
+        is_enabled=parent_enabled,
         seed_id=toggle_id,
         radius_px=100,
         bg_color=rl.Color(12, 10, 18, 255),

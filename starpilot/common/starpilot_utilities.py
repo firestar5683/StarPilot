@@ -25,6 +25,12 @@ from panda import Panda, FW_PATH
 
 from openpilot.starpilot.common.starpilot_variables import EARTH_RADIUS, STARPILOT_API, FROGS_GO_MOO_PATH, KONIK_PATH
 
+DEVICE_BUSY_MAX_CPU_USAGE_PERCENT = 89.0
+DEVICE_BUSY_AVG_CPU_USAGE_PERCENT = 74.0
+DEVICE_BUSY_HOT_CORE_COUNT = 4
+
+_throttle_state: dict[str, dict] = {}
+
 
 def capture_exception(exception):
   try:
@@ -416,3 +422,54 @@ def wait_for_no_driver(params, sm, door_checks=False, time_threshold=60):
     time.sleep(DT_DMON)
 
   params.remove("IsDriverViewEnabled")
+
+
+def device_cpu_throttle_factor(cpu_usage, name="SpeedLimit"):
+  """Smooth low-pass filtered CPU throttle controller."""
+  usage = list(cpu_usage)
+  if not usage:
+    return 1.0
+
+  now = time.monotonic()
+  key = "_shared"
+  if key not in _throttle_state:
+    _throttle_state[key] = {
+      "factor": 1.0,
+      "last_time": now,
+      "last_logged_factor": 1.0,
+    }
+
+  state = _throttle_state[key]
+  dt = max(0.0, now - state["last_time"])
+  state["last_time"] = now
+
+  avg = sum(usage) / len(usage)
+  hot_cores = sum(c >= DEVICE_BUSY_MAX_CPU_USAGE_PERCENT for c in usage)
+
+  target_factor = _compute_throttle_factor(avg, hot_cores)
+
+  # Low-pass filter (rate = 0.8): smooths out 100ms background system spikes
+  rate = 0.8
+  alpha = 1.0 - math.exp(-rate * dt)
+  alpha = min(alpha, 1.0)
+  state["factor"] = target_factor * alpha + state["factor"] * (1.0 - alpha)
+  state["factor"] = max(1.0, min(5.0, state["factor"]))
+
+  if state["factor"] >= state["last_logged_factor"] + 0.6:
+    print(f"[{name}] CPU throttle factor={state['factor']:.1f}x (avg={avg:.0f}%, hot={hot_cores})")
+    state["last_logged_factor"] = state["factor"]
+  elif state["factor"] <= 1.05 and state["last_logged_factor"] > 1.05:
+    print(f"[{name}] CPU recovered")
+    state["last_logged_factor"] = 1.0
+
+  return state["factor"]
+
+
+def _compute_throttle_factor(avg, hot_cores):
+  if avg < DEVICE_BUSY_AVG_CPU_USAGE_PERCENT:
+    avg_factor = 1.0
+  else:
+    avg_factor = 1.0 + (avg - DEVICE_BUSY_AVG_CPU_USAGE_PERCENT) / 8.0
+
+  hot_factor = 1.0 + max(0, hot_cores - DEVICE_BUSY_HOT_CORE_COUNT + 1) * 0.5
+  return min(max(avg_factor, hot_factor), 4.0)

@@ -180,6 +180,10 @@ def render_background_effects(rect: rl.Rectangle, border_width: float):
     if show_signal or show_blindspot:
       left_blindspot = car_state.leftBlindspot
       right_blindspot = car_state.rightBlindspot
+      vasm_left = ui_state.params_memory.get("VASMLeftActive") == "1"
+      vasm_right = ui_state.params_memory.get("VASMRightActive") == "1"
+      left_blindspot = left_blindspot or vasm_left
+      right_blindspot = right_blindspot or vasm_right
       left_blinker = car_state.leftBlinker
       right_blinker = car_state.rightBlinker
 

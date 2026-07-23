@@ -314,6 +314,43 @@
         "step": 0.1,
         "parent_key": "QOLLateral",
         "settings_tier": "simple"
+      },
+      {
+        "key": "VASMEnabled",
+        "label": "Enable V-ASM",
+        "description": "Camera-based adjacent spot monitoring using the driver camera. Supplements factory BSM.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "requires_nonempty_key": "VASMAnnotationConfig",
+        "disabled_reason": "Configure window annotations first via Galaxy \u2192 V-ASM Annotations",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "VASMConfidenceThreshold",
+        "label": "Confidence Threshold",
+        "description": "Minimum detection confidence for a vehicle to be considered in the blind spot (0.25\u20131.00, default 0.85). Higher values reduce false positives but may miss detections.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.25,
+        "max": 1.00,
+        "step": 0.05,
+        "precision": 2,
+        "parent_key": "VASMEnabled",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "VASMSmoothSeconds",
+        "label": "Smoothing Duration",
+        "description": "Time constant for temporal smoothing of detection signals (0.1\u20130.5s, default 0.2s). Higher values reduce flickering but add latency.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.1,
+        "max": 0.5,
+        "step": 0.1,
+        "precision": 1,
+        "parent_key": "VASMEnabled",
+        "settings_tier": "advanced"
       }
     ]
   },

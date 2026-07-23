@@ -320,6 +320,38 @@ class StarPilotLateralLayout(_SettingsPage):
     pt_advanced = self._make_parent("AdvancedLateralTune", "Advanced Lateral Tuning",
       "Fine-tune steering response and auto-tuning.")
 
+    def vasm_config_ok():
+      cfg = p.get("VASMAnnotationConfig")
+      return cfg not in (None, "", "{}")
+
+    def vasm_on():
+      return vasm_config_ok() and p.get_bool("VASMEnabled")
+
+    self._vasm_rows = [
+      SettingRow(
+        "VASMConfidenceThreshold", "value", tr_noop("Confidence Threshold"),
+        subtitle=tr_noop("Minimum detection confidence (0.50\u20131.00). Higher values reduce false positives."),
+        get_value=lambda: f"{p.get_float('VASMConfidenceThreshold'):.2f}",
+        on_click=lambda: self._show_slider("VASMConfidenceThreshold", 0.25, 1.00, step=0.05, value_type="float"),
+        visible=vasm_on,
+      ),
+      SettingRow(
+        "VASMSmoothSeconds", "value", tr_noop("Smoothing Duration"),
+        subtitle=tr_noop("Temporal smoothing time constant (0.1\u20132.0s). Higher values reduce flickering."),
+        get_value=lambda: f"{p.get_float('VASMSmoothSeconds'):.1f}s",
+        on_click=lambda: self._show_slider("VASMSmoothSeconds", 0.1, 0.5, step=0.1, unit="s", value_type="float"),
+        visible=vasm_on,
+      ),
+    ]
+    pt_vasm = ParentToggle(
+      label="V-ASM (Visual Adjacent Spot Monitoring)",
+      subtitle="Camera-based blind spot detection using the driver camera.",
+      get_state=lambda: p.get_bool("VASMEnabled"),
+      set_state=lambda s: p.put_bool("VASMEnabled", s),
+      enabled=lambda: vasm_config_ok(),
+      disabled_label=tr("Configure in Galaxy \u2192 V-ASM Annotations"),
+    )
+
     # Register subpanels for Level 2 slide transitions
     self._sub_panels["behavior"] = AetherSettingsView(
       self,
@@ -343,6 +375,14 @@ class StarPilotLateralLayout(_SettingsPage):
       header_title=tr_noop("Advanced Lateral Tuning"),
       header_subtitle=tr_noop("Adjust actuator delay, steer ratio, Kp, friction, and neural network feedforward controllers."),
       parent_toggle=pt_advanced,
+      panel_style=PANEL_STYLE,
+    )
+    self._sub_panels["vasm"] = AetherSettingsView(
+      self,
+      [SettingSection(title="", rows=self._vasm_rows)],
+      header_title=tr_noop("V-ASM"),
+      header_subtitle=tr_noop("Vision-based adjacent spot monitoring settings. Configure annotations via Galaxy \u2192 V-ASM Annotations."),
+      parent_toggle=pt_vasm,
       panel_style=PANEL_STYLE,
     )
     self._wire_sub_panels()
