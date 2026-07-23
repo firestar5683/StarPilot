@@ -179,7 +179,7 @@ class VASMDaemon:
         onroad = self.sm["deviceState"].started if self.sm.valid.get("deviceState", False) else False
         parked = self.sm["starpilotCarState"].isParked if self.sm.valid.get("starpilotCarState", False) else False
 
-        if not onroad or not self._enabled or not self.inference.valid or not self._annotation_loaded:
+        if not onroad or parked or not self._enabled or not self.inference.valid or not self._annotation_loaded:
           self._update_inactive(reset_inference=(onroad != self.onroad_prev))
           if onroad != self.onroad_prev:
             self.last_inference_at = 0.0

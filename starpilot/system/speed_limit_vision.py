@@ -320,7 +320,7 @@ class SpeedLimitVisionDaemon:
       self.Ratekeeper = Ratekeeper
       self.VisionIpcClient = VisionIpcClient
       self.VisionStreamType = VisionStreamType
-      self.sm = messaging.SubMaster(["deviceState", "mapdOut", "userBookmark", "livePose"])
+      self.sm = messaging.SubMaster(["deviceState", "mapdOut", "userBookmark", "livePose", "starpilotCarState"])
 
     self.client = None
     self.stream_name = ""
@@ -2567,6 +2567,14 @@ class SpeedLimitVisionDaemon:
         self.pending_auto_bookmark = None
         self._publish_status("Idle - offroad", clear_speed=True)
         self._publish_runtime_telemetry(now, "offroad")
+        ratekeeper.keep_time()
+        continue
+
+      parked = self.sm["starpilotCarState"].isParked if self.sm.valid.get("starpilotCarState", False) else False
+      if parked:
+        self.current_frame_bgr = None
+        self._publish_status("Idle - parked", clear_speed=True)
+        self._publish_runtime_telemetry(now, "parked")
         ratekeeper.keep_time()
         continue
 
