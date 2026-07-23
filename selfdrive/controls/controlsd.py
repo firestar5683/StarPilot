@@ -13,7 +13,7 @@ from opendbc.car.car_helpers import interfaces
 from opendbc.car.chrysler.values import pacifica_hybrid_aol_stock_acc_mode
 from opendbc.car.gm.values import CAR as GM_CAR
 from opendbc.car.vehicle_model import VehicleModel
-from openpilot.selfdrive.controls.lib.drive_helpers import MAX_LATERAL_JERK, clip_curvature, get_lateral_active
+from openpilot.selfdrive.controls.lib.drive_helpers import LaneCenteringController, MAX_LATERAL_JERK, clip_curvature, get_lateral_active
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
 from openpilot.selfdrive.controls.lib.latcontrol_pid import LatControlPID
 from openpilot.selfdrive.controls.lib.latcontrol_angle import LatControlAngle, STEER_ANGLE_SATURATION_THRESHOLD
@@ -305,6 +305,7 @@ class Controls:
     self.curvature = 0.0
     self.desired_curvature = 0.0
     self.lc_smooth_release = 0.0
+    self.lane_centering = LaneCenteringController()
     self.lc_entry_sign = 0.0
     self.lc_arrest_jerk_factor = 1.0
     self.turn_hold_curvature = 0.0
@@ -419,6 +420,7 @@ class Controls:
 
     if not CC.latActive:
       self.LaC.reset()
+      self.lane_centering.reset()
     if not CC.longActive:
       self.LoC.reset()
 
@@ -584,6 +586,16 @@ class Controls:
              lead_curvature * blinker_dir > abs(self.turn_hold_curvature):
             held_mag = min(lead_curvature * blinker_dir, abs(self.turn_hold_curvature) + CURVATURE_HOLD_RATCHET_RATE * DT_CTRL)
             self.turn_hold_curvature = math.copysign(held_mag, lead_curvature)
+
+    # Apply lane-line centering to the final model/turn-adjusted request. This keeps
+    # turn hold/lead bookkeeping on the raw model command while still subjecting the
+    # centering correction to the downstream curvature/jerk safety limits.
+    new_desired_curvature = self.lane_centering.update(
+      new_desired_curvature, model_v2, CS.vEgo,
+      bool(getattr(self.starpilot_toggles, "lane_centering", False)),
+      float(getattr(self.starpilot_toggles, "lane_center_offset", 0.0) or 0.0),
+      CC.latActive,
+      bool(self.sm.all_checks(['modelV2'])))
 
     jerk_factor = 1.0
     if self.starpilot_toggles.lane_change_pace < 10:

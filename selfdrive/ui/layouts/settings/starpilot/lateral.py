@@ -300,6 +300,27 @@ class StarPilotLateralLayout(_SettingsPage):
         on_click=lambda: self._show_slider("SteerRatio", max(0.01, cs.steerRatio) * 0.5, max(0.01, cs.steerRatio) * 1.5, step=0.01, value_type="float"),
         visible=lambda: alt_on() and cs.steerRatio != 0,
       ),
+      SettingRow(
+        "LaneCentering", "toggle", tr_noop("Lane Centering"),
+        subtitle=tr_noop("Center the car using both detected lane lines. Automatically falls back to standard lane keeping when both lines are not detected."),
+        get_state=lambda: p.get_bool("LaneCentering"),
+        set_state=lambda s: p.put_bool("LaneCentering", s),
+        visible=alt_on,
+      ),
+      SettingRow(
+        "LaneCenterOffset", "value", tr_noop("Lane Center Offset"),
+        subtitle=tr_noop("Shift the centered position within the lane. Negative moves left, positive moves right. Requires both detected lane lines."),
+        get_value=lambda: f"{p.get_float('LaneCenterOffset'):.2f} m",
+        on_click=lambda: self._show_slider("LaneCenterOffset", -0.5, 0.5, step=0.01, unit=" m", value_type="float"),
+        visible=lambda: alt_on() and p.get_bool("LaneCentering"),
+      ),
+      SettingRow(
+        "CameraOffset", "value", tr_noop("Camera Offset"),
+        subtitle=tr_noop("Virtually shift the driving model camera. Positive biases the model left; negative biases it right. Development use only."),
+        get_value=lambda: f"{p.get_float('CameraOffset'):.2f} m",
+        on_click=lambda: self._show_slider("CameraOffset", -0.35, 0.35, step=0.01, unit=" m", value_type="float"),
+        visible=alt_on,
+      ),
     ]
 
     self._manager_view = SteeringManagerView(

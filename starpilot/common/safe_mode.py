@@ -33,6 +33,8 @@ SAFE_MODE_MANAGED_KEYS = (
   "SteerKP",
   "SteerLatAccel",
   "SteerRatio",
+  "LaneCentering",
+  "LaneCenterOffset",
   "LaneChanges",
   "LaneChangeTime",
   "LaneDetectionWidth",

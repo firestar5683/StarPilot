@@ -124,6 +124,27 @@
         "settings_tier": "advanced"
       },
       {
+        "key": "LaneCentering",
+        "label": "Lane Centering",
+        "description": "Use both recognized lane lines to actively center the vehicle in the lane. Falls back to stock steering when both lane lines are not confidently detected.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "parent_key": "AdvancedLateralTune"
+      },
+      {
+        "key": "LaneCenterOffset",
+        "label": "Lane Center Offset",
+        "description": "Shift the target position within the lane, in meters. Negative values move the vehicle toward the left side of the lane; positive values move it toward the right.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": -0.5,
+        "max": 0.5,
+        "step": 0.01,
+        "precision": 2,
+        "parent_key": "LaneCentering"
+      },
+      {
         "key": "AlwaysOnLateral",
         "label": "Always On Lateral",
         "description": "openpilot's steering remains active even when the accelerator or brake pedals are pressed.",

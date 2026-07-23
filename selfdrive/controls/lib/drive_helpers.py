@@ -85,3 +85,106 @@ def get_curvature_from_plan(yaws, yaw_rates, t_idxs, vego, action_t):
   psi_target = np.interp(action_t, t_idxs, yaws)
   psi_rate = yaw_rates[0]
   return curv_from_psis(psi_target, psi_rate, vego, action_t)
+
+
+_LC_MIN_V_EGO = 5.0
+_LC_MIN_PROB = 0.6
+_LC_MAX_STD = 0.3
+_LC_MIN_WIDTH = 2.6
+_LC_MAX_WIDTH = 4.8
+_LC_MAX_CORR = 0.004
+_LC_MAX_GAIN = 0.30
+_LC_SMOOTH_TAU = 0.4
+
+
+class LaneCenteringController:
+  def __init__(self):
+    self._correction = 0.0
+
+  def reset(self):
+    self._correction = 0.0
+
+  def update(self, model_curvature, model_v2, v_ego, enabled, offset, lat_active, model_valid) -> float:
+    model_curvature = float(model_curvature)
+
+    if not model_valid:
+      self.reset()
+      return model_curvature
+
+    try:
+      offset_f = float(offset)
+    except (TypeError, ValueError):
+      self.reset()
+      return model_curvature
+    if not np.isfinite(offset_f):
+      # Non-finite offset is an untrusted config boundary: hard-reset so NaN
+      # never reaches smooth_value.
+      self.reset()
+      return model_curvature
+
+    if not enabled or not lat_active or v_ego < _LC_MIN_V_EGO:
+      self.reset()
+      return model_curvature
+
+    try:
+      if int(model_v2.meta.laneChangeState) != 0:
+        # Lane change in progress: hard-reset to drop any 0.4s filtered residual
+        # instead of smearing the pre-change correction into the lane change.
+        self.reset()
+        return model_curvature
+    except (AttributeError, TypeError, ValueError):
+      pass
+
+    valid, raw = self._raw_correction(model_v2, v_ego, offset_f)
+    target = float(np.clip(raw, -_LC_MAX_CORR, _LC_MAX_CORR)) * _LC_MAX_GAIN if valid else 0.0
+    self._correction = float(smooth_value(target, self._correction, _LC_SMOOTH_TAU, dt=DT_CTRL))
+    return model_curvature + self._correction
+
+  def _raw_correction(self, model_v2, v_ego, offset) -> tuple[bool, float]:
+    try:
+      lane_lines = model_v2.laneLines
+      probs = model_v2.laneLineProbs
+      stds = model_v2.laneLineStds
+      if len(lane_lines) < 3 or len(probs) < 3 or len(stds) < 3:
+        return False, 0.0
+      if int(model_v2.meta.laneChangeState) != 0:
+        return False, 0.0
+      if probs[1] < _LC_MIN_PROB or probs[2] < _LC_MIN_PROB:
+        return False, 0.0
+      if stds[1] > _LC_MAX_STD or stds[2] > _LC_MAX_STD:
+        return False, 0.0
+
+      left_x = np.asarray(lane_lines[1].x, dtype=float)
+      left_y = np.asarray(lane_lines[1].y, dtype=float)
+      right_x = np.asarray(lane_lines[2].x, dtype=float)
+      right_y = np.asarray(lane_lines[2].y, dtype=float)
+      if (left_x.size < 2 or left_x.size != left_y.size or
+          right_x.size < 2 or right_x.size != right_y.size):
+        return False, 0.0
+      if not (np.isfinite(left_x).all() and np.isfinite(left_y).all() and
+              np.isfinite(right_x).all() and np.isfinite(right_y).all()):
+        return False, 0.0
+      if not (np.all(np.diff(left_x) > 0) and np.all(np.diff(right_x) > 0)):
+        return False, 0.0
+
+      lookahead = float(np.clip(v_ego * 1.0, 8.0, 35.0))
+      left = float(np.interp(lookahead, left_x, left_y))
+      right = float(np.interp(lookahead, right_x, right_y))
+      width = right - left
+      if width < _LC_MIN_WIDTH or width > _LC_MAX_WIDTH:
+        return False, 0.0
+
+      center_y = 0.5 * (left + right)
+
+      pos_x = np.asarray(model_v2.position.x, dtype=float)
+      pos_y = np.asarray(model_v2.position.y, dtype=float)
+      if pos_x.size < 2 or pos_x.size != pos_y.size:
+        return False, 0.0
+      if not (np.isfinite(pos_x).all() and np.isfinite(pos_y).all() and np.all(np.diff(pos_x) > 0)):
+        return False, 0.0
+      model_y = float(np.interp(lookahead, pos_x, pos_y))
+      error = (center_y + offset) - model_y
+      raw = 2.0 * error / (lookahead ** 2)
+      return True, float(raw)
+    except (AttributeError, IndexError, TypeError, ValueError):
+      return False, 0.0
