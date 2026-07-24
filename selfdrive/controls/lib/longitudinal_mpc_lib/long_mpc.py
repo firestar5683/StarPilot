@@ -66,11 +66,15 @@ FCW_MAX_TTC = 4.0
 
 
 def _personality_value(aggressive, standard, relaxed, personality):
-  return {
-    log.LongitudinalPersonality.aggressive: aggressive,
-    log.LongitudinalPersonality.standard: standard,
-    log.LongitudinalPersonality.relaxed: relaxed,
-  }[personality]
+  # NB: compare with == rather than a dict lookup. `personality` is a capnp
+  # _DynamicEnum read from a message; it compares equal to the schema enumerants
+  # but does not hash to the same bucket, so a dict[personality] lookup KeyErrors
+  # on otherwise-valid values.
+  if personality == log.LongitudinalPersonality.aggressive:
+    return aggressive
+  if personality == log.LongitudinalPersonality.relaxed:
+    return relaxed
+  return standard
 
 
 def get_jerk_factor(aggressive_accel=0.5, aggressive_danger=0.5, aggressive_speed=0.5,
