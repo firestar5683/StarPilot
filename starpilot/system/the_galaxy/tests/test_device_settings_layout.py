@@ -43,7 +43,7 @@ def test_galaxy_layout_contains_basic_mode_controls():
 
   assert {"AlwaysOnLateral", "LaneChanges", "QOLLateral"} <= sections["Lateral (Steering)"].keys()
   assert {
-    "ConditionalExperimental",
+    "LongitudinalModelPreference",
     "CurveSpeedController",
     "AccelerationProfile",
     "DecelerationProfile",
@@ -86,7 +86,7 @@ def test_requested_simple_and_advanced_settings_tiers():
     assert lateral[key]["settings_tier"] == "advanced"
 
   for key in (
-    "ConditionalExperimental",
+    "LongitudinalModelPreference",
     "CurveSpeedController",
     "LongitudinalTune",
     "AccelerationProfile",
@@ -102,7 +102,6 @@ def test_requested_simple_and_advanced_settings_tiers():
     "TacoTune",
     "NavLongitudinalAllowed",
     "SpeedLimitController",
-    "ConditionalChill",
   ):
     assert longitudinal[key]["settings_tier"] == "advanced"
 

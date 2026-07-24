@@ -18,7 +18,7 @@ from openpilot.starpilot.controls.lib.starpilot_acceleration import (
 
 class FakePlanner:
   def __init__(self, *, v_cruise=0.0, slc_target=0.0, slc_offset=0.0, overridden_speed=0.0,
-               red_light=False, forcing_stop=False, disable_throttle=False):
+               red_light=False, forcing_stop=False):
     self.v_cruise = v_cruise
     self.starpilot_weather = SimpleNamespace(weather_id=0, reduce_acceleration=0.0)
     self.starpilot_vcruise = SimpleNamespace(
@@ -27,8 +27,7 @@ class FakePlanner:
       forcing_stop=forcing_stop,
       slc=SimpleNamespace(overridden_speed=overridden_speed),
     )
-    self.starpilot_cem = SimpleNamespace(stop_light_detected=red_light)
-    self.starpilot_following = SimpleNamespace(disable_throttle=disable_throttle)
+    self.longitudinal_intent = SimpleNamespace(stop_detected=red_light)
 
 
 def make_toggles(**overrides):

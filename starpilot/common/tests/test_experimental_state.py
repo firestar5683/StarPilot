@@ -1,10 +1,7 @@
 from openpilot.starpilot.common.experimental_state import (
-  CC_STATUS_PARAM,
-  CCStatus,
-  CE_STATUS_PARAM,
-  CEStatus,
+  LONGITUDINAL_PREFERENCE_OVERRIDE_PARAM,
   requested_experimental_mode,
-  restore_persisted_cc_state,
+  toggle_longitudinal_model_preference,
 )
 
 
@@ -16,9 +13,6 @@ class FakeParams:
   def get_bool(self, key):
     return bool(self.bools.get(key, False))
 
-  def put_bool(self, key, value):
-    self.bools[key] = bool(value)
-
   def get_int(self, key, default=0):
     return int(self.ints.get(key, default))
 
@@ -26,54 +20,34 @@ class FakeParams:
     self.ints[key] = int(value)
 
 
-def test_requested_experimental_mode_defaults_to_experimental_in_ccm_auto():
-  params = FakeParams(bools={"ConditionalChill": True})
-  params_memory = FakeParams(ints={CC_STATUS_PARAM: CCStatus["OFF"]})
-
-  assert requested_experimental_mode(params, params_memory) is True
+def test_set_speed_first_is_default():
+  assert not requested_experimental_mode(FakeParams(), FakeParams())
 
 
-def test_requested_experimental_mode_respects_ccm_manual_override():
-  params = FakeParams(bools={"ConditionalChill": True})
-
-  params_memory = FakeParams(ints={CC_STATUS_PARAM: CCStatus["USER_CHILL"]})
-  assert requested_experimental_mode(params, params_memory) is False
-
-  params_memory = FakeParams(ints={CC_STATUS_PARAM: CCStatus["USER_EXPERIMENTAL"]})
-  assert requested_experimental_mode(params, params_memory) is True
+def test_persistent_model_first_preference_is_respected():
+  params = FakeParams(ints={"LongitudinalModelPreference": 1})
+  assert requested_experimental_mode(params, FakeParams())
 
 
-def test_requested_experimental_mode_prefers_cem_if_both_conditional_modes_are_enabled():
-  params = FakeParams(bools={"ConditionalExperimental": True, "ConditionalChill": True})
+def test_drive_override_takes_priority_without_changing_persistent_default():
+  params = FakeParams(ints={"LongitudinalModelPreference": 0})
+  params_memory = FakeParams(ints={LONGITUDINAL_PREFERENCE_OVERRIDE_PARAM: 1})
 
-  params_memory = FakeParams(ints={
-    CE_STATUS_PARAM: CEStatus["OFF"],
-    CC_STATUS_PARAM: CCStatus["USER_EXPERIMENTAL"],
-  })
-  assert requested_experimental_mode(params, params_memory) is False
-
-  params_memory = FakeParams(ints={
-    CE_STATUS_PARAM: CEStatus["USER_OVERRIDDEN"],
-    CC_STATUS_PARAM: CCStatus["USER_CHILL"],
-  })
-  assert requested_experimental_mode(params, params_memory) is True
+  assert requested_experimental_mode(params, params_memory)
+  assert params.get_int("LongitudinalModelPreference") == 0
 
 
-def test_requested_experimental_mode_safe_mode_overrides_ccm():
-  params = FakeParams(bools={"SafeMode": True, "ConditionalChill": True})
-  params_memory = FakeParams(ints={CC_STATUS_PARAM: CCStatus["USER_EXPERIMENTAL"]})
+def test_exp_button_flips_preference_for_current_drive():
+  params = FakeParams(ints={"LongitudinalModelPreference": 0})
+  params_memory = FakeParams()
 
-  assert requested_experimental_mode(params, params_memory) is False
+  assert toggle_longitudinal_model_preference(params, params_memory)
+  assert params_memory.get_int(LONGITUDINAL_PREFERENCE_OVERRIDE_PARAM) == 1
+  assert not toggle_longitudinal_model_preference(params, params_memory)
+  assert params_memory.get_int(LONGITUDINAL_PREFERENCE_OVERRIDE_PARAM) == 0
 
 
-def test_restore_persisted_cc_state_rehydrates_manual_override():
-  params = FakeParams(
-    bools={"PersistChillState": True},
-    ints={"PersistedCCStatus": CCStatus["USER_CHILL"]},
-  )
-  params_memory = FakeParams(ints={CC_STATUS_PARAM: CCStatus["OFF"]})
-
-  restored_status = restore_persisted_cc_state(params, params_memory)
-
-  assert restored_status == CCStatus["USER_CHILL"]
-  assert params_memory.get_int(CC_STATUS_PARAM) == CCStatus["USER_CHILL"]
+def test_safe_mode_forces_set_speed_first():
+  params = FakeParams(bools={"SafeMode": True}, ints={"LongitudinalModelPreference": 1})
+  params_memory = FakeParams(ints={LONGITUDINAL_PREFERENCE_OVERRIDE_PARAM: 1})
+  assert not requested_experimental_mode(params, params_memory)

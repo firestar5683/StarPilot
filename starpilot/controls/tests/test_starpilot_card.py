@@ -70,7 +70,6 @@ def make_toggles(**overrides):
     "bookmark_via_cancel_long": False,
     "bookmark_via_cancel_very_long": False,
     "bookmark_via_lkas": False,
-    "conditional_experimental_mode": False,
     "experimental_mode_via_lkas": False,
     "force_coast_via_lkas": False,
     "lkas_allowed_for_aol": False,
@@ -592,21 +591,20 @@ def test_pacifica_hybrid_main_aol_waits_for_set_press(monkeypatch, tmp_path):
   assert ret.alwaysOnLateralEnabled is False
 
 
-def test_conditional_chill_wheel_override_cycles_manual_state(monkeypatch, tmp_path):
+def test_wheel_override_temporarily_flips_model_preference(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
   monkeypatch.setattr(spc, "is_FrogsGoMoo", lambda: False)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
 
   card = spc.StarPilotCard(SimpleNamespace(brand="gm"), SimpleNamespace(alternativeExperience=0))
   sm = make_sm()
-  toggles = make_toggles(conditional_chill_mode=True)
-
-  sm["selfdriveState"].experimentalMode = True
-  card.handle_experimental_mode(sm, toggles)
-  assert card.params_memory.get_int("CCStatus") == spc.CCStatus["USER_CHILL"]
+  toggles = make_toggles()
 
   card.handle_experimental_mode(sm, toggles)
-  assert card.params_memory.get_int("CCStatus") == spc.CCStatus["OFF"]
+  assert card.params_memory.get_int("LongitudinalModelPreferenceOverride") == 1
+
+  card.handle_experimental_mode(sm, toggles)
+  assert card.params_memory.get_int("LongitudinalModelPreferenceOverride") == 0
 
 
 def test_cancel_button_short_press_can_run_independent_mapping(monkeypatch, tmp_path):

@@ -71,7 +71,7 @@ class StarPilotEvents:
       if not self.starpilot_planner.model_stopped and self.stopped_for_light and starpilot_toggles.green_light_alert:
         self.events.add(StarPilotEventName.greenLight)
 
-      self.stopped_for_light = self.starpilot_planner.starpilot_cem.stop_light_detected
+      self.stopped_for_light = self.starpilot_planner.longitudinal_intent.stop_detected
     else:
       self.stopped_for_light = False
 

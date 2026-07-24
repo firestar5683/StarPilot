@@ -212,9 +212,8 @@ class StarPilotAcceleration:
       stop_context = (
         sm["carState"].standstill or
         getattr(sm["controlsState"], "forceDecel", False) or
-        getattr(self.starpilot_planner.starpilot_cem, "stop_light_detected", False) or
-        getattr(self.starpilot_planner.starpilot_vcruise, "forcing_stop", False) or
-        getattr(self.starpilot_planner.starpilot_following, "disable_throttle", False)
+        self.starpilot_planner.longitudinal_intent.stop_detected or
+        getattr(self.starpilot_planner.starpilot_vcruise, "forcing_stop", False)
       )
       if (getattr(starpilot_toggles, "speed_limit_controller", False) and
           v_ego > SLC_COAST_MIN_SPEED and

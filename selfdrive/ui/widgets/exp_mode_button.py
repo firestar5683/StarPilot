@@ -40,12 +40,7 @@ class ExperimentalModeButton(Widget):
     rl.draw_line_ex(rl.Vector2(line_x, rect.y), rl.Vector2(line_x, rect.y + rect.height), 3, separator_color)
 
     # Draw text label (left aligned)
-    if self.mode_variant == ModeBannerVariant.CONDITIONAL_EXPERIMENTAL:
-      text = tr("CONDITIONAL EXPERIMENTAL")
-    elif self.mode_variant == ModeBannerVariant.CONDITIONAL_CHILL:
-      text = tr("CONDITIONAL CHILL")
-    else:
-      text = tr("EXPERIMENTAL MODE ON") if self.experimental_mode else tr("CHILL MODE ON")
+    text = tr("MODEL FIRST") if self.experimental_mode else tr("SET-SPEED FIRST")
 
     text_x = rect.x + self.horizontal_padding
     font = gui_app.font(FontWeight.NORMAL)

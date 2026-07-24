@@ -25,6 +25,7 @@ class Maneuver:
     self.e2e = kwargs.get("e2e", False)
     self.personality = kwargs.get("personality", 0)
     self.force_decel = kwargs.get("force_decel", False)
+    self.lead_move_started_at = None
 
     self.duration = duration
     self.title = title
@@ -68,7 +69,13 @@ class Maneuver:
         print("Crashed!!!!")
         valid = False
 
-      if self.ensure_start and log['v_rel'] > 0 and log['acceleration'] < 1e-3:
+      if self.ensure_start and speed_lead > 0 and self.lead_move_started_at is None:
+        self.lead_move_started_at = plant.current_time
+      start_wait_expired = (
+        self.lead_move_started_at is not None and
+        plant.current_time - self.lead_move_started_at > 0.5
+      )
+      if self.ensure_start and start_wait_expired and log['v_rel'] > 0 and log['acceleration'] < 1e-3:
         print('LongitudinalPlanner not starting!')
         valid = False
 

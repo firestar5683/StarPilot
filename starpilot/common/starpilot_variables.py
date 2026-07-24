@@ -802,28 +802,12 @@ class StarPilotVariables:
     self.migrate_prius_cluster_offset(str(toggle.car_model))
     toggle.cluster_offset = self.get_value("ClusterOffset", cast=float, condition=toggle.car_make == "toyota")
 
-    toggle.conditional_experimental_mode = toggle.openpilot_longitudinal and self.get_value("ConditionalExperimental")
-    toggle.conditional_chill_mode = toggle.openpilot_longitudinal and not toggle.conditional_experimental_mode and self.get_value("ConditionalChill")
-    toggle.conditional_curves = self.get_value("CECurves", condition=toggle.conditional_experimental_mode)
-    toggle.conditional_curves_lead = self.get_value("CECurvesLead", condition=toggle.conditional_curves)
-    toggle.conditional_lead = self.get_value("CELead", condition=toggle.conditional_experimental_mode)
-    toggle.conditional_slower_lead = self.get_value("CESlowerLead", condition=toggle.conditional_lead)
-    toggle.conditional_stopped_lead = self.get_value("CEStoppedLead", condition=toggle.conditional_lead)
-    toggle.conditional_limit = self.get_value("CESpeed", cast=float, condition=toggle.conditional_experimental_mode, conversion=speed_conversion)
-    toggle.conditional_limit_lead = self.get_value("CESpeedLead", cast=float, condition=toggle.conditional_experimental_mode, conversion=speed_conversion)
-    toggle.conditional_model_stop_time = self.get_value("CEModelStopTime", cast=float, condition=toggle.conditional_experimental_mode and self.get_value("CEStopLights"))
-    toggle.conditional_signal = self.get_value("CESignalSpeed", cast=float, condition=toggle.conditional_experimental_mode, conversion=speed_conversion)
-    toggle.conditional_signal_lane_detection = self.get_value("CESignalLaneDetection", condition=toggle.conditional_signal != 0)
-    toggle.conditional_chill_speed = self.get_value("CCMSpeed", cast=float, condition=toggle.conditional_chill_mode, conversion=speed_conversion)
-    toggle.conditional_chill_speed_lead = self.get_value("CCMSpeedLead", cast=float, condition=toggle.conditional_chill_mode, conversion=speed_conversion)
-    toggle.conditional_chill_speed_margin = self.get_value("CCMSetSpeedMargin", cast=float, condition=toggle.conditional_chill_mode, conversion=speed_conversion)
-    toggle.conditional_chill_lead = self.get_value("CCMLead", condition=toggle.conditional_chill_mode)
-    toggle.conditional_chill_launch_assist = self.get_value("CCMLaunchAssist", condition=toggle.conditional_chill_mode)
-    toggle.cem_status = (
-      self.get_value("ShowCEMStatus", condition=toggle.conditional_experimental_mode) or
-      self.get_value("ShowCCMStatus", condition=toggle.conditional_chill_mode) or
-      toggle.debug_mode
+    persistent_preference = self.get_value("LongitudinalModelPreference", cast=int, min=0, max=1)
+    drive_override = self.params_memory.get_int("LongitudinalModelPreferenceOverride", default=-1)
+    toggle.longitudinal_model_preference = not toggle.safe_mode and bool(
+      drive_override if drive_override in (0, 1) else persistent_preference
     )
+    toggle.cem_status = self.get_value("ShowCEMStatus") or toggle.debug_mode
 
     toggle.curve_speed_controller = toggle.openpilot_longitudinal and self.get_value("CurveSpeedController")
     toggle.csc_status = self.get_value("ShowCSCStatus", condition=toggle.curve_speed_controller) or toggle.debug_mode

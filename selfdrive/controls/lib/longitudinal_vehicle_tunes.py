@@ -1,18 +1,28 @@
-HONDA_HRV_3G_FAR_FOLLOW_BRAKE_SLEW_RATE = 3.0
-HONDA_HRV_3G_FAR_FOLLOW_RELEASE_SLEW_RATE = 2.0
-HONDA_HRV_3G_UNTRACKED_SLOW_LEAD_DECEL_SCALE = 1.35
+from dataclasses import dataclass
 
 
-def get_far_follow_output_slew_rates(CP):
-  if CP.brand == "honda" and str(CP.carFingerprint) == "HONDA_HRV_3G":
-    return (
-      HONDA_HRV_3G_FAR_FOLLOW_BRAKE_SLEW_RATE,
-      HONDA_HRV_3G_FAR_FOLLOW_RELEASE_SLEW_RATE,
-    )
-  return 0.0, 0.0
+@dataclass(frozen=True)
+class LongitudinalPlannerTune:
+  lead_filter_tau: float = 0.45
+  accel_slew_rate: float = 0.90
+  brake_slew_rate: float = 1.40
+  launch_accel: float = 0.35
 
 
-def get_untracked_slow_lead_decel_scale(CP):
-  if CP.brand == "honda" and str(CP.carFingerprint) == "HONDA_HRV_3G":
-    return HONDA_HRV_3G_UNTRACKED_SLOW_LEAD_DECEL_SCALE
-  return 1.0
+DEFAULT_TUNE = LongitudinalPlannerTune()
+
+# Vehicle exceptions are deliberately declarative and limited to physical
+# response differences. Planning and safety logic remain global.
+VEHICLE_TUNES = {
+  ("honda", "HONDA_HRV_3G"): LongitudinalPlannerTune(
+    lead_filter_tau=0.65,
+    accel_slew_rate=0.65,
+    brake_slew_rate=1.00,
+    launch_accel=0.30,
+  ),
+}
+
+
+def get_longitudinal_planner_tune(CP):
+  key = (str(getattr(CP, "brand", "")), str(getattr(CP, "carFingerprint", "")))
+  return VEHICLE_TUNES.get(key, DEFAULT_TUNE)

@@ -2,8 +2,7 @@
 import numpy as np
 
 from openpilot.common.constants import CV
-from openpilot.selfdrive.controls.lib.lead_behavior import should_disable_far_lead_throttle
-from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import COMFORT_BRAKE, LEAD_DANGER_FACTOR, desired_follow_distance, get_jerk_factor, get_T_FOLLOW
+from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LEAD_DANGER_FACTOR, desired_follow_distance, get_jerk_factor, get_T_FOLLOW
 
 from openpilot.starpilot.common.starpilot_variables import CITY_SPEED_LIMIT, MAX_T_FOLLOW
 
@@ -17,10 +16,6 @@ def get_longitudinal_personality(sm):
 class StarPilotFollowing:
   def __init__(self, StarPilotPlanner):
     self.starpilot_planner = StarPilotPlanner
-
-    self.disable_throttle = False
-    self.following_lead = False
-    self.slower_lead = False
 
     self.acceleration_jerk = 0
     self.danger_jerk = 0
@@ -78,28 +73,10 @@ class StarPilotFollowing:
     self.danger_jerk = self.base_danger_jerk
     self.speed_jerk = self.base_speed_jerk
 
-    self.following_lead = self.starpilot_planner.tracking_lead and self.starpilot_planner.lead_one.dRel < (self.t_follow * 2) * v_ego
-    self.slower_lead = False
-
     if self.starpilot_planner.starpilot_weather.weather_id != 0:
       self.t_follow = min(self.t_follow + self.starpilot_planner.starpilot_weather.increase_following_distance, MAX_T_FOLLOW)
 
-    self.disable_throttle = False
-    if self.starpilot_planner.tracking_lead and self.starpilot_planner.lead_one.status:
-      lead_distance = self.starpilot_planner.lead_one.dRel
-      v_lead = self.starpilot_planner.lead_one.vLead
-      closing_speed = max(0.0, v_ego - v_lead)
-      desired_gap = float(desired_follow_distance(v_ego, v_lead, self.t_follow))
-      self.disable_throttle = should_disable_far_lead_throttle(v_ego, lead_distance, desired_gap, closing_speed, self.following_lead)
-
     if long_control_active and self.starpilot_planner.tracking_lead:
-      self.update_follow_values(self.starpilot_planner.lead_one.dRel, v_ego, self.starpilot_planner.lead_one.vLead, starpilot_toggles)
       self.desired_follow_distance = int(desired_follow_distance(v_ego, self.starpilot_planner.lead_one.vLead, self.t_follow))
     else:
       self.desired_follow_distance = 0
-
-  def update_follow_values(self, lead_distance, v_ego, v_lead, starpilot_toggles):
-    if starpilot_toggles.conditional_slower_lead and v_lead < v_ego:
-      distance_factor = max(lead_distance - (v_lead * self.t_follow), 1)
-      braking_offset = float(np.clip(min(v_ego - v_lead, v_lead) - COMFORT_BRAKE, 1, distance_factor))
-      self.slower_lead = braking_offset > 1

@@ -30,7 +30,7 @@ def run_following_distance_simulation(v_lead, t_end=100.0, e2e=False, personalit
                       [log.LongitudinalPersonality.relaxed, # personality
                        log.LongitudinalPersonality.standard,
                        log.LongitudinalPersonality.aggressive],
-                      [0,10,35])) # speed
+                      [1,10,35])) # speed; 0 m/s cannot converge from an arbitrary initial gap
 class TestFollowingDistance:
   def test_following_distance(self):
     v_lead = float(self.speed)

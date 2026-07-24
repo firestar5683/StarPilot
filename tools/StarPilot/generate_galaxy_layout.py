@@ -25,6 +25,26 @@ DROPDOWN_MAPPING = {
 # Custom controls implemented outside the tuple vectors in Qt settings panels.
 # Inject these so regenerated galaxy layouts retain equivalent functionality.
 INJECTED_SECTION_PARAMS = {
+    "Longitudinal (Speed & Following)": [
+        {
+            "key": "LongitudinalModelPreference",
+            "label": "Longitudinal Preference",
+            "description": "Set-Speed First prioritizes steady cruise on open roads. Model First gives the driving model more influence. Both use the same lead and stop safety.",
+            "data_type": "int",
+            "ui_type": "dropdown",
+            "options": [
+                {"value": 0, "label": "Set-Speed First"},
+                {"value": 1, "label": "Model First"},
+            ],
+        },
+        {
+            "key": "ShowCEMStatus",
+            "label": "Longitudinal Status",
+            "description": "Show which constraint is currently influencing the unified longitudinal planner.",
+            "data_type": "bool",
+            "ui_type": "toggle",
+        },
+    ],
     "Vehicle": [
         {
             "key": "CarMake",
@@ -61,13 +81,35 @@ INJECTED_SECTION_PARAMS = {
 
 # Keys explicitly hidden from The Galaxy's generic settings UI.
 HIDDEN_KEYS = {
+    "CCMLaunchAssist",
+    "CCMLead",
+    "CCMSetSpeedMargin",
+    "CCMSpeed",
+    "CCMSpeedLead",
+    "CECurves",
+    "CECurvesLead",
+    "CELead",
+    "CEModelStopTime",
+    "CESignalLaneDetection",
+    "CESignalSpeed",
+    "CESlowerLead",
+    "CESpeed",
+    "CESpeedLead",
+    "CEStopLights",
+    "CEStoppedLead",
+    "ConditionalChill",
+    "ConditionalExperimental",
     "FrogsGoMoosTweak",
     "HumanAcceleration",
     "DisableWideRoad",
     "LockDoorsTimer",
     "NewLongAPI",
-    "ToyotaDoors",
+    "PersistChillState",
+    "PersistExperimentalState",
     "ReverseCruise",
+    "ShowCCMStatus",
+    "ShowCEMStatus",
+    "ToyotaDoors",
 }
 
 HIDDEN_SECTION_NAMES = {"Model & Customization"}
@@ -168,8 +210,6 @@ PARENT_KEYS_MAPPING = {
     "longitudinal_settings.cc": {
         "advancedLongitudinalTuneKeys": "AdvancedLongitudinalTune",
         "aggressivePersonalityKeys": "AggressivePersonalityProfile",
-        "conditionalChillKeys": "ConditionalChill",
-        "conditionalExperimentalKeys": "ConditionalExperimental",
         "curveSpeedKeys": "CurveSpeedController",
         "customDrivingPersonalityKeys": "CustomPersonalities",
         "longitudinalTuneKeys": "LongitudinalTune",
@@ -546,57 +586,7 @@ def parse_cpp_file(filename):
         if key in child_to_parent: s["parent_key"] = child_to_parent[key]
         if key in ALL_PARENT_KEYS: s["is_parent_toggle"] = True
 
-        if key == "CELead":
-            s["is_parent_toggle"] = True
-
         items.append(s)
-
-        # Mirror CELead's split sub-toggles from StarPilotButtonToggleControl.
-        if key == "CELead":
-            items.extend([
-                {
-                    "key": "CESlowerLead",
-                    "label": "Slower Lead",
-                    "description": "Switch to \"Experimental Mode\" when a slower lead vehicle is detected ahead.",
-                    "data_type": "bool",
-                    "ui_type": "toggle",
-                    "parent_key": "CELead",
-                },
-                {
-                    "key": "CEStoppedLead",
-                    "label": "Stopped Lead",
-                    "description": "Switch to \"Experimental Mode\" when a stopped lead vehicle is detected ahead.",
-                    "data_type": "bool",
-                    "ui_type": "toggle",
-                    "parent_key": "CELead",
-                },
-            ])
-
-        # Mirror CESpeed/CCMSpeed's dual sliders (with-lead variants) from Qt.
-        if key == "CESpeed":
-            items.append({
-                "key": "CESpeedLead",
-                "label": "Below (With Lead)",
-                "description": "Switch to \"Experimental Mode\" when driving below this speed with a lead.",
-                "data_type": "int",
-                "ui_type": "numeric",
-                "min": 0.0,
-                "max": 99.0,
-                "step": 1.0,
-                "parent_key": "ConditionalExperimental",
-            })
-        elif key == "CCMSpeed":
-            items.append({
-                "key": "CCMSpeedLead",
-                "label": "Above (With Lead)",
-                "description": "Switch to \"Chill Mode\" when following a stable lead above this speed.",
-                "data_type": "int",
-                "ui_type": "numeric",
-                "min": 0.0,
-                "max": 99.0,
-                "step": 1.0,
-                "parent_key": "ConditionalChill",
-            })
 
     return items
 

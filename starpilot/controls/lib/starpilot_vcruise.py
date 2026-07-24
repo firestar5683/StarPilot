@@ -270,7 +270,7 @@ class StarPilotVCruise:
     long_control_active = sm["carControl"].longActive
 
     raw_stop_seen = bool(
-      self.starpilot_planner.starpilot_cem.stop_light_detected
+      self.starpilot_planner.longitudinal_intent.stop_detected
       or getattr(self.starpilot_planner, "raw_model_stopped", False)
       or sm["starpilotCarState"].dashboardStopSign > 0
     )
@@ -303,11 +303,11 @@ class StarPilotVCruise:
       and not stop_then_turn
     )
 
-    # CEM/model path: model predicted stop within ACTIVATION_M.
+    # Unified model path: model predicted stop within ACTIVATION_M.
     # Exclude when a lead is present (raw or filtered) — the handoff_to_stopped_lead path
-    # in CEM can set stop_light_detected even with a lead present, which would incorrectly
+    # can report stop intent even with a lead present, which would incorrectly
     # activate Force Stop and stop the car far behind the lead instead of letting ACC handle it.
-    cem_path = (self.starpilot_planner.starpilot_cem.stop_light_detected
+    cem_path = (self.starpilot_planner.longitudinal_intent.stop_detected
                 and controls_enabled and starpilot_toggles.force_stops
                 and self.starpilot_planner.model_length < ACTIVATION_M
                 and self.override_force_stop_timer <= 0
@@ -388,7 +388,7 @@ class StarPilotVCruise:
     elif self.standstill_force_stop_hold:
       self.force_stop_timer = max(self.force_stop_timer, 0.5)
     elif (self.forcing_stop and sm["carState"].standstill and not dash_active and
-          not self.starpilot_planner.starpilot_cem.stop_light_detected and not raw_model_stopped):
+          not self.starpilot_planner.longitudinal_intent.stop_detected and not raw_model_stopped):
       self.force_stop_timer = 0.0
     else:
       self.force_stop_timer = max(self.force_stop_timer - DT_MDL * 0.25, 0.0)

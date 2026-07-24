@@ -61,7 +61,6 @@ from openpilot.starpilot.common.maps_catalog import (
   schedule_label,
   schedule_param_value,
 )
-from openpilot.starpilot.common.experimental_state import sync_persist_chill_state, sync_persist_experimental_state
 from openpilot.starpilot.common.favorite_slots import (
   FAVORITE_ACTION_OPTIONS,
   FAVORITE_SLOTS_PARAM,
@@ -936,15 +935,7 @@ _TROUBLESHOOT_PERSONALITY_KEYS = [
 ]
 
 _TROUBLESHOOT_CEM_KEYS = [
-  "ConditionalExperimental",
-  "CESpeed",
-  "CESpeedLead",
-  "CECurves",
-  "CELead",
-  "CESlowerLead",
-  "CEStoppedLead",
-  "CEModelStopTime",
-  "CESignalSpeed",
+  "LongitudinalModelPreference",
   "ShowCEMStatus",
 ]
 
@@ -4510,22 +4501,6 @@ def setup(app):
           "updated": updated,
         }), 200
 
-      if key in {"ConditionalExperimental", "ConditionalChill"}:
-        enabled = str_val.strip() in ("1", "true", "True")
-        params.put_bool(key, enabled)
-
-        updated = {key: enabled}
-        if enabled:
-          other_key = "ConditionalChill" if key == "ConditionalExperimental" else "ConditionalExperimental"
-          params.put_bool(other_key, False)
-          updated[other_key] = False
-
-        update_starpilot_toggles()
-        return jsonify({
-          "message": f"Parameter '{key}' updated successfully.",
-          "updated": updated,
-        }), 200
-
       if key == "CustomAccelProfile":
         enabled = str_val.strip() in ("1", "true", "True")
         params.put_bool(key, enabled)
@@ -4543,30 +4518,6 @@ def setup(app):
         return jsonify({
           "message": f"Parameter '{key}' updated successfully.",
           "updated": updated,
-        }), 200
-
-      if key == "PersistExperimentalState":
-        enabled = str_val.strip() in ("1", "true", "True")
-        sync_persist_experimental_state(params, params_memory, enabled)
-        update_starpilot_toggles()
-        return jsonify({
-          "message": f"Parameter '{key}' updated successfully.",
-          "updated": {
-            "PersistExperimentalState": enabled,
-            "PersistedCEStatus": params.get_int("PersistedCEStatus", default=0),
-          },
-        }), 200
-
-      if key == "PersistChillState":
-        enabled = str_val.strip() in ("1", "true", "True")
-        sync_persist_chill_state(params, params_memory, enabled)
-        update_starpilot_toggles()
-        return jsonify({
-          "message": f"Parameter '{key}' updated successfully.",
-          "updated": {
-            "PersistChillState": enabled,
-            "PersistedCCStatus": params.get_int("PersistedCCStatus", default=0),
-          },
         }), 200
 
       if key == "IsRHD":

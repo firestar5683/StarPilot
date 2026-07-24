@@ -589,123 +589,29 @@
         "settings_tier": "advanced"
       },
       {
-        "key": "ConditionalExperimental",
-        "label": "Conditional Experimental Mode",
-        "description": "Automatically switch to \"Experimental Mode\" when set conditions are met. Allows the model to handle challenging situations with smarter decision making.",
-        "data_type": "bool",
-        "ui_type": "toggle",
-        "is_parent_toggle": true,
-        "settings_tier": "simple"
-      },
-      {
-        "key": "PersistExperimentalState",
-        "label": "Persist Experimental State",
-        "description": "Keep your manual Conditional Experimental override through reboots until you manually clear it.",
-        "data_type": "bool",
-        "ui_type": "toggle",
-        "parent_key": "ConditionalExperimental",
-        "settings_tier": "simple"
-      },
-      {
-        "key": "CESpeed",
-        "label": "Below",
-        "description": "Switch to \"Experimental Mode\" when driving below this speed without a lead to help openpilot handle low-speed situations more smoothly.",
+        "key": "LongitudinalModelPreference",
+        "label": "Longitudinal Preference",
+        "description": "Set-Speed First prioritizes steady cruise on open roads. Model First gives the driving model more influence. Both use the same lead and stop safety.",
         "data_type": "int",
-        "ui_type": "numeric",
-        "min": 0.0,
-        "max": 99.0,
-        "step": 1.0,
-        "parent_key": "ConditionalExperimental",
-        "settings_tier": "simple"
-      },
-      {
-        "key": "CESpeedLead",
-        "label": "Below (With Lead)",
-        "description": "Switch to \"Experimental Mode\" when driving below this speed with a lead.",
-        "data_type": "int",
-        "ui_type": "numeric",
-        "min": 0.0,
-        "max": 99.0,
-        "step": 1.0,
-        "parent_key": "ConditionalExperimental",
-        "settings_tier": "simple"
-      },
-      {
-        "key": "CECurves",
-        "label": "Curve Detected Ahead",
-        "description": "Switch to \"Experimental Mode\" when a curve is detected to allow the model to set an appropriate speed for the curve.",
-        "data_type": "bool",
-        "ui_type": "toggle",
-        "parent_key": "ConditionalExperimental",
-        "settings_tier": "simple"
-      },
-      {
-        "key": "CEStopLights",
-        "label": "\\\"Detected\\\" Stop Lights/Signs",
-        "description": "Switch to \"Experimental Mode\" whenever the driving model \"detects\" a red light or stop sign.\n\nDisclaimer: openpilot does not explicitly detect traffic lights or stop signs. In \"Experimental Mode\", openpilot makes end-to-end driving decisions from camera input, which means it may stop even when there's no clear reason!",
-        "data_type": "bool",
-        "ui_type": "toggle",
-        "parent_key": "ConditionalExperimental",
-        "settings_tier": "simple"
-      },
-      {
-        "key": "CELead",
-        "label": "Lead Detected Ahead",
-        "description": "Switch to \"Experimental Mode\" when a slower or stopped vehicle is detected. Can make braking smoother and more reliable on some vehicles.",
-        "data_type": "bool",
-        "ui_type": "toggle",
-        "parent_key": "ConditionalExperimental",
-        "is_parent_toggle": true,
-        "settings_tier": "simple"
-      },
-      {
-        "key": "CESlowerLead",
-        "label": "Slower Lead",
-        "description": "Switch to \"Experimental Mode\" when a slower lead vehicle is detected ahead.",
-        "data_type": "bool",
-        "ui_type": "toggle",
-        "parent_key": "CELead",
-        "settings_tier": "simple"
-      },
-      {
-        "key": "CEStoppedLead",
-        "label": "Stopped Lead",
-        "description": "Switch to \"Experimental Mode\" when a stopped lead vehicle is detected ahead.",
-        "data_type": "bool",
-        "ui_type": "toggle",
-        "parent_key": "CELead",
-        "settings_tier": "simple"
-      },
-      {
-        "key": "CEModelStopTime",
-        "label": "Predicted Stop In",
-        "description": "Switch to \"Experimental Mode\" when openpilot predicts a stop within the set time. This is usually triggered when the model \"sees\" a red light or stop sign ahead.\n\nDisclaimer: openpilot does not explicitly detect traffic lights or stop signs. In \"Experimental Mode\", openpilot makes end-to-end driving decisions from camera input, which means it may stop even when there's no clear reason!",
-        "data_type": "float",
-        "ui_type": "numeric",
-        "min": 0.0,
-        "max": 9.0,
-        "parent_key": "ConditionalExperimental",
-        "settings_tier": "simple"
-      },
-      {
-        "key": "CESignalSpeed",
-        "label": "Turn Signal Below",
-        "description": "Switch to \"Experimental Mode\" when using a turn signal below the set speed to allow the model to choose an appropriate speed for smoother left and right turns.",
-        "data_type": "int",
-        "ui_type": "numeric",
-        "min": 0.0,
-        "max": 99.0,
-        "step": 1.0,
-        "parent_key": "ConditionalExperimental",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "Set-Speed First"
+          },
+          {
+            "value": 1,
+            "label": "Model First"
+          }
+        ],
         "settings_tier": "simple"
       },
       {
         "key": "ShowCEMStatus",
-        "label": "Status Widget",
-        "description": "Show which condition triggered \"Experimental Mode\" on the driving screen.",
+        "label": "Longitudinal Status",
+        "description": "Show which constraint is currently influencing the unified longitudinal planner.",
         "data_type": "bool",
         "ui_type": "toggle",
-        "parent_key": "ConditionalExperimental",
         "settings_tier": "simple"
       },
       {
@@ -1858,87 +1764,6 @@
         "data_type": "bool",
         "ui_type": "toggle",
         "parent_key": "SpeedLimitController",
-        "settings_tier": "advanced"
-      },
-      {
-        "key": "ConditionalChill",
-        "label": "Conditional Chill Mode",
-        "description": "Keep \"Experimental Mode\" on by default, but temporarily switch to \"Chill Mode\" in simple cruising scenes where speed holding is usually better.",
-        "data_type": "bool",
-        "ui_type": "toggle",
-        "is_parent_toggle": true,
-        "settings_tier": "advanced"
-      },
-      {
-        "key": "PersistChillState",
-        "label": "Persist Chill State",
-        "description": "Keep your manual Conditional Chill override through reboots until you manually clear it.",
-        "data_type": "bool",
-        "ui_type": "toggle",
-        "parent_key": "ConditionalChill",
-        "settings_tier": "advanced"
-      },
-      {
-        "key": "CCMSpeed",
-        "label": "Above",
-        "description": "Switch to \"Chill Mode\" on open roads above this speed when no lead is detected and the car is still below the set speed.",
-        "data_type": "int",
-        "ui_type": "numeric",
-        "min": 0.0,
-        "max": 99.0,
-        "step": 1.0,
-        "parent_key": "ConditionalChill",
-        "settings_tier": "advanced"
-      },
-      {
-        "key": "CCMSpeedLead",
-        "label": "Above (With Lead)",
-        "description": "Switch to \"Chill Mode\" when following a stable lead above this speed.",
-        "data_type": "int",
-        "ui_type": "numeric",
-        "min": 0.0,
-        "max": 99.0,
-        "step": 1.0,
-        "parent_key": "ConditionalChill",
-        "settings_tier": "advanced"
-      },
-      {
-        "key": "CCMLead",
-        "label": "Stable Lead Ahead",
-        "description": "Switch to \"Chill Mode\" when following a steady, well-tracked lead vehicle at cruising speeds.",
-        "data_type": "bool",
-        "ui_type": "toggle",
-        "parent_key": "ConditionalChill",
-        "settings_tier": "advanced"
-      },
-      {
-        "key": "CCMLaunchAssist",
-        "label": "Launch Assist",
-        "description": "Temporarily switch to \"Chill Mode\" when starting from a stop if planner is already allowing throttle. Useful if your car launches too slowly from lights or stop signs.",
-        "data_type": "bool",
-        "ui_type": "toggle",
-        "parent_key": "ConditionalChill",
-        "settings_tier": "advanced"
-      },
-      {
-        "key": "CCMSetSpeedMargin",
-        "label": "Set Speed Margin",
-        "description": "How far below the set speed the car must be before open-road Conditional Chill can engage.",
-        "data_type": "int",
-        "ui_type": "numeric",
-        "min": 0.0,
-        "max": 15.0,
-        "step": 1.0,
-        "parent_key": "ConditionalChill",
-        "settings_tier": "advanced"
-      },
-      {
-        "key": "ShowCCMStatus",
-        "label": "Status Widget",
-        "description": "Show which condition triggered \"Chill Mode\" on the driving screen.",
-        "data_type": "bool",
-        "ui_type": "toggle",
-        "parent_key": "ConditionalChill",
         "settings_tier": "advanced"
       },
       {

@@ -736,10 +736,7 @@ class SelfdriveD:
 
     self.starpilot_events.add_from_msg(self.sm['starpilotPlan'].starpilotEvents)
 
-    if self.starpilot_toggles.conditional_experimental_mode or getattr(self.starpilot_toggles, "conditional_chill_mode", False):
-      self.experimental_mode = self.sm['starpilotPlan'].experimentalMode
-    else:
-      self.experimental_mode |= self.sm['starpilotPlan'].experimentalMode
+    self.experimental_mode = False if self.safe_mode else self.sm['starpilotPlan'].experimentalMode
 
   def data_sample(self):
     _car_state = messaging.recv_one(self.car_state_sock)
@@ -885,10 +882,6 @@ class SelfdriveD:
       self.is_metric = self.params.get_bool("IsMetric")
       self.is_ldw_enabled = self.params.get_bool("IsLdwEnabled")
       self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
-      if self.safe_mode:
-        self.experimental_mode = False
-      elif not self.starpilot_toggles.conditional_experimental_mode:
-        self.experimental_mode = self.params.get_bool("ExperimentalMode") and self.CP.openpilotLongitudinalControl
       self.personality = log.LongitudinalPersonality.relaxed if self.safe_mode else self.params.get("LongitudinalPersonality", return_default=True)
       time.sleep(0.1)
 

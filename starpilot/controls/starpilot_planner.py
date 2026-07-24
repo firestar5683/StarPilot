@@ -4,32 +4,22 @@ import math
 import time
 
 import cereal.messaging as messaging
-import numpy as np
 
 from openpilot.common.constants import CV
-from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.gps import get_gps_location_service
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
-from openpilot.selfdrive.controls.lib.lead_behavior import (
-  is_radarless_matched_follow_window,
-  should_hold_tracked_vision_lead,
-  should_track_lead,
-)
-from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import A_CHANGE_COST, DANGER_ZONE_COST, J_EGO_COST, STOP_DISTANCE
+from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import A_CHANGE_COST, DANGER_ZONE_COST, J_EGO_COST
 
 from openpilot.starpilot.common.starpilot_utilities import calculate_lane_width, calculate_road_curvature
-from openpilot.starpilot.common.starpilot_variables import CRUISING_SPEED, MINIMUM_LATERAL_ACCELERATION, PLANNER_TIME, THRESHOLD
-from openpilot.starpilot.controls.lib.conditional_chill_mode import ConditionalChillMode
-from openpilot.starpilot.controls.lib.conditional_experimental_mode import ConditionalExperimentalMode
+from openpilot.starpilot.common.starpilot_variables import CRUISING_SPEED, MINIMUM_LATERAL_ACCELERATION, PLANNER_TIME
 from openpilot.starpilot.controls.lib.starpilot_acceleration import StarPilotAcceleration
 from openpilot.starpilot.controls.lib.starpilot_events import StarPilotEvents
 from openpilot.starpilot.controls.lib.starpilot_following import StarPilotFollowing
 from openpilot.starpilot.controls.lib.starpilot_vcruise import StarPilotVCruise
+from openpilot.starpilot.controls.lib.unified_longitudinal_intent import UnifiedLongitudinalIntent
 from openpilot.starpilot.controls.lib.weather_checker import WeatherChecker
-
-RADARLESS_TRACK_HOLD_TIME = 0.45
 
 
 def _sanitize_json_value(value):
@@ -52,11 +42,10 @@ class StarPilotPlanner:
     self.params_memory = Params(memory=True)
 
     self.starpilot_acceleration = StarPilotAcceleration(self)
-    self.starpilot_cem = ConditionalExperimentalMode(self)
-    self.starpilot_ccm = ConditionalChillMode(self, self.starpilot_cem)
     self.starpilot_events = StarPilotEvents(self, error_log, ThemeManager)
     self.starpilot_following = StarPilotFollowing(self)
     self.starpilot_vcruise = StarPilotVCruise(self)
+    self.longitudinal_intent = UnifiedLongitudinalIntent(self)
     self.starpilot_weather = WeatherChecker(self)
 
     self.driving_in_curve = False
@@ -82,7 +71,6 @@ class StarPilotPlanner:
     self._lane_width_counter = 0
     self.lateral_acceleration = 0
     self.model_length = 0
-    self.lead_path_y = 0
     self.road_curvature = 0
     self.time_to_curve = 0
     self.v_cruise = 0
@@ -90,9 +78,6 @@ class StarPilotPlanner:
     self.gps_position = None
 
     self.gps_location_service = get_gps_location_service(self.params)
-
-    self.tracking_lead_filter = FirstOrderFilter(0, 0.5, DT_MDL)
-    self.radarless_follow_hold_until = 0.0
 
   def shutdown(self):
     self.starpilot_vcruise.slc.shutdown()
@@ -189,13 +174,6 @@ class StarPilotPlanner:
     self.CS_prev_right_blinker = CS.rightBlinker
 
     self.model_length = sm["modelV2"].position.x[-1]
-    model_position = sm["modelV2"].position
-    model_path_y = getattr(model_position, "y", [])
-    if len(model_path_y) == len(model_position.x):
-      self.lead_path_y = float(np.interp(self.lead_one.dRel, model_position.x, model_path_y))
-    else:
-      self.lead_path_y = 0.0
-
     self.raw_model_stopped = self.model_length < CRUISING_SPEED * PLANNER_TIME
     self.model_stopped = self.raw_model_stopped or self.starpilot_vcruise.forcing_stop
 
@@ -203,24 +181,11 @@ class StarPilotPlanner:
 
     self.road_curvature_detected = (1 / abs(self.road_curvature))**0.5 < v_ego > CRUISING_SPEED and not (sm["carState"].leftBlinker or sm["carState"].rightBlinker)
 
-    if not sm["carState"].standstill:
-      self.tracking_lead = self.update_lead_status(v_ego)
+    self.tracking_lead = bool(self.lead_one.status)
 
     self.starpilot_following.update(controls_enabled, v_ego, sm, starpilot_toggles)
 
-    conditional_tracking_active = controls_enabled or sm["starpilotCarState"].alwaysOnLateralEnabled
-    if conditional_tracking_active and bool(getattr(starpilot_toggles, "conditional_experimental_mode", False)):
-      # Keep CEM's filters warm in AOL so engagement can inherit the current scene.
-      self.starpilot_cem.update(v_ego, sm, starpilot_toggles)
-      self.starpilot_ccm.experimental_mode = True
-    elif conditional_tracking_active and bool(getattr(starpilot_toggles, "conditional_chill_mode", False)):
-      self.starpilot_ccm.update(v_ego, v_cruise, sm, starpilot_toggles)
-      self.starpilot_cem.experimental_mode = False
-    else:
-      self.starpilot_ccm.experimental_mode = True
-      self.starpilot_cem.experimental_mode = False
-      self.starpilot_cem.curve_detected = False
-      self.starpilot_cem.stop_sign_and_light(v_ego, sm, PLANNER_TIME - 2)
+    self.longitudinal_intent.update(v_ego, sm, starpilot_toggles)
 
     self.v_cruise = self.starpilot_vcruise.update(controls_enabled, now, time_validated, v_cruise, v_ego, sm, starpilot_toggles)
 
@@ -230,52 +195,6 @@ class StarPilotPlanner:
       self.starpilot_weather.update_weather(now, starpilot_toggles)
     else:
       self.starpilot_weather.weather_id = 0
-
-  def update_lead_status(self, v_ego):
-    following_lead = should_track_lead(
-      self.lead_one.status,
-      self.lead_one.dRel,
-      self.model_length,
-      STOP_DISTANCE,
-      v_ego,
-      v_lead=self.lead_one.vLead,
-      radar=bool(getattr(self.lead_one, "radar", False)),
-    )
-    continuity_candidate = self.tracking_lead or self.tracking_lead_filter.x >= THRESHOLD * 0.6
-    if not following_lead and continuity_candidate:
-      following_lead = should_hold_tracked_vision_lead(
-        self.lead_one.status,
-        self.lead_one.dRel,
-        self.model_length,
-        STOP_DISTANCE,
-        v_ego,
-        model_prob=float(getattr(self.lead_one, "modelProb", 0.0)),
-        y_rel=float(getattr(self.lead_one, "yRel", 0.0)),
-        path_y=self.lead_path_y,
-        radar=bool(getattr(self.lead_one, "radar", False)),
-      )
-    now_t = time.monotonic()
-    lead_radar = bool(getattr(self.lead_one, "radar", False))
-    t_follow = max(float(getattr(self.starpilot_following, "t_follow", 0.0)), 1.45)
-    matched_follow_window = self.lead_one.status and is_radarless_matched_follow_window(
-      v_ego,
-      self.lead_one.dRel,
-      self.lead_one.vLead,
-      t_follow,
-      radar=lead_radar,
-      lead_brake=max(0.0, -float(getattr(self.lead_one, "aLeadK", 0.0))),
-      lead_prob=float(getattr(self.lead_one, "modelProb", 0.0)),
-    )
-    if matched_follow_window and (following_lead or self.tracking_lead or self.tracking_lead_filter.x >= THRESHOLD * 0.6):
-      self.radarless_follow_hold_until = now_t + RADARLESS_TRACK_HOLD_TIME
-    elif lead_radar or not self.lead_one.status:
-      self.radarless_follow_hold_until = 0.0
-
-    if not following_lead and matched_follow_window and now_t < self.radarless_follow_hold_until:
-      following_lead = True
-
-    self.tracking_lead_filter.update(following_lead)
-    return self.tracking_lead_filter.x >= THRESHOLD
 
   def publish(self, theme_updated, sm, pm, starpilot_toggles, serialized_toggles=""):
     starpilot_plan_send = messaging.new_message("starpilotPlan")
@@ -293,16 +212,15 @@ class StarPilotPlanner:
     starpilotPlan.cscTraining = self.starpilot_vcruise.csc.enable_training
 
     starpilotPlan.desiredFollowDistance = int(self.starpilot_following.desired_follow_distance)
-    starpilotPlan.disableThrottle = self.starpilot_following.disable_throttle
+    starpilotPlan.disableThrottle = False
     starpilotPlan.trackingLead = self.tracking_lead
 
-    conditional_experimental_mode = False
-    if starpilot_toggles.conditional_experimental_mode:
-      conditional_experimental_mode = self.starpilot_cem.experimental_mode
-    elif starpilot_toggles.conditional_chill_mode:
-      conditional_experimental_mode = self.starpilot_ccm.experimental_mode
-
-    starpilotPlan.experimentalMode = conditional_experimental_mode or self.starpilot_vcruise.slc.experimental_mode
+    starpilotPlan.experimentalMode = bool(
+      not getattr(starpilot_toggles, "safe_mode", False) and (
+        starpilot_toggles.longitudinal_model_preference or
+        self.longitudinal_intent.status_value != 0
+      )
+    )
 
     starpilotPlan.forcingStop = self.starpilot_vcruise.forcing_stop
     starpilotPlan.forcingStopLength = self.starpilot_vcruise.tracked_model_length
@@ -327,7 +245,7 @@ class StarPilotPlanner:
     starpilotPlan.maxAcceleration = float(self.starpilot_acceleration.max_accel)
     starpilotPlan.minAcceleration = float(self.starpilot_acceleration.min_accel)
 
-    starpilotPlan.redLight = self.starpilot_cem.stop_light_detected
+    starpilotPlan.redLight = self.longitudinal_intent.stop_detected
 
     starpilotPlan.roadCurvature = self.road_curvature
 

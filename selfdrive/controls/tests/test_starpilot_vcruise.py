@@ -34,7 +34,7 @@ def make_vcruise(*, red_light=False, raw_model_stopped=False, forcing_stop=False
     params=FakeParams(),
     params_memory=FakeParams({"NavInstructionState": nav_state or {}}),
     lead_one=SimpleNamespace(status=False, dRel=float("inf"), vLead=0.0),
-    starpilot_cem=SimpleNamespace(stop_light_detected=red_light),
+    longitudinal_intent=SimpleNamespace(stop_detected=red_light),
     tracking_lead=False,
     driving_in_curve=False,
     model_length=60.0,
@@ -432,9 +432,9 @@ def test_stop_then_turn_override_releases_after_stop_seen_window_expires():
   sm["carState"].steeringAngleDeg = 30.0
   toggles = make_toggles()
 
-  planner.starpilot_cem.stop_light_detected = True
+  planner.longitudinal_intent.stop_detected = True
   update_vcruise(vcruise, sm, toggles, now=0.0, v_ego=7.0)
-  planner.starpilot_cem.stop_light_detected = False
+  planner.longitudinal_intent.stop_detected = False
 
   now = FORCE_STOP_TURN_VETO_STOP_SEEN_HOLD_TIME + 0.5
   for frame in range(12):
@@ -521,7 +521,7 @@ def test_standstill_seeded_force_stop_hold_requires_clear_window_before_release(
   assert first == pytest.approx(0.0)
   assert vcruise.standstill_force_stop_hold
 
-  planner.starpilot_cem.stop_light_detected = False
+  planner.longitudinal_intent.stop_detected = False
   second = vcruise.update(
     controls_enabled=True,
     now=0.4,
@@ -567,7 +567,7 @@ def test_standstill_seeded_force_stop_hold_accepts_datetime_now_without_crashing
   assert first == pytest.approx(0.0)
   assert vcruise.standstill_force_stop_hold
 
-  planner.starpilot_cem.stop_light_detected = False
+  planner.longitudinal_intent.stop_detected = False
   second = vcruise.update(
     controls_enabled=True,
     now=base + datetime.timedelta(seconds=0.4),

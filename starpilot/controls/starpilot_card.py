@@ -6,14 +6,7 @@ from openpilot.common.params import Params
 from openpilot.selfdrive.car.cruise import CRUISE_LONG_PRESS, ButtonType
 from openpilot.selfdrive.selfdrived.events import ET
 
-from openpilot.starpilot.common.experimental_state import (
-  CCStatus,
-  CEStatus,
-  next_manual_cc_status,
-  next_manual_ce_status,
-  sync_manual_cc_state,
-  sync_manual_ce_state,
-)
+from openpilot.starpilot.common.experimental_state import toggle_longitudinal_model_preference
 from openpilot.starpilot.common.favorite_slots import toggle_favorite_slot
 from openpilot.starpilot.common.starpilot_utilities import is_FrogsGoMoo
 from openpilot.starpilot.common.starpilot_variables import ERROR_LOGS_PATH, GearShifter, NON_DRIVING_GEARS
@@ -104,18 +97,7 @@ class StarPilotCard:
     if getattr(starpilot_toggles, "safe_mode", False):
       return
 
-    if starpilot_toggles.conditional_experimental_mode:
-      current_status = self.params_memory.get_int("CEStatus", default=CEStatus["OFF"])
-      override_value = next_manual_ce_status(current_status, sm["selfdriveState"].experimentalMode)
-      self.params_memory.put_int("CEStatus", override_value)
-      sync_manual_ce_state(self.params, override_value)
-    elif getattr(starpilot_toggles, "conditional_chill_mode", False):
-      current_status = self.params_memory.get_int("CCStatus", default=CCStatus["OFF"])
-      override_value = next_manual_cc_status(current_status, sm["selfdriveState"].experimentalMode)
-      self.params_memory.put_int("CCStatus", override_value)
-      sync_manual_cc_state(self.params, override_value)
-    else:
-      self.params.put_bool_nonblocking("ExperimentalMode", not sm["selfdriveState"].experimentalMode)
+    toggle_longitudinal_model_preference(self.params, self.params_memory)
 
   def update(self, carState, starpilotCarState, sm, starpilot_toggles):
     self.switchback_mode_enabled = self.params_memory.get_bool("SwitchbackModeEnabled")

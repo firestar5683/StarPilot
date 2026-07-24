@@ -44,6 +44,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ExperimentalLongitudinalEnabled", {PERSISTENT, BOOL}},
     {"ExperimentalMode", {PERSISTENT, BOOL}},
     {"ExperimentalModeConfirmed", {PERSISTENT, BOOL}},
+    {"LongitudinalModelPreference", {PERSISTENT, INT, "0", "0", 1, SETTINGS_SIMPLE}},
+    {"LongitudinalModelPreferenceOverride", {CLEAR_ON_MANAGER_START | CLEAR_ON_OFFROAD_TRANSITION, INT, "-1", "-1"}},
     {"PersistChillState", {PERSISTENT, BOOL, "0", "0", 1}},
     {"PersistExperimentalState", {PERSISTENT, BOOL, "0", "0", 1, SETTINGS_SIMPLE}},
     {"PersistedCCStatus", {PERSISTENT, INT, "0", "0"}},

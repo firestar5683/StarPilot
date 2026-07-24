@@ -6,9 +6,8 @@ from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.widgets import Widget
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.starpilot.common.experimental_state import (
-  CEStatus,
-  next_manual_ce_status,
-  sync_manual_ce_state,
+  requested_experimental_mode,
+  toggle_longitudinal_model_preference,
 )
 
 
@@ -35,7 +34,6 @@ class ExpButton(Widget):
       "disengaged": rl.Color(0, 0, 0, 166),
       "switchback": rl.Color(0x8b, 0x6c, 0xc5, 255),
       "aol": rl.Color(0x0a, 0xba, 0xb5, 255),
-      "cem_disabled": rl.Color(0xff, 0xff, 0x00, 255),
       "experimental": rl.Color(0xda, 0x6f, 0x25, 255),
       "traffic": rl.Color(0xc9, 0x22, 0x31, 255),
     }
@@ -50,7 +48,7 @@ class ExpButton(Widget):
 
   def _update_state(self) -> None:
     selfdrive_state = ui_state.sm["selfdriveState"]
-    self._experimental_mode = selfdrive_state.experimentalMode
+    self._experimental_mode = requested_experimental_mode(self._params, ui_state.params_memory)
     self._engageable = selfdrive_state.engageable or selfdrive_state.enabled or ui_state.always_on_lateral_active
 
     # Smooth steering angle for rotating wheel
@@ -65,8 +63,6 @@ class ExpButton(Widget):
       self._bg_color = self._bg_colors["switchback"]
     elif ui_state.always_on_lateral_active:
       self._bg_color = self._bg_colors["aol"]
-    elif ui_state.conditional_status == 1:
-      self._bg_color = self._bg_colors["cem_disabled"]
     elif self._held_or_actual_mode():
       self._bg_color = self._bg_colors["experimental"]
     elif ui_state.traffic_mode_enabled:
@@ -77,20 +73,9 @@ class ExpButton(Widget):
   def _handle_mouse_release(self, _):
     super()._handle_mouse_release(_)
     if self._is_toggle_allowed():
-      if self._params.get_bool("ConditionalExperimental"):
-        current_status = ui_state.params_memory.get_int("CEStatus", default=CEStatus["OFF"])
-        override_value = next_manual_ce_status(current_status, self._experimental_mode)
-        ui_state.params_memory.put_int("CEStatus", override_value)
-        sync_manual_ce_state(self._params, override_value)
-        self._held_mode = None
-        self._hold_end_time = None
-      else:
-        new_mode = not self._experimental_mode
-        self._params.put_bool("ExperimentalMode", new_mode)
-
-        # Hold new state temporarily
-        self._held_mode = new_mode
-        self._hold_end_time = time.monotonic() + self._hold_duration
+      new_mode = toggle_longitudinal_model_preference(self._params, ui_state.params_memory)
+      self._held_mode = new_mode
+      self._hold_end_time = time.monotonic() + self._hold_duration
 
   def _render(self, rect: rl.Rectangle) -> None:
     center_x = int(self._rect.x + self._rect.width // 2)

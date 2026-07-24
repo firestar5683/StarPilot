@@ -4,7 +4,6 @@ from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N
 from openpilot.common.pid import PIDController
 from openpilot.selfdrive.modeld.constants import ModelConstants
-from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.controls.lib.longcontrol_vehicle_tunes import LongControlVehicleTuning
 
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
@@ -17,7 +16,6 @@ LEAD_GAP_SETTLE_MAX_START_ACCEL = 0.25
 MOVING_STOP_FOLLOW_MIN_GAP = 0.25
 NEGATIVE_TARGET_CREEP_GUARD_SPEED = 0.35
 NEGATIVE_TARGET_CREEP_GUARD_DECEL = 0.40
-MODE_TRANSITION_MAX_DECEL = 4.0
 
 LongCtrlState = car.CarControl.Actuators.LongControlState
 
@@ -114,7 +112,6 @@ class LongControl:
   def __init__(self, CP):
     self.CP = CP
     self.long_control_state = LongCtrlState.off
-    self.experimental_mode = False
     self.pid = PIDController((CP.longitudinalTuning.kpBP, CP.longitudinalTuning.kpV),
                              (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
                              rate=1 / DT_CTRL)
@@ -122,37 +119,9 @@ class LongControl:
     kf = getattr(CP.longitudinalTuning, 'kfDEPRECATED', 0.0)
     self.feedforward_gain = kf if kf != 0.0 else 1.0
     self.v_pid = 0.0
-    self._mode_setup()
     self.last_output_accel = 0.0
     self.stop_release_counter = 0
     self.vehicle_tuning = LongControlVehicleTuning(CP)
-
-  def update_mpc_mode(self, experimental_mode):
-    new_mode = 'blended' if experimental_mode else 'acc'
-
-    if self.transitioning and self.prev_mode == 'blended' and self.current_mode == 'acc':
-      self.mode_transition_timer = 0.0
-
-    if new_mode != self.current_mode:
-      self.prev_mode = self.current_mode
-      self.transitioning = True
-      self.mode_transition_timer = 0.0
-      self.mode_transition_filter.x = self.last_output_accel
-
-      self.current_mode = new_mode
-
-    if self.transitioning:
-      self.mode_transition_timer += DT_CTRL
-      if self.mode_transition_timer >= self.mode_transition_duration:
-        self.transitioning = False
-
-  def _mode_setup(self):
-    self.prev_mode = 'acc'
-    self.current_mode = 'acc'
-    self.mode_transition_filter = FirstOrderFilter(0.0, 0.5, DT_CTRL)
-    self.mode_transition_timer = 0.0
-    self.mode_transition_duration = 1.0
-    self.transitioning = False
 
   def reset(self, preserve_stop_release=False):
     self.pid.reset()
@@ -271,7 +240,6 @@ class LongControl:
     else:  # LongCtrlState.pid
       a_target = self.vehicle_tuning.shape_gm_truck_accel_target(a_target, CS.vEgo, should_stop)
       error = a_target - CS.aEgo
-      self.update_mpc_mode(self.experimental_mode)
       self.vehicle_tuning.shape_volt_test_tune_integrator(self.pid, error, CS.vEgo)
       self._trim_positive_overshoot_integrator(a_target, error, CS)
       self.vehicle_tuning.trim_gm_truck_positive_hold_integrator(
@@ -292,19 +260,7 @@ class LongControl:
       raw_output_accel = self.vehicle_tuning.apply_pedal_long_brake_bias(raw_output_accel, a_target, CS)
 
 
-      if self.transitioning and self.prev_mode == 'acc' and self.current_mode == 'blended':
-        if raw_output_accel < 0 and raw_output_accel < self.last_output_accel:
-          progress = min(1.0, self.mode_transition_timer / self.mode_transition_duration)
-          # Soften transition at low urgency, but keep sharp for high decel
-          # 20% smoother for chill decel (lower exponent)
-          urgency = abs(raw_output_accel / -MODE_TRANSITION_MAX_DECEL)
-          urgency_smooth = min(1.0, urgency ** 0.4)  # 20% smoother for chill decel
-          blend_factor = 1.0 - (1.0 - progress) * (1.0 - urgency_smooth)
-          output_accel = self.last_output_accel + (raw_output_accel - self.last_output_accel) * blend_factor
-        else:
-          output_accel = raw_output_accel
-      else:
-        output_accel = raw_output_accel
+      output_accel = raw_output_accel
 
     self.last_output_accel = clip(output_accel, accel_limits[0], accel_limits[1])
     return self.last_output_accel
