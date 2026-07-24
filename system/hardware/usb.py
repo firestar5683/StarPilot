@@ -20,6 +20,14 @@ def usb_devices() -> list[Path]:
     return []
 
 
+def chestnut_present() -> bool:
+  return any(
+    read_int(device / "idVendor", 16) == CHESTNUT_VENDOR_ID and
+    read_int(device / "idProduct", 16) == CHESTNUT_PRODUCT_ID
+    for device in usb_devices()
+  )
+
+
 def controller(device: Path) -> Path | None:
   try:
     return next((parent for parent in device.resolve().parents if parent.name.endswith(".ssusb")), None)
