@@ -70,6 +70,10 @@ NON_LINEAR_TORQUE_PARAMS = {
     "left": [1.525, 1.05, 0.155, 0.0],
     "right": [1.525, 0.95, 0.150, 0.0],
   },
+  CAR.CHEVROLET_TRAX: {
+    "left": [3.8060, 0.8282, 0.1702, 0],
+    "right": [3.8060, 0.8282, 0.1702, 0],
+  },
 }
 
 NON_LINEAR_TORQUE_PARAM_ALIASES = {
@@ -780,6 +784,7 @@ class CarInterface(CarInterfaceBase):
       ret.alternativeExperience |= ALTERNATIVE_EXPERIENCE.GM_REMAP_CANCEL_TO_DISTANCE
 
     if candidate == CAR.CHEVROLET_TRAX:
+      ret.steerActuatorDelay = 0.16
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     return ret
