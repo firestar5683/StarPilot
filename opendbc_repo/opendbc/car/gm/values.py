@@ -433,7 +433,7 @@ class CAR(Platforms):
     CHEVROLET_TRAILBLAZER.specs,
   )
   CHEVROLET_TRAX = GMPlatformConfig(
-    [GMCarDocs("Chevrolet TRAX 2024")],
+    [GMCarDocs("Chevrolet TRAX 2024-25")],
     CarSpecs(mass=1365, wheelbase=2.7, steerRatio=16.4, centerToFrontRatio=0.4),
   )
 
