@@ -7,7 +7,11 @@
 
 #include <QCryptographicHash>
 #include <QDebug>
+#include <QJsonDocument>
+#include <QJsonObject>
+#include <QProcess>
 #include <QRandomGenerator>
+#include <QUrl>
 #include <QrCode.hpp>
 
 #include "common/watchdog.h"
@@ -297,7 +301,7 @@ void TogglesPanel::updateToggles() {
   }
 }
 
-GalaxyQRPopup::GalaxyQRPopup(const QString &url, QWidget *parent) : DialogBase(parent) {
+GalaxyQRPopup::GalaxyQRPopup(const QString &url, QWidget *parent, const QString &title_text, const QString &display_url) : DialogBase(parent) {
   setStyleSheet("GalaxyQRPopup { background-color: #1a1a30; }");
   QVBoxLayout *layout = new QVBoxLayout(this);
   layout->setAlignment(Qt::AlignCenter);
@@ -318,7 +322,7 @@ GalaxyQRPopup::GalaxyQRPopup(const QString &url, QWidget *parent) : DialogBase(p
     }
   }
 
-  QLabel *title = new QLabel(tr("Scan to open Galaxy"), this);
+  QLabel *title = new QLabel(title_text.isEmpty() ? tr("Scan to open Galaxy") : title_text, this);
   title->setStyleSheet("font-size: 52px; font-weight: bold; color: white;");
   title->setAlignment(Qt::AlignCenter);
   layout->addWidget(title);
@@ -329,9 +333,10 @@ GalaxyQRPopup::GalaxyQRPopup(const QString &url, QWidget *parent) : DialogBase(p
   qr_label->setAlignment(Qt::AlignCenter);
   layout->addWidget(qr_label);
 
-  QLabel *url_label = new QLabel(url, this);
-  url_label->setStyleSheet("font-size: 36px; color: #8b6cc5;");
+  QLabel *url_label = new QLabel(display_url.isEmpty() ? url : display_url, this);
+  url_label->setStyleSheet("font-size: 28px; color: #8b6cc5;");
   url_label->setAlignment(Qt::AlignCenter);
+  url_label->setWordWrap(true);
   layout->addWidget(url_label);
 
   QLabel *hint = new QLabel(tr("Tap anywhere to dismiss"), this);
@@ -429,6 +434,33 @@ DevicePanel::DevicePanel(SettingsWindow *parent) : ListWidget(parent) {
   pair_galaxy->setText(galaxy_paired ? tr("UNPAIR") : tr("PAIR"));
   galaxy_qr_btn->setVisible(galaxy_paired);
   addItem(pair_galaxy);
+
+  auto telemetrySetupBtn = new ButtonControl(
+    tr("EV Vehicle Telemetry"),
+    tr("SET UP"),
+    tr("Open a temporary local setup page for secure EV telemetry access. The read-only API remains available while driving."));
+  connect(telemetrySetupBtn, &ButtonControl::clicked, [=]() {
+    QStringList arguments{
+      "-m", "openpilot.system.vehicle_telemetry.setup", "launch",
+      "--data-dir", QString::fromStdString(galaxy_dir),
+    };
+    if (QProcess::execute("python3", arguments) != 0) {
+      ConfirmationDialog::alert(tr("Connect the comma to Wi-Fi before starting telemetry setup."), this);
+      return;
+    }
+    const QByteArray status_bytes = QByteArray::fromStdString(util::read_file(galaxy_dir + "/telemetry_setup_session.json"));
+    const QJsonObject status = QJsonDocument::fromJson(status_bytes).object();
+    const QString url = status.value("url").toString();
+    if (url.isEmpty()) {
+      ConfirmationDialog::alert(tr("EV Vehicle Telemetry setup did not start."), this);
+      return;
+    }
+    const QUrl parsed(url);
+    const QString display_url = parsed.scheme() + "://" + parsed.authority();
+    GalaxyQRPopup popup(url, this, tr("Scan to set up EV telemetry"), display_url);
+    popup.exec();
+  });
+  addItem(telemetrySetupBtn);
 
   // offroad-only buttons
 

@@ -166,6 +166,14 @@ class TestManager:
     assert qt_process.starts == 1
     assert ui_process.proc is qt_process.proc
 
+  def test_vehicle_telemetry_is_low_priority(self):
+    telemetry = next(process for process in procs if process.name == "vehicle_telemetryd")
+    assert telemetry.nice == 19
+    car_params = car.CarParams.new_message()
+    toggles = SimpleNamespace()
+    assert telemetry.should_run(False, Params(), car_params, toggles)
+    assert telemetry.should_run(True, Params(), car_params, toggles)
+
   def test_blacklisted_procs(self):
     # TODO: ensure there are blacklisted procs until we have a dedicated test
     assert len(BLACKLIST_PROCS), "No blacklisted procs to test not_run"

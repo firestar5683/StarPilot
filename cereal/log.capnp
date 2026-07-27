@@ -593,6 +593,7 @@ struct PandaState @0xa7649e2575e4591e {
   sbu1Voltage @35 :Float32;
   sbu2Voltage @36 :Float32;
   ev9LongPreinitStatus @37 :Ev9LongPreinitStatus;
+  ev9VehicleTelemetry @38 :Ev9VehicleTelemetry;
 
   # can health
   canState0 @29 :PandaCanState;
@@ -752,6 +753,22 @@ struct PandaState @0xa7649e2575e4591e {
     lastVehicleFrameUs @40 :UInt32;
     timingFlags @41 :UInt8;
     resident @42 :Bool;
+  }
+
+  struct Ev9VehicleTelemetry {
+    vehicleTelemetryAvailable @0 :Bool;
+    fuelGauge @1 :Float32;
+    distanceToEmpty @2 :Float32;
+    charging @3 :Bool;
+    chargingPortConnected @4 :Bool;
+    chargingTimeRemaining @5 :Float32;
+    vehicleTelemetrySourceMonoTime @6 :UInt64;
+    vehicleTelemetrySocValid @7 :Bool;
+    vehicleTelemetryDteValid @8 :Bool;
+    vehicleTelemetryChargingValid @9 :Bool;
+    vehicleTelemetryChargePortValid @10 :Bool;
+    vEgo @11 :Float32;
+    standstill @12 :Bool;
   }
 
   gasInterceptorDetectedDEPRECATED @4 :Bool;

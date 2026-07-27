@@ -44,8 +44,47 @@
 
 .navkeys-app-actions {
   display: flex;
+  gap: var(--gap-sm);
   justify-content: flex-end;
   margin-bottom: var(--margin-base);
+}
+
+.navkeys-pair-actions {
+  justify-content: center;
+}
+
+.navkeys-pairing-card {
+  align-items: center;
+  background: var(--input-bg);
+  border: var(--border-width-thin) solid var(--sidebar-border-color);
+  border-radius: var(--border-radius-md);
+  display: flex;
+  gap: var(--gap-lg);
+  padding: var(--padding-sm);
+}
+
+.navkeys-pairing-details {
+  flex: 1;
+}
+
+.navkeys-pairing-code {
+  font-family: var(--font-mono);
+  font-size: clamp(2rem, 6vw, 3.5rem);
+  font-weight: var(--font-weight-bold);
+  letter-spacing: 0.22em;
+  margin: var(--margin-xs) 0 var(--margin-base);
+}
+
+.navkeys-pairing-qr {
+  background: white;
+  border-radius: var(--border-radius-sm);
+  max-width: 240px;
+  width: min(40vw, 240px);
+}
+
+.navkeys-pairing-subtitle {
+  margin: 0 0 var(--margin-base);
+  text-align: left;
 }
 
 .navkeys-app-container {
@@ -125,6 +164,64 @@
   font-size: var(--font-size-sm);
 }
 
+.navkeys-checkbox-row {
+  align-items: center;
+  display: flex;
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-bold);
+  gap: var(--gap-sm);
+}
+
+.navkeys-generated-token {
+  background: var(--secondary-bg);
+  border-radius: var(--border-radius-sm);
+  font-family: var(--font-mono);
+  font-size: var(--font-size-xs);
+  margin-bottom: var(--margin-base);
+  overflow-wrap: anywhere;
+  padding: var(--padding-xs);
+}
+
+.navkeys-inline-copy {
+  all: unset;
+  color: var(--thumb-color);
+  cursor: pointer;
+  font-family: var(--font-mono);
+  margin-left: var(--gap-xs);
+  overflow-wrap: anywhere;
+}
+
+.navkeys-select {
+  width: 100%;
+}
+
+.navkeys-telemetry-actions {
+  justify-content: center;
+  margin-top: var(--margin-base);
+}
+
+.navkeys-telemetry-grid {
+  display: grid;
+  gap: var(--gap-sm);
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+}
+
+.navkeys-telemetry-section {
+  border-top: var(--border-width-thin) solid var(--sidebar-border-color);
+  margin-top: var(--margin-base);
+  padding-top: var(--margin-base);
+}
+
+.navkeys-telemetry-status {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  margin-top: var(--margin-base);
+}
+
+.navkeys-token-card {
+  margin-top: var(--margin-base);
+}
+
 .navkeys-label {
   display: block;
   font-size: var(--font-size-sm);
@@ -201,5 +298,9 @@
 
   .navkeys-input {
     font-size: var(--font-size-sm);
+  }
+
+  .navkeys-pairing-card {
+    flex-direction: column;
   }
 }

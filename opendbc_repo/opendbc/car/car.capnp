@@ -206,6 +206,9 @@ struct CarState {
   lowSpeedAlert @56 :Bool;  # lost steering control due to a dynamic min steering speed
   blockPcmEnable @60 :Bool;  # whether to allow PCM to enable this frame
   adasUnavailable @61 :Bool; # required ADAS replacement/ownership is unavailable
+  chargingTimeRemaining @62 :Float32; # validated estimated seconds until charging completes, or zero
+  distanceToEmpty @63 :Float32; # remaining range in meters
+  chargingPortConnected @64 :Bool;
 
   # cruise state
   cruiseState @10 :CruiseState;

@@ -237,6 +237,7 @@ else:
 
 procs += [
   PythonProcess("device_syncd", "starpilot.system.device_syncd", always_run),
+  PythonProcess("vehicle_telemetryd", "starpilot.system.vehicle_telemetryd", always_run, nice=19),
   PythonProcess("starpilot_process", "starpilot.starpilot_process", always_run),
   PythonProcess("mapd", "starpilot.navigation.mapd_wrapper", always_run, nice=19),
   PythonProcess("navigationd", "starpilot.navigation.navigationd", run_navigationd, nice=19),

@@ -8,7 +8,8 @@ from openpilot.selfdrive.ui.mici.layouts.settings.device import DeviceLayoutMici
 from openpilot.selfdrive.ui.mici.layouts.settings.developer import DeveloperLayoutMici
 from openpilot.selfdrive.ui.mici.layouts.settings.software import SoftwareLayoutMici
 from openpilot.selfdrive.ui.mici.layouts.settings.driving_model import DrivingModelBigButton
-from openpilot.selfdrive.ui.mici.layouts.settings.galaxy import GalaxyBigButton
+from openpilot.selfdrive.ui.mici.layouts.settings.galaxy import GalaxyBigButton, TelemetrySetupBigButton
+from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.selfdrive.ui.mici.layouts.settings.visuals import VisualsLayoutMici
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 
@@ -90,6 +91,8 @@ class SettingsLayout(NavScroller):
     self._force_drive_state_btn = ForceDriveStateBigButton()
     self._driving_model_btn = DrivingModelBigButton()
     galaxy_btn = GalaxyBigButton()
+    telemetry_setup_btn = TelemetrySetupBigButton()
+    telemetry_setup_btn.set_enabled(lambda: ui_state.is_offroad())
 
     self._scroller.add_widgets([
       toggles_btn,
@@ -101,6 +104,7 @@ class SettingsLayout(NavScroller):
       self._driving_model_btn,
       visuals_btn,
       galaxy_btn,
+      telemetry_setup_btn,
       PairBigButton(),
       #BigDialogButton("manual", "", "icons_mici/settings/manual_icon.png", "Check out the mici user\nmanual at comma.ai/setup"),
       developer_btn,

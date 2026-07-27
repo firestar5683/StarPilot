@@ -12,17 +12,18 @@ from openpilot.selfdrive.ui.mici.widgets.button import BigButton
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigDialog, BigConfirmationDialog, BigInputDialog, BigMultiOptionDialog
 from openpilot.system.hardware import PC
 from openpilot.system.hardware.hw import Paths
+from openpilot.system.vehicle_telemetry.setup import launch_vehicle_telemetry_setup
 from openpilot.system.ui.lib.application import FontWeight, gui_app
 from openpilot.system.ui.widgets.label import UnifiedLabel
 from openpilot.system.ui.widgets.nav_widget import NavWidget
 
 
 class GalaxyQRDialog(NavWidget):
-  def __init__(self, url: str):
+  def __init__(self, url: str, title: str = "pair with galaxy"):
     super().__init__()
     self._url = url
     self._qr_texture: rl.Texture | None = None
-    self._title = UnifiedLabel("pair with galaxy", font_size=48, font_weight=FontWeight.BOLD, line_height=0.8)
+    self._title = UnifiedLabel(title, font_size=48, font_weight=FontWeight.BOLD, line_height=0.8)
     self._generate_qr_code()
 
   def _generate_qr_code(self) -> None:
@@ -157,3 +158,18 @@ class GalaxyBigButton(BigButton):
 
   def _update_state(self):
     self.set_value("paired" if self._is_paired() else "pair")
+
+
+class TelemetrySetupBigButton(BigButton):
+  def __init__(self):
+    super().__init__("EV vehicle\ntelemetry", "scan QR", gui_app.texture("icons_mici/settings/galaxy.png", 64, 64))
+    self._data_dir = Path(Paths.comma_home()) / "starpilot" / "data" / "galaxy" if PC else Path("/data/galaxy")
+
+  def _handle_mouse_release(self, mouse_pos):
+    super()._handle_mouse_release(mouse_pos)
+    try:
+      session = launch_vehicle_telemetry_setup(self._data_dir)
+      gui_app.push_widget(GalaxyQRDialog(session["url"], "set up EV telemetry"))
+    except Exception as error:
+      cloudlog.warning(f"Vehicle telemetry setup launch failed: {error}")
+      gui_app.push_widget(BigDialog("", str(error)))

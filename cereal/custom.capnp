@@ -98,6 +98,19 @@ struct StarPilotCarState @0xf35cc4560bbf6ec2 {
   teslaCCNotArmed @27 :Bool;  # lateral engaged but DI_cruiseState != STANDBY/ENABLED
   accelHardCruise @28 :Bool;  # current/releasing accel cruise button came from GM hard-press signal
   decelHardCruise @29 :Bool;  # current/releasing decel cruise button came from GM hard-press signal
+  vehicleTelemetryAvailable @30 :Bool;
+  fuelGauge @31 :Float32;
+  distanceToEmpty @32 :Float32;
+  charging @33 :Bool;
+  chargingPortConnected @34 :Bool;
+  vEgo @35 :Float32;
+  standstill @36 :Bool;
+  chargingTimeRemaining @37 :Float32;
+  vehicleTelemetrySourceMonoTime @38 :UInt64;
+  vehicleTelemetrySocValid @39 :Bool;
+  vehicleTelemetryDteValid @40 :Bool;
+  vehicleTelemetryChargingValid @41 :Bool;
+  vehicleTelemetryChargePortValid @42 :Bool;
 }
 
 struct StarPilotDeviceState @0xda96579883444c35 {

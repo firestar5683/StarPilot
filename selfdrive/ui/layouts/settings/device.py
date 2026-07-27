@@ -4,6 +4,7 @@ import math
 from pathlib import Path
 import secrets
 import string
+from urllib.parse import urlsplit
 
 from cereal import messaging, log
 import numpy as np
@@ -18,8 +19,10 @@ from openpilot.selfdrive.ui.layouts.onboarding import TrainingGuide
 from openpilot.selfdrive.ui.widgets.pairing_dialog import PairingDialog
 from openpilot.system.hardware import PC, TICI
 from openpilot.system.hardware.hw import Paths
+from openpilot.system.vehicle_telemetry.setup import launch_vehicle_telemetry_setup
 from openpilot.system.ui.lib.application import FontWeight, gui_app
 from openpilot.system.ui.lib.multilang import multilang, tr, tr_noop
+from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets import Widget, DialogResult
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog, alert_dialog
 from openpilot.system.ui.widgets.html_render import HtmlModal
@@ -32,6 +35,7 @@ from openpilot.system.ui.widgets.scroller_tici import Scroller
 DESCRIPTIONS = {
   'pair_device': tr_noop("Pair your device with comma connect (connect.comma.ai) and claim your comma prime offer."),
   'pair_galaxy': tr_noop("Pair your device with Galaxy for remote access to The Galaxy."),
+  'telemetry_setup': tr_noop("Open a temporary local setup page for secure EV telemetry access. The read-only API remains available while driving."),
   'driver_camera': tr_noop("Preview the driver facing camera to ensure that driver monitoring has good visibility. (vehicle must be off)"),
   'reset_driver_monitoring': tr_noop("Clears the saved driver monitoring wheel-side calibration and any manual right-hand-driving override."),
   'reset_calibration': tr_noop("openpilot requires the device to be mounted within 4° left or right and within 5° up or 9° down."),
@@ -107,6 +111,75 @@ class GalaxyQRDialog(Widget):
       rl.unload_texture(self._qr_texture)
 
 
+def get_vehicle_telemetry_data_dir() -> Path:
+  return Path(Paths.comma_home()) / "starpilot" / "data" / "galaxy" if PC else Path("/data/galaxy")
+
+
+class TelemetrySetupQRDialog(Widget):
+  def __init__(self, url: str, display_url: str):
+    super().__init__()
+    self._url = url
+    self._display_url = display_url
+    self._qr_texture: rl.Texture | None = None
+    self._generate_qr_code()
+
+  def _generate_qr_code(self) -> None:
+    try:
+      qr = qrcode.QRCode(version=1, error_correction=qrcode.constants.ERROR_CORRECT_L, box_size=10, border=4)
+      qr.add_data(self._url)
+      qr.make(fit=True)
+
+      pil_img = qr.make_image(fill_color="black", back_color="white").convert("RGBA")
+      img_array = np.array(pil_img, dtype=np.uint8)
+
+      if self._qr_texture and self._qr_texture.id != 0:
+        rl.unload_texture(self._qr_texture)
+
+      rl_image = rl.Image()
+      rl_image.data = rl.ffi.cast("void *", img_array.ctypes.data)
+      rl_image.width = pil_img.width
+      rl_image.height = pil_img.height
+      rl_image.mipmaps = 1
+      rl_image.format = rl.PixelFormat.PIXELFORMAT_UNCOMPRESSED_R8G8B8A8
+      self._qr_texture = rl.load_texture_from_image(rl_image)
+    except Exception:
+      cloudlog.exception("Vehicle telemetry setup QR generation failed")
+      self._qr_texture = None
+
+  def _handle_mouse_release(self, _):
+    gui_app.pop_widget()
+
+  def _render_centered_text(
+    self, rect: rl.Rectangle, text: str, y: float, font_size: int, color: rl.Color, font_weight: FontWeight = FontWeight.NORMAL,
+  ) -> None:
+    font = gui_app.font(font_weight)
+    size = measure_text_cached(font, text, font_size)
+    rl.draw_text_ex(font, text, rl.Vector2(rect.x + (rect.width - size.x) / 2, y), font_size, 0, color)
+
+  def _render(self, rect: rl.Rectangle):
+    rl.clear_background(rl.Color(26, 26, 48, 255))
+
+    title_y = rect.y + 100
+    self._render_centered_text(rect, tr("Scan to set up EV telemetry"), title_y, 70, rl.WHITE, FontWeight.BOLD)
+
+    if self._qr_texture is None:
+      self._render_centered_text(rect, tr("QR Code Error"), rect.y + rect.height / 2 - 30, 50, rl.RED, FontWeight.BOLD)
+      return
+
+    qr_size = min(rect.height * 0.58, rect.width * 0.42)
+    qr_x = rect.x + (rect.width - qr_size) / 2
+    qr_y = title_y + 120
+    source = rl.Rectangle(0, 0, self._qr_texture.width, self._qr_texture.height)
+    rl.draw_texture_pro(self._qr_texture, source, rl.Rectangle(qr_x, qr_y, qr_size, qr_size), rl.Vector2(0, 0), 0, rl.WHITE)
+
+    self._render_centered_text(rect, self._display_url, qr_y + qr_size + 45, 36, rl.Color(180, 150, 230, 255))
+    self._render_centered_text(rect, tr("Tap anywhere to dismiss"), rect.y + rect.height - 120, 34, rl.Color(160, 160, 190, 255))
+
+  def __del__(self):
+    if self._qr_texture and self._qr_texture.id != 0:
+      rl.unload_texture(self._qr_texture)
+
+
 class DeviceLayout(Widget):
   def __init__(self):
     super().__init__()
@@ -119,6 +192,7 @@ class DeviceLayout(Widget):
     self._galaxy_manage_dialog: MultiOptionDialog | None = None
     self._fcc_dialog: HtmlModal | None = None
     self._training_guide: TrainingGuide | None = None
+    self._telemetry_data_dir = get_vehicle_telemetry_data_dir()
 
     self._galaxy_dir = get_galaxy_dir()
     self._galaxy_auth_path = self._galaxy_dir / "glxyauth"
@@ -135,6 +209,13 @@ class DeviceLayout(Widget):
     self._pair_device_btn.set_visible(lambda: not ui_state.prime_state.is_paired())
     self._pair_galaxy_btn = button_item(lambda: tr("Pair with Galaxy"), self._galaxy_button_text,
                                         lambda: tr(DESCRIPTIONS['pair_galaxy']), callback=self._pair_galaxy)
+    self._telemetry_setup_btn = button_item(
+      lambda: tr("EV Vehicle Telemetry"),
+      lambda: tr("SET UP"),
+      lambda: tr(DESCRIPTIONS['telemetry_setup']),
+      callback=self._start_telemetry_setup,
+      enabled=ui_state.is_offroad,
+    )
 
     self._reset_calib_btn = button_item(lambda: tr("Reset Calibration"), lambda: tr("RESET"), lambda: tr(DESCRIPTIONS['reset_calibration']),
                                         callback=self._reset_calibration_prompt)
@@ -148,6 +229,7 @@ class DeviceLayout(Widget):
       text_item(lambda: tr("Serial"), self._params.get("HardwareSerial") or (lambda: tr("N/A"))),
       self._pair_device_btn,
       self._pair_galaxy_btn,
+      self._telemetry_setup_btn,
       button_item(lambda: tr("Driver Camera"), lambda: tr("PREVIEW"), lambda: tr(DESCRIPTIONS['driver_camera']),
                   callback=self._show_driver_camera, enabled=ui_state.is_offroad),
       button_item(lambda: tr("Reset Driver Monitoring"), lambda: tr("RESET"), lambda: tr(DESCRIPTIONS['reset_driver_monitoring']),
@@ -380,6 +462,19 @@ class DeviceLayout(Widget):
           path.unlink()
       except Exception:
         cloudlog.exception(f"Galaxy unpair cleanup failed for {path}")
+
+  def _start_telemetry_setup(self):
+    if not ui_state.is_offroad():
+      gui_app.push_widget(alert_dialog(tr("Park before changing EV Vehicle Telemetry settings.")))
+      return
+    try:
+      session = launch_vehicle_telemetry_setup(self._telemetry_data_dir)
+      parsed = urlsplit(session["url"])
+      display_url = f"{parsed.scheme}://{parsed.netloc}"
+      gui_app.push_widget(TelemetrySetupQRDialog(session["url"], display_url))
+    except Exception as error:
+      cloudlog.warning(f"Vehicle telemetry setup launch failed: {error}")
+      gui_app.push_widget(alert_dialog(tr(str(error))))
 
   def _on_regulatory(self):
     if not self._fcc_dialog:

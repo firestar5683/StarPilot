@@ -16,6 +16,7 @@
 #include "common/swaglog.h"
 #include "common/timing.h"
 #include "common/util.h"
+#include "selfdrive/pandad/ev9_vehicle_telemetry.h"
 #include "system/hardware/hw.h"
 
 // -- Multi-panda conventions --
@@ -150,13 +151,17 @@ void can_send_thread(std::vector<Panda *> pandas, bool fake_send) {
   }
 }
 
-void can_recv(std::vector<Panda *> &pandas, PubMaster *pm) {
+void can_recv(std::vector<Panda *> &pandas, PubMaster *pm, Ev9VehicleTelemetryDecoder *ev9_vehicle_telemetry) {
   static std::vector<can_frame> raw_can_data;
   {
     bool comms_healthy = true;
     raw_can_data.clear();
     for (const auto& panda : pandas) {
       comms_healthy &= panda->can_receive(raw_can_data);
+    }
+
+    if (ev9_vehicle_telemetry != nullptr) {
+      ev9_vehicle_telemetry->update(raw_can_data, nanos_since_boot());
     }
 
     MessageBuilder msg;
@@ -285,8 +290,31 @@ void fill_ev9_long_preinit_status(cereal::PandaState::Ev9LongPreinitStatus::Buil
   }
 }
 
+void fill_ev9_vehicle_telemetry(cereal::PandaState::Ev9VehicleTelemetry::Builder &state,
+                                const Ev9VehicleTelemetrySnapshot &telemetry, bool enabled) {
+  if (!enabled) {
+    return;
+  }
+
+  state.setVehicleTelemetryAvailable(telemetry.available);
+  state.setVehicleTelemetrySocValid(telemetry.soc_valid);
+  state.setVehicleTelemetryDteValid(telemetry.dte_valid);
+  state.setVehicleTelemetryChargingValid(telemetry.charging_valid);
+  state.setVehicleTelemetryChargePortValid(telemetry.charge_port_valid);
+  state.setFuelGauge(telemetry.fuel_gauge);
+  state.setDistanceToEmpty(telemetry.distance_to_empty);
+  state.setCharging(telemetry.charging);
+  state.setChargingPortConnected(telemetry.charging_port_connected);
+  state.setChargingTimeRemaining(telemetry.charging_time_remaining);
+  state.setVehicleTelemetrySourceMonoTime(telemetry.source_mono_time);
+  state.setVEgo(0.0F);
+  state.setStandstill(true);
+}
+
 std::optional<bool> send_panda_states(PubMaster *pm, const std::vector<Panda *> &pandas, bool is_onroad,
-                                      bool spoofing_started, bool ignore_ignition_line) {
+                                      bool spoofing_started, bool ignore_ignition_line,
+                                      const Ev9VehicleTelemetryDecoder *ev9_vehicle_telemetry,
+                                      const std::string &ev9_vehicle_telemetry_serial) {
   bool ignition_local = false;
   const uint32_t pandas_cnt = pandas.size();
 
@@ -309,6 +337,9 @@ std::optional<bool> send_panda_states(PubMaster *pm, const std::vector<Panda *> 
   const bool red_panda_comma_three = (pandas.size() == 2) &&
                                      (pandas[0]->hw_type == cereal::PandaState::PandaType::DOS) &&
                                      (pandas[1]->hw_type == cereal::PandaState::PandaType::RED_PANDA);
+  const auto ev9_telemetry_snapshot = ev9_vehicle_telemetry != nullptr ?
+                                      ev9_vehicle_telemetry->snapshot(nanos_since_boot()) :
+                                      Ev9VehicleTelemetrySnapshot{};
   for (const auto& panda : pandas){
     auto health_opt = panda->get_state();
     if (!health_opt) {
@@ -381,6 +412,11 @@ std::optional<bool> send_panda_states(PubMaster *pm, const std::vector<Panda *> 
     fill_panda_state(ps, panda->hw_type, health);
     auto preinit_status = ps.initEv9LongPreinitStatus();
     fill_ev9_long_preinit_status(preinit_status, ev9PreinitStatuses[i], ev9PreinitResident[i]);
+    auto ev9_vehicle_state = ps.initEv9VehicleTelemetry();
+    const bool publish_ev9_vehicle_state = !is_onroad && ev9_vehicle_telemetry != nullptr &&
+                                           panda->hw_serial() == ev9_vehicle_telemetry_serial &&
+                                           ev9PreinitResident[i];
+    fill_ev9_vehicle_telemetry(ev9_vehicle_state, ev9_telemetry_snapshot, publish_ev9_vehicle_state);
 
     auto cs = std::array{ps.initCanState0(), ps.initCanState1(), ps.initCanState2()};
     for (uint32_t j = 0; j < PANDA_CAN_CNT; j++) {
@@ -439,14 +475,17 @@ void send_peripheral_state(Panda *panda, PubMaster *pm) {
 }
 
 void process_panda_state(std::vector<Panda *> &pandas, PubMaster *pm, bool engaged, bool is_onroad,
-                         bool spoofing_started, bool ignore_ignition_line) {
+                         bool spoofing_started, bool ignore_ignition_line,
+                         const Ev9VehicleTelemetryDecoder *ev9_vehicle_telemetry,
+                         const std::string &ev9_vehicle_telemetry_serial) {
   std::vector<std::string> connected_serials;
   for (Panda *p : pandas) {
     connected_serials.push_back(p->hw_serial());
   }
 
   {
-    auto ignition_opt = send_panda_states(pm, pandas, is_onroad, spoofing_started, ignore_ignition_line);
+    auto ignition_opt = send_panda_states(pm, pandas, is_onroad, spoofing_started, ignore_ignition_line,
+                                          ev9_vehicle_telemetry, ev9_vehicle_telemetry_serial);
     if (!ignition_opt) {
       LOGE("Failed to get ignition_opt");
       return;
@@ -549,6 +588,13 @@ void pandad_run(std::vector<Panda *> &pandas) {
   const bool no_fan_control = getenv("NO_FAN_CONTROL") != nullptr;
   const bool spoofing_started = getenv("STARTED") != nullptr;
   const bool fake_send = getenv("FAKESEND") != nullptr;
+  const char *ev9_vehicle_telemetry_serial_env = getenv("BOARDD_EV9_VEHICLE_TELEMETRY_SERIAL");
+  const std::string ev9_vehicle_telemetry_serial = ev9_vehicle_telemetry_serial_env != nullptr ?
+                                                   ev9_vehicle_telemetry_serial_env : "";
+  const bool ev9_vehicle_telemetry_enabled = !pandas.empty() && !ev9_vehicle_telemetry_serial.empty() &&
+                                             pandas[0]->hw_serial() == ev9_vehicle_telemetry_serial &&
+                                             ev9_preinit_status_enabled(pandas[0]);
+  Ev9VehicleTelemetryDecoder ev9_vehicle_telemetry;
   // Start the CAN send thread
   std::thread send_thread(can_send_thread, pandas, fake_send);
 
@@ -563,7 +609,7 @@ void pandad_run(std::vector<Panda *> &pandas) {
 
   // Main loop: receive CAN data and process states
   while (!do_exit && check_all_connected(pandas)) {
-    can_recv(pandas, &pm);
+    can_recv(pandas, &pm, ev9_vehicle_telemetry_enabled ? &ev9_vehicle_telemetry : nullptr);
 
     // Process peripheral state at 20 Hz
     if (rk.frame() % 5 == 0) {
@@ -582,7 +628,9 @@ void pandad_run(std::vector<Panda *> &pandas) {
       const std::string car_make = params.get("CarMake");
       const bool is_gm = car_make == "gm" || car_make == "GM" || car_make == "Gm";
       const bool ignore_ignition_line = is_gm && params.getBool("IgnoreIgnitionLine");
-      process_panda_state(pandas, &pm, engaged, is_onroad, spoofing_started, ignore_ignition_line);
+      process_panda_state(pandas, &pm, engaged, is_onroad, spoofing_started, ignore_ignition_line,
+                          ev9_vehicle_telemetry_enabled ? &ev9_vehicle_telemetry : nullptr,
+                          ev9_vehicle_telemetry_serial);
       panda_safety.configureSafetyMode(is_onroad);
     }
 

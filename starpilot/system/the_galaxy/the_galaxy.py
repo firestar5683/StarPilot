@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import importlib
+import ipaddress
 import math
 import numbers
 import os
+import atexit
 import sys
 import tarfile
 
@@ -13,7 +15,6 @@ from io import BytesIO
 from pathlib import Path
 
 import base64
-import errno
 import hashlib
 import json
 import re
@@ -21,15 +22,14 @@ import requests
 import secrets
 import selectors
 import shutil
-import signal
+import socket
 import subprocess
 import numpy as np
 from msgq.visionipc import VisionIpcClient, VisionStreamType
 from PIL import Image
 import threading
 import time
-import traceback
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from cereal import car, custom, log, messaging
 from opendbc.can.parser import CANParser
@@ -49,6 +49,32 @@ from panda import Panda
 
 from openpilot.starpilot.assets.model_manager import canonical_model_key, is_builtin_model_key, model_key_aliases
 from openpilot.starpilot.assets.theme_manager import HOLIDAY_THEME_PATH, THEME_COMPONENT_PARAMS
+from openpilot.starpilot.system.vehicle_telemetry import (
+  VehicleTelemetryCache,
+  is_fetch_authorized,
+  load_vehicle_telemetry_config,
+  load_vehicle_telemetry_status,
+  public_vehicle_telemetry_config,
+  telemetry_response,
+  update_vehicle_telemetry_config,
+  vehicle_telemetry_config_path,
+)
+from openpilot.starpilot.system.external_app_pairing import create_pairing, complete_pairing
+from openpilot.system.vehicle_telemetry.tailscale import (
+  TAILSCALE_DEFAULT_BASE,
+  TAILSCALE_STATUS_FILENAME,
+  TailscaleFunnelController,
+  begin_tailscale_login,
+  enable_personal_tailscale_relay,
+  ensure_tailscale_hostname,
+  tailscale_is_installed,
+)
+from openpilot.system.vehicle_telemetry.setup import (
+  TELEMETRY_SETUP_COOKIE_NAME,
+  TELEMETRY_SETUP_TOKEN_HEADER,
+  telemetry_setup_token_is_authorized,
+)
+from openpilot.system.vehicle_telemetry.tunnel import FRPC_STATUS_FILENAME
 from openpilot.starpilot.common.accel_profile import (
   CUSTOM_ACCEL_PROFILE_INITIALIZED_KEY,
   CUSTOM_ACCEL_PROFILE_PARAM_KEYS,
@@ -639,6 +665,10 @@ KEYS = {
 
 GALAXY_COOKIE_NAME = "galaxy_session"
 GALAXY_PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.embaucha.galaxynav&hl=en-US&ah=9FldHJ99kxL8oNbSlO5F4sQqwC4"
+DOOR_COMMAND_MAX_ATTEMPTS = 3
+DOOR_COMMAND_MAX_SECONDS = 4.0
+DOOR_COMMAND_RETRY_SECONDS = 1.0
+DIRECT_VEHICLE_HARDWARE_BLOCK_MESSAGE = "Direct Panda/CAN access is disabled while onroad or EV9 preinit is armed."
 
 NAVIGATION_MEMORY_LOCATION_STALE_SECONDS = 10.0
 NAVIGATION_PERSISTED_LOCATION_FUTURE_SKEW_SECONDS = 60.0
@@ -669,10 +699,353 @@ def _read_galaxy_text(path):
     return ""
 
 
+def _is_lan_ip(value):
+  try:
+    address = ipaddress.ip_address(str(value or "").split("%", 1)[0])
+    if getattr(address, "ipv4_mapped", None) is not None:
+      address = address.ipv4_mapped
+    return address.is_private or address.is_link_local or address.is_loopback
+  except ValueError:
+    return False
+
+
+def _request_is_lan():
+  if not _is_lan_ip(request.remote_addr):
+    return False
+  host = (request.host.split(":", 1)[0] if not request.host.startswith("[") else request.host.split("]", 1)[0][1:]).lower()
+  return _is_lan_ip(host) or host in ("localhost", "comma") or host.endswith(".local")
+
+
+def _request_is_lan_setup():
+  if not _request_is_lan():
+    return False
+  supplied = request.cookies.get(TELEMETRY_SETUP_COOKIE_NAME) or request.headers.get(TELEMETRY_SETUP_TOKEN_HEADER, "")
+  return telemetry_setup_token_is_authorized(supplied, _get_galaxy_dir())
+
+
+def _json_bool(value, default=False):
+  return value if isinstance(value, bool) else bool(default)
+
+
+def _bounded_json_int(value, default, minimum, maximum):
+  try:
+    parsed = int(value)
+  except (TypeError, ValueError):
+    parsed = int(default)
+  return max(minimum, min(maximum, parsed))
+
+
+def _merge_vehicle_telemetry_config(current, update):
+  """Merge a Galaxy form payload without echoing or erasing stored secrets."""
+  update = update if isinstance(update, dict) else {}
+  merged = json.loads(json.dumps(current))
+  requested_mode = str(update.get("mode") or current.get("mode") or "off").strip().lower()
+  merged["mode"] = requested_mode if requested_mode in ("off", "send", "local", "tailscale", "frp", "galaxy") else "off"
+
+  fetch_update = update.get("fetch") if isinstance(update.get("fetch"), dict) else {}
+  fetch = merged.setdefault("fetch", {})
+  fetch["enabled"] = _json_bool(fetch_update.get("enabled"), fetch.get("enabled", False))
+  if merged["mode"] in ("off", "send"):
+    fetch["enabled"] = False
+  fetch["bindAddress"] = str(fetch_update.get("bindAddress") or fetch.get("bindAddress") or "127.0.0.1")
+  fetch["port"] = _bounded_json_int(fetch_update.get("port"), fetch.get("port", 7766), 1024, 65535)
+  if merged["mode"] == "local":
+    fetch["bindAddress"] = "0.0.0.0"
+  supplied_fetch_token = str(update.get("fetchToken") or "").strip()
+  generated_fetch_token = ""
+  if _json_bool(update.get("rotateFetchToken")):
+    supplied_fetch_token = secrets.token_urlsafe(32)
+    generated_fetch_token = supplied_fetch_token
+  if supplied_fetch_token:
+    fetch["token"] = supplied_fetch_token
+  if fetch["enabled"] and len(str(fetch.get("token") or "")) < 32 and not fetch.get("clients"):
+    generated_fetch_token = secrets.token_urlsafe(32)
+    fetch["token"] = generated_fetch_token
+
+  push_update = update.get("push") if isinstance(update.get("push"), dict) else {}
+  push = merged.setdefault("push", {})
+  push["enabled"] = _json_bool(push_update.get("enabled"), push.get("enabled", False))
+  for key in ("url", "vehicleId", "vehicleName"):
+    if key in push_update:
+      push[key] = str(push_update.get(key) or "").strip()
+  if "maximumBatteryCapacityKilowattHours" in push_update:
+    push["maximumBatteryCapacityKilowattHours"] = push_update.get("maximumBatteryCapacityKilowattHours")
+  for key, default, minimum in (
+    ("drivingIntervalSeconds", 60, 30),
+    ("chargingIntervalSeconds", 120, 60),
+    ("parkedIntervalSeconds", 900, 300),
+  ):
+    if key in push_update:
+      push[key] = _bounded_json_int(push_update.get(key), push.get(key, default), minimum, 3600)
+  supplied_push_token = str(update.get("pushToken") or "").strip()
+  if supplied_push_token:
+    push["token"] = supplied_push_token
+
+  tunnel_update = update.get("tunnel") if isinstance(update.get("tunnel"), dict) else {}
+  tunnel = merged.setdefault("tunnel", {})
+  for key in ("binaryPath", "serverAddress", "subdomainHost", "subdomain", "trustedCaFile", "serverName"):
+    if key in tunnel_update:
+      tunnel[key] = str(tunnel_update.get(key) or "").strip()
+  if "serverPort" in tunnel_update:
+    tunnel["serverPort"] = _bounded_json_int(tunnel_update.get("serverPort"), tunnel.get("serverPort", 7000), 1, 65535)
+  supplied_tunnel_token = str(update.get("tunnelToken") or "").strip()
+  if supplied_tunnel_token:
+    tunnel["token"] = supplied_tunnel_token
+
+  tailscale_update = update.get("tailscale") if isinstance(update.get("tailscale"), dict) else {}
+  tailscale = merged.setdefault("tailscale", {})
+  if "hostname" in tailscale_update:
+    tailscale["hostname"] = str(tailscale_update.get("hostname") or "auto").strip()
+  return merged, generated_fetch_token
+
+
+def _vehicle_telemetry_tunnel_status(config, data_dir=None):
+  filename = TAILSCALE_STATUS_FILENAME if config.get("mode") == "tailscale" else FRPC_STATUS_FILENAME
+  return load_vehicle_telemetry_status(Path(data_dir or _get_galaxy_dir()) / filename)
+
+
+def _vehicle_telemetry_connection(config, galaxy_base_url, tunnel_status=None):
+  """Return app capability URLs for the active transport mode."""
+  mode = config.get("mode")
+  parsed = urlsplit(str(galaxy_base_url or ""))
+  if not parsed.hostname:
+    return [], "/api/vehicle/telemetry"
+  if mode == "galaxy":
+    return [urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))], "/api/vehicle/telemetry"
+
+  host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+  local_url = urlunsplit(("http", f"{host}:{config['fetch']['port']}", "", "", ""))
+  urls = [local_url] if mode == "local" else []
+  if mode in ("tailscale", "frp") and isinstance(tunnel_status, dict):
+    public = urlsplit(str(tunnel_status.get("publicURL") or ""))
+    if tunnel_status.get("state") == "running" and public.scheme == "https" and public.hostname:
+      urls.append(urlunsplit((public.scheme, public.netloc, "", "", "")))
+  return urls, "/api/vehicle/telemetry"
+
+
+def _direct_vehicle_hardware_access_blocked():
+  """Keep Galaxy from opening Panda/CAN handles onroad or during EV9 preinit."""
+  try:
+    return params.get_bool("IsOnroad") or params.get_bool("EV9LongPreinitPanda")
+  except Exception:
+    return True
+
+
+def _run_bounded_door_command(command, expect_locked):
+  """Send a parked-only Toyota door command with transition-safe gates."""
+  if _direct_vehicle_hardware_access_blocked():
+    return False, DIRECT_VEHICLE_HARDWARE_BLOCK_MESSAGE, 409
+  deadline = time.monotonic() + DOOR_COMMAND_MAX_SECONDS
+  can_parser = CANParser("toyota_nodsu_pt_generated", [("DOOR_LOCKS", 3)], bus=0)
+
+  if _direct_vehicle_hardware_access_blocked():
+    return False, DIRECT_VEHICLE_HARDWARE_BLOCK_MESSAGE, 409
+  can_sock = messaging.sub_sock("can", timeout=100)
+
+  for _attempt in range(DOOR_COMMAND_MAX_ATTEMPTS):
+    if time.monotonic() >= deadline:
+      break
+    if _direct_vehicle_hardware_access_blocked():
+      return False, DIRECT_VEHICLE_HARDWARE_BLOCK_MESSAGE, 409
+    with Panda(disable_checks=True) as panda:
+      if _direct_vehicle_hardware_access_blocked():
+        return False, DIRECT_VEHICLE_HARDWARE_BLOCK_MESSAGE, 409
+      panda.set_safety_mode(panda.SAFETY_TOYOTA)
+      if _direct_vehicle_hardware_access_blocked():
+        return False, DIRECT_VEHICLE_HARDWARE_BLOCK_MESSAGE, 409
+      panda.can_send(0x750, command, 0)
+
+    remaining = deadline - time.monotonic()
+    if remaining <= 0.0:
+      break
+    time.sleep(min(DOOR_COMMAND_RETRY_SECONDS, remaining))
+    if _direct_vehicle_hardware_access_blocked():
+      return False, DIRECT_VEHICLE_HARDWARE_BLOCK_MESSAGE, 409
+    lock_status = get_lock_status(can_parser, can_sock)
+    if (lock_status == 0) == expect_locked:
+      return True, "", 200
+
+  return False, "The door command could not be confirmed within the bounded retry window.", 504
+
+
+def _galaxy_session_cookie_is_authorized(slug, token):
+  expected = _build_galaxy_session_value(slug, token)
+  supplied = str(request.cookies.get(GALAXY_COOKIE_NAME) or "")
+  return bool(expected and supplied and secrets.compare_digest(supplied, expected))
+
+
 def _build_galaxy_session_value(slug, token):
   if not slug or not token:
     return ""
   return quote(f"{slug}:{token}", safe="")
+
+
+def _galaxy_public_url(slug):
+  return f"https://galaxy.firestar.link/{slug}" if slug else ""
+
+_GALAXY_MDNS_SERVICE_TYPE = "_sp-galaxy._tcp.local."
+_GALAXY_MDNS_LOG_PATH = Path("/tmp/galaxy_mdns.log")
+_GALAXY_MDNS_LOCK = threading.Lock()
+_GALAXY_MDNS_ZEROCONF = None
+_GALAXY_MDNS_INFO = None
+_GALAXY_MDNS_RETRY_THREAD = None
+_GALAXY_MDNS_ADDRESSES = ()
+_GALAXY_LAN_IPV4_NETWORKS = tuple(ipaddress.ip_network(value) for value in (
+  "10.0.0.0/8",
+  "172.16.0.0/12",
+  "192.168.0.0/16",
+  "169.254.0.0/16",
+))
+
+def _galaxy_mdns_log(message):
+  try:
+    line = f"{datetime.now(timezone.utc).isoformat()} {message}"
+    print(line, flush=True)
+    with open(_GALAXY_MDNS_LOG_PATH, "a") as f:
+      f.write(line + "\n")
+  except Exception:
+    pass
+
+def _is_galaxy_lan_ipv4_address(value):
+  try:
+    address = ipaddress.ip_address(str(value or "").strip())
+  except ValueError:
+    return False
+  if address.version != 4:
+    return False
+  return any(address in network for network in _GALAXY_LAN_IPV4_NETWORKS)
+
+def _is_galaxy_lan_host(value):
+  host = str(value or "").strip().lower().rstrip(".")
+  if host.endswith(".local"):
+    return True
+  return _is_galaxy_lan_ipv4_address(host)
+
+def _local_ipv4_addresses():
+  addresses = []
+  try:
+    with socket.socket(socket.AF_INET, socket.SOCK_DGRAM) as sock:
+      sock.connect(("8.8.8.8", 80))
+      candidate = sock.getsockname()[0]
+      if _is_galaxy_lan_ipv4_address(candidate):
+        addresses.append(candidate)
+  except Exception:
+    pass
+
+  try:
+    for info in socket.getaddrinfo(socket.gethostname(), None, socket.AF_INET, socket.SOCK_STREAM):
+      candidate = info[4][0]
+      if _is_galaxy_lan_ipv4_address(candidate) and candidate not in addresses:
+        addresses.append(candidate)
+  except Exception:
+    pass
+  return addresses
+
+def _galaxy_mdns_service_name():
+  hostname = socket.gethostname() or "comma"
+  safe_hostname = re.sub(r"[^A-Za-z0-9-]+", "-", hostname).strip("-") or "comma"
+  return f"StarPilot Galaxy {safe_hostname}.{_GALAXY_MDNS_SERVICE_TYPE}"
+
+def _stop_galaxy_mdns_advertiser():
+  global _GALAXY_MDNS_ZEROCONF, _GALAXY_MDNS_INFO, _GALAXY_MDNS_ADDRESSES
+  with _GALAXY_MDNS_LOCK:
+    if _GALAXY_MDNS_ZEROCONF is None:
+      return
+    try:
+      if _GALAXY_MDNS_INFO is not None:
+        _GALAXY_MDNS_ZEROCONF.unregister_service(_GALAXY_MDNS_INFO)
+    except Exception as e:
+      print(f"Galaxy mDNS unregister failed: {e}")
+    try:
+      _GALAXY_MDNS_ZEROCONF.close()
+    except Exception as e:
+      print(f"Galaxy mDNS close failed: {e}")
+    _GALAXY_MDNS_ZEROCONF = None
+    _GALAXY_MDNS_INFO = None
+    _GALAXY_MDNS_ADDRESSES = ()
+
+def _start_galaxy_mdns_advertiser(port):
+  global _GALAXY_MDNS_ZEROCONF, _GALAXY_MDNS_INFO, _GALAXY_MDNS_ADDRESSES
+  with _GALAXY_MDNS_LOCK:
+    if _GALAXY_MDNS_ZEROCONF is not None:
+      return
+
+    try:
+      from zeroconf import ServiceInfo, Zeroconf
+    except Exception as e:
+      _galaxy_mdns_log(f"unavailable; install zeroconf to advertise Bonjour discovery ({e})")
+      return
+
+    address_strings = _local_ipv4_addresses()
+    addresses = []
+    for address in address_strings:
+      try:
+        addresses.append(socket.inet_aton(address))
+      except OSError:
+        pass
+
+    if not addresses:
+      _galaxy_mdns_log("unavailable; no non-loopback IPv4 address found")
+      return
+
+    properties = {
+      "api": "galaxy",
+      "version": "1",
+      "statusPath": "/api/galaxy/status",
+      "sessionPath": "/api/galaxy/session",
+      "telemetryPath": "/api/galaxy/telemetry",
+    }
+    service_name = _galaxy_mdns_service_name()
+    server_name = f"{re.sub(r'[^A-Za-z0-9-]+', '-', socket.gethostname() or 'comma').strip('-') or 'comma'}.local."
+    try:
+      info = ServiceInfo(
+        _GALAXY_MDNS_SERVICE_TYPE,
+        service_name,
+        addresses=addresses,
+        port=int(port),
+        properties=properties,
+        server=server_name,
+      )
+      zeroconf = Zeroconf()
+      try:
+        zeroconf.register_service(info, allow_name_change=True)
+      except TypeError:
+        zeroconf.register_service(info)
+      _GALAXY_MDNS_ZEROCONF = zeroconf
+      _GALAXY_MDNS_INFO = info
+      _GALAXY_MDNS_ADDRESSES = tuple(address_strings)
+      atexit.register(_stop_galaxy_mdns_advertiser)
+      _galaxy_mdns_log(f"advertised as {service_name} on {','.join(address_strings)}:{port}")
+    except Exception as e:
+      _galaxy_mdns_log(f"advertise failed: {e}")
+
+def _ensure_galaxy_mdns_advertiser(port):
+  global _GALAXY_MDNS_RETRY_THREAD
+  with _GALAXY_MDNS_LOCK:
+    if _GALAXY_MDNS_ZEROCONF is not None or _GALAXY_MDNS_RETRY_THREAD is not None:
+      return
+
+    def retry_worker():
+      global _GALAXY_MDNS_RETRY_THREAD
+      try:
+        while True:
+          current_addresses = tuple(_local_ipv4_addresses())
+          if _GALAXY_MDNS_ZEROCONF is None:
+            _start_galaxy_mdns_advertiser(port)
+          elif current_addresses != _GALAXY_MDNS_ADDRESSES:
+            _galaxy_mdns_log(
+              f"LAN addresses changed from {','.join(_GALAXY_MDNS_ADDRESSES) or 'none'} "
+              f"to {','.join(current_addresses) or 'none'}; refreshing advertisement"
+            )
+            _stop_galaxy_mdns_advertiser()
+            _start_galaxy_mdns_advertiser(port)
+          time.sleep(30)
+      finally:
+        with _GALAXY_MDNS_LOCK:
+          _GALAXY_MDNS_RETRY_THREAD = None
+
+    _GALAXY_MDNS_RETRY_THREAD = threading.Thread(target=retry_worker, daemon=True)
+    _GALAXY_MDNS_RETRY_THREAD.start()
 
 
 def _parse_last_gps_position(raw_value):
@@ -4375,6 +4748,8 @@ def _set_lateral_maneuver_mode(enabled):
   return _save_lateral_maneuver_status(status)
 
 def setup(app):
+  _ensure_galaxy_mdns_advertiser(8083 if not _is_comma_device_runtime() else 8082)
+
   model_status_debug = {
     "last_signature": None,
     "last_log_time": 0.0,
@@ -4448,41 +4823,17 @@ def setup(app):
 
   @app.route("/api/doors/lock", methods=["POST"])
   def lock_doors():
-    can_parser = CANParser("toyota_nodsu_pt_generated", [("DOOR_LOCKS", 3)], bus=0)
-    can_sock = messaging.sub_sock("can", timeout=100)
-
-    while True:
-      with Panda(disable_checks=True) as panda:
-        if not params.get_bool("IsOnroad"):
-          panda.set_safety_mode(panda.SAFETY_TOYOTA)
-        panda.can_send(0x750, LOCK_CMD, 0)
-
-      time.sleep(1)
-
-      lock_status = get_lock_status(can_parser, can_sock)
-      if lock_status == 0:
-        break
-
-    return {"message": "Doors locked!"}
+    if _direct_vehicle_hardware_access_blocked():
+      return jsonify({"error": DIRECT_VEHICLE_HARDWARE_BLOCK_MESSAGE}), 409
+    success, error, status_code = _run_bounded_door_command(LOCK_CMD, True)
+    return ({"message": "Doors locked!"}, 200) if success else (jsonify({"error": error}), status_code)
 
   @app.route("/api/doors/unlock", methods=["POST"])
   def unlock_doors():
-    can_parser = CANParser("toyota_nodsu_pt_generated", [("DOOR_LOCKS", 3)], bus=0)
-    can_sock = messaging.sub_sock("can", timeout=100)
-
-    while True:
-      with Panda(disable_checks=True) as panda:
-        if not params.get_bool("IsOnroad"):
-          panda.set_safety_mode(panda.SAFETY_TOYOTA)
-        panda.can_send(0x750, UNLOCK_CMD, 0)
-
-      time.sleep(1)
-
-      lock_status = get_lock_status(can_parser, can_sock)
-      if lock_status != 0:
-        break
-
-    return {"message": "Doors unlocked!"}
+    if _direct_vehicle_hardware_access_blocked():
+      return jsonify({"error": DIRECT_VEHICLE_HARDWARE_BLOCK_MESSAGE}), 409
+    success, error, status_code = _run_bounded_door_command(UNLOCK_CMD, False)
+    return ({"message": "Doors unlocked!"}, 200) if success else (jsonify({"error": error}), status_code)
 
   @app.route("/api/error_logs", methods=["GET"])
   def get_error_logs():
@@ -6770,28 +7121,203 @@ def setup(app):
     slug = _read_galaxy_text(GALAXY_SLUG_FILE)
     return jsonify({
       "paired": paired,
-      "url": f"https://galaxy.firestar.link/{slug}" if slug else "",
+      "url": _galaxy_public_url(slug),
+      "externalAppPairingPath": "/api/external-app/pairing",
+      "pairingRequiresTelemetrySetup": True,
     })
+
+  @app.route("/api/galaxy/telemetry", methods=["GET"])
+  @app.route("/api/vehicle/telemetry", methods=["GET"])
+  @app.route("/<galaxy_slug>/api/galaxy/telemetry", methods=["GET"])
+  @app.route("/<galaxy_slug>/api/vehicle/telemetry", methods=["GET"])
+  def vehicle_telemetry(galaxy_slug=None):
+    if galaxy_slug is None:
+      if not _request_is_lan():
+        return jsonify({"error": "Galaxy route not found."}), 404
+    else:
+      configured_slug = _read_galaxy_text(GALAXY_SLUG_FILE)
+      if not configured_slug or not secrets.compare_digest(str(galaxy_slug), configured_slug):
+        return jsonify({"error": "Galaxy route not found."}), 404
+      session_token = _read_galaxy_text(GALAXY_SESSION_FILE)
+      if not _galaxy_session_cookie_is_authorized(configured_slug, session_token):
+        return jsonify({"error": "Galaxy session authorization failed."}), 401
+
+    config = load_vehicle_telemetry_config()
+    if config["mode"] != "galaxy":
+      return jsonify({"error": "Galaxy is not the active EV Vehicle Telemetry transport."}), 404
+    if not config["fetch"]["enabled"]:
+      return jsonify({"error": "EV Vehicle Telemetry fetch is disabled."}), 404
+    if not is_fetch_authorized(config, request.headers.get("Authorization")):
+      response = jsonify({"error": "EV Vehicle Telemetry authorization failed."})
+      response.status_code = 401
+      response.headers["WWW-Authenticate"] = 'Bearer realm="vehicle-telemetry"'
+      return response
+
+    response_payload = telemetry_response(
+      VehicleTelemetryCache().load(),
+      vehicle_id=config["push"]["vehicleId"],
+    )
+    if response_payload is None:
+      return jsonify({"error": "No validated EV Vehicle Telemetry has been cached yet."}), 503
+    response = jsonify(response_payload)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
   @app.route("/api/galaxy/session", methods=["GET"])
   def galaxy_session():
     slug = _read_galaxy_text(GALAXY_SLUG_FILE)
-    token = _read_galaxy_text(GALAXY_SESSION_FILE)
-    paired = len(_read_galaxy_text(GALAXY_AUTH_FILE)) == 64 and bool(slug and token)
+    paired = len(_read_galaxy_text(GALAXY_AUTH_FILE)) == 64 and bool(slug)
     control_catalog = _build_galaxy_nav_control_catalog()
     return jsonify({
       "appUrl": GALAXY_PLAY_STORE_URL,
       "cookieName": GALAXY_COOKIE_NAME,
       "paired": paired,
-      "sessionToken": _build_galaxy_session_value(slug, token),
+      "externalAppPairingPath": "/api/external-app/pairing",
+      "pairingRequiresTelemetrySetup": True,
       "controls": control_catalog["controls"],
       "sections": control_catalog["sections"],
       "controlCatalogVersion": control_catalog["version"],
       "controlCatalogUpdatedAt": control_catalog["updatedAt"],
     })
 
+  @app.route("/api/galaxy/ios-pairing/<short_code>", methods=["GET"])
+  def galaxy_ios_pairing(short_code):
+    del short_code
+    return jsonify({
+      "error": "Legacy Galaxy pairing is retired. Start a one-time external-app pairing session from the comma.",
+      "externalAppPairingPath": "/api/external-app/pairing",
+    }), 410
+
+  @app.route("/api/galaxy/ios-pairing-qr", methods=["GET"])
+  def galaxy_ios_pairing_qr():
+    return jsonify({
+      "error": "Legacy Galaxy QR pairing is retired. Start a one-time external-app pairing session from the comma.",
+      "externalAppPairingPath": "/api/external-app/pairing",
+    }), 410
+
+  @app.route("/api/vehicle/telemetry/status", methods=["GET"])
+  def vehicle_telemetry_status():
+    config = load_vehicle_telemetry_config()
+    if (config["mode"] != "galaxy" or not config["fetch"]["enabled"]
+        or not is_fetch_authorized(config, request.headers.get("Authorization"))):
+      return jsonify({"error": "EV Vehicle Telemetry fetch is disabled or unauthorized."}), 404
+
+    response = jsonify({
+      "config": public_vehicle_telemetry_config(config),
+      "cache": telemetry_response(
+        VehicleTelemetryCache().load(),
+        vehicle_id=config["push"]["vehicleId"],
+      ),
+      "exporter": load_vehicle_telemetry_status(),
+    })
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+  @app.route("/api/vehicle/telemetry/config", methods=["GET", "POST"])
+  def vehicle_telemetry_config():
+    if not _request_is_lan_setup():
+      return jsonify({"error": "Start a temporary EV Vehicle Telemetry setup session from the comma before viewing or changing configuration."}), 403
+    generated_fetch_token = ""
+    if request.method == "POST":
+      update = request.get_json(silent=True) or {}
+
+      def merge_config(current):
+        nonlocal generated_fetch_token
+        merged, generated_fetch_token = _merge_vehicle_telemetry_config(current, update)
+        return merged
+
+      config = update_vehicle_telemetry_config(merge_config)
+    else:
+      config = load_vehicle_telemetry_config()
+
+    tunnel_status = _vehicle_telemetry_tunnel_status(config)
+    response_payload = {
+      "config": public_vehicle_telemetry_config(config),
+      "cache": telemetry_response(VehicleTelemetryCache().load(), vehicle_id=config["push"]["vehicleId"]),
+      "exporter": load_vehicle_telemetry_status(),
+      "tunnel": tunnel_status,
+    }
+    if generated_fetch_token:
+      response_payload["generatedFetchToken"] = generated_fetch_token
+    response = jsonify(response_payload)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+  @app.route("/api/external-app/pairing", methods=["POST"])
+  def create_external_app_pairing():
+    if not _request_is_lan_setup():
+      return jsonify({"error": "Start a temporary EV Vehicle Telemetry setup session from the comma before pairing an app."}), 403
+    config = load_vehicle_telemetry_config()
+    if config["mode"] == "off" and not vehicle_telemetry_config_path().exists():
+      def enable_default_galaxy(current):
+        if current["mode"] == "off" and not vehicle_telemetry_config_path().exists():
+          current["mode"] = "galaxy"
+        return current
+
+      config = update_vehicle_telemetry_config(enable_default_galaxy)
+    if config["mode"] not in ("galaxy", "local", "tailscale", "frp"):
+      return jsonify({"error": "Select Galaxy, local, Tailscale, or FRP telemetry mode before pairing an app."}), 409
+    if config["mode"] in ("tailscale", "frp"):
+      tunnel_status = _vehicle_telemetry_tunnel_status(config)
+      if tunnel_status.get("state") != "running":
+        return jsonify({"error": "The public telemetry tunnel must be running before pairing an app."}), 409
+    try:
+      pairing = create_pairing(GALAXY_DIR, request.host_url)
+      try:
+        import qrcode
+        qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=3)
+        qr.add_data(pairing["qrData"])
+        qr.make(fit=True)
+        output = BytesIO()
+        qr.make_image(fill_color="black", back_color="white").save(output, format="PNG")
+        pairing["qrImageDataURL"] = "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii")
+      except Exception:
+        pairing["qrImageDataURL"] = ""
+      response = jsonify(pairing)
+      response.headers["Cache-Control"] = "no-store"
+      return response
+    except ValueError as error:
+      return jsonify({"error": str(error)}), 400
+
+  @app.route("/api/external-app/pair", methods=["POST"])
+  def pair_external_app():
+    if not _request_is_lan():
+      return jsonify({"error": "External-app pairing is available only on the local network."}), 403
+    data = request.get_json(silent=True) or {}
+    config = load_vehicle_telemetry_config()
+    tunnel_status = _vehicle_telemetry_tunnel_status(config)
+    telemetry_base_urls, telemetry_path = _vehicle_telemetry_connection(config, request.host_url, tunnel_status)
+    if not telemetry_base_urls:
+      return jsonify({"error": "The configured EV Vehicle Telemetry transport is not ready."}), 409
+    slug = _read_galaxy_text(GALAXY_SLUG_FILE)
+    session_token = _build_galaxy_session_value(slug, _read_galaxy_text(GALAXY_SESSION_FILE))
+    requested_capabilities = data.get("requestedCapabilities") if isinstance(data.get("requestedCapabilities"), list) else None
+    if requested_capabilities and "galaxySession" in requested_capabilities and (not slug or not session_token):
+      return jsonify({"error": "Pair StarPilot Galaxy with its cloud portal before connecting this external app."}), 409
+    legacy_connection = {
+      "portalURL": f"https://galaxy.firestar.link/{slug}" if slug else "",
+      "cookieName": GALAXY_COOKIE_NAME,
+      "sessionToken": session_token,
+    }
+    connection, error = complete_pairing(
+      GALAXY_DIR,
+      data.get("code", ""),
+      data.get("clientName", "External app"),
+      requested_capabilities=requested_capabilities,
+      legacy_connection=legacy_connection,
+      telemetry_base_urls=telemetry_base_urls,
+      telemetry_path=telemetry_path,
+    )
+    if error:
+      return jsonify({"error": error}), 401
+    response = jsonify(connection)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
   @app.route("/api/galaxy/pair", methods=["POST"])
   def galaxy_pair():
+    if not _request_is_lan_setup():
+      return jsonify({"error": "Start a temporary EV Vehicle Telemetry setup session from the comma before changing Galaxy pairing."}), 403
     data = request.get_json() or {}
     password = (data.get("password") or "").strip()
     if len(password) < 6:
@@ -6812,10 +7338,13 @@ def setup(app):
     return jsonify({
       "message": "Pairing successful!",
       "url": f"https://galaxy.firestar.link/{slug}",
+      "externalAppPairingPath": "/api/external-app/pairing",
     })
 
   @app.route("/api/galaxy/unpair", methods=["POST"])
   def galaxy_unpair():
+    if not _request_is_lan_setup():
+      return jsonify({"error": "Start a temporary EV Vehicle Telemetry setup session from the comma before changing Galaxy pairing."}), 403
     for f in ["glxyauth", "glxysession", "glxyslug"]:
       file_path = GALAXY_DIR / f
       if file_path.is_file():
@@ -6824,132 +7353,71 @@ def setup(app):
 
   @app.route("/api/tailscale/installed", methods=["GET"])
   def tailscale_installed():
-    base = "/data/tailscale"
-    tailscale_binary = f"{base}/tailscale"
-    tailscaled_binary = f"{base}/tailscaled"
-
-    systemd_unit = "/etc/systemd/system/tailscaled.service"
-
-    if os.path.exists(tailscale_binary) and os.path.exists(tailscaled_binary) and os.path.exists(systemd_unit):
-      return jsonify({"installed": True})
-
-    result = subprocess.run(["which", "tailscale"], capture_output=True, text=True)
-    if result.returncode == 0:
-      return jsonify({"installed": True})
-
-    return jsonify({"installed": False})
+    if not _request_is_lan_setup():
+      return jsonify({"error": "Tailscale setup status is available only on the local network."}), 403
+    config = load_vehicle_telemetry_config()
+    tailscale = config["tailscale"]
+    status = load_vehicle_telemetry_status(GALAXY_DIR / TAILSCALE_STATUS_FILENAME)
+    return jsonify({
+      "installed": tailscale_is_installed(tailscale),
+      "enabled": config["mode"] == "tailscale" and config["fetch"]["enabled"],
+      "state": status.get("state", "disabled"),
+      "publicURL": status.get("publicURL", ""),
+      "ownerURL": status.get("ownerURL", ""),
+      "error": status.get("error", ""),
+    })
 
   @app.route("/api/tailscale/setup", methods=["POST"])
   def tailscale_setup():
-    arch = "arm64"
-    base = "/data/tailscale"
+    if not _request_is_lan_setup():
+      return jsonify({"error": "Tailscale setup is available only on the local network."}), 403
+    try:
+      config, generated_fetch_token = enable_personal_tailscale_relay(
+        data_dir=GALAXY_DIR,
+        base_dir=TAILSCALE_DEFAULT_BASE,
+      )
+      response = {
+        "message": "Personal Tailscale relay enabled. Continue with owner login when it is ready.",
+        "config": public_vehicle_telemetry_config(config),
+      }
+      if generated_fetch_token:
+        response["generatedFetchToken"] = generated_fetch_token
+      return jsonify(response), 200
+    except Exception as error:
+      return jsonify({"error": f"Tailscale setup failed: {str(error)[:240]}"}), 500
 
-    result = subprocess.run(
-      "curl -s https://pkgs.tailscale.com/stable/ | grep -oP 'tailscale_\\K[0-9]+\\.[0-9]+\\.[0-9]+' | sort -V | tail -1",
-      shell=True, capture_output=True, text=True
-    )
-
-    version = result.stdout.strip() or "1.84.0"
-
-    bin_dir = f"{base}/tailscale_{version}_{arch}"
-    state = f"{base}/state"
-    socket = f"{base}/tailscaled.sock"
-    tgz_path = f"{base}/tailscale.tgz"
-
-    tgz_url = f"https://pkgs.tailscale.com/stable/tailscale_{version}_{arch}.tgz"
-
-    os.makedirs(state, exist_ok=True)
-
-    run_cmd(["curl", "-fsSL", tgz_url, "-o", tgz_path], "Downloaded Tailscale archive.", "Failed to download Tailscale archive.")
-
-    extract_tar(tgz_path, base)
-
-    run_cmd(["cp", f"{bin_dir}/tailscale", f"{base}/tailscale"], "Copied tailscale binary.", "Failed to copy tailscale binary.")
-    run_cmd(["cp", f"{bin_dir}/tailscaled", f"{base}/tailscaled"], "Copied tailscaled binary.", "Failed to copy tailscaled binary.")
-    run_cmd(["chmod", "+x", f"{base}/tailscale", f"{base}/tailscaled"], "Made binaries executable.", "Failed to chmod binaries.")
-
-    systemd_unit = f"""[Unit]
-    Description=Tailscale node agent
-    After=network.target
-
-    [Service]
-    ExecStart={base}/tailscaled \\
-      --tun=userspace-networking \\
-      --socks5-server=localhost:1055 \\
-      --state={state}/tailscaled.state \\
-      --socket={socket} \\
-      --statedir={state}
-    Restart=on-failure
-    RestartSec=5
-
-    [Install]
-    WantedBy=multi-user.target
-    """
-    unit_tmp = f"{base}/tailscaled.service"
-    with open(unit_tmp, "w") as f:
-      f.write(systemd_unit)
-
-    run_cmd(["sudo", "mount", "-o", "remount,rw", "/"], "Remounted / as read-write.", "Failed to remount / as read-write.")
-    run_cmd(["sudo", "install", "-m", "644", unit_tmp, "/etc/systemd/system/tailscaled.service"], "Installed systemd unit.", "Failed to install systemd unit.")
-    run_cmd(["sudo", "systemctl", "daemon-reload"], "Reloaded systemd daemon.", "Failed to reload systemd daemon.")
-    run_cmd(["sudo", "systemctl", "enable", "/etc/systemd/system/tailscaled.service"], "Enabled tailscaled service.", "Failed to enable tailscaled service.")
-    run_cmd(["sudo", "systemctl", "restart", "tailscaled"], "Started tailscaled service.", "Failed to start tailscaled service.")
-
-    proc = subprocess.Popen(
-      ["sudo", f"{base}/tailscale", "--socket", socket, "up", "--hostname", f"{HARDWARE.get_device_type()}-the-galaxy"],
-      stdout=subprocess.PIPE,
-      stderr=subprocess.STDOUT,
-      text=True,
-      preexec_fn=os.setsid
-    )
-
-    auth_url = None
-    for line in proc.stdout:
-      match = re.search(r"https://login\.tailscale\.com/\S+", line)
-      if match and not auth_url:
-        auth_url = match.group(0)
-        run_cmd(["sudo", "kill", "-TERM", f"-{proc.pid}"], "Sent SIGTERM to Tailscale setup process.", "Failed to send SIGTERM to Tailscale setup process.")
-        proc.wait(timeout=5)
-        break
-
-    return jsonify({
-      "message": "Tailscale setup started. Please authenticate in your browser.",
-      "auth_url": auth_url
-    }), 200
+  @app.route("/api/tailscale/login", methods=["POST"])
+  def tailscale_login():
+    if not _request_is_lan_setup():
+      return jsonify({"error": "Tailscale owner login is available only on the local network."}), 403
+    config = load_vehicle_telemetry_config()
+    if config["mode"] != "tailscale" or not config["fetch"]["enabled"]:
+      return jsonify({"error": "Enable the personal Tailscale relay first."}), 409
+    try:
+      hostname = ensure_tailscale_hostname(GALAXY_DIR, config["tailscale"].get("hostname", "auto"))
+      owner_url = begin_tailscale_login(config["tailscale"], hostname)
+      return jsonify({"message": "Complete owner login in Tailscale.", "ownerURL": owner_url}), 200
+    except Exception as error:
+      return jsonify({"error": f"Tailscale is not ready for login yet: {str(error)[:240]}"}), 409
 
   @app.route("/api/tailscale/uninstall", methods=["POST"])
   def tailscale_uninstall():
-    base = "/data/tailscale"
-    state = f"{base}/state"
-    unit_path = "/etc/systemd/system/tailscaled.service"
-    local_unit = f"{base}/tailscaled.service"
+    if not _request_is_lan_setup():
+      return jsonify({"error": "Tailscale relay changes are available only on the local network."}), 403
+    config = load_vehicle_telemetry_config()
+    try:
+      TailscaleFunnelController(GALAXY_DIR).reconcile(False, config["tailscale"], config["fetch"])
+    except Exception:
+      # The low-priority telemetry daemon will retry managed Funnel cleanup.
+      pass
 
-    run_cmd(["sudo", "mount", "-o", "remount,rw", "/"], "Remounted / as read-write.", "Failed to remount /.")
-    run_cmd(["sudo", "systemctl", "stop", "tailscaled"], "Stopped tailscaled.", "Failed to stop tailscaled.")
-    run_cmd(["sudo", "systemctl", "disable", "tailscaled"], "Disabled tailscaled.", "Failed to disable tailscaled.")
+    def disable_tailscale(current):
+      current["mode"] = "off"
+      current["fetch"]["enabled"] = False
+      return current
 
-    if os.path.exists(unit_path):
-      run_cmd(["sudo", "rm", unit_path], "Removed systemd unit file.", "Failed to remove systemd unit file.")
-      run_cmd(["sudo", "systemctl", "daemon-reload"], "Reloaded systemd daemon.", "Failed to reload systemd.")
-
-    delete_file(local_unit)
-
-    for filename in ["tailscale", "tailscaled", "tailscale.tgz"]:
-      delete_file(os.path.join(base, filename))
-
-    for item in os.listdir(base):
-      if item.startswith("tailscale_"):
-        item_path = os.path.join(base, item)
-        if os.path.isdir(item_path):
-          run_cmd(["sudo", "rm", "-rf", item_path], f"Removed {item_path}.", f"Failed to remove {item_path}.")
-
-    if os.path.exists(state):
-      run_cmd(["sudo", "rm", "-rf", state], "Removed tailscale state dir.", "Failed to remove tailscale state dir.")
-
-    if os.path.exists(base):
-      run_cmd(["sudo", "rm", "-rf", base], "Removed tailscale dir.", "Failed to remove tailscale dir.")
-
-    return jsonify({"message": "Tailscale uninstalled!"}), 200
+    update_vehicle_telemetry_config(disable_tailscale)
+    return jsonify({"message": "Personal relay disabled. Tailscale identity was retained for easy re-enable."}), 200
 
   @app.route("/api/themes", methods=["POST"])
   def save_theme_route():

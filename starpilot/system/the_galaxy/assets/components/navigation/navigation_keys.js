@@ -23,11 +23,40 @@ export function NavKeys() {
     editPublic: false, editSecret: false,
     savedPublic: false, savedSecret: false,
 
-    galaxyCookieName: "galaxy_session",
-    galaxySessionToken: "",
     galaxyAppUrl: DEFAULT_PLAY_STORE_URL,
     galaxyPaired: false,
-    galaxySessionVisible: false,
+    externalPairingQrData: "",
+    externalPairingQrImage: "",
+    externalPairingCode: "",
+    externalPairingExpiresAt: 0,
+    externalPairingLoading: false,
+
+    telemetryMode: "off",
+    telemetryFetchEnabled: false,
+    telemetryFetchPort: 7766,
+    telemetryFetchHasToken: false,
+    telemetryGeneratedFetchToken: "",
+    telemetryPushEnabled: false,
+    telemetryPushUrl: "",
+    telemetryPushToken: "",
+    telemetryVehicleId: "",
+    telemetryVehicleName: "",
+    telemetryBatteryCapacity: "",
+    telemetryDrivingInterval: 60,
+    telemetryChargingInterval: 120,
+    telemetryParkedInterval: 900,
+    telemetryTunnelBinary: "/data/vehicle_telemetry/bin/frpc",
+    telemetryTunnelServer: "",
+    telemetryTunnelPort: 7000,
+    telemetryTunnelToken: "",
+    telemetryTunnelDomain: "",
+    telemetryTunnelSubdomain: "auto",
+    telemetryTunnelCa: "",
+    telemetryTunnelServerName: "",
+    telemetryTunnelState: "disabled",
+    telemetryPublicUrl: "",
+    telemetryOwnerUrl: "",
+    telemetrySaving: false,
 
     showDeleteModal: false,
     keyToDelete: null,
@@ -66,7 +95,7 @@ export function NavKeys() {
     },
 
     req: async (url, opts) => {
-      const response = await fetch(url, opts)
+      const response = await fetch(url, { ...(opts || {}), credentials: "same-origin" })
       return { ok: response.ok, data: await response.json().catch(() => ({})) }
     },
 
@@ -133,6 +162,8 @@ export function NavKeys() {
   const api = {
     path: {
       galaxy: "/api/galaxy/session",
+      externalPairing: "/api/external-app/pairing",
+      telemetryConfig: "/api/vehicle/telemetry/config",
       key: "/api/navigation_key",
       nav: "/api/navigation"
     },
@@ -141,7 +172,7 @@ export function NavKeys() {
       const { ok, data } = await util.req(api.path.nav)
       if (!ok) {
         showMessage("error", "Failed to load keys...", "")
-        await api.loadGalaxySession()
+        await Promise.all([api.loadGalaxySession(), api.loadTelemetry()])
         return
       }
 
@@ -158,7 +189,7 @@ export function NavKeys() {
       state.initialMapboxComplete = state.savedPublic && state.savedSecret
 
       bumpImageVersion()
-      await api.loadGalaxySession()
+      await Promise.all([api.loadGalaxySession(), api.loadTelemetry()])
     },
 
     loadGalaxySession: async () => {
@@ -168,16 +199,171 @@ export function NavKeys() {
       }
 
       state.galaxyAppUrl = data.appUrl || DEFAULT_PLAY_STORE_URL
-      state.galaxyCookieName = data.cookieName || "galaxy_session"
       state.galaxyPaired = !!data.paired
-      state.galaxySessionToken = data.sessionToken || ""
-      state.galaxySessionVisible = false
     },
 
-    copyGalaxySession: async () => {
+    applyTelemetry: (data) => {
+      const config = data.config || {}
+      const fetchConfig = config.fetch || {}
+      const push = config.push || {}
+      const tunnel = config.tunnel || {}
+      state.telemetryMode = config.mode || "off"
+      state.telemetryFetchEnabled = !!fetchConfig.enabled
+      state.telemetryFetchPort = Number(fetchConfig.port || 7766)
+      state.telemetryFetchHasToken = !!fetchConfig.hasToken
+      state.telemetryPushEnabled = !!push.enabled
+      state.telemetryPushUrl = push.url || ""
+      state.telemetryVehicleId = push.vehicleId || ""
+      state.telemetryVehicleName = push.vehicleName || ""
+      state.telemetryBatteryCapacity = push.maximumBatteryCapacityKilowattHours ?? ""
+      state.telemetryDrivingInterval = Number(push.drivingIntervalSeconds || 60)
+      state.telemetryChargingInterval = Number(push.chargingIntervalSeconds || 120)
+      state.telemetryParkedInterval = Number(push.parkedIntervalSeconds || 900)
+      state.telemetryTunnelBinary = tunnel.binaryPath || "/data/vehicle_telemetry/bin/frpc"
+      state.telemetryTunnelServer = tunnel.serverAddress || ""
+      state.telemetryTunnelPort = Number(tunnel.serverPort || 7000)
+      state.telemetryTunnelDomain = tunnel.subdomainHost || ""
+      state.telemetryTunnelSubdomain = tunnel.subdomain || "auto"
+      state.telemetryTunnelCa = tunnel.trustedCaFile || ""
+      state.telemetryTunnelServerName = tunnel.serverName || ""
+      state.telemetryTunnelState = data.tunnel?.state || "disabled"
+      state.telemetryPublicUrl = data.tunnel?.publicURL || ""
+      state.telemetryOwnerUrl = data.tunnel?.ownerURL || ""
+      if (data.generatedFetchToken) {
+        state.telemetryGeneratedFetchToken = data.generatedFetchToken
+      }
+    },
+
+    loadTelemetry: async () => {
+      const { ok, data } = await util.req(api.path.telemetryConfig)
+      if (!ok) {
+        return showMessage("error", data.error || "Failed to load EV Vehicle Telemetry...", "telemetry")
+      }
+      api.applyTelemetry(data)
+    },
+
+    saveTelemetry: async ({ rotateFetchToken = false } = {}) => {
+      state.telemetrySaving = true
+      const payload = {
+        mode: state.telemetryMode,
+        rotateFetchToken,
+        fetchToken: "",
+        fetch: {
+          enabled: ["local", "tailscale", "frp", "galaxy"].includes(state.telemetryMode),
+          port: Number(state.telemetryFetchPort || 7766),
+          bindAddress: state.telemetryMode === "local" ? "0.0.0.0" : "127.0.0.1",
+        },
+        pushToken: state.telemetryPushToken,
+        push: {
+          enabled: state.telemetryMode === "send" || state.telemetryPushEnabled,
+          url: state.telemetryPushUrl,
+          vehicleId: state.telemetryVehicleId,
+          vehicleName: state.telemetryVehicleName,
+          maximumBatteryCapacityKilowattHours: state.telemetryBatteryCapacity || null,
+          drivingIntervalSeconds: Number(state.telemetryDrivingInterval || 60),
+          chargingIntervalSeconds: Number(state.telemetryChargingInterval || 120),
+          parkedIntervalSeconds: Number(state.telemetryParkedInterval || 900),
+        },
+        tunnelToken: state.telemetryTunnelToken,
+        tunnel: {
+          binaryPath: state.telemetryTunnelBinary,
+          serverAddress: state.telemetryTunnelServer,
+          serverPort: Number(state.telemetryTunnelPort || 7000),
+          subdomainHost: state.telemetryTunnelDomain,
+          subdomain: state.telemetryTunnelSubdomain,
+          trustedCaFile: state.telemetryTunnelCa,
+          serverName: state.telemetryTunnelServerName,
+        },
+      }
+      const { ok, data } = await util.req(api.path.telemetryConfig, {
+        body: JSON.stringify(payload),
+        headers: { "Content-Type": "application/json" },
+        method: "POST",
+      })
+      state.telemetrySaving = false
+      if (!ok) {
+        return showMessage("error", data.error || "Could not save EV Vehicle Telemetry...", "telemetry")
+      }
+      state.telemetryPushToken = ""
+      state.telemetryTunnelToken = ""
+      api.applyTelemetry(data)
+      showMessage("message", rotateFetchToken ? "New fetch token generated." : "EV Vehicle Telemetry saved.", "telemetry")
+    },
+
+    setupTailscale: async () => {
+      state.telemetrySaving = true
+      const { ok, data } = await util.req("/api/tailscale/setup", { method: "POST" })
+      state.telemetrySaving = false
+      if (!ok) {
+        return showMessage("error", data.error || "Could not enable the personal relay...", "telemetry")
+      }
+      if (data.generatedFetchToken) {
+        state.telemetryGeneratedFetchToken = data.generatedFetchToken
+      }
+      showMessage("message", data.message || "Personal relay enabled.", "telemetry")
+      await api.loadTelemetry()
+      setTimeout(api.loadTelemetry, 1500)
+      setTimeout(api.loadTelemetry, 5500)
+    },
+
+    openTailscaleOwner: async () => {
+      let ownerURL = state.telemetryOwnerUrl
+      if (!ownerURL) {
+        const { ok, data } = await util.req("/api/tailscale/login", { method: "POST" })
+        if (!ok) {
+          return showMessage("error", data.error || "Tailscale is not ready yet...", "telemetry")
+        }
+        ownerURL = data.ownerURL || ""
+      }
       try {
-        await util.copyText(state.galaxySessionToken)
-        showMessage("message", "Session token copied!", "app")
+        const parsed = new URL(ownerURL)
+        if (parsed.protocol !== "https:" || parsed.hostname !== "login.tailscale.com") {
+          throw new Error("Unexpected owner URL")
+        }
+        window.location.href = parsed.href
+      } catch (error) {
+        showMessage("error", "Tailscale returned an invalid owner URL.", "telemetry")
+      }
+    },
+
+    disableTailscale: async () => {
+      state.telemetrySaving = true
+      const { ok, data } = await util.req("/api/tailscale/uninstall", { method: "POST" })
+      state.telemetrySaving = false
+      if (!ok) {
+        return showMessage("error", data.error || "Could not disable the personal relay...", "telemetry")
+      }
+      await api.loadTelemetry()
+      showMessage("message", data.message || "Personal relay disabled.", "telemetry")
+    },
+
+    copyTelemetryValue: async (value, label) => {
+      try {
+        await util.copyText(value)
+        showMessage("message", `${label} copied!`, "telemetry")
+      } catch (e) {
+        showMessage("error", "Copy failed...", "telemetry")
+      }
+    },
+
+    createExternalPairing: async () => {
+      state.externalPairingLoading = true
+      const { ok, data } = await util.req(api.path.externalPairing, { method: "POST" })
+      state.externalPairingLoading = false
+      if (!ok) {
+        return showMessage("error", data.error || "Could not create pairing...", "app")
+      }
+      state.externalPairingQrData = data.qrData || ""
+      state.externalPairingQrImage = data.qrImageDataURL || ""
+      state.externalPairingCode = data.pairingCode || ""
+      state.externalPairingExpiresAt = Number(data.expiresAt || 0)
+      showMessage("message", "One-time pairing is ready for 10 minutes.", "app")
+    },
+
+    copyExternalPairing: async () => {
+      try {
+        await util.copyText(state.externalPairingQrData)
+        showMessage("message", "One-time pairing package copied!", "app")
       } catch (e) {
         showMessage("error", "Copy failed...", "app")
       }
@@ -372,42 +558,189 @@ export function NavKeys() {
         </a>
       </div>
 
-      <label class="navkeys-label" for="galaxy-cookie-name">Cookie Name</label>
-      <div class="navkeys-row">
-        <input
-          class="navkeys-input navkeys-token-input"
-          id="galaxy-cookie-name"
-          readonly
-          value="${() => state.galaxyCookieName}"
-        />
+      <div class="navkeys-subtitle">
+        Pair RangeBridge, Galaxy Nav, or another external app without copying URLs or reusable secrets.
       </div>
 
-      <label class="navkeys-label" for="galaxy-session-token">Session Token</label>
-      <div class="navkeys-row">
-        <input
-          class="navkeys-input navkeys-token-input"
-          id="galaxy-session-token"
-          placeholder="${() => state.galaxyPaired ? "Session token unavailable..." : "Pair Galaxy to create a session token..."}"
-          readonly
-          type="${() => state.galaxySessionVisible ? "text" : "password"}"
-          value="${() => state.galaxySessionToken}"
-        />
+      <div class="navkeys-app-actions navkeys-pair-actions">
         <button
-          aria-label="${() => state.galaxySessionVisible ? "Hide session token" : "Show session token"}"
-          class="navkeys-btn navkeys-icon-btn"
-          @click="${() => { state.galaxySessionVisible = !state.galaxySessionVisible }}"
-          disabled="${() => !state.galaxySessionToken}"
-          title="${() => state.galaxySessionVisible ? "Hide session token" : "Show session token"}">
-          <i class="${() => `bi ${state.galaxySessionVisible ? "bi-eye-slash" : "bi-eye"}`}"></i>
+          class="navkeys-btn navkeys-copy-btn"
+          @click="${api.createExternalPairing}"
+          disabled="${() => state.externalPairingLoading || state.telemetryMode === "off"}">
+          <i class="bi bi-qr-code"></i>
+          <span>${() => state.externalPairingLoading ? "Creating..." : "Create Pairing QR"}</span>
+        </button>
+      </div>
+
+      ${() => state.externalPairingQrData ? html`
+        <div class="navkeys-pairing-card">
+          ${state.externalPairingQrImage ? html`
+            <img class="navkeys-pairing-qr" alt="One-time external app pairing QR code" src="${state.externalPairingQrImage}" />
+          ` : ""}
+          <div class="navkeys-pairing-details">
+            <div class="navkeys-label">One-time connection package</div>
+            <div class="navkeys-pairing-code" aria-label="Six digit pairing code">
+              ${state.externalPairingCode}
+            </div>
+            <div class="navkeys-subtitle navkeys-pairing-subtitle">
+              Scan the QR or enter this six-digit code in an app on the same LAN. It expires at ${new Date(state.externalPairingExpiresAt * 1000).toLocaleTimeString()} and can be used once.
+            </div>
+            <button class="navkeys-btn navkeys-copy-btn" @click="${api.copyExternalPairing}">
+              <i class="bi bi-copy"></i>
+              <span>Copy Pairing Package</span>
+            </button>
+          </div>
+        </div>
+      ` : ""}
+    `
+  }
+
+  function telemetryInput(label, property, { type = "text", placeholder = "", secret = false } = {}) {
+    return html`
+      <label class="navkeys-label">${label}</label>
+      <input
+        autocomplete="${secret ? "new-password" : "off"}"
+        class="navkeys-input ${secret ? "navkeys-token-input" : ""}"
+        type="${type}"
+        placeholder="${placeholder}"
+        value="${() => state[property]}"
+        @input="${(event) => state[property] = event.target.value}" />
+    `
+  }
+
+  function renderTelemetryConfig() {
+    return html`
+      <div class="navkeys-title">EV Vehicle Telemetry</div>
+      <div class="navkeys-subtitle">
+        Cache only, send to your custom backend, serve on your LAN, use a personal Tailscale Funnel, publish through your own FRP gateway, or use the hosted Galaxy route. Custom HTTPS sending can also run with any access mode.
+      </div>
+
+      <div class="navkeys-telemetry-grid">
+        <div>
+          <label class="navkeys-label">Operating mode</label>
+          <select
+            class="navkeys-input navkeys-select"
+            value="${() => state.telemetryMode}"
+            @change="${(event) => {
+              state.telemetryMode = event.target.value
+              if (state.telemetryMode === "send") state.telemetryPushEnabled = true
+            }}">
+            <option value="off">Off / cache only</option>
+            <option value="send">Custom backend (send only)</option>
+            <option value="local">Local network</option>
+            <option value="tailscale">Personal public relay (Tailscale)</option>
+            <option value="frp">Self-hosted FRP</option>
+            <option value="galaxy">Galaxy portal</option>
+          </select>
+        </div>
+        ${() => state.telemetryMode === "local" || state.telemetryMode === "frp" ? html`
+          <div>${telemetryInput("Local API port", "telemetryFetchPort", { type: "number", placeholder: "7766" })}</div>
+        ` : ""}
+      </div>
+
+      ${() => state.telemetryMode === "tailscale" ? html`
+        <div class="navkeys-telemetry-section">
+          <div class="navkeys-label">Personal public relay</div>
+          <div class="navkeys-subtitle">
+            Your comma makes an outbound connection to your own free Tailscale account. One owner login and one Funnel approval are required; afterward the public HTTPS URL is restored automatically without port forwarding or custom DNS.
+          </div>
+          <div class="navkeys-telemetry-status">
+            Relay: <strong>${() => state.telemetryTunnelState}</strong>
+            ${() => state.telemetryPublicUrl ? html`
+              <button class="navkeys-inline-copy" @click="${() => api.copyTelemetryValue(state.telemetryPublicUrl, "Public URL")}">
+                ${state.telemetryPublicUrl}
+              </button>
+            ` : ""}
+          </div>
+          <div class="navkeys-app-actions navkeys-telemetry-actions">
+            <button class="navkeys-btn navkeys-copy-btn" @click="${api.setupTailscale}" disabled="${() => state.telemetrySaving}">
+              <i class="bi bi-cloud-arrow-up-fill"></i><span>Install / Enable Relay</span>
+            </button>
+            <button class="navkeys-btn navkeys-copy-btn" @click="${api.openTailscaleOwner}" disabled="${() => state.telemetrySaving || state.telemetryTunnelState === "running"}">
+              <i class="bi bi-box-arrow-up-right"></i><span>${() => state.telemetryTunnelState === "needs-funnel-approval" ? "Approve Funnel" : "Owner Login"}</span>
+            </button>
+            <button class="navkeys-btn navkeys-copy-btn delete" @click="${api.disableTailscale}" disabled="${() => state.telemetrySaving}">
+              <i class="bi bi-stop-circle"></i><span>Disable Relay</span>
+            </button>
+          </div>
+        </div>
+      ` : ""}
+
+      ${() => state.telemetryMode === "frp" ? html`
+        <div class="navkeys-telemetry-section">
+          <div class="navkeys-label">FRP client</div>
+          <div class="navkeys-telemetry-grid">
+            <div>${telemetryInput("Gateway address", "telemetryTunnelServer", { placeholder: "example.com" })}</div>
+            <div>${telemetryInput("Gateway port", "telemetryTunnelPort", { type: "number", placeholder: "7000" })}</div>
+            <div>${telemetryInput("Public wildcard domain", "telemetryTunnelDomain", { placeholder: "example.com" })}</div>
+            <div>${telemetryInput("Subdomain", "telemetryTunnelSubdomain", { placeholder: "auto" })}</div>
+            <div>${telemetryInput("frpc binary path", "telemetryTunnelBinary", { placeholder: "/data/vehicle_telemetry/bin/frpc" })}</div>
+            <div>${telemetryInput("Gateway token (leave blank to keep)", "telemetryTunnelToken", { secret: true, placeholder: "••••••••" })}</div>
+            <div>${telemetryInput("Trusted CA file", "telemetryTunnelCa", { placeholder: "/data/galaxy/gateway-ca.crt" })}</div>
+            <div>${telemetryInput("TLS server name", "telemetryTunnelServerName", { placeholder: "example.com" })}</div>
+          </div>
+          <div class="navkeys-telemetry-status">
+            Tunnel: <strong>${() => state.telemetryTunnelState}</strong>
+            ${() => state.telemetryPublicUrl ? html`
+              <button class="navkeys-inline-copy" @click="${() => api.copyTelemetryValue(state.telemetryPublicUrl, "Proxy URL")}">
+                ${state.telemetryPublicUrl}
+              </button>
+            ` : ""}
+          </div>
+        </div>
+      ` : ""}
+
+      <div class="navkeys-telemetry-section">
+        <label class="navkeys-checkbox-row">
+          <input
+            type="checkbox"
+            :checked="${() => state.telemetryMode === "send" || state.telemetryPushEnabled}"
+            @change="${(event) => state.telemetryPushEnabled = !!event.target.checked}"
+            disabled="${() => state.telemetryMode === "send"}" />
+          <span>Send snapshots to a custom HTTPS backend</span>
+        </label>
+        ${() => state.telemetryMode === "send" || state.telemetryPushEnabled ? html`
+          <div class="navkeys-telemetry-grid">
+            <div>${telemetryInput("Backend URL", "telemetryPushUrl", { placeholder: "https://telemetry.example/ingest" })}</div>
+            <div>${telemetryInput("Backend bearer token (leave blank to keep)", "telemetryPushToken", { secret: true, placeholder: "••••••••" })}</div>
+            <div>${telemetryInput("Vehicle ID or VIN", "telemetryVehicleId")}</div>
+            <div>${telemetryInput("Vehicle name", "telemetryVehicleName")}</div>
+            <div>${telemetryInput("Battery capacity (kWh)", "telemetryBatteryCapacity", { type: "number" })}</div>
+            <div>${telemetryInput("Driving interval (seconds)", "telemetryDrivingInterval", { type: "number" })}</div>
+            <div>${telemetryInput("Charging interval (seconds)", "telemetryChargingInterval", { type: "number" })}</div>
+            <div>${telemetryInput("Parked interval (seconds)", "telemetryParkedInterval", { type: "number" })}</div>
+          </div>
+        ` : ""}
+      </div>
+
+      <div class="navkeys-app-actions navkeys-telemetry-actions">
+        <button
+          class="navkeys-btn navkeys-copy-btn"
+          @click="${() => api.saveTelemetry({ rotateFetchToken: true })}"
+          disabled="${() => state.telemetrySaving || state.telemetryMode === "off" || state.telemetryMode === "send"}">
+          <i class="bi bi-arrow-clockwise"></i>
+          <span>Rotate Fetch Token</span>
         </button>
         <button
           class="navkeys-btn navkeys-copy-btn"
-          @click="${api.copyGalaxySession}"
-          disabled="${() => !state.galaxySessionToken}">
-          <i class="bi bi-copy"></i>
-          <span>Copy</span>
+          @click="${() => api.saveTelemetry()}"
+          disabled="${() => state.telemetrySaving}">
+          <i class="bi bi-floppy-fill"></i>
+          <span>${() => state.telemetrySaving ? "Saving..." : "Save Telemetry"}</span>
         </button>
       </div>
+
+      ${() => state.telemetryGeneratedFetchToken ? html`
+        <div class="navkeys-pairing-card navkeys-token-card">
+          <div class="navkeys-pairing-details">
+            <div class="navkeys-label">New fetch token — copy it now</div>
+            <div class="navkeys-generated-token">${state.telemetryGeneratedFetchToken}</div>
+            <button class="navkeys-btn navkeys-copy-btn" @click="${() => api.copyTelemetryValue(state.telemetryGeneratedFetchToken, "Fetch token")}">
+              <i class="bi bi-copy"></i><span>Copy Token</span>
+            </button>
+          </div>
+        </div>
+      ` : ""}
     `
   }
 
@@ -424,6 +757,10 @@ export function NavKeys() {
       <div class="navkeys-container navkeys-app-container">
         ${renderAppKeys()}
         ${renderStatus("app")}
+      </div>
+      <div class="navkeys-container navkeys-app-container">
+        ${renderTelemetryConfig()}
+        ${renderStatus("telemetry")}
       </div>
     </div>
     ${() => state.showDeleteModal ? Modal({

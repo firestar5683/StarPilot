@@ -11,3 +11,4 @@ Export('pandad_python')
 
 if GetOption('extras'):
   env.Program('tests/test_pandad_usbprotocol', ['tests/test_pandad_usbprotocol.cc'], LIBS=[panda] + libs)
+  env.Program('tests/test_ev9_vehicle_telemetry', ['tests/test_ev9_vehicle_telemetry.cc'], LIBS=libs)
