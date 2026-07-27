@@ -1,5 +1,4 @@
 import json
-from types import SimpleNamespace
 
 import pytest
 
@@ -251,17 +250,6 @@ def test_galaxy_session_value_matches_cookie_format():
   ) == f"testGalaxySlug01%3A{'a' * 64}"
 
 
-def test_ios_pairing_advertises_compact_telemetry_endpoint():
-  payload = the_galaxy._build_ios_galaxy_pairing_payload(
-    "testGalaxySlug01",
-    "a" * 64,
-    "http://192.168.0.75:8082",
-  )
-
-  assert payload["telemetryPath"] == "/api/galaxy/telemetry"
-  assert payload["vehicleTelemetryUrl"] == "https://galaxy.firestar.link/api/galaxy/telemetry"
-
-
 def test_galaxy_lan_address_filter_rejects_cellular_and_accepts_wifi():
   assert not the_galaxy._is_galaxy_lan_ipv4_address("30.9.31.4")
   assert not the_galaxy._is_galaxy_lan_ipv4_address("25.73.76.228")
@@ -269,179 +257,285 @@ def test_galaxy_lan_address_filter_rejects_cellular_and_accepts_wifi():
   assert the_galaxy._is_galaxy_lan_ipv4_address("10.0.0.2")
 
 
-def test_ios_pairing_rejects_public_request_host_as_local_base_url(monkeypatch):
-  monkeypatch.setattr(the_galaxy, "request", SimpleNamespace(
-    host="30.9.31.4:8082",
-    host_url="http://30.9.31.4:8082/",
-  ))
-
-  assert the_galaxy._request_local_base_url() == ""
-
-
-def test_ios_pairing_uses_private_request_host_as_local_base_url(monkeypatch):
-  monkeypatch.setattr(the_galaxy, "request", SimpleNamespace(
-    host="192.168.0.75:8082",
-    host_url="http://192.168.0.75:8082/",
-  ))
-
-  assert the_galaxy._request_local_base_url() == "http://192.168.0.75:8082"
-
-
-def test_compact_vehicle_telemetry_payload_keeps_only_maps_fields():
-  payload = the_galaxy._compact_vehicle_telemetry_payload({
-    "available": True,
-    "status": "ok",
-    "updatedAt": 1234.5,
-    "source": "StarPilot Galaxy E-GMP CAN",
-    "vehicleName": "Kia EV9",
-    "stateOfChargePercent": 82.0,
-    "distanceToEmptyKilometers": 401.0,
-    "isCharging": False,
-    "isPluggedIn": None,
-    "rawValues": {"large": "diagnostic payload"},
-    "canTopFrames": [{"address": "0x2b5"}],
-    "location": {"latitude": 41.0, "longitude": -87.0},
-  })
-
-  assert payload == {
-    "available": True,
-    "status": "ok",
-    "updatedAt": 1234.5,
-    "source": "StarPilot Galaxy E-GMP CAN",
-    "vehicleName": "Kia EV9",
-    "stateOfChargePercent": 82.0,
-    "distanceToEmptyKilometers": 401.0,
-    "isCharging": False,
+def test_galaxy_telemetry_routes_separate_lan_and_remote_auth(monkeypatch, tmp_path):
+  monkeypatch.setenv("SP_GALAXY_DIR", str(tmp_path))
+  slug = "testGalaxySlug01"
+  session_secret = "a" * 64
+  (tmp_path / "glxyslug").write_text(slug)
+  (tmp_path / "glxysession").write_text(session_secret)
+  config = {
+    "mode": "galaxy",
+    "fetch": {"enabled": True},
+    "push": {"vehicleId": "ev9-test"},
   }
+  cache_loads = []
 
+  class FakeVehicleTelemetryCache:
+    def load(self):
+      cache_loads.append(True)
+      return {"updatedAt": 1234.5, "stateOfChargePercent": 82.0}
 
-def test_vehicle_telemetry_updated_at_does_not_regress_during_boot_clock_sync(monkeypatch):
-  gnss_time = 1_783_624_171.0
-  cached_time = gnss_time + 2_463.0
-  monkeypatch.setattr(the_galaxy.time, "time", lambda: 1_751_465_133.0)
-  monkeypatch.setattr(the_galaxy, "_vehicle_telemetry_best_cache_load", lambda: {"updatedAt": cached_time})
-
-  assert the_galaxy._vehicle_telemetry_updated_at({"updatedAtSec": gnss_time}) == cached_time
-
-
-def test_ev9_passive_decoder_distinguishes_charge_states():
-  def decode(charge_status, energy_status, redundant_energy_status):
-    frames = [
-      {"src": 1, "address": 0x30A, "data": bytes.fromhex(charge_status)},
-      {"src": 1, "address": 0x320, "data": bytes.fromhex(energy_status)},
-      {"src": 1, "address": 0x2FA, "data": bytes.fromhex(redundant_energy_status)},
-    ]
-    return the_galaxy._decode_egmp_passive_display_frames(frames)[0]
-
-  charging = decode(
-    "4dc1150854011015006578000f00a00f0000000049820018000038402101003a",
-    "98921544000001baac0d88190001000f00000000000000000d003e004c040000",
-    "447b7404c31ecdcdf1ff1c1e000080ba00000000001414137c01720140280000",
+  monkeypatch.setattr(the_galaxy, "load_vehicle_telemetry_config", lambda: config)
+  monkeypatch.setattr(the_galaxy, "is_fetch_authorized", lambda _config, auth: auth == "Bearer test-token")
+  monkeypatch.setattr(the_galaxy, "VehicleTelemetryCache", FakeVehicleTelemetryCache)
+  monkeypatch.setattr(
+    the_galaxy,
+    "telemetry_response",
+    lambda payload, vehicle_id="": {**payload, "vehicleId": vehicle_id} if payload is not None else None,
   )
-  charge_complete = decode(
-    "2c1a9508440000108068b6230f01a00f00000000477d0002000038402101003a",
-    "3e499544000000c8ac0d88190001000f0000000000000000000000004c040000",
-    "5cb801008f1dcece00001d1e00007ac80000000000140f0fffff720140280000",
-  )
-  unplugged = decode(
-    "c9174f000400000000000c002c00a00f0000000043000001000038402000000e",
-    "7f5a4f44000000c3ac0d88190001000f000000000000000000000000ef560000",
-    "a24e5104d81dcccd09001a1b000084c3000000000014100f0000720140280000",
-  )
-
-  assert (charging["isPluggedIn"], charging["isCharging"]) == (True, True)
-  assert (charge_complete["isPluggedIn"], charge_complete["isCharging"]) == (True, False)
-  assert (unplugged["isPluggedIn"], unplugged["isCharging"]) == (False, False)
-
-
-def test_galaxy_telemetry_route_reads_cache_without_sampling(monkeypatch):
-  monkeypatch.setattr(the_galaxy, "_start_vehicle_telemetry_background_sampler", lambda: None)
   client, _ = _params_client(monkeypatch, {"IsOnroad": False}, "tici")
-  monkeypatch.setattr(the_galaxy, "_vehicle_telemetry_best_cache_load", lambda: {
-    "updatedAt": 1234.5,
-    "stateOfChargePercent": 82.0,
-    "rawValues": {"large": "diagnostic payload"},
-  })
-  monkeypatch.setattr(the_galaxy, "_build_vehicle_telemetry_payload", lambda **_: (_ for _ in ()).throw(AssertionError("sampled CAN")))
+  cache_loads.clear()
 
-  response = client.get("/api/galaxy/telemetry")
+  for alias in ("/api/galaxy/telemetry", "/api/vehicle/telemetry"):
+    prior_loads = len(cache_loads)
+    unauthorized = client.get(alias)
+    assert unauthorized.status_code == 401
+    assert unauthorized.headers["WWW-Authenticate"] == 'Bearer realm="vehicle-telemetry"'
+    assert len(cache_loads) == prior_loads
+
+    authorized = client.get(alias, headers={"Authorization": "Bearer test-token"})
+    assert authorized.status_code == 200
+    assert authorized.headers["Cache-Control"] == "no-store"
+    assert authorized.get_json() == {
+      "stateOfChargePercent": 82.0,
+      "updatedAt": 1234.5,
+      "vehicleId": "ev9-test",
+    }
+    assert len(cache_loads) == prior_loads + 1
+
+  remote = {"REMOTE_ADDR": "203.0.113.5", "HTTP_HOST": "galaxy.firestar.link"}
+  assert client.get(
+    "/api/galaxy/telemetry",
+    headers={"Authorization": "Bearer test-token"},
+    environ_overrides=remote,
+  ).status_code == 404
+  assert client.get(
+    "/wrong-slug/api/vehicle/telemetry",
+    headers={"Authorization": "Bearer test-token"},
+    environ_overrides=remote,
+  ).status_code == 404
+
+  for remote_alias in (f"/{slug}/api/galaxy/telemetry", f"/{slug}/api/vehicle/telemetry"):
+    bearer_only = client.get(
+      remote_alias,
+      headers={"Authorization": "Bearer test-token"},
+      environ_overrides=remote,
+    )
+    assert bearer_only.status_code == 401
+
+  client.set_cookie(
+    the_galaxy.GALAXY_COOKIE_NAME,
+    the_galaxy._build_galaxy_session_value(slug, session_secret),
+    domain="galaxy.firestar.link",
+  )
+  for remote_alias in (f"/{slug}/api/galaxy/telemetry", f"/{slug}/api/vehicle/telemetry"):
+    cookie_only = client.get(remote_alias, environ_overrides=remote)
+    assert cookie_only.status_code == 401
+    authorized = client.get(
+      remote_alias,
+      headers={"Authorization": "Bearer test-token"},
+      environ_overrides=remote,
+    )
+    assert authorized.status_code == 200
+
+  assert cache_loads == [True, True, True, True]
+
+
+def test_unauthenticated_galaxy_session_does_not_read_or_return_vehicle_telemetry(monkeypatch):
+  def unexpected_telemetry_access(*_args, **_kwargs):
+    raise AssertionError("Unauthenticated Galaxy session accessed vehicle telemetry")
+
+  monkeypatch.setattr(the_galaxy, "load_vehicle_telemetry_config", unexpected_telemetry_access)
+  monkeypatch.setattr(the_galaxy, "VehicleTelemetryCache", unexpected_telemetry_access)
+  client, _ = _params_client(monkeypatch, {"IsOnroad": False}, "tici")
+
+  response = client.get("/api/galaxy/session")
+  assert response.status_code == 200
+  assert "vehicleTelemetry" not in response.get_json()
+
+
+def test_unauthenticated_galaxy_metadata_never_returns_reusable_credentials(monkeypatch, tmp_path):
+  monkeypatch.setenv("SP_GALAXY_DIR", str(tmp_path))
+  slug = "testGalaxySlug01"
+  secret = "a" * 64
+  (tmp_path / "glxyauth").write_text("b" * 64)
+  (tmp_path / "glxyslug").write_text(slug)
+  (tmp_path / "glxysession").write_text(secret)
+  client, _ = _params_client(monkeypatch, {"IsOnroad": False}, "tici")
+
+  forbidden = {
+    "appKey",
+    "galaxyNavConnectUrl",
+    "iosConnectUrl",
+    "iosPairingCode",
+    "iosShortConnectUrl",
+    "iosShortPairingCode",
+    "pairingPayload",
+    "sessionToken",
+    "token",
+  }
+  for route in ("/api/galaxy/status", "/api/galaxy/session"):
+    response = client.get(route)
+    assert response.status_code == 200
+    payload = response.get_json()
+    assert payload["paired"] is True
+    assert not forbidden.intersection(payload)
+    assert secret not in response.get_data(as_text=True)
+    assert payload["externalAppPairingPath"] == "/api/external-app/pairing"
+
+  for route in ("/api/galaxy/ios-pairing/123456", "/api/galaxy/ios-pairing-qr"):
+    response = client.get(route)
+    assert response.status_code == 410
+    assert response.get_json()["externalAppPairingPath"] == "/api/external-app/pairing"
+
+
+def test_legacy_galaxy_pair_mutations_require_owner_setup_session(monkeypatch, tmp_path):
+  monkeypatch.setenv("SP_GALAXY_DIR", str(tmp_path))
+  client, _ = _params_client(monkeypatch, {"IsOnroad": False}, "tici")
+
+  denied_pair = client.post("/api/galaxy/pair", json={"password": "secret-password"})
+  assert denied_pair.status_code == 403
+  assert not (tmp_path / "glxyauth").exists()
+
+  (tmp_path / "glxyauth").write_text("b" * 64)
+  (tmp_path / "glxysession").write_text("a" * 64)
+  (tmp_path / "glxyslug").write_text("testGalaxySlug01")
+  denied_unpair = client.post("/api/galaxy/unpair")
+  assert denied_unpair.status_code == 403
+  assert (tmp_path / "glxysession").exists()
+
+  monkeypatch.setattr(the_galaxy, "_request_is_lan_setup", lambda: True)
+  allowed_unpair = client.post("/api/galaxy/unpair")
+  assert allowed_unpair.status_code == 200
+  assert not (tmp_path / "glxysession").exists()
+  allowed_pair = client.post("/api/galaxy/pair", json={"password": "secret-password"})
+  assert allowed_pair.status_code == 200
+  assert allowed_pair.get_json()["externalAppPairingPath"] == "/api/external-app/pairing"
+  assert "sessionToken" not in allowed_pair.get_json()
+  assert (tmp_path / "glxysession").is_file()
+
+
+def test_vehicle_telemetry_config_route_uses_atomic_update(monkeypatch, tmp_path):
+  monkeypatch.setenv("SP_GALAXY_DIR", str(tmp_path))
+  client, _ = _params_client(monkeypatch, {"IsOnroad": False}, "tici")
+  monkeypatch.setattr(the_galaxy, "_request_is_lan_setup", lambda: True)
+  real_update = the_galaxy.update_vehicle_telemetry_config
+  updates = []
+
+  def recording_update(mutator):
+    updates.append(True)
+    return real_update(mutator)
+
+  monkeypatch.setattr(the_galaxy, "update_vehicle_telemetry_config", recording_update)
+  response = client.post("/api/vehicle/telemetry/config", json={
+    "mode": "local",
+    "fetch": {"enabled": True, "port": 17766},
+    "rotateFetchToken": True,
+  })
 
   assert response.status_code == 200
-  assert response.headers["Cache-Control"] == "no-store"
-  assert response.get_json() == {
-    "available": True,
-    "stateOfChargePercent": 82.0,
-    "updatedAt": 1234.5,
-  }
+  assert updates == [True]
+  config = the_galaxy.load_vehicle_telemetry_config()
+  assert config["mode"] == "local"
+  assert config["fetch"]["enabled"] is True
+  assert config["fetch"]["port"] == 17766
+  assert len(config["fetch"]["token"]) >= 32
 
 
-class FakeTelemetrySubMaster:
-  def __init__(self, services, poll=None):
-    self.services = services
-    self.poll = poll
-    self.seen = {service: True for service in services}
-    self.alive = {service: True for service in services}
-    self.valid = {service: True for service in services}
-    self.updated = {service: False for service in services}
-    self.data = {
-      "carState": SimpleNamespace(to_dict=lambda: {"fuelGauge": 0.8}),
-      "can": [],
-    }
+def _poison_direct_vehicle_hardware(monkeypatch):
+  def unexpected_hardware_access(*_args, **_kwargs):
+    raise AssertionError("Galaxy opened direct vehicle hardware while access was blocked")
 
-  def update(self, _timeout):
-    return None
-
-  def __getitem__(self, service):
-    return self.data[service]
+  monkeypatch.setattr(the_galaxy, "CANParser", unexpected_hardware_access)
+  monkeypatch.setattr(the_galaxy.messaging, "sub_sock", unexpected_hardware_access)
+  monkeypatch.setattr(the_galaxy, "Panda", unexpected_hardware_access)
 
 
-def test_vehicle_telemetry_reuses_car_state_subscriber_and_preserves_health_checks(monkeypatch):
-  created = []
-
-  def submaster_factory(services, poll=None):
-    sm = FakeTelemetrySubMaster(services, poll=poll)
-    created.append(sm)
-    return sm
-
-  monkeypatch.setattr(the_galaxy.messaging, "SubMaster", submaster_factory)
-  monkeypatch.setattr(the_galaxy, "_VEHICLE_TELEMETRY_CAR_STATE_SM", None)
-  monkeypatch.setattr(the_galaxy, "_vehicle_telemetry_live_store", lambda *args, **kwargs: None)
-
-  first, _ = the_galaxy._build_car_state_telemetry_payload({}, None)
-  second, _ = the_galaxy._build_car_state_telemetry_payload({}, None)
-  assert first["stateOfChargePercent"] == 80.0
-  assert second["stateOfChargePercent"] == 80.0
-  assert len(created) == 1
-
-  created[0].seen["carState"] = False
-  assert the_galaxy._vehicle_telemetry_car_state_snapshot() is None
-  created[0].seen["carState"] = True
-  created[0].alive["carState"] = False
-  assert the_galaxy._vehicle_telemetry_car_state_snapshot() is None
-  created[0].alive["carState"] = True
-  created[0].valid["carState"] = False
-  assert the_galaxy._vehicle_telemetry_car_state_snapshot() is None
+def _assert_direct_vehicle_hardware_routes_blocked(client):
+  for route in ("/api/doors/lock", "/api/doors/unlock"):
+    response = client.post(route)
+    assert response.status_code == 409
+    assert "onroad or EV9 preinit" in response.get_json()["error"]
 
 
-def test_vehicle_telemetry_reuses_can_subscriber(monkeypatch):
-  created = []
+def test_ev9_preinit_blocks_galaxy_hardware_routes_before_opening_can(monkeypatch):
+  client, _ = _params_client(
+    monkeypatch,
+    {"EV9LongPreinitPanda": True, "IsOnroad": False},
+    "tici",
+  )
+  _poison_direct_vehicle_hardware(monkeypatch)
+  _assert_direct_vehicle_hardware_routes_blocked(client)
 
-  def submaster_factory(services, poll=None):
-    sm = FakeTelemetrySubMaster(services, poll=poll)
-    created.append(sm)
-    return sm
 
-  monotonic_time = iter((0.0, 1.0, 2.0, 3.0))
-  monkeypatch.setattr(the_galaxy.messaging, "SubMaster", submaster_factory)
-  monkeypatch.setattr(the_galaxy.time, "monotonic", lambda: next(monotonic_time))
-  monkeypatch.setattr(the_galaxy, "_VEHICLE_TELEMETRY_CAN_SM", None)
+def test_onroad_blocks_galaxy_hardware_routes_before_opening_can(monkeypatch):
+  client, _ = _params_client(
+    monkeypatch,
+    {"EV9LongPreinitPanda": False, "IsOnroad": True},
+    "tici",
+  )
+  _poison_direct_vehicle_hardware(monkeypatch)
+  _assert_direct_vehicle_hardware_routes_blocked(client)
 
-  the_galaxy._capture_can_frames(sample_ms=100)
-  the_galaxy._capture_can_frames(sample_ms=100)
 
-  assert len(created) == 1
-  assert created[0].services == ["can"]
-  assert created[0].poll == "can"
+def test_vehicle_gate_transition_stops_before_any_door_hardware(monkeypatch):
+  client, _ = _params_client(
+    monkeypatch,
+    {"EV9LongPreinitPanda": False, "IsOnroad": False},
+    "tici",
+  )
+  checks = iter((False, True, False, True))
+  monkeypatch.setattr(the_galaxy, "_direct_vehicle_hardware_access_blocked", lambda: next(checks))
+  _poison_direct_vehicle_hardware(monkeypatch)
+
+  for route in ("/api/doors/lock", "/api/doors/unlock"):
+    response = client.post(route)
+    assert response.status_code == 409
+    assert "onroad or EV9 preinit" in response.get_json()["error"]
+
+
+def test_door_command_has_bounded_retries_and_preserves_success(monkeypatch):
+  client, _ = _params_client(
+    monkeypatch,
+    {"EV9LongPreinitPanda": False, "IsOnroad": False},
+    "tici",
+  )
+  sends = []
+
+  class FakePanda:
+    SAFETY_TOYOTA = 73
+
+    def __init__(self, **_kwargs):
+      pass
+
+    def __enter__(self):
+      return self
+
+    def __exit__(self, *_args):
+      return None
+
+    def set_safety_mode(self, mode):
+      assert mode == self.SAFETY_TOYOTA
+
+    def can_send(self, address, command, bus):
+      sends.append((address, command, bus))
+
+  monkeypatch.setattr(the_galaxy, "_direct_vehicle_hardware_access_blocked", lambda: False)
+  monkeypatch.setattr(the_galaxy, "CANParser", lambda *_args, **_kwargs: object())
+  monkeypatch.setattr(the_galaxy.messaging, "sub_sock", lambda *_args, **_kwargs: object())
+  monkeypatch.setattr(the_galaxy, "Panda", FakePanda)
+  monkeypatch.setattr(the_galaxy.time, "monotonic", lambda: 0.0)
+  monkeypatch.setattr(the_galaxy.time, "sleep", lambda _seconds: None)
+  monkeypatch.setattr(the_galaxy, "get_lock_status", lambda *_args: 1)
+
+  timed_out = client.post("/api/doors/lock")
+  assert timed_out.status_code == 504
+  assert len(sends) == the_galaxy.DOOR_COMMAND_MAX_ATTEMPTS
+
+  sends.clear()
+  unlocked = client.post("/api/doors/unlock")
+  assert unlocked.status_code == 200
+  assert len(sends) == 1
 
 
 def test_use_old_ui_is_noop_on_c4_mici(monkeypatch):

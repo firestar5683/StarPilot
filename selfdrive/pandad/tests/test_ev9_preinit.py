@@ -159,6 +159,24 @@ def test_ev9_long_preinit_firmware_selection():
   assert [ev9_long_preinit_firmware_selected(panda, True) for panda in mixed_pandas] == [True, False, False]
 
 
+def test_ev9_vehicle_telemetry_environment_requires_verified_internal_resident():
+  environ = {}
+  key = "BOARDD_EV9_VEHICLE_TELEMETRY_SERIAL"
+
+  assert pandad_module.configure_ev9_vehicle_telemetry_environment(True, "internal", {"internal"}, environ)
+  assert environ[key] == "internal"
+
+  for enabled, internal_serial, resident_serials in (
+    (False, "internal", {"internal"}),
+    (True, "", {"internal"}),
+    (True, "internal", {"external"}),
+  ):
+    assert not pandad_module.configure_ev9_vehicle_telemetry_environment(
+      enabled, internal_serial, resident_serials, environ,
+    )
+    assert key not in environ
+
+
 def test_ev9_long_preinit_recognizes_resident_signature(monkeypatch, tmp_path):
   firmware_path = tmp_path / "panda_h7_ev9_long_preinit.bin.signed"
   firmware_path.write_bytes(b"firmware")

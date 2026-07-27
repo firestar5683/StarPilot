@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 from concurrent.futures import ThreadPoolExecutor, as_completed
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 
 import importlib
 import ipaddress
@@ -15,7 +15,6 @@ from io import BytesIO
 from pathlib import Path
 
 import base64
-import errno
 import hashlib
 import json
 import re
@@ -23,13 +22,11 @@ import requests
 import secrets
 import selectors
 import shutil
-import signal
 import socket
 import subprocess
 import threading
 import time
-import traceback
-from urllib.parse import quote
+from urllib.parse import quote, urlsplit, urlunsplit
 
 from cereal import car, custom, log, messaging
 from opendbc.can.parser import CANParser
@@ -38,7 +35,6 @@ from opendbc.car.toyota.carcontroller import LOCK_CMD, UNLOCK_CMD
 from opendbc.car.toyota.values import ToyotaStarPilotFlags
 from openpilot.common.constants import CV
 from openpilot.common.params import ParamKeyType, Params
-from openpilot.common.realtime import DT_HW
 from openpilot.common.time_helpers import system_time_valid
 from openpilot.system.hardware import HARDWARE, PC
 from openpilot.system.hardware.hw import Paths
@@ -49,6 +45,32 @@ from panda import Panda
 
 from openpilot.starpilot.assets.model_manager import canonical_model_key, is_builtin_model_key, model_key_aliases
 from openpilot.starpilot.assets.theme_manager import HOLIDAY_THEME_PATH, THEME_COMPONENT_PARAMS
+from openpilot.starpilot.system.vehicle_telemetry import (
+  VehicleTelemetryCache,
+  is_fetch_authorized,
+  load_vehicle_telemetry_config,
+  load_vehicle_telemetry_status,
+  public_vehicle_telemetry_config,
+  telemetry_response,
+  update_vehicle_telemetry_config,
+  vehicle_telemetry_config_path,
+)
+from openpilot.starpilot.system.external_app_pairing import create_pairing, complete_pairing
+from openpilot.system.vehicle_telemetry.tailscale import (
+  TAILSCALE_DEFAULT_BASE,
+  TAILSCALE_STATUS_FILENAME,
+  TailscaleFunnelController,
+  begin_tailscale_login,
+  enable_personal_tailscale_relay,
+  ensure_tailscale_hostname,
+  tailscale_is_installed,
+)
+from openpilot.system.vehicle_telemetry.setup import (
+  TELEMETRY_SETUP_COOKIE_NAME,
+  TELEMETRY_SETUP_TOKEN_HEADER,
+  telemetry_setup_token_is_authorized,
+)
+from openpilot.system.vehicle_telemetry.tunnel import FRPC_STATUS_FILENAME
 from openpilot.starpilot.common.accel_profile import (
   CUSTOM_ACCEL_PROFILE_INITIALIZED_KEY,
   CUSTOM_ACCEL_PROFILE_PARAM_KEYS,
@@ -118,26 +140,8 @@ _TESTING_GROUND_CUSTOM_RESERVED_INTERVAL_S = 15.0
 _TESTING_GROUND_CUSTOM_RESERVED_PM = None
 _TESTING_GROUND_CUSTOM_RESERVED_LOCK = threading.Lock()
 _TESTING_GROUND_CUSTOM_RESERVED_LAST_PUBLISH_MONO = 0.0
-_VEHICLE_TELEMETRY_CACHE_PATH = Path("/data/galaxy/vehicle_telemetry.json")
-_VEHICLE_TELEMETRY_SAMPLE_LOG_PATH = Path("/data/galaxy/vehicle_telemetry_samples.jsonl")
-_VEHICLE_TELEMETRY_SAMPLE_LOG_MAX_BYTES = 2 * 1024 * 1024
-_VEHICLE_TELEMETRY_BACKGROUND_SAMPLE_MS = 500
-_VEHICLE_TELEMETRY_BACKGROUND_INTERVAL_S = 10.0
-_VEHICLE_TELEMETRY_CACHE_FIRST_MAX_AGE_S = 120.0
-_VEHICLE_TELEMETRY_CACHE_WRITE_INTERVAL_S = 60.0
-_VEHICLE_TELEMETRY_BACKGROUND_LOCK = threading.Lock()
-_VEHICLE_TELEMETRY_BACKGROUND_THREAD = None
 _VEHICLE_TELEMETRY_CAR_STATE_LOCK = threading.Lock()
 _VEHICLE_TELEMETRY_CAR_STATE_SM = None
-_VEHICLE_TELEMETRY_CAN_LOCK = threading.Lock()
-_VEHICLE_TELEMETRY_CAN_SM = None
-_VEHICLE_TELEMETRY_LIVE_LOCK = threading.Lock()
-_VEHICLE_TELEMETRY_LIVE_PAYLOAD = None
-_VEHICLE_TELEMETRY_LIVE_SIGNATURE = None
-_VEHICLE_TELEMETRY_LIVE_LAST_STORE_MONO = 0.0
-_EGMP_PASSIVE_TELEMETRY_ADDRESSES = frozenset((0x2b5, 0x2fa, 0x30a, 0x320))
-_EGMP_EV9_USA_MAX_RANGE_KM = 450.6
-_EGMP_EV9_USA_BATTERY_KWH = 99.8
 PANDA_FIRMWARE_TOGGLE_KEYS = {"IgnoreIgnitionLine", "RemoteStartBootsComma", "HKGRemoteStartBootsComma", "EV9LongPreinitPanda"}
 PANDA_FIRMWARE_CONFIRMATION_FIELD = "confirmedPandaFirmwareFlash"
 _PANDA_FLASH_REBOOT_LOCK = threading.Lock()
@@ -558,6 +562,10 @@ KEYS = {
 
 GALAXY_COOKIE_NAME = "galaxy_session"
 GALAXY_PLAY_STORE_URL = "https://play.google.com/store/apps/details?id=com.embaucha.galaxynav&hl=en-US&ah=9FldHJ99kxL8oNbSlO5F4sQqwC4"
+DOOR_COMMAND_MAX_ATTEMPTS = 3
+DOOR_COMMAND_MAX_SECONDS = 4.0
+DOOR_COMMAND_RETRY_SECONDS = 1.0
+DIRECT_VEHICLE_HARDWARE_BLOCK_MESSAGE = "Direct Panda/CAN access is disabled while onroad or EV9 preinit is armed."
 
 NAVIGATION_MEMORY_LOCATION_STALE_SECONDS = 10.0
 NAVIGATION_PERSISTED_LOCATION_FUTURE_SKEW_SECONDS = 60.0
@@ -588,87 +596,189 @@ def _read_galaxy_text(path):
     return ""
 
 
+def _is_lan_ip(value):
+  try:
+    address = ipaddress.ip_address(str(value or "").split("%", 1)[0])
+    if getattr(address, "ipv4_mapped", None) is not None:
+      address = address.ipv4_mapped
+    return address.is_private or address.is_link_local or address.is_loopback
+  except ValueError:
+    return False
+
+
+def _request_is_lan():
+  if not _is_lan_ip(request.remote_addr):
+    return False
+  host = (request.host.split(":", 1)[0] if not request.host.startswith("[") else request.host.split("]", 1)[0][1:]).lower()
+  return _is_lan_ip(host) or host in ("localhost", "comma") or host.endswith(".local")
+
+
+def _request_is_lan_setup():
+  if not _request_is_lan():
+    return False
+  supplied = request.cookies.get(TELEMETRY_SETUP_COOKIE_NAME) or request.headers.get(TELEMETRY_SETUP_TOKEN_HEADER, "")
+  return telemetry_setup_token_is_authorized(supplied, _get_galaxy_dir())
+
+
+def _json_bool(value, default=False):
+  return value if isinstance(value, bool) else bool(default)
+
+
+def _bounded_json_int(value, default, minimum, maximum):
+  try:
+    parsed = int(value)
+  except (TypeError, ValueError):
+    parsed = int(default)
+  return max(minimum, min(maximum, parsed))
+
+
+def _merge_vehicle_telemetry_config(current, update):
+  """Merge a Galaxy form payload without echoing or erasing stored secrets."""
+  update = update if isinstance(update, dict) else {}
+  merged = json.loads(json.dumps(current))
+  requested_mode = str(update.get("mode") or current.get("mode") or "off").strip().lower()
+  merged["mode"] = requested_mode if requested_mode in ("off", "send", "local", "tailscale", "frp", "galaxy") else "off"
+
+  fetch_update = update.get("fetch") if isinstance(update.get("fetch"), dict) else {}
+  fetch = merged.setdefault("fetch", {})
+  fetch["enabled"] = _json_bool(fetch_update.get("enabled"), fetch.get("enabled", False))
+  if merged["mode"] in ("off", "send"):
+    fetch["enabled"] = False
+  fetch["bindAddress"] = str(fetch_update.get("bindAddress") or fetch.get("bindAddress") or "127.0.0.1")
+  fetch["port"] = _bounded_json_int(fetch_update.get("port"), fetch.get("port", 7766), 1024, 65535)
+  if merged["mode"] == "local":
+    fetch["bindAddress"] = "0.0.0.0"
+  supplied_fetch_token = str(update.get("fetchToken") or "").strip()
+  generated_fetch_token = ""
+  if _json_bool(update.get("rotateFetchToken")):
+    supplied_fetch_token = secrets.token_urlsafe(32)
+    generated_fetch_token = supplied_fetch_token
+  if supplied_fetch_token:
+    fetch["token"] = supplied_fetch_token
+  if fetch["enabled"] and len(str(fetch.get("token") or "")) < 32 and not fetch.get("clients"):
+    generated_fetch_token = secrets.token_urlsafe(32)
+    fetch["token"] = generated_fetch_token
+
+  push_update = update.get("push") if isinstance(update.get("push"), dict) else {}
+  push = merged.setdefault("push", {})
+  push["enabled"] = _json_bool(push_update.get("enabled"), push.get("enabled", False))
+  for key in ("url", "vehicleId", "vehicleName"):
+    if key in push_update:
+      push[key] = str(push_update.get(key) or "").strip()
+  if "maximumBatteryCapacityKilowattHours" in push_update:
+    push["maximumBatteryCapacityKilowattHours"] = push_update.get("maximumBatteryCapacityKilowattHours")
+  for key, default, minimum in (
+    ("drivingIntervalSeconds", 60, 30),
+    ("chargingIntervalSeconds", 120, 60),
+    ("parkedIntervalSeconds", 900, 300),
+  ):
+    if key in push_update:
+      push[key] = _bounded_json_int(push_update.get(key), push.get(key, default), minimum, 3600)
+  supplied_push_token = str(update.get("pushToken") or "").strip()
+  if supplied_push_token:
+    push["token"] = supplied_push_token
+
+  tunnel_update = update.get("tunnel") if isinstance(update.get("tunnel"), dict) else {}
+  tunnel = merged.setdefault("tunnel", {})
+  for key in ("binaryPath", "serverAddress", "subdomainHost", "subdomain", "trustedCaFile", "serverName"):
+    if key in tunnel_update:
+      tunnel[key] = str(tunnel_update.get(key) or "").strip()
+  if "serverPort" in tunnel_update:
+    tunnel["serverPort"] = _bounded_json_int(tunnel_update.get("serverPort"), tunnel.get("serverPort", 7000), 1, 65535)
+  supplied_tunnel_token = str(update.get("tunnelToken") or "").strip()
+  if supplied_tunnel_token:
+    tunnel["token"] = supplied_tunnel_token
+
+  tailscale_update = update.get("tailscale") if isinstance(update.get("tailscale"), dict) else {}
+  tailscale = merged.setdefault("tailscale", {})
+  if "hostname" in tailscale_update:
+    tailscale["hostname"] = str(tailscale_update.get("hostname") or "auto").strip()
+  return merged, generated_fetch_token
+
+
+def _vehicle_telemetry_tunnel_status(config, data_dir=None):
+  filename = TAILSCALE_STATUS_FILENAME if config.get("mode") == "tailscale" else FRPC_STATUS_FILENAME
+  return load_vehicle_telemetry_status(Path(data_dir or _get_galaxy_dir()) / filename)
+
+
+def _vehicle_telemetry_connection(config, galaxy_base_url, tunnel_status=None):
+  """Return app capability URLs for the active transport mode."""
+  mode = config.get("mode")
+  parsed = urlsplit(str(galaxy_base_url or ""))
+  if not parsed.hostname:
+    return [], "/api/vehicle/telemetry"
+  if mode == "galaxy":
+    return [urlunsplit((parsed.scheme, parsed.netloc, "", "", ""))], "/api/vehicle/telemetry"
+
+  host = f"[{parsed.hostname}]" if ":" in parsed.hostname else parsed.hostname
+  local_url = urlunsplit(("http", f"{host}:{config['fetch']['port']}", "", "", ""))
+  urls = [local_url] if mode == "local" else []
+  if mode in ("tailscale", "frp") and isinstance(tunnel_status, dict):
+    public = urlsplit(str(tunnel_status.get("publicURL") or ""))
+    if tunnel_status.get("state") == "running" and public.scheme == "https" and public.hostname:
+      urls.append(urlunsplit((public.scheme, public.netloc, "", "", "")))
+  return urls, "/api/vehicle/telemetry"
+
+
+def _direct_vehicle_hardware_access_blocked():
+  """Keep Galaxy from opening Panda/CAN handles onroad or during EV9 preinit."""
+  try:
+    return params.get_bool("IsOnroad") or params.get_bool("EV9LongPreinitPanda")
+  except Exception:
+    return True
+
+
+def _run_bounded_door_command(command, expect_locked):
+  """Send a parked-only Toyota door command with transition-safe gates."""
+  if _direct_vehicle_hardware_access_blocked():
+    return False, DIRECT_VEHICLE_HARDWARE_BLOCK_MESSAGE, 409
+  deadline = time.monotonic() + DOOR_COMMAND_MAX_SECONDS
+  can_parser = CANParser("toyota_nodsu_pt_generated", [("DOOR_LOCKS", 3)], bus=0)
+
+  if _direct_vehicle_hardware_access_blocked():
+    return False, DIRECT_VEHICLE_HARDWARE_BLOCK_MESSAGE, 409
+  can_sock = messaging.sub_sock("can", timeout=100)
+
+  for _attempt in range(DOOR_COMMAND_MAX_ATTEMPTS):
+    if time.monotonic() >= deadline:
+      break
+    if _direct_vehicle_hardware_access_blocked():
+      return False, DIRECT_VEHICLE_HARDWARE_BLOCK_MESSAGE, 409
+    with Panda(disable_checks=True) as panda:
+      if _direct_vehicle_hardware_access_blocked():
+        return False, DIRECT_VEHICLE_HARDWARE_BLOCK_MESSAGE, 409
+      panda.set_safety_mode(panda.SAFETY_TOYOTA)
+      if _direct_vehicle_hardware_access_blocked():
+        return False, DIRECT_VEHICLE_HARDWARE_BLOCK_MESSAGE, 409
+      panda.can_send(0x750, command, 0)
+
+    remaining = deadline - time.monotonic()
+    if remaining <= 0.0:
+      break
+    time.sleep(min(DOOR_COMMAND_RETRY_SECONDS, remaining))
+    if _direct_vehicle_hardware_access_blocked():
+      return False, DIRECT_VEHICLE_HARDWARE_BLOCK_MESSAGE, 409
+    lock_status = get_lock_status(can_parser, can_sock)
+    if (lock_status == 0) == expect_locked:
+      return True, "", 200
+
+  return False, "The door command could not be confirmed within the bounded retry window.", 504
+
+
+def _galaxy_session_cookie_is_authorized(slug, token):
+  expected = _build_galaxy_session_value(slug, token)
+  supplied = str(request.cookies.get(GALAXY_COOKIE_NAME) or "")
+  return bool(expected and supplied and secrets.compare_digest(supplied, expected))
+
+
 def _build_galaxy_session_value(slug, token):
   if not slug or not token:
     return ""
   return quote(f"{slug}:{token}", safe="")
 
-def _build_ios_short_pairing_code(slug, token):
-  if not slug or not token:
-    return ""
-  digest = hashlib.sha256(f"{slug}:{token}:galaxynav".encode("utf-8")).digest()
-  return f"{int.from_bytes(digest[:4], 'big') % 1_000_000:06d}"
-
-def _is_ios_short_pairing_code_valid(code, slug, token):
-  expected = _build_ios_short_pairing_code(slug, token)
-  normalized = re.sub(r"[^0-9]", "", str(code or ""))
-  return bool(normalized and expected and normalized == expected)
 
 def _galaxy_public_url(slug):
   return f"https://galaxy.firestar.link/{slug}" if slug else ""
-
-def _galaxy_api_base_url():
-  return "https://galaxy.firestar.link"
-
-def _request_local_base_url():
-  if request is None:
-    return ""
-  try:
-    host = (request.host or "").split(":", 1)[0].lower()
-    if not host or host in ("galaxy.firestar.link", "www.galaxy.firestar.link"):
-      return ""
-    if not _is_galaxy_lan_host(host):
-      return ""
-    return request.host_url.rstrip("/")
-  except Exception:
-    return ""
-
-def _build_ios_galaxy_pairing_payload(slug, token, local_base_url=""):
-  public_url = _galaxy_public_url(slug)
-  api_base_url = _galaxy_api_base_url()
-  session_token = _build_galaxy_session_value(slug, token)
-  if not public_url or not session_token:
-    return {
-      "iosConnectUrl": "",
-      "iosPairingCode": "",
-      "iosShortPairingCode": "",
-      "iosShortPairingUrl": "",
-      "iosPairingQRCodeUrl": "",
-      "vehicleTelemetryUrl": "",
-    }
-
-  short_code = _build_ios_short_pairing_code(slug, token)
-  payload = {
-    "format": "galaxy-vehicle-v1",
-    "baseURL": api_base_url,
-    "portalURL": public_url,
-    "cookieName": GALAXY_COOKIE_NAME,
-    "sessionToken": session_token,
-    "appKey": session_token,
-    "token": session_token,
-    "telemetryPath": "/api/galaxy/telemetry",
-  }
-  if local_base_url:
-    payload["localBaseURL"] = local_base_url
-    payload["lanURL"] = local_base_url
-    payload["localURL"] = local_base_url
-  compact = base64.urlsafe_b64encode(json.dumps(payload, separators=(",", ":")).encode("utf-8")).decode("ascii").rstrip("=")
-  pairing_base_url = local_base_url or public_url
-  return {
-    "iosConnectUrl": f"galaxynav://galaxy/connect?code={quote(compact, safe='')}",
-    "galaxyNavConnectUrl": f"galaxynav://galaxy/connect?code={quote(compact, safe='')}",
-    "iosShortConnectUrl": f"galaxynav://galaxy/connect?shortCode={quote(short_code, safe='')}",
-    "iosPairingCode": compact,
-    "iosShortPairingCode": short_code,
-    "iosShortPairingUrl": f"{pairing_base_url}/api/galaxy/ios-pairing/{quote(short_code, safe='')}",
-    "iosPairingQRCodeUrl": f"{pairing_base_url}/api/galaxy/ios-pairing-qr",
-    "pairingPayload": f"galaxy-vehicle-v1:{compact}",
-    "portalURL": public_url,
-    "localBaseURL": local_base_url,
-    "cookieName": GALAXY_COOKIE_NAME,
-    "telemetryPath": "/api/galaxy/telemetry",
-    "vehicleTelemetryUrl": f"{api_base_url}/api/galaxy/telemetry",
-  }
 
 _GALAXY_MDNS_SERVICE_TYPE = "_sp-galaxy._tcp.local."
 _GALAXY_MDNS_LOG_PATH = Path("/tmp/galaxy_mdns.log")
@@ -3644,794 +3754,6 @@ def _build_vehicle_fault_status():
       "items": unavailable_items,
     }
 
-def _get_vehicle_telemetry_model_name():
-  cp_bytes = _safe_params_get_live_raw("CarParamsPersistent") or _safe_params_get("CarParamsPersistent")
-  car_fingerprint = ""
-  try:
-    if cp_bytes:
-      with car.CarParams.from_bytes(cp_bytes) as cp:
-        car_fingerprint = str(getattr(cp, "carFingerprint", "") or "").strip()
-  except Exception:
-    car_fingerprint = ""
-
-  model_name = str(_safe_params_get("CarModelName", encoding="utf-8", default="") or "").strip()
-  model_value = str(_safe_params_get("CarModel", encoding="utf-8", default="") or "").strip()
-  return {
-    "vehicleName": model_name or model_value or car_fingerprint or "EV9",
-    "carModel": model_value,
-    "carFingerprint": car_fingerprint,
-  }
-
-def _vehicle_telemetry_payload_age_seconds(payload):
-  try:
-    updated_at = float(payload.get("updatedAt"))
-  except Exception:
-    return None
-  if not math.isfinite(updated_at) or updated_at <= 0:
-    return None
-  return max(0.0, time.time() - updated_at)
-
-def _vehicle_telemetry_has_maps_data(payload):
-  return (
-    isinstance(payload, dict)
-    and (payload.get("stateOfChargePercent") is not None or payload.get("estimatedRangeKilometers") is not None)
-  )
-
-def _vehicle_telemetry_payload_signature(payload):
-  if not isinstance(payload, dict):
-    return None
-  keys = (
-    "source",
-    "stateOfChargePercent",
-    "distanceToEmptyKilometers",
-    "estimatedRangeKilometers",
-    "chargingPowerKilowatts",
-    "isCharging",
-    "isPluggedIn",
-    "activeConnector",
-    "plugPowerType",
-    "chargeLimitPercent",
-  )
-  signature = {}
-  for key in keys:
-    value = payload.get(key)
-    if isinstance(value, numbers.Number) and math.isfinite(float(value)):
-      signature[key] = round(float(value), 3)
-    else:
-      signature[key] = value
-  return json.dumps(signature, separators=(",", ":"), sort_keys=True)
-
-def _vehicle_telemetry_live_load(max_age_seconds=None):
-  with _VEHICLE_TELEMETRY_LIVE_LOCK:
-    payload = dict(_VEHICLE_TELEMETRY_LIVE_PAYLOAD) if isinstance(_VEHICLE_TELEMETRY_LIVE_PAYLOAD, dict) else None
-  if not payload:
-    return None
-  if max_age_seconds is not None:
-    age_seconds = _vehicle_telemetry_payload_age_seconds(payload)
-    if age_seconds is None or age_seconds > max_age_seconds:
-      return None
-  return payload
-
-def _vehicle_telemetry_live_store(payload, frames=None, known_soc=None, note=""):
-  global _VEHICLE_TELEMETRY_LIVE_LAST_STORE_MONO, _VEHICLE_TELEMETRY_LIVE_PAYLOAD, _VEHICLE_TELEMETRY_LIVE_SIGNATURE
-  if not _vehicle_telemetry_has_maps_data(payload):
-    return
-
-  payload = dict(payload)
-  signature = _vehicle_telemetry_payload_signature(payload)
-  should_persist = False
-  with _VEHICLE_TELEMETRY_LIVE_LOCK:
-    _VEHICLE_TELEMETRY_LIVE_PAYLOAD = payload
-    now_mono = time.monotonic()
-    if (
-      signature != _VEHICLE_TELEMETRY_LIVE_SIGNATURE
-      or now_mono - _VEHICLE_TELEMETRY_LIVE_LAST_STORE_MONO >= _VEHICLE_TELEMETRY_CACHE_WRITE_INTERVAL_S
-    ):
-      _VEHICLE_TELEMETRY_LIVE_SIGNATURE = signature
-      _VEHICLE_TELEMETRY_LIVE_LAST_STORE_MONO = now_mono
-      should_persist = True
-
-  if should_persist:
-    _vehicle_telemetry_cache_store(payload)
-    _vehicle_telemetry_sample_store(payload, frames or [], known_soc=known_soc, note=note)
-
-def _vehicle_telemetry_cache_load(max_age_seconds=None):
-  try:
-    with open(_VEHICLE_TELEMETRY_CACHE_PATH) as f:
-      payload = json.load(f)
-    if isinstance(payload, dict):
-      if max_age_seconds is not None:
-        age_seconds = _vehicle_telemetry_payload_age_seconds(payload)
-        if age_seconds is None or age_seconds > max_age_seconds:
-          return None
-      return payload
-  except Exception:
-    pass
-  return None
-
-def _vehicle_telemetry_best_cache_load(max_age_seconds=None):
-  return _vehicle_telemetry_live_load(max_age_seconds=max_age_seconds) or _vehicle_telemetry_cache_load(max_age_seconds=max_age_seconds)
-
-def _vehicle_telemetry_updated_at(position=None):
-  now = time.time()
-  candidates = [now]
-  if isinstance(position, dict):
-    position_updated_at = _safe_float(position.get("updatedAtSec"), 0.0)
-    if position_updated_at > 1_500_000_000:
-      candidates.append(position_updated_at)
-
-  reference_time = max(candidates)
-  cached = _vehicle_telemetry_best_cache_load()
-  cached_updated_at = _safe_float((cached or {}).get("updatedAt"), 0.0)
-  # The comma clock can start about a year behind before GNSS/network time sync.
-  if 0.0 < cached_updated_at <= reference_time + 86400.0:
-    candidates.append(cached_updated_at)
-  return max(candidates)
-
-def _compact_vehicle_telemetry_payload(payload):
-  if not isinstance(payload, dict):
-    return None
-
-  keys = (
-    "available",
-    "status",
-    "updatedAt",
-    "source",
-    "vehicleName",
-    "stateOfChargePercent",
-    "fuelGauge",
-    "distanceToEmptyKilometers",
-    "estimatedRangeKilometers",
-    "isCharging",
-    "isPluggedIn",
-    "chargingPowerKilowatts",
-    "minutesToFull",
-    "maximumBatteryCapacityKilowattHours",
-    "activeConnector",
-    "plugPowerType",
-    "chargeLimitPercent",
-  )
-  compact = {key: payload[key] for key in keys if payload.get(key) is not None}
-  compact["available"] = _vehicle_telemetry_has_maps_data(payload)
-  return compact
-
-def _vehicle_telemetry_cache_store(payload):
-  if not isinstance(payload, dict):
-    return
-  if payload.get("stateOfChargePercent") is None and payload.get("estimatedRangeKilometers") is None:
-    return
-  try:
-    _VEHICLE_TELEMETRY_CACHE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    tmp_path = _VEHICLE_TELEMETRY_CACHE_PATH.with_suffix(".tmp")
-    with open(tmp_path, "w") as f:
-      json.dump(payload, f, separators=(",", ":"), sort_keys=True)
-    os.replace(tmp_path, _VEHICLE_TELEMETRY_CACHE_PATH)
-  except Exception:
-    pass
-
-def _compact_can_frames(frames):
-  compact = {}
-  for frame in frames:
-    try:
-      if int(frame.get("src", -1)) != 1:
-        continue
-      key = f"0x{int(frame['address']):x}:{len(frame['data'])}"
-      compact[key] = bytes(frame["data"]).hex()
-    except Exception:
-      continue
-  return dict(sorted(compact.items()))
-
-def _vehicle_telemetry_sample_log_trim():
-  try:
-    if not _VEHICLE_TELEMETRY_SAMPLE_LOG_PATH.exists():
-      return
-    if _VEHICLE_TELEMETRY_SAMPLE_LOG_PATH.stat().st_size <= _VEHICLE_TELEMETRY_SAMPLE_LOG_MAX_BYTES:
-      return
-    with open(_VEHICLE_TELEMETRY_SAMPLE_LOG_PATH, "rb") as f:
-      f.seek(-_VEHICLE_TELEMETRY_SAMPLE_LOG_MAX_BYTES // 2, os.SEEK_END)
-      data = f.read()
-    first_newline = data.find(b"\n")
-    if first_newline >= 0:
-      data = data[first_newline + 1:]
-    tmp_path = _VEHICLE_TELEMETRY_SAMPLE_LOG_PATH.with_suffix(".tmp")
-    with open(tmp_path, "wb") as f:
-      f.write(data)
-    os.replace(tmp_path, _VEHICLE_TELEMETRY_SAMPLE_LOG_PATH)
-  except Exception:
-    pass
-
-def _vehicle_telemetry_sample_store(payload, frames, known_soc=None, note=""):
-  if not isinstance(payload, dict):
-    return
-  try:
-    sample = {
-      "capturedAt": time.time(),
-      "knownStateOfChargePercent": known_soc,
-      "note": str(note or "")[:200],
-      "stateOfChargePercent": payload.get("stateOfChargePercent"),
-      "distanceToEmptyKilometers": payload.get("distanceToEmptyKilometers"),
-      "estimatedRangeKilometers": payload.get("estimatedRangeKilometers"),
-      "chargingPowerKilowatts": payload.get("chargingPowerKilowatts"),
-      "isCharging": payload.get("isCharging"),
-      "isPluggedIn": payload.get("isPluggedIn"),
-      "source": payload.get("source"),
-      "status": payload.get("status"),
-      "parserVersion": (payload.get("rawValues") or {}).get("egmpParserVersion"),
-      "rawValues": payload.get("rawValues") or {},
-      "latestFrames": _compact_can_frames(frames),
-    }
-    _VEHICLE_TELEMETRY_SAMPLE_LOG_PATH.parent.mkdir(parents=True, exist_ok=True)
-    with open(_VEHICLE_TELEMETRY_SAMPLE_LOG_PATH, "a") as f:
-      f.write(json.dumps(sample, separators=(",", ":"), sort_keys=True) + "\n")
-    _vehicle_telemetry_sample_log_trim()
-  except Exception:
-    pass
-
-def _vehicle_telemetry_sample_load(limit=50):
-  try:
-    with open(_VEHICLE_TELEMETRY_SAMPLE_LOG_PATH) as f:
-      lines = f.readlines()[-max(1, min(200, int(limit))):]
-    samples = []
-    for line in lines:
-      try:
-        samples.append(json.loads(line))
-      except Exception:
-        continue
-    return samples
-  except Exception:
-    return []
-
-def _read_uint_be(data, offset, length):
-  if offset < 0 or length <= 0 or offset + length > len(data):
-    return None
-  value = 0
-  for byte in data[offset:offset + length]:
-    value = (value << 8) | int(byte)
-  return value
-
-def _read_int_be(data, offset, length):
-  value = _read_uint_be(data, offset, length)
-  if value is None:
-    return None
-  sign_bit = 1 << (length * 8 - 1)
-  if value & sign_bit:
-    value -= 1 << (length * 8)
-  return value
-
-def _egmp_data_at(data, offset, length):
-  value = _read_uint_be(data, offset, length)
-  if value is not None:
-    return value
-  # Some UDS/ISOTP decoders keep the 0x62 + PID header; OVMS offsets refer to data bytes after that header.
-  return _read_uint_be(data, offset + 3, length)
-
-def _egmp_int_at(data, offset, length):
-  value = _read_int_be(data, offset, length)
-  if value is not None:
-    return value
-  return _read_int_be(data, offset + 3, length)
-
-def _normalize_uds_payload(raw_payload):
-  if not raw_payload:
-    return None, b""
-  payload = bytes(raw_payload)
-  if len(payload) >= 3 and payload[0] in (0x61, 0x62):
-    return (payload[1] << 8) | payload[2], payload[3:]
-  return None, payload
-
-def _capture_can_frames_with_submaster(sm, sample_ms, address_filter, source_filter):
-  frames = []
-  counts = {}
-  samples = {}
-  try:
-    deadline = time.monotonic() + max(0.1, sample_ms / 1000.0)
-    while time.monotonic() < deadline:
-      sm.update(100)
-      if not sm.updated["can"]:
-        continue
-      for msg in sm["can"]:
-        src = int(msg.src)
-        address = int(msg.address)
-        if source_filter is not None and src not in source_filter:
-          continue
-        if address_filter is not None and address not in address_filter:
-          continue
-        data = bytes(msg.dat)
-        frame = {
-          "src": src,
-          "address": address,
-          "data": data,
-          "time": time.time(),
-        }
-        frames.append(frame)
-        key = (frame["src"], frame["address"], len(data))
-        counts[key] = counts.get(key, 0) + 1
-        samples.setdefault(key, data.hex())
-  except Exception as exception:
-    return [], {"error": str(exception)}
-
-  top = []
-  for key, count in sorted(counts.items(), key=lambda item: item[1], reverse=True)[:24]:
-    src, address, length = key
-    top.append({
-      "src": src,
-      "address": hex(address),
-      "length": length,
-      "count": count,
-      "sample": samples.get(key, ""),
-    })
-  return frames, {
-    "frameCount": len(frames),
-    "uniqueFrameCount": len(counts),
-    "topFrames": top,
-  }
-
-def _capture_can_frames(sample_ms=10000, submaster=None, address_filter=None, source_filter=None):
-  global _VEHICLE_TELEMETRY_CAN_SM
-  if submaster is not None:
-    return _capture_can_frames_with_submaster(submaster, sample_ms, address_filter, source_filter)
-
-  # MSGQ only has a finite number of reader slots, and destroying a subscriber
-  # does not release its slot. Recreating this socket for every telemetry sample
-  # eventually evicts every existing CAN reader, including card. Keep one reader
-  # for the lifetime of The Galaxy and serialize its use across HTTP/background
-  # telemetry requests.
-  with _VEHICLE_TELEMETRY_CAN_LOCK:
-    if _VEHICLE_TELEMETRY_CAN_SM is None:
-      _VEHICLE_TELEMETRY_CAN_SM = messaging.SubMaster(["can"], poll="can")
-    return _capture_can_frames_with_submaster(
-      _VEHICLE_TELEMETRY_CAN_SM,
-      sample_ms,
-      address_filter,
-      source_filter,
-    )
-
-def _extract_uds_payloads(frames):
-  payloads = []
-  grouped = {}
-  for frame in frames:
-    grouped.setdefault((frame["src"], frame["address"]), []).append(frame["data"])
-
-  for (src, address), packets in grouped.items():
-    current = None
-    remaining = 0
-    for data in packets:
-      if not data:
-        continue
-      pci = data[0]
-      frame_type = pci >> 4
-      if frame_type == 0x0 and len(data) >= 2:
-        length = pci & 0x0F
-        payload = data[1:1 + length]
-        payloads.append({"src": src, "address": address, "payload": payload})
-      elif frame_type == 0x1 and len(data) >= 3:
-        total_length = ((pci & 0x0F) << 8) | data[1]
-        current = bytearray(data[2:])
-        remaining = max(0, total_length - len(current))
-        if remaining == 0:
-          payloads.append({"src": src, "address": address, "payload": bytes(current[:total_length])})
-          current = None
-      elif frame_type == 0x2 and current is not None:
-        chunk = data[1:]
-        current.extend(chunk)
-        remaining = max(0, remaining - len(chunk))
-        if remaining == 0:
-          payloads.append({"src": src, "address": address, "payload": bytes(current)})
-          current = None
-  return payloads
-
-def _latest_can_frame_map(frames):
-  latest = {}
-  for frame in frames:
-    latest[(int(frame["src"]), int(frame["address"]), len(frame["data"]))] = bytes(frame["data"])
-  return latest
-
-def _passive_candidate(data_by_addr, address, offset, scale=1.0, length=1, signed=False, little_endian=False):
-  data = data_by_addr.get(address)
-  if data is None or offset + length > len(data):
-    return None
-  if signed:
-    raw = int.from_bytes(data[offset:offset + length], byteorder="little" if little_endian else "big", signed=True)
-  elif little_endian:
-    raw = int.from_bytes(data[offset:offset + length], byteorder="little", signed=False)
-  else:
-    raw = _read_uint_be(data, offset, length)
-  if raw is None:
-    return None
-  return raw * scale
-
-def _passive_bit(data_by_addr, address, offset, bit):
-  data = data_by_addr.get(address)
-  if data is None or offset >= len(data) or not 0 <= bit <= 7:
-    return None
-  return (data[offset] >> bit) & 1
-
-def _consensus_value(candidates, tolerance):
-  valid = [(name, value) for name, value in candidates if isinstance(value, numbers.Number) and math.isfinite(float(value))]
-  for name, value in valid:
-    agreeing = [(candidate_name, candidate_value) for candidate_name, candidate_value in valid if abs(float(candidate_value) - float(value)) <= tolerance]
-    if len(agreeing) >= 2:
-      return round(sum(float(candidate_value) for _, candidate_value in agreeing) / len(agreeing), 2), [candidate_name for candidate_name, _ in agreeing]
-  return None, []
-
-def _candidate_debug_values(candidates):
-  values = []
-  for name, value in candidates:
-    if isinstance(value, numbers.Number) and math.isfinite(float(value)):
-      values.append(f"{name}={round(float(value), 2):g}")
-  return ",".join(values)
-
-def _display_integer_soc(value):
-  if not isinstance(value, numbers.Number) or not math.isfinite(float(value)):
-    return None
-  return float(math.floor(max(0.0, min(100.0, float(value))) + 1e-6))
-
-def _decode_egmp_passive_display_frames(frames):
-  latest = _latest_can_frame_map(frames)
-  data_by_addr = {}
-  for (src, address, length), data in latest.items():
-    if src == 1:
-      data_by_addr[address] = data
-
-  display_half_soc_candidates = [
-    ("0x320[7]/2", _passive_candidate(data_by_addr, 0x320, 7, 0.5)),
-    ("0x2fa[15]/2", _passive_candidate(data_by_addr, 0x2fa, 15, 0.5)),
-  ]
-  dte_kilometers = _passive_candidate(data_by_addr, 0x2b5, 8, 1.0, length=2, little_endian=True)
-  dte_miles = _passive_candidate(data_by_addr, 0x30a, 28, 1.0, length=2, little_endian=True)
-  valid_display_half_soc = [(name, value) for name, value in display_half_soc_candidates if value is not None and 0 <= value <= 100]
-  display_half_soc, display_half_soc_sources = _consensus_value(valid_display_half_soc, 0.25)
-  rejected_display_half_soc = None
-  if display_half_soc is None and len(valid_display_half_soc) == 1:
-    candidate_name, candidate_value = valid_display_half_soc[0]
-    # A lone zero from 0x320 has been observed while the EV9 is actually full.
-    # Require another SOC source before accepting a near-empty passive display value
-    # when any range counter still says the vehicle has meaningful range.
-    plausible_dte = (
-      (isinstance(dte_kilometers, numbers.Number) and dte_kilometers > 25)
-      or (isinstance(dte_miles, numbers.Number) and dte_miles > 15)
-    )
-    if float(candidate_value) <= 1.0 and plausible_dte:
-      rejected_display_half_soc = f"{candidate_name}={round(float(candidate_value), 2):g}"
-    else:
-      display_half_soc = round(float(candidate_value), 2)
-      display_half_soc_sources = [candidate_name]
-
-  plugged_candidates = [
-    ("0x30a[3].3", _passive_bit(data_by_addr, 0x30a, 3, 3)),
-    ("0x30a[29].0", _passive_bit(data_by_addr, 0x30a, 29, 0)),
-  ]
-  charging_candidates = [
-    ("0x320[6].0", _passive_bit(data_by_addr, 0x320, 6, 0)),
-    ("0x30a[4].4", _passive_bit(data_by_addr, 0x30a, 4, 4)),
-  ]
-  valid_plugged_candidates = [(name, value) for name, value in plugged_candidates if value in (0, 1)]
-  valid_charging_candidates = [(name, value) for name, value in charging_candidates if value in (0, 1)]
-
-  if display_half_soc is not None:
-    soc = _display_integer_soc(display_half_soc)
-    soc_sources = display_half_soc_sources
-  else:
-    soc = None
-    soc_sources = []
-
-  legacy_dte_miles = _passive_candidate(data_by_addr, 0x4d8, 2, 1.0, length=2, little_endian=True)
-  decoded = {}
-  raw_values = {}
-  if soc is not None:
-    decoded["stateOfChargePercent"] = soc
-    raw_values["passiveSocSources"] = ",".join(soc_sources)
-  display_half_soc_debug = _candidate_debug_values(display_half_soc_candidates)
-  if display_half_soc_debug:
-    raw_values["passiveDisplayHalfSocCandidates"] = display_half_soc_debug
-  if rejected_display_half_soc:
-    raw_values["passiveDisplayHalfSocRejected"] = rejected_display_half_soc
-  if display_half_soc is not None:
-    raw_values["passiveDisplayHalfSocConsensus"] = f"{display_half_soc:g}"
-  if dte_kilometers is not None and 50 < dte_kilometers < 900:
-    decoded["distanceToEmptyKilometers"] = round(float(dte_kilometers), 1)
-    decoded["estimatedRangeKilometers"] = decoded["distanceToEmptyKilometers"]
-    raw_values["passiveDteSource"] = "0x2b5[8:10] little-endian kilometers"
-    raw_values["passiveDteKilometers"] = str(int(dte_kilometers))
-  elif dte_miles is not None and 0 < dte_miles < 600:
-    raw_values["passiveRejectedDteMiles0x30a"] = str(int(dte_miles))
-  if legacy_dte_miles is not None and 0 < legacy_dte_miles < 600:
-    raw_values["passiveLegacyDteMiles0x4d8"] = str(int(legacy_dte_miles))
-  plugged = None
-  if len(valid_plugged_candidates) == 2 and valid_plugged_candidates[0][1] == valid_plugged_candidates[1][1]:
-    plugged = bool(valid_plugged_candidates[0][1])
-    decoded["isPluggedIn"] = plugged
-    raw_values["passivePluggedSources"] = ",".join(name for name, _ in valid_plugged_candidates)
-  elif valid_plugged_candidates:
-    raw_values["passivePluggedRejected"] = ",".join(f"{name}={value}" for name, value in valid_plugged_candidates)
-  if len(valid_charging_candidates) == 2 and valid_charging_candidates[0][1] == valid_charging_candidates[1][1]:
-    charging = bool(valid_charging_candidates[0][1]) and plugged is True
-    decoded["isCharging"] = charging
-    raw_values["passiveChargingSources"] = ",".join(name for name, _ in valid_charging_candidates)
-  elif valid_charging_candidates:
-    raw_values["passiveChargingRejected"] = ",".join(f"{name}={value}" for name, value in valid_charging_candidates)
-  if decoded:
-    raw_values["egmpPassiveDecoder"] = "display_half_soc"
-
-  return decoded, raw_values
-
-def _decode_egmp_bms_payload(pid, data):
-  decoded = {}
-  raw_values = {}
-
-  if pid == 0x0101:
-    bms_soc_raw = _egmp_data_at(data, 4, 1)
-    if bms_soc_raw is not None and 0 <= bms_soc_raw <= 200:
-      decoded["bmsStateOfChargePercent"] = round(bms_soc_raw / 2.0, 1)
-      raw_values["bmsSocRaw0101"] = str(bms_soc_raw)
-
-    current_raw = _egmp_int_at(data, 10, 2)
-    if current_raw is not None:
-      decoded["currentAmps"] = round(current_raw / 10.0, 1)
-      raw_values["batteryCurrentRaw0101"] = str(current_raw)
-
-    voltage_raw = _egmp_data_at(data, 12, 2)
-    if voltage_raw is not None:
-      decoded["voltageVolts"] = round(voltage_raw / 10.0, 1)
-      raw_values["batteryVoltageRaw0101"] = str(voltage_raw)
-
-    relay_raw = _egmp_data_at(data, 9, 1)
-    if relay_raw is not None:
-      decoded["bmsRelayClosed"] = bool(relay_raw & 0x01)
-      raw_values["bmsRelayRaw0101"] = str(relay_raw)
-
-    ignition_raw = _egmp_data_at(data, 50, 1)
-    if ignition_raw is not None:
-      decoded["bmsIgnitionOn"] = bool(ignition_raw & 0x04)
-      raw_values["bmsIgnitionRaw0101"] = str(ignition_raw)
-
-    available_power_raw = _egmp_data_at(data, 5, 2)
-    if available_power_raw is not None:
-      decoded["availableChargePowerWatts"] = available_power_raw
-      raw_values["availablePowerRaw0101"] = str(available_power_raw)
-
-  elif pid == 0x0105:
-    display_soc_raw = _egmp_data_at(data, 31, 1)
-    if display_soc_raw is not None and 0 <= display_soc_raw <= 200:
-      decoded["stateOfChargePercent"] = round(display_soc_raw / 2.0, 1)
-      raw_values["displaySocRaw0105"] = str(display_soc_raw)
-
-    max_temp = _egmp_int_at(data, 23, 1)
-    if max_temp is not None:
-      decoded["batteryTemperatureCelsius"] = max_temp
-      raw_values["batteryTempRaw0105"] = str(max_temp)
-
-  elif pid == 0x0100:
-    speed_raw = _egmp_data_at(data, 6, 2)
-    if speed_raw is not None and speed_raw < 4000:
-      decoded["speedMetersPerSecond"] = round((speed_raw / 10.0) / 3.6, 3)
-      raw_values["speedRaw0100"] = str(speed_raw)
-
-  return decoded, raw_values
-
-def _build_egmp_can_telemetry_payload(
-  model_info,
-  position,
-  known_soc=None,
-  sample_note="",
-  sample_ms=10000,
-  can_submaster=None,
-  can_address_filter=None,
-  can_source_filter=None,
-):
-  sample_updated_at = _vehicle_telemetry_updated_at(position)
-  frames, can_summary = _capture_can_frames(
-    sample_ms=sample_ms,
-    submaster=can_submaster,
-    address_filter=can_address_filter,
-    source_filter=can_source_filter,
-  )
-  decoded = {}
-  raw_values = {
-    "egmpParserVersion": "2026.07.09.1",
-    "batteryCapacityKilowattHours": str(_EGMP_EV9_USA_BATTERY_KWH),
-    "maximumDistanceKilometers": str(_EGMP_EV9_USA_MAX_RANGE_KM),
-  }
-
-  for entry in _extract_uds_payloads(frames):
-    pid, data = _normalize_uds_payload(entry["payload"])
-    if pid not in (0x0100, 0x0101, 0x0105):
-      continue
-    partial, raw = _decode_egmp_bms_payload(pid, data)
-    decoded.update({key: value for key, value in partial.items() if value is not None})
-    raw_values.update(raw)
-    raw_values[f"udsSource{pid:04x}"] = f"{entry['src']}:{hex(entry['address'])}"
-
-  passive_decoded, passive_raw = _decode_egmp_passive_display_frames(frames)
-  for key, value in passive_decoded.items():
-    decoded.setdefault(key, value)
-  raw_values.update(passive_raw)
-
-  if decoded.get("stateOfChargePercent") is None and decoded.get("bmsStateOfChargePercent") is not None:
-    decoded["stateOfChargePercent"] = decoded["bmsStateOfChargePercent"]
-
-  if decoded.get("voltageVolts") is not None and decoded.get("currentAmps") is not None:
-    decoded["powerKilowatts"] = round(decoded["voltageVolts"] * decoded["currentAmps"] / 1000.0, 2)
-
-  soc = decoded.get("stateOfChargePercent")
-  if isinstance(soc, numbers.Number):
-    soc = max(0.0, min(100.0, float(soc)))
-    decoded["stateOfChargePercent"] = round(soc, 1)
-    decoded.setdefault("estimatedRangeKilometers", round(_EGMP_EV9_USA_MAX_RANGE_KM * soc / 100.0, 1))
-
-  charge_power = decoded.get("chargingPowerKilowatts")
-  if isinstance(soc, numbers.Number) and isinstance(charge_power, numbers.Number) and charge_power > 0.1:
-    remaining_kwh = max(0.0, _EGMP_EV9_USA_BATTERY_KWH * (100.0 - float(soc)) / 100.0)
-    decoded.setdefault("minutesToFull", int(round(remaining_kwh / float(charge_power) * 60.0)))
-
-  charging = None
-  power = decoded.get("powerKilowatts")
-  if isinstance(power, numbers.Number):
-    # OVMS treats negative battery current/power as external charging.
-    charging = power < -0.5
-  if charging is None and "availableChargePowerWatts" in decoded:
-    charging = decoded["availableChargePowerWatts"] > 0
-  if charging is not None:
-    decoded["isCharging"] = bool(charging)
-    decoded["isPluggedIn"] = bool(charging) or decoded.get("availableChargePowerWatts", 0) > 0
-
-  has_maps_data = decoded.get("stateOfChargePercent") is not None or decoded.get("estimatedRangeKilometers") is not None
-  payload = {
-    **model_info,
-    "source": "StarPilot Galaxy E-GMP CAN",
-    "available": bool(has_maps_data),
-    "status": "ok" if has_maps_data else "waiting_for_egmp_bms_response",
-    "message": "Decoded E-GMP BMS telemetry from CAN." if has_maps_data else "Raw CAN is present, but no E-GMP BMS SOC/range payload has been observed yet.",
-    "updatedAt": sample_updated_at,
-    "location": position,
-    "maximumBatteryCapacityKilowattHours": _EGMP_EV9_USA_BATTERY_KWH,
-    "canFrameCount": can_summary.get("frameCount", 0),
-    "canUniqueFrameCount": can_summary.get("uniqueFrameCount", 0),
-    "canTopFrames": can_summary.get("topFrames", []),
-    "rawValues": raw_values,
-    **decoded,
-  }
-
-  if has_maps_data:
-    _vehicle_telemetry_live_store(payload, frames, known_soc=known_soc, note=sample_note)
-    return payload, 200
-
-  cached = _vehicle_telemetry_best_cache_load()
-  if cached:
-    cached = dict(cached)
-    cached.update({
-      "available": True,
-      "status": "stale_cache",
-      "message": "Using last decoded E-GMP CAN telemetry while waiting for a fresh BMS response.",
-      "canFrameCount": can_summary.get("frameCount", 0),
-      "canUniqueFrameCount": can_summary.get("uniqueFrameCount", 0),
-      "canTopFrames": can_summary.get("topFrames", []),
-      "location": position,
-    })
-    return cached, 200
-
-  return payload, 503
-
-def _build_car_state_telemetry_payload(model_info, position, known_soc=None, sample_note="", car_state_submaster=None):
-  car_state = _vehicle_telemetry_car_state_snapshot(car_state_submaster)
-  if car_state is None:
-    return None
-
-  fuel_gauge = _safe_float(car_state.get("fuelGauge", float("nan")), float("nan"))
-  has_soc = math.isfinite(fuel_gauge) and 0.0 < fuel_gauge <= 1.0
-  state_of_charge_percent = round(max(0.0, min(100.0, fuel_gauge * 100.0)), 1) if has_soc else None
-  distance_to_empty_meters = _safe_float(car_state.get("distanceToEmpty", float("nan")), float("nan"))
-  has_dte = math.isfinite(distance_to_empty_meters) and 0.0 < distance_to_empty_meters < 900000.0
-  distance_to_empty_km = round(distance_to_empty_meters / 1000.0, 1) if has_dte else None
-  if not has_soc and not has_dte:
-    return None
-
-  charging = bool(car_state.get("charging", False))
-  charging_port_connected = bool(car_state.get("chargingPortConnected", False))
-  payload = {
-    **model_info,
-    "source": "StarPilot Galaxy CAN",
-    "available": True,
-    "status": "ok",
-    "message": "Live CAN-backed carState available.",
-    "updatedAt": _vehicle_telemetry_updated_at(position),
-    "stateOfChargePercent": state_of_charge_percent,
-    "fuelGauge": round(fuel_gauge, 4) if has_soc else None,
-    "distanceToEmptyKilometers": distance_to_empty_km,
-    "estimatedRangeKilometers": distance_to_empty_km,
-    "isCharging": charging,
-    "isPluggedIn": charging_port_connected,
-    "speedMetersPerSecond": round(_safe_float(getattr(car_state, "vEgo", 0.0), 0.0), 3),
-    "standstill": bool(getattr(car_state, "standstill", False)),
-    "canValid": bool(getattr(car_state, "canValid", False)),
-    "canTimeout": bool(getattr(car_state, "canTimeout", False)),
-    "canErrorCounter": int(getattr(car_state, "canErrorCounter", 0) or 0),
-    "location": position,
-  }
-  if model_info.get("carFingerprint") == "KIA_EV9":
-    payload["maximumBatteryCapacityKilowattHours"] = _EGMP_EV9_USA_BATTERY_KWH
-  _vehicle_telemetry_live_store(payload, [], known_soc=known_soc, note=sample_note)
-  return payload, 200
-
-def _build_vehicle_telemetry_payload(
-  known_soc=None,
-  sample_note="",
-  sample_ms=10000,
-  cache_first_max_age_seconds=None,
-  car_state_submaster=None,
-  can_submaster=None,
-  can_address_filter=None,
-  can_source_filter=None,
-):
-  model_info = _get_vehicle_telemetry_model_name()
-  position = _get_navigation_last_position()
-
-  if cache_first_max_age_seconds is not None:
-    cached = _vehicle_telemetry_best_cache_load(max_age_seconds=cache_first_max_age_seconds)
-    if cached:
-      return dict(cached), 200
-
-  try:
-    car_state_result = _build_car_state_telemetry_payload(
-      model_info,
-      position,
-      known_soc=known_soc,
-      sample_note=sample_note,
-      car_state_submaster=car_state_submaster,
-    )
-    if car_state_result is not None:
-      return car_state_result
-
-    can_payload, can_status_code = _build_egmp_can_telemetry_payload(
-      model_info,
-      position,
-      known_soc=known_soc,
-      sample_note=sample_note,
-      sample_ms=sample_ms,
-      can_submaster=can_submaster,
-      can_address_filter=can_address_filter,
-      can_source_filter=can_source_filter,
-    )
-    if can_status_code == 200:
-      return can_payload, can_status_code
-    return can_payload, can_status_code
-  except Exception as exception:
-    return {
-      **model_info,
-      "source": "StarPilot Galaxy CAN",
-      "available": False,
-      "status": "error",
-      "message": str(exception),
-      "updatedAt": time.time(),
-      "location": position,
-    }, 500
-
-def _vehicle_telemetry_background_worker():
-  while True:
-    try:
-      _build_vehicle_telemetry_payload(
-        sample_note="background_live_cache",
-        sample_ms=_VEHICLE_TELEMETRY_BACKGROUND_SAMPLE_MS,
-        cache_first_max_age_seconds=None,
-        can_address_filter=_EGMP_PASSIVE_TELEMETRY_ADDRESSES,
-        can_source_filter={1},
-      )
-    except Exception:
-      pass
-    time.sleep(_VEHICLE_TELEMETRY_BACKGROUND_INTERVAL_S)
-
-def _start_vehicle_telemetry_background_sampler():
-  global _VEHICLE_TELEMETRY_BACKGROUND_THREAD
-  with _VEHICLE_TELEMETRY_BACKGROUND_LOCK:
-    if _VEHICLE_TELEMETRY_BACKGROUND_THREAD is not None and _VEHICLE_TELEMETRY_BACKGROUND_THREAD.is_alive():
-      return
-    _VEHICLE_TELEMETRY_BACKGROUND_THREAD = threading.Thread(
-      target=_vehicle_telemetry_background_worker,
-      name="galaxy-vehicle-telemetry",
-      daemon=True,
-    )
-    _VEHICLE_TELEMETRY_BACKGROUND_THREAD.start()
-
 def _get_starpilot_toggles_snapshot():
   raw_toggles = _safe_params_get_live_raw("StarPilotToggles")
   if not raw_toggles:
@@ -5253,7 +4575,6 @@ def _set_lateral_maneuver_mode(enabled):
 
 def setup(app):
   _ensure_galaxy_mdns_advertiser(8083 if not _is_comma_device_runtime() else 8082)
-  _start_vehicle_telemetry_background_sampler()
 
   model_status_debug = {
     "last_signature": None,
@@ -5325,41 +4646,17 @@ def setup(app):
 
   @app.route("/api/doors/lock", methods=["POST"])
   def lock_doors():
-    can_parser = CANParser("toyota_nodsu_pt_generated", [("DOOR_LOCKS", 3)], bus=0)
-    can_sock = messaging.sub_sock("can", timeout=100)
-
-    while True:
-      with Panda(disable_checks=True) as panda:
-        if not params.get_bool("IsOnroad"):
-          panda.set_safety_mode(panda.SAFETY_TOYOTA)
-        panda.can_send(0x750, LOCK_CMD, 0)
-
-      time.sleep(1)
-
-      lock_status = get_lock_status(can_parser, can_sock)
-      if lock_status == 0:
-        break
-
-    return {"message": "Doors locked!"}
+    if _direct_vehicle_hardware_access_blocked():
+      return jsonify({"error": DIRECT_VEHICLE_HARDWARE_BLOCK_MESSAGE}), 409
+    success, error, status_code = _run_bounded_door_command(LOCK_CMD, True)
+    return ({"message": "Doors locked!"}, 200) if success else (jsonify({"error": error}), status_code)
 
   @app.route("/api/doors/unlock", methods=["POST"])
   def unlock_doors():
-    can_parser = CANParser("toyota_nodsu_pt_generated", [("DOOR_LOCKS", 3)], bus=0)
-    can_sock = messaging.sub_sock("can", timeout=100)
-
-    while True:
-      with Panda(disable_checks=True) as panda:
-        if not params.get_bool("IsOnroad"):
-          panda.set_safety_mode(panda.SAFETY_TOYOTA)
-        panda.can_send(0x750, UNLOCK_CMD, 0)
-
-      time.sleep(1)
-
-      lock_status = get_lock_status(can_parser, can_sock)
-      if lock_status != 0:
-        break
-
-    return {"message": "Doors unlocked!"}
+    if _direct_vehicle_hardware_access_blocked():
+      return jsonify({"error": DIRECT_VEHICLE_HARDWARE_BLOCK_MESSAGE}), 409
+    success, error, status_code = _run_bounded_door_command(UNLOCK_CMD, False)
+    return ({"message": "Doors unlocked!"}, 200) if success else (jsonify({"error": error}), status_code)
 
   @app.route("/api/error_logs", methods=["GET"])
   def get_error_logs():
@@ -7597,131 +6894,205 @@ def setup(app):
   def galaxy_status():
     paired = len(_read_galaxy_text(GALAXY_AUTH_FILE)) == 64
     slug = _read_galaxy_text(GALAXY_SLUG_FILE)
-    token = _read_galaxy_text(GALAXY_SESSION_FILE)
-    ios_payload = _build_ios_galaxy_pairing_payload(slug, token, _request_local_base_url())
     return jsonify({
       "paired": paired,
       "url": _galaxy_public_url(slug),
-      **ios_payload,
+      "externalAppPairingPath": "/api/external-app/pairing",
+      "pairingRequiresTelemetrySetup": True,
     })
 
-  def _request_vehicle_telemetry_sample_ms(default_ms=10000):
-    raw = request.args.get("sampleMs") or request.args.get("sample_ms") or request.args.get("timeoutMs")
-    if raw is None:
-      return default_ms
-    try:
-      sample_ms = int(float(raw))
-    except Exception:
-      return default_ms
-    return max(250, min(30000, sample_ms))
-
   @app.route("/api/galaxy/telemetry", methods=["GET"])
-  def galaxy_telemetry():
-    payload = _compact_vehicle_telemetry_payload(_vehicle_telemetry_best_cache_load())
-    if payload is None:
-      payload = {
-        "available": False,
-        "status": "waiting_for_live_vehicle_data",
-      }
-      status_code = 503
+  @app.route("/api/vehicle/telemetry", methods=["GET"])
+  @app.route("/<galaxy_slug>/api/galaxy/telemetry", methods=["GET"])
+  @app.route("/<galaxy_slug>/api/vehicle/telemetry", methods=["GET"])
+  def vehicle_telemetry(galaxy_slug=None):
+    if galaxy_slug is None:
+      if not _request_is_lan():
+        return jsonify({"error": "Galaxy route not found."}), 404
     else:
-      status_code = 200
+      configured_slug = _read_galaxy_text(GALAXY_SLUG_FILE)
+      if not configured_slug or not secrets.compare_digest(str(galaxy_slug), configured_slug):
+        return jsonify({"error": "Galaxy route not found."}), 404
+      session_token = _read_galaxy_text(GALAXY_SESSION_FILE)
+      if not _galaxy_session_cookie_is_authorized(configured_slug, session_token):
+        return jsonify({"error": "Galaxy session authorization failed."}), 401
 
-    response = jsonify(payload)
+    config = load_vehicle_telemetry_config()
+    if config["mode"] != "galaxy":
+      return jsonify({"error": "Galaxy is not the active EV Vehicle Telemetry transport."}), 404
+    if not config["fetch"]["enabled"]:
+      return jsonify({"error": "EV Vehicle Telemetry fetch is disabled."}), 404
+    if not is_fetch_authorized(config, request.headers.get("Authorization")):
+      response = jsonify({"error": "EV Vehicle Telemetry authorization failed."})
+      response.status_code = 401
+      response.headers["WWW-Authenticate"] = 'Bearer realm="vehicle-telemetry"'
+      return response
+
+    response_payload = telemetry_response(
+      VehicleTelemetryCache().load(),
+      vehicle_id=config["push"]["vehicleId"],
+    )
+    if response_payload is None:
+      return jsonify({"error": "No validated EV Vehicle Telemetry has been cached yet."}), 503
+    response = jsonify(response_payload)
     response.headers["Cache-Control"] = "no-store"
-    return response, status_code
+    return response
 
   @app.route("/api/galaxy/session", methods=["GET"])
   def galaxy_session():
     slug = _read_galaxy_text(GALAXY_SLUG_FILE)
-    token = _read_galaxy_text(GALAXY_SESSION_FILE)
-    paired = len(_read_galaxy_text(GALAXY_AUTH_FILE)) == 64 and bool(slug and token)
-    ios_payload = _build_ios_galaxy_pairing_payload(slug, token, _request_local_base_url())
-    vehicle_telemetry, _ = _build_vehicle_telemetry_payload(
-      sample_ms=_request_vehicle_telemetry_sample_ms(),
-      cache_first_max_age_seconds=_VEHICLE_TELEMETRY_CACHE_FIRST_MAX_AGE_S,
-    )
+    paired = len(_read_galaxy_text(GALAXY_AUTH_FILE)) == 64 and bool(slug)
     control_catalog = _build_galaxy_nav_control_catalog()
     return jsonify({
       "appUrl": GALAXY_PLAY_STORE_URL,
       "cookieName": GALAXY_COOKIE_NAME,
       "paired": paired,
-      "sessionToken": _build_galaxy_session_value(slug, token),
-      "vehicleTelemetry": vehicle_telemetry,
+      "externalAppPairingPath": "/api/external-app/pairing",
+      "pairingRequiresTelemetrySetup": True,
       "controls": control_catalog["controls"],
       "sections": control_catalog["sections"],
       "controlCatalogVersion": control_catalog["version"],
       "controlCatalogUpdatedAt": control_catalog["updatedAt"],
-      **ios_payload,
     })
 
   @app.route("/api/galaxy/ios-pairing/<short_code>", methods=["GET"])
   def galaxy_ios_pairing(short_code):
-    slug = _read_galaxy_text(GALAXY_SLUG_FILE)
-    token = _read_galaxy_text(GALAXY_SESSION_FILE)
-    if not _is_ios_short_pairing_code_valid(short_code, slug, token):
-      return jsonify({"error": "Pairing code not found."}), 404
-    return jsonify(_build_ios_galaxy_pairing_payload(slug, token, _request_local_base_url()))
+    del short_code
+    return jsonify({
+      "error": "Legacy Galaxy pairing is retired. Start a one-time external-app pairing session from the comma.",
+      "externalAppPairingPath": "/api/external-app/pairing",
+    }), 410
 
   @app.route("/api/galaxy/ios-pairing-qr", methods=["GET"])
   def galaxy_ios_pairing_qr():
-    slug = _read_galaxy_text(GALAXY_SLUG_FILE)
-    token = _read_galaxy_text(GALAXY_SESSION_FILE)
-    ios_payload = _build_ios_galaxy_pairing_payload(slug, token, _request_local_base_url())
-    qr_value = ios_payload.get("galaxyNavConnectUrl") or ios_payload.get("iosConnectUrl") or ""
-    if not qr_value:
-      return jsonify({"error": "Pair Galaxy first."}), 404
-    try:
-      import qrcode
-      qr = qrcode.QRCode(version=None, error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=10, border=3)
-      qr.add_data(qr_value)
-      qr.make(fit=True)
-      image = qr.make_image(fill_color="black", back_color="white").convert("RGB")
-      buffer = BytesIO()
-      image.save(buffer, format="PNG")
-      buffer.seek(0)
-      return send_file(buffer, mimetype="image/png")
-    except Exception as e:
-      return jsonify({"error": f"QR code unavailable: {e}"}), 500
-
-  @app.route("/api/vehicle/telemetry", methods=["GET"])
-  def vehicle_telemetry():
-    payload, status_code = _build_vehicle_telemetry_payload(
-      sample_ms=_request_vehicle_telemetry_sample_ms(),
-      cache_first_max_age_seconds=_VEHICLE_TELEMETRY_CACHE_FIRST_MAX_AGE_S,
-    )
-    return jsonify(payload), status_code
-
-  @app.route("/api/vehicle/telemetry/samples", methods=["GET"])
-  def vehicle_telemetry_samples():
-    try:
-      limit = int(request.args.get("limit", 50))
-    except Exception:
-      limit = 50
     return jsonify({
-      "samples": _vehicle_telemetry_sample_load(limit),
+      "error": "Legacy Galaxy QR pairing is retired. Start a one-time external-app pairing session from the comma.",
+      "externalAppPairingPath": "/api/external-app/pairing",
+    }), 410
+
+  @app.route("/api/vehicle/telemetry/status", methods=["GET"])
+  def vehicle_telemetry_status():
+    config = load_vehicle_telemetry_config()
+    if (config["mode"] != "galaxy" or not config["fetch"]["enabled"]
+        or not is_fetch_authorized(config, request.headers.get("Authorization"))):
+      return jsonify({"error": "EV Vehicle Telemetry fetch is disabled or unauthorized."}), 404
+
+    response = jsonify({
+      "config": public_vehicle_telemetry_config(config),
+      "cache": telemetry_response(
+        VehicleTelemetryCache().load(),
+        vehicle_id=config["push"]["vehicleId"],
+      ),
+      "exporter": load_vehicle_telemetry_status(),
     })
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
-  @app.route("/api/vehicle/telemetry/known", methods=["POST"])
-  def vehicle_telemetry_known_sample():
-    data = request.get_json(silent=True) or {}
+  @app.route("/api/vehicle/telemetry/config", methods=["GET", "POST"])
+  def vehicle_telemetry_config():
+    if not _request_is_lan_setup():
+      return jsonify({"error": "Start a temporary EV Vehicle Telemetry setup session from the comma before viewing or changing configuration."}), 403
+    generated_fetch_token = ""
+    if request.method == "POST":
+      update = request.get_json(silent=True) or {}
+
+      def merge_config(current):
+        nonlocal generated_fetch_token
+        merged, generated_fetch_token = _merge_vehicle_telemetry_config(current, update)
+        return merged
+
+      config = update_vehicle_telemetry_config(merge_config)
+    else:
+      config = load_vehicle_telemetry_config()
+
+    tunnel_status = _vehicle_telemetry_tunnel_status(config)
+    response_payload = {
+      "config": public_vehicle_telemetry_config(config),
+      "cache": telemetry_response(VehicleTelemetryCache().load(), vehicle_id=config["push"]["vehicleId"]),
+      "exporter": load_vehicle_telemetry_status(),
+      "tunnel": tunnel_status,
+    }
+    if generated_fetch_token:
+      response_payload["generatedFetchToken"] = generated_fetch_token
+    response = jsonify(response_payload)
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
+  @app.route("/api/external-app/pairing", methods=["POST"])
+  def create_external_app_pairing():
+    if not _request_is_lan_setup():
+      return jsonify({"error": "Start a temporary EV Vehicle Telemetry setup session from the comma before pairing an app."}), 403
+    config = load_vehicle_telemetry_config()
+    if config["mode"] == "off" and not vehicle_telemetry_config_path().exists():
+      def enable_default_galaxy(current):
+        if current["mode"] == "off" and not vehicle_telemetry_config_path().exists():
+          current["mode"] = "galaxy"
+        return current
+
+      config = update_vehicle_telemetry_config(enable_default_galaxy)
+    if config["mode"] not in ("galaxy", "local", "tailscale", "frp"):
+      return jsonify({"error": "Select Galaxy, local, Tailscale, or FRP telemetry mode before pairing an app."}), 409
+    if config["mode"] in ("tailscale", "frp"):
+      tunnel_status = _vehicle_telemetry_tunnel_status(config)
+      if tunnel_status.get("state") != "running":
+        return jsonify({"error": "The public telemetry tunnel must be running before pairing an app."}), 409
     try:
-      known_soc = float(data.get("stateOfChargePercent"))
-    except Exception:
-      return jsonify({"error": "stateOfChargePercent is required"}), 400
-    note = str(data.get("note") or "")
-    payload, status_code = _build_vehicle_telemetry_payload(
-      known_soc=known_soc,
-      sample_note=note,
-      sample_ms=_request_vehicle_telemetry_sample_ms(),
+      pairing = create_pairing(GALAXY_DIR, request.host_url)
+      try:
+        import qrcode
+        qr = qrcode.QRCode(error_correction=qrcode.constants.ERROR_CORRECT_M, box_size=8, border=3)
+        qr.add_data(pairing["qrData"])
+        qr.make(fit=True)
+        output = BytesIO()
+        qr.make_image(fill_color="black", back_color="white").save(output, format="PNG")
+        pairing["qrImageDataURL"] = "data:image/png;base64," + base64.b64encode(output.getvalue()).decode("ascii")
+      except Exception:
+        pairing["qrImageDataURL"] = ""
+      response = jsonify(pairing)
+      response.headers["Cache-Control"] = "no-store"
+      return response
+    except ValueError as error:
+      return jsonify({"error": str(error)}), 400
+
+  @app.route("/api/external-app/pair", methods=["POST"])
+  def pair_external_app():
+    if not _request_is_lan():
+      return jsonify({"error": "External-app pairing is available only on the local network."}), 403
+    data = request.get_json(silent=True) or {}
+    config = load_vehicle_telemetry_config()
+    tunnel_status = _vehicle_telemetry_tunnel_status(config)
+    telemetry_base_urls, telemetry_path = _vehicle_telemetry_connection(config, request.host_url, tunnel_status)
+    if not telemetry_base_urls:
+      return jsonify({"error": "The configured EV Vehicle Telemetry transport is not ready."}), 409
+    slug = _read_galaxy_text(GALAXY_SLUG_FILE)
+    session_token = _build_galaxy_session_value(slug, _read_galaxy_text(GALAXY_SESSION_FILE))
+    requested_capabilities = data.get("requestedCapabilities") if isinstance(data.get("requestedCapabilities"), list) else None
+    if requested_capabilities and "galaxySession" in requested_capabilities and (not slug or not session_token):
+      return jsonify({"error": "Pair StarPilot Galaxy with its cloud portal before connecting this external app."}), 409
+    legacy_connection = {
+      "portalURL": f"https://galaxy.firestar.link/{slug}" if slug else "",
+      "cookieName": GALAXY_COOKIE_NAME,
+      "sessionToken": session_token,
+    }
+    connection, error = complete_pairing(
+      GALAXY_DIR,
+      data.get("code", ""),
+      data.get("clientName", "External app"),
+      requested_capabilities=requested_capabilities,
+      legacy_connection=legacy_connection,
+      telemetry_base_urls=telemetry_base_urls,
+      telemetry_path=telemetry_path,
     )
-    return jsonify({
-      "knownStateOfChargePercent": known_soc,
-      "sample": payload,
-    }), status_code
+    if error:
+      return jsonify({"error": error}), 401
+    response = jsonify(connection)
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
   @app.route("/api/galaxy/pair", methods=["POST"])
   def galaxy_pair():
+    if not _request_is_lan_setup():
+      return jsonify({"error": "Start a temporary EV Vehicle Telemetry setup session from the comma before changing Galaxy pairing."}), 403
     data = request.get_json() or {}
     password = (data.get("password") or "").strip()
     if len(password) < 6:
@@ -7730,10 +7101,10 @@ def setup(app):
     pw_hash = hashlib.sha256(password.encode()).hexdigest()
     GALAXY_DIR.mkdir(parents=True, exist_ok=True)
     GALAXY_AUTH_FILE.write_text(pw_hash)
-    
+
     # Generate 256-bit secure session token
     GALAXY_SESSION_FILE.write_text(secrets.token_hex(32))
-    
+
     # Generate 16-character alphanumeric routing slug
     charset = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789"
     slug = ''.join(secrets.choice(charset) for _ in range(16))
@@ -7742,11 +7113,13 @@ def setup(app):
     return jsonify({
       "message": "Pairing successful!",
       "url": f"https://galaxy.firestar.link/{slug}",
-      **_build_ios_galaxy_pairing_payload(slug, _read_galaxy_text(GALAXY_SESSION_FILE), _request_local_base_url()),
+      "externalAppPairingPath": "/api/external-app/pairing",
     })
 
   @app.route("/api/galaxy/unpair", methods=["POST"])
   def galaxy_unpair():
+    if not _request_is_lan_setup():
+      return jsonify({"error": "Start a temporary EV Vehicle Telemetry setup session from the comma before changing Galaxy pairing."}), 403
     for f in ["glxyauth", "glxysession", "glxyslug"]:
       file_path = GALAXY_DIR / f
       if file_path.is_file():
@@ -7755,132 +7128,71 @@ def setup(app):
 
   @app.route("/api/tailscale/installed", methods=["GET"])
   def tailscale_installed():
-    base = "/data/tailscale"
-    tailscale_binary = f"{base}/tailscale"
-    tailscaled_binary = f"{base}/tailscaled"
-
-    systemd_unit = "/etc/systemd/system/tailscaled.service"
-
-    if os.path.exists(tailscale_binary) and os.path.exists(tailscaled_binary) and os.path.exists(systemd_unit):
-      return jsonify({"installed": True})
-
-    result = subprocess.run(["which", "tailscale"], capture_output=True, text=True)
-    if result.returncode == 0:
-      return jsonify({"installed": True})
-
-    return jsonify({"installed": False})
+    if not _request_is_lan_setup():
+      return jsonify({"error": "Tailscale setup status is available only on the local network."}), 403
+    config = load_vehicle_telemetry_config()
+    tailscale = config["tailscale"]
+    status = load_vehicle_telemetry_status(GALAXY_DIR / TAILSCALE_STATUS_FILENAME)
+    return jsonify({
+      "installed": tailscale_is_installed(tailscale),
+      "enabled": config["mode"] == "tailscale" and config["fetch"]["enabled"],
+      "state": status.get("state", "disabled"),
+      "publicURL": status.get("publicURL", ""),
+      "ownerURL": status.get("ownerURL", ""),
+      "error": status.get("error", ""),
+    })
 
   @app.route("/api/tailscale/setup", methods=["POST"])
   def tailscale_setup():
-    arch = "arm64"
-    base = "/data/tailscale"
+    if not _request_is_lan_setup():
+      return jsonify({"error": "Tailscale setup is available only on the local network."}), 403
+    try:
+      config, generated_fetch_token = enable_personal_tailscale_relay(
+        data_dir=GALAXY_DIR,
+        base_dir=TAILSCALE_DEFAULT_BASE,
+      )
+      response = {
+        "message": "Personal Tailscale relay enabled. Continue with owner login when it is ready.",
+        "config": public_vehicle_telemetry_config(config),
+      }
+      if generated_fetch_token:
+        response["generatedFetchToken"] = generated_fetch_token
+      return jsonify(response), 200
+    except Exception as error:
+      return jsonify({"error": f"Tailscale setup failed: {str(error)[:240]}"}), 500
 
-    result = subprocess.run(
-      "curl -s https://pkgs.tailscale.com/stable/ | grep -oP 'tailscale_\\K[0-9]+\\.[0-9]+\\.[0-9]+' | sort -V | tail -1",
-      shell=True, capture_output=True, text=True
-    )
-
-    version = result.stdout.strip() or "1.84.0"
-
-    bin_dir = f"{base}/tailscale_{version}_{arch}"
-    state = f"{base}/state"
-    socket = f"{base}/tailscaled.sock"
-    tgz_path = f"{base}/tailscale.tgz"
-
-    tgz_url = f"https://pkgs.tailscale.com/stable/tailscale_{version}_{arch}.tgz"
-
-    os.makedirs(state, exist_ok=True)
-
-    run_cmd(["curl", "-fsSL", tgz_url, "-o", tgz_path], "Downloaded Tailscale archive.", "Failed to download Tailscale archive.")
-
-    extract_tar(tgz_path, base)
-
-    run_cmd(["cp", f"{bin_dir}/tailscale", f"{base}/tailscale"], "Copied tailscale binary.", "Failed to copy tailscale binary.")
-    run_cmd(["cp", f"{bin_dir}/tailscaled", f"{base}/tailscaled"], "Copied tailscaled binary.", "Failed to copy tailscaled binary.")
-    run_cmd(["chmod", "+x", f"{base}/tailscale", f"{base}/tailscaled"], "Made binaries executable.", "Failed to chmod binaries.")
-
-    systemd_unit = f"""[Unit]
-    Description=Tailscale node agent
-    After=network.target
-
-    [Service]
-    ExecStart={base}/tailscaled \\
-      --tun=userspace-networking \\
-      --socks5-server=localhost:1055 \\
-      --state={state}/tailscaled.state \\
-      --socket={socket} \\
-      --statedir={state}
-    Restart=on-failure
-    RestartSec=5
-
-    [Install]
-    WantedBy=multi-user.target
-    """
-    unit_tmp = f"{base}/tailscaled.service"
-    with open(unit_tmp, "w") as f:
-      f.write(systemd_unit)
-
-    run_cmd(["sudo", "mount", "-o", "remount,rw", "/"], "Remounted / as read-write.", "Failed to remount / as read-write.")
-    run_cmd(["sudo", "install", "-m", "644", unit_tmp, "/etc/systemd/system/tailscaled.service"], "Installed systemd unit.", "Failed to install systemd unit.")
-    run_cmd(["sudo", "systemctl", "daemon-reload"], "Reloaded systemd daemon.", "Failed to reload systemd daemon.")
-    run_cmd(["sudo", "systemctl", "enable", "/etc/systemd/system/tailscaled.service"], "Enabled tailscaled service.", "Failed to enable tailscaled service.")
-    run_cmd(["sudo", "systemctl", "restart", "tailscaled"], "Started tailscaled service.", "Failed to start tailscaled service.")
-
-    proc = subprocess.Popen(
-      ["sudo", f"{base}/tailscale", "--socket", socket, "up", "--hostname", f"{HARDWARE.get_device_type()}-the-galaxy"],
-      stdout=subprocess.PIPE,
-      stderr=subprocess.STDOUT,
-      text=True,
-      preexec_fn=os.setsid
-    )
-
-    auth_url = None
-    for line in proc.stdout:
-      match = re.search(r"https://login\.tailscale\.com/\S+", line)
-      if match and not auth_url:
-        auth_url = match.group(0)
-        run_cmd(["sudo", "kill", "-TERM", f"-{proc.pid}"], "Sent SIGTERM to Tailscale setup process.", "Failed to send SIGTERM to Tailscale setup process.")
-        proc.wait(timeout=5)
-        break
-
-    return jsonify({
-      "message": "Tailscale setup started. Please authenticate in your browser.",
-      "auth_url": auth_url
-    }), 200
+  @app.route("/api/tailscale/login", methods=["POST"])
+  def tailscale_login():
+    if not _request_is_lan_setup():
+      return jsonify({"error": "Tailscale owner login is available only on the local network."}), 403
+    config = load_vehicle_telemetry_config()
+    if config["mode"] != "tailscale" or not config["fetch"]["enabled"]:
+      return jsonify({"error": "Enable the personal Tailscale relay first."}), 409
+    try:
+      hostname = ensure_tailscale_hostname(GALAXY_DIR, config["tailscale"].get("hostname", "auto"))
+      owner_url = begin_tailscale_login(config["tailscale"], hostname)
+      return jsonify({"message": "Complete owner login in Tailscale.", "ownerURL": owner_url}), 200
+    except Exception as error:
+      return jsonify({"error": f"Tailscale is not ready for login yet: {str(error)[:240]}"}), 409
 
   @app.route("/api/tailscale/uninstall", methods=["POST"])
   def tailscale_uninstall():
-    base = "/data/tailscale"
-    state = f"{base}/state"
-    unit_path = "/etc/systemd/system/tailscaled.service"
-    local_unit = f"{base}/tailscaled.service"
+    if not _request_is_lan_setup():
+      return jsonify({"error": "Tailscale relay changes are available only on the local network."}), 403
+    config = load_vehicle_telemetry_config()
+    try:
+      TailscaleFunnelController(GALAXY_DIR).reconcile(False, config["tailscale"], config["fetch"])
+    except Exception:
+      # The low-priority telemetry daemon will retry managed Funnel cleanup.
+      pass
 
-    run_cmd(["sudo", "mount", "-o", "remount,rw", "/"], "Remounted / as read-write.", "Failed to remount /.")
-    run_cmd(["sudo", "systemctl", "stop", "tailscaled"], "Stopped tailscaled.", "Failed to stop tailscaled.")
-    run_cmd(["sudo", "systemctl", "disable", "tailscaled"], "Disabled tailscaled.", "Failed to disable tailscaled.")
+    def disable_tailscale(current):
+      current["mode"] = "off"
+      current["fetch"]["enabled"] = False
+      return current
 
-    if os.path.exists(unit_path):
-      run_cmd(["sudo", "rm", unit_path], "Removed systemd unit file.", "Failed to remove systemd unit file.")
-      run_cmd(["sudo", "systemctl", "daemon-reload"], "Reloaded systemd daemon.", "Failed to reload systemd.")
-
-    delete_file(local_unit)
-
-    for filename in ["tailscale", "tailscaled", "tailscale.tgz"]:
-      delete_file(os.path.join(base, filename))
-
-    for item in os.listdir(base):
-      if item.startswith("tailscale_"):
-        item_path = os.path.join(base, item)
-        if os.path.isdir(item_path):
-          run_cmd(["sudo", "rm", "-rf", item_path], f"Removed {item_path}.", f"Failed to remove {item_path}.")
-
-    if os.path.exists(state):
-      run_cmd(["sudo", "rm", "-rf", state], "Removed tailscale state dir.", "Failed to remove tailscale state dir.")
-
-    if os.path.exists(base):
-      run_cmd(["sudo", "rm", "-rf", base], "Removed tailscale dir.", "Failed to remove tailscale dir.")
-
-    return jsonify({"message": "Tailscale uninstalled!"}), 200
+    update_vehicle_telemetry_config(disable_tailscale)
+    return jsonify({"message": "Personal relay disabled. Tailscale identity was retained for easy re-enable."}), 200
 
   @app.route("/api/themes", methods=["POST"])
   def save_theme_route():

@@ -1,6 +1,6 @@
 import { html, reactive } from "/assets/vendor/arrow-core.js"
 import { Modal } from "/assets/components/modal.js"
-import { TailscaleControl } from "/assets/components/tailscale/tailscale.js"
+import { TailscaleControl } from "/assets/components/tailscale/tailscale.js?v=telemetry-setup-3"
 
 const FACTORY_RESET_STATUS_POLL_INTERVAL_MS = 1000
 

@@ -62,7 +62,7 @@ class GalaxyQRPopup : public DialogBase {
   Q_OBJECT
 
 public:
-  explicit GalaxyQRPopup(const QString &url, QWidget *parent = nullptr);
+  explicit GalaxyQRPopup(const QString &url, QWidget *parent = nullptr, const QString &title = QString(), const QString &display_url = QString());
 
 protected:
   void mousePressEvent(QMouseEvent *event) override {

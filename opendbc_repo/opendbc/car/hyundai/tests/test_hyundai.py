@@ -22,7 +22,7 @@ from opendbc.car.hyundai.interface import EV9PandaPreinitFlags, EV9PandaPreinitO
                                             CarInterface, attempt_ev9_pre_fingerprint_suppression, \
                                             update_ev9_panda_preinit_handoff
 from opendbc.car.interfaces import ACCEL_MIN, CarInterfaceBase
-from opendbc.car.hyundai import hyundaican, hyundaicanfd
+from opendbc.car.hyundai import carstate as hyundai_carstate, hyundaican, hyundaicanfd
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.ev9_longitudinal import should_send_ev9_direct_angle_command
 from opendbc.car.hyundai.radar_interface import MRREVO14F_RADAR_START_ADDR, MRR30_RADAR_START_ADDR, MRR35_RADAR_START_ADDR, \
@@ -32,6 +32,7 @@ from opendbc.car.hyundai.values import CAMERA_SCC_CAR, CANFD_CAR, CAN_GEARS, CAR
                                          UNSUPPORTED_LONGITUDINAL_CAR, PLATFORM_CODE_ECUS, HYUNDAI_VERSION_REQUEST_LONG, \
                                          LEGACY_LONGITUDINAL_CAR, DBC, HyundaiFlags, get_platform_codes, HyundaiSafetyFlags, \
                                          HyundaiStarPilotSafetyFlags, Buttons, CarControllerParams, kia_ev6_gt_line_longitudinal_tuning
+from opendbc.car.hyundai import values as hyundai_values
 
 LongCtrlState = CarControl.Actuators.LongControlState
 from opendbc.car.hyundai.fingerprints import FW_VERSIONS
@@ -191,6 +192,79 @@ class TestEV9EnergyTelemetry:
     assert parser.vl["EV_CHARGE_STATUS"]["CHARGE_PORT_CONNECTED"] == 0
     assert parser.vl["EV_CHARGE_STATUS"]["CHARGING_ACTIVE_REDUNDANT"] == 0
     assert parser.vl["EV_CHARGE_STATUS"]["CHARGE_PORT_CONNECTED_REDUNDANT"] == 0
+
+
+class TestHKGEnergyTelemetry:
+  CAN_DTE_CARS = {
+    CAR.HYUNDAI_IONIQ_EV_2020,
+    CAR.HYUNDAI_KONA_EV,
+    CAR.HYUNDAI_KONA_EV_2022,
+  }
+  CANFD_CARS = {
+    CAR.HYUNDAI_IONIQ_5,
+    CAR.HYUNDAI_IONIQ_5_PE,
+    CAR.HYUNDAI_IONIQ_6,
+    CAR.HYUNDAI_KONA_EV_2ND_GEN,
+    CAR.KIA_EV6,
+    CAR.KIA_EV9,
+    CAR.KIA_NIRO_EV_2ND_GEN,
+    CAR.GENESIS_GV60_EV_1ST_GEN,
+    CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN,
+  }
+
+  def test_route_validated_platform_allowlists(self):
+    assert hyundai_values.CAN_EV_CLUSTER_DTE_CAR == self.CAN_DTE_CARS
+    assert hyundai_values.CANFD_EV_TELEMETRY_CAR == self.CANFD_CARS
+
+  def test_classic_can_cluster_dte(self):
+    dbc = DBC[CAR.HYUNDAI_IONIQ_EV_2020][Bus.pt]
+    packer = CANPacker(dbc)
+    parser = CANParser(dbc, [("CLU13", 0)], 0)
+    parser.update([1_000_000_000, [packer.make_can_msg("CLU13", 0, {"CF_Clu_DTE": 408})]])
+
+    assert hyundai_carstate.get_can_ev_cluster_dte(parser) == 408_000.0
+
+  def test_canfd_soc_and_dte_do_not_require_ev9_charging_messages(self):
+    dbc = DBC[CAR.KIA_EV9][Bus.pt]
+    packer = CANPacker(dbc)
+    parser = CANParser(dbc, [("EV_RANGE_STATUS", 0), ("EV_ENERGY_STATUS_REDUNDANT", 0)], 1)
+    parser.update([1_000_000_000, [
+      packer.make_can_msg("EV_RANGE_STATUS", 1, {"DISTANCE_TO_EMPTY": 321}),
+      packer.make_can_msg("EV_ENERGY_STATUS_REDUNDANT", 1, {"BATTERY_SOC_REDUNDANT": 62.5}),
+    ]])
+
+    telemetry = hyundai_carstate.get_canfd_ev_energy_telemetry(parser)
+    assert telemetry.available
+    assert telemetry.soc_valid
+    assert telemetry.dte_valid
+    assert telemetry.fuel_gauge == pytest.approx(0.625)
+    assert telemetry.distance_to_empty == 321_000.0
+    assert not telemetry.charging_valid
+    assert not telemetry.charge_port_valid
+
+  def test_ev9_mode_requires_agreeing_soc_and_charge_sources(self):
+    dbc = DBC[CAR.KIA_EV9][Bus.pt]
+    packer = CANPacker(dbc)
+    parser = TestEV9EnergyTelemetry.parser()
+    parser.update([1_000_000_000, [
+      packer.make_can_msg("EV_RANGE_STATUS", 1, {"DISTANCE_TO_EMPTY": 511}),
+      packer.make_can_msg("EV_ENERGY_STATUS_REDUNDANT", 1, {"BATTERY_SOC_REDUNDANT": 79.5}),
+      packer.make_can_msg("EV_CHARGE_STATUS", 1, {
+        "CHARGE_PORT_CONNECTED": 1,
+        "CHARGING_ACTIVE_REDUNDANT": 1,
+        "CHARGE_PORT_CONNECTED_REDUNDANT": 1,
+      }),
+      packer.make_can_msg("EV_ENERGY_STATUS", 1, {"BATTERY_SOC": 80.0, "CHARGING_ACTIVE": 1}),
+    ]])
+
+    telemetry = hyundai_carstate.get_canfd_ev_energy_telemetry(
+      parser, require_redundant_soc=True, enable_charging=True,
+    )
+    assert telemetry.available
+    assert telemetry.soc_valid
+    assert telemetry.fuel_gauge == pytest.approx(0.7975)
+    assert telemetry.charging_valid and telemetry.charging
+    assert telemetry.charge_port_valid and telemetry.charging_port_connected
 
 
 class TestHyundaiFingerprint:

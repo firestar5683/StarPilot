@@ -131,6 +131,14 @@ class TestManager:
     assert names.index("the_galaxy") < ui_idx
     assert names.index("galaxy") < ui_idx
 
+  def test_vehicle_telemetry_is_low_priority(self):
+    telemetry = next(process for process in procs if process.name == "vehicle_telemetryd")
+    assert telemetry.nice == 19
+    car_params = car.CarParams.new_message()
+    toggles = SimpleNamespace()
+    assert telemetry.should_run(False, Params(), car_params, toggles)
+    assert telemetry.should_run(True, Params(), car_params, toggles)
+
   def test_big_device_ui_process_swaps_offroad_only(self, tmp_path):
     ui_process = BigDeviceUIProcess(lambda *args: True)
     qt_process = FakeManagedProcess()

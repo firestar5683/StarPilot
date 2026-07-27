@@ -1,5 +1,6 @@
 from collections import deque
 import copy
+from dataclasses import dataclass
 import math
 
 from cereal import custom
@@ -10,7 +11,8 @@ from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.values import HyundaiFlags, HyundaiStarPilotFlags, CAR, DBC, Buttons, CarControllerParams, \
                                        hyundai_cancel_button_enables_cruise, hyundai_cancel_button_resume_requires_set, \
                                        ALT_BUS_LDA_BUTTON_CARS, ALT_BUS_LDA_BUTTON_SWL_STAT_CARS, \
-                                       CANFD_CORNER_RADAR_BSM_CAR, CANFD_EV_TELEMETRY_CAR
+                                       CANFD_CORNER_RADAR_BSM_CAR, CAN_EV_CLUSTER_DTE_CAR, \
+                                       CANFD_EV_CHARGING_TELEMETRY_CAR, CANFD_EV_TELEMETRY_CAR
 from opendbc.car.interfaces import CarStateBase
 
 ButtonType = structs.CarState.ButtonEvent.Type
@@ -30,6 +32,23 @@ CANFD_NATIVE_BLINDSPOT_STALE_NS = 100_000_000
 EV9_RAW_BLINDSPOT_STALE_NS = 150_000_000
 CANFD_CAMERA_LEAD_MIN_DISTANCE = 0.1
 ALT_BUS_LDA_BUTTON_BURST_DEBOUNCE_NS = int(1.3e9)
+EV_ENERGY_MAX_AGE_NS = 500_000_000
+EV_ENERGY_MAX_SOURCE_SKEW_NS = 150_000_000
+
+
+@dataclass(frozen=True)
+class HKGEnergyTelemetry:
+  available: bool = False
+  soc_valid: bool = False
+  dte_valid: bool = False
+  charging_valid: bool = False
+  charge_port_valid: bool = False
+  fuel_gauge: float = 0.0
+  distance_to_empty: float = 0.0
+  charging: bool = False
+  charging_port_connected: bool = False
+  charging_time_remaining: float = 0.0
+  source_mono_time: int = 0
 
 def get_non_scc_cruise_signals(CP) -> tuple[str, str, str, str, str, str]:
   if CP.flags & HyundaiFlags.EV:
@@ -80,6 +99,107 @@ def decode_canfd_camera_lead(distance: float, rel_speed: float) -> tuple[bool, f
   if not lead_visible:
     return False, 0.0, 0.0
   return True, lead_distance, float(rel_speed)
+
+
+def get_canfd_ev_energy_telemetry(cp: CANParser, *, require_redundant_soc: bool = False,
+                                  enable_charging: bool = False,
+                                  now_nanos: int | None = None) -> HKGEnergyTelemetry:
+  if now_nanos is None:
+    now_nanos = int(cp._last_update_nanos)
+
+  def fresh(timestamp_nanos: int) -> bool:
+    age_nanos = now_nanos - int(timestamp_nanos)
+    return int(timestamp_nanos) > 0 and 0 <= age_nanos <= EV_ENERGY_MAX_AGE_NS
+
+  def aligned(first_timestamp_nanos: int, second_timestamp_nanos: int) -> bool:
+    return abs(int(first_timestamp_nanos) - int(second_timestamp_nanos)) <= EV_ENERGY_MAX_SOURCE_SKEW_NS
+
+  display_soc = cp.vl["EV_ENERGY_STATUS_REDUNDANT"]["BATTERY_SOC_REDUNDANT"]
+  display_soc_ts = cp.ts_nanos["EV_ENERGY_STATUS_REDUNDANT"]["BATTERY_SOC_REDUNDANT"]
+  soc_valid = fresh(display_soc_ts) and 0.0 <= display_soc <= 100.0
+  fuel_gauge = display_soc / 100.0 if soc_valid else 0.0
+  soc_timestamps = [display_soc_ts] if soc_valid else []
+
+  if require_redundant_soc:
+    primary_soc = cp.vl["EV_ENERGY_STATUS"]["BATTERY_SOC"]
+    primary_soc_ts = cp.ts_nanos["EV_ENERGY_STATUS"]["BATTERY_SOC"]
+    soc_valid = (soc_valid and fresh(primary_soc_ts) and aligned(display_soc_ts, primary_soc_ts) and
+                 0.0 <= primary_soc <= 100.0 and abs(display_soc - primary_soc) <= 1.0)
+    fuel_gauge = (display_soc + primary_soc) / 200.0 if soc_valid else 0.0
+    soc_timestamps = [display_soc_ts, primary_soc_ts] if soc_valid else []
+
+  dte_km = cp.vl["EV_RANGE_STATUS"]["DISTANCE_TO_EMPTY"]
+  dte_ts = cp.ts_nanos["EV_RANGE_STATUS"]["DISTANCE_TO_EMPTY"]
+  dte_valid = fresh(dte_ts) and 0.0 < dte_km < 900.0
+  distance_to_empty = dte_km * 1000.0 if dte_valid else 0.0
+
+  charging_valid = False
+  charge_port_valid = False
+  charging = False
+  charging_port_connected = False
+  charging_timestamps = []
+  if enable_charging:
+    plug_connected = cp.vl["EV_CHARGE_STATUS"]["CHARGE_PORT_CONNECTED"] == 1
+    plug_connected_redundant = cp.vl["EV_CHARGE_STATUS"]["CHARGE_PORT_CONNECTED_REDUNDANT"] == 1
+    plug_ts = cp.ts_nanos["EV_CHARGE_STATUS"]["CHARGE_PORT_CONNECTED"]
+    redundant_plug_ts = cp.ts_nanos["EV_CHARGE_STATUS"]["CHARGE_PORT_CONNECTED_REDUNDANT"]
+    charge_port_valid = (fresh(plug_ts) and fresh(redundant_plug_ts) and aligned(plug_ts, redundant_plug_ts) and
+                         plug_connected == plug_connected_redundant)
+    charging_port_connected = charge_port_valid and plug_connected
+
+    primary_charging = cp.vl["EV_ENERGY_STATUS"]["CHARGING_ACTIVE"] == 1
+    redundant_charging = cp.vl["EV_CHARGE_STATUS"]["CHARGING_ACTIVE_REDUNDANT"] == 1
+    primary_charging_ts = cp.ts_nanos["EV_ENERGY_STATUS"]["CHARGING_ACTIVE"]
+    redundant_charging_ts = cp.ts_nanos["EV_CHARGE_STATUS"]["CHARGING_ACTIVE_REDUNDANT"]
+    charging_valid = (charge_port_valid and fresh(primary_charging_ts) and fresh(redundant_charging_ts) and
+                      aligned(primary_charging_ts, redundant_charging_ts) and
+                      primary_charging == redundant_charging and
+                      (not primary_charging or charging_port_connected))
+    charging = charging_valid and primary_charging
+    if charge_port_valid:
+      charging_timestamps += [plug_ts, redundant_plug_ts]
+    if charging_valid:
+      charging_timestamps += [primary_charging_ts, redundant_charging_ts]
+
+  source_timestamps = [*soc_timestamps, *charging_timestamps]
+  if dte_valid:
+    source_timestamps.append(dte_ts)
+
+  return HKGEnergyTelemetry(
+    available=soc_valid or dte_valid,
+    soc_valid=soc_valid,
+    dte_valid=dte_valid,
+    charging_valid=charging_valid,
+    charge_port_valid=charge_port_valid,
+    fuel_gauge=fuel_gauge,
+    distance_to_empty=distance_to_empty,
+    charging=charging,
+    charging_port_connected=charging_port_connected,
+    source_mono_time=max(source_timestamps, default=0),
+  )
+
+
+def get_can_ev_cluster_dte(cp: CANParser) -> float:
+  dte_km = cp.vl["CLU13"]["CF_Clu_DTE"]
+  if cp.ts_nanos["CLU13"]["CF_Clu_DTE"] > 0 and 0.0 < dte_km < 900.0:
+    return dte_km * 1000.0
+  return 0.0
+
+
+def populate_starpilot_vehicle_telemetry(fp_ret, ret: structs.CarState, telemetry: HKGEnergyTelemetry) -> None:
+  fp_ret.vehicleTelemetryAvailable = telemetry.available
+  fp_ret.fuelGauge = ret.fuelGauge
+  fp_ret.distanceToEmpty = ret.distanceToEmpty
+  fp_ret.charging = ret.charging
+  fp_ret.chargingPortConnected = ret.chargingPortConnected
+  fp_ret.chargingTimeRemaining = ret.chargingTimeRemaining
+  fp_ret.vehicleTelemetrySourceMonoTime = telemetry.source_mono_time
+  fp_ret.vehicleTelemetrySocValid = telemetry.soc_valid
+  fp_ret.vehicleTelemetryDteValid = telemetry.dte_valid
+  fp_ret.vehicleTelemetryChargingValid = telemetry.charging_valid
+  fp_ret.vehicleTelemetryChargePortValid = telemetry.charge_port_valid
+  fp_ret.vEgo = ret.vEgo
+  fp_ret.standstill = ret.standstill
 
 
 class CarState(CarStateBase):
@@ -483,6 +603,15 @@ class CarState(CarStateBase):
     ret.lowSpeedAlert = self.low_speed_alert
 
     fp_ret = custom.StarPilotCarState.new_message()
+    if self.CP.carFingerprint in CAN_EV_CLUSTER_DTE_CAR:
+      ret.distanceToEmpty = get_can_ev_cluster_dte(cp)
+      dte_timestamp = cp.ts_nanos["CLU13"]["CF_Clu_DTE"] if ret.distanceToEmpty > 0.0 else 0
+      populate_starpilot_vehicle_telemetry(fp_ret, ret, HKGEnergyTelemetry(
+        available=ret.distanceToEmpty > 0.0,
+        dte_valid=ret.distanceToEmpty > 0.0,
+        distance_to_empty=ret.distanceToEmpty,
+        source_mono_time=dte_timestamp,
+      ))
 
     return ret, fp_ret
 
@@ -505,35 +634,18 @@ class CarState(CarStateBase):
     ret.doorOpen = cp.vl["DOORS_SEATBELTS"]["DRIVER_DOOR"] == 1
     ret.seatbeltUnlatched = cp.vl["DOORS_SEATBELTS"]["DRIVER_SEATBELT"] == 0
 
+    energy_telemetry = HKGEnergyTelemetry()
     if self.CP.carFingerprint in CANFD_EV_TELEMETRY_CAR:
-      primary_soc = cp.vl["EV_ENERGY_STATUS"]["BATTERY_SOC"]
-      redundant_soc = cp.vl["EV_ENERGY_STATUS_REDUNDANT"]["BATTERY_SOC_REDUNDANT"]
-      primary_soc_seen = cp.ts_nanos["EV_ENERGY_STATUS"]["BATTERY_SOC"] > 0
-      redundant_soc_seen = cp.ts_nanos["EV_ENERGY_STATUS_REDUNDANT"]["BATTERY_SOC_REDUNDANT"] > 0
-      soc_candidates = [soc for soc, seen in ((primary_soc, primary_soc_seen), (redundant_soc, redundant_soc_seen))
-                        if seen and 0.0 <= soc <= 100.0]
-      if soc_candidates and max(soc_candidates) - min(soc_candidates) <= 1.0:
-        ret.fuelGauge = sum(soc_candidates) / len(soc_candidates) / 100.0
-
-      dte_km = cp.vl["EV_RANGE_STATUS"]["DISTANCE_TO_EMPTY"]
-      if cp.ts_nanos["EV_RANGE_STATUS"]["DISTANCE_TO_EMPTY"] > 0 and 0.0 < dte_km < 900.0:
-        ret.distanceToEmpty = dte_km * 1000.0
-
-      plug_connected = cp.vl["EV_CHARGE_STATUS"]["CHARGE_PORT_CONNECTED"] == 1
-      plug_connected_redundant = cp.vl["EV_CHARGE_STATUS"]["CHARGE_PORT_CONNECTED_REDUNDANT"] == 1
-      plug_signals_seen = (
-        cp.ts_nanos["EV_CHARGE_STATUS"]["CHARGE_PORT_CONNECTED"] > 0
-        and cp.ts_nanos["EV_CHARGE_STATUS"]["CHARGE_PORT_CONNECTED_REDUNDANT"] > 0
+      energy_telemetry = get_canfd_ev_energy_telemetry(
+        cp,
+        require_redundant_soc=self.CP.carFingerprint in CANFD_EV_CHARGING_TELEMETRY_CAR,
+        enable_charging=self.CP.carFingerprint in CANFD_EV_CHARGING_TELEMETRY_CAR,
       )
-      ret.chargingPortConnected = plug_signals_seen and plug_connected and plug_connected_redundant
-
-      primary_charging = cp.vl["EV_ENERGY_STATUS"]["CHARGING_ACTIVE"] == 1
-      redundant_charging = cp.vl["EV_CHARGE_STATUS"]["CHARGING_ACTIVE_REDUNDANT"] == 1
-      charging_signals_seen = (
-        cp.ts_nanos["EV_ENERGY_STATUS"]["CHARGING_ACTIVE"] > 0
-        and cp.ts_nanos["EV_CHARGE_STATUS"]["CHARGING_ACTIVE_REDUNDANT"] > 0
-      )
-      ret.charging = ret.chargingPortConnected and charging_signals_seen and primary_charging and redundant_charging
+      ret.fuelGauge = energy_telemetry.fuel_gauge
+      ret.distanceToEmpty = energy_telemetry.distance_to_empty
+      ret.charging = energy_telemetry.charging
+      ret.chargingPortConnected = energy_telemetry.charging_port_connected
+      ret.chargingTimeRemaining = energy_telemetry.charging_time_remaining
 
     gear = cp.vl[self.gear_msg_canfd]["GEAR"]
     ret.gearShifter = self.parse_gear_shifter(self.shifter_values.get(gear))
@@ -689,6 +801,8 @@ class CarState(CarStateBase):
     )
     fp_ret.dashboardSpeedLimit = self.dashboard_speed_limit_raw * speed_factor \
       if self.dashboard_speed_limit_raw <= 252 else 0.0
+    if self.CP.carFingerprint in CANFD_EV_TELEMETRY_CAR:
+      populate_starpilot_vehicle_telemetry(fp_ret, ret, energy_telemetry)
     if self.CP.flags & HyundaiFlags.EV:
       drive_mode = cp.vl["DRIVE_MODE_EV"]["DRIVE_MODE"]
       fp_ret.ecoGear = (drive_mode == 4)
@@ -749,9 +863,12 @@ class CarState(CarStateBase):
       msgs += [
         ("EV_RANGE_STATUS", 0),
         ("EV_ENERGY_STATUS_REDUNDANT", 0),
-        ("EV_CHARGE_STATUS", 0),
-        ("EV_ENERGY_STATUS", 0),
       ]
+      if CP.carFingerprint in CANFD_EV_CHARGING_TELEMETRY_CAR:
+        msgs += [
+          ("EV_CHARGE_STATUS", 0),
+          ("EV_ENERGY_STATUS", 0),
+        ]
     msgs.append(("STEERING_WHEEL_MEDIA_BUTTONS", 0))  # optional: absent or slower on some CAN-FD variants
     cam_msgs.append(("ADAS_0x380", 0))  # optional: dashboard stop-sign signal, only on ADAS-equipped HKG CANFD
     return {

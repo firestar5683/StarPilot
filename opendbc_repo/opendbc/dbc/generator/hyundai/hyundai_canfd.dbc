@@ -559,7 +559,7 @@ BO_ 687 HOD_FD_01_100ms: 8 XXX
 BO_ 693 EV_RANGE_STATUS: 32 XXX
  SG_ DISTANCE_TO_EMPTY : 64|16@1+ (1,0) [0|900] "km" XXX
 
-CM_ SG_ 693 DISTANCE_TO_EMPTY "EV9 CCNC cluster DTE; matched displayed range across 154 captured samples.";
+CM_ SG_ 693 DISTANCE_TO_EMPTY "Hyundai/Kia/Genesis CAN-FD EV cluster DTE; route-validated on the telemetry allowlist.";
 
 BO_ 698 FR_CMR_04_40ms: 32 FR_CMR
  SG_ FR_CMR_Crc4Val : 0|16@1+ (1,0) [0|65535] "" Dummy
@@ -617,7 +617,7 @@ BO_ 762 EV_ENERGY_STATUS_REDUNDANT: 32 XXX
  SG_ BATTERY_SOC_REDUNDANT : 120|8@1+ (0.5,0) [0|100] "%" XXX
  SG_ CHARGING_STATE_AUX : 200|1@1+ (1,0) [0|1] "" XXX
 
-CM_ SG_ 762 BATTERY_SOC_REDUNDANT "EV9 CCNC display SOC redundancy; validated against user-observed SOC.";
+CM_ SG_ 762 BATTERY_SOC_REDUNDANT "Hyundai/Kia/Genesis CAN-FD display SOC; EV9 uses it as the redundant source for 0x320.";
 CM_ SG_ 762 CHARGING_STATE_AUX "EV9 CCNC charge-related state with startup transitions; semantics not yet assigned.";
 
 BO_ 778 EV_CHARGE_STATUS: 32 XXX

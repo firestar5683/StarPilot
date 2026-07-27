@@ -28,6 +28,7 @@ EV9_LONG_PREINIT_FIRMWARE_NAMES = (
 )
 EV9_LONG_PREINIT_SAFETY_PARAM = 0x495
 EV9_LONG_PREINIT_OPTIONAL_SAFETY_PARAM = 0x800
+EV9_VEHICLE_TELEMETRY_SERIAL_ENV = "BOARDD_EV9_VEHICLE_TELEMETRY_SERIAL"
 
 EV9_PREINIT_STATE_COLLECTING = 0
 EV9_PREINIT_STATE_WAIT_SESSION = 1
@@ -54,6 +55,18 @@ EV9_PREINIT_IN_FLIGHT_STATES = frozenset({
   EV9_PREINIT_STATE_RESTORING,
   EV9_PREINIT_STATE_READY_PENDING_RESPONSE,
 })
+
+
+def configure_ev9_vehicle_telemetry_environment(enabled: bool, internal_serial: str,
+                                                resident_serials, environ=None) -> bool:
+  """Enable the native decoder only for the verified internal resident Panda."""
+  environ = os.environ if environ is None else environ
+  selected = bool(enabled and internal_serial and internal_serial in resident_serials)
+  if selected:
+    environ[EV9_VEHICLE_TELEMETRY_SERIAL_ENV] = internal_serial
+  else:
+    environ.pop(EV9_VEHICLE_TELEMETRY_SERIAL_ENV, None)
+  return selected
 EV9_PREINIT_PRESERVE_FLAGS = (EV9_PREINIT_FLAG_START_INTENT |
                               EV9_PREINIT_FLAG_SUPPRESSION_CONFIRMED |
                               EV9_PREINIT_FLAG_BRIDGE_ACTIVE |
@@ -582,6 +595,8 @@ def main() -> None:
       os.environ["BOARDD_EV9_LONG_PREINIT_SERIALS"] = ",".join(ev9_preinit_serials)
     else:
       os.environ.pop("BOARDD_EV9_LONG_PREINIT_SERIALS", None)
+    internal_serial = internal_pandas[0].get_usb_serial() if internal_pandas else ""
+    configure_ev9_vehicle_telemetry_environment(ev9_long_preinit, internal_serial, ev9_preinit_serials)
     os.environ['MANAGER_DAEMON'] = 'pandad'
     process = subprocess.Popen(["./pandad", *panda_serials], cwd=os.path.join(BASEDIR, "selfdrive/pandad"))
     process.wait()

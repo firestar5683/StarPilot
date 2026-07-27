@@ -1,5 +1,4 @@
 import importlib.util
-import json
 import sys
 
 from pathlib import Path
@@ -96,7 +95,10 @@ def _install_server_import_stubs():
   )
   sys.modules["openpilot.system.hardware.hw"] = _simple_module(
     "openpilot.system.hardware.hw",
-    Paths=SimpleNamespace(log_root=lambda **kwargs: "/tmp/dashboard-test-routes/"),
+    Paths=SimpleNamespace(
+      comma_home=lambda: "/tmp/dashboard-test-comma-home",
+      log_root=lambda **kwargs: "/tmp/dashboard-test-routes/",
+    ),
   )
   sys.modules["openpilot.system.version"] = _simple_module("openpilot.system.version", get_build_metadata=lambda: SimpleNamespace())
   sys.modules["openpilot.tools.longitudinal_maneuvers.capabilities"] = _simple_module(
@@ -182,6 +184,9 @@ def _install_server_import_stubs():
   sys.modules["openpilot.starpilot.system.the_galaxy.factory_reset"] = _simple_module(
     "openpilot.starpilot.system.the_galaxy.factory_reset",
     remove_path=lambda *args, **kwargs: None,
+  )
+  sys.modules["openpilot.starpilot.system.the_galaxy.flm_workspace"] = _simple_module(
+    "openpilot.starpilot.system.the_galaxy.flm_workspace",
   )
   sys.modules["openpilot.starpilot.system.the_galaxy.utilities"] = utilities
 
