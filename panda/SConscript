@@ -24,10 +24,12 @@ def objcopy(source, target, env, for_signature):
     return '$OBJCOPY -O binary %s %s' % (source[0], target[0])
 
 def get_version(builder, build_type):
-  try:
-    git = subprocess.check_output(["git", "rev-parse", "--short=8", "HEAD"], encoding='utf8').strip()
-  except subprocess.CalledProcessError:
-    git = "unknown"
+  git = os.getenv("PANDA_GIT_VERSION", "").strip()
+  if not git:
+    try:
+      git = subprocess.check_output(["git", "rev-parse", "--short=8", "HEAD"], encoding='utf8').strip()
+    except subprocess.CalledProcessError:
+      git = "unknown"
   return f"{builder}-{git}-{build_type}"
 
 def get_key_header(name):
@@ -171,12 +173,22 @@ build_project("panda_remote", base_project_f4, "./board/main.c", ["-DPANDA_GM_RE
 build_project("panda_h7_remote", base_project_h7, "./board/main.c", ["-DPANDA_GM_REMOTE_START_C9"])
 build_project("panda_hkg_remote", base_project_f4, "./board/main.c", ["-DPANDA_HKG_REMOTE_START"])
 build_project("panda_h7_hkg_remote", base_project_h7, "./board/main.c", ["-DPANDA_HKG_REMOTE_START"])
+build_project("panda_h7_ev9_long_preinit", base_project_h7, "./board/main.c", ["-DPANDA_EV9_LONG_PREINIT"])
+build_project("panda_h7_ev9_long_preinit_hkg_remote", base_project_h7, "./board/main.c", ["-DPANDA_EV9_LONG_PREINIT", "-DPANDA_HKG_REMOTE_START"])
 build_project("panda_can_ignition_only", base_project_f4, "./board/main.c", ["-DPANDA_IGNORE_IGNITION_LINE"])
 build_project("panda_h7_can_ignition_only", base_project_h7, "./board/main.c", ["-DPANDA_IGNORE_IGNITION_LINE"])
 build_project("panda_remote_can_ignition_only", base_project_f4, "./board/main.c", ["-DPANDA_GM_REMOTE_START_C9", "-DPANDA_IGNORE_IGNITION_LINE"])
 build_project("panda_h7_remote_can_ignition_only", base_project_h7, "./board/main.c", ["-DPANDA_GM_REMOTE_START_C9", "-DPANDA_IGNORE_IGNITION_LINE"])
 build_project("panda_hkg_remote_can_ignition_only", base_project_f4, "./board/main.c", ["-DPANDA_HKG_REMOTE_START", "-DPANDA_IGNORE_IGNITION_LINE"])
 build_project("panda_h7_hkg_remote_can_ignition_only", base_project_h7, "./board/main.c", ["-DPANDA_HKG_REMOTE_START", "-DPANDA_IGNORE_IGNITION_LINE"])
+
+# Treat the EV9 variants as one deployable firmware set. Runtime selection can
+# change with the HKG remote-start Param, so production builds must never
+# refresh only the currently selected filename.
+Alias("panda_ev9_long_preinit_firmwares", [
+  "./board/obj/panda_h7_ev9_long_preinit.bin.signed",
+  "./board/obj/panda_h7_ev9_long_preinit_hkg_remote.bin.signed",
+])
 
 # panda jungle fw
 flags = [

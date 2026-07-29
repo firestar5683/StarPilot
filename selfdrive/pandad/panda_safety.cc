@@ -84,7 +84,16 @@ void PandaSafety::setSafetyMode(const std::string &params_string) {
     }
 
     if (i < starpilot_safety_configs.size()) {
-      safety_param |= starpilot_safety_configs[i].getSafetyParam();
+      const uint16_t starpilot_safety_param = starpilot_safety_configs[i].getSafetyParam();
+      // The strict EV9 model accepts only its production profile plus the
+      // optional AOL bit. Older StarPilotCarParams caches can carry generic
+      // CCNC or button flags that belong to a different safety model; never
+      // let those stale bits poison the final fail-closed EV9 configuration.
+      if (safety_model == cereal::CarParams::SafetyModel::HYUNDAI_CANFD_EV9) {
+        safety_param |= starpilot_safety_param & 0x800U;
+      } else {
+        safety_param |= starpilot_safety_param;
+      }
     }
 
     LOGW("Panda %d: setting safety model: %d, param: %d, alternative experience: %d", i, (int)safety_model, safety_param, alternative_experience);

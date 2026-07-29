@@ -125,6 +125,9 @@ class Panda:
   CAN_HEALTH_PACKET_VERSION = 5
   HEALTH_STRUCT = struct.Struct("<IIIIIIIIBBBBBHBBBHfBBHBHHB")
   CAN_HEALTH_STRUCT = struct.Struct("<BIBBBBBBBBIIIIIIIHHBBBIIII")
+  EV9_LONG_PREINIT_STATUS_STRUCT = struct.Struct("<14BH12I")
+  EV9_LONG_PREINIT_LEGACY_STATUS_STRUCT = struct.Struct("<14BH11I")
+  EV9_LONG_PREINIT_TIMING_STRUCT = struct.Struct("<4B15I")
 
   F4_DEVICES = [HW_TYPE_WHITE, HW_TYPE_BLACK, HW_TYPE_DOS]
   H7_DEVICES = [HW_TYPE_RED_PANDA, HW_TYPE_TRES, HW_TYPE_CUATRO, HW_TYPE_BODY]
@@ -601,6 +604,136 @@ class Panda:
       "irq2_call_rate": a[24],
       "can_core_reset_count": a[25],
     }
+
+  def get_ev9_long_preinit_status(self):
+    """Read live EV9 preinit ownership and timing; tolerate deployed v3 firmware."""
+    dat = self._handle.controlRead(Panda.REQUEST_IN, 0xe9, 0, 0, self.EV9_LONG_PREINIT_STATUS_STRUCT.size)
+    if dat is None or len(dat) == 0:
+      return None
+
+    if len(dat) == self.EV9_LONG_PREINIT_LEGACY_STATUS_STRUCT.size and dat[0] == 3:
+      a = self.EV9_LONG_PREINIT_LEGACY_STATUS_STRUCT.unpack(dat)
+      return {
+        "valid": True,
+        "version": a[0],
+        "state": a[1],
+        "flags": 0,
+        "fingerprint": a[2],
+        "attempts": a[3],
+        "last_service": a[4],
+        "last_response": a[5],
+        "last_nrc": a[6],
+        "communication_type": a[7],
+        "trigger": a[8],
+        "first_ecan_len": a[9],
+        "powertrain_state": a[10],
+        "powertrain_boot_state": a[11],
+        "powertrain_init_state": a[12],
+        "first_ecan_addr": a[14],
+        "first_can_us": a[15],
+        "state_started_us": a[16],
+        "trigger_us": a[17],
+        "first_ecan_us": a[18],
+        "driver_braking_us": a[19],
+        "pre_ready_us": a[20],
+        "ignition_us": a[21],
+        "session_response_us": a[22],
+        "comm_control_us": a[23],
+        "last_powertrain_us": a[24],
+        "ready_us": a[25],
+        "outcome_us": 0,
+        "timing_valid": False,
+      }
+
+    if len(dat) != self.EV9_LONG_PREINIT_STATUS_STRUCT.size or dat[0] != 4:
+      return None
+    a = self.EV9_LONG_PREINIT_STATUS_STRUCT.unpack(dat)
+    status = {
+      "valid": True,
+      "version": a[0],
+      "state": a[1],
+      "flags": a[13],
+      "fingerprint": a[2],
+      "attempts": a[3],
+      "last_service": a[4],
+      "last_response": a[5],
+      "last_nrc": a[6],
+      "communication_type": a[7],
+      "trigger": a[8],
+      "first_ecan_len": a[9],
+      "powertrain_state": a[10],
+      "powertrain_boot_state": a[11],
+      "powertrain_init_state": a[12],
+      "first_ecan_addr": a[14],
+      "first_can_us": a[15],
+      "state_started_us": a[16],
+      "trigger_us": a[17],
+      "first_ecan_us": a[18],
+      "driver_braking_us": a[19],
+      "pre_ready_us": a[20],
+      "ignition_us": a[21],
+      "session_response_us": a[22],
+      "comm_control_us": a[23],
+      "last_powertrain_us": a[24],
+      "ready_us": a[25],
+      "outcome_us": a[26],
+      "timing_valid": False,
+    }
+
+    try:
+      timing_dat = self._handle.controlRead(Panda.REQUEST_IN, 0xe9, 1, 0, self.EV9_LONG_PREINIT_TIMING_STRUCT.size)
+    except usb1.USBError:
+      return status
+    try:
+      verify_dat = self._handle.controlRead(Panda.REQUEST_IN, 0xe9, 0, 0, self.EV9_LONG_PREINIT_STATUS_STRUCT.size)
+    except usb1.USBError:
+      return status
+    if verify_dat is None or len(verify_dat) != self.EV9_LONG_PREINIT_STATUS_STRUCT.size or verify_dat[0] != 4:
+      return status
+    verify = self.EV9_LONG_PREINIT_STATUS_STRUCT.unpack(verify_dat)
+    # Fields that define the diagnostic cycle and ownership must not change
+    # across the two USB reads. High-rate telemetry fields may legitimately do
+    # so and are not part of this coherence check.
+    coherence_indices = (0, 1, 13, 17, 22, 23, 25, 26)
+    if any(a[i] != verify[i] for i in coherence_indices):
+      status["valid"] = False
+      return status
+    if timing_dat is not None and len(timing_dat) == self.EV9_LONG_PREINIT_TIMING_STRUCT.size:
+      t = self.EV9_LONG_PREINIT_TIMING_STRUCT.unpack(timing_dat)
+      coherent = (t[2] == status["flags"] and
+                  t[6] == status["session_response_us"] and
+                  t[7] == status["comm_control_us"] and
+                  t[12] == status["ready_us"])
+      if t[0] == 4 and t[1] == 1 and coherent:
+        status.update({
+          "timing_valid": True,
+          "lifecycle_flags": t[3],
+          "release_requested": bool(t[3] & 0x01),
+          "release_complete": bool(t[3] & 0x02),
+          "can_reset_failed": bool(t[3] & 0x04),
+          "timing_flags": t[2],
+          "cycle_started_us": t[4],
+          "session_request_us": t[5],
+          "timing_session_response_us": t[6],
+          "timing_comm_control_us": t[7],
+          "comm_control_response_us": t[8],
+          "last_critical_adas_us": t[9],
+          "first_replacement_us": t[10],
+          "suppression_confirmed_us": t[11],
+          "timing_ready_us": t[12],
+          "handoff_us": t[13],
+          "restore_us": t[14],
+          "abort_us": t[15],
+          "last_host_tx_us": t[16],
+          "last_tester_present_us": t[17],
+          "last_vehicle_frame_us": t[18],
+        })
+    return status
+
+  def request_ev9_long_preinit_release(self, cycle_started_us: int) -> bool:
+    """Gracefully restore the stock ADAS publisher before a disruptive Panda operation."""
+    dat = self._handle.controlRead(Panda.REQUEST_IN, 0xea, 1, cycle_started_us & 0xFFFF, 1)
+    return dat == b"\x01"
 
   # ******************* control *******************
 

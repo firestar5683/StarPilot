@@ -13,6 +13,7 @@
 #include "cereal/gen/cpp/log.capnp.h"
 #include "panda/board/health.h"
 #include "panda/board/can.h"
+#include "panda/board/ev9_long_preinit_status.h"
 #include "selfdrive/pandad/panda_comms.h"
 
 #define USB_TX_SOFT_LIMIT   (0x100U)
@@ -40,6 +41,13 @@ struct can_frame {
   long address;
   std::string dat;
   long src;
+};
+
+
+struct PandaEv9LongPreinitStatus {
+  ev9_long_preinit_status_t status = {};
+  ev9_long_preinit_timing_t timing = {};
+  bool timing_valid = false;
 };
 
 
@@ -71,6 +79,7 @@ public:
   void set_ir_pwr(uint16_t ir_pwr);
   std::optional<health_t> get_state();
   std::optional<can_health_t> get_can_state(uint16_t can_number);
+  std::optional<PandaEv9LongPreinitStatus> get_ev9_long_preinit_status();
   void set_loopback(bool loopback);
   std::optional<std::vector<uint8_t>> get_firmware_version();
   bool up_to_date();

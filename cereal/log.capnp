@@ -130,6 +130,7 @@ struct OnroadEvent @0xc4fa6047f024e718 {
     userBookmark @95;
     excessiveActuation @96;
     audioFeedback @97;
+    adasUnavailable @98;
 
     soundsUnavailableDEPRECATED @47;
   }
@@ -591,6 +592,7 @@ struct PandaState @0xa7649e2575e4591e {
   harnessStatus @21 :HarnessStatus;
   sbu1Voltage @35 :Float32;
   sbu2Voltage @36 :Float32;
+  ev9LongPreinitStatus @37 :Ev9LongPreinitStatus;
 
   # can health
   canState0 @29 :PandaCanState;
@@ -703,6 +705,53 @@ struct PandaState @0xa7649e2575e4591e {
       crcError @6;
       noChange @7;
     }
+  }
+
+  struct Ev9LongPreinitStatus {
+    valid @0 :Bool;
+    version @1 :UInt8;
+    state @2 :UInt8;
+    flags @3 :UInt8;
+    fingerprint @4 :UInt8;
+    attempts @5 :UInt8;
+    lastService @6 :UInt8;
+    lastResponse @7 :UInt8;
+    lastNrc @8 :UInt8;
+    communicationType @9 :UInt8;
+    trigger @10 :UInt8;
+    firstEcanLen @11 :UInt8;
+    powertrainState @12 :UInt8;
+    powertrainBootState @13 :UInt8;
+    powertrainInitState @14 :UInt8;
+    firstEcanAddr @15 :UInt16;
+    firstCanUs @16 :UInt32;
+    stateStartedUs @17 :UInt32;
+    triggerUs @18 :UInt32;
+    firstEcanUs @19 :UInt32;
+    driverBrakingUs @20 :UInt32;
+    preReadyUs @21 :UInt32;
+    ignitionUs @22 :UInt32;
+    sessionResponseUs @23 :UInt32;
+    commControlUs @24 :UInt32;
+    lastPowertrainUs @25 :UInt32;
+    readyUs @26 :UInt32;
+    outcomeUs @27 :UInt32;
+
+    timingValid @28 :Bool;
+    cycleStartedUs @29 :UInt32;
+    sessionRequestUs @30 :UInt32;
+    commControlResponseUs @31 :UInt32;
+    lastCriticalAdasUs @32 :UInt32;
+    firstReplacementUs @33 :UInt32;
+    suppressionConfirmedUs @34 :UInt32;
+    handoffUs @35 :UInt32;
+    restoreUs @36 :UInt32;
+    abortUs @37 :UInt32;
+    lastHostTxUs @38 :UInt32;
+    lastTesterPresentUs @39 :UInt32;
+    lastVehicleFrameUs @40 :UInt32;
+    timingFlags @41 :UInt8;
+    resident @42 :Bool;
   }
 
   gasInterceptorDetectedDEPRECATED @4 :Bool;

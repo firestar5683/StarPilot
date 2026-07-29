@@ -125,9 +125,23 @@ _TESTING_GROUND_CUSTOM_RESERVED_INTERVAL_S = 15.0
 _TESTING_GROUND_CUSTOM_RESERVED_PM = None
 _TESTING_GROUND_CUSTOM_RESERVED_LOCK = threading.Lock()
 _TESTING_GROUND_CUSTOM_RESERVED_LAST_PUBLISH_MONO = 0.0
-PANDA_FIRMWARE_TOGGLE_KEYS = {"IgnoreIgnitionLine", "RemoteStartBootsComma", "HKGRemoteStartBootsComma"}
+PANDA_FIRMWARE_TOGGLE_KEYS = {"IgnoreIgnitionLine", "RemoteStartBootsComma", "HKGRemoteStartBootsComma", "EV9LongPreinitPanda"}
 PANDA_FIRMWARE_CONFIRMATION_FIELD = "confirmedPandaFirmwareFlash"
 _PANDA_FLASH_REBOOT_LOCK = threading.Lock()
+EV9_SCOPED_PARAM_KEYS = {
+  "EV9LongPreinitPanda",
+}
+
+
+def _persistent_car_fingerprint() -> str:
+  try:
+    cp_bytes = params.get("CarParamsPersistent")
+    if cp_bytes:
+      with car.CarParams.from_bytes(cp_bytes) as cp:
+        return str(cp.carFingerprint or "")
+  except Exception:
+    pass
+  return ""
 
 
 def _flash_panda_then_reboot() -> None:
@@ -2440,6 +2454,394 @@ def _configured_favorite_slot_values(slots):
     if slot.get("key") and not is_favorite_action_key(slot.get("key"))
   }
 
+def _galaxy_nav_control_option_payload(raw_options):
+  options = []
+  if not isinstance(raw_options, list):
+    return options
+
+  for raw_option in raw_options:
+    if isinstance(raw_option, dict):
+      value = raw_option.get("value")
+      label = str(raw_option.get("label") or value or "").strip()
+    else:
+      value = raw_option
+      label = str(raw_option or "").strip()
+
+    if value is None or not label:
+      continue
+    options.append({
+      "value": _sanitize_json_value(value),
+      "label": label,
+    })
+
+  return options
+
+def _galaxy_nav_confirmation_payload(key):
+  if key not in PANDA_FIRMWARE_TOGGLE_KEYS:
+    return None
+
+  return {
+    "field": PANDA_FIRMWARE_CONFIRMATION_FIELD,
+    "title": "Confirm Panda Firmware Flash",
+    "message": "This will flash Panda firmware and reboot the device when it finishes.",
+    "confirmText": "Flash and Reboot",
+  }
+
+GALAXY_NAV_CONTROL_MAKE_SCOPES = {
+  "NAPRadarEnabled": ["Tesla"],
+  "NAPRadarBehindNosecone": ["Tesla"],
+  "NAPRadarOffset": ["Tesla"],
+  "NAPPedalEnabled": ["Tesla"],
+  "NAPPedalCanBus": ["Tesla"],
+  "NAPAdaptiveAccel": ["Tesla"],
+  "NAPPedalCalibDone": ["Tesla"],
+  "NAPPedalCalibFactor": ["Tesla"],
+  "NAPPedalCalibZero": ["Tesla"],
+  "GMPedalLongitudinal": ["GM", "GMC", "Chevrolet", "Cadillac", "Buick"],
+  "GMDashSpoofOffsets": ["GM", "GMC", "Chevrolet", "Cadillac", "Buick"],
+  "RemoteStartBootsComma": ["GM", "GMC", "Chevrolet", "Cadillac", "Buick"],
+  "VoltSNG": ["GM", "Chevrolet"],
+  "GMAutoHold": ["GM", "Chevrolet"],
+  "VoltOnePedalMode": ["GM", "Chevrolet"],
+  "RemapCancelToDistance": ["GM", "Chevrolet"],
+  "HKGRemoteStartBootsComma": ["Hyundai", "Kia", "Genesis"],
+  "SubaruSNG": ["Subaru"],
+  "SubaruSNGManualParkingBrake": ["Subaru"],
+  "SNGHack": ["Toyota", "Lexus"],
+  "ToyotaAutoHold": ["Toyota", "Lexus"],
+}
+
+def _galaxy_nav_make_scope_payload(key):
+  return GALAXY_NAV_CONTROL_MAKE_SCOPES.get(key)
+
+def _galaxy_nav_text(value):
+  return ParamsCompat._to_text(value).strip()
+
+def _galaxy_nav_model_label(key):
+  label = str(key or "").replace("_", " ").replace("-", " ").strip()
+  return label.title() if label else ""
+
+def _galaxy_nav_model_catalog():
+  available = [model.strip() for model in (params.get("AvailableModels", encoding="utf-8") or "").split(",")]
+  names = [name.strip() for name in (params.get("AvailableModelNames", encoding="utf-8") or "").split(",")]
+  series = [entry.strip() for entry in (params.get("AvailableModelSeries", encoding="utf-8") or "").split(",")]
+  versions = [entry.strip() for entry in (params.get("ModelVersions", encoding="utf-8") or "").split(",")]
+  released_dates = [entry.strip() for entry in (params.get("ModelReleasedDates", encoding="utf-8") or "").split(",")]
+
+  try:
+    on_disk_files = {entry.name for entry in MODELS_PATH.iterdir()} if MODELS_PATH.is_dir() else set()
+  except Exception:
+    on_disk_files = set()
+
+  community_favorites = {canonical_model_key(entry.strip()) for entry in (params.get("CommunityFavorites", encoding="utf-8") or "").split(",") if entry.strip()}
+  user_favorites = {canonical_model_key(entry.strip()) for entry in (params.get(MODEL_USER_FAVORITES_PARAM, encoding="utf-8") or "").split(",") if entry.strip()}
+  models_by_key = {}
+
+  def add_model(key, label=None, model_series=None, version=None, released=None, builtin=None):
+    canonical_key = canonical_model_key(key)
+    if not canonical_key:
+      return
+    model = models_by_key.setdefault(canonical_key, {
+      "value": canonical_key,
+      "label": label or _galaxy_nav_model_label(canonical_key) or canonical_key,
+      "series": model_series or "Custom Series",
+      "version": version or "",
+      "released": released or "",
+      "builtin": bool(builtin) or is_builtin_model_key(canonical_key),
+      "communityFavorite": canonical_key in community_favorites,
+      "userFavorite": canonical_key in user_favorites,
+    })
+    if label and (not model["label"] or model["label"] == model["value"]):
+      model["label"] = label
+    if model_series and (not model["series"] or model["series"] == "Custom Series"):
+      model["series"] = model_series
+    if version and not model["version"]:
+      model["version"] = version
+    if released and not model["released"]:
+      model["released"] = released
+    if builtin is not None:
+      model["builtin"] = model["builtin"] or bool(builtin)
+
+  for i, key in enumerate(available):
+    label = names[i] if i < len(names) and names[i] else None
+    model_series = series[i] if i < len(series) and series[i] else None
+    version = versions[i] if i < len(versions) and versions[i] else None
+    released = released_dates[i] if i < len(released_dates) and released_dates[i] else None
+    add_model(key, label=label, model_series=model_series, version=version, released=released)
+
+  model_suffix = "_driving_tinygrad.pkl"
+  for filename in sorted(on_disk_files):
+    if filename.endswith(model_suffix):
+      add_model(filename[:-len(model_suffix)])
+
+  default_key = canonical_model_key(
+    _galaxy_nav_text(params.get_default_value("Model") or params.get_default_value("DrivingModel"))
+  ) or "sc2"
+  default_label = _galaxy_nav_text(params.get_default_value("DrivingModelName")) or "South Carolina"
+  add_model(default_key, label=default_label, version=_galaxy_nav_text(params.get_default_value("DrivingModelVersion")), builtin=True)
+
+  current_model = canonical_model_key(params.get("Model", encoding="utf-8") or params.get("DrivingModel", encoding="utf-8"))
+  if current_model:
+    add_model(current_model)
+
+  models = []
+  for key, model in models_by_key.items():
+    installed = model["builtin"] or f"{key}_driving_tinygrad.pkl" in on_disk_files
+    partial = (not model["builtin"]) and (not installed) and any(file.startswith(f"{key}.") or file.startswith(f"{key}_") for file in on_disk_files)
+    models.append({
+      **model,
+      "installed": installed,
+      "partial": partial,
+    })
+
+  return sorted(models, key=lambda model: (model["series"].lower(), model["label"].lower()))
+
+def _galaxy_nav_installed_model_options():
+  catalog = _galaxy_nav_model_catalog()
+  installed = [{"value": model["value"], "label": model["label"]} for model in catalog if model["installed"]]
+  current_model = canonical_model_key(params.get("Model", encoding="utf-8") or params.get("DrivingModel", encoding="utf-8"))
+  if current_model and all(model["value"] != current_model for model in installed):
+    for model in catalog:
+      if model["value"] == current_model:
+        installed.append({"value": model["value"], "label": model["label"]})
+        break
+  return sorted(installed, key=lambda model: model["label"].lower())
+
+def _galaxy_nav_options_for_endpoint(endpoint):
+  endpoint = str(endpoint or "").strip()
+  if not endpoint:
+    return []
+
+  if endpoint == "/api/models/installed":
+    return _galaxy_nav_installed_model_options()
+
+  if endpoint == "/api/fingerprints/makes":
+    try:
+      return _get_fingerprint_catalog()["makes"]
+    except Exception:
+      return []
+
+  if endpoint.startswith("/api/fingerprints/models"):
+    try:
+      catalog = _get_fingerprint_catalog()
+      make_key = _normalize_fingerprint_make_key(params.get("CarMake", encoding="utf-8") or "")
+      models = catalog["models_by_make"].get(make_key) if make_key else catalog["all_models"]
+      return models or catalog["all_models"]
+    except Exception:
+      return []
+
+  return []
+
+def _galaxy_nav_resolved_options(param_data):
+  options = _galaxy_nav_control_option_payload(param_data.get("options"))
+  if options:
+    return options
+
+  return _galaxy_nav_control_option_payload(
+    _galaxy_nav_options_for_endpoint(param_data.get("options_endpoint"))
+  )
+
+def _galaxy_nav_model_detail(model):
+  details = []
+  if model.get("installed"):
+    details.append("Installed")
+  else:
+    details.append("Not installed")
+  if model.get("series"):
+    details.append(str(model["series"]))
+  if model.get("version"):
+    details.append(f"Version {model['version']}")
+  if model.get("partial"):
+    details.append("Partial files")
+  return " - ".join(details)
+
+def _galaxy_nav_model_manager_section():
+  models = _galaxy_nav_model_catalog()
+  current_model = canonical_model_key(params.get("Model", encoding="utf-8") or params.get("DrivingModel", encoding="utf-8"))
+  model_to_download = canonical_model_key(params_memory.get(MODEL_DOWNLOAD_PARAM, encoding="utf-8") or "")
+  download_all = params_memory.get_bool(MODEL_DOWNLOAD_ALL_PARAM)
+  downloading = bool(model_to_download) or download_all
+  progress = params_memory.get(MODEL_DOWNLOAD_PROGRESS_PARAM, encoding="utf-8") or "Idle"
+  missing_models = [model for model in models if not model.get("installed")]
+  installed_models = [model for model in models if model.get("installed")]
+
+  controls = [{
+    "id": "models.status.progress",
+    "title": "Model Download Status",
+    "subtitle": f"{len(installed_models)} installed, {len(missing_models)} missing",
+    "value": progress,
+    "path": ["models", "status", "progress"],
+    "readOnly": True,
+  }, {
+    "id": "models.action.refresh_manifest",
+    "title": "Refresh Model List",
+    "subtitle": "Check Galaxy for newly available driving models.",
+    "value": None,
+    "path": ["models", "refresh_manifest"],
+    "endpoint": "/api/models/refresh_manifest",
+    "method": "POST",
+  }, {
+    "id": "models.action.download_all",
+    "title": "Download All Missing Models",
+    "subtitle": f"{len(missing_models)} model(s) missing.",
+    "value": None,
+    "path": ["models", "download_all"],
+    "endpoint": "/api/models/download_all",
+    "method": "POST",
+  }]
+
+  if downloading:
+    controls.append({
+      "id": "models.action.cancel",
+      "title": "Cancel Model Download",
+      "subtitle": progress,
+      "value": None,
+      "path": ["models", "cancel"],
+      "endpoint": "/api/models/cancel",
+      "method": "POST",
+    })
+
+  for model in models:
+    model_key = model.get("value")
+    label = str(model.get("label") or model_key or "Model")
+    if not model_key:
+      continue
+
+    if not model.get("installed"):
+      controls.append({
+        "id": f"models.download.{model_key}",
+        "title": f"Download {label}",
+        "subtitle": _galaxy_nav_model_detail(model),
+        "value": None,
+        "path": ["models", "download", model_key],
+        "endpoint": "/api/models/download",
+        "method": "POST",
+        "requestBody": {"model": model_key},
+      })
+    elif not model.get("builtin") and model_key != current_model:
+      controls.append({
+        "id": f"models.delete.{model_key}",
+        "title": f"Delete {label}",
+        "subtitle": _galaxy_nav_model_detail(model),
+        "value": None,
+        "path": ["models", "delete", model_key],
+        "endpoint": "/api/models/delete",
+        "method": "POST",
+        "requestBody": {"model": model_key},
+        "confirmation": {
+          "field": "confirmed",
+          "title": f"Delete {label}",
+          "message": "This removes the local model files from this comma.",
+          "confirmText": "Delete Model",
+        },
+      })
+
+  if len(controls) <= 3:
+    controls.append({
+      "id": "models.status.empty",
+      "title": "No Model Downloads Found",
+      "subtitle": "Refresh the model list to check for newly available downloads.",
+      "value": "Ready",
+      "path": ["models", "status", "empty"],
+      "readOnly": True,
+    })
+
+  return {
+    "id": "model_downloads",
+    "title": "Model Downloads",
+    "controls": controls,
+    "metrics": [],
+  }
+
+def _build_galaxy_nav_control_catalog():
+  allowed_keys, value_types = _get_param_type_info()
+  defaults_lookup = _get_default_param_values()
+  ev9_controls_available = _persistent_car_fingerprint() == "KIA_EV9"
+
+  try:
+    layout_path = os.path.join(os.path.dirname(__file__), "assets", "components", "tools", "device_settings_layout.json")
+    with open(layout_path) as f:
+      layout_data = json.load(f)
+  except Exception:
+    layout_data = []
+
+  sections = []
+  controls = []
+  seen = set()
+
+  for section_index, section in enumerate(layout_data):
+    section_title = str(section.get("name") or section.get("title") or f"Section {section_index + 1}").strip()
+    section_id = str(section.get("id") or section_title.lower().replace(" ", "_").replace("&", "and")).strip() or f"section_{section_index + 1}"
+    section_controls = []
+
+    for param_data in section.get("params", []):
+      key = str(param_data.get("key") or "").strip()
+      if not key or key in seen or key not in allowed_keys:
+        continue
+      if key in EV9_SCOPED_PARAM_KEYS and not ev9_controls_available:
+        continue
+
+      ui_type = str(param_data.get("ui_type") or "").strip().lower()
+      data_type = str(param_data.get("data_type") or "").strip().lower()
+      value_type = value_types.get(key, str)
+      options = _galaxy_nav_resolved_options(param_data)
+
+      if ui_type == "toggle" or data_type == "bool" or value_type is bool:
+        kind = "toggle"
+      elif ui_type == "dropdown" or options:
+        kind = "option"
+      else:
+        continue
+
+      try:
+        value = _get_current_param_value(key, value_type, defaults_lookup)
+      except Exception:
+        value = None
+
+      seen.add(key)
+      control = {
+        "id": key,
+        "key": key,
+        "title": str(param_data.get("label") or key),
+        "subtitle": str(param_data.get("description") or ""),
+        "kind": kind,
+        "value": _sanitize_json_value(value),
+        "options": options,
+        "path": ["params", key],
+        "endpoint": "/api/params",
+        "method": "PUT",
+        "isWritable": True,
+        "sectionID": section_id,
+        "sectionTitle": section_title,
+      }
+      confirmation = _galaxy_nav_confirmation_payload(key)
+      if confirmation:
+        control["confirmation"] = confirmation
+      make_scope = _galaxy_nav_make_scope_payload(key)
+      if make_scope:
+        control["makeScope"] = make_scope
+      if param_data.get("parent_key"):
+        control["parentKey"] = str(param_data.get("parent_key"))
+      if param_data.get("is_parent_toggle") is not None:
+        control["isParentToggle"] = bool(param_data.get("is_parent_toggle"))
+      section_controls.append(control)
+      controls.append(control)
+
+    if section_controls:
+      sections.append({
+        "id": section_id,
+        "title": section_title,
+        "controls": section_controls,
+        "metrics": [],
+      })
+
+  return {
+    "version": 3,
+    "updatedAt": time.time(),
+    "controls": controls,
+    "sections": sections,
+  }
+
 _cached_allowed_keys = None
 _cached_param_types = None
 _cached_default_values = None
@@ -4407,6 +4809,8 @@ def setup(app):
       allowed_keys, _ = _get_param_type_info()
       if key not in allowed_keys:
         return jsonify({"error": f"Parameter '{key}' is not editable."}), 403
+      if key in EV9_SCOPED_PARAM_KEYS and _persistent_car_fingerprint() != "KIA_EV9":
+        return jsonify({"error": f"Parameter '{key}' is only available for KIA_EV9."}), 403
 
       if key in {"UseOldUI", "TryRaylibUI"}:
         enabled = str_val.strip() in ("1", "true", "True")
@@ -4452,7 +4856,11 @@ def setup(app):
       if key in PANDA_FIRMWARE_TOGGLE_KEYS and params.get_bool("IsOnroad"):
         return jsonify({"error": "Cannot flash Panda firmware while driving."}), 403
       if key in PANDA_FIRMWARE_TOGGLE_KEYS and data.get(PANDA_FIRMWARE_CONFIRMATION_FIELD) is not True:
-        return jsonify({"error": "Panda firmware changes require confirmation before flashing."}), 409
+        return jsonify({
+          "error": "Panda firmware changes require confirmation before flashing.",
+          "confirmationRequired": True,
+          "confirmation": _galaxy_nav_confirmation_payload(key),
+        }), 409
 
       if key in {"LeadIndicator", "HideLeadMarker"}:
         enabled = str_val.strip() in ("1", "true", "True")
@@ -6367,11 +6775,16 @@ def setup(app):
     slug = _read_galaxy_text(GALAXY_SLUG_FILE)
     token = _read_galaxy_text(GALAXY_SESSION_FILE)
     paired = len(_read_galaxy_text(GALAXY_AUTH_FILE)) == 64 and bool(slug and token)
+    control_catalog = _build_galaxy_nav_control_catalog()
     return jsonify({
       "appUrl": GALAXY_PLAY_STORE_URL,
       "cookieName": GALAXY_COOKIE_NAME,
       "paired": paired,
       "sessionToken": _build_galaxy_session_value(slug, token),
+      "controls": control_catalog["controls"],
+      "sections": control_catalog["sections"],
+      "controlCatalogVersion": control_catalog["version"],
+      "controlCatalogUpdatedAt": control_catalog["updatedAt"],
     })
 
   @app.route("/api/galaxy/pair", methods=["POST"])

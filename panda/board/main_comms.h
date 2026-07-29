@@ -74,6 +74,12 @@ int comms_control_handler(ControlPacket_t *req, uint8_t *resp) {
   print("- param2 "); puth(req->param2); print("\n");
 #endif
 
+  #ifdef PANDA_EV9_LONG_PREINIT
+  if (!ev9_long_preinit_usb_request_allowed(req->request, req->param1, req->param2)) {
+    return 0;
+  }
+  #endif
+
   switch (req->request) {
     // **** 0xa8: get microsecond timer
     case 0xa8:
@@ -217,7 +223,13 @@ int comms_control_handler(ControlPacket_t *req, uint8_t *resp) {
       break;
     // **** 0xdc: set safety mode
     case 0xdc:
+      #ifdef PANDA_EV9_LONG_PREINIT
+      if ((current_safety_mode != req->param1) || (current_safety_param != (uint16_t)req->param2)) {
+        set_safety_mode(req->param1, (uint16_t)req->param2);
+      }
+      #else
       set_safety_mode(req->param1, (uint16_t)req->param2);
+      #endif
       break;
     // **** 0xdd: get healthpacket and CANPacket versions
     case 0xdd:
@@ -229,9 +241,17 @@ int comms_control_handler(ControlPacket_t *req, uint8_t *resp) {
     // **** 0xde: set can bitrate
     case 0xde:
       if ((req->param1 < PANDA_CAN_CNT) && is_speed_valid(req->param2, speeds, sizeof(speeds)/sizeof(speeds[0]))) {
+        #ifdef PANDA_EV9_LONG_PREINIT
+        if (bus_config[req->param1].can_speed != req->param2) {
+          bus_config[req->param1].can_speed = req->param2;
+          bool ret = can_init(CAN_NUM_FROM_BUS_NUM(req->param1));
+          UNUSED(ret);
+        }
+        #else
         bus_config[req->param1].can_speed = req->param2;
         bool ret = can_init(CAN_NUM_FROM_BUS_NUM(req->param1));
         UNUSED(ret);
+        #endif
       }
       break;
     // **** 0xdf: set alternative experience
@@ -257,8 +277,15 @@ int comms_control_handler(ControlPacket_t *req, uint8_t *resp) {
       break;
     // **** 0xe5: set CAN loopback (for testing)
     case 0xe5:
+      #ifdef PANDA_EV9_LONG_PREINIT
+      if (can_loopback != (req->param1 > 0U)) {
+        can_loopback = req->param1 > 0U;
+        can_init_all();
+      }
+      #else
       can_loopback = req->param1 > 0U;
       can_init_all();
+      #endif
       break;
     // **** 0xe6: set custom clock source period and pulse length
     case 0xe6:
@@ -272,6 +299,32 @@ int comms_control_handler(ControlPacket_t *req, uint8_t *resp) {
     case 0xe8:
       bus_config[req->param1].canfd_auto = req->param2 > 0U;
       break;
+    #ifdef PANDA_EV9_LONG_PREINIT
+    // **** 0xe9: get paged EV9 early longitudinal initialization status.
+    // param1/wValue 0=status, 1=detailed timing.
+    case 0xe9:
+      COMPILE_TIME_ASSERT(sizeof(ev9_long_preinit_status_t) == USBPACKET_MAX_SIZE);
+      COMPILE_TIME_ASSERT(sizeof(ev9_long_preinit_timing_t) == USBPACKET_MAX_SIZE);
+      if (req->param1 == EV9_LONG_PREINIT_STATUS_PAGE) {
+        const ev9_long_preinit_status_t status = ev9_long_preinit_get_status();
+        (void)memcpy(resp, (const uint8_t *)&status, sizeof(status));
+        resp_len = sizeof(status);
+      } else if (req->param1 == EV9_LONG_PREINIT_TIMING_PAGE) {
+        const ev9_long_preinit_timing_t timing = ev9_long_preinit_get_timing();
+        (void)memcpy(resp, (const uint8_t *)&timing, sizeof(timing));
+        resp_len = sizeof(timing);
+      } else {
+      }
+      break;
+    // **** 0xea: request a cycle-bound graceful EV9 preinit release.
+    // param1=1, param2=low 16 bits of timing.cycle_started_us.
+    case EV9_PREINIT_USB_CONTROL_REQUEST:
+      if (req->param1 == EV9_PREINIT_USB_RELEASE) {
+        resp[0] = ev9_long_preinit_request_release(req->param2) ? 1U : 0U;
+        resp_len = 1U;
+      }
+      break;
+    #endif
     // **** 0xf1: Clear CAN ring buffer.
     case 0xf1:
       if (req->param1 == 0xFFFFU) {
@@ -307,19 +360,37 @@ int comms_control_handler(ControlPacket_t *req, uint8_t *resp) {
     case 0xf9:
       if ((req->param1 < PANDA_CAN_CNT) &&
            is_speed_valid(req->param2, data_speeds, sizeof(data_speeds)/sizeof(data_speeds[0]))) {
+        #ifdef PANDA_EV9_LONG_PREINIT
+        if (bus_config[req->param1].can_data_speed != req->param2) {
+          bus_config[req->param1].can_data_speed = req->param2;
+          bus_config[req->param1].canfd_enabled = (req->param2 >= bus_config[req->param1].can_speed);
+          bus_config[req->param1].brs_enabled = (req->param2 > bus_config[req->param1].can_speed);
+          bool ret = can_init(CAN_NUM_FROM_BUS_NUM(req->param1));
+          UNUSED(ret);
+        }
+        #else
         bus_config[req->param1].can_data_speed = req->param2;
         bus_config[req->param1].canfd_enabled = (req->param2 >= bus_config[req->param1].can_speed);
         bus_config[req->param1].brs_enabled = (req->param2 > bus_config[req->param1].can_speed);
         bool ret = can_init(CAN_NUM_FROM_BUS_NUM(req->param1));
         UNUSED(ret);
+        #endif
       }
       break;
     // **** 0xfc: set CAN FD non-ISO mode
     case 0xfc:
       if (req->param1 < PANDA_CAN_CNT) {
+        #ifdef PANDA_EV9_LONG_PREINIT
+        if (bus_config[req->param1].canfd_non_iso != (req->param2 != 0U)) {
+          bus_config[req->param1].canfd_non_iso = (req->param2 != 0U);
+          bool ret = can_init(CAN_NUM_FROM_BUS_NUM(req->param1));
+          UNUSED(ret);
+        }
+        #else
         bus_config[req->param1].canfd_non_iso = (req->param2 != 0U);
         bool ret = can_init(CAN_NUM_FROM_BUS_NUM(req->param1));
         UNUSED(ret);
+        #endif
       }
       break;
     default:

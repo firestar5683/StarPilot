@@ -118,6 +118,57 @@ std::optional<can_health_t> Panda::get_can_state(uint16_t can_number) {
   return err >= 0 ? std::make_optional(can_health) : std::nullopt;
 }
 
+std::optional<PandaEv9LongPreinitStatus> Panda::get_ev9_long_preinit_status() {
+  static_assert(sizeof(ev9_long_preinit_status_t) == USBPACKET_MAX_SIZE);
+  static_assert(sizeof(ev9_long_preinit_timing_t) == USBPACKET_MAX_SIZE);
+  constexpr int legacy_status_size = 60;
+
+  PandaEv9LongPreinitStatus result = {};
+  const int status_size = handle->control_read(0xe9, EV9_LONG_PREINIT_STATUS_PAGE, 0,
+                                               reinterpret_cast<unsigned char *>(&result.status),
+                                               sizeof(result.status));
+  const bool current_status = status_size == static_cast<int>(sizeof(result.status)) &&
+                              result.status.version == EV9_LONG_PREINIT_STATUS_VERSION;
+  const bool legacy_status = status_size == legacy_status_size && result.status.version == 3U;
+  if (!current_status && !legacy_status) {
+    return std::nullopt;
+  }
+
+  if (legacy_status) {
+    result.status.flags = 0U;
+    result.status.outcome_us = 0U;
+  }
+
+  if (current_status) {
+    const ev9_long_preinit_status_t first_status = result.status;
+    const int timing_size = handle->control_read(0xe9, EV9_LONG_PREINIT_TIMING_PAGE, 0,
+                                                 reinterpret_cast<unsigned char *>(&result.timing),
+                                                 sizeof(result.timing));
+    const bool timing_read_valid = timing_size == static_cast<int>(sizeof(result.timing)) &&
+                                   result.timing.version == EV9_LONG_PREINIT_STATUS_VERSION &&
+                                   result.timing.page == EV9_LONG_PREINIT_TIMING_PAGE;
+    if (timing_read_valid) {
+      ev9_long_preinit_status_t verified_status = {};
+      const int verified_size = handle->control_read(0xe9, EV9_LONG_PREINIT_STATUS_PAGE, 0,
+                                                      reinterpret_cast<unsigned char *>(&verified_status),
+                                                      sizeof(verified_status));
+      const bool verified_valid = verified_size == static_cast<int>(sizeof(verified_status)) &&
+                                  verified_status.version == EV9_LONG_PREINIT_STATUS_VERSION;
+      if (verified_valid) {
+        result.status = verified_status;
+        result.timing_valid = first_status.state == verified_status.state &&
+                              first_status.flags == verified_status.flags &&
+                              first_status.attempts == verified_status.attempts &&
+                              first_status.state_started_us == verified_status.state_started_us &&
+                              first_status.comm_control_us == verified_status.comm_control_us &&
+                              first_status.outcome_us == verified_status.outcome_us &&
+                              result.timing.flags == verified_status.flags;
+      }
+    }
+  }
+  return result;
+}
+
 void Panda::set_loopback(bool loopback) {
   handle->control_write(0xe5, loopback, 0);
 }
@@ -146,6 +197,8 @@ bool Panda::up_to_date() {
       "panda_h7_can_ignition_only.bin.signed",
       "panda_remote_can_ignition_only.bin.signed",
       "panda_h7_remote_can_ignition_only.bin.signed",
+      "panda_h7_ev9_long_preinit.bin.signed",
+      "panda_h7_ev9_long_preinit_hkg_remote.bin.signed",
     }) {
       auto content = util::read_file(std::string("../../panda/board/obj/") + fn);
       if (content.size() >= fw_sig->size() &&

@@ -2834,6 +2834,20 @@
         "settings_tier": "simple"
       },
       {
+        "key": "HKGRemoteStartBootsComma",
+        "label": "Remote Start Boots Comma (HKG)",
+        "description": "Use the remote-climate Hyundai/Kia/Genesis CAN-FD panda firmware at boot.\n\nRequired for EV remote-climate startup signal behavior.",
+        "data_type": "bool",
+        "ui_type": "toggle"
+      },
+      {
+        "key": "EV9LongPreinitPanda",
+        "label": "EV9 Preinit ADAS Handoff",
+        "description": "Use the resident EV9 Panda firmware to suppress the ADAS ECU during a stationary OFF-to-READY transition, then hand reconstruction and control to openpilot.\n\nExperimental and disabled by default. Requires a Panda flash and device reboot.",
+        "data_type": "bool",
+        "ui_type": "toggle"
+      },
+      {
         "key": "VoltSNG",
         "label": "Stop-and-Go Hack",
         "description": "Force stop-and-go on the 2017 Chevy Volt.",

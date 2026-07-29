@@ -66,5 +66,9 @@ bool can_tx_check_min_slots_free(uint32_t min);
 uint8_t calculate_checksum(const uint8_t *dat, uint32_t len);
 void can_set_checksum(CANPacket_t *packet);
 bool can_check_checksum(CANPacket_t *packet);
+#ifdef PANDA_EV9_LONG_PREINIT
+bool can_send_with_result(CANPacket_t *to_push, uint8_t bus_number, bool skip_tx_hook);
+bool can_send_ev9_preinit_with_result(CANPacket_t *to_push, uint8_t bus_number);
+#endif
 void can_send(CANPacket_t *to_push, uint8_t bus_number, bool skip_tx_hook);
 bool is_speed_valid(uint32_t speed, const uint32_t *all_speeds, uint8_t len);
