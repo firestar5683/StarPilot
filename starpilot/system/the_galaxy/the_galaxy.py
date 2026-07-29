@@ -138,9 +138,23 @@ _VEHICLE_TELEMETRY_LIVE_LAST_STORE_MONO = 0.0
 _EGMP_PASSIVE_TELEMETRY_ADDRESSES = frozenset((0x2b5, 0x2fa, 0x30a, 0x320))
 _EGMP_EV9_USA_MAX_RANGE_KM = 450.6
 _EGMP_EV9_USA_BATTERY_KWH = 99.8
-PANDA_FIRMWARE_TOGGLE_KEYS = {"IgnoreIgnitionLine", "RemoteStartBootsComma", "HKGRemoteStartBootsComma"}
+PANDA_FIRMWARE_TOGGLE_KEYS = {"IgnoreIgnitionLine", "RemoteStartBootsComma", "HKGRemoteStartBootsComma", "EV9LongPreinitPanda"}
 PANDA_FIRMWARE_CONFIRMATION_FIELD = "confirmedPandaFirmwareFlash"
 _PANDA_FLASH_REBOOT_LOCK = threading.Lock()
+EV9_SCOPED_PARAM_KEYS = {
+  "EV9LongPreinitPanda",
+}
+
+
+def _persistent_car_fingerprint() -> str:
+  try:
+    cp_bytes = params.get("CarParamsPersistent")
+    if cp_bytes:
+      with car.CarParams.from_bytes(cp_bytes) as cp:
+        return str(cp.carFingerprint or "")
+  except Exception:
+    pass
+  return ""
 
 
 def _flash_panda_then_reboot() -> None:
@@ -2895,6 +2909,7 @@ def _galaxy_nav_model_manager_section():
 def _build_galaxy_nav_control_catalog():
   allowed_keys, value_types = _get_param_type_info()
   defaults_lookup = _get_default_param_values()
+  ev9_controls_available = _persistent_car_fingerprint() == "KIA_EV9"
 
   try:
     layout_path = os.path.join(os.path.dirname(__file__), "assets", "components", "tools", "device_settings_layout.json")
@@ -2915,6 +2930,8 @@ def _build_galaxy_nav_control_catalog():
     for param_data in section.get("params", []):
       key = str(param_data.get("key") or "").strip()
       if not key or key in seen or key not in allowed_keys:
+        continue
+      if key in EV9_SCOPED_PARAM_KEYS and not ev9_controls_available:
         continue
 
       ui_type = str(param_data.get("ui_type") or "").strip().lower()
@@ -5651,6 +5668,8 @@ def setup(app):
       allowed_keys, _ = _get_param_type_info()
       if key not in allowed_keys:
         return jsonify({"error": f"Parameter '{key}' is not editable."}), 403
+      if key in EV9_SCOPED_PARAM_KEYS and _persistent_car_fingerprint() != "KIA_EV9":
+        return jsonify({"error": f"Parameter '{key}' is only available for KIA_EV9."}), 403
 
       if key in {"UseOldUI", "TryRaylibUI"}:
         enabled = str_val.strip() in ("1", "true", "True")

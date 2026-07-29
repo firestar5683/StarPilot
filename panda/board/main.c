@@ -64,6 +64,9 @@ void set_safety_mode(uint16_t mode, uint16_t param) {
     // TERMINAL ERROR: we can't continue if SILENT safety mode isn't succesfully set
     assert_fatal(err == 0, "Error: Failed setting SILENT mode. Hanging\n");
   }
+  #ifdef PANDA_EV9_LONG_PREINIT
+  const bool preserve_preinit_can = ev9_long_preinit_preserve_can_on_safety_transition(mode_copy, param);
+  #endif
   safety_tx_blocked = 0;
   safety_rx_invalid = 0;
 
@@ -101,7 +104,13 @@ void set_safety_mode(uint16_t mode, uint16_t param) {
       can_silent = false;
       break;
   }
+  #ifdef PANDA_EV9_LONG_PREINIT
+  if (!preserve_preinit_can) {
+    can_init_all();
+  }
+  #else
   can_init_all();
+  #endif
 }
 
 bool is_car_safety_mode(uint16_t mode) {
@@ -127,12 +136,17 @@ static void __attribute__ ((noinline)) enable_fpu(void) {
 // go into SILENT when heartbeat isn't received for this amount of seconds.
 #define HEARTBEAT_IGNITION_CNT_ON 5U
 #define HEARTBEAT_IGNITION_CNT_OFF 2U
+#ifdef PANDA_EV9_LONG_PREINIT
+static uint8_t prev_harness_status = HARNESS_STATUS_NC;
+#endif
 
 // called at 8Hz
 static void tick_handler(void) {
   static uint32_t siren_countdown = 0; // siren plays while countdown > 0
   static uint32_t controls_allowed_countdown = 0;
+  #ifndef PANDA_EV9_LONG_PREINIT
   static uint8_t prev_harness_status = HARNESS_STATUS_NC;
+  #endif
   static uint8_t loop_counter = 0U;
   static bool relay_malfunction_prev = false;
 
@@ -247,12 +261,37 @@ static void tick_handler(void) {
           heartbeat_engaged = false;
 
           if (current_safety_mode != SAFETY_SILENT) {
+            #ifdef PANDA_EV9_LONG_PREINIT
+            if (ev9_long_preinit_must_preserve()) {
+              // Controls are already disengaged. While the vehicle remains
+              // live, revoke host ownership and retain Panda's neutral bridge;
+              // stock restore is reserved for a firmware-proven OFF boundary.
+              ev9_long_preinit_host_watchdog_lost(microsecond_timer_get(), started);
+            } else {
+              set_safety_mode(SAFETY_SILENT, 0U);
+            }
+            #else
             set_safety_mode(SAFETY_SILENT, 0U);
+            #endif
           }
 
+          #ifdef PANDA_EV9_LONG_PREINIT
+          if (ev9_long_preinit_must_preserve()) {
+            // The resident bridge is now the only source of the deliberately
+            // suppressed ADAS streams. Power saving disables a CAN IRQ, so it
+            // must remain off until stock communication is safely restored.
+            if (power_save_status != POWER_SAVE_STATUS_DISABLED) {
+              set_power_save_state(POWER_SAVE_STATUS_DISABLED);
+            }
+          } else if (power_save_status != POWER_SAVE_STATUS_ENABLED) {
+            set_power_save_state(POWER_SAVE_STATUS_ENABLED);
+          } else {
+          }
+          #else
           if (power_save_status != POWER_SAVE_STATUS_ENABLED) {
             set_power_save_state(POWER_SAVE_STATUS_ENABLED);
           }
+          #endif
 
           // Also disable IR when the heartbeat goes missing
           current_board->set_ir_power(0U);
@@ -324,6 +363,13 @@ int main(void) {
   current_board->init();
   current_board->set_can_mode(CAN_MODE_NORMAL);
   harness_init();
+  #ifdef PANDA_EV9_LONG_PREINIT
+  // harness_init() already performs a synchronous orientation measurement.
+  // Apply it before the first CAN initialization so preinit RX uses the right
+  // logical buses, and seed the tick cache to avoid a redundant 125 ms reset.
+  can_set_orientation(harness.status == HARNESS_STATUS_FLIPPED);
+  prev_harness_status = harness.status;
+  #endif
 
   // panda has an FPU, let's use it!
   enable_fpu();
@@ -335,11 +381,20 @@ int main(void) {
     fan_init();
   }
 
-  // init to SILENT and can silent
+  // The explicitly selected EV9 build starts in non-output safety with the
+  // CAN cores able to transmit its narrow internal diagnostic allowlist.
+  #ifdef PANDA_EV9_LONG_PREINIT
+  set_safety_mode(SAFETY_NOOUTPUT, 0U);
+  #else
   set_safety_mode(SAFETY_SILENT, 0U);
+  #endif
 
   // enable CAN TXs
   enable_can_transceivers(true);
+
+  #ifdef PANDA_EV9_LONG_PREINIT
+  ev9_long_preinit_init();
+  #endif
 
   // init watchdog for heartbeat loop, fed at 8Hz
   simple_watchdog_init(FAULT_HEARTBEAT_LOOP_WATCHDOG, (3U * 1000000U / 8U));
@@ -368,12 +423,18 @@ int main(void) {
 
   // LED should keep on blinking all the time
   while (true) {
+    #ifdef PANDA_EV9_LONG_PREINIT
+    ev9_long_preinit_tick(microsecond_timer_get(), panda_ignition_line());
+    #endif
     if (power_save_status == POWER_SAVE_STATUS_DISABLED) {
       #ifdef DEBUG_FAULTS
       if (fault_status == FAULT_STATUS_NONE) {
       #endif
         // useful for debugging, fade breaks = panda is overloaded
         for (uint32_t fade = 0U; fade < MAX_LED_FADE; fade += 1U) {
+          #ifdef PANDA_EV9_LONG_PREINIT
+          ev9_long_preinit_service_tx_cancel(microsecond_timer_get());
+          #endif
           led_set(LED_RED, true);
           delay(fade >> 4);
           led_set(LED_RED, false);
@@ -381,6 +442,9 @@ int main(void) {
         }
 
         for (uint32_t fade = MAX_LED_FADE; fade > 0U; fade -= 1U) {
+          #ifdef PANDA_EV9_LONG_PREINIT
+          ev9_long_preinit_service_tx_cancel(microsecond_timer_get());
+          #endif
           led_set(LED_RED, true);
           delay(fade >> 4);
           led_set(LED_RED, false);

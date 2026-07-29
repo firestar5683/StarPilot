@@ -10,7 +10,7 @@ void enable_can_transceivers(bool enabled) {
   uint8_t main_bus = (harness.status == HARNESS_STATUS_FLIPPED) ? 3U : 1U;
   for(uint8_t i=1U; i<=4U; i++){
     bool transceiver_enabled = (i == main_bus) || enabled;
-    #ifdef PANDA_HKG_REMOTE_START
+    #if defined(PANDA_HKG_REMOTE_START) || defined(PANDA_EV9_LONG_PREINIT)
     uint8_t hkg_bus = (harness.status == HARNESS_STATUS_FLIPPED) ? 4U : 2U;
     transceiver_enabled = transceiver_enabled || (i == hkg_bus);
     #endif
@@ -31,7 +31,7 @@ void set_power_save_state(int state) {
       } else {
         llcan_irq_disable(cans[2]);
       }
-      #ifndef PANDA_HKG_REMOTE_START
+      #if !defined(PANDA_HKG_REMOTE_START) && !defined(PANDA_EV9_LONG_PREINIT)
       llcan_irq_disable(cans[1]);
       #endif
     } else {

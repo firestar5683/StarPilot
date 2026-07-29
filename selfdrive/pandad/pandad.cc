@@ -61,6 +61,16 @@ static bool is_tesla_preap(Params &params) {
   }
 }
 
+static bool ev9_preinit_status_enabled(Panda *panda) {
+  const char *configured_serials = getenv("BOARDD_EV9_LONG_PREINIT_SERIALS");
+  if (configured_serials == nullptr) {
+    return false;
+  }
+
+  const std::string serial_list = "," + std::string(configured_serials) + ",";
+  return serial_list.find("," + panda->hw_serial() + ",") != std::string::npos;
+}
+
 bool check_all_connected(const std::vector<Panda *> &pandas) {
   for (const auto& panda : pandas) {
     if (!panda->connected()) {
@@ -217,6 +227,64 @@ void fill_panda_can_state(cereal::PandaState::PandaCanState::Builder &cs, const 
   cs.setCanCoreResetCnt(can_health.can_core_reset_cnt);
 }
 
+void fill_ev9_long_preinit_status(cereal::PandaState::Ev9LongPreinitStatus::Builder &ps,
+                                  const std::optional<PandaEv9LongPreinitStatus> &preinit_status,
+                                  bool resident) {
+  ps.setResident(resident);
+  ps.setValid(false);
+  if (!preinit_status) {
+    return;
+  }
+
+  const auto &status = preinit_status->status;
+  ps.setValid(true);
+  ps.setVersion(status.version);
+  ps.setState(status.state);
+  ps.setFlags(status.flags);
+  ps.setFingerprint(status.fingerprint);
+  ps.setAttempts(status.attempts);
+  ps.setLastService(status.last_service);
+  ps.setLastResponse(status.last_response);
+  ps.setLastNrc(status.last_nrc);
+  ps.setCommunicationType(status.communication_type);
+  ps.setTrigger(status.trigger);
+  ps.setFirstEcanLen(status.first_ecan_len);
+  ps.setPowertrainState(status.powertrain_state);
+  ps.setPowertrainBootState(status.powertrain_boot_state);
+  ps.setPowertrainInitState(status.powertrain_init_state);
+  ps.setFirstEcanAddr(status.first_ecan_addr);
+  ps.setFirstCanUs(status.first_can_us);
+  ps.setStateStartedUs(status.state_started_us);
+  ps.setTriggerUs(status.trigger_us);
+  ps.setFirstEcanUs(status.first_ecan_us);
+  ps.setDriverBrakingUs(status.driver_braking_us);
+  ps.setPreReadyUs(status.pre_ready_us);
+  ps.setIgnitionUs(status.ignition_us);
+  ps.setSessionResponseUs(status.session_response_us);
+  ps.setCommControlUs(status.comm_control_us);
+  ps.setLastPowertrainUs(status.last_powertrain_us);
+  ps.setReadyUs(status.ready_us);
+  ps.setOutcomeUs(status.outcome_us);
+
+  ps.setTimingValid(preinit_status->timing_valid);
+  if (preinit_status->timing_valid) {
+    const auto &timing = preinit_status->timing;
+    ps.setTimingFlags(timing.flags);
+    ps.setCycleStartedUs(timing.cycle_started_us);
+    ps.setSessionRequestUs(timing.session_request_us);
+    ps.setCommControlResponseUs(timing.comm_control_response_us);
+    ps.setLastCriticalAdasUs(timing.last_critical_adas_us);
+    ps.setFirstReplacementUs(timing.first_replacement_us);
+    ps.setSuppressionConfirmedUs(timing.suppression_confirmed_us);
+    ps.setHandoffUs(timing.handoff_us);
+    ps.setRestoreUs(timing.restore_us);
+    ps.setAbortUs(timing.abort_us);
+    ps.setLastHostTxUs(timing.last_host_tx_us);
+    ps.setLastTesterPresentUs(timing.last_tester_present_us);
+    ps.setLastVehicleFrameUs(timing.last_vehicle_frame_us);
+  }
+}
+
 std::optional<bool> send_panda_states(PubMaster *pm, const std::vector<Panda *> &pandas, bool is_onroad,
                                       bool spoofing_started, bool ignore_ignition_line) {
   bool ignition_local = false;
@@ -233,10 +301,14 @@ std::optional<bool> send_panda_states(PubMaster *pm, const std::vector<Panda *> 
   std::vector<std::array<can_health_t, PANDA_CAN_CNT>> pandaCanStates;
   pandaCanStates.reserve(pandas_cnt);
 
+  std::vector<std::optional<PandaEv9LongPreinitStatus>> ev9PreinitStatuses;
+  ev9PreinitStatuses.reserve(pandas_cnt);
+  std::vector<bool> ev9PreinitResident;
+  ev9PreinitResident.reserve(pandas_cnt);
+
   const bool red_panda_comma_three = (pandas.size() == 2) &&
                                      (pandas[0]->hw_type == cereal::PandaState::PandaType::DOS) &&
                                      (pandas[1]->hw_type == cereal::PandaState::PandaType::RED_PANDA);
-
   for (const auto& panda : pandas){
     auto health_opt = panda->get_state();
     if (!health_opt) {
@@ -254,6 +326,10 @@ std::optional<bool> send_panda_states(PubMaster *pm, const std::vector<Panda *> 
       can_health[i] = *can_health_opt;
     }
     pandaCanStates.push_back(can_health);
+
+    const bool preinit_resident = ev9_preinit_status_enabled(panda);
+    ev9PreinitResident.push_back(preinit_resident);
+    ev9PreinitStatuses.push_back(preinit_resident ? panda->get_ev9_long_preinit_status() : std::nullopt);
 
     if (spoofing_started) {
       health.ignition_line_pkt = 1;
@@ -303,6 +379,8 @@ std::optional<bool> send_panda_states(PubMaster *pm, const std::vector<Panda *> 
 
     auto ps = pss[i];
     fill_panda_state(ps, panda->hw_type, health);
+    auto preinit_status = ps.initEv9LongPreinitStatus();
+    fill_ev9_long_preinit_status(preinit_status, ev9PreinitStatuses[i], ev9PreinitResident[i]);
 
     auto cs = std::array{ps.initCanState0(), ps.initCanState1(), ps.initCanState2()};
     for (uint32_t j = 0; j < PANDA_CAN_CNT; j++) {
@@ -471,7 +549,6 @@ void pandad_run(std::vector<Panda *> &pandas) {
   const bool no_fan_control = getenv("NO_FAN_CONTROL") != nullptr;
   const bool spoofing_started = getenv("STARTED") != nullptr;
   const bool fake_send = getenv("FAKESEND") != nullptr;
-
   // Start the CAN send thread
   std::thread send_thread(can_send_thread, pandas, fake_send);
 
@@ -502,7 +579,9 @@ void pandad_run(std::vector<Panda *> &pandas) {
         sm["selfdriveState"].getSelfdriveState().getEnabled() || preap_aol_engaged
       );
       is_onroad = params.getBool("IsOnroad");
-      const bool ignore_ignition_line = params.getBool("IgnoreIgnitionLine");
+      const std::string car_make = params.get("CarMake");
+      const bool is_gm = car_make == "gm" || car_make == "GM" || car_make == "Gm";
+      const bool ignore_ignition_line = is_gm && params.getBool("IgnoreIgnitionLine");
       process_panda_state(pandas, &pm, engaged, is_onroad, spoofing_started, ignore_ignition_line);
       panda_safety.configureSafetyMode(is_onroad);
     }

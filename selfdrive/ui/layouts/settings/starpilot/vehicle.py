@@ -388,6 +388,17 @@ class VehicleSettingsManagerView(PanelManagerView):
         "set_state": lambda s: self._controller._on_toggle("NostalgiaMode"),
       })
 
+    if cs.isEV9:
+      toggles.append({
+        "key": "EV9LongPreinitPanda",
+        "title": tr("EV9 Preinit ADAS Handoff"),
+        "subtitle": tr("Suppress the EV9 ADAS ECU during a stationary startup and hand control to openpilot."),
+        "get_state": lambda: self._controller._params.get_bool("EV9LongPreinitPanda"),
+        "set_state": lambda s: self._controller._on_panda_firmware_toggle(
+          "EV9LongPreinitPanda", tr("EV9 Preinit ADAS Handoff requires a Panda firmware update."),
+        ),
+      })
+
     return toggles
 
   def _rebuild_toggle_grid(self):

@@ -394,8 +394,13 @@ run_larch64_scons() {
     shift || true
   fi
   local engine
+  local panda_git_version
   local started_at
   engine="$(detect_engine)"
+  panda_git_version="$(git -C "${ROOT_DIR}" rev-parse --short=8 HEAD 2>/dev/null || true)"
+  if [[ ! "${panda_git_version}" =~ ^[0-9a-f]{8}$ ]]; then
+    err "Unable to resolve an 8-character Git version for the Panda firmware build."
+  fi
   ensure_image_exists "${engine}"
   ensure_sysroot_layout
   if [[ "${scrub_mode}" != "none" ]]; then
@@ -430,6 +435,7 @@ export SCONS_CACHE=/work/.cache/scons
 export SP_FORCE_TICI=1
 export SP_FORCE_ARCH=larch64
 export SP_TICI_SYSROOT=/opt/tici-sysroot
+export PANDA_GIT_VERSION="${panda_git_version}"
 export SP_BUILD_WARP_ARTIFACTS="\${SP_BUILD_WARP_ARTIFACTS:-0}"
 export SP_SKIP_DM_TINYGRAD_PKL="\${SP_SKIP_DM_TINYGRAD_PKL:-1}"
 export LD_LIBRARY_PATH=/usr/local/lib:/usr/lib/aarch64-linux-gnu:/lib/aarch64-linux-gnu:/opt/tici-sysroot/usr/local/lib:/opt/tici-sysroot/usr/lib/aarch64-linux-gnu:/opt/tici-sysroot/lib/aarch64-linux-gnu:/system/vendor/lib64:\${LD_LIBRARY_PATH:-}

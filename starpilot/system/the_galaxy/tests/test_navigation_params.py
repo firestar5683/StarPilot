@@ -1,6 +1,8 @@
 import json
 from types import SimpleNamespace
 
+import pytest
+
 from openpilot.common.params import ParamKeyType
 
 from test_dashboard_stats import MODULE_DIR, _install_server_import_stubs
@@ -83,6 +85,63 @@ def _params_client(monkeypatch, values, device_type):
   app = the_galaxy.Flask(f"params_test_{device_type}")
   the_galaxy.setup(app)
   return app.test_client(), fake_params
+
+
+EV9_SCOPED_PARAM_KEYS = {
+  "EV9LongPreinitPanda",
+}
+
+
+@pytest.mark.parametrize("fingerprint", ["", "KIA_EV6", "HYUNDAI_IONIQ_5"])
+@pytest.mark.parametrize("key", sorted(EV9_SCOPED_PARAM_KEYS))
+def test_ev9_scoped_param_writes_require_exact_fingerprint(monkeypatch, fingerprint, key):
+  client, fake_params = _params_client(monkeypatch, {}, "tici")
+  monkeypatch.setattr(
+    the_galaxy,
+    "_get_param_type_info",
+    lambda: (EV9_SCOPED_PARAM_KEYS, dict.fromkeys(EV9_SCOPED_PARAM_KEYS, bool)),
+  )
+  monkeypatch.setattr(the_galaxy, "_persistent_car_fingerprint", lambda: fingerprint, raising=False)
+
+  response = client.put("/api/params", json={"key": key, "value": True})
+
+  assert response.status_code == 403
+  assert not fake_params.get_bool(key)
+
+
+def test_ev9_controls_are_visible_only_for_exact_fingerprint(monkeypatch):
+  client, _ = _params_client(monkeypatch, {}, "tici")
+  monkeypatch.setattr(
+    the_galaxy,
+    "_get_param_type_info",
+    lambda: (EV9_SCOPED_PARAM_KEYS, dict.fromkeys(EV9_SCOPED_PARAM_KEYS, bool)),
+  )
+  monkeypatch.setattr(the_galaxy, "_get_default_param_values", lambda: dict.fromkeys(EV9_SCOPED_PARAM_KEYS, False))
+
+  monkeypatch.setattr(the_galaxy, "_persistent_car_fingerprint", lambda: "KIA_EV9")
+  ev9_controls = {control["key"]: control for control in client.get("/api/galaxy/session").get_json()["controls"]}
+  assert EV9_SCOPED_PARAM_KEYS <= set(ev9_controls)
+  assert ev9_controls["EV9LongPreinitPanda"]["confirmation"]["field"] == the_galaxy.PANDA_FIRMWARE_CONFIRMATION_FIELD
+
+  monkeypatch.setattr(the_galaxy, "_persistent_car_fingerprint", lambda: "KIA_EV6")
+  ev6_keys = {control["key"] for control in client.get("/api/galaxy/session").get_json()["controls"]}
+  assert EV9_SCOPED_PARAM_KEYS.isdisjoint(ev6_keys)
+
+
+def test_ev9_preinit_write_requires_panda_firmware_confirmation(monkeypatch):
+  client, fake_params = _params_client(monkeypatch, {}, "tici")
+  monkeypatch.setattr(
+    the_galaxy,
+    "_get_param_type_info",
+    lambda: (EV9_SCOPED_PARAM_KEYS, dict.fromkeys(EV9_SCOPED_PARAM_KEYS, bool)),
+  )
+  monkeypatch.setattr(the_galaxy, "_persistent_car_fingerprint", lambda: "KIA_EV9")
+
+  response = client.put("/api/params", json={"key": "EV9LongPreinitPanda", "value": True})
+
+  assert response.status_code == 409
+  assert response.get_json()["confirmationRequired"] is True
+  assert not fake_params.get_bool("EV9LongPreinitPanda")
 
 
 def test_params_compat_accepts_json_strings_for_json_keys():
