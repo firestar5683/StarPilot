@@ -34,6 +34,7 @@
 #define SAFETY_RIVIAN 33U
 #define SAFETY_VOLKSWAGEN_MEB 34U
 #define SAFETY_TESLA_PREAP 35U
+#define SAFETY_HYUNDAI_CANFD_EV9 36U
 
 #define GET_BIT(msg, b) ((bool)!!(((msg)->data[((b) / 8U)] >> ((b) % 8U)) & 0x1U))
 #define GET_FLAG(value, mask) (((value) & (mask)) == (mask))
@@ -344,6 +345,7 @@ extern const safety_hooks gm_hooks;
 extern const safety_hooks honda_nidec_hooks;
 extern const safety_hooks honda_bosch_hooks;
 extern const safety_hooks hyundai_canfd_hooks;
+extern const safety_hooks hyundai_canfd_ev9_hooks;
 extern const safety_hooks hyundai_hooks;
 extern const safety_hooks hyundai_legacy_hooks;
 extern const safety_hooks mazda_hooks;

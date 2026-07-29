@@ -73,6 +73,9 @@ class TestHyundaiCanfdBase(HyundaiButtonBase, common.CarSafetyTest, common.Drive
   GAS_MSG = ("", "")
   BUTTONS_TX_BUS = 1
 
+  def test_ev9_physical_57a_is_never_host_transmitted(self):
+    self.assertFalse(self._tx(libsafety_py.make_CANPacket(0x57A, 1, b"\x00" * 32)))
+
   def _torque_driver_msg(self, torque):
     values = {"STEERING_COL_TORQUE": torque}
     return self.packer.make_can_msg_safety("MDPS", self.PT_BUS, values)
@@ -507,6 +510,16 @@ class TestHyundaiCanfdLKASteeringEV(TestHyundaiCanfdBase):
       self.safety.set_controls_allowed(controls_allowed)
       self.assertFalse(self._tx(self._paddle_msg(left_paddle=1)))
 
+  def test_generic_model_has_no_ev9_diagnostics(self):
+    tester_present = b"\x02\x3E\x80\x00\x00\x00\x00\x00"
+    read_dtcs = b"\x03\x19\x02\xFF\x00\x00\x00\x00"
+    self.assertEqual([0x730, 1] in self.TX_MSGS,
+                     self._tx(libsafety_py.make_CANPacket(0x730, 1, tester_present)))
+    self.assertFalse(self._tx(libsafety_py.make_CANPacket(0x730, 1, read_dtcs)))
+    for addr in (0x7C4, 0x7C6, 0x7D0, 0x7D4):
+      with self.subTest(addr=hex(addr)):
+        self.assertFalse(self._tx(libsafety_py.make_CANPacket(addr, 1, read_dtcs)))
+
 
 # TODO: Handle ICE and HEV configurations once we see cars that use the new messages
 class TestHyundaiCanfdLKASteeringAltEV(TestHyundaiCanfdBase):
@@ -526,6 +539,8 @@ class TestHyundaiCanfdLKASteeringAltEV(TestHyundaiCanfdBase):
     self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiCanfd, HyundaiSafetyFlags.CANFD_LKA_STEERING | HyundaiSafetyFlags.EV_GAS |
                                  HyundaiSafetyFlags.CANFD_LKA_STEERING_ALT)
     self.safety.init_tests()
+
+  test_generic_model_has_no_ev9_diagnostics = TestHyundaiCanfdLKASteeringEV.test_generic_model_has_no_ev9_diagnostics
 
 
 class TestHyundaiCanfdLKASteeringAltButtonsICE(TestHyundaiCanfdLKASteeringAltEV):
@@ -631,12 +646,16 @@ class TestHyundaiCanfdLKASteeringLongEV(HyundaiLongitudinalBase, TestHyundaiCanf
     self.assertTrue(self.safety.get_controls_allowed())
     self.assertTrue(self._tx(self._accel_msg(-0.1)))
 
+  def test_generic_model_rejects_ev9_only_support_frames(self):
+    for addr in (0x161, 0x162, 0x38C, 0x57A):
+      self.assertFalse(self._tx(libsafety_py.make_CANPacket(addr, 1, b"\x00" * 32)))
+
 
 class TestHyundaiCanfdLKASteeringAltAngleLongEV(HyundaiLongitudinalBase, TestHyundaiCanfdAngleSteering):
 
-  TX_MSGS = [[0x110, 0], [0x1CF, 1], [0x362, 0], [0x51, 0], [0x100, 0], [0x730, 1], [0x12a, 1], [0x160, 1],
-             [0x1ba, 1], [0x1e0, 1], [0x1e5, 1], [0x31a, 1], [0x3b5, 1], [0x3c1, 1],
-             [0x1a0, 1], [0x1ea, 1], [0x200, 1], [0x345, 1], [0x1da, 1]]
+  TX_MSGS = [[0x110, 0], [0xCB, 1], [0x1CF, 1], [0x362, 0], [0x100, 0], [0x730, 1], [0x12a, 1], [0x160, 1],
+             [0x1ba, 1], [0x1e0, 1], [0x1e5, 1], [0x1a0, 1], [0x1ea, 1], [0x200, 1], [0x345, 1], [0x1da, 1],
+             [0x161, 1], [0x162, 1], [0x38c, 1]]
 
   RELAY_MALFUNCTION_ADDRS = {0: (0x110, 0x362), 1: (0x1a0,)}  # LKAS_ALT, CAM_0x362, SCC_CONTROL
   FWD_BLACKLISTED_ADDRS = {0: MRR35_RADAR_TRACK_ADDRS}
@@ -650,11 +669,51 @@ class TestHyundaiCanfdLKASteeringAltAngleLongEV(HyundaiLongitudinalBase, TestHyu
   STEER_MSG = "LKAS_ALT"
   GAS_MSG = ("ACCELERATOR", "ACCELERATOR_PEDAL")
   SAFETY_PARAM = HyundaiSafetyFlags.CANFD_LKA_STEERING | HyundaiSafetyFlags.CANFD_LKA_STEERING_ALT | \
-    HyundaiSafetyFlags.CANFD_ANGLE_STEERING | HyundaiSafetyFlags.LONG | HyundaiSafetyFlags.EV_GAS
+    HyundaiSafetyFlags.CANFD_ANGLE_STEERING | HyundaiSafetyFlags.LONG | HyundaiSafetyFlags.EV_GAS | HyundaiSafetyFlags.CCNC
 
   def setUp(self):
-    super().setUp()
+    self.packer = CANPackerSafety("hyundai_canfd_generated")
+    self.safety = libsafety_py.libsafety
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiCanfdEv9, self.SAFETY_PARAM)
+    self.safety.init_tests()
+    self.angle_cmd_cnt = 0
     self._rx(self._gear_msg(5))
+
+  def test_ev9_uses_hyundai_longitudinal_accel_limits(self):
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiCanfdEv9, self.SAFETY_PARAM)
+    self.safety.init_tests()
+    self.safety.set_controls_allowed(True)
+    for accel in (-3.5, 0.0, 3.5):
+      self.assertTrue(self._tx(self._accel_msg(accel)))
+    for accel in (-3.51, 3.51):
+      self.assertFalse(self._tx(self._accel_msg(accel)))
+
+  def test_ev9_rejects_runtime_diagnostics(self):
+    for addr in (0x730, 0x7C4, 0x7C6, 0x7D0, 0x7D4):
+      with self.subTest(addr=hex(addr)):
+        self.assertFalse(self._tx(libsafety_py.make_CANPacket(addr, 1, b"\x03\x19\x02\xFF\x00\x00\x00\x00")))
+        self.assertFalse(self._tx(libsafety_py.make_CANPacket(addr, 1, b"\x30\x00\x00\x00\x00\x00\x00\x00")))
+        self.assertFalse(self._tx(libsafety_py.make_CANPacket(addr, 1, b"\x04\x14\xFF\xFF\xFF\x00\x00\x00")))
+        self.assertFalse(self._tx(libsafety_py.make_CANPacket(addr, 1, b"\x02\x10\x03\x00\x00\x00\x00\x00")))
+
+    self.assertTrue(self._tx(libsafety_py.make_CANPacket(0x730, 1, b"\x02\x3E\x80\x00\x00\x00\x00\x00")))
+
+  def test_ev9_model_rejects_non_profile_messages(self):
+    for addr, bus, length in ((0x51, 0, 32), (0x31A, 1, 32), (0x3B5, 1, 32),
+                              (0x3C1, 1, 8), (0x57A, 1, 32)):
+      self.assertFalse(self._tx(libsafety_py.make_CANPacket(addr, bus, b"\x00" * length)))
+
+  def test_ev9_model_requires_exact_safety_param(self):
+    for invalid_param in (0, self.SAFETY_PARAM & ~HyundaiSafetyFlags.LONG,
+                          self.SAFETY_PARAM | HyundaiSafetyFlags.CAMERA_SCC):
+      self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiCanfdEv9, invalid_param)
+      self.safety.init_tests()
+      self.assertFalse(self._tx(libsafety_py.make_CANPacket(0x160, 1, b"\x00" * 16)))
+
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiCanfdEv9,
+                                 self.SAFETY_PARAM | HyundaiStarPilotSafetyFlags.AOL_LKAS_ON_ENGAGE)
+    self.safety.init_tests()
+    self.assertTrue(self._tx(libsafety_py.make_CANPacket(0x160, 1, b"\x00" * 16)))
 
   def _angle_cmd_msg(self, angle, enabled, increment_timer=True, gain_raw=250):
     if increment_timer:
@@ -678,6 +737,84 @@ class TestHyundaiCanfdLKASteeringAltAngleLongEV(HyundaiLongitudinalBase, TestHyu
       "ADAS_ACIAnglTqRedcGainVal": gain_raw * 0.004 if enabled or gain_raw != 250 else 0.0,
     }
     return self.packer.make_can_msg_safety("LKAS_ALT", 0, values)
+
+  def _direct_angle_cmd_msg(self, angle, enabled, gain=1.0, *, aci_active=0, fca_active=0, fca_gain=0.0):
+    values = {
+      "ADAS_ActvACISta": aci_active,
+      "ADAS_ActvACILvl2Sta": 2 if enabled else 1,
+      "ADAS_StrAnglReqVal": angle,
+      "ADAS_ACIAnglTqRedcGainVal": gain if enabled else 0.0,
+      "FCA_ESA_ActvSta": fca_active,
+      "FCA_ESA_TqBstGainVal": fca_gain,
+    }
+    return self.packer.make_can_msg_safety("ADAS_CMD_35_10ms", 1, values)
+
+  def _neutral_lfa_msg(self, **overrides):
+    values = {
+      "TORQUE_REQUEST": 0,
+      "STEER_REQ": 0,
+      "LKA_ASSIST": 0,
+      "STEER_MODE": 0,
+    }
+    values.update(overrides)
+    return self.packer.make_can_msg_safety("LFA", 1, values)
+
+  def test_ev9_lfa_reconstruction_cannot_actuate(self):
+    for controls_allowed in (False, True):
+      self.safety.set_controls_allowed(controls_allowed)
+      self.assertTrue(self._tx(self._neutral_lfa_msg()))
+      for signal, value in (("TORQUE_REQUEST", 1), ("STEER_REQ", 1),
+                            ("LKA_ASSIST", 1), ("STEER_MODE", 1)):
+        with self.subTest(controls_allowed=controls_allowed, signal=signal):
+          self.assertFalse(self._tx(self._neutral_lfa_msg(**{signal: value})))
+
+  def test_ev9_direct_angle_rejects_parallel_emergency_actuation(self):
+    self._reset_angle_measurement(0)
+    self._reset_speed_measurement(1)
+    for controls_allowed in (False, True):
+      self.safety.set_controls_allowed(controls_allowed)
+      self._set_prev_desired_angle(0)
+      self.assertTrue(self._tx(self._direct_angle_cmd_msg(0, False)))
+      for field, value in (("aci_active", 1), ("fca_active", 1), ("fca_gain", 1.0)):
+        with self.subTest(controls_allowed=controls_allowed, field=field):
+          self._set_prev_desired_angle(0)
+          self.assertFalse(self._tx(self._direct_angle_cmd_msg(0, False, **{field: value})))
+
+  def test_ev9_direct_downstream_angle_command_allowed_and_checked(self):
+    self.safety.set_controls_allowed(True)
+    self._reset_angle_measurement(0)
+    self._reset_speed_measurement(1)
+    self._set_prev_desired_angle(0)
+    self.assertTrue(self._tx(self._direct_angle_cmd_msg(0, True)))
+    self._set_prev_desired_angle(0)
+    self.assertTrue(self._tx(self._direct_angle_cmd_msg(0, True, gain=0.0)))
+    self._rx(self._gear_msg(0))
+    self._set_prev_desired_angle(0)
+    self.assertFalse(self._tx(self._direct_angle_cmd_msg(0, True)))
+    # Park handoff keeps the non-actuating 0xCB reconstruction alive; only an
+    # active steering request is gear-gated.
+    self._set_prev_desired_angle(0)
+    self.assertTrue(self._tx(self._direct_angle_cmd_msg(0, False)))
+    self._set_prev_desired_angle(0)
+    self.assertFalse(self._tx(self._direct_angle_cmd_msg(400, True)))
+
+  def test_ev9_inactive_direct_angle_tracks_physical_beyond_active_limit(self):
+    self._reset_speed_measurement(1)
+    for controls_allowed in (False, True):
+      self.safety.set_controls_allowed(controls_allowed)
+      for angle in (-657.0, 657.0):
+        with self.subTest(controls_allowed=controls_allowed, angle=angle):
+          self._reset_angle_measurement(angle)
+          self._set_prev_desired_angle(np.clip(angle, -360.0, 360.0))
+          self.assertTrue(self._tx(self._direct_angle_cmd_msg(angle, False)))
+          self.assertFalse(self._tx(self._direct_angle_cmd_msg(angle + (1.0 if angle < 0 else -1.0), False)))
+
+    # Expanding the non-actuating mirror range must not expand actuation.
+    self.safety.set_controls_allowed(True)
+    for angle in (-400.0, 400.0):
+      self._reset_angle_measurement(angle)
+      self._set_prev_desired_angle(np.clip(angle, -360.0, 360.0))
+      self.assertFalse(self._tx(self._direct_angle_cmd_msg(angle, True)))
 
   def _gear_msg(self, gear):
     values = {"GEAR": gear, "ACCELERATOR_PEDAL": 0}

@@ -425,6 +425,7 @@ int set_safety_hooks(uint16_t mode, uint16_t param) {
     {SAFETY_TESLA_PREAP, &tesla_preap_hooks},
 #ifdef CANFD
     {SAFETY_HYUNDAI_CANFD, &hyundai_canfd_hooks},
+    {SAFETY_HYUNDAI_CANFD_EV9, &hyundai_canfd_ev9_hooks},
 #endif
 #ifdef ALLOW_DEBUG
     {SAFETY_PSA, &psa_hooks},
