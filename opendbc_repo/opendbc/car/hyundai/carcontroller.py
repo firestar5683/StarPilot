@@ -7,10 +7,21 @@ from opendbc.car.common.filter_simple import FirstOrderFilter
 from opendbc.car.lateral import apply_driver_steer_torque_limits, apply_steer_angle_limits_vm, common_fault_avoidance, get_max_angle_delta_vm, get_max_angle_vm
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai import hyundaicanfd, hyundaican
+from opendbc.car.hyundai.carstate import CANFD_NATIVE_BLINDSPOT_STALE_NS, EV9_RAW_BLINDSPOT_STALE_NS
 from opendbc.car.hyundai.hyundaicanfd import CanBus
+from opendbc.car.hyundai.ev9_longitudinal import EV9_ACTUATION_JERK_LOWER, EV9_ACTUATION_JERK_UPPER, \
+                                                   EV9LongitudinalStopState, \
+                                                   EV9ActuationAbortReason, \
+                                                   ev9_actuation_abort_reason, \
+                                                   ev9_longitudinal_scc_command, \
+                                                   shape_ev9_longitudinal_accel, update_ev9_longitudinal_stop_state, \
+                                                   filter_ev9_adrv_replay_messages, \
+                                                   should_send_ev9_direct_angle_command
 from opendbc.car.hyundai.values import HyundaiFlags, Buttons, CarControllerParams, CAR, CANFD_ANGLE_LONGITUDINAL_CAR, \
-                                        CANFD_RADAR_LIVE_LONGITUDINAL_CAR, kia_ev6_gt_line_longitudinal_tuning
+                                        CANFD_RADAR_LIVE_LONGITUDINAL_CAR, \
+                                        kia_ev6_gt_line_longitudinal_tuning
 from opendbc.car.interfaces import CarControllerBase
+from opendbc.car.carlog import carlog
 from opendbc.car.vehicle_model import VehicleModel
 from openpilot.common.params import Params
 
@@ -70,6 +81,13 @@ DEFAULT_ANGLE_SMOOTHING_ALPHA_V = [0.2, 0.1, 0.0]
 EV9_STOP_REQUEST_SPEED = 0.47
 EV9_STANDSTILL_DELAY_FRAMES = 178
 EV9_STOP_RELEASE_DELAY_FRAMES = 6
+EV9_HIGH_ANGLE_GAIN_BP = [70.0, 120.0, 220.0, 320.0]
+EV9_HIGH_ANGLE_GAIN_CAP_V = [0.85, 0.55, 0.30, 0.16]
+EV9_HIGH_ANGLE_GAIN_MIN = 0.004
+EV9_SOFT_DRIVER_OVERRIDE_AUTHORITY = 0.35
+EV9_SOFT_DRIVER_OVERRIDE_MAX_DELTA = 8.0
+EV9_HIGH_ANGLE_INHIBIT_ENTER = 85.0
+EV9_HIGH_ANGLE_INHIBIT_RELEASE = 70.0
 BLINDSPOT_WARNING_FLASH_SAMPLES = 20
 BLINDSPOT_WARNING_FLASH_ON_SAMPLES = 16
 BLINDSPOT_WARNING_SOUND_SAMPLES = 36
@@ -126,6 +144,15 @@ class BlindspotWarningOutput:
   sound_active: bool = False
 
 
+@dataclass(frozen=True)
+class EV9BlindspotWarningInputs:
+  source_fresh: bool = False
+  left_detected: bool = False
+  right_detected: bool = False
+  left_stalk_active: bool = False
+  right_stalk_active: bool = False
+
+
 @dataclass
 class BlindspotWarningState:
   flash_phase: int = 0
@@ -133,6 +160,73 @@ class BlindspotWarningState:
   escalated_prev: bool = False
   sound_remaining: int = 0
   sound_armed: bool = True
+
+
+def update_blindspot_warning(state: BlindspotWarningState, escalated: bool,
+                             blinker: bool) -> BlindspotWarningOutput:
+  if not blinker:
+    state.flash_phase = 0
+    state.mirror_warning_active = False
+    state.escalated_prev = False
+    state.sound_remaining = 0
+    state.sound_armed = True
+    return BlindspotWarningOutput()
+
+  rising = escalated and not state.escalated_prev
+  if rising:
+    state.flash_phase = 0
+    state.mirror_warning_active = True
+    if state.sound_armed:
+      state.sound_remaining = BLINDSPOT_WARNING_SOUND_SAMPLES
+      state.sound_armed = False
+  elif escalated:
+    state.flash_phase = (state.flash_phase + 1) % BLINDSPOT_WARNING_FLASH_SAMPLES
+    state.mirror_warning_active = True
+  elif state.mirror_warning_active and state.flash_phase < BLINDSPOT_WARNING_FLASH_ON_SAMPLES - 1:
+    state.flash_phase += 1
+  else:
+    state.flash_phase = 0
+    state.mirror_warning_active = False
+
+  state.escalated_prev = escalated
+  sound_active = state.sound_remaining > 0
+  if state.sound_remaining > 0:
+    state.sound_remaining -= 1
+  return BlindspotWarningOutput(
+    mirror_lamp_active=state.mirror_warning_active and state.flash_phase < BLINDSPOT_WARNING_FLASH_ON_SAMPLES,
+    sound_active=sound_active,
+  )
+
+
+def get_ev9_blindspot_warning_inputs(CS, now_nanos: int) -> EV9BlindspotWarningInputs:
+  native_timestamp = int(getattr(CS, "native_blindspot_ts", 0))
+  native_age = int(now_nanos) - native_timestamp
+  source_fresh = native_timestamp > 0 and 0 <= native_age <= CANFD_NATIVE_BLINDSPOT_STALE_NS
+  if source_fresh:
+    left_detected = int(getattr(CS, "native_left_blindspot_state", 0)) in (1, 2)
+    right_detected = int(getattr(CS, "native_right_blindspot_state", 0)) in (1, 2)
+  else:
+    fallback_timestamp = int(getattr(CS, "ev9_reconstructed_blindspot_ts", 0))
+    fallback_age = int(now_nanos) - fallback_timestamp
+    source_fresh = fallback_timestamp > 0 and 0 <= fallback_age <= EV9_RAW_BLINDSPOT_STALE_NS
+    if not source_fresh:
+      return EV9BlindspotWarningInputs()
+    left_detected = bool(getattr(CS, "ev9_reconstructed_left_blindspot", False))
+    right_detected = bool(getattr(CS, "ev9_reconstructed_right_blindspot", False))
+
+  left_stalk_active = bool(getattr(CS, "left_blinker_stalk", False))
+  right_stalk_active = bool(getattr(CS, "right_blinker_stalk", False))
+  if left_stalk_active and right_stalk_active:
+    left_stalk_active = False
+    right_stalk_active = False
+
+  return EV9BlindspotWarningInputs(
+    source_fresh=True,
+    left_detected=left_detected,
+    right_detected=right_detected,
+    left_stalk_active=left_stalk_active,
+    right_stalk_active=right_stalk_active,
+  )
 
 
 def _jerk_limited_integrator(desired_accel: float, last_accel: float, jerk_upper: float, jerk_lower: float) -> float:
@@ -366,6 +460,79 @@ def compute_torque_reduction_gain(steering_torque, v_ego, lat_active, last_gain)
   return round(gain / 0.004) * 0.004
 
 
+def apply_ev9_high_angle_gain_cap(CP, gain: float, steering_angle_deg: float, lat_active: bool) -> float:
+  if CP.carFingerprint != CAR.KIA_EV9 or not CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING or not lat_active:
+    return gain
+
+  cap = float(np.interp(abs(steering_angle_deg), EV9_HIGH_ANGLE_GAIN_BP, EV9_HIGH_ANGLE_GAIN_CAP_V))
+  return max(EV9_HIGH_ANGLE_GAIN_MIN, min(gain, cap))
+
+
+def ev9_driver_override_active(CP, steering_pressed: bool, lat_active: bool) -> bool:
+  return CP.carFingerprint == CAR.KIA_EV9 and CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING and lat_active and \
+         steering_pressed
+
+
+def update_ev9_high_angle_inhibit(CP, inhibited: bool, steering_angle_deg: float, lat_active: bool,
+                                  protection_enabled: bool) -> bool:
+  """Latch EV9 angle actuation off before the EPS high-angle timer can fault."""
+  applicable = CP.carFingerprint == CAR.KIA_EV9 and CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING
+  if not applicable or not protection_enabled or not lat_active:
+    return False
+  if inhibited:
+    return abs(steering_angle_deg) > EV9_HIGH_ANGLE_INHIBIT_RELEASE
+  return abs(steering_angle_deg) >= EV9_HIGH_ANGLE_INHIBIT_ENTER
+
+
+def ev9_dynamic_steering_icons(CP, feature_enabled: bool, lat_active: bool, gain: float,
+                               driver_override: bool, high_angle_inhibited: bool,
+                               legacy_lka_icon: int, legacy_lfa_icon: int,
+                               downstream_angle_command_available: bool = True) -> tuple[int, int, bool | None]:
+  """Return EV9 grey/green steering state plus the CCNC actuation override."""
+  applicable = CP.carFingerprint == CAR.KIA_EV9 and CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING
+  if not applicable or not feature_enabled:
+    return legacy_lka_icon, legacy_lfa_icon, None
+
+  meaningfully_actuating = bool(lat_active and gain > EV9_HIGH_ANGLE_GAIN_MIN and
+                                not driver_override and not high_angle_inhibited and downstream_angle_command_available)
+  if lat_active:
+    icon = 2 if meaningfully_actuating else 1
+    return icon, icon, meaningfully_actuating
+  return 1, 0, False
+
+
+def ev9_reconstructed_steering_available(lat_active: bool, controls_enabled: bool,
+                                         always_on_lateral_enabled: bool) -> bool:
+  """Report feature availability independently from temporary actuation loss."""
+  return bool(lat_active or controls_enabled or always_on_lateral_enabled)
+
+
+def update_angle_command(CP, angle_filter, desired_angle: float, steering_angle_deg: float, v_ego: float,
+                         steering_pressed: bool, lat_active: bool, soft_driver_override_enabled: bool = False) -> float:
+  if ev9_driver_override_active(CP, steering_pressed, lat_active):
+    if not soft_driver_override_enabled:
+      angle_filter.x = steering_angle_deg
+      return steering_angle_deg
+
+    # Hands-on torque already reduces the requested EPS gain. Preserve a small,
+    # bounded portion of path authority instead of also snapping the requested
+    # angle to the measured wheel angle, which removes all useful correction.
+    desired_delta = (desired_angle - steering_angle_deg) * EV9_SOFT_DRIVER_OVERRIDE_AUTHORITY
+    override_target = steering_angle_deg + float(np.clip(desired_delta,
+                                                          -EV9_SOFT_DRIVER_OVERRIDE_MAX_DELTA,
+                                                          EV9_SOFT_DRIVER_OVERRIDE_MAX_DELTA))
+    angle_filter.update_alpha(get_angle_smoothing_alpha(CP, v_ego))
+    filtered_angle = angle_filter.update(override_target)
+    filtered_angle = float(np.clip(filtered_angle,
+                                   steering_angle_deg - EV9_SOFT_DRIVER_OVERRIDE_MAX_DELTA,
+                                   steering_angle_deg + EV9_SOFT_DRIVER_OVERRIDE_MAX_DELTA))
+    angle_filter.x = filtered_angle
+    return filtered_angle
+
+  angle_filter.update_alpha(get_angle_smoothing_alpha(CP, v_ego))
+  return angle_filter.update(desired_angle)
+
+
 def process_hud_alert(enabled, fingerprint, hud_control):
   sys_warning = (hud_control.visualAlert in (VisualAlert.steerRequired, VisualAlert.ldw))
 
@@ -413,8 +580,17 @@ class CarController(CarControllerBase):
     self._params = Params()
     if CP.carFingerprint == CAR.KIA_EV9:
       self._ev9_long_tuning = EV9LongitudinalTuningState()
-      self._left_blindspot_warning = BlindspotWarningState()
-      self._right_blindspot_warning = BlindspotWarningState()
+    # These are fixed parts of the EV9 production profile. Runtime feature
+    # Params previously allowed an incomplete combination of steering streams.
+    self.ev9_soft_driver_override_enabled = CP.carFingerprint == CAR.KIA_EV9
+    self.ev9_dynamic_steering_icon_enabled = CP.carFingerprint == CAR.KIA_EV9
+    self.ev9_high_angle_fault_protection_enabled = CP.carFingerprint == CAR.KIA_EV9
+    self.ev9_high_angle_inhibited = False
+    self._left_blindspot_warning = BlindspotWarningState()
+    self._right_blindspot_warning = BlindspotWarningState()
+    self._ev9_actuation_fault_reason = EV9ActuationAbortReason.NONE
+    self._ev9_scc_counter = 0
+    self._ev9_stop_state = EV9LongitudinalStopState()
     self.long_active_ecu = self.CP.openpilotLongitudinalControl
     self._ioniq_6_lane_change_ui_side = None
     self._ioniq_6_lane_change_ui_frames = 0
@@ -505,6 +681,7 @@ class CarController(CarControllerBase):
     actuators = CC.actuators
     hud_control = CC.hudControl
     lka_icon, lfa_icon = self._update_dash_icon_state(CC)
+    ev9_ccnc_steering_active = None
 
     if not self.CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING:
       self.params = CarControllerParams(self.CP, CS.out.vEgoRaw)
@@ -523,8 +700,21 @@ class CarController(CarControllerBase):
       desired_angle = float(np.clip(actuators.steeringAngleDeg,
                                     -self.params.ANGLE_LIMITS.STEER_ANGLE_MAX,
                                     self.params.ANGLE_LIMITS.STEER_ANGLE_MAX))
-      self.angle_filter.update_alpha(get_angle_smoothing_alpha(self.CP, CS.out.vEgo))
-      desired_angle = self.angle_filter.update(desired_angle)
+      steering_angle_deg = float(np.clip(CS.out.steeringAngleDeg,
+                                         -self.params.ANGLE_LIMITS.STEER_ANGLE_MAX,
+                                         self.params.ANGLE_LIMITS.STEER_ANGLE_MAX))
+      self.ev9_high_angle_inhibited = update_ev9_high_angle_inhibit(
+        self.CP, self.ev9_high_angle_inhibited, CS.out.steeringAngleDeg, CC.latActive,
+        self.ev9_high_angle_fault_protection_enabled,
+      )
+      if self.ev9_high_angle_inhibited:
+        # Reset the smoother to measured angle, then let the existing vehicle-model
+        # limiters move the transmitted request toward it at a safety-bounded rate.
+        self.angle_filter.x = steering_angle_deg
+        desired_angle = steering_angle_deg
+      else:
+        desired_angle = update_angle_command(self.CP, self.angle_filter, desired_angle, steering_angle_deg, CS.out.vEgo,
+                                             CS.out.steeringPressed, CC.latActive, self.ev9_soft_driver_override_enabled)
 
       apply_angle = apply_steer_angle_limits_vm(desired_angle, self.apply_angle_last, v_ego_raw,
                                                 measured_steering_angle, angle_lat_active, self.params, self.VM)
@@ -542,8 +732,11 @@ class CarController(CarControllerBase):
                                     self.apply_angle_last - max_angle_delta,
                                     self.apply_angle_last + max_angle_delta))
 
-      apply_torque = compute_torque_reduction_gain(CS.out.steeringTorque, v_ego_raw, angle_lat_active, self.apply_torque_last)
-      apply_steer_req = angle_lat_active and apply_torque != 0.0
+      apply_torque = compute_torque_reduction_gain(CS.out.steeringTorque, v_ego_raw, CC.latActive, self.apply_torque_last)
+      apply_torque = apply_ev9_high_angle_gain_cap(self.CP, apply_torque, CS.out.steeringAngleDeg, CC.latActive)
+      if self.ev9_high_angle_inhibited:
+        apply_torque = 0.0
+      apply_steer_req = CC.latActive and apply_torque != 0.0
       torque_fault = False
 
       if apply_angle is None:
@@ -557,6 +750,15 @@ class CarController(CarControllerBase):
                                               -self.params.ANGLE_LIMITS.STEER_ANGLE_MAX,
                                               self.params.ANGLE_LIMITS.STEER_ANGLE_MAX))
         self.angle_filter.x = self.apply_angle_last
+      driver_override = ev9_driver_override_active(self.CP, CS.out.steeringPressed, CC.latActive)
+      ev9_direct_path_required = self.CP.carFingerprint == CAR.KIA_EV9 and self.long_active_ecu
+      ev9_direct_path_available = not ev9_direct_path_required or should_send_ev9_direct_angle_command(
+        CS.out.gearShifter == structs.CarState.GearShifter.drive, CC.latActive,
+      ) and not getattr(CS, "mdps_lka_angle_fault", False)
+      lka_icon, lfa_icon, ev9_ccnc_steering_active = ev9_dynamic_steering_icons(
+        self.CP, self.ev9_dynamic_steering_icon_enabled, CC.latActive, apply_torque,
+        driver_override, self.ev9_high_angle_inhibited, lka_icon, lfa_icon, ev9_direct_path_available,
+      )
     else:
       # steering torque
       new_torque = int(round(actuators.torque * self.params.STEER_MAX))
@@ -660,7 +862,8 @@ class CarController(CarControllerBase):
     # *** CAN/CAN FD specific ***
     if self.CP.flags & HyundaiFlags.CANFD:
       can_sends.extend(self.create_canfd_msgs(now_nanos, apply_steer_req, apply_torque, apply_angle, set_speed_in_units, accel,
-                                              stopping, hud_control, CS, CC, starpilot_toggles, lka_icon, lfa_icon))
+                                              stopping, hud_control, CS, CC, starpilot_toggles, lka_icon, lfa_icon,
+                                              ev9_ccnc_steering_active))
     else:
       can_sends.extend(self.create_can_msgs(apply_steer_req, apply_torque, torque_fault, set_speed_in_units, accel,
                                             stopping, hud_control, actuators, CS, CC, lfa_icon))
@@ -743,12 +946,19 @@ class CarController(CarControllerBase):
     return can_sends
 
   def create_canfd_msgs(self, now_nanos, apply_steer_req, apply_torque, apply_angle, set_speed_in_units, accel, stopping,
-                        hud_control, CS, CC, starpilot_toggles, lka_icon, lfa_icon):
+                        hud_control, CS, CC, starpilot_toggles, lka_icon, lfa_icon, ev9_ccnc_steering_active=None):
     can_sends = []
 
     lka_steering = self.CP.flags & HyundaiFlags.CANFD_LKA_STEERING
     lka_steering_long = lka_steering and self.long_active_ecu
     ccnc_non_hda2 = self.CP.flags & HyundaiFlags.CCNC and not lka_steering
+    # If suppression fails, card.py strips longitudinal ownership and Panda's
+    # LONG flag. The complete EV9 reconstruction profile therefore runs only
+    # while this process still owns longitudinal control.
+    ev9_long_active = self.CP.carFingerprint == CAR.KIA_EV9 and self.long_active_ecu
+    cruise_state = getattr(CS.out, "cruiseState", None)
+    cruise_available = bool(getattr(cruise_state, "available", False))
+    ev9_main_mode = bool(getattr(CS, "ev9_cruise_main_on", cruise_available)) and not getattr(CS.out, "accFaulted", False)
     use_egmp_dynamic_long_tuning = egmp_dynamic_longitudinal_tuning(self.CP) and self.long_active_ecu and \
                                    CC.actuators.longControlState in (LongCtrlState.starting, LongCtrlState.pid, LongCtrlState.stopping)
     use_egmp_smoothed_accel = use_egmp_dynamic_long_tuning and (
@@ -764,50 +974,120 @@ class CarController(CarControllerBase):
     ccnc_angle_long = self.CP.carFingerprint in CANFD_ANGLE_LONGITUDINAL_CAR and \
       self.CP.flags & HyundaiFlags.CCNC and angle_lkas_alt and self.long_active_ecu
     steering_msg_active = apply_steer_req
+    ev9_panda_faulted = ev9_long_active and bool(getattr(CS, "panda_faulted", True))
     if angle_lkas_alt:
       # Angle LKAS_ALT cars fault if the angle-steering status drops inactive during torque limiting.
       # Hold the angle status active while lateral is active; VM/safety limits handle actuation.
       steering_msg_active = CC.latActive
+    if ev9_panda_faulted:
+      # A recovered/sticky Panda fault can be acceptable for completing a
+      # neutral ownership handoff, but never for vehicle actuation. Preserve
+      # the required steering stream with an inactive request at the measured
+      # angle and zero torque reduction gain.
+      steering_msg_active = False
+      apply_torque = 0
+      apply_angle = float(getattr(CS, "mdps_steering_angle", CS.out.steeringAngleDeg))
 
     gear = getattr(getattr(CS, "out", None), "gearShifter", None)
     drive_gear = gear == structs.CarState.GearShifter.drive
+    ev9_actuation_permitted = not ev9_panda_faulted
+    if ev9_long_active:
+      abort_reason = ev9_actuation_abort_reason(
+        bool(CC.enabled or CC.latActive),
+        bool(CS.out.canValid),
+        bool(getattr(CS, "openpilot_radar_valid", False)),
+        bool(getattr(CS, "panda_faulted", True)),
+        hyundaicanfd.ev9_scc_control_baseline_available(),
+      )
+      ev9_actuation_permitted = abort_reason == EV9ActuationAbortReason.NONE
+      if abort_reason != self._ev9_actuation_fault_reason:
+        if abort_reason == EV9ActuationAbortReason.NONE:
+          carlog.warning(f"EV9 ACTUATION INHIBIT CLEARED: {self._ev9_actuation_fault_reason.name}")
+        else:
+          carlog.error(f"EV9 ACTUATION INHIBITED: {abort_reason.name}")
+        self._ev9_actuation_fault_reason = abort_reason
+      if self.frame % 100 == 0:
+        actuation_status = "".join((
+          f"EV9 ACTUATION: permitted={ev9_actuation_permitted}, enabled={CC.enabled}, ",
+          f"requestedAccel={accel:.3f}, vEgo={CS.out.vEgo:.3f}",
+        ))
+        carlog.warning(actuation_status)
     if angle_lkas_alt:
       steering_msg_active = bool(steering_msg_active and drive_gear)
-    angle_lkas_alt_standstill_handoff = bool(getattr(CS.out, "standstill", False) and not CC.latActive)
-    forward_stock_lkas = angle_lkas_alt and (
-      angle_lkas_alt_standstill_handoff or not (drive_gear and (CC.latActive or CC.enabled))
-    )
-    if not forward_stock_lkas and not ccnc_angle_long:
+    openpilot_owns_lka_alt = angle_lkas_alt and drive_gear and (CC.latActive or CC.enabled)
+    if not ev9_long_active and bool(getattr(CS.out, "standstill", False)) and not CC.latActive:
+      openpilot_owns_lka_alt = False
+    forward_stock_lkas = angle_lkas_alt and not openpilot_owns_lka_alt
+    ev9_direct_angle_mode = ev9_long_active
+    if not forward_stock_lkas and not ev9_direct_angle_mode:
       can_sends.extend(hyundaicanfd.create_steering_messages(self.packer, self.CP, self.CAN, CC.enabled,
                                                              steering_msg_active, apply_torque, apply_angle,
                                                              CS.stock_lfa_msg,
                                                              CS.stock_lkas_msg if preserve_stock_lkas else None,
                                                              lka_icon=lka_icon))
-    direct_steering_active = ccnc_angle_long and drive_gear and CC.latActive and self.direct_angle_request_allowed and not CS.angle_steering_fault
-    inactive_steering_angle = float(np.clip(CS.angle_steering_angle,
-                                            -self.params.ANGLE_LIMITS.STEER_ANGLE_MAX,
-                                            self.params.ANGLE_LIMITS.STEER_ANGLE_MAX)) if ccnc_angle_long else 0.0
-    if ccnc_angle_long and drive_gear:
-      can_sends.append(hyundaicanfd.create_angle_adas_cmd(
-        self.packer, self.CAN,
-        apply_angle if direct_steering_active else inactive_steering_angle,
-        direct_steering_active, apply_torque if direct_steering_active else 0.0,
-      ))
-    if ccnc_angle_long and not drive_gear:
-      can_sends.extend(hyundaicanfd.create_inactive_angle_steering_messages(self.packer, self.CAN,
-                                                                             inactive_steering_angle))
+    if ev9_direct_angle_mode:
+      measured_angle = float(getattr(CS, "mdps_steering_angle", CS.out.steeringAngleDeg))
+      inactive_steering = hyundaicanfd.create_ev9_inactive_steering_messages(
+        self.packer, self.CAN, measured_angle, self.frame,
+      )
+      # 0x12A is part of Panda's full host lease and remains a neutral 100 Hz
+      # status stream in every gear. Only 0xCB changes from inactive status to
+      # the safety-limited direct angle command in Drive.
+      can_sends.append(inactive_steering[0])
+      if drive_gear:
+        direct_active = should_send_ev9_direct_angle_command(
+          drive_gear, CC.latActive,
+        ) and ev9_actuation_permitted and not getattr(CS, "mdps_lka_angle_fault", False)
+        can_sends.append(hyundaicanfd.create_ev9_direct_angle_command(
+          self.packer, self.CAN, apply_angle if direct_active else measured_angle,
+          direct_active, apply_torque if direct_active else 0.0, self.frame,
+        ))
+      else:
+        can_sends.append(inactive_steering[1])
+    elif ccnc_angle_long:
+      direct_steering_active = drive_gear and CC.latActive and self.direct_angle_request_allowed and not CS.angle_steering_fault
+      inactive_steering_angle = float(np.clip(CS.angle_steering_angle,
+                                              -self.params.ANGLE_LIMITS.STEER_ANGLE_MAX,
+                                              self.params.ANGLE_LIMITS.STEER_ANGLE_MAX))
+      if drive_gear:
+        can_sends.append(hyundaicanfd.create_angle_adas_cmd(
+          self.packer, self.CAN,
+          apply_angle if direct_steering_active else inactive_steering_angle,
+          direct_steering_active, apply_torque if direct_steering_active else 0.0,
+        ))
+      else:
+        can_sends.extend(hyundaicanfd.create_inactive_angle_steering_messages(
+          self.packer, self.CAN, inactive_steering_angle,
+        ))
 
     # prevent LFA from activating on LKA steering cars by sending "no lane lines detected" to ADAS ECU
     suppress_lfa = bool(lka_steering)
     if angle_lkas_alt:
-      suppress_lfa = bool(lka_steering and drive_gear and (CC.latActive or (ccnc_angle_long and CC.enabled)))
+      # LKAS_ALT and its camera companion must move together: either openpilot
+      # owns both messages or panda forwards both stock messages.
+      suppress_lfa = bool(lka_steering and openpilot_owns_lka_alt)
     if self.frame % 5 == 0 and suppress_lfa:
       can_sends.append(hyundaicanfd.create_suppress_lfa(self.packer, self.CAN, CS.lfa_block_msg,
                                                         self.CP.flags & HyundaiFlags.CANFD_LKA_STEERING_ALT))
 
     # LFA and HDA icons
-    if self.frame % 5 == 0 and (not lka_steering or lka_steering_long) and not ccnc_angle_long:
-      if ccnc_non_hda2:
+    if self.frame % 5 == 0 and (not lka_steering or lka_steering_long):
+      if ev9_long_active:
+        dash_scene = getattr(CS, "ev9_dash_scene", None)
+        can_sends.extend(hyundaicanfd.create_ccnc_angle_long_status_messages(
+          self.packer, self.CP, self.CAN, self.frame // 5, CC.enabled, ev9_main_mode,
+          CC.hudControl, CS.out, CS.is_metric,
+          # EV9's temporary angle lockout deliberately drops latActive while
+          # AOL remains available. Keep the reconstructed wheel grey during
+          # that non-actuating interval; steering_active below remains gated by
+          # the full actuation interlock.
+          steering_available=ev9_reconstructed_steering_available(
+            CC.latActive, CC.enabled, bool(getattr(CS, "ev9_always_on_lateral_enabled", False)),
+          ),
+          steering_active=bool(ev9_ccnc_steering_active and ev9_actuation_permitted),
+          hba_icon=CS.hba_icon, dash_scene=dash_scene,
+        ))
+      elif ccnc_non_hda2:
         can_sends.extend(hyundaicanfd.create_ccnc(self.packer, self.CAN, self.long_active_ecu, CC.enabled, CC.hudControl,
                                                   CC.leftBlinker, CC.rightBlinker, CS.msg_161, CS.msg_162, CS.msg_1b5,
                                                   CS.is_metric, CS.out, CS.out.cruiseState.available, lfa_icon))
@@ -842,41 +1122,42 @@ class CarController(CarControllerBase):
 
     if self.long_active_ecu:
       if lka_steering:
-        if ccnc_angle_long:
-          left_escalated = CS.left_blindspot_from_radar and CC.leftBlinker and not CC.rightBlinker
-          right_escalated = CS.right_blindspot_from_radar and CC.rightBlinker and not CC.leftBlinker
-          left_warning = BlindspotWarningOutput()
-          right_warning = BlindspotWarningOutput()
+        adrv_messages = hyundaicanfd.create_adrv_messages(self.packer, self.CAN, self.frame)
+        if ev9_long_active:
+          adrv_messages = filter_ev9_adrv_replay_messages(adrv_messages)
+          counter_divisors = {0x160: 2, 0x1DA: 100, 0x1EA: 5, 0x200: 5, 0x345: 20}
+          adrv_messages = [hyundaicanfd.create_ev9_adrv_message(msg[0], self.CAN.ECAN, self.frame // counter_divisors[msg[0]])
+                           for msg in adrv_messages]
+          status_messages = ((0x1E0, 5), (0x38C, 20))
+          adrv_messages.extend(hyundaicanfd.create_ev9_adrv_message(address, self.CAN.ECAN, self.frame // divisor)
+                               for address, divisor in status_messages if self.frame % divisor == 0)
           if self.frame % 5 == 0:
+            blindspot_inputs = get_ev9_blindspot_warning_inputs(CS, now_nanos)
+            left_escalated = blindspot_inputs.left_detected and blindspot_inputs.left_stalk_active
+            right_escalated = blindspot_inputs.right_detected and blindspot_inputs.right_stalk_active
             left_warning = update_blindspot_warning(
-              self._left_blindspot_warning, left_escalated, CC.leftBlinker,
+              self._left_blindspot_warning, left_escalated, blindspot_inputs.left_stalk_active,
             )
             right_warning = update_blindspot_warning(
-              self._right_blindspot_warning, right_escalated, CC.rightBlinker,
+              self._right_blindspot_warning, right_escalated, blindspot_inputs.right_stalk_active,
             )
-          steering_available = CC.latActive or CC.enabled
-          steering_active = direct_steering_active and apply_steer_req and not CS.out.steeringPressed
-          adrv_messages = hyundaicanfd.create_ccnc_adrv_messages(
-            self.packer, self.CP, self.CAN, self.frame, CC.enabled, CS.out.cruiseState.available, CC.hudControl,
-            CS.out, CS.is_metric, steering_available, steering_active,
-            CS.left_blindspot_from_radar, CS.right_blindspot_from_radar,
-            drive_gear=drive_gear,
-            hba_icon=CS.hba_icon,
-            left_escalated=left_escalated, right_escalated=right_escalated,
-            left_warning_lamp=left_warning.mirror_lamp_active,
-            right_warning_lamp=right_warning.mirror_lamp_active,
-            left_sound_active=left_warning.sound_active, right_sound_active=right_warning.sound_active,
-          )
-        else:
-          adrv_messages = hyundaicanfd.create_adrv_messages(self.packer, self.CAN, self.frame)
+            adrv_messages.extend(hyundaicanfd.create_ccnc_blindspot_status_messages(
+              self.packer, self.CP, self.CAN, self.frame // 5,
+              blindspot_inputs.left_detected, blindspot_inputs.right_detected,
+              left_escalated, right_escalated, drive_gear,
+              left_warning.mirror_lamp_active, right_warning.mirror_lamp_active,
+              left_warning.sound_active, right_warning.sound_active,
+            ))
         can_sends.extend(adrv_messages)
-        # The front radar treats ADAS_DRV's 0x100 broadcast as its host heartbeat
-        # and stops publishing object tracks when it disappears.
-        radar_heartbeat_step = 1 if ccnc_angle_long else 4
-        if self.CP.carFingerprint in CANFD_RADAR_LIVE_LONGITUDINAL_CAR and self.frame % radar_heartbeat_step == 0:
-          can_sends.append(hyundaicanfd.create_accelerator_brake_alt_spoof(0, self.frame // radar_heartbeat_step,
-                                                                            CS.out.brakePressed, CS.out.gasPressed,
-                                                                            self.CP.carFingerprint))
+        # Ioniq 5/6: front radar treats ADAS_DRV's 0x100 broadcast as its host heartbeat
+        # and stops publishing object tracks when it disappears. Spoof it periodically on
+        # PT bus so the radar keeps tracking.
+        standard_radar_heartbeat = self.CP.carFingerprint in CANFD_RADAR_LIVE_LONGITUDINAL_CAR and self.frame % 4 == 0
+        ev9_radar_heartbeat = ev9_long_active
+        if standard_radar_heartbeat or ev9_radar_heartbeat:
+          heartbeat_counter = self.frame if ev9_radar_heartbeat else self.frame // 4
+          can_sends.append(hyundaicanfd.create_accelerator_brake_alt_spoof(0, heartbeat_counter, CS.out.brakePressed,
+                                                                            CS.out.gasPressed, self.CP.carFingerprint))
       elif not ccnc_non_hda2:
         can_sends.extend(hyundaicanfd.create_fca_warning_light(self.packer, self.CAN, self.frame))
       if self.CP.carFingerprint == CAR.HYUNDAI_IONIQ_6 and self.frame % 5 == 0:
@@ -897,9 +1178,15 @@ class CarController(CarControllerBase):
                                                                                  CC.leftBlinker,
                                                                                  CC.rightBlinker))
       if self.frame % 2 == 0:
-        lead_visible, lead_distance, lead_rel_speed = self._get_canfd_scc_lead_state(CC, CS, now_nanos)
+        lead_visible, lead_distance, lead_rel_speed = self._get_canfd_scc_lead_state(
+          CC, CS, now_nanos, physical_lead_only=ev9_long_active,
+        )
+        scc_enabled, scc_accel, scc_stopping, scc_gas_override = ev9_longitudinal_scc_command(
+          CC.enabled, accel, stopping, CC.cruiseControl.override,
+          actuation_permitted=ev9_actuation_permitted,
+        ) if ev9_long_active else (CC.enabled, accel, stopping, CC.cruiseControl.override)
         acc_kwargs = {
-          "main_mode_acc": int(CS.out.cruiseState.available),
+          "main_mode_acc": int(ev9_main_mode if ev9_long_active else CS.out.cruiseState.available),
           "direct_accel": True,
           "jerk_lower": 5.0,
           "jerk_upper": 3.0 if CC.actuators.longControlState == LongCtrlState.pid else 1.0,
@@ -911,28 +1198,33 @@ class CarController(CarControllerBase):
           if use_egmp_smoothed_accel:
             acc_kwargs["jerk_lower"] = self._ioniq_6_long_tuning.jerk_lower
             acc_kwargs["jerk_upper"] = self._ioniq_6_long_tuning.jerk_upper
-        if ccnc_angle_long:
-          self._ev9_long_tuning = update_ev9_longitudinal_tuning(
-            self._ev9_long_tuning, CC.enabled and not CC.cruiseControl.override,
-            CC.actuators.longControlState == LongCtrlState.stopping, float(CS.out.vEgo),
+        if ev9_long_active:
+          self._ev9_stop_state = update_ev9_longitudinal_stop_state(
+            self._ev9_stop_state, scc_enabled and not scc_gas_override, scc_stopping, float(CS.out.vEgo),
           )
-          if self._ev9_long_tuning.stop_request or not CC.enabled or CC.cruiseControl.override:
-            self._ioniq_6_long_tuning = reset_egmp_longitudinal_tuning(self._ioniq_6_long_tuning)
-            accel = 0.0
-          can_sends.append(hyundaicanfd.create_ccnc_acc_control(
-            self.packer, self.CAN, CC.enabled, accel,
-            self._ev9_long_tuning.stop_request, self._ev9_long_tuning.cruise_standstill, CC.cruiseControl.override,
-            set_speed_in_units, int(CS.out.cruiseState.available), lead_distance, lead_rel_speed, lead_visible,
-            float(CS.out.vEgo),
-            jerk_lower=acc_kwargs["jerk_lower"],
-            jerk_upper=acc_kwargs["jerk_upper"],
+          scc_starting = CC.actuators.longControlState == LongCtrlState.starting
+          if scc_enabled and not scc_gas_override:
+            scc_accel_raw, scc_accel_value, scc_jerk_upper = shape_ev9_longitudinal_accel(
+              self.accel_last, scc_accel, float(CS.out.vEgo), scc_starting, scc_stopping, self._ev9_stop_state,
+            )
+          else:
+            scc_accel_raw = 0.0
+            scc_accel_value = 0.0
+            scc_jerk_upper = EV9_ACTUATION_JERK_UPPER
+          can_sends.append(hyundaicanfd.create_ev9_acc_control(
+            self.packer, self.CAN, self._ev9_scc_counter, scc_enabled, scc_accel_raw, scc_accel_value,
+            self._ev9_stop_state.stop_request, self._ev9_stop_state.cruise_standstill, scc_gas_override,
+            set_speed_in_units, int(ev9_main_mode), lead_distance, lead_rel_speed, lead_visible, float(CS.out.vEgo),
+            jerk_lower=EV9_ACTUATION_JERK_LOWER,
+            jerk_upper=scc_jerk_upper,
           ))
+          self._ev9_scc_counter = (self._ev9_scc_counter + 1) & 0xFF
         else:
           can_sends.append(hyundaicanfd.create_acc_control(
-            self.packer, self.CAN, CC.enabled, self.accel_last, accel, stopping, CC.cruiseControl.override,
+            self.packer, self.CAN, scc_enabled, self.accel_last, scc_accel, scc_stopping, scc_gas_override,
             set_speed_in_units, hud_control, cruise_info=CS.cruise_info if ccnc_non_hda2 else None, **acc_kwargs,
           ))
-        self.accel_last = accel
+        self.accel_last = scc_accel_value if ev9_long_active else scc_accel
     else:
       # button presses
       if (self.frame - self.last_button_frame) * DT_CTRL > 0.25:

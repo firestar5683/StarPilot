@@ -2848,6 +2848,27 @@
         "ui_type": "toggle"
       },
       {
+        "key": "KiaEv9ClusterSideObjectsEnabled",
+        "label": "Reconstruct Blind-Spot Alerts",
+        "description": "Recreate EV9 blind-spot warnings from qualified corner-radar data only when the native ADAS source is unavailable.",
+        "data_type": "bool",
+        "ui_type": "toggle"
+      },
+      {
+        "key": "KiaEv9ClusterHeadwayEnabled",
+        "label": "Show Reconstructed Headway Line",
+        "description": "Show the stock-style speed-based following-distance line on the EV9 cluster. This changes display output only.",
+        "data_type": "bool",
+        "ui_type": "toggle"
+      },
+      {
+        "key": "KiaEv9ClusterObjectsEnabled",
+        "label": "Show Reconstructed Vehicle Objects",
+        "description": "Show qualified primary and adjacent vehicle objects on the EV9 cluster. This changes display output only.",
+        "data_type": "bool",
+        "ui_type": "toggle"
+      },
+      {
         "key": "VoltSNG",
         "label": "Stop-and-Go Hack",
         "description": "Force stop-and-go on the 2017 Chevy Volt.",

@@ -43,6 +43,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"EV9LongPreinitPanda", {PERSISTENT, BOOL, "0"}},
     {"KiaEv9ClusterLaneChangeAnimationEnabled", {PERSISTENT, BOOL, "0"}},
     {"KiaEv9ClusterSideObjectsEnabled", {PERSISTENT, BOOL, "1"}},
+    {"KiaEv9ClusterHeadwayEnabled", {PERSISTENT, BOOL, "0"}},
+    {"KiaEv9ClusterObjectsEnabled", {PERSISTENT, BOOL, "0"}},
     {"AlphaLongitudinalEnabled", {PERSISTENT, BOOL}},
     {"ExperimentalLongitudinalEnabled", {PERSISTENT, BOOL}},
     {"ExperimentalMode", {PERSISTENT, BOOL}},

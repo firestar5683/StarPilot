@@ -96,11 +96,32 @@ def create_angle_adas_cmd(packer, CAN, apply_angle: float, lat_active: bool, tor
   return _create_angle_adas_cmd_msg(packer, CAN, apply_angle, lat_active, torque_reduction_gain)
 
 
+def create_ev9_direct_angle_command(packer, CAN, apply_angle: float, lat_active: bool,
+                                    torque_reduction_gain: float, counter: int = 0):
+  """Send the safety-limited angle directly to EPS when EV9 ADAS TX is disabled."""
+  if 0xCB not in _KIA_EV9_ADRV_LIVE_TEMPLATES:
+    return _create_angle_adas_cmd_msg(packer, CAN, apply_angle, lat_active, torque_reduction_gain)
+
+  values = {
+    "ADAS_ActvACISta": 0,
+    "ADAS_ActvACILvl2Sta": 2 if lat_active else 1,
+    "ADAS_StrAnglReqVal": apply_angle,
+    "ADAS_ACIAnglTqRedcGainVal": torque_reduction_gain if lat_active else 0.0,
+    "FCA_ESA_ActvSta": 0,
+    "FCA_ESA_TqBstGainVal": 0.0,
+  }
+  return _create_ev9_adrv_message_with_signals(
+    packer, CAN, 0xCB, counter, "ADAS_CMD_35_10ms", values,
+  )
+
+
 def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_torque, apply_angle,
                              lfa_base_values=None, lkas_base_values=None, lka_icon=None):
   if lka_icon is None:
     lka_icon = 2 if enabled else 1
   angle_lkas_alt = CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING and CP.flags & HyundaiFlags.CANFD_LKA_STEERING_ALT
+  if CP.carFingerprint == CAR.KIA_EV9 and angle_lkas_alt and not lat_active:
+    lka_icon = 1
 
   control_values = {
     "LKA_MODE": 2,
@@ -129,63 +150,66 @@ def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_torque,
     lfa_values["NEW_SIGNAL_2"] = 0
     lfa_values["DAMP_FACTOR"] = 100  # can potentially tuned for better perf [3, 200]
 
-  if CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING and CP.flags & HyundaiFlags.CANFD_LKA_STEERING_ALT:
+  if angle_lkas_alt:
     lkas_values["ADAS_StrAnglReqVal"] = apply_angle
     lkas_values["LKAS_ANGLE_ACTIVE"] = 2 if lat_active else 1
     lkas_values["ADAS_ACIAnglTqRedcGainVal"] = apply_torque if lat_active else 0.0
-    if angle_lkas_alt:
-      if lat_active:
-        lkas_values = {
-          "LKA_OptUsmSta": 0,
-          "LKA_RcgSta": 3,
-          "LKA_LHLnWrnSta": 0,
-          "LKA_RHLnWrnSta": 0,
-          "LKA_HndsoffSnd": 0,
-          "LKA_StrSnd": 0,
-          "LKA_SysIndReq": 2,
-          "StrTqReqVal": 0,
-          "ActToiSta": 0,
-          "ToiFltSta": 0,
-          "LFA_BUTTON": 0,
-          "LKA_SysWrn": 0,
-          "Damping_Gain": 100,
-          "LKAS_ANGLE_ACTIVE": 2,
-          "LKA_UsmMod": 0,
-          "ADAS_StrAnglReqVal": apply_angle,
-          "ADAS_ACIAnglTqRedcGainVal": apply_torque,
-        }
-      else:
-        lkas_values.update({
-          "LKA_OptUsmSta": 0,
-          "LKA_MODE": 0,
-          "LKA_RcgSta": 0,
-          "LKA_AVAILABLE": 0,
-          "LKA_LHLnWrnSta": 0,
-          "LKA_RHLnWrnSta": 0,
-          "LKA_WARNING": 0,
-          "LKA_HndsoffSnd": 0,
-          "LKA_StrSnd": 2,
-          "LKA_SysIndReq": 1,
-          "LKA_ICON": 1,
-          "FCA_SYSWARN": 0,
-          "StrTqReqVal": 0,
-          "TORQUE_REQUEST": 0,
-          "ActToiSta": 0,
-          "STEER_REQ": 0,
-          "ToiFltSta": 0,
-          "LFA_BUTTON": 0,
-          "LKA_SysWrn": 0,
-          "LKA_ASSIST": 0,
-          "Damping_Gain": 0,
-          "STEER_MODE": 0,
-          "NEW_SIGNAL_2": 0,
-          "LKAS_ANGLE_ACTIVE": 1,
-          "LKA_UsmMod": 0,
-          "HAS_LANE_SAFETY": 0,
-          "ADAS_ACIAnglTqRedcGainVal": 0.0,
-          "DAMP_FACTOR": 0,
-        })
-        lkas_values["ADAS_StrAnglReqVal"] = lkas_base_values.get("ADAS_StrAnglReqVal", apply_angle) if lkas_base_values else apply_angle
+    if lat_active:
+      lkas_values = {
+        "LKA_OptUsmSta": 0,
+        "LKA_RcgSta": 3,
+        "LKA_LHLnWrnSta": 0,
+        "LKA_RHLnWrnSta": 0,
+        "LKA_HndsoffSnd": 0,
+        "LKA_StrSnd": 0,
+        "LKA_SysIndReq": 2,
+        "StrTqReqVal": 0,
+        "ActToiSta": 0,
+        "ToiFltSta": 0,
+        "LFA_BUTTON": 0,
+        "LKA_SysWrn": 0,
+        "Damping_Gain": 100,
+        "LKAS_ANGLE_ACTIVE": 2,
+        "LKA_UsmMod": 0,
+        "ADAS_StrAnglReqVal": apply_angle,
+        "ADAS_ACIAnglTqRedcGainVal": apply_torque,
+      }
+    elif CP.carFingerprint == CAR.KIA_EV9 and lkas_base_values:
+      # Match the common HKG path: preserve the camera's UI/status template and
+      # override only the steering command fields while openpilot owns the bus.
+      lkas_values["ADAS_StrAnglReqVal"] = lkas_base_values.get("ADAS_StrAnglReqVal", apply_angle)
+    else:
+      lkas_values.update({
+        "LKA_OptUsmSta": 0,
+        "LKA_MODE": 0,
+        "LKA_RcgSta": 0,
+        "LKA_AVAILABLE": 0,
+        "LKA_LHLnWrnSta": 0,
+        "LKA_RHLnWrnSta": 0,
+        "LKA_WARNING": 0,
+        "LKA_HndsoffSnd": 0,
+        "LKA_StrSnd": 2,
+        "LKA_SysIndReq": 1,
+        "LKA_ICON": 1,
+        "FCA_SYSWARN": 0,
+        "StrTqReqVal": 0,
+        "TORQUE_REQUEST": 0,
+        "ActToiSta": 0,
+        "STEER_REQ": 0,
+        "ToiFltSta": 0,
+        "LFA_BUTTON": 0,
+        "LKA_SysWrn": 0,
+        "LKA_ASSIST": 0,
+        "Damping_Gain": 0,
+        "STEER_MODE": 0,
+        "NEW_SIGNAL_2": 0,
+        "LKAS_ANGLE_ACTIVE": 1,
+        "LKA_UsmMod": 0,
+        "HAS_LANE_SAFETY": 0,
+        "ADAS_ACIAnglTqRedcGainVal": 0.0,
+        "DAMP_FACTOR": 0,
+      })
+      lkas_values["ADAS_StrAnglReqVal"] = lkas_base_values.get("ADAS_StrAnglReqVal", apply_angle) if lkas_base_values else apply_angle
 
   ret = []
   if CP.flags & HyundaiFlags.CANFD_LKA_STEERING:
@@ -225,6 +249,51 @@ def create_inactive_angle_steering_messages(packer, CAN, steering_angle: float):
     packer.make_can_msg("LFA", CAN.ECAN, lfa_values),
     create_angle_adas_cmd(packer, CAN, steering_angle, False, 0.0),
   ]
+
+
+def create_ev9_inactive_steering_messages(packer, CAN, steering_angle: float, counter: int = 0):
+  """Recreate the EV9's parked ECAN steering status without actuation.
+
+  The stock ADAS ECU broadcasts both frames at 100 Hz. Keep every actuation
+  bit inactive, use the live measured angle for the redundant angle field,
+  and request zero torque-reduction gain.
+  """
+  lfa_values = {
+    "LKA_MODE": 2,
+    "LKA_ICON": 1,
+    "TORQUE_REQUEST": 0,
+    "LKA_ASSIST": 0,
+    "STEER_REQ": 0,
+    "STEER_MODE": 0,
+    "HAS_LANE_SAFETY": 0,
+    "NEW_SIGNAL_1": 0,
+    "NEW_SIGNAL_2": 0,
+    "DAMP_FACTOR": 100,
+  }
+  adas_cmd_values = {
+    "ADAS_ActvACISta": 0,
+    "ADAS_ActvACILvl2Sta": 1,
+    "ADAS_StrAnglReqVal": steering_angle,
+    "ADAS_ACIAnglTqRedcGainVal": 0.0,
+    "FCA_ESA_ActvSta": 0,
+    "FCA_ESA_TqBstGainVal": 0.0,
+  }
+  messages = [
+    _create_ev9_adrv_message_with_signals(packer, CAN, 0x12A, counter, "LFA", lfa_values)
+    if 0x12A in _KIA_EV9_ADRV_LIVE_TEMPLATES else packer.make_can_msg("LFA", CAN.ECAN, lfa_values),
+    _create_ev9_adrv_message_with_signals(packer, CAN, 0xCB, counter,
+                                           "ADAS_CMD_35_10ms", adas_cmd_values)
+    if 0xCB in _KIA_EV9_ADRV_LIVE_TEMPLATES else
+    _create_angle_adas_cmd_msg(packer, CAN, steering_angle, False, 0.0),
+  ]
+  ret = []
+  for address, dat, bus in messages:
+    if address in _KIA_EV9_ADRV_COUNTER_BASES:
+      dat = bytearray(dat)
+      dat[2] = (_KIA_EV9_ADRV_COUNTER_BASES[address] + counter + 1) & 0xFF
+      _update_checksum(packer, address, dat)
+    ret.append(CanData(address, bytes(dat), bus))
+  return ret
 
 
 def create_suppress_lfa(packer, CAN, lfa_block_msg, lka_steering_alt):
@@ -295,6 +364,13 @@ def create_lfahda_cluster(packer, CAN, enabled, base_values=None, lfa_icon=None)
     "LFA_ICON": lfa_icon,
   })
   return packer.make_can_msg("LFAHDA_CLUSTER", CAN.ECAN, values)
+
+
+def ccnc_lane_curvature_from_steering_angle(steering_angle_deg: float) -> int:
+  curvature_index = max(-15, min(int(steering_angle_deg / 4.5), 15))
+  if curvature_index >= 0:
+    return 15 + curvature_index
+  return 31 if curvature_index == -1 else 13 - abs(curvature_index + 15)
 
 
 def create_ccnc(packer, CAN, openpilot_longitudinal, enabled, hud, left_blinker, right_blinker, msg_161, msg_162, msg_1b5,
@@ -440,12 +516,37 @@ def create_ccnc_blindspot_status_messages(packer, CP, CAN, counter, left_blindsp
     "OSMrrLamp_RtIndSta": right_osm_state,
   }
 
-  return [
-    _create_ccnc_adrv_message_with_signals(
+  if CP.carFingerprint != CAR.KIA_EV9:
+    return [
+      _create_ccnc_adrv_message_with_signals(
       packer, CP, CAN, 0x1BA, counter, "BLINDSPOTS_REAR_CORNERS", desired_fields,
-    ),
-    # No retained radar input reproduces the stock RCTA target decision across routes.
-    _create_ccnc_adrv_message(CP.carFingerprint, 0x1E5, CAN.ECAN, counter),
+      ),
+      # No retained radar input reproduces the stock RCTA target decision across routes.
+      _create_ccnc_adrv_message(CP.carFingerprint, 0x1E5, CAN.ECAN, counter),
+    ]
+
+  rear_message = _create_ev9_adrv_message_with_signals(
+    packer, CAN, 0x1BA, counter, "BLINDSPOTS_REAR_CORNERS", desired_fields,
+  )
+  # route16e/170 prove that these undecoded companion bytes move with the
+  # mirror lamp and audible-warning windows. Preserve the live template and
+  # patch only those correlated bytes before regenerating integrity fields.
+  dat = bytearray(rear_message.dat)
+  dat[17] = 0x01 | (left_osm_state << 2) | (right_osm_state << 5)
+  if left_sound_active or right_sound_active:
+    dat[21] = 0x60
+    dat[22] = 0x08
+  else:
+    dat[21] = 0x00
+    dat[22] = 0x00
+  crc = hkg_can_fd_checksum(0x1BA, None, dat)
+  dat[0] = crc & 0xFF
+  dat[1] = (crc >> 8) & 0xFF
+  rear_message = CanData(0x1BA, bytes(dat), CAN.ECAN)
+
+  return [
+    rear_message,
+    create_ev9_adrv_message(0x1E5, CAN.ECAN, counter),
   ]
 
 
@@ -860,6 +961,7 @@ _CCNC_ADRV_TEMPLATES = {
     0x38C: bytes.fromhex("000000f71f000000000000000000000000000000000000000000000000000000"),
   },
 }
+
 _CCNC_ADRV_PERIODS = {
   CAR.KIA_EV9: {
     0x160: 2,
@@ -872,11 +974,71 @@ _CCNC_ADRV_PERIODS = {
   },
 }
 
+_KIA_EV9_ADRV_TEMPLATES = {
+  0x160: bytes.fromhex("0000000100000000fffc0100a8001000"),
+  0x1DA: bytes.fromhex("0000002200110000000000000000000000000000000000000000000000000000"),
+  0x1EA: bytes.fromhex("000000080000000000000000000000ff000000000000000000000000000f0f00"),
+  0x200: bytes.fromhex("00000014801a0000"),
+  0x345: bytes.fromhex("0000001500560000"),
+  # Neutral parked-state bodies captured immediately before suppressing the
+  # EV9 ADAS ECU. Bytes 0-2 are regenerated as CRC/counter below.
+  0x161: bytes.fromhex("0000000000000000c0fff0c003000000000000000000000000ff000000000000"),
+  0x162: bytes.fromhex("0000002700000000c0ff00000000000000000000000000000000000000000000"),
+  0x1BA: bytes.fromhex("00000000000000880200000000000000000000000000000f"),
+  0x1E5: bytes.fromhex("00000000000000000000220300000080"),
+  0x1E0: bytes.fromhex("00000002000000000000000000000000"),
+  0x38C: bytes.fromhex("000000f71f000000000000000000000000000000000000000000000000000000"),
+}
+
+# Per-process OFF -> READY continuity captured immediately before suppressing
+# ADAS_DRV. These are reset on every pre-fingerprint attempt. Preserve the
+# READY-state body and continue its rolling counter instead of jumping back to
+# an ignition-on template/counter zero.
+_KIA_EV9_ADRV_LIVE_TEMPLATES: dict[int, bytes] = {}
+_KIA_EV9_ADRV_COUNTER_BASES: dict[int, int] = {}
+_KIA_EV9_SCC_CONTROL_LIVE_TEMPLATE: bytes | None = None
+_KIA_EV9_SCC_CONTROL_COUNTER_BASE = 0
+
+
+def ev9_scc_control_baseline_available() -> bool:
+  return _KIA_EV9_SCC_CONTROL_LIVE_TEMPLATE is not None
+
+
+def set_ev9_adrv_baselines(messages: list[CanData]) -> None:
+  global _KIA_EV9_SCC_CONTROL_LIVE_TEMPLATE, _KIA_EV9_SCC_CONTROL_COUNTER_BASE
+  _KIA_EV9_ADRV_LIVE_TEMPLATES.clear()
+  _KIA_EV9_ADRV_COUNTER_BASES.clear()
+  _KIA_EV9_SCC_CONTROL_LIVE_TEMPLATE = None
+  _KIA_EV9_SCC_CONTROL_COUNTER_BASE = 0
+  for msg in messages:
+    dat = bytes(msg.dat)
+    if msg.src == 0 and msg.address == 0x100 and len(dat) == 24:
+      # Continue the resident counter, but never adopt its complete 0x100
+      # body. The resident can observe the vehicle's physical identity tuple;
+      # route 1ac proved that body does not keep MRR35 tracking alive. Both
+      # sides of handoff must use the verified ADAS_DRV radar heartbeat below.
+      _KIA_EV9_ADRV_COUNTER_BASES[msg.address] = dat[2]
+    elif msg.src == 1 and msg.address in (0x12A, 0xCB) and len(dat) in (16, 24):
+      _KIA_EV9_ADRV_COUNTER_BASES[msg.address] = dat[2]
+      _KIA_EV9_ADRV_LIVE_TEMPLATES[msg.address] = dat
+    elif msg.src == 1 and msg.address in _KIA_EV9_ADRV_TEMPLATES and len(dat) == len(_KIA_EV9_ADRV_TEMPLATES[msg.address]):
+      _KIA_EV9_ADRV_COUNTER_BASES[msg.address] = dat[2]
+      # 0x160 deliberately reports AEB unavailable after suppression; only
+      # inherit its counter. Every other support/status frame inherits the
+      # complete READY-state body.
+      if msg.address != 0x160:
+        _KIA_EV9_ADRV_LIVE_TEMPLATES[msg.address] = dat
+    elif msg.src == 1 and msg.address == 0x1A0 and len(dat) == 32:
+      _KIA_EV9_SCC_CONTROL_LIVE_TEMPLATE = dat
+      _KIA_EV9_SCC_CONTROL_COUNTER_BASE = dat[2]
 
 def create_accelerator_brake_alt_spoof(bus: int, counter: int, brake_pressed: bool, accelerator_pressed: bool,
                                        car_fingerprint=None) -> CanData:
-  template = _KIA_EV9_ACCEL_BRAKE_ALT_TEMPLATE if car_fingerprint == CAR.KIA_EV9 else _ACCEL_BRAKE_ALT_TEMPLATE
+  ev9 = str(car_fingerprint) == "KIA_EV9"
+  template = _KIA_EV9_ACCEL_BRAKE_ALT_TEMPLATE if ev9 else _ACCEL_BRAKE_ALT_TEMPLATE
   d = bytearray(template)
+  if ev9 and 0x100 in _KIA_EV9_ADRV_COUNTER_BASES:
+    counter += _KIA_EV9_ADRV_COUNTER_BASES[0x100] + 1
   d[2] = counter & 0xFF                              # COUNTER (bit 16, 8-bit)
   d[4] = (d[4] & ~0x01) | (0x01 if brake_pressed else 0x00)         # BRAKE_PRESSED (bit 32)
   d[22] = (d[22] & ~0x01) | (0x01 if accelerator_pressed else 0x00) # ACCELERATOR_PEDAL_PRESSED (bit 176)
@@ -895,6 +1057,21 @@ def _create_ccnc_adrv_message(car_fingerprint, address: int, bus: int, counter: 
   return CanData(address, bytes(d), bus)
 
 
+def create_ev9_adrv_message(address: int, bus: int, counter: int) -> CanData:
+  """Recreate a captured EV9 ADAS support payload with a fresh counter and CRC."""
+  template = _KIA_EV9_ADRV_LIVE_TEMPLATES.get(address)
+  if template is None:
+    template = _KIA_EV9_ADRV_TEMPLATES[address]
+  d = bytearray(template)
+  if address in _KIA_EV9_ADRV_COUNTER_BASES:
+    counter += _KIA_EV9_ADRV_COUNTER_BASES[address] + 1
+  d[2] = counter & 0xFF
+  crc = hkg_can_fd_checksum(address, None, d)
+  d[0] = crc & 0xFF
+  d[1] = (crc >> 8) & 0xFF
+  return CanData(address, bytes(d), bus)
+
+
 def _set_ccnc_message_signals(packer, message_name: str, dat: bytearray, values: dict) -> None:
   dbc_msg = packer.dbc.name_to_msg[message_name]
   for name, value in values.items():
@@ -903,6 +1080,27 @@ def _set_ccnc_message_signals(packer, message_name: str, dat: bytearray, values:
     if ival < 0:
       ival = (1 << sig.size) + ival
     _set_value(dat, sig, ival)
+
+
+def _create_ev9_adrv_message_with_signals(packer, CAN, address: int, counter: int,
+                                           message_name: str, values: dict) -> CanData:
+  """Apply only decoded signal deltas to the complete captured EV9 payload."""
+  msg = create_ev9_adrv_message(address, CAN.ECAN, counter)
+  dat = bytearray(msg.dat)
+  dbc_msg = packer.dbc.name_to_msg[message_name]
+  # Preserve every unknown bit in the captured body and overwrite only the
+  # explicitly named DBC signals. XOR deltas are not valid when a captured
+  # field already contains a nonzero value.
+  for name, value in values.items():
+    sig = dbc_msg.sigs[name]
+    ival = int(np.floor((value - sig.offset) / sig.factor + 0.5))
+    if ival < 0:
+      ival = (1 << sig.size) + ival
+    _set_value(dat, sig, ival)
+  crc = hkg_can_fd_checksum(address, None, dat)
+  dat[0] = crc & 0xFF
+  dat[1] = (crc >> 8) & 0xFF
+  return CanData(address, bytes(dat), CAN.ECAN)
 
 
 def _create_ccnc_adrv_message_with_signals(packer, CP, CAN, address: int, counter: int,
@@ -948,20 +1146,126 @@ def create_ccnc_acc_control(packer, CAN, enabled: bool, accel: float,
     # Stock CCNC LKA-long routes use raw 7. The DBC's physical range is stale.
     "DISTANCE_SETTING": 7 if enabled else 0,
   }
-
   return packer.make_can_msg("SCC_CONTROL", CAN.ECAN, values)
+
+
+def create_ev9_acc_control(packer, CAN, counter: int, enabled: bool, accel_raw: float, accel_value: float,
+                           stop_request: bool, cruise_standstill: bool, gas_override: bool, set_speed: float,
+                           main_mode_acc: int, lead_distance: float, lead_rel_speed: float, lead_visible: bool,
+                           v_ego: float, jerk_lower: float = 0.7, jerk_upper: float = 0.7) -> CanData:
+  """Patch an EV9 SCC_CONTROL command into the last stock payload.
+
+  The stock EV9 routes use different constants and object sentinels than the
+  generic EV6 path. Preserve every unnamed bit, overwrite the complete command
+  surface, continue the captured counter, and regenerate the CRC.
+  """
+  if not enabled or gas_override or stop_request:
+    accel_raw = 0.0
+    accel_value = 0.0
+
+  lead_visible = bool(lead_visible)
+  desired_headway = min(max(round(1.625 * max(v_ego, 0.0), 1), 3.5), 204.6) if enabled else 204.6
+  values = {
+    "ACCMode": 0 if not enabled else (2 if gas_override else 1),
+    "MainMode_ACC": int(bool(main_mode_acc)),
+    "StopReq": 1 if stop_request and enabled else 0,
+    "CRUISE_STANDSTILL": 1 if cruise_standstill and stop_request and enabled else 0,
+    "aReqValue": accel_value,
+    "aReqRaw": accel_raw,
+    "VSetDis": set_speed,
+    "JerkLowerLimit": jerk_lower if enabled else 1.0,
+    "JerkUpperLimit": jerk_upper if enabled else 3.0,
+    "ACC_ObjDist": float(np.clip(lead_distance, 0.0, 204.7)) if lead_visible else 204.6,
+    "ACC_ObjRelSpd": float(np.clip(lead_rel_speed, -16.4, 34.7)) if lead_visible else 34.6,
+    "ObjValid": 0 if lead_visible else 1,
+    "OBJ_STATUS": 2 if enabled and lead_visible else 0,
+    "NEW_SIGNAL_3": 2 if lead_visible else 0,
+    "NEW_SIGNAL_15": desired_headway,
+    "SET_ME_2": 4,
+    "SET_ME_3": 3,
+    "SET_ME_TMP_64": 0x64,
+    # The EV9 stock routes use raw 7. The DBC's physical range is stale.
+    "DISTANCE_SETTING": 7 if enabled else 0,
+  }
+
+  if _KIA_EV9_SCC_CONTROL_LIVE_TEMPLATE is None:
+    return packer.make_can_msg("SCC_CONTROL", CAN.ECAN, values)
+
+  dat = bytearray(_KIA_EV9_SCC_CONTROL_LIVE_TEMPLATE)
+  dbc_msg = packer.dbc.name_to_msg["SCC_CONTROL"]
+  for name, value in values.items():
+    sig = dbc_msg.sigs[name]
+    ival = int(np.floor((value - sig.offset) / sig.factor + 0.5))
+    if ival < 0:
+      ival = (1 << sig.size) + ival
+    _set_value(dat, sig, ival)
+  dat[2] = (_KIA_EV9_SCC_CONTROL_COUNTER_BASE + counter + 1) & 0xFF
+  crc = hkg_can_fd_checksum(0x1A0, None, dat)
+  dat[0] = crc & 0xFF
+  dat[1] = (crc >> 8) & 0xFF
+  return CanData(0x1A0, bytes(dat), CAN.ECAN)
+
+
+def create_ev9_adrv_160(bus: int, counter: int) -> CanData:
+  """Recreate EV9 0x160 while truthfully showing AEB disabled."""
+  return create_ev9_adrv_message(0x160, bus, counter)
 
 
 def create_ccnc_angle_long_status_messages(packer, CP, CAN, counter: int, enabled: bool = False,
                                          main_cruise_enabled: bool = False, hud=None, out=None,
                                          is_metric: bool = True, steering_available: bool = False,
-                                         steering_active: bool = False, hba_icon: int = 0) -> list[CanData]:
+                                         steering_active: bool = False, hba_icon: int = 0,
+                                         dash_scene=None) -> list[CanData]:
   cruise_speed = round(out.vCruiseCluster * (1 if is_metric else CV.KPH_TO_MPH)) if out is not None else 0
   display_speed = (40 if is_metric else 25) if cruise_speed > (145 if is_metric else 90) else max(cruise_speed, 0)
   main_standby = bool(main_cruise_enabled and not enabled)
+  display_active = bool(enabled or main_standby)
+  objects = getattr(dash_scene, "objects", None)
+  primary = getattr(objects, "primary", None)
+  left = getattr(objects, "left", None)
+  right = getattr(objects, "right", None)
+  left_rear = getattr(objects, "left_rear", None)
+  right_rear = getattr(objects, "right_rear", None)
+  objects_active = bool(display_active and objects is not None and getattr(dash_scene, "objects_enabled", True))
+  side_objects_active = bool(objects_active and getattr(dash_scene, "side_objects_enabled", True))
+  primary_object_state = (2 if enabled else 1) if objects_active and primary is not None else 0
+  target_line_distance = getattr(dash_scene, "target_line_distance", None)
+  speed_limit_raw = int(getattr(dash_scene, "speed_limit_raw", 0))
+  speed_limit_raw = speed_limit_raw if 1 <= speed_limit_raw <= 253 else 0
+  speed_limit_warning = bool(getattr(dash_scene, "speed_limit_warning", False))
+  lane_outline = getattr(dash_scene, "lane_outline", None)
+  lane_change_direction = getattr(dash_scene, "lane_change_direction", None)
+  lane_change_active = bool(display_active and lane_change_direction in ("left", "right"))
+  headway_enabled = bool(display_active and getattr(dash_scene, "headway_enabled", True))
+  desired_curvature = float(getattr(lane_outline, "desired_curvature", 0.0))
+  lane_geometry_valid = bool(np.isfinite(desired_curvature) and np.isfinite(CP.wheelbase) and np.isfinite(CP.steerRatio))
+  left_lane_visible = bool(display_active and lane_geometry_valid and getattr(lane_outline, "left_visible", False))
+  right_lane_visible = bool(display_active and lane_geometry_valid and getattr(lane_outline, "right_visible", False))
+  lane_curvature = 15
+  if left_lane_visible or right_lane_visible:
+    # modelV2 curvature is positive right, opposite Hyundai's steering-angle sign.
+    steering_angle_deg = -np.degrees(np.arctan(desired_curvature * CP.wheelbase)) * CP.steerRatio
+    lane_curvature = ccnc_lane_curvature_from_steering_angle(steering_angle_deg)
+  if not headway_enabled:
+    target_distance = 204.6
+  elif target_line_distance is not None:
+    target_distance = float(np.clip(target_line_distance, 0.1, 204.7))
+  else:
+    target_distance = float(np.clip(1.626 * max(float(getattr(out, "vEgo", 0.0)), 0.0), 0.0, 204.7))
+
+  def object_distance(obj) -> float:
+    return float(np.clip(float(obj.distance) - 0.2, 0.1, 204.7))
+
+  def rear_object_distance(obj) -> float:
+    return float(np.clip(float(obj.distance) - 0.2, 0.1, 25.5))
+
   values_161 = {
     "FCA_ICON": 1,       # orange: FCA unavailable
     "FCA_ALT_ICON": 0,
+    # The captured neutral template has this historical orange LKAS bit set.
+    # It is useful during Panda-owned preinit, but host reconstruction must
+    # clear it after handoff while retaining only the orange FCA indication.
+    "LKA_ICON": 0,
     "FCA_IMAGE": 0,
     "ALERTS_1": 0,
     "ALERTS_2": 0,
@@ -975,20 +1279,70 @@ def create_ccnc_angle_long_status_messages(packer, CP, CAN, counter: int, enable
     "LFA_ICON": (2 if steering_active else 1) if steering_available else 0,
     "HBA_ICON": hba_icon if hba_icon in (1, 2) else 0,
     "HDA_ICON": 2 if enabled else 1 if main_standby else 0,
-    "TARGET": 3 if enabled else 0,
+    "CENTERLINE": 0,
+    "TARGET": 3 if headway_enabled else 0,
+    "TARGET_DISTANCE": target_distance,
+    "LANELINE_LEFT": 4 if left_lane_visible and bool(getattr(hud, "leftLaneDepart", False)) else
+      6 if left_lane_visible and lane_change_active else 2 if left_lane_visible else 0,
+    "LANELINE_LEFT_POSITION": 15,
+    "LANELINE_RIGHT": 4 if right_lane_visible and bool(getattr(hud, "rightLaneDepart", False)) else
+      6 if right_lane_visible and lane_change_active else 2 if right_lane_visible else 0,
+    "LANELINE_RIGHT_POSITION": 15,
+    "LANELINE_CURVATURE": lane_curvature,
+    "LANE_ZOOM": 1,
+    "LCA_LEFT_ICON": 2 if lane_change_active else 1 if enabled or main_standby else 0,
+    "LCA_RIGHT_ICON": 2 if lane_change_active else 1 if enabled or main_standby else 0,
     "SETSPEED": 3 if enabled else 1 if main_standby else 0,
     "SETSPEED_HUD": 2 if enabled else 1 if main_standby else 0,
     "SETSPEED_SPEED": display_speed if enabled or main_standby else 255,
     "DISTANCE": hud.leadDistanceBars if enabled and hud is not None else 0,
     "DISTANCE_SPACING": 3 if enabled or main_standby else 0,
+    "DISTANCE_LEAD": primary_object_state,
     "DISTANCE_CAR": 2 if enabled else 1 if main_standby else 0,
+    "BCA_LEFT": 0,
+    "BCA_RIGHT": 0,
+    "LCA_LEFT_ARROW": 2 if lane_change_direction == "left" and lane_change_active else 0,
+    "LCA_RIGHT_ARROW": 2 if lane_change_direction == "right" and lane_change_active else 0,
   }
   values_162 = {fault: 0 for fault in (
     "FAULT_FSS", "FAULT_FCA", "FAULT_LSS", "FAULT_SLA", "FAULT_HDA", "FAULT_DAS", "FAULT_LFA", "FAULT_DAW",
     "FAULT_HBA", "FAULT_ESS",
   )}
-  values_162["VIBRATE"] = 0
+  values_162.update({
+    # Stock EV9 keeps the US/neutral sign context (raw 0x27) when no sign is
+    # present. Clearing it to 0x00 diverges from both stock and pre-reconstruction
+    # routes, so only the speed value itself should disappear.
+    "COUNTRY": 7,
+    "SPEEDLIMIT": speed_limit_raw,
+    "SPEEDLIMIT_FLASH": 4 if speed_limit_warning and speed_limit_raw else 2,
+    "SIGNS": 0,
+    "SPEEDLIMIT_WEATHER": 0,
+    "VIBRATE": 0,
+    "LEAD": primary_object_state,
+    "LEAD_DISTANCE": object_distance(primary) if objects_active and primary is not None else 0.0,
+    "LEAD_LATERAL": 0.0,
+    # Stock EV9 routes never populated the alternate slot. leadTwo often
+    # represents the same fused object and must not create a duplicate car.
+    "LEAD_ALT": 0,
+    "LEAD_ALT_DISTANCE": 0.0,
+    "LEAD_ALT_LATERAL": 0.0,
+    "LEAD_LEFT": 1 if side_objects_active and left is not None else 0,
+    "LEAD_LEFT_DISTANCE": object_distance(left) if side_objects_active and left is not None else 0.0,
+    "LEAD_LEFT_LATERAL": 3.0 if side_objects_active and left is not None else 0.0,
+    "LEAD_RIGHT": 1 if side_objects_active and right is not None else 0,
+    "LEAD_RIGHT_DISTANCE": object_distance(right) if side_objects_active and right is not None else 0.0,
+    "LEAD_RIGHT_LATERAL": 3.0 if side_objects_active and right is not None else 0.0,
+    # The rear fields can encode a second qualified near-side track. Most stock
+    # fixed 25 m markers have no trustworthy retained source, so do not derive
+    # them from the independently reconstructed mirror-warning decision.
+    "LEAD_LEFT_REAR_STATUS": 1 if side_objects_active and left_rear is not None else 0,
+    "LEAD_LEFT_REAR_DISTANCE": rear_object_distance(left_rear) if side_objects_active and left_rear is not None else 0.0,
+    "LEAD_LEFT_REAR_LATERAL": 3.0 if side_objects_active and left_rear is not None else 0.0,
+    "LEAD_RIGHT_REAR_STATUS": 1 if side_objects_active and right_rear is not None else 0,
+    "LEAD_RIGHT_REAR_DISTANCE": rear_object_distance(right_rear) if side_objects_active and right_rear is not None else 0.0,
+    "LEAD_RIGHT_REAR_LATERAL": 3.0 if side_objects_active and right_rear is not None else 0.0,
+  })
   return [
-    _create_ccnc_adrv_message_with_signals(packer, CP, CAN, 0x161, counter, "CCNC_0x161", values_161),
-    _create_ccnc_adrv_message_with_signals(packer, CP, CAN, 0x162, counter, "CCNC_0x162", values_162),
+    _create_ev9_adrv_message_with_signals(packer, CAN, 0x161, counter, "CCNC_0x161", values_161),
+    _create_ev9_adrv_message_with_signals(packer, CAN, 0x162, counter, "CCNC_0x162", values_162),
   ]

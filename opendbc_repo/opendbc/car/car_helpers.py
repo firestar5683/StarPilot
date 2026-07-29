@@ -205,11 +205,16 @@ def can_fingerprint(can_recv: CanRecvCallable) -> tuple[str | None, dict[int, di
 
 # **** for use live only ****
 def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multiplexing: ObdCallback, num_pandas: int,
-                cached_params: CarParamsT | None) -> tuple[str | None, dict, str, list[CarParams.CarFw], CarParams.FingerprintSource, bool]:
+                cached_params: CarParamsT | None, allow_fw_query: bool = True) -> \
+                  tuple[str | None, dict, str, list[CarParams.CarFw], CarParams.FingerprintSource, bool]:
   fixed_fingerprint = os.environ.get('FINGERPRINT', "")
   skip_fw_query = os.environ.get('SKIP_FW_QUERY', False)
   disable_fw_cache = os.environ.get('DISABLE_FW_CACHE', False)
   ecu_rx_addrs = set()
+
+  cached_fw_available = cached_params is not None and cached_params.brand != "mock" and len(cached_params.carFw) > 0 and \
+    cached_params.carVin is not VIN_UNKNOWN and not disable_fw_cache
+  skip_fw_query = skip_fw_query or (not allow_fw_query and not cached_fw_available)
 
   if not fixed_fingerprint and Params().get_bool("NAPForcePreAP"):
     fixed_fingerprint = "TESLA_MODEL_S_PREAP"
@@ -218,8 +223,7 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
 
   start_time = time.monotonic()
   if not skip_fw_query:
-    if cached_params is not None and cached_params.brand != "mock" and len(cached_params.carFw) > 0 and \
-       cached_params.carVin is not VIN_UNKNOWN and not disable_fw_cache:
+    if cached_fw_available:
       carlog.warning("Using cached CarParams")
       vin_rx_addr, vin_rx_bus, vin = -1, -1, cached_params.carVin
       car_fw = list(cached_params.carFw)
@@ -277,8 +281,11 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
 
 
 def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multiplexing: ObdCallback, alpha_long_allowed: bool,
-            is_release: bool, params: Params, num_pandas: int = 1, cached_params: CarParamsT | None = None, starpilot_toggles: SimpleNamespace = None):
-  candidate, fingerprints, vin, car_fw, source, exact_match = fingerprint(can_recv, can_send, set_obd_multiplexing, num_pandas, cached_params)
+            is_release: bool, params: Params, num_pandas: int = 1, cached_params: CarParamsT | None = None,
+            starpilot_toggles: SimpleNamespace = None, allow_fw_query: bool = True):
+  candidate, fingerprints, vin, car_fw, source, exact_match = fingerprint(
+    can_recv, can_send, set_obd_multiplexing, num_pandas, cached_params, allow_fw_query,
+  )
   candidate = _normalize_gm_bolt_candidate(candidate, fingerprints)
   candidate = _normalize_gm_volt_candidate(candidate, fingerprints)
   candidate = _normalize_forced_candidate(candidate)

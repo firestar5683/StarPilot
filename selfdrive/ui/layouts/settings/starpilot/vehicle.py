@@ -422,7 +422,7 @@ class VehicleSettingsManagerView(PanelManagerView):
       })
 
     if cs.isEV9:
-      toggles.append({
+      toggles.extend([{
         "key": "EV9LongPreinitPanda",
         "title": tr("EV9 Preinit ADAS Handoff"),
         "subtitle": tr("Suppress the EV9 ADAS ECU during a stationary startup and hand control to openpilot."),
@@ -430,7 +430,25 @@ class VehicleSettingsManagerView(PanelManagerView):
         "set_state": lambda s: self._controller._on_panda_firmware_toggle(
           "EV9LongPreinitPanda", tr("EV9 Preinit ADAS Handoff requires a Panda firmware update."),
         ),
-      })
+      }, {
+        "key": "KiaEv9ClusterSideObjectsEnabled",
+        "title": tr("Reconstruct Blind-Spot Alerts"),
+        "subtitle": tr("Use qualified corner-radar data only when native blind-spot data is unavailable."),
+        "get_state": lambda: self._controller._params.get_bool("KiaEv9ClusterSideObjectsEnabled"),
+        "set_state": lambda s: self._controller._on_toggle("KiaEv9ClusterSideObjectsEnabled"),
+      }, {
+        "key": "KiaEv9ClusterHeadwayEnabled",
+        "title": tr("Show Reconstructed Headway Line"),
+        "subtitle": tr("Show the stock-style speed-based following-distance line."),
+        "get_state": lambda: self._controller._params.get_bool("KiaEv9ClusterHeadwayEnabled"),
+        "set_state": lambda s: self._controller._on_toggle("KiaEv9ClusterHeadwayEnabled"),
+      }, {
+        "key": "KiaEv9ClusterObjectsEnabled",
+        "title": tr("Show Reconstructed Vehicle Objects"),
+        "subtitle": tr("Show qualified primary and adjacent vehicles on the cluster."),
+        "get_state": lambda: self._controller._params.get_bool("KiaEv9ClusterObjectsEnabled"),
+        "set_state": lambda s: self._controller._on_toggle("KiaEv9ClusterObjectsEnabled"),
+      }])
 
     return toggles
 

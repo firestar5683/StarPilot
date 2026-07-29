@@ -130,6 +130,9 @@ PANDA_FIRMWARE_CONFIRMATION_FIELD = "confirmedPandaFirmwareFlash"
 _PANDA_FLASH_REBOOT_LOCK = threading.Lock()
 EV9_SCOPED_PARAM_KEYS = {
   "EV9LongPreinitPanda",
+  "KiaEv9ClusterSideObjectsEnabled",
+  "KiaEv9ClusterHeadwayEnabled",
+  "KiaEv9ClusterObjectsEnabled",
 }
 
 

@@ -11,6 +11,7 @@ RESET_RESPONSE = b''
 # File-based logging for debugging
 ECU_LOG_FILE = "/data/ecu_disable.log"
 
+
 def ecu_log(msg):
   """Write to both carlog and a dedicated log file for debugging."""
   timestamp = datetime.datetime.now().strftime("%Y-%m-%d %H:%M:%S.%f")[:-3]
@@ -23,7 +24,8 @@ def ecu_log(msg):
     pass
 
 
-def disable_ecu(can_recv, can_send, bus=0, addr=0x7d0, sub_addr=None, com_cont_req=b'\x28\x83\x01', timeout=0.1, retry=10, reset=False):
+def disable_ecu(can_recv, can_send, bus=0, addr=0x7d0, sub_addr=None, com_cont_req=b'\x28\x83\x01', timeout=0.1, retry=10,
+                reset=False, session_delay=0.05, require_response=False):
   """Silence an ECU by disabling sending and receiving messages using UDS 0x28.
   The ECU will stay silent as long as openpilot keeps sending Tester Present.
 
@@ -93,6 +95,8 @@ def disable_ecu(can_recv, can_send, bus=0, addr=0x7d0, sub_addr=None, com_cont_r
           # ECU explicitly rejected - don't retry, it won't work
           ecu_log("=== ECU DISABLE REJECTED ===")
           return False
+        elif require_response:
+          ecu_log("=== ECU DISABLE UNCONFIRMED (no response) ===")
         else:
           # No response - consider it sent (ECU might have stopped responding)
           ecu_log("=== ECU DISABLE SENT (no response) ===")
