@@ -205,6 +205,7 @@ struct CarState {
   vehicleSensorsInvalid @52 :Bool;  # invalid steering angle readings, etc.
   lowSpeedAlert @56 :Bool;  # lost steering control due to a dynamic min steering speed
   blockPcmEnable @60 :Bool;  # whether to allow PCM to enable this frame
+  adasUnavailable @63 :Bool; # required ADAS replacement/ownership is unavailable
 
   # cruise state
   cruiseState @10 :CruiseState;
@@ -637,6 +638,8 @@ struct CarParams {
     fcaGiorgio @32;
     rivian @33;
     volkswagenMeb @34;
+    teslaPreap @35;
+    hyundaiCanfdEv9 @36;
   }
 
   enum SteerControlType {

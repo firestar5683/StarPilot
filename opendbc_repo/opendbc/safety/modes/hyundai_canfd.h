@@ -34,16 +34,6 @@
   {0x3B5, e_can, 32, .check_relay = false},  /* cluster blindspot overlay */ \
   {0x3C1, e_can, 8, .check_relay = false},  /* cluster lane change overlay */ \
 
-// Read-only EV9 diagnostics. The tx hook accepts only UDS ReadDTCInformation
-// (19 02 FF) and ISO-TP flow control on these addresses. All state-changing
-// diagnostic services remain blocked.
-#define HYUNDAI_CANFD_EV9_DTC_TX_MSGS(e_can) \
-  {0x730, e_can, 8, .check_relay = false},  /* ADAS */ \
-  {0x7C4, e_can, 8, .check_relay = false},  /* forward camera */ \
-  {0x7C6, e_can, 8, .check_relay = false},  /* combination meter */ \
-  {0x7D0, e_can, 8, .check_relay = false},  /* forward radar */ \
-  {0x7D4, e_can, 8, .check_relay = false},  /* EPS */ \
-
 // *** Addresses checked in rx hook ***
 // EV, ICE, HYBRID: ACCELERATOR (0x35), ACCELERATOR_BRAKE_ALT (0x100), ACCELERATOR_ALT (0x105)
 #define HYUNDAI_CANFD_COMMON_RX_CHECKS(pt_bus)                                                                          \
@@ -72,6 +62,7 @@ static bool hyundai_canfd_angle_steering = false;
 static bool hyundai_ccnc = false;
 static bool hyundai_canfd_angle_long = false;
 static bool hyundai_canfd_lka_alt_drive_gear = false;
+static bool hyundai_canfd_ev9 = false;
 
 static unsigned int hyundai_canfd_get_lka_addr(void) {
   return hyundai_canfd_lka_steering_alt ? 0x110U : 0x50U;
@@ -102,23 +93,6 @@ static bool hyundai_canfd_lka_alt_openpilot_allowed(void) {
 
 static bool hyundai_canfd_lka_alt_stock_forwarding(void) {
   return hyundai_canfd_lka_steering_alt && hyundai_canfd_angle_steering && !hyundai_canfd_lka_alt_openpilot_allowed();
-}
-
-static bool hyundai_canfd_ev9_dtc_addr(const CANPacket_t *msg) {
-  return (msg->bus == 1U) && ((msg->addr == 0x730U) || (msg->addr == 0x7C4U) ||
-                             (msg->addr == 0x7C6U) || (msg->addr == 0x7D0U) ||
-                             (msg->addr == 0x7D4U));
-}
-
-static bool hyundai_canfd_ev9_read_dtc_msg(const CANPacket_t *msg) {
-  if ((GET_LEN(msg) != 8U) || !hyundai_canfd_ev9_dtc_addr(msg)) {
-    return false;
-  }
-
-  const uint32_t first_word = GET_BYTES(msg, 0, 4);
-  const bool read_all_dtcs = first_word == 0xFF021903U;  // ISO-TP SF: 03 19 02 FF
-  const bool flow_control = first_word == 0x00000030U;  // ISO-TP FC: 30 00 00 00
-  return (read_all_dtcs || flow_control) && (GET_BYTES(msg, 4, 4) == 0U);
 }
 
 static void hyundai_canfd_rx_all_hook(const CANPacket_t *msg) {
@@ -240,6 +214,15 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *msg) {
     .angle_deg_to_can = 10,
     .frequency = 100U,
   };
+  // EV9's inactive 0xCB mirrors the physical 14-bit steering-angle sensor.
+  // At parking speeds the wheel can legitimately exceed the active-command
+  // ceiling above. Keep the exact measured-angle check over the full signal
+  // range while retaining the strict 360-degree ceiling for active commands.
+  const AngleSteeringLimits HYUNDAI_CANFD_ANGLE_STEERING_INACTIVE_LIMITS = {
+    .max_angle = 8192,
+    .angle_deg_to_can = 10,
+    .frequency = 100U,
+  };
   const AngleSteeringParams HYUNDAI_CANFD_ANGLE_STEERING_PARAMS = {
     .slip_factor = -0.0006085930193026732,
     .steer_ratio = 13.7,
@@ -256,6 +239,18 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *msg) {
     if (!hyundai_canfd_angle_steering) {
       tx = false;
     } else {
+      // The EV9 uses 0xCB only for direct steering-angle ownership. Keep the
+      // independent emergency-steering/torque-boost channel inactive, exactly
+      // as the resident reconstruction firmware does.
+      if (hyundai_canfd_ev9) {
+        const int aci_active = msg->data[3] & 0xFU;
+        const int fca_esa_active = msg->data[7] & 0x3U;
+        const int fca_esa_gain = msg->data[8];
+        if ((aci_active != 0) || (fca_esa_active != 0) || (fca_esa_gain != 0)) {
+          tx = false;
+        }
+      }
+
       const int lfa_angle_active = (msg->data[3] >> 4U) & 0xFU;
       const bool steer_angle_req = lfa_angle_active == 2;
 
@@ -266,8 +261,15 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *msg) {
       int desired_angle = (((uint32_t)(msg->data[5] & 0x3FU)) << 8) | (uint32_t)msg->data[4];
       desired_angle = to_signed(desired_angle, 14);
 
-      if (steer_angle_cmd_checks_vm(desired_angle, steer_angle_req,
-                                    HYUNDAI_CANFD_ANGLE_STEERING_LIMITS,
+      const AngleSteeringLimits angle_limits = (hyundai_canfd_ev9 && !steer_angle_req) ?
+                                                HYUNDAI_CANFD_ANGLE_STEERING_INACTIVE_LIMITS :
+                                                HYUNDAI_CANFD_ANGLE_STEERING_LIMITS;
+      const bool ev9_active_angle_violation = hyundai_canfd_ev9 && steer_angle_req &&
+                                               safety_max_limit_check(desired_angle,
+                                                                      HYUNDAI_CANFD_ANGLE_STEERING_LIMITS.max_angle,
+                                                                      -HYUNDAI_CANFD_ANGLE_STEERING_LIMITS.max_angle);
+      if (ev9_active_angle_violation ||
+          steer_angle_cmd_checks_vm(desired_angle, steer_angle_req, angle_limits,
                                     HYUNDAI_CANFD_ANGLE_STEERING_PARAMS)) {
         tx = false;
       }
@@ -307,6 +309,18 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *msg) {
     }
   }
 
+  // EV9 angle steering is validated on 0x110 above. Its parallel 0x12A LFA
+  // reconstruction frame must never carry a second torque/assist request.
+  if (hyundai_canfd_ev9 && (msg->addr == 0x12AU)) {
+    const int desired_torque = (((msg->data[6] & 0xFU) << 7U) | (msg->data[5] >> 1U)) - 1024U;
+    const bool steer_req = GET_BIT(msg, 52U);
+    const bool lka_assist = GET_BIT(msg, 62U);
+    const int steer_mode = (msg->data[8] >> 1U) & 0x7U;
+    if ((desired_torque != 0) || steer_req || lka_assist || (steer_mode != 0)) {
+      tx = false;
+    }
+  }
+
   // cruise buttons check
   if (msg->addr == 0x1cfU) {
     int button = msg->data[2] & 0x7U;
@@ -320,14 +334,13 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *msg) {
     }
   }
 
-  // UDS: tester present remains available for ECU suppression. The EV9's
-  // known diagnostic endpoints additionally permit the exact read-only DTC
-  // request and ISO-TP flow-control response above.
+  // UDS: only Tester Present remains available for the one ECU whose
+  // production communication suppression must be maintained.
   const bool disabled_ecu_addr = ((msg->addr == 0x730U) && hyundai_canfd_lka_steering) ||
                                  ((msg->addr == 0x7D0U) && !hyundai_camera_scc);
-  if (disabled_ecu_addr || hyundai_canfd_ev9_dtc_addr(msg)) {
+  if (disabled_ecu_addr) {
     const bool tester_present = (GET_BYTES(msg, 0, 4) == 0x00803E02U) && (GET_BYTES(msg, 4, 4) == 0U);
-    if (!(disabled_ecu_addr && tester_present) && !hyundai_canfd_ev9_read_dtc_msg(msg)) {
+    if (!tester_present) {
       tx = false;
     }
   }
@@ -365,7 +378,7 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *msg) {
   return tx;
 }
 
-static safety_config hyundai_canfd_init(uint16_t param) {
+static safety_config hyundai_canfd_init_common(uint16_t param) {
   const uint16_t HYUNDAI_PARAM_CANFD_LKA_STEERING_ALT = 128;
   const uint16_t HYUNDAI_PARAM_CANFD_ALT_BUTTONS = 32;
   const uint16_t HYUNDAI_PARAM_CANFD_ANGLE_STEERING = 1024;
@@ -373,12 +386,10 @@ static safety_config hyundai_canfd_init(uint16_t param) {
 
   static const CanMsg HYUNDAI_CANFD_LKA_STEERING_TX_MSGS[] = {
     HYUNDAI_CANFD_LKA_STEERING_COMMON_TX_MSGS(0, 1)
-    HYUNDAI_CANFD_EV9_DTC_TX_MSGS(1)
   };
 
   static const CanMsg HYUNDAI_CANFD_LKA_STEERING_ALT_TX_MSGS[] = {
     HYUNDAI_CANFD_LKA_STEERING_ALT_COMMON_TX_MSGS(0, 1)
-    HYUNDAI_CANFD_EV9_DTC_TX_MSGS(1)
   };
 
   static const CanMsg HYUNDAI_CANFD_LKA_STEERING_LONG_TX_MSGS[] = {
@@ -388,16 +399,12 @@ static safety_config hyundai_canfd_init(uint16_t param) {
     HYUNDAI_CANFD_BLINDSPOT_DASH_TX_MSGS(1)
     {0x51,  0, 32, .check_relay = false},  // ADRV_0x51
     {0x100, 0, 24, .check_relay = false},  // Ioniq 5/6: ACCELERATOR_BRAKE_ALT radar heartbeat spoof
-    HYUNDAI_CANFD_EV9_DTC_TX_MSGS(1)
+    {0x730, 1,  8, .check_relay = false},  // tester present for ADAS ECU disable
     {0x160, 1, 16, .check_relay = false},  // ADRV_0x160
     {0x1EA, 1, 32, .check_relay = false},  // ADRV_0x1ea
     {0x200, 1,  8, .check_relay = false},  // ADRV_0x200
     {0x345, 1,  8, .check_relay = false},  // ADRV_0x345
     {0x1DA, 1, 32, .check_relay = false},  // ADRV_0x1da
-    {0x161, 1, 32, .check_relay = false},  // EV9 CCNC_0x161 status reconstruction
-    {0x162, 1, 32, .check_relay = false},  // EV9 CCNC_0x162 status reconstruction
-    {0x38C, 1, 32, .check_relay = false},  // EV9 captured ADAS status
-    {0x57A, 1, 32, .check_relay = false},  // EV9 captured raw ADAS status
   };
 
   static const CanMsg HYUNDAI_CANFD_LKA_STEERING_ALT_LONG_TX_MSGS[] = {
@@ -407,16 +414,34 @@ static safety_config hyundai_canfd_init(uint16_t param) {
     HYUNDAI_CANFD_BLINDSPOT_DASH_TX_MSGS(1)
     {0x51,  0, 32, .check_relay = false},  // ADRV_0x51
     {0x100, 0, 24, .check_relay = false},  // ACCELERATOR_BRAKE_ALT radar heartbeat spoof
-    HYUNDAI_CANFD_EV9_DTC_TX_MSGS(1)
+    {0x730, 1,  8, .check_relay = false},  // tester present for ADAS ECU disable
     {0x160, 1, 16, .check_relay = false},  // ADRV_0x160
     {0x1EA, 1, 32, .check_relay = false},  // ADRV_0x1ea
     {0x200, 1,  8, .check_relay = false},  // ADRV_0x200
     {0x345, 1,  8, .check_relay = false},  // ADRV_0x345
     {0x1DA, 1, 32, .check_relay = false},  // ADRV_0x1da
-    {0x161, 1, 32, .check_relay = false},  // EV9 CCNC_0x161 status reconstruction
-    {0x162, 1, 32, .check_relay = false},  // EV9 CCNC_0x162 status reconstruction
-    {0x38C, 1, 32, .check_relay = false},  // EV9 captured ADAS status
-    {0x57A, 1, 32, .check_relay = false},  // EV9 captured raw ADAS status
+  };
+
+  // Dedicated EV9 profile. Keep this list exact: every entry is required for
+  // neutral ADAS reconstruction, truthful cluster status, and suppression
+  // keepalive. No physical 0x57A replay and
+  // no generic overlay/debug addresses are permitted.
+  static const CanMsg HYUNDAI_CANFD_EV9_LONG_TX_MSGS[] = {
+    HYUNDAI_CANFD_LKA_STEERING_ALT_COMMON_TX_MSGS(0, 1)
+    HYUNDAI_CANFD_LFA_STEERING_COMMON_TX_MSGS(1)
+    HYUNDAI_CANFD_SCC_CONTROL_COMMON_TX_MSGS(1, true)
+    {0x100, 0, 24, .check_relay = false},  // ACCELERATOR_BRAKE_ALT heartbeat
+    {0x730, 1,  8, .check_relay = false},  // exact Tester Present only
+    {0x160, 1, 16, .check_relay = false},  // ADRV status/AEB unavailable
+    {0x161, 1, 32, .check_relay = false},  // CCNC ADAS status
+    {0x162, 1, 32, .check_relay = false},  // CCNC ADAS status
+    {0x1BA, 1, 24, .check_relay = false},  // rear blindspot status
+    {0x1DA, 1, 32, .check_relay = false},  // ADRV support
+    {0x1E5, 1, 16, .check_relay = false},  // front corner status
+    {0x1EA, 1, 32, .check_relay = false},  // ADRV support
+    {0x200, 1,  8, .check_relay = false},  // ADRV support
+    {0x345, 1,  8, .check_relay = false},  // ADRV support
+    {0x38C, 1, 32, .check_relay = false},  // captured ADAS status
   };
 
   static const CanMsg HYUNDAI_CANFD_LFA_STEERING_TX_MSGS[] = {
@@ -472,7 +497,9 @@ static safety_config hyundai_canfd_init(uint16_t param) {
       };
 
       SET_RX_CHECKS(hyundai_canfd_lka_steering_long_rx_checks, ret);
-      if (hyundai_canfd_lka_steering_alt) {
+      if (hyundai_canfd_ev9) {
+        SET_TX_MSGS(HYUNDAI_CANFD_EV9_LONG_TX_MSGS, ret);
+      } else if (hyundai_canfd_lka_steering_alt) {
         SET_TX_MSGS(HYUNDAI_CANFD_LKA_STEERING_ALT_LONG_TX_MSGS, ret);
       } else {
         SET_TX_MSGS(HYUNDAI_CANFD_LKA_STEERING_LONG_TX_MSGS, ret);
@@ -590,8 +617,41 @@ static safety_config hyundai_canfd_init(uint16_t param) {
   return ret;
 }
 
+static safety_config hyundai_canfd_init(uint16_t param) {
+  hyundai_canfd_ev9 = false;
+  return hyundai_canfd_init_common(param);
+}
+
+static safety_config hyundai_canfd_ev9_init(uint16_t param) {
+  // Production EV9 profile: EV gas, longitudinal, LKA steering, alternate
+  // steering frames, and angle control are all mandatory. The StarPilot AOL
+  // behavior bit is the only optional extension. A mismatched cached CarParams
+  // therefore fails closed with an empty TX/RX configuration.
+  const uint16_t EV9_REQUIRED_PARAM = 0x495U;
+  const uint16_t EV9_OPTIONAL_PARAM = 0x800U;
+  const uint16_t EV9_ALLOWED_PARAM = EV9_REQUIRED_PARAM | EV9_OPTIONAL_PARAM;
+  safety_config ret = {0};
+  hyundai_canfd_ev9 = true;
+  if (((param & EV9_REQUIRED_PARAM) == EV9_REQUIRED_PARAM) &&
+      ((param | EV9_OPTIONAL_PARAM) == EV9_ALLOWED_PARAM)) {
+    ret = hyundai_canfd_init_common(param);
+  }
+  return ret;
+}
+
 const safety_hooks hyundai_canfd_hooks = {
   .init = hyundai_canfd_init,
+  .rx_all = hyundai_canfd_rx_all_hook,
+  .rx = hyundai_canfd_rx_hook,
+  .tx = hyundai_canfd_tx_hook,
+  .get_counter = hyundai_canfd_get_counter,
+  .get_checksum = hyundai_canfd_get_checksum,
+  .compute_checksum = hyundai_common_canfd_compute_checksum,
+  .fwd = hyundai_canfd_fwd_hook,
+};
+
+const safety_hooks hyundai_canfd_ev9_hooks = {
+  .init = hyundai_canfd_ev9_init,
   .rx_all = hyundai_canfd_rx_all_hook,
   .rx = hyundai_canfd_rx_hook,
   .tx = hyundai_canfd_tx_hook,
