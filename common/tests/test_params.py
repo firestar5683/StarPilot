@@ -131,6 +131,17 @@ class TestParams:
     assert self.params.get("LiveParameters") is None
     assert self.params.get("LiveParameters", return_default=True) is None
 
+  def test_ev9_experimental_features_default_off(self):
+    keys = {
+      "EV9LongPreinitPanda",
+      "KiaEv9ClusterBsmReconstructionEnabled",
+      "KiaEv9ClusterHeadwayEnabled",
+      "KiaEv9ClusterObjectsEnabled",
+    }
+
+    assert {key.encode() for key in keys} <= set(self.params.all_keys())
+    assert all(self.params.get_default_value(key) is False for key in keys)
+
   def test_params_get_type(self):
     # json
     self.params.put("ApiCache_DriveStats", {"a": 0})

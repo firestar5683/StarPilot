@@ -6,6 +6,7 @@ from opendbc.can.dbc import DBC as DBCReader
 from opendbc.can.parser import get_raw_value
 from opendbc.car import Bus, structs
 from opendbc.car.interfaces import RadarInterfaceBase
+from opendbc.car.hyundai.ev9_dash import Ev9DashTrackCandidates
 from opendbc.car.hyundai.values import CAR, DBC, HyundaiFlags, HYUNDAI_MANDO_FRONT_RADAR_DBC, HYUNDAI_MRREVO14F_RADAR_DBC, \
                                        HYUNDAI_MRR30_RADAR_DBC, HYUNDAI_MRR35_RADAR_DBC
 from openpilot.common.swaglog import cloudlog
@@ -25,6 +26,33 @@ EV9_CLUSTER_STRICT_SIDE_DISCRIMINATOR_THRESHOLD = 280.0
 EV9_CLUSTER_DISPLAY_DISCRIMINATOR_REJECT_LOG_LIMIT = 5
 
 
+def _ev9_dash_display_discriminator(values) -> float:
+  # The route-analysis worktree renamed this neutral DBC field. Accept both
+  # names so the candidate policy remains portable across generated-DBC
+  # revisions without changing the DBC in this production merge.
+  return float(values.get("NEW_SIGNAL_7", values.get(EV9_CLUSTER_DISPLAY_DISCRIMINATOR_SIGNAL, 0.0)))
+
+
+def ev9_dash_display_candidate(values) -> bool:
+  """Route-correlated CCNC object candidate; this field's physical meaning is unknown."""
+  return _ev9_dash_display_discriminator(values) > EV9_CLUSTER_DISPLAY_DISCRIMINATOR_THRESHOLD
+
+
+def ev9_dash_side_candidate(values) -> bool:
+  """Firmware-stable lifecycle observed for CCNC left/right object slots."""
+  return int(values.get("NEW_SIGNAL_3", 0)) == 2 and \
+         int(values.get("NEW_SIGNAL_12", 0)) == 10 and \
+         int(values.get("NEW_SIGNAL_15", 0)) == 2 and \
+         int(values.get("NEW_SIGNAL_17", 0)) == 1
+
+
+def ev9_dash_side_retention_candidate(values) -> bool:
+  # The numeric discriminator separates display objects on preserved d4-d6
+  # firmware, while the categorical lifecycle remains stable on route16e/170.
+  return _ev9_dash_display_discriminator(values) > EV9_CLUSTER_STRICT_SIDE_DISCRIMINATOR_THRESHOLD or \
+         (int(values.get("NEW_SIGNAL_3", 0)) == 2 and int(values.get("NEW_SIGNAL_17", 0)) == 1)
+
+
 def ev9_mrr35_cluster_display_candidate(values) -> bool:
   """Return whether an MRR35 track passes the stock-correlated display discriminator.
 
@@ -32,8 +60,7 @@ def ev9_mrr35_cluster_display_candidate(values) -> bool:
   only for EV9 cluster reconstruction; RadarData and liveTracks retain every
   track accepted by the normal STATE gate.
   """
-  return float(values.get(EV9_CLUSTER_DISPLAY_DISCRIMINATOR_SIGNAL, 0.0)) > \
-         EV9_CLUSTER_DISPLAY_DISCRIMINATOR_THRESHOLD
+  return ev9_dash_display_candidate(values)
 
 
 def ev9_mrr35_strict_side_display_candidate(values) -> bool:
@@ -42,18 +69,12 @@ def ev9_mrr35_strict_side_display_candidate(values) -> bool:
   This is deliberately stricter than the primary-lead filter. It is a display
   classifier only and must never be treated as an OEM BSM/RCTA decision.
   """
-  return float(values.get(EV9_CLUSTER_DISPLAY_DISCRIMINATOR_SIGNAL, 0.0)) > \
-         EV9_CLUSTER_STRICT_SIDE_DISCRIMINATOR_THRESHOLD and \
-         int(values.get("NEW_SIGNAL_3", 0)) == 2 and \
-         int(values.get("NEW_SIGNAL_12", 0)) == 10 and \
-         int(values.get("NEW_SIGNAL_15", 0)) == 2 and \
-         int(values.get("NEW_SIGNAL_17", 0)) == 1
+  return ev9_dash_side_candidate(values)
 
 
 def ev9_mrr35_side_display_retention_candidate(values) -> bool:
   """Retain an already-selected side object while its strong discriminator remains."""
-  return float(values.get(EV9_CLUSTER_DISPLAY_DISCRIMINATOR_SIGNAL, 0.0)) > \
-         EV9_CLUSTER_STRICT_SIDE_DISCRIMINATOR_THRESHOLD
+  return ev9_dash_side_retention_candidate(values)
 
 
 @dataclass(frozen=True)
@@ -142,6 +163,7 @@ class RadarInterface(RadarInterfaceBase):
     self.ev9_cluster_quality_track_ids: set[int] = set()
     self.ev9_cluster_strict_side_track_ids: set[int] = set()
     self.ev9_cluster_side_retention_track_ids: set[int] = set()
+    self.ev9_dash_track_candidates = Ev9DashTrackCandidates()
     self.ev9_cluster_display_discriminator_reject_count = 0
     self.ev9_cluster_display_discriminator_reject_logs = 0
     self.rcp = get_radar_can_parser(CP, self.radar_config)
@@ -154,21 +176,6 @@ class RadarInterface(RadarInterfaceBase):
       self.track_addrs = [(addr, f"RADAR_TRACK_{addr:x}")
                           for addr in range(self.radar_config.start_addr,
                                             self.radar_config.start_addr + self.radar_config.can_parser_msg_count)]
-
-  def enable_ev9_live_radar_tracks(self) -> bool:
-    """Enable EV9 MRR35 decoding when ADAS suppression leaves radar CAN alive.
-
-    Hyundai's common long-control setup marks radar unavailable for platforms
-    outside RADAR_LIVE_LONGITUDINAL_CAR because many ADAS knockouts also silence
-    their radar. EV9 stage-15 CommunicationControl does not: the complete MRR35
-    range remains on E-CAN. Keep this explicit so card can feature-gate the
-    behavior without changing any other Hyundai platform.
-    """
-    if self.CP.carFingerprint != CAR.KIA_EV9 or self.radar_config is None or self.rcp is None:
-      return False
-
-    self.radar_off_can = False
-    return True
 
   def update(self, can_strings):
     if self.ioniq_6_radar_probe and self.rcp is not None and not self.ioniq_6_radar_probe_logged:
@@ -190,6 +197,7 @@ class RadarInterface(RadarInterfaceBase):
       self.ev9_cluster_quality_track_ids.clear()
       self.ev9_cluster_strict_side_track_ids.clear()
       self.ev9_cluster_side_retention_track_ids.clear()
+      self.ev9_dash_track_candidates = Ev9DashTrackCandidates()
       return super().update(None)
 
     vls = self.rcp.update(can_strings)
@@ -325,19 +333,20 @@ class RadarInterface(RadarInterfaceBase):
           pt.aRel = msg["REL_ACCEL"]
           pt.yvRel = float("nan")
           if self.CP.carFingerprint == CAR.KIA_EV9 and addr in updated_messages:
-            if ev9_mrr35_cluster_display_candidate(msg):
+            if ev9_dash_display_candidate(msg):
               ev9_display_candidate_track_ids.add(pt.trackId)
             else:
               self.ev9_cluster_display_discriminator_reject_count += 1
               if self.ev9_cluster_display_discriminator_reject_logs < EV9_CLUSTER_DISPLAY_DISCRIMINATOR_REJECT_LOG_LIMIT:
                 self.ev9_cluster_display_discriminator_reject_logs += 1
-                cloudlog.warning(f"EV9 cluster display discriminator rejected MRR35 track: "
-                                 f"addr=0x{addr:X}, discriminator="
-                                 f"{msg[EV9_CLUSTER_DISPLAY_DISCRIMINATOR_SIGNAL]:.0f}, "
-                                 f"rejected={self.ev9_cluster_display_discriminator_reject_count}")
-            if ev9_mrr35_strict_side_display_candidate(msg):
+                cloudlog.warning(
+                  "EV9 cluster display discriminator rejected MRR35 track: addr=0x%X, discriminator=%.0f, rejected=%d",
+                  addr, _ev9_dash_display_discriminator(msg),
+                  self.ev9_cluster_display_discriminator_reject_count,
+                )
+            if ev9_dash_side_candidate(msg):
               ev9_strict_side_track_ids.add(pt.trackId)
-            if ev9_mrr35_side_display_retention_candidate(msg):
+            if ev9_dash_side_retention_candidate(msg):
               ev9_side_retention_track_ids.add(pt.trackId)
         elif addr in self.pts:
           del self.pts[addr]
@@ -367,6 +376,11 @@ class RadarInterface(RadarInterfaceBase):
       self.ev9_cluster_quality_track_ids = ev9_display_candidate_track_ids if self.rcp.can_valid else set()
       self.ev9_cluster_strict_side_track_ids = ev9_strict_side_track_ids if self.rcp.can_valid else set()
       self.ev9_cluster_side_retention_track_ids = ev9_side_retention_track_ids if self.rcp.can_valid else set()
+      self.ev9_dash_track_candidates = Ev9DashTrackCandidates(
+        frozenset(self.ev9_cluster_quality_track_ids),
+        frozenset(self.ev9_cluster_strict_side_track_ids),
+        frozenset(self.ev9_cluster_side_retention_track_ids),
+      )
 
     ret.points = list(self.pts.values())
     return ret

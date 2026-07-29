@@ -1061,6 +1061,20 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
     ET.NO_ENTRY: NoEntryAlert("Unknown Vehicle Variant"),
   },
 
+  # The stock ADAS ECU is intentionally offline on the EV9 longitudinal path.
+  # A takeover fault therefore has a distinct recovery action from a generic
+  # CAN/parser failure: stop openpilot output and restart the vehicle so stock
+  # assistance can be restored during the next OFF transition.
+  EventName.adasUnavailable: {
+    ET.IMMEDIATE_DISABLE: ImmediateDisableAlert("Driver Assistance Unavailable"),
+    ET.PERMANENT: Alert(
+      "Driver Assistance Unavailable",
+      "Restart the Vehicle to Restore Stock Assistance",
+      AlertStatus.normal, AlertSize.mid,
+      Priority.HIGH, VisualAlert.none, AudibleAlert.none, 1.),
+    ET.NO_ENTRY: NoEntryAlert("Driver Assistance Unavailable: Restart the Vehicle"),
+  },
+
   EventName.canBusMissing: {
     ET.IMMEDIATE_DISABLE: ImmediateDisableAlert("CAN Bus Disconnected"),
     ET.PERMANENT: Alert(

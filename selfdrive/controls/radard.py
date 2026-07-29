@@ -404,9 +404,7 @@ def main() -> None:
     radar_ts = DT_MDL
 
   g90_radar_filter = CP.brand == "hyundai" and CP.carFingerprint == "GENESIS_G90"
-  ev9_cluster_objects = CP.brand == "hyundai" and CP.carFingerprint == "KIA_EV9"
-  RD = RadarD(radar_ts=radar_ts, delay=CP.radarDelay, g90_radar_filter=g90_radar_filter,
-              track_adjacent_always=ev9_cluster_objects)
+  RD = RadarD(radar_ts=radar_ts, delay=CP.radarDelay, g90_radar_filter=g90_radar_filter)
 
   while 1:
     sm.update()

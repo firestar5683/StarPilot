@@ -205,7 +205,8 @@ def can_fingerprint(can_recv: CanRecvCallable) -> tuple[str | None, dict[int, di
 
 # **** for use live only ****
 def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multiplexing: ObdCallback, num_pandas: int,
-                cached_params: CarParamsT | None) -> tuple[str | None, dict, str, list[CarParams.CarFw], CarParams.FingerprintSource, bool]:
+                cached_params: CarParamsT | None, allow_fw_query: bool = True) -> \
+                  tuple[str | None, dict, str, list[CarParams.CarFw], CarParams.FingerprintSource, bool]:
   fixed_fingerprint = os.environ.get('FINGERPRINT', "")
   skip_fw_query = os.environ.get('SKIP_FW_QUERY', False)
   disable_fw_cache = os.environ.get('DISABLE_FW_CACHE', False)
@@ -224,7 +225,7 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
       vin_rx_addr, vin_rx_bus, vin = -1, -1, cached_params.carVin
       car_fw = list(cached_params.carFw)
       cached = True
-    else:
+    elif allow_fw_query:
       carlog.warning("Getting VIN & FW versions")
       # enable OBD multiplexing for VIN query
       # NOTE: this takes ~0.1s and is relied on to allow sendcan subscriber to connect in time
@@ -233,6 +234,11 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
       vin_rx_addr, vin_rx_bus, vin = get_vin(can_recv, can_send, (0, 1))
       ecu_rx_addrs = get_present_ecus(can_recv, can_send, set_obd_multiplexing, num_pandas=num_pandas)
       car_fw = get_fw_versions_ordered(can_recv, can_send, set_obd_multiplexing, vin, ecu_rx_addrs, num_pandas=num_pandas)
+      cached = False
+    else:
+      carlog.warning("Skipping VIN & FW wire queries")
+      vin_rx_addr, vin_rx_bus, vin = -1, -1, VIN_UNKNOWN
+      car_fw = []
       cached = False
 
     exact_fw_match, fw_candidates = match_fw_to_car(car_fw, vin)
@@ -277,8 +283,11 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
 
 
 def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multiplexing: ObdCallback, alpha_long_allowed: bool,
-            is_release: bool, params: Params, num_pandas: int = 1, cached_params: CarParamsT | None = None, starpilot_toggles: SimpleNamespace = None):
-  candidate, fingerprints, vin, car_fw, source, exact_match = fingerprint(can_recv, can_send, set_obd_multiplexing, num_pandas, cached_params)
+            is_release: bool, params: Params, num_pandas: int = 1, cached_params: CarParamsT | None = None,
+            starpilot_toggles: SimpleNamespace = None, allow_fw_query: bool = True):
+  candidate, fingerprints, vin, car_fw, source, exact_match = fingerprint(
+    can_recv, can_send, set_obd_multiplexing, num_pandas, cached_params, allow_fw_query,
+  )
   candidate = _normalize_gm_bolt_candidate(candidate, fingerprints)
   candidate = _normalize_gm_volt_candidate(candidate, fingerprints)
   candidate = _normalize_forced_candidate(candidate)

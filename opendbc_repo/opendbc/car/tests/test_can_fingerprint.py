@@ -1,8 +1,10 @@
 from types import SimpleNamespace
 
 import pytest
+import opendbc.car.car_helpers as car_helpers
 from opendbc.car.can_definitions import CanData
-from opendbc.car.car_helpers import FRAME_FINGERPRINT, _apply_starpilot_access_policy, _get_gm_stored_candidate_fallback, can_fingerprint
+from opendbc.car.car_helpers import FRAME_FINGERPRINT, _apply_starpilot_access_policy, _get_gm_stored_candidate_fallback, \
+                                            can_fingerprint, fingerprint as fingerprint_car
 from opendbc.car.fingerprints import _FINGERPRINTS as FINGERPRINTS
 from opendbc.car.gm.values import CAR as GM
 
@@ -109,3 +111,43 @@ class TestCanFingerprint:
     candidate = _apply_starpilot_access_policy("CHEVROLET_VOLT_CC", SimpleNamespace(block_user=True))
 
     assert candidate == "CHEVROLET_VOLT_CC"
+
+  def test_fingerprint_can_disable_all_vin_and_firmware_queries(self, monkeypatch):
+    monkeypatch.delenv("FINGERPRINT", raising=False)
+    monkeypatch.delenv("SKIP_FW_QUERY", raising=False)
+    monkeypatch.delenv("DISABLE_FW_CACHE", raising=False)
+    monkeypatch.setattr(car_helpers, "get_vin",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("VIN query must be vetoed")))
+    monkeypatch.setattr(car_helpers, "get_present_ecus",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ECU query must be vetoed")))
+    monkeypatch.setattr(car_helpers, "get_fw_versions_ordered",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("FW query must be vetoed")))
+    monkeypatch.setattr(car_helpers, "can_fingerprint", lambda _can_recv: (None, {0: {}, 1: {}, 2: {}, 3: {}}))
+
+    set_obd_calls = []
+    fingerprint_car(lambda **kwargs: [], lambda _msgs: None, set_obd_calls.append, 1, None, allow_fw_query=False)
+
+    assert set_obd_calls == [False]
+
+  def test_fingerprint_uses_valid_cache_while_wire_queries_are_disabled(self, monkeypatch):
+    monkeypatch.delenv("FINGERPRINT", raising=False)
+    monkeypatch.delenv("SKIP_FW_QUERY", raising=False)
+    monkeypatch.delenv("DISABLE_FW_CACHE", raising=False)
+    monkeypatch.setattr(car_helpers, "get_vin",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("VIN query must be vetoed")))
+    monkeypatch.setattr(car_helpers, "get_present_ecus",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("ECU query must be vetoed")))
+    monkeypatch.setattr(car_helpers, "get_fw_versions_ordered",
+                        lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("FW query must be vetoed")))
+    monkeypatch.setattr(car_helpers, "match_fw_to_car", lambda _car_fw, _vin: (True, set()))
+    monkeypatch.setattr(car_helpers, "can_fingerprint", lambda _can_recv: (None, {0: {}, 1: {}, 2: {}, 3: {}}))
+    cached_fw = [SimpleNamespace(address=0x730)]
+    cached_params = SimpleNamespace(brand="hyundai", carVin="KM8KNDAF0PU123456", carFw=cached_fw)
+
+    set_obd_calls = []
+    result = fingerprint_car(lambda **kwargs: [], lambda _msgs: None, set_obd_calls.append, 1, cached_params,
+                             allow_fw_query=False)
+
+    assert result[2] == cached_params.carVin
+    assert result[3] == cached_fw
+    assert set_obd_calls == [False]

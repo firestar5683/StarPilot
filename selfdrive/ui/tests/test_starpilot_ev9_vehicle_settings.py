@@ -5,6 +5,9 @@ from openpilot.selfdrive.ui.lib.starpilot_state import StarPilotCarState, starpi
 
 EV9_CONTROL_KEYS = {
   "EV9LongPreinitPanda",
+  "KiaEv9ClusterBsmReconstructionEnabled",
+  "KiaEv9ClusterHeadwayEnabled",
+  "KiaEv9ClusterObjectsEnabled",
 }
 
 

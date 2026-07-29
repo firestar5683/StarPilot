@@ -7,14 +7,10 @@ from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai.hyundaicanfd import CanBus
-from opendbc.car.hyundai.ev9_longitudinal import EV9_CRUISE_MAIN_STATE_PARAM, EV9_RAW_BSM_RECONSTRUCTION_PARAM, \
-                                                   EV9_SOFTWARE_BSM_VEHICLE_OUTPUT_PARAM, \
-                                                   ev9_default_enabled_param, update_ev9_cruise_main_latch
-from opendbc.car.hyundai.values import HyundaiFlags, HyundaiStarPilotFlags, HyundaiStarPilotSafetyFlags, CAR, DBC, Buttons, CarControllerParams, \
+from opendbc.car.hyundai.values import HyundaiFlags, HyundaiStarPilotFlags, CAR, DBC, Buttons, CarControllerParams, \
                                        hyundai_cancel_button_enables_cruise, ALT_BUS_LDA_BUTTON_CARS, ALT_BUS_LDA_BUTTON_SWL_STAT_CARS, \
-                                       CANFD_EV_TELEMETRY_CAR
+                                       CANFD_CORNER_RADAR_BSM_CAR, CANFD_EV_TELEMETRY_CAR
 from opendbc.car.interfaces import CarStateBase
-from openpilot.common.params import Params
 
 ButtonType = structs.CarState.ButtonEvent.Type
 
@@ -29,11 +25,10 @@ BUTTONS_DICT = {Buttons.RES_ACCEL: ButtonType.accelCruise, Buttons.SET_DECEL: Bu
 
 IONIQ_6_BLINDSPOT_RIGHT_MASK = 0x08
 IONIQ_6_BLINDSPOT_LEFT_MASK = 0x10
-CANFD_BLINDSPOT_BASE_MASK = 0x02
-CANFD_BLINDSPOT_STALE_NS = 100_000_000
+CANFD_NATIVE_BLINDSPOT_STALE_NS = 100_000_000
+EV9_RAW_BLINDSPOT_STALE_NS = 150_000_000
 CANFD_CAMERA_LEAD_MIN_DISTANCE = 0.1
 ALT_BUS_LDA_BUTTON_BURST_DEBOUNCE_NS = int(1.3e9)
-
 
 def get_non_scc_cruise_signals(CP) -> tuple[str, str, str, str, str, str]:
   if CP.flags & HyundaiFlags.EV:
@@ -43,58 +38,39 @@ def get_non_scc_cruise_signals(CP) -> tuple[str, str, str, str, str, str]:
   return "EMS16", "CRUISE_LAMP_M", "EMS16", "CRUISE_LAMP_S", "LVR12", "CF_Lvr_CruiseSet"
 
 
-def calculate_canfd_speed_limit(CP, FPCP, cp, cp_cam, speed_factor):
+def get_canfd_speed_limit_state(CP, FPCP, cp, cp_cam) -> tuple[int, bool]:
   if not (FPCP.flags & HyundaiStarPilotFlags.SPEED_LIMIT_AVAILABLE):
-    return 0.0
+    return 0, False
 
   speed_limit_bus = cp if CP.flags & HyundaiFlags.CANFD_LKA_STEERING else cp_cam
   try:
-    speed_limit = speed_limit_bus.vl["FR_CMR_02_100ms"]["ISLW_SpdCluMainDis"]
-    return speed_limit * speed_factor if 1 <= speed_limit <= 252 else 0.0
-  except (KeyError, ValueError):
-    return 0.0
-
-
-def read_canfd_speed_limit_raw(CP, cp, cp_cam) -> int:
-  """Preserve the camera's cluster-display value without unit conversion."""
-  speed_limit_bus = cp if CP.flags & HyundaiFlags.CANFD_LKA_STEERING else cp_cam
-  try:
-    return int(speed_limit_bus.vl["FR_CMR_02_100ms"]["ISLW_SpdCluMainDis"])
+    values = speed_limit_bus.vl["FR_CMR_02_100ms"]
+    speed_limit = int(values["ISLW_SpdCluMainDis"])
+    valid = 1 <= speed_limit <= 253
+    return (speed_limit, int(values["ISLA_SpdWrn"]) == 1) if valid else (0, False)
   except (KeyError, TypeError, ValueError):
-    return 0
+    return 0, False
 
 
 def decode_ioniq_6_blindspot_radar_state(state: int) -> tuple[bool, bool]:
-  """Decode the shared HKG CAN-FD corner-radar side-detection bitmap."""
   state_int = int(state)
   return bool(state_int & IONIQ_6_BLINDSPOT_LEFT_MASK), bool(state_int & IONIQ_6_BLINDSPOT_RIGHT_MASK)
 
 
-def resolve_ev9_blindspot_state(raw_state: int, raw_ts: int, stock_left_state: int, stock_right_state: int,
-                                stock_ts: int, now_nanos: int, raw_reconstruction_enabled: bool,
-                                drive_gear: bool, v_ego: float) -> tuple[bool, bool, str]:
-  """Prefer genuine fresh ADAS BSM; otherwise fail closed unless raw reconstruction is explicitly enabled."""
-  raw_age = int(now_nanos) - int(raw_ts)
-  raw_fresh = int(raw_ts) > 0 and 0 <= raw_age <= CANFD_BLINDSPOT_STALE_NS
-  state = int(raw_state)
-  if raw_reconstruction_enabled:
-    # Once raw reconstruction is selected, never fall back to 0x1BA: the
-    # controller is transmitting that frame itself and treating it as stock
-    # would latch a synthesized warning after the raw source went stale.
-    # Stock EV9 warnings were only observed while moving in Drive. The lowest
-    # active-lamp sample across the d4/d6 reference routes was 4.33 m/s. This
-    # gate removes the stationary/garage false warnings without discarding a
-    # validated stock warning sample; it does not claim raw 0x36A is faithful.
-    if drive_gear and float(v_ego) >= 4.3 and raw_fresh and bool(state & CANFD_BLINDSPOT_BASE_MASK):
-      left, right = decode_ioniq_6_blindspot_radar_state(state)
-      return left, right, "raw"
-    return False, False, "neutral"
+def decode_canfd_blinker_stalks(left_stalk: int, right_stalk: int) -> tuple[bool, bool]:
+  return int(left_stalk) == 1, int(right_stalk) == 1
 
-  stock_age = int(now_nanos) - int(stock_ts)
-  if int(stock_ts) > 0 and 0 <= stock_age <= CANFD_BLINDSPOT_STALE_NS:
-    return int(stock_left_state) in (1, 2), int(stock_right_state) in (1, 2), "stock"
 
-  return False, False, "neutral"
+def resolve_canfd_native_blindspot_state(left_state: int, right_state: int, timestamp_nanos: int,
+                                          now_nanos: int) -> tuple[bool, bool, bool]:
+  age_nanos = int(now_nanos) - int(timestamp_nanos)
+  fresh = int(timestamp_nanos) > 0 and 0 <= age_nanos <= CANFD_NATIVE_BLINDSPOT_STALE_NS
+  if not fresh:
+    return False, False, False
+
+  # Native 0x1BA state 1 is the steady lamp and state 2 is the escalated warning.
+  # State 0 is neutral and state 3 is not a validated object indication.
+  return int(left_state) in (1, 2), int(right_state) in (1, 2), True
 
 
 def decode_canfd_camera_lead(distance: float, rel_speed: float) -> tuple[bool, float, float]:
@@ -173,9 +149,8 @@ class CarState(CarStateBase):
     self.stock_camera_lead_distance = 0.0
     self.stock_camera_lead_rel_speed = 0.0
     self.stock_camera_lead_ts = 0
-    self.ev9_cluster_speed_limit_raw = 0
-    self.ev9_cluster_stop_target_active = False
-    self.ev9_cluster_stop_target_distance = 0.0
+    self.dashboard_speed_limit_raw = 0
+    self.dashboard_speed_limit_warning = False
     self.openpilot_lead_visible = False
     self.openpilot_lead_distance = 0.0
     self.openpilot_lead_rel_speed = 0.0
@@ -192,6 +167,7 @@ class CarState(CarStateBase):
     self.openpilot_lead_right_selected = False
     self.openpilot_radar_valid = False
     self.panda_faulted = True
+    self.stock_blinker_stalks = {}
     self.stock_blinker_stalks_ts = 0
     self.blindspots_rear_corners = {}
     self.blindspots_front_corner_1 = {}
@@ -199,34 +175,21 @@ class CarState(CarStateBase):
     self.blindspots_front_corner_1_ts = 0
     self.left_blindspot_from_radar = False
     self.right_blindspot_from_radar = False
-    self.ev9_raw_blindspot_state = 0
-    self.ev9_raw_blindspot_ts = 0
-    self.ev9_stock_blindspot_ts = 0
-    self.ev9_raw_blindspot_fresh = False
-    self.ev9_stock_blindspot_fresh = False
-    self.ev9_blindspot_source = "neutral"
-    self.ev9_software_bsm_left = False
-    self.ev9_software_bsm_right = False
-    self.ev9_software_bsm_left_escalated = False
-    self.ev9_software_bsm_right_escalated = False
-    self.ev9_software_bsm_left_source = "neutral"
-    self.ev9_software_bsm_right_source = "neutral"
-    self.ev9_software_bsm_left_confidence = 0.0
-    self.ev9_software_bsm_right_confidence = 0.0
-    self.ev9_vehicle_bsm_left = False
-    self.ev9_vehicle_bsm_right = False
-    self.ev9_vehicle_bsm_left_escalated = False
-    self.ev9_vehicle_bsm_right_escalated = False
-    self.ev9_raw_bsm_reconstruction_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
-      Params().get_bool(EV9_RAW_BSM_RECONSTRUCTION_PARAM)
-    self.ev9_software_bsm_vehicle_output_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
-      Params().get_bool(EV9_SOFTWARE_BSM_VEHICLE_OUTPUT_PARAM)
-    self.ev9_cruise_main_state_enabled = CP.carFingerprint == CAR.KIA_EV9 and \
-      ev9_default_enabled_param(Params(), EV9_CRUISE_MAIN_STATE_PARAM)
-    self.ev9_cruise_main_on = not self.ev9_cruise_main_state_enabled
-    self.ev9_smart_regen_active = False
-    self.ev9_smart_regen_lead_detected = False
-    self.ev9_regen_level_display_raw = 0
+    self.left_blinker_stalk = False
+    self.right_blinker_stalk = False
+    self.native_left_blindspot_state = 0
+    self.native_right_blindspot_state = 0
+    self.native_blindspot_ts = 0
+    self.native_blindspot_fresh = False
+    if CP.carFingerprint == CAR.KIA_EV9:
+      self.ev9_raw_blindspot_state = 0
+      self.ev9_raw_blindspot_ts = 0
+      self.ev9_raw_blindspot_fresh = False
+      self.ev9_reconstructed_left_blindspot = False
+      self.ev9_reconstructed_right_blindspot = False
+      self.ev9_reconstructed_blindspot_ts = 0
+      self.hba_icon = 0
+      self.main_cruise_on = False
 
     # On some cars, CLU15->CF_Clu_VehicleSpeed can oscillate faster than the dash updates. Sample at 5 Hz
     self.cluster_speed = 0
@@ -239,6 +202,12 @@ class CarState(CarStateBase):
     # To avoid re-engaging when openpilot cancels, check user engagement intention via buttons
     # Main button also can trigger an engagement on these cars
     return any(btn in ENABLE_BUTTONS for btn in self.cruise_buttons) or any(self.main_buttons)
+
+  def update_main_cruise(self, ret: structs.CarState) -> bool:
+    if any(be.type == ButtonType.mainCruise and be.pressed for be in ret.buttonEvents):
+      self.main_cruise_on = not self.main_cruise_on
+
+    return bool(ret.cruiseState.available and self.main_cruise_on)
 
   def create_cruise_button_events(self, cur_button: int, prev_button: int) -> list[structs.CarState.ButtonEvent]:
     if cur_button != prev_button and prev_button != Buttons.CANCEL and cur_button == Buttons.CANCEL:
@@ -396,7 +365,8 @@ class CarState(CarStateBase):
       ret.cruiseState.standstill = False
       ret.cruiseState.nonAdaptive = False
     elif no_scc:
-      cruise_available_msg, cruise_available_sig, cruise_enabled_msg, cruise_enabled_sig, cruise_speed_msg, cruise_speed_sig = get_non_scc_cruise_signals(self.CP)
+      cruise_available_msg, cruise_available_sig, cruise_enabled_msg, cruise_enabled_sig, cruise_speed_msg, cruise_speed_sig = \
+        get_non_scc_cruise_signals(self.CP)
       ret.cruiseState.available = cp.vl[cruise_available_msg][cruise_available_sig] != 0
       ret.cruiseState.enabled = cp.vl[cruise_enabled_msg][cruise_enabled_sig] != 0
       ret.cruiseState.standstill = False
@@ -584,44 +554,32 @@ class CarState(CarStateBase):
     left_blinker_sig, right_blinker_sig = self.get_canfd_blinker_sig_names(self.CP.carFingerprint, use_alt_lamp)
     ret.leftBlinker, ret.rightBlinker = self.update_blinker_from_lamp(50, cp.vl["BLINKERS"][left_blinker_sig],
                                                                       cp.vl["BLINKERS"][right_blinker_sig])
+    self.left_blinker_stalk, self.right_blinker_stalk = decode_canfd_blinker_stalks(
+      cp.vl["BLINKERS"]["LEFT_STALK"], cp.vl["BLINKERS"]["RIGHT_STALK"],
+    )
     self.left_blindspot_from_radar = False
     self.right_blindspot_from_radar = False
-    direct_radar_bsm = self.CP.carFingerprint == CAR.HYUNDAI_IONIQ_6
-    if direct_radar_bsm:
+    corner_radar_bsm = self.CP.carFingerprint in CANFD_CORNER_RADAR_BSM_CAR and self.CP.carFingerprint != CAR.KIA_EV9
+    if corner_radar_bsm:
       self.left_blindspot_from_radar, self.right_blindspot_from_radar = decode_ioniq_6_blindspot_radar_state(
         cp.vl["BLINDSPOTS_FRONT_CORNER_2"]["SIDE_DETECT_STATE"])
-    elif self.CP.carFingerprint == CAR.KIA_EV9:
+    if self.CP.carFingerprint == CAR.KIA_EV9:
       self.ev9_raw_blindspot_state = int(cp.vl["BLINDSPOTS_FRONT_CORNER_2"]["SIDE_DETECT_STATE"])
       self.ev9_raw_blindspot_ts = cp.ts_nanos["BLINDSPOTS_FRONT_CORNER_2"]["CHECKSUM"]
-      self.ev9_stock_blindspot_ts = cp.ts_nanos["BLINDSPOTS_REAR_CORNERS"]["CHECKSUM"]
-      now_nanos = max(cp.ts_nanos["WHEEL_SPEEDS"]["CHECKSUM"], self.ev9_raw_blindspot_ts,
-                      self.ev9_stock_blindspot_ts)
-      raw_age = now_nanos - self.ev9_raw_blindspot_ts
-      stock_age = now_nanos - self.ev9_stock_blindspot_ts
-      self.ev9_raw_blindspot_fresh = self.ev9_raw_blindspot_ts > 0 and 0 <= raw_age <= CANFD_BLINDSPOT_STALE_NS
-      # While the explicit vehicle-output experiment is active, received
-      # 0x1BA may be our own previous synthetic frame. Do not feed that frame
-      # back as a newly authoritative native decision. With output disabled,
-      # the unchanged native-fresh path below remains authoritative.
-      self.ev9_stock_blindspot_fresh = not self.ev9_software_bsm_vehicle_output_enabled and \
-        self.ev9_stock_blindspot_ts > 0 and 0 <= stock_age <= CANFD_BLINDSPOT_STALE_NS
-      self.left_blindspot_from_radar, self.right_blindspot_from_radar, self.ev9_blindspot_source = \
-        resolve_ev9_blindspot_state(
-          self.ev9_raw_blindspot_state, self.ev9_raw_blindspot_ts,
-          cp.vl["BLINDSPOTS_REAR_CORNERS"]["BCW_LtIndSta"],
-          cp.vl["BLINDSPOTS_REAR_CORNERS"]["BCW_RtIndSta"], self.ev9_stock_blindspot_ts, now_nanos,
-          self.ev9_raw_bsm_reconstruction_enabled, ret.gearShifter == structs.CarState.GearShifter.drive,
-          ret.vEgo,
-        )
-      if self.ev9_software_bsm_vehicle_output_enabled and self.ev9_blindspot_source == "stock":
-        self.left_blindspot_from_radar = False
-        self.right_blindspot_from_radar = False
-        self.ev9_blindspot_source = "neutral"
+      raw_age_nanos = max(cp.ts_nanos["WHEEL_SPEEDS"]["CHECKSUM"], self.ev9_raw_blindspot_ts) - self.ev9_raw_blindspot_ts
+      self.ev9_raw_blindspot_fresh = self.ev9_raw_blindspot_ts > 0 and \
+        0 <= raw_age_nanos <= EV9_RAW_BLINDSPOT_STALE_NS
     if self.CP.enableBsm:
       if self.CP.carFingerprint == CAR.KIA_EV9:
-        ret.leftBlindspot = self.left_blindspot_from_radar
-        ret.rightBlindspot = self.right_blindspot_from_radar
-      elif direct_radar_bsm:
+        self.native_left_blindspot_state = int(cp.vl["BLINDSPOTS_REAR_CORNERS"]["BCW_LtIndSta"])
+        self.native_right_blindspot_state = int(cp.vl["BLINDSPOTS_REAR_CORNERS"]["BCW_RtIndSta"])
+        self.native_blindspot_ts = cp.ts_nanos["BLINDSPOTS_REAR_CORNERS"]["CHECKSUM"]
+        now_nanos = max(cp.ts_nanos["WHEEL_SPEEDS"]["CHECKSUM"], self.native_blindspot_ts)
+        ret.leftBlindspot, ret.rightBlindspot, self.native_blindspot_fresh = resolve_canfd_native_blindspot_state(
+          self.native_left_blindspot_state, self.native_right_blindspot_state,
+          self.native_blindspot_ts, now_nanos,
+        )
+      elif corner_radar_bsm:
         ret.leftBlindspot = (bool(cp.vl["BLINDSPOTS_REAR_CORNERS"]["BCW_LtIndSta"]) or
                              self.left_blindspot_from_radar)
         ret.rightBlindspot = (bool(cp.vl["BLINDSPOTS_REAR_CORNERS"]["BCW_RtIndSta"]) or
@@ -647,16 +605,10 @@ class CarState(CarStateBase):
     main_button_samples = cp.vl_all[self.cruise_btns_msg_canfd]["ADAPTIVE_CRUISE_MAIN_BTN"]
     self.cruise_buttons.extend(cruise_button_samples)
     self.main_buttons.extend(main_button_samples)
-    if self.CP.carFingerprint == CAR.KIA_EV9:
-      self.ev9_cruise_main_on = update_ev9_cruise_main_latch(
-        self.ev9_cruise_main_on, prev_main_buttons, main_button_samples, self.ev9_cruise_main_state_enabled,
-      )
 
     # cruise state
     # CAN FD cars enable on main button press, set available if no TCS faults preventing engagement
     ret.cruiseState.available = cp.vl["TCS"]["ACCEnable"] == 0
-    if self.CP.carFingerprint == CAR.KIA_EV9 and self.CP.openpilotLongitudinalControl and not self.CP.pcmCruise:
-      ret.cruiseState.available = ret.cruiseState.available and self.ev9_cruise_main_on
     if self.CP.openpilotLongitudinalControl and not self.CP.pcmCruise:
       # These are not used for engage/disengage since openpilot keeps track of state using the buttons
       ret.cruiseState.enabled = cp.vl["TCS"]["ACC_REQ"] == 1
@@ -675,10 +627,6 @@ class CarState(CarStateBase):
     # TODO: find this message on ICE & HYBRID cars + cruise control signals (if exists)
     if self.CP.flags & HyundaiFlags.EV:
       ret.cruiseState.nonAdaptive = cp.vl["MANUAL_SPEED_LIMIT_ASSIST"]["MSLA_ENABLED"] == 1
-      if self.CP.carFingerprint == CAR.KIA_EV9:
-        self.ev9_smart_regen_active = bool(cp.vl["MANUAL_SPEED_LIMIT_ASSIST"]["SMART_REGEN_ACTIVE"])
-        self.ev9_smart_regen_lead_detected = bool(cp.vl["MANUAL_SPEED_LIMIT_ASSIST"]["SMART_REGEN_LEAD_DETECTED"])
-        self.ev9_regen_level_display_raw = int(cp.vl["MANUAL_SPEED_LIMIT_ASSIST"]["REGEN_LEVEL_DISPLAY_RAW"])
     self.lda_button = cp.vl[self.cruise_btns_msg_canfd]["LDA_BTN"]
     self.left_paddle = 0
     if self.CP.carFingerprint == CAR.HYUNDAI_IONIQ_6:
@@ -704,21 +652,28 @@ class CarState(CarStateBase):
       self.stock_lfa_msg = copy.copy(cp.vl["LFA"])
     if cp.ts_nanos["LFAHDA_CLUSTER"]["CHECKSUM"] > 0:
       self.stock_lfahda_cluster_msg = copy.copy(cp.vl["LFAHDA_CLUSTER"])
+    if self.CP.carFingerprint == CAR.KIA_EV9 and cp.ts_nanos["FR_CMR_01_10ms"]["FR_CMR_Crc1Val"] > 0:
+      hba_icon = int(cp.vl["FR_CMR_01_10ms"]["HBA_IndLmpReq"])
+      self.hba_icon = hba_icon if hba_icon in (1, 2) else 0
     if cp.ts_nanos["BLINKER_STALKS"]["CHECKSUM_MAYBE"] > 0:
+      self.stock_blinker_stalks = copy.copy(cp.vl["BLINKER_STALKS"])
       self.stock_blinker_stalks_ts = cp.ts_nanos["BLINKER_STALKS"]["CHECKSUM_MAYBE"]
 
     ret.buttonEvents = [*self.create_cruise_button_events(self.cruise_buttons[-1], prev_cruise_buttons),
                         *create_button_events(self.main_buttons[-1], prev_main_buttons, {1: ButtonType.mainCruise}),
                         *create_button_events(self.lda_button, prev_lda_button, {1: ButtonType.lkas}),
                         *create_button_events(self.left_paddle, prev_left_paddle, {1: ButtonType.altButton2})]
+    if self.CP.openpilotLongitudinalControl and self.CP.carFingerprint == CAR.KIA_EV9:
+      ret.cruiseState.available = self.update_main_cruise(ret)
 
     ret.blockPcmEnable = not self.recent_button_interaction()
 
     fp_ret = custom.StarPilotCarState.new_message()
-    fp_ret.dashboardSpeedLimit = calculate_canfd_speed_limit(self.CP, self.FPCP, cp, cp_cam, speed_factor)
-    if self.CP.carFingerprint == CAR.KIA_EV9:
-      self.ev9_cluster_speed_limit_raw = read_canfd_speed_limit_raw(self.CP, cp, cp_cam)
-
+    self.dashboard_speed_limit_raw, self.dashboard_speed_limit_warning = get_canfd_speed_limit_state(
+      self.CP, self.FPCP, cp, cp_cam,
+    )
+    fp_ret.dashboardSpeedLimit = self.dashboard_speed_limit_raw * speed_factor \
+      if self.dashboard_speed_limit_raw <= 252 else 0.0
     if self.CP.flags & HyundaiFlags.EV:
       drive_mode = cp.vl["DRIVE_MODE_EV"]["DRIVE_MODE"]
       fp_ret.ecoGear = (drive_mode == 4)
@@ -768,11 +723,10 @@ class CarState(CarStateBase):
       # parser entry optional so that expected ADAS silence does not poison
       # canValid; checksum/counter failures on all required messages remain.
       msgs.append(("BLINDSPOTS_REAR_CORNERS", 0))
-    if CP.carFingerprint in (CAR.HYUNDAI_IONIQ_6, CAR.KIA_EV9):
-      # This compact side-detection bitmap remains live when ADAS_DRV is
-      # disabled. EV9 retains it for an explicitly gated experiment only;
-      # genuine fresh 0x1BA remains authoritative there.
+    if CP.carFingerprint in CANFD_CORNER_RADAR_BSM_CAR:
       msgs.append(("BLINDSPOTS_FRONT_CORNER_2", 0))
+    if CP.carFingerprint == CAR.KIA_EV9:
+      msgs.append(("FR_CMR_01_10ms", 0))
     if CP.flags & HyundaiFlags.EV:
       msgs.append(("DRIVE_MODE_EV", 0))  # optional: not all CAN-FD EV variants publish drive mode
       msgs.append(("MANUAL_SPEED_LIMIT_ASSIST", 0))  # optional: used for non-adaptive cruise state and Ioniq 6 i-Pedal latch detection

@@ -89,6 +89,9 @@ def _params_client(monkeypatch, values, device_type):
 
 EV9_SCOPED_PARAM_KEYS = {
   "EV9LongPreinitPanda",
+  "KiaEv9ClusterBsmReconstructionEnabled",
+  "KiaEv9ClusterHeadwayEnabled",
+  "KiaEv9ClusterObjectsEnabled",
 }
 
 
