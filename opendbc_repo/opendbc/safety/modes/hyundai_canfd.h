@@ -635,6 +635,7 @@ static safety_config hyundai_canfd_ev9_init(uint16_t param) {
   if (((param & EV9_REQUIRED_PARAM) == EV9_REQUIRED_PARAM) &&
       ((param | EV9_OPTIONAL_PARAM) == EV9_ALLOWED_PARAM)) {
     ret = hyundai_canfd_init_common(param);
+    hyundai_cancel_button_resume_requires_set = true;
   }
   return ret;
 }

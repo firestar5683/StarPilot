@@ -8,7 +8,8 @@ from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.values import HyundaiFlags, HyundaiStarPilotFlags, CAR, DBC, Buttons, CarControllerParams, \
-                                       hyundai_cancel_button_enables_cruise, ALT_BUS_LDA_BUTTON_CARS, ALT_BUS_LDA_BUTTON_SWL_STAT_CARS, \
+                                       hyundai_cancel_button_enables_cruise, hyundai_cancel_button_resume_requires_set, \
+                                       ALT_BUS_LDA_BUTTON_CARS, ALT_BUS_LDA_BUTTON_SWL_STAT_CARS, \
                                        CANFD_CORNER_RADAR_BSM_CAR, CANFD_EV_TELEMETRY_CAR
 from opendbc.car.interfaces import CarStateBase
 
@@ -108,6 +109,7 @@ class CarState(CarStateBase):
     self.mode_button = 0
     self.custom_button = 0
     self.cancel_button_enable_in_progress = False
+    self.cancel_button_setpoint_established = False
     self.cruise_buttons_msg = {}
     self.redneck_send_button = Buttons.NONE
     self.redneck_v_target = 0
@@ -206,15 +208,25 @@ class CarState(CarStateBase):
   def update_main_cruise(self, ret: structs.CarState) -> bool:
     if any(be.type == ButtonType.mainCruise and be.pressed for be in ret.buttonEvents):
       self.main_cruise_on = not self.main_cruise_on
+      if not self.main_cruise_on:
+        self.cancel_button_setpoint_established = False
 
     return bool(ret.cruiseState.available and self.main_cruise_on)
 
   def create_cruise_button_events(self, cur_button: int, prev_button: int) -> list[structs.CarState.ButtonEvent]:
+    resume_requires_set = hyundai_cancel_button_resume_requires_set(self.CP.carFingerprint)
+    if resume_requires_set and self.out.cruiseState.available and \
+        prev_button == Buttons.SET_DECEL and cur_button != Buttons.SET_DECEL:
+      self.cancel_button_setpoint_established = True
+
     if cur_button != prev_button and prev_button != Buttons.CANCEL and cur_button == Buttons.CANCEL:
+      resume_setpoint_available = not resume_requires_set or self.cancel_button_setpoint_established
       self.cancel_button_enable_in_progress = (
         self.CP.openpilotLongitudinalControl and
         hyundai_cancel_button_enables_cruise(self.CP.carFingerprint) and
-        not self.out.cruiseState.enabled
+        self.out.cruiseState.available and
+        not self.out.cruiseState.enabled and
+        resume_setpoint_available
       )
 
     buttons_dict = BUTTONS_DICT
@@ -232,11 +244,14 @@ class CarState(CarStateBase):
     if super().update_button_enable(buttonEvents):
       return True
 
-    if not self.CP.pcmCruise and hyundai_cancel_button_enables_cruise(self.CP.carFingerprint):
+    if not self.CP.pcmCruise and self.out.cruiseState.available and \
+        hyundai_cancel_button_enables_cruise(self.CP.carFingerprint):
       for b in buttonEvents:
         # Some Palisade 2023 routes still surface the pause/resume interaction as a
         # plain cancel event even though stock ACC engages on the release edge.
-        if b.type == ButtonType.cancel and not b.pressed and not self.out.cruiseState.enabled:
+        resume_requires_set = hyundai_cancel_button_resume_requires_set(self.CP.carFingerprint)
+        resume_setpoint_available = not resume_requires_set or self.cancel_button_setpoint_established
+        if b.type == ButtonType.cancel and not b.pressed and not self.out.cruiseState.enabled and resume_setpoint_available:
           return True
 
     return False

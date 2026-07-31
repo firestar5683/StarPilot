@@ -933,6 +933,11 @@ class Buttons:
 
 CANCEL_BUTTON_ENABLE_CARS = frozenset({
   CAR.HYUNDAI_PALISADE_2023,
+  CAR.KIA_EV9,
+})
+
+CANCEL_BUTTON_RESUME_REQUIRES_SET_CARS = frozenset({
+  CAR.KIA_EV9,
 })
 
 KIA_EV6_GT_LINE_LONG_TUNING_VDS_PREFIXES = frozenset({
@@ -956,6 +961,10 @@ ALT_BUS_LDA_BUTTON_SWL_STAT_CARS = frozenset({
 
 def hyundai_cancel_button_enables_cruise(car_fingerprint) -> bool:
   return car_fingerprint in CANCEL_BUTTON_ENABLE_CARS
+
+
+def hyundai_cancel_button_resume_requires_set(car_fingerprint) -> bool:
+  return car_fingerprint in CANCEL_BUTTON_RESUME_REQUIRES_SET_CARS
 
 
 def kia_ev6_gt_line_longitudinal_tuning(car_fingerprint, vin: str) -> bool:
