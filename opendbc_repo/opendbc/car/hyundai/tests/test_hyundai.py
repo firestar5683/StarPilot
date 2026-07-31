@@ -953,6 +953,22 @@ class TestHyundaiFingerprint:
     events = car_state.create_cruise_button_events(Buttons.CANCEL, Buttons.NONE)
     assert [(be.type, be.pressed) for be in events] == [(ButtonType.cancel, True)]
 
+  def test_ev9_pause_resume_button_maps_to_enable_after_set(self):
+    toggles = get_test_toggles()
+    CP = CarInterface.get_params(CAR.KIA_EV9, gen_empty_fingerprint(), [], True, False, False, toggles)
+    FPCP = CarInterface.get_starpilot_params(CAR.KIA_EV9, gen_empty_fingerprint(), [], CP, toggles)
+    car_state = CarState(CP, FPCP)
+
+    car_state.out.cruiseState.available = True
+    car_state.out.cruiseState.enabled = False
+    car_state.create_cruise_button_events(Buttons.SET_DECEL, Buttons.NONE)
+    car_state.create_cruise_button_events(Buttons.NONE, Buttons.SET_DECEL)
+    events = car_state.create_cruise_button_events(Buttons.CANCEL, Buttons.NONE)
+    assert [(be.type, be.pressed) for be in events] == [(ButtonType.accelCruise, True)]
+
+    events = car_state.create_cruise_button_events(Buttons.NONE, Buttons.CANCEL)
+    assert [(be.type, be.pressed) for be in events] == [(ButtonType.accelCruise, False)]
+
   def test_ccnc_angle_long_main_cruise_toggle(self):
     car_state = SimpleNamespace(main_cruise_on=False)
     ret = SimpleNamespace(
@@ -979,6 +995,67 @@ class TestHyundaiFingerprint:
 
     car_state.out.cruiseState.enabled = True
     assert not car_state.update_button_enable([structs.CarState.ButtonEvent(pressed=False, type=ButtonType.cancel)])
+
+  def test_ev9_cancel_release_enables_from_standby_after_set(self):
+    toggles = get_test_toggles()
+    CP = CarInterface.get_params(CAR.KIA_EV9, gen_empty_fingerprint(), [], True, False, False, toggles)
+    FPCP = CarInterface.get_starpilot_params(CAR.KIA_EV9, gen_empty_fingerprint(), [], CP, toggles)
+    car_state = CarState(CP, FPCP)
+
+    car_state.out.cruiseState.available = True
+    car_state.out.cruiseState.enabled = False
+    car_state.create_cruise_button_events(Buttons.SET_DECEL, Buttons.NONE)
+    car_state.create_cruise_button_events(Buttons.NONE, Buttons.SET_DECEL)
+    assert not car_state.update_button_enable([structs.CarState.ButtonEvent(pressed=True, type=ButtonType.cancel)])
+    assert car_state.update_button_enable([structs.CarState.ButtonEvent(pressed=False, type=ButtonType.cancel)])
+
+  def test_pause_resume_button_does_not_resume_with_main_off(self):
+    toggles = get_test_toggles()
+    CP = CarInterface.get_params(CAR.KIA_EV9, gen_empty_fingerprint(), [], True, False, False, toggles)
+    FPCP = CarInterface.get_starpilot_params(CAR.KIA_EV9, gen_empty_fingerprint(), [], CP, toggles)
+    car_state = CarState(CP, FPCP)
+
+    car_state.out.cruiseState.available = False
+    car_state.out.cruiseState.enabled = False
+    events = car_state.create_cruise_button_events(Buttons.CANCEL, Buttons.NONE)
+    assert [(be.type, be.pressed) for be in events] == [(ButtonType.cancel, True)]
+    events = car_state.create_cruise_button_events(Buttons.NONE, Buttons.CANCEL)
+    assert [(be.type, be.pressed) for be in events] == [(ButtonType.cancel, False)]
+    assert not car_state.update_button_enable(events)
+
+  def test_pause_resume_button_requires_initial_set(self):
+    toggles = get_test_toggles()
+    CP = CarInterface.get_params(CAR.KIA_EV9, gen_empty_fingerprint(), [], True, False, False, toggles)
+    FPCP = CarInterface.get_starpilot_params(CAR.KIA_EV9, gen_empty_fingerprint(), [], CP, toggles)
+    car_state = CarState(CP, FPCP)
+
+    # A SET/- press while Main is unavailable does not establish a setpoint.
+    car_state.out.cruiseState.available = False
+    car_state.create_cruise_button_events(Buttons.SET_DECEL, Buttons.NONE)
+    car_state.create_cruise_button_events(Buttons.NONE, Buttons.SET_DECEL)
+
+    car_state.out.cruiseState.available = True
+    car_state.out.cruiseState.enabled = False
+
+    # Main-only standby has no retained setpoint, so center remains cancel.
+    events = car_state.create_cruise_button_events(Buttons.CANCEL, Buttons.NONE)
+    assert [(be.type, be.pressed) for be in events] == [(ButtonType.cancel, True)]
+    events = car_state.create_cruise_button_events(Buttons.NONE, Buttons.CANCEL)
+    assert [(be.type, be.pressed) for be in events] == [(ButtonType.cancel, False)]
+    assert not car_state.update_button_enable(events)
+
+    # SET/- establishes the speed; center can then represent resume.
+    car_state.create_cruise_button_events(Buttons.SET_DECEL, Buttons.NONE)
+    car_state.create_cruise_button_events(Buttons.NONE, Buttons.SET_DECEL)
+    events = car_state.create_cruise_button_events(Buttons.CANCEL, Buttons.NONE)
+    assert [(be.type, be.pressed) for be in events] == [(ButtonType.accelCruise, True)]
+
+    # Turning Main off clears the retained setpoint.
+    main_event = structs.CarState.ButtonEvent(pressed=True, type=ButtonType.mainCruise)
+    car_state.main_cruise_on = True
+    car_state.update_main_cruise(structs.CarState(buttonEvents=[main_event]))
+    events = car_state.create_cruise_button_events(Buttons.CANCEL, Buttons.NONE)
+    assert [(be.type, be.pressed) for be in events] == [(ButtonType.cancel, True)]
 
   def test_palisade_2023_disable_failure_falls_back_to_stock_acc(self, monkeypatch):
     toggles = get_test_toggles()

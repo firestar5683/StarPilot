@@ -715,6 +715,56 @@ class TestHyundaiCanfdLKASteeringAltAngleLongEV(HyundaiLongitudinalBase, TestHyu
     self.safety.init_tests()
     self.assertTrue(self._tx(libsafety_py.make_CANPacket(0x160, 1, b"\x00" * 16)))
 
+  def test_pause_resume_button_requires_set_and_main(self):
+    # SET/- while Main is off cannot create a resumable setpoint.
+    self._rx(self._button_msg(Buttons.SET))
+    self._rx(self._button_msg(Buttons.NONE))
+    self.safety.set_controls_allowed(False)
+
+    # Main alone cannot make center an initial SET button.
+    self._rx(self._button_msg(Buttons.NONE, main_button=1))
+    self._rx(self._button_msg(Buttons.NONE, main_button=0))
+    self.assertTrue(self.safety.get_acc_main_on())
+    self._rx(self._button_msg(Buttons.CANCEL))
+    self._rx(self._button_msg(Buttons.NONE))
+    self.assertFalse(self.safety.get_controls_allowed())
+
+    # SET/- establishes the retained speed.
+    self._rx(self._button_msg(Buttons.SET))
+    self._rx(self._button_msg(Buttons.NONE))
+    self.assertTrue(self.safety.get_controls_allowed())
+
+    # An engaged center press pauses at Panda first.
+    self._rx(self._button_msg(Buttons.CANCEL))
+    self.assertFalse(self.safety.get_controls_allowed())
+    self._rx(self._button_msg(Buttons.NONE))
+    self.assertFalse(self.safety.get_controls_allowed())
+
+    # A second center press resumes the retained setpoint.
+    self._rx(self._button_msg(Buttons.CANCEL))
+    self.assertFalse(self.safety.get_controls_allowed())
+    self._rx(self._button_msg(Buttons.NONE))
+    self.assertTrue(self.safety.get_controls_allowed())
+
+    # Main off clears the setpoint, so center cannot engage again.
+    self._rx(self._button_msg(Buttons.NONE, main_button=1))
+    self._rx(self._button_msg(Buttons.NONE, main_button=0))
+    self.assertFalse(self.safety.get_acc_main_on())
+
+    # HKG longitudinal safety does not revoke controls on Main off. The host
+    # drops cruise availability, while AOL retains its independent lateral gate.
+    self.assertTrue(self.safety.get_controls_allowed())
+
+    # Simulate the host disengagement before checking that Main on alone cannot
+    # restore the setpoint that Main off cleared.
+    self.safety.set_controls_allowed(False)
+    self._rx(self._button_msg(Buttons.NONE, main_button=1))
+    self._rx(self._button_msg(Buttons.NONE, main_button=0))
+    self.assertTrue(self.safety.get_acc_main_on())
+    self._rx(self._button_msg(Buttons.CANCEL))
+    self._rx(self._button_msg(Buttons.NONE))
+    self.assertFalse(self.safety.get_controls_allowed())
+
   def _angle_cmd_msg(self, angle, enabled, increment_timer=True, gain_raw=250):
     if increment_timer:
       self.safety.set_timer(self.angle_cmd_cnt * int(1e6 / self.LATERAL_FREQUENCY))

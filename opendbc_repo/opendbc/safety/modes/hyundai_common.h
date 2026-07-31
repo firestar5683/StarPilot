@@ -60,6 +60,14 @@ bool hyundai_cancel_button_enable = false;
 extern bool hyundai_can_refresh_msgs;
 bool hyundai_can_refresh_msgs = false;
 
+// Some platforms use the cancel input as a pause/resume button. Resume is only
+// allowed after SET establishes a setpoint, while a press during engagement
+// must still revoke actuation permission.
+extern bool hyundai_cancel_button_resume_requires_set;
+bool hyundai_cancel_button_resume_requires_set = false;
+static bool hyundai_cancel_button_resume_pending;
+static bool hyundai_cancel_button_setpoint_established;
+
 static uint8_t hyundai_last_button_interaction;  // button messages since the user pressed an enable button
 static bool acc_main_on_prev;
 static bool acc_main_on_tx;
@@ -95,6 +103,9 @@ void hyundai_common_init(uint16_t param) {
   hyundai_non_scc = GET_FLAG(param, HYUNDAI_PARAM_NON_SCC);
   hyundai_cancel_button_enable = GET_FLAG(param, HYUNDAI_PARAM_CANCEL_BTN_ENABLE);
   hyundai_can_refresh_msgs = GET_FLAG(param, HYUNDAI_PARAM_CAN_REFRESH_MSGS);
+  hyundai_cancel_button_resume_requires_set = false;
+  hyundai_cancel_button_resume_pending = false;
+  hyundai_cancel_button_setpoint_established = false;
 
   hyundai_last_button_interaction = HYUNDAI_PREV_BUTTON_SAMPLES;
   acc_main_on_prev = false;
@@ -141,9 +152,19 @@ void hyundai_common_cruise_buttons_check(const int cruise_button, const bool mai
     // enter controls on falling edge of resume or set
     bool set = (cruise_button != HYUNDAI_BTN_SET) && (cruise_button_prev == HYUNDAI_BTN_SET);
     bool res = (cruise_button != HYUNDAI_BTN_RESUME) && (cruise_button_prev == HYUNDAI_BTN_RESUME);
-    bool cancel_enable = hyundai_cancel_button_enable && !cruise_engaged_prev &&
+    bool cancel_enable = !hyundai_cancel_button_resume_requires_set && hyundai_cancel_button_enable && !cruise_engaged_prev &&
                          (cruise_button != HYUNDAI_BTN_CANCEL) && (cruise_button_prev == HYUNDAI_BTN_CANCEL);
-    if (set || res || cancel_enable) {
+    const bool cancel_pressed = (cruise_button == HYUNDAI_BTN_CANCEL) &&
+                                (cruise_button_prev != HYUNDAI_BTN_CANCEL);
+    const bool cancel_released = (cruise_button != HYUNDAI_BTN_CANCEL) &&
+                                 (cruise_button_prev == HYUNDAI_BTN_CANCEL);
+    const bool cancel_resume = hyundai_cancel_button_resume_requires_set && cancel_released &&
+                               hyundai_cancel_button_resume_pending &&
+                               hyundai_cancel_button_setpoint_established && acc_main_on;
+    if (hyundai_cancel_button_resume_requires_set && set && acc_main_on) {
+      hyundai_cancel_button_setpoint_established = true;
+    }
+    if (set || res || cancel_enable || cancel_resume) {
       controls_allowed = true;
 
       if (hyundai_aol_lkas_on_engage && ((alternative_experience & ALT_EXP_ALWAYS_ON_LATERAL) != 0)) {
@@ -151,8 +172,18 @@ void hyundai_common_cruise_buttons_check(const int cruise_button, const bool mai
       }
     }
 
+    if (hyundai_cancel_button_resume_requires_set && cancel_pressed) {
+      hyundai_cancel_button_resume_pending = !controls_allowed &&
+                                             hyundai_cancel_button_setpoint_established && acc_main_on;
+      controls_allowed = false;
+    }
+    if (hyundai_cancel_button_resume_requires_set && cancel_released) {
+      hyundai_cancel_button_resume_pending = false;
+    }
+
     // exit controls on cancel press
-    if ((cruise_button == HYUNDAI_BTN_CANCEL) && !(hyundai_cancel_button_enable && !cruise_engaged_prev)) {
+    if (!hyundai_cancel_button_resume_requires_set && (cruise_button == HYUNDAI_BTN_CANCEL) &&
+        !(hyundai_cancel_button_enable && !cruise_engaged_prev)) {
       controls_allowed = false;
     }
 
@@ -161,6 +192,9 @@ void hyundai_common_cruise_buttons_check(const int cruise_button, const bool mai
 
   if (main_button && !main_button_prev) {
     acc_main_on = !acc_main_on;
+    if (hyundai_cancel_button_resume_requires_set && !acc_main_on) {
+      hyundai_cancel_button_setpoint_established = false;
+    }
   }
   main_button_prev = main_button;
 }
@@ -204,6 +238,7 @@ void hyundai_common_acc_main_on_sync(void) {
 
     if (acc_main_on_mismatches >= 3U) {
       acc_main_on = false;
+      hyundai_cancel_button_setpoint_established = false;
     }
   } else {
     acc_main_on_mismatches = 0U;
