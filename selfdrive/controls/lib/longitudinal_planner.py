@@ -42,6 +42,10 @@ MODEL_STOP_MIN_END_SPEED = 2.0
 MODEL_FIRST_AUTHORITY = 0.75
 MODEL_FIRST_OPEN_ROAD_AUTHORITY = 0.35
 MODEL_FIRST_CRUISE_ERROR = 1.5
+MODEL_SLOWDOWN_MIN_ACCEL = 0.15
+MODEL_SLOWDOWN_MIN_SPEED_DROP = 0.75
+MODEL_SLOWDOWN_FULL_SPEED_DROP = 3.0
+MODEL_SLOWDOWN_MAX_AUTHORITY = 0.65
 
 STOP_ENTER_AUTHORITY = 0.72
 STOP_RELEASE_TIME = 0.50
@@ -183,6 +187,25 @@ class LongitudinalPlanner:
     time_score = 1.0 - _smoothstep(horizon, MODEL_STOP_FULL_TIME, MODEL_STOP_BEGIN_TIME)
     speed_score = 1.0 - _smoothstep(end_speed, 0.5, MODEL_STOP_MIN_END_SPEED)
     return float(time_score * speed_score)
+
+  @staticmethod
+  def _model_slowdown_authority(model, v_ego):
+    """Preview sustained model braking before it becomes a full stop request."""
+    if not len(model.position.x) or not len(model.velocity.x):
+      return 0.0
+
+    desired_accel = float(getattr(model.action, "desiredAcceleration", 0.0))
+    if not np.isfinite(desired_accel) or desired_accel >= -MODEL_SLOWDOWN_MIN_ACCEL:
+      return 0.0
+
+    end_speed = float(model.velocity.x[-1])
+    speed_drop = float(v_ego) - end_speed
+    if not np.isfinite(end_speed) or speed_drop < MODEL_SLOWDOWN_MIN_SPEED_DROP:
+      return 0.0
+
+    accel_score = _smoothstep(-desired_accel, MODEL_SLOWDOWN_MIN_ACCEL, 0.8)
+    speed_score = _smoothstep(speed_drop, MODEL_SLOWDOWN_MIN_SPEED_DROP, MODEL_SLOWDOWN_FULL_SPEED_DROP)
+    return MODEL_SLOWDOWN_MAX_AUTHORITY * max(accel_score, speed_score)
 
   @staticmethod
   def _curve_authority(sm, v_ego):
@@ -403,9 +426,11 @@ class LongitudinalPlanner:
     has_lead = any(bool(getattr(lead, "status", False)) for lead in leads)
     model_first = bool(getattr(starpilot_toggles, "longitudinal_model_preference", False))
     stop_authority = self._model_stop_authority(sm["modelV2"], scene_v_ego)
+    slowdown_authority = self._model_slowdown_authority(sm["modelV2"], scene_v_ego)
     self.model_authority = self._get_model_authority(
       sm, scene_v_ego, v_cruise, has_lead, model_first, stop_authority,
     )
+    self.model_authority = max(self.model_authority, slowdown_authority)
     model_limited_target = min(mpc_target, model_target)
     target = mpc_target + self.model_authority * (model_limited_target - mpc_target)
     self.plan_source = "e2e" if model_limited_target < mpc_target - 1e-3 and self.model_authority > 0.05 else self.mpc.source

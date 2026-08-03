@@ -77,6 +77,14 @@ def set_model_stop(model, distance=5.0):
   model.action.desiredAcceleration = -1.0
 
 
+def set_model_slowdown(model, end_speed, desired_accel=-0.4):
+  times = np.asarray(ModelConstants.T_IDXS)
+  v_ego = float(model.velocity.x[0])
+  model.position.x = np.linspace(0.0, max(v_ego * times[-1] * 0.8, 1.0), len(times)).tolist()
+  model.velocity.x = np.linspace(v_ego, end_speed, len(times)).tolist()
+  model.action.desiredAcceleration = desired_accel
+
+
 def make_sm(v_ego=20.0, *, v_cruise=None, model_accel=0.0, lead_one=None, lead_two=None):
   v_cruise = v_ego + 5.0 if v_cruise is None else v_cruise
   return {
@@ -175,6 +183,33 @@ def test_model_stop_intent_brakes_without_binary_mode_switch():
   assert planner.state == PlanState.stopping
   assert planner.output_a_target < 0.0
   assert planner.plan_source == "e2e"
+
+
+def test_set_speed_first_previews_sustained_model_slowdown():
+  CP = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
+  planner = LongitudinalPlanner(CP, init_v=20.0)
+  use_fixed_mpc(planner, 0.5)
+  sm = make_sm(v_ego=20.0, model_accel=-0.4)
+  set_model_slowdown(sm["modelV2"], end_speed=16.0)
+
+  planner.update(sm, make_toggles(model_first=False))
+
+  assert 0.0 < planner.model_authority < 1.0
+  assert planner.output_a_target < 0.0
+  assert planner.state == PlanState.moving
+
+
+def test_small_model_speed_dip_does_not_override_set_speed():
+  CP = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
+  planner = LongitudinalPlanner(CP, init_v=20.0)
+  use_fixed_mpc(planner, 0.5)
+  sm = make_sm(v_ego=20.0, model_accel=-0.2)
+  set_model_slowdown(sm["modelV2"], end_speed=19.5, desired_accel=-0.2)
+
+  planner.update(sm, make_toggles(model_first=False))
+
+  assert planner.model_authority == 0.0
+  assert planner.output_a_target > 0.0
 
 
 def test_force_stop_is_a_hard_stop():
