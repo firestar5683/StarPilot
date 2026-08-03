@@ -290,7 +290,7 @@ class CarState(CarStateBase):
     ret.standstill = ret.vEgoRaw == 0
 
     self.frame += 1
-    return ret
+    return ret, custom.StarPilotCarState.new_message()
 
   def update_low_speed_alert(self, v_ego: float) -> bool:
     # Low speed steer alert hysteresis logic

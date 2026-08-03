@@ -1,8 +1,12 @@
 from types import SimpleNamespace
 
+import pytest
+
 from opendbc.car.subaru.carcontroller import CarController
 from opendbc.car.subaru.fingerprints import FW_VERSIONS
-from opendbc.car.subaru.values import SubaruFlags
+from opendbc.car.subaru.interface import CarInterface
+from opendbc.car.subaru.values import CAR, SubaruFlags, SubaruSafetyFlags
+from opendbc.car.structs import CarParams
 
 
 def make_sng_controller(flags=0, prev_close_distance=4.0):
@@ -61,3 +65,43 @@ class TestSubaruFingerprint:
         fw_size = len(fws[0])
         for fw in fws:
           assert len(fw) == fw_size, f"{platform} {ecu}: {len(fw)} {fw_size}"
+
+
+ANGLE_PLATFORMS = (
+  CAR.SUBARU_FORESTER_2022,
+  CAR.SUBARU_OUTBACK_2023,
+  CAR.SUBARU_ASCENT_2023,
+  CAR.SUBARU_CROSSTREK_2025,
+)
+
+
+@pytest.mark.parametrize("platform", ANGLE_PLATFORMS)
+def test_angle_platform_params(platform):
+  CP = CarInterface.get_non_essential_params(platform)
+
+  assert CP.flags & SubaruFlags.LKAS_ANGLE
+  assert CP.steerControlType == CarParams.SteerControlType.angle
+  assert CP.safetyConfigs[0].safetyParam & SubaruSafetyFlags.LKAS_ANGLE
+  assert not CP.dashcamOnly
+  assert not CP.alphaLongitudinalAvailable
+
+
+def test_torque_platform_does_not_enable_angle_safety():
+  CP = CarInterface.get_non_essential_params(CAR.SUBARU_IMPREZA_2020)
+
+  assert not (CP.flags & SubaruFlags.LKAS_ANGLE)
+  assert CP.steerControlType == CarParams.SteerControlType.torque
+  assert not (CP.safetyConfigs[0].safetyParam & SubaruSafetyFlags.LKAS_ANGLE)
+
+
+def test_angle_controller_tracks_driver_override():
+  CP = CarInterface.get_non_essential_params(CAR.SUBARU_CROSSTREK_2025)
+  controller = CarController({}, CP)
+  CC = SimpleNamespace(latActive=True, actuators=SimpleNamespace(steeringAngleDeg=15.0))
+  CS = SimpleNamespace(out=SimpleNamespace(vEgoRaw=15.0, steeringAngleDeg=2.0, steeringTorque=250.0))
+
+  msg = controller.lateral_angle(CC, CS)
+
+  assert controller.driver_override
+  assert controller.apply_steer_last == CS.out.steeringAngleDeg
+  assert msg[0] == 0x124

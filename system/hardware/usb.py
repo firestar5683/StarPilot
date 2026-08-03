@@ -1,6 +1,7 @@
 from pathlib import Path
 
 CHESTNUT_VENDOR_ID = 0xADD1
+CHESTNUT_VENDOR_IDS = (CHESTNUT_VENDOR_ID, 0x3801)
 CHESTNUT_PRODUCT_ID = 0x0001
 USB_DEVICES_PATH = Path("/sys/bus/usb/devices")
 
@@ -22,7 +23,7 @@ def usb_devices() -> list[Path]:
 
 def chestnut_present() -> bool:
   return any(
-    read_int(device / "idVendor", 16) == CHESTNUT_VENDOR_ID and
+    read_int(device / "idVendor", 16) in CHESTNUT_VENDOR_IDS and
     read_int(device / "idProduct", 16) == CHESTNUT_PRODUCT_ID
     for device in usb_devices()
   )

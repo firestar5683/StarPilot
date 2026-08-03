@@ -88,6 +88,12 @@ For a model that cannot run on the device GPU, compile with the USB AMD GPU atta
 ./models --lebowski --gpu
 ```
 
+The ASM2464PD bridge must run the current tinygrad custom firmware from
+https://github.com/tinygrad/asm2464pd-firmware. Its USB product string starts
+with `custom`; the legacy `USB 3.2 PCIe TinyEnclosure` patch is not compatible
+with comma's current external-GPU runtime. Firmware flashing is a separate,
+explicit hardware setup step and StarPilot never performs it automatically.
+
 The dynamic flag (`--lebowski` above) sets the output and manifest model ID;
 when only one source model is staged, its ONNX filename does not need to match
 that ID. Input format and behavior version are inferred. `--external-gpu`

@@ -4,10 +4,10 @@ import pyray as rl
 from cereal import messaging, car
 from dataclasses import dataclass, field
 from openpilot.common.filter_simple import FirstOrderFilter
-from openpilot.common.params import Params
 from openpilot.common.constants import CV
 from openpilot.selfdrive.locationd.calibrationd import HEIGHT_INIT
 from openpilot.selfdrive.ui.lib.starpilot_theme import get_param_color, get_theme_color, get_visual_color, is_stock_color_scheme, with_alpha
+from openpilot.selfdrive.ui.onroad.radar_tracks import project_radar_points
 from openpilot.selfdrive.ui.onroad.starpilot.rainbow_path import RainbowPath
 from openpilot.selfdrive.ui.lib.starpilot_visuals import lead_indicator_enabled
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
@@ -24,6 +24,13 @@ DEFAULT_LANE_LINES_WIDTH = 4.0
 DEFAULT_PATH_EDGE_WIDTH = 20.0
 DEFAULT_PATH_WIDTH = 6.1
 DEFAULT_ROAD_EDGES_WIDTH = 2.0
+RADAR_MARKER_RADIUS = 7.0
+RADAR_MARKER_OUTLINE_RADIUS = 9.0
+RADAR_MARKER_TEXTURE_SIZE = 22
+RADAR_MARKER_TEXTURE_CENTER = RADAR_MARKER_TEXTURE_SIZE / 2.0
+RADAR_MARKER_TEXTURE_KEY = "onroad-radar-marker-v1"
+RADAR_MARKER_OUTLINE_COLOR = rl.Color(0, 0, 0, 170)
+RADAR_MARKER_FILL_COLOR = rl.Color(255, 40, 40, 230)
 
 THROTTLE_COLORS = [
   rl.Color(13, 248, 122, 102),   # HSLF(148/360, 0.94, 0.51, 0.4)
@@ -77,6 +84,12 @@ class ModelRenderer(Widget):
     # Transform matrix (3x3 for car space to screen space)
     self._car_space_transform = np.zeros((3, 3), dtype=np.float32)
     self._transform_dirty = True
+    self._radar_transform_generation = 0
+    self._radar_path_generation = 0
+    self._radar_projection_key = None
+    self._radar_marker_centers = []
+    self._radar_marker_positions = []
+    self._radar_marker_texture = None
     self._clip_region = None
 
     self._exp_gradient = Gradient(
@@ -88,7 +101,7 @@ class ModelRenderer(Widget):
     self._rainbow_path = RainbowPath()
 
     # Get longitudinal control setting from car parameters
-    self._params = Params()
+    self._params = ui_state.ui_params
     if car_params := self._params.get("CarParams"):
       cp = messaging.log_from_bytes(car_params, car.CarParams)
       self._longitudinal_control = cp.openpilotLongitudinalControl
@@ -96,6 +109,7 @@ class ModelRenderer(Widget):
   def set_transform(self, transform: np.ndarray):
     self._car_space_transform = transform.astype(np.float32)
     self._transform_dirty = True
+    self._radar_transform_generation += 1
 
   def _render(self, rect: rl.Rectangle):
     sm = ui_state.sm
@@ -172,6 +186,7 @@ class ModelRenderer(Widget):
   def _update_raw_points(self, model):
     """Update raw 3D points from model data"""
     self._path.raw_points = np.array([model.position.x, model.position.y, model.position.z], dtype=np.float32).T
+    self._radar_path_generation += 1
 
     # Model outputs can vary by branch/model family; keep renderer bounded to
     # the fixed number of lane/edge slots used by the UI.
@@ -591,33 +606,99 @@ class ModelRenderer(Widget):
   def _draw_radar_tracks(self):
     radar_tracks_enabled = self._params.get_bool("RadarTracksUI")
     if not radar_tracks_enabled:
+      self._clear_radar_projection_cache()
       return
 
     sm = ui_state.sm
     if not sm.valid.get("liveTracks", False):
+      self._clear_radar_projection_cache()
       return
 
     radar_points = sm["liveTracks"].points
     if len(radar_points) == 0:
+      self._clear_radar_projection_cache()
       return
 
-    path_x_array = self._path.raw_points[:, 0]
-    line_z = self._path.raw_points[:, 2]
+    clip = self._clip_region
+    if clip is None:
+      self._clear_radar_projection_cache()
+      return
 
-    radius = 4.0
-    red_color = rl.Color(255, 0, 0, 200)
+    projection_key = (
+      sm.recv_frame["liveTracks"],
+      self._radar_path_generation,
+      self._radar_transform_generation,
+      float(self._path_offset_z),
+      float(self._rect.x),
+      float(self._rect.y),
+      float(self._rect.width),
+      float(self._rect.height),
+    )
+    if projection_key != self._radar_projection_key:
+      d_rel = np.fromiter((float(point.dRel) for point in radar_points), dtype=np.float64, count=len(radar_points))
+      in_y = np.fromiter((float(-point.yRel) for point in radar_points), dtype=np.float64, count=len(radar_points))
+      clip_bounds = (
+        float(clip.x),
+        float(clip.y),
+        float(clip.x + clip.width),
+        float(clip.y + clip.height),
+      )
+      rect_bounds = (
+        float(self._rect.x),
+        float(self._rect.y),
+        float(self._rect.x + self._rect.width),
+        float(self._rect.y + self._rect.height),
+      )
+      screen_points = project_radar_points(
+        d_rel,
+        in_y,
+        self._path.raw_points[:, 0],
+        self._path.raw_points[:, 2],
+        self._car_space_transform,
+        float(self._path_offset_z),
+        clip_bounds,
+        rect_bounds,
+      )
+      self._radar_marker_centers = [rl.Vector2(float(x), float(y)) for x, y in screen_points]
+      self._radar_marker_positions = [
+        rl.Vector2(float(x - RADAR_MARKER_TEXTURE_CENTER), float(y - RADAR_MARKER_TEXTURE_CENTER))
+        for x, y in screen_points
+      ]
+      self._radar_projection_key = projection_key
 
-    for point in radar_points:
-      d_rel = point.dRel
-      idx = self._get_path_length_idx(path_x_array, d_rel)
-      z = line_z[idx] if idx < len(line_z) else 0.0
+    cache = getattr(gui_app, "cached_render_texture", None)
+    if self._radar_marker_texture is None and cache is not None:
+      self._radar_marker_texture = cache(
+        RADAR_MARKER_TEXTURE_KEY,
+        RADAR_MARKER_TEXTURE_SIZE,
+        RADAR_MARKER_TEXTURE_SIZE,
+        self._draw_radar_marker_texture,
+      )
 
-      calibrated_point = self._map_to_screen(d_rel, -point.yRel, z + self._path_offset_z)
-      if calibrated_point:
-        x, y = calibrated_point
-        x = np.clip(x, self._rect.x, self._rect.x + self._rect.width)
-        y = np.clip(y, self._rect.y, self._rect.y + self._rect.height)
-        rl.draw_circle_v(rl.Vector2(x, y), radius, red_color)
+    if self._radar_marker_texture is None:
+      for marker in self._radar_marker_centers:
+        rl.draw_circle_v(marker, RADAR_MARKER_OUTLINE_RADIUS, RADAR_MARKER_OUTLINE_COLOR)
+        rl.draw_circle_v(marker, RADAR_MARKER_RADIUS, RADAR_MARKER_FILL_COLOR)
+      return
+
+    rl.begin_blend_mode(rl.BlendMode.BLEND_ALPHA_PREMULTIPLY)
+    try:
+      for position in self._radar_marker_positions:
+        rl.draw_texture_v(self._radar_marker_texture, position, rl.WHITE)
+    finally:
+      rl.end_blend_mode()
+
+  def _draw_radar_marker_texture(self):
+    center = rl.Vector2(RADAR_MARKER_TEXTURE_CENTER, RADAR_MARKER_TEXTURE_CENTER)
+    rl.draw_circle_v(center, RADAR_MARKER_OUTLINE_RADIUS, RADAR_MARKER_OUTLINE_COLOR)
+    rl.draw_circle_v(center, RADAR_MARKER_RADIUS, RADAR_MARKER_FILL_COLOR)
+
+  def _clear_radar_projection_cache(self):
+    if self._radar_projection_key is None and not self._radar_marker_centers and not self._radar_marker_positions:
+      return
+    self._radar_projection_key = None
+    self._radar_marker_centers = []
+    self._radar_marker_positions = []
 
   def _update_adjacent_paths(self, max_idx: int, max_distance: float):
     """Compute adjacent lane path polygons by averaging lane line pairs."""
@@ -630,21 +711,25 @@ class ModelRenderer(Widget):
     lane_width_left = float(plan.laneWidthLeft) if plan.laneWidthLeft > 0 else 0.0
     lane_width_right = float(plan.laneWidthRight) if plan.laneWidthRight > 0 else 0.0
 
-    if lane_width_left <= 0 or lane_width_right <= 0:
-      self._adjacent_path_vertices = [np.empty((0, 2), dtype=np.float32), np.empty((0, 2), dtype=np.float32)]
-      return
+    # Clear stale polygons, then build each available side independently.
+    self._adjacent_path_vertices = [
+      np.empty((0, 2), dtype=np.float32),
+      np.empty((0, 2), dtype=np.float32),
+    ]
 
     # Left adjacent: average of lane_lines[0] and lane_lines[1]
-    self._adjacent_path_vertices[0] = self._get_adjacent_path_polygon(
-      self._lane_lines[0].raw_points, self._lane_lines[1].raw_points,
-      lane_width_left / 2.0, max_idx, max_distance
-    )
+    if lane_width_left > 0:
+      self._adjacent_path_vertices[0] = self._get_adjacent_path_polygon(
+        self._lane_lines[0].raw_points, self._lane_lines[1].raw_points,
+        lane_width_left / 2.0, max_idx, max_distance
+      )
 
     # Right adjacent: average of lane_lines[2] and lane_lines[3]
-    self._adjacent_path_vertices[1] = self._get_adjacent_path_polygon(
-      self._lane_lines[2].raw_points, self._lane_lines[3].raw_points,
-      lane_width_right / 2.0, max_idx, max_distance
-    )
+    if lane_width_right > 0:
+      self._adjacent_path_vertices[1] = self._get_adjacent_path_polygon(
+        self._lane_lines[2].raw_points, self._lane_lines[3].raw_points,
+        lane_width_right / 2.0, max_idx, max_distance
+      )
 
   def _get_adjacent_path_polygon(self, line1: np.ndarray, line2: np.ndarray, y_off: float, max_idx: int, max_distance: float) -> np.ndarray:
     if line1.shape[0] == 0 or line2.shape[0] == 0:
@@ -706,8 +791,8 @@ class ModelRenderer(Widget):
     """Get the index corresponding to the given path distance"""
     if len(pos_x_array) == 0:
       return 0
-    indices = np.where(pos_x_array <= path_distance)[0]
-    return indices[-1] if indices.size > 0 else 0
+    idx = np.searchsorted(pos_x_array, path_distance, side='right') - 1
+    return idx if idx >= 0 else 0
 
   def _map_to_screen(self, in_x, in_y, in_z):
     """Project a point in car space to screen space"""

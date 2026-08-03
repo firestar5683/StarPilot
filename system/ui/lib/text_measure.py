@@ -5,6 +5,12 @@ from openpilot.system.ui.lib.emoji import find_emoji
 _cache: dict[int, rl.Vector2] = {}
 
 
+def draw_text_with_shadow(font: rl.Font, text: str, pos: rl.Vector2, font_size: int, color: rl.Color,
+                          shadow_alpha: int = 120) -> None:
+  rl.draw_text_ex(font, text, rl.Vector2(pos.x + 1, pos.y + 1), font_size, 0, rl.Color(0, 0, 0, shadow_alpha))
+  rl.draw_text_ex(font, text, pos, font_size, 0, color)
+
+
 def measure_text_cached(font: rl.Font, text: str, font_size: int, spacing: float = 0) -> rl.Vector2:
   """Caches text measurements to avoid redundant calculations."""
   font = font_fallback(font)

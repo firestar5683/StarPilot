@@ -10,12 +10,17 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.lib.prime_state import PrimeState
+from openpilot.selfdrive.ui.lib.ui_param_cache import shared_ui_params
 from openpilot.system.hardware.usb import chestnut_present
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.hardware import HARDWARE, PC
 
 BACKLIGHT_OFFROAD = 65 if HARDWARE.get_device_type() == "mici" else 50
 USBGPU_POLL_INTERVAL = 1.0
+
+
+def _noop_progress(_phase: str) -> None:
+  pass
 
 
 class UIStatus(Enum):
@@ -35,6 +40,7 @@ class UIState:
 
   def _initialize(self):
     self.params = Params()
+    self.ui_params = shared_ui_params()
     self.params_memory = Params(memory=True)
     self.sm = messaging.SubMaster(
       [
@@ -83,10 +89,11 @@ class UIState:
     self.is_metric: bool = self.params.get_bool("IsMetric")
     self.is_release = self.params.get_bool("IsReleaseBranch")
     self.always_on_dm: bool = self.params.get_bool("AlwaysOnDM")
-    self.usbgpu: bool = chestnut_present()
+    self.usbgpu: bool = False
     self.usbgpu_compiled: bool = self.params.get_bool("UsbGpuCompiled")
     self.usbgpu_active: bool = self.params.get_bool("UsbGpuActive")
     self._usbgpu_update_time: float = 0.0
+    self._usbgpu_poll_thread: threading.Thread | None = None
     self.started: bool = False
     self.ignition: bool = False
     self.recording_audio: bool = False
@@ -121,7 +128,25 @@ class UIState:
     self._offroad_transition_callbacks: list[Callable[[], None]] = []
     self._engaged_transition_callbacks: list[Callable[[], None]] = []
 
+    self._schedule_usbgpu_poll(force=True)
     self.update_params()
+
+  def _poll_usbgpu_presence(self) -> None:
+    try:
+      self.usbgpu = chestnut_present()
+    except Exception:
+      cloudlog.exception("USB GPU presence poll failed")
+
+  def _schedule_usbgpu_poll(self, now: float | None = None, force: bool = False) -> None:
+    now = time.monotonic() if now is None else now
+    if not force and now - self._usbgpu_update_time < USBGPU_POLL_INTERVAL:
+      return
+    if self._usbgpu_poll_thread is not None and self._usbgpu_poll_thread.is_alive():
+      return
+
+    self._usbgpu_update_time = now
+    self._usbgpu_poll_thread = threading.Thread(target=self._poll_usbgpu_presence, name="ui_usbgpu_poll", daemon=True)
+    self._usbgpu_poll_thread.start()
 
   def add_offroad_transition_callback(self, callback: Callable[[], None]):
     self._offroad_transition_callbacks.append(callback)
@@ -145,16 +170,27 @@ class UIState:
   def is_offroad(self) -> bool:
     return not self.started
 
-  def update(self) -> None:
+  def update(self, progress_hook: Callable[[str], None] | None = None) -> None:
+    mark_progress = progress_hook or _noop_progress
+
+    mark_progress("ui.update.before_prime_state")
     self.prime_state.start()  # start thread after manager forks ui
+    mark_progress("ui.update.before_submaster")
     self.sm.update(0)
-    self._update_state()
-    self._update_status()
+    mark_progress("ui.update.before_state")
+    self._update_state(mark_progress)
+    mark_progress("ui.update.before_status")
+    self._update_status(mark_progress)
+    mark_progress("ui.update.before_params")
     if time.monotonic() - self._param_update_time > 5.0:
       self.update_params()
+    mark_progress("ui.update.before_device")
     device.update()
+    mark_progress("ui.update.after_device")
 
-  def _update_state(self) -> None:
+  def _update_state(self, progress_hook: Callable[[str], None] | None = None) -> None:
+    mark_progress = progress_hook or _noop_progress
+
     # Handle panda states updates
     if self.sm.updated["pandaStates"]:
       panda_states = self.sm["pandaStates"]
@@ -176,25 +212,27 @@ class UIState:
       self.light_sensor = -1
 
     # Trust hardwared's filtered started state; raw ignition can flap on Toyota.
-    force_onroad = self.params.get_bool("ForceOnroad")
-    force_offroad = self.params.get_bool("ForceOffroad")
+    mark_progress("ui.update.before_state_params")
+    params = self.ui_params
+    force_onroad = params.get_bool("ForceOnroad")
+    force_offroad = params.get_bool("ForceOffroad")
     started = self.sm["deviceState"].started
     started |= force_onroad
     started &= not force_offroad
     self.started = started
 
     # Update recording audio state
-    self.recording_audio = self.params.get_bool("RecordAudio") and self.started
+    self.recording_audio = params.get_bool("RecordAudio") and self.started
 
-    self.is_metric = self.params.get_bool("IsMetric")
-    self.always_on_dm = self.params.get_bool("AlwaysOnDM")
+    self.is_metric = params.get_bool("IsMetric")
+    self.always_on_dm = params.get_bool("AlwaysOnDM")
     now = time.monotonic()
-    if now - self._usbgpu_update_time >= USBGPU_POLL_INTERVAL:
-      self.usbgpu = chestnut_present()
-      self._usbgpu_update_time = now
-    self.usbgpu_compiled = self.params.get_bool("UsbGpuCompiled")
-    self.usbgpu_active = self.params.get_bool("UsbGpuActive")
+    self._schedule_usbgpu_poll(now)
+    self.usbgpu_compiled = params.get_bool("UsbGpuCompiled")
+    self.usbgpu_active = params.get_bool("UsbGpuActive")
     self.switchback_mode_enabled = self.params_memory.get_bool("SwitchbackModeEnabled") if self.started else False
+    self.conditional_status = self.params_memory.get_int("CEStatus", default=0) if self.started else 0
+    mark_progress("ui.update.after_state_params")
     if self.sm.valid.get("starpilotCarState", False):
       starpilot_car_state = self.sm["starpilotCarState"]
       self.always_on_lateral_active = (not self.sm["selfdriveState"].enabled and
@@ -203,8 +241,6 @@ class UIState:
     else:
       self.always_on_lateral_active = False
       self.traffic_mode_enabled = False
-
-    self.conditional_status = self.params_memory.get_int("CEStatus", default=0) if self.started else 0
 
     if self.sm.updated["starpilotPlan"]:
       plan = self.sm["starpilotPlan"]
@@ -220,7 +256,9 @@ class UIState:
     self.starpilot_toggles["force_offroad"] = force_offroad
     self.starpilot_toggles["force_onroad"] = force_onroad
 
-  def _update_status(self) -> None:
+  def _update_status(self, progress_hook: Callable[[str], None] | None = None) -> None:
+    mark_progress = progress_hook or _noop_progress
+
     if self.started and self.sm.updated["selfdriveState"]:
       ss = self.sm["selfdriveState"]
       state = ss.state
@@ -233,7 +271,10 @@ class UIState:
     # Check for engagement state changes
     if self.engaged != self._engaged_prev:
       for callback in self._engaged_transition_callbacks:
+        callback_name = getattr(callback, "__name__", type(callback).__name__)
+        mark_progress(f"ui.update.before_engaged_callback.{callback_name}")
         callback()
+        mark_progress(f"ui.update.after_engaged_callback.{callback_name}")
       self._engaged_prev = self.engaged
 
     # Handle onroad/offroad transition
@@ -244,7 +285,10 @@ class UIState:
         self.started_time = time.monotonic()
 
       for callback in self._offroad_transition_callbacks:
+        callback_name = getattr(callback, "__name__", type(callback).__name__)
+        mark_progress(f"ui.update.before_offroad_callback.{callback_name}")
         callback()
+        mark_progress(f"ui.update.after_offroad_callback.{callback_name}")
 
       self._started_prev = self.started
 
@@ -269,7 +313,7 @@ class Device:
     self._interactive_timeout_callbacks: list[Callable] = []
     self._prev_timed_out = False
     self._awake: bool = True
-    self._params = Params()
+    self._params = ui_state.ui_params
 
     self._offroad_brightness: int = BACKLIGHT_OFFROAD
     self._last_brightness: int = 0

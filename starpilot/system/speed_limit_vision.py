@@ -15,6 +15,7 @@ import numpy as np
 
 from openpilot.common.constants import CV
 from openpilot.common.realtime import set_core_affinity
+from openpilot.common.swaglog import cloudlog
 from openpilot.starpilot.common.cpu_throttle import device_cpu_throttle_factor
 from openpilot.system.hardware import PC
 
@@ -374,6 +375,7 @@ class SpeedLimitVisionDaemon:
     self.debug_log_path = None
     self.debug_bookmark_count = 0
     self.debug_session_started_at = 0.0
+    self.debug_session_unavailable = False
     self.last_logged_status = ""
     self.last_logged_candidate = None
     self.last_runtime_telemetry_at = 0.0
@@ -404,22 +406,31 @@ class SpeedLimitVisionDaemon:
     self.speed_value_templates = self._build_speed_value_templates()
     self._load_model()
 
-  def _start_debug_session(self):
-    if not self.use_runtime or self.params_memory is None or self.debug_session_id:
-      return
+  def _start_debug_session(self) -> bool:
+    if not self.use_runtime or self.params_memory is None or self.debug_session_id or self.debug_session_unavailable:
+      return False
 
     timestamp = datetime.now(UTC)
     session_id = timestamp.strftime("%Y%m%d_%H%M%S")
     debug_dir = DEBUG_BASE_DIR / session_id
-    suffix = 1
-    while debug_dir.exists():
-      suffix += 1
-      session_id = f"{timestamp.strftime('%Y%m%d_%H%M%S')}_{suffix}"
-      debug_dir = DEBUG_BASE_DIR / session_id
+    try:
+      suffix = 1
+      while debug_dir.exists():
+        suffix += 1
+        session_id = f"{timestamp.strftime('%Y%m%d_%H%M%S')}_{suffix}"
+        debug_dir = DEBUG_BASE_DIR / session_id
 
-    debug_dir.mkdir(parents=True, exist_ok=True)
-    capture_dir = debug_dir / DEBUG_CAPTURE_DIRNAME
-    capture_dir.mkdir(parents=True, exist_ok=True)
+      debug_dir.mkdir(parents=True, exist_ok=True)
+      capture_dir = debug_dir / DEBUG_CAPTURE_DIRNAME
+      capture_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as exc:
+      self.debug_session_unavailable = True
+      cloudlog.warning(f"Vision speed-limit debug storage unavailable: {exc}")
+      try:
+        self.params_memory.put("VisionSpeedLimitLastEvent", f"debug storage unavailable: {type(exc).__name__}"[:160])
+      except Exception:
+        pass
+      return False
 
     self.debug_session_id = session_id
     self.debug_dir = debug_dir
@@ -434,6 +445,7 @@ class SpeedLimitVisionDaemon:
     self.params_memory.put_int("VisionSpeedLimitBookmarkCount", self.debug_bookmark_count)
     self.params_memory.put("VisionSpeedLimitLastEvent", "")
     self._write_debug_event("session_start", reason="onroad")
+    return True
 
   def _close_debug_session(self):
     self.debug_session_id = ""
@@ -442,6 +454,7 @@ class SpeedLimitVisionDaemon:
     self.debug_log_path = None
     self.debug_bookmark_count = 0
     self.debug_session_started_at = 0.0
+    self.debug_session_unavailable = False
     self.last_logged_status = ""
     self.last_logged_candidate = None
     self.last_debug_heartbeat_at = 0.0
@@ -2589,8 +2602,7 @@ class SpeedLimitVisionDaemon:
         self.started_prev = True
         self._start_debug_session()
         self._publish_runtime_telemetry(now, "onroad_start", force=True)
-      elif not self.debug_session_id:
-        self._start_debug_session()
+      elif not self.debug_session_id and self._start_debug_session():
         self._write_debug_event("session_recovered", reason="missing_debug_session_while_onroad")
         self._publish_runtime_telemetry(now, "session_recovered", force=True)
 

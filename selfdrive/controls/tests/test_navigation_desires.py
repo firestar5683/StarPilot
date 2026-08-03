@@ -32,6 +32,7 @@ def make_toggles(**overrides):
     "one_lane_change": False,
     "use_turn_desires": False,
     "lane_changes_require_cruise": False,
+    "nav_desires_allowed": True,
   }
   defaults.update(overrides)
   return SimpleNamespace(**defaults)
@@ -493,7 +494,6 @@ def test_turn_desire_released_after_stop_completes():
 
 def test_nav_desires_disabled_leave_desire_unchanged():
   helper = DesireHelper()
-  helper.nav_desires_allowed = False
   helper._update_nav_params = lambda: None
   helper._nav_instruction_state = {"valid": True, "maneuverModifier": "left"}
 
@@ -502,7 +502,21 @@ def test_nav_desires_disabled_leave_desire_unchanged():
     True,
     0.0,
     make_plan(),
-    make_toggles(minimum_lane_change_speed=10.0),
+    make_toggles(minimum_lane_change_speed=10.0, nav_desires_allowed=False),
   )
 
+  assert helper.desire == log.Desire.none
+
+
+def test_disabling_nav_desires_clears_active_route_desire_immediately():
+  helper = DesireHelper()
+  helper._update_nav_params = lambda: None
+  helper._nav_instruction_state = {"valid": True, "maneuverModifier": "slightRight"}
+  car_state = make_car_state(vEgo=20.0)
+  plan = make_plan(laneWidthRight=4.2)
+
+  helper.update(car_state, True, 0.0, plan, make_toggles(nav_desires_allowed=True))
+  assert helper.desire == log.Desire.keepRight
+
+  helper.update(car_state, True, 0.0, plan, make_toggles(nav_desires_allowed=False))
   assert helper.desire == log.Desire.none

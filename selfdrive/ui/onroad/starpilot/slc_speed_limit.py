@@ -123,8 +123,9 @@ def _get_slc_state():
   plan = sm["starpilotPlan"]
   speed_limit_changed = plan.speedLimitChanged
 
-  show_slc = ui_state.params.get_bool("ShowSpeedLimits") or ui_state.params.get_bool("SpeedLimitController")
-  hide_sl = ui_state.params.get_bool("HideSpeedLimit")
+  params = ui_state.ui_params
+  show_slc = params.get_bool("ShowSpeedLimits") or params.get_bool("SpeedLimitController")
+  hide_sl = params.get_bool("HideSpeedLimit")
   unconfirmed_valid = plan.unconfirmedSlcSpeedLimit > 1
   # A pending (unconfirmed) limit overrides HideSpeedLimit so the prompt always shows.
   hide = not (speed_limit_changed and unconfirmed_valid) and hide_sl
@@ -134,10 +135,10 @@ def _get_slc_state():
     return None
 
   speed_conversion = CV.MS_TO_KPH if ui_state.is_metric else CV.MS_TO_MPH
-  show_offset = ui_state.params.get_bool("ShowSLCOffset")
+  show_offset = params.get_bool("ShowSLCOffset")
 
   dashboard_sl = sm["starpilotCarState"].dashboardSpeedLimit if sm.valid.get("starpilotCarState", False) else 0.0
-  vision_sl = ui_state.params_memory.get_float("VisionSpeedLimit") if ui_state.params.get_bool("VisionSpeedLimitDetection") else 0.0
+  vision_sl = ui_state.params_memory.get_float("VisionSpeedLimit") if params.get_bool("VisionSpeedLimitDetection") else 0.0
 
   slc_overridden_speed = plan.slcOverriddenSpeed
   # Driver override takes precedence over the planner's limit when active.
@@ -171,7 +172,7 @@ def _get_slc_state():
     'speed_limit_changed': speed_limit_changed,
     'hide': hide,
     'show_offset': show_offset,
-    'use_vienna': ui_state.params.get_bool("UseVienna"),
+    'use_vienna': params.get_bool("UseVienna"),
     'offset_str': offset_str,
     'speed_conversion': speed_conversion,
     'speed_unit': " km/h" if ui_state.is_metric else " mph",
@@ -352,8 +353,8 @@ def _draw_sign(state: dict, rect: rl.Rectangle, *, pending: bool = False):
 
 # ── Active Source Label (single-line mode when sources panel is off) ──
 
-_SOURCE_ABBREV = {"Dashboard": "DASH", "Map Data": "MAPS", "Vision": "VISION",
-                  "Mapbox": "MAPBOX", "Upcoming": "NEXT"}
+_SOURCE_ABBREV = {"Dashboard": "Dash", "Map Data": "Maps", "Vision": "Vision",
+                  "Mapbox": "Mapbox", "Upcoming": "Next"}
 
 def _draw_active_source_label(state: dict, cx: float, bottom_y: float, sign_width: float, expanded: bool = False) -> Optional[rl.Rectangle]:
   """Draw the single active-source pill below the sign. Returns pill rect for hit-testing."""
@@ -372,7 +373,7 @@ def _draw_active_source_label(state: dict, cx: float, bottom_y: float, sign_widt
   rl.draw_rectangle_rounded(rect, 0.4, 8, rl.Color(0, 0, 0, 180))
   rl.draw_rectangle_rounded_lines_ex(rect, 0.4, 8, 1, rl.Color(255, 255, 255, 100))
   
-  text_y = bottom_y + 8 + (pill_h - font_size) / 2
+  text_y = rect.y + (pill_h - sz.y) / 2
   rl.draw_text_ex(font, label, rl.Vector2(cx - sz.x / 2, text_y), font_size, 0, rl.WHITE)
   return rect
 
@@ -412,7 +413,7 @@ def _draw_sources_bubble(state: dict, anchor_rect: rl.Rectangle, sign_rect: rl.R
     return
 
   bubble_w = sign_rect.width + 24
-  bubble_h = sign_rect.height
+  bubble_h = sign_rect.height + 40
 
   bubble_x = sign_rect.x + sign_rect.width + 12
   bubble_y = sign_rect.y
@@ -498,4 +499,3 @@ def render_speed_limit_at(state: dict, rect: rl.Rectangle, expanded: bool = Fals
     _draw_sources_bubble(state, pill_rect, visual_rect)
 
   return pill_rect
-

@@ -11,13 +11,12 @@ import pyray as rl
 import qrcode
 
 from openpilot.common.basedir import BASEDIR
-from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.onroad.driver_camera_dialog import DriverCameraDialog
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.selfdrive.ui.layouts.onboarding import TrainingGuide
 from openpilot.selfdrive.ui.widgets.pairing_dialog import PairingDialog
-from openpilot.system.hardware import PC, TICI
+from openpilot.system.hardware import HARDWARE, PC, TICI
 from openpilot.system.hardware.hw import Paths
 from openpilot.system.ui.lib.application import FontWeight, gui_app
 from openpilot.system.ui.lib.multilang import multilang, tr, tr_noop
@@ -112,7 +111,7 @@ class DeviceLayout(Widget):
   def __init__(self):
     super().__init__()
 
-    self._params = Params()
+    self._params = ui_state.ui_params
     self._select_language_dialog: MultiOptionDialog | None = None
     self._driver_camera: DriverCameraDialog | None = None
     self._pair_device_dialog: PairingDialog | None = None
@@ -283,6 +282,10 @@ class DeviceLayout(Widget):
   def _perform_reboot(self, result: DialogResult):
     if result == DialogResult.CONFIRM:
       self._params.put_bool("DoUserReboot", True)
+      try:
+        HARDWARE.reboot()
+      except Exception:
+        cloudlog.exception("Direct user-requested reboot failed; manager fallback requested")
 
   def _power_off_prompt(self):
     if ui_state.engaged:

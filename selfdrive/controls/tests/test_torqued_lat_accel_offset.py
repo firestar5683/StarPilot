@@ -1,3 +1,5 @@
+from types import SimpleNamespace
+
 import numpy as np
 from cereal import car, messaging
 from opendbc.car import ACCELERATION_DUE_TO_GRAVITY
@@ -33,6 +35,7 @@ def generate_inputs(torque_tune, la_err_std, input_noise_std=None):
 
 def get_warmed_up_estimator(steer_torques, lat_accels):
   est = TorqueEstimator(car.CarParams())
+  est.starpilot_toggles = SimpleNamespace(use_custom_latAccelFactor=False, use_custom_friction=False)
   for steer_torque, lat_accel in zip(steer_torques, lat_accels, strict=True):
     est.filtered_points.add_point(steer_torque, lat_accel)
   return est

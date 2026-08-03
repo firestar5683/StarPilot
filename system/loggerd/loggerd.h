@@ -55,8 +55,8 @@ struct EncoderSettings {
   }
 
   static EncoderSettings StreamEncoderSettings() {
-    int _stream_bitrate = getenv("STREAM_BITRATE") ? atoi(getenv("STREAM_BITRATE")) : 1'000'000;
-    return EncoderSettings{.encode_type = cereal::EncodeIndex::Type::QCAMERA_H264, .bitrate = _stream_bitrate , .gop_size = 15};
+    int _stream_bitrate = getenv("STREAM_BITRATE") ? atoi(getenv("STREAM_BITRATE")) : 5'000'000;
+    return EncoderSettings{.encode_type = cereal::EncodeIndex::Type::QCAMERA_H264, .bitrate = _stream_bitrate , .gop_size = 5};
   }
 };
 
@@ -67,6 +67,7 @@ public:
   const char *filename = NULL;
   bool record = true;
   bool include_audio = false;
+  bool is_live = false;
   int frame_width = -1;
   int frame_height = -1;
   int fps = MAIN_FPS;
@@ -112,6 +113,7 @@ const EncoderInfo stream_road_encoder_info = {
   .publish_name = "livestreamRoadEncodeData",
   //.thumbnail_name = "thumbnail",
   .record = false,
+  .is_live = true,
   .get_settings = [](int){return EncoderSettings::StreamEncoderSettings();},
   INIT_ENCODE_FUNCTIONS(LivestreamRoadEncode),
 };
@@ -119,6 +121,7 @@ const EncoderInfo stream_road_encoder_info = {
 const EncoderInfo stream_wide_road_encoder_info = {
   .publish_name = "livestreamWideRoadEncodeData",
   .record = false,
+  .is_live = true,
   .get_settings = [](int){return EncoderSettings::StreamEncoderSettings();},
   INIT_ENCODE_FUNCTIONS(LivestreamWideRoadEncode),
 };
@@ -126,6 +129,7 @@ const EncoderInfo stream_wide_road_encoder_info = {
 const EncoderInfo stream_driver_encoder_info = {
   .publish_name = "livestreamDriverEncodeData",
   .record = false,
+  .is_live = true,
   .get_settings = [](int){return EncoderSettings::StreamEncoderSettings();},
   INIT_ENCODE_FUNCTIONS(LivestreamDriverEncode),
 };

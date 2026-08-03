@@ -424,6 +424,91 @@ def test_higher_limit_does_not_clear_override():
     controller.shutdown()
 
 
+def test_set_speed_mode_overrides_on_raise_without_gas():
+  # Max Set Speed mode: raising the set speed (+/-) above the posted limit must override
+  # the SLC hold with no gas pedal, targeting the set speed.
+  controller = make_controller(
+    speed_limit_controller_override_manual=False,
+    speed_limit_controller_override_set_speed=True,
+  )
+  try:
+    controller.source = "Dashboard"
+    controller.target = mph(45)
+    controller.last_valid_limit = mph(45)
+
+    # Baseline frame at the limit establishes the previous set speed (no rising edge yet).
+    controller.update_override(mph(45), 0.0, mph(45), 0.0, make_sm(gas_pressed=False))
+    assert not controller.override_slc
+
+    # Driver presses + to 60 (rising edge): override arms and targets the set speed.
+    controller.update_override(mph(60), 0.0, mph(45), 0.0, make_sm(gas_pressed=False))
+    assert controller.override_slc
+    assert controller.overridden_speed == pytest.approx(mph(60))
+
+    # Holding 60 with no further press: override stays latched.
+    controller.update_override(mph(60), 0.0, mph(58), 0.0, make_sm(gas_pressed=False))
+    assert controller.override_slc
+    assert controller.overridden_speed == pytest.approx(mph(60))
+  finally:
+    controller.shutdown()
+
+
+def test_set_speed_override_clears_on_new_speed_zone():
+  # Entering a new (lower) posted limit clears the override; a steady high set speed must not
+  # re-arm it. Only a fresh +/- press re-arms.
+  controller = make_controller(
+    speed_limit_controller_override_manual=False,
+    speed_limit_controller_override_set_speed=True,
+  )
+  try:
+    controller.source = "Dashboard"
+    controller.target = mph(45)
+    controller.previous_source = "Dashboard"
+    controller.previous_target = mph(45)
+    controller.last_valid_limit = mph(45)
+
+    controller.update_override(mph(45), 0.0, mph(45), 0.0, make_sm(gas_pressed=False))
+    controller.update_override(mph(60), 0.0, mph(45), 0.0, make_sm(gas_pressed=False))
+    assert controller.override_slc
+
+    # New lower zone (35): update_limits clears the override for the new segment.
+    controller.update_limits(mph(35), datetime.now(timezone.utc), False, mph(60), mph(58), make_sm(gas_pressed=False))
+    controller.update_override(mph(60), 0.0, mph(58), 0.0, make_sm(gas_pressed=False))
+    assert controller.target == pytest.approx(mph(35))
+    # Set speed unchanged at 60 -> no rising edge -> override stays cleared (car slows to 35).
+    assert not controller.override_slc
+    assert controller.overridden_speed == 0
+
+    # A fresh + press (60 -> 65) re-arms against the new limit.
+    controller.update_override(mph(65), 0.0, mph(35), 0.0, make_sm(gas_pressed=False))
+    assert controller.override_slc
+    assert controller.overridden_speed == pytest.approx(mph(65))
+  finally:
+    controller.shutdown()
+
+
+def test_gas_pedal_mode_ignores_set_speed_without_gas():
+  # Set With Gas Pedal mode: a high set speed alone must NOT override; gas is still required.
+  controller = make_controller(
+    speed_limit_controller_override_manual=True,
+    speed_limit_controller_override_set_speed=False,
+  )
+  try:
+    controller.source = "Dashboard"
+    controller.target = mph(45)
+    controller.last_valid_limit = mph(45)
+
+    controller.update_override(mph(60), 0.0, mph(45), 0.0, make_sm(gas_pressed=False))
+    assert not controller.override_slc
+    assert controller.overridden_speed == 0
+
+    controller.update_override(mph(60), 0.0, mph(50), 0.0, make_sm(gas_pressed=True))
+    assert controller.override_slc
+    assert controller.overridden_speed == pytest.approx(mph(50))
+  finally:
+    controller.shutdown()
+
+
 def test_manual_override_survives_brief_enabled_flicker():
   controller = make_controller()
   try:

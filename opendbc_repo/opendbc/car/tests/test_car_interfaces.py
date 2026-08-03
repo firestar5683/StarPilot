@@ -73,7 +73,6 @@ def get_test_starpilot_toggles() -> SimpleNamespace:
     cluster_offset=1.0,
     disable_openpilot_long=False,
     force_fingerprint=False,
-    frogsgomoo_tweak=False,
     lock_doors=False,
     reverse_cruise_increase=False,
     sng_hack=False,

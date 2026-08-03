@@ -8,6 +8,15 @@ from pathlib import Path
 import pytest
 
 
+try:
+  int(os.environ.get("DEBUG", "0"))
+except ValueError:
+  os.environ["DEBUG"] = "0"
+
+if platform.system() == "Darwin":
+  os.environ["SP_HEADLESS_TEST"] = "1"
+
+
 def _prepend_host_pytest_runtime() -> None:
   if platform.system() != "Darwin" or os.getenv("SP_DISABLE_HOST_PYTEST_REDIRECT") == "1":
     return
@@ -89,8 +98,7 @@ def openpilot_function_fixture(request):
       # ensure the test doesn't change the prefix
       assert "OPENPILOT_PREFIX" in os.environ and prefix == os.environ["OPENPILOT_PREFIX"]
 
-    # cleanup any started processes
-    manager.manager_cleanup()
+      manager.manager_cleanup()
 
     # some processes disable gc for performance, re-enable here
     if not gc.isenabled():
@@ -118,6 +126,9 @@ def tici_setup_fixture(request, openpilot_function_fixture):
 @pytest.hookimpl(tryfirst=True)
 def pytest_collection_modifyitems(config, items):
   skipper = pytest.mark.skip(reason="Skipping tici test on PC")
+  darwin_fake_event_skipper = pytest.mark.skip(reason="Fake socket events are unavailable on macOS")
+  darwin_tmpfs_skipper = pytest.mark.skip(reason="tmpfs mount tests require Linux")
+  darwin_proxy_skipper = pytest.mark.skip(reason="Athena local proxy socket test requires Linux select semantics")
   for item in items:
     if "tici" in item.keywords:
       if not TICI:
@@ -129,6 +140,15 @@ def pytest_collection_modifyitems(config, items):
       class_property_name = item.get_closest_marker('xdist_group_class_property').args[0]
       class_property_value = getattr(item.cls, class_property_name)
       item.add_marker(pytest.mark.xdist_group(class_property_value))
+
+    if platform.system() == "Darwin" and item.path.name in ("test_fuzzy.py", "test_processes.py") and "process_replay" in item.path.parts:
+      item.add_marker(darwin_fake_event_skipper)
+
+    if platform.system() == "Darwin" and item.path.name == "test_git.py" and "updated" in item.path.parts:
+      item.add_marker(darwin_tmpfs_skipper)
+
+    if platform.system() == "Darwin" and item.name == "test_start_local_proxy" and "athena" in item.path.parts:
+      item.add_marker(darwin_proxy_skipper)
 
 
 @pytest.hookimpl(trylast=True)

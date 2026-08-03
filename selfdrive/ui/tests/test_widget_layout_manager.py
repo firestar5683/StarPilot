@@ -1,49 +1,7 @@
-import sys
-import types
 import unittest
-from unittest.mock import MagicMock
+import pyray as rl
 
-# Create minimal mocks for imports so the tests can run headlessly.
-rl = types.SimpleNamespace(
-  Rectangle=lambda x=0, y=0, width=0, height=0: types.SimpleNamespace(x=x, y=y, width=width, height=height),
-  check_collision_point_rec=lambda p, r: (r.x <= p.x <= r.x + r.width) and (r.y <= p.y <= r.y + r.height),
-)
-sys.modules["pyray"] = rl
-
-ui_state = types.SimpleNamespace(
-  is_metric=True,
-  params=MagicMock(),
-)
-sys.modules["openpilot.selfdrive.ui.ui_state"] = types.SimpleNamespace(ui_state=ui_state)
-
-# Mock openpilot.system.ui.widgets
-widgets_mod = types.ModuleType("openpilot.system.ui.widgets")
-class MockWidget:
-  def __init__(self):
-    self.rect = rl.Rectangle()
-    self._children = []
-  def _child(self, w):
-    self._children.append(w)
-    return w
-  def set_rect(self, rect):
-    self.rect = rect
-  def render(self, rect):
-    self.rect = rect
-widgets_mod.Widget = MockWidget
-sys.modules["openpilot.system.ui.widgets"] = widgets_mod
-
-# Expose concrete widgets module with a mock base class
-widgets_starpilot_base = types.ModuleType("openpilot.selfdrive.ui.onroad.starpilot.widgets.base")
-class LayoutWidget(MockWidget):
-  def __init__(self, name: str, priority: int):
-    super().__init__()
-    self.name = name
-    self.priority = priority
-widgets_starpilot_base.LayoutWidget = LayoutWidget
-sys.modules["openpilot.selfdrive.ui.onroad.starpilot.widgets.base"] = widgets_starpilot_base
-
-
-# Now we can import our WidgetLayoutManager
+from openpilot.selfdrive.ui.onroad.starpilot.widgets.base import LayoutWidget
 from openpilot.selfdrive.ui.onroad.starpilot.widget_layout_manager import WidgetLayoutManager
 
 
@@ -225,4 +183,3 @@ class TestWidgetLayoutManager(unittest.TestCase):
 
 if __name__ == "__main__":
   unittest.main()
-

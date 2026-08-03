@@ -232,6 +232,14 @@ def shape_truck_positive_accel(accel: float, v_ego: float, enabled: bool,
   return accel
 
 
+def shape_truck_pitch_accel(pitch_accel: float, v_ego: float, enabled: bool) -> float:
+  if not enabled:
+    return pitch_accel
+
+  scale = float(np.interp(v_ego, [8.0, 15.0, 25.0, 35.0], [0.60, 0.45, 0.30, 0.25]))
+  return pitch_accel * scale
+
+
 def shape_truck_friction_brake(apply_brake: int, accel_cmd: float, stopping: bool, active: bool) -> tuple[int, bool]:
   if apply_brake <= 0:
     return 0, False
@@ -484,6 +492,10 @@ class CarController(CarControllerBase):
     self.xt4_cc_button_burst_last_counter = -1
     self.xt4_cc_button_observed_counter = -1
     self.xt4_cc_button_counter_frame = 0
+    self.gm_cc_last_direction_button = CruiseButtons.INIT
+    self.gm_cc_last_direction_frame = 0
+    self.gm_cc_pending_reverse_button = CruiseButtons.INIT
+    self.gm_cc_pending_reverse_frame = 0
 
     self.lka_steering_cmd_counter = 0
     self.lka_icon_status_last = (False, False)
@@ -1016,6 +1028,7 @@ class CarController(CarControllerBase):
               getattr(self.CP, "transmissionType", None) == TransmissionType.automatic and
               not self.CP.enableGasInterceptorDEPRECATED
             )
+            accel_due_to_pitch = shape_truck_pitch_accel(accel_due_to_pitch, CS.out.vEgo, truck_long_smoothing)
             accel_input = actuators.accel + accel_due_to_pitch
             if truck_long_smoothing:
               accel_input = shape_truck_positive_accel(

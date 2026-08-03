@@ -8,6 +8,7 @@ import os
 import re
 import secrets
 import shutil
+import signal
 import socket
 import subprocess
 import sys
@@ -1672,6 +1673,9 @@ def _invalidate_dashboard_cache():
 
 def warm_dashboard_stats(footage_paths=None):
   params_obj = params
+  if params_obj.get_bool("IsOnroad"):
+    return
+
   route_infos = _list_dashboard_routes(footage_paths or [])
 
   if not route_infos:
@@ -1689,6 +1693,8 @@ def warm_dashboard_stats(footage_paths=None):
   persistent_stats = _load_dashboard_persistent_stats(params_obj)
   candidates = _analysis_candidates(route_infos, persistent_stats)[:DASHBOARD_BACKGROUND_ROUTE_ANALYSIS_LIMIT]
   for route_info in candidates:
+    if params_obj.get_bool("IsOnroad"):
+      break
     full_route_info = dict(route_info)
     full_route_info["analysisSegmentCount"] = max(0, _safe_int(route_info.get("segmentCount", 0), 0))
     messages = _iter_route_log_messages(full_route_info)
@@ -1771,6 +1777,39 @@ def _clear_dashboard_analyzer_status():
     pass
 
 
+def _dashboard_analyzer_pid_matches(pid):
+  try:
+    command = Path(f"/proc/{pid}/cmdline").read_bytes()
+  except OSError:
+    return False
+  return b"warm_dashboard_stats" in command
+
+
+def stop_dashboard_background_analysis():
+  global _DASHBOARD_ANALYZER_PROCESS
+
+  stopped = False
+  with _DASHBOARD_ANALYZER_LOCK:
+    process = _DASHBOARD_ANALYZER_PROCESS
+    if process is not None and process.poll() is None:
+      process.terminate()
+      stopped = True
+    else:
+      status = _read_dashboard_analyzer_status()
+      pid = _safe_int(status.get("pid", 0), 0)
+      if pid > 0 and _dashboard_analyzer_pid_matches(pid):
+        try:
+          os.kill(pid, signal.SIGTERM)
+          stopped = True
+        except (ProcessLookupError, PermissionError, OSError):
+          pass
+
+    _DASHBOARD_ANALYZER_PROCESS = None
+    _clear_dashboard_analyzer_status()
+
+  return stopped
+
+
 def _dashboard_analysis_status(candidates):
   pending_count = len(candidates or [])
   return {
@@ -1784,10 +1823,12 @@ def _start_dashboard_background_analysis(footage_paths, route_infos, persistent_
   global _DASHBOARD_ANALYZER_PROCESS
 
   candidates = candidates if candidates is not None else _analysis_candidates(route_infos, persistent_stats)
-  if not route_infos or not candidates:
+  if params.get_bool("IsOnroad") or not route_infos or not candidates:
     return False
 
   with _DASHBOARD_ANALYZER_LOCK:
+    if params.get_bool("IsOnroad"):
+      return False
     if _dashboard_analyzer_running():
       return True
     repo_root = Path(__file__).resolve().parents[3]
@@ -2170,7 +2211,7 @@ def _model_usage_key(model_name):
   clean_name = _clean_model_label(model_name)
   if not clean_name or clean_name == "Unknown model":
     return ""
-  return canonical_model_key(clean_name) or clean_name.lower()
+  return re.sub(r"[^a-z0-9]+", "-", clean_name.lower()).strip("-")
 
 
 def _better_record(current, previous, metric_key):
@@ -2854,6 +2895,13 @@ def get_routes_names(footage_path):
   route_times = {segment.route_name.time_str for segment in segments}
   return sorted(route_times, reverse=True)
 
+def get_routes_with_segment_counts(footage_path):
+  route_counts = {}
+  for segment in get_all_segment_names(footage_path):
+    route_name = segment.route_name.time_str
+    route_counts[route_name] = route_counts.get(route_name, 0) + 1
+  return sorted(route_counts.items(), reverse=True)
+
 def get_segments_in_route(route_time_str, footage_path):
   return [
     f"{segment.time_str}--{segment.segment_num}"
@@ -2889,7 +2937,7 @@ def normalize_theme_name(name, for_path=False):
     return f"{normalized_parts[0]} ({' '.join(normalized_parts[1:])})".replace(" Week", "")
   return ' '.join(normalized_parts).replace(" Week", "")
 
-def process_route(footage_path, route_name):
+def process_route(footage_path, route_name, segment_count=0):
   segment_path = f"{footage_path}{route_name}--0"
   qcamera_path = f"{segment_path}/qcamera.ts"
 
@@ -2913,7 +2961,9 @@ def process_route(footage_path, route_name):
     "name": route_name,
     "png": f"/thumbnails/{route_name}--0/preview.png",
     "timestamp": route_timestamp_str,
-    "is_preserved": has_preserve_attr(segment_path)
+    "is_preserved": has_preserve_attr(segment_path),
+    "segmentCount": max(0, int(segment_count)),
+    "approxDurationSeconds": max(0, int(segment_count)) * 60,
   }
 
 def process_screen_recording(mp4):

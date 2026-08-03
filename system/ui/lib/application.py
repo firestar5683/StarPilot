@@ -30,6 +30,8 @@ FPS_CRITICAL_THRESHOLD = 0.5  # Critical threshold for triggering strict actions
 MOUSE_THREAD_RATE = 140  # touch controller runs at 140Hz
 DESKTOP_MOUSE_THREAD_RATE = int(os.getenv("DESKTOP_MOUSE_RATE", "500"))
 DESKTOP_CLICK_DEBOUNCE = float(os.getenv("DESKTOP_CLICK_DEBOUNCE", "0.2"))
+UI_IDLE_FPS = int(os.getenv("UI_IDLE_FPS", "0"))
+UI_INTERACTION_FPS_DURATION = 1.25
 MAX_TOUCH_SLOTS = 2
 TOUCH_HISTORY_TIMEOUT = 3.0  # Seconds before touch points fade out
 
@@ -496,7 +498,14 @@ class GuiApplication:
     self._ffmpeg_stop_event: threading.Event | None = None
     self._progress_hook: Callable[[str], None] | None = None
     self._textures: dict[str, rl.Texture] = {}
+    self._cached_render_textures: dict[str, rl.RenderTexture] = {}
+    self._pending_render_textures: dict[str, tuple[int, int, Callable[[], None]]] = {}
     self._target_fps: int = _DEFAULT_FPS
+    self._full_target_fps: int = _DEFAULT_FPS
+    self._idle_target_fps: int = max(10, _DEFAULT_FPS // 4)
+    self._adaptive_rendering = False
+    self._full_rate_rendering = False
+    self._high_fps_until = 0.0
     self._last_fps_log_time: float = time.monotonic()
     self._burn_in_start_time = time.monotonic()
     self._frame = 0
@@ -537,6 +546,50 @@ class GuiApplication:
   @property
   def target_fps(self):
     return self._target_fps
+
+  def _set_target_fps(self, fps: int) -> None:
+    fps = max(1, int(fps))
+    if fps == self._target_fps:
+      return
+    rl.set_target_fps(0 if OFFSCREEN else fps)
+    self._target_fps = fps
+
+  def configure_adaptive_rendering(self, enabled: bool, idle_fps: int | None = None) -> None:
+    """Enable low-rate rendering for static BIG-UI offroad screens.
+
+    The normal target remains unchanged unless a caller opts in. This keeps
+    MICI and all existing non-BIG layouts on their current scheduling path.
+    """
+    # Recording feeds raw frames to ffmpeg at the fixed full FPS, so changing
+    # the producer rate would make idle portions play back too quickly.
+    self._adaptive_rendering = bool(enabled and not OFFSCREEN and not RECORD)
+    if idle_fps is None or idle_fps <= 0:
+      idle_fps = UI_IDLE_FPS if UI_IDLE_FPS > 0 else max(10, self._full_target_fps // 4)
+    self._idle_target_fps = min(self._full_target_fps, max(1, int(idle_fps)))
+    self._full_rate_rendering = False
+    self._high_fps_until = time.monotonic() + UI_INTERACTION_FPS_DURATION if self._adaptive_rendering else 0.0
+    if self._adaptive_rendering:
+      self._apply_render_mode()
+    else:
+      self._set_target_fps(self._full_target_fps)
+
+  def request_high_fps(self, duration: float = UI_INTERACTION_FPS_DURATION) -> None:
+    if not self._adaptive_rendering:
+      return
+    self._high_fps_until = max(self._high_fps_until, time.monotonic() + max(0.0, duration))
+    self._apply_render_mode()
+
+  def set_render_mode(self, active: bool) -> None:
+    if not self._adaptive_rendering:
+      return
+    self._full_rate_rendering = active
+    self._apply_render_mode()
+
+  def _apply_render_mode(self) -> None:
+    if not self._adaptive_rendering:
+      return
+    high_rate = self._full_rate_rendering or time.monotonic() < self._high_fps_until
+    self._set_target_fps(self._full_target_fps if high_rate else self._idle_target_fps)
 
   def request_close(self):
     self._window_close_requested = True
@@ -607,6 +660,7 @@ class GuiApplication:
       # OFFSCREEN disables FPS limiting for fast offline rendering (e.g. clips)
       rl.set_target_fps(0 if OFFSCREEN else fps)
 
+      self._full_target_fps = fps
       self._target_fps = fps
       self._set_styles()
       self._load_fonts()
@@ -681,6 +735,7 @@ class GuiApplication:
       prev_widget.set_enabled(False)
 
     self._nav_stack.append(widget)
+    self.request_high_fps()
     widget.show_event()
     widget.set_enabled(True)
 
@@ -702,6 +757,7 @@ class GuiApplication:
 
     widget = self._nav_stack.pop(idx_to_pop)
     widget.hide_event()
+    self.request_high_fps()
 
   def pop_widgets_to(self, widget: object, callback: Callable[[], None] | None = None, instant: bool = False):
     # Pops middle widgets instantly without animation then dismisses top, animated out if NavWidget
@@ -750,6 +806,8 @@ class GuiApplication:
 
   def set_should_render(self, should_render: bool):
     self._should_render = should_render
+    if should_render:
+      self.request_high_fps()
 
   def texture(self, asset_path: str, width: int | None = None, height: int | None = None,
               alpha_premultiply=False, keep_aspect_ratio=True, flip_x: bool = False) -> rl.Texture:
@@ -773,6 +831,62 @@ class GuiApplication:
 
     self._textures[cache_key] = texture_obj
     return texture_obj
+
+  def cached_render_texture(self, cache_key: str, width: int, height: int,
+                            render: Callable[[], None]) -> object | None:
+    """Return a cached texture, scheduling cache misses between frames.
+
+    Raylib render-texture modes are not nestable. Widgets call this while the
+    main framebuffer (often another render texture) is active, so cache misses
+    must be populated after the frame has been presented.
+    """
+    cached = self._cached_render_textures.get(cache_key)
+    if cached is not None:
+      return cached.texture
+
+    self._pending_render_textures.setdefault(
+      cache_key, (max(1, int(width)), max(1, int(height)), render)
+    )
+    return None
+
+  def _populate_render_texture_cache(self) -> None:
+    pending = self._pending_render_textures
+    self._pending_render_textures = {}
+    for cache_key, (width, height, render) in pending.items():
+      if cache_key in self._cached_render_textures:
+        continue
+
+      cached = rl.load_render_texture(max(1, int(width)), max(1, int(height)))
+      began_texture_mode = False
+      began_blend_mode = False
+      try:
+        rl.begin_texture_mode(cached)
+        began_texture_mode = True
+        rl.clear_background(rl.Color(0, 0, 0, 0))
+        # Preserve straight alpha while RGB is accumulated premultiplied. The
+        # resulting texture can then be composited with BLEND_ALPHA_PREMULTIPLY
+        # without squaring translucent vector alpha.
+        rl.rl_set_blend_factors_separate(
+          rl.RL_SRC_ALPHA, rl.RL_ONE_MINUS_SRC_ALPHA,
+          rl.RL_ONE, rl.RL_ONE_MINUS_SRC_ALPHA,
+          rl.RL_FUNC_ADD, rl.RL_FUNC_ADD,
+        )
+        rl.begin_blend_mode(rl.BlendMode.BLEND_CUSTOM_SEPARATE)
+        began_blend_mode = True
+        render()
+      except Exception:
+        if began_blend_mode:
+          rl.end_blend_mode()
+        if began_texture_mode:
+          rl.end_texture_mode()
+        rl.unload_render_texture(cached)
+        raise
+      else:
+        rl.end_blend_mode()
+        rl.end_texture_mode()
+      rl.set_texture_filter(cached.texture, rl.TextureFilter.TEXTURE_FILTER_BILINEAR)
+      rl.set_texture_wrap(cached.texture, rl.TextureWrap.TEXTURE_WRAP_CLAMP)
+      self._cached_render_textures[cache_key] = cached
 
   def _load_image_from_path(self, image_path: str, width: int | None = None, height: int | None = None,
                             alpha_premultiply: bool = False, keep_aspect_ratio: bool = True, flip_x: bool = False) -> rl.Image:
@@ -850,6 +964,11 @@ class GuiApplication:
       rl.unload_texture(texture)
     self._textures = {}
 
+    for render_texture in self._cached_render_textures.values():
+      rl.unload_render_texture(render_texture)
+    self._cached_render_textures = {}
+    self._pending_render_textures = {}
+
     for font in self._fonts.values():
       rl.unload_font(font)
     self._fonts = {}
@@ -890,6 +1009,7 @@ class GuiApplication:
 
       while not (self._window_close_requested or rl.window_should_close()):
         self._mark_progress("gui_app.loop_start")
+        self._apply_render_mode()
         if PC:
           # Thread is not used on PC, need to manually add mouse events.
           self._mouse._handle_mouse_event()
@@ -898,6 +1018,7 @@ class GuiApplication:
         self._mouse_events = self._mouse.get_events()
         if len(self._mouse_events) > 0:
           self._last_mouse_event = self._mouse_events[-1]
+          self.request_high_fps()
 
         # Skip rendering when screen is off
         if not self._should_render:
@@ -987,6 +1108,7 @@ class GuiApplication:
         self._mark_progress("gui_app.before_end_drawing")
         rl.end_drawing()
         self._mark_progress("gui_app.after_end_drawing")
+        self._populate_render_texture_cache()
 
         if RECORD:
           image = rl.load_image_from_texture(self._render_texture.texture)
@@ -1182,6 +1304,9 @@ class GuiApplication:
     sys.exit(0)
 
   def _calculate_auto_scale(self) -> float:
+    if os.getenv("SP_HEADLESS_TEST") == "1":
+      return 1.0
+
      # Create temporary window to query monitor info
     rl.init_window(1, 1, "")
     w, h = rl.get_monitor_width(0), rl.get_monitor_height(0)

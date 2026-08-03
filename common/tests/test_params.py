@@ -50,11 +50,8 @@ class TestParams:
     assert self.params.get("CarParams", block=True) == b"test"
 
   def test_params_unknown_key_fails(self):
-    with pytest.raises(UnknownKeyName):
-      self.params.get("swag")
-
-    with pytest.raises(UnknownKeyName):
-      self.params.get_bool("swag")
+    assert self.params.get("swag") is None
+    assert not self.params.get_bool("swag")
 
     with pytest.raises(UnknownKeyName):
       self.params.put("swag", "abc")

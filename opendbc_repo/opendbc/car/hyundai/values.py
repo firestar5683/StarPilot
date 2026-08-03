@@ -77,11 +77,14 @@ class CarControllerParams:
       self.STEER_DELTA_DOWN = 3
 
     elif CP.flags & HyundaiFlags.CAN_CANFD_BLENDED:
-      self.STEER_MAX = 404
-      self.STEER_DRIVER_ALLOWANCE = 50
-      self.STEER_THRESHOLD = 150
-      self.STEER_DELTA_UP = 2
-      self.STEER_DELTA_DOWN = 3
+      if CP.flags & HyundaiFlags.CANFD_LKA_STEERING:
+        self.STEER_MAX = 384
+      else:
+        self.STEER_MAX = 404
+        self.STEER_DRIVER_ALLOWANCE = 50
+        self.STEER_THRESHOLD = 150
+        self.STEER_DELTA_UP = 2
+        self.STEER_DELTA_DOWN = 3
 
     # Default for most HKG
     else:
@@ -108,6 +111,7 @@ class HyundaiSafetyFlags(IntFlag):
 
 
 class HyundaiStarPilotSafetyFlags(IntFlag):
+  AOL_MAIN_LKAS_SYNC = 32
   HAS_LDA_BUTTON = 1024
   AOL_LKAS_ON_ENGAGE = 2048
 
@@ -476,8 +480,12 @@ class CAR(Platforms):
     [
       HyundaiCarDocs("Hyundai Palisade (without HDA II) 2023-25", "Highway Driving Assist",
                      car_parts=CarParts.common([CarHarness.hyundai_a])),
+      HyundaiCarDocs("Hyundai Palisade (with HDA II) 2023-24", "Highway Driving Assist II",
+                     car_parts=CarParts.common([CarHarness.hyundai_r])),
       HyundaiCarDocs("Kia Telluride (without HDA II) 2023-25", "Highway Driving Assist",
                      car_parts=CarParts.common([CarHarness.hyundai_l])),
+      HyundaiCarDocs("Kia Telluride (with HDA II) 2023-24", "Highway Driving Assist II",
+                     car_parts=CarParts.common([CarHarness.hyundai_p])),
     ],
     HYUNDAI_PALISADE.specs,
     flags=HyundaiFlags.CHECKSUM_CRC8 | HyundaiFlags.CAN_CANFD_BLENDED | HyundaiFlags.RADAR_SCC,
@@ -1037,7 +1045,7 @@ def match_fw_to_car_fuzzy(live_fw_versions, vin, offline_fw_versions) -> set[str
       if not any(found_platform_code in expected_platform_codes for found_platform_code in found_platform_codes):
         break
 
-      if ecu[0] in DATE_FW_ECUS:
+      if ecu[0] in DATE_FW_ECUS and candidate not in DATELESS_FUZZY_CARS:
         # If ECU can have a FW date, require it to exist
         # (this excludes candidates in the database without dates)
         if not len(expected_dates) or not len(found_dates):
@@ -1084,6 +1092,8 @@ PLATFORM_CODE_ECUS = [Ecu.fwdRadar, Ecu.fwdCamera, Ecu.eps]
 # So far we've only seen dates in fwdCamera
 # TODO: there are date codes in the ABS firmware versions in hex
 DATE_FW_ECUS = [Ecu.fwdCamera]
+
+DATELESS_FUZZY_CARS = {CAR.HYUNDAI_KONA_NON_SCC}
 
 # Note: an ECU on CAN FD cars may sometimes send 0x30080aaaaaaaaaaa (flow control continue) while we
 # are attempting to query ECUs. This currently does not seem to affect fingerprinting from the camera

@@ -93,7 +93,7 @@ static void psa_rx_hook(const CANPacket_t *msg) {
       pcm_cruise_check((msg->data[2U] >> 7U) & 1U); // RVV_ACC_ACTIVATION_REQ
     }
     if (msg->addr == PSA_HS2_DYN1_MDD_ETAT_2B6) {
-      acc_main_on = (msg->data[3] & 0x0FU) > 2;
+      acc_main_on = (msg->data[3] & 0x0FU) > 2U;
     }
   }
 

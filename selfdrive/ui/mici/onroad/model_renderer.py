@@ -464,12 +464,12 @@ class ModelRenderer(Widget):
       rl.draw_triangle_fan(lead.chevron, len(lead.chevron), with_alpha(lead_color, lead.fill_alpha))
 
   @staticmethod
-  def _get_path_length_idx(pos_x_array: np.ndarray, path_height: float) -> int:
+  def _get_path_length_idx(pos_x_array: np.ndarray, path_distance: float) -> int:
     """Get the index corresponding to the given path height"""
     if len(pos_x_array) == 0:
       return 0
-    indices = np.where(pos_x_array <= path_height)[0]
-    return indices[-1] if indices.size > 0 else 0
+    idx = np.searchsorted(pos_x_array, path_distance, side='right') - 1
+    return idx if idx >= 0 else 0
 
   def _map_to_screen(self, in_x, in_y, in_z):
     """Project a point in car space to screen space"""

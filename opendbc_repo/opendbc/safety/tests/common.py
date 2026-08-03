@@ -312,7 +312,7 @@ class TorqueSteeringSafetyTestBase(SafetyTestBase, abc.ABC):
 
   def _toggle_aol(self, toggle_on):
     """Toggles "Always On Lateral" On/Off"""
-    pass
+    return None
 
   def test_always_on_lateral(self):
     if self._toggle_aol(True) is None:
@@ -852,7 +852,7 @@ class AngleSteeringSafetyTest(VehicleSpeedSafetyTest):
 
   def _toggle_aol(self, toggle_on):
     """Toggles "Always On Lateral" on/off"""
-    pass
+    return None
 
   def test_always_on_lateral(self):
     if self._toggle_aol(True) is None:
@@ -1016,6 +1016,15 @@ class SafetyTest(SafetyTestBase):
             if attr.startswith('TestHyundai') and current_test.startswith('TestHyundai'):
               # common Hyundai lateral/button messages are intentionally shared across multiple safety variants
               tx = list(filter(lambda m: m[0] not in [0x340, 0x4F1, 0x485], tx))
+
+            if attr.startswith('TestGm') and current_test.startswith('TestGm'):
+              tx = list(filter(lambda m: m[0] not in [0x184, 0x1F5, 0x3D1], tx))
+
+            if attr.startswith('TestHyundaiCanfdLKASteering') and current_test.startswith('TestToyota'):
+              tx = list(filter(lambda m: m[0] not in [0x160], tx))
+
+            if attr.startswith('TestHyundaiCanfdCCNC') and current_test.startswith('TestSubaruPreglobal'):
+              tx = list(filter(lambda m: m[0] not in [0x161], tx))
 
             if attr.startswith('TestHyundaiLongitudinal') or attr in ('TestHyundaiSafetyFCEVLong',
                                                                       'TestHyundaiLongitudinalAolLkasOnEngageSafety',

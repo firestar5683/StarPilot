@@ -218,7 +218,7 @@ def hardware_thread(end_event, hw_queue) -> None:
   sm = sm.extend(['starpilotPlan'])
   pm = pm.extend(['starpilotDeviceState'])
 
-  starpilot_toggles = get_starpilot_toggles()
+  starpilot_toggles = get_starpilot_toggles(read_persisted_force_params=True)
 
   while not end_event.is_set():
     sm.update(PANDA_STATES_TIMEOUT)
@@ -488,7 +488,7 @@ def hardware_thread(end_event, hw_queue) -> None:
     should_start_prev = should_start
 
     # StarPilot variables
-    starpilot_toggles = get_starpilot_toggles(sm)
+    starpilot_toggles = get_starpilot_toggles(sm, read_persisted_force_params=True)
 
 
 def main():

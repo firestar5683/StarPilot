@@ -1,5 +1,5 @@
 from cereal import log
-from openpilot.common.params import Params, UnknownKeyName
+from openpilot.common.params import UnknownKeyName
 from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.list_view import multiple_button_item, toggle_item
 from openpilot.system.ui.widgets.scroller_tici import Scroller
@@ -38,7 +38,7 @@ DESCRIPTIONS = {
 class TogglesLayout(Widget):
   def __init__(self):
     super().__init__()
-    self._params = Params()
+    self._params = ui_state.ui_params
     self._sync_rhd_toggle()
 
     # param, title, desc, icon, needs_restart

@@ -52,6 +52,10 @@ class Alert:
   alert_type: str = ""
 
 
+def _is_reverse_gear_full_alert(alert: Alert) -> bool:
+  return alert.size == AlertSize.full and (alert.alert_type or "").split("/", 1)[0] == "reverseGear"
+
+
 ALERT_STARTUP_PENDING = Alert(
   text1=tr("openpilot Unavailable"),
   text2=tr("Waiting to start"),
@@ -161,7 +165,8 @@ class AlertRenderer(Widget):
         self._prev_alert = None
         return False
 
-    self._draw_background(alert)
+    if not _is_reverse_gear_full_alert(alert):
+      self._draw_background(alert)
     self._draw_text(alert)
 
     return True

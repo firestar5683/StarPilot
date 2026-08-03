@@ -17,7 +17,7 @@ from openpilot.selfdrive.ui.layouts.settings.starpilot.system_settings import St
 from openpilot.selfdrive.ui.layouts.settings.starpilot.appearance import StarPilotAppearanceLayout
 from openpilot.selfdrive.ui.layouts.settings.starpilot.vehicle import StarPilotVehicleSettingsLayout
 
-from openpilot.selfdrive.ui.layouts.settings.starpilot.aethergrid import TileGrid, HubTile, SPACING, BreadcrumbController, AETHER_LIST_METRICS, AetherListColors, draw_rounded_fill, draw_rounded_stroke, AetherTransitionManager
+from openpilot.selfdrive.ui.layouts.settings.starpilot.aethergrid import TileGrid, HubTile, SPACING, BreadcrumbController, AETHER_LIST_METRICS, AetherListColors, draw_rounded_fill, draw_rounded_stroke
 
 class StarPilotLayout(Widget):
   CATEGORIES = [
@@ -92,23 +92,6 @@ class StarPilotLayout(Widget):
     self._breadcrumbs = BreadcrumbController()
     self._main_grid = TileGrid(columns=None, padding=SPACING.tile_gap)
     self._rebuild_grid()
-    self._transition_manager = AetherTransitionManager()
-
-  def _make_render_fn(self, panel_type: StarPilotPanelType) -> Callable[[rl.Rectangle], None]:
-    if panel_type == StarPilotPanelType.MAIN:
-      def render_main(rect: rl.Rectangle):
-        metrics = AETHER_LIST_METRICS
-        shell_w = min(rect.width - metrics.outer_margin_x * 2, metrics.max_content_width)
-        shell_x = rect.x + (rect.width - shell_w) / 2
-        grid_rect = rl.Rectangle(
-          shell_x, rect.y + metrics.outer_margin_y,
-          shell_w, rect.height - metrics.outer_margin_y * 2
-        )
-        self._main_grid.render(grid_rect)
-      return render_main
-    else:
-      panel = self._panels[panel_type]
-      return lambda r: panel.instance.render(r) if panel.instance else None
 
   def set_depth_callback(self, callback: Callable):
     self._depth_callback = callback
@@ -247,13 +230,6 @@ class StarPilotLayout(Widget):
 
   def _set_current_panel(self, panel_type: StarPilotPanelType):
     if panel_type != self._current_panel:
-      old_panel = self._current_panel
-      direction = -1 if panel_type == StarPilotPanelType.MAIN else 1
-      self._transition_manager.start(
-        self._make_render_fn(old_panel),
-        self._make_render_fn(panel_type),
-        direction
-      )
 
       if self._current_panel != StarPilotPanelType.MAIN:
         old = self._panels[self._current_panel].instance
@@ -304,29 +280,19 @@ class StarPilotLayout(Widget):
     crumb_rect = rl.Rectangle(glass_rect.x, glass_rect.y, glass_rect.width, glass_rect.height)
     self._breadcrumbs.draw(crumb_rect)
 
-    # Update transitions
-    self._transition_manager.update(rl.get_frame_time())
-
     # 4. Render active content panel
-    if self._transition_manager.is_animating():
-      self._transition_manager.render(content_rect)
+    if self._current_panel == StarPilotPanelType.MAIN:
+      grid_rect = rl.Rectangle(shell_x, content_rect.y + AETHER_LIST_METRICS.outer_margin_y, shell_w, content_rect.height - AETHER_LIST_METRICS.outer_margin_y * 2)
+      self._main_grid.render(grid_rect)
     else:
-      if self._current_panel == StarPilotPanelType.MAIN:
-        grid_rect = rl.Rectangle(shell_x, content_rect.y + AETHER_LIST_METRICS.outer_margin_y, shell_w, content_rect.height - AETHER_LIST_METRICS.outer_margin_y * 2)
-        self._main_grid.render(grid_rect)
-      else:
-        panel = self._panels[self._current_panel]
-        if panel.instance:
-          panel.instance.render(content_rect)
+      panel = self._panels[self._current_panel]
+      if panel.instance:
+        panel.instance.render(content_rect)
 
   def _handle_mouse_press(self, mouse_pos: MousePos):
-    if self._transition_manager.is_animating():
-      return
     self._breadcrumbs.init_interaction(mouse_pos)
 
   def _handle_mouse_release(self, mouse_pos: MousePos):
-    if self._transition_manager.is_animating():
-      return
     action = self._breadcrumbs.finish_interaction(mouse_pos)
     if action:
       self._breadcrumbs.handle_click(action)

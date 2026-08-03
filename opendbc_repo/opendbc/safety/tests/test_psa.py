@@ -43,6 +43,18 @@ class TestPsaSafetyBase(common.CarSafetyTest, common.AngleSteeringSafetyTest):
     values = {"RVV_ACC_ACTIVATION_REQ": enable}
     return self.packer.make_can_msg_safety("HS2_DAT_MDD_CMD_452", self.ADAS_BUS, values)
 
+  def test_acc_main_state(self):
+    for counter, main_on in enumerate((False, True)):
+      msg = self.packer.make_can_msg_safety("HS2_DYN1_MDD_ETAT_2B6", self.ADAS_BUS, {
+        "ACC_STATUS": 3 if main_on else 2,
+        "DYN_ACC_PROCESS_COUNTER": counter,
+      })
+      msg[0].data[7] &= 0xF0
+      nibble_sum = sum((msg[0].data[i] >> 4) + (msg[0].data[i] & 0xF) for i in range(8))
+      msg[0].data[7] |= (3 - nibble_sum) & 0xF
+      self.assertTrue(self._rx(msg))
+      self.assertEqual(main_on, self.safety.get_acc_main_on())
+
   def _speed_msg(self, speed):
     values = {"VITESSE_VEHICULE_ROUES": speed * 3.6}
     return self.packer.make_can_msg_safety("HS2_DYN_ABR_38D", self.MAIN_BUS, values)

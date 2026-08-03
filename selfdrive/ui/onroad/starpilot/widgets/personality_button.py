@@ -12,7 +12,8 @@ class PersonalityButtonWidget(LayoutWidget):
 
   @property
   def is_visible(self) -> bool:
-    toggle_on = ui_state.params.get_bool("OnroadDistanceButton")
+    params = ui_state.ui_params
+    toggle_on = params.get_bool("OnroadDistanceButton")
     return bool(toggle_on and ui_state.started and ui_state.has_longitudinal_control)
 
   def get_size(self) -> tuple[float, float]:

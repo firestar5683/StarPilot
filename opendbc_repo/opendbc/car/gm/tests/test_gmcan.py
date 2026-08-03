@@ -69,7 +69,6 @@ class TestGMCan:
     assert bus == 0
     assert dat.hex() == "20000000000000"
 
-
   def test_gas_regen_command_matches_starpilot_volt_2019(self):
     packer = CANPacker(DBC[CAR.CHEVROLET_VOLT_2019]["pt"])
     addr, dat, bus = gmcan.create_gas_regen_command(packer, 0, 5000, 1, True, False, include_always_one3=True, use_volt_layout=True)

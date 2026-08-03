@@ -589,6 +589,80 @@ class TestGMCarController:
 
     assert [msg[2] for msg in msgs] == [0]
 
+  @parameterized.expand([
+    CAR.CHEVROLET_BOLT_CC_2017,
+    CAR.CHEVROLET_BOLT_CC_2018_2021,
+    CAR.CHEVROLET_BOLT_CC_2022_2023,
+  ])
+  def test_bolt_cc_redneck_ignores_small_setpoint_error(self, car_model):
+    packer = CANPacker(DBC[car_model][Bus.pt])
+    controller = SimpleNamespace(frame=int(2.0 / DT_CTRL), last_button_frame=0, apply_speed=0)
+    cs = SimpleNamespace(
+      CP=SimpleNamespace(
+        carFingerprint=car_model,
+        minEnableSpeed=24 * CV.MPH_TO_MS,
+      ),
+      buttons_counter=2,
+      out=SimpleNamespace(
+        vEgo=(60.6 * CV.MPH_TO_MS) / 1.01,
+        cruiseState=SimpleNamespace(speed=60 * CV.MPH_TO_MS),
+      ),
+    )
+
+    msgs = gmcan.create_gm_cc_spam_command(packer, controller, cs, SimpleNamespace(accel=0.0), SimpleNamespace(is_metric=False))
+
+    assert msgs == []
+    assert controller.apply_speed == 60
+
+  def test_non_bolt_cc_redneck_keeps_existing_setpoint_selector(self):
+    packer = CANPacker(DBC[CAR.CHEVROLET_EQUINOX_CC][Bus.pt])
+    controller = SimpleNamespace(frame=int(2.0 / DT_CTRL), last_button_frame=0, apply_speed=0)
+    cs = SimpleNamespace(
+      CP=SimpleNamespace(
+        carFingerprint=CAR.CHEVROLET_EQUINOX_CC,
+        flags=GMFlags.CC_LONG.value,
+        minEnableSpeed=24 * CV.MPH_TO_MS,
+      ),
+      buttons_counter=2,
+      out=SimpleNamespace(
+        vEgo=(60.6 * CV.MPH_TO_MS) / 1.01,
+        cruiseState=SimpleNamespace(speed=60 * CV.MPH_TO_MS),
+      ),
+    )
+
+    msgs = gmcan.create_gm_cc_spam_command(packer, controller, cs, SimpleNamespace(accel=0.0), SimpleNamespace(is_metric=False))
+
+    assert len(msgs) == 1
+    assert controller.apply_speed == 61
+
+  def test_bolt_cc_redneck_requires_persistent_acceleration_after_deceleration(self):
+    cp = SimpleNamespace(carFingerprint=CAR.CHEVROLET_BOLT_CC_2018_2021)
+    controller = SimpleNamespace(
+      frame=100,
+      gm_cc_last_direction_button=CruiseButtons.DECEL_SET,
+      gm_cc_last_direction_frame=100,
+      gm_cc_pending_reverse_button=CruiseButtons.INIT,
+      gm_cc_pending_reverse_frame=0,
+    )
+
+    assert gmcan.stabilize_bolt_cc_button(controller, cp, CruiseButtons.RES_ACCEL) == CruiseButtons.INIT
+    controller.frame += int(0.5 / DT_CTRL)
+    assert gmcan.stabilize_bolt_cc_button(controller, cp, CruiseButtons.RES_ACCEL) == CruiseButtons.INIT
+    controller.frame += int(0.11 / DT_CTRL)
+    assert gmcan.stabilize_bolt_cc_button(controller, cp, CruiseButtons.RES_ACCEL) == CruiseButtons.RES_ACCEL
+
+  def test_bolt_cc_redneck_deceleration_is_not_debounced(self):
+    cp = SimpleNamespace(carFingerprint=CAR.CHEVROLET_BOLT_CC_2018_2021)
+    controller = SimpleNamespace(
+      frame=100,
+      gm_cc_last_direction_button=CruiseButtons.RES_ACCEL,
+      gm_cc_last_direction_frame=100,
+      gm_cc_pending_reverse_button=CruiseButtons.INIT,
+      gm_cc_pending_reverse_frame=0,
+    )
+
+    assert gmcan.stabilize_bolt_cc_button(controller, cp, CruiseButtons.DECEL_SET) == CruiseButtons.DECEL_SET
+
   def test_xt4_cc_redneck_spam_matches_physical_button_burst(self):
     packer = CANPacker(DBC[CAR.CADILLAC_XT4_CC][Bus.pt])
     controller = SimpleNamespace(

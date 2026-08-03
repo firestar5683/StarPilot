@@ -1,7 +1,9 @@
+import platform
 from types import SimpleNamespace
 
 import cereal.messaging as messaging
 from cereal import log
+import pytest
 
 from opendbc.car.toyota.values import CAR as TOYOTA
 from openpilot.selfdrive.test.process_replay import replay_process_with_name
@@ -77,6 +79,7 @@ class TestLeads:
 
     assert track is None
 
+  @pytest.mark.skipif(platform.system() == "Darwin", reason="SocketEventHandle requires eventfd")
   def test_radar_fault(self):
     # if there's no radar-related can traffic, radard should either not respond or respond with an error
     # this is tightly coupled with underlying car radar_interface implementation, but it's a good sanity check

@@ -28,8 +28,10 @@ def _model(left=-1.8, right=1.8, model_y=0.0, lane_prob=0.9, lane_std=0.1, path_
   )
 
 
-def _update(controller, model, *, offset=0.0, authority=1.0, enabled=True, active=True, valid=True, speed=_V_EGO):
-  return controller.update(0.0, model, speed, enabled, offset, authority, active, valid)
+def _update(controller, model, *, offset=0.0, authority=1.0, enabled=True, active=True, valid=True, speed=_V_EGO,
+            pause_on_signal=False, turn_signal_active=False):
+  return controller.update(0.0, model, speed, enabled, offset, authority, active, valid,
+                           pause_on_signal, turn_signal_active)
 
 
 def _converge(model, *, offset=0.0, authority=1.0):
@@ -55,6 +57,25 @@ def test_hard_gates_are_noop(kwargs):
 
 def test_lane_change_is_noop():
   assert _update(LaneCenteringController(), _model(left=-1.5, right=2.1, lane_change=1)) == 0.0
+
+
+def test_turn_signal_fades_lane_centering_correction():
+  model = _model(left=-1.5, right=2.1)
+  controller, centered = _converge(model, authority=0.0)
+  fading = _update(controller, model, authority=0.0, pause_on_signal=True, turn_signal_active=True)
+  assert 0.0 < fading < centered
+
+  for _ in range(300):
+    fading = _update(controller, model, authority=0.0, pause_on_signal=True, turn_signal_active=True)
+  assert abs(fading) < 1e-6
+
+
+def test_turn_signal_pause_can_be_disabled():
+  model = _model(left=-1.5, right=2.1)
+  _, output = _converge(model, authority=0.0)
+  controller, _ = _converge(model, authority=0.0)
+  signaled = _update(controller, model, authority=0.0, turn_signal_active=True)
+  assert signaled == pytest.approx(output, abs=1e-7)
 
 
 @pytest.mark.parametrize(

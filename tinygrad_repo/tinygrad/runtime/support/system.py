@@ -220,9 +220,11 @@ class USBPCIDevice(PCIDevice):
   def __init__(self, devpref:str, dev, pcibus):
     self.pcibus, self.peer_group = pcibus, f"USBPCIDevice_{pcibus}"
     self.lock_fd = System.flock_acquire(f"{devpref.lower()}_{pcibus.lower()}.lock")
-    usb = USB3(dev, 0x81, 0x83, 0x02, 0x04)
+    usb = USB3(dev, 0x81, 0x83, 0x02, 0x04, use_bot=True)
     if DEBUG >= 1: print(f"am {self.pcibus}: product string: {usb.product!r}")
-    self.usb: CustomASM24Controller | ASM24Controller = CustomASM24Controller(usb) if usb.is_custom else ASM24Controller(usb)
+    if not usb.is_custom:
+      raise RuntimeError(f"unsupported legacy USB GPU firmware ({usb.product!r}); flash the current tinygrad ASM2464PD custom firmware")
+    self.usb: CustomASM24Controller = CustomASM24Controller(usb)
     self._bar_info = System.pci_setup_usb_bars(self.usb, gpu_bus=4, mem_base=0x10000000, pref_mem_base=(32 << 30))
     self.sram = BumpAllocator(size=0x80000, wrap=False) # asm24 controller sram
 

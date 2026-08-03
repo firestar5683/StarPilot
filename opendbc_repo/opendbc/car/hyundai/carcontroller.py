@@ -686,7 +686,15 @@ class CarController(CarControllerBase):
     sys_warning, sys_state, left_lane_warning, right_lane_warning = process_hud_alert(CC.enabled, self.car_fingerprint,
                                                                                       hud_control)
 
-    if can_canfd_blended:
+    if can_canfd_blended and self.CP.flags & HyundaiFlags.CANFD_LKA_STEERING:
+      can_sends.extend(hyundaicanfd.create_steering_messages(
+        self.packer, self.CP, self.CAN, CC.enabled, apply_steer_req, apply_torque, 0.0,
+      ))
+      if self.frame % 5 == 0:
+        can_sends.append(hyundaicanfd.create_suppress_lfa(
+          self.packer, self.CAN, CS.lfa_block_msg, False,
+        ))
+    elif can_canfd_blended:
       can_sends.extend(hyundaican.create_lkas11_can_canfd_blended(self.packer, self.frame, self.CP, apply_torque, apply_steer_req,
                                                                   torque_fault, CS.lkas11, sys_warning, sys_state, CC.enabled,
                                                                   hud_control.leftLaneVisible, hud_control.rightLaneVisible,

@@ -108,6 +108,9 @@ class StarPilotLateralLayout(_SettingsPage):
     def nlc_on():
       return lc_on() and p.get_bool("NudgelessLaneChange")
 
+    def close_gap_on():
+      return lc_on() and p.get_bool("LaneChangeCloseGap")
+
     def pos_on():
       return p.get_bool("PauseLateralOnSignal")
 
@@ -190,6 +193,20 @@ class StarPilotLateralLayout(_SettingsPage):
         get_value=self._get_lane_change_smoothing_display,
         on_click=self._show_lane_smoothing,
         visible=lc_on,
+      ),
+      SettingRow(
+        "LaneChangeCloseGap", "toggle", tr_noop("Close Gap On Lane Change"),
+        subtitle=tr_noop("Allows for a temporary shorter follow distance behind lead so that openpilot merges smoothly out of current lane, it will allow car to accelerate as it changes lanes."),
+        get_state=lambda: p.get_bool("LaneChangeCloseGap"),
+        set_state=lambda s: p.put_bool("LaneChangeCloseGap", s),
+        visible=lc_on,
+      ),
+      SettingRow(
+        "LaneChangeCloseGapSeconds", "value", tr_noop("Temporary Follow Distance"),
+        subtitle=tr_noop("Follow distance to hold while changing lanes. Only applied when shorter than your normal gap."),
+        get_value=self._get_lane_change_close_gap_display,
+        on_click=lambda: self._show_slider("LaneChangeCloseGapSeconds", 0.5, 3.0, step=0.05, unit="s", value_type="float"),
+        visible=close_gap_on,
       ),
     ]
 
@@ -374,6 +391,9 @@ class StarPilotLateralLayout(_SettingsPage):
     if val == 0 or val == 10:
       return tr("Stock")
     return str(val)
+
+  def _get_lane_change_close_gap_display(self) -> str:
+    return f"{self._params.get_float('LaneChangeCloseGapSeconds'):.2f}s"
 
   def _show_lane_smoothing(self):
     def on_close(res, val):

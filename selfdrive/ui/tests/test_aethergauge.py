@@ -1,51 +1,5 @@
-import sys
 import types
 import unittest
-from unittest.mock import MagicMock
-
-from collections import namedtuple
-
-ColorClass = namedtuple("Color", ["r", "g", "b", "a"])
-
-# 1. Register Mock/Stub for pyray
-rl = types.SimpleNamespace(
-  Color=lambda r, g, b, a=255: ColorClass(r, g, b, a),
-  Rectangle=lambda x=0, y=0, width=0, height=0: types.SimpleNamespace(x=x, y=y, width=width, height=height),
-  Vector2=lambda x=0, y=0: types.SimpleNamespace(x=x, y=y),
-  Texture2D=type("Texture2D", (), {}),
-  Font=type("Font", (), {}),
-  WHITE=ColorClass(255, 255, 255, 255),
-  BLACK=ColorClass(0, 0, 0, 255),
-  get_time=lambda: 1.0,
-  get_frame_time=lambda: 1.0 / 60.0,
-)
-sys.modules["pyray"] = rl
-
-# 2. Register Mock/Stub for text_measure
-text_measure = types.SimpleNamespace(
-  measure_text_cached=lambda *a, **k: types.SimpleNamespace(x=100, y=20)
-)
-sys.modules["openpilot.system.ui.lib.text_measure"] = text_measure
-
-# 3. Register Mock/Stub for starpilot_border
-starpilot_border = types.SimpleNamespace(
-  _csc_state=lambda: None,
-  _intensity=lambda c: 0.0,
-  _glow_color=lambda i: rl.Color(0, 255, 0, 255),
-)
-sys.modules["openpilot.selfdrive.ui.onroad.starpilot.starpilot_border"] = starpilot_border
-
-# 4. Register Mock/Stub for starpilot_status (added by engagement color blend)
-starpilot_status = types.SimpleNamespace(
-  get_border_color=lambda state: rl.Color(22, 127, 64, 255),
-)
-sys.modules["openpilot.selfdrive.ui.lib.starpilot_status"] = starpilot_status
-
-# 5. Register Mock/Stub for application.gui_app (added by FirstOrderFilter import)
-gui_app = types.SimpleNamespace(target_fps=60.0)
-sys.modules["openpilot.system.ui.lib.application"] = types.SimpleNamespace(
-  gui_app=gui_app, FontWeight=type("FontWeight", (), {"BOLD": 0, "MEDIUM": 1})
-)
 
 class MockSubMaster:
   def __init__(self):
@@ -68,11 +22,7 @@ mock_ui_state = types.SimpleNamespace(
   is_metric=False,
   sm=MockSubMaster(),
 )
-ui_state_mod = types.ModuleType("openpilot.selfdrive.ui.ui_state")
-ui_state_mod.ui_state = mock_ui_state
-sys.modules["openpilot.selfdrive.ui.ui_state"] = ui_state_mod
-
-# Now import aethergauge
+from openpilot.selfdrive.ui.onroad.starpilot import aethergauge
 from openpilot.selfdrive.ui.onroad.starpilot.aethergauge import (
   AetherGauge,
   AetherGaugeData,
@@ -82,6 +32,7 @@ from openpilot.selfdrive.ui.onroad.starpilot.aethergauge import (
   _is_stop_light,
   _is_curvature,
 )
+aethergauge.ui_state = mock_ui_state
 
 class TestAetherGaugeLeadLogic(unittest.TestCase):
   def setUp(self):

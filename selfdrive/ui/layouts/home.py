@@ -2,7 +2,6 @@ import time
 import pyray as rl
 from collections.abc import Callable
 from enum import IntEnum
-from openpilot.common.params import Params
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.selfdrive.ui.widgets.offroad_alerts import UpdateAlert, OffroadAlert
 from openpilot.selfdrive.ui.widgets.exp_mode_button import ExperimentalModeButton
@@ -32,7 +31,7 @@ class HomeLayoutState(IntEnum):
 class HomeLayout(Widget):
   def __init__(self):
     super().__init__()
-    self.params = Params()
+    self.params = ui_state.ui_params
 
     self.update_alert = UpdateAlert()
     self.offroad_alert = OffroadAlert()

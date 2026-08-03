@@ -25,6 +25,8 @@ from openpilot.starpilot.common.starpilot_variables import MODELS_PATH
 
 MANIFEST_CANDIDATES = ("v22",)
 DEFAULT_MODEL_KEY = "sc2"
+LOCAL_MODEL_PREFIX = "local-"
+LOCAL_MODEL_SERIES = "Local Series"
 ARTIFACT_URLS_CACHE = ".model_artifact_urls.json"
 ARTIFACT_METADATA_CACHE = ".model_artifacts.json"
 MODEL_KEY_CANONICAL_MAP = {
@@ -49,6 +51,11 @@ def canonical_model_key(model_key: str) -> str:
 
 def is_builtin_model_key(model_key: str) -> bool:
   return canonical_model_key(model_key) == DEFAULT_MODEL_KEY
+
+
+def is_local_model_key(model_key: str) -> bool:
+  """Hand-installed models live outside the manifest and are never downloaded or pruned."""
+  return canonical_model_key(model_key).startswith(LOCAL_MODEL_PREFIX)
 
 
 def model_key_aliases(model_key: str) -> list[str]:
@@ -443,6 +450,8 @@ class ModelManager:
     valid_keys = set(self.available_models)
     for model_file in MODELS_PATH.glob("*_driving_*"):
       model_key = model_file.name.split("_driving_", 1)[0]
+      if is_local_model_key(model_key):
+        continue
       if model_key not in valid_keys:
         delete_file(model_file, print_error=False)
 
@@ -472,7 +481,51 @@ class ModelManager:
     self._set_model_param_keys(replacement, replacement_name, None)
     self._sync_selected_model_version()
 
+  def _discover_local_models(self) -> list[dict]:
+    """Synthesize manifest entries for hand-installed models found in MODELS_PATH.
+
+    A local model is any "<local-*>_driving_*" artifact. An optional "<id>.json"
+    sidecar supplies name/version/series; without one the version stays empty so
+    modeld falls back to the version embedded in the artifact itself.
+    """
+    try:
+      entries = sorted(MODELS_PATH.glob(f"{LOCAL_MODEL_PREFIX}*_driving_*"))
+    except Exception as error:
+      print(f"Failed to scan for local models: {error}")
+      return []
+
+    discovered: dict[str, dict] = {}
+    for model_file in entries:
+      model_key = model_file.name.split("_driving_", 1)[0]
+      # Keys and names land in comma-joined params, so a comma would corrupt the catalog.
+      if not model_key.startswith(LOCAL_MODEL_PREFIX) or "," in model_key or model_key in discovered:
+        continue
+
+      info: dict = {}
+      sidecar = MODELS_PATH / f"{model_key}.json"
+      if sidecar.is_file():
+        try:
+          loaded = json.loads(sidecar.read_text())
+          if isinstance(loaded, dict):
+            info = loaded
+        except Exception as error:
+          print(f"Ignoring malformed local model sidecar {sidecar.name}: {error}")
+
+      fallback_name = model_key[len(LOCAL_MODEL_PREFIX):].replace("_", " ").replace("-", " ").strip()
+      discovered[model_key] = {
+        "id": model_key,
+        "name": _clean_model_name(info.get("name") or fallback_name or model_key).replace(",", " "),
+        "version": str(info.get("version") or "").strip(),
+        "series": str(info.get("series") or LOCAL_MODEL_SERIES).strip().replace(",", " "),
+        "released": str(info.get("released") or "2100-01-01").strip(),
+        "community_favorite": False,
+        "artifact_format": UNIFIED_ARTIFACT_FORMAT,
+      }
+
+    return list(discovered.values())
+
   def update_model_params(self, model_info: list[dict], manifest_version: str):
+    model_info = list(model_info) + self._discover_local_models()
     self.available_models = [str(model.get("id") or "").strip() for model in model_info]
     self.available_model_names = [_clean_model_name(model.get("name")) for model in model_info]
     self.model_versions = [str(model.get("version") or "").strip() for model in model_info]
@@ -516,6 +569,8 @@ class ModelManager:
   def _migrate_to_unified_artifacts(self, selected_model: str):
     removed = 0
     for model_file in MODELS_PATH.glob("*_driving_*"):
+      if is_local_model_key(model_file.name.split("_driving_", 1)[0]):
+        continue
       if model_file.is_file() or model_file.is_symlink():
         delete_file(model_file, print_error=False)
         removed += 1
@@ -572,6 +627,14 @@ class ModelManager:
 
     if is_builtin_model_key(model_to_download):
       self.params_memory.put(DOWNLOAD_PROGRESS_PARAM, "Built-in model already downloaded.")
+      self.params_memory.remove(MODEL_DOWNLOAD_PARAM)
+      self.downloading_model = False
+      return
+
+    # Local models have no upstream URL; a download attempt would 404 and then
+    # delete_file() the artifact on verification failure.
+    if is_local_model_key(model_to_download):
+      self.params_memory.put(DOWNLOAD_PROGRESS_PARAM, "Local model, nothing to download.")
       self.params_memory.remove(MODEL_DOWNLOAD_PARAM)
       self.downloading_model = False
       return
@@ -679,6 +742,9 @@ class ModelManager:
         handle_error(None, "Download cancelled...", "Download cancelled...", MODEL_DOWNLOAD_ALL_PARAM, DOWNLOAD_PROGRESS_PARAM, self.params_memory)
         return
 
+      if is_local_model_key(model_key):
+        continue
+
       artifact_format = artifact_format_map.get(model_key, "")
       if self._is_model_downloaded(model_key, artifact_format):
         continue
@@ -697,6 +763,8 @@ class ModelManager:
     self.params_memory.put(DOWNLOAD_PROGRESS_PARAM, "Updating...")
 
     for model_file in MODELS_PATH.glob("*_driving_*"):
+      if is_local_model_key(model_file.name.split("_driving_", 1)[0]):
+        continue
       if model_file.is_file():
         delete_file(model_file, print_error=False)
 

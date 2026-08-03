@@ -20,6 +20,14 @@ MALIBU_BUTTON_MAP = {
 ACC_CRUISE_STATE_ADAPTIVE = 2
 XT4_CC_BUTTON_BURST_FRAMES = 6
 XT4_CC_BUTTON_COUNTER_DELAY_FRAMES = 1
+BOLT_CC_BUTTON_CARS = {
+  CAR.CHEVROLET_BOLT_CC_2017,
+  CAR.CHEVROLET_BOLT_CC_2018_2021,
+  CAR.CHEVROLET_BOLT_CC_2022_2023,
+}
+BOLT_CC_TARGET_DEADBAND_MPH = 0.75
+BOLT_CC_REVERSE_CONFIRM_S = 0.6
+BOLT_CC_DIRECTION_MEMORY_S = 1.5
 
 
 def malibu_phase_map_for_button(button):
@@ -298,26 +306,65 @@ def create_lka_icon_command(bus, active, critical, steer):
   return CanData(0x104c006c, dat, bus)
 
 
+def stabilize_bolt_cc_button(controller, CP, requested_button):
+  if CP.carFingerprint not in BOLT_CC_BUTTON_CARS:
+    return requested_button
+
+  direction_buttons = (CruiseButtons.RES_ACCEL, CruiseButtons.DECEL_SET)
+  if requested_button not in direction_buttons:
+    controller.gm_cc_pending_reverse_button = CruiseButtons.INIT
+    return requested_button
+
+  last_button = getattr(controller, "gm_cc_last_direction_button", CruiseButtons.INIT)
+  last_frame = getattr(controller, "gm_cc_last_direction_frame", -int(BOLT_CC_DIRECTION_MEMORY_S / DT_CTRL) - 1)
+  recently_sent = (controller.frame - last_frame) * DT_CTRL <= BOLT_CC_DIRECTION_MEMORY_S
+  reversing_to_accel = (last_button == CruiseButtons.DECEL_SET and
+                        requested_button == CruiseButtons.RES_ACCEL and recently_sent)
+
+  if reversing_to_accel:
+    pending_button = getattr(controller, "gm_cc_pending_reverse_button", CruiseButtons.INIT)
+    if pending_button != requested_button:
+      controller.gm_cc_pending_reverse_button = requested_button
+      controller.gm_cc_pending_reverse_frame = controller.frame
+      return CruiseButtons.INIT
+
+    pending_frame = getattr(controller, "gm_cc_pending_reverse_frame", controller.frame)
+    if (controller.frame - pending_frame) * DT_CTRL < BOLT_CC_REVERSE_CONFIRM_S:
+      return CruiseButtons.INIT
+
+  controller.gm_cc_pending_reverse_button = CruiseButtons.INIT
+  return requested_button
+
+
 def create_gm_cc_spam_command(packer, controller, CS, actuators, starpilot_toggles):
   accel = actuators.accel
   v_ego = CS.out.vEgo
   cruise_btn = CruiseButtons.INIT
   rate = 1 if abs(accel) <= 0.15 else 0.2
-  ms_convert = CV.MS_TO_KPH if getattr(starpilot_toggles, "is_metric", False) else CV.MS_TO_MPH
+  is_metric = getattr(starpilot_toggles, "is_metric", False)
+  ms_convert = CV.MS_TO_KPH if is_metric else CV.MS_TO_MPH
   speed_setpoint = int(round(CS.out.cruiseState.speed * ms_convert))
-  desired_setpoint = int(round((v_ego * 1.01 + 3 * accel) * ms_convert))
+  projected_setpoint = (v_ego * 1.01 + 3 * accel) * ms_convert
+  desired_setpoint = int(round(projected_setpoint))
+  bolt_cc = CS.CP.carFingerprint in BOLT_CC_BUTTON_CARS
+  target_deadband = BOLT_CC_TARGET_DEADBAND_MPH * (CV.MPH_TO_KPH if is_metric else 1.0) if bolt_cc else 0.0
+  comparison_setpoint = projected_setpoint if bolt_cc else desired_setpoint
 
   if CS.CP.minEnableSpeed - (desired_setpoint / ms_convert) > 3.25:
     cruise_btn = CruiseButtons.CANCEL
-    controller.apply_speed = 0
-  elif desired_setpoint < speed_setpoint and speed_setpoint > CS.CP.minEnableSpeed * ms_convert + 1:
+  elif comparison_setpoint < speed_setpoint - target_deadband and speed_setpoint > CS.CP.minEnableSpeed * ms_convert + 1:
     cruise_btn = CruiseButtons.DECEL_SET
-    controller.apply_speed = speed_setpoint - 1
-  elif desired_setpoint > speed_setpoint:
+  elif comparison_setpoint > speed_setpoint + target_deadband:
     cruise_btn = CruiseButtons.RES_ACCEL
+
+  cruise_btn = stabilize_bolt_cc_button(controller, CS.CP, cruise_btn)
+  if cruise_btn == CruiseButtons.CANCEL:
+    controller.apply_speed = 0
+  elif cruise_btn == CruiseButtons.DECEL_SET:
+    controller.apply_speed = speed_setpoint - 1
+  elif cruise_btn == CruiseButtons.RES_ACCEL:
     controller.apply_speed = speed_setpoint + 1
   else:
-    cruise_btn = CruiseButtons.INIT
     controller.apply_speed = speed_setpoint
 
   if CS.CP.carFingerprint == CAR.CADILLAC_XT4_CC:
@@ -360,6 +407,9 @@ def create_gm_cc_spam_command(packer, controller, CS, actuators, starpilot_toggl
   # Or bus 2, since we're forwarding... but I think it does
   if (cruise_btn != CruiseButtons.INIT) and ((controller.frame - controller.last_button_frame) * DT_CTRL > rate):
     controller.last_button_frame = controller.frame
+    if bolt_cc and cruise_btn in (CruiseButtons.RES_ACCEL, CruiseButtons.DECEL_SET):
+      controller.gm_cc_last_direction_button = cruise_btn
+      controller.gm_cc_last_direction_frame = controller.frame
     if CS.CP.carFingerprint == CAR.CHEVROLET_MALIBU_HYBRID_CC:
       phase_map = malibu_phase_map_for_button(cruise_btn)
       if phase_map:

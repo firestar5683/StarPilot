@@ -914,7 +914,7 @@ class USBIface(PCIIface):
   def __init__(self, dev, dev_id): # pylint: disable=super-init-not-called
     deadline, visible = time.monotonic() + 5.0, []
     while dev_id >= len(visible) and time.monotonic() < deadline:
-      visible = hcq_filter_visible_devices(USB3.list_devices(0xADD1, 0x0001), "AMD")
+      visible = hcq_filter_visible_devices(USB3.list_devices(0xADD1, 0x0001) + USB3.list_devices(0x3801, 0x0001), "AMD")
       if dev_id >= len(visible): time.sleep(0.1)
     if dev_id >= len(visible):
       raise RuntimeError(f"AMD:{dev_id} does not exist ({pluralize('device', len(visible))} available)")

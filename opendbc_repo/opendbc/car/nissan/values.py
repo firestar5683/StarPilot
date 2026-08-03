@@ -66,7 +66,7 @@ class CAR(Platforms):
   )
   # Leaf with ADAS ECU found behind instrument cluster instead of glovebox
   # Currently the only known difference between them is the inverted seatbelt signal.
-  NISSAN_LEAF_IC = NISSAN_LEAF.override(car_docs=[NissanCarDocs(NISSAN_LEAF.car_docs[0].name + " - Instrument Cluster", video=NISSAN_LEAF.car_docs[0].video)])
+  NISSAN_LEAF_IC = NISSAN_LEAF.override(car_docs=[NissanCarDocs("Nissan Leaf Instrument Cluster 2018-23", video=NISSAN_LEAF.car_docs[0].video)])
   NISSAN_ROGUE = NissanPlatformConfig(
     [NissanCarDocs("Nissan Rogue 2018-20")],
     NissanCarSpecs(mass=1610, wheelbase=2.705)

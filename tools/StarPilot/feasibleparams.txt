@@ -1,9 +1,9 @@
 Dynamically Derived Feasible Param Candidates (The Golden List)
 ===============================================================
 
-Total globally registered C++ keys:  507
-Total explicit UI string references: 415
-Total Editable/Toggleable targets:   378
+Total globally registered C++ keys:  545
+Total explicit UI string references: 426
+Total Editable/Toggleable targets:   390
 
 AccelerationPath
 AccelerationProfile
@@ -28,6 +28,7 @@ AlwaysOnDM
 AlwaysOnLateral
 AutomaticUpdates
 AutomaticallyDownloadModels
+AvailableModelArtifactFormats
 AvailableModelNames
 AvailableModelSeries
 AvailableModels
@@ -37,6 +38,7 @@ BlindSpotMetrics
 BlindSpotPath
 BootLogo
 BorderMetrics
+CCMLaunchAssist
 CCMLead
 CCMSetSpeedMargin
 CCMSpeed
@@ -57,6 +59,7 @@ CalibrationParams
 CalibrationProgress
 CameraView
 CancelButtonControl
+ClearNavOnOffroad
 ColorScheme
 CommunityFavorites
 ConditionalChill
@@ -110,17 +113,15 @@ ForceStandstill
 ForceStopDistanceOffset
 ForceStops
 ForceTorqueController
-FrogsGoMoosTweak
 GMDashSpoofOffsets
 GMPedalLongitudinal
-HKGRemoteStartBootsComma
-IgnoreIgnitionLine
 GoatScream
 GoatScreamCriticalAlerts
 GreenLightAlert
 GsmApn
 GsmMetered
 GsmRoaming
+HKGRemoteStartBootsComma
 HasAcceptedTerms
 HideAlerts
 HideChangingLanesBanner
@@ -130,11 +131,13 @@ HideLeadMarker
 HideMaxSpeed
 HideSpeed
 HideSpeedLimit
+HideSteeringWheel
 HideTurningBanner
 HigherBitrate
 HolidayThemes
 HumanLaneChanges
 IconPack
+IgnoreIgnitionLine
 IncreaseFollowingLowVisibility
 IncreaseFollowingRain
 IncreaseFollowingRainStorm
@@ -149,6 +152,7 @@ IsLdwEnabled
 IsMetric
 IsRHD
 IsRHDOverride
+JeepBrakeHold
 KonikDongleId
 LKASButtonControl
 LaneChangeSmoothing
@@ -178,6 +182,7 @@ LongitudinalActuatorDelayStock
 LongitudinalPersonality
 LongitudinalTune
 LoudBlindspotAlert
+LoudBlindspotAlertWhenDisengaged
 LowVoltageShutdown
 MainCruiseButtonControl
 MapAcceleration
@@ -190,6 +195,9 @@ MaxDesiredAcceleration
 MinimumLaneChangeSpeed
 ModeButtonControl
 Model
+LatSmoothSeconds
+LongSmoothSeconds
+ModelManifestVersion
 ModelRandomizer
 ModelSortMode
 ModelUI
@@ -203,7 +211,6 @@ NoLogging
 NoUploads
 NostalgiaMode
 NudgelessLaneChange
-NudgelessLaneChangeOnlyWhenEngaged
 NumericalTemp
 Offroad_ExcessiveActuation
 Offset1
@@ -323,13 +330,13 @@ StandardJerkSpeedDecrease
 StandardPersonalityProfile
 StandbyMode
 StarButtonControl
+StarPilotFavoriteSlots
 StartAccel
 StartAccelStock
 StartupMessageBottom
 StartupMessageTop
 StaticPedalsOnUI
 SteerDelay
-SteerDelayModeMigrated
 SteerDelayStock
 SteerFriction
 SteerFrictionStock
@@ -359,6 +366,7 @@ TrafficJerkDeceleration
 TrafficJerkSpeed
 TrafficJerkSpeedDecrease
 TrafficPersonalityProfile
+TrailerLoad
 TruckTuning
 TuningLevel
 TuningLevelConfirmed

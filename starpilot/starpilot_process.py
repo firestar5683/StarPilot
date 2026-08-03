@@ -193,6 +193,7 @@ def transition_offroad(starpilot_planner, model_manager, theme_manager, thread_m
     thread_manager.run_with_lock(send_stats)
 
 def transition_onroad(error_log):
+  get_dashboard_utilities().stop_dashboard_background_analysis()
   if error_log.is_file():
     error_log.unlink()
 

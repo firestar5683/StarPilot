@@ -4,6 +4,7 @@ import pyray as rl
 from collections.abc import Callable
 
 from openpilot.common.swaglog import cloudlog
+from openpilot.selfdrive.ui.mici.layouts.settings.network.action_state import should_show_forget_button
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigInputDialog, BigConfirmationDialog
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton, LABEL_COLOR
 from openpilot.system.ui.lib.application import gui_app, MousePos, FontWeight
@@ -138,10 +139,11 @@ class WifiButton(BigButton):
 
   @property
   def _show_forget_btn(self):
-    if self._network.is_tethering or self._network_forgetting:
-      return False
-
-    return (self._is_saved and not self._wrong_password) or self._is_connecting
+    return should_show_forget_button(is_tethering=self._network.is_tethering,
+                                     is_forgetting=self._network_forgetting,
+                                     is_saved=self._is_saved,
+                                     wrong_password=self._wrong_password,
+                                     is_connecting=self._is_connecting)
 
   def _handle_mouse_release(self, mouse_pos: MousePos):
     if self._show_forget_btn and rl.check_collision_point_rec(mouse_pos, self._forget_btn.rect):

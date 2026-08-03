@@ -441,6 +441,30 @@ class TestHyundaiCanfdLFASteeringAltButtons(TestHyundaiCanfdLFASteeringAltButton
   pass
 
 
+class TestHyundaiCanfdAltButtonFlagIsolation(unittest.TestCase):
+  TX_MSGS = []
+
+  def setUp(self):
+    self.safety = libsafety_py.libsafety
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiCanfd, HyundaiSafetyFlags.CANFD_ALT_BUTTONS)
+    self.safety.init_tests()
+
+  @staticmethod
+  def _button_msg(*, main=False, lka=False):
+    dat = bytearray(16)
+    dat[4] = (int(main) << 2) | (int(lka) << 7)
+    return libsafety_py.make_CANPacket(0x1AA, 0, bytes(dat))
+
+  def test_alt_buttons_do_not_enable_classic_main_lkas_sync(self):
+    self.safety.safety_rx_hook(self._button_msg(lka=True))
+    self.safety.safety_rx_hook(self._button_msg())
+    self.assertTrue(self.safety.get_lkas_on())
+
+    self.safety.safety_rx_hook(self._button_msg(main=True))
+    self.safety.safety_rx_hook(self._button_msg())
+    self.assertTrue(self.safety.get_lkas_on())
+
+
 class TestHyundaiCanfdCCNCSupportFrames(common.SafetyTestBase):
   TX_MSGS = [[0x161, 0], [0x162, 0], [0x7C4, 2], [0xEA, 2]]
 

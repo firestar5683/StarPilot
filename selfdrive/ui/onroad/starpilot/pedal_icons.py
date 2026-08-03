@@ -6,7 +6,7 @@ _RADIUS = 36
 _FONT_SIZE = 36
 
 def render_pedal_icons(start_x: float, start_y: float, font):
-  params = ui_state.params
+  params = ui_state.ui_params
   if not params.get_bool("PedalsOnUI"):
     return
 

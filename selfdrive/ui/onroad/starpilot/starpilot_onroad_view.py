@@ -1,7 +1,5 @@
 import pyray as rl
-import time
 from msgq.visionipc import VisionStreamType
-from openpilot.common.params import Params
 from openpilot.selfdrive.ui.onroad.augmented_road_view import AugmentedRoadView
 from openpilot.selfdrive.ui.onroad.starpilot.starpilot_border import render_behind, render_overlay, render_background_effects
 from openpilot.selfdrive.ui.onroad.starpilot.path import render_adjacent_lanes, render_path_edges
@@ -11,18 +9,17 @@ from openpilot.selfdrive.ui.onroad.starpilot.widget_layout_manager import Widget
 from openpilot.selfdrive.ui.onroad.starpilot.widgets import (
   SetSpeedWidget, SpeedLimitWidget, PedalIconsWidget,
   AetherGaugeWidget, PersonalityButtonWidget, DriverMonitorWidget,
-  SteeringWheelWidget
+  SteeringWheelWidget, StoppedTimerWidget
 )
 from openpilot.selfdrive.ui.onroad.starpilot.stopping_point import render_stopping_point
 from openpilot.selfdrive.ui.onroad.starpilot.pause_indicators import render_lateral_paused, render_longitudinal_paused
 from openpilot.selfdrive.ui.onroad.starpilot.weather_icon import render_weather_icon
 from openpilot.selfdrive.ui.lib.starpilot_status import (
-  get_screen_edge_color, ENGAGED_COLOR,
-  EXPERIMENTAL_COLOR, TRAFFIC_COLOR,
+  get_screen_edge_color,
 )
 
 from openpilot.system.ui.lib.application import MousePos, gui_app, FontWeight
-from openpilot.system.ui.lib.text_measure import measure_text_cached
+from openpilot.system.ui.lib.text_measure import draw_text_with_shadow, measure_text_cached
 
 from cereal import log
 AlertSize = log.SelfdriveState.AlertSize
@@ -31,11 +28,10 @@ AlertSize = log.SelfdriveState.AlertSize
 class StarPilotOnroadView(AugmentedRoadView):
   def __init__(self, stream_type: VisionStreamType = VisionStreamType.VISION_STREAM_ROAD):
     super().__init__(stream_type)
-    self._params = Params()
+    self._params = ui_state.ui_params
 
     self._font_bold = gui_app.font(FontWeight.BOLD)
     self._font_medium = gui_app.font(FontWeight.MEDIUM)
-    self._standstill_started_at = 0.0
     self._torque_bar = TorqueBar()
     self._min_fps = 99.9
     self._max_fps = 0.0
@@ -56,6 +52,7 @@ class StarPilotOnroadView(AugmentedRoadView):
     self._pedals_widget = PedalIconsWidget()
     self._personality_button_widget = PersonalityButtonWidget()
     self._driver_monitor_widget = DriverMonitorWidget(self.driver_state_renderer)
+    self._stopped_timer_widget = StoppedTimerWidget(self.is_in_reverse)
 
     # Register to layout zones
     self.layout_manager.register_widget("left", self._set_speed_widget)
@@ -74,12 +71,17 @@ class StarPilotOnroadView(AugmentedRoadView):
     self._child(self._pedals_widget)
     self._child(self._personality_button_widget)
     self._child(self._driver_monitor_widget)
+    self._child(self._stopped_timer_widget)
 
   def _render(self, rect: rl.Rectangle):
     border_width = self._get_border_width()
     border_color = get_screen_edge_color(ui_state)
     rl.draw_rectangle_rounded(rect, 0.12, 10, border_color)
     render_background_effects(rect, border_width)
+
+    self._hud_renderer.draw_current_speed = (
+      ui_state.started and not self._stopped_timer_widget.replaces_current_speed
+    )
     super()._render(rect)
 
     if not ui_state.started:
@@ -91,8 +93,6 @@ class StarPilotOnroadView(AugmentedRoadView):
       self._render_slc()
       self._render_overlays()
       self._render_road_name()
-    if self._draw_road_overlays:
-      self._render_path_features(self._content_rect)
 
   def _draw_border(self, rect: rl.Rectangle):
     border_width = self._get_border_width()
@@ -103,8 +103,7 @@ class StarPilotOnroadView(AugmentedRoadView):
     render_overlay(border_rect, border_width)
 
   def _render_slc(self):
-    alert_showing, alert_size = self.alert_renderer.will_render()
-    if alert_showing is not None and alert_size == AlertSize.full:
+    if self._full_alert_showing():
       return
     if self._speed_limit_widget.is_visible:
       self._speed_limit_widget.render(self._speed_limit_widget.rect)
@@ -113,10 +112,13 @@ class StarPilotOnroadView(AugmentedRoadView):
 
   def _render_overlays(self):
     alert_showing, _ = self.alert_renderer.will_render()
+    if alert_showing is not None and alert_showing.size == AlertSize.full:
+      return
+
+    self._stopped_timer_widget.render(self._content_rect)
     if alert_showing is not None:
       return
 
-    self._render_standstill_timer()
     self._render_developer_metrics()
 
     self.layout_manager.render_widgets(exclude={"speed_limit", "set_speed"})
@@ -137,18 +139,13 @@ class StarPilotOnroadView(AugmentedRoadView):
     self._torque_bar.render(self._content_rect)
     rl.end_scissor_mode()
 
-  def _render_path_features(self, rect: rl.Rectangle):
-    """Render path-related features (adjacent paths, blind spot, path edges)."""
+  def _render_extra_road_overlays(self, rect: rl.Rectangle) -> None:
+    """Render path features in the parent's clipped road-overlay layer."""
     mr = self.model_renderer
 
     # Only render if we have path data
     if not mr._path.projected_points.size:
       return
-
-    rl.begin_scissor_mode(
-      int(rect.x), int(rect.y),
-      int(rect.width), int(rect.height),
-    )
 
     # Path edges (always rendered if track_edge_vertices exist)
     if mr._track_edge_vertices.size >= 4:
@@ -160,72 +157,9 @@ class StarPilotOnroadView(AugmentedRoadView):
     # Render stopping point atop the path
     render_stopping_point(mr, self._font_bold)
 
-    rl.end_scissor_mode()
-
-  def _render_standstill_timer(self):
-    if not self._params.get_bool("stopped_timer"):
-      self._standstill_started_at = 0.0
-      return
-    if not ui_state.sm.valid.get("carState", False):
-      return
-
-    car_state = ui_state.sm["carState"]
-    if getattr(car_state, "standstill", False):
-      if self._standstill_started_at == 0.0:
-        self._standstill_started_at = time.monotonic()
-    else:
-      self._standstill_started_at = 0.0
-      return
-
-    if self._standstill_started_at == 0.0:
-      return
-
-    duration = int(time.monotonic() - self._standstill_started_at)
-    if duration < 60:
-      return
-
-    minutes = duration // 60
-    seconds = duration % 60
-    minute_text = f"{minutes} minute{'s' if minutes != 1 else ''}"
-    second_text = f"{seconds} second{'s' if seconds != 1 else ''}"
-    minute_size = measure_text_cached(self._font_bold, minute_text, 176)
-    second_size = measure_text_cached(self._font_medium, second_text, 66)
-
-    def blend_colors(start: rl.Color, end: rl.Color, transition: float) -> rl.Color:
-      transition = float(min(max(transition, 0.0), 1.0))
-      return rl.Color(
-        int(start.r + transition * (end.r - start.r)),
-        int(start.g + transition * (end.g - start.g)),
-        int(start.b + transition * (end.b - start.b)),
-        255,
-      )
-
-    if duration < 150:
-      transition = (duration - 60) / 90.0
-      duration_color = blend_colors(ENGAGED_COLOR, EXPERIMENTAL_COLOR, transition)
-    elif duration < 300:
-      transition = (duration - 150) / 150.0
-      duration_color = blend_colors(EXPERIMENTAL_COLOR, TRAFFIC_COLOR, transition)
-    else:
-      duration_color = TRAFFIC_COLOR
-
-    x = gui_app.width / 2
-    rl.draw_text_ex(
-      self._font_bold,
-      minute_text,
-      rl.Vector2(x - minute_size.x / 2, 210 - minute_size.y / 2),
-      176,
-      0,
-      duration_color,
-    )
-    rl.draw_text_ex(
-      self._font_medium,
-      second_text,
-      rl.Vector2(x - second_size.x / 2, 290 - second_size.y / 2),
-      66,
-      0,
-      rl.Color(255, 255, 255, 242),
-    )
+  def _full_alert_showing(self) -> bool:
+    alert_showing, _ = self.alert_renderer.will_render()
+    return alert_showing is not None and alert_showing.size == AlertSize.full
 
   def _handle_mouse_press(self, mouse_pos: MousePos):
     # Check if click maps to any of the layout widgets
@@ -386,6 +320,9 @@ class StarPilotOnroadView(AugmentedRoadView):
       render_weather_icon(weather_rect)
 
   def _render_road_name(self):
+    if self._full_alert_showing():
+      return
+
     toggles = ui_state.starpilot_toggles
     road_name_on = bool(toggles.get("road_name_ui", self._params.get_bool("RoadNameUI")))
     if not road_name_on:
@@ -399,18 +336,12 @@ class StarPilotOnroadView(AugmentedRoadView):
       return
 
     font = self._font_bold
-    font_size = 32
+    font_size = 40
     sz = measure_text_cached(font, road_name, font_size)
 
-    pad_x = 24
-    pad_y = 5
-    pill_w = sz.x + pad_x * 2
-    pill_h = font_size + pad_y * 2
-
     cx = self._content_rect.x + self._content_rect.width / 2
-    by = self._content_rect.y + self._content_rect.height - pill_h - 16
-
-    pill = rl.Rectangle(cx - pill_w / 2, by, pill_w, pill_h)
-    rl.draw_rectangle_rounded(pill, 0.4, 8, rl.Color(0, 0, 0, 166))
-    rl.draw_rectangle_rounded_lines_ex(pill, 0.4, 8, 1, rl.Color(255, 255, 255, 60))
-    rl.draw_text_ex(font, road_name, rl.Vector2(cx - sz.x / 2, by + pad_y), font_size, 0, rl.WHITE)
+    text_pos = rl.Vector2(
+      round(cx - sz.x / 2),
+      round(self._content_rect.y + self._content_rect.height - sz.y - 5),
+    )
+    draw_text_with_shadow(font, road_name, text_pos, font_size, rl.Color(255, 255, 255, 180))

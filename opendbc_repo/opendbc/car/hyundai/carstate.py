@@ -123,6 +123,7 @@ class CarState(CarStateBase):
     self.msg_162 = {}
     self.msg_1b5 = {}
     self.msg_364 = {}
+    self.lfa_block_msg = {}
     self.stock_lkas_msg = {}
     self.stock_lfa_msg = {}
     self.stock_lfahda_cluster_msg = {}
@@ -332,7 +333,10 @@ class CarState(CarStateBase):
       ret.cruiseState.speed = cp_cruise.vl[scc_msg]["VSetDis"] * speed_conv
 
     if self.CP.flags & HyundaiFlags.CAN_CANFD_BLENDED:
-      self.msg_364 = copy.copy(cp_cam.vl["ALERTS_364"])
+      if self.CP.flags & HyundaiFlags.CANFD_LKA_STEERING:
+        self.lfa_block_msg = copy.copy(cp_cam.vl["CAM_0x2a4"])
+      else:
+        self.msg_364 = copy.copy(cp_cam.vl["ALERTS_364"])
 
     # TODO: Find brake pressure
     ret.brake = 0
@@ -391,7 +395,10 @@ class CarState(CarStateBase):
       ret.rightBlindspot = cp.vl["LCA11"]["CF_Lca_IndRight"] != 0
 
     # save the entire LKAS11 and CLU11
-    self.lkas11 = copy.copy(cp_cam.vl["LKAS11"])
+    if self.CP.flags & HyundaiFlags.CAN_CANFD_BLENDED and self.CP.flags & HyundaiFlags.CANFD_LKA_STEERING:
+      self.lkas11 = {}
+    else:
+      self.lkas11 = copy.copy(cp_cam.vl["LKAS11"])
     self.clu11 = copy.copy(cp.vl["CLU11"])
     self.steer_state = cp.vl["MDPS12"]["CF_Mdps_ToiActive"]  # 0 NOT ACTIVE, 1 ACTIVE
     prev_cruise_buttons = self.cruise_buttons[-1]
@@ -633,6 +640,34 @@ class CarState(CarStateBase):
   def get_can_parsers(self, CP):
     if CP.flags & HyundaiFlags.CANFD:
       return self.get_can_parsers_canfd(CP)
+
+    if CP.flags & HyundaiFlags.CAN_CANFD_BLENDED and CP.flags & HyundaiFlags.CANFD_LKA_STEERING:
+      msgs = [
+        ("MDPS12", 100),
+        ("TCS11", 100),
+        ("TCS13", 50),
+        ("TCS15", 10),
+        ("CLU11", 50),
+        ("CLU15", 5),
+        ("ESP12", 100),
+        ("CGW1", 10),
+        ("CGW2", 5),
+        ("WHL_SPD11", 50),
+        ("SAS11", 100),
+        ("SCC12", 50),
+        ("EMS12", 100),
+        ("EMS16", 100),
+        ("LVR12", 100),
+        ("BCM_PO_11", 0),
+        ("CLU13", 0),
+      ]
+      if CP.enableBsm:
+        msgs.append(("LCA11", 20))
+
+      return {
+        Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], msgs, CanBus(CP).ECAN),
+        Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [("CAM_0x2a4", 20)], CanBus(CP).CAM),
+      }
 
     msgs = [
       ("BCM_PO_11", 0),

@@ -51,8 +51,6 @@ function agnos_init {
   # StarPilot variables
   sudo chmod 0777 /cache
 
-  sudo rm -f /data/misc/display/color_cal/color_cal /data/misc/display/color_cal/source.sha256
-
   # Check if AGNOS update is required
   AGNOS_CURRENT_VERSION="$(< /VERSION)"
   AGNOS_UPDATE_REQUIRED=1

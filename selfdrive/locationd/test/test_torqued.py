@@ -1,9 +1,11 @@
 from cereal import car
+from types import SimpleNamespace
 from openpilot.selfdrive.locationd.torqued import TorqueEstimator
 
 
 def test_cal_percent():
   est = TorqueEstimator(car.CarParams())
+  est.starpilot_toggles = SimpleNamespace(use_custom_latAccelFactor=False, use_custom_friction=False)
   msg = est.get_msg()
   assert msg.liveTorqueParameters.calPerc == 0
 

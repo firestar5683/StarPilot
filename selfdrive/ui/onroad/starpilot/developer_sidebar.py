@@ -3,7 +3,6 @@ import time
 import re
 import json
 from cereal import car
-from openpilot.common.params import Params
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight, FONT_SCALE
 from openpilot.system.ui.lib.text_measure import measure_text_cached
@@ -64,7 +63,7 @@ def _setting_changed(value: float, reference: float) -> bool:
 
 class DeveloperSidebar:
   def __init__(self):
-    self._params = Params()
+    self._params = ui_state.ui_params
     self._font_bold = gui_app.font(FontWeight.SEMI_BOLD)
     self._last_toggles_check = 0.0
     self._cached_metrics = [0] * 7

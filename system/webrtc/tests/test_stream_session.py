@@ -39,7 +39,8 @@ class TestStreamSession:
       mocked_submaster.update_msgs(0, [test_msg])
 
     mocker.patch.object(messaging.SubMaster, "update", side_effect=mocked_update)
-    proxy = CerealOutgoingMessageProxy(mocked_submaster)
+    proxy = CerealOutgoingMessageProxy(["customReservedRawData0"])
+    proxy.sm = mocked_submaster
     proxy.add_channel(channel)
 
     proxy.update()
@@ -70,6 +71,7 @@ class TestStreamSession:
 
   def test_livestream_track(self, mocker):
     fake_msg = messaging.new_message("livestreamDriverEncodeData")
+    fake_msg.livestreamDriverEncodeData.idx.flags = 8
 
     config = {"receive.return_value": fake_msg.to_bytes()}
     mocker.patch("msgq.SubSocket", spec=True, **config)

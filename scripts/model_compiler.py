@@ -5,6 +5,7 @@ import hashlib
 import json
 import os
 import pickle
+import shutil
 import subprocess
 import sys
 from pathlib import Path
@@ -19,6 +20,7 @@ COMPILE_SCRIPT = REPO_ROOT / "tinygrad_repo/examples/openpilot/compile3.py"
 DRIVING_COMPILE_SCRIPT = REPO_ROOT / "selfdrive/modeld/compile_modeld.py"
 DM_WARP_COMPILE_SCRIPT = REPO_ROOT / "selfdrive/modeld/compile_dm_warp.py"
 MODEL_VERSIONS_CACHE = Path("/data/models/.model_versions.json")
+MODELS_PATH = MODEL_VERSIONS_CACHE.parent  # runtime dir modeld loads from: /data/models
 
 DM_MODEL_KEY = "dm"
 DM_MODEL_NAME = "dmonitoring_model"
@@ -84,6 +86,11 @@ def parse_args() -> argparse.Namespace:
                       help="Compile the driving artifact for the USB AMD GPU.")
   parser.add_argument("--split-artifact", type=Path, help="Split an existing oversized PKL without compiling.")
   parser.add_argument("--chunk-size-mib", type=int, default=95, help="Multipart size in MiB; must be below 100.")
+  parser.add_argument("--no-split", action="store_true",
+                      help="Keep a single .pkl even if >100 MiB (for local installs, which need one "
+                           "file). Auto-enabled for local- model IDs.")
+  parser.add_argument("--no-install", action="store_true",
+                      help="Do not auto-copy a local- model into /data/models after compiling.")
   parser.add_argument(
     "--image-history-pipeline",
     choices=("policy", "warp"),
@@ -302,6 +309,48 @@ def multipart_output_paths(artifact: Path, output_dir: Path | None = None) -> li
   ]
 
 
+def install_local_artifact(artifact: Path, model_key: str, version: str) -> None:
+  """Copy a freshly compiled local- model into the runtime dir modeld loads from,
+  and ensure its <id>.json sidecar carries the correct version.
+
+  The sidecar version is NOT cosmetic: without it _discover_local_models() records
+  an empty version, which downstream parses on the wrong contract (a v15 model then
+  drives like v11). Since we know the build version here, we write it so the local
+  install is correct by default. Local models must be a single is_file() in
+  /data/models to show in the picker. No-ops off-device (no /data/models).
+  """
+  if not MODELS_PATH.is_dir():
+    print(f"  skipped auto-install: {MODELS_PATH} not present (not on device?)")
+    return
+  dest = MODELS_PATH / artifact.name
+  shutil.copy2(artifact, dest)
+  print(f"  installed -> {dest}")
+
+  sidecar = MODELS_PATH / f"{model_key}.json"
+  info: dict = {}
+  if sidecar.is_file():
+    try:
+      loaded = json.loads(sidecar.read_text())
+      if isinstance(loaded, dict):
+        info = loaded
+    except Exception as error:
+      print(f"  WARN: existing sidecar {sidecar.name} is malformed, rewriting: {error}")
+  if not version:
+    if not str(info.get("version") or "").strip():
+      print(f"  WARN: could not determine version -- set it by hand in {sidecar.name} "
+            "or the model may drive on the wrong version contract")
+    return
+  # keep any user-set name/series; only guarantee a correct, non-empty version
+  if str(info.get("version") or "").strip() == version and sidecar.is_file():
+    print(f"  sidecar ok: {sidecar.name} (version {version})")
+    return
+  info.setdefault("name", model_key[len("local-"):].replace("_", " ").replace("-", " ").strip())
+  info.setdefault("series", "Local")
+  info["version"] = version
+  sidecar.write_text(json.dumps(info, indent=2) + "\n")
+  print(f"  wrote sidecar {sidecar.name} (version {version})")
+
+
 def split_oversized_artifact(
   artifact: Path,
   output_dir: Path | None = None,
@@ -507,17 +556,34 @@ def main() -> int:
   if not version and input_format == "supercombo":
     version = "v15"
   version_label = version or "unspecified behavior"
-  print(f"Compiling {model_key} ({input_format}, {version_label}) from {args.input_dir} -> {args.output_dir}")
+  will_install = model_key.startswith("local-") and not args.no_install
+  target = f"{args.output_dir}" + (f" -> {MODELS_PATH} (auto-install)" if will_install else "")
+  print(f"Compiling {model_key} ({input_format}, {version_label}) from {args.input_dir} -> {target}")
   output = compile_driving(model_key, files, input_format, version, args.output_dir,
                            args.image_history_pipeline, args.external_gpu)
   print(f"  saved {output.name}")
-  multipart_outputs = split_oversized_artifact(output)
-  if multipart_outputs:
-    print("  artifact exceeds 100 MiB; created repository-safe multipart files:")
-    for multipart_output in multipart_outputs:
-      print(f"    {multipart_output.name} ({multipart_output.stat().st_size} bytes)")
-    output.unlink()
-    print(f"  removed oversized source artifact {output.name}")
+  # Local models install as a single is_file() and never go to GitHub, so the >100 MiB
+  # repo split is pointless for them (you'd only have to reassemble it). Keep one .pkl.
+  keep_single = args.no_split or model_key.startswith("local-")
+  if keep_single:
+    is_local = model_key.startswith("local-")
+    if output.stat().st_size > REPOSITORY_FILE_LIMIT:
+      size_mb = output.stat().st_size / 1e6
+      if is_local:
+        print(f"  local model: kept as one {size_mb:.1f} MB file (repo split not needed)")
+      else:
+        print(f"  --no-split: kept one {size_mb:.1f} MB file; over 100 MB, so split it "
+              "before committing to a repo (re-run without --no-split, or --split-artifact)")
+    if is_local and not args.no_install:
+      install_local_artifact(output, model_key, version)
+  else:
+    multipart_outputs = split_oversized_artifact(output)
+    if multipart_outputs:
+      print("  artifact exceeds 100 MiB; created repository-safe multipart files:")
+      for multipart_output in multipart_outputs:
+        print(f"    {multipart_output.name} ({multipart_output.stat().st_size} bytes)")
+      output.unlink()
+      print(f"  removed oversized source artifact {output.name}")
   print("Done.")
   return 0
 

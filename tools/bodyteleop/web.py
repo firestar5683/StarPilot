@@ -12,7 +12,7 @@ from aiohttp import web
 from aiohttp import ClientSession
 
 from openpilot.common.basedir import BASEDIR
-from openpilot.system.webrtc.webrtcd import StreamRequestBody
+from openpilot.system.webrtc.helpers import StreamRequestBody
 from openpilot.common.params import Params
 
 logger = logging.getLogger("bodyteleop")
@@ -96,7 +96,7 @@ async def sound(request: 'web.Request'):
 
 async def offer(request: 'web.Request'):
   params = await request.json()
-  body = StreamRequestBody(params["sdp"], ["driver"], ["testJoystick"], ["carState"])
+  body = StreamRequestBody(params["sdp"], "driver", True, ["testJoystick"], ["carState"])
   body_json = json.dumps(dataclasses.asdict(body))
 
   logger.info("Sending offer to webrtcd...")

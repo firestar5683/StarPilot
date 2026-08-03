@@ -507,7 +507,7 @@ class StandstillTimerOverlay:
     return minute_text, second_text
 
   def _draw_centered_text(self, rect: rl.Rectangle, text: str, y: float, font: rl.Font, font_size: int, color: rl.Color) -> None:
-    text_size = rl.measure_text_ex(font, text, font_size, 0)
+    text_size = measure_text_cached(font, text, font_size)
     text_pos = rl.Vector2(rect.x + rect.width / 2 - text_size.x / 2, rect.y + y - text_size.y / 2)
     shadow_pos = rl.Vector2(text_pos.x + 2, text_pos.y + 2)
     rl.draw_text_ex(font, text, shadow_pos, font_size, 0, rl.Color(0, 0, 0, 170))
@@ -516,7 +516,7 @@ class StandstillTimerOverlay:
   @staticmethod
   def _fit_font_size(font: rl.Font, text: str, initial_size: int, max_width: float, minimum_size: int) -> int:
     font_size = max(initial_size, minimum_size)
-    while font_size > minimum_size and rl.measure_text_ex(font, text, font_size, 0).x > max_width:
+    while font_size > minimum_size and measure_text_cached(font, text, font_size).x > max_width:
       font_size -= 2
     return font_size
 
@@ -830,23 +830,28 @@ class AugmentedRoadView(CameraView):
 
   def _switch_stream_if_needed(self, sm, camera_view: int):
     if camera_view == CAMERA_VIEW_NONE:
+      self._cancel_pending_switch()
       self._reverse_driver_camera_frames = 0
       self._reverse_driver_camera_active = False
       return
 
+    reentry_selection_pending = (getattr(self, "_onroad_reentry_pending", False) and
+                                 not getattr(self, "_reentry_stream_selected", False))
+    if reentry_selection_pending:
+      self._refresh_available_streams()
+
     if self._update_reverse_driver_camera_state():
-      target = DRIVER_CAM
-      if self.stream_type != target:
-        self.switch_stream(target)
+      self.switch_stream(DRIVER_CAM)
       return
 
+    wide_available = WIDE_CAM in self.available_streams
     if camera_view == CAMERA_VIEW_DRIVER:
       target = DRIVER_CAM
     elif camera_view == CAMERA_VIEW_STANDARD:
       target = ROAD_CAM
     elif camera_view == CAMERA_VIEW_WIDE:
-      target = WIDE_CAM if WIDE_CAM in self.available_streams else ROAD_CAM
-    elif sm['selfdriveState'].experimentalMode and WIDE_CAM in self.available_streams:
+      target = WIDE_CAM if wide_available else ROAD_CAM
+    elif sm['selfdriveState'].experimentalMode and wide_available:
       v_ego = sm['carState'].vEgo
       if v_ego < WIDE_CAM_MAX_SPEED:
         target = WIDE_CAM
@@ -854,11 +859,12 @@ class AugmentedRoadView(CameraView):
         target = ROAD_CAM
       else:
         # Hysteresis zone - keep the current road camera selection.
-        target = WIDE_CAM if self.stream_type == WIDE_CAM else ROAD_CAM
+        target = WIDE_CAM if self.stream_type == WIDE_CAM and wide_available else ROAD_CAM
     else:
       target = ROAD_CAM
 
-    if self.stream_type != target:
+    if (reentry_selection_pending or
+        self.stream_type != target or (self._switching and self._target_stream_type != target)):
       self.switch_stream(target)
 
   def _update_calibration(self):

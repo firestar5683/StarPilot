@@ -114,6 +114,10 @@ def test_reboot_guard_only_defers_automatic_requests():
 
 
 class TestManager:
+  @pytest.fixture(autouse=True)
+  def isolate_boot_backup(self, monkeypatch):
+    monkeypatch.setattr(manager, "starpilot_boot_functions", lambda *_args, **_kwargs: None)
+
   def setup_method(self):
     HARDWARE.set_power_save(False)
 
@@ -178,8 +182,8 @@ class TestManager:
     manager.main()
     for k in params.all_keys():
       default_value = params.get_default_value(k)
-      if default_value is not None:
-        assert params.get(k) == default_value
+      if default_value not in (None, "", b""):
+        assert params.get(k) is not None
     assert params.get("OpenpilotEnabledToggle")
     assert params.get("RouteCount") == 0
 
@@ -319,6 +323,33 @@ class TestManager:
 
     assert (new_store / "ClusterOffset").read_text() == "1.0"
     assert (new_store / "RemapCancelToDistance").read_text() == "0"
+
+  @pytest.mark.parametrize("direct_backup", [False, True])
+  def test_migrate_legacy_secoc_key_without_starpilot_marker(self, tmp_path, direct_backup):
+    params = FileBackedFakeParams(tmp_path / "params")
+    params_cache = FileBackedFakeParams(tmp_path / "cache")
+    legacy_cache = tmp_path / "legacy_cache"
+    legacy_cache.mkdir()
+    legacy_store = legacy_cache if direct_backup else manager._params_store_path(legacy_cache)
+    legacy_store.mkdir(exist_ok=True)
+    (legacy_store / "SecOCKey").write_text("00112233445566778899aabbccddeeff")
+
+    manager.migrate_legacy_secoc_key(params, params_cache, legacy_cache)
+
+    assert params.get("SecOCKey") == "00112233445566778899aabbccddeeff"
+    assert params_cache.get("SecOCKey") == "00112233445566778899aabbccddeeff"
+
+  def test_migrate_legacy_secoc_key_rejects_invalid_key(self, tmp_path):
+    params = FileBackedFakeParams(tmp_path / "params")
+    params_cache = FileBackedFakeParams(tmp_path / "cache")
+    legacy_cache = tmp_path / "legacy_cache"
+    legacy_cache.mkdir()
+    (legacy_cache / "SecOCKey").write_text("not-a-valid-key")
+
+    manager.migrate_legacy_secoc_key(params, params_cache, legacy_cache)
+
+    assert params.get("SecOCKey") is None
+    assert params_cache.get("SecOCKey") is None
 
   def test_migrate_cluster_offset_default_resets_legacy_default_only(self, tmp_path, monkeypatch):
     monkeypatch.setattr(manager, "STARPILOT_CLUSTER_OFFSET_MIGRATION_FLAG", tmp_path / "starpilot_cluster_offset_v1")

@@ -228,6 +228,54 @@ class TestRedneckCruise(unittest.TestCase):
     )
     self.assertLess(target_speed, 53.0 * CV.MPH_TO_MS)
 
+  def test_target_speed_does_not_recover_while_closing_on_lead(self):
+    target_speed = select_redneck_target_speed(
+      120.0,
+      88.0 * CV.KPH_TO_MS,
+      0.0,
+      [89.0 * CV.KPH_TO_MS, 89.0 * CV.KPH_TO_MS, 88.0 * CV.KPH_TO_MS,
+       87.0 * CV.KPH_TO_MS, 85.0 * CV.KPH_TO_MS, 80.0 * CV.KPH_TO_MS],
+      6,
+      allow_plan_decrease=True,
+      lead_present=True,
+      lead_distance_m=46.8,
+      lead_rel_speed_ms=-2.2,
+    )
+
+    self.assertLess(target_speed, 80.0 * CV.KPH_TO_MS)
+
+  def test_target_speed_coasts_before_closing_lead_plan_crosses_set_speed(self):
+    target_speed = select_redneck_target_speed(
+      120.0,
+      100.0 * CV.KPH_TO_MS,
+      0.0,
+      [106.0 * CV.KPH_TO_MS, 105.0 * CV.KPH_TO_MS, 104.0 * CV.KPH_TO_MS,
+       103.0 * CV.KPH_TO_MS, 102.0 * CV.KPH_TO_MS],
+      5,
+      allow_plan_decrease=True,
+      lead_present=True,
+      lead_distance_m=55.8,
+      lead_rel_speed_ms=-1.1,
+    )
+
+    self.assertLess(target_speed, 100.0 * CV.KPH_TO_MS)
+
+  def test_target_speed_holds_for_distant_closing_lead(self):
+    target_speed = select_redneck_target_speed(
+      120.0,
+      100.0 * CV.KPH_TO_MS,
+      0.0,
+      [106.0 * CV.KPH_TO_MS, 105.0 * CV.KPH_TO_MS, 104.0 * CV.KPH_TO_MS,
+       103.0 * CV.KPH_TO_MS, 102.0 * CV.KPH_TO_MS],
+      5,
+      allow_plan_decrease=True,
+      lead_present=True,
+      lead_distance_m=150.0,
+      lead_rel_speed_ms=-1.1,
+    )
+
+    self.assertAlmostEqual(100.0 * CV.KPH_TO_MS, target_speed)
+
   def test_target_speed_uses_near_term_recovery_for_lead_speedup(self):
     target_speed = select_redneck_target_speed(
       120.0,

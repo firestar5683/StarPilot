@@ -55,6 +55,7 @@ from opendbc.car.gm.carcontroller import (
   get_stock_cc_active_for_cancel,
   shape_bolt_acc_pedal_low_speed_friction,
   shape_truck_friction_brake,
+  shape_truck_pitch_accel,
   shape_truck_positive_accel,
   should_use_fixed_stopping_brake,
   should_activate_auto_hold,
@@ -859,6 +860,15 @@ def test_shape_truck_positive_accel_does_not_relax_without_speed_error():
   no_error = shape_truck_positive_accel(0.28, 26.0, True, lead_visible=True, set_speed_error=0.0)
 
   assert no_error == base
+
+
+def test_shape_truck_pitch_accel_attenuates_highway_grade_feedforward():
+  assert shape_truck_pitch_accel(-0.30, 30.0, True) == pytest.approx(-0.0825)
+  assert shape_truck_pitch_accel(0.30, 30.0, True) == pytest.approx(0.0825)
+
+
+def test_shape_truck_pitch_accel_is_inactive_without_truck_tuning():
+  assert shape_truck_pitch_accel(-0.30, 30.0, False) == pytest.approx(-0.30)
 
 
 def test_shape_truck_friction_brake_suppresses_boundary_chatter():

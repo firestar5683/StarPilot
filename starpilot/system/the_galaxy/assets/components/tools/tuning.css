@@ -93,7 +93,6 @@
   border: 1px solid rgba(255, 255, 255, 0.06);
   border-radius: var(--border-radius-sm);
   color: var(--text-color);
-  cursor: pointer;
   display: flex;
   gap: var(--gap-sm);
   padding: var(--padding-sm);
@@ -105,6 +104,7 @@
 }
 
 .flmRouteItem {
+  cursor: pointer;
   flex: 1 1 auto;
   min-width: 0;
 }
@@ -141,13 +141,20 @@
   flex: 0 0 auto;
 }
 
+.flmSavedTuneActions {
+  align-items: stretch;
+  display: flex;
+  flex: 0 0 auto;
+  flex-direction: column;
+  gap: var(--gap-xs);
+}
+
 .flmRouteItem small,
 .flmWorkspaceItem small,
 .flmWorkspaceItem span {
   color: var(--text-muted);
 }
 
-.flmWorkspaceItem:hover,
 .flmRouteItem:hover,
 .flmCard button.selected {
   border-color: var(--main-fg);
@@ -386,5 +393,14 @@
   .flmTuneComparisonTable {
     font-size: var(--font-size-sm);
     grid-template-columns: minmax(8rem, 1.3fr) minmax(5rem, 1fr) auto minmax(5rem, 1fr);
+  }
+
+  .flmWorkspaceRow {
+    flex-direction: column;
+  }
+
+  .flmSavedTuneActions {
+    flex-direction: row;
+    flex-wrap: wrap;
   }
 }

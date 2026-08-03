@@ -16,6 +16,9 @@ def _make_wm(mocker: MockerFixture, connections=None):
   mocker.patch.object(WifiManager, '_initialize')
   wm = WifiManager.__new__(WifiManager)
   wm._exit = True  # prevent stop() from doing anything in __del__
+  wm._backend_unavailable = False
+  wm._fake_networking = False
+  wm._nmcli_networking = False
   wm._conn_monitor = mocker.MagicMock()
   wm._connections = dict(connections or {})
   wm._wifi_state = WifiState()
@@ -877,7 +880,6 @@ class TestWorkerErrorRecovery:
     mock_init.assert_called_once()
     assert wm._wifi_state.ssid == "A"
     assert wm._wifi_state.status == ConnectStatus.CONNECTED
-
   def test_connect_to_network_dbus_error_resyncs(self, mocker):
     """AddAndActivateConnection2 returns DBus error while A is connected."""
     wm = _make_wm(mocker, connections={"A": "/path/A"})
@@ -904,3 +906,32 @@ class TestWorkerErrorRecovery:
     mock_init.assert_called_once()
     assert wm._wifi_state.ssid == "A"
     assert wm._wifi_state.status == ConnectStatus.CONNECTED
+
+
+class TestMonitorSocketRecovery:
+  def test_state_monitor_recovers_dead_main_router(self, mocker):
+    wm = _make_wm(mocker)
+    wm._handle_state_change = mocker.MagicMock(side_effect=OSError(88, "Socket operation on non-socket"))
+    wm._recover_main_dbus_connection = mocker.MagicMock(return_value=True)
+
+    wm._handle_state_change_safely(NMDeviceState.ACTIVATED, NMDeviceState.IP_CHECK, NMDeviceStateReason.NONE)
+
+    wm._recover_main_dbus_connection.assert_called_once_with()
+
+  def test_reconnect_replaces_router_and_resyncs_state(self, mocker):
+    wm = _make_wm(mocker)
+    old_router = mocker.MagicMock()
+    new_router = mocker.MagicMock()
+    wm._router_main = old_router
+    wm._init_connections = mocker.MagicMock()
+    wm._init_wifi_state = mocker.MagicMock()
+    mocker.patch('openpilot.system.ui.lib.wifi_manager.open_dbus_connection_threading', return_value=mocker.MagicMock())
+    mocker.patch('openpilot.system.ui.lib.wifi_manager.DBusRouter', return_value=new_router)
+
+    assert wm._recover_main_dbus_connection()
+
+    assert wm._router_main is new_router
+    old_router.close.assert_called_once_with()
+    old_router.conn.close.assert_called_once_with()
+    wm._init_connections.assert_called_once_with()
+    wm._init_wifi_state.assert_called_once_with()

@@ -15,6 +15,60 @@ class Buttons:
   CANCEL = 6
 
 
+def test_gm_starpilot_safety_flag_combinations():
+  safety = libsafety_py.libsafety
+  combinations = (
+    GMSafetyFlags.HW_SDGM | GMSafetyFlags.FLAG_GM_NO_CAMERA | GMSafetyFlags.FLAG_GM_PANDA_PADDLE_SCHED,
+    GMSafetyFlags.HW_CAM | GMSafetyFlags.FLAG_GM_NO_CAMERA | GMSafetyFlags.FLAG_GM_PANDA_PADDLE_SCHED,
+    GMSafetyFlags.HW_CAM | GMSafetyFlags.FLAG_GM_NO_CAMERA | GMSafetyFlags.FLAG_GM_NO_ACC |
+      GMSafetyFlags.FLAG_GM_PEDAL_LONG | GMSafetyFlags.FLAG_GM_GAS_INTERCEPTOR |
+      GMSafetyFlags.FLAG_GM_BOLT_2022_PEDAL | GMSafetyFlags.FLAG_GM_PANDA_PADDLE_SCHED,
+    GMSafetyFlags.HW_CAM | GMSafetyFlags.FLAG_GM_GAS_INTERCEPTOR,
+  )
+  for flags in combinations:
+    assert safety.set_safety_hooks(CarParams.SafetyModel.gm, flags) == 0
+    safety.init_tests()
+
+
+def test_gm_panda_scheduler_paths():
+  safety = libsafety_py.libsafety
+  flags = (GMSafetyFlags.HW_CAM | GMSafetyFlags.FLAG_GM_NO_ACC | GMSafetyFlags.FLAG_GM_CC_LONG |
+           GMSafetyFlags.FLAG_GM_PEDAL_LONG | GMSafetyFlags.FLAG_GM_GAS_INTERCEPTOR |
+           GMSafetyFlags.FLAG_GM_PANDA_3D1_SCHED | GMSafetyFlags.FLAG_GM_PANDA_PADDLE_SCHED)
+  assert safety.set_safety_hooks(CarParams.SafetyModel.gm, flags) == 0
+  safety.init_tests()
+  safety.set_controls_allowed(True)
+
+  paddle = common.make_msg(0, 0xBD, 7, bytes([0x20, 0, 0, 0, 0, 0, 0]))
+  prndl = common.make_msg(0, 0x1F5, 8, bytes([0, 0, 0, 7, 0, 0, 0, 0]))
+  cruise = common.make_msg(0, 0x3D1, 8)
+
+  safety.set_timer(100000)
+  safety.safety_tx_hook(paddle)
+  safety.safety_tx_hook(prndl)
+  safety.safety_tx_hook(cruise)
+  safety.safety_rx_hook(paddle)
+  safety.safety_rx_hook(prndl)
+  safety.safety_rx_hook(cruise)
+
+  safety.set_timer(125000)
+  safety.safety_rx_hook(paddle)
+  safety.safety_rx_hook(prndl)
+  safety.set_timer(300000)
+  safety.safety_rx_hook(paddle)
+  safety.safety_rx_hook(prndl)
+
+
+def test_gm_bolt_acc_pedal_clears_stock_cruise():
+  safety = libsafety_py.libsafety
+  flags = GMSafetyFlags.HW_CAM | GMSafetyFlags.FLAG_GM_GAS_INTERCEPTOR | GMSafetyFlags.FLAG_GM_BOLT_2022_PEDAL
+  assert safety.set_safety_hooks(CarParams.SafetyModel.gm, flags) == 0
+  safety.init_tests()
+  safety.set_cruise_engaged_prev(True)
+  assert safety.safety_rx_hook(libsafety_py.make_CANPacket(0x1C4, 0, bytes(8)))
+  assert not safety.get_cruise_engaged_prev()
+
+
 class GmLongitudinalBase(common.CarSafetyTest, common.LongitudinalGasBrakeSafetyTest):
 
   RELAY_MALFUNCTION_ADDRS = {0: (0x180, 0x2CB), 2: (0x184,)}  # ASCMLKASteeringCmd, ASCMGasRegenCmd, PSCMStatus
@@ -606,7 +660,7 @@ class TestGmCcLongitudinalPandaSchedSafety(TestGmCcLongitudinalSafety):
     self._rx(self._user_gas_msg(self.GAS_PRESSED_THRESHOLD + 1))
     self.assertFalse(self.safety.get_gas_pressed_prev())
     self._rx(self._interceptor_user_gas(self.INTERCEPTOR_GAS_PRESSED))
-    self.assertFalse(self.safety.get_gas_pressed_prev())
+    self.assertTrue(self.safety.get_gas_pressed_prev())
     self._rx(self._interceptor_user_gas(0))
     self.assertFalse(self.safety.get_gas_pressed_prev())
 
@@ -615,11 +669,13 @@ class TestGmCcLongitudinalPandaSchedSafety(TestGmCcLongitudinalSafety):
     self.safety.set_controls_allowed(True)
     self._rx(self._interceptor_user_gas(self.INTERCEPTOR_GAS_PRESSED))
     self.assertTrue(self.safety.get_controls_allowed())
-    self.assertTrue(self.safety.get_longitudinal_allowed())
+    self.assertFalse(self.safety.get_longitudinal_allowed())
     self._rx(self._interceptor_user_gas(0))
     self.assertTrue(self.safety.get_longitudinal_allowed())
 class TestGmVoltAutoHoldCameraSafety(TestGmCameraSafetyBase):
   TX_MSGS = TestGmCameraSafety.TX_MSGS + [[0x315, 0]]
+  FWD_BLACKLISTED_ADDRS = {2: [0x180], 0: [0x184]}
+  RELAY_MALFUNCTION_ADDRS = {0: (0x180, 0x315), 2: (0x184,)}
   EXTRA_SAFETY_PARAM = GMSafetyFlags.FLAG_GM_PANDA_PADDLE_SCHED
 
   def setUp(self):
@@ -638,12 +694,14 @@ class TestGmVoltAutoHoldCameraSafety(TestGmCameraSafetyBase):
     self._rx(self._toggle_aol(True))
     self.safety.set_controls_allowed(False)
     self.assertTrue(self._tx(self._send_brake_msg(100)))
+    self.assertEqual(-1, self.safety.safety_fwd_hook(2, 0x315))
 
   def test_standstill_brake_blocked_without_main_on(self):
     self._rx(self._speed_msg(0))
     self._rx(self._toggle_aol(False))
     self.safety.set_controls_allowed(False)
     self.assertFalse(self._tx(self._send_brake_msg(100)))
+    self.assertEqual(0, self.safety.safety_fwd_hook(2, 0x315))
 
   def test_moving_brake_blocked_without_controls(self):
     self._rx(self._speed_msg(self.STANDSTILL_THRESHOLD + 1))
@@ -661,6 +719,8 @@ class TestGmVoltAutoHoldCameraSafety(TestGmCameraSafetyBase):
 
 class TestGmVoltOnePedalCameraSafety(TestGmCameraSafetyBase):
   TX_MSGS = TestGmCameraSafety.TX_MSGS + [[0x315, 0]]
+  FWD_BLACKLISTED_ADDRS = {2: [0x180], 0: [0x184]}
+  RELAY_MALFUNCTION_ADDRS = {0: (0x180, 0x315), 2: (0x184,)}
   EXTRA_SAFETY_PARAM = GMSafetyFlags.FLAG_GM_PANDA_PADDLE_SCHED | GMSafetyFlags.FLAG_GM_PANDA_3D1_SCHED
 
   def setUp(self):
@@ -679,12 +739,14 @@ class TestGmVoltOnePedalCameraSafety(TestGmCameraSafetyBase):
     self._rx(self._toggle_aol(True))
     self.safety.set_controls_allowed(False)
     self.assertTrue(self._tx(self._send_brake_msg(100)))
+    self.assertEqual(-1, self.safety.safety_fwd_hook(2, 0x315))
 
   def test_moving_brake_blocked_without_main_on(self):
     self._rx(self._speed_msg(self.STANDSTILL_THRESHOLD + 1))
     self._rx(self._toggle_aol(False))
     self.safety.set_controls_allowed(False)
     self.assertFalse(self._tx(self._send_brake_msg(100)))
+    self.assertEqual(0, self.safety.safety_fwd_hook(2, 0x315))
 
   def test_gas_blocks_moving_brake_without_controls(self):
     self._rx(self._speed_msg(self.STANDSTILL_THRESHOLD + 1))
@@ -696,6 +758,8 @@ class TestGmVoltOnePedalCameraSafety(TestGmCameraSafetyBase):
 
 class TestGmVoltAutoHoldSdgmSafety(TestGmSafetyBase):
   TX_MSGS = TestGmSdgmSafety.TX_MSGS + [[0x315, 2]]
+  FWD_BLACKLISTED_ADDRS = {2: [0x180], 0: [0x184]}
+  RELAY_MALFUNCTION_ADDRS = {0: (0x180,), 2: ()}
   EXTRA_SAFETY_PARAM = GMSafetyFlags.FLAG_GM_PANDA_PADDLE_SCHED
 
   def setUp(self):
@@ -714,12 +778,14 @@ class TestGmVoltAutoHoldSdgmSafety(TestGmSafetyBase):
     self._rx(self._toggle_aol(True))
     self.safety.set_controls_allowed(False)
     self.assertTrue(self._tx(self._send_brake_msg(100)))
+    self.assertEqual(-1, self.safety.safety_fwd_hook(0, 0x315))
 
   def test_standstill_brake_blocked_without_main_on(self):
     self._rx(self._speed_msg(0))
     self._rx(self._toggle_aol(False))
     self.safety.set_controls_allowed(False)
     self.assertFalse(self._tx(self._send_brake_msg(100)))
+    self.assertEqual(2, self.safety.safety_fwd_hook(0, 0x315))
 
   def test_moving_brake_blocked_without_controls(self):
     self._rx(self._speed_msg(self.STANDSTILL_THRESHOLD + 1))
@@ -727,25 +793,24 @@ class TestGmVoltAutoHoldSdgmSafety(TestGmSafetyBase):
     self.safety.set_controls_allowed(False)
     self.assertFalse(self._tx(self._send_brake_msg(100)))
 
-  def test_3d1_feed_frame_allowed(self):
-    self.assertTrue(self._tx(self._pcm_status_msg(True)))
-    self.assertTrue(self._tx(self._pcm_status_msg(False)))
+  def test_3d1_spoof_blocked_on_acc(self):
+    self.assertFalse(self._tx(common.make_msg(0, 0x3D1, 8)))
 
   def test_paddle_feed_apply_frames_buffered_before_stock_sync(self):
     paddle_apply = common.make_msg(0, 0xBD, 7, bytes([0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]))
     prndl_apply = common.make_msg(0, 0x1F5, 8, bytes([0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00]))
 
     self.safety.set_controls_allowed(True)
-    self.assertFalse(self._tx(paddle_apply))
-    self.assertFalse(self._tx(prndl_apply))
+    self.assertTrue(self._tx(paddle_apply))
+    self.assertTrue(self._tx(prndl_apply))
 
   def test_paddle_feed_apply_frames_blocked_after_stock_sync(self):
     paddle_apply = common.make_msg(0, 0xBD, 7, bytes([0x20, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00]))
     prndl_apply = common.make_msg(0, 0x1F5, 8, bytes([0x00, 0x00, 0x00, 0x07, 0x00, 0x00, 0x00, 0x00]))
 
     self.safety.set_controls_allowed(True)
-    self.assertFalse(self._tx(paddle_apply))
-    self.assertFalse(self._tx(prndl_apply))
+    self.assertTrue(self._tx(paddle_apply))
+    self.assertTrue(self._tx(prndl_apply))
 
     self._rx(paddle_apply)
     self._rx(prndl_apply)

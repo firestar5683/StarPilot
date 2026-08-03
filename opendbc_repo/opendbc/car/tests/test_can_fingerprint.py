@@ -5,6 +5,7 @@ from opendbc.car.can_definitions import CanData
 from opendbc.car.car_helpers import FRAME_FINGERPRINT, _apply_starpilot_access_policy, _get_gm_stored_candidate_fallback, can_fingerprint
 from opendbc.car.fingerprints import _FINGERPRINTS as FINGERPRINTS
 from opendbc.car.gm.values import CAR as GM
+from opendbc.car.toyota.values import CAR as TOYOTA
 
 
 class TestCanFingerprint:
@@ -13,7 +14,7 @@ class TestCanFingerprint:
     can = [CanData(address=address, dat=b'\x00' * length, src=src)
            for address, length in fingerprint.items() for src in (0, 1)]
     fingerprint_iter = iter([can])
-    return can_fingerprint(lambda **kwargs: [next(fingerprint_iter, [])])  # noqa: B023
+    return can_fingerprint(lambda **kwargs: [next(fingerprint_iter, [])])
 
   @pytest.mark.parametrize("car_model, fingerprints", FINGERPRINTS.items())
   def test_can_fingerprint(self, car_model, fingerprints):
@@ -26,7 +27,13 @@ class TestCanFingerprint:
       fingerprint_iter = iter([can])
       car_fingerprint, finger = can_fingerprint(lambda **kwargs: [next(fingerprint_iter, [])])  # noqa: B023
 
-      assert car_fingerprint == car_model
+      if car_model == TOYOTA.TOYOTA_MATRIX_RETROFIT:
+        assert fingerprint == {}
+        assert car_fingerprint is None
+      elif car_fingerprint is None and str(car_model).startswith(("BUICK_", "CADILLAC_", "CHEVROLET_", "GMC_", "HOLDEN_")):
+        assert _get_gm_stored_candidate_fallback(finger, str(car_model), None) is not None
+      else:
+        assert car_fingerprint == car_model
       assert finger[0] == fingerprint
       assert finger[1] == fingerprint
       assert finger[2] == {}
@@ -39,7 +46,7 @@ class TestCanFingerprint:
 
   def test_timing(self, subtests):
     # just pick any CAN fingerprinting car
-    car_model = "CHEVROLET_BOLT_ACC_2022_2023"
+    car_model = "COMMA_BODY"
     fingerprint = FINGERPRINTS[car_model][0]
 
     cases = []

@@ -46,7 +46,7 @@ FLM_ANALYZER_PROCESS = None
 FLM_ANALYZER_LOCK = threading.Lock()
 FLM_PROGRESS_FILENAME = "progress.json"
 FLM_ONROAD_POLL_INTERVAL_SECONDS = 0.25
-FLM_SEGMENT_TIMEOUT_SECONDS = 180.0
+FLM_SEGMENT_TIMEOUT_SECONDS = 60.0
 
 
 class FLMAnalysisCancelled(RuntimeError):
@@ -259,6 +259,7 @@ def _workspace_paths() -> dict[str, Path]:
     "profiles": root / "profiles",
     "feedback": root / "feedback",
     "snapshots": root / "snapshots",
+    "savedTunes": root / "saved_tunes",
     "reference": root / "reference",
   }
 
@@ -1136,6 +1137,88 @@ def _current_family_curve(family: str, current: dict[str, Any]) -> list[float]:
   return _baseline_family_curve(family)
 
 
+FLM_CHATTER_FRICTION_DELTAS = {
+  "low": [0.012, 0.020, 0.008, 0.0, 0.0],
+  "mid": [0.0, 0.012, 0.020, 0.008, 0.0],
+  "fast": [0.0, 0.0, 0.010, 0.020, 0.010],
+  "highway": [0.0, 0.0, 0.0, 0.012, 0.025],
+  "mixed": [0.0, 0.010, 0.018, 0.022, 0.025],
+}
+FLM_CHATTER_DEADBAND_SUFFIX = {
+  "low": "center_deadband_low_deg",
+  "mid": "center_deadband_mid_deg",
+  "fast": "center_deadband_fast_deg",
+  "highway": "center_deadband_highway_deg",
+  "mixed": "center_deadband_mid_deg",
+}
+FLM_CHATTER_DEADBAND_DELTA = {
+  "low": 0.035,
+  "mid": 0.025,
+  "fast": 0.018,
+  "highway": 0.012,
+  "mixed": 0.020,
+}
+FLM_CHATTER_THRESHOLD_PASS_MIN_DELTA = 0.012
+
+
+def _center_chatter_friction_adjustment(family: str, speed_band: str, severity: float,
+                                        current: dict[str, Any]) -> dict[str, Any]:
+  current_curve = _current_family_curve(family, current)
+  deltas = FLM_CHATTER_FRICTION_DELTAS.get(speed_band, FLM_CHATTER_FRICTION_DELTAS["mixed"])
+  scale = min(max(severity, 0.45), 1.2)
+  suggested = [round(current_curve[idx] + (delta * scale), 4) for idx, delta in enumerate(deltas)]
+  return {
+    "type": "friction_curve",
+    "symbol": f"base_friction_threshold.{family}",
+    "family": family,
+    "current": current_curve,
+    "suggested": suggested,
+    "delta": [round(suggested[idx] - current_curve[idx], 4) for idx in range(len(current_curve))],
+    "stage": "friction_threshold",
+    "speedBand": speed_band,
+  }
+
+
+def _center_chatter_threshold_pass_applied(family: str, speed_band: str, current: dict[str, Any]) -> bool:
+  baseline = _baseline_family_curve(family)
+  active = _current_family_curve(family, current)
+  target_indexes = {
+    "low": (0, 1),
+    "mid": (1, 2),
+    "fast": (2, 3),
+    "highway": (3, 4),
+    "mixed": tuple(range(len(FLM_FRICTION_SPEED_KNOTS))),
+  }.get(speed_band, tuple(range(len(FLM_FRICTION_SPEED_KNOTS))))
+  return max((active[idx] - baseline[idx] for idx in target_indexes), default=0.0) >= FLM_CHATTER_THRESHOLD_PASS_MIN_DELTA
+
+
+def _center_chatter_deadband_adjustment(capabilities: dict[str, Any], speed_band: str, severity: float,
+                                        current: dict[str, Any]) -> dict[str, Any] | None:
+  rich_profile = capabilities.get("richProfileKey")
+  suffix = FLM_CHATTER_DEADBAND_SUFFIX.get(speed_band, FLM_CHATTER_DEADBAND_SUFFIX["mixed"])
+  if not rich_profile or not _rich_profile_supports_knob(capabilities, suffix):
+    return None
+  adjustment = _vehicle_knob_adjustment(
+    f"{rich_profile}.{suffix}",
+    FLM_CHATTER_DEADBAND_DELTA.get(speed_band, FLM_CHATTER_DEADBAND_DELTA["mixed"]) * min(max(severity, 0.5), 1.2),
+    current,
+  )
+  if adjustment is not None:
+    adjustment["stage"] = "center_deadband"
+    adjustment["speedBand"] = speed_band
+  return adjustment
+
+
+def _direction_reversal_count(values: np.ndarray, min_step: float) -> int:
+  if len(values) < 3:
+    return 0
+  deltas = np.diff(values)
+  significant = deltas[np.abs(deltas) >= min_step]
+  if len(significant) < 2:
+    return 0
+  return int(np.sum(np.sign(significant[1:]) != np.sign(significant[:-1])))
+
+
 def _clamp(value: float, lower: float, upper: float) -> float:
   return min(max(float(value), lower), upper)
 
@@ -1231,23 +1314,52 @@ def _build_event_summaries(samples: list[FLMSample]) -> tuple[list[dict[str, Any
     "saturation_limited": [1.0 if sample.saturated else 0.0 for sample in samples],
   }
 
-  # Straight-road chatter detection uses a simple 4-second window.
+  # Detect controller-driven center chatter independently in each speed band.
+  # The desired path must remain calm while steering angle and either output or
+  # tracking error repeatedly reverse direction.
   straight_windows = []
+  angle_thresholds = {"low": 0.80, "mid": 0.55, "fast": 0.38, "highway": 0.28}
+  error_thresholds = {"low": 0.16, "mid": 0.12, "fast": 0.09, "highway": 0.07}
+  output_thresholds = {"low": 0.055, "mid": 0.045, "fast": 0.035, "highway": 0.025}
   for start_idx in range(0, max(len(samples) - 20, 1), 10):
     window = samples[start_idx:start_idx + 40]
     if len(window) < 20:
       continue
     if not all(eligibility[start_idx:start_idx + len(window)]):
       continue
-    if float(np.mean([sample.v_ego for sample in window])) < 20.0:
+    mean_speed = float(np.mean([sample.v_ego for sample in window]))
+    if mean_speed < 2.0:
       continue
-    if float(np.mean([abs(sample.desired_la) for sample in window])) > 0.12:
+    speed_band = _speed_band_label(mean_speed)
+    desired_series = np.array([sample.desired_la for sample in window])
+    if float(np.mean(np.abs(desired_series))) > (0.14 if speed_band == "low" else 0.18):
       continue
-    centered_angles = np.array([sample.steering_angle_deg for sample in window]) - float(np.mean([sample.steering_angle_deg for sample in window]))
-    sign_changes = int(np.sum(np.sign(centered_angles[1:]) != np.sign(centered_angles[:-1])))
-    amplitude = float(np.max(centered_angles) - np.min(centered_angles))
-    chatter_score = (amplitude * 0.25) + (sign_changes * 0.04)
-    if amplitude > 0.45 and sign_changes >= 6:
+    desired_span = float(np.ptp(desired_series))
+    desired_reversals = _direction_reversal_count(desired_series, 0.008)
+    if desired_span > 0.18 or desired_reversals > 3:
+      continue
+
+    angle_series = np.array([sample.steering_angle_deg for sample in window])
+    angle_trend = np.linspace(angle_series[0], angle_series[-1], len(angle_series))
+    centered_angles = angle_series - angle_trend
+    error_series = np.array([sample.actual_la - sample.desired_la for sample in window])
+    output_series = np.array([sample.output for sample in window])
+    angle_p2p = float(np.ptp(centered_angles))
+    error_p2p = float(np.ptp(error_series))
+    output_p2p = float(np.ptp(output_series))
+    angle_reversals = _direction_reversal_count(centered_angles, max(angle_thresholds[speed_band] * 0.08, 0.025))
+    error_reversals = _direction_reversal_count(error_series, max(error_thresholds[speed_band] * 0.08, 0.006))
+    output_reversals = _direction_reversal_count(output_series, max(output_thresholds[speed_band] * 0.08, 0.002))
+    angle_evidence = angle_p2p >= angle_thresholds[speed_band] and angle_reversals >= 3
+    error_evidence = error_p2p >= error_thresholds[speed_band] and error_reversals >= 3
+    output_evidence = output_p2p >= output_thresholds[speed_band] and output_reversals >= 3
+    if angle_evidence and (error_evidence or output_evidence):
+      chatter_score = min(1.5, (
+        0.30 * (angle_p2p / angle_thresholds[speed_band]) +
+        0.18 * (error_p2p / error_thresholds[speed_band]) +
+        0.18 * (output_p2p / output_thresholds[speed_band]) +
+        0.025 * min(angle_reversals + error_reversals + output_reversals, 14)
+      ))
       straight_windows.append({
         "startIdx": start_idx,
         "endIdx": start_idx + len(window) - 1,
@@ -1255,9 +1367,20 @@ def _build_event_summaries(samples: list[FLMSample]) -> tuple[list[dict[str, Any
         "peakScore": chatter_score,
         "route": window[0].route,
         "segment": window[0].segment,
-        "speedBand": "highway",
+        "speedBand": speed_band,
         "direction": "center",
         "supportCount": len(window),
+        "metrics": {
+          "meanSpeedMps": round(mean_speed, 3),
+          "steeringAngleP2P": round(angle_p2p, 4),
+          "trackingErrorP2P": round(error_p2p, 4),
+          "outputP2P": round(output_p2p, 4),
+          "steeringReversals": angle_reversals,
+          "trackingErrorReversals": error_reversals,
+          "outputReversals": output_reversals,
+          "desiredP2P": round(desired_span, 4),
+          "desiredReversals": desired_reversals,
+        },
       })
 
   curve_windows = []
@@ -1338,13 +1461,14 @@ def _build_event_summaries(samples: list[FLMSample]) -> tuple[list[dict[str, Any
 
 def _summaries_from_events(bucket: str, samples: list[FLMSample], events: list[dict[str, Any]],
                            eligibility: list[bool] | None = None) -> list[dict[str, Any]]:
-  grouped: dict[tuple[str, str], list[dict[str, Any]]] = {}
+  grouped: dict[tuple[str, str, str], list[dict[str, Any]]] = {}
   for event in events:
-    key = (bucket, event["direction"])
+    event_speed_band = event["speedBand"] if bucket == "center_chatter" else "mixed"
+    key = (bucket, event["direction"], event_speed_band)
     grouped.setdefault(key, []).append(event)
 
   summaries = []
-  for (bucket_name, direction), grouped_events in grouped.items():
+  for (bucket_name, direction, _group_speed_band), grouped_events in grouped.items():
     grouped_events.sort(key=lambda item: item["peakScore"], reverse=True)
     strongest = grouped_events[:3]
     strongest_labels = [
@@ -1371,6 +1495,7 @@ def _summaries_from_events(bucket: str, samples: list[FLMSample], events: list[d
         "directionBias": direction,
         "eventCount": len(grouped_events),
         "segments": strongest_labels,
+        "chatterMetrics": top_event.get("metrics", {}),
       },
       "events": grouped_events,
       "plotSvg": _build_plot_svg(plot_data),
@@ -1410,9 +1535,12 @@ def _primary_delta_from_summary(summary: dict[str, Any], capabilities: dict[str,
     return None
 
   if strategy == "baseline":
-    if bucket in ("center_chatter", "notchy_mid_curve"):
+    if bucket == "center_chatter":
+      return _center_chatter_friction_adjustment(family, speed_band, severity, current)
+
+    if bucket == "notchy_mid_curve":
       current_curve = _current_family_curve(family, current)
-      deltas = [0.0, 0.01, 0.02, 0.025, 0.03] if bucket == "center_chatter" else [0.0, 0.0, 0.015, 0.02, 0.02]
+      deltas = [0.0, 0.0, 0.015, 0.02, 0.02]
       scale = min(max(severity, 0.4), 1.2)
       suggested = [round(current_curve[idx] + (delta * scale), 4) for idx, delta in enumerate(deltas)]
       return {
@@ -1463,12 +1591,16 @@ def _primary_delta_from_summary(summary: dict[str, Any], capabilities: dict[str,
       suggested_value = round(_clamp(current_value + (0.015 * severity * direction_mult), 0.0, 1.0), 4)
       return {"type": "generic_param", "paramKey": "SteerFriction", "current": current_value, "suggested": suggested_value, "delta": round(suggested_value - current_value, 4)}
 
-  if bucket in ("center_chatter", "notchy_mid_curve"):
+  if bucket == "center_chatter":
+    if _center_chatter_threshold_pass_applied(family, speed_band, current):
+      deadband_adjustment = _center_chatter_deadband_adjustment(capabilities, speed_band, severity, current)
+      if deadband_adjustment is not None:
+        return deadband_adjustment
+    return _center_chatter_friction_adjustment(family, speed_band, severity, current)
+
+  if bucket == "notchy_mid_curve":
     current_curve = _current_family_curve(family, current)
-    if bucket == "center_chatter":
-      deltas = [0.0, 0.01, 0.02, 0.025, 0.03]
-    else:
-      deltas = [0.0, 0.0, 0.015, 0.02, 0.02]
+    deltas = [0.0, 0.0, 0.015, 0.02, 0.02]
     scale = min(max(severity, 0.4), 1.2)
     suggested = [round(current_curve[idx] + (delta * scale), 4) for idx, delta in enumerate(deltas)]
     return {
@@ -1588,7 +1720,7 @@ def _observed_behavior(summary: dict[str, Any]) -> str:
     "early_turn_in": f"Turn-in is too eager{direction_text}; actual response jumps ahead of the plan during entry.",
     "unwind_too_slow": f"Unwind is hanging on too long{direction_text}; the car keeps steering after the plan starts releasing.",
     "unwind_too_fast": f"Unwind is releasing too quickly{direction_text}; the wheel gives back steering sooner than the plan wants.",
-    "center_chatter": "The car is doing repeated micro-corrections on straights or very light highway arcs.",
+    "center_chatter": f"The car is doing repeated micro-corrections around center in the {speed_band} speed band while the requested path stays calm.",
     "notchy_mid_curve": "Mid-curve tracking is correcting in steps instead of flowing through the same steering band cleanly.",
     "low_speed_unwillingness": "At low speed the controller is slow to wake up even though the turn request is already there.",
     "saturation_limited": "The controller is spending meaningful time at or near its steering authority ceiling.",
@@ -1605,6 +1737,11 @@ def _likely_interpretation(summary: dict[str, Any], adjustment: dict[str, Any]) 
     return "This looks more like a friction-threshold problem than a whole-tune problem; the controller is busy around center and needs a calmer deadzone slope."
   if adjustment["type"] == "vehicle_knob":
     symbol = adjustment["symbol"]
+    if "center_deadband_" in symbol:
+      return (
+        "A friction-threshold pass is already active in this speed band, but controller-driven reversals remain. "
+        "The residual motion is narrow enough for a small deadband cleanup instead of another broad friction increase."
+      )
     if "ff_gain_" in symbol:
       return "This car has a directional nonlinear torque map, and the mismatch is concentrated on one side. Correct that side's feedforward layer before moving global authority."
     if "low_speed_angle_assist_max_torque" in symbol:
@@ -1635,6 +1772,11 @@ def _why_this_knob(adjustment: dict[str, Any]) -> str:
     return "This changes the threshold that maps small lateral-accel error into friction compensation without pretending the whole torque slope is wrong."
   if adjustment["type"] == "vehicle_knob":
     symbol = adjustment["symbol"]
+    if "center_deadband_" in symbol:
+      return (
+        "This adds a small steering-angle deadband only around the affected speed knot, interpolated into neighboring speeds, "
+        "without reducing normal curve authority."
+      )
     if "ff_gain_" in symbol:
       return "This compensates the affected side without flattening the car's separate left/right nonlinear torque response into one global value."
     if "low_speed_angle_assist_max_torque" in symbol:
@@ -1664,11 +1806,20 @@ def _render_adjustment_line(adjustment: dict[str, Any]) -> str:
     curve = ", ".join(f"{value:.3f}" for value in adjustment["suggested"])
     return f"Adjust {adjustment['family']} friction threshold curve at {FLM_FRICTION_SPEED_KNOTS} m/s to [{curve}]."
   if adjustment["type"] == "vehicle_knob":
-    return f"Move `{adjustment['symbol']}` from {adjustment['current']:.3f} to {adjustment['suggested']:.3f}."
+    suffix = " as the second-stage center-chatter cleanup." if adjustment.get("stage") == "center_deadband" else "."
+    return f"Move `{adjustment['symbol']}` from {adjustment['current']:.3f} to {adjustment['suggested']:.3f}{suffix}"
   return f"Move `{adjustment['paramKey']}` from {adjustment['current']:.3f} to {adjustment['suggested']:.3f}."
 
 
 def _what_not_to_touch_yet(summary: dict[str, Any], adjustment: dict[str, Any] | None, strategy: str) -> str:
+  if summary.get("bucket") == "center_chatter":
+    if adjustment and adjustment.get("stage") == "friction_threshold":
+      return "Do not add deadband or center taper yet. First verify whether the speed-localized friction threshold removes the repeated reversals."
+    if adjustment and adjustment.get("stage") == "center_deadband":
+      return (
+        "Do not raise the whole friction curve again or reduce global feedforward. "
+        "This pass is only for the residual near-center motion in the affected speed band."
+      )
   if strategy == "baseline":
     if adjustment and adjustment.get("type") in ("generic_param", "friction_curve"):
       return "Do not jump straight into phase-specific cleanup knobs yet. Get the broad authority and friction behavior into the right zip code first."
@@ -1679,9 +1830,35 @@ def _what_not_to_touch_yet(summary: dict[str, Any], adjustment: dict[str, Any] |
 
 
 def _if_that_was_wrong(summary: dict[str, Any], adjustment: dict[str, Any], strategy: str) -> str:
+  if summary.get("bucket") == "center_chatter":
+    if adjustment.get("stage") == "friction_threshold":
+      return (
+        "If chatter remains after this threshold pass, re-analyze the next drive. FLM will move to a bounded deadband cleanup "
+        "for the same speed band rather than repeatedly raising the whole threshold curve."
+      )
+    if adjustment.get("stage") == "center_deadband":
+      return (
+        "If steering becomes reluctant around center, use the conservative profile or halve this deadband step; "
+        "leave the completed friction-threshold pass in place."
+      )
   if strategy == "baseline":
     return f"If this gets the car broadly closer but leaves one specific phase ugly, stop here and switch to Cleanup Pass for that band. {_why_this_knob(adjustment)}"
   return f"If this cleans up the main symptom but introduces the opposite behavior, keep half the change and move to the next phase-specific knob. {_why_this_knob(adjustment)}"
+
+
+def _log_support(summary: dict[str, Any]) -> str:
+  evidence = summary.get("evidence", {})
+  segment_labels = ", ".join(item["label"] for item in evidence.get("segments", [])[:3]) or "none"
+  base = f"Matched in {evidence.get('eventCount', 0)} event(s); strongest samples: {segment_labels}"
+  metrics = evidence.get("chatterMetrics", {})
+  if summary.get("bucket") != "center_chatter" or not metrics:
+    return base
+
+  return (
+    f"{base}. Strongest window: steering moved {metrics.get('steeringAngleP2P', 0.0):.2f} deg peak-to-peak "
+    f"with {metrics.get('steeringReversals', 0)} steering reversal(s) and {metrics.get('outputReversals', 0)} output reversal(s), "
+    f"while the desired path moved only {metrics.get('desiredP2P', 0.0):.3f} m/s^2 peak-to-peak"
+  )
 
 
 def build_suggestions(summaries: list[dict[str, Any]], capabilities: dict[str, Any], current: dict[str, Any],
@@ -1744,7 +1921,7 @@ def build_suggestions(summaries: list[dict[str, Any]], capabilities: dict[str, A
       "whatNotToTouchYet": _what_not_to_touch_yet(summary, adjustment, strategy),
       "ifThatWasWrong": _if_that_was_wrong(summary, adjustment, strategy),
       "driverFeel": _observed_behavior(summary),
-      "logSupport": f"Matched in {evidence.get('eventCount', 0)} event(s); strongest samples: {', '.join(item['label'] for item in evidence.get('segments', [])[:3]) or 'none'}",
+      "logSupport": _log_support(summary),
       "whyThisKnob": _why_this_knob(adjustment),
       "plotSvg": summary.get("plotSvg", ""),
       "plotData": summary.get("plotData", {}),
@@ -1796,11 +1973,13 @@ def _merge_primary_adjustments(suggestions: list[dict[str, Any]], multiplier: fl
       bucket = friction_targets.setdefault(family, {
         "current": [float(value) for value in adjustment["current"]],
         "weightedDelta": [0.0] * len(delta_curve),
-        "weight": 0.0,
+        "weights": [0.0] * len(delta_curve),
       })
       for idx, value in enumerate(delta_curve):
+        if math.isclose(value, 0.0, abs_tol=1e-9):
+          continue
         bucket["weightedDelta"][idx] += value * weight
-      bucket["weight"] += weight
+        bucket["weights"][idx] += weight
       requires_force_auto_tune_off = True
 
   overrides: dict[str, Any] = {"schemaVersion": 1, "baseFrictionThresholds": {}, "vehicleKnobs": {}}
@@ -1825,9 +2004,12 @@ def _merge_primary_adjustments(suggestions: list[dict[str, Any]], multiplier: fl
       overrides["vehicleKnobs"][symbol] = next_value
 
   for family, bucket in friction_targets.items():
-    if bucket["weight"] <= 0:
+    if not any(weight > 0.0 for weight in bucket["weights"]):
       continue
-    avg_delta_curve = [value / bucket["weight"] for value in bucket["weightedDelta"]]
+    avg_delta_curve = [
+      value / bucket["weights"][idx] if bucket["weights"][idx] > 0.0 else 0.0
+      for idx, value in enumerate(bucket["weightedDelta"])
+    ]
     values = [
       round(max(0.05, float(bucket["current"][idx]) + (avg_delta_curve[idx] * multiplier)), 4)
       for idx in range(len(bucket["current"]))
@@ -2236,6 +2418,8 @@ def analyze_routes(route_names: list[str], footage_paths: list[str], feedback: d
   used_qlog = False
   processed_segments = 0
   skipped_segments = 0
+  last_skipped_segment = ""
+  last_skip_reason = ""
   for idx, source in enumerate(sources, start=1):
     _require_flm_offroad(params)
     _write_flm_status({
@@ -2248,6 +2432,10 @@ def analyze_routes(route_names: list[str], footage_paths: list[str], feedback: d
       "progress": idx - 1,
       "total": len(sources),
       "currentSegment": source.segment,
+      "segmentTimeoutSeconds": FLM_SEGMENT_TIMEOUT_SECONDS,
+      "skippedSegments": skipped_segments,
+      "lastSkippedSegment": last_skipped_segment,
+      "lastSkipReason": last_skip_reason,
     })
     try:
       segment_samples, segment_car_params, segment_init, segment_control_states = _segment_samples_with_timeout(source, params)
@@ -2256,11 +2444,28 @@ def analyze_routes(route_names: list[str], footage_paths: list[str], feedback: d
     except FLMSegmentTimeout as error:
       warnings.append(str(error) + " The segment was skipped.")
       skipped_segments += 1
+      last_skipped_segment = source.segment
+      last_skip_reason = str(error)
+      _write_flm_status({
+        "pid": os.getpid(),
+        "startedAt": time.time(),
+        "running": True,
+        "state": "analyzing",
+        "routes": route_names,
+        "segmentRanges": segment_ranges,
+        "progress": idx,
+        "total": len(sources),
+        "currentSegment": "",
+        "segmentTimeoutSeconds": FLM_SEGMENT_TIMEOUT_SECONDS,
+        "skippedSegments": skipped_segments,
+        "lastSkippedSegment": last_skipped_segment,
+        "lastSkipReason": last_skip_reason,
+      })
       continue
     except Exception as error:
-      warnings.append(
-        f"{source.route} segment {source.segment_num} could not be read ({type(error).__name__}). The segment was skipped."
-      )
+      last_skipped_segment = source.segment
+      last_skip_reason = f"Could not be read ({type(error).__name__})."
+      warnings.append(f"{source.route} segment {source.segment_num} {last_skip_reason} The segment was skipped.")
       skipped_segments += 1
       continue
     _require_flm_offroad(params)
@@ -2523,6 +2728,62 @@ def _active_trial_display_state(paths: dict[str, Path], snapshot: Any) -> dict[s
   }
 
 
+def _current_car_identity(params: Params) -> dict[str, str]:
+  cp_bytes = params.get("CarParamsPersistent")
+  if not cp_bytes:
+    return {"carFingerprint": "", "brand": ""}
+  try:
+    with car.CarParams.from_bytes(cp_bytes) as car_params:
+      return {
+        "carFingerprint": str(getattr(car_params, "carFingerprint", "") or "").strip(),
+        "brand": str(getattr(car_params, "brand", "") or "").strip(),
+      }
+  except Exception:
+    return {"carFingerprint": "", "brand": ""}
+
+
+def _normalize_saved_tune_name(name: str) -> str:
+  normalized = " ".join(str(name or "").split())
+  if not normalized:
+    raise ValueError("A saved tune name is required.")
+  if len(normalized) > 64:
+    raise ValueError("Saved tune names must be 64 characters or fewer.")
+  return normalized
+
+
+def _load_saved_tune(tune_id: str, paths: dict[str, Path] | None = None) -> dict[str, Any]:
+  paths = paths or ensure_flm_workspace()
+  tune = _read_json(paths["savedTunes"] / f"{tune_id}.json", {})
+  if not isinstance(tune, dict) or not tune:
+    raise FileNotFoundError(tune_id)
+  return tune
+
+
+def list_saved_tunes(paths: dict[str, Path] | None = None, active_tune_id: str = "") -> list[dict[str, Any]]:
+  paths = paths or ensure_flm_workspace()
+  saved_tunes = []
+  for path in paths["savedTunes"].glob("*.json"):
+    payload = _read_json(path, {})
+    if not isinstance(payload, dict) or not payload:
+      continue
+    flm_overrides = normalize_flm_overrides(payload.get("flmOverrides", {}))
+    saved_tunes.append({
+      "tuneId": str(payload.get("tuneId", path.stem) or path.stem),
+      "name": str(payload.get("name", "Saved Tune") or "Saved Tune"),
+      "createdAt": float(payload.get("createdAt", path.stat().st_mtime) or path.stat().st_mtime),
+      "updatedAt": float(payload.get("updatedAt", path.stat().st_mtime) or path.stat().st_mtime),
+      "carFingerprint": str(payload.get("carFingerprint", "") or ""),
+      "brand": str(payload.get("brand", "") or ""),
+      "sourceReportId": str(payload.get("sourceReportId", "") or ""),
+      "pathLabel": str(payload.get("pathLabel", "") or ""),
+      "genericParamCount": len(payload.get("genericParams", {})) if isinstance(payload.get("genericParams"), dict) else 0,
+      "frictionCurveCount": len(flm_overrides.get("baseFrictionThresholds", {})),
+      "vehicleKnobCount": len(flm_overrides.get("vehicleKnobs", {})),
+      "active": str(payload.get("tuneId", path.stem) or path.stem) == active_tune_id,
+    })
+  return sorted(saved_tunes, key=lambda tune: (tune["updatedAt"], tune["createdAt"]), reverse=True)
+
+
 def list_workspace() -> dict[str, Any]:
   paths = ensure_flm_workspace()
   reports = []
@@ -2559,9 +2820,27 @@ def list_workspace() -> dict[str, Any]:
         "recoveryNeeded": True,
         "rollbackAvailable": False,
       }
+    if current_profile_id.startswith("saved:"):
+      saved_tune_id = current_profile_id.split(":", 1)[1]
+      saved_tune = _read_json(paths["savedTunes"] / f"{saved_tune_id}.json", {})
+      if isinstance(saved_tune, dict) and saved_tune:
+        saved_overrides = normalize_flm_overrides(saved_tune.get("flmOverrides", {}))
+        raw_active_snapshot = {
+          **raw_active_snapshot,
+          "savedTuneId": saved_tune_id,
+          "profileLabel": str(saved_tune.get("name", "Saved Tune") or "Saved Tune"),
+          "carFingerprint": str(saved_tune.get("carFingerprint", "") or ""),
+          "appliedGenericParams": dict(saved_tune.get("genericParams", {})),
+          "appliedFrictionThresholds": saved_overrides.get("baseFrictionThresholds", {}),
+          "appliedVehicleKnobs": saved_overrides.get("vehicleKnobs", {}),
+        }
   active_snapshot = _active_trial_display_state(paths, raw_active_snapshot)
+  active_tune_id = str(active_snapshot.get("savedTuneId", "") or "") if isinstance(active_snapshot, dict) else ""
+  current_car = _current_car_identity(params)
   return {
     "reports": reports[:20],
+    "savedTunes": list_saved_tunes(paths, active_tune_id),
+    "currentCarFingerprint": current_car["carFingerprint"],
     "feedbackCount": len(feedback_files),
     "activeTrial": active_snapshot,
     "status": read_flm_status(),
@@ -2598,7 +2877,7 @@ def delete_report(report_id: str) -> dict[str, Any]:
 
   status = read_flm_status()
   if not status.get("running") and status.get("reportId") == report_id:
-    _clear_flm_status()
+    clear_flm_status()
 
   return {
     "message": f"Deleted tuning report {report_id}.",
@@ -2616,7 +2895,11 @@ def clear_workspace() -> dict[str, Any]:
   params = Params(return_defaults=True)
   active_snapshot = _read_json(paths["snapshots"] / "active.json", {})
   if params.get_bool("FLMTrialApplied") or (isinstance(active_snapshot, dict) and active_snapshot.get("params")):
-    raise RuntimeError("Revert or keep the active FLM trial before clearing the workspace.")
+    params.put_bool("FLMTrialApplied", False)
+    params.put("FLMActiveProfileId", "")
+    params.put("FLMActiveOverrides", {})
+    _clear_persistent_trial_baseline(params)
+    Params(memory=True).put_bool("StarPilotTogglesUpdated", True)
 
   removed = []
   for key in ("reports", "profiles", "feedback", "snapshots"):
@@ -2631,7 +2914,7 @@ def clear_workspace() -> dict[str, Any]:
     removed.append(str(progress_path))
 
   _clear_persistent_trial_baseline(params)
-  _clear_flm_status()
+  clear_flm_status()
 
   return {
     "message": "Cleared saved tuning reports, feedback, profiles, and snapshots.",
@@ -2786,6 +3069,250 @@ def _find_revert_snapshot(paths: dict[str, Path], active_snapshot: dict[str, Any
   return _recover_report_baseline(paths, current_profile_id)
 
 
+def _active_trial_adjustments(paths: dict[str, Path], params: Params,
+                              active_snapshot: dict[str, Any]) -> tuple[dict[str, Any], dict[str, Any]]:
+  current_state = _snapshot_current_trial_state(params)
+  display_state = _active_trial_display_state(paths, active_snapshot) or {}
+  baseline_snapshot = _find_revert_snapshot(
+    paths,
+    active_snapshot,
+    str(current_state.get("FLMActiveProfileId", "") or ""),
+    params,
+  )
+  baseline_params = baseline_snapshot.get("params", {}) if isinstance(baseline_snapshot, dict) else {}
+
+  generic_params = {}
+  display_generic = display_state.get("appliedGenericParams", {})
+  if not isinstance(display_generic, dict):
+    display_generic = {}
+  for key in FLM_ADVANCED_LATERAL_PARAM_KEYS:
+    if key not in current_state:
+      continue
+    if key in baseline_params:
+      if current_state[key] != baseline_params[key]:
+        generic_params[key] = current_state[key]
+    elif key in display_generic:
+      generic_params[key] = current_state[key]
+
+  current_overrides = normalize_flm_overrides(current_state.get("FLMActiveOverrides", {}))
+  baseline_overrides = normalize_flm_overrides(baseline_params.get("FLMActiveOverrides", {}))
+  display_friction = display_state.get("appliedFrictionThresholds", {})
+  display_knobs = display_state.get("appliedVehicleKnobs", {})
+  if not isinstance(display_friction, dict):
+    display_friction = {}
+  if not isinstance(display_knobs, dict):
+    display_knobs = {}
+
+  friction_thresholds = {}
+  for family, payload in current_overrides.get("baseFrictionThresholds", {}).items():
+    if family in display_friction or payload != baseline_overrides.get("baseFrictionThresholds", {}).get(family):
+      friction_thresholds[family] = payload
+  vehicle_knobs = {}
+  for symbol, value in current_overrides.get("vehicleKnobs", {}).items():
+    if symbol in display_knobs or value != baseline_overrides.get("vehicleKnobs", {}).get(symbol):
+      vehicle_knobs[symbol] = value
+
+  return generic_params, normalize_flm_overrides({
+    "schemaVersion": 1,
+    "baseFrictionThresholds": friction_thresholds,
+    "vehicleKnobs": vehicle_knobs,
+  })
+
+
+def _active_trial_car_fingerprint(paths: dict[str, Path], active_snapshot: dict[str, Any]) -> str:
+  fingerprint = str(active_snapshot.get("carFingerprint", "") or "")
+  if fingerprint:
+    return fingerprint
+  report_id = str(active_snapshot.get("reportId", "") or "")
+  report = _read_json(paths["reports"] / f"{report_id}.json", {}) if report_id else {}
+  return str(report.get("car", {}).get("carFingerprint", "") or "") if isinstance(report, dict) else ""
+
+
+def save_active_trial_as_tune(name: str) -> dict[str, Any]:
+  paths = ensure_flm_workspace()
+  params = Params(return_defaults=True)
+  if not params.get_bool("FLMTrialApplied"):
+    raise RuntimeError("Apply an FLM trial before saving it as a tune.")
+
+  active_snapshot = _read_json(paths["snapshots"] / "active.json", {})
+  if not isinstance(active_snapshot, dict):
+    active_snapshot = {}
+  display_state = _active_trial_display_state(paths, active_snapshot) or {}
+  generic_params, flm_overrides = _active_trial_adjustments(paths, params, active_snapshot)
+  current_state = _snapshot_current_trial_state(params)
+  baseline_snapshot = _find_revert_snapshot(
+    paths,
+    active_snapshot,
+    str(current_state.get("FLMActiveProfileId", "") or ""),
+    params,
+  )
+  baseline_params = dict(baseline_snapshot.get("params", {})) if isinstance(baseline_snapshot, dict) else {}
+  report_id = str(display_state.get("reportId", "") or "")
+  report = _read_json(paths["reports"] / f"{report_id}.json", {}) if report_id else {}
+  report_car = report.get("car", {}) if isinstance(report, dict) else {}
+  current_car = _current_car_identity(params)
+  car_fingerprint = current_car["carFingerprint"] or str(report_car.get("carFingerprint", "") or "")
+  brand = current_car["brand"] or str(report_car.get("brand", "") or "")
+  now = time.time()
+  tune_id = f"tune-{time.time_ns()}"
+  tune = {
+    "schemaVersion": 1,
+    "tuneId": tune_id,
+    "name": _normalize_saved_tune_name(name),
+    "createdAt": now,
+    "updatedAt": now,
+    "carFingerprint": car_fingerprint,
+    "brand": brand,
+    "sourceReportId": report_id,
+    "sourceProfileId": str(display_state.get("profileId", "") or ""),
+    "pathKey": str(display_state.get("pathKey", "") or ""),
+    "pathLabel": str(display_state.get("pathLabel", "") or ""),
+    "baselineParams": baseline_params,
+    "genericParams": generic_params,
+    "flmOverrides": flm_overrides,
+  }
+  _write_json(paths["savedTunes"] / f"{tune_id}.json", tune)
+  active_snapshot.update({
+    "profileId": f"saved:{tune_id}",
+    "savedTuneId": tune_id,
+    "profileLabel": tune["name"],
+    "carFingerprint": car_fingerprint,
+    "updatedAt": now,
+  })
+  _write_json(paths["snapshots"] / "active.json", active_snapshot)
+  _apply_param_bundle(params, {"FLMActiveProfileId": f"saved:{tune_id}"})
+  return {
+    "message": f"Saved {tune['name']}.",
+    "tune": tune,
+    "workspace": list_workspace(),
+  }
+
+
+def apply_saved_tune(tune_id: str) -> dict[str, Any]:
+  paths = ensure_flm_workspace()
+  tune = _load_saved_tune(tune_id, paths)
+  params = Params(return_defaults=True)
+  current_car = _current_car_identity(params)
+  tune_fingerprint = str(tune.get("carFingerprint", "") or "")
+  if current_car["carFingerprint"] and tune_fingerprint and current_car["carFingerprint"] != tune_fingerprint:
+    raise RuntimeError(
+      f"This tune is for {tune_fingerprint}, but the connected car is {current_car['carFingerprint']}."
+    )
+
+  current_state = _snapshot_current_trial_state(params)
+  raw_active_snapshot = _read_json(paths["snapshots"] / "active.json", {})
+  if not isinstance(raw_active_snapshot, dict):
+    raw_active_snapshot = {}
+  previous_display_state = _active_trial_display_state(paths, raw_active_snapshot) or {}
+  if current_state.get("FLMTrialApplied", False):
+    active_fingerprint = _active_trial_car_fingerprint(paths, raw_active_snapshot)
+    changing_cars = bool(current_car["carFingerprint"] and active_fingerprint and current_car["carFingerprint"] != active_fingerprint)
+    if changing_cars:
+      saved_baseline = tune.get("baselineParams", {})
+      if not isinstance(saved_baseline, dict) or not saved_baseline or saved_baseline.get("FLMTrialApplied", False):
+        raise RuntimeError("This saved tune does not contain a clean baseline for the connected car. Revert before changing cars, then save the tune again.")
+      baseline_params = saved_baseline
+      session_started_at = time.time()
+    else:
+      baseline_snapshot = _find_revert_snapshot(
+        paths,
+        raw_active_snapshot,
+        str(current_state.get("FLMActiveProfileId", "") or ""),
+        params,
+      )
+      if baseline_snapshot is None:
+        raise RuntimeError("The active FLM trial has no recoverable rollback baseline. Keep the current tune as the new baseline before switching tunes.")
+      baseline_params = baseline_snapshot["params"]
+      session_started_at = float(baseline_snapshot.get("sessionStartedAt", baseline_snapshot.get("capturedAt", time.time())) or time.time())
+  else:
+    baseline_params = current_state
+    session_started_at = time.time()
+
+  generic_params = {
+    key: value for key, value in tune.get("genericParams", {}).items()
+    if key in FLM_ADVANCED_LATERAL_PARAM_KEYS
+  } if isinstance(tune.get("genericParams"), dict) else {}
+  flm_overrides = normalize_flm_overrides(tune.get("flmOverrides", {}))
+  profile_id = f"saved:{tune_id}"
+  now = time.time()
+  snapshot = {
+    "reportId": str(tune.get("sourceReportId", "") or ""),
+    "profileId": profile_id,
+    "profileLabel": str(tune.get("name", "Saved Tune") or "Saved Tune"),
+    "savedTuneId": tune_id,
+    "carFingerprint": tune_fingerprint,
+    "pathKey": str(tune.get("pathKey", "") or ""),
+    "pathLabel": str(tune.get("pathLabel", "") or ""),
+    "capturedAt": session_started_at,
+    "updatedAt": now,
+    "sessionStartedAt": session_started_at,
+    "revisionCount": int(previous_display_state.get("revisionCount", 0) or 0) + 1,
+    "params": baseline_params,
+    "appliedGenericParams": generic_params,
+    "appliedFrictionThresholds": flm_overrides.get("baseFrictionThresholds", {}),
+    "appliedVehicleKnobs": flm_overrides.get("vehicleKnobs", {}),
+  }
+  _write_json(paths["snapshots"] / "active.json", snapshot)
+  _write_json(paths["snapshots"] / f"saved-{tune_id}-{time.time_ns()}.json", snapshot)
+  _persist_trial_baseline(params, snapshot)
+
+  # Start from the original manual baseline on every switch so values from the
+  # previously active saved tune cannot leak into this one.
+  bundle = {
+    key: baseline_params[key] for key in FLM_ADVANCED_LATERAL_PARAM_KEYS
+    if key in baseline_params
+  }
+  bundle.update(generic_params)
+  bundle["FLMActiveProfileId"] = profile_id
+  bundle["FLMActiveOverrides"] = flm_overrides
+  bundle["FLMTrialApplied"] = True
+  _apply_param_bundle(params, bundle)
+  if tune.get("pathKey") == "cleanup_pass" and tune_fingerprint:
+    _record_cleanup_progress(tune_fingerprint, str(tune.get("sourceReportId", "") or ""))
+  return {
+    "message": f"Applied saved tune {tune.get('name', 'Saved Tune')}.",
+    "tune": tune,
+    "workspace": list_workspace(),
+  }
+
+
+def rename_saved_tune(tune_id: str, name: str) -> dict[str, Any]:
+  paths = ensure_flm_workspace()
+  tune = _load_saved_tune(tune_id, paths)
+  tune["name"] = _normalize_saved_tune_name(name)
+  tune["updatedAt"] = time.time()
+  _write_json(paths["savedTunes"] / f"{tune_id}.json", tune)
+  active_snapshot_path = paths["snapshots"] / "active.json"
+  active_snapshot = _read_json(active_snapshot_path, {})
+  if isinstance(active_snapshot, dict) and active_snapshot.get("savedTuneId") == tune_id:
+    active_snapshot["profileLabel"] = tune["name"]
+    active_snapshot["updatedAt"] = time.time()
+    _write_json(active_snapshot_path, active_snapshot)
+  return {
+    "message": f"Renamed saved tune to {tune['name']}.",
+    "tune": tune,
+    "workspace": list_workspace(),
+  }
+
+
+def delete_saved_tune(tune_id: str) -> dict[str, Any]:
+  paths = ensure_flm_workspace()
+  tune = _load_saved_tune(tune_id, paths)
+  active_snapshot = _read_json(paths["snapshots"] / "active.json", {})
+  params = Params(return_defaults=True)
+  current_profile_id = params.get("FLMActiveProfileId", encoding="utf-8") or ""
+  if (
+    (isinstance(active_snapshot, dict) and active_snapshot.get("savedTuneId") == tune_id)
+    or (params.get_bool("FLMTrialApplied") and current_profile_id == f"saved:{tune_id}")
+  ):
+    raise RuntimeError("Revert or switch away from this saved tune before deleting it.")
+  (paths["savedTunes"] / f"{tune_id}.json").unlink()
+  return {
+    "message": f"Deleted saved tune {tune.get('name', 'Saved Tune')}.",
+    "workspace": list_workspace(),
+  }
+
+
 def apply_trial_profile(report_id: str, profile_id: str) -> dict[str, Any]:
   paths = ensure_flm_workspace()
   params = Params(return_defaults=True)
@@ -2894,7 +3421,16 @@ def revert_trial_profile() -> dict[str, Any]:
   current_profile_id = params.get("FLMActiveProfileId", encoding="utf-8") or ""
   revert_snapshot = _find_revert_snapshot(paths, snapshot if isinstance(snapshot, dict) else {}, current_profile_id, params)
   if revert_snapshot is None:
-    raise FileNotFoundError("active trial snapshot")
+    params.put_bool("FLMTrialApplied", False)
+    params.put("FLMActiveProfileId", "")
+    params.put("FLMActiveOverrides", {})
+    _clear_persistent_trial_baseline(params)
+    try:
+      snapshot_path.unlink()
+    except FileNotFoundError:
+      pass
+    Params(memory=True).put_bool("StarPilotTogglesUpdated", True)
+    return {"message": "Recovered the incomplete FLM trial; no rollback snapshot was available.", "recovered": True}
   _apply_param_bundle(params, revert_snapshot["params"])
   _clear_persistent_trial_baseline(params)
   try:

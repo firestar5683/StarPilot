@@ -12,7 +12,7 @@ class PedalIconsWidget(LayoutWidget):
 
   @property
   def is_visible(self) -> bool:
-    params = ui_state.params
+    params = ui_state.ui_params
     if not params.get_bool("PedalsOnUI"):
       return False
     # Only render when car state is valid

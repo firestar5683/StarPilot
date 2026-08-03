@@ -76,4 +76,3 @@ class WidgetLayoutManager:
       for widget in zone:
         if widget.is_visible and widget.name not in skip:
           widget.render(widget.rect)
-

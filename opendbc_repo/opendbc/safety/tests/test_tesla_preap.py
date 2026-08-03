@@ -68,6 +68,10 @@ class TestTeslaPreAPSafety(common.SafetyTestBase):
     return common.make_msg(0, 0x2B9, 8, dat)
 
   @staticmethod
+  def _msg(addr: int, dat: bytes | bytearray = bytes(8), bus: int = 0):
+    return common.make_msg(bus, addr, len(dat), bytearray(dat))
+
+  @staticmethod
   def _pedal_cmd_msg(raw_cmd: int = 700, enable: bool = True, bus: int = 0):
     dat = bytearray(6)
     dat[0] = (raw_cmd >> 8) & 0xFF
@@ -135,6 +139,64 @@ class TestTeslaPreAPSafety(common.SafetyTestBase):
     self.safety.set_controls_allowed(True)
     self.assertTrue(self._tx(self._pedal_cmd_msg()))
     self.assertTrue(self._tx(self._pedal_cmd_msg(raw_cmd=0, enable=False)))
+    self.assertFalse(self._tx(self._pedal_cmd_msg(raw_cmd=501, enable=False)))
+
+  def test_rx_state_paths(self):
+    self.safety.set_controls_allowed(True)
+    self.assertTrue(self._rx(self._msg(0x155, b"\x00\x00\x00\x00\x00\x00\x64\x00")))
+    self.assertTrue(self.safety.get_vehicle_moving())
+    self.assertTrue(self._rx(self._msg(0x368, b"\x00\x30\x00\x00\x00\x00\x00\x00")))
+    self.assertFalse(self.safety.get_vehicle_moving())
+
+    self.assertTrue(self._rx(self._msg(0x108, b"\x00\x00\x00\x00\x00\x00\x01\x00")))
+    self.assertTrue(self.safety.get_gas_pressed_prev())
+    self.assertTrue(self._rx(self._msg(0x20A)))
+    self.assertFalse(self.safety.get_brake_pressed_prev())
+
+    self.assertTrue(self._rx(self._steering_status_msg(eac_status=0, eac_error_code=6)))
+    self.assertTrue(self.safety.get_steering_disengage_prev())
+
+    self.safety.set_controls_allowed(True)
+    self.assertTrue(self._rx(self._gear_msg(3)))
+    self.assertFalse(self.safety.get_controls_allowed())
+
+  def test_all_door_sources_disengage(self):
+    for index, mask in ((1, 0x10), (1, 0x40), (2, 0x40), (3, 0x20), (6, 0x04), (5, 0x40)):
+      self._set_mode(0)
+      self.safety.set_controls_allowed(True)
+      dat = bytearray(8)
+      dat[index] = mask
+      self.assertTrue(self._rx(self._msg(0x318, dat)))
+      self.assertFalse(self.safety.get_controls_allowed())
+
+  def test_stalk_cancel_echo_window(self):
+    self._prime_can_engage()
+    self.safety.set_timer(100000)
+    self.assertTrue(self._rx(self._stalk_msg(2)))
+    self.safety.set_timer(200000)
+    self.assertTrue(self._rx(self._stalk_msg(1)))
+    self.assertTrue(self.safety.get_controls_allowed())
+
+  def test_pedal_rx_sources(self):
+    self._set_mode(1)
+    self.assertTrue(self._rx(self._msg(0x552, b"\x02\x8b\x00\x00\x00\x00")))
+    self.assertTrue(self.safety.get_gas_pressed_prev())
+    self._set_mode(1)
+    self.assertTrue(self._rx(self._msg(0x552, b"\x00\x00\x00\x00\x00\x00", bus=2)))
+    self.assertFalse(self.safety.get_gas_pressed_prev())
+
+  def test_radar_emulation_input_paths(self):
+    self._set_mode(2 | 4)
+    for addr in (0x45, 0x108, 0x145, 0x20A, 0x308, 0x30A, 0x405):
+      self.assertTrue(self._rx(self._msg(addr)))
+
+    self.assertTrue(self._rx(self._msg(0x398, b"\x00\x00\x00\x00\x00\x00\x00\x00")))
+    self.assertTrue(self._rx(self._msg(0x0E, b"\x00\x00\x3f\xff\x00\x00\x00\x00")))
+    self.assertTrue(self._rx(self._msg(0x0E)))
+    self.assertTrue(self._rx(self._msg(0x115, b"\x00\x00\x00\x00\xa0\x00\x00\x00")))
+    self.assertTrue(self._rx(self._msg(0x118, b"\x00\x00\xff\x0f\x01\x00")))
+    self.assertTrue(self._rx(self._msg(0x118, b"\x00\x00\x01\x00\x01\x00")))
+    self.assertTrue(self._rx(self._msg(0x118, b"\x00\x00\x20\x03\x02\x00")))
 
   def test_forwarding_passthrough(self):
     self.assertEqual(self.safety.safety_fwd_hook(0, 0x123), 2)

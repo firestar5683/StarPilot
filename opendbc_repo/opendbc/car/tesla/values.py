@@ -3,7 +3,7 @@ from enum import Enum, IntFlag
 from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, Bus, CarSpecs, DbcDict, PlatformConfig, Platforms
 from opendbc.car.lateral import AngleSteeringLimits, ISO_LATERAL_ACCEL
 from opendbc.car.structs import CarParams, CarState
-from opendbc.car.docs_definitions import CarDocs, CarFootnote, CarHarness, CarParts, Column
+from opendbc.car.docs_definitions import CarDocs, CarFootnote, CarHarness, CarParts, Column, SupportType
 from opendbc.car.fw_query_definitions import FwQueryConfig, Request, StdQueries
 
 Ecu = CarParams.Ecu
@@ -61,7 +61,7 @@ class CAR(Platforms):
     CarSpecs(mass=2495., wheelbase=2.960, steerRatio=12.0),
   )
   TESLA_MODEL_S_PREAP = TeslaPlatformConfig(
-    [CarDocs("Tesla Model S (Pre-AP) 2012-14", "All")],
+    [CarDocs("Tesla Model S (Pre-AP) 2012-14", "All", support_type=SupportType.COMMUNITY, support_link="#community")],
     CarSpecs(mass=2100., wheelbase=2.960, steerRatio=15.0),
     {
       Bus.party: 'tesla_can',

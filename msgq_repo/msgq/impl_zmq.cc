@@ -21,6 +21,9 @@ static size_t fnv1a_hash(const std::string &str) {
 
 static std::string namespaced_endpoint(std::string endpoint) {
     const char *namespace_env = std::getenv("OPENPILOT_ZMQ_NAMESPACE");
+    if (namespace_env == nullptr || namespace_env[0] == '\0') {
+        namespace_env = std::getenv("OPENPILOT_PREFIX");
+    }
     if (namespace_env != nullptr && namespace_env[0] != '\0') {
         endpoint = std::string(namespace_env) + ":" + endpoint;
     }

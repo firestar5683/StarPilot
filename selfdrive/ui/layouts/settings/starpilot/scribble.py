@@ -1,9 +1,10 @@
 from __future__ import annotations
 import math
 import pyray as rl
+from openpilot.system.ui.lib.application import gui_app
 
 
-def draw_custom_icon(key: str, x: float, y: float, s: float, color: rl.Color):
+def _draw_custom_icon_geometry(key: str, x: float, y: float, s: float, color: rl.Color):
 
   # Helper for drawing quadratic Bezier curves
   def draw_bezier(p0: rl.Vector2, p1: rl.Vector2, p2: rl.Vector2, thick: float):
@@ -425,4 +426,43 @@ def draw_custom_icon(key: str, x: float, y: float, s: float, color: rl.Color):
     rl.draw_line_ex(rl.Vector2(x_c - 6.5 * s, y_c + 2.5 * s), rl.Vector2(x_c + 6.5 * s, y_c + 2.5 * s), 3.5 * s, color)
 
 
+def draw_custom_icon(key: str, x: float, y: float, s: float, color: rl.Color):
+  """Draw a custom icon, caching its static vector geometry on the GPU."""
+  cache = getattr(gui_app, "cached_render_texture", None)
+  if hasattr(color, "r"):
+    color_key = (color.r, color.g, color.b, color.a)
+  else:
+    components = tuple(color)
+    color_key = (*components[:3], components[3] if len(components) > 3 else 255)
+  if cache is None:
+    _draw_custom_icon_geometry(key, x, y, s, color)
+    return
 
+  # A few strokes extend beyond the authored 60x60 canvas. Padding prevents
+  # those edges from being clipped by the render texture.
+  padding = max(1, int(math.ceil(3.0 * s)))
+  icon_size = max(1, int(round(60.0 * s)))
+  width = icon_size + 2 * padding
+  height = width
+  cache_key = f"aethergrid-icon:{key}:{round(s, 4)}:{width}:{height}:{color_key}"
+  texture = cache(cache_key, width, height,
+                  lambda: _draw_custom_icon_geometry(key, padding, padding, s, color))
+  if texture is None:
+    _draw_custom_icon_geometry(key, x, y, s, color)
+    return
+
+  # Render targets contain premultiplied alpha after drawing onto transparent
+  # black. Use the matching blend mode to avoid applying translucent icon
+  # alpha twice when compositing the cached texture.
+  rl.begin_blend_mode(rl.BlendMode.BLEND_ALPHA_PREMULTIPLY)
+  try:
+    rl.draw_texture_pro(
+      texture,
+      rl.Rectangle(0, 0, width, -height),
+      rl.Rectangle(x - padding, y - padding, width, height),
+      rl.Vector2(0, 0),
+      0.0,
+      rl.WHITE,
+    )
+  finally:
+    rl.end_blend_mode()

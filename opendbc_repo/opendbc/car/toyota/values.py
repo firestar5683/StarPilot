@@ -207,7 +207,7 @@ class CAR(Platforms):
     dbc_dict('toyota_new_mc_pt_generated', 'toyota_adas'),
   )
   TOYOTA_MATRIX_RETROFIT = PlatformConfig(
-    [ToyotaCommunityCarDocs("Toyota Matrix 2005 Retrofit", package="Custom retrofit")],
+    [ToyotaCommunityCarDocs("Toyota Matrix Retrofit 2005", package="Custom retrofit")],
     TOYOTA_COROLLA.specs,
     dbc_dict('toyota_new_mc_pt_generated', 'toyota_adas'),
   )
@@ -324,7 +324,7 @@ class CAR(Platforms):
     flags=ToyotaFlags.NO_STOP_TIMER,
   )
   TOYOTA_SIENNA_4TH_GEN = ToyotaSecOCPlatformConfig(
-    [ToyotaCommunityCarDocs("Toyota Sienna 2021-23", min_enable_speed=MIN_ACC_SPEED)],
+    [ToyotaCommunityCarDocs("Toyota Sienna 2021-25", min_enable_speed=MIN_ACC_SPEED)],
     CarSpecs(mass=4625. * CV.LB_TO_KG, wheelbase=3.06, steerRatio=17.8, tireStiffnessFactor=0.444),
   )
 

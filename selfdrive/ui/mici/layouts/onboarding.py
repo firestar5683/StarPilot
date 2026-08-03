@@ -124,7 +124,7 @@ class TrainingGuideDMTutorial(NavWidget):
       ui_state.params.put_bool_nonblocking("IsDriverViewEnabled", True)
 
     sm = ui_state.sm
-    if sm.recv_frame.get("driverMonitoringState", 0) == 0:
+    if sm.recv_frame.get("driverMonitoringState", 0) == 0 or sm.recv_frame.get("driverStateV2", 0) == 0:
       return
 
     dm_state = sm["driverMonitoringState"]
@@ -351,6 +351,7 @@ class OnboardingWindow(Widget):
     self._terms.set_enabled(lambda: self.enabled)  # for nav stack
     self._training_guide = TrainingGuide(completed_callback=self._on_completed_training)
     self._training_guide.set_enabled(lambda: self.enabled)  # for nav stack
+    self._needs_initial_push = False
 
   def _on_uninstall(self):
     ui_state.params.put_bool("DoUninstall", True)
@@ -359,6 +360,7 @@ class OnboardingWindow(Widget):
     super().show_event()
     device.set_override_interactive_timeout(300)
     device.set_offroad_brightness(100)
+    self._needs_initial_push = True
 
   def hide_event(self):
     super().hide_event()
@@ -376,12 +378,20 @@ class OnboardingWindow(Widget):
 
   def _on_terms_accepted(self):
     ui_state.params.put("HasAcceptedTerms", terms_version)
+    self._accepted_terms = True
     gui_app.push_widget(self._training_guide)
 
   def _on_completed_training(self):
     ui_state.params.put("CompletedTrainingVersion", training_version)
+    self._training_done = True
     self.close()
 
   def _render(self, _):
     rl.draw_rectangle_rec(self._rect, rl.BLACK)
+
+    if self._needs_initial_push:
+      self._needs_initial_push = False
+      if self._accepted_terms and not self._training_done:
+        gui_app.push_widget(self._training_guide)
+
     self._terms.render(self._rect)

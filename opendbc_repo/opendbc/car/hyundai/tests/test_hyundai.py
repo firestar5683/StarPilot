@@ -22,7 +22,7 @@ from opendbc.car.hyundai import hyundaican, hyundaicanfd
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.radar_interface import MRREVO14F_RADAR_START_ADDR, MRR30_RADAR_START_ADDR, MRR35_RADAR_START_ADDR, \
                                              RADAR_START_ADDR, get_radar_track_config
-from opendbc.car.hyundai.values import CAMERA_SCC_CAR, CANFD_CAR, CAN_GEARS, CAR, CHECKSUM, DATE_FW_ECUS, \
+from opendbc.car.hyundai.values import CAMERA_SCC_CAR, CANFD_CAR, CAN_GEARS, CAR, CHECKSUM, DATE_FW_ECUS, DATELESS_FUZZY_CARS, \
                                          HYBRID_CAR, EV_CAR, FW_QUERY_CONFIG, LEGACY_SAFETY_MODE_CAR, CANFD_FUZZY_WHITELIST, \
                                          UNSUPPORTED_LONGITUDINAL_CAR, PLATFORM_CODE_ECUS, HYUNDAI_VERSION_REQUEST_LONG, \
                                          LEGACY_LONGITUDINAL_CAR, DBC, HyundaiFlags, get_platform_codes, HyundaiSafetyFlags, \
@@ -56,6 +56,7 @@ NO_DATES_PLATFORMS = {
   CAR.KIA_OPTIMA_G4_FL,
   CAR.KIA_SORENTO,
   CAR.HYUNDAI_KONA,
+  CAR.HYUNDAI_KONA_NON_SCC,
   CAR.HYUNDAI_KONA_EV,
   CAR.HYUNDAI_KONA_EV_2022,
   CAR.HYUNDAI_KONA_HEV,
@@ -369,6 +370,55 @@ class TestHyundaiFingerprint:
     assert palisade_2023.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.CAN_CANFD_BLENDED
     assert palisade_2023.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.CANCEL_BTN_ENABLE
 
+  def test_palisade_telluride_hda2_uses_mixed_can_layout(self):
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[2][0x50] = 16
+    car_fw = [CarParams.CarFw(ecu=Ecu.adas, fwVersion=b"", address=0x730, brand="hyundai")]
+
+    CP = CarInterface.get_params(CAR.HYUNDAI_PALISADE_2023, fingerprint, car_fw, True, False, False, None)
+    can_bus = CanBus(CP)
+    parsers = CarState(CP, None).get_can_parsers(CP)
+
+    assert CP.flags & HyundaiFlags.CAN_CANFD_BLENDED
+    assert CP.flags & HyundaiFlags.CANFD_LKA_STEERING
+    assert not CP.alphaLongitudinalAvailable
+    assert not CP.openpilotLongitudinalControl
+    assert CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.CAN_CANFD_BLENDED
+    assert CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.CANFD_LKA_STEERING
+    assert can_bus.ACAN == 0
+    assert can_bus.ECAN == 1
+    assert parsers[Bus.pt].bus == 1
+    assert parsers[Bus.cam].bus == 2
+    assert CarControllerParams(CP).STEER_MAX == 384
+
+  def test_palisade_telluride_hda2_sends_lkas_and_camera_suppression(self):
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[2][0x50] = 16
+    car_fw = [CarParams.CarFw(ecu=Ecu.adas, fwVersion=b"", address=0x730, brand="hyundai")]
+    CP = CarInterface.get_params(CAR.HYUNDAI_PALISADE_2023, fingerprint, car_fw, False, False, False, None)
+    controller = CarController(DBC[CP.carFingerprint], CP)
+    controller.frame = 0
+
+    hud_control = SimpleNamespace(
+      visualAlert=CarControl.HUDControl.VisualAlert.none,
+      leftLaneVisible=True,
+      rightLaneVisible=True,
+      leftLaneDepart=False,
+      rightLaneDepart=False,
+    )
+    lfa_block_msg = {f"BYTE{i}": 0 for i in range(3, 24) if i != 7}
+    lfa_block_msg["COUNTER"] = 0
+    CS = SimpleNamespace(lfa_block_msg=lfa_block_msg, redneck_send_button=Buttons.NONE)
+    CC = SimpleNamespace(enabled=True, cruiseControl=SimpleNamespace(cancel=False, resume=False))
+    actuators = SimpleNamespace(longControlState=LongCtrlState.off)
+
+    msgs = controller.create_can_msgs(True, 100, False, 0.0, 0.0, False, hud_control, actuators, CS, CC, 2)
+    msg_addrs_buses = {(addr, bus) for addr, _, bus in msgs}
+
+    assert (0x50, 0) in msg_addrs_buses
+    assert (0x2A4, 0) in msg_addrs_buses
+    assert not ({0x340, 0x364} & {addr for addr, _, _ in msgs})
+
   @pytest.mark.parametrize("candidate", (CAR.HYUNDAI_ELANTRA_2024, CAR.HYUNDAI_ELANTRA_HEV_2024))
   def test_hyundai_can_refresh_platforms_use_refresh_dbc_and_safety_param(self, candidate):
     CP = CarInterface.get_params(candidate, gen_empty_fingerprint(), [], False, False, False, None)
@@ -396,6 +446,30 @@ class TestHyundaiFingerprint:
 
     palisade_2023 = CarInterface.get_params(CAR.HYUNDAI_PALISADE_2023, gen_empty_fingerprint(), [], True, False, False, None)
     assert palisade_2023.safetyConfigs[-1].safetyParam & HyundaiStarPilotSafetyFlags.HAS_LDA_BUTTON
+
+  def test_sonata_hybrid_aol_main_lkas_sync_is_scoped(self):
+    toggles = SimpleNamespace(always_on_lateral_lkas=True, main_cruise_aol_toggle=True)
+
+    sonata_hybrid_cp = CarInterface.get_params(CAR.HYUNDAI_SONATA_HYBRID, gen_empty_fingerprint(), [], False, False, False, None)
+    sonata_hybrid_fpcp = CarInterface.get_starpilot_params(
+      CAR.HYUNDAI_SONATA_HYBRID, gen_empty_fingerprint(), [], sonata_hybrid_cp, toggles,
+    )
+    assert sonata_hybrid_fpcp.safetyConfigs[-1].safetyParam & HyundaiStarPilotSafetyFlags.AOL_MAIN_LKAS_SYNC
+
+    sonata_cp = CarInterface.get_params(CAR.HYUNDAI_SONATA, gen_empty_fingerprint(), [], False, False, False, None)
+    sonata_fpcp = CarInterface.get_starpilot_params(CAR.HYUNDAI_SONATA, gen_empty_fingerprint(), [], sonata_cp, toggles)
+    assert not (sonata_fpcp.safetyConfigs[-1].safetyParam & HyundaiStarPilotSafetyFlags.AOL_MAIN_LKAS_SYNC)
+
+    disabled_toggles = SimpleNamespace(always_on_lateral_lkas=True, main_cruise_aol_toggle=False)
+    disabled_fpcp = CarInterface.get_starpilot_params(
+      CAR.HYUNDAI_SONATA_HYBRID, gen_empty_fingerprint(), [], sonata_hybrid_cp, disabled_toggles,
+    )
+    assert not (disabled_fpcp.safetyConfigs[-1].safetyParam & HyundaiStarPilotSafetyFlags.AOL_MAIN_LKAS_SYNC)
+
+    minimal_fpcp = CarInterface.get_starpilot_params(
+      CAR.HYUNDAI_SONATA_HYBRID, gen_empty_fingerprint(), [], sonata_hybrid_cp, SimpleNamespace(),
+    )
+    assert not (minimal_fpcp.safetyConfigs[-1].safetyParam & HyundaiStarPilotSafetyFlags.AOL_MAIN_LKAS_SYNC)
 
   def test_non_scc_flag_quirks(self):
     elantra_hev = CarInterface.get_params(CAR.HYUNDAI_ELANTRA_HEV_2022_NON_SCC, gen_empty_fingerprint(), [], True, False, False, None)
@@ -694,8 +768,8 @@ class TestHyundaiFingerprint:
     CP = CarInterface.get_params(CAR.HYUNDAI_ELANTRA_2021, gen_empty_fingerprint(), [], True, False, False, toggles)
 
     assert CP.longitudinalActuatorDelay == pytest.approx(0.22)
-    assert CP.stopAccel == pytest.approx(-1.5)
-    assert CP.stoppingDecelRate == pytest.approx(0.5)
+    assert CP.stopAccel == pytest.approx(-0.85)
+    assert CP.stoppingDecelRate == pytest.approx(0.35)
 
   def test_elantra_hev_2024_longitudinal_delay_matches_observed_response(self):
     toggles = get_test_toggles()
@@ -777,6 +851,22 @@ class TestHyundaiFingerprint:
     exact, matches = match_fw_to_car(car_fw, "", allow_exact=True, allow_fuzzy=False, log=False)
     assert exact
     assert CAR.HYUNDAI_KONA_NON_SCC in matches
+
+  def test_kona_non_scc_fw_matches_with_unstable_transmission_padding(self):
+    route_fw = {
+      (Ecu.eps, 0x7d4): b'\xf1\x00OS  MDPS C 1.00 1.05 56310/J9500 4OSDC105',
+      (Ecu.fwdCamera, 0x7c4): b'\xf1\x00OS9 LKAS AT AUS RHD 1.00 1.00 95740-J9200 g30',
+      (Ecu.fwdRadar, 0x7d0): b'\xf1\x00OS__ FCA --CUP      1.00 1.00 95655-J9100         ',
+      (Ecu.transmission, 0x7e1): b'\xf1\x006U2V0_C2\x00\x006U2V1051\x00\x00DOS4T16AS2\x0e\xdc_\xa7',
+    }
+    car_fw = [
+      CarParams.CarFw(ecu=ecu, fwVersion=version, address=address, subAddress=0, brand="hyundai")
+      for (ecu, address), version in route_fw.items()
+    ]
+
+    exact, matches = match_fw_to_car(car_fw, "", log=False)
+    assert not exact
+    assert matches == {CAR.HYUNDAI_KONA_NON_SCC}
 
   def test_kia_forte_2019_non_scc_does_not_require_fca11_or_scc12(self):
     toggles = get_test_toggles()
@@ -2707,7 +2797,7 @@ class TestHyundaiFingerprint:
       CAR.GENESIS_G70_2020,
     }
     excluded_platforms |= CANFD_CAR - EV_CAR - CANFD_FUZZY_WHITELIST  # shared platform codes
-    excluded_platforms |= NO_DATES_PLATFORMS  # date codes are required to match
+    excluded_platforms |= NO_DATES_PLATFORMS - DATELESS_FUZZY_CARS
 
     platforms_with_shared_codes = set()
     for platform, fw_by_addr in FW_VERSIONS.items():

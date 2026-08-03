@@ -106,11 +106,11 @@ class SoftwareLayout(Widget):
     super().__init__()
 
     self._onroad_label = ListItem(lambda: tr("Updates are only downloaded while the car is off."))
-    self._version_item = text_item(lambda: tr("Current Version"), starpilot_display_description(ui_state.params.get("UpdaterCurrentDescription")))
+    self._version_item = text_item(lambda: tr("Current Version"), starpilot_display_description(ui_state.ui_params.get("UpdaterCurrentDescription")))
     self._auto_updates_toggle = toggle_item(
       lambda: tr("Automatically Install Updates"),
       lambda: tr("Automatically install updates when parked with an active internet connection."),
-      initial_state=ui_state.params.get_bool("AutomaticUpdates"),
+      initial_state=ui_state.ui_params.get_bool("AutomaticUpdates"),
       callback=self._on_auto_updates_toggle,
     )
     self._download_btn = button_item(
@@ -129,8 +129,8 @@ class SoftwareLayout(Widget):
 
     # Branch switcher
     self._branch_btn = button_item(lambda: tr("Target Branch"), lambda: tr("SELECT"), callback=self._on_select_branch)
-    self._branch_btn.set_visible(not ui_state.params.get_bool("IsTestedBranch"))
-    self._branch_btn.action_item.set_value(ui_state.params.get("UpdaterTargetBranch") or "")
+    self._branch_btn.set_visible(not ui_state.ui_params.get_bool("IsTestedBranch"))
+    self._branch_btn.action_item.set_value(ui_state.ui_params.get("UpdaterTargetBranch") or "")
     self._branch_dialog: MultiOptionDialog | None = None
 
     self._scroller = Scroller(
@@ -159,11 +159,11 @@ class SoftwareLayout(Widget):
     self._onroad_label.set_visible(ui_state.is_onroad())
 
     # Update current version and release notes
-    current_desc = starpilot_display_description(ui_state.params.get("UpdaterCurrentDescription"))
-    current_release_notes = (ui_state.params.get("UpdaterCurrentReleaseNotes") or b"").decode("utf-8", "replace")
+    current_desc = starpilot_display_description(ui_state.ui_params.get("UpdaterCurrentDescription"))
+    current_release_notes = (ui_state.ui_params.get("UpdaterCurrentReleaseNotes") or b"").decode("utf-8", "replace")
     self._version_item.action_item.set_text(current_desc)
     self._version_item.set_description(current_release_notes)
-    self._auto_updates_toggle.action_item.set_state(ui_state.params.get_bool("AutomaticUpdates"))
+    self._auto_updates_toggle.action_item.set_state(ui_state.ui_params.get_bool("AutomaticUpdates"))
 
     # Update download button visibility and state
     self._download_btn.set_visible(ui_state.is_offroad())
@@ -185,10 +185,10 @@ class SoftwareLayout(Widget):
 
     # ── Normal updater state (only when fast update NOT active) ───
     if state.stage == FastUpdateStage.IDLE:
-      updater_state = ui_state.params.get("UpdaterState") or "idle"
-      failed_count = ui_state.params.get("UpdateFailedCount") or 0
-      fetch_available = ui_state.params.get_bool("UpdaterFetchAvailable")
-      update_available = ui_state.params.get_bool("UpdateAvailable")
+      updater_state = ui_state.ui_params.get("UpdaterState") or "idle"
+      failed_count = ui_state.ui_params.get("UpdateFailedCount") or 0
+      fetch_available = ui_state.ui_params.get_bool("UpdaterFetchAvailable")
+      update_available = ui_state.ui_params.get_bool("UpdateAvailable")
 
       if updater_state != "idle":
         self._waiting_for_updater = False
@@ -203,7 +203,7 @@ class SoftwareLayout(Widget):
           self._download_btn.action_item.set_value(tr("update available"))
           self._download_btn.action_item.set_text(tr("DOWNLOAD"))
         else:
-          last_update = ui_state.params.get("LastUpdateTime")
+          last_update = ui_state.ui_params.get("LastUpdateTime")
           if last_update:
             formatted = time_ago(last_update)
             self._download_btn.action_item.set_value(tr("up to date, last checked {}").format(formatted))
@@ -219,14 +219,14 @@ class SoftwareLayout(Widget):
       update_available = False
 
     # Update target branch button value
-    current_branch = ui_state.params.get("UpdaterTargetBranch") or ""
+    current_branch = ui_state.ui_params.get("UpdaterTargetBranch") or ""
     self._branch_btn.action_item.set_value(current_branch)
 
     # Update install button
     self._install_btn.set_visible(ui_state.is_offroad() and update_available and state.stage == FastUpdateStage.IDLE)
     if update_available and state.stage == FastUpdateStage.IDLE:
-      new_desc = starpilot_display_description(ui_state.params.get("UpdaterNewDescription"))
-      new_release_notes = (ui_state.params.get("UpdaterNewReleaseNotes") or b"").decode("utf-8", "replace")
+      new_desc = starpilot_display_description(ui_state.ui_params.get("UpdaterNewDescription"))
+      new_release_notes = (ui_state.ui_params.get("UpdaterNewReleaseNotes") or b"").decode("utf-8", "replace")
       self._install_btn.action_item.set_text(tr("INSTALL"))
       self._install_btn.action_item.set_value(new_desc)
       self._install_btn.set_description(new_release_notes)
@@ -327,7 +327,7 @@ class SoftwareLayout(Widget):
     threading.Thread(target=_run_worker, daemon=True).start()
 
   def _on_auto_updates_toggle(self, enabled: bool):
-    ui_state.params.put_bool("AutomaticUpdates", enabled)
+    ui_state.ui_params.put_bool("AutomaticUpdates", enabled)
 
   def _on_uninstall(self):
     def handle_step1(result):
@@ -338,13 +338,13 @@ class SoftwareLayout(Widget):
 
             def handle_step3(result3):
               if result3 == DialogResult.CONFIRM:
-                ui_state.params.clear_all()
-              ui_state.params.put_bool("DoUninstall", True)
+                ui_state.ui_params.clear_all()
+              ui_state.ui_params.put_bool("DoUninstall", True)
 
             dialog = ConfirmDialog(tr("This is a complete factory reset and cannot be undone. Are you absolutely sure?"), tr("Reset"), callback=handle_step3)
             gui_app.push_widget(dialog)
           else:
-            ui_state.params.put_bool("DoUninstall", True)
+            ui_state.ui_params.put_bool("DoUninstall", True)
 
         dialog = ConfirmDialog(
           tr("Do you want to perform a full factory reset? All saved assets and settings will be permanently deleted!"), tr("Factory Reset"), tr("Skip"), callback=handle_step2
@@ -364,12 +364,12 @@ class SoftwareLayout(Widget):
   def _on_install_update(self):
     # Trigger reboot to install update
     self._install_btn.action_item.set_enabled(False)
-    ui_state.params.put_bool("DoReboot", True)
+    ui_state.ui_params.put_bool("DoReboot", True)
 
   def _on_select_branch(self):
     # Get available branches and order
-    current_git_branch = ui_state.params.get("GitBranch") or ""
-    branches_str = ui_state.params.get("UpdaterAvailableBranches") or ""
+    current_git_branch = ui_state.ui_params.get("GitBranch") or ""
+    branches_str = ui_state.ui_params.get("UpdaterAvailableBranches") or ""
     branches = [b for b in branches_str.split(",") if b]
 
     for b in [current_git_branch, "devel-staging", "devel", "nightly", "nightly-dev", "master"]:
@@ -377,13 +377,13 @@ class SoftwareLayout(Widget):
         branches.remove(b)
         branches.insert(0, b)
 
-    current_target = ui_state.params.get("UpdaterTargetBranch") or ""
+    current_target = ui_state.ui_params.get("UpdaterTargetBranch") or ""
 
     def handle_selection(result):
       # Confirmed selection
       if result == DialogResult.CONFIRM and self._branch_dialog is not None and self._branch_dialog.selection:
         selection = self._branch_dialog.selection
-        ui_state.params.put("UpdaterTargetBranch", selection)
+        ui_state.ui_params.put("UpdaterTargetBranch", selection)
         self._branch_btn.action_item.set_value(selection)
         os.system("pkill -SIGUSR1 -f system.updated.updated")
       self._branch_dialog = None

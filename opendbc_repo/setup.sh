@@ -4,7 +4,7 @@ set -e
 BASEDIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)"
 
 # TODO: why doesn't uv do this?
-export PYTHONPATH=$BASEDIR
+export PYTHONPATH="$(dirname "$BASEDIR"):$BASEDIR${PYTHONPATH:+:$PYTHONPATH}"
 
 # *** dependencies install ***
 if [ "$(uname -s)" = "Linux" ]; then
@@ -16,13 +16,22 @@ if [ "$(uname -s)" = "Linux" ]; then
   fi
 fi
 
-if ! command -v uv &>/dev/null; then
-  echo "'uv' is not installed. Installing 'uv'..."
-  curl -LsSf https://astral.sh/uv/install.sh | sh
-fi
+if [ -d "$(dirname "$BASEDIR")/cereal" ] && [ -f "$(dirname "$BASEDIR")/.venv/bin/activate" ]; then
+  if [ "$(uname -s)" = "Darwin" ] && [ -f "$(dirname "$BASEDIR")/.host_runtime/darwin/worktree/.venv/bin/activate" ]; then
+    export VIRTUAL_ENV="$(dirname "$BASEDIR")/.host_runtime/darwin/worktree/.venv"
+  else
+    export VIRTUAL_ENV="$(dirname "$BASEDIR")/.venv"
+  fi
+  export PATH="$VIRTUAL_ENV/bin:$BASEDIR/.venv/bin:$PATH"
+else
+  if ! command -v uv &>/dev/null; then
+    echo "'uv' is not installed. Installing 'uv'..."
+    curl -LsSf https://astral.sh/uv/install.sh | sh
+  fi
 
-export UV_PROJECT_ENVIRONMENT="$BASEDIR/.venv"
-uv sync --all-extras
-source "$PYTHONPATH/.venv/bin/activate"
+  export UV_PROJECT_ENVIRONMENT="$BASEDIR/.venv"
+  uv sync --all-extras
+  source "$BASEDIR/.venv/bin/activate"
+fi
 
 $BASEDIR/opendbc/safety/tests/misra/install.sh

@@ -44,6 +44,7 @@
 
 #define TOYOTA_COMMON_SECOC_LONG_TX_MSGS \
   TOYOTA_COMMON_SECOC_TX_MSGS \
+  {0x344, 0, 8, .check_relay = false}, \
   {0x343, 0, 8, .check_relay = true}, \
   {0x183, 0, 8, .check_relay = true},  /* ACC_CONTROL_2 */ \
 
@@ -112,7 +113,7 @@ static uint32_t toyota_get_checksum(const CANPacket_t *msg) {
 static int toyota_get_interceptor(const CANPacket_t *msg) {
   uint16_t val1 = ((uint16_t)msg->data[0] << 8U) | (uint16_t)msg->data[1];
   uint16_t val2 = ((uint16_t)msg->data[2] << 8U) | (uint16_t)msg->data[3];
-  return (int)((val1 + val2) / 2U);
+  return ((int)val1 + (int)val2) / 2;
 }
 
 static bool toyota_get_quality_flag_valid(const CANPacket_t *msg) {
@@ -398,6 +399,8 @@ static bool toyota_tx_hook(const CANPacket_t *msg) {
       if (vehicle_moving || gas_pressed || !acc_main_on) {
         tx = false;
       }
+    } else if ((msg->addr == 0x344U) && toyota_stock_longitudinal) {
+      tx = false;
     }
   }
 
@@ -418,10 +421,12 @@ static bool toyota_tx_hook(const CANPacket_t *msg) {
 static safety_config toyota_init(uint16_t param) {
   static const CanMsg TOYOTA_TX_MSGS[] = {
     TOYOTA_COMMON_TX_MSGS
+    {0x344, 0, 8, .check_relay = false},
   };
 
   static const CanMsg TOYOTA_SECOC_TX_MSGS[] = {
     TOYOTA_COMMON_SECOC_TX_MSGS
+    {0x344, 0, 8, .check_relay = false},
   };
 
   static const CanMsg TOYOTA_LONG_TX_MSGS[] = {

@@ -31,7 +31,8 @@ class TestWebrtcdProc:
   async def test_webrtcd(self, mocker):
     mock_request = mocker.MagicMock()
     async def connect(offer):
-      body = {'sdp': offer.sdp, 'cameras': offer.video, 'bridge_services_in': self.in_services, 'bridge_services_out': self.out_services}
+      body = {'sdp': offer.sdp, 'init_camera': offer.video[0], 'enabled': True,
+              'bridge_services_in': self.in_services, 'bridge_services_out': self.out_services}
       mock_request.json.side_effect = mocker.AsyncMock(return_value=body)
       response = await get_stream(mock_request)
       response_json = json.loads(response.text)
@@ -62,4 +63,3 @@ class TestWebrtcdProc:
     assert mock_request.app["streams"].__setitem__.called, "Implementation changed, please update this test"
     _, session = mock_request.app["streams"].__setitem__.call_args.args
     await self.assertCompletesWithTimeout(session.post_run_cleanup())
-

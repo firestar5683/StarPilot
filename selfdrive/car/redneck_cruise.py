@@ -21,6 +21,8 @@ LEAD_EXTRA_COAST_BUFFER_FACTOR = 0.6
 LEAD_EXTRA_COAST_BUFFER_MAX_MS = 3.0 * CV.MPH_TO_MS
 LEAD_EXTRA_COAST_HEADWAY_MIN_S = 1.5
 LEAD_EXTRA_COAST_HEADWAY_MAX_S = 3.0
+LEAD_CLOSING_REL_SPEED_MIN_MS = 0.5 * CV.MPH_TO_MS
+LEAD_PROACTIVE_COAST_HEADWAY_MAX_S = 4.0
 LEAD_DEPARTURE_REL_SPEED_MIN_MS = 1.0 * CV.MPH_TO_MS
 LEAD_DEPARTURE_HEADWAY_MIN_S = 1.8
 LEAD_DEPARTURE_HEADWAY_MAX_S = 4.5
@@ -51,7 +53,8 @@ def select_redneck_target_speed(v_cruise_kph: float, speed_cluster_ms: float,
     target_speed_ms = float(starpilot_target_speed_ms)
 
   if allow_plan_decrease and len(plan_speeds_ms) > 0:
-    if lead_present and target_speed_ms > speed_cluster_ms and plan_speeds_ms[0] > speed_cluster_ms:
+    lead_closing = lead_present and lead_rel_speed_ms < -LEAD_CLOSING_REL_SPEED_MIN_MS
+    if lead_present and not lead_closing and target_speed_ms > speed_cluster_ms and plan_speeds_ms[0] > speed_cluster_ms:
       recovery_lookahead_points = min(len(plan_speeds_ms), LEAD_RECOVERY_LOOKAHEAD_POINTS)
       recovery_target_speed_ms = max(speed_cluster_ms, min(plan_speeds_ms[:recovery_lookahead_points]))
       departure_boost_ms = get_lead_departure_boost_ms(
@@ -65,16 +68,23 @@ def select_redneck_target_speed(v_cruise_kph: float, speed_cluster_ms: float,
       return min(target_speed_ms, recovery_target_speed_ms)
 
     decrease_target_speed_ms = min(plan_speeds_ms[:lookahead_points])
-    if lead_present and target_speed_ms > speed_cluster_ms and \
+    lead_headway_s = lead_distance_m / speed_cluster_ms if lead_distance_m > 0.0 and speed_cluster_ms > 0.1 else float("inf")
+    proactive_coast = lead_closing and lead_headway_s <= LEAD_PROACTIVE_COAST_HEADWAY_MAX_S
+
+    if not proactive_coast and lead_present and target_speed_ms > speed_cluster_ms and \
         decrease_target_speed_ms >= speed_cluster_ms - LEAD_RECOVERY_HOLD_BUFFER_MS:
       return speed_cluster_ms
 
-    if lead_present and decrease_target_speed_ms < speed_cluster_ms:
+    if lead_present and (decrease_target_speed_ms < speed_cluster_ms or proactive_coast):
       decrease_target_speed_ms = max(0.0, decrease_target_speed_ms - get_lead_coast_buffer_ms(
         speed_cluster_ms,
         lead_distance_m,
         lead_rel_speed_ms,
       ))
+
+    if proactive_coast and target_speed_ms > speed_cluster_ms and \
+        decrease_target_speed_ms >= speed_cluster_ms - LEAD_RECOVERY_HOLD_BUFFER_MS:
+      return speed_cluster_ms
 
     if decrease_target_speed_ms < target_speed_ms:
       return decrease_target_speed_ms

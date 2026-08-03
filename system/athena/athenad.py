@@ -28,7 +28,7 @@ from websocket import (ABNF, WebSocket, WebSocketException, WebSocketTimeoutExce
                        create_connection)
 
 import cereal.messaging as messaging
-from cereal import log
+from cereal import car, log
 from cereal.services import SERVICE_LIST
 from openpilot.common.api import Api, get_key_pair
 from openpilot.common.utils import CallbackReader, get_upload_stream
@@ -563,6 +563,34 @@ def getNetworkMetered() -> bool:
 @dispatcher.add_method
 def getNetworks():
   return HARDWARE.get_networks()
+
+
+@dispatcher.add_method
+def startStream(sdp: str, enabled: bool) -> dict:
+  from openpilot.system.webrtc.helpers import StreamRequestBody, post_stream_request, wait_for_webrtcd
+
+  params = Params()
+  bridge_services_in = []
+
+  # The manager shuts webrtcd down on ignition transitions, so persistent car
+  # params are safe here and remain available while the device is offroad.
+  cp_bytes = params.get("CarParamsPersistent")
+  if cp_bytes is None:
+    raise Exception("failed to get CarParamsPersistent")
+
+  with car.CarParams.from_bytes(cp_bytes) as CP:
+    if CP.notCar:
+      bridge_services_in.append("testJoystick")
+
+  if params.get_bool("IsOffroad"):
+    # Wake camerad, stream_encoderd, and webrtcd. webrtcd clears this after the
+    # last session ends, allowing manager to stop the extra processes again.
+    params.put_bool("IsLiveStreaming", True)
+    wait_for_webrtcd()
+
+  return post_stream_request(StreamRequestBody(
+    sdp, "wideRoad", enabled, bridge_services_in, ["carState", "deviceState"],
+  ))
 
 
 @dispatcher.add_method

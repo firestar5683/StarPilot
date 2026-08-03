@@ -27,45 +27,6 @@ static uint32_t preap_last_stalk_engage_us = 0;
 static int preap_radar_epas_type = 0;
 static int preap_radar_position = 0;
 
-static uint8_t tesla_preap_get_counter(const CANPacket_t *msg) {
-  if (msg->addr == 0x370U) {
-    return msg->data[6] & 0x0FU;
-  }
-  return 0U;
-}
-
-static uint32_t tesla_preap_get_checksum(const CANPacket_t *msg) {
-  if (msg->addr == 0x370U) {
-    return msg->data[7];
-  }
-  if (msg->addr == 0x488U) {
-    return msg->data[3];
-  }
-  return 0U;
-}
-
-static uint32_t tesla_preap_compute_checksum(const CANPacket_t *msg) {
-  int checksum_byte = -1;
-  if (msg->addr == 0x370U) {
-    checksum_byte = 7;
-  } else if (msg->addr == 0x488U) {
-    checksum_byte = 3;
-  }
-
-  if (checksum_byte == -1) {
-    return 0U;
-  }
-
-  uint8_t checksum = (uint8_t)(msg->addr & 0xFFU) + (uint8_t)((msg->addr >> 8) & 0xFFU);
-  const int len = GET_LEN(msg);
-  for (int i = 0; i < len; i++) {
-    if (i != checksum_byte) {
-      checksum += msg->data[i];
-    }
-  }
-  return checksum;
-}
-
 static const int preap_crc_lookup[256] = {
   0x00, 0x1D, 0x3A, 0x27, 0x74, 0x69, 0x4E, 0x53, 0xE8, 0xF5, 0xD2, 0xCF, 0x9C, 0x81, 0xA6, 0xBB,
   0xCD, 0xD0, 0xF7, 0xEA, 0xB9, 0xA4, 0x83, 0x9E, 0x25, 0x38, 0x1F, 0x02, 0x51, 0x4C, 0x6B, 0x76,
@@ -144,7 +105,7 @@ static void tesla_preap_gtw_emulation(const CANPacket_t *to_fwd) {
                          .bus = 1, .addr = 0x2A9, .data_len_code = to_fwd->data_len_code};
       uint32_t lo = PREAP_GET_BYTES_04(to_fwd);
       uint32_t hi = PREAP_GET_BYTES_48(to_fwd);
-      lo = (lo & 0xFFFFF33F) | 0x100U | 0x440U;
+      lo = (lo & 0xFFFFF33FU) | 0x100U | 0x440U;
       hi = (hi & 0xCFFF0F0FU) | 0x10000000U | ((uint32_t)preap_radar_position << 4) | ((uint32_t)preap_radar_epas_type << 12);
       PREAP_WORD_TO_BYTES(&pkt.data[0], lo);
       PREAP_WORD_TO_BYTES(&pkt.data[4], hi);
@@ -195,16 +156,17 @@ static void tesla_preap_gtw_emulation(const CANPacket_t *to_fwd) {
       const uint32_t lo = PREAP_GET_BYTES_04(to_fwd);
       const int ws_counter = PREAP_GET_BYTES_48(to_fwd) & 0x0F;
       const int raw_speed = (int)((0xFFF0000U & lo) >> 16);
-      int speed;
+      uint32_t speed;
       if (raw_speed == 0xFFF) {
         speed = 0x1FFF;
       } else {
         const int mph_x100 = raw_speed * 5 - 2500;
         const int kph_x100 = mph_x100 * 1609 / 1000;
-        speed = (kph_x100 < 0) ? 0 : ((kph_x100 / 4) & 0x1FFF);
+        const int speed_scaled = (kph_x100 / 4) & 0x1FFF;
+        speed = (kph_x100 < 0) ? 0U : (uint32_t)speed_scaled;
       }
-      const uint32_t ws_lo = (uint32_t)(speed | (speed << 13) | (speed << 26));
-      uint32_t ws_hi = (uint32_t)((speed >> 6) | (speed << 7) | (ws_counter << 20)) & 0x00FFFFFFU;
+      const uint32_t ws_lo = speed | (speed << 13U) | (speed << 26U);
+      uint32_t ws_hi = ((speed >> 6U) | (speed << 7U) | ((uint32_t)ws_counter << 20U)) & 0x00FFFFFFU;
       int ws_checksum = 0x76;
       ws_checksum = (ws_checksum + (int)(ws_lo & 0xFF) + (int)((ws_lo >> 8) & 0xFF) + (int)((ws_lo >> 16) & 0xFF) + (int)((ws_lo >> 24) & 0xFF)) & 0xFF;
       ws_checksum = (ws_checksum + (int)(ws_hi & 0xFF) + (int)((ws_hi >> 8) & 0xFF) + (int)((ws_hi >> 16) & 0xFF)) & 0xFF;
@@ -370,7 +332,7 @@ static bool tesla_preap_tx_hook(const CANPacket_t *msg) {
 static bool tesla_preap_fwd_hook(int bus_num, int addr) {
   (void)bus_num;
   (void)addr;
-  return true;
+  return false;
 }
 
 static safety_config tesla_preap_init(uint16_t param) {
@@ -428,8 +390,8 @@ const safety_hooks tesla_preap_hooks = {
   .rx_all = tesla_preap_gtw_emulation,
   .tx = tesla_preap_tx_hook,
   .fwd = tesla_preap_fwd_hook,
-  .get_checksum = tesla_preap_get_checksum,
-  .compute_checksum = tesla_preap_compute_checksum,
-  .get_counter = tesla_preap_get_counter,
+  .get_checksum = NULL,
+  .compute_checksum = NULL,
+  .get_counter = NULL,
   .get_quality_flag_valid = NULL,
 };

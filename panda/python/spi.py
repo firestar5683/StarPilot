@@ -7,6 +7,7 @@ import struct
 import threading
 from contextlib import contextmanager
 from functools import reduce
+from typing import Any
 
 from .base import BaseHandle, BaseSTBootloaderHandle, TIMEOUT
 from .constants import McuType, MCU_TYPE_BY_IDCODE, USBPACKET_MAX_SIZE
@@ -73,7 +74,7 @@ class PandaSpiTransferFailed(PandaSpiException):
 
 
 SPI_LOCK = threading.Lock()
-SPI_DEVICES = {}
+SPI_DEVICES: dict[int, Any] = {}
 class SpiDevice:
   """
   Provides locked, thread-safe access to a panda's SPI interface.

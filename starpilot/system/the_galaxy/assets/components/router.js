@@ -19,7 +19,7 @@ import { ModelManager } from "/assets/components/tools/model_manager.js?v=202603
 import { LivePlots } from "/assets/components/tools/plots.js"
 import { ThemeMaker } from "/assets/components/tools/theme_maker.js"
 import { TestingGround } from "/assets/components/tools/testing_ground.js"
-import { Tuning } from "/assets/components/tools/tuning.js?v=flm-workspace-9"
+import { Tuning } from "/assets/components/tools/tuning.js?v=flm-route-length-1"
 import { Troubleshoot } from "/assets/components/tools/troubleshoot.js"
 import { TmuxLog } from "/assets/components/tools/tmux.js"
 import { ToggleControl } from "/assets/components/tools/toggles.js"

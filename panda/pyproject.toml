@@ -45,6 +45,7 @@ panda = "."
 [tool.mypy]
 # third-party packages
 ignore_missing_imports = true
+follow_imports = "skip"
 
 # helpful warnings
 warn_redundant_casts = true

@@ -24,15 +24,19 @@ def make_event(event_types):
 class TestStateMachine:
   def setup_method(self):
     self.events = Events()
+    self.starpilot_events = Events()
     self.state_machine = StateMachine()
     self.state_machine.soft_disable_timer = int(SOFT_DISABLE_TIME / DT_CTRL)
+
+  def update(self):
+    self.state_machine.update(self.events, self.starpilot_events, False)
 
   def test_immediate_disable(self):
     for state in ALL_STATES:
       for et in MAINTAIN_STATES[state]:
         self.events.add(make_event([et, ET.IMMEDIATE_DISABLE]))
         self.state_machine.state = state
-        self.state_machine.update(self.events)
+        self.update()
         assert State.disabled == self.state_machine.state
         self.events.clear()
 
@@ -41,7 +45,7 @@ class TestStateMachine:
       for et in MAINTAIN_STATES[state]:
         self.events.add(make_event([et, ET.USER_DISABLE]))
         self.state_machine.state = state
-        self.state_machine.update(self.events)
+        self.update()
         assert State.disabled == self.state_machine.state
         self.events.clear()
 
@@ -52,17 +56,17 @@ class TestStateMachine:
       for et in MAINTAIN_STATES[state]:
         self.events.add(make_event([et, ET.SOFT_DISABLE]))
         self.state_machine.state = state
-        self.state_machine.update(self.events)
+        self.update()
         assert self.state_machine.state == State.disabled if state == State.disabled else State.softDisabling
         self.events.clear()
 
   def test_soft_disable_timer(self):
     self.state_machine.state = State.enabled
     self.events.add(make_event([ET.SOFT_DISABLE]))
-    self.state_machine.update(self.events)
+    self.update()
     for _ in range(int(SOFT_DISABLE_TIME / DT_CTRL)):
       assert self.state_machine.state == State.softDisabling
-      self.state_machine.update(self.events)
+      self.update()
 
     assert self.state_machine.state == State.disabled
 
@@ -70,7 +74,7 @@ class TestStateMachine:
     # Make sure noEntry keeps us disabled
     for et in ENABLE_EVENT_TYPES:
       self.events.add(make_event([ET.NO_ENTRY, et]))
-      self.state_machine.update(self.events)
+      self.update()
       assert self.state_machine.state == State.disabled
       self.events.clear()
 
@@ -78,7 +82,7 @@ class TestStateMachine:
     # preEnabled with noEntry event
     self.state_machine.state = State.preEnabled
     self.events.add(make_event([ET.NO_ENTRY, ET.PRE_ENABLE]))
-    self.state_machine.update(self.events)
+    self.update()
     assert self.state_machine.state == State.preEnabled
 
   def test_maintain_states(self):
@@ -87,6 +91,6 @@ class TestStateMachine:
       for et in MAINTAIN_STATES[state]:
         self.state_machine.state = state
         self.events.add(make_event([et]))
-        self.state_machine.update(self.events)
+        self.update()
         assert self.state_machine.state == state
         self.events.clear()

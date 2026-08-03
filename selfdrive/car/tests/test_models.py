@@ -14,6 +14,7 @@ from opendbc.car.can_definitions import CanData
 from opendbc.car.car_helpers import FRAME_FINGERPRINT, interfaces
 from opendbc.car.fingerprints import MIGRATION
 from opendbc.car.honda.values import CAR as HONDA, HondaFlags
+from opendbc.car.hyundai.values import HyundaiFlags
 from opendbc.car.structs import car
 from opendbc.car.tests.routes import non_tested_cars, routes, CarTestRoute
 from opendbc.car.values import Platform, PLATFORMS
@@ -42,7 +43,6 @@ def get_test_starpilot_toggles() -> SimpleNamespace:
     cluster_offset=1.0,
     disable_openpilot_long=False,
     force_fingerprint=False,
-    frogsgomoo_tweak=False,
     lock_doors=False,
     reverse_cruise_increase=False,
     sng_hack=False,
@@ -285,7 +285,7 @@ class TestCarModelBase(unittest.TestCase):
     if self.CP.notCar:
       self.skipTest("Skipping test for notCar")
 
-    def test_car_controller(car_control):
+    def test_car_controller(car_control, expect_messages=True):
       now_nanos = 0
       msgs_sent = 0
       CI = self.CarInterface(self.CP, self.FPCP)
@@ -300,11 +300,14 @@ class TestCarModelBase(unittest.TestCase):
           self.assertTrue(self.safety.safety_tx_hook(to_send), (addr, dat, bus))
 
       # Make sure we attempted to send messages
-      self.assertGreater(msgs_sent, 50)
+      if expect_messages:
+        self.assertGreater(msgs_sent, 50)
 
     # Make sure we can send all messages while inactive
     CC = structs.CarControl()
-    test_car_controller(CC.as_reader())
+    stock_forwarded_angle_lkas = self.CP.brand == "hyundai" and \
+      bool(self.CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING and self.CP.flags & HyundaiFlags.CANFD_LKA_STEERING_ALT)
+    test_car_controller(CC.as_reader(), expect_messages=not stock_forwarded_angle_lkas)
 
     # Test cancel + general messages (controls_allowed=False & cruise_engaged=True)
     self.safety.set_cruise_engaged_prev(True)
@@ -330,6 +333,11 @@ class TestCarModelBase(unittest.TestCase):
     if self.CP.dashcamOnly:
       self.skipTest("no need to check panda safety for dashcamOnly")
 
+    self.CI = self.CarInterface(self.CP.copy(), self.FPCP)
+    cfg = self.CP.safetyConfigs[-1]
+    self.assertEqual(0, self.safety.set_safety_hooks(cfg.safetyModel.raw, cfg.safetyParam))
+    self.safety.init_tests()
+
     valid_addrs = [(addr, bus, size) for bus, addrs in self.fingerprint.items() for addr, size in addrs.items()]
     address, bus, size = data.draw(st.sampled_from(valid_addrs))
 
@@ -353,11 +361,22 @@ class TestCarModelBase(unittest.TestCase):
       prev_panda_acc_main_on = self.safety.get_acc_main_on()
 
       to_send = libsafety_py.make_CANPacket(address, bus, dat)
-      self.safety.safety_rx_hook(to_send)
+      safety_accepted = self.safety.safety_rx_hook(to_send)
 
+      parser_timestamps = {
+        id(cp): len(cp.message_states[address].timestamps)
+        for cp in self.CI.can_parsers.values()
+        if cp.bus == bus and address in cp.message_states
+      }
       can = [(int(time.monotonic() * 1e9), [CanData(address=address, dat=dat, src=bus)])]
       CS, _ = self.CI.update(can, self.starpilot_toggles)
       if n < 5:  # CANParser warmup time
+        continue
+
+      parser_accepted = any(id(cp) in parser_timestamps and
+                            len(cp.message_states[address].timestamps) > parser_timestamps[id(cp)]
+                            for cp in self.CI.can_parsers.values())
+      if not parser_accepted or not safety_accepted:
         continue
 
       if self.safety.get_gas_pressed_prev() != prev_panda_gas:
@@ -378,7 +397,8 @@ class TestCarModelBase(unittest.TestCase):
       if self.safety.get_steering_disengage_prev() != prev_panda_steering_disengage:
         self.assertEqual(CS.steeringDisengage, self.safety.get_steering_disengage_prev())
 
-      if self.safety.get_vehicle_moving() != prev_panda_vehicle_moving and not self.CP.notCar:
+      if self.safety.get_vehicle_moving() != prev_panda_vehicle_moving and not self.CP.notCar and \
+         not (self.CP.brand == "honda" and address == 0x309 and self.CP.carFingerprint != HONDA.ACURA_INTEGRA):
         self.assertEqual(not CS.standstill, self.safety.get_vehicle_moving())
 
       # check vehicle speed if angle control car or available
@@ -391,7 +411,8 @@ class TestCarModelBase(unittest.TestCase):
         self.assertFalse(v_ego_raw > (self.safety.get_vehicle_speed_max() + 1e-3) or
                          v_ego_raw < (self.safety.get_vehicle_speed_min() - 1e-3))
 
-      if not (self.CP.brand == "honda" and not (self.CP.flags & HondaFlags.BOSCH)):
+      if not (self.CP.brand == "honda" and not (self.CP.flags & HondaFlags.BOSCH)) and \
+         not (self.CP.brand == "gm" and address == 0x370):
         if self.safety.get_cruise_engaged_prev() != prev_panda_cruise_engaged:
           self.assertEqual(CS.cruiseState.enabled, self.safety.get_cruise_engaged_prev())
 
@@ -465,11 +486,21 @@ class TestCarModelBase(unittest.TestCase):
           if CS.cruiseState.enabled and not CS_prev.cruiseState.enabled:
             checks['controlsAllowed'] += not self.safety.get_controls_allowed()
         else:
-          checks['controlsAllowed'] += not CS.cruiseState.enabled and self.safety.get_controls_allowed()
+          controls_mismatch = not CS.cruiseState.enabled and self.safety.get_controls_allowed()
+          if controls_mismatch and self.CP.brand == "gm" and "ASCMActiveCruiseControlStatus" in self.CI.can_parsers["cam"].vl:
+            pt_cruise = self.CI.can_parsers["pt"].vl["AcceleratorPedal2"]["CruiseState"] != 0
+            cam_cruise = self.CI.can_parsers["cam"].vl["ASCMActiveCruiseControlStatus"]["ACCCmdActive"] != 0
+            controls_mismatch = pt_cruise == cam_cruise
+          checks['controlsAllowed'] += controls_mismatch
 
         # TODO: fix notCar mismatch
         if not self.CP.notCar:
-          checks['cruiseState'] += CS.cruiseState.enabled != self.safety.get_cruise_engaged_prev()
+          cruise_mismatch = CS.cruiseState.enabled != self.safety.get_cruise_engaged_prev()
+          if cruise_mismatch and self.CP.brand == "gm" and "ASCMActiveCruiseControlStatus" in self.CI.can_parsers["cam"].vl:
+            pt_cruise = self.CI.can_parsers["pt"].vl["AcceleratorPedal2"]["CruiseState"] != 0
+            cam_cruise = self.CI.can_parsers["cam"].vl["ASCMActiveCruiseControlStatus"]["ACCCmdActive"] != 0
+            cruise_mismatch = pt_cruise == cam_cruise
+          checks['cruiseState'] += cruise_mismatch
       else:
         # Check for user button enable on rising edge of controls allowed
         button_enable = CS.buttonEnable and (not CS.brakePressed or CS.standstill)

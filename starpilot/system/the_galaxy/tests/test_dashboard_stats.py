@@ -3,6 +3,8 @@ import json
 import os
 import sys
 
+import pytest
+
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
@@ -10,6 +12,16 @@ from types import ModuleType, SimpleNamespace
 MODULE_DIR = Path(__file__).resolve().parents[1]
 if str(MODULE_DIR) not in sys.path:
   sys.path.insert(0, str(MODULE_DIR))
+
+_INITIAL_STUB_NAMES = (
+  "openpilot.system.loggerd.config",
+  "openpilot.system.loggerd.deleter",
+  "openpilot.system.loggerd.uploader",
+  "openpilot.starpilot.assets.model_manager",
+  "openpilot.starpilot.common.starpilot_variables",
+  "openpilot.starpilot.assets.theme_manager",
+)
+_INITIAL_MODULES = {name: sys.modules.get(name) for name in _INITIAL_STUB_NAMES}
 
 loggerd_config = ModuleType("openpilot.system.loggerd.config")
 loggerd_config.get_available_bytes = lambda default=0: default
@@ -43,6 +55,24 @@ sys.modules.setdefault("openpilot.starpilot.assets.theme_manager", theme_manager
 
 import utilities
 
+for _module_name, _module in _INITIAL_MODULES.items():
+  if _module is None:
+    sys.modules.pop(_module_name, None)
+  else:
+    sys.modules[_module_name] = _module
+
+_SERVER_MODULE_SNAPSHOTS = []
+
+
+@pytest.fixture(autouse=True)
+def restore_server_import_stubs():
+  yield
+  while _SERVER_MODULE_SNAPSHOTS:
+    snapshot = _SERVER_MODULE_SNAPSHOTS.pop()
+    for name in set(sys.modules) - set(snapshot):
+      sys.modules.pop(name, None)
+    sys.modules.update(snapshot)
+
 
 def _simple_module(name, **attrs):
   module = ModuleType(name)
@@ -52,6 +82,13 @@ def _simple_module(name, **attrs):
 
 
 def _install_server_import_stubs():
+  sys.modules["openpilot.system.loggerd.config"] = loggerd_config
+  sys.modules["openpilot.system.loggerd.deleter"] = loggerd_deleter
+  sys.modules["openpilot.system.loggerd.uploader"] = loggerd_uploader
+  sys.modules["openpilot.starpilot.assets.model_manager"] = model_manager
+  sys.modules["openpilot.starpilot.common.starpilot_variables"] = starpilot_variables
+  sys.modules["openpilot.starpilot.assets.theme_manager"] = theme_manager
+
   cereal_module = _simple_module("cereal")
   car_module = _simple_module("cereal.car", CarParams=SimpleNamespace(from_bytes=lambda _: SimpleNamespace(__enter__=lambda self: self, __exit__=lambda *args: None)))
   custom_module = _simple_module("cereal.custom", StarPilotCarParams=object)
@@ -246,6 +283,74 @@ class FakeParams:
 class FailingPutParams(FakeParams):
   def put(self, key, value):
     raise RuntimeError("unknown key")
+
+
+class FakeDashboardAnalyzerProcess:
+  def __init__(self):
+    self.terminated = False
+
+  def poll(self):
+    return None
+
+  def terminate(self):
+    self.terminated = True
+
+
+def test_route_inventory_counts_segments_without_video_probing(monkeypatch):
+  segments = [
+    SimpleNamespace(route_name=SimpleNamespace(time_str="route-new")),
+    SimpleNamespace(route_name=SimpleNamespace(time_str="route-new")),
+    SimpleNamespace(route_name=SimpleNamespace(time_str="route-new")),
+    SimpleNamespace(route_name=SimpleNamespace(time_str="route-old")),
+  ]
+  monkeypatch.setattr(utilities, "get_all_segment_names", lambda _path: segments)
+
+  assert utilities.get_routes_with_segment_counts("/tmp/routes") == [
+    ("route-old", 1),
+    ("route-new", 3),
+  ]
+
+
+def test_dashboard_background_analysis_does_not_start_onroad(monkeypatch):
+  def fail_if_started(*args, **kwargs):
+    raise AssertionError("worker started onroad")
+
+  monkeypatch.setattr(utilities, "params", FakeParams({"IsOnroad": True}))
+  monkeypatch.setattr(utilities.subprocess, "Popen", fail_if_started)
+
+  started = utilities._start_dashboard_background_analysis(
+    ["/tmp/routes"],
+    [{"name": "route"}],
+    {},
+    [{"name": "route"}],
+  )
+
+  assert started is False
+
+
+def test_dashboard_analysis_worker_exits_onroad_before_scanning(monkeypatch):
+  def fail_if_scanned(*args, **kwargs):
+    raise AssertionError("routes scanned onroad")
+
+  monkeypatch.setattr(utilities, "params", FakeParams({"IsOnroad": True}))
+  monkeypatch.setattr(utilities, "_list_dashboard_routes", fail_if_scanned)
+
+  utilities.warm_dashboard_stats(["/tmp/routes"])
+
+
+def test_stop_dashboard_background_analysis_terminates_owned_worker(monkeypatch, tmp_path):
+  process = FakeDashboardAnalyzerProcess()
+  status_path = tmp_path / "dashboard_analyzer_status.json"
+  status_path.write_text('{"pid":123}')
+  monkeypatch.setattr(utilities, "_DASHBOARD_ANALYZER_PROCESS", process)
+  monkeypatch.setattr(utilities, "DASHBOARD_ANALYZER_STATUS_PATH", status_path)
+
+  stopped = utilities.stop_dashboard_background_analysis()
+
+  assert stopped is True
+  assert process.terminated is True
+  assert utilities._DASHBOARD_ANALYZER_PROCESS is None
+  assert not status_path.exists()
 
 
 class FakeMessage:
@@ -842,20 +947,22 @@ def test_dashboard_persistent_stats_fallback_to_file_when_param_put_fails(tmp_pa
 
 def test_lightweight_routes_surface_recent_drives_without_log_analysis(monkeypatch):
   utilities._invalidate_dashboard_cache()
+  now = utilities.datetime.now().replace(hour=12, minute=0, second=0, microsecond=0)
+  week_start = utilities._start_of_week(now)
   route_infos = [
     {
       "name": "route-new",
       "segments": [],
       "segmentCount": 3,
-      "startedAt": utilities.datetime(2026, 6, 16, 9, 0, 0),
-      "modifiedAt": utilities.datetime(2026, 6, 16, 9, 3, 0).timestamp(),
+      "startedAt": week_start + utilities.timedelta(days=1, hours=9),
+      "modifiedAt": (week_start + utilities.timedelta(days=1, hours=9, minutes=3)).timestamp(),
     },
     {
       "name": "route-old",
       "segments": [],
       "segmentCount": 2,
-      "startedAt": utilities.datetime(2026, 6, 15, 9, 0, 0),
-      "modifiedAt": utilities.datetime(2026, 6, 15, 9, 2, 0).timestamp(),
+      "startedAt": week_start + utilities.timedelta(hours=9),
+      "modifiedAt": (week_start + utilities.timedelta(hours=9, minutes=2)).timestamp(),
     },
   ]
   params = FakeParams({
@@ -869,7 +976,7 @@ def test_lightweight_routes_surface_recent_drives_without_log_analysis(monkeypat
   monkeypatch.setattr(utilities, "_start_dashboard_background_analysis", lambda *args: None)
   monkeypatch.setattr(utilities, "_build_storage_summary", lambda paths: {"freeBytes": 0, "usedBytes": 0, "totalBytes": 0, "usedPercent": 0, "segmentCounts": {}})
 
-  dashboard = utilities.get_dashboard_stats(["/tmp/missing"], params, now=utilities.datetime(2026, 6, 16, 12, 0, 0))
+  dashboard = utilities.get_dashboard_stats(["/tmp/missing"], params, now=now)
 
   assert [drive["name"] for drive in dashboard["recentDrives"]] == ["route-new", "route-old"]
   assert dashboard["lastDrive"]["model"] == "Unknown model"
@@ -1412,6 +1519,7 @@ def test_github_urls_accept_owner_repo_origin():
 
 
 def _load_server_module():
+  _SERVER_MODULE_SNAPSHOTS.append(dict(sys.modules))
   _install_server_import_stubs()
   spec = importlib.util.spec_from_file_location("dashboard_server", MODULE_DIR / "the_galaxy.py")
   module = importlib.util.module_from_spec(spec)

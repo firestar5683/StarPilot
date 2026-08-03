@@ -114,7 +114,7 @@ class TestAthenadMethods:
     with pytest.raises(TimeoutError) as _:
       dispatcher["getMessage"]("controlsState")
 
-    end_event = multiprocessing.Event()
+    end_event = threading.Event()
 
     pub_sock = messaging.pub_sock("deviceState")
 
@@ -124,7 +124,7 @@ class TestAthenadMethods:
         pub_sock.send(msg.to_bytes())
         time.sleep(0.01)
 
-    p = multiprocessing.Process(target=send_deviceState)
+    p = threading.Thread(target=send_deviceState)
     p.start()
     time.sleep(0.1)
     try:
@@ -383,20 +383,23 @@ class TestAthenadMethods:
     mock_ws = MockWebsocket(ws_recv, ws_send)
     mock_create_connection.return_value = mock_ws
 
-    echo_socket = EchoSocket(self.SOCKET_PORT)
+    echo_socket = EchoSocket(0)
+    socket_port = echo_socket.socket.getsockname()[1]
+    athenad.LOCAL_PORT_WHITELIST.add(socket_port)
     socket_thread = threading.Thread(target=echo_socket.run)
     socket_thread.start()
 
-    athenad.startLocalProxy(end_event, 'ws://localhost:1234', self.SOCKET_PORT)
+    athenad.startLocalProxy(end_event, 'ws://localhost:1234', socket_port)
 
-    ws_recv.put_nowait(b'ping')
+    mock_ws.queue_recv(b'ping')
     try:
       recv = ws_send.get(timeout=5)
       assert recv == (b'ping', ABNF.OPCODE_BINARY), recv
     finally:
       # signal websocket close to athenad.ws_proxy_recv
-      ws_recv.put_nowait(WebSocketConnectionClosedException())
+      mock_ws.queue_recv(WebSocketConnectionClosedException())
       socket_thread.join()
+      athenad.LOCAL_PORT_WHITELIST.discard(socket_port)
 
   def test_get_ssh_authorized_keys(self):
     keys = dispatcher["getSshAuthorizedKeys"]()

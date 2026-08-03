@@ -47,7 +47,8 @@ class SpeedLimitWidget(LayoutWidget):
   def _render(self, rect: rl.Rectangle) -> None:
     if self._slc_state is None:
       return
-    expanded = ui_state.params.get_bool("SpeedLimitSources")
+    params = ui_state.ui_params
+    expanded = params.get_bool("SpeedLimitSources")
     self._pill_rect = render_speed_limit_at(self._slc_state, rect, expanded)
 
   def _handle_mouse_press(self, mouse_pos) -> None:
@@ -59,8 +60,9 @@ class SpeedLimitWidget(LayoutWidget):
         self._pill_rect.height + 40
       )
       if rl.check_collision_point_rec(mouse_pos, hit_rect):
-        current = ui_state.params.get_bool("SpeedLimitSources")
-        Params().put_bool("SpeedLimitSources", not current)
+        params = ui_state.ui_params
+        current = params.get_bool("SpeedLimitSources")
+        params.put_bool("SpeedLimitSources", not current)
         return
 
     state = _get_slc_state()

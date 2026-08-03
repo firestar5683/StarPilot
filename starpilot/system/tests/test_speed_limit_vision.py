@@ -19,6 +19,9 @@ class MemoryParams:
   def put_int(self, key, value):
     self.values[key] = value
 
+  def put(self, key, value):
+    self.values[key] = value
+
   def remove(self, key):
     self.values.pop(key, None)
 
@@ -65,6 +68,32 @@ def publishing_daemon(is_metric):
   daemon._schedule_auto_bookmark = lambda *_args, **_kwargs: None
   daemon._publish_status = lambda status, **_kwargs: setattr(daemon, "published_status", status)
   return daemon
+
+
+def test_debug_storage_failure_does_not_crash_detection(monkeypatch):
+  class ReadOnlyPath:
+    def __truediv__(self, _part):
+      return self
+
+    def exists(self):
+      return False
+
+    def mkdir(self, **_kwargs):
+      raise OSError(30, "Read-only file system")
+
+  daemon = SpeedLimitVisionDaemon.__new__(SpeedLimitVisionDaemon)
+  daemon.use_runtime = True
+  daemon.params_memory = MemoryParams()
+  daemon.debug_session_id = ""
+  daemon.debug_session_unavailable = False
+  monkeypatch.setattr(slv, "DEBUG_BASE_DIR", ReadOnlyPath())
+
+  assert not daemon._start_debug_session()
+  assert daemon.debug_session_unavailable
+  assert daemon.debug_session_id == ""
+  assert daemon.params_memory.values["VisionSpeedLimitLastEvent"] == "debug storage unavailable: OSError"
+
+  assert not daemon._start_debug_session()
 
 
 def test_disconnect_camera_releases_client_state():

@@ -99,6 +99,10 @@ class CarInterface(CarInterfaceBase):
     # "LFA steering" if camera directly sends LFA to the MDPS
     cam_can = CanBus(None, fingerprint).CAM
     lka_steering = 0x50 in fingerprint[cam_can] or 0x110 in fingerprint[cam_can]
+    if ret.flags & HyundaiFlags.CAN_CANFD_BLENDED:
+      lka_steering = Ecu.adas in [fw.ecu for fw in car_fw] or 0x50 in fingerprint[cam_can]
+      if lka_steering:
+        ret.flags |= HyundaiFlags.CANFD_LKA_STEERING.value
     CAN = CanBus(None, fingerprint, lka_steering)
 
     if ret.flags & HyundaiFlags.CANFD:
@@ -173,6 +177,8 @@ class CarInterface(CarInterfaceBase):
     else:
       # Shared configuration for non CAN-FD cars
       ret.alphaLongitudinalAvailable = candidate not in UNSUPPORTED_LONGITUDINAL_CAR or candidate in LEGACY_LONGITUDINAL_CAR
+      if ret.flags & HyundaiFlags.CAN_CANFD_BLENDED and ret.flags & HyundaiFlags.CANFD_LKA_STEERING:
+        ret.alphaLongitudinalAvailable = False
       ret.enableBsm = 0x58b in fingerprint[CAN.ECAN]
 
       # Send LFA message on cars with HDA
@@ -201,6 +207,8 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs[-1].safetyParam |= HyundaiStarPilotSafetyFlags.HAS_LDA_BUTTON.value
       if ret.flags & HyundaiFlags.CAN_CANFD_BLENDED:
         ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.CAN_CANFD_BLENDED.value
+        if ret.flags & HyundaiFlags.CANFD_LKA_STEERING:
+          ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.CANFD_LKA_STEERING.value
       if hyundai_cancel_button_enables_cruise(candidate):
         ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.CANCEL_BTN_ENABLE.value
 
@@ -263,8 +271,8 @@ class CarInterface(CarInterfaceBase):
 
     if candidate == CAR.HYUNDAI_ELANTRA_2021:
       ret.longitudinalActuatorDelay = 0.22
-      ret.stopAccel = -1.5
-      ret.stoppingDecelRate = 0.5
+      ret.stopAccel = -0.85
+      ret.stoppingDecelRate = 0.35
 
     if candidate == CAR.HYUNDAI_ELANTRA_HEV_2024:
       ret.longitudinalActuatorDelay = 0.22

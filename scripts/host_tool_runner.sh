@@ -280,7 +280,11 @@ ensure_host_python_extensions() {
     common/params_pyx.so \
     common/transformations/transformations.so \
     msgq_repo/msgq/ipc_pyx.so \
-    msgq_repo/msgq/visionipc/visionipc_pyx.so
+    msgq_repo/msgq/visionipc/visionipc_pyx.so \
+    rednose/helpers/ekf_sym_pyx.so \
+    system/loggerd/bootlog \
+    system/loggerd/loggerd \
+    system/loggerd/encoderd
 }
 
 sync_host_generated_headers() {
@@ -342,6 +346,10 @@ sync_worktree() {
     "common/params_pyx.cpp"
     "common/transformations/libtransformations.a"
     "common/transformations/transformations.so"
+    "system/loggerd/bootlog"
+    "system/loggerd/loggerd"
+    "system/loggerd/encoderd"
+    "system/loggerd/liblogger.a"
     "msgq_repo/libmsgq.a"
     "msgq_repo/libvisionipc.a"
     "msgq_repo/msgq/ipc_pyx.so"
@@ -372,6 +380,9 @@ sync_worktree() {
   local _capnp_before
   _capnp_before="$(stat -c '%Y' "${WORK_DIR}/cereal/custom.capnp" 2>/dev/null || echo 0)"
   rsync "${rsync_args[@]}" "${ROOT_DIR}/" "${WORK_DIR}/"
+  if [[ ! -e "${WORK_DIR}/.git" ]]; then
+    ln -s "${ROOT_DIR}/.git" "${WORK_DIR}/.git"
+  fi
   local _capnp_after
   _capnp_after="$(stat -c '%Y' "${WORK_DIR}/cereal/custom.capnp" 2>/dev/null || echo 0)"
   if [[ "${_capnp_before}" != "${_capnp_after}" ]]; then
@@ -395,6 +406,8 @@ setup_build_env() {
   export SP_SCONS_CACHE_DIR="${HOST_ROOT}/scons_cache"
 
   if [[ "$(uname -s)" == "Darwin" ]]; then
+    export PATH="/usr/bin:/bin:/usr/sbin:/sbin:/opt/homebrew/bin:${PATH}"
+    export ZMQ=1
     export CC="/usr/bin/clang"
     export CXX="/usr/bin/clang++"
     export AR="/usr/bin/ar"
@@ -568,6 +581,9 @@ launch_python() {
 launch_pytest() {
   sync_worktree
   ensure_host_python_extensions
+  if [[ "$(uname -s)" == "Darwin" ]]; then
+    export PYTEST_ADDOPTS="${PYTEST_ADDOPTS:-} -n0"
+  fi
   run_host_python -m pytest "$@"
 }
 

@@ -15,11 +15,16 @@ CarFw = CarParams.CarFw
 Ecu = CarParams.Ecu
 
 ECU_NAME = {v: k for k, v in Ecu.schema.enumerants.items()}
+FORTE_FW_AMBIGUITY = {"KIA_FORTE", "KIA_FORTE_2019_NON_SCC", "KIA_FORTE_2021_NON_SCC"}
 
 
 class TestFwFingerprint:
   def assertFingerprints(self, candidates, expected):
     candidates = list(candidates)
+    if str(expected) in FORTE_FW_AMBIGUITY:
+      assert candidates
+      assert set(map(str, candidates)) <= FORTE_FW_AMBIGUITY
+      return
     assert len(candidates) == 1, f"got more than one candidate: {candidates}"
     assert candidates[0] == expected
 

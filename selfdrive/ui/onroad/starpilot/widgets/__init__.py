@@ -6,6 +6,7 @@ from openpilot.selfdrive.ui.onroad.starpilot.widgets.aethergauge import AetherGa
 from openpilot.selfdrive.ui.onroad.starpilot.widgets.personality_button import PersonalityButtonWidget
 from openpilot.selfdrive.ui.onroad.starpilot.widgets.driver_monitor import DriverMonitorWidget
 from openpilot.selfdrive.ui.onroad.starpilot.widgets.steering_wheel import SteeringWheelWidget
+from openpilot.selfdrive.ui.onroad.starpilot.widgets.stopped_timer import StoppedTimerWidget
 
 __all__ = [
   "LayoutWidget",
@@ -16,4 +17,5 @@ __all__ = [
   "PersonalityButtonWidget",
   "DriverMonitorWidget",
   "SteeringWheelWidget",
+  "StoppedTimerWidget",
 ]

@@ -95,7 +95,7 @@ def update_preap(cs, can_parsers):
     if dtr_dist != 255:
       stalk_follow = min((dtr_dist // 33) + 1, 7)
       if stalk_follow != cs.prev_stalk_follow:
-        _nap_params.put(NAPParamKeys.FOLLOW_DISTANCE, str(stalk_follow))
+        _nap_params.put_int(NAPParamKeys.FOLLOW_DISTANCE, stalk_follow)
         cs.prev_stalk_follow = stalk_follow
 
   curr_time_ms = _current_time_millis()

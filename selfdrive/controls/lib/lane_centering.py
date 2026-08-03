@@ -15,6 +15,7 @@ _MIN_CENTER_TO_LINE = 1.1
 _MAX_RAW_CORRECTION = 0.004
 _MAX_GAIN = 0.30
 _SMOOTH_TAU = 0.4
+_SIGNAL_RELEASE_TAU = 0.20
 
 _E2E_MAX_PATH_STD = 0.35
 _E2E_BREAK_IN_START = 0.25
@@ -28,7 +29,8 @@ class LaneCenteringController:
   def reset(self) -> None:
     self._correction = 0.0
 
-  def update(self, model_curvature, model_v2, v_ego, enabled, offset, e2e_authority, lat_active, model_valid) -> float:
+  def update(self, model_curvature, model_v2, v_ego, enabled, offset, e2e_authority, lat_active, model_valid,
+             pause_on_signal=False, turn_signal_active=False) -> float:
     model_curvature = float(model_curvature)
 
     try:
@@ -46,6 +48,10 @@ class LaneCenteringController:
     if not model_valid or not enabled or not lat_active or v_ego < _MIN_V_EGO:
       self.reset()
       return model_curvature
+
+    if pause_on_signal and turn_signal_active:
+      self._correction = float(smooth_value(0.0, self._correction, _SIGNAL_RELEASE_TAU, dt=DT_CTRL))
+      return model_curvature + self._correction
 
     try:
       if model_v2.meta.laneChangeState != log.LaneChangeState.off:

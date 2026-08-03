@@ -86,7 +86,7 @@ static uint8_t honda_get_counter(const CANPacket_t *msg) {
 static int HONDA_GET_INTERCEPTOR(const CANPacket_t *msg) {
   uint16_t val1 = ((uint16_t)msg->data[0] << 8U) | (uint16_t)msg->data[1];
   uint16_t val2 = ((uint16_t)msg->data[2] << 8U) | (uint16_t)msg->data[3];
-  return (int)((val1 + val2) / 2U);
+  return ((int)val1 + (int)val2) / 2;
 }
 
 static void honda_rx_hook(const CANPacket_t *msg) {
@@ -161,7 +161,7 @@ static void honda_rx_hook(const CANPacket_t *msg) {
     }
   }
 
-  if (msg->addr == 0x201U) {
+  if ((msg->addr == 0x201U) && (msg->bus == pt_bus)) {
     const int honda_gas_interceptor_thrsld = 492;
     int gas_interceptor = HONDA_GET_INTERCEPTOR(msg);
     gas_pressed = gas_interceptor > honda_gas_interceptor_thrsld;

@@ -201,17 +201,18 @@ class CarState(CarStateBase):
     if self.CP.flags & HondaFlags.BOSCH_ALT_BRAKE:
       ret.brakePressed = cp.vl["BRAKE_MODULE"]["BRAKE_PRESSED"] != 0
     else:
+      powertrain_data = cp.vl["POWERTRAIN_DATA"]
       # brake switch has shown some single time step noise, so only considered when
       # switch is on for at least 2 consecutive CAN samples
       # brake switch rises earlier than brake pressed but is never 1 when in park
       brake_switch_vals = cp.vl_all["POWERTRAIN_DATA"]["BRAKE_SWITCH"]
       if len(brake_switch_vals):
-        brake_switch = cp.vl["POWERTRAIN_DATA"]["BRAKE_SWITCH"] != 0
+        brake_switch = powertrain_data["BRAKE_SWITCH"] != 0
         if len(brake_switch_vals) > 1:
           self.brake_switch_prev = brake_switch_vals[-2] != 0
         self.brake_switch_active = brake_switch and self.brake_switch_prev
         self.brake_switch_prev = brake_switch
-      ret.brakePressed = (cp.vl["POWERTRAIN_DATA"]["BRAKE_PRESSED"] != 0) or self.brake_switch_active
+      ret.brakePressed = (powertrain_data["BRAKE_PRESSED"] != 0) or self.brake_switch_active
 
     ret.brake = cp.vl["VSA_STATUS"]["USER_BRAKE"]
     ret.cruiseState.enabled = cp.vl["POWERTRAIN_DATA"]["ACC_STATUS"] != 0
@@ -269,8 +270,14 @@ class CarState(CarStateBase):
     return ret, fp_ret
 
   def get_can_parsers(self, CP):
+    pt_messages = [("GAS_SENSOR", 0)] if CP.enableGasInterceptorDEPRECATED else []
+    pt_parser = CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, CanBus(CP).pt)
+    if CP.enableGasInterceptorDEPRECATED:
+      pt_parser.message_states[0x201].ignore_checksum = True
+      pt_parser.message_states[0x201].ignore_counter = True
+
     parsers = {
-      Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).pt),
+      Bus.pt: pt_parser,
       Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).camera),
     }
     if CP.enableBsm:

@@ -1,7 +1,8 @@
 from openpilot.selfdrive.ui.ui_state import ui_state
 
 def get_compass_text() -> str | None:
-  if not ui_state.params.get_bool("Compass"):
+  params = ui_state.ui_params
+  if not params.get_bool("Compass"):
     return None
 
   # Retrieve bearing

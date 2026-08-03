@@ -241,17 +241,17 @@ class CAR(Platforms):
     },
   )
   CHEVROLET_VOLT_ASCM = GMPlatformConfig(
-    [GMCarDocs("Chevrolet Volt 2017-18 ASCM Harness", min_enable_speed=0, video="https://youtu.be/QeMCN_4TFfQ")],
+    [GMCarDocs("Chevrolet Volt ASCM Harness 2017-18", min_enable_speed=0, video="https://youtu.be/QeMCN_4TFfQ")],
     CHEVROLET_VOLT.specs,
     dbc_dict=CHEVROLET_VOLT.dbc_dict,
   )
   CHEVROLET_VOLT_CAMERA = GMPlatformConfig(
-    [GMCarDocs("Chevrolet Volt 2017-18 Camera Harness", "Flashed camera-forward integration with ACC")],
+    [GMCarDocs("Chevrolet Volt Camera Harness 2017-18", "Flashed camera-forward integration with ACC")],
     CHEVROLET_VOLT.specs,
     dbc_dict=CHEVROLET_VOLT.dbc_dict,
   )
   CHEVROLET_VOLT_CC = GMPlatformConfig(
-    [GMCarDocs("Chevrolet Volt 2017-18 - No-ACC", min_enable_speed=0)],
+    [GMCarDocs("Chevrolet Volt No-ACC 2017-18", min_enable_speed=0)],
     CHEVROLET_VOLT.specs,
     dbc_dict=CHEVROLET_VOLT.dbc_dict,
   )
@@ -264,7 +264,7 @@ class CAR(Platforms):
     GMCarSpecs(mass=1496, wheelbase=2.83, steerRatio=15.8, centerToFrontRatio=0.4),
   )
   CHEVROLET_MALIBU_ASCM = GMPlatformConfig(
-    [GMCarDocs("Chevrolet Malibu 2017-19 ASCM Harness")],
+    [GMCarDocs("Chevrolet Malibu ASCM Harness 2017-19")],
     CHEVROLET_MALIBU.specs,
   )
   GMC_ACADIA = GMASCMPlatformConfig(
@@ -272,7 +272,7 @@ class CAR(Platforms):
     GMCarSpecs(mass=1975, wheelbase=2.86, steerRatio=14.4, centerToFrontRatio=0.4),
   )
   GMC_ACADIA_ASCM = GMPlatformConfig(
-    [GMCarDocs("GMC Acadia 2018 ASCM Harness", video="https://www.youtube.com/watch?v=0ZN6DdsBUZo")],
+    [GMCarDocs("GMC Acadia ASCM Harness 2018", video="https://www.youtube.com/watch?v=0ZN6DdsBUZo")],
     GMC_ACADIA.specs,
   )
   BUICK_LACROSSE = GMASCMPlatformConfig(
@@ -280,11 +280,11 @@ class CAR(Platforms):
     GMCarSpecs(mass=1712, wheelbase=2.91, steerRatio=15.8, centerToFrontRatio=0.4),
   )
   BUICK_LACROSSE_ASCM = GMPlatformConfig(
-    [GMCarDocs("Buick LaCrosse 2017-19 ASCM Harness")],
+    [GMCarDocs("Buick LaCrosse ASCM Harness 2017-19")],
     BUICK_LACROSSE.specs,
   )
   BUICK_LACROSSE_ASCM_19US = GMPlatformConfig(
-    [GMCarDocs("Buick LaCrosse 2019 US ASCM Harness")],
+    [GMCarDocs("Buick LaCrosse US ASCM Harness 2019")],
     BUICK_LACROSSE.specs,
   )
   BUICK_REGAL = GMASCMPlatformConfig(
@@ -296,7 +296,7 @@ class CAR(Platforms):
     GMCarSpecs(mass=2564, wheelbase=2.95, steerRatio=17.3),
   )
   CADILLAC_ESCALADE_ASCM = GMPlatformConfig(
-    [GMCarDocs("Cadillac Escalade 2018 ASCM Harness", "Driver Assist Package")],
+    [GMCarDocs("Cadillac Escalade ASCM Harness 2018", "Driver Assist Package")],
     CADILLAC_ESCALADE.specs,
   )
   CADILLAC_ESCALADE_ESV = GMASCMPlatformConfig(
@@ -308,7 +308,7 @@ class CAR(Platforms):
     CADILLAC_ESCALADE_ESV.specs,
   )
   CADILLAC_ESCALADE_ESV_2019_ASCM = GMPlatformConfig(
-    [GMCarDocs("Cadillac Escalade ESV Platinum 2019 ASCM Harness", "Adaptive Cruise Control (ACC) & LKAS")],
+    [GMCarDocs("Cadillac Escalade ESV Platinum ASCM Harness 2019", "Adaptive Cruise Control (ACC) & LKAS")],
     CADILLAC_ESCALADE_ESV_2019.specs,
   )
   CHEVROLET_BOLT_ACC_2022_2023 = GMPlatformConfig(
@@ -318,19 +318,19 @@ class CAR(Platforms):
     GMCarSpecs(mass=1669, wheelbase=2.63779, steerRatio=16.8, centerToFrontRatio=0.4, tireStiffnessFactor=1.0),
   )
   CHEVROLET_BOLT_ACC_2022_2023_PEDAL = GMPlatformConfig(
-    [GMCarDocs("Chevrolet Bolt EV 2022-23 ACC w Pedal")],
+    [GMCarDocs("Chevrolet Bolt EV ACC w Pedal 2022-23")],
     CHEVROLET_BOLT_ACC_2022_2023.specs,
   )
   CHEVROLET_BOLT_CC_2022_2023 = GMPlatformConfig(
-    [GMCarDocs("Chevrolet Bolt EV 2022-23 - No-ACC")],
+    [GMCarDocs("Chevrolet Bolt EV No-ACC 2022-23")],
     CHEVROLET_BOLT_ACC_2022_2023.specs,
   )
   CHEVROLET_BOLT_CC_2018_2021 = GMPlatformConfig(
-    [GMCarDocs("Chevrolet Bolt EV 2018-21 - No-ACC")],
+    [GMCarDocs("Chevrolet Bolt EV No-ACC 2018-21")],
     CHEVROLET_BOLT_ACC_2022_2023.specs,
   )
   CHEVROLET_BOLT_CC_2017 = GMPlatformConfig(
-    [GMCarDocs("Chevrolet Bolt EV 2017 - No-ACC")],
+    [GMCarDocs("Chevrolet Bolt EV No-ACC 2017")],
     CHEVROLET_BOLT_ACC_2022_2023.specs,
   )
 
@@ -343,8 +343,8 @@ class CAR(Platforms):
   )
   CHEVROLET_SILVERADO_CC = GMPlatformConfig(
     [
-      GMCarDocs("Chevrolet Silverado 1500 - No-ACC"),
-      GMCarDocs("GMC Sierra 1500 - No-ACC"),
+      GMCarDocs("Chevrolet Silverado 1500 No-ACC 2020-21"),
+      GMCarDocs("GMC Sierra 1500 No-ACC 2020-21"),
     ],
     CHEVROLET_SILVERADO.specs,
   )
@@ -361,7 +361,7 @@ class CAR(Platforms):
     CarSpecs(mass=2731, wheelbase=3.302, steerRatio=17.3, centerToFrontRatio=0.49),
   )
   GMC_YUKON_CC = GMPlatformConfig(
-    [GMCarDocs("GMC Yukon - No-ACC")],
+    [GMCarDocs("GMC Yukon No-ACC 2019-20")],
     CarSpecs(mass=2541, wheelbase=2.95, steerRatio=16.3, centerToFrontRatio=0.4),
   )
   GMC_YUKON = GMPlatformConfig(
@@ -373,7 +373,7 @@ class CAR(Platforms):
     GMCarSpecs(mass=1660, wheelbase=2.78, steerRatio=14.4, centerToFrontRatio=0.4),
   )
   CADILLAC_XT4_CC = GMPlatformConfig(
-    [GMCarDocs("Cadillac XT4 - No-ACC")],
+    [GMCarDocs("Cadillac XT4 No-ACC 2023")],
     CADILLAC_XT4.specs,
   )
   CADILLAC_XT5 = GMSDGMPlatformConfig(
@@ -405,31 +405,31 @@ class CAR(Platforms):
     CarSpecs(mass=2050, wheelbase=2.86, steerRatio=16.0, centerToFrontRatio=0.5),
   )
   CADILLAC_CT6_CC = GMPlatformConfig(
-    [GMCarDocs("Cadillac CT6 - No-ACC")],
+    [GMCarDocs("Cadillac CT6 No-ACC 2016-20")],
     CarSpecs(mass=2358, wheelbase=3.11, steerRatio=17.7, centerToFrontRatio=0.4),
   )
   CADILLAC_XT5_CC = GMPlatformConfig(
-    [GMCarDocs("Cadillac XT5 - No-ACC")],
+    [GMCarDocs("Cadillac XT5 No-ACC 2022")],
     CADILLAC_XT5.specs,
   )
   CHEVROLET_EQUINOX_CC = GMPlatformConfig(
-    [GMCarDocs("Chevrolet Equinox 2019-22 - No-ACC")],
+    [GMCarDocs("Chevrolet Equinox No-ACC 2019-22")],
     CHEVROLET_EQUINOX.specs,
   )
   CHEVROLET_MALIBU_CC = GMPlatformConfig(
-    [GMCarDocs("Chevrolet Malibu 2023 - No-ACC")],
+    [GMCarDocs("Chevrolet Malibu No-ACC 2023")],
     CarSpecs(mass=1450, wheelbase=2.8, steerRatio=18.25, centerToFrontRatio=0.4, tireStiffnessFactor=0.997),
   )
   CHEVROLET_MALIBU_HYBRID_CC = GMPlatformConfig(
-    [GMCarDocs("Chevrolet Malibu Hybrid 2017 - No-ACC")],
+    [GMCarDocs("Chevrolet Malibu Hybrid No-ACC 2017")],
     CarSpecs(mass=1450, wheelbase=2.8, steerRatio=15.8, centerToFrontRatio=0.4),
   )
   CHEVROLET_SUBURBAN_CC = GMPlatformConfig(
-    [GMCarDocs("Chevrolet Suburban Premier 2016-20 - No-ACC")],
+    [GMCarDocs("Chevrolet Suburban Premier No-ACC 2016-20")],
     CHEVROLET_SUBURBAN.specs,
   )
   CHEVROLET_TRAILBLAZER_CC = GMPlatformConfig(
-    [GMCarDocs("Chevrolet Trailblazer 2021-22 - No-ACC")],
+    [GMCarDocs("Chevrolet Trailblazer No-ACC 2021-22")],
     CHEVROLET_TRAILBLAZER.specs,
   )
   CHEVROLET_TRAX = GMPlatformConfig(

@@ -9,6 +9,7 @@ import random
 
 HERE = os.path.abspath(os.path.dirname(__file__))
 ROOT = os.path.join(HERE, "../../../../")
+rng = random.Random(os.environ.get("PYTEST_XDIST_TESTRUNUID", "opendbc-misra"))
 
 IGNORED_PATHS = (
   'opendbc/safety/main.c',
@@ -39,9 +40,9 @@ files = [f for f in all_files if f.endswith(('.c', '.h')) and not f.startswith(I
 assert len(files) > 20, files
 
 for p in patterns:
-  mutations.append((random.choice(files), *p, True))
+  mutations.append((rng.choice(files), *p, True))
 
-mutations = random.sample(mutations, 2)  # can remove this once cppcheck is faster
+mutations = rng.sample(mutations, 2)  # can remove this once cppcheck is faster
 
 
 @pytest.mark.parametrize("fn, rule, transform, should_fail", mutations)

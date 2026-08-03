@@ -44,6 +44,19 @@ bool sync_encoders(EncoderdState *s, VisionStreamType cam_type, uint32_t frame_i
   }
 }
 
+void encoder_set_bitrate(std::unique_ptr<Encoder> &e) {
+  static Params params;
+  std::string val = params.get("LivestreamEncoderBitrate");
+  if (val.empty()) return;
+  e->set_bitrate(std::stoi(val));
+}
+
+void encoder_request_keyframe(std::unique_ptr<Encoder> &e) {
+  static Params params;
+  if (!params.getBool("LivestreamRequestKeyframe")) return;
+  e->request_keyframe();
+}
+
 
 void encoder_thread(EncoderdState *s, const LogCameraInfo &cam_info) {
   util::set_thread_name(cam_info.thread_name);
@@ -110,6 +123,11 @@ void encoder_thread(EncoderdState *s, const LogCameraInfo &cam_info) {
 
       // encode a frame
       for (int i = 0; i < encoders.size(); ++i) {
+        if (cam_info.encoder_infos[i].is_live) {
+          encoder_set_bitrate(encoders[i]);
+          encoder_request_keyframe(encoders[i]);
+        }
+
         int out_id = encoders[i]->encode_frame(buf, &extra);
 
         if (out_id == -1) {

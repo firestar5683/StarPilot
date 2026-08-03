@@ -1,5 +1,9 @@
+import os
 import opendbc
 import platform
+
+local_opendbc_path = os.path.abspath(os.path.join(Dir("#").abspath, "..", "opendbc_repo"))
+opendbc_include_path = local_opendbc_path if os.path.isdir(os.path.join(local_opendbc_path, "opendbc")) else opendbc.INCLUDE_PATH
 
 CC = 'gcc'
 system = platform.system()
@@ -21,7 +25,7 @@ env = Environment(
     '-Wfatal-errors',
     '-Wno-pointer-to-int-cast',
   ],
-  CPPPATH=[".", "../../", "../../board/", opendbc.INCLUDE_PATH],
+  CPPPATH=[".", "../../", "../../board/", opendbc_include_path],
 )
 if system == "Darwin":
   env.PrependENVPath('PATH', '/opt/homebrew/bin')

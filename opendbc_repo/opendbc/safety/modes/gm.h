@@ -100,6 +100,12 @@ static const uint32_t GM_PADDLE_STALE_US = 100000U;
 static const uint32_t GM_PADDLE_FEED_STALE_US = 100000U;
 static const int GM_VOLT_AUTO_HOLD_MAX_BRAKE = 240;
 
+static bool gm_stock_brake_replacement_active(void) {
+  const bool auto_hold_active = gm_volt_auto_hold && acc_main_on && !vehicle_moving && !gas_pressed_prev;
+  const bool one_pedal_active = gm_volt_one_pedal && acc_main_on && !gas_pressed_prev && !brake_pressed;
+  return auto_hold_active || one_pedal_active;
+}
+
 void can_send(CANPacket_t *to_push, uint8_t bus_number, bool skip_tx_hook);
 void can_set_checksum(CANPacket_t *packet);
 
@@ -509,15 +515,16 @@ static bool gm_fwd_hook(int bus_num, int addr) {
 
   if ((gm_hw == GM_CAM) || gm_sdgm) {
     if (bus_num == 0) {
-      bool is_pscm_msg = addr == 0x184U;
+      bool is_pscm_msg = addr == 0x184;
       // Keep the camera side sourced only from OP's spoofed cruise status on non-ACC paths.
-      bool is_ecm_cruise_status_msg = (addr == 0x3D1U) && !gm_has_acc;
-      block_msg = is_pscm_msg || is_ecm_cruise_status_msg;
+      bool is_ecm_cruise_status_msg = (addr == 0x3D1) && !gm_has_acc;
+      bool is_replaced_sdgm_brake = gm_sdgm && (addr == 0x315) && gm_stock_brake_replacement_active();
+      block_msg = is_pscm_msg || is_ecm_cruise_status_msg || is_replaced_sdgm_brake;
     } else if (bus_num == 2) {
-      bool is_lkas_msg = addr == 0x180U;
-      bool is_acc_status_msg = addr == 0x370U;
-      bool is_acc_actuation_msg = (addr == 0x315U) || (addr == 0x2CBU);
-      bool is_acc_counter_msg = addr == 0x2CDU;
+      bool is_lkas_msg = addr == 0x180;
+      bool is_acc_status_msg = addr == 0x370;
+      bool is_acc_actuation_msg = (addr == 0x315) || (addr == 0x2CB);
+      bool is_acc_counter_msg = addr == 0x2CD;
 
       block_msg = is_lkas_msg;
       if (gm_cam_long || gm_pedal_long) {
@@ -525,6 +532,9 @@ static bool gm_fwd_hook(int bus_num, int addr) {
       }
       if (gm_cam_long) {
         block_msg |= is_acc_actuation_msg || is_acc_counter_msg;
+      }
+      if (!gm_sdgm && (addr == 0x315) && gm_stock_brake_replacement_active()) {
+        block_msg = true;
       }
     }
   }
@@ -548,7 +558,7 @@ static safety_config gm_init(uint16_t param) {
   const uint16_t GM_PARAM_BOLT_2022_PEDAL = 4096;
   const uint16_t GM_PARAM_REMOTE_START_BOOTS_COMMA = 8192;
   const uint16_t GM_PARAM_PANDA_3D1_SCHED = 16384;
-  const uint16_t GM_PARAM_PANDA_PADDLE_SCHED = 32768;
+  const uint16_t GM_PARAM_PANDA_PADDLE_SCHED = 32768U;
 
   static const LongitudinalLimits GM_ASCM_LONG_LIMITS = {
     .max_gas = 8191,
@@ -620,7 +630,7 @@ static safety_config gm_init(uint16_t param) {
                                                                     {0x200, 0, 6, .check_relay = false},
                                                                     {0x1E1, 0, 7, .check_relay = false},
                                                                     {0xBD, 0, 7, .check_relay = false}, {0x1F5, 0, 8, .check_relay = false}};  // pt bus
-  static const CanMsg GM_CAM_VOLT_AUTO_HOLD_TX_MSGS[] = {{0x180, 0, 4, .check_relay = true}, {0x370, 0, 6, .check_relay = false}, {0x3D1, 0, 8, .check_relay = false}, {0x315, 0, 5, .check_relay = true},  // pt bus
+  static const CanMsg GM_CAM_VOLT_AUTO_HOLD_TX_MSGS[] = {{0x180, 0, 4, .check_relay = true}, {0x370, 0, 6, .check_relay = false}, {0x3D1, 0, 8, .check_relay = false}, {0x315, 0, 5, .check_relay = true, .disable_static_blocking = true},  // pt bus
                                                          {0x1E1, 2, 7, .check_relay = false}, {0x184, 2, 8, .check_relay = true},  // camera bus
                                                          {0x200, 0, 6, .check_relay = false},
                                                          {0x1E1, 0, 7, .check_relay = false},

@@ -47,6 +47,11 @@ class MainLayout(Widget):
       if not self._onboarding_window.completed:
         gui_app.push_widget(self._onboarding_window)
 
+    # TICI/TIZI offroad views are mostly static. Keep onroad and interaction
+    # at the normal rate, but avoid spending GPU/CPU budget redrawing idle UI.
+    # MainLayout is only used by BIG UI, so MICI retains its existing scheduler.
+    gui_app.configure_adaptive_rendering(gui_app.big_ui())
+
   @staticmethod
   def _critical_full_alert_active() -> bool:
     if not ui_state.sm.recv_frame['selfdriveState']:
@@ -60,6 +65,7 @@ class MainLayout(Widget):
       return
 
     self._handle_onroad_transition()
+    gui_app.set_render_mode(self._current_mode == MainState.ONROAD or ui_state.started)
     self._render_main_content()
 
   def _setup_callbacks(self):
@@ -105,11 +111,13 @@ class MainLayout(Widget):
       self._layouts[self._current_mode].hide_event()
       self._current_mode = layout
       self._layouts[self._current_mode].show_event()
+      gui_app.request_high_fps()
 
   def open_settings(self, panel_type: PanelType):
     self._layouts[MainState.SETTINGS].set_current_panel(panel_type)
     self._set_current_layout(MainState.SETTINGS)
     self._sidebar.set_visible(False)
+    gui_app.request_high_fps()
 
   def _on_settings_clicked(self):
     self.open_settings(PanelType.STARPILOT)

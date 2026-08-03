@@ -7,7 +7,7 @@ from openpilot.selfdrive.ui.onroad.starpilot.compass import get_compass_text
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.multilang import tr
-from openpilot.system.ui.lib.text_measure import measure_text_cached
+from openpilot.system.ui.lib.text_measure import draw_text_with_shadow, measure_text_cached
 from openpilot.system.ui.widgets import Widget
 
 # Constants
@@ -49,8 +49,8 @@ class Colors:
   BLACK_TRANSLUCENT = rl.Color(0, 0, 0, 166)
   WHITE_TRANSLUCENT = rl.Color(255, 255, 255, 200)
   BORDER_TRANSLUCENT = rl.Color(255, 255, 255, 75)
-  HEADER_GRADIENT_START = rl.Color(0, 0, 0, 114)
-  HEADER_GRADIENT_END = rl.BLANK
+  EDGE_GRADIENT_START = rl.Color(0, 0, 0, 114)
+  EDGE_GRADIENT_END = rl.BLANK
 
 
 UI_CONFIG = UIConfig()
@@ -76,6 +76,7 @@ class HudRenderer(Widget):
     self._navigation_card = NavigationCardRenderer()
 
     self.draw_set_speed = True
+    self.draw_current_speed = True
     self.draw_exp_button = True
 
   def _update_state(self) -> None:
@@ -121,14 +122,22 @@ class HudRenderer(Widget):
       int(rect.y),
       int(rect.width),
       UI_CONFIG.header_height,
-      COLORS.HEADER_GRADIENT_START,
-      COLORS.HEADER_GRADIENT_END,
+      COLORS.EDGE_GRADIENT_START,
+      COLORS.EDGE_GRADIENT_END,
+    )
+    rl.draw_rectangle_gradient_v(
+      int(rect.x),
+      int(rect.y + rect.height - UI_CONFIG.header_height),
+      int(rect.width),
+      UI_CONFIG.header_height,
+      COLORS.EDGE_GRADIENT_END,
+      COLORS.EDGE_GRADIENT_START,
     )
 
     if self.draw_set_speed and self.is_cruise_available and not ui_state.starpilot_toggles.get("hide_max_speed", False):
       self._draw_set_speed(rect)
 
-    if not ui_state.starpilot_toggles.get("hide_speed", False):
+    if self.draw_current_speed and not ui_state.starpilot_toggles.get("hide_speed", False):
       self._draw_current_speed(rect)
 
     self._navigation_card.render(rect)
@@ -201,4 +210,4 @@ class HudRenderer(Widget):
       compass_font_size = 50
       compass_size = measure_text_cached(self._font_bold, compass_text, compass_font_size)
       compass_pos = rl.Vector2(rect.x + rect.width / 2 - compass_size.x / 2, 65 - compass_size.y / 2)
-      rl.draw_text_ex(self._font_bold, compass_text, compass_pos, compass_font_size, 0, rl.Color(255, 255, 255, 180))
+      draw_text_with_shadow(self._font_bold, compass_text, compass_pos, compass_font_size, rl.Color(255, 255, 255, 180))

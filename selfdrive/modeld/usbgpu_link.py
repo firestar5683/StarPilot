@@ -2,7 +2,7 @@ import time
 from pathlib import Path
 
 from openpilot.common.swaglog import cloudlog
-from openpilot.system.hardware.usb import CHESTNUT_PRODUCT_ID, CHESTNUT_VENDOR_ID, controller, read_int, usb_devices
+from openpilot.system.hardware.usb import CHESTNUT_PRODUCT_ID, CHESTNUT_VENDOR_IDS, controller, read_int, usb_devices
 
 STABLE_SECONDS = 2.0
 STABLE_THRESHOLD = 5.0
@@ -10,7 +10,7 @@ STABLE_THRESHOLD = 5.0
 
 def _chestnut_portli() -> Path | None:
   for device in usb_devices():
-    if read_int(device / "idVendor", 16) != CHESTNUT_VENDOR_ID or \
+    if read_int(device / "idVendor", 16) not in CHESTNUT_VENDOR_IDS or \
        read_int(device / "idProduct", 16) != CHESTNUT_PRODUCT_ID:
       continue
     usb_controller = controller(device)

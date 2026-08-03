@@ -152,3 +152,16 @@ def test_transition_offroad_persists_valid_gps():
   )
 
   assert params.writes == [("LastGPSPosition", json.dumps(gps_position))]
+
+
+def test_transition_onroad_stops_dashboard_analysis(monkeypatch, tmp_path):
+  calls = []
+  dashboard_utilities = SimpleNamespace(stop_dashboard_background_analysis=lambda: calls.append("stop"))
+  monkeypatch.setattr(starpilot_process, "get_dashboard_utilities", lambda: dashboard_utilities)
+  error_log = tmp_path / "error.txt"
+  error_log.write_text("old error")
+
+  starpilot_process.transition_onroad(error_log)
+
+  assert calls == ["stop"]
+  assert not error_log.exists()

@@ -16,7 +16,7 @@ const state = reactive({
   routeProgress: 0,
   routeTotal: 0,
   connectDongleId: "",
-  workspace: { reports: [], activeTrial: null, status: {} },
+  workspace: { reports: [], savedTunes: [], activeTrial: null, status: {} },
   status: {},
   report: null,
   feedbackAccepted: [],
@@ -55,6 +55,16 @@ function formatReportSegmentRanges(report) {
 function safeCount(value) {
   const n = Number(value)
   return Number.isFinite(n) ? n : 0
+}
+
+function formatRouteLength(route) {
+  const segmentCount = Math.max(0, Math.round(safeCount(route?.segmentCount)))
+  if (!segmentCount) return "Length unavailable"
+  const approximateMinutes = Math.max(1, Math.round(safeCount(route?.approxDurationSeconds) / 60) || segmentCount)
+  const duration = approximateMinutes >= 60
+    ? `~${Math.floor(approximateMinutes / 60)}h ${approximateMinutes % 60}m`
+    : `~${approximateMinutes} min`
+  return `${segmentCount} segment${segmentCount === 1 ? "" : "s"} (${duration})`
 }
 
 function connectRouteUrl(routeName) {
@@ -258,29 +268,6 @@ async function deleteReport(reportId) {
   }
 }
 
-async function clearWorkspace() {
-  if (state.runningAction) return
-  if (!window.confirm("Clear every saved tuning report, feedback entry, generated profile, and snapshot from the device?")) return
-
-  state.runningAction = true
-  try {
-    const response = await fetch("/api/flm/workspace/clear", { method: "POST" })
-    const payload = await response.json()
-    if (!response.ok) throw new Error(payload.error || "Failed to clear tuning workspace.")
-
-    state.report = null
-    syncFeedbackState(null)
-    state.workspace = payload.workspace || { reports: [], activeTrial: null, status: {} }
-    state.status = { ...state.status, ...(payload.workspace?.status || {}) }
-    showSnackbar(payload.message || "Cleared tuning workspace.")
-  } catch (error) {
-    state.error = error?.message || "Failed to clear tuning workspace."
-    showSnackbar(state.error, "error")
-  } finally {
-    state.runningAction = false
-  }
-}
-
 async function fetchStatus() {
   try {
     const response = await fetch("/api/flm/status")
@@ -291,7 +278,12 @@ async function fetchStatus() {
       isOnroad: !!payload.isOnroad,
     }
     if (payload.activeTrial !== undefined) {
-      state.workspace = { ...state.workspace, activeTrial: payload.activeTrial, reports: payload.reports || state.workspace.reports }
+      state.workspace = {
+        ...state.workspace,
+        activeTrial: payload.activeTrial,
+        reports: payload.reports || state.workspace.reports,
+        savedTunes: payload.savedTunes || state.workspace.savedTunes,
+      }
     }
     const reportId = state.status.reportId
     if (reportId && state.report?.reportId !== reportId) {
@@ -431,6 +423,95 @@ async function applyProfile(profileId) {
   }
 }
 
+async function saveCurrentTune() {
+  if (state.runningAction || !state.workspace?.activeTrial) return
+  const defaultName = state.workspace.activeTrial.profileLabel || state.workspace.currentCarFingerprint || "Saved Tune"
+  const name = window.prompt("Name this tune", defaultName)
+  if (name === null) return
+
+  state.runningAction = true
+  try {
+    const response = await fetch("/api/flm/saved-tunes", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    })
+    const payload = await response.json()
+    if (!response.ok) throw new Error(payload.error || "Failed to save the active tune.")
+    state.error = ""
+    state.workspace = payload.workspace || state.workspace
+    showSnackbar(payload.message || "Saved the active tune.")
+  } catch (error) {
+    state.error = error?.message || "Failed to save the active tune."
+    showSnackbar(state.error, "error")
+  } finally {
+    state.runningAction = false
+  }
+}
+
+async function applySavedTune(tuneId) {
+  if (!tuneId || state.runningAction) return
+  state.runningAction = true
+  try {
+    const response = await fetch(`/api/flm/saved-tunes/${encodeURIComponent(tuneId)}/apply`, { method: "POST" })
+    const payload = await response.json()
+    if (!response.ok) throw new Error(payload.error || "Failed to apply saved tune.")
+    state.error = ""
+    state.workspace = payload.workspace || state.workspace
+    showSnackbar(payload.message || "Saved tune applied.")
+  } catch (error) {
+    state.error = error?.message || "Failed to apply saved tune."
+    showSnackbar(state.error, "error")
+  } finally {
+    state.runningAction = false
+  }
+}
+
+async function renameSavedTune(tune) {
+  if (!tune?.tuneId || state.runningAction) return
+  const name = window.prompt("Rename saved tune", tune.name || "Saved Tune")
+  if (name === null) return
+
+  state.runningAction = true
+  try {
+    const response = await fetch(`/api/flm/saved-tunes/${encodeURIComponent(tune.tuneId)}`, {
+      method: "PATCH",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ name }),
+    })
+    const payload = await response.json()
+    if (!response.ok) throw new Error(payload.error || "Failed to rename saved tune.")
+    state.error = ""
+    state.workspace = payload.workspace || state.workspace
+    showSnackbar(payload.message || "Saved tune renamed.")
+  } catch (error) {
+    state.error = error?.message || "Failed to rename saved tune."
+    showSnackbar(state.error, "error")
+  } finally {
+    state.runningAction = false
+  }
+}
+
+async function deleteSavedTune(tune) {
+  if (!tune?.tuneId || state.runningAction) return
+  if (!window.confirm(`Delete saved tune "${tune.name || "Saved Tune"}"?`)) return
+
+  state.runningAction = true
+  try {
+    const response = await fetch(`/api/flm/saved-tunes/${encodeURIComponent(tune.tuneId)}`, { method: "DELETE" })
+    const payload = await response.json()
+    if (!response.ok) throw new Error(payload.error || "Failed to delete saved tune.")
+    state.error = ""
+    state.workspace = payload.workspace || state.workspace
+    showSnackbar(payload.message || "Saved tune deleted.")
+  } catch (error) {
+    state.error = error?.message || "Failed to delete saved tune."
+    showSnackbar(state.error, "error")
+  } finally {
+    state.runningAction = false
+  }
+}
+
 async function selectPath(pathKey) {
   if (!state.report?.reportId || !pathKey || state.runningAction) return
   if (pathKey === (state.report.selectedPathKey || state.report.primaryPathKey)) return
@@ -460,7 +541,11 @@ async function revertProfile() {
   state.runningAction = true
   try {
     const response = await fetch("/api/flm/trials/revert", { method: "POST" })
-    const payload = await response.json()
+    const body = await response.text()
+    let payload
+    try { payload = body ? JSON.parse(body) : {} } catch (_) {
+      payload = { error: body.replace(/<[^>]+>/g, " ").replace(/\s+/g, " ").trim() }
+    }
     if (!response.ok) throw new Error(payload.error || "Failed to revert trial profile.")
     state.error = ""
     await fetchWorkspace()
@@ -596,8 +681,19 @@ function allReportProfiles() {
 
 function activeTrialProfile() {
   const activeTrial = state.workspace?.activeTrial
-  if (!activeTrial || activeTrial.reportId !== state.report?.reportId) return null
-  return allReportProfiles().find((profile) => profile.id === activeTrial.profileId) || null
+  if (!activeTrial) return null
+  if (activeTrial.reportId === state.report?.reportId) {
+    const reportProfile = allReportProfiles().find((profile) => profile.id === activeTrial.profileId)
+    if (reportProfile) return reportProfile
+  }
+  return {
+    id: activeTrial.profileId,
+    genericParams: activeTrial.appliedGenericParams || {},
+    flmOverrides: {
+      baseFrictionThresholds: activeTrial.appliedFrictionThresholds || {},
+      vehicleKnobs: activeTrial.appliedVehicleKnobs || {},
+    },
+  }
 }
 
 function mergedFlmOverrides() {
@@ -1020,6 +1116,12 @@ export function Tuning() {
             @click="${revertProfile}">
             Revert Trial
           </button>
+          <button
+            class="longManeuverButton"
+            disabled="${() => state.runningAction || !state.workspace?.activeTrial}"
+            @click="${saveCurrentTune}">
+            Save Tune
+          </button>
           ${() => state.workspace?.activeTrial?.rollbackAvailable === false ? html`
             <button
               class="longManeuverButton"
@@ -1054,7 +1156,7 @@ export function Tuning() {
           <p><strong>Updated:</strong> ${() => formatStatusAge(state.status?.updatedAt)}</p>
           <p><strong>Selected Routes:</strong> ${() => state.selectedRoutes.length}</p>
           <p><strong>Progress:</strong> ${() => `${safeCount(state.status?.progress)}/${safeCount(state.status?.total)}`}</p>
-          <p><strong>Active Trial:</strong> ${() => state.workspace?.activeTrial?.profileId || "None"}</p>
+          <p><strong>Active Trial:</strong> ${() => state.workspace?.activeTrial?.profileLabel || state.workspace?.activeTrial?.profileId || "None"}</p>
         </div>
 
         ${() => state.status?.isOnroad ? html`
@@ -1070,7 +1172,14 @@ export function Tuning() {
         ${() => state.status?.currentSegment ? html`
           <div class="longManeuverCurrent">
             <p><strong>Current Segment:</strong> ${state.status.currentSegment}</p>
+            ${state.status.segmentTimeoutSeconds ? html`
+              <p class="longManeuverMuted">Segments that take longer than ${safeCount(state.status.segmentTimeoutSeconds)} seconds are skipped automatically.</p>
+            ` : ""}
           </div>
+        ` : ""}
+
+        ${() => state.status?.lastSkippedSegment ? html`
+          <p class="longManeuverMuted">Skipped ${state.status.lastSkippedSegment} after it exceeded the read limit.</p>
         ` : ""}
 
         <div class="flmTwoColumn">
@@ -1101,6 +1210,7 @@ export function Tuning() {
                       <span>
                         <strong>${route.timestampLabel}</strong>
                         <small>${route.name}</small>
+                        <small>${formatRouteLength(route)}</small>
                       </span>
                     </label>
                     ${() => connectRouteUrl(route.name) ? html`
@@ -1140,37 +1250,54 @@ export function Tuning() {
           <section class="flmCard">
             <div class="flmCardHeader">
               <div>
-                <h3>Workspace</h3>
+                <h3>Saved Tunes</h3>
               </div>
               <button
-                class="longManeuverButton danger"
-                disabled="${() => state.runningAction || !(state.workspace?.reports || []).length}"
-                @click="${clearWorkspace}">
-                Clear Workspace
+                class="longManeuverButton"
+                disabled="${() => state.runningAction || !state.workspace?.activeTrial}"
+                @click="${saveCurrentTune}">
+                Save Current
               </button>
             </div>
-            ${() => state.loadingWorkspace ? html`<p class="longManeuverMuted">Loading workspace...</p>` : ""}
+            ${() => state.loadingWorkspace ? html`<p class="longManeuverMuted">Loading saved tunes...</p>` : ""}
             <p class="longManeuverMuted">
-              Recent reports stay on-device under <code>/data/galaxy/flm</code>. Loading a report refreshes the suggestion and trial view below.
+              Save a working FLM trial, switch between vehicle or trailer setups, then use Revert Trial to return to the exact manual settings from before FLM.
             </p>
             <div class="flmWorkspaceList">
-              ${() => (state.workspace?.reports || []).length
-                ? state.workspace.reports.map((report) => html`
+              ${() => (state.workspace?.savedTunes || []).length
+                ? state.workspace.savedTunes.map((tune) => html`
                   <div class="flmWorkspaceRow">
-                    <button class="flmWorkspaceItem" @click="${() => loadReport(report.reportId)}">
-                      <strong>${report.carFingerprint || "Unknown car"}</strong>
-                      <span>${(report.routeNames || []).join(", ")}</span>
-                      <small>${formatTimestamp(report.createdAt ? new Date(report.createdAt * 1000).toISOString() : "")}</small>
-                    </button>
-                    <button
-                      class="longManeuverButton danger flmWorkspaceDelete"
-                      disabled="${() => state.runningAction}"
-                      @click="${() => deleteReport(report.reportId)}">
-                      Delete
-                    </button>
+                    <div class="flmWorkspaceItem">
+                      <strong>${tune.name || "Saved Tune"}${tune.active ? " (Active)" : ""}</strong>
+                      <span>${tune.carFingerprint || "Unknown car"}${tune.pathLabel ? ` / ${tune.pathLabel}` : ""}</span>
+                      <small>
+                        ${tune.genericParamCount} generic, ${tune.frictionCurveCount} friction curve, ${tune.vehicleKnobCount} vehicle knobs
+                      </small>
+                      <small>${formatTimestamp(tune.updatedAt ? new Date(tune.updatedAt * 1000).toISOString() : "")}</small>
+                    </div>
+                    <div class="flmSavedTuneActions">
+                      <button
+                        class="longManeuverButton"
+                        disabled="${() => state.runningAction || tune.active}"
+                        @click="${() => applySavedTune(tune.tuneId)}">
+                        ${tune.active ? "Active" : "Apply"}
+                      </button>
+                      <button
+                        class="longManeuverButton"
+                        disabled="${() => state.runningAction}"
+                        @click="${() => renameSavedTune(tune)}">
+                        Rename
+                      </button>
+                      <button
+                        class="longManeuverButton danger"
+                        disabled="${() => state.runningAction || tune.active}"
+                        @click="${() => deleteSavedTune(tune)}">
+                        Delete
+                      </button>
+                    </div>
                   </div>
                 `)
-                : html`<p class="longManeuverMuted">No tuning reports yet.</p>`}
+                : html`<p class="longManeuverMuted">No saved tunes yet. Apply a trial, then save it here.</p>`}
             </div>
           </section>
         </div>

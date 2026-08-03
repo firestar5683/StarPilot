@@ -6,7 +6,7 @@ from hypothesis import given, settings, strategies as st
 from opendbc.car import Bus, structs
 from opendbc.can import CANPacker, CANParser
 from opendbc.car.structs import CarParams
-from opendbc.car.fw_versions import build_fw_dict
+from opendbc.car.fw_versions import build_fw_dict, match_fw_to_car
 from opendbc.car.toyota import toyotacan
 from opendbc.car.toyota.carcontroller import CarController, get_camry_hybrid_feedforward, get_long_tune, get_prius_feedforward, \
                                              get_prius_positive_feedforward_scale, \
@@ -56,6 +56,21 @@ class TestToyotaInterfaces:
     assert forced_params.lateralTuning.which() == "torque"
     assert forced_params.lateralTuning.torque.latAccelFactor == pytest.approx(1.7)
     assert forced_params.lateralTuning.torque.friction == pytest.approx(0.14)
+
+  def test_sienna_4th_gen_uses_torque_controller(self):
+    params = CarInterface.get_params(
+      CAR.TOYOTA_SIENNA_4TH_GEN,
+      {bus: {} for bus in range(8)},
+      [],
+      alpha_long=False,
+      is_release=False,
+      docs=False,
+      starpilot_toggles=SimpleNamespace(force_torque_controller=False, nnff=False, nnff_lite=False),
+    )
+
+    assert params.lateralTuning.which() == "torque"
+    assert params.lateralTuning.torque.latAccelFactor == pytest.approx(1.7)
+    assert params.lateralTuning.torque.friction == pytest.approx(0.14)
 
   def test_tss2_dbc(self):
     # We make some assumptions about TSS2 platforms,
@@ -126,6 +141,32 @@ class TestToyotaInterfaces:
     assert long_params.openpilotLongitudinalControl
     assert not long_params.flags & ToyotaFlags.HYBRID.value
     assert long_params.longitudinalActuatorDelay == pytest.approx(0.4)
+
+  def test_sienna_openpilot_long_uses_measured_actuator_delay(self):
+    stock_params = CarInterface.get_params(
+      CAR.TOYOTA_SIENNA,
+      {bus: {} for bus in range(8)},
+      [],
+      alpha_long=False,
+      is_release=False,
+      docs=False,
+      starpilot_toggles=SimpleNamespace(),
+    )
+    long_params = CarInterface.get_params(
+      CAR.TOYOTA_SIENNA,
+      {bus: ({0x2FF: 8} if bus == 0 else {}) for bus in range(8)},
+      [],
+      alpha_long=False,
+      is_release=False,
+      docs=False,
+      starpilot_toggles=SimpleNamespace(),
+    )
+
+    assert not stock_params.openpilotLongitudinalControl
+    assert stock_params.longitudinalActuatorDelay == pytest.approx(0.15)
+    assert long_params.openpilotLongitudinalControl
+    assert not long_params.flags & ToyotaFlags.HYBRID.value
+    assert long_params.longitudinalActuatorDelay == pytest.approx(0.5)
 
   @pytest.mark.parametrize("camera_message", [0x343, 0x4CB])
   def test_dsu_bypass_enables_longitudinal(self, camera_message):
@@ -331,6 +372,27 @@ class TestToyotaInterfaces:
 
 
 class TestToyotaFingerprint:
+  def test_sienna_2025_route_fw_exact_match(self):
+    route_fw = {
+      (Ecu.engine, 0x700, None): b'\x01896630869000\x00\x00\x00\x00',
+      (Ecu.abs, 0x7b0, None): b'\x01F15260823000\x00\x00\x00\x00',
+      (Ecu.eps, 0x7a1, None): b'\x018965B4514000\x00\x00\x00\x00',
+      (Ecu.hybrid, 0x7d2, None): b'\x02899830812000\x00\x00\x00\x00899850813000\x00\x00\x00\x00',
+      (Ecu.srs, 0x780, None): b'\x028917F0815200\x00\x00\x00\x008917H0801200\x00\x00\x00\x00',
+      (Ecu.fwdRadar, 0x750, 0xf): b'\x018821F3301500\x00\x00\x00\x00',
+      (Ecu.fwdCamera, 0x750, 0x6d): b'\x028646F0802500\x00\x00\x00\x008646G4202100\x00\x00\x00\x00',
+    }
+    car_fw = [
+      CarParams.CarFw(ecu=ecu, address=address, subAddress=0 if sub_address is None else sub_address,
+                      fwVersion=version, brand="toyota")
+      for (ecu, address, sub_address), version in route_fw.items()
+    ]
+
+    exact, matches = match_fw_to_car(car_fw, "5TDESKFC4SS158497", allow_fuzzy=False, log=False)
+
+    assert exact
+    assert matches == {CAR.TOYOTA_SIENNA_4TH_GEN}
+
   def test_non_essential_ecus(self, subtests):
     # Ensures only the cars that have multiple engine ECUs are in the engine non-essential ECU list
     for car_model, ecus in FW_VERSIONS.items():

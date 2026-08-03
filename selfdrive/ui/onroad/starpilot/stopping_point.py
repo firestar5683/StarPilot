@@ -14,7 +14,7 @@ def _draw_poly_outline(cx: float, cy: float, sides: int, radius: float, rotation
     rl.draw_line_ex(p1, p2, thickness, color)
 
 def render_stopping_point(renderer, font):
-  params = ui_state.params
+  params = ui_state.ui_params
   if not params.get_bool("ShowStoppingPoint"):
     return
 

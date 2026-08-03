@@ -268,6 +268,7 @@ class SubMaster:
 class PubMaster:
   def __init__(self, services: List[str]):
     self.sock = {}
+    self._zmq_readers_settled = set()
     for s in services:
       self.sock[s] = pub_sock(s)
 
@@ -277,6 +278,13 @@ class PubMaster:
     self.sock[s].send(dat)
 
   def wait_for_readers_to_update(self, s: str, timeout: int, dt: float = 0.05) -> bool:
+    if "ZMQ" in os.environ:
+      if s not in self._zmq_readers_settled:
+        time.sleep(min(timeout, 1.0))
+        self._zmq_readers_settled.add(s)
+      elif dt >= 0.05:
+        time.sleep(min(timeout, 1.0))
+      return True
     for _ in range(int(timeout*(1./dt))):
       if self.sock[s].all_readers_updated():
         return True

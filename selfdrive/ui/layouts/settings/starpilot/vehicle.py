@@ -400,13 +400,6 @@ class VehicleSettingsManagerView(PanelManagerView):
         "get_state": lambda: self._controller._params.get_bool("SNGHack"),
         "set_state": lambda s: self._controller._on_toggle("SNGHack"),
       })
-    if cs.isToyota and cs.hasOpenpilotLongitudinal:
-      toggles.append({
-        "title": tr("FrogsGoMoo Tweak"),
-        "get_state": lambda: self._controller._params.get_bool("FrogsGoMoosTweak"),
-        "set_state": lambda s: self._controller._on_toggle("FrogsGoMoosTweak"),
-      })
-
     if cs.isBolt and cs.hasPedal:
       toggles.append({
         "title": tr("Remap Cancel Button"),

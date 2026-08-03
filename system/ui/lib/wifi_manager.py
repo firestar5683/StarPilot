@@ -465,7 +465,38 @@ class WifiManager:
         while len(state_q):
           new_state, previous_state, change_reason = state_q.popleft().body
 
-          self._handle_state_change(new_state, previous_state, change_reason)
+          self._handle_state_change_safely(new_state, previous_state, change_reason)
+
+  def _handle_state_change_safely(self, new_state: int, previous_state: int, change_reason: int) -> None:
+    try:
+      self._handle_state_change(new_state, previous_state, change_reason)
+    except OSError as exc:
+      cloudlog.warning(f"Wi-Fi D-Bus socket failed; reconnecting: {exc}")
+      self._recover_main_dbus_connection()
+
+  def _recover_main_dbus_connection(self) -> bool:
+    try:
+      router = DBusRouter(open_dbus_connection_threading(bus="SYSTEM"))
+      _wrap_router(router)
+    except Exception:
+      cloudlog.exception("Failed to reconnect Wi-Fi D-Bus router")
+      return False
+
+    old_router = self._router_main
+    self._router_main = router
+    if old_router is not None:
+      try:
+        old_router.close()
+        old_router.conn.close()
+      except Exception:
+        pass
+
+    try:
+      self._init_connections()
+      self._init_wifi_state()
+    except Exception:
+      cloudlog.exception("Failed to restore Wi-Fi state after D-Bus reconnect")
+    return True
 
   def _handle_state_change(self, new_state: int, prev_state: int, change_reason: int):
     # Thread safety: _wifi_state is read/written by both the monitor thread (this handler)

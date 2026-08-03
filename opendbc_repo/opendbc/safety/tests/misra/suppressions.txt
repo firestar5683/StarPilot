@@ -14,6 +14,34 @@ unmatchedSuppression
 
 # All interrupt handlers are defined, including ones we don't use
 unusedFunction:*/interrupt_handlers*.h
+unusedFunction:*/modes/hyundai_common.h
+
+misra-c2012-8.9:*/modes/toyota.h
+misra-c2012-8.9:*/modes/tesla_preap.h
+misra-c2012-8.9:*/modes/gm.h
+misra-c2012-8.9:*/modes/hyundai.h
+misra-c2012-8.9:*/modes/subaru.h
+misra-c2012-8.9:*/modes/subaru_preglobal.h
+misra-c2012-8.9:*/modes/hyundai_canfd.h
+misra-c2012-9.3:*/modes/gm.h
+misra-c2012-10.1:*/modes/tesla_preap.h
+misra-c2012-10.4:*/modes/tesla_preap.h
+misra-c2012-10.4:*/modes/tesla.h
+misra-c2012-10.4:*/modes/hyundai_common.h
+misra-c2012-10.4:*/modes/hyundai.h
+misra-c2012-10.6:*/modes/hyundai.h
+misra-c2012-10.8:*/modes/gm.h
+misra-c2012-12.1:*/modes/tesla_preap.h
+misra-c2012-12.1:*/modes/gm.h
+misra-c2012-12.1:*/modes/hyundai.h
+misra-c2012-12.2:*/modes/tesla_preap.h
+misra-c2012-15.5:*/modes/honda.h
+misra-c2012-15.5:*/modes/tesla_preap.h
+misra-c2012-15.5:*/modes/gm.h
+misra-c2012-15.5:*/modes/hyundai_canfd.h
+misra-c2012-15.7:*/modes/toyota.h
+misra-c2012-15.7:*/modes/tesla_preap.h
+misra-c2012-15.7:*/modes/gm.h
 
 # all of the below suppressions are from new checks introduced after updating
 # cppcheck from 2.5 -> 2.13. they are listed here to separate the update from

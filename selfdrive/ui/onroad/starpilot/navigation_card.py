@@ -100,8 +100,9 @@ class NavigationCardRenderer(Widget):
       self._collapsed = new_state
 
   def _cancel_navigation(self) -> None:
+    params = ui_state.ui_params
     try:
-      ui_state.params.remove("NavDestination")
+      params.remove("NavDestination")
     except Exception:
       pass
 
@@ -162,14 +163,15 @@ class NavigationCardRenderer(Widget):
     return self._icons[icon_name]
 
   def _update_state(self) -> None:
-    self._enabled = ui_state.params.get_bool("NavigationUI")
+    params = ui_state.ui_params
+    self._enabled = params.get_bool("NavigationUI")
     self._valid = False
     self._interactive_rect = rl.Rectangle(0, 0, 0, 0)
 
     if not self._enabled:
       return
 
-    if not (ui_state.params.get("NavDestination") or ""):
+    if not (params.get("NavDestination") or ""):
       return
 
     raw_state = ui_state.params_memory.get("NavInstructionState") or {}

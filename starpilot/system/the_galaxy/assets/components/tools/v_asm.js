@@ -67,8 +67,8 @@ function redraw() {
   }
 
   const sides = [
-    { key: "left", points: state.leftPoints, fillColor: "rgba(13, 110, 253, 0.25)", borderColor: "#0d6efd", label: "LEFT" },
-    { key: "right", points: state.rightPoints, fillColor: "rgba(253, 126, 20, 0.25)", borderColor: "#fd7e14", label: "RIGHT" },
+    { key: "left", points: state.leftPoints, fillColor: "rgba(13, 110, 253, 0.25)", borderColor: "#0d6efd", label: "LEFT OF IMAGE" },
+    { key: "right", points: state.rightPoints, fillColor: "rgba(253, 126, 20, 0.25)", borderColor: "#fd7e14", label: "RIGHT OF IMAGE" },
   ];
 
   for (const side of sides) {
@@ -429,7 +429,7 @@ export function VASMAnnotations() {
             <ul class="v-asm-card-list">
               <li>Trace the visible glass (front and rear side windows on each side, as seen by the driver camera). Mask as much of the window area as possible.</li>
               <li>Exclude A-pillars, door frames, and interior. Include the side mirror if visible through the glass.</li>
-              <li>The B-pillar is fine to include if needed for a continuous mask. Your head or body being in frame is fine (that is part of the training data). Be consistent left vs right.</li>
+              <li>The B-pillar is fine to include as needed for a continuous mask. Your head or body being in frame is fine (that is part of the training data). Be consistent left vs right.</li>
             </ul>
           </div>
 
@@ -451,11 +451,11 @@ export function VASMAnnotations() {
           <div class="v-asm-btn-group">
             <button class="${state.annotating === "left" ? "v-asm-btn v-asm-btn-left-active" : "v-asm-btn v-asm-btn-outline-left"}"
                     @click="${startAnnotate}" value="left">
-              ${state.annotating === "left" ? "Annotating Left..." : "Annotate Left"}
+              ${state.annotating === "left" ? "Annotating Left (perspective of image)..." : "Annotate Left (as seen)"}
             </button>
             <button class="${state.annotating === "right" ? "v-asm-btn v-asm-btn-right-active" : "v-asm-btn v-asm-btn-outline-right"}"
                     @click="${startAnnotate}" value="right">
-              ${state.annotating === "right" ? "Annotating Right..." : "Annotate Right"}
+              ${state.annotating === "right" ? "Annotating Right (perspective of image)..." : "Annotate Right (as seen)"}
             </button>
             ${state.annotating ? html`<button class="v-asm-btn v-asm-btn-primary" @click="${finishSide}">Finish ${state.annotating === "left" ? "Left" : "Right"}</button>` : ""}
 
@@ -464,6 +464,9 @@ export function VASMAnnotations() {
             </button>
             ${state.configExists ? html`<button class="v-asm-btn v-asm-btn-danger" @click="${deleteConfig}" .disabled="${state.loading}">Delete Config</button>` : ""}
             <button class="v-asm-btn v-asm-btn-secondary" @click="${clearAll}">Clear All</button>
+            <button class="v-asm-btn v-asm-btn-secondary" @click="${retrySnapshot}" .disabled="${state.loading}">
+              ${state.loading ? "Loading..." : "Get a new Snapshot"}
+            </button>
           </div>
 
           <div class="v-asm-points-summary">

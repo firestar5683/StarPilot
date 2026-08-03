@@ -151,7 +151,7 @@ static bool chrysler_tx_hook(const CANPacket_t *msg) {
   }
 
   // FORCE CANCEL: only the cancel button press is allowed
-  if (msg->addr == chrysler_addrs->CRUISE_BUTTONS || msg->addr == chrysler_addrs->CRUISE_BUTTONS_ALT) {
+  if ((msg->addr == chrysler_addrs->CRUISE_BUTTONS) || (msg->addr == chrysler_addrs->CRUISE_BUTTONS_ALT)) {
     const bool is_cancel = msg->data[0] == 1U;
     const bool is_resume = msg->data[0] == 0x10U;
     const bool allow_resume_standstill = chrysler_jeep_brake_hold && is_resume && acc_main_on &&
