@@ -336,7 +336,7 @@ def default_ev_tuning_enabled(CP):
   ev_vehicle |= getattr(CP, "transmissionType", None) == car.CarParams.TransmissionType.direct
   return bool(ev_vehicle)
 
-def get_starpilot_toggles(sm=messaging.SubMaster(["starpilotPlan"])):
+def get_starpilot_toggles(sm=messaging.SubMaster(["starpilotPlan"]), *, read_persisted_force_params=False):
   toggles_text = sm["starpilotPlan"].starpilotToggles
   if toggles_text:
     get_starpilot_toggles._last_toggles_text = toggles_text
@@ -345,16 +345,18 @@ def get_starpilot_toggles(sm=messaging.SubMaster(["starpilotPlan"])):
 
   toggles = process_starpilot_toggles(toggles_text)
 
-  # Force drive-state controls must be authoritative from params so they
-  # apply immediately even if starpilotPlan publication is temporarily stale.
-  if not hasattr(get_starpilot_toggles, "_params"):
-    get_starpilot_toggles._params = Params(return_defaults=True)
+  # Realtime callers consume these values from the serialized toggle broadcast.
+  # Only startup/state-management callers should synchronously read the backing
+  # files; doing so from every 100 Hz control loop can stall critical processes.
+  if read_persisted_force_params:
+    if not hasattr(get_starpilot_toggles, "_params"):
+      get_starpilot_toggles._params = Params(return_defaults=True)
 
-  toggles.force_offroad = get_starpilot_toggles._params.get_bool("ForceOffroad")
-  toggles.force_onroad = get_starpilot_toggles._params.get_bool("ForceOnroad")
-  # Controller selection happens before the first live StarPilot broadcast. Do
-  # not let a cached CarParams/controller type hide the persisted user request.
-  toggles.force_torque_controller = get_starpilot_toggles._params.get_bool("ForceTorqueController")
+    toggles.force_offroad = get_starpilot_toggles._params.get_bool("ForceOffroad")
+    toggles.force_onroad = get_starpilot_toggles._params.get_bool("ForceOnroad")
+    # Controller selection happens before the first live StarPilot broadcast. Do
+    # not let a cached CarParams/controller type hide the persisted user request.
+    toggles.force_torque_controller = get_starpilot_toggles._params.get_bool("ForceTorqueController")
   return toggles
 
 @cache
