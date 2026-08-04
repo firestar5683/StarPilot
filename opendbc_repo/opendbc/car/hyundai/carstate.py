@@ -138,7 +138,7 @@ class CarState(CarStateBase):
     self.blindspots_front_corner_1_ts = 0
     self.left_blindspot_from_radar = False
     self.right_blindspot_from_radar = False
-    if CP.carFingerprint == CAR.KIA_EV9:
+    if CP.carFingerprint in CANFD_ANGLE_LONGITUDINAL_CAR:
       self.hba_icon = 0
       self.main_cruise_on = False
       self.angle_steering_angle = 0.0

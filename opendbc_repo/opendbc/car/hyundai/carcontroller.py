@@ -76,7 +76,7 @@ BLINDSPOT_WARNING_SOUND_SAMPLES = 36
 
 
 def egmp_dynamic_longitudinal_tuning(CP) -> bool:
-  return CP.carFingerprint in (CAR.HYUNDAI_IONIQ_6, CAR.KIA_EV9) or \
+  return CP.carFingerprint in (CAR.HYUNDAI_IONIQ_6, CAR.KIA_EV9, CAR.HYUNDAI_IONIQ_5_PE) or \
     kia_ev6_gt_line_longitudinal_tuning(CP.carFingerprint, getattr(CP, "carVin", ""))
 
 
@@ -411,7 +411,7 @@ class CarController(CarControllerBase):
     self.ecu_disable_failed = False
     self._ecu_disable_checked = False
     self._params = Params()
-    if CP.carFingerprint == CAR.KIA_EV9:
+    if CP.carFingerprint in CANFD_ANGLE_LONGITUDINAL_CAR:
       self._ev9_long_tuning = EV9LongitudinalTuningState()
       self._left_blindspot_warning = BlindspotWarningState()
       self._right_blindspot_warning = BlindspotWarningState()
@@ -515,6 +515,8 @@ class CarController(CarControllerBase):
       drive_gear = CS.out.gearShifter == structs.CarState.GearShifter.drive
       angle_lat_active = direct_angle_request_allowed(CS.out.vEgoRaw, measured_steering_angle, self.apply_angle_last,
                                                       drive_gear, self.BASELINE_VM, self.params) and not CS.angle_steering_fault
+    if self.CP.carFingerprint == CAR.HYUNDAI_IONIQ_5_PE and CS.out.standstill:
+      angle_lat_active = False
     self.direct_angle_request_allowed = angle_lat_active
     apply_angle = measured_steering_angle
 
@@ -597,8 +599,8 @@ class CarController(CarControllerBase):
     use_egmp_dynamic_long_tuning = egmp_dynamic_longitudinal_tuning(self.CP) and self.long_active_ecu and \
                                    actuators.longControlState in (LongCtrlState.starting, LongCtrlState.pid, LongCtrlState.stopping)
     is_ev6_gt_line = kia_ev6_gt_line_longitudinal_tuning(self.CP.carFingerprint, getattr(self.CP, "carVin", ""))
-    is_ev9 = self.CP.carFingerprint == CAR.KIA_EV9
-    if is_ev9 and (self._ev9_long_tuning.stop_request or not CC.enabled or CC.cruiseControl.override):
+    is_ccnc_angle_long = self.CP.carFingerprint in CANFD_ANGLE_LONGITUDINAL_CAR
+    if is_ccnc_angle_long and (self._ev9_long_tuning.stop_request or not CC.enabled or CC.cruiseControl.override):
       self._ioniq_6_long_tuning = reset_egmp_longitudinal_tuning(self._ioniq_6_long_tuning)
     if should_reset_ev6_gt_line_longitudinal_tuning(self.CP, actuators.longControlState):
       self._ioniq_6_long_tuning = reset_ev6_gt_line_longitudinal_tuning(self._ioniq_6_long_tuning, self.CP,
@@ -608,7 +610,7 @@ class CarController(CarControllerBase):
                                                                       CS.out.vEgo, CS.out.aEgo,
                                                                       actuators.longControlState, self.long_active_ecu,
                                                                       ev6_gt_line=is_ev6_gt_line,
-                                                                      low_speed_stop_brake_cap=is_ev9)
+                                                                      low_speed_stop_brake_cap=is_ccnc_angle_long)
     use_egmp_smoothed_accel = use_egmp_dynamic_long_tuning and (
       accel_cmd >= self._ioniq_6_long_tuning.actual_accel or
       self._ioniq_6_long_tuning.launch_active or
@@ -617,7 +619,7 @@ class CarController(CarControllerBase):
     if should_use_ev6_gt_line_stop_direct_tracking(is_ev6_gt_line, self._ioniq_6_long_tuning.stopping,
                                                    CS.out.vEgo, accel_cmd, self._ioniq_6_long_tuning.actual_accel):
       use_egmp_smoothed_accel = False
-    if is_ev9 and should_track_stop_accel_directly(self._ioniq_6_long_tuning.stopping, CS.out.vEgo,
+    if is_ccnc_angle_long and should_track_stop_accel_directly(self._ioniq_6_long_tuning.stopping, CS.out.vEgo,
                                                    accel_cmd, self._ioniq_6_long_tuning.actual_accel):
       use_egmp_smoothed_accel = False
     if use_egmp_dynamic_long_tuning:
