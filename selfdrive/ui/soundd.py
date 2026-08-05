@@ -344,6 +344,8 @@ class Soundd:
       AudibleAlert.promptRepeat: self.starpilot_toggles.prompt_volume / 100.0,
       AudibleAlert.promptDistracted: self.starpilot_toggles.promptDistracted_volume / 100.0,
 
+      AudibleAlert.preAlert: self.starpilot_toggles.promptDistracted_volume / 100.0,
+
       AudibleAlert.warningSoft: self.starpilot_toggles.warningSoft_volume / 100.0,
       AudibleAlert.warningImmediate: self.starpilot_toggles.warningImmediate_volume / 100.0,
 
