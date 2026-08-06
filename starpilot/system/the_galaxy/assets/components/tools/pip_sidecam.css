@@ -1,0 +1,44 @@
+/* PiP Side Camera reuses the V-ASM tool styling. */
+@import url("./v_asm.css");
+
+.pip-zoom-control {
+  margin-top: 18px;
+  padding: 14px 18px;
+  background: var(--card-bg, #16181d);
+  border: 1px solid var(--card-border, #2a2e37);
+  border-radius: 10px;
+}
+
+.pip-zoom-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  font-size: 14px;
+  font-weight: 600;
+  color: #e6e6e6;
+}
+
+.pip-zoom-value {
+  font-family: monospace;
+  color: #9ecbff;
+}
+
+.pip-zoom-slider {
+  width: 100%;
+  margin-top: 12px;
+  accent-color: #0d6efd;
+}
+
+.pip-zoom-labels {
+  display: flex;
+  justify-content: space-between;
+  font-size: 12px;
+  color: #8b8f98;
+  margin-top: 2px;
+}
+
+.pip-zoom-hint {
+  margin-top: 8px;
+  font-size: 12px;
+  color: #8b8f98;
+}

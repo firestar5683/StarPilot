@@ -24,6 +24,7 @@ const MENU_ITEMS = {
     { name: "Testing Ground", link: "/testing_ground", icon: "bi-bezier2" },
     { name: "Troubleshoot", link: "/troubleshoot", icon: "bi-tools" },
     { name: "V-Adj Spot Monitor", link: "/manage_v_asm", icon: "bi-eye" },
+    { name: "PiP Side Camera", link: "/manage_pip_sidecam", icon: "bi-badge-hd" },
     { name: "Theme Maker", link: "/theme_maker", icon: "bi-palette-fill" },
     { name: "Tmux Log", link: "/manage_tmux", icon: "bi-terminal" },
     { name: "Backup and Restore", link: "/manage_toggles", icon: "bi-arrow-repeat" },
