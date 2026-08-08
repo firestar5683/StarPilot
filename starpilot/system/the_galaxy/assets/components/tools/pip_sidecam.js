@@ -73,8 +73,8 @@ function redraw() {
 
   const half = state.zoom / 2;
   const sides = [
-    { key: "left", center: state.leftCenter, color: "#0d6efd", label: "LEFT WINDOW" },
-    { key: "right", center: state.rightCenter, color: "#fd7e14", label: "RIGHT WINDOW" },
+    { key: "left", center: state.leftCenter, color: "#0d6efd", label: "LEFT OF IMAGE" },
+    { key: "right", center: state.rightCenter, color: "#fd7e14", label: "RIGHT OF IMAGE" },
   ];
 
   for (const side of sides) {
@@ -117,7 +117,7 @@ function redraw() {
     ctx.font = "bold 15px monospace";
     ctx.textAlign = "center";
     ctx.fillText(
-      state.armSide === "left" ? "Click to set LEFT window center" : "Click to set RIGHT window center",
+      state.armSide === "left" ? "Click to set LEFT window center (as seen)" : "Click to set RIGHT window center (as seen)",
       canvas.width / 2,
       canvas.height - 18,
     );
@@ -257,8 +257,8 @@ async function saveConfig() {
   const config = {
     width: nativeW,
     height: nativeH,
-    center_left: toNative(state.leftCenter),
-    center_right: toNative(state.rightCenter),
+    center_right: toNative(state.leftCenter),
+    center_left: toNative(state.rightCenter),
     crop_size: Math.round(state.zoom * nativeW / cw),
   };
 
@@ -312,8 +312,8 @@ function applyConfigToCanvas() {
     return [Math.round(center[0] * cw / nativeW), Math.round(center[1] * ch / nativeH)];
   }
 
-  state.leftCenter = toCanvas(config.center_left);
-  state.rightCenter = toCanvas(config.center_right);
+  state.leftCenter = toCanvas(config.center_right);
+  state.rightCenter = toCanvas(config.center_left);
   if (Number.isFinite(Number(config.crop_size))) {
     state.zoom = Math.round(Number(config.crop_size) * cw / nativeW);
   }
@@ -385,8 +385,9 @@ export function PipSideCamera() {
           <div class="v-asm-card v-asm-card-danger">
             <div class="v-asm-card-title">Setup</div>
             <ul class="v-asm-card-list">
-              <li>Click "Set Left Center", then click the driver's side window; repeat for the right window</li>
+              <li>Click "Set Left (as seen)", then click the driver's side window; repeat for the right window</li>
               <li>From the driver camera, the car's LEFT window appears on the right side of the image and vice versa</li>
+              <li>"As seen" means from your seat (car's left/right); the image itself is mirrored</li>
               <li>The zoom slider applies to BOTH windows so the preview stays consistent</li>
               <li>At least one window center is required to enable the preview</li>
             </ul>
@@ -410,11 +411,11 @@ export function PipSideCamera() {
           <div class="v-asm-btn-group">
             <button class="${state.armSide === "left" ? "v-asm-btn v-asm-btn-left-active" : "v-asm-btn v-asm-btn-outline-left"}"
                     @click="${setArm}" value="left">
-              ${state.leftCenter ? "Move Left Center" : "Set Left Center"}
+              ${state.leftCenter ? "Move Left (as seen)" : "Set Left (as seen)"}
             </button>
             <button class="${state.armSide === "right" ? "v-asm-btn v-asm-btn-right-active" : "v-asm-btn v-asm-btn-outline-right"}"
                     @click="${setArm}" value="right">
-              ${state.rightCenter ? "Move Right Center" : "Set Right Center"}
+              ${state.rightCenter ? "Move Right (as seen)" : "Set Right (as seen)"}
             </button>
 
             <button class="v-asm-btn v-asm-btn-primary" @click="${saveConfig}" .disabled="${state.loading || (!state.leftCenter && !state.rightCenter)}">
@@ -428,7 +429,7 @@ export function PipSideCamera() {
           </div>
         </div>
 
-        ${state.armSide ? html`<div class="v-asm-mode-banner ${state.armSide === "left" ? "v-asm-mode-left" : "v-asm-mode-right"}"><span>${state.armSide === "left" ? "⬅ Placing Left Center" : "➡ Placing Right Center"}</span><span>Click on the window to place its center point</span></div>` : ""}
+        ${state.armSide ? html`<div class="v-asm-mode-banner ${state.armSide === "left" ? "v-asm-mode-left" : "v-asm-mode-right"}"><span>${state.armSide === "left" ? "⬅ Placing Left (as seen)" : "➡ Placing Right (as seen)"}</span><span>Click on the window to place its center point</span></div>` : ""}
 
         <div class="v-asm-canvas-wrapper">
           <canvas id="pip-sidecam-canvas" @click="${canvasClick}"></canvas>
