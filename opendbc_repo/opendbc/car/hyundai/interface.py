@@ -62,6 +62,24 @@ def apply_ecu_disable_failure_fallback(CP: structs.CarParams, params) -> None:
   CP.pcmCruise = True
 
 
+def egmp_in_ready_state(can_recv, bus: int, timeout_s: float = 0.5) -> bool:
+  ACCELERATOR_ADDR = 0x35
+  READY_BIT_MASK = 0x40
+
+  deadline = time.monotonic() + timeout_s
+  while time.monotonic() < deadline:
+    try:
+      can_packets = can_recv(wait_for_one=True)
+    except Exception:
+      break
+    for packet in can_packets:
+      for msg in packet:
+        if msg.address == ACCELERATOR_ADDR and msg.src == bus and len(msg.dat) > 3 and (msg.dat[3] & READY_BIT_MASK):
+          return True
+
+  return False
+
+
 def detect_kona_non_scc_radar_fca(candidate, fingerprint, car_fw) -> bool:
   if candidate != CAR.HYUNDAI_KONA_NON_SCC:
     return False
@@ -339,30 +357,37 @@ class CarInterface(CarInterfaceBase):
       if CP.flags & HyundaiFlags.CANFD_LKA_STEERING.value:
         addr, bus = 0x730, CanBus(CP).ECAN
 
-      # Try ECU disable. If it succeeds (IGN-ON mode), enable longitudinal.
-      # If it fails (READY mode returns NRC 0x22, or timeout), strip LONG safety flag
-      # so panda forwards stock SCC messages normally (lateral-only mode).
-      ecu_log(f"=== ECU DISABLE attempt: addr=0x{addr:x}, bus={bus} ===")
-      ecu_disabled = disable_ecu(can_recv, can_send, bus=bus, addr=addr, com_cont_req=communication_control,
-                                 reset=bool(CP.flags & HyundaiFlags.CAN_CANFD_BLENDED))
+      skip_disable_ecu = False
+      if CP.carFingerprint in CANFD_ANGLE_LONGITUDINAL_CAR and egmp_in_ready_state(can_recv, bus):
+        apply_ecu_disable_failure_fallback(CP, params)
+        ecu_log(f"=== ECU DISABLE FAILED - READY detected, safetyParam stripped to {CP.safetyConfigs[-1].safetyParam}, lateral-only mode ===")
+        skip_disable_ecu = True
 
-      if CP.carFingerprint in (CAR.HYUNDAI_IONIQ_6, CAR.HYUNDAI_IONIQ_5_PE):
-        # Track success/failure to auto-switch between openpilot long and stock ACC
-        if ecu_disabled:
-          ECU_DISABLE_TIMESTAMP = time.monotonic()
-          params.put_bool("EcuDisableFailed", False)
-          params.put_bool("ExperimentalMode", True)
-          ecu_log("=== ECU DISABLE SUCCESS - Longitudinal + Experimental ENABLED ===")
+      if not skip_disable_ecu:
+        # Try ECU disable. If it succeeds (IGN-ON mode), enable longitudinal.
+        # If it fails (READY mode returns NRC 0x22, or timeout), strip LONG safety flag
+        # so panda forwards stock SCC messages normally (lateral-only mode).
+        ecu_log(f"=== ECU DISABLE attempt: addr=0x{addr:x}, bus={bus} ===")
+        ecu_disabled = disable_ecu(can_recv, can_send, bus=bus, addr=addr, com_cont_req=communication_control,
+                                   reset=bool(CP.flags & HyundaiFlags.CAN_CANFD_BLENDED))
+
+        if CP.carFingerprint in (CAR.HYUNDAI_IONIQ_6, CAR.HYUNDAI_IONIQ_5_PE):
+          # Track success/failure to auto-switch between openpilot long and stock ACC
+          if ecu_disabled:
+            ECU_DISABLE_TIMESTAMP = time.monotonic()
+            params.put_bool("EcuDisableFailed", False)
+            params.put_bool("ExperimentalMode", True)
+            ecu_log("=== ECU DISABLE SUCCESS - Longitudinal + Experimental ENABLED ===")
+          else:
+            apply_ecu_disable_failure_fallback(CP, params)
+            ecu_log(f"=== ECU DISABLE FAILED - safetyParam stripped to {CP.safetyConfigs[-1].safetyParam}, lateral-only mode ===")
         else:
-          apply_ecu_disable_failure_fallback(CP, params)
-          ecu_log(f"=== ECU DISABLE FAILED - safetyParam stripped to {CP.safetyConfigs[-1].safetyParam}, lateral-only mode ===")
-      else:
-        if ecu_disabled:
-          params.put_bool("EcuDisableFailed", False)
-          ecu_log("=== ECU DISABLE SUCCESS ===")
-        else:
-          apply_ecu_disable_failure_fallback(CP, params)
-          ecu_log(f"=== ECU DISABLE FAILED - safetyParam stripped to {CP.safetyConfigs[-1].safetyParam}, lateral-only mode ===")
+          if ecu_disabled:
+            params.put_bool("EcuDisableFailed", False)
+            ecu_log("=== ECU DISABLE SUCCESS ===")
+          else:
+            apply_ecu_disable_failure_fallback(CP, params)
+            ecu_log(f"=== ECU DISABLE FAILED - safetyParam stripped to {CP.safetyConfigs[-1].safetyParam}, lateral-only mode ===")
 
     # for blinkers
     if CP.flags & HyundaiFlags.ENABLE_BLINKERS:
