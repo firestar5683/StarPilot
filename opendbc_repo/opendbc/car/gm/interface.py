@@ -784,7 +784,7 @@ class CarInterface(CarInterfaceBase):
       ret.alternativeExperience |= ALTERNATIVE_EXPERIENCE.GM_REMAP_CANCEL_TO_DISTANCE
 
     if candidate == CAR.CHEVROLET_TRAX:
-      ret.steerActuatorDelay = 0.16
+      ret.steerActuatorDelay = 0.46
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     return ret
