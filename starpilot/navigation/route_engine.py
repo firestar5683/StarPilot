@@ -390,7 +390,7 @@ class NavigationRoute:
 
 
 class MapboxRouteEngine:
-  DIRECTIONS_URL = "https://api.mapbox.com/directions/v5/mapbox/driving"
+  DIRECTIONS_URL = "https://api.mapbox.com/directions/v5/mapbox/driving-traffic"
 
   def __init__(self, session: Any = requests):
     self._session = session
