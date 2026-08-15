@@ -132,7 +132,10 @@ class HondaBoschPlatformConfig(PlatformConfig):
 
 @dataclass
 class HondaBoschCANFDPlatformConfig(HondaBoschPlatformConfig):
-  dbc_dict: DbcDict = field(default_factory=lambda: {Bus.pt: 'honda_common_canfd_generated'})
+  dbc_dict: DbcDict = field(default_factory=lambda: {
+    Bus.pt: 'honda_common_canfd_generated',
+    Bus.radar: 'honda_common_canfd_generated',
+  })
 
   def init(self):
     super().init()
