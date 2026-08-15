@@ -8,6 +8,8 @@ from functools import partial
 import cereal.messaging as messaging
 from cereal import car, log
 from cereal.services import SERVICE_LIST
+from opendbc.car.honda.values import CAR as HONDA_CAR
+from openpilot.common.constants import CV
 from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process
 from openpilot.common.swaglog import cloudlog
@@ -27,6 +29,8 @@ MIN_ABS_YAW_RATE = 0.0
 MAX_YAW_RATE_SANITY_CHECK = 1.0
 MIN_NCC = 0.95
 MAX_LAG = 0.65
+MVL_ACCORD_MIN_LAG = 0.15
+MVL_ACCORD_MIN_VEGO = 50.0 * CV.MPH_TO_MS
 MAX_LAG_STD = 0.1
 MAX_LAT_ACCEL = 2.0
 MAX_LAT_ACCEL_DIFF = 0.6
@@ -182,10 +186,11 @@ class LateralLagEstimator:
     self.okay_window_sec = okay_window_sec
     self.min_recovery_buffer_sec = min_recovery_buffer_sec
     self.initial_lag = full_lateral_delay(CP.steerActuatorDelay)
+    self.mvl_accord_mode = CP.carFingerprint == HONDA_CAR.HONDA_ACCORD_11G
     self.block_size = block_size
     self.block_count = block_count
     self.min_valid_block_count = min_valid_block_count
-    self.min_vego = min_vego
+    self.min_vego = MVL_ACCORD_MIN_VEGO if self.mvl_accord_mode else min_vego
     self.min_yr = min_yr
     self.min_ncc = min_ncc
     self.min_confidence = min_confidence
@@ -233,7 +238,13 @@ class LateralLagEstimator:
     else:
       liveDelay.status = log.LiveDelayData.Status.unestimated
 
-    if self.starpilot_toggles.use_custom_steerActuatorDelay:
+    if self.mvl_accord_mode:
+      # MVL uses the learned estimate only within [0.15, 0.65] s and does not apply StarPilot's custom-delay override.
+      if liveDelay.status == log.LiveDelayData.Status.estimated:
+        liveDelay.lateralDelay = min(MAX_LAG, max(MVL_ACCORD_MIN_LAG, valid_mean_lag))
+      else:
+        liveDelay.lateralDelay = self.initial_lag
+    elif self.starpilot_toggles.use_custom_steerActuatorDelay:
       liveDelay.lateralDelay = self.starpilot_toggles.steerActuatorDelay
     elif liveDelay.status == log.LiveDelayData.Status.estimated:
       liveDelay.lateralDelay = valid_mean_lag
@@ -322,7 +333,9 @@ class LateralLagEstimator:
     desired = masked_symmetric_moving_average(desired, okay, SMOOTH_K, SMOOTH_SIGMA)
     actual = masked_symmetric_moving_average(actual, okay, SMOOTH_K, SMOOTH_SIGMA)
 
-    delay, corr, confidence = self.actuator_delay(desired, actual, okay, self.dt, MAX_LAG)
+    delay, corr, confidence = self.actuator_delay(
+      desired, actual, okay, self.dt, MAX_LAG, MVL_ACCORD_MIN_LAG if self.mvl_accord_mode else 0.0,
+    )
     if corr < self.min_ncc or confidence < self.min_confidence or not is_valid:
       return
 
@@ -330,16 +343,17 @@ class LateralLagEstimator:
     self.last_estimate_t = self.t
 
   @staticmethod
-  def actuator_delay(expected_sig: np.ndarray, actual_sig: np.ndarray, mask: np.ndarray, dt: float, max_lag: float) -> tuple[float, float, float]:
+  def actuator_delay(expected_sig: np.ndarray, actual_sig: np.ndarray, mask: np.ndarray, dt: float, max_lag: float, min_lag: float = 0.0) -> tuple[float, float, float]:
     assert len(expected_sig) == len(actual_sig)
+    min_lag_samples = int(round(min_lag / dt))
     max_lag_samples = int(round(max_lag / dt))
     one_sec_samples = int(round(1.0 / dt))
     padded_size = fft_next_good_size(len(expected_sig) + max(max_lag_samples, one_sec_samples))
 
     ncc = masked_normalized_cross_correlation(expected_sig, actual_sig, mask, padded_size)
 
-    # only consider lags from 0 to max_lag
-    roi = np.s_[len(expected_sig) - 1: len(expected_sig) - 1 + max_lag_samples]
+    # MVL Accord searches only the 0.15-0.65 s delay range; other cars retain StarPilot's 0-max range.
+    roi = np.s_[len(expected_sig) - 1 + min_lag_samples: len(expected_sig) - 1 + max_lag_samples]
     threshold_roi = np.s_[len(expected_sig) - 1: len(expected_sig) - 1 + one_sec_samples]
     confidence_roi = np.s_[threshold_roi.start - CORR_BORDER_OFFSET: threshold_roi.stop + CORR_BORDER_OFFSET]
     roi_ncc = ncc[roi]
@@ -348,7 +362,7 @@ class LateralLagEstimator:
 
     max_corr_index = np.argmax(roi_ncc)
     corr = roi_ncc[max_corr_index]
-    lag = parabolic_peak_interp(roi_ncc, max_corr_index) * dt
+    lag = parabolic_peak_interp(roi_ncc, max_corr_index) * dt + min_lag
 
     # to estimate lag confidence, gather all high-correlation candidates and see how spread they are
     # if e.g. 0.8 and 0.4 are both viable, this is an ambiguous case
@@ -377,6 +391,10 @@ def retrieve_initial_lag(params: Params, CP: car.CarParams):
         lag, valid_blocks, status = ld.lateralDelayEstimate, ld.validBlocks, ld.status
         assert valid_blocks <= BLOCK_NUM, "Invalid number of valid blocks"
         assert status != log.LiveDelayData.Status.invalid, "Lag estimate is invalid"
+        if CP.carFingerprint == HONDA_CAR.HONDA_ACCORD_11G:
+          # StarPilot's LiveDelay schema has no MVL version field, so use MVL's valid
+          # learned-delay range as the compatibility guard before restoring the cache.
+          assert MVL_ACCORD_MIN_LAG <= lag <= MAX_LAG, "Accord LiveDelay outside MVL range"
         return lag, valid_blocks
     except Exception as e:
       cloudlog.error(f"Failed to retrieve initial lag: {e}")
@@ -397,6 +415,8 @@ def main():
   CP = messaging.log_from_bytes(params.get("CarParams", block=True), car.CarParams)
 
   lag_learner = LateralLagEstimator(CP, 1. / SERVICE_LIST['livePose'].frequency)
+  # MVL restores the previous valid live-delay estimate on startup. v1 deliberately
+  # skipped that for Accord; v2 restores it while retaining StarPilot's native schema.
   if (initial_lag_params := retrieve_initial_lag(params, CP)) is not None:
     lag, valid_blocks = initial_lag_params
     lag_learner.reset(lag, valid_blocks)

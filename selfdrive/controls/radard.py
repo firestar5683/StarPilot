@@ -13,11 +13,13 @@ from openpilot.common.realtime import DT_MDL, Priority, config_realtime_process
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.simple_kalman import KF1D
 from openpilot.selfdrive.controls.lib.desire_helper import LaneChangeDirection, LaneChangeState
+from opendbc.car.honda.values import CAR as HONDA_CAR
 from openpilot.starpilot.common.starpilot_variables import get_starpilot_toggles
 
 
-# Default lead acceleration decay set to 50% at 1s
+# Default StarPilot lead acceleration decay. MVL uses 1.5 s for its Honda control path.
 _LEAD_ACCEL_TAU = 0.6
+_MVL_LEAD_ACCEL_TAU = 1.5
 
 # radar tracks
 SPEED, ACCEL = 0, 1     # Kalman filter states enum
@@ -63,10 +65,12 @@ class KalmanParams:
 
 
 class Track:
-  def __init__(self, identifier: int, v_lead: float, kalman_params: KalmanParams):
+  def __init__(self, identifier: int, v_lead: float, kalman_params: KalmanParams, mvl_accord_mode: bool = False):
     self.identifier = identifier
     self.cnt = 0
-    self.aLeadTau = FirstOrderFilter(_LEAD_ACCEL_TAU, 0.45, DT_MDL)
+    self.mvl_accord_mode = mvl_accord_mode
+    self.lead_accel_tau = _MVL_LEAD_ACCEL_TAU if mvl_accord_mode else _LEAD_ACCEL_TAU
+    self.aLeadTau = FirstOrderFilter(self.lead_accel_tau, 0.45, DT_MDL)
     self.K_A = kalman_params.A
     self.K_C = kalman_params.C
     self.K_K = kalman_params.K
@@ -94,9 +98,13 @@ class Track:
     self.vLeadK = float(self.kf.x[SPEED][0])
     self.aLeadK = float(self.kf.x[ACCEL][0])
 
-    # Learn if constant acceleration
+    # MVL resets the decay time directly when acceleration is near-constant.
+    # Retain StarPilot's gradual recovery for every non-Accord vehicle.
     if abs(self.aLeadK) < 0.5:
-      self.aLeadTau.x = min(max(self.aLeadTau.x, 1e-2) * 1.1, _LEAD_ACCEL_TAU)
+      if self.mvl_accord_mode:
+        self.aLeadTau.x = self.lead_accel_tau
+      else:
+        self.aLeadTau.x = min(max(self.aLeadTau.x, 1e-2) * 1.1, self.lead_accel_tau)
     else:
       self.aLeadTau.update(0.0)
 
@@ -254,6 +262,74 @@ def match_vision_to_track(v_ego: float, lead: capnp._DynamicStructReader, model_
   return None
 
 
+def mvl_match_vision_to_track(v_ego: float, lead: capnp._DynamicStructReader, tracks: dict[int, Track]):
+  """MVL lead matching, isolated to the Accord 11G path."""
+  if not tracks:
+    return None
+
+  offset_vision_dist = lead.x[0] - RADAR_TO_CAMERA
+
+  def prob(c):
+    prob_d = laplacian_pdf(c.dRel, offset_vision_dist, lead.xStd[0])
+    prob_y = laplacian_pdf(c.yRel, -lead.y[0], lead.yStd[0])
+    prob_v = laplacian_pdf(c.vRel + v_ego, lead.v[0], lead.vStd[0])
+    return prob_d * prob_y * prob_v
+
+  track = max(tracks.values(), key=prob)
+  dist_sane = abs(track.dRel - offset_vision_dist) < max(offset_vision_dist * 0.25, 5.0)
+  vel_sane = (abs(track.vRel + v_ego - lead.v[0]) < 10.0) or (v_ego + track.vRel > 3.0)
+  return track if dist_sane and vel_sane else None
+
+
+def mvl_get_radar_state_from_vision(lead_msg: capnp._DynamicStructReader, v_ego: float, model_v_ego: float, lead_prob: float):
+  lead_v_rel_pred = lead_msg.v[0] - model_v_ego
+  return {
+    "dRel": float(lead_msg.x[0] - RADAR_TO_CAMERA),
+    "yRel": float(-lead_msg.y[0]),
+    "vRel": float(lead_v_rel_pred),
+    "vLead": float(v_ego + lead_v_rel_pred),
+    "vLeadK": float(v_ego + lead_v_rel_pred),
+    "aLeadK": float(lead_msg.a[0]),
+    "aLeadTau": 0.3,
+    "fcw": False,
+    "modelProb": float(lead_prob),
+    "status": True,
+    "radar": False,
+    "radarTrackId": -1,
+  }
+
+
+def mvl_get_lead(v_ego: float, ready: bool, tracks: dict[int, Track], lead_msg: capnp._DynamicStructReader,
+                 model_v_ego: float, lead_prob: float, low_speed_override: bool = True) -> dict[str, Any]:
+  """MVL lead selection translated to StarPilot's RadarState field names.
+
+  This intentionally does not consume StarPilot lead-detection thresholds, preferred-track
+  persistence, lane-change filtering, or increased-stopped-distance offsets.
+  """
+  if tracks and ready and lead_prob > 0.5:
+    track = mvl_match_vision_to_track(v_ego, lead_msg, tracks)
+  else:
+    track = None
+
+  lead_dict: dict[str, Any] = {"status": False}
+  if track is not None:
+    lead_dict = track.get_RadarState(lead_prob)
+  elif ready and lead_prob > 0.5:
+    lead_dict = mvl_get_radar_state_from_vision(lead_msg, v_ego, model_v_ego, lead_prob)
+
+  if low_speed_override:
+    low_speed_tracks = [c for c in tracks.values() if c.potential_low_speed_lead(v_ego)]
+    if low_speed_tracks:
+      closest_track = min(low_speed_tracks, key=lambda c: c.dRel)
+      if (not lead_dict["status"]) or (closest_track.dRel < lead_dict["dRel"]):
+        lead_dict = closest_track.get_RadarState()
+
+  for radar_track in tracks.values():
+    radar_track.leadTrackID = lead_dict.get("radarTrackId", -1)
+
+  return lead_dict
+
+
 def get_RadarState_from_vision(lead_msg: capnp._DynamicStructReader, v_ego: float, model_v_ego: float, model_prob: float):
   prev_aLeadK = getattr(get_RadarState_from_vision, "prev_aLeadK", 0.0)
   blended_aLeadK = 0.8 * float(lead_msg.a[0]) + 0.2 * prev_aLeadK
@@ -351,12 +427,13 @@ def get_adjacent_stopped(tracks: dict[int, Track], model_data: capnp._DynamicStr
 
 
 class RadarD:
-  def __init__(self, radar_ts: float = DT_MDL, delay: float = 0.0, g90_radar_filter: bool = False):
+  def __init__(self, radar_ts: float = DT_MDL, delay: float = 0.0, g90_radar_filter: bool = False, mvl_accord_mode: bool = False):
     self.current_time = 0.0
 
     self.tracks: dict[int, Track] = {}
     self.kalman_params = KalmanParams(radar_ts)
     self.g90_radar_filter = g90_radar_filter
+    self.mvl_accord_mode = mvl_accord_mode
     self.lead_prob_filters = [FirstOrderFilter(0.0, 0.2, radar_ts) for _ in range(2)]
     self.prev_lead_track_ids = [-1, -1]
 
@@ -395,7 +472,7 @@ class RadarD:
 
       # create the track if it doesn't exist or it's a new track
       if ids not in self.tracks:
-        self.tracks[ids] = Track(ids, v_lead, self.kalman_params)
+        self.tracks[ids] = Track(ids, v_lead, self.kalman_params, mvl_accord_mode=self.mvl_accord_mode)
       self.tracks[ids].update(rpt[0], rpt[1], rpt[2], v_lead, rpt[3])
 
     # *** publish radarState ***
@@ -421,20 +498,27 @@ class RadarD:
         else:
           self.lead_prob_filters[i].update(lead_prob)
 
-      self.radar_state.leadOne = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0], model_v_ego, sm['modelV2'],
-                                          sm['carState'].standstill, sm['starpilotPlan'], self.starpilot_toggles, low_speed_override=True,
-                                          g90_radar_filter=self.g90_radar_filter, lead_prob=self.lead_prob_filters[0].x,
-                                          preferred_track_id=self.prev_lead_track_ids[0])
-      self.radar_state.leadTwo = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[1], model_v_ego, sm['modelV2'],
-                                          sm['carState'].standstill, sm['starpilotPlan'], self.starpilot_toggles, low_speed_override=False,
-                                          g90_radar_filter=self.g90_radar_filter, lead_prob=self.lead_prob_filters[1].x,
-                                          preferred_track_id=self.prev_lead_track_ids[1])
+      if self.mvl_accord_mode:
+        self.radar_state.leadOne = mvl_get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0], model_v_ego,
+                                                self.lead_prob_filters[0].x, low_speed_override=True)
+        self.radar_state.leadTwo = mvl_get_lead(self.v_ego, self.ready, self.tracks, leads_v3[1], model_v_ego,
+                                                self.lead_prob_filters[1].x, low_speed_override=False)
+      else:
+        self.radar_state.leadOne = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0], model_v_ego, sm['modelV2'],
+                                            sm['carState'].standstill, sm['starpilotPlan'], self.starpilot_toggles, low_speed_override=True,
+                                            g90_radar_filter=self.g90_radar_filter, lead_prob=self.lead_prob_filters[0].x,
+                                            preferred_track_id=self.prev_lead_track_ids[0])
+        self.radar_state.leadTwo = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[1], model_v_ego, sm['modelV2'],
+                                            sm['carState'].standstill, sm['starpilotPlan'], self.starpilot_toggles, low_speed_override=False,
+                                            g90_radar_filter=self.g90_radar_filter, lead_prob=self.lead_prob_filters[1].x,
+                                            preferred_track_id=self.prev_lead_track_ids[1])
 
-      for i, lead in enumerate((self.radar_state.leadOne, self.radar_state.leadTwo)):
-        if lead.status and getattr(lead, "radar", False):
-          self.prev_lead_track_ids[i] = int(getattr(lead, "radarTrackId", -1))
-        elif (not lead.status) or (self.prev_lead_track_ids[i] not in self.tracks):
-          self.prev_lead_track_ids[i] = -1
+      if not self.mvl_accord_mode:
+        for i, lead in enumerate((self.radar_state.leadOne, self.radar_state.leadTwo)):
+          if lead.status and getattr(lead, "radar", False):
+            self.prev_lead_track_ids[i] = int(getattr(lead, "radarTrackId", -1))
+          elif (not lead.status) or (self.prev_lead_track_ids[i] not in self.tracks):
+            self.prev_lead_track_ids[i] = -1
 
     if self.ready and (self.starpilot_toggles.adjacent_lead_tracking or self.starpilot_toggles.human_lane_changes):
       self.starpilot_radar_state.leadLeft = get_adjacent_lead(self.tracks, sm['carState'].standstill, sm['modelV2'], left=True)
@@ -481,7 +565,8 @@ def main() -> None:
     radar_ts = DT_MDL
 
   g90_radar_filter = CP.brand == "hyundai" and CP.carFingerprint == "GENESIS_G90"
-  RD = RadarD(radar_ts=radar_ts, delay=CP.radarDelay, g90_radar_filter=g90_radar_filter)
+  mvl_accord_mode = CP.carFingerprint == HONDA_CAR.HONDA_ACCORD_11G
+  RD = RadarD(radar_ts=radar_ts, delay=CP.radarDelay, g90_radar_filter=g90_radar_filter, mvl_accord_mode=mvl_accord_mode)
 
   sm = sm.extend(['starpilotPlan'])
   pm = pm.extend(['starpilotRadarState'])

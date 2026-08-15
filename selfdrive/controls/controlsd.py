@@ -12,6 +12,7 @@ from openpilot.common.swaglog import cloudlog
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.chrysler.values import pacifica_hybrid_aol_stock_acc_mode
 from opendbc.car.gm.values import CAR as GM_CAR
+from opendbc.car.honda.values import CAR as HONDA_CAR
 from opendbc.car.nissan.values import CAR as NISSAN_CAR
 from opendbc.car.vehicle_model import VehicleModel
 from openpilot.selfdrive.controls.lib.drive_helpers import MAX_LATERAL_JERK, clip_curvature, get_lateral_active
@@ -25,6 +26,7 @@ from openpilot.selfdrive.controls.lib.latcontrol_torque import (
   get_bolt_2017_steer_ratio_scale,
 )
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
+from openpilot.selfdrive.controls.lib.mvl_accord_longcontrol import MVLAccordLongControl
 from openpilot.selfdrive.car.cruise_state import should_cancel_stock_cruise
 from openpilot.selfdrive.modeld.modeld import LAT_SMOOTH_SECONDS
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
@@ -327,7 +329,8 @@ class Controls:
     self.pose_calibrator = PoseCalibrator()
     self.calibrated_pose: Pose | None = None
 
-    self.LoC = LongControl(self.CP)
+    self.mvl_accord_mode = self.CP.carFingerprint == HONDA_CAR.HONDA_ACCORD_11G
+    self.LoC = MVLAccordLongControl(self.CP) if self.mvl_accord_mode else LongControl(self.CP)
     self.VM = VehicleModel(self.CP)
     self.LaC: LatControl
     if self.CP.steerControlType == car.CarParams.SteerControlType.angle:
@@ -438,13 +441,14 @@ class Controls:
     # accel PID loop
     pid_accel_limits = self.CI.get_pid_accel_limits(self.CP, CS.vEgo, CS.vCruise * CV.KPH_TO_MS)
     self.LoC.experimental_mode = bool(self.sm['selfdriveState'].experimentalMode)
-    actuators.accel = float(min(self.LoC.update(CC.longActive, CS, long_plan.aTarget, long_plan.shouldStop, pid_accel_limits,
-                                                self.starpilot_toggles, has_lead=long_plan.hasLead,
-                                                traffic_mode_enabled=self.sm['starpilotCarState'].trafficModeEnabled,
-                                                profile_max_accel=self.sm['starpilotPlan'].maxAcceleration,
-                                                pedal_override=tesla_pedal_override,
-                                                leads=(self.sm['radarState'].leadOne, self.sm['radarState'].leadTwo)),
-                                self.starpilot_toggles.max_desired_acceleration))
+    long_output = self.LoC.update(CC.longActive, CS, long_plan.aTarget, long_plan.shouldStop, pid_accel_limits,
+                                  self.starpilot_toggles, has_lead=long_plan.hasLead,
+                                  traffic_mode_enabled=self.sm['starpilotCarState'].trafficModeEnabled,
+                                  profile_max_accel=self.sm['starpilotPlan'].maxAcceleration,
+                                  pedal_override=tesla_pedal_override,
+                                  leads=(self.sm['radarState'].leadOne, self.sm['radarState'].leadTwo))
+    # MVL Accord uses the controller output directly; StarPilot's global max-accel knob must not retune it.
+    actuators.accel = float(long_output if self.mvl_accord_mode else min(long_output, self.starpilot_toggles.max_desired_acceleration))
 
     # Steering PID loop and lateral MPC
     # Reset desired curvature to current to avoid violating the limits on engage
@@ -452,6 +456,9 @@ class Controls:
       new_desired_curvature = self.sm['lateralManeuverPlan'].desiredCurvature if CC.latActive else self.curvature
     else:
       new_desired_curvature = model_v2.action.desiredCurvature if CC.latActive else self.curvature
+
+    # MVL Accord uses the model/lateral-maneuver curvature directly (then lane centering + stock clip).
+    mvl_accord_raw_curvature = new_desired_curvature
 
     # Low-speed turn-intent hold (see CURVATURE_HOLD_* above). Curvature sign convention
     # here is positive for RIGHT turns (pauseturn log: left turn at +148 deg steering
@@ -603,6 +610,11 @@ class Controls:
             held_mag = min(lead_curvature * blinker_dir, abs(self.turn_hold_curvature) + CURVATURE_HOLD_RATCHET_RATE * DT_CTRL)
             self.turn_hold_curvature = math.copysign(held_mag, lead_curvature)
 
+    if self.mvl_accord_mode:
+      new_desired_curvature = mvl_accord_raw_curvature
+      self.turn_hold_curvature = 0.0
+      self.turn_hold_done = False
+
     new_desired_curvature = self.lane_centering.update(
       new_desired_curvature, model_v2, CS.vEgo,
       self.starpilot_toggles.lane_centering,
@@ -648,9 +660,12 @@ class Controls:
           jerk_factor = self.lc_arrest_jerk_factor + rise_alpha * (jerk_factor - self.lc_arrest_jerk_factor)
       self.lc_arrest_jerk_factor = jerk_factor
 
+    if self.mvl_accord_mode:
+      jerk_factor = 1.0
+
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll,
                                                                jerk_factor)
-    lat_delay = self.sm["liveDelay"].lateralDelay + LAT_SMOOTH_SECONDS
+    lat_delay = self.sm["liveDelay"].lateralDelay + (0.0 if self.mvl_accord_mode else LAT_SMOOTH_SECONDS)
 
     actuators.curvature = self.desired_curvature
     steer, steeringAngleDeg, lac_log = self.LaC.update(CC.latActive, CS, self.VM, lp,

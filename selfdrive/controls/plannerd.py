@@ -5,6 +5,8 @@ from openpilot.common.realtime import Priority, config_realtime_process
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.controls.lib.ldw import LaneDepartureWarning
 from openpilot.selfdrive.controls.lib.longitudinal_planner import LongitudinalPlanner
+from openpilot.selfdrive.controls.lib.mvl_accord_longitudinal_planner import MVLAccordLongitudinalPlanner
+from opendbc.car.honda.values import CAR as HONDA_CAR
 import cereal.messaging as messaging
 
 from openpilot.starpilot.common.starpilot_variables import get_starpilot_toggles
@@ -19,7 +21,7 @@ def main():
   cloudlog.info("plannerd got CarParams: %s", CP.brand)
 
   ldw = LaneDepartureWarning()
-  longitudinal_planner = LongitudinalPlanner(CP)
+  longitudinal_planner = MVLAccordLongitudinalPlanner(CP) if CP.carFingerprint == HONDA_CAR.HONDA_ACCORD_11G else LongitudinalPlanner(CP)
   pm = messaging.PubMaster(['longitudinalPlan', 'driverAssistance'])
   sm = messaging.SubMaster(['carControl', 'carState', 'controlsState', 'liveParameters', 'radarState', 'modelV2', 'selfdriveState'],
                            poll='modelV2')

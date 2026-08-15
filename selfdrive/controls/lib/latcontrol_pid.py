@@ -114,8 +114,13 @@ class LatControlPID(LatControl):
     if not self.is_honda_pid_lateral:
       return
 
-    kp_scale = get_honda_lateral_pid_gain_scale(getattr(starpilot_toggles, "honda_lateral_pid_kp_scale", 1.0))
-    ki_scale = get_honda_lateral_pid_gain_scale(getattr(starpilot_toggles, "honda_lateral_pid_ki_scale", 1.0))
+    if self.CP.carFingerprint == HONDA.HONDA_ACCORD_11G:
+      # MVL Accord tune is fixed; StarPilot gain multipliers must not retune it.
+      kp_scale = 1.0
+      ki_scale = 1.0
+    else:
+      kp_scale = get_honda_lateral_pid_gain_scale(getattr(starpilot_toggles, "honda_lateral_pid_kp_scale", 1.0))
+      ki_scale = get_honda_lateral_pid_gain_scale(getattr(starpilot_toggles, "honda_lateral_pid_ki_scale", 1.0))
     if math.isclose(kp_scale, self.honda_lateral_pid_kp_scale) and math.isclose(ki_scale, self.honda_lateral_pid_ki_scale):
       return
 
