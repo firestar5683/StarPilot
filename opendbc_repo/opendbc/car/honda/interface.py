@@ -349,6 +349,13 @@ class CarInterface(CarInterfaceBase):
   @staticmethod
   def init(CP, can_recv, can_send, communication_control=None):
     if CP.carFingerprint in (HONDA_BOSCH - HONDA_BOSCH_RADARLESS) and CP.openpilotLongitudinalControl:
+      # CAN-FD radar ownership is handed over only after the comma relay is confirmed open.
+      # Disabling the radar here can create a gap before panda enters the Honda safety mode and
+      # replacement ACC_CONTROL is permitted, which can latch CRUISE_FAULT/DTCs in the brake module.
+      # deinit() still passes an explicit enable request and therefore falls through to disable_ecu.
+      if CP.carFingerprint in HONDA_BOSCH_CANFD and communication_control is None:
+        return
+
       # 0x80 silences response
       if communication_control is None:
         communication_control = bytes([uds.SERVICE_TYPE.COMMUNICATION_CONTROL, 0x80 | uds.CONTROL_TYPE.DISABLE_RX_DISABLE_TX,

@@ -7,6 +7,7 @@ from opendbc.car.honda import hondacan
 from opendbc.car.honda.values import (
   CAR,
   CruiseButtons,
+  CruiseSettings,
   HONDA_BOSCH,
   HONDA_BOSCH_CANFD,
   HONDA_BOSCH_RADARLESS,
@@ -212,6 +213,14 @@ class CarController(CarControllerBase):
     self.CAN = hondacan.CanBus(CP)
     self.tja_control = CP.carFingerprint in HONDA_BOSCH_TJA_CONTROL
 
+    # MVL CAN-FD ownership state. These do not affect non-CANFD vehicles.
+    self.radar_disable_counter = 0
+    self.radar_mux = 0
+    self.radar_hud_pulse = 0
+    self.last_acc_enabled = False
+    self.lkas_button_send_remaining = 0
+    self.last_lkas_button_frame = 0
+
     self.braking = False
     self.brake_steady = 0.0
     self.brake_last = 0.0
@@ -314,10 +323,54 @@ class CarController(CarControllerBase):
     # Send CAN commands
     can_sends = []
 
-    # tester present - w/ no response (keeps radar disabled)
+    # Bosch radar ownership. On CAN-FD, leave the stock radar active until the comma relay is open,
+    # then enter extended diagnostics and disable radar RX/TX. This prevents a gap between stock
+    # ACC_CONTROL disappearing and panda permitting openpilot's replacement stream.
     if self.CP.carFingerprint in (HONDA_BOSCH - HONDA_BOSCH_RADARLESS) and self.CP.openpilotLongitudinalControl:
-      if self.frame % 10 == 0:
+      if self.CP.carFingerprint in HONDA_BOSCH_CANFD and CS.stock_acc_alive:
+        if CS.canfd_relay_open:
+          if self.radar_disable_counter % 50 == 0:
+            can_sends.append((0x18DAB0F1, b'\x02\x10\x03\x00\x00\x00\x00\x00', self.CAN.pt))
+          elif self.radar_disable_counter % 50 == 5:
+            can_sends.append((0x18DAB0F1, b'\x03\x28\x83\x03\x00\x00\x00\x00', self.CAN.pt))
+          self.radar_disable_counter += 1
+      elif self.frame % 10 == 0:
         can_sends.append(make_tester_present_msg(0x18DAB0F1, self.CAN.pt, suppress_response=True))
+
+    # After the stock CAN-FD radar is silent, reproduce its low-rate/tick-aligned messages on both
+    # the PT and camera sides of the open relay. Pack once and mirror identical bytes so counters and
+    # checksums stay synchronized. v3 deliberately uses an idle lane/object payload first; model-based
+    # cluster rendering is deferred until the ownership/DTC handover is proven.
+    if self.CP.carFingerprint in HONDA_BOSCH_CANFD and self.CP.openpilotLongitudinalControl and not CS.stock_acc_alive:
+      if CC.enabled and not self.last_acc_enabled:
+        self.radar_hud_pulse = 30
+      self.last_acc_enabled = CC.enabled
+
+      radar_msgs = []
+      if CS.hud_tick:
+        radar_msgs.append(hondacan.create_radar_hud_canfd(self.packer, self.CAN.pt, CC.enabled, self.radar_hud_pulse > 0))
+        if self.radar_hud_pulse > 0:
+          self.radar_hud_pulse -= 1
+      if CS.supp_tick:
+        radar_msgs.append(hondacan.create_canfd_supplemental(self.packer, self.CAN.pt))
+      if CS.radar_50hz_tick:
+        if self.radar_mux >= 58:
+          self.radar_mux = 1
+        elif self.radar_mux == 10:
+          self.radar_mux = 17
+        elif self.radar_mux == 26:
+          self.radar_mux = 33
+        elif self.radar_mux == 42:
+          self.radar_mux = 49
+        else:
+          self.radar_mux += 1
+        radar_msgs.extend(hondacan.create_canfd_50hz_radar_messages(self.packer, self.CAN.pt, self.radar_mux))
+      if CS.radar_5hz_tick:
+        radar_msgs.extend(hondacan.create_canfd_5hz_radar_messages(self.packer, self.CAN.pt, CS.radar_ref_counter))
+
+      for addr, dat, _ in radar_msgs:
+        can_sends.append((addr, dat, self.CAN.pt))
+        can_sends.append((addr, dat, self.CAN.camera))
 
     # Send steering command.
     can_sends.append(hondacan.create_steering_control(self.packer, self.CAN, apply_torque, CC.latActive, self.tja_control))
@@ -419,12 +472,13 @@ class CarController(CarControllerBase):
 
           stopping = actuators.longControlState == LongCtrlState.stopping
           self.stopping_counter = self.stopping_counter + 1 if stopping else 0
-          can_sends.extend(
-            hondacan.create_acc_commands(
-              self.packer, self.CAN, CC.enabled, CC.longActive, self.accel, self.gas, self.stopping_counter, self.CP.carFingerprint,
-              gas_force=gas_pedal_force if self.mvl_accord_mode else None,
+          if not (self.CP.carFingerprint in HONDA_BOSCH_CANFD and CS.stock_acc_alive):
+            can_sends.extend(
+              hondacan.create_acc_commands(
+                self.packer, self.CAN, CC.enabled, CC.longActive, self.accel, self.gas, self.stopping_counter, self.CP,
+                gas_force=gas_pedal_force if self.mvl_accord_mode else None,
+              )
             )
-          )
         else:
           apply_brake = np.clip(self.brake_last - wind_brake, 0.0, 1.0)
           apply_brake = int(np.clip(apply_brake * self.params.NIDEC_BRAKE_MAX, 0, self.params.NIDEC_BRAKE_MAX - 1))
@@ -466,9 +520,17 @@ class CarController(CarControllerBase):
             idx = (self.frame // 2) % 0x10
             can_sends.append(create_gas_interceptor_command(self.packer, gas_interceptor_command, idx))
 
-    # Send dashboard UI commands.
+    # Send dashboard UI commands. On CAN-FD, ACC_HUD is owned by the radar and must only start
+    # after the handover, aligned to the radar's 10 Hz HUD tick.
+    if (self.CP.carFingerprint in HONDA_BOSCH_CANFD and CS.hud_tick and self.CP.openpilotLongitudinalControl
+        and not CS.stock_acc_alive):
+      can_sends.append(
+        hondacan.create_acc_hud(self.packer, self.CAN.pt, self.CP, CC.enabled, pcm_speed, actuators.accel,
+                                hud_control, hud_v_cruise, CS.is_metric, CS.acc_hud)
+      )
+
     if self.frame % 10 == 0:
-      if self.CP.openpilotLongitudinalControl:
+      if self.CP.openpilotLongitudinalControl and self.CP.carFingerprint not in HONDA_BOSCH_CANFD:
         # On Nidec, this also controls longitudinal positive acceleration
         can_sends.append(
           hondacan.create_acc_hud(self.packer, self.CAN.pt, self.CP, CC.enabled, pcm_speed, pcm_accel, hud_control, hud_v_cruise, CS.is_metric, CS.acc_hud)
@@ -484,7 +546,7 @@ class CarController(CarControllerBase):
 
       if self.CP.openpilotLongitudinalControl:
         # TODO: combining with create_acc_hud block above will change message order and will need replay logs regenerated
-        if self.CP.carFingerprint in (HONDA_BOSCH - HONDA_BOSCH_RADARLESS):
+        if self.CP.carFingerprint in (HONDA_BOSCH - HONDA_BOSCH_RADARLESS - HONDA_BOSCH_CANFD):
           can_sends.append(hondacan.create_radar_hud(self.packer, self.CAN.pt))
         if self.CP.carFingerprint == CAR.HONDA_CIVIC_BOSCH:
           can_sends.append(hondacan.create_legacy_brake_command(self.packer, self.CAN.pt))
@@ -494,6 +556,29 @@ class CarController(CarControllerBase):
             self.gas = gas_interceptor_command
           else:
             self.gas = pcm_accel / self.params.NIDEC_GAS_MAX
+
+    # CAN-FD: while engaged, the camera still needs a valid SCM_BUTTONS stream behind the open relay.
+    # Take over that stream, echoing the live ambient-light byte. Also send a short LKAS-setting pulse
+    # when stock LKAS is ready, matching MVL's workaround for the Honda touch-steering-wheel timer.
+    if (self.CP.carFingerprint in HONDA_BOSCH_CANFD and CC.enabled and self.frame % 4 == 0
+        and not pcm_cancel_cmd and not CC.cruiseControl.resume):
+      if (self.lkas_button_send_remaining == 0 and CS.lkas_hud["LKAS_READY"]
+          and self.frame >= self.last_lkas_button_frame + 500):
+        self.lkas_button_send_remaining = 3
+
+      if self.lkas_button_send_remaining > 0:
+        self.last_lkas_button_frame = self.frame
+        self.lkas_button_send_remaining -= 1
+        cruise_setting = CruiseSettings.LKAS
+      elif CS.cruise_setting == CruiseSettings.LKAS:
+        cruise_setting = 0
+      else:
+        cruise_setting = CS.cruise_setting
+
+      can_sends.append(hondacan.spam_buttons_command(
+        self.packer, self.CAN, CS.cruise_buttons, self.CP.carFingerprint,
+        cruise_setting=cruise_setting, ambient_light=CS.scm_ambient_light, bus=self.CAN.camera,
+      ))
 
     if self.frame > 0 and self.frame % 6000 == 0:
       self.param_store.put_float("HondaGasFactorParams", self.bosch_gas_factor)

@@ -5,3 +5,71 @@ CM_ "IMPORT _lkas_hud_8byte.dbc";
 CM_ "IMPORT _bosch_standstill.dbc";
 CM_ "IMPORT _steering_sensors_a.dbc";
 CM_ "IMPORT _gearbox_common.dbc";
+
+BO_ 929 RADAR_REFERENCE: 8 XXX
+ SG_ CHECKSUM : 59|4@0+ (1,0) [0|15] "" EON
+ SG_ COUNTER : 61|2@0+ (1,0) [0|3] "" EON
+
+BO_ 784 RADAR_HUD_CANFD: 8 XXX
+ SG_ SET_ME_X01 : 11|1@0+ (1,0) [0|1] "" XXX
+ SG_ SET_ME_X01_2 : 48|1@0+ (1,0) [0|1] "" XXX
+ SG_ CMBS_ENABLED_MAYBE : 53|1@0+ (1,0) [0|1] "" XXX
+ SG_ ACC_ON : 55|1@0+ (1,0) [0|1] "" XXX
+ SG_ CHECKSUM : 59|4@0+ (1,0) [0|15] "" EON
+ SG_ COUNTER : 61|2@0+ (1,0) [0|3] "" EON
+
+BO_ 114120024 LANE_PATH: 8 XXX
+ SG_ MUX M : 7|6@0+ (1,0) [0|63] "" XXX
+ SG_ PATH_OFFSET_1 m1 : 15|12@0- (1,0) [-2048|2047] "" XXX
+ SG_ PATH_OFFSET_2 m1 : 19|12@0- (1,0) [-2048|2047] "" XXX
+ SG_ PATH_OFFSET_3 m1 : 39|12@0- (1,0) [-2048|2047] "" XXX
+ SG_ PATH_OFFSET_4 m1 : 43|12@0- (1,0) [-2048|2047] "" XXX
+ SG_ CHECKSUM : 59|4@0+ (1,0) [0|15] "" XXX
+ SG_ COUNTER : 61|2@0+ (1,0) [0|3] "" XXX
+
+BO_ 114120025 HUD_OBJECTS: 8 XXX
+ SG_ MUX M : 7|6@0+ (1,0) [0|63] "" XXX
+ SG_ OBJECT_ID m1 : 15|5@0+ (1,0) [0|31] "" XXX
+ SG_ IS_LEAD_CAR m1 : 17|1@0+ (1,0) [0|1] "" XXX
+ SG_ CAR_TYPE m1 : 23|4@0- (1,0) [-8|7] "" XXX
+ SG_ ROTATION m1 : 31|8@0- (1,0) [-128|127] "" XXX
+ SG_ LONG_DIST m1 : 39|10@0+ (0.209,-16.9) [-16.9|196.9] "m" XXX
+ SG_ LAT_DIST m1 : 43|12@0- (0.1,0) [-204.8|204.7] "m" XXX
+ SG_ CHECKSUM : 59|4@0+ (1,0) [0|15] "" XXX
+ SG_ COUNTER : 61|2@0+ (1,0) [0|3] "" XXX
+
+BO_ 254913106 RADAR_LEAD2: 8 XXX
+ SG_ SET_ME_X88 : 7|8@0+ (1,0) [0|255] "" XXX
+ SG_ SET_ME_X78 : 15|8@0+ (1,0) [0|255] "" XXX
+ SG_ LEAD_DISTANCE_MAYBE : 23|11@0+ (1,0) [0|2047] "" XXX
+ SG_ CHECKSUM : 59|4@0+ (1,0) [0|15] "" XXX
+ SG_ COUNTER : 61|2@0+ (1,0) [0|3] "" XXX
+
+BO_ 254913116 RADAR_LEAD: 8 XXX
+ SG_ SET_ME_X01 : 5|1@0+ (1,0) [0|1] "" XXX
+ SG_ CNTR_REF : 7|2@0+ (1,0) [0|3] "" XXX
+ SG_ TARGET_SPEED_MAYBE : 15|8@0+ (1,0) [0|255] "" XXX
+ SG_ LEFT_LANE : 23|2@0+ (1,0) [0|3] "" XXX
+ SG_ RIGHT_LANE : 21|2@0+ (1,0) [0|3] "" XXX
+ SG_ LANE_PATH_LENGTH : 31|6@0+ (1,0) [0|63] "" XXX
+ SG_ CHECKSUM : 59|4@0+ (1,0) [0|15] "" XXX
+ SG_ COUNTER : 61|2@0+ (1,0) [0|3] "" XXX
+
+BO_ 440773198 BOSCH_SUPPLEMENTAL_CANFD: 8 XXX
+ SG_ SET_ME_X01 : 7|8@0+ (1,0) [0|255] "" XXX
+ SG_ SET_ME_X41 : 23|8@0+ (1,0) [0|255] "" XXX
+ SG_ CHECKSUM : 59|4@0+ (1,0) [0|15] "" XXX
+ SG_ COUNTER : 61|2@0+ (1,0) [0|3] "" XXX
+
+BO_ 1808 RADAR_SUPP_TICK_REFERENCE: 32 XXX
+ SG_ IGNORE : 11|1@0+ (1,0) [0|1] "" XXX
+
+BO_ 1840 RADAR_HUD_TICK_REFERENCE: 6 XXX
+ SG_ IGNORE : 11|1@0+ (1,0) [0|1] "" XXX
+
+BO_ 1872 RADAR_50HZ_TICK_REFERENCE: 16 XXX
+ SG_ IGNORE : 11|1@0+ (1,0) [0|1] "" XXX
+
+CM_ SG_ 254913116 LANE_PATH_LENGTH "number of valid LANE_PATH points in the current sweep (6 = idle/no lane, up to 23-24); the dash needs this to match the in-band 2047 terminator to draw the lane lines";
+CM_ SG_ 254913116 LEFT_LANE "3 = left lane line detected, 0 = none; tracks the camera's LKAS_HUD LANE_LINES bit 1 exactly in factory logs. The CAN FD equivalent of radarless LKAS_HUD_2 LEFT_LANE; the dash won't draw the lane lines while both are 0";
+CM_ SG_ 254913116 RIGHT_LANE "3 = right lane line detected, 0 = none; tracks the camera's LKAS_HUD LANE_LINES bit 0 exactly in factory logs. The CAN FD equivalent of radarless LKAS_HUD_2 RIGHT_LANE; the dash won't draw the lane lines while both are 0";
