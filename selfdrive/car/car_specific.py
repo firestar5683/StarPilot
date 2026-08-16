@@ -32,7 +32,7 @@ BRAND_EXTRA_GEARS = {
   'ford': [GearShifter.low, GearShifter.manumatic],
   'nissan': [GearShifter.brake],
   'chrysler': [GearShifter.low],
-  'honda': [GearShifter.sport],
+  'honda': [GearShifter.sport, GearShifter.brake],
   'toyota': [GearShifter.sport],
   'gm': [GearShifter.sport, GearShifter.low, GearShifter.eco, GearShifter.manumatic],
   'volkswagen': [GearShifter.eco, GearShifter.sport, GearShifter.manumatic],
