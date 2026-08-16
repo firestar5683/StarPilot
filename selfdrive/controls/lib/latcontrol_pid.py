@@ -100,6 +100,7 @@ class LatControlPID(LatControl):
     self.ff_factor = CP.lateralTuning.pid.kf
     self.get_steer_feedforward = CI.get_steer_feedforward_function()
     self.is_honda_pid_lateral = CP.brand == "honda"
+    self.is_mvl_accord = CP.carFingerprint == HONDA.HONDA_ACCORD_11G
     self.honda_lateral_pid_kp_scale = 1.0
     self.honda_lateral_pid_ki_scale = 1.0
     self.is_civic_bosch_modified = CP.carFingerprint == HONDA.HONDA_CIVIC_BOSCH and bool(CP.flags & HondaFlags.EPS_MODIFIED)
@@ -114,7 +115,7 @@ class LatControlPID(LatControl):
     if not self.is_honda_pid_lateral:
       return
 
-    if self.CP.carFingerprint == HONDA.HONDA_ACCORD_11G:
+    if self.is_mvl_accord:
       # MVL Accord tune is fixed; StarPilot gain multipliers must not retune it.
       kp_scale = 1.0
       ki_scale = 1.0
