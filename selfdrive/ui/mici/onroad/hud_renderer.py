@@ -408,7 +408,7 @@ class HudRenderer(Widget):
 
     # draw drop shadow
     circle_radius = 162 // 2
-    rl.draw_circle_gradient(int(x + circle_radius), int(y + circle_radius), circle_radius,
+    rl.draw_circle_gradient(rl.Vector2(x + circle_radius, y + circle_radius), circle_radius,
                             rl.Color(0, 0, 0, int(255 / 2 * alpha)), rl.BLANK)
 
     set_speed_color = rl.Color(255, 255, 255, int(255 * 0.9 * alpha))
@@ -630,7 +630,7 @@ class HudRenderer(Widget):
     center = rl.Vector2(button_rect.x + button_rect.width / 2, button_rect.y + button_rect.height / 2)
     radius = min(button_rect.width, button_rect.height) / 2
 
-    rl.draw_circle_gradient(int(center.x), int(center.y), radius, rl.Color(0, 0, 0, 90), rl.BLANK)
+    rl.draw_circle_gradient(center, radius, rl.Color(0, 0, 0, 90), rl.BLANK)
     rl.draw_circle(int(center.x), int(center.y), radius, fill)
     rl.draw_ring(center, radius - 6, radius, 0, 360, 48, outline)
 
