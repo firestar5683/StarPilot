@@ -4,6 +4,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -84,6 +85,8 @@ FLM_ADVANCED_LATERAL_PARAM_KEYS = {
   "SteerRatio",
 }
 FLM_TRIAL_BASELINE_PARAM = "FLMTrialBaseline"
+FLM_CUSTOM_VALUES_PARAM = "FLMCustomValuesEnabled"
+CUSTOM_TRIAL_CHANGE_LIMIT = 0.20
 
 GENERIC_PARAM_METADATA = {
   "SteerDelay": {"min": 0.01, "max": 1.0, "precision": 0.001, "deltaType": "absolute", "safeLiveTrial": True},
@@ -91,6 +94,62 @@ GENERIC_PARAM_METADATA = {
   "SteerKP": {"min": 0.1, "max": 1.5, "precision": 0.001, "deltaType": "absolute", "safeLiveTrial": True},
   "SteerLatAccel": {"min": 0.5, "max": 5.0, "precision": 0.001, "deltaType": "absolute", "safeLiveTrial": True},
   "SteerRatio": {"min": 5.0, "max": 25.0, "precision": 0.001, "deltaType": "absolute", "safeLiveTrial": True},
+}
+
+CUSTOM_GENERIC_PARAM_LABELS = {
+  "UseAutoSteerDelay": "Automatic steer delay",
+  "SteerDelay": "Steer delay",
+  "SteerFriction": "Steer friction",
+  "SteerKP": "Steer KP",
+  "SteerLatAccel": "Steer lateral acceleration",
+  "SteerRatio": "Steer ratio",
+}
+CUSTOM_GENERIC_CONTROL_HELP = {
+  "UseAutoSteerDelay": {
+    "summary": "Chooses whether StarPilot learns the full steering delay or uses the manual SteerDelay value.",
+    "moreLabel": "On",
+    "more": "The learned delay is active and the manual SteerDelay field is ignored.",
+    "lessLabel": "Off",
+    "less": "The entered SteerDelay becomes active, so its timing must match the car closely.",
+    "whyThisControl": "Delay affects timing rather than steering strength, so FLM keeps learning enabled unless a manual delay trial is intentional.",
+  },
+  "SteerDelay": {
+    "summary": "The full time in seconds between a steering command and the vehicle's response.",
+    "more": "Assumes a slower steering system and aligns control farther ahead. Too high can make transitions arrive early.",
+    "less": "Assumes a quicker response. Too low can leave turn-in and unwind behind the requested path.",
+    "whyThisControl": "This is a timing calibration, not a direct steering-strength control.",
+  },
+  "SteerFriction": {
+    "summary": "The torque compensation used to overcome steering-system friction around small errors and direction changes.",
+    "more": "Adds stronger friction compensation. It can wake up a reluctant response, but too much can make center corrections busy.",
+    "less": "Softens friction compensation. It can reduce twitch, but too little can create hesitation or a dead feeling.",
+    "whyThisControl": "Used to calm chatter or wake up low-speed response without pretending the whole torque map is wrong.",
+  },
+  "SteerKP": {
+    "summary": "The proportional feedback gain applied to lateral-acceleration tracking error.",
+    "more": "Corrects tracking error more strongly and quickly; too high can oscillate or feel nervous.",
+    "less": "Corrects more gently; too low can feel slow and leave persistent path error.",
+    "whyThisControl": "This changes feedback correction, while feedforward knobs change the predicted steering command.",
+  },
+  "SteerLatAccel": {
+    "summary": "The estimated lateral acceleration produced by one unit of steering torque.",
+    "more": "Tells the controller the car is more responsive, so it commands less torque for the same lateral-acceleration target.",
+    "less": "Tells the controller the car is less responsive, so it commands more torque for the same target.",
+    "whyThisControl": "This is a whole-car torque calibration; it should not be treated as a simple aggressiveness slider.",
+  },
+  "SteerRatio": {
+    "summary": "The steering-wheel-to-road-wheel geometry ratio used by the vehicle model.",
+    "more": "Assumes more steering-wheel rotation is required for the same road-wheel angle and changes the calculated curvature accordingly.",
+    "less": "Assumes less steering-wheel rotation is required for the same road-wheel angle.",
+    "whyThisControl": "A wrong ratio creates broad geometry and curve-tracking errors; it is not a phase-specific cleanup knob.",
+  },
+}
+CUSTOM_FRICTION_METADATA = {
+  "min": 0.0,
+  "max": 1.0,
+  "precision": 0.001,
+  "deltaType": "absolute",
+  "safeLiveTrial": True,
 }
 
 FLM_REFERENCE_MODEL = {
@@ -2696,6 +2755,699 @@ def select_report_path(report_id: str, path_key: str) -> dict[str, Any]:
   }
 
 
+def _custom_knob_label(symbol: str) -> str:
+  suffix = str(symbol).split(".", 1)[-1]
+  aliases = {"ff": "Feed Forward", "kp": "KP"}
+  return " ".join(aliases.get(word, word.capitalize()) for word in suffix.split("_"))
+
+
+def _custom_help(summary: str, more: str, less: str, why: str,
+                 more_label: str = "Higher value", less_label: str = "Lower value") -> dict[str, Any]:
+  return {
+    "summary": summary,
+    "moreLabel": more_label,
+    "more": more,
+    "lessLabel": less_label,
+    "less": less,
+    "whyThisControl": why,
+  }
+
+
+def _custom_vehicle_knob_help(symbol: str) -> dict[str, Any]:
+  suffix = str(symbol).split(".", 1)[-1]
+  side = "left turns" if suffix.endswith("_left") else "right turns" if suffix.endswith("_right") else "both directions"
+  analysis_why = _why_this_knob({"type": "vehicle_knob", "symbol": symbol})
+
+  if suffix.startswith("ff_gain_"):
+    return _custom_help(
+      f"Scales the car-specific feedforward contribution for {side} through its nonlinear operating band.",
+      f"Adds more predicted steering for {side}; response becomes stronger, but too much can overshoot.",
+      f"Adds less predicted steering for {side}; response becomes calmer, but too little can lag or run wide.",
+      analysis_why,
+    )
+  if suffix.startswith("turn_in_boost_"):
+    return _custom_help(
+      f"Changes the extra feedforward applied while entering {side}, with the strongest effect at lower speeds.",
+      "Makes curve entry quicker and more eager; too much can dive into the curve or spike past the plan.",
+      "Makes curve entry gentler; too little can delay turn-in.",
+      analysis_why,
+    )
+  if suffix.startswith("base_unwind_taper_"):
+    return _custom_help(
+      f"Reduces the base feedforward contribution while unwinding {side} through the vehicle's tuned speed window.",
+      "Removes more base feedforward on exit, so steering releases sooner; too much can release abruptly.",
+      "Keeps more base feedforward on exit; too little reduction can make steering hang on.",
+      "This separates the vehicle's base unwind behavior from its additional nonlinear feedforward layer.",
+    )
+  if suffix.startswith("unwind_taper_"):
+    return _custom_help(
+      f"Tapers the additional feedforward contribution while unwinding {side}.",
+      "Removes more feedforward on exit, making release quicker; too much can snap back.",
+      "Keeps more feedforward on exit; too little taper can make steering drag past the intended release.",
+      analysis_why,
+    )
+  if suffix == "center_taper_max":
+    return _custom_help(
+      "Sets the maximum feedforward reduction near straight-ahead steering in its normal speed band.",
+      "Calms more near-center activity, but too much can make light corrections feel lazy.",
+      "Preserves more near-center authority, but too little can leave straight-road nibbling.",
+      FLM_REFERENCE_MODEL["families"]["center_taper"]["reason"],
+    )
+  if suffix == "highway_center_taper_max":
+    return _custom_help(
+      "Sets the maximum feedforward reduction near center at highway speeds.",
+      "Calms more highway micro-correction activity, but too much can delay gentle lane-centering corrections.",
+      "Preserves more highway center authority, but too little can leave the wheel busy.",
+      "This isolates high-speed near-center behavior from normal curve authority.",
+    )
+  if suffix == "center_output_taper_max":
+    return _custom_help(
+      "Sets the maximum reduction of final steering output near center in the vehicle-specific speed band.",
+      "Reduces more final output and can calm center activity; too much can make the car reluctant around center.",
+      "Leaves more final output available; too little taper can keep small corrections active.",
+      "This acts on final output near center rather than changing the whole feedforward map.",
+    )
+  if suffix.startswith("center_deadband_"):
+    speed_band = suffix.removeprefix("center_deadband_").removesuffix("_deg").replace("_", " ")
+    return _custom_help(
+      f"Adds a steering-angle deadband around center at the {speed_band} speed knot; neighboring speeds are interpolated.",
+      "Ignores a larger tiny angle mismatch and can stop chatter; too much can delay light corrections.",
+      "Ignores less mismatch and stays more responsive; too little may leave center reversals active.",
+      analysis_why,
+    )
+  if suffix.startswith("turn_in_threshold_reduction_"):
+    return _custom_help(
+      f"Reduces the small-error friction threshold during turn-in for {side}.",
+      "Lowers the threshold more, so friction compensation wakes sooner on entry; too much can feel twitchy.",
+      "Keeps a higher entry threshold, making response calmer but potentially more reluctant.",
+      analysis_why,
+    )
+  if suffix.startswith("unwind_threshold_increase_"):
+    return _custom_help(
+      f"Raises the small-error friction threshold during unwind for {side}.",
+      "Softens more small friction corrections during release; too much can leave exit error uncorrected.",
+      "Keeps friction compensation more active during release; too little can make unwind busy.",
+      analysis_why,
+    )
+  if suffix == "center_friction_threshold_gain":
+    return _custom_help(
+      "Raises the friction threshold near straight-ahead steering in the vehicle-specific speed band.",
+      "Mutes more tiny friction corrections and can calm center activity; too much can create reluctance.",
+      "Lets friction compensation engage sooner; too little can leave center chatter.",
+      FLM_REFERENCE_MODEL["families"]["friction_threshold_curve"]["reason"],
+    )
+  if suffix.startswith("crawl_turn_in_ff_boost_"):
+    return _custom_help(
+      f"Adds feedforward while entering {side} at crawl speed when the requested angle is not being reached.",
+      "Adds more crawl-speed entry assistance; too much can tug or enter the turn too sharply.",
+      "Adds less assistance; too little can leave parking-lot and junction turns unwilling.",
+      analysis_why,
+    )
+  if suffix == "low_speed_angle_assist_max_torque":
+    return _custom_help(
+      "Caps the extra torque used at very low speed to close the desired-versus-actual steering-angle gap.",
+      "Allows stronger low-speed assistance; too much can tug, overshoot, or feel abrupt.",
+      "Limits the assistance more; too little can leave tight turns behind the requested angle.",
+      analysis_why,
+    )
+  if suffix == "curvy_speed_min":
+    return _custom_help(
+      "Sets the lower-speed edge of the dedicated curvy-unwind cleanup window.",
+      "Starts the unwind cleanup at a higher speed, so less low/mid-speed driving is affected.",
+      "Starts the cleanup at a lower speed, extending it into slower curves.",
+      "This moves the lower boundary of the curvy unwind layer without changing its strength inside the window.",
+    )
+  if suffix == "curvy_speed_max":
+    return _custom_help(
+      "Sets the upper-speed edge of the dedicated curvy-unwind cleanup window.",
+      "Keeps the unwind cleanup active into faster curves.",
+      "Ends the cleanup sooner, preserving the base unwind behavior at lower speeds.",
+      analysis_why,
+    )
+  if suffix == "curvy_turn_in_trim_speed_min":
+    return _custom_help(
+      "Sets the lower-speed edge of the dedicated curvy turn-in trim window.",
+      "Starts the entry trim at a higher speed, so less low/mid-speed driving is affected.",
+      "Starts the entry trim at a lower speed, extending it into slower curves.",
+      "This changes where the curve-entry trim is active, not how strong the trim is.",
+    )
+  if suffix == "curvy_turn_in_trim_speed_max":
+    return _custom_help(
+      "Sets the upper-speed edge of the dedicated curvy turn-in trim window.",
+      "Keeps the entry trim active into faster curves.",
+      "Ends the entry trim sooner and returns to the base turn-in behavior at a lower speed.",
+      analysis_why,
+    )
+  if suffix.startswith("curvy_turn_in_trim_"):
+    return _custom_help(
+      f"Subtracts feedforward during curve-band turn-in for {side}.",
+      "Removes more entry feedforward and calms eagerness; too much can create late turn-in.",
+      "Removes less entry feedforward and makes entry stronger; too little trim can overshoot.",
+      analysis_why,
+    )
+  if suffix.startswith("curvy_unwind_floor_relief_"):
+    return _custom_help(
+      f"Lowers the feedforward floor that otherwise limits curvy-unwind reduction for {side}.",
+      "Allows a deeper torque reduction and quicker release; too much can make unwind abrupt.",
+      "Keeps a higher feedforward floor and more exit authority; too little relief can make steering hang on.",
+      analysis_why,
+    )
+  if suffix.startswith("curvy_unwind_extra_reduction_"):
+    return _custom_help(
+      f"Applies an additional feedforward reduction during curve-band unwind for {side}.",
+      "Removes more exit feedforward and releases steering sooner; too much can unwind too fast.",
+      "Removes less exit feedforward; too little can leave the car steering after the plan releases.",
+      analysis_why,
+    )
+  if suffix == "unwind_ff_reduction":
+    return _custom_help(
+      "Reduces feedforward during the vehicle-specific higher-speed unwind phase.",
+      "Removes more feedforward and releases steering sooner; too much can release too quickly.",
+      "Keeps more feedforward through unwind; too little reduction can make the car hold the curve.",
+      "This targets exit feedforward without changing turn-in or the whole torque calibration.",
+    )
+  return _custom_help(
+    "A car-specific FLM control used by the active torque-controller profile.",
+    "Moves the control toward its stronger or wider effect; evaluate the exact driving phase named by the control.",
+    "Moves the control toward its weaker or narrower effect.",
+    analysis_why,
+  )
+
+
+def _is_custom_profile_id(profile_id: Any) -> bool:
+  return str(profile_id or "").endswith(":custom")
+
+
+def _existing_custom_values_present(paths: dict[str, Path], params: Params) -> bool:
+  """Detect installs that used custom values before the Developer toggle existed."""
+  if _is_custom_profile_id(params.get("FLMActiveProfileId", encoding="utf-8")):
+    return True
+
+  active_snapshot = _read_json(paths["snapshots"] / "active.json", {})
+  if isinstance(active_snapshot, dict) and _is_custom_profile_id(active_snapshot.get("profileId")):
+    return True
+
+  for tune_path in paths["savedTunes"].glob("*.json"):
+    tune = _read_json(tune_path, {})
+    if isinstance(tune, dict) and _is_custom_profile_id(tune.get("sourceProfileId")):
+      return True
+  return False
+
+
+def custom_values_enabled() -> bool:
+  """Return the custom-value gate, migrating existing custom users to enabled once."""
+  raw_params = Params()
+  if raw_params.get(FLM_CUSTOM_VALUES_PARAM) is not None:
+    return raw_params.get_bool(FLM_CUSTOM_VALUES_PARAM)
+
+  paths = ensure_flm_workspace()
+  if _existing_custom_values_present(paths, raw_params):
+    raw_params.put_bool(FLM_CUSTOM_VALUES_PARAM, True)
+    return True
+  return Params(return_defaults=True).get_bool(FLM_CUSTOM_VALUES_PARAM)
+
+
+def _require_custom_values_enabled() -> None:
+  if not custom_values_enabled():
+    raise RuntimeError("Enable Custom FLM Values in Galaxy Developer settings first.")
+
+
+def _custom_report_rationales(selected_path: dict[str, Any]) -> dict[str, list[dict[str, str]]]:
+  rationales: dict[str, list[dict[str, str]]] = {}
+  for suggestion in selected_path.get("suggestions", []):
+    if not isinstance(suggestion, dict):
+      continue
+    comparison = suggestion.get("currentVsSuggested")
+    if not isinstance(comparison, dict):
+      continue
+    comparison_type = str(comparison.get("type", "") or "")
+    if comparison_type == "generic_param":
+      control_key = f"generic:{comparison.get('paramKey', '')}"
+    elif comparison_type == "vehicle_knob":
+      control_key = f"vehicle:{comparison.get('symbol', '')}"
+    elif comparison_type == "friction_curve":
+      control_key = f"friction:{comparison.get('family', '')}"
+    else:
+      continue
+    rationale = {
+      "observedBehavior": str(suggestion.get("observedBehavior", "") or ""),
+      "likelyInterpretation": str(suggestion.get("likelyInterpretation", "") or ""),
+      "primaryAdjustment": str(suggestion.get("primaryAdjustment", "") or ""),
+      "whyThisKnob": str(suggestion.get("whyThisKnob", "") or ""),
+      "logSupport": str(suggestion.get("logSupport", "") or ""),
+    }
+    existing = rationales.setdefault(control_key, [])
+    if rationale not in existing and len(existing) < 3:
+      existing.append(rationale)
+  return rationales
+
+
+def _custom_help_with_analysis(help_payload: dict[str, Any], rationales: dict[str, list[dict[str, str]]],
+                               control_key: str) -> dict[str, Any]:
+  return {
+    **help_payload,
+    "analysis": rationales.get(control_key, []),
+  }
+
+
+def _custom_trial_profiles(report: dict[str, Any]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+  report_paths = [path for path in report.get("paths", []) if isinstance(path, dict)]
+  selected_path_key = str(report.get("selectedPathKey") or report.get("primaryPathKey") or "")
+  selected_path = next((path for path in report_paths if path.get("key") == selected_path_key), None)
+  if selected_path is None:
+    selected_path = next((path for path in report_paths if path.get("isPrimary")), report_paths[0] if report_paths else {})
+  profiles = [profile for profile in selected_path.get("profiles", []) if isinstance(profile, dict)] if selected_path else []
+  if not profiles:
+    profiles = [profile for profile in report.get("profiles", []) if isinstance(profile, dict)]
+  return profiles, selected_path or {}
+
+
+def _custom_trial_supported_knobs(report: dict[str, Any]) -> dict[str, dict[str, Any]]:
+  profile_key = str(report.get("capabilities", {}).get("richProfileKey", "") or "")
+  return {
+    symbol: dict(metadata)
+    for symbol, metadata in get_flm_supported_vehicle_knobs().items()
+    if metadata.get("profile") == profile_key and metadata.get("safeLiveTrial", True)
+  }
+
+
+def _custom_numeric_default(value: Any, metadata: dict[str, Any]) -> float:
+  try:
+    number = float(value)
+  except (TypeError, ValueError):
+    number = float(metadata.get("min", 0.0))
+  if not math.isfinite(number):
+    number = float(metadata.get("min", 0.0))
+  return _round_to_precision(
+    _clamp(number, float(metadata["min"]), float(metadata["max"])),
+    float(metadata.get("precision", 0.001)),
+  )
+
+
+def _ceil_to_precision(value: float, precision: float) -> float:
+  if precision <= 0:
+    return float(value)
+  return round(math.ceil((float(value) / precision) - 1e-9) * precision, 6)
+
+
+def _floor_to_precision(value: float, precision: float) -> float:
+  if precision <= 0:
+    return float(value)
+  return round(math.floor((float(value) / precision) + 1e-9) * precision, 6)
+
+
+def _custom_trial_numeric_limit(value: Any, metadata: dict[str, Any]) -> dict[str, Any]:
+  """Limit one custom field around the immutable values captured by this analysis."""
+  baseline = _custom_numeric_default(value, metadata)
+  absolute_minimum = float(metadata["min"])
+  absolute_maximum = float(metadata["max"])
+  precision = float(metadata.get("precision", 0.001))
+  # A zero baseline would otherwise be impossible to change. Permit one control
+  # step while retaining the absolute schema bounds.
+  maximum_change = max(abs(baseline) * CUSTOM_TRIAL_CHANGE_LIMIT, precision)
+  minimum = _ceil_to_precision(max(absolute_minimum, baseline - maximum_change), precision)
+  maximum = _floor_to_precision(min(absolute_maximum, baseline + maximum_change), precision)
+  if minimum > maximum:
+    minimum = maximum = baseline
+  return {
+    **metadata,
+    "absoluteMin": absolute_minimum,
+    "absoluteMax": absolute_maximum,
+    "analysisBaseline": baseline,
+    "min": minimum,
+    "max": maximum,
+  }
+
+
+def _complete_custom_trial_values(report: dict[str, Any], profile: dict[str, Any] | None = None,
+                                  use_stock: bool = False) -> dict[str, Any]:
+  stock = report.get("stockParams", {}) if isinstance(report.get("stockParams"), dict) else {}
+  current = report.get("currentParams", {}) if isinstance(report.get("currentParams"), dict) else {}
+  current_overrides = normalize_flm_overrides(current.get("FLMActiveOverrides", {}))
+  profile = profile if isinstance(profile, dict) else {}
+  profile_overrides = normalize_flm_overrides(profile.get("flmOverrides", {}))
+
+  generic_params = {
+    "UseAutoSteerDelay": bool(stock.get("UseAutoSteerDelay", True) if use_stock else current.get("UseAutoSteerDelay", stock.get("UseAutoSteerDelay", True))),
+  }
+  for key, metadata in GENERIC_PARAM_METADATA.items():
+    base_value = stock.get(key, metadata["min"]) if use_stock else current.get(key, stock.get(key, metadata["min"]))
+    generic_params[key] = _custom_numeric_default(base_value, metadata)
+  for key, value in profile.get("genericParams", {}).items():
+    if key == "UseAutoSteerDelay":
+      generic_params[key] = bool(value)
+    elif key in GENERIC_PARAM_METADATA:
+      generic_params[key] = _custom_numeric_default(value, GENERIC_PARAM_METADATA[key])
+
+  family = str(report.get("capabilities", {}).get("frictionFamily", "standard") or "standard")
+  stock_curve_payload = stock.get("FLMBaseFrictionThresholds", {}).get(family, {}) if isinstance(stock.get("FLMBaseFrictionThresholds"), dict) else {}
+  stock_curve = stock_curve_payload.get("values", []) if isinstance(stock_curve_payload, dict) else []
+  if len(stock_curve) != len(FLM_FRICTION_SPEED_KNOTS):
+    stock_curve = _baseline_family_curve(family)
+  current_curve_payload = current_overrides.get("baseFrictionThresholds", {}).get(family, {})
+  current_curve = current_curve_payload.get("values", []) if isinstance(current_curve_payload, dict) else []
+  base_curve = stock_curve if use_stock or len(current_curve) != len(FLM_FRICTION_SPEED_KNOTS) else current_curve
+  profile_curve_payload = profile_overrides.get("baseFrictionThresholds", {}).get(family, {})
+  profile_curve = profile_curve_payload.get("values", []) if isinstance(profile_curve_payload, dict) else []
+  if len(profile_curve) == len(FLM_FRICTION_SPEED_KNOTS):
+    base_curve = profile_curve
+  friction_values = [_custom_numeric_default(value, CUSTOM_FRICTION_METADATA) for value in base_curve]
+
+  supported_knobs = _custom_trial_supported_knobs(report)
+  stock_knobs = stock.get("FLMVehicleKnobs", {}) if isinstance(stock.get("FLMVehicleKnobs"), dict) else {}
+  current_knobs = current_overrides.get("vehicleKnobs", {})
+  profile_knobs = profile_overrides.get("vehicleKnobs", {})
+  vehicle_knobs = {}
+  for symbol, metadata in supported_knobs.items():
+    value = stock_knobs.get(symbol, metadata.get("defaultValue", metadata["min"]))
+    if not use_stock:
+      value = current_knobs.get(symbol, value)
+    value = profile_knobs.get(symbol, value)
+    vehicle_knobs[symbol] = _custom_numeric_default(value, metadata)
+
+  return {
+    "genericParams": generic_params,
+    "flmOverrides": {
+      "schemaVersion": 1,
+      "baseFrictionThresholds": {
+        family: {
+          "speedKnots": list(FLM_FRICTION_SPEED_KNOTS),
+          "values": friction_values,
+        },
+      },
+      "vehicleKnobs": vehicle_knobs,
+    },
+  }
+
+
+def _constrain_custom_trial_preset(values: dict[str, Any], generic_controls: list[dict[str, Any]],
+                                   friction_limits: list[dict[str, Any]],
+                                   vehicle_controls: list[dict[str, Any]]) -> tuple[dict[str, Any], bool]:
+  """Keep every fill preset immediately applicable within this analysis window."""
+  constrained = json.loads(json.dumps(values))
+  changed = False
+
+  generic_values = constrained.get("genericParams", {})
+  for control in generic_controls:
+    if control.get("type") != "number" or control["key"] not in generic_values:
+      continue
+    original = generic_values[control["key"]]
+    generic_values[control["key"]] = _custom_numeric_default(original, control)
+    changed = changed or generic_values[control["key"]] != original
+
+  friction_payloads = constrained.get("flmOverrides", {}).get("baseFrictionThresholds", {})
+  for family_payload in friction_payloads.values():
+    if not isinstance(family_payload, dict):
+      continue
+    friction_values = family_payload.get("values", [])
+    if not isinstance(friction_values, list) or len(friction_values) != len(friction_limits):
+      continue
+    for index, limit in enumerate(friction_limits):
+      original = friction_values[index]
+      friction_values[index] = _custom_numeric_default(original, limit)
+      changed = changed or friction_values[index] != original
+
+  vehicle_values = constrained.get("flmOverrides", {}).get("vehicleKnobs", {})
+  for control in vehicle_controls:
+    if control["key"] not in vehicle_values:
+      continue
+    original = vehicle_values[control["key"]]
+    vehicle_values[control["key"]] = _custom_numeric_default(original, control)
+    changed = changed or vehicle_values[control["key"]] != original
+  return constrained, changed
+
+
+def _current_custom_trial_values(report: dict[str, Any]) -> tuple[dict[str, Any], str, bool]:
+  """Build the Current preset from live device params when they match this report's car."""
+  params = Params(return_defaults=True)
+  current_state = _snapshot_current_trial_state(params)
+  trial_active = bool(current_state.get("FLMTrialApplied", False))
+  paths = ensure_flm_workspace()
+  active_snapshot = _read_json(paths["snapshots"] / "active.json", {})
+  if not isinstance(active_snapshot, dict):
+    active_snapshot = {}
+
+  report_fingerprint = str(report.get("car", {}).get("carFingerprint", "") or "")
+  current_fingerprint = _current_car_identity(params)["carFingerprint"]
+  if not current_fingerprint and trial_active:
+    current_fingerprint = _active_trial_car_fingerprint(paths, active_snapshot)
+
+  # Without any device/trial identity, retain the report snapshot. This keeps
+  # offline report viewing deterministic and avoids mixing values across cars.
+  if (
+    (report_fingerprint and current_fingerprint and report_fingerprint != current_fingerprint)
+    or (report_fingerprint and not current_fingerprint and not trial_active)
+  ):
+    return _complete_custom_trial_values(report), "analysis", False
+
+  report_current = report.get("currentParams", {}) if isinstance(report.get("currentParams"), dict) else {}
+  live_report = {
+    **report,
+    "currentParams": {
+      **report_current,
+      **current_state,
+    },
+  }
+  source = "active_trial" if trial_active else "device"
+  return _complete_custom_trial_values(live_report), source, trial_active
+
+
+def build_custom_trial_schema(report_id: str) -> dict[str, Any]:
+  _require_custom_values_enabled()
+  report = load_report(report_id)
+  if report.get("car", {}).get("controlPath") != "torque":
+    raise RuntimeError("Custom FLM trials require a torque-control report.")
+
+  supported_knobs = _custom_trial_supported_knobs(report)
+  profiles, selected_path = _custom_trial_profiles(report)
+  report_rationales = _custom_report_rationales(selected_path)
+  analysis_values = _complete_custom_trial_values(report)
+  current_values, current_source, current_trial_active = _current_custom_trial_values(report)
+  presets = {
+    "stock": {"label": "Stock", "values": _complete_custom_trial_values(report, use_stock=True)},
+    "current": {
+      "label": "Current (Active Tune)" if current_trial_active else "Current",
+      "values": current_values,
+    },
+  }
+  for profile in profiles:
+    label = str(profile.get("label", "") or "").strip()
+    preset_key = label.lower().replace(" ", "_")
+    if preset_key not in ("conservative", "recommended", "assertive"):
+      continue
+    presets[preset_key] = {
+      "label": label,
+      "profileId": str(profile.get("id", "") or ""),
+      "values": _complete_custom_trial_values(report, profile=profile),
+    }
+
+  default_preset = "current" if current_trial_active else ("recommended" if "recommended" in presets else "current")
+  generic_controls = [{
+    "key": "UseAutoSteerDelay",
+    "label": CUSTOM_GENERIC_PARAM_LABELS["UseAutoSteerDelay"],
+    "type": "boolean",
+    "help": _custom_help_with_analysis(
+      CUSTOM_GENERIC_CONTROL_HELP["UseAutoSteerDelay"],
+      report_rationales,
+      "generic:UseAutoSteerDelay",
+    ),
+  }]
+  for key, metadata in GENERIC_PARAM_METADATA.items():
+    generic_controls.append({
+      "key": key,
+      "label": CUSTOM_GENERIC_PARAM_LABELS.get(key, key),
+      "type": "number",
+      "help": _custom_help_with_analysis(
+        CUSTOM_GENERIC_CONTROL_HELP.get(key, {}),
+        report_rationales,
+        f"generic:{key}",
+      ),
+      **_custom_trial_numeric_limit(analysis_values["genericParams"][key], metadata),
+    })
+
+  analysis_knobs = analysis_values["flmOverrides"]["vehicleKnobs"]
+  vehicle_controls = []
+  for symbol, metadata in supported_knobs.items():
+    vehicle_controls.append({
+      "key": symbol,
+      "label": _custom_knob_label(symbol),
+      "type": "number",
+      "help": _custom_help_with_analysis(
+        _custom_vehicle_knob_help(symbol),
+        report_rationales,
+        f"vehicle:{symbol}",
+      ),
+      **_custom_trial_numeric_limit(analysis_knobs[symbol], metadata),
+    })
+  friction_family = str(report.get("capabilities", {}).get("frictionFamily", "standard") or "standard")
+  analysis_friction = analysis_values["flmOverrides"]["baseFrictionThresholds"][friction_family]["values"]
+  friction_limits = [
+    _custom_trial_numeric_limit(value, CUSTOM_FRICTION_METADATA)
+    for value in analysis_friction
+  ]
+  friction_help = _custom_help(
+    f"The base small-error friction threshold at each road-speed knot for the {friction_family} controller family.",
+    "Delays and softens friction compensation at that speed, which can calm chatter but may feel reluctant.",
+    "Activates friction compensation sooner at that speed, which can improve response but may become twitchy.",
+    FLM_REFERENCE_MODEL["families"]["friction_threshold_curve"]["reason"],
+  )
+  for preset in presets.values():
+    preset["values"], preset["clippedToAnalysisLimits"] = _constrain_custom_trial_preset(
+      preset["values"],
+      generic_controls,
+      friction_limits,
+      vehicle_controls,
+    )
+  return {
+    "schemaVersion": 1,
+    "reportId": report_id,
+    "carFingerprint": str(report.get("car", {}).get("carFingerprint", "") or ""),
+    "profileKey": str(report.get("capabilities", {}).get("richProfileKey", "") or ""),
+    "profileLabel": str(report.get("capabilities", {}).get("richProfileLabel", "") or ""),
+    "pathKey": str(selected_path.get("key", "") or ""),
+    "pathLabel": str(selected_path.get("title", "") or ""),
+    "defaultPreset": default_preset,
+    "currentPresetSource": current_source,
+    "currentTrialActive": current_trial_active,
+    "changeLimitPercent": int(CUSTOM_TRIAL_CHANGE_LIMIT * 100),
+    "analysisCapturedAt": report.get("createdAt"),
+    "forcedSettings": {
+      "AdvancedLateralTune": True,
+      "ForceAutoTune": False,
+      "ForceAutoTuneOff": True,
+    },
+    "controls": {
+      "genericParams": generic_controls,
+      "frictionCurve": {
+        "family": friction_family,
+        "speedKnots": list(FLM_FRICTION_SPEED_KNOTS),
+        "help": _custom_help_with_analysis(
+          friction_help,
+          report_rationales,
+          f"friction:{friction_family}",
+        ),
+        **CUSTOM_FRICTION_METADATA,
+        "valueLimits": friction_limits,
+      },
+      "vehicleKnobs": vehicle_controls,
+    },
+    "vehicleKnobCount": len(vehicle_controls),
+    "presets": presets,
+  }
+
+
+def _validate_custom_number(value: Any, metadata: dict[str, Any], label: str) -> float:
+  if isinstance(value, bool):
+    raise ValueError(f"{label} must be a number.")
+  try:
+    number = float(value)
+  except (TypeError, ValueError):
+    raise ValueError(f"{label} must be a number.") from None
+  if not math.isfinite(number):
+    raise ValueError(f"{label} must be finite.")
+  minimum = float(metadata["min"])
+  maximum = float(metadata["max"])
+  if number < minimum or number > maximum:
+    raise ValueError(f"{label} must be between {minimum:g} and {maximum:g}.")
+  return _round_to_precision(number, float(metadata.get("precision", 0.001)))
+
+
+def validate_custom_trial_values(report_id: str, payload: Any) -> tuple[dict[str, Any], dict[str, Any], dict[str, Any]]:
+  if not isinstance(payload, dict):
+    raise ValueError("Custom trial values must be a JSON object.")
+  schema = build_custom_trial_schema(report_id)
+  generic_raw = payload.get("genericParams", {})
+  overrides_raw = payload.get("flmOverrides", {})
+  if not isinstance(generic_raw, dict) or not isinstance(overrides_raw, dict):
+    raise ValueError("Custom generic parameters and FLM overrides are required.")
+  expected_override_keys = {"schemaVersion", "baseFrictionThresholds", "vehicleKnobs"}
+  if unknown := sorted(set(overrides_raw) - expected_override_keys):
+    raise ValueError(f"Unknown custom FLM override field(s): {', '.join(unknown)}.")
+  if overrides_raw.get("schemaVersion") != 1:
+    raise ValueError("Custom FLM overrides must use schema version 1.")
+
+  expected_generic = {control["key"] for control in schema["controls"]["genericParams"]}
+  generic_keys = set(generic_raw)
+  if missing := sorted(expected_generic - generic_keys):
+    raise ValueError(f"Missing custom generic parameter(s): {', '.join(missing)}.")
+  if unknown := sorted(generic_keys - expected_generic):
+    raise ValueError(f"Unknown custom generic parameter(s): {', '.join(unknown)}.")
+
+  generic_params = dict(schema["forcedSettings"])
+  for control in schema["controls"]["genericParams"]:
+    key = control["key"]
+    if control["type"] == "boolean":
+      if not isinstance(generic_raw[key], bool):
+        raise ValueError(f"{control['label']} must be on or off.")
+      generic_params[key] = generic_raw[key]
+    else:
+      generic_params[key] = _validate_custom_number(generic_raw[key], control, control["label"])
+
+  family = schema["controls"]["frictionCurve"]["family"]
+  friction_raw = overrides_raw.get("baseFrictionThresholds", {})
+  if not isinstance(friction_raw, dict):
+    raise ValueError("Custom friction thresholds must be a JSON object.")
+  if missing := sorted({family} - set(friction_raw)):
+    raise ValueError(f"Missing custom friction family: {', '.join(missing)}.")
+  if unknown := sorted(set(friction_raw) - {family}):
+    raise ValueError(f"Unknown custom friction family: {', '.join(unknown)}.")
+  family_payload = friction_raw.get(family, {})
+  if not isinstance(family_payload, dict):
+    raise ValueError(f"The {family} friction curve must be a JSON object.")
+  if unknown := sorted(set(family_payload) - {"speedKnots", "values"}):
+    raise ValueError(f"Unknown {family} friction field(s): {', '.join(unknown)}.")
+  try:
+    speed_knots = [float(value) for value in family_payload.get("speedKnots", [])]
+  except (TypeError, ValueError):
+    speed_knots = []
+  if speed_knots != [float(value) for value in FLM_FRICTION_SPEED_KNOTS]:
+    raise ValueError(f"The {family} friction speed knots cannot be changed.")
+  friction_values_raw = family_payload.get("values", []) if isinstance(family_payload, dict) else []
+  if len(friction_values_raw) != len(FLM_FRICTION_SPEED_KNOTS):
+    raise ValueError(f"The {family} friction curve requires {len(FLM_FRICTION_SPEED_KNOTS)} values.")
+  friction_limits = schema["controls"]["frictionCurve"]["valueLimits"]
+  friction_values = [
+    _validate_custom_number(value, friction_limits[index], f"{family} friction value {index + 1}")
+    for index, value in enumerate(friction_values_raw)
+  ]
+
+  knobs_raw = overrides_raw.get("vehicleKnobs", {})
+  if not isinstance(knobs_raw, dict):
+    raise ValueError("Custom vehicle knobs must be a JSON object.")
+  controls_by_key = {control["key"]: control for control in schema["controls"]["vehicleKnobs"]}
+  expected_knobs = set(controls_by_key)
+  knob_keys = set(knobs_raw)
+  if missing := sorted(expected_knobs - knob_keys):
+    raise ValueError(f"Missing custom vehicle knob(s): {', '.join(missing[:5])}{'...' if len(missing) > 5 else ''}.")
+  if unknown := sorted(knob_keys - expected_knobs):
+    raise ValueError(f"Unknown or unsupported vehicle knob(s): {', '.join(unknown[:5])}{'...' if len(unknown) > 5 else ''}.")
+  vehicle_knobs = {
+    symbol: _validate_custom_number(knobs_raw[symbol], controls_by_key[symbol], controls_by_key[symbol]["label"])
+    for symbol in controls_by_key
+  }
+
+  for minimum_suffix, maximum_suffix in (
+    ("curvy_speed_min", "curvy_speed_max"),
+    ("curvy_turn_in_trim_speed_min", "curvy_turn_in_trim_speed_max"),
+  ):
+    minimum_symbol = next((symbol for symbol in vehicle_knobs if symbol.endswith(f".{minimum_suffix}")), "")
+    maximum_symbol = next((symbol for symbol in vehicle_knobs if symbol.endswith(f".{maximum_suffix}")), "")
+    if minimum_symbol and maximum_symbol and vehicle_knobs[minimum_symbol] >= vehicle_knobs[maximum_symbol]:
+      raise ValueError(f"{_custom_knob_label(minimum_symbol)} must be lower than {_custom_knob_label(maximum_symbol)}.")
+
+  flm_overrides = {
+    "schemaVersion": 1,
+    "baseFrictionThresholds": {
+      family: {
+        "speedKnots": list(FLM_FRICTION_SPEED_KNOTS),
+        "values": friction_values,
+      },
+    },
+    "vehicleKnobs": vehicle_knobs,
+  }
+  return generic_params, flm_overrides, schema
+
+
 def _active_trial_display_state(paths: dict[str, Path], snapshot: Any) -> dict[str, Any] | None:
   if not isinstance(snapshot, dict) or not snapshot:
     return None
@@ -2857,6 +3609,7 @@ def list_workspace() -> dict[str, Any]:
   return {
     "reports": reports[:20],
     "savedTunes": list_saved_tunes(paths, active_tune_id),
+    "customValuesEnabled": custom_values_enabled(),
     "currentCarFingerprint": current_car["carFingerprint"],
     "feedbackCount": len(feedback_files),
     "activeTrial": active_snapshot,
@@ -3467,6 +4220,87 @@ def apply_trial_profile(report_id: str, profile_id: str) -> dict[str, Any]:
   return {
     "message": f"Applied {profile.get('label', 'FLM')} profile.",
     "profile": profile,
+  }
+
+
+def apply_custom_trial(report_id: str, payload: Any) -> dict[str, Any]:
+  paths = ensure_flm_workspace()
+  params = Params(return_defaults=True)
+  _require_flm_offroad(params)
+  report = load_report(report_id)
+  report_fingerprint = str(report.get("car", {}).get("carFingerprint", "") or "")
+  current_car = _current_car_identity(params)
+  if current_car["carFingerprint"] and report_fingerprint and current_car["carFingerprint"] != report_fingerprint:
+    raise RuntimeError(
+      f"This report is for {report_fingerprint}, but the connected car is {current_car['carFingerprint']}."
+    )
+
+  generic_params, flm_overrides, schema = validate_custom_trial_values(report_id, payload)
+  current_state = _snapshot_current_trial_state(params)
+  raw_active_snapshot = _read_json(paths["snapshots"] / "active.json", {})
+  if not isinstance(raw_active_snapshot, dict):
+    raw_active_snapshot = {}
+  previous_display_state = _active_trial_display_state(paths, raw_active_snapshot) or {}
+  if current_state.get("FLMTrialApplied", False):
+    baseline_snapshot = _find_revert_snapshot(
+      paths,
+      raw_active_snapshot,
+      str(current_state.get("FLMActiveProfileId", "") or ""),
+      params,
+    )
+    if baseline_snapshot is None:
+      raise RuntimeError("The active FLM trial has no recoverable rollback baseline. Keep the current tune as the new baseline before applying custom values.")
+    baseline_params = baseline_snapshot["params"]
+    session_started_at = float(baseline_snapshot.get("sessionStartedAt", baseline_snapshot.get("capturedAt", time.time())) or time.time())
+  else:
+    baseline_params = current_state
+    session_started_at = time.time()
+
+  profile_id = f"{report_id}:custom"
+  now = time.time()
+  snapshot = {
+    "reportId": report_id,
+    "profileId": profile_id,
+    "profileLabel": "Custom",
+    "carFingerprint": report_fingerprint,
+    "pathKey": schema["pathKey"],
+    "pathLabel": schema["pathLabel"],
+    "capturedAt": session_started_at,
+    "updatedAt": now,
+    "sessionStartedAt": session_started_at,
+    "revisionCount": int(previous_display_state.get("revisionCount", 0) or 0) + 1,
+    "params": baseline_params,
+    "appliedGenericParams": generic_params,
+    "appliedFrictionThresholds": flm_overrides["baseFrictionThresholds"],
+    "appliedVehicleKnobs": flm_overrides["vehicleKnobs"],
+  }
+  _write_json(paths["snapshots"] / "active.json", snapshot)
+  _write_json(paths["snapshots"] / f"{report_id}-custom-{time.time_ns()}.json", snapshot)
+  _persist_trial_baseline(params, snapshot)
+
+  bundle = {
+    key: baseline_params[key]
+    for key in FLM_ADVANCED_LATERAL_PARAM_KEYS
+    if key in baseline_params
+  }
+  bundle.update(generic_params)
+  bundle["FLMActiveProfileId"] = profile_id
+  bundle["FLMActiveOverrides"] = flm_overrides
+  bundle["FLMTrialApplied"] = True
+  _apply_param_bundle(params, bundle)
+  if schema["pathKey"] == "cleanup_pass" and report_fingerprint:
+    _record_cleanup_progress(report_fingerprint, report_id)
+  return {
+    "message": f"Applied custom FLM trial with {schema['vehicleKnobCount']} vehicle knobs.",
+    "profile": {
+      "id": profile_id,
+      "label": "Custom",
+      "pathKey": schema["pathKey"],
+      "pathLabel": schema["pathLabel"],
+      "genericParams": generic_params,
+      "flmOverrides": flm_overrides,
+    },
+    "workspace": list_workspace(),
   }
 
 

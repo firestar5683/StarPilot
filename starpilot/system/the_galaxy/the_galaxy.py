@@ -6229,6 +6229,7 @@ def setup(app):
       "activeTrial": workspace.get("activeTrial"),
       "reports": workspace.get("reports", [])[:10],
       "savedTunes": workspace.get("savedTunes", []),
+      "customValuesEnabled": workspace.get("customValuesEnabled", False),
     }), 200
 
   @app.route(f"{LEGACY_LATERAL_METHOD_API_PREFIX}/analyze", methods=["POST"])
@@ -6298,6 +6299,27 @@ def setup(app):
       return jsonify({"error": "FLM report not found."}), 404
     except ValueError as error:
       return jsonify({"error": str(error)}), 400
+
+  @app.route("/api/flm/report/<report_id>/custom-trial", methods=["GET"])
+  def get_flm_custom_trial(report_id):
+    try:
+      return jsonify(flm_workspace.build_custom_trial_schema(report_id)), 200
+    except FileNotFoundError:
+      return jsonify({"error": "FLM report not found."}), 404
+    except RuntimeError as error:
+      return jsonify({"error": str(error)}), 409
+
+  @app.route("/api/flm/report/<report_id>/custom-trial", methods=["POST"])
+  def apply_flm_custom_trial(report_id):
+    data = request.get_json(silent=True) or {}
+    try:
+      return jsonify(flm_workspace.apply_custom_trial(report_id, data)), 200
+    except FileNotFoundError:
+      return jsonify({"error": "FLM report not found."}), 404
+    except ValueError as error:
+      return jsonify({"error": str(error)}), 400
+    except (RuntimeError, flm_workspace.FLMAnalysisCancelled) as error:
+      return jsonify({"error": str(error)}), 409
 
   @app.route(f"{LEGACY_LATERAL_METHOD_API_PREFIX}/workspace", methods=["GET"])
   @app.route("/api/flm/workspace", methods=["GET"])

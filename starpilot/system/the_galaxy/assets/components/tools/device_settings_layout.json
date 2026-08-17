@@ -4104,6 +4104,15 @@
         "settings_tier": "simple"
       },
       {
+        "key": "FLMCustomValuesEnabled",
+        "label": "Custom FLM Values",
+        "description": "Show the custom FLM trial editor. Numeric changes are limited to 20% from the values captured by the latest analysis; complete another drive and analysis to reset the range.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "GalaxyDeveloperMode",
+        "settings_tier": "advanced"
+      },
+      {
         "key": "AlphaLongitudinalEnabled",
         "label": "openpilot Longitudinal Control (Alpha)",
         "description": "Enable openpilot longitudinal control for vehicles that support it. This replaces the vehicle's stock ACC and may disable automatic emergency braking. Changing this setting restarts the driving stack.",
