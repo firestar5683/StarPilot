@@ -147,10 +147,21 @@ def _install_flm_import_stubs(tmp_path):
     Paths=SimpleNamespace(comma_home=lambda: str(tmp_path), log_root=lambda **kwargs: str(tmp_path / "logs")),
   )
   sys.modules["openpilot.tools.lib.logreader"] = _simple_module("openpilot.tools.lib.logreader", LogReader=lambda *args, **kwargs: [])
-  sys.modules["openpilot.starpilot.system.the_galaxy.utilities"] = _simple_module(
+  sys.modules["openpilot.starpilot.common.lateral_delay"] = _simple_module(
+    "openpilot.starpilot.common.lateral_delay",
+    full_lateral_delay=lambda value: float(value) + 0.2,
+  )
+  galaxy_utilities = _simple_module(
     "openpilot.starpilot.system.the_galaxy.utilities",
     get_segments_in_route=lambda route, footage_path: [],
   )
+  galaxy_package = _simple_module(
+    "openpilot.starpilot.system.the_galaxy",
+    utilities=galaxy_utilities,
+  )
+  galaxy_package.__path__ = []
+  sys.modules["openpilot.starpilot.system.the_galaxy"] = galaxy_package
+  sys.modules["openpilot.starpilot.system.the_galaxy.utilities"] = galaxy_utilities
 
   return FakeParams
 
@@ -193,6 +204,98 @@ def _sample(module, **kwargs):
   )
   base.update(kwargs)
   return module.FLMSample(**base)
+
+
+def _write_custom_trial_report(module, report_id="report-custom"):
+  workspace = module.ensure_flm_workspace()
+  supported = {
+    symbol: metadata
+    for symbol, metadata in module.get_flm_supported_vehicle_knobs().items()
+    if metadata["profile"] == "hyundai_ioniq_6"
+  }
+  stock_knobs = {symbol: metadata["defaultValue"] for symbol, metadata in supported.items()}
+  first_symbol = next(iter(stock_knobs))
+  recommended_value = min(float(supported[first_symbol]["max"]), float(stock_knobs[first_symbol]) + 0.02)
+  profile = {
+    "id": f"{report_id}:cleanup_pass:recommended",
+    "reportId": report_id,
+    "label": "Recommended",
+    "pathKey": "cleanup_pass",
+    "pathLabel": "Cleanup Pass",
+    "genericParams": {"AdvancedLateralTune": True, "SteerLatAccel": 1.8},
+    "flmOverrides": {
+      "schemaVersion": 1,
+      "baseFrictionThresholds": {},
+      "vehicleKnobs": {first_symbol: recommended_value},
+    },
+  }
+  suggestion = {
+    "currentVsSuggested": {
+      "type": "vehicle_knob",
+      "symbol": first_symbol,
+      "current": stock_knobs[first_symbol],
+      "suggested": recommended_value,
+    },
+    "observedBehavior": "The analyzed route entered left curves late.",
+    "likelyInterpretation": "The left-side feedforward layer needs more authority.",
+    "primaryAdjustment": f"Move {first_symbol} to {recommended_value}.",
+    "whyThisKnob": "This corrects the affected side without moving global authority.",
+    "logSupport": "Matched in three events.",
+  }
+  report = {
+    "reportId": report_id,
+    "createdAt": 1.0,
+    "routeNames": ["route"],
+    "car": {"carFingerprint": "TEST_CAR", "brand": "hyundai", "controlPath": "torque"},
+    "capabilities": {
+      "frictionFamily": "hkg_canfd",
+      "richProfileKey": "hyundai_ioniq_6",
+      "richProfileLabel": "Ioniq 6",
+    },
+    "stockParams": {
+      "UseAutoSteerDelay": True,
+      "SteerDelay": 0.25,
+      "SteerFriction": 0.1,
+      "SteerKP": 1.0,
+      "SteerLatAccel": 1.5,
+      "SteerRatio": 15.0,
+      "FLMBaseFrictionThresholds": {
+        "hkg_canfd": {
+          "speedKnots": [0.0, 5.0, 10.0, 15.0, 25.0],
+          "values": [0.39, 0.395, 0.4, 0.405, 0.415],
+        },
+      },
+      "FLMVehicleKnobs": stock_knobs,
+    },
+    "currentParams": {
+      "AdvancedLateralTune": False,
+      "ForceAutoTune": True,
+      "ForceAutoTuneOff": False,
+      "UseAutoSteerDelay": True,
+      "SteerDelay": 0.25,
+      "SteerFriction": 0.1,
+      "SteerKP": 1.0,
+      "SteerLatAccel": 1.5,
+      "SteerRatio": 15.0,
+      "FLMActiveProfileId": "",
+      "FLMActiveOverrides": {},
+      "FLMTrialApplied": False,
+    },
+    "primaryPathKey": "cleanup_pass",
+    "selectedPathKey": "cleanup_pass",
+    "paths": [{
+      "key": "cleanup_pass",
+      "title": "Cleanup Pass",
+      "isPrimary": True,
+      "profiles": [profile],
+      "suggestions": [suggestion],
+    }],
+    "profiles": [profile],
+  }
+  (workspace["reports"] / f"{report_id}.json").write_text(json.dumps(report), encoding="utf-8")
+  (workspace["profiles"] / f"{report_id}.json").write_text(json.dumps([profile]), encoding="utf-8")
+  module.Params().put_bool(module.FLM_CUSTOM_VALUES_PARAM, True)
+  return report, supported, first_symbol, recommended_value
 
 
 def test_effective_control_path_prefers_logged_controller_state(tmp_path):
@@ -970,6 +1073,244 @@ def test_merge_primary_adjustments_disables_auto_delay_for_manual_delay_trial(tm
   assert params_delta["SteerDelay"] == pytest.approx(0.33)
   assert params_delta["UseAutoSteerDelay"] is False
   assert overrides == {}
+
+
+def test_custom_values_toggle_migrates_existing_custom_state_without_deleting_it(tmp_path):
+  module, fake_params_cls = _load_flm_workspace_module(tmp_path)
+  report, _, _, _ = _write_custom_trial_report(module)
+  workspace = module.ensure_flm_workspace()
+
+  fake_params_cls._store[module.FLM_CUSTOM_VALUES_PARAM] = False
+  with pytest.raises(RuntimeError, match="Galaxy Developer settings"):
+    module.build_custom_trial_schema(report["reportId"])
+
+  active_path = workspace["snapshots"] / "active.json"
+  active_payload = {
+    "reportId": report["reportId"],
+    "profileId": f"{report['reportId']}:custom",
+    "profileLabel": "Custom",
+    "appliedVehicleKnobs": {"example": 0.1},
+  }
+  active_path.write_text(json.dumps(active_payload), encoding="utf-8")
+  fake_params_cls._store.pop(module.FLM_CUSTOM_VALUES_PARAM)
+
+  assert module.custom_values_enabled() is True
+  assert fake_params_cls._store[module.FLM_CUSTOM_VALUES_PARAM] is True
+
+  fake_params_cls._store[module.FLM_CUSTOM_VALUES_PARAM] = False
+  assert module.list_workspace()["customValuesEnabled"] is False
+  assert json.loads(active_path.read_text(encoding="utf-8")) == active_payload
+
+
+def test_custom_trial_limits_stay_anchored_until_a_new_analysis(tmp_path):
+  module, fake_params_cls = _load_flm_workspace_module(tmp_path)
+  report, _, first_symbol, _ = _write_custom_trial_report(module)
+  schema = module.build_custom_trial_schema(report["reportId"])
+  first_control = next(control for control in schema["controls"]["vehicleKnobs"] if control["key"] == first_symbol)
+  zero_control = next(
+    control for control in schema["controls"]["vehicleKnobs"]
+    if control["key"].endswith(".center_deadband_low_deg")
+  )
+
+  assert schema["changeLimitPercent"] == 20
+  assert first_control["analysisBaseline"] == pytest.approx(0.1)
+  assert first_control["min"] == pytest.approx(0.08)
+  assert first_control["max"] == pytest.approx(0.12)
+  assert zero_control["analysisBaseline"] == pytest.approx(0.0)
+  assert zero_control["min"] == pytest.approx(0.0)
+  assert zero_control["max"] == pytest.approx(zero_control["precision"])
+
+  values = json.loads(json.dumps(schema["presets"]["current"]["values"]))
+  values["flmOverrides"]["vehicleKnobs"][first_symbol] = first_control["max"]
+  module.validate_custom_trial_values(report["reportId"], values)
+  fake_params_cls._store["IsOnroad"] = False
+  module.apply_custom_trial(report["reportId"], values)
+
+  same_analysis = module.build_custom_trial_schema(report["reportId"])
+  same_control = next(control for control in same_analysis["controls"]["vehicleKnobs"] if control["key"] == first_symbol)
+  assert same_control["analysisBaseline"] == pytest.approx(0.1)
+  assert same_control["max"] == pytest.approx(0.12)
+
+  too_far = json.loads(json.dumps(same_analysis["presets"]["current"]["values"]))
+  too_far["flmOverrides"]["vehicleKnobs"][first_symbol] = same_control["max"] + same_control["precision"]
+  with pytest.raises(ValueError, match="must be between"):
+    module.validate_custom_trial_values(report["reportId"], too_far)
+
+  next_report, _, next_symbol, _ = _write_custom_trial_report(module, "report-next-analysis")
+  next_report["currentParams"]["FLMActiveOverrides"] = {
+    "schemaVersion": 1,
+    "baseFrictionThresholds": {},
+    "vehicleKnobs": {next_symbol: 0.12},
+  }
+  workspace = module.ensure_flm_workspace()
+  (workspace["reports"] / f"{next_report['reportId']}.json").write_text(json.dumps(next_report), encoding="utf-8")
+  next_schema = module.build_custom_trial_schema(next_report["reportId"])
+  next_control = next(control for control in next_schema["controls"]["vehicleKnobs"] if control["key"] == next_symbol)
+  assert next_control["analysisBaseline"] == pytest.approx(0.12)
+  assert next_control["max"] == pytest.approx(0.144)
+
+
+def test_custom_trial_fill_presets_are_clipped_to_analysis_limits(tmp_path):
+  module, _ = _load_flm_workspace_module(tmp_path)
+  report, _, first_symbol, _ = _write_custom_trial_report(module)
+  profile = report["paths"][0]["profiles"][0]
+  profile["genericParams"]["SteerLatAccel"] = 3.0
+  profile["flmOverrides"]["vehicleKnobs"][first_symbol] = 0.4
+  workspace = module.ensure_flm_workspace()
+  (workspace["reports"] / f"{report['reportId']}.json").write_text(json.dumps(report), encoding="utf-8")
+
+  schema = module.build_custom_trial_schema(report["reportId"])
+  preset = schema["presets"]["recommended"]
+  first_control = next(control for control in schema["controls"]["vehicleKnobs"] if control["key"] == first_symbol)
+
+  assert preset["clippedToAnalysisLimits"] is True
+  assert preset["values"]["genericParams"]["SteerLatAccel"] == pytest.approx(1.8)
+  assert preset["values"]["flmOverrides"]["vehicleKnobs"][first_symbol] == pytest.approx(first_control["max"])
+
+
+def test_custom_trial_schema_exposes_every_supported_knob_and_analysis_seed(tmp_path):
+  module, _ = _load_flm_workspace_module(tmp_path)
+  report, supported, first_symbol, recommended_value = _write_custom_trial_report(module)
+
+  schema = module.build_custom_trial_schema(report["reportId"])
+  recommended = schema["presets"]["recommended"]["values"]
+
+  assert schema["vehicleKnobCount"] == len(supported)
+  assert {control["key"] for control in schema["controls"]["vehicleKnobs"]} == set(supported)
+  assert set(recommended["flmOverrides"]["vehicleKnobs"]) == set(supported)
+  assert recommended["flmOverrides"]["vehicleKnobs"][first_symbol] == pytest.approx(recommended_value)
+  assert recommended["genericParams"]["SteerLatAccel"] == pytest.approx(1.8)
+  assert all(control["help"]["summary"] for control in schema["controls"]["genericParams"])
+  assert all(control["help"]["summary"] for control in schema["controls"]["vehicleKnobs"])
+  first_help = next(control["help"] for control in schema["controls"]["vehicleKnobs"] if control["key"] == first_symbol)
+  assert first_help["analysis"][0]["whyThisKnob"] == "This corrects the affected side without moving global authority."
+  assert schema["controls"]["frictionCurve"]["help"]["summary"]
+  assert schema["forcedSettings"] == {
+    "AdvancedLateralTune": True,
+    "ForceAutoTune": False,
+    "ForceAutoTuneOff": True,
+  }
+
+
+def test_custom_trial_schema_refills_from_active_saved_tune(tmp_path):
+  module, fake_params_cls = _load_flm_workspace_module(tmp_path)
+  report, supported, first_symbol, _ = _write_custom_trial_report(module)
+  schema = module.build_custom_trial_schema(report["reportId"])
+  values = json.loads(json.dumps(schema["presets"]["recommended"]["values"]))
+  first_control = next(control for control in schema["controls"]["vehicleKnobs"] if control["key"] == first_symbol)
+  values["genericParams"]["SteerLatAccel"] = 1.7
+  values["flmOverrides"]["vehicleKnobs"][first_symbol] = max(
+    float(first_control["min"]),
+    float(values["flmOverrides"]["vehicleKnobs"][first_symbol]) - 0.005,
+  )
+  family = schema["controls"]["frictionCurve"]["family"]
+  values["flmOverrides"]["baseFrictionThresholds"][family]["values"][2] = 0.433
+  fake_params_cls._store = {
+    module.FLM_CUSTOM_VALUES_PARAM: True,
+    "IsOnroad": False,
+    "AdvancedLateralTune": False,
+    "ForceAutoTune": True,
+    "ForceAutoTuneOff": False,
+    "UseAutoSteerDelay": True,
+    "SteerDelay": 0.25,
+    "SteerFriction": 0.1,
+    "SteerKP": 1.0,
+    "SteerLatAccel": 1.5,
+    "SteerRatio": 15.0,
+    "FLMActiveProfileId": "",
+    "FLMActiveOverrides": {},
+    "FLMTrialApplied": False,
+  }
+
+  module.apply_custom_trial(report["reportId"], values)
+  module.save_active_trial_as_tune("My road tune")
+  reloaded_schema = module.build_custom_trial_schema(report["reportId"])
+  current = reloaded_schema["presets"]["current"]
+
+  assert reloaded_schema["currentPresetSource"] == "active_trial"
+  assert reloaded_schema["currentTrialActive"] is True
+  assert reloaded_schema["defaultPreset"] == "current"
+  assert current["label"] == "Current (Active Tune)"
+  assert current["values"]["genericParams"] == values["genericParams"]
+  assert set(current["values"]["flmOverrides"]["vehicleKnobs"]) == set(supported)
+  assert current["values"]["flmOverrides"]["vehicleKnobs"][first_symbol] == pytest.approx(
+    values["flmOverrides"]["vehicleKnobs"][first_symbol]
+  )
+  assert current["values"]["flmOverrides"]["baseFrictionThresholds"][family]["values"][2] == pytest.approx(0.433)
+
+
+def test_custom_trial_validation_requires_all_knobs_and_enforces_bounds(tmp_path):
+  module, _ = _load_flm_workspace_module(tmp_path)
+  report, _, _, _ = _write_custom_trial_report(module)
+  schema = module.build_custom_trial_schema(report["reportId"])
+  values = json.loads(json.dumps(schema["presets"][schema["defaultPreset"]]["values"]))
+  first_control = schema["controls"]["vehicleKnobs"][0]
+
+  values["flmOverrides"]["vehicleKnobs"].pop(first_control["key"])
+  with pytest.raises(ValueError, match="Missing custom vehicle knob"):
+    module.validate_custom_trial_values(report["reportId"], values)
+
+  values = json.loads(json.dumps(schema["presets"][schema["defaultPreset"]]["values"]))
+  values["flmOverrides"]["vehicleKnobs"][first_control["key"]] = first_control["max"] + 1
+  with pytest.raises(ValueError, match="must be between"):
+    module.validate_custom_trial_values(report["reportId"], values)
+
+  values = json.loads(json.dumps(schema["presets"][schema["defaultPreset"]]["values"]))
+  family = schema["controls"]["frictionCurve"]["family"]
+  values["flmOverrides"]["baseFrictionThresholds"][family]["speedKnots"][0] = 1.0
+  with pytest.raises(ValueError, match="speed knots cannot be changed"):
+    module.validate_custom_trial_values(report["reportId"], values)
+
+  values = json.loads(json.dumps(schema["presets"][schema["defaultPreset"]]["values"]))
+  values["flmOverrides"]["hiddenField"] = True
+  with pytest.raises(ValueError, match="Unknown custom FLM override"):
+    module.validate_custom_trial_values(report["reportId"], values)
+
+
+def test_apply_custom_trial_uses_exact_full_set_and_reverts_original_baseline(tmp_path):
+  module, fake_params_cls = _load_flm_workspace_module(tmp_path)
+  report, supported, first_symbol, _ = _write_custom_trial_report(module)
+  schema = module.build_custom_trial_schema(report["reportId"])
+  values = json.loads(json.dumps(schema["presets"][schema["defaultPreset"]]["values"]))
+  first_control = next(control for control in schema["controls"]["vehicleKnobs"] if control["key"] == first_symbol)
+  custom_value = min(float(first_control["max"]), max(float(first_control["min"]), float(values["flmOverrides"]["vehicleKnobs"][first_symbol]) + 0.01))
+  values["flmOverrides"]["vehicleKnobs"][first_symbol] = custom_value
+  baseline_overrides = {"vehicleKnobs": {"legacy.extra": 0.4}}
+  fake_params_cls._store = {
+    module.FLM_CUSTOM_VALUES_PARAM: True,
+    "IsOnroad": False,
+    "AdvancedLateralTune": False,
+    "ForceAutoTune": True,
+    "ForceAutoTuneOff": False,
+    "UseAutoSteerDelay": True,
+    "SteerDelay": 0.25,
+    "SteerFriction": 0.1,
+    "SteerKP": 1.0,
+    "SteerLatAccel": 1.5,
+    "SteerRatio": 15.0,
+    "FLMActiveProfileId": "",
+    "FLMActiveOverrides": baseline_overrides,
+    "FLMTrialApplied": False,
+  }
+
+  result = module.apply_custom_trial(report["reportId"], values)
+
+  assert result["profile"]["label"] == "Custom"
+  assert fake_params_cls._store["AdvancedLateralTune"] is True
+  assert fake_params_cls._store["ForceAutoTune"] is False
+  assert fake_params_cls._store["ForceAutoTuneOff"] is True
+  assert fake_params_cls._store["FLMActiveProfileId"] == f"{report['reportId']}:custom"
+  assert fake_params_cls._store["FLMTrialApplied"] is True
+  assert set(fake_params_cls._store["FLMActiveOverrides"]["vehicleKnobs"]) == set(supported)
+  assert fake_params_cls._store["FLMActiveOverrides"]["vehicleKnobs"][first_symbol] == pytest.approx(custom_value)
+  assert "legacy.extra" not in fake_params_cls._store["FLMActiveOverrides"]["vehicleKnobs"]
+
+  module.revert_trial_profile()
+  assert fake_params_cls._store["AdvancedLateralTune"] is False
+  assert fake_params_cls._store["ForceAutoTune"] is True
+  assert fake_params_cls._store["ForceAutoTuneOff"] is False
+  assert fake_params_cls._store["FLMActiveOverrides"]["vehicleKnobs"] == {"legacy.extra": pytest.approx(0.4)}
+  assert fake_params_cls._store["FLMTrialApplied"] is False
 
 
 def test_apply_and_revert_trial_profile_round_trip(tmp_path):

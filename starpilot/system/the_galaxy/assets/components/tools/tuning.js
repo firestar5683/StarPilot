@@ -16,9 +16,14 @@ const state = reactive({
   routeProgress: 0,
   routeTotal: 0,
   connectDongleId: "",
-  workspace: { reports: [], savedTunes: [], activeTrial: null, status: {} },
+  workspace: { reports: [], savedTunes: [], customValuesEnabled: false, activeTrial: null, status: {} },
   status: {},
   report: null,
+  customTrialSchema: null,
+  customTrialPreset: "",
+  customTrialValues: null,
+  customTrialHelpKey: "",
+  loadingCustomTrial: false,
   feedbackAccepted: [],
   feedbackIgnored: [],
   feedbackNotes: "",
@@ -55,6 +60,18 @@ function formatReportSegmentRanges(report) {
 function safeCount(value) {
   const n = Number(value)
   return Number.isFinite(n) ? n : 0
+}
+
+function formatBytes(value) {
+  const bytes = Math.max(0, safeCount(value))
+  if (bytes < 1024) return `${Math.round(bytes)} B`
+  if (bytes < 1024 * 1024) return `${(bytes / 1024).toFixed(1)} KB`
+  if (bytes < 1024 * 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`
+  return `${(bytes / (1024 * 1024 * 1024)).toFixed(2)} GB`
+}
+
+function cloneJson(value) {
+  return value == null ? value : JSON.parse(JSON.stringify(value))
 }
 
 function formatRouteLength(route) {
@@ -229,6 +246,41 @@ function syncFeedbackState(report) {
   state.feedbackNotes = typeof feedback.notes === "string" ? feedback.notes : ""
 }
 
+function selectCustomPreset(presetKey) {
+  const preset = state.customTrialSchema?.presets?.[presetKey]
+  if (!preset?.values) return
+  state.customTrialPreset = presetKey
+  state.customTrialValues = cloneJson(preset.values)
+}
+
+async function loadCustomTrialSchema(reportId, preferredPreset = "") {
+  state.customTrialSchema = null
+  state.customTrialValues = null
+  state.customTrialPreset = ""
+  state.customTrialHelpKey = ""
+  if (!state.workspace?.customValuesEnabled || !reportId || state.report?.car?.controlPath !== "torque") return
+  try {
+    state.loadingCustomTrial = true
+    const response = await fetch(`/api/flm/report/${encodeURIComponent(reportId)}/custom-trial`, { cache: "no-store" })
+    const payload = await response.json()
+    if (!response.ok) throw new Error(payload.error || "Failed to load custom trial controls.")
+    state.customTrialSchema = payload
+    selectCustomPreset(preferredPreset || payload.defaultPreset || "current")
+  } catch (error) {
+    state.error = error?.message || "Failed to load custom trial controls."
+  } finally {
+    state.loadingCustomTrial = false
+  }
+}
+
+async function fillCustomPreset(presetKey) {
+  if (presetKey !== "current") {
+    selectCustomPreset(presetKey)
+    return
+  }
+  await loadCustomTrialSchema(state.report?.reportId, "current")
+}
+
 async function loadReport(reportId) {
   if (!reportId) return
   try {
@@ -238,6 +290,7 @@ async function loadReport(reportId) {
     state.report = payload
     syncFeedbackState(payload)
     await fetchWorkspace()
+    await loadCustomTrialSchema(reportId)
   } catch (error) {
     state.error = error?.message || "Failed to load tuning report."
   }
@@ -255,6 +308,10 @@ async function deleteReport(reportId) {
 
     if (state.report?.reportId === reportId) {
       state.report = null
+      state.customTrialSchema = null
+      state.customTrialValues = null
+      state.customTrialPreset = ""
+      state.customTrialHelpKey = ""
       syncFeedbackState(null)
     }
     state.workspace = payload.workspace || state.workspace
@@ -273,6 +330,8 @@ async function fetchStatus() {
     const response = await fetch("/api/flm/status")
     const payload = await response.json()
     if (!response.ok) throw new Error(payload.error || "Failed to load tuning status.")
+    const customValuesWereEnabled = !!state.workspace?.customValuesEnabled
+    const customValuesEnabled = !!payload.customValuesEnabled
     state.status = {
       ...(payload.status || {}),
       isOnroad: !!payload.isOnroad,
@@ -283,6 +342,17 @@ async function fetchStatus() {
         activeTrial: payload.activeTrial,
         reports: payload.reports || state.workspace.reports,
         savedTunes: payload.savedTunes || state.workspace.savedTunes,
+        customValuesEnabled,
+      }
+    }
+    if (customValuesEnabled !== customValuesWereEnabled) {
+      if (customValuesEnabled && state.report?.reportId) {
+        await loadCustomTrialSchema(state.report.reportId)
+      } else if (!customValuesEnabled) {
+        state.customTrialSchema = null
+        state.customTrialValues = null
+        state.customTrialPreset = ""
+        state.customTrialHelpKey = ""
       }
     }
     const reportId = state.status.reportId
@@ -413,10 +483,85 @@ async function applyProfile(profileId) {
     const payload = await response.json()
     if (!response.ok) throw new Error(payload.error || "Failed to apply trial profile.")
     state.error = ""
-    await fetchWorkspace()
+    await Promise.all([fetchWorkspace(), loadCustomTrialSchema(state.report.reportId, "current")])
     showSnackbar(payload.message || "Trial profile applied.")
   } catch (error) {
     state.error = error?.message || "Failed to apply trial profile."
+    showSnackbar(state.error, "error")
+  } finally {
+    state.runningAction = false
+  }
+}
+
+function setCustomGenericValue(key, value) {
+  if (!state.customTrialValues) return
+  state.customTrialPreset = "custom"
+  state.customTrialValues = {
+    ...state.customTrialValues,
+    genericParams: {
+      ...(state.customTrialValues.genericParams || {}),
+      [key]: value,
+    },
+  }
+}
+
+function setCustomFrictionValue(index, value) {
+  if (!state.customTrialValues || !state.customTrialSchema) return
+  const family = state.customTrialSchema.controls.frictionCurve.family
+  const currentOverrides = state.customTrialValues.flmOverrides || {}
+  const currentFamily = currentOverrides.baseFrictionThresholds?.[family] || {}
+  const values = [...(currentFamily.values || [])]
+  values[index] = value
+  state.customTrialPreset = "custom"
+  state.customTrialValues = {
+    ...state.customTrialValues,
+    flmOverrides: {
+      ...currentOverrides,
+      baseFrictionThresholds: {
+        ...(currentOverrides.baseFrictionThresholds || {}),
+        [family]: { ...currentFamily, values },
+      },
+    },
+  }
+}
+
+function setCustomKnobValue(key, value) {
+  if (!state.customTrialValues) return
+  const currentOverrides = state.customTrialValues.flmOverrides || {}
+  state.customTrialPreset = "custom"
+  state.customTrialValues = {
+    ...state.customTrialValues,
+    flmOverrides: {
+      ...currentOverrides,
+      vehicleKnobs: {
+        ...(currentOverrides.vehicleKnobs || {}),
+        [key]: value,
+      },
+    },
+  }
+}
+
+async function applyCustomTrial() {
+  if (!state.workspace?.customValuesEnabled || !state.report?.reportId || !state.customTrialValues || state.runningAction || state.status?.isOnroad) return
+  const knobCount = safeCount(state.customTrialSchema?.vehicleKnobCount)
+  if (!window.confirm(
+    `Apply this exact custom FLM trial with ${knobCount} vehicle controls? Revert Trial will restore the settings from before the FLM trial. Apply while parked and evaluate changes cautiously.`
+  )) return
+
+  state.runningAction = true
+  try {
+    const response = await fetch(`/api/flm/report/${encodeURIComponent(state.report.reportId)}/custom-trial`, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(state.customTrialValues),
+    })
+    const payload = await response.json()
+    if (!response.ok) throw new Error(payload.error || "Failed to apply custom FLM trial.")
+    state.error = ""
+    state.workspace = payload.workspace || state.workspace
+    showSnackbar(payload.message || "Custom FLM trial applied.")
+  } catch (error) {
+    state.error = error?.message || "Failed to apply custom FLM trial."
     showSnackbar(state.error, "error")
   } finally {
     state.runningAction = false
@@ -458,6 +603,7 @@ async function applySavedTune(tuneId) {
     if (!response.ok) throw new Error(payload.error || "Failed to apply saved tune.")
     state.error = ""
     state.workspace = payload.workspace || state.workspace
+    await loadCustomTrialSchema(state.report?.reportId, "current")
     showSnackbar(payload.message || "Saved tune applied.")
   } catch (error) {
     state.error = error?.message || "Failed to apply saved tune."
@@ -556,6 +702,7 @@ async function selectPath(pathKey) {
     if (!response.ok) throw new Error(payload.error || "Failed to select tuning path.")
     state.report = payload.report
     syncFeedbackState(state.report)
+    await loadCustomTrialSchema(state.report.reportId)
     showSnackbar(payload.message || "Tuning path selected.")
   } catch (error) {
     state.error = error?.message || "Failed to select tuning path."
@@ -647,7 +794,7 @@ async function saveFeedback() {
       profiles: payload.profiles || state.report.profiles,
     }
     syncFeedbackState(state.report)
-    await fetchWorkspace()
+    await Promise.all([fetchWorkspace(), loadCustomTrialSchema(state.report.reportId)])
     showSnackbar(payload.message || "Feedback saved.")
   } catch (error) {
     state.error = error?.message || "Failed to save tuning feedback."
@@ -806,7 +953,7 @@ function comparisonValueChanged(row) {
 }
 
 function renderTuneComparison() {
-  const rows = tuneComparisonRows()
+  const rows = tuneComparisonRows().filter(comparisonValueChanged)
   if (!rows.length) return ""
   const profile = activeTrialProfile()
   const angleControl = state.report?.car?.controlPath === "angle"
@@ -984,6 +1131,205 @@ function renderTrackingOverview() {
         `)}
       </div>
     </div>
+  `
+}
+
+function toggleCustomTrialHelp(helpKey, event) {
+  event?.preventDefault?.()
+  event?.stopPropagation?.()
+  state.customTrialHelpKey = state.customTrialHelpKey === helpKey ? "" : helpKey
+}
+
+function renderCustomTrialHelp(help) {
+  if (!help?.summary) return ""
+  const analysis = Array.isArray(help.analysis) ? help.analysis : []
+  return html`
+    <div class="flmControlHelp">
+      <p>${help.summary}</p>
+      ${help.more ? html`<p><strong>${help.moreLabel || "Higher value"}:</strong> ${help.more}</p>` : ""}
+      ${help.less ? html`<p><strong>${help.lessLabel || "Lower value"}:</strong> ${help.less}</p>` : ""}
+      ${help.whyThisControl ? html`<p><strong>Why FLM uses it:</strong> ${help.whyThisControl}</p>` : ""}
+      ${analysis.length ? html`
+        <div class="flmControlAnalysisHelp">
+          <strong>Why this analysis selected it</strong>
+          ${analysis.map((rationale) => html`
+            <div>
+              ${rationale.observedBehavior ? html`<p><strong>Observed:</strong> ${rationale.observedBehavior}</p>` : ""}
+              ${rationale.likelyInterpretation ? html`<p><strong>Interpretation:</strong> ${rationale.likelyInterpretation}</p>` : ""}
+              ${rationale.primaryAdjustment ? html`<p><strong>Suggested move:</strong> ${rationale.primaryAdjustment}</p>` : ""}
+              ${rationale.whyThisKnob ? html`<p><strong>Rationale:</strong> ${rationale.whyThisKnob}</p>` : ""}
+              ${rationale.logSupport ? html`<p><strong>Log support:</strong> ${rationale.logSupport}</p>` : ""}
+            </div>
+          `)}
+        </div>
+      ` : ""}
+    </div>
+  `
+}
+
+function renderCustomFieldHeading(label, helpKey, help) {
+  return html`
+    <div class="flmCustomFieldHeading">
+      <span>${label}</span>
+      ${help?.summary ? html`
+        <button
+          type="button"
+          class="flmControlHelpButton"
+          title="Explain what this control changes"
+          aria-label="Explain ${label}"
+          aria-expanded="${() => state.customTrialHelpKey === helpKey}"
+          @click="${event => toggleCustomTrialHelp(helpKey, event)}">?</button>
+      ` : ""}
+    </div>
+    ${() => state.customTrialHelpKey === helpKey ? renderCustomTrialHelp(help) : ""}
+  `
+}
+
+function renderCustomTrialEditor() {
+  if (!state.workspace?.customValuesEnabled) return ""
+  if (state.loadingCustomTrial) {
+    return html`<section class="flmCard"><h3>Custom Active Trial</h3><p class="longManeuverMuted">Loading every available FLM control...</p></section>`
+  }
+  const schema = state.customTrialSchema
+  const values = state.customTrialValues
+  if (!schema || !values) return ""
+  const genericControls = schema.controls?.genericParams || []
+  const friction = schema.controls?.frictionCurve || {}
+  const frictionValues = values.flmOverrides?.baseFrictionThresholds?.[friction.family]?.values || []
+  const vehicleControls = schema.controls?.vehicleKnobs || []
+  return html`
+    <section class="flmCard flmCustomTrial">
+      <div class="flmCardHeader">
+        <div>
+          <h3>Custom Active Trial</h3>
+          <p class="longManeuverMuted">
+            Start from the analysis result, then edit every supported value. This report exposes ${schema.vehicleKnobCount} vehicle controls plus generic settings and the five-point ${friction.family} friction curve.
+          </p>
+        </div>
+        <button
+          class="longManeuverButton"
+          disabled="${() => state.runningAction || state.status?.isOnroad || !state.customTrialValues || state.workspace?.activeTrial?.rollbackAvailable === false}"
+          @click="${applyCustomTrial}">
+          Apply Custom Trial
+        </button>
+      </div>
+
+      <div class="flmCustomPresetBar">
+        <strong>Fill from:</strong>
+        ${Object.entries(schema.presets || {}).map(([key, preset]) => html`
+          <button
+            class="${() => `longManeuverButton ${state.customTrialPreset === key ? "selected" : ""}`}"
+            title="${preset.clippedToAnalysisLimits ? "Some values were clipped to this analysis's 20% custom range." : ""}"
+            disabled="${() => state.runningAction || state.loadingCustomTrial}"
+            @click="${() => fillCustomPreset(key)}">
+            ${preset.label}${preset.clippedToAnalysisLimits ? " (limited)" : ""}
+          </button>
+        `)}
+        ${() => state.customTrialPreset === "custom" ? html`<span class="flmCustomBadge">Edited</span>` : ""}
+      </div>
+
+      <div class="flmTrackingNotice">
+        Custom trials force Advanced Lateral Tune on and automatic torque tuning off so the entered values remain active. Each numeric field is limited to ${schema.changeLimitPercent}% above or below the Current values captured by this analysis; zero-value controls may move by one step. Fill presets are clipped to that window. Drive with the trial and complete a new analysis to reset the limits. Apply only while parked; stay ready to steer and use Revert Trial if behavior is not clearly better.
+      </div>
+
+      <div class="flmCustomSection">
+        <h4>Generic Lateral Settings</h4>
+        <div class="flmCustomGrid">
+          ${genericControls.map((control) => control.type === "boolean" ? html`
+            <div class="flmCustomField flmCustomBoolean">
+              ${renderCustomFieldHeading(control.label, `generic:${control.key}`, control.help)}
+              <input
+                type="checkbox"
+                aria-label="${control.label}"
+                checked="${() => !!state.customTrialValues?.genericParams?.[control.key]}"
+                @change="${event => setCustomGenericValue(control.key, event.target.checked)}" />
+              <code>${control.key}</code>
+            </div>
+          ` : html`
+            <div class="flmCustomField">
+              ${renderCustomFieldHeading(control.label, `generic:${control.key}`, control.help)}
+              <input
+                type="number"
+                aria-label="${control.label}"
+                min="${control.min}"
+                max="${control.max}"
+                step="${control.precision}"
+                value="${() => state.customTrialValues?.genericParams?.[control.key] ?? ""}"
+                @input="${event => setCustomGenericValue(control.key, event.target.value)}" />
+              <small>Analysis value ${control.analysisBaseline}; allowed ${control.min} to ${control.max}, step ${control.precision}</small>
+              <code>${control.key}</code>
+            </div>
+          `)}
+        </div>
+      </div>
+
+      <div class="flmCustomSection">
+        <h4>${friction.family} Friction Threshold Curve</h4>
+        <div class="flmCustomGrid flmFrictionGrid">
+          ${(friction.speedKnots || []).map((speed, index) => {
+            const limit = friction.valueLimits?.[index] || friction
+            return html`
+            <div class="flmCustomField">
+              ${renderCustomFieldHeading(
+                `${Number(speed).toFixed(0)} m/s (${Math.round(Number(speed) * 3.6)} km/h, ${Math.round(Number(speed) * 2.23694)} mph)`,
+                `friction:${index}`,
+                friction.help,
+              )}
+              <input
+                type="number"
+                aria-label="${friction.family} friction threshold at ${Number(speed).toFixed(0)} meters per second"
+                min="${limit.min}"
+                max="${limit.max}"
+                step="${friction.precision}"
+                value="${() => state.customTrialValues?.flmOverrides?.baseFrictionThresholds?.[friction.family]?.values?.[index] ?? ""}"
+                @input="${event => setCustomFrictionValue(index, event.target.value)}" />
+              <small>Analysis value ${limit.analysisBaseline}; allowed ${limit.min} to ${limit.max}, step ${friction.precision}</small>
+            </div>
+          `})}
+        </div>
+      </div>
+
+      <div class="flmCustomSection">
+        <div class="flmCardHeader">
+          <div>
+            <h4>All Vehicle FLM Controls (${vehicleControls.length})</h4>
+            <p class="longManeuverMuted">Every field is submitted and becomes part of the active custom trial.</p>
+          </div>
+        </div>
+        <div class="flmCustomGrid">
+          ${vehicleControls.map((control) => html`
+            <div class="flmCustomField">
+              ${renderCustomFieldHeading(control.label, `vehicle:${control.key}`, control.help)}
+              <input
+                type="number"
+                aria-label="${control.label}"
+                min="${control.min}"
+                max="${control.max}"
+                step="${control.precision}"
+                value="${() => state.customTrialValues?.flmOverrides?.vehicleKnobs?.[control.key] ?? ""}"
+                @input="${event => setCustomKnobValue(control.key, event.target.value)}" />
+              <small>Analysis value ${control.analysisBaseline}; allowed ${control.min} to ${control.max}, step ${control.precision}</small>
+              <code title="${control.key}">${control.key}</code>
+            </div>
+          `)}
+        </div>
+      </div>
+
+      <div class="longManeuverActions">
+        <button
+          class="longManeuverButton"
+          disabled="${() => state.runningAction || state.status?.isOnroad || state.workspace?.activeTrial?.rollbackAvailable === false}"
+          @click="${applyCustomTrial}">
+          Apply Exact Custom Values
+        </button>
+        <button
+          class="longManeuverButton"
+          disabled="${() => state.runningAction || !schema.presets?.recommended}"
+          @click="${() => selectCustomPreset(schema.presets?.recommended ? "recommended" : schema.defaultPreset)}">
+          Reset Form to Recommended
+        </button>
+      </div>
+    </section>
   `
 }
 
@@ -1423,6 +1769,8 @@ export function Tuning() {
               ${((primaryPath()?.suggestions) || []).map((suggestion) => renderSuggestion(suggestion))}
             </div>
           </section>
+
+          ${() => renderCustomTrialEditor()}
 
           <section class="flmCard">
             <h3>Trial Profiles</h3>

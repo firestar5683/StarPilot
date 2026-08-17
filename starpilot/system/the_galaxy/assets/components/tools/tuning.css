@@ -10,6 +10,7 @@
   border: 1px solid rgba(255, 255, 255, 0.08);
   border-radius: var(--border-radius-md);
   margin-top: var(--margin-base);
+  min-width: 0;
   padding: var(--padding-base);
 }
 
@@ -382,6 +383,144 @@
   color: var(--text-muted);
   font-size: var(--font-size-xs);
   padding: 0.15rem 0.45rem;
+}
+
+.flmCustomField input[type="number"] {
+  background: var(--input-bg);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--border-radius-sm);
+  box-sizing: border-box;
+  color: var(--text-color);
+  max-width: 100%;
+  min-width: 0;
+  padding: var(--padding-sm);
+  width: 100%;
+}
+
+.flmCustomTrial {
+  border-color: rgba(139, 108, 197, 0.45);
+}
+
+.flmCustomPresetBar {
+  align-items: center;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--gap-xs);
+  margin-top: var(--margin-base);
+}
+
+.flmCustomBadge {
+  background: var(--main-fg);
+  border-radius: 999px;
+  color: var(--main-bg);
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-demi-bold);
+  padding: 0.2rem 0.55rem;
+}
+
+.flmCustomSection {
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  margin-top: var(--margin-base);
+  padding-top: var(--padding-base);
+}
+
+.flmCustomSection > h4 {
+  margin-top: 0;
+}
+
+.flmCustomGrid {
+  display: grid;
+  gap: var(--gap-sm);
+  grid-template-columns: repeat(auto-fit, minmax(15rem, 1fr));
+}
+
+.flmFrictionGrid {
+  grid-template-columns: repeat(auto-fit, minmax(12rem, 1fr));
+}
+
+.flmCustomField {
+  background: rgba(255, 255, 255, 0.025);
+  border: 1px solid rgba(255, 255, 255, 0.07);
+  border-radius: var(--border-radius-sm);
+  display: flex;
+  flex-direction: column;
+  gap: var(--gap-xs);
+  min-width: 0;
+  padding: var(--padding-sm);
+}
+
+.flmCustomFieldHeading {
+  align-items: flex-start;
+  display: flex;
+  gap: var(--gap-xs);
+  justify-content: space-between;
+}
+
+.flmCustomFieldHeading > span {
+  font-weight: var(--font-weight-demi-bold);
+}
+
+.flmControlHelpButton {
+  align-items: center;
+  background: rgba(139, 108, 197, 0.18);
+  border: 1px solid rgba(139, 108, 197, 0.55);
+  border-radius: 50%;
+  color: var(--text-color);
+  cursor: pointer;
+  display: inline-flex;
+  flex: 0 0 1.35rem;
+  font-size: var(--font-size-xs);
+  font-weight: var(--font-weight-demi-bold);
+  height: 1.35rem;
+  justify-content: center;
+  padding: 0;
+  width: 1.35rem;
+}
+
+.flmControlHelpButton[aria-expanded="true"] {
+  background: var(--main-fg);
+  color: var(--main-bg);
+}
+
+.flmControlHelp {
+  background: rgba(139, 108, 197, 0.09);
+  border: 1px solid rgba(139, 108, 197, 0.28);
+  border-radius: var(--border-radius-sm);
+  color: var(--text-color);
+  font-size: var(--font-size-xs);
+  padding: var(--padding-sm);
+}
+
+.flmControlHelp p {
+  line-height: 1.4;
+  margin: 0 0 var(--margin-xs);
+}
+
+.flmControlHelp p:last-child {
+  margin-bottom: 0;
+}
+
+.flmControlAnalysisHelp {
+  border-top: 1px solid rgba(139, 108, 197, 0.28);
+  margin-top: var(--margin-sm);
+  padding-top: var(--padding-sm);
+}
+
+.flmControlAnalysisHelp > div {
+  margin-top: var(--margin-xs);
+}
+
+.flmCustomField small,
+.flmCustomField code {
+  color: var(--text-muted);
+  font-size: var(--font-size-xs);
+  overflow-wrap: anywhere;
+}
+
+.flmCustomBoolean input {
+  align-self: flex-start;
+  min-height: 1.2rem;
+  min-width: 1.2rem;
 }
 
 @media only screen and (max-width: 900px) {
