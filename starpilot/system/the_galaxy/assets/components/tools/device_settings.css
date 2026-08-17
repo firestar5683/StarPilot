@@ -426,6 +426,14 @@
   color: var(--text-muted);
 }
 
+/* Read-only learned values (e.g. Curve Speed Controller calibration) */
+.ds-readout {
+  color: var(--text-color);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  white-space: nowrap;
+}
+
 .ds-manual-row {
   align-items: center;
   display: flex;

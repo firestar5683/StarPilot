@@ -751,10 +751,23 @@
       {
         "key": "CurveSpeedController",
         "label": "Curve Speed Controller",
-        "description": "Automatically slow down for upcoming curves using data learned from your driving style, adapting to curves as you would.",
+        "description": "Automatically slow down for upcoming curves using data learned from your driving style, adapting to curves as you would. Press RES+ while it is slowing to cancel the slowdown for that curve.",
         "data_type": "bool",
         "ui_type": "toggle",
         "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CurveSpeedMargin",
+        "label": "Curve Speed Margin",
+        "description": "How much of your learned cornering comfort to use for curves. Lower slows more; 100% matches how you take curves yourself.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 70.0,
+        "max": 100.0,
+        "step": 5.0,
+        "unit": "%",
+        "parent_key": "CurveSpeedController",
         "settings_tier": "simple"
       },
       {
@@ -776,9 +789,31 @@
         "settings_tier": "simple"
       },
       {
+        "key": "CalibratedLateralAcceleration",
+        "label": "Calibrated Lateral Accel",
+        "description": "The learned lateral acceleration from collected driving data. Higher values allow faster cornering.",
+        "data_type": "float",
+        "ui_type": "readout",
+        "precision": 2,
+        "unit": " m/s²",
+        "parent_key": "CurveSpeedController",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "CalibrationProgress",
+        "label": "Calibration Progress",
+        "description": "How much curve data has been collected. Normal for the value to stay low.",
+        "data_type": "float",
+        "ui_type": "readout",
+        "precision": 2,
+        "unit": "%",
+        "parent_key": "CurveSpeedController",
+        "settings_tier": "simple"
+      },
+      {
         "key": "ResetCurveData",
         "label": "Reset Curve Data",
-        "description": "Clear learned Curve Speed Controller data and begin training again from the default lateral acceleration.",
+        "description": "Clear learned Curve Speed Controller data and begin training again from the built-in comfort defaults.",
         "ui_type": "action",
         "action_label": "Reset",
         "action_endpoint": "/api/curve_speed_controller/reset",

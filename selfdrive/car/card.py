@@ -24,7 +24,7 @@ from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
 from openpilot.common.constants import CV
 from openpilot.selfdrive.car.cruise import (
   VCruiseHelper, IMPERIAL_INCREMENT, V_CRUISE_MAX, V_CRUISE_MIN,
-  is_speed_limit_confirmation_pending,
+  is_csc_override_pending, is_speed_limit_confirmation_pending,
 )
 from openpilot.selfdrive.car.redneck_cruise import RedneckCruise, select_redneck_target_speed
 from openpilot.selfdrive.car.car_specific import MockCarState
@@ -277,6 +277,7 @@ class Car:
     )
     if not preap_software_cruise:
       speed_limit_confirmation_pending = is_speed_limit_confirmation_pending(self.sm['starpilotPlan'])
+      csc_override_pending = is_csc_override_pending(self.sm['starpilotPlan'])
       self.v_cruise_helper.update_v_cruise(
         CS,
         self.sm['carControl'].enabled,
@@ -284,6 +285,7 @@ class Car:
         speed_limit_confirmation_pending,
         self.starpilot_toggles,
         FPCS,
+        csc_active=csc_override_pending,
       )
     else:
       preap_v_cruise_kph = float(CS.cruiseState.speed * CV.MS_TO_KPH)

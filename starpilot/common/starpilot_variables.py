@@ -49,6 +49,9 @@ from openpilot.system.version import get_build_metadata
 
 CITY_SPEED_LIMIT = 25                     # 55mph is typically the minimum speed for highways
 CRUISING_SPEED = 5                        # Roughly the speed cars go when not touching the gas while in drive
+CSC_DEFAULT_MARGIN_PERCENT = 85           # Percent of learned cornering comfort the Curve Speed Controller targets
+CSC_MIN_MARGIN_PERCENT = 70               # Slows the most; 100 would exactly match the driver's own habit
+CSC_MAX_MARGIN_PERCENT = 100
 DEFAULT_LATERAL_ACCELERATION = 2.0        # m/s^2, typical lateral acceleration when taking curves
 DISPLAY_MENU_TIMER = 350                  # The length of time the following distance menu appears on some GM vehicles to prevent things getting out of sync
 EARTH_RADIUS = 6378137                    # Radius of the Earth in meters
@@ -826,6 +829,10 @@ class StarPilotVariables:
     toggle.curve_speed_controller = toggle.openpilot_longitudinal and self.get_value("CurveSpeedController")
     toggle.csc_no_lead = self.get_value("CurveSpeedControllerNoLead", condition=toggle.curve_speed_controller)
     toggle.csc_status = self.get_value("ShowCSCStatus", condition=toggle.curve_speed_controller) or toggle.debug_mode
+    # percent of learned cornering comfort to actually use; lower slows more
+    toggle.csc_margin = self.get_value("CurveSpeedMargin", cast=float, condition=toggle.curve_speed_controller,
+                                       default=CSC_DEFAULT_MARGIN_PERCENT, min=CSC_MIN_MARGIN_PERCENT,
+                                       max=CSC_MAX_MARGIN_PERCENT) / 100.0
 
     toggle.goat_scream_alert = self.get_value("GoatScream")
     toggle.goat_scream_critical_alerts = self.get_value("GoatScreamCriticalAlerts")

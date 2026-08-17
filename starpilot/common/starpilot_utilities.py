@@ -138,6 +138,23 @@ def calculate_road_curvature(modelData, v_ego):
   return float(predicted_lateral_acc / max(v_ego, 1)**2), max(time_to_curve, 1)
 
 
+PROFILE_MIN_SPEED = 3.0     # m/s — model points planned near standstill have unusable curvature
+PROFILE_MAX_CURVATURE = 0.1
+
+
+def extract_curve_profile(modelData):
+  orientation_rate = np.abs(np.array(modelData.orientationRate.z))
+  velocity = np.array(modelData.velocity.x)
+  distances = np.array(modelData.position.x)
+
+  # k = psi_dot / v per point, against the model's own planned speed so its
+  # slowdowns don't inflate the curvature
+  curvatures = orientation_rate / np.clip(velocity, PROFILE_MIN_SPEED, None)
+  curvatures = np.where(velocity < PROFILE_MIN_SPEED, 0.0, np.minimum(curvatures, PROFILE_MAX_CURVATURE))
+
+  return curvatures, distances
+
+
 def clean_model_name(name):
   return name.replace("(Default)", "").strip()
 

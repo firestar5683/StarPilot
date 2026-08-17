@@ -37,6 +37,11 @@ def is_speed_limit_confirmation_pending(starpilot_plan) -> bool:
   return bool(starpilot_plan.speedLimitChanged and starpilot_plan.unconfirmedSlcSpeedLimit >= 1)
 
 
+def is_csc_override_pending(starpilot_plan) -> bool:
+  """Accel presses cancel an active curve slowdown instead of raising the set speed."""
+  return bool(starpilot_plan.cscControllingSpeed) and not is_speed_limit_confirmation_pending(starpilot_plan)
+
+
 class VCruiseHelper:
   def __init__(self, CP, FPCP=None):
     self.CP = CP
@@ -89,13 +94,13 @@ class VCruiseHelper:
       return bool(getattr(starpilot_car_state, "decelHardCruise", False))
     return False
 
-  def update_v_cruise(self, CS, enabled, is_metric, speed_limit_changed, starpilot_toggles, starpilot_car_state=None):
+  def update_v_cruise(self, CS, enabled, is_metric, speed_limit_changed, starpilot_toggles, starpilot_car_state=None, csc_active=False):
     self.v_cruise_kph_last = self.v_cruise_kph
 
     if CS.cruiseState.available:
       if self.gm_cc_only or self.redneck_non_pcm or not self.CP.pcmCruise:
         # if stock cruise is completely disabled, then we can use our own set speed logic
-        self._update_v_cruise_non_pcm(CS, enabled, is_metric, speed_limit_changed, starpilot_toggles, starpilot_car_state)
+        self._update_v_cruise_non_pcm(CS, enabled, is_metric, speed_limit_changed, starpilot_toggles, starpilot_car_state, csc_active)
         self.v_cruise_cluster_kph = self.v_cruise_kph
         self.update_button_timers(CS, enabled, starpilot_car_state)
       else:
@@ -111,7 +116,7 @@ class VCruiseHelper:
       self.v_cruise_kph = V_CRUISE_UNSET
       self.v_cruise_cluster_kph = V_CRUISE_UNSET
 
-  def _update_v_cruise_non_pcm(self, CS, enabled, is_metric, speed_limit_changed, starpilot_toggles, starpilot_car_state=None):
+  def _update_v_cruise_non_pcm(self, CS, enabled, is_metric, speed_limit_changed, starpilot_toggles, starpilot_car_state=None, csc_active=False):
     # handle button presses. TODO: this should be in state_control, but a decelCruise press
     # would have the effect of both enabling and changing speed is checked after the state transition
     if not enabled:
@@ -126,7 +131,9 @@ class VCruiseHelper:
     for b in CS.buttonEvents:
       event_button_type = b.type.raw
       if event_button_type in self.button_timers:
-        if speed_limit_changed and b.pressed:
+        # decel presses keep their normal meaning
+        consume_press = speed_limit_changed or (csc_active and event_button_type in ACCEL_CRUISE_BUTTONS)
+        if consume_press and b.pressed:
           self.confirmation_button_suppressed.add(event_button_type)
         elif not b.pressed and event_button_type in self.confirmation_button_suppressed:
           self.confirmation_button_suppressed.remove(event_button_type)

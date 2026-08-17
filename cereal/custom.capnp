@@ -220,6 +220,10 @@ struct StarPilotPlan @0xf98d843bfd7004a3 {
   disableThrottle @35 :Bool;
   trackingLead @36 :Bool;
   stopSignConfirmed @37 :Bool;
+  # Curve Speed Controller diagnostics, for tuning and rollout validation
+  cscOverridden @38 :Bool;          # driver cancelled this curve with RES+
+  cscLearnedLatAccel @39 :Float32;  # learned comfort at the current curvature, before margin
+  cscBindingDistance @40 :Float32;  # distance to the horizon point setting the target, m
 }
 
 struct StarPilotRadarState @0xb86e6369214c01c8 {

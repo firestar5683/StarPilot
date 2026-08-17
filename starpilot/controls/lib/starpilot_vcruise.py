@@ -6,7 +6,12 @@ from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
 
 from openpilot.starpilot.common.starpilot_variables import CITY_SPEED_LIMIT, CRUISING_SPEED
-from openpilot.starpilot.controls.lib.curve_speed_controller import CurveSpeedController, is_manual_speed_control
+from openpilot.starpilot.controls.lib.curve_speed_controller import (
+  CSC_ACTIVE_OFF_DELTA,
+  CSC_ACTIVE_ON_DELTA,
+  CurveSpeedController,
+  is_manual_speed_control,
+)
 from openpilot.starpilot.controls.lib.speed_limit_controller import SpeedLimitController
 from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import (
   get_force_stop_distance_bias,
@@ -14,7 +19,6 @@ from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import (
 )
 
 CSC_MIN_SPEED = CITY_SPEED_LIMIT * CV.MPH_TO_MS
-CSC_CURVE_RELEASE_HOLD_TIME = 0.75
 OVERRIDE_FORCE_STOP_TIMER = 10
 STANDSTILL_FORCE_STOP_CLEAR_TIME = 0.75
 STANDSTILL_FORCE_STOP_LIGHT_HOLD_TIME = 5.0
@@ -184,8 +188,8 @@ class StarPilotVCruise:
     self._nav_instruction_state = {}
     self._applied_slc_control_target = 0.0
     self.csc_controlling_speed = False
+    self.csc_override = False
     self.csc_target = 0.0
-    self.csc_curve_last_seen_at = None
 
   def _update_nav_instruction_state(self):
     raw = self.starpilot_planner.params_memory.get("NavInstructionState") or {}
@@ -528,7 +532,8 @@ class StarPilotVCruise:
     v_ego_cluster = max(sm["carState"].vEgoCluster, v_ego)
     v_ego_diff = v_ego_cluster - v_ego
 
-    # FrogsGoMoo's Curve Speed Controller
+    # Curve Speed Controller
+    self.csc.starpilot_toggles = starpilot_toggles
     following_lead = bool(getattr(self.starpilot_planner.starpilot_following, "following_lead", False))
     manual_speed_control = is_manual_speed_control(sm)
     csc_available = (
@@ -538,28 +543,42 @@ class StarPilotVCruise:
       starpilot_toggles.curve_speed_controller and
       (not getattr(starpilot_toggles, "csc_no_lead", False) or not following_lead)
     )
-    csc_curve_detected = csc_available and self.starpilot_planner.road_curvature_detected
-    if csc_curve_detected:
-      self.csc.update_target(v_ego)
+    csc_blinker_on = sm["carState"].leftBlinker or sm["carState"].rightBlinker
+    csc_was_controlling = self.csc_controlling_speed
+    # a pending SLC confirmation owns the accel button
+    slc_confirmation_pending = self.slc.speed_limit_changed_timer > DT_MDL and self.slc.unconfirmed_speed_limit >= 1
+    csc_accel_button = bool(sm["starpilotCarState"].accelPressed) and not slc_confirmation_pending
 
-      self.csc_controlling_speed = True
-      self.csc_target = self.csc.target
-      self.csc_curve_last_seen_at = now
-    else:
-      csc_release_hold = bool(
-        csc_available and
-        self.csc_controlling_speed and
-        self.csc_curve_last_seen_at is not None and
-        self._elapsed_seconds(now, self.csc_curve_last_seen_at) < CSC_CURVE_RELEASE_HOLD_TIME
-      )
-      if not csc_release_hold:
-        self.csc.log_data(v_ego, sm)
+    # RES+ cancels the slowdown for the rest of this curve; cruise.py consumes the press
+    # so the set speed is untouched. Latched outside the availability branch because the
+    # press itself suspends CSC, so otherwise the slowdown returns on button release.
+    if csc_was_controlling and csc_accel_button:
+      self.csc_override = True
+    if not (long_control_active and starpilot_toggles.curve_speed_controller):
+      self.csc_override = False
 
+    if csc_available and not csc_blinker_on:
+      self.csc.update_target(v_ego, v_cruise)
+
+      if self.csc_override and self.csc.target > v_cruise - CSC_ACTIVE_OFF_DELTA:
+        self.csc_override = False
+
+      if self.csc_override:
         self.csc_controlling_speed = False
-        self.csc.target_set = False
-        self.csc_curve_last_seen_at = None
-
         self.csc_target = v_cruise
+      else:
+        self.csc_target = self.csc.target
+        if self.csc_target < v_cruise - CSC_ACTIVE_ON_DELTA:
+          self.csc_controlling_speed = True
+        elif self.csc_target > v_cruise - CSC_ACTIVE_OFF_DELTA:
+          self.csc_controlling_speed = False
+    else:
+      self.csc.reset(v_cruise)
+      self.csc_controlling_speed = False
+      self.csc_target = v_cruise
+
+    self.csc.handle_override(v_ego, csc_was_controlling, sm, accel_button=csc_accel_button)
+    self.csc.log_data(v_ego, sm)
 
     # Pfeiferj's Speed Limit Controller
     self.slc.starpilot_toggles = starpilot_toggles

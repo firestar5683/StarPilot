@@ -5324,6 +5324,13 @@ def setup(app):
     result["AlphaLongitudinalAvailable"] = _get_alpha_longitudinal_available()
     result["HasRivianAngleHarness"] = _get_has_rivian_angle_harness()
 
+    # display only; kept out of allowed_keys so the write paths still reject them
+    for readonly_key in ("CalibratedLateralAcceleration", "CalibrationProgress"):
+      try:
+        result[readonly_key] = params.get_float(readonly_key)
+      except Exception:
+        result[readonly_key] = None
+
     return jsonify(_sanitize_json_value(result)), 200
 
   @app.route("/api/params/defaults", methods=["GET"])

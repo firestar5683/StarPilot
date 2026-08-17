@@ -484,6 +484,13 @@ function formatStepValue(step, precision) {
   return Number(n.toFixed(Math.max(0, precision))).toString()
 }
 
+function formatReadoutValue(param, value) {
+  const n = Number(value)
+  if (value === null || value === undefined || !Number.isFinite(n)) return "--"
+  const precision = Number.isFinite(Number(param.precision)) ? Number(param.precision) : 2
+  return `${n.toFixed(precision)}${param.unit || ""}`
+}
+
 function numericBounds(param) {
   const defaultBounds = {
     min: param.min !== undefined ? param.min : (param.data_type === "float" ? 0.0 : 0),
@@ -1619,6 +1626,10 @@ function renderSettingRow(p) {
         placeholder="${p.placeholder || ""}"
         disabled="${() => isLocked()}"
         @change="${() => updateParam(p.key, "text")}" />
+    `
+  } else if (p.ui_type === "readout") {
+    rowControl = html`
+      <span class="ds-readout" id="ds-${p.key}">${() => formatReadoutValue(p, state.values[p.key])}</span>
     `
   } else if (p.ui_type === "color") {
     rowControl = html`

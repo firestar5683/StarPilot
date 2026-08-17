@@ -684,14 +684,19 @@ class StarPilotLongitudinalLayout(_SettingsPage):
 
     # ── 5. Adaptive Speed Controls Rows (CES + CSC + CCM) ──
     self._curve_speed_controller_rows = [
+      SettingRow("CurveSpeedMargin", "value", tr_noop("Curve Speed Margin"),
+                 subtitle=tr_noop("How much of your learned cornering comfort to use. Lower slows more for curves; 100% matches how you take them yourself."),
+                 get_value=lambda: f"{self._params.get_int('CurveSpeedMargin')}%",
+                 on_click=lambda: self._show_slider("CurveSpeedMargin", 70, 100, step=5, unit="%"),
+                 visible=csc_on),
       SettingRow("CalibratedLatAccel", "value", tr_noop("Calibrated Lateral Accel"),
                  subtitle=tr_noop("The learned lateral acceleration from collected driving data. Higher values allow faster cornering."),
-                 get_value=lambda: f"{self._params_memory.get_float('CalibratedLateralAcceleration'):.2f} m/s",
+                 get_value=lambda: f"{self._params.get_float('CalibratedLateralAcceleration'):.2f} m/s",
                  on_click=None,
                  visible=csc_on),
       SettingRow("CalibrationProgress", "value", tr_noop("Calibration Progress"),
                  subtitle=tr_noop("How much curve data has been collected. Normal for the value to stay low."),
-                 get_value=lambda: f"{self._params_memory.get_float('CalibrationProgress'):.2f}%",
+                 get_value=lambda: f"{self._params.get_float('CalibrationProgress'):.2f}%",
                  on_click=None,
                  visible=csc_on),
       SettingRow("ResetCurve", "action", tr_noop("Reset Curve Data"),
