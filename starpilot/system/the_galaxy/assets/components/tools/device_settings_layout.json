@@ -758,6 +758,20 @@
         "settings_tier": "simple"
       },
       {
+        "key": "CurveSpeedApproachDecel",
+        "label": "Curve Speed Approach Decel",
+        "description": "How hard the slowdown into a curve is planned. Lower starts it sooner and spreads it over more distance; higher waits longer and slows more firmly.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.3,
+        "max": 1.5,
+        "step": 0.1,
+        "precision": 1,
+        "unit": " m/s²",
+        "parent_key": "CurveSpeedController",
+        "settings_tier": "simple"
+      },
+      {
         "key": "CurveSpeedMargin",
         "label": "Curve Speed Margin",
         "description": "How much of your learned cornering comfort to use for curves. Lower slows more; 100% matches how you take curves yourself.",

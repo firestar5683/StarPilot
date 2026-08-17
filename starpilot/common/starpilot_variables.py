@@ -52,6 +52,9 @@ CRUISING_SPEED = 5                        # Roughly the speed cars go when not t
 CSC_DEFAULT_MARGIN_PERCENT = 85           # Percent of learned cornering comfort the Curve Speed Controller targets
 CSC_MIN_MARGIN_PERCENT = 70               # Slows the most; 100 would exactly match the driver's own habit
 CSC_MAX_MARGIN_PERCENT = 100
+CSC_DEFAULT_APPROACH_DECEL = 0.6          # m/s^2 the approach is planned at; sets how early the slowdown starts
+CSC_MIN_APPROACH_DECEL = 0.3              # earlier than this saturates against the model's ~10s horizon
+CSC_MAX_APPROACH_DECEL = 1.5              # later and firmer; matches the old ramp cap
 DEFAULT_LATERAL_ACCELERATION = 2.0        # m/s^2, typical lateral acceleration when taking curves
 DISPLAY_MENU_TIMER = 350                  # The length of time the following distance menu appears on some GM vehicles to prevent things getting out of sync
 EARTH_RADIUS = 6378137                    # Radius of the Earth in meters
@@ -833,6 +836,11 @@ class StarPilotVariables:
     toggle.csc_margin = self.get_value("CurveSpeedMargin", cast=float, condition=toggle.curve_speed_controller,
                                        default=CSC_DEFAULT_MARGIN_PERCENT, min=CSC_MIN_MARGIN_PERCENT,
                                        max=CSC_MAX_MARGIN_PERCENT) / 100.0
+    # lower plans the approach over a longer distance, so the slowdown starts sooner
+    toggle.csc_approach_decel = self.get_value("CurveSpeedApproachDecel", cast=float,
+                                               condition=toggle.curve_speed_controller,
+                                               default=CSC_DEFAULT_APPROACH_DECEL, min=CSC_MIN_APPROACH_DECEL,
+                                               max=CSC_MAX_APPROACH_DECEL)
 
     toggle.goat_scream_alert = self.get_value("GoatScream")
     toggle.goat_scream_critical_alerts = self.get_value("GoatScreamCriticalAlerts")

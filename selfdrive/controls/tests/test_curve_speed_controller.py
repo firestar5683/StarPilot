@@ -85,7 +85,12 @@ def test_straight_road_target_is_cruise_speed():
 
 
 def test_distant_apex_does_not_constrain_until_braking_is_due():
-  _, controller = make_controller(curve_profile=single_apex_profile(0.02, 400.0))
+  # derived from the shipped decel so retuning it doesn't silently invalidate the case
+  _, probe = make_controller()
+  curve_speed = max(float(np.sqrt(probe.lat_accel_for_curvature(0.02) / 0.02)), CSC_MIN_SPEED)
+  beyond_braking = 1.3 * (30.0**2 - curve_speed**2) / (2 * CSC_APPROACH_DECEL)
+
+  _, controller = make_controller(curve_profile=single_apex_profile(0.02, beyond_braking))
 
   target = converge(controller, 30.0, 30.0)
 
@@ -207,6 +212,25 @@ def test_lower_margin_engages_on_gentler_curves():
   aggressive = converge(aggressive_controller, 30.0, 30.0)
 
   assert aggressive < relaxed
+
+
+def test_approach_decel_slider_moves_where_braking_starts():
+  # the same curve must bind further out when the approach is planned gentler
+  def bind_distance(decel):
+    planner, controller = make_controller(curve_profile=single_apex_profile(0.01, 200.0))
+    controller.starpilot_toggles = SimpleNamespace(csc_approach_decel=decel)
+    converge(controller, 30.0, 30.0)
+    return controller.target
+
+  assert bind_distance(0.3) < bind_distance(1.5)
+
+
+def test_approach_decel_falls_back_to_default():
+  _, controller = make_controller()
+
+  assert controller.approach_decel == pytest.approx(CSC_APPROACH_DECEL)
+  controller.starpilot_toggles = SimpleNamespace(csc_approach_decel=0.0)
+  assert controller.approach_decel == pytest.approx(CSC_APPROACH_DECEL)
 
 
 def test_binding_distance_reports_the_constraining_point():

@@ -684,6 +684,12 @@ class StarPilotLongitudinalLayout(_SettingsPage):
 
     # ── 5. Adaptive Speed Controls Rows (CES + CSC + CCM) ──
     self._curve_speed_controller_rows = [
+      SettingRow("CurveSpeedApproachDecel", "value", tr_noop("Curve Speed Approach Decel"),
+                 subtitle=tr_noop("How hard the slowdown into a curve is planned. Lower starts it sooner and spreads it over more distance; higher waits longer and slows more firmly."),
+                 get_value=lambda: f"{self._params.get_float('CurveSpeedApproachDecel'):.1f} m/s²",
+                 on_click=lambda: self._show_slider("CurveSpeedApproachDecel", 0.3, 1.5, step=0.1,
+                                                   unit=" m/s²", value_type="float"),
+                 visible=csc_on),
       SettingRow("CurveSpeedMargin", "value", tr_noop("Curve Speed Margin"),
                  subtitle=tr_noop("How much of your learned cornering comfort to use. Lower slows more for curves; 100% matches how you take them yourself."),
                  get_value=lambda: f"{self._params.get_int('CurveSpeedMargin')}%",

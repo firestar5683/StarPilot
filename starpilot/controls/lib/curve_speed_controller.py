@@ -8,6 +8,7 @@ from openpilot.common.realtime import DT_MDL
 from openpilot.starpilot.common.starpilot_variables import (
   CITY_SPEED_LIMIT,
   CRUISING_SPEED,
+  CSC_DEFAULT_APPROACH_DECEL,
   CSC_DEFAULT_MARGIN_PERCENT,
   DEFAULT_LATERAL_ACCELERATION,
   PLANNER_TIME,
@@ -16,7 +17,9 @@ from openpilot.starpilot.common.starpilot_variables import (
 CALIBRATION_PROGRESS_THRESHOLD = 10 / DT_MDL
 CSC_MIN_SPEED = CITY_SPEED_LIMIT * CV.MPH_TO_MS
 
-CSC_APPROACH_DECEL = 1.0
+# braking distance is (v^2 - v_curve^2) / (2 * this), so lower starts the slowdown
+# sooner and spreads it further. User-tunable via CurveSpeedApproachDecel.
+CSC_APPROACH_DECEL = CSC_DEFAULT_APPROACH_DECEL
 CSC_TARGET_UP_RATE = 3.0
 CSC_TARGET_DOWN_RATE = 2.5
 CSC_TARGET_FILTER_RC = 0.4
@@ -312,6 +315,11 @@ class CurveSpeedController:
     margin = getattr(self.starpilot_toggles, "csc_margin", None)
     return float(margin) if margin else CSC_COMFORT_MARGIN
 
+  @property
+  def approach_decel(self):
+    decel = getattr(self.starpilot_toggles, "csc_approach_decel", None)
+    return float(decel) if decel else CSC_APPROACH_DECEL
+
   def lat_accel_for_curvature(self, curvature):
     lat_accel = np.interp(np.abs(curvature), self._curve_k, self._curve_a) * self.comfort_margin
 
@@ -339,7 +347,7 @@ class CurveSpeedController:
       lat_accel = self.lat_accel_for_curvature(curvatures)
       point_speeds = np.sqrt(lat_accel / np.maximum(curvatures, 1e-4))
       point_speeds = np.maximum(point_speeds, CSC_MIN_SPEED)
-      allowed_speeds = np.sqrt(point_speeds**2 + 2.0 * CSC_APPROACH_DECEL * np.maximum(distances, 0.0))
+      allowed_speeds = np.sqrt(point_speeds**2 + 2.0 * self.approach_decel * np.maximum(distances, 0.0))
       binding_index = int(np.argmin(allowed_speeds))
       raw_target = min(float(allowed_speeds[binding_index]), float(v_cruise))
       self.binding_distance = float(distances[binding_index]) if raw_target < v_cruise else 0.0

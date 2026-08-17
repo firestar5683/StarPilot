@@ -23,6 +23,7 @@ M_TO_MILES = 1.0 / 1609.34
 HIGHWAY_SPEED = 60.0 / MS_TO_MPH   # above this, engagement is the over-slowing regression risk
 CURVE_LAT_ACCEL = 1.3              # MINIMUM_LATERAL_ACCELERATION
 EPISODE_GAP_S = 1.0
+V_CRUISE_UNSET = 255
 
 
 @dataclass
@@ -35,11 +36,13 @@ class Frame:
   brake: bool = False
   accel_pressed: bool = False
   long_active: bool = False
+  blinker: bool = False     # CSC gating input: a blinker suspends it entirely
   csc_active: bool = False
   csc_overridden: bool = False
   csc_training: bool = False
   csc_speed: float = 0.0
-  v_cruise: float = 0.0
+  v_cruise: float = 0.0     # applied cruise speed, already reduced by CSC
+  set_speed: float = 0.0    # what the driver dialled in, so cuts are measurable
   learned_lat_accel: float = 0.0
   binding_distance: float = 0.0
 
@@ -66,17 +69,31 @@ class Episode:
     return self.end - self.start
 
 
+def read_events(identifier: str):
+  """A downloaded rlog reads directly; anything else goes through LogReader."""
+  path = Path(identifier)
+  if path.is_file():
+    from cereal import log as capnp_log
+
+    data = path.read_bytes()
+    if data[:4] == b"\x28\xb5\x2f\xfd":
+      import zstandard
+      data = zstandard.ZstdDecompressor().decompress(data, max_output_size=2 << 30)
+    return capnp_log.Event.read_multiple_bytes(data)
+
+  from openpilot.tools.lib.logreader import LogReader, ReadMode  # needs the device stack
+
+  return LogReader(identifier, default_mode=ReadMode.AUTO, sort_by_time=True)
+
+
 def read_frames(identifier: str) -> list[Frame]:
   """Join carState/controlsState/starpilotPlan onto the plan's cadence."""
-  from openpilot.tools.lib.logreader import LogReader, ReadMode  # heavy; keeps the metrics importable off-device
-
   frames: list[Frame] = []
   latest = Frame()
   t0 = None
   have_plan = False
 
-  reader = LogReader(identifier, default_mode=ReadMode.AUTO, sort_by_time=True)
-  for msg in reader:
+  for msg in read_events(identifier):
     which = msg.which()
     if which == "carState":
       cs = msg.carState
@@ -84,6 +101,9 @@ def read_frames(identifier: str) -> list[Frame]:
       latest.a_ego = float(cs.aEgo)
       latest.gas = bool(cs.gasPressed)
       latest.brake = bool(cs.brakePressed)
+      latest.blinker = bool(cs.leftBlinker or cs.rightBlinker)
+      set_kph = float(cs.vCruise)
+      latest.set_speed = set_kph / 3.6 if 0 < set_kph < V_CRUISE_UNSET else 0.0
     elif which == "carControl":
       latest.long_active = bool(msg.carControl.longActive)
     elif which == "controlsState":
@@ -123,15 +143,19 @@ def build_episodes(frames: list[Frame]) -> list[Episode]:
                           binding_distance=f.binding_distance, min_a_ego=f.a_ego)
         episodes.append(current)
       current.end = f.t
-      current.peak_cut = max(current.peak_cut, f.v_cruise - f.csc_speed)
+      if f.set_speed > 0:
+        current.peak_cut = max(current.peak_cut, f.set_speed - f.csc_speed)
       current.peak_lat_accel = max(current.peak_lat_accel, f.lat_accel)
       current.min_a_ego = min(current.min_a_ego, f.a_ego)
       current.gas |= f.gas
       current.brake |= f.brake
       last_active_t = f.t
     elif current is not None and (f.t - last_active_t) <= EPISODE_GAP_S:
-      # the cancel lands on the frame CSC releases, so look just past the end
+      # an override releases CSC on the same frame it registers, so the rejection
+      # always lands just past the end of the episode it rejected
       current.cancelled |= f.csc_overridden or f.accel_pressed
+      current.gas |= f.gas
+      current.brake |= f.brake
 
   return episodes
 
