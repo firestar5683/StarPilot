@@ -39,8 +39,8 @@ def _favorite(name, latitude, longitude, **flags):
   return {"name": name, "latitude": latitude, "longitude": longitude, **flags}
 
 
-def _card(params):
-  card = HomeInfoCard(params, FakeDriveStats())
+def _card(params, *, online_provider=lambda: True, gps_provider=lambda: True):
+  card = HomeInfoCard(params, FakeDriveStats(), online_provider=online_provider, gps_provider=gps_provider)
   card.set_rect(rl.Rectangle(100, 200, 750, 745))
   card.refresh()
   return card
@@ -127,3 +127,48 @@ def test_refresh_falls_back_without_clearing_an_active_non_favorite_destination(
   assert not card.quick_start_available
   assert card.show_records
   assert card.active_destination["name"] == "Old destination"
+
+
+def test_quick_start_requires_online_and_gps():
+  params = FakeParams({
+    "MapboxSecretKey": "secret",
+    FAVORITE_DESTINATIONS_KEY: json.dumps([_favorite("Home", 1, 2)]),
+  })
+
+  # Both online and GPS available
+  card = _card(params, online_provider=lambda: True, gps_provider=lambda: True)
+  assert card.quick_start_available
+  assert not card.show_records
+
+  # Offline
+  card_offline = _card(params, online_provider=lambda: False, gps_provider=lambda: True)
+  assert not card_offline.quick_start_available
+  assert card_offline.show_records
+
+  # No GPS fix
+  card_no_gps = _card(params, online_provider=lambda: True, gps_provider=lambda: False)
+  assert not card_no_gps.quick_start_available
+  assert card_no_gps.show_records
+
+  # Fallback GPS check via LastGPSPosition in params
+  params_with_gps = FakeParams({
+    "MapboxSecretKey": "secret",
+    FAVORITE_DESTINATIONS_KEY: json.dumps([_favorite("Home", 1, 2)]),
+    "LastGPSPosition": json.dumps({"latitude": 37.77, "longitude": -122.41, "hasFix": True}),
+  })
+  card_param_gps = HomeInfoCard(params_with_gps, FakeDriveStats(), online_provider=lambda: True)
+  card_param_gps.set_rect(rl.Rectangle(100, 200, 750, 745))
+  card_param_gps.refresh()
+  assert card_param_gps.quick_start_available
+
+  # LastGPSPosition with hasFix=False or Null Island -> unavailable
+  params_bad_gps = FakeParams({
+    "MapboxSecretKey": "secret",
+    FAVORITE_DESTINATIONS_KEY: json.dumps([_favorite("Home", 1, 2)]),
+    "LastGPSPosition": json.dumps({"latitude": 0.0, "longitude": 0.0, "hasFix": False}),
+  })
+  card_bad_gps = HomeInfoCard(params_bad_gps, FakeDriveStats(), online_provider=lambda: True)
+  card_bad_gps.set_rect(rl.Rectangle(100, 200, 750, 745))
+  card_bad_gps.refresh()
+  assert not card_bad_gps.quick_start_available
+

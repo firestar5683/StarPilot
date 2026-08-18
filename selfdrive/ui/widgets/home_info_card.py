@@ -1,7 +1,11 @@
 from __future__ import annotations
 
+import json
+import math
+from collections.abc import Callable
 from typing import Any
 
+from cereal import log
 import pyray as rl
 
 from openpilot.selfdrive.ui.widgets.drive_stats import (
@@ -33,14 +37,38 @@ TEXT_LEFT_INSET = 30.0
 TEXT_RIGHT_INSET = 34.0
 
 
+def _has_valid_gps_payload(raw: Any) -> bool:
+  if not raw:
+    return False
+  try:
+    data = json.loads(raw) if isinstance(raw, (str, bytes)) else raw
+    if isinstance(data, dict):
+      if str(data.get("hasFix")).strip().lower() in ("0", "false", "no", "off", "", "none"):
+        return False
+      lat, lon = float(data.get("latitude", 0.0)), float(data.get("longitude", 0.0))
+      return math.isfinite(lat) and math.isfinite(lon) and (abs(lat) > 1e-6 or abs(lon) > 1e-6)
+  except Exception:
+    pass
+  return False
+
+
 class HomeInfoCard(Widget):
   """Paired offroad Home card for Quick Start and Personal Records."""
 
-  def __init__(self, params: Any, drive_stats: Any):
+  def __init__(
+    self,
+    params: Any,
+    drive_stats: Any,
+    *,
+    online_provider: Callable[[], bool] | None = None,
+    gps_provider: Callable[[], bool] | None = None,
+  ):
     super().__init__()
     self._params = params
     self._store = NavigationDestinationStore(params)
     self._drive_stats = drive_stats
+    self._online_provider = online_provider
+    self._gps_provider = gps_provider
 
     self._show_records = False
     self._quick_start_available = False
@@ -73,6 +101,39 @@ class HomeInfoCard(Widget):
     self.refresh()
     super().show_event()
 
+  def _is_online(self) -> bool:
+    if self._online_provider is not None:
+      return bool(self._online_provider())
+    try:
+      from openpilot.selfdrive.ui.ui_state import ui_state
+      if hasattr(ui_state, "sm") and ui_state.sm.valid.get("deviceState", False):
+        return ui_state.sm["deviceState"].networkType != log.DeviceState.NetworkType.none
+    except Exception:
+      pass
+    return False
+
+  def _has_gps(self) -> bool:
+    if self._gps_provider is not None:
+      return bool(self._gps_provider())
+
+    if _has_valid_gps_payload(self._params.get("LastGPSPosition", encoding="utf-8")):
+      return True
+
+    try:
+      from openpilot.selfdrive.ui.ui_state import ui_state
+      if hasattr(ui_state, "sm") and ui_state.sm.valid.get("gpsLocationExternal", False):
+        gps = ui_state.sm["gpsLocationExternal"]
+        if getattr(gps, "hasFix", False):
+          lat, lon = float(getattr(gps, "latitude", 0.0)), float(getattr(gps, "longitude", 0.0))
+          if math.isfinite(lat) and math.isfinite(lon) and (abs(lat) > 1e-6 or abs(lon) > 1e-6):
+            return True
+
+      if hasattr(ui_state, "params_memory"):
+        return _has_valid_gps_payload(ui_state.params_memory.get("LastGPSPosition", encoding="utf-8"))
+    except Exception:
+      pass
+    return False
+
   def refresh(self) -> None:
     was_available = self._quick_start_available
     self._active_destination = self._store.active_destination()
@@ -80,7 +141,12 @@ class HomeInfoCard(Widget):
     raw_favorites = self._params.get(FAVORITE_DESTINATIONS_KEY, encoding="utf-8", default="[]")
     favorites = load_favorite_destinations(raw_favorites)
     self._favorites = ordered_favorite_destinations(favorites, limit=ROW_COUNT)
-    self._quick_start_available = routing_configured(self._params) and bool(self._favorites)
+    self._quick_start_available = (
+      routing_configured(self._params)
+      and bool(self._favorites)
+      and self._is_online()
+      and self._has_gps()
+    )
 
     if not self._quick_start_available:
       self._show_records = True
