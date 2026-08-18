@@ -128,7 +128,39 @@ def test_camry_tss2_gets_forward_force_stop_bias_only():
   assert get_force_stop_distance_bias("TOYOTA_RAV4_TSS2") == pytest.approx(0.0)
 
 
-def test_curve_speed_controller_blinker_resets_target():
+def test_curve_speed_controller_blinker_releases_the_cap_but_keeps_the_plan():
+  planner, vcruise = make_vcruise()
+  sm = make_sm(standstill=False)
+  toggles = make_toggles()
+  toggles.curve_speed_controller = True
+
+  calls = []
+
+  def set_curve_target(_v_ego, _v_cruise):
+    calls.append(_v_ego)
+    vcruise.csc.target = 14.0
+
+  vcruise.csc.update_target = set_curve_target
+  result = update_vcruise(vcruise, sm, toggles, now=10.0, v_ego=20.0)
+  assert result == pytest.approx(14.0)
+  assert vcruise.csc_controlling_speed
+
+  # the cap lifts so CSC can't fight the lane change, but the envelope keeps planning
+  # so the curve doesn't have to be re-discovered from the set speed afterwards
+  sm["carState"].leftBlinker = True
+  result = update_vcruise(vcruise, sm, toggles, now=10.25, v_ego=20.0)
+  assert result == pytest.approx(20.0)
+  assert not vcruise.csc_controlling_speed
+  assert len(calls) == 2  # still planning, so nothing has to be rediscovered
+
+  # blinker off: the plan is already current, so the cap comes straight back
+  sm["carState"].leftBlinker = False
+  result = update_vcruise(vcruise, sm, toggles, now=10.5, v_ego=20.0)
+  assert result == pytest.approx(14.0)
+  assert vcruise.csc_controlling_speed
+
+
+def test_curve_speed_controller_reseeds_after_a_real_dropout():
   planner, vcruise = make_vcruise()
   sm = make_sm(standstill=False)
   toggles = make_toggles()
@@ -138,14 +170,14 @@ def test_curve_speed_controller_blinker_resets_target():
     vcruise.csc.target = 14.0
 
   vcruise.csc.update_target = set_curve_target
-  result = update_vcruise(vcruise, sm, toggles, now=10.0, v_ego=20.0)
-  assert result == pytest.approx(14.0)
+  update_vcruise(vcruise, sm, toggles, now=11.0, v_ego=20.0)
   assert vcruise.csc_controlling_speed
 
-  sm["carState"].leftBlinker = True
-  result = update_vcruise(vcruise, sm, toggles, now=10.25, v_ego=20.0)
-  assert result == pytest.approx(20.0)
+  # disengaging is a real dropout, not a momentary veto -- that still resets
+  sm["carControl"].longActive = False
+  update_vcruise(vcruise, sm, toggles, now=11.05, v_ego=20.0)
   assert not vcruise.csc_controlling_speed
+  assert vcruise.csc.seed_pending
 
 
 def test_curve_speed_controller_releases_immediately_when_disabled():

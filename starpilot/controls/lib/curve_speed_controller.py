@@ -24,6 +24,7 @@ CSC_TARGET_UP_RATE = 3.0
 CSC_TARGET_DOWN_RATE = 2.5
 CSC_TARGET_FILTER_RC = 0.4
 CSC_EGO_HEADROOM = 2.0            # target never trails below v_ego, so CSC can't drag re-acceleration
+CSC_RELEASE_DEBOUNCE = 0.25       # s the envelope must stay clear before that floor applies
 CSC_ACTIVE_ON_DELTA = 0.5
 CSC_ACTIVE_OFF_DELTA = 0.25
 
@@ -119,6 +120,7 @@ class CurveSpeedController:
 
     self.target = 0.0
     self.binding_distance = 0.0
+    self.release_timer = 0.0
     self.target_filter = FirstOrderFilter(0.0, CSC_TARGET_FILTER_RC, DT_MDL, initialized=False)
     self.seed_pending = True
 
@@ -334,6 +336,7 @@ class CurveSpeedController:
 
   def reset(self, v_cruise):
     self.target = float(v_cruise)
+    self.release_timer = 0.0
     self.target_filter.x = float(v_cruise)
     self.target_filter.initialized = True
     self.seed_pending = True
@@ -363,11 +366,23 @@ class CurveSpeedController:
       self.target_filter.x = seed
       self.seed_pending = False
 
+    if raw_target >= v_ego:
+      self.release_timer += DT_MDL
+    else:
+      self.release_timer = 0.0
+
+    # The headroom aim goes through the rate limiter with everything else; applying it
+    # after the clamp let every upward jitter in raw_target reach the target unsmoothed.
     filtered = self.target_filter.update(raw_target)
-    self.target = float(np.clip(filtered,
+    self.target = float(np.clip(max(filtered, min(raw_target, v_ego + CSC_EGO_HEADROOM)),
                                 self.target - CSC_TARGET_DOWN_RATE * DT_MDL,
                                 self.target + CSC_TARGET_UP_RATE * DT_MDL))
-    self.target = max(self.target, min(raw_target, v_ego + CSC_EGO_HEADROOM))
+
+    # Once the envelope really has released, the target must not sit under the car or it
+    # drags re-acceleration. Debounced, because a single jittery frame doing this yanks a
+    # legitimate cut back up to v_ego and strobes the glow on sweepers.
+    if self.release_timer >= CSC_RELEASE_DEBOUNCE:
+      self.target = max(self.target, min(raw_target, v_ego))
 
     if self.target < v_cruise - CSC_ACTIVE_ON_DELTA:
       self.training_quiet_timer = CSC_TRAINING_QUIET_TIME

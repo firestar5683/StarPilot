@@ -575,6 +575,13 @@ class StarPilotVCruise:
           self.csc_controlling_speed = True
         elif self.csc_target > v_cruise - CSC_ACTIVE_OFF_DELTA:
           self.csc_controlling_speed = False
+    elif csc_available:
+      # Blinker: release the cap so CSC can't fight a lane change, but keep planning.
+      # Resetting here threw the braking plan away, so the restart re-planned from the
+      # set speed with the curve much closer -- which arrived as a panic stop.
+      self.csc.update_target(v_ego, v_cruise)
+      self.csc_controlling_speed = False
+      self.csc_target = v_cruise
     else:
       self.csc.reset(v_cruise)
       self.csc_controlling_speed = False

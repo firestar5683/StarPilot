@@ -13,6 +13,7 @@ from openpilot.starpilot.controls.lib.curve_speed_controller import (
   CSC_LAT_ACCEL_MAX,
   CSC_MIN_SPEED,
   CSC_NUDGE_WEIGHT,
+  CSC_TARGET_UP_RATE,
   CSC_TRAINING_SETTLE_TIME,
   CurveSpeedController,
   weighted_isotonic,
@@ -114,10 +115,34 @@ def test_exit_recovery_rises_immediately_without_freeze():
 
   planner.curve_profile = (np.zeros(33), np.linspace(0.0, 300.0, 33))
   controller.update_target(15.0, 30.0)
-  assert controller.target == pytest.approx(15.0 + CSC_EGO_HEADROOM)
+  assert controller.target > low_target          # rises on the very next frame, no freeze
+  assert controller.target - low_target == pytest.approx(CSC_TARGET_UP_RATE * DT_MDL)
+
+  # and it clears the car by the headroom within the time the up-rate needs
+  frames = int((15.0 + CSC_EGO_HEADROOM - controller.target) / (CSC_TARGET_UP_RATE * DT_MDL)) + 1
+  for _ in range(frames):
+    controller.update_target(15.0, 30.0)
+  assert controller.target >= 15.0 + CSC_EGO_HEADROOM
 
   recovered = converge(controller, 15.0, 30.0)
   assert recovered == pytest.approx(30.0)
+
+
+def test_upward_jitter_in_the_envelope_is_rate_limited():
+  # a sweeper the envelope only grazes: raw_target flicks between a mild cap and the
+  # set speed. The target must not chase the jumps, or the glow strobes.
+  planner, controller = make_controller(curve_profile=single_apex_profile(0.002, 40.0))
+  steady = converge(controller, 30.0, 32.0)
+  assert steady < 32.0
+
+  flat = (np.zeros(33), np.linspace(0.0, 300.0, 33))
+  grazing = planner.curve_profile
+  peak = steady
+  for i in range(40):
+    planner.curve_profile = flat if i % 2 else grazing
+    controller.update_target(30.0, 32.0)
+    assert controller.target - peak <= CSC_TARGET_UP_RATE * DT_MDL + 1e-6
+    peak = controller.target
 
 
 def test_fresh_activation_seeds_at_envelope_not_cruise():
@@ -134,10 +159,17 @@ def test_target_never_trails_accelerating_car_when_unconstrained():
 
   planner.curve_profile = (np.zeros(33), np.linspace(0.0, 300.0, 33))
   v_ego = 15.0
-  for _ in range(100):
+  caught_up = None
+  for frame in range(200):
     v_ego = min(v_ego + 2.0 * DT_MDL, 30.0)
     controller.update_target(v_ego, 30.0)
-    assert controller.target >= min(30.0, v_ego + CSC_EGO_HEADROOM) - 1e-6
+    # the target climbs faster than the car can, so once it is ahead it stays ahead
+    if controller.target >= v_ego:
+      caught_up = caught_up if caught_up is not None else frame
+    assert caught_up is None or controller.target >= min(30.0, v_ego) - 1e-6
+
+  assert caught_up is not None and caught_up * DT_MDL < 2.0
+  assert controller.target == pytest.approx(30.0)
 
 
 def test_target_does_not_ratchet_down_with_ego_speed():
