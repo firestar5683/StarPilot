@@ -3,6 +3,7 @@ import cereal.messaging as messaging
 from cereal import car, custom, log
 from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR
 from opendbc.car.nissan.values import CAR as NISSAN_CAR
+from openpilot.common.realtime import DT_CTRL
 
 from openpilot.selfdrive.selfdrived.selfdrived import (
   VALID_ONLY_COMM_ISSUE_GRACE_FRAMES,
@@ -25,6 +26,13 @@ def test_valid_only_comm_issue_is_debounced():
   should_alert, frames = evaluate_comm_issue(True, True, True, frames)
   assert not should_alert
   assert frames == 0
+
+
+def test_route_length_validity_cascade_stays_silent():
+  frames = 0
+  for _ in range(round(0.4 / DT_CTRL)):
+    should_alert, frames = evaluate_comm_issue(False, True, True, frames)
+    assert not should_alert
 
 
 def test_dead_or_slow_comm_issue_is_immediate():

@@ -56,7 +56,7 @@ MonitoringPolicy = log.DriverMonitoringState.MonitoringPolicy
 StarPilotEventName = custom.StarPilotOnroadEvent.EventName
 
 IGNORED_SAFETY_MODES = (SafetyModel.silent, SafetyModel.noOutput)
-VALID_ONLY_COMM_ISSUE_GRACE_FRAMES = max(1, round(0.25 / DT_CTRL))
+VALID_ONLY_COMM_ISSUE_GRACE_FRAMES = max(1, round(0.5 / DT_CTRL))
 
 
 def evaluate_comm_issue(all_checks: bool, all_alive: bool, all_freq_ok: bool,
@@ -515,7 +515,7 @@ class SelfdriveD:
           self.events.add(EventName.pedalPressed)
 
     # Create events for temperature, disk space, and memory
-    if self.sm['deviceState'].thermalStatus >= ThermalStatus.red:
+    if self.sm['deviceState'].thermalStatus >= ThermalStatus.overheated:
       self.events.add(EventName.overheat)
     if self.sm['deviceState'].freeSpacePercent < 7 and not SIMULATION:
       self.events.add(EventName.outOfSpace)

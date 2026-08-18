@@ -507,7 +507,7 @@ struct DeviceState @0xa4d8b5af2aa492eb {
   pmicTempC @39 :List(Float32);
   intakeTempC @46 :Float32;
   exhaustTempC @47 :Float32;
-  caseTempC @48 :Float32;
+  gnssTempC @48 :Float32;
   bottomSocTempC @50 :Float32;
   maxTempC @44 :Float32;  # max of other temps, used to control fan
   thermalZones @38 :List(ThermalZone);
@@ -522,10 +522,10 @@ struct DeviceState @0xa4d8b5af2aa492eb {
   }
 
   enum ThermalStatus {
-    green @0;
-    yellow @1;
-    red @2;
-    danger @3;
+    ok @0;
+    warmDEPRECATED @1;
+    overheated @2;
+    critical @3;
   }
 
   enum NetworkType {

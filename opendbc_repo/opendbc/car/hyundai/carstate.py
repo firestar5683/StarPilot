@@ -28,6 +28,11 @@ IONIQ_6_BLINDSPOT_LEFT_MASK = 0x10
 CANFD_CAMERA_LEAD_MIN_DISTANCE = 0.1
 ALT_BUS_LDA_BUTTON_BURST_DEBOUNCE_NS = int(1.3e9)
 
+CLASSIC_MEDIA_BUTTON_CARS = frozenset({
+  CAR.HYUNDAI_ELANTRA_2024,
+  CAR.HYUNDAI_ELANTRA_HEV_2024,
+})
+
 
 def get_non_scc_cruise_signals(CP) -> tuple[str, str, str, str, str, str]:
   if CP.flags & HyundaiFlags.EV:
@@ -437,6 +442,9 @@ class CarState(CarStateBase):
     ret.lowSpeedAlert = self.low_speed_alert
 
     fp_ret = custom.StarPilotCarState.new_message()
+    if self.CP.carFingerprint in CLASSIC_MEDIA_BUTTON_CARS:
+      fp_ret.modePressed = bool(cp.vl["GW_SWRC_PE"]["C_ModeSW"])
+      fp_ret.customPressed = bool(cp.vl["GW_SWRC_PE"]["C_MTSSW"])
 
     return ret, fp_ret
 
@@ -686,6 +694,9 @@ class CarState(CarStateBase):
       ("BCM_PO_11", 0),
       ("CLU13", 0),
     ]
+    if CP.carFingerprint in CLASSIC_MEDIA_BUTTON_CARS:
+      # Steering-wheel media switches are event-driven on the refresh Elantra.
+      msgs.append(("GW_SWRC_PE", 0))
     if CP.flags & HyundaiFlags.NON_SCC and not (CP.flags & HyundaiFlags.NON_SCC_NO_FCA):
       msgs.append(("FCA11", 0))  # Non-SCC trims can stop publishing FCA11; don't let it poison canValid
 

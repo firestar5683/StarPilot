@@ -122,9 +122,9 @@ class Sidebar(Widget):
     thermal_status = device_state.thermalStatus
     temperature = f"{int(device_state.maxTempC)}°C"
 
-    if thermal_status == ThermalStatus.green:
+    if thermal_status == ThermalStatus.ok:
       self._temp_status.update(tr_noop("TEMP"), temperature, Colors.GOOD)
-    elif thermal_status == ThermalStatus.yellow:
+    elif thermal_status == ThermalStatus.warmDEPRECATED:
       self._temp_status.update(tr_noop("TEMP"), temperature, Colors.WARNING)
     else:
       self._temp_status.update(tr_noop("TEMP"), temperature, Colors.DANGER)

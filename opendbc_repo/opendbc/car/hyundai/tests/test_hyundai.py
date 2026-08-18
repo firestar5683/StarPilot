@@ -654,6 +654,22 @@ class TestHyundaiFingerprint:
     assert DBC[CP.carFingerprint][Bus.pt] == "hyundai_can_refresh_generated"
     assert CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.CAN_REFRESH_MSGS
 
+  def test_elantra_refresh_decodes_classic_media_buttons(self):
+    toggles = get_test_toggles()
+    CP = CarInterface.get_params(CAR.HYUNDAI_ELANTRA_HEV_2024, gen_empty_fingerprint(), [], True, False, False, toggles)
+    FPCP = CarInterface.get_starpilot_params(CAR.HYUNDAI_ELANTRA_HEV_2024, gen_empty_fingerprint(), [], CP, toggles)
+
+    car_state = CarState(CP, FPCP)
+    can_parsers = car_state.get_can_parsers(CP)
+    packer = CANPacker(DBC[CP.carFingerprint][Bus.pt])
+    media_msg = packer.make_can_msg("GW_SWRC_PE", 0, {"C_ModeSW": 1, "C_MTSSW": 1})
+
+    can_parsers[Bus.pt].update([(1_000_000_000, [media_msg])])
+    _, fp_ret = car_state.update(can_parsers, toggles)
+
+    assert fp_ret.modePressed
+    assert fp_ret.customPressed
+
   def test_hyundai_lkas_button_sets_starpilot_safety_flag(self):
     fingerprint = gen_empty_fingerprint()
     fingerprint[0][0x391] = 8
