@@ -568,10 +568,11 @@ class StarPilotVCruise:
         self.csc_target = v_cruise
       else:
         self.csc_target = self.csc.target
-        # a target under the set speed alone means nothing -- until it falls under v_ego
-        # the car is still accelerating toward it. Release still waits for the set speed,
-        # so the glow spans the whole recovery instead of clearing at the apex.
-        if self.csc_target < min(v_cruise - CSC_ACTIVE_ON_DELTA, v_ego):
+        # A target under the set speed alone means nothing -- it only bites once the car has
+        # reached it, whether by being slowed down to it or by accelerating up into it. The
+        # second reading of CSC_ACTIVE_OFF_DELTA is that margin. Release still waits for the
+        # set speed, so the glow spans the hold and the whole recovery, not just the braking.
+        if self.csc_target < v_cruise - CSC_ACTIVE_ON_DELTA and v_ego >= self.csc_target - CSC_ACTIVE_OFF_DELTA:
           self.csc_controlling_speed = True
         elif self.csc_target > v_cruise - CSC_ACTIVE_OFF_DELTA:
           self.csc_controlling_speed = False

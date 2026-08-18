@@ -365,6 +365,27 @@ def test_csc_res_press_defers_to_slc_confirmation():
   assert vcruise.csc_controlling_speed
 
 
+def test_curve_speed_controller_glow_lights_when_the_car_arrives_at_the_cap_from_below():
+  planner, vcruise = make_vcruise()
+  sm = make_sm(standstill=False)
+  toggles = make_toggles()
+  toggles.curve_speed_controller = True
+
+  # accelerating out of a slow zone into a curve: the target is never under v_ego, but it
+  # is still the only thing stopping the car from reaching the set speed
+  def set_curve_target(_v_ego, _v_cruise):
+    vcruise.csc.target = 22.0
+
+  vcruise.csc.update_target = set_curve_target
+
+  update_vcruise(vcruise, sm, toggles, now=120.0, v_ego=15.0, v_cruise=32.0)
+  assert not vcruise.csc_controlling_speed          # still climbing, CSC isn't holding it yet
+
+  result = update_vcruise(vcruise, sm, toggles, now=120.05, v_ego=22.0, v_cruise=32.0)
+  assert result == pytest.approx(22.0)
+  assert vcruise.csc_controlling_speed              # arrived at the cap, and it binds
+
+
 def test_curve_speed_controller_glow_stays_off_while_the_target_is_above_v_ego():
   planner, vcruise = make_vcruise()
   sm = make_sm(standstill=False)
