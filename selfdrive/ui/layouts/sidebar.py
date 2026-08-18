@@ -68,7 +68,7 @@ class Sidebar(Widget):
     self._net_type = NETWORK_TYPES.get(NetworkType.none)
     self._net_strength = 0
 
-    self._temp_status = MetricData(tr_noop("TEMP"), tr_noop("GOOD"), Colors.GOOD)
+    self._temp_status = MetricData(tr_noop("TEMP"), "--°C", Colors.GOOD)
     self._panda_status = MetricData(tr_noop("VEHICLE"), tr_noop("ONLINE"), Colors.GOOD)
     self._connect_status = MetricData(tr_noop("CONNECT"), tr_noop("OFFLINE"), Colors.WARNING)
     self._recording_audio = False
@@ -120,13 +120,14 @@ class Sidebar(Widget):
 
   def _update_temperature_status(self, device_state):
     thermal_status = device_state.thermalStatus
+    temperature = f"{int(device_state.maxTempC)}°C"
 
     if thermal_status == ThermalStatus.green:
-      self._temp_status.update(tr_noop("TEMP"), tr_noop("GOOD"), Colors.GOOD)
+      self._temp_status.update(tr_noop("TEMP"), temperature, Colors.GOOD)
     elif thermal_status == ThermalStatus.yellow:
-      self._temp_status.update(tr_noop("TEMP"), tr_noop("OK"), Colors.WARNING)
+      self._temp_status.update(tr_noop("TEMP"), temperature, Colors.WARNING)
     else:
-      self._temp_status.update(tr_noop("TEMP"), tr_noop("HIGH"), Colors.DANGER)
+      self._temp_status.update(tr_noop("TEMP"), temperature, Colors.DANGER)
 
   def _update_connection_status(self, device_state):
     last_ping = device_state.lastAthenaPingTime
