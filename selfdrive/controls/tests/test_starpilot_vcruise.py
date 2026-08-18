@@ -75,12 +75,12 @@ def make_sm(*, standstill=True, min_steer_speed=0.0):
   }
 
 
-def update_vcruise(vcruise, sm, toggles, *, now, v_ego=0.0, controls_enabled=True):
+def update_vcruise(vcruise, sm, toggles, *, now, v_ego=0.0, v_cruise=20.0, controls_enabled=True):
   return vcruise.update(
     controls_enabled=controls_enabled,
     now=now,
     time_validated=True,
-    v_cruise=20.0,
+    v_cruise=v_cruise,
     v_ego=v_ego,
     sm=sm,
     starpilot_toggles=toggles,
@@ -331,6 +331,49 @@ def test_csc_res_press_defers_to_slc_confirmation():
   result = update_vcruise(vcruise, sm, toggles, now=80.1, v_ego=20.0)
   assert result == pytest.approx(14.0)
   assert vcruise.csc_controlling_speed
+
+
+def test_curve_speed_controller_glow_stays_off_while_the_target_is_above_v_ego():
+  planner, vcruise = make_vcruise()
+  sm = make_sm(standstill=False)
+  toggles = make_toggles()
+  toggles.curve_speed_controller = True
+
+  # a highway sweeper trims the target well under the set speed but never under v_ego,
+  # so the car keeps accelerating and the driver feels nothing
+  def set_curve_target(_v_ego, _v_cruise):
+    vcruise.csc.target = 26.0
+
+  vcruise.csc.update_target = set_curve_target
+  result = update_vcruise(vcruise, sm, toggles, now=90.0, v_ego=20.0, v_cruise=30.0)
+
+  assert result == pytest.approx(26.0)
+  assert not vcruise.csc_controlling_speed
+
+
+def test_curve_speed_controller_glow_holds_through_the_recovery_ramp():
+  planner, vcruise = make_vcruise()
+  sm = make_sm(standstill=False)
+  toggles = make_toggles()
+  toggles.curve_speed_controller = True
+
+  curve_target = {"v": 14.0}
+
+  def set_curve_target(_v_ego, _v_cruise):
+    vcruise.csc.target = curve_target["v"]
+
+  vcruise.csc.update_target = set_curve_target
+  update_vcruise(vcruise, sm, toggles, now=100.0, v_ego=20.0)
+  assert vcruise.csc_controlling_speed
+
+  # past the apex the target climbs back above v_ego while the car is still cornering
+  curve_target["v"] = 18.0
+  update_vcruise(vcruise, sm, toggles, now=100.05, v_ego=15.0)
+  assert vcruise.csc_controlling_speed
+
+  curve_target["v"] = 20.0
+  update_vcruise(vcruise, sm, toggles, now=100.1, v_ego=17.0)
+  assert not vcruise.csc_controlling_speed
 
 
 def test_curve_speed_controller_hysteresis_keeps_glow_off_for_marginal_targets():

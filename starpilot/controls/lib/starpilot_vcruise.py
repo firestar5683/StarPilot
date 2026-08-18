@@ -568,7 +568,10 @@ class StarPilotVCruise:
         self.csc_target = v_cruise
       else:
         self.csc_target = self.csc.target
-        if self.csc_target < v_cruise - CSC_ACTIVE_ON_DELTA:
+        # a target under the set speed alone means nothing -- until it falls under v_ego
+        # the car is still accelerating toward it. Release still waits for the set speed,
+        # so the glow spans the whole recovery instead of clearing at the apex.
+        if self.csc_target < min(v_cruise - CSC_ACTIVE_ON_DELTA, v_ego):
           self.csc_controlling_speed = True
         elif self.csc_target > v_cruise - CSC_ACTIVE_OFF_DELTA:
           self.csc_controlling_speed = False

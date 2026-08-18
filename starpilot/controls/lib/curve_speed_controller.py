@@ -34,6 +34,7 @@ CSC_LAT_ACCEL_MAX = 3.2
 CSC_NUDGE = 0.15
 CSC_NUDGE_WEIGHT = 20             # counts a single override pseudo-sample is worth
 CSC_TRAINING_QUIET_TIME = 5.0     # blocks passive samples after CSC limited speed, so it can't learn its own cap
+CSC_TRAINING_SETTLE_TIME = 2.0    # driver-owned seconds before a sample counts, so it isn't openpilot's leftover speed
 # Learned values match the driver's own cornering, which alone would never slow them
 # below their habit. Speed scales as the square root, so 0.85 is ~8% slower.
 CSC_COMFORT_MARGIN = CSC_DEFAULT_MARGIN_PERCENT / 100.0
@@ -207,7 +208,9 @@ class CurveSpeedController:
 
     if not eligible:
       self.flush_data()
-      self.training_timer = 0.0
+      # decay instead of resetting: a lead flickering in and out of the tracker used to
+      # cost the full re-arm, which left almost nothing to learn from on a real drive
+      self.training_timer = max(self.training_timer - DT_MDL, 0.0)
       self.persistence_timer = 0.0
       return
 
@@ -216,7 +219,7 @@ class CurveSpeedController:
       self.persistence_timer += DT_MDL
 
     in_curve = (
-      self.training_timer >= PLANNER_TIME and
+      self.training_timer >= CSC_TRAINING_SETTLE_TIME and
       self.starpilot_planner.driving_in_curve and
       not (sm["carState"].leftBlinker or sm["carState"].rightBlinker)
     )

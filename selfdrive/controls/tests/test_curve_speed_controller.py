@@ -4,7 +4,7 @@ import pytest
 from types import SimpleNamespace
 
 from openpilot.common.realtime import DT_MDL
-from openpilot.starpilot.common.starpilot_variables import DEFAULT_LATERAL_ACCELERATION, PLANNER_TIME
+from openpilot.starpilot.common.starpilot_variables import DEFAULT_LATERAL_ACCELERATION
 from openpilot.starpilot.controls.lib.curve_speed_controller import (
   CSC_APPROACH_DECEL,
   CSC_COMFORT_MARGIN,
@@ -13,6 +13,7 @@ from openpilot.starpilot.controls.lib.curve_speed_controller import (
   CSC_LAT_ACCEL_MAX,
   CSC_MIN_SPEED,
   CSC_NUDGE_WEIGHT,
+  CSC_TRAINING_SETTLE_TIME,
   CurveSpeedController,
   weighted_isotonic,
 )
@@ -298,7 +299,7 @@ def test_legacy_off_grid_curvature_data_merges_into_buckets():
 def test_training_update_step_is_capped_by_ema_count():
   planner, controller = make_controller(curvature_data={"0.02": {"average": 2.0, "count": 10000}}, driving_in_curve=True)
   planner.lateral_acceleration = 3.0
-  controller.training_timer = PLANNER_TIME
+  controller.training_timer = CSC_TRAINING_SETTLE_TIME
 
   controller.log_data(10.0, make_sm(long_active=False))
 
@@ -313,15 +314,65 @@ def test_no_passive_training_right_after_csc_limited_speed():
   converge(controller, 15.0, 30.0)
   assert controller.training_quiet_timer > 0.0
 
-  controller.training_timer = PLANNER_TIME
+  controller.training_timer = CSC_TRAINING_SETTLE_TIME
   controller.log_data(10.0, make_sm(long_active=False))
   assert "0.02" not in controller.curvature_data
   assert not controller.enable_training
 
   controller.training_quiet_timer = 0.0
-  controller.training_timer = PLANNER_TIME
+  controller.training_timer = CSC_TRAINING_SETTLE_TIME
   controller.log_data(10.0, make_sm(long_active=False))
   assert controller.curvature_data["0.02"]["count"] == 1
+
+
+def test_training_settles_within_a_couple_of_seconds():
+  # a real drive rarely holds every eligibility condition for a whole model horizon,
+  # so the settle time has to be short enough that ordinary curves still teach it
+  planner, controller = make_controller(driving_in_curve=True)
+  planner.lateral_acceleration = 2.4
+  sm = make_sm(long_active=False)
+
+  for _ in range(int(CSC_TRAINING_SETTLE_TIME / DT_MDL) - 2):
+    controller.log_data(10.0, sm)
+  assert "0.02" not in controller.curvature_data
+
+  for _ in range(3):
+    controller.log_data(10.0, sm)
+  assert controller.curvature_data["0.02"]["count"] >= 1
+
+
+def test_brief_ineligibility_does_not_restart_the_settle_timer():
+  planner, controller = make_controller(driving_in_curve=True)
+  planner.lateral_acceleration = 2.4
+  sm = make_sm(long_active=False)
+  for _ in range(int(CSC_TRAINING_SETTLE_TIME / DT_MDL) + 1):
+    controller.log_data(10.0, sm)
+  trained = controller.curvature_data["0.02"]["count"]
+
+  # a lead flickers into the tracker for two frames, then leaves
+  planner.tracking_lead = True
+  controller.log_data(10.0, sm)
+  controller.log_data(10.0, sm)
+  planner.tracking_lead = False
+
+  controller.log_data(10.0, sm)
+  assert controller.curvature_data["0.02"]["count"] == trained + 1
+
+
+def test_sustained_ineligibility_still_drains_the_settle_timer():
+  planner, controller = make_controller(driving_in_curve=True)
+  planner.lateral_acceleration = 2.4
+  engaged = make_sm(long_active=True)
+  manual = make_sm(long_active=False)
+  for _ in range(int(CSC_TRAINING_SETTLE_TIME / DT_MDL) + 1):
+    controller.log_data(10.0, manual)
+
+  for _ in range(int(2 * CSC_TRAINING_SETTLE_TIME / DT_MDL)):
+    controller.log_data(10.0, engaged)
+  assert controller.training_timer == pytest.approx(0.0)
+
+  controller.log_data(10.0, manual)
+  assert not controller.enable_training
 
 
 def test_gas_override_nudges_bucket_up_once_per_episode():
