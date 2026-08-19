@@ -27,6 +27,9 @@ CSC_EGO_HEADROOM = 2.0            # target never trails below v_ego, so CSC can'
 CSC_RELEASE_DEBOUNCE = 0.25       # s the envelope must stay clear before that floor applies
 CSC_ACTIVE_ON_DELTA = 0.5
 CSC_ACTIVE_OFF_DELTA = 0.25
+CSC_GLOW_HOLD_TIME = 3.0          # s the cap must stay released before the glow clears; the
+                                  # on/off band is only ~0.5 mph wide, so a target hovering
+                                  # near the set speed crosses it repeatedly on one curve
 
 CSC_COUNT_CAP = 600               # EMA floor: samples beyond this stop shrinking the update step
 CSC_PRIOR_COUNT = 100             # bucket count at which learned data and the prior have equal weight

@@ -3,7 +3,9 @@ import datetime
 import pytest
 
 from openpilot.common.constants import CV
+from openpilot.common.realtime import DT_MDL
 from openpilot.starpilot.common.starpilot_variables import PLANNER_TIME
+from openpilot.starpilot.controls.lib.curve_speed_controller import CSC_GLOW_HOLD_TIME
 from openpilot.starpilot.controls.lib.starpilot_vcruise import (
   FORCE_STOP_TURN_VETO_STOP_SEEN_HOLD_TIME,
   StarPilotVCruise,
@@ -365,6 +367,85 @@ def test_csc_res_press_defers_to_slc_confirmation():
   assert vcruise.csc_controlling_speed
 
 
+def test_curve_speed_controller_glow_holds_through_a_brief_release():
+  planner, vcruise = make_vcruise()
+  sm = make_sm(standstill=False)
+  toggles = make_toggles()
+  toggles.curve_speed_controller = True
+
+  curve_target = {"v": 14.0}
+
+  def set_curve_target(_v_ego, _v_cruise):
+    vcruise.csc.target = curve_target["v"]
+
+  vcruise.csc.update_target = set_curve_target
+  update_vcruise(vcruise, sm, toggles, now=130.0, v_ego=20.0)
+  assert vcruise.csc_controlling_speed
+
+  # one curve routinely lets go and re-engages; the glow must ride through it
+  curve_target["v"] = 20.0
+  now = 130.0
+  for _ in range(int((CSC_GLOW_HOLD_TIME - 0.2) / DT_MDL)):
+    now += DT_MDL
+    update_vcruise(vcruise, sm, toggles, now=now, v_ego=20.0)
+    assert vcruise.csc_controlling_speed
+
+  curve_target["v"] = 14.0
+  now += DT_MDL
+  update_vcruise(vcruise, sm, toggles, now=now, v_ego=20.0)
+  assert vcruise.csc_controlling_speed
+
+
+def test_curve_speed_controller_glow_clears_once_the_release_sticks():
+  planner, vcruise = make_vcruise()
+  sm = make_sm(standstill=False)
+  toggles = make_toggles()
+  toggles.curve_speed_controller = True
+
+  curve_target = {"v": 14.0}
+
+  def set_curve_target(_v_ego, _v_cruise):
+    vcruise.csc.target = curve_target["v"]
+
+  vcruise.csc.update_target = set_curve_target
+  update_vcruise(vcruise, sm, toggles, now=140.0, v_ego=20.0)
+  assert vcruise.csc_controlling_speed
+
+  curve_target["v"] = 20.0
+  now = 140.0
+  for _ in range(int(CSC_GLOW_HOLD_TIME / DT_MDL) + 1):
+    now += DT_MDL
+    update_vcruise(vcruise, sm, toggles, now=now, v_ego=20.0)
+  assert not vcruise.csc_controlling_speed
+
+
+def test_curve_speed_controller_keeps_the_cap_when_signalling_mid_curve():
+  planner, vcruise = make_vcruise()
+  sm = make_sm(standstill=False)
+  toggles = make_toggles()
+  toggles.curve_speed_controller = True
+
+  def set_curve_target(_v_ego, _v_cruise):
+    vcruise.csc.target = 14.0
+
+  vcruise.csc.update_target = set_curve_target
+  result = update_vcruise(vcruise, sm, toggles, now=150.0, v_ego=20.0)
+  assert result == pytest.approx(14.0)
+
+  # a lane change taken inside a curve must not hand the speed back
+  planner.driving_in_curve = True
+  sm["carState"].leftBlinker = True
+  result = update_vcruise(vcruise, sm, toggles, now=150.05, v_ego=20.0)
+  assert result == pytest.approx(14.0)
+  assert vcruise.csc_controlling_speed
+
+  # on a straight it still yields, so CSC can't fight the manoeuvre
+  planner.driving_in_curve = False
+  result = update_vcruise(vcruise, sm, toggles, now=150.1, v_ego=20.0)
+  assert result == pytest.approx(20.0)
+  assert not vcruise.csc_controlling_speed
+
+
 def test_curve_speed_controller_glow_lights_when_the_car_arrives_at_the_cap_from_below():
   planner, vcruise = make_vcruise()
   sm = make_sm(standstill=False)
@@ -424,8 +505,15 @@ def test_curve_speed_controller_glow_holds_through_the_recovery_ramp():
   update_vcruise(vcruise, sm, toggles, now=100.05, v_ego=15.0)
   assert vcruise.csc_controlling_speed
 
+  # fully released, but the glow only clears once the release has stuck
   curve_target["v"] = 20.0
-  update_vcruise(vcruise, sm, toggles, now=100.1, v_ego=17.0)
+  now = 100.1
+  update_vcruise(vcruise, sm, toggles, now=now, v_ego=17.0)
+  assert vcruise.csc_controlling_speed
+
+  for _ in range(int(CSC_GLOW_HOLD_TIME / DT_MDL) + 1):
+    now += DT_MDL
+    update_vcruise(vcruise, sm, toggles, now=now, v_ego=17.0)
   assert not vcruise.csc_controlling_speed
 
 

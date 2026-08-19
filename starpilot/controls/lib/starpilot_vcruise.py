@@ -9,6 +9,7 @@ from openpilot.starpilot.common.starpilot_variables import CITY_SPEED_LIMIT, CRU
 from openpilot.starpilot.controls.lib.curve_speed_controller import (
   CSC_ACTIVE_OFF_DELTA,
   CSC_ACTIVE_ON_DELTA,
+  CSC_GLOW_HOLD_TIME,
   CurveSpeedController,
   is_manual_speed_control,
 )
@@ -188,6 +189,7 @@ class StarPilotVCruise:
     self._nav_instruction_state = {}
     self._applied_slc_control_target = 0.0
     self.csc_controlling_speed = False
+    self.csc_glow_release_timer = 0.0
     self.csc_override = False
     self.csc_target = 0.0
 
@@ -543,7 +545,12 @@ class StarPilotVCruise:
       starpilot_toggles.curve_speed_controller and
       (not getattr(starpilot_toggles, "csc_no_lead", False) or not following_lead)
     )
-    csc_blinker_on = sm["carState"].leftBlinker or sm["carState"].rightBlinker
+    # The blinker veto is for lane changes and turns, where the model's path curvature is the
+    # manoeuvre rather than the road. Already cornering, the cut is real: releasing it there let
+    # the car accelerate into the curve and then claw the speed back in one step when the
+    # blinker cleared, with the glow dark for the whole lane change.
+    csc_blinker_on = ((sm["carState"].leftBlinker or sm["carState"].rightBlinker) and
+                      not self.starpilot_planner.driving_in_curve)
     csc_was_controlling = self.csc_controlling_speed
     # a pending SLC confirmation owns the accel button
     slc_confirmation_pending = self.slc.speed_limit_changed_timer > DT_MDL and self.slc.unconfirmed_speed_limit >= 1
@@ -565,6 +572,7 @@ class StarPilotVCruise:
 
       if self.csc_override:
         self.csc_controlling_speed = False
+        self.csc_glow_release_timer = 0.0
         self.csc_target = v_cruise
       else:
         self.csc_target = self.csc.target
@@ -574,18 +582,26 @@ class StarPilotVCruise:
         # set speed, so the glow spans the hold and the whole recovery, not just the braking.
         if self.csc_target < v_cruise - CSC_ACTIVE_ON_DELTA and v_ego >= self.csc_target - CSC_ACTIVE_OFF_DELTA:
           self.csc_controlling_speed = True
+          self.csc_glow_release_timer = 0.0
         elif self.csc_target > v_cruise - CSC_ACTIVE_OFF_DELTA:
-          self.csc_controlling_speed = False
+          # hold through a brief release: one curve routinely lets go and re-engages
+          self.csc_glow_release_timer += DT_MDL
+          if self.csc_glow_release_timer >= CSC_GLOW_HOLD_TIME:
+            self.csc_controlling_speed = False
+        else:
+          self.csc_glow_release_timer = 0.0
     elif csc_available:
       # Blinker: release the cap so CSC can't fight a lane change, but keep planning.
       # Resetting here threw the braking plan away, so the restart re-planned from the
       # set speed with the curve much closer -- which arrived as a panic stop.
       self.csc.update_target(v_ego, v_cruise)
       self.csc_controlling_speed = False
+      self.csc_glow_release_timer = 0.0
       self.csc_target = v_cruise
     else:
       self.csc.reset(v_cruise)
       self.csc_controlling_speed = False
+      self.csc_glow_release_timer = 0.0
       self.csc_target = v_cruise
 
     self.csc.handle_override(v_ego, csc_was_controlling, sm, accel_button=csc_accel_button)
