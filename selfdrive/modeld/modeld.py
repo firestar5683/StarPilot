@@ -933,10 +933,7 @@ def main(demo=False):
     mt2 = time.perf_counter()
     model_execution_time = mt2 - mt1
 
-    if model_output is not None and vipc_dropped_frames > 0:
-      cloudlog.error(f"suppressing model output after dropping {vipc_dropped_frames} frames")
-
-    if model_output is not None and vipc_dropped_frames == 0:
+    if model_output is not None:
       modelv2_send = messaging.new_message('modelV2')
       starpilot_modelv2_send = messaging.new_message('starpilotModelV2')
       drivingdata_send = messaging.new_message('drivingModelData')

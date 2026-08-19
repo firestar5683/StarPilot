@@ -28,6 +28,9 @@ FOLLOW_TRANSITION_MIN_TTC = 6.0
 FOLLOW_HEADWAY_MARGIN = 0.90
 FOLLOW_SIGN_CROSS_STEP = 0.10
 FOLLOW_TRANSITION_MAX_BRAKE = 0.25
+FOLLOW_STEADY_DEADBAND_MAX_TARGET = 0.28
+FOLLOW_STEADY_DEADBAND_MAX_CLOSING = 0.75
+FOLLOW_STEADY_DEADBAND_MAX_HEADWAY_MARGIN = 0.90
 
 
 @dataclass(frozen=True)
@@ -184,6 +187,25 @@ def _transition_target(lead, v_ego: float, t_follow: float, previous: float, tar
   return limited if abs(limited - float(target)) > 1e-6 else None
 
 
+def _steady_follow_deadband(lead, v_ego: float, t_follow: float, previous: float, target: float) -> float:
+  """Remove only small sign reversals in an already matched, non-urgent follow."""
+  if not _matched(lead, v_ego, t_follow):
+    return float(target)
+  if float(lead.vLead) - float(v_ego) > 0.15:
+    return float(target)
+  if max(0.0, float(v_ego) - float(lead.vLead)) > FOLLOW_STEADY_DEADBAND_MAX_CLOSING:
+    return float(target)
+  if _headway(lead, v_ego) - float(t_follow) > FOLLOW_STEADY_DEADBAND_MAX_HEADWAY_MARGIN:
+    return float(target)
+  if (
+    float(previous) * float(target) < 0.0 and
+    abs(float(previous)) <= FOLLOW_STEADY_DEADBAND_MAX_TARGET and
+    abs(float(target)) <= FOLLOW_STEADY_DEADBAND_MAX_TARGET
+  ):
+    return 0.0
+  return float(target)
+
+
 def apply(lead_one, lead_two, *, source: str, active: bool, v_ego: float, t_follow: float,
           previous_target: float, raw_target: float, tracking: bool, post_departure: bool,
           blocked: bool, panic_bypass: bool) -> FollowResult:
@@ -202,7 +224,11 @@ def apply(lead_one, lead_two, *, source: str, active: bool, v_ego: float, t_foll
     target = max(target, floor)
   if cap is not None:
     target = min(target, cap)
-  transition = _transition_target(lead, v_ego, t_follow, previous_target, target)
-  if transition is not None:
-    target = transition
+  deadband_target = _steady_follow_deadband(lead, v_ego, t_follow, previous_target, target)
+  if deadband_target != target:
+    target = deadband_target
+  else:
+    transition = _transition_target(lead, v_ego, t_follow, previous_target, target)
+    if transition is not None:
+      target = transition
   return FollowResult(lead, cap, floor, target)

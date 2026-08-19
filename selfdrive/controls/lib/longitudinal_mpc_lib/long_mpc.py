@@ -138,6 +138,8 @@ LEAD_ACCEL_TAU = 1.5
 FCW_MIN_MODEL_PROB = 0.9
 FCW_MIN_CLOSING_SPEED = 0.5
 FCW_MAX_TTC = 4.0
+MODEL_LEAD_TRAJECTORY_MAX_LEAD_BRAKE = 0.5
+MODEL_LEAD_TRAJECTORY_MAX_CLOSING_TTC = 7.0
 
 
 # Fewer timestamps don't hurt performance and lead to
@@ -176,6 +178,17 @@ def build_model_lead_trajectory(model_lead, radar_lead, v_ego):
   raw_d_rel = float(getattr(radar_lead, "dRel", float("nan")))
   raw_v_lead = float(getattr(radar_lead, "vLead", float("nan")))
   if not np.isfinite(raw_d_rel) or not np.isfinite(raw_v_lead):
+    return None
+
+  # The model path is a comfort prediction, not the raw safety measurement.
+  # When the measured lead is already braking or the gap is closing quickly,
+  # keep the legacy raw-lead path so an optimistic model horizon cannot delay
+  # the first braking response.
+  raw_lead_brake = max(0.0, -float(getattr(radar_lead, "aLeadK", 0.0)))
+  closing_speed = max(0.0, float(v_ego) - raw_v_lead)
+  ttc = raw_d_rel / max(closing_speed, 1e-3) if closing_speed > 0.1 else float("inf")
+  if (raw_lead_brake > MODEL_LEAD_TRAJECTORY_MAX_LEAD_BRAKE or
+      (closing_speed > 0.75 and ttc < MODEL_LEAD_TRAJECTORY_MAX_CLOSING_TTC)):
     return None
 
   # The model contributes future deltas only. This preserves raw lead source

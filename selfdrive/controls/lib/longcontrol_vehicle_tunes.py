@@ -27,11 +27,11 @@ GM_TRUCK_TARGET_FILTER_DROP_BYPASS = 0.45
 TOYOTA_SIENNA_TARGET_FILTER_MIN_SPEED = 12.0
 TOYOTA_SIENNA_TARGET_FILTER_UP_TAU = 0.32
 TOYOTA_SIENNA_TARGET_FILTER_DOWN_TAU = 0.24
-TOYOTA_SIENNA_LOW_SPEED_ACCEL_UP_TAU = 0.35
+TOYOTA_SIENNA_LOW_SPEED_ACCEL_UP_TAU = 0.50
 TOYOTA_SIENNA_TARGET_FILTER_BRAKE_BYPASS = -0.75
 TOYOTA_SIENNA_TARGET_FILTER_DROP_BYPASS = 0.65
-TOYOTA_SIENNA_COMFORT_FILTER_MIN_SPEED = 5.0
-TOYOTA_SIENNA_COMFORT_FILTER_MIN_DISTANCE = 10.0
+TOYOTA_SIENNA_COMFORT_FILTER_MIN_SPEED = 1.0
+TOYOTA_SIENNA_COMFORT_FILTER_MIN_DISTANCE = 7.0
 TOYOTA_SIENNA_COMFORT_FILTER_MIN_TTC = 4.5
 TOYOTA_SIENNA_COMFORT_FILTER_MAX_CLOSING_SPEED = 4.0
 TOYOTA_SIENNA_COMFORT_FILTER_MAX_LEAD_BRAKE = 2.5
@@ -295,7 +295,9 @@ class LongControlVehicleTuning:
 
     if v_ego < TOYOTA_SIENNA_TARGET_FILTER_MIN_SPEED and not comfort_filter_active:
       if a_target > 0.0:
-        if not self.toyota_sienna_target_filter_initialized or self.toyota_sienna_filtered_a_target < 0.0:
+        if not self.toyota_sienna_target_filter_initialized or (
+          self.toyota_sienna_filtered_a_target < 0.0 and comfort_lead is None
+        ):
           self.toyota_sienna_filtered_a_target = 0.0
           self.toyota_sienna_target_filter_initialized = True
         alpha = DT_CTRL / (TOYOTA_SIENNA_LOW_SPEED_ACCEL_UP_TAU + DT_CTRL)
@@ -303,6 +305,11 @@ class LongControlVehicleTuning:
           float(a_target) - self.toyota_sienna_filtered_a_target
         )
         return self.toyota_sienna_filtered_a_target
+
+      if comfort_lead is not None:
+        self.toyota_sienna_filtered_a_target = float(a_target)
+        self.toyota_sienna_target_filter_initialized = True
+        return float(a_target)
 
       self.toyota_sienna_target_filter_initialized = False
       return a_target

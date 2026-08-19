@@ -76,6 +76,7 @@ FORCE_STOP_TURN_VETO_MAX_SPEED = 18.0 * CV.MPH_TO_MS
 FORCE_STOP_TURN_VETO_STEERING_ANGLE = 25.0
 FORCE_STOP_CURVE_VETO_MAX_ROAD_CURVATURE = 0.003
 FORCE_STOP_TURN_VETO_STOP_SEEN_HOLD_TIME = 4.0
+FORCE_STOP_DISTANCE_REANCHOR_MIN_GAP = 3.0  # m — ignore small model-horizon noise
 
 # Knob bounds (mirror of UI slider; defense in depth)
 OFFSET_FT_MIN = -20
@@ -645,18 +646,32 @@ class StarPilotVCruise:
         v_cruise = 0.0
       else:
         # Kinematic distance estimator (also published as forcingStopLength).
-        # Decay one-to-one with motion, clamp by current model_length so we adopt
-        # the model's view when it regains sight, and snap closer to DASH_SEED_M
-        # when the dashboard signal is active and the model agrees a stop is near.
+        # Decay one-to-one with motion. A force-stop cycle may otherwise retain
+        # an old short horizon forever, even after the model has reopened the
+        # path. Recover only for the CEM/model path and only when the model's
+        # explicit stop action is clear; a committed model stop remains sticky.
         self.tracked_model_length = max(self.tracked_model_length - (v_ego * DT_MDL), 0.0)
-        self.tracked_model_length = min(self.tracked_model_length, self.starpilot_planner.model_length)
+        model_length = float(self.starpilot_planner.model_length)
+        try:
+          model_wants_stop = bool(sm["modelV2"].action.shouldStop)
+        except (KeyError, AttributeError, TypeError):
+          model_wants_stop = False
+        if (
+          not dash_active and
+          self.tracked_model_length > force_stop_handoff_m and
+          not model_wants_stop and
+          model_length > self.tracked_model_length + FORCE_STOP_DISTANCE_REANCHOR_MIN_GAP
+        ):
+          self.tracked_model_length = model_length
+        else:
+          self.tracked_model_length = min(self.tracked_model_length, model_length)
         if dash_active:
-          if self.starpilot_planner.model_length < DASH_MODEL_AGREE_M:
+          if model_length < DASH_MODEL_AGREE_M:
             self.tracked_model_length = min(self.tracked_model_length, DASH_SEED_M)
           # inside the seed the model range is the better line estimate; letting it pull
           # tracked back up is what keeps an early snap from parking us short of the sign
-          if self.starpilot_planner.model_length < DASH_SEED_M:
-            self.tracked_model_length = self.starpilot_planner.model_length
+          if model_length < DASH_SEED_M:
+            self.tracked_model_length = model_length
 
         # A car stopped in the next lane marks the stop bar better than the model does.
         # Shortening clamp only — it can pull the stop in, never push it out.

@@ -729,6 +729,31 @@ def test_force_stop_stays_committed_while_moving_even_if_scene_opens():
   assert vcruise.forcing_stop
 
 
+def test_force_stop_reanchors_when_model_reopens_path_without_stop_action():
+  planner, vcruise = make_vcruise(red_light=False, raw_model_stopped=False, forcing_stop=True)
+  planner.model_length = 40.0
+  vcruise.tracked_model_length = 10.0
+  sm = make_sm(standstill=False)
+  sm["modelV2"] = SimpleNamespace(action=SimpleNamespace(shouldStop=False))
+
+  result = update_vcruise(vcruise, sm, make_toggles(), now=0.0, v_ego=1.5)
+
+  assert vcruise.tracked_model_length == pytest.approx(40.0)
+  assert result > 5.0
+
+
+def test_force_stop_does_not_reanchor_committed_model_stop():
+  planner, vcruise = make_vcruise(red_light=False, raw_model_stopped=False, forcing_stop=True)
+  planner.model_length = 40.0
+  vcruise.tracked_model_length = 10.0
+  sm = make_sm(standstill=False)
+  sm["modelV2"] = SimpleNamespace(action=SimpleNamespace(shouldStop=True))
+
+  update_vcruise(vcruise, sm, make_toggles(), now=0.0, v_ego=1.5)
+
+  assert vcruise.tracked_model_length < 10.0
+
+
 def test_force_stop_releases_after_cem_light_clears_while_moving():
   planner, vcruise = make_vcruise(red_light=True, raw_model_stopped=False, forcing_stop=True)
   sm = make_sm(standstill=False)

@@ -60,6 +60,18 @@ def test_follow_policy_limits_small_post_lead_reversal():
   assert result.target - (-0.08) <= 0.18
 
 
+def test_follow_policy_deadbands_small_steady_sign_reversal():
+  result = run(lead(d_rel=37.2, v_lead=24.0, radar=True), v_ego=24.0, previous=0.24, raw=-0.24)
+
+  assert result.target == pytest.approx(0.0)
+
+
+def test_follow_policy_deadband_does_not_mask_closing_lead():
+  result = run(lead(d_rel=37.2, v_lead=22.5, a_lead=-1.0, radar=True), v_ego=24.0, previous=0.24, raw=-0.24)
+
+  assert result.target < 0.0
+
+
 def test_follow_policy_never_relaxes_material_braking():
   result = run(lead(d_rel=25.0, v_lead=18.0), v_ego=25.0, previous=0.30, raw=-1.2)
   assert result.target == pytest.approx(-1.2)

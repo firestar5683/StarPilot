@@ -376,6 +376,17 @@ def test_model_lead_trajectory_falls_back_without_raw_lead_or_valid_shape():
   assert build_model_lead_trajectory(short_model_lead, raw_lead, 20.0) is None
 
 
+@pytest.mark.parametrize("d_rel,v_lead,a_lead", [
+  (42.0, 18.0, -0.6),
+  (8.0, 0.0, 0.0),
+])
+def test_model_lead_trajectory_falls_back_for_urgent_raw_lead(d_rel, v_lead, a_lead):
+  raw_lead = make_lead(status=True, d_rel=d_rel, v_lead=v_lead, a_lead=a_lead, model_prob=0.99)
+  _, model_lead = make_model_lead()
+
+  assert build_model_lead_trajectory(model_lead, raw_lead, 20.0) is None
+
+
 def set_model_launch_trajectory(model, *, wait_time: float = 0.6, accel: float = 1.0):
   times = np.asarray(ModelConstants.T_IDXS, dtype=float)
   moving_time = np.maximum(times - wait_time, 0.0)

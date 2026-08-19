@@ -95,6 +95,19 @@ def test_every_galaxy_setting_has_a_shared_settings_tier():
   assert None not in tiers
 
 
+def test_every_setting_parent_exposes_a_manage_control():
+  layout = _layout()
+
+  for section in layout:
+    params = section.get("params", [])
+    parent_keys = {param.get("parent_key") for param in params if param.get("parent_key")}
+    params_by_key = {param["key"]: param for param in params}
+    for parent_key in parent_keys:
+      assert params_by_key[parent_key].get("is_parent_toggle") is True, (
+        f"{section['name']} parent {parent_key} must expose its child settings"
+      )
+
+
 def test_requested_simple_and_advanced_settings_tiers():
   sections = _params_by_section(_layout())
   lateral = sections["Lateral (Steering)"]
