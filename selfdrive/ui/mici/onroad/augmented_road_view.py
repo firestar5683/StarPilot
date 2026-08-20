@@ -21,6 +21,7 @@ from openpilot.selfdrive.ui.mici.onroad.starpilot_status import (
 )
 from openpilot.selfdrive.ui.mici.onroad.cameraview import CameraView
 from openpilot.selfdrive.ui.onroad.starpilot.pip_sidecam import PipSideCamera
+from openpilot.selfdrive.ui.onroad.starpilot.starpilot_border import get_traffic_border_colors
 from openpilot.selfdrive.ui.lib.starpilot_visuals import get_border_width
 from openpilot.starpilot.common.favorite_slots import is_favorite_action_key, load_favorite_slots, toggle_favorite_slot
 from openpilot.system.ui.lib.application import FontWeight, gui_app, MousePos, MouseEvent
@@ -825,6 +826,17 @@ class AugmentedRoadView(CameraView):
       int(self._content_rect.height),
     )
     rl.draw_rectangle_rounded_lines_ex(border_rect, 0.12, 16, border_size, get_border_color(ui_state))
+
+    if (colors := get_traffic_border_colors()) is not None:
+      for x, w, color in (
+        (border_rect.x, border_rect.width / 2, colors[0]),
+        (border_rect.x + border_rect.width / 2, border_rect.width - border_rect.width / 2, colors[1]),
+      ):
+        if color.a > 0:
+          rl.begin_scissor_mode(int(x), int(border_rect.y), int(w), int(border_rect.height))
+          rl.draw_rectangle_rounded_lines_ex(border_rect, 0.12, 16, border_size, color)
+          rl.end_scissor_mode()
+
     rl.end_scissor_mode()
 
   def _get_border_width(self) -> int:
