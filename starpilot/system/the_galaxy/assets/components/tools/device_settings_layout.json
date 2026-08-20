@@ -359,12 +359,12 @@
       {
         "key": "VASMConfidenceThreshold",
         "label": "Confidence Threshold",
-        "description": "Minimum vehicle-detection confidence (0.25-1.00, default 0.85). Higher values reduce false positives but may miss detections.",
+        "description": "Minimum vehicle-detection confidence (0.80-1.00, default 0.94). Higher values reduce false positives but may miss detections.",
         "data_type": "float",
         "ui_type": "numeric",
-        "min": 0.25,
+        "min": 0.80,
         "max": 1.00,
-        "step": 0.05,
+        "step": 0.01,
         "precision": 2,
         "parent_key": "VASMEnabled",
         "settings_tier": "advanced"

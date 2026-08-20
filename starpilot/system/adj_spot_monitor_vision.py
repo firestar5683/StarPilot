@@ -20,9 +20,9 @@ from openpilot.starpilot.system.adj_spot_monitor_vision_inference import VASMInf
 V_ASM_AFFINITY_CORES = [2]
 V_ASM_SOLO_AFFINITY_CORES = [0, 1, 2]
 
-BASE_INTERVAL = 0.750
-FOLLOWUP_INTERVAL = 0.200
-FOLLOWUP_WINDOW = 1.5
+BASE_INTERVAL = 1.000
+FOLLOWUP_INTERVAL = 0.300
+FOLLOWUP_WINDOW = 1.0
 
 PARAM_REFRESH_INTERVAL = 2.0
 STATUS_LOG_INTERVAL = 10.0
@@ -78,10 +78,13 @@ class VASMDaemon:
   def _cache_params(self):
     self._enabled = self.params.get_bool("VASMEnabled")
     self._slv_enabled = self.params.get_bool("VisionSpeedLimitDetection")
-    confidence_threshold = self.params.get_float("VASMConfidenceThreshold") or 0.85
-    smooth_seconds = self.params.get_float("VASMSmoothSeconds") or 0.2
-    self._conf_thresh = min(max(confidence_threshold, 0.25), 1.0)
-    self._smooth_sec = min(max(smooth_seconds, 0.1), 0.5)
+
+    confidence_threshold = self.params.get_float("VASMConfidenceThreshold")
+    smooth_seconds = self.params.get_float("VASMSmoothSeconds")
+
+    self._conf_thresh = min(max(confidence_threshold, 0.80), 1.00)
+    self._smooth_sec = min(max(smooth_seconds, 0.01), 0.50)
+    self._conf_hold_off = max(0.0, self._conf_thresh - 0.15)
 
   def _maybe_refresh_params(self, now):
     if now - self._last_param_refresh >= PARAM_REFRESH_INTERVAL:
@@ -256,6 +259,7 @@ class VASMDaemon:
           conf_thresh=self._conf_thresh,
           smooth_sec=self._smooth_sec,
           side_to_infer=self.current_side,
+          conf_hold_off=self._conf_hold_off,
         )
 
         self._inference_count += 1

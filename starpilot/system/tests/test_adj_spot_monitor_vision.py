@@ -3,7 +3,7 @@ from pathlib import Path
 import numpy as np
 
 from starpilot.system.adj_spot_monitor_vision import VASMDaemon
-from starpilot.system.adj_spot_monitor_vision_inference import MODEL_INPUT_H, MODEL_INPUT_W, V_ASM_MODEL_PATH, VASMInference
+from starpilot.system.adj_spot_monitor_vision_inference import MODEL_INPUT_SIZE, V_ASM_MODEL_PATH, VASMInference
 
 
 class FakeParams:
@@ -55,23 +55,51 @@ def test_model_loads_with_repo_inference_backend():
   inference = VASMInference(V_ASM_MODEL_PATH)
 
   assert inference.load(), inference.last_error
-  inference.net.setInput(np.zeros((1, 3, MODEL_INPUT_H, MODEL_INPUT_W), dtype=np.float32))
+  inference.net.setInput(np.zeros((1, 3, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE), dtype=np.float32))
 
-  assert inference.net.forward().shape == (1, 299, 6)
+  out = inference.net.forward()
+  # Supports both tri-class (1, 3) master model and legacy binary (1, 2)
+  assert out.shape in ((1, 3), (1, 2)), out.shape
 
 
 def test_model_runs_from_nv12_camera_frame():
   inference = VASMInference(V_ASM_MODEL_PATH)
   assert inference.load(), inference.last_error
   inference.load_config({
-    "width": MODEL_INPUT_W,
-    "height": MODEL_INPUT_H,
-    "poly_left": [[0, 0], [MODEL_INPUT_W, 0], [MODEL_INPUT_W, MODEL_INPUT_H], [0, MODEL_INPUT_H]],
+    "width": MODEL_INPUT_SIZE,
+    "height": MODEL_INPUT_SIZE,
+    "poly_left": [[0, 0], [MODEL_INPUT_SIZE, 0], [MODEL_INPUT_SIZE, MODEL_INPUT_SIZE], [0, MODEL_INPUT_SIZE]],
     "poly_right": [],
   })
-  nv12 = np.zeros((MODEL_INPUT_H * 3 // 2, MODEL_INPUT_W), dtype=np.uint8)
+  nv12 = np.zeros((MODEL_INPUT_SIZE * 3 // 2, MODEL_INPUT_SIZE), dtype=np.uint8)
 
-  assert inference.update(nv12, MODEL_INPUT_W, MODEL_INPUT_H, 0.5, 1.0, 0.2, "left") == (False, False)
+  assert inference.update(nv12, MODEL_INPUT_SIZE, MODEL_INPUT_SIZE, 0.5, 0.85, 0.05, "left") == (False, False)
+
+
+def test_classifier_output_maps_class_1_confidence():
+  inference = VASMInference(Path("unused.onnx"))
+  inference.load_config({
+    "width": 100, "height": 100,
+    "poly_left": [[0, 0], [100, 0], [100, 100], [0, 100]],
+    "poly_right": [],
+  })
+  inference._prepare_geometry(100, 100)
+
+  class FakeNet:
+    def setInput(self, blob):
+      pass
+
+    def forward(self):
+      # Tri-class output: [0_nocar, 1_car, 2_distant_or_rear]
+      return np.array([[0.05, 0.95, 0.00]], dtype=np.float32)
+
+  inference.net = FakeNet()
+  inference._valid = True
+  left_active, right_active = inference.update(
+    np.zeros((150, 100), dtype=np.uint8), 100, 100, 0.5, 0.85, 0.05, "left"
+  )
+  assert inference.left_confidence == np.float32(0.95)
+  assert left_active and not right_active
 
 
 def test_annotation_changes_reload_without_process_restart():

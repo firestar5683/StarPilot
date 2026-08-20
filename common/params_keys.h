@@ -692,7 +692,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"UserFavorites", {PERSISTENT, STRING, "", "", 1}},
     {"UseVienna", {PERSISTENT, BOOL, "0", "0", 1, SETTINGS_SIMPLE}},
     {"VASMAnnotationConfig", {PERSISTENT, JSON, "{}", "{}", 2}},
-    {"VASMConfidenceThreshold", {PERSISTENT, FLOAT, "0.85", "0.85", 2}},
+    {"VASMConfidenceThreshold", {PERSISTENT, FLOAT, "0.94", "0.94", 2}},
     {"VASMEnabled", {PERSISTENT, BOOL, "0", "0", 1}},
     {"VASMLeftActive", {CLEAR_ON_MANAGER_START, STRING, "0", "0", 2}},
     {"VASMLeftConfidence", {CLEAR_ON_MANAGER_START, STRING, "0.0", "0.0", 2}},

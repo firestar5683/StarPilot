@@ -5,13 +5,9 @@ import cv2
 import numpy as np
 
 _ASSETS = Path(__file__).resolve().parents[1] / "assets" / "vision_models"
-# The bundled export keeps 299 final candidates so OpenCV's TopK importer can load it.
 V_ASM_MODEL_PATH = _ASSETS / "v_asm_model.onnx"
 
-MODEL_INPUT_H = 256
-MODEL_INPUT_W = 352
-HYSTERESIS_ON = 0.65
-HYSTERESIS_OFF = 0.25
+MODEL_INPUT_SIZE = 352
 
 
 class VASMInference:
@@ -27,7 +23,12 @@ class VASMInference:
     self.config_width = 0
     self.config_height = 0
     self.masks = {"left": None, "right": None}
-    self.bboxes = {"left": None, "right": None, "left_raw": None, "right_raw": None}
+    self.bboxes = {
+        "left": None,
+        "right": None,
+        "left_raw": None,
+        "right_raw": None,
+    }
 
   def load(self) -> bool:
     if not self.model_path.is_file():
@@ -59,9 +60,26 @@ class VASMInference:
 
   @property
   def configured_sides(self):
-    return tuple(side for side in ("left", "right") if self.bboxes.get(f"{side}_raw") is not None)
+    return tuple(
+        side
+        for side in ("left", "right")
+        if self.bboxes.get(f"{side}_raw") is not None
+    )
 
-  def _prepare_geometry(self, h, w):
+  def load_config(self, config: dict):
+    self.frame_res = (0, 0)
+    self.config_width = config.get("width", 0)
+    self.config_height = config.get("height", 0)
+
+    for side in ("left", "right"):
+      poly = config.get(f"poly_{side}", [])
+      if len(poly) >= 3:
+        self.bboxes[f"{side}_raw"] = np.array(poly, dtype=np.float32)
+      else:
+        self.bboxes[f"{side}_raw"] = None
+        self.bboxes[side] = None
+
+  def _prepare_geometry(self, h: int, w: int):
     if (h, w) == self.frame_res:
       return
     self.frame_res = (h, w)
@@ -82,15 +100,10 @@ class VASMInference:
 
       bx, by, bw, bh = cv2.boundingRect(pts.astype(np.int32))
 
-      bx = (bx // 2) * 2
-      by = (by // 2) * 2
-      bw = ((bw + 1) // 2) * 2
-      bh = ((bh + 1) // 2) * 2
-
-      bx = max(0, min(bx, w - 2))
-      by = max(0, min(by, h - 2))
-      bw = max(2, min(bw, w - bx))
-      bh = max(2, min(bh, h - by))
+      bx = max(0, min((bx // 2) * 2, w - 2))
+      by = max(0, min((by // 2) * 2, h - 2))
+      bw = max(2, min(((bw + 1) // 2) * 2, w - bx))
+      bh = max(2, min(((bh + 1) // 2) * 2, h - by))
 
       bw = (bw // 2) * 2
       bh = (bh // 2) * 2
@@ -101,39 +114,33 @@ class VASMInference:
       cv2.fillPoly(mask, [pts.astype(np.int32) - [bx, by]], 255)
       self.masks[side] = mask
 
-  def load_config(self, config: dict):
-    self.frame_res = (0, 0)
-    self.config_width = config.get("width", 0)
-    self.config_height = config.get("height", 0)
-
-    for side in ("left", "right"):
-      poly = config.get(f"poly_{side}", [])
-      if len(poly) >= 3:
-        self.bboxes[f"{side}_raw"] = np.array(poly, dtype=np.float32)
-      else:
-        self.bboxes[f"{side}_raw"] = None
-        self.bboxes[side] = None
-
-  def _run_inference(self, raw_image, height, side):
+  def _run_inference(self, raw_image: np.ndarray, height: int, side: str) -> float:
     bbox = self.bboxes[side]
     if bbox is None or self.net is None:
       return 0.0
 
     x, y, w, h = bbox
 
-    # Slice NV12 directly
-    y_crop = raw_image[y: y + h, x: x + w]
-    uv_crop = raw_image[height + y // 2: height + (y + h) // 2, x: x + w]
+    y_crop = raw_image[y : y + h, x : x + w]
+    uv_crop = raw_image[height + y // 2 : height + (y + h) // 2, x : x + w]
     nv12_crop = np.vstack([y_crop, uv_crop])
 
-    # Convert cropped area directly from YUV NV12 to RGB (1-step, avoids double conversion)
     crop_rgb = cv2.cvtColor(nv12_crop, cv2.COLOR_YUV2RGB_NV12)
     if self.masks[side] is not None:
       crop_rgb = cv2.bitwise_and(crop_rgb, crop_rgb, mask=self.masks[side])
 
-    # Preprocess -> NCHW Float32 [0.0 - 1.0]
-    resized = cv2.resize(crop_rgb, (MODEL_INPUT_W, MODEL_INPUT_H), interpolation=cv2.INTER_LINEAR)
-    blob = resized.astype(np.float32) / 255.0
+    rs = MODEL_INPUT_SIZE
+    ch, cw = crop_rgb.shape[:2]
+    scale = rs / float(max(ch, cw))
+    nh, nw = int(round(ch * scale)), int(round(cw * scale))
+    resized = cv2.resize(crop_rgb, (nw, nh), interpolation=cv2.INTER_LINEAR)
+
+    crop_sq = np.zeros((rs, rs, 3), dtype=np.uint8)
+    top = (rs - nh) // 2
+    left = (rs - nw) // 2
+    crop_sq[top : top + nh, left : left + nw] = resized
+
+    blob = crop_sq.astype(np.float32) / 255.0
     blob = np.transpose(blob, (2, 0, 1))
     blob = np.expand_dims(blob, axis=0)
 
@@ -141,50 +148,57 @@ class VASMInference:
     out = self.net.forward()
 
     preds = np.squeeze(out)
-    if preds.ndim == 2:
-      if preds.shape[0] < preds.shape[1]:
-        preds = preds.T
-      if preds.shape[1] >= 6:
-        is_class_0 = (np.round(preds[:, 5]).astype(int) == 0)
-        relevant = preds[is_class_0]
-        if len(relevant) == 0:
-          return 0.0
-        return float(np.max(relevant[:, 4]))
-      elif preds.shape[1] >= 5:
-        return float(np.max(preds[:, 4]))
-      else:
-        return float(np.max(preds[:, 0]))
-    elif preds.ndim == 1 and preds.size > 0:
-      return float(np.max(preds))
+
+    # Direct output for Class 1 ('1_car' blindspot threat in tri-class model)
+    if preds.ndim >= 1 and preds.size > 0:
+      return float(preds[1]) if len(preds) > 1 else float(preds[0])
+
     return 0.0
 
-  def update(self, raw_image, width, height, dt, conf_thresh, smooth_sec, side_to_infer):
+  def update(
+      self,
+      raw_image: np.ndarray,
+      width: int,
+      height: int,
+      dt: float,
+      conf_thresh: float,
+      smooth_sec: float,
+      side_to_infer: str,
+      conf_hold_off: float | None = None,
+  ) -> tuple[bool, bool]:
     if not self._valid:
       return False, False
+
+    if conf_hold_off is None:
+      conf_hold_off = max(0.0, conf_thresh - 0.15)
 
     self._prepare_geometry(height, width)
     alpha = min(1.0, dt / max(smooth_sec, 0.001))
 
     raw_conf = self._run_inference(raw_image, height, side_to_infer)
+
     if side_to_infer == "left":
-      if raw_conf >= conf_thresh:
-        self._l_score = min(1.0, self._l_score + alpha)
-      else:
-        self._l_score = max(0.0, self._l_score - alpha)
       self.left_confidence = raw_conf
-      if self._l_score >= HYSTERESIS_ON:
-        self.left_active = True
-      elif self._l_score <= HYSTERESIS_OFF:
-        self.left_active = False
-    else:
-      if raw_conf >= conf_thresh:
-        self._r_score = min(1.0, self._r_score + alpha)
+      # Exponential Moving Average Smoothing
+      self._l_score = (1.0 - alpha) * self._l_score + alpha * raw_conf
+
+      # Dual-Threshold Hysteresis Logic
+      if not self.left_active:
+        if self._l_score >= conf_thresh:
+          self.left_active = True
       else:
-        self._r_score = max(0.0, self._r_score - alpha)
+        if self._l_score < conf_hold_off:
+          self.left_active = False
+
+    else:
       self.right_confidence = raw_conf
-      if self._r_score >= HYSTERESIS_ON:
-        self.right_active = True
-      elif self._r_score <= HYSTERESIS_OFF:
-        self.right_active = False
+      self._r_score = (1.0 - alpha) * self._r_score + alpha * raw_conf
+
+      if not self.right_active:
+        if self._r_score >= conf_thresh:
+          self.right_active = True
+      else:
+        if self._r_score < conf_hold_off:
+          self.right_active = False
 
     return self.left_active, self.right_active
