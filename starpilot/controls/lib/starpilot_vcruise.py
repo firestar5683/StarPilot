@@ -8,8 +8,8 @@ from openpilot.common.realtime import DT_MDL
 from openpilot.starpilot.common.starpilot_variables import CITY_SPEED_LIMIT, CRUISING_SPEED
 from openpilot.starpilot.controls.lib.curve_speed_controller import (
   CSC_ACTIVE_OFF_DELTA,
-  CSC_ACTIVE_ON_DELTA,
   CSC_GLOW_HOLD_TIME,
+  CSC_GLOW_ON_DELTA,
   CurveSpeedController,
   is_manual_speed_control,
 )
@@ -581,7 +581,7 @@ class StarPilotVCruise:
         # reached it, whether by being slowed down to it or by accelerating up into it. The
         # second reading of CSC_ACTIVE_OFF_DELTA is that margin. Release still waits for the
         # set speed, so the glow spans the hold and the whole recovery, not just the braking.
-        if self.csc_target < v_cruise - CSC_ACTIVE_ON_DELTA and v_ego >= self.csc_target - CSC_ACTIVE_OFF_DELTA:
+        if self.csc_target < v_cruise - CSC_GLOW_ON_DELTA and v_ego >= self.csc_target - CSC_ACTIVE_OFF_DELTA:
           self.csc_controlling_speed = True
           self.csc_glow_release_timer = 0.0
         elif self.csc_target > v_cruise - CSC_ACTIVE_OFF_DELTA:

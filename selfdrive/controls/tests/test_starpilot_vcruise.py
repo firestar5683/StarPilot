@@ -5,7 +5,7 @@ import pytest
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
 from openpilot.starpilot.common.starpilot_variables import PLANNER_TIME
-from openpilot.starpilot.controls.lib.curve_speed_controller import CSC_GLOW_HOLD_TIME
+from openpilot.starpilot.controls.lib.curve_speed_controller import CSC_GLOW_HOLD_TIME, CSC_GLOW_ON_DELTA
 from openpilot.starpilot.controls.lib.starpilot_vcruise import (
   FORCE_STOP_TURN_VETO_STOP_SEEN_HOLD_TIME,
   StarPilotVCruise,
@@ -365,6 +365,24 @@ def test_csc_res_press_defers_to_slc_confirmation():
   result = update_vcruise(vcruise, sm, toggles, now=80.1, v_ego=20.0)
   assert result == pytest.approx(14.0)
   assert vcruise.csc_controlling_speed
+
+
+def test_curve_speed_controller_glow_ignores_a_trivial_graze():
+  planner, vcruise = make_vcruise()
+  sm = make_sm(standstill=False)
+  toggles = make_toggles()
+  toggles.curve_speed_controller = True
+
+  # a long gentle bend where the envelope only shaves a little: the target hovers either
+  # side of the threshold for the whole curve, so a low bar strobes the glow
+  def set_curve_target(_v_ego, _v_cruise):
+    vcruise.csc.target = 20.0 - (CSC_GLOW_ON_DELTA / 2.0)
+
+  vcruise.csc.update_target = set_curve_target
+  result = update_vcruise(vcruise, sm, toggles, now=160.0, v_ego=20.0)
+
+  assert result < 20.0                      # the cap is still applied
+  assert not vcruise.csc_controlling_speed  # it just isn't worth announcing
 
 
 def test_curve_speed_controller_glow_holds_through_a_brief_release():

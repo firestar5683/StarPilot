@@ -27,6 +27,10 @@ CSC_EGO_HEADROOM = 2.0            # target never trails below v_ego, so CSC can'
 CSC_RELEASE_DEBOUNCE = 0.25       # s the envelope must stay clear before that floor applies
 CSC_ACTIVE_ON_DELTA = 0.5
 CSC_ACTIVE_OFF_DELTA = 0.25
+CSC_GLOW_ON_DELTA = 1.0           # ~2.2 mph. Separate from CSC_ACTIVE_ON_DELTA, which arms the
+                                  # training quiet timer and must stay sensitive. A graze this
+                                  # small isn't worth showing, and on a long gentle curve the
+                                  # target hovers across a lower threshold for the whole bend.
 CSC_GLOW_HOLD_TIME = 3.0          # s the cap must stay released before the glow clears; the
                                   # on/off band is only ~0.5 mph wide, so a target hovering
                                   # near the set speed crosses it repeatedly on one curve
