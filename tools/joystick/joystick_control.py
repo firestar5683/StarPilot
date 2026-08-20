@@ -1,17 +1,30 @@
 #!/usr/bin/env python3
 import os
+import time
 import argparse
 import threading
 import numpy as np
+import inputs
 from inputs import UnpluggedError, get_gamepad
 
 from cereal import messaging
 from openpilot.common.params import Params
 from openpilot.common.realtime import Ratekeeper
+from openpilot.common.swaglog import cloudlog
 from openpilot.system.hardware import HARDWARE
 from openpilot.tools.lib.kbhit import KBHit
 
 EXPO = 0.4
+
+# Per-controller config keyed on a substring of the `inputs` gamepad name.
+# accel = right stick vertical (up = gas). Axis codes and raw ranges (signed vs
+# unsigned) differ per pad — use tools/joystick/joystick_probe.py to add one.
+CONTROLLER_PROFILES = {
+  'Stadia':    {'name': 'Stadia',    'steer': 'ABS_X', 'accel': 'ABS_RZ', 'lo': 0.,      'hi': 255.},
+  'X-Box':     {'name': 'Xbox',      'steer': 'ABS_X', 'accel': 'ABS_RY', 'lo': -32768., 'hi': 32767.},
+  'DualSense': {'name': 'DualSense', 'steer': 'ABS_X', 'accel': 'ABS_RY', 'lo': 0.,      'hi': 255.},
+}
+DEFAULT_PROFILE = 'X-Box'
 
 
 class Keyboard:
@@ -42,35 +55,55 @@ class Keyboard:
 
 class Joystick:
   def __init__(self):
-    # This class supports a PlayStation 5 DualSense controller on the comma 3X
-    # TODO: find a way to get this from API or detect gamepad/PC, perhaps "inputs" doesn't support it
-    self.cancel_button = 'BTN_NORTH'  # BTN_NORTH=X/triangle
-    if HARDWARE.get_device_type() == 'pc':
-      accel_axis = 'ABS_Z'
-      steer_axis = 'ABS_RX'
-      # TODO: once the longcontrol API is finalized, we can replace this with outputting gas/brake and steering
-      self.flip_map = {'ABS_RZ': accel_axis}
-    else:
-      accel_axis = 'ABS_RX'
-      steer_axis = 'ABS_X'
-      self.flip_map = {'ABS_RY': accel_axis}
+    self.cancel_button = 'BTN_NORTH'
+    self.is_pc = HARDWARE.get_device_type() == 'pc'
+    self._last_scan = 0.
+    self._load_profile()
 
-    self.min_axis_value = {accel_axis: 0., steer_axis: 0.}
-    self.max_axis_value = {accel_axis: 255., steer_axis: 255.}
+  def _load_profile(self):
+    if self.is_pc:
+      # DualSense over a laptop for development
+      accel_axis, steer_axis = 'ABS_Z', 'ABS_RX'
+      self.flip_map = {'ABS_RZ': accel_axis}
+      raw_min, raw_max, self.deadzone = 0., 255., 0.03
+      name, prof_name = 'pc', 'pc'
+    else:
+      name = inputs.devices.gamepads[0].name if inputs.devices.gamepads else ''
+      prof = next((p for key, p in CONTROLLER_PROFILES.items() if key in name), CONTROLLER_PROFILES[DEFAULT_PROFILE])
+      accel_axis, steer_axis = prof['accel'], prof['steer']
+      self.flip_map = {}
+      raw_min, raw_max, self.deadzone = prof['lo'], prof['hi'], 0.10
+      prof_name = prof['name']
+
+    cloudlog.info(f"joystick_control: gamepad='{name}' using profile '{prof_name}'")
+    self.min_axis_value = {accel_axis: raw_min, steer_axis: raw_min}
+    self.max_axis_value = {accel_axis: raw_max, steer_axis: raw_max}
     self.axes_values = {accel_axis: 0., steer_axis: 0.}
     self.axes_order = [accel_axis, steer_axis]
     self.cancel = False
+
+  def _rescan(self):
+    # `inputs` enumerates /dev/input once at import, so a pad that wasn't ready at boot (or was
+    # hot-swapped) never gets read. Re-scan so it's picked up without a restart. Throttled to 1s.
+    now = time.monotonic()
+    if now - self._last_scan < 1.0:
+      return
+    self._last_scan = now
+    inputs.devices = inputs.DeviceManager()
+    if not self.is_pc and inputs.devices.gamepads:
+      self._load_profile()
 
   def update(self):
     try:
       joystick_event = get_gamepad()[0]
     except (OSError, UnpluggedError):
       self.axes_values = dict.fromkeys(self.axes_values, 0.)
+      self._rescan()
+      time.sleep(0.1)  # no controller; avoid busy-spin
       return False
 
     event = (joystick_event.code, joystick_event.state)
 
-    # flip left trigger to negative accel
     if event[0] in self.flip_map:
       event = (self.flip_map[event[0]], -event[1])
 
@@ -80,11 +113,8 @@ class Joystick:
       elif event[1] == 0:   # state 0 is falling edge
         self.cancel = False
     elif event[0] in self.axes_values:
-      self.max_axis_value[event[0]] = max(event[1], self.max_axis_value[event[0]])
-      self.min_axis_value[event[0]] = min(event[1], self.min_axis_value[event[0]])
-
       norm = -float(np.interp(event[1], [self.min_axis_value[event[0]], self.max_axis_value[event[0]]], [-1., 1.]))
-      norm = norm if abs(norm) > 0.03 else 0.  # center can be noisy, deadzone of 3%
+      norm = norm if abs(norm) > self.deadzone else 0.  # center can be noisy
       self.axes_values[event[0]] = EXPO * norm ** 3 + (1 - EXPO) * norm  # less action near center for fine control
     else:
       return False
@@ -100,9 +130,11 @@ def send_thread(joystick):
     if rk.frame % 20 == 0:
       print('\n' + ', '.join(f'{name}: {round(v, 3)}' for name, v in joystick.axes_values.items()))
 
+    # _rescan() may swap the axis map from another thread
+    values, order = joystick.axes_values, joystick.axes_order
     joystick_msg = messaging.new_message('testJoystick')
     joystick_msg.valid = True
-    joystick_msg.testJoystick.axes = [joystick.axes_values[ax] for ax in joystick.axes_order]
+    joystick_msg.testJoystick.axes = [values.get(ax, 0.) for ax in order]
 
     pm.send('testJoystick', joystick_msg)
 
