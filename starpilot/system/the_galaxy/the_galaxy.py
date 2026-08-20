@@ -6413,7 +6413,7 @@ def setup(app):
       "dashboard": dashboard_stats,
     }
     _STATS_RESPONSE_CACHE.update({
-      "updated_at": cache_now,
+      "updated_at": time.monotonic(),
       "payload": payload,
     })
     return payload
