@@ -8454,7 +8454,8 @@ def setup(app):
   def pip_preview_get_config():
     if not params.get_bool("GalaxyDeveloperMode"):
       return jsonify({"error": "PiP Side Camera is available only with Galaxy Developer Mode enabled."}), 403
-    return jsonify(_decode_json_object(params.get("PIPPreviewMask")))
+    mask = _decode_json_object(params.get("PIPPreviewMask"))
+    return jsonify({"device_type": HARDWARE.get_device_type(), "mask": mask})
 
   @app.route("/api/pip_preview/config", methods=["POST"])
   def pip_preview_save_config():

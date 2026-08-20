@@ -39,7 +39,7 @@ class StarPilotOnroadView(AugmentedRoadView):
     self._max_fps = 0.0
     self._avg_fps = 0.0
 
-    self._pip_sidecam = PipSideCamera()
+    self._pip_sidecam = self._child(PipSideCamera())
 
     self.layout_manager = WidgetLayoutManager(self._content_rect)
 

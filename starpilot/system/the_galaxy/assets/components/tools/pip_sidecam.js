@@ -35,6 +35,97 @@ const state = reactive({
 let _loadedImage = null;
 let _lastCanvas = null;
 let loadedConfig = null;
+let deviceType = null;
+
+const C4_ROAD_ASPECT = 476 / 240;
+
+function isC4() {
+  return (deviceType || "").toLowerCase() === "mici";
+}
+
+function drawCurvedRect(ctx, x, y, w, h) {
+  const r = Math.min(w, h) * 0.22;
+  ctx.beginPath();
+  ctx.moveTo(x + r, y);
+  ctx.arcTo(x + w, y, x + w, y + h, r);
+  ctx.arcTo(x + w, y + h, x, y + h, r);
+  ctx.arcTo(x, y + h, x, y, r);
+  ctx.arcTo(x, y, x + w, y, r);
+  ctx.closePath();
+}
+
+function cropSource(ctx, img, center, zoom) {
+  const cw = ctx.canvas.width;
+  const ch = ctx.canvas.height;
+  const nativeW = img.naturalWidth;
+  const nativeH = img.naturalHeight;
+  const [cx, cy] = center;
+  const nativeCx = (cw - cx) * nativeW / cw;
+  const nativeCy = cy * nativeH / ch;
+  const nativeZoom = zoom * nativeW / cw;
+  return { cw, ch, cx, cy, nativeCx, nativeCy, nativeZoom };
+}
+
+function drawC4Preview(ctx, img, center, zoom, color) {
+  const { cw, ch, cx, cy, nativeCx, nativeCy, nativeZoom } = cropSource(ctx, img, center, zoom);
+
+  let w = Math.min(zoom * 1.1, cw * 0.55);
+  w = Math.max(60, w);
+  let h = w / C4_ROAD_ASPECT;
+  if (h > ch * 0.5) {
+    h = ch * 0.5;
+    w = h * C4_ROAD_ASPECT;
+  }
+  const x = cx - w / 2;
+  const y = cy - h / 2;
+  const aspect = w / h;
+  const sx = nativeCx - nativeZoom / 2;
+  const sh = nativeZoom / aspect;
+  const sy = nativeCy - sh / 2;
+
+  ctx.save();
+  drawCurvedRect(ctx, x, y, w, h);
+  ctx.fillStyle = "#000";
+  ctx.fill();
+  ctx.clip();
+  ctx.translate(x + w, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(img, sx, sy, nativeZoom, sh, 0, y, w, h);
+  ctx.restore();
+
+  ctx.save();
+  drawCurvedRect(ctx, x, y, w, h);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2.5;
+  ctx.stroke();
+  ctx.restore();
+}
+
+function drawC3Preview(ctx, img, center, zoom, color) {
+  const { cx, cy, nativeCx, nativeCy, nativeZoom } = cropSource(ctx, img, center, zoom);
+  const half = zoom / 2;
+  const sx = nativeCx - nativeZoom / 2;
+  const sy = nativeCy - nativeZoom / 2;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, half, 0, Math.PI * 2);
+  ctx.fillStyle = "#000";
+  ctx.fill();
+  ctx.clip();
+  ctx.translate(cx + half, 0);
+  ctx.scale(-1, 1);
+  ctx.drawImage(img, sx, sy, nativeZoom, nativeZoom, 0, cy - half, zoom, zoom);
+  ctx.restore();
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.arc(cx, cy, half, 0, Math.PI * 2);
+  ctx.strokeStyle = color;
+  ctx.lineWidth = 2;
+  ctx.stroke();
+  ctx.restore();
+}
 
 function getCanvas() {
   return document.getElementById("pip-sidecam-canvas");
@@ -107,19 +198,11 @@ function redraw() {
 
     const [cx, cy] = side.center;
 
-    // Crop square (what gets sampled) + circular bubble overlay.
-    ctx.strokeStyle = side.color;
-    ctx.lineWidth = 2;
-    ctx.setLineDash([]);
-    ctx.strokeRect(cx - half, cy - half, state.zoom, state.zoom);
-
-    ctx.beginPath();
-    ctx.arc(cx, cy, half, 0, Math.PI * 2);
-    ctx.fillStyle = side.color + "40";
-    ctx.fill();
-    ctx.lineWidth = 2;
-    ctx.strokeStyle = side.color;
-    ctx.stroke();
+    if (isC4()) {
+      drawC4Preview(ctx, img, side.center, state.zoom, side.color);
+    } else {
+      drawC3Preview(ctx, img, side.center, state.zoom, side.color);
+    }
 
     // Center dot
     ctx.beginPath();
@@ -323,8 +406,9 @@ async function loadExistingConfig() {
   try {
     const resp = await fetch("/api/pip_preview/config");
     if (!resp.ok) return;
-    const config = await resp.json();
-    loadedConfig = config;
+    const data = await resp.json();
+    deviceType = data.device_type || deviceType || null;
+    loadedConfig = data.mask || null;
     applyConfigToCanvas();
   } catch (e) {
     console.error("PiP Preview config load failed", e);
