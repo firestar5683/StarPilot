@@ -587,6 +587,16 @@ function renderDashboard(state) {
   scheduleDashboardRefresh(dashboard);
 }
 
+const STATS_ATTEMPT_TIMEOUTS_MS = [5000, 20000];
+
+async function fetchDashboardStats(timeoutMs) {
+  const statsResponse = await withTimeout(fetch("/api/stats"), timeoutMs, "stats request");
+
+  if (!statsResponse.ok) throw new Error(`stats API error: ${statsResponse.status}`);
+
+  return withTimeout(statsResponse.json(), timeoutMs, "stats JSON parse");
+}
+
 async function initializeHome(force = false) {
   if (force) {
     clearDashboardRefreshTimer();
@@ -594,20 +604,27 @@ async function initializeHome(force = false) {
     renderDashboard(HOME_STATE);
   }
 
-  try {
-    const statsResponse = await withTimeout(fetch("/api/stats"), 5000, "stats request");
+  let statsJson = null;
+  let lastError = null;
+  for (const timeoutMs of STATS_ATTEMPT_TIMEOUTS_MS) {
+    try {
+      statsJson = await fetchDashboardStats(timeoutMs);
+      lastError = null;
+      break;
+    } catch (err) {
+      lastError = err;
+    }
+  }
 
-    if (!statsResponse.ok) throw new Error(`stats API error: ${statsResponse.status}`);
-
-    const statsJson = await withTimeout(statsResponse.json(), 5000, "stats JSON parse");
+  if (lastError) {
+    HOME_STATE.status = "error";
+    HOME_STATE.error = lastError?.message || String(lastError);
+  } else {
     const payloadUnit = statsJson?.dashboard?.week?.distanceUnit || statsJson?.driveStats?.all?.unit;
 
     HOME_STATE.data = statsJson;
     HOME_STATE.unit = payloadUnit || HOME_STATE.unit || "miles";
     HOME_STATE.status = "ready";
-  } catch (err) {
-    HOME_STATE.status = "error";
-    HOME_STATE.error = err?.message || String(err);
   }
 
   renderDashboard(HOME_STATE);

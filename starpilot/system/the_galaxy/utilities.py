@@ -2863,7 +2863,7 @@ def get_dashboard_stats(footage_paths, params_obj=None, now=None):
 
   _DASHBOARD_CACHE.update({
     "key": cache_key,
-    "updated_at": time.monotonic(),,
+    "updated_at": time.monotonic(),
     "value": copy.deepcopy(dashboard),
   })
   return dashboard
