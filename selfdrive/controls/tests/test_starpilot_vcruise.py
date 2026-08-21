@@ -46,6 +46,7 @@ def make_vcruise(*, red_light=False, raw_model_stopped=False, forcing_stop=False
     starpilot_following=SimpleNamespace(following_lead=False),
     tracking_lead=False,
     driving_in_curve=False,
+    lateral_acceleration=0.0,
     model_length=60.0,
     raw_model_stopped=raw_model_stopped,
     road_curvature=road_curvature,

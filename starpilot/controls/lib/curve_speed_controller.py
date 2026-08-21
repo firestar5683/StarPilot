@@ -41,6 +41,7 @@ CSC_LAT_ACCEL_MIN = 1.2
 CSC_LAT_ACCEL_MAX = 3.2
 CSC_NUDGE = 0.15
 CSC_NUDGE_WEIGHT = 20             # counts a single override pseudo-sample is worth
+CSC_OVERRIDE_WATCH_TIME = 6.0     # s to keep watching what the driver holds after they reject a cut
 CSC_TRAINING_QUIET_TIME = 5.0     # blocks passive samples after CSC limited speed, so it can't learn its own cap
 CSC_TRAINING_SETTLE_TIME = 2.0    # driver-owned seconds before a sample counts, so it isn't openpilot's leftover speed
 # Learned values match the driver's own cornering, which alone would never slow them
@@ -119,6 +120,10 @@ class CurveSpeedController:
 
     self.enable_training = False
     self.nudge_applied = False
+
+    self.override_watch_key = None
+    self.override_watch_peak = 0.0
+    self.override_watch_timer = 0.0
 
     self.training_timer = 0.0
     self.persistence_timer = 0.0
@@ -264,6 +269,8 @@ class CurveSpeedController:
     long_dropped = self._long_active_prev and not long_active
     self._long_active_prev = long_active
 
+    self._update_override_watch(sm)
+
     if not was_controlling:
       self.nudge_applied = False
       return
@@ -272,14 +279,46 @@ class CurveSpeedController:
       return
 
     if accel_button or (sm["carState"].gasPressed and self.target < v_ego - 0.5):
-      self._apply_nudge(CSC_NUDGE)
+      # Watch what the driver actually holds instead of stepping by a fixed amount. CSC is
+      # suspended while they override, so their cornering measures their comfort rather than
+      # this controller's own cap; a fixed step needs several rejections to close a real gap.
+      self.override_watch_key = self._bucket_curvature(abs(self.starpilot_planner.road_curvature))
+      self.override_watch_peak = abs(self.starpilot_planner.lateral_acceleration)
+      self.override_watch_timer = CSC_OVERRIDE_WATCH_TIME
+      self.nudge_applied = True
     elif (getattr(sm["carState"], "brakePressed", False) or long_dropped) and self.starpilot_planner.driving_in_curve:
       self._apply_nudge(-CSC_NUDGE)
+
+  def _update_override_watch(self, sm):
+    if self.override_watch_key is None:
+      return
+
+    lateral_acceleration = abs(self.starpilot_planner.lateral_acceleration)
+    if lateral_acceleration > self.override_watch_peak:
+      # credit the bucket the peak actually happened in, not the one at the button press
+      self.override_watch_peak = lateral_acceleration
+      self.override_watch_key = self._bucket_curvature(abs(self.starpilot_planner.road_curvature))
+
+    self.override_watch_timer -= DT_MDL
+    if self.override_watch_timer > 0.0 and (is_user_overriding_longitudinal(sm) or
+                                            self.starpilot_planner.driving_in_curve):
+      return
+
+    key = self.override_watch_key
+    self.override_watch_key = None
+    # floored at the old fixed step, so a rejection that never reaches a corner still counts
+    # and this path can only ever raise the bucket
+    self._record_pseudo_sample(key, max(self.override_watch_peak,
+                                        self.learned_lat_accel(float(key)) + CSC_NUDGE))
 
   def _apply_nudge(self, offset):
     key = self._bucket_curvature(abs(self.starpilot_planner.road_curvature))
     # relative to the learned value, not the margined one, or repeated overrides walk the bucket down
-    sample = float(np.clip(self.learned_lat_accel(float(key)) + offset, CSC_LAT_ACCEL_MIN, CSC_LAT_ACCEL_MAX))
+    self._record_pseudo_sample(key, self.learned_lat_accel(float(key)) + offset)
+    self.nudge_applied = True
+
+  def _record_pseudo_sample(self, key, sample):
+    sample = float(np.clip(sample, CSC_LAT_ACCEL_MIN, CSC_LAT_ACCEL_MAX))
 
     data = self.curvature_data.get(key, {"average": sample, "count": 0})
     effective_count = min(data["count"], CSC_COUNT_CAP)
@@ -289,7 +328,6 @@ class CurveSpeedController:
       "count": data["count"] + CSC_NUDGE_WEIGHT,
     }
 
-    self.nudge_applied = True
     self.rebuild_lat_accel_curve()
     self.data_dirty = True
     self.flush_data()

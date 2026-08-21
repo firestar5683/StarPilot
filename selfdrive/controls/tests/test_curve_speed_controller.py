@@ -12,7 +12,9 @@ from openpilot.starpilot.controls.lib.curve_speed_controller import (
   CSC_EGO_HEADROOM,
   CSC_LAT_ACCEL_MAX,
   CSC_MIN_SPEED,
+  CSC_NUDGE,
   CSC_NUDGE_WEIGHT,
+  CSC_OVERRIDE_WATCH_TIME,
   CSC_TARGET_UP_RATE,
   CSC_TRAINING_SETTLE_TIME,
   CurveSpeedController,
@@ -407,22 +409,60 @@ def test_sustained_ineligibility_still_drains_the_settle_timer():
   assert not controller.enable_training
 
 
+def settle_override(controller, sm=None, frames=None):
+  """Run the post-override watch out so the pseudo-sample is committed."""
+  sm = sm if sm is not None else make_sm()
+  for _ in range(frames if frames is not None else int(CSC_OVERRIDE_WATCH_TIME / DT_MDL) + 1):
+    controller.handle_override(20.0, False, sm)
+
+
 def test_gas_override_nudges_bucket_up_once_per_episode():
   _, controller = make_controller()
   prior = controller.learned_lat_accel(0.02)
   controller.target = 10.0
 
   controller.handle_override(20.0, True, make_sm(gas=True))
+  controller.handle_override(20.0, True, make_sm(gas=True))
+  assert "0.02" not in controller.curvature_data  # still watching what the driver holds
+
+  settle_override(controller)
   assert controller.curvature_data["0.02"]["count"] == CSC_NUDGE_WEIGHT
   assert controller.curvature_data["0.02"]["average"] > prior
-
-  controller.handle_override(20.0, True, make_sm(gas=True))
-  assert controller.curvature_data["0.02"]["count"] == CSC_NUDGE_WEIGHT
 
   controller.handle_override(20.0, False, make_sm())
   controller.target = 10.0
   controller.handle_override(20.0, True, make_sm(gas=True))
+  settle_override(controller)
   assert controller.curvature_data["0.02"]["count"] == 2 * CSC_NUDGE_WEIGHT
+
+
+def test_override_learns_the_cornering_the_driver_actually_held():
+  # the whole point: a fixed step needs several rejections to close a real disagreement,
+  # so record what they demonstrated instead
+  planner, observed = make_controller(driving_in_curve=True)
+  observed.target = 10.0
+  observed.handle_override(20.0, True, make_sm(gas=True))
+  planner.lateral_acceleration = 2.9          # they hold the curve much harder than CSC wanted
+  settle_override(observed, make_sm(gas=True))
+
+  _, stepped = make_controller(driving_in_curve=True)
+  stepped._apply_nudge(CSC_NUDGE)             # what the old fixed-step path would have recorded
+
+  assert observed.curvature_data["0.02"]["average"] == pytest.approx(2.9)
+  assert observed.curvature_data["0.02"]["average"] > stepped.curvature_data["0.02"]["average"]
+  assert observed.learned_lat_accel(0.02) > stepped.learned_lat_accel(0.02)
+
+
+def test_override_on_a_straight_still_registers_the_fixed_step():
+  planner, controller = make_controller()
+  prior = controller.learned_lat_accel(0.02)
+  controller.target = 10.0
+
+  controller.handle_override(20.0, True, make_sm(gas=True))
+  planner.lateral_acceleration = 0.0          # never reached a corner
+  settle_override(controller)
+
+  assert controller.curvature_data["0.02"]["average"] == pytest.approx(prior + CSC_NUDGE)
 
 
 def test_res_button_nudges_bucket_up_even_at_target_speed():
@@ -431,6 +471,7 @@ def test_res_button_nudges_bucket_up_even_at_target_speed():
   controller.target = 20.0  # car tracking the target, so the gas-press condition would not fire
 
   controller.handle_override(20.0, True, make_sm(), accel_button=True)
+  settle_override(controller)
 
   assert controller.curvature_data["0.02"]["count"] == CSC_NUDGE_WEIGHT
   assert controller.curvature_data["0.02"]["average"] > prior
