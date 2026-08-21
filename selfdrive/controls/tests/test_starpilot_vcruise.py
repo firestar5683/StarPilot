@@ -8,6 +8,7 @@ from openpilot.starpilot.common.starpilot_variables import PLANNER_TIME
 from openpilot.starpilot.controls.lib.curve_speed_controller import CSC_GLOW_HOLD_TIME, CSC_GLOW_ON_DELTA
 from openpilot.starpilot.controls.lib.starpilot_vcruise import (
   FORCE_STOP_TURN_VETO_STOP_SEEN_HOLD_TIME,
+  STANDSTILL_FORCE_STOP_LIGHT_HOLD_TIME,
   StarPilotVCruise,
   get_active_slc_control_target,
   get_lead_veto_distance,
@@ -1042,16 +1043,16 @@ def test_standstill_light_hold_expires_and_does_not_rearm_from_stopped_model():
   assert update_vcruise(vcruise, sm, toggles, now=0.0) == pytest.approx(0.0)
   assert vcruise.standstill_force_stop_reason == "light"
 
-  assert update_vcruise(vcruise, sm, toggles, now=4.9) == pytest.approx(0.0)
+  assert update_vcruise(vcruise, sm, toggles, now=STANDSTILL_FORCE_STOP_LIGHT_HOLD_TIME - 0.1) == pytest.approx(0.0)
   assert vcruise.forcing_stop
 
-  assert update_vcruise(vcruise, sm, toggles, now=5.1) == pytest.approx(20.0)
+  assert update_vcruise(vcruise, sm, toggles, now=STANDSTILL_FORCE_STOP_LIGHT_HOLD_TIME + 0.1) == pytest.approx(20.0)
   assert not vcruise.forcing_stop
   assert not vcruise.standstill_force_stop_hold
 
   # The red-light model remains stopped, but Force Stop must stay released so
   # Experimental Mode can own the red-to-green departure.
-  assert update_vcruise(vcruise, sm, toggles, now=5.2) == pytest.approx(20.0)
+  assert update_vcruise(vcruise, sm, toggles, now=STANDSTILL_FORCE_STOP_LIGHT_HOLD_TIME + 0.2) == pytest.approx(20.0)
   assert not vcruise.forcing_stop
 
 

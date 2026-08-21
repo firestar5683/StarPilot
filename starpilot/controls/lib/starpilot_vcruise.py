@@ -22,7 +22,9 @@ from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import (
 CSC_MIN_SPEED = CITY_SPEED_LIMIT * CV.MPH_TO_MS
 OVERRIDE_FORCE_STOP_TIMER = 10
 STANDSTILL_FORCE_STOP_CLEAR_TIME = 0.75
-STANDSTILL_FORCE_STOP_LIGHT_HOLD_TIME = 5.0
+# Open-loop — green is undetectable at standstill, so this only needs to cover the
+# handoff to CEM+model ownership. Extra seconds are pure departure lag.
+STANDSTILL_FORCE_STOP_LIGHT_HOLD_TIME = 2.0
 FORCE_STOP_LIGHT_CLEAR_TIME = 0.5
 SLC_LEAD_DROP_RELAXATION_MIN_SPEED = 20.0 * CV.MPH_TO_MS
 SLC_LEAD_DROP_RELAXATION_MIN_DISTANCE = 30.0
