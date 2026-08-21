@@ -224,12 +224,12 @@ class DesireHelper:
         if desired_lane_width >= starpilot_toggles.lane_detection_width and self._nav_torque_applied(carstate, lane_change_direction):
           return log.Desire.keepRight
     elif modifier in ("left", "sharpLeft"):
-      turn_allowed = not carstate.rightBlinker and not carstate.leftBlindspot
+      turn_allowed = carstate.leftBlinker and not carstate.rightBlinker and not carstate.leftBlindspot
       turn_allowed &= carstate.vEgo < starpilot_toggles.minimum_lane_change_speed and not carstate.standstill
       if turn_allowed and self._nav_turn_is_imminent(carstate, maneuver_distance):
         return log.Desire.turnLeft
     elif modifier in ("right", "sharpRight"):
-      turn_allowed = not carstate.leftBlinker and not carstate.rightBlindspot
+      turn_allowed = carstate.rightBlinker and not carstate.leftBlinker and not carstate.rightBlindspot
       turn_allowed &= carstate.vEgo < starpilot_toggles.minimum_lane_change_speed and not carstate.standstill
       if turn_allowed and self._nav_turn_is_imminent(carstate, maneuver_distance):
         return log.Desire.turnRight
