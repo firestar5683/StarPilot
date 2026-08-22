@@ -46,6 +46,7 @@ from openpilot.system.hardware import HARDWARE, PC
 from openpilot.system.hardware.hw import Paths
 from openpilot.system.loggerd.deleter import PRESERVE_ATTR_NAME, PRESERVE_ATTR_VALUE, PRESERVE_COUNT
 from openpilot.system.version import get_build_metadata
+from openpilot.selfdrive.ui.lib.starpilot_version import DEFAULT_HOME_SCREEN_NAME, HOME_SCREEN_NAME_MAX_LENGTH
 from openpilot.tools.longitudinal_maneuvers.capabilities import get_longitudinal_maneuver_support
 from panda import Panda
 
@@ -4991,6 +4992,16 @@ def setup(app):
       val = data["value"]
       selected_label_input = str(data.get("label") or "").strip()
 
+      if key == "HomeScreenName":
+        if not params.get_bool("GalaxyDeveloperMode"):
+          return jsonify({"error": "Custom Home Screen Name is available only with Galaxy Developer Mode enabled."}), 403
+
+        val = str(val or "").strip()
+        if len(val) > HOME_SCREEN_NAME_MAX_LENGTH:
+          return jsonify({"error": f"Custom Home Screen Name must be {HOME_SCREEN_NAME_MAX_LENGTH} characters or fewer."}), 400
+        data["value"] = val or DEFAULT_HOME_SCREEN_NAME
+        val = data["value"]
+
       # Python json parses true/false as boolean
       if isinstance(val, bool):
         str_val = "1" if val else "0"
@@ -5336,6 +5347,8 @@ def setup(app):
       if key == "RivianAngleControl":
         response["message"] = "Rivian steering mode updated. The safe channel handoff is in progress."
       updated = {}
+      if key == "HomeScreenName":
+        updated[key] = str_val
       if key in PANDA_FIRMWARE_TOGGLE_KEYS:
         threading.Thread(target=_flash_panda_then_reboot, daemon=True).start()
         response["message"] = f"Parameter '{key}' updated successfully. Panda flashing started; device will reboot when finished."

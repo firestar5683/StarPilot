@@ -12,7 +12,7 @@ LANGUAGES_FILE = TRANSLATIONS_DIR / "languages.json"
 GLYPH_PADDING = 6
 EXTRA_CHARS = "–‑✓×°§•X⚙✕◀▶✔⌫⇧␣○●↳çêüñ–‑✓×°§•€£¥²⚠ⓘ"
 UNIFONT_LANGUAGES = {"ar", "th", "zh-CHT", "zh-CHS", "ko", "ja"}
-BRAND_FONT_CHARS = " StarPilotstarpilot?z"
+BRAND_FONT_CHARS = "".join(chr(codepoint) for codepoint in range(32, 127))
 
 
 def _languages():

@@ -66,6 +66,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"HondaLateralPidKiScale", {PERSISTENT, FLOAT, "1.0", "1.0", 3}},
     {"HondaLateralPidKpScale", {PERSISTENT, FLOAT, "1.0", "1.0", 3}},
     {"HondaWindFactorParams", {PERSISTENT, FLOAT}},
+    {"HomeScreenName", {PERSISTENT, STRING, "StarPilot", "StarPilot", 3}},
     {"InstallDate", {PERSISTENT, TIME}},
     {"IsDriverViewEnabled", {CLEAR_ON_MANAGER_START, BOOL}},
     {"IsEngaged", {PERSISTENT, BOOL}},

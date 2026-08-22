@@ -2061,6 +2061,16 @@
         "settings_tier": "simple"
       },
       {
+        "key": "HomeScreenName",
+        "label": "Custom Home Screen Name",
+        "description": "Replace the StarPilot wordmark on the home screen. Leave it blank to use StarPilot. Maximum 12 characters.",
+        "data_type": "string",
+        "ui_type": "text",
+        "placeholder": "StarPilot",
+        "max_length": 12,
+        "settings_tier": "advanced"
+      },
+      {
         "key": "HideSpeed",
         "label": "Hide Current Speed",
         "description": "Hide the current speed from the driving screen.",

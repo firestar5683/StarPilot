@@ -12,7 +12,7 @@ from openpilot.system.ui.widgets.icon_widget import IconWidget
 from openpilot.system.ui.widgets.label import UnifiedLabel
 from openpilot.system.ui.lib.application import ASSETS_DIR, gui_app, FontWeight, MousePos
 from openpilot.selfdrive.ui.lib.mode_banner import ModeBannerVariant, get_mode_banner_variant, mode_atom_color
-from openpilot.selfdrive.ui.lib.starpilot_version import STARPILOT_DISPLAY_VERSION
+from openpilot.selfdrive.ui.lib.starpilot_version import DEFAULT_HOME_SCREEN_NAME, STARPILOT_DISPLAY_VERSION, home_screen_name
 from openpilot.selfdrive.ui.ui_state import ui_state
 
 HEAD_BUTTON_FONT_SIZE = 40
@@ -158,6 +158,7 @@ class MiciHomeLayout(Widget):
     self._version_text = None
     self._experimental_mode = False
     self._current_model_name = "default"
+    self._home_screen_name = DEFAULT_HOME_SCREEN_NAME
 
     self._mode_status_atom = ModeStatusAtom()
     self._egpu_icon = IconWidget("icons_mici/egpu.png", (50, 37))
@@ -173,7 +174,7 @@ class MiciHomeLayout(Widget):
       self._mic_icon,
     ], spacing=18)
 
-    self._openpilot_label = UnifiedLabel("StarPilot", font_size=96, font_weight=FontWeight.BRAND, max_width=480, wrap_text=False)
+    self._openpilot_label = UnifiedLabel(self._home_screen_name, font_size=96, font_weight=FontWeight.BRAND, max_width=480, wrap_text=False)
     self._version_label = UnifiedLabel("", font_size=36, font_weight=FontWeight.ROMAN, max_width=480, wrap_text=False)
     self._large_version_label = UnifiedLabel("", font_size=64, text_color=rl.GRAY, font_weight=FontWeight.ROMAN, max_width=480, wrap_text=False)
     self._date_label = UnifiedLabel("", font_size=36, text_color=rl.GRAY, font_weight=FontWeight.ROMAN, max_width=480, wrap_text=False)
@@ -188,6 +189,9 @@ class MiciHomeLayout(Widget):
   def _update_params(self):
     self._experimental_mode = ui_state.params.get_bool("ExperimentalMode")
     self._mode_status_atom.refresh()
+    self._home_screen_name = home_screen_name(ui_state.params)
+    self._openpilot_label.set_text(self._home_screen_name)
+    self._openpilot_label.set_font_weight(FontWeight.BRAND if self._home_screen_name.isascii() else FontWeight.MEDIUM)
 
     def _clean_model_name(value: str) -> str:
       return re.sub(r"[🗺️👀📡]", "", value).replace("(Default)", "").strip()
