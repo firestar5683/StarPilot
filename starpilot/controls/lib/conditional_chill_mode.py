@@ -10,6 +10,21 @@ from openpilot.starpilot.common.experimental_state import (
 )
 
 
+class DetectorToggles:
+  """Fixed detector configuration used by Conditional Chill."""
+
+  __slots__ = ()
+
+  conditional_curves = True
+  conditional_curves_lead = True
+  conditional_lead = True
+  conditional_slower_lead = True
+  conditional_stopped_lead = True
+
+
+DETECTOR_TOGGLES = DetectorToggles()
+
+
 class ConditionalChillMode:
   CCM_STOP_MODEL_TIME = 7.0
   CHILL_SPEED_ENTRY_CONFIRM_TIME = 0.35
@@ -132,15 +147,8 @@ class ConditionalChillMode:
     self._launch_forced_exit = False
 
   def _refresh_detector(self, v_ego, sm):
-    detector_toggles = type("DetectorToggles", (), {
-      "conditional_curves": True,
-      "conditional_curves_lead": True,
-      "conditional_lead": True,
-      "conditional_slower_lead": True,
-      "conditional_stopped_lead": True,
-    })()
-    self.detector.curve_detection(v_ego, detector_toggles)
-    self.detector.slow_lead(detector_toggles, v_ego)
+    self.detector.curve_detection(v_ego, DETECTOR_TOGGLES)
+    self.detector.slow_lead(DETECTOR_TOGGLES, v_ego)
     self.detector.stop_sign_and_light(v_ego, sm, self.CCM_STOP_MODEL_TIME)
 
   def _has_hard_veto(self, v_ego, sm, allow_launch=False):

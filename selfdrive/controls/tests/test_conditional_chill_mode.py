@@ -29,11 +29,14 @@ class FakeDetector:
     self.slow_lead_detected = False
     self.stop_light_detected = False
     self.stop_light_model_detected = False
+    self.toggle_objects = []
 
-  def curve_detection(self, *_args, **_kwargs):
+  def curve_detection(self, _v_ego, toggles):
+    self.toggle_objects.append(toggles)
     return None
 
-  def slow_lead(self, *_args, **_kwargs):
+  def slow_lead(self, toggles, _v_ego):
+    self.toggle_objects.append(toggles)
     return None
 
   def stop_sign_and_light(self, *_args, **_kwargs):
@@ -112,6 +115,23 @@ def test_ccm_stays_experimental_when_no_chill_condition_matches(monkeypatch):
 
   assert ccm.experimental_mode
   assert ccm.status_value == CCStatus["OFF"]
+
+
+def test_ccm_reuses_detector_toggles(monkeypatch):
+  _planner, detector, ccm = make_ccm()
+  sm = make_sm()
+  toggles = make_toggles()
+  monkeypatch.setattr("openpilot.starpilot.controls.lib.conditional_chill_mode.time.monotonic", lambda: 1.0)
+
+  ccm.update(20 * CV.MPH_TO_MS, 21 * CV.MPH_TO_MS, sm, toggles)
+  first_curve_toggles, first_slow_lead_toggles = detector.toggle_objects
+  detector.toggle_objects.clear()
+  ccm.update(20 * CV.MPH_TO_MS, 21 * CV.MPH_TO_MS, sm, toggles)
+  second_curve_toggles, second_slow_lead_toggles = detector.toggle_objects
+
+  assert first_curve_toggles is first_slow_lead_toggles
+  assert second_curve_toggles is second_slow_lead_toggles
+  assert first_curve_toggles is second_curve_toggles
 
 
 def test_ccm_enters_chill_for_open_road_speed_recovery(monkeypatch):
