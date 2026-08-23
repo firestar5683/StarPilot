@@ -66,7 +66,7 @@ def _normalize_forced_candidate(candidate: str | None) -> str | None:
   return LEGACY_FORCED_CANDIDATE_MAP.get(candidate, candidate)
 
 
-def _normalize_gm_bolt_candidate(candidate: str | None, fingerprints: dict[int, dict]) -> str | None:
+def _normalize_gm_bolt_candidate(candidate: str | None, fingerprints: dict[int, dict], vin: str | None = None) -> str | None:
   """
   Normalize ambiguous/mismatched Bolt candidates using robust PT message signatures.
   This guards against occasional wrong variant selection causing persistent canError.
@@ -78,8 +78,23 @@ def _normalize_gm_bolt_candidate(candidate: str | None, fingerprints: dict[int, 
   msg_211_len = pt.get(211)  # 2 on Gen1 Bolt, 3 on 2022+ Bolt
   msg_304_len = pt.get(304)  # 8 on 2017 Gen1, 1 on 2018-2021 Gen1
   has_pedal = 513 in pt
+ 
+  # The 2022-23 Bolt ACC, pedal, and CC variants share the same FPv1
+  # fingerprint. Recover an ambiguous match when the observed traffic
+  # matches the Bolt family and the VIN confirms model year 2022/2023.
+  bolt_2022_2023_signature = (
+    pt.get(190) == 7 and
+    msg_211_len == 3 and
+    pt.get(566) == 8 and
+    pt.get(458) == 5
+  )
+  vin_year = vin[9] if isinstance(vin, str) and len(vin) > 9 else None
 
+  # VIN model-year codes: N=2022, P=2023.
+  if candidate is None and bolt_2022_2023_signature and vin_year in ("N", "P"):
+    return "CHEVROLET_BOLT_ACC_2022_2023_PEDAL" if has_pedal else "CHEVROLET_BOLT_ACC_2022_2023"
   # If detection failed entirely but the signature is clearly Bolt, recover to a sane default.
+  
   if candidate is None and 170 in pt and 188 in pt and msg_211_len in (2, 3):
     if msg_211_len == 3:
       return "CHEVROLET_BOLT_ACC_2022_2023_PEDAL" if has_pedal else "CHEVROLET_BOLT_ACC_2022_2023"
@@ -279,7 +294,7 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
 def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multiplexing: ObdCallback, alpha_long_allowed: bool,
             is_release: bool, params: Params, num_pandas: int = 1, cached_params: CarParamsT | None = None, starpilot_toggles: SimpleNamespace = None):
   candidate, fingerprints, vin, car_fw, source, exact_match = fingerprint(can_recv, can_send, set_obd_multiplexing, num_pandas, cached_params)
-  candidate = _normalize_gm_bolt_candidate(candidate, fingerprints)
+  candidate = _normalize_gm_bolt_candidate(candidate, fingerprints, vin)
   candidate = _normalize_gm_volt_candidate(candidate, fingerprints)
   candidate = _normalize_forced_candidate(candidate)
   fingerprinted_candidate = candidate
