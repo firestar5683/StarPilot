@@ -224,6 +224,7 @@ struct StarPilotPlan @0xf98d843bfd7004a3 {
   cscOverridden @38 :Bool;          # driver cancelled this curve with RES+
   cscLearnedLatAccel @39 :Float32;  # learned comfort at the current curvature, before margin
   cscBindingDistance @40 :Float32;  # distance to the horizon point setting the target, m
+  approachStopLength @41 :Float32;  # pre-commit distance to a detected stop, m; 0 when off
 }
 
 struct StarPilotRadarState @0xb86e6369214c01c8 {

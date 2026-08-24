@@ -434,6 +434,7 @@ def make_sm(v_ego: float, desired_accel: float, min_accel: float, *, experimenta
       forcingStop=False,
       redLight=False,
       forcingStopLength=2,
+      approachStopLength=0.0,
     ),
   }
 

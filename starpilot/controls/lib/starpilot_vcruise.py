@@ -62,6 +62,8 @@ LEAD_VETO_M_OVERRIDES = {
 }
 FORCE_STOP_APPROACH_DECEL = 0.65  # m/s^2 — speed ceiling before commit. LOWER = more early
                           # braking; don't go under FORCE_STOP_MODEL_APPROACH_DECEL
+# approachStopLength is published RAW: model_length converges from above, so rate-limiting
+# it inward freezes it far out and the constraint never binds. Tried, measured, don't re-add.
 ADAS_MAX_MS = 17.88       # 40 mph — cross-street ADAS guard
 DASH_SEED_M = 27.0        # ~88 ft — typical ADAS detection distance, used to snap
                           # tracked length closer when dashboard confirms a sign
@@ -183,6 +185,7 @@ class StarPilotVCruise:
     self.force_stop_from_light = False
     self.force_stop_light_clear_since = None
     self.controls_enabled_previously = False
+    self.approach_stop_length = 0.0  # published as starpilotPlan.approachStopLength
     # Kinematic distance estimator. Same attribute also published as
     # starpilotPlan.forcingStopLength, so the existing reader keeps working.
     self.tracked_model_length = 0.0
@@ -637,6 +640,9 @@ class StarPilotVCruise:
     offset_ft = max(OFFSET_FT_MIN, min(OFFSET_FT_MAX, offset_ft_raw))
     offset_m = offset_ft * FT_TO_M
 
+    # cleared on every path; only the far-approach envelope below republishes it
+    self.approach_stop_length = 0.0
+
     if force_standstill_enabled and not self.override_force_standstill:
       self.forcing_stop = True
       self.tracked_model_length = 0.0
@@ -746,6 +752,8 @@ class StarPilotVCruise:
         adjacent_stop_d = self._get_adjacent_stop_distance(sm)
         if adjacent_stop_d is not None:
           approach_d = min(approach_d, adjacent_stop_d)
+        # pre-offset, so it hands off to forcingStopLength at commit without a step
+        self.approach_stop_length = max(approach_d, 0.0)
         approach_d += offset_m + force_stop_distance_bias_m
         if approach_d > force_stop_handoff_m:
           targets.append(math.sqrt(2.0 * FORCE_STOP_APPROACH_DECEL * (approach_d - force_stop_handoff_m)))

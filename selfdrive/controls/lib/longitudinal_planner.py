@@ -2196,9 +2196,14 @@ class LongitudinalPlanner:
     force_stop_x = None
     force_stop_handoff_m = get_force_stop_handoff_distance(self.CP.carFingerprint)
     if sm['starpilotPlan'].forcingStop and sm['starpilotPlan'].forcingStopLength > force_stop_handoff_m:
+      stop_length = float(sm['starpilotPlan'].forcingStopLength)
+    else:
+      # pre-commit the envelope is only a speed ceiling, which the solver tracks with a lag;
+      # getattr so a stale cereal build degrades to the old behaviour instead of raising
+      stop_length = float(getattr(sm['starpilotPlan'], 'approachStopLength', 0.0))
+    if stop_length > force_stop_handoff_m:
       force_stop_x = (
-        float(sm['starpilotPlan'].forcingStopLength) + STOP_DISTANCE +
-        get_force_stop_distance_bias(self.CP.carFingerprint)
+        stop_length + STOP_DISTANCE + get_force_stop_distance_bias(self.CP.carFingerprint)
       )
 
     self.mpc.update(sm['radarState'], v_cruise, x, v, a, j,
