@@ -751,15 +751,27 @@ def test_force_stop_stays_committed_while_moving_even_if_scene_opens():
 
 def test_force_stop_reanchors_when_model_reopens_path_without_stop_action():
   planner, vcruise = make_vcruise(red_light=False, raw_model_stopped=False, forcing_stop=True)
-  planner.model_length = 40.0
-  vcruise.tracked_model_length = 10.0
+  planner.model_length = 90.0
+  vcruise.tracked_model_length = 60.0
   sm = make_sm(standstill=False)
   sm["modelV2"] = SimpleNamespace(action=SimpleNamespace(shouldStop=False))
 
   result = update_vcruise(vcruise, sm, make_toggles(), now=0.0, v_ego=1.5)
 
-  assert vcruise.tracked_model_length == pytest.approx(40.0)
+  assert vcruise.tracked_model_length == pytest.approx(90.0)
   assert result > 5.0
+
+
+def test_force_stop_does_not_reanchor_inside_reanchor_floor():
+  planner, vcruise = make_vcruise(red_light=False, raw_model_stopped=False, forcing_stop=True)
+  planner.model_length = 90.0
+  vcruise.tracked_model_length = 25.0
+  sm = make_sm(standstill=False)
+  sm["modelV2"] = SimpleNamespace(action=SimpleNamespace(shouldStop=False))
+
+  update_vcruise(vcruise, sm, make_toggles(), now=0.0, v_ego=1.5)
+
+  assert vcruise.tracked_model_length < 25.0
 
 
 def test_force_stop_does_not_reanchor_committed_model_stop():
