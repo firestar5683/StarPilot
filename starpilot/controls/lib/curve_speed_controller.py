@@ -48,6 +48,13 @@ CSC_TRAINING_SETTLE_TIME = 2.0    # driver-owned seconds before a sample counts,
 # below their habit. Speed scales as the square root, so 0.85 is ~8% slower.
 CSC_COMFORT_MARGIN = CSC_DEFAULT_MARGIN_PERCENT / 100.0
 
+# The model under-reads curvature at range: measured 0.81x actual beyond ~75 m. That holds
+# only where the reading is already firm -- weak distant readings carry no usable magnitude
+# (0.40x median with a 14:1 spread), so scaling those would amplify noise, not signal.
+CSC_FARFIELD_MIN_CURVATURE = 0.004   # ~R 250 m; at this strength range readings were 85%+ reliable
+CSC_FARFIELD_MIN_DISTANCE = 30.0     # inside this the model is already accurate
+CSC_FARFIELD_GAIN = 1.23             # 1 / 0.81
+
 MAX_CURVATURE = 0.1
 MIN_CURVATURE = 0.001
 ROUNDING_PRECISION = 5
@@ -379,6 +386,12 @@ class CurveSpeedController:
 
     return lat_accel
 
+  @staticmethod
+  def _correct_far_field(curvatures, distances):
+    """Undo the model's known under-read of distant curvature, where the reading is firm."""
+    firm = (curvatures >= CSC_FARFIELD_MIN_CURVATURE) & (distances >= CSC_FARFIELD_MIN_DISTANCE)
+    return np.minimum(np.where(firm, curvatures * CSC_FARFIELD_GAIN, curvatures), MAX_CURVATURE)
+
   def reset(self, v_cruise):
     self.target = float(v_cruise)
     self.release_timer = 0.0
@@ -395,6 +408,7 @@ class CurveSpeedController:
       raw_target = float(v_cruise)
       self.binding_distance = 0.0
     else:
+      curvatures = self._correct_far_field(curvatures, distances)
       lat_accel = self.lat_accel_for_curvature(curvatures)
       point_speeds = np.sqrt(lat_accel / np.maximum(curvatures, 1e-4))
       point_speeds = np.maximum(point_speeds, CSC_MIN_SPEED)

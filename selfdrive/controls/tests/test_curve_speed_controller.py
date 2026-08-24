@@ -10,6 +10,7 @@ from openpilot.starpilot.controls.lib.curve_speed_controller import (
   CSC_COMFORT_MARGIN,
   CSC_COUNT_CAP,
   CSC_EGO_HEADROOM,
+  CSC_FARFIELD_GAIN,
   CSC_LAT_ACCEL_MAX,
   CSC_MIN_SPEED,
   CSC_NUDGE,
@@ -145,6 +146,42 @@ def test_upward_jitter_in_the_envelope_is_rate_limited():
     controller.update_target(30.0, 32.0)
     assert controller.target - peak <= CSC_TARGET_UP_RATE * DT_MDL + 1e-6
     peak = controller.target
+
+
+def test_firm_distant_curvature_is_corrected_for_the_model_under_read():
+  # the model reads ~0.81x actual at range, so a firm distant bend binds later than it should
+  distance = 90.0
+  _, plain = make_controller(curve_profile=single_apex_profile(0.0045, distance))
+  _, probe = make_controller()
+  corrected = probe._correct_far_field(*single_apex_profile(0.0045, distance))
+
+  assert corrected.max() == pytest.approx(0.0045 * CSC_FARFIELD_GAIN)
+  assert converge(plain, 30.0, 30.0) < envelope_speed(plain, 0.0045, distance) + 1e-6
+
+
+def test_weak_or_near_readings_are_left_alone():
+  _, probe = make_controller()
+
+  # too weak to carry usable magnitude at range
+  weak = probe._correct_far_field(*single_apex_profile(0.002, 90.0))
+  assert weak.max() == pytest.approx(0.002)
+
+  # firm, but close enough that the model is already accurate
+  near = probe._correct_far_field(*single_apex_profile(0.0045, 10.0))
+  assert near.max() == pytest.approx(0.0045)
+
+
+def test_far_field_correction_brings_the_slowdown_forward():
+  profile = single_apex_profile(0.0045, 120.0)
+  _, controller = make_controller(curve_profile=profile)
+
+  corrected = converge(controller, 30.0, 30.0)
+  raw_curvatures, distances = profile
+  uncorrected = float(np.sqrt(
+    max(np.sqrt(controller.lat_accel_for_curvature(0.0045) / 0.0045), CSC_MIN_SPEED) ** 2
+    + 2.0 * CSC_APPROACH_DECEL * 120.0))
+
+  assert corrected < uncorrected      # binds sooner than the model's own reading would
 
 
 def test_fresh_activation_seeds_at_envelope_not_cruise():
