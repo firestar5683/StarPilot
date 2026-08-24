@@ -517,6 +517,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"PIPPreviewMask", {PERSISTENT, JSON, "{\"width\":1928,\"height\":1208,\"center_left\":[315,548],\"center_right\":[1571,539],\"crop_size\":580}", "{\"width\":1928,\"height\":1208,\"center_left\":[315,548],\"center_right\":[1571,539],\"crop_size\":580}", 2}},
     {"PIPPreviewShowOnBlinker", {PERSISTENT, BOOL, "0", "0", 1}},
     {"PIPPreviewShowOnBSM", {PERSISTENT, BOOL, "0", "0", 1}},
+    {"PIPPreviewInvert", {PERSISTENT, BOOL, "0", "0", 1}},
     {"GalaxyPaired", {PERSISTENT, BOOL, "0", "0", 0}},
     {"GalaxyUploadPending", {PERSISTENT, BOOL, "0", "0", 0}},
     {"PreferredSchedule", {PERSISTENT, INT, "2", "0", 0}},

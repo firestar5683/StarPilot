@@ -2279,7 +2279,7 @@
       {
         "key": "PIPPreviewShowOnBlinker",
         "label": "Show on Turn Signal",
-        "description": "Display the side preview bubble while the corresponding turn signal is engaged.",
+        "description": "Display the side preview while the corresponding turn signal is engaged.",
         "picker_description": "Shows the side preview while a turn signal is on.",
         "data_type": "bool",
         "ui_type": "toggle",
@@ -2289,8 +2289,18 @@
       {
         "key": "PIPPreviewShowOnBSM",
         "label": "Show on Blind Spot Detection",
-        "description": "Display the side preview bubble when a vehicle is detected in the blind spot, whether from factory BSM, V-ASM, or both.",
+        "description": "Display the side preview when a vehicle is detected in the blind spot, whether from factory BSM, V-ASM, or both.",
         "picker_description": "Shows the side preview when a blind spot is detected.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "PIPPreviewEnabled",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "PIPPreviewInvert",
+        "label": "Invert Side View Orientation",
+        "description": "Flips the camera horizontally to switch whether your car's body appears on the inner/left or outer/right edge of the preview.",
+        "picker_description": "Keep off for the default view with the car body along the inside edge.",
         "data_type": "bool",
         "ui_type": "toggle",
         "parent_key": "PIPPreviewEnabled",

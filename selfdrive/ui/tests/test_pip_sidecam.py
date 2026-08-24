@@ -29,6 +29,36 @@ def test_pip_driver_camera_shader_mirrors_the_crop():
   assert "cropCoord.x = 1.0 - cropCoord.x" in PIP_FRAGMENT_SHADER
 
 
+class _FakeParams:
+  def __init__(self, invert: bool = False):
+    self._invert = invert
+
+  def get_bool(self, key: str) -> bool:
+    if key == "PIPPreviewInvert":
+      return self._invert
+    if key == "GalaxyDeveloperMode":
+      return True
+    return False
+
+  def get(self, key: str):
+    return None
+
+
+def test_pip_flip_value_follows_invert_param():
+  camera = PipSideCamera.__new__(PipSideCamera)
+  camera._closed = True
+  camera._last_param_refresh = 0.0
+  camera._flip_x_value = __import__("pyray").ffi.new("int[1]", [1])
+  camera._params = _FakeParams(invert=False)
+  camera._mask = {}
+  camera._refresh_config(force=True)
+  assert camera._flip_x_value[0] == 0
+
+  camera._params = _FakeParams(invert=True)
+  camera._refresh_config(force=True)
+  assert camera._flip_x_value[0] == 1
+
+
 def test_pip_driver_camera_shader_masks_before_sampling_and_keeps_two_texture_reads():
   assert "fwidth(radius)" in PIP_FRAGMENT_SHADER
   assert "if (radius > 1.0 + aa)" in PIP_FRAGMENT_SHADER
