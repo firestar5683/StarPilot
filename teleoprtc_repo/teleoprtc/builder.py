@@ -1,9 +1,7 @@
 import abc
-from typing import Dict, List
+from typing import Dict, List, Optional
 
-import aiortc
-
-from teleoprtc.stream import WebRTCBaseStream, WebRTCOfferStream, WebRTCAnswerStream, ConnectionProvider
+from teleoprtc.stream import RTCSessionDescription, WebRTCBaseStream, WebRTCOfferStream, WebRTCAnswerStream, ConnectionProvider
 from teleoprtc.tracks import TiciVideoStreamTrack, TiciTrackWrapper
 
 
@@ -14,11 +12,12 @@ class WebRTCStreamBuilder(abc.ABC):
 
 
 class WebRTCOfferBuilder(WebRTCStreamBuilder):
-  def __init__(self, connection_provider: ConnectionProvider):
+  def __init__(self, connection_provider: ConnectionProvider, bind_address: Optional[str] = None):
     self.connection_provider = connection_provider
+    self.bind_address = bind_address
     self.requested_camera_types: List[str] = []
     self.requested_audio = False
-    self.audio_tracks: List[aiortc.MediaStreamTrack] = []
+    self.audio_tracks: List[object] = []
     self.messaging_enabled = False
 
   def offer_to_receive_video_stream(self, camera_type: str):
@@ -28,7 +27,7 @@ class WebRTCOfferBuilder(WebRTCStreamBuilder):
   def offer_to_receive_audio_stream(self):
     self.requested_audio = True
 
-  def add_audio_stream(self, track: aiortc.MediaStreamTrack):
+  def add_audio_stream(self, track: object):
     assert len(self.audio_tracks) == 0
     self.audio_tracks = [track]
 
@@ -43,32 +42,34 @@ class WebRTCOfferBuilder(WebRTCStreamBuilder):
       video_producer_tracks=[],
       audio_producer_tracks=self.audio_tracks,
       should_add_data_channel=self.messaging_enabled,
+      bind_address=self.bind_address,
     )
 
 
 class WebRTCAnswerBuilder(WebRTCStreamBuilder):
-  def __init__(self, offer_sdp: str):
+  def __init__(self, offer_sdp: str, bind_address: Optional[str] = None):
     self.offer_sdp = offer_sdp
-    self.video_tracks: Dict[str, aiortc.MediaStreamTrack] = dict()
+    self.bind_address = bind_address
+    self.video_tracks: Dict[str, TiciVideoStreamTrack] = {}
     self.requested_audio = False
-    self.audio_tracks: List[aiortc.MediaStreamTrack] = []
+    self.audio_tracks: List[object] = []
 
   def offer_to_receive_audio_stream(self):
     self.requested_audio = True
 
-  def add_video_stream(self, camera_type: str, track: aiortc.MediaStreamTrack):
+  def add_video_stream(self, camera_type: str, track: object):
     assert camera_type not in self.video_tracks
     assert camera_type in ["driver", "wideRoad", "road"]
     if not isinstance(track, TiciVideoStreamTrack):
       track = TiciTrackWrapper(camera_type, track)
     self.video_tracks[camera_type] = track
 
-  def add_audio_stream(self, track: aiortc.MediaStreamTrack):
+  def add_audio_stream(self, track: object):
     assert len(self.audio_tracks) == 0
     self.audio_tracks = [track]
 
   def stream(self) -> WebRTCBaseStream:
-    description = aiortc.RTCSessionDescription(sdp=self.offer_sdp, type="offer")
+    description = RTCSessionDescription(sdp=self.offer_sdp, type="offer")
     return WebRTCAnswerStream(
       description,
       consumed_camera_types=[],
@@ -76,5 +77,5 @@ class WebRTCAnswerBuilder(WebRTCStreamBuilder):
       video_producer_tracks=list(self.video_tracks.values()),
       audio_producer_tracks=self.audio_tracks,
       should_add_data_channel=False,
+      bind_address=self.bind_address,
     )
-

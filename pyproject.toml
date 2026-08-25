@@ -29,6 +29,11 @@ dependencies = [
   "setuptools",
   "numpy >=2.0",
 
+  # AGNOS 19.6 native build dependencies
+  "comma-deps-capnproto; python_version >= '3.12'",
+  "comma-deps-ffmpeg; python_version >= '3.12'",
+  "libdatachannel-py>=2026.1.0.dev2; python_version >= '3.12'",
+
   # body / webrtcd
   "aiohttp",
   "aiortc",

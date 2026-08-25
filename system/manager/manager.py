@@ -1094,11 +1094,6 @@ def manager_init() -> None:
                        device=HARDWARE.get_device_type())
   last_timing = _log_boot_timing("manager_init", "logging_ready", manager_init_start, last_timing)
 
-  # preimport all processes
-  for p in managed_processes.values():
-    p.prepare()
-  last_timing = _log_boot_timing("manager_init", "preimport_processes", manager_init_start, last_timing)
-
   # StarPilot variables
   install_starpilot(build_metadata, params)
   last_timing = _log_boot_timing("manager_init", "install_starpilot", manager_init_start, last_timing)

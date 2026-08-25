@@ -1,6 +1,6 @@
 import dataclasses
 
-import aiortc
+from libdatachannel import Description
 
 
 @dataclasses.dataclass
@@ -15,13 +15,23 @@ def parse_info_from_offer(sdp: str) -> StreamingMediaInfo:
   """
   helper function to parse info about outgoing and incoming streams from an offer sdp
   """
-  desc = aiortc.sdp.SessionDescription.parse(sdp)
-  audio_tracks = [m for m in desc.media if m.kind == "audio"]
-  video_tracks = [m for m in desc.media if m.kind == "video" and m.direction in ["recvonly", "sendrecv"]]
-  application_tracks = [m for m in desc.media if m.kind == "application"]
-  has_incoming_audio_track = next((t for t in audio_tracks if t.direction in ["sendonly", "sendrecv"]), None) is not None
-  has_incoming_datachannel = len(application_tracks) > 0
-  expects_outgoing_audio_track = next((t for t in audio_tracks if t.direction in ["recvonly", "sendrecv"]), None) is not None
+  desc = Description(sdp, Description.Type.Offer)
+  n_video = 0
+  expected_audio_track = False
+  incoming_audio_track = False
+  incoming_datachannel = desc.has_application()
 
-  return StreamingMediaInfo(len(video_tracks), expects_outgoing_audio_track, has_incoming_audio_track, has_incoming_datachannel)
+  for i in range(desc.media_count()):
+    media = desc.media(i)
+    if media is None:
+      continue
+    direction = media.direction()
+    if media.type() == "video" and direction in (Description.Direction.RecvOnly, Description.Direction.SendRecv):
+      n_video += 1
+    elif media.type() == "audio":
+      if direction in (Description.Direction.RecvOnly, Description.Direction.SendRecv):
+        expected_audio_track = True
+      if direction in (Description.Direction.SendOnly, Description.Direction.SendRecv):
+        incoming_audio_track = True
 
+  return StreamingMediaInfo(n_video, expected_audio_track, incoming_audio_track, incoming_datachannel)

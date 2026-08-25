@@ -1,4 +1,5 @@
 import os
+import importlib
 import shutil
 import subprocess
 import sys
@@ -127,6 +128,41 @@ elif platform.system() == "Darwin":
 elif arch == "aarch64" and AGNOS:
   arch = "larch64"
 assert arch in ["larch64", "aarch64", "x86_64", "Darwin"]
+
+# AGNOS 19.6 ships native dependencies as versioned Python packages. Link
+# Cap'n Proto statically from that managed package so release binaries don't
+# depend on the removed libcapnp-1.0.2.so system library.
+try:
+  capnproto = importlib.import_module("capnproto")
+except ModuleNotFoundError:
+  capnproto = None
+try:
+  ffmpeg = importlib.import_module("ffmpeg")
+except ModuleNotFoundError:
+  ffmpeg = None
+
+capnproto_include_dirs = [capnproto.INCLUDE_DIR] if capnproto is not None else []
+capnproto_lib_dirs = [capnproto.LIB_DIR] if capnproto is not None else []
+ffmpeg_include_dirs = [ffmpeg.INCLUDE_DIR] if ffmpeg is not None else []
+ffmpeg_lib_dirs = [ffmpeg.LIB_DIR] if ffmpeg is not None else []
+
+# Cross-builds install managed dependencies in /work/.venv-linux-arm64, but
+# comma devices expose the same packages from /usr/local/venv. Never embed the
+# host/container mount path in release binaries.
+ffmpeg_runtime_lib_dirs = ffmpeg_lib_dirs
+if arch == "larch64" and ffmpeg is not None:
+  ffmpeg_runtime_lib_dirs = [os.path.join("/usr/local/venv", os.path.relpath(ffmpeg.LIB_DIR, sys.prefix))]
+
+# The managed native-dependency packages keep their tools inside the package
+# instead of installing them into /usr/local/venv/bin. cereal invokes capnpc
+# directly while SConscript files are evaluated, so make the packaged tools
+# discoverable to both SCons actions and configure-time subprocesses.
+dependency_bin_dirs = [
+  package.BIN_DIR for package in (capnproto, ffmpeg)
+  if package is not None and os.path.isdir(package.BIN_DIR)
+]
+if dependency_bin_dirs:
+  os.environ["PATH"] = os.pathsep.join([*dependency_bin_dirs, os.environ["PATH"]])
 
 # Homebrew llvm can shadow Apple clang and break macOS SDK header resolution.
 # Use the system toolchain explicitly on macOS for reliable local builds.
@@ -269,7 +305,10 @@ env = Environment(
     "-Wno-vla-cxx-extension",
   ] + cflags + ccflags,
 
-  CPPPATH=cpppath + [
+  # Managed dependencies must precede the compatibility sysroot. The sysroot
+  # can intentionally retain legacy libraries for C3 support, but new release
+  # binaries must link against the versions shipped in the managed venv.
+  CPPPATH=capnproto_include_dirs + ffmpeg_include_dirs + cpppath + [
     "#",
     "#third_party/acados/include",
     "#third_party/acados/include/blasfeo/include",
@@ -288,11 +327,11 @@ env = Environment(
   RANLIB=ranlib,
   LINKFLAGS=ldflags,
 
-  RPATH=rpath,
+  RPATH=ffmpeg_runtime_lib_dirs + rpath,
 
   CFLAGS=["-std=gnu11"] + cflags,
   CXXFLAGS=["-std=c++1z"] + cxxflags,
-  LIBPATH=libpath + [
+  LIBPATH=capnproto_lib_dirs + ffmpeg_lib_dirs + libpath + [
     "#msgq_repo",
     "#third_party",
     "#selfdrive/pandad",
@@ -371,7 +410,15 @@ SConscript(['opendbc_repo/SConscript'], exports={'env': env_swaglog})
 SConscript(['cereal/SConscript'])
 
 Import('socketmaster', 'msgq')
-messaging = [socketmaster, msgq, 'capnp', 'kj',]
+if capnproto is not None:
+  messaging = [
+    socketmaster,
+    msgq,
+    File(os.path.join(capnproto.LIB_DIR, "libcapnp.a")),
+    File(os.path.join(capnproto.LIB_DIR, "libkj.a")),
+  ]
+else:
+  messaging = [socketmaster, msgq, 'capnp', 'kj']
 Export('messaging')
 
 

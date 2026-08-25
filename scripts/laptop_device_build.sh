@@ -467,6 +467,66 @@ EOF
   echo "==> larch64 scons completed in $(( $(date +%s) - started_at ))s"
 }
 
+validate_larch64_artifacts() {
+  local engine
+  engine="$(detect_engine)"
+
+  echo "==> Validating larch64 runtime dependencies"
+  "${engine}" run --rm --platform linux/arm64 \
+    --user "${DOCKER_RUN_USER}" \
+    -v "${HOST_ROOT_DIR}:/work" \
+    -v "${HOST_VENV_DIR}:/work/.venv-linux-arm64:ro" \
+    -v "${HOST_SYSROOT_DIR}:/opt/tici-sysroot:ro" \
+    -v "${HOST_SYSROOT_DIR}/system/vendor/lib64:/system/vendor/lib64:ro" \
+    -w /work \
+    "${IMAGE_NAME}" bash -lc '
+set -euo pipefail
+ffmpeg_lib_dir="/work/.venv-linux-arm64/lib/python3.12/site-packages/ffmpeg/install/lib"
+target_ffmpeg_runpath="/usr/local/venv/lib/python3.12/site-packages/ffmpeg/install/lib"
+runtime_library_path="${ffmpeg_lib_dir}:/work/third_party/acados/larch64/lib:/work/third_party/libyuv/larch64/lib:/work/selfdrive/controls/lib/lateral_mpc_lib/c_generated_code:/work/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code:/opt/tici-sysroot/usr/local/lib:/opt/tici-sysroot/lib/aarch64-linux-gnu:/opt/tici-sysroot/usr/lib/aarch64-linux-gnu:/system/vendor/lib64"
+failures=0
+
+while IFS= read -r -d "" artifact; do
+  if ! readelf -h "${artifact}" 2>/dev/null | grep -q "Machine:.*AArch64"; then
+    continue
+  fi
+
+  dynamic="$(readelf -d "${artifact}" 2>/dev/null || true)"
+  if grep -Eq "(RPATH|RUNPATH).*\/work\/" <<<"${dynamic}"; then
+    echo "ERROR: ${artifact} embeds a build-host runtime path" >&2
+    failures=1
+  fi
+
+  has_ffmpeg=0
+  while IFS= read -r needed; do
+    case "${needed}" in
+      libavformat.so.*|libavcodec.so.*|libswresample.so.*|libavutil.so.*)
+        has_ffmpeg=1
+        if [[ ! -e "${ffmpeg_lib_dir}/${needed}" ]]; then
+          echo "ERROR: ${artifact} links ${needed}, which is not shipped by the managed FFmpeg package" >&2
+          failures=1
+        fi
+        ;;
+    esac
+  done < <(sed -n "s/.*Shared library: \[\([^]]*\)\].*/\1/p" <<<"${dynamic}")
+
+  if [[ "${has_ffmpeg}" -eq 1 ]] && ! grep -Fq "${target_ffmpeg_runpath}" <<<"${dynamic}"; then
+    echo "ERROR: ${artifact} links FFmpeg without the target managed-venv RUNPATH" >&2
+    failures=1
+  fi
+
+  missing="$(LD_LIBRARY_PATH="${runtime_library_path}" ldd "${artifact}" 2>&1 | grep "not found" || true)"
+  if [[ -n "${missing}" ]]; then
+    echo "ERROR: ${artifact} has unresolved target dependencies:" >&2
+    echo "${missing}" >&2
+    failures=1
+  fi
+done < <(git ls-files -z)
+
+exit "${failures}"
+'
+}
+
 setup_host_venv() {
   if [[ ! -f "${ROOT_DIR}/.venv/bin/activate" ]]; then
     if [[ -x "${ROOT_DIR}/tools/install_python_dependencies.sh" ]]; then
@@ -516,6 +576,7 @@ run_larch64_build() {
     cereal/messaging/bridge \
     msgq_repo/msgq/ipc_pyx.so \
     msgq_repo/msgq/visionipc/visionipc_pyx.so
+  validate_larch64_artifacts
   touch "${ROOT_DIR}/prebuilt"
 }
 
