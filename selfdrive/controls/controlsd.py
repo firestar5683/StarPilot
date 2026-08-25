@@ -163,17 +163,19 @@ CURVATURE_HOLD_OPPOSITE_RELEASE = 0.01  # 1/m
 CURVATURE_HOLD_CONFIRM_MIN = 0.003  # 1/m (~7 deg) of wound curvature before capture
 CURVATURE_HOLD_CONFIRM_SWEPT = 0.6  # rad of heading swept this blinker cycle; past this the push is exit-shaping, not initiation
 
-# Pull-away twitch guard. modeld converts the action head's lateral-ACCELERATION output to
-# curvature with a 1/max(1, v)^2 divide, so its residual at pull-away (~0.02 m/s^2, the
-# head's own noise floor) reads as curvature 0.015 — a 38 deg steering command — where the
-# same 0.02 m/s^2 at highway speed is 0.2 deg. Route 78511c37 twitched on 10 of 10 straight
-# takeoffs, torque 0.57-0.76 at 1.1-1.4 m/s. The model's own planned path is the tell: it
-# read 0.000-0.004 there (6-108x disagreement), while across 11 real low-speed turns in the
-# same drive the action stayed within 0.82-2.56x its plan probe.
-TWITCH_GUARD_MAX_SPEED = 4.0    # m/s; above this the 1/v^2 amplification is gone
-TWITCH_GUARD_FADE_SPEED = 3.0   # m/s; full strength below, faded out by MAX_SPEED
-TWITCH_GUARD_PLAN_RATIO = 3.0   # allowed |action| / |plan curvature| (worst real turn: 2.56)
-TWITCH_GUARD_FLOOR = 0.002      # 1/m (~5 deg of wheel); a near-zero probe must not clamp to nothing
+# Pull-away twitch guard. modeld divides the action head's lateral-ACCELERATION output by
+# max(1, v)^2, so its residual at pull-away (~0.02 m/s^2, the head's noise floor) reads as
+# curvature 0.015 — 38 deg of wheel — where the same value at highway speed is 0.2 deg.
+# Route 78511c37 twitched on 10 of 10 straight takeoffs. The model's own planned path is the
+# tell: it read straight there while the action demanded 6-108x more.
+TWITCH_GUARD_MAX_SPEED = 4.0      # m/s; above this the 1/v^2 amplification is gone
+TWITCH_GUARD_FADE_SPEED = 3.0     # m/s; full strength below, faded out by MAX_SPEED
+TWITCH_GUARD_PLAN_RATIO = 4.0     # allowed |action| / |plan curvature|
+TWITCH_GUARD_FLOOR = 0.002        # 1/m (~5 deg); a near-zero probe must not clamp to nothing
+TWITCH_GUARD_STRAIGHT_LO = 0.005  # 1/m; a plain ratio is too permissive near straight (3x of
+TWITCH_GUARD_STRAIGHT_HI = 0.014  # 0.003 still licenses 22 deg), so fade the allowance out too
+TWITCH_GUARD_MIN_REACH = 12.0     # m; shorter plans read straight while the action legitimately
+                                  # unwinds a turn (ce2b186c51 seg 28 t=14.6). Twitches: p5 24 m
 
 
 def _plan_circle_curvature(xs, ys, lookahead: float) -> float:
@@ -233,10 +235,17 @@ def get_plan_reach(model_v2) -> float:
 
 
 def limit_curvature_to_plan(model_v2, curvature: float, v_ego: float) -> float:
-  # See TWITCH_GUARD_*. Magnitude only: the command is bounded, never reversed.
+  # See TWITCH_GUARD_*. Magnitude only: the command is bounded, never reversed. FAR fit alone —
+  # the near probe swings with the car's heading error, so once a twitch has yawed the car it
+  # bends to correct it and licenses the very command that caused it (seg 10 t=53.1).
   if v_ego >= TWITCH_GUARD_MAX_SPEED or curvature == 0.0:
     return curvature
-  limit = max(TWITCH_GUARD_PLAN_RATIO * abs(get_plan_spatial_curvature(model_v2)), TWITCH_GUARD_FLOOR)
+  if get_plan_reach(model_v2) < TWITCH_GUARD_MIN_REACH:
+    return curvature
+  plan = abs(_plan_circle_curvature(model_v2.position.x, model_v2.position.y,
+                                    CURVATURE_HOLD_PLAN_LOOKAHEAD_FAR))
+  straightness = (plan - TWITCH_GUARD_STRAIGHT_LO) / (TWITCH_GUARD_STRAIGHT_HI - TWITCH_GUARD_STRAIGHT_LO)
+  limit = max(TWITCH_GUARD_PLAN_RATIO * plan * min(max(straightness, 0.0), 1.0), TWITCH_GUARD_FLOOR)
   if abs(curvature) <= limit:
     return curvature
   fade = (TWITCH_GUARD_MAX_SPEED - v_ego) / (TWITCH_GUARD_MAX_SPEED - TWITCH_GUARD_FADE_SPEED)
