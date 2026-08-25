@@ -86,6 +86,9 @@ FORCE_STOP_REANCHOR_MIN_M = 40.0  # m — inside this only ratchet down; shouldS
 FORCE_STOP_CAP_SLACK_M = 15.0  # m — the line can't move away, so tracked can never exceed
                           # what it was at commit minus distance driven. Slack covers an
                           # under-read at commit; without it that would stop us short.
+FORCE_STOP_CAP_TAPER_M = 60.0  # m — slack fades to 0 as the cap closes. The solver aims at
+                          # tracked, so slack held near the line is braking for a stop bar
+                          # that far past the real one.
 
 # Knob bounds (mirror of UI slider; defense in depth)
 OFFSET_FT_MIN = -20
@@ -683,7 +686,8 @@ class StarPilotVCruise:
         # had at commit minus what we've driven. Bounds a ballooning horizon (seen +95 m)
         # that the REANCHOR_MIN floor can't catch, since that floor trusts the estimate.
         self.force_stop_distance_cap = max(self.force_stop_distance_cap - (v_ego * DT_MDL), 0.0)
-        self.tracked_model_length = min(self.tracked_model_length, self.force_stop_distance_cap)
+        cap_slack = FORCE_STOP_CAP_SLACK_M * min(self.force_stop_distance_cap / FORCE_STOP_CAP_TAPER_M, 1.0)
+        self.tracked_model_length = min(self.tracked_model_length, self.force_stop_distance_cap + cap_slack)
         if dash_active:
           if model_length < DASH_MODEL_AGREE_M:
             self.tracked_model_length = min(self.tracked_model_length, DASH_SEED_M)
@@ -716,7 +720,7 @@ class StarPilotVCruise:
       self.stop_sign_confirmed = False
 
       self.tracked_model_length = self.starpilot_planner.model_length
-      self.force_stop_distance_cap = self.tracked_model_length + FORCE_STOP_CAP_SLACK_M
+      self.force_stop_distance_cap = self.tracked_model_length
 
       targets = [v_cruise]
       if self.csc_target >= CSC_MIN_SPEED:

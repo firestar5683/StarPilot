@@ -59,7 +59,7 @@ def make_vcruise(*, red_light=False, raw_model_stopped=False, forcing_stop=False
   vcruise.force_stop_timer = 1.0 if forcing_stop else 0.0
   vcruise.tracked_model_length = 0.0 if forcing_stop else planner.model_length
   # what the not-committed branch would have left behind on the frame before commit
-  vcruise.force_stop_distance_cap = planner.model_length + FORCE_STOP_CAP_SLACK_M
+  vcruise.force_stop_distance_cap = planner.model_length
   return planner, vcruise
 
 
@@ -756,7 +756,7 @@ def test_force_stop_reanchors_when_model_reopens_path_without_stop_action():
   planner, vcruise = make_vcruise(red_light=False, raw_model_stopped=False, forcing_stop=True)
   planner.model_length = 90.0
   vcruise.tracked_model_length = 60.0
-  vcruise.force_stop_distance_cap = 90.0 + FORCE_STOP_CAP_SLACK_M
+  vcruise.force_stop_distance_cap = 90.0
   sm = make_sm(standstill=False)
   sm["modelV2"] = SimpleNamespace(action=SimpleNamespace(shouldStop=False))
 
@@ -790,7 +790,23 @@ def test_force_stop_reanchor_bounded_by_distance_driven():
 
   update_vcruise(vcruise, sm, make_toggles(), now=0.0, v_ego=10.0)
 
-  assert vcruise.tracked_model_length <= 70.0
+  assert vcruise.tracked_model_length <= 70.0 + FORCE_STOP_CAP_SLACK_M
+  assert vcruise.tracked_model_length < 100.0  # nowhere near the 200 m the horizon claimed
+
+
+def test_force_stop_cap_slack_tapers_near_the_line():
+  # Slack protects against an under-read at commit; held near the line it would just aim the
+  # solver that far past the stop bar.
+  planner, vcruise = make_vcruise(red_light=False, raw_model_stopped=False, forcing_stop=True)
+  planner.model_length = 200.0
+  vcruise.tracked_model_length = 60.0
+  vcruise.force_stop_distance_cap = 12.0
+  sm = make_sm(standstill=False)
+  sm["modelV2"] = SimpleNamespace(action=SimpleNamespace(shouldStop=False))
+
+  update_vcruise(vcruise, sm, make_toggles(), now=0.0, v_ego=5.0)
+
+  assert vcruise.tracked_model_length < 12.0 + FORCE_STOP_CAP_SLACK_M / 2.0
 
 
 def test_force_stop_does_not_reanchor_committed_model_stop():

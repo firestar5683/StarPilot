@@ -307,7 +307,9 @@ class StarPilotPlanner:
     except (KeyError, IndexError, TypeError, AttributeError):
       car_params = None
 
-    if self.starpilot_vcruise.forcing_stop:
+    # Also while the far-approach envelope is running: at onset the ramp reaches only
+    # ~-0.5 m/s^2 after a second, so the first seconds of a detected red are mostly lost.
+    if self.starpilot_vcruise.forcing_stop or self.starpilot_vcruise.approach_stop_length > 0.0:
       jerk_scale = get_force_stop_jerk_scale(car_params)
     elif self.tracking_lead:
       # Elantra vision leads can hand off from cruise to lead0 while closing
