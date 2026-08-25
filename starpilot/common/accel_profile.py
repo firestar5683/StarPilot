@@ -3,8 +3,6 @@ from __future__ import annotations
 
 import math
 
-from openpilot.selfdrive.controls.lib.longitudinal_planner import get_max_accel
-
 ACCELERATION_PROFILES = {
   "STANDARD": 0,
   "ECO": 1,
