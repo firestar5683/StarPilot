@@ -9,6 +9,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.starpilot.common.model_versions import is_tinygrad_model_version
+from openpilot.starpilot.controls.lib.starpilot_vcruise import FT_TO_M, OFFSET_FT_MAX, OFFSET_FT_MIN
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import desired_follow_distance
@@ -2202,8 +2203,12 @@ class LongitudinalPlanner:
       # getattr so a stale cereal build degrades to the old behaviour instead of raising
       stop_length = float(getattr(sm['starpilotPlan'], 'approachStopLength', 0.0))
     if stop_length > force_stop_handoff_m:
+      # ForceStopDistanceOffset shifts the perceived line for the v_cruise ceiling, so it has
+      # to shift the obstacle too or the slider barely moves anything now that stop_x leads.
+      offset_ft = max(OFFSET_FT_MIN, min(OFFSET_FT_MAX, int(getattr(starpilot_toggles, 'force_stop_distance_offset', 0) or 0)))
       force_stop_x = (
-        stop_length + STOP_DISTANCE + get_force_stop_distance_bias(self.CP.carFingerprint)
+        stop_length + offset_ft * FT_TO_M + STOP_DISTANCE +
+        get_force_stop_distance_bias(self.CP.carFingerprint)
       )
 
     self.mpc.update(sm['radarState'], v_cruise, x, v, a, j,
