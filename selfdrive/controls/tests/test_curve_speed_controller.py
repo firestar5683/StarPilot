@@ -13,6 +13,9 @@ from openpilot.starpilot.controls.lib.curve_speed_controller import (
   CSC_FARFIELD_GAIN,
   CSC_LAT_ACCEL_MAX,
   CSC_MIN_SPEED,
+  MAX_CURVATURE,
+  PRIOR_CURVATURE_BP,
+  PRIOR_LAT_ACCEL_V,
   CSC_NUDGE,
   CSC_NUDGE_WEIGHT,
   CSC_OVERRIDE_WATCH_TIME,
@@ -244,7 +247,9 @@ def test_prior_gives_higher_lat_accel_for_sharper_curves():
   _, controller = make_controller()
 
   assert controller.learned_lat_accel(0.001) == pytest.approx(1.5, abs=0.05)
-  assert controller.learned_lat_accel(0.1) == pytest.approx(2.9, abs=0.05)
+  assert controller.learned_lat_accel(MAX_CURVATURE) > controller.learned_lat_accel(0.001)
+  assert controller.learned_lat_accel(MAX_CURVATURE) == pytest.approx(
+    float(np.interp(MAX_CURVATURE, PRIOR_CURVATURE_BP, PRIOR_LAT_ACCEL_V)), abs=0.05)
   assert controller.lateral_acceleration == pytest.approx(DEFAULT_LATERAL_ACCELERATION)
 
 
@@ -334,13 +339,19 @@ def test_learned_curve_stays_monotonic_despite_low_outlier_bucket():
 
 def test_dense_bucket_is_not_overridden_by_sparse_neighbour():
   # real device data: a running maximum ratcheted the 80-sample bucket up to the 20-sample neighbour
-  _, controller = make_controller(curvature_data={
+  _, dense_low = make_controller(curvature_data={
     "0.003": {"average": 1.95, "count": 20},
     "0.005": {"average": 1.38, "count": 80},
   })
+  _, dense_high = make_controller(curvature_data={
+    "0.003": {"average": 1.95, "count": 80},
+    "0.005": {"average": 1.38, "count": 20},
+  })
 
-  assert controller.learned_lat_accel(0.005) < 1.82
-  assert controller.learned_lat_accel(0.005) >= controller.learned_lat_accel(0.003)
+  assert dense_low.learned_lat_accel(0.005) < 1.95      # not ratcheted to the sparse neighbour
+  assert dense_low.learned_lat_accel(0.005) >= dense_low.learned_lat_accel(0.003)
+  # whichever side is better sampled should pull the fit: swapping the counts must raise it
+  assert dense_high.learned_lat_accel(0.005) > dense_low.learned_lat_accel(0.005)
 
 
 def test_weighted_isotonic_pools_violators_by_weight():

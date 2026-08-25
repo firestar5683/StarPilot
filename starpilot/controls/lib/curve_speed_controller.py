@@ -55,10 +55,20 @@ CSC_FARFIELD_MIN_CURVATURE = 0.004   # ~R 250 m; at this strength range readings
 CSC_FARFIELD_MIN_DISTANCE = 30.0     # inside this the model is already accurate
 CSC_FARFIELD_GAIN = 1.23             # 1 / 0.81
 
-MAX_CURVATURE = 0.1
-MIN_CURVATURE = 0.001
-ROUNDING_PRECISION = 5
-STEP = 0.001
+# Buckets are spaced geometrically, because comfort is a speed and v = sqrt(a/k) -- a linear
+# curvature grid puts nearly all its resolution where CSC can never operate. On real drives
+# 100% of active frames sat in k 0.001-0.006, which a 0.001 linear step covered in five
+# buckets, the widest spanning 95->67 mph. Geometric spacing makes every bucket ~3 mph wide.
+# Changing this grid is safe: _normalize_curvature_data re-buckets stored keys on load.
+MIN_CURVATURE = 0.0005            # R 2000 m — gentler than this never constrains anything
+MAX_CURVATURE = 0.02              # R 50 m — already well below the CSC_MIN_SPEED floor
+# 24 keeps every bucket under ~7 mph wide while holding ~45% of the old per-bucket sample
+# density; finer grids resolve better but leave more buckets prior-dominated for longer.
+CURVATURE_BUCKETS = 24
+ROUNDING_PRECISION = 6
+CURVATURE_GRID = MIN_CURVATURE * np.power(MAX_CURVATURE / MIN_CURVATURE,
+                                          np.arange(CURVATURE_BUCKETS) / (CURVATURE_BUCKETS - 1))
+LOG_CURVATURE_GRID = np.log(CURVATURE_GRID)
 
 # Drivers accept more lateral acceleration in sharp slow corners than in highway sweepers.
 PRIOR_CURVATURE_BP = [0.001, 0.003, 0.01, 0.03, 0.1]
@@ -148,7 +158,8 @@ class CurveSpeedController:
     curvature_data = self.starpilot_planner.params.get("CurvatureData")
     self.curvature_data = self._normalize_curvature_data(curvature_data)
 
-    self.required_curvatures = [str(round(road_curvature, ROUNDING_PRECISION)) for road_curvature in np.arange(MIN_CURVATURE, MAX_CURVATURE + STEP, STEP)]
+    # built through the bucketer so the keys are byte-identical to what training writes
+    self.required_curvatures = [self._bucket_curvature(curvature) for curvature in CURVATURE_GRID]
 
     self.rebuild_lat_accel_curve()
     # publish on the first flush even if this drive never trains, or the readout
@@ -157,10 +168,10 @@ class CurveSpeedController:
 
   @staticmethod
   def _bucket_curvature(road_curvature):
-    clipped_curvature = float(np.clip(road_curvature, MIN_CURVATURE, MAX_CURVATURE))
-    bucket_index = round((clipped_curvature - MIN_CURVATURE) / STEP)
-    bucketed_curvature = MIN_CURVATURE + (bucket_index * STEP)
-    return str(round(bucketed_curvature, ROUNDING_PRECISION))
+    clipped_curvature = float(np.clip(abs(road_curvature), MIN_CURVATURE, MAX_CURVATURE))
+    # nearest in log space, so a bucket is a constant speed step rather than a constant radius one
+    bucket_index = int(np.argmin(np.abs(LOG_CURVATURE_GRID - np.log(clipped_curvature))))
+    return str(round(float(CURVATURE_GRID[bucket_index]), ROUNDING_PRECISION))
 
   @classmethod
   def _normalize_curvature_data(cls, curvature_data):
