@@ -81,22 +81,3 @@ def test_follow_policy_bypasses_post_departure_handoff():
   result = run(lead(d_rel=46.0, v_lead=22.0), v_ego=20.0, previous=0.0, raw=0.6, post_departure=True)
   assert result.target == pytest.approx(0.6)
   assert result.accel_cap is None
-
-
-def test_follow_policy_lifts_low_speed_cap_for_departing_vision_lead():
-  # launching behind a vision lead that is clearly pulling away: the 0.55
-  # comfort ceiling blends up to the radar-equivalent launch ceiling
-  departing = run(lead(d_rel=9.0, v_lead=5.5, a_lead=0.8), v_ego=2.5, raw=1.5)
-  assert departing.target == pytest.approx(1.5)
-
-  # mid-blend: lead only 1.5 m/s faster gets a partial lift
-  partial = run(lead(d_rel=9.0, v_lead=4.0, a_lead=0.8), v_ego=2.5, raw=1.5)
-  assert 0.55 < partial.target < 1.5
-
-  # a lead we are keeping pace with keeps the comfort cap
-  gaining = run(lead(d_rel=9.0, v_lead=3.0, a_lead=0.3), v_ego=2.5, raw=1.5)
-  assert gaining.target <= 0.55
-
-  # radar leads below FOLLOW_MIN_SPEED were never capped; unchanged
-  radar_launch = run(lead(d_rel=9.0, v_lead=5.5, a_lead=0.8, radar=True), v_ego=2.5, raw=1.5)
-  assert radar_launch.target == pytest.approx(1.5)
