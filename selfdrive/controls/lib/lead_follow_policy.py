@@ -22,6 +22,7 @@ FOLLOW_MAX_LEAD_BRAKE = 0.35
 FOLLOW_GAP_BUFFER_MIN = 4.0
 FOLLOW_GAP_BUFFER_GAIN = 0.15
 FOLLOW_ACCEL_MAX = 0.55
+FOLLOW_LAUNCH_ACCEL_MAX = 1.5
 FOLLOW_TRANSITION_MIN_STEP = 0.06
 FOLLOW_TRANSITION_MAX_STEP = 0.18
 FOLLOW_TRANSITION_MIN_TTC = 6.0
@@ -145,7 +146,13 @@ def _catchup_cap(lead, v_ego: float, t_follow: float, *, source: str, tracking: 
   if not low_speed:
     entry = float(np.clip((v_ego - 8.0) / 4.0, 0.0, 1.0))
     cap = float(np.interp(entry, [0.0, 1.0], [1.5, cap]))
-  return min(FOLLOW_ACCEL_MAX if low_speed else 1.5, cap)
+    return min(1.5, cap)
+  # A vision lead pulling away cannot be lunged at while lead_delta stays
+  # positive, so the comfort ceiling blends up toward the uncapped radar-lead
+  # launch as the departure becomes unambiguous. Re-evaluated every cycle: a
+  # new lead or a braking lead drops lead_delta and restores the cap.
+  cap = min(FOLLOW_ACCEL_MAX, cap)
+  return float(np.interp(lead_delta, [1.0, 2.0], [cap, FOLLOW_LAUNCH_ACCEL_MAX]))
 
 
 def _matched_brake_floor(lead, v_ego: float, t_follow: float) -> float | None:
