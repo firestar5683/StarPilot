@@ -64,7 +64,7 @@ class LiveStreamVideoStreamTrack(TiciVideoStreamTrack):
       self._seen_keyframe = False
 
   def request_keyframe(self) -> None:
-    self.params.put("LivestreamRequestKeyframe", True, block=False)
+    self.params.put_nonblocking("LivestreamRequestKeyframe", True)
 
   def _build_frame_data(self, msg) -> bytes:
     encode_data = getattr(msg, msg.which())
@@ -91,7 +91,7 @@ class LiveStreamVideoStreamTrack(TiciVideoStreamTrack):
       if msg is not None:
         if not self._seen_keyframe and (getattr(msg, msg.which()).idx.flags & V4L2_BUF_FLAG_KEYFRAME):
           self._seen_keyframe = True
-          self.params.put("LivestreamRequestKeyframe", False, block=False)
+          self.params.put_nonblocking("LivestreamRequestKeyframe", False)
         break
       await asyncio.sleep(0.005)
 

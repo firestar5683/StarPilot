@@ -397,7 +397,10 @@ def _text_response(text: str, status: int = 200) -> tuple[int, bytes, str]:
 
 async def handle_get_stream(state: ServerState, raw_body: bytes) -> tuple[int, bytes, str]:
   stream_dict = state.streams
-  body = StreamRequestBody(**json.loads(raw_body))
+  parsed_dict = json.loads(raw_body)
+  valid_fields = {f.name for f in StreamRequestBody.__dataclass_fields__.values()}
+  filtered_dict = {k: v for k, v in parsed_dict.items() if k in valid_fields}
+  body = StreamRequestBody(**filtered_dict)
 
   async with state.stream_lock:
     # don't remove existing connection on prewarm request
