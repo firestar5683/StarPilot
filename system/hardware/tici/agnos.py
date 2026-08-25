@@ -16,6 +16,8 @@ SPARSE_CHUNK_FMT = struct.Struct('H2xI4x')
 CAIBX_URL = "https://commadist.azureedge.net/agnosupdate/"
 
 AGNOS_MANIFEST_FILE = "system/hardware/tici/agnos.json"
+PRIMARY_DOWNLOAD_ATTEMPTS = 3
+MAX_DOWNLOAD_ATTEMPTS = 10
 
 
 class StreamingDecompressor:
@@ -52,6 +54,11 @@ class StreamingDecompressor:
 
     self.sha256.update(result)
     return result
+
+
+def get_partition_download_url(partition: dict, attempt: int) -> str:
+  urls = [partition['url'], *partition.get('fallback_urls', [])]
+  return urls[min(attempt // PRIMARY_DOWNLOAD_ATTEMPTS, len(urls) - 1)]
 
 
 def unsparsify(f: StreamingDecompressor) -> Generator[bytes, None, None]:
@@ -258,7 +265,8 @@ def flash_partition(target_slot_number: int, partition: dict, cloudlog, standalo
 
 
 def swap(manifest_path: str, target_slot_number: int, cloudlog) -> None:
-  update = json.load(open(manifest_path))
+  with open(manifest_path) as manifest:
+    update = json.load(manifest)
   for partition in update:
     if not partition.get('full_check', False):
       clear_partition_hash(target_slot_number, partition)
@@ -273,7 +281,8 @@ def swap(manifest_path: str, target_slot_number: int, cloudlog) -> None:
 
 
 def flash_agnos_update(manifest_path: str, target_slot_number: int, cloudlog, standalone=False) -> None:
-  update = json.load(open(manifest_path))
+  with open(manifest_path) as manifest:
+    update = json.load(manifest)
 
   cloudlog.info(f"Target slot {target_slot_number}")
 
@@ -283,15 +292,20 @@ def flash_agnos_update(manifest_path: str, target_slot_number: int, cloudlog, st
   for partition in update:
     success = False
 
-    for retries in range(10):
+    for attempt in range(MAX_DOWNLOAD_ATTEMPTS):
+      download_partition = dict(partition)
+      download_partition['url'] = get_partition_download_url(partition, attempt)
+
       try:
-        flash_partition(target_slot_number, partition, cloudlog, standalone)
+        if download_partition['url'] != partition['url']:
+          cloudlog.info(f"Using fallback mirror for {partition['name']}: {download_partition['url']}")
+        flash_partition(target_slot_number, download_partition, cloudlog, standalone)
         success = True
         break
 
       except requests.exceptions.RequestException:
         cloudlog.exception("Failed")
-        cloudlog.info(f"Failed to download {partition['name']}, retrying ({retries})")
+        cloudlog.info(f"Failed to download {partition['name']}, retrying ({attempt + 1}/{MAX_DOWNLOAD_ATTEMPTS})")
         time.sleep(10)
 
     if not success:
@@ -302,7 +316,8 @@ def flash_agnos_update(manifest_path: str, target_slot_number: int, cloudlog, st
 
 
 def verify_agnos_update(manifest_path: str, target_slot_number: int) -> bool:
-  update = json.load(open(manifest_path))
+  with open(manifest_path) as manifest:
+    update = json.load(manifest)
   return all(verify_partition(target_slot_number, partition) for partition in update)
 
 

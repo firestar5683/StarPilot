@@ -57,6 +57,9 @@
   {
     "name": "boot",
     "url": "https://files.firestar.link/x/ugiq4cqx08q7/boot9.img.xz",
+    "fallback_urls": [
+      "https://files-east.firestar.link/x/npthb0hzvtxx/boot9.img.xz"
+    ],
     "hash": "ab2eba0f96b2f48efa376330c3eb509158361adf3ad9c20f269ec92457aa841f",
     "hash_raw": "ab2eba0f96b2f48efa376330c3eb509158361adf3ad9c20f269ec92457aa841f",
     "size": 48343040,
@@ -68,6 +71,9 @@
   {
     "name": "system",
     "url": "https://files.firestar.link/x/07530yj1jd6a/system18.img.xz",
+    "fallback_urls": [
+      "https://files-east.firestar.link/x/5pmqh33uqrob/system18.img.xz"
+    ],
     "hash": "01c84930849f9be2bdbad5e9a8dda3a6fd2be95e81d1b3556574b18346934f49",
     "hash_raw": "01c84930849f9be2bdbad5e9a8dda3a6fd2be95e81d1b3556574b18346934f49",
     "size": 4718592000,
