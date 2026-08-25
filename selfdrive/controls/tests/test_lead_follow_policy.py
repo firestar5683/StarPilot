@@ -77,6 +77,12 @@ def test_follow_policy_never_relaxes_material_braking():
   assert result.target == pytest.approx(-1.2)
 
 
+def test_follow_policy_leaves_low_speed_vision_follow_uncapped():
+  result = run(lead(d_rel=8.0, v_lead=4.0), v_ego=2.0, raw=1.4)
+  assert result.accel_cap is None
+  assert result.target == pytest.approx(1.4)
+
+
 def test_follow_policy_bypasses_post_departure_handoff():
   result = run(lead(d_rel=46.0, v_lead=22.0), v_ego=20.0, previous=0.0, raw=0.6, post_departure=True)
   assert result.target == pytest.approx(0.6)

@@ -21,7 +21,6 @@ FOLLOW_MAX_CLOSING = 3.5
 FOLLOW_MAX_LEAD_BRAKE = 0.35
 FOLLOW_GAP_BUFFER_MIN = 4.0
 FOLLOW_GAP_BUFFER_GAIN = 0.15
-FOLLOW_ACCEL_MAX = 0.55
 FOLLOW_TRANSITION_MIN_STEP = 0.06
 FOLLOW_TRANSITION_MAX_STEP = 0.18
 FOLLOW_TRANSITION_MIN_TTC = 6.0
@@ -107,20 +106,17 @@ def _catchup_cap(lead, v_ego: float, t_follow: float, *, source: str, tracking: 
     return None
 
   radar = bool(getattr(lead, "radar", False))
-  prob = _lead_prob(lead)
   brake = _lead_brake(lead)
-  low_speed = not radar and v_ego <= 12.0 and prob >= 0.85 and brake <= 0.20
-  if v_ego < FOLLOW_MIN_SPEED and not low_speed:
+  if v_ego < FOLLOW_MIN_SPEED:
     return None
 
   lead_delta = float(lead.vLead) - float(v_ego)
-  minimum_delta = -1.2 if low_speed else -0.5
+  minimum_delta = -0.5
   if lead_delta < minimum_delta:
     return None
 
   gap_error = float(lead.dRel) - float(desired_follow_distance(v_ego, lead.vLead, t_follow))
-  buffer = max(6.0 if low_speed else FOLLOW_GAP_BUFFER_MIN,
-               (0.35 if low_speed else FOLLOW_GAP_BUFFER_GAIN) * float(v_ego))
+  buffer = max(FOLLOW_GAP_BUFFER_MIN, FOLLOW_GAP_BUFFER_GAIN * float(v_ego))
   if gap_error > buffer:
     return None
 
@@ -130,22 +126,17 @@ def _catchup_cap(lead, v_ego: float, t_follow: float, *, source: str, tracking: 
     if source == "cruise" and gap_error <= 0.75 and lead_delta < minimum_delta:
       return 0.04
 
-  edge = np.interp(
-    lead_delta,
-    [-1.2, -0.5, 0.0, 1.0, 2.0] if low_speed else [-0.5, 0.0, 1.0],
-    [0.20, 0.20, 0.24, 0.38, 0.55] if low_speed else [0.16, 0.08, 0.02],
-  )
-  near = min(float(edge), 0.16 if low_speed else 0.03)
+  edge = np.interp(lead_delta, [-0.5, 0.0, 1.0], [0.16, 0.08, 0.02])
+  near = min(float(edge), 0.03)
   gap_factor = float(np.clip(max(gap_error, 0.0) / max(buffer, 0.1), 0.0, 1.0))
   cap = float(np.interp(gap_factor, [0.0, 1.0], [near, float(edge)]))
   allowance = float(np.clip(gap_error / 4.0, 0.0, 1.0))
   if v_ego >= 12.0:
     allowance *= 0.55 * float(np.clip((0.35 - brake) / 0.35, 0.0, 1.0))
   cap += allowance * 0.55
-  if not low_speed:
-    entry = float(np.clip((v_ego - 8.0) / 4.0, 0.0, 1.0))
-    cap = float(np.interp(entry, [0.0, 1.0], [1.5, cap]))
-  return min(FOLLOW_ACCEL_MAX if low_speed else 1.5, cap)
+  entry = float(np.clip((v_ego - 8.0) / 4.0, 0.0, 1.0))
+  cap = float(np.interp(entry, [0.0, 1.0], [1.5, cap]))
+  return min(1.5, cap)
 
 
 def _matched_brake_floor(lead, v_ego: float, t_follow: float) -> float | None:
