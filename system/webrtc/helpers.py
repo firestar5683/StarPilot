@@ -9,10 +9,20 @@ WEBRTCD_PORT = 5001
 @dataclass
 class StreamRequestBody:
   sdp: str
-  init_camera: str
-  enabled: bool
+  init_camera: str = ""
+  enabled: bool = True
+  cameras: list[str] = field(default_factory=list)
   bridge_services_in: list[str] = field(default_factory=list)
   bridge_services_out: list[str] = field(default_factory=list)
+
+  def __post_init__(self):
+    if not self.cameras:
+      if self.init_camera:
+        self.cameras = [self.init_camera]
+      else:
+        self.cameras = ["road"]
+    if not self.init_camera and self.cameras:
+      self.init_camera = self.cameras[0]
 
 
 def post_stream_request(body: StreamRequestBody) -> dict:
