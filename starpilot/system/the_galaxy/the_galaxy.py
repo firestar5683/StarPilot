@@ -8745,7 +8745,7 @@ def main():
     print("\"The Galaxy\" is not running on a comma device, enabling debug mode")
 
   app.secret_key = secrets.token_hex(32)
-  app.run(host=host, port=port, debug=debug, use_reloader=use_reloader)
+  app.run(host=host, port=port, debug=debug, use_reloader=use_reloader, threaded=True)
 
 if __name__ == "__main__":
   main()
