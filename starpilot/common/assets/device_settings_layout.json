@@ -429,6 +429,15 @@
         "settings_tier": "advanced"
       },
       {
+        "key": "HondaBoschARadar",
+        "label": "Honda Bosch-A Radar",
+        "description": "Honda Bosch-A harness only (N-Box, Accord, Civic, CR-V, CR-V Hybrid, Acura RDX, Insight, Honda e). Parses the car's own 16-slot Bosch-A radar CAN traffic into real leadOne/leadTwo tracks instead of treating the car as radarless. RX-only -- never transmits on the radar bus. Factory AEB/CMBS/FCW remain available as long as stock longitudinal stays in control; enabling openpilot longitudinal (alpha) disables them regardless of this toggle. Restart required to take effect.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "AdvancedLongitudinalTune",
+        "settings_tier": "advanced"
+      },
+      {
         "key": "CustomAccelProfile",
         "label": "Custom Accel Profile",
         "description": "Replace the built-in acceleration profile with your own per-speed max-acceleration values. Breakpoint speeds stay fixed, and the starting defaults mirror the currently selected acceleration profile plus EV or Truck tuning.",

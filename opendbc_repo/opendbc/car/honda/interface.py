@@ -1,10 +1,11 @@
 #!/usr/bin/env python3
 import numpy as np
+from openpilot.common.params import Params, UnknownKeyName
 from opendbc.car import get_safety_config, structs, uds
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.disable_ecu import disable_ecu
 from opendbc.car.honda.hondacan import CanBus
-from opendbc.car.honda.values import CarControllerParams, HondaFlags, CAR, HONDA_BOSCH, HONDA_BOSCH_CANFD, \
+from opendbc.car.honda.values import CarControllerParams, HondaFlags, CAR, HONDA_BOSCH, HONDA_BOSCH_A, HONDA_BOSCH_CANFD, \
                                                  HONDA_NIDEC_ALT_SCM_MESSAGES, HONDA_BOSCH_RADARLESS, HondaSafetyFlags
 from opendbc.car.honda.carcontroller import CarController
 from opendbc.car.honda.carstate import CarState
@@ -44,7 +45,15 @@ class CarInterface(CarInterfaceBase):
         cfgs.insert(0, get_safety_config(structs.CarParams.SafetyModel.noOutput))
       ret.safetyConfigs = cfgs
 
-      ret.radarUnavailable = True
+      # HONDA_BOSCH_A platforms (plain bosch_a harness: not CANFD, not radarless, not alt-radar) have
+      # a firmware-correct RadarInterface (16-slot Bosch-A object bank, RX-only) and use it by
+      # default via HondaBoschARadar: every other Bosch platform still has no parsed radar DBC and
+      # keeps radarUnavailable=True regardless.
+      try:
+        bosch_a_radar_tryout = not docs and Params().get_bool("HondaBoschARadar")
+      except UnknownKeyName:
+        bosch_a_radar_tryout = False
+      ret.radarUnavailable = not (candidate in HONDA_BOSCH_A and bosch_a_radar_tryout)
       # Disable the radar and let openpilot control longitudinal
       # WARNING: THIS DISABLES AEB!
       # If Bosch radarless, this blocks ACC messages from the camera
