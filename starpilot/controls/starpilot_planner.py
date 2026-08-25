@@ -20,12 +20,7 @@ from openpilot.selfdrive.controls.lib.lead_behavior import (
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import A_CHANGE_COST, DANGER_ZONE_COST, J_EGO_COST, STOP_DISTANCE
 from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import get_lead_follow_jerk_scale
 
-from openpilot.starpilot.common.starpilot_utilities import (
-  calculate_lane_width,
-  calculate_model_path_length,
-  calculate_road_curvature,
-  extract_curve_profile,
-)
+from openpilot.starpilot.common.starpilot_utilities import calculate_lane_width, calculate_road_curvature, extract_curve_profile
 from openpilot.starpilot.common.starpilot_variables import CRUISING_SPEED, MINIMUM_LATERAL_ACCELERATION, PLANNER_TIME, THRESHOLD
 from openpilot.starpilot.controls.lib.conditional_chill_mode import ConditionalChillMode
 from openpilot.starpilot.controls.lib.conditional_experimental_mode import ConditionalExperimentalMode
@@ -210,8 +205,8 @@ class StarPilotPlanner:
     self.CS_prev_left_blinker = CS.leftBlinker
     self.CS_prev_right_blinker = CS.rightBlinker
 
+    self.model_length = sm["modelV2"].position.x[-1]
     model_position = sm["modelV2"].position
-    self.model_length = calculate_model_path_length(model_position)
     model_path_y = getattr(model_position, "y", [])
     if len(model_path_y) == len(model_position.x):
       self.lead_path_y = float(np.interp(self.lead_one.dRel, model_position.x, model_path_y))

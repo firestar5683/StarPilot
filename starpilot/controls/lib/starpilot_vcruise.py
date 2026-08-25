@@ -65,14 +65,6 @@ FORCE_STOP_APPROACH_DECEL = 0.65  # m/s^2 — speed ceiling before commit. LOWER
 # approachStopLength is published RAW: model_length converges from above, so rate-limiting
 # it inward freezes it far out and the constraint never binds. Tried, measured, don't re-add.
 ADAS_MAX_MS = 17.88       # 40 mph — cross-street ADAS guard
-CEM_MAX_MS = 17.88        # 40 mph — same envelope for the model path. Committing at
-                          # ACTIVATION_M from above this needs >2.4 m/s^2, past the
-                          # 2.3 m/s^2 line where stops start failing, and a hard
-                          # highway-speed decel is what a driver reads as a phantom
-                          # stop. Every real force stop in route
-                          # 78511c37de32c375--9c33d63ad6 armed at <=39 mph; the one
-                          # false commit (off-ramp, 5.2 s of Force Stop) armed at 48.
-                          # The far-approach envelope bleeds speed under this first.
 DASH_SEED_M = 27.0        # ~88 ft — typical ADAS detection distance, used to snap
                           # tracked length closer when dashboard confirms a sign
 DASH_MODEL_AGREE_M = 50.0 # m — dash arm/snap needs model_length under this; a lone dash bit
@@ -383,16 +375,9 @@ class StarPilotVCruise:
     lead_present = (bool(getattr(lead, "status", False))
                     and float(getattr(lead, "dRel", float("inf"))) < lead_veto_m
                     and float(getattr(lead, "vLead", float("inf"))) < v_ego + 2.0)
-    # stop_then_turn exists so a wheel already pre-wound at a stop line can't veto a
-    # legit Force Stop. That scene only exists at pre-wind speeds. Unscoped, the override
-    # made this veto unreachable: stop_then_turn is armed by stop_light_detected on the
-    # same frame the veto is evaluated, so it was True on 100% of the frames the veto
-    # was meant to gate (route 78511c37de32c375--9c33d63ad6: 1130 curved detection
-    # frames, curved_approach_scene fired on 0 of them).
-    prewind_scene = stop_then_turn and v_ego <= FORCE_STOP_TURN_VETO_MAX_SPEED
     curved_approach_scene = (
       abs(float(getattr(self.starpilot_planner, "road_curvature", 0.0))) >= FORCE_STOP_CURVE_VETO_MAX_ROAD_CURVATURE
-      and not prewind_scene
+      and not stop_then_turn
     )
 
     # CEM/model path: model predicted stop within ACTIVATION_M.
@@ -412,7 +397,6 @@ class StarPilotVCruise:
     cem_path = (stop_light_detected
                 and controls_enabled and starpilot_toggles.force_stops
                 and model_length_active
-                and v_ego < CEM_MAX_MS
                 and self.override_force_stop_timer <= 0
                 and not self.starpilot_planner.driving_in_curve
                 and not curved_approach_scene

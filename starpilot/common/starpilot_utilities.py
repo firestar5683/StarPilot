@@ -124,24 +124,6 @@ def calculate_lane_width(lane_line1, lane_line2, road_edge=None):
   return float(distance_to_lane)
 
 
-def calculate_model_path_length(model_position):
-  # Distance the model plans to TRAVEL, measured along the path.
-  #
-  # position.x[-1] is only the forward projection of the plan's endpoint in the car's
-  # frame, so it collapses as soon as the path bends: on a highway sweeper it reads
-  # ~0.85x the real distance, on an off-ramp ~0.30x. Every "is the model planning a
-  # stop" test compares this against v_ego * T, so pure geometry reads as a stop.
-  # Measured on route 78511c37de32c375--9c33d63ad6 (32 min): 546 of 1149 false stop
-  # detections came from the chord collapse alone, with zero true stops depending on it
-  # (on a straight approach the two are identical to within 0.3%).
-  x = np.asarray(model_position.x, dtype=np.float64)
-  y = np.asarray(model_position.y, dtype=np.float64)
-  if x.size < 2 or y.size != x.size:
-    return float(x[-1]) if x.size else 0.0
-
-  return float(np.sum(np.hypot(np.diff(x), np.diff(y))))
-
-
 # Credit goes to Pfeiferj!
 def calculate_road_curvature(modelData, v_ego):
   orientation_rate = np.array(modelData.orientationRate.z)
