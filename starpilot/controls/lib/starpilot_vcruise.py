@@ -83,6 +83,9 @@ FORCE_STOP_TURN_VETO_STOP_SEEN_HOLD_TIME = 4.0
 FORCE_STOP_DISTANCE_REANCHOR_MIN_GAP = 3.0  # m — ignore small model-horizon noise
 FORCE_STOP_REANCHOR_MIN_M = 40.0  # m — inside this only ratchet down; shouldStop doesn't
                           # assert until ~10 m, so horizon jitter would release the stop
+FORCE_STOP_CAP_SLACK_M = 15.0  # m — the line can't move away, so tracked can never exceed
+                          # what it was at commit minus distance driven. Slack covers an
+                          # under-read at commit; without it that would stop us short.
 
 # Knob bounds (mirror of UI slider; defense in depth)
 OFFSET_FT_MIN = -20
@@ -189,6 +192,7 @@ class StarPilotVCruise:
     # Kinematic distance estimator. Same attribute also published as
     # starpilotPlan.forcingStopLength, so the existing reader keeps working.
     self.tracked_model_length = 0.0
+    self.force_stop_distance_cap = 0.0  # odometry ceiling, re-seeded until commit
 
     self.stop_sign_confirmed = False
     self.stop_seen_on_approach_at = None
@@ -675,6 +679,11 @@ class StarPilotVCruise:
           self.tracked_model_length = model_length
         else:
           self.tracked_model_length = min(self.tracked_model_length, model_length)
+        # Odometry ceiling: the line can't recede, so a re-anchor may never exceed what we
+        # had at commit minus what we've driven. Bounds a ballooning horizon (seen +95 m)
+        # that the REANCHOR_MIN floor can't catch, since that floor trusts the estimate.
+        self.force_stop_distance_cap = max(self.force_stop_distance_cap - (v_ego * DT_MDL), 0.0)
+        self.tracked_model_length = min(self.tracked_model_length, self.force_stop_distance_cap)
         if dash_active:
           if model_length < DASH_MODEL_AGREE_M:
             self.tracked_model_length = min(self.tracked_model_length, DASH_SEED_M)
@@ -707,6 +716,7 @@ class StarPilotVCruise:
       self.stop_sign_confirmed = False
 
       self.tracked_model_length = self.starpilot_planner.model_length
+      self.force_stop_distance_cap = self.tracked_model_length + FORCE_STOP_CAP_SLACK_M
 
       targets = [v_cruise]
       if self.csc_target >= CSC_MIN_SPEED:

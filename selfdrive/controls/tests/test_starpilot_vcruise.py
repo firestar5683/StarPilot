@@ -7,6 +7,7 @@ from openpilot.common.realtime import DT_MDL
 from openpilot.starpilot.common.starpilot_variables import PLANNER_TIME
 from openpilot.starpilot.controls.lib.curve_speed_controller import CSC_GLOW_HOLD_TIME, CSC_GLOW_ON_DELTA
 from openpilot.starpilot.controls.lib.starpilot_vcruise import (
+  FORCE_STOP_CAP_SLACK_M,
   FORCE_STOP_TURN_VETO_STOP_SEEN_HOLD_TIME,
   STANDSTILL_FORCE_STOP_LIGHT_HOLD_TIME,
   StarPilotVCruise,
@@ -57,6 +58,8 @@ def make_vcruise(*, red_light=False, raw_model_stopped=False, forcing_stop=False
   vcruise.forcing_stop = forcing_stop
   vcruise.force_stop_timer = 1.0 if forcing_stop else 0.0
   vcruise.tracked_model_length = 0.0 if forcing_stop else planner.model_length
+  # what the not-committed branch would have left behind on the frame before commit
+  vcruise.force_stop_distance_cap = planner.model_length + FORCE_STOP_CAP_SLACK_M
   return planner, vcruise
 
 
@@ -753,6 +756,7 @@ def test_force_stop_reanchors_when_model_reopens_path_without_stop_action():
   planner, vcruise = make_vcruise(red_light=False, raw_model_stopped=False, forcing_stop=True)
   planner.model_length = 90.0
   vcruise.tracked_model_length = 60.0
+  vcruise.force_stop_distance_cap = 90.0 + FORCE_STOP_CAP_SLACK_M
   sm = make_sm(standstill=False)
   sm["modelV2"] = SimpleNamespace(action=SimpleNamespace(shouldStop=False))
 
@@ -772,6 +776,21 @@ def test_force_stop_does_not_reanchor_inside_reanchor_floor():
   update_vcruise(vcruise, sm, make_toggles(), now=0.0, v_ego=1.5)
 
   assert vcruise.tracked_model_length < 25.0
+
+
+def test_force_stop_reanchor_bounded_by_distance_driven():
+  # The line can't recede: a ballooning horizon may not push the stop past where it was at
+  # commit minus the distance driven since.
+  planner, vcruise = make_vcruise(red_light=False, raw_model_stopped=False, forcing_stop=True)
+  planner.model_length = 200.0
+  vcruise.tracked_model_length = 60.0
+  vcruise.force_stop_distance_cap = 70.0
+  sm = make_sm(standstill=False)
+  sm["modelV2"] = SimpleNamespace(action=SimpleNamespace(shouldStop=False))
+
+  update_vcruise(vcruise, sm, make_toggles(), now=0.0, v_ego=10.0)
+
+  assert vcruise.tracked_model_length <= 70.0
 
 
 def test_force_stop_does_not_reanchor_committed_model_stop():
