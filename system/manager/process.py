@@ -634,19 +634,7 @@ class PythonProcess(ManagerProcess):
     self.launcher = launcher
 
   def prepare(self) -> None:
-    if self.enabled:
-      cloudlog.info(f"preimporting {self.module}")
-      start = time.monotonic()
-      try:
-        importlib.import_module(self.module)
-      finally:
-        line = f"SP_BOOT_TIMING preimport {self.name} module={self.module} +{time.monotonic() - start:.3f}s"
-        try:
-          with open(os.environ.get("SP_BOOT_TIMING_LOG", "/tmp/starpilot_boot_timing.log"), "a") as f:
-            f.write(line + "\n")
-        except OSError:
-          pass
-        cloudlog.warning(line)
+    pass
 
   def start(self) -> None:
     # In case we only tried a non blocking stop we need to stop it before restarting

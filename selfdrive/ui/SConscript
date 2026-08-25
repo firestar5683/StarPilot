@@ -1,15 +1,29 @@
+import importlib.util
+import os
+from pathlib import Path
+
 Import('env', 'arch', 'common')
 
 if GetOption('extras') and arch != "Darwin":
   raylib_env = env.Clone()
-  raylib_env['LIBPATH'] += [f'#third_party/raylib/{arch}/']
   raylib_env['LINKFLAGS'].append('-Wl,-strip-debug')
 
-  raylib_libs = common + ["raylib"]
   if arch == "larch64":
-    raylib_libs += ["GLESv2", "wayland-client", "wayland-egl", "EGL"]
+    tici_sysroot = os.environ.get("SP_TICI_SYSROOT", "").strip().rstrip("/")
+    if tici_sysroot:
+      raylib_dir = Path(tici_sysroot) / "usr/local/venv/lib/python3.12/site-packages/raylib/install"
+    else:
+      raylib_spec = importlib.util.find_spec("raylib")
+      if raylib_spec is None or raylib_spec.submodule_search_locations is None:
+        raise RuntimeError("The managed raylib package is required to build the comma installer")
+      raylib_dir = Path(raylib_spec.submodule_search_locations[0]) / "install"
+
+    raylib_env['CPPPATH'] += [str(raylib_dir / "include")]
+    raylib_env['LIBPATH'] += [str(raylib_dir / "lib")]
+    raylib_libs = common + ["raylib_comma", "GLESv2", "EGL", "gbm", "drm"]
   else:
-    raylib_libs += ["GL"]
+    raylib_env['LIBPATH'] += [f'#third_party/raylib/{arch}/']
+    raylib_libs = common + ["raylib", "GL"]
 
   release = "release3"
   installers = [
@@ -23,11 +37,15 @@ if GetOption('extras') and arch != "Darwin":
                             "ld -r -b binary -o $TARGET $SOURCE")
   inter = raylib_env.Command("installer/inter_ttf.o", "installer/inter-ascii.ttf",
                              "ld -r -b binary -o $TARGET $SOURCE")
+  inter_bold = raylib_env.Command("installer/inter_bold.o", "../assets/fonts/Inter-Bold.ttf",
+                                  "ld -r -b binary -o $TARGET $SOURCE")
+  inter_light = raylib_env.Command("installer/inter_light.o", "../assets/fonts/Inter-Light.ttf",
+                                   "ld -r -b binary -o $TARGET $SOURCE")
   for name, branch in installers:
     defines = {'BRANCH': f"'\"{branch}\"'"}
     if "internal" in name:
       defines['INTERNAL'] = "1"
 
     obj = raylib_env.Object(f"installer/installers/installer_{name}.o", ["installer/installer.cc"], CPPDEFINES=defines)
-    installer = raylib_env.Program(f"installer/installers/installer_{name}", [obj, cont, inter], LIBS=raylib_libs)
-    assert installer[0].get_size() < 1900*1e3, installer[0].get_size()
+    installer = raylib_env.Program(f"installer/installers/installer_{name}", [obj, cont, inter, inter_bold, inter_light], LIBS=raylib_libs)
+    assert installer[0].get_size() < 2500*1e3, installer[0].get_size()

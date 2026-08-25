@@ -1,65 +1,42 @@
-import pytest
-import asyncio
 import json
-# for aiortc and its dependencies
-import warnings
-warnings.filterwarnings("ignore", category=DeprecationWarning)
-warnings.filterwarnings("ignore", category=RuntimeWarning) # TODO: remove this when google-crc32c publish a python3.12 wheel
 
-from openpilot.system.webrtc.webrtcd import get_stream
+import pytest
 
-import aiortc
-from teleoprtc import WebRTCOfferBuilder
-from parameterized import parameterized_class
+pytest.importorskip("libdatachannel", reason="the upstream WebRTC backend requires Python 3.12")
+
+from openpilot.system.webrtc.webrtcd import ServerState, handle_get_schema, handle_post_notify, on_shutdown
 
 
-@parameterized_class(("in_services", "out_services"), [
-  (["testJoystick"], ["carState"]),
-  ([], ["carState"]),
-  (["testJoystick"], []),
-  ([], []),
-])
 @pytest.mark.asyncio
-class TestWebrtcdProc:
-  async def assertCompletesWithTimeout(self, awaitable, timeout=1):
-    try:
-      async with asyncio.timeout(timeout):
-        await awaitable
-    except TimeoutError:
-      pytest.fail("Timeout while waiting for awaitable to complete")
+async def test_get_schema():
+  status, body, content_type = await handle_get_schema(ServerState(), "carState")
 
-  async def test_webrtcd(self, mocker):
-    mock_request = mocker.MagicMock()
-    async def connect(offer):
-      body = {'sdp': offer.sdp, 'init_camera': offer.video[0], 'enabled': True,
-              'bridge_services_in': self.in_services, 'bridge_services_out': self.out_services}
-      mock_request.json.side_effect = mocker.AsyncMock(return_value=body)
-      response = await get_stream(mock_request)
-      response_json = json.loads(response.text)
-      return aiortc.RTCSessionDescription(**response_json)
+  assert status == 200
+  assert content_type.startswith("application/json")
+  assert "carState" in json.loads(body)
 
-    builder = WebRTCOfferBuilder(connect)
-    builder.offer_to_receive_video_stream("road")
-    builder.offer_to_receive_audio_stream()
-    if len(self.in_services) > 0 or len(self.out_services) > 0:
-      builder.add_messaging()
 
-    stream = builder.stream()
+@pytest.mark.asyncio
+async def test_get_schema_rejects_unknown_service():
+  with pytest.raises(AssertionError, match="Invalid service name"):
+    await handle_get_schema(ServerState(), "notARealService")
 
-    await self.assertCompletesWithTimeout(stream.start())
-    await self.assertCompletesWithTimeout(stream.wait_for_connection())
 
-    assert stream.has_incoming_video_track("road")
-    assert stream.has_incoming_audio_track()
-    assert stream.has_messaging_channel() == (len(self.in_services) > 0 or len(self.out_services) > 0)
+@pytest.mark.asyncio
+async def test_notify_and_shutdown_active_stream(mocker):
+  state = ServerState()
+  session = mocker.MagicMock()
+  session.stop = mocker.AsyncMock()
+  state.streams["test"] = session
 
-    video_track, audio_track = stream.get_incoming_video_track("road"), stream.get_incoming_audio_track()
-    await self.assertCompletesWithTimeout(video_track.recv())
-    await self.assertCompletesWithTimeout(audio_track.recv())
+  status, body, content_type = await handle_post_notify(state, {"type": "ping"})
 
-    await self.assertCompletesWithTimeout(stream.stop())
+  assert (status, body) == (200, b"OK")
+  assert content_type.startswith("text/plain")
+  channel = session.stream.get_messaging_channel.return_value
+  channel.send.assert_called_once_with(json.dumps({"type": "ping"}))
 
-    # cleanup, very implementation specific, test may break if it changes
-    assert mock_request.app["streams"].__setitem__.called, "Implementation changed, please update this test"
-    _, session = mock_request.app["streams"].__setitem__.call_args.args
-    await self.assertCompletesWithTimeout(session.post_run_cleanup())
+  await on_shutdown(state)
+
+  session.stop.assert_awaited_once()
+  assert state.streams == {}

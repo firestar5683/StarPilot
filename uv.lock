@@ -336,6 +336,26 @@ wheels = [
 ]
 
 [[package]]
+name = "comma-deps-capnproto"
+version = "1.0.1.post98"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/ca/83/d3e6346a31491be1d378e4585f37a7979eb772018616abfa74fb27750f1e/comma_deps_capnproto-1.0.1.post98-py3-none-macosx_11_0_arm64.whl", hash = "sha256:9f4d08682df92411b360bec855cb6475990313cd0ecd8ed5c6ee02befb9db913", size = 2407343, upload-time = "2026-07-23T17:01:21.247Z" },
+    { url = "https://files.pythonhosted.org/packages/b0/8b/6f2a29d50ed4c8741dbf0a34ab109899268d09753518cd693e881bbf1a9d/comma_deps_capnproto-1.0.1.post98-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:6cdf838a8d415ac71e1f52306624ab3ab6f27777f6ce89c0059c4129ea7b7f62", size = 2506355, upload-time = "2026-07-23T17:01:25.254Z" },
+    { url = "https://files.pythonhosted.org/packages/08/24/e91f2203d62e4db9de7dae06dd0cdefb1e000d8b3ba0bde48367be7e5b63/comma_deps_capnproto-1.0.1.post98-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:3d95993c9aff0c89e39ca965e995021dd3dccdfc3d5d85152916cf4bf651b7ec", size = 2590764, upload-time = "2026-07-23T17:01:29.062Z" },
+]
+
+[[package]]
+name = "comma-deps-ffmpeg"
+version = "7.1.0.post98"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/20/59/4899ac0fa54905f43e237fff122008d6c591918b41e36880eeb18cd6279c/comma_deps_ffmpeg-7.1.0.post98-py3-none-macosx_11_0_arm64.whl", hash = "sha256:7816c5adc9c6a7462209ccf1d023c42d7e38a4eee47aa2f43d45dfc8320063f8", size = 7326312, upload-time = "2026-07-23T17:01:55.975Z" },
+    { url = "https://files.pythonhosted.org/packages/29/cb/6e047c19c39977c5ae322ad698b91d8d9fce43314cb86563de91bb161982/comma_deps_ffmpeg-7.1.0.post98-py3-none-manylinux_2_28_aarch64.whl", hash = "sha256:45ad401b4058e3f7efb8d6841e1f187e8c265e942e56e7fb01db1ba9096e6b78", size = 4437675, upload-time = "2026-07-23T17:01:59.971Z" },
+    { url = "https://files.pythonhosted.org/packages/76/3d/cda4b19fa5a7b26921a518143c94fd3632030a34b157cab6d6f10f2c86bc/comma_deps_ffmpeg-7.1.0.post98-py3-none-manylinux_2_28_x86_64.whl", hash = "sha256:9e7034739d45a45254c4200a555d343b22ce117429bebc2de2c1b05f050bfc8c", size = 4681499, upload-time = "2026-07-23T17:02:03.963Z" },
+]
+
+[[package]]
 name = "contourpy"
 version = "1.3.3"
 source = { registry = "https://pypi.org/simple" }
@@ -903,6 +923,19 @@ wheels = [
     { url = "https://files.pythonhosted.org/packages/33/01/a8ea7c5ea32a9b45ceeaee051a04c8ed4320f5add3c51bfa20879b765b70/kiwisolver-1.4.9-pp311-pypy311_pp73-manylinux2014_x86_64.manylinux_2_17_x86_64.whl", hash = "sha256:85b5352f94e490c028926ea567fc569c52ec79ce131dadb968d3853e809518c2", size = 80281, upload-time = "2025-08-10T21:27:45.369Z" },
     { url = "https://files.pythonhosted.org/packages/da/e3/dbd2ecdce306f1d07a1aaf324817ee993aab7aee9db47ceac757deabafbe/kiwisolver-1.4.9-pp311-pypy311_pp73-manylinux_2_24_aarch64.manylinux_2_28_aarch64.whl", hash = "sha256:464415881e4801295659462c49461a24fb107c140de781d55518c4b80cb6790f", size = 78009, upload-time = "2025-08-10T21:27:46.376Z" },
     { url = "https://files.pythonhosted.org/packages/da/e9/0d4add7873a73e462aeb45c036a2dead2562b825aa46ba326727b3f31016/kiwisolver-1.4.9-pp311-pypy311_pp73-win_amd64.whl", hash = "sha256:fb940820c63a9590d31d88b815e7a3aa5915cad3ce735ab45f0c730b39547de1", size = 73929, upload-time = "2025-08-10T21:27:48.236Z" },
+]
+
+[[package]]
+name = "libdatachannel-py"
+version = "2026.1.0.dev2"
+source = { registry = "https://pypi.org/simple" }
+wheels = [
+    { url = "https://files.pythonhosted.org/packages/46/2f/68e8306327ddef4b2133d2efb163cb05b319759ce8bd50b8b32dcd03dd95/libdatachannel_py-2026.1.0.dev2-cp312-cp312-macosx_15_0_arm64.whl", hash = "sha256:6607fa1439e1b5bfceecd387c433470c9d45e439c3c06fa064f5c4669ad7e582", size = 1213155, upload-time = "2026-05-19T03:37:12.796Z" },
+    { url = "https://files.pythonhosted.org/packages/fc/e3/10aed36ffaf1744795322aae612db777991575b72a9f04e2c677c2c022bf/libdatachannel_py-2026.1.0.dev2-cp312-cp312-macosx_26_0_arm64.whl", hash = "sha256:a060b1250f57d1fccb36e3a6b36ac8f4fd34926a6b51c564e787e8b7206458aa", size = 1224706, upload-time = "2026-05-19T03:37:12.679Z" },
+    { url = "https://files.pythonhosted.org/packages/09/a9/103fc647a8f9c721ab140fe8d2f8dbd90817e917ca763c4eb0f843fe247e/libdatachannel_py-2026.1.0.dev2-cp312-cp312-manylinux_2_35_aarch64.whl", hash = "sha256:0b8aa3be2fa3654ea24f882756d6599e847de866a44f7a291c60994548a2debb", size = 1638879, upload-time = "2026-05-19T03:37:18.138Z" },
+    { url = "https://files.pythonhosted.org/packages/09/a8/0dc7d3fe80fc247ec165dbd455bc2a1a307ef65702a43e24473202c2bf42/libdatachannel_py-2026.1.0.dev2-cp312-cp312-manylinux_2_35_x86_64.whl", hash = "sha256:339a79fcbc8c6caf91c620f6e4a0f1b8ccb6a941a966d10a3135c980ae4651a6", size = 1718006, upload-time = "2026-05-19T03:37:11.891Z" },
+    { url = "https://files.pythonhosted.org/packages/6d/86/30904a8753e9db60d8c3cf8efda09585fc68f2004d3d7aa2910c93a8eed5/libdatachannel_py-2026.1.0.dev2-cp312-cp312-manylinux_2_38_aarch64.whl", hash = "sha256:b9f476cb065b50856ab2e53bf774ccca9c6a66454b7ce903aaf6dfcdef2a4482", size = 1643757, upload-time = "2026-05-19T03:37:12.207Z" },
+    { url = "https://files.pythonhosted.org/packages/d7/9d/1e10131396d28e84a8088a63c14978cc215f6677dc85acdd96b6068f0664/libdatachannel_py-2026.1.0.dev2-cp312-cp312-manylinux_2_38_x86_64.whl", hash = "sha256:1f31db7347549edcd69fcc1ecb8b31e7183894808ccf9387afc49a4d68debaae", size = 1751748, upload-time = "2026-05-19T03:37:06.98Z" },
 ]
 
 [[package]]
@@ -1582,6 +1615,8 @@ dependencies = [
     { name = "aiortc" },
     { name = "casadi" },
     { name = "cffi" },
+    { name = "comma-deps-capnproto", marker = "python_full_version >= '3.12'" },
+    { name = "comma-deps-ffmpeg", marker = "python_full_version >= '3.12'" },
     { name = "crcmod" },
     { name = "cython" },
     { name = "future-fstrings" },
@@ -1589,6 +1624,7 @@ dependencies = [
     { name = "jeepney" },
     { name = "json-rpc" },
     { name = "kaitaistruct" },
+    { name = "libdatachannel-py", marker = "python_full_version >= '3.12'" },
     { name = "libusb1" },
     { name = "mapbox-earcut" },
     { name = "numpy" },
@@ -1681,6 +1717,8 @@ requires-dist = [
     { name = "casadi", specifier = ">=3.6.6" },
     { name = "cffi" },
     { name = "codespell", marker = "extra == 'testing'" },
+    { name = "comma-deps-capnproto", marker = "python_full_version >= '3.12'" },
+    { name = "comma-deps-ffmpeg", marker = "python_full_version >= '3.12'" },
     { name = "coverage", marker = "extra == 'testing'" },
     { name = "crcmod" },
     { name = "cython" },
@@ -1694,6 +1732,7 @@ requires-dist = [
     { name = "jinja2", marker = "extra == 'docs'" },
     { name = "json-rpc" },
     { name = "kaitaistruct" },
+    { name = "libdatachannel-py", marker = "python_full_version >= '3.12'", specifier = ">=2026.1.0.dev2" },
     { name = "libusb1" },
     { name = "mapbox-earcut" },
     { name = "matplotlib", marker = "extra == 'dev'" },

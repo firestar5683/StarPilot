@@ -1,20 +1,17 @@
 import asyncio
 import json
 import time
-# for aiortc and its dependencies
-import warnings
-warnings.filterwarnings("ignore", category=DeprecationWarning)
-warnings.filterwarnings("ignore", category=RuntimeWarning) # TODO: remove this when google-crc32c publish a python3.12 wheel
 
-from aiortc import RTCDataChannel
-from aiortc.mediastreams import VIDEO_CLOCK_RATE, VIDEO_TIME_BASE
 import capnp
-import pyaudio
+import pytest
+
+pytest.importorskip("libdatachannel", reason="the upstream WebRTC backend requires Python 3.12")
+
 from cereal import messaging, log
+from teleoprtc.tracks import VIDEO_CLOCK_RATE
 
 from openpilot.system.webrtc.webrtcd import CerealOutgoingMessageProxy, CerealIncomingMessageProxy
 from openpilot.system.webrtc.device.video import LiveStreamVideoStreamTrack
-from openpilot.system.webrtc.device.audio import AudioInputStreamTrack
 
 
 class TestStreamSession:
@@ -33,40 +30,37 @@ class TestStreamSession:
     expected_dict = {"type": "customReservedRawData0", "logMonoTime": 123, "valid": True, "data": "test"}
     expected_json = json.dumps(expected_dict).encode()
 
-    channel = mocker.Mock(spec=RTCDataChannel)
-    mocked_submaster = messaging.SubMaster(["customReservedRawData0"])
-    def mocked_update(t):
-      mocked_submaster.update_msgs(0, [test_msg])
+    channel = mocker.Mock()
+    channel.is_open.return_value = True
+    proxy = CerealOutgoingMessageProxy(["customReservedRawData0"])
+
+    def mocked_update(_):
+      proxy.sm.update_msgs(0, [test_msg])
 
     mocker.patch.object(messaging.SubMaster, "update", side_effect=mocked_update)
-    proxy = CerealOutgoingMessageProxy(["customReservedRawData0"])
-    proxy.sm = mocked_submaster
     proxy.add_channel(channel)
-
     proxy.update()
 
     channel.send.assert_called_once_with(expected_json)
 
   def test_incoming_proxy(self, mocker):
     tested_msgs = [
-      {"type": "customReservedRawData0", "data": "test"}, # primitive
-      {"type": "can", "data": [{"address": 0, "dat": "", "src": 0}]}, # list
-      {"type": "testJoystick", "data": {"axes": [0, 0], "buttons": [False]}}, # dict
+      {"type": "customReservedRawData0", "data": "test"},
+      {"type": "can", "data": [{"address": 0, "dat": "", "src": 0}]},
+      {"type": "testJoystick", "data": {"axes": [0, 0], "buttons": [False]}},
     ]
 
     mocked_pubmaster = mocker.MagicMock(spec=messaging.PubMaster)
-
     proxy = CerealIncomingMessageProxy(mocked_pubmaster)
 
     for msg in tested_msgs:
       proxy.send(json.dumps(msg).encode())
 
       mocked_pubmaster.send.assert_called_once()
-      mt, md = mocked_pubmaster.send.call_args.args
-      assert mt == msg["type"]
-      assert isinstance(md, capnp._DynamicStructBuilder)
-      assert hasattr(md, msg["type"])
-
+      msg_type, message = mocked_pubmaster.send.call_args.args
+      assert msg_type == msg["type"]
+      assert isinstance(message, capnp._DynamicStructBuilder)
+      assert hasattr(message, msg_type)
       mocked_pubmaster.reset_mock()
 
   def test_livestream_track(self, mocker):
@@ -78,29 +72,11 @@ class TestStreamSession:
     track = LiveStreamVideoStreamTrack("driver")
 
     assert track.id.startswith("driver")
-    assert track.codec_preference() == "H264"
 
     for i in range(5):
       packet = self.loop.run_until_complete(track.recv())
-      assert packet.time_base == VIDEO_TIME_BASE
       if i == 0:
         start_ns = time.monotonic_ns()
         start_pts = packet.pts
-      assert abs(i + packet.pts - (start_pts + (((time.monotonic_ns() - start_ns) * VIDEO_CLOCK_RATE) // 1_000_000_000))) < 450 #5ms
-      assert packet.size == 0
-
-  def test_input_audio_track(self, mocker):
-    packet_time, rate = 0.02, 16000
-    sample_count = int(packet_time * rate)
-    mocked_stream = mocker.MagicMock(spec=pyaudio.Stream)
-    mocked_stream.read.return_value = b"\x00" * 2 * sample_count
-
-    config = {"open.side_effect": lambda *args, **kwargs: mocked_stream}
-    mocker.patch("pyaudio.PyAudio", spec=True, **config)
-    track = AudioInputStreamTrack(audio_format=pyaudio.paInt16, packet_time=packet_time, rate=rate)
-
-    for i in range(5):
-      frame = self.loop.run_until_complete(track.recv())
-      assert frame.rate == rate
-      assert frame.samples == sample_count
-      assert frame.pts == i * sample_count
+      assert abs(i + packet.pts - (start_pts + (((time.monotonic_ns() - start_ns) * VIDEO_CLOCK_RATE) // 1_000_000_000))) < 450
+      assert bytes(packet) == b""

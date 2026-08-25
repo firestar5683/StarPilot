@@ -1,50 +1,149 @@
 #!/usr/bin/env python3
+"""Build StarPilot AGNOS from the exact upstream system image.
+
+The output starts with comma's pinned AGNOS system partition, adds the Python
+packages required by StarPilot's older runtime and C3 support, and customizes
+only the stock setup/installer pair needed for StarPilot's factory install.
+Reset, updater, Magic, NetworkManager, and every existing upstream Python
+package remain byte-identical to the pinned image.
+"""
+
 import argparse
 import hashlib
 import json
+import lzma
 import os
 import re
 import shutil
-import subprocess
 import struct
+import subprocess
 import tempfile
 import urllib.request
 import zipfile
-from io import BytesIO
 from pathlib import Path
 
 
-RESET_PATH_IN_IMAGE = "/usr/comma/reset"
-COMMA_SH_PATH_IN_IMAGE = "/usr/comma/comma.sh"
-MAGIC_PATH_IN_IMAGE = "/usr/comma/magic.py"
-SETUP_PATH_IN_IMAGE = "/usr/comma/setup"
-UPDATER_PATH_IN_IMAGE = "/usr/comma/updater"
-BG_PATH_IN_IMAGE = "/usr/comma/bg.jpg"
-WESTON_SERVICE_PATH_IN_IMAGE = "/lib/systemd/system/weston.service"
-RESET_ENTRY_IN_ZIPAPP = "openpilot/system/ui/reset.py"
-MICI_RESET_ENTRY_IN_ZIPAPP = "openpilot/system/ui/mici_reset.py"
-TICI_RESET_ENTRY_IN_ZIPAPP = "openpilot/system/ui/tici_reset.py"
-APPLICATION_ENTRY_IN_ZIPAPP = "openpilot/system/ui/lib/application.py"
-WIFI_MANAGER_ENTRY_IN_SETUP_ZIPAPP = "openpilot/system/ui/lib/wifi_manager.py"
-SETUP_ENTRY_IN_SETUP_ZIPAPP = "openpilot/system/ui/setup.py"
-TICI_SETUP_ENTRY_IN_SETUP_ZIPAPP = "openpilot/system/ui/tici_setup.py"
-MICI_SETUP_ENTRY_IN_SETUP_ZIPAPP = "openpilot/system/ui/mici_setup.py"
-UPDATER_ENTRY_IN_ZIPAPP = "openpilot/system/ui/updater.py"
 VERSION_PATH_IN_IMAGE = "/VERSION"
-PYTHON_SITE_PACKAGES_PATH_IN_IMAGE = "/usr/local/venv/lib/python3.12/site-packages"
-AMDGPU_FIRMWARE_PATH_IN_IMAGE = "/lib/firmware/amdgpu"
-PATCH_MARKER = "STARPILOT_C4_RESET_LAYOUT_V1"
-APP_PATCH_MARKER = "STARPILOT_C4_RESET_APP_DIMENSIONS_V1"
-SETUP_WIFI_PATCH_MARKER = "JEEPNY_AVAILABLE = True"
-SETUP_BRANDING_PATCH_MARKER = "STARPILOT_SETUP_BRANDING_V1"
-SETUP_SSH_RESTORE_PATCH_MARKER = "STARPILOT_SETUP_SSH_RESTORE_V1"
-WESTON_BG_PATCH_MARKER = "STARPILOT_WESTON_BG_ORIENTATION_V2"
-COMMA_SH_DISPLAY_WAIT_PATCH_MARKER = "STARPILOT_DISPLAY_READY_WAIT_V1"
-JEEPNY_VERSION = "0.9.0"
-JEEPNY_WHEEL_URL = "https://files.pythonhosted.org/packages/b2/a3/e137168c9c44d18eff0376253da9f1e9234d0239e0ee230d2fee6cea8e55/jeepney-0.9.0-py3-none-any.whl"
-JEEPNY_WHEEL_SHA256 = "97e5714520c16fc0a45695e5365a2e11b81ea79bba796e26f9f1d178cb182683"
-JEEPNY_PACKAGE_DIR = "jeepney"
-JEEPNY_DIST_INFO_DIR = f"jeepney-{JEEPNY_VERSION}.dist-info"
+SITE_PACKAGES_PATH_IN_IMAGE = "/usr/local/venv/lib/python3.12/site-packages"
+LEGACY_RUNTIME_LIBRARY_DIR = "/usr/local/lib"
+SETUP_PATH_IN_IMAGE = "/usr/comma/setup"
+INSTALLER_PATH_IN_IMAGE = "/usr/comma/installer"
+STAR_PILOT_GIT_URL = "https://github.com/firestar5683/openpilot.git"
+STAR_PILOT_BRANCH = "StarPilot"
+STAR_PILOT_DEPENDENCY_NAMES = (
+  # C3/runtime compatibility
+  "crcmod", "crcmod-1.7.dist-info", "serial", "pyserial-3.5.dist-info",
+  "kaitaistruct.py", "kaitaistruct-0.11.dist-info",
+  # StarPilot always-on/default features
+  "cv2", "opencv_python_headless-4.11.0.86.dist-info", "opencv_python_headless.libs",
+  "mapbox_earcut.cpython-312-aarch64-linux-gnu.so", "mapbox_earcut-1.0.3.dist-info",
+  "jsonrpc", "json_rpc-1.15.0.dist-info", "xattr", "xattr-1.2.0.dist-info",
+  "onnx", "onnx-1.18.0.dist-info", "google", "protobuf-7.35.1.dist-info",
+  "typing_extensions.py", "typing_extensions-4.16.0.dist-info",
+  # Existing body/web tools still use aiohttp and PyAudio. The aiortc stack is
+  # deliberately not copied; WebRTC uses upstream's libdatachannel backend.
+  "aiohappyeyeballs", "aiohappyeyeballs-2.7.1.dist-info",
+  "aiohttp", "aiohttp-3.12.15.dist-info",
+  "aiosignal", "aiosignal-1.4.0.dist-info",
+  "attr", "attrs", "attrs-26.1.0.dist-info",
+  "frozenlist", "frozenlist-1.8.0.dist-info",
+  "multidict", "multidict-6.7.1.dist-info",
+  "propcache", "propcache-0.5.2.dist-info",
+  "yarl", "yarl-1.24.5.dist-info",
+  "pyaudio", "pyaudio-0.2.14.dist-info",
+)
+STAR_PILOT_DEPENDENCY_PATHS = tuple(
+  f"{SITE_PACKAGES_PATH_IN_IMAGE}/{name}" for name in STAR_PILOT_DEPENDENCY_NAMES
+)
+C3_DEPENDENCY_PATHS = tuple(
+  f"{SITE_PACKAGES_PATH_IN_IMAGE}/{name}"
+  for name in ("crcmod", "crcmod-1.7.dist-info", "serial", "pyserial-3.5.dist-info", "kaitaistruct.py", "kaitaistruct-0.11.dist-info")
+)
+LEGACY_RUNTIME_LIBRARY_NAMES = (
+  # Existing StarPilot prebuilts use these legacy SONAMEs. Keep only their
+  # runtime closure; current source builds use upstream's managed packages.
+  "libcapnp-1.0.2.so", "libkj-1.0.2.so",
+  "libavformat.so.58", "libavformat.so.58.29.100",
+  "libavcodec.so.58", "libavcodec.so.58.54.100",
+  "libavutil.so.56", "libavutil.so.56.31.100",
+  "libswresample.so.3", "libswresample.so.3.5.100",
+)
+LEGACY_RUNTIME_LIBRARY_PATHS = tuple(
+  f"{LEGACY_RUNTIME_LIBRARY_DIR}/{name}" for name in LEGACY_RUNTIME_LIBRARY_NAMES
+)
+FACTORY_INSTALL_PATHS = frozenset({SETUP_PATH_IN_IMAGE, INSTALLER_PATH_IN_IMAGE})
+ALLOWED_IMAGE_MUTATIONS = frozenset({
+  VERSION_PATH_IN_IMAGE,
+  *STAR_PILOT_DEPENDENCY_PATHS,
+  *LEGACY_RUNTIME_LIBRARY_PATHS,
+  *FACTORY_INSTALL_PATHS,
+})
+
+# Exact system partition pinned by ~/openpilot as of the 19.6 AGNOS release.
+UPSTREAM_VERSION = "19.6"
+UPSTREAM_SYSTEM_URL = (
+  "https://commadist.azureedge.net/agnosupdate/"
+  "system-5b6ce7965904a157fd3a134ccfcb854f9ca5c1cc2a26b7cb80a4fa4e1cc4aaa3.img.xz"
+)
+UPSTREAM_RAW_SHA256 = "5b6ce7965904a157fd3a134ccfcb854f9ca5c1cc2a26b7cb80a4fa4e1cc4aaa3"
+UPSTREAM_RAW_SIZE = 4_718_592_000
+UPSTREAM_SITE_PACKAGES_COUNT = 213
+
+# Compatibility packages are copied from StarPilot's exact, previously
+# deployed and field-tested 19.6.2 image. Existing upstream paths are never
+# overwritten.
+C3_DEPENDENCY_SOURCE_URL = (
+  "https://www.dropbox.com/scl/fi/pewhzpqzi3aewuiaffc6m/system10.img.xz"
+  "?rlkey=olzrzulhs93zzghnjrskmdwxt&st=exnfk2oz&dl=1"
+)
+C3_DEPENDENCY_SOURCE_RAW_SHA256 = "ab395d4c963a908ab86709f1a6580a62dd24cb34ee71cf5fd5ec29d7d48d0e10"
+C3_DEPENDENCY_SOURCE_RAW_SIZE = 4_718_592_000
+CANDIDATE_SITE_PACKAGES_COUNT = UPSTREAM_SITE_PACKAGES_COUNT + len(STAR_PILOT_DEPENDENCY_PATHS)
+
+# Hashes from that exact upstream image. Equality keeps all recovery plumbing
+# stock except the explicitly customized setup/installer pair.
+PROTECTED_PAYLOAD_HASHES = {
+  "/etc/NetworkManager/NetworkManager.conf": "779db62d2d4c5f8ce504c5d1f2994d34a9f35296d5efb7f3a48cb1e8a0d4778e",
+  "/etc/NetworkManager/conf.d/10-globally-managed-devices.conf": "45e653e2f709c027fad41f2d86b70e008b72c6bf4d34590b4765ebe8fe3ea948",
+  "/lib/systemd/system/NetworkManager.service": "fb33a80bf8c78b3af004d4b294c47a0139e37742c1d0d5a6a7663c7d1f4a2b48",
+  "/usr/comma/updater": "9df4edbeb5849de03f9c2d691d04646af84a3ef74c2f33be8e73d9281daebe99",
+  "/usr/comma/reset": "97ed6413515d0674442c42ae6e20baccf66dd6bb4ec382ee4cf0cc5ebe84e739",
+  "/usr/comma/magic.py": "c4416e66b127b31c17d08e6723ad46d12af7683e56626512d66c708b5f347ac9",
+  "/usr/comma/setup_keys": "934f74ab4b2ac06048418c2857be3a041e192ec03c09979987691c23c91353bd",
+  "/usr/comma/comma.sh": "bcba2b336cf0ca852786f8a58bbce407e0e9fe952c26fc5d903f6d9a34b44b4f",
+}
+UPSTREAM_FACTORY_INSTALL_HASHES = {
+  INSTALLER_PATH_IN_IMAGE: "85f6d9e54286a3842920d6967b187478b4e43d6171c331d72d3fb3102106e101",
+  SETUP_PATH_IN_IMAGE: "c382ce266653bad781c25e403ddea4af508aa6f3ea2eef3f568d964982fad9d6",
+}
+UPSTREAM_PAYLOAD_HASHES = {**PROTECTED_PAYLOAD_HASHES, **UPSTREAM_FACTORY_INSTALL_HASHES}
+
+SETUP_SOURCE_MEMBERS = (
+  "openpilot/system/ui/mici_setup.py",
+  "openpilot/system/ui/tici_setup.py",
+)
+
+UPSTREAM_REQUIRED_VENV_PATHS = {
+  "capnp": f"{SITE_PACKAGES_PATH_IN_IMAGE}/capnp",
+  "numpy": f"{SITE_PACKAGES_PATH_IN_IMAGE}/numpy",
+  "Crypto": f"{SITE_PACKAGES_PATH_IN_IMAGE}/Crypto",
+  "tqdm": f"{SITE_PACKAGES_PATH_IN_IMAGE}/tqdm",
+  "raylib": f"{SITE_PACKAGES_PATH_IN_IMAGE}/raylib",
+}
+REQUIRED_VENV_PATHS = {
+  **UPSTREAM_REQUIRED_VENV_PATHS,
+  "crcmod": f"{SITE_PACKAGES_PATH_IN_IMAGE}/crcmod",
+  "serial": f"{SITE_PACKAGES_PATH_IN_IMAGE}/serial",
+  "kaitaistruct": f"{SITE_PACKAGES_PATH_IN_IMAGE}/kaitaistruct.py",
+  "cv2": f"{SITE_PACKAGES_PATH_IN_IMAGE}/cv2",
+  "mapbox_earcut": f"{SITE_PACKAGES_PATH_IN_IMAGE}/mapbox_earcut.cpython-312-aarch64-linux-gnu.so",
+  "jsonrpc": f"{SITE_PACKAGES_PATH_IN_IMAGE}/jsonrpc",
+  "xattr": f"{SITE_PACKAGES_PATH_IN_IMAGE}/xattr",
+  "onnx": f"{SITE_PACKAGES_PATH_IN_IMAGE}/onnx",
+  "aiohttp": f"{SITE_PACKAGES_PATH_IN_IMAGE}/aiohttp",
+  "pyaudio": f"{SITE_PACKAGES_PATH_IN_IMAGE}/pyaudio",
+}
+
 ANDROID_SPARSE_MAGIC = 0xED26FF3A
 CHUNK_TYPE_RAW = 0xCAC1
 CHUNK_TYPE_FILL = 0xCAC2
@@ -52,1312 +151,878 @@ CHUNK_TYPE_DONT_CARE = 0xCAC3
 CHUNK_TYPE_CRC32 = 0xCAC4
 XZ_MAGIC = b"\xFD7zXZ\x00"
 
-AMDGPU_FIRMWARE_SHA256 = {
-  "gc_12_0_0_imu.bin.zst": "aa15e5b3156bffc45e0c50bccbcd364fbd3f958531b695b7487a803d780b8328",
-  "gc_12_0_0_me.bin.zst": "d7eba5197f2580f32b8256b1d9cb68e723e9e644293a34446a7913e3c093cba5",
-  "gc_12_0_0_mec.bin.zst": "1931593440b8f9423580d9e2cdc5b34e7c682cdffe1ca4b74b0c2f6a0420236d",
-  "gc_12_0_0_pfp.bin.zst": "16bfd64c10fe73b5e760055069a60e5841dba16c0ed4edb56c20d675e23901f6",
-  "gc_12_0_0_rlc.bin.zst": "6436b582734a413456fff3d3c7195e71cc9e78a7ed31ee21c83ffd6fae1ad186",
-  "psp_14_0_2_sos.bin.zst": "7b538448b57d4f9dd06b2eea90d4f86a16e65e3027cdecee8db71c2c5f1fa243",
-  "sdma_7_0_0.bin.zst": "beaafb53993a106edd392392d5896245ae2a957c6d0f495d0002eec72ad8ad38",
-  "smu_14_0_2.bin.zst": "6951995d1d606f4dc60c895f19d34ed18aa40e62129f83d8510c45e8aa9ae2fc",
-}
-
-DEFAULT_SYNC_COMMA_FILES = [
-  "/usr/comma/bg.jpg",
-  "/usr/comma/comma.sh",
-  "/usr/comma/debug.py",
-  "/usr/comma/fs_setup.sh",
-  "/usr/comma/installer",
-  "/usr/comma/magic.py",
-  "/usr/comma/power_drop_monitor.py",
-  "/usr/comma/power_monitor.py",
-  "/usr/comma/reset",
-  "/usr/comma/screen_calibration.py",
-  "/usr/comma/setup",
-  "/usr/comma/setup_keys",
-  "/usr/comma/updater",
-]
-
-INODE_MODE_TYPE_PREFIX = {
-  "regular": "100",
-  "directory": "040",
-  "symlink": "120",
-  "character": "20",
-  "block": "60",
-  "fifo": "10",
-  "socket": "140",
-}
-
-def patch_application_script(original: bytes) -> bytes:
-  if APP_PATCH_MARKER.encode("utf-8") in original:
-    return original
-
-  text = original.decode("utf-8", "replace")
-  replacement = (
-    f"# {APP_PATCH_MARKER}\n"
-    "_dt = HARDWARE.get_device_type()\n"
-    "if _dt in ('tici', 'tizi'):\n"
-    "  gui_app = GuiApplication(2160, 1080)\n"
-    "else:\n"
-    "  gui_app = GuiApplication(536, 240)\n"
-  )
-
-  fixed = text.replace("gui_app = GuiApplication(2160, 1080)", replacement)
-  if fixed == text:
-    fixed = re.sub(
-      r"^gui_app\s*=\s*GuiApplication\([^\n]+\)\s*$",
-      replacement.rstrip("\n"),
-      text,
-      count=1,
-      flags=re.MULTILINE,
-    )
-
-  if fixed == text:
-    # Newer upstream application.py is already device-aware via GuiApplication defaults.
-    # Keep it as-is and stamp a marker so verification can still pass.
-    if text.startswith("#!"):
-      first_nl = text.find("\n")
-      if first_nl != -1:
-        fixed = text[:first_nl + 1] + f"# {APP_PATCH_MARKER} (no-op)\n" + text[first_nl + 1:]
-      else:
-        fixed = text + f"\n# {APP_PATCH_MARKER} (no-op)\n"
-    else:
-      fixed = f"# {APP_PATCH_MARKER} (no-op)\n" + text
-
-  return fixed.encode("utf-8")
-
-
-def patch_setup_wifi_manager() -> bytes:
-  """
-  Replace setup zipapp's wifi_manager.py with repo version that gracefully handles
-  missing jeepney (fallback to nmcli/fake), preventing setup boot-logo hangs.
-  """
-  repo_root = Path(__file__).resolve().parents[2]
-  src = repo_root / "system/ui/lib/wifi_manager.py"
-  if not src.is_file():
-    raise RuntimeError(f"Unable to find repo wifi_manager source: {src}")
-  data = src.read_bytes()
-  if SETUP_WIFI_PATCH_MARKER.encode("utf-8") not in data:
-    raise RuntimeError("Repo wifi_manager.py does not appear to include jeepney fallback marker")
-  return data
-
-
-def patched_weston_bg_python() -> str:
-  som_id_path = "/sys/devices/platform/vendor/vendor:gpio-som-id/som_id"
-  return (
-    "from PIL import Image; "
-    f"som=open(\"{som_id_path}\").read().strip(); "
-    "img=Image.open(\"/usr/comma/bg.jpg\").convert(\"RGB\"); "
-    "img=img.rotate(180) if som == \"1\" else img; "
-    "mask=img.convert(\"L\").point(lambda p: 255 if p > 16 else 0); "
-    "bbox=mask.getbbox(); "
-    "logo=img.crop(bbox) if bbox else img; "
-    # Pillow positive degrees are counter-clockwise; -90 pre-rotates the source clockwise.
-    "logo=logo.rotate(-90, expand=True); "
-    "resample=Image.Resampling.LANCZOS if hasattr(Image, \"Resampling\") else Image.LANCZOS; "
-    "logo=logo.resize((max(1, logo.width//3), max(1, logo.height//3)), resample); "
-    "canvas=Image.new(\"RGB\", img.size, (0, 0, 0)); "
-    "canvas.paste(logo, ((img.width - logo.width)//2, (img.height - logo.height)//2)); "
-    "canvas.save(\"/tmp/bg.jpg\")"
-  )
-
-
-def patched_weston_bg_exec_line() -> str:
-  python_cmd = patched_weston_bg_python().replace('"', '\\"')
-  return f"ExecStartPre=/bin/bash -c \"/usr/local/venv/bin/python -c '{python_cmd}'\""
-
-
-def patch_comma_sh_display_wait(original: bytes) -> bytes:
-  text = original.decode("utf-8")
-  if COMMA_SH_DISPLAY_WAIT_PATCH_MARKER in text:
-    return original
-
-  old = """echo "waiting for magic"
-for i in {1..200}; do
-  if systemctl is-active --quiet magic && [ -S /tmp/drmfd.sock ]; then
-    break
-  fi
-  sleep 0.1
-done
-
-if systemctl is-active --quiet magic && [ -S /tmp/drmfd.sock ]; then
-  echo "magic ready after ${SECONDS}s"
-else
-  echo "timed out waiting for magic, ${SECONDS}s"
-fi
-"""
-  new = f"""# {COMMA_SH_DISPLAY_WAIT_PATCH_MARKER}
-if systemctl cat magic.service >/dev/null 2>&1; then
-  echo "waiting for magic"
-  for i in {{1..200}}; do
-    if systemctl is-active --quiet magic && [ -S /tmp/drmfd.sock ]; then
-      break
-    fi
-    sleep 0.1
-  done
-
-  if systemctl is-active --quiet magic && [ -S /tmp/drmfd.sock ]; then
-    echo "magic ready after ${{SECONDS}}s"
-  else
-    echo "timed out waiting for magic, ${{SECONDS}}s"
-  fi
-else
-  echo "magic unavailable; waiting for weston"
-  for i in {{1..200}}; do
-    if systemctl is-active --quiet weston-ready && [ -S /var/tmp/weston/wayland-0 ]; then
-      break
-    fi
-    sleep 0.1
-  done
-
-  if systemctl is-active --quiet weston-ready && [ -S /var/tmp/weston/wayland-0 ]; then
-    echo "weston ready after ${{SECONDS}}s"
-  else
-    echo "timed out waiting for weston, ${{SECONDS}}s"
-  fi
-fi
-"""
-
-  if old not in text:
-    raise RuntimeError("Unable to find comma.sh display readiness wait")
-  return text.replace(old, new, 1).encode("utf-8")
-
-
-def patch_weston_service(original: bytes) -> bytes:
-  text = original.decode("utf-8")
-  if WESTON_BG_PATCH_MARKER in text:
-    return original
-
-  old = (
-    "ExecStartPre=/bin/bash -c \"/usr/local/venv/bin/python -c 'from PIL import Image; "
-    "img=Image.open(\\\"/usr/comma/bg.jpg\\\"); "
-    "(img.rotate(180) if open(\\\"/sys/devices/platform/vendor/vendor:gpio-som-id/som_id\\\").read().strip() == \\\"1\\\" else img).save(\\\"/tmp/bg.jpg\\\")'\""
-  )
-  new = (
-    f"# {WESTON_BG_PATCH_MARKER}: displayed boot logo was 90 degrees counter-clockwise.\n"
-    f"{patched_weston_bg_exec_line()}"
-  )
-
-  if old not in text:
-    raise RuntimeError("Unable to find weston.service background image generation line")
-  return text.replace(old, new, 1).encode("utf-8")
-
-
-def patch_setup_branding_script(original: bytes, entry_name: str) -> bytes:
-  text = original.decode("utf-8")
-  if SETUP_BRANDING_PATCH_MARKER in text:
-    return text.encode("utf-8")
-
-  text = text.replace(
-    'OPENPILOT_URL = "https://openpilot.comma.ai"',
-    'NETWORK_CHECK_URL = "https://openpilot.comma.ai"\n'
-    'DEFAULT_INSTALLER_URL = "https://installer.comma.ai/firestar5683/StarPilot"\n'
-    f'# {SETUP_BRANDING_PATCH_MARKER}',
-  )
-  text = text.replace("urllib.request.Request(OPENPILOT_URL, method=\"HEAD\")",
-                      "urllib.request.Request(NETWORK_CHECK_URL, method=\"HEAD\")")
-  text = text.replace("urllib.request.urlopen(OPENPILOT_URL, timeout=2)",
-                      "urllib.request.urlopen(NETWORK_CHECK_URL, timeout=2)")
-  text = text.replace("self.download(OPENPILOT_URL)", "self.download(DEFAULT_INSTALLER_URL)")
-
-  if entry_name == MICI_SETUP_ENTRY_IN_SETUP_ZIPAPP:
-    text = text.replace('LargerSlider("slide to use\\nopenpilot"', 'LargerSlider("slide to use\\nstarpilot"')
-    text = text.replace('LargerSlider("slide to install\\nopenpilot"', 'LargerSlider("slide to install\\nstarpilot"')
-    text = text.replace('BigPillButton("install openpilot"', 'BigPillButton("install StarPilot"')
-    text = text.replace('set_text("install openpilot"', 'set_text("install StarPilot"')
-  elif entry_name == TICI_SETUP_ENTRY_IN_SETUP_ZIPAPP:
-    text = text.replace('ButtonRadio("openpilot"', 'ButtonRadio("StarPilot"')
-
-  if SETUP_BRANDING_PATCH_MARKER not in text:
-    raise RuntimeError(f"Failed to patch setup branding for {entry_name}")
-
-  return text.encode("utf-8")
-
-
-def patch_setup_module(relative_path: str) -> bytes:
-  """
-  Replace setup zipapp module with repo version so setup behavior stays in sync.
-  """
-  repo_root = Path(__file__).resolve().parents[2]
-  src = repo_root / relative_path
-  if not src.is_file():
-    raise RuntimeError(f"Unable to find repo setup source: {src}")
-  return src.read_bytes()
-
-
-def patch_setup_script_with_ssh_restore(relative_path: str) -> bytes:
-  """
-  Apply SSH-key restore logic directly into setup scripts for AGNOS images.
-  This keeps repo runtime behavior unchanged while making image reset flows
-  resilient to setup/install failures.
-  """
-  text = patch_setup_module(relative_path).decode("utf-8")
-  if SETUP_SSH_RESTORE_PATCH_MARKER in text:
-    return text.encode("utf-8")
-
-  restore_block = f"""
-# {SETUP_SSH_RESTORE_PATCH_MARKER}
-def _restore_ssh_after_reset():
-  backup_dir = "/cache/reset_backup"
-  params_dir = "/data/params/d"
-  if not os.path.isdir(backup_dir):
-    return
-
-  restored = False
-  try:
-    os.makedirs(params_dir, exist_ok=True)
-    for key in ("GithubSshKeys", "SshEnabled"):
-      src = f"{{backup_dir}}/{{key}}"
-      dst = f"{{params_dir}}/{{key}}"
-      if not os.path.isfile(src):
-        continue
-      shutil.copyfile(src, dst)
-      os.chmod(dst, 0o600)
-      restored = True
-
-    if restored:
-      os.system("sudo chown -R comma:comma /data/params >/dev/null 2>&1 || true")
-      os.system("sudo /usr/comma/set_ssh.sh >/tmp/setup_ssh_restore.log 2>&1 || true")
-  finally:
-    os.system(f"sudo rm -rf {{backup_dir}} >/dev/null 2>&1 || true")
-"""
-
-  if "def main():" not in text:
-    raise RuntimeError(f"Unable to patch setup script without main(): {relative_path}")
-
-  text = text.replace("\ndef main():", f"{restore_block}\n\ndef main():", 1)
-  text = text.replace("  try:\n    gui_app.init_window(", "  try:\n    _restore_ssh_after_reset()\n    gui_app.init_window(", 1)
-  return text.encode("utf-8")
-
-
-def get_setup_replacements() -> dict[str, bytes]:
-  """
-  Keep the reference setup bundle intact and patch only the networking backend.
-
-  The reference AGNOS setup bundle already contains the correct small-screen
-  selector and matching mici UI modules. Replacing those modules with repo-head
-  versions caused bootstrap incompatibilities. The only setup-side changes we
-  still need are the jeepney fallback plus the StarPilot branding/url strings.
-  """
-  return {
-    WIFI_MANAGER_ENTRY_IN_SETUP_ZIPAPP: patch_setup_wifi_manager(),
-  }
-
-
-def patch_updater_module() -> bytes:
-  """
-  Replace only the bundled updater selector with the repo version.
-
-  The selector itself carries the small-screen fallback logic; the rest of the
-  reference updater zipapp stays unchanged.
-  """
-  repo_root = Path(__file__).resolve().parents[2]
-  src = repo_root / "system/ui/updater.py"
-  if not src.is_file():
-    raise RuntimeError(f"Unable to find repo updater source: {src}")
-  return src.read_bytes()
-
-
-def patch_reset_script() -> bytes:
-  """
-  Use repo reset.py so AGNOS reset stays in sync with upstream selector logic.
-  """
-  repo_root = Path(__file__).resolve().parents[2]
-  src = repo_root / "system/ui/reset.py"
-  if not src.is_file():
-    raise RuntimeError(f"Unable to find repo reset source: {src}")
-  data = src.read_text(encoding="utf-8")
-  if PATCH_MARKER not in data:
-    if data.startswith("#!"):
-      first_nl = data.find("\n")
-      if first_nl != -1:
-        data = data[:first_nl + 1] + f"# {PATCH_MARKER}\n" + data[first_nl + 1:]
-      else:
-        data = data + f"\n# {PATCH_MARKER}\n"
-    else:
-      data = f"# {PATCH_MARKER}\n" + data
-  return data.encode("utf-8")
-
 
 def parse_args() -> argparse.Namespace:
-  p = argparse.ArgumentParser(description="Patch AGNOS system image with StarPilot reset and hardware support")
-  p.add_argument("--manifest", default="system/hardware/tici/agnos.json", help="Path to AGNOS manifest JSON")
-  p.add_argument("--work-dir", default=".cache/agnos_reset_patch", help="Working directory")
-  p.add_argument("--source-url", default=None, help="Override source raw system image URL")
-  p.add_argument("--source-image", default=None, help="Use existing local raw system image file instead of download")
-  p.add_argument("--reference-manifest", default=None, help="Optional AGNOS manifest used to source /usr/comma installer payloads")
-  p.add_argument("--reference-source-url", default=None, help="Override reference AGNOS system image URL for /usr/comma file sync")
-  p.add_argument("--reference-image", default=None, help="Use existing local reference system image file for /usr/comma file sync")
-  p.add_argument("--sync-comma-files", default=",".join(DEFAULT_SYNC_COMMA_FILES),
-                 help="Comma-separated file list to sync from reference image (e.g. /usr/comma/installer,/usr/comma/setup)")
-  p.add_argument("--disable-comma-file-sync", action="store_true",
-                 help="Disable syncing /usr/comma files from a reference image")
-  p.add_argument("--disable-usbgpu-firmware", action="store_true",
-                 help="Do not install the AMD firmware required by the external GPU")
-  p.add_argument("--output-xz", default=None, help="Output .img.xz path")
-  p.add_argument("--new-url", default=None, help="Hosted URL for patched image; used for manifest output")
-  p.add_argument("--manifest-out", default=None, help="Write updated manifest JSON here")
-  p.add_argument("--in-place-manifest", action="store_true", help="Update manifest file in place")
-  p.add_argument("--force-download", action="store_true", help="Force redownload source image")
-  p.add_argument("--set-version", default=None, help="Override /VERSION inside patched image (e.g. 12.8.1)")
-  return p.parse_args()
+  parser = argparse.ArgumentParser(description="Build an upstream-based StarPilot AGNOS system image")
+  parser.add_argument("--manifest", default="system/hardware/tici/agnos.json",
+                      help="Manifest to copy when writing an optional candidate manifest")
+  parser.add_argument("--source-url", default=UPSTREAM_SYSTEM_URL, help="Exact upstream system image URL")
+  parser.add_argument("--source-image", help="Use a local exact upstream raw, sparse, or .xz image")
+  parser.add_argument("--c3-deps-url", default=C3_DEPENDENCY_SOURCE_URL,
+                      help="Exact prior StarPilot image containing the compatibility packages")
+  parser.add_argument("--c3-deps-image", help="Use a local exact StarPilot dependency source image")
+  parser.add_argument("--set-version", required=True, help="StarPilot revision, for example 19.6.5")
+  parser.add_argument("--work-dir", default=".cache/agnos_upstream_system")
+  parser.add_argument("--output-xz", help="Output .img.xz path")
+  parser.add_argument("--new-url", help="Hosted output URL for an optional candidate manifest")
+  parser.add_argument("--manifest-out", help="Candidate manifest output path; never overwrites the checked-in manifest")
+  parser.add_argument("--force-download", action="store_true")
+  return parser.parse_args()
+
+
+def find_tool(name: str, extra_candidates: tuple[str, ...] = ()) -> str:
+  for candidate in (os.environ.get(name.upper()), name, *extra_candidates):
+    if candidate and (shutil.which(candidate) or Path(candidate).is_file()):
+      return candidate
+  raise RuntimeError(f"{name} not found")
 
 
 def find_debugfs() -> str:
-  candidates = [
-    os.environ.get("DEBUGFS"),
-    "debugfs",
-    "/opt/homebrew/opt/e2fsprogs/sbin/debugfs",
-  ]
-  for c in candidates:
-    if c and shutil.which(c):
-      return c
-    if c and Path(c).is_file():
-      return c
-  raise RuntimeError("debugfs not found. Install e2fsprogs and retry.")
+  return find_tool("debugfs", ("/opt/homebrew/opt/e2fsprogs/sbin/debugfs",))
 
 
-def load_manifest(path: Path) -> list[dict]:
-  return json.loads(path.read_text())
+def find_e2fsck() -> str:
+  return find_tool("e2fsck", ("/opt/homebrew/opt/e2fsprogs/sbin/e2fsck",))
 
 
-def get_system_entry(manifest: list[dict]) -> dict:
-  for e in manifest:
-    if e.get("name") == "system":
-      return e
-  raise RuntimeError("No system entry found in manifest")
-
-
-def pick_source_url(system_entry: dict, override: str | None) -> str:
-  if override:
-    return override
-  url = system_entry.get("url")
-  if isinstance(url, str):
-    return url
-  alt = system_entry.get("alt")
-  if isinstance(alt, dict) and isinstance(alt.get("url"), str):
-    return alt["url"]
-  raise RuntimeError("No source URL found for system image")
-
-
-def find_default_reference_manifest(primary_manifest_path: Path) -> Path | None:
-  # Expected tree layout for local development:
-  #   <parent>/starpilot/system/hardware/tici/agnos.json
-  #   <parent>/openpilot/system/hardware/tici/agnos.json
-  repo_root = primary_manifest_path
-  for _ in range(4):
-    if repo_root.parent == repo_root:
-      break
-    repo_root = repo_root.parent
-
-  candidates = [
-    repo_root.parent / "openpilot/openpilot/system/hardware/tici/agnos.json",
-    repo_root.parent / "openpilot/system/hardware/tici/agnos.json",
-    repo_root / "openpilot/system/hardware/tici/agnos.json",
-  ]
-
-  for candidate in candidates:
-    if candidate.is_file() and candidate.resolve() != primary_manifest_path.resolve():
-      return candidate.resolve()
-  return None
-
-
-def parse_sync_file_list(raw: str) -> list[str]:
-  out: list[str] = []
-  seen: set[str] = set()
-  for token in raw.replace(";", ",").split(","):
-    item = token.strip()
-    if not item:
-      continue
-    if not item.startswith("/"):
-      if "/" in item:
-        item = f"/{item.lstrip('/')}"
-      else:
-        item = f"/usr/comma/{item}"
-    if item not in seen:
-      seen.add(item)
-      out.append(item)
-  return out
-
-
-def download(url: str, dst: Path) -> None:
-  dst.parent.mkdir(parents=True, exist_ok=True)
-  tmp = dst.with_suffix(dst.suffix + ".part")
-  print(f"Downloading {url} -> {dst}", flush=True)
-  with urllib.request.urlopen(url) as src, open(tmp, "wb") as out:
-    shutil.copyfileobj(src, out, length=1024 * 1024)
-  tmp.replace(dst)
-
-
-def download_with_sha256(url: str, dst: Path, expected_sha256: str) -> None:
-  if not dst.exists():
-    download(url, dst)
-
-  actual_sha256 = sha256_file(dst)
-  if actual_sha256 != expected_sha256:
-    dst.unlink(missing_ok=True)
-    download(url, dst)
-    actual_sha256 = sha256_file(dst)
-
-  if actual_sha256 != expected_sha256:
-    raise RuntimeError(f"Downloaded file hash mismatch for {dst}: got {actual_sha256}, expected {expected_sha256}")
-
-
-def run_cmd(cmd: list[str], check: bool = True, capture: bool = True) -> subprocess.CompletedProcess[str]:
-  proc = subprocess.run(cmd, text=True, capture_output=capture)
-  if check and proc.returncode != 0:
-    raise RuntimeError(f"Command failed ({proc.returncode}): {' '.join(cmd)}\n{proc.stdout}\n{proc.stderr}")
-  return proc
-
-
-def is_xz_file(path: Path) -> bool:
-  with open(path, "rb") as f:
-    header = f.read(len(XZ_MAGIC))
-  return header == XZ_MAGIC
-
-
-def decompress_xz(src: Path, dst: Path) -> None:
-  dst.parent.mkdir(parents=True, exist_ok=True)
-  tmp = dst.with_suffix(dst.suffix + ".part")
-  print(f"Decompressing XZ image {src} -> {dst}", flush=True)
-  with open(tmp, "wb") as out:
-    proc = subprocess.run(["xz", "-d", "-c", str(src)], stdout=out, stderr=subprocess.PIPE, text=True)
-  if proc.returncode != 0:
-    tmp.unlink(missing_ok=True)
-    raise RuntimeError(f"xz decompression failed:\n{proc.stderr}")
-  tmp.replace(dst)
-
-
-def is_android_sparse(path: Path) -> bool:
-  with open(path, "rb") as f:
-    header = f.read(4)
-  if len(header) != 4:
-    return False
-  return int.from_bytes(header, "little") == ANDROID_SPARSE_MAGIC
-
-
-def unsparse_image(src_sparse: Path, dst_raw: Path) -> None:
-  print(f"Unsparsing Android image {src_sparse} -> {dst_raw}", flush=True)
-  with open(src_sparse, "rb") as f_in, open(dst_raw, "wb") as f_out:
-    file_hdr = f_in.read(28)
-    if len(file_hdr) != 28:
-      raise RuntimeError("Invalid sparse image header length")
-    magic, major, minor, file_hdr_sz, chunk_hdr_sz, blk_sz, total_blks, total_chunks, _checksum = struct.unpack("<I4H4I", file_hdr)
-    if magic != ANDROID_SPARSE_MAGIC:
-      raise RuntimeError("Not an Android sparse image")
-    if major != 1 or minor != 0:
-      raise RuntimeError(f"Unsupported sparse version: {major}.{minor}")
-    if file_hdr_sz > 28:
-      f_in.read(file_hdr_sz - 28)
-    if chunk_hdr_sz < 12:
-      raise RuntimeError(f"Invalid chunk header size: {chunk_hdr_sz}")
-
-    for _ in range(total_chunks):
-      chunk_hdr = f_in.read(12)
-      if len(chunk_hdr) != 12:
-        raise RuntimeError("Unexpected EOF in chunk header")
-      chunk_type, _reserved, chunk_sz, total_sz = struct.unpack("<2H2I", chunk_hdr)
-      if chunk_hdr_sz > 12:
-        f_in.read(chunk_hdr_sz - 12)
-
-      data_sz = total_sz - chunk_hdr_sz
-      out_chunk_bytes = chunk_sz * blk_sz
-
-      if chunk_type == CHUNK_TYPE_RAW:
-        if data_sz != out_chunk_bytes:
-          raise RuntimeError(f"RAW chunk size mismatch: data={data_sz} out={out_chunk_bytes}")
-        remaining = data_sz
-        while remaining > 0:
-          chunk = f_in.read(min(8 * 1024 * 1024, remaining))
-          if not chunk:
-            raise RuntimeError("Unexpected EOF in RAW chunk")
-          f_out.write(chunk)
-          remaining -= len(chunk)
-      elif chunk_type == CHUNK_TYPE_FILL:
-        if data_sz != 4:
-          raise RuntimeError(f"FILL chunk expected 4 bytes, got {data_sz}")
-        pattern = f_in.read(4)
-        if len(pattern) != 4:
-          raise RuntimeError("Unexpected EOF in FILL chunk")
-        # Write as sparse hole if fill is zero for speed.
-        if pattern == b"\x00\x00\x00\x00":
-          f_out.seek(out_chunk_bytes, os.SEEK_CUR)
-        else:
-          unit = pattern * (blk_sz // 4)
-          for _ in range(chunk_sz):
-            f_out.write(unit)
-      elif chunk_type == CHUNK_TYPE_DONT_CARE:
-        if data_sz > 0:
-          f_in.read(data_sz)
-        f_out.seek(out_chunk_bytes, os.SEEK_CUR)
-      elif chunk_type == CHUNK_TYPE_CRC32:
-        if data_sz != 4:
-          raise RuntimeError(f"CRC32 chunk expected 4 bytes, got {data_sz}")
-        f_in.read(4)
-      else:
-        raise RuntimeError(f"Unknown sparse chunk type: 0x{chunk_type:04x}")
-
-    f_out.truncate(total_blks * blk_sz)
-
-
-def materialize_ext4_image(source_img: Path, raw_img: Path, work_dir: Path, label: str, force: bool = False) -> None:
-  source_for_sparse = source_img
-
-  if is_xz_file(source_img):
-    decompressed = work_dir / f"{label}.decompressed.img"
-    if force and decompressed.exists():
-      decompressed.unlink()
-    if not decompressed.exists():
-      decompress_xz(source_img, decompressed)
-    source_for_sparse = decompressed
-
-  if force and raw_img.exists():
-    raw_img.unlink()
-
-  if raw_img.exists():
-    return
-
-  if is_android_sparse(source_for_sparse):
-    unsparse_image(source_for_sparse, raw_img)
-  else:
-    shutil.copy2(source_for_sparse, raw_img)
-
-
-def run_debugfs(debugfs: str, image: Path, request: str, write: bool = False) -> str:
-  cmd = [debugfs]
-  if write:
-    cmd.append("-w")
-  cmd += ["-R", request, str(image)]
-  proc = run_cmd(cmd, check=True, capture=True)
-  return f"{proc.stdout}\n{proc.stderr}"
-
-
-def split_shebang(data: bytes) -> tuple[bytes, bytes]:
-  if data.startswith(b"#!"):
-    idx = data.find(b"\n")
-    if idx != -1:
-      return data[:idx + 1], data[idx + 1:]
-  return b"", data
-
-
-def patch_reset_zipapp(original: bytes) -> bytes:
-  shebang, zip_payload = split_shebang(original)
-
-  src_io = BytesIO(zip_payload)
-  dst_io = BytesIO()
-  changed = False
-
-  replacement_reset = patch_reset_script()
-  reset_replacements = {
-    RESET_ENTRY_IN_ZIPAPP: replacement_reset,
-  }
-
-  with zipfile.ZipFile(src_io, "r") as src, zipfile.ZipFile(dst_io, "w", compression=zipfile.ZIP_DEFLATED) as dst:
-    if APPLICATION_ENTRY_IN_ZIPAPP not in src.namelist():
-      raise RuntimeError(f"{APPLICATION_ENTRY_IN_ZIPAPP} not found in reset zipapp")
-
-    seen_entries: set[str] = set()
-    for info in src.infolist():
-      seen_entries.add(info.filename)
-      payload = src.read(info.filename)
-      if info.filename in reset_replacements:
-        replacement_payload = reset_replacements[info.filename]
-        if payload != replacement_payload:
-          payload = replacement_payload
-          changed = True
-      elif info.filename == APPLICATION_ENTRY_IN_ZIPAPP:
-        patched_payload = patch_application_script(payload)
-        if patched_payload != payload:
-          payload = patched_payload
-          changed = True
-
-      new_info = zipfile.ZipInfo(info.filename, info.date_time)
-      new_info.compress_type = zipfile.ZIP_DEFLATED
-      new_info.external_attr = info.external_attr
-      new_info.create_system = info.create_system
-      dst.writestr(new_info, payload)
-
-    # Some reference images may not include reset.py; add missing entry explicitly.
-    default_external_attr = 0o100644 << 16
-    for entry, payload in reset_replacements.items():
-      if entry in seen_entries:
-        continue
-      new_info = zipfile.ZipInfo(entry)
-      new_info.compress_type = zipfile.ZIP_DEFLATED
-      new_info.external_attr = default_external_attr
-      new_info.create_system = 3
-      dst.writestr(new_info, payload)
-      changed = True
-
-  if not changed:
-    return original
-  return shebang + dst_io.getvalue()
-
-
-def patch_updater_zipapp(original: bytes) -> bytes:
-  shebang, zip_payload = split_shebang(original)
-
-  replacement = patch_updater_module()
-  src_io = BytesIO(zip_payload)
-  dst_io = BytesIO()
-  changed = False
-  found_updater = False
-
-  with zipfile.ZipFile(src_io, "r") as src, zipfile.ZipFile(dst_io, "w", compression=zipfile.ZIP_DEFLATED) as dst:
-    for info in src.infolist():
-      payload = src.read(info.filename)
-      if info.filename == UPDATER_ENTRY_IN_ZIPAPP:
-        found_updater = True
-        if payload != replacement:
-          payload = replacement
-          changed = True
-
-      new_info = zipfile.ZipInfo(info.filename, info.date_time)
-      new_info.compress_type = zipfile.ZIP_DEFLATED
-      new_info.external_attr = info.external_attr
-      new_info.create_system = info.create_system
-      dst.writestr(new_info, payload)
-
-    if not found_updater:
-      new_info = zipfile.ZipInfo(UPDATER_ENTRY_IN_ZIPAPP)
-      new_info.compress_type = zipfile.ZIP_DEFLATED
-      new_info.external_attr = 0o100644 << 16
-      new_info.create_system = 3
-      dst.writestr(new_info, replacement)
-      changed = True
-
-  if not changed:
-    return original
-  return shebang + dst_io.getvalue()
-
-
-def patch_setup_zipapp(original: bytes) -> bytes:
-  shebang, zip_payload = split_shebang(original)
-
-  src_io = BytesIO(zip_payload)
-  dst_io = BytesIO()
-  changed = False
-
-  replacements = get_setup_replacements()
-
-  with zipfile.ZipFile(src_io, "r") as src, zipfile.ZipFile(dst_io, "w", compression=zipfile.ZIP_DEFLATED) as dst:
-    seen_entries: set[str] = set()
-    for info in src.infolist():
-      seen_entries.add(info.filename)
-      payload = src.read(info.filename)
-      if info.filename in replacements and payload != replacements[info.filename]:
-        payload = replacements[info.filename]
-        changed = True
-      elif info.filename in (MICI_SETUP_ENTRY_IN_SETUP_ZIPAPP, TICI_SETUP_ENTRY_IN_SETUP_ZIPAPP):
-        patched_payload = patch_setup_branding_script(payload, info.filename)
-        if patched_payload != payload:
-          payload = patched_payload
-          changed = True
-
-      new_info = zipfile.ZipInfo(info.filename, info.date_time)
-      new_info.compress_type = zipfile.ZIP_DEFLATED
-      new_info.external_attr = info.external_attr
-      new_info.create_system = info.create_system
-      dst.writestr(new_info, payload)
-
-    default_external_attr = 0o100644 << 16
-    for entry, payload in replacements.items():
-      if entry in seen_entries:
-        continue
-      new_info = zipfile.ZipInfo(entry)
-      new_info.compress_type = zipfile.ZIP_DEFLATED
-      new_info.external_attr = default_external_attr
-      new_info.create_system = 3
-      dst.writestr(new_info, payload)
-      changed = True
-
-  if not changed:
-    return original
-  return shebang + dst_io.getvalue()
-
-
-def zipapp_has_markers(data: bytes) -> bool:
-  _shebang, zip_payload = split_shebang(data)
-  with zipfile.ZipFile(BytesIO(zip_payload), "r") as z:
-    reset_script = z.read(RESET_ENTRY_IN_ZIPAPP)
-    tici_reset_script = z.read(TICI_RESET_ENTRY_IN_ZIPAPP)
-    mici_reset_script = z.read(MICI_RESET_ENTRY_IN_ZIPAPP)
-    app_script = z.read(APPLICATION_ENTRY_IN_ZIPAPP)
-  return (
-    PATCH_MARKER.encode() in reset_script
-    and b"_device_tree_device_type" in reset_script
-    and b"gui_app.big_ui()" not in reset_script
-    and b"mici_setup" not in mici_reset_script
-    and b"jeepney" not in mici_reset_script
-    and b"mici_setup" not in tici_reset_script
-    and b"jeepney" not in tici_reset_script
-    and APP_PATCH_MARKER.encode() in app_script
-  )
-
-
-def setup_zipapp_has_expected_content(data: bytes) -> bool:
-  _shebang, zip_payload = split_shebang(data)
-  replacements = get_setup_replacements()
-  with zipfile.ZipFile(BytesIO(zip_payload), "r") as z:
-    try:
-      wifi_manager = z.read(WIFI_MANAGER_ENTRY_IN_SETUP_ZIPAPP)
-      if SETUP_WIFI_PATCH_MARKER.encode() not in wifi_manager:
-        return False
-      for entry, payload in replacements.items():
-        if z.read(entry) != payload:
-          return False
-      for entry in (MICI_SETUP_ENTRY_IN_SETUP_ZIPAPP, TICI_SETUP_ENTRY_IN_SETUP_ZIPAPP):
-        setup_script = z.read(entry)
-        if SETUP_BRANDING_PATCH_MARKER.encode() not in setup_script:
-          return False
-        if b"installer.comma.ai/firestar5683/StarPilot" not in setup_script:
-          return False
-      mici_setup = z.read(MICI_SETUP_ENTRY_IN_SETUP_ZIPAPP)
-      if b"install openpilot" in mici_setup or b"slide to install\\nopenpilot" in mici_setup:
-        return False
-    except KeyError:
-      return False
-  return True
-
-
-def updater_zipapp_has_expected_content(data: bytes) -> bool:
-  _shebang, zip_payload = split_shebang(data)
-  with zipfile.ZipFile(BytesIO(zip_payload), "r") as z:
-    try:
-      updater_script = z.read(UPDATER_ENTRY_IN_ZIPAPP)
-    except KeyError:
-      return False
-  return updater_script == patch_updater_module()
-
-
-def weston_service_has_expected_content(data: bytes) -> bool:
-  return (
-    WESTON_BG_PATCH_MARKER.encode("utf-8") in data
-    and b"displayed boot logo was 90 degrees counter-clockwise" in data
-    and b"logo=img.crop(bbox) if bbox else img" in data
-    and b"logo=logo.rotate(-90, expand=True)" in data
-    and b"logo=logo.resize((max(1, logo.width//3), max(1, logo.height//3)), resample)" in data
-    and b"canvas.save(\\\"/tmp/bg.jpg\\\")" in data
-  )
-
-
-def comma_sh_has_expected_display_wait(data: bytes) -> bool:
-  return (
-    COMMA_SH_DISPLAY_WAIT_PATCH_MARKER.encode("utf-8") in data
-    and b"systemctl cat magic.service" in data
-    and b"systemctl is-active --quiet weston-ready" in data
-    and b"[ -S /var/tmp/weston/wayland-0 ]" in data
-  )
-
-
-def parse_inode(debugfs_output: str) -> int:
-  m = re.search(r"Inode:\s+(\d+)", debugfs_output)
-  if not m:
-    raise RuntimeError(f"Unable to parse inode from debugfs stat output:\n{debugfs_output}")
-  return int(m.group(1))
-
-
-def format_debugfs_mode(mode_octal: str) -> str:
-  try:
-    mode = int(mode_octal, 8)
-  except ValueError as e:
-    raise RuntimeError(f"Invalid octal inode mode: {mode_octal}") from e
-  if not 0 <= mode <= 0xFFFF:
-    raise RuntimeError(f"Inode mode exceeds ext4 field width: {mode_octal}")
-  return f"0{mode:o}"
-
-
-def verify_inode_metadata(debugfs: str, image: Path, image_path: str, expected_type: str,
-                          mode_octal: str, uid: int, gid: int) -> None:
-  stat_out = run_debugfs(debugfs, image, f"stat {image_path}", write=False)
-  file_type, perms_octal, actual_uid, actual_gid = parse_debugfs_stat(stat_out)
-  expected_perms = int(mode_octal, 8) & 0o7777
-  actual_perms = int(perms_octal, 8)
-  if (file_type, actual_perms, actual_uid, actual_gid) != (expected_type, expected_perms, uid, gid):
-    raise RuntimeError(
-      f"Metadata verification failed for {image_path}: "
-      f"got type={file_type} mode={actual_perms:04o} uid={actual_uid} gid={actual_gid}, "
-      f"expected type={expected_type} mode={expected_perms:04o} uid={uid} gid={gid}"
-    )
-
-
-def write_regular_file_to_image(debugfs: str, image: Path, image_path: str, local_file: Path, mode_octal: str, uid: int = 0, gid: int = 0) -> None:
-  try:
-    run_debugfs(debugfs, image, f"rm {image_path}", write=True)
-  except Exception as e:
-    err = str(e).lower()
-    if "file not found" not in err and "no such file" not in err:
-      raise
-  run_debugfs(debugfs, image, f"write {local_file} {image_path}", write=True)
-  stat_out = run_debugfs(debugfs, image, f"stat {image_path}", write=False)
-  inode = parse_inode(stat_out)
-  run_debugfs(debugfs, image, f"set_inode_field <{inode}> mode {format_debugfs_mode(mode_octal)}", write=True)
-  run_debugfs(debugfs, image, f"set_inode_field <{inode}> uid {uid}", write=True)
-  run_debugfs(debugfs, image, f"set_inode_field <{inode}> gid {gid}", write=True)
-  verify_inode_metadata(debugfs, image, image_path, "regular", mode_octal, uid, gid)
-
-
-def ensure_directory_in_image(debugfs: str, image: Path, image_path: str, mode_octal: str = "040755", uid: int = 0, gid: int = 0) -> None:
-  try:
-    run_debugfs(debugfs, image, f"mkdir {image_path}", write=True)
-  except Exception as e:
-    err = str(e).lower()
-    if "already exists" not in err and "file exists" not in err:
-      raise
-
-  stat_out = run_debugfs(debugfs, image, f"stat {image_path}", write=False)
-  inode = parse_inode(stat_out)
-  run_debugfs(debugfs, image, f"set_inode_field <{inode}> mode {format_debugfs_mode(mode_octal)}", write=True)
-  run_debugfs(debugfs, image, f"set_inode_field <{inode}> uid {uid}", write=True)
-  run_debugfs(debugfs, image, f"set_inode_field <{inode}> gid {gid}", write=True)
-  verify_inode_metadata(debugfs, image, image_path, "directory", mode_octal, uid, gid)
-
-
-def extract_wheel_subset(wheel_path: Path, extract_dir: Path, roots: set[str]) -> dict[Path, str]:
-  if extract_dir.exists():
-    shutil.rmtree(extract_dir)
-  extract_dir.mkdir(parents=True)
-  file_modes: dict[Path, str] = {}
-
-  with zipfile.ZipFile(wheel_path, "r") as wheel:
-    for info in wheel.infolist():
-      parts = Path(info.filename).parts
-      if not parts or parts[0] not in roots:
-        continue
-      if any(part == ".." for part in parts):
-        raise RuntimeError(f"Unsafe wheel entry path: {info.filename}")
-
-      local_path = extract_dir.joinpath(*parts)
-      if info.is_dir():
-        local_path.mkdir(parents=True, exist_ok=True)
-        continue
-
-      local_path.parent.mkdir(parents=True, exist_ok=True)
-      with wheel.open(info, "r") as src, open(local_path, "wb") as dst:
-        shutil.copyfileobj(src, dst)
-
-      perms = (info.external_attr >> 16) & 0o777
-      if not perms:
-        perms = 0o644
-      os.chmod(local_path, perms)
-      file_modes[local_path] = f"100{perms:03o}"
-
-  if not (extract_dir / JEEPNY_PACKAGE_DIR / "__init__.py").is_file():
-    raise RuntimeError("jeepney wheel extraction did not produce jeepney/__init__.py")
-  if not (extract_dir / JEEPNY_DIST_INFO_DIR / "METADATA").is_file():
-    raise RuntimeError("jeepney wheel extraction did not produce dist-info/METADATA")
-
-  return file_modes
-
-
-def install_python_package_tree(debugfs: str, image: Path, source_dir: Path, image_root: str, file_modes: dict[Path, str]) -> None:
-  dirs = sorted((p for p in source_dir.rglob("*") if p.is_dir()), key=lambda p: len(p.relative_to(source_dir).parts))
-  for local_dir in dirs:
-    rel = local_dir.relative_to(source_dir).as_posix()
-    ensure_directory_in_image(debugfs, image, f"{image_root}/{rel}", "040755", 0, 0)
-
-  files = sorted((p for p in source_dir.rglob("*") if p.is_file()), key=lambda p: p.relative_to(source_dir).as_posix())
-  for local_file in files:
-    rel = local_file.relative_to(source_dir).as_posix()
-    mode_octal = file_modes.get(local_file, "100644")
-    write_regular_file_to_image(debugfs, image, f"{image_root}/{rel}", local_file, mode_octal, 0, 0)
-
-
-def install_jeepney_into_image(debugfs: str, image: Path, work_dir: Path) -> None:
-  wheel_dir = work_dir / "python_wheels"
-  wheel_path = wheel_dir / f"jeepney-{JEEPNY_VERSION}-py3-none-any.whl"
-  download_with_sha256(JEEPNY_WHEEL_URL, wheel_path, JEEPNY_WHEEL_SHA256)
-
-  extract_dir = work_dir / "jeepney_wheel"
-  file_modes = extract_wheel_subset(wheel_path, extract_dir, {JEEPNY_PACKAGE_DIR, JEEPNY_DIST_INFO_DIR})
-
-  print(f"Installing jeepney {JEEPNY_VERSION} into AGNOS Python venv", flush=True)
-  install_python_package_tree(debugfs, image, extract_dir, PYTHON_SITE_PACKAGES_PATH_IN_IMAGE, file_modes)
-
-
-def image_has_jeepney(debugfs: str, image: Path, work_dir: Path) -> bool:
-  verify_dir = work_dir / "jeepney_verify"
-  verify_dir.mkdir(parents=True, exist_ok=True)
-  init_file = verify_dir / "__init__.py"
-  wrappers_file = verify_dir / "wrappers.py"
-  metadata_file = verify_dir / "METADATA"
-  init_file.unlink(missing_ok=True)
-  wrappers_file.unlink(missing_ok=True)
-  metadata_file.unlink(missing_ok=True)
-  try:
-    for image_path in (
-      f"{PYTHON_SITE_PACKAGES_PATH_IN_IMAGE}/{JEEPNY_PACKAGE_DIR}/__init__.py",
-      f"{PYTHON_SITE_PACKAGES_PATH_IN_IMAGE}/{JEEPNY_PACKAGE_DIR}/wrappers.py",
-      f"{PYTHON_SITE_PACKAGES_PATH_IN_IMAGE}/{JEEPNY_DIST_INFO_DIR}/METADATA",
-    ):
-      file_type, _mode, _uid, _gid = parse_debugfs_stat(run_debugfs(debugfs, image, f"stat {image_path}", write=False))
-      if file_type != "regular":
-        raise RuntimeError(f"{image_path} has inode type {file_type}, expected regular")
-
-    run_debugfs(debugfs, image, f"dump -p {PYTHON_SITE_PACKAGES_PATH_IN_IMAGE}/{JEEPNY_PACKAGE_DIR}/__init__.py {init_file}", write=False)
-    run_debugfs(debugfs, image, f"dump -p {PYTHON_SITE_PACKAGES_PATH_IN_IMAGE}/{JEEPNY_PACKAGE_DIR}/wrappers.py {wrappers_file}", write=False)
-    run_debugfs(debugfs, image, f"dump -p {PYTHON_SITE_PACKAGES_PATH_IN_IMAGE}/{JEEPNY_DIST_INFO_DIR}/METADATA {metadata_file}", write=False)
-  except Exception:
-    return False
-
-  return (
-    b"from .wrappers import *" in init_file.read_bytes()
-    and b"class DBusAddress" in wrappers_file.read_bytes()
-    and f"Version: {JEEPNY_VERSION}".encode("utf-8") in metadata_file.read_bytes()
-  )
-
-
-def parse_debugfs_stat(debugfs_output: str) -> tuple[str, str, int, int]:
-  type_match = re.search(r"Type:\s+([A-Za-z]+)", debugfs_output)
-  mode_match = re.search(r"Mode:\s+([0-7]+)", debugfs_output)
-  user_match = re.search(r"User:\s+(\d+)", debugfs_output)
-  group_match = re.search(r"Group:\s+(\d+)", debugfs_output)
-  if not type_match or not mode_match or not user_match or not group_match:
-    raise RuntimeError(f"Unable to parse debugfs stat output:\n{debugfs_output}")
-  return type_match.group(1).lower(), mode_match.group(1), int(user_match.group(1)), int(group_match.group(1))
-
-
-def inode_mode_from_type_and_perms(file_type: str, perms_octal: str) -> str:
-  prefix = INODE_MODE_TYPE_PREFIX.get(file_type)
-  if prefix is None:
-    raise RuntimeError(f"Unsupported inode type '{file_type}' for mode conversion")
-  perms = perms_octal.strip()
-  if not perms:
-    raise RuntimeError("Empty permissions value in inode stat")
-  return f"{prefix}{int(perms, 8):03o}"
-
-
-def sync_files_from_reference_image(debugfs: str, reference_img: Path, patched_img: Path, sync_paths: list[str], work_dir: Path) -> list[str]:
-  sync_dir = work_dir / "reference_sync"
-  sync_dir.mkdir(parents=True, exist_ok=True)
-  synced: list[str] = []
-
-  for image_path in sync_paths:
-    source_tmp = sync_dir / f"source{image_path.replace('/', '_')}"
-    verify_tmp = sync_dir / f"verify{image_path.replace('/', '_')}"
-
-    stat_out = run_debugfs(debugfs, reference_img, f"stat {image_path}", write=False)
-    file_type, perms_octal, uid, gid = parse_debugfs_stat(stat_out)
-    mode_octal = inode_mode_from_type_and_perms(file_type, perms_octal)
-
-    run_debugfs(debugfs, reference_img, f"dump -p {image_path} {source_tmp}", write=False)
-    print(f"Syncing {image_path} from reference image (mode={mode_octal}, uid={uid}, gid={gid})", flush=True)
-    write_regular_file_to_image(debugfs, patched_img, image_path, source_tmp, mode_octal, uid, gid)
-
-    run_debugfs(debugfs, patched_img, f"dump -p {image_path} {verify_tmp}", write=False)
-    if sha256_file(source_tmp) != sha256_file(verify_tmp):
-      raise RuntimeError(f"Verification failed after syncing {image_path}")
-    synced.append(image_path)
-
-  return synced
+def run_cmd(command: list[str], *, allowed_returncodes: frozenset[int] = frozenset({0})) -> subprocess.CompletedProcess[str]:
+  result = subprocess.run(command, check=False, capture_output=True, text=True)
+  if result.returncode not in allowed_returncodes:
+    raise RuntimeError(f"Command failed ({result.returncode}): {' '.join(command)}\n{result.stdout}\n{result.stderr}")
+  return result
 
 
 def sha256_file(path: Path) -> str:
-  h = hashlib.sha256()
-  with open(path, "rb") as f:
-    while True:
-      chunk = f.read(1024 * 1024)
-      if not chunk:
-        break
-      h.update(chunk)
-  return h.hexdigest()
-
-
-def sha256_zstd_payload(path: Path) -> str:
-  try:
-    import zstandard
-  except ImportError as e:
-    raise RuntimeError("zstandard is required to verify the external-GPU firmware") from e
-
   digest = hashlib.sha256()
-  with open(path, "rb") as compressed:
-    with zstandard.ZstdDecompressor().stream_reader(compressed) as source:
-      while chunk := source.read(1024 * 1024):
-        digest.update(chunk)
+  with path.open("rb") as stream:
+    while chunk := stream.read(8 * 1024 * 1024):
+      digest.update(chunk)
   return digest.hexdigest()
 
 
-def install_amdgpu_firmware_from_reference(debugfs: str, reference_img: Path, patched_img: Path, work_dir: Path) -> None:
-  ensure_directory_in_image(debugfs, patched_img, AMDGPU_FIRMWARE_PATH_IN_IMAGE, "040755", 0, 0)
-  firmware_dir = work_dir / "amdgpu_firmware"
-  firmware_dir.mkdir(parents=True, exist_ok=True)
-
-  for filename, expected_payload_hash in AMDGPU_FIRMWARE_SHA256.items():
-    image_path = f"{AMDGPU_FIRMWARE_PATH_IN_IMAGE}/{filename}"
-    local_file = firmware_dir / filename
-    verify_file = firmware_dir / f"{filename}.verify"
-    local_file.unlink(missing_ok=True)
-    verify_file.unlink(missing_ok=True)
-
-    stat_out = run_debugfs(debugfs, reference_img, f"stat {image_path}", write=False)
-    file_type, perms_octal, uid, gid = parse_debugfs_stat(stat_out)
-    if file_type != "regular":
-      raise RuntimeError(f"Reference firmware {image_path} is {file_type}, expected regular")
-    run_debugfs(debugfs, reference_img, f"dump -p {image_path} {local_file}", write=False)
-    if sha256_zstd_payload(local_file) != expected_payload_hash:
-      raise RuntimeError(f"Reference firmware payload hash mismatch for {filename}")
-
-    mode_octal = inode_mode_from_type_and_perms(file_type, perms_octal)
-    write_regular_file_to_image(debugfs, patched_img, image_path, local_file, mode_octal, uid, gid)
-    run_debugfs(debugfs, patched_img, f"dump -p {image_path} {verify_file}", write=False)
-    if sha256_file(local_file) != sha256_file(verify_file):
-      raise RuntimeError(f"Compressed firmware verification failed for {filename}")
-    if sha256_zstd_payload(verify_file) != expected_payload_hash:
-      raise RuntimeError(f"Installed firmware payload hash mismatch for {filename}")
-
-  print(f"Installed and verified {len(AMDGPU_FIRMWARE_SHA256)} AMD firmware files", flush=True)
+def replace_exactly(text: str, old: str, new: str, expected_count: int = 1) -> str:
+  count = text.count(old)
+  if count != expected_count:
+    raise RuntimeError(f"Expected {expected_count} occurrences of {old!r}, found {count}")
+  return text.replace(old, new)
 
 
-def compress_xz(src: Path, dst: Path) -> None:
-  dst.parent.mkdir(parents=True, exist_ok=True)
-  tmp = dst.with_suffix(dst.suffix + ".part")
-  print(f"Compressing {src} -> {dst}", flush=True)
-  with open(tmp, "wb") as out:
-    proc = subprocess.run(["xz", "-T0", "-6", "-c", str(src)], stdout=out, stderr=subprocess.PIPE, text=True)
-  if proc.returncode != 0:
-    tmp.unlink(missing_ok=True)
-    raise RuntimeError(f"xz failed:\n{proc.stderr}")
-  tmp.replace(dst)
+def patch_setup_source(member: str, source: str) -> str:
+  bundled_installer_helper = r'''
+
+def patch_bundled_installer(path: str, owner: str, branch: str) -> None:
+  data = bytearray(open(path, "rb").read())
+
+  def patch_slot(old_value: bytes, new_value: bytes) -> None:
+    old_marker = old_value + b"?"
+    start = data.find(old_marker)
+    if start < 0 or data.find(old_marker, start + 1) >= 0:
+      raise RuntimeError(f"Expected exactly one installer slot for {old_value!r}")
+    end = data.find(b"\0", start)
+    if end < 0:
+      raise RuntimeError(f"Installer slot for {old_value!r} is not NUL terminated")
+    new_marker = new_value + b"?"
+    if len(new_marker) > end - start:
+      raise RuntimeError(f"Installer value {new_value!r} exceeds its slot")
+    data[start:end] = new_marker + b" " * (end - start - len(new_marker))
+
+  patch_slot(b"https://github.com/firestar5683/openpilot.git", f"https://github.com/{owner}/openpilot.git".encode("ascii"))
+  patch_slot(b"StarPilot", branch.encode("ascii"))
+  with open(path, "wb") as installer:
+    installer.write(data)
 
 
-def update_manifest_system_entry(manifest: list[dict], new_url: str, new_hash_raw: str, size: int) -> list[dict]:
-  updated = json.loads(json.dumps(manifest))
-  system_entry = get_system_entry(updated)
-  old_url = system_entry.get("url")
-  old_hash = system_entry.get("hash")
-  old_hash_raw = system_entry.get("hash_raw")
-  old_size = system_entry.get("size")
+def install_bundled_installer(owner: str, branch: str, installer_url: str) -> None:
+  import tempfile
 
-  system_entry["url"] = new_url
-  system_entry["hash"] = new_hash_raw
-  system_entry["hash_raw"] = new_hash_raw
-  system_entry["size"] = size
-  system_entry["sparse"] = False
-  system_entry["full_check"] = False
+  fd, tmpfile = tempfile.mkstemp(prefix="installer_")
+  try:
+    with os.fdopen(fd, "wb") as destination, open("/usr/comma/installer", "rb") as source:
+      destination.write(source.read())
+    patch_bundled_installer(tmpfile, owner, branch)
+    os.chmod(tmpfile, 0o755)
+    with open(INSTALLER_URL_PATH, "w") as installer_url_file:
+      installer_url_file.write(installer_url)
+    os.replace(tmpfile, INSTALLER_DESTINATION_PATH)
+  except Exception:
+    try:
+      os.close(fd)
+    except OSError:
+      pass
+    try:
+      os.unlink(tmpfile)
+    except FileNotFoundError:
+      pass
+    raise
+'''
+  source = replace_exactly(
+    source,
+    'OPENPILOT_URL = "https://openpilot.comma.ai"',
+    'CONNECTIVITY_URL = "https://openpilot.comma.ai"\nOPENPILOT_URL = "file:///usr/comma/installer"' + bundled_installer_helper,
+  )
 
-  if isinstance(old_url, str) and isinstance(old_hash, str) and isinstance(old_hash_raw, str) and isinstance(old_size, int):
-    system_entry["alt"] = {
-      "url": old_url,
-      "hash": old_hash,
-      "hash_raw": old_hash_raw,
-      "size": old_size,
-    }
+  source = replace_exactly(
+    source,
+    '''    # autocomplete incomplete URLs
+    if re.match("^([^/.]+)/([^/]+)$", url):
+      url = f"https://installer.comma.ai/{url}"
 
-  return updated
+    parsed = urlparse(url, scheme='https')
+    self.download_url = (urlparse(f"https://{url}") if not parsed.netloc else parsed).geturl()''',
+    '''    # owner/branch installs use the bundled COMMA/GBM installer. The
+    # installer.comma.ai binary targets Wayland and cannot run in this AGNOS.
+    self.installer_url = ("https://installer.comma.ai/firestar5683/StarPilot" if url == OPENPILOT_URL else url)
+    self.bundled_installer_target = (("firestar5683", "StarPilot") if url == OPENPILOT_URL else None)
+    match = re.fullmatch(r"(?:https://installer\\.comma\\.ai/)?([A-Za-z0-9_.-]+)/([A-Za-z0-9_.-]+)", url)
+    if match:
+      self.bundled_installer_target = match.groups()
+      self.installer_url = f"https://installer.comma.ai/{'/'.join(self.bundled_installer_target)}"
+      url = OPENPILOT_URL
 
+    parsed = urlparse(url, scheme='https')
+    self.download_url = (urlparse(f"https://{url}") if not parsed.netloc else parsed).geturl()''',
+  )
 
-def resolve_reference_source_image(args: argparse.Namespace, primary_manifest_path: Path, work_dir: Path) -> Path:
-  if args.reference_image:
-    ref_image = Path(args.reference_image).resolve()
-    if not ref_image.is_file():
-      raise RuntimeError(f"Reference image not found: {ref_image}")
-    return ref_image
+  source = replace_exactly(
+    source,
+    '''    try:
+      import tempfile
+''',
+    '''    try:
+      bundled_target = self.bundled_installer_target
+      if bundled_target is not None:
+        install_bundled_installer(*bundled_target, self.installer_url)
+        time.sleep(0.1)
+        gui_app.request_close()
+        return
 
-  reference_manifest_path: Path | None = None
-  if args.reference_manifest:
-    reference_manifest_path = Path(args.reference_manifest).resolve()
-    if not reference_manifest_path.is_file():
-      raise RuntimeError(f"Reference manifest not found: {reference_manifest_path}")
-  else:
-    reference_manifest_path = find_default_reference_manifest(primary_manifest_path)
+      import tempfile
+''',
+  )
 
-  if args.reference_source_url:
-    reference_url = args.reference_source_url
-  elif reference_manifest_path is not None:
-    reference_manifest = load_manifest(reference_manifest_path)
-    reference_entry = get_system_entry(reference_manifest)
-    reference_url = pick_source_url(reference_entry, None)
-    print(f"Using reference AGNOS manifest: {reference_manifest_path}", flush=True)
-  else:
-    raise RuntimeError(
-      "No reference image source found. Set --reference-image, --reference-source-url, or --reference-manifest."
+  source = replace_exactly(
+    source,
+    '''      req = urllib.request.Request(self.download_url, headers=headers)
+
+      with open(tmpfile, 'wb') as f, urllib.request.urlopen(req, timeout=30) as response:
+        total_size = int(response.headers.get('content-length', 0))''',
+    '''      response = (open("/usr/comma/installer", "rb") if self.download_url == OPENPILOT_URL else
+                  urllib.request.urlopen(urllib.request.Request(self.download_url, headers=headers), timeout=30))
+
+      with open(tmpfile, 'wb') as f, response:
+        total_size = (os.path.getsize("/usr/comma/installer") if self.download_url == OPENPILOT_URL else
+                      int(response.headers.get('content-length', 0)))''',
+  )
+
+  source = replace_exactly(
+    source,
+    '''      if not is_elf:
+''',
+    '''      if is_elf and self.bundled_installer_target is not None:
+        patch_bundled_installer(tmpfile, *self.bundled_installer_target)
+
+      if not is_elf:
+''',
+  )
+
+  source = replace_exactly(source, "f.write(self.download_url)", "f.write(self.installer_url)")
+
+  if member.endswith("mici_setup.py"):
+    source = replace_exactly(source, "urllib.request.Request(OPENPILOT_URL, method=\"HEAD\")",
+                             "urllib.request.Request(CONNECTIVITY_URL, method=\"HEAD\")")
+    source = replace_exactly(source, 'LargerSlider("slide to install\\nopenpilot", use_openpilot_callback)',
+                             'LargerSlider("slide to install\\nStarPilot", use_openpilot_callback)')
+    source = replace_exactly(source, 'BigPillButton("install openpilot", green=True)',
+                             'BigPillButton("install StarPilot", green=True)')
+    source = replace_exactly(source, 'set_text("install openpilot" if not custom_software else "choose software")',
+                             'set_text("install StarPilot" if not custom_software else "choose software")')
+    source = replace_exactly(source, '"No custom software found at this URL: " + self.download_url.replace',
+                             '"No custom software found at this URL: " + self.installer_url.replace')
+    source = replace_exactly(
+      source,
+      '''    except Exception:
+      self._download_failed_reason = "Invalid URL: " + self.download_url.replace("https://", "", 1)''',
+      '''    except Exception:
+      import traceback
+      traceback.print_exc()
+      self._download_failed_reason = "Invalid URL: " + self.installer_url.replace("https://", "", 1)''',
     )
+  elif member.endswith("tici_setup.py"):
+    source = replace_exactly(source, "urllib.request.urlopen(OPENPILOT_URL, timeout=2.0)",
+                             "urllib.request.urlopen(CONNECTIVITY_URL, timeout=2.0)")
+    source = replace_exactly(source, 'ButtonRadio("openpilot", self.checkmark',
+                             'ButtonRadio("StarPilot", self.checkmark')
+    source = replace_exactly(source, "self.download_failed(self.download_url,", "self.download_failed(self.installer_url,", expected_count=3)
+    source = replace_exactly(
+      source,
+      '''    except Exception:
+      error_msg = "Ensure the entered URL is valid, and the device's internet connection is good."''',
+      '''    except Exception:
+      import traceback
+      traceback.print_exc()
+      error_msg = "Ensure the entered URL is valid, and the device's internet connection is good."''',
+    )
+  else:
+    raise RuntimeError(f"Unexpected setup source member: {member}")
+  return source
 
-  reference_download = work_dir / "reference_system.img"
-  if args.force_download and reference_download.exists():
-    reference_download.unlink()
-  if not reference_download.exists():
-    download(reference_url, reference_download)
-  return reference_download
+
+def is_setup_cache_member(member: str) -> bool:
+  return any(
+    member.startswith(str(Path(source_member).parent / "__pycache__" / Path(source_member).stem)) and member.endswith(".pyc")
+    for source_member in SETUP_SOURCE_MEMBERS
+  )
+
+
+def patch_setup_zipapp(source: Path, destination: Path) -> None:
+  raw = source.read_bytes()
+  zip_offset = raw.find(b"PK\x03\x04")
+  if zip_offset < 0:
+    raise RuntimeError("Setup payload is not an executable zip application")
+  prefix = raw[:zip_offset]
+
+  destination.parent.mkdir(parents=True, exist_ok=True)
+  destination.write_bytes(prefix)
+  with zipfile.ZipFile(source, "r") as input_zip, zipfile.ZipFile(destination, "a") as output_zip:
+    names = set(input_zip.namelist())
+    missing = set(SETUP_SOURCE_MEMBERS) - names
+    if missing:
+      raise RuntimeError(f"Setup payload is missing source members: {sorted(missing)}")
+    for info in input_zip.infolist():
+      if is_setup_cache_member(info.filename):
+        continue
+      data = input_zip.read(info.filename)
+      if info.filename in SETUP_SOURCE_MEMBERS:
+        data = patch_setup_source(info.filename, data.decode("utf-8")).encode("utf-8")
+      output_zip.writestr(info, data)
+
+  destination.chmod(source.stat().st_mode & 0o7777)
+  with zipfile.ZipFile(destination, "r") as patched_zip:
+    if patched_zip.testzip() is not None:
+      raise RuntimeError("Patched setup zip application failed CRC validation")
+    for member in SETUP_SOURCE_MEMBERS:
+      patched = patched_zip.read(member).decode("utf-8")
+      if 'OPENPILOT_URL = "file:///usr/comma/installer"' not in patched:
+        raise RuntimeError(f"Patched setup member does not use the bundled installer: {member}")
+
+
+def patch_padded_binary_slot(data: bytearray, old_value: bytes, new_value: bytes) -> None:
+  old_marker = old_value + b"?"
+  start = data.find(old_marker)
+  if start < 0 or data.find(old_marker, start + 1) >= 0:
+    raise RuntimeError(f"Expected exactly one installer slot for {old_value!r}")
+  end = data.find(0, start)
+  if end < 0:
+    raise RuntimeError(f"Installer slot for {old_value!r} is not NUL terminated")
+  slot_length = end - start
+  new_marker = new_value + b"?"
+  if len(new_marker) > slot_length:
+    raise RuntimeError(f"Installer value {new_value!r} exceeds its {slot_length}-byte slot")
+  data[start:end] = new_marker + b" " * (slot_length - len(new_marker))
+
+
+def patch_installer_binary(source: Path, destination: Path) -> None:
+  data = bytearray(source.read_bytes())
+  if not data.startswith(b"\x7fELF"):
+    raise RuntimeError("Bundled installer is not an ELF executable")
+  original_size = len(data)
+  patch_padded_binary_slot(data, b"https://github.com/commaai/openpilot.git", STAR_PILOT_GIT_URL.encode())
+  patch_padded_binary_slot(data, b"release3", STAR_PILOT_BRANCH.encode())
+  if len(data) != original_size:
+    raise RuntimeError("Installer patch changed the executable size")
+  destination.parent.mkdir(parents=True, exist_ok=True)
+  destination.write_bytes(data)
+  destination.chmod(source.stat().st_mode & 0o7777)
+
+
+def validate_factory_install_payloads(setup: Path, installer: Path) -> None:
+  with zipfile.ZipFile(setup, "r") as setup_zip:
+    for member in SETUP_SOURCE_MEMBERS:
+      source = setup_zip.read(member).decode("utf-8")
+      if "StarPilot" not in source or 'OPENPILOT_URL = "file:///usr/comma/installer"' not in source:
+        raise RuntimeError(f"StarPilot setup customization is missing from {member}")
+      if "CONNECTIVITY_URL = \"https://openpilot.comma.ai\"" not in source:
+        raise RuntimeError(f"Connectivity check changed unexpectedly in {member}")
+      for expected in (
+        "patch_bundled_installer(tmpfile, *self.bundled_installer_target)",
+        "install_bundled_installer(*bundled_target, self.installer_url)",
+        'self.bundled_installer_target = (("firestar5683", "StarPilot") if url == OPENPILOT_URL else None)',
+        "self.bundled_installer_target = match.groups()",
+        "f.write(self.installer_url)",
+      ):
+        if expected not in source:
+          raise RuntimeError(f"Bundled custom-branch installer flow is missing from {member}: {expected}")
+
+  installer_data = installer.read_bytes()
+  for expected in (STAR_PILOT_GIT_URL.encode() + b"?", STAR_PILOT_BRANCH.encode() + b"?"):
+    if installer_data.count(expected) != 1:
+      raise RuntimeError(f"Bundled installer is missing {expected!r}")
+
+
+def validate_target_version(version: str) -> str:
+  clean = version.strip()
+  if not re.fullmatch(r"19\.6\.\d+", clean):
+    raise RuntimeError("Target version must be a 19.6.x StarPilot revision")
+  if int(clean.rsplit(".", 1)[1]) < 1:
+    raise RuntimeError("Target version must be newer than upstream 19.6")
+  return clean
+
+
+def download(url: str, destination: Path) -> None:
+  destination.parent.mkdir(parents=True, exist_ok=True)
+  partial = destination.with_suffix(destination.suffix + ".part")
+  print(f"Downloading exact upstream AGNOS: {url}", flush=True)
+  with urllib.request.urlopen(url) as source, partial.open("wb") as output:
+    shutil.copyfileobj(source, output, length=8 * 1024 * 1024)
+  partial.replace(destination)
+
+
+def is_xz_file(path: Path) -> bool:
+  with path.open("rb") as stream:
+    return stream.read(len(XZ_MAGIC)) == XZ_MAGIC
+
+
+def decompress_xz(source: Path, destination: Path) -> None:
+  partial = destination.with_suffix(destination.suffix + ".part")
+  print(f"Decompressing {source}", flush=True)
+  with lzma.open(source, "rb") as compressed, partial.open("wb") as output:
+    shutil.copyfileobj(compressed, output, length=8 * 1024 * 1024)
+  partial.replace(destination)
+
+
+def is_android_sparse(path: Path) -> bool:
+  with path.open("rb") as stream:
+    raw = stream.read(4)
+  return len(raw) == 4 and struct.unpack("<I", raw)[0] == ANDROID_SPARSE_MAGIC
+
+
+def unsparse_image(source: Path, destination: Path) -> None:
+  print(f"Expanding Android sparse image {source}", flush=True)
+  with source.open("rb") as source_file, destination.open("wb") as output:
+    header = source_file.read(28)
+    if len(header) != 28:
+      raise RuntimeError("Sparse image header is truncated")
+    magic, major, _minor, file_header_size, chunk_header_size, block_size, total_blocks, total_chunks, _checksum = struct.unpack(
+      "<I4H4I", header,
+    )
+    if magic != ANDROID_SPARSE_MAGIC or major != 1:
+      raise RuntimeError("Unsupported Android sparse image")
+    source_file.seek(file_header_size)
+    for _ in range(total_chunks):
+      chunk_header = source_file.read(chunk_header_size)
+      if len(chunk_header) != chunk_header_size:
+        raise RuntimeError("Sparse chunk header is truncated")
+      chunk_type, _reserved, chunk_blocks, total_size = struct.unpack("<2H2I", chunk_header[:12])
+      payload_size = total_size - chunk_header_size
+      output_size = chunk_blocks * block_size
+      if chunk_type == CHUNK_TYPE_RAW:
+        if payload_size != output_size:
+          raise RuntimeError("Sparse RAW chunk size mismatch")
+        remaining = payload_size
+        while remaining:
+          data = source_file.read(min(8 * 1024 * 1024, remaining))
+          if not data:
+            raise RuntimeError("Sparse RAW chunk is truncated")
+          output.write(data)
+          remaining -= len(data)
+      elif chunk_type == CHUNK_TYPE_FILL:
+        if payload_size != 4:
+          raise RuntimeError("Sparse FILL chunk has invalid size")
+        pattern = source_file.read(4)
+        if pattern == b"\0\0\0\0":
+          output.seek(output_size, os.SEEK_CUR)
+        else:
+          block = pattern * (block_size // 4)
+          for _ in range(chunk_blocks):
+            output.write(block)
+      elif chunk_type == CHUNK_TYPE_DONT_CARE:
+        source_file.seek(payload_size, os.SEEK_CUR)
+        output.seek(output_size, os.SEEK_CUR)
+      elif chunk_type == CHUNK_TYPE_CRC32:
+        source_file.seek(payload_size, os.SEEK_CUR)
+      else:
+        raise RuntimeError(f"Unknown sparse chunk type: 0x{chunk_type:04x}")
+    output.truncate(total_blocks * block_size)
+
+
+def materialize_upstream_image(source: Path, destination: Path, work_dir: Path) -> None:
+  candidate = source
+  if is_xz_file(source):
+    decompressed = work_dir / "upstream_system.decompressed.img"
+    if not decompressed.exists():
+      decompress_xz(source, decompressed)
+    candidate = decompressed
+  if destination.exists():
+    return
+  if is_android_sparse(candidate):
+    unsparse_image(candidate, destination)
+  else:
+    shutil.copy2(candidate, destination)
+
+
+def run_debugfs(debugfs: str, image: Path, request: str, *, write: bool = False) -> str:
+  command = [debugfs]
+  if write:
+    command.append("-w")
+  command += ["-R", request, str(image)]
+  result = run_cmd(command)
+  return f"{result.stdout}\n{result.stderr}"
+
+
+def parse_inode(output: str) -> int:
+  match = re.search(r"Inode:\s+(\d+)", output)
+  if not match:
+    raise RuntimeError(f"Unable to parse inode:\n{output}")
+  return int(match.group(1))
+
+
+def write_version(debugfs: str, image: Path, local_file: Path) -> None:
+  expected_mutations = frozenset({
+    VERSION_PATH_IN_IMAGE,
+    *STAR_PILOT_DEPENDENCY_PATHS,
+    *LEGACY_RUNTIME_LIBRARY_PATHS,
+    *FACTORY_INSTALL_PATHS,
+  })
+  if ALLOWED_IMAGE_MUTATIONS != expected_mutations:
+    raise RuntimeError("AGNOS mutation allowlist contains an unexpected path")
+  run_debugfs(debugfs, image, f"rm {VERSION_PATH_IN_IMAGE}", write=True)
+  run_debugfs(debugfs, image, f"write {local_file} {VERSION_PATH_IN_IMAGE}", write=True)
+  inode = parse_inode(run_debugfs(debugfs, image, f"stat {VERSION_PATH_IN_IMAGE}"))
+  for field, value in (("mode", "0100644"), ("uid", "0"), ("gid", "0")):
+    run_debugfs(debugfs, image, f"set_inode_field <{inode}> {field} {value}", write=True)
+
+
+def read_image_text(debugfs: str, image: Path, image_path: str) -> str:
+  output = run_debugfs(debugfs, image, f"cat {image_path}")
+  lines = [line.strip() for line in output.splitlines() if line.strip() and not line.startswith("debugfs ")]
+  return lines[0] if lines else ""
+
+
+def image_path_exists(debugfs: str, image: Path, image_path: str) -> bool:
+  output = run_debugfs(debugfs, image, f"stat {image_path}")
+  return re.search(r"Inode:\s+\d+", output) is not None
+
+
+def list_image_directory(debugfs: str, image: Path, image_path: str) -> set[str]:
+  output = run_debugfs(debugfs, image, f"ls -p {image_path}")
+  entries: set[str] = set()
+  for line in output.splitlines():
+    if line.startswith("/"):
+      fields = line.split("/")
+      if len(fields) >= 6 and fields[5] not in ("", ".", ".."):
+        entries.add(fields[5])
+  return entries
+
+
+def validate_venv_layout(debugfs: str, image: Path, *, expected_count: int,
+                         required_paths: dict[str, str]) -> dict[str, object]:
+  entries = list_image_directory(debugfs, image, SITE_PACKAGES_PATH_IN_IMAGE)
+  if len(entries) != expected_count:
+    raise RuntimeError(f"Managed venv has {len(entries)} entries; expected {expected_count}")
+  missing = [name for name, path in required_paths.items() if not image_path_exists(debugfs, image, path)]
+  if missing:
+    raise RuntimeError(f"Managed venv is missing required imports: {', '.join(missing)}")
+  return {"site_packages_count": len(entries), "required_imports": sorted(required_paths)}
+
+
+def image_path_is_directory(debugfs: str, image: Path, image_path: str) -> bool:
+  output = run_debugfs(debugfs, image, f"stat {image_path}")
+  if not re.search(r"Inode:\s+\d+", output):
+    raise RuntimeError(f"Image path does not exist: {image_path}")
+  return "Type: directory" in output
+
+
+def extract_starpilot_dependencies(debugfs: str, dependency_image: Path, destination: Path) -> None:
+  destination.mkdir(parents=True, exist_ok=True)
+  for image_path in STAR_PILOT_DEPENDENCY_PATHS:
+    if not image_path_exists(debugfs, dependency_image, image_path):
+      raise RuntimeError(f"StarPilot dependency source is missing {image_path}")
+    if image_path_is_directory(debugfs, dependency_image, image_path):
+      run_debugfs(debugfs, dependency_image, f"rdump {image_path} {destination}")
+    else:
+      run_debugfs(debugfs, dependency_image, f"dump -p {image_path} {destination / Path(image_path).name}")
+  extracted = {path.name for path in destination.iterdir()}
+  expected = set(STAR_PILOT_DEPENDENCY_NAMES)
+  if extracted != expected:
+    raise RuntimeError(f"Unexpected StarPilot dependency extraction: {sorted(extracted)}")
+
+
+def extract_legacy_runtime_libraries(debugfs: str, dependency_image: Path, destination: Path) -> None:
+  destination.mkdir(parents=True, exist_ok=True)
+  for name, image_path in zip(LEGACY_RUNTIME_LIBRARY_NAMES, LEGACY_RUNTIME_LIBRARY_PATHS, strict=True):
+    stat = run_debugfs(debugfs, dependency_image, f"stat {image_path}")
+    if not re.search(r"Inode:\s+\d+", stat):
+      raise RuntimeError(f"Legacy runtime source is missing {image_path}")
+    local_path = destination / name
+    if "Type: symlink" in stat:
+      match = re.search(r'Fast link dest: "([^"]+)"', stat)
+      if match is None:
+        raise RuntimeError(f"Unable to resolve legacy runtime symlink {image_path}")
+      local_path.symlink_to(match.group(1))
+    else:
+      run_debugfs(debugfs, dependency_image, f"dump -p {image_path} {local_path}")
+
+  extracted = {path.name for path in destination.iterdir()}
+  if extracted != set(LEGACY_RUNTIME_LIBRARY_NAMES):
+    raise RuntimeError(f"Unexpected legacy runtime library extraction: {sorted(extracted)}")
+  for path in destination.iterdir():
+    if path.is_symlink() and not path.resolve().is_file():
+      raise RuntimeError(f"Legacy runtime symlink target is missing: {path}")
+
+
+def ensure_image_directory(debugfs: str, image: Path, image_path: str) -> None:
+  if image_path_exists(debugfs, image, image_path):
+    return
+  parent = str(Path(image_path).parent)
+  if parent not in ("", ".", "/"):
+    ensure_image_directory(debugfs, image, parent)
+  run_debugfs(debugfs, image, f"mkdir {image_path}", write=True)
+  if not image_path_exists(debugfs, image, image_path):
+    raise RuntimeError(f"Failed to create image directory {image_path}")
+  inode = parse_inode(run_debugfs(debugfs, image, f"stat {image_path}"))
+  for field, value in (("mode", "040755"), ("uid", "0"), ("gid", "0")):
+    run_debugfs(debugfs, image, f"set_inode_field <{inode}> {field} {value}", write=True)
+
+
+def add_tree_to_image(debugfs: str, image: Path, source: Path, destination: str) -> None:
+  if image_path_exists(debugfs, image, destination):
+    raise RuntimeError(f"Refusing to overwrite upstream image path {destination}")
+  commands: list[str] = []
+  created_directories: set[str] = set()
+
+  def create_directory(image_path: str) -> None:
+    if image_path in created_directories or image_path == SITE_PACKAGES_PATH_IN_IMAGE:
+      return
+    parent = str(Path(image_path).parent)
+    if parent not in ("", ".", "/"):
+      create_directory(parent)
+    commands.extend((
+      f"mkdir {image_path}",
+      f"set_inode_field {image_path} mode 040755",
+      f"set_inode_field {image_path} uid 0",
+      f"set_inode_field {image_path} gid 0",
+    ))
+    created_directories.add(image_path)
+
+  create_directory(destination)
+  for local_path in sorted(source.rglob("*")):
+    if "__pycache__" in local_path.parts:
+      continue
+    relative = local_path.relative_to(source)
+    image_path = str(Path(destination) / relative)
+    if local_path.is_dir():
+      create_directory(image_path)
+      continue
+    create_directory(str(Path(image_path).parent))
+    mode = "0100755" if local_path.stat().st_mode & 0o111 else "0100644"
+    commands.extend((
+      f"write {local_path} {image_path}",
+      f"set_inode_field {image_path} mode {mode}",
+      f"set_inode_field {image_path} uid 0",
+      f"set_inode_field {image_path} gid 0",
+    ))
+
+  with tempfile.NamedTemporaryFile("w", encoding="utf-8") as command_file:
+    command_file.write("\n".join(commands) + "\n")
+    command_file.flush()
+    result = run_cmd([debugfs, "-w", "-f", command_file.name, str(image)])
+  output = f"{result.stdout}\n{result.stderr}"
+  if "File not found" in output or "Ext2 file already exists" in output:
+    raise RuntimeError(f"Failed to add StarPilot dependency tree {destination}:\n{output[-4000:]}")
+  if not image_path_exists(debugfs, image, destination):
+    raise RuntimeError(f"Failed to add StarPilot dependency tree {destination}")
+
+
+def add_path_to_image(debugfs: str, image: Path, source: Path, destination: str) -> None:
+  if image_path_exists(debugfs, image, destination):
+    raise RuntimeError(f"Refusing to overwrite upstream image path {destination}")
+  if source.is_symlink():
+    ensure_image_directory(debugfs, image, str(Path(destination).parent))
+    target = os.readlink(source)
+    if "/" in target or target in ("", ".", ".."):
+      raise RuntimeError(f"Unsafe compatibility-library symlink target: {target!r}")
+    run_debugfs(debugfs, image, f"symlink {destination} {target}", write=True)
+    stat = run_debugfs(debugfs, image, f"stat {destination}")
+    if "Type: symlink" not in stat or f'Fast link dest: "{target}"' not in stat:
+      raise RuntimeError(f"Failed to add StarPilot dependency symlink {destination}")
+    return
+  if source.is_dir():
+    add_tree_to_image(debugfs, image, source, destination)
+    return
+  if not source.is_file():
+    raise RuntimeError(f"Extracted dependency path is missing: {source}")
+  ensure_image_directory(debugfs, image, str(Path(destination).parent))
+  run_debugfs(debugfs, image, f"write {source} {destination}", write=True)
+  if not image_path_exists(debugfs, image, destination):
+    raise RuntimeError(f"Failed to add StarPilot dependency file {destination}")
+  inode = parse_inode(run_debugfs(debugfs, image, f"stat {destination}"))
+  mode = "0100755" if source.stat().st_mode & 0o111 else "0100644"
+  for field, value in (("mode", mode), ("uid", "0"), ("gid", "0")):
+    run_debugfs(debugfs, image, f"set_inode_field <{inode}> {field} {value}", write=True)
+
+
+def replace_image_file(debugfs: str, image: Path, source: Path, destination: str) -> None:
+  if destination not in FACTORY_INSTALL_PATHS:
+    raise RuntimeError(f"Refusing to replace non-factory-install path {destination}")
+  if not image_path_exists(debugfs, image, destination):
+    raise RuntimeError(f"Factory-install path is missing from upstream image: {destination}")
+  if not source.is_file():
+    raise RuntimeError(f"Replacement payload is missing: {source}")
+  run_debugfs(debugfs, image, f"rm {destination}", write=True)
+  run_debugfs(debugfs, image, f"write {source} {destination}", write=True)
+  inode = parse_inode(run_debugfs(debugfs, image, f"stat {destination}"))
+  for field, value in (("mode", "0100755"), ("uid", "0"), ("gid", "0")):
+    run_debugfs(debugfs, image, f"set_inode_field <{inode}> {field} {value}", write=True)
+
+
+def fingerprint_image_paths(debugfs: str, image: Path, paths: tuple[str, ...], work_dir: Path,
+                            label: str) -> dict[str, str]:
+  output_dir = work_dir / f"fingerprints_{label}"
+  output_dir.mkdir(parents=True, exist_ok=True)
+  fingerprints: dict[str, str] = {}
+  for image_path in paths:
+    local_path = output_dir / image_path.strip("/").replace("/", "_")
+    run_debugfs(debugfs, image, f"dump -p {image_path} {local_path}")
+    fingerprints[image_path] = sha256_file(local_path)
+  return fingerprints
+
+
+def validate_protected_payloads(actual: dict[str, str]) -> None:
+  differences = {
+    path: {"actual": actual.get(path), "expected": expected}
+    for path, expected in PROTECTED_PAYLOAD_HASHES.items()
+    if actual.get(path) != expected
+  }
+  if differences:
+    raise RuntimeError(f"Image is not exact upstream AGNOS: {json.dumps(differences, sort_keys=True)}")
+
+
+def validate_ext4(e2fsck: str, image: Path) -> None:
+  result = run_cmd([e2fsck, "-fn", str(image)], allowed_returncodes=frozenset({0, 1, 2}))
+  output = f"{result.stdout}\n{result.stderr}"
+  if "UNEXPECTED INCONSISTENCY" in output or "Filesystem still has errors" in output:
+    raise RuntimeError(f"ext4 validation failed:\n{output}")
+
+
+def compress_xz(source: Path, destination: Path) -> None:
+  destination.parent.mkdir(parents=True, exist_ok=True)
+  partial = destination.with_suffix(destination.suffix + ".part")
+  print(f"Compressing {source} -> {destination}", flush=True)
+  with partial.open("wb") as output:
+    result = subprocess.run(["xz", "-T0", "-6", "-c", str(source)], stdout=output, stderr=subprocess.PIPE)
+  if result.returncode != 0:
+    partial.unlink(missing_ok=True)
+    raise RuntimeError(result.stderr.decode("utf-8", "replace"))
+  partial.replace(destination)
+
+
+def get_system_entry(manifest: list[dict]) -> dict:
+  return next(entry for entry in manifest if entry.get("name") == "system")
+
+
+def update_manifest_system_entry(manifest: list[dict], new_url: str, raw_hash: str, size: int) -> list[dict]:
+  updated = json.loads(json.dumps(manifest))
+  entry = get_system_entry(updated)
+  entry.update({
+    "url": new_url,
+    "hash": raw_hash,
+    "hash_raw": raw_hash,
+    "size": size,
+    "sparse": False,
+    "full_check": False,
+    "has_ab": True,
+    "ondevice_hash": raw_hash,
+  })
+  entry.pop("alt", None)
+  entry.pop("casync_caibx", None)
+  entry.pop("casync_store", None)
+  return updated
 
 
 def main() -> int:
   args = parse_args()
-  debugfs = find_debugfs()
-
-  manifest_path = Path(args.manifest).resolve()
-  manifest = load_manifest(manifest_path)
-  system_entry = get_system_entry(manifest)
-
+  target_version = validate_target_version(args.set_version)
+  debugfs, e2fsck = find_debugfs(), find_e2fsck()
   work_dir = Path(args.work_dir).resolve()
   work_dir.mkdir(parents=True, exist_ok=True)
 
   if args.source_image:
-    downloaded_img = Path(args.source_image).resolve()
-    if not downloaded_img.is_file():
-      raise RuntimeError(f"Source image not found: {downloaded_img}")
+    source = Path(args.source_image).resolve()
   else:
-    source_url = pick_source_url(system_entry, args.source_url)
-    downloaded_img = work_dir / "base_system.img"
-    if args.force_download and downloaded_img.exists():
-      downloaded_img.unlink()
-    if not downloaded_img.exists():
-      download(source_url, downloaded_img)
+    source = work_dir / "upstream_system.img.xz"
+    if args.force_download:
+      source.unlink(missing_ok=True)
+    if not source.exists():
+      download(args.source_url, source)
+  if not source.is_file():
+    raise RuntimeError(f"Source image not found: {source}")
 
-  raw_img = work_dir / "base_system.ext4.img"
-  materialize_ext4_image(downloaded_img, raw_img, work_dir, "base_system", force=args.force_download)
-
-  patched_img = work_dir / "patched_system.ext4.img"
-  if patched_img.exists():
-    patched_img.unlink()
-  print(f"Copying source image -> {patched_img}", flush=True)
-  shutil.copy2(raw_img, patched_img)
-
-  sync_paths = [] if args.disable_comma_file_sync else parse_sync_file_list(args.sync_comma_files)
-  reference_raw = None
-  if sync_paths or not args.disable_usbgpu_firmware:
-    reference_source_img = resolve_reference_source_image(args, manifest_path, work_dir)
-    reference_raw = work_dir / "reference_system.ext4.img"
-    materialize_ext4_image(reference_source_img, reference_raw, work_dir, "reference_system", force=args.force_download)
-
-  if sync_paths:
-    assert reference_raw is not None
-    print(f"Syncing /usr/comma payload files from reference image: {reference_raw}", flush=True)
-    synced_files = sync_files_from_reference_image(debugfs, reference_raw, patched_img, sync_paths, work_dir)
-    print(f"Synced {len(synced_files)} /usr/comma files from reference image", flush=True)
-
-  if not args.disable_usbgpu_firmware:
-    assert reference_raw is not None
-    print(f"Installing external-GPU firmware from reference image: {reference_raw}", flush=True)
-    install_amdgpu_firmware_from_reference(debugfs, reference_raw, patched_img, work_dir)
-
-  preserved_paths = {
-    RESET_PATH_IN_IMAGE: "comma_reset",
-    SETUP_PATH_IN_IMAGE: "comma_setup",
-    COMMA_SH_PATH_IN_IMAGE: "comma_sh",
-    MAGIC_PATH_IN_IMAGE: "comma_magic",
-    BG_PATH_IN_IMAGE: "comma_bg",
+  upstream_raw = work_dir / "upstream_system.ext4.img"
+  materialize_upstream_image(source, upstream_raw, work_dir)
+  if upstream_raw.stat().st_size != UPSTREAM_RAW_SIZE:
+    raise RuntimeError(f"Upstream raw size mismatch: {upstream_raw.stat().st_size}")
+  upstream_hash = sha256_file(upstream_raw)
+  if upstream_hash != UPSTREAM_RAW_SHA256:
+    raise RuntimeError(f"Upstream raw hash mismatch: {upstream_hash}")
+  validate_ext4(e2fsck, upstream_raw)
+  if read_image_text(debugfs, upstream_raw, VERSION_PATH_IN_IMAGE) != UPSTREAM_VERSION:
+    raise RuntimeError("Source image does not contain upstream /VERSION=19.6")
+  upstream_venv = validate_venv_layout(
+    debugfs, upstream_raw,
+    expected_count=UPSTREAM_SITE_PACKAGES_COUNT,
+    required_paths=UPSTREAM_REQUIRED_VENV_PATHS,
+  )
+  additive_dependency_paths = (*STAR_PILOT_DEPENDENCY_PATHS, *LEGACY_RUNTIME_LIBRARY_PATHS)
+  unexpected_dependency_paths = [
+    path for path in additive_dependency_paths if image_path_exists(debugfs, upstream_raw, path)
+  ]
+  if unexpected_dependency_paths:
+    raise RuntimeError(f"Dependency allowlist overlaps upstream AGNOS: {unexpected_dependency_paths}")
+  upstream_payloads = fingerprint_image_paths(debugfs, upstream_raw, tuple(UPSTREAM_PAYLOAD_HASHES), work_dir, "upstream")
+  upstream_differences = {
+    path: {"actual": upstream_payloads.get(path), "expected": expected}
+    for path, expected in UPSTREAM_PAYLOAD_HASHES.items()
+    if upstream_payloads.get(path) != expected
   }
-  expected_hashes: dict[str, str] = {}
-  for image_path, label in preserved_paths.items():
-    preserved_file = work_dir / f"{label}.preserved"
-    print(f"Recording existing {image_path} for preservation", flush=True)
-    run_debugfs(debugfs, patched_img, f"dump -p {image_path} {preserved_file}", write=False)
-    expected_hashes[image_path] = sha256_file(preserved_file)
+  if upstream_differences:
+    raise RuntimeError(f"Source image is not exact upstream AGNOS: {json.dumps(upstream_differences, sort_keys=True)}")
 
-  original_updater = work_dir / "comma_updater.orig"
-  patched_updater = work_dir / "comma_updater.patched"
-  verify_updater = work_dir / "comma_updater.verify"
-  original_weston = work_dir / "weston_service.orig"
-  patched_weston = work_dir / "weston_service.patched"
-  verify_weston = work_dir / "weston_service.verify"
-  patched_comma_sh = work_dir / "comma_sh.patched"
+  upstream_fingerprint_dir = work_dir / "fingerprints_upstream"
+  customized_payload_dir = work_dir / "starpilot_factory_install"
+  if customized_payload_dir.exists():
+    shutil.rmtree(customized_payload_dir)
+  customized_payload_dir.mkdir(parents=True)
+  customized_setup = customized_payload_dir / "setup"
+  customized_installer = customized_payload_dir / "installer"
+  patch_setup_zipapp(upstream_fingerprint_dir / "usr_comma_setup", customized_setup)
+  patch_installer_binary(upstream_fingerprint_dir / "usr_comma_installer", customized_installer)
+  validate_factory_install_payloads(customized_setup, customized_installer)
 
-  original_comma_sh = work_dir / "comma_sh.preserved"
-  comma_sh_patched_data = patch_comma_sh_display_wait(original_comma_sh.read_bytes())
-  patched_comma_sh.write_bytes(comma_sh_patched_data)
+  c3_work_dir = work_dir / "c3_dependency_source"
+  c3_work_dir.mkdir(parents=True, exist_ok=True)
+  if args.c3_deps_image:
+    c3_source = Path(args.c3_deps_image).resolve()
+  else:
+    c3_source = c3_work_dir / "system.img.xz"
+    if args.force_download:
+      c3_source.unlink(missing_ok=True)
+    if not c3_source.exists():
+      download(args.c3_deps_url, c3_source)
+  if not c3_source.is_file():
+    raise RuntimeError(f"C3 dependency source image not found: {c3_source}")
+  c3_raw = c3_work_dir / "system.ext4.img"
+  materialize_upstream_image(c3_source, c3_raw, c3_work_dir)
+  if c3_raw.stat().st_size != C3_DEPENDENCY_SOURCE_RAW_SIZE:
+    raise RuntimeError(f"C3 dependency source size mismatch: {c3_raw.stat().st_size}")
+  c3_source_hash = sha256_file(c3_raw)
+  if c3_source_hash != C3_DEPENDENCY_SOURCE_RAW_SHA256:
+    raise RuntimeError(f"C3 dependency source hash mismatch: {c3_source_hash}")
+  dependency_packages_dir = work_dir / "starpilot_dependency_packages"
+  if dependency_packages_dir.exists():
+    shutil.rmtree(dependency_packages_dir)
+  extract_starpilot_dependencies(debugfs, c3_raw, dependency_packages_dir)
+  legacy_runtime_dir = work_dir / "starpilot_legacy_runtime_libraries"
+  if legacy_runtime_dir.exists():
+    shutil.rmtree(legacy_runtime_dir)
+  extract_legacy_runtime_libraries(debugfs, c3_raw, legacy_runtime_dir)
 
-  print("Writing patched /usr/comma/comma.sh display readiness wait", flush=True)
-  write_regular_file_to_image(debugfs, patched_img, COMMA_SH_PATH_IN_IMAGE, patched_comma_sh, "100775", 0, 0)
-  expected_hashes[COMMA_SH_PATH_IN_IMAGE] = sha256_file(patched_comma_sh)
+  candidate_raw = work_dir / f"starpilot_system_{target_version}.ext4.img"
+  candidate_raw.unlink(missing_ok=True)
+  shutil.copy2(upstream_raw, candidate_raw)
+  version_file = work_dir / "VERSION.starpilot"
+  version_file.write_text(target_version + "\n", encoding="utf-8")
+  write_version(debugfs, candidate_raw, version_file)
+  for image_path in STAR_PILOT_DEPENDENCY_PATHS:
+    add_path_to_image(debugfs, candidate_raw, dependency_packages_dir / Path(image_path).name, image_path)
+  for image_path in LEGACY_RUNTIME_LIBRARY_PATHS:
+    add_path_to_image(debugfs, candidate_raw, legacy_runtime_dir / Path(image_path).name, image_path)
+  replace_image_file(debugfs, candidate_raw, customized_setup, SETUP_PATH_IN_IMAGE)
+  replace_image_file(debugfs, candidate_raw, customized_installer, INSTALLER_PATH_IN_IMAGE)
 
-  print("Extracting weston.service from image", flush=True)
-  run_debugfs(debugfs, patched_img, f"dump -p {WESTON_SERVICE_PATH_IN_IMAGE} {original_weston}", write=False)
+  if read_image_text(debugfs, candidate_raw, VERSION_PATH_IN_IMAGE) != target_version:
+    raise RuntimeError("Failed to write the StarPilot AGNOS version marker")
+  candidate_venv = validate_venv_layout(
+    debugfs, candidate_raw,
+    expected_count=CANDIDATE_SITE_PACKAGES_COUNT,
+    required_paths=REQUIRED_VENV_PATHS,
+  )
+  missing_legacy_runtime = [
+    path for path in LEGACY_RUNTIME_LIBRARY_PATHS if not image_path_exists(debugfs, candidate_raw, path)
+  ]
+  if missing_legacy_runtime:
+    raise RuntimeError(f"Candidate image is missing legacy runtime libraries: {missing_legacy_runtime}")
+  candidate_payloads = fingerprint_image_paths(debugfs, candidate_raw, tuple(PROTECTED_PAYLOAD_HASHES), work_dir, "candidate")
+  validate_protected_payloads(candidate_payloads)
+  upstream_protected_payloads = {path: upstream_payloads[path] for path in PROTECTED_PAYLOAD_HASHES}
+  if candidate_payloads != upstream_protected_payloads:
+    raise RuntimeError("Protected upstream payloads changed")
+  candidate_factory_payloads = fingerprint_image_paths(
+    debugfs, candidate_raw, tuple(UPSTREAM_FACTORY_INSTALL_HASHES), work_dir, "candidate_factory_install",
+  )
+  expected_factory_payloads = {
+    SETUP_PATH_IN_IMAGE: sha256_file(customized_setup),
+    INSTALLER_PATH_IN_IMAGE: sha256_file(customized_installer),
+  }
+  if candidate_factory_payloads != expected_factory_payloads:
+    raise RuntimeError("Factory-install payloads do not match the validated StarPilot replacements")
+  candidate_factory_dir = work_dir / "fingerprints_candidate_factory_install"
+  validate_factory_install_payloads(
+    candidate_factory_dir / "usr_comma_setup",
+    candidate_factory_dir / "usr_comma_installer",
+  )
+  validate_ext4(e2fsck, candidate_raw)
 
-  weston_original_data = original_weston.read_bytes()
-  weston_patched_data = patch_weston_service(weston_original_data)
-  if weston_patched_data == weston_original_data:
-    print("weston.service already contains the expected boot-logo patch; continuing", flush=True)
-  patched_weston.write_bytes(weston_patched_data)
+  raw_hash = sha256_file(candidate_raw)
+  output_xz = Path(args.output_xz).resolve() if args.output_xz else work_dir / f"system-{raw_hash}.img.xz"
+  compress_xz(candidate_raw, output_xz)
+  metadata = {
+    "base_version": UPSTREAM_VERSION,
+    "base_raw_sha256": UPSTREAM_RAW_SHA256,
+    "target_version": target_version,
+    "allowed_image_mutations": sorted(ALLOWED_IMAGE_MUTATIONS),
+    "raw_sha256": raw_hash,
+    "raw_size": candidate_raw.stat().st_size,
+    "xz_sha256": sha256_file(output_xz),
+    "xz_size": output_xz.stat().st_size,
+    "upstream_venv_validation": upstream_venv,
+    "candidate_venv_validation": candidate_venv,
+    "c3_dependency_source_raw_sha256": c3_source_hash,
+    "starpilot_dependency_paths": list(STAR_PILOT_DEPENDENCY_PATHS),
+    "c3_dependency_paths": list(C3_DEPENDENCY_PATHS),
+    "legacy_runtime_library_paths": list(LEGACY_RUNTIME_LIBRARY_PATHS),
+    "protected_payloads": candidate_payloads,
+    "factory_install_payloads": candidate_factory_payloads,
+    "factory_reset_stack": (
+      "upstream reset/network/updater/Magic unchanged; setup uses the bundled stock COMMA/GBM installer "
+      "for both the default StarPilot install and custom GitHub owner/branch installs"
+    ),
+    "device_validation_required": True,
+  }
+  metadata_path = Path(str(output_xz) + ".metadata.json")
+  metadata_path.write_text(json.dumps(metadata, indent=2) + "\n", encoding="utf-8")
 
-  print("Writing patched weston.service back into image", flush=True)
-  write_regular_file_to_image(debugfs, patched_img, WESTON_SERVICE_PATH_IN_IMAGE, patched_weston, "100644", 0, 0)
-
-  run_debugfs(debugfs, patched_img, f"dump -p {WESTON_SERVICE_PATH_IN_IMAGE} {verify_weston}", write=False)
-  verify_weston_data = verify_weston.read_bytes()
-  if not weston_service_has_expected_content(verify_weston_data):
-    raise RuntimeError("weston.service verification failed after writing weston.service file into image")
-
-  print("Extracting /usr/comma/updater from image", flush=True)
-  run_debugfs(debugfs, patched_img, f"dump -p {UPDATER_PATH_IN_IMAGE} {original_updater}", write=False)
-
-  updater_original_data = original_updater.read_bytes()
-  updater_patched_data = patch_updater_zipapp(updater_original_data)
-  if updater_patched_data == updater_original_data:
-    print("Updater zipapp already contains the expected selector patch; continuing", flush=True)
-  patched_updater.write_bytes(updater_patched_data)
-
-  print("Writing patched /usr/comma/updater back into image", flush=True)
-  write_regular_file_to_image(debugfs, patched_img, UPDATER_PATH_IN_IMAGE, patched_updater, "100775", 0, 0)
-
-  run_debugfs(debugfs, patched_img, f"dump -p {UPDATER_PATH_IN_IMAGE} {verify_updater}", write=False)
-  verify_updater_data = verify_updater.read_bytes()
-  if not updater_zipapp_has_expected_content(verify_updater_data):
-    raise RuntimeError("Updater zipapp verification failed after writing updater file into image")
-
-  install_jeepney_into_image(debugfs, patched_img, work_dir)
-  if not image_has_jeepney(debugfs, patched_img, work_dir):
-    raise RuntimeError("jeepney verification failed after installing package into image")
-
-  for image_path, label in preserved_paths.items():
-    verify_file = work_dir / f"{label}.verify"
-    run_debugfs(debugfs, patched_img, f"dump -p {image_path} {verify_file}", write=False)
-    if image_path == COMMA_SH_PATH_IN_IMAGE and not comma_sh_has_expected_display_wait(verify_file.read_bytes()):
-      raise RuntimeError("comma.sh display readiness verification failed")
-    if sha256_file(verify_file) != expected_hashes[image_path]:
-      raise RuntimeError(f"{image_path} does not match the expected generated payload")
-
-  if args.set_version:
-    version_file = work_dir / "VERSION.patched"
-    version_file.write_text(args.set_version.strip() + "\n", encoding="utf-8")
-    print(f"Writing {VERSION_PATH_IN_IMAGE}={args.set_version.strip()}", flush=True)
-    write_regular_file_to_image(debugfs, patched_img, VERSION_PATH_IN_IMAGE, version_file, "100644", 0, 0)
-    version_raw = run_debugfs(debugfs, patched_img, f"cat {VERSION_PATH_IN_IMAGE}", write=False)
-    version_lines = [ln.strip() for ln in version_raw.splitlines() if ln.strip() and not ln.startswith("debugfs ")]
-    version_verify = version_lines[0] if version_lines else ""
-    if version_verify != args.set_version.strip():
-      raise RuntimeError(f"/VERSION mismatch after patch: got '{version_verify}', expected '{args.set_version.strip()}'")
-
-  raw_hash = sha256_file(patched_img)
-  raw_size = patched_img.stat().st_size
-
-  default_name = f"system-{raw_hash}.img.xz"
-  output_xz = Path(args.output_xz).resolve() if args.output_xz else (work_dir / default_name)
-  compress_xz(patched_img, output_xz)
-
-  print("")
-  print("Patched AGNOS system artifact ready:")
-  print(f"  raw image: {patched_img}")
-  print(f"  xz image:  {output_xz}")
-  print(f"  raw sha256/hash_raw: {raw_hash}")
-  print(f"  size: {raw_size}")
-  print("")
+  print("Validated upstream-based StarPilot AGNOS artifact:")
+  print(f"  target version: {target_version}")
+  print(f"  raw image:      {candidate_raw}")
+  print(f"  xz image:       {output_xz}")
+  print(f"  raw sha256:     {raw_hash}")
+  print(f"  xz sha256:      {metadata['xz_sha256']}")
+  print(f"  metadata:       {metadata_path}")
+  print("  only mutations: /VERSION, additive StarPilot runtime/C3 compatibility, and factory setup/installer branding")
 
   if args.new_url:
-    new_manifest = update_manifest_system_entry(manifest, args.new_url, raw_hash, raw_size)
-    out_path: Path
-    if args.in_place_manifest:
-      out_path = manifest_path
-    elif args.manifest_out:
-      out_path = Path(args.manifest_out).resolve()
-    else:
-      out_path = work_dir / "agnos.patched.json"
-    out_path.write_text(json.dumps(new_manifest, indent=2) + "\n")
-    print(f"Updated manifest written: {out_path}")
-  else:
-    print("No --new-url provided. Manifest not updated.")
-    print("Set system entry values to:")
-    print(json.dumps({
-      "url": "<your-hosted-system.img.xz-url>",
-      "hash": raw_hash,
-      "hash_raw": raw_hash,
-      "size": raw_size,
-      "sparse": False,
-      "full_check": False,
-      "has_ab": True,
-    }, indent=2))
-
+    manifest_path = Path(args.manifest).resolve()
+    output_manifest = Path(args.manifest_out).resolve() if args.manifest_out else work_dir / "agnos.candidate.json"
+    if output_manifest == manifest_path:
+      raise RuntimeError("Refusing to overwrite the checked-in manifest")
+    manifest = json.loads(manifest_path.read_text(encoding="utf-8"))
+    output_manifest.write_text(
+      json.dumps(update_manifest_system_entry(manifest, args.new_url, raw_hash, candidate_raw.stat().st_size), indent=2) + "\n",
+      encoding="utf-8",
+    )
+    print(f"  candidate manifest: {output_manifest}")
+  elif args.manifest_out:
+    raise RuntimeError("--manifest-out requires --new-url")
   return 0
 
 

@@ -16,6 +16,7 @@ from pathlib import Path
 REQUIRED_DIRS = [
   ("usr/local/lib", "/usr/local/lib"),
   ("usr/local/include", "/usr/local/include"),
+  ("usr/local/venv/lib/python3.12/site-packages/raylib/install", "/usr/local/venv/lib/python3.12/site-packages/raylib/install"),
   ("lib/aarch64-linux-gnu", "/lib/aarch64-linux-gnu"),
   ("usr/lib/aarch64-linux-gnu", "/usr/lib/aarch64-linux-gnu"),
   ("usr/include", "/usr/include"),

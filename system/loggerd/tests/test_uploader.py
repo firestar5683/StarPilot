@@ -7,7 +7,7 @@ from pathlib import Path
 from openpilot.system.hardware.hw import Paths
 
 from openpilot.common.swaglog import cloudlog
-from openpilot.system.loggerd.uploader import main, UPLOAD_ATTR_NAME, UPLOAD_ATTR_VALUE
+from openpilot.system.loggerd.uploader import clear_locks, main, UPLOAD_ATTR_NAME, UPLOAD_ATTR_VALUE
 from openpilot.system.loggerd.xattr_cache import getxattr
 
 from openpilot.system.loggerd.tests.loggerd_tests_common import UploaderTestCase
@@ -34,6 +34,10 @@ class FakeLogHandler(logging.Handler):
 
 log_handler = FakeLogHandler()
 cloudlog.addHandler(log_handler)
+
+
+def test_clear_locks_missing_root(tmp_path):
+  clear_locks(str(tmp_path / "missing"))
 
 
 class TestUploader(UploaderTestCase):
