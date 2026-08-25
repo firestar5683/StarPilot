@@ -31,7 +31,9 @@ from openpilot.starpilot.controls.lib.starpilot_vcruise import StarPilotVCruise
 from openpilot.starpilot.controls.lib.weather_checker import WeatherChecker
 
 RADARLESS_TRACK_HOLD_TIME = 0.45
-FORCE_STOP_JERK_SCALE = 0.32  # accel-change cost multiplier while forcing_stop (125 -> ~40)
+FORCE_STOP_JERK_SCALE = 0.25  # accel-change cost multiplier for the whole stop approach,
+                              # envelope included (125 -> ~31). Lower = reaches the braking
+                              # target sooner; it does not make the target deeper.
 FORCE_STOP_JERK_SCALE_OVERRIDES = {
   # The Elantra's current force-stop ramp is smooth, but it waits too long
   # before building decel and then arrives at the initial brake too abruptly.
