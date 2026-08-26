@@ -374,10 +374,11 @@ def get_vehicle_min_accel(CP, v_ego):
 
 # Restored planner constants retained by CEM, stop, and departure paths.
 A_CRUISE_MIN = -1.0
-# The stop distance runs ~9 m long through the mid-approach, which leaves the obstacle ~6 mph
-# of slack so it stays silent until ~35 m and deceleration sags. Multiplicative so the trim
-# scales with what is left: ~6 m at 90 m, under 1 m at the line.
-FORCE_STOP_OBSTACLE_TRIM = 0.93
+# The stop distance runs ~9 m long through the mid-approach, which leaves the obstacle slack
+# so it stays silent and deceleration sags. Multiplicative so the trim scales with what is
+# left: ~13 m at 90 m, ~1.5 m at the line. Buys the 35-70 m band; the far bands are dominated
+# by the over-read, so lowering this further cannot reach them.
+FORCE_STOP_OBSTACLE_TRIM = 0.85
 STANDSTILL_LEAD_CREEP_RELEASE_MIN_LEAD_SPEED = 0.25
 STANDSTILL_LEAD_CREEP_RELEASE_MIN_LEAD_ACCEL = 0.08
 STANDSTILL_LEAD_CREEP_RELEASE_MIN_GAP_MARGIN = 0.1
