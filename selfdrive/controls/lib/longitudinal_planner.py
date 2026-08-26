@@ -374,6 +374,10 @@ def get_vehicle_min_accel(CP, v_ego):
 
 # Restored planner constants retained by CEM, stop, and departure paths.
 A_CRUISE_MIN = -1.0
+# The stop distance runs ~9 m long through the mid-approach, which leaves the obstacle ~6 mph
+# of slack so it stays silent until ~35 m and deceleration sags. Multiplicative so the trim
+# scales with what is left: ~6 m at 90 m, under 1 m at the line.
+FORCE_STOP_OBSTACLE_TRIM = 0.93
 STANDSTILL_LEAD_CREEP_RELEASE_MIN_LEAD_SPEED = 0.25
 STANDSTILL_LEAD_CREEP_RELEASE_MIN_LEAD_ACCEL = 0.08
 STANDSTILL_LEAD_CREEP_RELEASE_MIN_GAP_MARGIN = 0.1
@@ -2207,7 +2211,7 @@ class LongitudinalPlanner:
       # to shift the obstacle too or the slider barely moves anything now that stop_x leads.
       offset_ft = max(OFFSET_FT_MIN, min(OFFSET_FT_MAX, int(getattr(starpilot_toggles, 'force_stop_distance_offset', 0) or 0)))
       force_stop_x = (
-        stop_length + offset_ft * FT_TO_M + STOP_DISTANCE +
+        stop_length * FORCE_STOP_OBSTACLE_TRIM + offset_ft * FT_TO_M + STOP_DISTANCE +
         get_force_stop_distance_bias(self.CP.carFingerprint)
       )
 
