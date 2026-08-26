@@ -41,6 +41,8 @@ ADJACENT_STOP_REST_FRAMES = 15
 ADJACENT_STOP_MIN_Y = 1.8         # m — inside this is our own lane
 ADJACENT_STOP_MAX_Y = 7.5         # m — beyond this is roadside, not an adjacent lane
 ADJACENT_STOP_MAX_D = 110.0       # m
+ADJACENT_STOP_QUEUE_GAP_M = 5.0   # m — anything stopped beyond the furthest qualifier means
+                                  # the bar is past it too, so the hint would stop us short
 
 
 class KalmanParams:
@@ -157,6 +159,10 @@ class Track:
     if self.leadTrackID == self.identifier:
       return False
 
+    return self.in_adjacent_lane(model_data)
+
+  def in_adjacent_lane(self, model_data: capnp._DynamicStructReader):
+    """Lane geometry only, no deceleration history — also used to spot a queue ahead."""
     if not (ADJACENT_STOP_MIN_Y < abs(self.yRel) < ADJACENT_STOP_MAX_Y):
       return False
 
@@ -330,9 +336,10 @@ def get_adjacent_lead(tracks: dict[int, Track], standstill: bool, model_data: ca
 def get_adjacent_stopped(tracks: dict[int, Track], model_data: capnp._DynamicStructReader) -> dict[str, Any]:
   """Stop-line hint: a vehicle that decelerated to a stop in a neighbouring lane.
 
-  Takes the FARTHEST qualifying vehicle: in a queue the front car sits at the bar and the
-  rest are closer to us, so the nearest one underestimates the distance. The consumer only
-  shortens with this, so underestimating is the harmful direction.
+  Takes the FARTHEST qualifying vehicle, then drops the hint entirely if a queue reaches
+  past it. Cars already stopped when we acquire them never show the moving -> stopped
+  transition, so the qualifying set is biased toward the back of a line; without this the
+  hint marks a mid-queue bumper and stops us short of the bar.
   """
   if len(model_data.laneLines) < 4:
     return {'status': False}
@@ -342,6 +349,11 @@ def get_adjacent_stopped(tracks: dict[int, Track], model_data: capnp._DynamicStr
     return {'status': False}
 
   furthest = max(candidates, key=lambda c: c.dRel)
+  for c in tracks.values():
+    if (c.dRel > furthest.dRel + ADJACENT_STOP_QUEUE_GAP_M and
+        abs(c.vLead) < ADJACENT_STOP_REST_V and
+        c.in_adjacent_lane(model_data)):
+      return {'status': False}
   return {
     'status': True,
     'dRel': float(furthest.dRel),
