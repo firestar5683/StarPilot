@@ -7,8 +7,10 @@ from opendbc.car.interfaces import ACCEL_MIN, ACCEL_MAX
 from openpilot.common.constants import CV
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import DT_MDL
+from openpilot.common.params import Params
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.starpilot.common.model_versions import is_tinygrad_model_version
+from openpilot.starpilot.controls.lib.hybrid_experimental_mode import HybridExperimentalMode
 from openpilot.starpilot.controls.lib.starpilot_vcruise import FT_TO_M, OFFSET_FT_MAX, OFFSET_FT_MIN
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc
@@ -142,6 +144,26 @@ VISION_LEAD_APPROACH_BRAKING_DEFICIT_MIN = 0.75
 VISION_LEAD_APPROACH_BRAKING_MIN_LEAD_BRAKE = 0.45
 VISION_LEAD_APPROACH_BRAKING_FULL_LEAD_BRAKE = 1.20
 PLANNER_SAFETY_WARNING_INTERVAL = 5.0
+HEM_STATUS_LOG_INTERVAL = 10.0
+HEM_AUTH_PUB_INTERVAL = 0.5
+
+
+def _hem_log_timestamp() -> str:
+  """Wall-clock timestamp with millisecond precision for the [HEM] live log."""
+  from datetime import datetime
+  now = datetime.now()
+  return now.strftime("%H:%M:%S") + f".{now.microsecond // 1000:03d}"
+
+
+def _hem_format_diag_value(value):
+  """Compact, deterministic formatting for the per-frame HEM diagnostic dump."""
+  if isinstance(value, (bool, np.bool_)):
+    return "1" if value else "0"
+  if isinstance(value, float):
+    return f"{value:.4f}"
+  if isinstance(value, (int, np.integer)):
+    return str(int(value))
+  return str(value)
 VISION_LEAD_APPROACH_BRAKING_FLOOR_MIN_DECEL = 1.30
 VISION_LEAD_APPROACH_BRAKING_FLOOR_MAX_DECEL = 1.75
 VISION_LEAD_APPROACH_CONFIRM_TIME = 0.25
@@ -611,6 +633,11 @@ class LongitudinalPlanner:
     self.duplicate_vision_comfort_lead_source = None
     self.prev_experimental_mode = None
     self.experimental_release_accel_until = 0.0
+    self.hybrid_controller = HybridExperimentalMode()
+    self._hem_status_log_t = 0.0
+    self._hem_logged_active = False
+    self._hem_auth_pub_t = 0.0
+    self._hem_params_memory = None
 
     if self.is_preap:
       try:
@@ -1910,6 +1937,36 @@ class LongitudinalPlanner:
       floor = min(LC_MERGE_ACCEL_BIAS, cruise_cap)
     return floor
 
+  def _log_hem_status(self, now_t, active, v_ego, a_chill, a_exp, a_fused):
+    hc = self.hybrid_controller
+    hc.record_diag = True
+    ts = _hem_log_timestamp()
+    if active != self._hem_logged_active:
+      self._hem_logged_active = active
+      self._hem_status_log_t = 0.0
+      print(f"[HEM] {ts} mode {'ON' if active else 'OFF'}")
+    if not active:
+      return
+    # Rich per-frame dump of every HEM decision variable so a missed stop can be
+    # diagnosed to the exact frame and signal (see hybrid_experimental_mode diag).
+    d = hc.diag
+    if d:
+      print(f"[HEM] {ts} " + " ".join(f"{k}={_hem_format_diag_value(v)}" for k, v in d.items()))
+
+  def _publish_hem_status(self, now_t):
+    if self._hem_params_memory is None:
+      try:
+        self._hem_params_memory = Params(memory=True)
+      except Exception:
+        return
+    if now_t - self._hem_auth_pub_t < HEM_AUTH_PUB_INTERVAL:
+      return
+    self._hem_auth_pub_t = now_t
+    try:
+      self._hem_params_memory.put_bool("HEMExpDominant", bool(self.hybrid_controller.last_exp_dominant))
+    except Exception:
+      pass
+
   def update(self, sm, starpilot_toggles):
     if self.is_preap:
       self._preap_param_frame += 1
@@ -1962,6 +2019,7 @@ class LongitudinalPlanner:
       self.a_desired = np.clip(sm['carState'].aEgo, accel_limits[0], accel_limits[1])
       self.model_allow_throttle = True
       self.model_allow_throttle_transition_t = 0.0
+      self.hybrid_controller.reset(float(self.a_desired))
 
     # Prevent divergence, smooth in current v_ego
     self.v_desired_filter.x = max(0.0, self.v_desired_filter.update(v_ego))
@@ -2323,25 +2381,30 @@ class LongitudinalPlanner:
       model_launch_accel = self.get_model_launch_accel(model_launch_v, model_launch_a, action_t, scene_v_ego)
 
     if classic_model:
-      output_a_target, output_should_stop = get_accel_from_plan_classic(
+      output_a_target_mpc, output_should_stop_mpc = get_accel_from_plan_classic(
         self.CP, self.v_desired_trajectory, self.a_desired_trajectory, starpilot_toggles.vEgoStopping)
     elif tinygrad_model:
       output_a_target_mpc, output_should_stop_mpc = get_accel_from_plan(
         self.v_desired_trajectory, self.a_desired_trajectory,
         action_t=action_t, vEgoStopping=starpilot_toggles.vEgoStopping)
-      output_a_target_e2e = sm['modelV2'].action.desiredAcceleration
-      output_should_stop_e2e = sm['modelV2'].action.shouldStop
-
-      if self.mode == 'acc' or self.generation == 'v9':
-        output_a_target = output_a_target_mpc
-        output_should_stop = output_should_stop_mpc
-      else:
-        output_a_target = min(output_a_target_mpc, output_a_target_e2e)
-        output_should_stop = output_should_stop_e2e or output_should_stop_mpc
     else:
-      output_a_target, output_should_stop = get_accel_from_plan(
+      output_a_target_mpc, output_should_stop_mpc = get_accel_from_plan(
         self.v_desired_trajectory, self.a_desired_trajectory,
         action_t=action_t, vEgoStopping=starpilot_toggles.vEgoStopping)
+
+    if bool(getattr(starpilot_toggles, "hybrid_experimental_mode", False)):
+      output_a_target = output_a_target_mpc
+      output_should_stop = output_should_stop_mpc
+    elif tinygrad_model and self.mode != 'acc' and self.generation != 'v9':
+      output_a_target_e2e = sm['modelV2'].action.desiredAcceleration
+      output_should_stop_e2e = sm['modelV2'].action.shouldStop
+      output_a_target = min(output_a_target_mpc, output_a_target_e2e)
+      output_should_stop = output_should_stop_e2e or output_should_stop_mpc
+      self._log_hem_status(now_t, False, scene_v_ego, output_a_target_mpc, output_a_target_e2e, output_a_target)
+    else:
+      output_a_target = output_a_target_mpc
+      output_should_stop = output_should_stop_mpc
+      self._log_hem_status(now_t, False, scene_v_ego, output_a_target_mpc, float('nan'), output_a_target)
 
     comfort_output_accel_min = get_vehicle_min_accel(self.CP, v_ego) if experimental_mlsim else accel_limits_turns[0]
     vision_cap_accel_min = min(comfort_output_accel_min, get_vehicle_min_accel(self.CP, v_ego))
@@ -2975,8 +3038,56 @@ class LongitudinalPlanner:
     if force_slow_decel and scene_v_ego > 0.1:
       output_a_target = min(output_a_target, FORCE_DECEL_MIN_ACCEL)
 
-    self.output_a_target = output_a_target
-    self.output_should_stop = bool(output_should_stop or vision_low_speed_stop_active)
+    a_chill_final = output_a_target
+    should_stop_chill = bool(output_should_stop or vision_low_speed_stop_active)
+
+    if bool(getattr(starpilot_toggles, "hybrid_experimental_mode", False)):
+      self.hybrid_controller.set_tuning(
+        getattr(starpilot_toggles, "hybrid_exp_bias", 0.0),
+        getattr(starpilot_toggles, "hybrid_vision_brake_sensitivity", 1.0),
+      )
+      a_exp_raw = float(sm['modelV2'].action.desiredAcceleration)
+      should_stop_exp = bool(sm['modelV2'].action.shouldStop)
+
+      # Pass the active lead that MPC is tracking (leadTwo when source == "lead1")
+      # so HEM is never blind to the radar lead actually being followed.
+      active_lead = self.lead_two if self.mpc.source == "lead1" else self.lead_one
+
+      a_fused, should_stop_fused = self.hybrid_controller.update(
+        v_ego=scene_v_ego,
+        v_cruise=v_cruise,
+        lead_one=active_lead,
+        model_v2=sm['modelV2'],
+        a_chill=a_chill_final,
+        a_exp=a_exp_raw,
+        should_stop_exp=should_stop_exp,
+        should_stop_chill=should_stop_chill,
+        gas_pressed=bool(getattr(sm['carState'], 'gasPressed', False)),
+      )
+
+      # HEM output can never exceed the physical
+      # vehicle acceleration envelope (same bounds as the non-hybrid path) or a
+      # per-frame jerk slew from the previously commanded target, regardless of
+      # tuning bias.
+      a_fused = float(np.clip(a_fused, output_accel_min, output_accel_max))
+      if not np.isfinite(a_fused):
+        a_fused = float(a_chill_final)
+
+      max_jerk_accel = float(getattr(sm['starpilotPlan'], 'accelerationJerk', 1.0)) * 3.0
+      max_jerk_brake = 4.0
+      max_delta_up = max_jerk_accel * self.dt
+      max_delta_down = max_jerk_brake * self.dt
+      prev_target = float(prev_output_a_target)
+      a_fused = float(np.clip(a_fused, prev_target - max_delta_down, prev_target + max_delta_up))
+
+      self.output_a_target = a_fused
+      self.output_should_stop = should_stop_fused
+      self._log_hem_status(now_t, True, scene_v_ego, a_chill_final, a_exp_raw, a_fused)
+      self._publish_hem_status(now_t)
+
+    else:
+      self.output_a_target = a_chill_final
+      self.output_should_stop = should_stop_chill
 
   def publish(self, sm, pm):
     plan_send = messaging.new_message('longitudinalPlan')

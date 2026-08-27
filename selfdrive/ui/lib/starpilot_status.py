@@ -11,6 +11,7 @@ AOL_COLOR = rl.Color(10, 186, 181, 255)
 ENGAGED_COLOR = rl.Color(22, 127, 64, 255)
 OVERRIDE_COLOR = rl.Color(137, 146, 141, 255)
 EXPERIMENTAL_COLOR = rl.Color(218, 111, 37, 255)
+HYBRID_EXPERIMENTAL_COLOR = rl.Color(0, 153, 255, 255)
 CEM_OVERRIDE_COLOR = rl.Color(255, 214, 0, 255)
 SWITCHBACK_COLOR = rl.Color(139, 108, 197, 255)
 TRAFFIC_COLOR = rl.Color(201, 34, 49, 255)
@@ -25,6 +26,31 @@ def is_longitudinal_only_active(state: UIState) -> bool:
   """
   car_control = state.sm["carControl"]
   return bool(state.sm["selfdriveState"].enabled and not car_control.latActive)
+
+
+def _is_hybrid_experimental_mode(state: UIState) -> bool:
+  """True when HEM (hybrid experimental) is the active longitudinal mode."""
+  return bool(state.starpilot_toggles.get("hybrid_experimental_mode", False))
+
+
+def _hem_exp_dominant(state: UIState) -> bool:
+  """True when the fused output tracks the E2E/vision input more than chill ACC.
+
+  Uses the planner's per-frame comparison (HEMExpDominant), which reflects the
+  active fusion regime rather than a raw vision weight.
+  """
+  params_memory = getattr(state, "params_memory", None)
+  if params_memory is None:
+    return False
+  try:
+    return bool(int(params_memory.get("HEMExpDominant") or 0))
+  except (TypeError, ValueError):
+    return False
+
+
+def _hem_border_color(state: UIState) -> rl.Color:
+  """Blue when chill dominates the fusion, orange when experimental/vision dominates (like CEM)."""
+  return EXPERIMENTAL_COLOR if _hem_exp_dominant(state) else HYBRID_EXPERIMENTAL_COLOR
 
 
 def _override_color_applies(state: UIState) -> bool:
@@ -57,6 +83,8 @@ def get_border_color(state: UIState):
   if state.always_on_lateral_active:
     return AOL_COLOR
   # Only color the border for CEM/experimental while actually enabled.
+  if enabled and _is_hybrid_experimental_mode(state):
+    return _hem_border_color(state)
   if enabled and state.conditional_status in CEM_DISABLED_OVERRIDE_STATUSES:
     return CEM_OVERRIDE_COLOR
   if enabled and state.sm["selfdriveState"].experimentalMode:
@@ -67,6 +95,8 @@ def get_border_color(state: UIState):
 
 
 def get_path_edge_color(state: UIState):
+  if state.sm["selfdriveState"].enabled and _is_hybrid_experimental_mode(state):
+    return _hem_border_color(state)
   if state.conditional_status in CEM_ACTIVE_STATUSES:
     return EXPERIMENTAL_COLOR
   return get_border_color(state)
@@ -85,6 +115,8 @@ def get_screen_edge_color(state: UIState):
     return AOL_COLOR
   # Keep the screen edge disengaged-blue when experimental mode is only the
   # requested longitudinal mode, not the active driving state.
+  if enabled and _is_hybrid_experimental_mode(state):
+    return _hem_border_color(state)
   if enabled and state.conditional_status in CEM_DISABLED_OVERRIDE_STATUSES:
     return CEM_OVERRIDE_COLOR
   if enabled and state.sm["selfdriveState"].experimentalMode:

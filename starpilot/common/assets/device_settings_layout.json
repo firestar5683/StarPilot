@@ -2262,6 +2262,44 @@
         "settings_tier": "advanced"
       },
       {
+        "key": "HybridExperimental",
+        "label": "Hybrid Experimental Mode",
+        "description": "Fuse the throttle response of chill ACC with the model's early, natural vision braking using a single continuous controller. Chill ACC always provides the hard safety distance, while the E2E trajectory is blended in for early stops. Unconfirmed vision braking is capped to a gentle coast, and vision is never allowed to under-brake.",
+        "picker_description": "Continuously blends Chill ACC with the model's vision braking.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "HybridExpBias",
+        "label": "E2E Authority Bias",
+        "description": "Biases the continuous hybrid between Chill and E2E. Negative favors Chill throttle and braking, positive favors E2E vision behavior. Range -1.0 to 1.0, default 0.0.",
+        "picker_description": "Biases authority between Chill and E2E vision.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": -1.0,
+        "max": 1.0,
+        "step": 0.05,
+        "precision": 2,
+        "parent_key": "HybridExperimental",
+        "settings_tier": "advanced"
+      },
+      {
+        "key": "HybridVisionBrakeSensitivity",
+        "label": "Vision Brake Sensitivity",
+        "description": "Scales how strongly the model's predicted stop horizon contributes to early braking. Below 1.0 reduces unprompted slowing; above 1.0 starts red-light and queue braking earlier. Range 0.0 to 2.0, default 1.0.",
+        "picker_description": "Scales early vision braking authority.",
+        "data_type": "float",
+        "ui_type": "numeric",
+        "min": 0.0,
+        "max": 2.0,
+        "step": 0.05,
+        "precision": 2,
+        "parent_key": "HybridExperimental",
+        "settings_tier": "advanced"
+      },
+      {
         "key": "SLCAbbreviatedSources",
         "label": "Show Abbreviated Icon Sources",
         "description": "Render the speed-limit sources as compact text labels (e.g. \"Dash-45\", \"MapD-30\") without icons.",

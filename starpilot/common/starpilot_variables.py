@@ -376,6 +376,19 @@ def speed_limit_controller_available(openpilot_longitudinal: bool, redneck_cruis
   return openpilot_longitudinal or redneck_cruise
 
 
+def get_longitudinal_modes(openpilot_longitudinal: bool, cem: bool, ccm: bool, hybrid: bool) -> tuple[bool, bool, bool]:
+  """Resolve the mutually exclusive longitudinal control modes (CEM/CCM/Hybrid)."""
+  conditional_experimental_mode = bool(openpilot_longitudinal) and bool(cem)
+  conditional_chill_mode = bool(openpilot_longitudinal) and not conditional_experimental_mode and bool(ccm)
+  hybrid_experimental_mode = (
+    bool(openpilot_longitudinal) and
+    not conditional_experimental_mode and
+    not conditional_chill_mode and
+    bool(hybrid)
+  )
+  return conditional_experimental_mode, conditional_chill_mode, hybrid_experimental_mode
+
+
 def migrate_cancel_button_controls(params: Params | None = None) -> bool:
   params = params or Params(return_defaults=True)
   if params.get_bool(CANCEL_BUTTON_MIGRATION_KEY) or not params.get_bool("RemapCancelToDistance"):
@@ -834,8 +847,16 @@ class StarPilotVariables:
     self.migrate_prius_cluster_offset(str(toggle.car_model))
     toggle.cluster_offset = self.get_value("ClusterOffset", cast=float, condition=toggle.car_make == "toyota")
 
-    toggle.conditional_experimental_mode = toggle.openpilot_longitudinal and self.get_value("ConditionalExperimental")
-    toggle.conditional_chill_mode = toggle.openpilot_longitudinal and not toggle.conditional_experimental_mode and self.get_value("ConditionalChill")
+    toggle.conditional_experimental_mode, toggle.conditional_chill_mode, toggle.hybrid_experimental_mode = get_longitudinal_modes(
+      toggle.openpilot_longitudinal,
+      self.get_value("ConditionalExperimental"),
+      self.get_value("ConditionalChill"),
+      self.get_value("HybridExperimental"),
+    )
+    toggle.hybrid_exp_bias = self.get_value(
+      "HybridExpBias", cast=float, condition=toggle.hybrid_experimental_mode, default=0.0, min=-1.0, max=1.0)
+    toggle.hybrid_vision_brake_sensitivity = self.get_value(
+      "HybridVisionBrakeSensitivity", cast=float, condition=toggle.hybrid_experimental_mode, default=1.0, min=0.0, max=2.0)
     toggle.conditional_curves = self.get_value("CECurves", condition=toggle.conditional_experimental_mode)
     toggle.conditional_curves_lead = self.get_value("CECurvesLead", condition=toggle.conditional_curves)
     toggle.conditional_lead = self.get_value("CELead", condition=toggle.conditional_experimental_mode)

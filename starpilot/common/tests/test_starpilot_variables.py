@@ -258,6 +258,18 @@ def test_missing_bounded_value_uses_explicit_default():
   assert value == 1.0
 
 
+def test_get_longitudinal_modes_is_mutually_exclusive():
+  # Hybrid wins when selected and CEM/CCM params are off.
+  assert spv.get_longitudinal_modes(True, False, False, True) == (False, False, True)
+  # CEM takes priority over the other modes when enabled.
+  assert spv.get_longitudinal_modes(True, True, True, True) == (True, False, False)
+  # CCM engages only when CEM is off.
+  assert spv.get_longitudinal_modes(True, False, True, False) == (False, True, False)
+  assert spv.get_longitudinal_modes(True, False, True, True) == (False, True, False)
+  # Nothing engages without openpilot longitudinal.
+  assert spv.get_longitudinal_modes(False, True, True, True) == (False, False, False)
+
+
 def test_disabled_conditional_experimental_toggles_are_off(monkeypatch, tmp_path):
   params_cls = spv.Params
 

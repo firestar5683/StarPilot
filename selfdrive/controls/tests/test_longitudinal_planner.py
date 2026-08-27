@@ -607,6 +607,48 @@ def test_experimental_mlsim_uses_vehicle_min_accel_floor(model_version):
   assert planner.output_a_target < comfort_min_accel
 
 
+def test_hybrid_mode_tempers_unconfirmed_vision_braking_with_chill():
+  v_ego = 20.0
+  desired_accel = -2.0
+  CP = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
+
+  # HEM is the final arbitrator: on open road (no lead, model not predicting a
+  # stop) it blends the raw E2E brake with the conservative Chill target rather
+  # than passing the full -2.0 straight through, but it still brakes (no creep).
+  hybrid_toggles = SimpleNamespace(**vars(make_toggles("v11")), hybrid_experimental_mode=True)
+  planner_hybrid = LongitudinalPlanner(CP, init_v=v_ego)
+  sm = make_sm(v_ego, desired_accel, -2.0, experimental_mode=False)
+  planner_hybrid.update(sm, hybrid_toggles)
+  assert planner_hybrid.mode == "acc"
+  assert planner_hybrid.output_a_target < 0.0, "HEM must still brake on a strong Exp decel"
+  assert planner_hybrid.output_a_target > desired_accel, "HEM must temper the raw E2E brake with Chill"
+
+  # Without HEM, experimental mode lets the raw E2E target through.
+  planner_exp = LongitudinalPlanner(CP, init_v=v_ego)
+  sm_exp = make_sm(v_ego, desired_accel, -2.0, experimental_mode=True)
+  planner_exp.update(sm_exp, make_toggles("v11"))
+  assert planner_exp.output_a_target <= -1.5
+
+
+def test_hybrid_mode_arbitrates_vision_braking_with_lead():
+  v_ego = 20.0
+  CP = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
+  hybrid_toggles = SimpleNamespace(**vars(make_toggles("v11")), hybrid_experimental_mode=True)
+
+  # With a tracked lead, the hybrid grants full E2E braking authority.
+  planner = LongitudinalPlanner(CP, init_v=v_ego)
+  sm = make_sm(
+    v_ego,
+    desired_accel=-2.0,
+    min_accel=-2.0,
+    experimental_mode=False,
+    tracking_lead=True,
+    lead_one=make_lead(status=True, d_rel=30.0, v_lead=10.0),
+  )
+  planner.update(sm, hybrid_toggles)
+  assert planner.output_a_target < 0.0
+
+
 def test_gm_pedal_vehicle_min_accel_uses_brand_when_car_name_is_missing():
   CP = SimpleNamespace(
     carName=None,

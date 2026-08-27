@@ -120,6 +120,9 @@ class StarPilotCard:
     if getattr(starpilot_toggles, "safe_mode", False):
       return
 
+    if getattr(starpilot_toggles, "hybrid_experimental_mode", False):
+      return
+
     if starpilot_toggles.conditional_experimental_mode:
       current_status = self.params_memory.get_int("CEStatus", default=CEStatus["OFF"])
       override_value = next_manual_ce_status(current_status, sm["selfdriveState"].experimentalMode)

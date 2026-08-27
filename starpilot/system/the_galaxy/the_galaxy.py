@@ -1208,6 +1208,37 @@ NAVIGATION_PERSISTED_LOCATION_MAX_AGE_SECONDS = 24 * 60 * 60
 
 TMUX_LOGS_PATH = Path("/data/tmux_logs")
 
+
+def _filter_hem_log_lines(output):
+  """Reduce a tmux pane capture to only lines emitted by the [HEM] logger.
+
+  The Galaxy terminal is used to debug Hybrid Experimental Mode stopping, so only
+  [HEM] lines (which now carry a millisecond timestamp and full per-frame diag)
+  are surfaced; all other process output is dropped.
+  """
+  if not output:
+    return ""
+  lines = [line for line in output.splitlines() if "[HEM]" in line]
+  return "\n".join(lines) + ("\n" if lines else "")
+
+
+# Generous but bounded scrollback/capture depth for the [HEM] diagnostics. This
+# is far beyond any stop-signal reproduction run (~20k lines ~= 16 min of HEM
+# logging at 20 Hz) while keeping capture cost, tunnel bandwidth, and browser
+# render work bounded so it cannot grow without limit or burden the device.
+TMUX_HISTORY_LIMIT = 20000
+TMUX_CAPTURE_LINES = 20000
+
+
+def _ensure_tmux_session():
+  """Create the comma session if needed, size it, and raise its scrollback limit
+  so the captured [HEM] window can hold the full run without overflow."""
+  if subprocess.run(["tmux", "has-session", "-t", "comma"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
+    run_cmd(["tmux", "new-session", "-d", "-s", "comma", "-x", "240", "-y", "70", "bash"], "Started tmux session", "Failed to start tmux session")
+  else:
+    run_cmd(["tmux", "resize-window", "-t", "comma:0", "-x", "240", "-y", "70"], "Resized tmux window", "Failed to resize tmux window")
+  run_cmd(["tmux", "set-option", "-t", "comma:0", "history-limit", str(TMUX_HISTORY_LIMIT)], "Set tmux scrollback limit.", "Failed to set tmux scrollback limit.")
+
 MODEL_DOWNLOAD_PARAM = "ModelToDownload"
 MODEL_DOWNLOAD_ALL_PARAM = "DownloadAllModels"
 ALLOW_GPU_DOWNLOAD_WITHOUT_GPU_PARAM = "AllowGpuModelDownloadWithoutGpu"
@@ -1524,6 +1555,7 @@ _TROUBLESHOOT_PERSONALITY_KEYS = [
 
 _TROUBLESHOOT_CEM_KEYS = [
   "ConditionalExperimental",
+  "HybridExperimental",
   "CESpeed",
   "CESpeedLead",
   "CECurves",
@@ -5202,15 +5234,16 @@ def setup(app):
           "updated": updated,
         }), 200
 
-      if key in {"ConditionalExperimental", "ConditionalChill"}:
+      if key in {"ConditionalExperimental", "ConditionalChill", "HybridExperimental"}:
         enabled = str_val.strip() in ("1", "true", "True")
         params.put_bool(key, enabled)
 
         updated = {key: enabled}
         if enabled:
-          other_key = "ConditionalChill" if key == "ConditionalExperimental" else "ConditionalExperimental"
-          params.put_bool(other_key, False)
-          updated[other_key] = False
+          for other_key in ("ConditionalExperimental", "ConditionalChill", "HybridExperimental"):
+            if other_key != key:
+              params.put_bool(other_key, False)
+              updated[other_key] = False
 
         update_starpilot_toggles()
         return jsonify({
@@ -8336,16 +8369,15 @@ def setup(app):
 
   @app.route("/api/tmux_log/live", methods=["GET"])
   def stream_tmux_log():
-    if subprocess.run(["tmux", "has-session", "-t", "comma"], stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL).returncode != 0:
-      run_cmd(["tmux", "new-session", "-d", "-s", "comma", "-x", "240", "-y", "70", "bash"], "Started tmux session", "Failed to start tmux session")
-    else:
-      run_cmd(["tmux", "resize-window", "-t", "comma:0", "-x", "240", "-y", "70"], "Resized tmux window", "Failed to resize tmux window")
+    _ensure_tmux_session()
 
     def generate():
       last_output = ""
       last_keepalive = 0.0
       while True:
-        output = subprocess.check_output(["tmux", "capture-pane", "-t", "comma:0", "-p", "-S", "-1000"], text=True)
+        output = _filter_hem_log_lines(
+          subprocess.check_output(["tmux", "capture-pane", "-t", "comma:0", "-p", "-S", f"-{TMUX_CAPTURE_LINES}"], text=True)
+        )
 
         if output != last_output:
           yield "data: " + "\n".join(reversed(output.splitlines())).replace("\n", "\ndata: ") + "\n\n"
@@ -8365,16 +8397,30 @@ def setup(app):
   @app.route("/api/tmux_log/snapshot", methods=["GET"])
   def snapshot_tmux_log():
     try:
-      output = subprocess.check_output(["tmux", "capture-pane", "-t", "comma:0", "-p", "-S", "-1000"], text=True)
+      output = subprocess.check_output(["tmux", "capture-pane", "-t", "comma:0", "-p", "-S", f"-{TMUX_CAPTURE_LINES}"], text=True)
     except subprocess.CalledProcessError:
-      run_cmd(["tmux", "new-session", "-d", "-s", "comma", "-x", "240", "-y", "70", "bash"], "Started tmux session", "Failed to start tmux session")
-      output = subprocess.check_output(["tmux", "capture-pane", "-t", "comma:0", "-p", "-S", "-1000"], text=True)
+      _ensure_tmux_session()
+      output = subprocess.check_output(["tmux", "capture-pane", "-t", "comma:0", "-p", "-S", f"-{TMUX_CAPTURE_LINES}"], text=True)
     except Exception as e:
       return jsonify({"error": str(e)}), 500
+
+    output = _filter_hem_log_lines(output)
 
     try:
       live_text = "\n".join(reversed(output.splitlines()))
       return jsonify({"data": live_text}), 200
+    except Exception as e:
+      return jsonify({"error": str(e)}), 500
+
+  @app.route("/api/tmux_log/clear", methods=["POST"])
+  def clear_tmux_log():
+    """Start a clean slate for a fresh HEM test run: wipe tmux scrollback and the
+    visible pane so only newly-emitted [HEM] lines are captured."""
+    try:
+      _ensure_tmux_session()
+      subprocess.run(["tmux", "clear-history", "-t", "comma:0"], check=False)
+      subprocess.run(["tmux", "send-keys", "-t", "comma:0", "clear", "Enter"], check=False)
+      return jsonify({"message": "Log cleared!"}), 200
     except Exception as e:
       return jsonify({"error": str(e)}), 500
 

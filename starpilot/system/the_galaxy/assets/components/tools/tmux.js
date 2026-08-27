@@ -193,6 +193,7 @@ export function TmuxLog() {
     log: '',
     selectorAction: null,
     transport: "connecting",
+    manualStop: false,
   });
   const lifecycleVersion = ++tmuxLifecycleVersion;
   let lifecycleTimer = null;
@@ -289,6 +290,12 @@ export function TmuxLog() {
       return;
     }
 
+    if (state.manualStop) {
+      stopLiveTransport();
+      state.transport = "stopped";
+      return;
+    }
+
     if (!isTmuxRouteActive()) {
       stopLiveTransport();
       state.transport = "inactive";
@@ -328,11 +335,55 @@ export function TmuxLog() {
     return "Tmux Live Log";
   }
 
-  function togglePause() {
-    state.paused = !state.paused;
-    if (!state.paused) {
-      state.log = state.latest;
+  function clearLog() {
+    state.manualStop = false;
+    state.paused = false;
+    fetch("/api/tmux_log/clear", { method: "POST" })
+      .then(res => {
+        if (!res.ok) return res.text().then(msg => { throw new Error(msg); });
+        state.log = "";
+        state.latest = "";
+        showSnackbar("Log cleared — ready for a fresh run!", "success");
+      })
+      .catch(err => showSnackbar(`Clear failed: ${err.message}`, "error"));
+  }
+
+  function stopLog() {
+    // Freeze the displayed data and tear down the live transport so nothing more
+    // can overwrite the captured [HEM] log before the user copies it.
+    state.manualStop = true;
+    state.paused = true;
+    stopLiveTransport();
+    state.transport = "stopped";
+    showSnackbar("Log stopped — data frozen for copying.", "success");
+  }
+
+  function resumeLog() {
+    state.manualStop = false;
+    state.paused = false;
+    state.transport = "connecting";
+    updateTransportForLifecycle();
+  }
+
+  function copyLog() {
+    const text = state.log || "";
+    if (!text) {
+      showSnackbar("Nothing to copy yet.", "error");
+      return;
     }
+    const done = ok => showSnackbar(ok ? `Copied ${text.length} chars to clipboard!` : "Copy failed.", ok ? "success" : "error");
+    if (navigator.clipboard && navigator.clipboard.writeText) {
+      navigator.clipboard.writeText(text).then(() => done(true)).catch(() => done(false));
+      return;
+    }
+    const ta = document.createElement("textarea");
+    ta.value = text;
+    ta.style.position = "fixed";
+    ta.style.left = "-9999px";
+    document.body.appendChild(ta);
+    ta.select();
+    try { done(document.execCommand("copy")); } catch (e) { done(false); }
+    document.body.removeChild(ta);
   }
 
   function captureLog() {
@@ -384,11 +435,12 @@ export function TmuxLog() {
       </div>
 
       <div class="tmux-controls">
-        <button class="tmux-control-button" @click="${captureLog}">💾 Capture Log</button>
+        <button class="tmux-control-button" @click="${clearLog}">🧹 Clear Log</button>
+        <button class="tmux-control-button" @click="${() => state.manualStop ? resumeLog() : stopLog()}">${() => state.manualStop ? "▶️ Resume Log" : "⏹️ Stop Log"}</button>
+        <button class="tmux-control-button" @click="${copyLog}">📋 Copy Log</button>
+        <button class="tmux-control-button" @click="${captureLog}">💾 Save Log</button>
         <button class="tmux-control-button" @click="${deleteSession}">🗑️ Delete Log</button>
-        <button class="tmux-control-button" @click="${confirmDeleteAllSessions}">🧨 Delete All Logs</button>
         <button class="tmux-control-button" @click="${downloadSessions}">⬇️ Download Log</button>
-        <button class="tmux-control-button" @click="${togglePause}">${() => state.paused ? "▶️ Resume Log" : "⏸️ Pause Log"}</button>
         <button class="tmux-control-button" @click="${() => state.selectorAction = 'rename'}">✏️ Rename Log</button>
       </div>
 
