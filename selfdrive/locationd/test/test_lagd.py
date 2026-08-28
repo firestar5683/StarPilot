@@ -19,7 +19,7 @@ DT = 0.05
 LAGD_MAX_LAG_FRAMES = int(round(MAX_LAG / DT))
 
 
-def process_messages(estimator, lag_frames, n_frames, vego=20.0, rejection_threshold=0.0):
+def process_messages(estimator, lag_frames, n_frames, vego=20.0, rejection_threshold=0.0, gear_shifter=car.CarState.GearShifter.unknown):
   for i in range(n_frames):
     t = i * estimator.dt
     desired_la = np.cos(10 * t) * 0.3
@@ -34,7 +34,7 @@ def process_messages(estimator, lag_frames, n_frames, vego=20.0, rejection_thres
     actual_yr = float(actual_la / vego)
     msgs = [
       (t, "carControl", car.CarControl(latActive=not rejected)),
-      (t, "carState", car.CarState(vEgo=vego, steeringPressed=False)),
+      (t, "carState", car.CarState(vEgo=vego, steeringPressed=False, gearShifter=gear_shifter)),
       (t, "controlsState", log.ControlsState(desiredCurvature=desired_cuvature)),
       (t, "livePose", log.LivePose(angularVelocityDevice=log.LivePose.XYZMeasurement(z=actual_yr, valid=True),
                                    posenetOK=True, inputsOK=True)),
@@ -137,6 +137,15 @@ class TestLagd:
     assert np.allclose(msg.liveDelay.lateralDelayEstimate, lag_frames * DT, atol=0.01)
     assert np.allclose(msg.liveDelay.lateralDelayEstimateStd, 0.0, atol=0.01)
     assert msg.liveDelay.calPerc == 100
+
+  def test_estimator_rejects_reverse_samples(self):
+    mocked_CP = car.CarParams(steerActuatorDelay=0.5)
+    estimator = LateralLagEstimator(mocked_CP, DT, min_recovery_buffer_sec=0.0, min_yr=0.0)
+    estimator.starpilot_toggles = SimpleNamespace(use_custom_steerActuatorDelay=False)
+    process_messages(estimator, 5, 10, gear_shifter=car.CarState.GearShifter.reverse)
+    assert not bool(estimator.points.okay[-1])
+    process_messages(estimator, 5, 10, gear_shifter=car.CarState.GearShifter.drive)
+    assert bool(estimator.points.okay[-1])
 
   @pytest.mark.skipif(PC, reason="only on device")
   @pytest.mark.timeout(60)

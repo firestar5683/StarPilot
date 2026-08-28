@@ -2,8 +2,14 @@ import random
 from types import SimpleNamespace
 import numpy as np
 
-from cereal import messaging
-from openpilot.selfdrive.locationd.paramsd import resolve_vehicle_model_params, retrieve_initial_vehicle_params, migrate_cached_vehicle_params_if_needed
+from cereal import car, messaging
+from openpilot.selfdrive.locationd.paramsd import (
+  resolve_vehicle_model_params,
+  retrieve_initial_vehicle_params,
+  migrate_cached_vehicle_params_if_needed,
+  VehicleParamsLearner,
+  MIN_ACTIVE_SPEED,
+)
 from openpilot.selfdrive.locationd.models.car_kf import CarKalman
 from openpilot.selfdrive.locationd.test.test_locationd_scenarios import TEST_ROUTE
 from openpilot.selfdrive.test.process_replay.migration import migrate, migrate_carParams
@@ -90,3 +96,21 @@ class TestParamsd:
     migrate_cached_vehicle_params_if_needed(params)
     assert params.get("LiveParameters") is None
     assert params.get("LiveParametersV2") is None
+
+  def test_vehicle_params_learner_rejects_reverse(self):
+    CP = car.CarParams(
+      mass=1500.0,
+      rotationalInertia=2500.0,
+      centerToFront=1.2,
+      wheelbase=2.8,
+      tireStiffnessFront=80000.0,
+      tireStiffnessRear=80000.0,
+      steerRatio=15.0,
+    )
+    learner = VehicleParamsLearner(CP, steer_ratio=15.0, stiffness_factor=1.0, angle_offset=0.0)
+    payload = car.CarState(vEgo=MIN_ACTIVE_SPEED + 1.0, steeringAngleDeg=0.0, gearShifter=car.CarState.GearShifter.reverse)
+    learner.handle_log(0.0, "carState", payload)
+    assert learner.active is False
+    payload.gearShifter = car.CarState.GearShifter.drive
+    learner.handle_log(0.0, "carState", payload)
+    assert learner.active is True

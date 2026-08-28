@@ -203,6 +203,7 @@ class LateralLagEstimator:
     self.steering_saturated = False
     self.desired_curvature = 0.0
     self.v_ego = 0.0
+    self.in_reverse = False
     self.yaw_rate = 0.0
     self.yaw_rate_std = 0.0
     self.pose_valid = False
@@ -271,6 +272,7 @@ class LateralLagEstimator:
     elif which == "carState":
       self.steering_pressed = msg.steeringPressed
       self.v_ego = msg.vEgo
+      self.in_reverse = msg.gearShifter == car.CarState.GearShifter.reverse
     elif which == "controlsState":
       self.steering_saturated = getattr(msg.lateralControlState, msg.lateralControlState.which()).saturated
       self.desired_curvature = msg.desiredCurvature
@@ -314,7 +316,7 @@ class LateralLagEstimator:
       for last_t in [self.last_lat_inactive_t, self.last_steering_pressed_t, self.last_steering_saturated_t, self.last_pose_invalid_t]
     )
     okay = self.lat_active and not self.steering_pressed and not self.steering_saturated and \
-           fast and turning and has_recovered and calib_valid and sensors_valid and la_valid
+           fast and turning and has_recovered and not self.in_reverse and calib_valid and sensors_valid and la_valid
 
     self.points.update(self.t, la_desired, la_actual_pose, okay)
 
