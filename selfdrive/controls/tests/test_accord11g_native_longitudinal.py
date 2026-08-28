@@ -11,8 +11,10 @@ from openpilot.selfdrive.controls.lib.longitudinal_planner import (
 )
 from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import (
   get_honda_accord_11g_accel_clip_slew_step,
+  get_honda_accord_11g_allow_throttle,
   get_honda_accord_11g_cruise_accel_max,
   get_honda_accord_11g_min_action_delay,
+  get_honda_accord_11g_no_throttle_accel_max,
   get_honda_accord_11g_reduction_only_v_cruise,
   get_honda_accord_11g_throttle_policy,
   get_honda_accord_11g_total_accel_max,
@@ -86,6 +88,32 @@ def test_accord11g_scalar_planner_contract_matches_road_validated_values():
 ])
 def test_accord11g_starpilot_v_cruise_is_reduction_only(starpilot_v_cruise, expected):
   assert get_honda_accord_11g_reduction_only_v_cruise(make_cp(), 20.0, starpilot_v_cruise) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize("throttle_prob, v_ego, expected", [
+  (0.41, 10.0, True),
+  (0.40, 10.0, False),
+  (0.0, 2.5, True),
+  (0.0, 2.51, False),
+])
+def test_accord11g_throttle_gate_matches_validated_policy(throttle_prob, v_ego, expected):
+  assert get_honda_accord_11g_allow_throttle(make_cp(), throttle_prob, v_ego) is expected
+  assert get_honda_accord_11g_allow_throttle(make_cp(fingerprint="HONDA_CIVIC_BOSCH"), throttle_prob, v_ego) is None
+
+
+@pytest.mark.parametrize("v_ego, accel_coast, expected", [
+  (2.5, -0.3, 1.6),
+  (3.75, -0.3, 0.65),
+  (5.0, -0.3, -0.3),
+  (5.0, -5.0, -3.5),
+])
+def test_accord11g_no_throttle_coast_cap_matches_validated_interpolation(v_ego, accel_coast, expected):
+  assert get_honda_accord_11g_no_throttle_accel_max(
+    make_cp(), v_ego, accel_min=-3.5, accel_max=1.6, accel_coast=accel_coast,
+  ) == pytest.approx(expected)
+  assert get_honda_accord_11g_no_throttle_accel_max(
+    make_cp(fingerprint="HONDA_CIVIC_BOSCH"), v_ego, accel_min=-3.5, accel_max=1.6, accel_coast=accel_coast,
+  ) is None
 
 
 def test_native_planner_uses_accord11g_acceleration_envelopes_only_for_accord():

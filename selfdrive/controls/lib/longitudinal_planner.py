@@ -22,8 +22,11 @@ from openpilot.selfdrive.controls.lib.lead_follow_policy import is_nonurgent_dup
 from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import (
   get_far_follow_output_slew_rates,
   get_follow_prebrake_min_headway,
+  get_honda_accord_11g_allow_throttle,
   get_honda_accord_11g_cruise_accel_max,
   get_honda_accord_11g_min_action_delay,
+  get_honda_accord_11g_no_throttle_accel_max,
+  get_honda_accord_11g_reduction_only_v_cruise,
   get_honda_accord_11g_total_accel_max,
   get_honda_accord_lead_departure_tune,
   get_honda_accord_stop_go_accel_cap,
@@ -57,7 +60,7 @@ from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import (
   get_tracked_lead_catchup_headway_margins,
 )
 from openpilot.selfdrive.controls.lib.drive_helpers import CONTROL_N
-from openpilot.selfdrive.car.cruise import V_CRUISE_UNSET
+from openpilot.selfdrive.car.cruise import V_CRUISE_MAX, V_CRUISE_UNSET
 from openpilot.common.swaglog import cloudlog
 from cereal import log
 
@@ -1981,10 +1984,18 @@ class LongitudinalPlanner:
 
     v_ego = get_planner_v_ego(self.CP, sm['carState'])
     scene_v_ego = float(sm['carState'].vEgo)
-    v_cruise = sm['starpilotPlan'].vCruise
-    if not np.isfinite(v_cruise):
-      cloudlog.error(f"Longitudinal planner received non-finite vCruise={v_cruise}, falling back to v_ego={v_ego:.2f}")
-      v_cruise = max(v_ego, 0.0)
+    starpilot_v_cruise = float(sm['starpilotPlan'].vCruise)
+    stock_v_cruise = min(float(sm['carState'].vCruise), V_CRUISE_MAX) * CV.KPH_TO_MS
+    accord_11g_v_cruise = get_honda_accord_11g_reduction_only_v_cruise(
+      self.CP, stock_v_cruise, starpilot_v_cruise,
+    )
+    if accord_11g_v_cruise is not None:
+      v_cruise = accord_11g_v_cruise
+    else:
+      v_cruise = starpilot_v_cruise
+      if not np.isfinite(v_cruise):
+        cloudlog.error(f"Longitudinal planner received non-finite vCruise={v_cruise}, falling back to v_ego={v_ego:.2f}")
+        v_cruise = max(v_ego, 0.0)
     v_cruise_initialized = sm['carState'].vCruise != V_CRUISE_UNSET
 
     long_control_off = sm['controlsState'].longControlState == LongCtrlState.off
@@ -2038,29 +2049,42 @@ class LongitudinalPlanner:
     # Don't clip at low speeds since throttle_prob doesn't account for creep. Raw
     # gasPressProb can cross both hysteresis thresholds for only a few model frames,
     # so confirm transitions before changing the physical coast cap.
-    if v_ego <= MIN_ALLOW_THROTTLE_SPEED:
-      self.model_allow_throttle = True
+    accord_11g_allow_throttle = get_honda_accord_11g_allow_throttle(self.CP, throttle_prob, v_ego)
+    if accord_11g_allow_throttle is not None:
+      self.model_allow_throttle = accord_11g_allow_throttle
       self.model_allow_throttle_transition_t = 0.0
     else:
-      transition_requested = (
-        throttle_prob <= ALLOW_THROTTLE_DISABLE_THRESHOLD if self.model_allow_throttle
-        else throttle_prob > ALLOW_THROTTLE_ENABLE_THRESHOLD
-      )
-      if transition_requested:
-        self.model_allow_throttle_transition_t += self.dt
-        if self.model_allow_throttle_transition_t + 1e-6 >= ALLOW_THROTTLE_TRANSITION_CONFIRM_TIME:
-          self.model_allow_throttle = not self.model_allow_throttle
-          self.model_allow_throttle_transition_t = 0.0
-      else:
+      if v_ego <= MIN_ALLOW_THROTTLE_SPEED:
+        self.model_allow_throttle = True
         self.model_allow_throttle_transition_t = 0.0
-    self.allow_throttle = self.model_allow_throttle and not sm['starpilotPlan'].disableThrottle
+      else:
+        transition_requested = (
+          throttle_prob <= ALLOW_THROTTLE_DISABLE_THRESHOLD if self.model_allow_throttle
+          else throttle_prob > ALLOW_THROTTLE_ENABLE_THRESHOLD
+        )
+        if transition_requested:
+          self.model_allow_throttle_transition_t += self.dt
+          if self.model_allow_throttle_transition_t + 1e-6 >= ALLOW_THROTTLE_TRANSITION_CONFIRM_TIME:
+            self.model_allow_throttle = not self.model_allow_throttle
+            self.model_allow_throttle_transition_t = 0.0
+        else:
+          self.model_allow_throttle_transition_t = 0.0
+    self.allow_throttle = self.model_allow_throttle and (
+      accord_11g_allow_throttle is not None or not sm['starpilotPlan'].disableThrottle
+    )
 
     if not self.allow_throttle:
-      clipped_accel_coast = max(accel_coast, accel_limits_turns[0])
-      # Hold the output cap to the physical coasting limit until throttle is
-      # allowed again. Relaxing back toward positive accel while the gate is
-      # still closed can stall downhill coastdown well above the target speed.
-      accel_limits_turns[1] = min(accel_limits_turns[1], clipped_accel_coast)
+      accord_11g_coast_cap = get_honda_accord_11g_no_throttle_accel_max(
+        self.CP, v_ego, accel_limits_turns[0], accel_limits_turns[1], accel_coast,
+      )
+      if accord_11g_coast_cap is not None:
+        accel_limits_turns[1] = accord_11g_coast_cap
+      else:
+        clipped_accel_coast = max(accel_coast, accel_limits_turns[0])
+        # Hold the output cap to the physical coasting limit until throttle is
+        # allowed again. Relaxing back toward positive accel while the gate is
+        # still closed can stall downhill coastdown well above the target speed.
+        accel_limits_turns[1] = min(accel_limits_turns[1], clipped_accel_coast)
     no_throttle_output_max = accel_limits_turns[1]
 
     if force_slow_decel:

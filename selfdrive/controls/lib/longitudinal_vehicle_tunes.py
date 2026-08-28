@@ -158,6 +158,28 @@ def get_honda_accord_11g_throttle_policy(CP):
   return HONDA_ACCORD_11G_THROTTLE_PROB_THRESHOLD, HONDA_ACCORD_11G_MIN_ALLOW_THROTTLE_SPEED
 
 
+def get_honda_accord_11g_allow_throttle(CP, throttle_prob, v_ego):
+  policy = get_honda_accord_11g_throttle_policy(CP)
+  if policy is None:
+    return None
+  threshold, min_allow_speed = policy
+  return bool(throttle_prob > threshold or v_ego <= min_allow_speed)
+
+
+def get_honda_accord_11g_no_throttle_accel_max(CP, v_ego, accel_min, accel_max, accel_coast):
+  policy = get_honda_accord_11g_throttle_policy(CP)
+  if policy is None:
+    return None
+  _, min_allow_speed = policy
+  clipped_accel_coast = max(float(accel_coast), float(accel_min))
+  coast_cap = np.interp(
+    v_ego,
+    [min_allow_speed, min_allow_speed * 2.0],
+    [accel_max, clipped_accel_coast],
+  )
+  return float(min(accel_max, coast_cap))
+
+
 def get_honda_accord_11g_min_action_delay(CP):
   return HONDA_ACCORD_11G_MIN_ACTION_DELAY if is_honda_accord_11g(CP) else None
 
