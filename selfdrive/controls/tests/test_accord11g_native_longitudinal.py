@@ -1,7 +1,14 @@
 from types import SimpleNamespace
 
+import numpy as np
 import pytest
 
+from openpilot.selfdrive.controls.lib.longitudinal_planner import (
+  CONTROL_N_T_IDX,
+  get_accel_from_plan,
+  get_max_accel,
+  limit_accel_in_turns,
+)
 from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import (
   get_honda_accord_11g_accel_clip_slew_step,
   get_honda_accord_11g_cruise_accel_max,
@@ -79,3 +86,37 @@ def test_accord11g_scalar_planner_contract_matches_road_validated_values():
 ])
 def test_accord11g_starpilot_v_cruise_is_reduction_only(starpilot_v_cruise, expected):
   assert get_honda_accord_11g_reduction_only_v_cruise(make_cp(), 20.0, starpilot_v_cruise) == pytest.approx(expected)
+
+
+def test_native_planner_uses_accord11g_acceleration_envelopes_only_for_accord():
+  accord = SimpleNamespace(brand="honda", carFingerprint="HONDA_ACCORD_11G", steerRatio=15.0, wheelbase=2.8)
+  civic = SimpleNamespace(brand="honda", carFingerprint="HONDA_CIVIC_BOSCH", steerRatio=15.0, wheelbase=2.8)
+
+  assert get_max_accel(17.5, accord) == pytest.approx(1.0)
+  assert get_max_accel(17.5, civic) == pytest.approx(1.1875)
+  assert limit_accel_in_turns(30.0, 0.0, [-3.5, 10.0], accord) == pytest.approx([-3.5, 2.45])
+  assert limit_accel_in_turns(30.0, 0.0, [-3.5, 10.0], civic) == pytest.approx([-3.5, 3.35])
+
+
+def test_native_plan_projection_uses_accord11g_stable_delay_without_changing_default():
+  control_t = np.asarray(CONTROL_N_T_IDX)
+  speeds = 10.0 + control_t ** 2
+  accels = np.zeros_like(control_t)
+  action_t = 0.2
+  stable_delay = 0.3
+  stable_speed = float(np.interp(stable_delay, CONTROL_N_T_IDX, speeds))
+  expected_stable_target = float(speeds[0] + (action_t / stable_delay) * (stable_speed - speeds[0]))
+  expected_stable_accel = 2.0 * (expected_stable_target - speeds[0]) / action_t
+  expected_default_target = float(np.interp(action_t, CONTROL_N_T_IDX, speeds))
+  expected_default_accel = 2.0 * (expected_default_target - speeds[0]) / action_t
+
+  stable_accel, stable_should_stop = get_accel_from_plan(
+    speeds, accels, action_t=action_t, min_stable_delay=stable_delay,
+  )
+  default_accel, default_should_stop = get_accel_from_plan(speeds, accels, action_t=action_t)
+
+  assert stable_accel == pytest.approx(expected_stable_accel)
+  assert default_accel == pytest.approx(expected_default_accel)
+  assert stable_accel != pytest.approx(default_accel)
+  assert not stable_should_stop
+  assert not default_should_stop

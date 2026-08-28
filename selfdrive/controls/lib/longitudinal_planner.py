@@ -22,6 +22,9 @@ from openpilot.selfdrive.controls.lib.lead_follow_policy import is_nonurgent_dup
 from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import (
   get_far_follow_output_slew_rates,
   get_follow_prebrake_min_headway,
+  get_honda_accord_11g_cruise_accel_max,
+  get_honda_accord_11g_min_action_delay,
+  get_honda_accord_11g_total_accel_max,
   get_honda_accord_lead_departure_tune,
   get_honda_accord_stop_go_accel_cap,
   get_honda_accord_stop_go_accel_rise_rate,
@@ -340,7 +343,10 @@ def get_longitudinal_personality(sm):
   return sm['selfdriveState'].personality
 
 
-def get_max_accel(v_ego):
+def get_max_accel(v_ego, CP=None):
+  accord_11g_max = get_honda_accord_11g_cruise_accel_max(CP, v_ego) if CP is not None else None
+  if accord_11g_max is not None:
+    return accord_11g_max
   return np.interp(v_ego, A_CRUISE_MAX_BP, A_CRUISE_MAX_VALS)
 
 def get_coast_accel(pitch):
@@ -354,7 +360,8 @@ def limit_accel_in_turns(v_ego, angle_steers, a_target, CP):
   """
   # FIXME: This function to calculate lateral accel is incorrect and should use the VehicleModel
   # The lookup table for turns should also be updated if we do this
-  a_total_max = np.interp(v_ego, _A_TOTAL_MAX_BP, _A_TOTAL_MAX_V)
+  accord_11g_total_max = get_honda_accord_11g_total_accel_max(CP, v_ego)
+  a_total_max = accord_11g_total_max if accord_11g_total_max is not None else np.interp(v_ego, _A_TOTAL_MAX_BP, _A_TOTAL_MAX_V)
   a_y = v_ego ** 2 * angle_steers * CV.DEG_TO_RAD / (CP.steerRatio * CP.wheelbase)
   a_x_allowed = math.sqrt(max(a_total_max ** 2 - a_y ** 2, 0.))
 
@@ -529,12 +536,16 @@ def get_accel_from_plan_classic(CP, speeds, accels, vEgoStopping):
   return a_target, should_stop
 
 
-def get_accel_from_plan(speeds, accels, action_t=DT_MDL, vEgoStopping=0.05):
+def get_accel_from_plan(speeds, accels, action_t=DT_MDL, vEgoStopping=0.05, min_stable_delay=0.0):
   if len(speeds) == CONTROL_N:
     v_now = speeds[0]
     a_now = accels[0]
 
-    v_target = np.interp(action_t, CONTROL_N_T_IDX, speeds)
+    if 0.0 < action_t < min_stable_delay:
+      stable_v_target = np.interp(min_stable_delay, CONTROL_N_T_IDX, speeds)
+      v_target = v_now + (action_t / min_stable_delay) * (stable_v_target - v_now)
+    else:
+      v_target = np.interp(action_t, CONTROL_N_T_IDX, speeds)
     a_target = 2 * (v_target - v_now) / (action_t) - a_now
     v_target_1sec = np.interp(action_t + 1.0, CONTROL_N_T_IDX, speeds)
   else:
@@ -1988,7 +1999,11 @@ class LongitudinalPlanner:
     prev_accel_constraint = not (reset_state or sm['carState'].standstill)
 
     if self.mpc.mode == 'acc':
-      accel_limits = [sm['starpilotPlan'].minAcceleration, sm['starpilotPlan'].maxAcceleration]
+      accord_11g_accel_max = get_honda_accord_11g_cruise_accel_max(self.CP, v_ego)
+      if accord_11g_accel_max is not None:
+        accel_limits = [ACCEL_MIN, accord_11g_accel_max]
+      else:
+        accel_limits = [sm['starpilotPlan'].minAcceleration, sm['starpilotPlan'].maxAcceleration]
       steer_angle_without_offset = sm['carState'].steeringAngleDeg - sm['liveParameters'].angleOffsetDeg
       accel_limits_turns = limit_accel_in_turns(v_ego, steer_angle_without_offset, accel_limits, self.CP)
       accel_limits_turns[0] = max(get_vehicle_min_accel(self.CP, v_ego), accel_limits_turns[0])
@@ -2373,6 +2388,7 @@ class LongitudinalPlanner:
     tinygrad_model = bool(getattr(starpilot_toggles, "tinygrad_model", False))
     experimental_mlsim = bool(tinygrad_model and self.mlsim and self.mode != 'acc')
     action_t = self.CP.longitudinalActuatorDelay + DT_MDL
+    accord_11g_min_action_delay = get_honda_accord_11g_min_action_delay(self.CP) or 0.0
     prev_output_a_target = float(self.output_a_target)
     model_launch_accel = None
     if self.model_launch_armed and not bool(sm['modelV2'].action.shouldStop):
@@ -2384,7 +2400,8 @@ class LongitudinalPlanner:
     elif tinygrad_model:
       output_a_target_mpc, output_should_stop_mpc = get_accel_from_plan(
         self.v_desired_trajectory, self.a_desired_trajectory,
-        action_t=action_t, vEgoStopping=starpilot_toggles.vEgoStopping)
+        action_t=action_t, vEgoStopping=starpilot_toggles.vEgoStopping,
+        min_stable_delay=accord_11g_min_action_delay)
       output_a_target_e2e = sm['modelV2'].action.desiredAcceleration
       output_should_stop_e2e = sm['modelV2'].action.shouldStop
 
@@ -2397,7 +2414,8 @@ class LongitudinalPlanner:
     else:
       output_a_target, output_should_stop = get_accel_from_plan(
         self.v_desired_trajectory, self.a_desired_trajectory,
-        action_t=action_t, vEgoStopping=starpilot_toggles.vEgoStopping)
+        action_t=action_t, vEgoStopping=starpilot_toggles.vEgoStopping,
+        min_stable_delay=accord_11g_min_action_delay)
 
     comfort_output_accel_min = get_vehicle_min_accel(self.CP, v_ego) if experimental_mlsim else accel_limits_turns[0]
     vision_cap_accel_min = min(comfort_output_accel_min, get_vehicle_min_accel(self.CP, v_ego))
