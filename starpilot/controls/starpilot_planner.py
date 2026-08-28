@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import json
 import math
+import os
 import time
 
 import cereal.messaging as messaging
@@ -210,7 +211,7 @@ class StarPilotPlanner:
     else:
       self.lead_path_y = 0.0
 
-    self.raw_model_stopped = self.model_length < CRUISING_SPEED * PLANNER_TIME
+    self.raw_model_stopped = self.model_length < CRUISING_SPEED * PLANNER_TIME and "SIMULATION" not in os.environ
     self.model_stopped = self.raw_model_stopped or self.starpilot_vcruise.forcing_stop
 
     self.road_curvature, self.time_to_curve = calculate_road_curvature(sm["modelV2"], v_ego)

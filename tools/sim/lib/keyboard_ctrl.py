@@ -34,7 +34,11 @@ KEYBOARD_HELP = """
 
 def getch() -> str:
   STDIN_FD = sys.stdin.fileno()
-  old_settings = termios.tcgetattr(STDIN_FD)
+  try:
+    old_settings = termios.tcgetattr(STDIN_FD)
+  except (termios.error, OSError):
+    # No controlling terminal (e.g. headless / background run). Idle instead of crashing.
+    return None
   try:
     # set
     mode = old_settings.copy()
@@ -48,8 +52,13 @@ def getch() -> str:
     termios.tcsetattr(STDIN_FD, termios.TCSAFLUSH, mode)
 
     ch = sys.stdin.read(1)
+  except (termios.error, OSError):
+    ch = None
   finally:
-    termios.tcsetattr(STDIN_FD, termios.TCSADRAIN, old_settings)
+    try:
+      termios.tcsetattr(STDIN_FD, termios.TCSADRAIN, old_settings)
+    except (termios.error, OSError):
+      pass
   return ch
 
 def print_keyboard_help():
@@ -60,7 +69,10 @@ def keyboard_poll_thread(q: 'Queue[QueueMessage]'):
 
   while True:
     c = getch()
-    if c == '1':
+    if c is None:
+      # No terminal input available (headless/background); avoid busy-looping.
+      time.sleep(0.05)
+    elif c == '1':
       q.put(control_cmd_gen("cruise_up"))
     elif c == '2':
       q.put(control_cmd_gen("cruise_down"))

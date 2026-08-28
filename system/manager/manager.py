@@ -57,18 +57,24 @@ print(_manager_import_timing_line, flush=True)
 _append_boot_timing_line(_manager_import_timing_line)
 
 
-LEGACY_BOLT_FP_MIGRATION_FLAG = Path("/data") / "legacy_bolt_fp_migration_v1"
-STARPILOT_DEFAULTS_PARITY_MIGRATION_FLAG = Path("/data") / "starpilot_defaults_parity_v1"
-STARPILOT_HUMANLIKE_DISABLE_MIGRATION_FLAG = Path("/data") / "starpilot_humanlike_disable_v1"
-STARPILOT_CLUSTER_OFFSET_MIGRATION_FLAG = Path("/data") / "starpilot_cluster_offset_v1"
-STARPILOT_TRAFFIC_SMOOTH_MIGRATION_FLAG = Path("/data") / "starpilot_traffic_smooth_v1"
-STARPILOT_TRAFFIC_FOLLOW_MIGRATION_FLAG = Path("/data") / "starpilot_traffic_follow_v1"
-STARPILOT_PARAM_RENAME_MIGRATION_FLAG = Path("/data") / "starpilot_param_rename_v1"
-STARPILOT_PARAM_CANONICALIZATION_MIGRATION_FLAG = Path("/data") / "starpilot_param_canonicalization_v1"
-STARPILOT_PC_ROOT_MIGRATION_FLAG = Path("/data") / "starpilot_pc_root_v1"
-STARPILOT_PARAMS_CACHE_MIGRATION_FLAG = Path("/data") / "starpilot_params_cache_v1"
-STARPILOT_DEFAULT_MODEL_MIGRATION_FLAG = Path("/data") / "starpilot_default_model_rdf_v4"
-STARPILOT_CE_MODEL_STOP_TIME_MIGRATION_FLAG = Path("/data") / "starpilot_ce_model_stop_time_v2"
+# Migration-flag root. On device these live on /data; on a PC host (sim, WSL,
+# no sudo) /data does not exist and is not writable, which made every migration
+# flag write fail with a PermissionError on each startup. Fall back to the
+# user-writable comma home on PC so the flags persist across runs.
+MIGRATION_FLAG_ROOT = Path("/data") if HARDWARE.get_device_type() != "pc" else Path(Paths.comma_home()) / "migrations"
+
+LEGACY_BOLT_FP_MIGRATION_FLAG = MIGRATION_FLAG_ROOT / "legacy_bolt_fp_migration_v1"
+STARPILOT_DEFAULTS_PARITY_MIGRATION_FLAG = MIGRATION_FLAG_ROOT / "starpilot_defaults_parity_v1"
+STARPILOT_HUMANLIKE_DISABLE_MIGRATION_FLAG = MIGRATION_FLAG_ROOT / "starpilot_humanlike_disable_v1"
+STARPILOT_CLUSTER_OFFSET_MIGRATION_FLAG = MIGRATION_FLAG_ROOT / "starpilot_cluster_offset_v1"
+STARPILOT_TRAFFIC_SMOOTH_MIGRATION_FLAG = MIGRATION_FLAG_ROOT / "starpilot_traffic_smooth_v1"
+STARPILOT_TRAFFIC_FOLLOW_MIGRATION_FLAG = MIGRATION_FLAG_ROOT / "starpilot_traffic_follow_v1"
+STARPILOT_PARAM_RENAME_MIGRATION_FLAG = MIGRATION_FLAG_ROOT / "starpilot_param_rename_v1"
+STARPILOT_PARAM_CANONICALIZATION_MIGRATION_FLAG = MIGRATION_FLAG_ROOT / "starpilot_param_canonicalization_v1"
+STARPILOT_PC_ROOT_MIGRATION_FLAG = MIGRATION_FLAG_ROOT / "starpilot_pc_root_v1"
+STARPILOT_PARAMS_CACHE_MIGRATION_FLAG = MIGRATION_FLAG_ROOT / "starpilot_params_cache_v1"
+STARPILOT_DEFAULT_MODEL_MIGRATION_FLAG = MIGRATION_FLAG_ROOT / "starpilot_default_model_rdf_v4"
+STARPILOT_CE_MODEL_STOP_TIME_MIGRATION_FLAG = MIGRATION_FLAG_ROOT / "starpilot_ce_model_stop_time_v2"
 STARPILOT_LEGACY_CACHE_MARKER_KEYS = ("RemapCancelToDistance",)
 STARPILOT_REMOVED_PARAM_KEYS = (
   "CoastUpToLeads", "HumanAcceleration", "HumanFollowing", "PrioritizeSmoothFollowing", "ReverseCruise",

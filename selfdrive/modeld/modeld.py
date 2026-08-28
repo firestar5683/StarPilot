@@ -6,9 +6,28 @@ import os
 import struct
 from openpilot.system.hardware import TICI
 os.environ['GMMU'] = '0'
-os.environ['DEV'] = 'QCOM' if TICI else 'LLVM'
+os.environ['DEV'] = 'QCOM' if TICI else os.environ.get('STARPIOT_SIM_DEV', 'LLVM')
 from tinygrad.device import Device
 from tinygrad.tensor import Tensor
+
+# On a PC host the tinygrad JIT artifacts compiled on the comma device can bake
+# QCOM/AMD device references into their graphs (a comma-device default device).
+# Re-target those to the local GPU (CUDA by default) so the model loads and runs
+# on the RTX instead of crashing on /dev/kgsl-3d0. Set STARPIOT_SIM_DEV=CPU to
+# force the CPU backend instead. Natively-PC artifacts (CUDA/CPU) pass through
+# untouched.
+if not TICI:
+  _sim_dev = os.environ.get('STARPIOT_SIM_DEV', '').split(':')[0].upper()
+  if _sim_dev:
+    _orig_canon = Device._canonicalize
+
+    def _remap_pc_device(device: str) -> str:
+      _head = device.split(':')[0].upper()
+      if _head in ('QCOM', 'AMD', 'LLVM'):
+        return _orig_canon(_sim_dev + device[len(_head):])
+      return _orig_canon(device)
+
+    Device._canonicalize = staticmethod(_remap_pc_device)
 import time
 import pickle
 import numpy as np
@@ -41,6 +60,7 @@ from openpilot.selfdrive.modeld.compile_modeld import (
   IMAGE_HISTORY_IN_WARP,
   LEGACY_WARP_INPUTS,
   _detect_vision_keys,
+  build_supercombo_artifact,
   make_split_input_queues,
   make_supercombo_input_queues,
 )
@@ -225,6 +245,35 @@ def _select_builtin_model(params: Params) -> None:
   params.put("DrivingModelName", "Regret Driven Framework V4")
 
 
+def _normalize_jit_device(jit, target_device: str) -> None:
+  """Rewrite a loaded JIT's expected input devices off the comma-device alias.
+
+  The tinygrad JIT unpickler can report an input buffer's device as QCOM when a
+  PC artifact is loaded in this process, even though the model was compiled for a
+  native PC backend. The QCOM/AMD/LLVM remap keeps allocation working, but the
+  stored expected_input_info still carries the raw QCOM string and a later call
+  would fail its device comparison. Rewrite those entries to the real device so
+  the JIT executes.
+  """
+  try:
+    captured = jit.captured
+  except AttributeError:
+    return
+  if captured is None:
+    return
+  info = list(getattr(captured, "expected_input_info", None) or [])
+  rewritten = False
+  for index, entry in enumerate(info):
+    if not isinstance(entry, (tuple, list)) or len(entry) < 4:
+      continue
+    device = entry[3]
+    if isinstance(device, str) and device.upper() in ("QCOM", "AMD", "LLVM"):
+      info[index] = (*entry[:3], target_device)
+      rewritten = True
+  if rewritten:
+    captured.expected_input_info = info
+
+
 def _close_tinygrad_disk_cache_connection() -> None:
   """Drop tinygrad's process-global cache connection before loading the next model."""
   import tinygrad.helpers as tinygrad_helpers
@@ -246,7 +295,7 @@ def get_action_from_model(model_output: dict[str, np.ndarray], prev_action: log.
                           is_v9: bool, is_v14: bool, is_v15: bool, starpilot_toggles,
                           lat_smooth_seconds=LAT_SMOOTH_SECONDS, long_smooth_seconds=LONG_SMOOTH_SECONDS,
                           is_v16: bool = False) -> log.ModelDataV2.Action:
-    if is_v14 or is_v15 or is_v16:
+    if (is_v14 or is_v15 or is_v16) and "action" in model_output:
       desired_curv_unscaled, desired_accel = model_output['action'][0]
       if is_v15 or is_v16:
         desired_curvature = float(desired_curv_unscaled) / max(1.0, v_ego) ** 2
@@ -318,6 +367,32 @@ def _load_model_artifact(path: Path):
     return load_oob(artifact_file)
 
 
+# Option 1: bypass the tinygrad JIT pickle round-trip entirely by tracing the ONNX
+# live on the local device (CUDA/CPU) at modeld startup. Set STARPIOT_LIVE_ONNX to
+# the path of the source .onnx to enable. This avoids the JIT-unpickler bug that
+# rewrites kernel targets to the comma-device default (QCOM) and produces
+# CUDA_ERROR_INVALID_IMAGE when a PC artifact is unpickled in this process.
+LIVE_ONNX = os.getenv("STARPIOT_LIVE_ONNX")
+
+
+def _parse_model_size(value: str) -> tuple[int, int]:
+  width, height = value.lower().split("x")
+  return int(width), int(height)
+
+
+def _build_live_artifact(cam_w: int, cam_h: int) -> dict:
+  """Trace the supercombo ONNX in-memory so the JITs run on the local GPU."""
+  model_size = _parse_model_size(os.getenv("STARPIOT_MODEL_SIZE", "512x256"))
+  cloudlog.warning(f"modeld: tracing supercombo ONNX live ({LIVE_ONNX}) on {Device.DEFAULT}")
+  return build_supercombo_artifact(
+    LIVE_ONNX,
+    model_size,
+    [(cam_w, cam_h)],
+    behavior_version=os.getenv("STARPIOT_BEHAVIOR_VERSION") or "v15",
+    image_history_pipeline=IMAGE_HISTORY_IN_POLICY,
+  )
+
+
 class ModelState:
   prev_desire: np.ndarray
 
@@ -370,8 +445,13 @@ class ModelState:
       raise FileNotFoundError(model_path)
 
     self.uses_external_gpu = external_gpu_active and requires_external_gpu and not loaded_builtin
-    artifact = (_load_model_artifact(model_path) if self.uses_external_gpu
-                else pickle.loads(read_file_chunked(str(model_path))))
+    if LIVE_ONNX and not self.uses_external_gpu:
+      # Option 1: trace the source ONNX live in-memory instead of JIT-unpickling a
+      # precompiled artifact, which this tinygrad build corrupts on a PC host.
+      artifact = _build_live_artifact(cam_w, cam_h)
+    else:
+      artifact = (_load_model_artifact(model_path) if self.uses_external_gpu
+                  else pickle.loads(read_file_chunked(str(model_path))))
     if artifact.get("format_version") != ARTIFACT_FORMAT_VERSION:
       raise ValueError(
         f"Unsupported model artifact format {artifact.get('format_version')!r}; "
@@ -386,8 +466,30 @@ class ModelState:
     self.warp_input_keys = tuple(artifact.get("warp_input_keys", LEGACY_WARP_INPUTS))
     self.policy_input_keys = tuple(artifact["policy_input_keys"])
     self.run_policy = artifact["run_policy"]
-    self.warp_enqueue = artifact[(cam_w, cam_h)]
+    warp_key = (cam_w, cam_h)
+    if warp_key not in artifact:
+      # The prebuilt artifact may have been compiled for a different camera
+      # resolution (e.g. a --pkl fallback built at 1928x1208 while the sim now
+      # runs at a reduced resolution). Re-trace the ONNX at the current size so
+      # the warp keys match camerad instead of hard-crashing with a KeyError.
+      if not LIVE_ONNX:
+        raise KeyError(
+          f"model artifact has no {warp_key} warp; rebuild it for this camera resolution or trace the ONNX live"
+        )
+      cloudlog.warning(f"modeld: artifact lacks {warp_key} warp; re-tracing ONNX at current resolution")
+      artifact = _build_live_artifact(cam_w, cam_h)
+    self.warp_enqueue = artifact[warp_key]
     self.can_prepare_only = self.image_history_pipeline == IMAGE_HISTORY_IN_WARP
+
+    # The tinygrad JIT unpickler can rewrite an input buffer's device to the
+    # comma-device default (QCOM) when loading a PC artifact in this process.
+    # The remap above lets allocation fall through to the target device, but the
+    # stored expected_input_info still compares against the raw (QCOM) string, so
+    # a later call would raise "args mismatch". Normalize those back to the real
+    # runtime device so the JITs actually run.
+    _normalize_jit_device(self.run_policy, str(Device.DEFAULT))
+    for _jit in (self.warp_enqueue,):
+      _normalize_jit_device(_jit, self.WARP_DEV)
 
     if self.model_type == "supercombo":
       input_shapes = self.metadata["model"]["input_shapes"]
@@ -539,13 +641,28 @@ class ModelState:
           inputs: dict[str, np.ndarray], prepare_only: bool,
           after_enqueue: Callable[[], None] | None = None) -> dict[str, np.ndarray] | None:
     frames: dict[str, Tensor] = {}
+    _host_warp = self.WARP_DEV in ("CPU", "NPY")
     for key, buf in bufs.items():
       ptr = np.frombuffer(buf.data, dtype=np.uint8).ctypes.data
       cache_key = (key, ptr)
       if cache_key not in self._blob_cache:
-        self._blob_cache[cache_key] = Tensor.from_blob(
-          ptr, (self.frame_buf_size,), dtype="uint8", device=self.WARP_DEV,
-        )
+        if _host_warp:
+          # Host-mapped zero-copy view: a CPU warp can read the shared-memory
+          # camera buffer directly.
+          self._blob_cache[cache_key] = Tensor.from_blob(
+            ptr, (self.frame_buf_size,), dtype="uint8", device=self.WARP_DEV,
+          )
+        else:
+          # The camera buffer is host shared memory; a GPU warp backend cannot
+          # read a host pointer directly, so copy it onto the device.
+          self._blob_cache[cache_key] = Tensor(
+            np.frombuffer(buf.data, dtype=np.uint8).copy(), device=self.WARP_DEV,
+          ).realize()
+      elif not _host_warp:
+        # Refresh the device copy with the latest frame contents.
+        self._blob_cache[cache_key].assign(
+          Tensor(np.frombuffer(buf.data, dtype=np.uint8).copy(), device=self.WARP_DEV),
+        ).realize()
       frames[key] = self._blob_cache[cache_key]
 
     inputs[self.desire_key][0] = 0

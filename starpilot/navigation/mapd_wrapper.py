@@ -11,10 +11,11 @@ from cereal import messaging
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
+from openpilot.starpilot.common.starpilot_variables import MAPS_PATH
 
 MAPD_DIR = Path(BASEDIR) / "starpilot/navigation"
 MAPD_BIN = MAPD_DIR / "mapd"
-OFFLINE_ROOT = Path("/data/media/0/osm/offline")
+OFFLINE_ROOT = MAPS_PATH
 RESTART_DELAY_S = 0.25
 MISSING_TILE_BACKOFF_S = 30.0
 FAILURE_WINDOW_S = 3.0

@@ -86,6 +86,7 @@ class MetaDriveWorld(World):
       curr_pos = md_vehicle.position
 
       state.velocity = md_vehicle.velocity
+      state.position = md_vehicle.position
       state.bearing = md_vehicle.bearing
       state.steering_angle = md_vehicle.steering_angle
       state.gps.from_xy(curr_pos)

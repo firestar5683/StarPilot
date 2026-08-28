@@ -48,7 +48,9 @@ def _fallback_tg_devices(process_name: str, usbgpu: bool) -> dict[str, str]:
   # recognized. Match upstream's generated device map and select AMD directly;
   # probing every tinygrad backend opens CL/DSP/CPU devices inside modeld and
   # can interfere with the on-road QCOM + AMD process.
-  return {"WARP_DEV": backend, "QUEUE_DEV": "AMD" if usbgpu else backend}
+  warp_dev = os.getenv("WARP_DEV", "").strip() or backend
+  queue_dev = os.getenv("QUEUE_DEV", "").strip() or ("AMD" if usbgpu else backend)
+  return {"WARP_DEV": warp_dev, "QUEUE_DEV": queue_dev}
 
 
 def get_tg_input_devices(process_name: str, usbgpu: bool) -> dict[str, str]:

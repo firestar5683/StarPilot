@@ -670,7 +670,7 @@ class SelfdriveD:
     report_comm_issue, self.valid_only_comm_issue_frames = evaluate_comm_issue(
       all_checks, all_alive, all_freq_ok, self.valid_only_comm_issue_frames,
     )
-    if not all_checks and report_comm_issue and no_system_errors and not big_model_settling:
+    if not all_checks and report_comm_issue and no_system_errors and not big_model_settling and not SIMULATION:
       if not all_alive:
         self.events.add(EventName.commIssue)
       elif not all_freq_ok:
@@ -689,7 +689,7 @@ class SelfdriveD:
     else:
       self.logged_comm_issue = None
 
-    if not self.CP.notCar and not big_model_settling:
+    if not self.CP.notCar and not big_model_settling and not SIMULATION:
       if not self.sm['livePose'].posenetOK:
         self.events.add(EventName.posenetInvalid)
       if not self.sm['livePose'].inputsOK:

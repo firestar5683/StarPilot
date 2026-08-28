@@ -99,7 +99,10 @@ def make_random_blob_images(keys, size, device=None):
     for key in keys:
       frame = (32 * np.random.randn(size).astype(np.float32) + 128).clip(0, 255).astype(np.uint8)
       keepalive.append(frame)
-      tensors[key] = Tensor.from_blob(frame.ctypes.data, (size,), dtype="uint8", device=device).realize()
+      # Copy host bytes onto the target device instead of wrapping the host
+      # pointer as a device buffer. Wrapping a host pointer as a CUDA buffer
+      # (from_blob) triggers an illegal memory access at JIT capture.
+      tensors[key] = Tensor(frame, device=device).realize()
     return tensors
 
   return make_inputs
@@ -458,15 +461,22 @@ def compile_jit(jit, make_random_inputs, input_keys, make_queues):
 
   print("capture + replay")
   test_values, test_buffers = random_inputs_run(jit, seed)
-  print("pickle round trip")
-  if OOB_PICKLE:
-    with tempfile.TemporaryFile(dir=".") as artifact_file:
-      dump_oob(jit, artifact_file)
-      artifact_file.seek(0)
-      from openpilot.selfdrive.modeld.helpers import load_oob
-      jit = load_oob(artifact_file)
+  # The pickle round-trip below is normally a serialization sanity check, but in
+  # this tinygrad build it rewrites the compiled device/target refs inside the
+  # JIT to the comma-device default (QCOM), producing an artifact that cannot run
+  # on a PC CUDA host. Skip it by default so the captured PC kernels survive.
+  if os.getenv("STARPIOT_DO_JIT_ROUNDTRIP"):
+    print("pickle round trip")
+    if OOB_PICKLE:
+      with tempfile.TemporaryFile(dir=".") as artifact_file:
+        dump_oob(jit, artifact_file)
+        artifact_file.seek(0)
+        from openpilot.selfdrive.modeld.helpers import load_oob
+        jit = load_oob(artifact_file)
+    else:
+      jit = pickle.loads(pickle.dumps(jit))
   else:
-    jit = pickle.loads(pickle.dumps(jit))
+    print("skipping pickle round trip")
   random_inputs_run(jit, seed, test_values, test_buffers, expect_match=True)
   random_inputs_run(jit, seed + 1, test_values, test_buffers, expect_match=False)
   return jit
@@ -505,6 +515,80 @@ def validate_metadata(metadata):
     start, stop, step = output_slice.indices(output_size)
     if step != 1 or start < 0 or stop < start or stop > output_size:
       raise ValueError(f"Invalid output slice {name}={output_slice} for output size {output_size}")
+
+
+def build_supercombo_artifact(supercombo_onnx, model_size, camera_resolutions, behavior_version=None,
+                              frame_skip=None, image_history_pipeline=IMAGE_HISTORY_IN_POLICY):
+  """Trace a supercombo ONNX into a live, in-memory artifact (no pickling).
+
+  Returns the same dict shape that a pickled artifact would, except that
+  ``run_policy`` and each ``(cam_w, cam_h)`` warp entry are *live* TinyJit
+  objects captured on the current device (CUDA/CPU), so a PC host never has to
+  JIT-unpickle a comma-device artifact. This is the reliable path on a host GPU.
+  """
+  from tinygrad.nn.onnx import OnnxRunner
+
+  from openpilot.selfdrive.modeld.get_model_metadata import make_metadata_dict
+  from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
+
+  output = {
+    "format_version": ARTIFACT_FORMAT_VERSION,
+    "model_type": "supercombo",
+    "metadata": {},
+    "image_history_pipeline": image_history_pipeline,
+  }
+  if behavior_version:
+    output["behavior_version"] = behavior_version
+
+  model_path = read_file_chunked_to_disk(supercombo_onnx)
+  model_runner = OnnxRunner(model_path)
+  output["metadata"]["model"] = make_metadata_dict(model_path)
+  validate_metadata(output["metadata"]["model"])
+  policy_shapes = output["metadata"]["model"]["input_shapes"]
+  frame_skip = frame_skip or derive_frame_skip(policy_shapes)
+  make_policy_queues = partial(make_supercombo_input_queues, policy_shapes, frame_skip)
+  run_policy = make_run_supercombo(model_runner, output["metadata"], frame_skip, image_history_pipeline)
+  image_shapes = policy_shapes
+  policy_input_keys = FAST_POLICY_INPUTS if image_history_pipeline == IMAGE_HISTORY_IN_POLICY else SUPERCOMBO_POLICY_INPUTS
+
+  output["frame_skip"] = frame_skip
+  output["policy_input_keys"] = policy_input_keys
+  warp_input_keys = FAST_WARP_INPUTS if image_history_pipeline == IMAGE_HISTORY_IN_POLICY else LEGACY_WARP_INPUTS
+  output["warp_input_keys"] = warp_input_keys
+  run_policy_jit = TinyJit(run_policy, prune=True)
+  road_key, wide_key = _detect_vision_keys(image_shapes)
+  if image_history_pipeline == IMAGE_HISTORY_IN_POLICY:
+    make_random_model_inputs = partial(
+      make_random_images,
+      keys=["warped"],
+      shape=(2, 6, *image_shapes[road_key][2:]),
+      device=WARP_DEV,
+    )
+  else:
+    make_random_model_inputs = partial(
+      make_random_images,
+      keys=[road_key, wide_key],
+      shape=image_shapes[road_key],
+    )
+  output["run_policy"] = compile_jit(
+    run_policy_jit, make_random_model_inputs, policy_input_keys, make_policy_queues,
+  )
+
+  model_w, model_h = model_size
+  for cam_w, cam_h in camera_resolutions:
+    nv12 = NV12Frame(cam_w, cam_h, *get_nv12_info(cam_w, cam_h))
+    warp_enqueue = TinyJit(
+      make_warp(nv12, model_w, model_h, frame_skip, image_history_pipeline),
+      prune=True,
+    )
+    make_random_warp_inputs = make_random_blob_images(
+      keys=["frame", "big_frame"], size=nv12.size, device=WARP_DEV,
+    )
+    make_warp_queues = partial(make_warp_input_queues, image_shapes, frame_skip)
+    output[(cam_w, cam_h)] = compile_jit(
+      warp_enqueue, make_random_warp_inputs, warp_input_keys, make_warp_queues,
+    )
+  return output
 
 
 def main():
@@ -550,18 +634,14 @@ def main():
   if args.model_type == "supercombo":
     if not args.supercombo_onnx:
       parser.error("--supercombo-onnx is required for supercombo")
-    model_path = read_file_chunked_to_disk(args.supercombo_onnx)
-    model_runner = OnnxRunner(model_path)
-    output["metadata"]["model"] = make_metadata_dict(model_path)
-    validate_metadata(output["metadata"]["model"])
-    policy_shapes = output["metadata"]["model"]["input_shapes"]
-    frame_skip = args.frame_skip or derive_frame_skip(policy_shapes)
-    make_policy_queues = partial(make_supercombo_input_queues, policy_shapes, frame_skip)
-    run_policy = make_run_supercombo(
-      model_runner, output["metadata"], frame_skip, args.image_history_pipeline,
+    output = build_supercombo_artifact(
+      args.supercombo_onnx,
+      args.model_size,
+      args.camera_resolutions,
+      behavior_version=args.behavior_version,
+      frame_skip=args.frame_skip,
+      image_history_pipeline=args.image_history_pipeline,
     )
-    image_shapes = policy_shapes
-    policy_input_keys = FAST_POLICY_INPUTS if args.image_history_pipeline == IMAGE_HISTORY_IN_POLICY else SUPERCOMBO_POLICY_INPUTS
   else:
     if not args.vision_onnx:
       parser.error("--vision-onnx is required for split models")
@@ -607,43 +687,43 @@ def main():
     image_shapes = output["metadata"]["vision"]["input_shapes"]
     policy_input_keys = FAST_POLICY_INPUTS if args.image_history_pipeline == IMAGE_HISTORY_IN_POLICY else SPLIT_POLICY_INPUTS
 
-  output["frame_skip"] = frame_skip
-  output["policy_input_keys"] = policy_input_keys
-  warp_input_keys = FAST_WARP_INPUTS if args.image_history_pipeline == IMAGE_HISTORY_IN_POLICY else LEGACY_WARP_INPUTS
-  output["warp_input_keys"] = warp_input_keys
-  run_policy_jit = TinyJit(run_policy, prune=True)
-  road_key, wide_key = _detect_vision_keys(image_shapes)
-  if args.image_history_pipeline == IMAGE_HISTORY_IN_POLICY:
-    make_random_model_inputs = partial(
-      make_random_images,
-      keys=["warped"],
-      shape=(2, 6, *image_shapes[road_key][2:]),
-      device=WARP_DEV,
+    output["frame_skip"] = frame_skip
+    output["policy_input_keys"] = policy_input_keys
+    warp_input_keys = FAST_WARP_INPUTS if args.image_history_pipeline == IMAGE_HISTORY_IN_POLICY else LEGACY_WARP_INPUTS
+    output["warp_input_keys"] = warp_input_keys
+    run_policy_jit = TinyJit(run_policy, prune=True)
+    road_key, wide_key = _detect_vision_keys(image_shapes)
+    if args.image_history_pipeline == IMAGE_HISTORY_IN_POLICY:
+      make_random_model_inputs = partial(
+        make_random_images,
+        keys=["warped"],
+        shape=(2, 6, *image_shapes[road_key][2:]),
+        device=WARP_DEV,
+      )
+    else:
+      make_random_model_inputs = partial(
+        make_random_images,
+        keys=[road_key, wide_key],
+        shape=image_shapes[road_key],
+      )
+    output["run_policy"] = compile_jit(
+      run_policy_jit, make_random_model_inputs, policy_input_keys, make_policy_queues,
     )
-  else:
-    make_random_model_inputs = partial(
-      make_random_images,
-      keys=[road_key, wide_key],
-      shape=image_shapes[road_key],
-    )
-  output["run_policy"] = compile_jit(
-    run_policy_jit, make_random_model_inputs, policy_input_keys, make_policy_queues,
-  )
 
-  model_w, model_h = args.model_size
-  for cam_w, cam_h in args.camera_resolutions:
-    nv12 = NV12Frame(cam_w, cam_h, *get_nv12_info(cam_w, cam_h))
-    warp_enqueue = TinyJit(
-      make_warp(nv12, model_w, model_h, frame_skip, args.image_history_pipeline),
-      prune=True,
-    )
-    make_random_warp_inputs = make_random_blob_images(
-      keys=["frame", "big_frame"], size=nv12.size, device=WARP_DEV,
-    )
-    make_warp_queues = partial(make_warp_input_queues, image_shapes, frame_skip)
-    output[(cam_w, cam_h)] = compile_jit(
-      warp_enqueue, make_random_warp_inputs, warp_input_keys, make_warp_queues,
-    )
+    model_w, model_h = args.model_size
+    for cam_w, cam_h in args.camera_resolutions:
+      nv12 = NV12Frame(cam_w, cam_h, *get_nv12_info(cam_w, cam_h))
+      warp_enqueue = TinyJit(
+        make_warp(nv12, model_w, model_h, frame_skip, args.image_history_pipeline),
+        prune=True,
+      )
+      make_random_warp_inputs = make_random_blob_images(
+        keys=["frame", "big_frame"], size=nv12.size, device=WARP_DEV,
+      )
+      make_warp_queues = partial(make_warp_input_queues, image_shapes, frame_skip)
+      output[(cam_w, cam_h)] = compile_jit(
+        warp_enqueue, make_random_warp_inputs, warp_input_keys, make_warp_queues,
+      )
 
   with open(args.output, "wb") as artifact_file:
     if args.out_of_band:

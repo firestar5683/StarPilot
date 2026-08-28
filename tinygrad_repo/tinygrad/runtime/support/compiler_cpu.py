@@ -22,7 +22,7 @@ class ClangCompiler(Compiler):
     return subprocess.check_output([getenv("CC", 'clang'), '-c', '-x', 'c', '-O2', '-fPIC', '-ffreestanding', '-fno-math-errno', '-nostdlib',
                                     '-fno-ident', f'--target={self.arch}-none-unknown-elf', *self.args, '-', '-o', '-'], input=src.encode('utf-8'))
 
-  def compile(self, src:str) -> bytes: return jit_loader(self.compile_to_obj(src))
+  def compile(self, src:str) -> bytes: return jit_loader(self.compile_to_obj(src), link_libs=["m"])
 
   def disassemble(self, lib:bytes): return capstone_flatdump(lib, self.arch)
 

@@ -58,6 +58,13 @@ class SimulatorBridge(ABC):
 
     self.past_startup_engaged = False
     self.startup_button_prev = True
+    self.startup_set_count = 0
+    self.auto_engage_speed_done = False
+    self.AUTO_CRUISE_KPH = 60.0
+
+    self.manual_throttle = 0.0
+    self.manual_brake = 0.0
+    self.manual_steer = 0.0
 
     self.test_run = False
 
@@ -126,7 +133,9 @@ Ignition: {self.simulator_state.ignition} Engaged: {self.simulator_state.is_enga
       self.simulator_state.left_blinker = False
       self.simulator_state.right_blinker = False
 
-      throttle_manual = steer_manual = brake_manual = 0.
+      throttle_manual = self.manual_throttle
+      steer_manual = self.manual_steer
+      brake_manual = self.manual_brake
 
       # Read manual controls
       if not q.empty():
@@ -134,11 +143,11 @@ Ignition: {self.simulator_state.ignition} Engaged: {self.simulator_state.is_enga
         if message.type == QueueMessageType.CONTROL_COMMAND:
           m = message.info.split('_')
           if m[0] == "steer":
-            steer_manual = float(m[1])
+            steer_manual = self.manual_steer = float(m[1])
           elif m[0] == "throttle":
-            throttle_manual = float(m[1])
+            throttle_manual = self.manual_throttle = float(m[1])
           elif m[0] == "brake":
-            brake_manual = float(m[1])
+            brake_manual = self.manual_brake = float(m[1])
           elif m[0] == "cruise":
             if m[1] == "down":
               self.simulator_state.cruise_button = CruiseButtons.DECEL_SET
@@ -146,6 +155,7 @@ Ignition: {self.simulator_state.ignition} Engaged: {self.simulator_state.is_enga
               self.simulator_state.cruise_button = CruiseButtons.RES_ACCEL
             elif m[1] == "cancel":
               self.simulator_state.cruise_button = CruiseButtons.CANCEL
+              self.manual_throttle = self.manual_brake = self.manual_steer = 0.0
             elif m[1] == "main":
               self.simulator_state.cruise_button = CruiseButtons.MAIN
           elif m[0] == "blinker":
@@ -173,14 +183,26 @@ Ignition: {self.simulator_state.ignition} Engaged: {self.simulator_state.is_enga
       self.simulator_state.is_engaged = self.simulated_car.sm['selfdriveState'].active
 
       if self.simulator_state.is_engaged:
+        self.manual_throttle = self.manual_brake = self.manual_steer = 0.0
         throttle_op = np.clip(self.simulated_car.sm['carControl'].actuators.accel / 1.6, 0.0, 1.0)
         brake_op = np.clip(-self.simulated_car.sm['carControl'].actuators.accel / 4.0, 0.0, 1.0)
         steer_op = self.simulated_car.sm['carControl'].actuators.steeringAngleDeg
 
+        # After auto-engaging at standstill the set speed is captured at ~floor
+        # (a crawl). Ramp it up to a real driving speed via cruise-accel presses.
+        if not self.auto_engage_speed_done and self.rk.frame % 5 == 0:
+          if self.simulated_car.sm['carState'].vCruise < self.AUTO_CRUISE_KPH:
+            self.simulator_state.cruise_button = CruiseButtons.RES_ACCEL
+          else:
+            self.auto_engage_speed_done = True
+
         self.past_startup_engaged = True
       elif not self.past_startup_engaged and self.simulated_car.sm['selfdriveState'].engageable:
-        self.simulator_state.cruise_button = CruiseButtons.DECEL_SET if self.startup_button_prev else CruiseButtons.MAIN # force engagement on startup
-        self.startup_button_prev = not self.startup_button_prev
+        # Auto-engage whenever the car is ready. Cruise-Set (DECEL_SET) engages from
+        # standstill; pressing periodically (not every frame) avoids ratcheting the set
+        # speed down while still catching the moment the car becomes engageable.
+        if self.rk.frame % 10 == 0:
+          self.simulator_state.cruise_button = CruiseButtons.DECEL_SET
 
       throttle_out = throttle_op if self.simulator_state.is_engaged else throttle_manual
       brake_out = brake_op if self.simulator_state.is_engaged else brake_manual
@@ -189,6 +211,41 @@ Ignition: {self.simulator_state.ignition} Engaged: {self.simulator_state.is_enga
       self.world.apply_controls(steer_out, throttle_out, brake_out)
       self.world.read_state()
       self.world.read_sensors(self.simulator_state)
+
+      if self.rk.frame % 300 == 0:
+        try:
+          from PIL import Image
+          cam = getattr(self.world, 'road_image', None)
+          if cam is not None and getattr(cam, 'any', None) and cam.any():
+            Image.fromarray(cam[:, :, ::-1]).save(f"/tmp/kilo/cam_{self.rk.frame}.jpg", quality=90)
+        except Exception as e:
+          print(f"CAM-ERR {e}", flush=True)
+
+      if self.rk.frame % 25 == 0 and not self.test_run:
+        try:
+          st = self.simulator_state
+          eng = st.is_engaged
+          engable = self.simulated_car.sm['selfdriveState'].engageable
+          active = self.simulated_car.sm['selfdriveState'].active
+          accel = self.simulated_car.sm['carControl'].actuators.accel if eng else float('nan')
+          cs = self.simulated_car.sm['carState']
+          sp = self.simulated_car.sm['starpilotPlan']
+          rd = self.simulated_car.sm['radarState']
+          m = self.simulated_car.sm['modelV2']
+          lead = rd.leadOne
+          print(f"BRIDGE engaged={eng} engable={engable} active={active} accel={accel:.2f} "
+                f"gas={throttle_out:.2f} brake={brake_out:.2f} steer={steer_out:.1f} "
+                f"v={st.speed if st.velocity is not None else -1:.2f} "
+                f"pos=({st.position[0]:.1f},{st.position[1]:.1f}) yaw={st.bearing:.1f} vCruiseK={cs.vCruise:.0f} "
+                f"forcStop={sp.forcingStop} apprStop={sp.approachStopLength:.1f} "
+                f"modelLen={m.position.x[-1]:.0f} mVel={m.velocity.x[-1]:.1f} "
+                f"mAcc={m.acceleration.x[-1]:.2f} sign={sp.stopSignConfirmed} "
+                f"leadD={lead.dRel:.1f} leadV={lead.vLead:.1f}", flush=True)
+        except Exception as e:
+          import traceback; traceback.print_exc()
+          print(f"BRIDGE-ERR {type(e).__name__}: {e}", flush=True)
+
+
 
       if self.world.exit_event.is_set():
         self.shutdown()

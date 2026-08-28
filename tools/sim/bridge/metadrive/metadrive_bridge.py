@@ -1,4 +1,5 @@
 import math
+import os
 from multiprocessing import Queue
 
 from metadrive.component.sensors.base_camera import _cuda_enable
@@ -28,21 +29,13 @@ def curve_block(length, angle=45, direction=0):
   }
 
 def create_map(track_size=60):
-  curve_len = track_size * 2
   return dict(
     type=MapGenerateMethod.PG_MAP_FILE,
     lane_num=2,
     lane_width=4.5,
     config=[
-      None,
-      straight_block(track_size),
-      curve_block(curve_len, 90),
-      straight_block(track_size),
-      curve_block(curve_len, 90),
-      straight_block(track_size),
-      curve_block(curve_len, 90),
-      straight_block(track_size),
-      curve_block(curve_len, 90),
+      straight_block(track_size * 10),
+      straight_block(track_size * 20),
     ]
   )
 
@@ -73,7 +66,13 @@ class MetaDriveBridge(SimulatorBridge):
         image_source="rgb_road",
       ),
       sensors=sensors,
-      image_on_cuda=_cuda_enable,
+      # CUDA image capture (cudaGraphicsGLRegisterImage) only works when the
+      # Panda3D GL context is NVIDIA-backed. On hybrid/compute-only laptops the
+      # display GL runs on the iGPU via Mesa (often llvmpipe software), so CUDA-GL
+      # interop fails with cudaErrorUnknown and crashes MetaDrive at sensor init.
+      # Default to the safe CPU readback path; opt into CUDA explicitly only when
+      # the GL context is actually NVIDIA.
+      image_on_cuda=bool(os.getenv("STARPIOT_CUDA_IMAGES")) and _cuda_enable,
       image_observation=True,
       interface_panel=[],
       out_of_route_done=False,

@@ -345,6 +345,8 @@ sync_worktree() {
     "msgq_repo/msgq/ipc_pyx.so"
     "msgq_repo/msgq/visionipc/visionipc_pyx.so"
     "rednose_repo/rednose/helpers/ekf_sym_pyx.so"
+    "selfdrive/locationd/models/generated/*.so"
+    "selfdrive/locationd/models/generated/*.os"
     "selfdrive/modeld/models/commonmodel_pyx.so"
     "selfdrive/pandad/libcan_list_to_can_capnp.a"
     "selfdrive/pandad/pandad_api_impl.so"

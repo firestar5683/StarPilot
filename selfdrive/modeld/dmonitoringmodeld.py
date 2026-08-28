@@ -8,9 +8,23 @@ import numpy as np
 
 from openpilot.system.hardware import TICI
 
-os.environ["DEV"] = "QCOM" if TICI else "CPU"
+os.environ["DEV"] = "QCOM" if TICI else os.environ.get("STARPIOT_SIM_DEV", "CPU")
 
+from tinygrad.device import Device
 from tinygrad.tensor import Tensor
+
+if not TICI:
+  _sim_dev = os.environ.get("STARPIOT_SIM_DEV", "").split(":")[0].upper()
+  if _sim_dev:
+    _orig_canon = Device._canonicalize
+
+    def _remap_pc_device(device: str) -> str:
+      _head = device.split(":")[0].upper()
+      if _head in ("QCOM", "AMD", "LLVM"):
+        return _orig_canon(_sim_dev + device[len(_head):])
+      return _orig_canon(device)
+
+    Device._canonicalize = staticmethod(_remap_pc_device)
 
 from cereal import messaging
 from cereal.messaging import PubMaster, SubMaster

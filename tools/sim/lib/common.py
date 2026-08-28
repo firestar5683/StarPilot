@@ -5,7 +5,7 @@ import numpy as np
 from abc import ABC, abstractmethod
 from collections import namedtuple
 
-W, H = 1928, 1208
+W, H = 1164, 874
 
 
 vec3 = namedtuple("vec3", ["x", "y", "z"])
@@ -41,6 +41,7 @@ class SimulatorState:
     self.ignition = True
 
     self.velocity: vec3 = None
+    self.position: tuple = (0, 0)
     self.bearing: float = 0
     self.gps = GPSState()
     self.imu = IMUState()

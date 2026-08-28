@@ -8800,7 +8800,10 @@ def main():
   debug = False if on_device else os.getenv("SP_GALAXY_DEBUG", "1").lower() in {"1", "true", "yes", "on"}
   port = 8082 if on_device else int(os.getenv("SP_GALAXY_PORT", "8083"))
   host = "0.0.0.0" if on_device else os.getenv("SP_GALAXY_HOST", "0.0.0.0")
-  use_reloader = False if on_device else os.getenv("SP_GALAXY_RELOAD", "0" if not debug else "1").lower() in {"1", "true", "yes", "on"}
+  # The Werkzeug reloader forks the process on file changes, which double-registers
+  # msgq publishers and crashes the stack on a host. Default it OFF (still opt-in
+  # via SP_GALAXY_RELOAD=1); on-device never uses the reloader.
+  use_reloader = False if on_device else os.getenv("SP_GALAXY_RELOAD", "0").lower() in {"1", "true", "yes", "on"}
 
   if debug:
     print("\"The Galaxy\" is not running on a comma device, enabling debug mode")

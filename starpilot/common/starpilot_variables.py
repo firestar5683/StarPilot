@@ -1313,7 +1313,7 @@ class StarPilotVariables:
     quality_of_life_cruise = self.get_value("QOLLongitudinal") and (toggle.openpilot_longitudinal or not FPCP.pcmCruiseSpeed)
     toggle.cruise_increase = self.get_value("CustomCruise", cast=float, condition=quality_of_life_cruise, default=1.0)
     toggle.cruise_increase_long = self.get_value("CustomCruiseLong", cast=float, condition=quality_of_life_cruise, default=5.0)
-    toggle.force_stops = self.get_value("ForceStops", condition=quality_of_life_longitudinal)
+    toggle.force_stops = self.get_value("ForceStops", condition=quality_of_life_longitudinal) and "SIMULATION" not in os.environ
     toggle.force_stop_distance_offset = self.get_value("ForceStopDistanceOffset", cast=int, condition=(quality_of_life_longitudinal and toggle.force_stops))
     toggle.force_standstill = self.get_value("ForceStandstill", condition=quality_of_life_longitudinal)
     toggle.radar_takeoffs = self.get_value("RadarTakeoffs", condition=quality_of_life_longitudinal)

@@ -41,6 +41,16 @@ LEGACY_DRIVING_PREFIXES = (
   "driving_",
 )
 
+# The bundled builtin supercombo ONNX used for live-tracing (Option 1) in modeld.
+# It matches is_driving_artifact_file (legacy "driving_" prefix) but has no model
+# key of its own, so model cleanup would treat it as stale and delete it out from
+# under modeld. It is never downloaded, managed, or pruned.
+BUILTIN_SUPERCOMBO_ONNX = "driving_supercombo.onnx"
+
+
+def is_builtin_supercombo_file(filename: str) -> bool:
+  return filename == BUILTIN_SUPERCOMBO_ONNX
+
 CANCEL_DOWNLOAD_PARAM = "CancelModelDownload"
 DOWNLOAD_PROGRESS_PARAM = "ModelDownloadProgress"
 MODEL_DOWNLOAD_PARAM = "ModelToDownload"
@@ -484,6 +494,8 @@ class ModelManager:
     for model_file in MODELS_PATH.iterdir():
       if not model_file.is_file() or not is_driving_artifact_file(model_file.name):
         continue
+      if is_builtin_supercombo_file(model_file.name):
+        continue
       model_key = model_file.name.split("_driving_", 1)[0] if "_driving_" in model_file.name else ""
       if not model_key or not is_local_model_key(model_key) and model_key not in valid_keys:
         delete_file(model_file, print_error=False)
@@ -622,6 +634,8 @@ class ModelManager:
     removed = 0
     for model_file in MODELS_PATH.iterdir():
       if not model_file.is_file() or not is_driving_artifact_file(model_file.name):
+        continue
+      if is_builtin_supercombo_file(model_file.name):
         continue
       model_key = model_file.name.split("_driving_", 1)[0] if "_driving_" in model_file.name else ""
       if model_key and is_local_model_key(model_key):
@@ -848,6 +862,8 @@ class ModelManager:
 
     for model_file in MODELS_PATH.iterdir():
       if not model_file.is_file() or not is_driving_artifact_file(model_file.name):
+        continue
+      if is_builtin_supercombo_file(model_file.name):
         continue
       model_key = model_file.name.split("_driving_", 1)[0] if "_driving_" in model_file.name else ""
       if model_key and is_local_model_key(model_key):

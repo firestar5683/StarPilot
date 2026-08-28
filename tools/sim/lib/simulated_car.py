@@ -15,7 +15,7 @@ class SimulatedCar:
 
   def __init__(self):
     self.pm = messaging.PubMaster(['can', 'pandaStates'])
-    self.sm = messaging.SubMaster(['carControl', 'controlsState', 'carParams', 'selfdriveState'])
+    self.sm = messaging.SubMaster(['carControl', 'controlsState', 'carParams', 'selfdriveState', 'carState', 'starpilotPlan', 'radarState', 'modelV2'])
     self.cp = self.get_car_can_parser()
     self.idx = 0
     self.params = Params()
@@ -76,6 +76,16 @@ class SimulatedCar:
     msg.append(self.packer.make_can_msg("STEERING_CONTROL", 2, {}))
     msg.append(self.packer.make_can_msg("ACC_HUD", 2, {}))
     msg.append(self.packer.make_can_msg("LKAS_HUD", 2, {}))
+    # 0x35e CAMERA_MESSAGES: StarPilot's Honda carstate registers this message
+    # when it reads the speed-limit / stop-sign fields (HAS_CAMERA_MESSAGES
+    # flag), and can_valid requires *every* registered message to be valid.
+    # The real camera sends it on the cam bus, so publish it here too;
+    # CANPacker auto-fills the Honda COUNTER/CHECKSUM. SPEED_LIMIT_SIGN=0
+    # means no posted speed limit, so calculate_speed_limit() returns 0.0.
+    msg.append(self.packer.make_can_msg("CAMERA_MESSAGES", 2, {
+      "SPEED_LIMIT_SIGN": 0,
+      "ROAD_SIGN": 0,
+    }))
 
     self.pm.send('can', can_list_to_can_capnp(msg))
 
