@@ -19,6 +19,14 @@ HONDA_ACCORD_STOP_GO_MAX_LEAD_BRAKE = 0.25
 HONDA_ACCORD_STOP_GO_MAX_LATERAL_OFFSET = 1.25
 HONDA_ACCORD_STOP_GO_MIN_MODEL_PROB = 0.95
 HONDA_ACCORD_STOP_GO_ACCEL_RISE_RATE = 4.0
+HONDA_ACCORD_11G_CRUISE_ACCEL_MAX_BP = (0.0, 10.0, 25.0, 40.0)
+HONDA_ACCORD_11G_CRUISE_ACCEL_MAX_V = (1.6, 1.2, 0.8, 0.6)
+HONDA_ACCORD_11G_TOTAL_ACCEL_MAX_BP = (20.0, 40.0)
+HONDA_ACCORD_11G_TOTAL_ACCEL_MAX_V = (1.7, 3.2)
+HONDA_ACCORD_11G_THROTTLE_PROB_THRESHOLD = 0.4
+HONDA_ACCORD_11G_MIN_ALLOW_THROTTLE_SPEED = 2.5
+HONDA_ACCORD_11G_MIN_ACTION_DELAY = 0.3
+HONDA_ACCORD_11G_ACCEL_CLIP_SLEW_STEP = 0.05
 HYUNDAI_ELANTRA_LEAD_FOLLOW_JERK_SCALE = 1.25
 GENESIS_GV70_ELECTRIFIED_LEAD_FOLLOW_JERK_SCALE = 1.75
 FORD_LIGHTNING_LEAD_FOLLOW_JERK_SCALE = 1.35
@@ -121,6 +129,50 @@ DEFAULT_FORCE_STOP_HANDOFF_M = 6.0
 HYUNDAI_SANTA_FE_2022_FORCE_STOP_REANCHOR_SPEED_TOLERANCE = 0.25
 HYUNDAI_SANTA_FE_2022_FORCE_STOP_LOW_SPEED_HOLD = 2.5
 KIA_CARNIVAL_2025_STOP_SIGN_LOW_SPEED_HOLD = 0.75
+
+
+def is_honda_accord_11g(CP):
+  return (
+    getattr(CP, "brand", "") == "honda" and
+    str(getattr(CP, "carFingerprint", "")) == "HONDA_ACCORD_11G"
+  )
+
+
+def get_honda_accord_11g_cruise_accel_max(CP, v_ego):
+  """Return the validated Accord 11G cruise acceleration ceiling."""
+  if not is_honda_accord_11g(CP):
+    return None
+  return float(np.interp(v_ego, HONDA_ACCORD_11G_CRUISE_ACCEL_MAX_BP, HONDA_ACCORD_11G_CRUISE_ACCEL_MAX_V))
+
+
+def get_honda_accord_11g_total_accel_max(CP, v_ego):
+  """Return the validated Accord 11G combined longitudinal/lateral envelope."""
+  if not is_honda_accord_11g(CP):
+    return None
+  return float(np.interp(v_ego, HONDA_ACCORD_11G_TOTAL_ACCEL_MAX_BP, HONDA_ACCORD_11G_TOTAL_ACCEL_MAX_V))
+
+
+def get_honda_accord_11g_throttle_policy(CP):
+  if not is_honda_accord_11g(CP):
+    return None
+  return HONDA_ACCORD_11G_THROTTLE_PROB_THRESHOLD, HONDA_ACCORD_11G_MIN_ALLOW_THROTTLE_SPEED
+
+
+def get_honda_accord_11g_min_action_delay(CP):
+  return HONDA_ACCORD_11G_MIN_ACTION_DELAY if is_honda_accord_11g(CP) else None
+
+
+def get_honda_accord_11g_accel_clip_slew_step(CP):
+  return HONDA_ACCORD_11G_ACCEL_CLIP_SLEW_STEP if is_honda_accord_11g(CP) else None
+
+
+def get_honda_accord_11g_reduction_only_v_cruise(CP, stock_v_cruise, starpilot_v_cruise):
+  """Keep StarPilot as a reduction-only speed constraint for the Accord 11G."""
+  if not is_honda_accord_11g(CP):
+    return None
+  if np.isfinite(starpilot_v_cruise) and starpilot_v_cruise >= 0.0:
+    return float(min(stock_v_cruise, starpilot_v_cruise))
+  return float(stock_v_cruise)
 
 
 def get_toyota_prius_stopped_lead_obstacle_bias(CP, lead, v_ego):
