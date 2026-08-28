@@ -204,6 +204,26 @@ def process_hud_alert(hud_alert):
   return alert_fcw, alert_steer_required
 
 
+def persist_honda_learned_params_nonblocking(params, gas_factor, wind_factor):
+  # Persist gas and wind factors asynchronously using put_nonblocking
+  params.put_nonblocking("HondaGasFactorParams", float(gas_factor))
+  params.put_nonblocking("HondaWindFactorParams", float(wind_factor))
+
+
+LKAS_STATE_CHANGE_PULSE_FRAMES = 30
+
+
+def update_accord11g_lkas_state_change(last_key, remaining_frames, hud_key):
+  if hud_key != last_key:
+    last_key = hud_key
+    remaining_frames = LKAS_STATE_CHANGE_PULSE_FRAMES
+
+  state_change = remaining_frames > 0
+  remaining_frames = max(0, remaining_frames - 1)
+
+  return last_key, remaining_frames, state_change
+
+
 class CarController(CarControllerBase):
   def __init__(self, dbc_names, CP):
     super().__init__(dbc_names, CP)
@@ -220,6 +240,11 @@ class CarController(CarControllerBase):
     self.last_acc_enabled = False
     self.lkas_button_send_remaining = 0
     self.last_lkas_button_frame = 0
+
+    # Accord 11G stock-style cluster state-change pulse.
+    # Inactive for every other Honda.
+    self.lkas_hud_key = None
+    self.lkas_state_change_frames = 0
 
     self.braking = False
     self.brake_steady = 0.0
@@ -538,9 +563,32 @@ class CarController(CarControllerBase):
 
       steering_available = CS.out.cruiseState.available and CS.out.vEgo > self.CP.minSteerSpeed
       reduced_steering = filtered_steering_pressed
+
+      lkas_state_change = None
+
+      if self.mvl_accord_mode:
+        lanes_visible = bool(hud_control.lanesVisible or CC.latActive)
+
+        hud_key = (
+          lanes_visible,
+          bool(alert_steer_required),
+        )
+
+        (
+          self.lkas_hud_key,
+          self.lkas_state_change_frames,
+          lkas_state_change,
+        ) = update_accord11g_lkas_state_change(
+          self.lkas_hud_key,
+          self.lkas_state_change_frames,
+          hud_key,
+        )
+
       can_sends.extend(
         hondacan.create_lkas_hud(
-          self.packer, self.CAN.lkas, self.CP, hud_control, CC.latActive, steering_available, reduced_steering, alert_steer_required, CS.lkas_hud
+          self.packer, self.CAN.lkas, self.CP, hud_control, CC.latActive,
+          steering_available, reduced_steering, alert_steer_required,
+          CS.lkas_hud, lkas_state_change=lkas_state_change,
         )
       )
 
@@ -581,8 +629,7 @@ class CarController(CarControllerBase):
       ))
 
     if self.frame > 0 and self.frame % 6000 == 0:
-      self.param_store.put_float("HondaGasFactorParams", self.bosch_gas_factor)
-      self.param_store.put_float("HondaWindFactorParams", self.bosch_wind_factor)
+      persist_honda_learned_params_nonblocking(self.param_store, self.bosch_gas_factor, self.bosch_wind_factor)
 
     new_actuators = actuators.as_builder()
     new_actuators.speed = self.speed

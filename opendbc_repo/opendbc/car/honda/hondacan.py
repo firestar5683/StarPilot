@@ -178,7 +178,8 @@ def create_acc_hud(packer, bus, CP, enabled, pcm_speed, pcm_accel, hud_control, 
   return packer.make_can_msg("ACC_HUD", bus, acc_hud_values)
 
 
-def create_lkas_hud(packer, bus, CP, hud_control, lat_active, steering_available, reduced_steering, alert_steer_required, lkas_hud):
+def create_lkas_hud(packer, bus, CP, hud_control, lat_active, steering_available, reduced_steering, alert_steer_required, lkas_hud,
+                    lkas_state_change=None):
   commands = []
   lanes_visible = bool(hud_control.lanesVisible or lat_active)
 
@@ -189,6 +190,11 @@ def create_lkas_hud(packer, bus, CP, hud_control, lat_active, steering_available
     'SOLID_LANES': lanes_visible,
     'BEEP': 0,
   }
+
+  # Preserve historical behavior for existing callers.
+  # Accord 11G explicitly supplies the stock-style pulse.
+  if lkas_state_change is not None:
+    lkas_hud_values['LKAS_STATE_CHANGE'] = int(lkas_state_change)
 
   if CP.carFingerprint in (HONDA_BOSCH_RADARLESS | HONDA_BOSCH_CANFD):
     lkas_hud_values['LANE_LINES'] = 3
