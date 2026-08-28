@@ -2,9 +2,12 @@ from types import SimpleNamespace
 
 import numpy as np
 import pytest
+from cereal import log
+from opendbc.car.interfaces import ACCEL_MAX, ACCEL_MIN
 
 from openpilot.selfdrive.controls.lib.longitudinal_planner import (
   CONTROL_N_T_IDX,
+  LongitudinalPlanner,
   get_accel_from_plan,
   get_max_accel,
   limit_accel_in_turns,
@@ -14,16 +17,56 @@ from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import (
   get_honda_accord_11g_allow_throttle,
   get_honda_accord_11g_cruise_accel_max,
   get_honda_accord_11g_min_action_delay,
+  get_honda_accord_11g_mpc_policy,
   get_honda_accord_11g_no_throttle_accel_max,
   get_honda_accord_11g_reduction_only_v_cruise,
   get_honda_accord_11g_throttle_policy,
   get_honda_accord_11g_total_accel_max,
   is_honda_accord_11g,
 )
+from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import (
+  COST_E_DIM,
+  DANGER_ZONE_COST,
+  FCW_IDXS,
+  LIMIT_COST,
+  N,
+  T_DIFFS,
+  T_IDXS,
+  LongitudinalMpc,
+  get_T_FOLLOW,
+)
 
 
 def make_cp(brand="honda", fingerprint="HONDA_ACCORD_11G"):
   return SimpleNamespace(brand=brand, carFingerprint=fingerprint)
+
+
+class FakeSolver:
+  def __init__(self):
+    self.costs = {}
+    self.values = {}
+
+  def reset(self):
+    pass
+
+  def cost_set(self, stage, field, value):
+    self.costs[(stage, field)] = np.array(value, copy=True)
+
+  def set(self, stage, field, value):
+    self.values[(stage, field)] = np.array(value, copy=True)
+
+
+def make_lead(status=False, d_rel=50.0, v_lead=30.0, a_lead=0.0, tau=1.5):
+  return SimpleNamespace(
+    status=status,
+    dRel=d_rel,
+    vLead=v_lead,
+    vRel=0.0,
+    aLeadK=a_lead,
+    aLeadTau=tau,
+    radar=True,
+    modelProb=1.0,
+  )
 
 
 @pytest.mark.parametrize("brand, fingerprint", [
@@ -41,6 +84,7 @@ def test_accord11g_native_contract_is_exactly_platform_scoped(brand, fingerprint
   assert get_honda_accord_11g_throttle_policy(other) is None
   assert get_honda_accord_11g_min_action_delay(other) is None
   assert get_honda_accord_11g_accel_clip_slew_step(other) is None
+  assert get_honda_accord_11g_mpc_policy(other) is None
   assert get_honda_accord_11g_reduction_only_v_cruise(other, 20.0, 15.0) is None
 
 
@@ -148,3 +192,80 @@ def test_native_plan_projection_uses_accord11g_stable_delay_without_changing_def
   assert stable_accel != pytest.approx(default_accel)
   assert not stable_should_stop
   assert not default_should_stop
+
+
+def test_accord11g_native_mpc_costs_match_validated_policy():
+  solver = FakeSolver()
+  mpc = LongitudinalMpc(CP=make_cp(), solver=solver)
+  policy = get_honda_accord_11g_mpc_policy(make_cp())
+
+  expected = np.diag([
+    policy["obstacle_cost"], 0.0, 0.0, 0.0,
+    policy["accel_change_cost"], policy["jerk_cost"],
+  ])
+  assert solver.costs[(0, "W")] == pytest.approx(expected)
+  assert solver.costs[(N, "W")].shape == (COST_E_DIM, COST_E_DIM)
+  assert solver.costs[(0, "Zl")] == pytest.approx([LIMIT_COST, LIMIT_COST, LIMIT_COST, DANGER_ZONE_COST])
+
+  mpc.set_weights(personality=log.LongitudinalPersonality.aggressive)
+  expected_aggressive = expected.copy()
+  expected_aggressive[4, 4] *= 0.5
+  expected_aggressive[5, 5] *= 0.5
+  assert solver.costs[(0, "W")] == pytest.approx(expected_aggressive)
+
+  mpc.set_weights(prev_accel_constraint=False)
+  assert solver.costs[(0, "W")][4, 4] == pytest.approx(0.0)
+
+
+def test_accord11g_native_mpc_uses_raw_lead_decay_without_changing_other_cars():
+  accord = LongitudinalMpc(CP=make_cp(), solver=FakeSolver())
+  civic = LongitudinalMpc(CP=make_cp(fingerprint="HONDA_CIVIC_BOSCH"), solver=FakeSolver())
+  for mpc in (accord, civic):
+    mpc.set_cur_state(35.0, 0.0)
+
+  lead = make_lead(True, 45.0, 25.0, -1.0, 0.8)
+  accord_lead_xv = accord.process_lead(lead)
+  civic_lead_xv = civic.process_lead(lead)
+  expected_a = lead.aLeadK * np.exp(-lead.aLeadTau * (T_IDXS ** 2) / 2.0)
+  expected_v = np.clip(lead.vLead + np.cumsum(T_DIFFS * expected_a), 0.0, 1e8)
+  expected_x = lead.dRel + np.cumsum(T_DIFFS * expected_v)
+
+  assert accord_lead_xv == pytest.approx(np.column_stack((expected_x, expected_v)))
+  assert not np.allclose(accord_lead_xv, civic_lead_xv)
+
+
+def test_accord11g_native_mpc_parameters_and_follow_time_match_validated_policy():
+  solver = FakeSolver()
+  mpc = LongitudinalMpc(CP=make_cp(), solver=solver)
+  mpc.set_cur_state(20.0, 0.0)
+  mpc.set_accel_limits(-0.4, 0.6)
+  mpc.run = lambda: None
+  radar_state = SimpleNamespace(leadOne=make_lead(), leadTwo=make_lead())
+  zeros = np.zeros(N + 1)
+
+  mpc.update(
+    radar_state, 25.0, zeros.copy(), zeros.copy(), zeros.copy(), zeros.copy(),
+    danger_factor=0.1, t_follow=9.0, personality=log.LongitudinalPersonality.aggressive,
+  )
+
+  assert mpc.source == "cruise"
+  assert mpc.params[:, 0] == pytest.approx(ACCEL_MIN)
+  assert mpc.params[:, 1] == pytest.approx(ACCEL_MAX)
+  assert mpc.params[:, 4] == pytest.approx(get_T_FOLLOW(personality=log.LongitudinalPersonality.aggressive))
+  assert mpc.params[:, 5] == pytest.approx(0.75)
+  assert not np.any(mpc.lead_xv_0[FCW_IDXS, 0] - mpc.x_sol[FCW_IDXS, 0] < 0.25)
+
+
+def test_accord11g_native_mpc_stays_in_acc_mode_without_changing_other_cars():
+  accord_planner = LongitudinalPlanner.__new__(LongitudinalPlanner)
+  accord_planner.generation = None
+  accord_planner.mode = "blended"
+  accord_planner.mpc = SimpleNamespace(honda_accord_11g_policy=get_honda_accord_11g_mpc_policy(make_cp()), mode="blended")
+
+  civic_planner = LongitudinalPlanner.__new__(LongitudinalPlanner)
+  civic_planner.generation = None
+  civic_planner.mode = "blended"
+  civic_planner.mpc = SimpleNamespace(honda_accord_11g_policy=None, mode="blended")
+
+  assert accord_planner.get_mpc_mode() == "acc"
+  assert civic_planner.get_mpc_mode() == "blended"

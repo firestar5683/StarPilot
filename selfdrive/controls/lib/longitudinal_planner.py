@@ -563,7 +563,7 @@ def get_accel_from_plan(speeds, accels, action_t=DT_MDL, vEgoStopping=0.05, min_
 class LongitudinalPlanner:
   def __init__(self, CP, init_v=0.0, init_a=0.0, dt=DT_MDL):
     self.CP = CP
-    self.mpc = LongitudinalMpc(dt=dt)
+    self.mpc = LongitudinalMpc(dt=dt, CP=CP)
     self.fcw = False
     self.dt = dt
     self.model_allow_throttle = True
@@ -655,6 +655,8 @@ class LongitudinalPlanner:
     return is_tinygrad_model_version(self.generation)
 
   def get_mpc_mode(self) -> str:
+    if getattr(self.mpc, 'honda_accord_11g_policy', None) is not None:
+      return 'acc'
     if not self.mlsim:
       return self.mode
     return getattr(self.mpc, 'mode', 'acc')
@@ -1973,9 +1975,7 @@ class LongitudinalPlanner:
     self.generation = getattr(starpilot_toggles, "model_version", None)
     experimental_mode = bool(sm['selfdriveState'].experimentalMode)
     self.mode = 'blended' if experimental_mode else 'acc'
-    self.mpc.mode = 'acc'
-    if not self.mlsim:
-      self.mpc.mode = self.mode
+    self.mpc.mode = self.get_mpc_mode()
 
     if len(sm['carControl'].orientationNED) == 3:
       accel_coast = get_coast_accel(sm['carControl'].orientationNED[1])

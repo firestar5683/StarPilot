@@ -27,6 +27,14 @@ HONDA_ACCORD_11G_THROTTLE_PROB_THRESHOLD = 0.4
 HONDA_ACCORD_11G_MIN_ALLOW_THROTTLE_SPEED = 2.5
 HONDA_ACCORD_11G_MIN_ACTION_DELAY = 0.3
 HONDA_ACCORD_11G_ACCEL_CLIP_SLEW_STEP = 0.05
+HONDA_ACCORD_11G_MPC_POLICY = {
+  "obstacle_cost": 3.0,
+  "jerk_cost": 5.0,
+  "accel_change_cost": 200.0,
+  "cruise_min_accel": -1.2,
+  "cruise_max_accel": 1.6,
+  "lead_accel_tau": 1.5,
+}
 HYUNDAI_ELANTRA_LEAD_FOLLOW_JERK_SCALE = 1.25
 GENESIS_GV70_ELECTRIFIED_LEAD_FOLLOW_JERK_SCALE = 1.75
 FORD_LIGHTNING_LEAD_FOLLOW_JERK_SCALE = 1.35
@@ -186,6 +194,10 @@ def get_honda_accord_11g_min_action_delay(CP):
 
 def get_honda_accord_11g_accel_clip_slew_step(CP):
   return HONDA_ACCORD_11G_ACCEL_CLIP_SLEW_STEP if is_honda_accord_11g(CP) else None
+
+
+def get_honda_accord_11g_mpc_policy(CP):
+  return HONDA_ACCORD_11G_MPC_POLICY if is_honda_accord_11g(CP) else None
 
 
 def get_honda_accord_11g_reduction_only_v_cruise(CP, stock_v_cruise, starpilot_v_cruise):
