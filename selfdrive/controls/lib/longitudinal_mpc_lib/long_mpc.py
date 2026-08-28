@@ -14,6 +14,7 @@ from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import DT_MDL
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.controls.lib.lead_behavior import get_tracked_lead_catchup_bias, is_radarless_matched_follow_window
+from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import get_honda_accord_11g_mpc_policy
 # WARNING: imports outside of constants will not trigger a rebuild
 from openpilot.selfdrive.modeld.constants import index_function, ModelConstants
 
@@ -428,10 +429,11 @@ def gen_long_ocp():
 
 
 class LongitudinalMpc:
-  def __init__(self, mode='acc', dt=DT_MDL):
+  def __init__(self, mode='acc', dt=DT_MDL, CP=None, solver=None):
     self.mode = mode
     self.dt = dt
-    self.solver = AcadosOcpSolverCython(MODEL_NAME, ACADOS_SOLVER_TYPE, N)
+    self.honda_accord_11g_policy = get_honda_accord_11g_mpc_policy(CP)
+    self.solver = solver if solver is not None else AcadosOcpSolverCython(MODEL_NAME, ACADOS_SOLVER_TYPE, N)
     self.source = SOURCES[2]
     # Initialize smoothing filters with default time constants
     self.current_filter_time = LEAD_FILTER_TIME_LOW
@@ -508,6 +510,19 @@ class LongitudinalMpc:
                   personality=log.LongitudinalPersonality.standard, v_ego=0.0, lead_dist=50.0,
                   uncertainty=0.0, accel_reengage=False, panic_bypass=False,
                   filter_time_factor_floor=0.0):
+    if self.honda_accord_11g_policy is not None:
+      policy = self.honda_accord_11g_policy
+      jerk_factor = get_jerk_factor(personality=personality)[0]
+      self.current_x_ego_cost = policy["obstacle_cost"]
+      self.current_j_ego_cost = policy["jerk_cost"]
+      self.current_a_change_cost = policy["accel_change_cost"]
+      self.current_dist_adapt = 0.0
+      a_change_cost = jerk_factor * policy["accel_change_cost"] if prev_accel_constraint else 0.0
+      cost_weights = [policy["obstacle_cost"], X_EGO_COST, V_EGO_COST, A_EGO_COST,
+                      a_change_cost, jerk_factor * policy["jerk_cost"]]
+      self.set_cost_weights(cost_weights, [LIMIT_COST, LIMIT_COST, LIMIT_COST, DANGER_ZONE_COST])
+      return
+
     # Update parameters based on current speed with interpolation for smooth scaling
     speed_mph = v_ego * CV.MS_TO_MPH  # Convert m/s to mph
 
@@ -601,7 +616,13 @@ class LongitudinalMpc:
         self.solver.set(i, 'x', self.x0)
 
   @staticmethod
-  def extrapolate_lead(x_lead, v_lead, a_lead, a_lead_tau, v_ego=0.0):
+  def extrapolate_lead(x_lead, v_lead, a_lead, a_lead_tau, v_ego=0.0, *, raw_decay=False):
+    if raw_decay:
+      a_lead_traj = a_lead * np.exp(-a_lead_tau * (T_IDXS ** 2) / 2.0)
+      v_lead_traj = np.clip(v_lead + np.cumsum(T_DIFFS * a_lead_traj), 0.0, 1e8)
+      x_lead_traj = x_lead + np.cumsum(T_DIFFS * v_lead_traj)
+      return np.column_stack((x_lead_traj, v_lead_traj))
+
     speed_mph = v_ego * CV.MS_TO_MPH
     bp = [0, 20, 35]
     exp_weight = np.interp(speed_mph, bp, [1.0, 1.0, 0.0])  # Full exp at <20, blend to constant at 35
@@ -630,6 +651,24 @@ class LongitudinalMpc:
                    smooth_duplicate_vision=False, model_lead=None):
     v_ego = self.x0[1]
     lead_active = lead is not None and lead.status and tracking_lead
+    if self.honda_accord_11g_policy is not None:
+      if lead_active:
+        x_lead = lead.dRel
+        v_lead = lead.vLead
+        a_lead = lead.aLeadK
+        a_lead_tau = lead.aLeadTau
+      else:
+        x_lead = 50.0
+        v_lead = v_ego + 10.0
+        a_lead = 0.0
+        a_lead_tau = self.honda_accord_11g_policy["lead_accel_tau"]
+
+      min_x_lead = ((v_ego + v_lead) / 2) * (v_ego - v_lead) / (-ACCEL_MIN * 2)
+      x_lead = np.clip(x_lead, min_x_lead, 1e8)
+      v_lead = np.clip(v_lead, 0.0, 1e8)
+      a_lead = np.clip(a_lead, -10.0, 5.0)
+      return self.extrapolate_lead(x_lead, v_lead, a_lead, a_lead_tau, raw_decay=True)
+
     if lead_active:
       model_lead_xv = build_model_lead_trajectory(model_lead, lead, v_ego)
       if model_lead_xv is not None:
@@ -928,6 +967,19 @@ class LongitudinalMpc:
              tracked_lead_catchup_bias_gain=None, tracked_lead_catchup_bias_cap=None,
              tracked_lead_catchup_speed_range=None, tracked_lead_catchup_fade_margins=None,
              tracked_lead_catchup_cruise_error_full=None):
+    if self.honda_accord_11g_policy is not None:
+      t_follow = get_T_FOLLOW(personality=personality)
+      optional_far_lead_comfort = False
+      smooth_duplicate_vision = False
+      modelV2 = None
+      lead_obstacle_bias = (0.0, 0.0)
+      tracked_lead_catchup_headway_margins = None
+      tracked_lead_catchup_bias_gain = None
+      tracked_lead_catchup_bias_cap = None
+      tracked_lead_catchup_speed_range = None
+      tracked_lead_catchup_fade_margins = None
+      tracked_lead_catchup_cruise_error_full = None
+
     v_ego = self.x0[1]
     lead_one = radarstate.leadOne
     lead_two = radarstate.leadTwo
@@ -951,7 +1003,7 @@ class LongitudinalMpc:
     lead_1_obstacle -= float(lead_obstacle_bias[1])
 
     self.params[:,0] = ACCEL_MIN
-    self.params[:,1] = max(0.0, self.max_a)
+    self.params[:,1] = ACCEL_MAX if self.honda_accord_11g_policy is not None else max(0.0, self.max_a)
 
     # Update in ACC mode or ACC/e2e blend
     if self.mode == 'acc':
@@ -959,9 +1011,17 @@ class LongitudinalMpc:
 
       # Fake an obstacle for cruise, this ensures smooth acceleration to set speed
       # when the leads are no factor.
-      v_lower = v_ego + (T_IDXS * self.cruise_min_a * 1.05)
+      cruise_min_a = (
+        self.honda_accord_11g_policy["cruise_min_accel"]
+        if self.honda_accord_11g_policy is not None else self.cruise_min_a
+      )
+      cruise_max_a = (
+        self.honda_accord_11g_policy["cruise_max_accel"]
+        if self.honda_accord_11g_policy is not None else self.max_a
+      )
+      v_lower = v_ego + (T_IDXS * cruise_min_a * 1.05)
       # TODO does this make sense when max_a is negative?
-      v_upper = v_ego + (T_IDXS * self.max_a * 1.05)
+      v_upper = v_ego + (T_IDXS * cruise_max_a * 1.05)
       v_cruise_clipped = np.clip(v_cruise * np.ones(N+1),
                                  v_lower,
                                  v_upper)
