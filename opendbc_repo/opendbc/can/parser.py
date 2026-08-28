@@ -9,6 +9,8 @@ from opendbc.can.dbc import DBC, Signal
 
 MAX_BAD_COUNTER = 5
 CAN_INVALID_CNT = 5
+CAN_DIAGNOSTIC_INTERVAL_NS = 1_000_000_000
+CAN_DIAGNOSTIC_MAX_OFFENDERS = 8
 
 
 def get_raw_value(dat: bytes | bytearray, sig: Signal) -> int:
@@ -126,7 +128,7 @@ class VLDict(dict):
 
 
 class CANParser:
-  def __init__(self, dbc_name: str, messages: list[tuple[str | int, int]], bus: int):
+  def __init__(self, dbc_name: str, messages: list[tuple[str | int, int]], bus: int, *, enable_can_valid_diagnostics: bool = False):
     self.dbc_name: str = dbc_name
     self.bus: int = bus
     self.dbc: DBC = DBC(dbc_name)
@@ -137,6 +139,11 @@ class CANParser:
     self.ts_nanos: dict[int | str, dict[str, int]] = {}
     self.addresses: set[int] = set()
     self.message_states: dict[int, MessageState] = {}
+
+    self._enable_can_valid_diagnostics = enable_can_valid_diagnostics
+    self._seen_valid = False
+    self._previous_can_valid = False
+    self._last_diagnostic_nanos: int | None = None
 
     for name_or_addr, freq in messages:
       if isinstance(name_or_addr, numbers.Number):
@@ -217,7 +224,52 @@ class CANParser:
 
     # TODO: probably only want to increment this once per update() call
     self.can_invalid_cnt = 0 if valid else min(self.can_invalid_cnt + 1, CAN_INVALID_CNT)
-    return self.can_invalid_cnt < CAN_INVALID_CNT and counters_valid
+    result = self.can_invalid_cnt < CAN_INVALID_CNT and counters_valid
+
+    if self._enable_can_valid_diagnostics:
+      if result:
+        self._seen_valid = True
+      if self._seen_valid and self._previous_can_valid and not result:
+        if self._last_diagnostic_nanos is None or (self._last_update_nanos - self._last_diagnostic_nanos) >= CAN_DIAGNOSTIC_INTERVAL_NS:
+          offenders = []
+          for state in sorted(self.message_states.values(), key=lambda s: s.address):
+            causes = []
+            if state.counter_fail >= MAX_BAD_COUNTER:
+              causes.append("counter-invalid")
+            if not state.ignore_alive:
+              if not state.timestamps:
+                causes.append("missing")
+              else:
+                if not state.valid(self._last_update_nanos, bus_timeout):
+                  causes.append("stale")
+            if causes:
+              if state.timestamps:
+                age_ms = max(0, (self._last_update_nanos - state.timestamps[-1]) * 1e-6)
+              else:
+                age_ms = "unknown"
+              if state.frequency > 0:
+                frequency_hz = state.frequency
+              elif not state.ignore_alive and state.timeout_threshold > 0:
+                frequency_hz = 10_000_000_000 / state.timeout_threshold
+              else:
+                frequency_hz = "unknown"
+              offenders.append({
+                "address": hex(state.address),
+                "name": state.name,
+                "causes": ", ".join(causes),
+                "frequency_hz": frequency_hz,
+                "age_ms": age_ms,
+              })
+          omitted = max(0, len(offenders) - CAN_DIAGNOSTIC_MAX_OFFENDERS)
+          if omitted > 0:
+            offenders = offenders[:CAN_DIAGNOSTIC_MAX_OFFENDERS]
+          diagnostic = f"CANParser canValid falling edge: bus={self.bus}, offender_count={len(offenders) + omitted}, "
+          diagnostic += f"offenders={offenders}, omitted={omitted}"
+          carlog.error(diagnostic)
+          self._last_diagnostic_nanos = self._last_update_nanos
+
+    self._previous_can_valid = result
+    return result
 
   def update(self, strings, sendcan: bool = False):
     if strings and not isinstance(strings[0], list | tuple):

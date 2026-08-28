@@ -5,6 +5,7 @@ import pytest
 from opendbc.car import Bus, structs
 from opendbc.car.structs import CarParams
 from opendbc.car import gen_empty_fingerprint
+from opendbc.car.honda.carstate import CarState
 from opendbc.car.honda.interface import CarInterface
 from opendbc.car.honda.carcontroller import (
   CarController,
@@ -277,6 +278,19 @@ class TestHondaFingerprint:
     assert Bus.radar not in DBC[crv_cp.carFingerprint]
     assert accord_cp.safetyConfigs[-1].safetyParam & HondaSafetyFlags.BOSCH_CANFD_MVL
     assert not crv_cp.safetyConfigs[-1].safetyParam & HondaSafetyFlags.BOSCH_CANFD_MVL
+
+  def test_can_valid_diagnostics_are_scoped_to_accord_11g(self):
+    fpcp = SimpleNamespace(flags=0)
+    accord_cp = CarInterface.get_non_essential_params(CAR.HONDA_ACCORD_11G)
+    civic_cp = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC_BOSCH)
+
+    accord_parsers = CarState(accord_cp, fpcp).get_can_parsers(accord_cp)
+    civic_parsers = CarState(civic_cp, fpcp).get_can_parsers(civic_cp)
+
+    assert accord_parsers
+    assert all(parser._enable_can_valid_diagnostics for parser in accord_parsers.values())
+    assert civic_parsers
+    assert all(not parser._enable_can_valid_diagnostics for parser in civic_parsers.values())
 
   def test_nidec_pedal_detection_enables_interceptor_path(self):
     toggles = get_test_toggles()

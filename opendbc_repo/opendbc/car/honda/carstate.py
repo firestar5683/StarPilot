@@ -354,26 +354,27 @@ class CarState(CarStateBase):
 
   def get_can_parsers(self, CP):
     pt_messages = [("GAS_SENSOR", 0)] if CP.enableGasInterceptorDEPRECATED else []
+    enable_can_valid_diagnostics = CP.carFingerprint == CAR.HONDA_ACCORD_11G
     if CP.carFingerprint == CAR.HONDA_ACCORD_11G:
       # Both deliberately go silent during the handover, so skip alive/timeout checks.
       pt_messages += [("ACC_CONTROL", float("nan")), ("STEERING_CONTROL", float("nan"))]
 
-    pt_parser = CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, CanBus(CP).pt)
+    pt_parser = CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, CanBus(CP).pt, enable_can_valid_diagnostics=enable_can_valid_diagnostics)
     if CP.enableGasInterceptorDEPRECATED:
       pt_parser.message_states[0x201].ignore_checksum = True
       pt_parser.message_states[0x201].ignore_counter = True
 
     parsers = {
       Bus.pt: pt_parser,
-      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).camera),
+      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).camera, enable_can_valid_diagnostics=enable_can_valid_diagnostics),
     }
     if CP.enableBsm:
-      parsers[Bus.body] = CANParser(DBC[CP.carFingerprint][Bus.body], [], CanBus(CP).radar)
+      parsers[Bus.body] = CANParser(DBC[CP.carFingerprint][Bus.body], [], CanBus(CP).radar, enable_can_valid_diagnostics=enable_can_valid_diagnostics)
     if CP.carFingerprint == CAR.HONDA_ACCORD_11G:
       parsers[Bus.radar] = CANParser(DBC[CP.carFingerprint][Bus.radar], [
         ("RADAR_SUPP_TICK_REFERENCE", 0),
         ("RADAR_HUD_TICK_REFERENCE", 0),
         ("RADAR_50HZ_TICK_REFERENCE", 0),
-      ], CanBus(CP).radar)
+      ], CanBus(CP).radar, enable_can_valid_diagnostics=enable_can_valid_diagnostics)
 
     return parsers
