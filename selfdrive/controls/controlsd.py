@@ -282,6 +282,13 @@ def update_twitch_guard(remaining: float, v_ego: float, standstill: bool) -> flo
   return max(remaining - DT_CTRL, 0.0)
 
 
+def twitch_guard_allowed(honda_accord_11g: bool, blinker_active: bool,
+                         turn_hold_active: bool, lane_change_active: bool) -> bool:
+  if honda_accord_11g:
+    return not (blinker_active or turn_hold_active or lane_change_active)
+  return not (blinker_active or turn_hold_active)
+
+
 def get_control_lateral_smooth_seconds(brand: str, v_ego: float, vehicle_smooth_seconds: float) -> float:
   if brand == "rivian" or (brand == "subaru" and vehicle_smooth_seconds > 0.0):
     return get_car_lateral_smooth_seconds(brand, v_ego, vehicle_smooth_seconds)
@@ -403,6 +410,7 @@ class Controls:
     self.turn_hold_done = False
     self.turn_blinker_swept = 0.0
     self.twitch_guard_remaining = 0.0
+    self.honda_accord_11g_lateral = self.CP.brand == "honda" and self.CP.carFingerprint == HONDA_CAR.HONDA_ACCORD_11G
     self.kona_non_scc_lateral_active = False
     self.kona_non_scc_lateral_faulted = False
     self.elantra_hev_2024_lateral_faulted = False
@@ -590,9 +598,14 @@ class Controls:
     # here is positive for RIGHT turns (pauseturn log: left turn at +148 deg steering
     # angle logs desiredCurvature -0.07), so the blinker maps right=+1, left=-1.
     blinker_dir = float(CS.rightBlinker) - float(CS.leftBlinker)
+    lane_change_active = model_v2.meta.laneChangeState != LaneChangeState.off
     if (CC.latActive and self.twitch_guard_remaining > 0.0 and
-        blinker_dir == 0.0 and self.turn_hold_curvature == 0.0):
+        twitch_guard_allowed(self.honda_accord_11g_lateral, blinker_dir != 0.0,
+                             self.turn_hold_curvature != 0.0, lane_change_active)):
       new_desired_curvature = limit_curvature_to_plan(model_v2, new_desired_curvature, CS.vEgo)
+    # The validated Accord path keeps the native model/action curvature and does not
+    # inherit generic turn-hold or turn-lead shaping. Lane centering remains downstream.
+    accord11g_raw_curvature = new_desired_curvature
     # heading swept in the blinker's direction over the whole blinker cycle (any speed):
     # discriminates a turn not yet made from one being exited (see the re-arm below)
     if blinker_dir == 0.0:
@@ -741,6 +754,11 @@ class Controls:
             held_mag = min(lead_curvature * blinker_dir, abs(self.turn_hold_curvature) + CURVATURE_HOLD_RATCHET_RATE * DT_CTRL)
             self.turn_hold_curvature = math.copysign(held_mag, lead_curvature)
 
+    if self.honda_accord_11g_lateral:
+      new_desired_curvature = accord11g_raw_curvature
+      self.turn_hold_curvature = 0.0
+      self.turn_hold_done = False
+
     new_desired_curvature = self.lane_centering.update(
       new_desired_curvature, model_v2, CS.vEgo,
       self.starpilot_toggles.lane_centering,
@@ -786,9 +804,14 @@ class Controls:
           jerk_factor = self.lc_arrest_jerk_factor + rise_alpha * (jerk_factor - self.lc_arrest_jerk_factor)
       self.lc_arrest_jerk_factor = jerk_factor
 
+    if self.honda_accord_11g_lateral:
+      jerk_factor = 1.0
+
     self.desired_curvature, curvature_limited = clip_curvature(CS.vEgo, self.desired_curvature, new_desired_curvature, lp.roll,
                                                                jerk_factor)
-    lat_smooth_seconds = get_control_lateral_smooth_seconds(self.CP.brand, CS.vEgo, self.CP.lateralSmoothSeconds)
+    lat_smooth_seconds = 0.0 if self.honda_accord_11g_lateral else get_control_lateral_smooth_seconds(
+      self.CP.brand, CS.vEgo, self.CP.lateralSmoothSeconds,
+    )
     lat_delay = self.sm["liveDelay"].lateralDelay + lat_smooth_seconds
 
     actuators.curvature = self.desired_curvature
