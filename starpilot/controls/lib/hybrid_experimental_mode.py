@@ -27,7 +27,7 @@ class HybridExperimentalMode:
     self.prev_a_target = 0.0
     self.last_exp_dominant = False
     self.diag = {}
-    self.record_diag = False
+    self.record_diag = True
 
     # Tunings
     self.HYBRID_EXP_BIAS = 0.0
@@ -107,8 +107,8 @@ class HybridExperimentalMode:
     a_brake_fused = min(a_chill, a_exp)
     a_throttle_fused = a_chill + max(0.0, a_exp - a_chill) * self.HYBRID_EXP_BIAS
 
-    # Output Arbitration
-    is_stopping_event = (self.w_vision > 0.3) or horizon_stopping
+    stop_requested = bool(should_stop_chill or should_stop_exp)
+    is_stopping_event = stop_requested or (self.w_vision > 0.2) or horizon_stopping
     self.last_exp_dominant = bool(is_stopping_event and not is_departing)
 
     if self.last_exp_dominant:

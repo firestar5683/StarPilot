@@ -231,6 +231,15 @@ def test_should_stop_chill_handshake():
   assert should_stop, "should_stop_chill must propagate into the fused stop flag"
 
 
+def test_should_stop_chill_engages_braking_regime_without_vision():
+  controller = make_controller(prev=0.0)
+  model = FakeModel(velocity=[20.0] * 33)
+  a, should_stop = controller.update(20.0, 25.0, FakeLead(), model, 0.0, -1.5, should_stop_chill=True)
+  assert controller.last_exp_dominant, "should_stop_chill must engage the braking regime"
+  assert a == pytest.approx(-1.5, abs=1e-3), f"Must command exp braking on planner stop, got {a}"
+  assert should_stop
+
+
 def test_should_stop_exp_handshake():
   controller = make_controller(prev=0.0)
   model = FakeModel(velocity=[5.0] * 33)
