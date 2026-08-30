@@ -1296,7 +1296,7 @@ ROUTE_THUMBNAIL_WAIT_SECONDS = 25
 SEGMENT_DURATION_SECONDS = 60
 # Only ever remux one segment at a time; the driving stack needs the headroom. The
 # subprocess timeout is the hard bound, with a small allowance for executor handoff.
-VIDEO_REMUX_WAIT_SECONDS = utilities.VIDEO_REMUX_TIMEOUT_SECONDS + 5
+VIDEO_REMUX_WAIT_SECONDS = getattr(utilities, "VIDEO_REMUX_TIMEOUT_SECONDS", 60) + 5
 # Segment media never changes once loggerd has closed it, so let the browser keep it.
 VIDEO_CACHE_SECONDS = 7 * 24 * 60 * 60
 _VIDEO_REMUX_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="video-remux")
