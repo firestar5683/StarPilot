@@ -5227,6 +5227,58 @@ def setup(app):
   def unlock_doors():
     return _send_door_command(UNLOCK_CMD, False, "Doors unlocked!", "unlock")
 
+  @app.route("/api/doors/settings", methods=["GET"])
+  def get_doors_settings():
+    try:
+      lock_doors = params.get_bool("LockDoors")
+      unlock_doors = params.get_bool("UnlockDoors")
+      lock_timer_raw = params.get("LockDoorsTimer")
+      try:
+        lock_timer = int(lock_timer_raw) if lock_timer_raw is not None else 0
+      except (ValueError, TypeError):
+        lock_timer = 0
+      return jsonify({
+        "lockDoors": lock_doors,
+        "unlockDoors": unlock_doors,
+        "lockDoorsTimer": lock_timer,
+      })
+    except Exception as e:
+      return jsonify({"error": str(e)}), 500
+
+  @app.route("/api/doors/settings", methods=["POST"])
+  def set_doors_settings():
+    try:
+      data = request.get_json() or {}
+      if "lockDoors" in data:
+        params.put_bool("LockDoors", bool(data["lockDoors"]))
+        params.put_bool("ToyotaDoors", True)
+      if "unlockDoors" in data:
+        params.put_bool("UnlockDoors", bool(data["unlockDoors"]))
+        params.put_bool("ToyotaDoors", True)
+      if "lockDoorsTimer" in data:
+        try:
+          timer_val = int(data["lockDoorsTimer"])
+          params.put_int("LockDoorsTimer", timer_val)
+        except (ValueError, TypeError):
+          pass
+
+      params_memory = Params(memory=True)
+      params_memory.put_bool("StarPilotTogglesUpdated", True)
+
+      lock_timer_raw = params.get("LockDoorsTimer")
+      try:
+        lock_timer = int(lock_timer_raw) if lock_timer_raw is not None else 0
+      except (ValueError, TypeError):
+        lock_timer = 0
+
+      return jsonify({
+        "lockDoors": params.get_bool("LockDoors"),
+        "unlockDoors": params.get_bool("UnlockDoors"),
+        "lockDoorsTimer": lock_timer,
+      })
+    except Exception as e:
+      return jsonify({"error": str(e)}), 500
+
   @app.route("/api/error_logs", methods=["GET"])
   def get_error_logs():
     if request.accept_mimetypes["text/html"]:
@@ -9324,17 +9376,21 @@ def setup(app):
     return {"error": "Video not found"}, 404
 
 def main():
+  import logging
+  logging.getLogger("werkzeug").setLevel(logging.ERROR)
+
   while not _ensure_galaxy_web_deps():
     print(f"The Galaxy waiting for Flask dependency ({_GALAXY_WEB_DEPS_ERROR}); retrying in 60s.")
     time.sleep(60)
 
   app = Flask(__name__, static_folder="assets", static_url_path="/assets")
+  app.logger.setLevel(logging.ERROR)
   setup(app)
   threading.Thread(target=_testing_ground_custom_reserved_worker, daemon=True).start()
 
   # Desktop-only debug mode. On-device must stay on 8082 to match Galaxy FRP routing.
   on_device = _is_comma_device_runtime()
-  debug = False if on_device else os.getenv("SP_GALAXY_DEBUG", "1").lower() in {"1", "true", "yes", "on"}
+  debug = False if on_device else os.getenv("SP_GALAXY_DEBUG", "0").lower() in {"1", "true", "yes", "on"}
   port = 8082 if on_device else int(os.getenv("SP_GALAXY_PORT", "8083"))
   host = "0.0.0.0" if on_device else os.getenv("SP_GALAXY_HOST", "0.0.0.0")
   use_reloader = False if on_device else os.getenv("SP_GALAXY_RELOAD", "0" if not debug else "1").lower() in {"1", "true", "yes", "on"}

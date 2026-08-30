@@ -10,21 +10,34 @@
   text-decoration: none;
   transition: background-color var(--transition-fast), box-shadow var(--transition-fast), color var(--transition-fast), transform var(--transition-fast);
   width: 100%;
+  cursor: pointer;
 }
 
-.door-control-button:hover {
+.door-control-button:hover:not(:disabled) {
   box-shadow: var(--shadow-md);
   color: var(--secondary-fg);
   transform: var(--hover-scale-sm);
 }
 
-.door-control-button + .door-control-button {
-  margin-top: var(--padding-sm);
+.door-control-button:disabled {
+  opacity: 0.6;
+  cursor: not-allowed;
+}
+
+.door-buttons-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: var(--padding-md);
+  width: 100%;
+  margin-top: var(--padding-md);
 }
 
 .door-control-text {
   color: var(--text-color);
   text-align: center;
+  margin: var(--padding-sm) 0;
+  font-size: var(--font-size-sm);
+  opacity: 0.9;
 }
 
 .door-control-title {
@@ -42,6 +55,8 @@
 .door-control-wrapper {
   display: flex;
   justify-content: center;
+  width: 100%;
+  padding: 0 var(--padding-md);
 }
 
 .door-control-widget {
@@ -53,13 +68,116 @@
   display: flex;
   flex-direction: column;
   margin-top: var(--padding-xl);
-  max-width: var(--width-lg);
+  max-width: 520px;
+  width: 100%;
   padding: var(--padding-lg);
   transform-origin: top center;
   transition: box-shadow var(--transition-fast), transform var(--transition-fast);
 }
 
-.door-control-widget:hover {
-  box-shadow: var(--shadow-md);
-  transform: var(--hover-scale-sm);
+.door-divider {
+  width: 100%;
+  height: 1px;
+  background: var(--input-bg);
+  margin: var(--padding-lg) 0 var(--padding-md) 0;
+  border: none;
+}
+
+.door-settings-title {
+  width: 100%;
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-bold);
+  color: var(--text-color);
+  margin-bottom: var(--padding-md);
+  text-align: left;
+}
+
+.door-setting-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  width: 100%;
+  padding: var(--padding-sm) 0;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+}
+
+.door-setting-row:last-child {
+  border-bottom: none;
+}
+
+.door-setting-info {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  padding-right: var(--padding-md);
+}
+
+.door-setting-label {
+  font-size: var(--font-size-base);
+  font-weight: var(--font-weight-medium);
+  color: var(--text-color);
+}
+
+.door-setting-desc {
+  font-size: var(--font-size-xs);
+  color: var(--text-muted, #888);
+  margin-top: 2px;
+}
+
+.door-switch {
+  position: relative;
+  display: inline-block;
+  width: 48px;
+  height: 26px;
+  flex-shrink: 0;
+}
+
+.door-switch input {
+  opacity: 0;
+  width: 0;
+  height: 0;
+}
+
+.door-slider {
+  position: absolute;
+  cursor: pointer;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background-color: var(--input-bg);
+  transition: .3s;
+  border-radius: 26px;
+}
+
+.door-slider:before {
+  position: absolute;
+  content: "";
+  height: 20px;
+  width: 20px;
+  left: 3px;
+  bottom: 3px;
+  background-color: white;
+  transition: .3s;
+  border-radius: 50%;
+}
+
+.door-switch input:checked + .door-slider {
+  background-color: var(--accent-color, #8b6cc5);
+}
+
+.door-switch input:checked + .door-slider:before {
+  transform: translateX(22px);
+}
+
+.door-select {
+  background-color: var(--input-bg);
+  color: var(--text-color);
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  border-radius: var(--border-radius-md);
+  padding: var(--padding-xs) var(--padding-sm);
+  font-size: var(--font-size-sm);
+  cursor: pointer;
+  outline: none;
+  min-width: 140px;
 }

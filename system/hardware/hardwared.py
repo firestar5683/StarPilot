@@ -25,7 +25,7 @@ from openpilot.system.hardware import HARDWARE, TICI, AGNOS, PC
 from openpilot.system.loggerd.config import get_available_bytes, get_available_percent, get_used_bytes
 from openpilot.system.statsd import statlog
 from openpilot.common.swaglog import cloudlog
-from openpilot.system.hardware.power_monitoring import PowerMonitoring
+from openpilot.system.hardware.power_monitoring import PowerMonitoring, VOLTAGE_SHUTDOWN_SUSTAINED_TIME_S
 from openpilot.system.hardware.fan_controller import TiciFanController
 from openpilot.system.hardware.usb import (
   CHESTNUT_FW_VERSION,
@@ -552,7 +552,7 @@ def hardware_thread(end_event, hw_queue) -> None:
     msg.deviceState.somPowerDrawW = som_power_draw
 
     if not onroad_conditions["ignition"] and (count % int(30. / DT_HW) == 0):
-      low_v_str = f" [LOW VOLTAGE SUSTAINED: {time.monotonic() - power_monitor.low_voltage_start_time:.1f}s / 30.0s]" if power_monitor.low_voltage_start_time else ""
+      low_v_str = f" [LOW VOLTAGE SUSTAINED: {time.monotonic() - power_monitor.low_voltage_start_time:.1f}s / {VOLTAGE_SHUTDOWN_SUSTAINED_TIME_S:.0f}s]" if power_monitor.low_voltage_start_time else ""
       print(f"[hardwared] Offroad Power: {power_monitor.car_voltage_mV / 1000.0:.2f}V (instant: {power_monitor.car_voltage_instant_mV / 1000.0:.2f}V), draw: {current_power_draw:.1f}W{low_v_str}", flush=True)
 
     # Check if we need to shut down
