@@ -171,7 +171,7 @@ class BlueZClient:
         continue
       props = interfaces[DEVICE_IFACE]
       uuids = [str(value).lower() for value in props.get("UUIDs", [])]
-      audio, controller = device_capabilities(uuids, int(props.get("Class", 0)), str(props.get("Icon", "")))
+      audio, controller = device_capabilities(uuids, int(props.get("Class") or 0), str(props.get("Icon") or ""))
       device = {
         "path": path,
         "address": str(props.get("Address", "")),
@@ -180,7 +180,7 @@ class BlueZClient:
         "trusted": bool(props.get("Trusted", False)),
         "connected": bool(props.get("Connected", False)),
         "blocked": bool(props.get("Blocked", False)),
-        "rssi": int(props["RSSI"]) if "RSSI" in props else None,
+        "rssi": int(props["RSSI"]) if "RSSI" in props and props["RSSI"] is not None else None,
         "uuids": uuids,
         "audio": audio,
         "controller": controller,

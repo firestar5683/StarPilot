@@ -98,7 +98,7 @@ def show_pairing_device(address: str, name: str, paired: bool, trusted: bool, co
                         audio: bool, controller: bool) -> bool:
   known = paired or trusted or connected
   named = bool(name) and name not in {address, "Unknown device"}
-  return known or (named and not blocked and (audio or controller))
+  return known or (named and not blocked)
 
 
 class _DesktopFakeBluetooth:
