@@ -164,26 +164,26 @@ function deviceActions(device) {
   return html`
     <div class="bluetoothActions">
       ${!device.paired ? html`
-        <button disabled="${() => !state.offroad || !!state.busy || pairing()}" @click="${() => request("pair", { address: device.address })}">
+        <button :disabled="${() => !state.offroad || !!state.busy || pairing()}" @click="${() => request("pair", { address: device.address })}">
           ${() => pairing() ? "Pairing…" : "Pair"}
         </button>
       ` : html`
-        <button disabled="${() => !!state.busy}" @click="${() => request(device.connected ? "disconnect" : "connect", { address: device.address })}">
+        <button :disabled="${() => !!state.busy}" @click="${() => request(device.connected ? "disconnect" : "connect", { address: device.address })}">
           ${device.connected ? "Disconnect" : "Connect"}
         </button>
         ${device.audio ? html`
           <button class="${() => audioSelected() ? "selected" : ""}"
-                  disabled="${() => !!state.busy}" @click="${() => request("select_audio", { address: audioSelected() ? "" : device.address })}">
+                  :disabled="${() => !!state.busy}" @click="${() => request("select_audio", { address: audioSelected() ? "" : device.address })}">
             ${() => audioSelected() ? "Stop Using for Audio" : "Use for Audio"}
           </button>
           ${device.connected ? html`
-            <button disabled="${() => !state.offroad || !!state.busy || !!state.audioTestLabel}" @click="${() => request("test_audio", { address: device.address })}">
+            <button :disabled="${() => !state.offroad || !!state.busy || !!state.audioTestLabel}" @click="${() => request("test_audio", { address: device.address })}">
               ${() => state.audioTestAddress === device.address && state.audioTestLabel ? `Test Audio: ${state.audioTestLabel}` : "Test Audio"}
             </button>
           ` : ""}
         ` : ""}
         <button class="bluetoothIconButton bluetoothForgetButton" title="Forget device" aria-label="Forget ${device.name}"
-                disabled="${() => !state.offroad || !!state.busy}" @click="${() => {
+                :disabled="${() => !state.offroad || !!state.busy}" @click="${() => {
           if (window.confirm(`Forget ${device.name}?`)) request("forget", { address: device.address })
         }}"><i class="bi bi-trash3" aria-hidden="true"></i></button>
       `}
@@ -208,17 +208,21 @@ function deviceRow(device) {
   `
 }
 
-function deviceSection(title, icon, devices, emptyText = "") {
+function deviceSection(title, icon, getDevices, emptyText = "") {
   return html`
     <section class="bluetoothSection">
       <div class="bluetoothSectionHeader">
         <div><i class="bi ${icon}" aria-hidden="true"></i><h3>${title}</h3></div>
-        <span>${devices.length}</span>
+        <span>${() => getDevices().length}</span>
       </div>
       <div class="bluetoothSectionBody">
-        ${devices.length ? devices.map(deviceRow) : html`
-          <div class="bluetoothEmptyState">${emptyText}</div>
-        `}
+        ${() => {
+          const list = getDevices()
+          const emptyMsg = typeof emptyText === "function" ? emptyText() : emptyText
+          return list.length ? list.map(deviceRow) : html`
+            <div class="bluetoothEmptyState">${emptyMsg}</div>
+          `
+        }}
       </div>
     </section>
   `
@@ -237,7 +241,7 @@ export function Bluetooth() {
           </div>
         </div>
         <label class="bluetoothSwitch">
-          <input type="checkbox" checked="${() => state.enabled}" disabled="${() => !state.available || !state.offroad || !!state.busy}"
+          <input type="checkbox" :checked="${() => state.enabled}" :disabled="${() => !state.available || !state.offroad || !!state.busy}"
                  @change="${(event) => request("power", { enabled: event.target.checked })}" />
           <span>${() => state.enabled ? "On" : "Off"}</span>
         </label>
@@ -256,13 +260,13 @@ export function Bluetooth() {
       ` : ""}
 
       <div class="bluetoothToolbar">
-        <button disabled="${() => !state.offroad || !state.enabled || !!state.busy}"
+        <button :disabled="${() => !state.offroad || !state.enabled || !!state.busy}"
                 class="${() => state.discovering ? "scanning" : ""}"
                 @click="${() => request(state.discovering ? "stop_scan" : "scan")}">
           <i class="${() => `bi ${state.discovering ? "bi-arrow-repeat" : "bi-search"}`}" aria-hidden="true"></i>
           ${() => state.discovering ? "Searching…" : "Search for Devices"}
         </button>
-        <button class="bluetoothSecondaryButton" disabled="${() => !!state.busy}" @click="${refresh}">
+        <button class="bluetoothSecondaryButton" :disabled="${() => !!state.busy}" @click="${refresh}">
           <i class="bi bi-arrow-clockwise" aria-hidden="true"></i> Refresh
         </button>
         <span class="bluetoothScanHint">Put a device in pairing mode before searching.</span>
@@ -278,8 +282,8 @@ export function Bluetooth() {
           </div>
         ` : ""}
         ${() => !state.loading && state.enabled ? html`
-          ${deviceSection("My Devices", "bi-check2-circle", knownDevices(), "No saved devices yet.")}
-          ${deviceSection("Available Devices", "bi-radar", availableDevices(), state.discovering ? "Searching for nearby devices…" : "No nearby devices found. Start a search to try again.")}
+          ${deviceSection("My Devices", "bi-check2-circle", knownDevices, "No saved devices yet.")}
+          ${deviceSection("Available Devices", "bi-radar", availableDevices, () => state.discovering ? "Searching for nearby devices…" : "No nearby devices found. Start a search to try again.")}
         ` : ""}
       </div>
     </div>
