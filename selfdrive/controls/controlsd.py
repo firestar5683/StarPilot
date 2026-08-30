@@ -383,9 +383,11 @@ class Controls:
 
     self.CI = interfaces[self.CP.carFingerprint](self.CP, self.FPCP)
 
+    self.mute_dm = True  # MuteDM forced on
+    ignore = ['driverMonitoringState'] if self.mute_dm else []
     self.sm = messaging.SubMaster(['liveDelay', 'liveParameters', 'liveTorqueParameters', 'modelV2', 'selfdriveState',
                                    'liveCalibration', 'livePose', 'longitudinalPlan', 'lateralManeuverPlan', 'carState', 'carOutput',
-                                   'driverMonitoringState', 'onroadEvents', 'driverAssistance', 'radarState'], poll='selfdriveState')
+                                   'driverMonitoringState', 'onroadEvents', 'driverAssistance', 'radarState'], ignore_alive=ignore, poll='selfdriveState')
     self.pm = messaging.PubMaster(['carControl', 'controlsState', 'starpilotLateralState'])
 
     self.steer_limited_by_safety = False
@@ -873,7 +875,7 @@ class Controls:
     cs.upAccelCmd = float(self.LoC.pid.p)
     cs.uiAccelCmd = float(self.LoC.pid.i)
     cs.ufAccelCmd = float(self.LoC.pid.f)
-    cs.forceDecel = bool(self.sm['driverMonitoringState'].noResponseForceDecel or
+    cs.forceDecel = bool((not self.mute_dm and self.sm['driverMonitoringState'].noResponseForceDecel) or
                          (self.sm['selfdriveState'].state == State.softDisabling) or self.sm["starpilotCarState"].forceCoast)
 
     lat_tuning = self.CP.lateralTuning.which()
