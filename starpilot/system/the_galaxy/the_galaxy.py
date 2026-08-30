@@ -3320,7 +3320,7 @@ GALAXY_MANUAL_BOOL_PARAM_KEYS = {"IsRHD", "IsRHDOverride"}
 
 def _get_param_type_info():
   global _cached_allowed_keys, _cached_param_types
-  if _cached_allowed_keys is None:
+  if _cached_allowed_keys is None or _cached_param_types is None:
     _cached_allowed_keys = {k for k, _, _, _ in starpilot_default_params if k not in EXCLUDED_KEYS}
 
     types = {}
@@ -6024,10 +6024,11 @@ def setup(app):
   def get_all_params():
     migrate_cancel_button_controls(params)
     allowed_keys, types = _get_param_type_info()
+    types = types or {}
     defaults_lookup = _get_default_param_values()
 
     result = {}
-    for key in allowed_keys:
+    for key in (allowed_keys or ()):
       t = types.get(key, str)
       try:
         result[key] = _get_current_param_value(key, t, defaults_lookup)

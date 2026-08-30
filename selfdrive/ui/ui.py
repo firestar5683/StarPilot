@@ -54,7 +54,6 @@ def main():
     gui_app.init_window("UI")
     stall_monitor.progress("ui.after_init_window")
     gui_app.set_progress_hook(stall_monitor.progress)
-    kick_watchdog()
     stall_monitor.progress("ui.before_layout_init")
     if BIG_UI:
       from openpilot.selfdrive.ui.layouts.main import MainLayout
