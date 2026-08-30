@@ -184,7 +184,7 @@ class Soundd:
       elif sounds_path.exists():
         wavefile = wave.open(str(sounds_path), 'r')
       else:
-        if filename == "startup.wav":
+        if filename == "startup.wav" and not Path(BASEDIR + "/selfdrive/assets/sounds/startup.wav").is_file():
           filename = "engage.wav"
         wavefile = wave.open(BASEDIR + "/selfdrive/assets/sounds/" + filename, 'r')
 
