@@ -232,14 +232,30 @@ class WazeSessionManager:
                     city = ra.alert_reporting_info.alert_address.city if ra.alert_reporting_info.HasField("alert_address") else ""
                     thumbs = ra.alert_reporting_info.thumbs_up_count
 
+                    alert_subtype = ra.alert_info.sub_type if ra.alert_info.HasField("sub_type") else waze_pb2.AlertSubType.NO_SUBTYPE
+                    subtype_name = waze_pb2.AlertSubType.Name(alert_subtype) if alert_subtype in waze_pb2.AlertSubType.values() else ""
+
                     category = "HAZARD"
                     label = "Road Hazard"
                     icon = "⚠️"
 
+                    # Check for verified police presence (POLICE_VISIBLE / POLICE_HIDING / MOBILE_CAMERA with >= 3 thumbs up reports)
+                    is_verified_police = False
                     if alert_type == waze_pb2.AlertType.POLICE:
                         category = "POLICE"
-                        label = "Police Reported"
+                        if alert_subtype == waze_pb2.AlertSubType.POLICE_HIDING:
+                            label = "Police Hidden (Speed Trap)"
+                        elif alert_subtype == waze_pb2.AlertSubType.POLICE_VISIBLE:
+                            label = "Police Visible"
+                        elif alert_subtype == waze_pb2.AlertSubType.POLICE_WITH_MOBILE_CAMERA:
+                            label = "Police Camera"
+                        else:
+                            label = "Police Reported"
                         icon = "🚨"
+
+                        if alert_subtype in (waze_pb2.AlertSubType.POLICE_VISIBLE, waze_pb2.AlertSubType.POLICE_HIDING, waze_pb2.AlertSubType.POLICE_WITH_MOBILE_CAMERA) and (thumbs or 0) >= 3:
+                            is_verified_police = True
+
                     elif alert_type == waze_pb2.AlertType.ACCIDENT:
                         category = "ACCIDENT_MAJOR"
                         label = "Accident Reported"
@@ -255,7 +271,10 @@ class WazeSessionManager:
                         "category": category,
                         "label": label,
                         "icon": icon,
-                        "type": "Waze Alert",
+                        "type": subtype_name or "Waze Alert",
+                        "subtype": alert_subtype,
+                        "thumbs": thumbs or 0,
+                        "is_verified_police": is_verified_police,
                         "location": f"{street}, {city}" if street and city else (street or city or "Roadway"),
                         "desc": f"Waze crowd report ({thumbs} confirmations)" if thumbs else "Waze crowd report",
                         "area": "Waze Community",
@@ -319,6 +338,9 @@ class RoadAlertsDaemon:
                     "label": label,
                     "icon": icon,
                     "type": log_type,
+                    "subtype": 0,
+                    "thumbs": 0,
+                    "is_verified_police": False,
                     "location": location,
                     "desc": desc,
                     "area": area,
@@ -383,6 +405,18 @@ class RoadAlertsDaemon:
             set_shm_param("RoadAlertDetail", closest["detail"])
             set_shm_param("RoadAlertSource", closest["source"])
             set_shm_param("RoadAlertCount", len(upcoming))
+
+            # Auto-slowdown trigger: Verified police (POLICE_VISIBLE / POLICE_HIDING with >= 3 confirmations) within 1.0 mile ahead
+            police_threats = [
+                u for u in upcoming
+                if u.get("is_verified_police", False) and u.get("distance_miles", 99.0) <= 1.0
+            ]
+            if police_threats:
+                set_shm_param("WazePoliceSlowdownActive", True)
+                set_shm_param("WazePoliceSlowdownDist", police_threats[0]["distance_miles"])
+            else:
+                set_shm_param("WazePoliceSlowdownActive", False)
+                set_shm_param("WazePoliceSlowdownDist", 0.0)
         else:
             set_shm_param("RoadAlertActive", False)
             set_shm_param("RoadAlertCategory", "")
@@ -393,6 +427,8 @@ class RoadAlertsDaemon:
             set_shm_param("RoadAlertDetail", "")
             set_shm_param("RoadAlertSource", "")
             set_shm_param("RoadAlertCount", 0)
+            set_shm_param("WazePoliceSlowdownActive", False)
+            set_shm_param("WazePoliceSlowdownDist", 0.0)
 
     def run(self):
         print("[road_alerts_d] Starting Unified Road Alerts daemon (CHP + Waze RT)...")
