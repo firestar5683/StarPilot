@@ -4957,6 +4957,30 @@ def setup(app):
     response.headers["Expires"] = "0"
     return response
 
+  # --- Uniden R4 Radar API Routes ---
+  @app.route("/api/uniden/status", methods=["GET"])
+  def uniden_status():
+    try:
+      return jsonify(get_connection_status()), 200
+    except Exception as e:
+      return jsonify({"error": str(e)}), 500
+
+  @app.route("/api/uniden/settings", methods=["GET", "POST"])
+  def uniden_settings():
+    from starpilot.system.uniden_r4 import update_settings, get_all_settings
+    if request.method == "POST":
+      data = request.get_json(silent=True) or {}
+      updated = update_settings(data)
+      return jsonify(updated), 200
+    return jsonify(get_all_settings()), 200
+
+  @app.route("/api/uniden/action/<action>", methods=["POST"])
+  def uniden_action(action):
+    from starpilot.system.uniden_r4 import trigger_action
+    res = trigger_action(action)
+    code = 200 if res.get("status") == "ok" else 400
+    return jsonify(res), code
+
   @app.route("/api/bluetooth/status", methods=["GET"])
   def bluetooth_status():
     try:
@@ -9375,6 +9399,7 @@ def setup(app):
           max_age=VIDEO_CACHE_SECONDS,
         )
     return {"error": "Video not found"}, 404
+
 
 def main():
   import logging

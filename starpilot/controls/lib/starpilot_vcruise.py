@@ -8,6 +8,7 @@ from openpilot.common.realtime import DT_MDL
 from openpilot.starpilot.common.starpilot_variables import CITY_SPEED_LIMIT, CRUISING_SPEED
 from openpilot.starpilot.controls.lib.curve_speed_controller import CurveSpeedController, is_manual_speed_control
 from openpilot.starpilot.controls.lib.speed_limit_controller import SpeedLimitController
+from openpilot.starpilot.system.uniden_shm import get_shm_param
 from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import (
   get_force_stop_distance_bias,
   get_force_stop_handoff_distance,
@@ -727,6 +728,12 @@ class StarPilotVCruise:
       self._applied_slc_control_target = slc_control_target if slc_control_target > 0.0 else 0.0
       if slc_control_target >= CSC_MIN_SPEED:
         targets.append(slc_control_target)
+
+      # Uniden Radar Detector Auto-Slowdown:
+      # If police radar is active (Ka, K, Laser, MRCD, POP) and a valid speed limit target exists (Map, Vision, Dashboard),
+      # clamp max cruise speed directly down to the road speed limit (ignoring manual set speed overrides).
+      if get_shm_param("UnidenRadarAlertActive", False) and self.slc_target >= CSC_MIN_SPEED:
+        targets.append(float(self.slc_target))
       if self.nav_turn_target > 0.0:
         targets.append(self.nav_turn_target)
 
