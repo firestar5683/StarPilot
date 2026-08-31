@@ -3046,8 +3046,17 @@ class LongitudinalPlanner:
         getattr(starpilot_toggles, "hybrid_exp_bias", 0.0),
         getattr(starpilot_toggles, "hybrid_vision_brake_sensitivity", 1.0),
       )
-      a_exp_raw = float(sm['modelV2'].action.desiredAcceleration)
       should_stop_exp = bool(sm['modelV2'].action.shouldStop)
+      model_v2 = sm['modelV2']
+      if (len(getattr(model_v2.velocity, 'x', [])) == ModelConstants.IDX_N and
+              len(getattr(model_v2.acceleration, 'x', [])) == ModelConstants.IDX_N):
+        v = np.interp(T_IDXS_MPC, ModelConstants.T_IDXS, model_v2.velocity.x)
+        a = np.interp(T_IDXS_MPC, ModelConstants.T_IDXS, model_v2.acceleration.x)
+        v_target = float(np.interp(action_t, T_IDXS_MPC, v))
+        a_exp_traj = 2.0 * (v_target - float(v[0])) / max(action_t, 1e-3) - float(a[0])
+        a_exp_raw = float(np.clip(a_exp_traj, -12.0, 3.0))
+      else:
+        a_exp_raw = float(model_v2.action.desiredAcceleration)
 
       # Pass the active lead that MPC is tracking (leadTwo when source == "lead1")
       # so HEM is never blind to the radar lead actually being followed.
