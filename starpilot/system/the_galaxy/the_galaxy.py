@@ -4957,6 +4957,60 @@ def setup(app):
     response.headers["Expires"] = "0"
     return response
 
+  # --- Live Road Alerts & CHP Hazards API Routes ---
+  @app.route("/api/road_alerts/live", methods=["GET"])
+  def road_alerts_live():
+    from openpilot.starpilot.system.road_alerts_d import RoadAlertsDaemon, haversine_miles, calculate_bearing
+    from openpilot.starpilot.system.uniden_shm import get_shm_param
+    try:
+      daemon = RoadAlertsDaemon()
+      daemon.fetch_feed()
+      daemon.update_gps()
+      
+      # If vehicle GPS isn't locked yet, default to cached or last known position
+      lat = daemon.current_lat if daemon.has_gps and daemon.current_lat != 0 else params.get_float("LastGpsLatitude") or 37.7749
+      lon = daemon.current_lon if daemon.has_gps and daemon.current_lon != 0 else params.get_float("LastGpsLongitude") or -122.4194
+      bearing = daemon.current_bearing
+      
+      daemon.current_lat = lat
+      daemon.current_lon = lon
+      daemon.current_bearing = bearing
+      daemon.has_gps = True
+
+      upcoming = daemon.process_upcoming_alerts(max_radius_miles=25.0) or []
+      
+      active_threat = None
+      if get_shm_param("RoadAlertActive", False):
+        active_threat = {
+          "category": get_shm_param("RoadAlertCategory", ""),
+          "label": get_shm_param("RoadAlertLabel", ""),
+          "icon": get_shm_param("RoadAlertIcon", ""),
+          "distance_miles": get_shm_param("RoadAlertDistance", 0.0),
+          "location": get_shm_param("RoadAlertLocation", ""),
+          "detail": get_shm_param("RoadAlertDetail", ""),
+        }
+      elif upcoming:
+        closest = upcoming[0]
+        active_threat = {
+          "category": closest["category"],
+          "label": closest["label"],
+          "icon": closest["icon"],
+          "distance_miles": closest["distance_miles"],
+          "location": closest["location"],
+          "detail": closest["detail"],
+          "area": closest["area"],
+        }
+
+      return jsonify({
+        "status": "ok",
+        "alerts": upcoming,
+        "active_threat": active_threat,
+        "total_count": len(upcoming),
+        "gps": {"lat": lat, "lon": lon, "bearing": bearing}
+      }), 200
+    except Exception as e:
+      return jsonify({"status": "error", "error": str(e)}), 500
+
   # --- Uniden R4 Radar API Routes ---
   @app.route("/api/uniden/status", methods=["GET"])
   def uniden_status():

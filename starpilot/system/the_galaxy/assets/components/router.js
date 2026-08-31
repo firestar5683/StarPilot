@@ -1,3 +1,4 @@
+import { RoadAlertsView } from "/assets/components/tools/road_alerts.js"
 import { UnidenR4View } from "/assets/components/tools/uniden_r4.js"
 import { html, reactive } from "/assets/vendor/arrow-core.js"
 import { createBrowserHistory, createRouter } from "/assets/vendor/remix-router-1.3.1.js"
@@ -71,6 +72,7 @@ function Root() {
   let routes = [
     createRoute("bluetooth", "/bluetooth", Bluetooth),
     createRoute("uniden_r4", "/uniden_r4", UnidenR4View),
+    createRoute("road_alerts", "/road_alerts", RoadAlertsView),
     createRoute("wheel_controls", "/wheel-controls", WheelControls),
     createRoute("device_settings", "/device_settings/:section?", DeviceSettings),
     createRoute("errorLogs", "/manage_error_logs", ErrorLogs),
