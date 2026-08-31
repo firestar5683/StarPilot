@@ -4964,10 +4964,8 @@ def setup(app):
     from openpilot.starpilot.system.uniden_shm import get_shm_param
     try:
       daemon = RoadAlertsDaemon()
-      daemon.fetch_feed()
       daemon.update_gps()
       
-      # If vehicle GPS isn't locked yet, default to cached or last known position
       lat = daemon.current_lat if daemon.has_gps and daemon.current_lat != 0 else params.get_float("LastGpsLatitude") or 37.7749
       lon = daemon.current_lon if daemon.has_gps and daemon.current_lon != 0 else params.get_float("LastGpsLongitude") or -122.4194
       bearing = daemon.current_bearing
@@ -4977,11 +4975,15 @@ def setup(app):
       daemon.current_bearing = bearing
       daemon.has_gps = True
 
+      daemon.fetch_chp()
+      daemon.fetch_waze()
+
       upcoming = daemon.process_upcoming_alerts(max_radius_miles=25.0) or []
       
       active_threat = None
       if get_shm_param("RoadAlertActive", False):
         active_threat = {
+          "source": get_shm_param("RoadAlertSource", ""),
           "category": get_shm_param("RoadAlertCategory", ""),
           "label": get_shm_param("RoadAlertLabel", ""),
           "icon": get_shm_param("RoadAlertIcon", ""),
@@ -4992,6 +4994,7 @@ def setup(app):
       elif upcoming:
         closest = upcoming[0]
         active_threat = {
+          "source": closest.get("source", ""),
           "category": closest["category"],
           "label": closest["label"],
           "icon": closest["icon"],

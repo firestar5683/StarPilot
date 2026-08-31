@@ -1,18 +1,24 @@
 #!/usr/bin/env python3
 import asyncio
+import base64
 import math
 import os
 import time
 import urllib.request
+import uuid
 import xml.etree.ElementTree as ET
+import requests
 from cereal import messaging
 from openpilot.common.params import Params
 from openpilot.starpilot.system.uniden_shm import set_shm_param, get_shm_param
+from openpilot.starpilot.system.waze import waze_pb2
 
 CHP_URL = "https://media.chp.ca.gov/sa_xml/sa.xml"
-SHM_PARAMS_PATH = "/dev/shm/params/d"
+WAZE_RT_HOST = "rt-xlb-am.waze.com"
+APP_VERSION = "5.17.1.0"
+PROTOCOL_VERSION = 234
 
-# Category definitions based on Sabre Plus / AlertMapper
+# Category definitions
 MAJOR_ACCIDENT_CODES = ("1179", "1180", "1181", "1183", "1141", "1144", "20001", "FATAL", "SIG ALERT")
 MINOR_ACCIDENT_CODES = ("1182", "20002")
 POLICE_CODES = ("1184", "CZP", "MZP", "OFFICER", "COP", "POLICE")
@@ -49,7 +55,7 @@ def parse_chp_latlon(latlon_str):
         pass
     return None, None
 
-def classify_incident(log_type):
+def classify_chp_incident(log_type):
     t = log_type.upper()
     if any(code in t for code in MAJOR_ACCIDENT_CODES):
         return "ACCIDENT_MAJOR", "Major Accident", "💥"
@@ -65,17 +71,218 @@ def classify_incident(log_type):
         return "DEBRIS", "Road Hazard", "⚠️"
     return "HAZARD", "Road Incident", "⚠️"
 
+class WazeSessionManager:
+    def __init__(self):
+        self.session = requests.Session()
+        self.session_id = None
+        self.secret_key = None
+        self.username = None
+        self.password = None
+        self.seq = 1
+        self.device_uuid = str(uuid.uuid4())
+
+    def _next_seq(self):
+        s = str(self.seq)
+        self.seq += 1
+        return s
+
+    def _proto_base64_line(self, element):
+        batch = waze_pb2.Batch()
+        batch.element.extend([element])
+        data = batch.SerializeToString()
+        b64 = base64.b64encode(data).decode("ascii")
+        return f"ProtoBase64,{b64}"
+
+    def register_and_login(self, lat=37.7749, lon=-122.4194):
+        try:
+            element_ci = waze_pb2.Element()
+            ci = element_ci.client_info
+            ci.protocol = PROTOCOL_VERSION
+            ci.client_version = APP_VERSION
+            ci.last_position.lon_times1000000 = int(round(lon * 1_000_000))
+            ci.last_position.lat_times1000000 = int(round(lat * 1_000_000))
+            ci.manufacturer = "Google"
+            ci.model = "Pixel"
+            ci.os_version = "14"
+            ci.locale = "en"
+            ci.installation_id = self.device_uuid
+            ci.device_type = waze_pb2.DeviceType.ANDROID_DEVICE
+            ci.app_type = waze_pb2.AppType.WAZE
+            ci.os_language_id = "en"
+            ci.session_uuid = str(uuid.uuid4())
+            ci.current_time_millis = int(time.time() * 1000)
+            ci.app_flavor = waze_pb2.AppFlavor.ALPHA
+
+            element_reg = waze_pb2.Element()
+            element_reg.register.SetInParent()
+
+            body = self._proto_base64_line(element_ci) + "\n" + self._proto_base64_line(element_reg)
+            headers = {
+                "User-Agent": APP_VERSION,
+                "x-waze-network-version": "3",
+                "sequence-number": self._next_seq(),
+                "Content-Type": "binary/octet-stream"
+            }
+
+            url = f"https://{WAZE_RT_HOST}/rtserver/distrib/static"
+            r = self.session.post(url, data=body.encode("utf-8"), headers=headers, timeout=12)
+            if r.status_code == 200:
+                batch = waze_pb2.Batch()
+                batch.ParseFromString(r.content)
+                for el in batch.element:
+                    if el.HasField("register_successful"):
+                        self.username = el.register_successful.username
+                        self.password = el.register_successful.password
+                        break
+
+            if not self.username or not self.password:
+                return False
+
+            element_login = waze_pb2.Element()
+            lr = element_login.login_request
+            lr.password_credential.username = self.username
+            lr.password_credential.password = self.password
+            lr.reason = waze_pb2.LoginRequest.LoginReason.NORMAL
+
+            element_ads = waze_pb2.Element()
+            element_ads.report_ads_setting.SetInParent()
+
+            body_login = (
+                self._proto_base64_line(element_ci) + "\n"
+                + self._proto_base64_line(element_login) + "\n"
+                + self._proto_base64_line(element_ads)
+            )
+            headers_login = {
+                "User-Agent": APP_VERSION,
+                "x-waze-network-version": "3",
+                "sequence-number": self._next_seq(),
+                "x-waze-wait-timeout": "8500",
+                "Content-Type": "binary/octet-stream"
+            }
+
+            url_login = f"https://{WAZE_RT_HOST}/rtserver/distrib/login"
+            r_login = self.session.post(url_login, data=body_login.encode("utf-8"), headers=headers_login, timeout=15)
+            if r_login.status_code == 200:
+                batch_login = waze_pb2.Batch()
+                batch_login.ParseFromString(r_login.content)
+                for el in batch_login.element:
+                    if el.HasField("login_response") and el.login_response.HasField("login_success"):
+                        ls = el.login_response.login_success
+                        self.session_id = ls.server_session_id
+                        self.secret_key = ls.secret_key
+                        return True
+            return False
+        except Exception as e:
+            print(f"[road_alerts_d] Waze login error: {e}")
+            return False
+
+    def query(self, lat, lon, box_radius_deg=0.06):
+        if not self.session_id:
+            if not self.register_and_login(lat, lon):
+                return []
+
+        lon_min = lon - box_radius_deg
+        lon_max = lon + box_radius_deg
+        lat_min = lat - (box_radius_deg * 0.8)
+        lat_max = lat + (box_radius_deg * 0.8)
+        mid_lon = (lon_min + lon_max) / 2.0
+        mid_lat = (lat_min + lat_max) / 2.0
+
+        cmd_map = (
+            f"MapDisplayed,{lon_min:.6f},{lat_max:.6f},{lon_max:.6f},{lat_max:.6f},"
+            f"{lon_max:.6f},{lat_min:.6f},{lon_min:.6f},{lat_min:.6f},"
+            f"{mid_lon:.6f},{mid_lat:.6f},67186,"
+            f"{lon_min:.6f},{lat_max:.6f},{lon_max:.6f},{lat_max:.6f},"
+            f"{lon_max:.6f},{lat_min:.6f},{lon_min:.6f},{lat_min:.6f}"
+        )
+        body = f"SeeMe,1,2,T,T,T,1,-1,1,7\nSetMood,1\nLocation,{lon:.6f},{lat:.6f}\n{cmd_map}"
+
+        uid = waze_pb2.UID()
+        uid.id = self.session_id
+        uid.secret_key = self.secret_key
+        uid_hdr = base64.b64encode(uid.SerializeToString()).decode("ascii")
+
+        headers = {
+            "User-Agent": APP_VERSION,
+            "x-waze-network-version": "3",
+            "sequence-number": self._next_seq(),
+            "x-waze-wait-timeout": "10500",
+            "uid": uid_hdr,
+            "Content-Type": "binary/octet-stream"
+        }
+
+        try:
+            url = f"https://{WAZE_RT_HOST}/rtserver/distrib/command"
+            r = self.session.post(url, data=body.encode("utf-8"), headers=headers, timeout=20)
+            if r.status_code != 200:
+                self.session_id = None
+                return []
+
+            batch = waze_pb2.Batch()
+            batch.ParseFromString(r.content)
+            alerts = []
+            for el in batch.element:
+                if el.HasField("add_alert_action"):
+                    ra = el.add_alert_action.realtime_alert
+                    alert_type = ra.alert_info.type
+                    alert_lat = ra.alert_info.position.lat_times1000000 / 1_000_000.0
+                    alert_lon = ra.alert_info.position.lon_times1000000 / 1_000_000.0
+                    
+                    street = ra.alert_reporting_info.alert_address.street if ra.alert_reporting_info.HasField("alert_address") else ""
+                    city = ra.alert_reporting_info.alert_address.city if ra.alert_reporting_info.HasField("alert_address") else ""
+                    thumbs = ra.alert_reporting_info.thumbs_up_count
+
+                    category = "HAZARD"
+                    label = "Road Hazard"
+                    icon = "⚠️"
+
+                    if alert_type == waze_pb2.AlertType.POLICE:
+                        category = "POLICE"
+                        label = "Police Reported"
+                        icon = "🚨"
+                    elif alert_type == waze_pb2.AlertType.ACCIDENT:
+                        category = "ACCIDENT_MAJOR"
+                        label = "Accident Reported"
+                        icon = "💥"
+                    elif alert_type in (waze_pb2.AlertType.ROAD_CLOSED, waze_pb2.AlertType.SYSTEM_ROAD_CLOSED, waze_pb2.AlertType.TURN_CLOSED):
+                        category = "CLOSURE"
+                        label = "Road Closure"
+                        icon = "⛔"
+
+                    alerts.append({
+                        "id": f"waze_{ra.id}",
+                        "source": "Waze",
+                        "category": category,
+                        "label": label,
+                        "icon": icon,
+                        "type": "Waze Alert",
+                        "location": f"{street}, {city}" if street and city else (street or city or "Roadway"),
+                        "desc": f"Waze crowd report ({thumbs} confirmations)" if thumbs else "Waze crowd report",
+                        "area": "Waze Community",
+                        "time": time.strftime("%I:%M %p"),
+                        "lat": alert_lat,
+                        "lon": alert_lon,
+                        "detail": f"{thumbs} driver confirmations" if thumbs else ""
+                    })
+            return alerts
+        except Exception as e:
+            print(f"[road_alerts_d] Waze query error: {e}")
+            self.session_id = None
+            return []
+
 class RoadAlertsDaemon:
     def __init__(self):
         self.sm = messaging.SubMaster(["gpsLocationExternal", "livePose"])
+        self.waze = WazeSessionManager()
         self.cached_incidents = []
-        self.last_fetch_time = 0.0
+        self.last_chp_fetch = 0.0
+        self.last_waze_fetch = 0.0
         self.current_lat = 0.0
         self.current_lon = 0.0
         self.current_bearing = 0.0
         self.has_gps = False
 
-    def fetch_feed(self):
+    def fetch_chp(self):
         try:
             req = urllib.request.Request(CHP_URL, headers={"User-Agent": "starpilot/1.0"})
             with urllib.request.urlopen(req, timeout=8) as resp:
@@ -103,10 +310,11 @@ class RoadAlertsDaemon:
                 clean_details = [d.strip() for d in details if d.strip()]
                 last_detail = clean_details[-1] if clean_details else desc
 
-                category, label, icon = classify_incident(log_type)
+                category, label, icon = classify_chp_incident(log_type)
 
                 incidents.append({
-                    "id": log_id,
+                    "id": f"chp_{log_id}",
+                    "source": "CHP",
                     "category": category,
                     "label": label,
                     "icon": icon,
@@ -119,10 +327,17 @@ class RoadAlertsDaemon:
                     "lon": lon,
                     "detail": last_detail
                 })
-            self.cached_incidents = incidents
-            self.last_fetch_time = time.monotonic()
+            self.chp_incidents = incidents
+            self.last_chp_fetch = time.monotonic()
         except Exception as e:
-            print(f"[road_alerts_d] Error fetching feed: {e}")
+            print(f"[road_alerts_d] Error fetching CHP feed: {e}")
+
+    def fetch_waze(self):
+        if not self.has_gps or self.current_lat == 0:
+            return
+        waze_alerts = self.waze.query(self.current_lat, self.current_lon)
+        self.waze_incidents = waze_alerts
+        self.last_waze_fetch = time.monotonic()
 
     def update_gps(self):
         self.sm.update(0)
@@ -138,15 +353,15 @@ class RoadAlertsDaemon:
         if not self.has_gps or self.current_lat == 0:
             return None
 
+        combined = getattr(self, "chp_incidents", []) + getattr(self, "waze_incidents", [])
         upcoming = []
-        for inc in self.cached_incidents:
+        for inc in combined:
             dist = haversine_miles(self.current_lat, self.current_lon, inc["lat"], inc["lon"])
             if dist <= max_radius_miles:
-                # Calculate relative bearing to check if ahead of car (within 75 degrees cone)
                 target_bearing = calculate_bearing(self.current_lat, self.current_lon, inc["lat"], inc["lon"])
                 bearing_diff = abs((target_bearing - self.current_bearing + 180) % 360 - 180)
                 
-                is_ahead = bearing_diff <= 75.0 or dist <= 0.3  # immediate proximity or forward cone
+                is_ahead = bearing_diff <= 75.0 or dist <= 0.3
                 if is_ahead:
                     inc_copy = dict(inc)
                     inc_copy["distance_miles"] = round(dist, 1)
@@ -166,6 +381,7 @@ class RoadAlertsDaemon:
             set_shm_param("RoadAlertDistance", closest["distance_miles"])
             set_shm_param("RoadAlertLocation", closest["location"])
             set_shm_param("RoadAlertDetail", closest["detail"])
+            set_shm_param("RoadAlertSource", closest["source"])
             set_shm_param("RoadAlertCount", len(upcoming))
         else:
             set_shm_param("RoadAlertActive", False)
@@ -175,17 +391,23 @@ class RoadAlertsDaemon:
             set_shm_param("RoadAlertDistance", 0.0)
             set_shm_param("RoadAlertLocation", "")
             set_shm_param("RoadAlertDetail", "")
+            set_shm_param("RoadAlertSource", "")
             set_shm_param("RoadAlertCount", 0)
 
     def run(self):
-        print("[road_alerts_d] Starting Road Alerts daemon...")
+        print("[road_alerts_d] Starting Unified Road Alerts daemon (CHP + Waze RT)...")
         while True:
             try:
-                # Refresh feed every 45 seconds
-                if time.monotonic() - self.last_fetch_time > 45.0:
-                    self.fetch_feed()
-
                 self.update_gps()
+                
+                # Fetch CHP every 45s
+                if time.monotonic() - self.last_chp_fetch > 45.0:
+                    self.fetch_chp()
+
+                # Fetch Waze every 25s
+                if time.monotonic() - self.last_waze_fetch > 25.0:
+                    self.fetch_waze()
+
                 upcoming = self.process_upcoming_alerts()
                 self.publish_to_shm(upcoming)
                 time.sleep(1.0)
