@@ -26,8 +26,6 @@ const state = reactive({
   }
 })
 
-let initialized = false
-
 function notify(msg, level) {
   if (typeof window.showSnackbar === "function") {
     window.showSnackbar(msg, level)
@@ -43,7 +41,12 @@ async function loadData() {
       fetch("/api/uniden/settings", { cache: "no-store" })
     ])
     if (resStatus.ok) state.status = await resStatus.json()
-    if (resSettings.ok) state.settings = await resSettings.json()
+    if (resSettings.ok) {
+      const data = await resSettings.json()
+      for (const [k, v] of Object.entries(data)) {
+        state.settings[k] = v
+      }
+    }
   } catch (e) {
     console.error("Failed to load Uniden R4 data:", e)
   } finally {
@@ -61,7 +64,9 @@ async function updateSetting(key, val) {
     })
     if (res.ok) {
       const data = await res.json()
-      state.settings = data
+      for (const [k, v] of Object.entries(data)) {
+        state.settings[k] = v
+      }
       notify(`Updated ${key}`)
     }
   } catch (e) {
@@ -80,9 +85,11 @@ async function sendAction(action) {
   }
 }
 
+let loadedOnce = false
+
 export function UnidenR4View() {
-  if (!initialized) {
-    initialized = true
+  if (!loadedOnce) {
+    loadedOnce = true
     loadData()
   }
 
@@ -108,8 +115,8 @@ export function UnidenR4View() {
             </div>
             <label class="uniden-switch">
               <input type="checkbox" 
-                     :checked="${() => state.settings.UnidenR4Enabled}" 
-                     @change="${(e) => e && e.target && updateSetting('UnidenR4Enabled', e.target.checked)}" />
+                     checked="${() => !!state.settings.UnidenR4Enabled}" 
+                     @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('UnidenR4Enabled', el.checked); }}" />
               <span class="uniden-slider"></span>
             </label>
           </div>
@@ -138,10 +145,10 @@ export function UnidenR4View() {
           <div class="uniden-setting-row">
             <div class="uniden-setting-info">
               <span class="uniden-setting-label">Detection Mode</span>
-              <span class="uniden-setting-desc">Filter profile for driving environments</span>
+              <span class="uniden-setting-desc">Radar sensitivity profile</span>
             </div>
             <select class="uniden-select" 
-                    @change="${(e) => e && e.target && updateSetting('UnidenR4Mode', e.target.value)}">
+                    @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('UnidenR4Mode', el.value); }}">
               <option value="all_threat" :selected="${() => state.settings.UnidenR4Mode === 'all_threat'}">All Threat</option>
               <option value="highway" :selected="${() => state.settings.UnidenR4Mode === 'highway'}">Highway</option>
               <option value="city" :selected="${() => state.settings.UnidenR4Mode === 'city'}">City</option>
@@ -151,13 +158,26 @@ export function UnidenR4View() {
 
           <div class="uniden-setting-row">
             <div class="uniden-setting-info">
+              <span class="uniden-setting-label">Main Volume</span>
+              <span class="uniden-setting-desc">Alert speaker level (0-8)</span>
+            </div>
+            <div class="uniden-range-container">
+              <input type="range" min="0" max="8" class="uniden-range" 
+                     value="${() => state.settings.UnidenR4Volume}"
+                     @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('UnidenR4Volume', parseInt(el.value)); }}" />
+              <span class="uniden-range-val">${() => state.settings.UnidenR4Volume}</span>
+            </div>
+          </div>
+
+          <div class="uniden-setting-row">
+            <div class="uniden-setting-info">
               <span class="uniden-setting-label">Auto Mute</span>
-              <span class="uniden-setting-desc">Automatically lowers alert volume after 3 seconds</span>
+              <span class="uniden-setting-desc">Automatically reduce volume after initial alert beep</span>
             </div>
             <label class="uniden-switch">
               <input type="checkbox" 
-                     :checked="${() => state.settings.UnidenR4AutoMute}" 
-                     @change="${(e) => e && e.target && updateSetting('UnidenR4AutoMute', e.target.checked)}" />
+                     checked="${() => !!state.settings.UnidenR4AutoMute}" 
+                     @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('UnidenR4AutoMute', el.checked); }}" />
               <span class="uniden-slider"></span>
             </label>
           </div>
@@ -165,26 +185,13 @@ export function UnidenR4View() {
           <div class="uniden-setting-row">
             <div class="uniden-setting-info">
               <span class="uniden-setting-label">Quiet Ride Speed</span>
-              <span class="uniden-setting-desc">Silence alerts below threshold speed (MPH)</span>
+              <span class="uniden-setting-desc">Mute all alerts below this speed (MPH)</span>
             </div>
             <div class="uniden-range-container">
-              <input type="range" min="0" max="75" step="5" class="uniden-range"
-                     :value="${() => state.settings.UnidenR4QuietRideSpeed}"
-                     @input="${(e) => e && e.target && updateSetting('UnidenR4QuietRideSpeed', parseInt(e.target.value))}" />
+              <input type="range" min="0" max="90" step="5" class="uniden-range"
+                     value="${() => state.settings.UnidenR4QuietRideSpeed}"
+                     @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('UnidenR4QuietRideSpeed', parseInt(el.value)); }}" />
               <span class="uniden-range-val">${() => `${state.settings.UnidenR4QuietRideSpeed} mph`}</span>
-            </div>
-          </div>
-
-          <div class="uniden-setting-row">
-            <div class="uniden-setting-info">
-              <span class="uniden-setting-label">Master Volume</span>
-              <span class="uniden-setting-desc">Detector speaker level (0 - 8)</span>
-            </div>
-            <div class="uniden-range-container">
-              <input type="range" min="0" max="8" step="1" class="uniden-range"
-                     :value="${() => state.settings.UnidenR4Volume}"
-                     @input="${(e) => e && e.target && updateSetting('UnidenR4Volume', parseInt(e.target.value))}" />
-              <span class="uniden-range-val">${() => state.settings.UnidenR4Volume}</span>
             </div>
           </div>
         </div>
@@ -200,8 +207,8 @@ export function UnidenR4View() {
             </div>
             <label class="uniden-switch">
               <input type="checkbox" 
-                     :checked="${() => state.settings.UnidenR4KaBand}" 
-                     @change="${(e) => e && e.target && updateSetting('UnidenR4KaBand', e.target.checked)}" />
+                     checked="${() => !!state.settings.UnidenR4KaBand}" 
+                     @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('UnidenR4KaBand', el.checked); }}" />
               <span class="uniden-slider"></span>
             </label>
           </div>
@@ -213,8 +220,8 @@ export function UnidenR4View() {
             </div>
             <label class="uniden-switch">
               <input type="checkbox" 
-                     :checked="${() => state.settings.UnidenR4KBand}" 
-                     @change="${(e) => e && e.target && updateSetting('UnidenR4KBand', e.target.checked)}" />
+                     checked="${() => !!state.settings.UnidenR4KBand}" 
+                     @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('UnidenR4KBand', el.checked); }}" />
               <span class="uniden-slider"></span>
             </label>
           </div>
@@ -226,8 +233,8 @@ export function UnidenR4View() {
             </div>
             <label class="uniden-switch">
               <input type="checkbox" 
-                     :checked="${() => state.settings.UnidenR4Laser}" 
-                     @change="${(e) => e && e.target && updateSetting('UnidenR4Laser', e.target.checked)}" />
+                     checked="${() => !!state.settings.UnidenR4Laser}" 
+                     @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('UnidenR4Laser', el.checked); }}" />
               <span class="uniden-slider"></span>
             </label>
           </div>
@@ -239,8 +246,8 @@ export function UnidenR4View() {
             </div>
             <label class="uniden-switch">
               <input type="checkbox" 
-                     :checked="${() => state.settings.UnidenR4MRCD}" 
-                     @change="${(e) => e && e.target && updateSetting('UnidenR4MRCD', e.target.checked)}" />
+                     checked="${() => !!state.settings.UnidenR4MRCD}" 
+                     @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('UnidenR4MRCD', el.checked); }}" />
               <span class="uniden-slider"></span>
             </label>
           </div>
@@ -252,8 +259,8 @@ export function UnidenR4View() {
             </div>
             <label class="uniden-switch">
               <input type="checkbox" 
-                     :checked="${() => state.settings.UnidenR4POP}" 
-                     @change="${(e) => e && e.target && updateSetting('UnidenR4POP', e.target.checked)}" />
+                     checked="${() => !!state.settings.UnidenR4POP}" 
+                     @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('UnidenR4POP', el.checked); }}" />
               <span class="uniden-slider"></span>
             </label>
           </div>
@@ -270,8 +277,8 @@ export function UnidenR4View() {
             </div>
             <label class="uniden-switch">
               <input type="checkbox" 
-                     :checked="${() => state.settings.UnidenAutoSlowdown}" 
-                     @change="${(e) => e && e.target && updateSetting('UnidenAutoSlowdown', e.target.checked)}" />
+                     checked="${() => !!state.settings.UnidenAutoSlowdown}" 
+                     @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('UnidenAutoSlowdown', el.checked); }}" />
               <span class="uniden-slider"></span>
             </label>
           </div>
@@ -287,7 +294,7 @@ export function UnidenR4View() {
               <span class="uniden-setting-desc">R4 Screen display level</span>
             </div>
             <select class="uniden-select" 
-                    @change="${(e) => e && e.target && updateSetting('UnidenR4Brightness', e.target.value)}">
+                    @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('UnidenR4Brightness', el.value); }}">
               <option value="auto" :selected="${() => state.settings.UnidenR4Brightness === 'auto'}">Auto</option>
               <option value="bright" :selected="${() => state.settings.UnidenR4Brightness === 'bright'}">Bright</option>
               <option value="dim" :selected="${() => state.settings.UnidenR4Brightness === 'dim'}">Dim</option>
@@ -304,8 +311,8 @@ export function UnidenR4View() {
             </div>
             <label class="uniden-switch">
               <input type="checkbox" 
-                     :checked="${() => state.settings.UnidenR4MuteMemory}" 
-                     @change="${(e) => e && e.target && updateSetting('UnidenR4MuteMemory', e.target.checked)}" />
+                     checked="${() => !!state.settings.UnidenR4MuteMemory}" 
+                     @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('UnidenR4MuteMemory', el.checked); }}" />
               <span class="uniden-slider"></span>
             </label>
           </div>

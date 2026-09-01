@@ -27,7 +27,7 @@ const state = reactive({
   lastUpdated: ""
 })
 
-let timer = null
+let loadedOnce = false
 
 async function loadData() {
   try {
@@ -55,21 +55,24 @@ async function loadData() {
 async function updateSetting(key, val) {
   state.settings[key] = val
   try {
-    await fetch("/api/road_alerts/settings", {
+    const res = await fetch("/api/road_alerts/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key, value: val })
     })
-    await loadData()
+    if (res.ok) {
+      await loadData()
+    }
   } catch (err) {
     console.error("Failed to update setting:", err)
   }
 }
 
 export function RoadAlertsView() {
-  if (!timer) {
+  if (!loadedOnce) {
+    loadedOnce = true
     loadData()
-    timer = setInterval(loadData, 5000)
+    setInterval(loadData, 5000)
   }
 
   return html`
@@ -119,7 +122,7 @@ export function RoadAlertsView() {
           </div>
           <label class="road-switch">
             <input type="checkbox" 
-                   :checked="${() => !!state.settings.WazePoliceAutoSlowdown}" 
+                   checked="${() => !!state.settings.WazePoliceAutoSlowdown}" 
                    @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('WazePoliceAutoSlowdown', el.checked); }}" />
             <span class="road-slider"></span>
           </label>
@@ -168,7 +171,7 @@ export function RoadAlertsView() {
           </div>
           <label class="road-switch">
             <input type="checkbox" 
-                   :checked="${() => !!state.settings.RoadAlertSlowdownMajorAccidents}" 
+                   checked="${() => !!state.settings.RoadAlertSlowdownMajorAccidents}" 
                    @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('RoadAlertSlowdownMajorAccidents', el.checked); }}" />
             <span class="road-slider"></span>
           </label>
@@ -181,7 +184,7 @@ export function RoadAlertsView() {
           </div>
           <label class="road-switch">
             <input type="checkbox" 
-                   :checked="${() => !!state.settings.RoadAlertSlowdownMinorAccidents}" 
+                   checked="${() => !!state.settings.RoadAlertSlowdownMinorAccidents}" 
                    @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('RoadAlertSlowdownMinorAccidents', el.checked); }}" />
             <span class="road-slider"></span>
           </label>
@@ -194,7 +197,7 @@ export function RoadAlertsView() {
           </div>
           <label class="road-switch">
             <input type="checkbox" 
-                   :checked="${() => !!state.settings.RoadAlertSlowdownDebris}" 
+                   checked="${() => !!state.settings.RoadAlertSlowdownDebris}" 
                    @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('RoadAlertSlowdownDebris', el.checked); }}" />
             <span class="road-slider"></span>
           </label>
@@ -207,7 +210,7 @@ export function RoadAlertsView() {
           </div>
           <label class="road-switch">
             <input type="checkbox" 
-                   :checked="${() => !!state.settings.RoadAlertSlowdownClosures}" 
+                   checked="${() => !!state.settings.RoadAlertSlowdownClosures}" 
                    @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('RoadAlertSlowdownClosures', el.checked); }}" />
             <span class="road-slider"></span>
           </label>
@@ -220,7 +223,7 @@ export function RoadAlertsView() {
           </div>
           <label class="road-switch">
             <input type="checkbox" 
-                   :checked="${() => !!state.settings.RoadAlertSlowdownWeather}" 
+                   checked="${() => !!state.settings.RoadAlertSlowdownWeather}" 
                    @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('RoadAlertSlowdownWeather', el.checked); }}" />
             <span class="road-slider"></span>
           </label>
@@ -238,7 +241,7 @@ export function RoadAlertsView() {
           </div>
           <label class="road-switch">
             <input type="checkbox" 
-                   :checked="${() => !!state.settings.RoadAlertShowPolice}" 
+                   checked="${() => !!state.settings.RoadAlertShowPolice}" 
                    @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('RoadAlertShowPolice', el.checked); }}" />
             <span class="road-slider"></span>
           </label>
@@ -251,7 +254,7 @@ export function RoadAlertsView() {
           </div>
           <label class="road-switch">
             <input type="checkbox" 
-                   :checked="${() => !!state.settings.RoadAlertShowMajorAccidents}" 
+                   checked="${() => !!state.settings.RoadAlertShowMajorAccidents}" 
                    @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('RoadAlertShowMajorAccidents', el.checked); }}" />
             <span class="road-slider"></span>
           </label>
@@ -264,7 +267,7 @@ export function RoadAlertsView() {
           </div>
           <label class="road-switch">
             <input type="checkbox" 
-                   :checked="${() => !!state.settings.RoadAlertShowMinorAccidents}" 
+                   checked="${() => !!state.settings.RoadAlertShowMinorAccidents}" 
                    @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('RoadAlertShowMinorAccidents', el.checked); }}" />
             <span class="road-slider"></span>
           </label>
@@ -277,7 +280,7 @@ export function RoadAlertsView() {
           </div>
           <label class="road-switch">
             <input type="checkbox" 
-                   :checked="${() => !!state.settings.RoadAlertShowDebris}" 
+                   checked="${() => !!state.settings.RoadAlertShowDebris}" 
                    @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('RoadAlertShowDebris', el.checked); }}" />
             <span class="road-slider"></span>
           </label>
@@ -290,7 +293,7 @@ export function RoadAlertsView() {
           </div>
           <label class="road-switch">
             <input type="checkbox" 
-                   :checked="${() => !!state.settings.RoadAlertShowClosures}" 
+                   checked="${() => !!state.settings.RoadAlertShowClosures}" 
                    @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('RoadAlertShowClosures', el.checked); }}" />
             <span class="road-slider"></span>
           </label>
@@ -303,7 +306,7 @@ export function RoadAlertsView() {
           </div>
           <label class="road-switch">
             <input type="checkbox" 
-                   :checked="${() => !!state.settings.RoadAlertShowWeather}" 
+                   checked="${() => !!state.settings.RoadAlertShowWeather}" 
                    @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('RoadAlertShowWeather', el.checked); }}" />
             <span class="road-slider"></span>
           </label>
