@@ -375,9 +375,31 @@ class RoadAlertsDaemon:
         if not self.has_gps or self.current_lat == 0:
             return None
 
+        # Category enablement toggles
+        cat_police = get_shm_param("RoadAlertShowPolice", True)
+        cat_major_acc = get_shm_param("RoadAlertShowMajorAccidents", True)
+        cat_minor_acc = get_shm_param("RoadAlertShowMinorAccidents", True)
+        cat_debris = get_shm_param("RoadAlertShowDebris", True)
+        cat_closures = get_shm_param("RoadAlertShowClosures", True)
+        cat_weather = get_shm_param("RoadAlertShowWeather", True)
+
         combined = getattr(self, "chp_incidents", []) + getattr(self, "waze_incidents", [])
         upcoming = []
         for inc in combined:
+            cat = inc.get("category", "")
+            if cat == "POLICE" and not cat_police:
+                continue
+            if cat == "ACCIDENT_MAJOR" and not cat_major_acc:
+                continue
+            if cat == "ACCIDENT_MINOR" and not cat_minor_acc:
+                continue
+            if cat in ("DEBRIS", "HAZARD") and not cat_debris:
+                continue
+            if cat == "CLOSURE" and not cat_closures:
+                continue
+            if cat == "WEATHER" and not cat_weather:
+                continue
+
             dist = haversine_miles(self.current_lat, self.current_lon, inc["lat"], inc["lon"])
             if dist <= max_radius_miles:
                 target_bearing = calculate_bearing(self.current_lat, self.current_lon, inc["lat"], inc["lon"])
@@ -406,11 +428,21 @@ class RoadAlertsDaemon:
             set_shm_param("RoadAlertSource", closest["source"])
             set_shm_param("RoadAlertCount", len(upcoming))
 
-            # Auto-slowdown trigger: Verified police (POLICE_VISIBLE / POLICE_HIDING with >= 3 confirmations) within 1.0 mile ahead
-            police_threats = [
-                u for u in upcoming
-                if u.get("is_verified_police", False) and u.get("distance_miles", 99.0) <= 1.0
-            ]
+            # Configurable Auto-Slowdown trigger for Waze Police Ahead
+            slowdown_enabled = get_shm_param("WazePoliceAutoSlowdown", True)
+            min_confirmations = get_shm_param("WazePoliceMinConfirmations", 3)
+            trigger_distance = get_shm_param("WazePoliceTriggerDistance", 1.0)
+
+            police_threats = []
+            if slowdown_enabled:
+                for u in upcoming:
+                    if u.get("source") == "Waze" and u.get("category") == "POLICE":
+                        sub = u.get("subtype", 0)
+                        # Must be POLICE_VISIBLE (201), POLICE_HIDING (202), or POLICE_CAMERA (203)
+                        if sub in (waze_pb2.AlertSubType.POLICE_VISIBLE, waze_pb2.AlertSubType.POLICE_HIDING, waze_pb2.AlertSubType.POLICE_WITH_MOBILE_CAMERA):
+                            if (u.get("thumbs", 0) >= min_confirmations) and (u.get("distance_miles", 99.0) <= trigger_distance):
+                                police_threats.append(u)
+
             if police_threats:
                 set_shm_param("WazePoliceSlowdownActive", True)
                 set_shm_param("WazePoliceSlowdownDist", police_threats[0]["distance_miles"])

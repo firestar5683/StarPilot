@@ -5010,6 +5010,12 @@ def setup(app):
         "WazePoliceTriggerDistance": get_shm_param("WazePoliceTriggerDistance", 1.0),
         "WazePoliceSlowdownActive": get_shm_param("WazePoliceSlowdownActive", False),
         "WazePoliceSlowdownDist": get_shm_param("WazePoliceSlowdownDist", 0.0),
+        "RoadAlertShowPolice": get_shm_param("RoadAlertShowPolice", True),
+        "RoadAlertShowMajorAccidents": get_shm_param("RoadAlertShowMajorAccidents", True),
+        "RoadAlertShowMinorAccidents": get_shm_param("RoadAlertShowMinorAccidents", True),
+        "RoadAlertShowDebris": get_shm_param("RoadAlertShowDebris", True),
+        "RoadAlertShowClosures": get_shm_param("RoadAlertShowClosures", True),
+        "RoadAlertShowWeather": get_shm_param("RoadAlertShowWeather", True),
       }
 
       return jsonify({

@@ -11,7 +11,13 @@ const state = reactive({
     WazePoliceMinConfirmations: 3,
     WazePoliceTriggerDistance: 1.0,
     WazePoliceSlowdownActive: false,
-    WazePoliceSlowdownDist: 0.0
+    WazePoliceSlowdownDist: 0.0,
+    RoadAlertShowPolice: true,
+    RoadAlertShowMajorAccidents: true,
+    RoadAlertShowMinorAccidents: true,
+    RoadAlertShowDebris: true,
+    RoadAlertShowClosures: true,
+    RoadAlertShowWeather: true
   },
   lastUpdated: ""
 })
@@ -47,6 +53,8 @@ async function updateSetting(key, val) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ key, value: val })
     })
+    // Quick reload data to apply filtering immediately
+    await loadData()
   } catch (err) {
     console.error("Failed to update setting:", err)
   }
@@ -139,6 +147,89 @@ export function RoadAlertsView() {
             <option value="1.5" :selected="${() => state.settings.WazePoliceTriggerDistance === 1.5}">1.5 Miles</option>
             <option value="2.0" :selected="${() => state.settings.WazePoliceTriggerDistance === 2.0}">2.0 Miles</option>
           </select>
+        </div>
+      </div>
+
+      <!-- Alert Category Filters Card -->
+      <div class="uniden-card mb-4">
+        <h2 class="uniden-card-title"><i class="bi bi-funnel-fill text-warning"></i> Incident Category Filters</h2>
+        
+        <div class="uniden-setting-row">
+          <div class="uniden-setting-info">
+            <span class="uniden-setting-label">🚨 Police Reports & Traps</span>
+            <span class="uniden-setting-desc">Show Waze police speed traps & CHP traffic officers</span>
+          </div>
+          <label class="uniden-switch">
+            <input type="checkbox" 
+                   :checked="${() => state.settings.RoadAlertShowPolice}" 
+                   @change="${(e) => e && e.target && updateSetting('RoadAlertShowPolice', e.target.checked)}" />
+            <span class="uniden-slider"></span>
+          </label>
+        </div>
+
+        <div class="uniden-setting-row">
+          <div class="uniden-setting-info">
+            <span class="uniden-setting-label">💥 Major Collisions & SigAlerts</span>
+            <span class="uniden-setting-desc">Fatal, injury collisions, and ambulance dispatches</span>
+          </div>
+          <label class="uniden-switch">
+            <input type="checkbox" 
+                   :checked="${() => state.settings.RoadAlertShowMajorAccidents}" 
+                   @change="${(e) => e && e.target && updateSetting('RoadAlertShowMajorAccidents', e.target.checked)}" />
+            <span class="uniden-slider"></span>
+          </label>
+        </div>
+
+        <div class="uniden-setting-row">
+          <div class="uniden-setting-info">
+            <span class="uniden-setting-label">🚗 Minor Collisions & Fender Benders</span>
+            <span class="uniden-setting-desc">Property damage only collisions & minor hit-and-runs</span>
+          </div>
+          <label class="uniden-switch">
+            <input type="checkbox" 
+                   :checked="${() => state.settings.RoadAlertShowMinorAccidents}" 
+                   @change="${(e) => e && e.target && updateSetting('RoadAlertShowMinorAccidents', e.target.checked)}" />
+            <span class="uniden-slider"></span>
+          </label>
+        </div>
+
+        <div class="uniden-setting-row">
+          <div class="uniden-setting-info">
+            <span class="uniden-setting-label">⚠️ Debris & Road Hazards</span>
+            <span class="uniden-setting-desc">Objects in lane, stalled vehicles, tires, vehicle fires</span>
+          </div>
+          <label class="uniden-switch">
+            <input type="checkbox" 
+                   :checked="${() => state.settings.RoadAlertShowDebris}" 
+                   @change="${(e) => e && e.target && updateSetting('RoadAlertShowDebris', e.target.checked)}" />
+            <span class="uniden-slider"></span>
+          </label>
+        </div>
+
+        <div class="uniden-setting-row">
+          <div class="uniden-setting-info">
+            <span class="uniden-setting-label">⛔ Road & Lane Closures</span>
+            <span class="uniden-setting-desc">Caltrans active closures, ramp blocks, traffic advisories</span>
+          </div>
+          <label class="uniden-switch">
+            <input type="checkbox" 
+                   :checked="${() => state.settings.RoadAlertShowClosures}" 
+                   @change="${(e) => e && e.target && updateSetting('RoadAlertShowClosures', e.target.checked)}" />
+            <span class="uniden-slider"></span>
+          </label>
+        </div>
+
+        <div class="uniden-setting-row">
+          <div class="uniden-setting-info">
+            <span class="uniden-setting-label">🌧️ Weather Hazards</span>
+            <span class="uniden-setting-desc">High winds, dense fog, snow/ice, flooding</span>
+          </div>
+          <label class="uniden-switch">
+            <input type="checkbox" 
+                   :checked="${() => state.settings.RoadAlertShowWeather}" 
+                   @change="${(e) => e && e.target && updateSetting('RoadAlertShowWeather', e.target.checked)}" />
+            <span class="uniden-slider"></span>
+          </label>
         </div>
       </div>
 
