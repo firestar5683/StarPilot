@@ -1,3 +1,4 @@
+import { UnidenR4View } from "/assets/components/tools/uniden_r4.js"
 import { html, reactive } from "/assets/vendor/arrow-core.js"
 import { createBrowserHistory, createRouter } from "/assets/vendor/remix-router-1.3.1.js"
 import { hideSidebar } from "/assets/js/utils.js"
@@ -96,6 +97,7 @@ function Root() {
     createRoute("vehicle_features", "/vehicle_features", VehicleFeatures),
     createRoute("v_asm", "/manage_v_asm", VASMAnnotations),
     createRoute("pip_sidecam", "/manage_pip_sidecam", PipSideCamera),
+    createRoute("uniden_r4", "/uniden_r4", UnidenR4View),
   ]
 
   router = createRouter({

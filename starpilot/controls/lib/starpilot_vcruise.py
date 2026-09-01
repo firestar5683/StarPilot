@@ -1,3 +1,4 @@
+from openpilot.starpilot.system.uniden_shm import get_shm_param
 #!/usr/bin/env python3
 import json
 import math
@@ -727,6 +728,13 @@ class StarPilotVCruise:
       self._applied_slc_control_target = slc_control_target if slc_control_target > 0.0 else 0.0
       if slc_control_target >= CSC_MIN_SPEED:
         targets.append(slc_control_target)
+      # Uniden Radar Auto-Slowdown (drops cruise target strictly to raw posted speed limit without offset)
+      if get_shm_param("UnidenAutoSlowdown", True) and get_shm_param("UnidenRadarAlertActive", False):
+        if self.slc_target > 0.0:
+          slc_control_target = self.slc_target
+          self._applied_slc_control_target = slc_control_target
+          targets.append(slc_control_target)
+
       if self.nav_turn_target > 0.0:
         targets.append(self.nav_turn_target)
 

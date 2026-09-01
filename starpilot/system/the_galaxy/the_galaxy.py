@@ -9175,6 +9175,31 @@ def setup(app):
       "skippedCount": skipped_count,
     })
 
+
+  # Uniden R4 Radar Detector Endpoints
+  @app.route("/api/uniden/settings", methods=["GET"])
+  def uniden_get_settings():
+    from starpilot.system.uniden_r4 import get_all_settings
+    return jsonify(get_all_settings())
+
+  @app.route("/api/uniden/settings", methods=["POST"])
+  def uniden_update_settings():
+    from starpilot.system.uniden_r4 import update_settings
+    data = request.get_json(silent=True) or {}
+    updated = update_settings(data)
+    return jsonify({"success": True, "settings": updated})
+
+  @app.route("/api/uniden/status", methods=["GET"])
+  def uniden_get_status():
+    from starpilot.system.uniden_r4 import get_connection_status
+    return jsonify(get_connection_status())
+
+  @app.route("/api/uniden/action/<action>", methods=["POST"])
+  def uniden_action(action):
+    from starpilot.system.uniden_r4 import trigger_action
+    result = trigger_action(action)
+    return jsonify(result)
+
   @app.route("/api/toggles/reset_default", methods=["POST"])
   def reset_toggle_values():
     for raw_key in _params_raw.all_keys():
