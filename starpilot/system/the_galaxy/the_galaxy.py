@@ -9175,6 +9175,113 @@ def setup(app):
       "skippedCount": skipped_count,
     })
 
+
+  # Live Road Alerts Endpoints
+  @app.route("/api/road_alerts/live", methods=["GET"])
+  def road_alerts_get_live():
+    from starpilot.system.road_alerts_d import RoadAlertsDaemon
+    from starpilot.system.uniden_shm import get_shm_param
+    try:
+      daemon = RoadAlertsDaemon()
+      daemon.update_gps()
+      upcoming = daemon.process_upcoming_alerts(max_radius_miles=3.0) or []
+      
+      active_threat = None
+      if get_shm_param("UnidenRadarAlertActive", False):
+        band = str(get_shm_param("UnidenRadarAlertBand", "") or "").upper()
+        strength = get_shm_param("UnidenRadarAlertStrength", 0)
+        desc = str(get_shm_param("UnidenRadarAlertDescription", "") or "")
+        active_threat = {
+          "source": "Uniden R4",
+          "category": "RADAR",
+          "label": f"RADAR: {band} BAND",
+          "icon": "⚡",
+          "distance_miles": 0.0,
+          "location": f"Signal Strength: {strength}/8",
+          "detail": desc or f"{band} Radar Frequency Detected",
+          "is_radar": True,
+        }
+      elif get_shm_param("RoadAlertActive", False):
+        dist = float(get_shm_param("RoadAlertDistance", 0.0) or 0.0)
+        if 0.0 < dist <= 0.5:
+          active_threat = {
+            "source": get_shm_param("RoadAlertSource", ""),
+            "category": get_shm_param("RoadAlertCategory", ""),
+            "label": get_shm_param("RoadAlertLabel", ""),
+            "icon": get_shm_param("RoadAlertIcon", ""),
+            "distance_miles": dist,
+            "location": get_shm_param("RoadAlertLocation", ""),
+            "detail": get_shm_param("RoadAlertDetail", ""),
+            "is_radar": False,
+          }
+
+      settings = {
+        "WazePoliceAutoSlowdown": get_shm_param("WazePoliceAutoSlowdown", True),
+        "WazePoliceMinConfirmations": get_shm_param("WazePoliceMinConfirmations", 3),
+        "WazePoliceTriggerDistance": get_shm_param("WazePoliceTriggerDistance", 1.0),
+        "WazePoliceSlowdownActive": get_shm_param("WazePoliceSlowdownActive", False),
+        "WazePoliceSlowdownDist": get_shm_param("WazePoliceSlowdownDist", 0.0),
+        "RoadAlertShowPolice": get_shm_param("RoadAlertShowPolice", True),
+        "RoadAlertShowMajorAccidents": get_shm_param("RoadAlertShowMajorAccidents", True),
+        "RoadAlertShowMinorAccidents": get_shm_param("RoadAlertShowMinorAccidents", True),
+        "RoadAlertShowDebris": get_shm_param("RoadAlertShowDebris", True),
+        "RoadAlertShowClosures": get_shm_param("RoadAlertShowClosures", True),
+        "RoadAlertShowWeather": get_shm_param("RoadAlertShowWeather", True),
+        "RoadAlertSlowdownMajorAccidents": get_shm_param("RoadAlertSlowdownMajorAccidents", True),
+        "RoadAlertSlowdownMinorAccidents": get_shm_param("RoadAlertSlowdownMinorAccidents", False),
+        "RoadAlertSlowdownDebris": get_shm_param("RoadAlertSlowdownDebris", True),
+        "RoadAlertSlowdownClosures": get_shm_param("RoadAlertSlowdownClosures", True),
+        "RoadAlertSlowdownWeather": get_shm_param("RoadAlertSlowdownWeather", False),
+        "RoadHazardSlowdownActive": get_shm_param("RoadHazardSlowdownActive", False),
+        "WazeSessionId": str(get_shm_param("WazeSessionId", "")),
+        "WazeSecretKey": str(get_shm_param("WazeSecretKey", "")),
+        "WazeAuthStatus": str(get_shm_param("WazeAuthStatus", "Active")),
+      }
+
+      return jsonify({
+        "alerts": upcoming,
+        "active_threat": active_threat,
+        "total_count": len(upcoming),
+        "gps": {
+          "lat": daemon.current_lat,
+          "lon": daemon.current_lon,
+          "bearing": daemon.current_bearing,
+        },
+        "settings": settings,
+      })
+    except Exception as e:
+      return jsonify({"error": str(e)}), 500
+
+  @app.route("/api/road_alerts/settings", methods=["POST"])
+  def road_alerts_update_settings():
+    from starpilot.system.uniden_shm import set_shm_param
+    data = request.get_json(silent=True) or {}
+    for k, v in data.items():
+      set_shm_param(k, v)
+    return jsonify({"success": True, "settings": data})
+
+  @app.route("/api/road_alerts/action/<action>", methods=["POST"])
+  def road_alerts_action(action):
+    from starpilot.system.road_alerts_d import RoadAlertsDaemon
+    from starpilot.system.uniden_shm import set_shm_param
+    if action == "refresh":
+      daemon = RoadAlertsDaemon()
+      daemon.update_gps()
+      daemon.fetch_chp()
+      daemon.fetch_waze()
+      return jsonify({"success": True, "message": "Refreshed incidents"})
+    elif action == "reauth_waze":
+      daemon = RoadAlertsDaemon()
+      daemon.update_gps()
+      res = daemon.waze.register_and_login(daemon.current_lat or 37.7749, daemon.current_lon or -122.4194, force=True)
+      return jsonify({"success": res, "message": "Waze session refreshed" if res else "Waze login failed"})
+    elif action == "clear_session":
+      set_shm_param("WazeSessionId", "")
+      set_shm_param("WazeSecretKey", "")
+      set_shm_param("WazeAuthStatus", "Cleared")
+      return jsonify({"success": True, "message": "Waze session tokens cleared"})
+    return jsonify({"error": "Unknown action"}), 400
+
   @app.route("/api/toggles/reset_default", methods=["POST"])
   def reset_toggle_values():
     for raw_key in _params_raw.all_keys():
