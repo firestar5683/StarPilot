@@ -4957,7 +4957,7 @@ def setup(app):
     response.headers["Expires"] = "0"
     return response
 
-  # --- Live Road Alerts & CHP Hazards API Routes ---
+# --- Live Road Alerts & CHP Hazards API Routes ---
   @app.route("/api/road_alerts/live", methods=["GET"])
   def road_alerts_live():
     from openpilot.starpilot.system.road_alerts_d import RoadAlertsDaemon, haversine_miles, calculate_bearing
@@ -5004,13 +5004,36 @@ def setup(app):
           "area": closest["area"],
         }
 
+      settings = {
+        "WazePoliceAutoSlowdown": get_shm_param("WazePoliceAutoSlowdown", True),
+        "WazePoliceMinConfirmations": get_shm_param("WazePoliceMinConfirmations", 3),
+        "WazePoliceTriggerDistance": get_shm_param("WazePoliceTriggerDistance", 1.0),
+        "WazePoliceSlowdownActive": get_shm_param("WazePoliceSlowdownActive", False),
+        "WazePoliceSlowdownDist": get_shm_param("WazePoliceSlowdownDist", 0.0),
+      }
+
       return jsonify({
         "status": "ok",
         "alerts": upcoming,
         "active_threat": active_threat,
         "total_count": len(upcoming),
-        "gps": {"lat": lat, "lon": lon, "bearing": bearing}
+        "gps": {"lat": lat, "lon": lon, "bearing": bearing},
+        "settings": settings
       }), 200
+    except Exception as e:
+      return jsonify({"status": "error", "error": str(e)}), 500
+
+  @app.route("/api/road_alerts/settings", methods=["POST"])
+  def road_alerts_update_settings():
+    from openpilot.starpilot.system.uniden_shm import set_shm_param
+    try:
+      data = request.get_json(force=True, silent=True) or {}
+      key = data.get("key")
+      val = data.get("value")
+      if key:
+        set_shm_param(key, val)
+        return jsonify({"status": "ok", "key": key, "value": val}), 200
+      return jsonify({"status": "error", "error": "Missing key"}), 400
     except Exception as e:
       return jsonify({"status": "error", "error": str(e)}), 500
 
