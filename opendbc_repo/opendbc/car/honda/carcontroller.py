@@ -24,6 +24,7 @@ VisualAlert = structs.CarControl.HUDControl.VisualAlert
 LongCtrlState = structs.CarControl.Actuators.LongControlState
 
 
+ACCORD11G_BRAKE_PID_DECEL_THRESHOLD = 1e-3
 ACCORD11G_BRAKE_PID_MIN_SPEED = 1e-3
 ACCORD11G_BRAKE_PID_MAX_SPEED = 3.0
 ACCORD11G_BRAKE_PID_RELEASE_PER_UPDATE = 0.02
@@ -471,7 +472,7 @@ class CarController(CarControllerBase):
             accel,
             CS.out.aEgo,
             CS.out.vEgo,
-            min_gas,
+            ACCORD11G_BRAKE_PID_DECEL_THRESHOLD,
             CC.longActive,
           ) if self.mvl_accord_mode else accel
 

@@ -8,6 +8,7 @@ from opendbc.car import gen_empty_fingerprint
 from opendbc.car.honda.carstate import CarState
 from opendbc.car.honda.interface import CarInterface
 from opendbc.car.honda.carcontroller import (
+  ACCORD11G_BRAKE_PID_DECEL_THRESHOLD,
   CarController,
   persist_honda_learned_params_nonblocking,
   update_accord11g_low_speed_brake_pid,
@@ -96,6 +97,44 @@ class TestHondaFingerprint:
     assert target_accel == pytest.approx(0.1)
     assert pid.reset_count == 1
     assert not pid.updates
+
+  @pytest.mark.parametrize("accel, expected_active", (
+    (-0.2, True),
+    (0.0, True),
+    (0.0005, True),
+    (ACCORD11G_BRAKE_PID_DECEL_THRESHOLD, False),
+    (0.01, False),
+  ))
+  def test_accord11g_low_speed_brake_pid_uses_all_decel_requests(self, accel, expected_active):
+    pid = FakeBrakePid(update_result=-0.1)
+
+    update_accord11g_low_speed_brake_pid(
+      pid, accel=accel, actual_accel=0.0, v_ego=1.0,
+      active_accel_threshold=ACCORD11G_BRAKE_PID_DECEL_THRESHOLD, long_active=True,
+    )
+
+    assert bool(pid.updates) is expected_active
+    assert (pid.reset_count == 0) is expected_active
+
+  @pytest.mark.parametrize("v_ego, expected_active", (
+    (0.0, False),
+    (0.001, False),
+    (0.01, True),
+    (1.0, True),
+    (2.999, True),
+    (3.0, False),
+    (3.1, False),
+  ))
+  def test_accord11g_low_speed_brake_pid_preserves_speed_envelope(self, v_ego, expected_active):
+    pid = FakeBrakePid(update_result=-0.1)
+
+    update_accord11g_low_speed_brake_pid(
+      pid, accel=-0.1, actual_accel=0.0, v_ego=v_ego,
+      active_accel_threshold=ACCORD11G_BRAKE_PID_DECEL_THRESHOLD, long_active=True,
+    )
+
+    assert bool(pid.updates) is expected_active
+    assert (pid.reset_count == 0) is expected_active
 
   def test_honda_lkas_hud_shows_lane_lines_when_lateral_only_is_active(self):
     class FakePacker:
