@@ -10,6 +10,7 @@ from opendbc.car.honda.interface import CarInterface
 from opendbc.car.honda.carcontroller import (
   CarController,
   persist_honda_learned_params_nonblocking,
+  update_accord11g_low_speed_brake_pid,
   get_civic_bosch_modified_steering_pressed,
   get_civic_bosch_modified_torque_lpf_tau,
   get_honda_bosch_wind_brake_mps2,
@@ -28,7 +29,74 @@ def get_test_toggles() -> SimpleNamespace:
   return SimpleNamespace(always_on_lateral_lkas=False, force_torque_controller=False, nnff=False, nnff_lite=False)
 
 
+class FakeBrakePid:
+  def __init__(self, i=0.0, update_result=-0.25):
+    self.i = i
+    self.update_result = update_result
+    self.updates = []
+    self.reset_count = 0
+
+  def update(self, *, error, speed):
+    self.updates.append((error, speed))
+    self.i = self.update_result
+    return self.update_result
+
+  def reset(self):
+    self.i = 0.0
+    self.reset_count += 1
+
+
 class TestHondaFingerprint:
+  def test_accord11g_low_speed_brake_pid_tracks_below_existing_crossover(self):
+    pid = FakeBrakePid(update_result=-0.25)
+
+    target_accel = update_accord11g_low_speed_brake_pid(
+      pid, accel=-0.3, actual_accel=-0.1, v_ego=1.0,
+      active_accel_threshold=-0.2, long_active=True,
+    )
+
+    assert target_accel == pytest.approx(-0.55)
+    assert pid.updates == [pytest.approx((-0.2, 1.0))]
+    assert pid.reset_count == 0
+
+  def test_accord11g_low_speed_brake_pid_releases_before_allowing_gas(self):
+    pid = FakeBrakePid(i=-0.4)
+
+    target_accel = update_accord11g_low_speed_brake_pid(
+      pid, accel=0.1, actual_accel=0.0, v_ego=1.0,
+      active_accel_threshold=-0.2, long_active=True,
+    )
+
+    assert pid.i == pytest.approx(-0.38)
+    assert target_accel == pytest.approx(-0.28)
+    assert not pid.updates
+    assert pid.reset_count == 0
+
+  def test_accord11g_low_speed_brake_pid_resets_immediately_when_disengaged(self):
+    pid = FakeBrakePid(i=-0.4)
+
+    target_accel = update_accord11g_low_speed_brake_pid(
+      pid, accel=0.0, actual_accel=0.0, v_ego=1.0,
+      active_accel_threshold=-0.2, long_active=False,
+    )
+
+    assert target_accel == pytest.approx(0.0)
+    assert pid.i == pytest.approx(0.0)
+    assert pid.reset_count == 1
+    assert not pid.updates
+
+  def test_accord11g_low_speed_brake_pid_clears_nonnegative_state(self):
+    pid = FakeBrakePid(i=0.0)
+
+    target_accel = update_accord11g_low_speed_brake_pid(
+      pid, accel=0.1, actual_accel=0.0, v_ego=1.0,
+      active_accel_threshold=-0.2, long_active=True,
+    )
+
+    assert target_accel == pytest.approx(0.1)
+    assert pid.reset_count == 1
+    assert not pid.updates
+
   def test_honda_lkas_hud_shows_lane_lines_when_lateral_only_is_active(self):
     class FakePacker:
       @staticmethod

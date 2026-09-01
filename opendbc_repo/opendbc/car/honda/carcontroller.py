@@ -24,6 +24,11 @@ VisualAlert = structs.CarControl.HUDControl.VisualAlert
 LongCtrlState = structs.CarControl.Actuators.LongControlState
 
 
+ACCORD11G_BRAKE_PID_MIN_SPEED = 1e-3
+ACCORD11G_BRAKE_PID_MAX_SPEED = 3.0
+ACCORD11G_BRAKE_PID_RELEASE_PER_UPDATE = 0.02
+
+
 def get_civic_bosch_modified_torque_lpf_tau(torque_cmd: float, prev_torque_cmd: float, v_ego: float) -> float:
   torque_delta = abs(float(torque_cmd) - float(prev_torque_cmd))
   torque_cmd_abs = abs(float(torque_cmd))
@@ -94,6 +99,30 @@ def get_civic_bosch_modified_steering_pressed(
 
 def get_honda_bosch_wind_brake_mps2(v_ego: float) -> float:
   return float(np.interp(v_ego, [0.0, 13.4, 22.4, 31.3, 40.2], [0.000, 0.049, 0.136, 0.267, 0.441]))
+
+
+def update_accord11g_low_speed_brake_pid(
+  brake_pid: PIDController,
+  accel: float,
+  actual_accel: float,
+  v_ego: float,
+  active_accel_threshold: float,
+  long_active: bool,
+) -> float:
+  if not long_active:
+    brake_pid.reset()
+    return accel
+
+  if accel < active_accel_threshold and ACCORD11G_BRAKE_PID_MIN_SPEED < v_ego < ACCORD11G_BRAKE_PID_MAX_SPEED:
+    brake_addon = brake_pid.update(error=accel - actual_accel, speed=v_ego)
+  else:
+    if brake_pid.i < 0.0:
+      brake_pid.i = min(0.0, brake_pid.i + ACCORD11G_BRAKE_PID_RELEASE_PER_UPDATE)
+    else:
+      brake_pid.reset()
+    brake_addon = brake_pid.i
+
+  return min(accel, accel + brake_addon)
 
 
 def update_honda_bosch_live_learning(
@@ -437,17 +466,18 @@ class CarController(CarControllerBase):
         ts = self.frame * DT_CTRL
 
         if self.CP.carFingerprint in HONDA_BOSCH:
-          if self.mvl_accord_mode and (accel < min_gas) and (1e-3 < CS.out.vEgo < 3.0):
-            brake_addon = self.mvl_brake_pid.update(error=accel - CS.out.aEgo, speed=CS.out.vEgo)
-            target_accel = min(accel, accel + brake_addon)
-          else:
-            if self.mvl_accord_mode:
-              self.mvl_brake_pid.reset()
-            target_accel = accel
+          target_accel = update_accord11g_low_speed_brake_pid(
+            self.mvl_brake_pid,
+            accel,
+            CS.out.aEgo,
+            CS.out.vEgo,
+            min_gas,
+            CC.longActive,
+          ) if self.mvl_accord_mode else accel
 
           self.accel = float(np.clip(target_accel, self.params.BOSCH_ACCEL_MIN, self.params.BOSCH_ACCEL_MAX))
-          # MVL uses requested accel (not extra-brake-adjusted accel) to decide propulsion crossover.
-          gas_pedal_force = (accel if self.mvl_accord_mode else self.accel) + hill_brake
+          # Keep propulsion inhibited while the Accord's extra-brake integrator releases.
+          gas_pedal_force = (target_accel if self.mvl_accord_mode else self.accel) + hill_brake
 
           if self.CP.carFingerprint not in HONDA_BOSCH_RADARLESS:
             gas_pedal_force += wind_brake_mps2 * self.bosch_wind_factor
