@@ -729,12 +729,14 @@ class StarPilotVCruise:
       if slc_control_target >= CSC_MIN_SPEED:
         targets.append(slc_control_target)
 
-      # Police Threat Auto-Slowdown (Uniden Radar Detector + Waze Crowd-Sourced Police Ahead):
-      # If live radar is firing OR a verified Waze police report (hidden/visible, >= 3 confirmations) is ahead,
-      # clamp max cruise speed directly down to the road speed limit (ignoring manual set speed overrides).
+      # Auto-Slowdown to Speed Limit on Police & Road Hazard Alerts:
+      # - Uniden physical radar firing (Ka, K, Laser, MRCD, POP)
+      # - Waze verified police ahead (hidden/visible, >= min confirmations)
+      # - Upcoming road hazards within 0.5 miles (Major/Minor accidents, lane debris, road closures, severe weather)
       radar_alert_active = get_shm_param("UnidenRadarAlertActive", False)
       waze_police_active = get_shm_param("WazePoliceSlowdownActive", False)
-      if (radar_alert_active or waze_police_active) and self.slc_target >= CSC_MIN_SPEED:
+      hazard_slowdown_active = get_shm_param("RoadHazardSlowdownActive", False)
+      if (radar_alert_active or waze_police_active or hazard_slowdown_active) and self.slc_target >= CSC_MIN_SPEED:
         targets.append(float(self.slc_target))
       if self.nav_turn_target > 0.0:
         targets.append(self.nav_turn_target)

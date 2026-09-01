@@ -239,7 +239,7 @@ class WazeSessionManager:
                     label = "Road Hazard"
                     icon = "⚠️"
 
-                    # Check for verified police presence (POLICE_VISIBLE / POLICE_HIDING / MOBILE_CAMERA with >= 3 thumbs up reports)
+                    # Check for verified police presence (POLICE_VISIBLE / POLICE_HIDING / MOBILE_CAMERA)
                     is_verified_police = False
                     if alert_type == waze_pb2.AlertType.POLICE:
                         category = "POLICE"
@@ -253,7 +253,7 @@ class WazeSessionManager:
                             label = "Police Reported"
                         icon = "🚨"
 
-                        if alert_subtype in (waze_pb2.AlertSubType.POLICE_VISIBLE, waze_pb2.AlertSubType.POLICE_HIDING, waze_pb2.AlertSubType.POLICE_WITH_MOBILE_CAMERA) and (thumbs or 0) >= 3:
+                        if alert_subtype in (waze_pb2.AlertSubType.POLICE_VISIBLE, waze_pb2.AlertSubType.POLICE_HIDING, waze_pb2.AlertSubType.POLICE_WITH_MOBILE_CAMERA):
                             is_verified_police = True
 
                     elif alert_type == waze_pb2.AlertType.ACCIDENT:
@@ -428,27 +428,55 @@ class RoadAlertsDaemon:
             set_shm_param("RoadAlertSource", closest["source"])
             set_shm_param("RoadAlertCount", len(upcoming))
 
-            # Configurable Auto-Slowdown trigger for Waze Police Ahead
-            slowdown_enabled = get_shm_param("WazePoliceAutoSlowdown", True)
+            # 1. Waze Police Auto-Slowdown
+            slowdown_police = get_shm_param("WazePoliceAutoSlowdown", True)
             min_confirmations = get_shm_param("WazePoliceMinConfirmations", 3)
             trigger_distance = get_shm_param("WazePoliceTriggerDistance", 1.0)
 
-            police_threats = []
-            if slowdown_enabled:
+            police_active = False
+            police_dist = 0.0
+            if slowdown_police:
                 for u in upcoming:
                     if u.get("source") == "Waze" and u.get("category") == "POLICE":
                         sub = u.get("subtype", 0)
-                        # Must be POLICE_VISIBLE (201), POLICE_HIDING (202), or POLICE_CAMERA (203)
                         if sub in (waze_pb2.AlertSubType.POLICE_VISIBLE, waze_pb2.AlertSubType.POLICE_HIDING, waze_pb2.AlertSubType.POLICE_WITH_MOBILE_CAMERA):
                             if (u.get("thumbs", 0) >= min_confirmations) and (u.get("distance_miles", 99.0) <= trigger_distance):
-                                police_threats.append(u)
+                                police_active = True
+                                police_dist = u["distance_miles"]
+                                break
+            set_shm_param("WazePoliceSlowdownActive", police_active)
+            set_shm_param("WazePoliceSlowdownDist", police_dist)
 
-            if police_threats:
-                set_shm_param("WazePoliceSlowdownActive", True)
-                set_shm_param("WazePoliceSlowdownDist", police_threats[0]["distance_miles"])
-            else:
-                set_shm_param("WazePoliceSlowdownActive", False)
-                set_shm_param("WazePoliceSlowdownDist", 0.0)
+            # 2. Hazard Auto-Slowdown (Major Accidents, Minor Accidents, Debris, Closures, Weather within 0.5 miles)
+            slowdown_major_acc = get_shm_param("RoadAlertSlowdownMajorAccidents", True)
+            slowdown_minor_acc = get_shm_param("RoadAlertSlowdownMinorAccidents", False)
+            slowdown_debris = get_shm_param("RoadAlertSlowdownDebris", True)
+            slowdown_closures = get_shm_param("RoadAlertSlowdownClosures", True)
+            slowdown_weather = get_shm_param("RoadAlertSlowdownWeather", False)
+
+            hazard_slowdown_active = False
+            for u in upcoming:
+                cat = u.get("category", "")
+                dist = u.get("distance_miles", 99.0)
+                if dist <= 0.5:
+                    if cat == "ACCIDENT_MAJOR" and slowdown_major_acc:
+                        hazard_slowdown_active = True
+                        break
+                    elif cat == "ACCIDENT_MINOR" and slowdown_minor_acc:
+                        hazard_slowdown_active = True
+                        break
+                    elif cat in ("DEBRIS", "HAZARD") and slowdown_debris:
+                        hazard_slowdown_active = True
+                        break
+                    elif cat == "CLOSURE" and slowdown_closures:
+                        hazard_slowdown_active = True
+                        break
+                    elif cat == "WEATHER" and slowdown_weather:
+                        hazard_slowdown_active = True
+                        break
+
+            set_shm_param("RoadHazardSlowdownActive", hazard_slowdown_active)
+
         else:
             set_shm_param("RoadAlertActive", False)
             set_shm_param("RoadAlertCategory", "")
@@ -461,6 +489,7 @@ class RoadAlertsDaemon:
             set_shm_param("RoadAlertCount", 0)
             set_shm_param("WazePoliceSlowdownActive", False)
             set_shm_param("WazePoliceSlowdownDist", 0.0)
+            set_shm_param("RoadHazardSlowdownActive", False)
 
     def run(self):
         print("[road_alerts_d] Starting Unified Road Alerts daemon (CHP + Waze RT)...")
