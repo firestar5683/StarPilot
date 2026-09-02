@@ -92,6 +92,38 @@ class TestSoundd:
     assert AudibleAlert.engage in soundd.loaded_sounds
     assert soundd.loaded_sounds[AudibleAlert.engage].size > 0
 
+  def test_load_sounds_falls_back_when_custom_wav_is_truncated(self, tmp_path):
+    soundd = Soundd.__new__(Soundd)
+    soundd.sound_directory = tmp_path / "sounds"
+    soundd.sound_directory.mkdir()
+    soundd.random_events_directory = tmp_path / "random_events"
+    soundd.random_events_directory.mkdir()
+
+    (soundd.sound_directory / "warning_immediate.wav").write_bytes(b"RIFF")
+
+    soundd.load_sounds()
+
+    assert AudibleAlert.warningImmediate in soundd.loaded_sounds
+    assert soundd.loaded_sounds[AudibleAlert.warningImmediate].size > 0
+
+  def test_missing_goat_keeps_stock_critical_alert(self, tmp_path):
+    soundd = Soundd.__new__(Soundd)
+    soundd.sound_directory = tmp_path / "sounds"
+    soundd.sound_directory.mkdir()
+    soundd.random_events_directory = tmp_path / "random_events"
+    soundd.random_events_directory.mkdir()
+    soundd.load_sounds()
+
+    goat_alert = starpilot_alert_key(StarPilotAudibleAlert.goat)
+    assert goat_alert not in soundd.loaded_sounds
+    assert AudibleAlert.warningImmediate in soundd.loaded_sounds
+
+    assert soundd.select_critical_alert(AudibleAlert.warningImmediate, True) == AudibleAlert.warningImmediate
+
+    soundd.loaded_sounds[goat_alert] = soundd.loaded_sounds[AudibleAlert.warningImmediate]
+    assert soundd.select_critical_alert(AudibleAlert.warningImmediate, True) == goat_alert
+    assert soundd.select_critical_alert(AudibleAlert.warningImmediate, False) == AudibleAlert.warningImmediate
+
   def test_bluetooth_audio_mutes_local_only_while_healthy(self):
     soundd = Soundd.__new__(Soundd)
     samples = np.array([0.25, -0.5], dtype=np.float32)

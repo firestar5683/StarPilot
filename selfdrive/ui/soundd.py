@@ -208,7 +208,7 @@ class Soundd:
       for path in self._sound_candidates(filename):
         try:
           sound_data = self._read_sound(path)
-        except (FileNotFoundError, OSError, wave.Error):
+        except (FileNotFoundError, OSError, EOFError, wave.Error):
           cloudlog.exception(f"soundd: failed to load {path}")
           continue
         if sound_data is not None:
@@ -263,6 +263,12 @@ class Soundd:
       self.bluetooth_audio = None
       sink.close()
 
+  def select_critical_alert(self, stock_alert, goat_scream_critical):
+    goat_alert = starpilot_alert_key(StarPilotAudibleAlert.goat)
+    if goat_scream_critical and goat_alert in self.loaded_sounds:
+      return goat_alert
+    return stock_alert
+
   def update_alert(self, new_alert):
     if new_alert != AudibleAlert.none and new_alert not in self.loaded_sounds:
       new_alert = AudibleAlert.none
@@ -295,8 +301,10 @@ class Soundd:
 
       critical_full_alert = sm['selfdriveState'].alertStatus == log.SelfdriveState.AlertStatus.critical
       critical_full_alert &= sm['selfdriveState'].alertSize == log.SelfdriveState.AlertSize.full
-      if self.starpilot_toggles.goat_scream_critical_alerts and critical_full_alert:
-        new_alert = starpilot_alert_key(StarPilotAudibleAlert.goat)
+      new_alert = self.select_critical_alert(
+        new_alert,
+        self.starpilot_toggles.goat_scream_critical_alerts and critical_full_alert,
+      )
 
       new_starpilot_alert = sm['starpilotSelfdriveState'].alertSound.raw
       if new_alert == AudibleAlert.none and new_starpilot_alert != StarPilotAudibleAlert.none:
