@@ -192,7 +192,11 @@ class Soundd:
       if length <= 0:
         cloudlog.warning(f"soundd: empty audio {path}, skipping")
         return None
-      sound = np.frombuffer(wavefile.readframes(length), dtype=np.int16).astype(np.float32) / (2**16/2)
+      raw = wavefile.readframes(length)
+      if len(raw) < 2 or (len(raw) % 2) != 0:
+        cloudlog.warning(f"soundd: truncated audio {path}, skipping")
+        return None
+      sound = np.frombuffer(raw, dtype=np.int16).astype(np.float32) / (2**16/2)
       if sound.size == 0:
         cloudlog.warning(f"soundd: empty audio {path}, skipping")
         return None
@@ -208,7 +212,7 @@ class Soundd:
       for path in self._sound_candidates(filename):
         try:
           sound_data = self._read_sound(path)
-        except (FileNotFoundError, OSError, EOFError, wave.Error):
+        except (FileNotFoundError, OSError, EOFError, ValueError, wave.Error):
           cloudlog.exception(f"soundd: failed to load {path}")
           continue
         if sound_data is not None:

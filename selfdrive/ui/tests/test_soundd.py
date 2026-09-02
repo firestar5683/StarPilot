@@ -106,6 +106,26 @@ class TestSoundd:
     assert AudibleAlert.warningImmediate in soundd.loaded_sounds
     assert soundd.loaded_sounds[AudibleAlert.warningImmediate].size > 0
 
+  def test_load_sounds_falls_back_when_custom_wav_has_odd_payload(self, tmp_path):
+    soundd = Soundd.__new__(Soundd)
+    soundd.sound_directory = tmp_path / "sounds"
+    soundd.sound_directory.mkdir()
+    soundd.random_events_directory = tmp_path / "random_events"
+    soundd.random_events_directory.mkdir()
+
+    odd = soundd.sound_directory / "warning_immediate.wav"
+    with wave.open(str(odd), "w") as wav:
+      wav.setnchannels(1)
+      wav.setsampwidth(2)
+      wav.setframerate(48000)
+      wav.writeframes(b"\x00\x00\x00\x00")
+    odd.write_bytes(odd.read_bytes()[:-1])
+
+    soundd.load_sounds()
+
+    assert AudibleAlert.warningImmediate in soundd.loaded_sounds
+    assert soundd.loaded_sounds[AudibleAlert.warningImmediate].size > 0
+
   def test_missing_goat_keeps_stock_critical_alert(self, tmp_path):
     soundd = Soundd.__new__(Soundd)
     soundd.sound_directory = tmp_path / "sounds"
