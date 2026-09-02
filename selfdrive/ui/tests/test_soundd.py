@@ -1,4 +1,4 @@
-from cereal import log
+from cereal import custom, log
 from cereal import messaging
 from cereal.messaging import SubMaster, PubMaster
 from openpilot.selfdrive.ui.soundd import (
@@ -8,12 +8,14 @@ from openpilot.selfdrive.ui.soundd import (
   check_selfdrive_timeout_alert,
   is_turn_steering_limit_alert,
   should_mute_turn_steering_limit_alert,
+  starpilot_alert_key,
 )
 
 import numpy as np
 import time
 
 AudibleAlert = log.SelfdriveState.AudibleAlert
+StarPilotAudibleAlert = custom.StarPilotCarControl.HUDControl.AudibleAlert
 
 
 class TestSoundd:
@@ -33,6 +35,22 @@ class TestSoundd:
     assert not should_mute_turn_steering_limit_alert("steerSaturated/warning", 30.0, 25.0)
     assert not should_mute_turn_steering_limit_alert("steerSaturated/warning", 10.0, 0.0)
     assert not should_mute_turn_steering_limit_alert("laneChangeBlocked/warning", 10.0, 25.0)
+
+  def test_load_sounds_skips_missing_custom_clips(self, tmp_path):
+    soundd = Soundd.__new__(Soundd)
+    soundd.sound_directory = tmp_path / "sounds"
+    soundd.sound_directory.mkdir()
+    soundd.random_events_directory = tmp_path / "random_events"
+    soundd.random_events_directory.mkdir()
+
+    soundd.load_sounds()
+
+    assert AudibleAlert.engage in soundd.loaded_sounds
+    assert starpilot_alert_key(StarPilotAudibleAlert.angry) not in soundd.loaded_sounds
+    soundd.current_alert = starpilot_alert_key(StarPilotAudibleAlert.angry)
+    soundd.current_volume = 1.0
+    soundd.current_sound_frame = 0
+    np.testing.assert_array_equal(soundd.get_sound_data(4), np.zeros(4, dtype=np.float32))
 
   def test_bluetooth_audio_mutes_local_only_while_healthy(self):
     soundd = Soundd.__new__(Soundd)

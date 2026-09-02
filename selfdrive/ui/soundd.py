@@ -180,26 +180,32 @@ class Soundd:
           sounds_path = standard_path
 
       if random_events_path.exists():
-        wavefile = wave.open(str(random_events_path), 'r')
+        path = random_events_path
       elif sounds_path.exists():
-        wavefile = wave.open(str(sounds_path), 'r')
+        path = sounds_path
       else:
         if filename == "startup.wav":
           filename = "engage.wav"
-        wavefile = wave.open(BASEDIR + "/selfdrive/assets/sounds/" + filename, 'r')
+        path = Path(BASEDIR) / "selfdrive" / "assets" / "sounds" / filename
+        if not path.exists():
+          cloudlog.warning(f"soundd: missing {filename}, skipping")
+          continue
 
-      assert wavefile.getnchannels() == 1
-      assert wavefile.getsampwidth() == 2
-      assert wavefile.getframerate() == SAMPLE_RATE
-
-      length = wavefile.getnframes()
-      self.loaded_sounds[sound] = np.frombuffer(wavefile.readframes(length), dtype=np.int16).astype(np.float32) / (2**16/2)
+      try:
+        with wave.open(str(path), 'r') as wavefile:
+          if wavefile.getnchannels() != 1 or wavefile.getsampwidth() != 2 or wavefile.getframerate() != SAMPLE_RATE:
+            cloudlog.warning(f"soundd: invalid format {path}, skipping")
+            continue
+          length = wavefile.getnframes()
+          self.loaded_sounds[sound] = np.frombuffer(wavefile.readframes(length), dtype=np.int16).astype(np.float32) / (2**16/2)
+      except (FileNotFoundError, OSError, wave.Error):
+        cloudlog.exception(f"soundd: failed to load {path}")
 
   def get_sound_data(self, frames): # get "frames" worth of data from the current alert sound, looping when required
 
     ret = np.zeros(frames, dtype=np.float32)
 
-    if self.current_alert != AudibleAlert.none:
+    if self.current_alert != AudibleAlert.none and self.current_alert in self.loaded_sounds:
       num_loops = sound_list[self.current_alert][1]
       sound_data = self.loaded_sounds[self.current_alert]
       written_frames = 0
@@ -239,7 +245,10 @@ class Soundd:
       sink.close()
 
   def update_alert(self, new_alert):
-    current_alert_played_once = self.current_alert == AudibleAlert.none or self.current_sound_frame > len(self.loaded_sounds[self.current_alert])
+    if new_alert != AudibleAlert.none and new_alert not in self.loaded_sounds:
+      new_alert = AudibleAlert.none
+    loaded = self.loaded_sounds.get(self.current_alert)
+    current_alert_played_once = self.current_alert == AudibleAlert.none or loaded is None or self.current_sound_frame > len(loaded)
     if self.current_alert != new_alert and (new_alert != AudibleAlert.none or current_alert_played_once):
       self.current_alert = new_alert
       self.current_sound_frame = 0
