@@ -13,6 +13,7 @@ from openpilot.selfdrive.ui.soundd import (
 
 import numpy as np
 import time
+import wave
 
 AudibleAlert = log.SelfdriveState.AudibleAlert
 StarPilotAudibleAlert = custom.StarPilotCarControl.HUDControl.AudibleAlert
@@ -46,11 +47,50 @@ class TestSoundd:
     soundd.load_sounds()
 
     assert AudibleAlert.engage in soundd.loaded_sounds
+    assert AudibleAlert.warningImmediate in soundd.loaded_sounds
     assert starpilot_alert_key(StarPilotAudibleAlert.angry) not in soundd.loaded_sounds
     soundd.current_alert = starpilot_alert_key(StarPilotAudibleAlert.angry)
     soundd.current_volume = 1.0
     soundd.current_sound_frame = 0
     np.testing.assert_array_equal(soundd.get_sound_data(4), np.zeros(4, dtype=np.float32))
+
+  def test_load_sounds_falls_back_to_stock_when_custom_is_invalid(self, tmp_path):
+    soundd = Soundd.__new__(Soundd)
+    soundd.sound_directory = tmp_path / "sounds"
+    soundd.sound_directory.mkdir()
+    soundd.random_events_directory = tmp_path / "random_events"
+    soundd.random_events_directory.mkdir()
+
+    invalid = soundd.sound_directory / "warning_immediate.wav"
+    with wave.open(str(invalid), "w") as wav:
+      wav.setnchannels(2)
+      wav.setsampwidth(2)
+      wav.setframerate(44100)
+      wav.writeframes(b"\x00\x00" * 64)
+
+    soundd.load_sounds()
+
+    assert AudibleAlert.warningImmediate in soundd.loaded_sounds
+    assert soundd.loaded_sounds[AudibleAlert.warningImmediate].size > 0
+
+  def test_load_sounds_skips_empty_wav(self, tmp_path):
+    soundd = Soundd.__new__(Soundd)
+    soundd.sound_directory = tmp_path / "sounds"
+    soundd.sound_directory.mkdir()
+    soundd.random_events_directory = tmp_path / "random_events"
+    soundd.random_events_directory.mkdir()
+
+    empty = soundd.sound_directory / "engage.wav"
+    with wave.open(str(empty), "w") as wav:
+      wav.setnchannels(1)
+      wav.setsampwidth(2)
+      wav.setframerate(48000)
+      wav.writeframes(b"")
+
+    soundd.load_sounds()
+
+    assert AudibleAlert.engage in soundd.loaded_sounds
+    assert soundd.loaded_sounds[AudibleAlert.engage].size > 0
 
   def test_bluetooth_audio_mutes_local_only_while_healthy(self):
     soundd = Soundd.__new__(Soundd)

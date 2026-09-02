@@ -164,42 +164,59 @@ class Soundd:
 
     return str(resolved_path), sound_files
 
+  def _sound_candidates(self, filename: str) -> list[Path]:
+    random_events_path = self.random_events_directory / filename
+    sounds_path = self.sound_directory / filename
+
+    if not sounds_path.exists() and "_tizi" in filename:
+      standard_path = self.sound_directory / filename.replace("_tizi", "")
+      if standard_path.exists():
+        sounds_path = standard_path
+
+    stock_filename = "engage.wav" if filename == "startup.wav" else filename
+    stock_path = Path(BASEDIR) / "selfdrive" / "assets" / "sounds" / stock_filename
+
+    candidates = []
+    for path in (random_events_path, sounds_path, stock_path):
+      if path.exists() and path not in candidates:
+        candidates.append(path)
+    return candidates
+
+  @staticmethod
+  def _read_sound(path: Path) -> np.ndarray | None:
+    with wave.open(str(path), 'r') as wavefile:
+      if wavefile.getnchannels() != 1 or wavefile.getsampwidth() != 2 or wavefile.getframerate() != SAMPLE_RATE:
+        cloudlog.warning(f"soundd: invalid format {path}, skipping")
+        return None
+      length = wavefile.getnframes()
+      if length <= 0:
+        cloudlog.warning(f"soundd: empty audio {path}, skipping")
+        return None
+      sound = np.frombuffer(wavefile.readframes(length), dtype=np.int16).astype(np.float32) / (2**16/2)
+      if sound.size == 0:
+        cloudlog.warning(f"soundd: empty audio {path}, skipping")
+        return None
+      return sound
+
   def load_sounds(self):
     self.loaded_sounds: dict[int, np.ndarray] = {}
 
-    # Load all sounds
+    # Load all sounds. Prefer theme/random-event clips, then packaged stock.
     for sound in sound_list:
       filename, play_count, volume = sound_list[sound]
-
-      random_events_path = self.random_events_directory / filename
-      sounds_path = self.sound_directory / filename
-
-      if not sounds_path.exists() and "_tizi" in filename:
-        standard_path = self.sound_directory / filename.replace("_tizi", "")
-        if standard_path.exists():
-          sounds_path = standard_path
-
-      if random_events_path.exists():
-        path = random_events_path
-      elif sounds_path.exists():
-        path = sounds_path
-      else:
-        if filename == "startup.wav":
-          filename = "engage.wav"
-        path = Path(BASEDIR) / "selfdrive" / "assets" / "sounds" / filename
-        if not path.exists():
-          cloudlog.warning(f"soundd: missing {filename}, skipping")
+      loaded = False
+      for path in self._sound_candidates(filename):
+        try:
+          sound_data = self._read_sound(path)
+        except (FileNotFoundError, OSError, wave.Error):
+          cloudlog.exception(f"soundd: failed to load {path}")
           continue
-
-      try:
-        with wave.open(str(path), 'r') as wavefile:
-          if wavefile.getnchannels() != 1 or wavefile.getsampwidth() != 2 or wavefile.getframerate() != SAMPLE_RATE:
-            cloudlog.warning(f"soundd: invalid format {path}, skipping")
-            continue
-          length = wavefile.getnframes()
-          self.loaded_sounds[sound] = np.frombuffer(wavefile.readframes(length), dtype=np.int16).astype(np.float32) / (2**16/2)
-      except (FileNotFoundError, OSError, wave.Error):
-        cloudlog.exception(f"soundd: failed to load {path}")
+        if sound_data is not None:
+          self.loaded_sounds[sound] = sound_data
+          loaded = True
+          break
+      if not loaded:
+        cloudlog.warning(f"soundd: missing {filename}, skipping")
 
   def get_sound_data(self, frames): # get "frames" worth of data from the current alert sound, looping when required
 
@@ -208,6 +225,8 @@ class Soundd:
     if self.current_alert != AudibleAlert.none and self.current_alert in self.loaded_sounds:
       num_loops = sound_list[self.current_alert][1]
       sound_data = self.loaded_sounds[self.current_alert]
+      if sound_data.size == 0:
+        return ret * self.current_volume
       written_frames = 0
 
       current_sound_frame = self.current_sound_frame % len(sound_data)
