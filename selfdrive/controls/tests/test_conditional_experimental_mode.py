@@ -1168,6 +1168,7 @@ def test_starpilot_planner_updates_cem_with_current_frame_state(monkeypatch):
 
   try:
     monkeypatch.setattr(starpilot_planner_module, "calculate_road_curvature", lambda model, v_ego: (0.01, 1.0))
+    monkeypatch.setattr(starpilot_planner_module, "extract_curve_profile", lambda model: ([], []))
     monkeypatch.setattr(planner.starpilot_acceleration, "update", lambda *args, **kwargs: None)
     monkeypatch.setattr(planner.starpilot_events, "update", lambda *args, **kwargs: None)
     monkeypatch.setattr(planner.starpilot_vcruise, "update", lambda *args, **kwargs: 0.0)

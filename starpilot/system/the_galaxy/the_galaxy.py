@@ -6136,6 +6136,16 @@ def setup(app):
     result["VehicleParked"] = _get_vehicle_parked()
     result["AlphaLongitudinalAvailable"] = _get_alpha_longitudinal_available()
     result["HasRivianAngleHarness"] = _get_has_rivian_angle_harness()
+    # read-only: excluded from allowed_keys (and so from the write paths) but still
+    # worth surfacing as a display-only readout
+    try:
+      result["CalibratedLateralAcceleration"] = _get_current_param_value("CalibratedLateralAcceleration", float, defaults_lookup)
+    except Exception:
+      result["CalibratedLateralAcceleration"] = None
+    try:
+      result["CalibrationProgress"] = _get_current_param_value("CalibrationProgress", float, defaults_lookup)
+    except Exception:
+      result["CalibrationProgress"] = None
 
     for key in ("CalibratedLateralAcceleration", "CalibrationProgress"):
       try:

@@ -484,11 +484,11 @@ function formatSliderValue(val, stepStr, precisionInt, key) {
 
 function formatReadoutValue(p) {
   const raw = state.values[p.key]
-  const value = parseFloat(raw)
-  if (raw === undefined || raw === null || Number.isNaN(value)) return "--"
+  const v = parseFloat(raw)
+  if (raw === undefined || raw === null || Number.isNaN(v)) return "--"
 
   const precision = p.precision !== undefined && p.precision !== null ? Number(p.precision) : 2
-  const formatted = Number(value.toFixed(Math.max(0, precision))).toString()
+  const formatted = Number(v.toFixed(Math.max(0, precision))).toString()
   return p.unit ? `${formatted}${p.unit}` : formatted
 }
 
