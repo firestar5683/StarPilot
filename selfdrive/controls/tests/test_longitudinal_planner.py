@@ -3696,6 +3696,14 @@ def test_experimental_speed_handoff_uses_lead_limit_when_following():
   assert planner.get_experimental_speed_handoff_weight(20.0 * CV.MPH_TO_MS, True, False, toggles, False) == 0.0
 
 
+def test_experimental_speed_handoff_keeps_stronger_e2e_brake():
+  kept = LongitudinalPlanner.apply_experimental_speed_handoff(-0.50, 0.20, -0.50, 1.0)
+  blended = LongitudinalPlanner.apply_experimental_speed_handoff(0.02, 0.40, 0.02, 0.5)
+
+  assert kept == pytest.approx(-0.50)
+  assert blended == pytest.approx(0.21)
+
+
 def test_experimental_release_accel_transition_does_not_mask_stopped_lead():
   v_ego = 23.96
   CP = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
