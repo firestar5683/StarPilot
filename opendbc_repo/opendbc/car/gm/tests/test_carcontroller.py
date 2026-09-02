@@ -53,6 +53,7 @@ from opendbc.car.gm.carcontroller import (
   get_testing_ground_1_brake_switch_bias,
   get_acc_dashboard_status_active,
   get_stock_cc_active_for_cancel,
+  limit_grade_feedforward,
   shape_bolt_acc_pedal_low_speed_friction,
   shape_truck_friction_brake,
   shape_truck_pitch_accel,
@@ -893,6 +894,20 @@ def test_shape_truck_pitch_accel_attenuates_highway_grade_feedforward():
 
 def test_shape_truck_pitch_accel_is_inactive_without_truck_tuning():
   assert shape_truck_pitch_accel(-0.30, 30.0, False) == pytest.approx(-0.30)
+
+
+def test_limit_grade_feedforward_does_not_stack_on_positive_planner():
+  assert limit_grade_feedforward(0.40, 0.50) == 0.0
+
+
+def test_limit_grade_feedforward_caps_uphill_hold():
+  assert limit_grade_feedforward(0.0, 0.50) == pytest.approx(0.20)
+  assert limit_grade_feedforward(-0.10, 0.50) == pytest.approx(0.20)
+
+
+def test_limit_grade_feedforward_keeps_downhill_help():
+  assert limit_grade_feedforward(0.40, -0.30) == pytest.approx(-0.30)
+  assert limit_grade_feedforward(-0.20, -0.30) == pytest.approx(-0.30)
 
 
 def test_shape_truck_friction_brake_suppresses_boundary_chatter():

@@ -256,6 +256,19 @@ def shape_truck_pitch_accel(pitch_accel: float, v_ego: float, enabled: bool) -> 
   return pitch_accel * scale
 
 
+MAX_UPHILL_GRADE_FF = 0.20
+
+
+def limit_grade_feedforward(planner_accel: float, pitch_accel: float) -> float:
+  # Planner already closed-loops hill sag. Stacking full g*sin(pitch) on a
+  # positive command is what kick-downs 10-speed trucks.
+  if pitch_accel > 0.0 and planner_accel > 0.0:
+    return 0.0
+  if pitch_accel > MAX_UPHILL_GRADE_FF:
+    return MAX_UPHILL_GRADE_FF
+  return pitch_accel
+
+
 def shape_truck_friction_brake(apply_brake: int, accel_cmd: float, stopping: bool, active: bool) -> tuple[int, bool]:
   if apply_brake <= 0:
     return 0, False
@@ -1003,14 +1016,13 @@ class CarController(CarControllerBase):
           self.truck_follow_accel = 0.0
         else:
           long_pitch_enabled = bool(getattr(starpilot_toggles, "long_pitch", True))
-          pedal_long_path = bool(self.CP.enableGasInterceptorDEPRECATED and (self.CP.flags & GMFlags.PEDAL_LONG.value))
-          long_pitch_for_powertrain = long_pitch_enabled or pedal_long_path
 
           if self.is_volt:
-            if long_pitch_for_powertrain and len(CC.orientationNED) == 3 and CS.out.vEgo > self.CP.vEgoStopping:
+            if long_pitch_enabled and len(CC.orientationNED) == 3 and CS.out.vEgo > self.CP.vEgoStopping:
               volt_pitch_accel = math.sin(CC.orientationNED[1]) * ACCELERATION_DUE_TO_GRAVITY
             else:
               volt_pitch_accel = 0.0
+            volt_pitch_accel = limit_grade_feedforward(accel, volt_pitch_accel)
 
             aero_drag_accel = (0.5 * self.coeffDrag * self.frontalArea * self.airDensity * CS.out.vEgo ** 2) / self.mass
             accel_cmd = float(np.clip(accel + aero_drag_accel + volt_pitch_accel, self.params.ACCEL_MIN, self.params.ACCEL_MAX))
@@ -1031,7 +1043,7 @@ class CarController(CarControllerBase):
             if self.apply_brake > 0:
               self.apply_gas = self.params.INACTIVE_REGEN
           else:
-            if long_pitch_for_powertrain and len(CC.orientationNED) == 3 and CS.out.vEgo > self.CP.vEgoStopping:
+            if long_pitch_enabled and len(CC.orientationNED) == 3 and CS.out.vEgo > self.CP.vEgoStopping:
               accel_due_to_pitch = math.sin(CC.orientationNED[1]) * ACCELERATION_DUE_TO_GRAVITY
             else:
               accel_due_to_pitch = 0.0
@@ -1048,6 +1060,7 @@ class CarController(CarControllerBase):
               not self.CP.enableGasInterceptorDEPRECATED
             )
             accel_due_to_pitch = shape_truck_pitch_accel(accel_due_to_pitch, CS.out.vEgo, truck_long_smoothing)
+            accel_due_to_pitch = limit_grade_feedforward(actuators.accel, accel_due_to_pitch)
             accel_input = actuators.accel + accel_due_to_pitch
             if truck_long_smoothing:
               accel_input = shape_truck_positive_accel(
