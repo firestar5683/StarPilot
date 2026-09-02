@@ -6,7 +6,13 @@ from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
 
 from openpilot.starpilot.common.starpilot_variables import CITY_SPEED_LIMIT, CRUISING_SPEED
-from openpilot.starpilot.controls.lib.curve_speed_controller import CurveSpeedController, is_manual_speed_control
+from openpilot.starpilot.controls.lib.curve_speed_controller import (
+  CSC_ACTIVE_OFF_DELTA,
+  CSC_GLOW_HOLD_TIME,
+  CSC_GLOW_ON_DELTA,
+  CurveSpeedController,
+  is_manual_speed_control,
+)
 from openpilot.starpilot.controls.lib.speed_limit_controller import SpeedLimitController
 from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import (
   get_force_stop_distance_bias,
@@ -16,7 +22,6 @@ from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import (
 )
 
 CSC_MIN_SPEED = CITY_SPEED_LIMIT * CV.MPH_TO_MS
-CSC_CURVE_RELEASE_HOLD_TIME = 0.75
 OVERRIDE_FORCE_STOP_TIMER = 10
 STANDSTILL_FORCE_STOP_CLEAR_TIME = 0.75
 # Open-loop — green is undetectable at standstill, so this only needs to cover the
@@ -202,8 +207,9 @@ class StarPilotVCruise:
     self._nav_instruction_state = {}
     self._applied_slc_control_target = 0.0
     self.csc_controlling_speed = False
+    self.csc_glow_release_timer = 0.0
+    self.csc_override = False
     self.csc_target = 0.0
-    self.csc_curve_last_seen_at = None
 
   def _update_nav_instruction_state(self):
     raw = self.starpilot_planner.params_memory.get("NavInstructionState") or {}
@@ -571,28 +577,62 @@ class StarPilotVCruise:
       starpilot_toggles.curve_speed_controller and
       (not getattr(starpilot_toggles, "csc_no_lead", False) or not following_lead)
     )
-    csc_curve_detected = csc_available and self.starpilot_planner.road_curvature_detected
-    if csc_curve_detected:
-      self.csc.update_target(v_ego)
+    # The blinker veto is for lane changes/turns, not for an already-real curve -- releasing it
+    # there let the car accelerate into the bend, then claw the speed back once the blinker cleared.
+    csc_blinker_on = ((sm["carState"].leftBlinker or sm["carState"].rightBlinker) and
+                      not self.starpilot_planner.driving_in_curve)
+    csc_was_controlling = self.csc_controlling_speed
+    # a pending SLC confirmation owns the accel button
+    slc_confirmation_pending = self.slc.speed_limit_changed_timer > DT_MDL and self.slc.unconfirmed_speed_limit >= 1
+    csc_accel_button = bool(sm["starpilotCarState"].accelPressed) and not slc_confirmation_pending
 
-      self.csc_controlling_speed = True
-      self.csc_target = self.csc.target
-      self.csc_curve_last_seen_at = now
-    else:
-      csc_release_hold = bool(
-        csc_available and
-        self.csc_controlling_speed and
-        self.csc_curve_last_seen_at is not None and
-        self._elapsed_seconds(now, self.csc_curve_last_seen_at) < CSC_CURVE_RELEASE_HOLD_TIME
-      )
-      if not csc_release_hold:
-        self.csc.log_data(v_ego, sm)
+    # Latched outside the availability branch: the press itself suspends CSC this frame, so
+    # latching inside it would never see the press, and the slowdown would return on release.
+    if csc_was_controlling and csc_accel_button:
+      self.csc_override = True
+    if not (long_control_active and starpilot_toggles.curve_speed_controller):
+      self.csc_override = False
 
+    if csc_available and not csc_blinker_on:
+      self.csc.update_target(v_ego, v_cruise)
+
+      if self.csc_override and self.csc.target > v_cruise - CSC_ACTIVE_OFF_DELTA:
+        self.csc_override = False
+
+      if self.csc_override:
         self.csc_controlling_speed = False
-        self.csc.target_set = False
-        self.csc_curve_last_seen_at = None
-
+        self.csc_glow_release_timer = 0.0
         self.csc_target = v_cruise
+      else:
+        self.csc_target = self.csc.target
+        # A low target alone means nothing until the car has actually reached it (slowed down
+        # to it, or accelerated up into it). Release still waits for the set speed, so the glow
+        # spans the hold and the recovery, not just the braking.
+        if self.csc_target < v_cruise - CSC_GLOW_ON_DELTA and v_ego >= self.csc_target - CSC_ACTIVE_OFF_DELTA:
+          self.csc_controlling_speed = True
+          self.csc_glow_release_timer = 0.0
+        elif self.csc_target > v_cruise - CSC_ACTIVE_OFF_DELTA:
+          # hold through a brief release: one curve routinely lets go and re-engages
+          self.csc_glow_release_timer += DT_MDL
+          if self.csc_glow_release_timer >= CSC_GLOW_HOLD_TIME:
+            self.csc_controlling_speed = False
+        else:
+          self.csc_glow_release_timer = 0.0
+    elif csc_available:
+      # Release the cap so CSC can't fight the lane change, but keep planning -- resetting here
+      # threw the braking plan away and re-planned from the set speed with the curve closer.
+      self.csc.update_target(v_ego, v_cruise)
+      self.csc_controlling_speed = False
+      self.csc_glow_release_timer = 0.0
+      self.csc_target = v_cruise
+    else:
+      self.csc.reset(v_cruise)
+      self.csc_controlling_speed = False
+      self.csc_glow_release_timer = 0.0
+      self.csc_target = v_cruise
+
+    self.csc.handle_override(v_ego, csc_was_controlling, sm, accel_button=csc_accel_button)
+    self.csc.log_data(v_ego, sm)
 
     # Pfeiferj's Speed Limit Controller
     self.slc.starpilot_toggles = starpilot_toggles

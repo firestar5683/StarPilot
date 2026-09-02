@@ -384,6 +384,7 @@
   padding: 0.2rem 0.6rem;
 }
 
+/* read-only: no border, since there is nothing here to click or edit */
 .ds-row-readout {
   background-color: transparent;
   border: none;
