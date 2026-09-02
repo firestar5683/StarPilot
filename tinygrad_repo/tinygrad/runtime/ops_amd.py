@@ -8,7 +8,7 @@ from tinygrad.runtime.support.hcq import MMIOInterface, BumpAllocator, hcq_filte
 from tinygrad.uop.ops import sint
 from tinygrad.device import Compiled, BufferSpec, TinyELF
 from tinygrad.helpers import getenv, round_up, data64_le, DEBUG, PROFILE, ProfileEvent, lo32, hi32, colored, prod, ContextVar, TracingKey
-from tinygrad.helpers import VIZ, ceildiv, unwrap, pluralize
+from tinygrad.helpers import VIZ, HCQ2, ceildiv, unwrap, pluralize
 from tinygrad.renderer.cstyle import HIPRenderer, HIPCCRenderer
 from tinygrad.renderer.llvmir import AMDLLVMRenderer
 from tinygrad.runtime.autogen import kfd, hsa, sqtt, amdgpu_kd, amdgpu_drm
@@ -651,6 +651,59 @@ class AMDAllocator(HCQAllocator['AMDDevice']):
 
   def _do_map(self, buf:HCQBuffer): return self.dev.iface.map(buf._base if buf._base is not None else buf)
 
+  def _copyin(self, dest:HCQBuffer, src:memoryview):
+    if not self.dev.is_usb(): return super()._copyin(dest, src)
+    from tinygrad.runtime.support.usb import alloc_cbuffer
+    # Pipelined copyin over the 0xF2 engine. ~256KB chunks stream into two alternating 256KB SRAM bounce windows; the
+    # engine can't signal data landing, so each chunk's wire image ends in a 4B sentinel tagged with its sequence number.
+    # A prebuilt SDMA ring polls each chunk's sentinel before copying it to VRAM, then bumps a drain fence; the host
+    # waits on that fence before re-arming a window. No timing is assumed in either direction.
+    dev, usb, ts, sdma = self.dev, self.dev.iface.pci_dev.usb, self.dev.timeline_signal, self.dev.sdma
+    CHUNK, src_mv = 0x40000 - 4, src.cast('B')  # payload per chunk: the 256KB window minus the 4B trailing sentinel
+    nchunks = ceildiv(src.nbytes, CHUNK)
+    FENCE = 0xA800  # drain fence: the GPU writes it via sys_buf (PCIe 0x820800), the host reads it here (xdata)
+    if not hasattr(self, '_usb_seq'):  # one-time: clear the fence and zero both windows so garbage can't match a sentinel
+      self._usb_seq, self._usb_stage = 0, [alloc_cbuffer(0x40000) for _ in range(2)]  # (backing array, memoryview) pairs
+      self._usb_wins = (self.b[0].offset(0, 0x40000), self.b[0].offset(0x40000, 0x40000))  # two windows, engine slots 0/16
+      usb.write(FENCE, bytes(8))
+      for bi in range(2): usb.scsi_write(bytes(0x40000), slot_start=bi * 16)
+
+    def wait_drain(count):  # spin until the drain fence reaches count, i.e. chunks 0..count-1 are fully in VRAM
+      t0 = time.perf_counter()
+      while int.from_bytes(usb.read(FENCE, 8), 'little') < count:
+        if time.perf_counter() - t0 > 10: raise RuntimeError(f"GPU failed to drain USB copyin chunk {count - 1} (10s, hung GPU?)")
+
+    # build the whole ring upfront: per chunk, poll the sentinel, copy SRAM->VRAM, bump the fence; then one doorbell
+    POLL_EQ = sdma.SDMA_OP_POLL_REGMEM | sdma.SDMA_PKT_POLL_REGMEM_HEADER_FUNC(3) | sdma.SDMA_PKT_POLL_REGMEM_HEADER_MEM_POLL(1)
+    POLL_DW5 = sdma.SDMA_PKT_POLL_REGMEM_DW5_INTERVAL(0x04) | sdma.SDMA_PKT_POLL_REGMEM_DW5_RETRY_COUNT(0xfff)
+    q = dev.hw_copy_queue_t().wait(ts, dev.timeline_value - 1)
+    for c in range(nchunks):
+      seq, size = self._usb_seq + c, min(CHUNK, src.nbytes - c * CHUNK)
+      q.q(POLL_EQ, *data64_le(self._usb_wins[seq & 1].va_addr + round_up(size + 4, 512) - 4), 0x51000000 | (seq & 0xFFFFFF), 0xFFFFFFFF, POLL_DW5)
+      q.copy(dest.offset(c * CHUNK), self._usb_wins[seq & 1], size)
+      q.write(dev.iface.sys_buf.offset(0x800, 8), seq + 1, b64=True)
+    q.signal(ts, dev.next_timeline()).submit(dev)
+
+    # stream the chunks: stage the wire image [payload][sentinel], arm the window, send. A window is reusable once
+    # its previous occupant (seq-2) is both fully sent (tag reaped) and fully drained to VRAM (the fence).
+    inflight = [None, None]
+    for c in range(nchunks):
+      seq, size = self._usb_seq + c, min(CHUNK, src.nbytes - c * CHUNK)
+      if inflight[seq & 1] is not None: usb.usb.bulk_wait(inflight[seq & 1])
+      buf = self._usb_stage[seq & 1][1]
+      buf[:size] = src_mv[c * CHUNK : c * CHUNK + size]
+      wire = round_up(size + 4, 512)  # payload plus the sentinel, padded to 512B sectors (full window for max chunks)
+      struct.pack_into('<I', buf, wire - 4, 0x51000000 | (seq & 0xFFFFFF))  # the sentinel is the last dword of the wire
+      arm_tag = usb.usb.control_write_async(0xF2, wire // 512, (seq & 1) * 16 | (ceildiv(wire, 0x4000) << 8))  # wValue=sectors, wIndex=slot|count
+      rd_tag, rd_mv = usb.usb.control_read_async(0xE4, 8, value=FENCE)  # arm and fence read fly in one round-trip window
+      usb.usb.bulk_wait(arm_tag)
+      usb.usb.bulk_wait(rd_tag)
+      if int.from_bytes(rd_mv, 'little') < seq - 1: wait_drain(seq - 1)  # rare: the drain lagged; spin on fresh reads
+      inflight[seq & 1] = usb.usb.bulk_write_async(buf[:wire])
+    for tag in inflight: usb.usb.bulk_wait(tag)
+    self._usb_seq += nchunks
+    wait_drain(self._usb_seq)  # copyin is synchronous: everything must be in VRAM before returning
+
   def _copyout(self, dest:memoryview, src:HCQBuffer):
     if not self.dev.is_usb(): return super()._copyout(dest, src)
     self.dev.synchronize()
@@ -844,7 +897,7 @@ class KFDIface:
 
 class PCIIface(PCIIfaceBase):
   def __init__(self, dev, dev_id):
-    super().__init__(dev, dev_id, vendor=0x1002, devices=((0xffff, (0x74a1,0x744c,0x7480,0x7550,0x7551,0x7590,0x75a0)),), vram_bar=0,
+    super().__init__(dev, dev_id, vendor=0x1002, devices=((0xffff, (0x74a1,0x74b5,0x744c,0x7480,0x7550,0x7551,0x7590,0x75a0,0x75a8)),), vram_bar=0,
       va_start=AMMemoryManager.va_allocator.base, va_size=AMMemoryManager.va_allocator.size, dev_impl_t=AMDev)
     self._compute_props()
 
@@ -926,14 +979,13 @@ class USBIface(PCIIface):
     region = self.dev_impl.mm.map_range(vaddr:=self.dev_impl.mm.alloc_vaddr(size=size), size, [(sys_addr, size)], aspace=AddrSpace.SYS, uncached=True)
     return HCQBuffer(vaddr, size, meta=PCIAllocationMeta(region, has_cpu_mapping=False), view=self.pci_dev.dma_view(ctrl_addr, size), owner=self.dev)
 
-  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, **kwargs) -> HCQBuffer:
+  def alloc(self, size:int, host=False, uncached=False, cpu_access=False, contiguous=False, force_devmem=False, zero=False, **kwargs) -> HCQBuffer:
     # usb allocates uncached and cpu_access in vram. vram writes are faster than sram writes
-    if host and self.sys_next_off + size < self.sys_buf.size:
-      self.sys_next_off += size
-      return self.sys_buf.offset(self.sys_next_off - size, size)
+    # NOTE: host allocs deliberately do NOT use sys_buf (the 0x820000 NVMe SQ region): the GPU's signal writes there
+    # collide with the 0xF2 engine mid-stream. Signals in VRAM are read back via 0xF0 streaming reads instead.
 
     # force devmem
-    return super().alloc(size, host=False, uncached=uncached, cpu_access=cpu_access, contiguous=contiguous, force_devmem=True, **kwargs)
+    return super().alloc(size, host=False, uncached=uncached, cpu_access=cpu_access, contiguous=contiguous, force_devmem=True, zero=zero, **kwargs)
 
   def sleep(self, timeout): pass
 
@@ -946,9 +998,7 @@ class AMDDevice(HCQCompiled):
   def is_usb(self) -> bool: return isinstance(self.iface, USBIface)
 
   def __init__(self, device:str=""):
-    self.device_id = int(device.split(":")[1]) if ":" in device else 0
-
-    self.iface = self._select_iface()
+    self.iface = self._select_iface(device)
 
     self.target:tuple[int, ...] = ((trgt:=self.iface.props['gfx_target_version']) // 10000, (trgt // 100) % 100, trgt % 100)
     self.arch = "gfx%d%x%x" % self.target
@@ -1015,7 +1065,8 @@ class AMDDevice(HCQCompiled):
       for k in (PMC_COUNTERS:=getenv("PMC_COUNTERS", pmc_default).split(",")):
         if k not in self.pmc_counters: raise RuntimeError(f"PMC counter {k} is not supported. Available: {','.join(self.pmc_counters.keys())}")
 
-      cast(AMDComputeQueue, unwrap(self.hw_compute_queue_t)()).pmc_start([(k, *self.pmc_counters[k]) for k in PMC_COUNTERS]).submit(self)
+      with (q:=cast(AMDComputeQueue, unwrap(self.hw_compute_queue_t)())).pred_exec((1 << self.xccs) - 1):
+        q.pmc_start([(k, *self.pmc_counters[k]) for k in PMC_COUNTERS]).submit(self)
       self.pmc_buffer = self.allocator.alloc(self.pmc_sched[-1].off + self.pmc_sched[-1].size, BufferSpec(nolru=True, uncached=True))
       self.allocator._copyin(self.pmc_buffer, memoryview(bytearray(self.pmc_buffer.size))) # zero pmc buffers, some counters have only lo part.
 
@@ -1028,6 +1079,10 @@ class AMDDevice(HCQCompiled):
       self.sqtt_buffers = [self.allocator.alloc(SQTT_BUFFER_SIZE<<20, BufferSpec(nolru=True, uncached=True)) for _ in range(self.se_cnt * self.xccs)]
       self.sqtt_wptrs = self.allocator.alloc(round_up(self.se_cnt * self.xccs * 4, 0x1000), BufferSpec(cpu_access=True, nolru=True))
       self.sqtt_next_cmd_id = itertools.count(0)
+
+    if self.is_am():
+      self.iface.dev_impl.gmc.vf_owner = self
+      if self.iface.dev_impl.vf_access: self.iface.dev_impl.release_vf_access()
 
   def create_queue(self, queue_type, ring_size, ctx_save_restore_size=0, eop_buffer_size=0, ctl_stack_size=0, debug_memory_size=0, idx=0):
     ring = self.iface.alloc(ring_size, uncached=True, cpu_access=True)
@@ -1052,7 +1107,8 @@ class AMDDevice(HCQCompiled):
     if getenv("AMD_DISABLE_SDMA"): return None
     if idx in self.sdma_queues: return self.sdma_queues[idx]
     with contextlib.suppress(OSError):
-      self.sdma_queues[idx] = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, 0x200 if self.is_usb() else (16 << 20), idx=idx)
+      # USB: a copyin submits its whole ring at once (3 packets per 240KB chunk), so it needs more than the 0x200 default
+      self.sdma_queues[idx] = self.create_queue(kfd.KFD_IOC_QUEUE_TYPE_SDMA, (1 << 20) if self.is_usb() else (16 << 20), idx=idx)
     return self.sdma_queues.get(idx, None)
 
   def _ensure_has_local_memory(self, private_segment_size):
@@ -1102,4 +1158,4 @@ class AMDDevice(HCQCompiled):
 
   def hw_copy_queues(self): return [(f"SDMA:{i}", functools.partial(unwrap(self.hw_copy_queue_t), queue_idx=i)) for i in self.sdma_queues]
 
-if getenv("HCQ2"): from extra.hcq2.ops_amd2 import * # noqa: F401, F403 # pylint: disable=unused-import
+if HCQ2: from extra.hcq2.ops_amd2 import * # noqa: F401, F403 # pylint: disable=unused-import

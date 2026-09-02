@@ -1,11 +1,16 @@
 from __future__ import annotations
 from typing import Callable, cast
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 from tinygrad.helpers import prod, Target, EMULATED_DTYPES
 from tinygrad.uop.ops import Ops, UOp, sint, ssimplify, smin, GroupOp, PatternMatcher
 from tinygrad.dtype import AddrSpace, DType, dtypes
-from tinygrad.codegen.opt.tc import TensorCore
+from tinygrad.renderer.tc import TensorCore
 from tinygrad.device import Compiler
+
+# an access takes its dtype from the buffer it indexes, so accessing at another dtype restates the storage on the buffer that owns it
+def with_storage(x:UOp, dt:DType) -> UOp:
+  if x.op in {Ops.PARAM, Ops.BUFFER}: return x.replace(arg=replace(x.arg, dtype=dt))
+  return x.replace(src=(with_storage(x.src[0], dt),)+x.src[1:])
 
 @dataclass(frozen=True)
 class Estimates:
@@ -35,8 +40,8 @@ class Estimates:
         while len(buf.src) and buf.op is not Ops.PARAM: buf = buf.src[0]
         if buf.op is Ops.PARAM:
           # u.src[0] is INDEX, cap at buffer size for re-reads (e.g. matmul)
-          accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.scalar().itemsize * mults
-          mem[(buf, u.op)] = smin(accessed, buf.max_numel() * buf.dtype.scalar().itemsize)
+          accessed = mem.get((buf, u.op), 0) + u.src[0].max_numel() * u.src[0].dtype.itemsize * mults
+          mem[(buf, u.op)] = smin(accessed, buf.max_numel() * buf.dtype.itemsize)
       if u.op is Ops.RANGE:
         mult_stack.append(mults)
         if u.dtype is not dtypes.void:  # unbounded loop, unknown trip count
@@ -45,11 +50,10 @@ class Estimates:
           mults = mults.substitute({x:x.const_like(0) for x in mults.toposort() if x.op is Ops.SPECIAL}) if isinstance(mults, UOp) else mults
       elif u.op is Ops.END: mults = mult_stack.pop(-1)
       elif u.op is Ops.SPECIAL: mults *= cast(sint, u.src[0].ssimplify()) # NOTE: we don't push to the mult_stack here, you can't end these
-      elif u.op is Ops.PARAM and u.arg.addrspace == AddrSpace.ALU and u.expr == 'core_id': mults *= int(u.vmax) + 1
       elif u.op is Ops.LOAD and u.src[0].addrspace != AddrSpace.REG:
-        lds += u.max_numel() * u.dtype.scalar().itemsize * mults
+        lds += u.max_numel() * u.dtype.itemsize * mults
       elif u.op is Ops.STORE and u.src[0].addrspace != AddrSpace.REG:
-        lds += u.max_numel() * u.src[1].dtype.scalar().itemsize * mults
+        lds += u.max_numel() * u.src[1].dtype.itemsize * mults
       elif u.op in GroupOp.ALU and u not in excluded:
         flops += (mults * (2 if u.op is Ops.MULACC else 1)) * u.max_numel()
       elif u.op is Ops.WMMA and u not in excluded:
@@ -62,7 +66,6 @@ class Renderer:
   # TODO: make this generic with a list of supported types
   supports_float4: bool = True
   has_local: bool = True
-  has_threads: bool = False
   has_shared: bool = True
   # NOTE: these two should be in (x,y,z) order to match the max_sizes argument in get_grouped_dims
   global_max: tuple[int, ...]|None = (0x8FFFFFFF,) * (3) # TODO: Ops.SPECIAL int32 indexes right now

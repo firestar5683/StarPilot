@@ -159,7 +159,21 @@ All four files must be updated together.
 
 ## Manifest
 
-Generate the base manifest after compilation, then namespace the release artifacts as v23:
+The current test branch uses manifest v25 and requests v25 only. Seed the new
+manifest from the previous catalog, then replace entries as artifacts are
+rebuilt with the pinned runtime:
+
+```bash
+cp /path/to/model_names_v24.json /path/to/model_names_v25.json
+```
+
+The current tinygrad pin is `f6fc4e3f2c3db5fae1e19cbfbc3ad9fc579a12ae`, from
+`openpilot` `origin/master` (`bump tg + TC_MIN_GLOBALS`). StarPilot's
+multi-model `modeld` remains in place; do not replace it with upstream's
+single-model `modeld`.
+
+For the older namespace migration workflow, generate the base manifest after
+compilation and namespace the release artifacts as v23:
 
 ```bash
 python3 scripts/model_rebuild_pipeline.py manifest \
@@ -175,9 +189,9 @@ python3 scripts/namespace_model_artifacts.py \
 
 The namespace command changes IDs such as `tr1422` to `tr14223`, renames the
 compiled and upload-ready files, and writes an ID map. It preserves display
-names and behavioral versions. The current model manager requests v23 only;
-the manifest is fetched from `Models/model_names_v23.json`, while v22 remains
-available for devices that have not updated yet.
+names and behavioral versions. The current model manager requests v25 only; the
+manifest is fetched from `Models/model_names_v25.json`. Devices still running
+the prior branch continue to request their existing manifest version.
 
 After importing newly compiled sources, normalize the release namespace before
 copying files into either resource repository:
@@ -205,4 +219,4 @@ Compilation validates JIT capture/replay, pickle round-trip, finite outputs, met
 4. Confirm `driverStateV2` on both supported camera resolutions.
 5. Test download, selection, deletion, randomization, migration, and fallback in both device UIs and Galaxy.
 
-The built-in RDF artifact is `selfdrive/modeld/models/driving_tinygrad.pkl`. If migration cannot download the selected v23 artifact, StarPilot switches to that built-in model.
+The built-in RDF artifact is `selfdrive/modeld/models/driving_tinygrad.pkl`. If migration cannot download the selected v25 artifact, StarPilot switches to that built-in model.

@@ -56,14 +56,13 @@ def build_compile_env(*, supercombo: bool = False) -> dict[str, str]:
   existing_pythonpath = env.get("PYTHONPATH", "")
   env["PYTHONPATH"] = f"{REPO_ROOT}{os.pathsep}{existing_pythonpath}" if existing_pythonpath else str(REPO_ROOT)
   defaults = {
+    "DEBUG": "0",
     "FLOAT16": "1",
     "IMAGE": "1" if supercombo else "2",
     "JIT_BATCH_SIZE": "0",
     "NOLOCALS": "1",
     "OPENPILOT_HACKS": "1",
-  } | ({} if supercombo else {
-    "DEBUG": "0",
-  })
+  }
   for key, default in defaults.items():
     try:
       int(str(env.get(key)), 0)

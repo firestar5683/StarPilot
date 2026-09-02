@@ -1,10 +1,9 @@
 import unittest, pytest
 from tinygrad import dtypes, Variable, Device
 from tinygrad.dtype import AddrSpace
-from tinygrad.helpers import DEBUG, Context
 from tinygrad.uop.ops import Ops, UOp, UPat, PatternMatcher, graph_rewrite, GroupOp, AxisType, broadcast_axes, KernelInfo
 from tinygrad.uop.symbolic import sym
-from test.helpers import to_uops_list
+from test.helpers import full_rewrite, to_uops_list
 from tinygrad.codegen import full_rewrite_to_sink
 
 simple_pm = PatternMatcher([
@@ -14,43 +13,27 @@ simple_pm = PatternMatcher([
   ((UPat.var('x') + UPat.cvar('c1')) + UPat.cvar('c2'), lambda x,c1,c2: x + (c1.val+c2.val)),
 ])
 
-def const_values(u:UOp):
-  if u.op is Ops.CONST: return (u.val,)
-  if u.op is Ops.STACK: return tuple(x.val for x in u.src)
-  raise AssertionError(f"expected const-like UOp, got {u.op}")
-
 class TestGraphRewriteConst(unittest.TestCase):
   def test_gep_const(self):
     v1 = UOp.const((0,1,2), dtypes.int)
     v2 = v1.index(1)
     ret = graph_rewrite(v2, sym)
-    self.assertEqual(ret.dtype, dtypes.int)
-    self.assertEqual(ret.val, 1)
+    self.assertIs(ret, UOp.const(1, dtypes.int))
 
   def test_add_const(self):
     v1 = UOp.const((0,1,2))
     v2 = UOp.const((5,6,7))
-    ret = graph_rewrite(v1+v2, sym)
-    self.assertEqual(ret.op, Ops.STACK)
-    self.assertEqual(const_values(ret), (5,7,9))
-
-  def test_add_const_lose_v(self):
-    v1 = UOp.const((0,1,2))
-    v2 = UOp.const((2,1,0))
-    ret = graph_rewrite(v1+v2, sym)
-    self.assertEqual(ret.op, Ops.STACK)
-    self.assertEqual(const_values(ret), (2,2,2))
+    self.assertIs(graph_rewrite(v1+v2, sym), UOp.const((5,7,9)))
 
 def xfail_broken_const_wraparound(fn):
   fn = pytest.mark.xfail(reason="const folding does not properly implement modular arithmetic")(fn)
   return unittest.expectedFailure(fn)
 class TestModularWraparound(unittest.TestCase):
   def _test(self, uop:UOp, expected:int):
-    results = to_uops_list([uop])
-    self.assertEqual(len(results), 2)  # +1 for SINK
-    self.assertEqual(results[0].op, Ops.CONST)
-    self.assertEqual(results[0].dtype, uop.dtype)
-    self.assertEqual(results[0].val, expected)
+    result = uop.simplify()
+    self.assertEqual(result.op, Ops.CONST)
+    self.assertEqual(result.dtype, uop.dtype)
+    self.assertEqual(result.val, expected)
 
   @xfail_broken_const_wraparound
   def test_cast(self):
@@ -157,7 +140,7 @@ class TestGraphRewrite(unittest.TestCase):
     self.assertEqual(nout.val, 3.0)
 
   def test_depth_2_fold(self):
-    v = UOp.variable("v", 0, 1, dtypes.float)
+    v = UOp.variable("v", 0, 1, dtypes.float, param=True)
     c1 = UOp.const(1.0)
     c2 = UOp.const(2.0)
     nout = graph_rewrite(v+c1+c2, simple_pm)
@@ -191,63 +174,25 @@ class TestGraphRewrite(unittest.TestCase):
       self.assertEqual(len([x for x in sink.toposort() if x.op is Ops.CONST]), 1)
 
 class TestUOpGraph(unittest.TestCase):
-  def test_add_constant_fold(self):
-    c1 = UOp.const(1.0, dtypes.float)
-    c2 = UOp.const(2.0, dtypes.float)
-    out = c1+c2
-    uops = to_uops_list([out])
-    self.assertEqual(len(uops), 2)  # +1 for SINK
-    out = uops[-2]
-    self.assertEqual(out.op, Ops.CONST)
-    self.assertEqual(out.val, 3.0)
-
   def test_where_same_fold(self):
     v = UOp.variable('tmp', 0, 1)
     c0 = UOp.const(0)
     vc = v != c0
     c1 = UOp.const(1.0, dtypes.float)
     out = vc.where(c1, c1)
-    uops = to_uops_list([out])
-    self.assertEqual(len(uops), 2)  # +1 for SINK
-    out = uops[-2]
-    self.assertEqual(out.op, Ops.CONST)
-    self.assertEqual(out.val, 1.0)
+    self.assertIs(out.simplify(), c1)
 
   def test_where_const_fold(self):
     bf = UOp.const(False)
     c1 = UOp.const(1.0, dtypes.float)
     c2 = UOp.const(2.0, dtypes.float)
     out = bf.where(c1, c2)
-    uops = to_uops_list([out])
-    self.assertEqual(len(uops), 2)  # +1 for SINK
-    out = uops[-2]
-    self.assertEqual(out.op, Ops.CONST)
-    self.assertEqual(out.val, 2.0)
+    self.assertIs(out.simplify(), c2)
 
   def test_const_cast(self):
     bf = UOp.const(False)
     out = bf.cast(dtypes.int)
-    uops = to_uops_list([out])
-    self.assertEqual(len(uops), 2)  # +1 for SINK
-    out = uops[-2]
-    self.assertEqual(out.op, Ops.CONST)
-    self.assertEqual(out.val, 0)
-
-  def test_const_bitcast(self):
-    bf = UOp.const(1.0, dtypes.float)
-    out = bf.bitcast(dtypes.uint32)
-    uops = to_uops_list([out])
-    self.assertEqual(len(uops), 2)  # +1 for SINK
-    out = uops[-2]
-    self.assertEqual(out.op, Ops.CONST)
-    self.assertEqual(out.val, 0x3F800000)
-
-  @unittest.expectedFailure
-  def test_const_shape_change_bitcast(self):
-    bf = UOp.const(0x3F).cast(dtypes.uint8)
-    out = bf.bitcast(dtypes.half)
-    uops = to_uops_list([out])
-    self.assertEqual(len(uops), 2)  # +1 for SINK
+    self.assertIs(full_rewrite(out.sink()).src[0], full_rewrite(UOp.const(0, dtypes.int).sink()).src[0])
 
   def test_devectorize_derives_lane_dtype(self):
     from tinygrad.codegen import do_devectorize
@@ -257,189 +202,137 @@ class TestUOpGraph(unittest.TestCase):
     invalid_lane_mul = next(u for u in out.src[0].toposort() if u.op is Ops.MUL)
     self.assertIs(invalid_lane_mul.dtype, dtypes.bool)
 
-  @unittest.skip("this test isn't valid uops")
-  def test_noop_vectorize_fold(self):
-    d0 = UOp.param(0, dtypes.float, (1,))
-    idx = UOp.const(0)
-    ld = d0.load(idx, dtype=dtypes.float)
-    vec = UOp(Ops.STACK, dtypes.float, (ld,))
-    x = vec.index(0)
-    alu = UOp(Ops.SQRT, src=(x, ))
-    out = UOp(Ops.STORE, src=(d0, idx, alu))
-    uops = to_uops_list([out])
-    self.assertEqual(len([x for x in uops if x.op is Ops.STACK]), 0)
-
-  @unittest.skip("this test isn't valid uops")
-  def test_gep_vec_fold(self):
-    d0 = UOp.param(0, dtypes.float, (1,))
-    d1 = UOp.param(1, dtypes.float, (1,))
-    d2 = UOp.param(2, dtypes.float, (1,))
-    idx = UOp.const(0)
-    def _test_vec(geps, count=4):
-      vec = UOp(Ops.STACK, dtypes.float, geps)
-      out = d0.index(idx).store(vec)
-      uops = to_uops_list([out])
-      if DEBUG >= 4:
-        from tinygrad import Device
-        print(Device[Device.DEFAULT].renderer.render(uops))
-      return uops[-2].src[-1]  # -2 to skip SINK
-
-    # possible
-    val = d1.index(idx).load(dtype=dtypes.float)
-    xyzw = tuple(val.index(i) for i in range(4))
-    self.assertIs(_test_vec(xyzw).op, Ops.LOAD)
-
-    # unaligned
-    val = d1.index(idx).load(dtype=dtypes.float)
-    wzyx = tuple(val.index(i) for i in reversed(range(4)))
-    self.assertIs(_test_vec(wzyx).op, Ops.STACK)
-
-    # different_size
-    val = d1.index(idx).load(dtype=dtypes.float)
-    xy = tuple(val.index(i) for i in range(2))
-    self.assertIs(_test_vec(xy+xy).op, Ops.STACK)
-    val = d1.index(idx).load(dtype=dtypes.float)
-    xy = tuple(val.index(i) for i in range(2))
-    self.assertIs(_test_vec(xy, count=2).op, Ops.STACK)
-
-    # different vals
-    val1 = d1.index(idx).load(dtype=dtypes.float)
-    val2 = d2.index(idx).load(dtype=dtypes.float)
-    xy1 = tuple(val1.index(i) for i in range(2))
-    xy2 = tuple(val2.index(i) for i in range(2))
-    self.assertIs(_test_vec(xy1+xy2).op, Ops.STACK)
+  def test_devectorize_zero_sized_scalar_expand(self):
+    from tinygrad.codegen import devectorizer2
+    expanded = UOp.const(1.0).reshape(1, 1).expand(0, 3)
+    self.assertEqual(graph_rewrite(expanded, devectorizer2).shape, (0, 3))
 
   def test_gep_vec_const_fold(self):
     for vec_size in [2, 4, 8]:
       consts = [UOp.const(float(i), dtypes.float) for i in range(vec_size)]
-      vec = UOp(Ops.STACK, src=tuple(consts))
-      with Context(SPEC=0):
-        uops = to_uops_list([vec.index(i) for i in range(vec_size)])
-        for uop, const in zip(uops, consts):
-          self.assertEqual(uop, const)
+      vec = UOp.stack(*consts)
+      for i, const in enumerate(consts): self.assertIs(vec.index(i), const)
 
   def test_cast_alu_fold(self):
-    d0 = UOp.param(0, dtypes.bool, (1,))
-    d1 = UOp.param(1, dtypes.int, (1,))
+    d0 = UOp.param(0, dtypes.bool, 1)
+    d1 = UOp.param(1, dtypes.int, 1)
     idx = UOp.const(0)
     ld = d1.index(idx)
     alu = (ld<1).cast(dtypes.bool)
     out = d0.index(idx).store(alu)
     uops = to_uops_list([out])
-    self.assertEqual(len([x for x in uops if x.op is Ops.CAST]), 0)
+    self.assertEqual(len([x for x in uops if x.op is Ops.CAST and x.src[0].op is not Ops.CONST]), 0)
 
   def test_double_cast_fold(self):
-    d0 = UOp.param(0, dtypes.float, (1,))
-    d1 = UOp.param(1, dtypes.int, (1,))
+    d0 = UOp.param(0, dtypes.float, 1)
+    d1 = UOp.param(1, dtypes.int, 1)
     idx = UOp.const(0, dtypes.int)
     ld = d1.index(idx)
     alu = ld.cast(dtypes.float).cast(dtypes.float)
     out = d0.index(idx).store(alu)
     uops = to_uops_list([out])
-    self.assertEqual(len([x for x in uops if x.op is Ops.CAST]), 1)
+    self.assertEqual(len([x for x in uops if x.op is Ops.CAST and x.src[0].op is not Ops.CONST]), 1)
 
   def test_depth_2_const_fold(self):
-    v = UOp.variable("tmp", 0, 1, dtypes.int)
-    c2 = UOp.const(2, dtypes.int)
-    c4 = UOp.const(4, dtypes.int)
+    v = UOp.variable("tmp", 0, 1, dtypes.int, param=True)
+    c2 = UOp.const(2)
+    c4 = UOp.const(4)
     vc = v+c2
     out = vc+c4
-    uops = to_uops_list([out])
-    self.assertEqual(len(uops), 5)  # +1 for SINK, +1 for the PARAM shape STACK
-    out = uops[-2]  # -2 to skip SINK
-    self.assertEqual(out.op, Ops.ADD)
-    self.assertEqual(out.src[1].op, Ops.CONST)
-    self.assertEqual(out.src[1].val, 6)
+    self.assertIs(out.simplify(), (v+UOp.const(6)).simplify())
 
   def test_bitcast_to_same_dtype_fold(self):
     for dt in dtypes.ints + dtypes.floats + (dtypes.bool,):
-      d0 = UOp.param(0, dt, (1,))
+      d0 = UOp.param(0, dt, 1)
       v = d0.index(UOp.const(0))
       uops = to_uops_list([v.bitcast(dt)])
       self.assertEqual(len([x for x in uops if x.op is Ops.BITCAST and x.dtype is dt]), 0, f"dtype = {dt}")
 
   def test_sub_with_cast_folds(self):
     a = Variable("a", 0, 5)
-    uops = to_uops_list([a.cast(dtypes.int)+(-a).cast(dtypes.int)])
-    assert uops[0] == UOp.const(0, dtypes.int)
-    assert uops[-1].op == Ops.SINK
+    out = a+(-a)
+    self.assertIs(full_rewrite(out.sink()).src[0], full_rewrite(UOp.const(0, dtypes.int).sink()).src[0])
 
   def test_where_on_gated_load_fold(self):
     ridx0 = UOp.range(100, 0)
-    d0 = UOp.param(0, dtypes.long, (100,))
+    d0 = UOp.param(0, dtypes.long, 100)
     ld = d0.index(ridx0.valid(ridx0<50))
     w = (ridx0<50).where(ld, 5)
-    out = UOp.param(1, dtypes.long, (100,))
+    out = UOp.param(1, dtypes.long, 100)
     uops = to_uops_list([out.index(ridx0).store(w)])
+    expected = full_rewrite(UOp.const(5, dtypes.long).sink()).src[0]
     for u in uops:
       assert u.op is not Ops.WHERE
-      if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: assert u.src[1].val==5
+      if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: self.assertIs(u.src[1], expected)
 
   def test_where_on_gated_load_folds_swapped_branches(self):
     ridx0 = UOp.range(100, 0)
-    d0 = UOp.param(0, dtypes.long, (100,))
+    d0 = UOp.param(0, dtypes.long, 100)
     ld = d0.index(ridx0.valid((ridx0<50).logical_not()))
     w = (ridx0<50).where(5, ld)
     uops = to_uops_list([w])
+    expected = full_rewrite(UOp.const(5, dtypes.long).sink()).src[0]
     for u in uops:
       assert u.op is not Ops.WHERE
-      if u.op is Ops.LOAD: assert u.src[1].val==5
+      if u.op is Ops.LOAD: self.assertIs(u.src[1], expected)
 
   def test_where_on_gated_load_with_cast(self):
     ridx0 = UOp.range(100, 0)
-    d0 = UOp.param(0, dtypes.int, (100,))
+    d0 = UOp.param(0, dtypes.int, 100)
     gate_idx = ridx0.valid((ridx0<50))
     ld = d0.index(gate_idx).cast(dtypes.float)
     w = (ridx0<50).where(ld, 5.0)
-    out = UOp.param(1, dtypes.float, (100,))
+    out = UOp.param(1, dtypes.float, 100)
     uops = to_uops_list([out.index(ridx0).store(w)])
+    expected = full_rewrite(UOp.const(5, dtypes.int).sink()).src[0]
     for u in uops:
       assert u.op is not Ops.WHERE
-      if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: assert u.src[1].val == 5
+      if u.op is Ops.LOAD and u.src[0].src[0].op is Ops.PARAM: self.assertIs(u.src[1], expected)
 
   def test_where_on_casted_gated_load_extra_cond(self):
     ridx0 = UOp.range(100, 0)
-    d0 = UOp.param(0, dtypes.float, (100,))
+    d0 = UOp.param(0, dtypes.float, 100)
     ld = d0.index(ridx0.valid(ridx0<50))
     w = ((ridx0<50) & (ridx0>30)).where(ld, UOp.const(0.0)).cast(dtypes.half)
-    out = UOp.param(1, dtypes.half, (100,))
+    out = UOp.param(1, dtypes.half, 100)
     uops = to_uops_list([out.index(ridx0).store(w)])
     for u in uops:
       assert u.op is not Ops.WHERE
 
   def test_where_on_casted_gated_load_extra_cond_swapped(self):
     ridx0 = UOp.range(100, 0)
-    d0 = UOp.param(0, dtypes.float, (100,))
+    d0 = UOp.param(0, dtypes.float, 100)
     ld = d0.index(ridx0.valid(ridx0<50))
     w = ((ridx0<50) & (ridx0>30)).where(UOp.const(0.0), ld).cast(dtypes.half)
-    out = UOp.param(1, dtypes.half, (100,))
+    out = UOp.param(1, dtypes.half, 100)
     uops = to_uops_list([out.index(ridx0).store(w)])
     for u in uops:
       assert u.op is not Ops.WHERE
 
   def test_where_in_store_becomes_gate(self):
     ridx0 = UOp.range(100, 0)
-    d0 = UOp.param(0, dtypes.long, (100,))
+    d0 = UOp.param(0, dtypes.long, 100)
     idx = d0.index(ridx0)
     ld = idx.load()
     val = (ridx0<50).where(5, ld)
     st = idx.store(val).end(ridx0)
     uops = to_uops_list([st])
+    expected = full_rewrite(UOp.const(5, dtypes.long).sink()).src[0]
     for u in uops:
       assert u.op is not Ops.WHERE
-      if u.op is Ops.STORE: assert u.src[1].val==5
+      if u.op is Ops.STORE: self.assertIs(u.src[1], expected)
 
   def test_load_idx_becomes_int(self):
     # mnist indexing with split reduceop
     # Make sure we are not doign math on the loaded index, which would promote it to long
-    c0 = UOp.param(0, dtypes.uchar, (128000,))
+    c0 = UOp.param(0, dtypes.uchar, 128000)
     c1 = UOp.range(UOp.const(512), 1, AxisType.WEAK)
     c2 = UOp.range(UOp.const(250), 2, AxisType.WEAK)
-    c3 = UOp.param(1, dtypes.int, (512,))
+    c3 = UOp.param(1, dtypes.int, 512)
     c4 = c3.index(c1)
     c5 = UOp.range(UOp.const(240), 0, AxisType.REDUCE)
     c6 = ((c2*UOp.const(240))+c5)
-    c7 = UOp.param(2, dtypes.uchar, (60000,))
+    c7 = UOp.param(2, dtypes.uchar, 60000)
     c8 = c7.index(c6)
     c9 = ((c4<0).where((c4+60000), c4)!=c6.cast(dtypes.int)).where(0, c8.cast(dtypes.uint).cast(dtypes.uchar)).reduce(c5, arg=Ops.ADD)
     c10 = c0.index(((c1*UOp.const(250))+c2)).store(c9).end(c1, c2)
@@ -449,14 +342,14 @@ class TestUOpGraph(unittest.TestCase):
 
   def test_load_idx_no_math_on_loaded(self):
     # test the (x+y)<c pattern where x has loads - we shouldn't do math on loaded indices
-    c0 = UOp.param(0, dtypes.uchar, (128000,))
+    c0 = UOp.param(0, dtypes.uchar, 128000)
     c1 = UOp.range(UOp.const(512), 1, AxisType.WEAK)
     c2 = UOp.range(UOp.const(250), 2, AxisType.WEAK)
-    c3 = UOp.param(1, dtypes.int, (512,))
+    c3 = UOp.param(1, dtypes.int, 512)
     c4 = c3.index(c1)  # c4 is a load
     c5 = UOp.range(UOp.const(240), 0, AxisType.REDUCE)
     c6 = ((c2*UOp.const(240))+c5)
-    c7 = UOp.param(2, dtypes.uchar, (60000,))
+    c7 = UOp.param(2, dtypes.uchar, 60000)
     c8 = c7.index(c6)
     # (loaded + range) < const pattern - loaded value shouldn't be promoted to long
     loaded_idx = c4.cast(dtypes.weakint)
@@ -468,9 +361,9 @@ class TestUOpGraph(unittest.TestCase):
       self.assertNotEqual(u.dtype, dtypes.long)
 
   def test_fold_gated_load(self):
-    glbl0 = UOp.param(0, dtypes.int, (1,))
-    glbl1 = UOp.param(1, dtypes.int, (1,))
-    glbl2 = UOp.param(2, dtypes.int, (1,))
+    glbl0 = UOp.param(0, dtypes.int, 1)
+    glbl1 = UOp.param(1, dtypes.int, 1)
+    glbl2 = UOp.param(2, dtypes.int, 1)
     idx = UOp.const(0)
     ld0 = glbl1.index(UOp.invalid())
     ld1 = glbl2.index(idx.valid(UOp.const(True)))
@@ -479,7 +372,7 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(len([u for u in uops if u.op is Ops.LOAD]), 1)
 
   def test_fold_gated_load_local(self):
-    glbl0 = UOp.param(0, dtypes.int, (16,))
+    glbl0 = UOp.param(0, dtypes.int, 16)
     smem = UOp.placeholder((18,), dtypes.int, slot=0, addrspace=AddrSpace.LOCAL)
     lidx = UOp.special(16, "lidx0")
     st = smem.index(lidx).store(glbl0.index(lidx).load())
@@ -492,7 +385,7 @@ class TestUOpGraph(unittest.TestCase):
     self.assertEqual(len([u for u in uops if u.op is Ops.LOAD]), 2)
 
   def test_fold_gated_store(self):
-    glbl = UOp.param(0, dtypes.int, (1,))
+    glbl = UOp.param(0, dtypes.int, 1)
     idx0 = UOp.const(0)
     val = UOp.const(42)
     st0 = glbl.index(UOp.invalid()).store(val)
@@ -500,13 +393,6 @@ class TestUOpGraph(unittest.TestCase):
     uops = to_uops_list([st0, st1])
     # only the second store happens
     self.assertEqual(len([u for u in uops if u.op is Ops.STORE]), 1)
-
-  @unittest.skip("this is a uop type error")
-  def test_asserts_bad_gate(self):
-    glbl0 = UOp.param(0, dtypes.int, (1,))
-    idx = UOp.const(0)
-    bad_gate = UOp.const(1)
-    with self.assertRaises(AssertionError): to_uops_list([UOp(Ops.STORE, src=(glbl0, idx, UOp.const(42), bad_gate))])
 
   def test_after_end(self):
     r = UOp.range(10, 0)
@@ -539,7 +425,7 @@ class TestReduceCollapse(unittest.TestCase):
 
   def test_reduce_shapeless_const_unroll(self):
     """a REDUCE over a shapeless CONST (e.g. x*0 folded late in codegen) must collapse before the expander"""
-    out = UOp.param(0, dtypes.float, (1,))
+    out = UOp.param(0, dtypes.float, 1)
     red = UOp.const(3.0).cast(dtypes.float).reduce(UOp.range(4, 0, AxisType.UNROLL), arg=(Ops.ADD, 0))
     ast = UOp.sink(out.index(UOp.const(0)).store(red)).replace(arg=KernelInfo())
     uops = full_rewrite_to_sink(ast, Device["CPU"].renderer, optimize=False).toposort()
@@ -548,17 +434,18 @@ class TestReduceCollapse(unittest.TestCase):
 
 class TestMovementOps(unittest.TestCase):
   def test_pm_mops_partial_reshape_index_removes_reshape(self):
-    from tinygrad.schedule.rangeify import pm_mops
+    from tinygrad.schedule.prepare import pm_mops
     src = UOp.param(0, dtypes.float, shape=(32, 4))
     r0, r1 = UOp.range(4, 0), UOp.range(8, 1)
     result = graph_rewrite(src.reshape((4, 8, 4)).index(r0, r1), pm_mops, name="test")
     self.assertEqual(result.op, Ops.INDEX)
     self.assertIs(result.src[0], src)
     self.assertEqual(result.shape, (4,))
-    self.assertNotIn(Ops.RESHAPE, [u.op for u in result.toposort()])
+    # the only RESHAPE is src itself: the view of the flat param, the extra reshape was folded into the INDEX
+    self.assertEqual([u for u in result.toposort() if u.op is Ops.RESHAPE], [src])
 
   def test_pm_mops_partial_reshape_index_suffix_mismatch_does_nothing(self):
-    from tinygrad.schedule.rangeify import pm_mops
+    from tinygrad.schedule.prepare import pm_mops
     src = UOp.param(0, dtypes.float, shape=(2, 6))
     result = graph_rewrite(src.reshape((2, 3, 2)).index(UOp.range(2, 0)), pm_mops, name="test")
     self.assertEqual(result.op, Ops.INDEX)
@@ -575,7 +462,7 @@ class TestConstBufferize(unittest.TestCase):
     from tinygrad.schedule.rangeify import pm_const_buffer_folding, BufferizeOpts
     c = UOp.const(42.0)
     r1 = UOp.range(3, 0)
-    bufferize_with_range = UOp(Ops.STAGE, src=(c, r1), arg=BufferizeOpts(device="CPU"))
+    bufferize_with_range = c.bufferize(r1, arg=BufferizeOpts(device="CPU"))
     self.assertEqual(len(bufferize_with_range.src), 2)  # const + 1 range
 
     result = graph_rewrite(bufferize_with_range, pm_const_buffer_folding, name='test')
@@ -590,7 +477,7 @@ class TestConstBufferize(unittest.TestCase):
     c = UOp.const(3.14)
     r1 = UOp.range(3, 0)
     r2 = UOp.range(4, 1)
-    bufferize_with_ranges = UOp(Ops.STAGE, src=(c, r1, r2), arg=BufferizeOpts(device="CPU"))
+    bufferize_with_ranges = c.bufferize(r1, r2, arg=BufferizeOpts(device="CPU"))
     self.assertEqual(len(bufferize_with_ranges.src), 3)  # const + 2 ranges
 
     result = graph_rewrite(bufferize_with_ranges, pm_const_buffer_folding, name='test')

@@ -7,6 +7,10 @@ import struct
 from openpilot.system.hardware import HARDWARE, TICI
 os.environ['GMMU'] = '0'
 os.environ['DEV'] = 'QCOM' if TICI else 'LLVM'
+try:
+  int(os.getenv('DEBUG', '0'), 0)
+except ValueError:
+  os.environ['DEBUG'] = '0'
 from tinygrad.device import Device
 from tinygrad.tensor import Tensor
 import time

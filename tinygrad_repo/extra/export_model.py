@@ -35,7 +35,7 @@ def compile_net(linear:UOp, output_bufs:List[Buffer]) -> Tuple[Dict[str,str], Li
     return name
 
   for call in iter_kernel_calls(linear):
-    arg_uops = [b for b in call.src[1:] if b.op is not Ops.BIND]
+    arg_uops = [b for b in call.src[1:] if not b.is_bound_var]
     prg = to_program(call.src[0], Device[arg_uops[0].device].renderer)
     info = prg.arg
     functions[info.function_name] = prg.src[2].arg
@@ -241,8 +241,7 @@ export default {model_name};
 def export_model(model, target:str, *inputs, model_name: Optional[str] = "model", stream_weights=False):
   assert Device.DEFAULT in EXPORT_SUPPORTED_DEVICE, f"only {', '.join(EXPORT_SUPPORTED_DEVICE)} are supported"
 
-  # NOTE: NUM_CPU_THREADS=1, since export does not support threading
-  with Context(JIT=2, NUM_CPU_THREADS=1): linear, output_bufs = jit_model(model, *inputs)
+  with Context(JIT=2): linear, output_bufs = jit_model(model, *inputs)
   functions, statements, bufs, bufs_to_save = compile_net(linear, output_bufs)
   state = get_state_dict(model)
   weight_names = {(id(b), b.offset, b.size, b.dtype): name for name, x in state.items() if (b:=x.uop.base.realized) is not None}
