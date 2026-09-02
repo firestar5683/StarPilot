@@ -212,7 +212,7 @@ class Soundd:
       for path in self._sound_candidates(filename):
         try:
           sound_data = self._read_sound(path)
-        except (FileNotFoundError, OSError, EOFError, ValueError, wave.Error):
+        except Exception:
           cloudlog.exception(f"soundd: failed to load {path}")
           continue
         if sound_data is not None:
