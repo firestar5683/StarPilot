@@ -667,7 +667,8 @@ class CarInterface(CarInterfaceBase):
       ret.alphaLongitudinalAvailable = False
       ret.openpilotLongitudinalControl = not disable_openpilot_long
       ret.pcmCruise = False
-      ret.minEnableSpeed = 24 * CV.MPH_TO_MS
+      if candidate not in (CAR.CHEVROLET_SILVERADO, CAR.CHEVROLET_SILVERADO_CC):
+        ret.minEnableSpeed = 24 * CV.MPH_TO_MS
       ret.radarUnavailable = True
       ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.FLAG_GM_CC_LONG.value
 
