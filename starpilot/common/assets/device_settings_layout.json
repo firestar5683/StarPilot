@@ -4653,6 +4653,17 @@
         "settings_tier": "simple"
       },
       {
+        "key": "AggressiveCoolingEnabled",
+        "label": "C3/C3X Aggressive Cooling",
+        "description": "Runs the fan on a lower, more aggressive temperature curve: the fan ramps up sooner and reacts faster to rising temperature, keeping the device meaningfully cooler on hot days at the cost of more fan noise.",
+        "picker_description": "Cooler-running, louder fan curve for comma 3/3X.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "DeviceManagement",
+        "settings_tier": "simple",
+        "requires_capability": "IsTiciOrTizi"
+      },
+      {
         "key": "UseKonikServer",
         "label": "Use Konik Server",
         "description": "Upload driving data to \"stable.konik.ai\" instead of \"connect.comma.ai\".",

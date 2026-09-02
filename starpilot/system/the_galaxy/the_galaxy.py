@@ -4147,6 +4147,9 @@ def _get_vehicle_parked():
   except Exception:
     return False
 
+def _get_is_tici_or_tizi():
+  return HARDWARE.get_device_type() in ("tici", "tizi")
+
 def _get_alpha_longitudinal_available():
   cp_bytes = _safe_params_get_live_raw("CarParamsPersistent")
   if not cp_bytes:
@@ -6206,6 +6209,7 @@ def setup(app):
     result["VehicleParked"] = _get_vehicle_parked()
     result["AlphaLongitudinalAvailable"] = _get_alpha_longitudinal_available()
     result["HasRivianAngleHarness"] = _get_has_rivian_angle_harness()
+    result["IsTiciOrTizi"] = _get_is_tici_or_tizi()
 
     for key in ("CalibratedLateralAcceleration", "CalibrationProgress"):
       try:

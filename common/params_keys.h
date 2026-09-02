@@ -441,6 +441,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"IncreaseFollowingRain", {PERSISTENT, FLOAT, "0.0", "0.0", 2, SETTINGS_SIMPLE}},
     {"IncreaseFollowingRainStorm", {PERSISTENT, FLOAT, "0.0", "0.0", 2, SETTINGS_SIMPLE}},
     {"IncreaseFollowingSnow", {PERSISTENT, FLOAT, "0.0", "0.0", 2, SETTINGS_SIMPLE}},
+    {"AggressiveCoolingEnabled", {PERSISTENT, BOOL, "0", "0", 2, SETTINGS_SIMPLE}},
     {"IncreaseThermalLimits", {PERSISTENT, BOOL, "0", "0", 2, SETTINGS_SIMPLE}},
     {"IssueReported", {CLEAR_ON_MANAGER_START, JSON, "{}", "{}"}},
     {"KonikDongleId", {PERSISTENT, STRING, "", "", 0}},
