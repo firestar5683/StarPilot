@@ -6,10 +6,12 @@ import numpy as np
 import pytest
 
 from openpilot.starpilot.system.bluetooth.audio import BluetoothAudioSink
+import openpilot.starpilot.system.bluetooth.daemon as bluetooth_daemon
 from openpilot.starpilot.system.bluetooth.bluez import PairingAgent
 from openpilot.starpilot.system.bluetooth.daemon import BluetoothController
+from openpilot.starpilot.system.bluetooth.elm327 import DTCParseError
 from openpilot.starpilot.system.bluetooth.protocol import (A2DP_SINK_UUID, HID_UUID, BluetoothClient, BluetoothDevice, BluetoothStatus,
-                                                           device_capabilities, show_pairing_device)
+                                                           SPP_UUID, device_capabilities, show_pairing_device)
 from openpilot.system import hardware
 from openpilot.system.ui.lib.bluetooth_manager import BluetoothManager
 
@@ -64,6 +66,7 @@ class FakeBlueZ:
       "connected": False,
       "audio": True,
       "controller": False,
+      "serial": False,
     }
 
   def close(self):
@@ -163,9 +166,40 @@ class FakeProcess:
     self.stopped = True
 
 
+class FakeELM:
+  instances = []
+
+  def __init__(self, address):
+    self.address = address
+    self.adapter_name = "Fake ELM327"
+    self.closed = False
+    self.commands = []
+    self.opened = False
+    FakeELM.instances.append(self)
+
+  def open(self):
+    self.opened = True
+    return self.adapter_name
+
+  def close(self):
+    self.closed = True
+
+  def command(self, value):
+    self.commands.append(value)
+    if value == "fail":
+      raise RuntimeError("transport failed")
+    if value == "bad_input":
+      raise ValueError("invalid command")
+    return f"response for {value}"
+
+  def read_dtcs(self):
+    return {"codes": ["P0133"], "raw": "43 01 33"}
+
+
 def test_protocol_round_trip_and_capabilities():
-  audio, controller = device_capabilities([A2DP_SINK_UUID, HID_UUID])
+  audio, controller, serial = device_capabilities([A2DP_SINK_UUID, HID_UUID])
   assert audio and controller
+  assert not serial
   status = BluetoothStatus.from_dict({
     "available": True,
     "enabled": True,
@@ -174,12 +208,167 @@ def test_protocol_round_trip_and_capabilities():
   assert status.devices == (BluetoothDevice("00:11:22:33:44:55", "Combo", uuids=(A2DP_SINK_UUID, HID_UUID), audio=True, controller=True),)
 
 
+def test_serial_capability_round_trips_and_is_discoverable():
+  audio, controller, serial = device_capabilities([SPP_UUID.upper()])
+  assert not audio and not controller and serial
+
+  status = BluetoothStatus.from_dict({
+    "devices": [{"address": "00:11:22:33:44:55", "name": "OBDII", "serial": True}],
+  })
+  assert status.devices[0].serial
+  assert show_pairing_device("00:11:22:33:44:55", "OBDII", False, False, False, False,
+                             audio=False, controller=False, serial=True)
+
+
+def test_serial_device_is_not_auto_reconnected_but_audio_device_is(monkeypatch):
+  class StopMaintenance(Exception):
+    pass
+
+  params = FakeParams(IsOffroad=True, BluetoothEnabled=True)
+  client = FakeBlueZ()
+  client.powered = True
+  client.device.update(paired=True, trusted=True, connected=False, audio=False, controller=False, serial=True)
+  sleeps = 0
+
+  def sleep(_delay):
+    nonlocal sleeps
+    sleeps += 1
+    if sleeps > 1:
+      raise StopMaintenance
+
+  monkeypatch.setattr(bluetooth_daemon.time, "sleep", sleep)
+  controller = BluetoothController(params, lambda: client, FakeRadio(), sleep=sleep, elm_factory=FakeELM)
+  controller._bluez = client
+  controller._last_reconnect = -100.0
+  with pytest.raises(StopMaintenance):
+    controller.maintain_connections()
+  assert client.actions == []
+
+  client.device.update(audio=True, serial=False)
+  sleeps = 0
+  controller._last_reconnect = -100.0
+  with pytest.raises(StopMaintenance):
+    controller.maintain_connections()
+  assert client.actions == [("connect", client.device["address"])]
+
+
+def make_elm_controller(elm_factory=FakeELM):
+  params = FakeParams(IsOffroad=True, BluetoothEnabled=True)
+  client = FakeBlueZ()
+  client.device.update(paired=True, trusted=True, serial=True)
+  controller = BluetoothController(params, lambda: client, FakeRadio(), elm_factory=elm_factory)
+  return controller, client, params
+
+
+def test_elm_is_lazy_and_requires_a_paired_serial_device():
+  FakeELM.instances = []
+  controller, client, params = make_elm_controller()
+  assert FakeELM.instances == []
+  controller.status()
+  assert FakeELM.instances == []
+
+  result = controller.handle({"command": "elm_open", "address": client.device["address"]})
+  assert result == {"adapter": "Fake ELM327"}
+  assert len(FakeELM.instances) == 1
+
+  params.values["IsOffroad"] = False
+  with pytest.raises(RuntimeError, match="offroad"):
+    controller.handle({"command": "elm_command", "address": client.device["address"], "value": "ATI"})
+
+  params.values["IsOffroad"] = True
+  client.device["paired"] = False
+  controller.handle({"command": "elm_close", "address": client.device["address"]})
+  with pytest.raises(RuntimeError, match="Pair"):
+    controller.handle({"command": "elm_open", "address": client.device["address"]})
+
+  client.device.update(paired=True, serial=False)
+  with pytest.raises(RuntimeError, match="Serial Port Profile"):
+    controller.handle({"command": "elm_open", "address": client.device["address"]})
+
+
+def test_elm_commands_use_one_session_and_close_on_transport_failure(monkeypatch):
+  FakeELM.instances = []
+  controller, client, _ = make_elm_controller()
+  address = client.device["address"]
+  controller.handle({"command": "elm_open", "address": address})
+  assert controller.handle({"command": "elm_open", "address": address}) == {"adapter": "Fake ELM327"}
+  assert controller.handle({"command": "elm_command", "address": address, "value": "ATI"}) == {"response": "response for ATI"}
+  assert controller.handle({"command": "elm_read_dtcs", "address": address}) == {"codes": ["P0133"], "raw": "43 01 33"}
+  with pytest.raises(ValueError, match="invalid command"):
+    controller.handle({"command": "elm_command", "address": address, "value": "bad_input"})
+
+  def fail_dtcs():
+    raise DTCParseError("No valid Mode 03 response", "garbage")
+
+  monkeypatch.setattr(FakeELM.instances[0], "read_dtcs", fail_dtcs)
+  with pytest.raises(DTCParseError):
+    controller.handle({"command": "elm_read_dtcs", "address": address})
+  assert controller._elm is not None and not FakeELM.instances[0].closed
+  with pytest.raises(RuntimeError, match="transport"):
+    controller.handle({"command": "elm_command", "address": address, "value": "fail"})
+  assert controller._elm is None
+  assert FakeELM.instances[0].closed
+
+
+def test_elm_open_replaces_a_different_session_and_close_is_allowed_onroad():
+  FakeELM.instances = []
+  controller, client, params = make_elm_controller()
+  first = client.device["address"]
+  second = "AA:BB:CC:DD:EE:FF"
+  controller.handle({"command": "elm_open", "address": first})
+  controller.handle({"command": "elm_open", "address": second})
+  assert len(FakeELM.instances) == 2
+  assert FakeELM.instances[0].closed
+  assert not FakeELM.instances[1].closed
+
+  params.values["IsOffroad"] = False
+  controller.handle({"command": "elm_close", "address": second})
+  assert FakeELM.instances[1].closed and controller._elm is None
+
+
+def test_elm_cleanup_happens_before_poweroff_forget_shutdown_and_onroad(monkeypatch):
+  class StopMaintenance(Exception):
+    pass
+
+  for cleanup in ("power", "forget", "shutdown", "onroad"):
+    FakeELM.instances = []
+    controller, client, params = make_elm_controller()
+    address = client.device["address"]
+    controller.handle({"command": "elm_open", "address": address})
+    session = FakeELM.instances[0]
+
+    if cleanup == "power":
+      controller.handle({"command": "set_power", "enabled": False})
+    elif cleanup == "forget":
+      controller.handle({"command": "forget", "address": address})
+    elif cleanup == "shutdown":
+      controller.close()
+    else:
+      params.values["IsOffroad"] = False
+      sleeps = 0
+
+      def sleep(_delay):
+        nonlocal sleeps
+        sleeps += 1
+        if sleeps > 1:
+          raise StopMaintenance
+
+      monkeypatch.setattr(bluetooth_daemon.time, "sleep", sleep)
+      controller._sleep = sleep
+      with pytest.raises(StopMaintenance):
+        controller.maintain_connections()
+
+    assert session.closed and controller._elm is None
+
+
 def test_pairing_list_filters_anonymous_and_irrelevant_advertisements():
   assert not show_pairing_device("00:11:22:33:44:55", "00:11:22:33:44:55", False, False, False, False, False, False)
   assert not show_pairing_device("00:11:22:33:44:55", "Nearby sensor", False, False, False, False, False, False)
   assert show_pairing_device("00:11:22:33:44:55", "Media Remote", False, False, False, False, False, True)
-  assert show_pairing_device("00:11:22:33:44:55", "Media Remote", False, False, False, False, False, True, True)
-  assert not show_pairing_device("00:11:22:33:44:55", "Nearby sensor", False, False, False, False, False, False, True)
+  assert show_pairing_device("00:11:22:33:44:55", "Media Remote", False, False, False, False, False, True, discovering=True)
+  assert show_pairing_device("00:11:22:33:44:55", "OBDII", False, False, False, False, False, False, False, discovering=True)
+  assert not show_pairing_device("00:11:22:33:44:55", "00:11:22:33:44:55", False, False, False, False, False, False, False, discovering=True)
+  assert not show_pairing_device("00:11:22:33:44:55", "OBDII", False, False, False, True, False, False, False, discovering=True)
   assert show_pairing_device("00:11:22:33:44:55", "Known device", True, True, False, False, False, False)
 
 

@@ -98,6 +98,32 @@ class BluetoothManager:
               self._operations.pop(normalized_address, None)
     threading.Thread(target=worker, daemon=True).start()
 
+  def _run_result(self, fn, *args, operation: str = "", address: str = "", callback=None) -> None:
+    normalized_address = address.upper()
+    if normalized_address:
+      with self._lock:
+        self._operations[normalized_address] = operation
+
+    def worker():
+      result = None
+      error = None
+      try:
+        result = fn(*args)
+      except Exception as exception:
+        error = str(exception)
+      finally:
+        if normalized_address:
+          with self._lock:
+            if self._operations.get(normalized_address) == operation:
+              self._operations.pop(normalized_address, None)
+      if callback is not None:
+        callback(result, error)
+      elif error:
+        with self._lock:
+          self._operation_error = error
+
+    threading.Thread(target=worker, daemon=True).start()
+
   def set_power(self, enabled: bool) -> None:
     with self._lock:
       if self._power_pending:
@@ -147,6 +173,18 @@ class BluetoothManager:
           self._operation_error = str(error)
           self._audio_test_deadline = 0.0
     threading.Thread(target=worker, daemon=True).start()
+
+  def elm_open(self, address: str, callback=None) -> None:
+    self._run_result(self._client.elm_open, address, operation="elm_open", address=address, callback=callback)
+
+  def elm_close(self, address: str, callback=None) -> None:
+    self._run_result(self._client.elm_close, address, operation="elm_close", address=address, callback=callback)
+
+  def elm_command(self, address: str, value: str, callback=None) -> None:
+    self._run_result(self._client.elm_command, address, value, operation="elm_command", address=address, callback=callback)
+
+  def elm_read_dtcs(self, address: str, callback=None) -> None:
+    self._run_result(self._client.elm_read_dtcs, address, operation="elm_read_dtcs", address=address, callback=callback)
 
   def respond(self, prompt_id: str, accepted: bool, value: str = "") -> None:
     self._run(self._client.respond, prompt_id, accepted, value)

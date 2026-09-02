@@ -132,7 +132,15 @@ class FakeBluetoothClient:
 
   def call(self, command, **payload):
     self.calls.append((command, payload))
-    return {"audio_test_delay_ms": 3000} if command == "test_audio" else {}
+    if command == "test_audio":
+      return {"audio_test_delay_ms": 3000}
+    if command == "elm_open":
+      return {"adapter": "Fake ELM327"}
+    if command == "elm_command":
+      return {"response": "OK"}
+    if command == "elm_read_dtcs":
+      return {"codes": ["P0133"], "raw": "43 01 33"}
+    return {}
 
 
 def test_bluetooth_status_api(monkeypatch):
@@ -200,6 +208,26 @@ def test_bluetooth_api_dispatches_operations(monkeypatch):
     ("select_audio", {"address": "00:11:22:33:44:55"}),
     ("select_audio", {"address": ""}),
     ("test_audio", {"address": "00:11:22:33:44:55"}),
+  ]
+
+
+def test_bluetooth_api_dispatches_elm_payload_and_allows_close_onroad(monkeypatch):
+  FakeBluetoothClient.calls = []
+  client, fake_params = _params_client(monkeypatch, {"IsOffroad": True}, "mici")
+  monkeypatch.setattr(the_galaxy, "BluetoothClient", FakeBluetoothClient)
+  address = "00:11:22:33:44:55"
+
+  assert client.post("/api/bluetooth/elm_open", json={"address": address}).get_json()["adapter"] == "Fake ELM327"
+  assert client.post("/api/bluetooth/elm_command", json={"address": address, "value": "ATI"}).get_json()["response"] == "OK"
+  assert client.post("/api/bluetooth/elm_read_dtcs", json={"address": address}).get_json()["codes"] == ["P0133"]
+  fake_params.values["IsOffroad"] = False
+  assert client.post("/api/bluetooth/elm_close", json={"address": address}).status_code == 200
+
+  assert FakeBluetoothClient.calls == [
+    ("elm_open", {"address": address}),
+    ("elm_command", {"address": address, "value": "ATI"}),
+    ("elm_read_dtcs", {"address": address}),
+    ("elm_close", {"address": address}),
   ]
 
 
