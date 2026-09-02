@@ -3704,6 +3704,12 @@ def test_experimental_speed_handoff_keeps_stronger_e2e_brake():
   assert blended == pytest.approx(0.21)
 
 
+def test_experimental_speed_handoff_following_lead_matches_cem_window():
+  assert LongitudinalPlanner.is_cem_following_lead(True, 40.0, 1.5, 20.0)
+  assert not LongitudinalPlanner.is_cem_following_lead(True, 80.0, 1.5, 20.0)
+  assert not LongitudinalPlanner.is_cem_following_lead(False, 10.0, 1.5, 20.0)
+
+
 def test_experimental_release_accel_transition_does_not_mask_stopped_lead():
   v_ego = 23.96
   CP = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)

@@ -8,6 +8,7 @@ import openpilot.selfdrive.controls.lib.longcontrol_vehicle_tunes as vehicle_tun
 from opendbc.car.gm.values import CAR, GMFlags
 from opendbc.car.subaru.values import CAR as SUBARU_CAR
 from opendbc.car.toyota.values import CAR as TOYOTA_CAR
+from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.controls.lib.longcontrol import (
   LongControl,
   LongCtrlState,
@@ -1558,4 +1559,24 @@ def test_leaving_experimental_slews_positive_accel():
   assert lc.transitioning
   assert output_accel > 0.05
   assert output_accel < 0.25
+
+
+def test_leaving_experimental_does_not_reset_mode_transition_timer():
+  CP = make_longcontrol_cp()
+  lc = LongControl(CP)
+  lc.current_mode = "blended"
+
+  lc.update_mpc_mode(False)
+  first = lc.mode_transition_timer
+  lc.update_mpc_mode(False)
+
+  assert lc.current_mode == "acc"
+  assert lc.transitioning
+  assert first == pytest.approx(DT_CTRL)
+  assert lc.mode_transition_timer == pytest.approx(2.0 * DT_CTRL)
+
+  for _ in range(int(lc.mode_transition_duration / DT_CTRL)):
+    lc.update_mpc_mode(False)
+
+  assert not lc.transitioning
 
