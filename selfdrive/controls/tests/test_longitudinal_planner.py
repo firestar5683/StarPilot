@@ -3705,6 +3705,7 @@ def test_experimental_speed_handoff_keeps_stronger_e2e_brake():
 
 
 def test_experimental_speed_handoff_following_lead_matches_cem_window():
+  # Distant radar-active lead is not CEM following_lead.
   assert LongitudinalPlanner.is_cem_following_lead(True, 40.0, 1.5, 20.0)
   assert not LongitudinalPlanner.is_cem_following_lead(True, 80.0, 1.5, 20.0)
   assert not LongitudinalPlanner.is_cem_following_lead(False, 10.0, 1.5, 20.0)

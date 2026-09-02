@@ -1783,9 +1783,10 @@ class LongitudinalPlanner:
     ))
 
   @staticmethod
-  def is_cem_following_lead(lead_active, d_rel, t_follow, v_ego):
-    # Same window as StarPilotFollowing.following_lead: tracked and inside 2*t_follow*v_ego.
-    return bool(lead_active and float(d_rel) < (float(t_follow) * 2.0) * float(v_ego))
+  def is_cem_following_lead(tracking_lead, d_rel, t_follow, v_ego):
+    # Same inputs as StarPilotFollowing.following_lead / CEM: published
+    # trackingLead and tFollow, plus leadOne.dRel inside 2*t_follow*v_ego.
+    return bool(tracking_lead and float(d_rel) < (float(t_follow) * 2.0) * float(v_ego))
 
   @staticmethod
   def apply_experimental_speed_handoff(output_a_target, output_a_target_mpc, output_a_target_e2e, speed_handoff):
@@ -2421,7 +2422,10 @@ class LongitudinalPlanner:
         output_a_target = min(output_a_target_mpc, output_a_target_e2e)
         output_should_stop = output_should_stop_e2e or output_should_stop_mpc
         cem_following_lead = self.is_cem_following_lead(
-          lead_one_active, self.lead_one.dRel, effective_t_follow, scene_v_ego,
+          tracking_lead,
+          self.lead_one.dRel,
+          sm['starpilotPlan'].tFollow,
+          scene_v_ego,
         )
         speed_handoff = self.get_experimental_speed_handoff_weight(
           scene_v_ego,
