@@ -398,6 +398,116 @@
   animation-delay: 0.28s;
 }
 
+.bluetoothElmPanel {
+  background: var(--secondary-bg);
+  border: 1px solid rgba(169, 140, 229, 0.45);
+  border-radius: var(--border-radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 18px;
+}
+
+.bluetoothElmHeader,
+.bluetoothElmActions,
+.bluetoothElmCommand > div {
+  align-items: center;
+  display: flex;
+  gap: 10px;
+}
+
+.bluetoothElmHeader {
+  justify-content: space-between;
+  gap: 18px;
+}
+
+.bluetoothElmHeader h3,
+.bluetoothElmHeader p,
+.bluetoothElmCodes p,
+.bluetoothElmResponse pre,
+.bluetoothElmCommand label {
+  margin: 0;
+}
+
+.bluetoothElmHeader p,
+.bluetoothElmCodes p {
+  color: var(--text-muted);
+  margin-top: 4px;
+}
+
+.bluetoothElmHeader strong {
+  color: #cbb2fa;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.bluetoothElmActions {
+  margin-top: 16px;
+}
+
+.bluetoothElmActions button,
+.bluetoothElmCommand button {
+  background: linear-gradient(135deg, #765bb6, #9474ce);
+  border: 0;
+  border-radius: var(--border-radius-md);
+  color: #fff;
+  cursor: pointer;
+  font-weight: 700;
+  padding: 10px 14px;
+}
+
+.bluetoothElmActions .bluetoothSecondaryButton {
+  background: var(--input-bg);
+  border: 1px solid var(--sidebar-border-color);
+  color: var(--text-color);
+}
+
+.bluetoothElmActions button:disabled,
+.bluetoothElmCommand button:disabled,
+.bluetoothElmCommand input:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.bluetoothElmCodes,
+.bluetoothElmCommand,
+.bluetoothElmResponse {
+  margin-top: 16px;
+}
+
+.bluetoothElmCommand label {
+  color: var(--text-muted);
+  display: block;
+  font-size: 0.86rem;
+  margin-bottom: 6px;
+}
+
+.bluetoothElmCommand > div {
+  align-items: stretch;
+}
+
+.bluetoothElmCommand input {
+  background: var(--input-bg);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: var(--border-radius-md);
+  color: var(--text-color);
+  flex: 1;
+  font: inherit;
+  min-width: 0;
+  padding: 10px 12px;
+}
+
+.bluetoothElmResponse pre {
+  background: var(--input-bg);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: var(--border-radius-md);
+  color: var(--text-color);
+  margin-top: 6px;
+  max-height: 220px;
+  overflow: auto;
+  padding: 12px;
+  white-space: pre-wrap;
+}
+
 @keyframes bluetoothSpin {
   to { transform: rotate(360deg); }
 }

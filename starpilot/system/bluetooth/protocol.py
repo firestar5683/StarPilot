@@ -16,6 +16,7 @@ BLUETOOTH_RADIO_HELPER = "/usr/comma/bluetooth-radio"
 A2DP_SINK_UUID = "0000110b-0000-1000-8000-00805f9b34fb"
 HID_UUID = "00001124-0000-1000-8000-00805f9b34fb"
 HOG_UUID = "00001812-0000-1000-8000-00805f9b34fb"
+SPP_UUID = "00001101-0000-1000-8000-00805f9b34fb"
 COMMAND_TIMEOUTS = {
   "set_power": 90.0,
   "start_scan": 20.0,
@@ -24,6 +25,10 @@ COMMAND_TIMEOUTS = {
   "disconnect": 20.0,
   "forget": 20.0,
   "test_audio": 10.0,
+  "elm_open": 15.0,
+  "elm_close": 5.0,
+  "elm_command": 20.0,
+  "elm_read_dtcs": 30.0,
 }
 TRUE_VALUES = {"1", "true", "yes", "on"}
 
@@ -40,6 +45,7 @@ class BluetoothDevice:
   uuids: tuple[str, ...] = ()
   audio: bool = False
   controller: bool = False
+  serial: bool = False
 
   @classmethod
   def from_dict(cls, value: dict[str, Any]) -> "BluetoothDevice":
@@ -54,6 +60,7 @@ class BluetoothDevice:
       uuids=tuple(str(uuid).lower() for uuid in value.get("uuids", ())),
       audio=bool(value.get("audio", False)),
       controller=bool(value.get("controller", False)),
+      serial=bool(value.get("serial", False)),
     )
 
 
@@ -86,21 +93,22 @@ class BluetoothStatus:
     )
 
 
-def device_capabilities(uuids: list[str] | tuple[str, ...], bluetooth_class: int = 0, icon: str = "") -> tuple[bool, bool]:
+def device_capabilities(uuids: list[str] | tuple[str, ...], bluetooth_class: int = 0, icon: str = "") -> tuple[bool, bool, bool]:
   normalized = {str(uuid).lower() for uuid in uuids}
   major_class = (int(bluetooth_class) >> 8) & 0x1F
   audio = A2DP_SINK_UUID in normalized or major_class == 0x04 or icon in {"audio-card", "audio-headphones", "audio-headset"}
   controller = HID_UUID in normalized or HOG_UUID in normalized or major_class == 0x05 or icon in {"input-gaming", "input-mouse", "input-keyboard"}
-  return audio, controller
+  serial = SPP_UUID in normalized
+  return audio, controller, serial
 
 
 def show_pairing_device(address: str, name: str, paired: bool, trusted: bool, connected: bool, blocked: bool,
-                        audio: bool, controller: bool, discovering: bool = False) -> bool:
+                        audio: bool, controller: bool, serial: bool = False, discovering: bool = False) -> bool:
   known = paired or trusted or connected
   normalized_address = "".join(character for character in address.upper() if character.isalnum())
   normalized_name = "".join(character for character in name.upper() if character.isalnum())
   named = bool(name) and name != "Unknown device" and normalized_name != normalized_address
-  return known or (named and not blocked and (audio or controller))
+  return known or (named and not blocked and (audio or controller or serial))
 
 
 class _DesktopFakeBluetooth:
@@ -303,6 +311,18 @@ class BluetoothClient:
   def test_audio(self, address: str) -> float:
     result = self.call("test_audio", address=address)
     return max(0.0, float(result.get("audio_test_delay_ms", 0)) / 1000.0)
+
+  def elm_open(self, address: str) -> dict[str, Any]:
+    return self.call("elm_open", address=address)
+
+  def elm_close(self, address: str) -> dict[str, Any]:
+    return self.call("elm_close", address=address)
+
+  def elm_command(self, address: str, value: str) -> dict[str, Any]:
+    return self.call("elm_command", address=address, value=value)
+
+  def elm_read_dtcs(self, address: str) -> dict[str, Any]:
+    return self.call("elm_read_dtcs", address=address)
 
   def respond(self, prompt_id: str, accepted: bool, value: str = "") -> None:
     self.call("pairing_response", prompt_id=prompt_id, accepted=accepted, value=value)

@@ -5121,11 +5121,16 @@ def setup(app):
       "select_audio": "select_audio",
       "test_audio": "test_audio",
       "pairing_response": "pairing_response",
+      "elm_open": "elm_open",
+      "elm_close": "elm_close",
+      "elm_command": "elm_command",
+      "elm_read_dtcs": "elm_read_dtcs",
     }
     command = commands.get(operation)
     if command is None:
       return jsonify({"error": "Unknown Bluetooth operation."}), 404
-    offroad_only = {"power", "scan", "stop_scan", "pair", "forget", "test_audio", "pairing_response"}
+    offroad_only = {"power", "scan", "stop_scan", "pair", "forget", "test_audio", "pairing_response",
+                    "elm_open", "elm_command", "elm_read_dtcs"}
     if operation in offroad_only and not params.get_bool("IsOffroad"):
       return jsonify({"error": "Bluetooth settings can only be changed offroad."}), 409
 
@@ -5143,6 +5148,8 @@ def setup(app):
       payload["address"] = str(data.get("address", ""))
       if not payload["address"] and command != "select_audio":
         return jsonify({"error": "Bluetooth device address is required."}), 400
+      if command == "elm_command":
+        payload["value"] = str(data.get("value", ""))
     try:
       client = BluetoothClient(timeout=10.0)
       if command == "set_power":

@@ -9,11 +9,13 @@ from typing import Any
 from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.starpilot.system.bluetooth.bluez import BlueZClient
+from openpilot.starpilot.system.bluetooth.elm327 import ELM327Session
 from openpilot.starpilot.system.bluetooth.protocol import BLUETOOTH_SOCKET_PATH
 from openpilot.starpilot.system.bluetooth.radio import BluetoothRadio
 
 
-OFFROAD_COMMANDS = {"set_power", "start_scan", "stop_scan", "pair", "forget", "test_audio", "pairing_response"}
+OFFROAD_COMMANDS = {"set_power", "start_scan", "stop_scan", "pair", "forget", "test_audio", "pairing_response",
+                    "elm_open", "elm_command", "elm_read_dtcs"}
 SCAN_DURATION = 20.0
 AUDIO_TEST_START_DELAY = 3.0
 AUDIO_TEST_HOLD_TIME = 3.0
@@ -24,13 +26,15 @@ MANUAL_DISCONNECT_SUPPRESSION_SECONDS = 300.0
 
 class BluetoothController:
   def __init__(self, params: Params | None = None, bluez_factory=BlueZClient, radio: BluetoothRadio | None = None,
-               params_memory: Params | None = None, sleep=time.sleep):
+               params_memory: Params | None = None, sleep=time.sleep, elm_factory=ELM327Session):
     self.params = params or Params()
     self.params_memory = params_memory or Params(memory=True)
     self._bluez_factory = bluez_factory
+    self._elm_factory = elm_factory
     self._radio = radio or BluetoothRadio()
     self._lock = threading.RLock()
     self._bluez: BlueZClient | None = None
+    self._elm: ELM327Session | None = None
     self._pairing_address = ""
     self._pairing_error = ""
     self._last_reconnect = 0.0
@@ -46,6 +50,7 @@ class BluetoothController:
     self.params.remove("BluetoothAudioTestActive")
     self.params_memory.remove("TestAlert")
     with self._lock:
+      self._close_elm()
       if self._bluez is not None:
         self._bluez.close()
         self._bluez = None
@@ -80,12 +85,39 @@ class BluetoothController:
 
   def _reset_client(self) -> None:
     with self._lock:
+      self._close_elm()
       if self._bluez is not None:
         try:
           self._bluez.close()
         except Exception:
           pass
         self._bluez = None
+
+  def _close_elm(self) -> None:
+    with self._lock:
+      session = self._elm
+      self._elm = None
+      if session is None:
+        return
+      try:
+        session.close()
+      except Exception:
+        cloudlog.warning("ELM327 session close failed")
+
+  def _invalidate_elm(self, session: ELM327Session) -> None:
+    with self._lock:
+      if self._elm is not session:
+        return
+      self._close_elm()
+
+  def _active_elm(self, address: str) -> ELM327Session:
+    with self._lock:
+      session = self._elm
+      if session is None:
+        raise RuntimeError("ELM327 session is not open")
+      if str(session.address).upper() != address.upper():
+        raise RuntimeError("ELM327 session is open for another device")
+      return session
 
   def _offroad(self) -> bool:
     return self.params.get_bool("IsOffroad")
@@ -183,6 +215,7 @@ class BluetoothController:
               pass
             raise
         else:
+          self._close_elm()
           try:
             client = self._bluez
             if client is not None:
@@ -231,6 +264,9 @@ class BluetoothController:
           self._manual_disconnect_until.pop(normalized_address, None)
           raise
     elif command == "forget":
+      with self._lock:
+        if self._elm is not None and str(self._elm.address).upper() == address.upper():
+          self._close_elm()
       self._client().remove(address)
       self._reconnect_backoff.pop(address.upper(), None)
       self._manual_disconnect_until.pop(address.upper(), None)
@@ -258,6 +294,50 @@ class BluetoothController:
       self._audio_test_deadline = deadline
       threading.Thread(target=self._test_audio_worker, args=(address, deadline), daemon=True).start()
       return {"audio_test_delay_ms": max(0, round((deadline - time.monotonic()) * 1000))}
+    elif command == "elm_open":
+      if not address:
+        raise RuntimeError("Bluetooth device address is required")
+      if not self.params.get_bool("BluetoothEnabled"):
+        raise RuntimeError("Bluetooth is disabled")
+      with self._lock:
+        if self._elm is not None and str(self._elm.address).upper() == address.upper():
+          return {"adapter": self._elm.adapter_name}
+        device = self._client().device_for_address(address)
+        if not device.get("paired"):
+          raise RuntimeError("Pair the Bluetooth device before opening ELM327")
+        if not device.get("serial"):
+          raise RuntimeError("Bluetooth device does not advertise Serial Port Profile")
+        self._close_elm()
+        session = self._elm_factory(address)
+        try:
+          adapter = str(session.open())
+        except Exception:
+          try:
+            session.close()
+          except Exception:
+            pass
+          raise
+        session.adapter_name = adapter
+        self._elm = session
+        return {"adapter": adapter}
+    elif command == "elm_close":
+      with self._lock:
+        if self._elm is not None and str(self._elm.address).upper() == address.upper():
+          self._close_elm()
+    elif command == "elm_command":
+      session = self._active_elm(address)
+      try:
+        return {"response": session.command(str(request.get("value", "")))}
+      except Exception:
+        self._invalidate_elm(session)
+        raise
+    elif command == "elm_read_dtcs":
+      session = self._active_elm(address)
+      try:
+        return session.read_dtcs()
+      except Exception:
+        self._invalidate_elm(session)
+        raise
     elif command == "pairing_response":
       if not self._client().agent.respond(str(request.get("prompt_id", "")), bool(request.get("accepted", False)), str(request.get("value", ""))):
         raise RuntimeError("Pairing request is no longer active")
@@ -276,10 +356,14 @@ class BluetoothController:
     while True:
       time.sleep(2)
       if not self.params.get_bool("BluetoothEnabled"):
+        self._close_elm()
         continue
       try:
         status = self.status()
+        if self._elm is not None and not status["offroad"]:
+          self._close_elm()
         if not status["available"] or not status["powered"]:
+          self._close_elm()
           continue
         now = time.monotonic()
         self._maintain_scan(status, now)

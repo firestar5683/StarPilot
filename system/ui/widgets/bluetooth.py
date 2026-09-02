@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from functools import partial
+import threading
 
 import pyray as rl
 
@@ -14,7 +15,7 @@ from openpilot.system.ui.widgets import DialogResult, Widget
 from openpilot.system.ui.widgets.button import Button, ButtonStyle
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog, alert_dialog
 from openpilot.system.ui.widgets.keyboard import Keyboard
-from openpilot.system.ui.widgets.label import gui_label
+from openpilot.system.ui.widgets.label import gui_label, gui_text_box
 from openpilot.system.ui.widgets.option_dialog import MultiOptionDialog
 from openpilot.system.ui.widgets.toggle import Toggle
 
@@ -45,11 +46,15 @@ def device_status_text(device: BluetoothDevice, operation: str, selected_audio: 
     capabilities.append(tr("audio output") if selected_audio.upper() == device.address.upper() else tr("audio"))
   if device.controller:
     capabilities.append(tr("controller"))
+  if device.serial:
+    capabilities.append(tr("serial"))
   capability_text = " / ".join(capabilities)
 
   if device.connected:
     return tr("Connected") + (f" / {capability_text}" if capability_text else "")
   if device.paired:
+    if device.serial:
+      return tr("Paired - tap to use ELM327") + (f" / {capability_text}" if capability_text else "")
     return tr("Paired - tap to connect")
   return tr("Tap to pair") + (f" / {capability_text}" if capability_text else "")
 
@@ -57,6 +62,8 @@ def device_status_text(device: BluetoothDevice, operation: str, selected_audio: 
 def device_action_allowed(device: BluetoothDevice, operation: str, offroad: bool) -> bool:
   """Mirror the daemon's operation policy before a row can receive a tap."""
   if operation:
+    return False
+  if device.serial and not offroad:
     return False
   if not offroad and not device.paired:
     return False
@@ -175,6 +182,139 @@ class BluetoothAudioTestDialog(Widget):
     self._done_button.render(button_rect)
 
 
+class ELM327Dialog(Widget):
+  """Ephemeral, offroad-only ELM327 controls opened from the Bluetooth panel."""
+  def __init__(self, manager: BluetoothManager, device: BluetoothDevice):
+    super().__init__()
+    self._manager = manager
+    self._address = device.address
+    self._name = device.name
+    self._state_lock = threading.Lock()
+    self._closed = False
+    self._connecting = True
+    self._adapter = ""
+    self._response = ""
+    self._codes: list[str] | None = None
+    self._error = ""
+    self._keyboard = Keyboard(max_text_size=256, min_text_size=1, password_mode=False)
+    self._read_button = Button(tr("Read Codes"), self._read_codes, button_style=ButtonStyle.PRIMARY, font_size=42)
+    self._command_button = Button(tr("Send Command"), self._send_command, button_style=ButtonStyle.NORMAL, font_size=42)
+    self._done_button = Button(tr("Done"), gui_app.pop_widget, button_style=ButtonStyle.NORMAL, font_size=42)
+
+  def show_event(self):
+    super().show_event()
+    self._manager.elm_open(self._address, callback=self._on_open_result)
+
+  def hide_event(self):
+    with self._state_lock:
+      self._closed = True
+    self._manager.elm_close(self._address)
+    super().hide_event()
+
+  def _on_open_result(self, result, error):
+    should_close = False
+    with self._state_lock:
+      self._connecting = False
+      if error:
+        self._error = error
+      else:
+        self._adapter = str((result or {}).get("adapter", ""))
+        self._response = ""
+        self._codes = None
+        should_close = self._closed
+    if should_close:
+      self._manager.elm_close(self._address)
+
+  def _on_command_result(self, command: str, result, error):
+    with self._state_lock:
+      if error:
+        self._error = error
+      else:
+        response = str((result or {}).get("response", ""))
+        self._response = f"{command}\n{response}".strip()
+
+  def _on_read_result(self, result, error):
+    with self._state_lock:
+      if error:
+        self._error = error
+      else:
+        self._codes = [str(code) for code in (result or {}).get("codes", [])]
+        self._response = str((result or {}).get("raw", ""))
+
+  def _send_command(self):
+    with self._state_lock:
+      if self._connecting or self._error or self._closed:
+        return
+    self._keyboard.reset(min_text_size=1)
+    self._keyboard.set_title(tr("Send ELM327 command"), tr("Raw commands are available offroad only."))
+    self._keyboard.set_callback(self._on_command_entered)
+    gui_app.push_widget(self._keyboard)
+
+  def _on_command_entered(self, result: DialogResult):
+    command = self._keyboard.text.strip()
+    self._keyboard.clear()
+    if result != DialogResult.CONFIRM or not command:
+      return
+    with self._state_lock:
+      self._response = f"{command}\nSending..."
+      self._error = ""
+    self._manager.elm_command(self._address, command, callback=partial(self._on_command_result, command))
+
+  def _read_codes(self):
+    with self._state_lock:
+      self._codes = None
+      self._error = ""
+    self._manager.elm_read_dtcs(self._address, callback=self._on_read_result)
+
+  def _update_state(self):
+    with self._state_lock:
+      ready = bool(self._adapter) and not self._connecting and not self._error and not self._closed
+    status = self._manager.status
+    operation = self._manager.operation_for(self._address)
+    enabled = ready and status.offroad and not operation
+    self._read_button.set_enabled(enabled)
+    self._command_button.set_enabled(enabled)
+    self._done_button.set_enabled(True)
+
+  def _render(self, rect: rl.Rectangle):
+    dialog_rect = rl.Rectangle(rect.x + 90, rect.y + 60, rect.width - 180, rect.height - 120)
+    rl.draw_rectangle_rounded(dialog_rect, 0.03, 20, DIALOG_BACKGROUND)
+
+    with self._state_lock:
+      connecting = self._connecting
+      adapter = self._adapter
+      response = self._response
+      codes = self._codes
+      error = self._error
+    gui_label(rl.Rectangle(dialog_rect.x + 45, dialog_rect.y + 35, dialog_rect.width - 90, 70), tr("ELM327"),
+              font_size=62, font_weight=FontWeight.BOLD)
+    gui_label(rl.Rectangle(dialog_rect.x + 45, dialog_rect.y + 105, dialog_rect.width - 90, 52), self._name,
+              font_size=42, color=TEXT_SECONDARY)
+    identity = tr("Connecting...") if connecting else adapter
+    gui_label(rl.Rectangle(dialog_rect.x + 45, dialog_rect.y + 157, dialog_rect.width - 90, 52), identity,
+              font_size=42, color=TEXT_CONNECTED if adapter else TEXT_SECONDARY)
+
+    button_y = dialog_rect.y + 225
+    button_width = (dialog_rect.width - 135) / 3
+    self._read_button.render(rl.Rectangle(dialog_rect.x + 45, button_y, button_width, 90))
+    self._command_button.render(rl.Rectangle(dialog_rect.x + 60 + button_width, button_y, button_width, 90))
+    self._done_button.render(rl.Rectangle(dialog_rect.x + 75 + button_width * 2, button_y, button_width, 90))
+
+    if error:
+      gui_text_box(rl.Rectangle(dialog_rect.x + 45, dialog_rect.y + 330, dialog_rect.width - 90, 80), error,
+                   font_size=38, color=rl.Color(255, 150, 150, 255))
+    if codes is not None:
+      gui_label(rl.Rectangle(dialog_rect.x + 45, dialog_rect.y + 410, 300, 45), tr("Stored Codes"),
+                font_size=38, font_weight=FontWeight.BOLD)
+      code_text = "\n".join(codes) if codes else tr("No stored codes reported.")
+      gui_text_box(rl.Rectangle(dialog_rect.x + 45, dialog_rect.y + 455, dialog_rect.width - 90, 95), code_text,
+                   font_size=38, color=TEXT_SECONDARY)
+    gui_label(rl.Rectangle(dialog_rect.x + 45, dialog_rect.y + 560, 300, 45), tr("Response"),
+              font_size=38, font_weight=FontWeight.BOLD)
+    gui_text_box(rl.Rectangle(dialog_rect.x + 45, dialog_rect.y + 605, dialog_rect.width - 90, dialog_rect.height - 650),
+                 response or "—", font_size=36, color=TEXT_SECONDARY)
+
+
 class BluetoothManagerUI(Widget):
   """Big UI Bluetooth settings panel backed by the existing Bluetooth manager daemon."""
   def __init__(self, manager: BluetoothManager):
@@ -264,6 +404,8 @@ class BluetoothManagerUI(Widget):
       return
     if not device.paired:
       self._manager.pair(device.address)
+    elif device.serial:
+      gui_app.push_widget(ELM327Dialog(self._manager, device))
     elif not device.connected:
       self._manager.connect(device.address)
     else:

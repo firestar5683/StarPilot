@@ -20,6 +20,11 @@ const state = reactive({
   prompt: null,
   audioTestAddress: "",
   audioTestLabel: "",
+  elmAddress: "",
+  elmName: "",
+  elmAdapter: "",
+  elmResponse: "",
+  elmCodes: null,
   error: "",
 })
 
@@ -46,7 +51,9 @@ function schedulePoll(delay = pollDelay()) {
   pollTimer = setTimeout(async () => {
     pollTimer = null
     try {
-      if (bluetoothPageActive() && document.visibilityState !== "hidden" && state.busy !== "power") {
+      if (state.elmAddress && (document.visibilityState === "hidden" || !bluetoothPageActive())) {
+        closeElm()
+      } else if (bluetoothPageActive() && document.visibilityState !== "hidden" && state.busy !== "power") {
         await refresh()
       }
     } finally {
@@ -97,13 +104,63 @@ async function request(operation, body = {}) {
     }
     state.error = ""
     await refresh()
+    return payload
   } catch (error) {
     state.error = error?.message || "Bluetooth operation failed"
+    return null
   } finally {
     state.busy = ""
     if (operation === "power") state.powerTarget = null
     schedulePoll(250)
   }
+}
+
+function clearElmState() {
+  state.elmAddress = ""
+  state.elmName = ""
+  state.elmAdapter = ""
+  state.elmResponse = ""
+  state.elmCodes = null
+}
+
+function closeElm() {
+  const address = state.elmAddress
+  if (!address) return
+  clearElmState()
+  request("elm_close", { address })
+}
+
+async function openElm(address) {
+  const device = state.devices.find((item) => normalizedAddress(item) === String(address || "").toUpperCase())
+  const payload = await request("elm_open", { address })
+  if (!payload || !device) return
+  state.elmAddress = address
+  state.elmName = device.name || address
+  state.elmAdapter = String(payload.adapter || "")
+  state.elmResponse = ""
+  state.elmCodes = null
+}
+
+async function readElmCodes() {
+  const address = state.elmAddress
+  if (!address) return
+  const payload = await request("elm_read_dtcs", { address })
+  if (!payload || state.elmAddress !== address) return
+  state.elmCodes = Array.isArray(payload.codes) ? payload.codes.map(String) : []
+  state.elmResponse = String(payload.raw || "")
+}
+
+async function sendElmCommand() {
+  const address = state.elmAddress
+  const input = document.getElementById("bluetoothElmCommand")
+  const command = input?.value.trim() || ""
+  if (!address || !command) {
+    state.error = "Enter an ELM327 command."
+    return
+  }
+  const payload = await request("elm_command", { address, value: command })
+  if (!payload || state.elmAddress !== address) return
+  state.elmResponse = `${command}\n${String(payload.response || "")}`.trim()
 }
 
 async function refreshOnce() {
@@ -126,6 +183,10 @@ async function refreshOnce() {
     devices,
   })
   state.devices = devices
+  if (state.elmAddress && (!state.enabled || !state.offroad ||
+      !devices.some((device) => normalizedAddress(device) === state.elmAddress.toUpperCase() && device.paired))) {
+    closeElm()
+  }
   if (state.deviceSignature !== deviceSignature) {
     state.deviceSignature = deviceSignature
     state.revision++
@@ -223,7 +284,11 @@ function initialize() {
   window.addEventListener("focus", refresh)
   window.addEventListener("pageshow", refresh)
   document.addEventListener("visibilitychange", () => {
-    if (document.visibilityState !== "hidden" && bluetoothPageActive()) refresh()
+    if (document.visibilityState === "hidden" || !bluetoothPageActive()) {
+      closeElm()
+    } else {
+      refresh()
+    }
   })
   refresh()
   schedulePoll(0)
@@ -248,6 +313,7 @@ function deviceCapabilities(device) {
   const capabilities = []
   if (device.audio) capabilities.push("Audio")
   if (device.controller) capabilities.push("Controller")
+  if (device.serial) capabilities.push("Serial")
   return capabilities.join(" · ") || "Bluetooth device"
 }
 
@@ -353,7 +419,14 @@ function renderDeviceActions(device) {
     actions.push("<button data-bluetooth-operation=\"pair\" data-address=\"" + address + "\"" +
       renderDisabledAttribute(!state.offroad || !!state.busy || pairing) + ">" + (pairing ? "Pairing…" : "Pair") + "</button>")
   }
-  if (device.paired || device.connected) {
+  if (device.paired && device.serial) {
+    actions.push("<button data-bluetooth-operation=\"elm_open\" data-address=\"" + address + "\"" +
+      renderDisabledAttribute(!state.offroad || !!state.busy) + ">ELM327</button>")
+    actions.push("<button class=\"bluetoothIconButton bluetoothForgetButton\" data-bluetooth-operation=\"forget\" data-address=\"" +
+      address + "\" data-device-name=\"" + name + "\" title=\"Forget device\" aria-label=\"Forget " + name + "\"" +
+      renderDisabledAttribute(!state.offroad || !!state.busy) + "><i class=\"bi bi-trash3\" aria-hidden=\"true\"></i></button>")
+  }
+  if ((device.paired || device.connected) && !device.serial) {
     const operation = device.connected ? "disconnect" : "connect"
     actions.push("<button data-bluetooth-operation=\"" + operation + "\" data-address=\"" + address + "\"" +
       renderDisabledAttribute(!!state.busy) + ">" + (device.connected ? "Disconnect" : "Connect") + "</button>")
@@ -407,7 +480,48 @@ function handleDeviceListClick(event) {
   const operation = button.dataset.bluetoothOperation
   const address = button.dataset.address || ""
   if (operation === "forget" && !window.confirm("Forget " + (button.dataset.deviceName || "this device") + "?")) return
-  request(operation, { address })
+  if (operation === "elm_open") {
+    openElm(address)
+  } else {
+    request(operation, { address })
+  }
+}
+
+function renderElmPanel() {
+  if (!state.elmAddress) return ""
+  return html`
+    <section class="bluetoothElmPanel">
+      <div class="bluetoothElmHeader">
+        <div>
+          <h3>ELM327</h3>
+          <p>${() => state.elmName || state.elmAddress}</p>
+        </div>
+        <strong>${() => state.elmAdapter || "Connecting…"}</strong>
+      </div>
+      <div class="bluetoothElmActions">
+        <button disabled="${() => !state.offroad || !!state.busy}" @click="${readElmCodes}">Read Codes</button>
+        <button class="bluetoothSecondaryButton" disabled="${() => !!state.busy}" @click="${closeElm}">Close</button>
+      </div>
+      ${() => state.elmCodes !== null ? html`
+        <div class="bluetoothElmCodes">
+          <strong>Stored Codes</strong>
+          <p>${() => state.elmCodes.length ? state.elmCodes.join(" · ") : "No stored codes reported."}</p>
+        </div>
+      ` : ""}
+      <div class="bluetoothElmCommand">
+        <label for="bluetoothElmCommand">Command</label>
+        <div>
+          <input id="bluetoothElmCommand" type="text" autocomplete="off" placeholder="ATI"
+                 disabled="${() => !state.offroad || !!state.busy}" />
+          <button disabled="${() => !state.offroad || !!state.busy}" @click="${sendElmCommand}">Send</button>
+        </div>
+      </div>
+      <div class="bluetoothElmResponse">
+        <strong>Response</strong>
+        <pre>${() => state.elmResponse || "—"}</pre>
+      </div>
+    </section>
+  `
 }
 
 export function Bluetooth() {
@@ -440,6 +554,7 @@ export function Bluetooth() {
           <span>The test sound is sent at NOW. The audible gap is Bluetooth latency.</span>
         </div>
       ` : ""}
+      ${() => renderElmPanel()}
 
       <div class="bluetoothToolbar">
         <button disabled="${() => !state.offroad || !state.enabled || !!state.busy}"
