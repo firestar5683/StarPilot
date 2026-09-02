@@ -101,13 +101,15 @@ class StarPilotFollowing:
     self.danger_jerk = self.base_danger_jerk
     self.speed_jerk = self.base_speed_jerk
 
-    self.following_lead = self.starpilot_planner.tracking_lead and self.starpilot_planner.lead_one.dRel < (self.t_follow * 2) * v_ego
     self.slower_lead = False
 
     if self.starpilot_planner.starpilot_weather.weather_id != 0:
       self.t_follow = min(self.t_follow + self.starpilot_planner.starpilot_weather.increase_following_distance, MAX_T_FOLLOW)
 
     self.update_lane_change_gap(long_control_active, v_ego, sm, starpilot_toggles)
+
+    # After t_follow adjustments so CEM and the published tFollow use the same window.
+    self.following_lead = self.starpilot_planner.tracking_lead and self.starpilot_planner.lead_one.dRel < (self.t_follow * 2) * v_ego
 
     self.disable_throttle = False
     if self.starpilot_planner.tracking_lead and self.starpilot_planner.lead_one.status:
