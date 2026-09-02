@@ -4,6 +4,17 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1">
+  <script>
+    const firstPathSegment = window.location.pathname.split("/").filter(Boolean)[0] || "";
+    const galaxyBasePath = window.location.hostname === "galaxy.firestar.link" && /^[A-Za-z0-9]{16}$/.test(firstPathSegment)
+      ? `/${firstPathSegment}`
+      : "";
+    const galaxyImportMap = document.createElement("script");
+    galaxyImportMap.type = "importmap";
+    galaxyImportMap.textContent = JSON.stringify({ imports: { "/assets/": `${galaxyBasePath}/assets/` } });
+    document.head.appendChild(galaxyImportMap);
+    window.__theGalaxyBasePath = galaxyBasePath;
+  </script>
   <link rel="apple-touch-icon" sizes="180x180" href="/assets/images/apple-touch-icon.png">
   <link rel="icon" type="image/png" sizes="32x32" href="/assets/images/favicon-32x32.png">
   <link rel="icon" type="image/png" sizes="16x16" href="/assets/images/favicon-16x16.png">
@@ -50,7 +61,8 @@
   <link rel="stylesheet" href="/assets/components/tools/tsk_manager.css">
 
   <script type="module">
-    import("/assets/components/router.js?v=router-cycle-fix-6").catch((err) => {
+    const routerPath = `${window.__theGalaxyBasePath}/assets/components/router.js?v=router-public-path-6`;
+    import(routerPath).catch((err) => {
       console.error("[the_galaxy] bootstrap failed", err);
       const target = document.getElementById("app") || document.body;
       const pre = document.createElement("pre");

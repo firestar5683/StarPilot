@@ -5053,6 +5053,12 @@ def setup(app):
         "enabled": params.get_bool("BluetoothEnabled"),
         "offroad": params.get_bool("IsOffroad"),
         "selected_audio": params.get("BluetoothAudioAddress", encoding="utf-8") or "",
+        "companion_enabled": params.get_bool("BluetoothCompanionEnabled"),
+        "companion_pairing": False,
+        "companion_pairing_remaining": 0,
+        "companion_service_uuid": "",
+        "companion_connected": False,
+        "companion_devices": [],
         "devices": [],
         "error": str(error),
       }), 503
@@ -5070,17 +5076,29 @@ def setup(app):
       "select_audio": "select_audio",
       "test_audio": "test_audio",
       "pairing_response": "pairing_response",
+      "companion": "set_companion",
+      "companion_pair": "start_companion_pairing",
+      "companion_pair_stop": "stop_companion_pairing",
     }
     command = commands.get(operation)
     if command is None:
       return jsonify({"error": "Unknown Bluetooth operation."}), 404
-    offroad_only = {"power", "scan", "stop_scan", "pair", "forget", "test_audio", "pairing_response"}
+    offroad_only = {
+      "power", "scan", "stop_scan", "pair", "forget", "test_audio", "pairing_response",
+      "companion", "companion_pair", "companion_pair_stop",
+    }
     if operation in offroad_only and not params.get_bool("IsOffroad"):
       return jsonify({"error": "Bluetooth settings can only be changed offroad."}), 409
 
     data = request.get_json(silent=True) or {}
+    companion_requires_bluetooth = operation in {"companion_pair", "companion_pair_stop"} or (
+      operation == "companion" and bool(data.get("enabled", False))
+    )
+    if companion_requires_bluetooth and not params.get_bool("BluetoothEnabled"):
+      return jsonify({"error": "Enable Bluetooth first."}), 409
+
     payload = {}
-    if command == "set_power":
+    if command in {"set_power", "set_companion"}:
       payload["enabled"] = bool(data.get("enabled", False))
     elif command == "pairing_response":
       payload = {
@@ -5088,7 +5106,7 @@ def setup(app):
         "accepted": bool(data.get("accepted", False)),
         "value": str(data.get("value", "")),
       }
-    elif command not in {"start_scan", "stop_scan"}:
+    elif command not in {"start_scan", "stop_scan", "start_companion_pairing", "stop_companion_pairing"}:
       payload["address"] = str(data.get("address", ""))
       if not payload["address"] and command != "select_audio":
         return jsonify({"error": "Bluetooth device address is required."}), 400

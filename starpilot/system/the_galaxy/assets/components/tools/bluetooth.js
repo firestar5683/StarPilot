@@ -12,6 +12,10 @@ const state = reactive({
   offroad: false,
   selectedAudio: "",
   pairingAddress: "",
+  companionPairing: false,
+  companionPairingRemaining: 0,
+  companionConnected: false,
+  companionDevices: [],
   devices: [],
   revision: 0,
   deviceSignature: "",
@@ -20,7 +24,8 @@ const state = reactive({
   prompt: null,
   audioTestAddress: "",
   audioTestLabel: "",
-  error: "",
+  operationError: "",
+  statusError: "",
 })
 
 let initialized = false
@@ -95,14 +100,14 @@ async function request(operation, body = {}) {
     if (operation === "test_audio") {
       startAudioTestCountdown(String(body.address || ""), Number(payload.audio_test_delay_ms || 3000), requestStartedAt)
     }
-    state.error = ""
-    await refresh()
+    state.operationError = ""
   } catch (error) {
-    state.error = error?.message || "Bluetooth operation failed"
+    state.operationError = error?.message || "Bluetooth operation failed"
   } finally {
     state.busy = ""
     if (operation === "power") state.powerTarget = null
     schedulePoll(250)
+    await refresh()
   }
 }
 
@@ -117,6 +122,10 @@ async function refreshOnce() {
   state.offroad = !!payload.offroad
   state.selectedAudio = String(payload.selected_audio || "")
   state.pairingAddress = String(payload.pairing_address || "")
+  state.companionPairing = !!payload.companion_pairing
+  state.companionPairingRemaining = Math.max(0, Number(payload.companion_pairing_remaining || 0))
+  state.companionConnected = !!payload.companion_connected
+  state.companionDevices = Array.isArray(payload.companion_devices) ? payload.companion_devices : []
   const devices = Array.isArray(payload.devices) ? payload.devices : []
   const deviceSignature = JSON.stringify({
     enabled: state.enabled,
@@ -132,7 +141,7 @@ async function refreshOnce() {
   }
   state.lastUpdated = Date.now()
   state.prompt = payload.prompt || null
-  state.error = payload.error || (response.ok ? "" : "Bluetooth service unavailable")
+  state.statusError = payload.error || (response.ok ? "" : "Bluetooth service unavailable")
 }
 
 function pairingPromptNeedsValue() {
@@ -145,12 +154,12 @@ function respondToPairingPrompt(accepted) {
   const input = document.getElementById("bluetoothPairingValue")
   const value = input?.value.trim() || ""
   if (accepted && prompt.kind === "pin" && !value) {
-    state.error = "Enter the PIN to continue pairing."
+    state.operationError = "Enter the PIN to continue pairing."
     input?.focus()
     return
   }
   if (accepted && prompt.kind === "passkey" && !/^\d{1,6}$/.test(value)) {
-    state.error = "Enter the numeric passkey to continue pairing."
+    state.operationError = "Enter the numeric passkey to continue pairing."
     input?.focus()
     return
   }
@@ -202,7 +211,7 @@ async function refresh() {
         await refreshOnce()
       } catch (error) {
         state.available = false
-        state.error = error?.message || "Bluetooth service unavailable"
+        state.statusError = error?.message || "Bluetooth service unavailable"
       } finally {
         state.loading = false
       }
@@ -227,6 +236,10 @@ function initialize() {
   })
   refresh()
   schedulePoll(0)
+}
+
+function currentError() {
+  return state.operationError || state.statusError
 }
 
 function normalizedAddress(device) {
@@ -269,6 +282,11 @@ function availableDevices() {
   return state.devices.filter((device) => !device.paired && !device.trusted && !device.connected)
 }
 
+function isCompanionDevice(device) {
+  const address = normalizedAddress(device)
+  return state.companionDevices.some((companionAddress) => String(companionAddress).toUpperCase() === address)
+}
+
 function deviceActions(device) {
   const audioSelected = () => state.selectedAudio.toUpperCase() === device.address.toUpperCase()
   const pairing = () => isPairing(device)
@@ -280,9 +298,13 @@ function deviceActions(device) {
         </button>
       ` : ""}
       ${device.paired || device.connected ? html`
-        <button disabled="${() => !!state.busy}" @click="${() => request(device.connected ? "disconnect" : "connect", { address: device.address })}">
-          ${device.connected ? "Disconnect" : "Connect"}
-        </button>
+        ${isCompanionDevice(device) && !device.connected ? html`
+          <span class="bluetoothReconnectHint"><i class="bi bi-phone" aria-hidden="true"></i> Reconnect from phone</span>
+        ` : html`
+          <button disabled="${() => !!state.busy}" @click="${() => request(device.connected ? "disconnect" : "connect", { address: device.address })}">
+            ${device.connected ? "Disconnect" : "Connect"}
+          </button>
+        `}
       ` : ""}
       ${device.paired || device.connected ? html`
         ${device.audio ? html`
@@ -354,9 +376,13 @@ function renderDeviceActions(device) {
       renderDisabledAttribute(!state.offroad || !!state.busy || pairing) + ">" + (pairing ? "Pairing…" : "Pair") + "</button>")
   }
   if (device.paired || device.connected) {
-    const operation = device.connected ? "disconnect" : "connect"
-    actions.push("<button data-bluetooth-operation=\"" + operation + "\" data-address=\"" + address + "\"" +
-      renderDisabledAttribute(!!state.busy) + ">" + (device.connected ? "Disconnect" : "Connect") + "</button>")
+    if (isCompanionDevice(device) && !device.connected) {
+      actions.push("<span class=\"bluetoothReconnectHint\"><i class=\"bi bi-phone\" aria-hidden=\"true\"></i> Reconnect from phone</span>")
+    } else {
+      const operation = device.connected ? "disconnect" : "connect"
+      actions.push("<button data-bluetooth-operation=\"" + operation + "\" data-address=\"" + address + "\"" +
+        renderDisabledAttribute(!!state.busy) + ">" + (device.connected ? "Disconnect" : "Connect") + "</button>")
+    }
     if (device.audio) {
       actions.push("<button class=\"" + (selected ? "selected" : "") + "\" data-bluetooth-operation=\"select_audio\" data-address=\"" +
         (selected ? "" : address) + "\"" + renderDisabledAttribute(!!state.busy) + ">" +
@@ -432,12 +458,40 @@ export function Bluetooth() {
       </div>
 
       ${() => !state.offroad ? html`<div class="bluetoothNotice">Scanning, pairing, and forgetting devices are available offroad only.</div>` : ""}
-      ${() => state.error ? html`<div class="bluetoothError">${state.error}</div>` : ""}
+      ${() => currentError() ? html`<div class="bluetoothError">${currentError()}</div>` : ""}
       ${pairingPrompt}
       ${() => state.audioTestLabel ? html`
         <div class="bluetoothAudioCountdown">
           <strong>${state.audioTestLabel}</strong>
           <span>The test sound is sent at NOW. The audible gap is Bluetooth latency.</span>
+        </div>
+      ` : ""}
+
+      ${() => state.enabled && !state.companionDevices.length ? html`
+        <div class="bluetoothCompanionCard">
+          <div class="bluetoothDeviceHeader">
+            <div>
+              <h3>Phone connection</h3>
+              <p>Pair a phone over an encrypted Bluetooth LE connection.</p>
+            </div>
+            <span class="bluetoothBadge">Not paired</span>
+          </div>
+          <div class="bluetoothActions">
+            <button disabled="${() => !state.offroad || !!state.busy}"
+                    @click="${() => request(state.companionPairing ? "companion_pair_stop" : "companion_pair")}">
+              ${() => state.companionPairing ? `Stop Pairing (${state.companionPairingRemaining}s)` : "Pair a Phone"}
+            </button>
+          </div>
+          ${() => state.companionPairing ? html`
+            <div class="bluetoothCompanionHint">
+              <strong>On an iPhone:</strong>
+              <ol>
+                <li>Open the iPhone app that will connect to StarPilot.</li>
+                <li>Tap Connect and choose StarPilot.</li>
+                <li>Keep this pairing window open until the app connects. StarPilot authorizes the phone automatically; no confirmation slider is shown.</li>
+              </ol>
+            </div>
+          ` : ""}
         </div>
       ` : ""}
 

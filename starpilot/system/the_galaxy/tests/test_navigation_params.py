@@ -145,6 +145,12 @@ def test_bluetooth_status_api(monkeypatch):
   assert response.headers["Cache-Control"] == "no-store, no-cache, must-revalidate, max-age=0"
   assert response.get_json() == {
     "available": True,
+    "companion_connected": False,
+    "companion_devices": [],
+    "companion_enabled": False,
+    "companion_pairing": False,
+    "companion_pairing_remaining": 0,
+    "companion_service_uuid": "",
     "devices": [],
     "discovering": False,
     "enabled": True,
@@ -171,6 +177,10 @@ def test_bluetooth_api_enforces_offroad(monkeypatch):
   assert response.status_code == 409
   assert FakeBluetoothClient.calls == []
 
+  response = client.post("/api/bluetooth/companion_pair")
+  assert response.status_code == 409
+  assert FakeBluetoothClient.calls == []
+
 
 def test_bluetooth_api_allows_connection_recovery_onroad(monkeypatch):
   FakeBluetoothClient.calls = []
@@ -183,14 +193,28 @@ def test_bluetooth_api_allows_connection_recovery_onroad(monkeypatch):
   assert FakeBluetoothClient.calls == [("connect", {"address": "00:11:22:33:44:55"})]
 
 
+def test_bluetooth_api_rejects_companion_start_while_bluetooth_is_disabled(monkeypatch):
+  FakeBluetoothClient.calls = []
+  client, _ = _params_client(monkeypatch, {"IsOffroad": True, "BluetoothEnabled": False}, "mici")
+  monkeypatch.setattr(the_galaxy, "BluetoothClient", FakeBluetoothClient)
+
+  assert client.post("/api/bluetooth/companion", json={"enabled": True}).status_code == 409
+  assert client.post("/api/bluetooth/companion_pair").status_code == 409
+  assert client.post("/api/bluetooth/companion_pair_stop").status_code == 409
+  assert FakeBluetoothClient.calls == []
+
+
 def test_bluetooth_api_dispatches_operations(monkeypatch):
   FakeBluetoothClient.calls = []
-  client, _ = _params_client(monkeypatch, {"IsOffroad": True}, "mici")
+  client, _ = _params_client(monkeypatch, {"IsOffroad": True, "BluetoothEnabled": True}, "mici")
   monkeypatch.setattr(the_galaxy, "BluetoothClient", FakeBluetoothClient)
 
   assert client.post("/api/bluetooth/power", json={"enabled": True}).status_code == 200
   assert client.post("/api/bluetooth/select_audio", json={"address": "00:11:22:33:44:55"}).status_code == 200
   assert client.post("/api/bluetooth/select_audio", json={"address": ""}).status_code == 200
+  assert client.post("/api/bluetooth/companion", json={"enabled": True}).status_code == 200
+  assert client.post("/api/bluetooth/companion_pair").status_code == 200
+  assert client.post("/api/bluetooth/companion_pair_stop").status_code == 200
   audio_response = client.post("/api/bluetooth/test_audio", json={"address": "00:11:22:33:44:55"})
   assert audio_response.status_code == 200
   assert audio_response.get_json()["audio_test_delay_ms"] == 3000
@@ -199,6 +223,9 @@ def test_bluetooth_api_dispatches_operations(monkeypatch):
     ("set_power", {"enabled": True}),
     ("select_audio", {"address": "00:11:22:33:44:55"}),
     ("select_audio", {"address": ""}),
+    ("set_companion", {"enabled": True}),
+    ("start_companion_pairing", {}),
+    ("stop_companion_pairing", {}),
     ("test_audio", {"address": "00:11:22:33:44:55"}),
   ]
 

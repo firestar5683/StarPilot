@@ -83,6 +83,41 @@ class NetworkIcon(Widget):
     rl.draw_texture_ex(draw_net_txt, rl.Vector2(draw_x, draw_y), 0.0, 1.0, rl.Color(255, 255, 255, int(255 * 0.9)))
 
 
+class BluetoothIcon(Widget):
+  OFF_COLOR = rl.Color(255, 255, 255, int(255 * 0.4))
+  ON_COLOR = rl.Color(255, 255, 255, int(255 * 0.9))
+  CONNECTED_COLOR = rl.Color(0, 130, 252, int(255 * 0.9))
+
+  def __init__(self):
+    super().__init__()
+    self.set_rect(rl.Rectangle(0, 0, 44, 44))
+    self._txt = gui_app.texture("icons_mici/settings/bluetooth.png", 38, 38)
+    self._enabled = False
+    self._connected = False
+    self._last_poll = 0.0
+
+  def _update_state(self):
+    now = rl.get_time()
+    if now - self._last_poll > 1.0:
+      self._last_poll = now
+      self._enabled = ui_state.params.get_bool("BluetoothEnabled")
+      self._connected = self._enabled and ui_state.params.get_bool("BluetoothConnected")
+
+  def _render(self, _):
+    color = self.CONNECTED_COLOR if self._connected else (self.ON_COLOR if self._enabled else self.OFF_COLOR)
+
+    draw_x = self._rect.x + (self._rect.width - self._txt.width) / 2
+    draw_y = self._rect.y + (self._rect.height - self._txt.height) / 2
+    rl.draw_texture_ex(self._txt, rl.Vector2(draw_x, draw_y), 0.0, 1.0, color)
+
+    if not self._enabled:
+      pad = self._txt.width * 0.08
+      start = rl.Vector2(draw_x + pad, draw_y + pad)
+      end = rl.Vector2(draw_x + self._txt.width - pad, draw_y + self._txt.height - pad)
+      rl.draw_line_ex(start, end, 9.0, rl.Color(0, 0, 0, 255))
+      rl.draw_line_ex(start, end, 4.0, self.OFF_COLOR)
+
+
 class ModeStatusAtom(Widget):
   def __init__(self):
     super().__init__()
@@ -160,8 +195,7 @@ class MiciHomeLayout(Widget):
     self._current_model_name = "default"
 
     self._mode_status_atom = ModeStatusAtom()
-    self._bluetooth_icon = IconWidget("icons_mici/settings/bluetooth.png", (38, 38), opacity=0.9)
-    self._bluetooth_icon.set_visible(False)
+    self._bluetooth_icon = BluetoothIcon()
     self._egpu_icon = IconWidget("icons_mici/egpu.png", (50, 37))
     self._egpu_icon_gray = IconWidget("icons_mici/egpu_gray.png", (50, 37))
     self._mic_icon = IconWidget("icons_mici/microphone.png", (32, 46))
@@ -190,7 +224,6 @@ class MiciHomeLayout(Widget):
 
   def _update_params(self):
     self._experimental_mode = ui_state.params.get_bool("ExperimentalMode")
-    self._bluetooth_icon.set_visible(ui_state.params.get_bool("BluetoothEnabled"))
     self._mode_status_atom.refresh()
 
     def _clean_model_name(value: str) -> str:

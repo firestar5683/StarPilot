@@ -22,7 +22,20 @@ def test_router_and_settings_cache_bust_is_consistent():
   index = INDEX_PATH.read_text(encoding="utf-8")
 
   assert "/assets/components/settings.js?v=router-cycle-fix-5" in router
-  assert "/assets/components/router.js?v=router-cycle-fix-6" in index
+  assert "/assets/components/router.js?v=router-public-path-6" in index
+  assert "/assets/components/tools/bluetooth.js?v=bluetooth-live-15" in router
+  assert "/assets/components/tools/bluetooth.css?v=bluetooth-6" in index
+
+
+def test_public_galaxy_bootstrap_keeps_the_device_path_for_module_imports():
+  index = INDEX_PATH.read_text(encoding="utf-8")
+
+  assert 'window.location.hostname === "galaxy.firestar.link"' in index
+  assert '/^[A-Za-z0-9]{16}$/.test(firstPathSegment)' in index
+  assert 'window.__theGalaxyBasePath = galaxyBasePath' in index
+  assert 'galaxyImportMap.type = "importmap"' in index
+  assert 'JSON.stringify({ imports: { "/assets/": `${galaxyBasePath}/assets/` } })' in index
+  assert '`${window.__theGalaxyBasePath}/assets/components/router.js?v=router-public-path-6`' in index
 
 
 def test_bluetooth_actions_use_reactive_disabled_bindings():
@@ -57,6 +70,24 @@ def test_bluetooth_actions_use_reactive_disabled_bindings():
   assert "const revisionAttribute" in source
   assert 'data-revision="${revision}"' in source
   assert 'bluetooth-live-15' in ROUTER_PATH.read_text(encoding="utf-8")
+  assert "state.enabled && !state.companionDevices.length" in source
+  assert "state.operationError || state.statusError" in source
+  assert "<h3>Phone connection</h3>" in source
+  assert "Open the iPhone app that will connect to StarPilot" in source
+  assert "Tap Connect and choose StarPilot" in source
+  assert "no confirmation slider is shown" in source
+  assert "isCompanionDevice(device) && !device.connected" in source
+  assert "Reconnect from phone" in source
+
+
+def test_bluetooth_device_list_rerenders_when_state_changes():
+  source = BLUETOOTH_PATH.read_text(encoding="utf-8")
+
+  assert "renderDeviceSection(title, icon, devices, emptyText" in source
+  assert 'renderDeviceSection("My Devices", "bi-check2-circle", knownDevices()' in source
+  assert 'renderDeviceSection("Available Devices", "bi-radar", availableDevices()' in source
+  assert "state.deviceSignature !== deviceSignature" in source
+  assert "state.revision++" in source
 
 
 def test_controller_test_mode_has_explicit_start_and_stop():
