@@ -303,6 +303,7 @@ class TestGMInterface:
 
     assert car_params.openpilotLongitudinalControl
     assert not car_params.enableGasInterceptorDEPRECATED
+    assert car_params.minEnableSpeed == pytest.approx(0.0)
     assert list(car_params.longitudinalTuning.kpBP) == pytest.approx([0.0, 5.0, 15.0, 35.0])
     assert list(car_params.longitudinalTuning.kpV) == pytest.approx([0.02, 0.03, 0.028, 0.022])
     assert list(car_params.longitudinalTuning.kiBP) == pytest.approx([0.0, 5.0, 15.0, 35.0])
