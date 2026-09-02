@@ -7,6 +7,7 @@ import numpy as np
 import pytest
 
 from cereal import log
+from openpilot.common.constants import CV
 from opendbc.car.honda.interface import CarInterface
 from opendbc.car.honda.values import CAR
 from opendbc.car.gm.values import CAR as GM_CAR, GMFlags
@@ -653,6 +654,8 @@ def make_toggles(model_version: str = "v11", radar_takeoffs: bool = False):
     model_version=model_version,
     vEgoStopping=0.5,
     radar_takeoffs=radar_takeoffs,
+    conditional_limit=0.0,
+    conditional_limit_lead=0.0,
   )
 
 
@@ -3648,6 +3651,49 @@ def test_experimental_release_accel_transition_damps_moving_lead_handoff():
   )
 
   assert target == pytest.approx(0.09)
+
+
+def test_experimental_release_accel_transition_damps_open_road_cespeed_exit():
+  v_ego = 23.96
+  CP = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
+  planner = LongitudinalPlanner(CP, init_v=v_ego)
+
+  target = planner.get_experimental_release_accel_target(
+    None,
+    v_ego,
+    1.13,
+    prev_output_a_target=0.03,
+    output_a_target=0.44,
+    release_active=True,
+  )
+
+  assert target == pytest.approx(0.09)
+
+
+def test_experimental_speed_handoff_weight_ramps_into_cespeed():
+  CP = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
+  planner = LongitudinalPlanner(CP)
+  toggles = make_toggles()
+  limit = 35.0 * CV.MPH_TO_MS
+  band = longitudinal_planner_module.EXPERIMENTAL_SPEED_HANDOFF_BAND
+  toggles.conditional_limit = limit
+
+  assert planner.get_experimental_speed_handoff_weight(limit - band - 1.0, True, False, toggles, False) == 0.0
+  assert planner.get_experimental_speed_handoff_weight(limit, True, False, toggles, False) == pytest.approx(1.0)
+  assert planner.get_experimental_speed_handoff_weight(limit - 0.5 * band, True, False, toggles, False) == pytest.approx(0.5)
+  assert planner.get_experimental_speed_handoff_weight(limit, True, False, toggles, True) == 0.0
+  assert planner.get_experimental_speed_handoff_weight(limit, False, False, toggles, False) == 0.0
+
+
+def test_experimental_speed_handoff_uses_lead_limit_when_following():
+  CP = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
+  planner = LongitudinalPlanner(CP)
+  toggles = make_toggles()
+  toggles.conditional_limit = 55.0 * CV.MPH_TO_MS
+  toggles.conditional_limit_lead = 20.0 * CV.MPH_TO_MS
+
+  assert planner.get_experimental_speed_handoff_weight(20.0 * CV.MPH_TO_MS, True, True, toggles, False) == pytest.approx(1.0)
+  assert planner.get_experimental_speed_handoff_weight(20.0 * CV.MPH_TO_MS, True, False, toggles, False) == 0.0
 
 
 def test_experimental_release_accel_transition_does_not_mask_stopped_lead():

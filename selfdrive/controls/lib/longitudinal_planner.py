@@ -282,13 +282,12 @@ EXPERIMENTAL_RELEASE_ACCEL_LOW_SPEED_THRESHOLD = 12.0
 EXPERIMENTAL_RELEASE_ACCEL_MIN_SPEED = 2.5
 EXPERIMENTAL_RELEASE_ACCEL_MIN_LEAD_SPEED = 5.0
 EXPERIMENTAL_RELEASE_ACCEL_MIN_LEAD_DELTA = -1.0
-EXPERIMENTAL_RELEASE_ACCEL_MAX_LEAD_DELTA = 1.5
 EXPERIMENTAL_RELEASE_ACCEL_MAX_LEAD_BRAKE = 0.2
-EXPERIMENTAL_RELEASE_ACCEL_MIN_MODEL_PROB = 0.9
-EXPERIMENTAL_RELEASE_ACCEL_MAX_LATERAL_OFFSET = 1.5
-EXPERIMENTAL_RELEASE_ACCEL_MIN_HEADWAY_MARGIN = 0.0
 EXPERIMENTAL_RELEASE_ACCEL_MIN_DELTA_A = 0.12
 EXPERIMENTAL_RELEASE_ACCEL_STEP = 0.06
+# Last few mph below CESpeed/CESpeedLead: mix MPC back in so experimental
+# cannot crawl into the breakpoint and then snap to ACC.
+EXPERIMENTAL_SPEED_HANDOFF_BAND = 5.0 * CV.MPH_TO_MS
 MATCHED_FOLLOW_TRANSITION_MIN_SPEED = 20.0
 TRACKED_VISION_MODEL_FLOOR_MIN_SPEED = 10.0
 TRACKED_VISION_MODEL_FLOOR_MIN_MODEL_PROB = 0.95
@@ -1766,30 +1765,41 @@ class LongitudinalPlanner:
       self.experimental_release_accel_until = 0.0
     self.prev_experimental_mode = bool(experimental_mode)
 
+  def get_experimental_speed_handoff_weight(self, v_ego, experimental_mode, following_lead,
+                                            starpilot_toggles, hold_experimental):
+    if not experimental_mode or hold_experimental:
+      return 0.0
+
+    limit_key = "conditional_limit_lead" if following_lead else "conditional_limit"
+    limit = float(getattr(starpilot_toggles, limit_key, 0.0) or 0.0)
+    if limit <= 1.0:
+      return 0.0
+
+    return float(np.clip(
+      (float(v_ego) - (limit - EXPERIMENTAL_SPEED_HANDOFF_BAND)) / EXPERIMENTAL_SPEED_HANDOFF_BAND,
+      0.0,
+      1.0,
+    ))
+
   def get_experimental_release_accel_target(self, lead, v_ego, base_t_follow,
                                             prev_output_a_target, output_a_target,
                                             release_active):
-    if not release_active or lead is None or not lead.status or v_ego < EXPERIMENTAL_RELEASE_ACCEL_MIN_SPEED:
+    if not release_active or v_ego < EXPERIMENTAL_RELEASE_ACCEL_MIN_SPEED:
       return None
 
-    lead_speed = float(lead.vLead)
-    lead_delta = lead_speed - float(v_ego)
-    lead_brake = max(0.0, -float(getattr(lead, "aLeadK", 0.0)))
-    lead_radar = bool(getattr(lead, "radar", False))
-    lead_prob = float(getattr(lead, "modelProb", 1.0 if lead_radar else 0.0))
-    actual_headway = float(lead.dRel) / max(float(v_ego), 1e-3)
-    if lead_speed < EXPERIMENTAL_RELEASE_ACCEL_MIN_LEAD_SPEED:
-      return None
-    if not (EXPERIMENTAL_RELEASE_ACCEL_MIN_LEAD_DELTA <= lead_delta <= EXPERIMENTAL_RELEASE_ACCEL_MAX_LEAD_DELTA):
-      return None
-    if lead_brake > EXPERIMENTAL_RELEASE_ACCEL_MAX_LEAD_BRAKE:
-      return None
-    if not lead_radar and lead_prob < EXPERIMENTAL_RELEASE_ACCEL_MIN_MODEL_PROB:
-      return None
-    if abs(float(getattr(lead, "yRel", 0.0))) > EXPERIMENTAL_RELEASE_ACCEL_MAX_LATERAL_OFFSET:
-      return None
-    if actual_headway < float(base_t_follow) + EXPERIMENTAL_RELEASE_ACCEL_MIN_HEADWAY_MARGIN:
-      return None
+    # Only veto comfort slewing for a real closing/stopped/braking lead. Open-road
+    # CESpeed exits and unmatched distant leads used to skip this path and floor.
+    if lead is not None and bool(getattr(lead, "status", False)):
+      lead_speed = float(lead.vLead)
+      lead_delta = lead_speed - float(v_ego)
+      lead_brake = max(0.0, -float(getattr(lead, "aLeadK", 0.0)))
+      if lead_speed < EXPERIMENTAL_RELEASE_ACCEL_MIN_LEAD_SPEED:
+        return None
+      if lead_delta < EXPERIMENTAL_RELEASE_ACCEL_MIN_LEAD_DELTA:
+        return None
+      if lead_brake > EXPERIMENTAL_RELEASE_ACCEL_MAX_LEAD_BRAKE:
+        return None
+
     if float(output_a_target) - float(prev_output_a_target) < EXPERIMENTAL_RELEASE_ACCEL_MIN_DELTA_A:
       return None
 
@@ -2394,6 +2404,19 @@ class LongitudinalPlanner:
       else:
         output_a_target = min(output_a_target_mpc, output_a_target_e2e)
         output_should_stop = output_should_stop_e2e or output_should_stop_mpc
+        speed_handoff = self.get_experimental_speed_handoff_weight(
+          scene_v_ego,
+          experimental_mode,
+          lead_one_active,
+          starpilot_toggles,
+          bool(
+            output_should_stop_e2e or
+            getattr(sm['starpilotPlan'], 'forcingStop', False) or
+            getattr(sm['starpilotPlan'], 'redLight', False)
+          ),
+        )
+        if speed_handoff > 0.0:
+          output_a_target = (1.0 - speed_handoff) * output_a_target + speed_handoff * output_a_target_mpc
     else:
       output_a_target, output_should_stop = get_accel_from_plan(
         self.v_desired_trajectory, self.a_desired_trajectory,

@@ -134,9 +134,6 @@ class LongControl:
   def update_mpc_mode(self, experimental_mode):
     new_mode = 'blended' if experimental_mode else 'acc'
 
-    if self.transitioning and self.prev_mode == 'blended' and self.current_mode == 'acc':
-      self.mode_transition_timer = 0.0
-
     if new_mode != self.current_mode:
       self.prev_mode = self.current_mode
       self.transitioning = True
@@ -320,6 +317,9 @@ class LongControl:
       freeze_integrator = self.vehicle_tuning.get_integrator_freeze(
         self.last_output_accel, a_target, error, CS.vEgo, accel_limits,
       )
+      leaving_experimental = self.transitioning and self.prev_mode == 'blended' and self.current_mode == 'acc'
+      if leaving_experimental:
+        freeze_integrator = True
       raw_output_accel = self.pid.update(error, speed=CS.vEgo, feedforward=feedforward,
                                          freeze_integrator=freeze_integrator)
       raw_output_accel = self._cap_positive_output_on_negative_target(raw_output_accel, a_target, error, CS)
@@ -337,7 +337,13 @@ class LongControl:
         raw_output_accel, CS.vEgo, should_stop, leads,
       )
 
-      if self.transitioning and self.prev_mode == 'acc' and self.current_mode == 'blended':
+      if leaving_experimental:
+        if raw_output_accel > self.last_output_accel:
+          progress = min(1.0, self.mode_transition_timer / max(self.mode_transition_duration, 1e-3))
+          output_accel = self.last_output_accel + (raw_output_accel - self.last_output_accel) * progress
+        else:
+          output_accel = raw_output_accel
+      elif self.transitioning and self.prev_mode == 'acc' and self.current_mode == 'blended':
         if raw_output_accel < 0 and raw_output_accel < self.last_output_accel:
           progress = min(1.0, self.mode_transition_timer / self.mode_transition_duration)
           # Soften transition at low urgency, but keep sharp for high decel
