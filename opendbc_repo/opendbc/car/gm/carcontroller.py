@@ -172,7 +172,7 @@ def should_send_cc_button_spam(CP, CC, CS):
   return (
     bool(CP.flags & GMFlags.CC_LONG.value) and
     CC.longActive and
-    CS.out.vEgo > CP.minEnableSpeed
+    CS.out.vEgo >= CP.minEnableSpeed
   )
 
 

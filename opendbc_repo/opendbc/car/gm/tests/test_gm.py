@@ -628,6 +628,13 @@ class TestGMCarController:
     assert not should_send_cc_button_spam(SimpleNamespace(flags=GMFlags.CC_LONG.value, minEnableSpeed=10.0), cc, cs)
     assert not should_send_cc_button_spam(SimpleNamespace(flags=0, minEnableSpeed=10.0), cc, cs)
 
+  def test_cc_button_spam_allows_standstill_when_min_enable_is_zero(self):
+    cp = SimpleNamespace(flags=GMFlags.CC_LONG.value, minEnableSpeed=0.0)
+    cc = SimpleNamespace(longActive=True)
+    cs = SimpleNamespace(out=SimpleNamespace(vEgo=0.0, cruiseState=SimpleNamespace(enabled=False)))
+
+    assert should_send_cc_button_spam(cp, cc, cs)
+
   def test_volt_cc_redneck_spam_is_mirrored_to_camera_bus(self):
     packer = CANPacker(DBC[CAR.CHEVROLET_VOLT_CC][Bus.pt])
     controller = SimpleNamespace(frame=int(0.3 / DT_CTRL), last_button_frame=0, apply_speed=0, malibu_button_phase=0)
