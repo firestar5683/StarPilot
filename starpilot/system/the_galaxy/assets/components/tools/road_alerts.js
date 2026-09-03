@@ -313,10 +313,44 @@ export function RoadAlerts() {
         <div class="card-content-wrapper">
           <p class="text-muted small mb-3">Automatically drop vehicle cruise target down to the posted road speed limit when approaching verified hazards or police traps:</p>
 
-          <!-- Waze Police Auto-Slowdown Section -->
+          <!-- 1. Minimum Confirmations (Global for crowd-sourced Waze reports) -->
           <div class="road-setting-row">
             <div class="road-setting-info">
-              <span class="road-setting-label">🚨 Auto-Slowdown on Waze Police Ahead</span>
+              <span class="road-setting-label">Minimum Confirmations</span>
+              <span class="road-setting-desc">Minimum driver thumbs-up reports required for crowd-sourced Waze slowdown alerts</span>
+            </div>
+            <select class="road-select" 
+                    value="${() => String(Number(state.settings.WazePoliceMinConfirmations || 3))}"
+                    @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('WazePoliceMinConfirmations', parseInt(el.value, 10)); }}">
+              <option value="1" selected="${() => Number(state.settings.WazePoliceMinConfirmations) === 1}">1+ Report (Most Sensitive)</option>
+              <option value="2" selected="${() => Number(state.settings.WazePoliceMinConfirmations) === 2}">2+ Reports</option>
+              <option value="3" selected="${() => Number(state.settings.WazePoliceMinConfirmations) === 3}">3+ Reports (Recommended)</option>
+              <option value="5" selected="${() => Number(state.settings.WazePoliceMinConfirmations) === 5}">5+ Reports (High Confidence)</option>
+              <option value="10" selected="${() => Number(state.settings.WazePoliceMinConfirmations) === 10}">10+ Reports (Verified Only)</option>
+            </select>
+          </div>
+
+          <!-- 2. Trigger Distance (Global for all slowdown alerts) -->
+          <div class="road-setting-row">
+            <div class="road-setting-info">
+              <span class="road-setting-label">Trigger Distance</span>
+              <span class="road-setting-desc">Distance ahead to begin slowing down to road speed limit for upcoming alerts</span>
+            </div>
+            <select class="road-select" 
+                    value="${() => String(Number(state.settings.WazePoliceTriggerDistance || 1))}"
+                    @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('WazePoliceTriggerDistance', parseFloat(el.value)); }}">
+              <option value="0.5" selected="${() => Number(state.settings.WazePoliceTriggerDistance) === 0.5}">0.5 Miles</option>
+              <option value="0.75" selected="${() => Number(state.settings.WazePoliceTriggerDistance) === 0.75}">0.75 Miles</option>
+              <option value="1" selected="${() => Number(state.settings.WazePoliceTriggerDistance) === 1 || Number(state.settings.WazePoliceTriggerDistance) === 1.0}">1.0 Mile (Recommended)</option>
+              <option value="1.5" selected="${() => Number(state.settings.WazePoliceTriggerDistance) === 1.5}">1.5 Miles</option>
+              <option value="2" selected="${() => Number(state.settings.WazePoliceTriggerDistance) === 2 || Number(state.settings.WazePoliceTriggerDistance) === 2.0}">2.0 Miles</option>
+            </select>
+          </div>
+
+          <!-- 3. Slowdown for Police Ahead -->
+          <div class="road-setting-row">
+            <div class="road-setting-info">
+              <span class="road-setting-label">🚨 Slowdown for Police Ahead</span>
               <span class="road-setting-desc">Automatically drop cruise speed to posted speed limit when approaching verified police traps</span>
             </div>
             <label class="road-switch">
@@ -327,43 +361,11 @@ export function RoadAlerts() {
             </label>
           </div>
 
-          <div class="road-setting-row">
-            <div class="road-setting-info">
-              <span class="road-setting-label">Minimum Confirmations (Police)</span>
-              <span class="road-setting-desc">Minimum driver thumbs-up reports required to trigger police auto-slowdown</span>
-            </div>
-            <select class="road-select" 
-                    value="${() => String(state.settings.WazePoliceMinConfirmations)}"
-                    @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('WazePoliceMinConfirmations', parseInt(el.value, 10)); }}">
-              <option value="1" selected="${() => Number(state.settings.WazePoliceMinConfirmations) === 1}">1+ Report (Most Sensitive)</option>
-              <option value="2" selected="${() => Number(state.settings.WazePoliceMinConfirmations) === 2}">2+ Reports</option>
-              <option value="3" selected="${() => Number(state.settings.WazePoliceMinConfirmations) === 3}">3+ Reports (Recommended)</option>
-              <option value="5" selected="${() => Number(state.settings.WazePoliceMinConfirmations) === 5}">5+ Reports (High Confidence)</option>
-              <option value="10" selected="${() => Number(state.settings.WazePoliceMinConfirmations) === 10}">10+ Reports (Verified Only)</option>
-            </select>
-          </div>
-
-          <div class="road-setting-row">
-            <div class="road-setting-info">
-              <span class="road-setting-label">Trigger Distance (Police)</span>
-              <span class="road-setting-desc">Distance ahead to begin slowing down to road speed limit</span>
-            </div>
-            <select class="road-select" 
-                    value="${() => String(state.settings.WazePoliceTriggerDistance)}"
-                    @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('WazePoliceTriggerDistance', parseFloat(el.value)); }}">
-              <option value="0.5" selected="${() => Number(state.settings.WazePoliceTriggerDistance) === 0.5}">0.5 Miles</option>
-              <option value="0.75" selected="${() => Number(state.settings.WazePoliceTriggerDistance) === 0.75}">0.75 Miles</option>
-              <option value="1.0" selected="${() => Number(state.settings.WazePoliceTriggerDistance) === 1.0}">1.0 Mile (Recommended)</option>
-              <option value="1.5" selected="${() => Number(state.settings.WazePoliceTriggerDistance) === 1.5}">1.5 Miles</option>
-              <option value="2.0" selected="${() => Number(state.settings.WazePoliceTriggerDistance) === 2.0}">2.0 Miles</option>
-            </select>
-          </div>
-
-          <!-- Road Hazard Category Slowdowns (Within 0.5 mi) -->
+          <!-- 4. Road Hazard Category Slowdowns -->
           <div class="road-setting-row">
             <div class="road-setting-info">
               <span class="road-setting-label">💥 Slowdown for Major Accidents</span>
-              <span class="road-setting-desc">Drop to road speed limit when within 0.5 mi of major injury collisions / SigAlerts</span>
+              <span class="road-setting-desc">Drop to road speed limit when within trigger distance of major injury collisions / SigAlerts</span>
             </div>
             <label class="road-switch">
               <input type="checkbox" 
@@ -376,7 +378,7 @@ export function RoadAlerts() {
           <div class="road-setting-row">
             <div class="road-setting-info">
               <span class="road-setting-label">🚗 Slowdown for Minor Accidents</span>
-              <span class="road-setting-desc">Drop to road speed limit when within 0.5 mi of minor collisions</span>
+              <span class="road-setting-desc">Drop to road speed limit when within trigger distance of minor collisions</span>
             </div>
             <label class="road-switch">
               <input type="checkbox" 
@@ -389,7 +391,7 @@ export function RoadAlerts() {
           <div class="road-setting-row">
             <div class="road-setting-info">
               <span class="road-setting-label">⚠️ Slowdown for Debris & Road Hazards</span>
-              <span class="road-setting-desc">Drop to road speed limit when within 0.5 mi of debris in lane, stalled vehicles, or vehicle fires</span>
+              <span class="road-setting-desc">Drop to road speed limit when within trigger distance of debris in lane, stalled vehicles, or vehicle fires</span>
             </div>
             <label class="road-switch">
               <input type="checkbox" 
@@ -402,7 +404,7 @@ export function RoadAlerts() {
           <div class="road-setting-row">
             <div class="road-setting-info">
               <span class="road-setting-label">⛔ Slowdown for Road & Lane Closures</span>
-              <span class="road-setting-desc">Drop to road speed limit when within 0.5 mi of active Caltrans lane/ramp closures</span>
+              <span class="road-setting-desc">Drop to road speed limit when within trigger distance of active Caltrans lane/ramp closures</span>
             </div>
             <label class="road-switch">
               <input type="checkbox" 
@@ -415,7 +417,7 @@ export function RoadAlerts() {
           <div class="road-setting-row">
             <div class="road-setting-info">
               <span class="road-setting-label">🌧️ Slowdown for Severe Weather</span>
-              <span class="road-setting-desc">Drop to road speed limit when within 0.5 mi of fog/snow/ice warnings</span>
+              <span class="road-setting-desc">Drop to road speed limit when within trigger distance of fog/snow/ice/flooding warnings</span>
             </div>
             <label class="road-switch">
               <input type="checkbox" 

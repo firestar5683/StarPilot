@@ -552,7 +552,7 @@ class RoadAlertsDaemon:
             set_shm_param("WazePoliceSlowdownActive", police_active)
             set_shm_param("WazePoliceSlowdownDist", police_dist)
 
-            # 2. Hazard Auto-Slowdown (Major Accidents, Minor Accidents, Debris, Closures, Weather within 0.5 miles)
+            # 2. Hazard Auto-Slowdown (Major Accidents, Minor Accidents, Debris, Closures, Weather within trigger distance)
             slowdown_major_acc = get_shm_param("RoadAlertSlowdownMajorAccidents", True)
             slowdown_minor_acc = get_shm_param("RoadAlertSlowdownMinorAccidents", False)
             slowdown_debris = get_shm_param("RoadAlertSlowdownDebris", True)
@@ -563,7 +563,14 @@ class RoadAlertsDaemon:
             for u in upcoming:
                 cat = u.get("category", "")
                 dist = u.get("distance_miles", 99.0)
-                if dist <= 0.5:
+                source = u.get("source", "")
+                thumbs = u.get("thumbs", 0)
+
+                # Global minimum confirmations filter on crowd-sourced Waze alerts
+                if source == "Waze" and thumbs < min_confirmations:
+                    continue
+
+                if dist <= trigger_distance:
                     if cat == "ACCIDENT_MAJOR" and slowdown_major_acc:
                         hazard_slowdown_active = True
                         break
