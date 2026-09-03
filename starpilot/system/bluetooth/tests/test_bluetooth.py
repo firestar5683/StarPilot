@@ -22,13 +22,18 @@ from openpilot.starpilot.system.bluetooth.companion import (
 )
 from openpilot.starpilot.system.bluetooth.daemon import COMPANION_BOND_SETTLE_INTERVAL, BluetoothController
 from openpilot.starpilot.system.bluetooth.live import (
-  LIVE_FRAME_MAGIC, LIVE_FRAME_RATE_HZ, LIVE_FRAME_SIZE, LIVE_NOTIFICATION_FRAGMENT_COUNT, LIVE_NOTIFICATION_SIZE,
-  LIVE_PROTOCOL_VERSION, BorderState, ConditionalChillReason, LiveFlags, LiveSnapshot, LiveTelemetryPublisher, ModelSource,
-  build_live_details, build_live_snapshot, live_notification_fragments,
+  LIVE_FRAME_MAGIC, LIVE_FRAME_RATE_HZ, LIVE_FRAME_SIZE, LIVE_FRAME_TYPE_HEALTH, LIVE_FRAME_TYPE_PATH,
+  LIVE_FRAME_TYPE_STATE, LIVE_HEALTH_FRAME_RATE_HZ, LIVE_HEALTH_TICK_DIVISOR, LIVE_NOTIFICATION_FRAGMENT_COUNT,
+  LIVE_NOTIFICATION_SIZE, LIVE_PATH_FRAME_RATE_HZ, LIVE_PATH_TICK_PATTERN, LIVE_PROTOCOL_VERSION,
+  LIVE_TOTAL_FRAME_RATE_HZ, LIVE_TOTAL_NOTIFICATION_RATE_HZ,
+  BorderState, ConditionalChillReason, HealthFlags, LiveFlags,
+  LiveSnapshot, LiveTelemetryPublisher, ModelSource, build_health_snapshot, build_live_details, build_live_snapshot,
+  build_path_snapshot, live_notification_fragments,
 )
 from openpilot.starpilot.system.bluetooth.protocol import (A2DP_SINK_UUID, HID_UUID, BluetoothClient, BluetoothDevice, BluetoothStatus,
                                                            device_capabilities, show_pairing_device)
 from openpilot.starpilot.system.bluetooth.radio import BluetoothRadio
+from openpilot.selfdrive.ui.lib.starpilot_version import STARPILOT_DISPLAY_VERSION
 from openpilot.system import hardware
 from openpilot.system.ui.lib.bluetooth_manager import BluetoothManager, companion_setup_visible
 
@@ -286,10 +291,13 @@ def test_protocol_round_trip_and_capabilities():
 
 
 def test_companion_protocol_is_read_only_and_versioned():
-  params = FakeParams(IsOffroad=True, Version="0.10", GitBranch="Dom")
+  params = FakeParams(IsOffroad=True, GitBranch="Dom")
   protocol = CompanionProtocol(params, clock=lambda: 1234.9)
 
   status = json.loads(protocol.status_bytes())
+  assert LIVE_PATH_FRAME_RATE_HZ == 4
+  assert LIVE_TOTAL_FRAME_RATE_HZ == 16
+  assert LIVE_TOTAL_NOTIFICATION_RATE_HZ == 64
   assert status == {
     "branch": "Dom",
     "device": "StarPilot",
@@ -300,10 +308,15 @@ def test_companion_protocol_is_read_only_and_versioned():
       "notification_fragments": LIVE_NOTIFICATION_FRAGMENT_COUNT,
       "notification_size": LIVE_NOTIFICATION_SIZE,
       "uuid": COMPANION_LIVE_UUID,
+      "frame_types": [LIVE_FRAME_TYPE_STATE, LIVE_FRAME_TYPE_HEALTH, LIVE_FRAME_TYPE_PATH],
+      "health_rate_hz": LIVE_HEALTH_FRAME_RATE_HZ,
+      "path_rate_hz": LIVE_PATH_FRAME_RATE_HZ,
+      "total_rate_hz": LIVE_TOTAL_FRAME_RATE_HZ,
+      "notification_rate_hz": LIVE_TOTAL_NOTIFICATION_RATE_HZ,
     },
     "onroad": False,
     "protocol_version": COMPANION_PROTOCOL_VERSION,
-    "version": "0.10",
+    "version": STARPILOT_DISPLAY_VERSION,
   }
   assert json.loads(protocol.handle(b'{"id":"one","op":"ping"}')) == {
     "data": {"time": 1234}, "id": "one", "ok": True, "op": "ping",
@@ -463,6 +476,127 @@ def test_live_publisher_sequences_frames():
 
   assert [struct.unpack_from("<H", frame, 6)[0] for frame in frames] == [0, 1]
   assert all(struct.unpack_from("<I", frame, 8)[0] == 12345 for frame in frames)
+
+
+def test_health_snapshot_packs_device_state_and_flags():
+  params = FakeParams(IsOffroad=False)
+  monotonic_ns = 100_000_000_000
+  sm = FakeSubMaster(
+    deviceState=SimpleNamespace(
+      started=True,
+      cpuUsagePercent=[10, 55, 30, 40], gpuUsagePercent=42, memoryUsagePercent=61, freeSpacePercent=73.4,
+      cpuTempC=[48.5, 51.2], gpuTempC=[44.0], memoryTempC=47.5, maxTempC=52.0, intakeTempC=33.0,
+      thermalStatus=0, fanSpeedPercentDesired=30, powerDrawW=12.5, somPowerDrawW=8.25,
+      carBatteryCapacityUwh=20_000_000, screenBrightnessPercent=80,
+      networkType=1, networkStrength=4, networkMetered=False,
+      lastAthenaPingTime=monotonic_ns - 10_000_000_000,
+    ),
+  )
+
+  snapshot = build_health_snapshot(sm, params, monotonic_ns)
+  frame = snapshot.pack(321, 0x0BADCAFE)
+
+  assert len(frame) == LIVE_FRAME_SIZE
+  assert struct.unpack_from("<2sBBHHII", frame) == (
+    LIVE_FRAME_MAGIC, LIVE_PROTOCOL_VERSION, LIVE_FRAME_TYPE_HEALTH, LIVE_FRAME_SIZE, 321, 0x0BADCAFE, snapshot.flags,
+  )
+  payload = struct.unpack_from("<4B5h2B3H4BI18x", frame, 16)
+  assert payload == (55, 42, 61, 73, 512, 440, 475, 520, 330, 0, 30, 1250, 825, 200, 80, 1, 4, 0, 100)
+
+  flags = HealthFlags(snapshot.flags)
+  for expected in (HealthFlags.ONROAD, HealthFlags.WIFI_CONNECTED, HealthFlags.LOCAL_NON_METERED_LINK,
+                   HealthFlags.THERMAL_OK, HealthFlags.FAN_ACTIVE, HealthFlags.CLOUD_PINGED):
+    assert flags & expected
+  for absent in (HealthFlags.OFFROAD, HealthFlags.NETWORK_METERED, HealthFlags.CELLULAR_CONNECTED,
+                 HealthFlags.THERMAL_OVERHEATED, HealthFlags.THERMAL_CRITICAL, HealthFlags.LOW_STORAGE):
+    assert not flags & absent
+  assert not snapshot.flags & (1 << 12)  # reserved and intentionally unused
+
+  fragments = live_notification_fragments(frame)
+  assert len(fragments) == LIVE_NOTIFICATION_FRAGMENT_COUNT
+  assert b"".join(fragment[4:] for fragment in fragments) == frame
+
+
+def test_health_snapshot_reports_offroad_metered_and_low_storage():
+  params = FakeParams(IsOffroad=True)
+  sm = FakeSubMaster(
+    deviceState=SimpleNamespace(
+      started=False, freeSpacePercent=4.0, thermalStatus=2, fanSpeedPercentDesired=0,
+      networkType=4, networkStrength=2, networkMetered=True, carBatteryCapacityUwh=0,
+    ),
+  )
+
+  snapshot = build_health_snapshot(sm, params)
+  flags = HealthFlags(snapshot.flags)
+
+  assert flags & HealthFlags.OFFROAD
+  assert flags & HealthFlags.NETWORK_METERED
+  assert flags & HealthFlags.CELLULAR_CONNECTED
+  assert flags & HealthFlags.THERMAL_OVERHEATED
+  assert flags & HealthFlags.LOW_STORAGE
+  assert not flags & HealthFlags.ONROAD
+  assert not flags & HealthFlags.LOCAL_NON_METERED_LINK  # cellular + metered → no local non-metered link
+  assert not flags & HealthFlags.FAN_ACTIVE
+
+
+def test_path_snapshot_packs_polynomial_and_reassembles_frame():
+  sm = FakeSubMaster(
+    drivingModelData=SimpleNamespace(
+      path=SimpleNamespace(yCoefficients=[0.1, 0.02, -0.003, 0.0004, 0.00005], xCoefficients=[1.0, 2.0, 3.0, 4.0, 5.0]),
+      meta=SimpleNamespace(laneChangeState=1, laneChangeDirection=2),
+      action=SimpleNamespace(desiredCurvature=0.0123),
+    ),
+    controlsState=SimpleNamespace(desiredCurvature=0.0),
+  )
+
+  snapshot = build_path_snapshot(sm)
+  frame = snapshot.pack(64, 0x00C0FFEE)
+
+  assert len(frame) == LIVE_FRAME_SIZE
+  assert struct.unpack_from("<2sBBHHII", frame) == (
+    LIVE_FRAME_MAGIC, LIVE_PROTOCOL_VERSION, LIVE_FRAME_TYPE_PATH, LIVE_FRAME_SIZE, 64, 0x00C0FFEE, 0,
+  )
+  curvature, ny, nx, lane_dir, lane_state = struct.unpack_from("<iBBBB", frame, 16)
+  assert (curvature, ny, nx, lane_dir, lane_state) == (12300, 5, 5, 2, 1)
+  y_coeffs = struct.unpack_from(f"<{ny}f", frame, 24)
+  x_coeffs = struct.unpack_from(f"<{nx}f", frame, 24 + 4 * ny)
+  assert y_coeffs == pytest.approx([0.1, 0.02, -0.003, 0.0004, 0.00005], abs=1e-6)
+  assert x_coeffs == pytest.approx([1.0, 2.0, 3.0, 4.0, 5.0])
+  fragments = live_notification_fragments(frame)
+  assert b"".join(fragment[4:] for fragment in fragments) == frame
+  assert frame[24 + 4 * (ny + nx):] == b"\x00" * (LIVE_FRAME_SIZE - 24 - 4 * (ny + nx))
+
+
+def test_path_snapshot_falls_back_to_controls_state_curvature():
+  sm = FakeSubMaster(controlsState=SimpleNamespace(desiredCurvature=-0.05))
+  snapshot = build_path_snapshot(sm)
+  frame = snapshot.pack(1, 0)
+
+  curvature, ny, nx, _dir, _state = struct.unpack_from("<iBBBB", frame, 16)
+  assert curvature == -50000 and ny == 0 and nx == 0
+
+
+def test_live_publisher_interleaves_frame_types_on_one_sequence():
+  publisher = LiveTelemetryPublisher(lambda _frame: None, FakeParams(), FakeParams(), monotonic=lambda: 1.0)
+  sm = FakeSubMaster()
+
+  state = publisher.publish_once(sm)
+  path = publisher.publish_path_once(sm)
+  health = publisher.publish_health_once(sm)
+
+  assert [frame[3] for frame in (state, path, health)] == [LIVE_FRAME_TYPE_STATE, LIVE_FRAME_TYPE_PATH, LIVE_FRAME_TYPE_HEALTH]
+  assert [struct.unpack_from("<H", frame, 6)[0] for frame in (state, path, health)] == [0, 1, 2]
+  assert all(len(frame) == LIVE_FRAME_SIZE for frame in (state, path, health))
+
+
+def test_live_optional_frame_slots_match_rates_without_collisions():
+  health_slots = {tick for tick in range(LIVE_FRAME_RATE_HZ) if tick % LIVE_HEALTH_TICK_DIVISOR == 0}
+  path_slots = set(LIVE_PATH_TICK_PATTERN)
+
+  assert len(path_slots) == LIVE_PATH_FRAME_RATE_HZ
+  assert path_slots.isdisjoint(health_slots)
+  assert all(0 <= tick < LIVE_FRAME_RATE_HZ for tick in path_slots)
+  assert LIVE_TOTAL_FRAME_RATE_HZ == LIVE_FRAME_RATE_HZ + LIVE_HEALTH_FRAME_RATE_HZ + LIVE_PATH_FRAME_RATE_HZ
 
 
 def test_companion_gatt_contract_requires_authenticated_characteristics():

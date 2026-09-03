@@ -17,13 +17,41 @@ from openpilot.common.swaglog import cloudlog
 
 LIVE_PROTOCOL_VERSION = 1
 LIVE_FRAME_TYPE_STATE = 1
+LIVE_FRAME_TYPE_HEALTH = 2
+LIVE_FRAME_TYPE_PATH = 3
 LIVE_FRAME_RATE_HZ = 10
+# The health frame tracks deviceState (~2 Hz), emitted every Nth tick of the 10 Hz loop.
+LIVE_HEALTH_TICK_DIVISOR = LIVE_FRAME_RATE_HZ // 2
+LIVE_HEALTH_FRAME_RATE_HZ = LIVE_FRAME_RATE_HZ // LIVE_HEALTH_TICK_DIVISOR
+# Four Hz keeps the optional path stream useful while bounding BLE notification load. These
+# slots are disjoint from the health ticks (0 and 5 modulo 10), avoiding optional-frame bursts.
+LIVE_PATH_FRAME_RATE_HZ = 4
+LIVE_PATH_TICK_PATTERN = (1, 3, 6, 8)
 LIVE_FRAME_SIZE = 64
 LIVE_FRAME_MAGIC = b"SP"
 LIVE_NOTIFICATION_SIZE = 20
 LIVE_NOTIFICATION_HEADER_SIZE = 4
 LIVE_NOTIFICATION_PAYLOAD_SIZE = LIVE_NOTIFICATION_SIZE - LIVE_NOTIFICATION_HEADER_SIZE
 LIVE_NOTIFICATION_FRAGMENT_COUNT = LIVE_FRAME_SIZE // LIVE_NOTIFICATION_PAYLOAD_SIZE
+LIVE_TOTAL_FRAME_RATE_HZ = LIVE_FRAME_RATE_HZ + LIVE_HEALTH_FRAME_RATE_HZ + LIVE_PATH_FRAME_RATE_HZ
+LIVE_TOTAL_NOTIFICATION_RATE_HZ = LIVE_TOTAL_FRAME_RATE_HZ * LIVE_NOTIFICATION_FRAGMENT_COUNT
+
+# Path frame keeps the production degree-4 polynomial in one frame; each axis has five
+# coefficients and the scalars + float32 coefficients exactly fill the 48-byte payload.
+LIVE_PATH_MAX_Y_COEFFS = 5
+LIVE_PATH_MAX_X_COEFFS = 5
+
+# Below this free-storage percentage the health frame raises the low-storage flag.
+LIVE_LOW_STORAGE_PERCENT = 10
+# An Athena ping newer than this many seconds counts as a fresh cloud contact.
+LIVE_ATHENA_FRESH_S = 70.0
+
+NETWORK_TYPE_CELLULAR = (2, 3, 4, 5)
+NETWORK_TYPE_WIFI = 1
+NETWORK_TYPE_ETHERNET = 6
+THERMAL_STATUS_OK = 0
+THERMAL_STATUS_OVERHEATED = 2
+THERMAL_STATUS_CRITICAL = 3
 
 
 class LiveFlags(IntFlag):
@@ -59,6 +87,23 @@ class LiveFlags(IntFlag):
   METRIC = 1 << 29
   OVERRIDING = 1 << 30
   RED_LIGHT = 1 << 31
+
+
+class HealthFlags(IntFlag):
+  ONROAD = 1 << 0
+  OFFROAD = 1 << 1
+  NETWORK_METERED = 1 << 2
+  WIFI_CONNECTED = 1 << 3
+  ETHERNET_CONNECTED = 1 << 4
+  CELLULAR_CONNECTED = 1 << 5
+  # Device has a non-metered Wi-Fi/Ethernet link; the phone must still verify local reachability.
+  LOCAL_NON_METERED_LINK = 1 << 6
+  THERMAL_OK = 1 << 7
+  THERMAL_OVERHEATED = 1 << 8
+  THERMAL_CRITICAL = 1 << 9
+  FAN_ACTIVE = 1 << 10
+  LOW_STORAGE = 1 << 11
+  CLOUD_PINGED = 1 << 13
 
 
 class CruiseState(IntEnum):
@@ -179,6 +224,41 @@ def _finite(value: Any, default: float = 0.0) -> float:
 
 def _scaled(value: Any, scale: float, low: int, high: int) -> int:
   return min(high, max(low, round(_finite(value) * scale)))
+
+
+def _max_finite(values: Any, default: float = 0.0) -> float:
+  """Reduce a capnp list (or scalar) to the max of its finite values."""
+  try:
+    finite = [float(v) for v in values if math.isfinite(float(v))]
+  except (TypeError, ValueError):
+    return _finite(values, default)
+  return max(finite) if finite else default
+
+
+def _float_list(values: Any, limit: int) -> tuple[float, ...]:
+  """Read up to ``limit`` finite floats from a capnp list."""
+  result: list[float] = []
+  try:
+    for value in values:
+      result.append(_finite(value))
+      if len(result) >= limit:
+        break
+  except TypeError:
+    return ()
+  return tuple(result)
+
+
+def _pack_live_header(frame_type: int, sequence: int, monotonic_ms: int, flags: int) -> bytes:
+  return struct.pack(
+    "<2sBBHHII",
+    LIVE_FRAME_MAGIC,
+    LIVE_PROTOCOL_VERSION,
+    int(frame_type) & 0xFF,
+    LIVE_FRAME_SIZE,
+    int(sequence) & 0xFFFF,
+    int(monotonic_ms) & 0xFFFFFFFF,
+    int(flags) & 0xFFFFFFFF,
+  )
 
 
 def _crc32(text: str) -> int:
@@ -313,16 +393,7 @@ class LiveSnapshot:
   metadata_revision: int = 0
 
   def pack(self, sequence: int, monotonic_ms: int) -> bytes:
-    header = struct.pack(
-      "<2sBBHHII",
-      LIVE_FRAME_MAGIC,
-      LIVE_PROTOCOL_VERSION,
-      LIVE_FRAME_TYPE_STATE,
-      LIVE_FRAME_SIZE,
-      int(sequence) & 0xFFFF,
-      int(monotonic_ms) & 0xFFFFFFFF,
-      int(self.flags) & 0xFFFFFFFF,
-    )
+    header = _pack_live_header(LIVE_FRAME_TYPE_STATE, sequence, monotonic_ms, self.flags)
     telemetry = struct.pack(
       "<hHhhhhhHhHHhH",
       _scaled(self.vehicle_speed, 100.0, -32768, 32767),
@@ -362,7 +433,7 @@ class LiveSnapshot:
 
 
 def live_notification_fragments(frame: bytes) -> tuple[bytes, ...]:
-  """Split a state frame into notifications that fit the default 23-byte ATT MTU."""
+  """Split a live frame into notifications that fit the default 23-byte ATT MTU."""
   if len(frame) != LIVE_FRAME_SIZE:
     raise ValueError(f"Live frame must be {LIVE_FRAME_SIZE} bytes")
   sequence = struct.unpack_from("<H", frame, 6)[0]
@@ -501,6 +572,165 @@ def build_live_snapshot(sm: Any, params: Params, params_memory: Params) -> LiveS
   )
 
 
+@dataclass(frozen=True)
+class HealthSnapshot:
+  flags: int = 0
+  cpu_usage: int = 0
+  gpu_usage: int = 0
+  memory_usage: int = 0
+  free_storage: int = 0
+  cpu_temp: float = 0.0
+  gpu_temp: float = 0.0
+  memory_temp: float = 0.0
+  max_temp: float = 0.0
+  intake_temp: float = 0.0
+  thermal_status: int = THERMAL_STATUS_OK
+  fan_speed: int = 0
+  power_draw: float = 0.0
+  som_power_draw: float = 0.0
+  battery_reserve_wh: float = 0.0
+  screen_brightness: int = 0
+  network_type: int = 0
+  network_strength: int = 0
+  uptime_s: int = 0
+
+  def pack(self, sequence: int, monotonic_ms: int) -> bytes:
+    header = _pack_live_header(LIVE_FRAME_TYPE_HEALTH, sequence, monotonic_ms, self.flags)
+    payload = struct.pack(
+      "<4B5h2B3H4BI18x",
+      min(100, max(0, int(self.cpu_usage))),
+      min(100, max(0, int(self.gpu_usage))),
+      min(100, max(0, int(self.memory_usage))),
+      min(100, max(0, int(self.free_storage))),
+      _scaled(self.cpu_temp, 10.0, -32768, 32767),
+      _scaled(self.gpu_temp, 10.0, -32768, 32767),
+      _scaled(self.memory_temp, 10.0, -32768, 32767),
+      _scaled(self.max_temp, 10.0, -32768, 32767),
+      _scaled(self.intake_temp, 10.0, -32768, 32767),
+      min(255, max(0, int(self.thermal_status))),
+      min(100, max(0, int(self.fan_speed))),
+      _scaled(self.power_draw, 100.0, 0, 65535),
+      _scaled(self.som_power_draw, 100.0, 0, 65535),
+      _scaled(self.battery_reserve_wh, 10.0, 0, 65535),
+      min(100, max(0, int(self.screen_brightness))),
+      min(255, max(0, int(self.network_type))),
+      min(255, max(0, int(self.network_strength))),
+      0,
+      max(0, int(self.uptime_s)) & 0xFFFFFFFF,
+    )
+    frame = header + payload
+    if len(frame) != LIVE_FRAME_SIZE:
+      raise AssertionError(f"Invalid health frame size: {len(frame)}")
+    return frame
+
+
+@dataclass(frozen=True)
+class PathSnapshot:
+  desired_curvature: float = 0.0
+  lane_change_direction: int = 0
+  lane_change_state: int = 0
+  y_coefficients: tuple[float, ...] = ()
+  x_coefficients: tuple[float, ...] = ()
+
+  def pack(self, sequence: int, monotonic_ms: int) -> bytes:
+    header = _pack_live_header(LIVE_FRAME_TYPE_PATH, sequence, monotonic_ms, 0)
+    y_coeffs = self.y_coefficients[:LIVE_PATH_MAX_Y_COEFFS]
+    x_coeffs = self.x_coefficients[:LIVE_PATH_MAX_X_COEFFS]
+    scalars = struct.pack(
+      "<iBBBB",
+      _scaled(self.desired_curvature, 1e6, -2147483648, 2147483647),
+      len(y_coeffs),
+      len(x_coeffs),
+      min(255, max(0, int(self.lane_change_direction))),
+      min(255, max(0, int(self.lane_change_state))),
+    )
+    coefficients = struct.pack(f"<{len(y_coeffs)}f", *y_coeffs) + struct.pack(f"<{len(x_coeffs)}f", *x_coeffs)
+    frame = header + scalars + coefficients
+    if len(frame) > LIVE_FRAME_SIZE:
+      raise AssertionError(f"Path frame overflows: {len(frame)}")
+    return frame.ljust(LIVE_FRAME_SIZE, b"\x00")
+
+
+def build_health_snapshot(sm: Any, params: Params, monotonic_ns: int = 0) -> HealthSnapshot:
+  device_state = _service(sm, "deviceState")
+  started = bool(getattr(device_state, "started", False))
+  offroad = _param_bool(params, "IsOffroad") if not started else False
+
+  network_type = _raw_enum(getattr(device_state, "networkType", 0))
+  metered = bool(getattr(device_state, "networkMetered", False))
+  wifi = network_type == NETWORK_TYPE_WIFI
+  ethernet = network_type == NETWORK_TYPE_ETHERNET
+  cellular = network_type in NETWORK_TYPE_CELLULAR
+  thermal_status = _raw_enum(getattr(device_state, "thermalStatus", THERMAL_STATUS_OK))
+  fan_speed = int(_finite(getattr(device_state, "fanSpeedPercentDesired", 0)))
+  free_storage = _finite(getattr(device_state, "freeSpacePercent", 0.0))
+  battery_uwh = _finite(getattr(device_state, "carBatteryCapacityUwh", 0.0))
+  ping_ns = _finite(getattr(device_state, "lastAthenaPingTime", 0.0))
+  cloud_fresh = ping_ns > 0 and 0 <= (monotonic_ns - ping_ns) < LIVE_ATHENA_FRESH_S * 1e9
+
+  flags = HealthFlags(0)
+  flag_values = (
+    (HealthFlags.ONROAD, started),
+    (HealthFlags.OFFROAD, not started and offroad),
+    (HealthFlags.NETWORK_METERED, metered),
+    (HealthFlags.WIFI_CONNECTED, wifi),
+    (HealthFlags.ETHERNET_CONNECTED, ethernet),
+    (HealthFlags.CELLULAR_CONNECTED, cellular),
+    (HealthFlags.LOCAL_NON_METERED_LINK, (wifi or ethernet) and not metered),
+    (HealthFlags.THERMAL_OK, thermal_status == THERMAL_STATUS_OK),
+    (HealthFlags.THERMAL_OVERHEATED, thermal_status == THERMAL_STATUS_OVERHEATED),
+    (HealthFlags.THERMAL_CRITICAL, thermal_status == THERMAL_STATUS_CRITICAL),
+    (HealthFlags.FAN_ACTIVE, fan_speed > 0),
+    (HealthFlags.LOW_STORAGE, free_storage < LIVE_LOW_STORAGE_PERCENT),
+    (HealthFlags.CLOUD_PINGED, cloud_fresh),
+  )
+  for flag, enabled in flag_values:
+    if enabled:
+      flags |= flag
+
+  return HealthSnapshot(
+    flags=int(flags),
+    cpu_usage=round(_max_finite(getattr(device_state, "cpuUsagePercent", ()))),
+    gpu_usage=int(_finite(getattr(device_state, "gpuUsagePercent", 0))),
+    memory_usage=int(_finite(getattr(device_state, "memoryUsagePercent", 0))),
+    free_storage=round(free_storage),
+    cpu_temp=_max_finite(getattr(device_state, "cpuTempC", ())),
+    gpu_temp=_max_finite(getattr(device_state, "gpuTempC", ())),
+    memory_temp=_finite(getattr(device_state, "memoryTempC", 0.0)),
+    max_temp=_finite(getattr(device_state, "maxTempC", 0.0)),
+    intake_temp=_finite(getattr(device_state, "intakeTempC", 0.0)),
+    thermal_status=thermal_status,
+    fan_speed=fan_speed,
+    power_draw=_finite(getattr(device_state, "powerDrawW", 0.0)),
+    som_power_draw=_finite(getattr(device_state, "somPowerDrawW", 0.0)),
+    battery_reserve_wh=battery_uwh / 1e6,
+    screen_brightness=int(_finite(getattr(device_state, "screenBrightnessPercent", 0))),
+    network_type=network_type,
+    network_strength=_raw_enum(getattr(device_state, "networkStrength", 0)),
+    uptime_s=int(monotonic_ns // 1_000_000_000),
+  )
+
+
+def build_path_snapshot(sm: Any) -> PathSnapshot:
+  model = _service(sm, "drivingModelData")
+  controls_state = _service(sm, "controlsState")
+  path = getattr(model, "path", None)
+  meta = getattr(model, "meta", None)
+  action = getattr(model, "action", None)
+
+  desired_curvature = getattr(action, "desiredCurvature", None)
+  if desired_curvature is None:
+    desired_curvature = getattr(controls_state, "desiredCurvature", 0.0)
+
+  return PathSnapshot(
+    desired_curvature=_finite(desired_curvature),
+    lane_change_direction=_raw_enum(getattr(meta, "laneChangeDirection", 0)),
+    lane_change_state=_raw_enum(getattr(meta, "laneChangeState", 0)),
+    y_coefficients=_float_list(getattr(path, "yCoefficients", ()), LIVE_PATH_MAX_Y_COEFFS),
+    x_coefficients=_float_list(getattr(path, "xCoefficients", ()), LIVE_PATH_MAX_X_COEFFS),
+  )
+
+
 def live_metadata(params: Params, current: dict[str, Any] | None = None) -> dict[str, Any]:
   current = current or {
     "alert": {"id": 0, "type": "", "text1": "", "text2": "", "status": 0},
@@ -538,7 +768,7 @@ def build_live_details(sm: Any) -> dict[str, Any]:
 class LiveTelemetryPublisher:
   SERVICES = (
     "deviceState", "carState", "selfdriveState", "carControl", "controlsState", "radarState",
-    "longitudinalPlan", "modelV2", "starpilotCarState", "starpilotPlan", "onroadEvents",
+    "longitudinalPlan", "modelV2", "drivingModelData", "starpilotCarState", "starpilotPlan", "onroadEvents",
   )
 
   def __init__(self, callback, params: Params, params_memory: Params, sm_factory=messaging.SubMaster,
@@ -566,14 +796,30 @@ class LiveTelemetryPublisher:
     if self._thread is not None and self._thread.is_alive():
       self._thread.join(timeout=1.0)
 
+  def _emit(self, frame: bytes) -> None:
+    self._sequence = (self._sequence + 1) & 0xFFFF
+    self._callback(frame)
+
   def publish_once(self, sm: Any) -> bytes:
     snapshot = build_live_snapshot(sm, self.params, self.params_memory)
     frame = snapshot.pack(self._sequence, round(self._monotonic() * 1000.0))
     details = build_live_details(sm)
     with self._details_lock:
       self._details = details
-    self._sequence = (self._sequence + 1) & 0xFFFF
-    self._callback(frame)
+    self._emit(frame)
+    return frame
+
+  def publish_health_once(self, sm: Any) -> bytes:
+    monotonic = self._monotonic()
+    snapshot = build_health_snapshot(sm, self.params, round(monotonic * 1e9))
+    frame = snapshot.pack(self._sequence, round(monotonic * 1000.0))
+    self._emit(frame)
+    return frame
+
+  def publish_path_once(self, sm: Any) -> bytes:
+    snapshot = build_path_snapshot(sm)
+    frame = snapshot.pack(self._sequence, round(self._monotonic() * 1000.0))
+    self._emit(frame)
     return frame
 
   def details(self) -> dict[str, Any]:
@@ -588,9 +834,15 @@ class LiveTelemetryPublisher:
       sm = self._sm_factory(list(self.SERVICES))
       period = 1.0 / LIVE_FRAME_RATE_HZ
       next_update = self._monotonic()
+      tick = 0
       while not self._stop.is_set():
         sm.update(0)
         self.publish_once(sm)
+        if tick % LIVE_FRAME_RATE_HZ in LIVE_PATH_TICK_PATTERN:
+          self.publish_path_once(sm)
+        if tick % LIVE_HEALTH_TICK_DIVISOR == 0:
+          self.publish_health_once(sm)
+        tick += 1
         next_update += period
         delay = max(0.0, next_update - self._monotonic())
         if self._stop.wait(delay):

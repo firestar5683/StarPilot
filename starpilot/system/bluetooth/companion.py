@@ -17,9 +17,16 @@ from openpilot.selfdrive.ui.lib.starpilot_version import STARPILOT_DISPLAY_VERSI
 from openpilot.starpilot.system.bluetooth.live import (
   LIVE_FRAME_RATE_HZ,
   LIVE_FRAME_SIZE,
+  LIVE_FRAME_TYPE_HEALTH,
+  LIVE_FRAME_TYPE_PATH,
+  LIVE_FRAME_TYPE_STATE,
+  LIVE_HEALTH_FRAME_RATE_HZ,
   LIVE_NOTIFICATION_FRAGMENT_COUNT,
   LIVE_NOTIFICATION_SIZE,
+  LIVE_PATH_FRAME_RATE_HZ,
   LIVE_PROTOCOL_VERSION,
+  LIVE_TOTAL_FRAME_RATE_HZ,
+  LIVE_TOTAL_NOTIFICATION_RATE_HZ,
   LiveSnapshot,
   LiveTelemetryPublisher,
   live_metadata,
@@ -154,6 +161,11 @@ class CompanionProtocol:
         "rate_hz": LIVE_FRAME_RATE_HZ,
         "notification_size": LIVE_NOTIFICATION_SIZE,
         "notification_fragments": LIVE_NOTIFICATION_FRAGMENT_COUNT,
+        "frame_types": [LIVE_FRAME_TYPE_STATE, LIVE_FRAME_TYPE_HEALTH, LIVE_FRAME_TYPE_PATH],
+        "health_rate_hz": LIVE_HEALTH_FRAME_RATE_HZ,
+        "path_rate_hz": LIVE_PATH_FRAME_RATE_HZ,
+        "total_rate_hz": LIVE_TOTAL_FRAME_RATE_HZ,
+        "notification_rate_hz": LIVE_TOTAL_NOTIFICATION_RATE_HZ,
       },
     }
 
