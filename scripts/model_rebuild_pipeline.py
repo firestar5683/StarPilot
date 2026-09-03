@@ -149,32 +149,33 @@ def extract_git_file(repo: Path, ref: str, git_path: str, destination: Path) -> 
   temporary.replace(destination)
 
 
-def find_model_paths(repo: Path, ref: str, input_format: str) -> list[str]:
+def find_model_paths(repo: Path, ref: str, input_format: str, uses_external_gpu: bool = False) -> list[str]:
+  prefix = "big_" if uses_external_gpu else ""
   requested = (
-    ("driving_supercombo.onnx",)
+    (f"{prefix}driving_supercombo.onnx",)
     if input_format == "supercombo"
     else (
-      "driving_vision.onnx",
-      "driving_policy.onnx",
-      "driving_on_policy.onnx",
-      "driving_off_policy.onnx",
+      f"{prefix}driving_vision.onnx",
+      f"{prefix}driving_policy.onnx",
+      f"{prefix}driving_on_policy.onnx",
+      f"{prefix}driving_off_policy.onnx",
     )
   )
   found: list[str] = []
   for filename in requested:
-    for prefix in MODEL_PATH_PREFIXES:
-      git_path = f"{prefix}/{filename}"
+    for path_prefix in MODEL_PATH_PREFIXES:
+      git_path = f"{path_prefix}/{filename}"
       if git_path_exists(repo, ref, git_path):
         found.append(git_path)
         break
 
   if input_format == "supercombo" and len(found) != 1:
-    raise FileNotFoundError(f"No supercombo ONNX found at {ref}")
+    raise FileNotFoundError(f"No supercombo ONNX found at {ref} (looking for {requested[0]})")
   names = {Path(path).name for path in found}
   if input_format == "split":
-    if "driving_vision.onnx" not in names:
-      raise FileNotFoundError(f"No driving_vision.onnx found at {ref}")
-    if not names.intersection({"driving_policy.onnx", "driving_on_policy.onnx"}):
+    if f"{prefix}driving_vision.onnx" not in names:
+      raise FileNotFoundError(f"No {prefix}driving_vision.onnx found at {ref}")
+    if not names.intersection({f"{prefix}driving_policy.onnx", f"{prefix}driving_on_policy.onnx"}):
       raise FileNotFoundError(f"No policy ONNX found at {ref}")
   return found
 
@@ -182,11 +183,12 @@ def find_model_paths(repo: Path, ref: str, input_format: str) -> list[str]:
 def extract_model(model_id: str, source: dict, repo: Path, workspace: Path) -> dict:
   ref = source["ref"]
   input_format = source["input_format"]
+  uses_external_gpu = source.get("uses_external_gpu", False)
   ensure_git_ref(repo, ref)
   output_dir = workspace / "onnx" / model_id
   output_dir.mkdir(parents=True, exist_ok=True)
   extracted = []
-  for git_path in find_model_paths(repo, ref, input_format):
+  for git_path in find_model_paths(repo, ref, input_format, uses_external_gpu):
     filename = Path(git_path).name
     destination = output_dir / f"{model_id}_{filename}"
     extract_git_file(repo, ref, git_path, destination)
@@ -201,6 +203,7 @@ def extract_model(model_id: str, source: dict, repo: Path, workspace: Path) -> d
     "id": model_id,
     "ref": ref,
     "input_format": input_format,
+    "uses_external_gpu": uses_external_gpu,
     "files": extracted,
   }
   (workspace / "results" / f"{model_id}_source.json").write_text(json.dumps(result, indent=2) + "\n")
@@ -285,7 +288,7 @@ def compile_model(model_id: str, source: dict, version: str, workspace: Path, fo
     f"--input-format {source['input_format']} --version {version}",
   ]
   if source.get("uses_external_gpu"):
-    command_parts.append("--external-gpu")
+    command_parts.append("--gpu")
   command = " ".join(command_parts)
   with open(log_path, "wb") as log_file:
     process = subprocess.run(["ssh", *SSH_OPTIONS, REMOTE, command], stdout=log_file, stderr=subprocess.STDOUT)
@@ -338,15 +341,6 @@ def validate_model(model_id: str, version: str, workspace: Path) -> dict:
 def update_manifest(base_manifest: Path, workspace: Path, source_map: dict) -> dict:
   payload = load_json(base_manifest)
   models = payload["models"] if isinstance(payload, dict) else payload
-  if not any(model.get("id") == "deeprl3v2" for model in models):
-    models.append({
-      "id": "deeprl3v2",
-      "name": "Deep RL 3 V2 👀📡",
-      "version": "v15",
-      "series": "OP Series",
-      "released": "2026-06-17",
-      "community_favorite": False,
-    })
   multipart_handoff = []
   for model in models:
     source = source_map.get(model["id"], {})
@@ -371,7 +365,7 @@ def update_manifest(base_manifest: Path, workspace: Path, source_map: dict) -> d
         ],
       })
   output = {"models": models}
-  output_path = workspace / "manifests/model_names_v22.json"
+  output_path = workspace / "manifests/model_names_v25.json"
   output_path.parent.mkdir(parents=True, exist_ok=True)
   output_path.write_text(json.dumps(output, indent=2, ensure_ascii=False) + "\n")
   (workspace / "ready-for-resources" / "multipart.json").write_text(
@@ -408,7 +402,6 @@ def main() -> int:
   if args.base_manifest:
     base = load_json(args.base_manifest)
     versions = {model["id"]: model["version"] for model in base.get("models", base)}
-  versions.setdefault("deeprl3v2", "v15")
 
   for model_id in model_ids:
     if model_id not in source_map:
