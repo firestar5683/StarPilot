@@ -136,6 +136,9 @@
   display: flex;
   flex-direction: column;
   gap: 4px;
+  flex: 1;
+  min-width: 0;
+  padding-right: 16px;
 }
 
 .road-setting-label {
@@ -146,6 +149,7 @@
 .road-setting-desc {
   font-size: 0.85rem;
   color: #8f92a1;
+  word-break: break-word;
 }
 
 /* Toggle Switch Styles */
@@ -153,7 +157,12 @@
   position: relative;
   display: inline-block;
   width: 48px;
+  min-width: 48px;
+  max-width: 48px;
   height: 26px;
+  min-height: 26px;
+  max-height: 26px;
+  flex-shrink: 0;
   cursor: pointer;
 }
 
@@ -171,9 +180,12 @@
   left: 0;
   right: 0;
   bottom: 0;
+  width: 48px;
+  height: 26px;
   background-color: #3b3b48;
   transition: .3s;
   border-radius: 26px;
+  box-sizing: border-box;
 }
 
 .road-slider:before {
@@ -203,6 +215,7 @@
   border-radius: 6px;
   padding: 6px 12px;
   font-size: 0.95rem;
+  flex-shrink: 0;
 }
 
 .alerts-list-card {
