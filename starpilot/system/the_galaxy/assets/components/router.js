@@ -1,9 +1,10 @@
-import { RoadAlertsView } from "/assets/components/tools/road_alerts.js"
+import { UnidenR4View } from "/assets/components/tools/uniden_r4.js?v=20260903"
+import { RoadAlertsView } from "/assets/components/tools/road_alerts.js?v=20260903b"
 import { html, reactive } from "/assets/vendor/arrow-core.js"
 import { createBrowserHistory, createRouter } from "/assets/vendor/remix-router-1.3.1.js"
 import { hideSidebar } from "/assets/js/utils.js"
 import { DeviceSettings } from "/assets/components/tools/device_settings.js?v=favorite-c4-hint-1"
-import { Bluetooth } from "/assets/components/tools/bluetooth.js?v=bluetooth-13"
+import { Bluetooth } from "/assets/components/tools/bluetooth.js?v=bluetooth-5"
 import { WheelControls } from "/assets/components/tools/wheel_controls.js?v=controllers-2"
 import { ErrorLogs } from "/assets/components/tools/error_logs.js"
 import { VehicleFeatures } from "/assets/components/tools/vehicle_features.js"
@@ -14,7 +15,7 @@ import { MapsManager } from "/assets/components/tools/maps.js"
 import { NavDestination } from "/assets/components/navigation/navigation_destination.js?v=nav-search-context-2"
 import { NavKeys } from "/assets/components/navigation/navigation_keys.js?v=app-keys-session-1"
 import { RouteRecordings } from "/assets/components/recordings/dashcam_routes.js"
-import { SettingsView } from "/assets/components/settings.js?v=router-cycle-fix-5"
+import { SettingsView } from "/assets/components/settings.js?v=router-cycle-fix-3"
 import { ScreenRecordings } from "/assets/components/recordings/screen_recordings.js"
 import { Sidebar } from "/assets/components/sidebar.js?v=controllers-nav-1"
 import { SentryMode } from "/assets/components/tools/sentry.js"
@@ -97,6 +98,7 @@ function Root() {
     createRoute("vehicle_features", "/vehicle_features", VehicleFeatures),
     createRoute("v_asm", "/manage_v_asm", VASMAnnotations),
     createRoute("pip_sidecam", "/manage_pip_sidecam", PipSideCamera),
+    createRoute("uniden_r4", "/uniden_r4", UnidenR4View),
     createRoute("road_alerts", "/road_alerts", RoadAlertsView),
   ]
 
