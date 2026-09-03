@@ -1906,6 +1906,20 @@ class TestLatControl:
     assert controller.pid._k_p[1] == pytest.approx([value * 2.0 for value in base_kp_v])
     assert controller.pid._k_i[1] == pytest.approx([value * 1.25 for value in base_ki_v])
 
+  def test_honda_accord_11g_pid_gain_scales_remain_fixed(self):
+    controller, VM, CS, params, _ = self._build_pid_controller(HONDA.HONDA_ACCORD_11G)
+    base_kp = [list(values) for values in controller.pid._k_p]
+    base_ki = [list(values) for values in controller.pid._k_i]
+
+    starpilot_toggles = SimpleNamespace(honda_lateral_pid_kp_scale=2.0, honda_lateral_pid_ki_scale=0.5)
+    controller.update(True, CS, VM, params, False, 0.0025, False, 0.2, None, None, starpilot_toggles)
+
+    assert controller.is_honda_accord_11g
+    assert controller.pid._k_p[0] == pytest.approx(base_kp[0])
+    assert controller.pid._k_p[1] == pytest.approx(base_kp[1])
+    assert controller.pid._k_i[0] == pytest.approx(base_ki[0])
+    assert controller.pid._k_i[1] == pytest.approx(base_ki[1])
+
   def test_honda_accord_torque_tune_uses_quick_curve_unwind(self):
     controller, _, _, _, _ = self._build_torque_controller(HONDA.HONDA_ACCORD, force_torque=True)
 

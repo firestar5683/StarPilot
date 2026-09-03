@@ -1,7 +1,9 @@
 import pytest
 import random
 
+import opendbc.can.parser as parser_module
 from opendbc.can import CANPacker, CANParser
+from opendbc.can.parser import CAN_DIAGNOSTIC_INTERVAL_NS, CAN_DIAGNOSTIC_MAX_OFFENDERS, CAN_INVALID_CNT, MessageState
 from opendbc.can.tests import TEST_DBC
 
 MAX_BAD_COUNTER = 5
@@ -366,3 +368,144 @@ class TestCanParserPacker:
     assert packer.make_can_msg("ACC_CONTROL", 0, {"UNKNOWN_SIGNAL": 0}) == (835, b'\x00\x00\x00\x00\x00\x00\x00N', 0)
     assert packer.make_can_msg("UNKNOWN_MESSAGE", 0, {"UNKNOWN_SIGNAL": 0}) == (0, b'', 0)
     assert packer.make_can_msg(0, 0, {"UNKNOWN_SIGNAL": 0}) == (0, b'', 0)
+
+  def test_can_valid_diagnostic_startup_and_disabled_regression(self, monkeypatch):
+    dbc_file = "honda_civic_touring_2016_can_generated"
+    packer = CANPacker(dbc_file)
+    error_calls = []
+    monkeypatch.setattr(parser_module.carlog, "error", error_calls.append)
+
+    enabled_parser = CANParser(dbc_file, [("VSA_STATUS", 50)], 0, enable_can_valid_diagnostics=True)
+    for _ in range(CAN_INVALID_CNT + 2):
+      assert not enabled_parser.can_valid
+    t0 = 1_000_000_000
+    enabled_parser.update([t0, [packer.make_can_msg("VSA_STATUS", 0, {})]])
+    assert enabled_parser.can_valid
+    assert error_calls == []
+
+    disabled_parser = CANParser(dbc_file, [("VSA_STATUS", 50)], 0)
+    disabled_parser.update([t0, [packer.make_can_msg("VSA_STATUS", 0, {})]])
+    assert disabled_parser.can_valid
+    state = next(iter(disabled_parser.message_states.values()))
+    disabled_parser.update([t0 + int(state.timeout_threshold) + 1, []])
+    results = [disabled_parser.can_valid for _ in range(CAN_INVALID_CNT)]
+    assert results == [True] * (CAN_INVALID_CNT - 1) + [False]
+    assert error_calls == []
+
+  def test_can_valid_diagnostic_falling_edge_recovery_and_rate_limit(self, monkeypatch):
+    dbc_file = "honda_civic_touring_2016_can_generated"
+    packer = CANPacker(dbc_file)
+    parser = CANParser(dbc_file, [("VSA_STATUS", 50)], 1, enable_can_valid_diagnostics=True)
+    state = next(iter(parser.message_states.values()))
+    error_calls = []
+    monkeypatch.setattr(parser_module.carlog, "error", error_calls.append)
+
+    t0 = 1_000_000_000
+    parser.update([t0, [packer.make_can_msg("VSA_STATUS", 1, {})]])
+    assert parser.can_valid
+    first_timeout = t0 + int(state.timeout_threshold) + 1
+    parser.update([first_timeout, []])
+    results = [parser.can_valid for _ in range(CAN_INVALID_CNT)]
+    assert results == [True] * (CAN_INVALID_CNT - 1) + [False]
+    assert len(error_calls) == 1
+
+    event = error_calls[0]
+    assert "CANParser canValid falling edge:" in event
+    assert "bus=1" in event
+    assert "offender_count=1" in event
+    assert hex(state.address) in event
+    assert "VSA_STATUS" in event
+    assert "stale" in event
+    assert "frequency_hz" in event
+    assert "age_ms" in event
+    assert "omitted=0" in event
+
+    for _ in range(CAN_INVALID_CNT + 2):
+      assert not parser.can_valid
+    assert len(error_calls) == 1
+
+    recovery_time = first_timeout + 1
+    parser.update([recovery_time, [packer.make_can_msg("VSA_STATUS", 1, {})]])
+    assert parser.can_valid
+    second_timeout = max(
+      recovery_time + int(state.timeout_threshold) + 1,
+      first_timeout + CAN_DIAGNOSTIC_INTERVAL_NS,
+    )
+    parser.update([second_timeout, []])
+    results = [parser.can_valid for _ in range(CAN_INVALID_CNT)]
+    assert results == [True] * (CAN_INVALID_CNT - 1) + [False]
+    assert len(error_calls) == 2
+    assert "CANParser canValid falling edge:" in error_calls[1]
+
+  def test_can_valid_diagnostic_counter_failure(self, monkeypatch):
+    dbc_file = "honda_civic_touring_2016_can_generated"
+    packer = CANPacker(dbc_file)
+    parser = CANParser(dbc_file, [("STEERING_CONTROL", 100)], 0, enable_can_valid_diagnostics=True)
+    state = next(iter(parser.message_states.values()))
+    error_calls = []
+    monkeypatch.setattr(parser_module.carlog, "error", error_calls.append)
+
+    t0 = 1_000_000_000
+    values = {"COUNTER": 1}
+    parser.update([t0, [packer.make_can_msg("STEERING_CONTROL", 0, values)]])
+    assert parser.can_valid
+
+    results = []
+    for i in range(1, MAX_BAD_COUNTER + 1):
+      timestamp = t0 + i * 10_000_000
+      parser.update([timestamp, [packer.make_can_msg("STEERING_CONTROL", 0, values)]])
+      results.append(parser.can_valid)
+
+    assert results == [True] * (MAX_BAD_COUNTER - 1) + [False]
+    assert state.counter_fail >= MAX_BAD_COUNTER
+    assert len(error_calls) == 1
+    event = error_calls[0]
+    assert "CANParser canValid falling edge:" in event
+    assert hex(state.address) in event
+    assert "STEERING_CONTROL" in event
+    assert "counter-invalid" in event
+    assert "stale" not in event
+
+  def test_can_valid_diagnostic_bounded_missing_offenders(self, monkeypatch):
+    dbc_file = "honda_civic_touring_2016_can_generated"
+    packer = CANPacker(dbc_file)
+    parser = CANParser(dbc_file, [("VSA_STATUS", 50)], 0, enable_can_valid_diagnostics=True)
+    original_state = next(iter(parser.message_states.values()))
+    error_calls = []
+    monkeypatch.setattr(parser_module.carlog, "error", error_calls.append)
+
+    t0 = 1_000_000_000
+    parser.update([t0, [packer.make_can_msg("VSA_STATUS", 0, {})]])
+    assert parser.can_valid
+
+    base_address = max(parser.message_states) + 1
+    for i in range(9):
+      address = base_address + i
+      parser.message_states[address] = MessageState(
+        address=address,
+        name=f"MISSING_{i}",
+        size=8,
+        signals=[],
+        frequency=10,
+        timeout_threshold=1_000_000_000,
+      )
+
+    timeout = t0 + int(original_state.timeout_threshold) + 1
+    parser.update([timeout, []])
+    results = [parser.can_valid for _ in range(CAN_INVALID_CNT)]
+    assert results == [True] * (CAN_INVALID_CNT - 1) + [False]
+    assert len(error_calls) == 1
+
+    event = error_calls[0]
+    assert "CANParser canValid falling edge:" in event
+    assert "offender_count=10" in event
+    assert "omitted=2" in event
+    assert "missing" in event
+    assert "stale" in event
+    assert "'age_ms': 'unknown'" in event
+    assert event.count("'address':") == CAN_DIAGNOSTIC_MAX_OFFENDERS
+
+    displayed_addresses = [original_state.address, *(base_address + i for i in range(7))]
+    positions = [event.find(hex(address)) for address in displayed_addresses]
+    assert all(position >= 0 for position in positions)
+    assert positions == sorted(positions)

@@ -6,6 +6,7 @@ from openpilot.common.pid import PIDController
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.controls.lib.longcontrol_vehicle_tunes import LongControlVehicleTuning
+from openpilot.selfdrive.controls.lib.longitudinal_vehicle_tunes import is_honda_accord_11g
 
 CONTROL_N_T_IDX = ModelConstants.T_IDXS[:CONTROL_N]
 clip = np.clip
@@ -22,6 +23,23 @@ TESLA_PEDAL_RELEASE_GUARD_TIME = 0.15
 TESLA_PEDAL_RELEASE_GUARD_MAX_DECEL = 0.35
 
 LongCtrlState = car.CarControl.Actuators.LongControlState
+
+
+def honda_accord_11g_long_control_state_trans(CP, active, long_control_state, should_stop,
+                                               brake_pressed, cruise_standstill):
+  """Road-validated Accord 11G state machine without shared start shaping."""
+  cruise_standstill = cruise_standstill and not bool(getattr(CP, "enableGasInterceptorDEPRECATED", False))
+  release_condition = not should_stop and not cruise_standstill and not brake_pressed
+
+  if not active:
+    return LongCtrlState.off
+  if long_control_state == LongCtrlState.off:
+    return LongCtrlState.pid if release_condition else LongCtrlState.stopping
+  if long_control_state == LongCtrlState.stopping and release_condition:
+    return LongCtrlState.pid
+  if long_control_state == LongCtrlState.pid and should_stop:
+    return LongCtrlState.stopping
+  return long_control_state
 
 def apply_deadzone(error, deadzone):
   if error > deadzone:
@@ -130,6 +148,29 @@ class LongControl:
     self.pedal_override_active = False
     self.pedal_override_release_frames = 0
     self.vehicle_tuning = LongControlVehicleTuning(CP)
+    self.honda_accord_11g = is_honda_accord_11g(CP)
+
+  def _update_honda_accord_11g(self, active, CS, a_target, should_stop, accel_limits):
+    """Use the validated Accord output policy inside the native LongControl."""
+    self.long_control_state = honda_accord_11g_long_control_state_trans(
+      self.CP, active, self.long_control_state, should_stop,
+      CS.brakePressed, CS.cruiseState.standstill,
+    )
+
+    if self.long_control_state == LongCtrlState.off:
+      self.pid.reset()
+      output_accel = 0.0
+    elif self.long_control_state == LongCtrlState.stopping:
+      output_accel = self.last_output_accel
+      if output_accel > self.CP.stopAccel:
+        output_accel = min(output_accel, 0.0) - DT_CTRL
+      self.pid.reset()
+    else:
+      error = a_target - CS.aEgo
+      output_accel = self.pid.update(error, speed=CS.vEgo, feedforward=a_target)
+
+    self.last_output_accel = float(clip(output_accel, accel_limits[0], accel_limits[1]))
+    return self.last_output_accel
 
   def update_mpc_mode(self, experimental_mode):
     new_mode = 'blended' if experimental_mode else 'acc'
@@ -237,6 +278,9 @@ class LongControl:
     """Update longitudinal control. This updates the state machine and runs a PID loop"""
     self.pid.neg_limit = accel_limits[0]
     self.pid.pos_limit = accel_limits[1]
+
+    if self.honda_accord_11g:
+      return self._update_honda_accord_11g(active, CS, a_target, should_stop, accel_limits)
 
     if pedal_override:
       self.pedal_override_active = True
