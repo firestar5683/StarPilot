@@ -1046,6 +1046,34 @@ def test_gpu_temp_reader_ignores_non_gpu_thermal_zones(tmp_path):
   assert utilities._read_gpu_temp_c(tmp_path) == 42
 
 
+def test_cpu_usage_reader_samples_twice_on_first_read(tmp_path, monkeypatch):
+  stat_path = tmp_path / "stat"
+  stat_path.write_text("cpu  100 0 100 800 0 0 0 0 0 0\ncpu0 1 0 1 8 0 0 0 0 0 0\n", encoding="utf-8")
+  utilities._CPU_USAGE_SNAPSHOT.update({"total": None, "idle": None, "value": None})
+
+  def advance(_seconds):
+    stat_path.write_text("cpu  400 0 100 900 0 0 0 0 0 0\ncpu0 4 0 1 9 0 0 0 0 0 0\n", encoding="utf-8")
+
+  monkeypatch.setattr(utilities.time, "sleep", advance)
+
+  assert utilities._read_cpu_usage_percent(stat_path) == 75
+
+
+def test_cpu_usage_reader_averages_busy_time_since_previous_read(tmp_path):
+  stat_path = tmp_path / "stat"
+  stat_path.write_text("cpu  400 0 100 900 0 0 0 0 0 0\ncpu0 4 0 1 9 0 0 0 0 0 0\n", encoding="utf-8")
+  utilities._CPU_USAGE_SNAPSHOT.update({"total": 1000.0, "idle": 800.0, "value": 0})
+
+  assert utilities._read_cpu_usage_percent(stat_path) == 75
+  assert utilities._CPU_USAGE_SNAPSHOT["total"] == 1400.0
+
+
+def test_cpu_usage_reader_returns_none_without_proc_stat(tmp_path):
+  utilities._CPU_USAGE_SNAPSHOT.update({"total": None, "idle": None, "value": None})
+
+  assert utilities._read_cpu_usage_percent(tmp_path / "missing") is None
+
+
 def test_network_name_uses_wifi_ssid(monkeypatch):
   monkeypatch.setattr(utilities, "HARDWARE", SimpleNamespace(get_network_type=lambda: 1))
   monkeypatch.setattr(utilities, "_read_active_wifi_ssid", lambda: "Garage Wi-Fi")
@@ -1089,6 +1117,7 @@ def test_device_summary_includes_network_name(monkeypatch):
   monkeypatch.setattr(utilities, "_read_uptime_seconds", lambda: 120)
   monkeypatch.setattr(utilities, "_read_cpu_temp_c", lambda: 55)
   monkeypatch.setattr(utilities, "_read_gpu_temp_c", lambda: 42)
+  monkeypatch.setattr(utilities, "_read_cpu_usage_percent", lambda: 23)
   monkeypatch.setattr(utilities, "get_current_lan_ip", lambda: "192.168.1.10")
   monkeypatch.setattr(utilities, "get_current_network_name", lambda: "Home Network")
 
@@ -1097,6 +1126,7 @@ def test_device_summary_includes_network_name(monkeypatch):
   assert summary["networkName"] == "Home Network"
   assert summary["lanIp"] == "192.168.1.10"
   assert summary["gpuTempC"] == 42
+  assert summary["cpuUsagePercent"] == 23
 
 
 def test_persistent_loader_accepts_decoded_param_dict():

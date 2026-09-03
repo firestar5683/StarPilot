@@ -151,7 +151,7 @@ function fallbackDashboard(data, unit) {
       longestUndistractedDrive: { value: "0.0 hours", detail: "No clean drives" },
       cleanDriveStreak: { value: "0 drives", detail: "No clean drives" },
     },
-    device: { status: "Parked", online: true, uptimeSeconds: null, cpuTempC: null, gpuTempC: null },
+    device: { status: "Parked", online: true, uptimeSeconds: null, cpuTempC: null, cpuUsagePercent: null, gpuTempC: null },
     storage: {
       freeBytes: 0,
       usedBytes: 0,
@@ -425,8 +425,9 @@ function renderStorage(storage) {
 
 function renderVitals(device) {
   const uptime = device.uptimeSeconds == null ? "unknown" : formatDuration(device.uptimeSeconds);
-  const cpu = device.cpuTempC == null ? "unknown" : `${formatInt(device.cpuTempC)} C`;
-  const gpu = device.gpuTempC == null ? "unknown" : `${formatInt(device.gpuTempC)} C`;
+  const cpuTemp = device.cpuTempC == null ? "unknown" : `${formatInt(device.cpuTempC)} C`;
+  const cpuUsage = device.cpuUsagePercent == null ? "unknown" : formatPercent(device.cpuUsagePercent);
+  const gpuTemp = device.gpuTempC == null ? "unknown" : `${formatInt(device.gpuTempC)} C`;
   const lanIp = device.lanIp || "unknown";
   const networkName = device.networkName || "No wireless connectivity";
   return `
@@ -437,8 +438,8 @@ function renderVitals(device) {
         <div><span>LAN IP</span><strong>${escapeHtml(lanIp)}</strong></div>
         <div><span>Network</span><strong>${escapeHtml(networkName)}</strong></div>
         <div><span>Uptime</span><strong>${escapeHtml(uptime)}</strong></div>
-        <div><span>CPU temp</span><strong>${escapeHtml(cpu)}</strong></div>
-        <div><span>GPU temp</span><strong>${escapeHtml(gpu)}</strong></div>
+        <div><span>CPU temp / usage</span><strong>${escapeHtml(`${cpuTemp} / ${cpuUsage}`)}</strong></div>
+        <div><span>GPU temp</span><strong>${escapeHtml(gpuTemp)}</strong></div>
       </div>
     </section>
   `;
