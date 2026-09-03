@@ -17,20 +17,13 @@ if str(REPO_ROOT / "scripts") not in sys.path:
 from model_compiler import REPOSITORY_FILE_LIMIT, split_oversized_artifact
 
 DEFAULT_OPENPILOT = Path.home() / "openpilot"
-DEFAULT_WORKSPACE = Path("/Volumes/T5/StarPilot-Model-Rebuild-2026-06-22")
-DEFAULT_SOURCE_MAP = REPO_ROOT / "scripts/model_source_map_v22.json"
-DEFAULT_MANIFEST = DEFAULT_WORKSPACE / "manifests/model_names_v22.json"
+DEFAULT_WORKSPACE = Path.home() / "workspace"
+DEFAULT_SOURCE_MAP = REPO_ROOT / "scripts/model_source_map_v25.json"
+DEFAULT_MANIFEST = DEFAULT_WORKSPACE / "manifests/model_names_v25.json"
 REMOTE = os.environ.get("STAR_PILOT_MODEL_REMOTE", "comma@192.168.3.109")
 REMOTE_ROOT = Path("/data/openpilot")
 SSH_OPTIONS = ("-o", "ConnectTimeout=10", "-o", "ConnectionAttempts=1")
 
-MODEL_FILENAMES = (
-  "driving_supercombo.onnx",
-  "driving_vision.onnx",
-  "driving_policy.onnx",
-  "driving_on_policy.onnx",
-  "driving_off_policy.onnx",
-)
 MODEL_PATH_PREFIXES = (
   "openpilot/selfdrive/modeld/models",
   "selfdrive/modeld/models",
@@ -149,34 +142,42 @@ def extract_git_file(repo: Path, ref: str, git_path: str, destination: Path) -> 
   temporary.replace(destination)
 
 
-def find_model_paths(repo: Path, ref: str, input_format: str, uses_external_gpu: bool = False) -> list[str]:
+def find_model_paths(repo: Path, ref: str, input_format: str, uses_external_gpu: bool = False) -> dict[str, str]:
+  """
+  Returns a dictionary mapping the remote Git path to the standard local filename.
+  This allows pulling a `big_` prefixed LFS file but saving it without the prefix locally.
+  """
   prefix = "big_" if uses_external_gpu else ""
-  requested = (
-    (f"{prefix}driving_supercombo.onnx",)
+  requested_standard_names = (
+    ("driving_supercombo.onnx",)
     if input_format == "supercombo"
     else (
-      f"{prefix}driving_vision.onnx",
-      f"{prefix}driving_policy.onnx",
-      f"{prefix}driving_on_policy.onnx",
-      f"{prefix}driving_off_policy.onnx",
+      "driving_vision.onnx",
+      "driving_policy.onnx",
+      "driving_on_policy.onnx",
+      "driving_off_policy.onnx",
     )
   )
-  found: list[str] = []
-  for filename in requested:
+
+  found: dict[str, str] = {}
+  for standard_name in requested_standard_names:
+    git_filename = f"{prefix}{standard_name}"
     for path_prefix in MODEL_PATH_PREFIXES:
-      git_path = f"{path_prefix}/{filename}"
+      git_path = f"{path_prefix}/{git_filename}"
       if git_path_exists(repo, ref, git_path):
-        found.append(git_path)
+        found[git_path] = standard_name
         break
 
   if input_format == "supercombo" and len(found) != 1:
-    raise FileNotFoundError(f"No supercombo ONNX found at {ref} (looking for {requested[0]})")
-  names = {Path(path).name for path in found}
+    raise FileNotFoundError(f"No supercombo ONNX found at {ref} (looked for {prefix}driving_supercombo.onnx)")
+  
   if input_format == "split":
-    if f"{prefix}driving_vision.onnx" not in names:
+    standard_names_found = set(found.values())
+    if "driving_vision.onnx" not in standard_names_found:
       raise FileNotFoundError(f"No {prefix}driving_vision.onnx found at {ref}")
-    if not names.intersection({f"{prefix}driving_policy.onnx", f"{prefix}driving_on_policy.onnx"}):
+    if not standard_names_found.intersection({"driving_policy.onnx", "driving_on_policy.onnx"}):
       raise FileNotFoundError(f"No policy ONNX found at {ref}")
+      
   return found
 
 
@@ -185,20 +186,23 @@ def extract_model(model_id: str, source: dict, repo: Path, workspace: Path) -> d
   input_format = source["input_format"]
   uses_external_gpu = source.get("uses_external_gpu", False)
   ensure_git_ref(repo, ref)
+  
   output_dir = workspace / "onnx" / model_id
   output_dir.mkdir(parents=True, exist_ok=True)
   extracted = []
-  for git_path in find_model_paths(repo, ref, input_format, uses_external_gpu):
-    filename = Path(git_path).name
-    destination = output_dir / f"{model_id}_{filename}"
+  
+  paths_to_extract = find_model_paths(repo, ref, input_format, uses_external_gpu)
+  for git_path, standard_name in paths_to_extract.items():
+    destination = output_dir / f"{model_id}_{standard_name}"
     extract_git_file(repo, ref, git_path, destination)
     extracted.append({
-      "component": filename,
+      "component": standard_name,
       "git_path": git_path,
       "path": str(destination),
       "size": destination.stat().st_size,
       "sha256": sha256_file(destination),
     })
+    
   result = {
     "id": model_id,
     "ref": ref,
@@ -289,6 +293,7 @@ def compile_model(model_id: str, source: dict, version: str, workspace: Path, fo
   ]
   if source.get("uses_external_gpu"):
     command_parts.append("--gpu")
+  
   command = " ".join(command_parts)
   with open(log_path, "wb") as log_file:
     process = subprocess.run(["ssh", *SSH_OPTIONS, REMOTE, command], stdout=log_file, stderr=subprocess.STDOUT)
@@ -341,16 +346,29 @@ def validate_model(model_id: str, version: str, workspace: Path) -> dict:
 def update_manifest(base_manifest: Path, workspace: Path, source_map: dict) -> dict:
   payload = load_json(base_manifest)
   models = payload["models"] if isinstance(payload, dict) else payload
+  
+  if not any(model.get("id") == "deeprl3v2" for model in models):
+    models.append({
+      "id": "deeprl3v2",
+      "name": "Deep RL 3 V2 👀📡",
+      "version": "v15",
+      "series": "OP Series",
+      "released": "2026-06-17",
+      "community_favorite": False,
+    })
+    
   multipart_handoff = []
   for model in models:
     source = source_map.get(model["id"], {})
     if "uses_external_gpu" in source:
       model["uses_external_gpu"] = bool(source["uses_external_gpu"])
+    
     artifact = workspace / "compiled" / f"{model['id']}_driving_tinygrad.pkl"
     model.pop("artifact_format", None)
     model.pop("artifact_size", None)
     model.pop("artifact_sha256", None)
     model.pop("artifact_urls", None)
+    
     if not artifact.is_file() or artifact.stat().st_size <= REPOSITORY_FILE_LIMIT:
       model.pop("artifact_url", None)
     else:
@@ -364,6 +382,7 @@ def update_manifest(base_manifest: Path, workspace: Path, source_map: dict) -> d
           for path in sorted((workspace / "ready-for-resources").glob(f"{artifact.name}.p[0-9][0-9]"))
         ],
       })
+      
   output = {"models": models}
   output_path = workspace / "manifests/model_names_v25.json"
   output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -387,10 +406,12 @@ def main() -> int:
 
   ensure_workspace(args.workspace)
   source_map = load_json(args.source_map)
+  
   if args.command == "init":
     shutil.copyfile(args.source_map, args.workspace / "source-maps" / args.source_map.name)
     shutil.copyfile(Path(__file__), args.workspace / "scripts" / Path(__file__).name)
     return 0
+    
   if args.command == "manifest":
     if args.base_manifest is None:
       parser.error("--base-manifest is required")
@@ -402,6 +423,7 @@ def main() -> int:
   if args.base_manifest:
     base = load_json(args.base_manifest)
     versions = {model["id"]: model["version"] for model in base.get("models", base)}
+  versions.setdefault("deeprl3v2", "v15")
 
   for model_id in model_ids:
     if model_id not in source_map:
@@ -421,6 +443,7 @@ def main() -> int:
       print(json.dumps(failure), file=sys.stderr, flush=True)
       if args.model:
         raise
+        
   failures = [
     args.workspace / "results" / f"{model_id}_failure.json"
     for model_id in model_ids
