@@ -71,7 +71,7 @@ async function updateSetting(key, val) {
     const res = await fetch("/api/road_alerts/settings", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key, value: val })
+      body: JSON.stringify({ [key]: val, key, value: val })
     })
     if (res.ok) {
       await loadData()
@@ -333,12 +333,13 @@ export function RoadAlerts() {
               <span class="road-setting-desc">Minimum driver thumbs-up reports required to trigger police auto-slowdown</span>
             </div>
             <select class="road-select" 
-                    @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('WazePoliceMinConfirmations', parseInt(el.value)); }}">
-              <option value="1" :selected="${() => state.settings.WazePoliceMinConfirmations === 1}">1+ Report (Most Sensitive)</option>
-              <option value="2" :selected="${() => state.settings.WazePoliceMinConfirmations === 2}">2+ Reports</option>
-              <option value="3" :selected="${() => state.settings.WazePoliceMinConfirmations === 3}">3+ Reports (Recommended)</option>
-              <option value="5" :selected="${() => state.settings.WazePoliceMinConfirmations === 5}">5+ Reports (High Confidence)</option>
-              <option value="10" :selected="${() => state.settings.WazePoliceMinConfirmations === 10}">10+ Reports (Verified Only)</option>
+                    :value="${() => String(state.settings.WazePoliceMinConfirmations)}"
+                    @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('WazePoliceMinConfirmations', parseInt(el.value, 10)); }}">
+              <option value="1" :selected="${() => Number(state.settings.WazePoliceMinConfirmations) === 1}">1+ Report (Most Sensitive)</option>
+              <option value="2" :selected="${() => Number(state.settings.WazePoliceMinConfirmations) === 2}">2+ Reports</option>
+              <option value="3" :selected="${() => Number(state.settings.WazePoliceMinConfirmations) === 3}">3+ Reports (Recommended)</option>
+              <option value="5" :selected="${() => Number(state.settings.WazePoliceMinConfirmations) === 5}">5+ Reports (High Confidence)</option>
+              <option value="10" :selected="${() => Number(state.settings.WazePoliceMinConfirmations) === 10}">10+ Reports (Verified Only)</option>
             </select>
           </div>
 
@@ -348,12 +349,13 @@ export function RoadAlerts() {
               <span class="road-setting-desc">Distance ahead to begin slowing down to road speed limit</span>
             </div>
             <select class="road-select" 
+                    :value="${() => String(state.settings.WazePoliceTriggerDistance)}"
                     @change="${(e) => { const el = e && (e.currentTarget || e.target); if (el) updateSetting('WazePoliceTriggerDistance', parseFloat(el.value)); }}">
-              <option value="0.5" :selected="${() => state.settings.WazePoliceTriggerDistance === 0.5}">0.5 Miles</option>
-              <option value="0.75" :selected="${() => state.settings.WazePoliceTriggerDistance === 0.75}">0.75 Miles</option>
-              <option value="1.0" :selected="${() => state.settings.WazePoliceTriggerDistance === 1.0}">1.0 Mile (Recommended)</option>
-              <option value="1.5" :selected="${() => state.settings.WazePoliceTriggerDistance === 1.5}">1.5 Miles</option>
-              <option value="2.0" :selected="${() => state.settings.WazePoliceTriggerDistance === 2.0}">2.0 Miles</option>
+              <option value="0.5" :selected="${() => Number(state.settings.WazePoliceTriggerDistance) === 0.5}">0.5 Miles</option>
+              <option value="0.75" :selected="${() => Number(state.settings.WazePoliceTriggerDistance) === 0.75}">0.75 Miles</option>
+              <option value="1.0" :selected="${() => Number(state.settings.WazePoliceTriggerDistance) === 1.0}">1.0 Mile (Recommended)</option>
+              <option value="1.5" :selected="${() => Number(state.settings.WazePoliceTriggerDistance) === 1.5}">1.5 Miles</option>
+              <option value="2.0" :selected="${() => Number(state.settings.WazePoliceTriggerDistance) === 2.0}">2.0 Miles</option>
             </select>
           </div>
 

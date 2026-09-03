@@ -73,12 +73,7 @@ from openpilot.starpilot.common.maps_catalog import (
   schedule_label,
   schedule_param_value,
 )
-from openpilot.starpilot.common.maps_download_progress import (
-  MAPS_STORAGE_CACHE_PARAM,
-  load_maps_storage_cache,
-  nonnegative_int,
-  selection_key,
-)
+from openpilot.starpilot.common.maps_download_progress import load_size_cache, nonnegative_int, selection_key
 from openpilot.starpilot.common.experimental_state import sync_persist_chill_state, sync_persist_experimental_state
 from openpilot.starpilot.common.favorite_slots import (
   FAVORITE_SLOTS_PARAM,
@@ -1301,7 +1296,7 @@ ROUTE_THUMBNAIL_WAIT_SECONDS = 25
 SEGMENT_DURATION_SECONDS = 60
 # Only ever remux one segment at a time; the driving stack needs the headroom. The
 # subprocess timeout is the hard bound, with a small allowance for executor handoff.
-VIDEO_REMUX_WAIT_SECONDS = utilities.VIDEO_REMUX_TIMEOUT_SECONDS + 5
+VIDEO_REMUX_WAIT_SECONDS = getattr(utilities, "VIDEO_REMUX_TIMEOUT_SECONDS", 60) + 5
 # Segment media never changes once loggerd has closed it, so let the browser keep it.
 VIDEO_CACHE_SECONDS = 7 * 24 * 60 * 60
 _VIDEO_REMUX_EXECUTOR = ThreadPoolExecutor(max_workers=1, thread_name_prefix="video-remux")
@@ -1516,7 +1511,7 @@ MODEL_USER_FAVORITES_PARAM = "UserFavorites"
 MAPS_DOWNLOAD_PARAM = "DownloadMaps"
 MAPS_CANCEL_DOWNLOAD_PARAM = "CancelDownloadMaps"
 MAPS_DOWNLOAD_PROGRESS_PARAM = "MapsDownloadProgress"
-MAPS_DOWNLOAD_SIZE_CACHE_PARAM = MAPS_STORAGE_CACHE_PARAM
+MAPS_DOWNLOAD_SIZE_CACHE_PARAM = "MapsDownloadSizeCache"
 
 
 def _get_galaxy_dir():
@@ -3325,7 +3320,7 @@ GALAXY_MANUAL_BOOL_PARAM_KEYS = {"IsRHD", "IsRHDOverride"}
 
 def _get_param_type_info():
   global _cached_allowed_keys, _cached_param_types
-  if _cached_allowed_keys is None:
+  if _cached_allowed_keys is None or _cached_param_types is None:
     _cached_allowed_keys = {k for k, _, _, _ in starpilot_default_params if k not in EXCLUDED_KEYS}
 
     types = {}
@@ -4944,10 +4939,6 @@ def setup(app):
       response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
       response.headers["Pragma"] = "no-cache"
       response.headers["Expires"] = "0"
-    if request.path == "/api/bluetooth/status" or request.path.startswith("/api/bluetooth/"):
-      response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
-      response.headers["Pragma"] = "no-cache"
-      response.headers["Expires"] = "0"
     return response
 
   @app.errorhandler(404)
@@ -4969,7 +4960,7 @@ def setup(app):
   @app.route("/api/bluetooth/status", methods=["GET"])
   def bluetooth_status():
     try:
-      status = BluetoothClient(timeout=10.0).status()
+      status = BluetoothClient(timeout=3.0).status()
       return jsonify(BluetoothClient.serialize_status(status)), 200
     except Exception as error:
       return jsonify({
@@ -5184,6 +5175,12 @@ def setup(app):
       "icons": [],
     }), 200
 
+  @app.route("/api/vehicle/drive_mode", methods=["GET"])
+  def vehicle_drive_mode():
+    from openpilot.starpilot.system.uniden_shm import get_shm_param
+    mode = str(get_shm_param("DriveMode", "Normal") or "Normal")
+    return jsonify({"drive_mode": mode})
+
   @app.route("/api/car_features_check", methods=["GET"])
   def car_features_check():
     tool = request.args.get("tool")
@@ -5235,6 +5232,58 @@ def setup(app):
   @app.route("/api/doors/unlock", methods=["POST"])
   def unlock_doors():
     return _send_door_command(UNLOCK_CMD, False, "Doors unlocked!", "unlock")
+
+  @app.route("/api/doors/settings", methods=["GET"])
+  def get_doors_settings():
+    try:
+      lock_doors = params.get_bool("LockDoors")
+      unlock_doors = params.get_bool("UnlockDoors")
+      lock_timer_raw = params.get("LockDoorsTimer")
+      try:
+        lock_timer = int(lock_timer_raw) if lock_timer_raw is not None else 0
+      except (ValueError, TypeError):
+        lock_timer = 0
+      return jsonify({
+        "lockDoors": lock_doors,
+        "unlockDoors": unlock_doors,
+        "lockDoorsTimer": lock_timer,
+      })
+    except Exception as e:
+      return jsonify({"error": str(e)}), 500
+
+  @app.route("/api/doors/settings", methods=["POST"])
+  def set_doors_settings():
+    try:
+      data = request.get_json() or {}
+      if "lockDoors" in data:
+        params.put_bool("LockDoors", bool(data["lockDoors"]))
+        params.put_bool("ToyotaDoors", True)
+      if "unlockDoors" in data:
+        params.put_bool("UnlockDoors", bool(data["unlockDoors"]))
+        params.put_bool("ToyotaDoors", True)
+      if "lockDoorsTimer" in data:
+        try:
+          timer_val = int(data["lockDoorsTimer"])
+          params.put_int("LockDoorsTimer", timer_val)
+        except (ValueError, TypeError):
+          pass
+
+      params_memory = Params(memory=True)
+      params_memory.put_bool("StarPilotTogglesUpdated", True)
+
+      lock_timer_raw = params.get("LockDoorsTimer")
+      try:
+        lock_timer = int(lock_timer_raw) if lock_timer_raw is not None else 0
+      except (ValueError, TypeError):
+        lock_timer = 0
+
+      return jsonify({
+        "lockDoors": params.get_bool("LockDoors"),
+        "unlockDoors": params.get_bool("UnlockDoors"),
+        "lockDoorsTimer": lock_timer,
+      })
+    except Exception as e:
+      return jsonify({"error": str(e)}), 500
 
   @app.route("/api/error_logs", methods=["GET"])
   def get_error_logs():
@@ -5981,10 +6030,11 @@ def setup(app):
   def get_all_params():
     migrate_cancel_button_controls(params)
     allowed_keys, types = _get_param_type_info()
+    types = types or {}
     defaults_lookup = _get_default_param_values()
 
     result = {}
-    for key in allowed_keys:
+    for key in (allowed_keys or ()):
       t = types.get(key, str)
       try:
         result[key] = _get_current_param_value(key, t, defaults_lookup)
@@ -6337,10 +6387,13 @@ def setup(app):
 
     selected_entries = get_selected_map_entries(selected_raw)
     selected_locations = [entry["token"] for entry in selected_entries]
-    size_cache = load_maps_storage_cache(params.get(MAPS_DOWNLOAD_SIZE_CACHE_PARAM, encoding="utf-8") or "")
-    storage_known = size_cache.storage_known
-    storage_bytes = size_cache.storage_bytes if storage_known else 0
-    maps_present = bool(size_cache.maps_present)
+    maps_present = MAPS_PATH.exists() and any(path.is_file() for path in MAPS_PATH.rglob("*"))
+    storage_bytes = 0
+    if MAPS_PATH.exists():
+      try:
+        storage_bytes = sum(path.stat().st_size for path in MAPS_PATH.rglob("*") if path.is_file())
+      except Exception:
+        storage_bytes = 0
 
     selected_key = selection_key(selected_locations)
     raw_progress = params_memory.get(MAPS_DOWNLOAD_PROGRESS_PARAM, encoding="utf-8") or ""
@@ -6351,13 +6404,10 @@ def setup(app):
     if not isinstance(download_progress, dict):
       download_progress = {}
 
-    if params_memory.get_bool(MAPS_DOWNLOAD_PARAM) and "storageBytes" in download_progress:
-      storage_known = bool(download_progress.get("storageKnown", True))
-      storage_bytes = nonnegative_int(download_progress.get("storageBytes", 0)) if storage_known else 0
-      maps_present = storage_bytes > 0 if storage_known else False
-
     if not params_memory.get_bool(MAPS_DOWNLOAD_PARAM) and selected_key and download_progress.get("selectedKey") != selected_key:
-      cached_bytes = size_cache.selection_estimate_bytes(selected_key)
+      size_cache = load_size_cache(params.get(MAPS_DOWNLOAD_SIZE_CACHE_PARAM, encoding="utf-8") or "")
+      cached_entry = size_cache.get(selected_key, {})
+      cached_bytes = nonnegative_int(cached_entry.get("downloadBytes", 0)) if isinstance(cached_entry, dict) else 0
       if cached_bytes > 0:
         download_progress = {
           "active": False,
@@ -6366,7 +6416,7 @@ def setup(app):
           "downloadedBytes": 0,
           "downloadedFiles": 0,
           "estimatedDownloadBytes": cached_bytes,
-          "estimateSource": "previous_additional_storage",
+          "estimateSource": "previous_download",
           "etaSeconds": 0,
           "percent": 0,
           "phase": "idle",
@@ -6374,9 +6424,8 @@ def setup(app):
           "selectedKey": selected_key,
           "selectedLocations": selected_locations,
           "storageBytes": storage_bytes,
-          "storageKnown": storage_known,
-          "totalFiles": size_cache.selection_total_files(selected_key),
-          "updatedAt": size_cache.selection_updated_at(selected_key),
+          "totalFiles": nonnegative_int(cached_entry.get("totalFiles", 0)),
+          "updatedAt": cached_entry.get("updatedAt", ""),
           "bytesPerSecond": 0,
         }
       else:
@@ -6395,7 +6444,6 @@ def setup(app):
           "selectedKey": selected_key,
           "selectedLocations": selected_locations,
           "storageBytes": storage_bytes,
-          "storageKnown": storage_known,
           "totalFiles": 0,
           "updatedAt": "",
           "bytesPerSecond": 0,
@@ -6411,7 +6459,6 @@ def setup(app):
       "isOnroad": params.get_bool("IsOnroad"),
       "lastUpdate": params.get("LastMapsUpdate", encoding="utf-8") or "Never",
       "mapsPresent": maps_present,
-      "storageKnown": storage_known,
       "scheduleLabel": schedule_label(params.get("PreferredSchedule")),
       "scheduleOptions": MAP_SCHEDULE_OPTIONS,
       "scheduleValue": schedule_param_value(params.get("PreferredSchedule")),
@@ -6497,11 +6544,6 @@ def setup(app):
 
     if MAPS_PATH.exists():
       shutil.rmtree(MAPS_PATH, ignore_errors=True)
-
-    size_cache = load_maps_storage_cache(params.get(MAPS_DOWNLOAD_SIZE_CACHE_PARAM, encoding="utf-8") or "")
-    size_cache.clear()
-    params.put(MAPS_DOWNLOAD_SIZE_CACHE_PARAM, size_cache.to_json())
-    params_memory.remove(MAPS_DOWNLOAD_PROGRESS_PARAM)
 
     return jsonify({"message": "Maps removed.", "status": _get_maps_status_payload()}), 200
 
@@ -9176,6 +9218,30 @@ def setup(app):
     })
 
 
+  # Uniden R4 Radar Detector Endpoints
+  @app.route("/api/uniden/settings", methods=["GET"])
+  def uniden_get_settings():
+    from starpilot.system.uniden_r4 import get_all_settings
+    return jsonify(get_all_settings())
+
+  @app.route("/api/uniden/settings", methods=["POST"])
+  def uniden_update_settings():
+    from starpilot.system.uniden_r4 import update_settings
+    data = request.get_json(silent=True) or {}
+    updated = update_settings(data)
+    return jsonify({"success": True, "settings": updated})
+
+  @app.route("/api/uniden/status", methods=["GET"])
+  def uniden_get_status():
+    from starpilot.system.uniden_r4 import get_connection_status
+    return jsonify(get_connection_status())
+
+  @app.route("/api/uniden/action/<action>", methods=["POST"])
+  def uniden_action(action):
+    from starpilot.system.uniden_r4 import trigger_action
+    result = trigger_action(action)
+    return jsonify(result)
+
   # Live Road Alerts Endpoints
   @app.route("/api/road_alerts/live", methods=["GET"])
   def road_alerts_get_live():
@@ -9256,8 +9322,11 @@ def setup(app):
   def road_alerts_update_settings():
     from starpilot.system.uniden_shm import set_shm_param
     data = request.get_json(silent=True) or {}
+    if "key" in data and "value" in data and len(data) <= 3:
+      set_shm_param(str(data["key"]), data["value"])
     for k, v in data.items():
-      set_shm_param(k, v)
+      if k not in ("key", "value"):
+        set_shm_param(k, v)
     return jsonify({"success": True, "settings": data})
 
   @app.route("/api/road_alerts/action/<action>", methods=["POST"])
@@ -9448,17 +9517,21 @@ def setup(app):
     return {"error": "Video not found"}, 404
 
 def main():
+  import logging
+  logging.getLogger("werkzeug").setLevel(logging.ERROR)
+
   while not _ensure_galaxy_web_deps():
     print(f"The Galaxy waiting for Flask dependency ({_GALAXY_WEB_DEPS_ERROR}); retrying in 60s.")
     time.sleep(60)
 
   app = Flask(__name__, static_folder="assets", static_url_path="/assets")
+  app.logger.setLevel(logging.ERROR)
   setup(app)
   threading.Thread(target=_testing_ground_custom_reserved_worker, daemon=True).start()
 
   # Desktop-only debug mode. On-device must stay on 8082 to match Galaxy FRP routing.
   on_device = _is_comma_device_runtime()
-  debug = False if on_device else os.getenv("SP_GALAXY_DEBUG", "1").lower() in {"1", "true", "yes", "on"}
+  debug = False if on_device else os.getenv("SP_GALAXY_DEBUG", "0").lower() in {"1", "true", "yes", "on"}
   port = 8082 if on_device else int(os.getenv("SP_GALAXY_PORT", "8083"))
   host = "0.0.0.0" if on_device else os.getenv("SP_GALAXY_HOST", "0.0.0.0")
   use_reloader = False if on_device else os.getenv("SP_GALAXY_RELOAD", "0" if not debug else "1").lower() in {"1", "true", "yes", "on"}

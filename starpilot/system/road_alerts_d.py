@@ -178,12 +178,19 @@ class WazeSessionManager:
                 batch_res.ParseFromString(r_login.content)
                 for el in batch_res.element:
                     if el.HasField("login_response"):
-                        self.session_id = el.login_response.session_id
-                        self.secret_key = el.login_response.secret_key
-                        set_shm_param("WazeSessionId", str(self.session_id))
-                        set_shm_param("WazeSecretKey", str(self.secret_key))
-                        set_shm_param("WazeAuthStatus", f"Guest Active (ID: {self.session_id})")
-                        return True
+                        resp = el.login_response
+                        if resp.HasField("login_success"):
+                            self.server_session_id = resp.login_success.server_session_id
+                            self.session_id = resp.login_success.session_id
+                            self.secret_key = resp.login_success.secret_key
+                            set_shm_param("WazeSessionId", str(self.server_session_id or self.session_id))
+                            set_shm_param("WazeSecretKey", str(self.secret_key))
+                            set_shm_param("WazeAuthStatus", f"Guest Active (ID: {self.server_session_id or self.session_id})")
+                            return True
+                        elif resp.HasField("login_error"):
+                            err_msg = str(resp.login_error)
+                            set_shm_param("WazeAuthStatus", f"Login Error: {err_msg}")
+                            return False
 
             set_shm_param("WazeAuthStatus", "Login challenge failed. Retrying...")
             return False
@@ -224,7 +231,7 @@ class WazeSessionManager:
 
         uid = waze_pb2.UID()
         try:
-            uid.id = int(self.session_id)
+            uid.id = int(getattr(self, "server_session_id", None) or self.session_id)
         except Exception:
             uid.id = 0
         uid.secret_key = str(self.secret_key)
@@ -528,8 +535,8 @@ class RoadAlertsDaemon:
 
             # 1. Waze Police Auto-Slowdown
             slowdown_police = get_shm_param("WazePoliceAutoSlowdown", True)
-            min_confirmations = get_shm_param("WazePoliceMinConfirmations", 2)
-            trigger_distance = get_shm_param("WazePoliceTriggerDistance", 1.0)
+            min_confirmations = int(get_shm_param("WazePoliceMinConfirmations", 3) or 3)
+            trigger_distance = float(get_shm_param("WazePoliceTriggerDistance", 1.0) or 1.0)
 
             police_active = False
             police_dist = 0.0
