@@ -234,8 +234,8 @@ export function RoadAlerts() {
         </div>
       `}
 
-      <!-- 3. Waze Session & Token Management (Collapsible, open by default) -->
-      <details class="road-card" open>
+      <!-- 3. Waze Session & Token Management (Collapsible, collapsed by default) -->
+      <details class="road-card">
         <summary class="road-card-title">
           <span><i class="bi bi-person-badge text-info"></i> Waze Session & Token Management</span>
           <i class="bi bi-chevron-down toggle-arrow"></i>
@@ -303,8 +303,8 @@ export function RoadAlerts() {
         </div>
       </details>
 
-      <!-- 4. Unified Road Alert & Police Auto-Slowdown (Collapsible, open by default) -->
-      <details class="road-card" open>
+      <!-- 4. Unified Road Alert & Police Auto-Slowdown (Collapsible, collapsed by default) -->
+      <details class="road-card">
         <summary class="road-card-title">
           <span><i class="bi bi-speedometer2 text-danger"></i> Road Alert & Police Auto-Slowdown</span>
           <i class="bi bi-chevron-down toggle-arrow"></i>
@@ -427,8 +427,8 @@ export function RoadAlerts() {
         </div>
       </details>
 
-      <!-- 5. Incident Category Display Filters (Collapsible, open by default) -->
-      <details class="road-card" open>
+      <!-- 5. Incident Category Display Filters (Collapsible, collapsed by default) -->
+      <details class="road-card">
         <summary class="road-card-title">
           <span><i class="bi bi-funnel-fill text-warning"></i> Incident Category Display Filters</span>
           <i class="bi bi-chevron-down toggle-arrow"></i>

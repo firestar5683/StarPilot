@@ -1,5 +1,5 @@
 import { UnidenR4View } from "/assets/components/tools/uniden_r4.js?v=20260903"
-import { RoadAlertsView } from "/assets/components/tools/road_alerts.js?v=20260903b"
+import { RoadAlertsView } from "/assets/components/tools/road_alerts.js?v=20260903-collapsed"
 import { html, reactive } from "/assets/vendor/arrow-core.js"
 import { createBrowserHistory, createRouter } from "/assets/vendor/remix-router-1.3.1.js"
 import { hideSidebar } from "/assets/js/utils.js"
