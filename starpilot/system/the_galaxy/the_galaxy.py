@@ -9121,7 +9121,9 @@ def setup(app):
     capture_file = cpu_capture.CAPTURE_FILE
     if not capture_file.exists():
       return jsonify({"error": "No CPU capture available yet."}), 404
-    return send_from_directory(str(capture_file.parent), capture_file.name, as_attachment=True)
+    timestamp = datetime.now().strftime("%Y-%m-%d_%H-%M-%S")
+    download_name = f"{capture_file.stem}_{timestamp}{capture_file.suffix}"
+    return send_from_directory(str(capture_file.parent), capture_file.name, as_attachment=True, download_name=download_name)
 
   @app.route("/api/cpu_captures", methods=["DELETE"])
   def delete_cpu_capture():
