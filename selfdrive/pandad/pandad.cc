@@ -45,8 +45,7 @@ ExitHandler do_exit;
 
 static uint64_t last_door_lock_command_time = 0;
 
-static bool is_tesla_preap(Params &params) {
-  const std::string car_params = params.get("CarParams");
+static bool is_tesla_preap(const std::string &car_params) {
   if (car_params.empty()) {
     return false;
   }
@@ -483,6 +482,8 @@ void pandad_run(std::vector<Panda *> &pandas) {
   Panda *peripheral_panda = pandas[0];
   bool engaged = false;
   bool is_onroad = false;
+  bool tesla_preap = false;
+  bool tesla_preap_checked = false;
 
   // Main loop: receive CAN data and process states
   while (!do_exit && check_all_connected(pandas)) {
@@ -496,7 +497,14 @@ void pandad_run(std::vector<Panda *> &pandas) {
     // Process panda state at 10 Hz
     if (rk.frame() % 10 == 0) {
       sm.update(0);
-      const bool preap_aol_engaged = is_tesla_preap(params) &&
+      if (!tesla_preap_checked) {
+        const std::string car_params = params.get("CarParams");
+        if (!car_params.empty()) {
+          tesla_preap = is_tesla_preap(car_params);
+          tesla_preap_checked = true;
+        }
+      }
+      const bool preap_aol_engaged = tesla_preap &&
                                      sm["starpilotCarState"].getStarpilotCarState().getAlwaysOnLateralEnabled();
       engaged = sm.allAliveAndValid({"selfdriveState", "starpilotCarState"}) && (
         sm["selfdriveState"].getSelfdriveState().getEnabled() || preap_aol_engaged
