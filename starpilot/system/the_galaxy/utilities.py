@@ -2834,7 +2834,7 @@ def _read_uptime_seconds():
 
 
 _CPU_USAGE_SNAPSHOT = {"total": None, "idle": None, "value": None}
-_CPU_USAGE_SAMPLE_SECONDS = 0.1
+_CPU_USAGE_SAMPLE_SECONDS = 0.5
 
 
 def _read_cpu_times(stat_path=None):
