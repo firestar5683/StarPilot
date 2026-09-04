@@ -151,7 +151,7 @@ function fallbackDashboard(data, unit) {
       longestUndistractedDrive: { value: "0.0 hours", detail: "No clean drives" },
       cleanDriveStreak: { value: "0 drives", detail: "No clean drives" },
     },
-    device: { status: "Parked", online: true, uptimeSeconds: null, cpuTempC: null, cpuUsagePercent: null, gpuTempC: null },
+    device: { status: "Parked", online: true, uptimeSeconds: null, cpuTempC: null, cpuUsagePercent: null, gpuTempC: null, cpuCapture: { exists: false } },
     storage: {
       freeBytes: 0,
       usedBytes: 0,
@@ -441,7 +441,25 @@ function renderVitals(device) {
         <div><span>CPU temp / usage</span><strong>${escapeHtml(`${cpuTemp} / ${cpuUsage}`)}</strong></div>
         <div><span>GPU temp</span><strong>${escapeHtml(gpuTemp)}</strong></div>
       </div>
+      ${renderCpuCapture(device.cpuCapture)}
     </section>
+  `;
+}
+
+function renderCpuCapture(capture) {
+  if (!capture || !capture.exists) {
+    return `<div class="dashboard-cpu-capture"><span>CPU capture</span><em>No capture recorded yet</em></div>`;
+  }
+  const rows = capture.rows == null ? "?" : capture.rows;
+  const size = capture.sizeBytes == null ? "" : ` (${formatBytes(capture.sizeBytes)})`;
+  return `
+    <div class="dashboard-cpu-capture">
+      <span>CPU capture</span>
+      <strong>${escapeHtml(`${rows} samples${size}`)}</strong>
+      <a class="dashboard-cpu-capture-download" href="/api/cpu_captures/download" download>
+        <i class="bi bi-download"></i> Download CSV
+      </a>
+    </div>
   `;
 }
 

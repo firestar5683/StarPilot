@@ -3,7 +3,8 @@
     "allow": [
       "Bash(python3 -c \"import json; json.load\\(open\\(r'c:\\\\Users\\\\user\\\\Documents\\\\GitHub\\\\openpilot\\\\starpilot\\\\system\\\\the_pond\\\\assets\\\\components\\\\tools\\\\device_settings_layout.json'\\)\\)\")",
       "Bash(python3 -m py_compile \"c:\\\\Users\\\\user\\\\Documents\\\\GitHub\\\\openpilot\\\\starpilot\\\\controls\\\\lib\\\\starpilot_vcruise.py\")",
-      "Bash(python3 -m py_compile \"c:\\\\Users\\\\user\\\\Documents\\\\GitHub\\\\openpilot\\\\selfdrive\\\\ui\\\\layouts\\\\settings\\\\starpilot\\\\longitudinal.py\")"
+      "Bash(python3 -m py_compile \"c:\\\\Users\\\\user\\\\Documents\\\\GitHub\\\\openpilot\\\\selfdrive\\\\ui\\\\layouts\\\\settings\\\\starpilot\\\\longitudinal.py\")",
+      "Bash(ssh *)"
     ]
   }
 }

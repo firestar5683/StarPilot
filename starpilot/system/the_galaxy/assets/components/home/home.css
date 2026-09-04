@@ -587,6 +587,28 @@
   height: 0.72rem;
 }
 
+.dashboard-cpu-capture {
+  align-items: center;
+  border-top: 1px solid rgba(255, 255, 255, 0.08);
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.6rem;
+  justify-content: space-between;
+  padding-top: 0.85rem;
+}
+
+.dashboard-cpu-capture em {
+  color: var(--dashboard-strong);
+  opacity: 0.7;
+}
+
+.dashboard-cpu-capture-download {
+  align-items: center;
+  display: inline-flex;
+  gap: 0.35rem;
+  text-decoration: none;
+}
+
 .dashboard-key-values,
 .dashboard-software-list {
   display: grid;

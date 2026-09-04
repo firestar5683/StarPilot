@@ -2976,9 +2976,18 @@ def _build_device_summary(params_obj):
     "cpuTempC": cpu_temp_c,
     "gpuTempC": gpu_temp_c,
     "cpuUsagePercent": cpu_usage_percent,
+    "cpuCapture": _cpu_capture_status(),
     "lanIp": lan_ip,
     "networkName": network_name,
   }
+
+
+def _cpu_capture_status():
+  try:
+    from openpilot.starpilot.system.the_galaxy import cpu_capture
+    return cpu_capture.capture_status()
+  except Exception:
+    return {"exists": False}
 
 
 def _build_favorite_models(params_obj, persistent_stats=None):
