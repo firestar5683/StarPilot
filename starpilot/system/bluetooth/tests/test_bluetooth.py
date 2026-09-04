@@ -295,6 +295,7 @@ def test_companion_protocol_is_read_only_and_versioned():
   protocol = CompanionProtocol(params, clock=lambda: 1234.9)
 
   status = json.loads(protocol.status_bytes())
+  assert isinstance(status["param_revision"], int) and status["param_revision"] > 0
   assert LIVE_PATH_FRAME_RATE_HZ == 0
   assert LIVE_TOTAL_FRAME_RATE_HZ == 12
   assert LIVE_TOTAL_NOTIFICATION_RATE_HZ == 48
@@ -315,6 +316,7 @@ def test_companion_protocol_is_read_only_and_versioned():
       "notification_rate_hz": LIVE_TOTAL_NOTIFICATION_RATE_HZ,
     },
     "onroad": False,
+    "param_revision": status["param_revision"],
     "protocol_version": COMPANION_PROTOCOL_VERSION,
     "version": STARPILOT_DISPLAY_VERSION,
   }
@@ -348,6 +350,42 @@ def test_companion_reads_and_writes_editable_params():
 
   read = _call(protocol, {"id": "r", "op": "get_params", "keys": [bool_key]})
   assert read["ok"] and read["data"][bool_key] is True
+
+
+def test_companion_param_revision_and_delta_reads_track_external_changes():
+  editable = load_editable_params()
+  keys = [key for key, meta in editable.items() if meta["data_type"] == "bool"][:2]
+  assert len(keys) == 2
+  params = FakeParams(IsOffroad=True, **dict.fromkeys(keys, False))
+  protocol = CompanionProtocol(params, clock=lambda: 0)
+
+  initial_revision = protocol.status()["param_revision"]
+  full = _call(protocol, {"id": "full", "op": "get_params", "keys": keys, "since": 0})
+  assert full["data"] == dict.fromkeys(keys, False)
+  unchanged = _call(protocol, {"id": "same", "op": "get_params", "keys": keys, "since": initial_revision})
+  assert unchanged["data"] == {}
+
+  params.put_bool(keys[0], True)  # Simulate an on-device/web write.
+  changed_revision = protocol.status()["param_revision"]
+  assert changed_revision > initial_revision
+  delta = _call(protocol, {"id": "delta", "op": "get_params", "keys": keys, "since": initial_revision})
+  assert delta["data"] == {keys[0]: True}
+
+  params.put_bool(keys[1], False)
+  assert protocol.status()["param_revision"] == changed_revision
+
+  params.remove(keys[0])
+  removed_revision = protocol.status()["param_revision"]
+  assert removed_revision > changed_revision
+  removed = _call(protocol, {"id": "removed", "op": "get_params", "keys": keys, "since": changed_revision})
+  assert removed["data"] == {keys[0]: None}
+
+
+def test_companion_rejects_invalid_param_revision():
+  key = next(iter(load_editable_params()))
+  protocol = CompanionProtocol(FakeParams(IsOffroad=True), clock=lambda: 0)
+  response = _call(protocol, {"id": "bad", "op": "get_params", "keys": [key], "since": -1})
+  assert not response["ok"] and "non-negative integer" in response["error"]
 
 
 def test_companion_rejects_non_editable_and_bad_reads():

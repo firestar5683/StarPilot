@@ -33,6 +33,26 @@ Companion API v2 adds the Live state characteristic while keeping the existing
 it is a separate wire format; changing one version does not automatically change
 the other.
 
+## Revision-based settings sync
+
+The status payload includes `param_revision`, a monotonic integer representing
+the current persistent Params state. It changes when any persistent parameter
+changes, including writes from the companion app, the on-device UI, or another
+local service.
+
+`get_params` accepts an optional non-negative integer `since` alongside its
+existing `keys` array:
+
+```json
+{"op":"get_params","keys":["ExampleToggle","ExampleValue"],"since":123}
+```
+
+When `since` is absent or zero, the response contains every requested allow-listed
+value. Otherwise, it contains only requested values modified after that revision.
+A changed value that has since been removed is returned as `null`. Clients use
+the status characteristic's `param_revision` as the authoritative revision and
+must only save it after every requested batch completes successfully.
+
 `get_status` also advertises the live UUID, frame and notification sizes,
 fragment count, and publication rate. It additionally advertises
 `live.frame_types` (`[1, 2]`) and `live.health_rate_hz` (`2`) so a client can

@@ -2,8 +2,9 @@ import json
 import math
 import queue
 import threading
+import time
 
-from collections.abc import Callable
+from collections.abc import Callable, Iterable
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -132,6 +133,85 @@ def _coerce_param_value(data_type: str, value: Any) -> Any:
   return str(value)
 
 
+class ParamRevisionTracker:
+  """Track global Params changes and per-companion-key modification revisions."""
+
+  def __init__(self, params: Params):
+    self.params = params
+    self._lock = threading.Lock()
+    self._revision = time.time_ns()
+    self._signature = self._params_signature()
+    self._file_values = self._read_param_files(self._signature) if self._signature is not None else None
+    self._values = self._read_editable_values()
+    self._modified = dict.fromkeys(self._values, self._revision)
+
+  def _params_signature(self) -> dict[str, tuple[int, int, int]] | None:
+    try:
+      root = Path(self.params.get_param_path())
+      return {
+        entry.name: (stat.st_ino, stat.st_size, stat.st_mtime_ns)
+        for entry in root.iterdir()
+        if entry.is_file() and not entry.name.startswith(".tmp_")
+        for stat in (entry.stat(),)
+      }
+    except (AttributeError, OSError):
+      return None
+
+  def _read_param_files(self, names: Iterable[str]) -> dict[str, bytes]:
+    try:
+      root = Path(self.params.get_param_path())
+      return {name: (root / name).read_bytes() for name in names if (root / name).is_file()}
+    except (AttributeError, OSError):
+      return {}
+
+  def _read_editable_values(self) -> dict[str, Any]:
+    values: dict[str, Any] = {}
+    for key, meta in load_editable_params().items():
+      raw = self.params.get(key, encoding="utf-8")
+      if isinstance(raw, bytes):
+        raw = raw.decode("utf-8", errors="ignore")
+      values[key] = (meta["data_type"], raw)
+    return values
+
+  def refresh(self) -> int:
+    with self._lock:
+      signature = self._params_signature()
+      if signature is not None and signature == self._signature:
+        return self._revision
+
+      values = self._read_editable_values()
+      changed_keys = {key for key in self._values.keys() | values.keys() if self._values.get(key) != values.get(key)}
+      global_change = bool(changed_keys)
+      if signature is not None and self._signature is not None and self._file_values is not None:
+        metadata_changes = {
+          key for key in self._signature.keys() | signature.keys()
+          if self._signature.get(key) != signature.get(key)
+        }
+        current_files = self._read_param_files(metadata_changes)
+        missing = object()
+        global_change = global_change or any(
+          self._file_values.get(key, missing) != current_files.get(key, missing)
+          for key in metadata_changes
+        )
+        for key in metadata_changes:
+          if key in current_files:
+            self._file_values[key] = current_files[key]
+          else:
+            self._file_values.pop(key, None)
+
+      if global_change:
+        self._revision += 1
+        for key in changed_keys:
+          self._modified[key] = self._revision
+
+      self._signature = signature
+      self._values = values
+      return self._revision
+
+  def changed_after(self, key: str, revision: int) -> bool:
+    return self._modified.get(key, 0) > revision
+
+
 class CompanionProtocol:
   """Versioned, allow-listed protocol for a bonded phone."""
 
@@ -143,17 +223,20 @@ class CompanionProtocol:
     self._publisher_factory = publisher_factory
     self._publisher = None
     self._publisher_lock = threading.Lock()
+    self._param_revisions = ParamRevisionTracker(self.params)
     self._live_lock = threading.Lock()
     self._live_listeners: set[Callable[[bytes], None]] = set()
     self._live_frame = LiveSnapshot().pack(0, 0)
 
   def status(self) -> dict[str, Any]:
+    param_revision = self._param_revisions.refresh()
     return {
       "protocol_version": COMPANION_PROTOCOL_VERSION,
       "device": "StarPilot",
       "version": STARPILOT_DISPLAY_VERSION,
       "branch": _param_text(self.params, "GitBranch"),
       "onroad": not self.params.get_bool("IsOffroad"),
+      "param_revision": param_revision,
       "live": {
         "uuid": COMPANION_LIVE_UUID,
         "protocol_version": LIVE_PROTOCOL_VERSION,
@@ -299,14 +382,20 @@ class CompanionProtocol:
       raise ValueError("get_params requires a non-empty 'keys' list")
     if len(keys) > self.MAX_GET_PARAM_KEYS:
       raise ValueError(f"get_params accepts at most {self.MAX_GET_PARAM_KEYS} keys per call")
+    since = request.get("since")
+    if since is not None and (isinstance(since, bool) or not isinstance(since, int) or since < 0):
+      raise ValueError("get_params 'since' must be a non-negative integer")
+    self._param_revisions.refresh()
     editable = load_editable_params()
     values: dict[str, Any] = {}
     for key in keys:
       meta = editable.get(str(key))
       if meta is None:
         continue
+      if since not in (None, 0) and not self._param_revisions.changed_after(str(key), since):
+        continue
       value = self._read_param(str(key), meta["data_type"])
-      if value is not None:
+      if value is not None or since not in (None, 0):
         values[str(key)] = value
     return values
 
@@ -329,6 +418,7 @@ class CompanionProtocol:
       self.params.put_bool(key, stored)
     else:
       self.params.put(key, stored)
+    self._param_revisions.refresh()
     self._refresh_toggles()
     return {"key": key, "applied": True}
 
