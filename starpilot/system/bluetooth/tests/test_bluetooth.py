@@ -13,6 +13,7 @@ import pytest
 from jeepney import DBusAddress, new_method_call
 
 from openpilot.starpilot.system.bluetooth.audio import BluetoothAudioSink
+from openpilot.starpilot.system.bluetooth import live as live_module
 from openpilot.starpilot.system.bluetooth.bluez import BlueZClient, BlueZError, PairingAgent
 from openpilot.starpilot.system.bluetooth.companion import (
   ADVERTISEMENT_IFACE, COMPANION_ADVERTISEMENT_PATH, COMPANION_APP_PATH, COMPANION_COMMAND_PATH, COMPANION_PROTOCOL_VERSION,
@@ -558,13 +559,14 @@ def test_live_publisher_uses_driving_model_data_only():
   assert "modelV2" not in LiveTelemetryPublisher.SERVICES
 
 
-def test_health_snapshot_packs_device_state_and_flags():
+def test_health_snapshot_packs_online_cpu_average_and_flags(monkeypatch):
+  monkeypatch.setattr(live_module, "_online_cpu_indices", lambda: [0, 1, 2, 3])
   params = FakeParams(IsOffroad=False)
   monotonic_ns = 100_000_000_000
   sm = FakeSubMaster(
     deviceState=SimpleNamespace(
       started=True,
-      cpuUsagePercent=[10, 55, 30, 40], gpuUsagePercent=42, memoryUsagePercent=61, freeSpacePercent=73.4,
+      cpuUsagePercent=[10, 55, 30, 40, 100, 100, 100, 100], gpuUsagePercent=42, memoryUsagePercent=61, freeSpacePercent=73.4,
       cpuTempC=[48.5, 51.2], gpuTempC=[44.0], memoryTempC=47.5, maxTempC=52.0, intakeTempC=33.0,
       thermalStatus=0, fanSpeedPercentDesired=30, powerDrawW=12.5, somPowerDrawW=8.25,
       carBatteryCapacityUwh=20_000_000, screenBrightnessPercent=80,
@@ -581,7 +583,7 @@ def test_health_snapshot_packs_device_state_and_flags():
     LIVE_FRAME_MAGIC, LIVE_PROTOCOL_VERSION, LIVE_FRAME_TYPE_HEALTH, LIVE_FRAME_SIZE, 321, 0x0BADCAFE, snapshot.flags,
   )
   payload = struct.unpack_from("<4B5h2B3H4BI18x", frame, 16)
-  assert payload == (55, 42, 61, 73, 512, 440, 475, 520, 330, 0, 30, 1250, 825, 200, 80, 1, 4, 0, 100)
+  assert payload == (34, 42, 61, 73, 512, 440, 475, 520, 330, 0, 30, 1250, 825, 200, 80, 1, 4, 0, 100)
 
   flags = HealthFlags(snapshot.flags)
   for expected in (HealthFlags.ONROAD, HealthFlags.WIFI_CONNECTED, HealthFlags.LOCAL_NON_METERED_LINK,

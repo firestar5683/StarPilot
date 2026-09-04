@@ -1,4 +1,5 @@
 import math
+from pathlib import Path
 import struct
 import threading
 import time
@@ -233,6 +234,37 @@ def _max_finite(values: Any, default: float = 0.0) -> float:
   except (TypeError, ValueError):
     return _finite(values, default)
   return max(finite) if finite else default
+
+
+def _online_cpu_indices() -> list[int] | None:
+  try:
+    spec = Path("/sys/devices/system/cpu/online").read_text(encoding="utf-8").strip()
+    indices = []
+    for group in spec.split(","):
+      bounds = group.split("-", maxsplit=1)
+      first = int(bounds[0])
+      last = int(bounds[-1])
+      if last < first:
+        return None
+      indices.extend(range(first, last + 1))
+    return indices or None
+  except (OSError, ValueError):
+    return None
+
+
+def _average_online_cpu_usage(values: Any, default: float = 0.0) -> float:
+  """Reduce per-CPU usage to an aggregate percentage for the online CPUs."""
+  try:
+    usage = [float(value) for value in values]
+  except (TypeError, ValueError):
+    return _finite(values, default)
+
+  online_indices = _online_cpu_indices()
+  if online_indices is not None:
+    usage = [usage[index] for index in online_indices if index < len(usage)]
+
+  finite = [value for value in usage if math.isfinite(value)]
+  return sum(finite) / len(finite) if finite else default
 
 
 def _pack_live_header(frame_type: int, sequence: int, monotonic_ms: int, flags: int) -> bytes:
@@ -650,7 +682,7 @@ def build_health_snapshot(sm: Any, params: Params, monotonic_ns: int = 0) -> Hea
 
   return HealthSnapshot(
     flags=int(flags),
-    cpu_usage=round(_max_finite(getattr(device_state, "cpuUsagePercent", ()))),
+    cpu_usage=round(_average_online_cpu_usage(getattr(device_state, "cpuUsagePercent", ()))),
     gpu_usage=int(_finite(getattr(device_state, "gpuUsagePercent", 0))),
     memory_usage=int(_finite(getattr(device_state, "memoryUsagePercent", 0))),
     free_storage=round(free_storage),

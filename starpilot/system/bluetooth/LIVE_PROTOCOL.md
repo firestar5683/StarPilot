@@ -202,7 +202,7 @@ values are little-endian and SI (temps in °C, power in W).
 | 6 | `uint16` | sequence | wraps naturally |
 | 8 | `uint32` | monotonic time | milliseconds |
 | 12 | `uint32` | health flags | bitmask below |
-| 16 | `uint8` | CPU usage % | 0–100 (max of per-core list) |
+| 16 | `uint8` | CPU usage % | 0–100 (average of currently online cores) |
 | 17 | `uint8` | GPU usage % | 0–100 |
 | 18 | `uint8` | memory usage % | 0–100 |
 | 19 | `uint8` | free storage % | 0–100 |
