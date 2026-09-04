@@ -22,13 +22,13 @@ from openpilot.starpilot.system.bluetooth.companion import (
 )
 from openpilot.starpilot.system.bluetooth.daemon import COMPANION_BOND_SETTLE_INTERVAL, BluetoothController
 from openpilot.starpilot.system.bluetooth.live import (
-  LIVE_FRAME_MAGIC, LIVE_FRAME_RATE_HZ, LIVE_FRAME_SIZE, LIVE_FRAME_TYPE_HEALTH, LIVE_FRAME_TYPE_PATH,
+  LIVE_FRAME_MAGIC, LIVE_FRAME_RATE_HZ, LIVE_FRAME_SIZE, LIVE_FRAME_TYPE_HEALTH,
   LIVE_FRAME_TYPE_STATE, LIVE_HEALTH_FRAME_RATE_HZ, LIVE_HEALTH_TICK_DIVISOR, LIVE_NOTIFICATION_FRAGMENT_COUNT,
-  LIVE_NOTIFICATION_SIZE, LIVE_PATH_FRAME_RATE_HZ, LIVE_PATH_TICK_PATTERN, LIVE_PROTOCOL_VERSION,
+  LIVE_NOTIFICATION_SIZE, LIVE_PATH_FRAME_RATE_HZ, LIVE_PROTOCOL_VERSION,
   LIVE_TOTAL_FRAME_RATE_HZ, LIVE_TOTAL_NOTIFICATION_RATE_HZ,
   BorderState, ConditionalChillReason, HealthFlags, LiveFlags,
   LiveSnapshot, LiveTelemetryPublisher, ModelSource, build_health_snapshot, build_live_details, build_live_snapshot,
-  build_path_snapshot, live_notification_fragments,
+  live_notification_fragments,
 )
 from openpilot.starpilot.system.bluetooth.protocol import (A2DP_SINK_UUID, HID_UUID, BluetoothClient, BluetoothDevice, BluetoothStatus,
                                                            device_capabilities, show_pairing_device)
@@ -295,9 +295,9 @@ def test_companion_protocol_is_read_only_and_versioned():
   protocol = CompanionProtocol(params, clock=lambda: 1234.9)
 
   status = json.loads(protocol.status_bytes())
-  assert LIVE_PATH_FRAME_RATE_HZ == 4
-  assert LIVE_TOTAL_FRAME_RATE_HZ == 16
-  assert LIVE_TOTAL_NOTIFICATION_RATE_HZ == 64
+  assert LIVE_PATH_FRAME_RATE_HZ == 0
+  assert LIVE_TOTAL_FRAME_RATE_HZ == 12
+  assert LIVE_TOTAL_NOTIFICATION_RATE_HZ == 48
   assert status == {
     "branch": "Dom",
     "device": "StarPilot",
@@ -308,7 +308,7 @@ def test_companion_protocol_is_read_only_and_versioned():
       "notification_fragments": LIVE_NOTIFICATION_FRAGMENT_COUNT,
       "notification_size": LIVE_NOTIFICATION_SIZE,
       "uuid": COMPANION_LIVE_UUID,
-      "frame_types": [LIVE_FRAME_TYPE_STATE, LIVE_FRAME_TYPE_HEALTH, LIVE_FRAME_TYPE_PATH],
+      "frame_types": [LIVE_FRAME_TYPE_STATE, LIVE_FRAME_TYPE_HEALTH],
       "health_rate_hz": LIVE_HEALTH_FRAME_RATE_HZ,
       "path_rate_hz": LIVE_PATH_FRAME_RATE_HZ,
       "total_rate_hz": LIVE_TOTAL_FRAME_RATE_HZ,
@@ -426,7 +426,7 @@ def test_live_snapshot_packs_complete_versioned_driving_state():
     controlsState=SimpleNamespace(longControlState=2, lateralControlState=lateral_state, vCruiseDEPRECATED=0.0),
     radarState=SimpleNamespace(leadOne=SimpleNamespace(status=True, dRel=26.4, vRel=-1.75, modelProb=0.992)),
     longitudinalPlan=SimpleNamespace(aTarget=-0.61, shouldStop=False),
-    modelV2=SimpleNamespace(meta=SimpleNamespace(laneChangeState=2, laneChangeDirection=2)),
+    drivingModelData=SimpleNamespace(meta=SimpleNamespace(laneChangeState=2, laneChangeDirection=2)),
     starpilotCarState=SimpleNamespace(
       alwaysOnLateralEnabled=True, pauseLateral=True, trafficModeEnabled=False, pulseAndGlide=False,
     ),
@@ -476,6 +476,48 @@ def test_live_publisher_sequences_frames():
 
   assert [struct.unpack_from("<H", frame, 6)[0] for frame in frames] == [0, 1]
   assert all(struct.unpack_from("<I", frame, 8)[0] == 12345 for frame in frames)
+
+
+def test_live_publisher_caches_persistent_params_for_one_second():
+  class CountingParams(FakeParams):
+    def __init__(self, **values):
+      super().__init__(**values)
+      self.reads = 0
+
+    def get_bool(self, key):
+      self.reads += 1
+      return super().get_bool(key)
+
+    def get_int(self, key, default=0):
+      self.reads += 1
+      return super().get_int(key, default)
+
+    def get(self, key, encoding=None, **kwargs):
+      self.reads += 1
+      return super().get(key, encoding=encoding, **kwargs)
+
+  now = [0.0]
+  params = CountingParams(IsMetric=False)
+  publisher = LiveTelemetryPublisher(lambda _frame: None, params, FakeParams(), monotonic=lambda: now[0])
+
+  first = publisher.publish_once(FakeSubMaster())
+  first_reads = params.reads
+  params.values["IsMetric"] = True
+  now[0] = 0.5
+  cached = publisher.publish_once(FakeSubMaster())
+  now[0] = 1.0
+  refreshed = publisher.publish_once(FakeSubMaster())
+
+  assert first_reads == 13
+  assert params.reads == 2 * first_reads
+  assert not struct.unpack_from("<I", first, 12)[0] & LiveFlags.METRIC
+  assert not struct.unpack_from("<I", cached, 12)[0] & LiveFlags.METRIC
+  assert struct.unpack_from("<I", refreshed, 12)[0] & LiveFlags.METRIC
+
+
+def test_live_publisher_uses_driving_model_data_only():
+  assert "drivingModelData" in LiveTelemetryPublisher.SERVICES
+  assert "modelV2" not in LiveTelemetryPublisher.SERVICES
 
 
 def test_health_snapshot_packs_device_state_and_flags():
@@ -539,64 +581,23 @@ def test_health_snapshot_reports_offroad_metered_and_low_storage():
   assert not flags & HealthFlags.FAN_ACTIVE
 
 
-def test_path_snapshot_packs_polynomial_and_reassembles_frame():
-  sm = FakeSubMaster(
-    drivingModelData=SimpleNamespace(
-      path=SimpleNamespace(yCoefficients=[0.1, 0.02, -0.003, 0.0004, 0.00005], xCoefficients=[1.0, 2.0, 3.0, 4.0, 5.0]),
-      meta=SimpleNamespace(laneChangeState=1, laneChangeDirection=2),
-      action=SimpleNamespace(desiredCurvature=0.0123),
-    ),
-    controlsState=SimpleNamespace(desiredCurvature=0.0),
-  )
-
-  snapshot = build_path_snapshot(sm)
-  frame = snapshot.pack(64, 0x00C0FFEE)
-
-  assert len(frame) == LIVE_FRAME_SIZE
-  assert struct.unpack_from("<2sBBHHII", frame) == (
-    LIVE_FRAME_MAGIC, LIVE_PROTOCOL_VERSION, LIVE_FRAME_TYPE_PATH, LIVE_FRAME_SIZE, 64, 0x00C0FFEE, 0,
-  )
-  curvature, ny, nx, lane_dir, lane_state = struct.unpack_from("<iBBBB", frame, 16)
-  assert (curvature, ny, nx, lane_dir, lane_state) == (12300, 5, 5, 2, 1)
-  y_coeffs = struct.unpack_from(f"<{ny}f", frame, 24)
-  x_coeffs = struct.unpack_from(f"<{nx}f", frame, 24 + 4 * ny)
-  assert y_coeffs == pytest.approx([0.1, 0.02, -0.003, 0.0004, 0.00005], abs=1e-6)
-  assert x_coeffs == pytest.approx([1.0, 2.0, 3.0, 4.0, 5.0])
-  fragments = live_notification_fragments(frame)
-  assert b"".join(fragment[4:] for fragment in fragments) == frame
-  assert frame[24 + 4 * (ny + nx):] == b"\x00" * (LIVE_FRAME_SIZE - 24 - 4 * (ny + nx))
-
-
-def test_path_snapshot_falls_back_to_controls_state_curvature():
-  sm = FakeSubMaster(controlsState=SimpleNamespace(desiredCurvature=-0.05))
-  snapshot = build_path_snapshot(sm)
-  frame = snapshot.pack(1, 0)
-
-  curvature, ny, nx, _dir, _state = struct.unpack_from("<iBBBB", frame, 16)
-  assert curvature == -50000 and ny == 0 and nx == 0
-
-
 def test_live_publisher_interleaves_frame_types_on_one_sequence():
   publisher = LiveTelemetryPublisher(lambda _frame: None, FakeParams(), FakeParams(), monotonic=lambda: 1.0)
   sm = FakeSubMaster()
 
   state = publisher.publish_once(sm)
-  path = publisher.publish_path_once(sm)
   health = publisher.publish_health_once(sm)
 
-  assert [frame[3] for frame in (state, path, health)] == [LIVE_FRAME_TYPE_STATE, LIVE_FRAME_TYPE_PATH, LIVE_FRAME_TYPE_HEALTH]
-  assert [struct.unpack_from("<H", frame, 6)[0] for frame in (state, path, health)] == [0, 1, 2]
-  assert all(len(frame) == LIVE_FRAME_SIZE for frame in (state, path, health))
+  assert [frame[3] for frame in (state, health)] == [LIVE_FRAME_TYPE_STATE, LIVE_FRAME_TYPE_HEALTH]
+  assert [struct.unpack_from("<H", frame, 6)[0] for frame in (state, health)] == [0, 1]
+  assert all(len(frame) == LIVE_FRAME_SIZE for frame in (state, health))
 
 
-def test_live_optional_frame_slots_match_rates_without_collisions():
+def test_live_health_frame_rate_matches_total():
   health_slots = {tick for tick in range(LIVE_FRAME_RATE_HZ) if tick % LIVE_HEALTH_TICK_DIVISOR == 0}
-  path_slots = set(LIVE_PATH_TICK_PATTERN)
 
-  assert len(path_slots) == LIVE_PATH_FRAME_RATE_HZ
-  assert path_slots.isdisjoint(health_slots)
-  assert all(0 <= tick < LIVE_FRAME_RATE_HZ for tick in path_slots)
-  assert LIVE_TOTAL_FRAME_RATE_HZ == LIVE_FRAME_RATE_HZ + LIVE_HEALTH_FRAME_RATE_HZ + LIVE_PATH_FRAME_RATE_HZ
+  assert len(health_slots) == LIVE_HEALTH_FRAME_RATE_HZ
+  assert LIVE_TOTAL_FRAME_RATE_HZ == LIVE_FRAME_RATE_HZ + LIVE_HEALTH_FRAME_RATE_HZ
 
 
 def test_companion_gatt_contract_requires_authenticated_characteristics():
@@ -642,15 +643,32 @@ def test_companion_live_characteristic_reads_and_notifies():
     request.header.serial = 1
     return request
 
+  class FakePublisher:
+    def __init__(self):
+      self.started = False
+      self.closed = False
+
+    def start(self):
+      self.started = True
+
+    def close(self):
+      self.closed = True
+
+  publishers = []
   router = FakeRouter()
-  protocol = CompanionProtocol(FakeParams(IsOffroad=False, DrivingModel="model"))
+  protocol = CompanionProtocol(
+    FakeParams(IsOffroad=False, DrivingModel="model"),
+    publisher_factory=lambda *_args: publishers.append(FakePublisher()) or publishers[-1],
+  )
   app = CompanionGattApplication(router, lambda *_args: (), lambda path: path == "/phone/one", protocol)
   app._registered = True
 
   read = message("ReadValue", "a{sv}", ({"device": ("o", "/phone/one"), "link": ("s", "LE")},))
   assert len(app._dispatch(read).body[0]) == LIVE_FRAME_SIZE
+  assert publishers == []
 
   app._dispatch(message("StartNotify"))
+  assert publishers[0].started
   frame = LiveSnapshot().pack(7, 100)
   protocol._publish_live(frame)
   notification_values = [signal.body[1]["Value"][1] for signal in router.sent[-LIVE_NOTIFICATION_FRAGMENT_COUNT:]]
@@ -658,9 +676,152 @@ def test_companion_live_characteristic_reads_and_notifies():
   assert len(router.sent[-1].serialise(2)) > 0
 
   app._dispatch(message("StopNotify"))
+  assert publishers[0].closed
   notifications = len(router.sent)
-  protocol._publish_live(LiveSnapshot().pack(8, 200))
+  cached_frame = LiveSnapshot().pack(8, 200)
+  protocol._publish_live(cached_frame)
   assert len(router.sent) == notifications
+  assert app._dispatch(read).body[0] == cached_frame
+  app._dispatch(message("StartNotify"))
+  assert len(publishers) == 2 and publishers[1].started
+  app._dispatch(message("StopNotify"))
+  assert publishers[1].closed
+  app.close()
+
+
+def test_companion_start_notify_cannot_outlive_application_close():
+  class FakeFilter:
+    def __init__(self):
+      self.messages = queue.Queue()
+
+    def __enter__(self):
+      return self.messages
+
+    def __exit__(self, *_args):
+      pass
+
+  class FakeRouter:
+    def __init__(self):
+      self.message_filter = FakeFilter()
+
+    def filter(self, *_args, **_kwargs):
+      return self.message_filter
+
+    def send(self, _message):
+      pass
+
+  start_entered = threading.Event()
+  allow_start = threading.Event()
+
+  class BlockingPublisher:
+    def __init__(self):
+      self.active = False
+      self.closed = False
+
+    def start(self):
+      start_entered.set()
+      assert allow_start.wait(1.0)
+      self.active = True
+
+    def close(self):
+      self.active = False
+      self.closed = True
+
+  publisher = BlockingPublisher()
+  protocol = CompanionProtocol(FakeParams(), publisher_factory=lambda *_args: publisher)
+  app = CompanionGattApplication(FakeRouter(), lambda *_args: (), lambda _path: False, protocol)
+  start_errors = []
+
+  def start_notifying():
+    try:
+      app._set_notifying(True)
+    except Exception as error:
+      start_errors.append(error)
+
+  start_thread = threading.Thread(target=start_notifying)
+  start_thread.start()
+  assert start_entered.wait(1.0)
+
+  close_entered = threading.Event()
+  close_finished = threading.Event()
+
+  def close_app():
+    close_entered.set()
+    app.close()
+    close_finished.set()
+
+  close_thread = threading.Thread(target=close_app)
+  close_thread.start()
+  assert close_entered.wait(1.0)
+  assert not close_finished.wait(0.05)
+
+  allow_start.set()
+  start_thread.join(timeout=1.0)
+  close_thread.join(timeout=1.0)
+
+  assert not start_thread.is_alive() and not close_thread.is_alive()
+  assert start_errors == []
+  assert publisher.closed and not publisher.active
+  assert protocol._publisher is None
+
+
+def test_companion_start_notify_failure_rolls_back_and_can_retry():
+  class FakeFilter:
+    def __init__(self):
+      self.messages = queue.Queue()
+
+    def __enter__(self):
+      return self.messages
+
+    def __exit__(self, *_args):
+      pass
+
+  class FakeRouter:
+    def __init__(self):
+      self.message_filter = FakeFilter()
+      self.sent = []
+
+    def filter(self, *_args, **_kwargs):
+      return self.message_filter
+
+    def send(self, message):
+      self.sent.append(message)
+
+  class FakePublisher:
+    def __init__(self, fail):
+      self.fail = fail
+      self.active = False
+      self.closed = False
+
+    def start(self):
+      if self.fail:
+        raise RuntimeError("publisher failed to start")
+      self.active = True
+
+    def close(self):
+      self.active = False
+      self.closed = True
+
+  publishers = []
+
+  def publisher_factory(*_args):
+    publisher = FakePublisher(fail=not publishers)
+    publishers.append(publisher)
+    return publisher
+
+  protocol = CompanionProtocol(FakeParams(), publisher_factory=publisher_factory)
+  app = CompanionGattApplication(FakeRouter(), lambda *_args: (), lambda _path: False, protocol)
+
+  with pytest.raises(RuntimeError, match="publisher failed"):
+    app._set_notifying(True)
+  assert not app._notifying
+  assert publishers[0].closed
+  assert protocol._publisher is None
+
+  app._set_notifying(True)
+  assert app._notifying and publishers[1].active
+  app._set_notifying(False)
+  assert not app._notifying and publishers[1].closed
   app.close()
 
 

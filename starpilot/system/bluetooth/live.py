@@ -18,28 +18,22 @@ from openpilot.common.swaglog import cloudlog
 LIVE_PROTOCOL_VERSION = 1
 LIVE_FRAME_TYPE_STATE = 1
 LIVE_FRAME_TYPE_HEALTH = 2
-LIVE_FRAME_TYPE_PATH = 3
 LIVE_FRAME_RATE_HZ = 10
 # The health frame tracks deviceState (~2 Hz), emitted every Nth tick of the 10 Hz loop.
 LIVE_HEALTH_TICK_DIVISOR = LIVE_FRAME_RATE_HZ // 2
 LIVE_HEALTH_FRAME_RATE_HZ = LIVE_FRAME_RATE_HZ // LIVE_HEALTH_TICK_DIVISOR
-# Four Hz keeps the optional path stream useful while bounding BLE notification load. These
-# slots are disjoint from the health ticks (0 and 5 modulo 10), avoiding optional-frame bursts.
-LIVE_PATH_FRAME_RATE_HZ = 4
-LIVE_PATH_TICK_PATTERN = (1, 3, 6, 8)
+# Retained in the Companion API v2 status payload for client compatibility.
+LIVE_PATH_FRAME_RATE_HZ = 0
 LIVE_FRAME_SIZE = 64
 LIVE_FRAME_MAGIC = b"SP"
 LIVE_NOTIFICATION_SIZE = 20
 LIVE_NOTIFICATION_HEADER_SIZE = 4
 LIVE_NOTIFICATION_PAYLOAD_SIZE = LIVE_NOTIFICATION_SIZE - LIVE_NOTIFICATION_HEADER_SIZE
 LIVE_NOTIFICATION_FRAGMENT_COUNT = LIVE_FRAME_SIZE // LIVE_NOTIFICATION_PAYLOAD_SIZE
-LIVE_TOTAL_FRAME_RATE_HZ = LIVE_FRAME_RATE_HZ + LIVE_HEALTH_FRAME_RATE_HZ + LIVE_PATH_FRAME_RATE_HZ
+LIVE_TOTAL_FRAME_RATE_HZ = LIVE_FRAME_RATE_HZ + LIVE_HEALTH_FRAME_RATE_HZ
 LIVE_TOTAL_NOTIFICATION_RATE_HZ = LIVE_TOTAL_FRAME_RATE_HZ * LIVE_NOTIFICATION_FRAGMENT_COUNT
-
-# Path frame keeps the production degree-4 polynomial in one frame; each axis has five
-# coefficients and the scalars + float32 coefficients exactly fill the 48-byte payload.
-LIVE_PATH_MAX_Y_COEFFS = 5
-LIVE_PATH_MAX_X_COEFFS = 5
+LIVE_PARAMS_REFRESH_INTERVAL_S = 1.0
+LIVE_OVERRUN_SLEEP_S = 0.01
 
 # Below this free-storage percentage the health frame raises the low-storage flag.
 LIVE_LOW_STORAGE_PERCENT = 10
@@ -187,6 +181,8 @@ def _raw_enum(value: Any, default: int = 0) -> int:
 
 
 def _param_bool(params: Params, key: str) -> bool:
+  if isinstance(params, dict):
+    return bool(params.get(key, False))
   try:
     return bool(params.get_bool(key))
   except (AttributeError, TypeError, ValueError):
@@ -194,6 +190,8 @@ def _param_bool(params: Params, key: str) -> bool:
 
 
 def _param_int(params: Params, key: str, default: int = 0) -> int:
+  if isinstance(params, dict):
+    return int(params.get(key, default))
   try:
     return int(params.get_int(key, default=default))
   except (AttributeError, TypeError, ValueError):
@@ -205,6 +203,8 @@ def _param_int(params: Params, key: str, default: int = 0) -> int:
 
 
 def _param_text(params: Params, key: str, limit: int = 128) -> str:
+  if isinstance(params, dict):
+    return str(params.get(key, ""))[:limit]
   try:
     value = params.get(key, encoding="utf-8") or ""
   except TypeError:
@@ -233,19 +233,6 @@ def _max_finite(values: Any, default: float = 0.0) -> float:
   except (TypeError, ValueError):
     return _finite(values, default)
   return max(finite) if finite else default
-
-
-def _float_list(values: Any, limit: int) -> tuple[float, ...]:
-  """Read up to ``limit`` finite floats from a capnp list."""
-  result: list[float] = []
-  try:
-    for value in values:
-      result.append(_finite(value))
-      if len(result) >= limit:
-        break
-  except TypeError:
-    return ()
-  return tuple(result)
 
 
 def _pack_live_header(frame_type: int, sequence: int, monotonic_ms: int, flags: int) -> bytes:
@@ -317,7 +304,7 @@ def _onroad_overrides(events: Any) -> tuple[bool, bool]:
 
 
 def _border_state(started: bool, selfdrive_state: Any, starpilot_car_state: Any, starpilot_plan: Any,
-                  events: Any, params_memory: Params) -> BorderState:
+                  events: Any, params_memory: Params, switchback: bool) -> BorderState:
   if not started:
     return BorderState.NONE
 
@@ -325,7 +312,6 @@ def _border_state(started: bool, selfdrive_state: Any, starpilot_car_state: Any,
   active = bool(getattr(selfdrive_state, "active", False))
   pause_lateral = bool(getattr(starpilot_car_state, "pauseLateral", False))
   always_on_lateral = not enabled and bool(getattr(starpilot_car_state, "alwaysOnLateralEnabled", False))
-  switchback = _param_bool(params_memory, "SwitchbackModeEnabled")
   traffic = bool(getattr(starpilot_car_state, "trafficModeEnabled", False))
   overriding = _raw_enum(getattr(selfdrive_state, "state", 0)) == 4
   lateral_override, longitudinal_override = _onroad_overrides(events)
@@ -454,7 +440,7 @@ def build_live_snapshot(sm: Any, params: Params, params_memory: Params) -> LiveS
   controls_state = _service(sm, "controlsState")
   radar_state = _service(sm, "radarState")
   longitudinal_plan = _service(sm, "longitudinalPlan")
-  model = _service(sm, "modelV2")
+  model = _service(sm, "drivingModelData")
   starpilot_car_state = _service(sm, "starpilotCarState")
   starpilot_plan = _service(sm, "starpilotPlan")
   events = _service(sm, "onroadEvents") or ()
@@ -486,6 +472,7 @@ def build_live_snapshot(sm: Any, params: Params, params_memory: Params) -> LiveS
     bool(getattr(starpilot_plan, "pulseGlideCoasting", False))
   )
   overriding = _raw_enum(getattr(selfdrive_state, "state", 0)) == 4
+  switchback = _param_bool(params_memory, "SwitchbackModeEnabled")
 
   flags = LiveFlags.CONNECTED
   flag_values = (
@@ -511,7 +498,7 @@ def build_live_snapshot(sm: Any, params: Params, params_memory: Params) -> LiveS
     (LiveFlags.BIG_MODEL, big_model),
     (LiveFlags.LATERAL_PAUSED, bool(getattr(starpilot_car_state, "pauseLateral", False))),
     (LiveFlags.TRAFFIC_MODE, bool(getattr(starpilot_car_state, "trafficModeEnabled", False))),
-    (LiveFlags.SWITCHBACK_MODE, _param_bool(params_memory, "SwitchbackModeEnabled")),
+    (LiveFlags.SWITCHBACK_MODE, switchback),
     (LiveFlags.ALERT_PRESENT, alert_present),
     (LiveFlags.TELEMETRY_VALID, started and all(_sm_bool(sm, "valid", name) for name in ("carState", "selfdriveState", "carControl"))),
     (LiveFlags.FORCING_STOP, bool(getattr(starpilot_plan, "forcingStop", False))),
@@ -533,7 +520,7 @@ def build_live_snapshot(sm: Any, params: Params, params_memory: Params) -> LiveS
     set_speed_kph = _finite(getattr(controls_state, "vCruiseDEPRECATED", 0.0))
   set_speed = set_speed_kph * CV.KPH_TO_MS
 
-  border_state = _border_state(started, selfdrive_state, starpilot_car_state, starpilot_plan, events, params_memory)
+  border_state = _border_state(started, selfdrive_state, starpilot_car_state, starpilot_plan, events, params_memory, switchback)
   model_source = ModelSource.BIG_LOADING if big_model_loading else ModelSource.BIG if big_model else ModelSource.SMALL
   model_key = _param_text(params, "DrivingModel")
   model_name = _param_text(params, "DrivingModelName")
@@ -624,33 +611,6 @@ class HealthSnapshot:
     return frame
 
 
-@dataclass(frozen=True)
-class PathSnapshot:
-  desired_curvature: float = 0.0
-  lane_change_direction: int = 0
-  lane_change_state: int = 0
-  y_coefficients: tuple[float, ...] = ()
-  x_coefficients: tuple[float, ...] = ()
-
-  def pack(self, sequence: int, monotonic_ms: int) -> bytes:
-    header = _pack_live_header(LIVE_FRAME_TYPE_PATH, sequence, monotonic_ms, 0)
-    y_coeffs = self.y_coefficients[:LIVE_PATH_MAX_Y_COEFFS]
-    x_coeffs = self.x_coefficients[:LIVE_PATH_MAX_X_COEFFS]
-    scalars = struct.pack(
-      "<iBBBB",
-      _scaled(self.desired_curvature, 1e6, -2147483648, 2147483647),
-      len(y_coeffs),
-      len(x_coeffs),
-      min(255, max(0, int(self.lane_change_direction))),
-      min(255, max(0, int(self.lane_change_state))),
-    )
-    coefficients = struct.pack(f"<{len(y_coeffs)}f", *y_coeffs) + struct.pack(f"<{len(x_coeffs)}f", *x_coeffs)
-    frame = header + scalars + coefficients
-    if len(frame) > LIVE_FRAME_SIZE:
-      raise AssertionError(f"Path frame overflows: {len(frame)}")
-    return frame.ljust(LIVE_FRAME_SIZE, b"\x00")
-
-
 def build_health_snapshot(sm: Any, params: Params, monotonic_ns: int = 0) -> HealthSnapshot:
   device_state = _service(sm, "deviceState")
   started = bool(getattr(device_state, "started", False))
@@ -711,26 +671,6 @@ def build_health_snapshot(sm: Any, params: Params, monotonic_ns: int = 0) -> Hea
   )
 
 
-def build_path_snapshot(sm: Any) -> PathSnapshot:
-  model = _service(sm, "drivingModelData")
-  controls_state = _service(sm, "controlsState")
-  path = getattr(model, "path", None)
-  meta = getattr(model, "meta", None)
-  action = getattr(model, "action", None)
-
-  desired_curvature = getattr(action, "desiredCurvature", None)
-  if desired_curvature is None:
-    desired_curvature = getattr(controls_state, "desiredCurvature", 0.0)
-
-  return PathSnapshot(
-    desired_curvature=_finite(desired_curvature),
-    lane_change_direction=_raw_enum(getattr(meta, "laneChangeDirection", 0)),
-    lane_change_state=_raw_enum(getattr(meta, "laneChangeState", 0)),
-    y_coefficients=_float_list(getattr(path, "yCoefficients", ()), LIVE_PATH_MAX_Y_COEFFS),
-    x_coefficients=_float_list(getattr(path, "xCoefficients", ()), LIVE_PATH_MAX_X_COEFFS),
-  )
-
-
 def live_metadata(params: Params, current: dict[str, Any] | None = None) -> dict[str, Any]:
   current = current or {
     "alert": {"id": 0, "type": "", "text1": "", "text2": "", "status": 0},
@@ -768,7 +708,7 @@ def build_live_details(sm: Any) -> dict[str, Any]:
 class LiveTelemetryPublisher:
   SERVICES = (
     "deviceState", "carState", "selfdriveState", "carControl", "controlsState", "radarState",
-    "longitudinalPlan", "modelV2", "drivingModelData", "starpilotCarState", "starpilotPlan", "onroadEvents",
+    "longitudinalPlan", "drivingModelData", "starpilotCarState", "starpilotPlan", "onroadEvents",
   )
 
   def __init__(self, callback, params: Params, params_memory: Params, sm_factory=messaging.SubMaster,
@@ -781,6 +721,8 @@ class LiveTelemetryPublisher:
     self._stop = threading.Event()
     self._thread: threading.Thread | None = None
     self._sequence = 0
+    self._params_cache: dict[str, Any] = {}
+    self._params_cache_time: float | None = None
     self._details_lock = threading.Lock()
     self._details = build_live_details({})
 
@@ -800,9 +742,30 @@ class LiveTelemetryPublisher:
     self._sequence = (self._sequence + 1) & 0xFFFF
     self._callback(frame)
 
+  def _cached_params(self, monotonic: float) -> dict[str, Any]:
+    if self._params_cache_time is None or monotonic - self._params_cache_time >= LIVE_PARAMS_REFRESH_INTERVAL_S:
+      self._params_cache = {
+        "ConditionalChill": _param_bool(self.params, "ConditionalChill"),
+        "SpeedLimitController": _param_bool(self.params, "SpeedLimitController"),
+        "ShowSpeedLimits": _param_bool(self.params, "ShowSpeedLimits"),
+        "CurveSpeedController": _param_bool(self.params, "CurveSpeedController"),
+        "UsbGpuActive": _param_bool(self.params, "UsbGpuActive"),
+        "UsbGpuLoading": _param_bool(self.params, "UsbGpuLoading"),
+        "IsMetric": _param_bool(self.params, "IsMetric"),
+        "DrivingModel": _param_text(self.params, "DrivingModel"),
+        "DrivingModelName": _param_text(self.params, "DrivingModelName"),
+        "DrivingModelVersion": _param_text(self.params, "DrivingModelVersion"),
+        "AccelerationProfile": _param_int(self.params, "AccelerationProfile"),
+        "LongitudinalPersonality": _param_int(self.params, "LongitudinalPersonality", 1),
+        "IsOffroad": _param_bool(self.params, "IsOffroad"),
+      }
+      self._params_cache_time = monotonic
+    return self._params_cache
+
   def publish_once(self, sm: Any) -> bytes:
-    snapshot = build_live_snapshot(sm, self.params, self.params_memory)
-    frame = snapshot.pack(self._sequence, round(self._monotonic() * 1000.0))
+    monotonic = self._monotonic()
+    snapshot = build_live_snapshot(sm, self._cached_params(monotonic), self.params_memory)
+    frame = snapshot.pack(self._sequence, round(monotonic * 1000.0))
     details = build_live_details(sm)
     with self._details_lock:
       self._details = details
@@ -811,14 +774,8 @@ class LiveTelemetryPublisher:
 
   def publish_health_once(self, sm: Any) -> bytes:
     monotonic = self._monotonic()
-    snapshot = build_health_snapshot(sm, self.params, round(monotonic * 1e9))
+    snapshot = build_health_snapshot(sm, self._cached_params(monotonic), round(monotonic * 1e9))
     frame = snapshot.pack(self._sequence, round(monotonic * 1000.0))
-    self._emit(frame)
-    return frame
-
-  def publish_path_once(self, sm: Any) -> bytes:
-    snapshot = build_path_snapshot(sm)
-    frame = snapshot.pack(self._sequence, round(self._monotonic() * 1000.0))
     self._emit(frame)
     return frame
 
@@ -838,16 +795,15 @@ class LiveTelemetryPublisher:
       while not self._stop.is_set():
         sm.update(0)
         self.publish_once(sm)
-        if tick % LIVE_FRAME_RATE_HZ in LIVE_PATH_TICK_PATTERN:
-          self.publish_path_once(sm)
         if tick % LIVE_HEALTH_TICK_DIVISOR == 0:
           self.publish_health_once(sm)
         tick += 1
         next_update += period
         delay = max(0.0, next_update - self._monotonic())
-        if self._stop.wait(delay):
-          return
         if delay == 0.0:
           next_update = self._monotonic()
+          delay = LIVE_OVERRUN_SLEEP_S
+        if self._stop.wait(delay):
+          return
     except Exception:
       cloudlog.exception("Bluetooth live telemetry publisher failed")

@@ -18,7 +18,6 @@ from openpilot.starpilot.system.bluetooth.live import (
   LIVE_FRAME_RATE_HZ,
   LIVE_FRAME_SIZE,
   LIVE_FRAME_TYPE_HEALTH,
-  LIVE_FRAME_TYPE_PATH,
   LIVE_FRAME_TYPE_STATE,
   LIVE_HEALTH_FRAME_RATE_HZ,
   LIVE_NOTIFICATION_FRAGMENT_COUNT,
@@ -143,6 +142,7 @@ class CompanionProtocol:
     self._clock = clock
     self._publisher_factory = publisher_factory
     self._publisher = None
+    self._publisher_lock = threading.Lock()
     self._live_lock = threading.Lock()
     self._live_listeners: set[Callable[[bytes], None]] = set()
     self._live_frame = LiveSnapshot().pack(0, 0)
@@ -161,7 +161,7 @@ class CompanionProtocol:
         "rate_hz": LIVE_FRAME_RATE_HZ,
         "notification_size": LIVE_NOTIFICATION_SIZE,
         "notification_fragments": LIVE_NOTIFICATION_FRAGMENT_COUNT,
-        "frame_types": [LIVE_FRAME_TYPE_STATE, LIVE_FRAME_TYPE_HEALTH, LIVE_FRAME_TYPE_PATH],
+        "frame_types": [LIVE_FRAME_TYPE_STATE, LIVE_FRAME_TYPE_HEALTH],
         "health_rate_hz": LIVE_HEALTH_FRAME_RATE_HZ,
         "path_rate_hz": LIVE_PATH_FRAME_RATE_HZ,
         "total_rate_hz": LIVE_TOTAL_FRAME_RATE_HZ,
@@ -195,16 +195,26 @@ class CompanionProtocol:
         cloudlog.exception("Bluetooth live telemetry notification failed")
 
   def start(self) -> None:
-    if self._publisher is not None:
-      return
-    self._publisher = self._publisher_factory(self._publish_live, self.params, self.params_memory)
-    self._publisher.start()
+    with self._publisher_lock:
+      if self._publisher is not None:
+        return
+      publisher = self._publisher_factory(self._publish_live, self.params, self.params_memory)
+      try:
+        publisher.start()
+      except Exception:
+        try:
+          publisher.close()
+        except Exception:
+          cloudlog.exception("Unable to clean up Bluetooth live telemetry after startup failure")
+        raise
+      self._publisher = publisher
 
   def close(self) -> None:
-    publisher = self._publisher
-    self._publisher = None
-    if publisher is not None:
-      publisher.close()
+    with self._publisher_lock:
+      publisher = self._publisher
+      self._publisher = None
+      if publisher is not None:
+        publisher.close()
 
   def handle(self, payload: bytes) -> bytes:
     request_id = ""
@@ -433,7 +443,6 @@ class CompanionGattApplication:
         pass
       raise
     self._registered = True
-    self.protocol.start()
 
   def rearm_advertisement(self) -> None:
     # BlueZ does not resume this advertisement after the central disconnects.
@@ -541,15 +550,34 @@ class CompanionGattApplication:
       self._emit_live_properties({"Value": ("ay", fragment)})
 
   def _set_notifying(self, notifying: bool) -> None:
-    with self._notify_lock:
-      if self._notifying == notifying:
-        if notifying:
-          raise RuntimeError("Notifications are already enabled")
-        return
-      self._notifying = notifying
-    self._emit_live_properties({"Notifying": ("b", notifying)})
-    if notifying:
-      self._emit_live_frame(self.protocol.live_bytes())
+    with self._close_lock:
+      if self._closed:
+        raise RuntimeError("Companion application is closed")
+      with self._notify_lock:
+        if self._notifying == notifying:
+          if notifying:
+            raise RuntimeError("Notifications are already enabled")
+          return
+
+      if notifying:
+        self.protocol.start()
+        with self._notify_lock:
+          self._notifying = True
+        try:
+          self._emit_live_properties({"Notifying": ("b", True)})
+          self._emit_live_frame(self.protocol.live_bytes())
+        except Exception:
+          with self._notify_lock:
+            self._notifying = False
+          self.protocol.close()
+          raise
+      else:
+        with self._notify_lock:
+          self._notifying = False
+        try:
+          self._emit_live_properties({"Notifying": ("b", False)})
+        finally:
+          self.protocol.close()
 
   def _dispatch(self, message):
     path = str(message.header.fields.get(HeaderFields.path, ""))

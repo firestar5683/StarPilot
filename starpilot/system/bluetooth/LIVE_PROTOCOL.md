@@ -13,7 +13,7 @@ Service UUID: `9b6d1000-6f7a-4a5b-8c3d-2e1f0a9b8c7d`
 | Status | `1001` | authenticated read | JSON device/protocol capabilities |
 | Command | `1002` | authenticated write | JSON read-only request |
 | Response | `1003` | authenticated read | JSON response for the writing phone |
-| Live state | `1004` | authenticated read + notify | latest frame / notification fragments |
+| Live state | `1004` | authenticated read + notify | cached frame / notification fragments |
 
 The full UUID for each characteristic uses the same suffix in
 `9b6d100x-6f7a-4a5b-8c3d-2e1f0a9b8c7d`.
@@ -35,12 +35,11 @@ the other.
 
 `get_status` also advertises the live UUID, frame and notification sizes,
 fragment count, and publication rate. It additionally advertises
-`live.frame_types` (`[1, 2, 3]`), `live.health_rate_hz` (`2`), and
-`live.path_rate_hz` (`4`) so a client can feature-detect the health and path
-frames before subscribing. `live.rate_hz` is the state-frame rate; the aggregate
-stream is also advertised as `live.total_rate_hz` (`16`) and
-`live.notification_rate_hz` (`64`) at the default ATT MTU. Optional path and
-health frames use disjoint 10 Hz tick slots to avoid bursts.
+`live.frame_types` (`[1, 2]`) and `live.health_rate_hz` (`2`) so a client can
+feature-detect the health frames before subscribing. `live.path_rate_hz` remains
+present for API compatibility but is `0`. `live.rate_hz` is the state-frame rate;
+the aggregate stream is also advertised as `live.total_rate_hz` (`12`) and
+`live.notification_rate_hz` (`48`) at the default ATT MTU.
 `get_live_metadata` returns the selected model plus current alert text and
 speed-limit source as compact JSON. Metadata is requested on demand so strings
 are not sent in every 10 Hz frame.
@@ -57,18 +56,18 @@ frame was type 1 must add this check before decoding the payload.
 | ---: | --- | ---: | --- |
 | `1` | State | 10 Hz | driving state (below) |
 | `2` | Device/Health | ~2 Hz | CPU/GPU/mem/temps/power/network/storage |
-| `3` | Path | ~4 Hz | predicted path polynomial + steering desire |
 
-The three types are interleaved on the same notify stream. The `sequence`
+The two types are interleaved on the same notify stream. The `sequence`
 counter increments across every frame regardless of type, so fragments are
 grouped by sequence exactly as before.
 
 ## Live state frame format v1
 
-Frames are exactly 64 bytes, little-endian, and are published at 10 Hz. A client
-may read the characteristic for the latest complete frame. Notifications split
-each frame into four 20-byte fragments so the feed also works with Bluetooth's
-default 23-byte ATT MTU. The
+Frames are exactly 64 bytes, little-endian, and are published at 10 Hz while a
+client subscribes to notifications. A client may read the characteristic for
+the last cached complete frame, which can be stale when no client is subscribed.
+Notifications split each frame into four 20-byte fragments so the feed also
+works with Bluetooth's default 23-byte ATT MTU. The
 `sequence` counter wraps at 65535 and `monotonic_ms` wraps at 2^32.
 
 Each notification has a four-byte little-endian header followed by 16 bytes of
@@ -231,41 +230,13 @@ do not send heavy media through the galaxy.link tunnel; use BLE for real-time
 data and the tunnel only for light scalar JSON. **Never** pull video over the
 tunnel — its exit can be metered/cellular.
 
-## Path frame v1 (frame type 3)
-
-The model's planned trajectory (the on-screen green path) and its lateral intent,
-published at ~4 Hz from the latest `drivingModelData`. `drivingModelData.path` is a
-`PolyPath` — polynomial coefficients, not raw points — so the whole curve fits in
-one frame. Same 16-byte header with frame type `3`; the header `flags` field is
-reserved (`0`) for this type.
-
-| Offset | Type | Field | Scale/meaning |
-| ---: | --- | --- | --- |
-| 16 | `int32` | desired curvature | 1e-6 /m (signed; + = left) |
-| 20 | `uint8` | y-coeff count `Ny` | lateral coefficients that follow (≤ 5) |
-| 21 | `uint8` | x-coeff count `Nx` | longitudinal coefficients that follow (≤ 5) |
-| 22 | `uint8` | lane-change direction | 0=none, 1=left, 2=right |
-| 23 | `uint8` | lane-change state | cereal enum |
-| 24 | `float32[Ny]` | lateral path coefficients | `y(t)`, SI, device frame |
-| 24+4·Ny | `float32[Nx]` | longitudinal coefficients | SI |
-| … | `uint8[…]` | reserved / padding to 64 | 0 |
-
-Read `Ny`/`Nx` first, then read that many little-endian `float32` lateral
-coefficients immediately followed by the longitudinal ones. The production
-coefficients are fitted against the model time index, so evaluate
-`y(t) = Σ yCoefficients[i]·tⁱ` and `x(t) = Σ xCoefficients[i]·tⁱ` for `t` in the
-model horizon (seconds), then draw the resulting `(x, y)` points. Do not treat
-the y coefficients as a polynomial in x. Read `desiredCurvature` for a heading
-indicator. The desired curvature falls back to
-`controlsState.desiredCurvature` (lag-adjusted) when the model action is absent.
-
 ## Channel responsibilities
 
 The companion is one of three tiers; a client should route requests accordingly:
 
 1. **BLE (this protocol)** — always-on, low-latency, bounded bandwidth. All
-   real-time driving state, device health, connectivity, and the predicted path.
-   Nothing real-time should ever depend on the network.
+   real-time driving state, device health, and connectivity. Nothing real-time
+   should ever depend on the network.
 2. **Direct LAN / non-metered WiFi (`:8082`)** — where heavy pulls are allowed:
    camera video, JPEG snapshots, route footage, screen recordings. Require health
    flag **bit 6**, a suitable non-metered local network on the phone, and a
@@ -284,15 +255,14 @@ described above. Concretely:
 1. **Bond first.** BlueZ requires an authenticated LE bond; unbonded or classic
    (BR/EDR) reads are rejected. Discover the service UUID
    `9b6d1000-6f7a-4a5b-8c3d-2e1f0a9b8c7d`.
-2. **Feature-detect** via `get_status`: read `live.frame_types`,
-   `live.health_rate_hz`, and `live.path_rate_hz` to learn which frame types this
-   device emits.
+2. **Feature-detect** via `get_status`: read `live.frame_types` and
+   `live.health_rate_hz` to learn which frame types this device emits.
 3. **Subscribe** to the Live characteristic and reassemble each frame from its
    four 20-byte fragments (group by sequence, order by the low nibble,
    concatenate the 16-byte payloads).
 4. **Dispatch on the frame-type byte at offset 3** after validating the `SP`
    magic, version, and size. Consume only the types you understand and ignore the
-   rest — a type-1-only dispatcher is unaffected by the health and path frames.
+   rest — a type-1-only dispatcher is unaffected by the health frames.
 5. Request `get_live_metadata` after connecting and whenever a **type-1** frame's
    `metadata_revision` changes.
 
@@ -304,5 +274,5 @@ HTTP page.
 The API has no operation that engages, accelerates, brakes, steers, or changes a
 driving parameter. BlueZ requires an authenticated bond for reads/writes, and
 notifications are available only over that paired encrypted link. The publisher
-starts with the companion GATT application and stops when the application is
-removed.
+runs only while a client subscribes to the Live characteristic and stops after
+the final subscription ends or the companion GATT application is removed.
