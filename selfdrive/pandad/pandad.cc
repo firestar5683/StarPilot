@@ -482,8 +482,15 @@ void pandad_run(std::vector<Panda *> &pandas) {
   Panda *peripheral_panda = pandas[0];
   bool engaged = false;
   bool is_onroad = false;
+  bool was_onroad = false;
   bool tesla_preap = false;
   bool tesla_preap_checked = false;
+  int tesla_preap_attempts = 0;
+  // CarParams is CLEAR_ON_ONROAD_TRANSITION and is only written once the car is
+  // fingerprinted, so allow a short grace window after going onroad for it to
+  // appear before giving up. Without this cap a carless/bench device (onroad but
+  // no CarParams) re-reads params.get("CarParams") every 10 Hz cycle forever.
+  constexpr int TESLA_PREAP_MAX_ATTEMPTS = 50;  // ~5 s at 10 Hz
 
   // Main loop: receive CAN data and process states
   while (!do_exit && check_all_connected(pandas)) {
@@ -497,11 +504,26 @@ void pandad_run(std::vector<Panda *> &pandas) {
     // Process panda state at 10 Hz
     if (rk.frame() % 10 == 0) {
       sm.update(0);
-      if (!tesla_preap_checked) {
+      is_onroad = params.getBool("IsOnroad");
+      const bool ignore_ignition_line = params.getBool("IgnoreIgnitionLine");
+
+      // Detect Tesla pre-AP once per drive. The onroad transition clears
+      // CarParams, so re-arm on offroad->onroad and read until it's written
+      // (or the grace window elapses), then latch so we stop hitting params.
+      if (is_onroad && !was_onroad) {
+        tesla_preap = false;
+        tesla_preap_checked = false;
+        tesla_preap_attempts = 0;
+      }
+      was_onroad = is_onroad;
+
+      if (is_onroad && !tesla_preap_checked) {
         const std::string car_params = params.get("CarParams");
         if (!car_params.empty()) {
           tesla_preap = is_tesla_preap(car_params);
           tesla_preap_checked = true;
+        } else if (++tesla_preap_attempts >= TESLA_PREAP_MAX_ATTEMPTS) {
+          tesla_preap_checked = true;  // no CarParams (carless/bench): give up, stop re-reading
         }
       }
       const bool preap_aol_engaged = tesla_preap &&
@@ -509,8 +531,6 @@ void pandad_run(std::vector<Panda *> &pandas) {
       engaged = sm.allAliveAndValid({"selfdriveState", "starpilotCarState"}) && (
         sm["selfdriveState"].getSelfdriveState().getEnabled() || preap_aol_engaged
       );
-      is_onroad = params.getBool("IsOnroad");
-      const bool ignore_ignition_line = params.getBool("IgnoreIgnitionLine");
       process_panda_state(pandas, &pm, engaged, is_onroad, spoofing_started, ignore_ignition_line);
       panda_safety.configureSafetyMode(is_onroad);
     }
