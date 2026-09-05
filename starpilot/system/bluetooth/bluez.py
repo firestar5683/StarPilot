@@ -2,6 +2,7 @@ import threading
 import time
 import uuid
 
+from collections.abc import Callable
 from typing import Any
 
 from jeepney import DBusAddress, MatchRule, new_error, new_method_call, new_method_return
@@ -19,6 +20,17 @@ DEVICE_IFACE = "org.bluez.Device1"
 AGENT_MANAGER_IFACE = "org.bluez.AgentManager1"
 AGENT_IFACE = "org.bluez.Agent1"
 AGENT_PATH = "/link/firestar/starpilot/agent"
+DEVICE_STATE_TIMEOUT = 5.0
+# Requests that never contain a user-entered secret.
+AUTO_ACCEPTABLE_AGENT_METHODS = frozenset(
+  {"DisplayPinCode", "DisplayPasskey", "RequestConfirmation", "RequestAuthorization", "AuthorizeService"}
+)
+
+
+class BlueZError(RuntimeError):
+  def __init__(self, name: str, detail: str):
+    super().__init__(detail)
+    self.name = name
 
 
 def unwrap_variant(value: Any) -> Any:
@@ -39,6 +51,17 @@ class PairingAgent:
     self._generation = 0
     self._auto_accept_paths: set[str] = set()
     self._auto_accept_incoming = False
+    # Authorizes silent pairing only during an explicit companion window.
+    self.auto_accept_handler: Callable[[str], bool] | None = None
+
+  def should_auto_accept(self, device_path: str) -> bool:
+    handler = self.auto_accept_handler
+    if handler is None:
+      return False
+    try:
+      return bool(handler(device_path))
+    except Exception:
+      return False
 
   @property
   def prompt(self) -> dict[str, Any] | None:
@@ -101,7 +124,8 @@ class PairingAgent:
 
   def auto_accept(self, kind: str, device_path: str) -> bool:
     with self._condition:
-      return kind in {"confirmation", "authorization"} and (self._auto_accept_incoming or device_path in self._auto_accept_paths)
+      configured = self._auto_accept_incoming or device_path in self._auto_accept_paths
+    return kind in {"confirmation", "authorization"} and (configured or self.should_auto_accept(device_path))
 
 class BlueZClient:
   def __init__(self):
@@ -141,7 +165,7 @@ class BlueZClient:
     if reply.header.message_type == MessageType.error:
       error_name = reply.header.fields.get(HeaderFields.error_name, "org.bluez.Error.Failed")
       detail = reply.body[0] if reply.body else error_name
-      raise RuntimeError(str(detail))
+      raise BlueZError(str(error_name), str(detail))
     return reply.body
 
   def _register_agent(self) -> None:
@@ -165,12 +189,15 @@ class BlueZClient:
       try:
         response_signature = None
         response_body: tuple = ()
+        auto = member in AUTO_ACCEPTABLE_AGENT_METHODS and self.agent.should_auto_accept(device_path)
         if member == "Release":
           self.agent.clear()
         elif member == "DisplayPinCode":
-          self.agent.display("display_pin", device_path, str(message.body[1]))
+          if not auto:
+            self.agent.display("display_pin", device_path, str(message.body[1]))
         elif member == "DisplayPasskey":
-          self.agent.display("display_passkey", device_path, f"{int(message.body[1]):06d}")
+          if not auto:
+            self.agent.display("display_passkey", device_path, f"{int(message.body[1]):06d}")
         elif member == "Cancel":
           self.agent.clear()
         else:
@@ -270,13 +297,36 @@ class BlueZClient:
       "prompt": prompt,
     }
 
-  def set_powered(self, powered: bool) -> None:
+  def set_adapter_property(self, name: str, signature: str, value: Any) -> None:
     path, _ = self.adapter()
     address = DBusAddress(path, bus_name=BLUEZ, interface=ADAPTER_IFACE)
     with self._request_lock:
-      reply = self.router.send_and_get_reply(Properties(address).set("Powered", "b", powered), timeout=10.0)
+      reply = self.router.send_and_get_reply(Properties(address).set(name, signature, value), timeout=10.0)
     if reply.header.message_type == MessageType.error:
-      raise RuntimeError(str(reply.body[0] if reply.body else "Unable to change Bluetooth power"))
+      raise RuntimeError(str(reply.body[0] if reply.body else f"Unable to set adapter {name}"))
+
+  def set_powered(self, powered: bool) -> None:
+    self.set_adapter_property("Powered", "b", powered)
+
+  def set_pairing_mode(self, enabled: bool) -> None:
+    if enabled:
+      self.set_adapter_property("PairableTimeout", "u", 0)
+      self.set_adapter_property("DiscoverableTimeout", "u", 0)
+      self.set_adapter_property("Pairable", "b", True)
+      try:
+        self.set_adapter_property("Discoverable", "b", True)
+      except Exception:
+        self.set_adapter_property("Pairable", "b", False)
+        raise
+    else:
+      error: Exception | None = None
+      for name in ("Discoverable", "Pairable"):
+        try:
+          self.set_adapter_property(name, "b", False)
+        except Exception as current_error:
+          error = error or current_error
+      if error is not None:
+        raise error
 
   def set_discoverable(self, discoverable: bool) -> None:
     path, _ = self.adapter()
@@ -295,8 +345,15 @@ class BlueZClient:
       raise RuntimeError(str(reply.body[0] if reply.body else "Unable to change Bluetooth discoverability"))
 
   def start_discovery(self) -> None:
-    path, _ = self.adapter()
-    self._call(path, ADAPTER_IFACE, "StartDiscovery")
+    path, props = self.adapter()
+    if props.get("Discovering", False):
+      return
+    try:
+      self._call(path, ADAPTER_IFACE, "StartDiscovery")
+    except BlueZError as error:
+      # A concurrent scan already reached the desired state.
+      if error.name != "org.bluez.Error.InProgress":
+        raise
 
   def stop_discovery(self) -> None:
     path, props = self.adapter()
@@ -309,6 +366,23 @@ class BlueZClient:
       if device["address"].upper() == normalized:
         return device
     raise RuntimeError(f"Bluetooth device {address} was not found")
+
+  def paired_device_for_path(self, path: str) -> dict[str, Any] | None:
+    interfaces = self.managed_objects().get(path, {})
+    props = interfaces.get(DEVICE_IFACE)
+    # Bonded confirms persisted keys; fall back for older BlueZ releases.
+    bonded = bool(props.get("Bonded", props.get("Paired", False))) if props is not None else False
+    if props is None or not bonded:
+      return None
+    return {
+      "path": path,
+      "address": str(props.get("Address", "")),
+      "name": str(props.get("Alias") or props.get("Name") or props.get("Address") or "Bluetooth device"),
+      "paired": True,
+      "bonded": True,
+      "trusted": bool(props.get("Trusted", False)),
+      "connected": bool(props.get("Connected", False)),
+    }
 
   def set_device_property(self, address: str, name: str, signature: str, value: Any) -> None:
     device = self.device_for_address(address)
@@ -332,10 +406,27 @@ class BlueZClient:
   def connect(self, address: str) -> None:
     device = self.device_for_address(address)
     self._call(device["path"], DEVICE_IFACE, "Connect", timeout=30.0)
+    self._wait_for_connection_state(address, True)
 
   def disconnect(self, address: str) -> None:
     device = self.device_for_address(address)
     self._call(device["path"], DEVICE_IFACE, "Disconnect", timeout=15.0)
+    self._wait_for_connection_state(address, False)
+
+  def _wait_for_connection_state(self, address: str, connected: bool) -> None:
+    deadline = time.monotonic() + DEVICE_STATE_TIMEOUT
+    while True:
+      try:
+        if self.device_for_address(address).get("connected", False) == connected:
+          return
+      except RuntimeError as error:
+        if not connected and "was not found" in str(error):
+          return
+        raise
+      if time.monotonic() >= deadline:
+        state = "connect" if connected else "disconnect"
+        raise RuntimeError(f"Bluetooth device did not {state}")
+      time.sleep(0.1)
 
   def remove(self, address: str) -> None:
     adapter_path, _ = self.adapter()
