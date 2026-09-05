@@ -224,10 +224,17 @@ static void tesla_preap_rx_hook(const CANPacket_t *msg) {
   }
 
   if (msg->addr == 0x368U) {
-    const int cruise_state = (msg->data[1] >> 4) & 0x07U;
+    const int cruise_state = (msg->data[1] >> 4) & 0x0FU;
     if (cruise_state == 3) {
       vehicle_moving = false;
     }
+    // Pre-AP uses valid non-off DI_cruiseState values as the cruise-main signal.
+    acc_main_on = (cruise_state == 1) ||
+                  (cruise_state == 2) ||
+                  (cruise_state == 3) ||
+                  (cruise_state == 4) ||
+                  (cruise_state == 6) ||
+                  (cruise_state == 7);
   }
 
   if (msg->addr == 0x118U) {
