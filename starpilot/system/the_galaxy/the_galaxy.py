@@ -116,6 +116,7 @@ from openpilot.starpilot.common.testing_grounds import (
 from openpilot.starpilot.navigation.destination_store import normalize_destination_payload, update_recent_destinations
 from openpilot.starpilot.system.the_galaxy.factory_reset import remove_path as _run_factory_reset_delete
 from openpilot.starpilot.system.the_galaxy import cpu_capture, flm_workspace, utilities
+from openpilot.starpilot.system.the_galaxy.bonjour import GalaxyBonjourAdvertiser
 from openpilot.starpilot.system.the_galaxy.update_recovery import inspect_interrupted_update, public_recovery_status, recover_interrupted_update
 from openpilot.starpilot.system.bluetooth import BluetoothClient
 from openpilot.starpilot.system.wheel_controls import (
@@ -7360,6 +7361,10 @@ def setup(app):
   @app.route("/api/device/status", methods=["GET"])
   def device_status():
     return jsonify({
+      "device": "StarPilot",
+      "version": params.get("Version", encoding="utf-8") or "",
+      "branch": params.get("GitBranch", encoding="utf-8") or "",
+      "onroad": not params.get_bool("IsOffroad"),
       "status": "Driving" if params.get_bool("IsOnroad") else "Parked",
       "online": True,
       "lanIp": utilities.get_current_lan_ip(),
@@ -9538,7 +9543,14 @@ def main():
     print("\"The Galaxy\" is not running on a comma device, enabling debug mode")
 
   app.secret_key = secrets.token_hex(32)
-  app.run(host=host, port=port, debug=debug, use_reloader=use_reloader, threaded=True)
+  bonjour = GalaxyBonjourAdvertiser(utilities.get_current_lan_ip, port=port) if on_device else None
+  if bonjour is not None:
+    bonjour.start()
+  try:
+    app.run(host=host, port=port, debug=debug, use_reloader=use_reloader, threaded=True)
+  finally:
+    if bonjour is not None:
+      bonjour.close()
 
 if __name__ == "__main__":
   main()

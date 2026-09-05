@@ -14,6 +14,7 @@ dependencies = [
   "pyserial",     # pigeond + qcomgpsd
   "requests",     # many one-off uses
   "pywebpush",    # Galaxy Sentry browser push notifications
+  "zeroconf",     # Bonjour advertisement for Galaxy Companion LAN discovery
   "sympy",        # rednose + friends
   "crcmod",       # cars + qcomgpsd
   "tqdm",         # cars (fw_versions.py) on start + many one-off uses
