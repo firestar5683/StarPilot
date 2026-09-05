@@ -89,11 +89,5 @@ export function isGalaxyTunnel() {
 }
 
 export function galaxyPath(path) {
-  const suffix = path.startsWith("/") ? path : `/${path}`
-  if (!isGalaxyTunnel()) return suffix
-
-  const firstPathSegment = window.location.pathname.split("/").filter(Boolean)[0] || ""
-  const slug = /^[A-Za-z0-9]{16}$/.test(firstPathSegment) ? `/${firstPathSegment}` : ""
-  if (!slug || suffix === slug || suffix.startsWith(`${slug}/`)) return suffix
-  return `${slug}${suffix}`
+  return path.startsWith("/") ? path : `/${path}`
 }

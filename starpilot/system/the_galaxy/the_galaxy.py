@@ -5005,6 +5005,18 @@ def setup(app):
 
   @app.errorhandler(404)
   def not_found(_):
+    is_api = (
+      request.path == "/api"
+      or "/api/" in request.path
+      or request.is_json
+      or (request.accept_mimetypes.accept_json and not request.accept_mimetypes.accept_html)
+    )
+    if is_api or request.method not in ("GET", "HEAD"):
+      return jsonify({"error": "Not found"}), 404
+
+    if request.path.startswith(("/assets/", "/screen_recordings/", "/thumbnails/", "/video/")):
+      return "Not found", 404
+
     response = make_response(render_template("index.html"))
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
