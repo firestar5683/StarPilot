@@ -22,13 +22,31 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.system.hardware import PC
 from openpilot.system.hardware.hw import Paths
 
+
+def _is_comma_device_runtime(
+  marker_paths=("/TICI", "/AGNOS"),
+  model_path="/sys/firmware/devicetree/base/model",
+) -> bool:
+  """Match the service's device check, including edge boot/update states."""
+  if not PC:
+    return True
+  if any(os.path.isfile(path) for path in marker_paths):
+    return True
+  try:
+    with open(model_path, encoding="utf-8") as f:
+      model = f.read().strip("\x00").lower()
+    return "comma " in model
+  except OSError:
+    return False
+
+
 # Mirrors _FP_DATA_ROOT in starpilot_variables, but avoids that module's heavy
 # import chain so this stays cheap to import (it runs in the always-on service
 # and is imported by utilities/tests).
-if PC:
-  _DATA_ROOT = Path(Paths.comma_home()) / "starpilot" / "data"
-else:
+if _is_comma_device_runtime():
   _DATA_ROOT = Path("/data")
+else:
+  _DATA_ROOT = Path(Paths.comma_home()) / "starpilot" / "data"
 CPU_CAPTURES_PATH = _DATA_ROOT / "cpu_captures"
 
 # How often a row is written. A single rolling file is trimmed once it grows
@@ -45,9 +63,7 @@ CAPTURE_FILENAME = "cpu_capture.csv"
 CAPTURE_FILE = CPU_CAPTURES_PATH / CAPTURE_FILENAME
 
 CSV_HEADER = "timestamp,cpu_pct,cpu_cores,cpu_temp_c,gpu_temp_c,mem_pct,state,top_procs"
-# Comment-style boundary written at each drive start (offroad -> onroad). Kept as
-# a `#` line so CSV readers skip it and it stands out when scanning the file.
-DRIVE_MARKER_PREFIX = "# ==== NEW DRIVE"
+DRIVE_MARKER_STATE = "drive_start"
 
 
 def _max_temp(values):
@@ -150,16 +166,18 @@ def _enforce_size_cap(path, header, max_bytes, trim_ratio=TRIM_TARGET_RATIO):
   except OSError:
     return
 
-  body = lines[1:] if lines and lines[0].rstrip("\n") == header else lines
+  header_line = (header + "\n").encode("utf-8")
+  body = lines[1:] if lines and lines[0].rstrip("\r\n") == header else lines
 
   target = int(max_bytes * trim_ratio)
-  running = len(header) + 1
+  running = len(header_line)
   kept = []
   for line in reversed(body):
-    running += len(line.encode("utf-8"))
-    if running > target and kept:
+    line_size = len(line.encode("utf-8"))
+    if running + line_size > target:
       break
     kept.append(line)
+    running += line_size
   kept.reverse()
 
   tmp = path.with_name(path.name + ".tmp")
@@ -186,9 +204,9 @@ def append_capture_row(fields, path=CAPTURE_FILE, header=CSV_HEADER, max_bytes=M
 
 
 def append_drive_marker(now, path=CAPTURE_FILE, header=CSV_HEADER, max_bytes=MAX_CAPTURE_BYTES):
-  """Append a comment-style boundary line marking the start of a new drive."""
+  """Append a valid CSV row marking the start of a new drive."""
   timestamp = now.isoformat(timespec="seconds") if isinstance(now, datetime) else str(now)
-  _append_raw(f"{DRIVE_MARKER_PREFIX} {timestamp}\n", path, header, max_bytes)
+  _append_raw(_csv_line([timestamp, "", "", "", "", "", DRIVE_MARKER_STATE, ""]), path, header, max_bytes)
 
 
 def capture_status(path=CAPTURE_FILE):
@@ -207,10 +225,17 @@ def capture_status(path=CAPTURE_FILE):
   except OSError:
     return status
   try:
-    with open(path, encoding="utf-8") as f:
-      # Count data rows only: skip the header (line 0) and any `#` markers.
-      rows = sum(1 for i, line in enumerate(f) if i and line.strip() and not line.startswith("#"))
-  except OSError:
+    with open(path, encoding="utf-8", newline="") as f:
+      reader = csv.reader(f)
+      next(reader, None)  # header
+      rows = 0
+      for row in reader:
+        if not row or not row[0].strip() or row[0].lstrip().startswith("#"):
+          continue
+        if len(row) > 6 and row[6].strip() == DRIVE_MARKER_STATE:
+          continue
+        rows += 1
+  except (OSError, UnicodeError, csv.Error):
     rows = 0
   status.update(exists=True, sizeBytes=stat.st_size, rows=rows, modified=stat.st_mtime)
   return status
@@ -243,7 +268,7 @@ def run_capture_loop(stop_event=None, path=CAPTURE_FILE, interval_s=CAPTURE_INTE
         continue
       next_emit = now + interval_s
 
-      if not sm.valid.get("deviceState"):
+      if not sm.valid.get("deviceState") or not sm.alive.get("deviceState"):
         continue
       device_state = sm["deviceState"]
 
@@ -255,11 +280,14 @@ def run_capture_loop(stop_event=None, path=CAPTURE_FILE, interval_s=CAPTURE_INTE
       prev_started = started
 
       top_procs = ""
-      if sm.valid.get("procLog"):
+      if sm.valid.get("procLog") and sm.alive.get("procLog"):
         dt = None if prev_ts is None else max(0.0, now - prev_ts)
         usage, prev_totals = compute_process_cpu(sm["procLog"].procs, prev_totals, dt, max_pct)
         prev_ts = now
         top_procs = format_top_procs(usage)
+      else:
+        prev_totals = {}
+        prev_ts = None
 
       append_capture_row(build_capture_fields(datetime.now(), device_state, top_procs), path=path)
     except Exception:

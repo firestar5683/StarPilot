@@ -227,19 +227,7 @@ def _is_comma_device_runtime() -> bool:
   `PC` is derived from `/TICI`, which can be missing in edge boot/update states.
   For Galaxy routing we must keep on-device Galaxy on 8082.
   """
-  if not PC:
-    return True
-
-  if os.path.isfile("/TICI") or os.path.isfile("/AGNOS"):
-    return True
-
-  model_path = "/sys/firmware/devicetree/base/model"
-  try:
-    with open(model_path) as f:
-      model = f.read().strip("\x00").lower()
-    return "comma " in model
-  except Exception:
-    return False
+  return cpu_capture._is_comma_device_runtime()
 
 
 def _get_param_key_type(params_obj, key):

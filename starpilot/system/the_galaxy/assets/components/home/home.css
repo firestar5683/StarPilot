@@ -604,8 +604,10 @@
 
 .dashboard-cpu-capture-download {
   align-items: center;
+  color: var(--dashboard-muted);
   display: inline-flex;
   gap: 0.35rem;
+  margin-left: auto;
   text-decoration: none;
 }
 

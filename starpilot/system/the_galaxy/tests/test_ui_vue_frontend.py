@@ -146,7 +146,10 @@ def test_ui_routes_ported_views_natively_no_classic_fallback():
   assert "ToolEmbed" in app
   home = _read("js/views/Home.js")
   assert "GalaxyEmbed" not in home and 'src="/classic"' not in home
-  assert "api.getStats()" in home and "keepRefreshing" in home and "usePolling" in home
+  assert "api.getStats()" in home and "usePolling" in home
+  assert "cpuUsagePercent" in home and "/api/cpu_captures/download" in home
+  classic_home = (REPO_ROOT / "starpilot/system/the_galaxy/assets/components/home/home.js").read_text(encoding="utf-8")
+  assert "DASHBOARD_REFRESH_INTERVAL_MS" in classic_home
   for section in ["Last drive", "This week", "Recent drives", "Personal records",
                   "Most used models", "Storage", "Vitals", "Software", "Your driving", "Your device"]:
     assert section in home, f"Home dashboard should include {section!r}"

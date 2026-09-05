@@ -2833,58 +2833,36 @@ def _read_uptime_seconds():
     return None
 
 
-_CPU_USAGE_SNAPSHOT = {"total": None, "idle": None, "value": None}
-_CPU_USAGE_SAMPLE_SECONDS = 0.5
+_DEVICE_STATE_SM = None
+_DEVICE_STATE_SM_LOCK = threading.Lock()
+_CPU_USAGE_VALUE = None
 
 
-def _read_cpu_times(stat_path=None):
-  path = Path("/proc/stat") if stat_path is None else Path(stat_path)
-  try:
-    with open(path, encoding="utf-8") as f:
-      fields = next(
-        (line.split()[1:] for line in f if line.startswith("cpu ")),
-        None,
-      )
-  except Exception:
-    return None
+def _read_cpu_usage_percent():
+  """Average per-core CPU usage from the published ``deviceState`` message.
 
-  if not fields or len(fields) < 5:
-    return None
-
-  try:
-    values = [float(value) for value in fields]
-  except ValueError:
-    return None
-
-  return sum(values), values[3] + values[4]
-
-
-def _read_cpu_usage_percent(stat_path=None):
-  sample = _read_cpu_times(stat_path)
-  if sample is None:
-    return None
-
-  previous_total = _CPU_USAGE_SNAPSHOT["total"]
-  previous_idle = _CPU_USAGE_SNAPSHOT["idle"]
-  if previous_total is None or sample[0] <= previous_total:
-    previous_total, previous_idle = sample
-    time.sleep(_CPU_USAGE_SAMPLE_SECONDS)
-    sample = _read_cpu_times(stat_path)
-    if sample is None:
-      return None
-
-  total, idle = sample
-  _CPU_USAGE_SNAPSHOT["total"] = total
-  _CPU_USAGE_SNAPSHOT["idle"] = idle
-
-  elapsed = total - previous_total
-  if elapsed <= 0:
-    return _CPU_USAGE_SNAPSHOT["value"]
-
-  busy = elapsed - (idle - previous_idle)
-  usage = round(max(0.0, min(100.0, busy / elapsed * 100.0)))
-  _CPU_USAGE_SNAPSHOT["value"] = usage
-  return usage
+  This mirrors the CPU metric exposed by the "CPU Metrics" (``ShowCPU``)
+  developer toggle: ``hardwared`` publishes ``deviceState.cpuUsagePercent``
+  from ``psutil.cpu_percent(percpu=True)`` and the onroad overlay averages that
+  per-core list. We consume that same canonical value instead of re-deriving
+  usage from ``/proc/stat``. Returns the last known value (or ``None`` if we
+  have never seen one) when ``deviceState`` is unavailable -- e.g. off-device
+  or before the first message is received.
+  """
+  global _DEVICE_STATE_SM, _CPU_USAGE_VALUE
+  with _DEVICE_STATE_SM_LOCK:
+    try:
+      if _DEVICE_STATE_SM is None:
+        from cereal import messaging  # lazy: native msgq extension isn't importable everywhere
+        _DEVICE_STATE_SM = messaging.SubMaster(["deviceState"])
+      _DEVICE_STATE_SM.update(0)  # non-blocking: read the latest conflated message
+      if _DEVICE_STATE_SM.valid.get("deviceState", False):
+        cpu_list = list(_DEVICE_STATE_SM["deviceState"].cpuUsagePercent)
+        if cpu_list:
+          _CPU_USAGE_VALUE = int(sum(cpu_list) / len(cpu_list))
+    except Exception:
+      pass
+    return _CPU_USAGE_VALUE
 
 
 def _normalize_temp_c(value):

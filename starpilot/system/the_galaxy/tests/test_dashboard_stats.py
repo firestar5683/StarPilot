@@ -1046,32 +1046,40 @@ def test_gpu_temp_reader_ignores_non_gpu_thermal_zones(tmp_path):
   assert utilities._read_gpu_temp_c(tmp_path) == 42
 
 
-def test_cpu_usage_reader_samples_twice_on_first_read(tmp_path, monkeypatch):
-  stat_path = tmp_path / "stat"
-  stat_path.write_text("cpu  100 0 100 800 0 0 0 0 0 0\ncpu0 1 0 1 8 0 0 0 0 0 0\n", encoding="utf-8")
-  utilities._CPU_USAGE_SNAPSHOT.update({"total": None, "idle": None, "value": None})
+class _FakeDeviceStateSM:
+  """Minimal SubMaster stand-in exposing the bits ``_read_cpu_usage_percent`` uses."""
 
-  def advance(_seconds):
-    stat_path.write_text("cpu  400 0 100 900 0 0 0 0 0 0\ncpu0 4 0 1 9 0 0 0 0 0 0\n", encoding="utf-8")
+  def __init__(self, cpu_list, valid=True):
+    self._cpu_list = cpu_list
+    self.valid = {"deviceState": valid}
 
-  monkeypatch.setattr(utilities.time, "sleep", advance)
+  def update(self, _timeout=0):
+    pass
 
-  assert utilities._read_cpu_usage_percent(stat_path) == 75
-
-
-def test_cpu_usage_reader_averages_busy_time_since_previous_read(tmp_path):
-  stat_path = tmp_path / "stat"
-  stat_path.write_text("cpu  400 0 100 900 0 0 0 0 0 0\ncpu0 4 0 1 9 0 0 0 0 0 0\n", encoding="utf-8")
-  utilities._CPU_USAGE_SNAPSHOT.update({"total": 1000.0, "idle": 800.0, "value": 0})
-
-  assert utilities._read_cpu_usage_percent(stat_path) == 75
-  assert utilities._CPU_USAGE_SNAPSHOT["total"] == 1400.0
+  def __getitem__(self, _key):
+    return SimpleNamespace(cpuUsagePercent=self._cpu_list)
 
 
-def test_cpu_usage_reader_returns_none_without_proc_stat(tmp_path):
-  utilities._CPU_USAGE_SNAPSHOT.update({"total": None, "idle": None, "value": None})
+def test_cpu_usage_reader_averages_device_state_cores(monkeypatch):
+  monkeypatch.setattr(utilities, "_DEVICE_STATE_SM", _FakeDeviceStateSM([10, 20, 60, 90]))
+  monkeypatch.setattr(utilities, "_CPU_USAGE_VALUE", None)
 
-  assert utilities._read_cpu_usage_percent(tmp_path / "missing") is None
+  # Matches the onroad overlay: int(sum(cpuUsagePercent) / len(cpuUsagePercent)).
+  assert utilities._read_cpu_usage_percent() == 45
+
+
+def test_cpu_usage_reader_returns_last_value_when_device_state_invalid(monkeypatch):
+  monkeypatch.setattr(utilities, "_DEVICE_STATE_SM", _FakeDeviceStateSM([10, 20, 60, 90], valid=False))
+  monkeypatch.setattr(utilities, "_CPU_USAGE_VALUE", 37)
+
+  assert utilities._read_cpu_usage_percent() == 37
+
+
+def test_cpu_usage_reader_returns_none_before_first_sample(monkeypatch):
+  monkeypatch.setattr(utilities, "_DEVICE_STATE_SM", _FakeDeviceStateSM([], valid=True))
+  monkeypatch.setattr(utilities, "_CPU_USAGE_VALUE", None)
+
+  assert utilities._read_cpu_usage_percent() is None
 
 
 def test_network_name_uses_wifi_ssid(monkeypatch):

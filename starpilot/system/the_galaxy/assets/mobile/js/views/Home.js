@@ -46,13 +46,6 @@ const FAVORITE_COLORS = ["#5ec8c8", "#8b6cc5", "#d4a060", "#e05577", "#6cc56e", 
 const TOP_MODEL_LIMIT = 3
 const WEEK_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
-function hasPendingWork(dashboard) {
-  const analysis = dashboard?.analysis || {}
-  const pendingRoutes = Math.max(0, Math.round(toNum(analysis.pendingRoutes)))
-  const recent = Array.isArray(dashboard?.recentDrives) ? dashboard.recentDrives : []
-  return Boolean(analysis.running) || pendingRoutes > 0 || recent.some((d) => !driveReady(d))
-}
-
 const emptyStats = () => ({ drives: 0, distance: 0, hours: 0 })
 const emptyDrive = () => ({
   date: "", endDate: "", distance: 0, distanceUnit: "", duration: 0,
@@ -68,7 +61,6 @@ export const Home = {
       error: "",
       payload: null,
       unit: "miles",
-      keepRefreshing: false,
       togglingKey: "",
     }
   },
@@ -272,6 +264,15 @@ export const Home = {
       }
     },
 
+    captureView() {
+      const capture = this.device.cpuCapture || {}
+      return {
+        exists: capture.exists === true,
+        samples: capture.rows == null ? "?" : toInt(capture.rows),
+        size: capture.sizeBytes == null ? "" : ` (${fmtBytes(capture.sizeBytes)})`,
+      }
+    },
+
     vitalsList() {
       const device = this.device
       return [
@@ -279,7 +280,7 @@ export const Home = {
         { label: "LAN IP", value: device.lanIp || "unknown" },
         { label: "Network", value: device.networkName || "No wireless connectivity" },
         { label: "Uptime", value: device.uptimeSeconds == null ? "unknown" : fmtDuration(device.uptimeSeconds) },
-        { label: "CPU temp", value: device.cpuTempC == null ? "unknown" : `${toInt(device.cpuTempC)} C` },
+        { label: "CPU temp / usage", value: `${device.cpuTempC == null ? "unknown" : `${toInt(device.cpuTempC)} C`} / ${device.cpuUsagePercent == null ? "unknown" : pct(device.cpuUsagePercent)}` },
         { label: "GPU temp", value: device.gpuTempC == null ? "unknown" : `${toInt(device.gpuTempC)} C` },
       ]
     },
@@ -326,7 +327,6 @@ export const Home = {
         this.payload = data
         this.unit = payloadUnit || this.unit || "miles"
         this.status = "ready"
-        this.keepRefreshing = hasPendingWork(data?.dashboard || {})
       } catch (err) {
         if (this.payload) {
           showSnackbar("Couldn't refresh dashboard.", "error")
@@ -360,7 +360,7 @@ export const Home = {
     },
   },
   created() {
-    this.poll = usePolling(() => this.load(), { interval: 3500, enabled: () => this.keepRefreshing })
+    this.poll = usePolling(() => this.load(), { interval: 5000 })
     this.poll.start()
   },
   mounted() { this.load() },
@@ -548,6 +548,15 @@ export const Home = {
                 <span class="gx-row__label">{{ v.label }}</span>
                 <span class="gx-row__value">{{ v.value }}</span>
               </div>
+            </div>
+            <div v-if="captureView.exists" class="dh-capture">
+              <span>CPU capture</span>
+              <strong>{{ captureView.samples }} samples{{ captureView.size }}</strong>
+              <a href="/api/cpu_captures/download" download><i class="bi bi-download"></i> Download CSV</a>
+            </div>
+            <div v-else class="dh-capture">
+              <span>CPU capture</span>
+              <em>No capture recorded yet</em>
             </div>
           </section>
 

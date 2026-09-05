@@ -8,6 +8,7 @@ const HOME_STATE = {
   initialized: false,
   refreshTimer: null,
 };
+const DASHBOARD_REFRESH_INTERVAL_MS = 5000;
 
 const FAVORITE_COLORS = ["#5ec8c8", "#8b6cc5", "#d4a060", "#e05577", "#6cc56e", "#8aa3ff"];
 const TOP_MODEL_LIMIT = 3;
@@ -189,8 +190,8 @@ function clearDashboardRefreshTimer() {
 
 function scheduleDashboardRefresh(dashboard) {
   clearDashboardRefreshTimer();
-  if (!dashboardShouldAutoRefresh(dashboard)) return;
-  HOME_STATE.refreshTimer = setTimeout(() => initializeHome(false), 3500);
+  const delay = dashboardShouldAutoRefresh(dashboard) ? 3500 : DASHBOARD_REFRESH_INTERVAL_MS;
+  HOME_STATE.refreshTimer = setTimeout(() => initializeHome(false), delay);
 }
 
 function renderAnalysisStatus(dashboard) {
