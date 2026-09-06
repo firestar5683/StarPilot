@@ -86,9 +86,16 @@ class Vapid01(object):
         :type private_key: bytes
 
         """
-        # not sure why, but load_pem_private_key fails to deserialize
-        return cls.from_der(
-            b''.join(private_key.splitlines()[1:-1]))
+        try:
+            key = serialization.load_pem_private_key(
+                private_key,
+                password=None,
+                backend=default_backend()
+            )
+            return cls(key)
+        except Exception:
+            lines = [line.strip() for line in private_key.splitlines() if line.strip() and not line.strip().startswith(b"-----")]
+            return cls.from_der(b''.join(lines))
 
     @classmethod
     def from_der(cls, private_key):
@@ -197,7 +204,7 @@ class Vapid01(object):
 
     def generate_keys(self):
         """Generate a valid ECDSA Key Pair."""
-        self.private_key = ec.generate_private_key(ec.SECP256R1,
+        self.private_key = ec.generate_private_key(ec.SECP256R1(),
                                                    default_backend())
 
     def private_pem(self):

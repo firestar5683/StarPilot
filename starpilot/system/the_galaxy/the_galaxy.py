@@ -6,6 +6,7 @@ import importlib
 import math
 import numbers
 import os
+import platform
 import sys
 import sysconfig
 import tarfile
@@ -186,7 +187,9 @@ def _galaxy_runtime_dependency_paths() -> tuple[str, ...]:
     "/usr/local/venv/lib/python3.12/site-packages",
   ]
 
-  for venv_name in (".venv", ".venv-linux-arm64"):
+  is_arm = platform.machine().lower() in ("aarch64", "arm64")
+  venv_names = (".venv-linux-arm64", ".venv") if is_arm else (".venv",)
+  for venv_name in venv_names:
     venv_path = repo_root / venv_name / "lib"
     if venv_path.is_dir():
       candidates.extend(str(path) for path in venv_path.glob("python*/site-packages"))
@@ -196,9 +199,13 @@ def _galaxy_runtime_dependency_paths() -> tuple[str, ...]:
 
 REPO_THIRD_PARTY_PATH = Path(__file__).resolve().parents[2] / "third_party"
 GALAXY_RUNTIME_DEPENDENCY_PATHS = _galaxy_runtime_dependency_paths()
-for deps_path in GALAXY_DEPS_PATHS + GALAXY_RUNTIME_DEPENDENCY_PATHS:
+for deps_path in GALAXY_DEPS_PATHS:
   if os.path.isdir(deps_path) and deps_path not in sys.path:
     sys.path.insert(0, deps_path)
+
+for deps_path in GALAXY_RUNTIME_DEPENDENCY_PATHS:
+  if os.path.isdir(deps_path) and deps_path not in sys.path:
+    sys.path.append(deps_path)
 
 if REPO_THIRD_PARTY_PATH.is_dir() and str(REPO_THIRD_PARTY_PATH) not in sys.path:
   sys.path.insert(0, str(REPO_THIRD_PARTY_PATH))
@@ -949,16 +956,23 @@ def _get_sentry_vapid():
   except ModuleNotFoundError as error:
     raise RuntimeError("pywebpush is not installed") from error
 
-  private_key_path, _ = _sentry_push_paths()
-  private_key_path.parent.mkdir(parents=True, exist_ok=True)
-  if private_key_path.is_file():
-    return Vapid.from_file(str(private_key_path))
+  with _SENTRY_PUSH_LOCK:
+    private_key_path, _ = _sentry_push_paths()
+    private_key_path.parent.mkdir(parents=True, exist_ok=True)
+    if private_key_path.is_file():
+      try:
+        if private_key_path.stat().st_size > 0:
+          return Vapid.from_file(str(private_key_path))
+      except Exception as error:
+        cloudlog.warning("Galaxy: Existing Sentry VAPID private key was invalid, regenerating: %s", error)
 
-  vapid = Vapid()
-  vapid.generate_keys()
-  vapid.save_key(str(private_key_path))
-  private_key_path.chmod(0o600)
-  return vapid
+    vapid = Vapid()
+    vapid.generate_keys()
+    temporary_path = private_key_path.with_suffix(".tmp")
+    vapid.save_key(str(temporary_path))
+    temporary_path.chmod(0o600)
+    temporary_path.replace(private_key_path)
+    return vapid
 
 
 def _sentry_vapid_public_key(vapid) -> str:
@@ -4959,7 +4973,30 @@ def _set_lateral_maneuver_mode(enabled):
 
   return _save_lateral_maneuver_status(status)
 
+
+_SLUG_PREFIX_RE = re.compile(r"^/([A-Za-z0-9]{16})(/.*)?$")
+
+
+class GalaxySlugMiddleware:
+  """WSGI middleware to normalize reverse-proxy requests prefixed with a 16-character tunnel slug."""
+
+  def __init__(self, wsgi_app):
+    self.wsgi_app = wsgi_app
+
+  def __call__(self, environ, start_response):
+    path_info = environ.get("PATH_INFO", "")
+    match = _SLUG_PREFIX_RE.match(path_info)
+    if match:
+      environ["HTTP_X_GALAXY_SLUG"] = match.group(1)
+      remainder = match.group(2)
+      environ["PATH_INFO"] = remainder if remainder else "/"
+    return self.wsgi_app(environ, start_response)
+
+
 def setup(app):
+  if not isinstance(app.wsgi_app, GalaxySlugMiddleware):
+    app.wsgi_app = GalaxySlugMiddleware(app.wsgi_app)
+
   model_status_debug = {
     "last_signature": None,
     "last_log_time": 0.0,
@@ -5005,6 +5042,19 @@ def setup(app):
 
   @app.errorhandler(404)
   def not_found(_):
+    is_api = (
+      request.path == "/api"
+      or request.path.startswith("/api/")
+      or "/api/" in request.path
+      or request.is_json
+      or (request.accept_mimetypes.accept_json and not request.accept_mimetypes.accept_html)
+    )
+    if is_api or request.method not in ("GET", "HEAD"):
+      return jsonify({"error": "Not found"}), 404
+
+    if request.path.startswith(("/assets/", "/screen_recordings/", "/thumbnails/", "/video/")):
+      return "Not found", 404
+
     response = make_response(render_template("index.html"))
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
@@ -8186,14 +8236,19 @@ def setup(app):
   def sentry_service_worker():
     response = send_from_directory(app.static_folder, "service-worker.js", mimetype="application/javascript")
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
+    response.headers["Service-Worker-Allowed"] = "/"
     return response
 
   @app.route("/api/sentry/push/config", methods=["GET"])
   def sentry_push_config():
     try:
       public_key = _sentry_vapid_public_key(_get_sentry_vapid())
-    except Exception:
+    except (RuntimeError, ModuleNotFoundError) as error:
+      cloudlog.warning("Galaxy: Sentry Web Push dependencies unavailable: %s", error)
       return jsonify({"enabled": False, "error": "Web Push dependencies are unavailable."}), 503
+    except Exception as error:
+      cloudlog.exception("Galaxy: Failed to initialize Sentry Web Push: %s", error)
+      return jsonify({"enabled": False, "error": f"Push notification service error: {error}"}), 500
 
     return jsonify({
       "enabled": True,
@@ -8209,8 +8264,12 @@ def setup(app):
 
     try:
       _get_sentry_vapid()
-    except Exception:
+    except (RuntimeError, ModuleNotFoundError) as error:
+      cloudlog.warning("Galaxy: Sentry Web Push dependencies unavailable: %s", error)
       return jsonify({"error": "Web Push dependencies are unavailable."}), 503
+    except Exception as error:
+      cloudlog.exception("Galaxy: Failed to initialize Sentry Web Push for subscription: %s", error)
+      return jsonify({"error": f"Push notification service error: {error}"}), 500
 
     with _SENTRY_PUSH_LOCK:
       subscriptions = _load_sentry_push_subscriptions()

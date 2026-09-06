@@ -24,7 +24,7 @@ function rememberEvent(eventId) {
 
 async function pollSentryEvent() {
   try {
-    const response = await fetch("/api/sentry/status", { cache: "no-store" })
+    const response = await fetch(galaxyPath("/api/sentry/status"), { cache: "no-store" })
     if (!response.ok) return
     const payload = await response.json()
     const event = payload?.lastEvent
@@ -81,6 +81,13 @@ async function readJsonResponse(response) {
   try {
     return JSON.parse(body)
   } catch {
+    const contentType = response.headers?.get("content-type") || ""
+    if (contentType.includes("text/html") || body.trim().startsWith("<")) {
+      if (response.status === 200) {
+        throw new Error("Galaxy returned an HTML page instead of JSON data. Check your session or connection.")
+      }
+      throw new Error(`Galaxy returned an HTML error page (${response.status}). Check the device connection or Galaxy tunnel.`)
+    }
     throw new Error(`Galaxy returned an unexpected ${response.status} response. Check the device connection or Galaxy tunnel.`)
   }
 }

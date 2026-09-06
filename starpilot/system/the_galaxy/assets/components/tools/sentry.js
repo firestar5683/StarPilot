@@ -108,14 +108,14 @@ async function sendTestEvent() {
   state.testBusy = true
   try {
     const response = await fetch(galaxyPath("/api/sentry/test"), { method: "POST" })
-    const payload = await response.json()
+    const payload = await readJsonResponse(response)
     if (!response.ok) {
       showSnackbar(payload.error || "Sentry test failed.")
       return
     }
     showSnackbar("Test capture started. The images will appear here shortly.")
   } catch (error) {
-    showSnackbar("Network error — is the device reachable?")
+    showSnackbar(error.message || "Network error — is the device reachable?")
   } finally {
     state.testBusy = false
   }
@@ -128,6 +128,13 @@ async function readJsonResponse(response) {
   try {
     return JSON.parse(body)
   } catch {
+    const contentType = response.headers?.get("content-type") || ""
+    if (contentType.includes("text/html") || body.trim().startsWith("<")) {
+      if (response.status === 200) {
+        throw new Error("Galaxy returned an HTML page instead of JSON data. Check your session or connection.")
+      }
+      throw new Error(`Galaxy returned an HTML error page (${response.status}). Check the device connection or Galaxy tunnel.`)
+    }
     throw new Error(`Galaxy returned an unexpected ${response.status} response. Check the device connection or Galaxy tunnel.`)
   }
 }
