@@ -1914,7 +1914,16 @@ function renderSettingRow(p) {
             </div>
           ` : ""}
 
-          ${() => p.is_parent_toggle && isParamEnabledForChildren(p) ? html`
+          ${() => p.key === LONGITUDINAL_MODE_KEY && isParamEnabledForChildren(p) ? html`
+            <button type="button" class="ds-manage-btn"
+              aria-controls="ds-LongitudinalControlMode-children"
+              aria-expanded="${state.expanded[p.key] ? "true" : "false"}"
+              @click="${() => toggleManage(p.key)}">
+              ${state.expanded[p.key] ? "Close" : "Manage"}
+              <i class="bi bi-chevron-${state.expanded[p.key] ? "up" : "down"}" aria-hidden="true"></i>
+            </button>
+          ` : ""}
+          ${() => p.key !== LONGITUDINAL_MODE_KEY && p.is_parent_toggle && isParamEnabledForChildren(p) ? html`
             <div class="ds-manage-btn" @click="${() => toggleManage(p.key)}">
               ${state.expanded[p.key] ? "Close" : "Manage"}
               <i class="bi bi-chevron-${state.expanded[p.key] ? "up" : "down"}"></i>
@@ -1950,7 +1959,11 @@ function renderSettingTree(paramsList, parentKey = null) {
     if (!hasChildParams(paramsList, param.key)) continue
     if (!isParamEnabledForChildren(param) || !state.expanded[param.key]) continue
 
-    rendered.push(...renderSettingTree(paramsList, param.key))
+    if (param.key === LONGITUDINAL_MODE_KEY) {
+      rendered.push(html`<div id="ds-LongitudinalControlMode-children">${renderSettingTree(paramsList, param.key)}</div>`)
+    } else {
+      rendered.push(...renderSettingTree(paramsList, param.key))
+    }
   }
 
   return rendered
