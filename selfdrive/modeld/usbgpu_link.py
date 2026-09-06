@@ -20,11 +20,16 @@ def _chestnut_portli() -> Path | None:
 
 
 def wait_usbgpu_link(timeout: float = 30.0) -> None:
+  start_time = time.monotonic()
   portli = _chestnut_portli()
+  while portli is None and time.monotonic() - start_time < timeout:
+    time.sleep(0.5)
+    portli = _chestnut_portli()
+
   if portli is None:
+    cloudlog.error("usbgpu device never enumerated")
     return
 
-  start_time = time.monotonic()
   while time.monotonic() - start_time < timeout:
     start_errors = read_int(portli, 0)
     time.sleep(STABLE_SECONDS)
