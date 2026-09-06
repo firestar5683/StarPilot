@@ -178,14 +178,48 @@ def _install_server_import_stubs():
   theme_manager.THEME_COMPONENT_PARAMS = {}
 
   def parse_custom_accel_profile_curve(count, breakpoints, values):
-    point_count = int(count)
+    numeric_count = float(count)
+    if not numeric_count.is_integer():
+      raise ValueError("Breakpoint count must be a whole number")
+    point_count = int(numeric_count)
     active_breakpoints = [float(value) for value in breakpoints[:point_count]]
     if any(current <= previous for previous, current in zip(active_breakpoints, active_breakpoints[1:], strict=False)):
       raise ValueError("Breakpoint speeds must be strictly increasing")
-    return active_breakpoints, [float(value) for value in values[:point_count]]
+    return [value * 0.44704 for value in active_breakpoints], [float(value) for value in values[:point_count]]
+
+  def get_accel_profile_curve_values(profile, ev_tuning=False, truck_tuning=False):
+    gas = {
+      0: [2.00, 1.80, 1.55, 1.30, 1.05, 0.85, 0.55],
+      1: [1.50, 1.30, 1.10, 0.90, 0.75, 0.55, 0.35],
+      2: [2.50, 2.25, 1.95, 1.60, 1.30, 1.05, 0.75],
+      3: [3.50, 3.20, 2.80, 2.35, 1.90, 1.55, 1.15],
+    }
+    ev = {
+      0: [2.00, 1.84, 1.64, 1.44, 1.24, 1.08, 0.84],
+      1: [1.50, 1.34, 1.18, 1.02, 0.90, 0.74, 0.58],
+      2: [2.50, 2.30, 2.06, 1.78, 1.54, 1.34, 1.10],
+      3: [3.50, 3.26, 2.94, 2.58, 2.22, 1.94, 1.62],
+    }
+    return list((ev if ev_tuning and not truck_tuning else gas)[int(profile or 0)])
+
+  def interpolate_accel_profile(v_ego, accel_curve, breakpoints=None):
+    curve_breakpoints = [0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 40.0] if breakpoints is None else list(breakpoints)
+    speed = float(v_ego)
+    if speed <= curve_breakpoints[0]:
+      return float(accel_curve[0])
+    if speed >= curve_breakpoints[-1]:
+      return float(accel_curve[-1])
+    for index, upper in enumerate(curve_breakpoints[1:], start=1):
+      if speed <= upper:
+        lower = curve_breakpoints[index - 1]
+        ratio = (speed - lower) / (upper - lower)
+        smooth_ratio = ratio ** 3 * (10.0 - 15.0 * ratio + 6.0 * ratio * ratio)
+        return float(accel_curve[index - 1] + (accel_curve[index] - accel_curve[index - 1]) * smooth_ratio)
+    raise AssertionError("unreachable")
 
   sys.modules["openpilot.starpilot.common.accel_profile"] = _simple_module(
     "openpilot.starpilot.common.accel_profile",
+    A_CRUISE_MAX_BP_CUSTOM=[0.0, 5.0, 10.0, 15.0, 20.0, 25.0, 40.0],
     CUSTOM_ACCEL_PROFILE_BREAKPOINT_PARAM_KEYS=[f"CustomAccelProfileBreakpoint{index}MPH" for index in range(1, 13)],
     CUSTOM_ACCEL_PROFILE_BREAKPOINTS_INITIALIZED_KEY="CustomAccelProfileBreakpointsInitialized",
     CUSTOM_ACCEL_PROFILE_CURVE_PARAM_KEYS=[
@@ -196,13 +230,18 @@ def _install_server_import_stubs():
     CUSTOM_ACCEL_PROFILE_DEFAULT_BREAKPOINTS_MPH=[0.0, 11.2, 22.4, 33.6, 44.7, 55.9, 89.5, 100.7, 111.8, 123.0, 134.2, 145.4],
     CUSTOM_ACCEL_PROFILE_DEFAULT_POINT_COUNT=7,
     CUSTOM_ACCEL_PROFILE_INITIALIZED_KEY="CustomAccelProfileInitialized",
-    CUSTOM_ACCEL_PROFILE_PARAM_KEYS=[],
+    CUSTOM_ACCEL_PROFILE_PARAM_KEYS=[f"CustomAccelProfile{mph}MPH" for mph in (0, 11, 22, 34, 45, 56, 89)],
     CUSTOM_ACCEL_PROFILE_POINT_COUNT_KEY="CustomAccelProfilePointCount",
     CUSTOM_ACCEL_PROFILE_POINT_VALUE_PARAM_KEYS=[f"CustomAccelProfilePoint{index}Accel" for index in range(1, 13)],
+    CUSTOM_ACCEL_PROFILE_VALUE_MAX=6.0,
+    CUSTOM_ACCEL_PROFILE_VALUE_MIN=0.0,
     build_custom_accel_profile_defaults=lambda *args, **kwargs: {},
-    custom_accel_profile_is_initialized=lambda *args, **kwargs: False,
+    custom_accel_profile_is_initialized=lambda flag, values: bool(flag) or all(value is not None for value in values.values()),
+    get_accel_profile_curve_values=get_accel_profile_curve_values,
+    interpolate_accel_profile=interpolate_accel_profile,
     get_custom_accel_profile_curve_defaults=lambda *args, **kwargs: {},
-    normalize_acceleration_profile=lambda value: value,
+    normalize_acceleration_profile=lambda value: int(value or 0),
+    normalize_deceleration_profile=lambda value: int(value or 0),
     parse_custom_accel_profile_curve=parse_custom_accel_profile_curve,
   )
   sys.modules["openpilot.starpilot.common.maps_catalog"] = _simple_module(
@@ -2169,6 +2208,200 @@ def test_toggle_backup_restore_round_trip_filters_non_settings(monkeypatch):
   assert update_calls == [True]
 
 
+@pytest.mark.parametrize("device_state", [
+  {"IsOnroad": True, "IsOffroad": False},
+  {"IsOnroad": False, "IsOffroad": False},
+])
+def test_toggle_restore_rejects_without_confirmed_offroad_for_parked_personality_key_without_mutation(monkeypatch, device_state):
+  server = _load_server_module()
+  assert server._import_galaxy_web_symbols()
+
+  parked_key = "StandardFollow"
+  definitions = {
+    parked_key: (1.45, server.ParamKeyType.FLOAT, server.ParamKeyFlag.PERSISTENT),
+    "EnabledSetting": (False, server.ParamKeyType.BOOL, server.ParamKeyFlag.PERSISTENT),
+  }
+
+  class ToggleParams:
+    def __init__(self):
+      self.values = {**device_state, parked_key: 1.45, "EnabledSetting": False}
+
+    def get(self, key, block=False):
+      del block
+      return self.values.get(key)
+
+    def get_bool(self, key):
+      return bool(self.values.get(key, False))
+
+    def get_default_value(self, key):
+      return definitions[key][0]
+
+    def get_key_flag(self, key):
+      return definitions[key][2]
+
+    def get_type(self, key):
+      return definitions[key][1]
+
+    def put(self, key, value):
+      self.values[key] = value
+
+  raw_params = ToggleParams()
+  server.starpilot_default_params = [
+    (key, default, value_type, 0)
+    for key, (default, value_type, _) in definitions.items()
+  ]
+  monkeypatch.setattr(server, "_params_raw", raw_params)
+  monkeypatch.setattr(server, "params", server.ParamsCompat(raw_params))
+  monkeypatch.setattr(server, "EXCLUDED_KEYS", set())
+  monkeypatch.setattr(server, "update_starpilot_toggles", lambda: pytest.fail("restore side effect ran"))
+
+  app = server.Flask(
+    "toggle_restore_onroad_test",
+    template_folder=str(MODULE_DIR / "templates"),
+    static_folder=str(MODULE_DIR / "assets"),
+  )
+  server.setup(app)
+  client = app.test_client()
+  before = dict(raw_params.values)
+
+  encoded_data = utilities.encode_parameters({"EnabledSetting": True, parked_key: 1.25})
+  response = client.post("/api/toggles/restore", json={"data": encoded_data})
+
+  assert response.status_code == 403
+  assert "parked" in response.get_json()["message"].lower()
+  assert raw_params.values == before
+
+
+@pytest.mark.parametrize("invalid_value", [99.0, "false"])
+def test_toggle_restore_rejects_invalid_personality_value_without_mutation(monkeypatch, invalid_value):
+  server = _load_server_module()
+  assert server._import_galaxy_web_symbols()
+
+  parked_key = "StandardFollow" if isinstance(invalid_value, float) else "CustomPersonalities"
+  definitions = {
+    parked_key: (1.45, server.ParamKeyType.FLOAT, server.ParamKeyFlag.PERSISTENT),
+    "EnabledSetting": (False, server.ParamKeyType.BOOL, server.ParamKeyFlag.PERSISTENT),
+  }
+  if parked_key == "CustomPersonalities":
+    definitions[parked_key] = (False, server.ParamKeyType.BOOL, server.ParamKeyFlag.PERSISTENT)
+
+  class ToggleParams:
+    def __init__(self):
+      self.values = {"IsOnroad": False, "IsOffroad": True, parked_key: 1.45, "EnabledSetting": False}
+
+    def get(self, key, block=False):
+      del block
+      return self.values.get(key)
+
+    def get_bool(self, key):
+      return bool(self.values.get(key, False))
+
+    def get_default_value(self, key):
+      return definitions[key][0]
+
+    def get_key_flag(self, key):
+      return definitions[key][2]
+
+    def get_type(self, key):
+      return definitions[key][1]
+
+    def put(self, key, value):
+      self.values[key] = value
+
+  raw_params = ToggleParams()
+  server.starpilot_default_params = [
+    (key, default, value_type, 0)
+    for key, (default, value_type, _) in definitions.items()
+  ]
+  monkeypatch.setattr(server, "_params_raw", raw_params)
+  monkeypatch.setattr(server, "params", server.ParamsCompat(raw_params))
+  monkeypatch.setattr(server, "EXCLUDED_KEYS", set())
+  monkeypatch.setattr(server, "update_starpilot_toggles", lambda: pytest.fail("restore side effect ran"))
+
+  app = server.Flask(
+    "toggle_restore_personality_bounds_test",
+    template_folder=str(MODULE_DIR / "templates"),
+    static_folder=str(MODULE_DIR / "assets"),
+  )
+  server.setup(app)
+  client = app.test_client()
+  before = dict(raw_params.values)
+
+  encoded_data = utilities.encode_parameters({"EnabledSetting": True, parked_key: invalid_value})
+  response = client.post("/api/toggles/restore", json={"data": encoded_data})
+
+  assert response.status_code == 400
+  assert "invalid" in response.get_json()["message"].lower()
+  assert raw_params.values == before
+
+
+def test_toggle_restore_enables_master_only_after_installing_a_strict_profile_document(monkeypatch):
+  server = _load_server_module()
+  assert server._import_galaxy_web_symbols()
+
+  definitions = {
+    "CustomPersonalities": (False, server.ParamKeyType.BOOL, server.ParamKeyFlag.PERSISTENT),
+    server.PERSONALITY_PROFILES_PARAM: (
+      {}, server.ParamKeyType.JSON, server.ParamKeyFlag.PERSISTENT | server.ParamKeyFlag.DONT_LOG,
+    ),
+  }
+
+  class ToggleParams:
+    def __init__(self):
+      self.values = {"IsOnroad": False, "IsOffroad": True, "CustomPersonalities": False}
+      self.writes = []
+
+    def get(self, key, block=False):
+      del block
+      return self.values.get(key)
+
+    def get_bool(self, key):
+      return bool(self.values.get(key, False))
+
+    def get_default_value(self, key):
+      return definitions[key][0]
+
+    def get_key_flag(self, key):
+      return definitions[key][2]
+
+    def get_type(self, key):
+      return definitions[key][1]
+
+    def put(self, key, value):
+      self.values[key] = value
+      self.writes.append((key, value))
+
+    def put_bool(self, key, value):
+      self.put(key, bool(value))
+
+  raw_params = ToggleParams()
+  server.starpilot_default_params = [
+    (key, default, value_type, 0)
+    for key, (default, value_type, _) in definitions.items()
+  ]
+  monkeypatch.setattr(server, "_params_raw", raw_params)
+  monkeypatch.setattr(server, "params", server.ParamsCompat(raw_params))
+  monkeypatch.setattr(server, "EXCLUDED_KEYS", set())
+  monkeypatch.setattr(server, "update_starpilot_toggles", lambda: None)
+
+  app = server.Flask(
+    "toggle_restore_personality_master_test",
+    template_folder=str(MODULE_DIR / "templates"),
+    static_folder=str(MODULE_DIR / "assets"),
+  )
+  server.setup(app)
+  response = app.test_client().post(
+    "/api/toggles/restore",
+    json={"data": utilities.encode_parameters({"CustomPersonalities": True})},
+  )
+
+  assert response.status_code == 200, response.get_json()
+  document = server.strict_profile_document(raw_params.values[server.PERSONALITY_PROFILES_PARAM])
+  assert document is not None and document["enabled"] is True
+  assert raw_params.values["CustomPersonalities"] is True
+  assert [key for key, _ in raw_params.writes] == [server.PERSONALITY_PROFILES_PARAM, "CustomPersonalities"]
+
+
 def test_toggle_restore_reports_invalid_and_unavailable_settings(monkeypatch):
   server = _load_server_module()
   assert server._import_galaxy_web_symbols()
@@ -2266,7 +2499,7 @@ def test_toggle_profile_slots_save_and_load_the_same_filtered_settings(monkeypat
     for key, (default, value_type, _) in definitions.items()
   ]
   monkeypatch.setattr(server, "_params_raw", raw_params)
-  monkeypatch.setattr(server, "params", FakeParams({"IsOnroad": False}))
+  monkeypatch.setattr(server, "params", FakeParams({"IsOnroad": False, "IsOffroad": True}))
   monkeypatch.setattr(server, "EXCLUDED_KEYS", set())
   monkeypatch.setattr(server, "TOGGLE_BACKUPS", tmp_path)
   update_calls = []

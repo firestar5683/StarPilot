@@ -1,6 +1,7 @@
 import json
+from typing import cast
 
-from openpilot.common.params import ParamKeyType
+from openpilot.common.params import ParamKeyType, Params
 from openpilot.starpilot.common.favorite_slots import (
   FAVORITE_ACTION_ACCEL_COUNTER,
   FAVORITE_ACTION_DECEL_COUNTER,
@@ -16,9 +17,16 @@ from openpilot.starpilot.common.favorite_slots import (
   filter_favorite_slot_options,
   load_settings_catalog,
   load_favorite_slots,
+  normalize_favorite_slots,
   save_favorite_slots,
   toggle_favorite_slot,
   unassign_favorite_slot,
+)
+from openpilot.starpilot.common.longitudinal_personality_profiles import (
+  PERSONALITY_ADVANCED_PARAM_KEYS,
+  PERSONALITY_PARKED_PARAM_KEYS,
+  PERSONALITY_PROFILE_ENABLE_PARAM_KEYS,
+  PERSONALITY_PROFILES_PARAM,
 )
 
 
@@ -27,11 +35,14 @@ class FakeParams:
     self.store = {}
     self.types = {
       FAVORITE_SLOTS_PARAM: ParamKeyType.JSON,
+      PERSONALITY_PROFILES_PARAM: ParamKeyType.JSON,
       "AlphaLongitudinalEnabled": ParamKeyType.BOOL,
       "ForceOffroad": ParamKeyType.BOOL,
       "RedneckCruise": ParamKeyType.BOOL,
       "NotBool": ParamKeyType.INT,
     }
+    self.types.update(dict.fromkeys(PERSONALITY_PROFILE_ENABLE_PARAM_KEYS | {"CustomPersonalities"}, ParamKeyType.BOOL))
+    self.types.update(dict.fromkeys(PERSONALITY_ADVANCED_PARAM_KEYS, ParamKeyType.INT))
 
   def get(self, key):
     return self.store.get(key)
@@ -99,6 +110,35 @@ def test_galaxy_only_ford_controls_are_not_available_to_device_favorites():
   options = build_favorite_slot_options(lambda _key: True, alpha_longitudinal_available=True)
 
   assert ford_keys.isdisjoint({option["key"] for option in options})
+
+
+def test_parked_only_personality_keys_are_never_exposed_or_mutated_as_favorites():
+  blocked_keys = PERSONALITY_PARKED_PARAM_KEYS | {PERSONALITY_PROFILES_PARAM}
+  options = build_favorite_slot_options(lambda _key: True, alpha_longitudinal_available=True)
+  assert blocked_keys.isdisjoint({option["key"] for option in options})
+
+  params = FakeParams()
+  typed_params = cast(Params, params)
+  params_memory = cast(Params, FakeParams())
+  for key in blocked_keys:
+    original = {"schemaVersion": 1, "enabled": False} if key == PERSONALITY_PROFILES_PARAM else 100
+    params.put(key, original)
+    params.put(FAVORITE_SLOTS_PARAM, [{"enabled": True, "show_onroad": True, "key": key, "label": "Profiles"}])
+    slots = load_favorite_slots(typed_params, eligible_keys={key})
+    assert slots[0]["key"] is None
+    assert toggle_favorite_slot(0, typed_params, params_memory, eligible_keys={key}) is False
+    assert params.get(key) == original
+
+
+def test_parked_only_personality_keys_are_removed_without_a_param_store_even_when_eligible():
+  blocked_keys = PERSONALITY_PARKED_PARAM_KEYS | {PERSONALITY_PROFILES_PARAM}
+
+  for key in blocked_keys:
+    slots = normalize_favorite_slots(
+      [{"enabled": True, "show_onroad": True, "key": key, "label": "Profiles"}],
+      eligible_keys={key},
+    )
+    assert slots[0]["key"] is None
 
 
 def test_load_favorite_slots_filters_non_bool_keys():

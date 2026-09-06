@@ -39,6 +39,7 @@ class TogglesLayout(Widget):
   def __init__(self):
     super().__init__()
     self._params = ui_state.ui_params
+    self._personality_seen = None
     self._sync_rhd_toggle()
 
     # param, title, desc, icon, needs_restart
@@ -156,12 +157,16 @@ class TogglesLayout(Widget):
   def _update_state(self):
     if ui_state.sm.updated["selfdriveState"]:
       personality = PERSONALITY_TO_INT[ui_state.sm["selfdriveState"].personality]
-      if personality != ui_state.personality and ui_state.started:
+      # Track this control's readback, not the cache shared with other UI paths.
+      # Repeated old messages must not undo an optimistic, queued selection.
+      if ui_state.started and personality != self._personality_seen:
         self._long_personality_setting.action_item.set_selected_button(personality)
+        self._personality_seen = personality
       ui_state.personality = personality
 
   def show_event(self):
     self._scroller.show_event()
+    self._personality_seen = None
     self._update_toggles()
 
   def _update_toggles(self):

@@ -5,7 +5,7 @@ import threading
 import time
 import uuid
 
-from openpilot.common.params import Params, ParamKeyFlag, UnknownKeyName
+from openpilot.common.params import Params, ParamKeyFlag, ParamKeyType, UnknownKeyName
 
 class TestParams:
   def setup_method(self):
@@ -127,6 +127,31 @@ class TestParams:
     assert isinstance(self.params.get("LongitudinalPersonality", return_default=True), int)
     assert self.params.get("LiveParameters") is None
     assert self.params.get("LiveParameters", return_default=True) is None
+
+  def test_longitudinal_personality_profiles_json_round_trip(self):
+    key = "LongitudinalPersonalityProfiles"
+    value = {
+      "schemaVersion": 1,
+      "enabled": False,
+      "axes": {
+        "acceleration": {
+          "speed": {"unit": "mph", "values": [0.0, 11.184681, 22.369363, 33.554044, 44.738726, 55.923407, 89.477452]},
+          "value": {"unit": "m/s^2", "meaning": "maximum_requested_acceleration"},
+        },
+        "braking": {
+          "speed": {"unit": "mph", "values": [0.0, 11.184681, 22.369363, 33.554044, 44.738726, 55.923407, 89.477452]},
+          "value": {"unit": "m/s^2", "meaning": "cruise_slc_deceleration_magnitude"},
+        },
+        "following": {"speed": {"unit": "mph", "values": [0, 10, 20, 30, 40, 50, 60, 70, 80, 90]}, "value": {"unit": "s", "meaning": "base_time_headway"}},
+      },
+      "profiles": {},
+    }
+    self.params.remove(key)
+
+    assert self.params.get_type(key) == ParamKeyType.JSON
+    assert self.params.get(key) is None
+    self.params.put(key, value)
+    assert self.params.get(key) == value
 
   def test_params_get_type(self):
     # json

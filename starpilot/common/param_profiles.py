@@ -183,38 +183,56 @@ def _read_profile(slot: str, profile_root: Path | None = None) -> dict:
   return payload
 
 
-def load_profile(params, slot: str, *, allowed_keys: set[str] | None = None, profile_root: Path | None = None,
-                 legacy_renames: dict[str, str] | None = None) -> dict:
+def prepare_profile(params, slot: str, *, allowed_keys: set[str] | None = None, profile_root: Path | None = None,
+                    legacy_renames: dict[str, str] | None = None) -> dict:
+  """Decode a slot without writes so callers can apply their validated restore policy."""
   normalized = _normalize_slot(slot)
   with _PROFILE_LOCK:
     payload = _read_profile(normalized, profile_root)
-    keys = eligible_profile_keys(params) if allowed_keys is None else set(allowed_keys)
-    renames = legacy_renames or {}
-    restored_count = 0
-    skipped_count = 0
-    for saved_key, entry in payload["settings"].items():
-      key = renames.get(saved_key, saved_key)
-      if not isinstance(key, str) or key not in keys or not isinstance(entry, dict):
-        skipped_count += 1
-        continue
-      try:
-        current_type = ParamKeyType(params.get_type(key))
-        saved_type = ParamKeyType(entry.get("type"))
-        if saved_type != current_type or "value" not in entry:
-          raise ValueError("setting type changed")
-        params.put(key, _deserialize_value(current_type, entry["value"]))
-        restored_count += 1
-      except (KeyError, TypeError, ValueError, OverflowError):
-        skipped_count += 1
+  keys = eligible_profile_keys(params) if allowed_keys is None else set(allowed_keys)
+  renames = legacy_renames or {}
+  settings = {}
+  skipped_count = 0
+  for saved_key, entry in payload["settings"].items():
+    key = renames.get(saved_key, saved_key)
+    if not isinstance(key, str) or key not in keys or not isinstance(entry, dict):
+      skipped_count += 1
+      continue
+    try:
+      current_type = ParamKeyType(params.get_type(key))
+      saved_type = ParamKeyType(entry.get("type"))
+      if saved_type != current_type or "value" not in entry:
+        raise ValueError("setting type changed")
+      settings[saved_key] = _deserialize_value(current_type, entry["value"])
+    except (KeyError, TypeError, ValueError, OverflowError):
+      skipped_count += 1
 
-  if restored_count == 0:
+  if not settings:
     raise ParamProfileError("No compatible settings were found in this profile.")
   return {
     "slot": normalized,
     "label": PROFILE_SLOTS[normalized],
-    "restoredCount": restored_count,
+    "settings": settings,
     "skippedCount": skipped_count,
   }
+
+
+def load_profile(params, slot: str, *, allowed_keys: set[str] | None = None, profile_root: Path | None = None,
+                 legacy_renames: dict[str, str] | None = None) -> dict:
+  result = prepare_profile(params, slot, allowed_keys=allowed_keys, profile_root=profile_root, legacy_renames=legacy_renames)
+  settings = result.pop("settings")
+  renames = legacy_renames or {}
+  restored_count = 0
+  with _PROFILE_LOCK:
+    for saved_key, value in settings.items():
+      try:
+        params.put(renames.get(saved_key, saved_key), value)
+        restored_count += 1
+      except (KeyError, TypeError, ValueError, OverflowError):
+        result["skippedCount"] += 1
+  if restored_count == 0:
+    raise ParamProfileError("No compatible settings were found in this profile.")
+  return {**result, "restoredCount": restored_count}
 
 
 def profile_status(slot: str, *, profile_root: Path | None = None) -> dict:

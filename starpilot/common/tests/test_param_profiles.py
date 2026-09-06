@@ -72,6 +72,24 @@ def test_profile_slots_round_trip_only_eligible_settings(tmp_path):
   assert params.values["TransientSetting"] is False
 
 
+def test_prepare_profile_decodes_without_writes_and_preserves_type_filtering(tmp_path):
+  params = FakeParams()
+  param_profiles.save_profile(params, "a", profile_root=tmp_path)
+  params.values.clear()
+  params.definitions["NumericSetting"] = (0, ParamKeyType.INT, ParamKeyFlag.PERSISTENT)
+
+  prepared = param_profiles.prepare_profile(params, "a", profile_root=tmp_path)
+
+  assert params.values == {}
+  assert prepared["settings"] == {"BooleanSetting": False, "JsonSetting": {"mode": "custom"}}
+  assert prepared["skippedCount"] == 1
+  assert prepared["slot"] == "a"
+  result = param_profiles.load_profile(params, "a", profile_root=tmp_path)
+  assert result["restoredCount"] == 2
+  assert result["skippedCount"] == 1
+  assert params.values == prepared["settings"]
+
+
 def test_profile_slots_report_missing_and_damaged_profiles(tmp_path):
   params = FakeParams()
 
