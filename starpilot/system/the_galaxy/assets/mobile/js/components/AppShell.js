@@ -102,7 +102,7 @@ export const AppShell = {
           <button type="button" class="gx-icon-btn gx-menu-btn" aria-label="Menu" @click="store.drawerOpen = true">
             <i class="bi bi-list"></i>
           </button>
-          <span class="gx-appbar__title">Galaxy</span>
+          <span class="gx-appbar__title">Big Dipper</span>
           <div class="gx-searchwrap">
             <input ref="searchInput" class="gx-search gx-appbar__search" type="search" placeholder="Search toggles..."
               v-model="search" aria-label="Search toggles" />
@@ -128,8 +128,8 @@ export const AppShell = {
       </transition>
       <aside class="gx-drawer" :class="{ open: store.drawerOpen }">
         <div class="gx-drawer__header">
-          <img class="gx-logo" src="/assets/images/main_logo.png" alt="Galaxy logo" />
-          <span class="gx-drawer-title">Galaxy</span>
+          <img class="gx-logo" src="/assets/images/main_logo.png" alt="Big Dipper logo" />
+          <span class="gx-drawer-title">Big Dipper</span>
         </div>
         <div class="gx-nav-section">
           <div class="gx-nav-section__title">Main</div>

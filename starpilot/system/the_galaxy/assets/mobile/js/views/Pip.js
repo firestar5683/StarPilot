@@ -59,6 +59,8 @@ export const Pip = {
   mounted() {
     this._img = null
     this._sizedFor = null
+    const canvas = this.canvas()
+    if (canvas) { canvas.width = CANVAS_W; canvas.height = CANVAS_H }
     this.loadExistingConfig()
     this.loadSnapshot()
     this.$nextTick(() => this.redraw())
@@ -69,6 +71,14 @@ export const Pip = {
     },
     canvas() {
       return this.$refs?.canvas || null
+    },
+    sizeCanvas() {
+      const canvas = this.canvas()
+      const img = this._img
+      if (!canvas || !img) return
+      const w = Math.min(img.naturalWidth, 1280)
+      canvas.width = w
+      canvas.height = Math.round(w * (img.naturalHeight / img.naturalWidth))
     },
     canvasScale() {
       const canvas = this.canvas()
@@ -165,8 +175,7 @@ export const Pip = {
       const img = this._img
       if (img && this._sizedFor !== img) {
         this._sizedFor = img
-        canvas.width = Math.min(img.naturalWidth, 1280)
-        canvas.height = Math.round(canvas.width * (img.naturalHeight / img.naturalWidth))
+        this.sizeCanvas()
       } else if (!img && (canvas.width === 0 || this._sizedFor)) {
         this._sizedFor = null
         canvas.width = CANVAS_W
@@ -257,6 +266,7 @@ export const Pip = {
           this._sizedFor = null
           this.image = true
           this.success = "Camera snapshot loaded. Place a center point on each window, then adjust the zoom."
+          this.sizeCanvas()
           this.applyConfigToCanvas()
           this.redraw()
           if (cleanup) cleanup()

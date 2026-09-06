@@ -1,7 +1,8 @@
 import { api, showSnackbar } from "../api.js"
 import { GalaxyConfirm } from "../components/GalaxyModal.js"
-import { GalaxySection } from "../components/GalaxySection.js"
 import { GalaxyTabs } from "../components/GalaxyTabs.js"
+import { GxNotice } from "../components/GxNotice.js"
+import { isFirestarOrigin } from "../components/PwaInstallSection.js"
 
 function fmtDuration(seconds) {
   seconds = Number(seconds) || 0
@@ -14,6 +15,26 @@ function formatBytes(bytes) {
   if (!bytes) return "0 MB"
   const mb = bytes / 1e6
   return mb >= 1000 ? `${(mb / 1000).toFixed(2)} GB` : `${mb.toFixed(1)} MB`
+}
+
+function getOrdinalSuffix(n) {
+  const s = ["th", "st", "nd", "rd"]
+  const v = n % 100
+  return s[(v - 20) % 10] || s[v] || s[0]
+}
+
+function formatScreenDate(dateString) {
+  const date = new Date(dateString)
+  if (Number.isNaN(date.getTime())) return String(dateString || "Unknown date")
+  const month = date.toLocaleString("en-US", { month: "long" })
+  const day = date.getDate()
+  const year = date.getFullYear()
+  let hour = date.getHours()
+  const minute = date.getMinutes()
+  const ampm = hour >= 12 ? "pm" : "am"
+  hour = hour % 12 || 12
+  const minuteStr = minute < 10 ? "0" + minute : minute
+  return `${month} ${day}${getOrdinalSuffix(day)}, ${year} - ${hour}:${minuteStr}${ampm}`
 }
 
 function normalizeRoute(r) {
@@ -33,9 +54,10 @@ function normalizeRoute(r) {
 
 export const Recordings = {
   name: "Recordings",
-  components: { GalaxySection, GalaxyTabs },
+  components: { GalaxyTabs, GxNotice },
   data() {
     return {
+      sub: "routes",
       loading: true,
       error: "",
       routes: [],
@@ -52,6 +74,13 @@ export const Recordings = {
       selectedCamera: "",
       logsRoute: null,
       logsData: null,
+      onFirestar: isFirestarOrigin(),
+      // Screen recordings subtab
+      screenLoading: false,
+      screenError: "",
+      screenProgress: 0,
+      recordings: [],
+      recPlay: null,
     }
   },
   computed: {
@@ -81,6 +110,13 @@ export const Recordings = {
   methods: {
     fmtDuration,
     formatBytes,
+    setSub(key) {
+      this.sub = key === "screen" ? "screen" : "routes"
+      if (this.sub === "screen" && !this.recordings.length && !this.screenLoading) this.loadScreenRecordings()
+    },
+    screenDisplayName(rec) {
+      return rec.is_custom_name ? rec.filename.replace(/\.mp4$/i, "").replace(/_/g, " ") : formatScreenDate(rec.timestamp)
+    },
     async loadRoutes() {
       this.loading = true
       this.error = ""
@@ -106,6 +142,35 @@ export const Recordings = {
       } finally {
         this.loading = false
       }
+    },
+    async loadScreenRecordings() {
+      this.screenLoading = true
+      this.screenError = ""
+      this.recordings = []
+      this.screenProgress = 0
+      const seen = new Set()
+      try {
+        this.recController?.abort()
+        this.recController = new AbortController()
+        await api.screenRecordingsStream({
+          signal: this.recController.signal,
+          onProgress: (p) => { this.screenProgress = p },
+          onRecordings: (raw) => {
+            for (const r of raw) {
+              if (seen.has(r.filename)) continue
+              seen.add(r.filename)
+              this.recordings.push(r)
+            }
+          },
+        })
+      } catch (e) {
+        if (e?.name !== "AbortError") this.screenError = "Couldn't load recordings."
+      } finally {
+        this.screenLoading = false
+      }
+    },
+    refreshScreenRecordings() {
+      this.loadScreenRecordings()
     },
     async deleteRoute(route) {
       if (!(await GalaxyConfirm({ title: "Delete route?", message: `Delete “${route.displayName}”?`, confirmLabel: "Delete", danger: true }))) return
@@ -148,13 +213,14 @@ export const Recordings = {
         this.routes = []
         showSnackbar(payload?.message || "Routes deleted!")
       } catch (e) {
-        showSnackbar("Failed to delete routes.", "error")
+        showSnackbar(e?.message || "Failed to delete routes.", "error")
       }
     },
     async openPlayer(route) {
       this.playerRoute = route
       this.playerLoading = true
       this.playerError = ""
+      this._playRetries = 0
       try {
         const data = await api.getRoute(route.name)
         const segments = Array.isArray(data.segment_urls) ? data.segment_urls.filter((u) => typeof u === "string") : []
@@ -173,13 +239,23 @@ export const Recordings = {
       }
     },
     cameraUrl(url, low) {
-      if (this.selectedCamera === "forward") return low && !url.includes("?" ) ? `${url}?quality=low` : url
+      if (this.selectedCamera === "forward") return low && !url.includes("?") ? `${url}?quality=low` : url
       const sep = url.includes("?") ? "&" : "?"
       return `${url}${sep}camera=${encodeURIComponent(this.selectedCamera)}${low ? "&quality=low" : ""}`
     },
     playSegment() {
       const video = this.$refs.player
-      if (!video || !this.segments[this.current]) return
+      if (!this.segments[this.current]) return
+      // The player mounts inside a Teleport + transition after openPlayer clears
+      // playerLoading, so the video element may not exist on the very first call.
+      if (!video) {
+        this._playRetries = (this._playRetries || 0) + 1
+        if (this._playRetries <= 15) {
+          requestAnimationFrame(() => this.playSegment())
+        }
+        return
+      }
+      this._playRetries = 0
       video.src = this.cameraUrl(this.segments[this.current])
       video.load()
       video.play().catch(() => {})
@@ -192,6 +268,7 @@ export const Recordings = {
       a.click()
     },
     closePlayer() {
+      this._playRetries = 0
       if (this.$refs.player) { this.$refs.player.pause(); this.$refs.player.removeAttribute("src") }
       this.playerRoute = null
       this.playerLoading = false
@@ -207,13 +284,71 @@ export const Recordings = {
         showSnackbar("Could not read logs.", "error")
       }
     },
+    closeRecPlayer() {
+      this.recPlay = null
+    },
+    screenUrl(filename) {
+      return api.screenRecordingVideoUrl(filename)
+    },
+    playRec(rec) {
+      this.recPlay = rec
+    },
+    downloadRec(rec) {
+      const a = document.createElement("a")
+      a.href = api.screenRecordingVideoUrl(rec.filename)
+      a.download = rec.filename
+      a.click()
+    },
+    async renameRec(rec) {
+      const base = rec.filename.replace(/\.mp4$/i, "")
+      const val = prompt("Rename recording:", base)
+      if (!val || val === base) return
+      try {
+        await api.renameScreenRecording(rec.filename, val + ".mp4")
+        showSnackbar("Recording renamed!")
+        this.refreshScreenRecordings()
+      } catch (e) {
+        showSnackbar("Rename failed.", "error")
+      }
+    },
+    async deleteRec(rec) {
+      if (!(await GalaxyConfirm({ title: "Delete recording?", message: `Delete “${rec.filename}”?`, confirmLabel: "Delete", danger: true }))) return
+      try {
+        await api.deleteScreenRecording(rec.filename)
+        this.recordings = this.recordings.filter((r) => r.filename !== rec.filename)
+        if (this.recPlay?.filename === rec.filename) this.recPlay = null
+        showSnackbar("Recording deleted!")
+      } catch (e) {
+        showSnackbar("Delete failed.", "error")
+      }
+    },
+    async deleteAllRecs() {
+      if (!(await GalaxyConfirm({ title: "Delete all recordings?", message: "This permanently deletes every screen recording.", confirmLabel: "Delete All", danger: true }))) return
+      try {
+        const payload = await api.deleteAllScreenRecordings()
+        this.recordings = []
+        this.recPlay = null
+        showSnackbar(payload?.message || "All screen recordings deleted!")
+      } catch (e) {
+        showSnackbar(e?.message || "Delete failed.", "error")
+      }
+    },
   },
-  async mounted() { await this.loadRoutes() },
-  beforeUnmount() { this.controller?.abort() },
+  async mounted() {
+    if (!this.onFirestar) await this.loadRoutes()
+  },
+  beforeUnmount() {
+    this.controller?.abort()
+    this.recController?.abort()
+  },
   template: `
     <div>
+      <template v-if="!onFirestar">
       <h2 style="margin-top:0;">Recordings</h2>
 
+      <GalaxyTabs :items="{ routes: 'Dashcam Routes', screen: 'Screen Recordings' }" :active="sub" @select="setSub" />
+
+      <template v-if="sub === 'routes'">
       <section class="gx-card">
         <div class="gx-section__header">
           <i class="bi bi-camera-reels"></i>
@@ -277,10 +412,47 @@ export const Recordings = {
           <a class="gx-btn gx-btn--tonal" :href="seg.url" download>Download</a>
         </div>
       </div>
+      </template>
+
+      <template v-else>
+      <section class="gx-card">
+        <div class="gx-section__header">
+          <i class="bi bi-record-circle"></i>
+          <span class="gx-section__title">Screen Recordings</span>
+          <span class="gx-section__count">{{ recordings.length }}</span>
+        </div>
+        <div v-if="screenLoading && !recordings.length" class="gx-loading">Loading screen recordings...</div>
+        <div v-else-if="screenError" class="gx-empty" style="color: var(--error);">{{ screenError }}</div>
+        <div v-else-if="!recordings.length" class="gx-empty">No screen recordings found.</div>
+        <article v-for="r in recordings" :key="r.filename" class="gx-row" style="cursor:pointer;" @click="playRec(r)">
+          <img :src="r.png" alt="" loading="lazy" style="width:84px; height:auto; border-radius:var(--radius-sm); object-fit:cover; flex:none;">
+          <div class="gx-row__info">
+            <span class="gx-row__label">{{ screenDisplayName(r) }}</span>
+            <span class="gx-row__desc">{{ r.filename }}</span>
+          </div>
+          <div style="display:flex; gap:6px; flex-wrap:wrap;">
+            <button type="button" class="gx-btn gx-btn--tonal" title="Play" @click.stop="playRec(r)"><i class="bi bi-play-fill"></i></button>
+            <button type="button" class="gx-btn gx-btn--tonal" title="Rename" @click.stop="renameRec(r)"><i class="bi bi-pencil"></i></button>
+            <button type="button" class="gx-btn gx-btn--tonal" title="Download" @click.stop="downloadRec(r)"><i class="bi bi-download"></i></button>
+            <button type="button" class="gx-btn gx-btn--danger" title="Delete" @click.stop="deleteRec(r)"><i class="bi bi-trash"></i></button>
+          </div>
+        </article>
+      </section>
+
+      <section class="gx-card" v-if="recordings.length">
+        <div class="gx-section__header">
+          <i class="bi bi-exclamation-triangle"></i>
+          <span class="gx-section__title">Delete recordings</span>
+        </div>
+        <div style="display:flex; gap:8px; padding: var(--sp-3); flex-wrap:wrap;">
+          <button type="button" class="gx-btn gx-btn--danger" @click="deleteAllRecs">Delete All Recordings</button>
+        </div>
+      </section>
+      </template>
 
       <Teleport to="body">
         <transition name="gx-fade">
-          <div v-if="playerRoute" class="gx-scrim gx-scrim--bottomsheet" @click.self="closePlayer">
+          <div v-if="sub === 'routes' && playerRoute" class="gx-scrim gx-scrim--bottomsheet" @click.self="closePlayer">
             <div class="gx-sheet" role="dialog" aria-label="Route video player">
               <div class="gx-section__header" style="cursor:default;">
                 <i class="bi bi-camera-video"></i>
@@ -307,6 +479,32 @@ export const Recordings = {
           </div>
         </transition>
       </Teleport>
+
+      <Teleport to="body">
+        <transition name="gx-fade">
+          <div v-if="recPlay" class="gx-scrim gx-scrim--bottomsheet" @click.self="closeRecPlayer">
+            <div class="gx-sheet" role="dialog" aria-label="Screen recording player">
+              <div class="gx-section__header" style="cursor:default;">
+                <i class="bi bi-record-circle"></i>
+                <span class="gx-section__title">{{ screenDisplayName(recPlay) }}</span>
+                <button type="button" class="gx-icon-btn" aria-label="Close player" @click="closeRecPlayer"><i class="bi bi-x-lg"></i></button>
+              </div>
+              <div style="padding: var(--sp-3);">
+                <video class="gx-video" controls autoplay playsinline :src="screenUrl(recPlay.filename)"></video>
+                <div style="display:flex; gap:8px; padding: var(--sp-3) 0 0; flex-wrap:wrap;">
+                  <button type="button" class="gx-btn" @click="downloadRec(recPlay)"><i class="bi bi-download"></i> Download</button>
+                  <button type="button" class="gx-btn gx-btn--tonal" @click="renameRec(recPlay)"><i class="bi bi-pencil"></i> Rename</button>
+                  <button type="button" class="gx-btn gx-btn--danger" @click="deleteRec(recPlay)"><i class="bi bi-trash"></i> Delete</button>
+                </div>
+              </div>
+            </div>
+          </div>
+        </transition>
+      </Teleport>
+      </template>
+
+      <GxNotice v-else tone="info" icon="bi-satellite" title="Recordings Unavailable via Galaxy"
+                text="Loading recordings requires a direct connection. Connect to your device's local network to use this feature." />
     </div>
   `,
 }

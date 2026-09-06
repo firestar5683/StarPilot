@@ -1,6 +1,6 @@
 {
-  "name": "Galaxy",
-  "short_name": "Galaxy",
+  "name": "Big Dipper",
+  "short_name": "Big Dipper",
   "description": "Control and configure your openpilot device from anywhere.",
   "icons": [
     { "src": "/assets/images/android-chrome-192x192.png", "sizes": "192x192", "type": "image/png", "purpose": "any maskable" },

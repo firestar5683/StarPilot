@@ -398,10 +398,10 @@ export const Vasm = {
           </div>
 
           <div style="display:flex; gap:8px; flex-wrap:wrap;">
-            <span class="gx-chip" :style="'border-color:' + BLUE + '; color:' + BLUE + ';'">Left: {{ leftPoints.length }} pt{{ leftPoints.length !== 1 ? 's' : '' }}<span v-if="leftDone"> ✔</span>
+            <span class="gx-chip" :style="'border-color:' + BLUE + '; color:' + BLUE + ';'">Left: {{ leftPoints.length }} pt{{ leftPoints.length !== 1 ? 's' : '' }}<i v-if="leftDone" class="bi bi-check-lg"></i>
               <span v-if="leftPoints.length > 0" style="margin-left:6px; cursor:pointer; color:var(--error);" @click="clearSide('left')">×</span>
             </span>
-            <span class="gx-chip" :style="'border-color:' + ORANGE + '; color:' + ORANGE + ';'">Right: {{ rightPoints.length }} pt{{ rightPoints.length !== 1 ? 's' : '' }}<span v-if="rightDone"> ✔</span>
+            <span class="gx-chip" :style="'border-color:' + ORANGE + '; color:' + ORANGE + ';'">Right: {{ rightPoints.length }} pt{{ rightPoints.length !== 1 ? 's' : '' }}<i v-if="rightDone" class="bi bi-check-lg"></i>
               <span v-if="rightPoints.length > 0" style="margin-left:6px; cursor:pointer; color:var(--error);" @click="clearSide('right')">×</span>
             </span>
           </div>

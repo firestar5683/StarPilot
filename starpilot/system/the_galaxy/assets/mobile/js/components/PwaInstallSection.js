@@ -1,3 +1,5 @@
+import { pwaState, requestInstall } from "../install.js"
+
 export const FIRESTAR_HOST = "galaxy.firestar.link"
 
 export function isFirestarOrigin() {
@@ -9,10 +11,6 @@ function isIos() {
   return /iPad|iPhone|iPod/.test(ua) && !/CriOS|FxiOS|OPiOS|EdgiOS/.test(ua)
 }
 
-function isStandalone() {
-  return window.matchMedia("(display-mode: standalone)").matches || !!window.navigator.standalone
-}
-
 export const PwaInstallSection = {
   name: "PwaInstallSection",
   props: {
@@ -21,10 +19,8 @@ export const PwaInstallSection = {
   },
   data() {
     return {
-      installed: isStandalone(),
       isIos: isIos(),
       onFirestar: isFirestarOrigin(),
-      deferredPrompt: null,
     }
   },
   computed: {
@@ -35,32 +31,18 @@ export const PwaInstallSection = {
       if (this.onFirestar) return window.location.origin
       return ""
     },
-    canInstall() { return !!this.deferredPrompt && !this.installed },
-    showManual() { return this.isIos && !this.installed && !this.deferredPrompt },
+    installed() { return pwaState.installed },
+    canInstall() { return !!pwaState.deferredPrompt && !pwaState.installed },
+    showManual() { return this.isIos && !pwaState.installed && !pwaState.deferredPrompt },
     onLocal() { return !this.onFirestar && !this.installUrl },
   },
   methods: {
-    capturePrompt(e) {
-      e.preventDefault()
-      this.deferredPrompt = e
-    },
     async install() {
-      const prompt = this.deferredPrompt
-      if (!prompt) return
-      prompt.prompt()
-      try { await prompt.userChoice } catch (e) { /* user cancelled */ }
-      this.deferredPrompt = null
-      this.installed = true
+      await requestInstall()
     },
     installHost() {
       try { return new URL(this.installUrl).host } catch (e) { return this.installUrl }
     },
-  },
-  mounted() {
-    window.addEventListener("beforeinstallprompt", this.capturePrompt)
-  },
-  beforeUnmount() {
-    window.removeEventListener("beforeinstallprompt", this.capturePrompt)
   },
   template: `
     <section v-if="!installed" class="gx-card gx-install">

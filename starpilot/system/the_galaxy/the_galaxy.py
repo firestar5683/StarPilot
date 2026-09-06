@@ -5075,6 +5075,8 @@ def setup(app):
 
   @app.route("/", methods=["GET"])
   def index():
+    if params.get_bool("GalaxyMobileDefault"):
+      return _serve_new_ui()
     response = make_response(render_template("index.html"))
     response.headers["Cache-Control"] = "no-store, no-cache, must-revalidate, max-age=0"
     response.headers["Pragma"] = "no-cache"
@@ -5088,8 +5090,6 @@ def setup(app):
 
   @app.route("/mobile", methods=["GET"])
   @app.route("/mobile/", methods=["GET"])
-  @app.route("/ui", methods=["GET"])
-  @app.route("/ui/", methods=["GET"])
   def mobile_index():
     return _serve_new_ui()
 

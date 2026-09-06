@@ -196,7 +196,7 @@ export const Logs = {
           </div>
           <pre ref="tmuxtail" class="gx-terminal" @scroll.passive="onTmuxScroll">{{ stream.state.log || '(waiting for log output…)' }}</pre>
           <div style="display:flex; gap:8px; padding: var(--sp-3); flex-wrap:wrap;">
-            <button type="button" class="gx-btn gx-btn--tonal" @click="stream.togglePause()">{{ stream.state.paused ? '▶️ Resume' : '⏸️ Pause' }}</button>
+            <button type="button" class="gx-btn gx-btn--tonal" @click="stream.togglePause()"><i class="bi" :class="stream.state.paused ? 'bi-play-fill' : 'bi-pause-fill'"></i> {{ stream.state.paused ? 'Resume' : 'Pause' }}</button>
             <button type="button" class="gx-btn gx-btn--tonal" @click="captureTmux">Capture Log</button>
             <button type="button" class="gx-btn gx-btn--tonal" @click="deleteAllTmux">Delete All</button>
           </div>

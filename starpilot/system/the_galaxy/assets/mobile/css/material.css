@@ -342,6 +342,10 @@ ul { list-style: none; margin: 0; padding: 0; }
 .gx-appbar__back:active { transform: scale(0.92); }
 
 .gx-appbar__title {
+  background: linear-gradient(135deg, #8b6cc5 0%, #5ec8c8 55%, #d4789c 100%);
+  -webkit-background-clip: text;
+  background-clip: text;
+  -webkit-text-fill-color: transparent;
   font-size: var(--fs-lg);
   font-weight: var(--fw-bold);
   white-space: nowrap;

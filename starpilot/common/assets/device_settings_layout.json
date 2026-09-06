@@ -4915,6 +4915,15 @@
         "settings_tier": "simple"
       },
       {
+        "key": "GalaxyMobileDefault",
+        "label": "Try the Big Dipper Web UI",
+        "description": "Open the Big Dipper at the top-level Galaxy link instead of the classic Galaxy. The classic UI remains available at /classic and Big Dipper at /mobile regardless of this toggle.",
+        "picker_description": "Serve the Big Dipper as the default landing page.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "advanced"
+      },
+      {
         "key": "AlphaLongitudinalEnabled",
         "label": "openpilot Longitudinal Control (Alpha)",
         "description": "Enable openpilot longitudinal control for vehicles that support it. This replaces the vehicle's stock ACC and may disable automatic emergency braking. Changing this setting restarts the driving stack.",

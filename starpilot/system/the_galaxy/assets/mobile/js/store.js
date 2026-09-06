@@ -91,7 +91,7 @@ export function goBack() {
   window.location.hash = prev
 }
 
-const NATIVE_ROOTS = new Set(["/", "/settings", "/tools", "/recordings", "/logs", "/tuning", "/navigation", "/vehicle", "/system", "/embed", "/manage_doors", "/galaxy", "/manage_tsk", "/sentry", "/manage_models", "/plots", "/testing_ground", "/theme_maker", "/cameras"])
+const NATIVE_ROOTS = new Set(["/", "/settings", "/tools", "/recordings", "/logs", "/tuning", "/navigation", "/vehicle", "/system", "/embed", "/manage_doors", "/galaxy", "/manage_tsk", "/sentry", "/manage_models", "/plots", "/testing_ground", "/theme_maker", "/model_laboratory", "/cameras"])
 
 export function toolHref(link) {
   const path = link.split("?")[0]

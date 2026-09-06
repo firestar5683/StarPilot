@@ -267,7 +267,7 @@ export const SystemTools = {
                 <div v-if="fastStatus.message" class="gx-note">{{ fastStatus.message }}</div>
                 <div v-if="fastStatus.warning && (fastStatus.running || fastStatus.updateAvailable)" class="gx-note gx-note--danger">{{ fastStatus.warning }}</div>
                 <div v-if="fastStatus.agnosUpdate?.available && fastStatus.agnosUpdate?.warnings?.length" style="margin-top:4px;">
-                  <div v-for="w in fastStatus.agnosUpdate.warnings" :key="w" class="gx-note gx-note--danger">⚠ {{ w }}</div>
+                  <div v-for="w in fastStatus.agnosUpdate.warnings" :key="w" class="gx-note gx-note--danger"><i class="bi bi-exclamation-triangle-fill"></i> {{ w }}</div>
                 </div>
               </div>
             </div>

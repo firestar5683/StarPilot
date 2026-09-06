@@ -325,15 +325,17 @@ def test_ui_galaxy_background_is_css_only_and_lightweight():
 
 def test_galaxy_py_serves_classic_at_root_and_new_ui_at_mobile():
   source = GALAXY_PY.read_text(encoding="utf-8")
-  # The classic Galaxy SPA is the default landing at / (original behaviour).
+  # The classic Galaxy SPA is the default landing at / (original behaviour) unless
+  # the "New Galaxy by Default" (GalaxyMobileDefault) toggle is enabled.
   assert '@app.route("/", methods=["GET"])' in source
   assert 'render_template("index.html")' in source
+  assert 'params.get_bool("GalaxyMobileDefault")' in source
   # Classic also stays reachable at /classic (page-in-page embed target).
   assert '@app.route("/classic", methods=["GET"])' in source
-  # The modern Vue UI is served at /mobile (and /ui), not the root.
+  # The modern Vue UI is served at /mobile, not the root.
   assert '@app.route("/mobile", methods=["GET"])' in source
-  assert '@app.route("/ui", methods=["GET"])' in source
   assert 'Path(app.static_folder) / "mobile" / "index.html"' in source
+  assert '@app.route("/ui", methods=["GET"])' not in source
 
 
 def test_ui_manifest_is_valid_pwa_manifest():
