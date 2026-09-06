@@ -8,6 +8,8 @@ from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.multilang import tr, tr_noop
 from openpilot.system.ui.widgets import DialogResult
 from openpilot.selfdrive.ui.ui_state import ui_state
+from openpilot.selfdrive.ui.mici.layouts.settings.longitudinal_mode import LongitudinalModeClient, MODE_LABELS
+from openpilot.starpilot.system.the_galaxy.longitudinal_mode import lock_reason
 
 PERSONALITY_TO_INT = log.LongitudinalPersonality.schema.enumerants
 
@@ -148,12 +150,31 @@ class TogglesLayout(Widget):
       if param == "DisengageOnAccelerator":
         self._toggles["LongitudinalPersonality"] = self._long_personality_setting
 
-    self._update_experimental_mode_icon()
-    self._scroller = Scroller(list(self._toggles.values()), line_separator=True, spacing=0)
+    self._longitudinal_mode = LongitudinalModeClient()
+    self._mode_setting = multiple_button_item(
+      lambda: tr("Speed control"),
+      lambda: tr("Chill: conventional speed control. Experimental: model-controlled gas and brakes. "
+                 "Conditional Experimental: Chill, switching to Experimental under your chosen conditions. "
+                 "Conditional Chill: Experimental, switching to Chill for simple cruising."),
+      buttons=[lambda: tr("Chill"), lambda: tr("Experimental"), lambda: tr("Cond. Exp."), lambda: tr("Cond. Chill")],
+      button_width=260, selected_index=-1, callback=self._select_longitudinal_mode, icon="experimental_white.png",
+    )
+    self._mode_setting.action_item.set_enabled(self._mode_enabled)
+    # Stock-ACC cars retain Dom's lateral-only EXP toggle; longitudinal cars
+    # get the four-way control. Keep both widgets, displaying only one.
+    widgets = []
+    for key, item in self._toggles.items():
+      widgets.append(item)
+      if key == "ExperimentalMode":
+        widgets.append(self._mode_setting)
+    self._sync_mode_selection()
+    self._scroller = Scroller(widgets, line_separator=True, spacing=0)
 
     ui_state.add_engaged_transition_callback(self._update_toggles)
 
   def _update_state(self):
+    self._longitudinal_mode.update()
+    self._sync_mode_selection()
     if ui_state.sm.updated["selfdriveState"]:
       personality = PERSONALITY_TO_INT[ui_state.sm["selfdriveState"].personality]
       if personality != ui_state.personality and ui_state.started:
@@ -273,6 +294,30 @@ class TogglesLayout(Widget):
 
   def _set_longitudinal_personality(self, button_index: int):
     self._params.put("LongitudinalPersonality", button_index)
+
+  def _sync_mode_selection(self):
+    has_longitudinal = bool(ui_state.CP is not None and ui_state.CP.openpilotLongitudinalControl)
+    self._mode_setting.set_visible(has_longitudinal)
+    self._toggles["ExperimentalMode"].set_visible(not has_longitudinal)
+    state = self._longitudinal_mode.state
+    # -1 deliberately clears selection when readback is unavailable. The shared
+    # setter rejects -1, so assign its documented render state directly.
+    self._mode_setting.action_item.selected_button = list(MODE_LABELS).index(state["mode"]) if state else -1
+
+  def _mode_enabled(self):
+    params, cp = ui_state.params, ui_state.CP
+    capable = bool(cp is not None and cp.openpilotLongitudinalControl and ui_state.experimental_mode_available)
+    capable = capable and params.get("DisableOpenpilotLongitudinal") in (False, "0", b"0", "False", b"False")
+    if cp is not None and cp.alphaLongitudinalAvailable:
+      capable = capable and params.get_bool("AlphaLongitudinalEnabled")
+    return self._longitudinal_mode.enabled and not lock_reason(params, capable)
+
+  def _select_longitudinal_mode(self, index):
+    # MultipleButtonAction selects optimistically before invoking its callback.
+    # Restore verified selection immediately, including locked/stale clicks.
+    self._sync_mode_selection()
+    if self._mode_enabled() and 0 <= index < len(MODE_LABELS):
+      self._longitudinal_mode.select(tuple(MODE_LABELS)[index])
 
   def _sync_rhd_toggle(self):
     if not self._params.get_bool("IsRHDOverride"):

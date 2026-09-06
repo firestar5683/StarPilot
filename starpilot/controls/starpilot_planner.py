@@ -337,7 +337,9 @@ class StarPilotPlanner:
     starpilotPlan.pulseGlideCoasting = self.starpilot_acceleration.pulse_glide_coasting
     starpilotPlan.trackingLead = self.tracking_lead
 
-    conditional_experimental_mode = False
+    # Publish the complete effective request. selfdrived must not combine this
+    # frame with separately polled Params or cached conditional-mode flags.
+    conditional_experimental_mode = bool(getattr(starpilot_toggles, "experimental_mode", False))
     if starpilot_toggles.conditional_experimental_mode:
       conditional_experimental_mode = self.starpilot_cem.experimental_mode
     elif starpilot_toggles.conditional_chill_mode:

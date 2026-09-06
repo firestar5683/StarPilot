@@ -103,6 +103,10 @@ from openpilot.starpilot.common.maps_download_progress import (
   selection_key,
 )
 from openpilot.starpilot.common.experimental_state import sync_persist_chill_state, sync_persist_experimental_state
+from openpilot.starpilot.system.the_galaxy.longitudinal_mode import (
+  MODE_KEYS as LONGITUDINAL_MODE_KEYS, ModeError, WRITE_LOCK as LONGITUDINAL_MODE_LOCK,
+  set_mode as set_longitudinal_mode, snapshot as longitudinal_mode_snapshot,
+)
 from openpilot.starpilot.common.favorite_slots import (
   FAVORITE_SLOTS_PARAM,
   SETTINGS_CATALOG_PATH,
@@ -4144,6 +4148,23 @@ def _get_vehicle_parked():
   except Exception:
     return False
 
+def _get_longitudinal_mode_capable():
+  # Do not authorize from a default or a stale toggle snapshot. Pending disable
+  # also blocks selection until the driving stack has regenerated CarParams.
+  if _safe_params_get_bool("DisableOpenpilotLongitudinal", default=True):
+    return False
+  cp_bytes = _safe_params_get_live_raw("CarParamsPersistent")
+  if not cp_bytes:
+    return False
+  try:
+    with car.CarParams.from_bytes(cp_bytes) as cp:
+      if cp.alphaLongitudinalAvailable and not _safe_params_get_bool("AlphaLongitudinalEnabled", default=False):
+        return False
+      return bool(cp.openpilotLongitudinalControl)
+  except Exception:
+    return False
+
+
 def _get_alpha_longitudinal_available():
   cp_bytes = _safe_params_get_live_raw("CarParamsPersistent")
   if not cp_bytes:
@@ -5641,6 +5662,27 @@ def setup(app):
       return jsonify({"error": "Favorite action failed."}), 400
     return jsonify({"message": "Favorite action sent."}), 200
 
+  @app.route("/api/longitudinal_mode", methods=["GET", "PUT"])
+  def longitudinal_mode():
+    with LONGITUDINAL_MODE_LOCK:
+      try:
+        if request.method == "GET":
+          return jsonify(longitudinal_mode_snapshot(params, _get_longitudinal_mode_capable())), 200
+        data = request.get_json(silent=True)
+        if not isinstance(data, dict):
+          return jsonify({"error": "Expected a JSON object."}), 400
+        try:
+          result = set_longitudinal_mode(params, data.get("mode"), data.get("expected"), _get_longitudinal_mode_capable, data.get("acknowledged") is True)
+        finally:
+          # A failed multi-key write can leave a safer partial state. Publish it
+          # too, without attempting a rollback or continuing the mode writes.
+          update_starpilot_toggles()
+        return jsonify(result), 200
+      except ModeError as error:
+        return jsonify({"error": str(error)}), error.status
+      except Exception:
+        return jsonify({"error": "Longitudinal mode state is unavailable. Refresh before retrying."}), 503
+
   @app.route("/api/params", methods=["GET", "PUT"])
   def get_param():
     if request.method == "PUT":
@@ -5649,6 +5691,29 @@ def setup(app):
         return jsonify({"error": "Missing 'key' or 'value' in request body."}), 400
 
       key = str(data["key"]).strip()
+      if key in LONGITUDINAL_MODE_KEYS:
+        # Favorites and older Galaxy clients still use boolean writes. Route
+        # them through the same road-state, capability and verified-write policy.
+        if type(data["value"]) is not bool:
+          return jsonify({"error": "Mode settings require a JSON boolean."}), 400
+        with LONGITUDINAL_MODE_LOCK:
+          try:
+            before = longitudinal_mode_snapshot(params, _get_longitudinal_mode_capable())
+            candidate = {**before["values"], key: data["value"]}
+            if data["value"] and key in {"ConditionalExperimental", "ConditionalChill"}:
+              candidate["ConditionalChill" if key == "ConditionalExperimental" else "ConditionalExperimental"] = False
+            target = ("conditional_experimental" if candidate["ConditionalExperimental"] else
+                      "conditional_chill" if candidate["ConditionalChill"] else
+                      "experimental" if candidate["ExperimentalMode"] else "chill")
+            try:
+              result = set_longitudinal_mode(params, target, before["values"], _get_longitudinal_mode_capable, data.get("acknowledged") is True)
+            finally:
+              update_starpilot_toggles()
+            return jsonify({"updated": result["values"], "message": "Longitudinal control mode updated."}), 200
+          except ModeError as error:
+            return jsonify({"error": str(error)}), error.status
+          except Exception:
+            return jsonify({"error": "Longitudinal mode state is unavailable."}), 503
       if key.lower() == FAVORITE_SLOTS_PARAM.lower():
         key = FAVORITE_SLOTS_PARAM
         raw_slots = data["value"]
@@ -5867,22 +5932,6 @@ def setup(app):
         updated = {key: enabled}
         if enabled:
           other_key = "StaticPedalsOnUI" if key == "DynamicPedalsOnUI" else "DynamicPedalsOnUI"
-          params.put_bool(other_key, False)
-          updated[other_key] = False
-
-        update_starpilot_toggles()
-        return jsonify({
-          "message": f"Parameter '{key}' updated successfully.",
-          "updated": updated,
-        }), 200
-
-      if key in {"ConditionalExperimental", "ConditionalChill"}:
-        enabled = str_val.strip() in ("1", "true", "True")
-        params.put_bool(key, enabled)
-
-        updated = {key: enabled}
-        if enabled:
-          other_key = "ConditionalChill" if key == "ConditionalExperimental" else "ConditionalExperimental"
           params.put_bool(other_key, False)
           updated[other_key] = False
 

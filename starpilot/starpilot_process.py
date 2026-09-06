@@ -255,6 +255,9 @@ def update_toggles_in_background(result, starpilot_variables, started, theme_man
     result["update"] = (updated_variables, updated_toggles)
   except Exception:
     result["failed"] = True
+    # A busy mode lock (or another loader failure) must not consume the only
+    # notification. The published toggle object remains unchanged until retry.
+    starpilot_variables.params_memory.put_bool("StarPilotTogglesUpdated", True)
     raise
 
 def starpilot_thread():
