@@ -27,13 +27,42 @@ def _patch_tinygrad_fetch_fw():
   if original_fetch_fw is None:
     return
 
+  # tinygrad's own disk cache lives under $HOME/.cache, which is not guaranteed
+  # to survive a reboot on-device. Persist a copy under /data so a firmware blob
+  # only ever needs network once, ever, instead of on every cold boot.
+  persistent_cache_dir = pathlib.Path("/data/tinygrad_fw_cache")
+
   def fetch_fw(path, name, sha256):
     firmware_path = pathlib.Path(f"/lib/firmware/{path}/{name}.zst")
     if firmware_path.is_file():
       blob = zstandard.ZstdDecompressor().stream_reader(firmware_path.read_bytes()).read()
       if hashlib.sha256(blob).hexdigest() == sha256:
         return blob
-    return original_fetch_fw(path, name, sha256)
+
+    cached_path = persistent_cache_dir / path / f"{name}.{sha256}"
+    if cached_path.is_file():
+      blob = cached_path.read_bytes()
+      if hashlib.sha256(blob).hexdigest() == sha256:
+        return blob
+
+    last_error = None
+    for attempt in range(3):
+      if attempt:
+        time.sleep(5)
+      try:
+        blob = original_fetch_fw(path, name, sha256)
+        break
+      except Exception as error:
+        last_error = error
+    else:
+      raise last_error
+
+    try:
+      cached_path.parent.mkdir(parents=True, exist_ok=True)
+      cached_path.write_bytes(blob)
+    except OSError:
+      pass
+    return blob
 
   helpers.fetch_fw = fetch_fw
 
