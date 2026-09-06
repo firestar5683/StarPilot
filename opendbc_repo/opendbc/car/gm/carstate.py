@@ -1,4 +1,5 @@
 import copy
+import math
 from cereal import custom
 from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, create_button_events, structs
@@ -109,8 +110,11 @@ class CarState(CarStateBase):
     self.car_gps_supported = self.car_gps_config is not None
     self.car_gps = None
     self._car_gps_timestamp_nanos = 0
+    self._prev_gps_lat = None
+    self._prev_gps_lon = None
+    self._last_gps_bearing = None
 
-  def _update_car_gps(self, cp) -> None:
+  def _update_car_gps(self, cp, v_ego: float = 0.0) -> None:
     if self.car_gps_config is None:
       return
 
@@ -125,6 +129,25 @@ class CarState(CarStateBase):
     gps = self.car_gps_config.decoder(*(cp.vl[name] for name in self.car_gps_config.messages))
     if gps is not None:
       gps["timestamp_nanos"] = timestamp_nanos
+      if gps["hasFix"]:
+        lat, lon = gps["latitude"], gps["longitude"]
+        if self._prev_gps_lat is not None and (lat, lon) != (self._prev_gps_lat, self._prev_gps_lon):
+          d_lat = (lat - self._prev_gps_lat) * 111139.0
+          d_lon = (lon - self._prev_gps_lon) * 111139.0 * math.cos(math.radians(lat))
+          if math.hypot(d_lat, d_lon) > 1.5 and v_ego > 1.0 and not self.moving_backward:
+            self._last_gps_bearing = math.degrees(math.atan2(d_lon, d_lat)) % 360.0
+
+        self._prev_gps_lat, self._prev_gps_lon = lat, lon
+
+        bearing = self._last_gps_bearing if self._last_gps_bearing is not None else 0.0
+        gps["speed"] = max(0.0, v_ego)
+        gps["bearingDeg"] = bearing
+        gps["bearingAccuracyDeg"] = 5.0 if (v_ego > 1.0 and self._last_gps_bearing is not None) else 180.0
+        heading_rad = math.radians(bearing)
+        gps["vNED"] = [v_ego * math.cos(heading_rad), v_ego * math.sin(heading_rad), 0.0]
+      else:
+        self._prev_gps_lat = self._prev_gps_lon = None
+
       self.car_gps = gps
       self._car_gps_timestamp_nanos = timestamp_nanos
 
@@ -144,8 +167,6 @@ class CarState(CarStateBase):
     pt_cp = can_parsers[Bus.pt]
     cam_cp = can_parsers[Bus.cam]
     loopback_cp = can_parsers[Bus.loopback]
-
-    self._update_car_gps(pt_cp)
 
     ret = structs.CarState()
 
@@ -216,6 +237,8 @@ class CarState(CarStateBase):
     # standstill=True if ECM allows engagement with brake.
     ret.standstill = abs(pt_cp.vl["EBCMWheelSpdRear"]["RLWheelSpd"]) <= STANDSTILL_THRESHOLD and \
                      abs(pt_cp.vl["EBCMWheelSpdRear"]["RRWheelSpd"]) <= STANDSTILL_THRESHOLD
+
+    self._update_car_gps(pt_cp, ret.vEgo)
 
     if pt_cp.vl["ECMPRDNL2"]["ManualMode"] == 1:
       ret.gearShifter = self.parse_gear_shifter("T")
