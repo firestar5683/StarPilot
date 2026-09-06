@@ -1,6 +1,5 @@
 import asyncio
 import dataclasses
-import json
 import logging
 import os
 import ssl
@@ -96,12 +95,14 @@ async def sound(request: 'web.Request'):
 
 async def offer(request: 'web.Request'):
   params = await request.json()
-  body = StreamRequestBody(params["sdp"], "driver", True, ["testJoystick"], ["carState"])
-  body_json = json.dumps(dataclasses.asdict(body))
+  body = StreamRequestBody(
+    sdp=params["sdp"], cameras=["driver"], enabled=True,
+    bridge_services_in=["testJoystick"], bridge_services_out=["carState"],
+  )
 
   logger.info("Sending offer to webrtcd...")
   webrtcd_url = f"http://{WEBRTCD_HOST}:{WEBRTCD_PORT}/stream"
-  async with ClientSession() as session, session.post(webrtcd_url, data=body_json) as resp:
+  async with ClientSession() as session, session.post(webrtcd_url, json=dataclasses.asdict(body)) as resp:
     assert resp.status == 200
     answer = await resp.json()
     return web.json_response(answer)

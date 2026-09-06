@@ -72,8 +72,7 @@ class VCruiseHelper:
     return short_interval, long_interval
 
   def _uses_software_cruise(self) -> bool:
-    return bool(self.gm_cc_only or self.redneck_non_pcm or
-                not self.CP.pcmCruise or getattr(self.CP, "openpilotLongitudinalControl", False))
+    return bool(self.gm_cc_only or self.redneck_non_pcm or not self.CP.pcmCruise)
 
   @property
   def v_cruise_initialized(self):
