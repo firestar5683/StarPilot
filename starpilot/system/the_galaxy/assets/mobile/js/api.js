@@ -357,6 +357,9 @@ export function showSnackbar(message, level = "info") {
   }
   const el = document.createElement("div")
   el.className = "snackbar show"
+  el.setAttribute("role", level === "error" ? "alert" : "status")
+  el.setAttribute("aria-live", level === "error" ? "assertive" : "polite")
+  el.setAttribute("aria-atomic", "true")
   el.style.background = level === "error" ? "var(--error)" : "var(--color-confirm, #8b6cc5)"
   el.style.borderRadius = "var(--border-radius-base, 5px)"
   el.style.color = "var(--text-color, #fff)"

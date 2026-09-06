@@ -26,6 +26,7 @@ from openpilot.starpilot.assets.model_manager import (
 from openpilot.starpilot.assets.theme_manager import THEME_COMPONENT_PARAMS, ThemeManager
 from openpilot.starpilot.common.starpilot_functions import update_maps, update_openpilot
 from openpilot.starpilot.common.safe_mode import (
+  SAFE_MODE_BACKUP_PARAM,
   SAFE_MODE_ENFORCE_FRAMES,
   apply_safe_mode,
   restore_safe_mode,
@@ -257,6 +258,22 @@ def update_toggles_in_background(result, starpilot_variables, started, theme_man
     result["failed"] = True
     raise
 
+
+def update_safe_mode_state(params, params_raw, params_memory, safe_mode_active, *, enforce=False):
+  current_safe_mode = safe_mode_enabled(params_raw)
+  restore_pending = not current_safe_mode and params_raw.get(SAFE_MODE_BACKUP_PARAM) is not None
+  if current_safe_mode != safe_mode_active or restore_pending:
+    if current_safe_mode:
+      apply_safe_mode(params, params_raw, params_memory)
+      return True
+
+    restore_safe_mode(params_raw, params_memory)
+    return params_raw.get(SAFE_MODE_BACKUP_PARAM) is not None
+
+  if current_safe_mode and enforce:
+    apply_safe_mode(params, params_raw, params_memory, ensure_backup=False)
+  return safe_mode_active
+
 def starpilot_thread():
   rate_keeper = Ratekeeper(1 / DT_MDL, None)
 
@@ -380,16 +397,13 @@ def starpilot_thread():
     if rate_keeper.frame % ASSET_CHECK_RATE == 0:
       check_assets(now, model_manager, theme_manager, thread_manager, params, params_memory, starpilot_toggles)
 
-    current_safe_mode = safe_mode_enabled(params_raw)
-    safe_mode_changed = current_safe_mode != safe_mode_active
-    if safe_mode_changed:
-      if current_safe_mode:
-        apply_safe_mode(params, params_raw, params_memory)
-      else:
-        restore_safe_mode(params_raw, params_memory)
-      safe_mode_active = current_safe_mode
-    elif current_safe_mode and (params_memory.get_bool("StarPilotTogglesUpdated") or rate_keeper.frame % SAFE_MODE_ENFORCE_FRAMES == 0):
-      apply_safe_mode(params, params_raw, params_memory, ensure_backup=False)
+    safe_mode_active = update_safe_mode_state(
+      params,
+      params_raw,
+      params_memory,
+      safe_mode_active,
+      enforce=(params_memory.get_bool("StarPilotTogglesUpdated") or rate_keeper.frame % SAFE_MODE_ENFORCE_FRAMES == 0),
+    )
 
     completed_toggle_update = toggle_update_result.pop("update", None)
     if completed_toggle_update is not None:

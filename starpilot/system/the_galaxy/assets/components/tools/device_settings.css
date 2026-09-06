@@ -226,6 +226,10 @@
 }
 
 /* ――― Child Row Modifier (Sub-menus) ――― */
+.ds-setting-children {
+  display: contents;
+}
+
 .ds-child-modifier {
   border-left: 2px solid var(--color-gray-200);
   margin-left: 1rem;
@@ -749,6 +753,530 @@
   min-width: 0;
 }
 
+/* ――― Driving Personality Profiles ――― */
+.ds-personality-profiles {
+  container-type: inline-size;
+  display: grid;
+  gap: var(--gap-base);
+  margin: 0.75rem 0 0 1rem;
+  padding-left: 1rem;
+  border-left: 2px solid var(--color-gray-200);
+}
+
+.ds-personality-card {
+  container-type: inline-size;
+  --personality-accent: #38bdf8;
+  --personality-accent-bg: rgba(56, 189, 248, 0.12);
+  --personality-accent-border: rgba(56, 189, 248, 0.35);
+  background: rgba(3, 7, 18, 0.48);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: 0.75rem;
+  overflow: hidden;
+  transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.ds-personality-card[data-profile="traffic"] {
+  --personality-accent: #fbbf24;
+  --personality-accent-bg: rgba(251, 191, 36, 0.12);
+  --personality-accent-border: rgba(251, 191, 36, 0.4);
+}
+
+.ds-personality-card[data-profile="aggressive"] {
+  --personality-accent: #fb7185;
+  --personality-accent-bg: rgba(251, 113, 133, 0.12);
+  --personality-accent-border: rgba(251, 113, 133, 0.4);
+}
+
+.ds-personality-card[data-profile="standard"] {
+  --personality-accent: #38bdf8;
+  --personality-accent-bg: rgba(56, 189, 248, 0.12);
+  --personality-accent-border: rgba(56, 189, 248, 0.4);
+}
+
+.ds-personality-card[data-profile="relaxed"] {
+  --personality-accent: #4ade80;
+  --personality-accent-bg: rgba(74, 222, 128, 0.12);
+  --personality-accent-border: rgba(74, 222, 128, 0.4);
+}
+
+.ds-personality-summary {
+  gap: 0.75rem;
+  justify-content: space-between;
+  flex-wrap: wrap;
+  align-items: center;
+  background: transparent;
+  box-sizing: border-box;
+  color: var(--text-color);
+  display: flex;
+  min-width: 0;
+  padding: 0.65rem 0.75rem;
+  text-align: left;
+  width: 100%;
+}
+
+.ds-personality-summary .ds-personality-profile-toggle {
+  border: 0;
+  padding: 0;
+  margin: 0;
+  width: auto;
+  gap: 0.5rem;
+  flex: 0 1 auto;
+  min-width: 0;
+}
+
+@container (min-width: 1100px) {
+  .ds-personality-card {
+    display: grid;
+    grid-template-columns: minmax(190px, 1fr) minmax(0, 4fr);
+    align-items: start;
+  }
+
+  .ds-personality-card > .ds-personality-body {
+    border-top: 0;
+    border-left: 1px solid var(--sidebar-border-color);
+    min-width: 0;
+    padding: 0.65rem 0.75rem;
+  }
+}
+
+.ds-personality-name {
+  align-items: center;
+  display: flex;
+  gap: 0.75rem;
+  min-width: 0;
+}
+
+.ds-personality-name h3 {
+  font-size: var(--font-size-base);
+  margin: 0;
+}
+
+.ds-personality-disclosure {
+  align-items: center;
+  background: var(--input-bg);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: 0.45rem;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  font: inherit;
+  font-size: 0.68rem;
+  font-weight: var(--font-weight-semibold);
+  gap: 0.45rem;
+  justify-content: center;
+  margin-top: 0.5rem;
+  padding: 0.5rem 0.65rem;
+  width: 100%;
+}
+
+.ds-personality-primary {
+  display: grid;
+  gap: 0.5rem;
+  padding: 0 0.75rem 0.75rem;
+}
+
+.ds-visually-hidden {
+  clip: rect(0 0 0 0);
+  clip-path: inset(50%);
+  height: 1px;
+  overflow: hidden;
+  position: absolute;
+  white-space: nowrap;
+  width: 1px;
+}
+
+.ds-personality-name strong,
+.ds-personality-name small {
+  display: block;
+}
+
+.ds-personality-name small {
+  color: var(--text-muted);
+  font-size: 0.7rem;
+  margin-top: 0.15rem;
+}
+
+.ds-personality-badge {
+  align-items: center;
+  background: var(--personality-accent-bg);
+  border: 1px solid var(--personality-accent-border);
+  border-radius: 0.55rem;
+  color: var(--personality-accent);
+  display: inline-flex;
+  flex: 0 0 2.1rem;
+  font-size: 0.75rem;
+  font-weight: var(--font-weight-bold);
+  height: 2.1rem;
+  justify-content: center;
+}
+
+.ds-personality-body {
+  border-top: 1px solid var(--sidebar-border-color);
+  display: grid;
+  gap: var(--gap-base);
+  padding: 1rem;
+}
+
+.ds-personality-settings {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.ds-personality-settings[hidden],
+.ds-personality-disabled-note[hidden] {
+  display: none;
+}
+
+.ds-personality-fields {
+  display: grid;
+  gap: 0.5rem;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 260px), 1fr));
+}
+
+.ds-personality-field {
+  background: var(--input-bg);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: var(--border-radius-base);
+  display: flex;
+  flex-direction: column;
+  gap: 0.4rem;
+  justify-content: space-between;
+  margin: 0;
+  min-width: 0;
+  padding: 0.55rem;
+}
+
+.ds-personality-field h4 {
+  color: var(--text-color);
+  font-size: var(--font-size-sm);
+  font-weight: var(--font-weight-semibold);
+  margin: 0;
+}
+
+.ds-personality-field p {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  line-height: 1.35;
+  margin: 0;
+}
+
+.ds-personality-options {
+  border: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 0.45rem;
+  display: flex;
+  gap: 0;
+  overflow: hidden;
+}
+
+.ds-personality-option {
+  background: rgba(15, 23, 42, 0.72);
+  border: 0;
+  border-left: 1px solid rgba(148, 163, 184, 0.28);
+  border-radius: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  flex: 1 1 auto;
+  font: inherit;
+  font-size: 0.64rem;
+  font-weight: var(--font-weight-semibold);
+  min-height: 1.9rem;
+  min-width: 0;
+  padding: 0.3rem 0.25rem;
+  transition: background var(--transition-fast), border-color var(--transition-fast), color var(--transition-fast);
+  white-space: nowrap;
+}
+
+.ds-personality-option:first-child {
+  border-left: 0;
+}
+
+.ds-personality-option:hover:not(:disabled) {
+  background: rgba(51, 65, 85, 0.72);
+  color: var(--text-color);
+}
+
+.ds-personality-option[aria-pressed="true"] {
+  background: rgba(226, 232, 240, 0.14);
+  border-color: rgba(226, 232, 240, 0.72);
+  color: #f8fafc;
+}
+
+.ds-personality-option:disabled {
+  cursor: not-allowed;
+  opacity: 0.45;
+}
+
+.ds-personality-option:focus-visible,
+.ds-personality-advanced > button:focus-visible,
+.ds-personality-advanced-choice:focus-visible,
+.ds-personality-value input:focus-visible,
+.ds-personality-custom-number input:focus-visible {
+  outline: 2px solid #e2e8f0;
+  outline-offset: 2px;
+}
+
+.ds-personality-curve {
+  background: rgba(15, 23, 42, 0.66);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: var(--border-radius-base);
+  padding: 0.85rem;
+}
+
+.ds-personality-curve-head {
+  align-items: flex-start;
+  display: flex;
+  gap: var(--gap-base);
+  justify-content: space-between;
+  margin-bottom: 0.65rem;
+}
+
+.ds-personality-curve-head h4 {
+  color: var(--text-color);
+  font-size: var(--font-size-sm);
+  margin: 0;
+}
+
+.ds-personality-curve-head p,
+.ds-personality-curve-note {
+  color: var(--text-muted);
+  font-size: 0.68rem;
+  line-height: 1.4;
+  margin: 0.18rem 0 0;
+}
+
+.ds-personality-reference-key {
+  align-items: center;
+  color: var(--text-muted);
+  display: flex;
+  font-size: 0.68rem;
+  gap: 0.42rem;
+  margin-top: 0.38rem;
+}
+
+.ds-personality-reference-key > span {
+  border-top: 2px dashed rgba(226, 232, 240, 0.34);
+  display: inline-block;
+  width: 1.7rem;
+}
+
+.ds-personality-curve-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  justify-content: flex-end;
+}
+
+.ds-personality-curve-actions button:disabled {
+  cursor: not-allowed;
+  opacity: var(--disabled-opacity);
+}
+
+.ds-personality-graph-layout {
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr) 190px;
+}
+
+.ds-personality-chart {
+  background: rgba(2, 6, 23, 0.55);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: 0.5rem;
+  box-sizing: border-box;
+  height: 240px;
+  min-width: 0;
+  touch-action: none;
+  width: 100%;
+}
+
+.ds-personality-grid-line {
+  stroke: rgba(148, 163, 184, 0.13);
+  stroke-width: 1;
+}
+
+.ds-personality-axis-label {
+  fill: var(--text-muted);
+  font-family: var(--font-body);
+  font-size: 9px;
+}
+
+.ds-personality-curve-area {
+  fill: rgba(56, 189, 248, 0.10);
+}
+
+.ds-personality-curve-line {
+  fill: none;
+  stroke: #38bdf8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 3;
+}
+
+.ds-personality-curve-point {
+  cursor: ns-resize;
+  fill: #07111d;
+  outline: none;
+  stroke: #7dd3fc;
+  stroke-width: 3;
+}
+
+.ds-personality-curve-point:hover,
+.ds-personality-curve-point:focus {
+  fill: #38bdf8;
+  stroke: #e0f2fe;
+}
+
+.ds-personality-values {
+  display: grid;
+  gap: 0.35rem;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  max-height: 245px;
+  overflow-y: auto;
+}
+
+.ds-personality-value {
+  background: var(--input-bg);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: 0.4rem;
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.35rem 0.45rem;
+}
+
+.ds-personality-value span {
+  color: var(--text-muted);
+  font-size: 0.62rem;
+}
+
+.ds-personality-value input {
+  background: transparent;
+  border: 0;
+  color: var(--text-color);
+  font-family: var(--font-body);
+  font-size: 0.78rem;
+  min-width: 0;
+  outline: none;
+  width: 100%;
+}
+
+.ds-personality-value b {
+  display: none;
+}
+
+.ds-personality-advanced {
+  border-top: 1px solid var(--sidebar-border-color);
+  padding-top: 0.6rem;
+}
+
+.ds-personality-advanced > .ds-manage-btn {
+  margin-top: 0;
+}
+
+.ds-personality-advanced-rows {
+  display: grid;
+  gap: 0.55rem;
+  margin-top: 0.45rem;
+}
+
+.ds-personality-advanced-rows[hidden],
+.ds-personality-custom-number[hidden] {
+  display: none;
+}
+
+.ds-personality-warning {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.32);
+  border-radius: var(--border-radius-base);
+  color: #fcd34d;
+  font-size: 0.7rem;
+  line-height: 1.4;
+  padding: 0.65rem 0.75rem;
+}
+
+.ds-personality-advanced-value {
+  align-items: center;
+  background: var(--input-bg);
+  border: 1px solid var(--sidebar-border-color);
+  border-radius: var(--border-radius-base);
+  display: grid;
+  gap: 0.75rem;
+  grid-template-columns: minmax(0, 1fr) minmax(0, 1.4fr);
+  min-width: 0;
+  padding: 0.7rem 0.75rem;
+}
+
+.ds-personality-advanced-copy {
+  display: flex;
+  flex-direction: column;
+  gap: 0.2rem;
+  min-width: 0;
+}
+
+.ds-personality-advanced-copy strong {
+  color: var(--text-color);
+  font-size: 0.75rem;
+}
+
+.ds-personality-advanced-copy small,
+.ds-personality-custom-number span {
+  color: var(--text-muted);
+  font-size: 0.65rem;
+  line-height: 1.35;
+}
+
+.ds-personality-advanced-control {
+  display: grid;
+  gap: 0.45rem;
+  min-width: 0;
+}
+
+.ds-personality-advanced-options {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.ds-personality-custom-number {
+  align-items: center;
+  display: flex;
+  gap: 0.5rem;
+  justify-content: flex-end;
+  min-width: 0;
+}
+
+.ds-personality-custom-number span {
+  flex: 0 0 auto;
+  white-space: nowrap;
+}
+
+.ds-personality-custom-number input {
+  background: rgba(15, 23, 42, 0.75);
+  border: 1px solid rgba(148, 163, 184, 0.35);
+  border-radius: 0.4rem;
+  box-sizing: border-box;
+  color: var(--text-color);
+  font: inherit;
+  max-width: 100%;
+  min-width: 0;
+  padding: 0.42rem 0.5rem;
+  width: 7rem;
+}
+
+.ds-personality-error {
+  border: 1px solid rgba(248, 113, 113, 0.4);
+  border-radius: var(--border-radius-base);
+  color: #fca5a5;
+  margin: 0.75rem 0 0 1rem;
+  padding: 0.8rem;
+}
+
+.ds-personality-migration-warning {
+  background: rgba(245, 158, 11, 0.08);
+  border: 1px solid rgba(245, 158, 11, 0.42);
+  border-radius: var(--border-radius-base);
+  color: #fcd34d;
+  font-size: 0.78rem;
+  line-height: 1.45;
+  padding: 0.75rem 0.9rem;
+}
+
 /* ――― Mobile ――― */
 @media only screen and (max-width: 768px) and (orientation: portrait) {
   .ds-wrapper {
@@ -784,5 +1312,35 @@
 
   .ds-favorite-switch {
     justify-content: space-between;
+  }
+
+  .ds-personality-profiles {
+    margin-left: 0;
+    padding-left: 0;
+    border-left: 0;
+  }
+
+}
+
+/* Respond to the card's available space, including landscape and embeds. */
+@container (max-width: 850px) {
+  .ds-personality-graph-layout,
+  .ds-personality-advanced-value {
+    grid-template-columns: minmax(0, 1fr);
+  }
+
+  .ds-personality-values {
+    grid-template-columns: repeat(auto-fit, minmax(90px, 1fr));
+    max-height: none;
+  }
+}
+
+@container (max-width: 400px) {
+  .ds-personality-curve-head {
+    flex-wrap: wrap;
+  }
+
+  .ds-personality-curve-actions {
+    justify-content: flex-start;
   }
 }

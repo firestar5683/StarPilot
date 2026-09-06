@@ -16,6 +16,9 @@ function showSnackbar(msg, level, timeout = 3500, options = {}) {
   const setSnackbarContent = (snackbar) => {
     snackbar.innerHTML = msg
     snackbar.className = "snackbar show"
+    snackbar.setAttribute("role", level === "error" ? "alert" : "status")
+    snackbar.setAttribute("aria-live", level === "error" ? "assertive" : "polite")
+    snackbar.setAttribute("aria-atomic", "true")
     if (level === "error") {
       snackbar.style.backgroundColor = "#f44336"
     } else {
