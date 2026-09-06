@@ -444,15 +444,26 @@ class SpeedLimitController:
       return
 
     current_road_name = sm["mapdOut"].roadName if desired_source == "Map Data" else ""
+    current_speed = self.target if (self.source != "None" and self.target > 0) else self.last_valid_limit
 
-    if abs(desired_target - self.previous_target) >= 1 or (current_road_name != self.previous_road_name and current_road_name != ""):
+    # Do not trigger alerts when shifting to fallback or when re-obtaining the same speed limit
+    is_fallback = desired_source == "None" or desired_target == 0
+    same_speed = desired_target > 0 and current_speed > 0 and abs(desired_target - current_speed) < 1
+
+    if not is_fallback and not same_speed and (abs(desired_target - self.previous_target) >= 1 or current_speed == 0):
       self.handle_limit_change(desired_source, desired_target, current_road_name, v_ego, sm)
-    elif desired_source != self.source and (abs(desired_target - self.target) < 1 or self.target == 0):
-      self.source = desired_source
-      self.target = desired_target
     else:
       self.speed_limit_changed_timer = 0
       self.unconfirmed_speed_limit = 0
+      if desired_source != self.source or desired_target != self.target:
+        self.source = desired_source
+        self.target = desired_target
+      if desired_source != "None" and desired_target > 0:
+        self.previous_source = desired_source
+        self.previous_target = desired_target
+      if current_road_name != self.previous_road_name and current_road_name != "":
+        self.previous_road_name = current_road_name
+        self.denied_target = 0
 
     if self.source != "None" and self.target > 0:
       self.last_valid_limit = self.target
