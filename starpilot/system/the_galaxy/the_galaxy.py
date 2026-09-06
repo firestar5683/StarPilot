@@ -5989,6 +5989,9 @@ def setup(app):
           return jsonify({"error": "CustomPersonalities must be a JSON boolean."}), 400
         enabled = data["value"]
         with _PERSONALITY_PROFILES_WRITE_LOCK:
+          # The car may have started while this request waited behind an edit.
+          if _personality_settings_write_locked():
+            return jsonify({"error": "Driving personality settings can only be changed while parked."}), 403
           ev_tuning = _get_detected_ev_tuning()
           truck_tuning = (_get_detected_truck_tuning() or params.get_bool("TruckTuning")) and not ev_tuning
           raw_document = _safe_params_get_live_raw(PERSONALITY_PROFILES_PARAM)

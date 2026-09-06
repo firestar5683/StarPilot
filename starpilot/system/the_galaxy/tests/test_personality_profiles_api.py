@@ -595,6 +595,32 @@ def test_master_toggle_writes_in_fail_closed_order(monkeypatch, enabled, expecte
   assert [key for key, _ in params.writes] == expected_order
 
 
+@pytest.mark.parametrize("enabled", [False, True])
+@pytest.mark.parametrize("road_change", [{"IsOnroad": True}, {"IsOffroad": False}])
+def test_master_toggle_rechecks_parked_state_after_waiting_for_profile_lock(monkeypatch, enabled, road_change):
+  original = profile_document(default_personality_profiles(False), enabled=not enabled)
+  client, params = _client(monkeypatch, {
+    "CustomPersonalities": not enabled, PERSONALITY_PROFILES_PARAM: original,
+  })
+  notifications = []
+
+  class StateChangingLock:
+    def __enter__(self):
+      params.values.update(road_change)
+
+    def __exit__(self, *_):
+      return False
+
+  monkeypatch.setattr(the_galaxy, "_PERSONALITY_PROFILES_WRITE_LOCK", StateChangingLock())
+  monkeypatch.setattr(the_galaxy, "update_starpilot_toggles", lambda: notifications.append(True))
+  response = client.put("/api/params", json={"key": "CustomPersonalities", "value": enabled})
+  assert response.status_code == 403
+  assert params.writes == []
+  assert params.values[PERSONALITY_PROFILES_PARAM] == original
+  assert params.values["CustomPersonalities"] is not enabled
+  assert notifications == []
+
+
 def test_profile_document_write_failure_never_enables_master(monkeypatch):
   original = profile_document(default_personality_profiles(False), enabled=False)
   client, params = _client(monkeypatch, {

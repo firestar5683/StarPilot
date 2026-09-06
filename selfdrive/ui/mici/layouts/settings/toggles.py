@@ -12,6 +12,7 @@ PERSONALITY_TO_INT = log.LongitudinalPersonality.schema.enumerants
 class TogglesLayoutMici(NavScroller):
   def __init__(self):
     super().__init__()
+    self._personality_seen = None
     self._sync_rhd_toggle()
 
     def rhd_toggle_callback(checked: bool):
@@ -70,12 +71,17 @@ class TogglesLayoutMici(NavScroller):
 
     if ui_state.sm.updated["selfdriveState"]:
       personality = PERSONALITY_TO_INT[ui_state.sm["selfdriveState"].personality]
-      if personality != ui_state.personality and ui_state.started:
+      # The sidebar also updates the shared cache. Track readback per control
+      # so its next tap cannot reselect the active profile from a stale label.
+      # Repeated old messages must not undo an optimistic, queued selection.
+      if ui_state.started and personality != self._personality_seen:
         self._personality_toggle.set_value(self._personality_toggle._options[personality])
+        self._personality_seen = personality
       ui_state.personality = personality
 
   def show_event(self):
     super().show_event()
+    self._personality_seen = None
     self._update_toggles()
 
   def _update_toggles(self):

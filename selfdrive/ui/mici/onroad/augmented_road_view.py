@@ -652,6 +652,7 @@ class AugmentedRoadView(CameraView):
   def _sidebar_personality_touch_enabled(self) -> bool:
     return (
       ui_state.started and
+      ui_state.has_longitudinal_control and
       self._sidebar_widgets_visible() and
       not ui_state.ui_params.get_bool("SafeMode")
     )
