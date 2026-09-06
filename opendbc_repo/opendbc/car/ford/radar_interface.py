@@ -1,3 +1,5 @@
+# Ford-specific additions first imported in StarPilot 3f6ccd104e substantially adapt BluePilot
+# bp-7.0 radar work. See the repository root CREDITS.md and THIRD_PARTY_NOTICES.md.
 import numpy as np
 from collections import deque
 from typing import cast

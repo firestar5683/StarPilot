@@ -1,3 +1,16 @@
+"""Ford lateral-control extensions.
+
+The four-signal curvature strategy, path-angle-primary strategy, manual-turn detector, platform
+gains, and related safety protocol are substantially adapted from BluePilot's Ford work, principally
+by Alan Polk and additional contributors. The audited bp-7.0 reference is
+e1d051d7ba270261b4455068bd68f1a58db15a4a; the missing original source SHA is reconstructed in
+CREDITS.md. StarPilot reorganized that work for its own architecture and has since changed its
+tuning, lookahead, driver-override handoff, and recovery behavior.
+
+See CREDITS.md for feature-level authorship and upstream commits, and THIRD_PARTY_NOTICES.md for the
+published upstream license notices. Upstream contributors do not maintain this adaptation.
+"""
+
 from collections import deque
 from dataclasses import dataclass
 from enum import IntEnum
@@ -17,6 +30,8 @@ class FordLateralMode(IntEnum):
   angle = 2
 
 
+# These rate-limit values descend from BluePilot's ``values_ext.py``, which carries the Haibin Wen
+# and sunnypilot contributors copyright notice reproduced in THIRD_PARTY_NOTICES.md.
 FORD_ANGLE_LIMITS = AngleSteeringLimits(
   0.02,
   ([5, 16, 25], [0.0025, 0.0012, 0.00008]),
@@ -66,6 +81,7 @@ class FordLateralResult:
   shadow_curvature: float = 0.0
 
 
+# Adapted from BluePilot HumanTurnDetector (Alan Polk, 97867c1eb57b7472f6fc3de62f0fef576e5a5497).
 class HumanTurnDetector:
   ANGLE_DEG = 45.0
   HOLD_SECONDS = 1.5
@@ -312,6 +328,8 @@ class FordLateralController:
       active=True,
     )
 
+  # Platform grouping and baseline gains descend from Alan Polk's angle-primary implementation
+  # (d0aac605f99d37e9da205e419f7989c1e9eaa386); StarPilot applies its own runtime factors below.
   def _platform_angle_gains(self) -> tuple[float, float]:
     if self.CP.carFingerprint in CANFD_BODY_ON_FRAME:
       return 0.95, 0.95
@@ -363,6 +381,8 @@ class FordLateralController:
     self.path_angle_last = path_angle
 
     lane_change = self._lane_change()[0]
+    # The anti-stall concept and initial thresholds trace to John Christman's upstream work
+    # (9012f76666a5c90764fcaec40832b9a607488c27). This active-session recovery is StarPilot-specific.
     stall_gap = float(actuators.curvature) - current
     stalled = (self.human_turn_enabled and not CS.out.steeringPressed and not lane_change and v_ego > 9.0
                and abs(stall_gap) > STALL_GAP_MIN

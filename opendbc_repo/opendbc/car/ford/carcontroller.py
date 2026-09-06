@@ -6,6 +6,8 @@ from opendbc.car.lateral import ISO_LATERAL_ACCEL, apply_std_steer_angle_limits
 from opendbc.car.ford import fordcan
 from opendbc.car.ford.values import CarControllerParams, FordFlags, CAR
 from opendbc.car.interfaces import CarControllerBase, V_CRUISE_MAX
+# This Ford extension boundary substantially adapts BluePilot bp-7.0 work. See the root CREDITS.md
+# (including Alan Polk's d0aac605f and db2bdff05) and THIRD_PARTY_NOTICES.md.
 from openpilot.starpilot.car.ford import fordcan as starpilot_fordcan
 from openpilot.starpilot.car.ford.lateral import FordLateralController, FordLateralMode, FordLateralResult
 

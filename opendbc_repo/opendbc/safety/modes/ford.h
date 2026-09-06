@@ -2,6 +2,11 @@
 
 #include "opendbc/safety/declarations.h"
 
+// StarPilot's extended Ford curvature/angle enforcement below is substantially adapted from
+// BluePilot bp-7.0 panda work, principally Alan Polk's 8f8d6d15f0a590f42b78de964ffb0d0af7f5d63d
+// with shadow-curvature contributions from Jacob Neulight. See /CREDITS.md and
+// /THIRD_PARTY_NOTICES.md. This comment does not attribute the surrounding upstream openpilot code.
+
 // Safety-relevant CAN messages for Ford vehicles.
 #define FORD_EngBrakeData          0x165U   // RX from PCM, for driver brake pedal and cruise state
 #define FORD_EngVehicleSpThrottle  0x204U   // RX from PCM, for driver throttle input

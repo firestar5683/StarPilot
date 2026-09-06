@@ -1,3 +1,5 @@
+# Ford-specific additions first imported in StarPilot 3f6ccd104e substantially adapt BluePilot
+# bp-7.0 interface work. See the repository root CREDITS.md and THIRD_PARTY_NOTICES.md.
 import numpy as np
 from opendbc.car import Bus, get_safety_config, structs
 from opendbc.car.carlog import carlog

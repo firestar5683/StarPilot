@@ -1,3 +1,10 @@
+"""Ford extended-lateral CAN constructors.
+
+Adapted from BluePilot's ``fordcan_ext.py`` and angle-mode protocol at bp-7.0 commit
+e1d051d7ba270261b4455068bd68f1a58db15a4a, including panda integration developed principally by
+Alan Polk. See CREDITS.md and THIRD_PARTY_NOTICES.md for detailed provenance and terms.
+"""
+
 from opendbc.car.ford.fordcan import CanBus, calculate_lat_ctl2_checksum
 
 

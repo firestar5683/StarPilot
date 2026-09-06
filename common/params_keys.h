@@ -373,6 +373,8 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ForceStandstill", {PERSISTENT, BOOL, "0", "0", 2, SETTINGS_SIMPLE}},
     {"FordLKASButtonControlMigrated", {PERSISTENT, BOOL, "0", "0"}},
     {"ForceTorqueController", {PERSISTENT, BOOL, "0", "0", 3}},
+    // These Ford lateral tuning concepts descend from BluePilot bp-7.0. StarPilot's key names and
+    // settings integration are local; see /CREDITS.md and /THIRD_PARTY_NOTICES.md for provenance.
     {"FordAngleBlend", {PERSISTENT, FLOAT, "0.5", "0.5", 2}},
     {"FordAngleHighSpeedDamping", {PERSISTENT, FLOAT, "1.0", "1.0", 2}},
     {"FordAngleHighSpeedFactor", {PERSISTENT, FLOAT, "1.0", "1.0", 2}},
