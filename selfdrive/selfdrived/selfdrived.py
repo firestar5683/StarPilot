@@ -35,6 +35,7 @@ from openpilot.system.hardware import HARDWARE
 from openpilot.starpilot.common.starpilot_utilities import contains_event_type
 from openpilot.starpilot.common.starpilot_variables import get_starpilot_toggles
 from openpilot.starpilot.common.lateral_only_experimental import experimental_mode_available
+from openpilot.starpilot.common.longitudinal_mode import request_mode_refresh
 from openpilot.starpilot.common.vision_bsm import get_fresh_vasm_state
 from openpilot.starpilot.system.wheel_controls import (
   CONTROLLER_ACTION_COUNTERS,
@@ -845,10 +846,12 @@ class SelfdriveD:
 
     self.starpilot_events.add_from_msg(self.sm['starpilotPlan'].starpilotEvents)
 
-    if self.starpilot_toggles.conditional_experimental_mode or getattr(self.starpilot_toggles, "conditional_chill_mode", False):
-      self.experimental_mode = self.sm['starpilotPlan'].experimentalMode
-    else:
-      self.experimental_mode |= self.sm['starpilotPlan'].experimentalMode
+    # One plan owns both the selection and conditional result. A delayed/missed
+    # toggle broadcast must not mix an old mode with the current plan result.
+    self.experimental_mode = (not self.safe_mode and experimental_mode_available(self.CP) and (
+      self.sm['starpilotPlan'].experimentalMode if not REPLAY or self.starpilot_toggles.conditional_experimental_mode
+      or getattr(self.starpilot_toggles, "conditional_chill_mode", False)
+      else self.experimental_mode or self.sm['starpilotPlan'].experimentalMode))
 
   def data_sample(self):
     _car_state = messaging.recv_one(self.car_state_sock)
@@ -995,10 +998,17 @@ class SelfdriveD:
       self.is_metric = self.params.get_bool("IsMetric")
       self.is_ldw_enabled = self.params.get_bool("IsLdwEnabled")
       self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
-      if self.safe_mode:
-        self.experimental_mode = False
-      elif not self.starpilot_toggles.conditional_experimental_mode:
-        self.experimental_mode = self.params.get_bool("ExperimentalMode") and experimental_mode_available(self.CP)
+      if REPLAY:
+        # Older replay input sets omit starpilotPlan and its ordinary EXP bit.
+        # Preserve Dom's historical Params path only for offline replay.
+        if self.safe_mode:
+          self.experimental_mode = False
+        elif not self.starpilot_toggles.conditional_experimental_mode:
+          self.experimental_mode = self.params.get_bool("ExperimentalMode") and experimental_mode_available(self.CP)
+      else:
+        # Off the driving loop: honor unnotified legacy mode writes, repeating
+        # until a complete selection snapshot is actually published.
+        request_mode_refresh(self.params, self.params_memory, self.starpilot_toggles)
       self.personality = log.LongitudinalPersonality.relaxed if self.safe_mode else self.params.get("LongitudinalPersonality", return_default=True)
       time.sleep(0.1)
 

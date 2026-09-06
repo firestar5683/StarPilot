@@ -2,6 +2,9 @@ from cereal import log
 
 from openpilot.system.ui.widgets.scroller import NavScroller
 from openpilot.selfdrive.ui.mici.widgets.button import BigParamControl, BigMultiParamToggle
+from openpilot.selfdrive.ui.mici.widgets.longitudinal_mode import LongitudinalModeButton
+from openpilot.selfdrive.ui.mici.layouts.settings.longitudinal_mode import LongitudinalModeClient
+from openpilot.starpilot.system.the_galaxy.longitudinal_mode import lock_reason
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.selfdrive.ui.layouts.settings.common import restart_needed_callback
 from openpilot.selfdrive.ui.ui_state import ui_state
@@ -20,7 +23,10 @@ class TogglesLayoutMici(NavScroller):
 
     self._personality_toggle = BigMultiParamToggle("driving personality", "LongitudinalPersonality", ["aggressive", "standard", "relaxed"])
     self._safe_mode_btn = BigParamControl("safe mode", "SafeMode", toggle_callback=restart_needed_callback)
-    self._experimental_btn = BigParamControl("experimental mode", "ExperimentalMode")
+    self._longitudinal_mode = LongitudinalModeClient()
+    self._experimental_btn = LongitudinalModeButton()
+    self._experimental_btn.set_click_callback(self._cycle_longitudinal_mode)
+    self._experimental_btn.set_enabled(lambda: self._mode_enabled(for_display=True))
     is_metric_toggle = BigParamControl("use metric units", "IsMetric")
     ldw_toggle = BigParamControl("lane departure warnings", "IsLdwEnabled")
     always_on_dm_toggle = BigParamControl("always-on driver monitor", "AlwaysOnDM")
@@ -31,8 +37,8 @@ class TogglesLayoutMici(NavScroller):
 
     self._scroller.add_widgets([
       self._personality_toggle,
-      self._safe_mode_btn,
       self._experimental_btn,
+      self._safe_mode_btn,
       is_metric_toggle,
       ldw_toggle,
       always_on_dm_toggle,
@@ -44,7 +50,6 @@ class TogglesLayoutMici(NavScroller):
 
     # Toggle lists
     self._refresh_toggles = (
-      ("ExperimentalMode", self._experimental_btn),
       ("SafeMode", self._safe_mode_btn),
       ("IsMetric", is_metric_toggle),
       ("IsLdwEnabled", ldw_toggle),
@@ -67,6 +72,10 @@ class TogglesLayoutMici(NavScroller):
 
   def _update_state(self):
     super()._update_state()
+    # Read-only refresh, independent of _update_toggles' existing Safe Mode
+    # enforcement. Galaxy changes must not cause incidental native Params writes.
+    self._longitudinal_mode.update()
+    self._experimental_btn.set_value(self._longitudinal_mode.label)
 
     if ui_state.sm.updated["selfdriveState"]:
       personality = PERSONALITY_TO_INT[ui_state.sm["selfdriveState"].personality]
@@ -82,14 +91,12 @@ class TogglesLayoutMici(NavScroller):
     ui_state.update_params()
     self._sync_rhd_toggle()
     safe_mode = ui_state.params.get_bool("SafeMode")
-    self._experimental_btn.set_enabled(not safe_mode)
     self._personality_toggle.set_enabled(not safe_mode)
     if safe_mode:
       if ui_state.params.get_bool("ExperimentalMode"):
         ui_state.params.put_bool("ExperimentalMode", False)
       if ui_state.params.get("LongitudinalPersonality", return_default=True) != int(log.LongitudinalPersonality.relaxed):
         ui_state.params.put_int("LongitudinalPersonality", int(log.LongitudinalPersonality.relaxed))
-      self._experimental_btn.set_checked(False)
       self._personality_toggle.set_value("relaxed")
 
     # CP gating for experimental mode
@@ -100,15 +107,28 @@ class TogglesLayoutMici(NavScroller):
       else:
         # no long for now
         self._experimental_btn.set_visible(False)
-        self._experimental_btn.set_checked(False)
         self._personality_toggle.set_visible(False)
-        self._experimental_btn.set_enabled(False)
         self._personality_toggle.set_enabled(False)
         ui_state.params.remove("ExperimentalMode")
 
     # Refresh toggles from params to mirror external changes
     for key, item in self._refresh_toggles:
       item.set_checked(ui_state.params.get_bool(key))
+
+  def _mode_enabled(self, *, for_display=False):
+    params = ui_state.params
+    cp = ui_state.CP
+    capable = bool(cp is not None and cp.openpilotLongitudinalControl and ui_state.experimental_mode_available)
+    # Pending disable/alpha changes must block before CarParams is regenerated.
+    capable = capable and params.get("DisableOpenpilotLongitudinal") in (False, "0", b"0", "False", b"False")
+    if cp is not None and cp.alphaLongitudinalAvailable:
+      capable = capable and params.get_bool("AlphaLongitudinalEnabled")
+    available = self._longitudinal_mode.display_enabled if for_display else self._longitudinal_mode.enabled
+    return available and not lock_reason(params, capable)
+
+  def _cycle_longitudinal_mode(self):
+    if self._mode_enabled():
+      self._longitudinal_mode.cycle()
 
   def _sync_rhd_toggle(self):
     if not ui_state.params.get_bool("IsRHDOverride"):
