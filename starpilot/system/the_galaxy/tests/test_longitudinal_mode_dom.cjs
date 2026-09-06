@@ -6,10 +6,26 @@ const path = require('node:path')
 const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright')
 const repo = path.resolve(__dirname, '../../../..')
 const assets = path.join(repo, 'starpilot/system/the_galaxy/assets')
-const fixturePath = process.env.GALAXY_DOM_FIXTURE
-if (!fixturePath) throw new Error('Set GALAXY_DOM_FIXTURE to the existing offline setup.js fixture')
-let fixture = fs.readFileSync(fixturePath, 'utf8').replace(/import \{DeviceSettings\}[^\n]+/g, '')
-fixture += `
+// All API responses below are synthetic. Layout/assets come from this checkout.
+const layoutFixture = JSON.parse(fs.readFileSync(path.join(repo, 'starpilot/common/assets/device_settings_layout.json'), 'utf8'))
+const fixture = `
+const layoutFixture = ${JSON.stringify(layoutFixture)};
+const paramsFixture = Object.fromEntries(layoutFixture.flatMap(section => section.params || []).map(param =>
+  [param.key, param.data_type === 'bool' ? false : (param.default ?? param.min ?? 0)]));
+const jsonResponse = value => new Response(JSON.stringify(value), {status:200});
+window.showSnackbar=()=>{};
+window.fetch=async (input, init={}) => {
+  const url=new URL(input,location.href);
+  const method=init.method || 'GET';
+  if(method !== 'GET') throw new Error('Unexpected fixture write: '+url.pathname);
+  if(url.pathname==='/assets/components/tools/device_settings_layout.json') return jsonResponse(layoutFixture);
+  if(url.pathname==='/api/params/defaults' || url.pathname==='/api/flm/workspace') return jsonResponse({});
+  if(url.pathname==='/api/params/all') return jsonResponse(paramsFixture);
+  if(url.pathname==='/api/favorites/slots') return jsonResponse({options:[],slots:[null,null,null],values:{}});
+  if(url.pathname==='/api/favorites/values') return jsonResponse({values:{}});
+  if(url.pathname==='/api/params') return new Response(String(paramsFixture[url.searchParams.get('key')] ?? false));
+  throw new Error('Unmocked request: '+method+' '+url.pathname);
+};
 paramsFixture.IsOnroad = ${process.env.GALAXY_DOM_ONROAD === '1'};
 paramsFixture.GalaxyDeveloperMode = false;
 let modeState = {mode:'conditional_experimental', values:{ExperimentalMode:true,ConditionalExperimental:true,ConditionalChill:false},locked:false,reason:'',experimental_confirmed:false};
