@@ -2,6 +2,7 @@ import os
 import operator
 import platform
 import sys
+import time
 
 from types import SimpleNamespace
 
@@ -24,9 +25,21 @@ def notcar(started: bool, params: Params, CP: car.CarParams, starpilot_toggles: 
 def iscar(started: bool, params: Params, CP: car.CarParams, starpilot_toggles: SimpleNamespace) -> bool:
   return started and not CP.notCar
 
+FORCE_OFFROAD_LOGGING_GRACE_S = 60  # keep loggerd alive this long after Force Offroad, to capture the onroad->offroad transition in the same route
+_force_offroad_since: float | None = None
+
 def logging(started: bool, params: Params, CP: car.CarParams, starpilot_toggles: SimpleNamespace) -> bool:
+  global _force_offroad_since
   run = (not CP.notCar) or not params.get_bool("DisableLogging")
-  return started and run
+
+  if started or not starpilot_toggles.force_offroad:
+    _force_offroad_since = None
+    return started and run
+
+  # offroad specifically because of the Force Offroad toggle: keep logging for a grace period
+  if _force_offroad_since is None:
+    _force_offroad_since = time.monotonic()
+  return run and (time.monotonic() - _force_offroad_since) < FORCE_OFFROAD_LOGGING_GRACE_S
 
 def ublox_available() -> bool:
   return os.path.exists('/dev/ttyHS0') and not os.path.exists('/persist/comma/use-quectel-gps')
