@@ -2,6 +2,8 @@ import re
 from dataclasses import dataclass, field
 from enum import IntFlag
 
+# Provenance: portions of HKG angle limits, flags, and platform data are adapted from
+# sunnypilot/opendbc's hkg-angle-steering-2025 branch at cc4b08625. See CREDITS.md.
 from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, Bus, CarSpecs, DbcDict, PlatformConfig, Platforms, uds
 from opendbc.car.lateral import AngleSteeringLimits, ISO_LATERAL_ACCEL
 from opendbc.car.common.conversions import Conversions as CV

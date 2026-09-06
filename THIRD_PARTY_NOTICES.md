@@ -14,11 +14,27 @@ and related tests are adapted from the public BluePilot repository:
 - Historical reconstruction: [CREDITS.md](CREDITS.md#ford-support-adapted-from-bluepilot)
 - Provenance and contributors: [CREDITS.md](CREDITS.md)
 
-The upstream branch contains both `LICENSE` and `LICENSE.md`. Its README points to `LICENSE` for
-openpilot licensing, while some extension files point to `LICENSE.md`. Because the scope of those
-two notices is not unambiguous, StarPilot preserves both and treats the more restrictive notice
-conservatively for upstream-derived material. This is a record of the published notices, not a
-legal conclusion about their scope.
+## sunnypilot Hyundai, Kia, and Genesis support
+
+Portions of StarPilot's HKG angle steering, CAN integration, panda safety enforcement and tests,
+firmware fingerprints, platform data, and cruise-button management are adapted directly from the
+public sunnypilot repositories:
+
+- Source: <https://github.com/sunnypilot/sunnypilot/tree/hkg-angle-steering-2025>
+- Audited superproject snapshot: [`cfb38312db33779f4727c983d372474a56ccb5d8`](https://github.com/sunnypilot/sunnypilot/commit/cfb38312db33779f4727c983d372474a56ccb5d8)
+- Source: <https://github.com/sunnypilot/opendbc/tree/hkg-angle-steering-2025>
+- Audited angle-branch snapshot: [`cc4b08625a98e94b318cab15e45e05dad58042bd`](https://github.com/sunnypilot/opendbc/commit/cc4b08625a98e94b318cab15e45e05dad58042bd)
+- Later HKG history was audited against `sunnypilot/opendbc` `master` at
+  [`f95f996f5917dcbbf2e32fe51b606a24cf836af6`](https://github.com/sunnypilot/opendbc/commit/f95f996f5917dcbbf2e32fe51b606a24cf836af6).
+- Historical reconstruction and contributors: [CREDITS.md](CREDITS.md#hyundai-kia-and-genesis-support-adapted-from-sunnypilot)
+
+## Applicable upstream license notices
+
+The upstream repositories and branches identified above publish both `LICENSE` and `LICENSE.md`.
+Their READMEs point to `LICENSE` for openpilot licensing, while some extension files point to
+`LICENSE.md`. Because the scope of those two notices is not unambiguous, StarPilot preserves both
+and treats the more restrictive notice conservatively for upstream-derived material. This is a
+record of the published notices, not a legal conclusion about their scope.
 
 ### Upstream `LICENSE` notice (MIT)
 
@@ -39,19 +55,37 @@ NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FO
 DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT
 OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
 
-### Upstream Ford extension file notice
+### Upstream `opendbc` `LICENSE` notice (MIT)
 
-The upstream `carstate_ext.py`, `values_ext.py`, and several related sunnypilot extension files
-carry this file-level notice:
+Copyright (c) 2020, Comma.ai, Inc.
+
+Permission is hereby granted, free of charge, to any person obtaining a copy of this software and
+associated documentation files (the "Software"), to deal in the Software without restriction,
+including without limitation the rights to use, copy, modify, merge, publish, distribute,
+sublicense, and/or sell copies of the Software, and to permit persons to whom the Software is
+furnished to do so, subject to the following conditions:
+
+The above copyright notice and this permission notice shall be included in all copies or
+substantial portions of the Software.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR IMPLIED, INCLUDING BUT
+NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND
+NONINFRINGEMENT. IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM,
+DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM, OUT
+OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
+
+### Upstream extension file notice
+
+Several upstream Ford and HKG extension files carry this file-level notice:
 
 > Copyright (c) 2021-, Haibin Wen, sunnypilot, and a number of other contributors.
 >
 > This file is part of sunnypilot and is licensed under the MIT License.
 > See the LICENSE.md file in the root directory for more details.
 
-StarPilot's Ford state integration and lateral-limit values were informed by those extension files.
-The reference to “MIT License” conflicts with the nonstandard restrictions in the referenced
-upstream `LICENSE.md`; both texts are retained here rather than silently choosing between them.
+StarPilot's Ford and HKG integrations were informed by extension files carrying this notice. The
+reference to “MIT License” conflicts with the nonstandard restrictions in the referenced upstream
+`LICENSE.md`; both texts are retained here rather than silently choosing between them.
 
 ### Upstream `LICENSE.md` notice (published as “Custom MIT License”)
 

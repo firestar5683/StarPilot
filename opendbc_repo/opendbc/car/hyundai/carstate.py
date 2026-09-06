@@ -2,6 +2,8 @@ from collections import deque
 import copy
 import math
 
+# Provenance: portions of HKG angle-state integration are adapted from sunnypilot/opendbc's
+# hkg-angle-steering-2025 branch at cc4b08625. See CREDITS.md and THIRD_PARTY_NOTICES.md.
 from cereal import custom
 from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, create_button_events, structs

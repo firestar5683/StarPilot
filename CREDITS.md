@@ -79,6 +79,70 @@ parts of their implementation. Future ports should cite the exact upstream commi
 commit and at the relevant source boundary; when history can be retained cleanly, use a merge,
 subtree, or cherry-pick with origin metadata rather than a single squashed attribution.
 
+## Hyundai, Kia, and Genesis support adapted from sunnypilot
+
+Portions of StarPilot's HKG angle steering, CAN integration, panda safety enforcement, safety tests,
+firmware fingerprints, and cruise-button management are adapted from sunnypilot. Some upstream HKG
+authorship is retained in StarPilot's Git history, and StarPilot commit
+[`e33305151`](https://github.com/firestar5683/StarPilot/commit/e33305151ba852ea3350aa9f7a12d1c8bd137c43)
+identified its ICBM/CSLC work as a sunnypilot port. Other substantial imports were committed locally
+without recording an exact source revision, so this section documents the reconstructed lineage.
+
+The exact checkout used for each historical import cannot now be proven. The reference snapshots
+used for this audit are:
+
+- [`sunnypilot/sunnypilot` `hkg-angle-steering-2025`](https://github.com/sunnypilot/sunnypilot/tree/hkg-angle-steering-2025)
+  at [`cfb38312d`](https://github.com/sunnypilot/sunnypilot/commit/cfb38312db33779f4727c983d372474a56ccb5d8),
+  whose opendbc submodule points to the next snapshot.
+- [`sunnypilot/opendbc` `hkg-angle-steering-2025`](https://github.com/sunnypilot/opendbc/tree/hkg-angle-steering-2025)
+  at [`cc4b08625`](https://github.com/sunnypilot/opendbc/commit/cc4b08625a98e94b318cab15e45e05dad58042bd).
+- [`sunnypilot/opendbc` `master`](https://github.com/sunnypilot/opendbc)
+  at [`f95f996f5`](https://github.com/sunnypilot/opendbc/commit/f95f996f5917dcbbf2e32fe51b606a24cf836af6),
+  used to audit later HKG fingerprints and extension history.
+
+### Upstream authors and work
+
+- **Haibin (Jason) Wen** contributed the original Kia EV9 HDA2/LFA2 angle-steering port, Hyundai
+  angle integration and signals, non-SCC platform support, and Intelligent Cruise Button Management.
+  Important lineage commits include
+  [`abe78de2c`](https://github.com/sunnypilot/opendbc/commit/abe78de2c2f9d8774d343c35c181d27e9d944392),
+  [`333de6f1a`](https://github.com/sunnypilot/opendbc/commit/333de6f1a2097a27709a652d5862bad05d83ed1f),
+  [`559a37426`](https://github.com/sunnypilot/opendbc/commit/559a37426976171ceb56c541bec9362abd8b8bd2), and
+  [`862828ad6`](https://github.com/sunnypilot/opendbc/commit/862828ad6f870fb23dd8670fe2a18dc19313217b).
+- **Shane Smiskol** contributed foundational angle-command limiting, driver-override behavior, and
+  EPS-fault avoidance, including
+  [`228a397a3`](https://github.com/sunnypilot/opendbc/commit/228a397a37618de1ecbaf06b70efe3e0e0a8eec6) and
+  [`42d84ff6c`](https://github.com/sunnypilot/opendbc/commit/42d84ff6ca3d48529b195395d652ad777ad397ca).
+- **DevTekVE** contributed substantial angle-controller integration, tuning, platform support, panda
+  safety logic, and tests, including
+  [`c77c7ec2e`](https://github.com/sunnypilot/opendbc/commit/c77c7ec2e39959b65c42e2d70aa943fccd606361),
+  [`7ded99dba`](https://github.com/sunnypilot/opendbc/commit/7ded99dba145c56754e8bbe47217eb174ec03396),
+  [`3819ca7f0`](https://github.com/sunnypilot/opendbc/commit/3819ca7f0d2576771924bd60f47d3e8676b5d583), and
+  [`8d134e98f`](https://github.com/sunnypilot/opendbc/commit/8d134e98f3151a1aec354f93e81c3a4269788991).
+- **Nicholas Evans, dany7915, janpoo6427, Tinkerpet, royjr, Taylor Hoshino, Intelli, Joshua Mack,
+  Mark McCallister, Discountchubbs, and other sunnypilot contributors** supplied vehicle ports,
+  fingerprints, firmware data, safety-limit updates, and related integration represented in the
+  adapted HKG support.
+
+This list identifies contributors found during the repository, commit, and blame audit. The
+sunnypilot repositories and their Git histories remain the authoritative record and may identify
+additional contributors.
+
+### Local-to-upstream map
+
+| StarPilot area | Upstream lineage | What StarPilot changed |
+| --- | --- | --- |
+| `opendbc_repo/opendbc/car/hyundai/carcontroller.py` | Angle controller and driver-override work in `sunnypilot/opendbc` `hkg-angle-steering-2025` | Integrated the controller into StarPilot's opendbc layout and added substantial local longitudinal, smoothing, recovery, and platform behavior. |
+| `opendbc_repo/opendbc/car/hyundai/hyundaicanfd.py`, `interface.py`, and `values.py` | Angle commands, signal selection, safety flags, limits, and platform integration from the angle branch | Combined later upstream changes with StarPilot flags, Params, platform tuning, and local CAN/CAN-FD behavior. |
+| `opendbc_repo/opendbc/safety/modes/hyundai_canfd.h` and its tests | Angle-command safety enforcement and regression tests from the angle branch | Extended and reorganized the safety mode and tests for StarPilot's current supported modes. |
+| `opendbc_repo/opendbc/car/hyundai/fingerprints.py` and HKG platform data | sunnypilot HKG extension/fingerprint history on `master` plus angle-branch vehicle ports | Flattened extension data into the local opendbc tree and continued adding and updating platforms. |
+| HKG cruise-button management and settings integration | sunnypilot ICBM/CSLC concepts and implementation history, including `862828ad6` and `2277e3d49` | Adapted the feature to StarPilot/FrogPilot controls and settings; later revisions changed or removed portions of the original integration. |
+
+The current implementation is not a wholesale copy of either reference snapshot and has diverged
+substantially. Its HKG angle-control and supporting safety architecture nevertheless remain
+derivative in design and in identifiable portions of the implementation. The applicable upstream
+notices are preserved in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
 ## Policy for future third-party ports
 
 Before publishing a third-party port:
