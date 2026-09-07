@@ -55,6 +55,8 @@
   opacity: 0.72;
 }
 
+.bluetoothCard,
+.bluetoothCompanionCard,
 .bluetoothNotice,
 .bluetoothError,
 .bluetoothPrompt {
@@ -62,6 +64,32 @@
   border: 1px solid var(--sidebar-border-color);
   border-radius: var(--border-radius-lg);
   padding: 14px 16px;
+}
+
+.bluetoothCompanionCard h3,
+.bluetoothCompanionCard p {
+  margin: 0;
+}
+
+.bluetoothCompanionCard p {
+  margin-top: 6px;
+  opacity: 0.8;
+}
+
+.bluetoothCompanionHint {
+  margin-top: 12px;
+  color: #d9c9ff;
+  font-size: 0.9rem;
+}
+
+.bluetoothCompanionHint ol {
+  color: var(--text-color);
+  margin: 8px 0 0;
+  padding-left: 20px;
+}
+
+.bluetoothCompanionHint li + li {
+  margin-top: 5px;
 }
 
 .bluetoothNotice,
@@ -321,6 +349,16 @@
   flex-wrap: wrap;
   gap: 8px;
   justify-content: flex-end;
+}
+
+.bluetoothReconnectHint {
+  align-items: center;
+  color: #d9c9ff;
+  display: inline-flex;
+  font-size: 0.84rem;
+  font-weight: 700;
+  gap: 7px;
+  padding: 10px 4px;
 }
 
 .bluetoothActions button.selected {

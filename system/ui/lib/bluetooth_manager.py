@@ -5,6 +5,11 @@ import time
 from openpilot.starpilot.system.bluetooth import BluetoothClient, BluetoothStatus
 
 
+def companion_setup_visible(status: BluetoothStatus) -> bool:
+  # Keep pairing available as the stale-bond recovery path.
+  return True
+
+
 class BluetoothManager:
   def __init__(self):
     self._client = BluetoothClient(timeout=5.0)
@@ -147,6 +152,12 @@ class BluetoothManager:
           self._operation_error = str(error)
           self._audio_test_deadline = 0.0
     threading.Thread(target=worker, daemon=True).start()
+
+  def set_companion(self, enabled: bool) -> None:
+    self._run(self._client.set_companion, enabled)
+
+  def set_companion_pairing(self, pairing: bool) -> None:
+    self._run(self._client.start_companion_pairing if pairing else self._client.stop_companion_pairing)
 
   def respond(self, prompt_id: str, accepted: bool, value: str = "") -> None:
     self._run(self._client.respond, prompt_id, accepted, value)

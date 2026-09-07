@@ -1,4 +1,5 @@
 import json
+import math
 import os
 import socket
 import threading
@@ -20,10 +21,13 @@ COMMAND_TIMEOUTS = {
   "set_power": 90.0,
   "start_scan": 20.0,
   "stop_scan": 20.0,
-  "connect": 35.0,
-  "disconnect": 20.0,
+  "connect": 40.0,
+  "disconnect": 25.0,
   "forget": 20.0,
   "test_audio": 10.0,
+  "set_companion": 55.0,
+  "start_companion_pairing": 55.0,
+  "stop_companion_pairing": 55.0,
 }
 TRUE_VALUES = {"1", "true", "yes", "on"}
 
@@ -69,6 +73,12 @@ class BluetoothStatus:
   devices: tuple[BluetoothDevice, ...] = ()
   prompt: dict[str, Any] | None = None
   error: str = ""
+  companion_enabled: bool = False
+  companion_pairing: bool = False
+  companion_pairing_remaining: int = 0
+  companion_service_uuid: str = ""
+  companion_devices: tuple[str, ...] = ()
+  companion_connected: bool = False
 
   @classmethod
   def from_dict(cls, value: dict[str, Any]) -> "BluetoothStatus":
@@ -83,6 +93,12 @@ class BluetoothStatus:
       devices=tuple(BluetoothDevice.from_dict(device) for device in value.get("devices", ())),
       prompt=value.get("prompt"),
       error=str(value.get("error", "")),
+      companion_enabled=bool(value.get("companion_enabled", False)),
+      companion_pairing=bool(value.get("companion_pairing", False)),
+      companion_pairing_remaining=max(0, int(value.get("companion_pairing_remaining", 0))),
+      companion_service_uuid=str(value.get("companion_service_uuid", "")),
+      companion_devices=tuple(str(address) for address in value.get("companion_devices", ())),
+      companion_connected=bool(value.get("companion_connected", False)),
     )
 
 
@@ -109,6 +125,8 @@ class _DesktopFakeBluetooth:
     self._lock = threading.Lock()
     self._enabled = True
     self._discovering = False
+    self._companion_enabled = False
+    self._companion_pairing_deadline = 0.0
     self._selected_audio = "00:11:22:33:44:55"
     self._devices = (
       BluetoothDevice("00:11:22:33:44:55", "Bluetooth Speaker", paired=True, trusted=True, connected=True, audio=True, rssi=-34),
@@ -118,6 +136,7 @@ class _DesktopFakeBluetooth:
 
   def status(self) -> BluetoothStatus:
     with self._lock:
+      pairing_remaining = max(0, math.ceil(self._companion_pairing_deadline - time.monotonic()))
       return BluetoothStatus(
         available=True,
         enabled=self._enabled,
@@ -126,6 +145,9 @@ class _DesktopFakeBluetooth:
         # Desktop demos do not run bluetooth_managerd, so keep the mock usable from Settings.
         offroad=True,
         selected_audio=self._selected_audio,
+        companion_enabled=self._companion_enabled,
+        companion_pairing=pairing_remaining > 0,
+        companion_pairing_remaining=pairing_remaining,
         devices=self._devices,
       )
 
@@ -153,7 +175,19 @@ class _DesktopFakeBluetooth:
         self._enabled = bool(payload.get("enabled", False))
         self._discovering = False
         if not self._enabled:
+          self._companion_pairing_deadline = 0.0
           self._devices = tuple(replace(device, connected=False) for device in self._devices)
+      elif command == "set_companion":
+        self._require_enabled()
+        self._companion_enabled = bool(payload.get("enabled", False))
+        if not self._companion_enabled:
+          self._companion_pairing_deadline = 0.0
+      elif command == "start_companion_pairing":
+        self._require_enabled()
+        self._companion_enabled = True
+        self._companion_pairing_deadline = time.monotonic() + 120.0
+      elif command == "stop_companion_pairing":
+        self._companion_pairing_deadline = 0.0
       elif command == "start_scan":
         self._require_enabled()
         self._discovering = True
@@ -303,6 +337,15 @@ class BluetoothClient:
   def test_audio(self, address: str) -> float:
     result = self.call("test_audio", address=address)
     return max(0.0, float(result.get("audio_test_delay_ms", 0)) / 1000.0)
+
+  def set_companion(self, enabled: bool) -> None:
+    self.call("set_companion", enabled=enabled)
+
+  def start_companion_pairing(self) -> None:
+    self.call("start_companion_pairing")
+
+  def stop_companion_pairing(self) -> None:
+    self.call("stop_companion_pairing")
 
   def respond(self, prompt_id: str, accepted: bool, value: str = "") -> None:
     self.call("pairing_response", prompt_id=prompt_id, accepted=accepted, value=value)

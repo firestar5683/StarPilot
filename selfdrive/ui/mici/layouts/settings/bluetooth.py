@@ -3,9 +3,16 @@ import pyray as rl
 from openpilot.selfdrive.ui.mici.layouts.settings.network.wifi_ui import ForgetButton, LoadingAnimation
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton, LABEL_COLOR
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigConfirmationDialog, BigDialog, BigInputDialog, BigMultiOptionDialog
+from openpilot.starpilot.system.bluetooth.protocol import BluetoothStatus
 from openpilot.system.ui.lib.application import FontWeight, MousePos, gui_app
-from openpilot.system.ui.lib.bluetooth_manager import BluetoothManager
+from openpilot.system.ui.lib.bluetooth_manager import BluetoothManager, companion_setup_visible
 from openpilot.system.ui.widgets.scroller import NavScroller
+
+
+def companion_pair_button_content(status: BluetoothStatus) -> tuple[str, str]:
+  if status.companion_pairing:
+    return "pair a phone", f"discoverable / {status.companion_pairing_remaining}s"
+  return "pair a phone", "start"
 
 
 class BluetoothDeviceButton(BigButton):
@@ -142,12 +149,16 @@ class BluetoothLayoutMici(NavScroller):
     self._dialog_icon = gui_app.texture("icons_mici/settings/bluetooth.png", 64, 64)
     self._power_btn = BigButton("bluetooth", "off", self._dialog_icon, scroll=True)
     self._power_btn.set_click_callback(self._toggle_power)
+    self._companion_pair_btn = BigButton("pair a phone", "start", self._dialog_icon, scroll=True)
+    self._companion_pair_btn.set_click_callback(self._toggle_companion_pairing)
     self._scan_btn = BigButton("scan for devices", "scan", self._dialog_icon, scroll=True)
     self._scan_btn.set_click_callback(lambda: self._manager.set_scanning(True))
     self._scanning_btn = BluetoothScanningButton()
     self._device_buttons = {}
     self._scan_on_ready = False
-    self._scroller.add_widgets([self._power_btn, self._scan_btn, self._scanning_btn])
+    self._scroller.add_widgets([
+      self._power_btn, self._companion_pair_btn, self._scan_btn, self._scanning_btn,
+    ])
     self._rebuild()
 
   def show_event(self):
@@ -168,12 +179,21 @@ class BluetoothLayoutMici(NavScroller):
     self._scan_on_ready = enabled
     self._manager.set_power(enabled)
 
+  def _toggle_companion_pairing(self):
+    self._manager.set_companion_pairing(not self._manager.status.companion_pairing)
+
   def _rebuild(self):
     status = self._manager.status
     self._power_btn.set_value("on" if status.enabled else "off")
     self._power_btn.set_enabled(status.available and status.offroad)
+    companion_text, companion_value = companion_pair_button_content(status)
+    self._companion_pair_btn.set_text(companion_text)
+    self._companion_pair_btn.set_value(companion_value)
+    self._companion_pair_btn.set_enabled(status.enabled and status.offroad)
     self._scan_btn.set_enabled(status.enabled and status.offroad)
     items = [self._power_btn]
+    if status.enabled and companion_setup_visible(status):
+      items.append(self._companion_pair_btn)
     for device in status.devices:
       button = self._device_buttons.get(device.address)
       if button is None:
@@ -260,6 +280,11 @@ class BluetoothLayoutMici(NavScroller):
       status.offroad,
       status.selected_audio,
       status.pairing_address,
+      status.companion_enabled,
+      status.companion_pairing,
+      status.companion_pairing_remaining,
+      status.companion_connected,
+      status.companion_devices,
       tuple((device.address, device.name, device.paired, device.connected, device.audio, device.controller) for device in status.devices),
     )
     if signature != self._last_signature:
