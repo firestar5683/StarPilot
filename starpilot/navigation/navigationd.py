@@ -218,15 +218,17 @@ class Navigationd:
     if self._timer_expired(self._arrival_started_at, ARRIVAL_CLEAR_SECONDS, now):
       self._clear_route(remove_destination=True)
 
-  def _publish_nav_instruction(self, route: NavigationRoute | None, progress: RouteProgress | None, location_valid: bool) -> None:
+  def _publish_nav_instruction(
+    self,
+    route: NavigationRoute | None,
+    progress: RouteProgress | None,
+    location_valid: bool,
+    payload: dict[str, object] | None = None,
+  ) -> None:
     msg = messaging.new_message("navInstruction")
     msg.valid = bool(route is not None and progress is not None and location_valid)
 
-    if msg.valid and route is not None and progress is not None and self._last_position is not None:
-      payload = route.build_instruction_payload(
-        progress,
-        use_vienna_sign=self.params.get_bool("UseVienna"),
-      )
+    if msg.valid and route is not None and progress is not None and self._last_position is not None and payload is not None:
       nav_instruction = msg.navInstruction
       nav_instruction.maneuverPrimaryText = payload["maneuverPrimaryText"]
       nav_instruction.maneuverSecondaryText = payload["maneuverSecondaryText"]
@@ -244,14 +246,22 @@ class Navigationd:
 
     self.pm.send("navInstruction", msg)
 
-  def _publish_nav_state(self, route: NavigationRoute | None, progress: RouteProgress | None, location_valid: bool) -> None:
+  def _publish_nav_state(
+    self,
+    route: NavigationRoute | None,
+    progress: RouteProgress | None,
+    location_valid: bool,
+    payload: dict[str, object] | None = None,
+  ) -> None:
     if route is None or progress is None or not location_valid:
       if self._last_nav_state is not None:
         self.params_memory.remove("NavInstructionState")
         self._last_nav_state = None
       return
 
-    payload = route.build_instruction_payload(progress, use_vienna_sign=self.params.get_bool("UseVienna"))
+    if payload is None:
+      return
+
     all_maneuvers = payload.get("allManeuvers") or []
     next_maneuver = all_maneuvers[1] if len(all_maneuvers) > 1 and isinstance(all_maneuvers[1], dict) else {}
     active_lane_direction = ""
@@ -342,8 +352,15 @@ class Navigationd:
       if route is None:
         progress = None
 
-      self._publish_nav_instruction(route, progress, location_valid)
-      self._publish_nav_state(route, progress, location_valid)
+      payload = None
+      if route is not None and progress is not None and location_valid:
+        payload = route.build_instruction_payload(
+          progress,
+          use_vienna_sign=self.params.get_bool("UseVienna"),
+        )
+
+      self._publish_nav_instruction(route, progress, location_valid, payload)
+      self._publish_nav_state(route, progress, location_valid, payload)
       self._publish_nav_route_if_needed()
       self.rk.keep_time()
 
