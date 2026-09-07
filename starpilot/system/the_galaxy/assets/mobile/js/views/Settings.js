@@ -1,3 +1,5 @@
+import { longitudinalModeLayout, LONGITUDINAL_MODE_KEY } from "/assets/components/tools/longitudinal_mode.mjs"
+import { LongitudinalMode } from "../components/LongitudinalMode.js"
 import { api, showSnackbar } from "../api.js"
 import { navigate, store } from "../store.js"
 import {
@@ -11,7 +13,7 @@ import { DevModeBanner } from "../components/DevModeBanner.js"
 
 export const Settings = {
   name: "Settings",
-  components: { SettingTree, GalaxyToggleCard, GalaxySection, DevModeBanner },
+  components: { SettingTree, GalaxyToggleCard, GalaxySection, DevModeBanner, LongitudinalMode },
   data() {
     return {
       layout: [],
@@ -53,12 +55,15 @@ export const Settings = {
     },
   },
   methods: {
+    isModeParam(p) { return p.key === LONGITUDINAL_MODE_KEY || !!p.longitudinal_mode },
+    modeSection(s) { return this.layout.find(section => section.name === s.name && section.params.some(p => p.key === LONGITUDINAL_MODE_KEY)) },
+    ordinaryParams(s) { return s.params.filter(p => !this.isModeParam(p)) },
     async load() {
       try {
         const [layout, values, defaults] = await Promise.all([
           api.getLayout(), api.getParams(), api.getDefaults(),
         ])
-        this.layout = layout
+        this.layout = longitudinalModeLayout(layout)
         this.values = values || {}
         this.defaults = defaults || {}
         if (!this.activeSectionSlug && this.sections.length) {
@@ -139,8 +144,9 @@ export const Settings = {
           </div>
           <template v-for="section in searchResults" :key="section.slug">
             <GalaxySection :title="section.name + ' (' + section.matches.length + ')'" :icon="section.icon || 'bi-search'" :default-open="false">
+              <LongitudinalMode v-if="section.matches.some(isModeParam)" :section="modeSection(section)" :values="values" @change="onParamChange" />
               <template v-for="p in section.matches" :key="p.key">
-                <GalaxyToggleCard :param="p" :value="values[p.key]" :values="values" :locked="lockReason(p) !== ''"
+                <GalaxyToggleCard v-if="!isModeParam(p)" :param="p" :value="values[p.key]" :values="values" :locked="lockReason(p) !== ''"
                   @change="onParamChange" />
               </template>
             </GalaxySection>
@@ -161,7 +167,8 @@ export const Settings = {
               <i class="bi" :class="activeSection.icon"></i>
               <span class="gx-section__title">{{ activeSection.name }}</span>
             </div>
-            <SettingTree :params="activeSection.params" :parent-key="null" :values="values"
+            <LongitudinalMode v-if="modeSection(activeSection)" :section="modeSection(activeSection)" :values="values" @change="onParamChange" />
+            <SettingTree :params="ordinaryParams(activeSection)" :parent-key="null" :values="values"
               :expanded="expanded" :lock-reason="lockReason" @change="onParamChange" @manage="toggleManage" />
             <div v-if="!activeSection.params.length" class="gx-empty">No settings in this section.</div>
           </div>
