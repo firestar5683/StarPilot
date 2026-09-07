@@ -70,6 +70,7 @@ const FLM_ADVANCED_LATERAL_KEYS = new Set([
 const state = reactive({
   longitudinalMode: null,
   longitudinalModeUpdating: false,
+  longitudinalModeRequestId: 0,
   layout: [],
   allKeys: [],
   paramMetaByKey: {},
@@ -362,12 +363,14 @@ function applyLongitudinalMode(data) {
 
 async function fetchLongitudinalMode(force = false) {
   if (state.longitudinalModeUpdating && !force) return
+  const requestId = ++state.longitudinalModeRequestId
   try {
     const response = await fetch("/api/longitudinal_mode", { cache: "no-store" })
     if (!response.ok) throw new Error("Longitudinal mode unavailable")
     const data = await response.json()
-    if (!state.longitudinalModeUpdating || force) applyLongitudinalMode(data)
+    if (requestId === state.longitudinalModeRequestId && (!state.longitudinalModeUpdating || force)) applyLongitudinalMode(data)
   } catch (_error) {
+    if (requestId !== state.longitudinalModeRequestId || (state.longitudinalModeUpdating && !force)) return
     state.longitudinalMode = null
     state.values = { ...state.values, [LONGITUDINAL_MODE_KEY]: "" }
     scheduleSyncInputs()
@@ -386,6 +389,8 @@ async function updateLongitudinalMode(targetOverride = null) {
   // The explicit selection acknowledges this request, not the persistent
   // ExperimentalModeConfirmed flag. The guarded endpoint remains authoritative.
   const acknowledged = target === "experimental"
+  // Invalidate pre-write reads, even if they finish after forced reconciliation.
+  ++state.longitudinalModeRequestId
   state.longitudinalModeUpdating = true
   try {
     const response = await fetch("/api/longitudinal_mode", {
