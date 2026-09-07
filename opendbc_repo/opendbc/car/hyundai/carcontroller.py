@@ -750,6 +750,7 @@ class CarController(CarControllerBase):
     can_sends = []
     can_canfd_blended = bool(self.CP.flags & HyundaiFlags.CAN_CANFD_BLENDED)
     blended_hda2 = can_canfd_blended and bool(self.CP.flags & HyundaiFlags.CANFD_LKA_STEERING)
+    longitudinal_active = bool(self.long_active_ecu and getattr(CC, "longActive", False))
 
     # HUD messages
     sys_warning, sys_state, left_lane_warning, right_lane_warning = process_hud_alert(CC.enabled, self.car_fingerprint,
@@ -758,6 +759,7 @@ class CarController(CarControllerBase):
     if blended_hda2:
       can_sends.extend(hyundaicanfd.create_steering_messages(
         self.packer, self.CP, self.CAN, CC.enabled, apply_steer_req, apply_torque, 0.0,
+        longitudinal_active=longitudinal_active,
       ))
       if self.long_active_ecu:
         can_sends.extend(hyundaican.create_lkas11_can_canfd_blended(
@@ -849,7 +851,8 @@ class CarController(CarControllerBase):
     can_sends = []
 
     lka_steering = self.CP.flags & HyundaiFlags.CANFD_LKA_STEERING
-    lka_steering_long = lka_steering and self.long_active_ecu
+    longitudinal_active = bool(self.long_active_ecu and getattr(CC, "longActive", False))
+    lka_steering_long = lka_steering and longitudinal_active
     ccnc_non_hda2 = self.CP.flags & HyundaiFlags.CCNC and not lka_steering
     use_egmp_dynamic_long_tuning = egmp_dynamic_longitudinal_tuning(self.CP) and self.long_active_ecu and \
                                    CC.actuators.longControlState in (LongCtrlState.starting, LongCtrlState.pid, LongCtrlState.stopping)
@@ -878,7 +881,7 @@ class CarController(CarControllerBase):
     if angle_lkas_alt:
       steering_msg_active = bool(steering_msg_active and drive_gear)
     angle_lkas_alt_standstill_handoff = bool(getattr(CS.out, "standstill", False) and not CC.latActive)
-    forward_stock_lkas = angle_lkas_alt and (
+    forward_stock_lkas = self.CP.carFingerprint in CANFD_ANGLE_LONGITUDINAL_CAR and angle_lkas_alt and (
       angle_lkas_alt_standstill_handoff or not (drive_gear and (CC.latActive or CC.enabled))
     )
     preserve_stock_lfa_status = preserve_stock_canfd_lfa_status(self.CP.carFingerprint)
@@ -887,7 +890,8 @@ class CarController(CarControllerBase):
                                                              steering_msg_active, apply_torque, apply_angle,
                                                              CS.stock_lfa_msg if preserve_stock_lfa_status else None,
                                                              CS.stock_lkas_msg if preserve_stock_lkas else None,
-                                                             lka_icon=lka_icon))
+                                                             lka_icon=lka_icon,
+                                                             longitudinal_active=longitudinal_active))
     direct_steering_active = ccnc_angle_long and drive_gear and CC.latActive and self.direct_angle_request_allowed and not CS.angle_steering_fault
     inactive_steering_angle = float(np.clip(CS.angle_steering_angle,
                                             -self.params.ANGLE_LIMITS.STEER_ANGLE_MAX,

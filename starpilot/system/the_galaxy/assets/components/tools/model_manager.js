@@ -11,6 +11,8 @@ const state = reactive({
   allowGpuDownloadsWithoutGpu: false,
   models: [],
   currentModel: "",
+  activeSmallModel: "",
+  activeBigModel: "",
   summary: { installed: 0, missing: 0, total: 0 },
   status: {
     modelToDownload: "",
@@ -158,9 +160,10 @@ function getReleaseOrderedModels() {
   return getFilteredModels().sort(modelSortCompare);
 }
 
-function getInstalledModels() {
+function getInstalledModels(profile = "") {
   return state.models
     .filter(model => model && typeof model === "object" && !!model.installed)
+    .filter(model => !profile || (!!model.requiresGpu === (profile === "big")))
     .sort(modelSortCompare);
 }
 
@@ -178,6 +181,13 @@ function getCurrentModelName() {
   if (!match) return current;
 
   return safeText(match.label, current);
+}
+
+function getModelName(modelKey, fallback = "none selected") {
+  const key = safeText(modelKey, "");
+  if (!key) return fallback;
+  const match = state.models.find(model => safeText(model?.value, "") === key);
+  return match ? safeText(match.label, key) : key;
 }
 
 async function fetchJson(url, options = {}) {
@@ -218,6 +228,8 @@ async function fetchStatus() {
 
     state.models = models;
     state.currentModel = safeText(payload.currentModel, "");
+    state.activeSmallModel = safeText(payload.activeSmallModel, "");
+    state.activeBigModel = safeText(payload.activeBigModel, "");
 
     const summary = payload.summary && typeof payload.summary === "object" ? payload.summary : {};
     state.summary = {
@@ -241,6 +253,8 @@ async function fetchStatus() {
     const signature = [
       state.models.length,
       state.currentModel,
+      state.activeSmallModel,
+      state.activeBigModel,
       state.status.downloading,
       state.status.downloadAll,
       state.status.modelToDownload,
@@ -300,11 +314,13 @@ function ensurePolling() {
   pollingHandle = setTimeout(poll, ACTIVE_POLL_INTERVAL_MS);
 }
 
-async function setActiveModel(modelKey) {
-  const payload = await fetchJson("/api/params", {
+async function setActiveModel(modelKey, profile = "") {
+  const model = state.models.find(entry => safeText(entry?.value, "") === safeText(modelKey, ""));
+  const resolvedProfile = profile || (model?.requiresGpu ? "big" : "small");
+  const payload = await fetchJson("/api/models/active", {
     method: "PUT",
     headers: { "Content-Type": "application/json" },
-    body: JSON.stringify({ key: "Model", value: modelKey }),
+    body: JSON.stringify({ profile: resolvedProfile, model: modelKey }),
   });
 
   notify(payload.message || `Selected "${modelKey}".`);
@@ -394,9 +410,10 @@ async function runAction(action, modelKey = "") {
       return;
     }
 
-    if (action === "select") {
+    if (action === "select" || action === "select-small" || action === "select-big") {
       if (!modelKey) return;
-      await setActiveModel(modelKey);
+      const profile = action === "select-small" ? "small" : action === "select-big" ? "big" : "";
+      await setActiveModel(modelKey, profile);
     } else if (action === "download") {
       if (!modelKey) return;
       await startDownload(modelKey);
@@ -454,10 +471,11 @@ function bindDomHandlers() {
     }
 
     if (!(target instanceof HTMLSelectElement)) return;
-    if (target.id === "mm-active-model-select") {
+    if (target.id === "mm-active-small-model-select" || target.id === "mm-active-big-model-select") {
       const modelKey = safeText(target.value, "");
       if (!modelKey) return;
-      runAction("select", modelKey).catch(() => {});
+      const profile = target.id === "mm-active-big-model-select" ? "big" : "small";
+      runAction(`select-${profile}`, modelKey).catch(() => {});
       return;
     }
 
@@ -498,9 +516,11 @@ function bindDomHandlers() {
 function renderActions(model) {
   const modelKey = safeText(model.value, "");
   const modelIsDownloading = state.status.downloading && !state.status.downloadAll && state.status.modelToDownload === modelKey;
+  const profile = model.requiresGpu ? "big" : "small";
+  const isActive = profile === "big" ? state.activeBigModel === modelKey : state.activeSmallModel === modelKey;
 
-  if (state.currentModel === modelKey) {
-    return html`<span class="mm-chip mm-chip-active">Active</span>`;
+  if (isActive) {
+    return html`<span class="mm-chip mm-chip-active">Active ${profile === "big" ? "Big" : "Small"}</span>`;
   }
 
   if (state.status.downloading) {
@@ -512,7 +532,7 @@ function renderActions(model) {
 
   if (model.installed) {
     return html`
-      <button class="mm-btn mm-btn-secondary" data-mm-action="select" data-model="${modelKey}">Set Active</button>
+      <button class="mm-btn mm-btn-secondary" data-mm-action="select-${profile}" data-model="${modelKey}">Set Active ${profile === "big" ? "Big" : "Small"}</button>
       ${model.builtin
         ? ""
         : html`<button class="mm-btn mm-btn-danger" data-mm-action="delete" data-model="${modelKey}">Delete</button>`}
@@ -620,30 +640,55 @@ export function ModelManager() {
       </div>
 
       <div class="mm-status">
-        <span class="mm-chip">Current: ${getCurrentModelName()}</span>
+        <span class="mm-chip">Loaded: ${() => getCurrentModelName()}</span>
+        <span class="mm-chip mm-chip-device-gpu">Active Small: ${() => getModelName(state.activeSmallModel)}</span>
+        <span class="mm-chip mm-chip-egpu">Active Big: ${() => getModelName(state.activeBigModel)}</span>
         <span class="mm-chip">Progress: ${safeText(state.status.progress, "Idle")}</span>
         <span class="mm-chip">${() => getUserFavoriteModels(false).length} personal favorites</span>
         ${() => state.status.isOnroad ? html`<span class="mm-chip mm-chip-warning">Onroad: actions disabled</span>` : ""}
       </div>
 
       <div class="mm-filters">
-        <label class="mm-filter-label" for="mm-active-model-select">Active Model</label>
-        <select class="mm-select" id="mm-active-model-select">
-          ${(() => {
-            const orderedInstalled = getInstalledModels().sort((a, b) => {
-              const aCurrent = safeText(a.value) === state.currentModel ? 0 : 1;
-              const bCurrent = safeText(b.value) === state.currentModel ? 0 : 1;
+        <label class="mm-filter-label" for="mm-active-small-model-select">Active Small</label>
+        <select class="mm-select" id="mm-active-small-model-select">
+          ${() => {
+            const orderedInstalled = getInstalledModels("small").sort((a, b) => {
+              const aCurrent = safeText(a.value) === state.activeSmallModel ? 0 : 1;
+              const bCurrent = safeText(b.value) === state.activeSmallModel ? 0 : 1;
               if (aCurrent !== bCurrent) return aCurrent - bCurrent;
               return safeText(a.label, a.value).localeCompare(safeText(b.label, b.value), undefined, { sensitivity: "base" });
             });
 
             return orderedInstalled.length > 0
               ? orderedInstalled.map(model => html`
-                <option value="${safeText(model.value)}" selected="${() => safeText(model.value) === state.currentModel || false}">
+                <option value="${safeText(model.value)}" selected="${() => safeText(model.value) === state.activeSmallModel || false}">
                   ${safeText(model.label, model.value)}
                 </option>              `)
               : html`<option value="">No installed models</option>`;
-          })()}
+          }}
+        </select>
+
+        <label class="mm-filter-label" for="mm-active-big-model-select">Active Big</label>
+        <select class="mm-select" id="mm-active-big-model-select" disabled="${() => getInstalledModels("big").length === 0}">
+          ${() => {
+            const orderedInstalled = getInstalledModels("big").sort((a, b) => {
+              const aCurrent = safeText(a.value) === state.activeBigModel ? 0 : 1;
+              const bCurrent = safeText(b.value) === state.activeBigModel ? 0 : 1;
+              if (aCurrent !== bCurrent) return aCurrent - bCurrent;
+              return safeText(a.label, a.value).localeCompare(safeText(b.label, b.value), undefined, { sensitivity: "base" });
+            });
+
+            return orderedInstalled.length > 0
+              ? html`
+                ${state.activeBigModel ? "" : html`<option value="" selected>Choose an eGPU model</option>`}
+                ${orderedInstalled.map(model => html`
+                  <option value="${safeText(model.value)}" selected="${() => safeText(model.value) === state.activeBigModel || false}">
+                    ${safeText(model.label, model.value)}
+                  </option>
+                `)}
+              `
+              : html`<option value="">No installed eGPU models</option>`;
+          }}
         </select>
 
         <label class="mm-filter-label" for="mm-favorite-model-select">Favorite Models</label>

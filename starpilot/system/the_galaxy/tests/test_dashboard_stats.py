@@ -44,10 +44,25 @@ model_manager = ModuleType("openpilot.starpilot.assets.model_manager")
 model_manager.MODEL_LAB_DOWNLOAD_PARAM = "ModelLabModelToDownload"
 model_manager.canonical_model_key = lambda value: str(value or "").strip().lower().replace(" ", "-")
 model_manager.external_gpu_available = lambda: False
+def _stub_get_model_profile(params, profile):
+  prefix = "ActiveBigModel" if profile == "big" else "ActiveSmallModel"
+  key = params.get(prefix) or ("rdf43" if profile == "small" else "")
+  return key, params.get(f"{prefix}Name") or key, params.get(f"{prefix}Version") or ""
+
+
+def _stub_set_model_profile(params, profile, key, name="", version=""):
+  prefix = "ActiveBigModel" if profile == "big" else "ActiveSmallModel"
+  params.put(prefix, key)
+  params.put(f"{prefix}Name", name or key)
+  params.put(f"{prefix}Version", version)
+
+
+model_manager.get_model_profile = _stub_get_model_profile
 model_manager.is_builtin_model_key = lambda key: False
 model_manager.model_accelerator_artifact_filename = lambda key: f"{key}_driving_chestnut_tinygrad.pkl"
 model_manager.model_key_aliases = lambda key: ()
 model_manager.model_uses_external_gpu = lambda key: False
+model_manager.set_model_profile = _stub_set_model_profile
 sys.modules.setdefault("openpilot.starpilot.assets.model_manager", model_manager)
 
 starpilot_variables = ModuleType("openpilot.starpilot.common.starpilot_variables")
@@ -1778,6 +1793,70 @@ def _load_server_module():
   module = importlib.util.module_from_spec(spec)
   spec.loader.exec_module(module)
   return module
+
+
+def test_model_profiles_can_be_selected_without_external_gpu(monkeypatch, tmp_path):
+  server = _load_server_module()
+  assert server._import_galaxy_web_symbols()
+
+  class ModelParams(FakeParams):
+    defaults = {
+      "Model": "rdf43",
+      "DrivingModel": "rdf43",
+      "DrivingModelName": "Regret Driven Framework V4",
+      "ModelVersion": "v15",
+      "DrivingModelVersion": "v15",
+    }
+
+    def get_default_value(self, key):
+      return self.defaults.get(key)
+
+  params = ModelParams({
+    "AvailableModels": "rdf43,small-one,big-one",
+    "AvailableModelNames": "Regret Driven Framework V4,Small One,Big One",
+    "AvailableModelSeries": "Built-in,Small,Large",
+    "AvailableModelArtifactFormats": "tinygrad_single_v1,tinygrad_single_v1,tinygrad_single_v1",
+    "ModelVersions": "v15,v15,v16",
+    "ModelReleasedDates": "2026-01-01,2026-01-02,2026-01-03",
+    "Model": "rdf43",
+    "DrivingModel": "rdf43",
+  })
+  (tmp_path / "small-one_driving_tinygrad.pkl").write_bytes(b"small")
+  (tmp_path / "big-one_driving_tinygrad.pkl").write_bytes(b"big")
+
+  app = server.Flask(
+    "model_profiles_test",
+    template_folder=str(MODULE_DIR / "templates"),
+    static_folder=str(MODULE_DIR / "assets"),
+  )
+  server.setup(app)
+  monkeypatch.setattr(server, "params", params)
+  monkeypatch.setattr(server, "params_memory", FakeParams())
+  monkeypatch.setattr(server, "MODELS_PATH", tmp_path)
+  monkeypatch.setattr(server, "external_gpu_available", lambda: False)
+  monkeypatch.setattr(server, "is_builtin_model_key", lambda key: key == "rdf43")
+  monkeypatch.setattr(server, "model_uses_external_gpu", lambda key: key == "big-one")
+  client = app.test_client()
+
+  big_response = client.put("/api/models/active", json={"profile": "big", "model": "big-one"})
+  assert big_response.status_code == 200
+  assert params.values["ActiveBigModel"] == "big-one"
+  assert params.values["Model"] == "rdf43"
+
+  small_response = client.put("/api/models/active", json={"profile": "small", "model": "small-one"})
+  assert small_response.status_code == 200
+  assert params.values["ActiveSmallModel"] == "small-one"
+
+  status = client.get("/api/models/status").get_json()
+  assert status["activeBigModel"] == "big-one"
+  assert status["activeSmallModel"] == "small-one"
+
+  wrong_profile = client.put("/api/models/active", json={"profile": "small", "model": "big-one"})
+  assert wrong_profile.status_code == 409
+
+  params.put("IsOnroad", True)
+  onroad = client.put("/api/models/active", json={"profile": "small", "model": "rdf43"})
+  assert onroad.status_code == 403
 
 
 def test_model_laboratory_api_uses_installed_models_and_enforces_hardware_size_version_guards(monkeypatch, tmp_path):

@@ -52,11 +52,13 @@ from openpilot.selfdrive.modeld.helpers import get_tg_input_devices, load_oob, t
 from openpilot.selfdrive.modeld.usbgpu_link import wait_usbgpu_link
 from openpilot.starpilot.assets.model_manager import (
   ModelManager,
+  get_model_profile,
   load_model_artifact_metadata,
   model_accelerator_artifact_available,
   model_accelerator_artifact_installed,
   model_accelerator_artifact_path,
   model_uses_external_gpu,
+  set_runtime_model_params,
 )
 from openpilot.starpilot.common.model_lab import (
   MODEL_LAB_RUNTIME_PARAM,
@@ -781,9 +783,16 @@ class ModelState:
 
 
 def _load_model_state(cam_w: int, cam_h: int, selected_model: str, external_gpu_requested: bool,
-                      params: Params) -> ModelState:
+                      params: Params, model_version: str = "", write_model_version: bool = True) -> ModelState:
   try:
-    return ModelState(cam_w, cam_h, external_gpu_requested)
+    return ModelState(
+      cam_w,
+      cam_h,
+      external_gpu_requested,
+      model_id_override=selected_model,
+      write_model_version=write_model_version,
+      model_version_override=model_version,
+    )
   except Exception:
     if selected_model == BUILTIN_MODEL_KEY:
       raise
@@ -795,10 +804,16 @@ def _load_model_state(cam_w: int, cam_h: int, selected_model: str, external_gpu_
       device_config = tinygrad_dev_config(False, TICI)
       DEV.value = device_config
       os.environ["DEV"] = device_config
-    return ModelState(cam_w, cam_h, False)
+    return ModelState(
+      cam_w,
+      cam_h,
+      False,
+      model_id_override=BUILTIN_MODEL_KEY,
+      write_model_version=write_model_version,
+    )
 
 
-def _load_external_gpu_model(cam_w: int, cam_h: int, selected_model: str,
+def _load_external_gpu_model(cam_w: int, cam_h: int, selected_model: str, model_version: str = "",
                              CP=None, demo: bool = False) -> ModelState | None:
   """Load and warm the USB-GPU model without running another tinygrad model concurrently."""
   candidate = None
@@ -813,6 +828,7 @@ def _load_external_gpu_model(cam_w: int, cam_h: int, selected_model: str,
       True,
       model_id_override=selected_model,
       write_model_version=False,
+      model_version_override=model_version,
     )
     if not candidate.uses_external_gpu:
       raise RuntimeError("external GPU model resolved to the builtin model")
@@ -987,15 +1003,20 @@ def main(demo=False):
   config_realtime_process(7, 54)
 
   params = Params()
-  selected_model = _canonical_model_id(_resolve_mirrored_param(params, "Model", "DrivingModel") or BUILTIN_MODEL_KEY)
   usbgpu_present_now = usbgpu_present()
+  small_model_id, _, small_model_version = get_model_profile(params, "small")
+  big_model_id, _, big_model_version = get_model_profile(params, "big")
+  small_model_id = _canonical_model_id(small_model_id or BUILTIN_MODEL_KEY)
+  big_model_id = _canonical_model_id(big_model_id)
+  selected_model = big_model_id if usbgpu_present_now and big_model_id else small_model_id
+  selected_model_version = big_model_version if selected_model == big_model_id else small_model_version
   model_lab_config, model_lab_error = _model_lab_runtime_request(params, usbgpu_present_now)
   model_lab_requested = bool(model_lab_config["enabled"])
   model_lab_ready = model_lab_requested and model_lab_error is None
-  external_model_selected = model_uses_external_gpu(selected_model)
-  external_artifact = MODELS_PATH / f"{selected_model}_driving_tinygrad.pkl"
+  external_model_selected = bool(big_model_id) and model_uses_external_gpu(big_model_id)
+  external_artifact = MODELS_PATH / f"{big_model_id}_driving_tinygrad.pkl"
   external_artifact_ready = external_model_selected and file_chunked_exists(external_artifact)
-  external_gpu_requested = usbgpu_present_now and (external_model_selected or model_lab_ready)
+  external_gpu_requested = usbgpu_present_now and (bool(big_model_id) or model_lab_ready)
   params.put_bool("UsbGpuPresent", usbgpu_present_now)
   params.put_bool("UsbGpuCompiled", external_artifact_ready or model_lab_ready)
   params.put_bool("UsbGpuActive", False)
@@ -1045,12 +1066,14 @@ def main(demo=False):
       CP = get_demo_car_params()
     else:
       CP = messaging.log_from_bytes(params.get("CarParams", block=True), car.CarParams)
-    small_model = ModelState(
+    small_model = _load_model_state(
       vipc_client_main.width,
       vipc_client_main.height,
+      small_model_id,
       False,
-      model_id_override=BUILTIN_MODEL_KEY,
-      write_model_version=False,
+      params,
+      small_model_version,
+      False,
     )
     versions = _model_versions()
     lateral_id = model_lab_config["lateralModel"]
@@ -1071,7 +1094,7 @@ def main(demo=False):
       params.put("ModelVersion", model.policy_generation)
       params.put("DrivingModelVersion", model.policy_generation)
     else:
-      model_lab_error = "one or both precompiled AMD models failed to load; using the built-in model"
+      model_lab_error = "one or both precompiled AMD models failed to load; using the active small model"
       cloudlog.error(f"Model Laboratory unavailable: {model_lab_error}")
       model = small_model
       params.put("ModelVersion", model.policy_generation)
@@ -1087,23 +1110,36 @@ def main(demo=False):
       vipc_client_main.width,
       vipc_client_main.height,
       selected_model,
+      selected_model_version,
       CP,
       demo,
     )
 
-    small_model = ModelState(
+    small_model = _load_model_state(
       vipc_client_main.width,
       vipc_client_main.height,
+      small_model_id,
       False,
-      model_id_override=BUILTIN_MODEL_KEY,
-      write_model_version=False,
+      params,
+      small_model_version,
+      False,
     )
     model = big_model if big_model is not None else small_model
     if big_model is not None:
       params.put("ModelVersion", model.policy_generation)
       params.put("DrivingModelVersion", model.policy_generation)
   else:
-    model = _load_model_state(vipc_client_main.width, vipc_client_main.height, selected_model, False, params)
+    model = _load_model_state(
+      vipc_client_main.width,
+      vipc_client_main.height,
+      selected_model,
+      False,
+      params,
+      selected_model_version,
+    )
+
+  if not model_lab_active:
+    set_runtime_model_params(params, model.model_id, model.policy_generation)
 
   external_gpu_active = model_lab_active or model.uses_external_gpu
   params.put_bool("UsbGpuCompiled", external_artifact_ready or model_lab_ready)
@@ -1243,14 +1279,15 @@ def main(demo=False):
       model_lab_active = False
       model_lab_longitudinal = None
       if small_model is None:
-        raise RuntimeError("Model Laboratory has no built-in fallback model")
+        raise RuntimeError("Model Laboratory has no active small fallback model")
       model = small_model
       external_gpu_active = False
-      model_lab_error = "Chestnut disconnected; using the built-in model"
+      model_lab_error = "Chestnut disconnected; using the active small model"
       params.put_bool("UsbGpuPresent", False)
       params.put_bool("UsbGpuActive", False)
       params.put("ModelVersion", model.policy_generation)
       params.put("DrivingModelVersion", model.policy_generation)
+      set_runtime_model_params(params, model.model_id, model.policy_generation)
       _set_model_lab_runtime(
         params,
         requested=model_lab_requested,
@@ -1335,13 +1372,13 @@ def main(demo=False):
         lateral_model_output = model_output
     except Exception:
       if model_lab_active:
-        cloudlog.exception("Model Laboratory inference failed, falling back to the built-in model")
+        cloudlog.exception("Model Laboratory inference failed, falling back to the active small model")
         if small_model is None:
-          raise RuntimeError("Model Laboratory has no built-in fallback model") from None
+          raise RuntimeError("Model Laboratory has no active small fallback model") from None
         model = small_model
         model_lab_longitudinal = None
         model_lab_active = False
-        model_lab_error = "Model Laboratory inference failed; using the built-in model"
+        model_lab_error = "Model Laboratory inference failed; using the active small model"
         _set_model_lab_runtime(
           params,
           requested=model_lab_requested,
@@ -1352,13 +1389,14 @@ def main(demo=False):
       else:
         if not external_gpu_active or small_model is None:
           raise
-        cloudlog.exception("external GPU model failed, falling back to builtin model")
+        cloudlog.exception("external GPU model failed, falling back to active small model")
         model = small_model
         big_model = None
       params.put_bool("UsbGpuActive", False)
       external_gpu_active = False
       params.put("ModelVersion", model.policy_generation)
       params.put("DrivingModelVersion", model.policy_generation)
+      set_runtime_model_params(params, model.model_id, model.policy_generation)
       params.put_bool("UsbGpuLoading", False)
       if chestnut_state is not None:
         chestnut_state.big = False

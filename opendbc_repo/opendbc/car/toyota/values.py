@@ -624,6 +624,11 @@ ANGLE_CONTROL_CAR = CAR.with_flags(ToyotaFlags.ANGLE_CONTROL)
 
 SECOC_CAR = CAR.with_flags(ToyotaFlags.SECOC)
 
+TOYOTA_AUTO_HOLD_CARS = (TSS2_CAR - RADAR_ACC_CAR - SECOC_CAR) | {
+  CAR.TOYOTA_RAV4,
+  CAR.TOYOTA_RAV4H,
+}
+
 # no resume button press required
 NO_STOP_TIMER_CAR = CAR.with_flags(ToyotaFlags.NO_STOP_TIMER)
 

@@ -635,14 +635,6 @@ class StarPilotVariables:
 
     alpha_longitudinal = CP.alphaLongitudinalAvailable
     toggle.car_make = CP.brand
-    toggle.ford_lateral_mode = self.get_value(
-      "FordLateralMode",
-      cast=int,
-      condition=toggle.car_make == "ford",
-      default=1,
-      min=0,
-      max=2,
-    )
     migrate_ford_lkas_button_default(toggle.car_make, self.params)
     toggle.car_model = CP.carFingerprint
     toggle.disable_openpilot_long = self.get_value("DisableOpenpilotLongitudinal", condition=not alpha_longitudinal)

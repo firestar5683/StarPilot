@@ -91,7 +91,6 @@ def test_shared_settings_catalog_is_common_and_well_formed():
 
 def test_galaxy_only_ford_controls_are_not_available_to_device_favorites():
   ford_keys = {
-    "FordLateralMode",
     "FordHumanTurnDetection",
     "FordHandsFreeCluster",
   }

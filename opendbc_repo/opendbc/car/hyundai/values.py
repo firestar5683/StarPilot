@@ -1000,6 +1000,10 @@ KIA_EV6_GT_LINE_LONG_TUNING_VDS_PREFIXES = frozenset({
 })
 KIA_EV6_GT_LINE_LONG_TUNING_TESTING_GROUND_ID = "5"
 
+KIA_RAY_EV_VIN_VDS_PREFIXES = frozenset({
+  "CG81A",
+})
+
 
 ALT_BUS_LDA_BUTTON_CARS = frozenset()
 ALT_BUS_LDA_BUTTON_SWL_STAT_CARS = frozenset()
@@ -1012,6 +1016,10 @@ def hyundai_cancel_button_enables_cruise(car_fingerprint) -> bool:
 def kia_ev6_gt_line_longitudinal_tuning(car_fingerprint, vin: str, testing_ground_active: bool = False) -> bool:
   vin_match = isinstance(vin, str) and len(vin) == 17 and vin[3:8] in KIA_EV6_GT_LINE_LONG_TUNING_VDS_PREFIXES
   return car_fingerprint == CAR.KIA_EV6 and (vin_match or testing_ground_active)
+
+
+def kia_ray_ev_vin(vin: str) -> bool:
+  return isinstance(vin, str) and len(vin) == 17 and vin[3:8] in KIA_RAY_EV_VIN_VDS_PREFIXES
 
 
 def get_platform_codes(fw_versions: list[bytes]) -> set[tuple[bytes, bytes | None]]:

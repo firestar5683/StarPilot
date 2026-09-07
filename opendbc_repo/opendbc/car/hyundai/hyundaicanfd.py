@@ -99,9 +99,12 @@ def create_angle_adas_cmd(packer, CAN, apply_angle: float, lat_active: bool, tor
 
 
 def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_torque, apply_angle,
-                             lfa_base_values=None, lkas_base_values=None, lka_icon=None):
+                             lfa_base_values=None, lkas_base_values=None, lka_icon=None,
+                             longitudinal_active=None):
   if lka_icon is None:
     lka_icon = 2 if enabled else 1
+  if longitudinal_active is None:
+    longitudinal_active = CP.openpilotLongitudinalControl
 
   angle_lkas_alt = CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING and CP.flags & HyundaiFlags.CANFD_LKA_STEERING_ALT
 
@@ -195,7 +198,7 @@ def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_torque,
   ret = []
   if CP.flags & HyundaiFlags.CANFD_LKA_STEERING:
     lkas_msg = "LKAS_ALT" if CP.flags & HyundaiFlags.CANFD_LKA_STEERING_ALT else "LKAS"
-    if CP.openpilotLongitudinalControl and not CP.flags & HyundaiFlags.CAN_CANFD_BLENDED:
+    if longitudinal_active and not CP.flags & HyundaiFlags.CAN_CANFD_BLENDED:
       ret.append(packer.make_can_msg("LFA", CAN.ECAN, lfa_values))
     ret.append(packer.make_can_msg(lkas_msg, CAN.ACAN, lkas_values))
   else:

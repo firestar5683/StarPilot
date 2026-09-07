@@ -68,11 +68,11 @@ contributors.
 
 | StarPilot area | Upstream lineage | What StarPilot changed |
 | --- | --- | --- |
-| `starpilot/car/ford/lateral.py` | `human_turn.py`, `lateral_curv_ext.py`, `lateral_angle_ext.py`, and `values_ext.py` at the reference snapshot above | Reorganized three extension/mixin implementations into one controller; integrated StarPilot Params; later added live-delay curvature lookahead, active-session driver override, measured-curvature handoff blending, PSCM acknowledgement, and local recovery/tuning behavior. |
-| `starpilot/car/ford/fordcan.py` | `fordcan_ext.py` and the angle-mode safety protocol, especially `8f8d6d15f` | Reduced the extension to the Ford lateral CAN constructors used by StarPilot and adapted it to the local controller interface. |
+| `starpilot/car/ford/lateral.py` | `human_turn.py`, `lateral_curv_ext.py`, and `values_ext.py` at the reference snapshot above; earlier StarPilot revisions also adapted `lateral_angle_ext.py` | Consolidated the runtime implementation on the extended-curvature strategy, integrated StarPilot Params, and added live-delay curvature lookahead and local tuning behavior. |
+| `starpilot/car/ford/fordcan.py` | `fordcan_ext.py` and the extended-lateral protocol, especially `8f8d6d15f` | Reduced the extension to the curvature CAN constructors used by StarPilot and adapted it to the local controller interface. |
 | `opendbc_repo/opendbc/car/ford/` | Ford controller/state/interface/radar/platform changes in the `bp-7.0` snapshot | Integrated the changes directly into StarPilot's opendbc layout instead of retaining sunnypilot mixins; subsequent fixes and behavior differ by file. |
-| `opendbc_repo/opendbc/safety/modes/ford.h` and Ford safety tests | BluePilot panda enforcement for four-signal curvature and angle-primary control, especially `8f8d6d15f`, plus shadow-curvature work | Adapted the flags and checks to StarPilot's smaller mode protocol and continued adding local regression coverage. |
-| Ford Params and settings surfaces | BluePilot's mode and tuning concepts | Renamed and implemented in StarPilot's native Params/Galaxy architecture; no BluePilot or sunnypilot UI classes were retained. |
+| `opendbc_repo/opendbc/safety/modes/ford.h` and Ford safety tests | BluePilot panda enforcement for four-signal curvature and angle-primary control, especially `8f8d6d15f`, plus shadow-curvature work | Retained the extended-curvature checks, removed runtime path-angle selection, and continued adding local regression coverage. |
+| Ford Params and settings surfaces | BluePilot's curvature tuning concepts | Renamed and implemented in StarPilot's native Params/Galaxy architecture; no BluePilot or sunnypilot UI classes were retained. |
 
 The local code has materially diverged, but the first four rows remain derivative in design and in
 parts of their implementation. Future ports should cite the exact upstream commit in the importing

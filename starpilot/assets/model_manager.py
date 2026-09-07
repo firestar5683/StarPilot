@@ -31,6 +31,16 @@ from openpilot.system.hardware.usb import chestnut_firmware_ready
 MANIFEST_CANDIDATES = ("v25",)
 MODEL_NAMESPACE_SUFFIX = "3"
 DEFAULT_MODEL_KEY = "rdf43"
+ACTIVE_BIG_MODEL_PARAM = "ActiveBigModel"
+ACTIVE_BIG_MODEL_NAME_PARAM = "ActiveBigModelName"
+ACTIVE_BIG_MODEL_VERSION_PARAM = "ActiveBigModelVersion"
+ACTIVE_SMALL_MODEL_PARAM = "ActiveSmallModel"
+ACTIVE_SMALL_MODEL_NAME_PARAM = "ActiveSmallModelName"
+ACTIVE_SMALL_MODEL_VERSION_PARAM = "ActiveSmallModelVersion"
+MODEL_PROFILE_PARAMS = {
+  "big": (ACTIVE_BIG_MODEL_PARAM, ACTIVE_BIG_MODEL_NAME_PARAM, ACTIVE_BIG_MODEL_VERSION_PARAM),
+  "small": (ACTIVE_SMALL_MODEL_PARAM, ACTIVE_SMALL_MODEL_NAME_PARAM, ACTIVE_SMALL_MODEL_VERSION_PARAM),
+}
 LOCAL_MODEL_PREFIX = "local-"
 LOCAL_MODEL_SERIES = "Local Series"
 ARTIFACT_URLS_CACHE = ".model_artifact_urls.json"
@@ -113,6 +123,105 @@ def model_uses_external_gpu(model_key: str) -> bool:
   return bool(load_model_artifact_metadata(model_key).get("uses_external_gpu", False))
 
 
+def _params_text(params, key: str) -> str:
+  try:
+    value = params.get(key)
+  except Exception:
+    return ""
+  if value is None:
+    return ""
+  if isinstance(value, bytes):
+    return value.decode("utf-8", errors="ignore").strip()
+  return str(value).strip()
+
+
+def _catalog_model_details(params, model_key: str) -> tuple[str, str]:
+  canonical_key = canonical_model_key(model_key)
+  models = [canonical_model_key(entry) for entry in _params_text(params, "AvailableModels").split(",")]
+  names = [entry.strip() for entry in _params_text(params, "AvailableModelNames").split(",")]
+  versions = [entry.strip() for entry in _params_text(params, "ModelVersions").split(",")]
+  try:
+    index = models.index(canonical_key)
+  except ValueError:
+    return "", ""
+  name = names[index] if index < len(names) else ""
+  version = versions[index] if index < len(versions) else ""
+  return name, version
+
+
+def get_model_profile(params, profile: str) -> tuple[str, str, str]:
+  if profile not in MODEL_PROFILE_PARAMS:
+    raise ValueError(f"Unknown model profile: {profile}")
+
+  key_param, name_param, version_param = MODEL_PROFILE_PARAMS[profile]
+  model_key = canonical_model_key(_params_text(params, key_param))
+  requires_gpu = profile == "big"
+  if model_key and model_uses_external_gpu(model_key) != requires_gpu:
+    model_key = ""
+
+  if not model_key:
+    legacy_key = canonical_model_key(_params_text(params, "DrivingModel") or _params_text(params, "Model"))
+    if legacy_key and model_uses_external_gpu(legacy_key) == requires_gpu:
+      model_key = legacy_key
+
+  if not model_key and profile == "small":
+    model_key = DEFAULT_MODEL_KEY
+  if not model_key:
+    return "", "", ""
+
+  stored_key = canonical_model_key(_params_text(params, key_param))
+  model_name = _params_text(params, name_param) if stored_key == model_key else ""
+  model_version = _params_text(params, version_param) if stored_key == model_key else ""
+  if not model_name and canonical_model_key(_params_text(params, "DrivingModel") or _params_text(params, "Model")) == model_key:
+    model_name = _params_text(params, "DrivingModelName")
+  if not model_version and canonical_model_key(_params_text(params, "DrivingModel") or _params_text(params, "Model")) == model_key:
+    model_version = _params_text(params, "DrivingModelVersion") or _params_text(params, "ModelVersion")
+
+  catalog_name, catalog_version = _catalog_model_details(params, model_key)
+  model_name = catalog_name or model_name
+  model_version = catalog_version or model_version
+  if is_builtin_model_key(model_key):
+    model_name = model_name or "Regret Driven Framework V4"
+    model_version = model_version or "v15"
+  return model_key, model_name, model_version
+
+
+def set_model_profile(params, profile: str, model_key: str, model_name: str = "", model_version: str = "") -> None:
+  if profile not in MODEL_PROFILE_PARAMS:
+    raise ValueError(f"Unknown model profile: {profile}")
+
+  canonical_key = canonical_model_key(model_key)
+  if not canonical_key:
+    raise ValueError("Model profile cannot be empty")
+  if model_uses_external_gpu(canonical_key) != (profile == "big"):
+    raise ValueError(f"Model {canonical_key} is not a {profile} model")
+
+  catalog_name, catalog_version = _catalog_model_details(params, canonical_key)
+  key_param, name_param, version_param = MODEL_PROFILE_PARAMS[profile]
+  params.put(key_param, canonical_key)
+  params.put(name_param, model_name or catalog_name or canonical_key)
+  params.put(version_param, model_version or catalog_version or ("v15" if is_builtin_model_key(canonical_key) else ""))
+
+
+def set_runtime_model_params(params, model_key: str, model_version: str = "") -> None:
+  canonical_key = canonical_model_key(model_key) or DEFAULT_MODEL_KEY
+  profile = "big" if model_uses_external_gpu(canonical_key) else "small"
+  profile_key, profile_name, profile_version = get_model_profile(params, profile)
+  catalog_name, catalog_version = _catalog_model_details(params, canonical_key)
+  model_name = profile_name if profile_key == canonical_key else catalog_name
+  resolved_version = model_version or (profile_version if profile_key == canonical_key else catalog_version)
+  if is_builtin_model_key(canonical_key):
+    model_name = model_name or "Regret Driven Framework V4"
+    resolved_version = resolved_version or "v15"
+
+  params.put("Model", canonical_key)
+  params.put("DrivingModel", canonical_key)
+  params.put("DrivingModelName", model_name or canonical_key)
+  if resolved_version:
+    params.put("ModelVersion", resolved_version)
+    params.put("DrivingModelVersion", resolved_version)
+
+
 def model_accelerator_artifact_metadata(model_key: str, accelerator: str = MODEL_LAB_ACCELERATOR) -> dict:
   metadata = load_model_artifact_metadata(model_key)
   artifacts = metadata.get("accelerator_artifacts", {})
@@ -168,6 +277,7 @@ class ModelManager:
     self._load_catalog_from_params()
 
     self._ensure_model_params()
+    self._ensure_model_profiles()
     if boot_run:
       self._sync_selected_model_version()
 
@@ -252,6 +362,12 @@ class ModelManager:
         selected_name = self.available_model_names[selected_index]
 
     self._set_model_param_keys(selected_model, selected_name, current_version)
+
+  def _ensure_model_profiles(self):
+    for profile in MODEL_PROFILE_PARAMS:
+      model_key, model_name, model_version = get_model_profile(self.params, profile)
+      if model_key:
+        set_model_profile(self.params, profile, model_key, model_name, model_version)
 
   def _model_key_aliases(self, model_key: str) -> list[str]:
     return model_key_aliases(model_key)
@@ -457,7 +573,7 @@ class ModelManager:
         return False
     return True
 
-  def _installed_model_choices(self) -> list[tuple[str, str, str]]:
+  def _installed_model_choices(self, profile: str = "") -> list[tuple[str, str, str]]:
     self._load_catalog_from_params()
     version_map = self._model_version_map()
     artifact_format_map = self._model_artifact_format_map()
@@ -471,6 +587,8 @@ class ModelManager:
 
       canonical_key = self._canonical_model_key(model_key)
       if canonical_key in blacklisted_keys or canonical_key in seen_keys:
+        continue
+      if profile and model_uses_external_gpu(canonical_key) != (profile == "big"):
         continue
       if model_uses_external_gpu(canonical_key) and not external_gpu_available():
         continue
@@ -496,12 +614,14 @@ class ModelManager:
       print("Model Randomizer skipped while Model Laboratory is enabled.")
       return None
 
-    choices = self._installed_model_choices()
+    active_big_model, _, _ = get_model_profile(self.params, "big")
+    profile = "big" if external_gpu_available() and active_big_model else "small"
+    choices = self._installed_model_choices(profile)
     if not choices:
       print("Model Randomizer skipped: no installed, non-blacklisted models available.")
       return None
 
-    selected = self._selected_model()
+    selected, _, _ = get_model_profile(self.params, profile)
     eligible_choices = [choice for choice in choices if self._canonical_model_key(choice[0]) != selected]
     if not eligible_choices:
       eligible_choices = choices
@@ -510,6 +630,7 @@ class ModelManager:
     if not model_version:
       model_version = self._default_param_text("ModelVersion") or self._default_param_text("DrivingModelVersion") or "v11"
 
+    set_model_profile(self.params, profile, model_key, model_name, model_version)
     self._set_model_param_keys(model_key, model_name, model_version)
     try:
       self.params_memory.put_bool("StarPilotTogglesUpdated", True)
@@ -610,41 +731,33 @@ class ModelManager:
       return
 
     selected = self._selected_model()
-    if model_uses_external_gpu(selected) and not external_gpu_available():
-      default_name = self._default_param_text("DrivingModelName") or "Regret Driven Framework V4"
-      default_version = self._default_param_text("ModelVersion") or self._default_param_text("DrivingModelVersion") or "v15"
-      self._set_model_param_keys(DEFAULT_MODEL_KEY, default_name, default_version)
-      print(f"Model {selected} requires an external GPU; selected built-in model instead.")
-      return
-
     if is_builtin_model_key(selected):
       self._sync_selected_model_version()
-      return
+    else:
+      resolved_selected = self._resolve_manifest_model_key(selected)
+      if resolved_selected != selected:
+        selected_index = self.available_models.index(resolved_selected)
+        selected_name = self.available_model_names[selected_index] if selected_index < len(self.available_model_names) else resolved_selected
+        self._set_model_param_keys(resolved_selected, selected_name, None)
+        selected = resolved_selected
 
-    resolved_selected = self._resolve_manifest_model_key(selected)
-    if resolved_selected != selected:
-      selected_index = self.available_models.index(resolved_selected)
-      selected_name = self.available_model_names[selected_index] if selected_index < len(self.available_model_names) else resolved_selected
-      self._set_model_param_keys(resolved_selected, selected_name, None)
-      selected = resolved_selected
+      aliases = self._model_key_aliases(selected)
+      if any(alias in self.available_models for alias in aliases):
+        self._sync_selected_model_version()
+      else:
+        try:
+          default_model = self._default_param_text("Model") or self._default_param_text("DrivingModel")
+        except Exception:
+          default_model = DEFAULT_MODEL_KEY
 
-    aliases = self._model_key_aliases(selected)
-    if any(alias in self.available_models for alias in aliases):
-      self._sync_selected_model_version()
-      return
+        candidates = self._model_key_aliases(default_model) + self._model_key_aliases(DEFAULT_MODEL_KEY) + self.available_models
+        replacement = next((entry for entry in candidates if entry in self.available_models), self.available_models[0])
+        replacement_index = self.available_models.index(replacement)
+        replacement_name = self.available_model_names[replacement_index] if replacement_index < len(self.available_model_names) else replacement
+        self._set_model_param_keys(replacement, replacement_name, None)
+        self._sync_selected_model_version()
 
-    try:
-      default_model = self._default_param_text("Model") or self._default_param_text("DrivingModel")
-    except Exception:
-      default_model = DEFAULT_MODEL_KEY
-
-    candidates = self._model_key_aliases(default_model) + self._model_key_aliases(DEFAULT_MODEL_KEY) + self.available_models
-    replacement = next((entry for entry in candidates if entry in self.available_models), self.available_models[0])
-
-    replacement_index = self.available_models.index(replacement)
-    replacement_name = self.available_model_names[replacement_index] if replacement_index < len(self.available_model_names) else replacement
-    self._set_model_param_keys(replacement, replacement_name, None)
-    self._sync_selected_model_version()
+    self._ensure_model_profiles()
 
   def _discover_local_models(self) -> list[dict]:
     """Synthesize manifest entries for hand-installed models found in MODELS_PATH.
@@ -729,6 +842,7 @@ class ModelManager:
       self._artifact_metadata_cache_path().write_text(json.dumps(self._build_artifact_metadata_map(model_info)))
     except Exception as error:
       print(f"Failed to write model versions cache: {error}")
+    self._ensure_model_profiles()
 
   def check_models(self, boot_run: bool):
     del boot_run  # Not currently needed, retained for call-site parity.

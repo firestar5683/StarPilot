@@ -264,7 +264,6 @@ class StarPilotAcceleration:
     deceleration_profile = normalize_deceleration_profile(
       getattr(starpilot_toggles, "deceleration_profile", DECELERATION_PROFILES["STANDARD"])
     )
-
     if sm["starpilotCarState"].trafficModeEnabled:
       self.max_accel = get_max_accel_traffic(v_ego)
     elif custom_accel_profile:

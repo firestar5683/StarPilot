@@ -691,7 +691,7 @@ PALISADE_CENTER_TAPER_LAT = 0.28
 PALISADE_CENTER_TAPER_LAT_WIDTH = 0.055
 PALISADE_CENTER_TAPER_SPEED = 12.0
 PALISADE_CENTER_TAPER_SPEED_WIDTH = 2.5
-PALISADE_CENTER_OUTPUT_TAPER_MAX = 0.12
+PALISADE_CENTER_OUTPUT_TAPER_MAX = 0.18
 PALISADE_CENTER_OUTPUT_TAPER_LAT = 0.28
 PALISADE_CENTER_OUTPUT_TAPER_LAT_WIDTH = 0.055
 PALISADE_CENTER_OUTPUT_TAPER_SPEED = 15.0
@@ -3199,14 +3199,17 @@ def get_genesis_g70_friction_threshold(v_ego: float, desired_lateral_accel: floa
 
 
 def get_genesis_g70_friction_jerk_deadzone(v_ego: float, desired_lateral_accel: float,
-                                           desired_lateral_jerk: float = 0.0) -> float:
+                                           desired_lateral_jerk: float = 0.0,
+                                           measured_lateral_accel: float = 0.0) -> float:
   speed_weight = _sigmoid((v_ego - GENESIS_G70_FRICTION_JERK_DEADZONE_SPEED) /
                           GENESIS_G70_FRICTION_JERK_DEADZONE_SPEED_WIDTH)
   center_weight = _sigmoid((GENESIS_G70_FRICTION_JERK_DEADZONE_LAT - abs(desired_lateral_accel)) /
                            GENESIS_G70_FRICTION_JERK_DEADZONE_LAT_WIDTH)
   deadzone = GENESIS_G70_FRICTION_JERK_DEADZONE_MAX * speed_weight * center_weight
 
-  if desired_lateral_accel * desired_lateral_jerk < 0.0:
+  overshoot = max(abs(measured_lateral_accel) - abs(desired_lateral_accel), 0.0)
+  if (desired_lateral_accel * desired_lateral_jerk < 0.0 and
+      desired_lateral_accel * measured_lateral_accel > 0.0 and overshoot > 0.0):
     curve_speed_weight = _sigmoid(
       (max(v_ego, 0.0) - GENESIS_G70_CURVE_UNWIND_FRICTION_JERK_DEADZONE_SPEED) /
       GENESIS_G70_CURVE_UNWIND_FRICTION_JERK_DEADZONE_SPEED_WIDTH
@@ -3223,8 +3226,9 @@ def get_genesis_g70_friction_jerk_deadzone(v_ego: float, desired_lateral_accel: 
       (abs(desired_lateral_jerk) - GENESIS_G70_CURVE_UNWIND_FRICTION_JERK_DEADZONE_JERK) /
       GENESIS_G70_CURVE_UNWIND_FRICTION_JERK_DEADZONE_JERK_WIDTH
     )
+    overshoot_weight = _sigmoid((overshoot - 0.08) / 0.10)
     deadzone += (GENESIS_G70_CURVE_UNWIND_FRICTION_JERK_DEADZONE_MAX * curve_speed_weight *
-                 curve_onset_weight * curve_cutoff_weight * jerk_weight)
+                 curve_onset_weight * curve_cutoff_weight * jerk_weight * overshoot_weight)
   return deadzone
 
 

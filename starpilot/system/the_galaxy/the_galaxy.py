@@ -56,10 +56,12 @@ from openpilot.starpilot.assets.model_manager import (
   MODEL_LAB_DOWNLOAD_PARAM,
   canonical_model_key,
   external_gpu_available,
+  get_model_profile,
   is_builtin_model_key,
   model_accelerator_artifact_filename,
   model_key_aliases,
   model_uses_external_gpu,
+  set_model_profile,
 )
 from openpilot.starpilot.common.model_lab import (
   MODEL_LAB_CONFIG_PARAM,
@@ -6066,6 +6068,9 @@ def setup(app):
                   break
           except Exception:
             pass
+
+        profile = "big" if model_uses_external_gpu(selected_model) else "small"
+        set_model_profile(params, profile, selected_model)
       elif key in ("ModelVersion", "DrivingModelVersion"):
         params.put("ModelVersion", str_val)
         params.put("DrivingModelVersion", str_val)
@@ -6263,6 +6268,8 @@ def setup(app):
     return jsonify({
       "models": models,
       "currentModel": _current_model_key(),
+      "activeSmallModel": _active_model_key("small"),
+      "activeBigModel": _active_model_key("big"),
       "summary": {
         "installed": sum(1 for model in models if model["installed"]),
         "missing": sum(1 for model in models if not model["installed"]),
@@ -6431,6 +6438,43 @@ def setup(app):
 
     return jsonify({"message": f"Updated model {' and '.join(changed)}."}), 200
 
+  @app.route("/api/models/active", methods=["PUT"])
+  def set_active_model_profile():
+    if params.get_bool("IsOnroad"):
+      return jsonify({"error": "Cannot change active models while driving."}), 403
+
+    data = request.get_json(silent=True) or {}
+    profile = str(data.get("profile") or "").strip().lower()
+    if profile not in ("small", "big"):
+      return jsonify({"error": "Model profile must be 'small' or 'big'."}), 400
+
+    model_key = canonical_model_key(str(data.get("model") or "").strip())
+    if not model_key:
+      return jsonify({"error": "Missing model key."}), 400
+
+    catalog = {model["value"]: model for model in get_model_catalog()}
+    model = catalog.get(model_key)
+    if model is None:
+      return jsonify({"error": f"Unknown model '{model_key}'."}), 404
+    if not model["installed"]:
+      return jsonify({"error": f"Download '{model['label']}' before selecting it."}), 409
+    if bool(model["requiresGpu"]) != (profile == "big"):
+      expected = "an eGPU model" if profile == "big" else "an on-device model"
+      return jsonify({"error": f"Active {profile.title()} must be {expected}."}), 409
+
+    lab_config = normalize_model_lab_config(params.get(MODEL_LAB_CONFIG_PARAM, encoding="utf-8") or "")
+    if lab_config["enabled"]:
+      lab_config["enabled"] = False
+      params.put(MODEL_LAB_CONFIG_PARAM, lab_config)
+      params.remove(MODEL_LAB_RUNTIME_PARAM)
+
+    set_model_profile(params, profile, model_key, model["label"], model["version"])
+    return jsonify({
+      "message": f"Active {profile.title()} set to '{model['label']}'.",
+      "profile": profile,
+      "model": model_key,
+    }), 200
+
   @app.route("/api/models/status", methods=["GET"])
   def get_models_status():
     models = get_model_catalog()
@@ -6442,6 +6486,8 @@ def setup(app):
 
     downloading = bool(model_to_download or lab_model_to_download) or download_all
     current_model = _current_model_key()
+    active_small_model = _active_model_key("small")
+    active_big_model = _active_model_key("big")
     sort_mode = read_legacy_param_file(MODEL_SORT_MODE_PARAM, DEFAULT_MODEL_SORT_MODE)
     terminal = progress in ("Downloaded!", "All models downloaded!") or bool(re.search(r"cancelled|exists|failed|offline|invalid|error", progress, re.IGNORECASE))
     summary = {
@@ -6462,6 +6508,8 @@ def setup(app):
       cancelling,
       progress,
       current_model,
+      active_small_model,
+      active_big_model,
       sort_mode,
       terminal,
       bool(params.get_bool("IsOnroad")),
@@ -6498,6 +6546,8 @@ def setup(app):
       "terminal": terminal,
       "models": models,
       "currentModel": current_model,
+      "activeSmallModel": active_small_model,
+      "activeBigModel": active_big_model,
       "summary": summary,
       "sortMode": sort_mode,
     }), 200
@@ -6619,7 +6669,8 @@ def setup(app):
       return jsonify({"error": "Missing model key."}), 400
 
     current_model = _current_model_key()
-    if model_key == current_model:
+    active_models = {current_model, _active_model_key("small"), _active_model_key("big")}
+    if model_key in active_models:
       return jsonify({"error": "Cannot delete the currently active model."}), 409
 
     catalog = {model["value"]: model for model in get_model_catalog()}
@@ -6860,6 +6911,10 @@ def setup(app):
   def _current_model_key():
     current_model = _param_text(params.get("Model", encoding="utf-8") or params.get("DrivingModel", encoding="utf-8"))
     return canonical_model_key(current_model) or _default_model_key()
+
+  def _active_model_key(profile):
+    model_key, _, _ = get_model_profile(params, profile)
+    return canonical_model_key(model_key)
 
   def is_model_installed(model_key, model_version, on_disk_files):
     del model_version

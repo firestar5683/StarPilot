@@ -3,8 +3,11 @@ from types import SimpleNamespace
 
 import pytest
 
-from opendbc.car.ford.values import CAR
-from ..lateral import ANGLE_HANDOFF_RECOVERY_SECONDS, HANDOFF_PAUSE_FRAMES, HANDOFF_PAUSE_MIN_FRAMES, STEER_DT, FordLateralController, HumanTurnDetector
+from opendbc.can import CANPacker
+from opendbc.car.ford.fordcan import CanBus
+from opendbc.car.ford.values import CAR, FordFlags
+from .. import fordcan
+from ..lateral import FordLateralController, HumanTurnDetector
 
 
 class FakeSubMaster(dict):
@@ -23,19 +26,19 @@ def controller(monkeypatch):
   CP = SimpleNamespace(flags=0, carFingerprint="FORD_EDGE_MK2")
   controller = FordLateralController(CP)
   controller.sm = FakeSubMaster(["modelV2", "liveDelay"])
+  controller.curvature_blend_low = 0.4
+  controller.curvature_blend_high = 0.4
+  controller.curvature_lane_change_factor = 0.85
   return controller
 
 
-def car_state(speed=15.0, curvature=0.0, steering_pressed=False, steering_angle=0.0, lateral_control_status=None):
-  state = SimpleNamespace(out=SimpleNamespace(
+def car_state(speed=15.0, curvature=0.0, steering_pressed=False, steering_angle=0.0):
+  return SimpleNamespace(out=SimpleNamespace(
     vEgoRaw=speed,
     yawRate=-curvature * speed,
     steeringPressed=steering_pressed,
     steeringAngleDeg=steering_angle,
   ))
-  if lateral_control_status is not None:
-    state.lateral_control_status = lateral_control_status
-  return state
 
 
 def test_human_turn_requires_sustained_input():
@@ -47,8 +50,30 @@ def test_human_turn_requires_sustained_input():
   assert not detector.update(True, False, 50.0)
 
 
+@pytest.mark.parametrize("canfd", (False, True))
+def test_extended_messages_are_curvature_only(canfd):
+  CP = SimpleNamespace(flags=FordFlags.CANFD if canfd else 0, safetyConfigs=[SimpleNamespace()])
+  packer = CANPacker("ford_lincoln_base_pt")
+  can_bus = CanBus(CP)
+
+  _, lka_data, _ = fordcan.create_lka_msg(packer, can_bus)
+  assert lka_data[4] & 0x3 == 0x2
+
+  if canfd:
+    _, lateral_data, _ = fordcan.create_lat_ctl2_msg(packer, can_bus, 1, 2, 1, 0.001, 0.0, 0)
+    raw_path_angle = ((lateral_data[3] & 0x1F) << 6) | (lateral_data[4] >> 2)
+    raw_path_offset = ((lateral_data[4] & 0x3) << 8) | lateral_data[5]
+  else:
+    _, lateral_data, _ = fordcan.create_lat_ctl_msg(packer, can_bus, True, 2, 1, 0.001, 0.0)
+    raw_path_angle = (lateral_data[3] << 3) | (lateral_data[4] >> 5)
+    raw_path_offset = (lateral_data[5] << 2) | (lateral_data[6] >> 6)
+
+  assert raw_path_angle == 1000
+  assert raw_path_offset == 512
+
+
 def test_curvature_strategy_uses_polynomial_signals(controller):
-  result = controller.update_curvature(
+  result = controller.update(
     SimpleNamespace(latActive=True), car_state(), SimpleNamespace(curvature=0.001))
   assert result.active
   assert 0.0 < result.curvature <= 0.001
@@ -83,8 +108,8 @@ def test_curvature_strategy_uses_learned_lookahead(controller, monkeypatch):
   monkeypatch.setattr(controller, "_predicted_curvature",
                       lambda _v_ego, lookahead: lookaheads.append(lookahead) or 0.0)
 
-  controller.update_curvature(SimpleNamespace(latActive=True), car_state(),
-                              SimpleNamespace(curvature=0.001))
+  controller.update(SimpleNamespace(latActive=True), car_state(),
+                    SimpleNamespace(curvature=0.001))
 
   assert lookaheads == [pytest.approx(0.38)]
 
@@ -97,34 +122,13 @@ def test_lane_change_accepts_capnp_enum_wrappers(controller):
   assert controller._lane_change() == (True, 1)
 
 
-def test_angle_strategy_uses_path_angle_and_shadow(controller):
-  result = controller.update_angle(
-    SimpleNamespace(latActive=True), car_state(curvature=0.001), SimpleNamespace(curvature=0.001))
-  assert result.active
-  assert result.curvature == 0.0
-  assert result.path_angle > 0.0
-  assert result.shadow_curvature == pytest.approx(0.0005)
-
-
-def test_manual_turn_keeps_angle_session_active(controller):
-  controller.human_turn_enabled = True
-  measured_curvature = 0.004
-  CC = SimpleNamespace(latActive=True, currentCurvature=measured_curvature)
-  CS = car_state(speed=8.0, curvature=measured_curvature, steering_pressed=True, steering_angle=50.0)
-  actuators = SimpleNamespace(curvature=-0.005)
-  for _ in range(61):
-    result = controller.update_angle(CC, CS, actuators)
-    assert result.active
-  assert result.path_angle == pytest.approx(measured_curvature * 8.0 * 1.3)
-
-
 def test_curvature_control_stays_active_during_driver_correction(controller):
   controller.human_turn_enabled = True
   CC = SimpleNamespace(latActive=True)
   actuators = SimpleNamespace(curvature=0.001)
 
   for _ in range(20):
-    result = controller.update_curvature(
+    result = controller.update(
       CC, car_state(steering_pressed=True, steering_angle=10.0), actuators)
     assert result.active
 
@@ -134,118 +138,11 @@ def test_curvature_manual_turn_keeps_session_active_with_neutral_command(control
   CC = SimpleNamespace(latActive=True)
   actuators = SimpleNamespace(curvature=0.001)
 
-  controller.update_curvature(
+  controller.update(
     CC, car_state(steering_pressed=True, steering_angle=0.0), actuators)
   for _ in range(30):
-    result = controller.update_curvature(
+    result = controller.update(
       CC, car_state(steering_pressed=True, steering_angle=50.0), actuators)
 
   assert result.active
   assert result.curvature == 0.0
-  assert result.path_angle == 0.0
-
-
-def test_angle_control_stays_active_after_sustained_driver_correction(controller):
-  controller.human_turn_enabled = True
-  measured_curvature = 0.001
-  CC = SimpleNamespace(latActive=True, currentCurvature=measured_curvature)
-  actuators = SimpleNamespace(curvature=-0.001)
-
-  for _ in range(20):
-    result = controller.update_angle(
-      CC, car_state(curvature=measured_curvature, steering_pressed=True, steering_angle=10.0), actuators)
-    assert result.active
-    assert result.path_angle > 0.0
-
-  for _ in range(HANDOFF_PAUSE_FRAMES):
-    assert controller.update_angle(CC, car_state(curvature=measured_curvature), actuators).active
-
-
-def test_angle_driver_override_is_handoff_safe_with_human_turn_detection_disabled(controller):
-  controller.human_turn_enabled = False
-  measured_curvature = 0.002
-  result = controller.update_angle(
-    SimpleNamespace(latActive=True, currentCurvature=measured_curvature),
-    car_state(curvature=measured_curvature, steering_pressed=True),
-    SimpleNamespace(curvature=-0.002),
-  )
-
-  assert result.active
-  assert result.path_angle > 0.0
-
-
-def test_short_driver_correction_does_not_pause_angle_control(controller):
-  controller.human_turn_enabled = True
-  CC = SimpleNamespace(latActive=True)
-  actuators = SimpleNamespace(curvature=0.001)
-
-  for _ in range(9):
-    assert controller.update_angle(
-      CC, car_state(steering_pressed=True, steering_angle=10.0), actuators).active
-
-  assert controller.update_angle(CC, car_state(), actuators).active
-
-
-def test_angle_driver_handoff_does_not_depend_on_pscm_mode_reset(controller):
-  controller.human_turn_enabled = True
-  measured_curvature = 0.001
-  CC = SimpleNamespace(latActive=True, currentCurvature=measured_curvature)
-  actuators = SimpleNamespace(curvature=-0.001)
-
-  for _ in range(10):
-    assert controller.update_angle(
-      CC, car_state(curvature=measured_curvature, steering_pressed=True, steering_angle=10.0), actuators).active
-
-  for _ in range(HANDOFF_PAUSE_MIN_FRAMES):
-    assert controller.update_angle(
-      CC, car_state(lateral_control_status=1), actuators).active
-
-
-def test_long_manual_turn_hands_angle_control_back_without_disabling(controller):
-  controller.human_turn_enabled = True
-  measured_curvature = 0.004
-  CC = SimpleNamespace(latActive=True, currentCurvature=measured_curvature)
-  actuators = SimpleNamespace(curvature=-0.005)
-
-  for _ in range(40):
-    assert controller.update_angle(
-      CC, car_state(speed=8.0, curvature=measured_curvature, steering_pressed=True, steering_angle=50.0), actuators).active
-
-  for _ in range(HANDOFF_PAUSE_FRAMES):
-    assert controller.update_angle(
-      CC, car_state(speed=8.0, curvature=measured_curvature), actuators).active
-
-
-def test_angle_handoff_reenters_from_measured_curvature(controller):
-  controller.human_turn_enabled = True
-  controller.angle_blend = 0.0
-  measured_curvature = 0.004
-  CC = SimpleNamespace(latActive=True, currentCurvature=measured_curvature)
-  actuators = SimpleNamespace(curvature=-0.005)
-
-  for _ in range(10):
-    controller.update_angle(
-      CC, car_state(speed=8.0, curvature=measured_curvature, steering_pressed=True, steering_angle=10.0), actuators)
-
-  resumed = controller.update_angle(CC, car_state(speed=8.0, curvature=measured_curvature), actuators)
-  assert resumed.active
-  assert resumed.path_angle == pytest.approx(measured_curvature * 8.0 * 1.3)
-
-  recovery_frames = round(ANGLE_HANDOFF_RECOVERY_SECONDS / STEER_DT)
-  for _ in range(recovery_frames + 2):
-    recovered = controller.update_angle(CC, car_state(speed=8.0, curvature=measured_curvature), actuators)
-  assert recovered.path_angle < 0.0
-
-
-def test_angle_control_recovers_from_bounded_tracking_stall(controller):
-  controller.human_turn_enabled = True
-  controller.angle_blend = 0.0
-  CC = SimpleNamespace(latActive=True)
-  CS = car_state(speed=15.0, curvature=0.0)
-  actuators = SimpleNamespace(curvature=0.01)
-
-  for _ in range(10):
-    assert controller.update_angle(CC, CS, actuators).active
-
-  for _ in range(HANDOFF_PAUSE_FRAMES):
-    assert not controller.update_angle(CC, CS, actuators).active

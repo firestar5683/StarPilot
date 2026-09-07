@@ -9,7 +9,7 @@ from pathlib import Path
 
 from openpilot.common.file_chunker import get_chunk_name, get_manifest_path
 from openpilot.common.params import Params
-from openpilot.starpilot.assets.model_manager import external_gpu_available, model_uses_external_gpu
+from openpilot.starpilot.assets.model_manager import external_gpu_available, model_uses_external_gpu, set_model_profile
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigDialog, BigDialogBase, BigMultiOptionDialog
 from openpilot.selfdrive.ui.ui_state import ui_state
@@ -568,6 +568,13 @@ class DrivingModelBigButton(BigButton):
     if version:
       self._params.put("ModelVersion", version)
       self._params.put("DrivingModelVersion", version)
+    set_model_profile(
+      self._params,
+      "big" if entry.requires_external_gpu else "small",
+      entry.key,
+      entry.name,
+      version,
+    )
 
     if ui_state.started:
       self._params.put_bool("OnroadCycleRequested", True)

@@ -365,45 +365,11 @@
         "settings_tier": "simple"
       },
       {
-        "key": "FordLateralMode",
-        "label": "Ford Steering Strategy",
-        "description": "Choose the Ford lateral controller. Curvature is the tuned default, Angle uses path-angle control, and Native preserves the original Ford controls.",
-        "picker_description": "Chooses Native, Curvature, or Angle steering on Ford vehicles.",
-        "data_type": "int",
-        "ui_type": "dropdown",
-        "options": [
-          {
-            "value": 0,
-            "label": "Native"
-          },
-          {
-            "value": 1,
-            "label": "Curvature"
-          },
-          {
-            "value": 2,
-            "label": "Angle"
-          }
-        ],
-        "is_parent_toggle": true,
-        "galaxy_only": true,
-        "vehicle_makes": [
-          "Ford"
-        ],
-        "settings_tier": "simple"
-      },
-      {
         "key": "FordHumanTurnDetection",
         "label": "Manual Turn Release",
         "description": "Yield during an intentional manual turn while keeping the Ford steering session ready.",
         "data_type": "bool",
         "ui_type": "toggle",
-        "parent_key": "FordLateralMode",
-        "visible_when_key": "FordLateralMode",
-        "visible_when_values": [
-          1,
-          2
-        ],
         "galaxy_only": true,
         "vehicle_makes": [
           "Ford"
@@ -416,12 +382,6 @@
         "description": "Show the hands-free assistance graphic on supported CAN-FD Ford clusters while lateral control is active. Driver monitoring requirements do not change.",
         "data_type": "bool",
         "ui_type": "toggle",
-        "parent_key": "FordLateralMode",
-        "visible_when_key": "FordLateralMode",
-        "visible_when_values": [
-          1,
-          2
-        ],
         "galaxy_only": true,
         "vehicle_makes": [
           "Ford"
@@ -438,11 +398,6 @@
         "max": 1.0,
         "step": 0.05,
         "precision": 2,
-        "parent_key": "FordLateralMode",
-        "visible_when_key": "FordLateralMode",
-        "visible_when_values": [
-          1
-        ],
         "galaxy_only": true,
         "vehicle_makes": [
           "Ford"
@@ -459,11 +414,6 @@
         "max": 1.0,
         "step": 0.05,
         "precision": 2,
-        "parent_key": "FordLateralMode",
-        "visible_when_key": "FordLateralMode",
-        "visible_when_values": [
-          1
-        ],
         "galaxy_only": true,
         "vehicle_makes": [
           "Ford"
@@ -473,123 +423,13 @@
       {
         "key": "FordCurvatureLaneChangeFactor",
         "label": "Curvature Lane-Change Factor",
-        "description": "Scale steering during high-speed lane changes in Curvature mode.",
+        "description": "Scale steering during high-speed lane changes.",
         "data_type": "float",
         "ui_type": "numeric",
         "min": 0.5,
         "max": 1.25,
         "step": 0.05,
         "precision": 2,
-        "parent_key": "FordLateralMode",
-        "visible_when_key": "FordLateralMode",
-        "visible_when_values": [
-          1
-        ],
-        "galaxy_only": true,
-        "vehicle_makes": [
-          "Ford"
-        ],
-        "settings_tier": "simple"
-      },
-      {
-        "key": "FordAngleBlend",
-        "label": "Angle Prediction Blend",
-        "description": "Blend model prediction into the Ford path-angle command. 0 uses planner curvature only; 1 uses model prediction only.",
-        "data_type": "float",
-        "ui_type": "numeric",
-        "min": 0.0,
-        "max": 1.0,
-        "step": 0.01,
-        "precision": 2,
-        "parent_key": "FordLateralMode",
-        "visible_when_key": "FordLateralMode",
-        "visible_when_values": [
-          2
-        ],
-        "galaxy_only": true,
-        "vehicle_makes": [
-          "Ford"
-        ],
-        "settings_tier": "simple"
-      },
-      {
-        "key": "FordAngleLowSpeedFactor",
-        "label": "Low-Speed Angle Response",
-        "description": "Adjust path-angle strength at lower speeds and higher curvature.",
-        "data_type": "float",
-        "ui_type": "numeric",
-        "min": 0.5,
-        "max": 1.5,
-        "step": 0.01,
-        "precision": 2,
-        "parent_key": "FordLateralMode",
-        "visible_when_key": "FordLateralMode",
-        "visible_when_values": [
-          2
-        ],
-        "galaxy_only": true,
-        "vehicle_makes": [
-          "Ford"
-        ],
-        "settings_tier": "simple"
-      },
-      {
-        "key": "FordAngleHighSpeedFactor",
-        "label": "High-Speed Angle Response",
-        "description": "Adjust path-angle strength through larger highway curves.",
-        "data_type": "float",
-        "ui_type": "numeric",
-        "min": 0.5,
-        "max": 1.5,
-        "step": 0.01,
-        "precision": 2,
-        "parent_key": "FordLateralMode",
-        "visible_when_key": "FordLateralMode",
-        "visible_when_values": [
-          2
-        ],
-        "galaxy_only": true,
-        "vehicle_makes": [
-          "Ford"
-        ],
-        "settings_tier": "simple"
-      },
-      {
-        "key": "FordAngleHighSpeedDamping",
-        "label": "High-Speed Angle Damping",
-        "description": "Dampen small steering corrections at highway speed.",
-        "data_type": "float",
-        "ui_type": "numeric",
-        "min": 0.25,
-        "max": 1.25,
-        "step": 0.01,
-        "precision": 2,
-        "parent_key": "FordLateralMode",
-        "visible_when_key": "FordLateralMode",
-        "visible_when_values": [
-          2
-        ],
-        "galaxy_only": true,
-        "vehicle_makes": [
-          "Ford"
-        ],
-        "settings_tier": "simple"
-      },
-      {
-        "key": "FordAngleLaneChangeFactor",
-        "label": "Angle Lane-Change Factor",
-        "description": "Scale steering during high-speed lane changes in Angle mode.",
-        "data_type": "float",
-        "ui_type": "numeric",
-        "min": 0.5,
-        "max": 1.5,
-        "step": 0.01,
-        "precision": 2,
-        "parent_key": "FordLateralMode",
-        "visible_when_key": "FordLateralMode",
-        "visible_when_values": [
-          2
-        ],
         "galaxy_only": true,
         "vehicle_makes": [
           "Ford"
@@ -3709,8 +3549,8 @@
       {
         "key": "ToyotaAutoHold",
         "label": "Toyota Auto Hold",
-        "description": "Hold the brakes at a stop on supported Toyota/Lexus TSS2 vehicles when cruise main is available and cruise is not active.",
-        "picker_description": "Holds Toyota/Lexus brakes at stops when cruise is available.",
+        "description": "Hold the brakes at a stop on supported Toyota/Lexus vehicles when cruise main is available and cruise is not active.",
+        "picker_description": "Holds supported Toyota/Lexus brakes at stops when cruise is available.",
         "data_type": "bool",
         "ui_type": "toggle",
         "galaxy_only": true,

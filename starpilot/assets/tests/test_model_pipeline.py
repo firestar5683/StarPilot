@@ -141,6 +141,77 @@ def test_external_gpu_requirement_is_cached_from_manifest(tmp_path, monkeypatch)
   assert not model_manager.model_uses_external_gpu("missing")
 
 
+def test_active_small_and_big_profiles_migrate_from_legacy_selection(tmp_path, monkeypatch):
+  monkeypatch.setattr(model_manager, "MODELS_PATH", tmp_path)
+  (tmp_path / model_manager.ARTIFACT_METADATA_CACHE).write_text(json.dumps({
+    "small-one": {"uses_external_gpu": False},
+    "big-one": {"uses_external_gpu": True},
+  }))
+
+  class FakeParams:
+    def __init__(self, selected):
+      self.values = {
+        "Model": selected,
+        "DrivingModel": selected,
+        "DrivingModelName": selected.title(),
+        "DrivingModelVersion": "v16",
+        "AvailableModels": "rdf43,small-one,big-one",
+        "AvailableModelNames": "Regret Driven Framework V4,Small One,Big One",
+        "ModelVersions": "v15,v16,v16",
+      }
+
+    def get(self, key):
+      return self.values.get(key)
+
+    def put(self, key, value):
+      self.values[key] = value
+
+  small_params = FakeParams("small-one")
+  assert model_manager.get_model_profile(small_params, "small") == ("small-one", "Small One", "v16")
+  assert model_manager.get_model_profile(small_params, "big") == ("", "", "")
+
+  big_params = FakeParams("big-one")
+  assert model_manager.get_model_profile(big_params, "small") == (
+    "rdf43", "Regret Driven Framework V4", "v15",
+  )
+  assert model_manager.get_model_profile(big_params, "big") == ("big-one", "Big One", "v16")
+
+
+def test_runtime_model_metadata_does_not_overwrite_model_profiles(tmp_path, monkeypatch):
+  monkeypatch.setattr(model_manager, "MODELS_PATH", tmp_path)
+  (tmp_path / model_manager.ARTIFACT_METADATA_CACHE).write_text(json.dumps({
+    "small-one": {"uses_external_gpu": False},
+    "big-one": {"uses_external_gpu": True},
+  }))
+
+  class FakeParams:
+    def __init__(self):
+      self.values = {
+        "ActiveSmallModel": "small-one",
+        "ActiveSmallModelName": "Small One",
+        "ActiveSmallModelVersion": "v15",
+        "ActiveBigModel": "big-one",
+        "ActiveBigModelName": "Big One",
+        "ActiveBigModelVersion": "v16",
+      }
+
+    def get(self, key):
+      return self.values.get(key)
+
+    def put(self, key, value):
+      self.values[key] = value
+
+  params = FakeParams()
+  model_manager.set_runtime_model_params(params, "big-one", "v16")
+  assert params.values["DrivingModel"] == "big-one"
+  assert params.values["DrivingModelName"] == "Big One"
+  model_manager.set_runtime_model_params(params, "small-one", "v15")
+  assert params.values["DrivingModel"] == "small-one"
+  assert params.values["DrivingModelName"] == "Small One"
+  assert params.values["ActiveBigModel"] == "big-one"
+  assert params.values["ActiveSmallModel"] == "small-one"
+
+
 def test_manifest_metadata_classifies_model_lab_candidates_and_accelerator_artifacts(tmp_path, monkeypatch):
   monkeypatch.setattr(model_manager, "MODELS_PATH", tmp_path)
   manager = object.__new__(ModelManager)

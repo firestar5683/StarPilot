@@ -20,7 +20,7 @@ import { ScreenRecordings } from "/assets/components/recordings/screen_recording
 import { Sidebar } from "/assets/components/sidebar.js?v=controllers-nav-1"
 import { SentryMode } from "/assets/components/tools/sentry.js"
 import { SpeedLimits } from "/assets/components/tools/speed_limits.js"
-import { ModelManager } from "/assets/components/tools/model_manager.js?v=20260825a"
+import { ModelManager } from "/assets/components/tools/model_manager.js?v=20260906a"
 import { ModelLaboratory } from "/assets/components/tools/model_laboratory.js?v=model-lab-5"
 import { LivePlots } from "/assets/components/tools/plots.js"
 import { ThemeMaker } from "/assets/components/tools/theme_maker.js"

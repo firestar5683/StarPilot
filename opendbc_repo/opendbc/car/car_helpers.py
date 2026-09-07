@@ -10,6 +10,7 @@ from opendbc.car.carlog import carlog
 from opendbc.car.structs import CarParams, CarParamsT
 from opendbc.car.fingerprints import eliminate_incompatible_cars, all_legacy_fingerprint_cars
 from opendbc.car.fw_versions import ObdCallback, get_fw_versions_ordered, get_present_ecus, match_fw_to_car
+from opendbc.car.hyundai.values import kia_ray_ev_vin
 from opendbc.car.mock.values import CAR as MOCK
 from opendbc.car.toyota.values import ToyotaSafetyFlags
 from opendbc.car.values import BRANDS
@@ -246,8 +247,13 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
       set_obd_multiplexing(True)
       # VIN query only reliably works through OBDII
       vin_rx_addr, vin_rx_bus, vin = get_vin(can_recv, can_send, (0, 1))
-      ecu_rx_addrs = get_present_ecus(can_recv, can_send, set_obd_multiplexing, num_pandas=num_pandas)
-      car_fw = get_fw_versions_ordered(can_recv, can_send, set_obd_multiplexing, vin, ecu_rx_addrs, num_pandas=num_pandas)
+      skip_fw_buses = {1} if kia_ray_ev_vin(vin) else set()
+      if skip_fw_buses:
+        carlog.warning("Kia Ray EV: skipping CAN1 firmware queries")
+      ecu_rx_addrs = get_present_ecus(can_recv, can_send, set_obd_multiplexing,
+                                      num_pandas=num_pandas, skip_buses=skip_fw_buses)
+      car_fw = get_fw_versions_ordered(can_recv, can_send, set_obd_multiplexing, vin, ecu_rx_addrs,
+                                       num_pandas=num_pandas, skip_buses=skip_fw_buses)
       cached = False
 
     exact_fw_match, fw_candidates = match_fw_to_car(car_fw, vin)
