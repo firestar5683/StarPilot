@@ -7,7 +7,12 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.common.pid import PIDController
 from openpilot.system.hardware import HARDWARE
 
-OFFSET = 0
+# comma 3/3X (tici/tizi) run a more aggressive, cooler-targeting curve than comma 4 (mici)
+IS_MICI = HARDWARE.get_device_type() == "mici"
+OFFSET = 0 if IS_MICI else -5
+K_P = 0 if IS_MICI else 1.0
+FF_LOW = 60.0 if IS_MICI else 55.0
+FF_HIGH = 100.0 if IS_MICI else 80.0
 
 class BaseFanController(ABC):
   @abstractmethod
@@ -21,7 +26,7 @@ class TiciFanController(BaseFanController):
     cloudlog.info("Setting up TICI fan handler")
 
     self.last_ignition = False
-    self.controller = PIDController(k_p=0, k_i=4e-3, rate=(1 / DT_HW))
+    self.controller = PIDController(k_p=K_P, k_i=4e-3, rate=(1 / DT_HW))
 
   def update(self, cur_temp: float, ignition: bool) -> int:
     self.controller.pos_limit = 100 if ignition else 30
@@ -33,7 +38,7 @@ class TiciFanController(BaseFanController):
     error = cur_temp - (75 + OFFSET)
     fan_pwr_out = int(self.controller.update(
                       error=error,
-                      feedforward=np.interp(cur_temp, [60.0 + OFFSET, 100.0 + OFFSET], [0, 100])
+                      feedforward=np.interp(cur_temp, [FF_LOW, FF_HIGH], [0, 100])
                     ))
 
     self.last_ignition = ignition
