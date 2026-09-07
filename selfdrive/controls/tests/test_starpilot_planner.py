@@ -37,7 +37,7 @@ def make_toggles(**overrides):
 
 def test_force_stop_jerk_scale_is_platform_specific():
   assert get_force_stop_jerk_scale(SimpleNamespace(carFingerprint="HYUNDAI_ELANTRA_2021")) == 0.80
-  assert get_force_stop_jerk_scale(SimpleNamespace(carFingerprint="OTHER_CAR")) == 0.32
+  assert get_force_stop_jerk_scale(SimpleNamespace(carFingerprint="OTHER_CAR")) == 0.20
 
 
 def test_lead_follow_jerk_scale_is_platform_specific():
@@ -255,3 +255,18 @@ def test_untracked_vision_lead_still_uses_strict_entry_gate():
     assert not planner.update_lead_status(16.8)
   finally:
     planner.shutdown()
+
+
+def test_gps_location_service_updates_on_carparams(monkeypatch):
+  planner = make_planner(monkeypatch)
+  try:
+    sm = make_sm(planner, frame=1, v_ego=20.0, left_blinker=False)
+    sm.updated = {"carParams": True}
+    sm["carParams"] = SimpleNamespace(brand="gm")
+    sm["gpsLocationExternal"] = SimpleNamespace(latitude=2.0, longitude=2.0, bearingDeg=45.0, hasFix=True)
+    planner.update(0.0, False, sm, make_toggles())
+    assert planner.gps_location_service == "gpsLocationExternal"
+    assert planner.gps_position["latitude"] == 2.0
+  finally:
+    planner.shutdown()
+

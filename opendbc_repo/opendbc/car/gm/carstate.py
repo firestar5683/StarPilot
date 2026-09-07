@@ -1,5 +1,7 @@
 import copy
 import math
+from datetime import UTC, datetime, timedelta
+from collections.abc import Mapping
 from cereal import custom
 from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, create_button_events, structs
@@ -8,12 +10,10 @@ from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.gps import get_car_gps_config
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.gm.values import (
-  ALT_ACCS,
   ASCM_INT,
   CAMERA_ACC_CAR,
   CAR,
   CC_ONLY_CAR,
-  CC_REGEN_PADDLE_CAR,
   DBC,
   AccState,
   CanBus,
@@ -37,6 +37,112 @@ BUTTONS_DICT = {CruiseButtons.RES_ACCEL: ButtonType.accelCruise, CruiseButtons.D
                 CruiseButtons.MAIN: ButtonType.mainCruise, CruiseButtons.CANCEL: ButtonType.cancel}
 HARD_BUTTONS_DICT = {CruiseButtons.RES_ACCEL: ButtonType.accelCruise, CruiseButtons.DECEL_SET: ButtonType.decelCruise}
 NORMAL_CRUISE_BUTTONS = (CruiseButtons.RES_ACCEL, CruiseButtons.DECEL_SET)
+
+# Optional ~10 Hz CT6 PPS GPS messages on the powertrain bus.
+PPS_GPS_MESSAGES = (
+  "PPS_ElevHdSpd_FO",
+  "PPS_PosLat_FO",
+  "PPS_PosLong_FO",
+  "PPS_Time_FO",
+  "PPS_QualMetrics_FO",
+)
+# PPS_SigAcqTime_FO is omitted: its validity bit stays 1 even during valid fixes.
+
+
+def pps_checksum_ok(data: bytes) -> bool:
+  """Validate the 11-bit checksum used by the observed PPS frames."""
+  if len(data) < 2:
+    return False
+  received = ((data[-2] & 0x07) << 8) | data[-1]
+  expected = sum(data[:-2]) + (data[-2] >> 3) + 0x4C
+  return (expected & 0x7FF) == received
+
+
+def decode_gm_pps_gps(values: Mapping[str, Mapping[str, float]], raw: Mapping[str, bytes],
+                      timestamp_nanos: int) -> dict | None:
+  """Decode one coherent PPS bundle into the existing car-GPS sample shape."""
+  if any(not pps_checksum_ok(raw.get(name, b"")) for name in PPS_GPS_MESSAGES):
+    return None
+
+  try:
+    pos_lat = values["PPS_PosLat_FO"]
+    pos_long = values["PPS_PosLong_FO"]
+    timestamp_values = values["PPS_Time_FO"]
+    quality = values["PPS_QualMetrics_FO"]
+    if (int(pos_lat.get("PPSLatV", 1)) != 0 or
+        int(pos_long.get("PPSLongV", 1)) != 0 or
+        int(quality.get("PPS2DAbsPosErrEstmtV", 1)) != 0 or
+        int(quality.get("PPSMdV", 1)) != 0 or
+        int(quality.get("PPSPstnDilPrcsV", 1)) != 0 or
+        int(timestamp_values.get("PPSTmdayV", 1)) != 0 or
+        int(timestamp_values.get("PPSCldrDayV", 1)) != 0 or
+        int(timestamp_values.get("PPSCldrYrV", 1)) != 0):
+      return None
+    # Reject mode 6 (dead reckoning only without GNSS).
+    if int(quality["PPSMd"]) == 6:
+      return None
+
+    latitude = float(pos_lat["PPSLat"]) / 3_600_000.0
+    longitude = float(pos_long["PPSLong"]) / 3_600_000.0
+    if not (math.isfinite(latitude) and math.isfinite(longitude) and
+            -90.0 <= latitude <= 90.0 and -180.0 <= longitude <= 180.0 and
+            (latitude != 0.0 or longitude != 0.0)):
+      return None
+
+    year = int(timestamp_values["PPSCldrYr"])
+    day_of_year = int(timestamp_values["PPSCldrDay"])
+    millis_of_day = int(timestamp_values["PPSTmday"])
+    if not 2014 <= year <= 2141 or day_of_year < 1 or not 0 <= millis_of_day < 86_400_000:
+      return None
+    timestamp = datetime(year, 1, 1, tzinfo=UTC) + timedelta(days=day_of_year - 1, milliseconds=millis_of_day)
+    if timestamp.year != year:
+      return None
+
+    elev = values["PPS_ElevHdSpd_FO"]
+    speed = float(elev["PPSVel"]) * CV.KPH_TO_MS
+    if int(elev.get("PPSVelV", 1)) != 0 or not math.isfinite(speed) or not 0.0 <= speed <= 200.0:
+      speed = 0.0
+    heading = float(elev["PPSHedng"])
+    if (int(elev.get("PPSHedngV", 1)) != 0 or
+        not math.isfinite(heading) or not 0.0 <= heading < 360.0):
+      heading = 0.0
+
+    altitude = float(elev["PPSElvtn"]) / 100.0
+    if int(elev.get("PPSElvtnV", 1)) != 0 or not math.isfinite(altitude):
+      altitude = 0.0
+
+    horizontal_accuracy = float(quality["PPS2DAbsPosErrEstmt"])
+    if not math.isfinite(horizontal_accuracy) or horizontal_accuracy < 0.0:
+      horizontal_accuracy = 0.0
+
+    vertical_accuracy = float(quality["PPS3DAbsPosErrEstmt"])
+    if int(quality.get("PPS3DAbsPosErrEstmtV", 1)) != 0 or not math.isfinite(vertical_accuracy) or vertical_accuracy < 0.0:
+      vertical_accuracy = 0.0
+
+    bearing_accuracy = float(quality["PPSAbsHdngErrEstmt"])
+    if int(quality.get("PPSAbsHdngErrEstmtV", 1)) != 0 or not math.isfinite(bearing_accuracy) or bearing_accuracy < 0.0:
+      bearing_accuracy = 180.0
+  except (KeyError, TypeError, ValueError, OverflowError, AttributeError):
+    return None
+
+  heading_rad = math.radians(heading)
+  return {
+    "timestamp_nanos": timestamp_nanos,
+    "latitude": latitude,
+    "longitude": longitude,
+    "altitude": altitude,
+    "speed": speed,
+    "bearingDeg": heading,
+    "horizontalAccuracy": horizontal_accuracy,
+    "unixTimestampMillis": round(timestamp.timestamp() * 1000),
+    "verticalAccuracy": vertical_accuracy,
+    "bearingAccuracyDeg": bearing_accuracy,
+    # Velocity error units are undocumented in DBC; omit conversion.
+    "speedAccuracy": 0.0,
+    "hasFix": True,
+    "satelliteCount": 0,
+    "vNED": [speed * math.cos(heading_rad), speed * math.sin(heading_rad), 0.0],
+  }
 
 
 def get_hard_cruise_buttons(steering_button_msg: dict) -> int:
@@ -109,10 +215,14 @@ class CarState(CarStateBase):
     self.car_gps_config = get_car_gps_config(CP)
     self.car_gps_supported = self.car_gps_config is not None
     self.car_gps = None
+    self.onstar_gps = None
     self._car_gps_timestamp_nanos = 0
     self._prev_gps_lat = None
     self._prev_gps_lon = None
     self._last_gps_bearing = None
+
+    self.pps_gps = None
+    self._pps_gps_timestamp_nanos = 0
 
   def _update_car_gps(self, cp, v_ego: float = 0.0) -> None:
     if self.car_gps_config is None:
@@ -148,11 +258,46 @@ class CarState(CarStateBase):
       else:
         self._prev_gps_lat = self._prev_gps_lon = None
 
+      self.onstar_gps = gps
       self.car_gps = gps
       self._car_gps_timestamp_nanos = timestamp_nanos
 
-  def get_car_gps(self):
+  def _update_pps_gps(self, cp) -> None:
+    """Decode a complete, checksum-valid PPS burst when one is available."""
+    timestamps = [max(cp.ts_nanos[name].values(), default=0) for name in PPS_GPS_MESSAGES]
+    if not all(timestamps):
+      return
+
+    timestamp_nanos = max(timestamps)
+    if timestamp_nanos <= self._pps_gps_timestamp_nanos:
+      return
+    if timestamp_nanos - min(timestamps) > 100_000_000:
+      return
+
+    vl = cp.vl
+    try:
+      first_id = int(vl["PPS_ElevHdSpd_FO"]["PPSElvHedngSpdBrstID"])
+      if not (first_id == int(vl["PPS_PosLat_FO"]["PPSLatBrstID"]) ==
+              int(vl["PPS_PosLong_FO"]["PPSLongBrstID"]) ==
+              int(vl["PPS_Time_FO"]["PPSTmBrstID"]) ==
+              int(vl["PPS_QualMetrics_FO"]["PPSPosQltyMtcBrstID"])):
+        return
+    except (KeyError, ValueError, TypeError, OverflowError):
+      return
+
+    values = {name: cp.vl[name] for name in PPS_GPS_MESSAGES}
+    raw = {name: cp.vl_raw[name] for name in PPS_GPS_MESSAGES}
+    self.pps_gps = decode_gm_pps_gps(values, raw, timestamp_nanos)
+    self._pps_gps_timestamp_nanos = timestamp_nanos
+
+  def get_car_gps(self) -> dict | None:
     return self.car_gps
+
+  def get_car_gps_sources(self) -> dict[str, dict | None]:
+    return {
+      "pps": self.pps_gps,
+      "onstar": self.onstar_gps,
+    }
 
   def update_button_enable(self, buttonEvents: list[structs.CarState.ButtonEvent]):
     if not self.CP.pcmCruise:
@@ -239,6 +384,9 @@ class CarState(CarStateBase):
                      abs(pt_cp.vl["EBCMWheelSpdRear"]["RRWheelSpd"]) <= STANDSTILL_THRESHOLD
 
     self._update_car_gps(pt_cp, ret.vEgo)
+    pps_cp = can_parsers.get(Bus.adas)
+    if pps_cp is not None:
+      self._update_pps_gps(pps_cp)
 
     if pt_cp.vl["ECMPRDNL2"]["ManualMode"] == 1:
       ret.gearShifter = self.parse_gear_shifter("T")
@@ -588,8 +736,16 @@ class CarState(CarStateBase):
       ("ASCMLKASteeringCmd", 0),
     ]
 
-    return {
+    parsers = {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, CanBus.POWERTRAIN),
       Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], cam_messages, CanBus.CAMERA),
       Bus.loopback: CANParser(DBC[CP.carFingerprint][Bus.pt], loopback_messages, CanBus.LOOPBACK),
     }
+    if getattr(CP, "brand", None) == "gm":
+      # Optional CT6 PPS parser on Bus.adas; non-PPS vehicles remain CAN-valid.
+      parsers[Bus.adas] = CANParser(
+        "cadillac_ct6_object",
+        [(name, 0) for name in PPS_GPS_MESSAGES],
+        CanBus.POWERTRAIN,
+      )
+    return parsers

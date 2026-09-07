@@ -63,7 +63,8 @@ def main() -> NoReturn:
   gps_location_service = get_gps_location_service(params)
 
   pm = messaging.PubMaster(['clocks'])
-  sm = messaging.SubMaster([gps_location_service])
+  # Subscribe to both services to support dynamic GM GPS routing.
+  sm = messaging.SubMaster(['gpsLocation', 'gpsLocationExternal'])
 
   # StarPilot variables
   tf = TimezoneFinder() if TimezoneFinder is not None else None
@@ -75,6 +76,7 @@ def main() -> NoReturn:
 
   while True:
     sm.update(1000)
+    gps_location_service = get_gps_location_service(params)
 
     msg = messaging.new_message('clocks')
     msg.valid = system_time_valid()

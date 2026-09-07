@@ -1,3 +1,5 @@
+from __future__ import annotations
+
 import os
 import operator
 import platform
@@ -6,6 +8,7 @@ import sys
 from types import SimpleNamespace
 
 from cereal import car
+from openpilot.common.gps import gm_car_params_present
 from openpilot.common.params import Params
 from opendbc.car.gps import car_gps_available
 from openpilot.system.hardware import HARDWARE, PC, TICI
@@ -36,9 +39,12 @@ def update_car_gps_param(params: Params) -> bool | None:
   car_params = params.get("CarParams")
   if car_params is None:
     return None
+  try:
+    with car.CarParams.from_bytes(car_params) as parsed_cp:
+      available = car_gps_available(parsed_cp)
+  except Exception:
+    return None
 
-  with car.CarParams.from_bytes(car_params) as CP:
-    available = car_gps_available(CP)
   if available != params.get_bool("CarGpsAvailable"):
     params.put_bool("CarGpsAvailable", available)
   return available
@@ -48,7 +54,9 @@ def ublox(started: bool, params: Params, CP: car.CarParams, starpilot_toggles: S
   use_ublox = ublox_available()
   if use_ublox != params.get_bool("UbloxAvailable"):
     params.put_bool("UbloxAvailable", use_ublox)
-  return started and use_ublox and car_gps is False
+  is_gm = gm_car_params_present(params)
+  # On GM, card arbitrates u-blox and CAN GPS; wait for CarParams.
+  return started and use_ublox and car_gps is not None and (not car_gps or is_gm)
 
 def joystick(started: bool, params: Params, CP: car.CarParams, starpilot_toggles: SimpleNamespace) -> bool:
   return started and params.get_bool("JoystickDebugMode")

@@ -6,8 +6,10 @@ from collections.abc import Callable, Mapping
 from typing import Any
 
 from opendbc.car.common.conversions import Conversions as CV
+from opendbc.can.dbc import DBC as DBC_FILE
+from opendbc.car import Bus
 from opendbc.car.ford.values import CAR as FORD_CAR
-from opendbc.car.gm.values import CAR as GM_CAR
+from opendbc.car.gm.values import CAR as GM_CAR, DBC as GM_DBC
 
 
 CarGpsSample = dict[str, Any]
@@ -158,8 +160,25 @@ CAR_GPS_CONFIGS: dict[str, CarGpsConfig] = {
 
 
 def get_car_gps_config(CP) -> CarGpsConfig | None:
+  cp_brand = getattr(CP, "brand", None)
   config = CAR_GPS_CONFIGS.get(CP.carFingerprint)
-  return config if config is not None and config.brand == CP.brand else None
+  if config is not None and config.brand == cp_brand:
+    return config
+
+  # Enable OnStar GPS for GM cars whose powertrain DBC defines it.
+  if cp_brand == "gm":
+    try:
+      dbc_name = GM_DBC[CP.carFingerprint][Bus.pt]
+      if "TCICOnStarGPSPosition" in DBC_FILE(dbc_name).name_to_msg:
+        return CarGpsConfig(
+          brand="gm",
+          messages=CHEVROLET_BOLT_GPS_MESSAGES,
+          decoder=parse_chevrolet_bolt_can_gps,
+        )
+    except (KeyError, OSError, TypeError, RuntimeError):
+      pass
+
+  return None
 
 
 def car_gps_available(CP) -> bool:

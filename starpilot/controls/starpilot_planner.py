@@ -126,6 +126,10 @@ class StarPilotPlanner:
       v_cruise_kph += starpilot_toggles.set_speed_offset
     v_cruise = v_cruise_kph * CV.KPH_TO_MS
     v_ego = max(sm["carState"].vEgo, 0)
+    updated = getattr(sm, "updated", None)
+    if updated is not None and updated.get("carParams", False):
+      cp = sm["carParams"] if "carParams" in sm else None
+      self.gps_location_service = get_gps_location_service(self.params, cp)
 
     gps_location = sm[self.gps_location_service]
     self.gps_position = {

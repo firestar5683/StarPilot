@@ -6,8 +6,11 @@ import numpy as np
 from collections import defaultdict
 from dataclasses import dataclass
 
+from cereal import car
 from cereal import log
 from cereal import messaging
+from openpilot.common.gps import gm_car_params_present
+from openpilot.common.params import Params
 from openpilot.system.ubloxd.generated.ubx import Ubx
 from openpilot.system.ubloxd.generated.gps import Gps
 from openpilot.system.ubloxd.generated.glonass import Glonass
@@ -103,7 +106,8 @@ class UbloxMsgParser:
     11: 64, 12: 128, 13: 256, 14: 512, 15: 1024,
   }
 
-  def __init__(self) -> None:
+  def __init__(self, gps_service: str = 'gpsLocationExternal') -> None:
+    self.gps_service = gps_service
     self.framer = UbxFramer()
     self.caches = EphemerisCaches(
       gps_subframes=defaultdict(dict),
@@ -159,10 +163,10 @@ class UbloxMsgParser:
       return self._gen_nav_sat(body)
     return None
 
-  # NAV-PVT -> gpsLocationExternal
+  # NAV-PVT -> the selected canonical GPS service
   def _gen_nav_pvt(self, msg: Ubx.NavPvt) -> tuple[str, capnp.lib.capnp._DynamicStructBuilder]:
-    dat = messaging.new_message('gpsLocationExternal', valid=True)
-    gps = dat.gpsLocationExternal
+    dat = messaging.new_message(self.gps_service, valid=True)
+    gps = getattr(dat, self.gps_service)
     gps.source = log.GpsLocationData.SensorSource.ublox
     gps.flags = msg.flags
     gps.hasFix = (msg.flags % 2) == 1
@@ -191,7 +195,7 @@ class UbloxMsgParser:
     gps.verticalAccuracy = msg.v_acc * 1e-03
     gps.speedAccuracy = msg.s_acc * 1e-03
     gps.bearingAccuracyDeg = msg.head_acc * 1e-05
-    return ('gpsLocationExternal', dat)
+    return (self.gps_service, dat)
 
   # RXM-SFRBX dispatch to GPS or GLONASS ephemeris
   def _gen_rxm_sfrbx(self, msg) -> tuple[str, capnp.lib.capnp._DynamicStructBuilder] | None:
@@ -493,8 +497,11 @@ class UbloxMsgParser:
 
 
 def main():
-  parser = UbloxMsgParser()
-  pm = messaging.PubMaster(['ubloxGnss', 'gpsLocationExternal'])
+  params = Params()
+  gps_service = 'gpsLocation' if gm_car_params_present(params) else 'gpsLocationExternal'
+
+  parser = UbloxMsgParser(gps_service)
+  pm = messaging.PubMaster(['ubloxGnss', gps_service])
   sock = messaging.sub_sock('ubloxRaw', timeout=100, conflate=False)
 
   while True:

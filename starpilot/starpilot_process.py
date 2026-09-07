@@ -310,6 +310,9 @@ def starpilot_thread():
   while True:
     sm.update()
 
+    if sm.updated["carParams"]:
+      gps_location_service = get_gps_location_service(params, sm["carParams"])
+
     now = datetime.datetime.now(datetime.timezone.utc)
     monotonic_now = time.monotonic()
 

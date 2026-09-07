@@ -1,5 +1,6 @@
 import pytest
 import numpy as np
+from datetime import UTC, datetime
 from types import SimpleNamespace
 from parameterized import parameterized
 
@@ -8,7 +9,14 @@ from opendbc.can import CANPacker, CANParser
 from opendbc.car import Bus, DT_CTRL, structs
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.gm import gmcan
-from opendbc.car.gm.carstate import CarState as GMCarState, get_hard_cruise_buttons, update_auto_hold_drive_timers
+from opendbc.car.gm.carstate import (
+  CarState as GMCarState,
+  PPS_GPS_MESSAGES,
+  decode_gm_pps_gps,
+  get_hard_cruise_buttons,
+  pps_checksum_ok,
+  update_auto_hold_drive_timers,
+)
 from opendbc.car.gm.carcontroller import (
   VisualAlert,
   get_acc_dashboard_always_one,
@@ -94,6 +102,146 @@ class TestBoltGps:
     assert gps["horizontalAccuracy"] == 6.0
     assert gps["verticalAccuracy"] == 10.0
     assert gps["speedAccuracy"] == 0.5
+
+
+class TestPpsGps:
+  _frames = [
+    (0x260, bytes.fromhex("10ddac000d831277"), 0),
+    (0x261, bytes.fromhex("08386fce09ca"), 0),
+    (0x262, bytes.fromhex("6d98820341de"), 0),
+    (0x264, bytes.fromhex("0018f90578b5eaac"), 0),
+    (0x265, bytes.fromhex("1a0000800a0258fd"), 0),
+  ]
+
+  def test_observed_bundle_checksum_and_conversion(self):
+    parser = CANParser("cadillac_ct6_object", [(name, 0) for name in PPS_GPS_MESSAGES], 0)
+    parser.update([(1_000_000_000, self._frames)])
+
+    assert all(pps_checksum_ok(parser.vl_raw[name]) for name in PPS_GPS_MESSAGES)
+    gps = decode_gm_pps_gps(
+      {name: parser.vl[name] for name in PPS_GPS_MESSAGES},
+      {name: parser.vl_raw[name] for name in PPS_GPS_MESSAGES},
+      1_000_000_000,
+    )
+    assert gps is not None
+    assert gps["hasFix"]
+    assert gps["latitude"] == pytest.approx(38.3101, abs=1e-4)
+    assert gps["longitude"] == pytest.approx(-85.7701, abs=1e-4)
+    assert gps["altitude"] == pytest.approx(106.9)
+    assert gps["bearingDeg"] == pytest.approx(56.748)
+    assert gps["horizontalAccuracy"] == pytest.approx(1.0)
+    assert gps["unixTimestampMillis"] == 1788655668655
+
+  @pytest.fixture
+  def bundle(self):
+    parser = CANParser("cadillac_ct6_object", [(name, 0) for name in PPS_GPS_MESSAGES], 0)
+    parser.update([(1_000_000_000, self._frames)])
+    return ({name: dict(parser.vl[name]) for name in PPS_GPS_MESSAGES},
+            {name: parser.vl_raw[name] for name in PPS_GPS_MESSAGES})
+
+  @pytest.mark.parametrize("year,day,date", [
+    (2025, 1, "2025-01-01"), (2025, 365, "2025-12-31"), (2025, 366, None),
+    (2024, 366, "2024-12-31"), (2024, 367, None), (2025, 0, None),
+  ])
+  def test_one_based_day_of_year(self, bundle, year, day, date):
+    values, raw = bundle
+    values["PPS_Time_FO"].update(PPSCldrYr=year, PPSCldrDay=day, PPSTmday=1234)
+    gps = decode_gm_pps_gps(values, raw, 1_000_000_000)
+    if date is None:
+      assert gps is None
+    else:
+      expected = int(datetime.fromisoformat(date).replace(tzinfo=UTC).timestamp() * 1000) + 1234
+      assert gps["unixTimestampMillis"] == expected
+
+  @pytest.mark.parametrize("bad_data", [b"", b"\x01"])
+  def test_checksum_short_input(self, bad_data):
+    assert not pps_checksum_ok(bad_data)
+
+  @pytest.mark.parametrize("lat,lon,valid", [(0.0, 10.0 * 3_600_000, True), (10.0 * 3_600_000, 0.0, True), (0.0, 0.0, False)])
+  def test_coordinate_axes(self, bundle, lat, lon, valid):
+    values, raw = bundle
+    values["PPS_PosLat_FO"]["PPSLat"] = lat
+    values["PPS_PosLong_FO"]["PPSLong"] = lon
+    gps = decode_gm_pps_gps(values, raw, 1_000_000_000)
+    if valid:
+      assert gps is not None
+      assert gps["hasFix"]
+    else:
+      assert gps is None
+
+  def test_get_car_gps_sources_shape(self):
+    cs = GMCarState.__new__(GMCarState)
+    cs.pps_gps = {"hasFix": True}
+    cs.onstar_gps = None
+    sources = cs.get_car_gps_sources()
+    assert sources == {"pps": {"hasFix": True}, "onstar": None}
+
+  @pytest.mark.parametrize("message,signal,value", [
+    ("PPS_PosLat_FO", "PPSLatV", 1),
+    ("PPS_PosLong_FO", "PPSLongV", 1),
+    ("PPS_QualMetrics_FO", "PPS2DAbsPosErrEstmtV", 1),
+    ("PPS_PosLat_FO", "PPSLat", float("nan")),
+    ("PPS_PosLong_FO", "PPSLong", 181 * 3_600_000),
+    ("PPS_QualMetrics_FO", "PPSMd", 6),
+    ("PPS_Time_FO", "PPSTmdayV", 1),
+  ])
+  def test_unusable_position_rejected(self, bundle, message, signal, value):
+    values, raw = bundle
+    values[message][signal] = value
+    assert decode_gm_pps_gps(values, raw, 1_000_000_000) is None
+
+  @pytest.mark.parametrize("invalidity", ["checksum", "position-validity"])
+  def test_burst_cache_and_explicit_invalidation(self, invalidity):
+    parser = CANParser("cadillac_ct6_object", [(name, 0) for name in PPS_GPS_MESSAGES], 0)
+    cs = GMCarState.__new__(GMCarState)
+    cs.pps_gps = None
+    cs._pps_gps_timestamp_nanos = 0
+    parser.update([(1_000_000_000, self._frames[:-1])])
+    cs._update_pps_gps(parser)
+    assert cs.pps_gps is None  # Incomplete startup burst.
+    parser.update([(1_000_000_000, self._frames[-1:])])
+    cs._update_pps_gps(parser)
+    good = cs.pps_gps
+    assert good is not None
+    # No complete new burst: keep its original timestamp for freshness.
+    parser.update([(2_000_000_000, self._frames[:1])])
+    cs._update_pps_gps(parser)
+    assert cs.pps_gps is good
+    parser.update([(2_100_000_000, self._frames)])
+    parser.vl["PPS_PosLat_FO"]["PPSLatBrstID"] = int(parser.vl["PPS_PosLat_FO"]["PPSLatBrstID"]) ^ 1
+    cs._update_pps_gps(parser)
+    assert cs.pps_gps is good  # A mismatched burst must not refresh the fix.
+    bad_frames = ([(addr, data[:-1] + bytes([data[-1] ^ 1]), bus) for addr, data, bus in self._frames]
+                  if invalidity == "checksum" else self._frames)
+    parser.update([(3_000_000_000, bad_frames)])
+    if invalidity == "position-validity":
+      parser.vl["PPS_PosLat_FO"]["PPSLatV"] = 1
+    cs._update_pps_gps(parser)
+    assert cs.pps_gps is None
+    parser.update([(4_000_000_000, self._frames)])
+    cs._update_pps_gps(parser)
+    assert cs.pps_gps is not None
+
+  @pytest.mark.parametrize("speed_bad,heading_bad,elevation_bad,vertical_bad,bearing_bad", [
+    (0, 0, 0, 0, 0), (1, 0, 0, 0, 0), (0, 1, 0, 0, 0), (0, 0, 1, 0, 0),
+    (0, 0, 0, 1, 0), (0, 0, 0, 0, 1), (1, 1, 1, 1, 1),
+  ], ids=["valid", "speed", "heading", "elevation", "vertical-accuracy", "bearing-accuracy", "all-invalid"])
+  def test_optional_field_fallbacks(self, bundle, speed_bad, heading_bad, elevation_bad, vertical_bad, bearing_bad):
+    values, raw = bundle
+    values["PPS_ElevHdSpd_FO"].update(PPSVel=36, PPSVelV=speed_bad, PPSHedng=90, PPSHedngV=heading_bad,
+                                     PPSElvtn=12345, PPSElvtnV=elevation_bad)
+    values["PPS_QualMetrics_FO"].update(PPS2DAbsPosErrEstmt=3.2, PPS3DAbsPosErrEstmt=4.5, PPS3DAbsPosErrEstmtV=vertical_bad,
+                                        PPSAbsHdngErrEstmt=6.0, PPSAbsHdngErrEstmtV=bearing_bad)
+    gps = decode_gm_pps_gps(values, raw, 1_000_000_000)
+    assert gps is not None
+    assert gps["hasFix"]
+    assert gps["speed"] == pytest.approx(0.0 if speed_bad else 10.0)
+    assert gps["bearingDeg"] == (0 if heading_bad else 90)
+    assert gps["altitude"] == pytest.approx(0.0 if elevation_bad else 123.45)
+    assert gps["vNED"] == pytest.approx([gps["speed"], 0, 0] if heading_bad else [0, gps["speed"], 0])
+    assert gps["horizontalAccuracy"] == pytest.approx(3.2)
+    assert gps["verticalAccuracy"] == pytest.approx(0.0 if vertical_bad else 4.5)
+    assert gps["bearingAccuracyDeg"] == pytest.approx(180.0 if bearing_bad else 6.0)
 
   def test_bolt_gps_heading_and_speed_derivation(self):
     cp = SimpleNamespace(

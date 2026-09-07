@@ -4,6 +4,7 @@ import pytest
 
 from cereal import car
 from opendbc.car.ford.values import CAR as FORD_CAR
+from opendbc.car.gm.values import CAR as GM_CAR
 import openpilot.system.manager.process_config as process_config
 from openpilot.system.manager.process_config import (
   allow_uploads,
@@ -152,25 +153,33 @@ class GpsParams:
     self.values[key] = value
 
 
-def test_ublox_waits_for_current_carparams(monkeypatch):
-  monkeypatch.setattr("openpilot.system.manager.process_config.ublox_available", lambda: True)
-  params = GpsParams()
+@pytest.mark.parametrize("brand,fingerprint,persisted,live_brand,expected,car_gps", [
+  ("gm", "", False, "gm", False, False),
+  ("mock", "", False, "mock", False, False),
+  ("ford", "", False, "ford", False, False),
+  ("gm", GM_CAR.CHEVROLET_BOLT_CC_2018_2021, False, "gm", False, False),
+  ("gm", GM_CAR.CHEVROLET_BOLT_CC_2018_2021, True, "gm", True, True),
+  ("gm", GM_CAR.CHEVROLET_BOLT_CC_2018_2021, True, "", True, True),
+  ("gm", "unknown GM", True, "gm", True, False),
+  ("mock", "mock", True, "", True, False),
+  ("ford", FORD_CAR.FORD_MUSTANG_MACH_E_MK1, True, "", False, True),
+  ("gm", "", "corrupt", "", False, False),
+], ids=["missing-gm", "missing-mock", "missing-ford", "stale-live-cp", "persisted-gm",
+        "empty-live-cp", "unknown-gm", "non-car-gps", "vehicle-gps", "corrupt-cp"])
+def test_ublox_startup(monkeypatch, brand, fingerprint, persisted, live_brand, expected, car_gps):
+  monkeypatch.setattr(process_config, "ublox_available", lambda: True)
+  current = car.CarParams.new_message(brand=brand, carFingerprint=fingerprint)
+  params = GpsParams(current if persisted is True else None)
+  if persisted == "corrupt":
+    params.values["CarParams"] = b"invalid_corrupt_data"
+  live_cp = car.CarParams.new_message(brand=live_brand, carFingerprint=fingerprint if live_brand else "")
 
-  assert not ublox(True, params, car.CarParams.new_message(), SimpleNamespace())
+  assert ublox(True, params, live_cp, SimpleNamespace()) is expected
   assert params.get_bool("UbloxAvailable")
-
-
-@pytest.mark.parametrize("car_gps,expected", [(False, True), (True, False)])
-def test_ublox_has_single_external_gps_publisher(monkeypatch, car_gps, expected):
-  monkeypatch.setattr("openpilot.system.manager.process_config.ublox_available", lambda: True)
-  CP = car.CarParams.new_message()
-  if car_gps:
-    CP.brand = "ford"
-    CP.carFingerprint = FORD_CAR.FORD_MUSTANG_MACH_E_MK1
-  else:
-    CP.brand = "mock"
-    CP.carFingerprint = "mock"
-  params = GpsParams(CP)
-
-  assert ublox(True, params, car.CarParams.new_message(), SimpleNamespace()) is expected
   assert params.get_bool("CarGpsAvailable") is car_gps
+  assert not ublox(False, params, live_cp, SimpleNamespace())
+  if persisted is False and fingerprint:
+    params.values["CarParams"] = current.to_bytes()
+    assert ublox(True, params, live_cp, SimpleNamespace())  # Same stale live CP, now with current persisted CP.
+  monkeypatch.setattr(process_config, "ublox_available", lambda: False)
+  assert not ublox(True, params, live_cp, SimpleNamespace())

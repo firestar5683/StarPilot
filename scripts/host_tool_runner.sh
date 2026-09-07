@@ -284,14 +284,27 @@ ensure_host_python_extensions() {
 }
 
 sync_host_generated_headers() {
-  if ! command -v capnpc >/dev/null 2>&1; then
+  local capnp_bin=""
+  local candidate=""
+  for candidate in "${HOST_VENV}"/lib/python*/site-packages/capnproto/install/bin; do
+    if [[ -x "${candidate}/capnpc" ]]; then
+      capnp_bin="${candidate}"
+      break
+    fi
+  done
+
+  local capnpc_cmd="capnpc"
+  if [[ -n "${capnp_bin}" ]]; then
+    capnpc_cmd="${capnp_bin}/capnpc"
+    export PATH="${capnp_bin}:${PATH}"
+  elif ! command -v capnpc >/dev/null 2>&1; then
     return
   fi
 
   (
     cd "${WORK_DIR}"
     mkdir -p cereal/gen/cpp
-    capnpc --src-prefix=cereal \
+    "${capnpc_cmd}" --src-prefix=cereal \
       cereal/log.capnp \
       cereal/car.capnp \
       cereal/legacy.capnp \

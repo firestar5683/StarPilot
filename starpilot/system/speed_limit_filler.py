@@ -55,7 +55,10 @@ class MapSpeedLogger:
 
     self.gps_location_service = get_gps_location_service(self.params)
 
-    self.sm = messaging.SubMaster(["deviceState", "starpilotCarState", "starpilotPlan", self.gps_location_service, "mapdOut", "modelV2"])
+    self.sm = messaging.SubMaster([
+      "carParams", "deviceState", "starpilotCarState", "starpilotPlan", "gpsLocation", "gpsLocationExternal",
+      "mapdOut", "modelV2",
+    ])
 
   @property
   def can_make_overpass_request(self):
@@ -252,6 +255,8 @@ class MapSpeedLogger:
     return relevant_segments
 
   def log_speed_limit(self):
+    if self.sm.updated["carParams"]:
+      self.gps_location_service = get_gps_location_service(self.params, self.sm["carParams"])
     if not self.sm.updated[self.gps_location_service]:
       return
 

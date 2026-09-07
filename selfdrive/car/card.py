@@ -43,6 +43,8 @@ REDNECK_DECREASE_LOOKAHEAD_POINTS = 10
 SLC_SOURCE_NONE = "None"
 EventName = log.OnroadEvent.EventName
 
+GM_GPS_SOURCES = (("device", 2.0), ("pps", 1.0), ("onstar", 2.5))
+
 # forward
 carlog.addHandler(ForwardingHandler(cloudlog))
 
@@ -76,6 +78,22 @@ def can_comm_callbacks(logcan: messaging.SubSocket, sendcan: messaging.PubSocket
   return can_recv, can_send
 
 
+def _gps_sample_is_healthy(sample: dict) -> bool:
+  if not sample.get("hasFix", False):
+    return False
+  try:
+    latitude = float(sample["latitude"])
+    longitude = float(sample["longitude"])
+    return (math.isfinite(latitude) and math.isfinite(longitude) and
+            -90.0 <= latitude <= 90.0 and -180.0 <= longitude <= 180.0 and
+            (latitude != 0.0 or longitude != 0.0) and
+            math.isfinite(float(sample["altitude"])) and
+            math.isfinite(float(sample["speed"])) and
+            math.isfinite(float(sample["bearingDeg"])))
+  except (KeyError, TypeError, ValueError):
+    return False
+
+
 class Car:
   CI: CarInterfaceBase
   RI: RadarInterfaceBase
@@ -85,7 +103,9 @@ class Car:
 
   def __init__(self, CI=None, RI=None) -> None:
     self.can_sock = messaging.sub_sock('can', timeout=20)
-    self.sm = messaging.SubMaster(['pandaStates', 'carControl', 'onroadEvents', 'radarState', 'longitudinalPlan'])
+    self.sm = messaging.SubMaster([
+      'pandaStates', 'carControl', 'onroadEvents', 'radarState', 'longitudinalPlan', 'gpsLocation',
+    ])
     self.pm = messaging.PubMaster(['sendcan', 'carState', 'carParams', 'carOutput', 'liveTracks'])
     self.gps_pm = None
 
@@ -93,6 +113,8 @@ class Car:
     self._last_car_gps_timestamp_nanos = 0
     self._last_car_gps_received_monotonic = 0.0
     self._last_car_gps_publish_monotonic = 0.0
+    self._gm_gps = dict.fromkeys(source for source, _ in GM_GPS_SOURCES)
+    self._gm_gps_had_fix = False
 
     self.CC_prev = car.CarControl.new_message()
     self.CS_prev = car.CarState.new_message()
@@ -141,8 +163,9 @@ class Car:
       self.RI = RI
 
     car_gps_supported = bool(getattr(self.CI.CS, 'car_gps_supported', False))
+    self.gm_gps_supported = self.CP.brand == "gm"
     self.params.put_bool("CarGpsAvailable", car_gps_supported)
-    if car_gps_supported:
+    if car_gps_supported or self.gm_gps_supported:
       self.gps_pm = messaging.PubMaster(['gpsLocationExternal'])
 
     aol_available = always_on_lateral_available(self.CP)
@@ -349,39 +372,80 @@ class Car:
     FPCS = self.starpilot_card.update(CS, FPCS, self.sm, self.starpilot_toggles)
     return CS, RD, FPCS
 
+  def _publish_gm_gps(self, now: float) -> None:
+    if self.sm.updated.get("gpsLocation", False):
+      self._gm_gps["device"] = (self.sm["gpsLocation"].to_dict(), now) if self.sm.valid["gpsLocation"] else None
+
+    for source, sample in self.CI.CS.get_car_gps_sources().items():
+      previous = self._gm_gps[source]
+      if sample is None:
+        self._gm_gps[source] = None
+      elif previous is None or sample["timestamp_nanos"] > previous[0]["timestamp_nanos"]:
+        self._gm_gps[source] = (sample.copy(), now)
+
+    # Device > PPS > OnStar, with each source's own freshness window.
+    selected = None
+    for source, timeout in GM_GPS_SOURCES:
+      candidate = self._gm_gps[source]
+      if candidate is not None and now - candidate[1] <= timeout and _gps_sample_is_healthy(candidate[0]):
+        selected = candidate[0]
+        break
+
+    if selected is None:
+      if not self._gm_gps_had_fix:
+        return
+    elif self._gm_gps_had_fix and (now - self._last_car_gps_publish_monotonic < 0.2):
+      return
+
+    gps_send = messaging.new_message('gpsLocationExternal', valid=selected is not None)
+    if selected is not None:
+      gps_send.gpsLocationExternal = {key: value for key, value in selected.items() if key != "timestamp_nanos"}
+      if source != "device":
+        gps_send.gpsLocationExternal.source = "car"
+    else:
+      # Clear subscribers' cached fix once, then let the service become stale.
+      gps_send.gpsLocationExternal.hasFix = False
+    assert self.gps_pm is not None
+    self.gps_pm.send('gpsLocationExternal', gps_send)
+    self._gm_gps_had_fix = selected is not None
+    self._last_car_gps_publish_monotonic = now
+
   def state_publish(self, CS: car.CarState, RD: structs.RadarDataT | None, FPCS: custom.StarPilotCarState):
     """carState and carParams publish loop"""
 
-    get_car_gps = getattr(self.CI.CS, 'get_car_gps', None)
-    car_gps = get_car_gps() if get_car_gps is not None else None
     now = time.monotonic()
-    if car_gps is not None and car_gps['timestamp_nanos'] > self._last_car_gps_timestamp_nanos:
-      self._last_car_gps_timestamp_nanos = car_gps['timestamp_nanos']
-      self._last_car_gps_received_monotonic = now
+    if self.gm_gps_supported:
+      self._publish_gm_gps(now)
+    else:
+      get_car_gps = getattr(self.CI.CS, 'get_car_gps', None)
+      car_gps = get_car_gps() if get_car_gps is not None else None
+      if car_gps is not None and car_gps['timestamp_nanos'] > self._last_car_gps_timestamp_nanos:
+        self._last_car_gps_timestamp_nanos = car_gps['timestamp_nanos']
+        self._last_car_gps_received_monotonic = now
 
-    if car_gps is not None and self._last_car_gps_received_monotonic > 0.0 and \
-        now - self._last_car_gps_received_monotonic <= 2.5 and \
-        now - self._last_car_gps_publish_monotonic >= 0.2:
-      gps_send = messaging.new_message('gpsLocationExternal', valid=True)
-      gps = gps_send.gpsLocationExternal
-      gps.flags = 0
-      gps.latitude = car_gps['latitude']
-      gps.longitude = car_gps['longitude']
-      gps.altitude = car_gps['altitude']
-      gps.speed = car_gps['speed']
-      gps.bearingDeg = car_gps['bearingDeg']
-      gps.horizontalAccuracy = car_gps['horizontalAccuracy']
-      gps.unixTimestampMillis = car_gps['unixTimestampMillis']
-      gps.source = log.GpsLocationData.SensorSource.car
-      gps.vNED = car_gps['vNED']
-      gps.verticalAccuracy = car_gps['verticalAccuracy']
-      gps.bearingAccuracyDeg = car_gps['bearingAccuracyDeg']
-      gps.speedAccuracy = car_gps['speedAccuracy']
-      gps.hasFix = car_gps['hasFix']
-      gps.satelliteCount = car_gps['satelliteCount']
-      assert self.gps_pm is not None
-      self.gps_pm.send('gpsLocationExternal', gps_send)
-      self._last_car_gps_publish_monotonic = now
+      if car_gps is not None and self._last_car_gps_received_monotonic > 0.0 and \
+          now - self._last_car_gps_received_monotonic <= 2.5 and \
+          now - self._last_car_gps_publish_monotonic >= 0.2:
+        gps_send = messaging.new_message('gpsLocationExternal', valid=True)
+        gps = gps_send.gpsLocationExternal
+        gps.flags = 0
+        gps.latitude = car_gps['latitude']
+        gps.longitude = car_gps['longitude']
+        gps.altitude = car_gps['altitude']
+        gps.speed = car_gps['speed']
+        gps.bearingDeg = car_gps['bearingDeg']
+        gps.horizontalAccuracy = car_gps['horizontalAccuracy']
+        gps.unixTimestampMillis = car_gps['unixTimestampMillis']
+        gps.source = log.GpsLocationData.SensorSource.car
+        gps.vNED = car_gps['vNED']
+        gps.verticalAccuracy = car_gps['verticalAccuracy']
+        gps.bearingAccuracyDeg = car_gps['bearingAccuracyDeg']
+        gps.speedAccuracy = car_gps['speedAccuracy']
+        gps.hasFix = car_gps['hasFix']
+        gps.satelliteCount = car_gps['satelliteCount']
+        assert self.gps_pm is not None
+        self.gps_pm.send('gpsLocationExternal', gps_send)
+        self._last_car_gps_publish_monotonic = now
 
     # carParams - logged every 50 seconds (> 1 per segment)
     if self.sm.frame % int(50. / DT_CTRL) == 0:
