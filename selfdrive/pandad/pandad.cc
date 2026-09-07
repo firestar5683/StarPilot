@@ -45,8 +45,7 @@ ExitHandler do_exit;
 
 static uint64_t last_door_lock_command_time = 0;
 
-static bool is_tesla_preap(Params &params) {
-  const std::string car_params = params.get("CarParams");
+static bool is_tesla_preap(const std::string &car_params) {
   if (car_params.empty()) {
     return false;
   }
@@ -483,6 +482,9 @@ void pandad_run(std::vector<Panda *> &pandas) {
   Panda *peripheral_panda = pandas[0];
   bool engaged = false;
   bool is_onroad = false;
+  bool was_onroad = false;
+  bool tesla_preap = false;
+  bool tesla_preap_checked = false;
 
   // Main loop: receive CAN data and process states
   while (!do_exit && check_all_connected(pandas)) {
@@ -496,13 +498,26 @@ void pandad_run(std::vector<Panda *> &pandas) {
     // Process panda state at 10 Hz
     if (rk.frame() % 10 == 0) {
       sm.update(0);
-      const bool preap_aol_engaged = is_tesla_preap(params) &&
+      is_onroad = params.getBool("IsOnroad");
+      const bool ignore_ignition_line = params.getBool("IgnoreIgnitionLine");
+
+      // Re-evaluate after each drive transition once fingerprinting is ready.
+      if (is_onroad && !was_onroad) {
+        tesla_preap = false;
+        tesla_preap_checked = false;
+      }
+      was_onroad = is_onroad;
+
+      if (is_onroad && !tesla_preap_checked && params.getBool("ControlsReady")) {
+        tesla_preap = is_tesla_preap(params.get("CarParams"));
+        tesla_preap_checked = true;
+      }
+
+      const bool preap_aol_engaged = tesla_preap &&
                                      sm["starpilotCarState"].getStarpilotCarState().getAlwaysOnLateralEnabled();
       engaged = sm.allAliveAndValid({"selfdriveState", "starpilotCarState"}) && (
         sm["selfdriveState"].getSelfdriveState().getEnabled() || preap_aol_engaged
       );
-      is_onroad = params.getBool("IsOnroad");
-      const bool ignore_ignition_line = params.getBool("IgnoreIgnitionLine");
       process_panda_state(pandas, &pm, engaged, is_onroad, spoofing_started, ignore_ignition_line);
       panda_safety.configureSafetyMode(is_onroad);
     }
