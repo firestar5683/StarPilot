@@ -7,13 +7,16 @@ from opendbc.car.structs import CarParams
 from opendbc.car import gen_empty_fingerprint
 from opendbc.car.honda.interface import CarInterface
 from opendbc.car.honda.carcontroller import (
+  BOSCH_BRAKE_FORCE_ON,
+  BOSCH_BRAKE_FORCE_RELEASE,
   CarController,
   get_civic_bosch_modified_steering_pressed,
   get_civic_bosch_modified_torque_lpf_tau,
   get_honda_bosch_wind_brake_mps2,
+  update_honda_bosch_braking,
   update_honda_bosch_live_learning,
 )
-from opendbc.car.honda.hondacan import create_lkas_hud
+from opendbc.car.honda.hondacan import create_acc_commands, create_lkas_hud
 from opendbc.car.honda.fingerprints import FW_VERSIONS
 from opendbc.car.honda.values import CAR, DBC, HONDA_BOSCH, HONDA_BOSCH_TJA_CONTROL, CarControllerParams, HondaFlags, HondaSafetyFlags, \
                                      HondaStarPilotFlags
@@ -26,6 +29,73 @@ def get_test_toggles() -> SimpleNamespace:
 
 
 class TestHondaFingerprint:
+  @staticmethod
+  def _acc_control_values(active, accel, gas=500, gas_force=0.5, braking=False):
+    class FakePacker:
+      @staticmethod
+      def make_can_msg(name, bus, values):
+        return name, bus, values
+
+    can = SimpleNamespace(pt=1)
+    cp = SimpleNamespace(carFingerprint=CAR.HONDA_CRV_5G)
+    commands = create_acc_commands(FakePacker(), can, True, active, accel, gas, 0, cp, gas_force, braking)
+    assert commands[-1][0] == "ACC_CONTROL"
+    return commands[-1][2]
+
+  def test_bosch_acc_commands_reject_fault_route_gas_brake_conflict(self):
+    # Route 00000002--aa8501ddcb broadcast P061B while Alpha Long sent
+    # approximately accel=-0.27, positive gas, and both brake bits. Drag/grade
+    # compensation calculated positive gas, so same-domain arbitration keeps
+    # propulsion without reproducing the simultaneous request.
+    braking = update_honda_bosch_braking(False, 0.2, False, True)
+    values = self._acc_control_values(True, -0.27, gas=160, gas_force=0.2, braking=braking)
+
+    assert values["GAS_COMMAND"] == 160
+    assert values["ACCEL_COMMAND"] == pytest.approx(-0.27)
+    assert values["BRAKE_REQUEST"] == 0
+    assert values["BRAKE_LIGHTS"] == 0
+
+  @pytest.mark.parametrize("active", [False, True])
+  @pytest.mark.parametrize("accel", [-3.5, -0.27, -0.2, -0.1, 0.0, 0.01, 2.0])
+  @pytest.mark.parametrize("gas_force", [-0.5, 0.0, 0.5])
+  @pytest.mark.parametrize("braking", [False, True])
+  def test_bosch_acc_commands_never_request_gas_and_braking_together(self, active, accel, gas_force, braking):
+    values = self._acc_control_values(active, accel, gas_force=gas_force, braking=braking)
+
+    assert not (values["GAS_COMMAND"] > 0 and values["BRAKE_REQUEST"] == 1)
+    assert not (values["GAS_COMMAND"] > 0 and values["BRAKE_LIGHTS"] == 1)
+    if values["GAS_COMMAND"] > 0:
+      assert active
+
+  def test_bosch_acc_commands_preserve_road_load_gas_above_brake_threshold(self):
+    # Suppressing this positive drag/grade-compensated gas from raw accel
+    # causes the acceleration/coast cycle seen in full E2E road testing.
+    values = self._acc_control_values(True, -0.27, gas=500, gas_force=0.3)
+
+    assert values["GAS_COMMAND"] == 500
+    assert values["ACCEL_COMMAND"] == pytest.approx(-0.27)
+    assert values["BRAKE_REQUEST"] == 0
+    assert values["BRAKE_LIGHTS"] == 0
+
+  def test_bosch_acc_commands_do_not_send_gas_without_positive_force(self):
+    values = self._acc_control_values(True, 0.2, gas=500, gas_force=-0.4)
+
+    assert values["GAS_COMMAND"] == -30000
+
+  def test_bosch_braking_uses_force_hysteresis(self):
+    braking = update_honda_bosch_braking(False, BOSCH_BRAKE_FORCE_ON - 0.01, False, True)
+    assert braking
+
+    braking = update_honda_bosch_braking(braking, -0.05, False, True)
+    assert braking
+
+    braking = update_honda_bosch_braking(braking, BOSCH_BRAKE_FORCE_RELEASE + 0.01, False, True)
+    assert not braking
+
+  def test_bosch_braking_preserves_stopping_and_resets_inactive(self):
+    assert update_honda_bosch_braking(False, 0.5, True, True)
+    assert not update_honda_bosch_braking(True, -1.0, False, False)
+
   def test_honda_lkas_hud_shows_lane_lines_when_lateral_only_is_active(self):
     class FakePacker:
       @staticmethod

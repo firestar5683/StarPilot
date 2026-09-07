@@ -23,6 +23,20 @@ from openpilot.common.params import Params
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
 LongCtrlState = structs.CarControl.Actuators.LongControlState
 
+BOSCH_BRAKE_FORCE_ON = -0.12
+BOSCH_BRAKE_FORCE_RELEASE = -0.02
+
+
+def update_honda_bosch_braking(braking: bool, gas_pedal_force: float, stopping: bool, long_active: bool) -> bool:
+  """Select Bosch brake mode from the same road-load-adjusted force used for gas."""
+  if not long_active:
+    return False
+  if stopping:
+    return True
+  if braking:
+    return gas_pedal_force <= BOSCH_BRAKE_FORCE_RELEASE
+  return gas_pedal_force < BOSCH_BRAKE_FORCE_ON
+
 
 def get_civic_bosch_modified_torque_lpf_tau(torque_cmd: float, prev_torque_cmd: float, v_ego: float) -> float:
   torque_delta = abs(float(torque_cmd) - float(prev_torque_cmd))
@@ -238,6 +252,7 @@ class CarController(CarControllerBase):
     self.steering_pressed_filter_s = 0.0
     self.steering_pressed_robust_prev = False
     self.bosch_last_gas = 0.0
+    self.bosch_braking = False
     self.bosch_gas_factor = self.param_store.get_float("HondaGasFactorParams", default=1.0)
     self.bosch_wind_factor = self.param_store.get_float("HondaWindFactorParams", default=1.0)
     self.bosch_wind_factor_before_brake = self.bosch_wind_factor
@@ -472,12 +487,16 @@ class CarController(CarControllerBase):
           self.bosch_last_gas = self.gas
 
           stopping = actuators.longControlState == LongCtrlState.stopping
+          bosch_braking = None
+          if not self.mvl_accord_mode:
+            self.bosch_braking = update_honda_bosch_braking(self.bosch_braking, gas_pedal_force, stopping, CC.longActive)
+            bosch_braking = self.bosch_braking
           self.stopping_counter = self.stopping_counter + 1 if stopping else 0
           if not self.mvl_accord_mode or mvl_radar_owned:
             can_sends.extend(
               hondacan.create_acc_commands(
                 self.packer, self.CAN, CC.enabled, CC.longActive, self.accel, self.gas, self.stopping_counter, self.CP,
-                gas_force=gas_pedal_force if self.mvl_accord_mode else None,
+                gas_force=gas_pedal_force, braking=bosch_braking,
               )
             )
         else:
