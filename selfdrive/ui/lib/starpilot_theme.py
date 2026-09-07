@@ -6,6 +6,7 @@ from pathlib import Path
 import pyray as rl
 
 from openpilot.common.basedir import BASEDIR
+from openpilot.system.ui.lib.application import gui_app
 
 ACTIVE_THEME_COLORS_PATH = Path(BASEDIR) / "starpilot/assets/active_theme/colors/colors.json"
 STOCK_THEME_COLORS_PATH = Path(BASEDIR) / "starpilot/assets/stock_theme/colors/colors.json"
@@ -21,6 +22,7 @@ _FALLBACK_THEME_COLORS = {
 }
 
 _THEME_COLOR_CACHE: dict[str, object] = {
+  "frame": None,
   "stamp": None,
   "colors": None,
 }
@@ -89,7 +91,12 @@ def _build_color(entry: object, fallback: tuple[int, int, int, int]) -> rl.Color
 
 
 def _load_theme_colors() -> dict[str, rl.Color]:
+  frame = gui_app.frame
+  if frame == _THEME_COLOR_CACHE["frame"] and _THEME_COLOR_CACHE["colors"] is not None:
+    return _THEME_COLOR_CACHE["colors"]  # type: ignore[return-value]
+
   stamp = (_file_stamp(STOCK_THEME_COLORS_PATH), _file_stamp(ACTIVE_THEME_COLORS_PATH))
+  _THEME_COLOR_CACHE["frame"] = frame
   if stamp == _THEME_COLOR_CACHE["stamp"] and _THEME_COLOR_CACHE["colors"] is not None:
     return _THEME_COLOR_CACHE["colors"]  # type: ignore[return-value]
 
