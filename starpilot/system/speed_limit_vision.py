@@ -2825,6 +2825,7 @@ class SpeedLimitVisionDaemon:
       self._maybe_commit_training_capture(now)
       self._maybe_capture_map_transition_miss(now)
 
+      frame_bgr = None
       ratekeeper.keep_time()
 
 
