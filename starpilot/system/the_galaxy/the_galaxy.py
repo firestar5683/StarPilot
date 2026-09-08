@@ -56,11 +56,14 @@ from panda import Panda
 from openpilot.starpilot.assets.model_manager import (
   MODEL_LAB_DOWNLOAD_PARAM,
   canonical_model_key,
+  disable_big_model_profile,
   external_gpu_available,
+  get_model_profile,
   is_builtin_model_key,
   model_accelerator_artifact_filename,
   model_key_aliases,
   model_uses_external_gpu,
+  set_model_profile,
 )
 from openpilot.starpilot.common.model_lab import (
   MODEL_LAB_CONFIG_PARAM,
@@ -5164,6 +5167,7 @@ def setup(app):
       "/assets/components/settings.js",
       "/assets/components/home/home.js",
       "/assets/components/home/home.css",
+      "/assets/mobile/js/params.js",
       "/assets/components/tools/device_settings.js",
       "/assets/components/tools/device_settings.css",
       "/assets/components/tools/device_settings_layout.json",
@@ -5330,6 +5334,7 @@ def setup(app):
     status["slots"] = slots
     status["controller_slots"] = controller_slots
     status["controller_options"] = controller_options
+    status["disconnect_controllers_offroad"] = params.get_bool("BluetoothDisconnectControllersOffroad")
     is_metric = params.get_bool("IsMetric")
     speed_minimum, speed_maximum = controller_speed_bounds(is_metric)
     status["speed_unit"] = "km/h" if is_metric else "mph"
@@ -5339,13 +5344,16 @@ def setup(app):
 
   @app.route("/api/wheel-controls/<operation>", methods=["POST"])
   def wheel_controls_operation(operation):
-    if operation not in {"action", "learn", "cancel", "delete", "clear", "test", "test-stop", "joystick"}:
+    if operation not in {"action", "learn", "cancel", "delete", "clear", "test", "test-stop", "joystick", "offroad-disconnect"}:
       return jsonify({"error": "Unknown wheel control operation."}), 404
     if not params.get_bool("IsOffroad"):
       return jsonify({"error": "Wheel controls can only be configured offroad."}), 409
 
     data = request.get_json(silent=True) or {}
     try:
+      if operation == "offroad-disconnect":
+        params.put_bool("BluetoothDisconnectControllersOffroad", bool(data.get("enabled", False)))
+        return jsonify({"message": "Offroad controller disconnect updated."}), 200
       if operation == "action":
         slot_index = int(data.get("slot", -1))
         key = str(data.get("key") or "").strip()
@@ -5444,6 +5452,27 @@ def setup(app):
     if not SETTINGS_CATALOG_PATH.is_file():
       return "Settings catalog not found", 404
     return send_file(str(SETTINGS_CATALOG_PATH), mimetype="application/json")
+
+  @app.route("/assets/mobile/manifest.json", methods=["GET"])
+  def mobile_manifest():
+    manifest_path = Path(app.static_folder) / "mobile" / "manifest.json"
+    if not manifest_path.is_file():
+      return jsonify({"error": "Big Dipper manifest not found"}), 404
+
+    try:
+      manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
+    except (OSError, ValueError, json.JSONDecodeError):
+      return jsonify({"error": "Big Dipper manifest is invalid"}), 500
+
+    slug = _read_galaxy_text(_get_galaxy_dir() / "glxyslug")
+    if re.fullmatch(r"[A-Za-z0-9]{16}", slug):
+      manifest_data["start_url"] = f"https://galaxy.firestar.link/{slug}"
+    else:
+      manifest_data["start_url"] = "/mobile/"
+
+    response = jsonify(manifest_data)
+    response.mimetype = "application/manifest+json"
+    return _no_store_response(response)
 
   @app.route("/manifest.json", methods=["GET"])
   @app.route("/assets/manifest.json", methods=["GET"])
@@ -6393,6 +6422,9 @@ def setup(app):
                   break
           except Exception:
             pass
+
+        profile = "big" if model_uses_external_gpu(selected_model) else "small"
+        set_model_profile(params, profile, selected_model)
       elif key in ("ModelVersion", "DrivingModelVersion"):
         params.put("ModelVersion", str_val)
         params.put("DrivingModelVersion", str_val)
@@ -6590,6 +6622,8 @@ def setup(app):
     return jsonify({
       "models": models,
       "currentModel": _current_model_key(),
+      "activeSmallModel": _active_model_key("small"),
+      "activeBigModel": _active_model_key("big"),
       "summary": {
         "installed": sum(1 for model in models if model["installed"]),
         "missing": sum(1 for model in models if not model["installed"]),
@@ -6641,20 +6675,23 @@ def setup(app):
       },
       "manifest": {
         "version": params.get("ModelManifestVersion", encoding="utf-8") or "unknown",
-        "shortcomings": [
-          "The current manifest does not consistently declare model size; legacy non-Chestnut entries are treated as small.",
-          "The current manifest does not publish AMD-compiled variants for its ordinary small-model downloads.",
-          "The current manifest does not declare lateral or longitudinal quality/capability tags.",
-          "The current manifest does not declare output-contract compatibility, memory, or frame-time measurements.",
-        ],
-        "opportunities": [
-          "Publish model_size and model_lab_eligible for every model.",
-          "Publish an accelerator_artifacts.chestnut entry pointing to a precompiled AMD pickle for each supported small model.",
-          "Publish role scores and pairing notes from replay evaluations.",
-          "Publish architecture, output-contract, peak-memory, and p50/p95 execution metadata.",
-        ],
       },
     }
+
+  def _activate_preferred_model_profile():
+    """Restore the model that the normal small/big profile system would run."""
+    profile = "big" if external_gpu_available() and _active_model_key("big") else "small"
+    model_key, model_name, model_version = get_model_profile(params, profile)
+    if not model_key:
+      model_key, model_name, model_version = _default_model_key(), _default_model_name(), _default_model_version()
+
+    params.put("Model", model_key)
+    params.put("DrivingModel", model_key)
+    params.put("DrivingModelName", model_name or model_key)
+    if model_version:
+      params.put("ModelVersion", model_version)
+      params.put("DrivingModelVersion", model_version)
+    return model_name or model_key
 
   @app.route("/api/model-laboratory", methods=["GET", "PUT"])
   def model_laboratory():
@@ -6694,7 +6731,8 @@ def setup(app):
         params.put("DrivingModelVersion", lateral["version"])
       message = "Model Laboratory enabled. The pair will load on the next drive."
     else:
-      message = "Model Laboratory disabled."
+      restored_model = _activate_preferred_model_profile()
+      message = f"Model Laboratory disabled. {restored_model} will be used next."
 
     return jsonify({"message": message, **_model_lab_status_payload()}), 200
 
@@ -6702,8 +6740,6 @@ def setup(app):
   def download_model_laboratory_artifact():
     if params.get_bool("IsOnroad"):
       return jsonify({"error": "Model Laboratory artifacts can only be downloaded while parked."}), 403
-    if not external_gpu_available():
-      return jsonify({"error": "Chestnut is not connected and firmware-ready."}), 409
     if (
       params_memory.get_bool(MODEL_DOWNLOAD_ALL_PARAM)
       or (params_memory.get(MODEL_DOWNLOAD_PARAM, encoding="utf-8") or "")
@@ -6717,16 +6753,50 @@ def setup(app):
     if model is None:
       return jsonify({"error": f"Unknown model '{model_key}'."}), 404
     if not model.get("modelLabEligible"):
-      return jsonify({"error": "Only compatible small models can be prepared for Model Laboratory."}), 409
+      return jsonify({"error": "Only compatible small models have Model Laboratory eGPU variants."}), 409
     if not model.get("modelLabArtifactAvailable"):
       return jsonify({"error": "The manifest does not publish a precompiled AMD artifact for this model."}), 409
     if model.get("modelLabArtifactInstalled"):
-      return jsonify({"message": f"\"{model['label']}\" is already prepared for Chestnut."}), 200
+      return jsonify({"message": f"The eGPU variant for \"{model['label']}\" is already downloaded."}), 200
 
     params_memory.remove(MODEL_CANCEL_DOWNLOAD_PARAM)
     params_memory.put(MODEL_LAB_DOWNLOAD_PARAM, model_key)
-    params_memory.put(MODEL_DOWNLOAD_PROGRESS_PARAM, "Downloading precompiled AMD artifact...")
-    return jsonify({"message": f"Started preparing \"{model['label']}\" for Chestnut."}), 200
+    params_memory.put(MODEL_DOWNLOAD_PROGRESS_PARAM, "Starting eGPU variant download...")
+    return jsonify({"message": f"Started downloading the eGPU variant for \"{model['label']}\"."}), 200
+
+  @app.route("/api/model-laboratory/artifact", methods=["DELETE"])
+  def delete_model_laboratory_artifact():
+    if params.get_bool("IsOnroad"):
+      return jsonify({"error": "Model Laboratory eGPU variants can only be deleted while parked."}), 403
+    if (
+      params_memory.get_bool(MODEL_DOWNLOAD_ALL_PARAM)
+      or (params_memory.get(MODEL_DOWNLOAD_PARAM, encoding="utf-8") or "")
+      or (params_memory.get(MODEL_LAB_DOWNLOAD_PARAM, encoding="utf-8") or "")
+    ):
+      return jsonify({"error": "Cannot delete an eGPU variant while a model download is in progress."}), 409
+
+    data = request.get_json(silent=True) or {}
+    model_key = canonical_model_key(str(data.get("model") or "").strip())
+    model = next((entry for entry in get_model_catalog() if entry["value"] == model_key), None)
+    if model is None:
+      return jsonify({"error": f"Unknown model '{model_key}'."}), 404
+    if not model.get("modelLabArtifactInstalled"):
+      return jsonify({"message": f"No eGPU variant is downloaded for \"{model['label']}\"."}), 200
+
+    config = normalize_model_lab_config(params.get(MODEL_LAB_CONFIG_PARAM, encoding="utf-8") or "")
+    if config["enabled"] and model_key in (config["lateralModel"], config["longitudinalModel"]):
+      return jsonify({"error": "Disable Model Laboratory or choose a different pair before deleting this eGPU variant."}), 409
+
+    artifact_path = MODELS_PATH / model_accelerator_artifact_filename(model_key)
+    try:
+      artifact_path.unlink(missing_ok=True)
+      Path(get_manifest_path(artifact_path)).unlink(missing_ok=True)
+      for chunk_path in artifact_path.parent.glob(f"{artifact_path.name}.chunk*of*"):
+        chunk_path.unlink(missing_ok=True)
+    except Exception as exception:
+      return jsonify({"error": f"Failed deleting the eGPU variant: {exception}"}), 500
+
+    return jsonify({"message": f"Deleted the eGPU variant for \"{model['label']}\".", **_model_lab_status_payload()}), 200
 
   @app.route("/api/models/preferences", methods=["GET", "PUT"])
   def get_or_set_models_preferences():
@@ -6758,6 +6828,59 @@ def setup(app):
 
     return jsonify({"message": f"Updated model {' and '.join(changed)}."}), 200
 
+  @app.route("/api/models/active", methods=["PUT"])
+  def set_active_model_profile():
+    if params.get_bool("IsOnroad"):
+      return jsonify({"error": "Cannot change active models while driving."}), 403
+
+    data = request.get_json(silent=True) or {}
+    profile = str(data.get("profile") or "").strip().lower()
+    if profile not in ("small", "big"):
+      return jsonify({"error": "Model profile must be 'small' or 'big'."}), 400
+
+    model_key = canonical_model_key(str(data.get("model") or "").strip())
+    if not model_key:
+      if profile != "big":
+        return jsonify({"error": "Active Small cannot be disabled."}), 400
+
+      lab_config = normalize_model_lab_config(params.get(MODEL_LAB_CONFIG_PARAM, encoding="utf-8") or "")
+      if lab_config["enabled"]:
+        lab_config["enabled"] = False
+        params.put(MODEL_LAB_CONFIG_PARAM, lab_config)
+        params.remove(MODEL_LAB_RUNTIME_PARAM)
+
+      disable_big_model_profile(params)
+      restored_model = _activate_preferred_model_profile()
+      return jsonify({
+        "message": f"Active Big disabled. {restored_model} will be used even when Chestnut is connected.",
+        "profile": profile,
+        "model": "",
+      }), 200
+
+    catalog = {model["value"]: model for model in get_model_catalog()}
+    model = catalog.get(model_key)
+    if model is None:
+      return jsonify({"error": f"Unknown model '{model_key}'."}), 404
+    if not model["installed"]:
+      return jsonify({"error": f"Download '{model['label']}' before selecting it."}), 409
+    if bool(model["requiresGpu"]) != (profile == "big"):
+      expected = "an eGPU model" if profile == "big" else "an on-device model"
+      return jsonify({"error": f"Active {profile.title()} must be {expected}."}), 409
+
+    lab_config = normalize_model_lab_config(params.get(MODEL_LAB_CONFIG_PARAM, encoding="utf-8") or "")
+    if lab_config["enabled"]:
+      lab_config["enabled"] = False
+      params.put(MODEL_LAB_CONFIG_PARAM, lab_config)
+      params.remove(MODEL_LAB_RUNTIME_PARAM)
+
+    set_model_profile(params, profile, model_key, model["label"], model["version"])
+    active_model = _activate_preferred_model_profile()
+    return jsonify({
+      "message": f"Active {profile.title()} set to '{model['label']}'. {active_model} will be used next.",
+      "profile": profile,
+      "model": model_key,
+    }), 200
+
   @app.route("/api/models/status", methods=["GET"])
   def get_models_status():
     models = get_model_catalog()
@@ -6769,6 +6892,8 @@ def setup(app):
 
     downloading = bool(model_to_download or lab_model_to_download) or download_all
     current_model = _current_model_key()
+    active_small_model = _active_model_key("small")
+    active_big_model = _active_model_key("big")
     sort_mode = read_legacy_param_file(MODEL_SORT_MODE_PARAM, DEFAULT_MODEL_SORT_MODE)
     terminal = progress in ("Downloaded!", "All models downloaded!") or bool(re.search(r"cancelled|exists|failed|offline|invalid|error", progress, re.IGNORECASE))
     summary = {
@@ -6789,6 +6914,8 @@ def setup(app):
       cancelling,
       progress,
       current_model,
+      active_small_model,
+      active_big_model,
       sort_mode,
       terminal,
       bool(params.get_bool("IsOnroad")),
@@ -6825,6 +6952,8 @@ def setup(app):
       "terminal": terminal,
       "models": models,
       "currentModel": current_model,
+      "activeSmallModel": active_small_model,
+      "activeBigModel": active_big_model,
       "summary": summary,
       "sortMode": sort_mode,
     }), 200
@@ -6946,7 +7075,8 @@ def setup(app):
       return jsonify({"error": "Missing model key."}), 400
 
     current_model = _current_model_key()
-    if model_key == current_model:
+    active_models = {current_model, _active_model_key("small"), _active_model_key("big")}
+    if model_key in active_models:
       return jsonify({"error": "Cannot delete the currently active model."}), 409
 
     catalog = {model["value"]: model for model in get_model_catalog()}
@@ -7187,6 +7317,10 @@ def setup(app):
   def _current_model_key():
     current_model = _param_text(params.get("Model", encoding="utf-8") or params.get("DrivingModel", encoding="utf-8"))
     return canonical_model_key(current_model) or _default_model_key()
+
+  def _active_model_key(profile):
+    model_key, _, _ = get_model_profile(params, profile)
+    return canonical_model_key(model_key)
 
   def is_model_installed(model_key, model_version, on_disk_files):
     del model_version

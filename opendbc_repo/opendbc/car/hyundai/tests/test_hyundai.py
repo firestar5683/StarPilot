@@ -901,7 +901,21 @@ class TestHyundaiFingerprint:
     fingerprint[2][0x485] = 8
     CP = CarInterface.get_params(CAR.KIA_RAY_EV, fingerprint, [], False, False, False, None)
 
-    assert not (CP.flags & HyundaiFlags.SEND_LFA)
+    assert CP.flags & HyundaiFlags.SEND_LFA
+    assert CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.CAN_REFRESH_MSGS
+
+  def test_ray_ev_uses_carrot_eight_byte_lfa_frame(self):
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[2][0x485] = 8
+    CP = CarInterface.get_params(CAR.KIA_RAY_EV, fingerprint, [], False, False, False, None)
+    controller = CarController(DBC[CP.carFingerprint], CP)
+
+    msg = hyundaican.create_ray_lfahda_mfc(controller._ray_lfa_packer, True, 2)
+    assert msg[0] == 0x485
+    assert len(msg[1]) == 8
+    assert msg[1][0] & 0x03 == 2
+    assert msg[1][2] & 0x10 == 0x10
+    assert msg[1][3] & 0x03 == 2
 
   def test_non_ray_legacy_platform_keeps_53e_lkas12_detection(self):
     fingerprint = gen_empty_fingerprint()
@@ -1038,8 +1052,11 @@ class TestHyundaiFingerprint:
     ret = update(0, 3)
     assert any(be.type == ButtonType.lkas and not be.pressed for be in ret.buttonEvents)
 
-    ret = update(2, 4)
+    ret = update(1, 4)
     assert any(be.type == ButtonType.lkas and be.pressed for be in ret.buttonEvents)
+
+    raw_button_msg = packer.make_can_msg("BCM_PO_11", 0, {"RAY_LKAS_BTN": 1})
+    assert raw_button_msg[1][0] == 0x10
 
   def test_non_ray_does_not_use_ray_lkas_signal(self):
     CP = CarInterface.get_params(CAR.KIA_FORTE_2021_NON_SCC, gen_empty_fingerprint(), [], False, False, False, None)
@@ -2467,10 +2484,11 @@ class TestHyundaiFingerprint:
     CP = CarParams.new_message()
     CP.carFingerprint = CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN
     CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.EV | HyundaiFlags.CANFD_LKA_STEERING)
-    CP.openpilotLongitudinalControl = False
+    CP.openpilotLongitudinalControl = True
 
     controller = CarController(DBC[CP.carFingerprint], CP)
     controller.frame = 1
+    controller.long_active_ecu = True
     can_bus = CanBus(CP)
     parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("LKAS", 0)], can_bus.ACAN)
     stock_lkas = {
@@ -2512,13 +2530,50 @@ class TestHyundaiFingerprint:
     assert parser.vl["LKAS"]["STEER_MODE"] == 0
     assert parser.vl["LKAS"]["NEW_SIGNAL_2"] == 0
 
-    CP.openpilotLongitudinalControl = True
     lfa_parser = CANParser(DBC[CP.carFingerprint][Bus.pt], [("LFA", 0)], can_bus.ECAN)
     lfa_msgs = hyundaicanfd.create_steering_messages(controller.packer, CP, can_bus, True, True, 0, 0.0)
     assert [(controller.packer.dbc.addr_to_msg[addr].name, bus) for addr, _, bus in lfa_msgs] == [("LFA", can_bus.ECAN), ("LKAS", can_bus.ACAN)]
     lfa_parser.update([(1, [lfa_msgs[0]])])
     assert lfa_parser.can_valid
     assert lfa_parser.vl["LFA"]["DAMP_FACTOR"] == 100
+
+    cc.longActive = False
+    inactive_msgs = controller.create_canfd_msgs(0, True, 0.44, 0.0, 0.0, 0.0, False,
+                                                 cc.hudControl, cs, cc, get_test_toggles(), lka_icon=2, lfa_icon=2)
+    steering_names = [(controller.packer.dbc.addr_to_msg[addr].name, bus) for addr, _, bus in inactive_msgs
+                      if controller.packer.dbc.addr_to_msg[addr].name in ("LFA", "LKAS")]
+    assert steering_names == [("LFA", can_bus.ECAN), ("LKAS", can_bus.ACAN)]
+
+    controller.frame = 1
+    cc.longActive = True
+    active_msgs = controller.create_canfd_msgs(0, True, 0.44, 0.0, 0.0, 0.0, False,
+                                               cc.hudControl, cs, cc, get_test_toggles(), lka_icon=2, lfa_icon=2)
+    steering_names = [(controller.packer.dbc.addr_to_msg[addr].name, bus) for addr, _, bus in active_msgs
+                      if controller.packer.dbc.addr_to_msg[addr].name in ("LFA", "LKAS")]
+    assert steering_names == [("LFA", can_bus.ECAN), ("LKAS", can_bus.ACAN)]
+
+  def test_ioniq_6_keeps_lfa_status_when_longitudinal_is_inactive(self):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.HYUNDAI_IONIQ_6
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.EV | HyundaiFlags.CANFD_LKA_STEERING)
+    CP.openpilotLongitudinalControl = True
+
+    controller = CarController(DBC[CP.carFingerprint], CP)
+    controller.frame = 1
+    controller.long_active_ecu = False
+    cc = SimpleNamespace(
+      enabled=False, latActive=False, longActive=False,
+      actuators=SimpleNamespace(longControlState=LongCtrlState.off),
+      leftBlinker=False, rightBlinker=False, hudControl=SimpleNamespace(),
+    )
+    cs = SimpleNamespace(
+      stock_lfa_msg=None, stock_lkas_msg=None,
+      out=SimpleNamespace(gearShifter=structs.CarState.GearShifter.park),
+    )
+
+    msgs = controller.create_canfd_msgs(0, False, 0.0, 0.0, 0.0, 0.0, False,
+                                        cc.hudControl, cs, cc, get_test_toggles(), lka_icon=1, lfa_icon=1)
+    assert any(addr == 0x12A for addr, _, _ in msgs)
 
   def test_gv70_electrified_longitudinal_uses_hda2_scc_contract(self):
     CP = CarParams.new_message()
@@ -2650,6 +2705,26 @@ class TestHyundaiFingerprint:
     msgs = controller.create_canfd_msgs(0, False, 0.0, 0.0, 0.0, 0.0, False, cc.hudControl, cs, cc,
                                         get_test_toggles(), lka_icon=1, lfa_icon=1)
     assert len([msg for msg in msgs if msg[0] == 0x110]) == expected_lkas_msgs
+
+  @pytest.mark.parametrize("standstill", [False, True])
+  def test_sportage_angle_lkas_alt_forwards_stock_status_when_inactive(self, standstill):
+    CP = CarParams.new_message()
+    CP.carFingerprint = CAR.KIA_SPORTAGE_HEV_2026
+    CP.flags = int(HyundaiFlags.CANFD | HyundaiFlags.HYBRID | HyundaiFlags.CANFD_ANGLE_STEERING |
+                   HyundaiFlags.CANFD_LKA_STEERING | HyundaiFlags.CANFD_LKA_STEERING_ALT)
+    CP.openpilotLongitudinalControl = False
+
+    controller = CarController(DBC[CP.carFingerprint], CP)
+    cc = SimpleNamespace(enabled=False, latActive=False,
+                         actuators=SimpleNamespace(longControlState=LongCtrlState.off),
+                         leftBlinker=False, rightBlinker=False, hudControl=SimpleNamespace())
+    cs = SimpleNamespace(stock_lfa_msg=None, stock_lkas_msg={},
+                         out=SimpleNamespace(standstill=standstill, steeringAngleDeg=0.0,
+                                             gearShifter=structs.CarState.GearShifter.drive))
+
+    msgs = controller.create_canfd_msgs(0, False, 0.0, 0.0, 0.0, 0.0, False, cc.hudControl, cs, cc,
+                                        get_test_toggles(), lka_icon=1, lfa_icon=1)
+    assert not [msg for msg in msgs if msg[0] in (0x110, 0x12A)]
 
   def test_ev9_inactive_angle_steering_does_not_suppress_stock_lfa(self):
     CP = CarParams.new_message()

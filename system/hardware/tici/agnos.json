@@ -56,9 +56,9 @@
   },
   {
     "name": "boot",
-    "url": "https://files.firestar.link/x/5gjbdh7zoxox/boot28.img.xz",
+    "url": "https://files.firestar.link/x/d61i6okcs0kt/boot29.img.xz",
     "fallback_urls": [
-      "https://files-east.firestar.link/x/9mxc942n97e0/boot28.img.xz"
+      "https://files-east.firestar.link/x/tqgw36v0suj3/boot29.img.xz"
     ],
     "hash": "9d826668e81b51d493947f91bc436bb94d3f276364737760b59a6660dae366d6",
     "hash_raw": "9d826668e81b51d493947f91bc436bb94d3f276364737760b59a6660dae366d6",
@@ -70,16 +70,16 @@
   },
   {
     "name": "system",
-    "url": "https://files.firestar.link/x/pre1xtwygykq/system28.img.xz",
+    "url": "https://files.firestar.link/x/iss4fjdpqont/system29.img.xz",
     "fallback_urls": [
-      "https://files-east.firestar.link/x/hpfu9a8221uj/system28.img.xz"
+      "https://files-east.firestar.link/x/pg70qwnpkad1/system29.img.xz"
     ],
-    "hash": "bb7fe46c2f1f49fefed7226218b8786e5f7e013cef1eaa5f2fb8ee044e087c3a",
-    "hash_raw": "c967bcb9d5f7d2194a22de68d0ed66c0de44e9fd25cd650f99d9497d4d9a2a57",
+    "hash": "d744641104991cdf13e1294aeb9b2628656cab46ed7f234f0f04092a9a5ead8d",
+    "hash_raw": "2516390281514cde7a9ea8cea5f88035cc55a5124aa23626d12ff1f82554c0e8",
     "size": 4718592000,
     "sparse": true,
     "full_check": false,
     "has_ab": true,
-    "ondevice_hash": "50e041fd2348dac61003f521f19b9311f0667d7bca443a12439dfd835bf5daa8"
+    "ondevice_hash": "11f234a3af7f6f137b2a702f5cf34273786bc1fe7dae8eb790faba8afa0e5b31"
   }
 ]

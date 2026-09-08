@@ -14,6 +14,7 @@ from openpilot.selfdrive.controls.radard import (
   RadarD,
   g90_low_speed_radar_lead_sane,
   g90_radar_lead_lateral_sane,
+  has_slow_radar_tracks,
   is_bosch_a_radar_car,
   match_vision_to_track,
 )
@@ -95,6 +96,15 @@ class TestLeads:
     assert legacy.lead_prob_filters[0].dt == pytest.approx(0.06)
     assert bosch_a.lead_prob_filters[0].dt == pytest.approx(DT_MDL)
     assert bosch_a.kalman_params.A[0][1] == pytest.approx(HONDA_BOSCH_A_RADAR_TS)
+
+  def test_slow_radar_frequency_relaxation_is_scoped(self):
+    slow_radar = SimpleNamespace(radarTimeStepDEPRECATED=0.15, radarUnavailable=False)
+    normal_radar = SimpleNamespace(radarTimeStepDEPRECATED=0.1, radarUnavailable=False)
+    unavailable_radar = SimpleNamespace(radarTimeStepDEPRECATED=0.15, radarUnavailable=True)
+
+    assert has_slow_radar_tracks(slow_radar)
+    assert not has_slow_radar_tracks(normal_radar)
+    assert not has_slow_radar_tracks(unavailable_radar)
 
   @pytest.mark.skipif(platform.system() == "Darwin", reason="SocketEventHandle requires eventfd")
   def test_radar_fault(self):

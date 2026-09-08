@@ -190,6 +190,23 @@ def test_ui_numeric_toggles_are_sliders_with_default():
   assert 'title="Set to zero"' not in card
 
 
+def test_ui_speed_units_follow_the_vehicle():
+  params = _read("js/params.js")
+  card = _read("js/components/GalaxyToggleCard.js")
+  tree = _read("js/components/SettingTree.js")
+  settings = _read("js/views/Settings.js")
+
+  assert "resolveVehicleUnitParam" in params
+  assert "formatNumericParamValue" in params
+  assert "unit_search_terms" in params and "unit_search_terms" in settings
+  assert "IsMetric" in params
+  assert ':values="values"' in tree
+  assert "displayParam" in card and "formatNumericParamValue" in card
+  assert "sliderStepDisplay" in card and "Step:" in card
+  assert ':values="values"' in settings
+  assert "Use Metric System" in settings
+
+
 def test_ui_centralizes_api_and_uses_composables():
   api = _read("js/api.js")
   composables = _read("js/composables.js")
@@ -343,7 +360,7 @@ def test_ui_manifest_is_valid_pwa_manifest():
   assert manifest["display"] == "standalone"
   assert manifest["name"]
   assert manifest["icons"]
-  assert manifest["start_url"] == "/mobile/"
+  assert "start_url" not in manifest
 
 
 def test_ui_ported_classic_tools_native_no_embed():
@@ -425,7 +442,7 @@ def test_ui_all_remaining_classic_tools_native_no_embed():
   # Shared API surface added for the second batch of ported pages.
   for method in ["selectTestingGround",
                  "getSentryStatus", "getSentryEvents", "deleteSentryEvent", "sentryPushSubscribe",
-                 "getModelStatus", "startModelDownload", "downloadAllModels", "deleteModel", "saveModelPreferences",
+                 "getModelStatus", "setActiveModel", "startModelDownload", "downloadAllModels", "deleteModel", "saveModelPreferences",
                  "getPlotsLive",
                  "getGalaxySession", "deleteNavigationKey",
                  "getThemeList", "saveTheme", "applyTheme", "deleteTheme", "downloadTheme",
@@ -505,6 +522,23 @@ assert(P.countAdvancedHiddenByDeveloperMode([sec], { GalaxyDeveloperMode: true }
 const slider = { key: "DeviceShutdown", data_type: "int", min: 1, max: 30, step: 1 }
 assert(P.snapNumericToBoundsAndStep(17.9, P.numericBounds(slider, {}), 0) === 18, "snap")
 assert(P.formatSliderValue(6, "1", 0, "DeviceShutdown") === "6 hours", "format")
+const speed = {
+  key: "Offset2", data_type: "float", unit_type: "vehicle_speed",
+  min: -99, max: 99, step: 1, precision: 0,
+  metric_min: -150, metric_max: 150, unit_range_index: 1,
+}
+const imperialSpeed = P.resolveVehicleUnitParam(speed, { IsMetric: false })
+assert(imperialSpeed.unit === " mph", "imperial unit")
+assert(imperialSpeed.label === "Speed Offset (25–34 mph)", "imperial offset band")
+assert(P.formatNumericParamValue(speed, 3, { IsMetric: false }) === "3 mph", "imperial value")
+const metricSpeed = P.resolveVehicleUnitParam(speed, { IsMetric: true })
+assert(metricSpeed.unit === " km/h", "metric unit")
+assert(metricSpeed.label === "Speed Offset (30–49 km/h)", "metric offset band")
+assert(metricSpeed.unit_search_terms.includes("metric"), "metric settings are searchable")
+assert(P.numericBounds(speed, { IsMetric: true }).max === 150, "metric bounds")
+assert(P.numericBounds(speed, { IsMetric: true }).step === 1, "one km/h per step")
+assert(P.formatNumericParamValue(speed, 3, { IsMetric: true }) === "3 km/h", "metric value")
+assert(P.usesMetricUnits({ IsMetric: "1" }) === true, "serialized metric bool")
 const laneOffset = { key: "LaneCenterOffset", data_type: "float", min: 0, max: 0.3, step: 0.01 }
 const laneBounds = P.numericBounds(laneOffset, {})
 assert(laneBounds.min === -0.3, "lane offset keeps signed lower bound")

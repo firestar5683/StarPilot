@@ -1,0 +1,20 @@
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index ba0479b..04a5134 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -122,6 +122,7 @@ else()
+     GIT_SHALLOW TRUE
+     GIT_SUBMODULES_RECURSE TRUE
+     SOURCE_DIR ${LIBDATACHANNEL_SOURCE_DIR}
++    PATCH_COMMAND git -C ${LIBDATACHANNEL_SOURCE_DIR}/deps/libjuice apply ${PROJECT_ROOT}/libjuice-zero-tiebreaker.patch
+     BINARY_DIR ${LIBDATACHANNEL_BUILD_DIR}
+     STAMP_DIR ${LIBDATACHANNEL_BUILD_DIR}/stamp
+     TMP_DIR ${LIBDATACHANNEL_BUILD_DIR}/tmp
+diff --git a/VERSION b/VERSION
+index 7655152..2270f25 100644
+--- a/VERSION
++++ b/VERSION
+@@ -1 +1 @@
+-2026.1.0.dev2
+\ No newline at end of file
++2026.1.0.dev2+starpilot.ice1

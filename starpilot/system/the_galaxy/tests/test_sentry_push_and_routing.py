@@ -62,6 +62,26 @@ def test_slug_middleware_service_worker_and_headers(client):
     assert response_direct.headers.get("Service-Worker-Allowed") == "/"
 
 
+def test_mobile_manifest_embeds_device_slug_for_fresh_app_login(client):
+  galaxy_dir = the_galaxy._get_galaxy_dir()
+  galaxy_dir.mkdir(parents=True, exist_ok=True)
+  (galaxy_dir / "glxyslug").write_text("df70390ca648d7c3")
+
+  response = client.get("/assets/mobile/manifest.json")
+
+  assert response.status_code == 200
+  assert response.mimetype == "application/manifest+json"
+  assert response.get_json()["start_url"] == "https://galaxy.firestar.link/df70390ca648d7c3"
+  assert "no-store" in response.headers.get("Cache-Control", "")
+
+
+def test_mobile_manifest_falls_back_to_local_mobile_route_without_slug(client):
+  response = client.get("/assets/mobile/manifest.json")
+
+  assert response.status_code == 200
+  assert response.get_json()["start_url"] == "/mobile/"
+
+
 def test_404_api_returns_json_not_html(client):
   # Non-existent API route without slug
   res1 = client.get("/api/nonexistent")

@@ -11,6 +11,7 @@ const state = reactive({
   slots: [],
   controllerSlots: [],
   controllerOptions: [],
+  disconnectControllersOffroad: false,
   speedUnit: "mph",
   speedMinimum: 5,
   speedMaximum: 90,
@@ -37,6 +38,7 @@ async function refresh() {
     state.slots = Array.isArray(payload.slots) ? payload.slots : []
     state.controllerSlots = Array.isArray(payload.controller_slots) ? payload.controller_slots : []
     state.controllerOptions = Array.isArray(payload.controller_options) ? payload.controller_options : []
+    state.disconnectControllersOffroad = !!payload.disconnect_controllers_offroad
     state.speedUnit = typeof payload.speed_unit === "string" ? payload.speed_unit : "mph"
     state.speedMinimum = Number(payload.speed_minimum || 5)
     state.speedMaximum = Number(payload.speed_maximum || 90)
@@ -264,6 +266,16 @@ export function WheelControls() {
       ${() => state.error ? html`<div class="wheelError">${state.error}</div>` : ""}
       ${() => !state.loading && !state.available && state.mappings.length ? html`<div class="wheelNotice">The wheel control service is starting.</div>` : ""}
       ${() => state.testing ? testPanel() : ""}
+
+      <label class="wheelPolicy">
+        <span>
+          <strong>Disconnect controllers when offroad</strong>
+          <small>After two minutes offroad, paired controllers disconnect to save battery and reconnect when the car starts. Bluetooth and audio-only devices stay connected.</small>
+        </span>
+        <input type="checkbox" checked="${() => state.disconnectControllersOffroad}"
+               disabled="${() => !state.offroad || !!state.busy}"
+               @change="${event => request("offroad-disconnect", { enabled: event.currentTarget.checked })}" />
+      </label>
 
       <div class="wheelDeviceSummary">
         <div class="wheelDeviceHeading">

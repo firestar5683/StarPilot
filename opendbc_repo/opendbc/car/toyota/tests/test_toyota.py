@@ -10,6 +10,7 @@ from opendbc.car.fw_versions import build_fw_dict, match_fw_to_car
 from opendbc.car.toyota import toyotacan
 from opendbc.car.toyota.carcontroller import CarController, get_camry_hybrid_feedforward, get_long_tune, get_prius_feedforward, \
                                              get_prius_positive_feedforward_scale, \
+                                             get_rav4_interceptor_pedal_scale, \
                                              limit_interceptor_pcm_accel, \
                                              limit_interceptor_stopping_accel, limit_no_lead_cruise_sign_flip, \
                                              limit_prius_stopping_accel, should_bypass_toyota_long_pid, supports_toyota_auto_hold, \
@@ -18,9 +19,10 @@ from opendbc.car.toyota.carstate import CarState, LKAS_BUTTON_CAR, calculate_int
 from opendbc.car.toyota.fingerprints import FW_VERSIONS
 from opendbc.car.toyota.interface import CarInterface
 from opendbc.car.toyota.radar_interface import RadarInterface, TSSP_RADAR_EGO_SPEED_SCALE
-from opendbc.car.toyota.values import CAR, DBC, TSS2_CAR, ANGLE_CONTROL_CAR, RADAR_ACC_CAR, SECOC_CAR, \
+from opendbc.car.toyota.values import CAR, DBC, MIN_ACC_SPEED, TSS2_CAR, ANGLE_CONTROL_CAR, RADAR_ACC_CAR, SECOC_CAR, \
                                                   FW_QUERY_CONFIG, PLATFORM_CODE_ECUS, FUZZY_EXCLUDED_PLATFORMS, \
-                                                  ToyotaFlags, ToyotaSafetyFlags, ToyotaStarPilotFlags, get_platform_codes
+                                                  ToyotaFlags, ToyotaSafetyFlags, ToyotaStarPilotFlags, TOYOTA_AUTO_HOLD_CARS, \
+                                                  get_platform_codes
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
 from openpilot.common.params import Params
 
@@ -187,12 +189,13 @@ class TestToyotaInterfaces:
       if car_model in TSS2_CAR and car_model not in SECOC_CAR:
         assert dbc[Bus.pt] == "toyota_nodsu_pt_generated"
 
-  def test_auto_hold_sets_flag_on_supported_tss2(self):
+  @pytest.mark.parametrize("candidate", [CAR.TOYOTA_CAMRY_TSS2, CAR.TOYOTA_RAV4, CAR.TOYOTA_RAV4H])
+  def test_auto_hold_sets_flag_on_supported_toyota(self, candidate):
     params = Params()
     try:
       params.put_bool("ToyotaAutoHold", True)
       car_params = CarInterface.get_params(
-        CAR.TOYOTA_CAMRY_TSS2,
+        candidate,
         {bus: {} for bus in range(8)},
         [],
         alpha_long=False,
@@ -206,11 +209,17 @@ class TestToyotaInterfaces:
     assert car_params.flags & ToyotaFlags.AUTO_BRAKE_HOLD.value
     assert car_params.alternativeExperience & ALTERNATIVE_EXPERIENCE.ALLOW_AEB
 
-  def test_auto_hold_is_disabled_by_default(self):
+    can_parsers = CarState.get_can_parsers(car_params)
+    car_state = CarState(car_params, SimpleNamespace(flags=0))
+    car_state.update(can_parsers, SimpleNamespace(cluster_offset=1.0))
+    assert "PRE_COLLISION_2" in can_parsers[Bus.cam].vl
+
+  @pytest.mark.parametrize("candidate", [CAR.TOYOTA_CAMRY_TSS2, CAR.TOYOTA_RAV4, CAR.TOYOTA_RAV4H])
+  def test_auto_hold_is_disabled_by_default(self, candidate):
     params = Params()
     params.remove("ToyotaAutoHold")
     car_params = CarInterface.get_params(
-      CAR.TOYOTA_CAMRY_TSS2,
+      candidate,
       {bus: {} for bus in range(8)},
       [],
       alpha_long=False,
@@ -774,6 +783,14 @@ class TestToyotaCarController:
     )
 
     assert supports_toyota_auto_hold(CP, True)
+    assert supports_toyota_auto_hold(SimpleNamespace(
+      carFingerprint=CAR.TOYOTA_RAV4,
+      flags=ToyotaFlags.AUTO_BRAKE_HOLD.value,
+    ), True)
+    assert supports_toyota_auto_hold(SimpleNamespace(
+      carFingerprint=CAR.TOYOTA_RAV4H,
+      flags=ToyotaFlags.AUTO_BRAKE_HOLD.value,
+    ), True)
     assert not supports_toyota_auto_hold(CP, False)
     assert not supports_toyota_auto_hold(SimpleNamespace(
       carFingerprint=CAR.TOYOTA_CAMRY_TSS2,
@@ -783,6 +800,8 @@ class TestToyotaCarController:
       carFingerprint=CAR.TOYOTA_CAMRY,
       flags=ToyotaFlags.AUTO_BRAKE_HOLD.value,
     ), True)
+
+    assert TOYOTA_AUTO_HOLD_CARS >= {CAR.TOYOTA_RAV4, CAR.TOYOTA_RAV4H}
 
   def test_toyota_auto_hold_latches_after_brake_press_until_gas(self):
     controller = self._make_controller()
@@ -1022,6 +1041,27 @@ class TestToyotaCarController:
     )
 
     assert 0.0 < gas_cmd <= 0.5
+
+  def test_rav4_interceptor_launch_mapping_is_softer_than_generic_mapping(self):
+    controller = self._make_controller()
+    controller.CP.enableGasInterceptorDEPRECATED = True
+    controller.CP.carFingerprint = CAR.TOYOTA_RAV4
+    controller.accel = 1.5
+
+    rav4_gas = controller._compute_interceptor_gas_cmd(
+      SimpleNamespace(longActive=True),
+      SimpleNamespace(out=SimpleNamespace(standstill=False, vEgo=1.0)),
+    )
+
+    controller.CP.carFingerprint = CAR.TOYOTA_AVALON_2019
+    generic_gas = controller._compute_interceptor_gas_cmd(
+      SimpleNamespace(longActive=True),
+      SimpleNamespace(out=SimpleNamespace(standstill=False, vEgo=1.0)),
+    )
+
+    assert rav4_gas < generic_gas
+    assert get_rav4_interceptor_pedal_scale(5.0) == pytest.approx(0.23)
+    assert get_rav4_interceptor_pedal_scale(MIN_ACC_SPEED) == pytest.approx(0.3)
 
   def test_interceptor_corolla_scales_with_accel_request_when_pedal_enables_sng(self):
     controller = self._make_controller()

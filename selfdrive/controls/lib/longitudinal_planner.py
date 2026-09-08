@@ -397,6 +397,27 @@ def get_vehicle_min_accel(CP, v_ego):
   return float(ACCEL_MIN)
 
 
+def get_far_lead_coast_cap(lead, v_ego, desired_gap, output_a_target):
+  if lead is None or not bool(getattr(lead, "status", False)):
+    return float(output_a_target)
+
+  v_ego = float(v_ego)
+  lead_distance = float(getattr(lead, "dRel", float("inf")))
+  lead_speed = float(getattr(lead, "vLead", v_ego))
+  closing_speed = v_ego - lead_speed
+  if (
+    v_ego <= 10.0 or
+    closing_speed <= 0.5 or
+    lead_distance < FAR_LEAD_COAST_MIN_DISTANCE or
+    lead_distance <= float(desired_gap) + FAR_LEAD_COAST_MIN_GAP_MARGIN or
+    lead_distance / max(closing_speed, 0.1) < FAR_LEAD_COAST_MIN_TTC or
+    max(0.0, -float(getattr(lead, "aLeadK", 0.0))) > FAR_LEAD_COAST_MAX_LEAD_BRAKE
+  ):
+    return float(output_a_target)
+
+  return max(float(output_a_target), -FAR_LEAD_COAST_MAX_DECEL)
+
+
 # Restored planner constants retained by CEM, stop, and departure paths.
 A_CRUISE_MIN = -1.0
 # The stop distance runs ~9 m long through the mid-approach, which leaves the obstacle slack
@@ -433,6 +454,11 @@ VEHICLE_FAR_FOLLOW_SLEW_MIN_DISTANCE_TIME = 1.35
 VEHICLE_FAR_FOLLOW_SLEW_MIN_HEADWAY = 1.35
 VEHICLE_FAR_FOLLOW_SLEW_MIN_TTC = 8.0
 VEHICLE_FAR_FOLLOW_SLEW_MAX_LATERAL_OFFSET = 1.5
+FAR_LEAD_COAST_MIN_DISTANCE = 45.0
+FAR_LEAD_COAST_MIN_TTC = 8.0
+FAR_LEAD_COAST_MIN_GAP_MARGIN = 6.0
+FAR_LEAD_COAST_MAX_LEAD_BRAKE = 0.35
+FAR_LEAD_COAST_MAX_DECEL = 0.20
 RADAR_DEPART_CONFLICT_MAX_EGO_SPEED = 1.6
 RADAR_DEPART_CONFLICT_MIN_RADAR_LATERAL = 1.5
 RADAR_DEPART_CONFLICT_MAX_RADAR_DISTANCE = 18.0
@@ -3068,6 +3094,28 @@ class LongitudinalPlanner:
       bool(output_should_stop or vision_low_speed_stop_active),
       panic_bypass,
     )
+
+    far_lead_coast_allowed = (
+      not experimental_mode and
+      comfort_lead is not None and
+      desired_gap is not None and
+      not output_should_stop and
+      not vision_low_speed_stop_active and
+      not close_lead_caps and
+      not panic_bypass and
+      not depart_safety_veto and
+      inside_gap_closing_cap is None and
+      not bool(getattr(sm['starpilotPlan'], 'forcingStop', False)) and
+      not bool(getattr(sm['starpilotPlan'], 'redLight', False)) and
+      not bool(getattr(sm['starpilotPlan'], 'stopSignConfirmed', False))
+    )
+    if far_lead_coast_allowed:
+      output_a_target = get_far_lead_coast_cap(
+        comfort_lead,
+        scene_v_ego,
+        desired_gap,
+        output_a_target,
+      )
 
     if radar_gap_settle_active:
       output_a_target = RADAR_STANDSTILL_GAP_SETTLE_ACCEL

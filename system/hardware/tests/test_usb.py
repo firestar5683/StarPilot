@@ -24,6 +24,13 @@ def test_chestnut_present_with_comma_vendor_id(tmp_path, monkeypatch):
   assert usb.chestnut_present()
 
 
+def test_chestnut_usb_ids_include_runtime_and_bootloader():
+  assert usb.is_chestnut_usb_id(0x3801, 0x0001)
+  assert usb.is_chestnut_usb_id(0xADD1, 0x0001)
+  assert not usb.is_chestnut_usb_id(0x174C, 0x2464)
+  assert usb.is_chestnut_usb_id(0x174C, 0x2464, include_bootloader=True)
+
+
 def test_chestnut_absent_for_other_usb_device(tmp_path, monkeypatch):
   monkeypatch.setattr(usb, "USB_DEVICES_PATH", tmp_path)
   device = tmp_path / "1-1"

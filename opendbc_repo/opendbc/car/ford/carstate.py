@@ -1,3 +1,6 @@
+# Ford-specific additions first imported in StarPilot 3f6ccd104e substantially adapt BluePilot
+# bp-7.0 vehicle-state work, including a sunnypilot extension with the Haibin Wen/contributors
+# notice retained in THIRD_PARTY_NOTICES.md. See the repository root CREDITS.md for provenance.
 from cereal import custom
 from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, create_button_events, structs

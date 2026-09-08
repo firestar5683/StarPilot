@@ -63,6 +63,7 @@ class VisualsLayoutMici(NavScroller):
     self._torque_bar_btn = BigParamControl("torque bar", "EnableTorqueBarWidget")
     self._rainbow_path_btn = BigParamControl("rainbow road", "RainbowPath")
     self._lead_indicator_btn = LeadIndicatorBigButton()
+    self._lead_info_btn = BigParamControl("show lead speed", "LeadInfo")
     self._speed_limit_signs_btn = BigParamControl("show speed limits", "ShowSpeedLimits")
     self._slc_confirmation_btn = BigParamControl("confirm new speed limits", "SLCConfirmation")
     self._slc_confirmation_lower_btn = BigParamControl("confirm lower limits", "SLCConfirmationLower")
@@ -76,6 +77,7 @@ class VisualsLayoutMici(NavScroller):
       self._torque_bar_btn,
       self._rainbow_path_btn,
       self._lead_indicator_btn,
+      self._lead_info_btn,
       self._speed_limit_signs_btn,
       self._slc_confirmation_btn,
       self._slc_confirmation_lower_btn,
@@ -93,6 +95,7 @@ class VisualsLayoutMici(NavScroller):
   def _refresh(self):
     self._camera_view_btn.refresh()
     self._lead_indicator_btn.refresh()
+    self._lead_info_btn.set_enabled(lead_indicator_enabled(self._lead_info_btn.params, hide_by_default=True))
     confirmation_enabled = self._slc_confirmation_btn.params.get_bool("SLCConfirmation")
     self._slc_confirmation_lower_btn.set_visible(confirmation_enabled)
     self._slc_confirmation_higher_btn.set_visible(confirmation_enabled)

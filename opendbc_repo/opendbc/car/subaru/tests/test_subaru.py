@@ -244,7 +244,7 @@ def test_outback_2023_uses_d_platform_bus_layout():
   assert CP.flags & SubaruFlags.D_PLATFORM
   assert CP.safetyConfigs[0].safetyParam & SubaruSafetyFlags.D_PLATFORM
   assert CP.safetyConfigs[0].safetyParam & SubaruSafetyFlags.STOP_START_BUTTON
-  assert not (CP.safetyConfigs[0].safetyParam & SubaruSafetyFlags.LEGACY_2025_ANGLE_LIMITS)
+  assert CP.safetyConfigs[0].safetyParam & SubaruSafetyFlags.FIXED_ANGLE_LIMITS
   assert CanBus.main_for_cp(CP) == CanBus.alt
   assert CanBus.angle_for_cp(CP) == CanBus.main
   assert parsers[Bus.pt].bus == CanBus.alt
@@ -622,8 +622,9 @@ def test_angle_controller_blocks_low_speed_mads_engagement():
   assert parser.vl["ES_LKAS_ANGLE"]["LKAS_Request"] == 1
 
 
-def test_ascent_angle_controller_uses_fixed_angle_rate_limits():
-  CP = CarInterface.get_non_essential_params(CAR.SUBARU_ASCENT_2023)
+@pytest.mark.parametrize("platform", (CAR.SUBARU_ASCENT_2023, CAR.SUBARU_OUTBACK_2023))
+def test_angle_controller_uses_fixed_angle_rate_limits(platform):
+  CP = CarInterface.get_non_essential_params(platform)
   controller = CarController({}, CP)
   CC = SimpleNamespace(enabled=True, latActive=True, actuators=SimpleNamespace(steeringAngleDeg=-14.88))
   CS = SimpleNamespace(out=SimpleNamespace(

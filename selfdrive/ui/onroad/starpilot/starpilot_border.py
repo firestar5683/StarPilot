@@ -59,6 +59,8 @@ def _csc_state():
 
   plan = sm["starpilotPlan"]
   params = ui_state.ui_params
+
+
   if not params.get_bool("ShowCSCStatus"):
     return None
 

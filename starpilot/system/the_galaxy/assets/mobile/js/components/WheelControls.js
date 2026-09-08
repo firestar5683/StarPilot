@@ -12,6 +12,7 @@ export const WheelControls = {
       loading: true, busy: "", available: false, offroad: false, learning: false,
       devices: [], mappings: [], slots: [], controllerSlots: [], controllerOptions: [],
       joystickDevice: "", learningSlot: null, remainingSeconds: 0, testing: false,
+      disconnectControllersOffroad: false,
       lastTested: null, speedUnit: "mph", speedMinimum: 0, speedMaximum: 0, error: "",
     }
   },
@@ -29,6 +30,7 @@ export const WheelControls = {
         this.slots = Array.isArray(p.slots) ? p.slots : []
         this.controllerSlots = Array.isArray(p.controller_slots) ? p.controller_slots : []
         this.controllerOptions = Array.isArray(p.controller_options) ? p.controller_options : []
+        this.disconnectControllersOffroad = !!p.disconnect_controllers_offroad
         this.joystickDevice = typeof p.joystick_device === "string" ? p.joystick_device : ""
         this.learningSlot = Number.isInteger(p.learning_slot) ? p.learning_slot : null
         this.remainingSeconds = Number.isFinite(Number(p.remaining_seconds)) ? Number(p.remaining_seconds) : 0
@@ -98,6 +100,18 @@ export const WheelControls = {
         <div style="display:flex; gap:8px; margin-bottom:12px; flex-wrap:wrap;">
           <button type="button" class="gx-btn" :disabled="disabled() || !mappings.length" @click="request(testing ? 'test-stop' : 'test')">{{ testing ? 'Stop Testing' : 'Test Buttons' }}</button>
           <button type="button" class="gx-btn gx-btn--danger" :disabled="disabled() || !mappings.length" @click="request('clear')">Clear All</button>
+        </div>
+        <div class="gx-row" style="margin-bottom:12px;">
+          <div class="gx-row__info">
+            <span class="gx-row__label">Disconnect controllers when offroad</span>
+            <span class="gx-row__desc">After two minutes offroad, paired controllers disconnect to save battery and reconnect when the car starts. Bluetooth and audio-only devices stay connected.</span>
+          </div>
+          <label class="gx-switch">
+            <input type="checkbox" :checked="disconnectControllersOffroad" :disabled="disabled()"
+              @change="request('offroad-disconnect', { enabled: $event.target.checked })" />
+            <span class="gx-switch__track"></span>
+            <span class="gx-switch__thumb"></span>
+          </label>
         </div>
         <div v-if="testing && lastTested" style="margin-bottom:12px;">
           <span class="gx-chip" :style="lastTested.mapped ? 'background:var(--success);' : 'background:var(--error);'">{{ lastTested.mapped ? 'Successful' : 'Not mapped' }}</span>

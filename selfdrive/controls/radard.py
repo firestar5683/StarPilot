@@ -7,6 +7,7 @@ from typing import Any
 
 import capnp
 from cereal import messaging, log, car, custom
+from cereal.services import SERVICE_LIST
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL, Priority, config_realtime_process
@@ -40,6 +41,11 @@ HONDA_BOSCH_A_GROSS_DISTANCE_M = 25.0
 
 def is_bosch_a_radar_car(CP) -> bool:
   return CP.brand == "honda" and CP.carFingerprint in HONDA_BOSCH_A and not CP.radarUnavailable
+
+
+def has_slow_radar_tracks(CP) -> bool:
+  radar_ts = float(getattr(CP, "radarTimeStepDEPRECATED", DT_MDL) or DT_MDL)
+  return not CP.radarUnavailable and radar_ts > 2.0 / SERVICE_LIST["liveTracks"].frequency
 
 
 # Adjacent-lane stopped-vehicle detector, used as a stop-line hint on red-light
@@ -636,8 +642,9 @@ def main() -> None:
   cloudlog.info("radard got CarParams")
 
   # *** setup messaging
+  ignore_avg_freq = ['liveTracks'] if has_slow_radar_tracks(CP) else None
   sm = messaging.SubMaster(['modelV2', 'carState', 'liveTracks'], poll='modelV2',
-                           ignore_valid=['starpilotPlan'])
+                           ignore_avg_freq=ignore_avg_freq, ignore_valid=['starpilotPlan'])
   pm = messaging.PubMaster(['radarState'])
 
   radar_ts = float(getattr(CP, "radarTimeStepDEPRECATED", DT_MDL) or DT_MDL)

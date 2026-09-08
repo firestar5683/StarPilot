@@ -46,6 +46,18 @@ def test_device_settings_uses_the_params_api_and_layout_json():
   assert 'fetch("/assets/components/tools/device_settings_layout.json?v=settings-tier-1"' in source
 
 
+def test_device_settings_speed_units_follow_the_vehicle():
+  source = _device_settings()
+
+  assert 'from "/assets/mobile/js/params.js"' in source
+  assert "resolveVehicleUnitParam" in source
+  assert "formatNumericParamValue" in source
+  assert "vehicleSpeedUnit(state.values)" in source
+  assert "unit_search_terms" in source
+  assert "Use Metric System" in source
+  assert "per click" in source
+
+
 def test_lane_center_offset_can_step_below_zero():
   source = _device_settings()
 

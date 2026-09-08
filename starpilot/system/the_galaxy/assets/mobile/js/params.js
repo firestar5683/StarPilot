@@ -1,4 +1,45 @@
 export const GALAXY_DEVELOPER_MODE_KEY = "GalaxyDeveloperMode"
+export const VEHICLE_SPEED_UNIT_TYPE = "vehicle_speed"
+
+const SPEED_OFFSET_RANGES = {
+  imperial: ["0–24", "25–34", "35–44", "45–54", "55–64", "65–74", "75–99"],
+  metric: ["0–29", "30–49", "50–59", "60–79", "80–99", "100–119", "120–140"],
+}
+
+export function usesMetricUnits(values = {}) {
+  const value = values?.IsMetric
+  if (value === true || value === 1) return true
+  return ["1", "true", "yes", "on"].includes(String(value ?? "").trim().toLowerCase())
+}
+
+export function vehicleSpeedUnit(values = {}) {
+  return usesMetricUnits(values) ? "km/h" : "mph"
+}
+
+export function resolveVehicleUnitParam(param, values = {}) {
+  if (!param || param.unit_type !== VEHICLE_SPEED_UNIT_TYPE) return param
+
+  const metric = usesMetricUnits(values)
+  const mode = metric ? "metric" : "imperial"
+  const resolved = {
+    ...param,
+    unit: ` ${vehicleSpeedUnit(values)}`,
+    unit_search_terms: "metric imperial mph km/h vehicle speed units",
+  }
+  for (const field of ["min", "max", "step", "precision"]) {
+    const override = param[`${mode}_${field}`]
+    if (override !== undefined && override !== null) resolved[field] = override
+  }
+
+  if (Number.isInteger(param.unit_range_index)) {
+    const range = SPEED_OFFSET_RANGES[mode][param.unit_range_index]
+    if (range) {
+      resolved.label = `Speed Offset (${range} ${vehicleSpeedUnit(values)})`
+      resolved.description = `How much to offset posted speed limits between ${range} ${vehicleSpeedUnit(values)}.`
+    }
+  }
+  return resolved
+}
 
 const HIDDEN_SETTING_KEYS = new Set(["HumanAcceleration"])
 const RADAR_REQUIRED_KEYS = new Set(["HumanLaneChanges", "RadarTakeoffs"])
@@ -88,7 +129,8 @@ export function countAdvancedHiddenByDeveloperMode(layout, values) {
   return count
 }
 
-export function numericBounds(param, values) {
+export function numericBounds(param, values = {}) {
+  param = resolveVehicleUnitParam(param, values)
   const defaultBounds = {
     min: param.min !== undefined ? param.min : (param.data_type === "float" ? 0.0 : 0),
     max: param.max !== undefined ? param.max : (param.data_type === "float" ? 100.0 : 100),
@@ -192,6 +234,13 @@ export function formatSliderValue(val, stepStr, precisionInt, key) {
   if (!stepStr || !stepStr.includes(".")) return Math.round(v).toString()
   const dec = stepStr.split(".")[1].length
   return Number(v.toFixed(dec)).toString()
+}
+
+export function formatNumericParamValue(param, value, values = {}) {
+  const resolved = resolveVehicleUnitParam(param, values)
+  const bounds = numericBounds(resolved, values)
+  const formatted = formatSliderValue(value, String(bounds.step), resolved.precision, resolved.key)
+  return resolved.unit && formatted !== "--" ? `${formatted}${resolved.unit}` : formatted
 }
 
 export function formatReadoutValue(p, value) {

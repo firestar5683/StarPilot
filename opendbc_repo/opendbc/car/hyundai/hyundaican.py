@@ -203,6 +203,17 @@ def create_lfahda_mfc(packer, enabled, frame=None, CP=None, lfa_icon=None):
   return packer.make_can_msg("LFAHDA_MFC", bus, values)
 
 
+def create_ray_lfahda_mfc(packer, lat_active, lfa_icon):
+  values = {
+    "HDA_USM": 2,
+    "HDA_Icon_State": 2 if lfa_icon else 0,
+    "HDA_VSetReq": 0,
+    "HDA_Icon_Wheel": int(lat_active),
+    "LFA_Icon_State": lfa_icon,
+  }
+  return packer.make_can_msg("LFAHDA_MFC", 0, values)
+
+
 def create_acc_commands_can_canfd_blended(packer, enabled, accel, upper_jerk, idx, hud_control, set_speed,
                                           stopping, long_override, use_fca, CP):
   commands = []

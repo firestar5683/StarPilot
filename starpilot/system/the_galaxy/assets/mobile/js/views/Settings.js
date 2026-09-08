@@ -2,7 +2,7 @@ import { api, showSnackbar } from "../api.js"
 import { navigate, store } from "../store.js"
 import {
   applyParamChange, countAdvancedHiddenByDeveloperMode, GALAXY_DEVELOPER_MODE_KEY, isSettingVisible,
-  slugifySectionName,
+  resolveVehicleUnitParam, slugifySectionName, vehicleSpeedUnit,
 } from "../params.js"
 import { SettingTree } from "../components/SettingTree.js"
 import { PersonalityProfiles } from "../components/PersonalityProfiles.js"
@@ -50,6 +50,7 @@ export const Settings = {
       return this.sections.find((s) => s.slug === this.activeSectionSlug) || this.sections[0]
     },
     hiddenAdvancedCount() { return countAdvancedHiddenByDeveloperMode(this.layout, this.values) },
+    speedUnit() { return vehicleSpeedUnit(this.values) },
     searchActive() { return !!this.searchTerm },
     searchTerm: {
       get() { return store.search },
@@ -98,7 +99,9 @@ export const Settings = {
     matchesFilter(p) {
       if (!this.searchTerm) return true
       const q = this.searchTerm.toLowerCase()
-      return [p.label, p.key, p.description].some((v) => String(v || "").toLowerCase().includes(q))
+      const displayParam = resolveVehicleUnitParam(p, this.values)
+      return [displayParam.label, displayParam.key, displayParam.description, displayParam.unit, displayParam.unit_search_terms]
+        .some((v) => String(v || "").toLowerCase().includes(q))
     },
     selectSection(slug) {
       if (slug !== this.activeSectionSlug) navigate("/settings/" + slug)
@@ -133,6 +136,11 @@ export const Settings = {
     <div>
       <h2 style="margin-top:0;">Toggles</h2>
 
+      <div class="gx-unit-note">
+        <i class="bi bi-speedometer2"></i>
+        <span>Vehicle-unit speed settings use <strong>{{ speedUnit }}</strong> and follow the comma's <em>Use Metric System</em> toggle. Each control shows its adjustment step.</span>
+      </div>
+
       <DevModeBanner :hidden-count="hiddenAdvancedCount" :dev-mode-on="devModeOn" />
 
       <div v-if="loading" class="gx-loading">Loading configuration...</div>
@@ -149,7 +157,7 @@ export const Settings = {
             <GalaxySection :title="section.name + ' (' + section.matches.length + ')'" :icon="section.icon || 'bi-search'" :default-open="false">
               <template v-for="p in section.matches" :key="p.key">
                 <PersonalityProfiles v-if="p.key === 'CustomPersonalities'" :manage-open="!!expanded[p.key]" @manage="toggleManage(p.key)" @change="onParamChange" />
-                <GalaxyToggleCard v-else :param="p" :value="values[p.key]" :locked="lockReason(p) !== ''"
+                <GalaxyToggleCard v-else :param="p" :value="values[p.key]" :values="values" :locked="lockReason(p) !== ''"
                   @change="onParamChange" />
               </template>
             </GalaxySection>

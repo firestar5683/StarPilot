@@ -11,7 +11,7 @@ from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.toyota import toyotacan
 from opendbc.car.toyota.values import CAR, MIN_ACC_SPEED, NO_STOP_TIMER_CAR, PEDAL_TRANSITION, TSS2_CAR, \
                                         CarControllerParams, ToyotaFlags, \
-                                        UNSUPPORTED_DSU_CAR, LEGACY_PRIUS_CAR, RADAR_ACC_CAR, SECOC_CAR
+                                        UNSUPPORTED_DSU_CAR, LEGACY_PRIUS_CAR, TOYOTA_AUTO_HOLD_CARS
 from opendbc.can import CANPacker
 
 Ecu = structs.CarParams.Ecu
@@ -37,6 +37,9 @@ TOYOTA_COAST_BRAKE_DISABLE_ACCEL = -0.06  # m/s^2
 TOYOTA_NO_LEAD_COAST_BRAKE_ACCEL = -0.30  # m/s^2
 TOYOTA_INTERCEPTOR_COMFORT_TARGET_ACCEL = 2.0  # m/s^2
 TOYOTA_NO_LEAD_CRUISE_SIGN_FLIP_MIN_SET_SPEED_ERROR = 0.35  # m/s
+TOYOTA_RAV4_LAUNCH_PEDAL_BLEND_SPEED = 5.0  # m/s
+TOYOTA_RAV4_LAUNCH_PEDAL_SCALE = 0.11
+TOYOTA_RAV4_LOW_SPEED_PEDAL_SCALE = 0.23
 
 # LKA limits
 # EPS faults if you apply torque while the steering rate is above 100 deg/s for too long
@@ -48,8 +51,6 @@ MAX_USER_TORQUE = 500
 
 PARK = structs.CarState.GearShifter.park
 REVERSE = structs.CarState.GearShifter.reverse
-
-TOYOTA_AUTO_HOLD_CARS = TSS2_CAR - RADAR_ACC_CAR - SECOC_CAR
 
 # Lock / unlock door commands - Credit goes to AlexandreSato!
 LOCK_CMD = b"\x40\x05\x30\x11\x00\x80\x00\x00"
@@ -80,6 +81,14 @@ def supports_toyota_auto_hold(CP, auto_hold_enabled: bool) -> bool:
     CP.carFingerprint in TOYOTA_AUTO_HOLD_CARS and
     bool(CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD.value)
   )
+
+
+def get_rav4_interceptor_pedal_scale(v_ego: float) -> float:
+  return float(np.interp(
+    max(float(v_ego), 0.0),
+    [0.0, TOYOTA_RAV4_LAUNCH_PEDAL_BLEND_SPEED, MIN_ACC_SPEED, MIN_ACC_SPEED + PEDAL_TRANSITION],
+    [TOYOTA_RAV4_LAUNCH_PEDAL_SCALE, TOYOTA_RAV4_LOW_SPEED_PEDAL_SCALE, 0.3, 0.0],
+  ))
 
 
 def get_long_tune(CP, params):
@@ -265,7 +274,7 @@ class CarController(CarControllerBase):
 
     max_interceptor_gas = 0.5
     if self.CP.carFingerprint == CAR.TOYOTA_RAV4:
-      pedal_scale = float(np.interp(CS.out.vEgo, [0.0, MIN_ACC_SPEED, MIN_ACC_SPEED + PEDAL_TRANSITION], [0.15, 0.3, 0.0]))
+      pedal_scale = get_rav4_interceptor_pedal_scale(CS.out.vEgo)
     elif self.CP.carFingerprint in (CAR.TOYOTA_COROLLA, CAR.TOYOTA_MATRIX_RETROFIT):
       pedal_scale = float(np.interp(CS.out.vEgo, [0.0, MIN_ACC_SPEED, MIN_ACC_SPEED + PEDAL_TRANSITION], [0.3, 0.4, 0.0]))
     else:

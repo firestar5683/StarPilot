@@ -520,7 +520,7 @@ class LatControlTorque(LatControl):
         )
       elif genesis_g70_active:
         vehicle_friction_jerk_deadzone = get_genesis_g70_friction_jerk_deadzone(
-          CS.vEgo, setpoint, desired_lateral_jerk,
+          CS.vEgo, setpoint, desired_lateral_jerk, measurement,
         )
       elif self.is_genesis_gv70:
         vehicle_friction_jerk_deadzone = get_genesis_gv70_friction_jerk_deadzone(CS.vEgo, setpoint)

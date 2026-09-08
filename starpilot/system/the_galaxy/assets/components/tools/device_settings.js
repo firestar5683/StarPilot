@@ -6,6 +6,7 @@ import {
   shouldSubmitPersonalityPreset,
   valueFromPointer,
 } from "/assets/components/tools/personality_profiles.mjs"
+import { formatNumericParamValue, resolveVehicleUnitParam, vehicleSpeedUnit } from "/assets/mobile/js/params.js"
 
 const endpointOptionsCache = {}
 const endpointOptionsInflight = {}
@@ -596,47 +597,13 @@ async function fetchLayoutAndParams() {
   scheduleSyncInputs()
 }
 
-function formatSliderValue(val, stepStr, precisionInt, key) {
-  if (val === null || val === undefined) return "--"
-  const v = parseFloat(val)
-  if (Number.isNaN(v)) return val
-
-  if (key === "SwitchbackModeCooldown") {
-    if (v === 0) return "Off"
-    return v === 1 ? "1 min" : `${v} min`
-  }
-
-  if (key === "DeviceShutdown") {
-    return v === 1 ? "1 hour" : `${v} hours`
-  }
-
-  const volumeKeys = [
-    "BelowSteerSpeedVolume", "DisengageVolume", "EngageVolume", "PromptVolume",
-    "PromptDistractedVolume", "RefuseVolume",
-    "WarningImmediateVolume", "WarningSoftVolume",
-  ]
-  if (key && volumeKeys.includes(key)) {
-    if (v === 0) return "Muted"
-    if (v === 101) return "Auto"
-    return `${v}%`
-  }
-
-  if (precisionInt !== undefined && precisionInt !== null) {
-    return Number(v.toFixed(precisionInt)).toString()
-  }
-
-  if (!stepStr || !stepStr.includes(".")) return Math.round(v).toString()
-  const dec = stepStr.split(".")[1].length
-  return Number(v.toFixed(dec)).toString()
-}
-
 function formatReadoutValue(p) {
   const raw = state.values[p.key]
-  const value = parseFloat(raw)
-  if (raw === undefined || raw === null || Number.isNaN(value)) return "--"
+  const v = parseFloat(raw)
+  if (raw === undefined || raw === null || Number.isNaN(v)) return "--"
 
   const precision = p.precision !== undefined && p.precision !== null ? Number(p.precision) : 2
-  const formatted = Number(value.toFixed(Math.max(0, precision))).toString()
+  const formatted = Number(v.toFixed(Math.max(0, precision))).toString()
   return p.unit ? `${formatted}${p.unit}` : formatted
 }
 
@@ -653,6 +620,7 @@ function formatStepValue(step, precision) {
 }
 
 function numericBounds(param) {
+  param = resolveVehicleUnitParam(param, state.values)
   const defaultBounds = {
     min: param.min !== undefined ? param.min : (param.data_type === "float" ? 0.0 : 0),
     max: param.max !== undefined ? param.max : (param.data_type === "float" ? 100.0 : 100),
@@ -1153,13 +1121,7 @@ function syncNumericDisplay(param, rawValue) {
   const displayEl = document.getElementById(`ds-display-${param.key}`)
   if (!displayEl) return
 
-  const bounds = numericBounds(param)
-  displayEl.textContent = formatSliderValue(
-    rawValue,
-    String(bounds.step),
-    param.precision,
-    param.key,
-  )
+  displayEl.textContent = formatNumericParamValue(param, rawValue, state.values)
 }
 
 async function updateNumericParam(param, numericValue, options = {}) {
@@ -1512,10 +1474,9 @@ function matchesFilter(p) {
   if (!state.filter) return true
   if (isGroupParam(p)) return false
   const q = state.filter.toLowerCase()
-  const label = String(p.label || "").toLowerCase()
-  const key = String(p.key || "").toLowerCase()
-  const description = String(p.description || "").toLowerCase()
-  return label.includes(q) || key.includes(q) || description.includes(q)
+  const displayParam = resolveVehicleUnitParam(p, state.values)
+  return [displayParam.label, displayParam.key, displayParam.description, displayParam.unit, displayParam.unit_search_terms]
+    .some(value => String(value || "").toLowerCase().includes(q))
 }
 
 function clearSearchFilter() {
@@ -1580,8 +1541,7 @@ function formatFlmValue(param, value) {
   if (value === undefined || value === null) return "not set"
   if (param.data_type === "bool") return value ? "On" : "Off"
   if (param.ui_type === "numeric") {
-    const bounds = numericBounds(param)
-    return formatSliderValue(value, String(bounds.step), param.precision, param.key)
+    return formatNumericParamValue(param, value, state.values)
   }
   return String(value)
 }
@@ -2418,6 +2378,8 @@ function renderSettingRow(p) {
     return ""
   }
 
+  p = resolveVehicleUnitParam(p, state.values)
+
   const isNumeric = p.ui_type === "numeric"
   const isSlider = isNumeric && p.control === "slider"
   const isText = p.ui_type === "text"
@@ -2460,8 +2422,8 @@ function renderSettingRow(p) {
           @input="${(event) => previewSliderParam(p, event.currentTarget.value)}"
           @change="${(event) => commitSliderParam(p, event.currentTarget.value)}" />
         <div class="ds-slider-scale">
-          <span>${formatSliderValue(numericBounds(p).min, String(numericBounds(p).step), p.precision, p.key)}</span>
-          <span>${formatSliderValue(numericBounds(p).max, String(numericBounds(p).step), p.precision, p.key)}</span>
+          <span>${formatNumericParamValue(p, numericBounds(p).min, state.values)}</span>
+          <span>${formatNumericParamValue(p, numericBounds(p).max, state.values)}</span>
         </div>
         <button
           class="ds-reset-btn"
@@ -2487,10 +2449,10 @@ function renderSettingRow(p) {
       const updating = isNumericUpdating(p.key)
       const defaultNumeric = resolveDefaultNumericValue(p, bounds)
       const defaultLabel = defaultNumeric !== null
-        ? formatSliderValue(defaultNumeric, String(bounds.step), p.precision, p.key)
+        ? formatNumericParamValue(p, defaultNumeric, state.values)
         : "N/A"
       const canReset = !updating && defaultNumeric !== null && Math.abs(defaultNumeric - currentNumeric) > epsilon
-      const stepLabel = p.key === "DeviceShutdown" ? "1 hour" : formatStepValue(bounds.step, precision)
+      const stepLabel = p.key === "DeviceShutdown" ? "1 hour" : `${formatStepValue(bounds.step, precision)}${p.unit || ""}`
       return html`
             <div class="ds-stepper">
               <button
@@ -2498,7 +2460,7 @@ function renderSettingRow(p) {
                 disabled="${() => isLocked() || isNumericUpdating(p.key) || !canStepNumericParam(p, -1)}"
                 @click="${() => stepNumericParam(p, -1)}">-</button>
               <div class="ds-stepper-meta">
-                <span>${formatSliderValue(bounds.min, String(bounds.step), p.precision, p.key)} to ${formatSliderValue(bounds.max, String(bounds.step), p.precision, p.key)}</span>
+                <span>${formatNumericParamValue(p, bounds.min, state.values)} to ${formatNumericParamValue(p, bounds.max, state.values)}</span>
                 <span class="ds-step-value">Step: ${stepLabel} per click</span>
                 <span class="ds-default-value">Default: ${defaultLabel}</span>
                 <div class="ds-manual-row">
@@ -2649,8 +2611,7 @@ function renderSettingRow(p) {
             if (isColor) return formatColorDisplayValue(p)
             if (isReadout) return formatReadoutValue(p)
             const currentValue = state.sliderPreviewValues[p.key] ?? state.values[p.key]
-            const bounds = numericBounds(p)
-            return currentValue !== undefined ? formatSliderValue(currentValue, String(bounds.step), p.precision, p.key) : ".."
+            return currentValue !== undefined ? formatNumericParamValue(p, currentValue, state.values) : ".."
           }}</span>` : ""}
       </div>
 
@@ -2732,6 +2693,11 @@ export function DeviceSettings({ params }) {
   return html`
     <div class="ds-wrapper">
       <h2>Toggles</h2>
+
+      <div class="ds-unit-note">
+        <i class="bi bi-speedometer2"></i>
+        <span>Vehicle-unit speed settings use <strong>${() => vehicleSpeedUnit(state.values)}</strong> and follow the comma's <em>Use Metric System</em> toggle. Each control shows its adjustment step.</span>
+      </div>
 
       <div class="ds-search-row">
         <input

@@ -53,6 +53,12 @@ PERSONALITY_FAVORITE_BLOCKED_KEYS = PERSONALITY_PARKED_PARAM_KEYS | {PERSONALITY
 
 
 BLOCKED_ONROAD_KEYS = {
+  "ActiveBigModel",
+  "ActiveBigModelName",
+  "ActiveBigModelVersion",
+  "ActiveSmallModel",
+  "ActiveSmallModelName",
+  "ActiveSmallModelVersion",
   "AlphaLongitudinalEnabled",
   "DrivingModel",
   "Model",

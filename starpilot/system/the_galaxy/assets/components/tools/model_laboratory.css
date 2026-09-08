@@ -151,6 +151,11 @@
   color: var(--color-black);
 }
 
+.ml-button-danger {
+  background: rgba(224, 85, 119, 0.12);
+  color: var(--danger-fg);
+}
+
 .ml-button:disabled {
   cursor: not-allowed;
   opacity: 0.55;

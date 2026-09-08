@@ -284,19 +284,22 @@ ensure_host_python_extensions() {
 }
 
 sync_host_generated_headers() {
-  if ! command -v capnpc >/dev/null 2>&1; then
+  local capnpc="${ROOT_DIR}/.venv/bin/capnpc"
+  local capnpc_cpp
+  capnpc_cpp="$(find "${ROOT_DIR}/.venv/lib" -path '*/capnproto/install/bin/capnpc-c++' -type f -print -quit)"
+  if [[ ! -x "${capnpc}" || ! -x "${capnpc_cpp}" ]]; then
     return
   fi
 
   (
     cd "${WORK_DIR}"
     mkdir -p cereal/gen/cpp
-    capnpc --src-prefix=cereal \
+    "${capnpc}" --src-prefix=cereal \
       cereal/log.capnp \
       cereal/car.capnp \
       cereal/legacy.capnp \
       cereal/custom.capnp \
-      -o c++:cereal/gen/cpp/
+      -o "${capnpc_cpp}:cereal/gen/cpp/"
   )
 }
 

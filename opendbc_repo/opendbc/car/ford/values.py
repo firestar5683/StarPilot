@@ -1,3 +1,5 @@
+# Ford platform data and limits first imported in StarPilot 3f6ccd104e substantially adapt
+# BluePilot bp-7.0 contributor work. See the repository root CREDITS.md and THIRD_PARTY_NOTICES.md.
 import copy
 import re
 from dataclasses import dataclass, field, replace

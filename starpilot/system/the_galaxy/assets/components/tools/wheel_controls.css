@@ -37,11 +37,42 @@
 .wheelCard,
 .wheelNotice,
 .wheelError,
-.wheelDeviceSummary {
+.wheelDeviceSummary,
+.wheelPolicy {
   background: var(--sidebar-bg);
   border: 1px solid var(--sidebar-border-color);
   border-radius: var(--border-radius-lg);
   padding: 16px;
+}
+
+.wheelPolicy {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 20px;
+  cursor: pointer;
+}
+
+.wheelPolicy span,
+.wheelPolicy small {
+  display: block;
+}
+
+.wheelPolicy small {
+  margin-top: 5px;
+  opacity: 0.68;
+}
+
+.wheelPolicy input {
+  width: 22px;
+  height: 22px;
+  flex: 0 0 auto;
+  accent-color: #8b6cc5;
+}
+
+.wheelPolicy:has(input:disabled) {
+  cursor: not-allowed;
+  opacity: 0.6;
 }
 
 .wheelSlotGrid,

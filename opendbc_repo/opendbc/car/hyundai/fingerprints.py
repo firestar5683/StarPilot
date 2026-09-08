@@ -1,4 +1,6 @@
 """ AUTO-FORMATTED USING opendbc/car/debug/format_fingerprints.py, EDIT STRUCTURE THERE."""
+# Provenance: portions of HKG firmware data are adapted from sunnypilot/opendbc master at
+# f95f996f5 and its hkg-angle-steering-2025 branch at cc4b08625. See CREDITS.md.
 from opendbc.car.structs import CarParams
 from opendbc.car.hyundai.values import CAR
 

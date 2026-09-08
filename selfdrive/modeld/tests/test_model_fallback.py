@@ -29,8 +29,8 @@ def test_incompatible_downloaded_model_falls_back_to_builtin(monkeypatch):
   calls = []
   builtin_model = object()
 
-  def load_model(cam_w, cam_h, external_gpu_active):
-    calls.append((cam_w, cam_h, external_gpu_active))
+  def load_model(cam_w, cam_h, external_gpu_active, **kwargs):
+    calls.append((cam_w, cam_h, external_gpu_active, kwargs.get("model_id_override")))
     if len(calls) == 1:
       raise TypeError("incompatible artifact")
     return builtin_model
@@ -40,7 +40,10 @@ def test_incompatible_downloaded_model_falls_back_to_builtin(monkeypatch):
   monkeypatch.setattr(modeld.cloudlog, "exception", lambda *_args, **_kwargs: None)
 
   assert modeld._load_model_state(1928, 1208, "custom-model", False, params) is builtin_model
-  assert calls == [(1928, 1208, False), (1928, 1208, False)]
+  assert calls == [
+    (1928, 1208, False, "custom-model"),
+    (1928, 1208, False, modeld.BUILTIN_MODEL_KEY),
+  ]
   assert params.values == {
     "Model": modeld.BUILTIN_MODEL_KEY,
     "DrivingModel": modeld.BUILTIN_MODEL_KEY,
@@ -49,7 +52,7 @@ def test_incompatible_downloaded_model_falls_back_to_builtin(monkeypatch):
 
 
 def test_builtin_model_load_failure_is_not_hidden(monkeypatch):
-  monkeypatch.setattr(modeld, "ModelState", lambda *_args: (_ for _ in ()).throw(TypeError("bad builtin")))
+  monkeypatch.setattr(modeld, "ModelState", lambda *_args, **_kwargs: (_ for _ in ()).throw(TypeError("bad builtin")))
 
   with pytest.raises(TypeError, match="bad builtin"):
     modeld._load_model_state(1928, 1208, modeld.BUILTIN_MODEL_KEY, False, FakeParams())
