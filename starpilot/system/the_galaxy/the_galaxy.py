@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timedelta, timezone
+from types import SimpleNamespace
 
 import importlib
 import math
@@ -4134,8 +4135,50 @@ def _get_has_radar():
   except Exception:
     return False
 
+def _get_offroad_vehicle_parked():
+  cp_bytes = _safe_params_get_live_raw("CarParamsPersistent")
+  fpcp_bytes = _safe_params_get_live_raw("StarPilotCarParamsPersistent")
+  if not cp_bytes or not fpcp_bytes:
+    return False
+
+  with car.CarParams.from_bytes(cp_bytes) as cp, custom.StarPilotCarParams.from_bytes(fpcp_bytes) as fpcp:
+    car_state = importlib.import_module(f"opendbc.car.{cp.brand}.carstate").CarState(cp, fpcp)
+    parsers = car_state.get_can_parsers(cp)
+    # CarState needs these options, but they don't affect gear.
+    toggles = SimpleNamespace(subaru_sng=False, cluster_offset=1.0)
+    car_state.update(parsers, toggles)  # The first update registers the messages CarState uses.
+    can_sock = messaging.sub_sock("can", timeout=100)
+    # Match pandad's clock (common/timing.h).
+    clock_id = getattr(time, "CLOCK_BOOTTIME", time.CLOCK_MONOTONIC)
+    started = time.clock_gettime_ns(clock_id)
+    deadline = started + 3_000_000_000
+    while time.clock_gettime_ns(clock_id) < deadline:
+      message_sizes = {(parser.bus, message.address): message.size
+                       for parser in parsers.values() for message in parser.message_states.values()}
+      packets = messaging.drain_sock(can_sock, wait_for_one=True)
+      now = time.clock_gettime_ns(clock_id)
+      frames = [
+        (packet.logMonoTime, [(c.address, c.dat, c.src) for c in packet.can if len(c.dat) == message_sizes.get((c.src, c.address))])
+        for packet in packets if packet.valid and started <= packet.logMonoTime <= now
+      ]
+      if not frames:
+        continue
+      for parser in parsers.values():
+        parser.update(frames)
+      state, _ = car_state.update(parsers, toggles)
+      car_state.out = state
+      # can_valid can stay true after messages stop arriving.
+      if all(
+        message.frequency > 0 and message.valid(now, parser.bus_timeout)
+        for parser in parsers.values() for message in parser.message_states.values() if not message.ignore_alive
+      ) and all(parser.can_valid for parser in parsers.values()):
+        return state.gearShifter == car.CarState.GearShifter.park
+  return False
+
 def _get_vehicle_parked():
   try:
+    if not params.get_bool("IsOnroad"):
+      return _get_offroad_vehicle_parked()
     sm = messaging.SubMaster(["carState"], poll="carState")
     sm.update(100)
     if not sm.seen["carState"] or not sm.alive["carState"] or not sm.valid["carState"]:
