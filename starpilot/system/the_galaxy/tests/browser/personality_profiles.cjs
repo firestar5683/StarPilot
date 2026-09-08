@@ -204,8 +204,7 @@ const output=process.env.PERSONALITY_BROWSER_OUTPUT || path.join(require('os').t
    store.route='/settings/longitudinal-speed-following';store.params={open:'CustomPersonalities'};store.search='';createApp(Settings).mount('#app');
  });
  await page.locator('.gx-personalities__grid').waitFor();assert(await page.locator('#gx-personality-settings').isVisible());
- await page.locator('.gx-longitudinal-mode select').waitFor();
- assert.equal(await page.locator('.gx-longitudinal-mode select').inputValue(),'conditional_experimental','dedicated mode renderer coexists with deep-linked personality editor');
+ assert.equal(await page.locator('.gx-longitudinal-mode').count(),0,'personality-only settings do not introduce unified mode');
  for(const theme of ['dark','light']) {
    await page.evaluate(t=>document.documentElement.dataset.theme=t,theme);
    await page.locator('.gx-personalities__heading').scrollIntoViewIfNeeded();
