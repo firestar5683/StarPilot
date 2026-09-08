@@ -49,7 +49,7 @@ import {DeviceSettings} from '/assets/components/tools/device_settings.js';
 DeviceSettings({params:{section:'longitudinal-speed-following'}})(document.querySelector('#app'));
 `
 ;(async () => {
-  const browser = await chromium.launch({ headless: true, args: ['--no-sandbox'] })
+  const browser = await chromium.launch({ headless: true, executablePath: process.env.CHROMIUM_EXECUTABLE, args: ['--no-sandbox'] })
   try {
     const page = await browser.newPage({ viewport: { width: 1100, height: 900 } })
     const errors = []

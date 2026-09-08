@@ -41,7 +41,7 @@ window.fetch=async(input,init={})=>{
 window.app=createApp(Settings); window.vm=window.app.mount('#app');
 `
 ;(async()=>{
- const browser=await chromium.launch({headless:true,args:['--no-sandbox']})
+ const browser=await chromium.launch({headless:true,executablePath:process.env.CHROMIUM_EXECUTABLE,args:['--no-sandbox']})
  const reports=[]
  try {
   for(const cfg of [{width:1440,height:1000,scale:1,touch:false},{width:1100,height:900,scale:1.25,touch:false},{width:390,height:844,scale:1,touch:true},{width:360,height:800,scale:1.5,touch:true},{width:768,height:1024,scale:2,touch:true}]) {

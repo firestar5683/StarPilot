@@ -125,10 +125,6 @@ export const Settings = {
     <div>
       <h2 style="margin-top:0;">Toggles</h2>
 
-      <div class="gx-unit-note">
-        <i class="bi bi-speedometer2"></i>
-        <span>Vehicle-unit speed settings use <strong>{{ speedUnit }}</strong> and follow the comma's <em>Use Metric System</em> toggle. Each control shows its adjustment step.</span>
-      </div>
 
       <DevModeBanner :hidden-count="hiddenAdvancedCount" :dev-mode-on="devModeOn" />
 

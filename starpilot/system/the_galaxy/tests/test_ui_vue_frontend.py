@@ -206,7 +206,7 @@ def test_ui_speed_units_follow_the_vehicle():
   assert "displayParam" in card and "formatNumericParamValue" in card
   assert "sliderStepDisplay" in card and "Step:" in card
   assert ':values="values"' in settings
-  assert "Use Metric System" in settings
+  assert 'class="gx-unit-note"' not in settings
 
 
 def test_ui_centralizes_api_and_uses_composables():

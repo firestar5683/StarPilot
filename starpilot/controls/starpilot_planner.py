@@ -227,13 +227,13 @@ class StarPilotPlanner:
     if conditional_tracking_active and bool(getattr(starpilot_toggles, "conditional_experimental_mode", False)):
       # Keep CEM's filters warm in AOL so engagement can inherit the current scene.
       self.starpilot_cem.update(v_ego, sm, starpilot_toggles, v_cruise)
-      self.starpilot_ccm.experimental_mode = True
+      self.starpilot_ccm.deactivate()
     elif conditional_tracking_active and bool(getattr(starpilot_toggles, "conditional_chill_mode", False)):
       self.starpilot_ccm.update(v_ego, v_cruise, sm, starpilot_toggles)
-      self.starpilot_cem.experimental_mode = False
+      self.starpilot_cem.deactivate()
     else:
-      self.starpilot_ccm.experimental_mode = True
-      self.starpilot_cem.experimental_mode = False
+      self.starpilot_ccm.deactivate()
+      self.starpilot_cem.deactivate()
       self.starpilot_cem.curve_detected = False
       self.starpilot_cem.stop_sign_and_light(v_ego, sm, PLANNER_TIME - 2)
 

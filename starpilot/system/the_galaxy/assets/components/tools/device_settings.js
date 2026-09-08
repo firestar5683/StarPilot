@@ -1972,10 +1972,6 @@ export function DeviceSettings({ params }) {
     <div class="ds-wrapper">
       <h2>Toggles</h2>
 
-      <div class="ds-unit-note">
-        <i class="bi bi-speedometer2"></i>
-        <span>Vehicle-unit speed settings use <strong>${() => vehicleSpeedUnit(state.values)}</strong> and follow the comma's <em>Use Metric System</em> toggle. Each control shows its adjustment step.</span>
-      </div>
 
       <div class="ds-search-row">
         <input

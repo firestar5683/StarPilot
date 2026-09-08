@@ -138,6 +138,13 @@ class ConditionalChillMode:
 
     self._write_status(self.status_value if not self.experimental_mode else CCStatus["OFF"])
 
+  def deactivate(self):
+    # Inactive time is not continuous scene confirmation. Do not alter persisted
+    # manual override state or the shared CEM hazard detector.
+    self._reset_timers()
+    self.experimental_mode = True
+    self._prev_cc_status = None
+
   def _reset_timers(self):
     self._active_auto_status = CCStatus["OFF"]
     self._candidate_since = 0.0

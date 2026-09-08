@@ -52,9 +52,8 @@ def test_device_settings_speed_units_follow_the_vehicle():
   assert 'from "/assets/mobile/js/params.js"' in source
   assert "resolveVehicleUnitParam" in source
   assert "formatNumericParamValue" in source
-  assert "vehicleSpeedUnit(state.values)" in source
   assert "unit_search_terms" in source
-  assert "Use Metric System" in source
+  assert 'class="ds-unit-note"' not in source
   assert "per click" in source
 
 
