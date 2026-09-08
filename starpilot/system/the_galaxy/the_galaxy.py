@@ -4167,6 +4167,7 @@ def _get_offroad_vehicle_parked():
         parser.update(frames)
       state, _ = car_state.update(parsers, toggles)
       car_state.out = state
+      now = time.clock_gettime_ns(clock_id)
       # can_valid can stay true after messages stop arriving.
       if all(
         message.frequency > 0 and message.valid(now, parser.bus_timeout)
