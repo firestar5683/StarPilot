@@ -92,6 +92,7 @@ let cscCalibrationPollInflight = null
 let cscCalibrationPollTimer = null
 let uiContextPollInflight = null
 let uiContextPollTimer = null
+let personalityViewGeneration = 0
 const DYNAMIC_DEFAULT_DEP_KEYS = new Set(["AccelerationProfile", "EVTuning", "TruckTuning"])
 const PERSONALITY_DEFINITIONS = [
   { id: "traffic", label: "Traffic Mode", icon: "bi bi-stoplights-fill" },
@@ -158,6 +159,7 @@ const state = reactive({
   personalityReferenceCurves: {},
   personalityProfilesError: "",
   personalityProfilesLoading: true,
+  personalityRecoveryPending: false,
   personalityUpdating: {},
 })
 
@@ -1626,22 +1628,71 @@ function togglePersonalityAdvanced(profileId) {
   }
 }
 
+async function recoverPersonalitySave() {
+  if (state.personalityRecoveryPending) return false
+  state.personalityRecoveryPending = true
+  const generation = personalityViewGeneration
+  state.personalityProfilesError = "Save could not be confirmed. Rechecking saved state…"
+  try {
+    const responses = await Promise.all([
+      fetch("/api/personality_profiles", { cache: "no-store" }),
+      fetch("/api/params/all", { cache: "no-store" }),
+    ])
+    if (responses.some(response => !response.ok)) throw new Error("Saved state readback failed.")
+    const [data, values] = await Promise.all(responses.map(response => response.json()))
+    if (generation !== personalityViewGeneration || !window.location.pathname.startsWith("/device_settings")) return false
+    for (const [profile, categories] of Object.entries(state.personalityProfiles)) {
+      for (const category of Object.keys(categories)) {
+        const config = data?.profiles?.[profile]?.[category]
+        if (!config || typeof config.preset !== "string" || !Array.isArray(config.curve) || !config.curve.every(Number.isFinite) ||
+            (config.preset === "custom" && config.curve.length !== data.speed_breakpoints_mph?.[category]?.length)) throw new Error("Saved profiles are malformed.")
+      }
+    }
+    const onroad = [false, "", "0", "False", "false"].includes(values?.IsOnroad) ? false : [true, "1", "True", "true"].includes(values?.IsOnroad) ? true : null
+    const offroad = [true, "1", "True", "true"].includes(values?.IsOffroad)
+    if (onroad === null || (!onroad && !offroad)) throw new Error("Road state could not be verified.")
+    state.values = { ...state.values, IsOnroad: onroad, IsOffroad: offroad }
+    state.personalityProfiles = data.profiles
+    state.personalityMigrationRequired = !!data.migration_required
+    state.personalityConfigured = !!data.configured
+    state.personalityEnabled = !!data.enabled
+    state.personalityReferenceCurves = data.reference_curves || {}
+    state.personalityProfilesError = ""
+    showParamSnackbar("Save could not be confirmed. Showing verified saved state; review it before editing again.", "error")
+    return true
+  } catch (error) {
+    if (window.location.pathname.startsWith("/device_settings")) state.personalityProfilesError = `${error.message} Editing is locked. Retry saved-state readback.`
+    return false
+  } finally {
+    state.personalityRecoveryPending = false
+  }
+}
+
 async function savePersonalityCategory(profileId, category, preset, curve, successMessage) {
   if (state.values.IsOnroad) return false
+  if (!window.location.pathname.startsWith("/device_settings") || state.personalityProfilesError || state.personalityProfilesLoading) return false
   if (state.personalityMigrationRequired) {
     showParamSnackbar("This profile data requires a verified migration before it can be edited.", "error")
     return false
   }
   const updateKey = personalityUpdateKey(profileId, category)
-  if (state.personalityUpdating[updateKey]) return false
+  if (Object.keys(state.personalityUpdating).length) return false
+  const generation = personalityViewGeneration
+  const expected = JSON.parse(JSON.stringify(state.personalityProfiles?.[profileId]?.[category]))
   state.personalityUpdating = { ...state.personalityUpdating, [updateKey]: true }
   try {
+    if (uiContextPollInflight) await uiContextPollInflight
+    if (generation !== personalityViewGeneration || !window.location.pathname.startsWith("/device_settings") || state.values.IsOnroad || state.personalityMigrationRequired) return false
     const response = await fetch("/api/personality_profiles", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ profile: profileId, category, preset, curve }),
+      body: JSON.stringify({ profile: profileId, category, preset, curve, expected }),
     })
     const data = await response.json()
+    if (generation !== personalityViewGeneration || !window.location.pathname.startsWith("/device_settings")) {
+      state.personalityProfilesError = "Save confirmation was interrupted. Retry saved-state readback before editing."
+      return false
+    }
     if (!response.ok) throw new Error(data.error || response.statusText || "Failed to save driving personality")
     const currentConfig = state.personalityProfiles?.[profileId]?.[category]
     const savedConfig = data.profiles?.[profileId]?.[category]
@@ -1662,7 +1713,8 @@ async function savePersonalityCategory(profileId, category, preset, curve, succe
     showParamSnackbar(successMessage || `${PERSONALITY_CATEGORY_DEFINITIONS[category].label} updated.`)
     return true
   } catch (error) {
-    showParamSnackbar(error?.message || "Failed to save driving personality.", "error")
+    if (generation === personalityViewGeneration && window.location.pathname.startsWith("/device_settings")) await recoverPersonalitySave()
+    else state.personalityProfilesError = "Save confirmation was interrupted. Retry saved-state readback before editing."
     return false
   } finally {
     const next = { ...state.personalityUpdating }
@@ -1899,7 +1951,7 @@ function beginPersonalityCurveDrag(event, profileId, category) {
   const finish = async pointerEvent => {
     removeListeners(pointerEvent)
     const saved = await savePersonalityCategory(profileId, category, "custom", curve, `${definition.label} graph updated.`)
-    if (!saved) restorePersonalityCurveVisual(profileId, category, config.curve)
+    if (!saved && !state.personalityProfilesError && window.location.pathname.startsWith("/device_settings")) restorePersonalityCurveVisual(profileId, category, state.personalityProfiles[profileId][category].curve)
   }
   const cancel = pointerEvent => {
     removeListeners(pointerEvent)
@@ -1947,7 +1999,7 @@ async function adjustPersonalityCurvePoint(profileId, category, index, input) {
   const curve = [...config.curve]
   curve[index] = Number(parsed.toFixed(2))
   const saved = await savePersonalityCategory(profileId, category, "custom", curve, `${definition.label} graph updated.`)
-  if (!saved) restorePersonalityCurveVisual(profileId, category, config.curve)
+  if (!saved && !state.personalityProfilesError && window.location.pathname.startsWith("/device_settings")) restorePersonalityCurveVisual(profileId, category, state.personalityProfiles[profileId][category].curve)
 }
 
 function renderPersonalityCurve(profile, category, config) {
@@ -2140,7 +2192,7 @@ function renderPersonalityAdvancedRows(profile, config) {
       ${() => config.acceleration.preset === "custom" ? renderPersonalityCurve(profile, "acceleration", config.acceleration) : ""}
       ${() => config.braking.preset === "custom" ? renderPersonalityCurve(profile, "braking", config.braking) : ""}
       ${() => config.following.preset === "custom" ? renderPersonalityCurve(profile, "following", config.following) : ""}
-      <div class="ds-personality-warning" role="note"><strong>Warning:</strong> Custom values are untested and may not be supported by the developer.</div>
+
       ${rows}
     </div>
   `
@@ -2196,7 +2248,7 @@ function renderPersonalityCard(profile) {
 
 function renderPersonalityProfilesPanel() {
   if (state.personalityProfilesLoading) return html`<div class="ds-loading" role="status" aria-live="polite">Loading driving personalities...</div>`
-  if (state.personalityProfilesError) return html`<div class="ds-personality-error" role="alert" aria-live="assertive">${state.personalityProfilesError}</div>`
+  if (state.personalityProfilesError) return html`<div class="ds-personality-error" role="alert" aria-live="assertive">${state.personalityProfilesError}<button type="button" class="ds-reset-btn" disabled="${() => state.personalityRecoveryPending || Object.keys(state.personalityUpdating).length > 0}" @click="${() => state.personalityMeta ? recoverPersonalitySave() : fetchPersonalityProfiles()}">Retry saved-state readback</button></div>`
   if (!state.personalityMeta) return html`<div class="ds-personality-error" role="alert" aria-live="assertive">Driving personalities could not be loaded. Refresh the page to retry.</div>`
   return html`
     <div class="ds-personality-profiles" id="personality-profiles-panel">
@@ -2651,6 +2703,8 @@ function resolveActiveSectionSlug(params) {
 }
 
 export function DeviceSettings({ params }) {
+  personalityViewGeneration += 1
+  if (Object.keys(state.personalityUpdating).length) state.personalityProfilesError = "Save in progress. Retry saved-state readback when it finishes."
   lastParams = params
 
   requestAnimationFrame(() => {

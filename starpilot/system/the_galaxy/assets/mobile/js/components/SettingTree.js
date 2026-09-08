@@ -1,9 +1,10 @@
+import { PersonalityProfiles } from "./PersonalityProfiles.js"
 import { GalaxyToggleCard } from "./GalaxyToggleCard.js"
 import { hasChildParams, isGroupParam, isParamEnabledForChildren } from "../params.js"
 
 export const SettingTree = {
   name: "SettingTree",
-  components: { GalaxyToggleCard },
+  components: { GalaxyToggleCard, PersonalityProfiles },
   props: {
     params: { type: Array, required: true },
     parentKey: { default: null },
@@ -29,13 +30,14 @@ export const SettingTree = {
   },
   template: `
     <template v-for="p in children" :key="p.key">
-      <div class="gx-tree-node" :class="{ 'gx-tree-node--child': depth > 0 }" :style="'--gx-depth:' + depth">
+      <PersonalityProfiles v-if="p.key === 'CustomPersonalities'" :manage-open="isExpanded(p)" @manage="$emit('manage', p.key)" @change="$emit('change', $event)" />
+      <div v-else class="gx-tree-node" :class="{ 'gx-tree-node--child': depth > 0 }" :style="'--gx-depth:' + depth">
         <GalaxyToggleCard :param="p" :value="values[p.key]" :locked="lockReason(p) !== ''"
           :manageable="manageable(p)" :manage-open="manageOpen(p)"
           @change="$emit('change', $event)" @manage="$emit('manage', $event)" />
       </div>
       <transition name="gx-collapse">
-        <div v-if="showChildren(p)" class="gx-tree-children">
+        <div v-if="p.key !== 'CustomPersonalities' && showChildren(p)" class="gx-tree-children">
           <SettingTree :params="params" :parent-key="p.key" :depth="depth + 1"
             :values="values" :expanded="expanded" :lock-reason="lockReason"
             @change="$emit('change', $event)" @manage="$emit('manage', $event)" />

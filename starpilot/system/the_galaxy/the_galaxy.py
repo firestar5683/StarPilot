@@ -137,6 +137,7 @@ from openpilot.starpilot.common.longitudinal_personality_profiles import (
   PERSONALITY_PROFILE_ENABLE_PARAM_KEYS,
   PROFILE_SCHEMA_VERSION,
   default_personality_profiles,
+  is_unconfigured_profile_document,
   initial_custom_curve,
   is_truck_fingerprint,
   migrate_profile_document,
@@ -5830,7 +5831,7 @@ def setup(app):
     configured = stored_document is not None
     migration_required = configured and current_document is None
     enabled = params.get_bool("CustomPersonalities")
-    if raw_profiles is not None and stored_document is None:
+    if not is_unconfigured_profile_document(raw_profiles) and stored_document is None:
       return jsonify({"error": "Stored longitudinal personality profiles are malformed and were not overwritten."}), 409
     profiles = stored_document["profiles"] if configured else default_personality_profiles(ev_tuning, truck_tuning)
 
@@ -5841,11 +5842,19 @@ def setup(app):
         return jsonify({"error": "Stored longitudinal personality profiles require a verified migration before editing."}), 409
       data = request.get_json(silent=True)
       required_fields = {"profile", "category", "preset", "curve"}
-      if not isinstance(data, dict) or set(data) != required_fields:
-        return jsonify({"error": "Expected exactly profile, category, preset, and curve."}), 400
+      if not isinstance(data, dict) or set(data) not in (required_fields, required_fields | {"expected"}):
+        return jsonify({"error": "Expected profile, category, preset, curve, and optional expected category."}), 400
 
       try:
         current_config = profiles[data["profile"]][data["category"]]
+        # Opt-in category compare-and-swap, inside the shared writer lock. Older
+        # clients keep their full-replacement contract; both shipped editors send
+        # their original category, so another editor or slot restore wins safely.
+        # Numeric JSON round-trips may turn 1.0 into 1; booleans must not match 1.
+        if "expected" in data and (data["expected"] != current_config or any(
+          isinstance(value, bool) for key in ("curve", "legacyCurve") for value in data["expected"].get(key, [])
+        )):
+          return jsonify({"error": "Saved profile changed. Reload and review it before editing again."}), 409
         curve = data["curve"]
         if data["preset"] == "custom" and current_config.get("preset") != "custom":
           if curve != []:
@@ -5995,7 +6004,7 @@ def setup(app):
           ev_tuning = _get_detected_ev_tuning()
           truck_tuning = (_get_detected_truck_tuning() or params.get_bool("TruckTuning")) and not ev_tuning
           raw_document = _safe_params_get_live_raw(PERSONALITY_PROFILES_PARAM)
-          if raw_document is not None and strict_profile_document(raw_document) is None:
+          if not is_unconfigured_profile_document(raw_document) and strict_profile_document(raw_document) is None:
             return jsonify({"error": "Stored longitudinal personality profiles require a verified migration before changing the master control."}), 409
           document = synchronise_profile_document_enabled(
             raw_document, enabled, ev_tuning, truck_tuning,
@@ -9917,7 +9926,7 @@ def setup(app):
         ev_tuning = _get_detected_ev_tuning()
         truck_tuning = (_get_detected_truck_tuning() or params.get_bool("TruckTuning")) and not ev_tuning
         raw_document = _params_raw.get(PERSONALITY_PROFILES_PARAM)
-        if raw_document is not None and strict_profile_document(raw_document) is None:
+        if not is_unconfigured_profile_document(raw_document) and strict_profile_document(raw_document) is None:
           return jsonify({
             "success": False,
             "message": "Stored longitudinal personality profiles require a verified migration before restoring the master control.",

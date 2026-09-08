@@ -371,13 +371,13 @@ def test_custom_graph_has_reference_line_and_only_reset_action():
   assert ">Paste<" not in curve
 
 
-def test_advanced_values_use_supported_presets_and_warn_before_custom():
+def test_advanced_values_use_supported_presets_without_retired_warning_copy():
   source = DEVICE_SETTINGS_PATH.read_text(encoding="utf-8")
   advanced_rows = source.split("function renderPersonalityAdvancedRows", 1)[1].split("\n}", 1)[0]
   value_editor = source.split("function renderPersonalityAdvancedValue", 1)[1].split("\n}", 1)[0]
   option_resolver = source.split("function personalityAdvancedOptions", 1)[1].split("\n}", 1)[0]
   advanced = advanced_rows + value_editor + option_resolver
-  assert "Custom values are untested" in advanced
+  assert "Custom values are untested" not in advanced
   assert "Chill" in advanced
   assert "Standard" in advanced
   assert "Custom" in advanced
@@ -572,9 +572,11 @@ def test_failed_graph_put_restores_persisted_curve_inputs_and_canvas_for_edit_an
   assert "personality-input-${profileId}-${category}-${index}" in restore
   assert "personality-value-${profileId}-${category}-${index}" in restore
   drag = source.split("function beginPersonalityCurveDrag", 1)[1].split("\n}\n\nfunction setPersonalityCurveError", 1)[0]
-  assert "if (!saved) restorePersonalityCurveVisual" in drag
   adjust = source.split("function adjustPersonalityCurvePoint", 1)[1].split("\n}\n\nfunction renderPersonalityCurve", 1)[0]
-  assert "if (!saved) restorePersonalityCurveVisual" in adjust
+  for caller in (drag, adjust):
+    assert 'if (!saved && !state.personalityProfilesError' in caller
+    assert 'restorePersonalityCurveVisual(profileId, category, state.personalityProfiles[profileId][category].curve)' in caller
+    assert 'restorePersonalityCurveVisual(profileId, category, config.curve)' not in caller
 
 
 def test_personality_jerk_layout_metadata_matches_stored_percentage_range():

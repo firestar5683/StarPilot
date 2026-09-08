@@ -52,6 +52,10 @@ export const api = {
       .filter((section) => (section.params || []).length > 0)
   },
 
+  getPersonalityProfiles() { return request("/api/personality_profiles", { cache: "no-store" }) },
+  savePersonalityProfile(data) { return request("/api/personality_profiles", { method: "PUT", data }) },
+  migratePersonalityProfiles() { return request("/api/personality_profiles/migrate", { method: "POST" }) },
+
   getParams() { return request("/api/params/all") },
   async getDefaults() {
     const res = await fetch("/api/params/defaults")

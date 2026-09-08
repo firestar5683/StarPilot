@@ -365,6 +365,16 @@ def migrate_profile_document(raw_document) -> dict | None:
   return strict_profile_document(profile_document(migrated_profiles, enabled=legacy["enabled"]))
 
 
+def is_unconfigured_profile_document(raw_document) -> bool:
+  # The Params registry's JSON default is {}, returned either decoded or raw.
+  # Only that empty-object sentinel (or an absent key) is unconfigured. Invalid
+  # JSON, null, arrays and nonempty malformed documents remain fail-closed.
+  if raw_document is None:
+    return True
+  decoded = _decode_json(raw_document)
+  return isinstance(decoded, dict) and not decoded
+
+
 def synchronise_profile_document_enabled(
   raw_document, enabled: bool, ev_tuning: bool, truck_tuning: bool = False,
 ) -> dict | None:
@@ -372,7 +382,7 @@ def synchronise_profile_document_enabled(
     raise ValueError("enabled must be a JSON boolean")
   document = migrate_profile_document(raw_document)
   if document is None:
-    if raw_document is not None or not enabled:
+    if not is_unconfigured_profile_document(raw_document) or not enabled:
       return None
     return profile_document(default_personality_profiles(ev_tuning, truck_tuning), enabled=True)
   document["enabled"] = enabled
