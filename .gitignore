@@ -81,6 +81,7 @@ selfdrive/modeld/models/*.pkl
 # openpilot log files
 *.bz2
 *.zst
+!selfdrive/modeld/firmware/amdgpu/*.zst
 
 build/
 

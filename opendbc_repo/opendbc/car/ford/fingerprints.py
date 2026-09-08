@@ -1,4 +1,6 @@
 """ AUTO-FORMATTED USING opendbc/car/debug/format_fingerprints.py, EDIT STRUCTURE THERE."""
+# Some Ford firmware entries first imported in StarPilot 3f6ccd104e came from BluePilot bp-7.0
+# contributors. The exact authors and source revisions are recorded in the root CREDITS.md.
 from opendbc.car.structs import CarParams
 from opendbc.car.ford.values import CAR
 

@@ -23,6 +23,7 @@ from openpilot.starpilot.assets.model_manager import (
   is_builtin_model_key,
   model_uses_external_gpu,
   model_key_aliases,
+  set_model_profile,
 )
 from openpilot.starpilot.common.starpilot_variables import MODELS_PATH, update_starpilot_toggles
 from openpilot.system.ui.lib.application import FontWeight, MouseEvent, MousePos, gui_app
@@ -1089,6 +1090,13 @@ class StarPilotDrivingModelLayout(_SettingsPage):
     resolved_version = resolved_version or entry.version or self._default_model_version()
     self._params.put("ModelVersion", resolved_version)
     self._params.put("DrivingModelVersion", resolved_version)
+    set_model_profile(
+      self._params,
+      "big" if entry.requires_external_gpu else "small",
+      selected_model,
+      entry.name,
+      resolved_version,
+    )
     update_starpilot_toggles()
     self._update_model_metadata()
     if ui_state.started:

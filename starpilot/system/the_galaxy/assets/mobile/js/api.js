@@ -136,6 +136,7 @@ export const api = {
   getModelLab() { return request("/api/model-laboratory", { cache: "no-store" }) },
   saveModelLab(config) { return request("/api/model-laboratory", { method: "PUT", data: config }) },
   prepareModelLabArtifact(model) { return request("/api/model-laboratory/download", { method: "POST", data: { model } }) },
+  deleteModelLabArtifact(model) { return request("/api/model-laboratory/artifact", { method: "DELETE", data: { model } }) },
 
   getErrorLogs() { return request("/api/error_logs", { headers: { Accept: "application/json" } }) },
   getErrorLog(filename) { return fetch(`/api/error_logs/${encodeURIComponent(filename)}`).then((r) => r.text()) },
@@ -260,6 +261,7 @@ export const api = {
   sentryPushSubscribe(body) { return request("/api/sentry/push/subscribe", { method: "POST", data: body }) },
 
   getModelStatus() { return requestOk("/api/models/status", { cache: "no-store" }) },
+  setActiveModel(profile, modelKey = "") { return request("/api/models/active", { method: "PUT", data: { profile, model: modelKey } }) },
   startModelDownload(modelKey, allowGpuWithoutGpu = false) { return request("/api/models/download", { method: "POST", data: { model: modelKey, allowGpuWithoutGpu } }) },
   downloadAllModels(allowGpuWithoutGpu = false) { return request("/api/models/download_all", { method: "POST", data: { allowGpuWithoutGpu } }) },
   deleteModel(modelKey) { return request("/api/models/delete", { method: "POST", data: { model: modelKey } }) },

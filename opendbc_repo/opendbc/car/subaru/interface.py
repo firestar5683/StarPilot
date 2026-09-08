@@ -42,7 +42,7 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs[0].safetyParam |= SubaruSafetyFlags.D_PLATFORM_CAMERA.value
       if candidate in SUBARU_STOP_START_CARS:
         ret.safetyConfigs[0].safetyParam |= SubaruSafetyFlags.STOP_START_BUTTON.value
-      if candidate in (CAR.SUBARU_LEGACY_2025, CAR.SUBARU_ASCENT_2023):
+      if candidate in (CAR.SUBARU_LEGACY_2025, CAR.SUBARU_ASCENT_2023, CAR.SUBARU_OUTBACK_2023):
         ret.safetyConfigs[0].safetyParam |= SubaruSafetyFlags.FIXED_ANGLE_LIMITS.value
 
     ret.steerLimitTimer = 0.4

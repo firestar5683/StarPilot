@@ -808,7 +808,11 @@ def startStream(sdp: str, enabled: bool) -> dict:
     wait_for_webrtcd()
 
   return post_stream_request(StreamRequestBody(
-    sdp, "wideRoad", enabled, bridge_services_in, ["carState", "deviceState"],
+    sdp=sdp,
+    cameras=["wideRoad"],
+    enabled=enabled,
+    bridge_services_in=bridge_services_in,
+    bridge_services_out=["carState", "deviceState"],
   ))
 
 

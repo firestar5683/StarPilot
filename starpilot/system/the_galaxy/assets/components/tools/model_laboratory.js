@@ -12,7 +12,6 @@ const state = reactive({
   download: {},
   models: [],
   summary: {},
-  manifest: { version: "unknown", shortcomings: [], opportunities: [] },
 })
 
 let initialized = false
@@ -27,31 +26,33 @@ function modelLabel(modelId) {
   return modelById(modelId)?.label || modelId || "not selected"
 }
 
-function readyModels() {
+function availableModels() {
   return state.models.filter(model => model.modelLabArtifactAvailable)
 }
 
+function downloadedModels() {
+  return availableModels().filter(model => model.modelLabArtifactInstalled)
+}
+
 function candidateModels(role) {
-  const ready = readyModels()
-  if (role !== "longitudinal") return ready
+  const downloaded = downloadedModels()
+  if (role !== "longitudinal") return downloaded
   const lateral = modelById(state.configuration.lateralModel)
-  if (!lateral) return ready
-  return ready.filter(model => model.value !== lateral.value)
+  if (!lateral) return downloaded
+  return downloaded.filter(model => model.value !== lateral.value)
 }
 
 function selectionError() {
-  if (!state.chestnutReady) return "Connect a firmware-ready Chestnut first."
   if (state.isOnroad) return "Park before changing the laboratory pair."
+  if (downloadedModels().length < 2) return "Download at least two eGPU variants before composing a pair."
   const lateral = modelById(state.configuration.lateralModel)
   const longitudinal = modelById(state.configuration.longitudinalModel)
-  if (!lateral || !longitudinal) return "Choose two small models with published Chestnut artifacts."
+  if (!lateral || !longitudinal) return "Choose two downloaded eGPU variants."
   if (lateral.value === longitudinal.value) return "Lateral and longitudinal models must be different."
-  if (!lateral.modelLabArtifactAvailable || !longitudinal.modelLabArtifactAvailable) {
-    return "Both models need a precompiled AMD artifact in the manifest."
-  }
   if (!lateral.modelLabArtifactInstalled || !longitudinal.modelLabArtifactInstalled) {
-    return "Prepare both precompiled AMD artifacts first."
+    return "Download both eGPU variants first."
   }
+  if (!state.chestnutReady) return "Connect a firmware-ready Chestnut to enable this pair."
   return ""
 }
 
@@ -75,17 +76,14 @@ function applyPayload(payload) {
   state.download = payload?.download && typeof payload.download === "object" ? payload.download : {}
   state.models = Array.isArray(payload?.models) ? payload.models : []
   state.summary = payload?.summary && typeof payload.summary === "object" ? payload.summary : {}
-  state.manifest = payload?.manifest && typeof payload.manifest === "object"
-    ? payload.manifest
-    : { version: "unknown", shortcomings: [], opportunities: [] }
   state.error = String(payload?.configurationError || "")
 
-  const ready = readyModels()
-  if (!modelById(state.configuration.lateralModel) && ready.length > 0) {
-    state.configuration.lateralModel = ready[0].value
+  const downloaded = downloadedModels()
+  if (!downloaded.some(model => model.value === state.configuration.lateralModel)) {
+    state.configuration.lateralModel = downloaded[0]?.value || ""
   }
-  if (!modelById(state.configuration.longitudinalModel) && ready.length > 1) {
-    state.configuration.longitudinalModel = ready.find(model => (
+  if (!downloaded.some(model => model.value === state.configuration.longitudinalModel)) {
+    state.configuration.longitudinalModel = downloaded.find(model => (
       model.value !== state.configuration.lateralModel
     ))?.value || ""
   }
@@ -157,8 +155,31 @@ async function prepareModel(modelId) {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify({ model: modelId }),
     })
-    state.message = String(payload.message || "Chestnut artifact download queued.")
+    state.message = String(payload.message || "eGPU variant download queued.")
     await refresh()
+  } catch (error) {
+    state.error = error?.message || String(error)
+  } finally {
+    state.saving = false
+  }
+}
+
+async function deleteModel(modelId) {
+  if (state.saving || !modelId) return
+  const model = modelById(modelId)
+  if (!window.confirm(`Delete the eGPU variant for "${model?.label || modelId}"? The normal on-device model will not be removed.`)) return
+  state.saving = true
+  state.error = ""
+  state.message = ""
+  try {
+    const payload = await requestJson("/api/model-laboratory/artifact", {
+      method: "DELETE",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ model: modelId }),
+    })
+    selectionDirty = false
+    applyPayload(payload)
+    state.message = String(payload.message || "eGPU variant deleted.")
   } catch (error) {
     state.error = error?.message || String(error)
   } finally {
@@ -176,6 +197,11 @@ function bindControls() {
     if (button.dataset.bound === "1") return
     button.dataset.bound = "1"
     button.addEventListener("click", () => prepareModel(button.dataset.mlDownload))
+  })
+  document.querySelectorAll("[data-ml-delete]").forEach(button => {
+    if (button.dataset.bound === "1") return
+    button.dataset.bound = "1"
+    button.addEventListener("click", () => deleteModel(button.dataset.mlDelete))
   })
 
   if (lateral) {
@@ -226,15 +252,15 @@ function ensurePolling() {
       return
     }
     await refresh()
-    pollHandle = setTimeout(poll, 5000)
+    pollHandle = setTimeout(poll, state.download?.model ? 1000 : 5000)
   }
   pollHandle = setTimeout(poll, 5000)
 }
 
 function renderModel(model) {
   const artifactStatus = model.modelLabArtifactInstalled
-    ? "AMD ready"
-    : model.modelLabArtifactAvailable ? "AMD download needed" : "AMD not published"
+    ? "eGPU variant downloaded"
+    : "eGPU variant not downloaded"
   return html`
     <div class="ml-model">
       <div>
@@ -248,8 +274,15 @@ function renderModel(model) {
           ${artifactStatus}
         </span>
         ${model.modelLabArtifactAvailable && !model.modelLabArtifactInstalled ? html`
-          <button class="ml-button" data-ml-download="${model.value}" disabled="${() => state.saving || state.isOnroad}">
-            Prepare for Chestnut
+          <button class="ml-button" data-ml-download="${model.value}" disabled="${() => state.saving || state.isOnroad || Boolean(state.download?.model)}">
+            ${() => state.download?.model === model.value
+              ? `Downloading · ${state.download?.progress || "starting…"}`
+              : "Download eGPU variant"}
+          </button>
+        ` : ""}
+        ${model.modelLabArtifactInstalled ? html`
+          <button class="ml-button ml-button-danger" data-ml-delete="${model.value}" disabled="${() => state.saving || state.isOnroad || Boolean(state.download?.model)}">
+            Delete eGPU variant
           </button>
         ` : ""}
       </div>
@@ -290,8 +323,19 @@ export function ModelLaboratory() {
         <section class="ml-card">
           <div class="ml-card-heading">
             <div>
+              <h3>Available models</h3>
+              <p>Download eGPU-compatible small models. These are separate from the small models in Model Manager because they are compiled for the eGPU.</p>
+              <p>${() => `${state.summary.ready || 0} downloaded · ${Math.max((state.summary.published || 0) - (state.summary.ready || 0), 0)} available to download.`}</p>
+            </div>
+          </div>
+          <div class="ml-model-list">${() => availableModels().map(renderModel)}</div>
+        </section>
+
+        <section class="ml-card">
+          <div class="ml-card-heading">
+            <div>
               <h3>Compose a pair</h3>
-              <p>Both precompiled small models stay resident and run every camera frame on Chestnut's AMD GPU.</p>
+              <p>Choose from downloaded eGPU variant combinations below.</p>
             </div>
             <span class="${() => `ml-state ${state.configuration.enabled ? "is-enabled" : ""}`}">
               ${() => state.configuration.enabled ? "Enabled" : "Disabled"}
@@ -362,20 +406,6 @@ export function ModelLaboratory() {
           </div>
           ${() => state.runtime?.error ? html`<div class="ml-alert ml-alert-error">${state.runtime.error}</div>` : ""}
           <p class="ml-muted">Both roles evaluate the same frame at 20 Hz. A runtime failure suppresses that frame and falls back to the built-in QCOM model.</p>
-        </section>
-
-        <section class="ml-card">
-          <div class="ml-card-heading">
-            <div>
-              <h3>Available models</h3>
-              <p>${() => `${state.summary.ready || 0} ready to pair · ${Math.max((state.summary.published || 0) - (state.summary.ready || 0), 0)} available to download.`}</p>
-            </div>
-          </div>
-          <div class="ml-model-list">${() => readyModels().map(renderModel)}</div>
-          <div class="ml-note">
-            Model Manager downloads the manifest's precompiled AMD variants. Nothing is compiled on the comma.
-            A normal installed model may still need its separate Chestnut artifact.
-          </div>
         </section>
 
       ` : ""}

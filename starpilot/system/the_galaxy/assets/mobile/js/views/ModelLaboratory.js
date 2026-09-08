@@ -14,13 +14,17 @@ export const ModelLaboratory = {
       isOnroad: false,
       configuration: { enabled: false, lateralModel: "", longitudinalModel: "" },
       runtime: {},
+      download: {},
       summary: {},
       models: [],
     }
   },
   computed: {
-    readyModels() {
+    availableModels() {
       return this.models.filter((m) => m && m.modelLabArtifactAvailable)
+    },
+    readyModels() {
+      return this.availableModels.filter((m) => m.modelLabArtifactInstalled)
     },
     candidates() {
       const ready = this.readyModels
@@ -28,18 +32,16 @@ export const ModelLaboratory = {
       return ready.filter((m) => !lat || m.value !== lat)
     },
     selectionError() {
-      if (!this.chestnutReady) return "Connect a firmware-ready Chestnut first."
       if (this.isOnroad) return "Park before changing the laboratory pair."
+      if (this.readyModels.length < 2) return "Download at least two eGPU variants before composing a pair."
       const lat = this.modelById(this.configuration.lateralModel)
       const lon = this.modelById(this.configuration.longitudinalModel)
-      if (!lat || !lon) return "Choose two small models with published Chestnut artifacts."
+      if (!lat || !lon) return "Choose two downloaded eGPU variants."
       if (lat.value === lon.value) return "Lateral and longitudinal models must be different."
-      if (!lat.modelLabArtifactAvailable || !lon.modelLabArtifactAvailable) {
-        return "Both models need a precompiled AMD artifact in the manifest."
-      }
       if (!lat.modelLabArtifactInstalled || !lon.modelLabArtifactInstalled) {
-        return "Prepare both precompiled AMD artifacts first."
+        return "Download both eGPU variants first."
       }
+      if (!this.chestnutReady) return "Connect a firmware-ready Chestnut to enable this pair."
       return ""
     },
     runtimeState() {
@@ -48,7 +50,7 @@ export const ModelLaboratory = {
     },
   },
   created() {
-    this.poll = usePolling(() => this.refresh(), { interval: 5000 })
+    this.poll = usePolling(() => this.refresh(), { interval: 2000 })
     this.poll.start()
   },
   beforeUnmount() {
@@ -62,9 +64,8 @@ export const ModelLaboratory = {
       return this.modelById(id)?.label || id || "not selected"
     },
     artifactStatus(m) {
-      if (m.modelLabArtifactInstalled) return { text: "AMD ready", good: true }
-      if (m.modelLabArtifactAvailable) return { text: "AMD download needed", good: false }
-      return { text: "AMD not published", good: false }
+      if (m.modelLabArtifactInstalled) return { text: "eGPU variant downloaded", good: true }
+      return { text: "eGPU variant not downloaded", good: false }
     },
     async refresh() {
       try {
@@ -82,6 +83,7 @@ export const ModelLaboratory = {
       this.isOnroad = Boolean(payload.isOnroad)
       this.error = String(payload.configurationError || "")
       this.runtime = payload.runtime && typeof payload.runtime === "object" ? payload.runtime : {}
+      this.download = payload.download && typeof payload.download === "object" ? payload.download : {}
       this.summary = payload.summary && typeof payload.summary === "object" ? payload.summary : {}
       this.models = Array.isArray(payload.models) ? payload.models : []
       const cfg = payload.configuration && typeof payload.configuration === "object" ? payload.configuration : {}
@@ -95,10 +97,10 @@ export const ModelLaboratory = {
     },
     normalizeSelection() {
       const ready = this.readyModels
-      if (!this.modelById(this.configuration.lateralModel) && ready.length) {
-        this.configuration.lateralModel = ready[0].value
+      if (!ready.some((m) => m.value === this.configuration.lateralModel)) {
+        this.configuration.lateralModel = ready[0]?.value || ""
       }
-      if (!this.modelById(this.configuration.longitudinalModel) && ready.length > 1) {
+      if (!ready.some((m) => m.value === this.configuration.longitudinalModel)) {
         const lon = ready.find((m) => m.value !== this.configuration.lateralModel)
         this.configuration.longitudinalModel = lon?.value || ""
       }
@@ -143,9 +145,28 @@ export const ModelLaboratory = {
       this.message = ""
       try {
         const payload = await api.prepareModelLabArtifact(modelId)
-        this.message = String(payload?.message || "Chestnut artifact download queued.")
-        showSnackbar("Chestnut artifact download queued", "info")
+        this.message = String(payload?.message || "eGPU variant download queued.")
+        showSnackbar("eGPU variant download queued", "info")
         await this.refresh()
+      } catch (e) {
+        this.error = e?.message || String(e)
+      } finally {
+        this.saving = false
+      }
+    },
+    async deleteModel(modelId) {
+      if (this.saving || !modelId) return
+      const model = this.modelById(modelId)
+      if (!window.confirm(`Delete the eGPU variant for "${model?.label || modelId}"? The normal on-device model will not be removed.`)) return
+      this.saving = true
+      this.error = ""
+      this.message = ""
+      try {
+        const payload = await api.deleteModelLabArtifact(modelId)
+        this.dirty = false
+        this.applyPayload(payload)
+        this.message = String(payload?.message || "eGPU variant deleted.")
+        showSnackbar("eGPU variant deleted", "info")
       } catch (e) {
         this.error = e?.message || String(e)
       } finally {
@@ -179,10 +200,39 @@ export const ModelLaboratory = {
 
       <div class="gx-card">
         <div class="gx-section__header">
+          <i class="bi bi-cpu"></i>
+          <span class="gx-section__title">Available models</span>
+          <span class="gx-section__count">{{ summary.ready || 0 }} downloaded · {{ Math.max((summary.published || 0) - (summary.ready || 0), 0) }} available to download</span>
+        </div>
+        <div style="padding: 0 var(--sp-4) var(--sp-3); color:var(--text-muted); font-size:var(--fs-sm);">
+          Download eGPU-compatible small models. These are separate from the small models in Model Manager because they are compiled for the eGPU.
+        </div>
+        <article v-for="m in availableModels" :key="m.value" class="gx-row">
+          <div class="gx-row__info">
+            <span class="gx-row__label">{{ m.label }}</span>
+            <span class="gx-row__desc">{{ m.value }} · {{ m.series || 'Unknown series' }}</span>
+          </div>
+          <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
+            <span class="gx-chip">{{ m.version || 'unknown version' }}</span>
+            <span class="gx-chip">{{ m.modelSize || 'small' }}</span>
+            <span class="gx-chip" :style="artifactStatus(m).good ? 'color:var(--success);' : 'color:var(--warning);'">{{ artifactStatus(m).text }}</span>
+            <button v-if="!m.modelLabArtifactInstalled" type="button" class="gx-btn gx-btn--tonal" :disabled="saving || isOnroad || !!download.model" @click="prepareModel(m.value)">
+              {{ download.model === m.value ? 'Downloading · ' + (download.progress || 'starting…') : 'Download eGPU variant' }}
+            </button>
+            <button v-else type="button" class="gx-btn gx-btn--tonal" style="color:var(--error);" :disabled="saving || isOnroad || !!download.model" @click="deleteModel(m.value)">
+              Delete eGPU variant
+            </button>
+          </div>
+        </article>
+      </div>
+
+      <div class="gx-card">
+        <div class="gx-section__header">
           <i class="bi bi-collection"></i>
           <span class="gx-section__title">Compose a pair</span>
           <span class="gx-chip" :style="configuration.enabled ? 'background:var(--success);color:var(--on-secondary);' : ''">{{ configuration.enabled ? 'Enabled' : 'Disabled' }}</span>
         </div>
+        <div style="padding: 0 var(--sp-4); color:var(--text-muted); font-size:var(--fs-sm);">Choose from downloaded eGPU variant combinations below.</div>
         <div style="padding: var(--sp-4); display:grid; gap:var(--sp-3);">
           <label style="display:grid; gap:4px;">
             <strong style="font-size:var(--fs-sm);">Lateral model</strong>
@@ -234,30 +284,6 @@ export const ModelLaboratory = {
         </div>
       </div>
 
-      <div class="gx-card">
-        <div class="gx-section__header">
-          <i class="bi bi-cpu"></i>
-          <span class="gx-section__title">Available models</span>
-          <span class="gx-section__count">{{ summary.ready || 0 }} ready to pair · {{ Math.max((summary.published || 0) - (summary.ready || 0), 0) }} available to download</span>
-        </div>
-        <article v-for="m in readyModels" :key="m.value" class="gx-row">
-          <div class="gx-row__info">
-            <span class="gx-row__label">{{ m.label }}</span>
-            <span class="gx-row__desc">{{ m.value }} · {{ m.series || 'Unknown series' }}</span>
-          </div>
-          <div style="display:flex; gap:6px; flex-wrap:wrap; align-items:center;">
-            <span class="gx-chip">{{ m.version || 'unknown version' }}</span>
-            <span class="gx-chip">{{ m.modelSize || 'small' }}</span>
-            <span class="gx-chip" :style="artifactStatus(m).good ? 'color:var(--success);' : 'color:var(--warning);'">{{ artifactStatus(m).text }}</span>
-            <button v-if="m.modelLabArtifactAvailable && !m.modelLabArtifactInstalled" type="button" class="gx-btn gx-btn--tonal" :disabled="saving || isOnroad" @click="prepareModel(m.value)">
-              Prepare for Chestnut
-            </button>
-          </div>
-        </article>
-        <div style="padding: var(--sp-3);">
-          <p class="gx-row__desc" style="margin:0;">Model Manager downloads the manifest's precompiled AMD variants. Nothing is compiled on the comma. A normal installed model may still need its separate Chestnut artifact.</p>
-        </div>
-      </div>
     </template>
   </div>
   `,

@@ -96,11 +96,10 @@ def _params_client(monkeypatch, values, device_type):
     the_galaxy,
     "_get_param_type_info",
     lambda: (
-      {"AlphaLongitudinalEnabled", "ForceOffroad", "FordLateralMode"},
+      {"AlphaLongitudinalEnabled", "ForceOffroad"},
       {
         "AlphaLongitudinalEnabled": bool,
         "ForceOffroad": bool,
-        "FordLateralMode": int,
       },
     ),
   )
@@ -232,6 +231,25 @@ def test_wheel_controls_status_includes_favorite_slots(monkeypatch):
     "__starpilot_controller_action__:disengage_openpilot",
   }
   assert response.get_json()["speed_unit"] == "mph"
+  assert response.get_json()["disconnect_controllers_offroad"] is False
+
+
+def test_wheel_controls_configures_offroad_controller_disconnect(monkeypatch):
+  client, fake_params = _params_client(monkeypatch, {"IsOffroad": True}, "mici")
+
+  response = client.post("/api/wheel-controls/offroad-disconnect", json={"enabled": True})
+
+  assert response.status_code == 200
+  assert fake_params.get_bool("BluetoothDisconnectControllersOffroad")
+
+
+def test_wheel_controls_offroad_controller_disconnect_requires_offroad(monkeypatch):
+  client, fake_params = _params_client(monkeypatch, {"IsOffroad": False}, "mici")
+
+  response = client.post("/api/wheel-controls/offroad-disconnect", json={"enabled": True})
+
+  assert response.status_code == 409
+  assert not fake_params.get_bool("BluetoothDisconnectControllersOffroad")
 
 
 def test_wheel_controls_configures_a_controller_only_action(monkeypatch):
@@ -556,19 +574,6 @@ def test_params_all_exposes_curve_calibration_readouts(monkeypatch):
   assert response.status_code == 200
   assert response.get_json()["CalibratedLateralAcceleration"] == 2.73
   assert response.get_json()["CalibrationProgress"] == 48.0
-
-
-def test_ford_lateral_mode_is_editable_through_galaxy(monkeypatch):
-  client, fake_params = _params_client(monkeypatch, {
-    "CarMake": "Ford",
-    "FordLateralMode": 1,
-  }, "mici")
-
-  response = client.put("/api/params", json={"key": "FordLateralMode", "value": 2, "label": "Angle"})
-
-  assert response.status_code == 200
-  assert fake_params.values["FordLateralMode"] == "2"
-  assert ("FordLateralMode", "2") in fake_params.writes
 
 
 def test_custom_accel_breakpoint_update_validates_the_complete_curve(monkeypatch):

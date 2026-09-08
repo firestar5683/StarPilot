@@ -1,4 +1,6 @@
 #!/usr/bin/env python3
+# Provenance: portions of HKG angle-safety tests are adapted from sunnypilot/opendbc's
+# hkg-angle-steering-2025 branch at cc4b08625. See CREDITS.md and THIRD_PARTY_NOTICES.md.
 from parameterized import parameterized_class
 import unittest
 import numpy as np

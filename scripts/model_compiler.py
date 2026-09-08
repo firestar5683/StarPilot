@@ -69,10 +69,6 @@ def build_compile_env(*, supercombo: bool = False) -> dict[str, str]:
       int(str(env.get(key)), 0)
     except (TypeError, ValueError):
       env[key] = default
-  if supercombo:
-    # Unified supercombo artifacts must use upstream compile defaults. The
-    # legacy QCOM tuning causes a reproducible HCQ timeline failure here.
-    env.pop("QCOM_PRIORITY", None)
   return env
 
 

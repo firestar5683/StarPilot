@@ -1,4 +1,6 @@
 import time
+# Provenance: portions of HKG angle integration are adapted from sunnypilot/opendbc's
+# hkg-angle-steering-2025 branch at cc4b08625. See CREDITS.md and THIRD_PARTY_NOTICES.md.
 from opendbc.car import get_safety_config, structs, uds
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.values import HyundaiFlags, CAR, CarControllerParams, \
@@ -209,9 +211,7 @@ class CarInterface(CarInterfaceBase):
       ret.enableBsm = 0x58b in fingerprint[CAN.ECAN]
 
       # Send LFA message on cars with HDA
-      if 0x485 in fingerprint[CAN.CAM] and (
-          candidate != CAR.KIA_RAY_EV or fingerprint[CAN.CAM][0x485] == 4
-      ):
+      if 0x485 in fingerprint[CAN.CAM]:
         ret.flags |= HyundaiFlags.SEND_LFA.value
 
       # These cars use the FCA11 message for the AEB and FCW signals, all others use SCC12
@@ -225,6 +225,9 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.hyundaiLegacy)]
       else:
         ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.hyundai, 0)]
+
+      if candidate == CAR.KIA_RAY_EV and fingerprint[CAN.CAM].get(0x485) == 8:
+        ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.CAN_REFRESH_MSGS.value
 
       if ret.flags & HyundaiFlags.CAMERA_SCC:
         ret.safetyConfigs[0].safetyParam |= HyundaiSafetyFlags.CAMERA_SCC.value

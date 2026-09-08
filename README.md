@@ -21,6 +21,20 @@ but [has expanded to offer Quality-Of-Life improvements for all](#features)!
 StarPilot is built off of [FrogPilot](https://github.com/FrogAi/FrogPilot)
 and supports the major features FrogPilot offers.
 
+Ford-specific lateral-control and vehicle-support work includes substantial adaptations from
+[BluePilot](https://github.com/BluePilotDev/bluepilot/tree/bp-7.0), principally developed by
+[Alan Polk](https://github.com/alan-polk) with additional BluePilot contributors. StarPilot's
+implementation has since diverged, but that does not erase its lineage. See [CREDITS.md](CREDITS.md)
+for the code-level provenance and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md) for applicable
+upstream notices and terms. BluePilot and its contributors do not maintain or endorse StarPilot;
+please direct support requests for this adaptation to the StarPilot project.
+
+Hyundai, Kia, and Genesis angle steering and related vehicle support include substantial adaptations
+from [sunnypilot](https://github.com/sunnypilot/sunnypilot/tree/hkg-angle-steering-2025) and its
+[opendbc angle-steering branch](https://github.com/sunnypilot/opendbc/tree/hkg-angle-steering-2025).
+StarPilot's implementation has diverged significantly; the upstream contributors do not maintain
+this adaptation. Detailed code lineage is recorded in [CREDITS.md](CREDITS.md#hyundai-kia-and-genesis-support-adapted-from-sunnypilot).
+
 StarPilot has a vibrant, welcoming community [discord](https://firestar.link/discord).
 Stop by to chat or ask questions!
 
@@ -77,4 +91,9 @@ Uses your comma's sysroot/toolchain
 * Custom long maneuver tests, specifically designed for regen-only vehicles
 
 ## Third-Party Notices
+
 * Portions of this software include modified versions of the Material Design Icons provided by Google under the Apache License 2.0. A copy of the license is included in the `LICENSE-MDI` file.
+* Ford support includes software adapted from BluePilot's `bp-7.0` branch. The source repository contains both a standard MIT notice and a separate custom SUNNYPILOT LLC notice; StarPilot preserves both in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+* Hyundai, Kia, and Genesis support includes software adapted directly from sunnypilot's HKG angle-steering branch and sunnypilot/opendbc. StarPilot preserves the applicable notices in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
+
+> This project uses software from Haibin Wen and SUNNYPILOT LLC and is licensed under a custom license requiring permission for use.

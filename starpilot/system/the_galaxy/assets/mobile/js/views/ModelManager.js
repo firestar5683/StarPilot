@@ -24,6 +24,8 @@ export const ModelManager = {
       allowGpu: false,
       models: [],
       currentModel: "",
+      activeSmallModel: "",
+      activeBigModel: "",
       summary: { installed: 0, missing: 0, total: 0 },
       status: {
         modelToDownload: "",
@@ -40,6 +42,12 @@ export const ModelManager = {
       if (!key) return "none"
       const match = (this.models || []).find((m) => text(m && m.value, "") === key)
       return match ? text(match.label, key) : key
+    },
+    installedSmallModels() {
+      return (this.models || []).filter((m) => m?.installed && !m?.requiresGpu)
+    },
+    installedBigModels() {
+      return (this.models || []).filter((m) => m?.installed && !!m?.requiresGpu)
     },
     sorted() {
       const mode = this.sortMode
@@ -95,6 +103,8 @@ export const ModelManager = {
         const p = await api.getModelStatus()
         this.models = Array.isArray(p.models) ? p.models.filter((m) => m && typeof m === "object") : []
         this.currentModel = text(p.currentModel, "")
+        this.activeSmallModel = text(p.activeSmallModel, "")
+        this.activeBigModel = text(p.activeBigModel, "")
         const s = p.summary && typeof p.summary === "object" ? p.summary : {}
         this.summary = {
           installed: Number(s.installed) || 0,
@@ -129,8 +139,9 @@ export const ModelManager = {
       this.busy = `${action}:${key}`
       try {
         let msg = ""
-        if (action === "select") {
-          const p = await api.updateParam({ key: "Model", value: key })
+        if (action === "select-small" || action === "select-big") {
+          const profile = action === "select-big" ? "big" : "small"
+          const p = await api.setActiveModel(profile, key)
           msg = p?.message || `Selected "${label}".`
         } else if (action === "download") {
           const p = await api.startModelDownload(key, this.allowGpu)
@@ -223,6 +234,21 @@ export const ModelManager = {
             </div>
 
             <div class="gx-row" style="border-top:none;">
+              <span class="gx-row__label">Active Small</span>
+              <select class="gx-field" style="flex:1;" :value="activeSmallModel" :disabled="!!busy || status.isOnroad" @change="runAction('select-small', installedSmallModels.find(m => m.value === $event.target.value))">
+                <option v-for="m in installedSmallModels" :key="m.value" :value="m.value">{{ m.label || m.value }}</option>
+              </select>
+            </div>
+
+            <div class="gx-row" style="border-top:none;">
+              <span class="gx-row__label">Active Big</span>
+              <select class="gx-field" style="flex:1;" :value="activeBigModel" :disabled="!!busy || status.isOnroad" @change="$event.target.value ? runAction('select-big', installedBigModels.find(m => m.value === $event.target.value)) : runAction('select-big')">
+                <option value="">None — always use Active Small</option>
+                <option v-for="m in installedBigModels" :key="m.value" :value="m.value">{{ m.label || m.value }}</option>
+              </select>
+            </div>
+
+            <div class="gx-row" style="border-top:none;">
               <span class="gx-row__label">Sort</span>
               <select class="gx-field" style="flex:1;" :value="sortMode" @change="sortMode = $event.target.value">
                 <option value="release_date">Release Date</option>
@@ -294,7 +320,7 @@ export const ModelManager = {
                 <button type="button" class="gx-btn gx-btn--danger" :disabled="!!busy" @click="runAction('cancel', m)"><i class="bi bi-x-circle"></i> Cancel</button>
               </template>
               <template v-else-if="rowState(m) === 'installed'">
-                <button type="button" class="gx-btn" :disabled="!!busy" @click="runAction('select', m)"><i class="bi bi-play-fill"></i> Set Active</button>
+                <button type="button" class="gx-btn" :disabled="!!busy" @click="runAction(m.requiresGpu ? 'select-big' : 'select-small', m)"><i class="bi bi-play-fill"></i> Set Active {{ m.requiresGpu ? 'Big' : 'Small' }}</button>
                 <button v-if="!m.builtin" type="button" class="gx-btn gx-btn--tonal" style="color:var(--error);" :disabled="!!busy" @click="runAction('delete', m)"><i class="bi bi-trash"></i> Delete</button>
               </template>
               <template v-else>

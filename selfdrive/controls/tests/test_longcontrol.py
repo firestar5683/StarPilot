@@ -765,6 +765,15 @@ def test_elantra_lead_stop_releases_stale_hard_brake_after_target_eases():
   assert tuning.shape_stopping_accel(-1.20, -0.25, True, 1.0, False, -0.85) == pytest.approx(-1.20)
 
 
+def test_elantra_final_stop_cap_softens_normal_low_speed_stop():
+  CP = make_longcontrol_cp(brand="hyundai", carFingerprint="HYUNDAI_ELANTRA_2021")
+  tuning = vehicle_tunes.LongControlVehicleTuning(CP)
+
+  assert tuning.shape_stopping_accel(-0.85, -0.25, True, 0.5, False, -0.85) == pytest.approx(-0.35)
+  assert tuning.shape_stopping_accel(-0.85, -1.25, True, 0.5, False, -0.85) == pytest.approx(-0.85)
+  assert tuning.shape_stopping_accel(-0.85, -0.25, False, 0.5, False, -0.85) == pytest.approx(-0.85)
+
+
 def test_elantra_stopped_lead_handoff_holds_braking_direction_without_touching_brakes():
   CP = make_longcontrol_cp(brand="hyundai", carFingerprint="HYUNDAI_ELANTRA_2021")
   tuning = vehicle_tunes.LongControlVehicleTuning(CP)

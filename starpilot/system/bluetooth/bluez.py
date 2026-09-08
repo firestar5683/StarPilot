@@ -329,9 +329,9 @@ class BlueZClient:
     self.set_device_property(address, "Trusted", "b", True)
     self.agent.clear()
 
-  def connect(self, address: str) -> None:
+  def connect(self, address: str, timeout: float = 30.0) -> None:
     device = self.device_for_address(address)
-    self._call(device["path"], DEVICE_IFACE, "Connect", timeout=30.0)
+    self._call(device["path"], DEVICE_IFACE, "Connect", timeout=timeout)
 
   def disconnect(self, address: str) -> None:
     device = self.device_for_address(address)

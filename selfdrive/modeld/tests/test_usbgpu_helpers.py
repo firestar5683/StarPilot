@@ -1,4 +1,5 @@
 import io
+import struct
 from types import MethodType
 from types import SimpleNamespace
 
@@ -150,6 +151,42 @@ def test_chestnut_telemetry_is_bounded_when_amd_is_unavailable(monkeypatch):
   assert service == "chestnutState"
   assert message.which() == "chestnutState"
   assert not message.valid
+
+
+def test_chestnut_power_telemetry_works_before_amd_initializes(monkeypatch):
+  class FakePubMaster:
+    def __init__(self):
+      self.sent = []
+
+    def send(self, service, message):
+      self.sent.append((service, message))
+
+  class FakeHandle:
+    def controlRead(self, *_args, **_kwargs):
+      return struct.pack("<Hh?", 12100, 850, True)
+
+    def close(self):
+      pass
+
+  class FakeContext:
+    def openByVendorIDAndProductID(self, *_args, **_kwargs):
+      return FakeHandle()
+
+    def close(self):
+      pass
+
+  publisher = FakePubMaster()
+  monkeypatch.setattr(modeld, "Device", SimpleNamespace(_opened_devices=set()))
+  monkeypatch.setattr(modeld.usb1, "USBContext", FakeContext)
+
+  telemetry = modeld.ChestnutState(publisher, big=False)
+  telemetry.send()
+
+  _, message = publisher.sent[0]
+  assert message.valid
+  assert message.chestnutState.supplyVoltage == 12100
+  assert message.chestnutState.supplyCurrent == 850
+  assert message.chestnutState.supplyFault
 
 
 def test_tinygrad_disk_cache_connection_is_closed_between_models(monkeypatch):

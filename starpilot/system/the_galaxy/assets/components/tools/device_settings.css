@@ -342,6 +342,24 @@
   margin-bottom: var(--margin-sm);
 }
 
+.ds-unit-note {
+  align-items: center;
+  background: var(--input-bg);
+  border: var(--border-style-main);
+  border-radius: var(--border-radius-base);
+  color: var(--text-muted);
+  display: flex;
+  font-size: var(--font-size-sm);
+  gap: var(--gap-sm);
+  margin-bottom: var(--margin-base);
+  padding: var(--padding-sm) var(--padding-base);
+}
+
+.ds-unit-note i,
+.ds-unit-note strong {
+  color: var(--main-fg);
+}
+
 /* ――― Empty Filter State ――― */
 .ds-empty {
   color: var(--text-muted);

@@ -77,7 +77,7 @@ class CarController(CarControllerBase):
     self.angle_bus = CanBus.angle_for_cp(CP)
     self.status_bus = CanBus.camera if CP.flags & SubaruFlags.D_PLATFORM_CAMERA else CanBus.main
 
-    if CP.flags & SubaruFlags.LKAS_ANGLE:
+    if CP.flags & SubaruFlags.LKAS_ANGLE and CP.carFingerprint != CAR.SUBARU_OUTBACK_2023:
       self.VM = VehicleModel(get_safety_CP())
 
     self.prev_close_distance = 0
@@ -332,7 +332,7 @@ class CarController(CarControllerBase):
         self.apply_steer_last = CS.out.steeringAngleDeg
 
       steer_target = self._angle_reclaim_target(CC.actuators.steeringAngleDeg) if lkas_active else CC.actuators.steeringAngleDeg
-      if self.CP.carFingerprint == CAR.SUBARU_ASCENT_2023:
+      if self.CP.carFingerprint in (CAR.SUBARU_ASCENT_2023, CAR.SUBARU_OUTBACK_2023):
         apply_steer = apply_std_steer_angle_limits(
           steer_target,
           self.apply_steer_last,

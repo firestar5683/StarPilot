@@ -1,8 +1,8 @@
 import { api, showSnackbar } from "../api.js"
 import {
-  coerceValueByType, formatSliderValue, formatReadoutValue, getColorDefault,
+  coerceValueByType, formatNumericParamValue, formatReadoutValue, getColorDefault,
   normalizeHexColor, numericBounds, numericEpsilon, snapNumericToBoundsAndStep,
-  stepPrecision,
+  resolveVehicleUnitParam, stepPrecision,
 } from "../params.js"
 import { FavoritesEditor } from "./FavoritesEditor.js"
 
@@ -12,6 +12,7 @@ export const GalaxyToggleCard = {
   props: {
     param: { type: Object, required: true },
     value: { default: undefined },
+    values: { type: Object, default: () => ({}) },
     locked: { type: Boolean, default: false },
     manageable: { type: Boolean, default: false },
     manageOpen: { type: Boolean, default: false },
@@ -28,8 +29,9 @@ export const GalaxyToggleCard = {
     }
   },
   computed: {
-    bounds() { return numericBounds(this.param, {}) },
-    precision() { return stepPrecision(this.bounds.step, this.param.precision) },
+    displayParam() { return resolveVehicleUnitParam(this.param, this.values) },
+    bounds() { return numericBounds(this.displayParam, this.values) },
+    precision() { return stepPrecision(this.bounds.step, this.displayParam.precision) },
     epsilon() { return numericEpsilon(this.precision) },
     isSlider() { return this.isNumeric },
     isNumeric() { return this.param.ui_type === "numeric" },
@@ -38,11 +40,17 @@ export const GalaxyToggleCard = {
     currentValue() { return this.preview !== undefined ? this.preview : this.value },
     displayValue() {
       if (this.isColor) return normalizeHexColor(this.value) ? normalizeHexColor(this.value).toUpperCase() : "Stock"
-      if (this.isReadout) return formatReadoutValue(this.param, this.value)
-      return this.value !== undefined && this.value !== null ? formatSliderValue(this.value, String(this.bounds.step), this.param.precision, this.param.key) : ".."
+      if (this.isReadout) return formatReadoutValue(this.displayParam, this.value)
+      return this.value !== undefined && this.value !== null ? formatNumericParamValue(this.displayParam, this.value, this.values) : ".."
     },
     sliderDisplay() {
-      return this.value !== undefined ? formatSliderValue(this.currentValue, String(this.bounds.step), this.param.precision, this.param.key) : ".."
+      return this.value !== undefined ? formatNumericParamValue(this.displayParam, this.currentValue, this.values) : ".."
+    },
+    sliderRangeDisplay() {
+      return `${formatNumericParamValue(this.displayParam, this.bounds.min, this.values)} to ${formatNumericParamValue(this.displayParam, this.bounds.max, this.values)}`
+    },
+    sliderStepDisplay() {
+      return formatNumericParamValue(this.displayParam, this.bounds.step, this.values)
     },
     isColor() { return this.param.ui_type === "color" },
     isAction() { return this.param.ui_type === "action" },
@@ -167,10 +175,10 @@ export const GalaxyToggleCard = {
     <div>
       <div class="gx-row" :class="{ disabled: locked, 'gx-row--favorites': isFavorites, 'gx-row--stack': isSlider || isSelect }">
         <div class="gx-row__info">
-          <span class="gx-row__label">{{ param.label }}
-            <span v-if="param.settings_tier === 'advanced'" class="gx-chip gx-chip--advanced">Advanced</span>
+          <span class="gx-row__label">{{ displayParam.label }}
+            <span v-if="displayParam.settings_tier === 'advanced'" class="gx-chip gx-chip--advanced">Advanced</span>
           </span>
-          <span v-if="param.description" class="gx-row__desc">{{ param.description }}</span>
+          <span v-if="displayParam.description" class="gx-row__desc">{{ displayParam.description }}</span>
           <div v-if="locked" class="gx-row__desc"><strong>Locked:</strong> This setting can only be changed while parked.</div>
         </div>
 
@@ -190,6 +198,10 @@ export const GalaxyToggleCard = {
             :value="currentValue" :disabled="locked || updating"
             @input="onSliderInput" @change="onSliderCommit" @blur="onSliderBlur"
             @touchstart="beginInteract" @mousedown="beginInteract" @keydown="beginInteract" />
+          <div v-if="displayParam.unit_type" class="gx-slider-meta">
+            <span>{{ sliderRangeDisplay }}</span>
+            <span>Step: {{ sliderStepDisplay }}</span>
+          </div>
           <button class="gx-slider-reset" :disabled="locked || updating" @click="resetToDefault">Default</button>
         </div>
 

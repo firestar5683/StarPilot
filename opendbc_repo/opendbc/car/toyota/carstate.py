@@ -314,6 +314,9 @@ class CarState(CarStateBase):
     if CP.carFingerprint in DISTANCE_BUTTON_CAR:
       pt_messages.append(("PCM_CRUISE_4", 1))
 
+    if CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD.value:
+      cam_messages.append(("PRE_COLLISION_2", 50))
+
     return {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, 0),
       Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], cam_messages, 2),

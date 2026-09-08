@@ -408,7 +408,7 @@ class CarInterface(CarInterfaceBase):
     ret.steerActuatorDelay = 0.1  # Default delay, not measured yet
 
     ret.steerLimitTimer = 0.4
-    ret.radarTimeStepDEPRECATED = 0.0667  # GM radar runs at 15Hz instead of the standard 20Hz
+    ret.radarTimeStepDEPRECATED = 0.15 if candidate == CAR.BUICK_LACROSSE else 0.0667
     ret.longitudinalActuatorDelay = 0.5  # large delay to initially start braking
 
     if candidate in (
@@ -440,7 +440,7 @@ class CarInterface(CarInterfaceBase):
     elif candidate in (CAR.BUICK_LACROSSE, CAR.BUICK_LACROSSE_ASCM, CAR.BUICK_LACROSSE_ASCM_19US):
       CarInterfaceBase.configure_torque_tune(CAR.BUICK_LACROSSE, ret.lateralTuning)
       if candidate == CAR.BUICK_LACROSSE_ASCM_19US:
-        ret.minSteerSpeed = 27 * CV.MPH_TO_MS
+        ret.minSteerSpeed = 28 * CV.MPH_TO_MS
 
     elif candidate == CAR.CADILLAC_ESCALADE:
       ret.minEnableSpeed = -1.  # engage speed is decided by pcm

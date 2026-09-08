@@ -55,6 +55,8 @@ class FakeBlueZ:
     self.discovering = False
     self.closed = False
     self.actions = []
+    self.connect_timeouts = []
+    self.connect_error = None
     self.device = {
       "path": "/fake/device",
       "address": "00:11:22:33:44:55",
@@ -91,8 +93,11 @@ class FakeBlueZ:
   def pair(self, address, _device_path=None):
     self.actions.append(("pair", address))
 
-  def connect(self, address):
+  def connect(self, address, timeout=30.0):
     self.actions.append(("connect", address))
+    self.connect_timeouts.append(timeout)
+    if self.connect_error is not None:
+      raise self.connect_error
 
   def disconnect(self, address):
     self.actions.append(("disconnect", address))
@@ -297,6 +302,7 @@ def test_disconnect_is_idempotent_and_suppresses_auto_reconnect():
   params = FakeParams(IsOffroad=False, BluetoothEnabled=True)
   client = FakeBlueZ()
   controller = BluetoothController(params, lambda: client, FakeRadio())
+  controller._policy_disconnected.add(client.device["address"].upper())
 
   controller.handle({"command": "disconnect", "address": client.device["address"]})
 
@@ -304,6 +310,7 @@ def test_disconnect_is_idempotent_and_suppresses_auto_reconnect():
   assert client.actions == [("disconnect", client.device["address"])]
   assert address in controller._manual_disconnect_until
   assert controller._manual_disconnect_until[address] > time.monotonic()
+  assert address not in controller._policy_disconnected
 
 
 def test_power_off_preserves_saved_audio_selection():
@@ -430,6 +437,85 @@ def test_scan_stops_after_timeout():
 
   controller._maintain_scan(controller.status(), controller._scan_deadline)
   assert not client.discovering and controller._scan_deadline == 0.0
+
+
+def test_controller_offroad_disconnect_policy_is_opt_in_and_delayed():
+  params = FakeParams(IsOffroad=True, BluetoothEnabled=True, BluetoothDisconnectControllersOffroad=False)
+  client = FakeBlueZ()
+  controller = BluetoothController(params, lambda: client, FakeRadio())
+  controller._bluez = client
+  controller_status = {
+    "offroad": True,
+    "devices": [
+      {**client.device, "name": "Controller", "audio": False, "controller": True, "connected": True},
+      {**client.device, "address": "AA:BB:CC:DD:EE:FF", "audio": True, "controller": False, "connected": True},
+    ],
+  }
+
+  assert not controller._maintain_controller_offroad_policy(controller_status, 100.0)
+  params.put_bool("BluetoothDisconnectControllersOffroad", True)
+  assert not controller._maintain_controller_offroad_policy(controller_status, 219.9)
+  assert client.actions == []
+
+  assert controller._maintain_controller_offroad_policy(controller_status, 220.0)
+  assert client.actions == [("disconnect", client.device["address"])]
+  assert client.device["address"].upper() in controller._policy_disconnected
+  assert controller._maintain_controller_offroad_policy(controller_status, 221.0)
+  assert client.actions == [("disconnect", client.device["address"])]
+
+
+def test_controller_offroad_disconnect_policy_reconnects_onroad():
+  params = FakeParams(IsOffroad=True, BluetoothEnabled=True, BluetoothDisconnectControllersOffroad=True)
+  client = FakeBlueZ()
+  controller = BluetoothController(params, lambda: client, FakeRadio())
+  controller._bluez = client
+  address = "00:11:22:33:44:55"
+  controller._offroad_since = 100.0
+  controller._policy_disconnected.add(address)
+  controller._reconnect_backoff[address] = (3, 500.0)
+  controller._last_reconnect = 210.0
+
+  disconnected_status = {
+    "offroad": False,
+    "selected_audio": "",
+    "devices": [{**client.device, "controller": False, "connected": False}],
+  }
+  assert not controller._maintain_controller_offroad_policy(disconnected_status, 220.0)
+  assert controller._offroad_since is None
+  assert controller._policy_disconnected == {address}
+  assert controller._policy_disconnect_retry_after == {}
+  assert address not in controller._reconnect_backoff
+  assert controller._last_reconnect == 0.0
+
+  controller._maintain_reconnects(disconnected_status, 220.0, False)
+  assert client.actions == [("connect", address)]
+  assert client.connect_timeouts == [5.0]
+
+  connected_status = {
+    **disconnected_status,
+    "devices": [{**client.device, "controller": False, "connected": True}],
+  }
+  controller._maintain_reconnects(connected_status, 221.0, False)
+  assert controller._policy_disconnected == set()
+
+
+def test_controller_auto_reconnect_uses_fixed_short_retry():
+  params = FakeParams(IsOffroad=False, BluetoothEnabled=True)
+  client = FakeBlueZ()
+  client.connect_error = RuntimeError("Host is down")
+  controller = BluetoothController(params, lambda: client, FakeRadio())
+  controller._bluez = client
+  status = {
+    "offroad": False,
+    "selected_audio": "",
+    "devices": [{**client.device, "audio": False, "controller": True, "connected": False}],
+  }
+
+  controller._maintain_reconnects(status, 100.0, False)
+  assert controller._reconnect_backoff[client.device["address"]] == (1, 105.0)
+  controller._maintain_reconnects(status, 105.0, False)
+  assert controller._reconnect_backoff[client.device["address"]] == (2, 110.0)
+  assert client.connect_timeouts == [5.0, 5.0]
 
 
 def test_pair_keeps_discovery_until_pair_starts():

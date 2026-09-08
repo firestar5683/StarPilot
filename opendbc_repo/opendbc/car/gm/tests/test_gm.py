@@ -205,6 +205,33 @@ class TestBoltGps:
 
 
 class TestGMInterface:
+  def test_lacrosse_obd_and_ascm_integrations_remain_separate(self):
+    obd_params = interfaces[CAR.BUICK_LACROSSE].get_params(
+      CAR.BUICK_LACROSSE,
+      _empty_fingerprint(),
+      [],
+      alpha_long=False,
+      is_release=False,
+      docs=False,
+      starpilot_toggles=_test_starpilot_toggles(),
+    )
+    ascm_params = interfaces[CAR.BUICK_LACROSSE_ASCM].get_params(
+      CAR.BUICK_LACROSSE_ASCM,
+      _empty_fingerprint(),
+      [],
+      alpha_long=False,
+      is_release=False,
+      docs=False,
+      starpilot_toggles=_test_starpilot_toggles(),
+    )
+
+    assert obd_params.networkLocation == structs.CarParams.NetworkLocation.gateway
+    assert obd_params.openpilotLongitudinalControl
+    assert obd_params.radarTimeStepDEPRECATED == pytest.approx(0.15)
+    assert ascm_params.networkLocation == structs.CarParams.NetworkLocation.fwdCamera
+    assert not ascm_params.openpilotLongitudinalControl
+    assert ascm_params.radarTimeStepDEPRECATED == pytest.approx(0.0667)
+
   @parameterized.expand([
     CAR.CHEVROLET_BOLT_CC_2017,
     CAR.CHEVROLET_BOLT_CC_2018_2021,
@@ -290,6 +317,14 @@ class TestGMInterface:
                                          starpilot_toggles=_test_starpilot_toggles())
 
     assert car_params.minSteerSpeed == pytest.approx(7 * CV.MPH_TO_MS)
+
+  def test_lacrosse_2019_ascm_min_steer_speed_is_28_mph(self):
+    car_model = CAR.BUICK_LACROSSE_ASCM_19US
+    CarInterface = interfaces[car_model]
+    car_params = CarInterface.get_params(car_model, _empty_fingerprint(), [], alpha_long=False, is_release=False, docs=False,
+                                         starpilot_toggles=_test_starpilot_toggles())
+
+    assert car_params.minSteerSpeed == pytest.approx(28 * CV.MPH_TO_MS)
 
   @parameterized.expand([
     ("interceptor", True),

@@ -1,5 +1,7 @@
 #pragma once
 
+// Provenance: portions of HKG angle-command safety are adapted from sunnypilot/opendbc's
+// hkg-angle-steering-2025 branch at cc4b08625. See CREDITS.md and THIRD_PARTY_NOTICES.md.
 #include "opendbc/safety/declarations.h"
 #include "opendbc/safety/modes/hyundai_common.h"
 

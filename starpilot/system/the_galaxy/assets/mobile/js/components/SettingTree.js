@@ -30,7 +30,7 @@ export const SettingTree = {
   template: `
     <template v-for="p in children" :key="p.key">
       <div class="gx-tree-node" :class="{ 'gx-tree-node--child': depth > 0 }" :style="'--gx-depth:' + depth">
-        <GalaxyToggleCard :param="p" :value="values[p.key]" :locked="lockReason(p) !== ''"
+        <GalaxyToggleCard :param="p" :value="values[p.key]" :values="values" :locked="lockReason(p) !== ''"
           :manageable="manageable(p)" :manage-open="manageOpen(p)"
           @change="$emit('change', $event)" @manage="$emit('manage', $event)" />
       </div>

@@ -1,5 +1,5 @@
 import { api } from "../api.js"
-import { isSettingVisible, slugifySectionName, applyParamChange } from "../params.js"
+import { isSettingVisible, resolveVehicleUnitParam, slugifySectionName, applyParamChange } from "../params.js"
 import { SettingTree } from "./SettingTree.js"
 import { GalaxySection } from "./GalaxySection.js"
 
@@ -35,7 +35,9 @@ export const ParamSections = {
     matches(p) {
       if (!this.search) return true
       const q = this.search.toLowerCase()
-      return [p.label, p.key, p.description].some((v) => String(v || "").toLowerCase().includes(q))
+      const displayParam = resolveVehicleUnitParam(p, this.values)
+      return [displayParam.label, displayParam.key, displayParam.description, displayParam.unit, displayParam.unit_search_terms]
+        .some((v) => String(v || "").toLowerCase().includes(q))
     },
     async load() {
       try {

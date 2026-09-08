@@ -11,7 +11,8 @@ class StreamRequestBody:
   sdp: str
   init_camera: str = ""
   enabled: bool = True
-  cameras: list[str] = field(default_factory=list)
+  # Preserve the legacy positional camera/enabled/incoming/outgoing API.
+  cameras: list[str] = field(default_factory=list, kw_only=True)
   bridge_services_in: list[str] = field(default_factory=list)
   bridge_services_out: list[str] = field(default_factory=list)
 

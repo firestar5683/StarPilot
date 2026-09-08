@@ -48,6 +48,12 @@ SETTINGS_CATALOG_PATH = Path(__file__).resolve().parent / "assets" / "device_set
 
 
 BLOCKED_ONROAD_KEYS = {
+  "ActiveBigModel",
+  "ActiveBigModelName",
+  "ActiveBigModelVersion",
+  "ActiveSmallModel",
+  "ActiveSmallModelName",
+  "ActiveSmallModelVersion",
   "AlphaLongitudinalEnabled",
   "DrivingModel",
   "Model",
