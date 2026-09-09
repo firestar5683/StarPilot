@@ -32,7 +32,7 @@ export const SettingTree = {
     <template v-for="p in children" :key="p.key">
       <PersonalityProfiles v-if="p.key === 'CustomPersonalities'" :manage-open="isExpanded(p)" @manage="$emit('manage', p.key)" @change="$emit('change', $event)" />
       <div v-else class="gx-tree-node" :class="{ 'gx-tree-node--child': depth > 0 }" :style="'--gx-depth:' + depth">
-        <GalaxyToggleCard :param="p" :value="values[p.key]" :values="values" :locked="lockReason(p) !== ''"
+        <GalaxyToggleCard :param="p" :value="values[p.key]" :values="values" :locked="lockReason(p) !== ''" :lock-message="lockReason(p)"
           :manageable="manageable(p)" :manage-open="manageOpen(p)"
           @change="$emit('change', $event)" @manage="$emit('manage', $event)" />
       </div>

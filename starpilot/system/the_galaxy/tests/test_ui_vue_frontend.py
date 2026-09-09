@@ -100,7 +100,9 @@ def test_ui_restores_hierarchical_sub_toggle_rendering():
   assert "hasChildParams" in params
 
   assert "SettingTree" in settings
-  assert '<SettingTree :params="activeSection.params"' in settings
+  assert '<SettingTree :params="ordinaryParams(activeSection)"' in settings
+  assert '<LongitudinalMode v-if="modeSection(activeSection)"' in settings
+  assert 's.params.filter(p => !this.isModeParam(p))' in settings
 
   # SettingTree recursively reveals children; subpanels are collapsed by default
   # (classic Galaxy behavior) and expand only when the user taps Manage/Close.
@@ -217,7 +219,7 @@ def test_ui_speed_units_follow_the_vehicle():
   assert "displayParam" in card and "formatNumericParamValue" in card
   assert "sliderStepDisplay" in card and "Step:" in card
   assert ':values="values"' in settings
-  assert "gx-unit-note" not in settings
+  assert 'class="gx-unit-note"' not in settings
 
 
 def test_ui_centralizes_api_and_uses_composables():

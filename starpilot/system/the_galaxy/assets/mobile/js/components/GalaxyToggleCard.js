@@ -14,6 +14,7 @@ export const GalaxyToggleCard = {
     value: { default: undefined },
     values: { type: Object, default: () => ({}) },
     locked: { type: Boolean, default: false },
+    lockMessage: { type: String, default: "This setting can only be changed while parked." },
     manageable: { type: Boolean, default: false },
     manageOpen: { type: Boolean, default: false },
   },
@@ -72,6 +73,7 @@ export const GalaxyToggleCard = {
     labelOf(el) { return el?.options?.[el.selectedIndex]?.textContent || "" },
     rollback(prev) { this.$emit("change", { key: this.param.key, value: prev }) },
     async commit(nextValue) {
+      if (this.locked || this.updating) return
       const prev = this.value
       const label = this.lastLabel || ""
       this.$emit("change", { key: this.param.key, value: nextValue })
@@ -179,7 +181,7 @@ export const GalaxyToggleCard = {
             <span v-if="displayParam.settings_tier === 'advanced'" class="gx-chip gx-chip--advanced">Advanced</span>
           </span>
           <span v-if="displayParam.description" class="gx-row__desc">{{ displayParam.description }}</span>
-          <div v-if="locked" class="gx-row__desc"><strong>Locked:</strong> This setting can only be changed while parked.</div>
+          <div v-if="locked" class="gx-row__desc"><strong>Locked:</strong> {{ lockMessage }}</div>
         </div>
 
         <label v-if="isSwitch" class="gx-switch">

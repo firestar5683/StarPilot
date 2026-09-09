@@ -35,6 +35,7 @@ export const FavoritesEditor = {
     return {
       loading: true,
       saving: false,
+      actionPending: false,
       slots: [],
       options: [],
       values: {},
@@ -116,11 +117,15 @@ export const FavoritesEditor = {
       }
     },
     async runAction(key) {
+      if (this.actionPending) return
+      this.actionPending = true
       try {
         const data = await api.activateFavoriteAction(key)
         showSnackbar(data?.message || "Favorite action sent.")
       } catch (e) {
         showSnackbar(e?.message || "Failed to send favorite action.", "error")
+      } finally {
+        this.actionPending = false
       }
     },
   },
@@ -136,7 +141,7 @@ export const FavoritesEditor = {
             <small style="color:var(--text-muted);">Favorite #{{ f.index + 1 }}</small>
             <strong>{{ f.opt.label || f.slot.key }}</strong>
             <span style="color:var(--text-muted); font-size:var(--fs-sm);">{{ f.opt.section || '' }}</span>
-            <button v-if="isActionSlot(f.slot)" type="button" class="gx-btn" :disabled="saving" @click.prevent="runAction(f.slot.key)">
+            <button v-if="isActionSlot(f.slot)" type="button" class="gx-btn" :disabled="saving || actionPending" @click.prevent="runAction(f.slot.key)">
               Press
             </button>
             <label v-else class="gx-switch" style="align-self:flex-start;">
@@ -162,9 +167,9 @@ export const FavoritesEditor = {
               <input class="gx-field" type="search" :value="filters[index] || ''" :disabled="saving" placeholder="Search toggles..." @input="filters = filters.map((f,i)=> i===index ? $event.target.value : f)" />
             </label>
             <label style="display:grid; gap:4px;">
-              <span style="font-size:var(--fs-sm); color:var(--text-muted);">Toggle</span>
+              <span style="font-size:var(--fs-sm); color:var(--text-muted);">Toggle or action</span>
               <select class="gx-field" :value="slot.key || ''" :disabled="saving" @change="updateSlot(index, { key: $event.target.value || null })">
-                <option value="">Select a toggle...</option>
+                <option value="">Select a toggle or action...</option>
                 <option v-for="opt in filteredOptions(index)" :key="opt.key" :value="opt.key">{{ opt.label }}</option>
               </select>
             </label>

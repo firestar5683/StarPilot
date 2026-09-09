@@ -53,6 +53,7 @@ def test_device_settings_speed_units_follow_the_vehicle():
   assert "resolveVehicleUnitParam" in source
   assert "formatNumericParamValue" in source
   assert "unit_search_terms" in source
+  assert 'class="ds-unit-note"' not in source
   assert "per click" in source
   assert "ds-unit-note" not in source
 
