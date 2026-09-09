@@ -302,7 +302,7 @@ class CarController(CarControllerBase):
       lkas_available = CC.latActive and (not mads_only or mads_only_ok) and \
         CS.out.gearShifter == structs.CarState.GearShifter.drive and not CS.out.standstill
 
-      manual_handoff = self._legacy_2025_manual_handoff(CS, lkas_available)
+      manual_handoff = self._legacy_2025_manual_handoff(CS, CC.latActive)
       lkas_active = lkas_available and not manual_handoff
 
       steer_target = self._legacy_2025_reclaim_target(CC.actuators.steeringAngleDeg) if lkas_active else CC.actuators.steeringAngleDeg
@@ -325,7 +325,7 @@ class CarController(CarControllerBase):
       lkas_available = CC.latActive and (not mads_only or mads_only_ok) and \
         CS.out.gearShifter == structs.CarState.GearShifter.drive and not CS.out.standstill
 
-      manual_handoff = self._angle_manual_handoff(CS, lkas_available)
+      manual_handoff = self._angle_manual_handoff(CS, CC.latActive)
       lkas_active = lkas_available and not manual_handoff
 
       if lkas_active and not self.angle_lkas_active:
@@ -361,7 +361,7 @@ class CarController(CarControllerBase):
     lkas_available = CC.latActive and (not mads_only or mads_only_ok) and \
       getattr(CS.out, "gearShifter", structs.CarState.GearShifter.drive) == structs.CarState.GearShifter.drive and \
       not getattr(CS.out, "standstill", False)
-    manual_handoff = self._angle_manual_handoff(CS, lkas_available)
+    manual_handoff = self._angle_manual_handoff(CS, CC.latActive)
     lat_active = lkas_available and not self.driver_override and not manual_handoff
     if lat_active and not self.angle_lkas_active:
       self.apply_steer_last = CS.out.steeringAngleDeg

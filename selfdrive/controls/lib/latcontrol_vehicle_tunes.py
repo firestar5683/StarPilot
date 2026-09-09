@@ -314,7 +314,7 @@ GENESIS_G70_LOW_SPEED_OUTPUT_LIMIT_LAT = 0.14
 GENESIS_G70_LOW_SPEED_OUTPUT_LIMIT_LAT_WIDTH = 0.05
 GENESIS_G70_LOW_SPEED_OUTPUT_LIMIT_SPEED = 6.0
 GENESIS_G70_LOW_SPEED_OUTPUT_LIMIT_SPEED_WIDTH = 1.5
-GENESIS_G70_CURVE_UNWIND_OUTPUT_REDUCTION_MAX = 0.08
+GENESIS_G70_CURVE_UNWIND_OUTPUT_REDUCTION_MAX = 0.10
 GENESIS_G70_CURVE_UNWIND_SPEED = 18.0
 GENESIS_G70_CURVE_UNWIND_SPEED_WIDTH = 3.0
 GENESIS_G70_CURVE_UNWIND_LAT = 0.25
@@ -629,6 +629,15 @@ KIA_CARNIVAL_UNWIND_FF_OVERSHOOT = 0.08
 KIA_CARNIVAL_UNWIND_FF_OVERSHOOT_WIDTH = 0.06
 KIA_CARNIVAL_UNWIND_FF_JERK = 0.45
 KIA_CARNIVAL_UNWIND_FF_JERK_WIDTH = 0.20
+KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_MAX = 0.28
+KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_SPEED = 8.0
+KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_SPEED_WIDTH = 2.0
+KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_SPEED_CUTOFF = 16.0
+KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_SPEED_CUTOFF_WIDTH = 2.5
+KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_OVERSHOOT = 0.25
+KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_OVERSHOOT_WIDTH = 0.15
+KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_JERK = 0.45
+KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_JERK_WIDTH = 0.20
 
 TUCSON_4TH_GEN_CENTER_TAPER_MAX = 0.44
 TUCSON_4TH_GEN_CENTER_TAPER_LAT = 0.28
@@ -2854,6 +2863,27 @@ def get_kia_carnival_unwind_ff_scale(setpoint: float, measured_lateral_accel: fl
   return 1.0 - (KIA_CARNIVAL_UNWIND_FF_REDUCTION_MAX * speed_weight * overshoot_weight * jerk_weight)
 
 
+def get_kia_carnival_unwind_output_scale(setpoint: float, measured_lateral_accel: float,
+                                         desired_lateral_jerk: float, v_ego: float) -> float:
+  if (setpoint * desired_lateral_jerk >= 0.0 or
+      setpoint * measured_lateral_accel <= 0.0):
+    return 1.0
+
+  overshoot = max(abs(measured_lateral_accel) - abs(setpoint), 0.0)
+  if overshoot <= 0.0:
+    return 1.0
+
+  speed_weight = (_sigmoid((v_ego - KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_SPEED) /
+                           KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_SPEED_WIDTH) *
+                  _sigmoid((KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_SPEED_CUTOFF - v_ego) /
+                           KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_SPEED_CUTOFF_WIDTH))
+  overshoot_weight = _sigmoid((overshoot - KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_OVERSHOOT) /
+                              KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_OVERSHOOT_WIDTH)
+  jerk_weight = _sigmoid((abs(desired_lateral_jerk) - KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_JERK) /
+                         KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_JERK_WIDTH)
+  return 1.0 - (KIA_CARNIVAL_UNWIND_OUTPUT_DAMPING_MAX * speed_weight * overshoot_weight * jerk_weight)
+
+
 def _tucson_4th_gen_center_weights(desired_lateral_accel: float, v_ego: float) -> tuple[float, float]:
   speed_weight = _sigmoid((TUCSON_4TH_GEN_CENTER_TAPER_SPEED_MAX - v_ego) / TUCSON_4TH_GEN_CENTER_TAPER_SPEED_WIDTH)
   center_weight = _sigmoid((TUCSON_4TH_GEN_CENTER_TAPER_LAT - abs(desired_lateral_accel)) / TUCSON_4TH_GEN_CENTER_TAPER_LAT_WIDTH)
@@ -3126,8 +3156,6 @@ def get_genesis_gv70_unwind_ff_scale(setpoint: float, measured_lateral_accel: fl
     return 1.0
 
   overshoot = max(abs(measured_lateral_accel) - abs(setpoint), 0.0)
-  if overshoot <= 0.0:
-    return 1.0
   overshoot_weight = _sigmoid((overshoot - GENESIS_GV70_UNWIND_FF_OVERSHOOT) /
                               GENESIS_GV70_UNWIND_FF_OVERSHOOT_WIDTH)
   jerk_weight = _sigmoid((abs(desired_lateral_jerk) - GENESIS_GV70_UNWIND_FF_JERK) /

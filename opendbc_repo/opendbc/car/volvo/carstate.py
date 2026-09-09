@@ -1,8 +1,9 @@
 from cereal import custom
-from opendbc.car import structs, Bus
+from opendbc.car import Bus, ButtonType, create_button_events, structs
 from opendbc.can.parser import CANParser
-from opendbc.car.volvo.values import DBC, VolvoSPAPlatformConfig, CAR
+from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
+from opendbc.car.volvo.values import CAR, DBC, VolvoC1PlatformConfig, VolvoSPAPlatformConfig
 
 GearShifter = structs.CarState.GearShifter
 TransmissionType = structs.CarParams.TransmissionType
@@ -16,6 +17,7 @@ STEERING_PRESSED_THRESHOLD = 2
 class CarState(CarStateBase):
   def __init__(self, CP, FPCP):
     super().__init__(CP, FPCP)
+    self.is_c1 = isinstance(CAR(CP.carFingerprint).config, VolvoC1PlatformConfig)
     self.is_spa = isinstance(CAR(CP.carFingerprint).config, VolvoSPAPlatformConfig)
     self.gas_pressed_prev = False
     self.dispatch_lca_2_msg = False
@@ -34,8 +36,22 @@ class CarState(CarStateBase):
     self.msg_lca_4 = {}
     self.msg_lca_6 = {}
     self.msg_lca_7 = {}
+    self.c1_msg_pscm = {}
+    self.c1_lka_torque = 0
+    self.c1_button_states = {
+      "ACCOnOffBtn": False,
+      "ACCStopBtn": False,
+      "ACCSetBtn": False,
+      "ACCResumeBtn": False,
+      "ACCMinusBtn": False,
+      "TimeGapIncreaseBtn": False,
+      "TimeGapDecreaseBtn": False,
+    }
 
   def update(self, can_parsers, starpilot_toggles) -> structs.CarState:
+    if self.is_c1:
+      return self._update_c1(can_parsers)
+
     cp_main = can_parsers[Bus.main]
     cp_pt = can_parsers[Bus.pt]
     cp_party = can_parsers[Bus.party]
@@ -137,8 +153,83 @@ class CarState(CarStateBase):
     fp_ret = custom.StarPilotCarState.new_message()
     return ret, fp_ret
 
+  def _update_c1(self, can_parsers):
+    cp = can_parsers[Bus.pt]
+    cp_cam = can_parsers[Bus.cam]
+    ret = structs.CarState()
+
+    ret.vEgoRaw = cp.vl["VehicleSpeed1"]["VehicleSpeed"] * CV.KPH_TO_MS
+    ret.vEgo, ret.aEgo = self.update_speed_kf(ret.vEgoRaw)
+    ret.standstill = ret.vEgoRaw < 0.1
+
+    ret.steeringAngleDeg = cp.vl["PSCM1"]["SteeringAngleServo"]
+    ret.steeringTorque = cp.vl["PSCM1"]["LKATorque"]
+    ret.steeringPressed = False
+
+    ret.gasPressed = cp.vl["PedalandBrake"]["AccPedal"] > 5.0
+    ret.brakePressed = bool(cp.vl["PedalandBrake"]["BrakePedalActive2"] or
+                            cp.vl["PedalandBrake"]["BrakePedalActive"])
+
+    ret.gearShifter = {
+      0: GearShifter.park,
+      1: GearShifter.reverse,
+      2: GearShifter.neutral,
+      3: GearShifter.drive,
+    }.get(int(cp.vl["TCM0"]["GearShifter"]), GearShifter.unknown)
+
+    ret.cruiseState.available = bool(cp_cam.vl["FSM0"]["ACCStatusOnOff"])
+    ret.cruiseState.enabled = bool(cp_cam.vl["FSM0"]["ACCStatusActive"])
+    ret.cruiseState.speed = cp.vl["ACC"]["SpeedTargetACC"] * CV.KPH_TO_MS
+    ret.cruiseState.nonAdaptive = False
+    ret.cruiseState.standstill = ret.standstill
+
+    turn_signal = int(cp.vl["MiscCarInfo"]["TurnSignal"])
+    ret.leftBlinker, ret.rightBlinker = self.update_blinker_from_stalk(
+      50, turn_signal == 1, turn_signal == 3)
+    ret.doorOpen = False
+    ret.seatbeltUnlatched = False
+
+    button_types = {
+      "ACCOnOffBtn": ButtonType.mainCruise,
+      "ACCStopBtn": ButtonType.cancel,
+      "ACCSetBtn": ButtonType.setCruise,
+      "ACCResumeBtn": ButtonType.resumeCruise,
+      "ACCMinusBtn": ButtonType.decelCruise,
+      "TimeGapIncreaseBtn": ButtonType.gapAdjustCruise,
+      "TimeGapDecreaseBtn": ButtonType.gapAdjustCruise,
+    }
+    button_events = []
+    for signal, button_type in button_types.items():
+      pressed = bool(cp.vl["CCButtons"][signal])
+      button_events.extend(create_button_events(pressed, self.c1_button_states[signal], {True: button_type}))
+      self.c1_button_states[signal] = pressed
+    ret.buttonEvents = button_events
+
+    self.c1_msg_pscm = cp.vl["PSCM1"]
+    self.c1_lka_torque = int(cp.vl["PSCM1"]["LKATorque"])
+
+    fp_ret = custom.StarPilotCarState.new_message()
+    return ret, fp_ret
+
   @staticmethod
   def get_can_parsers(CP):
+    if isinstance(CAR(CP.carFingerprint).config, VolvoC1PlatformConfig):
+      return {
+        Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], [
+          ("VehicleSpeed1", 50),
+          ("CCButtons", 100),
+          ("PSCM1", 50),
+          ("PedalandBrake", 100),
+          ("TCM0", 10),
+          ("ACC", 17),
+          ("MiscCarInfo", 25),
+        ], 0),
+        Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.cam], [
+          ("FSM0", 100),
+          ("FSM1", 50),
+        ], 2),
+      }
+
     return {
       Bus.main: CANParser(DBC[CP.carFingerprint][Bus.main], [], 0),
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], 1),

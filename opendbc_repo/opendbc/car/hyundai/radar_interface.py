@@ -19,6 +19,9 @@ MRR30_RADAR_START_ADDR = 0x210
 MRR30_RADAR_MSG_COUNT = 16
 MRR35_RADAR_START_ADDR = 0x3A5
 MRR35_RADAR_MSG_COUNT = 32
+GV70_RADAR_START_ADDR = 0x210
+GV70_RADAR_MSG_COUNT = 16
+GV70_RADAR_DBC = "hyundai_radar_210_21f_generated"
 
 
 @dataclass(frozen=True)
@@ -30,6 +33,7 @@ class RadarTrackConfig:
   frequency: int = 50
   parser_msg_count: int | None = None
   expected_length: int | None = None
+  dbc_name: str | None = None
 
   @property
   def can_parser_msg_count(self) -> int:
@@ -47,6 +51,10 @@ RADAR_TRACK_CONFIGS = {
 
 
 def get_radar_track_config(car_fingerprint, flags: int = 0) -> RadarTrackConfig | None:
+  if car_fingerprint == CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN:
+    return RadarTrackConfig(GV70_RADAR_START_ADDR, GV70_RADAR_MSG_COUNT, "gv70_210", bus=0,
+                            frequency=20, expected_length=32, dbc_name=GV70_RADAR_DBC)
+
   radar_dbc = DBC[car_fingerprint].get(Bus.radar)
   if car_fingerprint == CAR.GENESIS_G90 and radar_dbc == HYUNDAI_MANDO_FRONT_RADAR_DBC:
     return RadarTrackConfig(RADAR_START_ADDR, G90_RADAR_MSG_COUNT, "mando", parser_msg_count=RADAR_MSG_COUNT)
@@ -65,6 +73,10 @@ def radar_tracks_available(radar_config: RadarTrackConfig | None, fingerprint) -
   if radar_config is None:
     return False
 
+  if radar_config.radar_type == "gv70_210":
+    return all(fingerprint[radar_config.bus].get(addr) == radar_config.expected_length
+               for addr in range(radar_config.start_addr, radar_config.start_addr + radar_config.msg_count))
+
   msg_len = fingerprint[radar_config.bus].get(radar_config.start_addr)
   if msg_len is None:
     return False
@@ -78,7 +90,8 @@ def get_radar_can_parser(CP, radar_config):
 
   messages = [(f"RADAR_TRACK_{addr:x}", radar_config.frequency)
               for addr in range(radar_config.start_addr, radar_config.start_addr + radar_config.can_parser_msg_count)]
-  return CANParser(DBC[CP.carFingerprint][Bus.radar], messages, radar_config.bus)
+  dbc_name = radar_config.dbc_name or DBC[CP.carFingerprint][Bus.radar]
+  return CANParser(dbc_name, messages, radar_config.bus)
 
 
 class RadarInterface(RadarInterfaceBase):
@@ -220,6 +233,27 @@ class RadarInterface(RadarInterfaceBase):
             pt.aRel = float("nan")
             pt.yvRel = float("nan")
           else:
+            del self.pts[track_key]
+        continue
+
+      if radar_type == "gv70_210":
+        for i in ("1", "2"):
+          track_key = addr * 2 + int(i) - 1
+          valid = msg[f"{i}_STATE"] in (3, 4)
+          if valid:
+            pt = self.pts.get(track_key)
+            if pt is None:
+              pt = structs.RadarData.RadarPoint()
+              pt.trackId = self.track_id
+              self.track_id += 1
+              self.pts[track_key] = pt
+            pt.measured = True
+            pt.dRel = msg[f"{i}_LONG_DIST"]
+            pt.yRel = msg[f"{i}_LAT_DIST"]
+            pt.vRel = msg[f"{i}_REL_SPEED"]
+            pt.aRel = msg[f"{i}_REL_ACCEL"]
+            pt.yvRel = msg[f"{i}_REL_LAT_SPEED"]
+          elif track_key in self.pts:
             del self.pts[track_key]
         continue
 

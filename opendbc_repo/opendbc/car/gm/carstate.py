@@ -32,6 +32,7 @@ STANDSTILL_THRESHOLD = 10 * 0.0311
 VOLT_EBCM_BRAKE_PRESSED_THRESHOLD = 6 / 0xd0
 AUTO_HOLD_MIN_DRIVE_TIME_S = 3.0
 AUTO_HOLD_REGEN_RELEASE_COOLDOWN_S = 1.0
+ACC_STARTUP_FAULT_GRACE_PERIOD_S = 5.0
 
 BUTTONS_DICT = {CruiseButtons.RES_ACCEL: ButtonType.accelCruise, CruiseButtons.DECEL_SET: ButtonType.decelCruise,
                 CruiseButtons.MAIN: ButtonType.mainCruise, CruiseButtons.CANCEL: ButtonType.cancel}
@@ -65,6 +66,24 @@ def update_auto_hold_drive_timers(in_drive_for_hold: bool, moving_for_hold: bool
     one_pedal_drive_time = 0.0
 
   return auto_hold_drive_time, one_pedal_drive_time
+
+
+def update_startup_acc_fault_suppression(car_fingerprint: str, system_power_mode: int,
+                                          previous_system_power_mode: int, timer: float,
+                                          acc_state: int, friction_brake_unavailable: bool) -> tuple[float, bool]:
+  if car_fingerprint != CAR.BUICK_LACROSSE:
+    return 0.0, False
+
+  if system_power_mode == 2 and previous_system_power_mode != 2:
+    timer = ACC_STARTUP_FAULT_GRACE_PERIOD_S
+  elif system_power_mode != 2:
+    timer = 0.0
+
+  if timer <= 0.0 or acc_state != AccState.FAULTED:
+    return 0.0, False
+
+  timer = max(timer - DT_CTRL, 0.0)
+  return timer, timer > 0.0 and not friction_brake_unavailable
 
 
 class CarState(CarStateBase):
@@ -105,6 +124,8 @@ class CarState(CarStateBase):
     self.lkas_previously_enabled = 0
     self.lkas_enabled = 0
     self.pcm_acc_status = AccState.OFF
+    self.system_power_mode = 0
+    self.startup_acc_fault_suppression_timer = 0.0
     self.stock_fcw_alert = 0
     self.car_gps_config = get_car_gps_config(CP)
     self.car_gps_supported = self.car_gps_config is not None
@@ -350,8 +371,18 @@ class CarState(CarStateBase):
 
     ret.cruiseState.available = pt_cp.vl["ECMEngineStatus"]["CruiseMainOn"] != 0
     ret.espDisabled = pt_cp.vl["ESPStatus"]["TractionControlOn"] != 1
-    ret.accFaulted = (pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.FAULTED or
-                      pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1)
+    acc_state = pt_cp.vl["AcceleratorPedal2"]["CruiseState"]
+    friction_brake_unavailable = pt_cp.vl["EBCMFrictionBrakeStatus"]["FrictionBrakeUnavailable"] == 1
+    self.startup_acc_fault_suppression_timer, suppress_startup_acc_fault = update_startup_acc_fault_suppression(
+      self.CP.carFingerprint,
+      int(pt_cp.vl["BCMGeneralPlatformStatus"]["SystemPowerMode"]),
+      self.system_power_mode,
+      self.startup_acc_fault_suppression_timer,
+      acc_state,
+      friction_brake_unavailable,
+    )
+    self.system_power_mode = int(pt_cp.vl["BCMGeneralPlatformStatus"]["SystemPowerMode"])
+    ret.accFaulted = (acc_state == AccState.FAULTED and not suppress_startup_acc_fault) or friction_brake_unavailable
 
     ret.cruiseState.enabled = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] != AccState.OFF
     ret.cruiseState.standstill = pt_cp.vl["AcceleratorPedal2"]["CruiseState"] == AccState.STANDSTILL

@@ -546,6 +546,25 @@ def test_ascent_2023_uses_gen2_angle_bus_layout():
   assert controller.status_bus == CanBus.main
 
 
+def test_ascent_steering_rate_retains_last_can_sample():
+  CP = CarInterface.get_non_essential_params(CAR.SUBARU_ASCENT_2023)
+  car_state = CarState(CP, None)
+  parsers = car_state.get_can_parsers(CP)
+  toggles = SimpleNamespace(subaru_sng=False)
+
+  parsers[Bus.pt].vl["Steering_2"]["Steering_Angle"] = 1.0
+  parsers[Bus.pt].vl["Steering_2"]["COUNTER"] = 1
+  car_state.update(parsers, toggles)
+
+  parsers[Bus.pt].vl["Steering_2"]["Steering_Angle"] = 2.0
+  parsers[Bus.pt].vl["Steering_2"]["COUNTER"] = 2
+  state, _ = car_state.update(parsers, toggles)
+  assert state.steeringRateDeg == pytest.approx(50.0)
+
+  state, _ = car_state.update(parsers, toggles)
+  assert state.steeringRateDeg == pytest.approx(50.0)
+
+
 def test_other_angle_platforms_keep_existing_bus_layout():
   CP = CarInterface.get_non_essential_params(CAR.SUBARU_CROSSTREK_2025)
   parsers = CarState.get_can_parsers(CP)
@@ -707,11 +726,20 @@ def test_ascent_angle_controller_blocks_parking_lot_aol_engagement():
   CS.out.steeringRateDeg = 0.0
   msg = controller.lateral_angle(CC, CS)
   parser.update([(2, [msg])])
+  assert parser.vl["ES_LKAS_ANGLE"]["LKAS_Request"] == 0
+
+  for i in range(8):
+    msg = controller.lateral_angle(CC, CS)
+    parser.update([(3 + i, [msg])])
+    assert parser.vl["ES_LKAS_ANGLE"]["LKAS_Request"] == 0
+
+  msg = controller.lateral_angle(CC, CS)
+  parser.update([(11, [msg])])
   assert parser.vl["ES_LKAS_ANGLE"]["LKAS_Request"] == 1
 
   CS.out.gearShifter = structs.CarState.GearShifter.reverse
   msg = controller.lateral_angle(CC, CS)
-  parser.update([(3, [msg])])
+  parser.update([(12, [msg])])
   assert parser.vl["ES_LKAS_ANGLE"]["LKAS_Request"] == 0
   assert parser.vl["ES_LKAS_ANGLE"]["LKAS_Output"] == pytest.approx(CS.out.steeringAngleDeg)
 

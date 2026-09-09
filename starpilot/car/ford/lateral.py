@@ -37,6 +37,14 @@ CURVATURE_LOOKAHEAD_MAX = 0.40
 FORD_CURVATURE_LOOKAHEAD = {
   CAR.FORD_EXPLORER_MK6: 0.20,
 }
+FORD_CONSERVATIVE_PREVIEW_CARS = frozenset({
+  CAR.FORD_MUSTANG_MACH_E_MK1,
+})
+FORD_MANUAL_TURN_LATCH_CARS = frozenset({
+  CAR.FORD_MUSTANG_MACH_E_MK1,
+})
+MANUAL_TURN_ENTRY_ANGLE_DEG = 12.0
+MANUAL_TURN_RECOVERY_SECONDS = 0.25
 
 
 @dataclass(frozen=True)
@@ -101,6 +109,8 @@ class FordLateralController:
     self.curvature_lane_change_factor = 0.85
 
     self.human_turn = HumanTurnDetector()
+    self.manual_turn_latched = False
+    self.manual_turn_recovery_timer = 0.0
     self.curvature_samples = deque(maxlen=max(2, round(0.3 / STEER_DT)))
     self.curvature_last = 0.0
     self._frame = 0
@@ -151,8 +161,13 @@ class FordLateralController:
   def _current_curvature(CS) -> float:
     return -CS.out.yawRate / max(CS.out.vEgoRaw, 0.1)
 
-  def _blend_and_scale(self, desired: float, predicted: float, v_ego: float) -> tuple[float, int]:
+  def _blend_and_scale(self, desired: float, predicted: float, v_ego: float, current: float = 0.0) -> tuple[float, int]:
     blend = float(np.interp(abs(desired), [0.0, 0.001], [self.curvature_blend_low, self.curvature_blend_high]))
+    if self.CP.carFingerprint in FORD_CONSERVATIVE_PREVIEW_CARS:
+      if desired * predicted <= 0.0:
+        blend = 0.0
+      elif current * predicted > 0.0 and abs(current) > abs(desired) and abs(predicted) > abs(desired):
+        blend *= abs(desired) / abs(predicted)
     requested = predicted * blend + desired * (1.0 - blend)
     lane_change, direction = self._lane_change()
     precision = 1
@@ -166,26 +181,62 @@ class FordLateralController:
   def _manual_turn(self, CC, CS) -> bool:
     if not CC.latActive:
       self.human_turn.reset()
+      self.manual_turn_latched = False
+      self.manual_turn_recovery_timer = 0.0
       return False
-    return self.human_turn.update(
+    detected = self.human_turn.update(
       self.human_turn_enabled, CS.out.steeringPressed, CS.out.steeringAngleDeg)
+    if self.CP.carFingerprint not in FORD_MANUAL_TURN_LATCH_CARS:
+      return detected
+
+    if not self.human_turn_enabled:
+      self.manual_turn_latched = False
+      self.manual_turn_recovery_timer = 0.0
+      return False
+
+    blinker_direction = float(CS.out.rightBlinker) - float(CS.out.leftBlinker)
+    driver_turning_with_signal = (
+      CS.out.steeringPressed and abs(CS.out.steeringAngleDeg) >= MANUAL_TURN_ENTRY_ANGLE_DEG and
+      blinker_direction != 0.0 and not self._lane_change()[0] and
+      CS.out.steeringTorque * blinker_direction < 0.0
+    )
+    if detected or driver_turning_with_signal:
+      self.manual_turn_latched = True
+
+    if not self.manual_turn_latched:
+      self.manual_turn_recovery_timer = 0.0
+      return False
+
+    if CS.out.steeringPressed or blinker_direction != 0.0:
+      self.manual_turn_recovery_timer = 0.0
+    else:
+      self.manual_turn_recovery_timer += STEER_DT
+      if self.manual_turn_recovery_timer + 1e-9 >= MANUAL_TURN_RECOVERY_SECONDS:
+        self.manual_turn_latched = False
+        self.manual_turn_recovery_timer = 0.0
+
+    return self.manual_turn_latched
 
   def update(self, CC, CS, actuators) -> FordLateralResult:
     current = self._current_curvature(CS)
     if not CC.latActive:
       self.human_turn.reset()
+      self.manual_turn_latched = False
+      self.manual_turn_recovery_timer = 0.0
       self.curvature_samples.clear()
       self.curvature_last = 0.0
       return FordLateralResult()
 
-    if self._manual_turn(CC, CS) or CS.out.vEgoRaw < 0.1:
+    manual_turn = self._manual_turn(CC, CS)
+    if manual_turn or CS.out.vEgoRaw < 0.1:
       self.curvature_samples.clear()
       self.curvature_last = 0.0
-      return FordLateralResult(active=True)
+      return FordLateralResult(active=not (
+        manual_turn and self.CP.carFingerprint in FORD_MANUAL_TURN_LATCH_CARS))
 
     v_ego = float(CS.out.vEgoRaw)
     predicted = self._predicted_curvature(v_ego, self._curvature_lookahead())
-    requested, precision = self._blend_and_scale(float(actuators.curvature), predicted, v_ego)
+    requested, precision = self._blend_and_scale(float(actuators.curvature), predicted, v_ego, current)
 
     if v_ego > 9.0:
       requested = float(np.clip(requested, current - CarControllerParams.CURVATURE_ERROR,

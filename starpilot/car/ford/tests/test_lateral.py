@@ -32,12 +32,16 @@ def controller(monkeypatch):
   return controller
 
 
-def car_state(speed=15.0, curvature=0.0, steering_pressed=False, steering_angle=0.0):
+def car_state(speed=15.0, curvature=0.0, steering_pressed=False, steering_angle=0.0,
+              steering_torque=0.0, left_blinker=False, right_blinker=False):
   return SimpleNamespace(out=SimpleNamespace(
     vEgoRaw=speed,
     yawRate=-curvature * speed,
     steeringPressed=steering_pressed,
     steeringAngleDeg=steering_angle,
+    steeringTorque=steering_torque,
+    leftBlinker=left_blinker,
+    rightBlinker=right_blinker,
   ))
 
 
@@ -114,6 +118,36 @@ def test_curvature_strategy_uses_learned_lookahead(controller, monkeypatch):
   assert lookaheads == [pytest.approx(0.38)]
 
 
+def test_mach_e_preview_does_not_override_opposite_current_path(controller):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+
+  requested, _ = controller._blend_and_scale(-0.0001, 0.002, 20.0)
+
+  assert requested == pytest.approx(-0.0001)
+
+
+def test_mach_e_preview_is_reduced_when_ahead_of_current_path(controller):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+
+  requested, _ = controller._blend_and_scale(0.0005, 0.002, 20.0, current=0.0015)
+
+  assert requested == pytest.approx(0.00065)
+
+
+def test_mach_e_preview_remains_available_on_curve_entry(controller):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+
+  requested, _ = controller._blend_and_scale(0.0005, 0.002, 20.0, current=0.0002)
+
+  assert requested == pytest.approx(0.0011)
+
+
+def test_non_mach_e_preview_blend_is_unchanged(controller):
+  requested, _ = controller._blend_and_scale(-0.0001, 0.002, 20.0, current=0.0015)
+
+  assert requested == pytest.approx(0.00074)
+
+
 def test_lane_change_accepts_capnp_enum_wrappers(controller):
   controller.model = SimpleNamespace(meta=SimpleNamespace(
     laneChangeState=SimpleNamespace(raw=2),
@@ -146,3 +180,87 @@ def test_curvature_manual_turn_keeps_session_active_with_neutral_command(control
 
   assert result.active
   assert result.curvature == 0.0
+
+
+def test_mach_e_signaled_manual_turn_yields_until_inputs_settle(controller):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.human_turn_enabled = True
+  CC = SimpleNamespace(latActive=True)
+  actuators = SimpleNamespace(curvature=0.006)
+
+  result = controller.update(CC, car_state(
+    steering_pressed=True, steering_angle=-15.0, steering_torque=-2.0,
+    right_blinker=True), actuators)
+  assert not result.active
+  assert result.curvature == 0.0
+
+  result = controller.update(CC, car_state(
+    steering_pressed=True, steering_angle=5.0, steering_torque=2.0,
+    right_blinker=True), actuators)
+  assert not result.active
+
+  for _ in range(4):
+    result = controller.update(CC, car_state(), actuators)
+    assert not result.active
+
+  result = controller.update(CC, car_state(), actuators)
+  assert result.active
+  assert result.curvature > 0.0
+
+
+def test_mach_e_opposite_blinker_correction_does_not_start_manual_turn(controller):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+
+  result = controller.update(
+    SimpleNamespace(latActive=True),
+    car_state(steering_pressed=True, steering_angle=-15.0, steering_torque=2.0,
+              right_blinker=True),
+    SimpleNamespace(curvature=0.001),
+  )
+
+  assert result.active
+
+
+def test_mach_e_lane_change_nudge_does_not_start_manual_turn(controller):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  controller.model = SimpleNamespace(
+    orientationRate=SimpleNamespace(z=[0.0] * 33),
+    meta=SimpleNamespace(
+      laneChangeState=SimpleNamespace(raw=2),
+      laneChangeDirection=SimpleNamespace(raw=2),
+    ),
+  )
+
+  result = controller.update(
+    SimpleNamespace(latActive=True),
+    car_state(steering_pressed=True, steering_angle=-15.0, steering_torque=-2.0,
+              right_blinker=True),
+    SimpleNamespace(curvature=0.001),
+  )
+
+  assert result.active
+
+
+def test_mach_e_small_blinker_nudge_does_not_start_manual_turn(controller):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+
+  result = controller.update(
+    SimpleNamespace(latActive=True),
+    car_state(steering_pressed=True, steering_angle=-5.0, steering_torque=-2.0,
+              right_blinker=True),
+    SimpleNamespace(curvature=0.001),
+  )
+
+  assert result.active
+
+
+def test_mach_e_manual_turn_latch_resets_with_lateral_control(controller):
+  controller.CP.carFingerprint = CAR.FORD_MUSTANG_MACH_E_MK1
+  actuators = SimpleNamespace(curvature=0.001)
+  turning = car_state(
+    steering_pressed=True, steering_angle=-15.0, steering_torque=-2.0,
+    right_blinker=True)
+
+  assert not controller.update(SimpleNamespace(latActive=True), turning, actuators).active
+  assert not controller.update(SimpleNamespace(latActive=False), turning, actuators).active
+  assert controller.update(SimpleNamespace(latActive=True), car_state(), actuators).active

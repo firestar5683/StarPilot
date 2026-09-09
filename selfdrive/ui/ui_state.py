@@ -297,6 +297,8 @@ class UIState:
 
 
 class Device:
+  SCREEN_SETTINGS_REFRESH_INTERVAL = 1.0
+
   def __init__(self):
     self._ignition = False
     self._interaction_time: float = -1
@@ -305,6 +307,16 @@ class Device:
     self._prev_timed_out = False
     self._awake: bool = True
     self._params = ui_state.ui_params
+
+    self._screen_settings_refresh_time: float = 0.0
+    self._screen_management = False
+    self._screen_brightness = 101
+    self._screen_brightness_onroad = 101
+    self._screen_timeout = 30
+    self._screen_timeout_onroad = 30
+    self._standby_mode = False
+    self._last_status = ui_state.status
+    self._refresh_screen_settings(force=True)
 
     self._offroad_brightness: int = BACKLIGHT_OFFROAD
     self._last_brightness: int = 0
@@ -325,8 +337,8 @@ class Device:
     if self._override_interactive_timeout is not None:
       return self._override_interactive_timeout
 
-    timeout_onroad = self._params.get_int("ScreenTimeoutOnroad", return_default=True)
-    timeout_offroad = self._params.get_int("ScreenTimeout", return_default=True)
+    timeout_onroad = self._screen_timeout_onroad
+    timeout_offroad = self._screen_timeout
 
     if timeout_onroad <= 0:
       timeout_onroad = 10 if gui_app.big_ui() else 5
@@ -345,12 +357,54 @@ class Device:
     self._interactive_timeout_callbacks.append(callback)
 
   def update(self):
+    self._refresh_screen_settings()
+
     # do initial reset
     if self._interaction_time <= 0:
       self._reset_interactive_timeout()
 
-    self._update_brightness()
     self._update_wakefulness()
+    self._update_brightness()
+
+  def _refresh_screen_settings(self, force: bool = False) -> None:
+    now = time.monotonic()
+    if not force and now - self._screen_settings_refresh_time < self.SCREEN_SETTINGS_REFRESH_INTERVAL:
+      return
+
+    previous = (
+      self._screen_management,
+      self._screen_brightness,
+      self._screen_brightness_onroad,
+      self._screen_timeout,
+      self._screen_timeout_onroad,
+      self._standby_mode,
+    )
+
+    self._screen_management = self._params.get_bool("ScreenManagement")
+    if self._screen_management:
+      self._screen_brightness = min(max(self._params.get_int("ScreenBrightness", return_default=True), 0), 101)
+      self._screen_brightness_onroad = min(max(self._params.get_int("ScreenBrightnessOnroad", return_default=True), 0), 101)
+      self._screen_timeout = self._params.get_int("ScreenTimeout", return_default=True)
+      self._screen_timeout_onroad = self._params.get_int("ScreenTimeoutOnroad", return_default=True)
+      self._standby_mode = self._params.get_bool("StandbyMode")
+    else:
+      self._screen_brightness = 101
+      self._screen_brightness_onroad = 101
+      self._screen_timeout = 30
+      self._screen_timeout_onroad = 30
+      self._standby_mode = False
+
+    self._screen_settings_refresh_time = now
+    current = (
+      self._screen_management,
+      self._screen_brightness,
+      self._screen_brightness_onroad,
+      self._screen_timeout,
+      self._screen_timeout_onroad,
+      self._standby_mode,
+    )
+    if previous != current and self._interaction_time > 0:
+      self._reset_interactive_timeout()
 
   def set_offroad_brightness(self, brightness: int | None):
     if brightness is None:
@@ -358,6 +412,15 @@ class Device:
     self._offroad_brightness = min(max(brightness, 0), 100)
 
   def _update_brightness(self):
+    brightness = self._calculate_brightness()
+
+    if brightness != self._last_brightness:
+      if self._brightness_thread is None or not self._brightness_thread.is_alive():
+        self._brightness_thread = threading.Thread(target=HARDWARE.set_screen_brightness, args=(brightness,))
+        self._brightness_thread.start()
+        self._last_brightness = brightness
+
+  def _calculate_brightness(self) -> int:
     clipped_brightness = self._offroad_brightness
 
     if ui_state.started and ui_state.light_sensor >= 0:
@@ -374,19 +437,26 @@ class Device:
     brightness = round(self._brightness_filter.update(clipped_brightness))
     if not self._awake:
       brightness = 0
+    elif ui_state.started and self._standby_mode and time.monotonic() > self._interaction_time:
+      brightness = 0
+    elif ui_state.started and self._screen_brightness_onroad != 101:
+      brightness = max(5, self._screen_brightness_onroad) if time.monotonic() <= self._interaction_time else self._screen_brightness_onroad
+    elif not ui_state.started and self._screen_brightness != 101:
+      brightness = self._screen_brightness
 
-    if brightness != self._last_brightness:
-      if self._brightness_thread is None or not self._brightness_thread.is_alive():
-        self._brightness_thread = threading.Thread(target=HARDWARE.set_screen_brightness, args=(brightness,))
-        self._brightness_thread.start()
-        self._last_brightness = brightness
+    return brightness
 
   def _update_wakefulness(self):
     # Handle interactive timeout
-    ignition_just_turned_off = not ui_state.ignition and self._ignition
+    ignition_state_changed = ui_state.ignition != self._ignition
     self._ignition = ui_state.ignition
 
-    if ignition_just_turned_off or any(ev.left_down for ev in gui_app.mouse_events):
+    status_changed = ui_state.status != self._last_status and ui_state.status != UIStatus.OVERRIDE
+    self._last_status = ui_state.status
+    wake_for_onroad_event = (ui_state.started and self._standby_mode and self._screen_brightness_onroad != 0 and
+                             (status_changed or self._visible_onroad_alert()))
+
+    if ignition_state_changed or any(ev.left_down for ev in gui_app.mouse_events) or wake_for_onroad_event:
       self._reset_interactive_timeout()
 
     interaction_timeout = time.monotonic() > self._interaction_time
@@ -396,6 +466,27 @@ class Device:
     self._prev_timed_out = interaction_timeout
 
     self._set_awake(ui_state.ignition or not interaction_timeout or PC)
+
+  @staticmethod
+  def _visible_onroad_alert() -> bool:
+    if not ui_state.started:
+      return False
+
+    sm = ui_state.sm
+    try:
+      selfdrive_state = sm["selfdriveState"]
+      if selfdrive_state.alertSize != log.SelfdriveState.AlertSize.none:
+        return True
+      if selfdrive_state.alertStatus != log.SelfdriveState.AlertStatus.normal:
+        return True
+    except Exception:
+      pass
+
+    try:
+      starpilot_state = sm["starpilotSelfdriveState"]
+      return getattr(starpilot_state.alertSize, "raw", 0) != 0
+    except Exception:
+      return False
 
   def _set_awake(self, on: bool):
     if on != self._awake:

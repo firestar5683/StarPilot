@@ -80,6 +80,14 @@ def test_ui_ports_developer_mode_gating():
   assert "isAdvancedHiddenByDeveloperMode" in params
 
 
+def test_ui_exposes_gm_auto_hold_to_buick():
+  params = _read("js/params.js")
+  device_settings = (REPO_ROOT / "starpilot/system/the_galaxy/assets/components/tools/device_settings.js").read_text(encoding="utf-8")
+
+  assert 'GMAutoHold: ["Buick", "Chevrolet", "Holden"]' in params
+  assert 'GMAutoHold: ["Buick", "Chevrolet", "Holden"]' in device_settings
+
+
 def test_ui_restores_hierarchical_sub_toggle_rendering():
   # Children must nest under parents via the recursive SettingTree, gated on
   # the parent being enabled AND expanded (classic renderSettingTree contract).
@@ -509,6 +517,10 @@ def test_ui_mobile_polish_regressions():
   assert "checkedForUpdates && !!this.fastStatus?.updateAvailable" in system
   assert "gx-update-progress__fill" in system
   assert "linear-gradient(90deg, #5ec8c8 0%, #8b6cc5 100%)" in css
+  assert "Automatically Install Updates" in system
+  assert 'key: "AutomaticUpdates"' in system
+  assert "!!fastStatus?.automaticUpdates" in system
+  assert "isOnroad || autoUpdateBusy || !!fastStatus?.running" in system
 
   bluetooth = _read("js/components/BluetoothPanel.js")
   assert "methods: {\n    address," in bluetooth

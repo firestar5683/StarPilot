@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 """
-Safety tests for Volvo CMA/SPA.
+Safety tests for Volvo C1/CMA/SPA.
 
 The safety mode lives at ``opendbc/safety/modes/volvo.h`` and is parameterized
 by ``safetyParam``:
@@ -8,14 +8,13 @@ by ``safetyParam``:
   - ``safetyParam == 0``       → CMA platform (Volvo XC40 Recharge)
   - ``safetyParam == VOLVO_FLAG_SPA`` → SPA platform (Volvo S60 Recharge,
     Polestar 2)
+  - ``safetyParam == VOLVO_FLAG_C1``  → C1 platform (Volvo V40)
 
-The two platforms share LCA/PSCM/etc. addresses on the main and party buses
-but use *different* PT-bus addresses and signal scales for ECM_1 and
-BUS1_CRUISE_CONTROL. Vehicle speed is read from main-bus SPEED on both, so it
-is not platform-dependent. This test file exercises both platforms through the
-same generic ``CarSafetyTest`` harness so that any future divergence between
-``carstate.py`` and ``volvo.h`` — e.g. a threshold drifting out of sync — is
-caught on a laptop instead of in the car.
+CMA and SPA share LCA/PSCM/etc. addresses on the main and party buses but use
+different PT-bus addresses and signal scales. C1 uses the V40's legacy CAN
+layout and its own safety allowlist. The tests exercise all three through the
+generic ``CarSafetyTest`` harness so divergence between ``carstate.py`` and
+``volvo.h`` is caught before running in a car.
 
 Companion to: ``opendbc/car/volvo/carstate.py`` (must agree on thresholds).
 """
@@ -25,13 +24,16 @@ import re
 import unittest
 
 from opendbc.car.volvo.interface import SAFETY_VOLVO
+from opendbc.car.volvo.values import VolvoSafetyFlags
+from opendbc.car.volvo.volvocan import create_c1_checksum, create_c1_steering_control
 from opendbc.safety.tests.libsafety import libsafety_py
 import opendbc.safety.tests.common as common
 from opendbc.safety.tests.common import CANPackerSafety
 
 
-# Must match VOLVO_FLAG_SPA in opendbc/safety/modes/volvo.h
-VOLVO_FLAG_SPA = 1
+# Must match the flags in opendbc/safety/modes/volvo.h
+VOLVO_FLAG_SPA = VolvoSafetyFlags.SPA.value
+VOLVO_FLAG_C1 = VolvoSafetyFlags.C1.value
 
 # Must match VOLVO_SPEED_TO_MS in volvo.h and SPEED_TO_MS in carstate.py
 VOLVO_SPEED_TO_MS = 0.003977
@@ -330,6 +332,125 @@ class TestVolvoSPA(TestVolvoSafetyBase):
     values = {"CRUISE_CONTROL_SPA_ENABLED": 1 if enable else 0}
     return self.pt_packer.make_can_msg_safety(
       "BUS1_CRUISE_CONTROL", VOLVO_PT_BUS, values)
+
+
+class TestVolvoC1(common.CarSafetyTest, common.AngleSteeringSafetyTest):
+  TX_MSGS = [[0xD0, VOLVO_MAIN_BUS], [0x125, VOLVO_PARTY_BUS], [0x10, VOLVO_MAIN_BUS]]
+  RELAY_MALFUNCTION_ADDRS = {
+    VOLVO_MAIN_BUS: (0xD0,),
+    VOLVO_PARTY_BUS: (0x125,),
+  }
+  FWD_BLACKLISTED_ADDRS = {
+    VOLVO_MAIN_BUS: [0x125],
+    VOLVO_PARTY_BUS: [0xD0],
+  }
+  STANDSTILL_THRESHOLD = 0.1
+  GAS_PRESSED_THRESHOLD = 5.0
+
+  STEER_ANGLE_MAX = 359.9
+  STEER_ANGLE_TEST_MAX = 350.0
+  DEG_TO_CAN = 1 / 0.04395
+  ANGLE_RATE_BP = [7.0, 17.0, 36.0]
+  ANGLE_RATE_UP = [2.0, 0.25, 0.1]
+  ANGLE_RATE_DOWN = [2.0, 0.25, 0.1]
+
+  def setUp(self):
+    self.packer = CANPackerSafety("volvo_v40_2017_pt")
+    self.safety = libsafety_py.libsafety
+    self.safety.set_safety_hooks(SAFETY_VOLVO, VOLVO_FLAG_C1)
+    self.safety.init_tests()
+
+  def _angle_cmd_msg(self, angle: float, enabled: bool, increment_timer: bool = True):
+    values = {
+      "SET_X_E3": 0xE3,
+      "SET_X_B4": 0xB4,
+      "SET_X_08": 0x08,
+      "LKAAngleReq": angle,
+      "LKASteerDirection": 3 if enabled else 0,
+      "TrqLim": 0,
+      "SET_X_25": 0x25,
+      "SET_X_02": 0x02,
+    }
+
+    def fix_checksum(msg):
+      address, data, bus = msg
+      data = bytearray(data)
+      data[6] = create_c1_checksum(data)
+      return address, data, bus
+
+    return self.packer.make_can_msg_safety("FSM1", VOLVO_MAIN_BUS, values, fix_checksum)
+
+  def _angle_meas_msg(self, angle: float):
+    return self.packer.make_can_msg_safety(
+      "PSCM1", VOLVO_MAIN_BUS, {"SteeringAngleServo": angle})
+
+  def _speed_msg(self, speed):
+    return self.packer.make_can_msg_safety(
+      "VehicleSpeed1", VOLVO_MAIN_BUS, {"VehicleSpeed": speed * 3.6})
+
+  def _speed_msg_2(self, speed):
+    return None
+
+  def _user_brake_msg(self, brake):
+    return self.packer.make_can_msg_safety(
+      "PedalandBrake", VOLVO_MAIN_BUS, {"BrakePedalActive2": bool(brake)})
+
+  def _user_gas_msg(self, gas):
+    return self.packer.make_can_msg_safety(
+      "PedalandBrake", VOLVO_MAIN_BUS, {"AccPedal": gas})
+
+  def _pcm_status_msg(self, enable):
+    return self.packer.make_can_msg_safety(
+      "FSM0", VOLVO_PARTY_BUS, {"ACCStatusActive": bool(enable)})
+
+  def test_cancel_button_only(self):
+    allowed = self.packer.make_can_msg_safety(
+      "CCButtons", VOLVO_MAIN_BUS, {"ACCStopBtn": 1})
+    self.assertTrue(self._tx(allowed))
+
+    for signal in ("ACCOnOffBtn", "ACCSetBtn", "ACCResumeBtn", "ACCMinusBtn",
+                   "TimeGapIncreaseBtn", "TimeGapDecreaseBtn"):
+      msg = self.packer.make_can_msg_safety("CCButtons", VOLVO_MAIN_BUS, {signal: 1})
+      self.assertFalse(self._tx(msg), signal)
+
+  def test_pscm_relay_cannot_invent_angle(self):
+    for _ in range(common.MAX_SAMPLE_VALS):
+      self._rx(self._angle_meas_msg(10))
+    valid = self.packer.make_can_msg_safety(
+      "PSCM1", VOLVO_PARTY_BUS, {"SteeringAngleServo": 10})
+    invalid = self.packer.make_can_msg_safety(
+      "PSCM1", VOLVO_PARTY_BUS, {"SteeringAngleServo": 20})
+    self.assertTrue(self._tx(valid))
+    self.assertFalse(self._tx(invalid))
+
+  def test_pscm_relay_preserves_full_lock_angle(self):
+    for angle in (-720, 500):
+      for _ in range(common.MAX_SAMPLE_VALS):
+        self._rx(self._angle_meas_msg(angle))
+      relayed = self.packer.make_can_msg_safety(
+        "PSCM1", VOLVO_PARTY_BUS, {"SteeringAngleServo": angle})
+      self.assertTrue(self._tx(relayed), angle)
+
+  def test_steering_static_fields_and_checksum(self):
+    self.safety.set_controls_allowed(True)
+    self._reset_angle_measurement(0)
+    self._reset_speed_measurement(10)
+    self._set_prev_desired_angle(0)
+    valid = self._angle_cmd_msg(0, True)
+    self.assertTrue(self._tx(valid))
+
+    for byte_index in (0, 1, 2, 3, 4, 6, 7):
+      invalid = self._angle_cmd_msg(0, True)
+      invalid[0].data[byte_index] ^= 0x4 if byte_index in (4, 7) else 0x1
+      self.assertFalse(self._tx(invalid), byte_index)
+
+  def test_controller_steering_message_is_allowed(self):
+    self.safety.set_controls_allowed(True)
+    self._reset_angle_measurement(0)
+    self._reset_speed_measurement(10)
+    self._set_prev_desired_angle(0)
+    address, data, bus = create_c1_steering_control(self.packer, 0, True)
+    self.assertTrue(self._tx(libsafety_py.make_CANPacket(address, bus, data)))
 
 
 if __name__ == "__main__":

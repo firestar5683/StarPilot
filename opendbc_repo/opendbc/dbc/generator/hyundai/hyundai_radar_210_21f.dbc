@@ -1,0 +1,1221 @@
+
+VERSION ""
+
+
+NS_ :
+    NS_DESC_
+    CM_
+    BA_DEF_
+    BA_
+    VAL_
+    CAT_DEF_
+    CAT_
+    FILTER
+    BA_DEF_DEF_
+    EV_DATA_
+    ENVVAR_DATA_
+    SGTYPE_
+    SGTYPE_VAL_
+    BA_DEF_SGTYPE_
+    BA_SGTYPE_
+    SIG_TYPE_REF_
+    VAL_TABLE_
+    SIG_GROUP_
+    SIG_VALTYPE_
+    SIGTYPE_VALTYPE_
+    BO_TX_BU_
+    BA_DEF_REL_
+    BA_REL_
+    BA_DEF_DEF_REL_
+    BU_SG_REL_
+    BU_EV_REL_
+    BU_BO_REL_
+    SG_MUL_VAL_
+
+BS_:
+
+BU_: XXX
+    
+BO_ 528 RADAR_TRACK_210: 32 RADAR
+ SG_ CHECKSUM : 0|16@1+ (1,0) [0|65535] "" XXX
+ SG_ COUNTER : 16|8@1+ (1,0) [0|255] "" XXX
+ SG_ 1_STATE_ALT : 25|2@0+ (1,0) [0|3] "" XXX
+ SG_ 1_MOTION_STATE : 29|3@0+ (1,0) [0|4] "" XXX
+ SG_ 1_TRACK_QUALITY : 38|7@0+ (1,0) [0|127] "" XXX
+ SG_ 1_AGE : 47|8@0+ (1,0) [0|255] "" XXX
+ SG_ 1_COAST_AGE : 51|4@0+ (1,0) [0|15] "" XXX
+ SG_ 1_STATE : 54|3@0+ (1,0) [0|7] "" XXX
+ SG_ 1_RCS : 63|8@0- (1,0) [-128|127] "" XXX
+ SG_ 1_LONG_DIST : 64|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 1_LAT_DIST : 76|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 1_REL_SPEED : 88|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 1_NEW_SIGNAL_4 : 102|2@1+ (1,0) [0|2] "" XXX
+ SG_ 1_REL_LAT_SPEED : 104|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 1_REL_ACCEL : 118|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+ SG_ 1_NEW_SIGNAL_18 : 129|2@0+ (1,0) [0|1] "" XXX
+ SG_ 1_OBJECT_ID : 135|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_NEW_SIGNAL_18 : 137|2@0+ (1,0) [0|1] "" XXX
+ SG_ 2_OBJECT_ID : 143|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_STATE_ALT : 153|2@0+ (1,0) [0|3] "" XXX
+ SG_ 2_MOTION_STATE : 157|3@0+ (1,0) [0|4] "" XXX
+ SG_ 2_TRACK_QUALITY : 166|7@0+ (1,0) [0|127] "" XXX
+ SG_ 2_AGE : 175|8@0+ (1,0) [0|255] "" XXX
+ SG_ 2_COAST_AGE : 179|4@0+ (1,0) [0|15] "" XXX
+ SG_ 2_STATE : 182|3@0+ (1,0) [0|7] "" XXX
+ SG_ 2_RCS : 191|8@0- (1,0) [-128|127] "" XXX
+ SG_ 2_LONG_DIST : 192|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 2_LAT_DIST : 204|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 2_REL_SPEED : 216|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 2_NEW_SIGNAL_4 : 230|2@1+ (1,0) [0|2] "" XXX
+ SG_ 2_REL_LAT_SPEED : 232|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 2_REL_ACCEL : 246|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+
+VAL_ 528 1_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 528 2_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 528 1_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 528 2_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 528 1_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+VAL_ 528 2_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+    CM_ BO_ 528 "Hyundai/Kia 210-21F radar-track layout: 16 messages with two target slots per 32-byte message (32 tracks total). Two related dialects share the same position, velocity, age, coast-age, and compressed-state core. The detailed dialect also populates STATE, RCS, and NEW_SIGNAL_4; the compact Tucson/Sportage/Santa Cruz dialect leaves those fields zero and uses STATE_ALT. The dialect is independent of the logged raw bus and is not an HDA-level discriminator: HDA2-like routes carried the sustained stream on A-CAN mapped to bus 0, while non-HDA2 routes mapped A-CAN to bus 1. Compact targets populate per-slot NEW_SIGNAL_18/OBJECT_ID extension bytes at bytes 16 and 17; detailed platforms usually leave them zero. Byte 18 and bits 26, 30-31, 39, 55, and 117 remained zero. REL_LAT_SPEED has opposite sign conventions between the detailed and compact dialects. The HKG CAN-FD checksum matched every one of 13,210,543 checked frames.";
+CM_ SG_ 528 1_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 528 1_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 528 1_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 528 1_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 528 1_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 528 1_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 528 1_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 528 1_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 528 1_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 528 1_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 528 1_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 528 1_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 528 1_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 528 1_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 528 1_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 528 2_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 528 2_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 528 2_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 528 2_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 528 2_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 528 2_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 528 2_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 528 2_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 528 2_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 528 2_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 528 2_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 528 2_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 528 2_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 528 2_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 528 2_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 528 CHECKSUM "16-bit HKG CAN-FD checksum using the CAN address as the data ID.";
+CM_ SG_ 528 COUNTER "8-bit transmit-cycle counter. It covers 0-255 and wraps.";
+
+BO_ 529 RADAR_TRACK_211: 32 RADAR
+ SG_ CHECKSUM : 0|16@1+ (1,0) [0|65535] "" XXX
+ SG_ COUNTER : 16|8@1+ (1,0) [0|255] "" XXX
+ SG_ 1_STATE_ALT : 25|2@0+ (1,0) [0|3] "" XXX
+ SG_ 1_MOTION_STATE : 29|3@0+ (1,0) [0|4] "" XXX
+ SG_ 1_TRACK_QUALITY : 38|7@0+ (1,0) [0|127] "" XXX
+ SG_ 1_AGE : 47|8@0+ (1,0) [0|255] "" XXX
+ SG_ 1_COAST_AGE : 51|4@0+ (1,0) [0|15] "" XXX
+ SG_ 1_STATE : 54|3@0+ (1,0) [0|7] "" XXX
+ SG_ 1_RCS : 63|8@0- (1,0) [-128|127] "" XXX
+ SG_ 1_LONG_DIST : 64|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 1_LAT_DIST : 76|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 1_REL_SPEED : 88|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 1_NEW_SIGNAL_4 : 102|2@1+ (1,0) [0|2] "" XXX
+ SG_ 1_REL_LAT_SPEED : 104|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 1_REL_ACCEL : 118|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+ SG_ 1_NEW_SIGNAL_18 : 129|2@0+ (1,0) [0|1] "" XXX
+ SG_ 1_OBJECT_ID : 135|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_NEW_SIGNAL_18 : 137|2@0+ (1,0) [0|1] "" XXX
+ SG_ 2_OBJECT_ID : 143|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_STATE_ALT : 153|2@0+ (1,0) [0|3] "" XXX
+ SG_ 2_MOTION_STATE : 157|3@0+ (1,0) [0|4] "" XXX
+ SG_ 2_TRACK_QUALITY : 166|7@0+ (1,0) [0|127] "" XXX
+ SG_ 2_AGE : 175|8@0+ (1,0) [0|255] "" XXX
+ SG_ 2_COAST_AGE : 179|4@0+ (1,0) [0|15] "" XXX
+ SG_ 2_STATE : 182|3@0+ (1,0) [0|7] "" XXX
+ SG_ 2_RCS : 191|8@0- (1,0) [-128|127] "" XXX
+ SG_ 2_LONG_DIST : 192|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 2_LAT_DIST : 204|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 2_REL_SPEED : 216|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 2_NEW_SIGNAL_4 : 230|2@1+ (1,0) [0|2] "" XXX
+ SG_ 2_REL_LAT_SPEED : 232|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 2_REL_ACCEL : 246|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+
+VAL_ 529 1_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 529 2_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 529 1_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 529 2_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 529 1_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+VAL_ 529 2_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+    CM_ BO_ 529 "Hyundai/Kia 210-21F radar-track layout: 16 messages with two target slots per 32-byte message (32 tracks total). Two related dialects share the same position, velocity, age, coast-age, and compressed-state core. The detailed dialect also populates STATE, RCS, and NEW_SIGNAL_4; the compact Tucson/Sportage/Santa Cruz dialect leaves those fields zero and uses STATE_ALT. The dialect is independent of the logged raw bus and is not an HDA-level discriminator: HDA2-like routes carried the sustained stream on A-CAN mapped to bus 0, while non-HDA2 routes mapped A-CAN to bus 1. Compact targets populate per-slot NEW_SIGNAL_18/OBJECT_ID extension bytes at bytes 16 and 17; detailed platforms usually leave them zero. Byte 18 and bits 26, 30-31, 39, 55, and 117 remained zero. REL_LAT_SPEED has opposite sign conventions between the detailed and compact dialects. The HKG CAN-FD checksum matched every one of 13,210,543 checked frames.";
+CM_ SG_ 529 1_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 529 1_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 529 1_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 529 1_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 529 1_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 529 1_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 529 1_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 529 1_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 529 1_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 529 1_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 529 1_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 529 1_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 529 1_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 529 1_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 529 1_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 529 2_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 529 2_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 529 2_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 529 2_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 529 2_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 529 2_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 529 2_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 529 2_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 529 2_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 529 2_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 529 2_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 529 2_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 529 2_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 529 2_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 529 2_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 529 CHECKSUM "16-bit HKG CAN-FD checksum using the CAN address as the data ID.";
+CM_ SG_ 529 COUNTER "8-bit transmit-cycle counter. It covers 0-255 and wraps.";
+
+BO_ 530 RADAR_TRACK_212: 32 RADAR
+ SG_ CHECKSUM : 0|16@1+ (1,0) [0|65535] "" XXX
+ SG_ COUNTER : 16|8@1+ (1,0) [0|255] "" XXX
+ SG_ 1_STATE_ALT : 25|2@0+ (1,0) [0|3] "" XXX
+ SG_ 1_MOTION_STATE : 29|3@0+ (1,0) [0|4] "" XXX
+ SG_ 1_TRACK_QUALITY : 38|7@0+ (1,0) [0|127] "" XXX
+ SG_ 1_AGE : 47|8@0+ (1,0) [0|255] "" XXX
+ SG_ 1_COAST_AGE : 51|4@0+ (1,0) [0|15] "" XXX
+ SG_ 1_STATE : 54|3@0+ (1,0) [0|7] "" XXX
+ SG_ 1_RCS : 63|8@0- (1,0) [-128|127] "" XXX
+ SG_ 1_LONG_DIST : 64|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 1_LAT_DIST : 76|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 1_REL_SPEED : 88|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 1_NEW_SIGNAL_4 : 102|2@1+ (1,0) [0|2] "" XXX
+ SG_ 1_REL_LAT_SPEED : 104|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 1_REL_ACCEL : 118|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+ SG_ 1_NEW_SIGNAL_18 : 129|2@0+ (1,0) [0|1] "" XXX
+ SG_ 1_OBJECT_ID : 135|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_NEW_SIGNAL_18 : 137|2@0+ (1,0) [0|1] "" XXX
+ SG_ 2_OBJECT_ID : 143|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_STATE_ALT : 153|2@0+ (1,0) [0|3] "" XXX
+ SG_ 2_MOTION_STATE : 157|3@0+ (1,0) [0|4] "" XXX
+ SG_ 2_TRACK_QUALITY : 166|7@0+ (1,0) [0|127] "" XXX
+ SG_ 2_AGE : 175|8@0+ (1,0) [0|255] "" XXX
+ SG_ 2_COAST_AGE : 179|4@0+ (1,0) [0|15] "" XXX
+ SG_ 2_STATE : 182|3@0+ (1,0) [0|7] "" XXX
+ SG_ 2_RCS : 191|8@0- (1,0) [-128|127] "" XXX
+ SG_ 2_LONG_DIST : 192|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 2_LAT_DIST : 204|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 2_REL_SPEED : 216|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 2_NEW_SIGNAL_4 : 230|2@1+ (1,0) [0|2] "" XXX
+ SG_ 2_REL_LAT_SPEED : 232|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 2_REL_ACCEL : 246|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+
+VAL_ 530 1_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 530 2_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 530 1_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 530 2_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 530 1_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+VAL_ 530 2_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+    CM_ BO_ 530 "Hyundai/Kia 210-21F radar-track layout: 16 messages with two target slots per 32-byte message (32 tracks total). Two related dialects share the same position, velocity, age, coast-age, and compressed-state core. The detailed dialect also populates STATE, RCS, and NEW_SIGNAL_4; the compact Tucson/Sportage/Santa Cruz dialect leaves those fields zero and uses STATE_ALT. The dialect is independent of the logged raw bus and is not an HDA-level discriminator: HDA2-like routes carried the sustained stream on A-CAN mapped to bus 0, while non-HDA2 routes mapped A-CAN to bus 1. Compact targets populate per-slot NEW_SIGNAL_18/OBJECT_ID extension bytes at bytes 16 and 17; detailed platforms usually leave them zero. Byte 18 and bits 26, 30-31, 39, 55, and 117 remained zero. REL_LAT_SPEED has opposite sign conventions between the detailed and compact dialects. The HKG CAN-FD checksum matched every one of 13,210,543 checked frames.";
+CM_ SG_ 530 1_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 530 1_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 530 1_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 530 1_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 530 1_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 530 1_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 530 1_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 530 1_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 530 1_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 530 1_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 530 1_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 530 1_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 530 1_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 530 1_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 530 1_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 530 2_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 530 2_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 530 2_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 530 2_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 530 2_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 530 2_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 530 2_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 530 2_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 530 2_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 530 2_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 530 2_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 530 2_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 530 2_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 530 2_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 530 2_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 530 CHECKSUM "16-bit HKG CAN-FD checksum using the CAN address as the data ID.";
+CM_ SG_ 530 COUNTER "8-bit transmit-cycle counter. It covers 0-255 and wraps.";
+
+BO_ 531 RADAR_TRACK_213: 32 RADAR
+ SG_ CHECKSUM : 0|16@1+ (1,0) [0|65535] "" XXX
+ SG_ COUNTER : 16|8@1+ (1,0) [0|255] "" XXX
+ SG_ 1_STATE_ALT : 25|2@0+ (1,0) [0|3] "" XXX
+ SG_ 1_MOTION_STATE : 29|3@0+ (1,0) [0|4] "" XXX
+ SG_ 1_TRACK_QUALITY : 38|7@0+ (1,0) [0|127] "" XXX
+ SG_ 1_AGE : 47|8@0+ (1,0) [0|255] "" XXX
+ SG_ 1_COAST_AGE : 51|4@0+ (1,0) [0|15] "" XXX
+ SG_ 1_STATE : 54|3@0+ (1,0) [0|7] "" XXX
+ SG_ 1_RCS : 63|8@0- (1,0) [-128|127] "" XXX
+ SG_ 1_LONG_DIST : 64|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 1_LAT_DIST : 76|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 1_REL_SPEED : 88|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 1_NEW_SIGNAL_4 : 102|2@1+ (1,0) [0|2] "" XXX
+ SG_ 1_REL_LAT_SPEED : 104|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 1_REL_ACCEL : 118|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+ SG_ 1_NEW_SIGNAL_18 : 129|2@0+ (1,0) [0|1] "" XXX
+ SG_ 1_OBJECT_ID : 135|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_NEW_SIGNAL_18 : 137|2@0+ (1,0) [0|1] "" XXX
+ SG_ 2_OBJECT_ID : 143|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_STATE_ALT : 153|2@0+ (1,0) [0|3] "" XXX
+ SG_ 2_MOTION_STATE : 157|3@0+ (1,0) [0|4] "" XXX
+ SG_ 2_TRACK_QUALITY : 166|7@0+ (1,0) [0|127] "" XXX
+ SG_ 2_AGE : 175|8@0+ (1,0) [0|255] "" XXX
+ SG_ 2_COAST_AGE : 179|4@0+ (1,0) [0|15] "" XXX
+ SG_ 2_STATE : 182|3@0+ (1,0) [0|7] "" XXX
+ SG_ 2_RCS : 191|8@0- (1,0) [-128|127] "" XXX
+ SG_ 2_LONG_DIST : 192|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 2_LAT_DIST : 204|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 2_REL_SPEED : 216|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 2_NEW_SIGNAL_4 : 230|2@1+ (1,0) [0|2] "" XXX
+ SG_ 2_REL_LAT_SPEED : 232|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 2_REL_ACCEL : 246|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+
+VAL_ 531 1_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 531 2_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 531 1_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 531 2_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 531 1_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+VAL_ 531 2_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+    CM_ BO_ 531 "Hyundai/Kia 210-21F radar-track layout: 16 messages with two target slots per 32-byte message (32 tracks total). Two related dialects share the same position, velocity, age, coast-age, and compressed-state core. The detailed dialect also populates STATE, RCS, and NEW_SIGNAL_4; the compact Tucson/Sportage/Santa Cruz dialect leaves those fields zero and uses STATE_ALT. The dialect is independent of the logged raw bus and is not an HDA-level discriminator: HDA2-like routes carried the sustained stream on A-CAN mapped to bus 0, while non-HDA2 routes mapped A-CAN to bus 1. Compact targets populate per-slot NEW_SIGNAL_18/OBJECT_ID extension bytes at bytes 16 and 17; detailed platforms usually leave them zero. Byte 18 and bits 26, 30-31, 39, 55, and 117 remained zero. REL_LAT_SPEED has opposite sign conventions between the detailed and compact dialects. The HKG CAN-FD checksum matched every one of 13,210,543 checked frames.";
+CM_ SG_ 531 1_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 531 1_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 531 1_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 531 1_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 531 1_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 531 1_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 531 1_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 531 1_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 531 1_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 531 1_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 531 1_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 531 1_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 531 1_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 531 1_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 531 1_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 531 2_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 531 2_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 531 2_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 531 2_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 531 2_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 531 2_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 531 2_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 531 2_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 531 2_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 531 2_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 531 2_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 531 2_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 531 2_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 531 2_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 531 2_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 531 CHECKSUM "16-bit HKG CAN-FD checksum using the CAN address as the data ID.";
+CM_ SG_ 531 COUNTER "8-bit transmit-cycle counter. It covers 0-255 and wraps.";
+
+BO_ 532 RADAR_TRACK_214: 32 RADAR
+ SG_ CHECKSUM : 0|16@1+ (1,0) [0|65535] "" XXX
+ SG_ COUNTER : 16|8@1+ (1,0) [0|255] "" XXX
+ SG_ 1_STATE_ALT : 25|2@0+ (1,0) [0|3] "" XXX
+ SG_ 1_MOTION_STATE : 29|3@0+ (1,0) [0|4] "" XXX
+ SG_ 1_TRACK_QUALITY : 38|7@0+ (1,0) [0|127] "" XXX
+ SG_ 1_AGE : 47|8@0+ (1,0) [0|255] "" XXX
+ SG_ 1_COAST_AGE : 51|4@0+ (1,0) [0|15] "" XXX
+ SG_ 1_STATE : 54|3@0+ (1,0) [0|7] "" XXX
+ SG_ 1_RCS : 63|8@0- (1,0) [-128|127] "" XXX
+ SG_ 1_LONG_DIST : 64|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 1_LAT_DIST : 76|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 1_REL_SPEED : 88|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 1_NEW_SIGNAL_4 : 102|2@1+ (1,0) [0|2] "" XXX
+ SG_ 1_REL_LAT_SPEED : 104|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 1_REL_ACCEL : 118|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+ SG_ 1_NEW_SIGNAL_18 : 129|2@0+ (1,0) [0|1] "" XXX
+ SG_ 1_OBJECT_ID : 135|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_NEW_SIGNAL_18 : 137|2@0+ (1,0) [0|1] "" XXX
+ SG_ 2_OBJECT_ID : 143|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_STATE_ALT : 153|2@0+ (1,0) [0|3] "" XXX
+ SG_ 2_MOTION_STATE : 157|3@0+ (1,0) [0|4] "" XXX
+ SG_ 2_TRACK_QUALITY : 166|7@0+ (1,0) [0|127] "" XXX
+ SG_ 2_AGE : 175|8@0+ (1,0) [0|255] "" XXX
+ SG_ 2_COAST_AGE : 179|4@0+ (1,0) [0|15] "" XXX
+ SG_ 2_STATE : 182|3@0+ (1,0) [0|7] "" XXX
+ SG_ 2_RCS : 191|8@0- (1,0) [-128|127] "" XXX
+ SG_ 2_LONG_DIST : 192|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 2_LAT_DIST : 204|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 2_REL_SPEED : 216|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 2_NEW_SIGNAL_4 : 230|2@1+ (1,0) [0|2] "" XXX
+ SG_ 2_REL_LAT_SPEED : 232|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 2_REL_ACCEL : 246|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+
+VAL_ 532 1_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 532 2_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 532 1_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 532 2_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 532 1_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+VAL_ 532 2_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+    CM_ BO_ 532 "Hyundai/Kia 210-21F radar-track layout: 16 messages with two target slots per 32-byte message (32 tracks total). Two related dialects share the same position, velocity, age, coast-age, and compressed-state core. The detailed dialect also populates STATE, RCS, and NEW_SIGNAL_4; the compact Tucson/Sportage/Santa Cruz dialect leaves those fields zero and uses STATE_ALT. The dialect is independent of the logged raw bus and is not an HDA-level discriminator: HDA2-like routes carried the sustained stream on A-CAN mapped to bus 0, while non-HDA2 routes mapped A-CAN to bus 1. Compact targets populate per-slot NEW_SIGNAL_18/OBJECT_ID extension bytes at bytes 16 and 17; detailed platforms usually leave them zero. Byte 18 and bits 26, 30-31, 39, 55, and 117 remained zero. REL_LAT_SPEED has opposite sign conventions between the detailed and compact dialects. The HKG CAN-FD checksum matched every one of 13,210,543 checked frames.";
+CM_ SG_ 532 1_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 532 1_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 532 1_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 532 1_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 532 1_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 532 1_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 532 1_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 532 1_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 532 1_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 532 1_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 532 1_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 532 1_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 532 1_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 532 1_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 532 1_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 532 2_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 532 2_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 532 2_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 532 2_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 532 2_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 532 2_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 532 2_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 532 2_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 532 2_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 532 2_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 532 2_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 532 2_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 532 2_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 532 2_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 532 2_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 532 CHECKSUM "16-bit HKG CAN-FD checksum using the CAN address as the data ID.";
+CM_ SG_ 532 COUNTER "8-bit transmit-cycle counter. It covers 0-255 and wraps.";
+
+BO_ 533 RADAR_TRACK_215: 32 RADAR
+ SG_ CHECKSUM : 0|16@1+ (1,0) [0|65535] "" XXX
+ SG_ COUNTER : 16|8@1+ (1,0) [0|255] "" XXX
+ SG_ 1_STATE_ALT : 25|2@0+ (1,0) [0|3] "" XXX
+ SG_ 1_MOTION_STATE : 29|3@0+ (1,0) [0|4] "" XXX
+ SG_ 1_TRACK_QUALITY : 38|7@0+ (1,0) [0|127] "" XXX
+ SG_ 1_AGE : 47|8@0+ (1,0) [0|255] "" XXX
+ SG_ 1_COAST_AGE : 51|4@0+ (1,0) [0|15] "" XXX
+ SG_ 1_STATE : 54|3@0+ (1,0) [0|7] "" XXX
+ SG_ 1_RCS : 63|8@0- (1,0) [-128|127] "" XXX
+ SG_ 1_LONG_DIST : 64|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 1_LAT_DIST : 76|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 1_REL_SPEED : 88|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 1_NEW_SIGNAL_4 : 102|2@1+ (1,0) [0|2] "" XXX
+ SG_ 1_REL_LAT_SPEED : 104|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 1_REL_ACCEL : 118|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+ SG_ 1_NEW_SIGNAL_18 : 129|2@0+ (1,0) [0|1] "" XXX
+ SG_ 1_OBJECT_ID : 135|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_NEW_SIGNAL_18 : 137|2@0+ (1,0) [0|1] "" XXX
+ SG_ 2_OBJECT_ID : 143|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_STATE_ALT : 153|2@0+ (1,0) [0|3] "" XXX
+ SG_ 2_MOTION_STATE : 157|3@0+ (1,0) [0|4] "" XXX
+ SG_ 2_TRACK_QUALITY : 166|7@0+ (1,0) [0|127] "" XXX
+ SG_ 2_AGE : 175|8@0+ (1,0) [0|255] "" XXX
+ SG_ 2_COAST_AGE : 179|4@0+ (1,0) [0|15] "" XXX
+ SG_ 2_STATE : 182|3@0+ (1,0) [0|7] "" XXX
+ SG_ 2_RCS : 191|8@0- (1,0) [-128|127] "" XXX
+ SG_ 2_LONG_DIST : 192|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 2_LAT_DIST : 204|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 2_REL_SPEED : 216|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 2_NEW_SIGNAL_4 : 230|2@1+ (1,0) [0|2] "" XXX
+ SG_ 2_REL_LAT_SPEED : 232|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 2_REL_ACCEL : 246|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+
+VAL_ 533 1_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 533 2_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 533 1_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 533 2_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 533 1_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+VAL_ 533 2_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+    CM_ BO_ 533 "Hyundai/Kia 210-21F radar-track layout: 16 messages with two target slots per 32-byte message (32 tracks total). Two related dialects share the same position, velocity, age, coast-age, and compressed-state core. The detailed dialect also populates STATE, RCS, and NEW_SIGNAL_4; the compact Tucson/Sportage/Santa Cruz dialect leaves those fields zero and uses STATE_ALT. The dialect is independent of the logged raw bus and is not an HDA-level discriminator: HDA2-like routes carried the sustained stream on A-CAN mapped to bus 0, while non-HDA2 routes mapped A-CAN to bus 1. Compact targets populate per-slot NEW_SIGNAL_18/OBJECT_ID extension bytes at bytes 16 and 17; detailed platforms usually leave them zero. Byte 18 and bits 26, 30-31, 39, 55, and 117 remained zero. REL_LAT_SPEED has opposite sign conventions between the detailed and compact dialects. The HKG CAN-FD checksum matched every one of 13,210,543 checked frames.";
+CM_ SG_ 533 1_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 533 1_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 533 1_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 533 1_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 533 1_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 533 1_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 533 1_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 533 1_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 533 1_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 533 1_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 533 1_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 533 1_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 533 1_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 533 1_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 533 1_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 533 2_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 533 2_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 533 2_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 533 2_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 533 2_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 533 2_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 533 2_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 533 2_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 533 2_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 533 2_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 533 2_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 533 2_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 533 2_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 533 2_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 533 2_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 533 CHECKSUM "16-bit HKG CAN-FD checksum using the CAN address as the data ID.";
+CM_ SG_ 533 COUNTER "8-bit transmit-cycle counter. It covers 0-255 and wraps.";
+
+BO_ 534 RADAR_TRACK_216: 32 RADAR
+ SG_ CHECKSUM : 0|16@1+ (1,0) [0|65535] "" XXX
+ SG_ COUNTER : 16|8@1+ (1,0) [0|255] "" XXX
+ SG_ 1_STATE_ALT : 25|2@0+ (1,0) [0|3] "" XXX
+ SG_ 1_MOTION_STATE : 29|3@0+ (1,0) [0|4] "" XXX
+ SG_ 1_TRACK_QUALITY : 38|7@0+ (1,0) [0|127] "" XXX
+ SG_ 1_AGE : 47|8@0+ (1,0) [0|255] "" XXX
+ SG_ 1_COAST_AGE : 51|4@0+ (1,0) [0|15] "" XXX
+ SG_ 1_STATE : 54|3@0+ (1,0) [0|7] "" XXX
+ SG_ 1_RCS : 63|8@0- (1,0) [-128|127] "" XXX
+ SG_ 1_LONG_DIST : 64|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 1_LAT_DIST : 76|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 1_REL_SPEED : 88|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 1_NEW_SIGNAL_4 : 102|2@1+ (1,0) [0|2] "" XXX
+ SG_ 1_REL_LAT_SPEED : 104|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 1_REL_ACCEL : 118|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+ SG_ 1_NEW_SIGNAL_18 : 129|2@0+ (1,0) [0|1] "" XXX
+ SG_ 1_OBJECT_ID : 135|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_NEW_SIGNAL_18 : 137|2@0+ (1,0) [0|1] "" XXX
+ SG_ 2_OBJECT_ID : 143|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_STATE_ALT : 153|2@0+ (1,0) [0|3] "" XXX
+ SG_ 2_MOTION_STATE : 157|3@0+ (1,0) [0|4] "" XXX
+ SG_ 2_TRACK_QUALITY : 166|7@0+ (1,0) [0|127] "" XXX
+ SG_ 2_AGE : 175|8@0+ (1,0) [0|255] "" XXX
+ SG_ 2_COAST_AGE : 179|4@0+ (1,0) [0|15] "" XXX
+ SG_ 2_STATE : 182|3@0+ (1,0) [0|7] "" XXX
+ SG_ 2_RCS : 191|8@0- (1,0) [-128|127] "" XXX
+ SG_ 2_LONG_DIST : 192|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 2_LAT_DIST : 204|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 2_REL_SPEED : 216|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 2_NEW_SIGNAL_4 : 230|2@1+ (1,0) [0|2] "" XXX
+ SG_ 2_REL_LAT_SPEED : 232|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 2_REL_ACCEL : 246|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+
+VAL_ 534 1_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 534 2_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 534 1_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 534 2_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 534 1_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+VAL_ 534 2_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+    CM_ BO_ 534 "Hyundai/Kia 210-21F radar-track layout: 16 messages with two target slots per 32-byte message (32 tracks total). Two related dialects share the same position, velocity, age, coast-age, and compressed-state core. The detailed dialect also populates STATE, RCS, and NEW_SIGNAL_4; the compact Tucson/Sportage/Santa Cruz dialect leaves those fields zero and uses STATE_ALT. The dialect is independent of the logged raw bus and is not an HDA-level discriminator: HDA2-like routes carried the sustained stream on A-CAN mapped to bus 0, while non-HDA2 routes mapped A-CAN to bus 1. Compact targets populate per-slot NEW_SIGNAL_18/OBJECT_ID extension bytes at bytes 16 and 17; detailed platforms usually leave them zero. Byte 18 and bits 26, 30-31, 39, 55, and 117 remained zero. REL_LAT_SPEED has opposite sign conventions between the detailed and compact dialects. The HKG CAN-FD checksum matched every one of 13,210,543 checked frames.";
+CM_ SG_ 534 1_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 534 1_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 534 1_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 534 1_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 534 1_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 534 1_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 534 1_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 534 1_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 534 1_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 534 1_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 534 1_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 534 1_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 534 1_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 534 1_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 534 1_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 534 2_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 534 2_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 534 2_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 534 2_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 534 2_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 534 2_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 534 2_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 534 2_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 534 2_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 534 2_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 534 2_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 534 2_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 534 2_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 534 2_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 534 2_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 534 CHECKSUM "16-bit HKG CAN-FD checksum using the CAN address as the data ID.";
+CM_ SG_ 534 COUNTER "8-bit transmit-cycle counter. It covers 0-255 and wraps.";
+
+BO_ 535 RADAR_TRACK_217: 32 RADAR
+ SG_ CHECKSUM : 0|16@1+ (1,0) [0|65535] "" XXX
+ SG_ COUNTER : 16|8@1+ (1,0) [0|255] "" XXX
+ SG_ 1_STATE_ALT : 25|2@0+ (1,0) [0|3] "" XXX
+ SG_ 1_MOTION_STATE : 29|3@0+ (1,0) [0|4] "" XXX
+ SG_ 1_TRACK_QUALITY : 38|7@0+ (1,0) [0|127] "" XXX
+ SG_ 1_AGE : 47|8@0+ (1,0) [0|255] "" XXX
+ SG_ 1_COAST_AGE : 51|4@0+ (1,0) [0|15] "" XXX
+ SG_ 1_STATE : 54|3@0+ (1,0) [0|7] "" XXX
+ SG_ 1_RCS : 63|8@0- (1,0) [-128|127] "" XXX
+ SG_ 1_LONG_DIST : 64|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 1_LAT_DIST : 76|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 1_REL_SPEED : 88|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 1_NEW_SIGNAL_4 : 102|2@1+ (1,0) [0|2] "" XXX
+ SG_ 1_REL_LAT_SPEED : 104|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 1_REL_ACCEL : 118|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+ SG_ 1_NEW_SIGNAL_18 : 129|2@0+ (1,0) [0|1] "" XXX
+ SG_ 1_OBJECT_ID : 135|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_NEW_SIGNAL_18 : 137|2@0+ (1,0) [0|1] "" XXX
+ SG_ 2_OBJECT_ID : 143|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_STATE_ALT : 153|2@0+ (1,0) [0|3] "" XXX
+ SG_ 2_MOTION_STATE : 157|3@0+ (1,0) [0|4] "" XXX
+ SG_ 2_TRACK_QUALITY : 166|7@0+ (1,0) [0|127] "" XXX
+ SG_ 2_AGE : 175|8@0+ (1,0) [0|255] "" XXX
+ SG_ 2_COAST_AGE : 179|4@0+ (1,0) [0|15] "" XXX
+ SG_ 2_STATE : 182|3@0+ (1,0) [0|7] "" XXX
+ SG_ 2_RCS : 191|8@0- (1,0) [-128|127] "" XXX
+ SG_ 2_LONG_DIST : 192|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 2_LAT_DIST : 204|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 2_REL_SPEED : 216|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 2_NEW_SIGNAL_4 : 230|2@1+ (1,0) [0|2] "" XXX
+ SG_ 2_REL_LAT_SPEED : 232|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 2_REL_ACCEL : 246|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+
+VAL_ 535 1_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 535 2_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 535 1_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 535 2_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 535 1_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+VAL_ 535 2_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+    CM_ BO_ 535 "Hyundai/Kia 210-21F radar-track layout: 16 messages with two target slots per 32-byte message (32 tracks total). Two related dialects share the same position, velocity, age, coast-age, and compressed-state core. The detailed dialect also populates STATE, RCS, and NEW_SIGNAL_4; the compact Tucson/Sportage/Santa Cruz dialect leaves those fields zero and uses STATE_ALT. The dialect is independent of the logged raw bus and is not an HDA-level discriminator: HDA2-like routes carried the sustained stream on A-CAN mapped to bus 0, while non-HDA2 routes mapped A-CAN to bus 1. Compact targets populate per-slot NEW_SIGNAL_18/OBJECT_ID extension bytes at bytes 16 and 17; detailed platforms usually leave them zero. Byte 18 and bits 26, 30-31, 39, 55, and 117 remained zero. REL_LAT_SPEED has opposite sign conventions between the detailed and compact dialects. The HKG CAN-FD checksum matched every one of 13,210,543 checked frames.";
+CM_ SG_ 535 1_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 535 1_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 535 1_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 535 1_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 535 1_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 535 1_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 535 1_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 535 1_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 535 1_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 535 1_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 535 1_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 535 1_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 535 1_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 535 1_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 535 1_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 535 2_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 535 2_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 535 2_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 535 2_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 535 2_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 535 2_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 535 2_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 535 2_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 535 2_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 535 2_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 535 2_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 535 2_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 535 2_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 535 2_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 535 2_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 535 CHECKSUM "16-bit HKG CAN-FD checksum using the CAN address as the data ID.";
+CM_ SG_ 535 COUNTER "8-bit transmit-cycle counter. It covers 0-255 and wraps.";
+
+BO_ 536 RADAR_TRACK_218: 32 RADAR
+ SG_ CHECKSUM : 0|16@1+ (1,0) [0|65535] "" XXX
+ SG_ COUNTER : 16|8@1+ (1,0) [0|255] "" XXX
+ SG_ 1_STATE_ALT : 25|2@0+ (1,0) [0|3] "" XXX
+ SG_ 1_MOTION_STATE : 29|3@0+ (1,0) [0|4] "" XXX
+ SG_ 1_TRACK_QUALITY : 38|7@0+ (1,0) [0|127] "" XXX
+ SG_ 1_AGE : 47|8@0+ (1,0) [0|255] "" XXX
+ SG_ 1_COAST_AGE : 51|4@0+ (1,0) [0|15] "" XXX
+ SG_ 1_STATE : 54|3@0+ (1,0) [0|7] "" XXX
+ SG_ 1_RCS : 63|8@0- (1,0) [-128|127] "" XXX
+ SG_ 1_LONG_DIST : 64|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 1_LAT_DIST : 76|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 1_REL_SPEED : 88|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 1_NEW_SIGNAL_4 : 102|2@1+ (1,0) [0|2] "" XXX
+ SG_ 1_REL_LAT_SPEED : 104|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 1_REL_ACCEL : 118|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+ SG_ 1_NEW_SIGNAL_18 : 129|2@0+ (1,0) [0|1] "" XXX
+ SG_ 1_OBJECT_ID : 135|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_NEW_SIGNAL_18 : 137|2@0+ (1,0) [0|1] "" XXX
+ SG_ 2_OBJECT_ID : 143|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_STATE_ALT : 153|2@0+ (1,0) [0|3] "" XXX
+ SG_ 2_MOTION_STATE : 157|3@0+ (1,0) [0|4] "" XXX
+ SG_ 2_TRACK_QUALITY : 166|7@0+ (1,0) [0|127] "" XXX
+ SG_ 2_AGE : 175|8@0+ (1,0) [0|255] "" XXX
+ SG_ 2_COAST_AGE : 179|4@0+ (1,0) [0|15] "" XXX
+ SG_ 2_STATE : 182|3@0+ (1,0) [0|7] "" XXX
+ SG_ 2_RCS : 191|8@0- (1,0) [-128|127] "" XXX
+ SG_ 2_LONG_DIST : 192|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 2_LAT_DIST : 204|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 2_REL_SPEED : 216|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 2_NEW_SIGNAL_4 : 230|2@1+ (1,0) [0|2] "" XXX
+ SG_ 2_REL_LAT_SPEED : 232|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 2_REL_ACCEL : 246|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+
+VAL_ 536 1_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 536 2_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 536 1_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 536 2_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 536 1_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+VAL_ 536 2_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+    CM_ BO_ 536 "Hyundai/Kia 210-21F radar-track layout: 16 messages with two target slots per 32-byte message (32 tracks total). Two related dialects share the same position, velocity, age, coast-age, and compressed-state core. The detailed dialect also populates STATE, RCS, and NEW_SIGNAL_4; the compact Tucson/Sportage/Santa Cruz dialect leaves those fields zero and uses STATE_ALT. The dialect is independent of the logged raw bus and is not an HDA-level discriminator: HDA2-like routes carried the sustained stream on A-CAN mapped to bus 0, while non-HDA2 routes mapped A-CAN to bus 1. Compact targets populate per-slot NEW_SIGNAL_18/OBJECT_ID extension bytes at bytes 16 and 17; detailed platforms usually leave them zero. Byte 18 and bits 26, 30-31, 39, 55, and 117 remained zero. REL_LAT_SPEED has opposite sign conventions between the detailed and compact dialects. The HKG CAN-FD checksum matched every one of 13,210,543 checked frames.";
+CM_ SG_ 536 1_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 536 1_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 536 1_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 536 1_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 536 1_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 536 1_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 536 1_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 536 1_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 536 1_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 536 1_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 536 1_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 536 1_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 536 1_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 536 1_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 536 1_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 536 2_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 536 2_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 536 2_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 536 2_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 536 2_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 536 2_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 536 2_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 536 2_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 536 2_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 536 2_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 536 2_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 536 2_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 536 2_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 536 2_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 536 2_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 536 CHECKSUM "16-bit HKG CAN-FD checksum using the CAN address as the data ID.";
+CM_ SG_ 536 COUNTER "8-bit transmit-cycle counter. It covers 0-255 and wraps.";
+
+BO_ 537 RADAR_TRACK_219: 32 RADAR
+ SG_ CHECKSUM : 0|16@1+ (1,0) [0|65535] "" XXX
+ SG_ COUNTER : 16|8@1+ (1,0) [0|255] "" XXX
+ SG_ 1_STATE_ALT : 25|2@0+ (1,0) [0|3] "" XXX
+ SG_ 1_MOTION_STATE : 29|3@0+ (1,0) [0|4] "" XXX
+ SG_ 1_TRACK_QUALITY : 38|7@0+ (1,0) [0|127] "" XXX
+ SG_ 1_AGE : 47|8@0+ (1,0) [0|255] "" XXX
+ SG_ 1_COAST_AGE : 51|4@0+ (1,0) [0|15] "" XXX
+ SG_ 1_STATE : 54|3@0+ (1,0) [0|7] "" XXX
+ SG_ 1_RCS : 63|8@0- (1,0) [-128|127] "" XXX
+ SG_ 1_LONG_DIST : 64|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 1_LAT_DIST : 76|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 1_REL_SPEED : 88|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 1_NEW_SIGNAL_4 : 102|2@1+ (1,0) [0|2] "" XXX
+ SG_ 1_REL_LAT_SPEED : 104|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 1_REL_ACCEL : 118|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+ SG_ 1_NEW_SIGNAL_18 : 129|2@0+ (1,0) [0|1] "" XXX
+ SG_ 1_OBJECT_ID : 135|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_NEW_SIGNAL_18 : 137|2@0+ (1,0) [0|1] "" XXX
+ SG_ 2_OBJECT_ID : 143|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_STATE_ALT : 153|2@0+ (1,0) [0|3] "" XXX
+ SG_ 2_MOTION_STATE : 157|3@0+ (1,0) [0|4] "" XXX
+ SG_ 2_TRACK_QUALITY : 166|7@0+ (1,0) [0|127] "" XXX
+ SG_ 2_AGE : 175|8@0+ (1,0) [0|255] "" XXX
+ SG_ 2_COAST_AGE : 179|4@0+ (1,0) [0|15] "" XXX
+ SG_ 2_STATE : 182|3@0+ (1,0) [0|7] "" XXX
+ SG_ 2_RCS : 191|8@0- (1,0) [-128|127] "" XXX
+ SG_ 2_LONG_DIST : 192|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 2_LAT_DIST : 204|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 2_REL_SPEED : 216|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 2_NEW_SIGNAL_4 : 230|2@1+ (1,0) [0|2] "" XXX
+ SG_ 2_REL_LAT_SPEED : 232|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 2_REL_ACCEL : 246|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+
+VAL_ 537 1_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 537 2_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 537 1_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 537 2_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 537 1_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+VAL_ 537 2_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+    CM_ BO_ 537 "Hyundai/Kia 210-21F radar-track layout: 16 messages with two target slots per 32-byte message (32 tracks total). Two related dialects share the same position, velocity, age, coast-age, and compressed-state core. The detailed dialect also populates STATE, RCS, and NEW_SIGNAL_4; the compact Tucson/Sportage/Santa Cruz dialect leaves those fields zero and uses STATE_ALT. The dialect is independent of the logged raw bus and is not an HDA-level discriminator: HDA2-like routes carried the sustained stream on A-CAN mapped to bus 0, while non-HDA2 routes mapped A-CAN to bus 1. Compact targets populate per-slot NEW_SIGNAL_18/OBJECT_ID extension bytes at bytes 16 and 17; detailed platforms usually leave them zero. Byte 18 and bits 26, 30-31, 39, 55, and 117 remained zero. REL_LAT_SPEED has opposite sign conventions between the detailed and compact dialects. The HKG CAN-FD checksum matched every one of 13,210,543 checked frames.";
+CM_ SG_ 537 1_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 537 1_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 537 1_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 537 1_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 537 1_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 537 1_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 537 1_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 537 1_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 537 1_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 537 1_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 537 1_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 537 1_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 537 1_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 537 1_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 537 1_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 537 2_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 537 2_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 537 2_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 537 2_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 537 2_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 537 2_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 537 2_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 537 2_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 537 2_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 537 2_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 537 2_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 537 2_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 537 2_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 537 2_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 537 2_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 537 CHECKSUM "16-bit HKG CAN-FD checksum using the CAN address as the data ID.";
+CM_ SG_ 537 COUNTER "8-bit transmit-cycle counter. It covers 0-255 and wraps.";
+
+BO_ 538 RADAR_TRACK_21a: 32 RADAR
+ SG_ CHECKSUM : 0|16@1+ (1,0) [0|65535] "" XXX
+ SG_ COUNTER : 16|8@1+ (1,0) [0|255] "" XXX
+ SG_ 1_STATE_ALT : 25|2@0+ (1,0) [0|3] "" XXX
+ SG_ 1_MOTION_STATE : 29|3@0+ (1,0) [0|4] "" XXX
+ SG_ 1_TRACK_QUALITY : 38|7@0+ (1,0) [0|127] "" XXX
+ SG_ 1_AGE : 47|8@0+ (1,0) [0|255] "" XXX
+ SG_ 1_COAST_AGE : 51|4@0+ (1,0) [0|15] "" XXX
+ SG_ 1_STATE : 54|3@0+ (1,0) [0|7] "" XXX
+ SG_ 1_RCS : 63|8@0- (1,0) [-128|127] "" XXX
+ SG_ 1_LONG_DIST : 64|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 1_LAT_DIST : 76|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 1_REL_SPEED : 88|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 1_NEW_SIGNAL_4 : 102|2@1+ (1,0) [0|2] "" XXX
+ SG_ 1_REL_LAT_SPEED : 104|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 1_REL_ACCEL : 118|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+ SG_ 1_NEW_SIGNAL_18 : 129|2@0+ (1,0) [0|1] "" XXX
+ SG_ 1_OBJECT_ID : 135|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_NEW_SIGNAL_18 : 137|2@0+ (1,0) [0|1] "" XXX
+ SG_ 2_OBJECT_ID : 143|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_STATE_ALT : 153|2@0+ (1,0) [0|3] "" XXX
+ SG_ 2_MOTION_STATE : 157|3@0+ (1,0) [0|4] "" XXX
+ SG_ 2_TRACK_QUALITY : 166|7@0+ (1,0) [0|127] "" XXX
+ SG_ 2_AGE : 175|8@0+ (1,0) [0|255] "" XXX
+ SG_ 2_COAST_AGE : 179|4@0+ (1,0) [0|15] "" XXX
+ SG_ 2_STATE : 182|3@0+ (1,0) [0|7] "" XXX
+ SG_ 2_RCS : 191|8@0- (1,0) [-128|127] "" XXX
+ SG_ 2_LONG_DIST : 192|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 2_LAT_DIST : 204|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 2_REL_SPEED : 216|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 2_NEW_SIGNAL_4 : 230|2@1+ (1,0) [0|2] "" XXX
+ SG_ 2_REL_LAT_SPEED : 232|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 2_REL_ACCEL : 246|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+
+VAL_ 538 1_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 538 2_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 538 1_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 538 2_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 538 1_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+VAL_ 538 2_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+    CM_ BO_ 538 "Hyundai/Kia 210-21F radar-track layout: 16 messages with two target slots per 32-byte message (32 tracks total). Two related dialects share the same position, velocity, age, coast-age, and compressed-state core. The detailed dialect also populates STATE, RCS, and NEW_SIGNAL_4; the compact Tucson/Sportage/Santa Cruz dialect leaves those fields zero and uses STATE_ALT. The dialect is independent of the logged raw bus and is not an HDA-level discriminator: HDA2-like routes carried the sustained stream on A-CAN mapped to bus 0, while non-HDA2 routes mapped A-CAN to bus 1. Compact targets populate per-slot NEW_SIGNAL_18/OBJECT_ID extension bytes at bytes 16 and 17; detailed platforms usually leave them zero. Byte 18 and bits 26, 30-31, 39, 55, and 117 remained zero. REL_LAT_SPEED has opposite sign conventions between the detailed and compact dialects. The HKG CAN-FD checksum matched every one of 13,210,543 checked frames.";
+CM_ SG_ 538 1_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 538 1_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 538 1_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 538 1_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 538 1_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 538 1_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 538 1_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 538 1_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 538 1_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 538 1_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 538 1_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 538 1_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 538 1_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 538 1_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 538 1_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 538 2_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 538 2_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 538 2_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 538 2_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 538 2_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 538 2_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 538 2_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 538 2_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 538 2_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 538 2_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 538 2_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 538 2_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 538 2_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 538 2_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 538 2_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 538 CHECKSUM "16-bit HKG CAN-FD checksum using the CAN address as the data ID.";
+CM_ SG_ 538 COUNTER "8-bit transmit-cycle counter. It covers 0-255 and wraps.";
+
+BO_ 539 RADAR_TRACK_21b: 32 RADAR
+ SG_ CHECKSUM : 0|16@1+ (1,0) [0|65535] "" XXX
+ SG_ COUNTER : 16|8@1+ (1,0) [0|255] "" XXX
+ SG_ 1_STATE_ALT : 25|2@0+ (1,0) [0|3] "" XXX
+ SG_ 1_MOTION_STATE : 29|3@0+ (1,0) [0|4] "" XXX
+ SG_ 1_TRACK_QUALITY : 38|7@0+ (1,0) [0|127] "" XXX
+ SG_ 1_AGE : 47|8@0+ (1,0) [0|255] "" XXX
+ SG_ 1_COAST_AGE : 51|4@0+ (1,0) [0|15] "" XXX
+ SG_ 1_STATE : 54|3@0+ (1,0) [0|7] "" XXX
+ SG_ 1_RCS : 63|8@0- (1,0) [-128|127] "" XXX
+ SG_ 1_LONG_DIST : 64|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 1_LAT_DIST : 76|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 1_REL_SPEED : 88|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 1_NEW_SIGNAL_4 : 102|2@1+ (1,0) [0|2] "" XXX
+ SG_ 1_REL_LAT_SPEED : 104|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 1_REL_ACCEL : 118|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+ SG_ 1_NEW_SIGNAL_18 : 129|2@0+ (1,0) [0|1] "" XXX
+ SG_ 1_OBJECT_ID : 135|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_NEW_SIGNAL_18 : 137|2@0+ (1,0) [0|1] "" XXX
+ SG_ 2_OBJECT_ID : 143|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_STATE_ALT : 153|2@0+ (1,0) [0|3] "" XXX
+ SG_ 2_MOTION_STATE : 157|3@0+ (1,0) [0|4] "" XXX
+ SG_ 2_TRACK_QUALITY : 166|7@0+ (1,0) [0|127] "" XXX
+ SG_ 2_AGE : 175|8@0+ (1,0) [0|255] "" XXX
+ SG_ 2_COAST_AGE : 179|4@0+ (1,0) [0|15] "" XXX
+ SG_ 2_STATE : 182|3@0+ (1,0) [0|7] "" XXX
+ SG_ 2_RCS : 191|8@0- (1,0) [-128|127] "" XXX
+ SG_ 2_LONG_DIST : 192|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 2_LAT_DIST : 204|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 2_REL_SPEED : 216|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 2_NEW_SIGNAL_4 : 230|2@1+ (1,0) [0|2] "" XXX
+ SG_ 2_REL_LAT_SPEED : 232|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 2_REL_ACCEL : 246|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+
+VAL_ 539 1_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 539 2_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 539 1_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 539 2_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 539 1_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+VAL_ 539 2_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+    CM_ BO_ 539 "Hyundai/Kia 210-21F radar-track layout: 16 messages with two target slots per 32-byte message (32 tracks total). Two related dialects share the same position, velocity, age, coast-age, and compressed-state core. The detailed dialect also populates STATE, RCS, and NEW_SIGNAL_4; the compact Tucson/Sportage/Santa Cruz dialect leaves those fields zero and uses STATE_ALT. The dialect is independent of the logged raw bus and is not an HDA-level discriminator: HDA2-like routes carried the sustained stream on A-CAN mapped to bus 0, while non-HDA2 routes mapped A-CAN to bus 1. Compact targets populate per-slot NEW_SIGNAL_18/OBJECT_ID extension bytes at bytes 16 and 17; detailed platforms usually leave them zero. Byte 18 and bits 26, 30-31, 39, 55, and 117 remained zero. REL_LAT_SPEED has opposite sign conventions between the detailed and compact dialects. The HKG CAN-FD checksum matched every one of 13,210,543 checked frames.";
+CM_ SG_ 539 1_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 539 1_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 539 1_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 539 1_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 539 1_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 539 1_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 539 1_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 539 1_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 539 1_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 539 1_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 539 1_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 539 1_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 539 1_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 539 1_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 539 1_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 539 2_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 539 2_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 539 2_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 539 2_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 539 2_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 539 2_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 539 2_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 539 2_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 539 2_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 539 2_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 539 2_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 539 2_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 539 2_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 539 2_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 539 2_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 539 CHECKSUM "16-bit HKG CAN-FD checksum using the CAN address as the data ID.";
+CM_ SG_ 539 COUNTER "8-bit transmit-cycle counter. It covers 0-255 and wraps.";
+
+BO_ 540 RADAR_TRACK_21c: 32 RADAR
+ SG_ CHECKSUM : 0|16@1+ (1,0) [0|65535] "" XXX
+ SG_ COUNTER : 16|8@1+ (1,0) [0|255] "" XXX
+ SG_ 1_STATE_ALT : 25|2@0+ (1,0) [0|3] "" XXX
+ SG_ 1_MOTION_STATE : 29|3@0+ (1,0) [0|4] "" XXX
+ SG_ 1_TRACK_QUALITY : 38|7@0+ (1,0) [0|127] "" XXX
+ SG_ 1_AGE : 47|8@0+ (1,0) [0|255] "" XXX
+ SG_ 1_COAST_AGE : 51|4@0+ (1,0) [0|15] "" XXX
+ SG_ 1_STATE : 54|3@0+ (1,0) [0|7] "" XXX
+ SG_ 1_RCS : 63|8@0- (1,0) [-128|127] "" XXX
+ SG_ 1_LONG_DIST : 64|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 1_LAT_DIST : 76|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 1_REL_SPEED : 88|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 1_NEW_SIGNAL_4 : 102|2@1+ (1,0) [0|2] "" XXX
+ SG_ 1_REL_LAT_SPEED : 104|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 1_REL_ACCEL : 118|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+ SG_ 1_NEW_SIGNAL_18 : 129|2@0+ (1,0) [0|1] "" XXX
+ SG_ 1_OBJECT_ID : 135|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_NEW_SIGNAL_18 : 137|2@0+ (1,0) [0|1] "" XXX
+ SG_ 2_OBJECT_ID : 143|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_STATE_ALT : 153|2@0+ (1,0) [0|3] "" XXX
+ SG_ 2_MOTION_STATE : 157|3@0+ (1,0) [0|4] "" XXX
+ SG_ 2_TRACK_QUALITY : 166|7@0+ (1,0) [0|127] "" XXX
+ SG_ 2_AGE : 175|8@0+ (1,0) [0|255] "" XXX
+ SG_ 2_COAST_AGE : 179|4@0+ (1,0) [0|15] "" XXX
+ SG_ 2_STATE : 182|3@0+ (1,0) [0|7] "" XXX
+ SG_ 2_RCS : 191|8@0- (1,0) [-128|127] "" XXX
+ SG_ 2_LONG_DIST : 192|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 2_LAT_DIST : 204|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 2_REL_SPEED : 216|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 2_NEW_SIGNAL_4 : 230|2@1+ (1,0) [0|2] "" XXX
+ SG_ 2_REL_LAT_SPEED : 232|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 2_REL_ACCEL : 246|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+
+VAL_ 540 1_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 540 2_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 540 1_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 540 2_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 540 1_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+VAL_ 540 2_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+    CM_ BO_ 540 "Hyundai/Kia 210-21F radar-track layout: 16 messages with two target slots per 32-byte message (32 tracks total). Two related dialects share the same position, velocity, age, coast-age, and compressed-state core. The detailed dialect also populates STATE, RCS, and NEW_SIGNAL_4; the compact Tucson/Sportage/Santa Cruz dialect leaves those fields zero and uses STATE_ALT. The dialect is independent of the logged raw bus and is not an HDA-level discriminator: HDA2-like routes carried the sustained stream on A-CAN mapped to bus 0, while non-HDA2 routes mapped A-CAN to bus 1. Compact targets populate per-slot NEW_SIGNAL_18/OBJECT_ID extension bytes at bytes 16 and 17; detailed platforms usually leave them zero. Byte 18 and bits 26, 30-31, 39, 55, and 117 remained zero. REL_LAT_SPEED has opposite sign conventions between the detailed and compact dialects. The HKG CAN-FD checksum matched every one of 13,210,543 checked frames.";
+CM_ SG_ 540 1_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 540 1_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 540 1_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 540 1_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 540 1_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 540 1_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 540 1_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 540 1_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 540 1_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 540 1_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 540 1_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 540 1_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 540 1_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 540 1_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 540 1_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 540 2_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 540 2_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 540 2_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 540 2_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 540 2_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 540 2_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 540 2_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 540 2_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 540 2_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 540 2_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 540 2_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 540 2_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 540 2_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 540 2_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 540 2_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 540 CHECKSUM "16-bit HKG CAN-FD checksum using the CAN address as the data ID.";
+CM_ SG_ 540 COUNTER "8-bit transmit-cycle counter. It covers 0-255 and wraps.";
+
+BO_ 541 RADAR_TRACK_21d: 32 RADAR
+ SG_ CHECKSUM : 0|16@1+ (1,0) [0|65535] "" XXX
+ SG_ COUNTER : 16|8@1+ (1,0) [0|255] "" XXX
+ SG_ 1_STATE_ALT : 25|2@0+ (1,0) [0|3] "" XXX
+ SG_ 1_MOTION_STATE : 29|3@0+ (1,0) [0|4] "" XXX
+ SG_ 1_TRACK_QUALITY : 38|7@0+ (1,0) [0|127] "" XXX
+ SG_ 1_AGE : 47|8@0+ (1,0) [0|255] "" XXX
+ SG_ 1_COAST_AGE : 51|4@0+ (1,0) [0|15] "" XXX
+ SG_ 1_STATE : 54|3@0+ (1,0) [0|7] "" XXX
+ SG_ 1_RCS : 63|8@0- (1,0) [-128|127] "" XXX
+ SG_ 1_LONG_DIST : 64|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 1_LAT_DIST : 76|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 1_REL_SPEED : 88|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 1_NEW_SIGNAL_4 : 102|2@1+ (1,0) [0|2] "" XXX
+ SG_ 1_REL_LAT_SPEED : 104|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 1_REL_ACCEL : 118|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+ SG_ 1_NEW_SIGNAL_18 : 129|2@0+ (1,0) [0|1] "" XXX
+ SG_ 1_OBJECT_ID : 135|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_NEW_SIGNAL_18 : 137|2@0+ (1,0) [0|1] "" XXX
+ SG_ 2_OBJECT_ID : 143|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_STATE_ALT : 153|2@0+ (1,0) [0|3] "" XXX
+ SG_ 2_MOTION_STATE : 157|3@0+ (1,0) [0|4] "" XXX
+ SG_ 2_TRACK_QUALITY : 166|7@0+ (1,0) [0|127] "" XXX
+ SG_ 2_AGE : 175|8@0+ (1,0) [0|255] "" XXX
+ SG_ 2_COAST_AGE : 179|4@0+ (1,0) [0|15] "" XXX
+ SG_ 2_STATE : 182|3@0+ (1,0) [0|7] "" XXX
+ SG_ 2_RCS : 191|8@0- (1,0) [-128|127] "" XXX
+ SG_ 2_LONG_DIST : 192|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 2_LAT_DIST : 204|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 2_REL_SPEED : 216|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 2_NEW_SIGNAL_4 : 230|2@1+ (1,0) [0|2] "" XXX
+ SG_ 2_REL_LAT_SPEED : 232|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 2_REL_ACCEL : 246|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+
+VAL_ 541 1_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 541 2_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 541 1_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 541 2_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 541 1_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+VAL_ 541 2_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+    CM_ BO_ 541 "Hyundai/Kia 210-21F radar-track layout: 16 messages with two target slots per 32-byte message (32 tracks total). Two related dialects share the same position, velocity, age, coast-age, and compressed-state core. The detailed dialect also populates STATE, RCS, and NEW_SIGNAL_4; the compact Tucson/Sportage/Santa Cruz dialect leaves those fields zero and uses STATE_ALT. The dialect is independent of the logged raw bus and is not an HDA-level discriminator: HDA2-like routes carried the sustained stream on A-CAN mapped to bus 0, while non-HDA2 routes mapped A-CAN to bus 1. Compact targets populate per-slot NEW_SIGNAL_18/OBJECT_ID extension bytes at bytes 16 and 17; detailed platforms usually leave them zero. Byte 18 and bits 26, 30-31, 39, 55, and 117 remained zero. REL_LAT_SPEED has opposite sign conventions between the detailed and compact dialects. The HKG CAN-FD checksum matched every one of 13,210,543 checked frames.";
+CM_ SG_ 541 1_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 541 1_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 541 1_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 541 1_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 541 1_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 541 1_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 541 1_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 541 1_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 541 1_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 541 1_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 541 1_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 541 1_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 541 1_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 541 1_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 541 1_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 541 2_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 541 2_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 541 2_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 541 2_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 541 2_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 541 2_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 541 2_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 541 2_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 541 2_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 541 2_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 541 2_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 541 2_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 541 2_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 541 2_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 541 2_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 541 CHECKSUM "16-bit HKG CAN-FD checksum using the CAN address as the data ID.";
+CM_ SG_ 541 COUNTER "8-bit transmit-cycle counter. It covers 0-255 and wraps.";
+
+BO_ 542 RADAR_TRACK_21e: 32 RADAR
+ SG_ CHECKSUM : 0|16@1+ (1,0) [0|65535] "" XXX
+ SG_ COUNTER : 16|8@1+ (1,0) [0|255] "" XXX
+ SG_ 1_STATE_ALT : 25|2@0+ (1,0) [0|3] "" XXX
+ SG_ 1_MOTION_STATE : 29|3@0+ (1,0) [0|4] "" XXX
+ SG_ 1_TRACK_QUALITY : 38|7@0+ (1,0) [0|127] "" XXX
+ SG_ 1_AGE : 47|8@0+ (1,0) [0|255] "" XXX
+ SG_ 1_COAST_AGE : 51|4@0+ (1,0) [0|15] "" XXX
+ SG_ 1_STATE : 54|3@0+ (1,0) [0|7] "" XXX
+ SG_ 1_RCS : 63|8@0- (1,0) [-128|127] "" XXX
+ SG_ 1_LONG_DIST : 64|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 1_LAT_DIST : 76|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 1_REL_SPEED : 88|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 1_NEW_SIGNAL_4 : 102|2@1+ (1,0) [0|2] "" XXX
+ SG_ 1_REL_LAT_SPEED : 104|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 1_REL_ACCEL : 118|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+ SG_ 1_NEW_SIGNAL_18 : 129|2@0+ (1,0) [0|1] "" XXX
+ SG_ 1_OBJECT_ID : 135|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_NEW_SIGNAL_18 : 137|2@0+ (1,0) [0|1] "" XXX
+ SG_ 2_OBJECT_ID : 143|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_STATE_ALT : 153|2@0+ (1,0) [0|3] "" XXX
+ SG_ 2_MOTION_STATE : 157|3@0+ (1,0) [0|4] "" XXX
+ SG_ 2_TRACK_QUALITY : 166|7@0+ (1,0) [0|127] "" XXX
+ SG_ 2_AGE : 175|8@0+ (1,0) [0|255] "" XXX
+ SG_ 2_COAST_AGE : 179|4@0+ (1,0) [0|15] "" XXX
+ SG_ 2_STATE : 182|3@0+ (1,0) [0|7] "" XXX
+ SG_ 2_RCS : 191|8@0- (1,0) [-128|127] "" XXX
+ SG_ 2_LONG_DIST : 192|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 2_LAT_DIST : 204|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 2_REL_SPEED : 216|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 2_NEW_SIGNAL_4 : 230|2@1+ (1,0) [0|2] "" XXX
+ SG_ 2_REL_LAT_SPEED : 232|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 2_REL_ACCEL : 246|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+
+VAL_ 542 1_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 542 2_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 542 1_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 542 2_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 542 1_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+VAL_ 542 2_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+    CM_ BO_ 542 "Hyundai/Kia 210-21F radar-track layout: 16 messages with two target slots per 32-byte message (32 tracks total). Two related dialects share the same position, velocity, age, coast-age, and compressed-state core. The detailed dialect also populates STATE, RCS, and NEW_SIGNAL_4; the compact Tucson/Sportage/Santa Cruz dialect leaves those fields zero and uses STATE_ALT. The dialect is independent of the logged raw bus and is not an HDA-level discriminator: HDA2-like routes carried the sustained stream on A-CAN mapped to bus 0, while non-HDA2 routes mapped A-CAN to bus 1. Compact targets populate per-slot NEW_SIGNAL_18/OBJECT_ID extension bytes at bytes 16 and 17; detailed platforms usually leave them zero. Byte 18 and bits 26, 30-31, 39, 55, and 117 remained zero. REL_LAT_SPEED has opposite sign conventions between the detailed and compact dialects. The HKG CAN-FD checksum matched every one of 13,210,543 checked frames.";
+CM_ SG_ 542 1_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 542 1_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 542 1_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 542 1_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 542 1_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 542 1_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 542 1_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 542 1_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 542 1_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 542 1_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 542 1_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 542 1_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 542 1_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 542 1_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 542 1_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 542 2_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 542 2_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 542 2_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 542 2_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 542 2_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 542 2_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 542 2_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 542 2_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 542 2_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 542 2_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 542 2_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 542 2_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 542 2_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 542 2_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 542 2_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 542 CHECKSUM "16-bit HKG CAN-FD checksum using the CAN address as the data ID.";
+CM_ SG_ 542 COUNTER "8-bit transmit-cycle counter. It covers 0-255 and wraps.";
+
+BO_ 543 RADAR_TRACK_21f: 32 RADAR
+ SG_ CHECKSUM : 0|16@1+ (1,0) [0|65535] "" XXX
+ SG_ COUNTER : 16|8@1+ (1,0) [0|255] "" XXX
+ SG_ 1_STATE_ALT : 25|2@0+ (1,0) [0|3] "" XXX
+ SG_ 1_MOTION_STATE : 29|3@0+ (1,0) [0|4] "" XXX
+ SG_ 1_TRACK_QUALITY : 38|7@0+ (1,0) [0|127] "" XXX
+ SG_ 1_AGE : 47|8@0+ (1,0) [0|255] "" XXX
+ SG_ 1_COAST_AGE : 51|4@0+ (1,0) [0|15] "" XXX
+ SG_ 1_STATE : 54|3@0+ (1,0) [0|7] "" XXX
+ SG_ 1_RCS : 63|8@0- (1,0) [-128|127] "" XXX
+ SG_ 1_LONG_DIST : 64|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 1_LAT_DIST : 76|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 1_REL_SPEED : 88|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 1_NEW_SIGNAL_4 : 102|2@1+ (1,0) [0|2] "" XXX
+ SG_ 1_REL_LAT_SPEED : 104|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 1_REL_ACCEL : 118|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+ SG_ 1_NEW_SIGNAL_18 : 129|2@0+ (1,0) [0|1] "" XXX
+ SG_ 1_OBJECT_ID : 135|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_NEW_SIGNAL_18 : 137|2@0+ (1,0) [0|1] "" XXX
+ SG_ 2_OBJECT_ID : 143|6@0+ (1,0) [0|63] "" XXX
+ SG_ 2_STATE_ALT : 153|2@0+ (1,0) [0|3] "" XXX
+ SG_ 2_MOTION_STATE : 157|3@0+ (1,0) [0|4] "" XXX
+ SG_ 2_TRACK_QUALITY : 166|7@0+ (1,0) [0|127] "" XXX
+ SG_ 2_AGE : 175|8@0+ (1,0) [0|255] "" XXX
+ SG_ 2_COAST_AGE : 179|4@0+ (1,0) [0|15] "" XXX
+ SG_ 2_STATE : 182|3@0+ (1,0) [0|7] "" XXX
+ SG_ 2_RCS : 191|8@0- (1,0) [-128|127] "" XXX
+ SG_ 2_LONG_DIST : 192|12@1+ (0.05,0) [0|204.75] "m" XXX
+ SG_ 2_LAT_DIST : 204|12@1- (0.05,0) [-102.4|102.35] "m" XXX
+ SG_ 2_REL_SPEED : 216|14@1- (0.01,0) [-81.92|81.91] "m/s" XXX
+ SG_ 2_NEW_SIGNAL_4 : 230|2@1+ (1,0) [0|2] "" XXX
+ SG_ 2_REL_LAT_SPEED : 232|13@1- (0.01,0) [-40.96|40.95] "m/s" XXX
+ SG_ 2_REL_ACCEL : 246|10@1- (0.05,0) [-25.6|25.55] "m/s^2" XXX
+
+VAL_ 543 1_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 543 2_STATE_ALT 0 "EMPTY" 1 "TENTATIVE" 2 "MEASURED" 3 "COASTED" ;
+VAL_ 543 1_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 543 2_MOTION_STATE 0 "UNKNOWN" 1 "STATIONARY" 2 "MOVING" 3 "STOPPED" 4 "ONCOMING" ;
+VAL_ 543 1_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+VAL_ 543 2_STATE 0 "EMPTY" 1 "TENTATIVE_1" 2 "TENTATIVE_2" 3 "MEASURED" 4 "COASTED" 7 "UNRESOLVED_TENTATIVE" ;
+    CM_ BO_ 543 "Hyundai/Kia 210-21F radar-track layout: 16 messages with two target slots per 32-byte message (32 tracks total). Two related dialects share the same position, velocity, age, coast-age, and compressed-state core. The detailed dialect also populates STATE, RCS, and NEW_SIGNAL_4; the compact Tucson/Sportage/Santa Cruz dialect leaves those fields zero and uses STATE_ALT. The dialect is independent of the logged raw bus and is not an HDA-level discriminator: HDA2-like routes carried the sustained stream on A-CAN mapped to bus 0, while non-HDA2 routes mapped A-CAN to bus 1. Compact targets populate per-slot NEW_SIGNAL_18/OBJECT_ID extension bytes at bytes 16 and 17; detailed platforms usually leave them zero. Byte 18 and bits 26, 30-31, 39, 55, and 117 remained zero. REL_LAT_SPEED has opposite sign conventions between the detailed and compact dialects. The HKG CAN-FD checksum matched every one of 13,210,543 checked frames.";
+CM_ SG_ 543 1_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 543 1_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 543 1_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 543 1_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 543 1_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 543 1_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 543 1_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 543 1_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 543 1_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 543 1_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 543 1_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 543 1_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 543 1_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 543 1_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 543 1_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 543 2_STATE_ALT "Compressed lifecycle state: 0=empty, 1=tentative, 2=measured, 3=coasted.";
+CM_ SG_ 543 2_MOTION_STATE "Ground-frame target-motion class: 0=unknown, 1=stationary, 2=moving, 3=stopped, and 4=oncoming. The stopped label is independently supported by related Hyundai BN7 radar and HMVS4 object DBCs. Values 3/4 were observed only on the compact dialect; the detailed dialect has no dedicated oncoming value.";
+CM_ SG_ 543 2_TRACK_QUALITY "Unsigned 7-bit track quality/existence score. Detailed platforms share the same lifecycle-dependent distribution as the 3A5-3C4 layout; compact platforms use a higher calibration that falls as COAST_AGE increases. A related Hyundai object layout defines its 7-bit quality level as reliability, validity, or probability evidence; the raw radar scale is not confirmed to be a percentage.";
+CM_ SG_ 543 2_AGE "Per-track alive age/lifetime count, observed 0-255. It normally increments on an update and may hold.";
+CM_ SG_ 543 2_COAST_AGE "Prediction age: normally 0 while measured, then increments from 1 to 15 while coasted.";
+CM_ SG_ 543 2_STATE "Detailed lifecycle state: 0=empty, 1/2=tentative acquisition, 3=measured, 4=coasted/predicted, 7=unresolved tentative. Values 5 and 6 were not observed; compact platforms leave this field zero.";
+CM_ SG_ 543 2_RCS "Signed radar cross-section/return-strength value. Its distribution matches the 3A5-3C4 RCS field, and distance-controlled samples consistently increase from small to passenger to large targets. The raw unit is not calibrated; compact platforms leave it zero.";
+CM_ SG_ 543 2_LONG_DIST "Longitudinal distance from the ego radar. Empty compact slots may contain the 204.75 m endpoint sentinel.";
+CM_ SG_ 543 2_LAT_DIST "Lateral position relative to the ego axis.";
+CM_ SG_ 543 2_REL_SPEED "Longitudinal speed relative to ego; negative means the target is moving longitudinally slower than ego.";
+CM_ SG_ 543 2_NEW_SIGNAL_4 "Unknown category, observed 0-2 on detailed platforms. Compact platforms leave it zero.";
+CM_ SG_ 543 2_REL_LAT_SPEED "Target lateral speed relative to the ego axis at 0.01 m/s per bit. The detailed dialect uses the decoded sign; compact platforms use the opposite sign.";
+CM_ SG_ 543 2_REL_ACCEL "Target longitudinal acceleration relative to ego acceleration at 0.05 m/s^2 per bit.";
+CM_ SG_ 543 2_NEW_SIGNAL_18 "Unknown compact-dialect per-target status area, observed only as 0/1; its second bit remained zero. Detailed platforms leave it zero.";
+CM_ SG_ 543 2_OBJECT_ID "Strongly inferred compact-dialect persistent object identifier, observed 0-63. It held through 99.9% of consecutive same-track updates and changed when a slot acquired a replacement target. A related Hyundai BN7 radar DBC independently defines ObjectId as a global ID that remains constant while an object is tracked. Detailed platforms usually leave it zero.";
+CM_ SG_ 543 CHECKSUM "16-bit HKG CAN-FD checksum using the CAN address as the data ID.";
+CM_ SG_ 543 COUNTER "8-bit transmit-cycle counter. It covers 0-255 and wraps.";

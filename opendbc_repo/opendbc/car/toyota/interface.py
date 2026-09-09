@@ -164,8 +164,8 @@ class CarInterface(CarInterfaceBase):
       ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.GAS_INTERCEPTOR.value
 
     toyota_auto_hold = Params(return_defaults=True).get_bool("ToyotaAutoHold")
-    if toyota_auto_hold and candidate in TOYOTA_AUTO_HOLD_CARS:
-      ret.alternativeExperience |= ALTERNATIVE_EXPERIENCE.ALLOW_AEB
+    if toyota_auto_hold and ret.openpilotLongitudinalControl and candidate in TOYOTA_AUTO_HOLD_CARS:
+      ret.alternativeExperience |= ALTERNATIVE_EXPERIENCE.TOYOTA_AUTO_HOLD
       ret.flags |= ToyotaFlags.AUTO_BRAKE_HOLD.value
 
     if not ret.openpilotLongitudinalControl:

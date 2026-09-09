@@ -8,6 +8,7 @@ from opendbc.car.hyundai.values import HyundaiFlags, CAR, CarControllerParams, \
                                                    CANFD_SECURITYACCESS_CAR, \
                                                    CANFD_ANGLE_LONGITUDINAL_CAR, \
                                                    CANFD_RADAR_LIVE_LONGITUDINAL_CAR, \
+                                                   CANFD_RADAR_ECU_KEEPALIVE_CAR, \
                                                    RADAR_LIVE_LONGITUDINAL_CAR, \
                                                    UNSUPPORTED_LONGITUDINAL_CAR, HyundaiSafetyFlags, \
                                                    LEGACY_LONGITUDINAL_CAR, \
@@ -26,6 +27,15 @@ from openpilot.starpilot.common.testing_grounds import testing_ground
 
 ButtonType = structs.CarState.ButtonEvent.Type
 Ecu = structs.CarParams.Ecu
+
+
+def get_communication_control_request(car_fingerprint):
+  if car_fingerprint in CANFD_RADAR_ECU_KEEPALIVE_CAR:
+    return bytes([uds.SERVICE_TYPE.COMMUNICATION_CONTROL, uds.CONTROL_TYPE.ENABLE_RX_DISABLE_TX,
+                  uds.MESSAGE_TYPE.NORMAL])
+
+  return bytes([uds.SERVICE_TYPE.COMMUNICATION_CONTROL, 0x80 | uds.CONTROL_TYPE.DISABLE_RX_DISABLE_TX,
+                uds.MESSAGE_TYPE.NORMAL])
 
 # Cancel button can sometimes be ACC pause/resume button, main button can also enable on some cars
 ENABLE_BUTTONS = (ButtonType.accelCruise, ButtonType.decelCruise, ButtonType.cancel, ButtonType.mainCruise)
@@ -353,14 +363,7 @@ class CarInterface(CarInterfaceBase):
     params = Params()
 
     if communication_control is None:
-      if CP.carFingerprint in CANFD_RADAR_LIVE_LONGITUDINAL_CAR:
-        # Don't use 0x80 suppress bit so we can read the ECU response.
-        # Use ENABLE_RX_DISABLE_TX (0x01) so the ECU can still receive from rear radars for BSM
-        # while blocking SCC TX.
-        communication_control = bytes([uds.SERVICE_TYPE.COMMUNICATION_CONTROL, uds.CONTROL_TYPE.ENABLE_RX_DISABLE_TX, uds.MESSAGE_TYPE.NORMAL])
-      else:
-        # 0x80 silences response for other cars (original behavior)
-        communication_control = bytes([uds.SERVICE_TYPE.COMMUNICATION_CONTROL, 0x80 | uds.CONTROL_TYPE.DISABLE_RX_DISABLE_TX, uds.MESSAGE_TYPE.NORMAL])
+      communication_control = get_communication_control_request(CP.carFingerprint)
 
     ecu_log(f"=== init() called: opLong={CP.openpilotLongitudinalControl}, flags=0x{CP.flags:x}, safetyParam={CP.safetyConfigs[-1].safetyParam} ===")
 

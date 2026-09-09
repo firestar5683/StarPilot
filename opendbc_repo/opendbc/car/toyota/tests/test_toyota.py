@@ -196,7 +196,8 @@ class TestToyotaInterfaces:
       params.put_bool("ToyotaAutoHold", True)
       car_params = CarInterface.get_params(
         candidate,
-        {bus: {} for bus in range(8)},
+        {bus: ({0x2FF: 8} if candidate in (CAR.TOYOTA_RAV4, CAR.TOYOTA_RAV4H) and bus == 0 else {})
+         for bus in range(8)},
         [],
         alpha_long=False,
         is_release=False,
@@ -207,12 +208,13 @@ class TestToyotaInterfaces:
       params.remove("ToyotaAutoHold")
 
     assert car_params.flags & ToyotaFlags.AUTO_BRAKE_HOLD.value
-    assert car_params.alternativeExperience & ALTERNATIVE_EXPERIENCE.ALLOW_AEB
+    assert car_params.alternativeExperience & ALTERNATIVE_EXPERIENCE.TOYOTA_AUTO_HOLD
+    assert not car_params.alternativeExperience & ALTERNATIVE_EXPERIENCE.ALLOW_AEB
 
     can_parsers = CarState.get_can_parsers(car_params)
     car_state = CarState(car_params, SimpleNamespace(flags=0))
     car_state.update(can_parsers, SimpleNamespace(cluster_offset=1.0))
-    assert "PRE_COLLISION_2" in can_parsers[Bus.cam].vl
+    assert "PRE_COLLISION_2" not in can_parsers[Bus.cam].vl
 
   @pytest.mark.parametrize("candidate", [CAR.TOYOTA_CAMRY_TSS2, CAR.TOYOTA_RAV4, CAR.TOYOTA_RAV4H])
   def test_auto_hold_is_disabled_by_default(self, candidate):
@@ -229,7 +231,7 @@ class TestToyotaInterfaces:
     )
 
     assert not car_params.flags & ToyotaFlags.AUTO_BRAKE_HOLD.value
-    assert not car_params.alternativeExperience & ALTERNATIVE_EXPERIENCE.ALLOW_AEB
+    assert not car_params.alternativeExperience & ALTERNATIVE_EXPERIENCE.TOYOTA_AUTO_HOLD
 
   def test_prius_openpilot_long_uses_hybrid_long_defaults(self):
     car_params = CarInterface.get_params(
@@ -744,6 +746,8 @@ class TestToyotaCarController:
     controller.standstill_req = standstill_req
     controller.last_standstill = last_standstill
     controller.accel = 0.0
+    controller.brake_hold_active = False
+    controller._brake_hold_counter = 0
     return controller
 
   @staticmethod
@@ -806,9 +810,6 @@ class TestToyotaCarController:
   def test_toyota_auto_hold_latches_after_brake_press_until_gas(self):
     controller = self._make_controller()
     controller.packer = CANPacker(DBC[CAR.TOYOTA_CAMRY_TSS2][Bus.pt])
-    controller.frame = 0
-    controller.brake_hold_active = False
-    controller._brake_hold_counter = 0
 
     cs = SimpleNamespace(
       out=SimpleNamespace(
@@ -818,28 +819,22 @@ class TestToyotaCarController:
         brakePressed=True,
         gearShifter=structs.CarState.GearShifter.drive,
       ),
-      pre_collision_2={},
     )
 
-    controller.create_auto_brake_hold_messages(cs, brake_hold_allowed_timer=0)
+    controller.update_auto_hold_state(cs, activation_frames=0)
     assert controller.brake_hold_active
 
     cs.out.brakePressed = False
-    controller.frame = 2
-    controller.create_auto_brake_hold_messages(cs, brake_hold_allowed_timer=0)
+    controller.update_auto_hold_state(cs, activation_frames=0)
     assert controller.brake_hold_active
 
     cs.out.gasPressed = True
-    controller.frame = 4
-    controller.create_auto_brake_hold_messages(cs, brake_hold_allowed_timer=0)
+    controller.update_auto_hold_state(cs, activation_frames=0)
     assert not controller.brake_hold_active
 
   def test_toyota_auto_hold_does_not_trigger_without_brake_press(self):
     controller = self._make_controller()
     controller.packer = CANPacker(DBC[CAR.TOYOTA_CAMRY_TSS2][Bus.pt])
-    controller.frame = 0
-    controller.brake_hold_active = False
-    controller._brake_hold_counter = 0
     cs = SimpleNamespace(
       out=SimpleNamespace(
         standstill=True,
@@ -848,10 +843,9 @@ class TestToyotaCarController:
         brakePressed=False,
         gearShifter=structs.CarState.GearShifter.drive,
       ),
-      pre_collision_2={},
     )
 
-    controller.create_auto_brake_hold_messages(cs, brake_hold_allowed_timer=0)
+    controller.update_auto_hold_state(cs, activation_frames=0)
     assert not controller.brake_hold_active
 
   def test_prius_resume_request_releases_standstill_latch(self):
@@ -991,12 +985,9 @@ class TestToyotaCarController:
     assert parser.can_valid
     assert parser.vl["ACC_CONTROL"]["ALLOW_LONG_PRESS"] == 1
 
-  def test_auto_brake_hold_sends_modified_pre_collision_after_timer(self):
+  def test_auto_hold_uses_acc_control_brake_path(self):
     controller = self._make_controller()
     controller.packer = CANPacker(DBC[CAR.TOYOTA_CAMRY_TSS2][Bus.pt])
-    controller.frame = 0
-    controller.brake_hold_active = False
-    controller._brake_hold_counter = 0
     cs = SimpleNamespace(
       out=SimpleNamespace(
         standstill=True,
@@ -1005,16 +996,19 @@ class TestToyotaCarController:
         brakePressed=True,
         gearShifter=structs.CarState.GearShifter.drive,
       ),
-      pre_collision_2={},
     )
 
-    can_sends = controller.create_auto_brake_hold_messages(cs, brake_hold_allowed_timer=0)
+    controller.update_auto_hold_state(cs, activation_frames=0)
+    can_sends = [toyotacan.create_accel_command(
+      controller.packer, -1.0, False, True, True, False, 1, False, 0, False,
+    )]
 
-    parser = CANParser(DBC[CAR.TOYOTA_CAMRY_TSS2][Bus.pt], [("PRE_COLLISION_2", 0)], 0)
+    parser = CANParser(DBC[CAR.TOYOTA_CAMRY_TSS2][Bus.pt], [("ACC_CONTROL", 0)], 0)
     parser.update([(1, can_sends)])
     assert controller.brake_hold_active
-    assert parser.vl["PRE_COLLISION_2"]["DSS1GDRV"] == -1.0
-    assert parser.vl["PRE_COLLISION_2"]["PBRTRGR"] == 1
+    assert parser.vl["ACC_CONTROL"]["ACCEL_CMD"] == -1.0
+    assert parser.vl["ACC_CONTROL"]["PERMIT_BRAKING"] == 1
+    assert parser.vl["ACC_CONTROL"]["RELEASE_STANDSTILL"] == 0
 
   def test_interceptor_stop_and_go_holds_small_launch_at_standstill(self):
     controller = self._make_controller()

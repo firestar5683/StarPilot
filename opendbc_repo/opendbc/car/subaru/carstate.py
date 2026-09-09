@@ -85,14 +85,14 @@ class CarState(CarStateBase):
 
     if self.CP.flags & SubaruFlags.LKAS_ANGLE:
       ret.steeringAngleDeg = cp_angle.vl["Steering_2"]["Steering_Angle"]
-      steering_updated = len(cp_angle.vl_all["Steering_2"]["Steering_Angle"]) > 0
+      steering_counter = cp_angle.vl["Steering_2"]["COUNTER"]
     else:
       ret.steeringAngleDeg = cp.vl["Steering_Torque"]["Steering_Angle"]
-      steering_updated = len(cp.vl_all["Steering_Torque"]["Steering_Angle"]) > 0
+      steering_counter = cp.vl["Steering_Torque"].get("COUNTER", 0)
 
     if not (self.CP.flags & SubaruFlags.PREGLOBAL):
       # ideally we get this from the car, but unclear if it exists. diagnostic software doesn't even have it
-      ret.steeringRateDeg = self.angle_rate_calulator.update(ret.steeringAngleDeg, steering_updated)
+      ret.steeringRateDeg = self.angle_rate_calulator.update(ret.steeringAngleDeg, steering_counter)
 
     ret.steeringTorque = cp_angle.vl["Steering_Torque"]["Steer_Torque_Sensor"]
     ret.steeringTorqueEps = cp_angle.vl["Steering_Torque"]["Steer_Torque_Output"]

@@ -6,7 +6,7 @@ from opendbc.car.lateral import apply_driver_steer_torque_limits
 from opendbc.car.gm import gmcan
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.gm.values import (
-  ASCM_INT, CAMERA_ACC_CAR, CAR, CC_ONLY_CAR, CC_REGEN_PADDLE_CAR, DBC, EV_CAR, SDGM_CAR, AccState, CanBus, CarControllerParams,
+  ASCM_INT, CAMERA_ACC_CAR, CAR, CC_ONLY_CAR, CC_REGEN_PADDLE_CAR, DBC, EV_CAR, GM_AUTO_HOLD_CARS, SDGM_CAR, AccState, CanBus, CarControllerParams,
   CruiseButtons, GMFlags, GMSafetyFlags,
 )
 from opendbc.car.interfaces import CarControllerBase
@@ -309,7 +309,7 @@ def supports_volt_auto_hold(CP, auto_hold_enabled: bool):
     auto_hold_enabled and
     getattr(CP, "openpilotLongitudinalControl", False) and
     stock_hold_safety_ready and
-    CP.carFingerprint in AUTO_HOLD_VOLT_CARS
+    CP.carFingerprint in GM_AUTO_HOLD_CARS
   )
 
 

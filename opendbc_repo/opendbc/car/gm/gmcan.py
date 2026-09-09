@@ -31,6 +31,8 @@ BOLT_CC_DIRECTION_MEMORY_S = 1.5
 VOLT_CC_CARS = {
   CAR.CHEVROLET_VOLT_CC,
 }
+VOLT_CC_TARGET_DEADBAND_MPH = 5.0
+VOLT_CC_ACCEL_DEADBAND_MS2 = 0.15
 
 
 def malibu_phase_map_for_button(button):
@@ -344,7 +346,15 @@ def _create_volt_cc_spam_command(CS, actuators, ms_convert):
   speed_setpoint = int(round(CS.out.cruiseState.speed * ms_convert))
   ego_speed = CS.out.vEgo * ms_convert
 
-  if accel == 0.0:
+  v_cruise_kph = float(getattr(CS.out, "vCruise", 0.0))
+  if 0.0 < v_cruise_kph < 255.0:
+    is_metric = ms_convert == CV.MS_TO_KPH
+    target_setpoint = v_cruise_kph if is_metric else v_cruise_kph * CV.KPH_TO_MPH
+    target_deadband = VOLT_CC_TARGET_DEADBAND_MPH * (CV.MPH_TO_KPH if is_metric else 1.0)
+    if abs(target_setpoint - speed_setpoint) <= target_deadband:
+      return CruiseButtons.INIT, float("inf")
+
+  if abs(accel) <= VOLT_CC_ACCEL_DEADBAND_MS2:
     return CruiseButtons.INIT, float("inf")
 
   if accel < 0.0:

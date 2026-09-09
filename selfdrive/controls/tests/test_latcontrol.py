@@ -161,6 +161,7 @@ from openpilot.selfdrive.controls.lib.latcontrol_torque import (
   get_kia_carnival_friction_threshold,
   get_kia_carnival_highway_transition_output_scale,
   get_kia_carnival_unwind_ff_scale,
+  get_kia_carnival_unwind_output_scale,
   get_kia_stinger_2022_center_taper_scale,
   get_kia_stinger_2022_friction_threshold,
   get_tucson_4th_gen_center_taper_scale,
@@ -742,6 +743,17 @@ class TestLatControl:
     low_speed_exit = get_kia_carnival_unwind_ff_scale(0.31, 0.43, -0.88, 11.0)
     assert low_speed_exit < 0.90
 
+  def test_kia_carnival_unwind_output_scale_is_bounded_and_phase_gated(self):
+    steady_turn = get_kia_carnival_unwind_output_scale(0.80, 0.90, 0.60, 11.0)
+    clean_unwind = get_kia_carnival_unwind_output_scale(0.20, 0.20, -1.5, 11.0)
+    overshooting_unwind = get_kia_carnival_unwind_output_scale(0.20, 0.90, -1.5, 11.0)
+    high_speed_overshoot = get_kia_carnival_unwind_output_scale(0.20, 0.90, -1.5, 25.0)
+
+    assert steady_turn == pytest.approx(1.0)
+    assert clean_unwind == pytest.approx(1.0)
+    assert 0.70 < overshooting_unwind < 1.0
+    assert high_speed_overshoot > overshooting_unwind
+
   def test_genesis_g90_ff_scale_curve(self):
     assert get_genesis_g90_ff_scale(0.0, 0.0, 20.0) == 1.0
     assert get_genesis_g90_ff_scale(0.5, 0.0, 20.0) > get_genesis_g90_ff_scale(-0.5, 0.0, 20.0)
@@ -771,9 +783,13 @@ class TestLatControl:
     assert base > left_unwind > right_unwind
 
   def test_genesis_gv70_unwind_ff_scale(self):
-    assert get_genesis_gv70_unwind_ff_scale(-0.3, -0.3, 0.8, 15.0) == 1.0
+    steady_unwind = get_genesis_gv70_unwind_ff_scale(-0.3, -0.3, 0.8, 15.0)
+    assert steady_unwind < 1.0
     assert get_genesis_gv70_unwind_ff_scale(-0.3, 0.1, 0.8, 15.0) == 1.0
+    assert get_genesis_gv70_unwind_ff_scale(-0.3, -0.3, -0.8, 15.0) == 1.0
 
+    early_unwind = get_genesis_gv70_unwind_ff_scale(-0.7, -0.6, 0.8, 15.0)
+    assert early_unwind < 1.0
     reduced = get_genesis_gv70_unwind_ff_scale(-0.2, -1.0, 1.0, 20.0)
     assert 0.6 < reduced < 1.0
     assert get_genesis_gv70_unwind_ff_scale(-0.2, -1.0, -1.0, 20.0) == 1.0
@@ -967,7 +983,7 @@ class TestLatControl:
       get_genesis_g70_high_speed_transition_scale(0.0, 0.8, 65.0 * 0.44704)
     assert get_genesis_g70_high_speed_transition_scale(0.0, 0.8, 20.0 * 0.44704) > \
       get_genesis_g70_high_speed_transition_scale(0.0, 0.8, 65.0 * 0.44704)
-    assert 0.90 < get_genesis_g70_curve_unwind_output_scale(0.7, -0.5, 25.0) < 1.0
+    assert 0.88 < get_genesis_g70_curve_unwind_output_scale(0.7, -0.5, 25.0) < 1.0
     assert get_genesis_g70_curve_unwind_output_scale(0.7, 0.5, 25.0) == 1.0
     assert get_genesis_g70_angle_output_scale(55.0, 1.0) > get_genesis_g70_angle_output_scale(85.0, 1.0)
     assert get_genesis_g70_angle_output_scale(85.0, -1.0) == pytest.approx(1.0)

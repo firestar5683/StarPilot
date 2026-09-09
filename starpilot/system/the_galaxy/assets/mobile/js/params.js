@@ -62,7 +62,7 @@ const VEHICLE_SETTING_MAKES = {
   RemoteStartBootsComma: ["Buick", "Cadillac", "Chevrolet", "GMC", "Holden"],
   HKGRemoteStartBootsComma: ["Genesis", "Hyundai", "Kia"],
   VoltSNG: ["Chevrolet", "Holden"],
-  GMAutoHold: ["Chevrolet", "Holden"],
+  GMAutoHold: ["Buick", "Chevrolet", "Holden"],
   VoltOnePedalMode: ["Chevrolet", "Holden"],
   RemapCancelToDistance: ["Chevrolet", "Holden"],
   JeepBrakeHold: ["Jeep"],
@@ -140,8 +140,11 @@ export function numericBounds(param, values = {}) {
     const n = Number(value)
     return Number.isFinite(n) ? n : null
   }
-  if (param.key === "ScreenBrightness" || param.key === "ScreenBrightnessOnroad") {
+  if (param.key === "ScreenBrightness") {
     return { min: 1, max: 101, step: 1 }
+  }
+  if (param.key === "ScreenBrightnessOnroad") {
+    return { min: 0, max: 101, step: 1 }
   }
   if (param.key === "LaneCenterOffset") {
     return { min: -0.3, max: 0.3, step: 0.01 }

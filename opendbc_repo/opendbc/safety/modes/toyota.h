@@ -2,6 +2,8 @@
 
 #include "opendbc/safety/declarations.h"
 
+#define TOYOTA_AUTO_HOLD_ACCEL -1000  // -1.0 m/s^2 in ACC_CONTROL units
+
 // Stock longitudinal
 #define TOYOTA_BASE_TX_MSGS \
   {0x191, 0, 8, .check_relay = true}, {0x412, 0, 8, .check_relay = true}, {0x1D2, 0, 8, .check_relay = false},  /* LKAS + LTA + PCM cancel cmd */  \
@@ -277,7 +279,15 @@ static bool toyota_tx_hook(const CANPacket_t *msg) {
         // SecOC cars move accel to 0x183. Only allow inactive accel on 0x343 to match stock behavior
         violation = desired_accel != TOYOTA_LONG_LIMITS.inactive_accel;
       }
-      violation |= longitudinal_accel_checks(desired_accel, TOYOTA_LONG_LIMITS);
+
+      bool toyota_auto_hold =
+        !toyota_stock_longitudinal &&
+        ((alternative_experience & ALT_EXP_TOYOTA_AUTO_HOLD) != 0) &&
+        !vehicle_moving && !gas_pressed && acc_main_on &&
+        (desired_accel == TOYOTA_AUTO_HOLD_ACCEL) &&
+        GET_BIT(msg, 30U) && !GET_BIT(msg, 31U) && !GET_BIT(msg, 24U);
+
+      violation |= !toyota_auto_hold && longitudinal_accel_checks(desired_accel, TOYOTA_LONG_LIMITS);
 
       // only ACC messages that cancel are allowed when openpilot is not controlling longitudinal
       if (toyota_stock_longitudinal) {
@@ -394,12 +404,7 @@ static bool toyota_tx_hook(const CANPacket_t *msg) {
       tx = false;
     }
 
-    // Auto brake hold replaces the camera AEB message only while stopped.
-    if ((msg->addr == 0x344U) && ((alternative_experience & ALT_EXP_ALLOW_AEB) != 0)) {
-      if (vehicle_moving || gas_pressed || !acc_main_on) {
-        tx = false;
-      }
-    } else if ((msg->addr == 0x344U) && toyota_stock_longitudinal) {
+    if ((msg->addr == 0x344U) && toyota_stock_longitudinal) {
       tx = false;
     }
   }
@@ -566,21 +571,11 @@ static safety_config toyota_init(uint16_t param) {
   return ret;
 }
 
-static bool toyota_fwd_hook(int bus_num, int addr) {
-  bool block_msg = false;
-  if (bus_num == 2) {
-    block_msg = (addr == 0x344) && ((alternative_experience & ALT_EXP_ALLOW_AEB) != 0) &&
-                !vehicle_moving && !gas_pressed && acc_main_on;
-  }
-  return block_msg;
-}
-
 const safety_hooks toyota_hooks = {
   .init = toyota_init,
   .rx = toyota_rx_hook,
   .rx_all = toyota_rx_all_hook,
   .tx = toyota_tx_hook,
-  .fwd = toyota_fwd_hook,
   .get_checksum = toyota_get_checksum,
   .compute_checksum = toyota_compute_checksum,
   .get_quality_flag_valid = toyota_get_quality_flag_valid,

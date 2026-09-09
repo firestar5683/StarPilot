@@ -4,7 +4,8 @@ from types import SimpleNamespace
 from opendbc.car.volvo.carcontroller import CarController
 from opendbc.car.volvo.helpers import checksum_lca_5_message
 from opendbc.car.volvo.interface import CarInterface
-from opendbc.car.volvo.values import DBC
+from opendbc.car.volvo.values import CAR, DBC
+from opendbc.car.volvo.volvocan import create_c1_checksum
 
 
 def _zero_message():
@@ -67,3 +68,70 @@ def test_controller_relays_stock_lca5_angle_when_inactive():
   if raw & (1 << 14):
     raw -= 1 << 15
   assert abs(raw * 0.05596 - 12.0) < 0.1
+
+
+def _c1_state():
+  return SimpleNamespace(
+    out=SimpleNamespace(steeringAngleDeg=10.0, vEgo=12.0, vEgoRaw=12.0),
+    c1_lka_torque=5,
+    c1_msg_pscm=_zero_message(),
+  )
+
+
+def test_c1_controller_emits_checked_steering_and_pscm_relay():
+  cp = CarInterface.get_non_essential_params(CAR.VOLVO_V40)
+  controller = CarController(DBC[cp.carFingerprint], cp)
+  cc = SimpleNamespace(
+    latActive=True,
+    actuators=_Actuators(),
+    cruiseControl=SimpleNamespace(cancel=False),
+  )
+
+  actuators, can_sends = controller.update(cc, _c1_state(), 0, None)
+  assert [(msg[0], msg[2]) for msg in can_sends] == [(0x125, 2), (0xD0, 0)]
+
+  fsm = can_sends[1][1]
+  assert fsm[7] & 0x3 == 3
+  assert fsm[6] == create_c1_checksum(fsm)
+  assert 0.0 < actuators.steeringAngleDeg <= 2.0
+
+
+def test_c1_controller_sends_only_cancel_button():
+  cp = CarInterface.get_non_essential_params(CAR.VOLVO_V40)
+  controller = CarController(DBC[cp.carFingerprint], cp)
+  cc = SimpleNamespace(
+    latActive=False,
+    actuators=_Actuators(),
+    cruiseControl=SimpleNamespace(cancel=True),
+  )
+
+  _, can_sends = controller.update(cc, _c1_state(), 0, None)
+  buttons = next(msg for msg in can_sends if msg[0] == 0x10)
+  assert buttons[2] == 0
+  assert buttons[1][7] == 0x10
+  assert buttons[1][6] == 0
+
+
+def test_c1_controller_temporarily_drops_steering_on_zero_torque_fault():
+  cp = CarInterface.get_non_essential_params(CAR.VOLVO_V40)
+  controller = CarController(DBC[cp.carFingerprint], cp)
+  cs = _c1_state()
+  cs.c1_lka_torque = 0
+  cc = SimpleNamespace(
+    latActive=True,
+    actuators=_Actuators(),
+    cruiseControl=SimpleNamespace(cancel=False),
+  )
+
+  directions = []
+  for _ in range(23):
+    _, can_sends = controller.update(cc, cs, 0, None)
+    directions.extend(msg[1][7] & 0x3 for msg in can_sends if msg[0] == 0xD0)
+
+  assert directions[:-1] == [3] * 11
+  assert directions[-1] == 0
+
+  while controller.frame <= 122:
+    _, can_sends = controller.update(cc, cs, 0, None)
+  fsm = next(msg for msg in can_sends if msg[0] == 0xD0)
+  assert fsm[1][7] & 0x3 == 3
