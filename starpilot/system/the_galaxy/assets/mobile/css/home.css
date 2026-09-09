@@ -138,10 +138,13 @@
 
 .dh-donut {
   --dh-value: 0;
-  display: grid;
+  align-items: center;
+  display: flex;
+  flex-direction: column;
   flex: 0 0 auto;
+  gap: 3px;
   height: 116px;
-  place-items: center;
+  justify-content: center;
   position: relative;
   width: 116px;
 }

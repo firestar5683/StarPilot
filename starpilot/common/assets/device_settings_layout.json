@@ -1704,6 +1704,10 @@
         "precision": 0,
         "unit_type": "vehicle_speed",
         "metric_max": 150.0,
+        "excluded_vehicle_makes": [
+          "Lexus",
+          "Toyota"
+        ],
         "parent_key": "QOLLongitudinal",
         "settings_tier": "simple"
       },
@@ -1719,6 +1723,24 @@
         "precision": 0,
         "unit_type": "vehicle_speed",
         "metric_max": 150.0,
+        "excluded_vehicle_makes": [
+          "Lexus",
+          "Toyota"
+        ],
+        "parent_key": "QOLLongitudinal",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ReverseCruise",
+        "label": "Reverse Cruise Increase",
+        "description": "Reverse Toyota/Lexus cruise-button behavior so a short press changes the dashboard set speed by 5 and a hold changes it by 1.",
+        "picker_description": "Swaps Toyota/Lexus short-press and hold cruise increments.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "vehicle_makes": [
+          "Lexus",
+          "Toyota"
+        ],
         "parent_key": "QOLLongitudinal",
         "settings_tier": "simple"
       },
@@ -4829,12 +4851,12 @@
       },
       {
         "key": "GalaxyMobileDefault",
-        "label": "Try the Big Dipper Web UI",
-        "description": "Open the Big Dipper at the top-level Galaxy link instead of the classic Galaxy. The classic UI remains available at /classic and Big Dipper at /mobile regardless of this toggle.",
-        "picker_description": "Serve the Big Dipper as the default landing page.",
+        "label": "Use Galaxy (new) by Default",
+        "description": "Open Galaxy (new) at the top-level Galaxy link. Turn this off to use Galaxy (old) instead. Galaxy (old) remains available at /classic and Galaxy (new) at /mobile.",
+        "picker_description": "Serve Galaxy (new) as the default landing page.",
         "data_type": "bool",
         "ui_type": "toggle",
-        "settings_tier": "advanced"
+        "settings_tier": "simple"
       },
       {
         "key": "AlphaLongitudinalEnabled",

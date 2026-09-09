@@ -55,6 +55,13 @@ def test_device_settings_speed_units_follow_the_vehicle():
   assert "unit_search_terms" in source
   assert 'class="ds-unit-note"' not in source
   assert "per click" in source
+  assert "ds-unit-note" not in source
+
+
+def test_device_settings_supports_vehicle_make_exclusions():
+  source = _device_settings()
+
+  assert "excluded_vehicle_makes" in source
 
 
 def test_lane_center_offset_can_step_below_zero():

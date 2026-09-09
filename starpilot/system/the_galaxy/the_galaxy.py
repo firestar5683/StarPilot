@@ -5326,12 +5326,12 @@ def setup(app):
   def mobile_manifest():
     manifest_path = Path(app.static_folder) / "mobile" / "manifest.json"
     if not manifest_path.is_file():
-      return jsonify({"error": "Big Dipper manifest not found"}), 404
+      return jsonify({"error": "Galaxy manifest not found"}), 404
 
     try:
       manifest_data = json.loads(manifest_path.read_text(encoding="utf-8"))
     except (OSError, ValueError, json.JSONDecodeError):
-      return jsonify({"error": "Big Dipper manifest is invalid"}), 500
+      return jsonify({"error": "Galaxy manifest is invalid"}), 500
 
     slug = _read_galaxy_text(_get_galaxy_dir() / "glxyslug")
     if re.fullmatch(r"[A-Za-z0-9]{16}", slug):

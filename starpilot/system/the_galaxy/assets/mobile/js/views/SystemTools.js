@@ -30,11 +30,17 @@ export const SystemTools = {
       profileBusy: "",
     }
   },
-  created() { this.poll = usePolling(() => this.loadFastStatus(), { interval: 3000 }); this.poll.start() },
+  created() {
+    this.poll = usePolling(() => this.loadFastStatus(), {
+      interval: 1000,
+      enabled: () => !this.fastStatus || !!this.fastStatus.running,
+    })
+    this.poll.start()
+  },
   mounted() { this.loadBranches(); this.loadProfiles() },
   beforeUnmount() { this.poll?.destroy() },
   computed: {
-    updateAvailable() { return !!this.fastStatus?.updateAvailable && !this.fastStatus?.running },
+    updateAvailable() { return this.checkedForUpdates && !!this.fastStatus?.updateAvailable && !this.fastStatus?.running },
     factoryResetStatus() {
       const s = this.fastStatus
       if (!s || String(s?.lastMode || "").trim() !== "factory-reset") return null
@@ -53,6 +59,7 @@ export const SystemTools = {
   },
   methods: {
     shortCommit,
+    toPercent,
     async loadBranches() {
       try {
         const data = await api.getUpdateBranches()
@@ -65,8 +72,15 @@ export const SystemTools = {
         this.branchLoading = false
       }
     },
-    async loadFastStatus() {
-      try { this.fastStatus = await api.getUpdateFastStatus() } catch (e) { this.fastStatus = null }
+    async loadFastStatus({ throwOnError = false } = {}) {
+      try {
+        const status = await api.getUpdateFastStatus()
+        if (!status) throw new Error("Update status unavailable")
+        this.fastStatus = status
+      } catch (e) {
+        this.fastStatus = null
+        if (throwOnError) throw e
+      }
     },
     async backupToggles() {
       try {
@@ -160,6 +174,7 @@ export const SystemTools = {
       try {
         await api.setUpdateBranch(branch)
         showSnackbar(`Switching to ${branch}...`)
+        await this.loadFastStatus()
       } catch (e) {
         showSnackbar(e?.message || "Switch failed.", "error")
       }
@@ -168,7 +183,7 @@ export const SystemTools = {
       if (this.busy) return
       this.busy = "check"
       try {
-        await this.loadFastStatus()
+        await this.loadFastStatus({ throwOnError: true })
         this.checkedForUpdates = true
         const st = this.fastStatus
         if (st?.running) showSnackbar("An update is already running.")
@@ -227,6 +242,7 @@ export const SystemTools = {
       try {
         await api.factoryReset()
         showSnackbar("SAVE ME initiated — factory resetting...")
+        await this.loadFastStatus()
       } catch (e) {
         showSnackbar(e?.message || "Factory reset failed.", "error")
       }
@@ -256,14 +272,27 @@ export const SystemTools = {
                 <i class="bi bi-arrow-repeat"></i>
                 <span class="gx-section__title">Update Status</span>
                 <span v-if="fastStatus.running" class="gx-chip" style="background:var(--primary);color:var(--on-primary);">{{ fastStatus.progressPercent }}%</span>
-                <span v-else-if="fastStatus.updateAvailable" class="gx-chip" style="background:var(--warning);color:var(--black);">Update available</span>
-                <span v-else class="gx-chip">Up to date</span>
+                <span v-else-if="updateAvailable" class="gx-chip" style="background:var(--warning);color:var(--black);">Update available</span>
+                <span v-else-if="checkedForUpdates" class="gx-chip">Up to date</span>
+                <span v-else class="gx-chip">Not checked</span>
               </div>
               <div style="padding: var(--sp-3); display:grid; gap:6px;">
                 <div class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Branch</span><span class="gx-row__value">{{ fastStatus.branch || currentBranch || '—' }}</span></div>
                 <div v-if="fastStatus.running" class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Stage</span><span class="gx-row__value">{{ fastStatus.stage }} · {{ fastStatus.progressLabel }}</span></div>
                 <div class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Local</span><span class="gx-row__value" style="font-family:monospace;">{{ shortCommit(fastStatus.localCommit) }}</span></div>
                 <div class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Remote</span><span class="gx-row__value" style="font-family:monospace;">{{ shortCommit(fastStatus.remoteCommit) }}</span></div>
+                <div v-if="fastStatus.running" class="gx-update-progress" role="progressbar" aria-label="Update progress"
+                  :aria-valuenow="Math.round(fastStatus.progressPercent || 0)" aria-valuemin="0" aria-valuemax="100">
+                  <div class="gx-update-progress__track">
+                    <div class="gx-update-progress__fill" :class="{ 'gx-update-progress__fill--error': fastStatus.stage === 'error' }"
+                      :style="{ width: toPercent(fastStatus.progressPercent) + '%' }"></div>
+                  </div>
+                  <div class="gx-update-progress__meta">
+                    <span>Step {{ fastStatus.progressStep || 0 }}/{{ fastStatus.progressTotalSteps || 5 }}: {{ fastStatus.progressLabel || fastStatus.stage || 'Updating' }}</span>
+                    <strong>{{ Math.round(toPercent(fastStatus.progressPercent)) }}%</strong>
+                  </div>
+                  <small v-if="fastStatus.progressDetail">{{ fastStatus.progressDetail }}</small>
+                </div>
                 <div v-if="fastStatus.message" class="gx-note">{{ fastStatus.message }}</div>
                 <div v-if="fastStatus.warning && (fastStatus.running || fastStatus.updateAvailable)" class="gx-note gx-note--danger">{{ fastStatus.warning }}</div>
                 <div v-if="fastStatus.agnosUpdate?.available && fastStatus.agnosUpdate?.warnings?.length" style="margin-top:4px;">
@@ -287,7 +316,7 @@ export const SystemTools = {
                 <i v-if="busy === 'check'" class="bi bi-arrow-repeat gx-spin"></i>
                 <i v-else class="bi bi-search"></i> {{ busy === 'check' ? 'Checking...' : 'Check for Updates' }}
               </button>
-              <button type="button" class="gx-btn" :disabled="!updateAvailable || !!busy || isOnroad" @click="applyFastUpdate">
+              <button v-if="updateAvailable" type="button" class="gx-btn" :disabled="!!busy || isOnroad" @click="applyFastUpdate">
                 <i class="bi bi-arrow-up-circle"></i> {{ busy === 'fast' ? 'Updating...' : 'Update Now' }}
               </button>
               <button type="button" class="gx-btn gx-btn--tonal" :disabled="!!busy || isOnroad" @click="runUpdate('recover')">Recover</button>

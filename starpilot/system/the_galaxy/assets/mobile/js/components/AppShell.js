@@ -7,12 +7,12 @@ const NAV = {
     { name: "Recordings", link: "/recordings", icon: "bi-camera-reels" },
   ],
   tools: [
+    { name: "Bluetooth", link: "/bluetooth", icon: "bi-bluetooth" },
     { name: "Cameras & Monitoring", link: "/cameras", icon: "bi-camera-video" },
     { name: "Galaxy", link: "/galaxy", icon: "bi-globe2" },
     { name: "Logs & Diagnostics", link: "/logs", icon: "bi-exclamation-triangle" },
     { name: "Model Manager", link: "/manage_models", icon: "bi-cpu" },
     { name: "Navigation & Maps", link: "/navigation", icon: "bi-map" },
-    { name: "Sentry Mode", link: "/sentry", icon: "bi-shield-exclamation" },
     { name: "System Tools", link: "/system", icon: "bi-arrow-repeat" },
     { name: "Model Laboratory", link: "/model_laboratory", icon: "bi-bezier2" },
     { name: "Plots", link: "/plots", icon: "bi-graph-up-arrow" },
@@ -81,6 +81,9 @@ export const AppShell = {
     bottomNavTo(item) {
       navigate(item.link)
     },
+    goHome() {
+      navigate("/")
+    },
     isActive(link) {
       return this.activePath === link || (link !== "/" && this.activePath.startsWith(link))
     },
@@ -102,7 +105,10 @@ export const AppShell = {
           <button type="button" class="gx-icon-btn gx-menu-btn" aria-label="Menu" @click="store.drawerOpen = true">
             <i class="bi bi-list"></i>
           </button>
-          <span class="gx-appbar__title">Big Dipper</span>
+          <span class="gx-appbar__home" role="button" tabindex="0"
+            aria-label="Galaxy home" @click="goHome" @keydown.enter="goHome" @keydown.space.prevent="goHome">
+            <span class="gx-appbar__title">Galaxy</span>
+          </span>
           <div class="gx-searchwrap">
             <input ref="searchInput" class="gx-search gx-appbar__search" type="search" placeholder="Search toggles..."
               v-model="search" aria-label="Search toggles" />
@@ -128,8 +134,8 @@ export const AppShell = {
       </transition>
       <aside class="gx-drawer" :class="{ open: store.drawerOpen }">
         <div class="gx-drawer__header">
-          <img class="gx-logo" src="/assets/images/main_logo.png" alt="Big Dipper logo" />
-          <span class="gx-drawer-title">Big Dipper</span>
+          <img class="gx-logo" src="/assets/images/main_logo.png" alt="Galaxy logo" />
+          <span class="gx-drawer-title">Galaxy</span>
         </div>
         <div class="gx-nav-section">
           <div class="gx-nav-section__title">Main</div>

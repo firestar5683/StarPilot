@@ -54,6 +54,7 @@ from openpilot.selfdrive.controls.lib.latcontrol_vehicle_tunes import (
   get_rav4_tss2_pid_output,
   get_subaru_impreza_pid_output_scale,
   get_genesis_gv70_low_speed_center_overshoot_scale,
+  get_genesis_g70_high_speed_transition_scale,
   normalize_flm_overrides,
   set_flm_runtime_overrides,
 )
@@ -960,6 +961,12 @@ class TestLatControl:
     assert get_genesis_g70_low_speed_output_limit(0.0, 2.0) < 0.30
     assert get_genesis_g70_low_speed_angle_damping(0.0, -20.0, 0.0, 2.0) < 0.0
     assert get_genesis_g70_low_speed_angle_damping(0.0, 20.0, 0.0, 2.0) > 0.0
+    assert get_genesis_g70_high_speed_transition_scale(0.0, 0.8, 65.0 * 0.44704) < \
+      get_genesis_g70_high_speed_transition_scale(0.0, 0.1, 65.0 * 0.44704)
+    assert get_genesis_g70_high_speed_transition_scale(1.0, 0.8, 65.0 * 0.44704) > \
+      get_genesis_g70_high_speed_transition_scale(0.0, 0.8, 65.0 * 0.44704)
+    assert get_genesis_g70_high_speed_transition_scale(0.0, 0.8, 20.0 * 0.44704) > \
+      get_genesis_g70_high_speed_transition_scale(0.0, 0.8, 65.0 * 0.44704)
     assert 0.90 < get_genesis_g70_curve_unwind_output_scale(0.7, -0.5, 25.0) < 1.0
     assert get_genesis_g70_curve_unwind_output_scale(0.7, 0.5, 25.0) == 1.0
     assert get_genesis_g70_angle_output_scale(55.0, 1.0) > get_genesis_g70_angle_output_scale(85.0, 1.0)

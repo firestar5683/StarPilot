@@ -72,11 +72,7 @@ class VCruiseHelper:
     return short_interval, long_interval
 
   def _uses_software_cruise(self) -> bool:
-    # Some cars, including Toyota TSS2, keep pcmCruise enabled while
-    # openpilot owns longitudinal control. In that case the software cruise
-    # target must be used so custom short/hold intervals are honored.
-    return bool(self.gm_cc_only or self.redneck_non_pcm or not self.CP.pcmCruise or
-                getattr(self.CP, "openpilotLongitudinalControl", False))
+    return bool(self.gm_cc_only or self.redneck_non_pcm or not self.CP.pcmCruise)
 
   @property
   def v_cruise_initialized(self):
@@ -229,12 +225,6 @@ class VCruiseHelper:
       self.v_cruise_kph = float(np.clip(initialized_speed_limit_kph, V_CRUISE_MIN, V_CRUISE_MAX))
     elif self.redneck_non_pcm and CS.cruiseState.speedCluster > 0:
       self.v_cruise_kph = float(np.clip(CS.cruiseState.speedCluster * CV.MS_TO_KPH, V_CRUISE_MIN, V_CRUISE_MAX))
-    elif self.CP.pcmCruise and CS.cruiseState.speed > 0:
-      # Keep PCM/dash set speed as the starting target when software cruise
-      # takes over, while allowing subsequent button presses to use custom
-      # intervals. This preserves Toyota's stock engage behavior.
-      pcm_speed_kph = CS.cruiseState.speed * CV.MS_TO_KPH
-      self.v_cruise_kph = float(np.clip(pcm_speed_kph, V_CRUISE_MIN, V_CRUISE_MAX))
     else:
       self.v_cruise_kph = int(round(np.clip(CS.vEgo * CV.MS_TO_KPH, engage_floor_kph, V_CRUISE_MAX)))
 

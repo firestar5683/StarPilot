@@ -32,6 +32,7 @@ class DeveloperLayout(Widget):
   def __init__(self):
     super().__init__()
     self._params = Params()
+    self._params.put_bool("LongitudinalManeuverMode", False)
 
     # Build items and keep references for callbacks/state updates
     self._adb_toggle = toggle_item(
@@ -59,13 +60,6 @@ class DeveloperLayout(Widget):
       enabled=ui_state.is_offroad,
     )
 
-    self._long_maneuver_toggle = toggle_item(
-      lambda: tr("Longitudinal Maneuver Mode"),
-      description="",
-      initial_state=self._params.get_bool("LongitudinalManeuverMode"),
-      callback=self._on_long_maneuver_mode,
-    )
-
     self._alpha_long_toggle = toggle_item(
       lambda: tr("openpilot Longitudinal Control (Alpha)"),
       description=lambda: tr(DESCRIPTIONS["alpha_longitudinal"]),
@@ -87,7 +81,6 @@ class DeveloperLayout(Widget):
       self._ssh_toggle,
       self._ssh_keys,
       self._joystick_toggle,
-      self._long_maneuver_toggle,
       self._alpha_long_toggle,
       self._ui_debug_toggle,
     ], line_separator=True, spacing=0)
@@ -114,13 +107,7 @@ class DeveloperLayout(Widget):
       else:
         self._alpha_long_toggle.set_visible(True)
 
-      long_man_enabled = ui_state.has_longitudinal_control and ui_state.is_offroad()
-      self._long_maneuver_toggle.action_item.set_enabled(long_man_enabled)
-      if not long_man_enabled:
-        self._long_maneuver_toggle.action_item.set_state(False)
-        self._params.put_bool("LongitudinalManeuverMode", False)
     else:
-      self._long_maneuver_toggle.action_item.set_enabled(False)
       self._alpha_long_toggle.set_visible(False)
 
     # TODO: make a param control list item so we don't need to manage internal state as much here
@@ -129,7 +116,6 @@ class DeveloperLayout(Widget):
       ("AdbEnabled", self._adb_toggle),
       ("SshEnabled", self._ssh_toggle),
       ("JoystickDebugMode", self._joystick_toggle),
-      ("LongitudinalManeuverMode", self._long_maneuver_toggle),
       ("AlphaLongitudinalEnabled", self._alpha_long_toggle),
       ("ShowDebugInfo", self._ui_debug_toggle),
     ):
@@ -149,12 +135,6 @@ class DeveloperLayout(Widget):
   def _on_joystick_debug_mode(self, state: bool):
     self._params.put_bool("JoystickDebugMode", state)
     self._params.put_bool("LongitudinalManeuverMode", False)
-    self._long_maneuver_toggle.action_item.set_state(False)
-
-  def _on_long_maneuver_mode(self, state: bool):
-    self._params.put_bool("LongitudinalManeuverMode", state)
-    self._params.put_bool("JoystickDebugMode", False)
-    self._joystick_toggle.action_item.set_state(False)
 
   def _on_alpha_long_enabled(self, state: bool):
     if state:

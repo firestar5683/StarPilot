@@ -4,7 +4,7 @@ import { api, showSnackbar } from "../api.js"
 import { navigate, store } from "../store.js"
 import {
   applyParamChange, countAdvancedHiddenByDeveloperMode, GALAXY_DEVELOPER_MODE_KEY, isSettingVisible,
-  resolveVehicleUnitParam, slugifySectionName, vehicleSpeedUnit,
+  resolveVehicleUnitParam, slugifySectionName,
 } from "../params.js"
 import { SettingTree } from "../components/SettingTree.js"
 import { GalaxyToggleCard } from "../components/GalaxyToggleCard.js"
@@ -41,7 +41,6 @@ export const Settings = {
       return this.sections.find((s) => s.slug === this.activeSectionSlug) || this.sections[0]
     },
     hiddenAdvancedCount() { return countAdvancedHiddenByDeveloperMode(this.layout, this.values) },
-    speedUnit() { return vehicleSpeedUnit(this.values) },
     searchActive() { return !!this.searchTerm },
     searchTerm: {
       get() { return store.search },

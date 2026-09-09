@@ -216,6 +216,7 @@ export const TroubleshootPanel = {
           <div v-if="!itemsVisible(section).length" class="gx-empty">No settings are currently different from their defaults.</div>
           <div v-else style="display:grid; gap:8px; grid-template-columns:repeat(auto-fill,minmax(260px,1fr)); padding:0 var(--sp-3) var(--sp-3);">
             <div v-for="item in itemsVisible(section)" :key="item.label" class="gx-row"
+              :class="{ 'gx-diagnostic-row--changed': isChanged(item) }"
               style="border:none; background:var(--surface); border-radius:var(--radius-md); margin:0; padding:10px 12px; flex-direction:column; align-items:stretch; gap:8px;">
               <div style="display:flex; align-items:center; gap:6px; min-width:0;">
                 <span class="gx-row__label" style="font-size:var(--fs-sm); overflow-wrap:anywhere;">{{ item.label }}</span>

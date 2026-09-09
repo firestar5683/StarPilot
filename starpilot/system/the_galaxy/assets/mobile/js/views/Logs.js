@@ -5,9 +5,9 @@ import { TroubleshootPanel } from "../components/TroubleshootPanel.js"
 import { GalaxyTabs } from "../components/GalaxyTabs.js"
 
 const TABS = {
+  troubleshoot: "Troubleshoot",
   errors: "Error Logs",
   tmux: "Tmux Live Log",
-  troubleshoot: "Troubleshoot",
 }
 
 function parseLogDate(filename) {
@@ -35,7 +35,7 @@ export const Logs = {
     }
   },
   setup() {
-    return useTabRouting("/logs", { errors: "errors", tmux: "tmux", troubleshoot: "troubleshoot" })
+    return useTabRouting("/logs", { troubleshoot: "troubleshoot", errors: "errors", tmux: "tmux" })
   },
   created() {
     this.stream = useLogStream({ endpoint: "/api/tmux_log/live", snapshotFn: () => api.tmuxSnapshot(), interval: 2000 })

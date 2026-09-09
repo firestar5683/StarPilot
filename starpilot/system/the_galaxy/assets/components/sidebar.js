@@ -18,7 +18,6 @@ const MENU_ITEMS = {
     { name: "Sentry Mode", link: "/sentry", icon: "bi-shield-exclamation" },
     { name: "Controllers", link: "/wheel-controls", icon: "bi-controller" },
     { name: "Lateral Tuning", link: "/tuning", icon: "bi-sign-turn-right" },
-    { name: "Long Maneuvers", link: "/longitudinal_maneuvers", icon: "bi-signpost-split" },
     { name: "Maps", link: "/manage_maps", icon: "bi-map" },
     { name: "Navigation", link: "/set_navigation_destination", icon: "bi-geo-alt-fill" },
     { name: "App Keys", link: "/manage_navigation_keys", icon: "bi-key-fill" },

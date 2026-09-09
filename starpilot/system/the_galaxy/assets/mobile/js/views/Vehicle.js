@@ -1,35 +1,21 @@
 import { api, showSnackbar } from "../api.js"
 import { navigate, toolHref } from "../store.js"
-import { WheelControls } from "../components/WheelControls.js"
-import { BluetoothPanel } from "../components/BluetoothPanel.js"
 import { GalaxySection } from "../components/GalaxySection.js"
-import { GalaxyTabs } from "../components/GalaxyTabs.js"
-import { useTabRouting } from "../composables.js"
 
 const FEATURES = [
   { key: "doors", name: "Lock/Unlock Doors", icon: "bi-door-closed", desc: "Send lock or unlock commands remotely to your vehicle.", embed: "/manage_doors" },
   { key: "tsk", name: "Toyota Security Keys", icon: "bi-key-fill", desc: "Manage and apply security keys for secOC protected devices.", embed: "/manage_tsk" },
 ]
 
-const TABS = {
-  controllers: "Controllers",
-  bluetooth: "Bluetooth",
-  features: "Vehicle Features",
-}
-
 export const Vehicle = {
   name: "Vehicle",
-  components: { WheelControls, BluetoothPanel, GalaxySection, GalaxyTabs },
+  components: { GalaxySection },
   data() {
     return {
-      TABS,
       features: FEATURES,
       featureStatus: {},
       busy: "",
     }
-  },
-  setup() {
-    return useTabRouting("/vehicle", { controllers: "controllers", bluetooth: "bluetooth", features: "features" })
   },
   computed: {
     featureList() { return this.features },
@@ -65,34 +51,22 @@ export const Vehicle = {
     <div class="gx-view">
       <h2 style="margin-top:0;">Vehicle Controls</h2>
 
-      <GalaxyTabs :items="TABS" :active="tab" @select="selectTab" />
-
-      <template v-if="tab === 'controllers'">
-        <WheelControls />
-      </template>
-
-      <template v-else-if="tab === 'bluetooth'">
-        <BluetoothPanel />
-      </template>
-
-      <template v-else>
-        <GalaxySection title="Vehicle Features" icon="bi-check2-square">
-          <div style="padding: var(--sp-3); display:grid; gap:8px;">
-            <button v-for="f in featureList" :key="f.key" type="button"
-              class="gx-row" style="width:100%; border:none; background:transparent; color:inherit; cursor:pointer; text-align:left;"
-              @click="openFeature(f)">
-              <div class="gx-row__info">
-                <span class="gx-row__label"><i class="bi" :class="f.icon" style="margin-right:6px; color:var(--primary);"></i>{{ f.name }}</span>
-                <span class="gx-row__desc">{{ f.desc }}</span>
-              </div>
-              <span v-if="busy === f.key" class="gx-chip" style="background:var(--surface-variant);">Checking...</span>
-              <span v-else-if="statusOf(f.key) === 'denied'" class="gx-chip" style="background:var(--error);">Not supported</span>
-              <i v-else class="bi bi-chevron-right" style="color:var(--text-muted);"></i>
-            </button>
-            <p style="color:var(--text-muted); margin:0;">These features verify vehicle compatibility when launched.</p>
-          </div>
-        </GalaxySection>
-      </template>
+      <GalaxySection title="Vehicle Features" icon="bi-check2-square">
+        <div style="padding: var(--sp-3); display:grid; gap:8px;">
+          <button v-for="f in featureList" :key="f.key" type="button"
+            class="gx-row" style="width:100%; border:none; background:transparent; color:inherit; cursor:pointer; text-align:left;"
+            @click="openFeature(f)">
+            <div class="gx-row__info">
+              <span class="gx-row__label"><i class="bi" :class="f.icon" style="margin-right:6px; color:var(--primary);"></i>{{ f.name }}</span>
+              <span class="gx-row__desc">{{ f.desc }}</span>
+            </div>
+            <span v-if="busy === f.key" class="gx-chip" style="background:var(--surface-variant);">Checking...</span>
+            <span v-else-if="statusOf(f.key) === 'denied'" class="gx-chip" style="background:var(--error);">Not supported</span>
+            <i v-else class="bi bi-chevron-right" style="color:var(--text-muted);"></i>
+          </button>
+          <p style="color:var(--text-muted); margin:0;">These features verify vehicle compatibility when launched.</p>
+        </div>
+      </GalaxySection>
     </div>
   `,
 }

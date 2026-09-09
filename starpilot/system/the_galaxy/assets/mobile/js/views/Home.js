@@ -253,7 +253,7 @@ export const Home = {
         name: m.name,
         label: `${toInt(m.drives)} ${toNum(m.drives) === 1 ? "drive" : "drives"} using this model`,
       }))
-      return { hasModels: true, style: `background: conic-gradient(${segments.join(", ")})`, rows }
+      return { hasModels: true, style: `conic-gradient(${segments.join(", ")})`, rows }
     },
 
     storageView() {
@@ -510,7 +510,7 @@ export const Home = {
           <section class="gx-card dh-card">
             <div class="dh-card__head"><i class="bi bi-stars"></i><span>Most used models</span></div>
             <div v-if="modelView.hasModels" class="dh-body dh-models">
-              <div class="dh-chart-ring" :style="{ background: modelView.style }"></div>
+              <div class="dh-chart-ring" :style="{ backgroundImage: modelView.style }" role="img" aria-label="Model usage share"></div>
               <div class="dh-models__list">
                 <div v-for="m in modelView.rows" :key="m.name" class="dh-model">
                   <span class="dh-swatch" :style="{ background: m.color }"></span>

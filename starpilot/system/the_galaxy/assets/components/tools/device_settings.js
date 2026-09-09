@@ -1,5 +1,5 @@
 import { html, reactive } from "/assets/vendor/arrow-core.js"
-import { formatNumericParamValue, resolveVehicleUnitParam, vehicleSpeedUnit } from "/assets/mobile/js/params.js"
+import { formatNumericParamValue, resolveVehicleUnitParam } from "/assets/mobile/js/params.js"
 
 import { LONGITUDINAL_MODE_KEY, longitudinalModeLayout, validLongitudinalSnapshot } from "/assets/components/tools/longitudinal_mode.mjs"
 
@@ -107,9 +107,11 @@ function normalizeVehicleMake(value) {
 
 function isVehicleSettingVisible(section, param) {
   const allowedMakes = param.vehicle_makes || (section.name === "Vehicle" ? VEHICLE_SETTING_MAKES[param.key] : null)
-  if (!allowedMakes) return true
   const selectedMake = normalizeVehicleMake(state.values.CarMake)
-  return allowedMakes.some(make => normalizeVehicleMake(make) === selectedMake)
+  if (allowedMakes && !allowedMakes.some(make => normalizeVehicleMake(make) === selectedMake)) return false
+
+  const excludedMakes = param.excluded_vehicle_makes || []
+  return !excludedMakes.some(make => normalizeVehicleMake(make) === selectedMake)
 }
 
 function matchesSettingValueCondition(param) {
