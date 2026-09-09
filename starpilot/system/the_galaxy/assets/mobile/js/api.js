@@ -67,7 +67,18 @@ export const api = {
   getFlmWorkspace() { return requestOk("/api/flm/workspace", { cache: "no-store" }) },
   getFavoritesSlots() { return request("/api/favorites/slots", { cache: "no-store" }) },
   saveFavoritesSlots(slots) { return request("/api/favorites/slots", { method: "PUT", data: { slots } }) },
-  activateFavoriteAction(key) { return request("/api/favorites/action", { method: "POST", data: { key } }) },
+  async activateFavoriteAction(key) {
+    let data = { key }
+    if (key.startsWith("__starpilot_favorite_action__:longitudinal_")) {
+      const started = performance.now()
+      const state = await request("/api/longitudinal_mode", { cache: "no-store" })
+      if (state.locked || !Number.isFinite(state.action_expires_at) || performance.now() - started > 1500) {
+        throw new Error(state.reason || "Speed control state is unavailable. Check the current selection before retrying.")
+      }
+      data = { key, expected: state.values, expires_at: state.action_expires_at, acknowledged: true }
+    }
+    return request("/api/favorites/action", { method: "POST", data })
+  },
 
   getDeviceStatus() { return requestOk("/api/device/status") },
   getStats() { return requestOk("/api/stats") },

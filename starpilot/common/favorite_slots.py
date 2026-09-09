@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from openpilot.common.params import ParamKeyType, Params
+from openpilot.starpilot.common.longitudinal_mode_actions import ACTION_OPTIONS, ACTION_TARGETS, LEGACY_MODE_ACTIONS, request_mode_action
 
 
 FAVORITE_SLOTS_PARAM = "StarPilotFavoriteSlots"
@@ -20,6 +21,7 @@ FAVORITE_ACTION_DECEL_COUNTER = "FavoriteVirtualDecelCruiseCounter"
 FAVORITE_ACTION_ACCEL_COUNTER = "FavoriteVirtualAccelCruiseCounter"
 FAVORITE_ACTION_TRAFFIC_MODE_COUNTER = "FavoriteTrafficModeCounter"
 FAVORITE_ACTION_OPTIONS = (
+  *ACTION_OPTIONS,
   {
     "key": FAVORITE_ACTION_DISTANCE_DECREASE,
     "label": "Distance - / SET",
@@ -133,6 +135,9 @@ def build_favorite_slot_options(is_eligible_param: Callable[[str], bool], *,
     return []
 
   options = [dict(option) for option in FAVORITE_ACTION_OPTIONS]
+  for option in options:
+    if option["key"] in ACTION_TARGETS:
+      option["section"] = catalog_map.get("ConditionalExperimental", {}).get("section", "Longitudinal")
   for key, param_data in catalog_map.items():
     if param_data.get("galaxy_only"):
       continue
@@ -473,6 +478,8 @@ def request_starpilot_toggle_refresh(params_memory: Params | None = None) -> Non
 
 
 def trigger_favorite_action(key: str | None, params_memory: Params | None = None) -> bool:
+  if key in ACTION_TARGETS or key in LEGACY_MODE_ACTIONS:
+    return request_mode_action(key)
   if not is_favorite_action_key(key):
     return False
 
@@ -494,6 +501,9 @@ def execute_favorite_key(key: str | None, params: Params | None = None, params_m
     return False
   if not is_param_action_safe_onroad(key, params):
     return False
+
+  if key in LEGACY_MODE_ACTIONS:
+    return request_mode_action(key)
 
   if is_favorite_action_key(key):
     return trigger_favorite_action(key, params_memory)

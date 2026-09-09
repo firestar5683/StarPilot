@@ -5683,8 +5683,34 @@ def setup(app):
 
   @app.route("/api/favorites/action", methods=["POST"])
   def favorite_action():
-    data = request.get_json() or {}
+    from openpilot.starpilot.common.longitudinal_mode_actions import ACTION_TARGETS, resolve_action_target
+    import math
+    from time import monotonic
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+      return jsonify({"error": "Expected a JSON object."}), 400
     key = str(data.get("key") or "").strip()
+    if key in ACTION_TARGETS:
+      with LONGITUDINAL_MODE_LOCK:
+        try:
+          # Native callers expire their request rather than queue a delayed mode
+          # change after a stalled server. Browser presses execute immediately.
+          deadline = data.get("expires_at")
+          if type(deadline) not in (int, float) or not math.isfinite(deadline) or not 0 < deadline - monotonic() <= 2:
+            return jsonify({"error": "Speed control request expired. Check the current selection before retrying."}), 409
+          current = longitudinal_mode_snapshot(params, _get_longitudinal_mode_capable())
+          target = resolve_action_target(key, current["mode"])
+          try:
+            if monotonic() >= deadline:
+              return jsonify({"error": "Speed control request expired."}), 409
+            result = set_longitudinal_mode(params, target, data.get("expected"), _get_longitudinal_mode_capable, data.get("acknowledged") is True)
+          finally:
+            update_starpilot_toggles()
+          return jsonify({**result, "message": "Speed control mode selected."}), 200
+        except ModeError as error:
+          return jsonify({"error": str(error)}), error.status
+        except Exception:
+          return jsonify({"error": "Speed control mode unavailable. Check the current selection before retrying."}), 503
     if not is_favorite_action_key(key):
       return jsonify({"error": "Unknown favorite action."}), 400
     if not trigger_favorite_action(key, params_memory):
@@ -5693,10 +5719,11 @@ def setup(app):
 
   @app.route("/api/longitudinal_mode", methods=["GET", "PUT"])
   def longitudinal_mode():
+    from time import monotonic
     with LONGITUDINAL_MODE_LOCK:
       try:
         if request.method == "GET":
-          return jsonify(longitudinal_mode_snapshot(params, _get_longitudinal_mode_capable())), 200
+          return jsonify({**longitudinal_mode_snapshot(params, _get_longitudinal_mode_capable()), "action_expires_at": monotonic() + 2.0}), 200
         data = request.get_json(silent=True)
         if not isinstance(data, dict):
           return jsonify({"error": "Expected a JSON object."}), 400

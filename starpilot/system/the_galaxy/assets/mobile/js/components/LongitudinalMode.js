@@ -1,3 +1,4 @@
+import { GalaxySelect } from "./GalaxySelect.js"
 import { LONGITUDINAL_MODE_KEY, LONGITUDINAL_MODES, validLongitudinalSnapshot } from "/assets/components/tools/longitudinal_mode.mjs"
 import { SettingTree } from "./SettingTree.js"
 import { isSettingVisible } from "../params.js"
@@ -5,7 +6,7 @@ import { isSettingVisible } from "../params.js"
 // Selection is API readback, not the conditional controller's ExperimentalMode output.
 export const LongitudinalMode = {
   name: "LongitudinalMode",
-  components: { SettingTree },
+  components: { GalaxySelect, SettingTree },
   props: { section: { type: Object, required: true }, values: { type: Object, required: true } },
   emits: ["change"],
   data() { return { snapshot: null, pending: false, reading: false, expanded: {}, open: false, error: "", generation: 0, timer: null, disposed: false, modes: LONGITUDINAL_MODES } },
@@ -68,11 +69,10 @@ export const LongitudinalMode = {
           <span v-if="error" class="gx-row__desc" role="alert">{{ error }}</span>
         </div>
         <div class="gx-mode-select">
-          <div class="gx-field gx-mode-select__label" aria-hidden="true"><span>{{ label }}</span><i class="bi bi-chevron-down"></i></div>
-          <select id="gx-longitudinal-mode" :value="mode" :disabled="locked" aria-describedby="gx-longitudinal-description" @change="select">
+          <GalaxySelect class="gx-field gx-field--full" id="gx-longitudinal-mode" :value="mode" :disabled="locked" aria-describedby="gx-longitudinal-description" @change="select">
             <option v-if="!snapshot" value="">Unavailable</option>
             <option v-for="m in modes" :key="m.value" :value="m.value">{{ m.label }}</option>
-          </select>
+          </GalaxySelect>
         </div>
       </div>
       <button v-if="conditional" type="button" class="gx-manage-btn" :aria-expanded="open" aria-controls="gx-longitudinal-children" @click="open = !open">
