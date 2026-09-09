@@ -328,4 +328,14 @@ def test_set_speed_limit_unavailable_on_stock_pcm_without_helper():
 def test_speed_limit_controller_available_on_openpilot_longitudinal_or_redneck():
   assert spv.speed_limit_controller_available(openpilot_longitudinal=True, redneck_cruise=False) is True
   assert spv.speed_limit_controller_available(openpilot_longitudinal=False, redneck_cruise=True) is True
+
+
+def test_toyota_pcm_cruise_uses_hardware_reverse_instead_of_software_intervals():
+  assert spv.software_cruise_intervals_available(True, "toyota", True, True, True) is False
+  assert spv.reverse_cruise_available(True, "toyota", True) is True
+
+
+def test_non_toyota_software_cruise_keeps_custom_intervals():
+  assert spv.software_cruise_intervals_available(True, "hyundai", False, True, True) is True
+  assert spv.reverse_cruise_available(True, "hyundai", False) is False
   assert spv.speed_limit_controller_available(openpilot_longitudinal=False, redneck_cruise=False) is False

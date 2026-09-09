@@ -7,6 +7,7 @@ from openpilot.system.manager.launch_param_migrations import (
   DEFAULT_CAMERA_VIEW,
   DEVELOPER_METRIC_DISPLAY_KEYS,
   DEVELOPER_METRIC_DISPLAY_MIGRATION_MARKER,
+  GALAXY_NEW_DEFAULT_MIGRATION_MARKER,
   DEFAULT_LANE_CHANGE_SMOOTHING,
   DEFAULT_STEER_KP,
   DEVICE_SHUTDOWN_HOURS_MIGRATION_MARKER,
@@ -14,7 +15,7 @@ from openpilot.system.manager.launch_param_migrations import (
   LAUNCH_PARAM_MIGRATION_MARKER,
   LATERAL_METHOD_REBRAND_MIGRATION_MARKER,
   MARKER_DIRNAME,
-  REVERSE_CRUISE_REMOVAL_MIGRATION_MARKER,
+  REVERSE_CRUISE_RESTORE_MIGRATION_MARKER,
   STANDARD_ACCELERATION_PROFILE,
   SPEED_LIMIT_VISIBILITY_MIGRATION_MARKER,
   LEGACY_UI_SELECTION_MIGRATION_MARKER,
@@ -178,14 +179,42 @@ def test_apply_launch_param_migrations_preserves_custom_camera_view(tmp_path):
   assert params.get_int("CameraView") == 0
 
 
-def test_apply_launch_param_migrations_removes_reverse_cruise_param(tmp_path):
+def test_apply_launch_param_migrations_restores_reverse_cruise_from_swapped_intervals(tmp_path):
   params = FileBackedFakeParams(tmp_path / "params")
-  params.put_bool("ReverseCruise", True)
+  params.put_float("CustomCruise", 5.0)
+  params.put_float("CustomCruiseLong", 1.0)
 
   apply_launch_param_migrations(params)
 
-  assert not Path(params.get_param_path("ReverseCruise")).exists()
-  assert marker_path(tmp_path, REVERSE_CRUISE_REMOVAL_MIGRATION_MARKER).is_file()
+  assert params.get_bool("ReverseCruise")
+  assert marker_path(tmp_path, REVERSE_CRUISE_RESTORE_MIGRATION_MARKER).is_file()
+
+
+def test_apply_launch_param_migrations_preserves_explicit_reverse_cruise_choice(tmp_path):
+  params = FileBackedFakeParams(tmp_path / "params")
+  params.put_float("CustomCruise", 5.0)
+  params.put_float("CustomCruiseLong", 1.0)
+  params.put_bool("ReverseCruise", False)
+
+  apply_launch_param_migrations(params)
+
+  assert not params.get_bool("ReverseCruise")
+
+
+def test_apply_launch_param_migrations_enables_galaxy_new_default_once(tmp_path):
+  params = FileBackedFakeParams(tmp_path / "params")
+  params.put_bool("GalaxyMobileDefault", False)
+
+  apply_launch_param_migrations(params)
+
+  assert params.get_bool("GalaxyMobileDefault")
+  marker = marker_path(tmp_path, GALAXY_NEW_DEFAULT_MIGRATION_MARKER)
+  assert marker.is_file()
+
+  params.put_bool("GalaxyMobileDefault", False)
+  apply_launch_param_migrations(params)
+
+  assert not params.get_bool("GalaxyMobileDefault")
 
 
 def test_apply_launch_param_migrations_applies_branch_defaults_for_existing_installs(tmp_path):

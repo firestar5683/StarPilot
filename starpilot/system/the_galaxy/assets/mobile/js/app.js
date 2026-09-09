@@ -8,12 +8,12 @@ import { Logs } from "./views/Logs.js"
 import { Tuning } from "./views/Tuning.js"
 import { Navigation } from "./views/Navigation.js"
 import { Vehicle } from "./views/Vehicle.js"
+import { Bluetooth } from "./views/Bluetooth.js"
 import { SystemTools } from "./views/SystemTools.js"
 import { ToolEmbed } from "./views/ToolEmbed.js"
 import { Doors } from "./views/Doors.js"
 import { Galaxy } from "./views/Galaxy.js"
 import { Tsk } from "./views/Tsk.js"
-import { Sentry } from "./views/Sentry.js"
 import { ModelManager } from "./views/ModelManager.js"
 import { Plots } from "./views/Plots.js"
 import { TestingGround } from "./views/TestingGround.js"
@@ -43,12 +43,13 @@ const VIEWS = {
   "/tuning": Tuning,
   "/navigation": Navigation,
   "/vehicle": Vehicle,
+  "/bluetooth": Bluetooth,
   "/system": SystemTools,
   "/embed": ToolEmbed,
   "/manage_doors": Doors,
   "/galaxy": Galaxy,
   "/manage_tsk": Tsk,
-  "/sentry": Sentry,
+  "/sentry": Cameras,
   "/manage_models": ModelManager,
   "/plots": Plots,
   "/testing_ground": TestingGround,
@@ -89,6 +90,71 @@ app.mount("#galaxy-app")
 
 initRouter()
 
+// Disable card blur during document scrolling.
+;(() => {
+  let timer = null
+  let scrollEnded = true
+  const touches = new Set()
+  const nativeScrollEnd = "onscrollend" in document
+  const body = document.body
+
+  const isModalEvent = (e) => {
+    const t = e.target
+    return t instanceof Element && t.closest(".gx-scrim, .gx-sheet, .gx-dialog, .gx-drawer") !== null
+  }
+
+  const setScrolling = (active) => {
+    if (active) {
+      if (!body.classList.contains("is-scrolling")) body.classList.add("is-scrolling")
+    } else if (!touches.size && body.classList.contains("is-scrolling")) {
+      body.classList.remove("is-scrolling")
+    }
+  }
+
+  const scheduleRestore = () => {
+    clearTimeout(timer)
+    const scrollY = window.scrollY
+    // Finger release and completion notifications can precede the last movement.
+    // Keep glass disabled until the scroll position has also settled.
+    timer = setTimeout(() => {
+      if (window.scrollY !== scrollY) scheduleRestore()
+      else setScrolling(false)
+    }, 120)
+  }
+
+  document.addEventListener("scroll", () => {
+    scrollEnded = false
+    setScrolling(true)
+    clearTimeout(timer)
+    if (!nativeScrollEnd) scheduleRestore()
+  }, { passive: true })
+
+  document.addEventListener("scrollend", () => {
+    scrollEnded = true
+    scheduleRestore()
+  }, { passive: true })
+
+  window.addEventListener("touchstart", (e) => {
+    if (isModalEvent(e)) return
+    for (const touch of e.changedTouches) touches.add(touch.identifier)
+  }, { passive: true })
+
+  const releaseTouches = (e) => {
+    for (const touch of e.changedTouches) touches.delete(touch.identifier)
+    if (!touches.size && (scrollEnded || !nativeScrollEnd)) scheduleRestore()
+  }
+  window.addEventListener("touchend", releaseTouches, { passive: true })
+  window.addEventListener("touchcancel", releaseTouches, { passive: true })
+
+  window.addEventListener("hashchange", () => {
+    scrollEnded = true
+    touches.clear()
+    clearTimeout(timer)
+    body.classList.remove("is-scrolling")
+  }, { passive: true })
+})()
+
+// Layer 2: Ambient Hero Stars Spawner
 ;(() => {
   const bg = document.getElementById("galaxy-bg")
   if (!bg) return

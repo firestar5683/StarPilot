@@ -10,7 +10,6 @@ import { VehicleFeatures } from "/assets/components/tools/vehicle_features.js"
 import { TSKManager } from "/assets/components/tools/tsk_manager.js"
 import { GalaxyPairing } from "/assets/components/tools/galaxy.js"
 import { Home } from "/assets/components/home/home.js"
-import { LongitudinalManeuvers } from "/assets/components/tools/longitudinal_maneuvers.js"
 import { MapsManager } from "/assets/components/tools/maps.js"
 import { NavDestination } from "/assets/components/navigation/navigation_destination.js?v=nav-search-context-2"
 import { NavKeys } from "/assets/components/navigation/navigation_keys.js?v=app-keys-session-1"
@@ -91,7 +90,6 @@ function Root() {
     createRoute("model_laboratory", "/model_laboratory", ModelLaboratory),
     createRoute("tuning", "/tuning", Tuning),
     createRoute("lateral_maneuvers", "/lateral_maneuvers", Tuning),
-    createRoute("longitudinal_maneuvers", "/longitudinal_maneuvers", LongitudinalManeuvers),
     createRoute("maps", "/manage_maps", MapsManager),
     createRoute("plots", "/plots", LivePlots),
     createRoute("thememaker", "/theme_maker", ThemeMaker),

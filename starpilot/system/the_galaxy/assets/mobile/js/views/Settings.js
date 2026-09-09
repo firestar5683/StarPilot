@@ -2,7 +2,7 @@ import { api, showSnackbar } from "../api.js"
 import { navigate, store } from "../store.js"
 import {
   applyParamChange, countAdvancedHiddenByDeveloperMode, GALAXY_DEVELOPER_MODE_KEY, isSettingVisible,
-  resolveVehicleUnitParam, slugifySectionName, vehicleSpeedUnit,
+  resolveVehicleUnitParam, slugifySectionName,
 } from "../params.js"
 import { SettingTree } from "../components/SettingTree.js"
 import { PersonalityProfiles } from "../components/PersonalityProfiles.js"
@@ -50,7 +50,6 @@ export const Settings = {
       return this.sections.find((s) => s.slug === this.activeSectionSlug) || this.sections[0]
     },
     hiddenAdvancedCount() { return countAdvancedHiddenByDeveloperMode(this.layout, this.values) },
-    speedUnit() { return vehicleSpeedUnit(this.values) },
     searchActive() { return !!this.searchTerm },
     searchTerm: {
       get() { return store.search },
@@ -135,11 +134,6 @@ export const Settings = {
   template: `
     <div>
       <h2 style="margin-top:0;">Toggles</h2>
-
-      <div class="gx-unit-note">
-        <i class="bi bi-speedometer2"></i>
-        <span>Vehicle-unit speed settings use <strong>{{ speedUnit }}</strong> and follow the comma's <em>Use Metric System</em> toggle. Each control shows its adjustment step.</span>
-      </div>
 
       <DevModeBanner :hidden-count="hiddenAdvancedCount" :dev-mode-on="devModeOn" />
 

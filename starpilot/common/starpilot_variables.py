@@ -396,6 +396,16 @@ def speed_limit_controller_available(openpilot_longitudinal: bool, redneck_cruis
   return openpilot_longitudinal or redneck_cruise
 
 
+def software_cruise_intervals_available(quality_of_life: bool, car_make: str, pcm_cruise: bool,
+                                        openpilot_longitudinal: bool, pcm_cruise_speed: bool) -> bool:
+  return bool(quality_of_life and not (car_make == "toyota" and pcm_cruise) and
+              (openpilot_longitudinal or not pcm_cruise_speed))
+
+
+def reverse_cruise_available(quality_of_life: bool, car_make: str, pcm_cruise: bool) -> bool:
+  return bool(quality_of_life and car_make == "toyota" and pcm_cruise)
+
+
 def migrate_cancel_button_controls(params: Params | None = None) -> bool:
   params = params or Params(return_defaults=True)
   if params.get_bool(CANCEL_BUTTON_MIGRATION_KEY) or not params.get_bool("RemapCancelToDistance"):
@@ -1361,10 +1371,17 @@ class StarPilotVariables:
     toggle.pause_lateral_below_signal = self.get_value("PauseLateralOnSignal", condition=toggle.pause_lateral_below_speed != 0)
     toggle.pause_lateral_signal_delay = self.get_value("LateralResumeDelay", cast=float, condition=toggle.pause_lateral_below_signal, default=0.0, min=0.0, max=5.0)
 
-    quality_of_life_longitudinal = toggle.openpilot_longitudinal and self.get_value("QOLLongitudinal")
-    quality_of_life_cruise = self.get_value("QOLLongitudinal") and (toggle.openpilot_longitudinal or not FPCP.pcmCruiseSpeed)
+    quality_of_life = self.get_value("QOLLongitudinal")
+    quality_of_life_longitudinal = toggle.openpilot_longitudinal and quality_of_life
+    quality_of_life_cruise = software_cruise_intervals_available(
+      quality_of_life, toggle.car_make, pcm_cruise, toggle.openpilot_longitudinal, FPCP.pcmCruiseSpeed,
+    )
     toggle.cruise_increase = self.get_value("CustomCruise", cast=float, condition=quality_of_life_cruise, default=1.0)
     toggle.cruise_increase_long = self.get_value("CustomCruiseLong", cast=float, condition=quality_of_life_cruise, default=5.0)
+    toggle.reverse_cruise_increase = self.get_value(
+      "ReverseCruise",
+      condition=reverse_cruise_available(quality_of_life, toggle.car_make, pcm_cruise),
+    )
     toggle.force_stops = self.get_value("ForceStops", condition=quality_of_life_longitudinal)
     toggle.force_stop_distance_offset = self.get_value("ForceStopDistanceOffset", cast=int, condition=(quality_of_life_longitudinal and toggle.force_stops))
     toggle.force_standstill = self.get_value("ForceStandstill", condition=quality_of_life_longitudinal)

@@ -20,6 +20,7 @@ export const BluetoothPanel = {
     availableDevices() { return this.devices.filter((d) => !d.paired && !d.trusted && !d.connected) },
   },
   methods: {
+    address,
     async refresh() {
       try {
         const p = await api.getBluetoothStatus()

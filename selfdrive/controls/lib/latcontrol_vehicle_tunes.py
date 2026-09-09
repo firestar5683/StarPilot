@@ -289,6 +289,13 @@ GENESIS_G70_CENTER_OUTPUT_TAPER_LAT = 0.30
 GENESIS_G70_CENTER_OUTPUT_TAPER_LAT_WIDTH = 0.10
 GENESIS_G70_CENTER_OUTPUT_TAPER_SPEED = 18.0
 GENESIS_G70_CENTER_OUTPUT_TAPER_SPEED_WIDTH = 3.0
+GENESIS_G70_HIGH_SPEED_TRANSITION_DAMPING_MAX = 0.18
+GENESIS_G70_HIGH_SPEED_TRANSITION_DAMPING_SPEED = 45.0 * CV.MPH_TO_MS
+GENESIS_G70_HIGH_SPEED_TRANSITION_DAMPING_SPEED_WIDTH = 8.0 * CV.MPH_TO_MS
+GENESIS_G70_HIGH_SPEED_TRANSITION_DAMPING_LAT = 0.45
+GENESIS_G70_HIGH_SPEED_TRANSITION_DAMPING_LAT_WIDTH = 0.15
+GENESIS_G70_HIGH_SPEED_TRANSITION_DAMPING_JERK = 0.35
+GENESIS_G70_HIGH_SPEED_TRANSITION_DAMPING_JERK_WIDTH = 0.15
 GENESIS_G70_LOW_SPEED_CENTER_TAPER_MAX = 0.06
 GENESIS_G70_LOW_SPEED_CENTER_TAPER_LAT = 0.14
 GENESIS_G70_LOW_SPEED_CENTER_TAPER_LAT_WIDTH = 0.05
@@ -3243,6 +3250,18 @@ def get_genesis_g70_center_output_scale(desired_lateral_accel: float, v_ego: flo
   low_speed_center_weight = _sigmoid((GENESIS_G70_LOW_SPEED_CENTER_TAPER_LAT - abs(desired_lateral_accel)) /
                                      GENESIS_G70_LOW_SPEED_CENTER_TAPER_LAT_WIDTH)
   reduction += GENESIS_G70_LOW_SPEED_CENTER_TAPER_MAX * low_speed_weight * low_speed_center_weight
+  return 1.0 - reduction
+
+
+def get_genesis_g70_high_speed_transition_scale(desired_lateral_accel: float,
+                                                desired_lateral_jerk: float, v_ego: float) -> float:
+  speed_weight = _sigmoid((v_ego - GENESIS_G70_HIGH_SPEED_TRANSITION_DAMPING_SPEED) /
+                          GENESIS_G70_HIGH_SPEED_TRANSITION_DAMPING_SPEED_WIDTH)
+  center_weight = _sigmoid((GENESIS_G70_HIGH_SPEED_TRANSITION_DAMPING_LAT - abs(desired_lateral_accel)) /
+                           GENESIS_G70_HIGH_SPEED_TRANSITION_DAMPING_LAT_WIDTH)
+  jerk_weight = _sigmoid((abs(desired_lateral_jerk) - GENESIS_G70_HIGH_SPEED_TRANSITION_DAMPING_JERK) /
+                          GENESIS_G70_HIGH_SPEED_TRANSITION_DAMPING_JERK_WIDTH)
+  reduction = (GENESIS_G70_HIGH_SPEED_TRANSITION_DAMPING_MAX * speed_weight * center_weight * jerk_weight)
   return 1.0 - reduction
 
 

@@ -177,9 +177,11 @@ function normalizeVehicleMake(value) {
 
 function isVehicleSettingVisible(section, param) {
   const allowedMakes = param.vehicle_makes || (section.name === "Vehicle" ? VEHICLE_SETTING_MAKES[param.key] : null)
-  if (!allowedMakes) return true
   const selectedMake = normalizeVehicleMake(state.values.CarMake)
-  return allowedMakes.some(make => normalizeVehicleMake(make) === selectedMake)
+  if (allowedMakes && !allowedMakes.some(make => normalizeVehicleMake(make) === selectedMake)) return false
+
+  const excludedMakes = param.excluded_vehicle_makes || []
+  return !excludedMakes.some(make => normalizeVehicleMake(make) === selectedMake)
 }
 
 function matchesSettingValueCondition(param) {
@@ -2693,11 +2695,6 @@ export function DeviceSettings({ params }) {
   return html`
     <div class="ds-wrapper">
       <h2>Toggles</h2>
-
-      <div class="ds-unit-note">
-        <i class="bi bi-speedometer2"></i>
-        <span>Vehicle-unit speed settings use <strong>${() => vehicleSpeedUnit(state.values)}</strong> and follow the comma's <em>Use Metric System</em> toggle. Each control shows its adjustment step.</span>
-      </div>
 
       <div class="ds-search-row">
         <input

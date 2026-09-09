@@ -17,9 +17,9 @@ export const DevModeBanner = {
       <i class="bi bi-shield-lock gx-alert__icon"></i>
       <div class="gx-alert__body">
         <strong>{{ hiddenCount }} advanced setting{{ hiddenCount !== 1 ? "s" : "" }} hidden.</strong>
-        <span>Advanced features are tucked away until you enable Developer Mode.</span>
+        <span>Want more advanced features or missing a few toggles? Enable Developer Mode whenever you’re ready.</span>
       </div>
-      <button type="button" class="gx-btn gx-btn--tonal" @click="unlock">Enable Developer Mode</button>
+      <button type="button" class="gx-btn gx-btn--tonal" @click="unlock">Go to Developer Tab</button>
     </div>
   `,
 }

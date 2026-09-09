@@ -66,6 +66,15 @@ def test_galaxy_layout_contains_basic_mode_controls():
   assert {"AlphaLongitudinalEnabled", "ForceOffroad", "GalaxyDeveloperMode"} <= sections["Developer"].keys()
 
 
+def test_galaxy_new_ui_is_the_visible_default_choice():
+  galaxy_default = _params_by_section(_layout())["Developer"]["GalaxyMobileDefault"]
+
+  assert _declared_default("GalaxyMobileDefault") == "1"
+  assert galaxy_default["settings_tier"] == "simple"
+  assert galaxy_default["label"] == "Use Galaxy (new) by Default"
+  assert "Galaxy (old)" in galaxy_default["description"]
+
+
 def test_ford_lateral_controls_are_ford_only_and_galaxy_only():
   lateral = _params_by_section(_layout())["Lateral (Steering)"]
   ford_keys = {
@@ -140,6 +149,15 @@ def test_speed_settings_follow_vehicle_units_with_one_unit_steps():
   assert params["CustomCruise"]["metric_max"] == 150
   assert params["CCMSetSpeedMargin"]["metric_max"] == 30
   assert params["PulseGlideSpeedDelta"]["imperial_max"] == 15
+
+
+def test_cruise_controls_are_split_between_toyota_and_software_cruise():
+  longitudinal = _params_by_section(_layout())["Longitudinal (Speed & Following)"]
+
+  assert longitudinal["CustomCruise"]["excluded_vehicle_makes"] == ["Lexus", "Toyota"]
+  assert longitudinal["CustomCruiseLong"]["excluded_vehicle_makes"] == ["Lexus", "Toyota"]
+  assert longitudinal["ReverseCruise"]["vehicle_makes"] == ["Lexus", "Toyota"]
+  assert _declared_default("ReverseCruise") == "0"
 
 
 def test_curve_speed_controller_no_lead_toggle_is_nested_under_csc():

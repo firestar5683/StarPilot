@@ -63,6 +63,7 @@
   --glass-border-light: rgba(255, 255, 255, 0.2);
   --glass-shadow: 0 8px 24px 0 rgba(0, 0, 0, 0.35);
   --glass-blur: blur(4px);
+  --card-scroll-bg: rgba(22, 18, 38, 0.95);
   --glass-text: #f3f2f8;
   --glass-accent: #9d72ff;
 
@@ -132,6 +133,7 @@
   --surface-container: rgba(255, 255, 255, 0.75);
   --surface-container-high: rgba(255, 255, 255, 0.95);
   --surface-container-low: rgba(240, 243, 252, 0.75);
+  --card-scroll-bg: rgba(245, 246, 252, 0.96);
 
   --on-surface: #171526;
   --on-surface-variant: #5f5b7d;
@@ -213,6 +215,8 @@ body {
   pointer-events: none;
   transform: translateZ(0);
   will-change: transform;
+  isolation: isolate;
+  contain: strict;
 }
 
 #galaxy-bg::before {
@@ -231,7 +235,6 @@ body {
   opacity: 0.5;
   will-change: transform;
   transform: translate3d(var(--gx-para-x), 0, 0);
-  animation: galaxy-drift-smooth 160s linear infinite;
 }
 
 #galaxy-bg::after {
@@ -248,7 +251,6 @@ body {
   opacity: 0.6;
   will-change: transform;
   transform: translate3d(var(--gx-para-x), 0, 0);
-  animation: galaxy-drift-smooth 100s linear infinite;
 }
 
 #galaxy-bg .galaxy-hero {
@@ -261,11 +263,6 @@ body {
   animation: galaxy-twinkle 6s ease-in-out infinite alternate;
 }
 
-@keyframes galaxy-drift-smooth {
-  from { transform: translate3d(0, 0, 0); }
-  to { transform: translate3d(0, -400px, 0); }
-}
-
 @keyframes galaxy-twinkle {
   0%, 100% { opacity: 0.3; transform: scale(0.9); }
   50% { opacity: 1; transform: scale(1.2); }
@@ -275,6 +272,11 @@ body {
   #galaxy-bg, #galaxy-bg::before, #galaxy-bg::after, #galaxy-bg .galaxy-hero {
     animation: none !important;
   }
+}
+
+/* Keep decorative animation out of modal backdrops and drawer content. */
+body:has(.gx-scrim, .gx-underlay, .gx-drawer.open) #galaxy-bg .galaxy-hero {
+  display: none;
 }
 
 [data-theme="light"] #galaxy-bg {
@@ -333,6 +335,8 @@ ul { list-style: none; margin: 0; padding: 0; }
   position: sticky;
   top: 0;
   z-index: var(--z-appbar);
+  transform: translateZ(0);
+  isolation: isolate;
 }
 
 .gx-appbar__pill {
@@ -352,7 +356,8 @@ ul { list-style: none; margin: 0; padding: 0; }
   transition: background-color var(--motion-fast), border-color var(--motion-fast);
 }
 
-.gx-appbar__back {
+.gx-appbar .gx-appbar__back,
+.gx-appbar .gx-theme-toggle {
   background: var(--glass-bg);
   backdrop-filter: var(--glass-blur);
   -webkit-backdrop-filter: var(--glass-blur);
@@ -366,7 +371,8 @@ ul { list-style: none; margin: 0; padding: 0; }
   transition: transform var(--motion-fast), background-color var(--motion-fast);
 }
 
-.gx-appbar__back:active { transform: scale(0.92); }
+.gx-appbar .gx-appbar__back:active,
+.gx-appbar .gx-theme-toggle:active { transform: scale(0.92); }
 
 .gx-appbar__title {
   background: linear-gradient(135deg, #8b6cc5 0%, #5ec8c8 55%, #d4789c 100%);
@@ -383,6 +389,24 @@ ul { list-style: none; margin: 0; padding: 0; }
   height: 28px;
   margin-right: var(--sp-2);
   vertical-align: middle;
+}
+
+.gx-appbar__home {
+  display: inline-flex;
+  align-items: center;
+  cursor: pointer;
+  padding: 2px 8px;
+  border-radius: var(--radius-full);
+  transition: background-color var(--motion-fast), transform var(--motion-fast);
+}
+
+.gx-appbar__home:hover { background-color: var(--glass-bg-hover); }
+
+.gx-appbar__home:active { transform: scale(0.96); }
+
+.gx-appbar__home:focus-visible {
+  outline: 2px solid var(--primary);
+  outline-offset: 2px;
 }
 
 .gx-appbar__right {
@@ -437,27 +461,6 @@ ul { list-style: none; margin: 0; padding: 0; }
 .gx-icon-btn i { font-size: 1.3rem; }
 .gx-back-btn { display: none; }
 .gx-menu-btn { display: inline-flex; }
-
-.gx-theme-toggle {
-  background: var(--glass-bg);
-  backdrop-filter: var(--glass-blur);
-  -webkit-backdrop-filter: var(--glass-blur);
-  border: 1px solid var(--glass-border);
-  border-radius: 50%;
-  box-shadow: var(--glass-shadow);
-  color: var(--glass-text);
-  flex: none;
-  height: var(--touch-target);
-  width: var(--touch-target);
-  transition: transform var(--motion-fast), background-color var(--motion-fast), border-color var(--motion-fast);
-}
-
-.gx-theme-toggle:active { transform: scale(0.92); }
-
-[data-theme="light"] .gx-theme-toggle {
-  border: 1.5px solid var(--primary);
-  box-shadow: 0 2px 8px rgba(120, 73, 232, 0.2);
-}
 
 .gx-searchwrap {
   align-items: center;
@@ -540,7 +543,10 @@ ul { list-style: none; margin: 0; padding: 0; }
   position: fixed;
   bottom: calc(18px + env(safe-area-inset-bottom, 0px));
   left: 50%;
-  transform: translateX(-50%);
+  transform: translateX(-50%) translateZ(0);
+  will-change: transform;
+  isolation: isolate;
+  contain: layout style;
   z-index: 1000;
 
   display: flex;
@@ -616,7 +622,37 @@ ul { list-style: none; margin: 0; padding: 0; }
   box-shadow: var(--elev-1);
   margin-bottom: var(--sp-4);
   overflow: hidden;
-  transition: transform var(--motion-fast), box-shadow var(--motion-fast);
+  transition: transform var(--motion-fast), box-shadow var(--motion-fast), background-color 0.15s ease-out;
+}
+
+/* Surgical content-visibility for top-level non-collapsible cards */
+.dh-card:not(.dh-stat),
+.gx-content > div > .gx-card {
+  content-visibility: auto;
+  contain-intrinsic-size: 280px;
+  contain-intrinsic-size: auto 280px;
+}
+
+.dh-stat {
+  content-visibility: auto;
+  contain-intrinsic-size: 110px;
+  contain-intrinsic-size: auto 110px;
+}
+
+/* Disarm containment on collapsible sections and nested cards */
+.gx-card:has(.gx-section__body),
+.gx-card .gx-card,
+.gx-tree-node .gx-card {
+  content-visibility: visible !important;
+  contain-intrinsic-size: none !important;
+}
+
+/* Velocity-Adaptive Glass: bypass blur on scrolling cards with contrast boost */
+body.is-scrolling .gx-card,
+body.is-scrolling .gx-tile {
+  backdrop-filter: none !important;
+  -webkit-backdrop-filter: none !important;
+  background: var(--card-scroll-bg) !important;
 }
 
 .gx-unit-note {
@@ -635,6 +671,48 @@ ul { list-style: none; margin: 0; padding: 0; }
 .gx-unit-note i {
   color: var(--primary);
   font-size: 1.2rem;
+}
+
+.gx-row.gx-diagnostic-row--changed {
+  background: rgba(139, 108, 197, 0.18) !important;
+  box-shadow: inset 3px 0 var(--primary);
+}
+
+.gx-update-progress {
+  display: grid;
+  gap: 6px;
+  margin-top: var(--sp-2);
+}
+
+.gx-update-progress__track {
+  background: rgba(255, 255, 255, 0.12);
+  border-radius: var(--radius-full);
+  height: 12px;
+  overflow: hidden;
+}
+
+.gx-update-progress__fill {
+  background: linear-gradient(90deg, #5ec8c8 0%, #8b6cc5 100%);
+  border-radius: inherit;
+  height: 100%;
+  transition: width 0.4s ease;
+}
+
+.gx-update-progress__fill--error {
+  background: linear-gradient(90deg, #b43a3a 0%, #de5656 100%);
+}
+
+.gx-update-progress__meta {
+  align-items: center;
+  display: flex;
+  font-size: var(--fs-sm);
+  gap: var(--sp-2);
+  justify-content: space-between;
+}
+
+.gx-update-progress small {
+  color: var(--text-muted);
+  overflow-wrap: anywhere;
 }
 
 [data-theme="light"] .gx-card {
@@ -1443,6 +1521,9 @@ input[type="color"].gx-color {
 
 .gx-fade-enter-active, .gx-fade-leave-active { transition: opacity var(--motion-base); }
 .gx-fade-enter-from, .gx-fade-leave-to { opacity: 0; }
+
+/* Keep the underlay (and star suppression) until the drawer finishes closing. */
+.gx-underlay.gx-fade-leave-active { transition: opacity var(--motion-slow); }
 
 .gx-slide-enter-active, .gx-slide-leave-active {
   transition: transform var(--motion-base), opacity var(--motion-base);

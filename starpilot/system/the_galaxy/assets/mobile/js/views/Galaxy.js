@@ -4,6 +4,13 @@ import { PwaInstallSection, isFirestarOrigin } from "../components/PwaInstallSec
 
 const isTunnel = () => isFirestarOrigin()
 
+function localDeviceUrl(ip, route = "/") {
+  const raw = String(ip || "").trim()
+  if (!raw || raw === "unknown") return ""
+  const host = raw.includes(":") && !raw.startsWith("[") ? `[${raw}]` : raw
+  return `http://${host}:8082/#${route}`
+}
+
 export const Galaxy = {
   name: "Galaxy",
   components: { PwaInstallSection },
@@ -14,10 +21,17 @@ export const Galaxy = {
       url: "",
       password: "",
       submitting: false,
+      localUrl: "",
     }
   },
   async mounted() {
-    if (this.isTunnel) return
+    if (this.isTunnel) {
+      try {
+        const status = await api.getDeviceStatus()
+        this.localUrl = localDeviceUrl(status?.lanIp, "/galaxy")
+      } catch (e) {}
+      return
+    }
     try {
       const data = await api.getGalaxyStatus()
       this.paired = !!data?.paired
@@ -76,7 +90,14 @@ export const Galaxy = {
             <i class="bi bi-satellite gx-alert__icon"></i>
             <div class="gx-alert__body">
               <strong>Galaxy Pairing Unavailable via Galaxy</strong>
-              <span>Galaxy pairing requires a direct connection. Connect to your device's local network to use this feature.</span>
+              <span>
+                Galaxy pairing requires a direct connection. If you are on the same local network, connect here:
+                <br />
+                <a v-if="localUrl" class="gx-btn gx-btn--tonal" :href="localUrl" style="margin-top:var(--sp-3);">
+                  <i class="bi bi-box-arrow-up-right"></i> Open Galaxy Locally
+                </a>
+                <span v-else>your device's local IP on port 8082.</span>
+              </span>
             </div>
           </div>
         </section>

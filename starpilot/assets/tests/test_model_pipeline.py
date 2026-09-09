@@ -405,8 +405,18 @@ def test_external_gpu_compile_uses_agnos_isolated_cpu(monkeypatch):
   command = ["python3", "compile_modeld.py"]
   monkeypatch.setattr(model_compiler.sys, "platform", "linux")
   monkeypatch.setattr(model_compiler.platform, "machine", lambda: "aarch64")
+  monkeypatch.setattr(model_compiler.os, "sched_getaffinity", lambda _: {7}, raising=False)
 
   assert model_compiler.external_gpu_compile_command(command) == ["taskset", "-c", "7", *command]
+
+
+def test_external_gpu_compile_skips_unavailable_agnos_cpu(monkeypatch):
+  command = ["python3", "compile_modeld.py"]
+  monkeypatch.setattr(model_compiler.sys, "platform", "linux")
+  monkeypatch.setattr(model_compiler.platform, "machine", lambda: "aarch64")
+  monkeypatch.setattr(model_compiler.os, "sched_getaffinity", lambda _: {0, 1, 2, 3}, raising=False)
+
+  assert model_compiler.external_gpu_compile_command(command) is command
 
 
 def test_external_gpu_compile_does_not_pin_other_platforms(monkeypatch):

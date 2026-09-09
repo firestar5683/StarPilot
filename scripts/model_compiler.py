@@ -84,9 +84,14 @@ def wait_for_external_gpu() -> None:
 
 
 def external_gpu_compile_command(command: list[str]) -> list[str]:
-  """Pin USB-GPU compilation to AGNOS' isolated CPU without changing host builds."""
+  """Pin USB-GPU compilation when AGNOS exposes the isolated CPU."""
   if sys.platform == "linux" and platform.machine() == "aarch64":
-    return ["taskset", "-c", "7", *command]
+    try:
+      available_cpus = os.sched_getaffinity(0)
+      if 7 in available_cpus:
+        return ["taskset", "-c", "7", *command]
+    except (AttributeError, OSError):
+      pass
   return command
 
 
