@@ -16,7 +16,14 @@ export const PersonalityProfiles = {
   computed: {
     expanded: { get() { return this.manageOpen ?? this.localExpanded }, set(value) { this.localExpanded = value; this.$emit("manage") } },
     offroad() { return [false, "", "0", "False", "false"].includes(this.values.IsOnroad) && [true, "1", "True", "true"].includes(this.values.IsOffroad) },
-    locked() { return !this.ready || this.busy || !this.offroad },
+    roadStateKnown() {
+      const flag = value => [true, 1, "1", "True", "true"].includes(value) ? true
+        : [false, 0, "", "0", "False", "false"].includes(value) ? false : null
+      const onroad = flag(this.values.IsOnroad), offroad = flag(this.values.IsOffroad)
+      return onroad !== null && offroad !== null && onroad !== offroad && flag(this.values.SafeMode) === false
+    },
+    locked() { return !this.ready || this.busy || !this.roadStateKnown || this.data?.editing_locked === true },
+    maintenanceLocked() { return this.locked || !this.offroad },
     editingLocked() { return this.locked || this.curvePending || !!this.data?.migration_required },
   },
   async mounted() {
@@ -74,6 +81,11 @@ export const PersonalityProfiles = {
           throw new Error("Profile data is unavailable or malformed. Retrying automatically…")
         }
       }
+      if (data?.launch_boost_options !== undefined && (
+          !Array.isArray(data.launch_boost_options) || data.launch_boost_options.join(",") !== "off,low,medium,high" ||
+          PROFILES.some(profile => !data.launch_boost_options.includes(data.launch_boost?.[profile])))) {
+        throw new Error("Launch Boost settings are unavailable. Retrying automatically…")
+      }
       return data
     },
     acceptData(data) {
@@ -111,12 +123,15 @@ export const PersonalityProfiles = {
       if (this.busy || !this.ready || this.contextPending) return
       this.contextPending = true
       try {
-        this.contextRequest = api.getParams()
-        const values = await this.contextRequest
+        this.contextRequest = Promise.all([api.getParams(), api.getPersonalityProfiles()])
+        const [values, profileState] = await this.contextRequest
         if (this.disposed) return
         // A read started before a write must not replace its verified readback.
-        if (!this.busy) this.values = values
-        if (!this.offroad) { this.drag = null; this.drafts = {}; this.curveText = {} }
+        if (!this.busy) {
+          this.values = values
+          if (this.data) this.data.editing_locked = profileState.editing_locked === true
+        }
+        if (!this.roadStateKnown) { this.drag = null; this.drafts = {}; this.curveText = {} }
       } catch (e) { this.ready = false; this.error = "Connection lost. Reconnecting…" }
       finally { this.contextPending = false; this.contextRequest = null }
     },
@@ -147,11 +162,16 @@ export const PersonalityProfiles = {
       } finally { this.busy = false }
       if (!this.disposed) await this.load()
     },
-    migrate() { return this.write(() => api.migratePersonalityProfiles(), () => !this.locked) },
+    migrate() { return this.write(() => api.migratePersonalityProfiles(), () => !this.maintenanceLocked) },
     toggle(key, event) {
       const value = event.target.checked
       event.target.checked = this.enabled(this.values[key])
       return this.write(() => api.updateParam({ key, value }), () => !this.paramLocked(key))
+    },
+    async launchBoost(profile, level) {
+      const expected = this.data.launch_boost?.[profile]
+      if (expected === level || !this.data.launch_boost_options?.includes(level)) return
+      return this.write(() => api.savePersonalityLaunchBoost({ profile, level, expected }))
     },
     async preset(profile, category, preset) {
       if (this.data.profiles[profile][category].preset === preset) return
@@ -282,10 +302,10 @@ export const PersonalityProfiles = {
       <p v-if="busy" role="status" class="gx-personalities__live">Saving…</p>
       <p v-if="!data && !error" role="status">Loading profiles…</p>
       <template v-if="data">
-        <p v-if="!offroad" role="note">Active driving personality can be switched on-road. Saved profile tuning is available off-road.</p>
+        <p v-if="!roadStateKnown" role="note">Active driving personality can be switched on-road. Saved profile tuning is available off-road.</p>
         <div v-if="data.migration_required" role="alert" class="gx-personalities__error">
           <p>Stored profiles need migration before editing.</p>
-          <button type="button" class="gx-btn" :disabled="locked" @click="migrate">Migrate profiles</button>
+          <button type="button" class="gx-btn" :disabled="maintenanceLocked" @click="migrate">Migrate profiles</button>
         </div>
         <p v-if="!enabled(values.CustomPersonalities)">Enable to configure profiles. Existing defaults remain active while off.</p>
         <div class="gx-personalities__grid">
@@ -306,6 +326,15 @@ export const PersonalityProfiles = {
               </section>
               <details class="gx-personalities__advanced" :open="advancedOpen[profile]" @toggle="advancedOpen[profile] = $event.target.open">
                 <summary>Advanced</summary>
+                <section v-if="data.launch_boost_options" class="gx-personalities__category">
+                  <h4>Launch Boost</h4>
+                  <div class="gx-personalities__options" role="group" :aria-label="label(profile) + ' Launch Boost'">
+                    <button v-for="level in data.launch_boost_options" :key="level" type="button" class="gx-btn gx-btn--tonal"
+                      :aria-pressed="data.launch_boost[profile] === level" :disabled="editingLocked"
+                      @click="launchBoost(profile, level)">{{ label(level) }}</button>
+                  </div>
+                  <p>Extra acceleration when starting from a stop.</p>
+                </section>
                 <template v-for="(title, category) in CATEGORIES" :key="category">
                 <details v-if="data.profiles[profile][category].preset === 'custom'" open class="gx-personalities__curve">
                   <summary>Custom {{ title.toLowerCase() }} graph</summary>

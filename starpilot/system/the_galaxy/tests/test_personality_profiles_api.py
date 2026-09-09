@@ -23,6 +23,7 @@ from test_navigation_params import _params_client, the_galaxy
 
 def _client(monkeypatch, values=None, *, ev_tuning=False, truck_tuning=False):
   device_values = dict(values or {})
+  device_values.setdefault("SafeMode", False)
   device_values.setdefault("IsOnroad", False)
   device_values.setdefault("IsOffroad", not device_values["IsOnroad"])
   client, params = _params_client(monkeypatch, device_values, "tici")
@@ -202,8 +203,8 @@ def test_saved_v2_high_curve_read_migrate_edit_and_master_round_trip(monkeypatch
   assert params.writes == writes
 
 
-@pytest.mark.parametrize("state", [{"IsOnroad": True}, {"IsOnroad": False, "IsOffroad": False}])
-def test_saved_v2_high_curve_never_bypasses_parked_write_guard(monkeypatch, state):
+@pytest.mark.parametrize("state", [{"IsOnroad": True, "SafeMode": True}, {"IsOnroad": False, "IsOffroad": False}])
+def test_saved_v2_high_curve_never_bypasses_edit_guard(monkeypatch, state):
   profiles = default_personality_profiles(False)
   profiles["aggressive"]["acceleration"] = {"preset": "custom", "curve": [6.0] * 10}
   raw = json.dumps(profile_document(profiles, enabled=True))
@@ -518,10 +519,10 @@ def test_api_exposes_and_enforces_requested_acceleration_and_braking_bounds(monk
 
 
 @pytest.mark.parametrize("device_state", [
-  {"IsOnroad": True, "IsOffroad": False},
+  {"IsOnroad": True, "IsOffroad": True},
   {"IsOnroad": False, "IsOffroad": False},
 ])
-def test_dedicated_and_generic_profile_mutations_require_confirmed_offroad(monkeypatch, device_state):
+def test_dedicated_and_generic_profile_mutations_require_known_state(monkeypatch, device_state):
   original = profile_document(default_personality_profiles(False), enabled=False)
   client, params = _client(monkeypatch, {**device_state, PERSONALITY_PROFILES_PARAM: original})
   before = json.loads(json.dumps(params.values))
@@ -535,7 +536,7 @@ def test_dedicated_and_generic_profile_mutations_require_confirmed_offroad(monke
   assert dedicated.status_code == 403
   assert generic.status_code == 403
   assert legacy_parent.status_code == 403
-  assert "parked" in legacy_parent.get_json()["error"].lower()
+  assert "known road state" in legacy_parent.get_json()["error"].lower()
   assert params.values == before
 
 
@@ -597,7 +598,7 @@ def test_master_toggle_writes_in_fail_closed_order(monkeypatch, enabled, expecte
 
 @pytest.mark.parametrize("enabled", [False, True])
 @pytest.mark.parametrize("road_change", [{"IsOnroad": True}, {"IsOffroad": False}])
-def test_master_toggle_rechecks_parked_state_after_waiting_for_profile_lock(monkeypatch, enabled, road_change):
+def test_master_toggle_rechecks_consistent_state_after_waiting_for_profile_lock(monkeypatch, enabled, road_change):
   original = profile_document(default_personality_profiles(False), enabled=not enabled)
   client, params = _client(monkeypatch, {
     "CustomPersonalities": not enabled, PERSONALITY_PROFILES_PARAM: original,
@@ -644,7 +645,7 @@ def test_profile_document_write_failure_never_enables_master(monkeypatch):
 
 def test_unverified_profile_document_write_never_enables_master(monkeypatch):
   client, params = _client(monkeypatch, {"IsOnroad": False, "CustomPersonalities": False})
-  monkeypatch.setattr(the_galaxy, "_safe_params_get_live_raw", lambda key, default=None, block=False: None)
+  monkeypatch.setattr(the_galaxy, "_safe_params_get_live_raw", lambda key, default=None, block=False: None if key == PERSONALITY_PROFILES_PARAM else params.values.get(key, default))
 
   response = client.put("/api/params", json={"key": "CustomPersonalities", "value": True})
 
@@ -676,15 +677,14 @@ def test_master_write_failure_leaves_master_false_after_verified_document_write(
   assert document is not None and document["enabled"] is True
 
 
-def test_every_state_affecting_personality_write_is_rejected_onroad(monkeypatch):
+def test_every_personality_setting_can_be_edited_onroad(monkeypatch):
   client, params = _client(monkeypatch, {"IsOnroad": True})
-  before = json.loads(json.dumps(params.values))
-
   for key in PERSONALITY_PARKED_PARAM_KEYS:
-    value = False if key in PERSONALITY_PROFILE_ENABLE_PARAM_KEYS or key == "CustomPersonalities" else 50
+    value = False if key in PERSONALITY_PROFILE_ENABLE_PARAM_KEYS or key == "CustomPersonalities" else 1.4 if key in PERSONALITY_FOLLOW_PARAM_KEYS else 75.0
     response = client.put("/api/params", json={"key": key, "value": value})
-    assert response.status_code == 403, key
-  assert params.values == before
+    assert response.status_code == 200, (key, response.get_json())
+    assert key in {name for name, _ in params.writes}
+
 
 
 def test_every_state_affecting_personality_write_is_rejected_until_offroad_is_confirmed(monkeypatch):
@@ -902,3 +902,35 @@ def test_malformed_stored_document_readback_fails_closed(monkeypatch):
   response = client.get("/api/personality_profiles")
   assert response.status_code == 409
   assert "malformed" in response.get_json()["error"].lower()
+
+
+@pytest.mark.parametrize("profile", ["traffic", "aggressive", "standard", "relaxed"])
+@pytest.mark.parametrize("category,preset,value", [("acceleration", "sport", 1.2), ("braking", "eco", 1.1), ("following", "far", 1.5)])
+def test_all_categories_and_custom_points_edit_onroad(monkeypatch, profile, category, preset, value):
+  client, params = _client(monkeypatch, {"IsOnroad": True})
+  for name, curve in [(preset, []), ("custom", []), ("custom", [value] * 10)]:
+    current = client.get("/api/personality_profiles").get_json()
+    response = client.put("/api/personality_profiles", json={"profile": profile, "category": category, "preset": name, "curve": curve, "expected": current["profiles"][profile][category]})
+    assert response.status_code == 200, response.get_json()
+  assert response.get_json()["profiles"][profile][category]["curve"] == [value] * 10
+  assert params.values["IsOnroad"] is True
+
+
+@pytest.mark.parametrize("state", [{"SafeMode": True}, {"SafeMode": None}, {"IsOnroad": None}, {"IsOffroad": None}, {"IsOnroad": True, "IsOffroad": True}])
+def test_interactive_edits_fail_closed_for_unknown_or_safe_mode(monkeypatch, state):
+  client, params = _client(monkeypatch, {"IsOnroad": True, "IsOffroad": False, **state})
+  assert client.put("/api/personality_profiles", json={"profile": "standard", "category": "acceleration", "preset": "eco", "curve": []}).status_code == 403
+  for key, value in [("CustomPersonalities", True), ("StandardJerkAcceleration", 75), ("StandardPersonalityProfile", True)]:
+    assert client.put("/api/params", json={"key": key, "value": value}).status_code == 403
+  assert params.writes == []
+
+
+@pytest.mark.parametrize("onroad", [False, True])
+@pytest.mark.parametrize("backup", ["{}", {}, {"CustomPersonalities": {"present": True, "value": True}}])
+def test_pending_safe_mode_restore_blocks_interactive_edits(monkeypatch, onroad, backup):
+  client, params = _client(monkeypatch, {"IsOnroad": onroad, "IsOffroad": not onroad, "SafeMode": False, "SafeModeBackup": backup})
+  assert client.get("/api/personality_profiles").json["editing_locked"] is True
+  assert client.put("/api/personality_profiles/launch_boost", json={"profile":"standard", "level":"off", "expected":"high"}).status_code == 403
+  assert client.put("/api/params", json={"key":"CustomPersonalities", "value": True}).status_code == 403
+  assert client.put("/api/personality_profiles", json={}).status_code == 403
+  assert params.writes == []

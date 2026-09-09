@@ -19,9 +19,9 @@ module.exports=async({page,curve,data,values,faults,counts,errors})=>{
   let before=counts().attempts;await n.press('Tab');assert.equal(counts().attempts,before);
   assert(await n.isDisabled());release();await idle();assert.equal(counts().attempts,before+1);assert.equal(data.profiles.traffic.acceleration.curve[2],1.65);results.push('numeric pending poll commits once');
   // Off-road state changing while the change waits must prevent the PUT.
-  release=gate('params');await poll();before=counts().attempts;await edit('1.7');values.IsOnroad='True';values.IsOffroad='';release();
+  release=gate('params');await poll();before=counts().attempts;await edit('1.7');values.IsOnroad='True';values.IsOffroad='True';release();
   await page.waitForFunction(()=>!document.querySelector('#app').__vue_app__._instance.proxy.curvePending);
-  assert.equal(counts().attempts,before);assert.equal(await n.inputValue(),'1.65');assert(await n.isDisabled());results.push('pending change rechecks offroad');
+  assert.equal(counts().attempts,before);assert.equal(await n.inputValue(),'1.65');assert(await n.isDisabled());results.push('pending change rechecks road-state consistency');
   values.IsOnroad='';values.IsOffroad='True';await poll();await idle();
   // In-flight PUT blocks repeat authoring until verified readback.
   release=gate('put');before=counts().attempts;await edit('1.75');await page.waitForFunction(()=>document.querySelector('#app').__vue_app__._instance.proxy.busy);
@@ -37,7 +37,7 @@ module.exports=async({page,curve,data,values,faults,counts,errors})=>{
   const drag=async()=>{await page.locator('.snackbar').waitFor({state:'detached'});const h=curve.locator('circle[fill="transparent"]').nth(2);await h.scrollIntoViewIfNeeded();const b=await h.boundingBox();await page.mouse.move(b.x+b.width/2,b.y+b.height/2);await page.mouse.down();await page.mouse.move(b.x+b.width/2,b.y+b.height/2-8,{steps:3});};
   faults.failPut=true;before=counts().attempts;await drag();await page.mouse.up();await idle();assert.equal(counts().attempts,before+1);assert.equal(await n.inputValue(),'1.8');await page.getByText('Save could not be confirmed. Showing verified saved state; review it before editing again.',{exact:true}).waitFor();results.push('failed pointer PUT restores verified state');
   before=counts().attempts;await drag();await curve.locator('svg').evaluate(svg=>svg.releasePointerCapture(document.querySelector('#app').__vue_app__._instance.proxy.drag.pointerId));await page.mouse.up();assert.equal(await n.inputValue(),'1.8');assert.equal(counts().attempts,before);results.push('lost capture rolls back without PUT');
-  await drag();values.IsOnroad='True';values.IsOffroad='';await poll();await page.waitForFunction(()=>!document.querySelector('#app').__vue_app__._instance.proxy.contextPending);await page.mouse.up();assert.equal(await n.inputValue(),'1.8');assert.equal(counts().attempts,before);results.push('mid-drag road transition rolls back');
+  await drag();values.IsOnroad='True';values.IsOffroad='True';await poll();await page.waitForFunction(()=>!document.querySelector('#app').__vue_app__._instance.proxy.contextPending);await page.mouse.up();assert.equal(await n.inputValue(),'1.8');assert.equal(counts().attempts,before);results.push('mid-drag unknown road state rolls back');
   values.IsOnroad='';values.IsOffroad='True';await poll();await idle();
   release=gate('params');await poll();await drag();await page.mouse.up();assert.equal(counts().attempts,before);release();await idle();assert.equal(counts().attempts,before+1);results.push('pointer release waits for pending poll');
   // Unmount before release cancels preview; remount only loads server state.

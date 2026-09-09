@@ -127,6 +127,10 @@ from openpilot.starpilot.common.favorite_slots import (
 from openpilot.starpilot.common.lateral_delay import full_lateral_delay
 from openpilot.starpilot.common.longitudinal_personality_profiles import (
   ACCELERATION_PRESETS,
+  LAUNCH_BOOST_LEVELS,
+  PERSONALITY_IDS,
+  personality_launch_boost_levels,
+  update_personality_launch_boost,
   ACCELERATION_SPEEDS_MPH,
   BRAKING_PRESETS,
   BRAKING_SPEEDS_MPH,
@@ -3496,6 +3500,20 @@ def _safe_params_get_bool(key, default=False):
   except Exception:
     return bool(default)
 
+def _personality_edits_write_locked():
+  """Interactive edits allow either known road state; maintenance remains parked-only."""
+  def boolean(key):
+    value = _safe_params_get_live_raw(key)
+    if value in (True, "1", b"1", "True", b"True"):
+      return True
+    if value in (False, "0", b"0", "False", b"False"):
+      return False
+    return None
+  onroad, offroad = boolean("IsOnroad"), boolean("IsOffroad")
+  return (onroad is None or offroad is None or onroad == offroad or boolean("SafeMode") is not False
+          or _safe_params_get_live_raw("SafeModeBackup") is not None)
+
+
 def _personality_settings_write_locked():
   return _safe_params_get_bool("IsOnroad", default=True) or not _safe_params_get_bool("IsOffroad", default=False)
 
@@ -5849,6 +5867,37 @@ def setup(app):
       "schema_version": PROFILE_SCHEMA_VERSION,
     }), 200
 
+  @app.route("/api/personality_profiles/launch_boost", methods=["PUT"])
+  @_serialize_personality_profile_writes
+  def personality_launch_boost():
+    if _personality_edits_write_locked():
+      return jsonify({"error": "Personality editing requires a known road state with Safe Mode off."}), 403
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or set(data) != {"profile", "level", "expected"}:
+      return jsonify({"error": "Expected profile, level and expected Launch Boost setting."}), 400
+    if (not isinstance(data["profile"], str) or data["profile"] not in PERSONALITY_IDS or
+        not isinstance(data["level"], str) or data["level"] not in LAUNCH_BOOST_LEVELS or
+        not isinstance(data["expected"], str) or data["expected"] not in LAUNCH_BOOST_LEVELS):
+      return jsonify({"error": "Invalid personality or Launch Boost setting."}), 400
+    raw = _safe_params_get_live_raw(PERSONALITY_PROFILES_PARAM)
+    document = strict_profile_document(raw)
+    if document is None and not is_unconfigured_profile_document(raw):
+      return jsonify({"error": "Stored profiles need migration or repair before editing Launch Boost."}), 409
+    profiles = document["profiles"] if document is not None else default_personality_profiles(False)
+    current = personality_launch_boost_levels(profiles)[data["profile"]]
+    if data["expected"] != current:
+      return jsonify({"error": "Saved Launch Boost changed. Reload and review it before editing again."}), 409
+    profiles = update_personality_launch_boost(profiles, data["profile"], data["level"])
+    candidate = profile_document(profiles, enabled=params.get_bool("CustomPersonalities"))
+    if _personality_edits_write_locked():
+      return jsonify({"error": "Personality editing became unavailable. Refresh before retrying."}), 403
+    params.put(PERSONALITY_PROFILES_PARAM, candidate)
+    update_starpilot_toggles()
+    if strict_profile_document(_safe_params_get_live_raw(PERSONALITY_PROFILES_PARAM)) != candidate:
+      return jsonify({"error": "Launch Boost save could not be verified. Refresh before retrying."}), 500
+    return jsonify({"launch_boost": personality_launch_boost_levels(profiles)}), 200
+
+
   @app.route("/api/personality_profiles", methods=["GET", "PUT"])
   @_serialize_personality_profile_writes
   def personality_profiles():
@@ -5865,8 +5914,8 @@ def setup(app):
     profiles = stored_document["profiles"] if configured else default_personality_profiles(ev_tuning, truck_tuning)
 
     if request.method == "PUT":
-      if _personality_settings_write_locked():
-        return jsonify({"error": "Longitudinal personality profiles can only be changed while off-road."}), 403
+      if _personality_edits_write_locked():
+        return jsonify({"error": "Personality editing requires a known road state with Safe Mode off."}), 403
       if current_document is None and stored_document is not None:
         return jsonify({"error": "Stored longitudinal personality profiles require a verified migration before editing."}), 409
       data = request.get_json(silent=True)
@@ -5874,6 +5923,10 @@ def setup(app):
       if not isinstance(data, dict) or set(data) not in (required_fields, required_fields | {"expected"}):
         return jsonify({"error": "Expected profile, category, preset, curve, and optional expected category."}), 400
 
+      if (not isinstance(data["profile"], str) or data["profile"] not in PERSONALITY_IDS or
+          not isinstance(data["category"], str) or data["category"] not in CURVE_BOUNDS or
+          ("expected" in data and not isinstance(data["expected"], dict))):
+        return jsonify({"error": "Invalid personality, category or expected category."}), 400
       try:
         current_config = profiles[data["profile"]][data["category"]]
         # Opt-in category compare-and-swap, inside the shared writer lock. Older
@@ -5919,6 +5972,8 @@ def setup(app):
       except (KeyError, TypeError, ValueError) as error:
         return jsonify({"error": str(error)}), 400
 
+      if _personality_edits_write_locked():
+        return jsonify({"error": "Personality editing became unavailable. Refresh before retrying."}), 403
       params.put(PERSONALITY_PROFILES_PARAM, profile_document(profiles, enabled=enabled))
       configured = True
       migration_required = False
@@ -5930,12 +5985,15 @@ def setup(app):
       "default_profiles": default_personality_profiles(ev_tuning, truck_tuning),
       "enabled": enabled,
       "migration_required": migration_required,
+      "editing_locked": _personality_edits_write_locked(),
       "options": {
         "acceleration": list(ACCELERATION_PRESETS),
         "braking": list(BRAKING_PRESETS),
         "following": list(FOLLOWING_PRESETS),
       },
       "profiles": profiles,
+      "launch_boost": personality_launch_boost_levels(profiles),
+      "launch_boost_options": list(LAUNCH_BOOST_LEVELS),
       "reference_curves": personality_reference_curves(ev_tuning, truck_tuning),
       "schema_version": PROFILE_SCHEMA_VERSION,
       "speed_breakpoints_mph": {
@@ -5955,8 +6013,8 @@ def setup(app):
       key = str(data["key"]).strip()
       if key.lower() == PERSONALITY_PROFILES_PARAM.lower():
         return jsonify({"error": "Longitudinal personality profiles must be changed with the Driving Personalities editor."}), 403
-      if key in PERSONALITY_PARKED_PARAM_KEYS and _personality_settings_write_locked():
-        return jsonify({"error": "Driving personality settings can only be changed while parked."}), 403
+      if key in PERSONALITY_PARKED_PARAM_KEYS and _personality_edits_write_locked():
+        return jsonify({"error": "Personality editing requires a known road state with Safe Mode off."}), 403
       if key in PERSONALITY_PROFILE_ENABLE_PARAM_KEYS and type(data["value"]) is not bool:
         return jsonify({"error": f"{key} must be a JSON boolean."}), 400
       if key.lower() == FAVORITE_SLOTS_PARAM.lower():
@@ -6027,9 +6085,9 @@ def setup(app):
           return jsonify({"error": "CustomPersonalities must be a JSON boolean."}), 400
         enabled = data["value"]
         with _PERSONALITY_PROFILES_WRITE_LOCK:
-          # The car may have started while this request waited behind an edit.
-          if _personality_settings_write_locked():
-            return jsonify({"error": "Driving personality settings can only be changed while parked."}), 403
+          # The road state or Safe Mode may have changed while waiting for an edit.
+          if _personality_edits_write_locked():
+            return jsonify({"error": "Personality editing requires a known road state with Safe Mode off."}), 403
           ev_tuning = _get_detected_ev_tuning()
           truck_tuning = (_get_detected_truck_tuning() or params.get_bool("TruckTuning")) and not ev_tuning
           raw_document = _safe_params_get_live_raw(PERSONALITY_PROFILES_PARAM)

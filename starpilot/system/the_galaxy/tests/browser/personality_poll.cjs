@@ -26,7 +26,7 @@ module.exports = async ({page, data, values, faults, counts, errors}) => {
   assert.equal(counts().attempts, attempts+1);
   // A road-state change during the read must reject the queued click.
   release = await gate(); attempts = counts().attempts;
-  await custom.click(); values.IsOnroad='True'; values.IsOffroad=''; release(); await idle();
+  await custom.click(); values.IsOnroad='True'; values.IsOffroad='True'; release(); await idle();
   assert.equal(counts().attempts, attempts); assert(await custom.isDisabled());
   values.IsOnroad=''; values.IsOffroad='True';
   await page.evaluate(async () => await document.querySelector('#app').__vue_app__._instance.proxy.refreshContext());
