@@ -97,29 +97,55 @@ class TestToyotaSafetyBase(common.CarSafetyTest, common.LongitudinalAccelSafetyT
           msg = libsafety_py.make_CANPacket(0x283, 0, bytes(dat))
           self.assertEqual(not bad and not stock_longitudinal, self._tx(msg))
 
-  def test_auto_brake_hold_aeb_replacement_only_at_standstill(self):
-    self.safety.set_alternative_experience(ALTERNATIVE_EXPERIENCE.ALLOW_AEB)
-    hold_msg = libsafety_py.make_CANPacket(0x344, 0, b"\xfd\x80\x00\x00\x00\x00\x00\xcc")
+  def test_auto_hold_acc_control_is_narrowly_allowed_only_at_standstill(self):
+    if (not self.LONGITUDINAL or
+        self.safety.get_current_safety_param() & (ToyotaSafetyFlags.STOCK_LONGITUDINAL.value | ToyotaSafetyFlags.SECOC.value)):
+      raise unittest.SkipTest("Toyota Auto Hold requires non-SecOC openpilot longitudinal control")
+
+    self.safety.set_alternative_experience(ALTERNATIVE_EXPERIENCE.TOYOTA_AUTO_HOLD)
+    hold_msg = self.packer.make_can_msg_safety("ACC_CONTROL", 0, {
+      "ACCEL_CMD": -1.0,
+      "PERMIT_BRAKING": 1,
+      "RELEASE_STANDSTILL": 0,
+      "CANCEL_REQ": 0,
+    })
 
     self._rx(self._speed_msg(0))
     self._rx(self._toggle_aol(True))
     self._rx(self._user_gas_msg(False))
+    self.safety.set_controls_allowed(False)
     self.assertTrue(self._tx(hold_msg))
-    self.assertEqual(-1, self.safety.safety_fwd_hook(2, 0x344))
+
+    self.assertFalse(self._tx(self.packer.make_can_msg_safety("ACC_CONTROL", 0, {
+      "ACCEL_CMD": -1.1,
+      "PERMIT_BRAKING": 1,
+      "RELEASE_STANDSTILL": 0,
+    })))
 
     self._rx(self._speed_msg(1.0))
     self.assertFalse(self._tx(hold_msg))
-    self.assertEqual(0, self.safety.safety_fwd_hook(2, 0x344))
 
     self._rx(self._speed_msg(0))
     self._rx(self._user_gas_msg(True))
     self.assertFalse(self._tx(hold_msg))
-    self.assertEqual(0, self.safety.safety_fwd_hook(2, 0x344))
 
     self._rx(self._user_gas_msg(False))
     self._rx(self._toggle_aol(False))
     self.assertFalse(self._tx(hold_msg))
-    self.assertEqual(0, self.safety.safety_fwd_hook(2, 0x344))
+
+  def test_auto_hold_acc_control_is_blocked_without_toyota_hold_toggle(self):
+    hold_msg = self.packer.make_can_msg_safety("ACC_CONTROL", 0, {
+      "ACCEL_CMD": -1.0,
+      "PERMIT_BRAKING": 1,
+      "RELEASE_STANDSTILL": 0,
+      "CANCEL_REQ": 0,
+    })
+    self._rx(self._speed_msg(0))
+    self._rx(self._toggle_aol(True))
+    self._rx(self._user_gas_msg(False))
+    self.safety.set_controls_allowed(False)
+    self.safety.set_alternative_experience(0)
+    self.assertFalse(self._tx(hold_msg))
 
   # Only allow LTA msgs with no actuation
   def test_lta_steer_cmd(self):

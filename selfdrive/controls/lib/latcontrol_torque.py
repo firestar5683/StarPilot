@@ -632,6 +632,9 @@ class LatControlTorque(LatControl):
         output_torque *= get_kia_ev6_center_output_scale(setpoint, CS.vEgo)
       elif kia_carnival_active:
         output_torque *= kia_carnival_center_taper
+        output_torque *= get_kia_carnival_unwind_output_scale(
+          setpoint, measurement, desired_lateral_jerk, CS.vEgo,
+        )
         output_torque *= get_kia_carnival_highway_transition_output_scale(setpoint, desired_lateral_jerk, CS.vEgo)
       elif palisade_active:
         output_torque *= get_palisade_center_output_scale(setpoint, CS.vEgo)

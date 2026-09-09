@@ -12,6 +12,8 @@ from openpilot.selfdrive.controls.radard import (
   DT_MDL,
   HONDA_BOSCH_A_RADAR_TS,
   RadarD,
+  POST_STANDSTILL_RADAR_LEAD_PERSISTENCE_FRAMES,
+  post_standstill_radar_lead_is_urgent,
   g90_low_speed_radar_lead_sane,
   g90_radar_lead_lateral_sane,
   has_slow_radar_tracks,
@@ -105,6 +107,64 @@ class TestLeads:
     assert has_slow_radar_tracks(slow_radar)
     assert not has_slow_radar_tracks(normal_radar)
     assert not has_slow_radar_tracks(unavailable_radar)
+
+  @staticmethod
+  def make_radar_only_lead(track_id: int, d_rel: float = 8.0, v_rel: float = 0.0):
+    return {
+      "status": True,
+      "radar": True,
+      "modelProb": 0.0,
+      "radarTrackId": track_id,
+      "dRel": d_rel,
+      "vRel": v_rel,
+    }
+
+  def test_post_standstill_radar_lead_requires_same_track_persistence(self):
+    radar = RadarD()
+    radar._post_standstill_gate_active = True
+    lead = self.make_radar_only_lead(42)
+
+    assert not radar._filter_post_standstill_lead(lead)["status"]
+    assert not radar._filter_post_standstill_lead(lead)["status"]
+    assert radar._filter_post_standstill_lead(lead)["status"]
+    assert radar._post_standstill_candidate_frames == POST_STANDSTILL_RADAR_LEAD_PERSISTENCE_FRAMES
+
+  def test_post_standstill_radar_lead_resets_for_new_track(self):
+    radar = RadarD()
+    radar._post_standstill_gate_active = True
+
+    assert not radar._filter_post_standstill_lead(self.make_radar_only_lead(42))["status"]
+    assert not radar._filter_post_standstill_lead(self.make_radar_only_lead(43))["status"]
+    assert radar._post_standstill_candidate_frames == 1
+
+  def test_post_standstill_gate_only_arms_after_no_lead_stop(self):
+    radar = RadarD()
+    radar._remember_post_standstill_state(standstill=True, lead_status=False)
+    radar._prepare_post_standstill_gate(standstill=False)
+    assert radar._post_standstill_gate_active
+
+    radar = RadarD()
+    radar._remember_post_standstill_state(standstill=True, lead_status=True)
+    radar._prepare_post_standstill_gate(standstill=False)
+    assert not radar._post_standstill_gate_active
+
+  def test_post_standstill_model_lead_bypasses_gate(self):
+    radar = RadarD()
+    radar._post_standstill_gate_active = True
+    lead = self.make_radar_only_lead(42)
+    lead["modelProb"] = 0.9
+
+    assert radar._filter_post_standstill_lead(lead)["status"]
+    assert not radar._post_standstill_gate_active
+
+  def test_post_standstill_urgent_radar_lead_bypasses_gate(self):
+    radar = RadarD()
+    radar._post_standstill_gate_active = True
+    lead = self.make_radar_only_lead(42, d_rel=3.0, v_rel=-2.1)
+
+    assert post_standstill_radar_lead_is_urgent(lead)
+    assert radar._filter_post_standstill_lead(lead)["status"]
+    assert not radar._post_standstill_gate_active
 
   @pytest.mark.skipif(platform.system() == "Darwin", reason="SocketEventHandle requires eventfd")
   def test_radar_fault(self):

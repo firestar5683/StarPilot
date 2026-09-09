@@ -26,6 +26,7 @@ export const SystemTools = {
       fastStatus: null,
       checkedForUpdates: false,
       busy: "",
+      autoUpdateBusy: false,
       profiles: [],
       profileBusy: "",
     }
@@ -77,6 +78,7 @@ export const SystemTools = {
         const status = await api.getUpdateFastStatus()
         if (!status) throw new Error("Update status unavailable")
         this.fastStatus = status
+        this.isOnroad = !!status.isOnroad
       } catch (e) {
         this.fastStatus = null
         if (throwOnError) throw e
@@ -195,6 +197,21 @@ export const SystemTools = {
         this.busy = ""
       }
     },
+    async setAutomaticUpdates(enabled) {
+      if (this.autoUpdateBusy || this.isOnroad || this.fastStatus?.running || !this.fastStatus) return
+      const previous = !!this.fastStatus.automaticUpdates
+      this.autoUpdateBusy = true
+      this.fastStatus = { ...this.fastStatus, automaticUpdates: !!enabled }
+      try {
+        const payload = await api.updateParam({ key: "AutomaticUpdates", value: !!enabled, label: "Automatic Updates" })
+        showSnackbar(payload?.message || `Automatic updates ${enabled ? "enabled" : "disabled"}.`)
+      } catch (e) {
+        this.fastStatus = { ...this.fastStatus, automaticUpdates: previous }
+        showSnackbar(e?.message || "Failed to update Automatic Updates.", "error")
+      } finally {
+        this.autoUpdateBusy = false
+      }
+    },
     async applyFastUpdate() {
       if (this.busy || this.isOnroad) return
       if (this.fastStatus?.running) { showSnackbar("Fast update is already running."); return }
@@ -298,6 +315,22 @@ export const SystemTools = {
                 <div v-if="fastStatus.agnosUpdate?.available && fastStatus.agnosUpdate?.warnings?.length" style="margin-top:4px;">
                   <div v-for="w in fastStatus.agnosUpdate.warnings" :key="w" class="gx-note gx-note--danger"><i class="bi bi-exclamation-triangle-fill"></i> {{ w }}</div>
                 </div>
+              </div>
+            </div>
+
+            <div class="gx-card" style="margin-bottom:12px;">
+              <div class="gx-row" style="border-top:none;">
+                <div class="gx-row__info">
+                  <span class="gx-row__label">Automatically Install Updates</span>
+                  <span class="gx-row__desc">Install updates automatically while parked with an active internet connection.</span>
+                </div>
+                <label class="gx-switch">
+                  <input type="checkbox" :checked="!!fastStatus?.automaticUpdates"
+                    :disabled="!fastStatus || isOnroad || autoUpdateBusy || !!fastStatus?.running"
+                    @change="setAutomaticUpdates($event.target.checked)" />
+                  <span class="gx-switch__track"></span>
+                  <span class="gx-switch__thumb"></span>
+                </label>
               </div>
             </div>
 

@@ -38,6 +38,10 @@ HONDA_BOSCH_A_CHALLENGER_STALE_CYCLES = 2
 HONDA_BOSCH_A_GROSS_DISTANCE_STALE_CYCLES = 3
 HONDA_BOSCH_A_GROSS_DISTANCE_M = 25.0
 
+POST_STANDSTILL_RADAR_LEAD_PERSISTENCE_FRAMES = 3
+POST_STANDSTILL_RADAR_LEAD_URGENT_TTC = 1.5
+POST_STANDSTILL_RADAR_LEAD_URGENT_DISTANCE = 1.5
+
 
 def is_bosch_a_radar_car(CP) -> bool:
   return CP.brand == "honda" and CP.carFingerprint in HONDA_BOSCH_A and not CP.radarUnavailable
@@ -242,8 +246,15 @@ def g90_low_speed_radar_lead_sane(track: Track, v_ego: float) -> bool:
 
 
 def honda_bosch_a_low_speed_radar_lead_sane(track: Track, v_ego: float) -> bool:
-  """Require a few real Bosch sweeps before a radar-only low-speed takeover."""
   return track.cnt >= HONDA_BOSCH_A_LOW_SPEED_MIN_COUNT and track.potential_low_speed_lead(v_ego)
+
+
+def post_standstill_radar_lead_is_urgent(lead: dict[str, Any]) -> bool:
+  d_rel = float(lead.get("dRel", math.inf))
+  v_rel = float(lead.get("vRel", 0.0))
+  closing_speed = max(-v_rel, 0.0)
+  ttc = d_rel / closing_speed if closing_speed > 0.1 else math.inf
+  return d_rel <= POST_STANDSTILL_RADAR_LEAD_URGENT_DISTANCE or ttc <= POST_STANDSTILL_RADAR_LEAD_URGENT_TTC
 
 
 def track_matches_vision(track: Track, lead: capnp._DynamicStructReader, v_ego: float, *,
@@ -454,6 +465,11 @@ class RadarD:
     self.preferred_stale_track_ids = [-1, -1]
     self.preferred_challenger_stale_counts = [0, 0]
     self.preferred_gross_distance_stale_counts = [0, 0]
+    self._was_standstill = False
+    self._standstill_had_lead = False
+    self._post_standstill_gate_active = False
+    self._post_standstill_candidate_id = -1
+    self._post_standstill_candidate_frames = 0
 
     self.v_ego = 0.0
     self.v_ego_hist = deque([0.0], maxlen=int(round(delay / DT_MDL)) + 1)
@@ -525,9 +541,57 @@ class RadarD:
       self.prev_lead_track_ids[lead_index] = -1
       self._reset_preferred_stale_evidence(lead_index)
 
+  def _prepare_post_standstill_gate(self, standstill: bool) -> None:
+    if standstill:
+      self._post_standstill_gate_active = False
+      self._post_standstill_candidate_id = -1
+      self._post_standstill_candidate_frames = 0
+    elif self._was_standstill and not self._standstill_had_lead:
+      self._post_standstill_gate_active = True
+      self._post_standstill_candidate_id = -1
+      self._post_standstill_candidate_frames = 0
+
+  def _filter_post_standstill_lead(self, lead: dict[str, Any]) -> dict[str, Any]:
+    if not self._post_standstill_gate_active:
+      return lead
+
+    model_lead = float(lead.get("modelProb", 0.0)) > float(
+      getattr(self.starpilot_toggles, "lead_detection_probability", 0.35))
+    radar_only = bool(lead.get("status", False) and lead.get("radar", False) and not model_lead)
+    if not radar_only:
+      if lead.get("status", False):
+        self._post_standstill_gate_active = False
+      self._post_standstill_candidate_id = -1
+      self._post_standstill_candidate_frames = 0
+      return lead
+
+    track_id = int(lead.get("radarTrackId", -1))
+    if track_id == self._post_standstill_candidate_id:
+      self._post_standstill_candidate_frames += 1
+    else:
+      self._post_standstill_candidate_id = track_id
+      self._post_standstill_candidate_frames = 1
+
+    persistent = self._post_standstill_candidate_frames >= POST_STANDSTILL_RADAR_LEAD_PERSISTENCE_FRAMES
+    if persistent or post_standstill_radar_lead_is_urgent(lead):
+      self._post_standstill_gate_active = False
+      return lead
+
+    return {"status": False}
+
+  def _remember_post_standstill_state(self, standstill: bool, lead_status: bool) -> None:
+    if standstill:
+      self._was_standstill = True
+      self._standstill_had_lead |= lead_status
+    else:
+      self._was_standstill = False
+      self._standstill_had_lead = False
+
   def update(self, sm: messaging.SubMaster, rr: car.RadarData):
     self.ready = sm.seen['modelV2']
     self.current_time = 1e-9 * max(sm.logMonoTime.values())
+    standstill = bool(sm['carState'].standstill)
+    self._prepare_post_standstill_gate(standstill)
 
     if sm.recv_frame['carState'] != self.last_v_ego_frame:
       self.v_ego = sm['carState'].vEgo
@@ -585,11 +649,12 @@ class RadarD:
 
         self._update_honda_bosch_a_preferred_staleness(i, leads_v3[i], self.lead_prob_filters[i].x)
 
-      self.radar_state.leadOne = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0], model_v_ego, sm['modelV2'],
-                                          sm['carState'].standstill, sm['starpilotPlan'], self.starpilot_toggles, low_speed_override=True,
-                                          g90_radar_filter=self.g90_radar_filter, lead_prob=self.lead_prob_filters[0].x,
-                                          preferred_track_id=self.prev_lead_track_ids[0],
-                                          honda_bosch_a_radar=self.honda_bosch_a_radar)
+      lead_one = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0], model_v_ego, sm['modelV2'],
+                          standstill, sm['starpilotPlan'], self.starpilot_toggles, low_speed_override=True,
+                          g90_radar_filter=self.g90_radar_filter, lead_prob=self.lead_prob_filters[0].x,
+                          preferred_track_id=self.prev_lead_track_ids[0],
+                          honda_bosch_a_radar=self.honda_bosch_a_radar)
+      self.radar_state.leadOne = self._filter_post_standstill_lead(lead_one)
       self.radar_state.leadTwo = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[1], model_v_ego, sm['modelV2'],
                                           sm['carState'].standstill, sm['starpilotPlan'], self.starpilot_toggles, low_speed_override=False,
                                           g90_radar_filter=self.g90_radar_filter, lead_prob=self.lead_prob_filters[1].x,
@@ -615,6 +680,8 @@ class RadarD:
     # lane-change and UI behaviour unchanged.
     if self.ready:
       self.starpilot_radar_state.adjacentStopped = get_adjacent_stopped(self.tracks, sm['modelV2'])
+
+    self._remember_post_standstill_state(standstill, bool(self.radar_state.leadOne.status))
 
     self.starpilot_toggles = get_starpilot_toggles(sm)
 

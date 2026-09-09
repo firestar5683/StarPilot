@@ -108,6 +108,7 @@ non_tested_cars = [
   TOYOTA.TOYOTA_RAV4H,
 
   # No recorded routes yet
+  VOLVO.VOLVO_V40,
   VOLVO.VOLVO_XC40_RECHARGE,
   VOLVO.VOLVO_S60_RECHARGE,
   VOLVO.POLESTAR_2,

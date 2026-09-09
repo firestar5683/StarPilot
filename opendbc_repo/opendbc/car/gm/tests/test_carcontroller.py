@@ -431,6 +431,15 @@ def test_volt_auto_hold_requires_toggle_supported_non_cc_only_volt_and_stock_saf
     ),
     True,
   )
+  assert supports_volt_auto_hold(
+    SimpleNamespace(
+      carFingerprint=CAR.BUICK_LACROSSE,
+      openpilotLongitudinalControl=True,
+      networkLocation=CarParams.NetworkLocation.gateway,
+      safetyConfigs=stock_safety,
+    ),
+    True,
+  )
   assert not supports_volt_auto_hold(
     SimpleNamespace(
       carFingerprint=CAR.CHEVROLET_VOLT,

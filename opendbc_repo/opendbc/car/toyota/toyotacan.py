@@ -89,38 +89,6 @@ def create_pcs_commands(packer, accel, active, mass):
   return [msg1, msg2]
 
 
-def create_brake_hold_command(packer, frame, pre_collision_2, brake_hold_active):
-  values = {s: pre_collision_2[s] for s in [
-    "DSS1GDRV",
-    "DS1STAT2",
-    "DS1STBK2",
-    "PCSWAR",
-    "PCSALM",
-    "PCSOPR",
-    "PCSABK",
-    "PBATRGR",
-    "PPTRGR",
-    "IBTRGR",
-    "CLEXTRGR",
-    "IRLT_REQ",
-    "BRKHLD",
-    "AVSTRGR",
-    "VGRSTRGR",
-    "PREFILL",
-    "PBRTRGR",
-    "PCSDIS",
-    "PBPREPMP",
-  ] if s in pre_collision_2}
-
-  if brake_hold_active:
-    values = {
-      "DSS1GDRV": 0x3FF,
-      "PBRTRGR": frame % 730 < 727,
-    }
-
-  return packer.make_can_msg("PRE_COLLISION_2", 0, values)
-
-
 def create_acc_cancel_command(packer):
   values = {
     "GAS_RELEASED": 0,
