@@ -1163,11 +1163,18 @@ def manager_thread() -> None:
 
     started = sm['deviceState'].started
 
-    if started and not started_prev and not starpilot_toggles.force_onroad:
-      params.clear_all(ParamKeyFlag.CLEAR_ON_ONROAD_TRANSITION)
+    if started and not started_prev:
+      # ForceOnroad skips the normal onroad parameter reset.
+      if starpilot_toggles.force_onroad:
+        # These flags stay set after card exits.
+        # Clear them so pandad doesn't think card finished init on restart.
+        params.remove("ControlsReady")
+        params.remove("FirmwareQueryDone")
+      else:
+        params.clear_all(ParamKeyFlag.CLEAR_ON_ONROAD_TRANSITION)
 
-      # StarPilot variables
-      params_memory.clear_all(ParamKeyFlag.CLEAR_ON_ONROAD_TRANSITION)
+        # StarPilot variables
+        params_memory.clear_all(ParamKeyFlag.CLEAR_ON_ONROAD_TRANSITION)
     elif not started and started_prev:
       params.clear_all(ParamKeyFlag.CLEAR_ON_OFFROAD_TRANSITION)
 
