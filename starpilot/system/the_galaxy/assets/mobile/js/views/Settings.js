@@ -98,7 +98,7 @@ export const Settings = {
     },
     lockReason(param) {
       if (param?.requires_offroad && this.values.IsOnroad) return "This setting can only be changed while parked."
-      if (param?.requires_parked && !this.values.VehicleParked) return "This setting can only be changed while the vehicle is in Park."
+      if (param?.requires_parked && !this.values.VehicleParked && !(param.key === "ForceOffroad" && this.values.ForceOffroad)) return "This setting can only be changed while the vehicle is in Park."
       if (param?.disabled_when_key_true && this.values[param.disabled_when_key_true]) return param.disabled_reason || "Disabled by another setting."
       if (param?.requires_nonempty_key) {
         const val = this.values[param.requires_nonempty_key]

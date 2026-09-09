@@ -5802,10 +5802,10 @@ def setup(app):
         }), 200
 
       if key == "ForceOffroad":
-        if not _get_vehicle_parked():
+        enabled = str_val.strip() in ("1", "true", "True")
+        if enabled and not _get_vehicle_parked():
           return jsonify({"error": "Force Offroad is only available while the vehicle is in Park."}), 403
 
-        enabled = str_val.strip() in ("1", "true", "True")
         params.put_bool("ForceOffroad", enabled)
         params.put_bool("ForceOnroad", False)
         update_starpilot_toggles()

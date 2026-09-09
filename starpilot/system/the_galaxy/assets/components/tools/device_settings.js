@@ -1292,7 +1292,7 @@ function getSettingLockReason(param) {
   if (param?.requires_offroad && state.values.IsOnroad) {
     return "This setting can only be changed while parked."
   }
-  if (param?.requires_parked && !state.values.VehicleParked) {
+  if (param?.requires_parked && !state.values.VehicleParked && !(param.key === "ForceOffroad" && state.values.ForceOffroad)) {
     return "This setting can only be changed while the vehicle is in Park."
   }
   if (param?.disabled_when_key_true && state.values[param.disabled_when_key_true]) {
