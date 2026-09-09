@@ -937,6 +937,7 @@ class ModelManager:
     try:
       self._download_model(model_to_download, allow_gpu_without_gpu)
     finally:
+      self.downloading_model = False
       self.params_memory.remove(ALLOW_GPU_DOWNLOAD_WITHOUT_GPU_PARAM)
 
   def _download_artifact_to_path(self, model_key: str, file_path: Path, remote_filename: str,
@@ -1057,8 +1058,8 @@ class ModelManager:
       self.params_memory.put(DOWNLOAD_PROGRESS_PARAM, "eGPU variant downloaded!")
       return True
     finally:
-      self.params_memory.remove(MODEL_LAB_DOWNLOAD_PARAM)
       self.downloading_model = False
+      self.params_memory.remove(MODEL_LAB_DOWNLOAD_PARAM)
 
   def _download_model(self, model_to_download: str, allow_gpu_without_gpu: bool):
     self.downloading_model = True
@@ -1129,6 +1130,7 @@ class ModelManager:
     try:
       self._download_all_models(allow_gpu_without_gpu)
     finally:
+      self.downloading_model = False
       self.params_memory.remove(ALLOW_GPU_DOWNLOAD_WITHOUT_GPU_PARAM)
 
   def _download_all_models(self, allow_gpu_without_gpu: bool):

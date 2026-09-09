@@ -1,4 +1,6 @@
 .mm-wrapper {
+  /* Polling replaces rows: do not anchor the viewport to a recycled row. */
+  overflow-anchor: none;
   color: var(--text-color);
   max-width: 1200px;
   padding-right: var(--padding-base);
@@ -112,6 +114,7 @@
   align-items: center;
   border-bottom: 1px solid var(--sidebar-border-color);
   display: flex;
+  flex-wrap: wrap;
   gap: var(--gap-md);
   justify-content: space-between;
   padding: 0.75rem 0.8rem;
@@ -122,6 +125,7 @@
 }
 
 .mm-row-main {
+  flex: 1;
   min-width: 0;
 }
 
@@ -262,11 +266,64 @@
   padding: 0.7rem 0;
 }
 
+.mm-filter-newline { flex-basis: 100%; }
+
+.mm-filter-help,
+.mm-comparison-heading span,
+.mm-tracking-pending {
+  color: var(--text-muted);
+  font-size: 0.8rem;
+}
+
+.mm-comparison-heading {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  margin: 24px 0 12px;
+}
+
+.mm-comparison-heading h3 { margin: 0 0 6px; }
+
+.mm-metrics {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  flex-basis: 100%;
+  width: 100%;
+  margin: 0;
+  gap: 8px;
+}
+
+.mm-metric {
+  padding: 12px;
+  border-radius: var(--border-radius-base);
+  background: var(--secondary-bg);
+  min-width: 0;
+}
+
+.mm-metric-total { box-shadow: inset 3px 0 #5eaae0; }
+.mm-metric dt { font-size: 0.78rem; color: var(--text-muted); }
+.mm-metric dd { font-size: 1.45rem; font-weight: 650; margin: 8px 0 4px; font-variant-numeric: tabular-nums; }
+.mm-metric span { font-size: 0.72rem; color: var(--text-muted); }
+.mm-tracking-pending { flex-basis: 100%; }
+.mm-tracking-pending:empty { display: none; }
+.mm-history { flex-basis: 100%; min-width: 0; overflow-wrap: anywhere; }
+.mm-history-row { padding: 12px 0; border-bottom: 1px solid var(--sidebar-border-color); font-size: .85rem; }
+.mm-comparison { padding: var(--padding-base); border: 1px solid var(--sidebar-border-color); border-radius: var(--border-radius-base); overflow-wrap: anywhere; }
+.mm-comparison summary { cursor: pointer; font-weight: 650; padding: 8px 0; }
+.mm-comparison p { color: var(--text-muted); font-size: .85rem; line-height: 1.5; }
+.mm-comparison label { display: block; margin: 8px 0; }
+.mm-comparison select { max-width: 100%; }
+
 @media (max-width: 850px) {
+  .mm-metrics { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   .mm-row {
     align-items: flex-start;
     flex-direction: column;
   }
+
+  .mm-metrics, .mm-tracking-pending { flex-basis: auto; }
 
   .mm-row-actions {
     width: 100%;

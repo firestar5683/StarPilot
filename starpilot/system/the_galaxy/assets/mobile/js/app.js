@@ -1,3 +1,4 @@
+import { GalaxySelect } from "./components/GalaxySelect.js"
 import { createApp, h } from "vue"
 import { AppShell } from "./components/AppShell.js"
 import { Home } from "./views/Home.js"
@@ -23,7 +24,7 @@ import { Cameras } from "./views/Cameras.js"
 import { store, initRouter, navigate } from "./store.js"
 import { showSnackbar } from "./api.js"
 
-window.__galaxyVue = { createApp, h }
+window.__galaxyVue = { createApp, h, GalaxySelect }
 
 window.addEventListener("message", (event) => {
   const data = event?.data
@@ -86,6 +87,7 @@ const app = createApp({
   },
 })
 
+app.component("GalaxySelect", GalaxySelect)
 app.mount("#galaxy-app")
 
 initRouter()

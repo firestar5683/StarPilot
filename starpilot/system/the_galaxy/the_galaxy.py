@@ -1232,6 +1232,8 @@ def _dispatch_sentry_event(event: dict, *, bypass_rate_limit: bool = False) -> N
     except Exception:
       cloudlog.exception("Galaxy: ntfy notification failed")
 
+from openpilot.starpilot.system.the_galaxy import backup as galaxy_backup
+
 TOGGLE_BACKUP_FORMAT = "starpilot-toggle-backup"
 TOGGLE_BACKUP_VERSION = 1
 TOGGLE_BACKUP_MAX_ENCODED_BYTES = 2_000_000
@@ -1914,10 +1916,6 @@ _TROUBLESHOOT_ADVANCED_LATERAL_KEYS = [
   "ForceAutoTuneOff",
   "ForceTorqueController",
   "CameraOffset",
-  "LaneCentering",
-  "LaneCenteringPauseOnSignal",
-  "LaneCenteringE2EAuthority",
-  "LaneCenterOffset",
 ]
 
 _TROUBLESHOOT_ADVANCED_LONGITUDINAL_KEYS = [
@@ -1960,22 +1958,22 @@ _RUNTIME_DEFAULT_ZERO_OK_KEYS = {
 _TROUBLESHOOT_SECTION_DEFINITIONS = [
   {
     "id": "personality_settings",
-    "title": "Personality Profile Settings",
+    "title": "Longitudinal (Speed & Following) › Driving Personalities",
     "keys": _TROUBLESHOOT_PERSONALITY_KEYS,
   },
   {
     "id": "cem_settings",
-    "title": "CEM Settings",
+    "title": "Longitudinal (Speed & Following) › Longitudinal control mode",
     "keys": _TROUBLESHOOT_CEM_KEYS,
   },
   {
     "id": "advanced_lateral_tuning",
-    "title": "Advanced Lateral Tuning",
+    "title": "Lateral (Steering) › Advanced Lateral Tuning",
     "keys": _TROUBLESHOOT_ADVANCED_LATERAL_KEYS,
   },
   {
     "id": "advanced_longitudinal_tuning",
-    "title": "Advanced Longitudinal Tuning",
+    "title": "Longitudinal (Speed & Following) › Advanced Longitudinal Tuning",
     "keys": _TROUBLESHOOT_ADVANCED_LONGITUDINAL_KEYS,
   },
 ]
@@ -3374,11 +3372,7 @@ def _get_available_favorite_slot_options():
 
 
 def _get_available_controller_action_options():
-  options = [*_get_available_favorite_slot_options(), *(dict(option) for option in CONTROLLER_ACTION_OPTIONS)]
-  return sorted(options, key=lambda option: (
-    str(option.get("section") or "").casefold(),
-    str(option.get("label") or option.get("key") or "").casefold(),
-  ))
+  return _get_available_favorite_slot_options()
 
 
 def _favorite_slot_values(options):
@@ -4535,6 +4529,60 @@ def _build_troubleshoot_payload():
     for section_definition in _TROUBLESHOOT_SECTION_DEFINITIONS
   ]
 
+  # Use the same category and parent metadata as Settings, rather than a second short list.
+  shown = {item['key'] for section in sections for item in section['items']}
+  registered = {key for key, *_ in starpilot_default_params}
+  for category in load_settings_catalog() or []:
+    groups = {}
+    for entry in category.get('params', []):
+      key = entry.get('key')
+      if key in shown or key not in registered or key.startswith('LaneCentering') or key == 'LaneCenterOffset':
+        continue
+      if _params_raw.get_key_flag(key) & ParamKeyFlag.DONT_LOG:
+        continue
+      parent = entry.get('parent_key')
+      title = category['name']
+      if parent:
+        title += ' › ' + str(layout_metadata.get(parent, {}).get('label', parent))
+      groups.setdefault(title, []).append(key)
+      shown.add(key)
+    for title, keys in groups.items():
+      section = _build_troubleshoot_section_payload({'id': 'catalog_' + keys[0], 'title': title, 'keys': keys},
+                                                    value_types, default_values, layout_metadata, learned_values)
+      section['resettable'] = False
+      sections.append(section)
+  for title, keys in [
+      ('Bluetooth Controllers', ['BluetoothEnabled', 'BluetoothDisconnectControllersOffroad', 'WheelControlsEnabled', 'ControllerActionSlots', 'WheelControlMappings']),
+      ('Longitudinal (Speed & Following) › Longitudinal control mode', ['ExperimentalMode', 'ConditionalExperimental', 'ConditionalChill', 'LongitudinalPersonality']),
+      ('Model Manager', ['Model', 'ActiveBigModel', 'ActiveSmallModel', 'ModelSortMode', 'UserFavorites'])]:
+    keys = [key for key in keys if key in registered and key not in shown]
+    if keys:
+      section = _build_troubleshoot_section_payload({'id': 'extra_' + keys[0], 'title': title, 'keys': keys},
+                                                    value_types, default_values, layout_metadata, learned_values)
+      section['resettable'] = False
+      sections.append(section)
+      shown.update(keys)
+  raw_document = _safe_params_get_live_raw(PERSONALITY_PROFILES_PARAM)
+  document = migrate_profile_document(raw_document)
+  defaults = default_personality_profiles(_get_detected_ev_tuning(), _get_detected_truck_tuning())
+  profile_values = document['profiles'] if document else defaults
+  for profile_id, profile in profile_values.items():
+    items = []
+    for category, value in {**profile, 'launchBoost': personality_launch_boost_levels(profile_values)[profile_id]}.items():
+      # Render each preset, axis and point list; the document is an explicit non-secret exception.
+      fields = value.items() if isinstance(value, dict) else [('level', value)]
+      for field, current in fields:
+        default = (personality_launch_boost_levels(defaults)[profile_id] if category == 'launchBoost' else defaults[profile_id].get(category))
+        if isinstance(default, dict):
+          default = default.get(field)
+        items.append({'key': profile_id + '.' + category + '.' + field,
+                      'label': ('Launch Boost' if category == 'launchBoost' else category.replace('_', ' ').title()) + ' · ' + field.title(),
+                      'value': current, 'defaultValue': default})
+    sections.append({'id': 'profile_document_' + profile_id,
+                     'title': 'Longitudinal (Speed & Following) › Driving Personalities › ' + profile_id.title(),
+                     'resettable': False, 'items': items})
+  sections.sort(key=lambda section: section['title'])
+
   return _sanitize_json_value({
     "vehicleStatus": _build_vehicle_fault_status(),
     "snapshot": snapshot_items,
@@ -5188,6 +5236,8 @@ class GalaxySlugMiddleware:
 
 
 def setup(app):
+  from openpilot.starpilot.system.the_galaxy.model_stats_api import register_model_stats_api
+  model_stats_api = register_model_stats_api(app)
   if not isinstance(app.wsgi_app, GalaxySlugMiddleware):
     app.wsgi_app = GalaxySlugMiddleware(app.wsgi_app)
 
@@ -5287,6 +5337,13 @@ def setup(app):
   @app.route("/mobile/", methods=["GET"])
   def mobile_index():
     return _serve_new_ui()
+
+  @app.route("/api/vitals/external-gpu", methods=["GET"])
+  def get_external_gpu_vitals():
+    from starpilot.system.the_galaxy.external_gpu_vitals import external_gpu_vitals
+    response = jsonify(external_gpu_vitals())
+    response.headers["Cache-Control"] = "no-store"
+    return response
 
   @app.route("/api/bluetooth/status", methods=["GET"])
   def bluetooth_status():
@@ -5812,6 +5869,12 @@ def setup(app):
         if not isinstance(raw_slot, dict):
           continue
         key = str(raw_slot.get("key") or "").strip()
+        if key == CONTROLLER_ACTION_SET_SPEED:
+          from openpilot.starpilot.common.controller_actions import controller_speed_bounds
+          minimum, maximum = controller_speed_bounds(params.get_bool("IsMetric"))
+          value = raw_slot.get("value")
+          if type(value) not in (int, float) or not minimum <= value <= maximum:
+            return jsonify(error=f"Favorite #{idx + 1} speed must be between {minimum} and {maximum}."), 400
         if key and key not in eligible_keys:
           return jsonify(error=f"Favorite #{idx + 1} must use a Galaxy-exposed toggle or action."), 400
 
@@ -5830,6 +5893,7 @@ def setup(app):
         "slots": slots,
         "options": options,
         "values": _favorite_slot_values(options),
+        "is_metric": params.get_bool("IsMetric"),
       }), 200
 
     slots = normalize_favorite_slots(params.get(FAVORITE_SLOTS_PARAM), params=params, eligible_keys=eligible_keys)
@@ -5842,6 +5906,7 @@ def setup(app):
       "slots": slots,
       "options": options,
       "values": _favorite_slot_values(options),
+        "is_metric": params.get_bool("IsMetric"),
     }), 200
 
   @app.route("/api/favorites/values", methods=["GET"])
@@ -5883,7 +5948,7 @@ def setup(app):
           return jsonify({"error": "Speed control mode unavailable. Check the current selection before retrying."}), 503
     if not is_favorite_action_key(key):
       return jsonify({"error": "Unknown favorite action."}), 400
-    if not trigger_favorite_action(key, params_memory):
+    if not trigger_favorite_action(key, params_memory, params=params, value=data.get("value")):
       return jsonify({"error": "Favorite action failed."}), 400
     return jsonify({"message": "Favorite action sent."}), 200
 
@@ -6706,6 +6771,17 @@ def setup(app):
 
     return jsonify(_sanitize_json_value(result)), 200
 
+  @app.route("/api/system/monitor", methods=["GET"])
+  def system_monitor_snapshot():
+    from openpilot.starpilot.system.the_galaxy.system_monitor import monitor
+    try:
+      from starpilot.system.the_galaxy.external_gpu_vitals import external_gpu_vitals
+      response = jsonify({**monitor.sample(), 'vitals': external_gpu_vitals(include_onboard=True)})
+      response.headers['Cache-Control'] = 'no-store'
+      return response
+    except (OSError, ValueError, IndexError):
+      return jsonify({'error': 'System activity is temporarily unavailable.'}), 503
+
   @app.route("/api/troubleshoot", methods=["GET"])
   def get_troubleshoot_data():
     try:
@@ -6966,7 +7042,11 @@ def setup(app):
     if params.get_bool("IsOnroad"):
       return jsonify({"error": "Cannot change active models while driving."}), 403
 
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    # Disabling Active Big requires an explicit empty string, not a missing or
+    # malformed model value coerced into one by Python truthiness.
+    if not isinstance(data, dict) or not isinstance(data.get("model"), str):
+      return jsonify({"error": "An explicit model string is required."}), 400
     profile = str(data.get("profile") or "").strip().lower()
     if profile not in ("small", "big"):
       return jsonify({"error": "Model profile must be 'small' or 'big'."}), 400
@@ -7017,6 +7097,12 @@ def setup(app):
   @app.route("/api/models/status", methods=["GET"])
   def get_models_status():
     models = get_model_catalog()
+    try:
+      from openpilot.starpilot.system.the_galaxy.utilities import get_model_engagement
+      model_engagement = get_model_engagement(params)
+    except Exception:
+      model_engagement = {}  # Missing history must not disable model controls.
+
     model_to_download = canonical_model_key(params_memory.get(MODEL_DOWNLOAD_PARAM, encoding="utf-8") or "")
     lab_model_to_download = canonical_model_key(params_memory.get(MODEL_LAB_DOWNLOAD_PARAM, encoding="utf-8") or "")
     download_all = params_memory.get_bool(MODEL_DOWNLOAD_ALL_PARAM)
@@ -7076,6 +7162,8 @@ def setup(app):
 
     return jsonify({
       "modelToDownload": model_to_download,
+      "statistics": model_stats_api.summary(),
+      "modelEngagement": model_engagement,
       "modelLabModelToDownload": lab_model_to_download,
       "downloadAll": download_all,
       "downloading": downloading,
@@ -7608,7 +7696,9 @@ def setup(app):
       })
 
     models.sort(key=lambda model: (model["series"].lower(), model["label"].lower()))
-    return models
+    return model_stats_api.annotate(models, MODELS_PATH,
+                                    Path(__file__).resolve().parents[3] / 'selfdrive/modeld/models/driving_tinygrad.pkl',
+                                    artifact_metadata, model_accelerator_artifact_filename)
 
   @app.route("/api/routes", methods=["GET"])
   def list_routes():
@@ -10108,11 +10198,136 @@ def setup(app):
 
     return send_file(buffer, as_attachment=True, download_name="toggle_backup.json", mimetype="application/json")
 
+  @app.route("/api/backup", methods=["POST"])
+  def backup_complete_data():
+    toggle_values = {}
+    default_values = _get_static_default_param_values()
+    for key in sorted(_get_toggle_backup_keys() - set(galaxy_backup.HISTORY_KEYS)):
+      raw_value = _params_raw.get(key)
+      if raw_value is None:
+        raw_value = default_values.get(key)
+      if raw_value is None:
+        continue
+      value = _sanitize_json_value(raw_value)
+      if not isinstance(value, (str, int, float, bool, dict, list)):
+        value = str(value)
+
+      toggle_values[key] = value
+
+    with _PERSONALITY_PROFILES_WRITE_LOCK, _STATS_RESPONSE_LOCK:
+      toggle_values['CustomPersonalities'] = params.get_bool('CustomPersonalities')
+      raw_profiles = _params_raw.get(PERSONALITY_PROFILES_PARAM)
+      document = strict_profile_document(raw_profiles)
+      if document is None and not is_unconfigured_profile_document(raw_profiles):
+        return jsonify({"message": "Personality profiles require migration or repair before backup."}), 409
+      if document is None and toggle_values.get('CustomPersonalities'):
+        document = profile_document(default_personality_profiles(_get_detected_ev_tuning(), _get_detected_truck_tuning()), enabled=True)
+      history = {}
+      for key in galaxy_backup.HISTORY_KEYS:
+        value = _params_raw.get(key)
+        if value is not None:
+          history[key] = _coerce_toggle_restore_value(key, value)
+      payload = {
+        "format": galaxy_backup.FORMAT, "version": galaxy_backup.VERSION,
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+        "settings": toggle_values, "personalityProfiles": document,
+        "history": history,
+        "modelStatistics": galaxy_backup.export_statistics("/data/starpilot/model_stats.sqlite"),
+      }
+      encoded = json.dumps(payload, allow_nan=False)
+      if len(encoded.encode()) > galaxy_backup.MAX_BYTES:
+        return jsonify({"message": "Backup exceeds the supported size; no incomplete backup was created."}), 413
+    return send_file(BytesIO(encoded.encode()), as_attachment=True,
+                     download_name="starpilot-backup.json", mimetype="application/json")
+
+  def _restore_complete_backup(data):
+    def parked():
+      if _personality_settings_write_locked():
+        raise ValueError("Restore requires a confirmed parked device with Safe Mode off.")
+    try:
+      parked()
+      if type(data.get("version")) is not int or data["version"] != galaxy_backup.VERSION:
+        raise ValueError("This backup requires a compatible Galaxy version.")
+      galaxy_backup.json_document(data)
+      if len(json.dumps(data).encode()) > galaxy_backup.MAX_BYTES:
+        raise ValueError("Backup file is too large.")
+      if not isinstance(data.get("settings"), dict) or not isinstance(data.get("history"), dict):
+        raise ValueError("Backup settings or history are missing.")
+      allowed = _get_toggle_backup_keys() - set(galaxy_backup.HISTORY_KEYS)
+      settings = {}
+      skipped = 0
+      for saved_key, value in data["settings"].items():
+        key = LEGACY_STARPILOT_PARAM_RENAMES.get(saved_key, saved_key)
+        if key not in allowed:
+          skipped += 1
+          continue
+        value = _coerce_toggle_restore_value(key, value)
+        if key in PERSONALITY_ADVANCED_PARAM_KEYS:
+          value = validate_personality_advanced_value(value)
+        elif key in PERSONALITY_FOLLOW_PARAM_KEYS:
+          value = validate_personality_follow_value(value)
+        settings[key] = value
+      raw_document = data.get("personalityProfiles")
+      document = strict_profile_document(raw_document) if raw_document is not None else None
+      if raw_document is not None and document is None:
+        raise ValueError("Invalid personality profile document; nothing was restored.")
+      if document is not None:
+        if settings.get("CustomPersonalities", document["enabled"]) != document["enabled"]:
+          raise ValueError("Personality enable settings disagree with the profile document.")
+        settings[PERSONALITY_PROFILES_PARAM] = document
+        settings['CustomPersonalities'] = document['enabled']
+      elif settings.get('CustomPersonalities'):
+        raise ValueError("Enabled personality profiles are missing from the backup.")
+      history = {}
+      for key, value in data['history'].items():
+        if key not in galaxy_backup.HISTORY_KEYS:
+          raise ValueError("Unknown history field in backup.")
+        history[key] = _coerce_toggle_restore_value(key, value)
+        if key in ('GalaxyDashboardStats', 'ModelDrivesAndScores', 'StarPilotStats', 'ApiCache_DriveStats') and not isinstance(history[key], dict):
+          raise ValueError('Invalid statistics document.')
+      dashboard = history.get('GalaxyDashboardStats', {})
+      if not isinstance(dashboard, dict) or dashboard.get('version', 1) != 1 or not isinstance(dashboard.get('routes', {}), dict):
+        raise ValueError("Invalid dashboard history.")
+      for name, entry in dashboard.get('routes', {}).items():
+        if not isinstance(name, str) or not isinstance(entry, dict):
+          raise ValueError('Invalid dashboard route.')
+        for field in ('distanceMeters', 'duration', 'engagedSeconds', 'distractedMoments', 'unresponsiveMoments', 'segmentCount'):
+          if field in entry and not galaxy_backup._number(entry[field]):
+            raise ValueError('Invalid dashboard route measurement.')
+      for field in ('attentionRecords', 'personalRecords', 'modelUsage'):
+        if not isinstance(dashboard.get(field, {}), dict):
+          raise ValueError("Invalid dashboard records.")
+      if not isinstance(dashboard.get('ignoredRoutes', []), list):
+        raise ValueError("Invalid ignored-route history.")
+      statistics = galaxy_backup.validate_statistics(data.get('modelStatistics'))
+      with _PERSONALITY_PROFILES_WRITE_LOCK, _STATS_RESPONSE_LOCK:
+        parked()
+        utilities.stop_dashboard_background_analysis()
+        recovery = Path('/data/starpilot/backups') / ('galaxy-restore-' + datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f'))
+        result = galaxy_backup.apply_restore(_params_raw, settings, history, statistics,
+                                            '/data/starpilot/model_stats.sqlite', recovery, parked)
+        utilities._invalidate_dashboard_cache()
+        _STATS_RESPONSE_CACHE.update({'payload': None, 'updated_at': 0.0})
+      update_starpilot_toggles()
+      return jsonify({"success": True, **result, "skippedCount": skipped,
+                      "message": f"Restored settings and history. Added {result['addedDrives']} drives; existing drives were kept."})
+    except (ValueError, TypeError, KeyError, OverflowError) as error:
+      return jsonify({"success": False, "message": str(error)}), 400
+    except Exception:
+      app.logger.exception('Backup restore failed')
+      return jsonify({"success": False, "message": "Restore failed. Check diagnostics; a recovery copy is retained on the device."}), 500
+
+  @app.route("/api/restore", methods=["POST"])
   @app.route("/api/toggles/restore", methods=["POST"])
   def restore_toggle_values():
+    if request.content_length is not None and request.content_length > galaxy_backup.MAX_BYTES:
+      return jsonify({"message": "Backup file is too large."}), 413
     request_data = request.get_json(silent=True)
     if not isinstance(request_data, dict):
       return jsonify({"success": False, "message": "Invalid toggle backup file."}), 400
+
+    if request_data.get("format") == galaxy_backup.FORMAT:
+      return _restore_complete_backup(request_data)
 
     backup_format = request_data.get("format")
     if backup_format not in (None, TOGGLE_BACKUP_FORMAT):
@@ -10484,6 +10699,12 @@ def main():
 
   # Desktop-only debug mode. On-device must stay on 8082 to match Galaxy FRP routing.
   on_device = _is_comma_device_runtime()
+  if on_device:
+    try:
+      from openpilot.starpilot.system.model_statsd import start_observer
+      start_observer()
+    except Exception as error:
+      print(f"Optional model statistics observer unavailable: {error}")
   debug = False if on_device else os.getenv("SP_GALAXY_DEBUG", "1").lower() in {"1", "true", "yes", "on"}
   port = 8082 if on_device else int(os.getenv("SP_GALAXY_PORT", "8083"))
   host = "0.0.0.0" if on_device else os.getenv("SP_GALAXY_HOST", "0.0.0.0")

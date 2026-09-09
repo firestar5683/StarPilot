@@ -17,7 +17,9 @@ def client_for(params, capable=True):
   routes = [node for node in setup.body if isinstance(node, ast.FunctionDef) and node.name in {"longitudinal_mode", "get_param"}]
   signals = []
   app = Flask(__name__)
-  env = dict(app=app, request=request, jsonify=jsonify, params=params,
+  env = dict(PERSONALITY_PROFILES_PARAM="LongitudinalPersonalityProfiles",
+             PERSONALITY_PARKED_PARAM_KEYS=set(), PERSONALITY_PROFILE_ENABLE_PARAM_KEYS=set(),
+             app=app, request=request, jsonify=jsonify, params=params,
              LONGITUDINAL_MODE_LOCK=mode.WRITE_LOCK, LONGITUDINAL_MODE_KEYS=mode.MODE_KEYS,
              ModeError=mode.ModeError, set_longitudinal_mode=mode.set_mode,
              longitudinal_mode_snapshot=mode.snapshot, _get_longitudinal_mode_capable=lambda: capable,

@@ -72,8 +72,8 @@ export const api = {
   getFlmWorkspace() { return requestOk("/api/flm/workspace", { cache: "no-store" }) },
   getFavoritesSlots() { return request("/api/favorites/slots", { cache: "no-store" }) },
   saveFavoritesSlots(slots) { return request("/api/favorites/slots", { method: "PUT", data: { slots } }) },
-  async activateFavoriteAction(key) {
-    let data = { key }
+  async activateFavoriteAction(key, value) {
+    let data = { key, ...(value == null ? {} : { value }) }
     if (key.startsWith("__starpilot_favorite_action__:longitudinal_")) {
       const started = performance.now()
       const state = await request("/api/longitudinal_mode", { cache: "no-store" })
@@ -201,15 +201,20 @@ export const api = {
   navigationFavorite(body) { return request("/api/navigation/favorite", { method: "POST", data: body }) },
   deleteNavigationKey(type) { return request(`/api/navigation_key?type=${encodeURIComponent(type)}`, { method: "DELETE" }) },
 
+  async systemMonitor(signal) {
+    const response = await fetch("/api/system/monitor", { signal, cache: "no-store" })
+    if (!response.ok) throw new Error("System monitor unavailable")
+    return response.json()
+  },
   async backupToggles() {
-    const res = await fetch("/api/toggles/backup", { method: "POST" })
+    const res = await fetch("/api/backup", { method: "POST" })
     if (!res.ok) {
       const data = await res.json().catch(() => ({}))
-      throw new Error(data?.message || "Failed to create toggle backup.")
+      throw new Error(data?.message || "Failed to create backup.")
     }
     return res.blob()
   },
-  restoreToggles(data) { return request("/api/toggles/restore", { method: "POST", data }) },
+  restoreToggles(data) { return request("/api/restore", { method: "POST", data }) },
   resetTogglesDefault() { return request("/api/toggles/reset_default", { method: "POST" }) },
 
   getUpdateBranches() { return request("/api/update/branches") },

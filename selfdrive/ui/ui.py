@@ -67,6 +67,8 @@ def main():
     kick_watchdog()
     stall_monitor.progress("ui.loop_ready")
     context_update_time = 0.0
+    from openpilot.selfdrive.ui.controller_toast import ControllerToast
+    controller_toast = ControllerToast(ui_state.params_memory)
 
     for should_render in gui_app.render():
       stall_monitor.progress("ui.loop_iteration")
@@ -79,6 +81,7 @@ def main():
         stall_monitor.set_context(_stall_context())
         context_update_time = now
       if should_render:
+        controller_toast.render(ui_state)
         # reaffine after power save offlines our core
         if TICI and os.sched_getaffinity(0) != cores:
           try:

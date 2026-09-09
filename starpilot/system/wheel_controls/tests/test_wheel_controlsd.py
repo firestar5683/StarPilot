@@ -118,10 +118,12 @@ def test_learning_captures_next_key_without_triggering_old_mapping(monkeypatch):
   params = FakeParams({"IsOffroad": True})
   memory = FakeParams()
   daemon = wheel_controlsd.WheelControlsDaemon(params, memory)
+  # Isolate HID routing here; real receipt dispatch is covered by test_action_feedback.
+  monkeypatch.setattr(daemon.feedback, "execute", lambda slot, _: wheel_controlsd.execute_mapping_slot(slot, params, memory))
   triggered = []
   monkeypatch.setattr(wheel_controlsd, "execute_favorite_slot", lambda *args: triggered.append(args[0]) or True)
 
-  wheel_controlsd.start_learning(1, memory)
+  wheel_controlsd.start_learning(1, memory, params)
   daemon._update_learning(10.0)
   daemon._handle_key(source("Game Controller"), 304)
 
@@ -143,6 +145,8 @@ def test_mapped_key_triggers_once(monkeypatch):
   memory = FakeParams()
   wheel_controlsd.upsert_mapping(source(), 30, 2, params)
   daemon = wheel_controlsd.WheelControlsDaemon(params, memory)
+  # Isolate HID routing here; real receipt dispatch is covered by test_action_feedback.
+  monkeypatch.setattr(daemon.feedback, "execute", lambda slot, _: wheel_controlsd.execute_mapping_slot(slot, params, memory))
   triggered = []
   monkeypatch.setattr(wheel_controlsd, "execute_favorite_slot", lambda slot, *_args: triggered.append(slot) or True)
 
@@ -158,6 +162,8 @@ def test_mapped_controller_action_dispatches_without_using_a_favorite_slot(monke
   memory = FakeParams()
   wheel_controlsd.upsert_mapping(source(), 30, 3, params)
   daemon = wheel_controlsd.WheelControlsDaemon(params, memory)
+  # Isolate HID routing here; real receipt dispatch is covered by test_action_feedback.
+  monkeypatch.setattr(daemon.feedback, "execute", lambda slot, _: wheel_controlsd.execute_mapping_slot(slot, params, memory))
   favorite_triggered = []
   controller_triggered = []
   monkeypatch.setattr(wheel_controlsd, "execute_favorite_slot", lambda slot, *_args: favorite_triggered.append(slot) or True)
@@ -277,6 +283,8 @@ def test_selected_joystick_controller_does_not_trigger_favorites(monkeypatch):
   wheel_controlsd.upsert_mapping(source("Game Controller"), 304, 0, params)
   wheel_controlsd.set_joystick_device("stable-device", True, params)
   daemon = wheel_controlsd.WheelControlsDaemon(params, memory)
+  # Isolate HID routing here; real receipt dispatch is covered by test_action_feedback.
+  monkeypatch.setattr(daemon.feedback, "execute", lambda slot, _: wheel_controlsd.execute_mapping_slot(slot, params, memory))
   triggered = []
   monkeypatch.setattr(wheel_controlsd, "execute_favorite_slot", lambda slot, *_args: triggered.append(slot) or True)
 
@@ -294,6 +302,8 @@ def test_only_key_down_is_dispatched(monkeypatch):
   memory = FakeParams()
   wheel_controlsd.upsert_mapping(source(), 30, 0, params)
   daemon = wheel_controlsd.WheelControlsDaemon(params, memory)
+  # Isolate HID routing here; real receipt dispatch is covered by test_action_feedback.
+  monkeypatch.setattr(daemon.feedback, "execute", lambda slot, _: wheel_controlsd.execute_mapping_slot(slot, params, memory))
   triggered = []
   monkeypatch.setattr(wheel_controlsd, "execute_favorite_slot", lambda slot, *_args: triggered.append(slot) or True)
   read_fd, write_fd = os.pipe()
@@ -371,6 +381,8 @@ def test_dpad_hat_axes_are_dispatched_once_per_press(monkeypatch):
   left = wheel_controlsd.hat_event_code(wheel_controlsd.ABS_HAT0X, -1)
   wheel_controlsd.upsert_mapping(source("Game Controller"), left, 1, params)
   daemon = wheel_controlsd.WheelControlsDaemon(params, memory)
+  # Isolate HID routing here; real receipt dispatch is covered by test_action_feedback.
+  monkeypatch.setattr(daemon.feedback, "execute", lambda slot, _: wheel_controlsd.execute_mapping_slot(slot, params, memory))
   triggered = []
   monkeypatch.setattr(wheel_controlsd, "execute_favorite_slot", lambda slot, *_args: triggered.append(slot) or True)
   read_fd, write_fd = os.pipe()
@@ -392,6 +404,8 @@ def test_button_test_mode_eats_mapped_and_unmapped_inputs(monkeypatch):
   memory = FakeParams()
   wheel_controlsd.upsert_mapping(source(), 164, 0, params)
   daemon = wheel_controlsd.WheelControlsDaemon(params, memory)
+  # Isolate HID routing here; real receipt dispatch is covered by test_action_feedback.
+  monkeypatch.setattr(daemon.feedback, "execute", lambda slot, _: wheel_controlsd.execute_mapping_slot(slot, params, memory))
   triggered = []
   monkeypatch.setattr(wheel_controlsd, "execute_favorite_slot", lambda slot, *_args: triggered.append(slot) or True)
 

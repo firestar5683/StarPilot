@@ -1,4 +1,6 @@
 import { html } from "/assets/vendor/arrow-core.js";
+import "/assets/components/home/external_gpu_temperature.js";
+import "/assets/components/home/top_models.js";
 
 const HOME_STATE = {
   status: "loading",
@@ -6,11 +8,10 @@ const HOME_STATE = {
   unit: "miles",
   error: "",
   initialized: false,
+  recentOpen: true,
   refreshTimer: null,
 };
 
-const FAVORITE_COLORS = ["#5ec8c8", "#8b6cc5", "#d4a060", "#e05577", "#6cc56e", "#8aa3ff"];
-const TOP_MODEL_LIMIT = 3;
 
 function withTimeout(promise, timeoutMs, label) {
   return new Promise((resolve, reject) => {
@@ -301,10 +302,10 @@ function renderRecords(records) {
 function renderRecentDrives(drives) {
   if (!Array.isArray(drives) || drives.length === 0) {
     return `
-      <section class="dashboard-card dashboard-recent">
-        <h2>Recent drives</h2>
+      <details id="dashboard_recent" class="dashboard-card dashboard-recent" ${HOME_STATE.recentOpen ? "open" : ""}>
+        <summary style="cursor:pointer;font-weight:600;padding:4px 0 16px">Recent drives</summary>
         <div class="dashboard-empty">No local drives found yet.</div>
-      </section>
+      </details>
     `;
   }
 
@@ -350,57 +351,10 @@ function renderRecentDrives(drives) {
   }).join("");
 
   return `
-    <section class="dashboard-card dashboard-recent">
-      <h2>Recent drives</h2>
+    <details id="dashboard_recent" class="dashboard-card dashboard-recent" ${HOME_STATE.recentOpen ? "open" : ""}>
+      <summary style="cursor:pointer;font-weight:600;padding:4px 0 16px">Recent drives</summary>
       ${rows}
-    </section>
-  `;
-}
-
-function favoriteChart(models) {
-  if (!Array.isArray(models) || models.length === 0) {
-    return {
-      style: "background: conic-gradient(var(--dashboard-track) 0 100%)",
-      rows: `<div class="dashboard-empty">No model usage recorded yet.</div>`,
-    };
-  }
-
-  const topModels = models.slice(0, TOP_MODEL_LIMIT);
-  const total = topModels.reduce((sum, model) => sum + Math.max(1, numberValue(model.weight)), 0);
-  let start = 0;
-  const segments = topModels.map((model, index) => {
-    const end = start + (Math.max(1, numberValue(model.weight)) / total) * 100;
-    const segment = `${FAVORITE_COLORS[index]} ${start}% ${end}%`;
-    start = end;
-    return segment;
-  });
-
-  const rows = topModels.map((model, index) => `
-    <div class="dashboard-model-row">
-      <span class="dashboard-swatch" style="background:${FAVORITE_COLORS[index]}"></span>
-      <div>
-        <strong>${escapeHtml(model.name)}</strong>
-        <small>${formatInt(model.drives)} ${numberValue(model.drives) === 1 ? "drive" : "drives"} using this model</small>
-      </div>
-    </div>
-  `).join("");
-
-  return {
-    style: `background: conic-gradient(${segments.join(", ")})`,
-    rows,
-  };
-}
-
-function renderFavoriteModels(models) {
-  const chart = favoriteChart(models);
-  return `
-    <section class="dashboard-card dashboard-models">
-      <h2>Most used models</h2>
-      <div class="dashboard-model-layout">
-        <div class="dashboard-favorite-donut" style="${chart.style}"></div>
-        <div class="dashboard-model-list">${chart.rows}</div>
-      </div>
-    </section>
+    </details>
   `;
 }
 
@@ -439,6 +393,7 @@ function renderVitals(device) {
         <div><span>Uptime</span><strong>${escapeHtml(uptime)}</strong></div>
         <div><span>CPU temp</span><strong>${escapeHtml(cpu)}</strong></div>
         <div><span>GPU temp</span><strong>${escapeHtml(gpu)}</strong></div>
+        <div><span>eGPU</span><strong><external-gpu-temperature>--</external-gpu-temperature></strong></div>
       </div>
     </section>
   `;
@@ -473,6 +428,8 @@ function renderSoftware(info = {}) {
 }
 
 function bindDashboardActions() {
+  const recent = document.getElementById("dashboard_recent");
+  if (recent) recent.ontoggle = () => { HOME_STATE.recentOpen = recent.open; };
   const refreshButton = document.getElementById("dashboard_refresh");
   if (refreshButton) {
     refreshButton.onclick = () => initializeHome(true);
@@ -573,7 +530,7 @@ function renderDashboard(state) {
       ${renderRecentDrives(dashboard.recentDrives || [])}
 
       <div class="dashboard-two-column dashboard-model-storage">
-        ${renderFavoriteModels(dashboard.favoriteModels || [])}
+        <section class="dashboard-card dashboard-models"><h2>Top models</h2><top-models></top-models></section>
         ${renderStorage(dashboard.storage || {})}
       </div>
 

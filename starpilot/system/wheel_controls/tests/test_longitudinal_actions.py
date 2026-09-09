@@ -77,7 +77,7 @@ def test_press_not_release_or_autorepeat(monkeypatch):
   source = wheel.InputSource('/dev/input/event-test', 'test-id', 'test', 5, 1, 1)
   params.put_bool(wheel.ENABLED_PARAM, True)
   wheel.upsert_mapping(source, 304, 3, params)
-  monkeypatch.setattr(favorites, 'request_mode_action', lambda k, **kw: calls.append(k) or True)
+  monkeypatch.setattr(actions, 'request_mode_action', lambda k, **kw: calls.append(k) or True)
   daemon = wheel.WheelControlsDaemon(params, memory)
   daemon.sources[123] = source
   daemon.buffers[123] = bytearray()

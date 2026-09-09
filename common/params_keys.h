@@ -352,6 +352,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"DrivingModelVersion", {PERSISTENT, STRING, "v15", "v15", 1}},
     {"DynamicPathWidth", {PERSISTENT, BOOL, "0", "0", 2, SETTINGS_SIMPLE}},
     {"DynamicPedalsOnUI", {PERSISTENT, BOOL, "1", "0", 1, SETTINGS_SIMPLE}},
+    {"GpuModelReadySound", {PERSISTENT, BOOL, "1", "1", 2, SETTINGS_SIMPLE}},
     {"EngageVolume", {PERSISTENT, INT, "101", "101", 2, SETTINGS_SIMPLE}},
     {"EVTuning", {PERSISTENT, BOOL, "0", "0", 3}},
     {"Fahrenheit", {PERSISTENT, BOOL, "0", "0", 3}},

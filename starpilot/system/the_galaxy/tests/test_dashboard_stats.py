@@ -756,7 +756,7 @@ def test_route_listing_uses_all_segment_times_when_segment_zero_was_touched(tmp_
   routes = utilities._list_dashboard_routes([tmp_path])
 
   assert routes[0]["startedAt"] == route_start
-  start, end = utilities._route_time_range(routes[0], 180)
+  start, end = utilities._route_time_range(routes[0], 180, now=utilities.datetime(2026, 7, 20))
   assert start == "2026-07-18T07:19:00"
   assert end == "2026-07-18T07:22:00"
 
@@ -1781,7 +1781,11 @@ def test_invalid_filesystem_time_requests_reanalysis():
   assert utilities._analysis_candidates([route], stats) == [route]
 
 
-def test_corrected_filesystem_time_replaces_touched_persisted_time_without_losing_stats():
+def test_corrected_filesystem_time_replaces_touched_persisted_time_without_losing_stats(monkeypatch):
+  original_time_check = utilities._dashboard_time_is_valid
+  monkeypatch.setattr(utilities, "_dashboard_time_is_valid",
+                      lambda value, now=None, require_recent=False:
+                      original_time_check(value, now=now or utilities.datetime(2026, 7, 21), require_recent=require_recent))
   params = FakeParams({
     utilities.DASHBOARD_PERSISTENT_STATS_PARAM: {
       "routes": {
@@ -2666,3 +2670,19 @@ def test_toggle_profile_slots_save_and_load_the_same_filtered_settings(monkeypat
   server.params.values["IsOnroad"] = True
   onroad = client.post("/api/toggles/profiles/a/load")
   assert onroad.status_code == 403
+
+
+def test_statistics_engagement_catalog_alias_and_ambiguity():
+  entry = {'modelKey':'cinque-divergence-mask', 'model':'Cinque Divergence Mask'}
+  lookup = {'cdm': {'name':'Cinque Divergence Mask'}}
+  assert utilities._statistics_model_key(entry, lookup) == 'cdm'
+  assert utilities._statistics_model_key({**entry,'modelKey':'cdm'},lookup) == 'cdm'
+  lookup['other'] = {'name':'Cinque Divergence Mask'}
+  assert utilities._statistics_model_key(entry, lookup) == 'cinque-divergence-mask'
+
+
+def test_public_drive_dates_have_device_timezone():
+  from datetime import datetime
+  result = utilities._public_drive({'date':'2026-09-09T14:59:45', 'endDate':'2026-09-09T15:17:18'}, False)
+  assert datetime.fromisoformat(result['date']).tzinfo is not None
+  assert datetime.fromisoformat(result['endDate']).timestamp() - datetime.fromisoformat(result['date']).timestamp() == 1053

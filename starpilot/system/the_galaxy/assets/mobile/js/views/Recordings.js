@@ -372,12 +372,12 @@ export const Recordings = {
         </div>
         <div style="padding: var(--sp-3); display:flex; gap:8px; flex-wrap:wrap;">
           <input class="gx-field" style="flex:1; min-width:160px;" type="search" placeholder="Search routes..." v-model="searchQuery" />
-          <select class="gx-field" v-model="sortOrder">
+          <GalaxySelect class="gx-field" v-model="sortOrder">
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>
             <option value="longest">Longest duration</option>
             <option value="shortest">Shortest duration</option>
-          </select>
+          </GalaxySelect>
         </div>
         <div style="padding: 0 var(--sp-3) var(--sp-3);">
           <GalaxyTabs :items="{ all: 'All', preserved: 'Preserved' }" :active="showPreservedOnly ? 'preserved' : 'all'" @select="setPreservedFilter" />
@@ -481,9 +481,9 @@ export const Recordings = {
                   <video ref="player" class="gx-video" controls muted playsinline preload="metadata"></video>
                   <div style="display:flex; gap:8px; padding: var(--sp-3) 0 0; flex-wrap:wrap; align-items:center;">
                     <button type="button" class="gx-btn gx-btn--tonal" :disabled="current<=0" @click="current--; playSegment()"><i class="bi bi-skip-start-fill"></i></button>
-                    <select class="gx-field" :value="current" @change="current = Number($event.target.value); playSegment()">
+                    <GalaxySelect class="gx-field" :value="current" @change="current = Number($event.target.value); playSegment()">
                       <option v-for="(s,i) in segments" :key="i" :value="i">Segment {{ i + 1 }}</option>
-                    </select>
+                    </GalaxySelect>
                     <button type="button" class="gx-btn gx-btn--tonal" :disabled="current>=segments.length-1" @click="current++; playSegment()"><i class="bi bi-skip-end-fill"></i></button>
                     <button v-for="c in cameras" :key="c" type="button" class="gx-chip" :style="selectedCamera===c?'background:var(--primary);color:var(--on-primary);':''" @click="selectedCamera=c; playSegment()">{{ c }}</button>
                     <button type="button" class="gx-btn" @click="downloadRoute"><i class="bi bi-download"></i> Download</button>

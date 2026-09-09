@@ -4,10 +4,13 @@ import { GalaxyConfirm } from "../components/GalaxyModal.js"
 import { TroubleshootPanel } from "../components/TroubleshootPanel.js"
 import { GalaxyTabs } from "../components/GalaxyTabs.js"
 
+import { SystemMonitor } from "../components/SystemMonitor.js"
+
 const TABS = {
   troubleshoot: "Troubleshoot",
   errors: "Error Logs",
   tmux: "Tmux Live Log",
+  monitor: "System Monitor",
 }
 
 function parseLogDate(filename) {
@@ -19,7 +22,7 @@ function parseLogDate(filename) {
 
 export const Logs = {
   name: "Logs",
-  components: { TroubleshootPanel, GalaxyTabs },
+  components: { TroubleshootPanel, GalaxyTabs, SystemMonitor },
   data() {
     return {
       TABS,
@@ -35,7 +38,7 @@ export const Logs = {
     }
   },
   setup() {
-    return useTabRouting("/logs", { troubleshoot: "troubleshoot", errors: "errors", tmux: "tmux" })
+    return useTabRouting("/logs", { troubleshoot: "troubleshoot", errors: "errors", tmux: "tmux", monitor: "monitor" })
   },
   created() {
     this.stream = useLogStream({ endpoint: "/api/tmux_log/live", snapshotFn: () => api.tmuxSnapshot(), interval: 2000 })
@@ -219,6 +222,10 @@ export const Logs = {
             </div>
           </div>
         </section>
+      </template>
+
+      <template v-else-if="tab === 'monitor'">
+        <SystemMonitor />
       </template>
 
       <template v-else>

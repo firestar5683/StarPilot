@@ -3,6 +3,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from cereal import log
+
 from openpilot.common.constants import CV
 from openpilot.selfdrive.controls.lib.longitudinal_planner import A_CRUISE_MIN
 from openpilot.starpilot.common.accel_profile import A_CRUISE_MAX_BP_CUSTOM, ACCELERATION_PROFILES, DECELERATION_PROFILES
@@ -35,6 +37,8 @@ class FakePlanner:
 
 def make_toggles(**overrides):
   defaults = {
+    "custom_personalities": False,
+    "longitudinal_personality_profiles": {},
     "acceleration_profile": ACCELERATION_PROFILES["STANDARD"],
     "deceleration_profile": DECELERATION_PROFILES["ECO"],
     "custom_accel_profile": False,
@@ -64,6 +68,7 @@ def make_sm(*, set_speed_kph=100.0, lead_one=None, lead_two=None, standstill=Fal
     "carState": SimpleNamespace(vCruise=set_speed_kph, standstill=standstill, vEgoCluster=v_ego_cluster),
     "carControl": SimpleNamespace(orientationNED=[0.0, pitch, 0.0]),
     "controlsState": SimpleNamespace(forceDecel=force_decel),
+    "selfdriveState": log.SelfdriveState.new_message(personality=log.LongitudinalPersonality.standard),
     "radarState": SimpleNamespace(
       leadOne=lead_one or make_lead(),
       leadTwo=lead_two or make_lead(),

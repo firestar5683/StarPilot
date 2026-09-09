@@ -1,3 +1,31 @@
+/* Model Manager: presentation-only comparison cards. */
+/* Download status changes must not move the viewport to another card. */
+.gx-model-manager { overflow-anchor: none; }
+.gx-model-history { padding: 0 var(--sp-3) var(--sp-3); overflow-wrap: anywhere; }
+.gx-model-comparison { padding: var(--sp-3); overflow-wrap: anywhere; }
+.gx-model-comparison summary { cursor: pointer; font-weight: 600; padding: 12px 0; }
+.gx-model-comparison p { color: var(--on-surface-variant); font-size: 13px; line-height: 1.5; }
+.gx-model-comparison label { display: block; margin: 12px 0 8px; }
+.gx-model-comparison select { width: 100%; min-height: 44px; }
+.gx-model-history-row { padding: 12px 0; border-bottom: 1px solid var(--outline); font-size: 13px; }
+.gx-model-metrics {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  margin: 0;
+  padding: 0 var(--sp-3) var(--sp-3);
+}
+.gx-model-metrics > div {
+  padding: 8px 10px;
+  min-width: 0;
+  border-radius: 10px;
+  background: var(--surface-container-high);
+}
+.gx-model-metric-total { box-shadow: inset 3px 0 var(--secondary); }
+.gx-model-metrics dt { line-height: 1.35; font-size: 11px; color: var(--on-surface-variant); }
+.gx-model-metrics dd { margin: 4px 0 0; font-size: 19px; font-weight: 650; font-variant-numeric: tabular-nums; }
+.gx-model-metrics span { font-size: 11px; color: var(--on-surface-variant); }
+
 .gx-personalities { overflow-anchor: none; }
 #gx-personality-settings { padding: 0 var(--sp-4) var(--sp-4); }
 .gx-personalities__live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
@@ -1640,7 +1668,15 @@ input[type="color"].gx-color {
   .gx-content { padding-bottom: var(--sp-6); }
 }
 
-/* Galaxy themed mode selector */
+/* Native popup options need opaque theme colours, not glass/transparent surfaces. */
+select { color-scheme: inherit; }
+select option, select optgroup {
+  color: var(--on-surface, #f3f2f8);
+  background-color: var(--background, #161226);
+}
+select option:disabled { color: var(--on-surface-variant, #bab6cb); }
+
+/* Shared Galaxy dropdowns: the native select only adapts existing values/events. */
 .gx-select { display: inline-flex; position: relative; vertical-align: middle; min-width: 0; max-width: 100%; }
 .gx-select.gx-field { padding: 0; background: var(--surface-container-high); }
 .gx-select.gx-field--full { display: flex; width: 100%; }
@@ -1656,6 +1692,35 @@ input[type="color"].gx-color {
 .gx-select-menu [role="option"]:hover:not(:disabled), .gx-select-menu [role="option"]:focus-visible { outline: 2px solid var(--primary); outline-offset: -2px; background: var(--primary-container); color: var(--on-primary-container); }
 .gx-select-menu [role="option"]:disabled { opacity: .45; cursor: default; }
 .gx-select-menu__group { padding: 10px 12px 4px; color: var(--on-surface-variant); font-size: .85em; }
+
 .gx-select-menu { background: linear-gradient(var(--surface-container-high), var(--surface-container-high)), #141020; }
 [data-theme="light"] .gx-select-menu { background: linear-gradient(var(--surface-container-high), var(--surface-container-high)), #fff; }
 .gx-select-menu:not([open]) { display: none; }
+
+/* Four compact statistics across roomy model cards; two by two on mobile. */
+.gx-model-manager .gx-card-grid > .gx-card { container-type: inline-size; }
+@container (min-width: 640px) {
+  .gx-model-metrics { grid-template-columns: repeat(4, minmax(0, 1fr)); }
+}
+
+/* Read-only task manager, shared by phone and desktop layouts. */
+.gx-monitor__toolbar, .gx-monitor__filters { display:flex; gap:12px; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; }
+.gx-monitor__summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+.gx-monitor__metric { padding:16px; margin:0; display:flex; flex-direction:column; gap:6px; position:relative; overflow:hidden; }
+.gx-monitor__metric > span, .gx-monitor__metric small { color:var(--text-muted); }
+.gx-monitor__metric strong { font-size:26px; }
+.gx-monitor__graph { height:32px; width:100%; color:var(--primary); }
+.gx-monitor progress { width:100%; height:6px; accent-color:var(--primary); }
+.gx-monitor__cores { padding:14px; margin:12px 0; }
+.gx-monitor__cores summary { cursor:pointer; }
+.gx-monitor__cores > div { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:16px; padding-top:12px; }
+.gx-monitor__cores span { font-size:12px; display:flex; flex-wrap:wrap; justify-content:space-between; gap:6px; }
+.gx-monitor__filters input { flex:1; min-width:180px; }
+.gx-monitor__table { overflow:auto; max-height:65vh; }
+.gx-monitor table { width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
+.gx-monitor th { position:sticky; top:0; background:var(--surface); z-index:1; text-align:left; }
+.gx-monitor th button { background:transparent; color:inherit; border:0; font:inherit; font-weight:600; cursor:pointer; padding:12px; white-space:nowrap; }
+.gx-monitor td { padding:10px 12px; border-top:1px solid var(--border-color,rgba(128,128,128,.15)); white-space:nowrap; }
+.gx-monitor td:first-child { min-width:180px; max-width:350px; white-space:normal; overflow-wrap:anywhere; }
+.gx-monitor tbody tr:hover { background:var(--surface); }
+@media(max-width:600px) { .gx-monitor__summary { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; } .gx-monitor__metric { padding:12px; } .gx-monitor__metric strong { font-size:22px; } }

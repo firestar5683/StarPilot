@@ -4,6 +4,7 @@ import copy
 import hashlib
 import ipaddress
 import json
+import math
 import os
 import queue
 import re
@@ -1602,6 +1603,10 @@ def _public_drive(drive, is_metric):
   for key in public:
     if key in drive:
       public[key] = drive[key]
+  for key in ('date', 'endDate'):
+    parsed = _coerce_dashboard_time(public[key])
+    if parsed is not None:
+      public[key] = parsed.astimezone().isoformat()
   return public
 
 
@@ -2925,6 +2930,85 @@ def _build_device_summary(params_obj):
   }
 
 
+def _statistics_model_key(entry, model_names):
+  key = canonical_model_key(entry.get('modelKey', ''))
+  if key in model_names:
+    return key
+  label = _model_usage_key(entry.get('model', ''))
+  if key and key != label:
+    return key  # retain an explicit ID that has left the catalogue
+  aliases = {model_id for model_id, info in model_names.items()
+             if _model_usage_key(info.get('name', '')) in {key, label} - {''}}
+  # Duplicate display names are ambiguous; never merge their statistics.
+  if len(aliases) == 1:
+    return aliases.pop()
+  return key or label
+
+
+def _build_model_engagement(persistent_stats, model_names=None):
+  """Time-weighted engagement from complete retained routes, never event counts."""
+  if not isinstance(persistent_stats, dict) or not isinstance(persistent_stats.get("routes"), dict):
+    return {}
+  ignored = persistent_stats.get("ignoredRoutes", [])
+  ignored = {v for v in ignored if isinstance(v, str)} if isinstance(ignored, list) else set()
+  totals = {}
+  for name, entry in persistent_stats["routes"].items():
+    if name in ignored or not isinstance(entry, dict) or entry.get("analysisComplete") is not True:
+      continue
+    if not _dashboard_time_is_valid(entry.get("date", "")):
+      continue
+    duration, engaged = entry.get("duration"), entry.get("engagedSeconds")
+    if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(v) for v in (duration, engaged)):
+      continue
+    if duration <= 0 or not 0 <= engaged <= duration:
+      continue
+    key = _statistics_model_key(entry, model_names or {})
+    if not key:
+      continue
+    row = totals.setdefault(key, {"durationSeconds": 0.0, "engagedSeconds": 0.0, "drives": 0})
+    row["durationSeconds"] += duration
+    row["engagedSeconds"] += engaged
+    row["drives"] += 1
+  return {key: {**row, "percent": round(100 * row["engagedSeconds"] / row["durationSeconds"], 1)}
+          for key, row in totals.items()}
+
+
+def get_model_engagement(params_obj):
+  # Read raw data: the general dashboard normalizer defaults missing exposure
+  # to zero, which would falsely imply a measured 0% here. Never write it back.
+  raw = _read_dashboard_param_file(DASHBOARD_PERSISTENT_STATS_PARAM)
+  if raw is None:
+    raw = _params_get_value(params_obj, DASHBOARD_PERSISTENT_STATS_PARAM, None)
+  return _build_model_engagement(_decode_json_param(raw, {}), _model_lookup(params_obj))
+
+
+def _build_model_distances(persistent_stats=None):
+  """Read retained route mileage; never infer assisted distance or event counts."""
+  stats = persistent_stats if isinstance(persistent_stats, dict) else {}
+  routes = stats.get("routes", {})
+  if not isinstance(routes, dict):
+    return []
+  ignored = stats.get("ignoredRoutes", [])
+  ignored = {name for name in ignored if isinstance(name, str)} if isinstance(ignored, list) else set()
+  models = {}
+  for route_name, entry in routes.items():
+    if route_name in ignored or not isinstance(entry, dict):
+      continue
+    if entry.get("analysisComplete") is not True or not _dashboard_time_is_valid(entry.get("date", "")):
+      continue
+    distance = entry.get("distanceMeters")
+    if isinstance(distance, bool) or not isinstance(distance, (int, float)) or not math.isfinite(distance) or distance <= 0:
+      continue
+    name = _clean_model_label(entry.get("model", ""))
+    key = canonical_model_key(entry.get("modelKey", "")) or _model_usage_key(name)
+    if not key:
+      continue
+    row = models.setdefault(key, {"key": key, "name": name or key, "distanceMeters": 0.0, "drives": 0})
+    row["distanceMeters"] += distance
+    row["drives"] += 1
+  return sorted(models.values(), key=lambda row: (-row["distanceMeters"], row["key"]))
+
+
 def _build_favorite_models(params_obj, persistent_stats=None):
   lookup = _model_lookup(params_obj)
   user_favorites = {canonical_model_key(entry) for entry in _split_csv(_params_get_text(params_obj, "UserFavorites", ""))}
@@ -2976,6 +3060,7 @@ def _dashboard_empty(is_metric, now, footage_paths, params_obj, persistent_stats
     "device": _build_device_summary(params_obj),
     "storage": _build_storage_summary(footage_paths),
     "favoriteModels": _build_favorite_models(params_obj, persistent_stats),
+    "modelDistances": _build_model_distances(persistent_stats),
   }
 
 
@@ -3045,6 +3130,7 @@ def get_dashboard_stats(footage_paths, params_obj=None, now=None):
       "device": _build_device_summary(params_obj),
       "storage": _build_storage_summary(footage_paths),
       "favoriteModels": _build_favorite_models(params_obj, persistent_stats),
+      "modelDistances": _build_model_distances(persistent_stats),
     }
   dashboard["analysis"] = analysis_status
 

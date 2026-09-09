@@ -165,7 +165,7 @@ def test_ui_routes_ported_views_natively_no_classic_fallback():
   assert "GalaxyEmbed" not in home and 'src="/classic"' not in home
   assert "api.getStats()" in home and "keepRefreshing" in home and "usePolling" in home
   for section in ["Last drive", "This week", "Recent drives", "Personal records",
-                  "Most used models", "Storage", "Vitals", "Software", "Your driving", "Your device"]:
+                  "Top models", "Storage", "Vitals", "Software", "Your driving", "Your device"]:
     assert section in home, f"Home dashboard should include {section!r}"
   assert "setDriveStats" in _read("js/api.js")
   assert "fetch(" not in home.replace("api.", ""), "Home should not use raw fetch()"
@@ -544,7 +544,10 @@ def test_ui_mobile_polish_regressions():
 
   home = _read("js/views/Home.js")
   home_css = _read("css/home.css")
-  assert "backgroundImage: modelView.style" in home
+  # The integration replaces the usage ring with recorded-statistics rankings.
+  assert '<component is="top-models" all-rows default-mode="distance"' in home
+  assert 'import "/assets/components/home/top_models.js"' in home
+  assert "Most used models" not in home
   assert "display: flex" in home_css and "flex-direction: column" in home_css
 
   tuning = _read("js/views/Tuning.js")

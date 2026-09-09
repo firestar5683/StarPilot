@@ -519,7 +519,7 @@ def test_personality_cards_and_advanced_disclosures_have_unique_accessible_relat
   assert 'aria-controls="personality-advanced-${profile.id}"' in advanced
   assert 'id="personality-advanced-${profile.id}"' in source
   assert 'aria-hidden="true"' in advanced
-  manage = source.split('${() => p.is_parent_toggle', 1)[1].split("` : \"\"}", 1)[0]
+  manage = source.split('${() => p.key !== LONGITUDINAL_MODE_KEY && p.is_parent_toggle', 1)[1].split("` : \"\"}", 1)[0]
   assert 'aria-controls="${p.key === "CustomPersonalities" ? "personality-profiles-panel"' in manage
   assert 'aria-expanded="${() => state.expanded[p.key] ? "true" : "false"}"' in manage
 

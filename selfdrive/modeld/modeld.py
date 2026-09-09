@@ -70,6 +70,8 @@ from openpilot.starpilot.common.model_lab import (
   model_lab_manifest_eligible,
 )
 from openpilot.starpilot.common.model_versions import is_tinygrad_model_version
+from openpilot.starpilot.common.model_stats_identity import LoadedDigest, loaded_identity, publish_identity
+from openpilot.starpilot.common.external_gpu_memory import allocated_vram
 from openpilot.starpilot.common.starpilot_variables import get_starpilot_toggles, MODELS_PATH, params_memory
 
 
@@ -267,6 +269,7 @@ class ChestnutState:
         metrics_buf = bytearray(smu.adev.vram.view(smu.driver_table_paddr, ctypes.sizeof(metrics_t))[:])
         metrics = metrics_t.from_buffer(metrics_buf).SmuMetrics
         self.metrics = {
+          "tempSampleMonoTime": time.monotonic_ns(),
           "tempC": metrics.AvgTemperature[smu.smu_mod.TEMP_HOTSPOT],
           "memoryTempC": metrics.AvgTemperature[smu.smu_mod.TEMP_MEM],
           "powerDrawW": metrics.AverageSocketPower,
@@ -281,6 +284,18 @@ class ChestnutState:
           cloudlog.exception("chestnut state read failed")
         self.valid = False
         self.metrics.clear()
+
+    # Optional accounting reads Python allocator state only; failure must not
+    # affect stock SMU/ASM diagnostics or their validity. Same 0.1 Hz cadence.
+    if self.big and "AMD" in Device._opened_devices and self.sends % 100 == 1:
+      self.memory_metrics = {}
+      memory = allocated_vram(Device["AMD"])
+      if memory is not None:
+        self.memory_metrics = {"memoryUsedBytes": memory[0], "memoryTotalBytes": memory[1],
+                               "memorySampleMonoTime": time.monotonic_ns()}
+    if self.big and "AMD" in Device._opened_devices:
+      for key, value in getattr(self, "memory_metrics", {}).items():
+        setattr(state, key, value)
 
     if self.big:
       for key, value in self.metrics.items():
@@ -465,13 +480,22 @@ def _is_oob_artifact_header(header: bytes) -> bool:
   return 2 <= opcode_size <= MAX_OOB_OPCODE_SIZE and header[8] == 0x80 and header[9] <= pickle.HIGHEST_PROTOCOL
 
 
-def _load_model_artifact(path: Path):
+def _load_model_artifact(path: Path, stats_identity=None):
   """Load legacy pickle artifacts and the streaming OOB format used by large GPU models."""
   with open_file_chunked(path) as artifact_file:
     oob_artifact = _is_oob_artifact_header(artifact_file.peek(10)[:10])
 
   with open_file_chunked(path) as artifact_file:
-    return load_oob(artifact_file) if oob_artifact else pickle.load(artifact_file)
+    source = artifact_file
+    if stats_identity is not None:
+      try:
+        source = LoadedDigest(artifact_file)
+      except Exception:
+        pass
+    artifact = load_oob(source) if oob_artifact else pickle.load(source)
+    if isinstance(source, LoadedDigest):
+      source.apply(stats_identity)
+    return artifact
 
 
 def _normalize_model_artifact(artifact: dict) -> dict:
@@ -570,7 +594,11 @@ class ModelState:
 
     self.model_id = BUILTIN_MODEL_KEY if loaded_builtin else model_id
     self.uses_external_gpu = external_gpu_active and (requires_external_gpu or force_external_gpu) and not loaded_builtin
-    artifact = _normalize_model_artifact(_load_model_artifact(model_path))
+    try:
+      self.stats_identity = loaded_identity(self.model_id, self.uses_external_gpu)
+    except Exception:
+      self.stats_identity = None
+    artifact = _normalize_model_artifact(_load_model_artifact(model_path, self.stats_identity))
 
     self.model_type = artifact["model_type"]
     self.metadata = artifact["metadata"]
@@ -1504,6 +1532,7 @@ def main(demo=False):
 
       fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, live_calib_seen)
       pm.send('modelV2', modelv2_send)
+      publish_identity(starpilot_modelv2_send, modelv2_send, model, model_lab_longitudinal if model_lab_active else None)
       pm.send('starpilotModelV2', starpilot_modelv2_send)
       pm.send('drivingModelData', drivingdata_send)
       pm.send('cameraOdometry', posenet_send)

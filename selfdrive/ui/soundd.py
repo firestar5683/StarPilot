@@ -42,6 +42,8 @@ StarPilotAudibleAlert = custom.StarPilotCarControl.HUDControl.AudibleAlert
 STARPILOT_CUSTOM_ALERT_OFFSET = 1000
 STARPILOT_CUSTOM_ALERT_START = int(StarPilotAudibleAlert.angry)
 TURN_STEERING_LIMIT_ALERT_SUFFIX = "steersaturated"
+GPU_MODEL_READY_ALERT = 2000
+
 # Keep carState out of this list; C4's onroad stack is near msgq's 15-reader limit.
 SOUNDD_SERVICES = ('selfdriveState', 'soundPressure', 'starpilotSelfdriveState', 'starpilotPlan')
 
@@ -67,6 +69,7 @@ def should_mute_turn_steering_limit_alert(alert_type: str, v_ego: float, mute_be
 
 
 sound_list: dict[int, tuple[str, int | None, float]] = {
+  GPU_MODEL_READY_ALERT: ("model_ready.wav", 1, MAX_VOLUME),
   # AudibleAlert, file name, play count (none for infinite)
   AudibleAlert.engage: ("engage.wav", 1, MAX_VOLUME),
   AudibleAlert.disengage: ("disengage.wav", 1, MAX_VOLUME),
@@ -124,6 +127,11 @@ class Soundd:
     self.spl_filter_weighted = FirstOrderFilter(0, 2.5, FILTER_DT, initialized=False)
 
     self.params_memory = Params(memory=True)
+    from openpilot.starpilot.common.gpu_model_ready_sound import GpuModelReadyChime
+    self.model_ready_chime = GpuModelReadyChime()
+    self.model_ready_params = Params(return_defaults=True)
+    self.model_ready_last_check = 0.0
+    self.model_ready_pending = False
 
     self.starpilot_toggles = get_starpilot_toggles()
 
@@ -325,6 +333,33 @@ class Soundd:
       self.update_alert(AudibleAlert.none)
       self.selfdrive_timeout_alert = False
 
+  def update_model_ready_sound(self, sm):
+    # A one-shot ending exactly on a callback boundary must release its slot.
+    if self.current_alert == GPU_MODEL_READY_ALERT:
+      loaded = self.loaded_sounds.get(GPU_MODEL_READY_ALERT)
+      if loaded is None or self.current_sound_frame >= len(loaded):
+        self.current_alert = AudibleAlert.none
+        self.current_sound_frame = 0
+    now = time.monotonic()
+    if now - self.model_ready_last_check >= 0.25:
+      self.model_ready_last_check = now
+      try:
+        self.model_ready_pending = self.model_ready_chime.update(
+          active=self.model_ready_params.get_bool("UsbGpuActive"),
+          loading=self.model_ready_params.get_bool("UsbGpuLoading"),
+          onroad=self.model_ready_params.get_bool("IsOnroad"),
+          enabled=self.model_ready_params.get_bool("GpuModelReadySound"), now=now)
+      except Exception:
+        self.model_ready_chime.consume()
+        self.model_ready_pending = False
+    # Run after stock/custom alert selection: warnings and timeout alerts always win.
+    if (self.model_ready_pending and self.current_alert == AudibleAlert.none
+        and not self.selfdrive_timeout_alert and sm.valid["selfdriveState"] and sm.alive["selfdriveState"]):
+      self.model_ready_chime.consume()
+      self.model_ready_pending = False
+      self.current_alert_type = ""
+      self.update_alert(GPU_MODEL_READY_ALERT)
+
   def get_volume_override(self):
     if self.current_alert_type.startswith("belowSteerSpeed/"):
       return self.starpilot_toggles.below_steer_speed_volume / 100.0
@@ -391,6 +426,7 @@ class Soundd:
               self.current_volume = 0.0
 
           self.get_audible_alert(sm)
+          self.update_model_ready_sound(sm)
 
           if self.current_alert != AudibleAlert.none:
             v_ego = max(float(getattr(sm["starpilotSelfdriveState"], "vEgo", 0.0)), 0.0)

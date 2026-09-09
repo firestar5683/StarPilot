@@ -207,11 +207,11 @@ export const GalaxyToggleCard = {
           <button class="gx-slider-reset" :disabled="locked || updating" @click="resetToDefault">Default</button>
         </div>
 
-        <select v-else-if="isSelect" class="gx-field" :disabled="locked || updating" :value="String(value ?? '')" @change="onSelect">
+        <GalaxySelect v-else-if="isSelect" class="gx-field" :disabled="locked || updating" :value="String(value ?? '')" @change="onSelect">
           <option v-if="optionsLoading" value="">Loading...</option>
           <option v-else-if="!selectOptions.length" value="">No options available</option>
           <option v-for="opt in selectOptions" :key="String(opt.value)" :value="String(opt.value)">{{ opt.label }}</option>
-        </select>
+        </GalaxySelect>
 
         <input v-else-if="isText" class="gx-field" :type="param.input_type || 'text'" :value="value ?? ''"
           :placeholder="param.placeholder || ''" :disabled="locked || updating" @change="onText" />

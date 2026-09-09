@@ -1,0 +1,14 @@
+import assert from 'node:assert/strict';
+import {driveEventCounts as match} from '../assets/mobile/js/drive_event_counts.js';
+const route = {name:'route',routeNames:['route'],date:'2026-09-09T14:59:45.366549+01:00',endDate:'2026-09-09T15:17:18.484533+01:00'};
+const fragment = {drive:'uuid',started:1788962385.330969,updated:1788963438.957487,complete:1,gaps:842,stats:{available:true,interventions:4,disengagements:1,incomplete:true}};
+const history = {available:true,history:[fragment],hasMore:false};
+assert.deepEqual(match([route],history),[{interventions:4,disengagements:1,partial:true}]);
+assert.equal(match([route,{...route,name:'ambiguous'}],history)[0].interventions,null);
+assert.equal(match([route],{...history,history:[{...fragment,started:fragment.started-3}]} )[0].interventions,null);
+assert.equal(match([{...route,date:'',endDate:''}],{...history,history:[{...fragment,routeName:'route'}]})[0].interventions,4);
+assert.equal(match([route],{...history,history:[{...fragment,routeName:'different'}]})[0].interventions,null);
+assert.equal(match([route],{...history,driveSummaries:[{...fragment,stats:{available:true,interventions:0,disengagements:0}}]})[0].interventions,0);
+assert.equal(match([route],{...history,driveSummaries:[{...fragment,stats:{available:false,interventions:0,disengagements:0}}]})[0].interventions,null);
+assert.equal(match([route],{...history,driveSummaries:[fragment],driveSummariesHasMore:true})[0].interventions,null);
+console.log('Actual sub-second boundary mismatch, explicit route IDs, timezone offsets, ambiguity, zero coverage and pagination passed');
