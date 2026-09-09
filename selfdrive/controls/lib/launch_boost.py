@@ -31,42 +31,45 @@ class LaunchBoost:
     return target + self.extra
 
 
-# Conservative eligibility for the extra boost, not ordinary stop release.
-LAUNCH_LEAD_GAP_MARGIN = 0.5  # metres beyond the normal standstill gap
-LAUNCH_LEAD_MIN_SPEED = 0.5  # m/s
-LAUNCH_LEAD_MIN_OPENING_SPEED = 0.25  # m/s
-LAUNCH_LEAD_MIN_ACCEL = 0.3  # m/s^2, filtered lead acceleration
-LAUNCH_LEAD_MIN_PROB = 0.85
-LAUNCH_LEAD_MAX_LATERAL = 1.75  # metres
+class LaunchLeadGate:
+  """Withhold extra launch acceleration only for a nearby, slowly accelerating or braking lead.
 
-
-def lead_allows_launch_boost(leads, ego_speed, stop_distance):
-  """Require the nearest reported lead to be clear of the gap and pulling away.
-
-  Unknown/malformed lead data withholds only this optional extra acceleration.
-  A farther accelerating lead must not authorize boost past a nearer slow lead.
+  Hysteresis prevents repeated toggling around either boundary. No reported lead
+  clears this comfort restriction; normal planner safety gates still apply.
   """
-  present = [lead for lead in leads if bool(getattr(lead, "status", False))]
-  if not present:
-    return False
-  try:
-    gaps = [float(lead.dRel) for lead in present]
-    if not all(math.isfinite(gap) and gap > 0 for gap in gaps):
+  BLOCK_DISTANCE = 12.0  # m
+  RELEASE_DISTANCE = 13.0  # m
+  BLOCK_ACCEL = 0.5  # m/s^2, filtered lead acceleration
+  RELEASE_ACCEL = 0.6  # m/s^2
+
+  def __init__(self):
+    self.blocked = False
+
+  def reset(self):
+    self.blocked = False
+
+  def allows(self, leads):
+    present = [lead for lead in leads if bool(getattr(lead, "status", False))]
+    if not present:
+      self.reset()
+      return True
+    try:
+      gaps = [float(lead.dRel) for lead in present]
+      if not all(math.isfinite(gap) and gap >= 0 for gap in gaps):
+        return False
+      gap = min(gaps)
+      # A distant lead cannot introduce this extra comfort veto.
+      if gap >= self.RELEASE_DISTANCE:
+        self.reset()
+        return True
+      accel = float(present[gaps.index(gap)].aLeadK)
+      if not math.isfinite(accel):
+        return False
+      if self.blocked:
+        if accel >= self.RELEASE_ACCEL:
+          self.reset()
+      elif gap < self.BLOCK_DISTANCE and accel < self.BLOCK_ACCEL:
+        self.blocked = True
+      return not self.blocked
+    except (AttributeError, TypeError, ValueError, OverflowError):
       return False
-    lead = present[gaps.index(min(gaps))]
-    speed, accel, lateral = float(lead.vLead), float(lead.aLeadK), float(lead.yRel)
-    probability = float(getattr(lead, "modelProb", 0.0))
-    ego_speed, stop_distance = float(ego_speed), float(stop_distance)
-    if not all(math.isfinite(value) for value in (speed, accel, lateral, probability, ego_speed, stop_distance)):
-      return False
-    return bool(
-      ego_speed >= 0 and stop_distance >= 0 and
-      (bool(getattr(lead, "radar", False)) or probability >= LAUNCH_LEAD_MIN_PROB) and
-      abs(lateral) <= LAUNCH_LEAD_MAX_LATERAL and
-      min(gaps) >= stop_distance + LAUNCH_LEAD_GAP_MARGIN and
-      speed >= LAUNCH_LEAD_MIN_SPEED and
-      speed - ego_speed >= LAUNCH_LEAD_MIN_OPENING_SPEED and
-      accel >= LAUNCH_LEAD_MIN_ACCEL
-    )
-  except (AttributeError, TypeError, ValueError, OverflowError):
-    return False
