@@ -4144,11 +4144,11 @@ def _get_offroad_vehicle_parked():
   with car.CarParams.from_bytes(cp_bytes) as cp, custom.StarPilotCarParams.from_bytes(fpcp_bytes) as fpcp:
     car_state = importlib.import_module(f"opendbc.car.{cp.brand}.carstate").CarState(cp, fpcp)
     parsers = car_state.get_can_parsers(cp)
-    # CarState needs these options, but they don't affect gear.
+    # These options don't affect gearShifter.
     toggles = SimpleNamespace(subaru_sng=False, cluster_offset=1.0)
-    car_state.update(parsers, toggles)  # The first update registers the messages CarState uses.
+    car_state.update(parsers, toggles)  # Register CAN messages before filtering frames.
     can_sock = messaging.sub_sock("can", timeout=100)
-    # Match pandad's clock (common/timing.h).
+    # pandad timestamps logMonoTime using CLOCK_BOOTTIME.
     clock_id = getattr(time, "CLOCK_BOOTTIME", time.CLOCK_MONOTONIC)
     started = time.clock_gettime_ns(clock_id)
     deadline = started + 3_000_000_000
@@ -4168,7 +4168,7 @@ def _get_offroad_vehicle_parked():
       state, _ = car_state.update(parsers, toggles)
       car_state.out = state
       now = time.clock_gettime_ns(clock_id)
-      # can_valid can stay true after messages stop arriving.
+      # Use current time since can_valid uses the last CAN timestamp.
       if all(
         message.frequency > 0 and message.valid(now, parser.bus_timeout)
         for parser in parsers.values() for message in parser.message_states.values() if not message.ignore_alive
