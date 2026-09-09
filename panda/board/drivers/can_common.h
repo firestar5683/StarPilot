@@ -7,7 +7,11 @@ uint32_t rx_buffer_overflow = 0;
 
 can_health_t can_health[PANDA_CAN_CNT] = {{0}, {0}, {0}};
 
-// Ignition detected from CAN meessages
+// Wake requests only feed bootkick; they must not assert ignition or controls.
+bool wake_on_can = false;
+uint32_t wake_on_can_cnt = 0U;
+
+// Ignition detected from CAN messages
 bool ignition_can = false;
 uint32_t ignition_can_cnt = 0U;
 #ifdef PANDA_HKG_REMOTE_START
@@ -221,6 +225,8 @@ void ignition_can_hook(CANPacket_t *msg) {
       if ((counter == ((prev_counter_tesla + 1) % 16)) && (prev_counter_tesla != -1)) {
         // VCFRONT_LVPowerState->VCFRONT_vehiclePowerState
         int power_state = (msg->data[0] >> 5U) & 0x3U;
+        wake_on_can = power_state != 0x0;   // VEHICLE_POWER_STATE_OFF=0
+        wake_on_can_cnt = 0U;
         ignition_can = power_state == 0x3;  // VEHICLE_POWER_STATE_DRIVE=3
         ignition_can_cnt = 0U;
       }
