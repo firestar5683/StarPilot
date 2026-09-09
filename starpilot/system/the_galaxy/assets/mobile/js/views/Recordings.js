@@ -77,6 +77,7 @@ export const Recordings = {
       playerError: "",
       segments: [],
       current: 0,
+      segmentMenuOpen: false,
       cameras: [],
       selectedCamera: "",
       logsRoute: null,
@@ -206,7 +207,7 @@ export const Recordings = {
       if (!newName || newName === route.displayName) return
       try {
         const payload = await api.renameRoute(route.name, newName)
-        Object.assign(route, normalizeRoute({ ...route, name: payload.name || newName, isCustomName: true }))
+        Object.assign(route, normalizeRoute({ ...route, isCustomName: true }))
         route.displayName = payload.name || newName
         showSnackbar("Route renamed!")
       } catch (e) {
@@ -237,6 +238,7 @@ export const Recordings = {
         if (!cameras.length) throw new Error("No camera video for this route.")
         this.segments = segments
         this.current = 0
+        this.segmentMenuOpen = false
         this.cameras = cameras
         this.selectedCamera = cameras.includes("forward") ? "forward" : cameras[0]
         this.$nextTick(() => this.playSegment())
@@ -264,9 +266,22 @@ export const Recordings = {
         return
       }
       this._playRetries = 0
+      video.controls = true
       video.src = this.cameraUrl(this.segments[this.current])
       video.load()
       video.play().catch(() => {})
+    },
+    toggleSegmentMenu() {
+      this.segmentMenuOpen = !this.segmentMenuOpen
+      if (this.segmentMenuOpen) {
+        this.$nextTick(() => this.$el.querySelector(".gx-segment-picker__item.active")?.scrollIntoView({ block: "nearest" }))
+      }
+    },
+    selectSegment(i) {
+      this.segmentMenuOpen = false
+      if (i === this.current) return
+      this.current = i
+      this.playSegment()
     },
     downloadRoute() {
       if (!this.playerRoute) return
@@ -282,15 +297,21 @@ export const Recordings = {
       this.playerLoading = false
       this.playerError = ""
       this.segments = []
+      this.segmentMenuOpen = false
       this.cameras = []
     },
     async openLogs(route) {
       try {
         this.logsData = await api.getRouteLogs(route.name)
         this.logsRoute = route
+        this.$nextTick(() => this.$refs.logsSection?.scrollIntoView({ behavior: "smooth", block: "start" }))
       } catch (e) {
         showSnackbar("Could not read logs.", "error")
       }
+    },
+    closeLogs() {
+      this.logsRoute = null
+      this.logsData = null
     },
     closeRecPlayer() {
       this.recPlay = null
@@ -388,16 +409,17 @@ export const Recordings = {
       <div v-if="error" class="gx-empty" style="color: var(--error);">{{ error }}</div>
       <section class="gx-card">
         <div v-if="!visibleRoutes.length && !loading" class="gx-empty">No routes found.</div>
-        <article v-for="r in visibleRoutes" :key="r.name" class="gx-row" style="cursor:pointer;" @click="openPlayer(r)">
+        <article v-for="r in visibleRoutes" :key="r.name" class="gx-row gx-recordings-row" :class="{ 'gx-recordings-row--preserved': r.is_preserved }" style="cursor:pointer;" @click="openPlayer(r)">
           <div class="gx-row__info">
-            <span class="gx-row__label">{{ r.displayName }} <span v-if="r.is_preserved" class="gx-chip gx-chip--dev">Preserved</span></span>
+            <span class="gx-row__label">{{ r.displayName }}</span>
             <span class="gx-row__desc">{{ fmtDuration(r.approxDurationSeconds) }} · {{ r.segmentCount }} segments</span>
+            <span v-if="r.is_preserved" class="gx-chip gx-chip--dev gx-recordings-preserved-chip">Preserved</span>
           </div>
-          <div style="display:flex; gap:6px;">
-            <button type="button" class="gx-btn gx-btn--tonal" title="Preserve" @click.stop="togglePreserved(r)"><i class="bi" :class="r.is_preserved ? 'bi-heart-fill' : 'bi-heart'"></i></button>
-            <button type="button" class="gx-btn gx-btn--tonal" title="Logs" @click.stop="openLogs(r)"><i class="bi bi-file-earmark-arrow-down"></i></button>
-            <button type="button" class="gx-btn gx-btn--tonal" title="Rename" @click.stop="renameRoute(r)"><i class="bi bi-pencil"></i></button>
-            <button type="button" class="gx-btn gx-btn--danger" title="Delete" @click.stop="deleteRoute(r)"><i class="bi bi-trash"></i></button>
+          <div class="gx-row__actions">
+            <button type="button" class="gx-btn gx-btn--tonal gx-btn--icon" title="Preserve" @click.stop="togglePreserved(r)"><i class="bi" :class="r.is_preserved ? 'bi-heart-fill' : 'bi-heart'"></i></button>
+            <button type="button" class="gx-btn gx-btn--tonal gx-btn--icon" title="Logs" @click.stop="openLogs(r)"><i class="bi bi-file-earmark-arrow-down"></i></button>
+            <button type="button" class="gx-btn gx-btn--tonal gx-btn--icon" title="Rename" @click.stop="renameRoute(r)"><i class="bi bi-pencil"></i></button>
+            <button type="button" class="gx-btn gx-btn--danger gx-btn--icon" title="Delete" @click.stop="deleteRoute(r)"><i class="bi bi-trash"></i></button>
           </div>
         </article>
       </section>
@@ -407,17 +429,21 @@ export const Recordings = {
           <i class="bi bi-exclamation-triangle"></i>
           <span class="gx-section__title">Delete local routes</span>
         </div>
-        <div style="display:flex; gap:8px; padding: var(--sp-3); flex-wrap:wrap;">
-          <button type="button" class="gx-btn gx-btn--tonal" @click="deleteAllRoutes(false)">Delete Non-Preserved</button>
-          <button type="button" class="gx-btn gx-btn--danger" @click="deleteAllRoutes(true)">Delete All Including Preserved</button>
+        <div class="gx-route-delete-actions" style="display:flex; gap:8px; padding: var(--sp-3); flex-wrap:wrap;">
+          <button type="button" class="gx-btn gx-btn--tonal gx-route-delete-btn" @click="deleteAllRoutes(false)">Delete Non-Preserved</button>
+          <button type="button" class="gx-btn gx-btn--danger gx-route-delete-btn" @click="deleteAllRoutes(true)">Delete All Including Preserved</button>
         </div>
       </section>
 
-      <div v-if="logsRoute && logsData" class="gx-card" style="margin-top:12px;">
-        <div class="gx-section__header">
+      <div v-if="logsRoute && logsData" ref="logsSection" class="gx-card gx-route-logs-section" style="margin-top:12px;">
+        <div class="gx-section__header gx-route-logs-header">
           <i class="bi bi-file-earmark-arrow-down"></i>
-          <span class="gx-section__title">{{ logsData.segments?.length || 0 }} segments · {{ formatBytes(logsData.totalBytes) }}</span>
-          <a class="gx-btn gx-btn--tonal" :href="'/api/routes/' + logsRoute.name + '/logs/download'" download>Download all (.tar)</a>
+          <div class="gx-route-logs-title">
+            <span class="gx-section__title">{{ logsRoute.displayName }} Logs</span>
+            <span class="gx-route-logs-summary">{{ logsData.segments?.length || 0 }} segments · {{ formatBytes(logsData.totalBytes) }}</span>
+          </div>
+          <button type="button" class="gx-icon-btn gx-route-logs-close" aria-label="Close logs" title="Close logs" @click="closeLogs"><i class="bi bi-x-lg"></i></button>
+          <a class="gx-btn gx-btn--tonal gx-route-logs-download" :href="'/api/routes/' + logsRoute.name + '/logs/download'" download>Download all (.tar)</a>
         </div>
         <div v-for="seg in logsData.segments || []" :key="seg.segmentNum" class="gx-row">
           <div class="gx-row__info">
@@ -439,17 +465,17 @@ export const Recordings = {
         <div v-if="screenLoading && !recordings.length" class="gx-loading">Loading screen recordings...</div>
         <div v-else-if="screenError" class="gx-empty" style="color: var(--error);">{{ screenError }}</div>
         <div v-else-if="!recordings.length" class="gx-empty">No screen recordings found.</div>
-        <article v-for="r in recordings" :key="r.filename" class="gx-row" style="cursor:pointer;" @click="playRec(r)">
-          <img :src="r.png" alt="" loading="lazy" style="width:84px; height:auto; border-radius:var(--radius-sm); object-fit:cover; flex:none;">
+        <article v-for="r in recordings" :key="r.filename" class="gx-row gx-recordings-row gx-screen-recordings-row" style="cursor:pointer;" @click="playRec(r)">
+          <img class="gx-recording-row-thumb" :src="r.png" alt="" loading="lazy" style="width:84px; height:auto; border-radius:var(--radius-sm); object-fit:cover; flex:none;">
           <div class="gx-row__info">
             <span class="gx-row__label">{{ screenDisplayName(r) }}</span>
             <span class="gx-row__desc">{{ r.filename }}</span>
           </div>
-          <div style="display:flex; gap:6px; flex-wrap:wrap;">
-            <button type="button" class="gx-btn gx-btn--tonal" title="Play" @click.stop="playRec(r)"><i class="bi bi-play-fill"></i></button>
-            <button type="button" class="gx-btn gx-btn--tonal" title="Rename" @click.stop="renameRec(r)"><i class="bi bi-pencil"></i></button>
-            <button type="button" class="gx-btn gx-btn--tonal" title="Download" @click.stop="downloadRec(r)"><i class="bi bi-download"></i></button>
-            <button type="button" class="gx-btn gx-btn--danger" title="Delete" @click.stop="deleteRec(r)"><i class="bi bi-trash"></i></button>
+          <div class="gx-row__actions">
+            <button type="button" class="gx-btn gx-btn--tonal gx-btn--icon" title="Play" @click.stop="playRec(r)"><i class="bi bi-play-fill"></i></button>
+            <button type="button" class="gx-btn gx-btn--tonal gx-btn--icon" title="Rename" @click.stop="renameRec(r)"><i class="bi bi-pencil"></i></button>
+            <button type="button" class="gx-btn gx-btn--tonal gx-btn--icon" title="Download" @click.stop="downloadRec(r)"><i class="bi bi-download"></i></button>
+            <button type="button" class="gx-btn gx-btn--danger gx-btn--icon" title="Delete" @click.stop="deleteRec(r)"><i class="bi bi-trash"></i></button>
           </div>
         </article>
       </section>
@@ -468,8 +494,8 @@ export const Recordings = {
       <Teleport to="body">
         <transition name="gx-fade">
           <div v-if="sub === 'routes' && playerRoute" class="gx-scrim gx-scrim--bottomsheet" @click.self="closePlayer">
-            <div class="gx-sheet" role="dialog" aria-label="Route video player">
-              <div class="gx-section__header" style="cursor:default;">
+            <div class="gx-sheet" role="dialog" aria-label="Route video player" @click="segmentMenuOpen = false">
+              <div class="gx-section__header gx-video-player-header" style="cursor:default;">
                 <i class="bi bi-camera-video"></i>
                 <span class="gx-section__title">{{ playerRoute.displayName }}</span>
                 <button type="button" class="gx-icon-btn" aria-label="Close player" @click="closePlayer"><i class="bi bi-x-lg"></i></button>
@@ -479,14 +505,24 @@ export const Recordings = {
                 <div v-else-if="playerLoading" class="gx-loading"><i class="bi bi-hourglass-split"></i> Loading video...</div>
                 <template v-else-if="segments.length">
                   <video ref="player" class="gx-video" controls muted playsinline preload="metadata"></video>
-                  <div style="display:flex; gap:8px; padding: var(--sp-3) 0 0; flex-wrap:wrap; align-items:center;">
-                    <button type="button" class="gx-btn gx-btn--tonal" :disabled="current<=0" @click="current--; playSegment()"><i class="bi bi-skip-start-fill"></i></button>
-                    <select class="gx-field" :value="current" @change="current = Number($event.target.value); playSegment()">
-                      <option v-for="(s,i) in segments" :key="i" :value="i">Segment {{ i + 1 }}</option>
-                    </select>
-                    <button type="button" class="gx-btn gx-btn--tonal" :disabled="current>=segments.length-1" @click="current++; playSegment()"><i class="bi bi-skip-end-fill"></i></button>
-                    <button v-for="c in cameras" :key="c" type="button" class="gx-chip" :style="selectedCamera===c?'background:var(--primary);color:var(--on-primary);':''" @click="selectedCamera=c; playSegment()">{{ c }}</button>
-                    <button type="button" class="gx-btn" @click="downloadRoute"><i class="bi bi-download"></i> Download</button>
+                  <div style="display:flex; flex-direction:column; gap:8px; padding: var(--sp-3) 0 0;">
+                    <div class="gx-video-segment-controls">
+                      <button type="button" class="gx-btn gx-btn--tonal gx-btn--icon" aria-label="Previous segment" :disabled="current<=0" @click="current--; playSegment()"><i class="bi bi-chevron-left"></i></button>
+                      <div class="gx-segment-picker gx-video-segment-select">
+                        <button type="button" class="gx-segment-picker__trigger" :aria-expanded="segmentMenuOpen ? 'true' : 'false'" @click.stop="toggleSegmentMenu">
+                          <span>Segment {{ current + 1 }} of {{ segments.length }}</span>
+                          <i class="bi" :class="segmentMenuOpen ? 'bi-chevron-up' : 'bi-chevron-down'"></i>
+                        </button>
+                        <div v-if="segmentMenuOpen" class="gx-segment-picker__menu" role="listbox" @click.stop>
+                          <button v-for="(s,i) in segments" :key="i" type="button" class="gx-segment-picker__item" :class="{ active: i === current }" role="option" :aria-selected="i === current ? 'true' : 'false'" @click="selectSegment(i)">Segment {{ i + 1 }}</button>
+                        </div>
+                      </div>
+                      <button type="button" class="gx-btn gx-btn--tonal gx-btn--icon" aria-label="Next segment" :disabled="current>=segments.length-1" @click="current++; playSegment()"><i class="bi bi-chevron-right"></i></button>
+                    </div>
+                    <div class="gx-video-actions" style="display:flex; gap:8px; flex-wrap:wrap; align-items:center;">
+                      <button v-for="c in cameras" :key="c" type="button" class="gx-chip" :style="selectedCamera===c?'background:var(--primary);color:var(--on-primary);':''" @click="selectedCamera=c; playSegment()">{{ c }}</button>
+                      <button type="button" class="gx-btn gx-btn--tonal gx-btn--icon gx-video-download" title="Download" style="margin-left:auto;" @click="downloadRoute"><i class="bi bi-download"></i></button>
+                    </div>
                   </div>
                 </template>
               </div>
@@ -499,7 +535,7 @@ export const Recordings = {
         <transition name="gx-fade">
           <div v-if="recPlay" class="gx-scrim gx-scrim--bottomsheet" @click.self="closeRecPlayer">
             <div class="gx-sheet" role="dialog" aria-label="Screen recording player">
-              <div class="gx-section__header" style="cursor:default;">
+              <div class="gx-section__header gx-video-player-header" style="cursor:default;">
                 <i class="bi bi-record-circle"></i>
                 <span class="gx-section__title">{{ screenDisplayName(recPlay) }}</span>
                 <button type="button" class="gx-icon-btn" aria-label="Close player" @click="closeRecPlayer"><i class="bi bi-x-lg"></i></button>

@@ -709,6 +709,8 @@ def _prune_video_cache(keep_path=None):
 
 
 def ffmpeg_concat_segments_to_mp4(input_files, cache_key=None):
+  # -tag:v hvc1: ffmpeg tags a copied HEVC stream "hev1" by default, which Safari/iOS
+  # refuses to play inline; "hvc1" is the tag WebKit actually accepts.
   if not input_files:
     raise ValueError("No input files provided for concatenation")
 
@@ -733,7 +735,7 @@ def ffmpeg_concat_segments_to_mp4(input_files, cache_key=None):
   try:
     subprocess.run(
       [FFMPEG_BIN, "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0",
-       "-i", str(list_file), "-c", "copy", "-movflags", "faststart", "-y", str(cache_path)],
+       "-i", str(list_file), "-c", "copy", "-tag:v", "hvc1", "-movflags", "faststart", "-y", str(cache_path)],
       check=True
     )
   except subprocess.CalledProcessError:
@@ -770,7 +772,8 @@ def ffmpeg_stream_concatenated_mp4(input_files, chunk_size=256 * 1024):
   try:
     process = subprocess.Popen(
       [FFMPEG_BIN, "-hide_banner", "-loglevel", "error", "-f", "concat", "-safe", "0",
-       "-i", str(list_path), "-c", "copy", "-movflags", "frag_keyframe+empty_moov+default_base_moof",
+       "-i", str(list_path), "-c", "copy", "-tag:v", "hvc1",
+       "-movflags", "frag_keyframe+empty_moov+default_base_moof",
        "-f", "mp4", "pipe:1"],
       stdout=subprocess.PIPE,
       stderr=subprocess.DEVNULL,
@@ -845,7 +848,9 @@ def ffmpeg_mp4_wrap_to_path(filename):
 
   VIDEO_CACHE_PATH.mkdir(exist_ok=True)
 
-  file_hash = hashlib.md5(str(input_path).encode()).hexdigest()
+  # "hvc1" prefix busts caches remuxed before the hvc1 tag fix, so iPhones don't keep
+  # getting served an old hev1-tagged file that predates it.
+  file_hash = hashlib.md5(f"hvc1|{input_path}".encode()).hexdigest()
   cache_path = VIDEO_CACHE_PATH / f"{file_hash}.mp4"
 
   if cache_path.exists() and cache_path.stat().st_mtime > input_path.stat().st_mtime:
@@ -860,7 +865,7 @@ def ffmpeg_mp4_wrap_to_path(filename):
   try:
     subprocess.run(
       [FFMPEG_BIN, "-hide_banner", "-loglevel", "error", "-i", str(input_path),
-       "-c", "copy", "-movflags", "faststart", "-y", str(cache_path)],
+       "-c", "copy", "-tag:v", "hvc1", "-movflags", "faststart", "-y", str(cache_path)],
       check=True,
       timeout=remaining_time(),
     )

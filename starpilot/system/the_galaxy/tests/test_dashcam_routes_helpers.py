@@ -100,8 +100,8 @@ def test_player_shell_keeps_both_quality_levels_at_one_fixed_size():
   assert ".dashcam-video-shell.qcamera-framing video" in source
   assert "object-fit: fill;" in source
   assert 'videoShell.classList.toggle("qcamera-framing", showingPreview)' in component
-  assert "deferNativeControlsUntilInteraction(stagingVideo)" in component
-  assert "stagingVideo.controls = true" not in component
+  assert "deferNativeControlsUntilInteraction" not in component
+  assert "stagingVideo.controls = true" in component
 
 
 def test_groups_routes_into_today_yesterday_dates_and_unknown():

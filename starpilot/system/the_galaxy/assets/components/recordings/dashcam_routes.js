@@ -361,30 +361,6 @@ async function openOverlay(route) {
   let upgradeTimer = null
   let isUpgrading = false
 
-  const clearDeferredNativeControls = video => {
-    if (typeof video._dashcamControlsCleanup === "function") video._dashcamControlsCleanup()
-  }
-  const setNativeControls = (video, enabled) => {
-    clearDeferredNativeControls(video)
-    video.controls = enabled
-  }
-  const deferNativeControlsUntilInteraction = video => {
-    clearDeferredNativeControls(video)
-    video.controls = false
-
-    const restore = () => {
-      if (video !== activeVideo || !overlay) return
-      setNativeControls(video, true)
-    }
-    const events = ["pointermove", "pointerdown", "focus"]
-    const cleanup = () => {
-      events.forEach(eventName => video.removeEventListener(eventName, restore))
-      delete video._dashcamControlsCleanup
-    }
-    video._dashcamControlsCleanup = cleanup
-    events.forEach(eventName => video.addEventListener(eventName, restore))
-  }
-
   const setPlayerMessage = (message, isError = false) => {
     playerState.textContent = message
     playerState.hidden = !message
@@ -412,7 +388,7 @@ async function openOverlay(route) {
     upgradeController = null
     stagingVideo.pause()
     stagingVideo.removeAttribute("src")
-    setNativeControls(stagingVideo, false)
+    stagingVideo.controls = false
     stagingVideo.load()
   }
 
@@ -479,12 +455,13 @@ async function openOverlay(route) {
 
           activeVideo.classList.remove("active")
           activeVideo.classList.add("staging")
-          setNativeControls(activeVideo, false)
+          activeVideo.controls = false
 
           stagingVideo.classList.remove("staging")
           stagingVideo.classList.add("active")
-          if (isPlaying) deferNativeControlsUntilInteraction(stagingVideo)
-          else setNativeControls(stagingVideo, true)
+          // Keep native controls enabled across the quality swap so touch browsers
+          // can reveal them again after their normal auto-hide.
+          stagingVideo.controls = true
 
           const oldActive = activeVideo
           activeVideo = stagingVideo
@@ -590,11 +567,11 @@ async function openOverlay(route) {
     stagingVideo.removeAttribute("src")
     stagingVideo.classList.remove("active")
     stagingVideo.classList.add("staging")
-    setNativeControls(stagingVideo, false)
+    stagingVideo.controls = false
 
     activeVideo.classList.remove("staging")
     activeVideo.classList.add("active")
-    setNativeControls(activeVideo, true)
+    activeVideo.controls = true
     activeVideo.src = cameraVideoUrl(segmentUrl, camera, showingPreview ? "low" : undefined)
     activeVideo.load()
     if (autoplay) activeVideo.play().catch(() => {})
@@ -768,7 +745,6 @@ function closeOverlay() {
   document.removeEventListener("keydown", overlay._closeOnEscape)
   const videos = overlay.querySelectorAll("video")
   videos.forEach(v => {
-    v._dashcamControlsCleanup?.()
     v.pause()
     v.removeAttribute("src")
     v.load()
