@@ -41,6 +41,7 @@ from opendbc.car.gm.values import GMFlags
 from opendbc.car.toyota.carcontroller import LOCK_CMD, UNLOCK_CMD
 from opendbc.car.toyota.values import ToyotaStarPilotFlags
 from openpilot.common.constants import CV
+from openpilot.starpilot.common.vehicle_snapshot import read_vehicle_snapshot
 from openpilot.common.file_chunker import file_chunked_exists, get_chunk_name, get_manifest_path
 from openpilot.common.params import ParamKeyFlag, ParamKeyType, Params
 from openpilot.common.realtime import DT_HW
@@ -4178,6 +4179,7 @@ def _snapshot_bool_text(value):
     return "No"
   return "Unavailable"
 
+
 def _build_vehicle_fault_status():
   unavailable_items = [
     {"label": "Cruise Fault", "value": "Unavailable", "severity": "neutral"},
@@ -4195,10 +4197,8 @@ def _build_vehicle_fault_status():
     unavailable_severity = "warn"
 
   try:
-    sm = messaging.SubMaster(["carState"], poll="carState")
-    sm.update(100)
-    has_live_car_state = sm.seen["carState"] and sm.alive["carState"] and sm.valid["carState"]
-    if not has_live_car_state:
+    car_state = read_vehicle_snapshot()
+    if car_state is None:
       return {
         "available": False,
         "summary": unavailable_summary,
@@ -4206,7 +4206,6 @@ def _build_vehicle_fault_status():
         "items": unavailable_items,
       }
 
-    car_state = sm["carState"]
     cruise_state = getattr(car_state, "cruiseState", None)
 
     cruise_faulted = bool(getattr(car_state, "accFaulted", False))
@@ -4288,17 +4287,8 @@ def _get_has_radar():
     return False
 
 def _get_vehicle_parked():
-  try:
-    sm = messaging.SubMaster(["carState"], poll="carState")
-    sm.update(100)
-    if not sm.seen["carState"] or not sm.alive["carState"] or not sm.valid["carState"]:
-      return False
-
-    gear_shifter = getattr(getattr(car, "CarState", None), "GearShifter", None)
-    park_value = getattr(gear_shifter, "park", None)
-    return park_value is not None and getattr(sm["carState"], "gearShifter", None) == park_value
-  except Exception:
-    return False
+  state = read_vehicle_snapshot()
+  return state is not None and state.gearShifter == "park"
 
 def _get_longitudinal_mode_capable():
   # Do not authorize from a default or a stale toggle snapshot. Pending disable
@@ -5171,6 +5161,8 @@ class GalaxySlugMiddleware:
 
 
 def setup(app):
+  from openpilot.starpilot.system.the_galaxy.model_stats_api import register_model_stats_api
+  register_model_stats_api(app)
   if not isinstance(app.wsgi_app, GalaxySlugMiddleware):
     app.wsgi_app = GalaxySlugMiddleware(app.wsgi_app)
 
@@ -10404,6 +10396,12 @@ def main():
 
   # Desktop-only debug mode. On-device must stay on 8082 to match Galaxy FRP routing.
   on_device = _is_comma_device_runtime()
+  if on_device:
+    try:
+      from openpilot.starpilot.system.model_statsd import start_observer
+      start_observer()
+    except Exception as error:
+      print(f"Optional model statistics observer unavailable: {error}")
   debug = False if on_device else os.getenv("SP_GALAXY_DEBUG", "1").lower() in {"1", "true", "yes", "on"}
   port = 8082 if on_device else int(os.getenv("SP_GALAXY_PORT", "8083"))
   host = "0.0.0.0" if on_device else os.getenv("SP_GALAXY_HOST", "0.0.0.0")

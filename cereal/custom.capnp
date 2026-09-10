@@ -108,6 +108,8 @@ struct StarPilotDeviceState @0xda96579883444c35 {
 
 struct StarPilotModelDataV2 @0x80ae746ee2596b11 {
   turnDirection @0 :TurnDirection;
+  runtimeIdentity @1 :Text;  # loaded role identities; empty means unavailable
+  modelMonoTime @2 :UInt64;  # exact matching successful modelV2 Event timestamp
 
   enum TurnDirection {
     none @0;

@@ -8,6 +8,7 @@ import requests
 import time
 
 from cereal import messaging
+from openpilot.starpilot.common.vehicle_snapshot import write_vehicle_snapshot
 from openpilot.common.api import Api, api_get
 from openpilot.common.gps import get_gps_location_service
 from openpilot.common.params import Params
@@ -327,6 +328,7 @@ def starpilot_thread():
 
   while True:
     sm.update()
+    write_vehicle_snapshot(sm)
 
     now = datetime.datetime.now(datetime.timezone.utc)
     monotonic_now = time.monotonic()
