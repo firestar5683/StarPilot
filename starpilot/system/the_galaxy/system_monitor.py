@@ -25,6 +25,27 @@ class SystemMonitor:
       if self.cached is not None and now - self.previous_time < 1.5:
         return self.cached
       elapsed = now - self.previous_time if self.previous_time is not None else None
+      cpu_now, cores = {}, []
+      overall = None
+      cpu_capacity = None
+      for line in (self.root / 'stat').read_text().splitlines():
+        values = line.split()
+        if not values or not values[0].startswith('cpu'):
+          continue
+        values_num = [int(value) for value in values[1:9]]
+        pair = (sum(values_num), values_num[3] + values_num[4])
+        key = values[0]
+        cpu_now[key] = pair
+        old = self.cpu_previous.get(key)
+        percent = None
+        if old and pair[0] > old[0]:
+          percent = round(max(0, min(100, 100 * (1 - (pair[1] - old[1]) / (pair[0] - old[0])))), 1)
+        if key == 'cpu':
+          overall = percent
+          if old and pair[0] > old[0]:
+            cpu_capacity = pair[0] - old[0]
+        else:
+          cores.append({'name': key, 'percent': percent})
       rows, ticks, names = [], {}, {}
       for path in self.root.iterdir():
         if not path.name.isdigit():
@@ -53,30 +74,14 @@ class SystemMonitor:
             info = {'name': name.removeprefix('/data/openpilot/'), 'user': user, 'kernel': not args}
           names[identity] = info
           cpu = None
-          if elapsed and identity in self.previous and current >= self.previous[identity]:
-            cpu = round((current - self.previous[identity]) / self.hz / elapsed * 100, 1)
+          if cpu_capacity and identity in self.previous and current >= self.previous[identity]:
+            # Same aggregate tick window as the total, including any core hotplug.
+            # 100% means all measured CPU capacity, not one fully occupied core.
+            cpu = round(min(100, (current - self.previous[identity]) / cpu_capacity * 100), 1)
           rows.append({'pid': identity[0], **info, 'state': fields[0], 'cpu': cpu,
                        'memoryMiB': round(max(0, int(fields[21])) * self.page / 1048576, 1)})
         except (OSError, ValueError, IndexError):
           continue  # Process exited or is inaccessible during this snapshot.
-      cpu_now, cores = {}, []
-      overall = None
-      for line in (self.root / 'stat').read_text().splitlines():
-        values = line.split()
-        if not values or not values[0].startswith('cpu'):
-          continue
-        values_num = [int(value) for value in values[1:9]]
-        pair = (sum(values_num), values_num[3] + values_num[4])
-        key = values[0]
-        cpu_now[key] = pair
-        old = self.cpu_previous.get(key)
-        percent = None
-        if old and pair[0] > old[0]:
-          percent = round(max(0, min(100, 100 * (1 - (pair[1] - old[1]) / (pair[0] - old[0])))), 1)
-        if key == 'cpu':
-          overall = percent
-        else:
-          cores.append({'name': key, 'percent': percent})
       memory = {line.split(':')[0]: int(line.split()[1]) for line in (self.root / 'meminfo').read_text().splitlines() if ':' in line}
       total = memory['MemTotal'] / 1024
       available = memory.get('MemAvailable', memory.get('MemFree', 0)) / 1024
