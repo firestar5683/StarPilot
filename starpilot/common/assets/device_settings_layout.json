@@ -3355,6 +3355,14 @@
         "data_type": "bool",
         "ui_type": "toggle",
         "settings_tier": "simple"
+      },
+      {
+        "key": "GpuModelReadySound",
+        "label": "GPU Model Ready Sound",
+        "description": "Play a short chime when the external GPU model finishes loading. Driving alerts take priority.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
       }
     ]
   },
