@@ -245,7 +245,10 @@ def _validated_category_with_length(
   for raw_value in curve:
     if isinstance(raw_value, bool) or not isinstance(raw_value, numbers.Real):
       return None
-    value = float(raw_value)
+    try:
+      value = float(raw_value)
+    except OverflowError:
+      return None
     if not math.isfinite(value) or not minimum <= value <= maximum:
       return None
     values.append(round(value, 4))
@@ -261,7 +264,10 @@ def _validated_category_with_length(
     for raw_value in legacy_curve:
       if isinstance(raw_value, bool) or not isinstance(raw_value, numbers.Real):
         return None
-      value = float(raw_value)
+      try:
+        value = float(raw_value)
+      except OverflowError:
+        return None
       if not math.isfinite(value) or not legacy_minimum <= value <= legacy_maximum:
         return None
       legacy_values.append(round(value, 4))

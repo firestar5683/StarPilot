@@ -82,8 +82,8 @@ def read_stats(path=DEFAULT_PATH, *, model=None, mode='all', period='all', limit
   if period not in ('all', '7', '30'):
     raise ValueError('period must be all/7/30')
   cutoff = 0 if period == 'all' else time.time() - int(period) * 86400
-  if mode not in ('all', 'full', 'aol') or not 1 <= limit <= 200 or offset < 0:
-    raise ValueError('mode must be all/full/aol; limit 1..200; offset >= 0')
+  if mode not in ('all', 'full', 'aol') or not 1 <= limit <= 200 or not 0 <= offset <= 2**63 - 1:
+    raise ValueError('mode must be all/full/aol; limit 1..200; offset must be 0..9223372036854775807')
   result = {'schemaVersion': SCHEMA_VERSION, 'definitionVersion': None, 'currentDefinitionVersion': DEFINITION_VERSION,
             'available': False, 'status': 'not_started', 'models': {}, 'pairs': [],
             'history': [], 'driveSummaries': [], 'driveSummariesHasMore': False, 'recordedSince': None, 'lastUpdated': None, 'gaps': 0,
@@ -121,9 +121,17 @@ def read_stats(path=DEFAULT_PATH, *, model=None, mode='all', period='all', limit
       fields = ', '.join(f'SUM({key}) AS {key}' for key in COUNTERS)
       # Extract policy metadata only, not retained sample states. Keep original
       # counters intact; incompatible definition cohorts cannot produce a rate.
-      policy_sql = "json_group_array(DISTINCT json_object('definitionVersion', " \
-                   "CASE WHEN json_type(state, '$.definitionVersion') IS NULL THEN 1 ELSE json_extract(state, '$.definitionVersion') END, 'interventionReleaseSeconds', " \
-                   "CASE WHEN json_type(state, '$.interventionReleaseSeconds') IS NULL THEN 0.5 ELSE json_extract(state, '$.interventionReleaseSeconds') END)) AS policies"
+      # JSON booleans become SQL integers under json_extract; gate types before
+      # rebuilding JSON so invalid policies cannot masquerade as historical v1.
+      policy_sql = (
+        "json_group_array(DISTINCT json_object('definitionVersion', "
+        "CASE WHEN json_type(state, '$.definitionVersion') IS NULL THEN 1 "
+        "WHEN json_type(state, '$.definitionVersion')='integer' THEN json_extract(state, '$.definitionVersion') "
+        "ELSE NULL END, 'interventionReleaseSeconds', "
+        "CASE WHEN json_type(state, '$.interventionReleaseSeconds') IS NULL THEN 0.5 "
+        "WHEN json_type(state, '$.interventionReleaseSeconds') IN ('integer','real') "
+        "THEN json_extract(state, '$.interventionReleaseSeconds') ELSE NULL END)) AS policies"
+      )
       aggregates = db.execute(ACTIVE_DRIVES + f'SELECT owner, mode, {fields}, {policy_sql}, MAX(gaps > 0 OR (NOT complete AND updated < ?)) AS incomplete '
                               f'FROM metrics JOIN active_drives AS drives ON drives.id=metrics.drive {where} GROUP BY owner, mode',
                               (time.time() - 30, arg, cutoff)).fetchall()

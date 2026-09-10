@@ -164,7 +164,7 @@ def test_comma4_sidebar_requires_longitudinal_control(started, capable, safe, vi
 def test_settings_enable_selection_onroad_but_preserve_safety_gates(mici, safe, capable):
   params = Params(SafeMode=safe, LongitudinalPersonality=1, IsOnroad=True, IsOffroad=False)
   state = SimpleNamespace(params=params, update_params=lambda: None, engaged=True,
-                          CP=SimpleNamespace(alphaLongitudinalAvailable=False),
+                          CP=SimpleNamespace(alphaLongitudinalAvailable=False, openpilotLongitudinalControl=capable),
                           has_longitudinal_control=capable, experimental_mode_available=capable)
   path = "selfdrive/ui/" + ("mici/" if mici else "") + "layouts/settings/toggles.py"
   cls = methods(path, "TogglesLayoutMici" if mici else "TogglesLayout", {"_update_toggles"},
@@ -176,6 +176,7 @@ def test_settings_enable_selection_onroad_but_preserve_safety_gates(mici, safe, 
   choice = Choice()
   layout._personality_toggle = layout._long_personality_setting = choice
   layout._experimental_btn = Choice()
+  layout._lateral_experimental_btn = Choice()
   layout._toggles = {"ExperimentalMode": Choice()}
   layout._toggle_defs = {}
   layout._refresh_toggles = []

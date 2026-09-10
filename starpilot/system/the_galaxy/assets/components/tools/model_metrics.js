@@ -147,7 +147,7 @@ export function compareMetrics(a, b, mode) {
 export function modelManagerMetrics(model, engagement) {
   const stats = model?.stats?.available === true ? model.stats : null;
   if (!(distance(stats?.assistedMeters) > 0) && !(engagement?.durationSeconds > 0)) return [];
-  const percent = typeof engagement?.percent === 'number' && Number.isFinite(engagement.percent)
+  const percent = engagement?.measurementScope === 'runtime_intervals' && typeof engagement?.percent === 'number' && Number.isFinite(engagement.percent)
     && engagement.percent >= 0 && engagement.percent <= 100 && engagement.durationSeconds > 0
     ? `${engagement.percent.toLocaleString(undefined, {maximumFractionDigits: 1})}%` : '—';
   const average = (metresKey, countKey) => {
@@ -157,7 +157,7 @@ export function modelManagerMetrics(model, engagement) {
   };
   return [
     {label: 'Assisted distance', value: milesText(stats?.assistedMeters), primary: true},
-    {label: 'Engage percentage', value: percent, description: 'Time engaged / recorded drive time for completed routes attributed to this model.'},
+    {label: 'Engage percentage', value: percent, description: 'Measured engagement over verified recorded intervals for this model. Partial coverage: missing telemetry, model switches and Model Lab pairs are excluded; older routes may be unavailable.'},
     {label: 'Avg mi / intervention', value: average('interventionMeters', 'interventions')},
     {label: 'Avg mi / disengagement', value: average('disengagementMeters', 'disengagements')},
   ];

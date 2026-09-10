@@ -67,3 +67,25 @@ def test_summary_cache_and_size_cache_are_not_caller_mutable(tmp_path):
   size = service.size(tmp_path / 'no-artifact', None)
   size['fileSizeBytes'] = 100
   assert service.size(tmp_path / 'no-artifact', None)['fileSizeBytes'] is None
+
+
+@pytest.mark.parametrize('offset', [2**63, 10**100])
+def test_oversized_history_offset_is_bad_request(tmp_path, offset):
+  path = tmp_path / 'stats.sqlite'
+  recorded(path, complete=True)
+  app = Flask(__name__)
+  app.config['TESTING'] = True
+  register_model_stats_api(app, path)
+  response = app.test_client().get(f'/api/models/stats?offset={offset}')
+  assert response.status_code == 400
+  assert 'offset' in response.get_json()['error']
+
+
+def test_largest_sqlite_history_offset_is_empty_page(tmp_path):
+  path = tmp_path / 'stats.sqlite'
+  recorded(path, complete=True)
+  app = Flask(__name__)
+  register_model_stats_api(app, path)
+  response = app.test_client().get(f'/api/models/stats?offset={2**63 - 1}')
+  assert response.status_code == 200
+  assert response.get_json()['history'] == []

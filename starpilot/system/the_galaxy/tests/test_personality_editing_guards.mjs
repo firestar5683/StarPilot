@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
 import {readFileSync} from 'node:fs';
 const source=readFileSync(new URL('../assets/mobile/js/components/PersonalityProfiles.js',import.meta.url),'utf8').replace(/^import .*$/gm,'');
-const {PersonalityProfiles:c}=await import('data:text/javascript;base64,'+Buffer.from("const personalityProfileParamKey = () => {}; const api={getParams:async()=>({IsOnroad:false,IsOffroad:true,SafeMode:false}),getPersonalityProfiles:async()=>({editing_locked:false})};\n"+source).toString('base64'));
-const ctx={...c.data(),ready:true,values:{IsOnroad:true,IsOffroad:false,SafeMode:false},data:{editing_locked:false}};
+const fixture=JSON.parse(readFileSync(new URL("./browser/fixtures/personality_profiles.json",import.meta.url),"utf8"));
+const {PersonalityProfiles:c}=await import('data:text/javascript;base64,'+Buffer.from("const personalityProfileParamKey = () => {}; const api={getParams:async()=>({IsOnroad:false,IsOffroad:true,SafeMode:false}),getPersonalityProfiles:async()=>({..."+JSON.stringify(fixture)+",editing_locked:false})};\n"+source).toString('base64'));
+const ctx={...c.data(),...c.methods,ready:true,values:{IsOnroad:true,IsOffroad:false,SafeMode:false},data:{...fixture,editing_locked:false}};
 for(const [key,computed] of Object.entries(c.computed)) if(typeof computed==='function') Object.defineProperty(ctx,key,{get:()=>computed.call(ctx)});
 assert.equal(ctx.locked,false,'known onroad authoring is allowed');
 assert.equal(ctx.maintenanceLocked,true,'onroad migration remains disabled');

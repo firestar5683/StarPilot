@@ -604,3 +604,23 @@ def test_initial_custom_curve_resamples_named_preset_to_custom_axis():
   config = {"preset": "sport", "curve": []}
   for speed_mph, value in zip(ACCELERATION_SPEEDS_MPH, curve, strict=True):
     assert value == pytest.approx(interpolate_category_curve("acceleration", speed_mph * 0.44704, config, False, False), abs=5e-5)
+
+
+@pytest.mark.parametrize("curve_kind", ["current", "legacy", "v1"])
+@pytest.mark.parametrize("sign", [1, -1])
+def test_oversized_json_integer_is_rejected_and_loads_defaults(curve_kind, sign):
+  document = profile_document(default_personality_profiles(False), enabled=True)
+  category = {"preset": "custom", "curve": [1.0] * len(ACCELERATION_SPEEDS_MPH)}
+  if curve_kind == "v1":
+    document["schemaVersion"] = 1
+    document["axes"] = lpp._V1_PROFILE_AXES
+    category["curve"] = [1.0] * len(lpp._V1_ACCELERATION_SPEEDS_MPH)
+  elif curve_kind == "legacy":
+    category["legacyCurve"] = [1.0] * len(lpp._V1_ACCELERATION_SPEEDS_MPH)
+  document["profiles"]["standard"]["acceleration"] = category
+  assert lpp.migrate_profile_document(document) is not None
+  category["legacyCurve" if curve_kind == "legacy" else "curve"][0] = sign * 10 ** 400
+  raw = json.dumps(document)
+  assert lpp.strict_profile_document(raw) is None
+  assert lpp.migrate_profile_document(raw) is None
+  assert load_personality_profiles(raw, False) == default_personality_profiles(False)

@@ -10242,8 +10242,8 @@ def setup(app):
 
   def _restore_complete_backup(data):
     def parked():
-      if _personality_settings_write_locked():
-        raise ValueError("Restore requires a confirmed parked device with Safe Mode off.")
+      if _personality_settings_write_locked() or _personality_edits_write_locked():
+        raise ValueError("Restore requires a confirmed parked device with Safe Mode off and no pending Safe Mode restoration.")
     try:
       parked()
       if type(data.get("version")) is not int or data["version"] != galaxy_backup.VERSION:
@@ -10313,6 +10313,9 @@ def setup(app):
                       "message": f"Restored settings and history. Added {result['addedDrives']} drives; existing drives were kept."})
     except (ValueError, TypeError, KeyError, OverflowError) as error:
       return jsonify({"success": False, "message": str(error)}), 400
+    except galaxy_backup.RestoreError as error:
+      app.logger.exception('Backup restore verification failed')
+      return jsonify({"success": False, "message": str(error)}), 500
     except Exception:
       app.logger.exception('Backup restore failed')
       return jsonify({"success": False, "message": "Restore failed. Check diagnostics; a recovery copy is retained on the device."}), 500

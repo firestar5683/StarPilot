@@ -28,6 +28,12 @@ class TogglesLayoutMici(NavScroller):
     self._experimental_btn = LongitudinalModeButton()
     self._experimental_btn.set_click_callback(self._cycle_longitudinal_mode)
     self._experimental_btn.set_enabled(lambda: self._mode_enabled(for_display=True))
+    # Supported stock-ACC cars retain their ordinary lateral-only EXP switch.
+    self._lateral_experimental_btn = BigParamControl("experimental mode", "ExperimentalMode")
+    self._lateral_experimental_btn.set_enabled(lambda: bool(
+      ui_state.CP is not None and not ui_state.CP.openpilotLongitudinalControl and
+      ui_state.experimental_mode_available and not ui_state.params.get_bool("SafeMode")))
+    self._lateral_experimental_btn.set_visible(False)
     is_metric_toggle = BigParamControl("use metric units", "IsMetric")
     ldw_toggle = BigParamControl("lane departure warnings", "IsLdwEnabled")
     always_on_dm_toggle = BigParamControl("always-on driver monitor", "AlwaysOnDM")
@@ -39,6 +45,7 @@ class TogglesLayoutMici(NavScroller):
     self._scroller.add_widgets([
       self._personality_toggle,
       self._experimental_btn,
+      self._lateral_experimental_btn,
       self._safe_mode_btn,
       is_metric_toggle,
       ldw_toggle,
@@ -51,6 +58,7 @@ class TogglesLayoutMici(NavScroller):
 
     # Toggle lists
     self._refresh_toggles = (
+      ("ExperimentalMode", self._lateral_experimental_btn),
       ("SafeMode", self._safe_mode_btn),
       ("IsMetric", is_metric_toggle),
       ("IsLdwEnabled", ldw_toggle),
@@ -105,10 +113,14 @@ class TogglesLayoutMici(NavScroller):
         ui_state.params.put_int("LongitudinalPersonality", int(log.LongitudinalPersonality.relaxed))
       self._personality_toggle.set_value("relaxed")
 
-    # CP gating for experimental mode
+    # CP gating for experimental mode: only longitudinal cars use the mode API.
+    self._experimental_btn.set_visible(False)
+    self._lateral_experimental_btn.set_visible(False)
     if ui_state.CP is not None:
       if ui_state.experimental_mode_available:
-        self._experimental_btn.set_visible(True)
+        has_longitudinal = bool(ui_state.CP.openpilotLongitudinalControl)
+        self._experimental_btn.set_visible(has_longitudinal)
+        self._lateral_experimental_btn.set_visible(not has_longitudinal)
         self._personality_toggle.set_visible(ui_state.has_longitudinal_control)
       else:
         # no long for now

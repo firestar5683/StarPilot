@@ -311,3 +311,42 @@ def test_native_tile_font_metrics_fit_without_wrapping_or_clipping():
     assert width(label, 20, 'Regular') < 402 - 2 * 40 - 84
   assert (36 + 20) * 1.16 < 180 - 2 * 23
   assert 3 * 35 + 66 <= 180  # four native personality-style pills
+
+
+@pytest.mark.parametrize("safe_mode", [False, True])
+def test_mici_preserves_supported_lateral_experimental_toggle(safe_mode):
+  layout, state = native_layout({"SafeMode": safe_mode, "ExperimentalMode": True})
+  state.CP.openpilotLongitudinalControl = False
+  state.has_longitudinal_control = False
+  layout._update_toggles()
+  assert not layout._experimental_btn.visible
+  assert layout._lateral_experimental_btn.visible
+  assert layout._lateral_experimental_btn.enabled() is (not safe_mode)
+  assert layout._lateral_experimental_btn.checked is (not safe_mode)
+  assert not layout._mode_enabled()
+  assert not layout._personality_toggle.visible
+  if not safe_mode:
+    assert not state.params.writes
+    state.params.values["SafeMode"] = True
+    assert not layout._lateral_experimental_btn.enabled()
+
+
+def test_mici_experimental_widgets_follow_capability_changes():
+  layout, state = native_layout()
+  layout._update_toggles()
+  assert layout._experimental_btn.visible
+  assert not layout._lateral_experimental_btn.visible
+  assert not layout._lateral_experimental_btn.enabled()
+  state.CP.openpilotLongitudinalControl = False
+  state.has_longitudinal_control = False
+  layout._update_toggles()
+  assert layout._lateral_experimental_btn.visible
+  state.experimental_mode_available = False
+  layout._update_toggles()
+  assert not layout._lateral_experimental_btn.visible
+  assert not layout._experimental_btn.visible
+  assert not layout._lateral_experimental_btn.enabled()
+  state.CP = None
+  layout._update_toggles()
+  assert not layout._lateral_experimental_btn.visible
+  assert not layout._experimental_btn.visible

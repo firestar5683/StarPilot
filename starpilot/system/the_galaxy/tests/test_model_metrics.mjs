@@ -26,3 +26,10 @@ for (const filter of ['gpu','comma','both']) {
  assert.equal(m.matchesHardware({}, filter),filter==='both');
 }
 console.log('Model metrics formatting, null handling, event ratios, comparison sorting, file sizes and hardware filters passed');
+
+const measured = {percent:75, durationSeconds:10.4, engagedSeconds:7.8, measurementScope:'runtime_intervals', coverage:'partial'};
+const engage = m.modelManagerMetrics({stats}, measured).find(metric => metric.label === 'Engage percentage');
+assert.equal(engage.value, '75%');
+assert.match(engage.description, /verified recorded intervals/);
+assert.equal(m.modelManagerMetrics({stats}, {percent:100, durationSeconds:10})[1].value, '—');
+assert.equal(m.modelManagerMetrics({stats})[1].value, '—');

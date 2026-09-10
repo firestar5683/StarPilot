@@ -6,7 +6,7 @@ const clone=x=>JSON.parse(JSON.stringify(x));
 const data=JSON.parse(fs.readFileSync(path.join(__dirname,'browser/fixtures/personality_profiles.json')));
 const layout=JSON.parse(fs.readFileSync(path.join(root,'starpilot/common/assets/device_settings_layout.json')));
 let server=clone(data),puts=0;
-const values={IsOnroad:false,IsOffroad:true};
+const values={IsOnroad:false,IsOffroad:true,SafeMode:false};
 const context={personalityProfileParamKey:p=>p[0].toUpperCase()+p.slice(1)+'PersonalityProfile',showSnackbar:()=>{},api:{getParams:async()=>values,getLayout:async()=>layout,getPersonalityProfiles:async()=>clone(server),savePersonalityProfile:async payload=>{
  puts++;
  assert(payload.expected,'shipped editor must opt into CAS');

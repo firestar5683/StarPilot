@@ -11,7 +11,7 @@ export const PersonalityProfiles = {
   emits: ["change", "manage"],
   data() {
     return { PROFILES, CATEGORIES, data: null, values: {}, meta: {}, busy: false, ready: false,
-      error: "", notice: "", localExpanded: false, advancedOpen: {}, drafts: {}, curvePending: false, recovery: false, curveText: {}, advancedText: {}, curveErrors: {}, advancedErrors: {}, drag: null, advancedCustom: {}, contextPending: false, contextRequest: null, loadPending: false, timer: null, disposed: false }
+      error: "", notice: "", localExpanded: false, advancedOpen: {}, drafts: {}, curvePending: false, recovery: false, curveText: {}, advancedText: {}, curveErrors: {}, advancedErrors: {}, drag: null, advancedCustom: {}, contextPending: false, contextRequest: null, writeGeneration: 0, loadPending: false, timer: null, disposed: false }
   },
   computed: {
     expanded: { get() { return this.manageOpen ?? this.localExpanded }, set(value) { this.localExpanded = value; this.$emit("manage") } },
@@ -93,9 +93,12 @@ export const PersonalityProfiles = {
       // Previews are gesture-local. Fresh saved data must not resurrect them.
       for (const profile of PROFILES) for (const category of Object.keys(CATEGORIES)) {
         const key = profile + category
-        if (this.drafts[key] && JSON.stringify(this.data?.profiles?.[profile]?.[category]) !== JSON.stringify(next.profiles[profile][category])) {
+        if (JSON.stringify(this.data?.profiles?.[profile]?.[category]) !== JSON.stringify(next.profiles[profile][category])) {
+          const activeDrag = this.drag?.profile === profile && this.drag.category === category
+          const preview = this.drafts[key] || activeDrag || Object.keys(this.curveText).some(field => field.startsWith(key))
           this.discard(profile, category)
-          if (!this.busy && !this.curvePending) { this.drag = null; this.notice = "Saved profiles changed. The affected preview was cancelled." }
+          if (activeDrag) this.drag = null
+          if (preview && !this.busy) this.notice = "Saved profiles changed. The affected preview was cancelled."
         }
       }
       this.data = next
@@ -122,17 +125,18 @@ export const PersonalityProfiles = {
     async refreshContext() {
       if (this.busy || !this.ready || this.contextPending) return
       this.contextPending = true
+      const generation = this.writeGeneration
       try {
         this.contextRequest = Promise.all([api.getParams(), api.getPersonalityProfiles()])
         const [values, profileState] = await this.contextRequest
-        if (this.disposed) return
         // A read started before a write must not replace its verified readback.
-        if (!this.busy) {
-          this.values = values
-          if (this.data) this.data.editing_locked = profileState.editing_locked === true
-        }
+        if (this.disposed || this.busy || generation !== this.writeGeneration) return
+        this.acceptData(profileState)
+        this.values = values
         if (!this.roadStateKnown) { this.drag = null; this.drafts = {}; this.curveText = {} }
-      } catch (e) { this.ready = false; this.error = "Connection lost. Reconnecting…" }
+      } catch (e) {
+        if (!this.disposed && generation === this.writeGeneration) { this.ready = false; this.error = "Connection lost. Reconnecting…" }
+      }
       finally { this.contextPending = false; this.contextRequest = null }
     },
     async write(action, check = () => !this.editingLocked) {
@@ -141,6 +145,7 @@ export const PersonalityProfiles = {
       if (this.contextPending) { try { await this.contextRequest } catch { return } }
       if (this.disposed || !check()) return
       this.busy = true
+      this.writeGeneration++
       this.error = ""
       this.notice = ""
       try {
@@ -197,19 +202,24 @@ export const PersonalityProfiles = {
       delete this.curveErrors[profile + category]
       if (!preview) return this.saveCurve(profile, category)
     },
-    discard(profile, category) { delete this.drafts[profile + category]; delete this.curveErrors[profile + category] },
+    discard(profile, category) {
+      const key = profile + category
+      delete this.drafts[key]; delete this.curveErrors[key]
+      for (const field of Object.keys(this.curveText)) if (field.startsWith(key)) delete this.curveText[field]
+    },
     async saveCurve(profile, category, reset = false) {
       if (this.editingLocked || this.disposed) return
       const curve = reset ? this.data.reference_curves?.[profile]?.[category] : this.draft(profile, category)
       if (!Array.isArray(curve)) return
       const snapshot = [...curve]
+      const expected = this.data.profiles[profile][category]
       this.curvePending = true
       try {
         // Finish polling without losing change events, then recheck the same
         // affirmative off-road and migration policy before sending the edit.
         if (this.contextPending) { try { await this.contextRequest } catch { return } }
-        if (this.disposed) return
-        if (await this.write(() => api.savePersonalityProfile({ profile, category, preset: "custom", curve: snapshot, expected: this.data.profiles[profile][category] }), () => !this.locked && !this.data?.migration_required)) this.notice = ""
+        if (this.disposed || JSON.stringify(expected) !== JSON.stringify(this.data.profiles[profile][category])) return
+        if (await this.write(() => api.savePersonalityProfile({ profile, category, preset: "custom", curve: snapshot, expected }), () => !this.locked && !this.data?.migration_required)) this.notice = ""
       } finally {
         this.discard(profile, category)
         this.curvePending = false

@@ -102,3 +102,19 @@ def test_explicit_null_policy_is_unknown_not_legacy(tmp_path):
   result=read_stats(path)
   assert result['models']['rdf43']['stats']['definitionStatus']=='unknown'
   assert result['history'][0]['stats']['definitionStatus']=='unknown'
+
+
+@pytest.mark.parametrize('version,release', [(True, .5), (False, .5), (1.0, .5), ('1', .5), (2, True), (2, '2')])
+def test_invalid_policy_scalar_types_remain_unknown_in_aggregates(tmp_path, version, release):
+  path = tmp_path / 'stats.sqlite'
+  recorded(path, complete=True)
+  set_policy(path, 'drive1', version, release)
+  before = export_statistics(path)
+  result = read_stats(path)
+  for stats in [result['models']['rdf43']['stats'], result['history'][0]['stats'], result['comparisons'][0]['stats']]:
+    assert stats['definitionStatus'] == 'unknown'
+    assert stats['eventRatesComparable'] is False
+    assert stats['milesPerIntervention'] is None
+    assert stats['assistedMeters'] == pytest.approx(10.1)
+    assert stats['interventions'] == 1
+  assert export_statistics(path) == before
