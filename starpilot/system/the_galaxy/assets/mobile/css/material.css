@@ -1639,3 +1639,25 @@ input[type="color"].gx-color {
   .gx-back-btn { display: none; }
   .gx-content { padding-bottom: var(--sp-6); }
 }
+
+/* Read-only task manager, shared by phone and desktop layouts. */
+.gx-monitor__toolbar, .gx-monitor__filters { display:flex; gap:12px; align-items:center; justify-content:space-between; margin-bottom:12px; flex-wrap:wrap; }
+.gx-monitor__summary { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); gap:12px; }
+.gx-monitor__metric { padding:16px; margin:0; display:flex; flex-direction:column; gap:6px; position:relative; overflow:hidden; }
+.gx-monitor__metric > span, .gx-monitor__metric small { color:var(--text-muted); }
+.gx-monitor__metric strong { font-size:26px; }
+.gx-monitor__graph { height:32px; width:100%; color:var(--primary); }
+.gx-monitor progress { width:100%; height:6px; accent-color:var(--primary); }
+.gx-monitor__cores { padding:14px; margin:12px 0; }
+.gx-monitor__cores summary { cursor:pointer; }
+.gx-monitor__cores > div { display:grid; grid-template-columns:repeat(auto-fit,minmax(120px,1fr)); gap:16px; padding-top:12px; }
+.gx-monitor__cores span { font-size:12px; display:flex; flex-wrap:wrap; justify-content:space-between; gap:6px; }
+.gx-monitor__filters input { flex:1; min-width:180px; }
+.gx-monitor__table { overflow:auto; max-height:65vh; }
+.gx-monitor table { width:100%; border-collapse:collapse; font-size:13px; font-variant-numeric:tabular-nums; }
+.gx-monitor th { position:sticky; top:0; background:var(--surface); z-index:1; text-align:left; }
+.gx-monitor th button { background:transparent; color:inherit; border:0; font:inherit; font-weight:600; cursor:pointer; padding:12px; white-space:nowrap; }
+.gx-monitor td { padding:10px 12px; border-top:1px solid var(--border-color,rgba(128,128,128,.15)); white-space:nowrap; }
+.gx-monitor td:first-child { min-width:180px; max-width:350px; white-space:normal; overflow-wrap:anywhere; }
+.gx-monitor tbody tr:hover { background:var(--surface); }
+@media(max-width:600px) { .gx-monitor__summary { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; } .gx-monitor__metric { padding:12px; } .gx-monitor__metric strong { font-size:22px; } }

@@ -6627,6 +6627,23 @@ def setup(app):
 
     return jsonify(_sanitize_json_value(result)), 200
 
+  @app.route("/api/system/monitor", methods=["GET"])
+  def system_monitor_snapshot():
+    from openpilot.starpilot.system.the_galaxy.system_monitor import monitor
+    try:
+      # Telemetry is an optional companion; process monitoring works on its own.
+      try:
+        from openpilot.starpilot.system.the_galaxy.external_gpu_vitals import external_gpu_vitals
+      except ImportError:
+        vitals = {}
+      else:
+        vitals = external_gpu_vitals(include_onboard=True)
+      response = jsonify({**monitor.sample(), 'vitals': vitals})
+      response.headers['Cache-Control'] = 'no-store'
+      return response
+    except (OSError, ValueError, IndexError):
+      return jsonify({'error': 'System activity is temporarily unavailable.'}), 503
+
   @app.route("/api/troubleshoot", methods=["GET"])
   def get_troubleshoot_data():
     try:

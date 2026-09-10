@@ -190,6 +190,11 @@ export const api = {
   navigationFavorite(body) { return request("/api/navigation/favorite", { method: "POST", data: body }) },
   deleteNavigationKey(type) { return request(`/api/navigation_key?type=${encodeURIComponent(type)}`, { method: "DELETE" }) },
 
+  async systemMonitor(signal) {
+    const response = await fetch("/api/system/monitor", { signal, cache: "no-store" })
+    if (!response.ok) throw new Error("System monitor unavailable")
+    return response.json()
+  },
   async backupToggles() {
     const res = await fetch("/api/toggles/backup", { method: "POST" })
     if (!res.ok) {
