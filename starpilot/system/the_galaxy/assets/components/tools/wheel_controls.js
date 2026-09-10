@@ -1,5 +1,4 @@
 import { html, reactive } from "/assets/vendor/arrow-core.js"
-import { openControllerActionPicker } from "./controller_action_picker.js"
 
 const state = reactive({
   loading: true,
@@ -136,17 +135,12 @@ function controllerSlotCard(slot, index) {
   const selectedOption = state.controllerOptions.find(option => option.key === selectedKey)
   const mappings = () => state.mappings.filter(mapping => mapping.slot === targetIndex)
   const learning = () => state.learning && state.learningSlot === targetIndex
-  const selectAction = event => openControllerActionPicker({
-    index, trigger: event.currentTarget,
-    getOptions: () => state.controllerOptions,
-    getSlot: () => state.controllerSlots[index],
-    isDisabled: () => !state.offroad || !!state.busy,
-    onSelect: key => {
-      const option = state.controllerOptions.find(candidate => candidate.key === key)
-      const value = option?.value_type === "speed" ? Number(state.controllerSlots[index]?.value || option.default_value || 30) : null
-      request("action", { slot: index, key, value })
-    },
-  })
+  const selectAction = event => {
+    const key = event.currentTarget.value
+    const option = state.controllerOptions.find(candidate => candidate.key === key)
+    const value = option?.value_type === "speed" ? Number(slot?.value || option.default_value || 30) : null
+    request("action", { slot: index, key, value })
+  }
   return html`
     <section class="wheelCard wheelControllerCard">
       <div class="wheelCardHeader">
@@ -162,10 +156,13 @@ function controllerSlotCard(slot, index) {
       </div>
       <label class="wheelActionPicker">
         <span>Action</span>
-        <button type="button" data-controller-action-slot="${index}" aria-haspopup="dialog"
-                disabled="${() => !state.offroad || !!state.busy}" @click="${selectAction}">
-          ${selectedOption?.label || slot?.label || selectedKey || "Not configured"} · Choose action
-        </button>
+        <select disabled="${() => !state.offroad || !!state.busy}"
+                @change="${selectAction}">
+          <option value="" selected="${() => selectedKey === ""}">Not configured</option>
+          ${state.controllerOptions.map(option => html`
+            <option value="${option.key}" selected="${() => selectedKey === option.key}">${option.label}</option>
+          `)}
+        </select>
       </label>
       ${selectedOption?.value_type === "speed" ? html`
         <label class="wheelActionPicker wheelSpeedPicker">
