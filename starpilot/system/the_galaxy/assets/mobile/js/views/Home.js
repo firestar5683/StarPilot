@@ -1,4 +1,6 @@
 import { api, showSnackbar } from "../api.js"
+import "/assets/components/home/top_models.js"
+import { driveEventCounts, readDriveEventHistory } from "../drive_event_counts.js"
 import { usePolling } from "../composables.js"
 import { GalaxyConfirm } from "../components/GalaxyModal.js"
 
@@ -42,8 +44,7 @@ const driveReady = (drive) => drive?.ignored === true || drive?.attentionKnown !
 const driveUnit = (drive, fallback = "miles") => drive?.distanceUnit || fallback
 const driveSpeedUnit = (drive, unit) => drive?.speedUnit || (unit === "kilometers" ? "kph" : "mph")
 
-const FAVORITE_COLORS = ["#5ec8c8", "#8b6cc5", "#d4a060", "#e05577", "#6cc56e", "#8aa3ff"]
-const TOP_MODEL_LIMIT = 3
+
 const WEEK_LABELS = ["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"]
 
 function hasPendingWork(dashboard) {
@@ -67,6 +68,8 @@ export const Home = {
       status: "loading",
       error: "",
       payload: null,
+      eventHistory: null,
+      disposed: false,
       unit: "miles",
       keepRefreshing: false,
       togglingKey: "",
@@ -107,6 +110,15 @@ export const Home = {
       const drive = this.dash.lastDrive || emptyDrive()
       const ready = driveReady(drive)
       const unit = driveUnit(drive, this.unit)
+      const recent = Array.isArray(this.dash.recentDrives) ? this.dash.recentDrives : []
+      const routeKeys = d => [...new Set([d?.name, ...(d?.routeNames || [])].filter(Boolean))]
+      const keys = routeKeys(drive)
+      const matched = keys.length ? recent.findIndex(d => {
+        const candidate = routeKeys(d)
+        return candidate.length === keys.length && candidate.every(key => keys.includes(key))
+      }) : -1
+      const events = matched >= 0 ? driveEventCounts(recent, this.eventHistory)[matched]
+        : driveEventCounts([drive, ...recent], this.eventHistory)[0]
       return {
         ready,
         range: fmtDriveRange(drive.date, drive.endDate),
@@ -115,14 +127,17 @@ export const Home = {
           { value: ready ? toDec(drive.distance) : "...", label: ready ? unit : "analyzing" },
           { value: fmtDuration(drive.duration), label: "duration" },
           { value: ready ? toInt(drive.avgSpeed) : "...", label: ready ? `${driveSpeedUnit(drive, unit)} avg` : "speed" },
-          { value: ready ? pct(drive.engagedPercent) : "...", label: "engaged" },
         ],
-        footer: ready
+        partialEvents: events.partial,
+        footer: ready && !drive.ignored
           ? [
+              { icon: "bi-check2-circle", text: `${pct(drive.engagedPercent)} engaged` },
               { icon: "bi-eye", text: `${toInt(drive.distractedMoments)} distracted` },
               { icon: "bi-exclamation-triangle", text: `${toInt(drive.unresponsiveMoments)} unresponsive` },
+              { icon: "bi-hand-index", text: `${events.interventions ?? "—"} interventions` },
+              { icon: "bi-stop-circle", text: `${events.disengagements ?? "—"} disengagements` },
             ]
-          : [{ icon: "bi-hourglass-split", text: "Analyzing stats" }],
+          : [{ icon: "bi-hourglass-split", text: drive.ignored ? "Stats excluded" : "Analyzing stats" }],
       }
     },
 
@@ -186,6 +201,7 @@ export const Home = {
 
     recentList() {
       const drives = Array.isArray(this.dash.recentDrives) ? this.dash.recentDrives : []
+      const events = driveEventCounts(drives, this.eventHistory)
       return drives.map((drive, index) => {
         const ignored = drive?.ignored === true
         const ready = driveReady(drive)
@@ -223,6 +239,11 @@ export const Home = {
           distance,
           duration: fmtDuration(drive.duration),
           attentionItems,
+          events: ignored ? [] : [
+            { label: "interventions", value: events[index].interventions ?? "—" },
+            { label: "disengagements", value: events[index].disengagements ?? "—" },
+          ],
+          partialEvents: events[index].partial,
           engaged,
           engagedValue: ready && !ignored ? clamp(drive.engagedPercent) : 0,
           canToggle: routeNames.length > 0,
@@ -232,28 +253,6 @@ export const Home = {
           toggleKey: routeNames.join(","),
         }
       })
-    },
-
-    modelView() {
-      const models = Array.isArray(this.dash.favoriteModels) ? this.dash.favoriteModels : []
-      if (models.length === 0) {
-        return { hasModels: false, style: "", rows: [] }
-      }
-      const top = models.slice(0, TOP_MODEL_LIMIT)
-      const total = top.reduce((sum, m) => sum + Math.max(1, toNum(m.weight)), 0)
-      let start = 0
-      const segments = top.map((m, i) => {
-        const end = start + (Math.max(1, toNum(m.weight)) / total) * 100
-        const seg = `${FAVORITE_COLORS[i]} ${start}% ${end}%`
-        start = end
-        return seg
-      })
-      const rows = top.map((m, i) => ({
-        color: FAVORITE_COLORS[i],
-        name: m.name,
-        label: `${toInt(m.drives)} ${toNum(m.drives) === 1 ? "drive" : "drives"} using this model`,
-      }))
-      return { hasModels: true, style: `conic-gradient(${segments.join(", ")})`, rows }
     },
 
     storageView() {
@@ -315,19 +314,31 @@ export const Home = {
     },
 
     async load() {
-      if (this.refreshing) return
+      if (this.refreshing || this.disposed) return
       this.refreshing = true
       if (!this.payload) this.status = "loading"
       this.error = ""
       try {
         const data = await api.getStats()
+        if (this.disposed) return
         if (!data) throw new Error("empty stats payload")
         const payloadUnit = data?.dashboard?.week?.distanceUnit || data?.driveStats?.all?.unit
         this.payload = data
+        this.eventController?.abort()
+        this.eventController = new AbortController()
+        const controller = this.eventController
+        const timeout = setTimeout(() => controller.abort(), 8000)
+        this.eventHistory = null
+        readDriveEventHistory(controller.signal).then(history => {
+          if (!this.disposed && !controller.signal.aborted && this.eventController === controller) this.eventHistory = history
+        }).catch(() => {
+          if (!this.disposed && this.eventController === controller) this.eventHistory = null
+        }).finally(() => clearTimeout(timeout))
         this.unit = payloadUnit || this.unit || "miles"
         this.status = "ready"
         this.keepRefreshing = hasPendingWork(data?.dashboard || {})
       } catch (err) {
+        if (this.disposed) return
         if (this.payload) {
           showSnackbar("Couldn't refresh dashboard.", "error")
         } else {
@@ -364,7 +375,7 @@ export const Home = {
     this.poll.start()
   },
   mounted() { this.load() },
-  beforeUnmount() { this.poll?.destroy() },
+  beforeUnmount() { this.disposed = true; this.poll?.destroy(); this.eventController?.abort() },
   template: `
     <div class="dh-view">
       <template v-if="status === 'loading'">
@@ -416,12 +427,11 @@ export const Home = {
             </div>
             <div class="dh-tags">
               <span class="dh-tag"><i class="bi bi-cpu"></i>{{ lastDrive.model }}</span>
-              <template v-if="lastDrive.ready">
-                <span class="dh-tag"><i :class="'bi ' + lastDrive.footer[0].icon"></i>{{ lastDrive.footer[0].text }}</span>
-                <span class="dh-tag"><i :class="'bi ' + lastDrive.footer[1].icon"></i>{{ lastDrive.footer[1].text }}</span>
-              </template>
-              <span v-else class="dh-tag"><i class="bi bi-hourglass-split"></i>Analyzing stats</span>
             </div>
+            <div class="dh-drive__stats dh-last-stats">
+              <span v-for="item in lastDrive.footer" :key="item.text" class="dh-drive__stat"><i :class="'bi ' + item.icon"></i>{{ item.text }}</span>
+            </div>
+            <span v-if="lastDrive.partialEvents" class="dh-tag">Incomplete event recording</span>
           </div>
         </section>
 
@@ -475,8 +485,8 @@ export const Home = {
           </section>
         </div>
 
-        <section class="gx-card dh-card">
-          <div class="dh-card__head"><i class="bi bi-clock-history"></i><span>Recent drives</span></div>
+        <details class="gx-card dh-card">
+          <summary class="dh-card__head" style="cursor:pointer;display:list-item"><span>Recent drives</span></summary>
           <template v-if="!recentList.length">
             <div class="gx-empty">No local drives found yet.</div>
           </template>
@@ -490,38 +500,24 @@ export const Home = {
                 <span>{{ drive.distance }}</span>
                 <span>{{ drive.duration }}</span>
               </div>
-              <div class="dh-drive__row">
-                <div class="dh-drive__cell">
-                  <div class="dh-track"><span :style="{ width: drive.engagedValue + '%' }"></span></div>
-                  <span class="dh-drive__engaged" :class="{ 'dh-drive__muted': drive.pending || drive.ignored }">{{ drive.engaged }}</span>
-                </div>
-                <div class="dh-drive__attention">
-                  <span v-for="a in drive.attentionItems" :key="a.text"><i :class="'bi ' + a.icon"></i>{{ a.text }}</span>
-                </div>
+              <div class="dh-drive__stats" aria-label="Drive statistics">
+                <span class="dh-drive__stat" :class="{ 'dh-drive__muted': drive.pending || drive.ignored }"><i class="bi bi-speedometer2" aria-hidden="true"></i>{{ drive.engaged }}</span>
+                <span v-for="a in drive.attentionItems" :key="a.text" class="dh-drive__stat"><i :class="'bi ' + a.icon" aria-hidden="true"></i>{{ a.text }}</span>
+                <span v-for="event in drive.events" :key="event.label" class="dh-drive__stat">{{ event.value }} {{ event.label }}</span>
               </div>
+              <div class="dh-track"><span :style="{ width: drive.engagedValue + '%' }"></span></div>
+              <span v-if="drive.partialEvents" class="dh-drive__muted">Incomplete recording</span>
               <button v-if="drive.canToggle" type="button" class="gx-manage-btn dh-drive__action" :disabled="isToggling(drive.routeNames)" @click="toggleDriveStats(drive)">
                 <i :class="'bi ' + drive.actionIcon"></i> {{ drive.actionLabel }}
               </button>
             </article>
           </div>
-        </section>
+        </details>
 
         <div class="dh-grid dh-grid--2">
           <section class="gx-card dh-card">
-            <div class="dh-card__head"><i class="bi bi-stars"></i><span>Most used models</span></div>
-            <div v-if="modelView.hasModels" class="dh-body dh-models">
-              <div class="dh-chart-ring" :style="{ backgroundImage: modelView.style }" role="img" aria-label="Model usage share"></div>
-              <div class="dh-models__list">
-                <div v-for="m in modelView.rows" :key="m.name" class="dh-model">
-                  <span class="dh-swatch" :style="{ background: m.color }"></span>
-                  <div class="dh-model__body">
-                    <strong>{{ m.name }}</strong>
-                    <small>{{ m.label }}</small>
-                  </div>
-                </div>
-              </div>
-            </div>
-            <div v-else class="gx-empty">No model usage recorded yet.</div>
+            <div class="dh-card__head"><i class="bi bi-stars"></i><span>Top models</span></div>
+            <div class="dh-body"><component is="top-models" all-rows default-mode="distance" :history-rows="JSON.stringify(dash.modelDistances || [])"></component></div>
           </section>
 
           <section class="gx-card dh-card">

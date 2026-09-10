@@ -1,0 +1,24 @@
+import assert from 'node:assert/strict';
+import {drivingMetrics,modelManagerMetrics,metricSortValue,trackingStatus,historyRow} from '../assets/components/tools/model_metrics.js';
+globalThis.HTMLElement=class {};
+globalThis.customElements={get:()=>true};
+const {topModelRows}=await import('../assets/components/home/top_models.js');
+const mixed={value:'mixed',stats:{available:true,assistedMeters:3218.688,interventionMeters:1609.344,disengagementMeters:1609.344,interventions:1,disengagements:1,eventRatesComparable:false,definitionStatus:'mixed'}};
+assert.equal(drivingMetrics(mixed)[0].value,'2.0 mi');
+assert.equal(drivingMetrics(mixed)[1].value,'—');
+assert.equal(drivingMetrics(mixed)[2].value,'—');
+assert.equal(modelManagerMetrics(mixed)[2].value,'—');
+assert.equal(metricSortValue(mixed,'interventions'),null);
+assert.equal(metricSortValue(mixed,'distance'),3218.688);
+assert.match(trackingStatus(mixed),/definitions/i);
+assert.equal(topModelRows([mixed],'interventions').length,0);
+assert.equal(topModelRows([mixed],'distance').length,1);
+assert.match(historyRow({stats:mixed.stats}).configuration,/definitions/i);
+console.log('Mixed definition display and ranking guards passed');
+
+const historical={...mixed,value:'historical',stats:{...mixed.stats,eventRatesComparable:true,definitionStatus:'historical',definitionVersion:1,interventionReleaseSeconds:.5}};
+assert.notEqual(drivingMetrics(historical)[1].value,'—');
+assert.equal(metricSortValue(historical,'interventions'),null);
+assert.equal(topModelRows([historical],'interventions').length,0);
+assert.match(trackingStatus(historical),/Historical/);
+assert.match(historyRow({stats:historical.stats}).configuration,/Definition v1/);

@@ -4,6 +4,7 @@ import copy
 import hashlib
 import ipaddress
 import json
+import math
 import os
 import queue
 import re
@@ -31,6 +32,13 @@ from openpilot.system.loggerd.uploader import listdir_by_creation
 from openpilot.tools.lib.route import SegmentName
 
 from openpilot.starpilot.assets.model_manager import canonical_model_key
+try:
+  from openpilot.starpilot.common.model_stats import MAX_GAP, parse_identity
+except ImportError:
+  # The display PR remains usable before the recorder provider is installed.
+  MAX_GAP = 0.25
+  def parse_identity(_text):
+    return None
 from openpilot.starpilot.common.starpilot_variables import THEME_SAVE_PATH, VIDEO_CACHE_PATH
 from openpilot.starpilot.assets.theme_manager import HOLIDAY_THEME_PATH
 
@@ -75,7 +83,7 @@ DASHBOARD_ROUTE_SEGMENT_SAMPLE_LIMIT = 2
 DASHBOARD_PERSISTED_ROUTE_LIMIT = 5000
 DASHBOARD_PERSIST_MIN_ROUTE_AGE_SECONDS = 120
 DASHBOARD_PERSISTENT_STATS_PARAM = "GalaxyDashboardStats"
-DASHBOARD_ROUTE_ANALYSIS_VERSION = 4
+DASHBOARD_ROUTE_ANALYSIS_VERSION = 5
 DASHBOARD_PARAMS_DIR = Path("/data/params/d")
 DASHBOARD_ANALYZER_LOG_PATH = "/tmp/galaxy_dashboard_analyzer.log"
 DASHBOARD_ANALYZER_STATUS_PATH = Path("/tmp/galaxy_dashboard_analyzer_status.json")
@@ -1451,6 +1459,10 @@ def _analyze_route_messages(messages, route_info, model_names, is_metric, deadli
   previous_state_time = None
   previous_enabled = False
   previous_events = set()
+  previous_model = None
+  latest_model_time = None
+  model_engagement = {}
+  state_valid = False
 
   distance_m = 0.0
   engaged_seconds = 0.0
@@ -1481,6 +1493,27 @@ def _analyze_route_messages(messages, route_info, model_names, is_metric, deadli
     if message_type == "initData" and payload is not None and not model:
       model = _route_model_from_init_data(payload, model_names)
 
+    elif message_type == "starpilotModelV2":
+      if seconds is None or (latest_model_time is not None and seconds <= latest_model_time):
+        previous_model = None
+        continue
+      latest_model_time = seconds
+      identity = parse_identity(getattr(payload, "runtimeIdentity", None))
+      roles = json.loads(identity)["roles"] if identity else []
+      fresh = (state_valid and seconds is not None and previous_state_time is not None
+               and 0 <= seconds - previous_state_time <= MAX_GAP)
+      if len(roles) != 1 or not fresh or not getattr(message, "valid", True):
+        previous_model = None
+        continue
+      if previous_model is not None:
+        previous_time, previous_identity = previous_model
+        dt = seconds - previous_time
+        if identity == previous_identity and 0 < dt <= MAX_GAP:
+          exposure = model_engagement.setdefault(identity, {"durationSeconds": 0.0, "engagedSeconds": 0.0})
+          exposure["durationSeconds"] += dt
+          exposure["engagedSeconds"] += dt if previous_enabled else 0.0
+      previous_model = (seconds, identity)
+
     elif message_type == "carState" and payload is not None and seconds is not None:
       if previous_car_time is not None and seconds > previous_car_time:
         distance_m += max(previous_speed, 0.0) * min(seconds - previous_car_time, 10.0)
@@ -1488,6 +1521,14 @@ def _analyze_route_messages(messages, route_info, model_names, is_metric, deadli
       previous_car_time = seconds
 
     elif message_type == "selfdriveState" and payload is not None and seconds is not None:
+      if previous_state_time is not None and seconds <= previous_state_time:
+        previous_model = None
+        continue
+      state_valid = bool(getattr(message, "valid", True))
+      # Drop the transition interval rather than guess where engagement changed.
+      if (not state_valid or bool(getattr(payload, "enabled", False)) != previous_enabled
+          or (previous_state_time is not None and not 0 <= seconds - previous_state_time <= MAX_GAP)):
+        previous_model = None
       if previous_state_time is not None and seconds > previous_state_time and previous_enabled:
         engaged_seconds += min(seconds - previous_state_time, 10.0)
       previous_enabled = bool(getattr(payload, "enabled", False))
@@ -1541,6 +1582,7 @@ def _analyze_route_messages(messages, route_info, model_names, is_metric, deadli
     "avgSpeed": int(round(avg_speed)),
     "engagedPercent": max(0, min(100, engaged_percent)),
     "engagedSeconds": round(engaged_seconds, 1),
+    "modelEngagement": model_engagement,
     "model": model or "Unknown model",
     "segmentCount": int(route_info.get("segmentCount", 0)),
     "distractedMoments": distracted_moments,
@@ -1553,7 +1595,7 @@ def _analyze_route_messages(messages, route_info, model_names, is_metric, deadli
   }
 
 
-def _iter_route_log_messages(route_info, deadline=None):
+def _iter_route_log_messages(route_info, deadline=None, *, prefer_runtime=False):
   try:
     from openpilot.tools.lib.logreader import LogReader
   except Exception:
@@ -1564,6 +1606,13 @@ def _iter_route_log_messages(route_info, deadline=None):
       return
 
     log_path = get_route_log_path(segment.get("path"))
+    if prefer_runtime:
+      # Runtime identity is rlog-only. The offroad background worker may read it;
+      # foreground dashboard requests retain the smaller qlog preference.
+      segment_path = Path(segment.get("path") or "")
+      directory = segment_path if segment_path.is_dir() else segment_path.parent
+      log_path = next((directory / name for name in ("rlog", "rlog.zst", "rlog.bz2", "raw_log.zst", "raw_log.bz2")
+                       if (directory / name).is_file()), log_path)
     if log_path is None:
       continue
     try:
@@ -1602,6 +1651,10 @@ def _public_drive(drive, is_metric):
   for key in public:
     if key in drive:
       public[key] = drive[key]
+  for key in ('date', 'endDate'):
+    parsed = _coerce_dashboard_time(public[key])
+    if parsed is not None:
+      public[key] = parsed.astimezone().isoformat()
   return public
 
 
@@ -1671,6 +1724,7 @@ def _drive_from_persistent_route(route_name, entry, is_metric):
     "avgSpeed": int(round(avg_speed)),
     "engagedPercent": max(0, min(100, engaged_percent)),
     "engagedSeconds": round(engaged_seconds, 1),
+    "modelEngagement": _normalize_model_engagement(entry.get("modelEngagement")),
     "model": _clean_model_label(entry.get("model", "")) or "Unknown model",
     "segmentCount": max(0, _safe_int(entry.get("segmentCount", 0), 0)),
     "distractedMoments": max(0, _safe_int(entry.get("distractedMoments", 0), 0)),
@@ -1923,7 +1977,7 @@ def warm_dashboard_stats(footage_paths=None):
       break
     full_route_info = dict(route_info)
     full_route_info["analysisSegmentCount"] = max(0, _safe_int(route_info.get("segmentCount", 0), 0))
-    messages = _iter_route_log_messages(full_route_info)
+    messages = _iter_route_log_messages(full_route_info, prefer_runtime=True)
     drive = _analyze_route_messages(messages, full_route_info, model_names, is_metric)
     _update_dashboard_persistent_stats(params_obj, [drive], time.time())
 
@@ -2386,6 +2440,7 @@ def _normalize_persistent_routes(raw_routes):
       "clean": bool(entry.get("clean", False)),
       "undistracted": bool(entry.get("undistracted", entry.get("clean", False))),
       "engagedSeconds": max(0.0, _safe_float(entry.get("engagedSeconds", 0.0), 0.0)),
+      "modelEngagement": _normalize_model_engagement(entry.get("modelEngagement")),
       "distractedMoments": max(0, _safe_int(entry.get("distractedMoments", 0), 0)),
       "unresponsiveMoments": max(0, _safe_int(entry.get("unresponsiveMoments", 0), 0)),
       "model": _clean_model_label(entry.get("model", "")),
@@ -2730,6 +2785,7 @@ def _update_dashboard_persistent_stats(params_obj, drives, wall_now):
       "clean": attention_known and _drive_is_clean(drive),
       "undistracted": attention_known and _drive_is_undistracted(drive),
       "engagedSeconds": max(0.0, _safe_float(drive.get("engagedSeconds", 0.0), 0.0)),
+      "modelEngagement": _normalize_model_engagement(drive.get("modelEngagement")),
       "distractedMoments": max(0, _safe_int(drive.get("distractedMoments", 0), 0)),
       "unresponsiveMoments": max(0, _safe_int(drive.get("unresponsiveMoments", 0), 0)),
       "model": model_name,
@@ -2773,6 +2829,7 @@ def _update_dashboard_persistent_stats(params_obj, drives, wall_now):
           corrected_start = _coerce_dashboard_time(next_entry.get("date", ""))
           next_entry["endDate"] = _jsonable_time(corrected_start + timedelta(seconds=next_entry["duration"])) if corrected_start else ""
         next_entry["engagedSeconds"] = max(0.0, _safe_float(existing_entry.get("engagedSeconds", 0.0), 0.0))
+        next_entry["modelEngagement"] = _normalize_model_engagement(existing_entry.get("modelEngagement"))
         next_entry["distractedMoments"] = max(0, _safe_int(existing_entry.get("distractedMoments", 0), 0))
         next_entry["unresponsiveMoments"] = max(0, _safe_int(existing_entry.get("unresponsiveMoments", 0), 0))
         next_entry["analysisComplete"] = bool(existing_entry.get("analysisComplete", False))
@@ -2925,6 +2982,108 @@ def _build_device_summary(params_obj):
   }
 
 
+def _statistics_model_key(entry, model_names):
+  key = canonical_model_key(entry.get('modelKey', ''))
+  if key in model_names:
+    return key
+  label = _model_usage_key(entry.get('model', ''))
+  if key and key != label:
+    return key  # retain an explicit ID that has left the catalogue
+  aliases = {model_id for model_id, info in model_names.items()
+             if _model_usage_key(info.get('name', '')) in {key, label} - {''}}
+  # Duplicate display names are ambiguous; never merge their statistics.
+  if len(aliases) == 1:
+    return aliases.pop()
+  return key or label
+
+
+def _normalize_model_engagement(raw):
+  """Keep only finite exposure with single-model runtime provenance."""
+  result = {}
+  if not isinstance(raw, dict):
+    return result
+  for identity, exposure in raw.items():
+    owner = parse_identity(identity)
+    if not owner or len(json.loads(owner)["roles"]) != 1 or not isinstance(exposure, dict):
+      continue
+    duration, engaged = exposure.get("durationSeconds"), exposure.get("engagedSeconds")
+    try:
+      valid_numbers = all(type(v) in (int, float) and math.isfinite(v) for v in (duration, engaged))
+    except OverflowError:
+      valid_numbers = False
+    if not valid_numbers:
+      continue
+    if duration <= 0 or not 0 <= engaged <= duration:
+      continue
+    result[owner] = {"durationSeconds": duration, "engagedSeconds": engaged}
+  return result
+
+
+def _build_model_engagement(persistent_stats, model_names=None):
+  """Engagement over measured runtime intervals, not inferred whole-route time.
+
+  Legacy selected-model labels and paired runtime configurations cannot establish
+  standalone ownership. Missing telemetry and switches are omitted, not scaled.
+  """
+  if not isinstance(persistent_stats, dict) or not isinstance(persistent_stats.get("routes"), dict):
+    return {}
+  ignored = persistent_stats.get("ignoredRoutes", [])
+  ignored = {v for v in ignored if isinstance(v, str)} if isinstance(ignored, list) else set()
+  totals = {}
+  for name, entry in persistent_stats["routes"].items():
+    if name in ignored or not isinstance(entry, dict) or entry.get("analysisComplete") is not True:
+      continue
+    if not _dashboard_time_is_valid(entry.get("date", "")):
+      continue
+    seen = set()
+    for identity, exposure in _normalize_model_engagement(entry.get("modelEngagement")).items():
+      key = json.loads(identity)["roles"][0]["modelId"]
+      row = totals.setdefault(key, {"durationSeconds": 0.0, "engagedSeconds": 0.0, "drives": 0})
+      row["durationSeconds"] += exposure["durationSeconds"]
+      row["engagedSeconds"] += exposure["engagedSeconds"]
+      row["drives"] += key not in seen
+      seen.add(key)
+  return {key: {**row, "measurementScope": "runtime_intervals", "coverage": "partial",
+                "percent": round(100 * row["engagedSeconds"] / row["durationSeconds"], 1)}
+          for key, row in totals.items()}
+
+
+def get_model_engagement(params_obj):
+  # Read raw data: the general dashboard normalizer defaults missing exposure
+  # to zero, which would falsely imply a measured 0% here. Never write it back.
+  raw = _read_dashboard_param_file(DASHBOARD_PERSISTENT_STATS_PARAM)
+  if raw is None:
+    raw = _params_get_value(params_obj, DASHBOARD_PERSISTENT_STATS_PARAM, None)
+  return _build_model_engagement(_decode_json_param(raw, {}), _model_lookup(params_obj))
+
+
+def _build_model_distances(persistent_stats=None):
+  """Read retained route mileage; never infer assisted distance or event counts."""
+  stats = persistent_stats if isinstance(persistent_stats, dict) else {}
+  routes = stats.get("routes", {})
+  if not isinstance(routes, dict):
+    return []
+  ignored = stats.get("ignoredRoutes", [])
+  ignored = {name for name in ignored if isinstance(name, str)} if isinstance(ignored, list) else set()
+  models = {}
+  for route_name, entry in routes.items():
+    if route_name in ignored or not isinstance(entry, dict):
+      continue
+    if entry.get("analysisComplete") is not True or not _dashboard_time_is_valid(entry.get("date", "")):
+      continue
+    distance = entry.get("distanceMeters")
+    if isinstance(distance, bool) or not isinstance(distance, (int, float)) or not math.isfinite(distance) or distance <= 0:
+      continue
+    name = _clean_model_label(entry.get("model", ""))
+    key = canonical_model_key(entry.get("modelKey", "")) or _model_usage_key(name)
+    if not key:
+      continue
+    row = models.setdefault(key, {"key": key, "name": name or key, "distanceMeters": 0.0, "drives": 0})
+    row["distanceMeters"] += distance
+    row["drives"] += 1
+  return sorted(models.values(), key=lambda row: (-row["distanceMeters"], row["key"]))
+
+
 def _build_favorite_models(params_obj, persistent_stats=None):
   lookup = _model_lookup(params_obj)
   user_favorites = {canonical_model_key(entry) for entry in _split_csv(_params_get_text(params_obj, "UserFavorites", ""))}
@@ -2976,6 +3135,7 @@ def _dashboard_empty(is_metric, now, footage_paths, params_obj, persistent_stats
     "device": _build_device_summary(params_obj),
     "storage": _build_storage_summary(footage_paths),
     "favoriteModels": _build_favorite_models(params_obj, persistent_stats),
+    "modelDistances": _build_model_distances(persistent_stats),
   }
 
 
@@ -3045,6 +3205,7 @@ def get_dashboard_stats(footage_paths, params_obj=None, now=None):
       "device": _build_device_summary(params_obj),
       "storage": _build_storage_summary(footage_paths),
       "favoriteModels": _build_favorite_models(params_obj, persistent_stats),
+      "modelDistances": _build_model_distances(persistent_stats),
     }
   dashboard["analysis"] = analysis_status
 

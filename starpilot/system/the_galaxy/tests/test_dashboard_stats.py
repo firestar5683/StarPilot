@@ -756,7 +756,7 @@ def test_route_listing_uses_all_segment_times_when_segment_zero_was_touched(tmp_
   routes = utilities._list_dashboard_routes([tmp_path])
 
   assert routes[0]["startedAt"] == route_start
-  start, end = utilities._route_time_range(routes[0], 180)
+  start, end = utilities._route_time_range(routes[0], 180, now=utilities.datetime(2026, 7, 20))
   assert start == "2026-07-18T07:19:00"
   assert end == "2026-07-18T07:22:00"
 
@@ -1781,7 +1781,11 @@ def test_invalid_filesystem_time_requests_reanalysis():
   assert utilities._analysis_candidates([route], stats) == [route]
 
 
-def test_corrected_filesystem_time_replaces_touched_persisted_time_without_losing_stats():
+def test_corrected_filesystem_time_replaces_touched_persisted_time_without_losing_stats(monkeypatch):
+  original_time_check = utilities._dashboard_time_is_valid
+  monkeypatch.setattr(utilities, "_dashboard_time_is_valid",
+                      lambda value, now=None, require_recent=False:
+                      original_time_check(value, now=now or utilities.datetime(2026, 7, 21), require_recent=require_recent))
   params = FakeParams({
     utilities.DASHBOARD_PERSISTENT_STATS_PARAM: {
       "routes": {
@@ -2666,3 +2670,145 @@ def test_toggle_profile_slots_save_and_load_the_same_filtered_settings(monkeypat
   server.params.values["IsOnroad"] = True
   onroad = client.post("/api/toggles/profiles/a/load")
   assert onroad.status_code == 403
+
+
+def test_statistics_engagement_catalog_alias_and_ambiguity():
+  entry = {'modelKey':'cinque-divergence-mask', 'model':'Cinque Divergence Mask'}
+  lookup = {'cdm': {'name':'Cinque Divergence Mask'}}
+  assert utilities._statistics_model_key(entry, lookup) == 'cdm'
+  assert utilities._statistics_model_key({**entry,'modelKey':'cdm'},lookup) == 'cdm'
+  lookup['other'] = {'name':'Cinque Divergence Mask'}
+  assert utilities._statistics_model_key(entry, lookup) == 'cinque-divergence-mask'
+
+
+def test_public_drive_dates_have_device_timezone():
+  from datetime import datetime
+  result = utilities._public_drive({'date':'2026-09-09T14:59:45', 'endDate':'2026-09-09T15:17:18'}, False)
+  assert datetime.fromisoformat(result['date']).tzinfo is not None
+  assert datetime.fromisoformat(result['endDate']).timestamp() - datetime.fromisoformat(result['date']).timestamp() == 1053
+
+
+def runtime_message(seconds, model='b', pair=False):
+  roles = [{'modelId': model, 'artifact': 'loaded-sha256:fixture', 'backend': 'comma'}]
+  if pair:
+    roles.append({'modelId': 'c', 'artifact': 'loaded-sha256:other', 'backend': 'chestnut'})
+  return msg('starpilotModelV2', seconds, SimpleNamespace(runtimeIdentity=json.dumps({'version': 1, 'roles': roles})))
+
+
+def measured_route(messages):
+  messages = [msg('initData', 0, SimpleNamespace(params={'DrivingModelName': 'A'}))] + messages
+  return utilities._analyze_route_messages(messages, {'name': 'route-a', 'segmentCount': 1}, {}, False) | {'date': '2026-09-08T12:00:00', 'modelKey': 'a'}
+
+
+@pytest.mark.skipif(not (MODULE_DIR.parents[1] / "common/model_stats.py").exists(), reason="Requires recorder PR 04")
+def test_runtime_engagement_omits_unverified_startup_selection():
+  route = measured_route([msg('selfdriveState', 0, SimpleNamespace(enabled=True)),
+                          msg('selfdriveState', 10, SimpleNamespace(enabled=True))])
+  assert route['engagedSeconds'] == 10
+  assert utilities._build_model_engagement({'routes': {'route-a': route}}) == {}
+
+
+@pytest.mark.skipif(not (MODULE_DIR.parents[1] / "common/model_stats.py").exists(), reason="Requires recorder PR 04")
+def test_runtime_engagement_tracks_fallback_with_full_precision_and_survives_persistence(monkeypatch):
+  messages = []
+  for i in range(105):
+    t = i / 10
+    messages.extend([msg('selfdriveState', t, SimpleNamespace(enabled=True)), runtime_message(t)])
+  route = measured_route(messages)
+  assert route['duration'] == 10 and route['engagedSeconds'] == 10.4
+  monkeypatch.setattr(utilities, '_read_dashboard_param_file', lambda key: None)
+  params = FakeParams()
+  utilities._update_dashboard_persistent_stats(params, [route], 0)
+  stats = utilities._load_dashboard_persistent_stats(params)
+  result = utilities._build_model_engagement(stats, {'a': {'name': 'A'}, 'b': {'name': 'B'}})
+  assert set(result) == {'b'}
+  assert result['b']['durationSeconds'] == pytest.approx(10.4)
+  assert result['b']['engagedSeconds'] == pytest.approx(10.4)
+  assert result['b']['percent'] == 100
+  loaded = utilities._drive_from_persistent_route('route-a', stats['routes']['route-a'], False)
+  assert loaded['modelEngagement'] == route['modelEngagement']
+  shell = {**route, 'attentionKnown': False, 'analysisComplete': False, 'distanceMeters': 0, 'modelEngagement': {}}
+  utilities._update_dashboard_persistent_stats(params, [shell], 0)
+  assert utilities.get_model_engagement(params) == result
+
+
+@pytest.mark.skipif(not (MODULE_DIR.parents[1] / "common/model_stats.py").exists(), reason="Requires recorder PR 04")
+def test_runtime_engagement_does_not_bridge_switches_gaps_pairs_or_stale_state():
+  messages = []
+  for t, model, pair, enabled in [(0, 'b', False, True), (.1, 'b', False, True),
+                                  (.2, 'a', False, True), (.3, 'a', False, True),
+                                  (1, 'a', False, True), (1.1, 'a', True, True),
+                                  (1.2, 'a', False, True), (1.3, 'a', False, False),
+                                  (1.4, 'a', False, False)]:
+    messages.extend([msg('selfdriveState', t, SimpleNamespace(enabled=enabled)), runtime_message(t, model, pair)])
+  messages.extend([runtime_message(2), runtime_message(2.1)])
+  route = measured_route(messages)
+  result = utilities._build_model_engagement({'routes': {'route-a': route}})
+  assert set(result) == {'a', 'b'}
+  assert result['b']['durationSeconds'] == pytest.approx(.1)
+  assert result['b']['engagedSeconds'] == pytest.approx(.1)
+  assert result['a']['durationSeconds'] == pytest.approx(.2)
+  assert result['a']['engagedSeconds'] == pytest.approx(.1)
+  assert result['a']['percent'] == 50
+
+
+@pytest.mark.skipif(not (MODULE_DIR.parents[1] / "common/model_stats.py").exists(), reason="Requires recorder PR 04")
+def test_runtime_engagement_rejects_future_state_and_invalid_output():
+  future = measured_route([msg('selfdriveState', 1, SimpleNamespace(enabled=True)), runtime_message(0), runtime_message(.1)])
+  invalid = runtime_message(.1)
+  invalid.valid = False
+  route = measured_route([msg('selfdriveState', 0, SimpleNamespace(enabled=True)), runtime_message(0), invalid])
+  assert utilities._build_model_engagement({'routes': {'future': future, 'invalid': route}}) == {}
+
+
+@pytest.mark.skipif(not (MODULE_DIR.parents[1] / "common/model_stats.py").exists(), reason="Requires recorder PR 04")
+def test_runtime_engagement_does_not_count_replayed_output_timestamps():
+  route = measured_route([msg('selfdriveState', 0, SimpleNamespace(enabled=True)),
+                          runtime_message(0), runtime_message(.1), runtime_message(0), runtime_message(.1)])
+  result = utilities._build_model_engagement({'routes': {'route-a': route}})
+  assert result['b']['durationSeconds'] == pytest.approx(.1)
+  assert result['b']['engagedSeconds'] == pytest.approx(.1)
+
+
+@pytest.mark.skipif(not (MODULE_DIR.parents[1] / "common/model_stats.py").exists(), reason="Requires recorder PR 04")
+def test_runtime_engagement_reports_measured_interval_coverage():
+  route = measured_route([msg('selfdriveState', 0, SimpleNamespace(enabled=True)), runtime_message(0), runtime_message(.1)])
+  result = utilities._build_model_engagement({'routes': {'route-a': route}})['b']
+  assert result['measurementScope'] == 'runtime_intervals'
+  assert result['coverage'] == 'partial'
+
+
+def test_background_runtime_reader_prefers_rlog_and_foreground_retains_qlog(tmp_path):
+  from cereal import log
+  qmessage = log.Event.new_message()
+  qmessage.logMonoTime = 1
+  qmessage.init('selfdriveState')
+  rmessage = log.Event.new_message()
+  rmessage.logMonoTime = 2
+  rmessage.init('starpilotModelV2')
+  (tmp_path / 'qlog').write_bytes(qmessage.to_bytes())
+  (tmp_path / 'rlog').write_bytes(rmessage.to_bytes())
+  route = {'segments': [{'path': str(tmp_path)}]}
+  assert [m.which() for m in utilities._iter_route_log_messages(route)] == ['selfdriveState']
+  assert [m.which() for m in utilities._iter_route_log_messages(route, prefer_runtime=True)] == ['starpilotModelV2']
+  (tmp_path / 'rlog').unlink()
+  assert [m.which() for m in utilities._iter_route_log_messages(route, prefer_runtime=True)] == ['selfdriveState']
+
+
+@pytest.mark.skipif(not (MODULE_DIR.parents[1] / "common/model_stats.py").exists(), reason="Requires recorder PR 04")
+def test_runtime_engagement_does_not_replace_latest_state_with_late_message():
+  route = measured_route([msg('selfdriveState', 0, SimpleNamespace(enabled=False)), runtime_message(0),
+                          msg('selfdriveState', .1, SimpleNamespace(enabled=False)), runtime_message(.1),
+                          msg('selfdriveState', .05, SimpleNamespace(enabled=True)), runtime_message(.15), runtime_message(.2)])
+  result = utilities._build_model_engagement({'routes': {'route-a': route}})['b']
+  assert result['engagedSeconds'] == 0
+  assert result['percent'] == 0
+
+
+@pytest.mark.parametrize('duration,engaged', [(10**400, 1), (1, 10**400), (float('inf'), 1), (1, True), (1, 2)])
+@pytest.mark.skipif(not (MODULE_DIR.parents[1] / "common/model_stats.py").exists(), reason="Requires recorder PR 04")
+def test_runtime_engagement_rejects_impossible_imported_exposure(duration, engaged):
+  identity = runtime_message(0).starpilotModelV2.runtimeIdentity
+  route = {'date': '2026-09-08T12:00:00', 'analysisComplete': True,
+           'modelEngagement': {identity: {'durationSeconds': duration, 'engagedSeconds': engaged}}}
+  assert utilities._build_model_engagement({'routes': {'route-a': route}}) == {}
