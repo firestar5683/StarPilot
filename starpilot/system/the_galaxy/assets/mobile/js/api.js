@@ -72,7 +72,7 @@ export const api = {
   getFlmWorkspace() { return requestOk("/api/flm/workspace", { cache: "no-store" }) },
   getFavoritesSlots() { return request("/api/favorites/slots", { cache: "no-store" }) },
   saveFavoritesSlots(slots) { return request("/api/favorites/slots", { method: "PUT", data: { slots } }) },
-  activateFavoriteAction(key) { return request("/api/favorites/action", { method: "POST", data: { key } }) },
+  activateFavoriteAction(key, value) { return request("/api/favorites/action", { method: "POST", data: { key, ...(value == null ? {} : { value }) } }) },
 
   getDeviceStatus() { return requestOk("/api/device/status") },
   getStats() { return requestOk("/api/stats") },

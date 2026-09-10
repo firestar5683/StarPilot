@@ -3371,11 +3371,7 @@ def _get_available_favorite_slot_options():
 
 
 def _get_available_controller_action_options():
-  options = [*_get_available_favorite_slot_options(), *(dict(option) for option in CONTROLLER_ACTION_OPTIONS)]
-  return sorted(options, key=lambda option: (
-    str(option.get("section") or "").casefold(),
-    str(option.get("label") or option.get("key") or "").casefold(),
-  ))
+  return _get_available_favorite_slot_options()
 
 
 def _favorite_slot_values(options):
@@ -5795,6 +5791,12 @@ def setup(app):
         if not isinstance(raw_slot, dict):
           continue
         key = str(raw_slot.get("key") or "").strip()
+        if key == CONTROLLER_ACTION_SET_SPEED:
+          from openpilot.starpilot.common.controller_actions import controller_speed_bounds
+          minimum, maximum = controller_speed_bounds(params.get_bool("IsMetric"))
+          value = raw_slot.get("value")
+          if type(value) not in (int, float) or not minimum <= value <= maximum:
+            return jsonify(error=f"Favorite #{idx + 1} speed must be between {minimum} and {maximum}."), 400
         if key and key not in eligible_keys:
           return jsonify(error=f"Favorite #{idx + 1} must use a Galaxy-exposed toggle or action."), 400
 
@@ -5813,6 +5815,7 @@ def setup(app):
         "slots": slots,
         "options": options,
         "values": _favorite_slot_values(options),
+        "is_metric": params.get_bool("IsMetric"),
       }), 200
 
     slots = normalize_favorite_slots(params.get(FAVORITE_SLOTS_PARAM), params=params, eligible_keys=eligible_keys)
@@ -5825,6 +5828,7 @@ def setup(app):
       "slots": slots,
       "options": options,
       "values": _favorite_slot_values(options),
+        "is_metric": params.get_bool("IsMetric"),
     }), 200
 
   @app.route("/api/favorites/values", methods=["GET"])
@@ -5840,7 +5844,7 @@ def setup(app):
     key = str(data.get("key") or "").strip()
     if not is_favorite_action_key(key):
       return jsonify({"error": "Unknown favorite action."}), 400
-    if not trigger_favorite_action(key, params_memory):
+    if not trigger_favorite_action(key, params_memory, params=params, value=data.get("value")):
       return jsonify({"error": "Favorite action failed."}), 400
     return jsonify({"message": "Favorite action sent."}), 200
 

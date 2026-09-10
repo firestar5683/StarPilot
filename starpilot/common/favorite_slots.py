@@ -3,6 +3,7 @@ from __future__ import annotations
 
 import functools
 import json
+import math
 from collections.abc import Callable, Iterable, Mapping
 from pathlib import Path
 from typing import Any
@@ -12,6 +13,9 @@ from openpilot.starpilot.common.longitudinal_personality_profiles import (
   PERSONALITY_PARKED_PARAM_KEYS,
   PERSONALITY_PROFILES_PARAM,
 )
+
+
+from openpilot.starpilot.common.controller_actions import CONTROLLER_ACTION_OPTIONS, CONTROLLER_ACTION_KEYS, CONTROLLER_ACTION_SET_SPEED
 
 
 FAVORITE_SLOTS_PARAM = "StarPilotFavoriteSlots"
@@ -24,6 +28,7 @@ FAVORITE_ACTION_DECEL_COUNTER = "FavoriteVirtualDecelCruiseCounter"
 FAVORITE_ACTION_ACCEL_COUNTER = "FavoriteVirtualAccelCruiseCounter"
 FAVORITE_ACTION_TRAFFIC_MODE_COUNTER = "FavoriteTrafficModeCounter"
 FAVORITE_ACTION_OPTIONS = (
+  *({**option, "action": "controller"} for option in CONTROLLER_ACTION_OPTIONS),
   {
     "key": FAVORITE_ACTION_DISTANCE_DECREASE,
     "label": "Distance - / SET",
@@ -442,16 +447,27 @@ def normalize_favorite_slots(raw_slots: Any, params: Params | None = None,
     ):
       key = None
 
-    label = str(raw_slot.get("label") or FAVORITE_ACTION_LABELS.get(key, "")).strip()
+    label = str(raw_slot.get("label") or FAVORITE_ACTION_LABELS.get(key or "", "")).strip()
     if len(label) > 32:
       label = label[:32].rstrip()
 
+    speed_value = None
+    if key == CONTROLLER_ACTION_SET_SPEED:
+      try:
+        candidate = float(raw_slot.get("value"))
+        if math.isfinite(candidate) and candidate > 0:
+          speed_value = candidate
+      except (TypeError, ValueError):
+        pass
+
     slots[idx] = {
-      "enabled": bool(raw_slot.get("enabled", False)),
+      "enabled": bool(raw_slot.get("enabled", False)) and (key != CONTROLLER_ACTION_SET_SPEED or speed_value is not None),
       "show_onroad": bool(raw_slot.get("show_onroad", False)),
       "key": key,
       "label": label if key else "",
     }
+    if key == CONTROLLER_ACTION_SET_SPEED:
+      slots[idx]["value"] = speed_value
 
   return slots
 
@@ -478,7 +494,10 @@ def request_starpilot_toggle_refresh(params_memory: Params | None = None) -> Non
   params_memory.put_bool("StarPilotTogglesUpdated", True)
 
 
-def trigger_favorite_action(key: str | None, params_memory: Params | None = None) -> bool:
+def trigger_favorite_action(key: str | None, params_memory: Params | None = None, *, params: Params | None = None, value=None) -> bool:
+  if key in CONTROLLER_ACTION_KEYS:
+    from openpilot.starpilot.system.wheel_controls.wheel_controlsd import execute_controller_key
+    return execute_controller_key(key, params or Params(return_defaults=True), params_memory or Params(memory=True), value=value)
   if not is_favorite_action_key(key):
     return False
 
@@ -493,7 +512,7 @@ def trigger_favorite_action(key: str | None, params_memory: Params | None = None
 
 
 def execute_favorite_key(key: str | None, params: Params | None = None, params_memory: Params | None = None, *,
-                         eligible_keys: Iterable[str] | None = None) -> bool:
+                         eligible_keys: Iterable[str] | None = None, value=None) -> bool:
   params = params or Params(return_defaults=True)
   eligible_keys = set(eligible_keys) if eligible_keys is not None else None
   if not favorite_key_is_valid(params, key, eligible_keys=eligible_keys):
@@ -502,7 +521,7 @@ def execute_favorite_key(key: str | None, params: Params | None = None, params_m
     return False
 
   if is_favorite_action_key(key):
-    return trigger_favorite_action(key, params_memory)
+    return trigger_favorite_action(key, params_memory, params=params, value=value)
 
   if is_enum_param(key):
     return cycle_enum_parameter(key, params, params_memory)
@@ -533,7 +552,7 @@ def toggle_favorite_slot(slot_index: int, params: Params | None = None, params_m
   key = slot.get("key")
   if not slot.get("enabled") or not key:
     return False
-  return execute_favorite_key(key, params, params_memory, eligible_keys=eligible_keys)
+  return execute_favorite_key(key, params, params_memory, eligible_keys=eligible_keys, value=slot.get("value"))
 
 
 def unassign_favorite_slot(slot_index: int, params: Params | None = None, params_memory: Params | None = None, *,

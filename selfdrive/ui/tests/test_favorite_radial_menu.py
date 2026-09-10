@@ -933,3 +933,53 @@ def test_render_boolean_toggle_switch_and_picker_badges(monkeypatch):
   assert "TOGGLE" in drawn_texts
   assert "2 STATES" in drawn_texts
   assert "ACTION" in drawn_texts
+
+
+
+def test_speed_assignment_requires_new_galaxy_without_disabling_existing_slot():
+  from openpilot.starpilot.common.controller_actions import CONTROLLER_ACTION_SET_SPEED
+
+  speed_option = {"key": CONTROLLER_ACTION_SET_SPEED, "label": "Set Speed To", "value_type": "speed", "default_value": 30}
+  menu, params, _memory = _menu([0.0], options=[speed_option, {"key": "FeatureToggle", "label": "Feature Toggle"}])
+  params.put(FAVORITE_SLOTS_PARAM, [{"enabled": True, "show_onroad": True, "key": "FeatureToggle", "label": "Feature Toggle"}])
+  menu._open_picker(0)
+
+  assert CONTROLLER_ACTION_SET_SPEED in menu._available_option_keys
+  assert [option["key"] for option in menu._picker_options] == ["FeatureToggle"]
+  menu._assign_option(speed_option)
+  assert params.get(FAVORITE_SLOTS_PARAM)[0]["key"] == "FeatureToggle"
+  assert menu.state == FavoriteRadialMenu.STATE_PICKER
+
+
+def test_saved_speed_favorite_retains_value_and_displays_current_unit():
+  from openpilot.starpilot.common.controller_actions import CONTROLLER_ACTION_SET_SPEED
+
+  menu, params, _memory = _menu([0.0], options=[{"key": CONTROLLER_ACTION_SET_SPEED, "label": "Set Speed To", "value_type": "speed"}])
+  params.put(FAVORITE_SLOTS_PARAM, [{"enabled": True, "show_onroad": True, "key": CONTROLLER_ACTION_SET_SPEED, "label": "Set Speed To", "value": 42}])
+  menu._open_radial()
+  for metric, unit in [(False, "mph"), (True, "km/h")]:
+    params.put_bool("IsMetric", metric)
+    menu._layout(rl.Rectangle(0, 0, 2160, 1080))
+    slot = menu._slots[0]
+    assert menu._slot_is_configured(slot)
+    assert slot["value"] == 42
+    assert slot["label"] == f"Set Speed To 42 {unit}"
+  assert params.get(FAVORITE_SLOTS_PARAM)[0]["label"] == "Set Speed To"
+
+
+
+def test_native_saved_speed_favorite_tap_dispatches_configured_value(monkeypatch):
+  from openpilot.starpilot.common.controller_actions import CONTROLLER_ACTION_SET_SPEED
+  from openpilot.starpilot.system.wheel_controls import wheel_controlsd
+
+  menu, params, memory = _menu([0.0], options=[{"key": CONTROLLER_ACTION_SET_SPEED, "label": "Set Speed To", "value_type": "speed"}])
+  slot = {"enabled": True, "show_onroad": True, "key": CONTROLLER_ACTION_SET_SPEED, "label": "Set Speed To", "value": 42}
+  params.put(FAVORITE_SLOTS_PARAM, [slot])
+  dispatched = []
+  monkeypatch.setattr(wheel_controlsd, "execute_controller_key", lambda key, params, memory, **kwargs: dispatched.append((key, kwargs["value"])) or True)
+  rect = rl.Rectangle(0, 0, 2160, 1080)
+  _tap(menu, rect, menu.corner_center(rect))
+  _tap(menu, rect, menu.slot_centers(rect)[0])
+
+  assert dispatched == [(CONTROLLER_ACTION_SET_SPEED, 42)]
+  assert params.get(FAVORITE_SLOTS_PARAM) == [slot]

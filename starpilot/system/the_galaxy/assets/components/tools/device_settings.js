@@ -1,4 +1,5 @@
 import { html, reactive } from "/assets/vendor/arrow-core.js"
+import { api } from "/assets/mobile/js/api.js"
 import {
   formatProfileSpeed,
   personalityProfileParamKey,
@@ -765,6 +766,7 @@ function normalizeFavoriteSlots(slots) {
     if (!slot || typeof slot !== "object") return
     const key = slot.key ? String(slot.key) : null
     normalized[index] = {
+      ...slot,
       enabled: !!slot.enabled,
       show_onroad: !!slot.show_onroad,
       key,
@@ -803,7 +805,9 @@ function isFavoriteActionOption(option) {
 
 function filteredFavoriteOptions(index) {
   const filter = state.favoriteFilters[index] || ""
-  return normalizeFavoriteOptions(state.favoriteOptions).filter(opt => favoriteOptionMatchesFilter(opt, filter))
+  const selectedKey = state.favoriteSlots[index]?.key
+  return normalizeFavoriteOptions(state.favoriteOptions).filter(opt =>
+    (opt.value_type !== "speed" || opt.key === selectedKey) && favoriteOptionMatchesFilter(opt, filter))
 }
 
 function populateFavoriteSelect(index, selectEl = null) {
@@ -1005,7 +1009,14 @@ async function saveFavoriteSlots(slots) {
 function updateFavoriteSlot(index, patch) {
   const slots = normalizeFavoriteSlots(state.favoriteSlots)
   const current = slots[index] || defaultFavoriteSlots()[0]
+  const option = state.favoriteOptions.find(opt => opt.key === patch.key)
+  if (patch.key !== current.key && option?.value_type === "speed") {
+    showParamSnackbar("Configure Set Speed favorites in New Galaxy.", "error")
+    scheduleSyncInputs()
+    return
+  }
   const nextSlot = { ...current, ...patch }
+  if (patch.key !== undefined && patch.key !== current.key) delete nextSlot.value
 
   if (!nextSlot.key) {
     nextSlot.label = ""
@@ -1075,22 +1086,12 @@ async function updateFavoriteValue(key, checked, sourceEl = null) {
   }
 }
 
-async function activateFavoriteAction(key) {
+async function activateFavoriteAction(key, value) {
   try {
-    const res = await fetch("/api/favorites/action", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key }),
-    })
-    const data = await res.json()
-
-    if (res.ok) {
-      showParamSnackbar(data.message || "Favorite action sent.")
-    } else {
-      showParamSnackbar(data.error || "Failed to send favorite action", "error")
-    }
-  } catch (e) {
-    showParamSnackbar("Network error — is the device reachable?", "error")
+    const data = await api.activateFavoriteAction(key, value)
+    showParamSnackbar(data.message || "Favorite action sent.")
+  } catch (error) {
+    showParamSnackbar(error.message || "Failed to send favorite action", "error")
   }
 }
 
@@ -2339,6 +2340,7 @@ function renderFavoriteSlotsPanel() {
 
   return html`
     <div class="ds-favorites-panel">
+      <div class="ds-row-desc">Configure Set Speed favorites in New Galaxy. Saved speeds use the current mph/km/h setting.</div>
       ${quickFavorites.length ? html`
         <div class="ds-favorite-quick-grid">
           ${quickFavorites.map(favorite => {
@@ -2349,7 +2351,7 @@ function renderFavoriteSlotsPanel() {
             const quickCopy = html`
               <div class="ds-favorite-quick-copy">
                 <span class="ds-favorite-quick-slot">Favorite #${favorite.index + 1}</span>
-                <span class="ds-favorite-quick-title">${selectedOption.label || favorite.slot.label || selectedKey}</span>
+                <span class="ds-favorite-quick-title">${selectedOption.label || favorite.slot.label || selectedKey}${selectedOption.value_type === "speed" ? ` ${favorite.slot.value} ${vehicleSpeedUnit(state.values)}` : ""}</span>
                 ${selectedOption.section ? html`<span class="ds-favorite-quick-section">${selectedOption.section}</span>` : ""}
                 ${selectedOption.description ? html`<span class="ds-favorite-quick-desc">${selectedOption.description}</span>` : ""}
               </div>
@@ -2360,7 +2362,7 @@ function renderFavoriteSlotsPanel() {
                 <button
                   type="button"
                   class="ds-favorite-quick-card ds-favorite-action-card"
-                  @click="${() => activateFavoriteAction(selectedKey)}">
+                  @click="${() => activateFavoriteAction(selectedKey, favorite.slot.value)}">
                   ${quickCopy}
                   <span class="ds-favorite-action-chip">Press</span>
                 </button>
@@ -2386,14 +2388,14 @@ function renderFavoriteSlotsPanel() {
         const selectedOption = optionByKey.get(slot.key)
         const selectedKey = slot.key || ""
         const favoriteFilter = state.favoriteFilters[index] || ""
-        const filteredOptions = options.filter(opt => favoriteOptionMatchesFilter(opt, favoriteFilter))
+        const filteredOptions = filteredFavoriteOptions(index)
 
         return html`
           <div class="ds-favorite-card">
             <div class="ds-favorite-card-header">
               <div>
                 <div class="ds-row-label">Favorite #${index + 1}</div>
-                <div class="ds-row-desc">${selectedOption?.section || "No toggle selected"}</div>
+                <div class="ds-row-desc">${selectedOption?.section || "No toggle selected"}${selectedOption?.value_type === "speed" ? ` · ${slot.value} ${vehicleSpeedUnit(state.values)}` : ""}</div>
               </div>
               <label class="ds-favorite-switch">
                 <span>Enabled</span>

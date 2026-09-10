@@ -1,4 +1,5 @@
 import { api } from "../api.js"
+import { openControllerActionPicker } from "../../../components/tools/controller_action_picker.js"
 import { usePolling } from "../composables.js"
 import { GxNotice } from "./GxNotice.js"
 
@@ -17,7 +18,7 @@ export const WheelControls = {
     }
   },
   created() { this.poll = usePolling(() => this.refresh(), { interval: 750 }); this.poll.start() },
-  beforeUnmount() { this.poll?.destroy() },
+  beforeUnmount() { this.closeActionPicker?.(); this.poll?.destroy() },
   methods: {
     async refresh() {
       try {
@@ -68,6 +69,15 @@ export const WheelControls = {
     configured(slot) { return !!slot?.enabled && !!slot?.key },
     optionByKey(key) { return this.controllerOptions.find((o) => o.key === key) || null },
     isSpeedSlot(slot) { return this.optionByKey(slot?.key)?.value_type === "speed" },
+    chooseAction(i, event) {
+      this.closeActionPicker = openControllerActionPicker({
+        theme: "dipper", index: i, trigger: event.currentTarget,
+        getOptions: () => this.controllerOptions,
+        getSlot: () => this.controllerSlots[i],
+        isDisabled: () => this.disabled(),
+        onSelect: key => this.onActionSelect(i, { target: { value: key } }),
+      })
+    },
     onActionSelect(i, e) {
       if (this.disabled()) return
       const key = String(e.target.value || "")
@@ -158,10 +168,10 @@ export const WheelControls = {
               </div>
               <button type="button" class="gx-btn gx-btn--tonal" :disabled="!slot.enabled || disabled() || testing" @click="learn(actionSlotIndex(i))">{{ listenLabel(actionSlotIndex(i)) }}</button>
             </div>
-            <select class="gx-field gx-field--full" :value="String(slot.key || '')" :disabled="disabled()" @change="onActionSelect(i, $event)">
-              <option value="">Not configured</option>
-              <option v-for="opt in controllerOptions" :key="opt.key" :value="opt.key">{{ opt.label }}</option>
-            </select>
+            <button type="button" class="gx-btn gx-btn--tonal" style="white-space:normal; height:auto; min-height:44px;"
+              :data-controller-action-slot="i" aria-haspopup="dialog" :disabled="disabled()" @click="chooseAction(i, $event)">
+              {{ optionByKey(slot.key)?.label || slot.label || slot.key || 'Not configured' }} · Choose action
+            </button>
             <div v-if="isSpeedSlot(slot)" class="gx-row" style="border:none; padding:0;">
               <div class="gx-row__info">
                 <span class="gx-row__label">Set speed ({{ speedUnit }})</span>

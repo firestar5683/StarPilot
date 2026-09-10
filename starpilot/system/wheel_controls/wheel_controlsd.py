@@ -31,75 +31,21 @@ ENABLED_PARAM = "WheelControlsEnabled"
 JOYSTICK_DEVICE_PARAM = "JoystickControlDevice"
 CONTROLLER_ACTION_SLOT_COUNT = 10
 MAPPING_SLOT_COUNT = FAVORITE_SLOT_COUNT + CONTROLLER_ACTION_SLOT_COUNT
-CONTROLLER_ACTION_SET_SPEED = "__starpilot_controller_action__:set_speed"
-CONTROLLER_ACTION_SELFIE = "__starpilot_controller_action__:selfie"
-CONTROLLER_ACTION_BOOKMARK = "__starpilot_controller_action__:bookmark"
-CONTROLLER_ACTION_PULSE_AND_GLIDE = "__starpilot_controller_action__:pulse_and_glide"
-CONTROLLER_ACTION_FORCE_COAST = "__starpilot_controller_action__:force_coast"
-CONTROLLER_ACTION_TOGGLE_AOL = "__starpilot_controller_action__:toggle_aol"
-CONTROLLER_ACTION_ENGAGE = "__starpilot_controller_action__:engage_openpilot"
-CONTROLLER_ACTION_DISENGAGE = "__starpilot_controller_action__:disengage_openpilot"
-CONTROLLER_ACTION_COUNTERS = {
-  CONTROLLER_ACTION_BOOKMARK: "WheelButtonBookmarkCounter",
-  CONTROLLER_ACTION_PULSE_AND_GLIDE: "WheelControlPulseGlideCounter",
-  CONTROLLER_ACTION_FORCE_COAST: "WheelControlForceCoastCounter",
-  CONTROLLER_ACTION_TOGGLE_AOL: "WheelControlAOLCounter",
-  CONTROLLER_ACTION_ENGAGE: "WheelControlEngageCounter",
-  CONTROLLER_ACTION_DISENGAGE: "WheelControlDisengageCounter",
-}
-CONTROLLER_ACTION_OPTIONS = (
-  {
-    "key": CONTROLLER_ACTION_SET_SPEED,
-    "label": "Set Speed To",
-    "description": "Immediately changes the software-controlled cruise set speed while engaged.",
-    "section": "Controller Actions",
-    "value_type": "speed",
-    "default_value": 30,
-  },
-  {
-    "key": CONTROLLER_ACTION_SELFIE,
-    "label": "Take Comma Selfie",
-    "description": "Captures the driver camera and saves it in Sentry history.",
-    "section": "Controller Actions",
-  },
-  {
-    "key": CONTROLLER_ACTION_BOOKMARK,
-    "label": "Bookmark",
-    "description": "Creates a driving bookmark without changing the on-screen Favorites.",
-    "section": "Controller Actions",
-  },
-  {
-    "key": CONTROLLER_ACTION_PULSE_AND_GLIDE,
-    "label": "Pulse and Glide",
-    "description": "Toggles Pulse and Glide using the same transient control as a mapped vehicle button.",
-    "section": "Controller Actions",
-  },
-  {
-    "key": CONTROLLER_ACTION_FORCE_COAST,
-    "label": "Force Coasting",
-    "description": "Toggles forced coasting using the same transient control as a mapped vehicle button.",
-    "section": "Controller Actions",
-  },
-  {
-    "key": CONTROLLER_ACTION_TOGGLE_AOL,
-    "label": "Toggle AOL",
-    "description": "Toggles Always On Lateral like the vehicle LKAS button; it does not change the AOL setting.",
-    "section": "Controller Actions",
-  },
-  {
-    "key": CONTROLLER_ACTION_ENGAGE,
-    "label": "Engage Openpilot",
-    "description": "Requests engagement through the normal openpilot readiness and safety checks.",
-    "section": "Controller Actions",
-  },
-  {
-    "key": CONTROLLER_ACTION_DISENGAGE,
-    "label": "Disengage Openpilot",
-    "description": "Immediately disengages openpilot like the vehicle cancel button.",
-    "section": "Controller Actions",
-  },
+from openpilot.starpilot.common.controller_actions import (
+  CONTROLLER_ACTION_CYCLE_PERSONALITY,
+  CONTROLLER_ACTION_SET_SPEED,
+  CONTROLLER_ACTION_SELFIE,
+  CONTROLLER_ACTION_BOOKMARK,
+  CONTROLLER_ACTION_PULSE_AND_GLIDE,
+  CONTROLLER_ACTION_FORCE_COAST,
+  CONTROLLER_ACTION_TOGGLE_AOL,
+  CONTROLLER_ACTION_ENGAGE,
+  CONTROLLER_ACTION_DISENGAGE,
+  CONTROLLER_ACTION_COUNTERS,
+  CONTROLLER_ACTION_OPTIONS,
+  CONTROLLER_ACTION_KEYS,
+  controller_speed_bounds,
 )
-CONTROLLER_ACTION_KEYS = {option["key"] for option in CONTROLLER_ACTION_OPTIONS}
 LEARN_TIMEOUT_SECONDS = 20.0
 DEVICE_SCAN_INTERVAL_SECONDS = 1.0
 STATUS_INTERVAL_SECONDS = 0.5
@@ -281,10 +227,6 @@ def set_controller_action_slot(index: int, key: str | None, label: str, params: 
   slots = load_controller_action_slots(params, eligible_keys)
   slots[index] = {"enabled": key is not None, "key": key, "label": label if key else "", "value": value}
   return save_controller_action_slots(slots, params, eligible_keys=eligible_keys)
-
-
-def controller_speed_bounds(is_metric: bool) -> tuple[int, int]:
-  return (8, 145) if is_metric else (5, 90)
 
 
 def set_controller_cruise_speed(value: Any, params: Params, params_memory: Params) -> bool:
@@ -489,23 +431,70 @@ def execute_favorite_slot(slot: int, params: Params, params_memory: Params) -> b
   return toggle_favorite_slot(slot, params, params_memory)
 
 
+def cycle_driving_personality(params: Params) -> bool:
+  """Select the next native personality, without synthesizing cruise/Traffic inputs."""
+  from cereal import car, log
+
+  if params.get_bool("SafeMode"):
+    return False
+  try:
+    # Match native UI capability selection; never use parked CP while on-road.
+    cp_bytes = params.get("CarParams" if params.get_bool("IsOnroad") else "CarParamsPersistent")
+    if not cp_bytes:
+      return False
+    with car.CarParams.from_bytes(cp_bytes) as cp:
+      available = params.get_bool("AlphaLongitudinalEnabled") if cp.alphaLongitudinalAvailable else cp.openpilotLongitudinalControl
+    if not available:
+      return False
+
+    # Typed Params decoding truncates fractional ints and defaults corrupt text.
+    # Inspect the stored token so malformed selections cannot become Aggressive.
+    current = Path(params.get_param_path("LongitudinalPersonality")).read_bytes()
+    profiles = tuple(int(profile) for profile in (
+      log.LongitudinalPersonality.aggressive,
+      log.LongitudinalPersonality.standard,
+      log.LongitudinalPersonality.relaxed,
+    ))
+    tokens = tuple(str(profile).encode("ascii") for profile in profiles)
+    if current not in tokens:
+      return False
+    next_personality = profiles[(tokens.index(current) + 1) % len(profiles)]
+  except Exception:
+    # Missing/malformed CP or selection: do not change effective driving state.
+    return False
+
+  if params.get_bool("SafeMode"):
+    return False
+  # Synchronous persistence lets successive HID events see the preceding change.
+  # selfdrived's existing Params reader publishes this selection; Traffic retains
+  # its independent override. No toggle refresh or virtual speed input is needed.
+  params.put_int("LongitudinalPersonality", next_personality)
+  return True
+
+
 def execute_controller_action(index: int, params: Params, params_memory: Params) -> bool:
-  from openpilot.starpilot.common.favorite_slots import execute_favorite_key
   slots = load_controller_action_slots(params)
   if not 0 <= index < len(slots):
     return False
   slot = slots[index]
   if not slot.get("enabled"):
     return False
-  if slot.get("key") == CONTROLLER_ACTION_SET_SPEED:
-    return set_controller_cruise_speed(slot.get("value"), params, params_memory)
-  if slot.get("key") == CONTROLLER_ACTION_SELFIE:
+  return execute_controller_key(slot.get("key"), params, params_memory, value=slot.get("value"))
+
+
+def execute_controller_key(key, params: Params, params_memory: Params, *, value=None) -> bool:
+  from openpilot.starpilot.common.favorite_slots import execute_favorite_key
+  if key == CONTROLLER_ACTION_CYCLE_PERSONALITY:
+    return cycle_driving_personality(params)
+  if key == CONTROLLER_ACTION_SET_SPEED:
+    return set_controller_cruise_speed(value, params, params_memory)
+  if key == CONTROLLER_ACTION_SELFIE:
     return request_comma_selfie()
-  if slot.get("key") in (CONTROLLER_ACTION_ENGAGE, CONTROLLER_ACTION_DISENGAGE) and not params.get_bool("IsOnroad"):
+  if key in (CONTROLLER_ACTION_ENGAGE, CONTROLLER_ACTION_DISENGAGE) and not params.get_bool("IsOnroad"):
     return False
-  if slot.get("key") in CONTROLLER_ACTION_COUNTERS:
-    return trigger_controller_action(slot["key"], params_memory)
-  return execute_favorite_key(slot.get("key"), params, params_memory)
+  if key in CONTROLLER_ACTION_COUNTERS:
+    return trigger_controller_action(key, params_memory)
+  return execute_favorite_key(key, params, params_memory)
 
 
 def execute_mapping_slot(slot: int, params: Params, params_memory: Params) -> bool:

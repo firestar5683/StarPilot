@@ -9,6 +9,7 @@ from typing import Any
 
 import pyray as rl
 
+from openpilot.starpilot.common.controller_actions import CONTROLLER_ACTION_SET_SPEED
 from openpilot.starpilot.common.favorite_slots import (
   FAVORITE_SLOT_COUNT,
   get_favorite_enum_state,
@@ -257,6 +258,9 @@ class FavoriteRadialMenu:
       key = slot.get("key")
       if key in self._available_option_labels:
         slot["label"] = self._available_option_labels[key]
+      if key == CONTROLLER_ACTION_SET_SPEED and slot.get("value") is not None:
+        unit = "km/h" if self._params.get_bool("IsMetric") else "mph"
+        slot["label"] = f"Set Speed To {slot['value']:g} {unit}"
     self._layout_slot_rects()
     self._layout_picker_rects()
 
@@ -590,7 +594,9 @@ class FavoriteRadialMenu:
 
   def _open_picker(self, slot_index: int) -> None:
     options = self._refresh_option_catalog()
-    self._picker_options = options or []
+    # This on-road picker has no numeric editor. Keep speed actions in the
+    # catalogue for activating saved slots, but configure their value in Galaxy.
+    self._picker_options = [option for option in (options or []) if option.get("value_type") != "speed"]
     self._selected_slot = slot_index
     self._editing_slot = None
     self._picker_page = 0
@@ -602,7 +608,7 @@ class FavoriteRadialMenu:
       return
 
     key = str(option.get("key") or "").strip()
-    if not key:
+    if not key or key == CONTROLLER_ACTION_SET_SPEED or option.get("value_type") == "speed":
       return
 
     slots = load_favorite_slots(self._params, eligible_keys=self._available_option_keys)
@@ -1013,7 +1019,7 @@ class FavoriteRadialMenu:
     title = f"Assign Favorite {self._selected_slot + 1}" if self._selected_slot is not None else "Assign Favorite"
     title_pos = rl.Vector2(self._drawer_rect.x + 36 * scale, self._drawer_rect.y + 26 * scale)
     self._draw_text(self._font(bold=True), title, title_pos, int(50 * scale), self._TEXT)
-    subtitle = "Choose a shortcut"
+    subtitle = "Set Speed: configure in New Galaxy"
     self._draw_text(
       self._font(bold=False), subtitle,
       rl.Vector2(title_pos.x, title_pos.y + 72 * scale), int(26 * scale), self._MUTED_TEXT,
