@@ -5171,6 +5171,8 @@ class GalaxySlugMiddleware:
 
 
 def setup(app):
+  from openpilot.starpilot.assets.model_sizes import ModelSizes
+  model_sizes = ModelSizes()
   if not isinstance(app.wsgi_app, GalaxySlugMiddleware):
     app.wsgi_app = GalaxySlugMiddleware(app.wsgi_app)
 
@@ -6887,7 +6889,10 @@ def setup(app):
     if params.get_bool("IsOnroad"):
       return jsonify({"error": "Cannot change active models while driving."}), 403
 
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    # An explicit empty model disables Active Big; malformed values must not.
+    if not isinstance(data, dict) or not isinstance(data.get("model"), str):
+      return jsonify({"error": "An explicit model string is required."}), 400
     profile = str(data.get("profile") or "").strip().lower()
     if profile not in ("small", "big"):
       return jsonify({"error": "Model profile must be 'small' or 'big'."}), 400
@@ -7529,7 +7534,9 @@ def setup(app):
       })
 
     models.sort(key=lambda model: (model["series"].lower(), model["label"].lower()))
-    return models
+    return model_sizes.annotate(models, MODELS_PATH,
+                                Path(__file__).resolve().parents[3] / "selfdrive/modeld/models/driving_tinygrad.pkl",
+                                artifact_metadata, model_accelerator_artifact_filename)
 
   @app.route("/api/routes", methods=["GET"])
   def list_routes():
