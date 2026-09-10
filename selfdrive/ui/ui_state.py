@@ -49,6 +49,7 @@ class UIState:
         "liveCalibration",
         "radarState",
         "deviceState",
+        "chestnutState",
         "pandaStates",
         "carParams",
         "driverMonitoringState",
