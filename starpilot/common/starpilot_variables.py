@@ -1599,6 +1599,10 @@ class StarPilotVariables:
       "TeslaCoopSteering",
       condition=toggle.car_make == "tesla" and toggle.car_model == TESLA_CAR.TESLA_MODEL_3,
     )
+    toggle.tesla_wake_on_can = self.get_value(
+      "TeslaWakeOnCAN",
+      condition=toggle.car_make == "tesla" and toggle.car_model in {TESLA_CAR.TESLA_MODEL_3, TESLA_CAR.TESLA_MODEL_Y, TESLA_CAR.TESLA_MODEL_X},
+    )
     toggle.rivian_angle_control = self.get_value("RivianAngleControl", condition=toggle.car_make == "rivian")
 
     toggle.tethering_config = self.get_value("TetheringEnabled", cast=float)

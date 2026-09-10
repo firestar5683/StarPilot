@@ -62,8 +62,9 @@ export const api = {
     return res.ok ? parse(res) : {}
   },
 
-  updateParam({ key, value, label }) {
+  updateParam({ key, value, label, confirmedPandaFirmwareFlash }) {
     const data = { key, value }
+    if (confirmedPandaFirmwareFlash === true) data.confirmedPandaFirmwareFlash = true
     if (label) data.label = label
     return request("/api/params", { method: "PUT", data })
   },

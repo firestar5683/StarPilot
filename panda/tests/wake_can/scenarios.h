@@ -3,7 +3,12 @@ static void tick(void) { timer.SR = 1U; tick_handler(); }
 static void second(void) { for (int i=0; i<8; i++) tick(); }
 static CANPacket_t packet(unsigned bus, unsigned addr, unsigned dlc, unsigned state, unsigned counter) {
   CANPacket_t p = {0}; p.bus=bus; p.addr=addr; p.data_len_code=dlc;
-  p.data[0]=state<<5; p.data[6]=counter<<4; return p;
+  p.data[0]=state<<5; p.data[6]=counter<<4;
+  // Tesla DBC checksum: address bytes plus seven payload bytes, modulo 256.
+  unsigned sum=(addr & 255U)+(addr >> 8U);
+  for (unsigned i=0; i<7; i++) sum+=p.data[i];
+  p.data[7]=sum & 255U;
+  return p;
 }
 static void tesla(unsigned state, unsigned counter) {
   CANPacket_t p=packet(0,0x221,8,state,counter); ignition_can_hook(&p);
@@ -36,10 +41,49 @@ static void invalid_case(void) {
   tesla(0,7); assert(wake_on_can && wake_on_can_cnt==2); // jump
   tesla(0,8); assert(!wake_on_can && wake_on_can_cnt==0); // reacquire after jump
   tesla(2,9); assert(wake_on_can);
-  // Checksum is NOT validated in this stock/reference path; explicit limitation.
-  p=packet(0,0x221,8,2,10); p.data[7]=0xFF; ignition_can_hook(&p);
-  assert(wake_on_can_cnt==0);
+  wake_on_can_cnt=2;
+  p=packet(0,0x221,8,2,10); p.data[7]^=1; ignition_can_hook(&p);
+  assert(wake_on_can && wake_on_can_cnt==2); // invalid frames cannot refresh wake
+  tesla(0,11); assert(wake_on_can && wake_on_can_cnt==2); // valid frame primes again
+  tesla(0,12); assert(!wake_on_can && wake_on_can_cnt==0);
 }
+
+static void disabled_case(void) {
+  for (unsigned state=0; state<4; state++) {
+    pair(state);
+    assert(!wake_on_can); // default and other manufacturers never gain Tesla wake
+    assert(ignition_can == (state==3)); // stock DRIVE remains independent of opt-in
+  }
+}
+static void checksum_case(void) {
+  CANPacket_t p=packet(0,0x221,8,2,14);
+  assert(p.data[7]==0x43); // address 0x23 + ACCESSORY 0x40 + counter 0xE0
+  p.data[7]^=1; ignition_can_hook(&p);
+  tesla(2,15); assert(!wake_on_can); // bad checksum cannot prime a wake
+  tesla(2,0); assert(wake_on_can); // two valid consecutive frames, including wrap
+  tesla(0,1); assert(!wake_on_can);
+  // Corruption in any payload/checksum byte cannot create a wake or prime it.
+  for (unsigned i=0; i<8; i++) {
+    p=packet(0,0x221,8,2,2); p.data[i]^=1; ignition_can_hook(&p);
+    assert(!wake_on_can);
+    tesla(2,3); assert(!wake_on_can);
+    tesla(0,4); assert(!wake_on_can);
+  }
+  p=packet(0,0x221,8,2,5); p.extended=1; ignition_can_hook(&p);
+  assert(!wake_on_can);
+  tesla(2,6); assert(!wake_on_can);
+  tesla(2,7); assert(wake_on_can);
+  wake_on_can_cnt=2;
+  for (unsigned i=0; i<4; i++) {
+    p=packet(0,0x221,8,2,8+i); p.data[7]^=1; ignition_can_hook(&p);
+    second();
+  }
+  assert(!wake_on_can); // checksum-invalid traffic ages out
+  // Do not change the stock DRIVE decoder while hardening the extra wake path.
+  p=packet(0,0x221,8,3,12); p.data[7]^=1; ignition_can_hook(&p);
+  assert(ignition_can && !wake_on_can);
+}
+
 static void stale_case(void) {
   pair(2);
   for (unsigned i=1; i<=3; i++) { second(); assert(wake_on_can && wake_on_can_cnt==i); }
@@ -218,7 +262,9 @@ static void trace_case(void) {
 }
 int main(int argc,char **argv) {
   assert(argc==2);
-  if (!strcmp(argv[1],"states")) wake_case();
+  if (!strcmp(argv[1],"disabled")) disabled_case();
+  else if (!strcmp(argv[1],"checksum")) checksum_case();
+  else if (!strcmp(argv[1],"states")) wake_case();
   else if (!strcmp(argv[1],"invalid")) invalid_case();
   else if (!strcmp(argv[1],"stale")) stale_case();
   else if (!strcmp(argv[1],"watchdog")) watchdog_case();

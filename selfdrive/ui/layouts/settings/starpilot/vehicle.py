@@ -6,6 +6,7 @@ import time
 
 import pyray as rl
 
+from openpilot.selfdrive.pandad.panda_firmware import supports_tesla_can_wake, validate_tesla_can_wake_firmware
 from openpilot.system.hardware import HARDWARE
 from openpilot.system.ui.lib.application import gui_app, FontWeight
 from openpilot.system.ui.lib.multilang import tr, tr_noop
@@ -405,6 +406,14 @@ class VehicleSettingsManagerView(PanelManagerView):
         "set_state": lambda s: self._controller._on_toggle("RemapCancelToDistance"),
       })
 
+    if supports_tesla_can_wake(self._controller._params):
+      toggles.append({
+        "title": tr("Wake on CAN"),
+        "subtitle": tr("Wake from Tesla CAN activity. Requires a Panda flash and reboot while parked."),
+        "get_state": lambda: self._controller._params.get_bool("TeslaWakeOnCAN"),
+        "set_state": lambda s: self._controller._on_panda_firmware_toggle("TeslaWakeOnCAN", tr("Wake on CAN requires a Panda firmware update and device reboot.")),
+      })
+
     if cs.isHKGCanFd and cs.hasOpenpilotLongitudinal:
       toggles.append({
         "title": tr("EV Remote Climate"),
@@ -683,8 +692,27 @@ class StarPilotVehicleSettingsLayout(_SettingsPage):
       self._manager_view._rebuild_toggle_grid()
 
   def _on_panda_firmware_toggle(self, param_key: str, prompt: str):
+    def allowed():
+      return not self._params.get_bool("IsOnroad") and (param_key != "TeslaWakeOnCAN" or supports_tesla_can_wake(self._params))
+
+    if not allowed():
+      gui_app.push_widget(alert_dialog(tr("Panda firmware changes require a supported vehicle and must be made while parked.")))
+      return
+
     current = self._params.get_bool(param_key) if self._params.get(param_key) is not None else False
     new_state = not current
+
+    def firmware_available():
+      if param_key == "TeslaWakeOnCAN":
+        try:
+          validate_tesla_can_wake_firmware(self._params, new_state)
+        except RuntimeError as exc:
+          gui_app.push_widget(alert_dialog(str(exc)))
+          return False
+      return True
+
+    if not firmware_available():
+      return
 
     def flash_and_reboot():
       self._params_memory.put_bool("FlashPanda", True)
@@ -693,7 +721,7 @@ class StarPilotVehicleSettingsLayout(_SettingsPage):
       HARDWARE.reboot()
 
     def on_confirm(res):
-      if res != DialogResult.CONFIRM:
+      if res != DialogResult.CONFIRM or not allowed() or not firmware_available():
         starpilot_state.update(force=True)
         self._manager_view._rebuild_toggle_grid()
         return

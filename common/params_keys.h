@@ -362,6 +362,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"IgnoreIgnitionLine", {PERSISTENT, BOOL, "0", "0", 0, SETTINGS_SIMPLE}},
     {"LongPitch", {PERSISTENT, BOOL, "1", "0", 2, SETTINGS_SIMPLE}},
     {"RemoteStartBootsComma", {PERSISTENT, BOOL, "0", "0", 0, SETTINGS_SIMPLE}},
+    {"TeslaWakeOnCAN", {PERSISTENT, BOOL, "0", "0", 0, SETTINGS_SIMPLE}},
     {"RemapCancelToDistance", {PERSISTENT, BOOL, "0", "0", 0, SETTINGS_SIMPLE}},
     {"NAPAdaptiveAccel", {PERSISTENT, BOOL, "1", "1", 0, SETTINGS_SIMPLE}},
     {"NAPFollowDistance", {PERSISTENT, INT, "4", "4"}},

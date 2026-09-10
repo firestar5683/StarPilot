@@ -7,6 +7,8 @@ import {
 import { FavoritesEditor } from "./FavoritesEditor.js"
 import { t } from "../i18n.js"
 
+const PANDA_FIRMWARE_TOGGLE_KEYS = new Set(["IgnoreIgnitionLine", "RemoteStartBootsComma", "HKGRemoteStartBootsComma", "TeslaWakeOnCAN"])
+
 export const GalaxyToggleCard = {
   name: "GalaxyToggleCard",
   components: { FavoritesEditor },
@@ -76,12 +78,18 @@ export const GalaxyToggleCard = {
     rollback(prev) { this.$emit("change", { key: this.param.key, value: prev }) },
     async commit(nextValue) {
       if (this.locked || this.updating) return
+      const firmwareToggle = PANDA_FIRMWARE_TOGGLE_KEYS.has(this.param.key)
+      if (firmwareToggle && this.values.IsOnroad) return
+      if (firmwareToggle && !window.confirm(`${this.param.label} requires a Panda firmware update and device reboot.\n\n${nextValue ? "Enable" : "Disable"} ${this.param.label} and flash the Panda now?`)) {
+        this.rollback(this.value)
+        return
+      }
       const prev = this.value
       const label = this.lastLabel || ""
       this.$emit("change", { key: this.param.key, value: nextValue })
       this.updating = true
       try {
-        const data = await api.updateParam({ key: this.param.key, value: nextValue, label })
+        const data = await api.updateParam({ key: this.param.key, value: nextValue, label, ...(firmwareToggle ? { confirmedPandaFirmwareFlash: true } : {}) })
         const updated = data?.updated && typeof data.updated === "object" ? data.updated : {}
         if (Object.prototype.hasOwnProperty.call(updated, this.param.key)) {
           this.$emit("change", { key: this.param.key, value: updated[this.param.key], ...updated })
@@ -94,9 +102,9 @@ export const GalaxyToggleCard = {
         this.updating = false
       }
     },
-    onSwitch(e) {
-      if (!this.locked) this.commit(!!e.target.checked)
-      else e.target.checked = !!this.value
+    async onSwitch(e) {
+      if (!this.locked) await this.commit(!!e.target.checked)
+      e.target.checked = !!this.value
     },
     onSelect(e) {
       if (this.locked) { e.target.value = String(this.value ?? "") ; return }

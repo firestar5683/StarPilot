@@ -12,7 +12,7 @@ import subprocess
 
 ROOT = Path(__file__).resolve().parents[3]
 HERE = Path(__file__).resolve().parent
-BASE = 'b7775991bf673f565c8f31e2a4df027014fe7882'
+BASE = 'bb04e935272ccbc7551dd5f46d18197757a35587'
 FILES = ['panda/board/drivers/can_common.h', 'panda/board/main.c',
          'panda/board/drivers/bootkick.h', 'panda/board/boards/cuatro.h']
 
@@ -75,10 +75,10 @@ def main():
               'extracted_sha256': hashes, 'stock_extracted_sha256': stock_hashes, 'runs': []}
   scenarios = ['states','invalid','stale','watchdog','drive_watchdog','boot','serial','gpio','existing','other_cars','drive_edge',
                'independent_edges','wake_reset','stock_drive']
-  for hkg, gm, ignore in itertools.product([False, True], repeat=3):
+  for tesla, hkg, gm, ignore in itertools.product([False, True], repeat=4):
     for debug, allow_debug in [(False,False), (True,True), (False,True)]:
-      variant = f'hkg{int(hkg)}-gm{int(gm)}-ignore{int(ignore)}-debug{int(debug)}-allow{int(allow_debug)}'
-      flags = [f'-D{x}' for x, yes in [('PANDA_HKG_REMOTE_START',hkg),('PANDA_GM_REMOTE_START_C9',gm),
+      variant = f'tesla{int(tesla)}-hkg{int(hkg)}-gm{int(gm)}-ignore{int(ignore)}-debug{int(debug)}-allow{int(allow_debug)}'
+      flags = [f'-D{x}' for x, yes in [('PANDA_TESLA_WAKE_ON_CAN',tesla),('PANDA_HKG_REMOTE_START',hkg),('PANDA_GM_REMOTE_START_C9',gm),
                ('PANDA_IGNORE_IGNITION_LINE',ignore),('DEBUG',debug),('ALLOW_DEBUG',allow_debug)] if yes]
       binaries = {}
       for name in ['candidate', 'stock']:
@@ -102,7 +102,10 @@ def main():
         assert run.returncode != 0 and 'wake_on_can == (state != 0)' in run.stderr, run.stderr
         print('RED verified: stock fails non-OFF wake assertion:', run.stderr.strip())
         return
-      for scenario in scenarios:
+      selected = scenarios + ['checksum'] if tesla else [
+        'disabled', 'drive_watchdog', 'boot', 'serial', 'gpio', 'existing', 'other_cars',
+        'stock_drive', 'independent_edges', 'wake_reset']
+      for scenario in selected:
         run = subprocess.run([str(binaries['candidate']),scenario], text=True,capture_output=True)
         manifest['runs'].append({'variant':variant,'scenario':scenario,'rc':run.returncode,'stdout':run.stdout,'stderr':run.stderr})
         if run.returncode:
@@ -118,7 +121,7 @@ def main():
       trace_hash = hashlib.sha256(traces[0]).hexdigest()
       (args.evidence / f'parity-{variant}.txt').write_bytes(traces[0])
       manifest['runs'].append({'variant':variant,'parity_frames':20000,'sha256':trace_hash})
-      print(f'PASS {variant}: {len(scenarios)} scenarios; 20000-frame ignition/watchdog and boot/reset stock parity; DRIVE edge preserved')
+      print(f'PASS {variant}: {len(selected)} scenarios; 20000-frame ignition/watchdog and boot/reset stock parity; DRIVE edge preserved')
   (args.evidence/'manifest.json').write_text(json.dumps(manifest,indent=2)+'\n')
   summary = {'configurations':sum('parity_frames' in r for r in manifest['runs']),
              'scenario_runs':sum('scenario' in r for r in manifest['runs']),

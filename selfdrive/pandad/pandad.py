@@ -12,37 +12,18 @@ from openpilot.common.params import Params, UnknownKeyName
 from openpilot.system.hardware import HARDWARE
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.pandad.rivian_long_flasher import prepare_rivian_bridge
+from openpilot.selfdrive.pandad.panda_firmware import get_firmware_path, get_tesla_wake_on_can
+from openpilot.selfdrive.pandad.panda_firmware import get_selected_firmware_name as get_selected_firmware_name
 
 
-def get_selected_firmware_name(app_fn: str, remote_start: bool, hkg_remote_start: bool, ignore_ignition_line: bool) -> str:
-  if not remote_start and not hkg_remote_start and not ignore_ignition_line:
-    return app_fn
-
-  h7 = app_fn == "panda_h7.bin.signed"
-  name_parts = ["panda_h7" if h7 else "panda"]
-  if hkg_remote_start:
-    name_parts.extend(["hkg", "remote"])
-  elif remote_start:
-    name_parts.append("remote")
-  if ignore_ignition_line:
-    name_parts.append("can_ignition_only")
-  return "_".join(name_parts) + ".bin.signed"
+def get_expected_firmware_path(panda: Panda, remote_start: bool, hkg_remote_start: bool, ignore_ignition_line: bool,
+                               tesla_wake: bool = False) -> str:
+  return get_firmware_path(FW_PATH, panda.get_mcu_type().config.app_fn, remote_start, hkg_remote_start, ignore_ignition_line, tesla_wake)
 
 
-def get_expected_firmware_path(panda: Panda, remote_start: bool, hkg_remote_start: bool, ignore_ignition_line: bool) -> str:
-  app_fn = panda.get_mcu_type().config.app_fn
-  selected_fn = get_selected_firmware_name(app_fn, remote_start, hkg_remote_start, ignore_ignition_line)
-  if selected_fn != app_fn:
-    selected_path = os.path.join(FW_PATH, selected_fn)
-    if os.path.isfile(selected_path):
-      return selected_path
-    cloudlog.warning(f"Selected panda firmware not found: {selected_path}, falling back to default")
-  return os.path.join(FW_PATH, app_fn)
-
-
-def get_expected_signature(panda: Panda, remote_start: bool, hkg_remote_start: bool, ignore_ignition_line: bool) -> bytes:
+def get_expected_signature(panda: Panda, remote_start: bool, hkg_remote_start: bool, ignore_ignition_line: bool, tesla_wake: bool = False) -> bytes:
   try:
-    fn = get_expected_firmware_path(panda, remote_start, hkg_remote_start, ignore_ignition_line)
+    fn = get_expected_firmware_path(panda, remote_start, hkg_remote_start, ignore_ignition_line, tesla_wake)
     return Panda.get_signature_from_firmware(fn)
   except Exception:
     cloudlog.exception("Error computing expected signature")
@@ -70,7 +51,7 @@ def get_ignore_ignition_line(params: Params) -> bool:
     return False
 
 
-def flash_panda(panda_serial: str, remote_start: bool, hkg_remote_start: bool, ignore_ignition_line: bool) -> Panda:
+def flash_panda(panda_serial: str, remote_start: bool, hkg_remote_start: bool, ignore_ignition_line: bool, tesla_wake: bool = False) -> Panda:
   try:
     panda = Panda(panda_serial)
   except PandaProtocolMismatch:
@@ -78,8 +59,8 @@ def flash_panda(panda_serial: str, remote_start: bool, hkg_remote_start: bool, i
     HARDWARE.recover_internal_panda()
     raise
 
-  fw_path = get_expected_firmware_path(panda, remote_start, hkg_remote_start, ignore_ignition_line)
-  fw_signature = get_expected_signature(panda, remote_start, hkg_remote_start, ignore_ignition_line)
+  fw_path = get_expected_firmware_path(panda, remote_start, hkg_remote_start, ignore_ignition_line, tesla_wake)
+  fw_signature = get_expected_signature(panda, remote_start, hkg_remote_start, ignore_ignition_line, tesla_wake)
   internal_panda = panda.is_internal()
 
   panda_version = "bootstub" if panda.bootstub else panda.get_version()
@@ -172,8 +153,9 @@ def main() -> None:
       remote_start = get_remote_start_boots_comma(params)
       hkg_remote_start = get_hkg_remote_start_boots_comma(params)
       ignore_ignition_line = get_ignore_ignition_line(params)
+      tesla_wake = get_tesla_wake_on_can(params)
       for serial in panda_serials:
-        pandas.append(flash_panda(serial, remote_start, hkg_remote_start, ignore_ignition_line))
+        pandas.append(flash_panda(serial, remote_start, hkg_remote_start, ignore_ignition_line, tesla_wake))
 
       # Ensure internal panda is present if expected
       internal_pandas = [panda for panda in pandas if panda.is_internal()]
@@ -225,7 +207,7 @@ def main() -> None:
     first_run = False
 
     # run pandad with all connected serials as arguments
-    if get_remote_start_boots_comma(params) or get_hkg_remote_start_boots_comma(params) or get_ignore_ignition_line(params):
+    if remote_start or hkg_remote_start or ignore_ignition_line or tesla_wake:
       os.environ["BOARDD_SKIP_FW_CHECK"] = "1"
     else:
       os.environ.pop("BOARDD_SKIP_FW_CHECK", None)

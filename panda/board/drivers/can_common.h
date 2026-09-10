@@ -225,12 +225,31 @@ void ignition_can_hook(CANPacket_t *msg) {
       if ((counter == ((prev_counter_tesla + 1) % 16)) && (prev_counter_tesla != -1)) {
         // VCFRONT_LVPowerState->VCFRONT_vehiclePowerState
         int power_state = (msg->data[0] >> 5U) & 0x3U;
-        wake_on_can = power_state != 0x0;   // VEHICLE_POWER_STATE_OFF=0
-        wake_on_can_cnt = 0U;
         ignition_can = power_state == 0x3;  // VEHICLE_POWER_STATE_DRIVE=3
         ignition_can_cnt = 0U;
       }
       prev_counter_tesla = counter;
+
+      #ifdef PANDA_TESLA_WAKE_ON_CAN
+      // Only the opt-in Tesla firmware enables early wake. Keep its validation
+      // separate from the stock DRIVE ignition decoder and watchdog inputs.
+      // VCFRONT_LVPowerStateChecksum: address bytes + payload bytes 0..6.
+      uint32_t checksum = (msg->addr & 0xFFU) + (msg->addr >> 8U);
+      for (uint8_t i = 0U; i < 7U; i++) {
+        checksum += msg->data[i];
+      }
+      static int prev_counter_tesla_wake = -1;
+      if (!msg->extended && (msg->data[7] == (checksum & 0xFFU))) {
+        if ((prev_counter_tesla_wake != -1) && (counter == ((prev_counter_tesla_wake + 1) % 16))) {
+          wake_on_can = ((msg->data[0] >> 5U) & 0x3U) != 0U;  // OFF=0
+          wake_on_can_cnt = 0U;
+        }
+        prev_counter_tesla_wake = counter;
+      } else {
+        // A rejected frame cannot prime the next wake or keep one fresh.
+        prev_counter_tesla_wake = -1;
+      }
+      #endif
     }
 
     // Tesla Model S pre-AP exception

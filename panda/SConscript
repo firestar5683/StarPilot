@@ -181,6 +181,12 @@ build_project("panda_h7_remote_can_ignition_only", base_project_h7, "./board/mai
 build_project("panda_hkg_remote_can_ignition_only", base_project_f4, "./board/main.c", ["-DPANDA_HKG_REMOTE_START", "-DPANDA_IGNORE_IGNITION_LINE"])
 build_project("panda_h7_hkg_remote_can_ignition_only", base_project_h7, "./board/main.c", ["-DPANDA_HKG_REMOTE_START", "-DPANDA_IGNORE_IGNITION_LINE"])
 
+# Tesla early wake is opt-in and independent of stock ignition detection.
+build_project("panda_tesla_wake", base_project_f4, "./board/main.c", ["-DPANDA_TESLA_WAKE_ON_CAN"])
+build_project("panda_h7_tesla_wake", base_project_h7, "./board/main.c", ["-DPANDA_TESLA_WAKE_ON_CAN"])
+build_project("panda_tesla_wake_can_ignition_only", base_project_f4, "./board/main.c", ["-DPANDA_TESLA_WAKE_ON_CAN", "-DPANDA_IGNORE_IGNITION_LINE"])
+build_project("panda_h7_tesla_wake_can_ignition_only", base_project_h7, "./board/main.c", ["-DPANDA_TESLA_WAKE_ON_CAN", "-DPANDA_IGNORE_IGNITION_LINE"])
+
 # panda jungle fw
 flags = [
   "-DPANDA_JUNGLE",

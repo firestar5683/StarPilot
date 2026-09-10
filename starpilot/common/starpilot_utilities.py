@@ -22,6 +22,8 @@ from openpilot.common.realtime import DT_DMON, DT_HW
 from openpilot.system.hardware import HARDWARE
 from openpilot.system.version import get_build_metadata
 from panda import Panda, FW_PATH
+from openpilot.selfdrive.pandad.panda_firmware import get_firmware_path, get_tesla_wake_on_can
+from openpilot.selfdrive.pandad.panda_firmware import get_selected_firmware_name as get_selected_panda_firmware_name
 
 from openpilot.starpilot.common.starpilot_variables import EARTH_RADIUS, STARPILOT_API, KONIK_PATH
 
@@ -198,21 +200,6 @@ def extract_zip(zip_file, extract_path):
   print(f"Extraction completed!")
 
 
-def get_selected_panda_firmware_name(app_fn, remote_start, hkg_remote_start, ignore_ignition_line):
-  if not remote_start and not hkg_remote_start and not ignore_ignition_line:
-    return app_fn
-
-  h7 = app_fn == "panda_h7.bin.signed"
-  name_parts = ["panda_h7" if h7 else "panda"]
-  if hkg_remote_start:
-    name_parts.extend(["hkg", "remote"])
-  elif remote_start:
-    name_parts.append("remote")
-  if ignore_ignition_line:
-    name_parts.append("can_ignition_only")
-  return "_".join(name_parts) + ".bin.signed"
-
-
 def flash_panda(params_memory):
   from openpilot.selfdrive.pandad.rivian_long_flasher import is_rivian_bridge_panda, is_rivian_vehicle
 
@@ -230,6 +217,8 @@ def flash_panda(params_memory):
   except Exception:
     ignore_ignition_line = False
 
+  tesla_wake = get_tesla_wake_on_can(params)
+
   rivian = is_rivian_vehicle()
   usb_serials = set(Panda.usb_list())
   for serial in Panda.list():
@@ -246,15 +235,8 @@ def flash_panda(params_memory):
             print(f"Skipping unverified external Black Panda on Rivian {serial}")
             continue
         print(f"Flashing Panda {serial}")
-        flash_fn = None
         app_fn = panda.get_mcu_type().config.app_fn
-        selected_fn = get_selected_panda_firmware_name(app_fn, remote_start, hkg_remote_start, ignore_ignition_line)
-        if selected_fn != app_fn:
-          candidate = os.path.join(FW_PATH, selected_fn)
-          if os.path.isfile(candidate):
-            flash_fn = candidate
-          else:
-            print(f"Selected panda firmware missing: {candidate}. Falling back to default firmware.")
+        flash_fn = get_firmware_path(FW_PATH, app_fn, remote_start, hkg_remote_start, ignore_ignition_line, tesla_wake)
         panda.flash(fn=flash_fn)
     except Exception as exception:
       print(f"Failed to flash Panda {serial}: {exception}")

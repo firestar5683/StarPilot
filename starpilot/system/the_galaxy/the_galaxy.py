@@ -46,6 +46,7 @@ from openpilot.common.params import ParamKeyFlag, ParamKeyType, Params
 from openpilot.common.realtime import DT_HW
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.time_helpers import system_time_valid
+from openpilot.selfdrive.pandad.panda_firmware import supports_tesla_can_wake, validate_tesla_can_wake_firmware
 from openpilot.system.hardware import HARDWARE, PC
 from openpilot.system.hardware.hw import Paths
 from openpilot.system.loggerd.deleter import PRESERVE_ATTR_NAME, PRESERVE_ATTR_VALUE, PRESERVE_COUNT
@@ -268,7 +269,7 @@ _TESTING_GROUND_CUSTOM_RESERVED_INTERVAL_S = 15.0
 _TESTING_GROUND_CUSTOM_RESERVED_PM = None
 _TESTING_GROUND_CUSTOM_RESERVED_LOCK = threading.Lock()
 _TESTING_GROUND_CUSTOM_RESERVED_LAST_PUBLISH_MONO = 0.0
-PANDA_FIRMWARE_TOGGLE_KEYS = {"IgnoreIgnitionLine", "RemoteStartBootsComma", "HKGRemoteStartBootsComma"}
+PANDA_FIRMWARE_TOGGLE_KEYS = {"IgnoreIgnitionLine", "RemoteStartBootsComma", "HKGRemoteStartBootsComma", "TeslaWakeOnCAN"}
 PANDA_FIRMWARE_CONFIRMATION_FIELD = "confirmedPandaFirmwareFlash"
 _PANDA_FLASH_REBOOT_LOCK = threading.Lock()
 
@@ -6223,10 +6224,19 @@ def setup(app):
         if params.get_bool("IsOnroad"):
           return jsonify({"error": "Cannot change PiP Side Camera configuration while driving."}), 403
 
+      if key == "TeslaWakeOnCAN" and not supports_tesla_can_wake(params):
+        return jsonify({"error": "Wake on CAN is available only for a detected Tesla Model 3, Y or X."}), 403
+
       if key in PANDA_FIRMWARE_TOGGLE_KEYS and params.get_bool("IsOnroad"):
         return jsonify({"error": "Cannot flash Panda firmware while driving."}), 403
       if key in PANDA_FIRMWARE_TOGGLE_KEYS and data.get(PANDA_FIRMWARE_CONFIRMATION_FIELD) is not True:
         return jsonify({"error": "Panda firmware changes require confirmation before flashing."}), 409
+
+      if key == "TeslaWakeOnCAN":
+        try:
+          validate_tesla_can_wake_firmware(params, str_val.strip() in ("1", "true", "True"))
+        except RuntimeError as exc:
+          return jsonify({"error": str(exc)}), 409
 
       if key in {"LeadIndicator", "HideLeadMarker"}:
         enabled = str_val.strip() in ("1", "true", "True")
@@ -6568,6 +6578,7 @@ def setup(app):
       except Exception:
         result[key] = None
 
+    result["TeslaCANWakeAvailable"] = supports_tesla_can_wake(params)
     result["HasRadar"] = _get_has_radar()
     result["VehicleParked"] = _get_vehicle_parked()
     result["AlphaLongitudinalAvailable"] = _get_alpha_longitudinal_available()
