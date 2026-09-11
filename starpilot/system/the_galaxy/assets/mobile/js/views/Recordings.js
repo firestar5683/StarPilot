@@ -38,11 +38,6 @@ function formatScreenDate(dateString) {
   return `${month} ${day}${getOrdinalSuffix(day)}, ${year} - ${hour}:${minuteStr}${ampm}`
 }
 
-function routeIdShort(route) {
-  const name = String(route?.name || "")
-  return name.split("--").slice(1).join("--") || name
-}
-
 function localDeviceUrl(ip, route = "/") {
   const raw = String(ip || "").trim()
   if (!raw || raw === "unknown") return ""
@@ -99,7 +94,6 @@ export const Recordings = {
   methods: {
     fmtDuration,
     formatBytes,
-    routeIdShort,
     setSub(key) {
       this.sub = key === "screen" ? "screen" : "routes"
       if (this.sub === "screen" && !this.recordings.length && !this.screenLoading) this.loadScreenRecordings()
@@ -392,7 +386,7 @@ export const Recordings = {
         <div v-if="!visibleRoutes.length && !loading" class="gx-empty">No routes found.</div>
         <article v-for="r in visibleRoutes" :key="r.name" class="gx-row gx-recordings-row" :class="{ 'gx-recordings-row--preserved': r.is_preserved }" style="cursor:pointer;" @click="openPlayer(r)">
           <div class="gx-row__info">
-            <span class="gx-row__label">{{ r.isCustomName ? r.displayName : (r.displayDate + ' · ' + routeIdShort(r)) }}</span>
+            <span class="gx-row__label">{{ r.displayName }}</span>
             <span class="gx-row__desc"><template v-if="r.isCustomName">{{ r.displayDate }} · </template>{{ fmtDuration(r.approxDurationSeconds) }} · {{ r.segmentCount }} segments</span>
             <span v-if="r.is_preserved" class="gx-chip gx-chip--dev gx-recordings-preserved-chip">Preserved</span>
           </div>
