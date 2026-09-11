@@ -3,6 +3,7 @@ import { GalaxyConfirm } from "../components/GalaxyModal.js"
 import { GalaxyTabs } from "../components/GalaxyTabs.js"
 import { GxNotice } from "../components/GxNotice.js"
 import { isFirestarOrigin } from "../components/PwaInstallSection.js"
+import { normalizeRoute, routeMatchesSearch, sortRoutes } from "../../../components/recordings/dashcam_routes_helpers.js"
 
 function fmtDuration(seconds) {
   seconds = Number(seconds) || 0
@@ -35,21 +36,6 @@ function formatScreenDate(dateString) {
   hour = hour % 12 || 12
   const minuteStr = minute < 10 ? "0" + minute : minute
   return `${month} ${day}${getOrdinalSuffix(day)}, ${year} - ${hour}:${minuteStr}${ampm}`
-}
-
-function normalizeRoute(r) {
-  const name = String(r?.name || "")
-  const isCustomName = !!r?.isCustomName
-  return {
-    name,
-    displayName: r?.displayName || name.split("--").pop() || name,
-    displayDate: r?.displayDate || "",
-    approxDurationSeconds: Number(r?.approxDurationSeconds || 0),
-    segmentCount: Number(r?.segmentCount || r?.numSegments || 0),
-    is_preserved: !!r?.is_preserved,
-    isCustomName,
-    png: r?.png || "",
-  }
 }
 
 function localDeviceUrl(ip, route = "/") {
@@ -101,19 +87,8 @@ export const Recordings = {
       }
     },
     visibleRoutes() {
-      let list = this.routes.slice()
-      if (this.showPreservedOnly) list = list.filter((r) => r.is_preserved)
-      if (this.searchQuery.trim()) {
-        const q = this.searchQuery.toLowerCase()
-        list = list.filter((r) => [r.displayName, r.displayDate, r.name].some((v) => String(v || "").toLowerCase().includes(q)))
-      }
-      const sorters = {
-        newest: (a, b) => (b.name > a.name ? 1 : -1),
-        oldest: (a, b) => (a.name > b.name ? 1 : -1),
-        longest: (a, b) => b.approxDurationSeconds - a.approxDurationSeconds,
-        shortest: (a, b) => a.approxDurationSeconds - b.approxDurationSeconds,
-      }
-      return list.sort(sorters[this.sortOrder] || sorters.newest)
+      const list = this.routes.filter((r) => (!this.showPreservedOnly || r.is_preserved) && routeMatchesSearch(r, this.searchQuery))
+      return sortRoutes(list, this.sortOrder)
     },
   },
   methods: {
@@ -207,8 +182,8 @@ export const Recordings = {
       if (!newName || newName === route.displayName) return
       try {
         const payload = await api.renameRoute(route.name, newName)
-        Object.assign(route, normalizeRoute({ ...route, isCustomName: true }))
-        route.displayName = payload.name || newName
+        const savedName = payload.name || newName
+        Object.assign(route, normalizeRoute({ ...route, timestamp: savedName, isCustomName: true }))
         showSnackbar("Route renamed!")
       } catch (e) {
         showSnackbar("Rename failed.", "error")
@@ -392,7 +367,7 @@ export const Recordings = {
           <span class="gx-section__count">{{ stats.count }} drives · {{ stats.formattedDuration }}</span>
         </div>
         <div style="padding: var(--sp-3); display:flex; gap:8px; flex-wrap:wrap;">
-          <input class="gx-field" style="flex:1; min-width:160px;" type="search" placeholder="Search routes..." v-model="searchQuery" />
+          <input class="gx-field" style="flex:1; min-width:160px;" type="search" placeholder="Search routes, dates, or IDs..." v-model="searchQuery" />
           <select class="gx-field" v-model="sortOrder">
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>
@@ -412,7 +387,7 @@ export const Recordings = {
         <article v-for="r in visibleRoutes" :key="r.name" class="gx-row gx-recordings-row" :class="{ 'gx-recordings-row--preserved': r.is_preserved }" style="cursor:pointer;" @click="openPlayer(r)">
           <div class="gx-row__info">
             <span class="gx-row__label">{{ r.displayName }}</span>
-            <span class="gx-row__desc">{{ fmtDuration(r.approxDurationSeconds) }} · {{ r.segmentCount }} segments</span>
+            <span class="gx-row__desc"><template v-if="r.isCustomName">{{ r.displayDate }} · </template>{{ fmtDuration(r.approxDurationSeconds) }} · {{ r.segmentCount }} segments</span>
             <span v-if="r.is_preserved" class="gx-chip gx-chip--dev gx-recordings-preserved-chip">Preserved</span>
           </div>
           <div class="gx-row__actions">
