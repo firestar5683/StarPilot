@@ -31,8 +31,8 @@ BOLT_CC_DIRECTION_MEMORY_S = 1.5
 VOLT_CC_CARS = {
   CAR.CHEVROLET_VOLT_CC,
 }
-VOLT_CC_TARGET_DEADBAND_MPH = 5.0
-VOLT_CC_ACCEL_DEADBAND_MS2 = 0.15
+VOLT_CC_FREE_REQUEST_DEADBAND_MPH = 5.0
+VOLT_CC_LEAD_REQUEST_DEADBAND_MPH = 2.0
 
 
 def malibu_phase_map_for_button(button):
@@ -341,20 +341,18 @@ def stabilize_bolt_cc_button(controller, CP, requested_button):
   return requested_button
 
 
-def _create_volt_cc_spam_command(CS, actuators, ms_convert):
+def _create_volt_cc_spam_command(CS, actuators, ms_convert, lead_visible):
   accel = float(actuators.accel)
   speed_setpoint = int(round(CS.out.cruiseState.speed * ms_convert))
   ego_speed = CS.out.vEgo * ms_convert
+  requested_setpoint = (CS.out.vEgo * 1.01 + 3 * accel) * ms_convert
+  deadband_mph = VOLT_CC_LEAD_REQUEST_DEADBAND_MPH if lead_visible else VOLT_CC_FREE_REQUEST_DEADBAND_MPH
+  request_deadband = deadband_mph * (CV.MPH_TO_KPH if ms_convert == CV.MS_TO_KPH else 1.0)
 
-  v_cruise_kph = float(getattr(CS.out, "vCruise", 0.0))
-  if 0.0 < v_cruise_kph < 255.0:
-    is_metric = ms_convert == CV.MS_TO_KPH
-    target_setpoint = v_cruise_kph if is_metric else v_cruise_kph * CV.KPH_TO_MPH
-    target_deadband = VOLT_CC_TARGET_DEADBAND_MPH * (CV.MPH_TO_KPH if is_metric else 1.0)
-    if abs(target_setpoint - speed_setpoint) <= target_deadband:
-      return CruiseButtons.INIT, float("inf")
+  if abs(requested_setpoint - speed_setpoint) <= request_deadband:
+    return CruiseButtons.INIT, float("inf")
 
-  if abs(accel) <= VOLT_CC_ACCEL_DEADBAND_MS2:
+  if accel == 0.0:
     return CruiseButtons.INIT, float("inf")
 
   if accel < 0.0:
@@ -371,7 +369,7 @@ def _create_volt_cc_spam_command(CS, actuators, ms_convert):
   return CruiseButtons.RES_ACCEL, rate
 
 
-def create_gm_cc_spam_command(packer, controller, CS, actuators, starpilot_toggles):
+def create_gm_cc_spam_command(packer, controller, CS, actuators, starpilot_toggles, lead_visible=False):
   accel = actuators.accel
   v_ego = CS.out.vEgo
   cruise_btn = CruiseButtons.INIT
@@ -386,7 +384,7 @@ def create_gm_cc_spam_command(packer, controller, CS, actuators, starpilot_toggl
   comparison_setpoint = projected_setpoint if bolt_cc else desired_setpoint
 
   if CS.CP.carFingerprint in VOLT_CC_CARS:
-    cruise_btn, rate = _create_volt_cc_spam_command(CS, actuators, ms_convert)
+    cruise_btn, rate = _create_volt_cc_spam_command(CS, actuators, ms_convert, lead_visible)
   else:
     if CS.CP.minEnableSpeed - (desired_setpoint / ms_convert) > 3.25:
       cruise_btn = CruiseButtons.CANCEL
