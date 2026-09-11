@@ -10,6 +10,7 @@ import subprocess
 import threading
 import time
 from collections import OrderedDict
+from contextlib import contextmanager
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from datetime import datetime, timezone
 from http.client import HTTPException
@@ -31,6 +32,10 @@ _cache = OrderedDict()
 _cache_lock = threading.Lock()
 _api_backoff_until = 0.0
 _api_retry_at = 0.0
+_api_request_lock = threading.Lock()
+_raw_backoff_until = 0.0
+_raw_retry_at = 0.0
+_request_locks = {}
 VERSION_CACHE_TTL = 6 * 60 * 60
 MAX_VERSION_CACHE_ENTRIES = 1024
 MAX_VERSION_BYTES = 64 * 1024
@@ -82,8 +87,50 @@ def _is_quota_failure(error):
                               (headers.get('X-RateLimit-Remaining') == '0' or (wait.isdigit() and len(wait) <= 6)))
 
 
+@contextmanager
+def _request_lock(kind, url):
+  """Coalesce identical misses without retaining locks after callers finish."""
+  key = (kind, url)
+  with _cache_lock:
+    entry = _request_locks.setdefault(key, [threading.Lock(), 0])
+    entry[1] += 1
+  try:
+    with entry[0]:
+      yield
+  finally:
+    with _cache_lock:
+      entry[1] -= 1
+      if entry[1] == 0:
+        del _request_locks[key]
+
+
+def _retry_at(headers):
+  wait = headers.get('Retry-After', '').strip()
+  reset = headers.get('X-RateLimit-Reset', '').strip()
+  if wait.isdigit() and len(wait) <= 6:
+    return time.time() + int(wait)
+  if reset.isdigit() and len(reset) <= 12 and int(reset) > time.time():
+    return float(reset)
+  return 0.0
+
+
+def _record_quota_backoff(retry_at, raw=False):
+  global _api_backoff_until, _api_retry_at, _raw_backoff_until, _raw_retry_at
+  delay = max(1, retry_at - time.time()) if retry_at else 60
+  deadline = time.monotonic() + delay
+  with _cache_lock:
+    if raw:
+      if deadline > _raw_backoff_until:
+        _raw_backoff_until, _raw_retry_at = deadline, retry_at
+    elif deadline > _api_backoff_until:
+      _api_backoff_until, _api_retry_at = deadline, retry_at
+
+
 def _get_display_version(url):
   """Read only the numeric version literal; never import or execute remote code."""
+  with _cache_lock:
+    if time.monotonic() < _raw_backoff_until:
+      raise HistoryUnavailable(_rate_limit_message(_raw_retry_at))
   request = Request(url, headers={'User-Agent': 'StarPilot-Galaxy-VersionPicker'})
   try:
     with _open_raw_url(request, timeout=HTTP_TIMEOUT) as response:
@@ -103,8 +150,11 @@ def _get_display_version(url):
     if error.code == 404:
       return None  # Older builds can predate the display-version file.
     if error.code in (403, 429):
-      failure = HistoryUnavailable if _is_quota_failure(error) else VersionHistoryError
-      raise failure('GitHub version metadata access is limited; retry later.') from None
+      if _is_quota_failure(error):
+        retry_at = _retry_at(error.headers or {})
+        _record_quota_backoff(retry_at, raw=True)
+        raise HistoryUnavailable(_rate_limit_message(retry_at)) from None
+      raise VersionHistoryError('GitHub version metadata access is limited; retry later.') from None
     failure = HistoryUnavailable if 500 <= error.code < 600 else VersionHistoryError
     raise failure('GitHub version metadata is unavailable; retry later.') from None
   except (URLError, TimeoutError, OSError, HTTPException):
@@ -117,14 +167,16 @@ def _display_version(base, sha):
   # The validated origin and full SHA make this an immutable public file URL.
   repository = base.removeprefix('https://api.github.com/repos/')
   url = f'https://raw.githubusercontent.com/{repository}/{sha}/selfdrive/ui/lib/starpilot_version.py'
-  # Share the limit across requests, and recheck the cache after acquiring a slot.
-  with _version_slots:
+  # Duplicate callers share one miss; cached values do not consume download slots.
+  with _request_lock('raw', url):
     with _cache_lock:
       entry = _version_cache.get(url)
       if entry is not None and time.monotonic() - entry[0] < VERSION_CACHE_TTL:
         _version_cache.move_to_end(url)
         return entry[1]
-    value = _get_display_version(url)
+    with _version_slots:
+      # Check raw quota inside the slot, including workers queued by other callers.
+      value = _get_display_version(url)
     with _cache_lock:
       _version_cache[url] = (time.monotonic(), value)
       _version_cache.move_to_end(url)
@@ -145,8 +197,13 @@ def _rate_limit_message(retry_at):
 
 
 def _get_json(url):
+  """Serialize public API requests and recheck quota after waiting for a turn."""
+  with _api_request_lock:
+    return _request_json(url)
+
+
+def _request_json(url):
   """Fetch one bounded public API response. Kept separate for offline tests."""
-  global _api_backoff_until, _api_retry_at
   with _cache_lock:
     if time.monotonic() < _api_backoff_until:
       raise HistoryUnavailable(_rate_limit_message(_api_retry_at))
@@ -162,21 +219,10 @@ def _get_json(url):
   except HTTPError as error:
     error.close()
     if error.code in (403, 429):
-      headers = error.headers or {}
-      wait = headers.get('Retry-After', '').strip()
-      reset = headers.get('X-RateLimit-Reset', '').strip()
-      retry_at = 0.0
-      if wait.isdigit() and len(wait) <= 6:
-        retry_at = time.time() + int(wait)
-      elif reset.isdigit() and len(reset) <= 12 and int(reset) > time.time():
-        retry_at = float(reset)
-      # Share only a short quota backoff; unrelated 403 responses do not block
-      # other lookups. Valid cached responses remain available during backoff.
+      retry_at = _retry_at(error.headers or {})
+      # Honor the complete server deadline. Unrelated 403s do not block lookups.
       if _is_quota_failure(error):
-        delay = max(1, min(60, retry_at - time.time())) if retry_at else 60
-        with _cache_lock:
-          _api_backoff_until = time.monotonic() + delay
-          _api_retry_at = retry_at
+        _record_quota_backoff(retry_at)
       failure = HistoryUnavailable if _is_quota_failure(error) else VersionHistoryError
       raise failure(_rate_limit_message(retry_at)) from None
     if error.code == 404:
@@ -190,20 +236,20 @@ def _get_json(url):
 
 
 def _json(url, fresh=False, ttl=CACHE_TTL):
-  now = time.monotonic()
-  if not fresh:
+  with _request_lock('api', url):
+    if not fresh:
+      with _cache_lock:
+        entry = _cache.get(url)
+        if entry is not None and time.monotonic() - entry[0] < ttl:
+          _cache.move_to_end(url)
+          return copy.deepcopy(entry[1])
+    value = _get_json(url)
     with _cache_lock:
-      entry = _cache.get(url)
-      if entry is not None and now - entry[0] < ttl:
-        _cache.move_to_end(url)
-        return copy.deepcopy(entry[1])
-  value = _get_json(url)
-  with _cache_lock:
-    _cache[url] = (time.monotonic(), copy.deepcopy(value))
-    _cache.move_to_end(url)
-    while len(_cache) > MAX_CACHE_ENTRIES:
-      _cache.popitem(last=False)
-  return value
+      _cache[url] = (time.monotonic(), copy.deepcopy(value))
+      _cache.move_to_end(url)
+      while len(_cache) > MAX_CACHE_ENTRIES:
+        _cache.popitem(last=False)
+    return value
 
 
 def _git(repo_path, *args):
@@ -444,7 +490,17 @@ def list_versions(repo_path, branch, page=1, head=None):
   return result
 
 
+def _saved_display_versions(base, branch, page, requested_head, resolved_head):
+  # A version literal belongs to an immutable SHA. Reuse its validated saved
+  # value only after the live branch head and requested commit page are checked.
+  snapshot = _load_history_snapshot(base, branch, page, requested_head)
+  if snapshot is None or snapshot['head'] != resolved_head:
+    return {}
+  return {row['sha']: row['version'] for row in snapshot['commits'] if 'version' in row}
+
+
 def _list_versions(base, branch, page, pinned_head):
+  requested_head = pinned_head
   current = _head(base, branch)
   if pinned_head is not None:
     _ancestor(base, pinned_head, current)
@@ -458,9 +514,18 @@ def _list_versions(base, branch, page, pinned_head):
     has_more = bool(_block(base, pinned_head, block_page + 2))
   selected = rows[offset:end]
   if branch.lower() == 'starpilot' and selected:
+    saved_versions = _saved_display_versions(base, branch, page, requested_head, pinned_head)
+    pending = []
+    for index, row in enumerate(selected):
+      if row['sha'] in saved_versions:
+        selected[index] = dict(row, version=saved_versions[row['sha']])
+      else:
+        pending.append(index)
+    if not pending:
+      return {'branch': branch, 'head': pinned_head, 'page': page, 'hasMore': has_more, 'commits': selected}
     executor = ThreadPoolExecutor(max_workers=_VERSION_WORKERS)
     try:
-      futures = {executor.submit(_display_version, base, row['sha']): index for index, row in enumerate(selected)}
+      futures = {executor.submit(_display_version, base, selected[index]['sha']): index for index in pending}
       for future in as_completed(futures):
         index = futures[future]
         selected[index] = dict(selected[index], version=future.result())

@@ -208,6 +208,31 @@ def check_repository_idle(repo):
   # Check independently of operation markers, which may be missing or stale.
   if git(repo, 'ls-files', '--unmerged'):
     raise InstallError('Repository has unmerged index entries; resolve them before installing or restoring')
+  # These flags can hide working edits from ordinary patches, and the patches
+  # cannot restore the flags themselves. Leave both source and index untouched.
+  for entry in git(repo, 'ls-files', '-v', '-z', binary=True).split(b'\0'):
+    if entry[:1].islower() or entry[:1] == b'S':
+      name = entry[2:].decode(errors='replace')
+      raise InstallError(f'Repository uses assume-unchanged or skip-worktree on {name}; save its contents and clear the flag before installing or restoring')
+
+
+def _check_ignored_collisions(repo, commit):
+  # Force checkout also replaces ignored files, including file/directory
+  # collisions. They are deliberately absent from the ordinary recovery tar.
+  ignored = [name for name in git(repo, 'ls-files', '--others', '--ignored', '--exclude-standard', '-z', binary=True).split(b'\0') if name]
+  if not ignored:
+    return
+  tracked = set(git(repo, 'ls-tree', '-r', '-z', '--name-only', commit, binary=True).split(b'\0')) - {b''}
+  directories = set()
+  for name in tracked:
+    parts = name.split(b'/')
+    directories.update(b'/'.join(parts[:index]) for index in range(1, len(parts)))
+  for name in ignored:
+    parts = name.split(b'/')
+    if (name in tracked or name in directories or
+        any(b'/'.join(parts[:index]) in tracked for index in range(1, len(parts)))):
+      label = name.decode(errors='replace')
+      raise InstallError(f'Ignored local path conflicts with the selected source: {label}; move or save it outside the checkout before installing or restoring')
 
 
 def _check_submodules(repo):
@@ -282,6 +307,7 @@ def restore(folder, *, check_parked, restore_data=False):
   validate_target(old)
   check_parked()
   check_repository_idle(repo)
+  _check_ignored_collisions(repo, old['commit'])
   # Validate the whole archive before changing the checkout.
   with tarfile.open(folder / 'untracked.tar') as archive:
     for member in archive.getmembers():
@@ -337,6 +363,7 @@ def install(repo, target, *, data_root=Path('/data'), check_parked, progress, re
   progress(2, 'Checking compatibility', 100, sha[:10])
   check_repository_idle(repo)
   _check_submodules(repo)
+  _check_ignored_collisions(repo, sha)
   preflight(repo, sha, require_device_binaries, data_root)
   check_parked()
   progress(3, 'Saving recovery backup', 0, 'Preserving local changes, settings and model statistics')

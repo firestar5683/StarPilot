@@ -313,17 +313,22 @@ def test_invalid_version_metadata_is_retryable(history, repo, api, monkeypatch, 
   URLError('offline'), IncompleteRead(b'partial', 100),
 ])
 def test_version_network_failure_is_not_cached_as_missing(history, repo, api, monkeypatch, failure):
+  clock = [1000.0]
+  monkeypatch.setattr(history.time, 'monotonic', lambda: clock[0])
+  monkeypatch.setattr(history.time, 'time', lambda: clock[0])
   api.heads['StarPilot'] = 1
   def fail(*args, **kwargs):
     raise failure
   monkeypatch.setattr(history, '_open_raw_url', fail, raising=False)
   with pytest.raises(history.VersionHistoryError, match='retry'):
     history.list_versions(repo, 'StarPilot')
+  clock[0] += 61
   monkeypatch.setattr(history, '_open_raw_url', lambda *a, **kw: io.BytesIO(b'STARPILOT_DISPLAY_VERSION = "6.7.7"\n'))
   assert history.list_versions(repo, 'StarPilot')['commits'][0]['version'] == '6.7.7'
 
 
 def test_version_cache_outlives_branch_cache_and_expires(history, repo, api, monkeypatch):
+  monkeypatch.setattr(history, '_saved_display_versions', lambda *a: {})  # Exercise memory-cache expiry alone.
   api.heads['StarPilot'] = 1
   clock = [100.0]
   monkeypatch.setattr(history.time, 'monotonic', lambda: clock[0])
@@ -488,7 +493,7 @@ def test_rate_limit_reports_retry_time(history, monkeypatch, headers, expected):
 
 
 @pytest.mark.parametrize('code', [403, 429])
-def test_rate_limit_short_backoff_is_shared_and_then_retries(history, monkeypatch, code):
+def test_rate_limit_full_backoff_is_shared_and_then_retries(history, monkeypatch, code):
   clock = [1000.0]
   monkeypatch.setattr(history.time, 'time', lambda: clock[0])
   monkeypatch.setattr(history.time, 'monotonic', lambda: clock[0])
@@ -504,6 +509,10 @@ def test_rate_limit_short_backoff_is_shared_and_then_retries(history, monkeypatc
       history._get_json('https://api.github.com/repos/a/b/' + path)
   assert len(calls) == 1
   clock[0] += 61
+  with pytest.raises(history.HistoryUnavailable):
+    history._get_json('https://api.github.com/repos/a/b/branches/main')
+  assert len(calls) == 1
+  clock[0] = 3280
   assert history._get_json('https://api.github.com/repos/a/b/branches/main') == {'ok': True}
   assert len(calls) == 2
 
@@ -713,6 +722,7 @@ def test_starpilot_snapshot_fallback_only_for_version_transport_failure(history,
   monkeypatch.setattr(history, '_open_raw_url', lambda *a, **kw: io.BytesIO(b'STARPILOT_DISPLAY_VERSION = "6.7.7"\n'))
   first = history.list_versions(repo, 'StarPilot')
   offline = offline_reload(history, monkeypatch)
+  monkeypatch.setattr(offline, '_saved_display_versions', lambda *a: {})  # Force transport to test failure policy.
   monkeypatch.setattr(offline, '_get_json', api)
   def raw(*args, **kwargs):
     if failure_kind == 'offline':
@@ -773,6 +783,7 @@ def test_http_failure_snapshot_fallback_boundary(history, repo, api, monkeypatch
   monkeypatch.setattr(history, '_open_raw_url', lambda *a, **kw: io.BytesIO(b'STARPILOT_DISPLAY_VERSION = "6.7.7"\n'))
   first = history.list_versions(repo, branch)
   offline = offline_reload(history, monkeypatch)
+  monkeypatch.setattr(offline, '_saved_display_versions', lambda *a: {})  # Force transport to test failure policy.
   def fail(*args, **kwargs):
     raise HTTPError('https://github.com/', code, 'Unavailable', headers, io.BytesIO())
   if transport == 'api':
@@ -792,3 +803,58 @@ def test_http_failure_snapshot_fallback_boundary(history, repo, api, monkeypatch
 def test_empty_snapshot_preload_timestamp_is_rejected(history, repo, api):
   first = history.list_versions(repo, 'main')
   assert not history._save_history_snapshot('https://api.github.com/repos/firestar5683/openpilot', 'main', 1, None, first, saved_at='')
+
+def test_saved_release_labels_survive_restart_without_repeating_raw_downloads(history, repo, api, monkeypatch):
+  api.heads['StarPilot'] = 3
+  monkeypatch.setattr(history, '_open_raw_url', lambda *a, **kw: io.BytesIO(b'STARPILOT_DISPLAY_VERSION = "6.7.7"\n'))
+  first = history.list_versions(repo, 'StarPilot')
+  restarted = offline_reload(history, monkeypatch)
+  monkeypatch.setattr(restarted, '_get_json', api)
+  def forbidden(*args, **kwargs):
+    pytest.fail('A saved immutable release label was downloaded again')
+  monkeypatch.setattr(restarted, '_open_raw_url', forbidden)
+  assert restarted.list_versions(repo, 'StarPilot')['commits'] == first['commits']
+  # A changed head cannot reuse the previous first-page snapshot blindly.
+  api.heads['StarPilot'] = 4
+  restarted._cache.clear()
+  calls = []
+  def raw(*args, **kwargs):
+    calls.append(1)
+    return io.BytesIO(b'STARPILOT_DISPLAY_VERSION = "6.7.8"\n')
+  monkeypatch.setattr(restarted, '_open_raw_url', raw)
+  result = restarted.list_versions(repo, 'StarPilot')
+  assert result['head'] == f'{4:040x}' and result['commits'][0]['version'] == '6.7.8'
+  assert calls
+
+
+def test_saved_labels_never_bypass_live_history_validation(history, repo, api, monkeypatch):
+  api.heads['StarPilot'] = 3
+  monkeypatch.setattr(history, '_open_raw_url', lambda *a, **kw: io.BytesIO(b'STARPILOT_DISPLAY_VERSION = "6.7.7"\n'))
+  first = history.list_versions(repo, 'StarPilot')
+  restarted = offline_reload(history, monkeypatch)
+  def invalid(url):
+    if '/commits?' in url: return {'invalid': True}
+    return api(url)
+  monkeypatch.setattr(restarted, '_get_json', invalid)
+  with pytest.raises(restarted.VersionHistoryError, match='invalid commit history'):
+    restarted.list_versions(repo, 'StarPilot')
+
+def test_nine_page_release_browse_reuses_saved_labels_after_restart(history, repo, api, monkeypatch):
+  api.heads['StarPilot'] = 240
+  calls = []
+  def raw(*args, **kwargs):
+    calls.append(1)
+    return io.BytesIO(b'STARPILOT_DISPLAY_VERSION = "6.7.7"\n')
+  monkeypatch.setattr(history, '_open_raw_url', raw)
+  head = f'{240:040x}'
+  for page in range(1, 10):
+    history.list_versions(repo, 'StarPilot', page=page, head=head if page > 1 else None)
+  assert len(calls) == 225
+  assert len(api.requests) == 4  # One branch head and three 100-commit blocks.
+  restarted = offline_reload(history, monkeypatch)
+  monkeypatch.setattr(restarted, '_get_json', api)
+  monkeypatch.setattr(restarted, '_open_raw_url', raw)
+  for page in range(1, 10):
+    restarted.list_versions(repo, 'StarPilot', page=page, head=head if page > 1 else None)
+  assert len(calls) == 225  # No repeat raw-file requests for those 225 saved labels.
+  assert len(api.requests) == 8  # The live branch and history are still validated.
