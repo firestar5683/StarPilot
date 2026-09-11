@@ -44,6 +44,20 @@ def test_galaxy_layout_removes_obsolete_and_duplicate_controls():
   ) == 1
 
 
+def test_slc_override_method_is_not_exposed_in_either_settings_ui():
+  layout = _layout()
+  galaxy_keys = {
+    param["key"]
+    for section in layout
+    for param in section.get("params", [])
+  }
+  device_ui = (REPO_ROOT / "selfdrive/ui/layouts/settings/starpilot/longitudinal.py").read_text(encoding="utf-8")
+
+  assert "SLCOverride" not in galaxy_keys
+  assert 'SettingRow("SLCOverride"' not in device_ui
+  assert "SLC_OVERRIDE_OPTIONS" not in device_ui
+
+
 def test_galaxy_layout_contains_basic_mode_controls():
   sections = _params_by_section(_layout())
 

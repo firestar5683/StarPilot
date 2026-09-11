@@ -752,8 +752,7 @@ class StarPilotVCruise:
         self.slc_offset,
         self.slc.overridden_speed,
         v_ego_diff,
-        allow_lower_override=(getattr(starpilot_toggles, "redneck_cruise", False) and
-                              getattr(starpilot_toggles, "speed_limit_controller_override_set_speed", False)),
+        allow_lower_override=getattr(starpilot_toggles, "redneck_cruise", False),
       )
       slc_control_target = get_slc_lead_drop_relaxed_target(
         slc_control_target,

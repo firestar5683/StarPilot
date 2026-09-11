@@ -2106,8 +2106,8 @@
       {
         "key": "SpeedLimitController",
         "label": "Speed Limit Controller",
-        "description": "Limit openpilot's maximum driving speed to the current speed limit from configured map, dashboard, and optional vision sources.",
-        "picker_description": "Limits speed using map, dashboard, or vision data.",
+        "description": "Limit openpilot's maximum driving speed using configured map, dashboard, and optional vision sources. Press + above a limit for a persistent override; hold the gas pedal for a temporary override.",
+        "picker_description": "Press + above a limit for a persistent override; hold the gas pedal for a temporary override.",
         "data_type": "bool",
         "ui_type": "toggle",
         "is_parent_toggle": true,
@@ -2195,30 +2195,6 @@
           {
             "value": 2,
             "label": "Previous Limit"
-          }
-        ],
-        "parent_key": "SpeedLimitController",
-        "settings_tier": "advanced"
-      },
-      {
-        "key": "SLCOverride",
-        "label": "Override Speed",
-        "description": "Choose how SLC behaves after you manually drive faster than the posted speed limit.",
-        "picker_description": "Chooses how SLC responds after you exceed the limit.",
-        "data_type": "int",
-        "ui_type": "dropdown",
-        "options": [
-          {
-            "value": 0,
-            "label": "None"
-          },
-          {
-            "value": 1,
-            "label": "Set With Gas Pedal"
-          },
-          {
-            "value": 2,
-            "label": "Max Set Speed"
           }
         ],
         "parent_key": "SpeedLimitController",

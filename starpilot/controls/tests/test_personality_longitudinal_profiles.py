@@ -96,7 +96,6 @@ def _toggles(document):
     set_speed_limit=False,
     set_speed_offset=0.0,
     speed_limit_controller=False,
-    speed_limit_controller_override_set_speed=False,
     truck_tuning=False,
   )
 

@@ -1675,10 +1675,6 @@
         <translation>Резерв. дж. лімітів</translation>
     </message>
     <message>
-        <source>Override Speed</source>
-        <translation>Ручна швидк.</translation>
-    </message>
-    <message>
         <source>Confirm New Speed Limits</source>
         <translation>Підтверд. новий ліміт шв.</translation>
     </message>
@@ -1833,14 +1829,6 @@
     <message>
         <source>None</source>
         <translation>Нема</translation>
-    </message>
-    <message>
-        <source>Set With Gas Pedal</source>
-        <translation>Педаль</translation>
-    </message>
-    <message>
-        <source>Max Set Speed</source>
-        <translation>Макс встан. швидк.</translation>
     </message>
     <message>
         <source>SELECT</source>
@@ -2345,10 +2333,6 @@
     <message>
         <source>&lt;b&gt;The speed used by "Speed Limit Controller" when no speed limit is found.&lt;/b&gt;&lt;br&gt;&lt;br&gt;- &lt;b&gt;Set Speed&lt;/b&gt;: Use the cruise set speed&lt;br&gt;- &lt;b&gt;Experimental Mode&lt;/b&gt;: Estimate the limit using the driving model&lt;br&gt;- &lt;b&gt;Previous Limit&lt;/b&gt;: Keep using the last confirmed limit</source>
         <translation>&lt;b&gt;Швидкість, яка використовується «Контролером обмеження швидкості», коли обмеження швидкості не виявлено.&lt;/b&gt;&lt;br&gt;&lt;br&gt;- &lt;b&gt;Встановити швидкість&lt;/b&gt;: Використовувати встановлену швидкість круїз-контролю&lt;br&gt;- &lt;b&gt;Експериментальний режим&lt;/b&gt;: Оцінити обмеження за допомогою моделі водіння&lt;br&gt;- &lt;b&gt;Попереднє обмеження&lt;/b&gt;: Продовжувати використовувати останнє підтверджене обмеження</translation>
-    </message>
-    <message>
-        <source>&lt;b&gt;The speed used by "Speed Limit Controller" after you manually drive faster than the posted limit.&lt;/b&gt;&lt;br&gt;&lt;br&gt;- &lt;b&gt;Set with Gas Pedal&lt;/b&gt;: Use the highest speed reached while pressing the gas&lt;br&gt;- &lt;b&gt;Max Set Speed&lt;/b&gt;: Use the cruise set speed&lt;br&gt;&lt;br&gt;Overrides clear when openpilot disengages.</source>
-        <translation>&lt;b&gt;Швидкість, яку використовує «Контролер обмеження швидкості» після того, як ви вручну перевищили встановлене обмеження. &lt;/b&gt;&lt;br&gt;&lt;br&gt;- &lt;b&gt;Встановлюється за допомогою педалі газу&lt;/b&gt;: використовується найвища швидкість, досягнута під час натискання на педаль газу&lt;br&gt;- &lt;b&gt;Максимальна встановлена швидкість&lt;/b&gt;: використовується встановлена швидкість круїз-контролю&lt;br&gt;&lt;br&gt;Перезапис скасовується, коли OpenPilot деактивується.</translation>
     </message>
     <message>
         <source>&lt;b&gt;Miscellaneous "Speed Limit Controller" changes&lt;/b&gt; to fine-tune how openpilot drives.</source>

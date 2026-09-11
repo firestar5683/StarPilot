@@ -52,6 +52,7 @@ class SpeedLimitController:
     self.override_slc = False
     self.override_disable_timer = 0.0
     self._prev_v_cruise = None
+    self._persistent_override_speed = 0.0
     self._set_speed_override_input_consumed = False
 
     self.denied_target = 0
@@ -126,16 +127,20 @@ class SpeedLimitController:
   def clear_override(self):
     self.override_slc = False
     self.overridden_speed = 0
+    self._persistent_override_speed = 0.0
+
+  def clear_persistent_override(self):
+    self._persistent_override_speed = 0.0
 
   def clear_persistent_override_for_limit_change(self, previous_limit, new_limit):
-    if not self.starpilot_toggles.speed_limit_controller_override_set_speed or self.overridden_speed <= 0:
+    if self._persistent_override_speed <= 0:
       return
     if previous_limit <= 0 or new_limit <= 0 or abs(new_limit - previous_limit) < 0.1:
       return
 
     new_target_with_offset = new_limit + self.get_offset(new_limit)
-    if new_limit < previous_limit or self.overridden_speed <= new_target_with_offset:
-      self.clear_override()
+    if new_limit < previous_limit or self._persistent_override_speed <= new_target_with_offset:
+      self.clear_persistent_override()
 
   def get_mapbox_speed_limit(self, now, time_validated, v_ego, sm):
     if not self.starpilot_planner.gps_valid or not self.mapbox_token or abs(sm["carState"].steeringAngleDeg - sm["liveParameters"].angleOffsetDeg) >= 45:
@@ -519,41 +524,32 @@ class SpeedLimitController:
     target_to_use = self.target_to_use
     target_with_offset = target_to_use + self.get_offset(target_to_use)
 
-    if self.starpilot_toggles.speed_limit_controller_override_manual:
-      if sm["carState"].gasPressed and v_ego > target_with_offset > 0:
-        self.override_slc = True
-        self.overridden_speed = v_ego + v_ego_diff
-      else:
-        self.clear_override()
-      return
-
-    if not self.starpilot_toggles.speed_limit_controller_override_set_speed:
-      self.clear_override()
-      return
-
     set_speed = v_cruise + v_cruise_diff
     bidirectional_set_speed = getattr(self.starpilot_toggles, "redneck_cruise", False)
-    if bidirectional_set_speed:
-      if self.override_slc and set_speed > 0:
-        self.overridden_speed = set_speed
-      elif target_with_offset > 0 and set_speed > 0 and set_speed_changed and not set_speed_input_consumed:
-        self.override_slc = True
-        self.overridden_speed = set_speed
-      else:
-        self.clear_override()
-      return
 
-    if self.override_slc:
-      # A fallback transition alone preserves the override; a fresh set-speed change may clear it.
-      if set_speed <= 0 or (
-        target_with_offset > 0 and set_speed <= target_with_offset and
-        (self.source != "None" or set_speed_changed)
-      ):
-        self.clear_override()
+    if self._persistent_override_speed > 0:
+      if bidirectional_set_speed:
+        if set_speed <= 0:
+          self.clear_persistent_override()
+        else:
+          self._persistent_override_speed = set_speed
+      elif set_speed <= 0 or (target_with_offset > 0 and set_speed <= target_with_offset and (self.source != "None" or set_speed_changed)):
+        self.clear_persistent_override()
       else:
-        self.overridden_speed = set_speed
-    elif target_with_offset > 0 and set_speed_raised and set_speed > target_with_offset and not set_speed_input_consumed:
+        self._persistent_override_speed = set_speed
+    elif (
+      target_with_offset > 0
+      and set_speed > 0
+      and not set_speed_input_consumed
+      and ((bidirectional_set_speed and set_speed_changed) or (not bidirectional_set_speed and set_speed_raised and set_speed > target_with_offset))
+    ):
+      self._persistent_override_speed = set_speed
+
+    if sm["carState"].gasPressed and v_ego > target_with_offset > 0:
       self.override_slc = True
-      self.overridden_speed = set_speed
+      self.overridden_speed = v_ego + v_ego_diff
+    elif self._persistent_override_speed > 0:
+      self.override_slc = True
+      self.overridden_speed = self._persistent_override_speed
     else:
       self.clear_override()

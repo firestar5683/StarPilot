@@ -77,13 +77,6 @@ SLC_FALLBACK_OPTIONS = [
   (2, "Previous Limit"),
 ]
 
-SLC_OVERRIDE_OPTIONS = [
-  (0, "None"),
-  (1, "Set With Gas Pedal"),
-  (2, "Max Set Speed"),
-]
-
-
 # ═══════════════════════════════════════════════════════════════
 # AdaptiveSpeedView — nested panel with two adaptive speed tiles
 # ═══════════════════════════════════════════════════════════════
@@ -599,11 +592,6 @@ class StarPilotLongitudinalLayout(_SettingsPage):
                  get_value=lambda: self._profile_label_for_value(self._params.get_int("SLCFallback"), SLC_FALLBACK_OPTIONS),
                  on_click=lambda: self._show_labeled_select("Fallback Speed", "SLCFallback", SLC_FALLBACK_OPTIONS,
                                                             self._params.get_int("SLCFallback"))),
-      SettingRow("SLCOverride", "value", tr_noop("Override Speed"),
-                 subtitle="",
-                 get_value=lambda: self._profile_label_for_value(self._params.get_int("SLCOverride"), SLC_OVERRIDE_OPTIONS),
-                 on_click=lambda: self._show_labeled_select("Override Speed", "SLCOverride", SLC_OVERRIDE_OPTIONS,
-                                                            self._params.get_int("SLCOverride"))),
       SettingRow("SLCPriority", "value", tr_noop("Source Priority"),
                  subtitle="",
                  get_value=self._get_priority_value,
@@ -889,7 +877,7 @@ class StarPilotLongitudinalLayout(_SettingsPage):
       self,
       [SettingSection(title="", rows=self._slc_rows)],
       header_title=tr_noop("Speed Limit Controller"),
-      header_subtitle=tr_noop("Manage auto speed matching, confirmation, offsets, and source priority."),
+      header_subtitle=tr_noop("Press + above a limit for a persistent override; hold the gas pedal for a temporary override."),
       parent_toggle=pt_slc,
       panel_style=PANEL_STYLE,
     )

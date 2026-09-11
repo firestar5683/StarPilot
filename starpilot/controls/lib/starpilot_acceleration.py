@@ -221,8 +221,7 @@ class StarPilotAcceleration:
       getattr(self.starpilot_planner.starpilot_vcruise, "slc_offset", 0.0),
       getattr(getattr(self.starpilot_planner.starpilot_vcruise, "slc", None), "overridden_speed", 0.0),
       max(float(getattr(sm["carState"], "vEgoCluster", v_ego) or v_ego), v_ego) - v_ego,
-      allow_lower_override=(getattr(starpilot_toggles, "redneck_cruise", False) and
-                            getattr(starpilot_toggles, "speed_limit_controller_override_set_speed", False)),
+      allow_lower_override=getattr(starpilot_toggles, "redneck_cruise", False),
     )
     v_target = float(self.starpilot_planner.v_cruise or raw_v_cruise)
     if effective_slc_target > 0.0:
@@ -277,8 +276,7 @@ class StarPilotAcceleration:
       getattr(self.starpilot_planner.starpilot_vcruise, "slc_offset", 0.0),
       getattr(getattr(self.starpilot_planner.starpilot_vcruise, "slc", None), "overridden_speed", 0.0),
       v_ego_diff,
-      allow_lower_override=(getattr(starpilot_toggles, "redneck_cruise", False) and
-                            getattr(starpilot_toggles, "speed_limit_controller_override_set_speed", False)),
+      allow_lower_override=getattr(starpilot_toggles, "redneck_cruise", False),
     )
     v_target = float(self.starpilot_planner.v_cruise or raw_v_cruise)
     if effective_slc_target > 0.0:
@@ -319,8 +317,7 @@ class StarPilotAcceleration:
       getattr(self.starpilot_planner.starpilot_vcruise, "slc_offset", 0.0),
       getattr(getattr(self.starpilot_planner.starpilot_vcruise, "slc", None), "overridden_speed", 0.0),
       max(v_ego_cluster, v_ego) - v_ego,
-      allow_lower_override=(getattr(starpilot_toggles, "redneck_cruise", False) and
-                            getattr(starpilot_toggles, "speed_limit_controller_override_set_speed", False)),
+      allow_lower_override=getattr(starpilot_toggles, "redneck_cruise", False),
     )
     v_target = float(self.starpilot_planner.v_cruise or raw_v_cruise)
     if effective_slc_target > 0.0:

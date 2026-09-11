@@ -47,8 +47,6 @@ def make_toggles(**overrides):
     "slc_mapbox_filler": False,
     "speed_limit_confirmation_higher": False,
     "speed_limit_confirmation_lower": False,
-    "speed_limit_controller_override_manual": True,
-    "speed_limit_controller_override_set_speed": False,
     "redneck_cruise": False,
     "speed_limit_filler": False,
     "speed_limit_offset1": 0.0,
@@ -317,8 +315,6 @@ def test_display_only_applies_large_delta_guard():
 
 def test_set_speed_override_survives_source_changes_and_fallback_until_driver_clears():
   controller = make_controller(
-    speed_limit_controller_override_manual=False,
-    speed_limit_controller_override_set_speed=True,
     speed_limit_priority1="Map Data",
     speed_limit_priority2="Dashboard",
     slc_fallback_set_speed=True,
@@ -444,10 +440,7 @@ def test_unconfirmed_lower_limit_keeps_existing_override():
 
 
 def test_set_speed_override_handles_higher_limit_changes():
-  controller = make_controller(
-    speed_limit_controller_override_manual=False,
-    speed_limit_controller_override_set_speed=True,
-  )
+  controller = make_controller()
   try:
     controller.source = "Dashboard"
     controller.target = mph(35)
@@ -479,24 +472,33 @@ def test_set_speed_override_handles_higher_limit_changes():
     controller.shutdown()
 
 
-def test_set_speed_override_follows_driver_wheel_intent():
-  controller = make_controller(
-    speed_limit_controller_override_manual=False,
-    speed_limit_controller_override_set_speed=True,
-  )
+def test_pedal_and_set_speed_overrides_are_independent():
+  controller = make_controller()
   try:
     controller.source = "Dashboard"
     controller.target = mph(45)
     controller.last_valid_limit = mph(45)
 
-    # Gas never creates a persistent wheel override.
+    # A pedal pass is temporary; a set-speed increase is the fixed persistent action.
     controller.update_override(mph(45), 0.0, mph(45), 0.0, make_sm(gas_pressed=False))
     controller.update_override(mph(45), 0.0, mph(55), 0.0, make_sm(gas_pressed=True))
+    assert controller.override_slc
+    assert controller.overridden_speed == pytest.approx(mph(55))
+
+    controller.update_override(mph(45), 0.0, mph(55), 0.0, make_sm(gas_pressed=False))
     assert not controller.override_slc
     assert controller.overridden_speed == 0
 
     # A fresh + above the effective SLC target arms the override.
     controller.update_override(mph(55), 0.0, mph(55), 0.0, make_sm(gas_pressed=False))
+    assert controller.override_slc
+    assert controller.overridden_speed == pytest.approx(mph(55))
+
+    # Pedaling temporarily takes priority, then returns to the selected set speed.
+    controller.update_override(mph(55), 0.0, mph(60), 0.0, make_sm(gas_pressed=True))
+    assert controller.overridden_speed == pytest.approx(mph(60))
+
+    controller.update_override(mph(55), 0.0, mph(60), 0.0, make_sm(gas_pressed=False))
     assert controller.override_slc
     assert controller.overridden_speed == pytest.approx(mph(55))
 
@@ -516,11 +518,9 @@ def test_set_speed_override_follows_driver_wheel_intent():
     controller.shutdown()
 
 
-def test_set_speed_mode_waits_until_above_slc_target_with_offset():
+def test_persistent_override_waits_until_above_slc_target_with_offset():
   controller = make_controller(
     is_metric=True,
-    speed_limit_controller_override_manual=False,
-    speed_limit_controller_override_set_speed=True,
     speed_limit_offset2=3 * CV.KPH_TO_MS,
   )
   try:
@@ -546,10 +546,7 @@ def test_set_speed_mode_waits_until_above_slc_target_with_offset():
 def test_set_speed_override_clears_on_new_speed_zone():
   # Entering a new (lower) posted limit clears the override; a steady high set speed must not
   # re-arm it. Only a fresh +/- press re-arms.
-  controller = make_controller(
-    speed_limit_controller_override_manual=False,
-    speed_limit_controller_override_set_speed=True,
-  )
+  controller = make_controller()
   try:
     controller.source = "Dashboard"
     controller.target = mph(45)
@@ -579,8 +576,6 @@ def test_set_speed_override_clears_on_new_speed_zone():
 
 def test_confirmation_accel_press_does_not_arm_set_speed_override():
   controller = make_controller(
-    speed_limit_controller_override_manual=False,
-    speed_limit_controller_override_set_speed=True,
     speed_limit_confirmation_higher=True,
   )
   try:
@@ -622,10 +617,7 @@ def test_confirmation_accel_press_does_not_arm_set_speed_override():
 
 
 def test_adopt_speed_limit_clears_complete_override_state():
-  controller = make_controller(
-    speed_limit_controller_override_manual=False,
-    speed_limit_controller_override_set_speed=True,
-  )
+  controller = make_controller()
   try:
     controller.source = "Dashboard"
     controller.target = mph(45)
@@ -645,10 +637,8 @@ def test_adopt_speed_limit_clears_complete_override_state():
     controller.shutdown()
 
 
-def test_redneck_set_speed_mode_overrides_in_both_directions():
+def test_redneck_set_speed_override_is_bidirectional():
   controller = make_controller(
-    speed_limit_controller_override_manual=False,
-    speed_limit_controller_override_set_speed=True,
     redneck_cruise=True,
   )
   try:
@@ -670,10 +660,7 @@ def test_redneck_set_speed_mode_overrides_in_both_directions():
 
 
 def test_manual_override_tracks_current_speed_and_ends_on_release():
-  controller = make_controller(
-    speed_limit_controller_override_manual=True,
-    speed_limit_controller_override_set_speed=False,
-  )
+  controller = make_controller()
   try:
     controller.source = "Dashboard"
     controller.target = mph(45)
@@ -724,10 +711,7 @@ def test_manual_override_survives_brief_enabled_flicker():
 
 
 def test_override_clears_after_sustained_disengage():
-  controller = make_controller(
-    speed_limit_controller_override_manual=False,
-    speed_limit_controller_override_set_speed=True,
-  )
+  controller = make_controller()
   try:
     controller.source = "Dashboard"
     controller.target = mph(45)

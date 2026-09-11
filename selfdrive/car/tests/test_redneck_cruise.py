@@ -265,7 +265,6 @@ class TestRedneckCruise(unittest.TestCase):
       starpilot_toggles=SimpleNamespace(
         speed_limit_controller=True,
         redneck_cruise=True,
-        speed_limit_controller_override_set_speed=True,
       ),
     )
     car_state = SimpleNamespace(
