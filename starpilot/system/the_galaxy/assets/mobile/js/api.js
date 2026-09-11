@@ -228,6 +228,12 @@ export const api = {
   getUpdateBranches() { return request("/api/update/branches") },
   getUpdateBranch() { return request("/api/update/branch") },
   setUpdateBranch(branch) { return request("/api/update/branch", { method: "POST", data: { branch } }) },
+  getUpdateVersions(branch, { page = 1, head = "", signal } = {}) {
+    const query = new URLSearchParams({ branch, page: String(page) })
+    if (head) query.set("head", head)
+    return request(`/api/update/versions?${query}`, { cache: "no-store", signal })
+  },
+  installUpdateVersion(branch, commit) { return request("/api/update/version", { method: "POST", data: { branch, commit, confirmed: true } }) },
   updateFast() { return request("/api/update/fast", { method: "POST" }) },
   getUpdateFastStatus() { return request("/api/update/fast/status") },
   updateRecover() { return request("/api/update/recover", { method: "POST" }) },

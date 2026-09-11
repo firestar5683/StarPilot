@@ -2,6 +2,8 @@ import { api, showSnackbar } from "../api.js"
 import { usePolling } from "../composables.js"
 import { GalaxyConfirm } from "../components/GalaxyModal.js"
 import { GalaxySection } from "../components/GalaxySection.js"
+import { GalaxySelect } from "../components/GalaxySelect.js"
+import { VersionHistoryPicker, versionTitle, releaseVersions } from "../components/VersionHistoryPicker.js"
 import { GxNotice } from "../components/GxNotice.js"
 
 function shortCommit(commit) {
@@ -16,12 +18,26 @@ function toPercent(value) {
 
 export const SystemTools = {
   name: "SystemTools",
-  components: { GalaxySection, GxNotice },
+  components: { GalaxySection, GxNotice, GalaxySelect, VersionHistoryPicker },
   data() {
     return {
       branches: [],
       currentBranch: "",
+      targetBranch: "",
+      versionMode: "latest",
+      selectedCommit: "",
+      versionCommits: [],
+      versionHead: "",
+      versionPage: 0,
+      versionHasMore: false,
+      versionLoading: false,
+      versionError: "",
+      versionNotice: "",
+      versionGeneration: 0,
       branchLoading: true,
+      otherBranchesOpen: false,
+      branchBusy: false,
+
       isOnroad: false,
       fastStatus: null,
       checkedForUpdates: false,
@@ -42,8 +58,27 @@ export const SystemTools = {
     this.poll.start()
   },
   mounted() { this.loadBranches(); this.loadProfiles(); this.loadTailscale() },
-  beforeUnmount() { this.poll?.destroy() },
+  beforeUnmount() { this.poll?.destroy(); this.resetVersions() },
   computed: {
+    primaryBranchValue() {
+      if (this.otherBranchesOpen) return "other:"
+      return ["StarPilot", "Dom"].includes(this.targetBranch) ? this.targetBranch : ""
+    },
+    otherBranches() {
+      const branches = this.branches.filter(branch => !["StarPilot", "Dom"].includes(branch))
+      if (this.currentBranch && !["StarPilot", "Dom"].includes(this.currentBranch) && !branches.includes(this.currentBranch)) {
+        branches.unshift(this.currentBranch)
+      }
+      return branches
+    },
+    branchSwitchBlocked() {
+      return this.branchLoading || this.isOnroad || !!this.fastStatus?.isOnroad || !!this.fastStatus?.running || !!this.busy
+    },
+    versionChoices() { return this.targetBranch === "StarPilot" ? releaseVersions(this.versionCommits) : this.versionCommits },
+    installVersionBlocked() {
+      return this.branchSwitchBlocked || this.branchBusy || !this.branches.includes(this.targetBranch) ||
+        (this.versionMode === "earlier" && (this.versionLoading || !/^[a-f0-9]{40}$/.test(this.selectedCommit) || !this.versionChoices.some(commit => commit.sha === this.selectedCommit)))
+    },
     updateAvailable() { return this.checkedForUpdates && !!this.fastStatus?.updateAvailable && !this.fastStatus?.running },
     factoryResetStatus() {
       const s = this.fastStatus
@@ -69,6 +104,10 @@ export const SystemTools = {
         const data = await api.getUpdateBranches()
         this.branches = Array.isArray(data?.branches) ? data.branches : []
         this.currentBranch = data?.currentBranch || ""
+        if (!this.targetBranch) {
+          this.targetBranch = this.currentBranch
+          this.otherBranchesOpen = !!this.targetBranch && !["StarPilot", "Dom"].includes(this.targetBranch)
+        }
         this.isOnroad = !!data?.isOnroad
       } catch (e) {
         showSnackbar("Failed to load update info.", "error")
@@ -168,20 +207,126 @@ export const SystemTools = {
         showSnackbar("Reset failed.", "error")
       }
     },
-    onBranchSelect(e) {
+    onPrimaryBranchSelect(e) {
       const branch = e.target.value
-      e.target.value = this.currentBranch || ""
-      this.switchBranch(branch)
+      if (this.branchSwitchBlocked || this.branchBusy) return
+      this.otherBranchesOpen = branch === "other:"
+      if (this.otherBranchesOpen) {
+        // Other is navigation, never an install target.
+        this.targetBranch = ""
+        this.resetVersions()
+      } else this.selectTargetBranch(branch)
     },
-    async switchBranch(branch) {
-      if (!branch || branch === this.currentBranch) return
-      if (!(await GalaxyConfirm({ title: "Switch branch?", message: `Switch to ${branch} and update?`, confirmLabel: "Switch" }))) return
+    onBranchSelect(e) { this.selectTargetBranch(e.target.value) },
+    selectTargetBranch(branch) {
+      if (!branch || !this.branches.includes(branch) || this.branchBusy || this.branchSwitchBlocked) return
+      if (branch === this.targetBranch) return
+      this.targetBranch = branch
+      this.otherBranchesOpen = !["StarPilot", "Dom"].includes(branch)
+      this.resetVersions()
+    },
+    resetVersions() {
+      this.versionAbort?.abort()
+      this.versionAbort = null
+      this.versionGeneration++
+      this.versionMode = "latest"
+      this.selectedCommit = ""
+      this.versionCommits = []
+      this.versionHead = ""
+      this.versionPage = 0
+      this.versionHasMore = false
+      this.versionLoading = false
+      this.versionError = ""
+      this.versionNotice = ""
+    },
+    async onVersionModeSelect(e) {
+      if (this.branchSwitchBlocked || this.branchBusy) return
+      const mode = e.target.value
+      if (!["latest", "earlier"].includes(mode)) return
+      this.resetVersions()
+      this.versionMode = mode
+      if (mode === "earlier") await this.loadVersions()
+    },
+    async loadVersions(more = false) {
+      if (!this.targetBranch || !this.branches.includes(this.targetBranch) || this.versionLoading || this.versionMode !== "earlier" || (more && !this.versionHasMore)) return
+      const branch = this.targetBranch
+      const generation = this.versionGeneration
+      let page = more ? this.versionPage + 1 : 1
+      let head = more ? this.versionHead : ""
+      const controller = new AbortController()
+      this.versionAbort = controller
+      this.versionLoading = true
+      this.versionError = ""
+      const originalCount = this.versionChoices.length
+      const budget = more && branch === "StarPilot" ? 4 : 1
       try {
-        await api.setUpdateBranch(branch)
-        showSnackbar(`Switching to ${branch}...`)
+        for (let scanned = 0; scanned < budget; scanned++) {
+          const data = await api.getUpdateVersions(branch, {page, head, signal: controller.signal})
+          if (generation !== this.versionGeneration || controller.signal.aborted) return
+          if (data?.branch !== branch || data?.page !== page || !/^[a-f0-9]{40}$/.test(data?.head || "") || (head && data.head !== head) || !Array.isArray(data?.commits)) throw new Error("Version history changed. Choose Latest and try again.")
+          const commits = data.commits.filter(commit => /^[a-f0-9]{40}$/.test(commit?.sha || ""))
+          this.versionCommits = page > 1 ? [...this.versionCommits, ...commits.filter(commit => !this.versionCommits.some(existing => existing.sha === commit.sha))] : commits
+          if (data.cached) {
+            const saved = new Date(data.cachedAt)
+            const when = Number.isFinite(saved.getTime()) ? " from " + saved.toLocaleString() : ""
+            this.versionNotice = "Showing saved history" + when + ". Installation still needs an online check."
+          } else if (page === 1) this.versionNotice = ""
+          this.versionHead = data.head
+          this.versionPage = page
+          this.versionHasMore = !!data.hasMore && commits.length > 0
+          if (!this.versionCommits.length) this.versionError = "No versions are available for this branch. Choose Latest or another branch."
+          if (!this.versionHasMore || this.versionChoices.length > originalCount) break
+          page++
+          head = this.versionHead
+        }
+      } catch (e) {
+        if (generation !== this.versionGeneration || controller.signal.aborted) return
+        this.versionError = e?.message || "Failed to load version history. Try again."
+      } finally {
+        if (generation === this.versionGeneration) {
+          this.versionLoading = false
+          this.versionAbort = null
+        }
+      }
+    },
+    versionDate(date) {
+      const value = new Date(date)
+      return Number.isNaN(value.getTime()) ? "Date unavailable" : value.toLocaleDateString(undefined, {year: "numeric", month: "short", day: "numeric"})
+    },
+    async returnToLatest() {
+      const branch = this.fastStatus?.versionPin?.branch
+      if (this.branchSwitchBlocked || this.branchBusy || !this.branches.includes(branch)) return
+      this.selectTargetBranch(branch)
+      this.resetVersions()
+      await this.installSelectedVersion()
+    },
+    async installSelectedVersion() {
+      if (this.installVersionBlocked) return
+      const branch = this.targetBranch
+      const commit = this.versionMode === "latest" ? "latest" : this.selectedCommit
+      const generation = this.versionGeneration
+      this.branchBusy = true
+      try {
+        const selected = this.versionCommits.find(item => item.sha === commit)
+        const version = commit === "latest" ? "Latest" : `${versionTitle(selected, branch === "StarPilot")}\nCommit: ${commit}`
+        const policy = commit === "latest" ? "This uses the normal branch updater, including any required OS update during startup. Your automatic-update setting is unchanged." : "Automatic updates will be paused for this earlier version."
+        const recovery = commit === "latest"
+          ? "This replaces the current software. Settings and statistics are kept. Local code changes may be overwritten; standard Rollback saves the previous committed version."
+          : "This replaces the current software. Settings and statistics are kept, and local code changes are backed up. Older versions may remove this picker; an SSH recovery copy is saved on the device."
+        if (!(await GalaxyConfirm({title: "Install selected version?", message: `Branch: ${branch}\nVersion: ${version}\n\n${policy}\n\n${recovery}\n\nYour device will reboot when installation finishes.`, confirmLabel: "Install & Reboot", danger: true}))) return
+        // Refresh driving/updater state after the user has reviewed the target.
+        await this.loadFastStatus({throwOnError: true})
+        if (this.branchSwitchBlocked || this.targetBranch !== branch || generation !== this.versionGeneration) {
+          showSnackbar("Installation is unavailable while driving or updating, or the selection has changed.", "error")
+          return
+        }
+        const result = await api.installUpdateVersion(branch, commit)
+        showSnackbar(result?.message || `Installing ${version} on ${branch}...`)
         await this.loadFastStatus()
       } catch (e) {
-        showSnackbar(e?.message || "Switch failed.", "error")
+        showSnackbar(e?.message || "Installation failed.", "error")
+      } finally {
+        this.branchBusy = false
       }
     },
     async checkUpdates() {
@@ -342,7 +487,7 @@ export const SystemTools = {
                 <span v-else class="gx-chip">Not checked</span>
               </div>
               <div style="padding: var(--sp-3); display:grid; gap:6px;">
-                <div class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Branch</span><span class="gx-row__value">{{ fastStatus.branch || currentBranch || '—' }}</span></div>
+                <div class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Installed branch</span><span class="gx-row__value">{{ fastStatus.branch || currentBranch || '—' }}</span></div>
                 <div v-if="fastStatus.running" class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Stage</span><span class="gx-row__value">{{ fastStatus.stage }} · {{ fastStatus.progressLabel }}</span></div>
                 <div class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Local</span><span class="gx-row__value" style="font-family:monospace;">{{ shortCommit(fastStatus.localCommit) }}</span></div>
                 <div class="gx-row" style="border-top:none; min-height:0; padding:4px 0;"><span class="gx-row__label">Remote</span><span class="gx-row__value" style="font-family:monospace;">{{ shortCommit(fastStatus.remoteCommit) }}</span></div>
@@ -383,12 +528,48 @@ export const SystemTools = {
             </div>
 
             <div class="gx-card" style="margin-bottom:12px;">
-              <div class="gx-section__header"><i class="bi bi-git-branch"></i><span class="gx-section__title">Switch Branch</span></div>
+              <div class="gx-section__header"><i class="bi bi-git-branch"></i><span class="gx-section__title">Install a Version</span></div>
               <div style="padding: var(--sp-3);">
-                <select class="gx-field gx-field--full" :disabled="!!isOnroad" @change="onBranchSelect">
-                  <option v-if="!branches.length" value="">No branches available</option>
-                  <option v-for="b in branches" :key="b" :value="b" :selected="b === currentBranch">{{ b === currentBranch ? b + ' (current)' : b }}</option>
-                </select>
+                <p class="gx-note" style="margin-top:0; overflow-wrap:anywhere;">Installed branch: <strong>{{ currentBranch || 'Unknown' }}</strong></p>
+                <GalaxySelect id="gx-primary-branch" class="gx-field gx-field--full" aria-label="Target branch"
+                  :value="primaryBranchValue" :disabled="branchSwitchBlocked || branchBusy" @change="onPrimaryBranchSelect">
+                  <option value="" disabled>Select a branch</option>
+                  <option value="StarPilot" data-collapsed-label="StarPilot" data-description="Stable releases. Recommended for most users." :disabled="!branches.includes('StarPilot')">StarPilot — Release</option>
+                  <option value="Dom" data-collapsed-label="Dom" data-description="Latest features and fixes under development. Updates regularly and may introduce bugs." :disabled="!branches.includes('Dom')">Dom — Development</option>
+                  <option value="other:">Other branches…</option>
+                </GalaxySelect>
+                <div v-if="otherBranchesOpen" style="margin-top:var(--sp-3); padding-left:var(--sp-3); border-left:2px solid var(--outline-variant);">
+                  <label for="gx-other-branch" class="gx-row__label">Other branches</label>
+                  <p class="gx-note">Additional branches from this installation's repository.</p>
+                  <GalaxySelect id="gx-other-branch" class="gx-field gx-field--full" aria-label="Other branches"
+                    :value="otherBranches.includes(targetBranch) ? targetBranch : ''" :disabled="branchSwitchBlocked || branchBusy" @change="onBranchSelect">
+                    <option value="" disabled>{{ otherBranches.length ? 'Select another branch' : 'No other branches available' }}</option>
+                    <option v-for="b in otherBranches" :key="b" :value="b">{{ b === currentBranch ? b + ' (current)' : b }}</option>
+                  </GalaxySelect>
+                </div>
+                <p v-if="!branchLoading && !branches.length" class="gx-note">No branch list available. Reload when connected to check available branches.</p>
+                <div v-if="targetBranch" style="margin-top:var(--sp-3); display:grid; gap:8px; min-width:0;">
+                  <label for="gx-version-mode" class="gx-row__label">Version</label>
+                  <GalaxySelect id="gx-version-mode" class="gx-field gx-field--full" aria-label="Version" :value="versionMode"
+                    :disabled="branchSwitchBlocked || branchBusy || !branches.includes(targetBranch)" @change="onVersionModeSelect">
+                    <option value="latest">Latest</option>
+                    <option value="earlier">Choose earlier…</option>
+                  </GalaxySelect>
+                  <template v-if="versionMode === 'earlier'">
+                    <VersionHistoryPicker id="gx-version-commit" :value="selectedCommit" :commits="versionCommits"
+                      :release-branch="targetBranch === 'StarPilot'" :loading="versionLoading" :has-more="versionHasMore" :error="versionError" :notice="versionNotice"
+                      :disabled="branchSwitchBlocked || branchBusy" @change="selectedCommit = $event.target.value"
+                      @loadmore="loadVersions(versionCommits.length > 0 && versionHasMore)" />
+                  </template>
+                  <p v-if="!branches.includes(targetBranch)" class="gx-note">This installed branch is no longer listed by the repository. Select an available target branch to install a version.</p>
+                  <button type="button" class="gx-btn" :disabled="installVersionBlocked" @click="installSelectedVersion">
+                    <i v-if="branchBusy" class="bi bi-arrow-repeat gx-spin"></i>{{ branchBusy ? 'Starting installation…' : 'Install selected version' }}
+                  </button>
+                </div>
+                <div v-if="fastStatus?.versionPin" class="gx-note" style="margin-top:var(--sp-3); overflow-wrap:anywhere;">
+                  <p>Pinned version: <strong>{{ fastStatus.versionPin.branch }} · {{ shortCommit(fastStatus.versionPin.commit) }}</strong><br>Automatic updates were paused at installation.</p>
+                  <button type="button" class="gx-btn gx-btn--tonal" :disabled="branchSwitchBlocked || branchBusy || !branches.includes(fastStatus.versionPin.branch)" @click="returnToLatest">Return to Latest</button>
+                </div>
               </div>
             </div>
 
