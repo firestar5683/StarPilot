@@ -34,7 +34,7 @@ export const GalaxyModal = {
         <transition name="gx-slide" appear>
           <div class="gx-sheet" role="dialog" :aria-label="title">
             <h3 class="gx-sheet__title">{{ title }}</h3>
-            <p v-if="message" style="color: var(--text-muted); line-height: 1.5;">{{ message }}</p>
+            <p v-if="message" style="color: var(--text-muted); line-height: 1.5; white-space: pre-line; overflow-wrap: anywhere;">{{ message }}</p>
             <input v-if="input" ref="input" v-model="value" class="gx-field gx-field--full" type="text"
               :placeholder="inputPlaceholder" @keyup.enter="confirm" />
             <div class="gx-dialog__actions">
