@@ -3454,6 +3454,15 @@ def test_rav4_tss2_early_lead_cap_starts_a_mild_response():
   assert -0.5 <= cap < 0.0
 
 
+def test_rav4_tss2_early_lead_cap_handles_moderate_closing_before_hard_approach():
+  CP = ToyotaCarInterface.get_non_essential_params(TOYOTA_CAR.TOYOTA_RAV4_TSS2_2023)
+  lead = make_lead(status=True, d_rel=35.0, v_lead=16.4, a_lead=-0.5, model_prob=0.99)
+
+  cap = get_toyota_rav4_tss2_early_lead_cap(CP, lead, 17.4, -3.5)
+
+  assert cap == pytest.approx(-0.30, abs=0.03)
+
+
 def test_rav4_tss2_early_lead_cap_does_not_change_other_paths():
   rav4 = ToyotaCarInterface.get_non_essential_params(TOYOTA_CAR.TOYOTA_RAV4_TSS2_2023)
   other = ToyotaCarInterface.get_non_essential_params(TOYOTA_CAR.TOYOTA_RAV4_TSS2_2022)
