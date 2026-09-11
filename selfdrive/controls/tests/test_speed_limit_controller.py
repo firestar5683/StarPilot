@@ -75,7 +75,7 @@ def make_sm(*, gas_pressed, enabled=True, accel_pressed=False, decel_pressed=Fal
     "carControl": SimpleNamespace(longActive=long_active),
     "carState": SimpleNamespace(gasPressed=gas_pressed, steeringAngleDeg=0.0, vCruise=v_cruise_kph),
     "liveParameters": SimpleNamespace(angleOffsetDeg=0.0),
-    "mapdOut": SimpleNamespace(nextSpeedLimitDistance=0.0, nextSpeedLimit=0.0, speedLimit=0.0, waySelectionType=0),
+    "mapdOut": SimpleNamespace(nextSpeedLimitDistance=0.0, nextSpeedLimit=0.0, speedLimit=0.0, waySelectionType=0, roadName=""),
     "selfdriveState": SimpleNamespace(enabled=enabled),
     "starpilotCarState": SimpleNamespace(accelPressed=accel_pressed, decelPressed=decel_pressed),
   }
@@ -315,106 +315,62 @@ def test_display_only_applies_large_delta_guard():
     controller.shutdown()
 
 
-def test_new_source_limit_clears_override_until_gas_release():
-  controller = make_controller()
+def test_set_speed_override_survives_source_changes_and_fallback_until_driver_clears():
+  controller = make_controller(
+    speed_limit_controller_override_manual=False,
+    speed_limit_controller_override_set_speed=True,
+    speed_limit_priority1="Map Data",
+    speed_limit_priority2="Dashboard",
+    slc_fallback_set_speed=True,
+  )
   try:
     controller.source = "Dashboard"
-    controller.target = mph(55)
+    controller.target = mph(45)
     controller.previous_source = "Dashboard"
-    controller.previous_target = mph(55)
-    controller.overridden_speed = mph(65)
+    controller.previous_target = mph(45)
+    controller.last_valid_limit = mph(45)
 
-    sm = make_sm(gas_pressed=True)
-    controller.update_limits(mph(45), datetime.now(timezone.utc), False, mph(75), mph(65), sm)
-    controller.update_override(mph(75), 0.0, mph(65), 0.0, sm)
-
-    assert controller.target == pytest.approx(mph(45))
-    assert controller.source == "Dashboard"
-    assert controller.overridden_speed == 0
-    assert not controller.override_slc
-
-    controller.update_limits(mph(45), datetime.now(timezone.utc), False, mph(75), mph(65), sm)
-    controller.update_override(mph(75), 0.0, mph(65), 0.0, sm)
-
-    assert controller.overridden_speed == 0
-    assert not controller.override_slc
-
-    controller.update_override(mph(75), 0.0, mph(65), 0.0, make_sm(gas_pressed=False))
-    controller.update_override(mph(75), 0.0, mph(65), 0.0, sm)
-
-    assert controller.overridden_speed == pytest.approx(mph(65))
+    controller.update_override(mph(45), 0.0, mph(45), 0.0, make_sm(gas_pressed=False))
+    controller.update_override(mph(55), 0.0, mph(45), 0.0, make_sm(gas_pressed=False))
     assert controller.override_slc
 
-    # --- Dropout / Fallback Test Condition ---
-    controller.starpilot_toggles = make_toggles(slc_fallback_set_speed=True)
-    # No limit available → falls back to v_cruise (75 mph) with source "None".
-    # Override persists because target_to_use resolves to last_valid_limit (45 mph) which is
-    # below overridden_speed (65 mph) — the sticky override_slc chain stays True.
-    controller.update_limits(0.0, datetime.now(timezone.utc), False, mph(75), mph(65), sm)
-    controller.update_override(mph(75), 0.0, mph(65), 0.0, sm)
+    # Dashboard 45 -> Map Data 45 is not a new speed zone.
+    map_sm = make_sm(gas_pressed=False)
+    map_sm["mapdOut"].speedLimit = mph(45)
+    controller.update_limits(0.0, datetime.now(timezone.utc), False, mph(55), mph(50), map_sm)
+    controller.update_override(mph(55), 0.0, mph(50), 0.0, map_sm)
+    assert controller.source == "Map Data"
+    assert controller.overridden_speed == pytest.approx(mph(55))
+    assert controller.override_slc
 
-    assert controller.target == pytest.approx(mph(75))
+    # A temporary fallback, and even a complete source dropout, do not clear the override.
+    controller.update_limits(0.0, datetime.now(timezone.utc), False, mph(55), mph(50), make_sm(gas_pressed=False))
+    controller.update_override(mph(55), 0.0, mph(50), 0.0, make_sm(gas_pressed=False))
     assert controller.source == "None"
-    assert controller.overridden_speed == pytest.approx(mph(65))
+    assert controller.target == pytest.approx(mph(55))
+    assert controller.overridden_speed == pytest.approx(mph(55))
     assert controller.override_slc
 
-    # Recovery to a confirmed limit (55 mph) clears the override: this is a genuinely new
-    # speed zone (55 != last_valid 45), so clear_override_for_source_limit fires correctly.
-    controller.update_limits(mph(55), datetime.now(timezone.utc), False, mph(75), mph(65), sm)
-    controller.update_override(mph(75), 0.0, mph(65), 0.0, sm)
+    controller.starpilot_toggles.slc_fallback_set_speed = False
+    controller.update_limits(0.0, datetime.now(timezone.utc), False, mph(55), mph(50), make_sm(gas_pressed=False))
+    controller.update_override(mph(55), 0.0, mph(50), 0.0, make_sm(gas_pressed=False))
+    assert controller.target == 0
+    assert controller.overridden_speed == pytest.approx(mph(55))
+    assert controller.override_slc
 
-    assert controller.target == pytest.approx(mph(55))
+    controller.update_limits(mph(45), datetime.now(timezone.utc), False, mph(55), mph(50), make_sm(gas_pressed=False))
+    controller.update_override(mph(55), 0.0, mph(50), 0.0, make_sm(gas_pressed=False))
     assert controller.source == "Dashboard"
-    assert controller.overridden_speed == 0
+    assert controller.overridden_speed == pytest.approx(mph(55))
+    assert controller.override_slc
+
+    # Set-speed fallback does not clear passively, but a fresh - to the retained target does.
+    controller.starpilot_toggles.slc_fallback_set_speed = True
+    controller.update_limits(0.0, datetime.now(timezone.utc), False, mph(55), mph(50), make_sm(gas_pressed=False))
+    controller.update_override(mph(55), 0.0, mph(50), 0.0, make_sm(gas_pressed=False))
+    controller.update_override(mph(45), 0.0, mph(50), 0.0, make_sm(gas_pressed=False))
     assert not controller.override_slc
-
-      # --- Override Clipping Check (set-speed fallback) ---
-      # Separate controller: active override, then fallback to v_cruise that is BELOW the override.
-      # overridden_speed clips to v_cruise (override_slc stays True via sticky chain, but
-      # np.clip clamps overridden_speed to the new target+offset).
-    clip_controller = make_controller(slc_fallback_set_speed=True)
-    try:
-      clip_controller.source = "Dashboard"
-      clip_controller.target = mph(55)
-      clip_controller.previous_source = "Dashboard"
-      clip_controller.previous_target = mph(55)
-      clip_controller.last_valid_limit = mph(55)
-      clip_controller.override_slc = True
-      clip_controller.overridden_speed = mph(65)
-
-      sm_no_gas = make_sm(gas_pressed=False)
-      # v_cruise = 30 mph (below last_valid 55), so target_to_use returns mph(30).
-      # override_slc sticky: overridden_speed=65 > 30+0=30 > 0 — still True from chain.
-      # np.clip(65, 30, 30) = 30, so overridden_speed clips to mph(30).
-      clip_controller.update_limits(0.0, datetime.now(timezone.utc), False, mph(30), mph(30), sm_no_gas)
-      clip_controller.update_override(mph(30), 0.0, mph(30), 0.0, sm_no_gas)
-
-      assert clip_controller.target == pytest.approx(mph(30))
-      # Clipped to v_cruise — not locked at mph(55) or mph(65)
-      assert clip_controller.overridden_speed == pytest.approx(mph(30))
-      assert clip_controller.override_slc
-    finally:
-      clip_controller.shutdown()
-
-    # --- Lost Speed Limit (no fallback) clears target to 0 ---
-    # When all limit sources drop to 0 with no fallback, target becomes 0
-    # and override_slc is False (target_to_use=0, chain evaluates False).
-    lost_controller = make_controller(slc_fallback_set_speed=False, slc_fallback_previous_speed_limit=False)
-    try:
-      lost_controller.source = "Dashboard"
-      lost_controller.target = mph(45)
-      lost_controller.previous_source = "Dashboard"
-      lost_controller.previous_target = mph(45)
-
-      sm_on = make_sm(gas_pressed=False)
-      lost_controller.update_limits(0.0, datetime.now(timezone.utc), False, mph(75), mph(65), sm_on)
-      lost_controller.update_override(mph(75), 0.0, mph(65), 0.0, sm_on)
-
-      assert lost_controller.target == 0
-      assert lost_controller.overridden_speed == 0
-      assert not lost_controller.override_slc
-    finally:
-      lost_controller.shutdown()
+    assert controller.overridden_speed == 0
   finally:
     controller.shutdown()
 
@@ -487,50 +443,43 @@ def test_unconfirmed_lower_limit_keeps_existing_override():
     controller.shutdown()
 
 
-def test_higher_limit_does_not_clear_override():
-  controller = make_controller()
+def test_set_speed_override_handles_higher_limit_changes():
+  controller = make_controller(
+    speed_limit_controller_override_manual=False,
+    speed_limit_controller_override_set_speed=True,
+  )
   try:
     controller.source = "Dashboard"
     controller.target = mph(35)
     controller.previous_source = "Dashboard"
     controller.previous_target = mph(35)
-    controller.overridden_speed = mph(55)
-    controller.override_slc = True
+    controller.last_valid_limit = mph(35)
 
-    sm = make_sm(gas_pressed=True)
-    controller.update_limits(mph(45), datetime.now(timezone.utc), False, mph(75), mph(55), sm)
-    controller.update_override(mph(75), 0.0, mph(55), 0.0, sm)
+    controller.update_override(mph(35), 0.0, mph(35), 0.0, make_sm(gas_pressed=False))
+    controller.update_override(mph(55), 0.0, mph(35), 0.0, make_sm(gas_pressed=False))
+    assert controller.override_slc
+    assert controller.overridden_speed == pytest.approx(mph(55))
+
+    # A higher limit below the selected override preserves it.
+    controller.update_limits(mph(45), datetime.now(timezone.utc), False, mph(55), mph(50), make_sm(gas_pressed=False))
+    controller.update_override(mph(55), 0.0, mph(50), 0.0, make_sm(gas_pressed=False))
 
     assert controller.target == pytest.approx(mph(45))
     assert controller.source == "Dashboard"
     assert controller.overridden_speed == pytest.approx(mph(55))
     assert controller.override_slc
 
-    controller_overridden_below = make_controller()
-    try:
-      controller_overridden_below.source = "Dashboard"
-      controller_overridden_below.target = mph(35)
-      controller_overridden_below.previous_source = "Dashboard"
-      controller_overridden_below.previous_target = mph(35)
-      controller_overridden_below.overridden_speed = mph(40)
-      controller_overridden_below.override_slc = True
-
-      sm = make_sm(gas_pressed=True)
-      controller_overridden_below.update_limits(mph(45), datetime.now(timezone.utc), False, mph(75), mph(55), sm)
-      controller_overridden_below.update_override(mph(75), 0.0, mph(55), 0.0, sm)
-
-      assert controller_overridden_below.target == pytest.approx(mph(45))
-      assert controller_overridden_below.overridden_speed == 0
-      assert not controller_overridden_below.override_slc
-    finally:
-      controller_overridden_below.shutdown()
+    # A higher effective target that reaches the override clears it without re-arming.
+    controller.update_limits(mph(55), datetime.now(timezone.utc), False, mph(55), mph(50), make_sm(gas_pressed=False))
+    controller.update_override(mph(55), 0.0, mph(50), 0.0, make_sm(gas_pressed=False))
+    assert controller.target == pytest.approx(mph(55))
+    assert controller.overridden_speed == 0
+    assert not controller.override_slc
   finally:
     controller.shutdown()
 
 
-def test_set_speed_mode_overrides_on_raise_without_gas():
-  # Max Set Speed mode: raising the set speed (+/-) above the posted limit must override
-  # the SLC hold with no gas pedal, targeting the set speed.
+def test_set_speed_override_follows_driver_wheel_intent():
   controller = make_controller(
     speed_limit_controller_override_manual=False,
     speed_limit_controller_override_set_speed=True,
@@ -540,19 +489,29 @@ def test_set_speed_mode_overrides_on_raise_without_gas():
     controller.target = mph(45)
     controller.last_valid_limit = mph(45)
 
-    # Baseline frame at the limit establishes the previous set speed (no rising edge yet).
+    # Gas never creates a persistent wheel override.
     controller.update_override(mph(45), 0.0, mph(45), 0.0, make_sm(gas_pressed=False))
+    controller.update_override(mph(45), 0.0, mph(55), 0.0, make_sm(gas_pressed=True))
     assert not controller.override_slc
+    assert controller.overridden_speed == 0
 
-    # Driver presses + to 60 (rising edge): override arms and targets the set speed.
-    controller.update_override(mph(60), 0.0, mph(45), 0.0, make_sm(gas_pressed=False))
+    # A fresh + above the effective SLC target arms the override.
+    controller.update_override(mph(55), 0.0, mph(55), 0.0, make_sm(gas_pressed=False))
     assert controller.override_slc
-    assert controller.overridden_speed == pytest.approx(mph(60))
+    assert controller.overridden_speed == pytest.approx(mph(55))
 
-    # Holding 60 with no further press: override stays latched.
     controller.update_override(mph(60), 0.0, mph(58), 0.0, make_sm(gas_pressed=False))
     assert controller.override_slc
     assert controller.overridden_speed == pytest.approx(mph(60))
+
+    controller.update_override(mph(50), 0.0, mph(50), 0.0, make_sm(gas_pressed=False))
+    assert controller.override_slc
+    assert controller.overridden_speed == pytest.approx(mph(50))
+
+    # Returning to the effective SLC target ends the persistent override.
+    controller.update_override(mph(45), 0.0, mph(45), 0.0, make_sm(gas_pressed=False))
+    assert not controller.override_slc
+    assert controller.overridden_speed == 0
   finally:
     controller.shutdown()
 
@@ -576,6 +535,10 @@ def test_set_speed_mode_waits_until_above_slc_target_with_offset():
     controller.update_override(35 * CV.KPH_TO_MS, 0.0, 30 * CV.KPH_TO_MS, 0.0, make_sm(gas_pressed=False))
     assert controller.override_slc
     assert controller.overridden_speed == pytest.approx(35 * CV.KPH_TO_MS)
+
+    controller.update_override(33 * CV.KPH_TO_MS, 0.0, 30 * CV.KPH_TO_MS, 0.0, make_sm(gas_pressed=False))
+    assert not controller.override_slc
+    assert controller.overridden_speed == 0
   finally:
     controller.shutdown()
 
@@ -598,18 +561,86 @@ def test_set_speed_override_clears_on_new_speed_zone():
     controller.update_override(mph(60), 0.0, mph(45), 0.0, make_sm(gas_pressed=False))
     assert controller.override_slc
 
-    # New lower zone (35): update_limits clears the override for the new segment.
-    controller.update_limits(mph(35), datetime.now(timezone.utc), False, mph(60), mph(58), make_sm(gas_pressed=False))
+    # A 1 mph lower zone takes the same-limit fast path but still clears the override.
+    controller.update_limits(mph(44), datetime.now(timezone.utc), False, mph(60), mph(58), make_sm(gas_pressed=False))
     controller.update_override(mph(60), 0.0, mph(58), 0.0, make_sm(gas_pressed=False))
-    assert controller.target == pytest.approx(mph(35))
-    # Set speed unchanged at 60 -> no rising edge -> override stays cleared (car slows to 35).
+    assert controller.target == pytest.approx(mph(44))
+    # Set speed unchanged at 60 -> no rising edge -> override stays cleared (car slows to 44).
     assert not controller.override_slc
     assert controller.overridden_speed == 0
 
     # A fresh + press (60 -> 65) re-arms against the new limit.
-    controller.update_override(mph(65), 0.0, mph(35), 0.0, make_sm(gas_pressed=False))
+    controller.update_override(mph(65), 0.0, mph(44), 0.0, make_sm(gas_pressed=False))
     assert controller.override_slc
     assert controller.overridden_speed == pytest.approx(mph(65))
+  finally:
+    controller.shutdown()
+
+
+def test_confirmation_accel_press_does_not_arm_set_speed_override():
+  controller = make_controller(
+    speed_limit_controller_override_manual=False,
+    speed_limit_controller_override_set_speed=True,
+    speed_limit_confirmation_higher=True,
+  )
+  try:
+    controller.source = "Dashboard"
+    controller.target = mph(45)
+    controller.previous_source = "Dashboard"
+    controller.previous_target = mph(45)
+    controller.last_valid_limit = mph(45)
+
+    controller.update_override(mph(45), 0.0, mph(45), 0.0, make_sm(gas_pressed=False))
+    controller.update_limits(mph(50), datetime.now(timezone.utc), False, mph(45), mph(45), make_sm(gas_pressed=False))
+    assert controller.source == "None"
+    assert controller.unconfirmed_speed_limit == pytest.approx(mph(50))
+
+    # The button arrives before the corresponding cruise-speed update. This + accepts the
+    # pending 50 mph limit, but its delayed 55 mph set-speed update must not arm an override.
+    confirm_sm = make_sm(gas_pressed=False, accel_pressed=True, v_cruise_kph=45 * CV.MPH_TO_KPH)
+    controller.update_limits(mph(50), datetime.now(timezone.utc), False, mph(45), mph(45), confirm_sm)
+    controller.update_override(mph(45), 0.0, mph(45), 0.0, confirm_sm)
+    assert controller.source == "Dashboard"
+    assert controller.target == pytest.approx(mph(50))
+    assert not controller.override_slc
+    assert controller.overridden_speed == 0
+
+    delayed_speed_sm = make_sm(gas_pressed=False, v_cruise_kph=55 * CV.MPH_TO_KPH)
+    controller.update_limits(mph(50), datetime.now(timezone.utc), False, mph(55), mph(45), delayed_speed_sm)
+    controller.update_override(mph(55), 0.0, mph(45), 0.0, delayed_speed_sm)
+    assert not controller.override_slc
+    assert controller.overridden_speed == 0
+
+    # A second fresh + is allowed to establish the override.
+    second_press_sm = make_sm(gas_pressed=False, accel_pressed=True, v_cruise_kph=60 * CV.MPH_TO_KPH)
+    controller.update_limits(mph(50), datetime.now(timezone.utc), False, mph(60), mph(45), second_press_sm)
+    controller.update_override(mph(60), 0.0, mph(45), 0.0, second_press_sm)
+    assert controller.override_slc
+    assert controller.overridden_speed == pytest.approx(mph(60))
+  finally:
+    controller.shutdown()
+
+
+def test_adopt_speed_limit_clears_complete_override_state():
+  controller = make_controller(
+    speed_limit_controller_override_manual=False,
+    speed_limit_controller_override_set_speed=True,
+  )
+  try:
+    controller.source = "Dashboard"
+    controller.target = mph(45)
+    controller.previous_source = "Dashboard"
+    controller.previous_target = mph(45)
+    controller.last_valid_limit = mph(45)
+    controller.override_slc = True
+    controller.overridden_speed = mph(55)
+    controller._slc_adopt_counter = 3
+    controller.starpilot_planner.params_memory.values["SLCAdoptSpeedLimit"] = True
+
+    controller.update_limits(mph(45), datetime.now(timezone.utc), False, mph(55), mph(50), make_sm(gas_pressed=False))
+
+    assert controller.overridden_speed == 0
+    assert not controller.override_slc
   finally:
     controller.shutdown()
 
@@ -638,8 +669,7 @@ def test_redneck_set_speed_mode_overrides_in_both_directions():
     controller.shutdown()
 
 
-def test_gas_pedal_mode_ignores_set_speed_without_gas():
-  # Set With Gas Pedal mode: a high set speed alone must NOT override; gas is still required.
+def test_manual_override_tracks_current_speed_and_ends_on_release():
   controller = make_controller(
     speed_limit_controller_override_manual=True,
     speed_limit_controller_override_set_speed=False,
@@ -653,9 +683,17 @@ def test_gas_pedal_mode_ignores_set_speed_without_gas():
     assert not controller.override_slc
     assert controller.overridden_speed == 0
 
-    controller.update_override(mph(60), 0.0, mph(50), 0.0, make_sm(gas_pressed=True))
+    controller.update_override(mph(60), 0.0, mph(55), 0.0, make_sm(gas_pressed=True))
     assert controller.override_slc
+    assert controller.overridden_speed == pytest.approx(mph(55))
+
+    # The temporary override follows the current speed rather than a historical peak.
+    controller.update_override(mph(60), 0.0, mph(50), 0.0, make_sm(gas_pressed=True))
     assert controller.overridden_speed == pytest.approx(mph(50))
+
+    controller.update_override(mph(60), 0.0, mph(50), 0.0, make_sm(gas_pressed=False))
+    assert not controller.override_slc
+    assert controller.overridden_speed == 0
   finally:
     controller.shutdown()
 
@@ -667,17 +705,17 @@ def test_manual_override_survives_brief_enabled_flicker():
     controller.target = mph(45)
     controller.previous_source = "Dashboard"
     controller.previous_target = mph(45)
-    controller.overridden_speed = mph(55)
-    controller.override_slc = True
+    controller.last_valid_limit = mph(45)
+    controller.update_override(mph(60), 0.0, mph(55), 0.0, make_sm(gas_pressed=True))
 
-    disabled_sm = make_sm(gas_pressed=False, enabled=False)
+    disabled_sm = make_sm(gas_pressed=True, enabled=False)
     for _ in range(int(0.5 / DT_MDL)):
-      controller.update_override(mph(75), 0.0, mph(65), 0.0, disabled_sm)
+      controller.update_override(mph(60), 0.0, mph(55), 0.0, disabled_sm)
 
     assert controller.overridden_speed == pytest.approx(mph(55))
     assert controller.override_slc
 
-    controller.update_override(mph(75), 0.0, mph(65), 0.0, make_sm(gas_pressed=False, enabled=True))
+    controller.update_override(mph(60), 0.0, mph(55), 0.0, make_sm(gas_pressed=True, enabled=True))
 
     assert controller.overridden_speed == pytest.approx(mph(55))
     assert controller.override_slc
@@ -685,16 +723,19 @@ def test_manual_override_survives_brief_enabled_flicker():
     controller.shutdown()
 
 
-def test_manual_override_clears_after_sustained_disengage():
-  controller = make_controller()
+def test_override_clears_after_sustained_disengage():
+  controller = make_controller(
+    speed_limit_controller_override_manual=False,
+    speed_limit_controller_override_set_speed=True,
+  )
   try:
     controller.source = "Dashboard"
     controller.target = mph(45)
     controller.previous_source = "Dashboard"
     controller.previous_target = mph(45)
+    controller.last_valid_limit = mph(45)
     controller.overridden_speed = mph(55)
     controller.override_slc = True
-    controller.override_requires_gas_release = True
 
     disabled_sm = make_sm(gas_pressed=False, enabled=False)
     for _ in range(int(1.0 / DT_MDL) + 1):
@@ -702,6 +743,5 @@ def test_manual_override_clears_after_sustained_disengage():
 
     assert controller.overridden_speed == 0
     assert not controller.override_slc
-    assert not controller.override_requires_gas_release
   finally:
     controller.shutdown()
