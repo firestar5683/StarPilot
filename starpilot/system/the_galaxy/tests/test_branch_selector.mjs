@@ -139,7 +139,7 @@ test('return to Latest uses pinned branch and confirms without changing automati
   instance.fastStatus = {versionPin: {branch: 'feature/test', commit: SHA, installedAt: '2026-09-10'}}
   await instance.returnToLatest()
   assert.deepEqual(calls, [{branch: 'feature/test', commit: 'latest'}])
-  assert.ok(confirmations[0].message.includes('remain off'))
+  assert.ok(confirmations[0].message.includes('automatic-update setting is unchanged'))
 })
 test('API preserves branch encoding, pagination head, abort signal and confirmed install body', async () => {
   const calls = []
@@ -264,4 +264,19 @@ test('changing branch during a multi-page release search cancels remaining pages
  const pending=instance.loadVersions(true)
  instance.selectTargetBranch('Dom');finish();await pending
  assert.equal(requests,2);assert.equal(instance.versionCommits.length,0);assert.equal(instance.versionLoading,false)
+})
+
+test('Latest explains normal OS handling and local-edit behavior; historical confirmation keeps recovery details', async () => {
+  const {instance, confirmations} = fixture()
+  instance.selectTargetBranch('Dom')
+  await instance.installSelectedVersion()
+  assert.match(confirmations[0].message, /normal branch updater/)
+  assert.match(confirmations[0].message, /required OS update/)
+  assert.match(confirmations[0].message, /Local code changes may be overwritten/)
+  assert.doesNotMatch(confirmations[0].message, /code changes are backed up/)
+  await instance.onVersionModeSelect({target:{value:'earlier'}})
+  instance.selectedCommit=SHA
+  await instance.installSelectedVersion()
+  assert.match(confirmations[1].message, /updates will be paused/)
+  assert.match(confirmations[1].message, /code changes are backed up/)
 })

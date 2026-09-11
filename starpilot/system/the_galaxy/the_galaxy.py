@@ -3021,6 +3021,12 @@ def _version_install_worker(branch, selection):
   installed = None
   try:
     version_install.require_parked()
+    if selection == "latest":
+      # Preserve the existing branch updater, including boot-time AGNOS handling.
+      # Historical compatibility and GitHub-history restrictions apply only to
+      # exact revisions, never to an ordinary update to the latest branch head.
+      _branch_switch_worker(branch)
+      return
     _set_fast_update_progress(1, "Resolving selected version", 10.0, branch)
     target = version_history.resolve_version(repo_path, branch, selection)
     version_install.require_parked()
@@ -3167,6 +3173,7 @@ def _branch_switch_worker(target_branch):
     _set_fast_update_progress(3, "Switching branch", 100.0, f"Now on '{target_branch}'.")
 
     _run_submodule_update_if_needed(repo_path, step=4)
+    version_install.clear_pin()
     _finish_update_and_reboot(
       f"Switched to '{target_branch}'. Device is rebooting now. Please wait for reconnection."
     )
@@ -3236,6 +3243,7 @@ def _rollback_worker():
     _set_fast_update_progress(3, "Applying rollback target", 100.0, f"Now on {target_branch} @ {short_commit}.")
 
     _run_submodule_update_if_needed(repo_path, step=4)
+    version_install.clear_pin()
     try:
       _clear_rollback_target(repo_path)
     except Exception as exception:

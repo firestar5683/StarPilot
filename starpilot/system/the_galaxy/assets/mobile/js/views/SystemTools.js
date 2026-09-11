@@ -309,8 +309,11 @@ export const SystemTools = {
       try {
         const selected = this.versionCommits.find(item => item.sha === commit)
         const version = commit === "latest" ? "Latest" : `${versionTitle(selected, branch === "StarPilot")}\nCommit: ${commit}`
-        const policy = commit === "latest" ? "Automatic updates will remain off after installation. You can enable them in settings." : "Automatic updates will be paused for this earlier version."
-        if (!(await GalaxyConfirm({title: "Install selected version?", message: `Branch: ${branch}\nVersion: ${version}\n\n${policy}\n\nThis replaces the current software. Settings and statistics are kept, and local code changes are backed up. Older versions may remove this picker; an SSH recovery copy is saved on the device.\n\nYour device will reboot when installation finishes.`, confirmLabel: "Install & Reboot", danger: true}))) return
+        const policy = commit === "latest" ? "This uses the normal branch updater, including any required OS update during startup. Your automatic-update setting is unchanged." : "Automatic updates will be paused for this earlier version."
+        const recovery = commit === "latest"
+          ? "This replaces the current software. Settings and statistics are kept. Local code changes may be overwritten; standard Rollback saves the previous committed version."
+          : "This replaces the current software. Settings and statistics are kept, and local code changes are backed up. Older versions may remove this picker; an SSH recovery copy is saved on the device."
+        if (!(await GalaxyConfirm({title: "Install selected version?", message: `Branch: ${branch}\nVersion: ${version}\n\n${policy}\n\n${recovery}\n\nYour device will reboot when installation finishes.`, confirmLabel: "Install & Reboot", danger: true}))) return
         // Refresh driving/updater state after the user has reviewed the target.
         await this.loadFastStatus({throwOnError: true})
         if (this.branchSwitchBlocked || this.targetBranch !== branch || generation !== this.versionGeneration) {

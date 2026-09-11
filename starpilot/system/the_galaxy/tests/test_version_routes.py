@@ -123,3 +123,10 @@ def test_history_has_no_artificial_page_depth_cutoff(server):
   reply=client.get('/api/update/versions?branch=Dom&page=1201&head='+'b'*40)
   assert reply.status_code==200
   ns['version_history'].list_versions.assert_called_once_with('/repo','Dom',page=1201,head='b'*40)
+
+def test_historical_worker_records_pre_install_branch_and_commit_for_rollback(server):
+  _, ns = server
+  ns['_git_stdout'].side_effect=['a'*40, 'feature/test', 'b'*40]
+  ns['_version_install_worker']('Dom','a'*40)
+  ns['_save_rollback_target'].assert_called_once_with('/repo','feature/test','b'*40)
+  ns['_set_fast_update_error_state'].assert_not_called()

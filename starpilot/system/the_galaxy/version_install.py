@@ -83,6 +83,11 @@ def validate_target(target):
     raise InstallError('An exact validated commit and branch are required')
 
 
+def clear_pin(data_root=Path('/data')):
+  """Normal branch updates and rollback supersede a historical selection."""
+  (Path(data_root) / 'starpilot/version_selection.json').unlink(missing_ok=True)
+
+
 def read_pin(repo, data_root=Path('/data')):
   try:
     value = json.loads((Path(data_root) / 'starpilot/version_selection.json').read_text())
