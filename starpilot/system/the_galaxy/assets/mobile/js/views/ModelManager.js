@@ -1,6 +1,8 @@
 import { api, showSnackbar } from "../api.js"
 import { usePolling } from "../composables.js"
 import { GalaxyConfirm } from "../components/GalaxyModal.js"
+import { openGalaxyHelpDialog } from "../components/FeatureHelp.js"
+import { readHardwareFilter, saveHardwareFilter, matchesHardware, hardwareLabel, fileSizeText } from "/assets/components/tools/model_hardware.js"
 
 function text(value, fallback = "") {
   return value === null || value === undefined ? fallback : String(value)
@@ -11,6 +13,9 @@ function releasedTs(value) {
   return Number.isNaN(n) ? 0 : n
 }
 
+// Survives SPA unmount: a new instance must read after a sent write settles.
+let selectionWrite = null
+
 export const ModelManager = {
   name: "ModelManager",
   data() {
@@ -18,10 +23,13 @@ export const ModelManager = {
       loading: true,
       error: "",
       busy: "",
+      selectionUncertain: true,
+      statusGeneration: 0,
+      disposed: false,
       sortMode: "release_date",
       userFilter: "all",
       communityFilter: "all",
-      allowGpu: false,
+      hardwareFilter: readHardwareFilter(),
       models: [],
       currentModel: "",
       activeSmallModel: "",
@@ -53,6 +61,7 @@ export const ModelManager = {
       const mode = this.sortMode
       const rows = (this.models || [])
         .filter((m) => m && typeof m === "object")
+        .filter((m) => matchesHardware(m, this.hardwareFilter))
         .filter((m) => this.userFilter === "all" ? true : !!m.userFavorite === (this.userFilter === "yes"))
         .filter((m) => this.communityFilter === "all" ? true : !!m.communityFavorite === (this.communityFilter === "yes"))
       rows.sort((a, b) => {
@@ -63,9 +72,6 @@ export const ModelManager = {
         return text(a.label, a.value).localeCompare(text(b.label, b.value), undefined, { sensitivity: "base", numeric: true })
       })
       return rows
-    },
-    anyGpuBlocked() {
-      return (this.models || []).some((m) => !!m.requiresGpu && !m.gpuAvailable)
     },
     downloadTargetLabel() {
       if (this.status.downloadAll) return "all missing models"
@@ -78,10 +84,16 @@ export const ModelManager = {
     this.poll = usePolling(() => this.refresh(), { interval: 2000 })
     this.poll.start()
   },
-  beforeUnmount() { this.poll?.destroy() },
+  beforeUnmount() {
+    this.disposed = true
+    ++this.statusGeneration
+    this.poll?.destroy()
+  },
   methods: {
-    gpuBlocked(model) {
-      return !!model.requiresGpu && !model.gpuAvailable && !this.allowGpu
+    hardwareLabel,
+    fileSizeText,
+    setHardwareFilter(value) {
+      this.hardwareFilter = saveHardwareFilter(value)
     },
     rowState(model) {
       const key = text(model.value, "")
@@ -99,8 +111,12 @@ export const ModelManager = {
       return !this.status.isOnroad
     },
     async refresh() {
+      const generation = ++this.statusGeneration
       try {
+        if (selectionWrite) await selectionWrite.catch(() => {})
+        if (this.disposed || generation !== this.statusGeneration) return
         const p = await api.getModelStatus()
+        if (this.disposed || generation !== this.statusGeneration) return
         this.models = Array.isArray(p.models) ? p.models.filter((m) => m && typeof m === "object") : []
         this.currentModel = text(p.currentModel, "")
         this.activeSmallModel = text(p.activeSmallModel, "")
@@ -119,13 +135,17 @@ export const ModelManager = {
           isOnroad: !!p.isOnroad,
         }
         this.error = ""
+        this.selectionUncertain = false
         this.loading = false
       } catch (e) {
+        if (this.disposed || generation !== this.statusGeneration) return
         this.error = e?.message || String(e)
         this.loading = false
       }
     },
     async runAction(action, model = null) {
+      const selecting = action === "select-small" || action === "select-big"
+      if (this.disposed || (selecting && this.selectionUncertain)) return
       if (this.busy) {
         showSnackbar("Please wait for the current action to finish.", "error")
         return
@@ -138,16 +158,41 @@ export const ModelManager = {
       const label = text(model && model.label, key || "model")
       this.busy = `${action}:${key}`
       try {
+        let allowGpu = false
+        const needsGpuPrompt = action === "download"
+          ? model?.requiresGpu && !model.gpuAvailable
+          : action === "downloadAll" && this.models.some(m => !m.installed && m.requiresGpu && !m.gpuAvailable)
+        if (needsGpuPrompt) {
+          allowGpu = await openGalaxyHelpDialog({
+            title: "No external GPU detected",
+            paragraphs: [action === "downloadAll"
+              ? "This download includes models that require an external GPU. You can download them now, but they cannot run until a compatible GPU is connected and detected."
+              : `“${label}” requires an external GPU. You can download it now, but it cannot run until a compatible GPU is connected and detected.`,
+              "GPU model files can be large. Downloading does not activate a model or change the model currently in use."],
+            confirmLabel: "Download anyway", cancelLabel: "Cancel",
+          })
+          if (!allowGpu || this.disposed) return
+          // The car can change state while a confirmation is open.
+          await this.refresh()
+          if (this.disposed || this.error || !this.actionAllowedOnroad(action) || this.status.downloading) {
+            if (!this.disposed) showSnackbar("Download not started. Check the device status and try again while parked.", "error")
+            return
+          }
+        }
         let msg = ""
         if (action === "select-small" || action === "select-big") {
           const profile = action === "select-big" ? "big" : "small"
-          const p = await api.setActiveModel(profile, key)
+          this.selectionUncertain = true
+          ++this.statusGeneration // Pre-write polls cannot reconcile this selection.
+          selectionWrite = api.setActiveModel(profile, key)
+          let p
+          try { p = await selectionWrite } finally { selectionWrite = null }
           msg = p?.message || `Selected "${label}".`
         } else if (action === "download") {
-          const p = await api.startModelDownload(key, this.allowGpu)
+          const p = await api.startModelDownload(key, allowGpu)
           msg = p?.message || `Downloading "${label}"...`
         } else if (action === "downloadAll") {
-          const p = await api.downloadAllModels(this.allowGpu)
+          const p = await api.downloadAllModels(allowGpu)
           msg = p?.message || "Started downloading all models."
         } else if (action === "cancel") {
           const p = await api.postAction("/api/models/cancel")
@@ -175,17 +220,21 @@ export const ModelManager = {
           const p = await api.postAction("/api/models/refresh_manifest")
           msg = p?.message || "Model manifest refreshed."
         }
+        if (this.disposed) return
         if (msg) showSnackbar(msg)
         await this.refresh()
       } catch (e) {
+        if (this.disposed) return
         showSnackbar(e?.message || String(e), "error")
+        // Reconcile a possibly accepted request before releasing the action lock.
+        await this.refresh()
       } finally {
-        this.busy = ""
+        if (!this.disposed) this.busy = ""
       }
     },
   },
   template: `
-    <div class="gx-view">
+    <div class="gx-view gx-model-manager">
       <div v-if="loading" class="gx-card">
         <div class="gx-loading" style="padding: var(--sp-4);">Loading models...</div>
       </div>
@@ -200,7 +249,7 @@ export const ModelManager = {
             <span class="gx-chip">{{ summary.installed }} installed</span>
             <span class="gx-chip">{{ summary.missing }} missing</span>
             <span class="gx-chip">{{ summary.total }} total</span>
-            <span class="gx-chip" style="background:var(--primary);color:var(--on-primary);">Active: {{ currentLabel }}</span>
+            <span class="gx-chip" style="background:var(--primary);color:var(--on-primary);">Selected: {{ currentLabel }}</span>
           </div>
           <div style="padding: 0 var(--sp-3) var(--sp-3);">
             <div v-if="error" class="gx-alert gx-alert--warn" style="border:none; margin:0 0 8px;">
@@ -226,23 +275,23 @@ export const ModelManager = {
             <i class="bi bi-sliders"></i>
             <span class="gx-section__title">Controls</span>
           </div>
-          <div style="padding: var(--sp-3); display:grid; gap:12px;">
+          <div style="padding: var(--sp-3); display:grid; grid-template-columns:minmax(0, 1fr); gap:12px;">
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
               <button v-if="status.downloading" type="button" class="gx-btn gx-btn--danger" :disabled="!!busy" @click="runAction('cancel')"><i class="bi bi-stop-circle"></i> Cancel Download</button>
-              <button v-else type="button" class="gx-btn" :disabled="!!busy" @click="runAction('downloadAll')"><i class="bi bi-download"></i> Download All Missing</button>
+              <button v-else type="button" class="gx-btn" :disabled="!!busy" @click="runAction('downloadAll')"><i class="bi bi-download"></i> Download all missing — entire catalogue</button>
               <button type="button" class="gx-btn gx-btn--tonal" :disabled="!!busy" @click="runAction('refresh')"><i v-if="busy === 'refresh:'" class="bi bi-arrow-repeat gx-spin"></i><i v-else class="bi bi-arrow-clockwise"></i> Refresh</button>
             </div>
 
             <div class="gx-row" style="border-top:none;">
               <span class="gx-row__label">Active Small</span>
-              <select class="gx-field" style="flex:1;" :value="activeSmallModel" :disabled="!!busy || status.isOnroad" @change="runAction('select-small', installedSmallModels.find(m => m.value === $event.target.value))">
+              <select class="gx-field" style="flex:1;" :value="activeSmallModel" :disabled="!!busy || selectionUncertain || status.isOnroad" @change="runAction('select-small', installedSmallModels.find(m => m.value === $event.target.value))">
                 <option v-for="m in installedSmallModels" :key="m.value" :value="m.value">{{ m.label || m.value }}</option>
               </select>
             </div>
 
             <div class="gx-row" style="border-top:none;">
               <span class="gx-row__label">Active Big</span>
-              <select class="gx-field" style="flex:1;" :value="activeBigModel" :disabled="!!busy || status.isOnroad" @change="$event.target.value ? runAction('select-big', installedBigModels.find(m => m.value === $event.target.value)) : runAction('select-big')">
+              <select class="gx-field" style="flex:1;" :value="activeBigModel" :disabled="!!busy || selectionUncertain || status.isOnroad" @change="$event.target.value ? runAction('select-big', installedBigModels.find(m => m.value === $event.target.value)) : runAction('select-big')">
                 <option value="">None — always use Active Small</option>
                 <option v-for="m in installedBigModels" :key="m.value" :value="m.value">{{ m.label || m.value }}</option>
               </select>
@@ -253,6 +302,15 @@ export const ModelManager = {
               <select class="gx-field" style="flex:1;" :value="sortMode" @change="sortMode = $event.target.value">
                 <option value="release_date">Release Date</option>
                 <option value="alphabetical">Alphabetical</option>
+              </select>
+            </div>
+
+            <div class="gx-row" style="border-top:none;">
+              <label class="gx-row__label" for="gx-model-hardware">Model hardware</label>
+              <select id="gx-model-hardware" class="gx-field" style="flex:1; min-width:0;" :value="hardwareFilter" @change="setHardwareFilter($event.target.value)">
+                <option value="both">Both</option>
+                <option value="gpu">GPU models only</option>
+                <option value="comma">Comma models only</option>
               </select>
             </div>
 
@@ -269,22 +327,11 @@ export const ModelManager = {
               </select>
             </div>
 
-            <div class="gx-row" style="border-top:none;">
-              <div class="gx-row__info">
-                <span class="gx-row__label">Download GPU models without GPU</span>
-                <span v-if="anyGpuBlocked" class="gx-row__desc">GPU models are very large and will not run without an external GPU.</span>
-              </div>
-              <label class="gx-switch">
-                <input type="checkbox" v-model="allowGpu" />
-                <span class="gx-switch__track"></span>
-                <span class="gx-switch__thumb"></span>
-              </label>
-            </div>
           </div>
         </section>
 
         <template v-if="!sorted.length">
-          <div class="gx-card"><div class="gx-empty">No models available.</div></div>
+          <div class="gx-card"><div class="gx-empty">No models match these filters. Try Both or clear the favourite filters.</div></div>
         </template>
         <template v-else>
           <div class="gx-card-grid">
@@ -299,10 +346,11 @@ export const ModelManager = {
                 <div style="margin-top:6px; display:flex; flex-wrap:wrap; gap:6px;">
                   <span class="gx-chip">{{ m.value }}</span>
                   <span v-if="m.builtin" class="gx-chip">Built-in</span>
-                  <span class="gx-chip">{{ m.requiresGpu ? 'eGPU' : 'On-device GPU' }}</span>
+                  <span class="gx-chip">{{ hardwareLabel(m) }}</span>
                   <span v-if="m.version" class="gx-chip">Version {{ m.version }}</span>
                   <span v-if="m.released" class="gx-chip">Released {{ m.released }}</span>
                   <span v-if="m.partial" class="gx-chip">Partial Files</span>
+                  <span class="gx-chip">File size: {{ fileSizeText(m) }}</span>
                 </div>
               </div>
               <button type="button" class="gx-icon-btn" :disabled="!!busy" :title="m.userFavorite ? 'Remove from your favorites' : 'Add to your favorites'" @click="runAction(m.userFavorite ? 'unfavorite' : 'favorite', m)">
@@ -320,11 +368,11 @@ export const ModelManager = {
                 <button type="button" class="gx-btn gx-btn--danger" :disabled="!!busy" @click="runAction('cancel', m)"><i class="bi bi-x-circle"></i> Cancel</button>
               </template>
               <template v-else-if="rowState(m) === 'installed'">
-                <button type="button" class="gx-btn" :disabled="!!busy" @click="runAction(m.requiresGpu ? 'select-big' : 'select-small', m)"><i class="bi bi-play-fill"></i> Set Active {{ m.requiresGpu ? 'Big' : 'Small' }}</button>
+                <button type="button" class="gx-btn" :disabled="!!busy || selectionUncertain" @click="runAction(m.requiresGpu ? 'select-big' : 'select-small', m)"><i class="bi bi-play-fill"></i> Set Active {{ m.requiresGpu ? 'Big' : 'Small' }}</button>
                 <button v-if="!m.builtin" type="button" class="gx-btn gx-btn--tonal" style="color:var(--error);" :disabled="!!busy" @click="runAction('delete', m)"><i class="bi bi-trash"></i> Delete</button>
               </template>
               <template v-else>
-                <button type="button" class="gx-btn" :disabled="!!busy || gpuBlocked(m)" @click="runAction('download', m)"><i class="bi bi-download"></i> {{ gpuBlocked(m) ? 'GPU Required' : 'Download' }}</button>
+                <button type="button" class="gx-btn" :disabled="!!busy || status.isOnroad" @click="runAction('download', m)"><i class="bi bi-download"></i> Download</button>
               </template>
             </div>
             </section>

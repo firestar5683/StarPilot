@@ -1,3 +1,7 @@
+/* Download status changes must not move the viewport to another card. */
+.gx-model-manager { overflow-anchor: none; }
+.gx-model-manager .gx-row .gx-field { min-width: 0; }
+
 .gx-personalities { overflow-anchor: none; }
 #gx-personality-settings { padding: 0 var(--sp-4) var(--sp-4); }
 .gx-personalities__live { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
