@@ -519,7 +519,7 @@ def test_personality_cards_and_advanced_disclosures_have_unique_accessible_relat
   assert 'aria-controls="personality-advanced-${profile.id}"' in advanced
   assert 'id="personality-advanced-${profile.id}"' in source
   assert 'aria-hidden="true"' in advanced
-  manage = source.split('${() => p.is_parent_toggle', 1)[1].split("` : \"\"}", 1)[0]
+  manage = source.split('p.is_parent_toggle && (p.key === "CustomPersonalities"', 1)[1].split("` : \"\"}", 1)[0]
   assert 'aria-controls="${p.key === "CustomPersonalities" ? "personality-profiles-panel"' in manage
   assert 'aria-expanded="${() => state.expanded[p.key] ? "true" : "false"}"' in manage
 
@@ -658,3 +658,35 @@ def test_responsive_canvas_keeps_metric_endpoint_labels_separate_and_scales_bitm
   assert [labels[0]["text"], labels[-1]["text"]] == ["0", "144.8"]
   for left, right in zip(labels, labels[1:]):
     assert left["x"] + left["width"] / 2 + 6 <= right["x"] - right["width"] / 2
+
+
+def test_classic_following_picker_displays_migrated_selection_and_current_traffic_option():
+  source = DEVICE_SETTINGS_PATH.read_text(encoding="utf-8")
+  functions = "\n".join(
+    "function " + name + source.split("function " + name, 1)[1].split("\n}\n", 1)[0] + "\n}"
+    for name in ("personalityPresetLabel", "personalityUpdateKey", "renderPersonalityCategoryField")
+  )
+  order = "const PERSONALITY_OPTION_ORDER = " + source.split("const PERSONALITY_OPTION_ORDER = ", 1)[1].split("\n}", 1)[0] + "\n};"
+  result = _run_node(order + functions + """
+    const state = {values: {}, personalityUpdating: {}, personalityMeta: {options: {following:
+      ['dom_default', 'close', 'medium', 'far', 'traffic', 'custom', 'legacy_close', 'legacy_medium', 'legacy_far']}}};
+    const PERSONALITY_CATEGORY_DEFINITIONS = {following: {label: 'Following'}};
+    const html = (parts, ...values) => parts.reduce((text, part, i) => {
+      let value = values[i];
+      if (typeof value === 'function') value = part.endsWith('@click="') ? '' : value();
+      return text + part + (Array.isArray(value) ? value.join('') : value ?? '');
+    }, '');
+    console.log(JSON.stringify(['legacy_close', 'legacy_medium', 'legacy_far', 'traffic', 'medium'].map(preset =>
+      renderPersonalityCategoryField({id: 'standard', label: 'Standard'}, 'following', {preset, curve: []}))));
+  """)
+  import re
+  for index, rendered in enumerate(result):
+    buttons = re.findall(r'<button.*?</button>', rendered, flags=re.S)
+    assert sum('aria-pressed="true"' in button for button in buttons) == 1
+    assert any(re.search(r'>\s*Traffic\s*</button>', button) for button in buttons)
+    if index < 3:
+      expected = ["Previous Close", "Previous Medium", "Previous Far"][index]
+      assert any(expected in button and 'aria-pressed="true"' in button for button in buttons)
+      assert 'Previous fixed following distance retained.' in rendered
+    else:
+      assert 'Previous ' not in rendered

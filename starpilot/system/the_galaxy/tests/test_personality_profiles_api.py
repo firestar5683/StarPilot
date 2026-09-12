@@ -1,8 +1,10 @@
 import json
+import sys
 
 import numpy as np
 import pytest
 
+from openpilot.starpilot.common import accel_profile
 from openpilot.starpilot.common.accel_profile import A_CRUISE_MAX_BP_CUSTOM, ACCELERATION_PROFILES, interpolate_accel_profile
 from openpilot.starpilot.common.longitudinal_personality_profiles import (
   FOLLOWING_SPEEDS_MPH,
@@ -22,6 +24,11 @@ from test_navigation_params import _params_client, the_galaxy
 
 
 def _client(monkeypatch, values=None, *, ev_tuning=False, truck_tuning=False):
+  # Use the real pure curve implementation; the general Galaxy import fixture
+  # stubs it with incomplete vehicle tables for unrelated dashboard tests.
+  monkeypatch.setitem(sys.modules, "openpilot.starpilot.common.accel_profile", accel_profile)
+  for name in ("get_accel_profile_curve_values", "interpolate_accel_profile", "normalize_acceleration_profile", "normalize_deceleration_profile"):
+    monkeypatch.setattr(the_galaxy, name, getattr(accel_profile, name))
   device_values = dict(values or {})
   device_values.setdefault("IsOnroad", False)
   device_values.setdefault("IsOffroad", not device_values["IsOnroad"])
@@ -248,7 +255,7 @@ def test_legacy_master_without_document_remains_enabled_when_first_profile_is_sa
   assert document is not None and document["enabled"] is True
 
 
-def test_first_save_persists_one_atomic_versioned_document_with_other_categories_standard(monkeypatch):
+def test_first_save_persists_one_atomic_versioned_document_with_other_categories_dom_default(monkeypatch):
   client, params = _client(monkeypatch)
   response = client.put("/api/personality_profiles", json={
     "profile": "standard", "category": "braking", "preset": "sport", "curve": [2.0] * 10,
@@ -262,7 +269,7 @@ def test_first_save_persists_one_atomic_versioned_document_with_other_categories
     for category, config in profile.items():
       if (profile_id, category) != ("standard", "braking"):
         assert config == {
-          "preset": "medium" if category == "following" else "standard", "curve": [],
+          "preset": "dom_default", "curve": [],
         }
   assert len([write for write in params.writes if write[0] == PERSONALITY_PROFILES_PARAM]) == 1
 
@@ -345,7 +352,7 @@ def test_dom_default_custom_acceleration_seeds_from_effective_legacy_custom_curv
   profiles["traffic"]["acceleration"] = {"preset": "dom_default", "curve": []}
   values = {
     "IsOnroad": False,
-    "CustomAccelProfile": True,
+    "CustomAccelProfile": True, "AdvancedLongitudinalTune": True,
     "CustomAccelProfileInitialized": True,
     PERSONALITY_PROFILES_PARAM: profile_document(profiles, enabled=False),
     **{
@@ -360,7 +367,7 @@ def test_dom_default_custom_acceleration_seeds_from_effective_legacy_custom_curv
   assert response.status_code == 200
   document = strict_profile_document(params.values[PERSONALITY_PROFILES_PARAM])
   expected = [
-    round(interpolate_accel_profile(speed * 0.44704, [1.1, 1.0, 0.9, 0.8, 0.7, 0.6, 0.5], A_CRUISE_MAX_BP_CUSTOM), 4)
+    round(interpolate_accel_profile(speed * 0.44704, accel_profile.A_CRUISE_MAX_VALS_TRAFFIC_ALL, A_CRUISE_MAX_BP_CUSTOM), 4)
     for speed in FOLLOWING_SPEEDS_MPH
   ]
   assert document["profiles"]["traffic"]["acceleration"]["curve"] == expected
@@ -386,7 +393,7 @@ def test_dom_default_custom_seed_resamples_valid_dynamic_curve_and_malformed_dyn
   profiles["standard"]["acceleration"] = {"preset": "dom_default", "curve": []}
   dynamic = {
     "IsOnroad": False,
-    "CustomAccelProfile": True,
+    "CustomAccelProfile": True, "AdvancedLongitudinalTune": True,
     PERSONALITY_PROFILES_PARAM: profile_document(profiles, enabled=False),
     "CustomAccelProfileBreakpointsInitialized": True,
     "CustomAccelProfilePointCount": 3,
@@ -450,7 +457,7 @@ def test_following_custom_seeds_from_legacy_profile_and_then_persists_edits(monk
   assert document["profiles"]["standard"]["following"]["curve"] == [round(value, 4) for value in edited]
 
 
-def test_fresh_following_custom_seeds_from_selected_medium_even_when_legacy_custom_is_off(monkeypatch):
+def test_fresh_following_custom_seeds_from_dom_default_when_legacy_custom_is_off(monkeypatch):
   client, params = _client(monkeypatch, {
     "IsOnroad": False,
     "CustomPersonalities": False,
@@ -462,15 +469,15 @@ def test_fresh_following_custom_seeds_from_selected_medium_even_when_legacy_cust
   })
   assert response.status_code == 200
   document = strict_profile_document(params.values[PERSONALITY_PROFILES_PARAM])
-  assert document["profiles"]["relaxed"]["following"]["curve"] == [1.45] * len(FOLLOWING_SPEEDS_MPH)
+  assert document["profiles"]["relaxed"]["following"]["curve"] == [1.75] * len(FOLLOWING_SPEEDS_MPH)
 
 
 def test_traffic_following_seed_matches_legacy_runtime_speed_units(monkeypatch):
   profiles = default_personality_profiles(False)
   profiles["traffic"]["following"] = {"preset": "dom_default", "curve": []}
   client, params = _client(monkeypatch, {
-    "IsOnroad": False,
-    PERSONALITY_PROFILES_PARAM: profile_document(profiles, enabled=False),
+    "IsOnroad": False, "CustomPersonalities": True,
+    PERSONALITY_PROFILES_PARAM: profile_document(profiles, enabled=True),
     "TrafficFollow": 0.8,
     "RelaxedFollow": 1.6,
   })
@@ -828,7 +835,7 @@ def test_known_v1_document_is_migrated_for_readback(monkeypatch):
 
   assert body["configured"] is True
   assert body["migration_required"] is True
-  assert body["schema_version"] == 2
+  assert body["schema_version"] == PROFILE_SCHEMA_VERSION
   assert len(body["profiles"]["standard"]["acceleration"]["curve"]) == 10
   assert body["profiles"]["standard"]["acceleration"]["legacyCurve"] == [1.0] * 7
 

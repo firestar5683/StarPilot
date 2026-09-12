@@ -38,7 +38,7 @@ from openpilot.starpilot.common.longitudinal_personality_profiles import (
 def test_document_is_versioned_disabled_and_declares_exact_axes_and_units():
   document = profile_document(default_personality_profiles(False), enabled=False)
 
-  assert document["schemaVersion"] == PROFILE_SCHEMA_VERSION == 2
+  assert document["schemaVersion"] == PROFILE_SCHEMA_VERSION == 3
   assert document["enabled"] is False
   assert document["axes"] == {
     "acceleration": {
@@ -455,7 +455,7 @@ def test_following_custom_initialisation_uses_effective_legacy_curve():
 
 
 def test_v2_uses_one_shared_ten_mph_custom_axis():
-  assert PROFILE_SCHEMA_VERSION == 2
+  assert PROFILE_SCHEMA_VERSION == 3
   expected = tuple(range(0, 91, 10))
   assert ACCELERATION_SPEEDS_MPH == expected
   assert BRAKING_SPEEDS_MPH == expected
@@ -474,9 +474,13 @@ def test_fresh_profiles_start_with_dom_defaults():
 
 def test_following_presets_match_stock_dom_personalities_exactly():
   assert FOLLOWING_PRESET_CURVES == {
-    "close": (1.25,) * 10,
-    "medium": (1.45,) * 10,
-    "far": (1.75,) * 10,
+    "close": (1.25, 1.0),
+    "medium": (1.45, 1.2),
+    "far": (1.6, 1.4),
+    "traffic": (0.75, 1.6),
+    "legacy_close": (1.25, 1.25),
+    "legacy_medium": (1.45, 1.45),
+    "legacy_far": (1.75, 1.75),
   }
 
 
@@ -500,9 +504,9 @@ def test_named_acceleration_presets_keep_native_dom_interpolation():
 def test_reference_curves_are_profile_specific_and_use_the_custom_axis():
   references = lpp.personality_reference_curves(False, False)
   assert references["traffic"]["acceleration"] != references["aggressive"]["acceleration"]
-  assert references["aggressive"]["following"] == [1.25] * 10
-  assert references["standard"]["following"] == [1.45] * 10
-  assert references["relaxed"]["following"] == [1.75] * 10
+  assert references["aggressive"]["following"] == [1.25] * 5 + [1.2, 1.1, 1.0, 1.0, 1.0]
+  assert references["standard"]["following"] == [1.45] * 5 + [1.4, 1.3, 1.2, 1.2, 1.2]
+  assert references["relaxed"]["following"] == [1.6] * 5 + [1.56, 1.48, 1.4, 1.4, 1.4]
   for profile in references.values():
     for curve in profile.values():
       assert len(curve) == 10
@@ -537,7 +541,7 @@ def test_exact_v1_document_migrates_whole_or_not_at_all():
 
   migrated = lpp.migrate_profile_document(legacy)
   assert migrated is not None
-  assert migrated["schemaVersion"] == 2
+  assert migrated["schemaVersion"] == PROFILE_SCHEMA_VERSION
   assert migrated["enabled"] is True
   migrated_acceleration = migrated["profiles"]["aggressive"]["acceleration"]
   assert migrated_acceleration["preset"] == "custom"
@@ -545,7 +549,10 @@ def test_exact_v1_document_migrates_whole_or_not_at_all():
   assert max(migrated_acceleration["curve"]) == CURVE_BOUNDS["acceleration"][1]
   assert migrated_acceleration["legacyCurve"] == legacy_profiles["aggressive"]["acceleration"]["curve"]
   assert interpolate_category_curve("acceleration", 40.0, migrated_acceleration, False, False) == 4.0
-  assert migrated["profiles"]["standard"] == legacy_profiles["standard"]
+  assert migrated["profiles"]["standard"] == {
+    **legacy_profiles["standard"],
+    "following": {"preset": "legacy_medium", "curve": []},
+  }
 
   malformed = json.loads(json.dumps(legacy))
   malformed["profiles"]["aggressive"]["acceleration"]["curve"][0] = True

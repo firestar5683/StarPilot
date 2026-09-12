@@ -213,7 +213,7 @@ def test_traffic_profile_wins_over_cereal_personality_without_changing_jerk():
 
   controller.update(True, 0.0, _sm(traffic=True, personality=Personality.aggressive), _toggles(document))
 
-  assert controller.t_follow == pytest.approx(1.75)
+  assert controller.t_follow == pytest.approx(1.6)
   assert controller.base_acceleration_jerk == 1.0
 
 
@@ -347,3 +347,29 @@ def test_every_advanced_param_maps_to_runtime_attribute_with_hundredth_conversio
     assert keywords["conversion"] == 0.01
     assert keywords["min"] == 0.25
     assert keywords["max"] == 2.0
+
+
+@pytest.mark.parametrize("profile,personality,preset", [
+  ("aggressive", Personality.aggressive, "close"),
+  ("standard", Personality.standard, "medium"),
+  ("relaxed", Personality.relaxed, "far"),
+  ("traffic", Personality.standard, "traffic"),
+])
+def test_named_presets_match_dom_default_runtime_with_factory_following_settings(monkeypatch, profile, personality, preset):
+  # Dom CITY_SPEED_LIMIT is 25 m/s, not 25 mph as the older fixture assumes.
+  monkeypatch.setattr(following_module, "TRAFFIC_MODE_BP", [0.0, 25.0])
+  default_document = _document()
+  named_document = _document()
+  named_document["profiles"][profile]["following"] = {"preset": preset, "curve": []}
+  for speed in (0, 5, 10, 20, 45 * 0.44704, 50 * 0.44704, 25, 60 * 0.44704, 70 * 0.44704, 40):
+    results = []
+    for document in (default_document, named_document):
+      toggles = _toggles(document)
+      toggles.aggressive_follow = [1.25, 1.0]
+      toggles.standard_follow = [1.45, 1.2]
+      toggles.relaxed_follow = [1.6, 1.4]
+      toggles.traffic_mode_follow = [0.75, 1.6]
+      controller = StarPilotFollowing(_planner())
+      controller.update(True, speed, _sm(personality=personality, traffic=profile == "traffic"), toggles)
+      results.append((controller.t_follow, controller.base_acceleration_jerk, controller.base_danger_jerk, controller.base_speed_jerk))
+    assert results[0] == pytest.approx(results[1], abs=1e-12)

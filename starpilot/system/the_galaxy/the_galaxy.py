@@ -149,7 +149,6 @@ from openpilot.starpilot.common.longitudinal_personality_profiles import (
   initial_custom_curve,
   is_truck_fingerprint,
   migrate_profile_document,
-  personality_reference_curves,
   profile_document,
   strict_profile_document,
   synchronise_profile_document_enabled,
@@ -3659,18 +3658,20 @@ def _get_detected_truck_tuning():
     return False
 
 
-def _get_effective_legacy_custom_accel_curve(ev_tuning: bool, truck_tuning: bool) -> list[float]:
+def _get_effective_legacy_custom_accel_curve(
+  ev_tuning: bool, truck_tuning: bool, *, acceleration_profile=None, custom_enabled: bool | None = None,
+) -> list[float]:
   target_axis = np.array(ACCELERATION_SPEEDS_MPH, dtype=float) * 0.44704
 
   def sample(values, breakpoints):
     return [round(interpolate_accel_profile(float(speed), values, breakpoints), 4) for speed in target_axis]
 
   preset_curve = get_accel_profile_curve_values(
-    normalize_acceleration_profile(_safe_params_get_live_raw("AccelerationProfile")),
+    normalize_acceleration_profile(_safe_params_get_live_raw("AccelerationProfile") if acceleration_profile is None else acceleration_profile),
     ev_tuning,
     truck_tuning,
   )
-  if not _safe_params_get_bool("CustomAccelProfile"):
+  if not (_safe_params_get_bool("CustomAccelProfile") if custom_enabled is None else custom_enabled):
     return sample(preset_curve, A_CRUISE_MAX_BP_CUSTOM)
 
   raw_legacy = {key: _safe_params_get_live_raw(key) for key in CUSTOM_ACCEL_PROFILE_PARAM_KEYS}
@@ -3716,12 +3717,12 @@ def _get_effective_legacy_following_curve(profile_id: str) -> list[float]:
 
   def follow_value(key: str) -> float:
     try:
-      parsed = float(_safe_params_get_live_raw(key, defaults[key]))
+      parsed = float(_safe_params_get_live_raw(key, defaults[key]) if _safe_params_get_bool("CustomPersonalities") else defaults[key])
     except (TypeError, ValueError):
       parsed = defaults[key]
     if not math.isfinite(parsed):
       parsed = defaults[key]
-    return float(np.clip(parsed, *CURVE_BOUNDS["following"]))
+    return float(np.clip(parsed, 0.5 if key == "TrafficFollow" else CURVE_BOUNDS["following"][0], CURVE_BOUNDS["following"][1]))
 
   if profile_id == "traffic":
     breakpoints = (0.0, 25.0 / CV.MPH_TO_MS)
@@ -3733,6 +3734,43 @@ def _get_effective_legacy_following_curve(profile_id: str) -> list[float]:
   else:
     raise ValueError(f"Unknown personality: {profile_id}")
   return [round(float(point), 4) for point in np.interp(FOLLOWING_SPEEDS_MPH, breakpoints, values)]
+
+
+def _get_dom_personality_reference_curves(ev_tuning: bool) -> dict[str, dict[str, list[float]]]:
+  """Sample Dom's configured base curves, without live driving modifiers.
+
+  Use global powertrain/tuning switches for Dom default, just as the runtime
+  does. Named personality presets have a separate detected-powertrain policy.
+  """
+  from openpilot.starpilot.common.accel_profile import A_CRUISE_MAX_VALS_TRAFFIC_ALL
+
+  truck_tuning = _safe_params_get_bool("TruckTuning")
+  raw_ev = _safe_params_get_live_raw("EVTuning")
+  ev_tuning = (ev_tuning if raw_ev in (None, b"", "") else _safe_params_get_bool("EVTuning")) and not truck_tuning
+  tuning = _safe_params_get_bool("LongitudinalTune")
+  custom_accel = _safe_params_get_bool("AdvancedLongitudinalTune") and _safe_params_get_bool("CustomAccelProfile")
+  acceleration_profile = normalize_acceleration_profile(_safe_params_get_live_raw("AccelerationProfile")) if tuning or custom_accel else 0
+  deceleration_profile = normalize_deceleration_profile(_safe_params_get_live_raw("DecelerationProfile", 1)) if tuning else 1
+  map_gears = _safe_params_get_bool("QOLLongitudinal") and _safe_params_get_bool("MapGears")
+  # A static speed graph uses the normal-gear base; live Eco/Sport, weather and
+  # overspeed/lead modifiers remain on Dom's existing controller paths.
+  if map_gears and _safe_params_get_bool("MapAcceleration") and not custom_accel:
+    acceleration_profile = 0
+  if map_gears and _safe_params_get_bool("MapDeceleration"):
+    deceleration_profile = 0
+  acceleration = _get_effective_legacy_custom_accel_curve(
+    ev_tuning, truck_tuning, acceleration_profile=acceleration_profile, custom_enabled=custom_accel,
+  )
+  traffic_acceleration = [round(interpolate_accel_profile(speed * CV.MPH_TO_MS, A_CRUISE_MAX_VALS_TRAFFIC_ALL), 4)
+                          for speed in ACCELERATION_SPEEDS_MPH]
+  return {
+    profile: {
+      "acceleration": list(traffic_acceleration if profile == "traffic" else acceleration),
+      "braking": [0.35 if profile == "traffic" else {0: 1.0, 1: 0.5, 2: 2.0}[deceleration_profile]] * len(BRAKING_SPEEDS_MPH),
+      "following": _get_effective_legacy_following_curve(profile),
+    }
+    for profile in ("traffic", "aggressive", "standard", "relaxed")
+  }
 
 
 def _get_runtime_default_param_overrides():
@@ -5897,8 +5935,11 @@ def setup(app):
         return jsonify({"error": "Stored longitudinal personality profiles require a verified migration before editing."}), 409
       data = request.get_json(silent=True)
       required_fields = {"profile", "category", "preset", "curve"}
-      if not isinstance(data, dict) or set(data) not in (required_fields, required_fields | {"expected"}):
-        return jsonify({"error": "Expected profile, category, preset, curve, and optional expected category."}), 400
+      if not isinstance(data, dict) or not required_fields <= set(data) or set(data) - required_fields - {"expected", "reset"}:
+        return jsonify({"error": "Expected profile, category, preset, curve, and optional expected category or reset."}), 400
+      reset = data.get("reset", False)
+      if type(reset) is not bool or (reset and (data["preset"] != "custom" or data["curve"] != [])):
+        return jsonify({"error": "Reset requires Custom and an empty curve; defaults are resolved by the server."}), 400
 
       try:
         current_config = profiles[data["profile"]][data["category"]]
@@ -5907,23 +5948,17 @@ def setup(app):
         )):
           return jsonify({"error": "Saved profile changed. Reload and review it before editing again."}), 409
         curve = data["curve"]
-        if data["preset"] == "custom" and current_config.get("preset") != "custom":
+        initialize_default = data["preset"] == "custom" and current_config["preset"] == "dom_default" and not current_config["curve"]
+        if reset:
+          curve = _get_dom_personality_reference_curves(ev_tuning)[data["profile"]][data["category"]]
+        elif data["preset"] == "custom" and current_config.get("preset") != "custom":
           if curve != []:
             update_personality_profile(
               profiles, data["profile"], data["category"], "custom", curve, ev_tuning, truck_tuning
             )
           legacy_curve = None
-          if current_config.get("preset") == "dom_default":
-            if data["category"] == "acceleration":
-              legacy_curve = _get_effective_legacy_custom_accel_curve(ev_tuning, truck_tuning)
-            elif data["category"] == "braking":
-              legacy_curve = {
-                0: [1.0] * len(BRAKING_SPEEDS_MPH),
-                1: [0.5] * len(BRAKING_SPEEDS_MPH),
-                2: [2.0] * len(BRAKING_SPEEDS_MPH),
-              }[normalize_deceleration_profile(_safe_params_get_live_raw("DecelerationProfile"))]
-            else:
-              legacy_curve = _get_effective_legacy_following_curve(data["profile"])
+          if current_config.get("preset") == "dom_default" and not current_config.get("curve"):
+            legacy_curve = _get_dom_personality_reference_curves(ev_tuning)[data["profile"]][data["category"]]
           curve = initial_custom_curve(
             data["category"], current_config, ev_tuning, truck_tuning, legacy_curve=legacy_curve
           )
@@ -5937,6 +5972,7 @@ def setup(app):
           curve,
           ev_tuning,
           truck_tuning,
+          reset=reset or initialize_default,
         )
       except (KeyError, TypeError, ValueError) as error:
         return jsonify({"error": str(error)}), 400
@@ -5958,7 +5994,7 @@ def setup(app):
         "following": list(FOLLOWING_PRESETS),
       },
       "profiles": profiles,
-      "reference_curves": personality_reference_curves(ev_tuning, truck_tuning),
+      "reference_curves": _get_dom_personality_reference_curves(ev_tuning),
       "schema_version": PROFILE_SCHEMA_VERSION,
       "speed_breakpoints_mph": {
         "acceleration": list(ACCELERATION_SPEEDS_MPH),

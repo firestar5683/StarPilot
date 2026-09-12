@@ -29,12 +29,17 @@ export const PersonalityProfiles = {
   },
   methods: {
     enabled(value) { return [true, 1, "1", "True", "true"].includes(value) },
-    label(value) { return value.split("_").map(s => s === "plus" ? "+" : s[0].toUpperCase() + s.slice(1)).join(" ").replace(" +", "+") },
+    label(value) { return value.split("_").map(s => s === "plus" ? "+" : s === "legacy" ? "Previous" : s[0].toUpperCase() + s.slice(1)).join(" ").replace(" +", "+") },
     key: personalityProfileParamKey,
     speed(value) { return formatProfileSpeed(value, this.enabled(this.values.IsMetric)) },
     speedUnit() { return profileSpeedUnit(this.enabled(this.values.IsMetric)) },
     bounds(param) { return numericBounds(param, this.values) },
-    options(category) { return (category === "following" ? ["close", "medium", "far", "custom"] : ["eco", "standard", "sport", "sport_plus", "custom"]).filter(x => this.data.options[category].includes(x)) },
+    options(category, profile) {
+      const choices = (category === "following" ? ["close", "medium", "far", "traffic", "custom"] : ["eco", "standard", "sport", "sport_plus", "custom"]).filter(x => this.data.options[category].includes(x))
+      const selected = this.data.profiles[profile]?.[category]?.preset
+      if (category === "following" && selected?.startsWith("legacy_") && this.data.options[category].includes(selected)) choices.unshift(selected)
+      return choices
+    },
     advancedParams(profile) {
       return Object.values(this.meta).filter(p => p.parent_key === this.key(profile) && p.key.includes("Jerk"))
     },
@@ -174,14 +179,14 @@ export const PersonalityProfiles = {
     discard(profile, category) { delete this.drafts[profile + category]; delete this.curveErrors[profile + category] },
     async saveCurve(profile, category, reset = false) {
       if (this.editingLocked || this.disposed) return
-      const curve = reset ? this.data.reference_curves?.[profile]?.[category] : this.draft(profile, category)
+      const curve = reset ? [] : this.draft(profile, category)
       if (!Array.isArray(curve)) return
       const snapshot = [...curve]
       this.curvePending = true
       try {
         if (this.contextPending) { try { await this.contextRequest } catch { return } }
         if (this.disposed) return
-        if (await this.write(() => api.savePersonalityProfile({ profile, category, preset: "custom", curve: snapshot, expected: this.data.profiles[profile][category] }), () => !this.locked && !this.data?.migration_required)) this.notice = ""
+        if (await this.write(() => api.savePersonalityProfile({ profile, category, preset: "custom", curve: snapshot, ...(reset ? { reset: true } : {}), expected: this.data.profiles[profile][category] }), () => !this.locked && !this.data?.migration_required)) this.notice = ""
       } finally {
         this.discard(profile, category)
         this.curvePending = false
@@ -202,7 +207,7 @@ export const PersonalityProfiles = {
       if (this.drag?.profile === profile && this.drag.category === category) return this.drag.max
       return Math.max(this.data.bounds[category][1], ...this.draft(profile, category), ...(this.data.reference_curves?.[profile]?.[category] || []))
     },
-    graphMin(profile, category) { return this.drag?.profile === profile && this.drag.category === category ? this.drag.min : this.data.bounds[category][0] },
+    graphMin(profile, category) { return this.drag?.profile === profile && this.drag.category === category ? this.drag.min : Math.min(this.data.bounds[category][0], ...this.draft(profile, category), ...(this.data.reference_curves?.[profile]?.[category] || [])) },
     graphPoints(profile, category, reference = false) {
       const curve = reference ? this.data.reference_curves?.[profile]?.[category] : this.draft(profile, category)
       const max = this.graphMax(profile, category)
@@ -288,18 +293,19 @@ export const PersonalityProfiles = {
               <section v-for="(title, category) in CATEGORIES" :key="category" class="gx-personalities__category">
                 <h4>{{ title }}</h4>
                 <div class="gx-personalities__options" role="group" :aria-label="label(profile) + ' ' + title">
-                  <button v-for="option in options(category)" :key="option" type="button" class="gx-btn gx-btn--tonal"
+                  <button v-for="option in options(category, profile)" :key="option" type="button" class="gx-btn gx-btn--tonal"
                     :aria-pressed="data.profiles[profile][category].preset === option" :disabled="editingLocked"
                     @click="preset(profile, category, option)">{{ label(option) }}</button>
                 </div>
                 <p v-if="data.profiles[profile][category].preset === 'dom_default'">Using existing Dom default.</p>
+                <p v-if="category === 'following' && data.profiles[profile][category].preset.startsWith('legacy_')">Previous fixed following distance retained. Select a preset to use its current curve.</p>
               </section>
               <details class="gx-personalities__advanced" :open="advancedOpen[profile]" @toggle="advancedOpen[profile] = $event.target.open">
                 <summary>Advanced</summary>
                 <template v-for="(title, category) in CATEGORIES" :key="category">
                 <details v-if="data.profiles[profile][category].preset === 'custom'" open class="gx-personalities__curve">
                   <summary>Custom {{ title.toLowerCase() }} graph</summary>
-                  <p>{{ category === 'following' ? 'Seconds' : 'm/s²' }} · {{ speedUnit() }}. Dashed: default.</p>
+                  <p>{{ category === 'following' ? 'Seconds' : 'm/s²' }} · {{ speedUnit() }}. Dashed: Dom default.</p>
                   <div class="gx-personalities__plot" tabindex="0" :aria-label="label(profile) + ' ' + title + ' graph; scroll horizontally on narrow screens'">
                   <svg viewBox="-30 -12 340 140" role="group" :aria-disabled="editingLocked" :aria-label="label(profile) + ' ' + title + ' editable curve; exact values below'"
                     style="touch-action: pan-x" @pointerdown="pickPoint(profile, category, $event)" @pointermove="moveDrag" @pointerup="endDrag" @pointercancel="endDrag" @lostpointercapture="endDrag">
@@ -336,7 +342,8 @@ export const PersonalityProfiles = {
                     </label>
                   </div>
                   <div class="gx-personalities__options">
-                    <button type="button" class="gx-btn gx-btn--tonal" :disabled="editingLocked" @click="saveCurve(profile, category, true)">Reset to default</button>
+                    <button type="button" class="gx-btn gx-btn--tonal" :disabled="editingLocked"
+                      :aria-label="label(profile) + ' ' + title + ' reset to default'" @click="saveCurve(profile, category, true)">Reset to default</button>
                   </div>
                 </details>
                 </template>
