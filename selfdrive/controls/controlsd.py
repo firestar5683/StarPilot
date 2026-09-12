@@ -1,6 +1,8 @@
 #!/usr/bin/env python3
 import math
 from numbers import Number
+import os
+import time
 
 from cereal import car, custom, log
 import cereal.messaging as messaging
@@ -26,7 +28,8 @@ from openpilot.selfdrive.controls.lib.drive_helpers import (
 from openpilot.selfdrive.controls.lib.lane_centering import LaneCenteringController
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
 from openpilot.selfdrive.controls.lib.latcontrol_pid import LatControlPID
-from openpilot.selfdrive.controls.lib.latcontrol_angle import LatControlAngle, STEER_ANGLE_SATURATION_THRESHOLD
+from openpilot.selfdrive.controls.lib.latcontrol_angle import LatControlAngle
+from openpilot.selfdrive.controls.lib.steering_saturation import is_angle_steering_limited
 from openpilot.selfdrive.controls.lib.latcontrol_curvature import LatControlCurvature
 from openpilot.selfdrive.controls.lib.latcontrol_torque import (
   BOLT_2018_2021_STEER_RATIO_TEST_SCALE,
@@ -48,6 +51,7 @@ LaneChangeDirection = log.LaneChangeDirection
 LateralControlMode = car.CarControl.Actuators.LateralControlMode
 
 ACTUATOR_FIELDS = tuple(car.CarControl.Actuators.schema.fields.keys())
+REPLAY = "REPLAY" in os.environ
 
 # After a smoothed lane change ends, ramp the curvature limits back to stock over this
 # time so the final recenter correction is shaped instead of stepping through unclamped.
@@ -873,8 +877,15 @@ class Controls:
     if self.sm['selfdriveState'].active:
       CO = self.sm['carOutput']
       if self.CP.steerControlType == car.CarParams.SteerControlType.angle:
-        self.steer_limited_by_safety = abs(CC.actuators.steeringAngleDeg - CO.actuatorsOutput.steeringAngleDeg) > \
-                                              STEER_ANGLE_SATURATION_THRESHOLD
+        output_healthy = (
+          self.sm.valid['carOutput'] and
+          self.sm.alive['carOutput'] and
+          self.sm.freq_ok['carOutput']
+        )
+        now_nanos = self.sm.logMonoTime['selfdriveState'] if REPLAY else time.monotonic_ns()
+        self.steer_limited_by_safety = is_angle_steering_limited(
+          self.CP, CC.actuators.steeringAngleDeg, CO, output_healthy, now_nanos,
+        )
       else:
         self.steer_limited_by_safety = abs(CC.actuators.torque - CO.actuatorsOutput.torque) > 1e-2
 
