@@ -1,3 +1,4 @@
+import math
 from types import SimpleNamespace
 
 import pytest
@@ -73,3 +74,110 @@ def test_safety_flag_is_model_3_only(candidate, enabled, expected):
 
   if candidate != CAR.TESLA_MODEL_S_PREAP:
     assert CarController(DBC[candidate], params).coop_enabled is expected
+
+
+def assert_finite_nonnegative_limit_errors(controller):
+  errors = (controller.resume_limit_error_deg, controller.cooperative_limit_error_deg)
+  assert all(math.isfinite(error) and error >= 0.0 for error in errors)
+  assert math.isfinite(controller.cooperative_offset_deg)
+
+
+def test_zero_torque_has_zero_cooperative_diagnostics(vehicle_model):
+  controller = CooperativeSteeringController()
+
+  angle, lat_active = controller.update(0.0, True, True, make_car_state(), vehicle_model)
+
+  assert angle == 0.0
+  assert lat_active
+  assert controller.resume_limit_error_deg == 0.0
+  assert controller.cooperative_limit_error_deg == 0.0
+  assert controller.cooperative_offset_deg == 0.0
+  assert_finite_nonnegative_limit_errors(controller)
+
+
+def test_steady_light_torque_reports_offset_without_real_limiting(vehicle_model):
+  controller = CooperativeSteeringController()
+
+  for _ in range(100):
+    controller.update(0.0, True, True, make_car_state(torque=0.9), vehicle_model)
+
+  assert controller.cooperative_offset_deg > 2.5
+  assert controller.resume_limit_error_deg < 2.5
+  assert controller.cooperative_limit_error_deg < 2.5
+  assert_finite_nonnegative_limit_errors(controller)
+
+
+def test_torque_reversal_updates_signed_offset_without_negative_errors(vehicle_model):
+  controller = CooperativeSteeringController()
+  for _ in range(100):
+    controller.update(0.0, True, True, make_car_state(torque=0.9), vehicle_model)
+
+  for _ in range(200):
+    controller.update(0.0, True, True, make_car_state(torque=-0.9), vehicle_model)
+
+  assert controller.cooperative_offset_deg < -2.5
+  assert_finite_nonnegative_limit_errors(controller)
+
+
+def test_release_reports_gradual_offset_unwind(vehicle_model):
+  controller = CooperativeSteeringController()
+  for _ in range(100):
+    controller.update(0.0, True, True, make_car_state(torque=1.5), vehicle_model)
+
+  offsets = []
+  for _ in range(100):
+    controller.update(0.0, True, True, make_car_state(), vehicle_model)
+    offsets.append(controller.cooperative_offset_deg)
+
+  assert offsets[0] > offsets[-1] >= 0.0
+  assert all(next_offset <= offset for offset, next_offset in zip(offsets, offsets[1:]))
+  assert offsets[-1] == pytest.approx(0.0, abs=1e-6)
+  assert_finite_nonnegative_limit_errors(controller)
+
+
+def test_resume_ramp_reports_resume_limiting(vehicle_model):
+  controller = CooperativeSteeringController()
+  controller.reset_resume_state(0.0)
+  controller.reset_override_state(0.0)
+
+  controller.update(20.0, True, True, make_car_state(), vehicle_model)
+
+  assert controller.resume_limit_error_deg > 2.5
+  assert controller.cooperative_limit_error_deg < 2.5
+  assert controller.cooperative_offset_deg == 0.0
+
+
+def test_final_limiter_reports_cooperative_target_clipping(vehicle_model):
+  controller = CooperativeSteeringController()
+  controller.reset_resume_state(20.0)
+  controller.reset_override_state(0.0)
+
+  controller.update(20.0, True, True, make_car_state(), vehicle_model)
+
+  assert controller.resume_limit_error_deg == 0.0
+  assert controller.cooperative_limit_error_deg > 2.5
+  assert controller.cooperative_offset_deg == 0.0
+
+
+def test_final_limiter_remains_visible_with_light_torque(vehicle_model):
+  controller = CooperativeSteeringController()
+  controller.reset_resume_state(20.0)
+  controller.reset_override_state(0.0)
+
+  controller.update(20.0, True, True, make_car_state(torque=-0.9), vehicle_model)
+
+  assert abs(controller.cooperative_offset_deg) > 0.0
+  assert controller.cooperative_limit_error_deg > 2.5
+
+
+def test_diagnostics_reset_on_disabled_update(vehicle_model):
+  controller = CooperativeSteeringController()
+  controller.reset_resume_state(20.0)
+  controller.update(20.0, True, True, make_car_state(), vehicle_model)
+  assert controller.cooperative_limit_error_deg > 2.5
+
+  controller.update(4.0, True, False, make_car_state(torque=2.0), vehicle_model)
+
+  assert controller.resume_limit_error_deg == 0.0
+  assert controller.cooperative_limit_error_deg == 0.0
+  assert controller.cooperative_offset_deg == 0.0

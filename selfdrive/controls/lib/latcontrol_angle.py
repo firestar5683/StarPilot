@@ -3,9 +3,7 @@ import math
 from cereal import log
 from opendbc.car.subaru.values import CAR as SUBARU_CAR
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
-
-# TODO This is speed dependent
-STEER_ANGLE_SATURATION_THRESHOLD = 2.5  # Degrees
+from openpilot.selfdrive.controls.lib.steering_saturation import STEER_ANGLE_SATURATION_THRESHOLD
 
 _ASCENT_ANGLE_TRACKING_GAIN = 0.25
 _ASCENT_ANGLE_TRACKING_MAX_CORRECTION = 8.0

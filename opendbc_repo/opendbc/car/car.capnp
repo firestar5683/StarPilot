@@ -375,6 +375,17 @@ struct CarControl {
     torqueOutputCan @8: Float32;   # value sent over can to the car
     speed @6: Float32;  # m/s
     lateralControlMode @9: LateralControlMode;
+    steeringLimitInfo @10 :SteeringLimitInfo;
+
+    struct SteeringLimitInfo {
+      valid @0 :Bool;
+      modelLimitErrorDeg @1 :Float32;
+      resumeLimitErrorDeg @2 :Float32;
+      cooperativeLimitErrorDeg @3 :Float32;
+      cooperativeOffsetDeg @4 :Float32;
+      monoTime @5 :UInt64;
+      combinedLimitErrorDeg @6 :Float32;
+    }
 
     enum LongControlState @0xe40f3a917d908282{
       off @0;

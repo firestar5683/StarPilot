@@ -24,6 +24,7 @@ class CarController(CarControllerBase):
     self.coop_enabled = CP.carFingerprint == CAR.TESLA_MODEL_3 and any(
       config.safetyParam & TeslaSafetyFlags.COOP_STEERING.value for config in CP.safetyConfigs
     )
+    self._clear_steering_limit_info()
     self.packer = CANPacker(dbc_names[Bus.party])
     self.tesla_can = TeslaCAN(self.packer)
     self.preap_long = None
@@ -39,8 +40,28 @@ class CarController(CarControllerBase):
       from opendbc.car.tesla.interface import CarInterface
       self.VM = VehicleModel(CarInterface.get_non_essential_params(CAR.TESLA_MODEL_S_PREAP))
 
+  def _clear_steering_limit_info(self):
+    self.steering_limit_info_valid = False
+    self.model_limit_error_deg = 0.0
+    self.resume_limit_error_deg = 0.0
+    self.cooperative_limit_error_deg = 0.0
+    self.cooperative_offset_deg = 0.0
+    self.steering_limit_mono_time = 0
+    self.combined_limit_error_deg = 0.0
+
+  def _write_steering_limit_info(self, actuators):
+    info = actuators.steeringLimitInfo
+    info.valid = self.steering_limit_info_valid
+    info.modelLimitErrorDeg = self.model_limit_error_deg
+    info.resumeLimitErrorDeg = self.resume_limit_error_deg
+    info.cooperativeLimitErrorDeg = self.cooperative_limit_error_deg
+    info.cooperativeOffsetDeg = self.cooperative_offset_deg
+    info.monoTime = self.steering_limit_mono_time
+    info.combinedLimitErrorDeg = self.combined_limit_error_deg
+
   def update(self, CC, CS, now_nanos, starpilot_toggles):
     if self.CP.carFingerprint == CAR.TESLA_MODEL_S_PREAP:
+      self._clear_steering_limit_info()
       return self._update_preap(CC, CS)
 
     actuators = CC.actuators
@@ -48,8 +69,12 @@ class CarController(CarControllerBase):
 
     # Preserve the stock controller path unless cooperative steering is explicitly enabled.
     lat_active = CC.latActive and (not CS.out.steeringDisengage if self.coop_enabled else CS.hands_on_level < 3)
+    if not (self.coop_enabled and lat_active):
+      self._clear_steering_limit_info()
 
     if self.frame % 2 == 0:
+      requested_angle = actuators.steeringAngleDeg
+
       # Angular rate limit based on speed
       self.apply_angle_last = apply_steer_angle_limits_vm(actuators.steeringAngleDeg, self.apply_angle_last, CS.out.vEgoRaw, CS.out.steeringAngleDeg,
                                                           lat_active, CarControllerParams, self.VM)
@@ -57,6 +82,27 @@ class CarController(CarControllerBase):
       self.apply_angle_command_last, lat_active = self.coop_steer.update(
         self.apply_angle_last, lat_active, self.coop_enabled, CS, self.VM,
       )
+
+      if self.coop_enabled and lat_active:
+        model_limit_error_deg = abs(requested_angle - self.apply_angle_last)
+        resume_limit_error_deg = self.coop_steer.resume_limit_error_deg
+        cooperative_limit_error_deg = self.coop_steer.cooperative_limit_error_deg
+        cooperative_offset_deg = self.coop_steer.cooperative_offset_deg
+        combined_limit_error_deg = abs(requested_angle + cooperative_offset_deg - self.apply_angle_command_last)
+        limit_values = (model_limit_error_deg, resume_limit_error_deg, cooperative_limit_error_deg,
+                        cooperative_offset_deg, combined_limit_error_deg)
+
+        if all(np.isfinite(value) for value in limit_values):
+          self.steering_limit_info_valid = True
+          self.model_limit_error_deg = model_limit_error_deg
+          self.resume_limit_error_deg = resume_limit_error_deg
+          self.cooperative_limit_error_deg = cooperative_limit_error_deg
+          self.cooperative_offset_deg = cooperative_offset_deg
+          self.steering_limit_mono_time = now_nanos
+          self.combined_limit_error_deg = combined_limit_error_deg
+        else:
+          self._clear_steering_limit_info()
+
       can_sends.append(self.tesla_can.create_steering_control(self.apply_angle_command_last, lat_active))
 
     if self.frame % 10 == 0:
@@ -79,6 +125,7 @@ class CarController(CarControllerBase):
     # TODO: HUD control
     new_actuators = actuators.as_builder()
     new_actuators.steeringAngleDeg = self.apply_angle_command_last
+    self._write_steering_limit_info(new_actuators)
 
     self.frame += 1
     return new_actuators, can_sends
@@ -121,6 +168,7 @@ class CarController(CarControllerBase):
 
     new_actuators = actuators.as_builder()
     new_actuators.steeringAngleDeg = self.apply_angle_last
+    self._write_steering_limit_info(new_actuators)
 
     self.frame += 1
     return new_actuators, can_sends
