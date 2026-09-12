@@ -11,6 +11,8 @@ from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.starpilot.common.model_versions import is_tinygrad_model_version
 from openpilot.starpilot.controls.lib.starpilot_vcruise import FT_TO_M, OFFSET_FT_MAX, OFFSET_FT_MIN
 from openpilot.selfdrive.controls.lib.longcontrol import LongCtrlState
+from openpilot.selfdrive.controls.lib.launch_boost import LaunchBoost
+from openpilot.starpilot.common.longitudinal_personality_profiles import resolve_personality_launch_boost
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import LongitudinalMpc, get_safe_obstacle_distance
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import desired_follow_distance
 from openpilot.selfdrive.controls.lib.longitudinal_mpc_lib.long_mpc import should_trigger_planner_fcw
@@ -606,6 +608,7 @@ class LongitudinalPlanner:
     self.tracked_lead_catchup_headway_margins = get_tracked_lead_catchup_headway_margins(CP)
     self.far_follow_output_slew_active = False
     self.model_launch_armed = False
+    self.launch_boost = LaunchBoost()
     self.model_launch_stop_seen = False
     self.confident_lead_depart_elapsed = 0.0
     self.slow_creep_lead_depart_elapsed = 0.0
@@ -2823,8 +2826,18 @@ class LongitudinalPlanner:
         (not lead_present and (self.mode != 'acc' or self.model_launch_stop_seen))
       )
     )
-    if model_launch_allowed:
-      output_a_target = max(output_a_target, model_launch_accel)
+    launch_boost_level = resolve_personality_launch_boost(
+      starpilot_toggles, bool(getattr(sm['starpilotCarState'], 'trafficModeEnabled', False)), personality,
+    )
+    # Preserve High exactly; lower levels must not pre-charge their ramp while
+    # disengaged or while the driver is supplying acceleration.
+    launch_ramp_active = not reset_state and not bool(
+      getattr(sm['carState'], 'gasPressed', False) or getattr(sm['starpilotCarState'], 'accelPressed', False)
+    )
+    output_a_target = self.launch_boost.update(
+      output_a_target, model_launch_accel, launch_boost_level,
+      model_launch_allowed and (launch_boost_level == "high" or launch_ramp_active), self.dt,
+    )
 
     if depart_safety_veto or output_should_stop or bool(getattr(sm['starpilotPlan'], 'forcingStop', False)) or bool(getattr(sm['starpilotPlan'], 'redLight', False)):
       self.lead_depart_accel_hold_until = 0.0
