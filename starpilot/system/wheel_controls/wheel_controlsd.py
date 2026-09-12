@@ -20,6 +20,7 @@ from openpilot.common.params import Params
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.constants import CV
 from openpilot.starpilot.common.favorite_slots import FAVORITE_SLOT_COUNT
+from openpilot.starpilot.common.screen_settings import STANDBY_BUTTON_PRESS_PARAM
 
 
 MAPPINGS_PARAM = "WheelControlMappings"
@@ -504,6 +505,7 @@ class WheelControlsDaemon:
     self.sources: dict[int, InputSource] = {}
     self.buffers: dict[int, bytearray] = {}
     self.hat_values: dict[tuple[int, int], int] = {}
+    self.pressed_keys: set[tuple[int, int]] = set()
     self.learning_slot: int | None = None
     self.learning_deadline = 0.0
     self.last_learned: dict[str, Any] | None = None
@@ -511,8 +513,17 @@ class WheelControlsDaemon:
     self.last_tested: dict[str, Any] | None = None
     self.last_scan = 0.0
     self.last_status = 0.0
+    self._car_state_sock = None
+    self._car_state_messaging = None
+    self._last_car_button_frame = 0
+    self._tesla_car_params: bytes | None = None
+    self._tesla_can_sock = None
+    self._tesla_messaging = None
+    self._tesla_button_observer = None
 
   def close(self) -> None:
+    self._close_car_buttons()
+    self._close_tesla_buttons()
     for fd in list(self.sources):
       self._remove(fd)
     self.selector.close()
@@ -531,6 +542,7 @@ class WheelControlsDaemon:
     self.sources.pop(fd, None)
     self.buffers.pop(fd, None)
     self.hat_values = {key: value for key, value in self.hat_values.items() if key[0] != fd}
+    self.pressed_keys = {key for key in self.pressed_keys if key[0] != fd}
 
   def _scan_devices(self) -> None:
     current_paths = {source.path for source in self.sources.values()}
@@ -607,6 +619,9 @@ class WheelControlsDaemon:
       }
       return
 
+    # The daemon may also run only to wake the screen, with mapped actions disabled.
+    if not self.params.get_bool(ENABLED_PARAM):
+      return
     for mapping in mappings:
       if mapping["device_id"] == source.device_id and mapping["event_code"] == code:
         try:
@@ -636,13 +651,122 @@ class WheelControlsDaemon:
       raw = bytes(buffer[:INPUT_EVENT.size])
       del buffer[:INPUT_EVENT.size]
       _seconds, _microseconds, event_type, code, value = INPUT_EVENT.unpack(raw)
-      if event_type == EV_KEY and value == KEY_DOWN:
-        self._handle_key(source, code)
+      if event_type == EV_KEY:
+        key = (fd, code)
+        if value == 0:
+          self.pressed_keys.discard(key)
+        elif value == KEY_DOWN:
+          if key not in self.pressed_keys:
+            self.pressed_keys.add(key)
+            self._publish_button_press(time.monotonic_ns())
+          self._handle_key(source, code)
       elif event_type == EV_ABS and ABS_HAT0X <= code <= ABS_HAT3Y:
         previous = self.hat_values.get((fd, code), 0)
         self.hat_values[(fd, code)] = value
         if value and value != previous:
+          self._publish_button_press(time.monotonic_ns())
           self._handle_key(source, hat_event_code(code, value))
+
+  def _publish_button_press(self, timestamp: int) -> None:
+    try:
+      if not all(self.params.get_bool(key) for key in ("ScreenManagement", "StandbyMode", "StandbyWakeButton")):
+        return
+      self.params_memory.put_int(STANDBY_BUTTON_PRESS_PARAM, timestamp)
+    except Exception:
+      # A display notification must not interrupt existing controller actions.
+      cloudlog.exception("wheel controls: screen wake notification failed")
+
+  def _close_car_buttons(self) -> None:
+    self._car_state_sock = None
+    self._car_state_messaging = None
+    self._last_car_button_frame = 0
+
+  def _configure_car_buttons(self) -> None:
+    if not all(self.params.get_bool(key) for key in ("ScreenManagement", "StandbyMode", "StandbyWakeButton", "IsOnroad")):
+      self._close_car_buttons()
+      return
+    if self._car_state_sock is not None:
+      return
+    try:
+      from cereal import messaging
+
+      # UI SubMaster conflates frames and can discard one-frame button events.
+      self._car_state_sock = messaging.sub_sock("carState", conflate=False)
+      self._car_state_messaging = messaging
+      self._last_car_button_frame = time.monotonic_ns()
+    except Exception:
+      self._close_car_buttons()
+      cloudlog.exception("wheel controls: car button observer unavailable")
+
+  def _poll_car_buttons(self) -> None:
+    if self._car_state_sock is None:
+      return
+    try:
+      messages = self._car_state_messaging.drain_sock(self._car_state_sock, wait_for_one=False)
+      # card publishes with Python messaging.new_message: already CLOCK_MONOTONIC.
+      now_ns = time.monotonic_ns()
+      pressed_at = 0
+      for message in messages:
+        timestamp = int(message.logMonoTime)
+        if not message.valid or not 0 <= now_ns - timestamp < 2_000_000_000 or timestamp <= self._last_car_button_frame:
+          continue
+        self._last_car_button_frame = timestamp
+        if any(event.pressed and str(event.type) not in ("unknown", "0") for event in message.carState.buttonEvents):
+          pressed_at = timestamp
+      if pressed_at:
+        self._publish_button_press(pressed_at)
+    except Exception:
+      self._close_car_buttons()
+      cloudlog.exception("wheel controls: car button read failed")
+
+  def _close_tesla_buttons(self) -> None:
+    # SubSocket releases its native subscription in __dealloc__.
+    self._tesla_can_sock = None
+    self._tesla_button_observer = None
+    self._tesla_messaging = None
+    self._tesla_car_params = None
+
+  def _configure_tesla_buttons(self) -> None:
+    if not all(self.params.get_bool(key) for key in ("ScreenManagement", "StandbyMode", "StandbyWakeButton", "IsOnroad")):
+      self._close_tesla_buttons()
+      return
+    cp_bytes = self.params.get("CarParams")
+    if cp_bytes == self._tesla_car_params:
+      return
+    self._close_tesla_buttons()
+    self._tesla_car_params = cp_bytes
+    if not cp_bytes:
+      return
+    try:
+      from cereal import car
+      from openpilot.starpilot.system.wheel_controls.tesla_standby_buttons import TeslaStandbyButtonObserver, tesla_button_dbc
+
+      with car.CarParams.from_bytes(cp_bytes) as cp:
+        dbc = tesla_button_dbc(cp)
+      if dbc is not None:
+        from cereal import messaging
+
+        self._tesla_button_observer = TeslaStandbyButtonObserver(dbc)
+        self._tesla_can_sock = messaging.sub_sock("can")
+        self._tesla_messaging = messaging
+    except Exception:
+      self._close_tesla_buttons()
+      cloudlog.exception("wheel controls: passive Tesla button observer unavailable")
+
+  def _poll_tesla_buttons(self) -> None:
+    if self._tesla_can_sock is None:
+      return
+    try:
+      messages = self._tesla_messaging.drain_sock(self._tesla_can_sock, wait_for_one=False)
+      now_boot_ns = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+      now_ns = time.monotonic_ns()
+      timestamp = self._tesla_button_observer.update(messages, now_boot_ns)
+      if timestamp:
+        # pandad timestamps include suspend time; the UI and external inputs use monotonic().
+        self._publish_button_press(now_ns - (now_boot_ns - timestamp))
+    except Exception:
+      self._close_tesla_buttons()
+      cloudlog.exception("wheel controls: passive Tesla button read failed")
 
   def _publish_status(self, now: float) -> None:
     remaining = max(0, round(self.learning_deadline - now, 1)) if self.learning_slot is not None else 0
@@ -666,12 +790,16 @@ class WheelControlsDaemon:
         self._update_testing()
         if now - self.last_scan >= DEVICE_SCAN_INTERVAL_SECONDS:
           self._scan_devices()
+          self._configure_car_buttons()
+          self._configure_tesla_buttons()
           self.last_scan = now
         for key, _mask in self.selector.select(timeout=0.1):
           try:
             self._read_events(key.fd)
           except (KeyError, OSError):
             self._remove(key.fd)
+        self._poll_car_buttons()
+        self._poll_tesla_buttons()
         now = time.monotonic()
         if now - self.last_status >= STATUS_INTERVAL_SECONDS:
           self._publish_status(now)

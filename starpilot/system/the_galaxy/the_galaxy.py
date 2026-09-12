@@ -3410,6 +3410,12 @@ def _get_param_type_info():
       elif k in types and dt == "bool":
         types[k] = bool
 
+    # Zero-valued offsets must stay numeric; legacy inference treats "0" as bool.
+    from openpilot.starpilot.common.screen_settings import SCREEN_INT_KEYS
+    for k in SCREEN_INT_KEYS:
+      if k in _cached_allowed_keys:
+        types[k] = int
+
     for k in GALAXY_MANUAL_BOOL_PARAM_KEYS:
       if k in _cached_allowed_keys:
         types[k] = bool
@@ -5186,6 +5192,7 @@ def setup(app):
       "/assets/components/home/home.js",
       "/assets/components/home/home.css",
       "/assets/mobile/js/params.js",
+      "/assets/mobile/js/components/ScreenBrightnessControl.js",
       "/assets/components/tools/device_settings.js",
       "/assets/components/tools/device_settings.css",
       "/assets/components/tools/device_settings_layout.json",
@@ -5993,6 +6000,18 @@ def setup(app):
         return jsonify({"error": "Missing 'key' or 'value' in request body."}), 400
 
       key = str(data["key"]).strip()
+      if key.startswith(("ScreenBrightness", "StandbyWake")):
+        from openpilot.common.params import UnknownKeyName
+        from openpilot.starpilot.common.screen_settings import write_screen_setting
+        try:
+          updated = write_screen_setting(params, key, data["value"])
+        except ValueError as error:
+          return jsonify({"error": str(error)}), 400
+        except (OSError, KeyError, UnknownKeyName):
+          return jsonify({"error": "Screen setting could not be saved."}), 503
+        update_starpilot_toggles()
+        return jsonify({"updated": updated, "message": "Screen setting saved."}), 200
+
       if key.lower() == PERSONALITY_PROFILES_PARAM.lower():
         return jsonify({"error": "Longitudinal personality profiles must be changed with the Driving Personalities editor."}), 403
       if key in PERSONALITY_PARKED_PARAM_KEYS and _personality_settings_write_locked():

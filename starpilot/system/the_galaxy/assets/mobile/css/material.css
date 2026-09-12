@@ -1896,3 +1896,13 @@ button.gx-chip:hover {
 .gx-monitor td:first-child { min-width:180px; max-width:350px; white-space:normal; overflow-wrap:anywhere; }
 .gx-monitor tbody tr:hover { background:var(--surface); }
 @media(max-width:600px) { .gx-monitor__summary { grid-template-columns:repeat(2,minmax(0,1fr)); gap:8px; } .gx-monitor__metric { padding:12px; } .gx-monitor__metric strong { font-size:22px; } }
+
+/* Screen settings: separate brightness modes. */
+.gx-brightness__readout {
+  align-items: baseline;
+  display: flex;
+  flex-wrap: wrap;
+  gap: var(--sp-2);
+  justify-content: space-between;
+}
+.gx-brightness__readout label { color: var(--text-muted); font-size: var(--fs-sm); }

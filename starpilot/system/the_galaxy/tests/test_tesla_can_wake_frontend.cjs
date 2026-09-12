@@ -8,7 +8,7 @@ const layout = JSON.parse(fs.readFileSync(path.join(root, 'starpilot/common/asse
 const section = layout.find(s => s.name === 'Vehicle');
 const param = section.params.find(p => p.key === 'TeslaWakeOnCAN');
 assert.ok(param, 'Wake on CAN must appear in Vehicle settings');
-const ctx = { console, FavoritesEditor: {}, window: { confirm: () => false }, api: {}, showSnackbar: () => {} };
+const ctx = { console, FavoritesEditor: {}, ScreenBrightnessControl: {}, window: { confirm: () => false }, api: {}, showSnackbar: () => {} };
 vm.createContext(ctx);
 function load(file, expose) {
   const src = fs.readFileSync(path.join(base, file), 'utf8').replace(/^import[\s\S]*?from [^\n]+\n/gm, '').replace(/export /g, '');

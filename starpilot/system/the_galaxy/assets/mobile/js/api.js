@@ -48,7 +48,7 @@ export const api = {
   async getLayout() {
     const data = await request(LAYOUT_URL, { cache: "no-store" })
     return (data || [])
-      .map((section) => ({ ...section, params: (section.params || []).filter((p) => p.key !== "Model") }))
+      .map((section) => ({ ...section, params: (section.params || []).filter((p) => p.key !== "Model").map((p) => ({ ...p, ui_type: p.galaxy_ui_type || p.ui_type })) }))
       .filter((section) => (section.params || []).length > 0)
   },
 
