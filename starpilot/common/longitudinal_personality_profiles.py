@@ -36,7 +36,8 @@ def is_truck_fingerprint(fingerprint: object) -> bool:
 
 ACCELERATION_PRESETS = ("dom_default", "standard", "eco", "sport", "sport_plus", "custom")
 BRAKING_PRESETS = ("dom_default", "standard", "eco", "sport", "custom")
-FOLLOWING_PRESETS = ("dom_default", "close", "medium", "far", "custom")
+_LEGACY_FOLLOWING_PRESETS = ("close", "medium", "far")
+FOLLOWING_PRESETS = ("dom_default", "close", "medium", "far", "traffic", "custom", "legacy_close", "legacy_medium", "legacy_far")
 CURVE_BOUNDS = {
   "acceleration": (0.0, 3.5),
   "braking": (0.5, 2.0),
@@ -115,10 +116,21 @@ _BRAKING_PRESET_CURVES = {
   "standard": (1.0,) * len(BRAKING_SPEEDS_MPH),
   "sport": (2.0,) * len(BRAKING_SPEEDS_MPH),
 }
+# Named following presets use Dom's native speed breakpoints. Custom retains
+# its editable 10 mph grid; sampling named presets onto that grid is only for
+# first-use Custom conversion and graph previews, not runtime interpolation.
 FOLLOWING_PRESET_CURVES = {
-  "close": (1.25,) * len(FOLLOWING_SPEEDS_MPH),
-  "medium": (1.45,) * len(FOLLOWING_SPEEDS_MPH),
-  "far": (1.75,) * len(FOLLOWING_SPEEDS_MPH),
+  "close": (1.25, 1.0),
+  "medium": (1.45, 1.2),
+  "far": (1.6, 1.4),
+  "traffic": (0.75, 1.6),
+  "legacy_close": (1.25, 1.25),
+  "legacy_medium": (1.45, 1.45),
+  "legacy_far": (1.75, 1.75),
+}
+_FOLLOWING_PRESET_SPEEDS_MPH = {
+  preset: (0.0, 25.0 / 0.44704) if preset == "traffic" else (45.0, 70.0)
+  for preset in FOLLOWING_PRESET_CURVES
 }
 PROFILE_AXES = {
   "acceleration": {
@@ -148,7 +160,7 @@ _ACCELERATION_PROFILE_IDS = {
 }
 
 _PERSONALITY_REFERENCE_PRESETS = {
-  "traffic": {"acceleration": "eco", "braking": "standard", "following": "close"},
+  "traffic": {"acceleration": "eco", "braking": "standard", "following": "traffic"},
   "aggressive": {"acceleration": "sport_plus", "braking": "sport", "following": "close"},
   "standard": {"acceleration": "standard", "braking": "standard", "following": "medium"},
   "relaxed": {"acceleration": "eco", "braking": "eco", "following": "far"},
@@ -309,6 +321,10 @@ def _strict_document(
       return None
     profile = {}
     for category in _CATEGORY_SPECS:
+      raw_category = raw_profile.get(category)
+      if (schema_version < 3 and category == "following" and isinstance(raw_category, dict)
+          and raw_category.get("preset") not in ("dom_default", "custom", *_LEGACY_FOLLOWING_PRESETS)):
+        return None
       validated = _validated_category_with_length(
         category, raw_profile.get(category), category_lengths[category], curve_bounds, legacy_curve_bounds,
         retain_custom=schema_version >= 3,
@@ -325,9 +341,16 @@ def _strict_document(
   }
 
 
+def _preserve_legacy_following_presets(profiles: dict[str, dict]) -> None:
+  for profile in profiles.values():
+    config = profile["following"]
+    if config["preset"] in _LEGACY_FOLLOWING_PRESETS:
+      config["preset"] = "legacy_" + config["preset"]
+
+
 def strict_profile_document(raw_document) -> dict | None:
-  # Version 2 has the same axes and active curves. Read it losslessly; the next
-  # normal save upgrades the document without requiring a destructive reset.
+  # V2 uses fixed-distance named following presets. Preserve their original
+  # meaning; adopting a speed-dependent preset requires an explicit selection.
   decoded = _decode_json(raw_document)
   version = decoded.get("schemaVersion") if isinstance(decoded, dict) else None
   if type(version) is not int or version not in (2, PROFILE_SCHEMA_VERSION):
@@ -341,6 +364,8 @@ def strict_profile_document(raw_document) -> dict | None:
     _V1_CURVE_BOUNDS,
   )
   if document is not None:
+    if version == 2:
+      _preserve_legacy_following_presets(document["profiles"])
     document["schemaVersion"] = PROFILE_SCHEMA_VERSION
   return document
 
@@ -361,6 +386,7 @@ def migrate_profile_document(raw_document) -> dict | None:
     return None
 
   migrated_profiles = deepcopy(legacy["profiles"])
+  _preserve_legacy_following_presets(migrated_profiles)
   for profile in migrated_profiles.values():
     for category in ("acceleration", "braking"):
       config = profile[category]
@@ -592,4 +618,6 @@ def interpolate_category_curve(
       speed * 0.44704 for speed in ACCELERATION_SPEEDS_MPH
     )
     return interpolate_accel_profile(float(v_ego), values, breakpoints)
-  return _linear_interp(float(v_ego) / 0.44704, _CATEGORY_SPEEDS_MPH[category], values)
+  breakpoints = (_FOLLOWING_PRESET_SPEEDS_MPH[validated["preset"]]
+                 if category == "following" and validated["preset"] != "custom" else _CATEGORY_SPEEDS_MPH[category])
+  return _linear_interp(float(v_ego) / 0.44704, breakpoints, values)

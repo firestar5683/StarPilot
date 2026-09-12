@@ -116,7 +116,7 @@ const PERSONALITY_CATEGORY_DEFINITIONS = {
 const PERSONALITY_OPTION_ORDER = {
   acceleration: ["eco", "standard", "sport", "sport_plus", "custom"],
   braking: ["eco", "standard", "sport", "custom"],
-  following: ["close", "medium", "far", "custom"],
+  following: ["close", "medium", "far", "traffic", "custom"],
 }
 const PERSONALITY_ADVANCED_KEYS = {
   traffic: ["TrafficJerkAcceleration", "TrafficJerkDeceleration", "TrafficJerkDanger", "TrafficJerkSpeedDecrease", "TrafficJerkSpeed"],
@@ -1667,7 +1667,7 @@ function handleSectionTabClick(sectionSlug, event) {
 }
 
 function personalityPresetLabel(preset) {
-  return String(preset || "").split("_").map(part => part === "plus" ? "+" : `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join(" ").replace(" +", "+")
+  return String(preset || "").split("_").map(part => part === "plus" ? "+" : part === "legacy" ? "Previous" : `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join(" ").replace(" +", "+")
 }
 
 function personalityUpdateKey(profileId, category) {
@@ -2122,6 +2122,7 @@ function renderPersonalityCategoryField(profile, category, config) {
   const definition = PERSONALITY_CATEGORY_DEFINITIONS[category]
   const availableOptions = new Set((state.personalityMeta?.options?.[category] || []).filter(option => option !== "dom_default"))
   const options = (PERSONALITY_OPTION_ORDER[category] || []).filter(option => availableOptions.has(option))
+  if (category === "following" && config.preset.startsWith("legacy_") && availableOptions.has(config.preset)) options.unshift(config.preset)
   const updateKey = personalityUpdateKey(profile.id, category)
   return html`
     <section class="ds-personality-field" aria-labelledby="personality-field-${profile.id}-${category}">
@@ -2139,6 +2140,7 @@ function renderPersonalityCategoryField(profile, category, config) {
         `)}
       </div>
       ${() => config.preset === "dom_default" ? html`<small class="ds-personality-default-note">Using existing StarPilot defaults.</small>` : ""}
+      ${() => category === "following" && config.preset.startsWith("legacy_") ? html`<small class="ds-personality-default-note">Previous fixed following distance retained. Select a preset to use its current curve.</small>` : ""}
     </section>
   `
 }

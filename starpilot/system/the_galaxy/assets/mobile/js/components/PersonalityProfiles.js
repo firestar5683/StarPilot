@@ -29,12 +29,17 @@ export const PersonalityProfiles = {
   },
   methods: {
     enabled(value) { return [true, 1, "1", "True", "true"].includes(value) },
-    label(value) { return value.split("_").map(s => s === "plus" ? "+" : s[0].toUpperCase() + s.slice(1)).join(" ").replace(" +", "+") },
+    label(value) { return value.split("_").map(s => s === "plus" ? "+" : s === "legacy" ? "Previous" : s[0].toUpperCase() + s.slice(1)).join(" ").replace(" +", "+") },
     key: personalityProfileParamKey,
     speed(value) { return formatProfileSpeed(value, this.enabled(this.values.IsMetric)) },
     speedUnit() { return profileSpeedUnit(this.enabled(this.values.IsMetric)) },
     bounds(param) { return numericBounds(param, this.values) },
-    options(category) { return (category === "following" ? ["close", "medium", "far", "custom"] : ["eco", "standard", "sport", "sport_plus", "custom"]).filter(x => this.data.options[category].includes(x)) },
+    options(category, profile) {
+      const choices = (category === "following" ? ["close", "medium", "far", "traffic", "custom"] : ["eco", "standard", "sport", "sport_plus", "custom"]).filter(x => this.data.options[category].includes(x))
+      const selected = this.data.profiles[profile]?.[category]?.preset
+      if (category === "following" && selected?.startsWith("legacy_") && this.data.options[category].includes(selected)) choices.unshift(selected)
+      return choices
+    },
     advancedParams(profile) {
       return Object.values(this.meta).filter(p => p.parent_key === this.key(profile) && p.key.includes("Jerk"))
     },
@@ -288,11 +293,12 @@ export const PersonalityProfiles = {
               <section v-for="(title, category) in CATEGORIES" :key="category" class="gx-personalities__category">
                 <h4>{{ title }}</h4>
                 <div class="gx-personalities__options" role="group" :aria-label="label(profile) + ' ' + title">
-                  <button v-for="option in options(category)" :key="option" type="button" class="gx-btn gx-btn--tonal"
+                  <button v-for="option in options(category, profile)" :key="option" type="button" class="gx-btn gx-btn--tonal"
                     :aria-pressed="data.profiles[profile][category].preset === option" :disabled="editingLocked"
                     @click="preset(profile, category, option)">{{ label(option) }}</button>
                 </div>
                 <p v-if="data.profiles[profile][category].preset === 'dom_default'">Using existing Dom default.</p>
+                <p v-if="category === 'following' && data.profiles[profile][category].preset.startsWith('legacy_')">Previous fixed following distance retained. Select a preset to use its current curve.</p>
               </section>
               <details class="gx-personalities__advanced" :open="advancedOpen[profile]" @toggle="advancedOpen[profile] = $event.target.open">
                 <summary>Advanced</summary>

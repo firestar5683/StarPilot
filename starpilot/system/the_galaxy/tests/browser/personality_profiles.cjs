@@ -40,6 +40,10 @@ const output=process.env.PERSONALITY_BROWSER_OUTPUT || path.join(require('os').t
  assert(!(await page.locator('#gx-personality-settings').isVisible()));
  await page.getByRole('button',{name:'Manage',exact:true}).click();
  assert.equal(await page.locator('.gx-personalities__profile').count(),4);
+ if(process.env.PERSONALITY_FOLLOWING_ONLY){
+   await require('./personality_following_presets.cjs')({page,data,writes,errors,output});
+   return;
+ }
  if(process.env.PERSONALITY_CUSTOM_ONLY){
    await require('./personality_custom_graphs.cjs')({page,data,values,writes,errors,output});
    return;
