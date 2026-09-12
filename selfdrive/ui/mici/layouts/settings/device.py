@@ -14,6 +14,7 @@ from openpilot.selfdrive.ui.mici.widgets.dialog import BigDialog, BigConfirmatio
 from openpilot.selfdrive.ui.mici.widgets.pairing_dialog import PairingDialog, get_pairing_backend_name, get_pairing_host
 from openpilot.selfdrive.ui.mici.onroad.driver_camera_dialog import DriverCameraDialog
 from openpilot.selfdrive.ui.mici.layouts.onboarding import TrainingGuide, TermsPage
+from openpilot.selfdrive.ui.mici.layouts.settings.screen import ScreenSettingsLayoutMici
 from openpilot.system.ui.lib.application import gui_app, FontWeight, MousePos
 from openpilot.system.ui.lib.multilang import tr
 from openpilot.system.ui.widgets import Widget
@@ -271,6 +272,8 @@ class DeviceLayoutMici(NavScroller):
 
     self._connect_server_btn = ConnectServerBigButton()
     self._simple_mode_btn = BigParamControl("simple mode", "SimpleMode")
+    screen_settings_btn = BigButton("screen settings")
+    screen_settings_btn.set_click_callback(lambda: gui_app.push_widget(ScreenSettingsLayoutMici()))
 
     driver_cam_btn = BigButton("driver\ncamera preview", "", gui_app.texture("icons_mici/settings/device/cameras.png", 64, 64))
     driver_cam_btn.set_click_callback(lambda: gui_app.push_widget(DriverCameraDialog()))
@@ -288,6 +291,7 @@ class DeviceLayoutMici(NavScroller):
       self._connect_server_btn,
       PairBigButton(),
       self._simple_mode_btn,
+      screen_settings_btn,
       review_training_guide_btn,
       driver_cam_btn,
       reset_driver_monitoring_btn,

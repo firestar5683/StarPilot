@@ -7,6 +7,9 @@ class FakeParams:
   def __init__(self, **values):
     self.values = values
 
+  def get(self, key):
+    return self.values.get(key)
+
   def get_bool(self, key, **_kwargs):
     return bool(self.values.get(key, False))
 
@@ -31,6 +34,7 @@ def make_device(monkeypatch, **overrides):
   values.update(overrides)
   state = SimpleNamespace(
     ui_params=FakeParams(**values),
+    params_memory=FakeParams(),
     status=ui_state_module.UIStatus.DISENGAGED,
     started=False,
     ignition=False,
@@ -139,7 +143,7 @@ def test_standby_wakes_for_visible_alert(monkeypatch):
   state.ignition = True
   device._ignition = True
   device._interaction_time = now - 1
-  device._visible_onroad_alert = lambda: True
+  device._active_standby_alerts = lambda: {"StandbyWakeInfoAlert"}
 
   device._update_wakefulness()
 

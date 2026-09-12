@@ -57,6 +57,13 @@ from openpilot.selfdrive.ui.layouts.settings.starpilot.aethergrid import (
   TOGGLE_ROW_HEIGHT,
 )
 from openpilot.starpilot.common import param_profiles
+from openpilot.starpilot.common.screen_settings import (
+  BRIGHTNESS_KEYS, SCREEN_WAKE_DESCRIPTIONS, SCREEN_WAKE_OPTIONS, brightness_preferences, write_screen_setting,
+)
+from openpilot.selfdrive.ui.layouts.settings.starpilot.screen_controls import (
+  AetherBrightnessDialog, BrightnessAdjustorRow, WakeToggleRow, show_screen_save_error,
+)
+from openpilot.selfdrive.ui.lib.screen_settings import try_screen_setting
 from openpilot.starpilot.common.connect_server import prepare_konik_server_switch
 from openpilot.starpilot.common.starpilot_variables import EXCLUDED_KEYS as STARPILOT_EXCLUDED_KEYS, TOGGLE_BACKUPS, update_starpilot_toggles
 
@@ -135,7 +142,7 @@ class SystemSettingsManagerView(PanelManagerView):
       hours: f"{hours} " + (tr("hour") if hours == 1 else tr("hours"))
       for hours in range(1, 31)
     }
-    brightness_labels = {101: tr("Auto"), 0: tr("Off")}
+    brightness_labels = {0: tr("Off")}
 
     self._slider_specs: dict[str, dict[str, Any]] = {
       "ScreenBrightness": {
@@ -144,11 +151,11 @@ class SystemSettingsManagerView(PanelManagerView):
         "unit": "%",
         "labels": brightness_labels,
         "min": 0,
-        "max": 101,
+        "max": 100,
         "step": 1,
         "live": True,
-        "presets": [0, 25, 50, 75, 101],
-        "get": lambda: float(self._controller._params.get_int("ScreenBrightness")),
+        "presets": [0, 25, 50, 75, 100],
+        "get": lambda: float(brightness_preferences(self._controller._params, "ScreenBrightness")["manual"]),
         "set": lambda v: self._controller._set_brightness("ScreenBrightness", v),
       },
       "ScreenBrightnessOnroad": {
@@ -157,17 +164,17 @@ class SystemSettingsManagerView(PanelManagerView):
         "unit": "%",
         "labels": brightness_labels,
         "min": 0,
-        "max": 101,
+        "max": 100,
         "step": 1,
         "live": True,
-        "presets": [0, 35, 60, 80, 101],
-        "get": lambda: float(self._controller._params.get_int("ScreenBrightnessOnroad")),
+        "presets": [0, 25, 50, 75, 100],
+        "get": lambda: float(brightness_preferences(self._controller._params, "ScreenBrightnessOnroad")["manual"]),
         "set": lambda v: self._controller._set_brightness("ScreenBrightnessOnroad", int(v)),
       },
       "ScreenTimeout": {
-        "title": tr("Offroad Screen Timeout"),
-        "subtitle": "",
-        "unit": "s",
+        "title": tr("Offroad Timeout"),
+        "subtitle": tr("Screen sleeps while parked."),
+        "unit": " seconds",
         "labels": {},
         "min": 5,
         "max": 60,
@@ -178,9 +185,9 @@ class SystemSettingsManagerView(PanelManagerView):
         "set": lambda v: self._set_timeout("ScreenTimeout", v),
       },
       "ScreenTimeoutOnroad": {
-        "title": tr("Onroad Screen Timeout"),
-        "subtitle": "",
-        "unit": "s",
+        "title": tr("Onroad Timeout"),
+        "subtitle": tr("Standby sleeps the screen after this many seconds."),
+        "unit": " seconds",
         "labels": {},
         "min": 5,
         "max": 60,
@@ -222,8 +229,10 @@ class SystemSettingsManagerView(PanelManagerView):
       return lambda active: self._show_system_slider(k) if active else None
 
     for key, spec in self._slider_specs.items():
+      row_type = BrightnessAdjustorRow if key in BRIGHTNESS_KEYS else AetherAdjustorRow
+      row_kwargs = {"params": self._controller._params, "brightness_key": key} if key in BRIGHTNESS_KEYS else {}
       adjustor = self._child(
-        AetherAdjustorRow(
+        row_type(
           spec["title"],
           spec["subtitle"],
           spec["min"],
@@ -239,6 +248,7 @@ class SystemSettingsManagerView(PanelManagerView):
           set_active=make_set_active(key),
           style=PANEL_STYLE,
           color=PANEL_STYLE.accent,
+          **row_kwargs,
         )
       )
       adjustor.set_touch_valid_callback(lambda: self._scroll_panel.is_touch_valid())
@@ -247,7 +257,7 @@ class SystemSettingsManagerView(PanelManagerView):
     self._toggle_defs = [
       {
         "title": tr("Standby Mode"),
-        "subtitle": "",
+        "subtitle": tr("Only selected events wake the screen. Choose wake events below."),
         "get_state": lambda: self._controller._params.get_bool("StandbyMode"),
         "set_state": lambda v: self._controller._params.put_bool("StandbyMode", v),
       },
@@ -299,6 +309,17 @@ class SystemSettingsManagerView(PanelManagerView):
       },
     ]
 
+    self._wake_toggle_defs = [
+      {
+        "title": tr("Wake: {}").format(tr(label)),
+        "subtitle": tr(SCREEN_WAKE_DESCRIPTIONS[key]),
+        "wake": True,
+        "get_state": lambda k=key, d=default: self._controller._params.get_bool(k, default=d),
+        "set_state": lambda value, k=key: self._save_wake_setting(k, value),
+      }
+      for key, label, default in SCREEN_WAKE_OPTIONS
+    ]
+    self._standby_visible = self._controller._params.get_bool("StandbyMode")
     self._basics_tile_grid_h = 0.0
 
     if self.PANEL_STYLE.toggle_row_mode:
@@ -309,8 +330,7 @@ class SystemSettingsManagerView(PanelManagerView):
       tile = self._make_toggle_tile(toggle_def)
       self._connectivity_tile_grid.add_tile(tile)
     self.register_page_grid(self._connectivity_tile_grid)
-    page_size = self._compute_page_size(TOGGLE_ROW_HEIGHT)
-    self._set_toggle_pages([self._toggle_defs[i:i+page_size] for i in range(0, len(self._toggle_defs), page_size)])
+    self._refresh_toggle_pages()
 
     self._drive_mode_control = self._child(
       AetherSegmentedControl(
@@ -321,6 +341,29 @@ class SystemSettingsManagerView(PanelManagerView):
         suppress_background=True,
       )
     )
+
+  def _save_wake_setting(self, key: str, value: bool):
+    return try_screen_setting(lambda: write_screen_setting(self._controller._params, key, value), show_screen_save_error)
+
+  def _make_toggle_tile(self, definition: dict):
+    if definition.get("wake"):
+      return WakeToggleRow(title=definition["title"], desc=definition["subtitle"],
+                           get_state=definition["get_state"], set_state=definition["set_state"], bg_color=self.PANEL_STYLE.accent)
+    return super()._make_toggle_tile(definition)
+
+  def _display_keys(self) -> list[str]:
+    standby = self._controller._params.get_bool("StandbyMode")
+    return [key for key in self._display_slider_keys if key != "ScreenTimeoutOnroad" or standby]
+
+  def _visible_toggle_defs(self) -> list[dict]:
+    if self._controller._params.get_bool("StandbyMode"):
+      return self._toggle_defs[:1] + self._wake_toggle_defs + self._toggle_defs[1:]
+    return self._toggle_defs
+
+  def _refresh_toggle_pages(self):
+    definitions = self._visible_toggle_defs()
+    page_size = self._compute_page_size(TOGGLE_ROW_HEIGHT)
+    self._set_toggle_pages([definitions[i:i + page_size] for i in range(0, len(definitions), page_size)])
 
   def _tab_subtitle(self, tab_id: str) -> str:
     if tab_id == "basics":
@@ -342,6 +385,9 @@ class SystemSettingsManagerView(PanelManagerView):
     return f"{int(current_val)}{spec['unit']}"
 
   def _show_system_slider(self, key: str):
+    if key in BRIGHTNESS_KEYS:
+      gui_app.push_widget(AetherBrightnessDialog(self._controller._params, key, self._slider_specs[key]["title"]))
+      return
     spec = self._slider_specs[key]
     original_val = spec["get"]()
 
@@ -489,17 +535,21 @@ class SystemSettingsManagerView(PanelManagerView):
     draw_custom_icon("first_aid", icon_x, icon_y, s, icon_color)
 
   def _measure_content_height(self, width: float) -> float:
-    display_h = self._slider_section_height(self._display_slider_keys, width) + GROUP_TOP_INSET + GROUP_HEADER_TOTAL_HEIGHT
+    standby = self._controller._params.get_bool("StandbyMode")
+    if standby != self._standby_visible:
+      self._standby_visible = standby
+      self._refresh_toggle_pages()
+    display_h = self._slider_section_height(self._display_keys(), width) + GROUP_TOP_INSET + GROUP_HEADER_TOTAL_HEIGHT
     power_h = self._slider_section_height(self._power_slider_keys, width) + GROUP_TOP_INSET + GROUP_HEADER_TOTAL_HEIGHT
 
     if self._uses_two_columns(width):
       column_w = self._column_width(width)
       
       # Reset custom heights to calculate natural measurements first
-      for key in self._display_slider_keys + self._power_slider_keys:
+      for key in self._display_keys() + self._power_slider_keys:
         self._adjustor_rows[key].custom_row_height = None
 
-      display_container_h = self._slider_section_height(self._display_slider_keys, column_w)
+      display_container_h = self._slider_section_height(self._display_keys(), column_w)
       power_container_h = self._slider_section_height(self._power_slider_keys, column_w)
 
       left_overhead = GROUP_TOP_INSET + 2 * GROUP_HEADER_TOTAL_HEIGHT + SECTION_GAP
@@ -522,7 +572,7 @@ class SystemSettingsManagerView(PanelManagerView):
       if max_container_h < max_natural_h:
         scale_f = max_container_h / left_natural_content_h
         row_h = max(80.0, float(AETHER_LIST_METRICS.adjustor_row_height) * scale_f)
-        for key in self._display_slider_keys + self._power_slider_keys:
+        for key in self._display_keys() + self._power_slider_keys:
           self._adjustor_rows[key].custom_row_height = row_h
 
       self._system_max_container_h = max_container_h
@@ -530,7 +580,7 @@ class SystemSettingsManagerView(PanelManagerView):
       return self._compute_two_column_height(max_container_h)
     else:
       # Ensure defaults are restored in single column mode
-      for key in self._display_slider_keys + self._power_slider_keys:
+      for key in self._display_keys() + self._power_slider_keys:
         self._adjustor_rows[key].custom_row_height = None
       tiles_content_h = self.measure_page_grid_height(self._connectivity_tile_grid, width - 24)
       return self._stacked_section_height([display_h, power_h, tiles_content_h + 24])
@@ -555,8 +605,8 @@ class SystemSettingsManagerView(PanelManagerView):
 
       current_y = y + GROUP_TOP_INSET
       current_y = draw_group_header(x + 24, current_y, column_w - 48, tr("Display"))
-      for index, key in enumerate(self._display_slider_keys):
-        current_y = self._draw_slider_row(rl.Rectangle(x, current_y, column_w, 0), key, is_last=index == len(self._display_slider_keys) - 1)
+      for index, key in enumerate(self._display_keys()):
+        current_y = self._draw_slider_row(rl.Rectangle(x, current_y, column_w, 0), key, is_last=index == len(self._display_keys()) - 1)
         
       current_y += SECTION_GAP
       
@@ -570,7 +620,7 @@ class SystemSettingsManagerView(PanelManagerView):
         self._system_max_container_h, columns=tg_cols)
       return
 
-    y = self._draw_slider_section(y, x, width, tr("Display"), self._display_slider_keys)
+    y = self._draw_slider_section(y, x, width, tr("Display"), self._display_keys())
     y += SECTION_GAP
     y = self._draw_slider_section(y, x, width, tr("Power"), self._power_slider_keys)
     y += SECTION_GAP
@@ -978,13 +1028,7 @@ class StarPilotSystemLayout(_SettingsPage):
       self._on_reset_stock()
 
   def _set_brightness(self, key, val):
-    self._params.put_int(key, int(val))
-    if not ui_state.started and key == "ScreenBrightness":
-      if hasattr(HARDWARE, 'set_screen_brightness'):
-        HARDWARE.set_screen_brightness(int(val))
-    elif ui_state.started and key == "ScreenBrightnessOnroad":
-      if hasattr(HARDWARE, 'set_screen_brightness'):
-        HARDWARE.set_screen_brightness(int(val))
+    return try_screen_setting(lambda: write_screen_setting(self._params, key, int(val)), show_screen_save_error)
 
   def _get_konik_state(self):
     if Path("/data/not_vetted").exists():

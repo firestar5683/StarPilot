@@ -99,6 +99,7 @@ export function matchesSettingValueCondition(param, values) {
 // Any structural reason a param must not be shown (regardless of dev mode).
 function isHiddenByConditions(section, param, values) {
   if (HIDDEN_SETTING_KEYS.has(param.key) || !isVehicleSettingVisible(section, param, values) || !matchesSettingValueCondition(param, values)) return true
+  if (param.visible_when_all_true?.some((key) => !values[key])) return true
   if (param.requires_capability && !values[param.requires_capability]) return true
   if (RADAR_REQUIRED_KEYS.has(param.key) && !values.HasRadar) return true
   if (param.key === "AlphaLongitudinalEnabled" && !values.AlphaLongitudinalAvailable) return true
