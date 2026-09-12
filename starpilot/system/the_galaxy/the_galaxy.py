@@ -1229,6 +1229,8 @@ def _dispatch_sentry_event(event: dict, *, bypass_rate_limit: bool = False) -> N
     except Exception:
       cloudlog.exception("Galaxy: ntfy notification failed")
 
+from openpilot.starpilot.system.the_galaxy import backup as galaxy_backup
+
 TOGGLE_BACKUP_FORMAT = "starpilot-toggle-backup"
 TOGGLE_BACKUP_VERSION = 1
 TOGGLE_BACKUP_MAX_ENCODED_BYTES = 2_000_000
@@ -10053,11 +10055,129 @@ def setup(app):
 
     return send_file(buffer, as_attachment=True, download_name="toggle_backup.json", mimetype="application/json")
 
+  @app.route("/api/backup", methods=["POST"])
+  def backup_complete_data():
+    toggle_values = {}
+    default_values = _get_static_default_param_values()
+    for key in sorted(_get_toggle_backup_keys() - set(galaxy_backup.HISTORY_KEYS) - {PERSONALITY_PROFILES_PARAM, "CustomPersonalities"}):
+      raw_value = _params_raw.get(key)
+      if raw_value is None:
+        raw_value = default_values.get(key)
+      if raw_value is None:
+        continue
+      value = _sanitize_json_value(raw_value)
+      if not isinstance(value, (str, int, float, bool, dict, list)):
+        value = str(value)
+
+      toggle_values[key] = value
+
+    with _PERSONALITY_PROFILES_WRITE_LOCK, _STATS_RESPONSE_LOCK:
+      history = {}
+      for key in galaxy_backup.HISTORY_KEYS:
+        value = _params_raw.get(key)
+        if value is not None:
+          history[key] = _coerce_toggle_restore_value(key, value)
+      try:
+        statistics = galaxy_backup.export_statistics("/data/starpilot/model_stats.sqlite")
+      except (ValueError, OSError) as error:
+        return jsonify({"message": str(error)}), 409
+      payload = {
+        "format": galaxy_backup.FORMAT, "version": galaxy_backup.VERSION,
+        "createdAt": datetime.now(timezone.utc).isoformat(),
+        "settings": toggle_values,
+        "omittedSettings": [PERSONALITY_PROFILES_PARAM, "CustomPersonalities"],
+        "history": history,
+        "modelStatistics": statistics,
+      }
+      encoded = json.dumps(payload, allow_nan=False)
+      if len(encoded.encode()) > galaxy_backup.MAX_BYTES:
+        return jsonify({"message": "Backup exceeds the supported size; no incomplete backup was created."}), 413
+    return send_file(BytesIO(encoded.encode()), as_attachment=True,
+                     download_name="starpilot-backup.json", mimetype="application/json")
+
+  def _restore_complete_backup(data):
+    def parked():
+      galaxy_backup.require_parked(_params_live_raw)
+    try:
+      parked()
+      if type(data.get("version")) is not int or data["version"] != galaxy_backup.VERSION:
+        raise ValueError("This backup requires a compatible Galaxy version.")
+      galaxy_backup.json_document(data)
+      if len(json.dumps(data).encode()) > galaxy_backup.MAX_BYTES:
+        raise ValueError("Backup file is too large.")
+      if not isinstance(data.get("settings"), dict) or not isinstance(data.get("history"), dict):
+        raise ValueError("Backup settings or history are missing.")
+      allowed = _get_toggle_backup_keys() - set(galaxy_backup.HISTORY_KEYS) - {PERSONALITY_PROFILES_PARAM, "CustomPersonalities"}
+      settings = {}
+      skipped = 0
+      for saved_key, value in data["settings"].items():
+        key = LEGACY_STARPILOT_PARAM_RENAMES.get(saved_key, saved_key)
+        if key not in allowed:
+          skipped += 1
+          continue
+        value = _coerce_toggle_restore_value(key, value)
+        if key in PERSONALITY_ADVANCED_PARAM_KEYS:
+          value = validate_personality_advanced_value(value)
+        elif key in PERSONALITY_FOLLOW_PARAM_KEYS:
+          value = validate_personality_follow_value(value)
+        settings[key] = value
+      if data.get("personalityProfiles") is not None:
+        raise ValueError("Personality profile documents are not supported by this backup version.")
+      history = {}
+      for key, value in data['history'].items():
+        if key not in galaxy_backup.HISTORY_KEYS:
+          raise ValueError("Unknown history field in backup.")
+        history[key] = _coerce_toggle_restore_value(key, value)
+        if key in ('GalaxyDashboardStats', 'ModelDrivesAndScores', 'StarPilotStats', 'ApiCache_DriveStats') and not isinstance(history[key], dict):
+          raise ValueError('Invalid statistics document.')
+      dashboard = history.get('GalaxyDashboardStats', {})
+      if not isinstance(dashboard, dict) or dashboard.get('version', 1) != 1 or not isinstance(dashboard.get('routes', {}), dict):
+        raise ValueError("Invalid dashboard history.")
+      for name, entry in dashboard.get('routes', {}).items():
+        if not isinstance(name, str) or not isinstance(entry, dict):
+          raise ValueError('Invalid dashboard route.')
+        for field in ('distanceMeters', 'duration', 'engagedSeconds', 'distractedMoments', 'unresponsiveMoments', 'segmentCount'):
+          if field in entry and not galaxy_backup._number(entry[field]):
+            raise ValueError('Invalid dashboard route measurement.')
+      for field in ('attentionRecords', 'personalRecords', 'modelUsage'):
+        if not isinstance(dashboard.get(field, {}), dict):
+          raise ValueError("Invalid dashboard records.")
+      if not isinstance(dashboard.get('ignoredRoutes', []), list):
+        raise ValueError("Invalid ignored-route history.")
+      if 'modelStatistics' not in data:
+        raise ValueError('Model statistics field is missing; use null for settings/history-only backups.')
+      statistics = galaxy_backup.validate_statistics(data['modelStatistics'])
+      with _PERSONALITY_PROFILES_WRITE_LOCK, _STATS_RESPONSE_LOCK:
+        parked()
+        utilities.stop_dashboard_background_analysis()
+        recovery = Path('/data/starpilot/backups') / ('galaxy-restore-' + datetime.now(timezone.utc).strftime('%Y%m%d-%H%M%S-%f'))
+        result = galaxy_backup.apply_restore(_params_raw, settings, history, statistics,
+                                            '/data/starpilot/model_stats.sqlite', recovery, parked)
+        utilities._invalidate_dashboard_cache()
+        _STATS_RESPONSE_CACHE.update({'payload': None, 'updated_at': 0.0})
+      update_starpilot_toggles()
+      return jsonify({"success": True, **result, "skippedCount": skipped,
+                      "message": f"Restored settings and history. Added {result['addedDrives']} drives; existing drives were kept."})
+    except (ValueError, TypeError, KeyError, OverflowError) as error:
+      return jsonify({"success": False, "message": str(error)}), 400
+    except galaxy_backup.RestoreError as error:
+      app.logger.exception('Backup restore verification failed')
+      return jsonify({"success": False, "message": str(error)}), 500
+    except Exception:
+      app.logger.exception('Backup restore failed')
+      return jsonify({"success": False, "message": "Restore failed. Check diagnostics; a recovery copy is retained on the device."}), 500
+
+  @app.route("/api/restore", methods=["POST"])
   @app.route("/api/toggles/restore", methods=["POST"])
   def restore_toggle_values():
+    if request.content_length is not None and request.content_length > galaxy_backup.MAX_BYTES:
+      return jsonify({"message": "Backup file is too large."}), 413
     request_data = request.get_json(silent=True)
     if not isinstance(request_data, dict):
       return jsonify({"success": False, "message": "Invalid toggle backup file."}), 400
+
+    if request_data.get("format") == galaxy_backup.FORMAT:
+      return _restore_complete_backup(request_data)
 
     backup_format = request_data.get("format")
     if backup_format not in (None, TOGGLE_BACKUP_FORMAT):
@@ -10080,6 +10200,13 @@ def setup(app):
     if not isinstance(toggle_values, dict):
       return jsonify({"success": False, "message": "Toggle backup does not contain settings."}), 400
 
+    if request.path == "/api/restore":
+      return _restore_complete_backup({
+        "version": galaxy_backup.VERSION,
+        "settings": {key: value for key, value in toggle_values.items() if key not in galaxy_backup.HISTORY_KEYS},
+        "history": {key: value for key, value in toggle_values.items() if key in galaxy_backup.HISTORY_KEYS},
+        "modelStatistics": None,
+      })
     return _restore_toggle_values(toggle_values)
 
   def _restore_toggle_values(toggle_values, *, profile=None):

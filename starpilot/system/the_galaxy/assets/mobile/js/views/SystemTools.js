@@ -93,10 +93,10 @@ export const SystemTools = {
         const url = URL.createObjectURL(blob)
         const a = document.createElement("a")
         a.href = url
-        a.download = "toggle-backup.json"
+        a.download = "starpilot-backup.json"
         a.click()
         setTimeout(() => URL.revokeObjectURL(url), 1000)
-        showSnackbar("Toggle backup downloaded.")
+        showSnackbar("Backup downloaded.")
       } catch (e) {
         showSnackbar(e?.message || "Backup failed.", "error")
       }
@@ -145,19 +145,22 @@ export const SystemTools = {
         this.profileBusy = ""
       }
     },
-    onRestoreFile(e) {
+    async onRestoreFile(e) {
+      if (this.isOnroad) { showSnackbar("Park the vehicle before restoring.", "error"); return }
       const file = e.target.files[0]
       e.target.value = ""
       if (!file) return
-      if (file.size > 5_000_000) { showSnackbar("That toggle backup file is too large.", "error"); return }
-      file.text().then((text) => {
+      if (file.size > 67_108_864) { showSnackbar("That backup file is too large.", "error"); return }
+      return file.text().then(async (text) => {
         let data
-        try { data = JSON.parse(text) } catch { showSnackbar("That file is not a valid toggle backup.", "error"); return }
-        if (!data || typeof data !== "object" || Array.isArray(data)) { showSnackbar("That file is not a valid toggle backup.", "error"); return }
-        api.restoreToggles(data).then((res) => {
-          showSnackbar(res?.message || "Toggles restored!")
-        }).catch((err) => showSnackbar(err?.message || "Failed to restore toggles.", "error"))
-      })
+        try { data = JSON.parse(text) } catch { showSnackbar("That file is not a valid backup.", "error"); return }
+        if (!data || typeof data !== "object" || Array.isArray(data)) { showSnackbar("That file is not a valid backup.", "error"); return }
+        if (!(await GalaxyConfirm({ title: "Restore backup?", message: "This applies saved settings and merges driving history. Existing drive records are kept, so importing the same backup again does not double-count them.", confirmLabel: "Restore" }))) return
+        if (this.isOnroad) { showSnackbar("Park the vehicle before restoring.", "error"); return }
+        return api.restoreToggles(data).then((res) => {
+          showSnackbar(res?.message || "Backup restored!")
+        }).catch((err) => showSnackbar(err?.message || "Failed to restore backup.", "error"))
+      }).catch((err) => showSnackbar(err?.message || "Failed to read backup file.", "error"))
     },
     async resetDefault() {
       if (!(await GalaxyConfirm({ title: "Reset toggles to default?", message: "This resets all toggles to their default values and reboots.", confirmLabel: "Reset", danger: true }))) return
@@ -435,13 +438,13 @@ export const SystemTools = {
           </div>
         </div>
         <div style="padding: var(--sp-3); display:flex; gap:8px; flex-wrap:wrap;">
-          <button type="button" class="gx-btn" @click="backupToggles"><i class="bi bi-download"></i> Backup Toggles</button>
-          <button type="button" class="gx-btn gx-btn--tonal" @click="$refs.restoreInput.click()"><i class="bi bi-upload"></i> Restore Toggles</button>
+          <button type="button" class="gx-btn" @click="backupToggles"><i class="bi bi-download"></i> Backup</button>
+          <button type="button" class="gx-btn gx-btn--tonal" :disabled="isOnroad" @click="$refs.restoreInput.click()"><i class="bi bi-upload"></i> Restore</button>
           <button type="button" class="gx-btn gx-btn--tonal" @click="resetDefault">Reset to Default</button>
           <button type="button" class="gx-btn gx-btn--danger" @click="deleteAllDrivingRoutes">Delete All Driving Routes</button>
           <input ref="restoreInput" type="file" accept=".json" style="display:none;" @change="onRestoreFile" />
         </div>
-        <p class="gx-note" style="padding: 0 var(--sp-4);">Backup downloads your toggle settings as a JSON file. Restore re-applies one, and Reset to Default clears them back to stock and reboots.</p>
+        <p class="gx-note" style="padding: 0 var(--sp-4);">Backup downloads settings and dashboard history, plus model mileage, interventions and disengagements when model statistics are available. Restore applies settings and merges history while parked. Older toggle backups are also supported. Personality profile documents and their master switch are excluded. Model files and driving videos are not included. Reset to Default clears settings and reboots.</p>
 
         <div v-if="factoryResetStatus" style="padding: var(--sp-3); border-top: 1px solid var(--border-color, rgba(255,255,255,.08));">
           <div class="gx-section__header">

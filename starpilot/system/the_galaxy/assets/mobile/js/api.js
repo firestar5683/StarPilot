@@ -215,14 +215,14 @@ export const api = {
     return response.json()
   },
   async backupToggles() {
-    const res = await fetch("/api/toggles/backup", { method: "POST" })
+    const res = await fetch("/api/backup", { method: "POST" })
     if (!res.ok) {
       const data = await res.json().catch(() => ({}))
-      throw new Error(data?.message || "Failed to create toggle backup.")
+      throw new Error(data?.message || "Failed to create backup.")
     }
     return res.blob()
   },
-  restoreToggles(data) { return request("/api/toggles/restore", { method: "POST", data }) },
+  restoreToggles(data) { return request("/api/restore", { method: "POST", data }) },
   resetTogglesDefault() { return request("/api/toggles/reset_default", { method: "POST" }) },
 
   getUpdateBranches() { return request("/api/update/branches") },
