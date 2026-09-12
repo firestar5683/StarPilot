@@ -1,4 +1,6 @@
 import { api, showSnackbar } from "../api.js"
+import {readComparison, comparisonRows} from '/assets/components/tools/model_comparison.js'
+import {modelManagerMetrics, trackingStatus, compareMetrics, readModelHistory, historyRow} from '/assets/components/tools/model_metrics.js'
 import { usePolling } from "../composables.js"
 import { GalaxyConfirm } from "../components/GalaxyModal.js"
 
@@ -23,6 +25,9 @@ export const ModelManager = {
       communityFilter: "all",
       allowGpu: false,
       models: [],
+      histories: {},
+      modelEngagement: {},
+      period: 'all', statsMode: 'all', comparison: [], comparisonStatus: '', comparisonRequest: 0,
       currentModel: "",
       activeSmallModel: "",
       activeBigModel: "",
@@ -56,6 +61,10 @@ export const ModelManager = {
         .filter((m) => this.userFilter === "all" ? true : !!m.userFavorite === (this.userFilter === "yes"))
         .filter((m) => this.communityFilter === "all" ? true : !!m.communityFavorite === (this.communityFilter === "yes"))
       rows.sort((a, b) => {
+        if (["distance", "interventions", "disengagements"].includes(mode)) {
+          const delta = compareMetrics(a, b, mode)
+          if (delta !== 0) return delta
+        }
         if (mode === "release_date") {
           const delta = releasedTs(b.released) - releasedTs(a.released)
           if (delta !== 0) return delta
@@ -80,6 +89,38 @@ export const ModelManager = {
   },
   beforeUnmount() { this.poll?.destroy() },
   methods: {
+    comparisonRows,
+    async loadComparison() {
+      const request = ++this.comparisonRequest
+      this.comparisonStatus = 'Loading…'
+      this.comparison = []
+      this.histories = {}
+      try {
+        const rows = await readComparison(this.period, this.statsMode)
+        if (request !== this.comparisonRequest) return
+        this.comparison = rows
+        this.comparisonStatus = rows.length ? '' : 'No recorded comparisons for this period.'
+      } catch (error) {
+        if (request === this.comparisonRequest) this.comparisonStatus = error.message
+      }
+    },
+    modelManagerMetrics,
+    trackingStatus,
+    historyRow,
+    async loadHistory(key, more = false) {
+      const prior = this.histories[key]
+      if (prior?.loading) return
+      if (!more && prior?.open) { this.histories[key] = {...prior, open:false}; return }
+      this.histories[key] = {rows:[], ...prior, open:true, loading:true, error:""}
+      try {
+        const period = this.period, mode = this.statsMode
+        const result = await readModelHistory(key, more ? prior.rows.length : 0, period, mode)
+        if (period !== this.period || mode !== this.statsMode) return
+        this.histories[key] = {...result, rows:more ? [...prior.rows, ...result.rows] : result.rows, open:true, loading:false, error:""}
+      } catch (error) {
+        this.histories[key] = {...this.histories[key], loading:false, error:error.message}
+      }
+    },
     gpuBlocked(model) {
       return !!model.requiresGpu && !model.gpuAvailable && !this.allowGpu
     },
@@ -102,6 +143,7 @@ export const ModelManager = {
       try {
         const p = await api.getModelStatus()
         this.models = Array.isArray(p.models) ? p.models.filter((m) => m && typeof m === "object") : []
+        this.modelEngagement = p.modelEngagement || {}
         this.currentModel = text(p.currentModel, "")
         this.activeSmallModel = text(p.activeSmallModel, "")
         this.activeBigModel = text(p.activeBigModel, "")
@@ -185,7 +227,7 @@ export const ModelManager = {
     },
   },
   template: `
-    <div class="gx-view">
+    <div class="gx-view gx-model-manager">
       <div v-if="loading" class="gx-card">
         <div class="gx-loading" style="padding: var(--sp-4);">Loading models...</div>
       </div>
@@ -253,6 +295,9 @@ export const ModelManager = {
               <select class="gx-field" style="flex:1;" :value="sortMode" @change="sortMode = $event.target.value">
                 <option value="release_date">Release Date</option>
                 <option value="alphabetical">Alphabetical</option>
+                <option value="distance">Total distance</option>
+                <option value="interventions">Miles / intervention</option>
+                <option value="disengagements">Miles / disengagement</option>
               </select>
             </div>
 
@@ -287,6 +332,17 @@ export const ModelManager = {
           <div class="gx-card"><div class="gx-empty">No models available.</div></div>
         </template>
         <template v-else>
+          <details class="gx-card gx-model-comparison" @toggle="$event.target.open && loadComparison()">
+            <summary>Compare recorded revisions and assistance modes</summary>
+            <p>Cards show all-time assisted distance (Total distance), pooled across revisions. Comparisons keep each loaded revision, backend, pair and assistance mode separate. Periods include drives started in the selected window.</p>
+            <label for="gx-period">Period</label>
+            <select id="gx-period" class="gx-field" v-model="period" @change="loadComparison()"><option value="all">All time</option><option value="7">Last 7 days</option><option value="30">Last 30 days</option></select>
+            <label for="gx-stats-mode">Assistance mode</label>
+            <select id="gx-stats-mode" class="gx-field" v-model="statsMode" @change="loadComparison()"><option value="all">All modes (separate rows)</option><option value="full">Full assistance</option><option value="aol">Lateral only</option></select>
+            <p>{{ comparisonStatus }}</p>
+            <article class="gx-model-history-row" v-for="row in comparisonRows(comparison)"><strong>{{ row.configuration }}</strong><div>{{ row.mode }}</div><div>{{ row.values }}</div><div>{{ row.counts }}</div></article>
+            <p>Event averages use eligible exposure / episode count, not completed-interval averages. Intervention exposure excludes held inputs and the 2 s release/rearm period in definition v2 (historical v1 used 0.5 s). Mixed or unknown definitions retain distance and counts but have no event averages. Disengagement exposure includes the enabled session. Zero events are not ranked as infinite. These observations are not controlled safety scores.</p>
+          </details>
           <div class="gx-card-grid">
             <section class="gx-card" v-for="m in sorted" :key="m.value">
             <div style="display:flex; align-items:flex-start; gap:8px; padding: var(--sp-3);">
@@ -326,6 +382,25 @@ export const ModelManager = {
               <template v-else>
                 <button type="button" class="gx-btn" :disabled="!!busy || gpuBlocked(m)" @click="runAction('download', m)"><i class="bi bi-download"></i> {{ gpuBlocked(m) ? 'GPU Required' : 'Download' }}</button>
               </template>
+            </div>
+            <dl class="gx-model-metrics" aria-label="Per-model driving statistics">
+              <div v-for="metric in modelManagerMetrics(m, modelEngagement[m.value])" :key="metric.label" :class="{ 'gx-model-metric-total': metric.primary }">
+                <dt :title="metric.description">{{ metric.label }}</dt>
+                <dd>{{ metric.value }}</dd>
+              </div>
+            </dl>
+            <p class="gx-row__desc" style="padding:0 var(--sp-3) var(--sp-3); margin:0;">{{ trackingStatus(m) }}</p>
+            <div class="gx-model-history">
+              <button type="button" class="gx-btn gx-btn--tonal" @click="loadHistory(m.value)">{{ histories[m.value]?.open ? 'Close history' : 'Drive history' }}</button>
+              <div v-if="histories[m.value]?.open">
+                <p v-if="histories[m.value].error">{{ histories[m.value].error }}</p>
+                <p v-else-if="histories[m.value].loading">Loading…</p>
+                <p v-else-if="!histories[m.value].rows.length">No recorded drives</p>
+                <div class="gx-model-history-row" v-for="(entry, i) in histories[m.value].rows" :key="i">
+                  <strong>{{ historyRow(entry).title }}</strong><div>{{ historyRow(entry).configuration }}</div><div>{{ historyRow(entry).values }}</div><div>{{ historyRow(entry).counts }}</div>
+                </div>
+                <button v-if="histories[m.value].more" type="button" class="gx-btn gx-btn--tonal" :disabled="histories[m.value].loading" @click="loadHistory(m.value, true)">More drives</button>
+              </div>
             </div>
             </section>
           </div>

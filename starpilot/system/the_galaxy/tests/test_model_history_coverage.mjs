@@ -1,0 +1,11 @@
+import fs from 'node:fs';
+import assert from 'node:assert/strict';
+const text=fs.readFileSync(new URL('../assets/components/tools/model_metrics.js',import.meta.url),'utf8');
+const {historyRow}=await import('data:text/javascript;base64,'+Buffer.from(text).toString('base64'));
+const base={started:1700000000,complete:true,stats:{available:true,incomplete:true}};
+assert.match(historyRow({...base,gaps:3}).title,/3 tracking gaps/);
+assert.doesNotMatch(historyRow({...base,gaps:3}).title,/Open/);
+assert.match(historyRow({...base,complete:false,gaps:0}).title,/Open/);
+assert.match(historyRow({...base,gaps:0}).title,/Incomplete telemetry/);
+assert.doesNotMatch(historyRow({...base,stats:{available:true,incomplete:false},gaps:0}).title,/gap|Incomplete|Open/);
+console.log('PASS closed with gaps, open, resource-limited incomplete and complete history');

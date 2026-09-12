@@ -5167,6 +5167,11 @@ class GalaxySlugMiddleware:
 
 
 def setup(app):
+  try:
+    from openpilot.starpilot.system.the_galaxy.model_stats_api import ModelStatsAPI, register_model_stats_api
+    model_stats_api = (ModelStatsAPI() if 'model_stats' in app.view_functions else register_model_stats_api(app))
+  except ImportError:
+    model_stats_api = None
   if not isinstance(app.wsgi_app, GalaxySlugMiddleware):
     app.wsgi_app = GalaxySlugMiddleware(app.wsgi_app)
 
@@ -7016,7 +7021,15 @@ def setup(app):
       )
       model_status_debug["last_empty_catalog_log_time"] = now
 
+    try:
+      from openpilot.starpilot.system.the_galaxy.utilities import get_model_engagement
+      model_engagement = get_model_engagement(params)
+    except Exception:
+      model_engagement = {}
+
     return jsonify({
+      "modelEngagement": model_engagement,
+      "statistics": model_stats_api.summary() if model_stats_api is not None else None,
       "modelToDownload": model_to_download,
       "modelLabModelToDownload": lab_model_to_download,
       "downloadAll": download_all,
@@ -7550,7 +7563,7 @@ def setup(app):
       })
 
     models.sort(key=lambda model: (model["series"].lower(), model["label"].lower()))
-    return models
+    return model_stats_api.annotate(models) if model_stats_api is not None else models
 
   @app.route("/api/routes", methods=["GET"])
   def list_routes():
