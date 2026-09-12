@@ -138,6 +138,8 @@ from openpilot.starpilot.common.longitudinal_personality_profiles import (
   CURVE_BOUNDS,
   FOLLOWING_PRESETS,
   FOLLOWING_SPEEDS_MPH,
+  LAUNCH_BOOST_LEVELS,
+  PERSONALITY_IDS,
   PERSONALITY_PROFILES_PARAM,
   PERSONALITY_ADVANCED_PARAM_KEYS,
   PERSONALITY_FOLLOW_PARAM_KEYS,
@@ -150,10 +152,12 @@ from openpilot.starpilot.common.longitudinal_personality_profiles import (
   is_truck_fingerprint,
   migrate_profile_document,
   personality_reference_curves,
+  personality_launch_boost_levels,
   profile_document,
   strict_profile_document,
   synchronise_profile_document_enabled,
   update_personality_profile,
+  update_personality_launch_boost,
   validate_personality_advanced_value,
   validate_personality_follow_value,
 )
@@ -5875,6 +5879,36 @@ def setup(app):
       "schema_version": PROFILE_SCHEMA_VERSION,
     }), 200
 
+  @app.route("/api/personality_profiles/launch_boost", methods=["PUT"])
+  @_serialize_personality_profile_writes
+  def personality_launch_boost():
+    if _personality_settings_write_locked():
+      return jsonify({"error": "Longitudinal personality profiles can only be changed while off-road."}), 403
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or set(data) != {"profile", "level", "expected"}:
+      return jsonify({"error": "Expected profile, level and expected Launch Boost setting."}), 400
+    if (not isinstance(data["profile"], str) or data["profile"] not in PERSONALITY_IDS or
+        not isinstance(data["level"], str) or data["level"] not in LAUNCH_BOOST_LEVELS or
+        not isinstance(data["expected"], str) or data["expected"] not in LAUNCH_BOOST_LEVELS):
+      return jsonify({"error": "Invalid personality or Launch Boost setting."}), 400
+    raw = _safe_params_get_live_raw(PERSONALITY_PROFILES_PARAM)
+    document = strict_profile_document(raw)
+    if document is None and not is_unconfigured_profile_document(raw):
+      return jsonify({"error": "Stored profiles need migration or repair before editing Launch Boost."}), 409
+    profiles = document["profiles"] if document is not None else default_personality_profiles(False)
+    current = personality_launch_boost_levels(profiles)[data["profile"]]
+    if data["expected"] != current:
+      return jsonify({"error": "Saved Launch Boost changed. Reload and review it before editing again."}), 409
+    profiles = update_personality_launch_boost(profiles, data["profile"], data["level"])
+    candidate = profile_document(profiles, enabled=params.get_bool("CustomPersonalities"))
+    if _personality_settings_write_locked():
+      return jsonify({"error": "Personality editing became unavailable. Refresh before retrying."}), 403
+    params.put(PERSONALITY_PROFILES_PARAM, candidate)
+    update_starpilot_toggles()
+    if strict_profile_document(_safe_params_get_live_raw(PERSONALITY_PROFILES_PARAM)) != candidate:
+      return jsonify({"error": "Launch Boost save could not be verified. Refresh before retrying."}), 500
+    return jsonify({"launch_boost": personality_launch_boost_levels(profiles)}), 200
+
   @app.route("/api/personality_profiles", methods=["GET", "PUT"])
   @_serialize_personality_profile_writes
   def personality_profiles():
@@ -5901,6 +5935,8 @@ def setup(app):
         return jsonify({"error": "Expected profile, category, preset, curve, and optional expected category."}), 400
 
       try:
+        if data["category"] not in ("acceleration", "braking", "following"):
+          raise ValueError("Unknown profile category")
         current_config = profiles[data["profile"]][data["category"]]
         if "expected" in data and (data["expected"] != current_config or any(
           isinstance(value, bool) for key in ("curve", "legacyCurve") for value in data["expected"].get(key, [])
@@ -5958,6 +5994,8 @@ def setup(app):
         "following": list(FOLLOWING_PRESETS),
       },
       "profiles": profiles,
+      "launch_boost": personality_launch_boost_levels(profiles),
+      "launch_boost_options": list(LAUNCH_BOOST_LEVELS),
       "reference_curves": personality_reference_curves(ev_tuning, truck_tuning),
       "schema_version": PROFILE_SCHEMA_VERSION,
       "speed_breakpoints_mph": {

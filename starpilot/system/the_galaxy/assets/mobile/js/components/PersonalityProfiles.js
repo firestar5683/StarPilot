@@ -74,6 +74,11 @@ export const PersonalityProfiles = {
           throw new Error("Profile data is unavailable or malformed. Retrying automatically…")
         }
       }
+      if (data?.launch_boost_options !== undefined && (
+          !Array.isArray(data.launch_boost_options) || data.launch_boost_options.join(",") !== "off,low,medium,high" ||
+          PROFILES.some(profile => !data.launch_boost_options.includes(data.launch_boost?.[profile])))) {
+        throw new Error("Launch Boost settings are unavailable. Retrying automatically…")
+      }
       return data
     },
     acceptData(data) {
@@ -148,6 +153,11 @@ export const PersonalityProfiles = {
       const value = event.target.checked
       event.target.checked = this.enabled(this.values[key])
       return this.write(() => api.updateParam({ key, value }), () => !this.paramLocked(key))
+    },
+    async launchBoost(profile, level) {
+      const expected = this.data.launch_boost?.[profile]
+      if (expected === level || !this.data.launch_boost_options?.includes(level)) return
+      return this.write(() => api.savePersonalityLaunchBoost({ profile, level, expected }))
     },
     async preset(profile, category, preset) {
       if (this.data.profiles[profile][category].preset === preset) return
@@ -296,6 +306,15 @@ export const PersonalityProfiles = {
               </section>
               <details class="gx-personalities__advanced" :open="advancedOpen[profile]" @toggle="advancedOpen[profile] = $event.target.open">
                 <summary>Advanced</summary>
+                <section v-if="data.launch_boost_options" class="gx-personalities__category">
+                  <h4>Launch Boost</h4>
+                  <div class="gx-personalities__options" role="group" :aria-label="label(profile) + ' Launch Boost'">
+                    <button v-for="level in data.launch_boost_options" :key="level" type="button" class="gx-btn gx-btn--tonal"
+                      :aria-pressed="data.launch_boost[profile] === level" :disabled="editingLocked"
+                      @click="launchBoost(profile, level)">{{ label(level) }}</button>
+                  </div>
+                  <p>Extra acceleration when starting from a stop.</p>
+                </section>
                 <template v-for="(title, category) in CATEGORIES" :key="category">
                 <details v-if="data.profiles[profile][category].preset === 'custom'" open class="gx-personalities__curve">
                   <summary>Custom {{ title.toLowerCase() }} graph</summary>

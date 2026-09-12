@@ -54,6 +54,7 @@ export const api = {
 
   getPersonalityProfiles() { return request("/api/personality_profiles", { cache: "no-store" }) },
   savePersonalityProfile(data) { return request("/api/personality_profiles", { method: "PUT", data }) },
+  savePersonalityLaunchBoost(data) { return request("/api/personality_profiles/launch_boost", { method: "PUT", data }) },
   migratePersonalityProfiles() { return request("/api/personality_profiles/migrate", { method: "POST" }) },
 
   getParams() { return request("/api/params/all") },

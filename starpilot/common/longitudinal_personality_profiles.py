@@ -10,6 +10,8 @@ import numbers
 PERSONALITY_PROFILES_PARAM = "LongitudinalPersonalityProfiles"
 PROFILE_SCHEMA_VERSION = 2
 PERSONALITY_IDS = ("traffic", "aggressive", "standard", "relaxed")
+LAUNCH_BOOST_LEVELS = ("off", "low", "medium", "high")
+DEFAULT_LAUNCH_BOOST = "high"
 TRUCK_FINGERPRINT_TOKENS = (
   " RAM 1500 ",
   " RAM HD ",
@@ -301,9 +303,20 @@ def _strict_document(
   profiles = {}
   for personality in PERSONALITY_IDS:
     raw_profile = raw_profiles.get(personality)
-    if not isinstance(raw_profile, dict) or set(raw_profile) != set(_CATEGORY_SPECS):
+    if not isinstance(raw_profile, dict):
+      return None
+    # Optional v2 extension: legacy document normalisation stays unchanged.
+    # Only an explicit launch edit adds this field.
+    has_launch_boost = schema_version == PROFILE_SCHEMA_VERSION and "launchBoost" in raw_profile
+    expected_keys = set(_CATEGORY_SPECS) | ({"launchBoost"} if has_launch_boost else set())
+    if set(raw_profile) != expected_keys:
       return None
     profile = {}
+    if has_launch_boost:
+      level = raw_profile["launchBoost"]
+      if not isinstance(level, str) or level not in LAUNCH_BOOST_LEVELS:
+        return None
+      profile["launchBoost"] = level
     for category in _CATEGORY_SPECS:
       validated = _validated_category_with_length(
         category, raw_profile.get(category), category_lengths[category], curve_bounds, legacy_curve_bounds,
@@ -440,6 +453,35 @@ def update_personality_profile(
     return updated
   updated[personality][category] = validated
   return updated
+
+
+def update_personality_launch_boost(profiles, personality: str, level: str) -> dict[str, dict]:
+  if not isinstance(personality, str) or personality not in PERSONALITY_IDS:
+    raise ValueError("Unknown personality")
+  if not isinstance(level, str) or level not in LAUNCH_BOOST_LEVELS:
+    raise ValueError("Launch Boost must be off, low, medium or high")
+  canonical = strict_profile_document(profile_document(profiles, enabled=True))
+  if canonical is None:
+    raise ValueError("Stored personality profiles must be valid before editing Launch Boost")
+  updated = canonical["profiles"]
+  updated[personality]["launchBoost"] = level
+  return updated
+
+
+def personality_launch_boost_levels(profiles) -> dict[str, str]:
+  return {personality: profiles[personality].get("launchBoost", DEFAULT_LAUNCH_BOOST)
+          for personality in PERSONALITY_IDS}
+
+
+def resolve_personality_launch_boost(toggles, traffic_mode: bool, personality) -> str:
+  personality_id = active_personality_id(traffic_mode, personality)
+  if (personality_id is None or not getattr(toggles, "custom_personalities", False) or
+      not getattr(toggles, f"{personality_id}_personality_profile", True)):
+    return DEFAULT_LAUNCH_BOOST
+  profile = resolve_personality_profile(
+    getattr(toggles, "longitudinal_personality_profiles", {}), traffic_mode, personality,
+  )
+  return profile.get("launchBoost", DEFAULT_LAUNCH_BOOST) if profile is not None else DEFAULT_LAUNCH_BOOST
 
 
 def active_personality_id(traffic_mode: bool, personality) -> str | None:
