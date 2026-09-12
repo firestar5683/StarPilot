@@ -38,7 +38,7 @@ from openpilot.starpilot.common.longitudinal_personality_profiles import (
 def test_document_is_versioned_disabled_and_declares_exact_axes_and_units():
   document = profile_document(default_personality_profiles(False), enabled=False)
 
-  assert document["schemaVersion"] == PROFILE_SCHEMA_VERSION == 2
+  assert document["schemaVersion"] == PROFILE_SCHEMA_VERSION == 3
   assert document["enabled"] is False
   assert document["axes"] == {
     "acceleration": {
@@ -455,7 +455,7 @@ def test_following_custom_initialisation_uses_effective_legacy_curve():
 
 
 def test_v2_uses_one_shared_ten_mph_custom_axis():
-  assert PROFILE_SCHEMA_VERSION == 2
+  assert PROFILE_SCHEMA_VERSION == 3
   expected = tuple(range(0, 91, 10))
   assert ACCELERATION_SPEEDS_MPH == expected
   assert BRAKING_SPEEDS_MPH == expected
@@ -537,7 +537,7 @@ def test_exact_v1_document_migrates_whole_or_not_at_all():
 
   migrated = lpp.migrate_profile_document(legacy)
   assert migrated is not None
-  assert migrated["schemaVersion"] == 2
+  assert migrated["schemaVersion"] == PROFILE_SCHEMA_VERSION
   assert migrated["enabled"] is True
   migrated_acceleration = migrated["profiles"]["aggressive"]["acceleration"]
   assert migrated_acceleration["preset"] == "custom"

@@ -17,10 +17,13 @@ const output=process.env.PERSONALITY_BROWSER_OUTPUT || path.join(require('os').t
  const u=new URL(route.request().url()); let file;
  if(u.pathname==='/')return route.fulfill({contentType:'text/html',body:`<script type="importmap">{"imports":{"vue":"/assets/vendor/vue/vue.esm-browser.js"}}</script><link rel="stylesheet" href="/assets/vendor/bootstrap-icons/bootstrap-icons.min.css"><link rel="stylesheet" href="/assets/mobile/css/material.css"><div id="app"></div><div id="snackbar_wrapper"></div><script type="module">import {createApp} from '/assets/vendor/vue/vue.esm-browser.js';import {PersonalityProfiles} from '/assets/mobile/js/components/PersonalityProfiles.js';createApp(PersonalityProfiles).mount('#app');</script>`});
  if(u.pathname==='/api/params/all'){await waitGate('params');return route.fulfill({json:values});}
+ if(u.pathname==='/api/longitudinal_mode' && route.request().method()==='GET')return route.fulfill({json:{mode:'chill',locked:false,reason:'',experimental_confirmed:false,values:{ExperimentalMode:false,ConditionalExperimental:false,ConditionalChill:false}}});
  if(u.pathname==='/api/params/defaults')return route.fulfill({json:{}});
  if(u.pathname==='/api/params'){const d=route.request().postDataJSON();values[d.key]=d.value;return route.fulfill({json:{success:true}});}
  if(u.pathname==='/api/personality_profiles'){
- if(route.request().method()==='PUT'){attempts++;await waitGate('put');if(failWrite||faults.failPut){failWrite=false;faults.failPut=false;return route.fulfill({status:503,json:{error:'Synthetic save failure'}});}const d=route.request().postDataJSON();writes.push(d);data.profiles[d.profile][d.category]={preset:d.preset,curve:d.curve.length?d.curve:[...data.reference_curves[d.profile][d.category]]};}
+ if(route.request().method()==='PUT'){attempts++;await waitGate('put');if(failWrite||faults.failPut){failWrite=false;faults.failPut=false;return route.fulfill({status:503,json:{error:'Synthetic save failure'}});}const d=route.request().postDataJSON();writes.push(d);const previous=data.profiles[d.profile][d.category];
+ if(d.expected && JSON.stringify(d.expected)!==JSON.stringify(previous))return route.fulfill({status:409,json:{error:'Saved profile changed'}});
+ data.profiles[d.profile][d.category]={preset:d.preset,curve:d.reset?[...data.reference_curves[d.profile][d.category]]:d.preset==='custom'?(d.curve.length?d.curve:previous.curve.length?[...previous.curve]:[...data.reference_curves[d.profile][d.category]]):[...previous.curve]};}
  else {profileReads++;if(faults.readFailures){faults.readFailures--;return route.fulfill({status:503,json:{error:'Synthetic readback failure'}});}}
  return route.fulfill({json:data});}
  if(u.pathname.endsWith('device_settings_layout.json'))file=root+'/starpilot/common/assets/device_settings_layout.json';
@@ -37,6 +40,10 @@ const output=process.env.PERSONALITY_BROWSER_OUTPUT || path.join(require('os').t
  assert(!(await page.locator('#gx-personality-settings').isVisible()));
  await page.getByRole('button',{name:'Manage',exact:true}).click();
  assert.equal(await page.locator('.gx-personalities__profile').count(),4);
+ if(process.env.PERSONALITY_CUSTOM_ONLY){
+   await require('./personality_custom_graphs.cjs')({page,data,values,writes,errors,output});
+   return;
+ }
  if(process.env.PERSONALITY_POLL_ONLY){
    await require('./personality_poll.cjs')({page,data,values,faults,counts:()=>({attempts}),errors});
    return;
@@ -130,7 +137,7 @@ const output=process.env.PERSONALITY_BROWSER_OUTPUT || path.join(require('os').t
    await n.press('Tab');
    await page.waitForFunction(()=>!document.querySelector('#app').__vue_app__._instance.proxy.curvePending);
    assert.equal(Number(await n.inputValue()),1.5);
-   await graph.getByRole('button',{name:'Reset to default',exact:true}).click();
+   await graph.getByRole('button',{name:/reset to default/i}).click();
    await page.waitForFunction(()=>!document.querySelector('#app').__vue_app__._instance.proxy.busy);
    const p=['traffic','aggressive','standard','relaxed'][pi],c=['acceleration','braking','following'][ci];
    assert.deepEqual(await graph.locator('input').evaluateAll(ns=>ns.map(n=>Number(n.value))),data.reference_curves[p][c]);
@@ -204,7 +211,7 @@ const output=process.env.PERSONALITY_BROWSER_OUTPUT || path.join(require('os').t
    store.route='/settings/longitudinal-speed-following';store.params={open:'CustomPersonalities'};store.search='';createApp(Settings).mount('#app');
  });
  await page.locator('.gx-personalities__grid').waitFor();assert(await page.locator('#gx-personality-settings').isVisible());
- assert.equal(await page.locator('.gx-longitudinal-mode').count(),0,'personality-only settings do not introduce unified mode');
+ assert.equal(await page.locator('.gx-longitudinal-mode').count(),1,'Dom Settings retains the existing unified mode selector');
  for(const theme of ['dark','light']) {
    await page.evaluate(t=>document.documentElement.dataset.theme=t,theme);
    await page.locator('.gx-personalities__heading').scrollIntoViewIfNeeded();

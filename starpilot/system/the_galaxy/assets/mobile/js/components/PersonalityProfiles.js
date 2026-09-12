@@ -174,14 +174,14 @@ export const PersonalityProfiles = {
     discard(profile, category) { delete this.drafts[profile + category]; delete this.curveErrors[profile + category] },
     async saveCurve(profile, category, reset = false) {
       if (this.editingLocked || this.disposed) return
-      const curve = reset ? this.data.reference_curves?.[profile]?.[category] : this.draft(profile, category)
+      const curve = reset ? [] : this.draft(profile, category)
       if (!Array.isArray(curve)) return
       const snapshot = [...curve]
       this.curvePending = true
       try {
         if (this.contextPending) { try { await this.contextRequest } catch { return } }
         if (this.disposed) return
-        if (await this.write(() => api.savePersonalityProfile({ profile, category, preset: "custom", curve: snapshot, expected: this.data.profiles[profile][category] }), () => !this.locked && !this.data?.migration_required)) this.notice = ""
+        if (await this.write(() => api.savePersonalityProfile({ profile, category, preset: "custom", curve: snapshot, ...(reset ? { reset: true } : {}), expected: this.data.profiles[profile][category] }), () => !this.locked && !this.data?.migration_required)) this.notice = ""
       } finally {
         this.discard(profile, category)
         this.curvePending = false
@@ -202,7 +202,7 @@ export const PersonalityProfiles = {
       if (this.drag?.profile === profile && this.drag.category === category) return this.drag.max
       return Math.max(this.data.bounds[category][1], ...this.draft(profile, category), ...(this.data.reference_curves?.[profile]?.[category] || []))
     },
-    graphMin(profile, category) { return this.drag?.profile === profile && this.drag.category === category ? this.drag.min : this.data.bounds[category][0] },
+    graphMin(profile, category) { return this.drag?.profile === profile && this.drag.category === category ? this.drag.min : Math.min(this.data.bounds[category][0], ...this.draft(profile, category), ...(this.data.reference_curves?.[profile]?.[category] || [])) },
     graphPoints(profile, category, reference = false) {
       const curve = reference ? this.data.reference_curves?.[profile]?.[category] : this.draft(profile, category)
       const max = this.graphMax(profile, category)
@@ -299,7 +299,7 @@ export const PersonalityProfiles = {
                 <template v-for="(title, category) in CATEGORIES" :key="category">
                 <details v-if="data.profiles[profile][category].preset === 'custom'" open class="gx-personalities__curve">
                   <summary>Custom {{ title.toLowerCase() }} graph</summary>
-                  <p>{{ category === 'following' ? 'Seconds' : 'm/s²' }} · {{ speedUnit() }}. Dashed: default.</p>
+                  <p>{{ category === 'following' ? 'Seconds' : 'm/s²' }} · {{ speedUnit() }}. Dashed: Dom default.</p>
                   <div class="gx-personalities__plot" tabindex="0" :aria-label="label(profile) + ' ' + title + ' graph; scroll horizontally on narrow screens'">
                   <svg viewBox="-30 -12 340 140" role="group" :aria-disabled="editingLocked" :aria-label="label(profile) + ' ' + title + ' editable curve; exact values below'"
                     style="touch-action: pan-x" @pointerdown="pickPoint(profile, category, $event)" @pointermove="moveDrag" @pointerup="endDrag" @pointercancel="endDrag" @lostpointercapture="endDrag">
@@ -336,7 +336,8 @@ export const PersonalityProfiles = {
                     </label>
                   </div>
                   <div class="gx-personalities__options">
-                    <button type="button" class="gx-btn gx-btn--tonal" :disabled="editingLocked" @click="saveCurve(profile, category, true)">Reset to default</button>
+                    <button type="button" class="gx-btn gx-btn--tonal" :disabled="editingLocked"
+                      :aria-label="label(profile) + ' ' + title + ' reset to default'" @click="saveCurve(profile, category, true)">Reset to default</button>
                   </div>
                 </details>
                 </template>

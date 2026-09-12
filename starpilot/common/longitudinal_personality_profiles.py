@@ -8,7 +8,7 @@ import math
 import numbers
 
 PERSONALITY_PROFILES_PARAM = "LongitudinalPersonalityProfiles"
-PROFILE_SCHEMA_VERSION = 2
+PROFILE_SCHEMA_VERSION = 3
 PERSONALITY_IDS = ("traffic", "aggressive", "standard", "relaxed")
 TRUCK_FINGERPRINT_TOKENS = (
   " RAM 1500 ",
@@ -48,6 +48,9 @@ _V2_CURVE_BOUNDS = {
   "following": (0.75, 3.0),
 }
 _V1_CURVE_BOUNDS = dict(_V2_CURVE_BOUNDS)
+# Dom's Traffic default is below the point editor's minimum. Keep it losslessly
+# after initialization/reset, while applying CURVE_BOUNDS to newly edited points.
+_V3_CURVE_BOUNDS = {**_V2_CURVE_BOUNDS, "braking": (0.35, 2.0), "following": (0.5, 3.0)}
 PERSONALITY_ADVANCED_PARAM_KEYS = frozenset(
   f"{profile}{suffix}"
   for profile in ("Traffic", "Aggressive", "Standard", "Relaxed")
@@ -218,6 +221,7 @@ def _validated_category_with_length(
   expected_length: int,
   curve_bounds: dict[str, tuple[float, float]],
   legacy_curve_bounds: dict[str, tuple[float, float]] | None = None,
+  *, retain_custom: bool = False,
 ) -> dict | None:
   if category not in _CATEGORY_SPECS or not isinstance(raw_category, dict):
     return None
@@ -230,7 +234,7 @@ def _validated_category_with_length(
   curve = raw_category.get("curve")
   if not isinstance(preset, str) or preset not in presets or not isinstance(curve, list):
     return None
-  if preset != "custom":
+  if preset != "custom" and (not retain_custom or not curve):
     return {"preset": preset, "curve": []} if not curve and not has_legacy_curve else None
   if len(curve) != expected_length:
     return None
@@ -266,7 +270,7 @@ def _validated_category_with_length(
 
 def _validated_category(category: str, raw_category) -> dict | None:
   expected_length = _CATEGORY_SPECS.get(category, ((), 0))[1]
-  return _validated_category_with_length(category, raw_category, expected_length, _V2_CURVE_BOUNDS, _V1_CURVE_BOUNDS)
+  return _validated_category_with_length(category, raw_category, expected_length, _V3_CURVE_BOUNDS, _V1_CURVE_BOUNDS, retain_custom=True)
 
 
 def _schema_values_equal(actual, expected) -> bool:
@@ -307,6 +311,7 @@ def _strict_document(
     for category in _CATEGORY_SPECS:
       validated = _validated_category_with_length(
         category, raw_profile.get(category), category_lengths[category], curve_bounds, legacy_curve_bounds,
+        retain_custom=schema_version >= 3,
       )
       if validated is None:
         return None
@@ -321,14 +326,23 @@ def _strict_document(
 
 
 def strict_profile_document(raw_document) -> dict | None:
-  return _strict_document(
-    raw_document,
-    PROFILE_SCHEMA_VERSION,
+  # Version 2 has the same axes and active curves. Read it losslessly; the next
+  # normal save upgrades the document without requiring a destructive reset.
+  decoded = _decode_json(raw_document)
+  version = decoded.get("schemaVersion") if isinstance(decoded, dict) else None
+  if type(version) is not int or version not in (2, PROFILE_SCHEMA_VERSION):
+    return None
+  document = _strict_document(
+    decoded,
+    version,
     PROFILE_AXES,
     {category: expected_length for category, (_, expected_length) in _CATEGORY_SPECS.items()},
-    _V2_CURVE_BOUNDS,
+    _V2_CURVE_BOUNDS if version == 2 else _V3_CURVE_BOUNDS,
     _V1_CURVE_BOUNDS,
   )
+  if document is not None:
+    document["schemaVersion"] = PROFILE_SCHEMA_VERSION
+  return document
 
 
 def migrate_profile_document(raw_document) -> dict | None:
@@ -406,6 +420,7 @@ def serialize_personality_profiles(profiles, ev_tuning: bool, truck_tuning: bool
 
 def update_personality_profile(
   profiles, personality: str, category: str, preset: str, curve, ev_tuning: bool, truck_tuning: bool = False,
+  *, reset: bool = False,
 ) -> dict[str, dict]:
   if personality not in PERSONALITY_IDS:
     raise ValueError(f"Unknown personality: {personality}")
@@ -414,12 +429,14 @@ def update_personality_profile(
   base_document = profile_document(profiles, enabled=True)
   canonical = strict_profile_document(base_document)
   validated = _validated_category(category, {"preset": preset, "curve": curve})
-  if validated is not None and preset == "custom":
+  if preset != "custom" and (curve != [] or reset):
+    validated = None
+  if validated is not None and preset == "custom" and not reset:
     minimum, maximum = CURVE_BOUNDS[category]
     previous = canonical["profiles"][personality][category] if canonical is not None else None
     for index, value in enumerate(curve):
       if not minimum <= value <= maximum and (
-        previous is None or previous["preset"] != "custom" or value != previous["curve"][index]
+        previous is None or not previous["curve"] or value != previous["curve"][index]
       ):
         validated = None
         break
@@ -436,7 +453,10 @@ def update_personality_profile(
     base = canonical["profiles"]
   updated = deepcopy(base)
   previous = updated[personality][category]
-  if preset == "custom" and previous["preset"] == "custom" and validated["curve"] == previous["curve"]:
+  # A preset only changes which curve is active. Dormant Custom data, including
+  # preserved v1 runtime interpolation, survives switching and serialization.
+  if preset != "custom" or (not reset and validated["curve"] == previous["curve"]):
+    previous["preset"] = preset
     return updated
   updated[personality][category] = validated
   return updated
@@ -522,7 +542,9 @@ def initial_custom_curve(
   if category not in _CATEGORY_SPECS or not isinstance(current_config, dict):
     raise ValueError("Unknown or malformed profile category")
   preset = current_config.get("preset")
-  if preset == "dom_default":
+  if current_config.get("curve"):
+    candidate = current_config["curve"]
+  elif preset == "dom_default":
     candidate = legacy_curve
     if category in ("acceleration", "braking") and isinstance(candidate, list) and len(candidate) == len(_V1_ACCELERATION_SPEEDS_MPH):
       candidate = [
@@ -562,7 +584,7 @@ def interpolate_category_curve(
   if validated is None:
     raise ValueError(f"Invalid {category} profile configuration.")
   values = category_curve(category, validated, ev_tuning, truck_tuning)
-  if "legacyCurve" in validated:
+  if validated["preset"] == "custom" and "legacyCurve" in validated:
     return _linear_interp(float(v_ego), _NATIVE_ACCELERATION_SPEEDS_MS, validated["legacyCurve"])
   if category == "acceleration":
     from openpilot.starpilot.common.accel_profile import interpolate_accel_profile
