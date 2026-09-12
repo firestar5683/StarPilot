@@ -5267,6 +5267,13 @@ def setup(app):
   def mobile_index():
     return _serve_new_ui()
 
+  @app.route("/api/vitals/external-gpu", methods=["GET"])
+  def get_external_gpu_vitals():
+    from openpilot.starpilot.system.the_galaxy.external_gpu_vitals import external_gpu_vitals
+    response = jsonify(external_gpu_vitals())
+    response.headers["Cache-Control"] = "no-store"
+    return response
+
   @app.route("/api/bluetooth/status", methods=["GET"])
   def bluetooth_status():
     try:

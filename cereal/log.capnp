@@ -775,6 +775,13 @@ struct ChestnutState {
   supplyVoltage @8 :UInt16;  # mV
   supplyCurrent @9 :Int16;  # mA
   supplyFault @10 :Bool;
+  # Host monotonic time of the successful SMU temperature sample (not the
+  # faster cached-message publication). Zero means no external GPU sample.
+  tempSampleMonoTime @11 :UInt64;
+  # Physical VRAM unavailable to new allocations (allocated/cached + reserved).
+  memoryUsedBytes @12 :UInt64;
+  memoryTotalBytes @13 :UInt64;
+  memorySampleMonoTime @14 :UInt64;
 }
 
 struct RadarState @0x9a185389d6fdd05f {

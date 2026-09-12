@@ -22,6 +22,7 @@ from cereal.messaging import PubMaster, SubMaster
 from cereal.services import SERVICE_LIST
 from msgq.visionipc import VisionIpcClient, VisionStreamType, VisionBuf
 from openpilot.common.swaglog import cloudlog
+from openpilot.starpilot.common.external_gpu_memory import allocated_vram
 from openpilot.common.params import Params
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.file_chunker import file_chunked_exists, open_file_chunked
@@ -272,6 +273,7 @@ class ChestnutState:
         metrics_buf = bytearray(smu.adev.vram.view(smu.driver_table_paddr, ctypes.sizeof(metrics_t))[:])
         metrics = metrics_t.from_buffer(metrics_buf).SmuMetrics
         self.metrics = {
+          "tempSampleMonoTime": time.monotonic_ns(),
           "tempC": metrics.AvgTemperature[smu.smu_mod.TEMP_HOTSPOT],
           "memoryTempC": metrics.AvgTemperature[smu.smu_mod.TEMP_MEM],
           "powerDrawW": metrics.AverageSocketPower,
@@ -286,6 +288,18 @@ class ChestnutState:
           cloudlog.exception("chestnut state read failed")
         self.valid = False
         self.metrics.clear()
+
+    # Optional accounting reads Python allocator state only; failure must not
+    # affect stock SMU/ASM diagnostics or their validity. Same 0.1 Hz cadence.
+    if self.big and "AMD" in Device._opened_devices and self.sends % 100 == 1:
+      self.memory_metrics = {}
+      memory = allocated_vram(Device["AMD"])
+      if memory is not None:
+        self.memory_metrics = {"memoryUsedBytes": memory[0], "memoryTotalBytes": memory[1],
+                               "memorySampleMonoTime": time.monotonic_ns()}
+    if self.big and "AMD" in Device._opened_devices:
+      for key, value in getattr(self, "memory_metrics", {}).items():
+        setattr(state, key, value)
 
     if self.big:
       for key, value in self.metrics.items():

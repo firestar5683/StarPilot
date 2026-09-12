@@ -1,3 +1,5 @@
+import "/assets/components/home/external_gpu_temperature.js"
+import "/assets/components/home/external_gpu_memory.js"
 import { api, showSnackbar } from "../api.js"
 import { usePolling } from "../composables.js"
 import { GalaxyConfirm } from "../components/GalaxyModal.js"
@@ -548,6 +550,8 @@ export const Home = {
                 <span class="gx-row__label">{{ v.label }}</span>
                 <span class="gx-row__value">{{ v.value }}</span>
               </div>
+              <div class="gx-row"><span class="gx-row__label">eGPU</span><span class="gx-row__value"><component is="external-gpu-temperature">--</component></span></div>
+              <div class="gx-row"><span class="gx-row__label">eGPU RAM</span><span class="gx-row__value"><component is="external-gpu-memory">--</component></span></div>
             </div>
           </section>
 
