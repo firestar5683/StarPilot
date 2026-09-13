@@ -519,10 +519,9 @@ class CarController(CarControllerBase):
     self.xt4_cc_button_burst_last_counter = -1
     self.xt4_cc_button_observed_counter = -1
     self.xt4_cc_button_counter_frame = 0
-    self.gm_cc_last_direction_button = CruiseButtons.INIT
-    self.gm_cc_last_direction_frame = 0
-    self.gm_cc_pending_reverse_button = CruiseButtons.INIT
-    self.gm_cc_pending_reverse_frame = 0
+    # Bolt CC-only set speed target filter state, see gmcan._bolt_cc_setpoint_button
+    self.gm_cc_target_speed = None
+    self.gm_cc_target_frame = None
 
     self.lka_steering_cmd_counter = 0
     self.lka_icon_status_last = (False, False)
@@ -980,7 +979,8 @@ class CarController(CarControllerBase):
       should_send_cc_button_spam(self.CP, CC, CS)
     )
     if xt4_cc_button_spam:
-      can_sends.extend(gmcan.create_gm_cc_spam_command(self.packer_pt, self, CS, actuators, starpilot_toggles))
+      can_sends.extend(gmcan.create_gm_cc_spam_command(self.packer_pt, self, CS, actuators, starpilot_toggles,
+                                                       v_cruise=hud_v_cruise))
     elif self.CP.carFingerprint == CAR.CADILLAC_XT4_CC:
       self.xt4_cc_button_burst_remaining = 0
       self.xt4_cc_button_burst_button = CruiseButtons.INIT
@@ -1165,8 +1165,11 @@ class CarController(CarControllerBase):
               can_sends.extend(gmcan.create_gm_cc_spam_command(
                 self.packer_pt, self, CS, actuators, starpilot_toggles,
                 longitudinal_adjustment_active=longitudinal_adjustment_active,
+                v_cruise=hud_v_cruise,
               ))
           else:
+            self.gm_cc_target_speed = None
+            self.gm_cc_target_frame = None
             if (CS.out.cruiseState.enabled and CC.enabled and self.frame % 52 == 0 and
                 CS.cruise_buttons == CruiseButtons.UNPRESS and CS.out.gasPressed and CS.out.cruiseState.speed < CS.out.vEgo < hud_v_cruise):
               if self.CP.carFingerprint == CAR.CHEVROLET_MALIBU_HYBRID_CC:
