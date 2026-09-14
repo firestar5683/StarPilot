@@ -49,6 +49,8 @@ try:
 except Exception:
   Params = None
 
+from openpilot.system.ui.lib.tethering_nat import ensure_tethering_nat
+
 TETHERING_IP_ADDRESS = "192.168.43.1"
 DEFAULT_TETHERING_PASSWORD = "swagswagcomma"
 SIGNAL_QUEUE_SIZE = 10
@@ -316,6 +318,10 @@ class WifiManager:
         return
 
       self._wifi_state = WifiState(ssid=ssid, status=status)
+
+      # Hotspot may already be active (boot restore / autoconnect fallback)
+      if ssid == self._tethering_ssid:
+        self._ensure_tethering_nat()
 
     if block:
       worker()
@@ -588,6 +594,11 @@ class WifiManager:
       self._wifi_state = wifi_state
       self._enqueue_callbacks(self._activated)
       self._update_active_connection_info()
+
+      # AGNOS (no nf_tables — verified upstream) never installs shared-mode
+      # NAT rules; ensure them on every hotspot activation path
+      if wifi_state.ssid == self._tethering_ssid:
+        self._ensure_tethering_nat()
 
       # Persist volatile connections (created by AddAndActivateConnection2) to disk
       if conn_path is not None:
@@ -1056,6 +1067,14 @@ class WifiManager:
 
   def set_ipv4_forward(self, enabled: bool):
     self._ipv4_forward = enabled
+
+  def _ensure_tethering_nat(self):
+    def worker():
+      try:
+        ensure_tethering_nat()
+      except Exception:
+        cloudlog.exception("Failed to ensure tethering NAT")
+    threading.Thread(target=worker, daemon=True).start()
 
   def set_tethering_active(self, active: bool):
     if self._backend_unavailable:
