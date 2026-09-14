@@ -49,7 +49,7 @@ try:
 except Exception:
   Params = None
 
-from openpilot.system.ui.lib.tethering_nat import ensure_tethering_nat
+from openpilot.common.tethering_nat import ensure_tethering_nat
 
 TETHERING_IP_ADDRESS = "192.168.43.1"
 DEFAULT_TETHERING_PASSWORD = "swagswagcomma"

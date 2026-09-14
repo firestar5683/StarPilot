@@ -20,6 +20,7 @@ from openpilot.common.utils import strip_deprecated_keys
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_HW
+from openpilot.common.tethering_nat import start_tethering_nat_monitor
 from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
 from openpilot.system.hardware import HARDWARE, TICI, AGNOS, PC
 from openpilot.system.loggerd.config import get_available_bytes, get_available_percent, get_used_bytes
@@ -699,6 +700,10 @@ def main():
 
   if TICI:
     threads.append(threading.Thread(target=touch_thread, args=(end_event,)))
+
+  if AGNOS:
+    # Always-on, event-driven tethering NAT (blocks on rtnetlink; no polling)
+    start_tethering_nat_monitor()
 
   for t in threads:
     t.start()
