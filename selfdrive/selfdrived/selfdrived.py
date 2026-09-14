@@ -255,7 +255,7 @@ class SelfdriveD:
     self.big_model_attempted = False
     self.big_model_active = False
     self.big_model_failed = False
-    self.big_model_ready_t = 0.
+    self.big_model_swap_t = 0.
     self.experimental_mode = False
     self.ecu_disable_failed = False
     self.ecu_disable_failed_checked = not (
@@ -394,15 +394,23 @@ class SelfdriveD:
     loading = self.params.get_bool("UsbGpuLoading")
     if loading:
       self.big_model_attempted = True
-    if self.big_model_loading and not loading:
-      self.big_model_ready_t = time.monotonic()
     self.big_model_loading = loading
     if loading:
       self.events.add(EventName.bigModelLoading)
 
+    # The big model loads in the background while the small model drives, so it sits
+    # loaded-but-unused until the driver disengages. That is a success, not a failure.
+    pending = self.params.get_bool("UsbGpuPending")
+    if pending:
+      self.big_model_attempted = True
+      self.events.add(EventName.bigModelPending)
+
     big_active = self.params.get("UsbGpuActive")
+    if self.big_model_active != (big_active is True):
+      self.big_model_swap_t = time.monotonic()
     model_unavailable = self.big_model_active and self.sm.seen['modelV2'] and not self.sm.alive['modelV2']
-    big_failed = self.big_model_attempted and not loading and (big_active is False or model_unavailable)
+    big_failed = self.big_model_attempted and not loading and not pending and \
+                 (big_active is False or model_unavailable)
     if big_failed and not self.big_model_failed:
       self.events.add(EventName.bigModelFailed)
     self.big_model_failed = big_failed
@@ -697,7 +705,10 @@ class SelfdriveD:
                          (contains_event_type(self.events, self.starpilot_events, ET.SOFT_DISABLE) or
                           contains_event_type(self.events, self.starpilot_events, ET.IMMEDIATE_DISABLE))
     no_system_errors = (not has_disable_events) or (len(self.events) == num_events)
-    big_model_settling = self.big_model_loading or time.monotonic() < self.big_model_ready_t + 5.
+    # modeld publishes on the small model throughout the background load, so only the model
+    # swap itself can briefly disturb the stream. Suppressing for the whole load would hide
+    # a genuinely dead modeld for as long as the load takes.
+    big_model_settling = time.monotonic() < self.big_model_swap_t + 2.
     all_checks = self.sm.all_checks()
     all_alive = self.sm.all_alive() if not all_checks else True
     all_freq_ok = self.sm.all_freq_ok() if not all_checks else True

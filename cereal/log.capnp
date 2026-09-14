@@ -132,6 +132,7 @@ struct OnroadEvent @0xc4fa6047f024e718 {
     audioFeedback @97;
     bigModelLoading @100;
     bigModelFailed @102;
+    bigModelPending @103;
 
     soundsUnavailableDEPRECATED @47;
     stockLkasDEPRECATED @98;

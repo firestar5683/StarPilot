@@ -344,8 +344,11 @@ class Soundd:
     if now - self.model_ready_last_check >= 0.25:
       self.model_ready_last_check = now
       try:
+        # The big model now loads in the background, so it is announced when it becomes
+        # usable (pending the driver's next disengage) rather than only once it is running.
         self.model_ready_pending = self.model_ready_chime.update(
-          active=self.model_ready_params.get_bool("UsbGpuActive"),
+          active=(self.model_ready_params.get_bool("UsbGpuPending") or
+                  self.model_ready_params.get_bool("UsbGpuActive")),
           loading=self.model_ready_params.get_bool("UsbGpuLoading"),
           onroad=self.model_ready_params.get_bool("IsOnroad"),
           enabled=self.model_ready_params.get_bool("GpuModelReadySound"), now=now)

@@ -32,6 +32,18 @@ def test_model_source_failure_detection_matches_the_backend_state_contract():
   assert not failed(True, True, False, True)
 
 
+def test_model_source_shows_a_pending_big_model_as_still_loading():
+  # The big model loads in the background, so "loaded, waiting for a disengage" must read
+  # as in-progress rather than as a failure.
+  status = model_source.ModelSourceWidget._status_for
+  failed = model_source.ModelSourceWidget._big_model_failed
+
+  assert status(False, False, False, True) is model_source.ModelSourceStatus.LOADING
+  assert not failed(False, True, False, True, True)
+  # Chestnut going away while pending is still a genuine failure.
+  assert failed(False, False, False, True, True)
+
+
 def test_model_source_latches_small_model_engagement_until_the_big_model_recovers(monkeypatch):
   widget = object.__new__(model_source.ModelSourceWidget)
   widget._small_model_engaged = False
@@ -50,6 +62,7 @@ def test_model_source_latches_small_model_engagement_until_the_big_model_recover
       usbgpu_compiled=True,
       usbgpu_active=False,
       usbgpu_loading=False,
+      usbgpu_pending=False,
     ),
   )
   monkeypatch.setattr(model_source.rl, "get_time", lambda: 42.0)
