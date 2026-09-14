@@ -32,13 +32,14 @@ def test_model_source_failure_detection_matches_the_backend_state_contract():
   assert not failed(True, True, False, True)
 
 
-def test_model_source_shows_a_pending_big_model_as_still_loading():
-  # The big model loads in the background, so "loaded, waiting for a disengage" must read
-  # as in-progress rather than as a failure.
+def test_model_source_blinks_while_loading_then_clears_once_the_big_model_is_ready():
+  # The blinking icon is the driver's "still loading" cue, and its disappearance is how they
+  # know the next disengage/engage will pick up the big model.
   status = model_source.ModelSourceWidget._status_for
   failed = model_source.ModelSourceWidget._big_model_failed
 
-  assert status(False, False, False, True) is model_source.ModelSourceStatus.LOADING
+  assert status(True, False, False, False) is model_source.ModelSourceStatus.LOADING
+  assert status(True, False, False, True) is not model_source.ModelSourceStatus.LOADING
   assert not failed(False, True, False, True, True)
   # Chestnut going away while pending is still a genuine failure.
   assert failed(False, False, False, True, True)

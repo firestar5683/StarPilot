@@ -64,6 +64,9 @@ StarPilotEventName = custom.StarPilotOnroadEvent.EventName
 
 IGNORED_SAFETY_MODES = (SafetyModel.silent, SafetyModel.noOutput)
 VALID_ONLY_COMM_ISSUE_GRACE_FRAMES = max(1, round(0.5 / DT_CTRL))
+# How long the "driving on the small model" banner shows before the blinking eGPU icon
+# takes over as the indication that the big model is still loading.
+BIG_MODEL_LOADING_ALERT_SECONDS = 3.0
 
 
 def evaluate_comm_issue(all_checks: bool, all_alive: bool, all_freq_ok: bool,
@@ -256,6 +259,7 @@ class SelfdriveD:
     self.big_model_active = False
     self.big_model_failed = False
     self.big_model_swap_t = 0.
+    self.big_model_loading_t = 0.
     self.experimental_mode = False
     self.ecu_disable_failed = False
     self.ecu_disable_failed_checked = not (
@@ -394,8 +398,12 @@ class SelfdriveD:
     loading = self.params.get_bool("UsbGpuLoading")
     if loading:
       self.big_model_attempted = True
+      if not self.big_model_loading:
+        self.big_model_loading_t = time.monotonic()
     self.big_model_loading = loading
-    if loading:
+    # Announce the small-model handover briefly; the blinking eGPU icon carries the
+    # "still loading" state from there so the banner does not sit on screen for minutes.
+    if loading and time.monotonic() < self.big_model_loading_t + BIG_MODEL_LOADING_ALERT_SECONDS:
       self.events.add(EventName.bigModelLoading)
 
     # The big model loads in the background while the small model drives, so it sits

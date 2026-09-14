@@ -72,7 +72,9 @@ class ModelSourceWidget(LayoutWidget):
   @staticmethod
   def _status_for(loading: bool, small_model_engaged: bool, big_failed: bool,
                   pending: bool = False) -> ModelSourceStatus:
-    if loading or pending:
+    # Pending means the big model finished loading and is waiting for the next disengage,
+    # so the blinking loading icon stops: its absence is what tells the driver it is ready.
+    if loading and not pending:
       return ModelSourceStatus.LOADING
     if small_model_engaged:
       return ModelSourceStatus.FALLBACK_ENGAGED

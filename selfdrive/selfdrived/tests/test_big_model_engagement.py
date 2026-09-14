@@ -25,6 +25,24 @@ def test_big_model_failure_still_disengages():
   assert ET.SOFT_DISABLE in EVENTS[EventName.bigModelFailed]
 
 
+def test_loading_banner_is_brief_and_hands_over_to_the_icon():
+  # The load can run for minutes; the banner announces the handover to the small model and
+  # then gets out of the way, leaving the blinking eGPU icon as the "still loading" cue.
+  from openpilot.selfdrive.selfdrived import selfdrived
+
+  assert selfdrived.BIG_MODEL_LOADING_ALERT_SECONDS == 3.0
+
+  source = (Path(selfdrived.__file__)).read_text(encoding="utf-8")
+  tree = ast.parse(source)
+  guard = next(
+    node for node in ast.walk(tree)
+    if isinstance(node, ast.If) and "bigModelLoading" in ast.dump(node)
+    and "BIG_MODEL_LOADING_ALERT_SECONDS" in ast.dump(node.test)
+  )
+  # The alert must be gated on elapsed time, not added unconditionally every frame.
+  assert "big_model_loading_t" in ast.dump(guard.test)
+
+
 def _big_failed(*, attempted, loading, pending, big_active, model_unavailable=False):
   """Mirror of selfdrived's big_failed expression, extracted from the source."""
   source = (Path(__file__).parents[1] / "selfdrived.py").read_text(encoding="utf-8")

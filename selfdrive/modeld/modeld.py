@@ -111,6 +111,11 @@ LAT_SMOOTH_BP = [2.0, 8.0]
 # the 20 Hz publish loop on core 7 (shared with dmonitoringmodeld) and barely run at all.
 BIG_MODEL_LOADER_CORES = {6}
 
+# A healthy load takes ~30 s once vehicle power is stable. If the AMD device never comes up
+# the tinygrad calls can block indefinitely, so give up rather than reporting "loading"
+# forever while the small model quietly keeps driving.
+BIG_MODEL_LOAD_TIMEOUT_SECONDS = 150.0
+
 
 class BigModelLoadCancelled(Exception):
   """Raised inside the background loader when modeld no longer wants the big model."""
@@ -909,6 +914,14 @@ class BigModelLoader:
   def in_progress(self) -> bool:
     return self._thread is not None and self._thread.is_alive()
 
+  @property
+  def timed_out(self) -> bool:
+    """A load stuck inside tinygrad cannot be interrupted, so the caller gives up on it.
+
+    The thread is a daemon and keeps running, but nothing will consume its result.
+    """
+    return self.in_progress and time.monotonic() - self.started_t > BIG_MODEL_LOAD_TIMEOUT_SECONDS
+
   def start(self, model_id: str, model_version: str = "") -> bool:
     if self.in_progress:
       return False
@@ -1438,7 +1451,15 @@ def main(demo=False):
     # Collect a finished background big-model load, then promote it once the driver is
     # disengaged. Swapping rebuilds the temporal input queues, so it must not happen
     # under actuation.
-    if big_loader is not None and not big_loader.in_progress:
+    if big_loader is not None and big_loader.timed_out:
+      big_loader.cancel()
+      big_loader = None
+      params.put_bool("UsbGpuLoading", False)
+      params.put_bool("UsbGpuPending", False)
+      params.put_bool("UsbGpuActive", False)
+      cloudlog.error(f"big model load exceeded {BIG_MODEL_LOAD_TIMEOUT_SECONDS:.0f}s, "
+                     "staying on the small model")
+    elif big_loader is not None and not big_loader.in_progress:
       loaded_big_model, big_load_error = big_loader.take()
       big_loader = None
       params.put_bool("UsbGpuLoading", False)

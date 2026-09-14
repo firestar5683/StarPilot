@@ -321,6 +321,48 @@ def test_background_big_model_load_leaves_the_running_model_untouched(monkeypatc
   ]
 
 
+def test_big_model_load_gives_up_instead_of_loading_forever(monkeypatch):
+  # A load stuck inside tinygrad cannot be interrupted, so the timeout is what stops modeld
+  # reporting "loading" for the rest of the drive while the small model quietly drives.
+  release = threading.Event()
+  calls = []
+
+  class HangingModelState:
+    uses_external_gpu = True
+
+    def __init__(self, *_a, **_k):
+      release.wait(timeout=10)
+
+    def warmup(self):
+      pass
+
+  monkeypatch.setattr(modeld, "set_core_affinity", lambda cores: None)
+  monkeypatch.setattr(modeld, "wait_usbgpu_link", lambda: None)
+  monkeypatch.setattr(modeld, "wait_for_external_gpu_power_ready", lambda CP, cancel=None: None)
+  monkeypatch.setattr(modeld, "_close_tinygrad_disk_cache_connection", lambda: calls.append("close"))
+  monkeypatch.setattr(modeld, "ModelState", HangingModelState)
+
+  loader = modeld.BigModelLoader(1928, 1208, "car-params")
+  loader.start("big-model", "v15")
+  try:
+    assert loader.in_progress
+    assert not loader.timed_out
+
+    # Pretend the load has been running well past its budget.
+    loader.started_t -= modeld.BIG_MODEL_LOAD_TIMEOUT_SECONDS + 1
+    assert loader.timed_out
+    # take() must not hand over a model from a load we already gave up on.
+    assert loader.take() == (None, "")
+  finally:
+    release.set()
+    loader._thread.join(timeout=10)
+
+
+def test_big_model_load_timeout_leaves_room_for_a_normal_load():
+  # A healthy load measured ~26 s on device; the budget must not cut those off.
+  assert modeld.BIG_MODEL_LOAD_TIMEOUT_SECONDS > 60
+
+
 def test_background_big_model_loader_runs_off_modelds_realtime_core():
   # modeld is SCHED_FIFO on core 7 and threads inherit its affinity, so a loader left there
   # would be starved behind the 20 Hz publish loop.
