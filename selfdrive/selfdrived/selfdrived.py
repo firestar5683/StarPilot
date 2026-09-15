@@ -407,11 +407,11 @@ class SelfdriveD:
       self.events.add(EventName.bigModelLoading)
 
     # The big model loads in the background while the small model drives, so it sits
-    # loaded-but-unused until the driver disengages. That is a success, not a failure.
+    # loaded-but-unused until the driver disengages. That is a success, not a failure, and
+    # it raises no alert: the driver sees it through the eGPU icon, not a banner.
     pending = self.params.get_bool("UsbGpuPending")
     if pending:
       self.big_model_attempted = True
-      self.events.add(EventName.bigModelPending)
 
     big_active = self.params.get("UsbGpuActive")
     if self.big_model_active != (big_active is True):

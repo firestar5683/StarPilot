@@ -16,9 +16,10 @@ def test_big_model_loading_does_not_block_engagement():
   assert ET.PERMANENT in EVENTS[EventName.bigModelLoading]
 
 
-def test_big_model_pending_is_advisory_only():
-  pending = EVENTS[EventName.bigModelPending]
-  assert set(pending) == {ET.PERMANENT}
+def test_big_model_pending_raises_no_alert():
+  # The banner fired ~13 s before the model was actually usable, so the driver saw "ready"
+  # and then got errors trying to engage. The eGPU icon carries this state instead.
+  assert EVENTS[EventName.bigModelPending] == {}
 
 
 def test_big_model_failure_still_disengages():

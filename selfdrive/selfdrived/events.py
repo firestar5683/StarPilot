@@ -537,11 +537,10 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
                                        "Driving on the small model"),
   },
 
-  EventName.bigModelPending: {
-    ET.PERMANENT: NormalPermanentAlert("Big Model Ready",
-                                       "Disengage and re-engage to use it",
-                                       duration=10.),
-  },
+  # bigModelPending carries no alert on purpose: the eGPU icon clearing, and then turning
+  # green on the next engage, is the driver's cue. A banner here announced the model before
+  # it was usable.
+  EventName.bigModelPending: {},
 
   EventName.bigModelFailed: {
     ET.SOFT_DISABLE: soft_disable_alert("Big Model Failed"),

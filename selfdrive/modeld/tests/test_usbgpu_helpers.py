@@ -311,16 +311,16 @@ def test_background_big_model_load_leaves_the_running_model_untouched(monkeypatc
   loaded, error = loader.take()
   assert isinstance(loaded, fake_model_state)
   assert error == ""
-  # warmup() is absent on purpose: it runs on QCOM alongside the driving small model, so it
-  # is deferred to promotion (while disengaged) rather than run on the loader thread.
+  # warmup() belongs here rather than at promotion: see
+  # test_big_model_warmup_stays_on_the_background_loader.
   assert calls == [
     ("affinity", tuple(sorted(modeld.BIG_MODEL_LOADER_CORES))),
     ("power", "car-params"),
     "link",
     ("model", 1928, 1208, True, "big-model", False, "v15"),
+    "warmup",
     "close_cache",
   ]
-  assert "warmup" not in calls
 
 
 def test_big_model_load_gives_up_instead_of_loading_forever(monkeypatch):
@@ -365,12 +365,15 @@ def test_big_model_load_timeout_leaves_room_for_a_normal_load():
   assert modeld.BIG_MODEL_LOAD_TIMEOUT_SECONDS > 60
 
 
-def test_big_model_warmup_is_deferred_out_of_the_background_load():
-  """warmup() runs the camera warp on QCOM, the GPU the small model is driving on.
+def test_big_model_warmup_stays_on_the_background_loader():
+  """Warming at promotion blocks the publish loop in one long stretch; warming on the
+  loader spreads the same work out while the small model is still driving.
 
-  Running it on the loader thread blocked modeld for seconds at a time: measured modelV2
-  gaps of 1.3-2.9 s clustered in the second half of four loads, with core 7 only ~30% busy
-  (blocked, not starved). It belongs at promotion, which is already gated on disengaged.
+  Measured with warmup at promotion: modelV2 went silent for 13.0 s and 12.8 s on two
+  drives, starting the instant the model was collected, which tripped commIssue and blocked
+  the driver from engaging. Measured with warmup on the loader: worst in-load gap was
+  1.3-2.9 s, spread across the load. Neither is free, but only the second one leaves
+  modeld publishing when the driver wants to engage.
   """
   import ast
   from pathlib import Path
@@ -380,13 +383,13 @@ def test_big_model_warmup_is_deferred_out_of_the_background_load():
 
   loader = next(n for n in ast.walk(tree)
                 if isinstance(n, ast.ClassDef) and n.name == "BigModelLoader")
-  assert "warmup" not in ast.dump(loader), \
-    "the loader thread must not warm up the big model; it shares QCOM with the small model"
+  assert "warmup" in ast.dump(loader), "the loader thread must warm the big model"
 
   main_fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
   promote = next(n for n in ast.walk(main_fn)
                  if isinstance(n, ast.If) and "_big_model_swap_allowed" in ast.dump(n.test))
-  assert "warmup" in ast.dump(promote), "promotion must warm the big model before it drives"
+  assert "warmup" not in ast.dump(promote), \
+    "promotion must not warm the big model; it runs inside the 20 Hz publish loop"
 
 
 def test_chestnut_telemetry_is_suppressed_while_a_background_load_runs():
