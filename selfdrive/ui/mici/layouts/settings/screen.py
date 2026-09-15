@@ -173,6 +173,8 @@ class ScreenValueButton(BigButton):
         write_screen_setting(self._params, key, value)
       else:
         self._params.put_int(key, value)
+        if self._params.get_int(key) != value:
+          raise OSError("Screen timeout write did not persist")
 
     saved = try_screen_setting(write, show_screen_save_error)
     self.refresh()
@@ -251,6 +253,8 @@ class ScreenToggleMici(BigToggle):
         write_screen_setting(self._params, self._key, value)
       else:
         self._params.put_bool(self._key, value)
+        if self._params.get_bool(self._key) != value:
+          raise OSError("Screen toggle write did not persist")
 
     saved = try_screen_setting(write, show_screen_save_error)
     self.refresh()

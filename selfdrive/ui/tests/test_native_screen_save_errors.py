@@ -247,3 +247,56 @@ class TestNativeScreenSaveErrors:
     slider._handle_mouse_release(None)
     assert self.params.get_int(key) == external + 1
     assert slider._committed_value == external + 1
+
+
+  @pytest.mark.parametrize("key", ["ScreenTimeout", "ScreenTimeoutOnroad"])
+  def test_c4_silent_timeout_failure_restores_slider_and_allows_retry(self, key):
+    self.params.put_int(key, 30)
+
+    class DroppedWrites:
+      def put_int(self, key, value):
+        pass
+
+      def __getattr__(_self, name):
+        return getattr(self.params, name)
+
+    button = mici.ScreenValueButton.__new__(mici.ScreenValueButton)
+    button._params = DroppedWrites()
+    button.refresh = lambda: None
+    slider = mici.ScreenSliderMici(
+      "timeout", 5, 60, 5, 30, " seconds", lambda value: button._save(key, value),
+      read_value=lambda: button._read_saved_value(key),
+    )
+    slider._value, slider._dragging = 60, True
+    self.assert_recoverable(lambda: slider._handle_mouse_release(None))
+    assert slider._value == slider._committed_value == self.params.get_int(key) == 30
+    assert not slider.is_dismissing
+    button._params = self.params
+    self.errors.clear()
+    slider._value, slider._dragging = 60, True
+    slider._handle_mouse_release(None)
+    assert slider._value == slider._committed_value == self.params.get_int(key) == 60
+    assert self.errors == []
+
+  @pytest.mark.parametrize("key", ["ScreenManagement", "StandbyMode"])
+  def test_c4_silent_toggle_failure_restores_state_and_reports_error(self, key):
+    self.params.put_bool(key, False)
+
+    class DroppedWrites:
+      def put_bool(self, key, value):
+        pass
+
+      def __getattr__(_self, name):
+        return getattr(self.params, name)
+
+    control = mici.ScreenToggleMici.__new__(mici.ScreenToggleMici)
+    control._params, control._key, control._default = DroppedWrites(), key, False
+    control._checked = True
+    assert self.assert_recoverable(lambda: control._save(True)) is False
+    assert control._checked is False
+    assert self.params.get_bool(key) is False
+    control._params = self.params
+    self.errors.clear()
+    assert control._save(True) is True
+    assert control._checked is True and self.params.get_bool(key) is True
+    assert self.errors == []
