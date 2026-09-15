@@ -36,6 +36,9 @@ ASSIST_DATA_FILE = '/tmp/xtra3grc.bin'
 ASSIST_DATA_FILE_DOWNLOAD = ASSIST_DATA_FILE + '.download'
 ASSISTANCE_URL = 'http://xtrapath3.izatcloud.net/xtra3grc.bin'
 
+# How often to report that the modem is delivering GNSS logs but no position reports.
+POSITION_REPORT_WARN_INTERVAL = 30.0
+
 LOG_TYPES = [
   LOG_GNSS_GPS_MEASUREMENT_REPORT,
   LOG_GNSS_GLONASS_MEASUREMENT_REPORT,
@@ -294,10 +297,24 @@ def main() -> NoReturn:
 
   pm = messaging.PubMaster(['qcomGnss', 'gpsLocation'])
 
+  # Diagnostics for the two silent paths that yield streaming measurements but no gpsLocation:
+  # the modem never sending position reports at all, and position reports being dropped for
+  # their source field. Without these the failure leaves no trace in the logs.
+  position_reports_seen = 0
+  gnss_logs_seen = 0
+  last_logged_pos_source = -1
+  last_position_warn = time.monotonic()
+
   while 1:
     if os.path.exists(ASSIST_DATA_FILE) and want_assistance:
       setup_quectel(diag)
       want_assistance = False
+
+    now = time.monotonic()
+    if now - last_position_warn >= POSITION_REPORT_WARN_INTERVAL:
+      last_position_warn = now
+      if position_reports_seen == 0 and gnss_logs_seen > 0:
+        cloudlog.error(f"no position reports after {gnss_logs_seen} GNSS logs: {hex(LOG_GNSS_POSITION_REPORT)} is not being delivered by the modem")
 
     opcode, payload = diag.recv()
     if opcode != DIAG_LOG_F:
@@ -314,6 +331,8 @@ def main() -> NoReturn:
 
     if log_type not in LOG_TYPES:
       continue
+
+    gnss_logs_seen += 1
 
     if DEBUG:
       print(f"{time.time():.4f}: got log: {log_type} len {len(log_payload)}")  # noqa: TID251
@@ -362,9 +381,18 @@ def main() -> NoReturn:
             setattr(sv, k, v)
       pm.send('qcomGnss', msg)
     elif log_type == LOG_GNSS_POSITION_REPORT:
+      position_reports_seen += 1
       report = unpack_position(log_payload)
       if report["u_PosSource"] != 2:
+        # 0: none, 1: weighted least-squares, 3: externally injected, 4: internal database.
+        # Only the Kalman filter source (2) is published, so a modem stuck on another source
+        # yields measurement reports with no gpsLocation and no other trace.
+        if report["u_PosSource"] != last_logged_pos_source:
+          last_logged_pos_source = report["u_PosSource"]
+          failure_code, fix_events = report.get("u_FailureCode"), report.get("w_FixEvents")
+          cloudlog.warning(f"dropping position report: u_PosSource={last_logged_pos_source} (need 2), failureCode={failure_code}, fixEvents={fix_events}")
         continue
+      last_logged_pos_source = 2
       vNED = [report["q_FltVelEnuMps[1]"], report["q_FltVelEnuMps[0]"], -report["q_FltVelEnuMps[2]"]]
       vNEDsigma = [report["q_FltVelSigmaMps[1]"], report["q_FltVelSigmaMps[0]"], -report["q_FltVelSigmaMps[2]"]]
 

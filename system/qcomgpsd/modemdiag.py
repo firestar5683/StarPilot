@@ -3,6 +3,8 @@ from serial import Serial
 from crcmod import mkCrcFun
 from struct import pack, unpack_from, calcsize
 
+from openpilot.common.swaglog import cloudlog
+
 class ModemDiag:
   def __init__(self):
     self.serial = self.open_serial()
@@ -77,18 +79,37 @@ def setup_logs(diag, types_to_log):
 
   log_masks = unpack_from('<16I', payload, calcsize(header_spec))
 
+  # Track which requested log ids the modem actually accepted. A partial failure here is the
+  # difference between measurements streaming with no position reports and a working GPS fix.
+  registered = set()
+
   for log_type, log_mask_bitsize in enumerate(log_masks):
     if log_mask_bitsize:
       log_mask = [0] * ((log_mask_bitsize+7)//8)
+      requested = set()
       for i in range(log_mask_bitsize):
-        if ((log_type<<12)|i) in types_to_log:
+        log_id = (log_type<<12)|i
+        if log_id in types_to_log:
           log_mask[i//8] |= 1 << (i%8)
+          requested.add(log_id)
       opcode, payload = send_recv(diag, DIAG_LOG_CONFIG_F, pack('<3xIII',
           LOG_CONFIG_SET_MASK_OP,
           log_type,
           log_mask_bitsize
       ) + bytes(log_mask))
-      assert opcode == DIAG_LOG_CONFIG_F
       operation, status = unpack_from(header_spec, payload)
-      assert operation == LOG_CONFIG_SET_MASK_OP
-      assert status == LOG_CONFIG_SUCCESS_S
+      if opcode != DIAG_LOG_CONFIG_F or operation != LOG_CONFIG_SET_MASK_OP or status != LOG_CONFIG_SUCCESS_S:
+        # Previously bare asserts: the mask write silently failed and the affected log ids
+        # never arrived, with no indication of which ones were lost.
+        lost = sorted(hex(i) for i in requested)
+        raise RuntimeError(f"log mask set failed for group {log_type}: opcode={opcode} operation={operation} status={status} lost={lost}")
+      registered |= requested
+
+  missing = set(types_to_log) - registered
+  if missing:
+    # The modem reported no mask range covering these ids, so they will never be delivered.
+    raise RuntimeError(f"log ids not registered (no mask range): {sorted(hex(i) for i in missing)}")
+
+  if registered:
+    cloudlog.warning(f"diag log registration complete: {sorted(hex(i) for i in registered)}")
+  return registered
