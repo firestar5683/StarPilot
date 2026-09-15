@@ -1,8 +1,31 @@
 from types import SimpleNamespace
+import time
 
 from cereal import log
 
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper, LaneChangeDirection, LaneChangeState
+
+
+def test_navigation_desire_expires_when_publisher_stops(monkeypatch):
+  now = [100.0]
+  monkeypatch.setattr(time, "monotonic", lambda: now[0])
+  state = {"valid": True, "updatedAtMonotonic": 100.0, "maneuverType": "turn",
+           "maneuverModifier": "right", "maneuverDistance": 10.0}
+  helper = DesireHelper()
+  helper.params_memory = SimpleNamespace(get=lambda key: state)
+  car = make_car_state(vEgo=5.0, rightBlinker=True)
+  toggles = make_toggles(nav_lane_positioning_allowed=False)
+
+  helper.update(car, True, 0.0, make_plan(), toggles)
+  assert helper.desire == log.Desire.turnRight
+
+  now[0] = 103.0
+  helper.update(car, True, 0.0, make_plan(), toggles)
+  assert helper.desire == log.Desire.none
+
+  state = {**state, "updatedAtMonotonic": now[0]}
+  helper.update(car, True, 0.0, make_plan(), toggles)
+  assert helper.desire == log.Desire.turnRight
 
 
 def make_car_state(**overrides):
