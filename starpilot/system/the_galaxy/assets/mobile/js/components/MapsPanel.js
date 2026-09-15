@@ -1,6 +1,7 @@
 import { api, showSnackbar } from "../api.js"
 import { usePolling } from "../composables.js"
 import { GalaxyConfirm } from "./GalaxyModal.js"
+import { GalaxySelect } from "./GalaxySelect.js"
 import { GxNotice } from "./GxNotice.js"
 
 const STATUS_DEFAULTS = {
@@ -43,7 +44,7 @@ function uniqueSorted(values) {
 
 export const MapsPanel = {
   name: "MapsPanel",
-  components: { GxNotice },
+  components: { GalaxySelect, GxNotice },
   data() {
     return {
       loadingCatalog: true,
@@ -396,9 +397,9 @@ export const MapsPanel = {
           </div>
           <div class="gx-row" style="border-top:none; flex-wrap:wrap;">
             <span class="gx-row__label">Auto Update</span>
-            <select class="gx-field" style="flex:1; min-width:160px;" :value="scheduleDraft" @change="scheduleDraft = $event.target.value">
+            <GalaxySelect class="gx-field" style="flex:1; min-width:160px;" :value="scheduleDraft" @change="scheduleDraft = $event.target.value">
               <option v-for="opt in scheduleOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-            </select>
+            </GalaxySelect>
             <button type="button" class="gx-btn gx-btn--tonal" :disabled="savingSchedule || !scheduleDirty" @click="saveSchedule">
               {{ savingSchedule ? 'Applying...' : 'Apply' }}
             </button>

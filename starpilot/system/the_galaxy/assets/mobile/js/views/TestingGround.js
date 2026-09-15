@@ -1,6 +1,7 @@
 import { api, showSnackbar } from "../api.js"
 import { usePolling } from "../composables.js"
 import { GalaxySection } from "../components/GalaxySection.js"
+import { GalaxySelect } from "../components/GalaxySelect.js"
 
 function slotIdOf(slot) {
   return String((slot && slot.id) || "").trim()
@@ -52,7 +53,7 @@ function modeLabelOf(slot, mode) {
 export const TestingGround = {
   name: "TestingGround",
   props: { embedded: { type: Boolean, default: false } },
-  components: { GalaxySection },
+  components: { GalaxySection, GalaxySelect },
   data() {
     return { loading: true, busy: false, error: "", data: null, selectedSlot: "" }
   },
@@ -214,9 +215,9 @@ export const TestingGround = {
 
               <div class="gx-row" style="border-top:none;">
                 <span class="gx-row__label">View Slot</span>
-                <select class="gx-field" :value="selectedSlot" :disabled="busy" @change="onSelectSlot">
+                <GalaxySelect class="gx-field" :value="selectedSlot" :disabled="busy" @change="onSelectSlot">
                   <option v-for="slot in selectableSlots" :key="slotId(slot)" :value="slotId(slot)">{{ slotId(slot) }}. {{ slot.name }}</option>
-                </select>
+                </GalaxySelect>
               </div>
               <p class="gx-note">
                 Only one Testing Ground can be active at a time. Switching slots only changes what you're viewing; the active test stays enabled until you explicitly choose another mode.

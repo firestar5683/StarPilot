@@ -44,14 +44,17 @@ try {
   const rowSelector=mobile?'.gx-card-grid > section':'.mm-row';
   const rows=page.locator(rowSelector);
   await rows.first().waitFor();
-  const select=mobile?page.locator('.gx-row').filter({has:page.getByText('Active Big',{exact:true})}).locator('select'):page.locator('#mm-active-big-model-select');
+  const activeBigRow=page.locator('.gx-row').filter({has:page.getByText('Active Big',{exact:true})});
+  const select=mobile?activeBigRow.locator('select'):page.locator('#mm-active-big-model-select');
+  // Mobile renders GalaxySelect: pick through its menu, then read the backing native select.
+  const choose=async value=>{if(!mobile) return select.selectOption(value);await activeBigRow.locator('.gx-select__button').click();await page.locator(`.gx-select-menu[open] [role="option"][data-value="${value}"]`).click();};
   assert.equal(await select.inputValue(),'fixture-0');
-  await select.selectOption('');
+  await choose('');
   await new Promise(r=>setTimeout(r,350));
   assert.deepEqual(writes,[{path:'/api/models/active',body:{profile:'big',model:''}}],`${surface}: None must disable Active Big through API`);
   assert.equal(await select.inputValue(),process.env.MODEL_FAULT === 'reject' ? 'fixture-0' : '', 'Selection must match authoritative status after uncertain response');
   if (process.env.MODEL_FAULT) assert.ok(polls >= 2, 'Uncertain write requires immediate authoritative readback');
-  await select.selectOption('fixture-2');
+  await choose('fixture-2');
   await new Promise(r=>setTimeout(r,350));
   assert.equal(writes.length,2);
   assert.deepEqual(writes[1],{path:'/api/models/active',body:{profile:'big',model:'fixture-2'}});

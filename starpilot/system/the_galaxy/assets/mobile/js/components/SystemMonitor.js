@@ -1,4 +1,5 @@
 import { api } from "../api.js"
+import { GalaxySelect } from "./GalaxySelect.js"
 
 // Exact launch-module/executable matches only. Generic Python, shell and kernel
 // processes cannot be attributed reliably from the monitor's sanitized names.
@@ -74,6 +75,7 @@ export function processFeature(process) {
 
 export const SystemMonitor = {
   name: "SystemMonitor",
+  components: { GalaxySelect },
   data() { return { snapshot: null, error: "", paused: false, loading: false, query: "", scope: "comma", sort: "cpu", descending: true, history: [], sensorNow: 0, receivedAt: 0, timer: null, stopped: false } },
   mounted() { this.visibility = () => { if (!document.hidden) this.refresh() }; document.addEventListener("visibilitychange", this.visibility); this.refresh() },
   beforeUnmount() { this.stopped = true; clearTimeout(this.timer); clearTimeout(this.sensorTimer); this.controller?.abort(); document.removeEventListener("visibilitychange", this.visibility) },
@@ -164,7 +166,7 @@ export const SystemMonitor = {
           <section class="gx-card gx-monitor__metric"><span>eGPU VRAM</span><strong>{{ vramUsed == null ? '—' : number(vramUsed / 1073741824) + ' GiB' }}</strong><small v-if="vramTotal != null">{{ number(vramTotal / 1073741824) }} GiB total · {{ number(100 * vramUsed / vramTotal, '%') }}</small><progress v-if="vramTotal > 0 && vramUsed != null" :value="vramUsed" :max="vramTotal" aria-label="eGPU VRAM usage"></progress></section>
         </div>
         <details class="gx-card gx-monitor__cores"><summary>CPU cores</summary><div><span v-for="core in snapshot.cores" :key="core.name">{{ core.name.toUpperCase() }} <b>{{ number(core.percent, '%') }}</b><progress :value="core.percent || 0" max="100" :aria-label="core.name + ' usage'"></progress></span></div></details>
-        <div class="gx-monitor__filters"><input class="gx-field" type="search" v-model="query" aria-label="Search processes" placeholder="Search feature, process, PID or user…"/><select class="gx-field" v-model="scope" aria-label="Process group"><option value="comma">Comma processes</option><option value="users">Apps and services</option><option value="all">All processes</option></select></div>
+        <div class="gx-monitor__filters"><input class="gx-field" type="search" v-model="query" aria-label="Search processes" placeholder="Search feature, process, PID or user…"/><GalaxySelect class="gx-field" v-model="scope" aria-label="Process group"><option value="comma">Comma processes</option><option value="users">Apps and services</option><option value="all">All processes</option></GalaxySelect></div>
         <p class="gx-note">{{ rows.length }} processes shown. {{ snapshot.cpuPercent == null ? 'Collecting the first CPU sample…' : '' }}</p>
         <section class="gx-card gx-monitor__table" tabindex="0" aria-label="Process table; scroll horizontally for more columns">
           <table><thead><tr><th v-for="column in [['name','Process'],['pid','PID'],['cpu','CPU'],['memoryMiB','Memory'],['user','User'],['state','Status']]" :key="column[0]" :aria-sort="ariaSort(column[0])"><button type="button" @click="sortBy(column[0])">{{ column[1] }}{{ arrow(column[0]) }}</button></th></tr></thead>

@@ -53,14 +53,17 @@ for (const surface of ['classic','mobile']) for (const scenario of ['stale-poll'
   window.notices=[];window.showSnackbar=(...a)=>window.notices.push(a);
   new MutationObserver(records=>{for(const r of records) if(r.target.id==='snackbar_wrapper') for(const n of r.addedNodes) window.notices.push(n.textContent);}).observe(document,{childList:true,subtree:true});
  });
- const select=mobile?page.locator('.gx-row').filter({has:page.getByText('Active Big',{exact:true})}).locator('select'):page.locator('#mm-active-big-model-select');
+ const activeBigRow=page.locator('.gx-row').filter({has:page.getByText('Active Big',{exact:true})});
+ const select=mobile?activeBigRow.locator('select'):page.locator('#mm-active-big-model-select');
+ // Mobile renders GalaxySelect: pick through its menu, then read the backing native select.
+ const choose=async value=>{if(!mobile) return select.selectOption(value);await activeBigRow.locator('.gx-select__button').click();await page.locator(`.gx-select-menu[open] [role="option"][data-value="${value}"]`).click();};
  const until=async(fn,msg)=>{for(let i=0;i<80;i++){if(await fn())return;await tick();}throw new Error(msg);};
  let failure=null;
  try {
   await page.goto('http://galaxy.invalid/manage_models');
   await until(async()=>await select.count() && await select.inputValue()==='gpu-a','initial selection');
   if(scenario==='stale-poll') {holdNext=true;await page.evaluate(()=>{window.poll()});await until(()=>heldGet,'held prewrite poll');}
-  await select.selectOption('');
+  await choose('');
   await until(()=>writes.length===1,'selection PUT');
   assert.deepEqual(writes,[{method:'PUT',path:'/api/models/active',body:{profile:'big',model:''}}]);
   if(scenario==='stale-poll') {

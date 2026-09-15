@@ -1,8 +1,10 @@
 import { api, showSnackbar } from "../api.js"
 import { LANGUAGE_OPTIONS, languageState, normalizeLanguage, setLanguage, t } from "../i18n.js"
+import { GalaxySelect } from "./GalaxySelect.js"
 
 export const LanguageSelector = {
   name: "LanguageSelector",
+  components: { GalaxySelect },
   props: { deviceValue: { type: String, default: "" } },
   data() {
     return { languages: LANGUAGE_OPTIONS, selected: languageState.code, saving: false, error: "" }
@@ -53,9 +55,9 @@ export const LanguageSelector = {
       <div class="gx-language-card__row">
         <label class="gx-language-card__label">
           <span>{{ tr("Select language") }}</span>
-          <select class="gx-field gx-language-card__select" :value="selected" :disabled="saving" @change="change">
+          <GalaxySelect class="gx-field gx-language-card__select" :value="selected" :disabled="saving" @change="change">
             <option v-for="option in languages" :key="option.value" :value="option.value">{{ tr(option.label, option.label) }}</option>
-          </select>
+          </GalaxySelect>
         </label>
         <small class="gx-row__desc gx-language-card__hint">{{ tr("Galaxy uses English when no language is selected.") }}</small>
       </div>

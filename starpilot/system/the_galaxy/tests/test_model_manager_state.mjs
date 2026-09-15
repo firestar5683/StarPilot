@@ -13,7 +13,7 @@ const api = {
  downloadAllModels: allow => { requests.push({all:true,allow});return write(); },
  postAction: action => { requests.push({action});return write(); },
 };
-const component = new Function('api','showSnackbar','usePolling','GalaxyConfirm','openGalaxyHelpDialog',...Object.keys(hardware), source.replace(/^import .*$/gm,'').replace('export const ModelManager', 'const ModelManager')+';return ModelManager;')(api,(...a)=>notices.push(a),()=>{},()=>{},()=>prompt(),...Object.values(hardware));
+const component = new Function('api','showSnackbar','usePolling','GalaxyConfirm','openGalaxyHelpDialog','GalaxySelect',...Object.keys(hardware), source.replace(/^import .*$/gm,'').replace('export const ModelManager', 'const ModelManager')+';return ModelManager;')(api,(...a)=>notices.push(a),()=>{},()=>{},()=>prompt(),{},...Object.values(hardware));
 function instance() { const vm=component.data();for(const [key,value] of Object.entries(component.methods))vm[key]=value.bind(vm);return vm; }
 async function reset() {requests=[];notices=[];status=async()=>payload();write=async()=>({});prompt=async()=>true;const vm=instance();await vm.refresh();return vm;}
 // Filters combine without altering the catalogue or selection.
@@ -36,9 +36,9 @@ vm=await reset();const pending=deferred();write=()=>pending.promise;const action
 vm=await reset();const confirmation=deferred();prompt=()=>confirmation.promise;const downloading=vm.runAction('download',vm.models[0]);await vm.runAction('downloadAll');assert.deepEqual(requests,[]);component.beforeUnmount.call(vm);confirmation.resolve(true);await downloading;assert.deepEqual(requests,[]);
 // Two concurrent polls resolve newest-first.
 vm=await reset();const a=deferred(),b=deferred();status=()=>a.promise;const first=vm.refresh();status=()=>b.promise;const second=vm.refresh();b.resolve(payload({activeBigModel:'new'}));await second;a.resolve(payload({activeBigModel:'old'}));await first;assert.equal(vm.activeBigModel,'new');
-assert.ok(!source.includes('GalaxySelect'));assert.ok(!source.includes('model_metrics'));assert.ok(!source.includes('model_stats'));assert.ok(source.includes('selectionUncertain || status.isOnroad'));
+assert.ok(!source.includes('model_metrics'));assert.ok(!source.includes('model_stats'));assert.ok(source.includes('selectionUncertain || status.isOnroad'));
 console.log('PASS: 15 hardware/download/selection/lifecycle scenarios against shipped methods');
 
 const {compile} = await import('../assets/vendor/vue/vue.esm-browser.js');
 assert.equal(typeof compile(component.template, {onError(error) {throw error;}}), 'function');
-console.log('PASS: shipped Vue compiler accepts the native-select Model Manager template');
+console.log('PASS: shipped Vue compiler accepts the GalaxySelect Model Manager template');

@@ -64,9 +64,11 @@ export const GalaxySelect = {
       let zoom = 1
       for (let node = menu; node; node = node.parentElement) zoom *= Number.parseFloat(getComputedStyle(node).zoom) || 1
       const menuWidth = Math.min(Math.max(rect.width, 240), width - 24)
+      // Keep long lists a compact scrolling menu instead of a full-screen wall.
+      const maxHeight = Math.min(height - 24, 360)
       menu.style.width = `${menuWidth / zoom}px`
-      menu.style.maxHeight = `${(height - 24) / zoom}px`
-      const menuHeight = Math.min(menu.scrollHeight * zoom + 2, height - 24)
+      menu.style.maxHeight = `${maxHeight / zoom}px`
+      const menuHeight = Math.min(menu.scrollHeight * zoom + 2, maxHeight)
       const below = height - rect.bottom - 12
       const top = below >= Math.min(menuHeight, 220) ? Math.min(rect.bottom + 6, height - menuHeight - 12) : Math.max(12, rect.top - menuHeight - 6)
       menu.style.left = `${Math.max(12, Math.min(rect.left, width - menuWidth - 12)) / zoom}px`

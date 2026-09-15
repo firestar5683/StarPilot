@@ -1,6 +1,7 @@
 import { api, showSnackbar } from "../api.js"
 import { GalaxyConfirm } from "../components/GalaxyModal.js"
 import { GalaxyTabs } from "../components/GalaxyTabs.js"
+import { GalaxySelect } from "../components/GalaxySelect.js"
 import { GxNotice } from "../components/GxNotice.js"
 import { isFirestarOrigin } from "../components/PwaInstallSection.js"
 import { normalizeRoute, routeMatchesSearch, sortRoutes } from "../../../components/recordings/dashcam_routes_helpers.js"
@@ -47,7 +48,7 @@ function localDeviceUrl(ip, route = "/") {
 
 export const Recordings = {
   name: "Recordings",
-  components: { GalaxyTabs, GxNotice },
+  components: { GalaxySelect, GalaxyTabs, GxNotice },
   data() {
     return {
       sub: "routes",
@@ -368,12 +369,12 @@ export const Recordings = {
         </div>
         <div style="padding: var(--sp-3); display:flex; gap:8px; flex-wrap:wrap;">
           <input class="gx-field" style="flex:1; min-width:160px;" type="search" placeholder="Search routes, dates, or IDs..." v-model="searchQuery" />
-          <select class="gx-field" v-model="sortOrder">
+          <GalaxySelect class="gx-field" aria-label="Sort routes" v-model="sortOrder">
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>
             <option value="longest">Longest duration</option>
             <option value="shortest">Shortest duration</option>
-          </select>
+          </GalaxySelect>
         </div>
         <div style="padding: 0 var(--sp-3) var(--sp-3);">
           <GalaxyTabs :items="{ all: 'All', preserved: 'Preserved' }" :active="showPreservedOnly ? 'preserved' : 'all'" @select="setPreservedFilter" />

@@ -56,13 +56,15 @@ window.app=createApp(Settings); window.vm=window.app.mount('#app');
    })
    await page.goto('http://offline.invalid/')
    await page.evaluate(scale=>{document.documentElement.style.zoom=String(scale)},cfg.scale)
-   const select=page.locator('#gx-longitudinal-mode'), manage=page.locator('[aria-controls="gx-longitudinal-children"]')
-   const waitMode=mode=>page.waitForFunction(mode=>{const e=document.querySelector('#gx-longitudinal-mode');return e?.value===mode&&!e.disabled},mode)
+   // GalaxySelect: #gx-longitudinal-mode is the visible button; a hidden native select holds the value.
+   const button=page.locator('#gx-longitudinal-mode'), picker=page.locator('.gx-select:has(> #gx-longitudinal-mode)'), select=picker.locator('select'), manage=page.locator('[aria-controls="gx-longitudinal-children"]')
+   const choose=async mode=>{await (cfg.touch?button.tap():button.click());const option=page.locator(`.gx-select-menu[open] [role="option"][data-value="${mode}"]`);await (cfg.touch?option.tap():option.click())}
+   const waitMode=mode=>page.waitForFunction(mode=>{const b=document.querySelector('#gx-longitudinal-mode'),e=b?.closest('.gx-select')?.querySelector('select');return e?.value===mode&&!e.disabled&&!b.disabled},mode)
    await waitMode('conditional_experimental')
-   assert.equal(await page.locator('.gx-mode-select__label span').innerText(),'Conditional Experimental')
-   assert.equal(await page.locator('.gx-mode-select__label span').evaluate(e=>e.scrollWidth<=e.clientWidth+1),true)
-   await select.focus()
-   assert.equal(await page.locator('.gx-mode-select').evaluate(e=>getComputedStyle(e).outlineStyle),'solid')
+   assert.equal(await button.locator('span').innerText(),'Conditional Experimental')
+   assert.equal(await button.locator('span').evaluate(e=>e.scrollWidth<=e.clientWidth+1),true)
+   await button.focus()
+   assert.notEqual(await picker.evaluate(e=>getComputedStyle(e).boxShadow),'none')
    assert.deepEqual(await select.locator('option').allTextContents(),['Chill','Experimental','Conditional Experimental','Conditional Chill'])
    assert.equal(await page.evaluate(()=>writes.length),0)
    assert.equal(await manage.getAttribute('aria-expanded'),'false')
@@ -75,7 +77,7 @@ window.app=createApp(Settings); window.vm=window.app.mount('#app');
    // Every direct classic child appears with identical description and native control.
    for(const owner of ['ConditionalExperimental','ConditionalChill']) {
     const target=owner==='ConditionalExperimental'?'conditional_experimental':'conditional_chill'
-    if(target!=='conditional_experimental') {await select.selectOption(target);await waitMode(target)}
+    if(target!=='conditional_experimental') {await choose(target);await waitMode(target)}
     await page.screenshot({path:path.join(out,`${cfg.width}-${cfg.scale}-${target}.png`),fullPage:true})
     for(const p of layout.flatMap(s=>s.params||[]).filter(p=>p.parent_key===owner)) {
      assert.ok((await children.innerText()).includes(p.label),p.key)
@@ -99,21 +101,21 @@ window.app=createApp(Settings); window.vm=window.app.mount('#app');
    await slider.focus();await slider.press('ArrowRight');await slider.press('Tab')
    assert.ok(await page.evaluate(()=>paramWrites.length>0))
    for(const target of ['chill','experimental']) {
-    await select.selectOption(target);await waitMode(target);assert.equal(await manage.count(),0);assert.equal(await children.count(),0)
+    await choose(target);await waitMode(target);assert.equal(await manage.count(),0);assert.equal(await children.count(),0)
     await page.screenshot({path:path.join(out,`${cfg.width}-${cfg.scale}-${target}.png`),fullPage:true})
    }
    assert.equal(await page.evaluate(()=>writes.at(-1).acknowledged),true)
-   await page.evaluate(()=>{holdWrite=true});await select.selectOption('conditional_chill')
+   await page.evaluate(()=>{holdWrite=true});await choose('conditional_chill')
    await page.waitForFunction(()=>!!window.releaseWrite)
    assert.equal(await select.inputValue(),'experimental');assert.equal(await select.isDisabled(),true)
    await page.evaluate(()=>{holdWrite=false;releaseWrite()});await waitMode('conditional_chill')
-   await page.evaluate(()=>{failWrite=true});await select.selectOption('chill');await waitMode('conditional_chill')
+   await page.evaluate(()=>{failWrite=true});await choose('chill');await waitMode('conditional_chill')
    assert.ok((await page.locator('[role=alert]').innerText()).includes('Injected'))
    await page.evaluate(()=>{failWrite=false;externalMode('conditional_experimental')});await waitMode('conditional_experimental')
    // Routine polling never dims an available control; stale pre-write GET is ignored.
    await page.evaluate(()=>{holdRead=true});await page.waitForFunction(()=>!!window.releaseRead)
    assert.equal(await select.isEnabled(),true)
-   await select.selectOption('conditional_chill');await waitMode('conditional_chill')
+   await choose('conditional_chill');await waitMode('conditional_chill')
    await page.evaluate(()=>{holdRead=false;releaseRead()});await page.waitForTimeout(100)
    assert.equal(await select.inputValue(),'conditional_chill')
    for(const reason of ['Locked by Safe Mode.','openpilot longitudinal unavailable.']) {
@@ -130,13 +132,13 @@ window.app=createApp(Settings); window.vm=window.app.mount('#app');
    await page.screenshot({path:path.join(out,`${cfg.width}-${cfg.scale}-dark.png`),fullPage:true})
    await page.evaluate(()=>document.documentElement.setAttribute('data-theme','light'))
    await page.screenshot({path:path.join(out,`${cfg.width}-${cfg.scale}-light.png`),fullPage:true})
-   await page.evaluate(()=>{failRead=true});await page.waitForFunction(()=>document.querySelector('#gx-longitudinal-mode').value==='')
+   await page.evaluate(()=>{failRead=true});await page.waitForFunction(()=>document.querySelector('#gx-longitudinal-mode').closest('.gx-select').querySelector('select').value==='')
    assert.equal(await select.isDisabled(),true)
    await page.evaluate(()=>{failRead=false});await waitMode('conditional_chill')
    // Search must use the same guarded selector, never generic Params for virtual key.
    await page.evaluate(()=>{store.search='Longitudinal control mode'})
    await page.locator('.gx-section__header').last().click()
-   await waitMode('conditional_chill');await select.selectOption('chill');await waitMode('chill')
+   await waitMode('conditional_chill');await choose('chill');await waitMode('chill')
    assert.equal(await page.evaluate(()=>paramWrites.some(p=>p.key==='LongitudinalControlMode')),false)
    assert.deepEqual(errors,[])
    reports.push({...cfg,passed:true,writes:await page.evaluate(()=>writes.length)})

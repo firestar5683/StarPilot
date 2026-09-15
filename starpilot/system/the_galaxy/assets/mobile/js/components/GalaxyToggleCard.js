@@ -5,13 +5,14 @@ import {
   resolveVehicleUnitParam, stepPrecision,
 } from "../params.js"
 import { FavoritesEditor } from "./FavoritesEditor.js"
+import { GalaxySelect } from "./GalaxySelect.js"
 import { t } from "../i18n.js"
 
 const PANDA_FIRMWARE_TOGGLE_KEYS = new Set(["IgnoreIgnitionLine", "RemoteStartBootsComma", "HKGRemoteStartBootsComma", "TeslaWakeOnCAN"])
 
 export const GalaxyToggleCard = {
   name: "GalaxyToggleCard",
-  components: { FavoritesEditor },
+  components: { FavoritesEditor, GalaxySelect },
   props: {
     param: { type: Object, required: true },
     value: { default: undefined },
@@ -217,11 +218,11 @@ export const GalaxyToggleCard = {
           <button class="gx-slider-reset" :disabled="locked || updating" @click="resetToDefault">{{ tr("Default") }}</button>
         </div>
 
-        <select v-else-if="isSelect" class="gx-field" :disabled="locked || updating" :value="String(value ?? '')" @change="onSelect">
+        <GalaxySelect v-else-if="isSelect" class="gx-field" :disabled="locked || updating" :value="String(value ?? '')" @change="onSelect">
           <option v-if="optionsLoading" value="">{{ tr("Loading...") }}</option>
           <option v-else-if="!selectOptions.length" value="">{{ tr("No options available") }}</option>
           <option v-for="opt in selectOptions" :key="String(opt.value)" :value="String(opt.value)">{{ tr(opt.label, opt.label) }}</option>
-        </select>
+        </GalaxySelect>
 
         <input v-else-if="isText" class="gx-field" :type="param.input_type || 'text'" :value="value ?? ''"
           :placeholder="param.placeholder || ''" :disabled="locked || updating" @change="onText" />

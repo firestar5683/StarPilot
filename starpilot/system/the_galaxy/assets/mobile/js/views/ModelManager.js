@@ -2,6 +2,7 @@ import { api, showSnackbar } from "../api.js"
 import { usePolling } from "../composables.js"
 import { GalaxyConfirm } from "../components/GalaxyModal.js"
 import { openGalaxyHelpDialog } from "../components/FeatureHelp.js"
+import { GalaxySelect } from "../components/GalaxySelect.js"
 import { readHardwareFilter, saveHardwareFilter, matchesHardware, hardwareLabel, fileSizeText } from "/assets/components/tools/model_hardware.js"
 
 function text(value, fallback = "") {
@@ -17,6 +18,7 @@ let selectionWrite = null
 
 export const ModelManager = {
   name: "ModelManager",
+  components: { GalaxySelect },
   data() {
     return {
       loading: true,
@@ -281,47 +283,47 @@ export const ModelManager = {
 
             <div class="gx-row" style="border-top:none;">
               <span class="gx-row__label">Active Small</span>
-              <select class="gx-field" style="flex:1;" :value="activeSmallModel" :disabled="!!busy || selectionUncertain || status.isOnroad" @change="runAction('select-small', installedSmallModels.find(m => m.value === $event.target.value))">
+              <GalaxySelect class="gx-field" style="flex:1;" :value="activeSmallModel" :disabled="!!busy || selectionUncertain || status.isOnroad" @change="runAction('select-small', installedSmallModels.find(m => m.value === $event.target.value))">
                 <option v-for="m in installedSmallModels" :key="m.value" :value="m.value">{{ m.label || m.value }}</option>
-              </select>
+              </GalaxySelect>
             </div>
 
             <div class="gx-row" style="border-top:none;">
               <span class="gx-row__label">Active Big</span>
-              <select class="gx-field" style="flex:1;" :value="activeBigModel" :disabled="!!busy || selectionUncertain || status.isOnroad" @change="$event.target.value ? runAction('select-big', installedBigModels.find(m => m.value === $event.target.value)) : runAction('select-big')">
+              <GalaxySelect class="gx-field" style="flex:1;" :value="activeBigModel" :disabled="!!busy || selectionUncertain || status.isOnroad" @change="$event.target.value ? runAction('select-big', installedBigModels.find(m => m.value === $event.target.value)) : runAction('select-big')">
                 <option value="">None — always use Active Small</option>
                 <option v-for="m in installedBigModels" :key="m.value" :value="m.value">{{ m.label || m.value }}</option>
-              </select>
+              </GalaxySelect>
             </div>
 
             <div class="gx-row" style="border-top:none;">
               <span class="gx-row__label">Sort</span>
-              <select class="gx-field" style="flex:1;" :value="sortMode" @change="sortMode = $event.target.value">
+              <GalaxySelect class="gx-field" style="flex:1;" :value="sortMode" @change="sortMode = $event.target.value">
                 <option value="release_date">Release Date</option>
                 <option value="alphabetical">Alphabetical</option>
-              </select>
+              </GalaxySelect>
             </div>
 
             <div class="gx-row" style="border-top:none;">
               <label class="gx-row__label" for="gx-model-hardware">Model hardware</label>
-              <select id="gx-model-hardware" class="gx-field" style="flex:1; min-width:0;" :value="hardwareFilter" @change="setHardwareFilter($event.target.value)">
+              <GalaxySelect id="gx-model-hardware" class="gx-field" style="flex:1; min-width:0;" :value="hardwareFilter" @change="setHardwareFilter($event.target.value)">
                 <option value="both">Both</option>
                 <option value="gpu">GPU models only</option>
                 <option value="comma">Comma models only</option>
-              </select>
+              </GalaxySelect>
             </div>
 
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
-              <select class="gx-field" style="flex:1; min-width:140px;" :value="userFilter" @change="userFilter = $event.target.value">
+              <GalaxySelect class="gx-field" style="flex:1; min-width:140px;" aria-label="Your favorite filter" :value="userFilter" @change="userFilter = $event.target.value">
                 <option value="all">Your Favorite: All</option>
                 <option value="yes">Your Favorite: Yes</option>
                 <option value="no">Your Favorite: No</option>
-              </select>
-              <select class="gx-field" style="flex:1; min-width:140px;" :value="communityFilter" @change="communityFilter = $event.target.value">
+              </GalaxySelect>
+              <GalaxySelect class="gx-field" style="flex:1; min-width:140px;" aria-label="Community filter" :value="communityFilter" @change="communityFilter = $event.target.value">
                 <option value="all">Community: All</option>
                 <option value="yes">Community: Yes</option>
                 <option value="no">Community: No</option>
-              </select>
+              </GalaxySelect>
             </div>
 
           </div>
