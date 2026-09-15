@@ -1,5 +1,6 @@
 import random
 import time
+import pytest
 from typing import Sized, cast
 
 import cereal.messaging as messaging
@@ -15,6 +16,29 @@ class TestSubMaster:
     # ZMQ pub socket takes too long to die
     # sleep to prevent multiple publishers error between tests
     zmq_sleep(3)
+
+  @pytest.mark.parametrize("poll", [None, "deviceState"])
+  def test_drain_preserves_short_events_with_native_socket_wrappers(self, poll):
+    pub = messaging.PubMaster(["carState", "deviceState"])
+    sm = messaging.SubMaster(["carState", "deviceState"], poll=poll, drain_services=["carState"])
+    zmq_sleep()
+    pressed = messaging.new_message("carState", valid=True)
+    button = pressed.carState.init("buttonEvents", 1)[0]
+    button.type, button.pressed = "accelCruise", True
+    pub.send("carState", pressed)
+    latest = messaging.new_message("carState", valid=True)
+    latest.carState.vEgo = 12.0
+    pub.send("carState", latest)
+    pub.send("deviceState", messaging.new_message("deviceState", valid=True))
+    sm.update(1000)
+    assert len(sm.drained["carState"]) == 2
+    assert sm.drained["carState"][0].carState.buttonEvents[0].pressed
+    assert sm["carState"].vEgo == 12.0 and not sm["carState"].buttonEvents
+    assert sm.logMonoTime["carState"] == latest.logMonoTime
+    assert sm.frame == 0 and all(sm.updated.values())
+    sm.update(0)
+    assert sm.drained["carState"] == []
+    assert sm.frame == 1 and not any(sm.updated.values())
 
   def test_init(self):
     sm = messaging.SubMaster(events)

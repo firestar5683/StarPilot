@@ -75,7 +75,8 @@ class UIState:
         "liveTracks",
         "liveDelay",
         "liveTorqueParameters",
-      ]
+      ],
+      drain_services=["carState"],
     )
 
     self.prime_state = PrimeState()
@@ -305,6 +306,7 @@ class Device:
   def __init__(self):
     self._ignition = False
     self._last_button_press = standby_button_press_time(ui_state.params_memory)
+    self._last_car_button_frame = int(time.monotonic() * 1e9)
     self._last_turn_signal = None
     self._interaction_time: float = -1
     self._override_interactive_timeout: int | None = None
@@ -506,6 +508,16 @@ class Device:
     button_pressed = button_time > self._last_button_press and 0 <= time.monotonic() - button_time / 1e9 < 2
     self._last_button_press = button_time
     events = {"button"} if button_pressed else set()
+    # Reuse the UI reader: another carState subscriber can exhaust msgq slots.
+    frames = getattr(ui_state.sm, "drained", {}).get("carState", []) if ui_state.started else []
+    now_ns = int(time.monotonic() * 1e9)
+    for message in frames:
+      timestamp = int(message.logMonoTime)
+      if not message.valid or not 0 <= now_ns - timestamp < 2_000_000_000 or timestamp <= self._last_car_button_frame:
+        continue
+      self._last_car_button_frame = timestamp
+      if any(event.pressed and str(event.type) not in ("unknown", "0") for event in message.carState.buttonEvents):
+        events.add("button")
     car_state = self._fresh_message("carState") if ui_state.started else None
     turn_signal = (int(car_state.leftBlinker) | (int(car_state.rightBlinker) << 1)) if car_state is not None else None
     if self._last_turn_signal is not None and turn_signal and turn_signal != self._last_turn_signal:

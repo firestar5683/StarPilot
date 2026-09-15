@@ -513,12 +513,8 @@ class WheelControlsDaemon:
     self.last_tested: dict[str, Any] | None = None
     self.last_scan = 0.0
     self.last_status = 0.0
-    self._car_state_sock = None
-    self._car_state_messaging = None
-    self._last_car_button_frame = 0
 
   def close(self) -> None:
-    self._close_car_buttons()
     for fd in list(self.sources):
       self._remove(fd)
     self.selector.close()
@@ -671,50 +667,6 @@ class WheelControlsDaemon:
       # A display notification must not interrupt existing controller actions.
       cloudlog.exception("wheel controls: screen wake notification failed")
 
-  def _close_car_buttons(self) -> None:
-    self._car_state_sock = None
-    self._car_state_messaging = None
-    self._last_car_button_frame = 0
-
-  def _configure_car_buttons(self) -> None:
-    if not all(self.params.get_bool(key) for key in ("ScreenManagement", "StandbyMode", "StandbyWakeButton", "IsOnroad")):
-      self._close_car_buttons()
-      return
-    if self._car_state_sock is not None:
-      return
-    try:
-      from cereal import messaging
-
-      # UI SubMaster conflates frames and can discard one-frame button events.
-      self._car_state_sock = messaging.sub_sock("carState", conflate=False)
-      self._car_state_messaging = messaging
-      self._last_car_button_frame = time.monotonic_ns()
-    except Exception:
-      self._close_car_buttons()
-      cloudlog.exception("wheel controls: car button observer unavailable")
-
-  def _poll_car_buttons(self) -> None:
-    if self._car_state_sock is None:
-      return
-    try:
-      messages = self._car_state_messaging.drain_sock(self._car_state_sock, wait_for_one=False)
-      # card publishes with Python messaging.new_message: already CLOCK_MONOTONIC.
-      now_ns = time.monotonic_ns()
-      pressed_at = 0
-      for message in messages:
-        timestamp = int(message.logMonoTime)
-        if not message.valid or not 0 <= now_ns - timestamp < 2_000_000_000 or timestamp <= self._last_car_button_frame:
-          continue
-        self._last_car_button_frame = timestamp
-        if any(event.pressed and str(event.type) not in ("unknown", "0") for event in message.carState.buttonEvents):
-          pressed_at = timestamp
-      if pressed_at:
-        self._publish_button_press(pressed_at)
-    except Exception:
-      self._close_car_buttons()
-      cloudlog.exception("wheel controls: car button read failed")
-
-
   def _publish_status(self, now: float) -> None:
     remaining = max(0, round(self.learning_deadline - now, 1)) if self.learning_slot is not None else 0
     status = {
@@ -737,14 +689,12 @@ class WheelControlsDaemon:
         self._update_testing()
         if now - self.last_scan >= DEVICE_SCAN_INTERVAL_SECONDS:
           self._scan_devices()
-          self._configure_car_buttons()
           self.last_scan = now
         for key, _mask in self.selector.select(timeout=0.1):
           try:
             self._read_events(key.fd)
           except (KeyError, OSError):
             self._remove(key.fd)
-        self._poll_car_buttons()
         now = time.monotonic()
         if now - self.last_status >= STATUS_INTERVAL_SECONDS:
           self._publish_status(now)

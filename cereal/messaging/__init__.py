@@ -152,7 +152,8 @@ class FrequencyTracker:
 class SubMaster:
   def __init__(self, services: List[str], poll: Optional[str] = None,
                ignore_alive: Optional[List[str]] = None, ignore_avg_freq: Optional[List[str]] = None,
-               ignore_valid: Optional[List[str]] = None, addr: str = "127.0.0.1", frequency: Optional[float] = None):
+               ignore_valid: Optional[list[str]] = None, addr: str = "127.0.0.1", frequency: Optional[float] = None,
+               drain_services: list[str] | None = None):
     self.frame = -1
     self.services = services
     self.seen = {s: False for s in services}
@@ -160,6 +161,9 @@ class SubMaster:
     self.recv_time = {s: 0. for s in services}
     self.recv_frame = {s: 0 for s in services}
     self.sock = {}
+    self.drained = {s: [] for s in (drain_services or [])}
+    if not self.drained.keys() <= set(services):
+      raise ValueError("Drained services must be subscribed")
     self.data = {}
     self.logMonoTime = {s: 0 for s in services}
 
@@ -187,7 +191,7 @@ class SubMaster:
 
     for s in services:
       p = self.poller if s not in self.non_polled_services else None
-      self.sock[s] = sub_sock(s, poller=p, addr=addr, conflate=True)
+      self.sock[s] = sub_sock(s, poller=p, addr=addr, conflate=s not in self.drained)
 
       try:
         data = new_message(s)
@@ -207,14 +211,28 @@ class SubMaster:
   def _check_avg_freq(self, s: str) -> bool:
     return SERVICE_LIST[s].frequency > 0.99 and (s not in self.ignore_average_freq) and (s not in self.ignore_alive)
 
+  def _recv_socket(self, sock):
+    message = recv_one_or_none(sock)
+    if not self.drained or message is None:
+      return message
+    # Native Poller returns fresh socket wrappers; identify the service by data.
+    service = message.which()
+    if service not in self.drained:
+      return message
+    # Preserve event edges for observers, but update state/frequency only once.
+    self.drained[service] = [message, *drain_sock(sock)]
+    return self.drained[service][-1]
+
   def update(self, timeout: int = 100) -> None:
+    for service in self.drained:
+      self.drained[service] = []
     msgs = []
     for sock in self.poller.poll(timeout):
-      msgs.append(recv_one_or_none(sock))
+      msgs.append(self._recv_socket(sock))
 
     # non-blocking receive for non-polled sockets
     for s in self.non_polled_services:
-      msgs.append(recv_one_or_none(self.sock[s]))
+      msgs.append(self._recv_socket(self.sock[s]))
     self.update_msgs(time.monotonic(), msgs)
 
   def update_msgs(self, cur_time: float, msgs: List[capnp.lib.capnp._DynamicStructReader]) -> None:
@@ -262,6 +280,7 @@ class SubMaster:
       ignore_valid=self.ignore_valid,
       addr=self.addr,
       frequency=None if self.poll is not None else self.update_freq,
+      drain_services=list(self.drained),
     )
 
 

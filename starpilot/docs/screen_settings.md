@@ -32,11 +32,11 @@ Engagement and alert detection use Dom's existing status and alert predicates. E
 
 Dom's ignition transitions, screen-setting changes and page timeout handling are retained. There are no gear, brake-pedal or accelerator wake triggers. Standby powers the display down after the timeout using Dom's existing display-power path.
 
-Vehicle buttons use the car interface's existing decoded `carState.buttonEvents`. The listener drains every message so short presses survive between UI refreshes. Controller buttons use the existing input-device reader. When button wake is enabled, fresh presses wake once; releases, key repeat and held buttons do not keep extending the timer. Mapped actions retain their separate enable setting and continue to work normally. Button coverage depends on what the existing vehicle interface and supported input devices expose; this PR introduces no manufacturer-specific CAN decoding.
+Vehicle buttons use the car interface's existing decoded `carState.buttonEvents`. The existing UI subscriber drains every message so short presses survive between UI refreshes, while UI state and frequency tracking receive only the latest frame. No additional vehicle-message reader is opened. Controller buttons use the existing input-device reader. When button wake is enabled, fresh presses wake once; releases, key repeat and held buttons do not keep extending the timer. Mapped actions retain their separate enable setting and continue to work normally. Button coverage depends on what the existing vehicle interface and supported input devices expose; this PR introduces no manufacturer-specific CAN decoding.
 
 ## Persistence and compatibility
 
-The existing brightness keys retain 101 as Auto and 0–100 as Manual. Four additional persistent integers store manual memory and relative offsets. Seven persistent booleans store wake selections. StandbyButtonPressTime carries fresh button timestamps in RAM, clears on manager start, and is excluded from logging.
+The existing brightness keys retain 101 as Auto and 0–100 as Manual. Four additional persistent integers store manual memory and relative offsets. Seven persistent booleans store wake selections. StandbyButtonPressTime carries fresh external-controller button timestamps in RAM, clears on manager start, and is excluded from logging.
 
 Native UI and Galaxy writes use one shared validator and an advisory nonblocking file lock outside the Params key directory. Snapshot, write, readback and rollback run within that transaction; UI caches invalidate inside and after it. A busy or failed save is reported and can be retried. Other direct Params writers must use the shared helper to participate in this transaction contract.
 
