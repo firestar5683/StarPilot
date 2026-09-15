@@ -1,7 +1,9 @@
 """Timed-out git commands must be stopped so git can remove its lock files."""
 import ast
+import contextlib
 import os
 import selectors
+import signal
 import subprocess
 import sys
 import time
@@ -19,7 +21,12 @@ open(lock, "w").close()
 def cleanup(signum, frame):
   os.unlink(lock)
   sys.exit(128 + signum)
-signal.signal(signal.SIGTERM, cleanup if mode == "clean" else signal.SIG_IGN)
+signal.signal(signal.SIGTERM, signal.SIG_IGN if mode == "stubborn" else cleanup)
+if mode == "helper":
+  # Like a hook or filter git starts: inherits git's stdout/stderr and outlives it.
+  import subprocess
+  helper = subprocess.Popen([sys.executable, "-c", "import time; time.sleep(30)"])
+  open(lock + ".helper", "w").write(str(helper.pid))
 open(lock + ".ready", "w").close()
 while True:
   time.sleep(0.05)
@@ -70,6 +77,19 @@ def test_timed_out_short_git_command_is_terminated_and_still_raises(tmp_path):
   with pytest.raises(subprocess.TimeoutExpired):
     scope["_run_git"](str(tmp_path), ["reset", "--hard", "FETCH_HEAD"], timeout=1.5)
   assert not lock.exists()
+
+
+def test_timed_out_git_returns_even_if_its_child_still_holds_the_output_pipes(tmp_path):
+  scope, lock = git_runner(tmp_path, "helper")
+  started = time.monotonic()
+  try:
+    with pytest.raises(subprocess.TimeoutExpired):
+      scope["_run_git"](str(tmp_path), ["reset", "--hard", "FETCH_HEAD"], timeout=1.5)
+    assert time.monotonic() - started < 10
+    assert not lock.exists()
+  finally:
+    with contextlib.suppress(FileNotFoundError, ProcessLookupError):
+      os.kill(int(Path(f"{lock}.helper").read_text()), signal.SIGKILL)
 
 
 def test_run_git_keeps_its_completed_process_result(tmp_path):

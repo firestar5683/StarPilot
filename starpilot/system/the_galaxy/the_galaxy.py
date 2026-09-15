@@ -2714,8 +2714,8 @@ def _run_git(repo_path, args, timeout=30):
       stdout, stderr = process.communicate(timeout=timeout)
     except subprocess.TimeoutExpired:
       # subprocess.run would SIGKILL here, leaving index.lock behind after reset/checkout.
+      # Don't drain the pipes afterwards: a hook or filter git started can hold them open long after git exits.
       _stop_git_process(process)
-      process.communicate()
       raise
   return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
 
@@ -2914,7 +2914,7 @@ def _set_fast_update_error_state(message, exception):
   error_text = str(exception).strip() or "Unknown error"
   if f"{SHALLOW_LOCK_NAME}': File exists" in error_text:
     # Recover clears this lock once no git process is using it.
-    message = f"{message} An interrupted update left a Git lock behind. Tap Recover, then update again."
+    message = f"{message} An interrupted update left a Git lock behind. Tap Recover."
   _set_fast_update_state(
     running=False,
     stage="error",
