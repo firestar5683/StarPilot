@@ -18,6 +18,7 @@ from struct import unpack_from, calcsize, pack
 from cereal import log
 import cereal.messaging as messaging
 from openpilot.common.gpio import gpio_init, gpio_set
+from openpilot.common.params import Params
 from openpilot.common.utils import retry
 from openpilot.common.time_helpers import system_time_valid
 from openpilot.system.hardware.tici.pins import GPIO
@@ -38,6 +39,16 @@ ASSISTANCE_URL = 'http://xtrapath3.izatcloud.net/xtra3grc.bin'
 
 # How often to report that the modem is delivering GNSS logs but no position reports.
 POSITION_REPORT_WARN_INTERVAL = 30.0
+
+# The module hot starts by default, reusing whatever assistance data it already holds. A stale or
+# corrupt database survives every reboot and leaves the engine tracking satellites without ever
+# demodulating their time, so it reports positions sourced from the database (or nothing at all)
+# and never reaches a real fix. Wipe the database after this many consecutive fixless boots.
+GPS_FIX_FAILURES_BEFORE_COLD_START = 3
+GPS_FIX_FAILURE_PARAM = "QcomGpsFixFailures"
+
+# Force the next setup_quectel() to delete all assistance data instead of hot starting.
+cold_start_requested = False
 
 LOG_TYPES = [
   LOG_GNSS_GPS_MEASUREMENT_REPORT,
@@ -160,10 +171,19 @@ def downloader_loop(event):
     pass
 
 @retry(attempts=5, delay=0.2, ignore_failure=True)
-def inject_assistance():
+def inject_assistance() -> bool:
   cmd = f"mmcli -m any --timeout 30 --location-inject-assistance-data={ASSIST_DATA_FILE}"
-  subprocess.check_output(cmd, stderr=subprocess.PIPE, shell=True)
+  try:
+    subprocess.check_output(cmd, stderr=subprocess.PIPE, shell=True)
+  except subprocess.CalledProcessError as e:
+    # mmcli's own error text says why the modem rejected the data (e.g. the location feature
+    # being unavailable). The traceback alone does not carry it, so surface it here before the
+    # retry decorator swallows the exception.
+    stderr = (e.stderr or b"").decode("utf-8", errors="replace").strip()
+    cloudlog.error(f"assistance injection rejected by mmcli (exit {e.returncode}): {stderr}")
+    raise
   cloudlog.info("successfully loaded assistance data")
+  return True
 
 @retry(attempts=5, delay=1.0)
 def setup_quectel(diag: ModemDiag) -> bool:
@@ -182,7 +202,7 @@ def setup_quectel(diag: ModemDiag) -> bool:
   if gps_enabled():
     at_cmd("AT+QGPSEND")
 
-  if "GPS_COLD_START" in os.environ:
+  if "GPS_COLD_START" in os.environ or cold_start_requested:
     # deletes all assistance
     at_cmd("AT+QGPSDEL=0")
   else:
@@ -198,9 +218,14 @@ def setup_quectel(diag: ModemDiag) -> bool:
   at_cmd("AT+QGPSXTRA=1")
   at_cmd("AT+QGPSSUPLURL=\"NULL\"")
   if os.path.exists(ASSIST_DATA_FILE):
-    ret = True
-    inject_assistance()
-    os.remove(ASSIST_DATA_FILE)
+    # Only consume the downloaded data once the modem has actually accepted it. Reporting success
+    # regardless used to clear want_assistance and delete the file, so a rejected injection threw
+    # away the download and never retried for the rest of the drive.
+    if inject_assistance():
+      ret = True
+      os.remove(ASSIST_DATA_FILE)
+    else:
+      cloudlog.error("assistance data not injected, keeping it for a later attempt")
   #at_cmd("AT+QGPSXTRADATA?")
   if system_time_valid():
     time_str = datetime.datetime.now(datetime.UTC).replace(tzinfo=None).strftime("%Y/%m/%d,%H:%M:%S")
@@ -286,6 +311,22 @@ def main() -> NoReturn:
     sys.exit(0)
   signal.signal(signal.SIGINT, cleanup)
   signal.signal(signal.SIGTERM, cleanup)
+
+  # Count this boot as fixless until a position report proves otherwise. The counter is only
+  # cleared by an actual fix, so it survives reboots and accumulates across failing boots.
+  global cold_start_requested
+  params = Params()
+  fix_failures = params.get_int(GPS_FIX_FAILURE_PARAM, return_default=True, default=0)
+  cold_start_requested = fix_failures >= GPS_FIX_FAILURES_BEFORE_COLD_START
+  if cold_start_requested:
+    # Clear the count as the wipe is performed rather than waiting for a fix: a cold start takes
+    # much longer to acquire, so the next boot should get to try the hot path again instead of
+    # cold starting forever when the fixless streak has some other cause.
+    cloudlog.warning(f"{fix_failures} consecutive boots without a GPS fix, cold starting the module")
+    fix_failures = 0
+    params.put_int(GPS_FIX_FAILURE_PARAM, 0)
+  else:
+    params.put_int(GPS_FIX_FAILURE_PARAM, fix_failures + 1)
 
   # connect to modem
   diag = ModemDiag()
@@ -419,6 +460,11 @@ def main() -> NoReturn:
       if gps.hasFix:
         want_assistance = False
         stop_download_event.set()
+        if fix_failures:
+          # A real fix means the assistance data is usable: start the next boot from a clean count.
+          fix_failures = 0
+          cold_start_requested = False
+          params.put_int(GPS_FIX_FAILURE_PARAM, 0)
       pm.send('gpsLocation', msg)
 
     elif log_type == LOG_GNSS_OEMDRE_SVPOLY_REPORT:
