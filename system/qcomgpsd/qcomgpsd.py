@@ -18,9 +18,9 @@ from struct import unpack_from, calcsize, pack
 from cereal import log
 import cereal.messaging as messaging
 from openpilot.common.gpio import gpio_init, gpio_set
-from openpilot.common.params import Params
 from openpilot.common.utils import retry
 from openpilot.common.time_helpers import system_time_valid
+from openpilot.system.hardware import AGNOS
 from openpilot.system.hardware.tici.pins import GPIO
 from openpilot.common.swaglog import cloudlog
 from openpilot.system.qcomgpsd.modemdiag import ModemDiag, DIAG_LOG_F, setup_logs, send_recv
@@ -45,10 +45,30 @@ POSITION_REPORT_WARN_INTERVAL = 30.0
 # demodulating their time, so it reports positions sourced from the database (or nothing at all)
 # and never reaches a real fix. Wipe the database after this many consecutive fixless boots.
 GPS_FIX_FAILURES_BEFORE_COLD_START = 3
-GPS_FIX_FAILURE_PARAM = "QcomGpsFixFailures"
+
+# Kept in a plain file rather than a param: params keys are compiled into libparams from
+# params_keys.h, so a new key raises UnknownKeyName until scons rebuilds. This counter must never
+# be able to take qcomgpsd down with it.
+GPS_FIX_FAILURE_FILE = "/data/qcomgpsd_fix_failures" if AGNOS else "/tmp/qcomgpsd_fix_failures"
 
 # Force the next setup_quectel() to delete all assistance data instead of hot starting.
 cold_start_requested = False
+
+
+def read_fix_failures() -> int:
+  try:
+    with open(GPS_FIX_FAILURE_FILE) as f:
+      return max(0, int(f.read().strip() or 0))
+  except (OSError, ValueError):
+    return 0
+
+
+def write_fix_failures(count: int) -> None:
+  try:
+    with open(GPS_FIX_FAILURE_FILE, "w") as f:
+      f.write(str(count))
+  except OSError:
+    cloudlog.exception("failed to persist the GPS fix failure count")
 
 LOG_TYPES = [
   LOG_GNSS_GPS_MEASUREMENT_REPORT,
@@ -315,8 +335,7 @@ def main() -> NoReturn:
   # Count this boot as fixless until a position report proves otherwise. The counter is only
   # cleared by an actual fix, so it survives reboots and accumulates across failing boots.
   global cold_start_requested
-  params = Params()
-  fix_failures = params.get_int(GPS_FIX_FAILURE_PARAM, return_default=True, default=0)
+  fix_failures = read_fix_failures()
   cold_start_requested = fix_failures >= GPS_FIX_FAILURES_BEFORE_COLD_START
   if cold_start_requested:
     # Clear the count as the wipe is performed rather than waiting for a fix: a cold start takes
@@ -324,9 +343,9 @@ def main() -> NoReturn:
     # cold starting forever when the fixless streak has some other cause.
     cloudlog.warning(f"{fix_failures} consecutive boots without a GPS fix, cold starting the module")
     fix_failures = 0
-    params.put_int(GPS_FIX_FAILURE_PARAM, 0)
+    write_fix_failures(0)
   else:
-    params.put_int(GPS_FIX_FAILURE_PARAM, fix_failures + 1)
+    write_fix_failures(fix_failures + 1)
 
   # connect to modem
   diag = ModemDiag()
@@ -464,7 +483,7 @@ def main() -> NoReturn:
           # A real fix means the assistance data is usable: start the next boot from a clean count.
           fix_failures = 0
           cold_start_requested = False
-          params.put_int(GPS_FIX_FAILURE_PARAM, 0)
+          write_fix_failures(0)
       pm.send('gpsLocation', msg)
 
     elif log_type == LOG_GNSS_OEMDRE_SVPOLY_REPORT:
