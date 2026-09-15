@@ -287,8 +287,6 @@ def _stub_big_model_loader(monkeypatch, calls, *, uses_external_gpu=True, model_
   monkeypatch.setattr(modeld, "wait_usbgpu_link", lambda: calls.append("link"))
   monkeypatch.setattr(modeld, "wait_for_external_gpu_power_ready",
                       lambda CP, cancel=None: calls.append(("power", CP)))
-  monkeypatch.setattr(modeld, "wait_for_external_gpu_supply_ready",
-                      lambda cancel=None: calls.append("supply"))
   monkeypatch.setattr(modeld, "_close_tinygrad_disk_cache_connection", lambda: calls.append("close_cache"))
   monkeypatch.setattr(modeld, "ModelState", FakeModelState)
   return FakeModelState
@@ -316,7 +314,6 @@ def test_background_big_model_load_leaves_the_running_model_untouched(monkeypatc
   assert calls == [
     ("affinity", tuple(sorted(modeld.BIG_MODEL_LOADER_CORES))),
     ("power", "car-params"),
-    "supply",
     "link",
     ("model", 1928, 1208, True, "big-model", False, "v15"),
     "warmup",
@@ -366,41 +363,30 @@ def test_big_model_load_timeout_leaves_room_for_a_normal_load():
   assert modeld.BIG_MODEL_LOAD_TIMEOUT_SECONDS > 60
 
 
-def test_external_gpu_supply_gate_rejects_a_brownout():
-  # The e-GMP ECU-disable sequence needed for openpilot longitudinal cycles the car through
-  # ACC mode into READY, which power-cycles Chestnut. Measured on two such startups: its rail
-  # collapses to ~7 V with current flowing backwards out of its capacitors, while the vehicle
-  # rail still reads 11 V throughout.
-  ready, stable = modeld._external_gpu_supply_ready(7836, -1, True, True, 10.0, 5.0)
-  assert not ready and stable is None
+def test_chestnut_telemetry_is_suppressed_while_a_background_load_runs():
+  """Telemetry shares Chestnut's USB device with the model weight transfer.
 
-  # Negative current alone is a brownout even before the fault flag is latched.
-  ready, stable = modeld._external_gpu_supply_ready(11312, -10, False, True, 10.0, 5.0)
-  assert not ready and stable is None
+  ChestnutState._read_ina() issues USB control reads on the same device tinygrad streams
+  weights over. The old code loaded before the publish loop existed so the two never
+  overlapped; loading in the background makes them concurrent, which stalls the transfer
+  until it times out. Captured on four drives: the load never completed while telemetry
+  was polling at 10 Hz, and chestnutState first appeared only after the load on the one
+  drive that succeeded.
+  """
+  import ast
+  from pathlib import Path
 
-  # A device that has not re-enumerated is not ready however healthy the rail looks.
-  ready, stable = modeld._external_gpu_supply_ready(13000, 1500, False, False, 10.0, 5.0)
-  assert not ready and stable is None
-
-
-def test_external_gpu_supply_gate_waits_out_the_re_enumeration():
-  # The supply recovers several seconds before the device is back on the PCIe bus, so a
-  # healthy reading must be held steady rather than acted on immediately.
-  ready, stable = modeld._external_gpu_supply_ready(13000, 1500, False, True, 100.0, None)
-  assert not ready and stable == 100.0
-
-  ready, _ = modeld._external_gpu_supply_ready(13000, 1500, False, True, 105.0, 100.0)
-  assert not ready, "must not release while still inside the settling window"
-
-  ready, _ = modeld._external_gpu_supply_ready(
-    13000, 1500, False, True, 100.0 + modeld.EXTERNAL_GPU_SUPPLY_STABLE_SECONDS, 100.0,
+  source = (Path(modeld.__file__).with_name("modeld.py")).read_text(encoding="utf-8")
+  main_fn = next(n for n in ast.parse(source).body
+                 if isinstance(n, ast.FunctionDef) and n.name == "main")
+  assign = next(
+    node for node in ast.walk(main_fn)
+    if isinstance(node, ast.Assign)
+    and any(isinstance(t, ast.Name) and t.id == "send_chestnut" for t in node.targets)
   )
-  assert ready
-
-
-def test_external_gpu_supply_settling_outlasts_the_measured_re_enumeration():
-  # PCIe reached L0 ~6 s after the supply recovered on both captured failures.
-  assert modeld.EXTERNAL_GPU_SUPPLY_STABLE_SECONDS >= 10.0
+  guard = ast.dump(assign.value)
+  assert "big_loader" in guard and "in_progress" in guard, \
+    "chestnutState polling must be gated on the background loader being idle"
 
 
 def test_background_big_model_loader_runs_off_modelds_realtime_core():

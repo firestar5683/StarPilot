@@ -116,13 +116,6 @@ BIG_MODEL_LOADER_CORES = {6}
 # forever while the small model quietly keeps driving.
 BIG_MODEL_LOAD_TIMEOUT_SECONDS = 150.0
 
-# Chestnut's own supply must be healthy before tinygrad touches the device. The vehicle rail
-# can read healthy while Chestnut browns out and re-enumerates, and initializing across that
-# window blocks forever inside tinygrad instead of failing. Measured on two e-GMP startups:
-# the supply recovers ~6 s before PCIe reaches L0, so hold it steady well past the recovery.
-EXTERNAL_GPU_SUPPLY_STABLE_SECONDS = 10.0
-EXTERNAL_GPU_LINK_WAIT_TIMEOUT_SECONDS = 60.0
-
 
 class BigModelLoadCancelled(Exception):
   """Raised inside the background loader when modeld no longer wants the big model."""
@@ -224,84 +217,6 @@ def wait_for_external_gpu_power_ready(CP=None, cancel=None) -> None:
         cloudlog.warning(f"external GPU load deferred: vehicle power is {detail}; waiting for " +
                          f"{EXTERNAL_GPU_POWER_READY_MV / 1000:.1f} V to remain stable")
       last_log = now
-
-
-def _external_gpu_supply_ready(voltage_mv: int, current_ma: int, fault: bool, enumerated: bool,
-                               now: float, stable_since: float | None) -> tuple[bool, float | None]:
-  """Chestnut's own supply and USB enumeration must both be healthy.
-
-  The vehicle rail does not tell us this: on an e-GMP startup it can read 11 V throughout
-  while Chestnut browns out to 7 V and re-enumerates. Negative current means its capacitors
-  are discharging, and the supply recovers seconds before the device is back on the bus, so
-  both signals have to hold steady together.
-  """
-  if fault or current_ma < 0 or voltage_mv < EXTERNAL_GPU_POWER_READY_MV or not enumerated:
-    return False, None
-
-  stable_since = now if stable_since is None else stable_since
-  return now - stable_since >= EXTERNAL_GPU_SUPPLY_STABLE_SECONDS, stable_since
-
-
-def _read_external_gpu_supply() -> tuple[int, int, bool]:
-  """Read Chestnut's supply telemetry over USB, before tinygrad has opened the device."""
-  context = usb1.USBContext()
-  try:
-    for vendor_id, product_id in CHESTNUT_USB_IDS:
-      handle = context.openByVendorIDAndProductID(vendor_id, product_id, skip_on_error=True)
-      if handle is None:
-        continue
-      try:
-        raw = handle.controlRead(0xC0, 0xC0, 0, 0, 5, timeout=100)
-        return struct.unpack("<Hh?", bytes(raw))
-      finally:
-        handle.close()
-  finally:
-    context.close()
-  raise usb1.USBErrorNoDevice
-
-
-def wait_for_external_gpu_supply_ready(cancel=None) -> None:
-  """Wait out a Chestnut brownout before tinygrad initializes the device.
-
-  Initializing while Chestnut is power-cycling blocks forever inside tinygrad rather than
-  failing, so this gate is what keeps a startup brownout from wedging the whole load.
-  """
-  if cancel is not None and cancel.is_set():
-    raise BigModelLoadCancelled("cancelled before waiting for the external GPU supply")
-
-  stable_since = None
-  wait_started = time.monotonic()
-  last_log = 0.0
-  detail = "unavailable"
-
-  while True:
-    if cancel is not None and cancel.is_set():
-      raise BigModelLoadCancelled("cancelled while waiting for the external GPU supply")
-    now = time.monotonic()
-
-    try:
-      voltage_mv, current_ma, fault = _read_external_gpu_supply()
-      enumerated = usbgpu_present()
-      detail = f"{voltage_mv / 1000:.2f} V, {current_ma} mA, fault {fault}, enumerated {enumerated}"
-      ready, stable_since = _external_gpu_supply_ready(
-        voltage_mv, current_ma, fault, enumerated, now, stable_since,
-      )
-      if ready:
-        cloudlog.warning(f"external GPU supply stable at {voltage_mv / 1000:.2f} V; starting load")
-        return
-    except Exception as exc:
-      stable_since = None
-      detail = f"unreadable ({exc.__class__.__name__})"
-
-    if now - wait_started >= EXTERNAL_GPU_LINK_WAIT_TIMEOUT_SECONDS:
-      raise TimeoutError(f"external GPU supply did not settle after "
-                         f"{EXTERNAL_GPU_LINK_WAIT_TIMEOUT_SECONDS:.0f}s ({detail})")
-
-    if now - last_log >= EXTERNAL_GPU_POWER_LOG_INTERVAL_SECONDS:
-      cloudlog.warning(f"external GPU load deferred: supply is {detail}")
-      last_log = now
-
-    time.sleep(0.1)
 
 
 def get_lateral_smooth_seconds(v_ego: float, maximum: float = 0.0) -> float:
@@ -1041,9 +956,6 @@ class BigModelLoader:
       set_core_affinity(sorted(BIG_MODEL_LOADER_CORES))
       if not self.demo:
         wait_for_external_gpu_power_ready(self.CP, cancel=self._cancel)
-        # Chestnut can brown out and re-enumerate as the vehicle powers up; initializing
-        # across that window wedges tinygrad, so wait for its own supply to settle first.
-        wait_for_external_gpu_supply_ready(cancel=self._cancel)
       if self._cancel.is_set():
         raise BigModelLoadCancelled("cancelled before the external GPU link check")
       wait_usbgpu_link()
@@ -1603,6 +1515,9 @@ def main(demo=False):
     try:
       send_chestnut = (
         chestnut_state is not None and
+        # Telemetry shares the USB device with the model transfer, so polling it while a
+        # background load is in flight stalls that transfer until it times out.
+        (big_loader is None or not big_loader.in_progress) and
         run_count % round(ModelConstants.MODEL_FREQ / SERVICE_LIST["chestnutState"].frequency) == 0
       )
       if model_lab_longitudinal is not None:
