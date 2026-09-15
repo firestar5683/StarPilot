@@ -35,7 +35,7 @@ class TestNativeScreenSaveErrors:
     self.params.put_int('ScreenBrightness', 101)
     self.params.put_int('ScreenBrightnessManual', 37)
     self.params.put_int('ScreenBrightnessOffset', -12)
-    self.params.put_bool('StandbyWakeBrake', False)
+    self.params.put_bool('StandbyWakeTurnSignal', False)
     self.errors = []
     with (
       patch.object(big, 'show_screen_save_error', lambda: self.errors.append('save failed')),
@@ -107,20 +107,20 @@ class TestNativeScreenSaveErrors:
       compile(ast.Expression(definition), "wake-controls", "eval"),
       dict(namespace, self=view, tr=lambda value: value, SCREEN_WAKE_OPTIONS=SCREEN_WAKE_OPTIONS, SCREEN_WAKE_DESCRIPTIONS=SCREEN_WAKE_DESCRIPTIONS),
     )
-    brake = next(control for control in definitions if "Brake pedal" in control["title"])
-    self.assert_recoverable(lambda: brake["set_state"](True))
-    assert brake["get_state"]() is False
-    assert self.params.get_bool("StandbyWakeBrake") is False
+    turn_signal = next(control for control in definitions if "Turn signals" in control["title"])
+    self.assert_recoverable(lambda: turn_signal["set_state"](True))
+    assert turn_signal["get_state"]() is False
+    assert self.params.get_bool("StandbyWakeTurnSignal") is False
 
   @pytest.mark.parametrize("error_type", [OSError, ValueError, UnknownKeyName])
   def test_c4_failed_wake_toggle_restores_checked_state(self, error_type):
     control = mici.ScreenToggleMici.__new__(mici.ScreenToggleMici)
-    control._params, control._key, control._default = (self.params, 'StandbyWakeBrake', False)
+    control._params, control._key, control._default = (self.params, 'StandbyWakeTurnSignal', False)
     control._checked = True
     with patch.object(mici, 'write_screen_setting', side_effect=error_type('Screen settings busy')):
       self.assert_recoverable(lambda: control._save(True))
     assert not control._checked
-    assert not self.params.get_bool('StandbyWakeBrake')
+    assert not self.params.get_bool('StandbyWakeTurnSignal')
 
   @pytest.mark.parametrize('key,minimum,saved', [('ScreenBrightnessOffset', -30, -12), ('ScreenBrightness', 0, 37)])
   def test_c4_slider_failure_restores_visible_value_and_keeps_slider_open(self, key, minimum, saved):
@@ -198,7 +198,7 @@ class TestNativeScreenSaveErrors:
         return control._set_mode(1)
     else:
       control = mici.ScreenToggleMici.__new__(mici.ScreenToggleMici)
-      control._params, control._key, control._default = self.params, "StandbyWakeBrake", False
+      control._params, control._key, control._default = self.params, "StandbyWakeTurnSignal", False
       control._checked = True
 
       def action():
@@ -208,7 +208,7 @@ class TestNativeScreenSaveErrors:
       self.assert_recoverable(action)
     assert self.params.get_int("ScreenBrightness") == 101
     assert self.params.get_int("ScreenBrightnessManual") == 37
-    assert self.params.get_bool("StandbyWakeBrake") is False
+    assert self.params.get_bool("StandbyWakeTurnSignal") is False
     if interface == "c3":
       assert control._mode_index() == 0
     else:

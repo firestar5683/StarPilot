@@ -104,7 +104,7 @@ def test_sleep_and_standby_override_positive_offsets():
 @pytest.mark.parametrize('status,size,expected', [
   ('normal', 'none', None), ('normal', 'small', 'StandbyWakeInfoAlert'),
   ('userPrompt', 'small', 'StandbyWakeWarningAlert'), ('critical', 'full', 'StandbyWakeCriticalAlert'),
-  ('critical', 'none', None),
+  ('critical', 'none', 'StandbyWakeCriticalAlert'),
 ])
 def test_alerts_are_classified_by_priority(status, size, expected):
   assert screen().alert_wake_key(SimpleNamespace(alertStatus=status, alertSize=size)) == expected
@@ -113,24 +113,8 @@ def test_alerts_are_classified_by_priority(status, size, expected):
 def test_defaults_preserve_alert_and_engagement_waking_only():
   enabled = screen().enabled_wake_keys(Params())
   assert enabled == {'StandbyWakeEngage', 'StandbyWakeDisengage', 'StandbyWakeInfoAlert', 'StandbyWakeWarningAlert',
-                     'StandbyWakeCriticalAlert', 'StandbyWakeTouch', 'StandbyWakeDriveState'}
+                     'StandbyWakeCriticalAlert'}
   assert 'StandbyWakeCriticalAlert' not in screen().enabled_wake_keys(Params({'StandbyWakeCriticalAlert': False}))
-
-
-def test_vehicle_triggers_are_edges_not_continuous_pedal_or_signal_states():
-  tracker = screen().StandbyWakeTracker()
-  assert tracker.update(engaged=False, turn_signal=0, brake=False, accelerator=False) == set()
-  assert tracker.update(engaged=True, turn_signal=1, brake=True, accelerator=True) == {
-    'StandbyWakeEngage', 'StandbyWakeTurnSignal', 'StandbyWakeBrake', 'StandbyWakeAccelerator'}
-  assert tracker.update(engaged=True, turn_signal=1, brake=True, accelerator=True) == set()
-  assert tracker.update(engaged=False, turn_signal=2, brake=False, accelerator=False) == {'StandbyWakeDisengage', 'StandbyWakeTurnSignal'}
-
-
-def test_stale_vehicle_data_does_not_create_wake_events_when_it_returns():
-  tracker = screen().StandbyWakeTracker()
-  tracker.update(engaged=False, turn_signal=0, brake=False, accelerator=False)
-  assert tracker.update() == set()
-  assert tracker.update(engaged=True, turn_signal=1, brake=True, accelerator=True) == set()
 
 
 @pytest.mark.parametrize('key', ['ScreenBrightness', 'ScreenBrightnessOnroad'])

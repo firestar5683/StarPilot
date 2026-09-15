@@ -16,30 +16,20 @@ BRIGHTNESS_KEYS = ('ScreenBrightness', 'ScreenBrightnessOnroad')
 SCREEN_INT_KEYS = frozenset(key + suffix for key in BRIGHTNESS_KEYS for suffix in ('', 'Manual', 'Offset'))
 STANDBY_BUTTON_PRESS_PARAM = 'StandbyButtonPressTime'
 SCREEN_WAKE_OPTIONS = (
-  ('StandbyWakeTouch', 'Touch screen', True),
-  ('StandbyWakeDriveState', 'Car drive state changed', True),
-  ('StandbyWakeButton', 'Bluetooth or steering wheel button', False),
   ('StandbyWakeEngage', 'Engagement', True),
   ('StandbyWakeDisengage', 'Disengagement', True),
   ('StandbyWakeInfoAlert', 'Informational alerts', True),
   ('StandbyWakeWarningAlert', 'Warning alerts', True),
   ('StandbyWakeCriticalAlert', 'Critical / takeover alerts', True),
   ('StandbyWakeTurnSignal', 'Turn signals', False),
-  ('StandbyWakeBrake', 'Brake pedal', False),
-  ('StandbyWakeAccelerator', 'Accelerator pedal', False),
 )
 SCREEN_WAKE_DESCRIPTIONS = {
-  'StandbyWakeTouch': 'Wake the screen from Standby when you touch it.',
-  'StandbyWakeDriveState': 'Wake the screen from Standby when the gear, ignition or driving state changes.',
-  'StandbyWakeButton': 'Wake the screen from Standby when a connected Bluetooth or USB controller, or a supported steering wheel button, is pressed.',
   'StandbyWakeEngage': 'Wake the screen from Standby when StarPilot engages.',
   'StandbyWakeDisengage': 'Wake the screen from Standby when StarPilot disengages.',
   'StandbyWakeInfoAlert': 'Wake the screen from Standby and keep it awake while an informational alert is displayed.',
   'StandbyWakeWarningAlert': 'Wake the screen from Standby and keep it awake while a warning alert is displayed.',
   'StandbyWakeCriticalAlert': 'Wake the screen from Standby and keep it awake while a critical or takeover alert is displayed.',
   'StandbyWakeTurnSignal': 'Wake the screen from Standby when a turn signal is activated or its direction changes.',
-  'StandbyWakeBrake': 'Wake the screen from Standby when the brake pedal is pressed.',
-  'StandbyWakeAccelerator': 'Wake the screen from Standby when the accelerator pedal is pressed.',
 }
 SCREEN_WAKE_KEYS = frozenset(key for key, _, _ in SCREEN_WAKE_OPTIONS)
 SCREEN_SETTING_KEYS = SCREEN_INT_KEYS | SCREEN_WAKE_KEYS
@@ -191,8 +181,6 @@ def calculate_screen_brightness(automatic, manual, offset=0, *, interactive=Fals
 def alert_wake_key(alert):
   status = str(getattr(alert, 'alertStatus', 'normal'))
   size = str(getattr(alert, 'alertSize', 'none'))
-  if size in ('none', '0'):
-    return None
   if status in ('critical', '2'):
     return 'StandbyWakeCriticalAlert'
   if status in ('userPrompt', '1'):
@@ -200,57 +188,6 @@ def alert_wake_key(alert):
   if size not in ('none', '0'):
     return 'StandbyWakeInfoAlert'
   return None
-
-
-def standby_alert_wake_key(primary, secondary, *, now, started_time, started_frame, updated, recv_frame, recv_time,
-                           primary_fresh, secondary_fresh, tici, mici, hide_alerts=False):
-  """Resolve the current renderer alert without constructing a UI widget.
-
-  Both renderers generate startup/unresponsive alerts before reading normal
-  messages. C4 keeps the reboot alert critical; C3 renders it informational.
-  Raw stale messages never wake Standby, even if still cached by the renderer.
-  """
-  waiting_for_startup = recv_frame < started_frame
-  if not updated:
-    if waiting_for_startup and now - started_time > 5:
-      return 'StandbyWakeInfoAlert'
-    missing = now - recv_time
-    if tici and not waiting_for_startup and missing > 5:
-      if getattr(primary, 'enabled', False) and missing - 5 < 10:
-        return 'StandbyWakeCriticalAlert'
-      return 'StandbyWakeCriticalAlert' if mici else 'StandbyWakeInfoAlert'
-
-  if waiting_for_startup:
-    return None
-  # Primary alerts take display precedence, even when that category is disabled.
-  if alert_wake_key(primary) is not None:
-    alert = primary if primary_fresh else None
-  else:
-    alert = secondary if secondary_fresh else None
-  if not mici and hide_alerts and str(getattr(alert, 'alertStatus', 'normal')) in ('normal', '0'):
-    return None
-  return alert_wake_key(alert)
-
-
-class StandbyWakeTracker:
-  """Detect new driver inputs; missing samples reset each input's history."""
-  def __init__(self):
-    self.previous = {}
-
-  def update(self, *, engaged=None, turn_signal=None, brake=None, accelerator=None, drive_state=None):
-    current = dict(engaged=engaged, turn_signal=turn_signal, brake=brake, accelerator=accelerator, drive_state=drive_state)
-    events = set()
-    for key, value in current.items():
-      previous = self.previous.get(key)
-      if value is not None and previous is not None and value != previous:
-        if key == 'engaged':
-          events.add('StandbyWakeEngage' if value else 'StandbyWakeDisengage')
-        elif key == 'drive_state':
-          events.add('StandbyWakeDriveState')
-        elif value:
-          events.add({'turn_signal': 'StandbyWakeTurnSignal', 'brake': 'StandbyWakeBrake', 'accelerator': 'StandbyWakeAccelerator'}[key])
-    self.previous = current
-    return events
 
 
 def standby_button_press_time(params):

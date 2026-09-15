@@ -15,7 +15,7 @@ PRESS_PARAM = "StandbyButtonPressTime"
 
 @pytest.fixture
 def input_pipe():
-  params = FakeParams({"ScreenManagement": True, "StandbyMode": True, "StandbyWakeButton": True})
+  params = FakeParams({"ScreenManagement": True, "StandbyMode": True})
   memory = FakeParams()
   daemon = wheel_controlsd.WheelControlsDaemon(params, memory)
   read_fd, write_fd = os.pipe()
@@ -60,8 +60,8 @@ def test_selected_joystick_buttons_wake_without_executing_mappings(input_pipe, m
   assert actions == []
 
 
-@pytest.mark.parametrize("disabled_key", ["ScreenManagement", "StandbyMode", "StandbyWakeButton"])
-def test_button_wake_is_opt_in_and_enabling_it_while_held_does_not_create_a_press(input_pipe, monkeypatch, disabled_key):
+@pytest.mark.parametrize("disabled_key", ["ScreenManagement", "StandbyMode"])
+def test_enabling_standby_while_held_does_not_create_a_press(input_pipe, monkeypatch, disabled_key):
   _daemon, params, memory, _fd, send = input_pipe
   params.put_bool(disabled_key, False)
   monkeypatch.setattr(wheel_controlsd.time, "monotonic_ns", lambda: 100)
@@ -162,10 +162,10 @@ def test_disconnected_device_does_not_suppress_next_press_on_reused_descriptor(i
   (False, True, True, True, True),
   (False, False, True, True, False),
   (False, True, False, True, False),
-  (False, True, True, False, False),
+  (False, True, True, False, True),
   (True, False, False, False, True),
 ])
-def test_manager_runs_listener_for_enabled_mappings_or_selected_standby_wake(started, mapping, management, standby, button, expected):
+def test_manager_runs_listener_for_enabled_mappings_or_standby(started, mapping, management, standby, button, expected):
   # The manager module creates native processes at import, so load its real predicate only.
   path = Path(__file__).resolve().parents[4] / "system/manager/process_config.py"
   tree = ast.parse(path.read_text())

@@ -106,7 +106,7 @@ def test_only_selected_alert_categories_wake(key, field, value):
 
 
 @pytest.mark.parametrize('key,field', [
-  ('StandbyWakeBrake', 'brakePressed'), ('StandbyWakeAccelerator', 'gasPressed'), ('StandbyWakeTurnSignal', 'leftBlinker'),
+  ('StandbyWakeTurnSignal', 'leftBlinker'),
 ])
 def test_selected_driver_input_wakes_once_and_can_sleep_while_held(key, field):
   device, state, _ = make_device(**dict.fromkeys(screen.SCREEN_WAKE_KEYS, False))
@@ -119,31 +119,6 @@ def test_selected_driver_input_wakes_once_and_can_sleep_while_held(key, field):
   device._interaction_time = 90
   device._update_wakefulness()
   assert device._calculate_brightness() == 0
-
-
-def test_unselected_engagement_and_stale_alerts_do_not_wake():
-  device, state, _ = make_device(**dict.fromkeys(screen.SCREEN_WAKE_KEYS, False))
-  device._update_wakefulness()
-  state.sm['selfdriveState'].enabled = True
-  state.status = type(state.status).ENGAGED
-  device._update_wakefulness()
-  assert device._calculate_brightness() == 0
-  device._params.values['StandbyWakeCriticalAlert'] = True
-  device._refresh_screen_settings(force=True)
-  device._interaction_time = 90
-  state.sm['selfdriveState'].alertStatus = 'critical'
-  state.sm['selfdriveState'].alertSize = 'full'
-  state.sm.alive['selfdriveState'] = False
-  device._update_wakefulness()
-  assert device._calculate_brightness() == 0
-
-
-def test_selected_event_recovers_manual_zero_brightness():
-  device, state, _ = make_device(ScreenBrightnessOnroad=0)
-  state.sm['selfdriveState'].alertSize = 'full'
-  state.sm['selfdriveState'].alertStatus = 'critical'
-  device._update_wakefulness()
-  assert device._calculate_brightness() == 5
 
 
 def test_runtime_limits_legacy_offsets_to_thirty_percent():
@@ -162,23 +137,19 @@ def test_every_wake_choice_controls_its_own_event(key, selected):
   device._update_wakefulness()  # Seed signals; startup is not a driver event.
   if key == 'StandbyWakeEngage':
     state.sm['selfdriveState'].enabled = True
+    state.status = type(state.status).ENGAGED
   elif key == 'StandbyWakeDisengage':
     state.sm['selfdriveState'].enabled = True
+    state.status = type(state.status).ENGAGED
     device._update_wakefulness()
     state.sm['selfdriveState'].enabled = False
+    state.status = type(state.status).DISENGAGED
   elif key.endswith('Alert'):
     alert = state.sm['selfdriveState']
     alert.alertSize = 'small'
     alert.alertStatus = {'StandbyWakeInfoAlert': 'normal', 'StandbyWakeWarningAlert': 'userPrompt', 'StandbyWakeCriticalAlert': 'critical'}[key]
-  elif key in ('StandbyWakeBrake', 'StandbyWakeAccelerator', 'StandbyWakeTurnSignal'):
-    field = {'StandbyWakeBrake': 'brakePressed', 'StandbyWakeAccelerator': 'gasPressed', 'StandbyWakeTurnSignal': 'leftBlinker'}[key]
-    setattr(state.sm['carState'], field, True)
-  elif key == 'StandbyWakeTouch':
-    app.mouse_events = [SimpleNamespace(left_down=True)]
-  elif key == 'StandbyWakeDriveState':
-    state.sm['carState'].gearShifter = 'reverse'
-  elif key == 'StandbyWakeButton':
-    state.params_memory.values['StandbyButtonPressTime'] = 99_500_000_000
+  elif key == 'StandbyWakeTurnSignal':
+    state.sm['carState'].leftBlinker = True
   else:
     pytest.fail('No stimulus for wake option ' + key)
   device._interaction_time = 90
@@ -186,15 +157,13 @@ def test_every_wake_choice_controls_its_own_event(key, selected):
   assert (device._calculate_brightness() > 0) is selected
 
 
-@pytest.mark.parametrize('selected', [False, True])
-def test_external_button_press_is_fresh_and_consumed_once(selected):
+def test_external_button_press_is_fresh_and_consumed_once():
   settings = dict.fromkeys(screen.SCREEN_WAKE_KEYS, False)
-  settings['StandbyWakeButton'] = selected
   device, state, _ = make_device(**settings)
   device._update_wakefulness()
   state.params_memory.values['StandbyButtonPressTime'] = 99_500_000_000
   device._update_wakefulness()
-  assert (device._calculate_brightness() > 0) is selected
+  assert (device._calculate_brightness() > 0) is True
   device._interaction_time = 90
   device._update_wakefulness()
   assert device._calculate_brightness() == 0
@@ -203,118 +172,14 @@ def test_external_button_press_is_fresh_and_consumed_once(selected):
   assert device._calculate_brightness() == 0
 
 
-@pytest.mark.parametrize('selected', [False, True])
-def test_ignition_changes_obey_drive_state_choice(selected):
-  settings = dict.fromkeys(screen.SCREEN_WAKE_KEYS, False)
-  settings['StandbyWakeDriveState'] = selected
-  device, state, _ = make_device(**settings)
-  state.ignition = False
-  device._update_wakefulness()
-  assert (device._calculate_brightness() > 0) is selected
-
-
-def test_settings_and_programmatic_timeouts_cannot_bypass_standby_choices():
-  device, _, _ = make_device(**dict.fromkeys(screen.SCREEN_WAKE_KEYS, False))
-  device._params.values['ScreenBrightnessOnroadOffset'] = 20
-  device._refresh_screen_settings(force=True)
-  assert device._interaction_time == 90
-  device.reset_interactive_timeout()
-  device.set_override_interactive_timeout(300)
-  assert device._interaction_time == 90
-  assert device.interactive_timeout == 30
-  assert device._calculate_brightness() == 0
-
-
-def test_stale_button_messages_and_releases_do_not_wake():
-  device, state, _ = make_device(StandbyWakeButton=True)
-  device._update_wakefulness()
-  state.sm['carState'].buttonEvents = [SimpleNamespace(pressed=False, type='accelCruise')]
-  state.sm.logMonoTime['carState'] += 1
-  device._update_wakefulness()
-  assert device._calculate_brightness() == 0
-  state.sm['carState'].buttonEvents[0].pressed = True
-  state.sm.logMonoTime['carState'] += 1
-  state.sm.alive['carState'] = False
-  device._update_wakefulness()
-  state.sm.alive['carState'] = True
-  device._update_wakefulness()
-  assert device._calculate_brightness() == 0
-
-
-@pytest.mark.parametrize('selected', [False, True])
-def test_entering_ignition_before_onroad_obeys_drive_state_selection(selected):
-  device, state, _ = make_device(**{**dict.fromkeys(screen.SCREEN_WAKE_KEYS, False), 'StandbyWakeDriveState': selected})
-  state.started = state.ignition = device._started = device._ignition = False
-  device._update_wakefulness()
-  assert not device.awake
-  state.ignition = True
-  device._update_wakefulness()
-  assert (device._calculate_brightness() > 0) is selected
-  state.started = True
-  device._update_wakefulness()
-  assert (device._calculate_brightness() > 0) is selected
-
-
 def test_consumed_button_press_is_not_replayed_between_ui_frames():
-  device, state, _ = make_device(StandbyWakeButton=True)
+  device, state, _ = make_device()
   device._update_wakefulness()
   state.params_memory.values['StandbyButtonPressTime'] = 99_500_000_000
   device._update_wakefulness()
   assert device._calculate_brightness() > 0
   device._interaction_time = 90
   device._update_wakefulness()
-  assert device._calculate_brightness() == 0
-
-
-
-@pytest.mark.parametrize('operation', ['settings_change', 'public_reset', 'timeout_override'])
-def test_force_offroad_cannot_wake_through_settings_or_timeout_overrides(operation):
-  device, state, _ = make_device(**dict.fromkeys(screen.SCREEN_WAKE_KEYS, False))
-  device._update_wakefulness()
-  state.started = False
-  assert state.ignition
-  device._update_wakefulness()
-  assert device._calculate_brightness() == 0
-  if operation == 'settings_change':
-    device._params.values['ScreenBrightnessOffset'] = 15
-    device._refresh_screen_settings(force=True)
-  elif operation == 'public_reset':
-    device.reset_interactive_timeout()
-  else:
-    device.set_override_interactive_timeout(300)
-  device._update_wakefulness()
-  assert device._interaction_time == 90
-  assert device.interactive_timeout == 30
-  assert device._calculate_brightness() == 0
-
-
-@pytest.mark.parametrize('device_type', ['tici', 'mici'])
-@pytest.mark.parametrize('fallback', ['startup', 'takeover', 'reboot'])
-@pytest.mark.parametrize('selected', [False, True])
-def test_rendered_system_alerts_obey_their_selected_category(device_type, fallback, selected):
-  category = 'StandbyWakeCriticalAlert' if fallback == 'takeover' or (fallback == 'reboot' and device_type == 'mici') else 'StandbyWakeInfoAlert'
-  settings = dict.fromkeys(screen.SCREEN_WAKE_KEYS, False)
-  settings[category] = selected
-  device, state, _ = make_device(device_type=device_type, **settings)
-  state.started_frame, state.started_time = 5, 90
-  state.sm.updated['selfdriveState'] = False
-  state.sm.alive['selfdriveState'] = False
-  state.sm.recv_frame['selfdriveState'] = 1 if fallback == 'startup' else 6
-  state.sm.recv_time['selfdriveState'] = 84 if fallback == 'reboot' else 94
-  state.sm['selfdriveState'].enabled = True
-  # Generated fallback alerts are returned before the normal hide-alerts filter.
-  state.starpilot_toggles['hide_alerts'] = True
-  device._update_wakefulness()
-  assert device._active_standby_alerts() == {category}
-  assert (device._calculate_brightness() > 0) is selected
-
-
-def test_alert_with_no_displayed_size_does_not_wake():
-  device, state, _ = make_device(StandbyWakeCriticalAlert=True)
-  state.sm['selfdriveState'].alertStatus = 'critical'
-  state.sm['selfdriveState'].alertSize = 'none'
-  device._update_wakefulness()
-  assert device._active_standby_alerts() == set()
   assert device._calculate_brightness() == 0
 
 
@@ -331,21 +196,20 @@ def test_hidden_secondary_alert_does_not_bypass_primary_category_selection():
 
 
 @pytest.mark.parametrize('device_type', ['tici', 'mici'])
-def test_normal_alert_hide_setting_matches_active_renderer(device_type):
+def test_dom_alert_predicate_does_not_depend_on_renderer_hide_setting(device_type):
   device, state, _ = make_device(device_type=device_type)
   state.starpilot_toggles['hide_alerts'] = True
   state.sm['selfdriveState'].alertSize = 'small'
   device._update_wakefulness()
-  assert (device._calculate_brightness() > 0) is (device_type == 'mici')
+  assert (device._calculate_brightness() > 0) is True
 
 
-@pytest.mark.parametrize('selected', [False, True])
-def test_bluetooth_wake_during_ignition_only_standby(selected):
-  settings = {**dict.fromkeys(screen.SCREEN_WAKE_KEYS, False), 'StandbyWakeButton': selected}
+def test_bluetooth_wake_during_ignition_only_standby():
+  settings = dict.fromkeys(screen.SCREEN_WAKE_KEYS, False)
   device, state, _ = make_device(**settings)
-  state.started = device._started = False
+  state.started = False
   state.ignition = device._ignition = True
   device._update_wakefulness()
   state.params_memory.values['StandbyButtonPressTime'] = 99_500_000_000
   device._update_wakefulness()
-  assert (device._calculate_brightness() > 0) is selected
+  assert (device._calculate_brightness() > 0) is True

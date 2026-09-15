@@ -371,7 +371,7 @@ def start_learning(slot: int, params_memory: Params | None = None, params: Param
 
 def cancel_learning(params_memory: Params | None = None, params: Params | None = None) -> None:
   (params_memory or Params(memory=True)).remove(LEARN_SLOT_PARAM)
-  if params is not None and not load_mappings(params):
+  if params is not None and params.get_bool(ENABLED_PARAM) and not load_mappings(params):
     params.put_bool(ENABLED_PARAM, False)
 
 
@@ -516,14 +516,9 @@ class WheelControlsDaemon:
     self._car_state_sock = None
     self._car_state_messaging = None
     self._last_car_button_frame = 0
-    self._tesla_car_params: bytes | None = None
-    self._tesla_can_sock = None
-    self._tesla_messaging = None
-    self._tesla_button_observer = None
 
   def close(self) -> None:
     self._close_car_buttons()
-    self._close_tesla_buttons()
     for fd in list(self.sources):
       self._remove(fd)
     self.selector.close()
@@ -669,7 +664,7 @@ class WheelControlsDaemon:
 
   def _publish_button_press(self, timestamp: int) -> None:
     try:
-      if not all(self.params.get_bool(key) for key in ("ScreenManagement", "StandbyMode", "StandbyWakeButton")):
+      if not all(self.params.get_bool(key) for key in ("ScreenManagement", "StandbyMode")):
         return
       self.params_memory.put_int(STANDBY_BUTTON_PRESS_PARAM, timestamp)
     except Exception:
@@ -682,7 +677,7 @@ class WheelControlsDaemon:
     self._last_car_button_frame = 0
 
   def _configure_car_buttons(self) -> None:
-    if not all(self.params.get_bool(key) for key in ("ScreenManagement", "StandbyMode", "StandbyWakeButton", "IsOnroad")):
+    if not all(self.params.get_bool(key) for key in ("ScreenManagement", "StandbyMode", "IsOnroad")):
       self._close_car_buttons()
       return
     if self._car_state_sock is not None:
@@ -719,54 +714,6 @@ class WheelControlsDaemon:
       self._close_car_buttons()
       cloudlog.exception("wheel controls: car button read failed")
 
-  def _close_tesla_buttons(self) -> None:
-    # SubSocket releases its native subscription in __dealloc__.
-    self._tesla_can_sock = None
-    self._tesla_button_observer = None
-    self._tesla_messaging = None
-    self._tesla_car_params = None
-
-  def _configure_tesla_buttons(self) -> None:
-    if not all(self.params.get_bool(key) for key in ("ScreenManagement", "StandbyMode", "StandbyWakeButton", "IsOnroad")):
-      self._close_tesla_buttons()
-      return
-    cp_bytes = self.params.get("CarParams")
-    if cp_bytes == self._tesla_car_params:
-      return
-    self._close_tesla_buttons()
-    self._tesla_car_params = cp_bytes
-    if not cp_bytes:
-      return
-    try:
-      from cereal import car
-      from openpilot.starpilot.system.wheel_controls.tesla_standby_buttons import TeslaStandbyButtonObserver, tesla_button_dbc
-
-      with car.CarParams.from_bytes(cp_bytes) as cp:
-        dbc = tesla_button_dbc(cp)
-      if dbc is not None:
-        from cereal import messaging
-
-        self._tesla_button_observer = TeslaStandbyButtonObserver(dbc)
-        self._tesla_can_sock = messaging.sub_sock("can")
-        self._tesla_messaging = messaging
-    except Exception:
-      self._close_tesla_buttons()
-      cloudlog.exception("wheel controls: passive Tesla button observer unavailable")
-
-  def _poll_tesla_buttons(self) -> None:
-    if self._tesla_can_sock is None:
-      return
-    try:
-      messages = self._tesla_messaging.drain_sock(self._tesla_can_sock, wait_for_one=False)
-      now_boot_ns = time.clock_gettime_ns(time.CLOCK_BOOTTIME)
-      now_ns = time.monotonic_ns()
-      timestamp = self._tesla_button_observer.update(messages, now_boot_ns)
-      if timestamp:
-        # pandad timestamps include suspend time; the UI and external inputs use monotonic().
-        self._publish_button_press(now_ns - (now_boot_ns - timestamp))
-    except Exception:
-      self._close_tesla_buttons()
-      cloudlog.exception("wheel controls: passive Tesla button read failed")
 
   def _publish_status(self, now: float) -> None:
     remaining = max(0, round(self.learning_deadline - now, 1)) if self.learning_slot is not None else 0
@@ -791,7 +738,6 @@ class WheelControlsDaemon:
         if now - self.last_scan >= DEVICE_SCAN_INTERVAL_SECONDS:
           self._scan_devices()
           self._configure_car_buttons()
-          self._configure_tesla_buttons()
           self.last_scan = now
         for key, _mask in self.selector.select(timeout=0.1):
           try:
@@ -799,7 +745,6 @@ class WheelControlsDaemon:
           except (KeyError, OSError):
             self._remove(key.fd)
         self._poll_car_buttons()
-        self._poll_tesla_buttons()
         now = time.monotonic()
         if now - self.last_status >= STATUS_INTERVAL_SECONDS:
           self._publish_status(now)

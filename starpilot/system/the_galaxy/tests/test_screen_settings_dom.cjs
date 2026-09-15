@@ -10,8 +10,7 @@ const layout = JSON.parse(fs.readFileSync(path.join(repo, 'starpilot/common/asse
 const section = layout.find(s => s.params.some(p => p.key === 'ScreenManagement'))
 const wakeDefaults = {
   StandbyWakeEngage:true, StandbyWakeDisengage:true, StandbyWakeInfoAlert:true, StandbyWakeWarningAlert:true,
-  StandbyWakeCriticalAlert:true, StandbyWakeTurnSignal:false, StandbyWakeBrake:false, StandbyWakeAccelerator:false,
-  StandbyWakeTouch:true, StandbyWakeDriveState:true, StandbyWakeButton:false,
+  StandbyWakeCriticalAlert:true, StandbyWakeTurnSignal:false,
 }
 const wakes = Object.keys(wakeDefaults)
 const fixture = `
@@ -155,7 +154,7 @@ createApp({components:{SettingTree},setup:()=>({values}),
     assert.equal(await page.locator('.gx-wake-choice, [data-wake-choice]').count(),0,'wake events use ordinary Galaxy switches')
     for(const key of wakes) {
       const param=section.params.find(p=>p.key===key)
-      assert.ok(param && param.ui_type==='toggle','all eleven wake events use standard toggles')
+      assert.ok(param && param.ui_type==='toggle','all six wake events use standard toggles')
       assert.equal(param.default,wakeDefaults[key],key+' retains its required default')
       assert.match(param.description,/wake.*standby|standby.*wake/i,key+' explains waking Standby')
       assert.equal(await wakeRow(key).getByText(param.description,{exact:true}).count(),1,key+' description is visible')
@@ -164,11 +163,8 @@ createApp({components:{SettingTree},setup:()=>({values}),
       await checkbox.setChecked(!wakeDefaults[key])
       await page.waitForFunction(({key,expected})=>window.values[key]===expected,{key,expected:!wakeDefaults[key]})
     }
-    assert.equal(await page.getByText(/Touch always wakes|ignition changes also wake/).count(),0)
-    assert.match(section.params.find(p=>p.key==='StandbyMode').description,/only.*selected/i)
-    assert.match(section.params.find(p=>p.key==='StandbyWakeDriveState').description,/Park.*Reverse.*Neutral.*Drive/)
-    assert.match(section.params.find(p=>p.key==='StandbyWakeDriveState').description,/ignition.*driving/)
-    assert.match(section.params.find(p=>p.key==='StandbyWakeButton').description,/Bluetooth.*steering wheel/)
+    assert.match(section.params.find(p=>p.key==='StandbyMode').description,/Touch.*Bluetooth.*steering wheel.*always wake/i)
+    assert.deepEqual(section.params.filter(p=>p.key.startsWith('StandbyWake')).map(p=>p.key).sort(), [...wakes].sort())
     await page.waitForFunction(()=>!Array.from(document.querySelectorAll('.gx-switch input')).some(input=>input.disabled))
     await page.evaluate(()=>{window.values.ScreenBrightnessOffset=80})
     assert.equal(await offSlider.inputValue(),'30','older saved offsets stay within the new display range')
@@ -196,6 +192,6 @@ createApp({components:{SettingTree},setup:()=>({values}),
     await page.evaluate(()=>{window.values.StandbyMode=true;window.values.ScreenManagement=false})
     assert.equal(await wakeRow(wakes[0]).count(),0,'disabled Screen Settings hides wake choices')
     assert.deepEqual(errors,[])
-    console.log('PASS: real Vue Auto/Manual controls, manual100 default/reset, +/-30% offsets, memory/zero, independent contexts, drag/pending stability, save rollback, eleven described standard wake toggles, Manage/Close submenu, seconds readouts, mobile layout, zero page errors')
+    console.log('PASS: real Vue Auto/Manual controls, manual100 default/reset, +/-30% offsets, memory/zero, independent contexts, drag/pending stability, save rollback, six described standard wake toggles, Manage/Close submenu, seconds readouts, mobile layout, zero page errors')
   } finally {await browser.close()}
 })().catch(error=>{console.error(error);process.exitCode=1})

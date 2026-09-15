@@ -4751,8 +4751,8 @@
       {
         "key": "StandbyMode",
         "label": "Standby Mode",
-        "description": "Turn the driving screen off after the onroad timeout. While Standby Mode is active, only the selected wake events turn it back on.",
-        "picker_description": "Turns the driving screen off and wakes it only for selected events.",
+        "description": "Turn off the screen after the onroad timeout. Touch and recognised Bluetooth or steering wheel button presses always wake it. Choose additional wake events below.",
+        "picker_description": "Turn off the driving screen after inactivity and choose additional wake events.",
         "data_type": "bool",
         "ui_type": "toggle",
         "parent_key": "ScreenManagement",
@@ -4833,76 +4833,6 @@
         "key": "StandbyWakeTurnSignal",
         "label": "Turn signals",
         "description": "Wake the screen from Standby when a turn signal is activated.",
-        "data_type": "bool",
-        "ui_type": "toggle",
-        "default": false,
-        "parent_key": "StandbyMode",
-        "visible_when_all_true": [
-          "ScreenManagement",
-          "StandbyMode"
-        ],
-        "settings_tier": "simple"
-      },
-      {
-        "key": "StandbyWakeBrake",
-        "label": "Brake pedal",
-        "description": "Wake the screen from Standby when the brake pedal is pressed.",
-        "data_type": "bool",
-        "ui_type": "toggle",
-        "default": false,
-        "parent_key": "StandbyMode",
-        "visible_when_all_true": [
-          "ScreenManagement",
-          "StandbyMode"
-        ],
-        "settings_tier": "simple"
-      },
-      {
-        "key": "StandbyWakeAccelerator",
-        "label": "Accelerator pedal",
-        "description": "Wake the screen from Standby when the accelerator pedal is pressed.",
-        "data_type": "bool",
-        "ui_type": "toggle",
-        "default": false,
-        "parent_key": "StandbyMode",
-        "visible_when_all_true": [
-          "ScreenManagement",
-          "StandbyMode"
-        ],
-        "settings_tier": "simple"
-      },
-      {
-        "key": "StandbyWakeTouch",
-        "label": "Touch screen",
-        "description": "Wake the screen from Standby when the screen is touched.",
-        "data_type": "bool",
-        "ui_type": "toggle",
-        "default": true,
-        "parent_key": "StandbyMode",
-        "visible_when_all_true": [
-          "ScreenManagement",
-          "StandbyMode"
-        ],
-        "settings_tier": "simple"
-      },
-      {
-        "key": "StandbyWakeDriveState",
-        "label": "Car drive state changed",
-        "description": "Wake the screen from Standby when the gear changes between Park, Reverse, Neutral or Drive, or when ignition or driving state changes.",
-        "data_type": "bool",
-        "ui_type": "toggle",
-        "default": true,
-        "parent_key": "StandbyMode",
-        "visible_when_all_true": [
-          "ScreenManagement",
-          "StandbyMode"
-        ],
-        "settings_tier": "simple"
-      },
-      {
-        "key": "StandbyWakeButton",
-        "label": "Bluetooth or steering wheel button",
-        "description": "Wake the screen from Standby when a connected Bluetooth or USB controller button, or a supported steering wheel button, is pressed.",
         "data_type": "bool",
         "ui_type": "toggle",
         "default": false,

@@ -47,9 +47,9 @@ class TestNativeScreenControls:
     refresh = method(MICi, 'ScreenToggleMici', 'refresh')
     params = self._real_params()
     values = []
-    control = SimpleNamespace(_params=params, _key='StandbyWakeBrake', _default=False, set_checked=values.append)
+    control = SimpleNamespace(_params=params, _key='StandbyWakeTurnSignal', _default=False, set_checked=values.append)
     refresh(control)
-    params.put_bool('StandbyWakeBrake', True)
+    params.put_bool('StandbyWakeTurnSignal', True)
     refresh(control)
     assert values == [False, True]
 
@@ -78,13 +78,13 @@ class TestNativeScreenControls:
     namespace = {
       'self': view,
       'tr': lambda text: text,
-      'SCREEN_WAKE_DESCRIPTIONS': {'StandbyWakeEngage': 'Wake when engaged.', 'StandbyWakeBrake': 'Wake when braking.'},
-      'SCREEN_WAKE_OPTIONS': [('StandbyWakeEngage', 'Engagement', True), ('StandbyWakeBrake', 'Brake', False)],
+      'SCREEN_WAKE_DESCRIPTIONS': {'StandbyWakeEngage': 'Wake when engaged.', 'StandbyWakeTurnSignal': 'Wake when indicating.'},
+      'SCREEN_WAKE_OPTIONS': [('StandbyWakeEngage', 'Engagement', True), ('StandbyWakeTurnSignal', 'Turn signals', False)],
     }
     exec(compile(ast.Module(body=[assignment], type_ignores=[]), 'native-wake-callbacks', 'exec'), namespace)
     assert [option['get_state']() for option in view._wake_toggle_defs] == [True, False]
-    assert [option['subtitle'] for option in view._wake_toggle_defs] == ['Wake when engaged.', 'Wake when braking.']
-    params.put_bool('StandbyWakeBrake', True)
+    assert [option['subtitle'] for option in view._wake_toggle_defs] == ['Wake when engaged.', 'Wake when indicating.']
+    params.put_bool('StandbyWakeTurnSignal', True)
     params.put_bool('StandbyWakeEngage', False)
     assert [option['get_state']() for option in view._wake_toggle_defs] == [False, True]
 
@@ -94,9 +94,9 @@ class TestNativeScreenControls:
     helper_spec.loader.exec_module(helper)
     save = method(MICi, 'ScreenToggleMici', '_save', SCREEN_WAKE_KEYS=helper.SCREEN_WAKE_KEYS, write_screen_setting=helper.write_screen_setting)
     params = self._real_params()
-    for key in ('ScreenManagement', 'StandbyMode', 'StandbyWakeBrake'):
+    for key in ('ScreenManagement', 'StandbyMode', 'StandbyWakeTurnSignal'):
       save(SimpleNamespace(_params=params, _key=key, refresh=lambda: None), True)
-    assert [params.get_bool(key) for key in ('ScreenManagement', 'StandbyMode', 'StandbyWakeBrake')] == [True, True, True]
+    assert [params.get_bool(key) for key in ('ScreenManagement', 'StandbyMode', 'StandbyWakeTurnSignal')] == [True, True, True]
 
   def test_mici_value_save_remembers_brightness_and_accepts_existing_timeout(self):
     helper_spec = importlib.util.spec_from_file_location('screen_settings', ROOT / 'starpilot/common/screen_settings.py')
@@ -126,11 +126,11 @@ class TestNativeScreenControls:
     view = SimpleNamespace(
       _controller=SimpleNamespace(_params=params),
       _toggle_defs=[{'title': 'Standby'}, {'title': 'Uploads'}],
-      _wake_toggle_defs=[{'title': 'Engagement'}, {'title': 'Brake'}],
+      _wake_toggle_defs=[{'title': 'Engagement'}, {'title': 'Turn signals'}],
     )
     assert get_defs(view) == [{'title': 'Standby'}, {'title': 'Uploads'}]
     params.get_bool = lambda key: True
-    assert get_defs(view) == [{'title': 'Standby'}, {'title': 'Engagement'}, {'title': 'Brake'}, {'title': 'Uploads'}]
+    assert get_defs(view) == [{'title': 'Standby'}, {'title': 'Engagement'}, {'title': 'Turn signals'}, {'title': 'Uploads'}]
 
   def test_mici_brightness_slider_selects_offset_or_manual_with_correct_bounds(self):
     for mode, want in [('auto', ('ScreenBrightnessOnroadOffset', -30, 30, -25, '%')), ('manual', ('ScreenBrightnessOnroad', 0, 100, 73, '%'))]:

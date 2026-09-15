@@ -257,7 +257,7 @@ class SystemSettingsManagerView(PanelManagerView):
     self._toggle_defs = [
       {
         "title": tr("Standby Mode"),
-        "subtitle": tr("Only selected events wake the screen. Choose wake events below."),
+        "subtitle": tr("Touch and button presses always wake the screen. Choose additional wake events below."),
         "get_state": lambda: self._controller._params.get_bool("StandbyMode"),
         "set_state": lambda v: self._controller._params.put_bool("StandbyMode", v),
       },

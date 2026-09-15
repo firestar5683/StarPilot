@@ -13,9 +13,9 @@ from openpilot.selfdrive.ui.lib.prime_state import PrimeState
 from openpilot.selfdrive.ui.lib.ui_param_cache import shared_ui_params
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.starpilot.common.lateral_only_experimental import lateral_only_experimental_available
-from openpilot.system.hardware import HARDWARE, PC, TICI
+from openpilot.system.hardware import HARDWARE, PC
 from openpilot.starpilot.common.screen_settings import (
-  StandbyWakeTracker, standby_alert_wake_key, brightness_preferences, calculate_screen_brightness, enabled_wake_keys, standby_button_press_time,
+  alert_wake_key, brightness_preferences, calculate_screen_brightness, enabled_wake_keys, standby_button_press_time,
 )
 
 BACKLIGHT_OFFROAD = 65 if HARDWARE.get_device_type() == "mici" else 50
@@ -304,8 +304,8 @@ class Device:
 
   def __init__(self):
     self._ignition = False
-    self._started = ui_state.started
     self._last_button_press = standby_button_press_time(ui_state.params_memory)
+    self._last_turn_signal = None
     self._interaction_time: float = -1
     self._override_interactive_timeout: int | None = None
     self._interactive_timeout_callbacks: list[Callable] = []
@@ -320,10 +320,9 @@ class Device:
     self._screen_timeout = 30
     self._screen_timeout_onroad = 30
     self._standby_mode = False
-    self._screen_offset = 0
-    self._screen_offset_onroad = 0
+    self._last_status = ui_state.status
+    self._screen_offset = self._screen_offset_onroad = 0
     self._wake_keys = frozenset()
-    self._wake_tracker = StandbyWakeTracker()
     self._refresh_screen_settings(force=True)
 
     self._offroad_brightness: int = BACKLIGHT_OFFROAD
@@ -338,11 +337,11 @@ class Device:
   def set_override_interactive_timeout(self, timeout: int | None) -> None:
     # Override the interactive timeout duration temporarily
     self._override_interactive_timeout = timeout
-    self.reset_interactive_timeout()
+    self._reset_interactive_timeout()
 
   @property
   def interactive_timeout(self) -> int:
-    if self._override_interactive_timeout is not None and not ((ui_state.started or ui_state.ignition) and self._standby_mode):
+    if self._override_interactive_timeout is not None:
       return self._override_interactive_timeout
 
     timeout_onroad = self._screen_timeout_onroad
@@ -359,9 +358,7 @@ class Device:
     self._interaction_time = time.monotonic() + self.interactive_timeout
 
   def reset_interactive_timeout(self) -> None:
-    # Page lifecycle callbacks must not wake Standby without a selected event.
-    if not ((ui_state.started or ui_state.ignition) and self._standby_mode):
-      self._reset_interactive_timeout()
+    self._reset_interactive_timeout()
 
   def add_interactive_timeout_callback(self, callback: Callable):
     self._interactive_timeout_callbacks.append(callback)
@@ -424,7 +421,7 @@ class Device:
       self._screen_offset_onroad,
       self._wake_keys,
     )
-    if previous != current and self._interaction_time > 0 and not ((ui_state.started or ui_state.ignition) and (previous[5] or self._standby_mode)):
+    if previous != current and self._interaction_time > 0:
       self._reset_interactive_timeout()
 
   def set_offroad_brightness(self, brightness: int | None):
@@ -463,23 +460,25 @@ class Device:
       self._screen_offset_onroad if ui_state.started else self._screen_offset,
       interactive=interactive,
       awake=self._awake,
-      standby_timed_out=(ui_state.started or ui_state.ignition) and self._standby_mode and not interactive,
+      standby_timed_out=ui_state.started and self._standby_mode and not interactive,
     )
 
   def _update_wakefulness(self):
     # Handle interactive timeout
-    drive_state_changed = ui_state.ignition != self._ignition or ui_state.started != self._started
-    standby_active = self._standby_mode and (ui_state.started or self._started or ui_state.ignition or self._ignition)
-    self._ignition, self._started = ui_state.ignition, ui_state.started
+    ignition_state_changed = ui_state.ignition != self._ignition
+    self._ignition = ui_state.ignition
 
-    events = self._wake_input_events() | self._active_standby_alerts()
-    touched = any(ev.left_down for ev in gui_app.mouse_events)
-    if touched:
-      events.add("StandbyWakeTouch")
-    if drive_state_changed:
-      events.add("StandbyWakeDriveState")
-    should_wake = bool(events & self._wake_keys) if standby_active else touched or drive_state_changed
-    if should_wake:
+    status_changed = ui_state.status != self._last_status and ui_state.status != UIStatus.OVERRIDE
+    self._last_status = ui_state.status
+    status_key = "StandbyWakeEngage" if ui_state.status == UIStatus.ENGAGED else "StandbyWakeDisengage"
+    input_events = self._wake_input_events()
+    selected_status_change = status_changed and status_key in self._wake_keys
+    selected_turn_signal = bool(input_events & self._wake_keys)
+    button_pressed = self._standby_mode and (ui_state.started or ui_state.ignition) and "button" in input_events
+    wake_for_onroad_event = (ui_state.started and self._standby_mode and self._screen_brightness_onroad != 0 and
+                             (selected_status_change or self._visible_onroad_alert() or selected_turn_signal))
+
+    if ignition_state_changed or any(ev.left_down for ev in gui_app.mouse_events) or button_pressed or wake_for_onroad_event:
       self._reset_interactive_timeout()
 
     interaction_timeout = time.monotonic() > self._interaction_time
@@ -503,44 +502,38 @@ class Device:
 
   def _wake_input_events(self):
     button_time = standby_button_press_time(ui_state.params_memory)
-    external_press = button_time > self._last_button_press and 0 <= time.monotonic() - button_time / 1e9 < 2
+    button_pressed = button_time > self._last_button_press and 0 <= time.monotonic() - button_time / 1e9 < 2
     self._last_button_press = button_time
-    if not ui_state.started:
-      events = self._wake_tracker.update()
-      if external_press:
-        events.add("StandbyWakeButton")
-      return events
-    selfdrive_state = self._fresh_message("selfdriveState")
-    car_state = self._fresh_message("carState")
-    gear = str(car_state.gearShifter) if car_state is not None else None
-    events = self._wake_tracker.update(
-      engaged=bool(selfdrive_state.enabled) if selfdrive_state is not None else None,
-      turn_signal=(int(car_state.leftBlinker) | (int(car_state.rightBlinker) << 1)) if car_state is not None else None,
-      brake=bool(car_state.brakePressed) if car_state is not None else None,
-      accelerator=bool(car_state.gasPressed) if car_state is not None else None,
-      drive_state=gear if gear not in ("unknown", "0") else None,
-    )
-    if external_press:
-      events.add("StandbyWakeButton")
+    events = {"button"} if button_pressed else set()
+    car_state = self._fresh_message("carState") if ui_state.started else None
+    turn_signal = (int(car_state.leftBlinker) | (int(car_state.rightBlinker) << 1)) if car_state is not None else None
+    if self._last_turn_signal is not None and turn_signal and turn_signal != self._last_turn_signal:
+      events.add("StandbyWakeTurnSignal")
+    self._last_turn_signal = turn_signal
     return events
 
   def _active_standby_alerts(self):
+    # Match Dom's alert predicate and primary-message precedence. The toggle
+    # selects the category; it does not introduce another alert renderer.
     if not ui_state.started:
       return set()
-    sm = ui_state.sm
     try:
-      key = standby_alert_wake_key(
-        sm["selfdriveState"], sm["starpilotSelfdriveState"],
-        now=time.monotonic(), started_time=ui_state.started_time, started_frame=ui_state.started_frame,
-        updated=sm.updated["selfdriveState"], recv_frame=sm.recv_frame["selfdriveState"], recv_time=sm.recv_time["selfdriveState"],
-        primary_fresh=self._fresh_message("selfdriveState") is not None,
-        secondary_fresh=self._fresh_message("starpilotSelfdriveState") is not None,
-        tici=TICI, mici=HARDWARE.get_device_type() == "mici",
-        hide_alerts=getattr(ui_state, "starpilot_toggles", {}).get("hide_alerts", False),
-      )
-    except (KeyError, AttributeError):
-      return set()
-    return {key} if key is not None else set()
+      key = alert_wake_key(ui_state.sm["selfdriveState"])
+      if key is not None:
+        return {key}
+    except Exception:
+      pass
+    try:
+      alert = ui_state.sm["starpilotSelfdriveState"]
+      if str(alert.alertSize) not in ("none", "0"):
+        key = alert_wake_key(alert)
+        return {key} if key is not None else set()
+    except Exception:
+      pass
+    return set()
+
+  def _visible_onroad_alert(self):
+    return bool(self._active_standby_alerts() & self._wake_keys)
 
   def _set_awake(self, on: bool):
     if on != self._awake:
