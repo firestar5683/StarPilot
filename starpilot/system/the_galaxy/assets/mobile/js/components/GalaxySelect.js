@@ -6,7 +6,7 @@ export const GalaxySelect = {
   inheritAttrs: false,
   props: { value: { default: undefined }, modelValue: { default: undefined }, disabled: Boolean },
   emits: ["change", "update:modelValue"],
-  data() { return { uid: `gx-select-${++nextId}`, items: [], selected: "", label: "", open: false, name: "Choose an option", typeahead: "", typedAt: 0 } },
+  data() { return { uid: `gx-select-${++nextId}`, items: [], selected: "", label: "", open: false, name: "Choose an option", typeahead: "", typedAt: 0, anchor: null } },
   computed: {
     current() { return this.modelValue !== undefined ? this.modelValue : this.value },
     buttonId() { return this.$attrs.id || this.uid },
@@ -43,6 +43,7 @@ export const GalaxySelect = {
       const menu = this.$refs.menu
       menu.showModal()
       this.position()
+      document.addEventListener("scroll", this.follow, { capture: true, passive: true })
       const options = [...menu.querySelectorAll('[role="option"]:not(:disabled)')]
       const selected = options.find(option => option.dataset.value === this.selected)
       const first = event?.key === "End" ? options.at(-1) : options[0]
@@ -51,6 +52,7 @@ export const GalaxySelect = {
     close() {
       if (!this.open) return
       this.open = false
+      document.removeEventListener("scroll", this.follow, { capture: true })
       this.$refs.menu?.close()
       if (this.$refs.button?.isConnected) this.$refs.button.focus({ preventScroll: true })
     },
@@ -70,9 +72,22 @@ export const GalaxySelect = {
       menu.style.maxHeight = `${maxHeight / zoom}px`
       const menuHeight = Math.min(menu.scrollHeight * zoom + 2, maxHeight)
       const below = height - rect.bottom - 12
-      const top = below >= Math.min(menuHeight, 220) ? Math.min(rect.bottom + 6, height - menuHeight - 12) : Math.max(12, rect.top - menuHeight - 6)
-      menu.style.left = `${Math.max(12, Math.min(rect.left, width - menuWidth - 12)) / zoom}px`
-      menu.style.top = `${Math.max(12, top) / zoom}px`
+      const top = Math.max(12, below >= Math.min(menuHeight, 220) ? Math.min(rect.bottom + 6, height - menuHeight - 12) : Math.max(12, rect.top - menuHeight - 6))
+      const left = Math.max(12, Math.min(rect.left, width - menuWidth - 12))
+      menu.style.left = `${left / zoom}px`
+      menu.style.top = `${top / zoom}px`
+      this.anchor = { left: left - rect.left, top: top - rect.top, zoom }
+    },
+    follow(event) {
+      // The modal menu is fixed to the viewport, so carry it with its button when
+      // the page (or any scroll container) moves underneath it.
+      if (!this.open || !this.anchor || this.$refs.menu?.contains(event.target)) return
+      const rect = this.$refs.button.getBoundingClientRect()
+      const height = window.visualViewport?.height || window.innerHeight
+      if (rect.bottom < 0 || rect.top > height) return this.close()
+      const { left, top, zoom } = this.anchor
+      this.$refs.menu.style.left = `${(rect.left + left) / zoom}px`
+      this.$refs.menu.style.top = `${(rect.top + top) / zoom}px`
     },
     select(item) {
       if (this.disabled) return this.close()
@@ -117,6 +132,7 @@ export const GalaxySelect = {
   },
   updated() { this.sync() },
   beforeUnmount() {
+    document.removeEventListener("scroll", this.follow, { capture: true })
     this.$refs.menu?.close()
     window.removeEventListener("resize", this.position)
     window.visualViewport?.removeEventListener("resize", this.position)
