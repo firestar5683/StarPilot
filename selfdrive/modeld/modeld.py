@@ -972,9 +972,11 @@ class BigModelLoader:
       )
       if not candidate.uses_external_gpu:
         raise RuntimeError("external GPU model resolved to the builtin model")
-      candidate.warmup()
+      # warmup() is deliberately not called here: the big model's camera warp runs on QCOM,
+      # the same GPU the small model is driving on, so warming up in the background stalls
+      # the 20 Hz loop for seconds at a time. It runs at promotion instead, while disengaged.
       if self._cancel.is_set():
-        raise BigModelLoadCancelled("cancelled after warmup")
+        raise BigModelLoadCancelled("cancelled after load")
       with self._lock:
         self._result = candidate
       cloudlog.warning(f"background big model load finished in {time.monotonic() - self.started_t:.1f}s")
@@ -1485,24 +1487,33 @@ def main(demo=False):
       vipc_dropped_frames,
       live_calib_seen,
     ):
-      big_model._reset_state()
-      model = big_model
-      external_gpu_active = True
-      # Nothing from the small model carries over: re-arm the frame-drop warmup and drop
-      # the rolling probability buffers and previous action, which are model specific.
-      run_count = 0
-      frame_dropped_filter.x = 0.
-      publish_state = PublishState()
-      prev_action = log.ModelDataV2.Action()
-      params.put("ModelVersion", model.policy_generation)
-      params.put("DrivingModelVersion", model.policy_generation)
-      set_runtime_model_params(params, model.model_id, model.policy_generation)
-      params.put_bool("UsbGpuActive", True)
-      params.put_bool("UsbGpuPending", False)
-      params.put_bool("UsbGpuLoading", False)
-      if chestnut_state is not None:
-        chestnut_state.big = True
-      cloudlog.warning(f"now driving on the big model {model.model_id}")
+      # Warm up here rather than on the loader thread: this runs on QCOM alongside the small
+      # model, so it has to happen while disengaged. warmup() ends with _reset_state().
+      try:
+        big_model.warmup()
+      except Exception:
+        cloudlog.exception("big model warmup failed, staying on the small model")
+        big_model = None
+        params.put_bool("UsbGpuPending", False)
+        params.put_bool("UsbGpuActive", False)
+      else:
+        model = big_model
+        external_gpu_active = True
+        # Nothing from the small model carries over: re-arm the frame-drop warmup and drop
+        # the rolling probability buffers and previous action, which are model specific.
+        run_count = 0
+        frame_dropped_filter.x = 0.
+        publish_state = PublishState()
+        prev_action = log.ModelDataV2.Action()
+        params.put("ModelVersion", model.policy_generation)
+        params.put("DrivingModelVersion", model.policy_generation)
+        set_runtime_model_params(params, model.model_id, model.policy_generation)
+        params.put_bool("UsbGpuActive", True)
+        params.put_bool("UsbGpuPending", False)
+        params.put_bool("UsbGpuLoading", False)
+        if chestnut_state is not None:
+          chestnut_state.big = True
+        cloudlog.warning(f"now driving on the big model {model.model_id}")
 
     frame_drop_ratio = frames_dropped / (1 + frames_dropped)
     dropped_frame = vipc_dropped_frames > 0
