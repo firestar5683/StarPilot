@@ -21,6 +21,7 @@ from openpilot.selfdrive.ui.mici.onroad.starpilot_status import (
 )
 from openpilot.selfdrive.ui.mici.onroad.cameraview import CameraView
 from openpilot.selfdrive.ui.onroad.starpilot.pip_sidecam import PipSideCamera
+from openpilot.selfdrive.ui.onroad.starpilot.developer_metrics import build_developer_metric_parts, external_gpu_temperature_metric, external_gpu_memory_metric, system_memory_total_gib
 from openpilot.selfdrive.ui.onroad.starpilot.pulse_glide import get_pulse_glide_border_color
 from openpilot.selfdrive.ui.onroad.starpilot.starpilot_border import get_traffic_border_colors
 from openpilot.selfdrive.ui.lib.starpilot_visuals import get_border_width
@@ -593,6 +594,8 @@ class AugmentedRoadView(CameraView):
     self._sidebar_widgets = MiciSidebarWidgets(self._confidence_ball)
     self._min_steer_speed_banner = MinSteerSpeedBanner()
     self._standstill_timer = StandstillTimerOverlay()
+    self._metrics_font = gui_app.font(FontWeight.MEDIUM)
+    self._memory_total_gib = system_memory_total_gib()
     self._favorite_slots = self._child(FavoriteSlotsOverlay())
     self._offroad_label = UnifiedLabel("start the car to\nuse openpilot", 54, FontWeight.DISPLAY,
                                        text_color=rl.Color(255, 255, 255, int(255 * 0.9)),
@@ -759,10 +762,14 @@ class AugmentedRoadView(CameraView):
 
     # Fade out bottom of overlays for looks
     rl.draw_texture_ex(self._fade_texture, rl.Vector2(self._content_rect.x, self._content_rect.y), 0.0, 1.0, rl.WHITE)
+    alert_to_render, not_animating_out = self._alert_renderer.will_render()
+
+    # Diagnostics are subordinate to alerts, navigation, HUD and previews.
+    # Keep them inside the camera scissor, never in the fixed sidebar/border.
+    if ui_state.started and draw_road_overlays and alert_to_render is None:
+      self._render_developer_metrics()
     if draw_hud_controls:
       self._hud_renderer.render_background()
-
-    alert_to_render, not_animating_out = self._alert_renderer.will_render()
 
     should_draw_dmoji = ui_state.is_onroad() and (
       is_driver_stream or camera_view_none or ((not in_reverse) and (not self._hud_renderer.drawing_top_icons()))
@@ -826,6 +833,72 @@ class AugmentedRoadView(CameraView):
     msg = messaging.new_message('uiDebug')
     msg.uiDebug.drawTimeMillis = (time.monotonic() - start_draw) * 1000
     self._pm.send('uiDebug', msg)
+
+  def _render_developer_metrics(self):
+    params = ui_state.ui_params
+    toggles = ui_state.starpilot_toggles
+    debug_mode = bool(toggles.get("debug_mode", params.get_bool("DebugMode")))
+    enabled = (bool(toggles.get("developer_ui", params.get_bool("DeveloperUI"))) and params.get_bool("DeveloperMetrics")) or debug_mode
+
+    def metric_enabled(toggle_key, param_key, debug_override=False):
+      if debug_mode and debug_override:
+        return True
+      return enabled and bool(toggles.get(toggle_key, params.get_bool(param_key)))
+
+    flags = dict(
+      show_cpu=metric_enabled("cpu_metrics", "ShowCPU", True),
+      show_gpu=metric_enabled("gpu_metrics", "ShowGPU"),
+      show_temp=metric_enabled("numerical_temp", "NumericalTemp", True),
+      show_memory=metric_enabled("memory_metrics", "ShowMemoryUsage", True),
+      show_fps=metric_enabled("show_fps", "FPSCounter", True),
+    )
+    if not any(flags.values()):
+      return
+
+    sm = ui_state.sm
+    # Do not present a missing/stale device message as a genuine 0% reading.
+    device = sm["deviceState"] if sm.valid.get("deviceState", False) and sm.alive.get("deviceState", False) else None
+    parts = build_developer_metric_parts(
+      **flags, fps=rl.get_fps(), min_fps=0, max_fps=0, avg_fps=0,
+      cpu_usage_percent=device.cpuUsagePercent if device else [],
+      cpu_temp_c=device.cpuTempC if device else [],
+      gpu_usage_percent=device.gpuUsagePercent if device else 0,
+      gpu_temp_c=device.gpuTempC if device else [],
+      max_temp_c=device.maxTempC if device else 0,
+      memory_usage_percent=device.memoryUsagePercent if device else 0,
+      memory_total_gib=self._memory_total_gib,
+    )
+    # MICI has a 536x240 canvas: show current FPS, not the big UI's history.
+    parts = [part for part in parts if not part.startswith(("Min:", "Max:", "Avg:"))]
+    if device is None:
+      parts = [part if part.startswith("FPS:") else part.split(":", 1)[0] + ": --" for part in parts]
+    if flags["show_gpu"]:
+      parts.append(external_gpu_temperature_metric(sm))
+      parts.append(external_gpu_memory_metric(sm))
+
+    # Leave room for the steering wheel/turn intent on the left and model
+    # source icon on the right. Fit whole metrics, never shrink to tiny text.
+    rect = self._content_rect
+    inset = max(14, self._get_border_width() + 6)
+    x = rect.x + max(96, inset)
+    width = rect.width - max(96, inset) - max(64, inset)
+    font_size, line_height, padding = 16, 20, 4
+    lines = []
+    for part in parts:
+      if measure_text_cached(self._metrics_font, part, font_size).x > width - 2 * padding:
+        return
+      candidate = f"{lines[-1]} | {part}" if lines else part
+      if lines and measure_text_cached(self._metrics_font, candidate, font_size).x <= width - 2 * padding:
+        lines[-1] = candidate
+      else:
+        lines.append(part)
+    height = len(lines) * line_height + 2 * padding
+    if not lines or height > min(108, rect.height - 2 * inset):
+      return
+    y = rect.y + rect.height - inset - height
+    rl.draw_rectangle_rec(rl.Rectangle(x, y, width, height), rl.Color(0, 0, 0, 185))
+    for index, line in enumerate(lines):
+      rl.draw_text_ex(self._metrics_font, line, rl.Vector2(x + padding, y + padding + index * line_height), font_size, 0, rl.WHITE)
 
   def _draw_border(self):
     border_size = self._get_border_width()

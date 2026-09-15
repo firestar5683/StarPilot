@@ -1,3 +1,5 @@
+import math
+
 import pyray as rl
 from msgq.visionipc import VisionStreamType
 from openpilot.selfdrive.ui.onroad.augmented_road_view import AugmentedRoadView
@@ -18,6 +20,7 @@ from openpilot.selfdrive.ui.onroad.starpilot.pulse_glide import get_pulse_glide_
 from openpilot.selfdrive.ui.onroad.starpilot.pip_sidecam import PipSideCamera
 from openpilot.selfdrive.ui.onroad.starpilot.favorite_radial_menu import FavoriteRadialMenu
 from openpilot.selfdrive.ui.onroad.starpilot.weather_icon import render_weather_icon
+from openpilot.selfdrive.ui.onroad.starpilot.developer_metrics import build_developer_metric_parts, external_gpu_temperature_metric, external_gpu_memory_metric, system_memory_total_gib
 from openpilot.selfdrive.ui.lib.starpilot_status import (
   get_screen_edge_color,
 )
@@ -47,6 +50,7 @@ class StarPilotOnroadView(AugmentedRoadView):
     self._min_fps = 99.9
     self._max_fps = 0.0
     self._avg_fps = 0.0
+    self._memory_total_gib = system_memory_total_gib()
 
     self._pip_sidecam = self._child(PipSideCamera())
     self._favorite_radial_menu = FavoriteRadialMenu(
@@ -280,7 +284,7 @@ class StarPilotOnroadView(AugmentedRoadView):
     # Track FPS
     fps = rl.get_fps()
 
-    if fps > 0:
+    if math.isfinite(fps) and fps > 0:
       self._min_fps = min(self._min_fps, fps)
       self._max_fps = max(self._max_fps, fps)
       alpha = 1.0 / (60.0 * 5.0)
@@ -290,19 +294,21 @@ class StarPilotOnroadView(AugmentedRoadView):
         self._avg_fps = alpha * fps + (1.0 - alpha) * self._avg_fps
 
     # Gather device stats
-    device_state = ui_state.sm["deviceState"] if ui_state.sm.valid.get("deviceState", False) else None
-    cpu_val = 0
-    gpu_val = 0
-    temp_val = 0
-    mem_val = 0
-    mem_gb = 0.0
+    sm = ui_state.sm
+    device_state = sm["deviceState"] if sm.valid.get("deviceState", False) and sm.alive.get("deviceState", False) else None
+    cpu_usage = []
+    cpu_temps = []
+    gpu_usage = 0
+    gpu_temps = []
+    max_temp = 0.0
+    memory_usage = 0
     if device_state:
-      cpu_list = list(device_state.cpuUsagePercent)
-      cpu_val = int(sum(cpu_list) / len(cpu_list)) if cpu_list else 0
-      gpu_val = int(device_state.gpuUsagePercent)
-      temp_val = int(device_state.maxTempC)
-      mem_val = int(device_state.memoryUsagePercent)
-      mem_gb = 8.0 * mem_val / 100.0
+      cpu_usage = list(device_state.cpuUsagePercent)
+      cpu_temps = list(device_state.cpuTempC)
+      gpu_usage = device_state.gpuUsagePercent
+      gpu_temps = list(device_state.gpuTempC)
+      max_temp = device_state.maxTempC
+      memory_usage = device_state.memoryUsagePercent
 
     font = self._font_medium
     font_size = 24
@@ -315,25 +321,47 @@ class StarPilotOnroadView(AugmentedRoadView):
       rl.draw_text_ex(font, text, rl.Vector2(pos.x + 1, pos.y + 1), font_size, 0, rl.BLACK)
       rl.draw_text_ex(font, text, pos, font_size, 0, color)
 
-    parts = []
-    if show_cpu:
-      parts.append(f"CPU: {cpu_val}%")
-    if show_gpu:
-      parts.append(f"GPU: {gpu_val}%")
-    if show_temp:
-      parts.append(f"TEMP: {temp_val}°C")
-    if show_memory:
-      parts.append(f"RAM: {mem_gb:.1f} GB ({mem_val}%)")
-    if show_fps:
-      parts += [f"FPS: {round(fps)}", f"Min: {round(self._min_fps)}",
-                f"Max: {round(self._max_fps)}", f"Avg: {round(self._avg_fps)}"]
+    parts = build_developer_metric_parts(
+      show_fps=show_fps,
+      show_cpu=show_cpu,
+      show_gpu=show_gpu,
+      show_temp=show_temp,
+      show_memory=show_memory,
+      fps=fps,
+      min_fps=self._min_fps,
+      max_fps=self._max_fps,
+      avg_fps=self._avg_fps,
+      cpu_usage_percent=cpu_usage,
+      cpu_temp_c=cpu_temps,
+      gpu_usage_percent=gpu_usage,
+      gpu_temp_c=gpu_temps,
+      max_temp_c=max_temp,
+      memory_usage_percent=memory_usage,
+      memory_total_gib=self._memory_total_gib,
+    )
 
-    line = " | ".join(parts)
-    sz = measure_text_cached(font, line, font_size)
-    bx = self._content_rect.x + (self._content_rect.width - sz.x) / 2
+    if device_state is None:
+      # FPS comes from the renderer; device metrics require a live sample.
+      parts = [part if part.startswith(("FPS:", "Min:", "Max:", "Avg:")) else part.split(":", 1)[0] + ": --" for part in parts]
+
+    if show_gpu:
+      parts.append(external_gpu_temperature_metric(ui_state.sm))
+      parts.append(external_gpu_memory_metric(ui_state.sm))
+    lines = []
+    available_width = self._content_rect.width - 24
+    for part in parts:
+      candidate = f"{lines[-1]} | {part}" if lines else part
+      if lines and measure_text_cached(font, candidate, font_size).x <= available_width:
+        lines[-1] = candidate
+      else:
+        lines.append(part)
     border_width = self._get_border_width()
-    by = self._content_rect.y + self._content_rect.height + (border_width - sz.y) // 2
-    draw_text_with_outline(line, bx, by, rl.WHITE)
+    for index, line in enumerate(lines):
+      sz = measure_text_cached(font, line, font_size)
+      bx = self._content_rect.x + (self._content_rect.width - sz.x) / 2
+      by = self._content_rect.y + self._content_rect.height + (border_width - sz.y) // 2
+      by -= (len(lines) - index - 1) * (font_size + 4)
+      draw_text_with_outline(line, bx, by, rl.WHITE)
 
 
   def _render_bottom_row_widgets(self):
