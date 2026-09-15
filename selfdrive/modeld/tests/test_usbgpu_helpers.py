@@ -389,11 +389,34 @@ def test_chestnut_telemetry_is_suppressed_while_a_background_load_runs():
     "chestnutState polling must be gated on the background loader being idle"
 
 
-def test_background_big_model_loader_runs_off_modelds_realtime_core():
-  # modeld is SCHED_FIFO on core 7 and threads inherit its affinity, so a loader left there
-  # would be starved behind the 20 Hz publish loop.
-  assert 7 not in modeld.BIG_MODEL_LOADER_CORES
+def test_background_big_model_loader_avoids_the_realtime_cores():
+  """The loader must not share a core with modeld or the camera pipeline.
+
+  modeld is SCHED_FIFO on core 7 and threads inherit its affinity, so a loader left there is
+  starved behind the 20 Hz publish loop. Putting it on camerad's core instead stalls frame
+  delivery: measured p95 on roadCameraState went 50.8 ms -> 108.9 ms for the whole load.
+  """
   assert modeld.BIG_MODEL_LOADER_CORES
+
+  reserved = {
+    7: "modeld (config_realtime_process(7, 54)) and dmonitoringmodeld",
+    6: "camerad (system/camerad/main.cc set_core_affinity({6}))",
+    5: "plannerd, radard, selfdrived, starpilot_process",
+    4: "card and controlsd",
+  }
+  for core, owner in reserved.items():
+    assert core not in modeld.BIG_MODEL_LOADER_CORES, f"core {core} belongs to {owner}"
+
+  # camerad pins itself in C++, which is easy to miss when auditing Python callers.
+  import re
+  from pathlib import Path
+
+  camerad_main = Path(modeld.__file__).parents[2] / "system" / "camerad" / "main.cc"
+  pinned = re.search(r"set_core_affinity\(\{([0-9,\s]+)\}\)", camerad_main.read_text(encoding="utf-8"))
+  assert pinned, "could not find camerad's core affinity"
+  camerad_cores = {int(c) for c in pinned.group(1).split(",") if c.strip()}
+  assert not (camerad_cores & modeld.BIG_MODEL_LOADER_CORES), \
+    f"the loader must not share camerad's cores {sorted(camerad_cores)}"
 
 
 @pytest.mark.parametrize("failure", [

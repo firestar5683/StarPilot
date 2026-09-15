@@ -106,10 +106,13 @@ EXTERNAL_GPU_POWER_WAIT_TIMEOUT_SECONDS = 60.0
 EXTERNAL_GPU_POWER_LOG_INTERVAL_SECONDS = 10.0
 LAT_SMOOTH_BP = [2.0, 8.0]
 
-# The background big-model loader must leave modeld's SCHED_FIFO core. Thread affinity is
-# inherited from config_realtime_process(7, 54), so without this the loader would sit behind
-# the 20 Hz publish loop on core 7 (shared with dmonitoringmodeld) and barely run at all.
-BIG_MODEL_LOADER_CORES = {6}
+# The background big-model loader must leave modeld's SCHED_FIFO core, because thread
+# affinity is inherited from config_realtime_process(7, 54) and the loader would otherwise
+# sit behind the 20 Hz publish loop. Every other core is spoken for as well -- 4 is
+# card/controlsd, 5 is plannerd/radard/selfdrived, 6 is camerad (system/camerad/main.cc),
+# 7 is modeld and dmonitoringmodeld -- so the loader floats across the little cores, which
+# run the non-realtime locationd/UI work, instead of pinning on top of one critical process.
+BIG_MODEL_LOADER_CORES = {0, 1, 2, 3}
 
 # A healthy load takes ~30 s once vehicle power is stable. If the AMD device never comes up
 # the tinygrad calls can block indefinitely, so give up rather than reporting "loading"
@@ -1462,14 +1465,17 @@ def main(demo=False):
     elif big_loader is not None and not big_loader.in_progress:
       loaded_big_model, big_load_error = big_loader.take()
       big_loader = None
-      params.put_bool("UsbGpuLoading", False)
       if loaded_big_model is not None:
         big_model = loaded_big_model
+        # Raise pending before clearing loading: selfdrived polls these separately at 100 Hz
+        # and reads "neither loading nor pending" as a failed load.
         params.put_bool("UsbGpuPending", True)
+        params.put_bool("UsbGpuLoading", False)
         cloudlog.warning("big model ready; waiting for the driver to disengage before using it")
       else:
         params.put_bool("UsbGpuPending", False)
         params.put_bool("UsbGpuActive", False)
+        params.put_bool("UsbGpuLoading", False)
         cloudlog.error(f"big model unavailable, staying on the small model: {big_load_error}")
 
     if big_model is not None and model is not big_model and _big_model_swap_allowed(

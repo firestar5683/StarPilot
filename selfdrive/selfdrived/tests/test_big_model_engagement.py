@@ -25,6 +25,43 @@ def test_big_model_failure_still_disengages():
   assert ET.SOFT_DISABLE in EVENTS[EventName.bigModelFailed]
 
 
+def test_pending_is_raised_before_loading_is_cleared():
+  """selfdrived polls UsbGpuLoading and UsbGpuPending separately at 100 Hz.
+
+  Clearing loading first leaves a window where neither is set, which reads as a failed load:
+  captured as exactly one frame of bigModelFailed at the moment the load completed, on two
+  drives (50.77 s and 62.98 s).
+  """
+  import ast
+  from pathlib import Path
+
+  from openpilot.selfdrive.modeld import modeld
+
+  source = (Path(modeld.__file__).with_name("modeld.py")).read_text(encoding="utf-8")
+  main_fn = next(n for n in ast.parse(source).body
+                 if isinstance(n, ast.FunctionDef) and n.name == "main")
+  collect = next(
+    node for node in ast.walk(main_fn)
+    if isinstance(node, ast.If) and "UsbGpuPending" in ast.dump(node)
+    and "take" in ast.dump(node)
+  )
+  # The success branch is the `if loaded_big_model is not None:` inside the collect block.
+  success = next(n for n in ast.walk(collect)
+                 if isinstance(n, ast.If) and "loaded_big_model" in ast.dump(n.test))
+  writes = [
+    node.args[0].value
+    for node in ast.walk(ast.Module(body=list(success.body), type_ignores=[]))
+    if isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute)
+    and node.func.attr == "put_bool" and node.args
+    and isinstance(node.args[0], ast.Constant)
+  ]
+  pending_writes = [i for i, k in enumerate(writes) if k == "UsbGpuPending"]
+  loading_writes = [i for i, k in enumerate(writes) if k == "UsbGpuLoading"]
+  assert pending_writes and loading_writes
+  assert min(pending_writes) < min(loading_writes), \
+    "UsbGpuPending must be raised before UsbGpuLoading is cleared"
+
+
 def test_loading_banner_is_brief_and_hands_over_to_the_icon():
   # The load can run for minutes; the banner announces the handover to the small model and
   # then gets out of the way, leaving the blinking eGPU icon as the "still loading" cue.
