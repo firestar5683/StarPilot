@@ -65,7 +65,7 @@ window.app=createApp(Settings); window.vm=window.app.mount('#app');
    assert.equal(await page.locator('#gx-longitudinal-mode > span').innerText(),'Conditional Experimental')
    assert.equal(await page.locator('#gx-longitudinal-mode > span').evaluate(e=>e.scrollWidth<=e.clientWidth+1),true)
    await trigger.focus()
-   assert.equal(await modeSelect.evaluate(e=>getComputedStyle(e).outlineStyle),'solid')
+   assert.notEqual(await modeSelect.evaluate(e=>getComputedStyle(e).boxShadow),'none')
    assert.deepEqual(await modeSelect.locator('select option').allTextContents(),['Chill','Experimental','Conditional Experimental','Conditional Chill'])
    assert.equal(await page.evaluate(()=>writes.length),0)
    assert.equal(await manage.getAttribute('aria-expanded'),'false')

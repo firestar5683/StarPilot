@@ -90,7 +90,7 @@ export const Tsk = {
           <div v-if="loading" class="gx-loading">Loading keys...</div>
           <template v-else>
             <label class="gx-row__label" style="font-size:var(--fs-xs);">Select Key</label>
-            <GalaxySelect class="gx-field gx-field--full" :value="selectedKeyName" @change="selectKey($event.target.value)">
+            <GalaxySelect class="gx-field gx-field--full" aria-label="Saved key" :value="selectedKeyName" @change="selectKey($event.target.value)">
               <option value="">-- Select a saved key --</option>
               <option v-for="k in keys" :key="k.name" :value="k.name">{{ k.name }}</option>
             </GalaxySelect>

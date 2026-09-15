@@ -358,7 +358,7 @@ export const Recordings = {
         </div>
         <div style="padding: var(--sp-3); display:flex; gap:8px; flex-wrap:wrap;">
           <input class="gx-field" style="flex:1; min-width:160px;" type="search" placeholder="Search routes, dates, or IDs..." v-model="searchQuery" />
-          <GalaxySelect class="gx-field" v-model="sortOrder">
+          <GalaxySelect class="gx-field" aria-label="Sort routes" v-model="sortOrder">
             <option value="newest">Newest first</option>
             <option value="oldest">Oldest first</option>
             <option value="longest">Longest duration</option>

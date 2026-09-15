@@ -176,6 +176,24 @@ test('GalaxySelect ignores a second open request while its menu is open', async 
   assert.equal(instance.open, true)
 })
 
+test('GalaxySelect menu follows its button on scroll and closes once the button leaves the viewport', () => {
+  const context = vm.createContext({document: {getElementById() {}}, window: {innerHeight: 800}})
+  vm.runInContext(fs.readFileSync(js + 'components/GalaxySelect.js', 'utf8').replace('export const GalaxySelect =', 'globalThis.component ='), context)
+  let rect = {left: 20, top: 300, bottom: 344}, closed = 0
+  const menu = {style: {}, contains: node => node === menu}
+  const instance = {open: true, anchor: {left: 0, top: 50, zoom: 2}, $refs: {menu, button: {getBoundingClientRect: () => rect}}, close() { closed++ }}
+  context.component.methods.follow.call(instance, {target: {}})
+  assert.deepEqual({...menu.style}, {left: '10px', top: '175px'})
+  rect = {left: 20, top: 100, bottom: 144}
+  context.component.methods.follow.call(instance, {target: menu})
+  assert.equal(menu.style.top, '175px')
+  context.component.methods.follow.call(instance, {target: {}})
+  assert.equal(menu.style.top, '75px')
+  rect = {left: 20, top: -60, bottom: -16}
+  context.component.methods.follow.call(instance, {target: {}})
+  assert.equal(closed, 1)
+})
+
 test('unavailable branch and navigation values cannot become install targets', async () => {
   const {instance, calls, confirmations} = fixture()
   for (const branch of ['other:', '', 'deleted-branch']) instance.selectTargetBranch(branch)

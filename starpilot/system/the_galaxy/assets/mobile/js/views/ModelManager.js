@@ -312,12 +312,12 @@ export const ModelManager = {
             </div>
 
             <div style="display:flex; gap:8px; flex-wrap:wrap;">
-              <GalaxySelect class="gx-field" style="flex:1; min-width:140px;" :value="userFilter" @change="userFilter = $event.target.value">
+              <GalaxySelect class="gx-field" style="flex:1; min-width:140px;" aria-label="Your favorite filter" :value="userFilter" @change="userFilter = $event.target.value">
                 <option value="all">Your Favorite: All</option>
                 <option value="yes">Your Favorite: Yes</option>
                 <option value="no">Your Favorite: No</option>
               </GalaxySelect>
-              <GalaxySelect class="gx-field" style="flex:1; min-width:140px;" :value="communityFilter" @change="communityFilter = $event.target.value">
+              <GalaxySelect class="gx-field" style="flex:1; min-width:140px;" aria-label="Community filter" :value="communityFilter" @change="communityFilter = $event.target.value">
                 <option value="all">Community: All</option>
                 <option value="yes">Community: Yes</option>
                 <option value="no">Community: No</option>

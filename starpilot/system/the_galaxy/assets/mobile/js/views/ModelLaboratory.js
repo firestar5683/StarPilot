@@ -237,7 +237,7 @@ export const ModelLaboratory = {
           <label style="display:grid; gap:4px;">
             <strong style="font-size:var(--fs-sm);">Lateral model</strong>
             <small style="color:var(--text-muted); font-size:var(--fs-xs);">Path shape, curvature, lane geometry, and driving desire</small>
-            <GalaxySelect class="gx-field" :value="configuration.lateralModel" @change="configuration.lateralModel = $event.target.value; onLateralChange()">
+            <GalaxySelect class="gx-field" aria-label="Lateral model" :value="configuration.lateralModel" @change="configuration.lateralModel = $event.target.value; onLateralChange()">
               <option value="">Choose a model</option>
               <option v-for="m in readyModels" :key="m.value" :value="m.value">{{ m.label }} · {{ m.version }}</option>
             </GalaxySelect>
@@ -245,7 +245,7 @@ export const ModelLaboratory = {
           <label style="display:grid; gap:4px;">
             <strong style="font-size:var(--fs-sm);">Longitudinal model</strong>
             <small style="color:var(--text-muted); font-size:var(--fs-xs);">Speed, acceleration, stopping, leads, and scene confidence</small>
-            <GalaxySelect class="gx-field" :value="configuration.longitudinalModel" @change="configuration.longitudinalModel = $event.target.value; dirty = true">
+            <GalaxySelect class="gx-field" aria-label="Longitudinal model" :value="configuration.longitudinalModel" @change="configuration.longitudinalModel = $event.target.value; dirty = true">
               <option value="">Choose a model</option>
               <option v-for="m in candidates" :key="m.value" :value="m.value">{{ m.label }} · {{ m.version }}</option>
             </GalaxySelect>
