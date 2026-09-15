@@ -1203,7 +1203,6 @@
       },
       {
         "key": "CustomPersonalities",
-        "requires_offroad": true,
         "label": "Driving Personalities",
         "description": "Customize braking, acceleration, and following distance for each profile.",
         "picker_description": "Customizes driving personalities to match your style.",
@@ -1214,7 +1213,6 @@
       },
       {
         "key": "TrafficPersonalityProfile",
-        "requires_offroad": true,
         "label": "Traffic Mode",
         "description": "Customize the \"Traffic Mode\" personality profile. Designed for stop-and-go driving.",
         "picker_description": "Customizes Traffic Mode for stop-and-go driving.",
@@ -1226,7 +1224,6 @@
       },
       {
         "key": "AggressivePersonalityProfile",
-        "requires_offroad": true,
         "label": "Aggressive",
         "description": "Customize the \"Aggressive\" personality profile. Designed for assertive driving with tighter gaps.",
         "picker_description": "Customizes Aggressive Mode for assertive driving.",
@@ -1238,7 +1235,6 @@
       },
       {
         "key": "StandardPersonalityProfile",
-        "requires_offroad": true,
         "label": "Standard",
         "description": "Customize the \"Standard\" personality profile. Designed for balanced driving with moderate gaps.",
         "picker_description": "Customizes Standard Mode for balanced driving.",
@@ -1250,7 +1246,6 @@
       },
       {
         "key": "RelaxedPersonalityProfile",
-        "requires_offroad": true,
         "label": "Relaxed",
         "description": "Customize the \"Relaxed\" personality profile. Designed for smoother, more comfortable driving with larger gaps.",
         "picker_description": "Customizes Relaxed Mode for smoother driving.",
@@ -1262,7 +1257,6 @@
       },
       {
         "key": "TrafficFollow",
-        "requires_offroad": true,
         "label": "Following Distance",
         "description": "The minimum following distance to the lead vehicle. openpilot blends between this value and the \"Relaxed\" profile as speed increases. Increase for more space; decrease for tighter gaps.",
         "data_type": "float",
@@ -1275,7 +1269,6 @@
       },
       {
         "key": "TrafficJerkAcceleration",
-        "requires_offroad": true,
         "label": "Acceleration Smoothness",
         "description": "How smoothly openpilot accelerates. Increase for gentler starts; decrease for faster but more abrupt takeoffs.",
         "data_type": "float",
@@ -1288,7 +1281,6 @@
       },
       {
         "key": "TrafficJerkDeceleration",
-        "requires_offroad": true,
         "label": "Braking Smoothness",
         "description": "How smoothly openpilot brakes. Increase for gentler stops; decrease for quicker but sharper braking.",
         "data_type": "float",
@@ -1301,7 +1293,6 @@
       },
       {
         "key": "TrafficJerkDanger",
-        "requires_offroad": true,
         "label": "Safety Gap Bias",
         "description": "How much extra space openpilot keeps from the vehicle ahead. Increase for larger gaps and more cautious following; decrease for tighter gaps and closer following.",
         "data_type": "float",
@@ -1314,7 +1305,6 @@
       },
       {
         "key": "TrafficJerkSpeedDecrease",
-        "requires_offroad": true,
         "label": "Slowdown Response",
         "description": "How smoothly openpilot slows down. Increase for more gradual deceleration; decrease for faster but sharper slowdowns.",
         "data_type": "float",
@@ -1327,7 +1317,6 @@
       },
       {
         "key": "TrafficJerkSpeed",
-        "requires_offroad": true,
         "label": "Speed-Up Response",
         "description": "How smoothly openpilot speeds up. Increase for more gradual acceleration; decrease for quicker but more jolting acceleration.",
         "data_type": "float",
@@ -1340,7 +1329,6 @@
       },
       {
         "key": "AggressiveFollow",
-        "requires_offroad": true,
         "label": "Following Distance",
         "description": "How many seconds openpilot follows behind lead vehicles when using the \"Aggressive\" profile. Increase for more space; decrease for tighter gaps.\n\nDefault: 1.25 seconds.",
         "data_type": "float",
@@ -1353,7 +1341,6 @@
       },
       {
         "key": "AggressiveFollowHigh",
-        "requires_offroad": true,
         "label": "High Speed Following Distance",
         "description": "Following distance for higher speeds in the \"Aggressive\" profile. openpilot smoothly blends from the base value to this value as speed rises.",
         "data_type": "float",
@@ -1366,7 +1353,6 @@
       },
       {
         "key": "AggressiveJerkAcceleration",
-        "requires_offroad": true,
         "label": "Acceleration Smoothness",
         "description": "How smoothly openpilot accelerates. Increase for gentler starts; decrease for faster but more abrupt takeoffs.",
         "data_type": "float",
@@ -1379,7 +1365,6 @@
       },
       {
         "key": "AggressiveJerkDeceleration",
-        "requires_offroad": true,
         "label": "Braking Smoothness",
         "description": "How smoothly openpilot brakes. Increase for gentler stops; decrease for quicker but sharper braking.",
         "data_type": "float",
@@ -1392,7 +1377,6 @@
       },
       {
         "key": "AggressiveJerkDanger",
-        "requires_offroad": true,
         "label": "Safety Gap Bias",
         "description": "How much extra space openpilot keeps from the vehicle ahead. Increase for larger gaps and more cautious following; decrease for tighter gaps and closer following.",
         "data_type": "float",
@@ -1405,7 +1389,6 @@
       },
       {
         "key": "AggressiveJerkSpeedDecrease",
-        "requires_offroad": true,
         "label": "Slowdown Response",
         "description": "How smoothly openpilot slows down. Increase for more gradual deceleration; decrease for faster but sharper slowdowns.",
         "data_type": "float",
@@ -1418,7 +1401,6 @@
       },
       {
         "key": "AggressiveJerkSpeed",
-        "requires_offroad": true,
         "label": "Speed-Up Response",
         "description": "How smoothly openpilot speeds up. Increase for more gradual acceleration; decrease for quicker but more jolting acceleration.",
         "data_type": "float",
@@ -1431,7 +1413,6 @@
       },
       {
         "key": "StandardFollow",
-        "requires_offroad": true,
         "label": "Following Distance",
         "description": "How many seconds openpilot follows behind lead vehicles when using the \"Standard\" profile. Increase for more space; decrease for tighter gaps.\n\nDefault: 1.45 seconds.",
         "data_type": "float",
@@ -1444,7 +1425,6 @@
       },
       {
         "key": "StandardFollowHigh",
-        "requires_offroad": true,
         "label": "High Speed Following Distance",
         "description": "Following distance for higher speeds in the \"Standard\" profile. openpilot smoothly blends from the base value to this value as speed rises.",
         "data_type": "float",
@@ -1457,7 +1437,6 @@
       },
       {
         "key": "StandardJerkAcceleration",
-        "requires_offroad": true,
         "label": "Acceleration Smoothness",
         "description": "How smoothly openpilot accelerates. Increase for gentler starts; decrease for faster but more abrupt takeoffs.",
         "data_type": "float",
@@ -1470,7 +1449,6 @@
       },
       {
         "key": "StandardJerkDeceleration",
-        "requires_offroad": true,
         "label": "Braking Smoothness",
         "description": "How smoothly openpilot brakes. Increase for gentler stops; decrease for quicker but sharper braking.",
         "data_type": "float",
@@ -1483,7 +1461,6 @@
       },
       {
         "key": "StandardJerkDanger",
-        "requires_offroad": true,
         "label": "Safety Gap Bias",
         "description": "How much extra space openpilot keeps from the vehicle ahead. Increase for larger gaps and more cautious following; decrease for tighter gaps and closer following.",
         "data_type": "float",
@@ -1496,7 +1473,6 @@
       },
       {
         "key": "StandardJerkSpeedDecrease",
-        "requires_offroad": true,
         "label": "Slowdown Response",
         "description": "How smoothly openpilot slows down. Increase for more gradual deceleration; decrease for faster but sharper slowdowns.",
         "data_type": "float",
@@ -1509,7 +1485,6 @@
       },
       {
         "key": "StandardJerkSpeed",
-        "requires_offroad": true,
         "label": "Speed-Up Response",
         "description": "How smoothly openpilot speeds up. Increase for more gradual acceleration; decrease for quicker but more jolting acceleration.",
         "data_type": "float",
@@ -1522,7 +1497,6 @@
       },
       {
         "key": "RelaxedFollow",
-        "requires_offroad": true,
         "label": "Following Distance",
         "description": "How many seconds openpilot follows behind lead vehicles when using the \"Relaxed\" profile. Increase for more space; decrease for tighter gaps.\n\nDefault: 1.6 seconds.",
         "data_type": "float",
@@ -1535,7 +1509,6 @@
       },
       {
         "key": "RelaxedFollowHigh",
-        "requires_offroad": true,
         "label": "High Speed Following Distance",
         "description": "Following distance for higher speeds in the \"Relaxed\" profile. openpilot smoothly blends from the base value to this value as speed rises.",
         "data_type": "float",
@@ -1548,7 +1521,6 @@
       },
       {
         "key": "RelaxedJerkAcceleration",
-        "requires_offroad": true,
         "label": "Acceleration Smoothness",
         "description": "How smoothly openpilot accelerates. Increase for gentler starts; decrease for faster but more abrupt takeoffs.",
         "data_type": "float",
@@ -1561,7 +1533,6 @@
       },
       {
         "key": "RelaxedJerkDeceleration",
-        "requires_offroad": true,
         "label": "Braking Smoothness",
         "description": "How smoothly openpilot brakes. Increase for gentler stops; decrease for quicker but sharper braking.",
         "data_type": "float",
@@ -1574,7 +1545,6 @@
       },
       {
         "key": "RelaxedJerkDanger",
-        "requires_offroad": true,
         "label": "Safety Gap Bias",
         "description": "How much extra space openpilot keeps from the vehicle ahead. Increase for larger gaps and more cautious following; decrease for tighter gaps and closer following.",
         "data_type": "float",
@@ -1587,7 +1557,6 @@
       },
       {
         "key": "RelaxedJerkSpeedDecrease",
-        "requires_offroad": true,
         "label": "Slowdown Response",
         "description": "How smoothly openpilot slows down. Increase for more gradual deceleration; decrease for faster but sharper slowdowns.",
         "data_type": "float",
@@ -1600,7 +1569,6 @@
       },
       {
         "key": "RelaxedJerkSpeed",
-        "requires_offroad": true,
         "label": "Speed-Up Response",
         "description": "How smoothly openpilot speeds up. Increase for more gradual acceleration; decrease for quicker but more jolting acceleration.",
         "data_type": "float",
@@ -2837,6 +2805,16 @@
         "data_type": "bool",
         "ui_type": "toggle",
         "parent_key": "CustomUI",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "ShowBrakeStatus",
+        "label": "Show Brake Status",
+        "description": "Tint the on-screen steering-wheel icon red while the car reports that its brake lights are on.",
+        "picker_description": "Tints the on-screen steering-wheel icon red while the brake lights are on.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "galaxy_only": true,
         "settings_tier": "simple"
       },
       {
@@ -4670,6 +4648,17 @@
         "ui_type": "toggle",
         "parent_key": "DeviceManagement",
         "settings_tier": "simple"
+      },
+      {
+        "key": "AggressiveCoolingEnabled",
+        "label": "C3/C3X Aggressive Cooling",
+        "description": "Runs the fan on a lower, more aggressive temperature curve: the fan ramps up sooner and reacts faster to rising temperature, keeping the device meaningfully cooler on hot days at the cost of more fan noise.",
+        "picker_description": "Cooler-running, louder fan curve for comma 3/3X.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "DeviceManagement",
+        "settings_tier": "simple",
+        "requires_capability": "IsTiciOrTizi"
       },
       {
         "key": "UseKonikServer",

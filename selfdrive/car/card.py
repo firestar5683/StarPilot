@@ -43,6 +43,22 @@ REDNECK_DECREASE_LOOKAHEAD_POINTS = 10
 SLC_SOURCE_NONE = "None"
 EventName = log.OnroadEvent.EventName
 
+
+def _build_starpilot_car_control(steering_limit_info: dict[str, bool | float | int] | None, valid: bool):
+  message = messaging.new_message('starpilotCarControl')
+  message.valid = valid
+  if steering_limit_info is not None:
+    info = message.starpilotCarControl.steeringLimitInfo
+    info.valid = bool(steering_limit_info.get("valid", False))
+    info.modelLimitErrorDeg = float(steering_limit_info.get("modelLimitErrorDeg", 0.0))
+    info.resumeLimitErrorDeg = float(steering_limit_info.get("resumeLimitErrorDeg", 0.0))
+    info.cooperativeLimitErrorDeg = float(steering_limit_info.get("cooperativeLimitErrorDeg", 0.0))
+    info.cooperativeOffsetDeg = float(steering_limit_info.get("cooperativeOffsetDeg", 0.0))
+    info.monoTime = int(steering_limit_info.get("monoTime", 0))
+    info.combinedLimitErrorDeg = float(steering_limit_info.get("combinedLimitErrorDeg", 0.0))
+  return message
+
+
 # forward
 carlog.addHandler(ForwardingHandler(cloudlog))
 
@@ -86,7 +102,7 @@ class Car:
   def __init__(self, CI=None, RI=None) -> None:
     self.can_sock = messaging.sub_sock('can', timeout=20)
     self.sm = messaging.SubMaster(['pandaStates', 'carControl', 'onroadEvents', 'radarState', 'longitudinalPlan'])
-    self.pm = messaging.PubMaster(['sendcan', 'carState', 'carParams', 'carOutput', 'liveTracks'])
+    self.pm = messaging.PubMaster(['sendcan', 'carState', 'carParams', 'carOutput', 'liveTracks', 'starpilotCarControl'])
     self.gps_pm = None
 
     self.can_rcv_cum_timeout_counter = 0
@@ -99,6 +115,7 @@ class Car:
     self.initialized_prev = False
 
     self.last_actuators_output = structs.CarControl.Actuators()
+    self.last_steering_limit_info: dict[str, bool | float | int] | None = None
 
     self.params = Params()
     self.params_memory = Params(memory=True)
@@ -396,6 +413,12 @@ class Car:
     co_send.carOutput.actuatorsOutput = self.last_actuators_output
     self.pm.send('carOutput', co_send)
 
+    starpilot_control_send = _build_starpilot_car_control(
+      self.last_steering_limit_info,
+      CS.canValid and self.sm.all_checks(['carControl']),
+    )
+    self.pm.send('starpilotCarControl', starpilot_control_send)
+
     # kick off controlsd step while we actuate the latest carControl packet
     cs_send = messaging.new_message('carState')
     cs_send.valid = CS.canValid
@@ -450,14 +473,26 @@ class Car:
         self.CI.CC.update_live_params(live_params.roll, live_params.angleOffsetDeg,
                                       live_params.stiffnessFactor, live_params.steerRatio)
       self.last_actuators_output, can_sends = self.CI.apply(CC, now_nanos, self.starpilot_toggles)
+      get_steering_limit_info = getattr(self.CI.CC, "get_steering_limit_info", None)
+      self.last_steering_limit_info = get_steering_limit_info() if get_steering_limit_info is not None else None
       self.pm.send('sendcan', can_list_to_can_capnp(can_sends, msgtype='sendcan', valid=CS.canValid))
 
       self.CC_prev = CC
 
   def _update_openpilot_lead_state(self, CC: car.CarControl) -> None:
     lead_visible = bool(CC.hudControl.leadVisible)
+    longitudinal_adjustment_active = lead_visible
     lead_distance = 0.0
     lead_rel_speed = 0.0
+
+    if self.sm.seen['starpilotPlan'] and self.sm.valid['starpilotPlan']:
+      longitudinal_adjustment_active = bool(self.sm['starpilotPlan'].trackingLead)
+
+    if self.sm.seen['longitudinalPlan'] and self.sm.valid['longitudinalPlan']:
+      longitudinal_plan = self.sm['longitudinalPlan']
+      longitudinal_adjustment_active |= bool(
+        longitudinal_plan.shouldStop or str(longitudinal_plan.longitudinalPlanSource) != "cruise"
+      )
 
     if self.sm.seen['radarState'] and self.sm.valid['radarState']:
       lead = self.sm['radarState'].leadOne
@@ -473,6 +508,7 @@ class Car:
     self.CI.CS.openpilot_lead_visible = lead_visible
     self.CI.CS.openpilot_lead_distance = lead_distance
     self.CI.CS.openpilot_lead_rel_speed = lead_rel_speed
+    self.CI.CS.openpilot_longitudinal_adjustment_active = longitudinal_adjustment_active
 
   def _update_redneck_cruise(self, CS: car.CarState, CC: car.CarControl) -> None:
     if self.redneck_cruise is None:

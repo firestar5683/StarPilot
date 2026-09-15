@@ -37,6 +37,40 @@ const MENU_ITEMS = {
 };
 
 let galaxyDeveloperMode = false;
+const SIDEBAR_PINNED_KEY = "galaxySidebarPinned";
+let sidebarPinnedPreference = null;
+
+function defaultSidebarPinned() {
+  try {
+    return window.matchMedia?.("(min-width: 768px)")?.matches ?? window.innerWidth >= 768;
+  } catch {
+    return false;
+  }
+}
+
+function sidebarPinned() {
+  if (sidebarPinnedPreference !== null) return sidebarPinnedPreference;
+  let stored;
+  try {
+    stored = window.localStorage?.getItem(SIDEBAR_PINNED_KEY);
+  } catch {
+    stored = null;
+  }
+  if (stored === "true" || stored === "false") {
+    sidebarPinnedPreference = stored === "true";
+    return sidebarPinnedPreference;
+  }
+  return defaultSidebarPinned();
+}
+
+function setSidebarPinned(pinned) {
+  sidebarPinnedPreference = Boolean(pinned);
+  try {
+    window.localStorage?.setItem(SIDEBAR_PINNED_KEY, String(sidebarPinnedPreference));
+  } catch {
+  }
+  document.documentElement.classList.toggle("galaxy-sidebar-pinned", sidebarPinnedPreference);
+}
 
 function matchesPath(currentPath, link) {
   if (link === "/") return currentPath === "/";
@@ -92,14 +126,29 @@ function bindSidebarHandlers() {
 
   if (!menuButton || !underlay) return;
 
-  if (!window.__theGalaxySidebarMenuBound) {
-    window.__theGalaxySidebarMenuBound = true;
+  const pinButton = document.getElementById("sidebar_pin_button");
+  pinButton?.addEventListener("click", () => {
+    const pinned = !sidebarPinned();
+    setSidebarPinned(pinned);
+    const sidebar = document.getElementById("sidebar");
+    hideSidebar();
+    sidebar?.classList.toggle("pinned", pinned);
+    pinButton.setAttribute("aria-pressed", String(pinned));
+    pinButton.setAttribute("title", pinned ? "Unpin navigation" : "Pin navigation");
+    pinButton.querySelector("i")?.classList.toggle("bi-pin-angle-fill", pinned);
+    pinButton.querySelector("i")?.classList.toggle("bi-pin-angle", !pinned);
+  });
+
+  if (menuButton.dataset.boundClick !== "1") {
+    menuButton.dataset.boundClick = "1";
     menuButton.addEventListener("click", () => {
       const sidebar = document.getElementById("sidebar");
       const currentUnderlay = document.getElementById("sidebarUnderlay");
       if (!sidebar || !currentUnderlay) return;
-      sidebar.classList.toggle("visible");
-      currentUnderlay.classList.toggle("hidden");
+      if (sidebar.classList.contains("pinned")) return;
+      const open = sidebar.classList.toggle("visible");
+      currentUnderlay.classList.toggle("hidden", !open);
+      menuButton.setAttribute("aria-expanded", String(open));
     });
   }
 
@@ -132,19 +181,25 @@ function renderSidebarIntoShell(currentPath) {
   if (!shell) return;
 
   const activePath = currentPath || window.location.pathname;
+  const pinned = sidebarPinned();
   const sectionsMarkup = Object.entries(MENU_ITEMS)
     .map(([section, links]) => buildSectionMarkup(section, links, activePath))
     .join("");
 
   shell.innerHTML = `
     <div id="sidebarUnderlay" class="hidden"></div>
-    <div id="sidebar" class="sidebar">
+    <div id="sidebar" class="sidebar${pinned ? " pinned" : ""}">
       <div>
         <div class="title">
           <img class="logo" src="/assets/images/main_logo.png" alt="Galaxy logo" />
           <div class="title_text sidebar_header">
             <p>Galaxy</p>
           </div>
+          <button id="sidebar_pin_button" class="sidebar-pin-button" type="button"
+                  aria-label="Toggle pinned navigation" aria-pressed="${pinned}"
+                  title="${pinned ? "Unpin navigation" : "Pin navigation"}">
+            <i class="bi ${pinned ? "bi-pin-angle-fill" : "bi-pin-angle"}"></i>
+          </button>
         </div>
         <hr />
         ${sectionsMarkup}
@@ -157,6 +212,7 @@ function renderSidebarIntoShell(currentPath) {
 
 export function Sidebar(currentPath) {
   setTimeout(() => {
+    document.documentElement.classList.toggle("galaxy-sidebar-pinned", sidebarPinned());
     renderSidebarIntoShell(currentPath);
     refreshGalaxyDeveloperMode();
   }, 0);

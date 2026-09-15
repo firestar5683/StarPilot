@@ -488,7 +488,10 @@ class Device:
         callback()
     self._prev_timed_out = interaction_timeout
 
-    self._set_awake(ui_state.ignition or not interaction_timeout or PC)
+    standby_active = ui_state.started and self._standby_mode
+    keep_display_awake = not interaction_timeout or PC
+    keep_display_awake |= ui_state.ignition and not standby_active
+    self._set_awake(keep_display_awake)
 
   @staticmethod
   def _fresh_message(name):

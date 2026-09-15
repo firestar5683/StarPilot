@@ -30,8 +30,9 @@ export function usePolling(fn, { interval = 3000, enabled = () => true } = {}) {
   let destroyed = false
 
   const stop = () => { if (timer) { clearTimeout(timer); timer = null } }
+  const scrolling = () => typeof document !== "undefined" && !!document.body?.classList?.contains("is-scrolling")
   const tick = async () => {
-    if (destroyed || !enabled() || document.visibilityState !== "visible") {
+    if (destroyed || !enabled() || document.visibilityState !== "visible" || scrolling()) {
       timer = setTimeout(tick, interval)
       return
     }

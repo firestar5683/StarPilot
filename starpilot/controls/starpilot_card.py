@@ -31,6 +31,16 @@ from openpilot.starpilot.system.wheel_controls import (
 )
 
 HYUNDAI_MAIN_CRUISE_AOL_CONFIRM_TIMEOUT_FRAMES = 100
+AOL_NON_BLOCKING_IMMEDIATE_DISABLE_ALERTS = {
+  f"speedTooLow/{ET.IMMEDIATE_DISABLE}",
+}
+
+
+def aol_blocked_by_immediate_disable(*alert_types) -> bool:
+  return any(
+    ET.IMMEDIATE_DISABLE in alert_type and alert_type not in AOL_NON_BLOCKING_IMMEDIATE_DISABLE_ALERTS
+    for alert_type in alert_types
+  )
 
 
 class StarPilotCard:
@@ -338,8 +348,9 @@ class StarPilotCard:
     self.always_on_lateral_enabled &= not hyundai_aol_needs_engagement or self.hyundai_aol_ready
     self.always_on_lateral_enabled &= sm["starpilotPlan"].lateralCheck
     self.always_on_lateral_enabled &= sm["liveCalibration"].calPerc >= 1
-    alert_types = sm["selfdriveState"].alertType + sm["starpilotSelfdriveState"].alertType
-    self.always_on_lateral_enabled &= ET.IMMEDIATE_DISABLE not in alert_types
+    self.always_on_lateral_enabled &= not aol_blocked_by_immediate_disable(
+      sm["selfdriveState"].alertType, sm["starpilotSelfdriveState"].alertType,
+    )
     self.always_on_lateral_enabled &= not (carState.brakePressed and carState.vEgo < starpilot_toggles.always_on_lateral_pause_speed) or carState.standstill
     self.always_on_lateral_enabled &= not self.error_log.is_file()
 

@@ -31,7 +31,7 @@ class Navigationd:
     self._route_lock = threading.Lock()
     self._route: NavigationRoute | None = None
     self._active_destination: dict[str, object] | None = None
-    self._requested_destination_key: tuple[str, float, float] | None = None
+    self._requested_destination_key: tuple[str, str, float, float] | None = None
     self._route_fetch_inflight = False
     self._route_generation = 0
     self._published_route_generation = -1
@@ -44,11 +44,12 @@ class Navigationd:
     self._last_nav_state: dict[str, object] | None = None
 
   @staticmethod
-  def _destination_key(destination: dict[str, object] | None) -> tuple[str, float, float] | None:
+  def _destination_key(destination: dict[str, object] | None) -> tuple[str, str, float, float] | None:
     if destination is None:
       return None
     return (
       str(destination["place_name"]).casefold(),
+      str(destination.get("routeId") or "main"),
       round(float(destination["latitude"]), 6),
       round(float(destination["longitude"]), 6),
     )

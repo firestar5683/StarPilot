@@ -400,13 +400,15 @@ class MapboxRouteEngine:
       return None
 
     end = Coordinate(float(destination["latitude"]), float(destination["longitude"]))
+    route_id = str(destination.get("routeId") or "main")
+    requested_route_index = int(route_id[4:]) if route_id.startswith("alt-") and route_id[4:].isdigit() else 0
     params: dict[str, str] = {
       "access_token": token,
       "geometries": "geojson",
       "steps": "true",
       "overview": "full",
       "annotations": "maxspeed",
-      "alternatives": "false",
+      "alternatives": "true" if requested_route_index > 0 else "false",
       "banner_instructions": "true",
     }
     if bearing is not None:
@@ -420,7 +422,7 @@ class MapboxRouteEngine:
       return None
 
     routes = data.get("routes") or []
-    route = routes[0] if routes else None
+    route = routes[requested_route_index] if requested_route_index < len(routes) else (routes[0] if routes else None)
     legs = route.get("legs") if route else None
     leg = legs[0] if legs else None
     if data.get("code") != "Ok" or route is None or leg is None:

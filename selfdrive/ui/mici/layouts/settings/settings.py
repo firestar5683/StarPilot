@@ -12,6 +12,7 @@ from openpilot.selfdrive.ui.mici.layouts.settings.driving_model import DrivingMo
 from openpilot.selfdrive.ui.mici.layouts.settings.galaxy import GalaxyBigButton
 from openpilot.selfdrive.ui.mici.layouts.settings.visuals import VisualsLayoutMici
 from openpilot.system.ui.lib.application import gui_app, FontWeight
+from openpilot.system.ui.lib.wifi_manager import WifiManager
 
 
 class SettingsBigButton(BigButton):
@@ -56,7 +57,7 @@ class ForceDriveStateBigButton(BigMultiToggle):
 
 
 class SettingsLayout(NavScroller):
-  def __init__(self):
+  def __init__(self, wifi_manager: WifiManager):
     super().__init__()
     self._params = Params()
 
@@ -64,7 +65,7 @@ class SettingsLayout(NavScroller):
     toggles_btn = SettingsBigButton("toggles", "", gui_app.texture("icons_mici/settings.png", 64, 64))
     toggles_btn.set_click_callback(lambda: gui_app.push_widget(toggles_panel))
 
-    network_panel = NetworkLayoutMici()
+    network_panel = NetworkLayoutMici(wifi_manager)
     network_btn = SettingsBigButton("network", "", gui_app.texture("icons_mici/settings/network/wifi_strength_full.png", 76, 56))
     network_btn.set_click_callback(lambda: gui_app.push_widget(network_panel))
 

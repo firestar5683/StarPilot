@@ -16,7 +16,7 @@ import { NavKeys } from "/assets/components/navigation/navigation_keys.js?v=app-
 import { RouteRecordings } from "/assets/components/recordings/dashcam_routes.js"
 import { SettingsView } from "/assets/components/settings.js?v=router-cycle-fix-5"
 import { ScreenRecordings } from "/assets/components/recordings/screen_recordings.js"
-import { Sidebar } from "/assets/components/sidebar.js?v=controllers-nav-1"
+import { Sidebar } from "/assets/components/sidebar.js?v=sidebar-pin-2"
 import { SentryMode } from "/assets/components/tools/sentry.js"
 import { SpeedLimits } from "/assets/components/tools/speed_limits.js"
 import { ModelManager } from "/assets/components/tools/model_manager.js?v=20260906a"

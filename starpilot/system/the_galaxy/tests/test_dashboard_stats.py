@@ -393,6 +393,7 @@ def _install_server_import_stubs():
   sys.modules["openpilot.starpilot.navigation.destination_store"] = _simple_module(
     "openpilot.starpilot.navigation.destination_store",
     normalize_destination_payload=lambda payload: payload,
+    routing_configured=lambda params: bool(str(params.get("MapboxSecretKey") or "").strip()),
     update_recent_destinations=lambda *args, **kwargs: [],
   )
   sys.modules["openpilot.starpilot.system.the_galaxy.factory_reset"] = _simple_module(

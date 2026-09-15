@@ -462,6 +462,33 @@ def test_navigation_last_position_rejects_stale_persisted_fix(monkeypatch):
   assert the_galaxy._get_navigation_last_position() is None
 
 
+def test_navigation_api_rejects_destination_without_secret_key(monkeypatch):
+  client, fake_params = _params_client(monkeypatch, {"MapboxPublicKey": "public"}, "tici")
+
+  response = client.post("/api/navigation", json={
+    "name": "Work",
+    "latitude": 41.0,
+    "longitude": -87.0,
+  })
+
+  assert response.status_code == 400
+  assert "secret key" in response.get_json()["message"]
+  assert fake_params.get("NavDestination") is None
+
+
+def test_navigation_api_accepts_destination_with_secret_key(monkeypatch):
+  client, fake_params = _params_client(monkeypatch, {"MapboxSecretKey": "secret"}, "tici")
+
+  response = client.post("/api/navigation", json={
+    "name": "Work",
+    "latitude": 41.0,
+    "longitude": -87.0,
+  })
+
+  assert response.status_code == 200
+  assert json.loads(fake_params.get("NavDestination"))["name"] == "Work"
+
+
 def test_save_longitudinal_maneuver_status_writes_json_param_as_dict(monkeypatch):
   fake_params = WritableFakeParams()
   monkeypatch.setattr(the_galaxy, "params", fake_params)

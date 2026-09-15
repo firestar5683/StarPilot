@@ -10,7 +10,6 @@ export const LongitudinalMode = {
   data() { return { snapshot: null, pending: false, reading: false, expanded: {}, open: false, error: "", generation: 0, timer: null, disposed: false, modes: LONGITUDINAL_MODES } },
   computed: {
     mode() { return this.snapshot?.mode || "" },
-    label() { return this.modes.find(m => m.value === this.mode)?.label || "Unavailable" },
     reason() { return this.snapshot?.locked ? this.snapshot.reason : this.snapshot ? "" : "Speed control state unavailable." },
     locked() { return this.pending || !this.snapshot || this.snapshot.locked },
     conditional() { return this.mode === "conditional_experimental" || this.mode === "conditional_chill" },
@@ -66,13 +65,10 @@ export const LongitudinalMode = {
           <span v-if="reason" class="gx-row__desc" role="status">{{ reason }}</span>
           <span v-if="error" class="gx-row__desc" role="alert">{{ error }}</span>
         </div>
-        <div class="gx-mode-select">
-          <div class="gx-field gx-mode-select__label" aria-hidden="true"><span>{{ label }}</span><i class="bi bi-chevron-down"></i></div>
-          <select id="gx-longitudinal-mode" :value="mode" :disabled="locked" aria-describedby="gx-longitudinal-description" @change="select">
-            <option v-if="!snapshot" value="">Unavailable</option>
-            <option v-for="m in modes" :key="m.value" :value="m.value">{{ m.label }}</option>
-          </select>
-        </div>
+        <GalaxySelect id="gx-longitudinal-mode" class="gx-field gx-field--full" :value="mode" :disabled="locked" aria-describedby="gx-longitudinal-description" @change="select">
+          <option v-if="!snapshot" value="">Unavailable</option>
+          <option v-for="m in modes" :key="m.value" :value="m.value">{{ m.label }}</option>
+        </GalaxySelect>
       </div>
       <button v-if="conditional" type="button" class="gx-manage-btn" :aria-expanded="open" aria-controls="gx-longitudinal-children" @click="open = !open">
         {{ open ? 'Close' : 'Manage' }}<i class="bi" aria-hidden="true" :class="open ? 'bi-chevron-up' : 'bi-chevron-down'"></i>

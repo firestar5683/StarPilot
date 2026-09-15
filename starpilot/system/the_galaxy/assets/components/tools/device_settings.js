@@ -116,13 +116,31 @@ const PERSONALITY_CATEGORY_DEFINITIONS = {
 const PERSONALITY_OPTION_ORDER = {
   acceleration: ["eco", "standard", "sport", "sport_plus", "custom"],
   braking: ["eco", "standard", "sport", "custom"],
-  following: ["close", "medium", "far", "custom"],
+  following: ["close", "medium", "far", "traffic", "custom"],
 }
 const PERSONALITY_ADVANCED_KEYS = {
   traffic: ["TrafficJerkAcceleration", "TrafficJerkDeceleration", "TrafficJerkDanger", "TrafficJerkSpeedDecrease", "TrafficJerkSpeed"],
   aggressive: ["AggressiveJerkAcceleration", "AggressiveJerkDeceleration", "AggressiveJerkDanger", "AggressiveJerkSpeedDecrease", "AggressiveJerkSpeed"],
   standard: ["StandardJerkAcceleration", "StandardJerkDeceleration", "StandardJerkDanger", "StandardJerkSpeedDecrease", "StandardJerkSpeed"],
   relaxed: ["RelaxedJerkAcceleration", "RelaxedJerkDeceleration", "RelaxedJerkDanger", "RelaxedJerkSpeedDecrease", "RelaxedJerkSpeed"],
+}
+const PERSONALITY_EDITOR_PARAM_KEYS = new Set([
+  "CustomPersonalities",
+  ...PERSONALITY_DEFINITIONS.map(profile => personalityProfileParamKey(profile.id)),
+  ...Object.values(PERSONALITY_ADVANCED_KEYS).flat(),
+  "TrafficFollow", "AggressiveFollow", "AggressiveFollowHigh", "StandardFollow", "StandardFollowHigh",
+  "RelaxedFollow", "RelaxedFollowHigh",
+])
+function parseRoadFlag(value) {
+  if (value === true || value === 1 || value === "1" || value === "true" || value === "True") return true
+  if (value === false || value === 0 || value === "" || value === "0" || value === "false" || value === "False") return false
+  return null
+}
+
+function personalityRoadStateKnown() {
+  const onroad = parseRoadFlag(state.values.IsOnroad)
+  const offroad = parseRoadFlag(state.values.IsOffroad)
+  return onroad !== null && offroad !== null && onroad !== offroad
 }
 const PANDA_FIRMWARE_TOGGLE_KEYS = new Set(["IgnoreIgnitionLine", "RemoteStartBootsComma", "HKGRemoteStartBootsComma"])
 const FLM_ADVANCED_LATERAL_KEYS = new Set([
@@ -896,6 +914,13 @@ async function refreshCscCalibrationValues() {
     const nextValues = { ...state.values }
     let changed = false
     for (const [key, value] of entries) {
+      if (value === null && (key === "IsOnroad" || key === "IsOffroad")) {
+        if (nextValues[key] !== null) {
+          nextValues[key] = null
+          changed = true
+        }
+        continue
+      }
       if (value === null || nextValues[key] === value) continue
       nextValues[key] = value
       changed = true
@@ -930,7 +955,7 @@ async function refreshUiContextValues() {
   if (uiContextPollInflight || state.loadingValues) return uiContextPollInflight
 
   uiContextPollInflight = Promise.all(
-    ["IsOnroad", "IsMetric"].map(async key => {
+    ["IsOnroad", "IsOffroad", "IsMetric"].map(async key => {
       const response = await fetch(`/api/params?key=${encodeURIComponent(key)}`, { cache: "no-store" })
       if (!response.ok) return [key, null]
       const raw = (await response.text()).trim().toLowerCase()
@@ -949,7 +974,13 @@ async function refreshUiContextValues() {
       state.values = nextValues
       scheduleSyncInputs()
     }
-  }).catch(() => {}).finally(async () => {
+  }).catch(() => {
+    const nextValues = { ...state.values, IsOnroad: null, IsOffroad: null }
+    if (state.values.IsOnroad !== null || state.values.IsOffroad !== null) {
+      state.values = nextValues
+      scheduleSyncInputs()
+    }
+  }).finally(async () => {
     await fetchLongitudinalMode()
     uiContextPollInflight = null
   })
@@ -1579,12 +1610,15 @@ function getSettingLockReason(param) {
   if (param?.key === "CustomPersonalities" && state.personalityMigrationRequired) {
     return "This profile data requires a verified migration before it can be edited."
   }
+  if (PERSONALITY_EDITOR_PARAM_KEYS.has(param?.key) && !personalityRoadStateKnown()) {
+    return "Driving state is not confirmed. Refresh before editing personalities."
+  }
   if (param?.key === LONGITUDINAL_MODE_KEY) {
     if (state.longitudinalModeUpdating) return "Updating longitudinal control mode…"
     if (!state.longitudinalMode) return "Longitudinal mode state unavailable. Refresh to retry."
     return state.longitudinalMode.locked ? state.longitudinalMode.reason : ""
   }
-  if (param?.requires_offroad && state.values.IsOnroad) {
+  if (param?.requires_offroad && (!personalityRoadStateKnown() || state.values.IsOnroad)) {
     return "This setting can only be changed while parked."
   }
   if (param?.requires_parked && !state.values.VehicleParked && !(param.key === "ForceOffroad" && state.values.ForceOffroad)) {
@@ -1667,7 +1701,7 @@ function handleSectionTabClick(sectionSlug, event) {
 }
 
 function personalityPresetLabel(preset) {
-  return String(preset || "").split("_").map(part => part === "plus" ? "+" : `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join(" ").replace(" +", "+")
+  return String(preset || "").split("_").map(part => part === "plus" ? "+" : part === "legacy" ? "Previous" : `${part.charAt(0).toUpperCase()}${part.slice(1)}`).join(" ").replace(" +", "+")
 }
 
 function personalityUpdateKey(profileId, category) {
@@ -1701,9 +1735,9 @@ async function recoverPersonalitySave() {
             (config.preset === "custom" && config.curve.length !== data.speed_breakpoints_mph?.[category]?.length)) throw new Error("Saved profiles are malformed.")
       }
     }
-    const onroad = [false, "", "0", "False", "false"].includes(values?.IsOnroad) ? false : [true, "1", "True", "true"].includes(values?.IsOnroad) ? true : null
-    const offroad = [true, "1", "True", "true"].includes(values?.IsOffroad)
-    if (onroad === null || (!onroad && !offroad)) throw new Error("Road state could not be verified.")
+    const onroad = parseRoadFlag(values?.IsOnroad)
+    const offroad = parseRoadFlag(values?.IsOffroad)
+    if (onroad === null || offroad === null || onroad === offroad) throw new Error("Road state could not be verified.")
     state.values = { ...state.values, IsOnroad: onroad, IsOffroad: offroad }
     state.personalityProfiles = data.profiles
     state.personalityMigrationRequired = !!data.migration_required
@@ -1721,8 +1755,10 @@ async function recoverPersonalitySave() {
   }
 }
 
-async function savePersonalityCategory(profileId, category, preset, curve, successMessage) {
-  if (state.values.IsOnroad) return false
+async function savePersonalityCategory(profileId, category, preset, curve, successMessage, expectedOnroad = null) {
+  if (!personalityRoadStateKnown()) return false
+  if (expectedOnroad === null) expectedOnroad = parseRoadFlag(state.values.IsOnroad)
+  if (expectedOnroad !== null && parseRoadFlag(state.values.IsOnroad) !== expectedOnroad) return false
   if (!window.location.pathname.startsWith("/device_settings") || state.personalityProfilesError || state.personalityProfilesLoading) return false
   if (state.personalityMigrationRequired) {
     showParamSnackbar("This profile data requires a verified migration before it can be edited.", "error")
@@ -1735,7 +1771,8 @@ async function savePersonalityCategory(profileId, category, preset, curve, succe
   state.personalityUpdating = { ...state.personalityUpdating, [updateKey]: true }
   try {
     if (uiContextPollInflight) await uiContextPollInflight
-    if (generation !== personalityViewGeneration || !window.location.pathname.startsWith("/device_settings") || state.values.IsOnroad || state.personalityMigrationRequired) return false
+    if (generation !== personalityViewGeneration || !window.location.pathname.startsWith("/device_settings") || !personalityRoadStateKnown() ||
+        (expectedOnroad !== null && parseRoadFlag(state.values.IsOnroad) !== expectedOnroad) || state.personalityMigrationRequired) return false
     const response = await fetch("/api/personality_profiles", {
       method: "PUT",
       headers: { "Content-Type": "application/json" },
@@ -1971,9 +2008,10 @@ function beginPersonalityCurveDrag(event, profileId, category) {
   const config = state.personalityProfiles?.[profileId]?.[category]
   const bounds = state.personalityMeta?.bounds?.[category]
   const definition = PERSONALITY_CATEGORY_DEFINITIONS[category]
-  if (state.personalityMigrationRequired || !(canvas instanceof HTMLCanvasElement) || !config || !bounds || !definition || state.personalityUpdating[personalityUpdateKey(profileId, category)]) return
+  if (!personalityRoadStateKnown() || state.personalityMigrationRequired || !(canvas instanceof HTMLCanvasElement) || !config || !bounds || !definition || state.personalityUpdating[personalityUpdateKey(profileId, category)]) return
 
   event.preventDefault()
+  const startingOnroad = parseRoadFlag(state.values.IsOnroad)
   const curve = [...config.curve]
   const geometry = graphGeometry(category, curve, canvas.clientWidth || 660)
   const chartRect = canvas.getBoundingClientRect()
@@ -2000,7 +2038,7 @@ function beginPersonalityCurveDrag(event, profileId, category) {
   }
   const finish = async pointerEvent => {
     removeListeners(pointerEvent)
-    const saved = await savePersonalityCategory(profileId, category, "custom", curve, `${definition.label} graph updated.`)
+    const saved = await savePersonalityCategory(profileId, category, "custom", curve, `${definition.label} graph updated.`, startingOnroad)
     if (!saved && !state.personalityProfilesError && window.location.pathname.startsWith("/device_settings")) restorePersonalityCurveVisual(profileId, category, state.personalityProfiles[profileId][category].curve)
   }
   const cancel = pointerEvent => {
@@ -2070,7 +2108,7 @@ function renderPersonalityCurve(profile, category, config) {
           <h4>Custom ${definition.label}</h4>
         </div>
         <div class="ds-personality-curve-actions">
-          <button type="button" class="ds-reset-btn" aria-label="Reset ${profile.label} ${definition.label} graph to Dom default" disabled="${() => !!state.values.IsOnroad || !!state.personalityMigrationRequired || !!state.personalityUpdating[updateKey]}" @click="${() => resetPersonalityCurve(profile.id, category)}">Reset</button>
+          <button type="button" class="ds-reset-btn" aria-label="Reset ${profile.label} ${definition.label} graph to Dom default" disabled="${() => !personalityRoadStateKnown() || !!state.personalityMigrationRequired || !!state.personalityUpdating[updateKey]}" @click="${() => resetPersonalityCurve(profile.id, category)}">Reset</button>
         </div>
       </div>
       ${config.curve.some(value => value > Number(editBounds[1])) ? html`
@@ -2084,8 +2122,8 @@ function renderPersonalityCurve(profile, category, config) {
           height="${geometry.height}"
           role="img"
           aria-label="${definition.title} by speed with the ${profile.label} reference shown faintly. Drag near a point to adjust it."
-          aria-disabled="${() => !!state.values.IsOnroad || !!state.personalityMigrationRequired}"
-          @pointerdown="${event => { if (!state.values.IsOnroad && !state.personalityMigrationRequired) beginPersonalityCurveDrag(event, profile.id, category) }}"></canvas>
+          aria-disabled="${() => !personalityRoadStateKnown() || !!state.personalityMigrationRequired}"
+          @pointerdown="${event => { if (personalityRoadStateKnown() && !state.personalityMigrationRequired) beginPersonalityCurveDrag(event, profile.id, category) }}"></canvas>
         <div class="ds-personality-values">
           ${config.curve.map((value, index) => html`
             <label class="ds-personality-value">
@@ -2100,7 +2138,7 @@ function renderPersonalityCurve(profile, category, config) {
                 aria-describedby="personality-curve-error-${profile.id}-${category}"
                 aria-invalid="${() => state.personalityCurveErrors[updateKey] ? "true" : "false"}"
                 value="${Number(value).toFixed(2)}"
-                disabled="${() => !!state.values.IsOnroad || !!state.personalityMigrationRequired || !!state.personalityUpdating[updateKey]}"
+                disabled="${() => !personalityRoadStateKnown() || !!state.personalityMigrationRequired || !!state.personalityUpdating[updateKey]}"
                 @change="${event => adjustPersonalityCurvePoint(profile.id, category, index, event.currentTarget)}" />
               <b id="personality-value-${profile.id}-${category}-${index}">${Number(value).toFixed(2)} ${definition.valueUnit}</b>
             </label>
@@ -2122,6 +2160,7 @@ function renderPersonalityCategoryField(profile, category, config) {
   const definition = PERSONALITY_CATEGORY_DEFINITIONS[category]
   const availableOptions = new Set((state.personalityMeta?.options?.[category] || []).filter(option => option !== "dom_default"))
   const options = (PERSONALITY_OPTION_ORDER[category] || []).filter(option => availableOptions.has(option))
+  if (category === "following" && config.preset.startsWith("legacy_") && availableOptions.has(config.preset)) options.unshift(config.preset)
   const updateKey = personalityUpdateKey(profile.id, category)
   return html`
     <section class="ds-personality-field" aria-labelledby="personality-field-${profile.id}-${category}">
@@ -2132,13 +2171,14 @@ function renderPersonalityCategoryField(profile, category, config) {
             type="button"
             class="ds-personality-option"
             aria-pressed="${() => config.preset === option ? "true" : "false"}"
-            disabled="${() => !!state.values.IsOnroad || !!state.personalityMigrationRequired || !!state.personalityUpdating[updateKey]}"
+            disabled="${() => !personalityRoadStateKnown() || !!state.personalityMigrationRequired || !!state.personalityUpdating[updateKey]}"
             @click="${() => updatePersonalityPreset(profile.id, category, option)}">
             ${personalityPresetLabel(option)}
           </button>
         `)}
       </div>
       ${() => config.preset === "dom_default" ? html`<small class="ds-personality-default-note">Using existing StarPilot defaults.</small>` : ""}
+      ${() => category === "following" && config.preset.startsWith("legacy_") ? html`<small class="ds-personality-default-note">Previous fixed following distance retained. Select a preset to use its current curve.</small>` : ""}
     </section>
   `
 }
@@ -2185,7 +2225,7 @@ function personalityAdvancedOptions(key) {
 }
 
 function updatePersonalityAdvancedPreset(param, mode) {
-  if (state.values.IsOnroad || state.numericUpdating[param.key]) return
+  if (!personalityRoadStateKnown() || state.numericUpdating[param.key]) return
   if (mode === "custom") {
     state.personalityAdvancedCustomOpen = { ...state.personalityAdvancedCustomOpen, [param.key]: true }
     return
@@ -2212,7 +2252,7 @@ function renderPersonalityAdvancedValue(profile, param) {
               class="ds-personality-option ds-personality-advanced-choice"
               aria-label="${profile.label} ${param.label} ${label} percentage preset"
               aria-pressed="${() => personalityAdvancedMode(param.key) === mode ? "true" : "false"}"
-              disabled="${() => !!state.values.IsOnroad || !!state.numericUpdating[param.key]}"
+              disabled="${() => !personalityRoadStateKnown() || !!state.numericUpdating[param.key]}"
               @click="${() => updatePersonalityAdvancedPreset(param, mode)}">${label}</button>
           `)}
         </div>
@@ -2224,7 +2264,7 @@ function renderPersonalityAdvancedValue(profile, param) {
             step="${bounds.step}"
             aria-label="${profile.label} ${param.label} custom percentage"
             value="${() => resolveCurrentNumericValue(param, bounds)}"
-            disabled="${() => !!state.values.IsOnroad || !!state.numericUpdating[param.key]}"
+            disabled="${() => !personalityRoadStateKnown() || !!state.numericUpdating[param.key]}"
             @change="${event => updateNumericParam(param, event.currentTarget.value, event.currentTarget)}" />
           <span>${bounds.min}–${bounds.max}</span>
         </label>
@@ -2303,10 +2343,12 @@ function renderPersonalityProfilesPanel() {
   if (!state.personalityMeta) return html`<div class="ds-personality-error" role="alert" aria-live="assertive">Driving personalities could not be loaded. Refresh the page to retry.</div>`
   return html`
     <div class="ds-personality-profiles" id="personality-profiles-panel">
+      ${() => !personalityRoadStateKnown() ? html`<div class="ds-personality-migration-warning" role="status">Driving state is not confirmed. Personality editing is temporarily disabled.</div>` : ""}
+      ${() => parseRoadFlag(state.values.IsOnroad) === true && personalityRoadStateKnown() ? html`<div class="ds-personality-migration-warning" role="note">Changes to the active profile can take effect immediately and alter acceleration, braking, or following behavior. Make adjustments only when it is safe, and stay ready to take control.</div>` : ""}
       ${() => state.personalityMigrationRequired ? html`
         <div class="ds-personality-migration-warning" role="alert" aria-live="assertive">
           <span>This profile data requires a verified migration before it can be edited.</span>
-          <button type="button" class="ds-reset-btn" disabled="${() => !!state.values.IsOnroad || state.personalityMigrationInProgress}" @click="${migratePersonalityProfiles}">
+          <button type="button" class="ds-reset-btn" disabled="${() => parseRoadFlag(state.values.IsOnroad) === true || !personalityRoadStateKnown() || state.personalityMigrationInProgress}" @click="${migratePersonalityProfiles}">
             ${() => state.personalityMigrationInProgress ? "Migrating..." : "Migrate profiles"}
           </button>
         </div>

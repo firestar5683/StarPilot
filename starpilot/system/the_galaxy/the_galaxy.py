@@ -77,6 +77,7 @@ from openpilot.starpilot.common.model_lab import (
 )
 from openpilot.starpilot.assets.theme_manager import HOLIDAY_THEME_PATH, THEME_COMPONENT_PARAMS
 from openpilot.starpilot.common import param_profiles
+from openpilot.starpilot.system.the_galaxy import version_history, version_install
 from openpilot.starpilot.common.accel_profile import (
   A_CRUISE_MAX_BP_CUSTOM,
   CUSTOM_ACCEL_PROFILE_BREAKPOINT_PARAM_KEYS,
@@ -149,7 +150,6 @@ from openpilot.starpilot.common.longitudinal_personality_profiles import (
   initial_custom_curve,
   is_truck_fingerprint,
   migrate_profile_document,
-  personality_reference_curves,
   profile_document,
   strict_profile_document,
   synchronise_profile_document_enabled,
@@ -168,7 +168,7 @@ from openpilot.starpilot.common.testing_grounds import (
   TESTING_GROUNDS_SLOT_DEFINITIONS as SHARED_TESTING_GROUNDS_SLOT_DEFINITIONS,
   TESTING_GROUNDS_STATE_PATH as SHARED_TESTING_GROUNDS_STATE_PATH,
 )
-from openpilot.starpilot.navigation.destination_store import normalize_destination_payload, update_recent_destinations
+from openpilot.starpilot.navigation.destination_store import normalize_destination_payload, routing_configured, update_recent_destinations
 from openpilot.starpilot.system.the_galaxy.factory_reset import remove_path as _run_factory_reset_delete
 from openpilot.starpilot.system.the_galaxy import flm_workspace, utilities
 from openpilot.starpilot.system.the_galaxy.update_recovery import inspect_interrupted_update, public_recovery_status, recover_interrupted_update
@@ -1957,22 +1957,22 @@ _RUNTIME_DEFAULT_ZERO_OK_KEYS = {
 _TROUBLESHOOT_SECTION_DEFINITIONS = [
   {
     "id": "personality_settings",
-    "title": "Personality Profile Settings",
+    "title": "Longitudinal (Speed & Following) › Driving Personalities",
     "keys": _TROUBLESHOOT_PERSONALITY_KEYS,
   },
   {
     "id": "cem_settings",
-    "title": "CEM Settings",
+    "title": "Longitudinal (Speed & Following) › Longitudinal control mode",
     "keys": _TROUBLESHOOT_CEM_KEYS,
   },
   {
     "id": "advanced_lateral_tuning",
-    "title": "Advanced Lateral Tuning",
+    "title": "Lateral (Steering) › Advanced Lateral Tuning",
     "keys": _TROUBLESHOOT_ADVANCED_LATERAL_KEYS,
   },
   {
     "id": "advanced_longitudinal_tuning",
-    "title": "Advanced Longitudinal Tuning",
+    "title": "Longitudinal (Speed & Following) › Advanced Longitudinal Tuning",
     "keys": _TROUBLESHOOT_ADVANCED_LONGITUDINAL_KEYS,
   },
 ]
@@ -3014,6 +3014,66 @@ def _collect_fast_update_info(include_remote=True):
     **rollback_data,
   }
 
+def _version_install_worker(branch, selection):
+  """Resolve, back up and install one immutable revision after explicit confirmation."""
+  repo_path = str(_get_openpilot_root())
+  installed = None
+  try:
+    version_install.require_parked()
+    if selection == "latest":
+      # Preserve the existing branch updater, including boot-time AGNOS handling.
+      # Historical compatibility and GitHub-history restrictions apply only to
+      # exact revisions, never to an ordinary update to the latest branch head.
+      _branch_switch_worker(branch)
+      return
+    _set_fast_update_progress(1, "Resolving selected version", 10.0, branch)
+    target = version_history.resolve_version(repo_path, branch, selection)
+    version_install.require_parked()
+    # The normal updater owns staging for its whole lifetime. Pause only that
+    # daemon and its children, then refuse any still-held Git locks.
+    with version_install.suspend_updater() as updater:
+      version_install.require_parked()
+      version_install.check_repository_idle(repo_path)
+      rc, detail = _run_git_with_progress(
+        repo_path, _build_shallow_fetch_commit_args(target["commit"]),
+        timeout=240, step=1, label="Fetching selected version",
+      )
+      if rc:
+        raise version_install.InstallError(detail or "Unable to fetch the selected revision")
+      if _git_stdout(repo_path, ["rev-parse", "FETCH_HEAD^{commit}"]) != target["commit"]:
+        raise version_install.InstallError("Fetched revision does not match the selected version")
+      version_install.require_parked()
+      previous_branch = _git_stdout(repo_path, ["branch", "--show-current"])
+      previous_commit = _git_stdout(repo_path, ["rev-parse", "HEAD"])
+      result = version_install.install(
+        repo_path, target, check_parked=version_install.require_parked,
+        progress=_set_fast_update_progress,
+      )
+      installed = result
+      updater.restart_after_install()
+      _save_rollback_target(repo_path, previous_branch, previous_commit)
+      update_starpilot_toggles()
+      version_install.require_parked()
+      _set_fast_update_progress(5, "Rebooting device", 100.0, "Selected revision installed. Automatic updates remain paused.")
+      # Keep the action locked until shutdown. Another request must not start
+      # during the reboot notice, or if the hardware reboot call returns.
+      _set_fast_update_state(
+        running=True, stage="rebooting", finishedAt=time.time(),
+        message=f"Installed {branch} @ {target['commit'][:10]}. Rebooting now.",
+        recoveryBackup=result["backup"],
+      )
+      time.sleep(_FAST_UPDATE_REBOOT_NOTICE_SECONDS)
+      version_install.require_parked()
+      HARDWARE.reboot()
+  except Exception as exception:
+    if installed is not None:
+      _set_fast_update_error_state(
+        "The selected version is installed, but the device could not finish restarting. Park and reboot to activate it.", exception,
+      )
+      _set_fast_update_state(recoveryBackup=installed["backup"])
+    else:
+      _set_fast_update_error_state("Selected version installation failed.", exception)
+
 def _fast_update_worker():
   started_at = time.time()
   repo_path = str(_get_openpilot_root())
@@ -3112,6 +3172,7 @@ def _branch_switch_worker(target_branch):
     _set_fast_update_progress(3, "Switching branch", 100.0, f"Now on '{target_branch}'.")
 
     _run_submodule_update_if_needed(repo_path, step=4)
+    version_install.clear_pin()
     _finish_update_and_reboot(
       f"Switched to '{target_branch}'. Device is rebooting now. Please wait for reconnection."
     )
@@ -3181,6 +3242,7 @@ def _rollback_worker():
     _set_fast_update_progress(3, "Applying rollback target", 100.0, f"Now on {target_branch} @ {short_commit}.")
 
     _run_submodule_update_if_needed(repo_path, step=4)
+    version_install.clear_pin()
     try:
       _clear_rollback_target(repo_path)
     except Exception as exception:
@@ -3506,6 +3568,27 @@ def _safe_params_get_bool(key, default=False):
 def _personality_settings_write_locked():
   return _safe_params_get_bool("IsOnroad", default=True) or not _safe_params_get_bool("IsOffroad", default=False)
 
+def _personality_editor_write_locked():
+  def road_state(value):
+    if isinstance(value, bytes):
+      value = value.decode("utf-8", errors="replace")
+    if isinstance(value, str):
+      normalized = value.strip().lower()
+      if normalized in ("1", "true"):
+        return True
+      if normalized in ("0", "false"):
+        return False
+      return None
+    if isinstance(value, bool):
+      return value
+    if isinstance(value, int) and value in (0, 1):
+      return bool(value)
+    return None
+
+  is_onroad = road_state(_safe_params_get_live_raw("IsOnroad"))
+  is_offroad = road_state(_safe_params_get_live_raw("IsOffroad"))
+  return is_onroad is None or is_offroad is None or is_onroad == is_offroad
+
 def _normalize_vasm_config(data):
   if not isinstance(data, dict):
     raise ValueError("Configuration must be a JSON object.")
@@ -3665,18 +3748,20 @@ def _get_detected_truck_tuning():
     return False
 
 
-def _get_effective_legacy_custom_accel_curve(ev_tuning: bool, truck_tuning: bool) -> list[float]:
+def _get_effective_legacy_custom_accel_curve(
+  ev_tuning: bool, truck_tuning: bool, *, acceleration_profile=None, custom_enabled: bool | None = None,
+) -> list[float]:
   target_axis = np.array(ACCELERATION_SPEEDS_MPH, dtype=float) * 0.44704
 
   def sample(values, breakpoints):
     return [round(interpolate_accel_profile(float(speed), values, breakpoints), 4) for speed in target_axis]
 
   preset_curve = get_accel_profile_curve_values(
-    normalize_acceleration_profile(_safe_params_get_live_raw("AccelerationProfile")),
+    normalize_acceleration_profile(_safe_params_get_live_raw("AccelerationProfile") if acceleration_profile is None else acceleration_profile),
     ev_tuning,
     truck_tuning,
   )
-  if not _safe_params_get_bool("CustomAccelProfile"):
+  if not (_safe_params_get_bool("CustomAccelProfile") if custom_enabled is None else custom_enabled):
     return sample(preset_curve, A_CRUISE_MAX_BP_CUSTOM)
 
   raw_legacy = {key: _safe_params_get_live_raw(key) for key in CUSTOM_ACCEL_PROFILE_PARAM_KEYS}
@@ -3722,12 +3807,12 @@ def _get_effective_legacy_following_curve(profile_id: str) -> list[float]:
 
   def follow_value(key: str) -> float:
     try:
-      parsed = float(_safe_params_get_live_raw(key, defaults[key]))
+      parsed = float(_safe_params_get_live_raw(key, defaults[key]) if _safe_params_get_bool("CustomPersonalities") else defaults[key])
     except (TypeError, ValueError):
       parsed = defaults[key]
     if not math.isfinite(parsed):
       parsed = defaults[key]
-    return float(np.clip(parsed, *CURVE_BOUNDS["following"]))
+    return float(np.clip(parsed, 0.5 if key == "TrafficFollow" else CURVE_BOUNDS["following"][0], CURVE_BOUNDS["following"][1]))
 
   if profile_id == "traffic":
     breakpoints = (0.0, 25.0 / CV.MPH_TO_MS)
@@ -3739,6 +3824,43 @@ def _get_effective_legacy_following_curve(profile_id: str) -> list[float]:
   else:
     raise ValueError(f"Unknown personality: {profile_id}")
   return [round(float(point), 4) for point in np.interp(FOLLOWING_SPEEDS_MPH, breakpoints, values)]
+
+
+def _get_dom_personality_reference_curves(ev_tuning: bool) -> dict[str, dict[str, list[float]]]:
+  """Sample Dom's configured base curves, without live driving modifiers.
+
+  Use global powertrain/tuning switches for Dom default, just as the runtime
+  does. Named personality presets have a separate detected-powertrain policy.
+  """
+  from openpilot.starpilot.common.accel_profile import A_CRUISE_MAX_VALS_TRAFFIC_ALL
+
+  truck_tuning = _safe_params_get_bool("TruckTuning")
+  raw_ev = _safe_params_get_live_raw("EVTuning")
+  ev_tuning = (ev_tuning if raw_ev in (None, b"", "") else _safe_params_get_bool("EVTuning")) and not truck_tuning
+  tuning = _safe_params_get_bool("LongitudinalTune")
+  custom_accel = _safe_params_get_bool("AdvancedLongitudinalTune") and _safe_params_get_bool("CustomAccelProfile")
+  acceleration_profile = normalize_acceleration_profile(_safe_params_get_live_raw("AccelerationProfile")) if tuning or custom_accel else 0
+  deceleration_profile = normalize_deceleration_profile(_safe_params_get_live_raw("DecelerationProfile", 1)) if tuning else 1
+  map_gears = _safe_params_get_bool("QOLLongitudinal") and _safe_params_get_bool("MapGears")
+  # A static speed graph uses the normal-gear base; live Eco/Sport, weather and
+  # overspeed/lead modifiers remain on Dom's existing controller paths.
+  if map_gears and _safe_params_get_bool("MapAcceleration") and not custom_accel:
+    acceleration_profile = 0
+  if map_gears and _safe_params_get_bool("MapDeceleration"):
+    deceleration_profile = 0
+  acceleration = _get_effective_legacy_custom_accel_curve(
+    ev_tuning, truck_tuning, acceleration_profile=acceleration_profile, custom_enabled=custom_accel,
+  )
+  traffic_acceleration = [round(interpolate_accel_profile(speed * CV.MPH_TO_MS, A_CRUISE_MAX_VALS_TRAFFIC_ALL), 4)
+                          for speed in ACCELERATION_SPEEDS_MPH]
+  return {
+    profile: {
+      "acceleration": list(traffic_acceleration if profile == "traffic" else acceleration),
+      "braking": [0.35 if profile == "traffic" else {0: 1.0, 1: 0.5, 2: 2.0}[deceleration_profile]] * len(BRAKING_SPEEDS_MPH),
+      "following": _get_effective_legacy_following_curve(profile),
+    }
+    for profile in ("traffic", "aggressive", "standard", "relaxed")
+  }
 
 
 def _get_runtime_default_param_overrides():
@@ -4318,6 +4440,8 @@ def _get_longitudinal_mode_capable():
   except Exception:
     return False
 
+def _get_is_tici_or_tizi():
+  return HARDWARE.get_device_type() in ("tici", "tizi")
 
 def _get_alpha_longitudinal_available():
   cp_bytes = _safe_params_get_live_raw("CarParamsPersistent")
@@ -4519,6 +4643,45 @@ def _build_troubleshoot_payload():
     _build_troubleshoot_section_payload(section_definition, value_types, default_values, layout_metadata, learned_values)
     for section_definition in _TROUBLESHOOT_SECTION_DEFINITIONS
   ]
+
+  shown = {item['key'] for section in sections for item in section['items']}
+  registered = {key for key, *_ in starpilot_default_params}
+  for category in load_settings_catalog() or []:
+    groups = {}
+    for entry in category.get('params', []):
+      key = entry.get('key')
+      if key in shown or key not in registered or key.startswith('LaneCentering') or key == 'LaneCenterOffset':
+        continue
+      if (entry.get("requires_capability") == "HasRivianAngleHarness" and not _get_has_rivian_angle_harness()):
+        continue
+      if key == "TeslaWakeOnCAN" and not supports_tesla_can_wake(params):
+        continue
+      if _params_raw.get_key_flag(key) & ParamKeyFlag.DONT_LOG:
+        continue
+      parent = entry.get('parent_key')
+      title = category['name']
+      if parent:
+        title += ' › ' + str(layout_metadata.get(parent, {}).get('label', parent))
+      groups.setdefault(title, []).append(key)
+      shown.add(key)
+    for title, keys in groups.items():
+      section = _build_troubleshoot_section_payload({'id': 'catalog_' + keys[0], 'title': title, 'keys': keys},
+                                                    value_types, default_values, layout_metadata, learned_values)
+      section['resettable'] = False
+      sections.append(section)
+  for title, keys in [
+      ('Bluetooth Controllers', ['BluetoothEnabled', 'BluetoothDisconnectControllersOffroad', 'WheelControlsEnabled', 'ControllerActionSlots', 'WheelControlMappings']),
+      ('Longitudinal (Speed & Following) › Longitudinal control mode', ['ExperimentalMode', 'ConditionalExperimental', 'ConditionalChill', 'LongitudinalPersonality']),
+      ('Model Manager', ['Model', 'ActiveBigModel', 'ActiveSmallModel', 'ModelSortMode', 'UserFavorites'])]:
+    keys = [key for key in keys if key in registered and key not in shown
+            and not (_params_raw.get_key_flag(key) & ParamKeyFlag.DONT_LOG)]
+    if keys:
+      section = _build_troubleshoot_section_payload({'id': 'extra_' + keys[0], 'title': title, 'keys': keys},
+                                                    value_types, default_values, layout_metadata, learned_values)
+      section['resettable'] = False
+      sections.append(section)
+      shown.update(keys)
+  sections.sort(key=lambda section: section["title"])
 
   return _sanitize_json_value({
     "vehicleStatus": _build_vehicle_fault_status(),
@@ -5173,6 +5336,8 @@ class GalaxySlugMiddleware:
 
 
 def setup(app):
+  from openpilot.starpilot.assets.model_sizes import ModelSizes
+  model_sizes = ModelSizes()
   if not isinstance(app.wsgi_app, GalaxySlugMiddleware):
     app.wsgi_app = GalaxySlugMiddleware(app.wsgi_app)
 
@@ -5623,6 +5788,11 @@ def setup(app):
 
   @app.route("/api/navigation", methods=["POST"])
   def set_navigation():
+    if not routing_configured(params):
+      return {
+        "message": "A Mapbox secret key is required to calculate the on-device route and provide navigation turn desires. Add it in App Keys first."
+      }, 400
+
     destination = normalize_destination_payload(request.json)
     if destination is None:
       return {"message": "Invalid destination payload"}, 400
@@ -5898,14 +6068,17 @@ def setup(app):
     profiles = stored_document["profiles"] if configured else default_personality_profiles(ev_tuning, truck_tuning)
 
     if request.method == "PUT":
-      if _personality_settings_write_locked():
-        return jsonify({"error": "Longitudinal personality profiles can only be changed while off-road."}), 403
+      if _personality_editor_write_locked():
+        return jsonify({"error": "Driving state is unavailable or inconsistent. Refresh before editing personalities."}), 403
       if current_document is None and stored_document is not None:
         return jsonify({"error": "Stored longitudinal personality profiles require a verified migration before editing."}), 409
       data = request.get_json(silent=True)
       required_fields = {"profile", "category", "preset", "curve"}
-      if not isinstance(data, dict) or set(data) not in (required_fields, required_fields | {"expected"}):
-        return jsonify({"error": "Expected profile, category, preset, curve, and optional expected category."}), 400
+      if not isinstance(data, dict) or not required_fields <= set(data) or set(data) - required_fields - {"expected", "reset"}:
+        return jsonify({"error": "Expected profile, category, preset, curve, and optional expected category or reset."}), 400
+      reset = data.get("reset", False)
+      if type(reset) is not bool or (reset and (data["preset"] != "custom" or data["curve"] != [])):
+        return jsonify({"error": "Reset requires Custom and an empty curve; defaults are resolved by the server."}), 400
 
       try:
         current_config = profiles[data["profile"]][data["category"]]
@@ -5914,23 +6087,17 @@ def setup(app):
         )):
           return jsonify({"error": "Saved profile changed. Reload and review it before editing again."}), 409
         curve = data["curve"]
-        if data["preset"] == "custom" and current_config.get("preset") != "custom":
+        initialize_default = data["preset"] == "custom" and current_config["preset"] == "dom_default" and not current_config["curve"]
+        if reset:
+          curve = _get_dom_personality_reference_curves(ev_tuning)[data["profile"]][data["category"]]
+        elif data["preset"] == "custom" and current_config.get("preset") != "custom":
           if curve != []:
             update_personality_profile(
               profiles, data["profile"], data["category"], "custom", curve, ev_tuning, truck_tuning
             )
           legacy_curve = None
-          if current_config.get("preset") == "dom_default":
-            if data["category"] == "acceleration":
-              legacy_curve = _get_effective_legacy_custom_accel_curve(ev_tuning, truck_tuning)
-            elif data["category"] == "braking":
-              legacy_curve = {
-                0: [1.0] * len(BRAKING_SPEEDS_MPH),
-                1: [0.5] * len(BRAKING_SPEEDS_MPH),
-                2: [2.0] * len(BRAKING_SPEEDS_MPH),
-              }[normalize_deceleration_profile(_safe_params_get_live_raw("DecelerationProfile"))]
-            else:
-              legacy_curve = _get_effective_legacy_following_curve(data["profile"])
+          if current_config.get("preset") == "dom_default" and not current_config.get("curve"):
+            legacy_curve = _get_dom_personality_reference_curves(ev_tuning)[data["profile"]][data["category"]]
           curve = initial_custom_curve(
             data["category"], current_config, ev_tuning, truck_tuning, legacy_curve=legacy_curve
           )
@@ -5944,10 +6111,13 @@ def setup(app):
           curve,
           ev_tuning,
           truck_tuning,
+          reset=reset or initialize_default,
         )
       except (KeyError, TypeError, ValueError) as error:
         return jsonify({"error": str(error)}), 400
 
+      if _personality_editor_write_locked():
+        return jsonify({"error": "Driving state is unavailable or inconsistent. Refresh before editing personalities."}), 403
       params.put(PERSONALITY_PROFILES_PARAM, profile_document(profiles, enabled=enabled))
       configured = True
       migration_required = False
@@ -5965,7 +6135,7 @@ def setup(app):
         "following": list(FOLLOWING_PRESETS),
       },
       "profiles": profiles,
-      "reference_curves": personality_reference_curves(ev_tuning, truck_tuning),
+      "reference_curves": _get_dom_personality_reference_curves(ev_tuning),
       "schema_version": PROFILE_SCHEMA_VERSION,
       "speed_breakpoints_mph": {
         "acceleration": list(ACCELERATION_SPEEDS_MPH),
@@ -6014,8 +6184,8 @@ def setup(app):
 
       if key.lower() == PERSONALITY_PROFILES_PARAM.lower():
         return jsonify({"error": "Longitudinal personality profiles must be changed with the Driving Personalities editor."}), 403
-      if key in PERSONALITY_PARKED_PARAM_KEYS and _personality_settings_write_locked():
-        return jsonify({"error": "Driving personality settings can only be changed while parked."}), 403
+      if key in PERSONALITY_PARKED_PARAM_KEYS and _personality_editor_write_locked():
+        return jsonify({"error": "Driving state is unavailable or inconsistent. Refresh before editing personalities."}), 403
       if key in PERSONALITY_PROFILE_ENABLE_PARAM_KEYS and type(data["value"]) is not bool:
         return jsonify({"error": f"{key} must be a JSON boolean."}), 400
       if key in LONGITUDINAL_MODE_KEYS:
@@ -6107,8 +6277,8 @@ def setup(app):
           return jsonify({"error": "CustomPersonalities must be a JSON boolean."}), 400
         enabled = data["value"]
         with _PERSONALITY_PROFILES_WRITE_LOCK:
-          if _personality_settings_write_locked():
-            return jsonify({"error": "Driving personality settings can only be changed while parked."}), 403
+          if _personality_editor_write_locked():
+            return jsonify({"error": "Driving state is unavailable or inconsistent. Refresh before editing personalities."}), 403
           ev_tuning = _get_detected_ev_tuning()
           truck_tuning = (_get_detected_truck_tuning() or params.get_bool("TruckTuning")) and not ev_tuning
           raw_document = _safe_params_get_live_raw(PERSONALITY_PROFILES_PARAM)
@@ -6117,6 +6287,8 @@ def setup(app):
           document = synchronise_profile_document_enabled(
             raw_document, enabled, ev_tuning, truck_tuning,
           )
+          if _personality_editor_write_locked():
+            return jsonify({"error": "Driving state is unavailable or inconsistent. Refresh before editing personalities."}), 403
           updated = {"CustomPersonalities": enabled}
           if enabled:
             if document is None:
@@ -6264,6 +6436,9 @@ def setup(app):
           validate_tesla_can_wake_firmware(params, enabled)
         except RuntimeError as exc:
           return jsonify({"error": str(exc)}), 409
+
+      if key in PERSONALITY_PARKED_PARAM_KEYS and _personality_editor_write_locked():
+        return jsonify({"error": "Driving state is unavailable or inconsistent. Refresh before editing personalities."}), 403
 
       if key in {"LeadIndicator", "HideLeadMarker"}:
         enabled = str_val.strip() in ("1", "true", "True")
@@ -6610,6 +6785,7 @@ def setup(app):
     result["VehicleParked"] = _get_vehicle_parked()
     result["AlphaLongitudinalAvailable"] = _get_alpha_longitudinal_available()
     result["HasRivianAngleHarness"] = _get_has_rivian_angle_harness()
+    result["IsTiciOrTizi"] = _get_is_tici_or_tizi()
 
     for key in ("CalibratedLateralAcceleration", "CalibrationProgress"):
       try:
@@ -6927,7 +7103,9 @@ def setup(app):
     if params.get_bool("IsOnroad"):
       return jsonify({"error": "Cannot change active models while driving."}), 403
 
-    data = request.get_json(silent=True) or {}
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict) or not isinstance(data.get("model"), str):
+      return jsonify({"error": "An explicit model string is required."}), 400
     profile = str(data.get("profile") or "").strip().lower()
     if profile not in ("small", "big"):
       return jsonify({"error": "Model profile must be 'small' or 'big'."}), 400
@@ -7569,7 +7747,9 @@ def setup(app):
       })
 
     models.sort(key=lambda model: (model["series"].lower(), model["label"].lower()))
-    return models
+    return model_sizes.annotate(models, MODELS_PATH,
+                                Path(__file__).resolve().parents[3] / "selfdrive/modeld/models/driving_tinygrad.pkl",
+                                artifact_metadata, model_accelerator_artifact_filename)
 
   @app.route("/api/routes", methods=["GET"])
   def list_routes():
@@ -8529,6 +8709,7 @@ def setup(app):
       **git_data,
       "isOnroad": _safe_params_get_bool("IsOnroad"),
       "automaticUpdates": _safe_params_get_bool("AutomaticUpdates"),
+      "versionPin": version_install.read_pin(repo_path),
       "interruptedUpdateRecovery": _get_interrupted_update_recovery(repo_path, state_data),
       "warning": "Fast update skips backup creation and finalization safeguards.",
     }), 200
@@ -8596,6 +8777,61 @@ def setup(app):
       "running": state_data.get("running", False),
     }), 200
 
+  @app.route("/api/update/versions", methods=["GET"])
+  def get_update_versions():
+    branch = request.args.get("branch", "")
+    repo_path = str(_get_openpilot_root())
+    if not branch or len(branch) > 255 or not _is_valid_git_branch_name(repo_path, branch):
+      return jsonify({"error": "Choose a valid branch to browse its versions."}), 400
+    try:
+      page = int(request.args.get("page", "1"))
+    except (TypeError, ValueError):
+      return jsonify({"error": "Invalid history page."}), 400
+    head = request.args.get("head") or None
+    if page < 1 or (head is not None and not re.fullmatch(r"[0-9a-f]{40}", head)) or (page > 1 and head is None):
+      return jsonify({"error": "Invalid history page or history revision."}), 400
+    if not _remote_git_check_allowed():
+      return jsonify({"error": "Version history will be available once the device clock is synchronized."}), 503
+    try:
+      return jsonify(version_history.list_versions(repo_path, branch, page=page, head=head)), 200
+    except version_history.VersionHistoryError as exception:
+      return jsonify({"error": str(exception)}), 422
+    except Exception:
+      return jsonify({"error": "Unable to load version history. Please try again."}), 503
+
+  @app.route("/api/update/version", methods=["POST"])
+  def run_version_install():
+    payload = request.get_json(silent=True)
+    if not isinstance(payload, dict) or payload.get("confirmed") is not True:
+      return jsonify({"error": "Confirm the selected version before installing."}), 400
+    branch, commit = payload.get("branch"), payload.get("commit")
+    repo_path = str(_get_openpilot_root())
+    if not isinstance(branch, str) or not branch or len(branch) > 255 or not _is_valid_git_branch_name(repo_path, branch):
+      return jsonify({"error": "Invalid branch name."}), 400
+    if not isinstance(commit, str) or (commit != "latest" and not re.fullmatch(r"[0-9a-f]{40}", commit)):
+      return jsonify({"error": "Choose Latest or an exact version from this branch's history."}), 400
+    try:
+      version_install.require_parked()
+    except version_install.InstallError as exception:
+      return jsonify({"error": str(exception)}), 409
+    with _fast_update_lock:
+      if _fast_update_state.get("running"):
+        return jsonify({"error": "Another update action is already in progress."}), 409
+      _fast_update_state.update({
+        "running": True, "stage": "starting", "message": "Preparing selected version...",
+        "lastError": "", "lastBranch": branch, "lastMode": "version-install",
+        "startedAt": time.time(), "finishedAt": 0.0,
+        "progressStep": 1, "progressTotalSteps": _FAST_UPDATE_TOTAL_STEPS,
+        "progressStepPercent": 0.0, "progressPercent": 0.0,
+        "progressLabel": "Preparing selected version", "progressDetail": "Checking branch history and compatibility...",
+      })
+    try:
+      threading.Thread(target=_version_install_worker, args=(branch, commit), daemon=True).start()
+    except Exception as exception:
+      _set_fast_update_error_state("Unable to start version installation.", exception)
+      return jsonify({"error": "Unable to start version installation."}), 503
+    return jsonify({"message": "Version installation started. The device will reboot when complete."}), 202
+
   @app.route("/api/update/agnos_status", methods=["GET"])
   def get_agnos_update_status():
     state_data = _get_fast_update_state()
@@ -8645,6 +8881,8 @@ def setup(app):
   def run_fast_update():
     if params.get_bool("IsOnroad"):
       return jsonify({"error": "Cannot run a fast update while driving."}), 409
+    if version_install.read_pin(str(_get_openpilot_root())):
+      return jsonify({"error": "A historical version is installed. Choose Latest in the version selector to update."}), 409
 
     with _fast_update_lock:
       if _fast_update_state.get("running"):

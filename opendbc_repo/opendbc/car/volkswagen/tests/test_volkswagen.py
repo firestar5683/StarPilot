@@ -8,7 +8,7 @@ from opendbc.car import Bus
 from opendbc.car.structs import CarParams
 from opendbc.car.volkswagen.interface import CarInterface
 from opendbc.car.volkswagen.fingerprints import FW_VERSIONS
-from opendbc.car.volkswagen.mqbcan import volkswagen_mqb_meb_checksum
+from opendbc.car.volkswagen.mqbcan import volkswagen_meb_alt_crc_checksum, volkswagen_mqb_meb_checksum
 from opendbc.car.volkswagen.radar_interface import RadarInterface
 from opendbc.car.volkswagen.values import CAR, DBC, FW_QUERY_CONFIG, WMI, CanBus, VolkswagenFlags, VolkswagenSafetyFlags
 
@@ -74,6 +74,18 @@ class TestVolkswagenPlatformConfigs:
   def test_meb_klr_checksum(self, data_hex):
     data = bytearray.fromhex(data_hex)
     assert volkswagen_mqb_meb_checksum(0x25D, None, data) == data[0]
+
+  @pytest.mark.parametrize(("address", "data_hex"), (
+    (0x0DB, "bb0ffcf0fefe0000fd0fffc0ff0000000200000000000000010000000000000000000000000000000000000000000000"),
+    (0x0FC, "650b1f007ef0b10c0000000000000000ffff1019191c1cfefe0000000000000000e0fff40140ffeb7f0748e481af421f00000000000000000000000000000000"),
+    (0x102, "9f0e7cfa010500000020cb0402000000b703a00000ec0f00000000002cd3ff1f0020a60000000020000000007d5256ab"),
+    (0x10B, "9d06000000007efe000000010000ff01feff000000000000000000000090240000000000000000000000000000000000"),
+    (0x139, "ac0e850b0890132000d019800000000000000000000000003002000500000000"),
+    (0x13D, "2412111101d1060000d0d410d106000000000000000000000000000000000000"),
+  ))
+  def test_meb_gen2_checksum(self, address, data_hex):
+    data = bytearray.fromhex(data_hex)
+    assert volkswagen_meb_alt_crc_checksum(address, None, data) == data[0]
 
   def test_meb_camera_radar_tracks(self):
     cp = self._get_meb_params(CAR.SKODA_ENYAQ_MK1)

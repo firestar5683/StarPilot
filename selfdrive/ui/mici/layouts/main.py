@@ -8,6 +8,8 @@ from openpilot.selfdrive.ui.mici.layouts.onboarding import OnboardingWindow
 from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.widgets.scroller import Scroller
 from openpilot.system.ui.lib.application import gui_app
+from openpilot.system.hardware import PC
+from openpilot.system.ui.lib.wifi_manager import WifiManager
 
 
 ONROAD_DELAY = 2.5  # seconds
@@ -23,6 +25,8 @@ class MiciMainLayout(Scroller):
     self._prev_standstill = False
     self._onroad_time_delay: float | None = None
     self._setup = False
+    # Start monitoring tethering at UI startup; settings may never be opened.
+    self._wifi_manager = None if PC else WifiManager(active=False)
 
     # Initialize widgets
     self._home_layout = MiciHomeLayout()
@@ -65,7 +69,9 @@ class MiciMainLayout(Scroller):
     if self._settings_layout is None:
       from openpilot.selfdrive.ui.mici.layouts.settings.settings import SettingsLayout
 
-      self._settings_layout = SettingsLayout()
+      if self._wifi_manager is None:
+        self._wifi_manager = WifiManager(active=False)
+      self._settings_layout = SettingsLayout(self._wifi_manager)
       self._settings_layout.set_rect(rl.Rectangle(0, 0, gui_app.width, gui_app.height))
     gui_app.push_widget(self._settings_layout)
 

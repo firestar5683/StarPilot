@@ -251,9 +251,16 @@
 
 .map-wrapper {
   height: 100vh;
-  left: var(--sidebar-width);
+  left: 0;
   position: absolute;
-  width: calc(100vw - var(--sidebar-width));
+  width: 100vw;
+}
+
+@media only screen and (min-width: 768px) {
+  html.galaxy-sidebar-pinned .map-wrapper {
+    left: var(--sidebar-width);
+    width: calc(100vw - var(--sidebar-width));
+  }
 }
 
 .mapboxgl-popup-content {

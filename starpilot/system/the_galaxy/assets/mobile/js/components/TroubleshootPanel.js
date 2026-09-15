@@ -6,6 +6,7 @@ function formatValue(value) {
   if (typeof value === "boolean") return value ? "On" : "Off"
   if (typeof value === "number") return Number.isInteger(value) ? String(value) : String(Number(value.toFixed(4)))
   if (value === null || value === undefined) return "n/a"
+  if (typeof value === "object") return JSON.stringify(value)
   const text = String(value).trim()
   return text || "(empty)"
 }
@@ -18,6 +19,7 @@ function formatLearnedValue(value) {
 
 function valuesMatch(left, right) {
   if (left === right) return true
+  if (left && right && typeof left === "object" && typeof right === "object") return JSON.stringify(left) === JSON.stringify(right)
   if ((left === null || left === undefined) && (right === null || right === undefined)) return true
   if (typeof left === "number" && typeof right === "number") return Math.abs(left - right) < 1e-9
   const lt = String(left ?? "").trim()
@@ -39,6 +41,7 @@ export const TroubleshootPanel = {
       busySection: "",
       error: "",
       onlyNonDefault: false,
+      search: "",
       vehicleStatus: { available: false, summary: "", summarySeverity: "neutral", items: [] },
       snapshot: [],
       sections: [],
@@ -50,8 +53,7 @@ export const TroubleshootPanel = {
       return this.sections.reduce((count, s) => count + (Array.isArray(s.items) ? s.items.filter((i) => !valuesMatch(i?.value, i?.defaultValue)).length : 0), 0)
     },
     visibleSections() {
-      if (!this.onlyNonDefault) return this.sections
-      return this.sections.filter((s) => (Array.isArray(s.items) ? s.items.filter((i) => !valuesMatch(i?.value, i?.defaultValue)).length : 0) > 0)
+      return this.sections.filter((section) => this.itemsVisible(section).length > 0)
     },
   },
   mounted() { this.load() },
@@ -61,7 +63,9 @@ export const TroubleshootPanel = {
     isChanged(item) { return !valuesMatch(item?.value, item?.defaultValue) },
     itemsVisible(section) {
       const items = Array.isArray(section?.items) ? section.items : []
-      return this.onlyNonDefault ? items.filter((i) => !valuesMatch(i?.value, i?.defaultValue)) : items
+      const query = this.search.trim().toLowerCase()
+      return items.filter((i) => (!this.onlyNonDefault || !valuesMatch(i?.value, i?.defaultValue)) &&
+        (!query || `${section.title} ${i.key} ${i.label} ${formatValue(i.value)}`.toLowerCase().includes(query)))
     },
     severity(sev) {
       const s = String(sev || "neutral").toLowerCase()
@@ -167,6 +171,7 @@ export const TroubleshootPanel = {
               <span class="gx-switch__thumb"></span>
             </label>
           </div>
+          <input class="gx-field gx-field--full" type="search" v-model="search" placeholder="Search settings or categories..." aria-label="Search diagnostics" />
           <GxNotice v-if="error" tone="danger" :text="error" style="margin:var(--sp-2) 0 0;" />
           <div class="gx-row__desc"><strong>Onroad:</strong> {{ isOnroad ? 'Yes' : 'No' }}</div>
           <div class="gx-row__desc"><strong>Changed Settings:</strong> {{ countNonDefault }}</div>

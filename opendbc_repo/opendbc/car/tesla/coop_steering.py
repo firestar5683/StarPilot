@@ -62,6 +62,9 @@ class CooperativeSteeringController:
     self.angle_override = 0.0
     self.resume_rate_limiter_delta = SteerRateLimiter()
     self.resume_rate_limiter = SteerRateLimiter()
+    self.resume_limit_error_deg = 0.0
+    self.cooperative_limit_error_deg = 0.0
+    self.cooperative_offset_deg = 0.0
 
   def reset_override_state(self, apply_angle: float) -> None:
     self.apply_angle_last = apply_angle
@@ -105,19 +108,25 @@ class CooperativeSteeringController:
     return self.resume_rate_limiter.update(apply_angle, angle_rate_delta)
 
   def update(self, apply_angle: float, lat_active: bool, enabled: bool, CS, VM: VehicleModel) -> tuple[float, bool]:
+    self.resume_limit_error_deg = 0.0
+    self.cooperative_limit_error_deg = 0.0
+    self.cooperative_offset_deg = 0.0
     if not enabled:
       self.reset_resume_state(apply_angle)
       self.reset_override_state(apply_angle)
       return apply_angle, lat_active
 
+    requested_angle = apply_angle
     apply_angle = self.apply_resume_rate_limit(lat_active, apply_angle)
+    self.resume_limit_error_deg = abs(requested_angle - apply_angle)
     if not lat_active:
       self.reset_override_state(apply_angle)
       return apply_angle, False
 
     apply_angle_delta = apply_angle - self.apply_angle_last
     self.apply_angle_last = apply_angle
-    apply_angle += self.update_override_angle(apply_angle_delta, CS.out.steeringTorque, CS.out.vEgo, VM)
+    self.cooperative_offset_deg = self.update_override_angle(apply_angle_delta, CS.out.steeringTorque, CS.out.vEgo, VM)
+    apply_angle += self.cooperative_offset_deg
 
     limited_angle = apply_steer_angle_limits_vm(
       apply_angle,
@@ -129,5 +138,6 @@ class CooperativeSteeringController:
       VM,
     )
     self.coop_apply_angle_last = limited_angle
+    self.cooperative_limit_error_deg = abs(apply_angle - limited_angle)
     self.unwind_override_angle(apply_angle - limited_angle)
     return limited_angle, True

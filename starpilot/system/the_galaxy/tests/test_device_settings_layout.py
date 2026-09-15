@@ -89,6 +89,37 @@ def test_galaxy_new_ui_is_the_visible_default_choice():
   assert "Galaxy (old)" in galaxy_default["description"]
 
 
+def test_driving_personality_controls_are_not_parked_only():
+  params = {
+    param["key"]: param
+    for section in _layout()
+    for param in section.get("params", [])
+  }
+  personality_keys = {
+    "CustomPersonalities",
+    *{f"{profile}PersonalityProfile" for profile in ("Traffic", "Aggressive", "Standard", "Relaxed")},
+    "TrafficFollow", "AggressiveFollow", "AggressiveFollowHigh", "StandardFollow", "StandardFollowHigh",
+    "RelaxedFollow", "RelaxedFollowHigh",
+    *{
+      f"{profile}{suffix}"
+      for profile in ("Traffic", "Aggressive", "Standard", "Relaxed")
+      for suffix in ("JerkAcceleration", "JerkDeceleration", "JerkDanger", "JerkSpeedDecrease", "JerkSpeed")
+    },
+  }
+
+  assert personality_keys <= params.keys()
+  assert all(params[key].get("requires_offroad") is not True for key in personality_keys)
+
+
+def test_brake_status_toggle_is_galaxy_only():
+  setting = _params_by_section(_layout())["Visual (Display & UI)"]["ShowBrakeStatus"]
+
+  assert _declared_default("ShowBrakeStatus") == "0"
+  assert setting["galaxy_only"] is True
+  assert setting["settings_tier"] == "simple"
+  assert setting["ui_type"] == "toggle"
+
+
 def test_ford_lateral_controls_are_ford_only_and_galaxy_only():
   lateral = _params_by_section(_layout())["Lateral (Steering)"]
   ford_keys = {

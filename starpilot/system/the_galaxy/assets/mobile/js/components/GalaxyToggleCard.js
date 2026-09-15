@@ -10,6 +10,10 @@ import { t } from "../i18n.js"
 
 const PANDA_FIRMWARE_TOGGLE_KEYS = new Set(["IgnoreIgnitionLine", "RemoteStartBootsComma", "HKGRemoteStartBootsComma", "TeslaWakeOnCAN"])
 
+const FINE_SCRUB_HOLD_MS = 300
+const FINE_SCRUB_FACTOR = 5
+const FINE_SCRUB_JITTER_PX = 4
+
 export const GalaxyToggleCard = {
   name: "GalaxyToggleCard",
   components: { FavoritesEditor, ScreenBrightnessControl },
@@ -31,6 +35,8 @@ export const GalaxyToggleCard = {
       endpointLoading: false,
       preview: undefined,
       interacting: false,
+      fineScrub: null,
+      isFineScrubbing: false,
     }
   },
   computed: {
@@ -128,19 +134,95 @@ export const GalaxyToggleCard = {
       if (Math.abs(next - current) <= this.epsilon) return
       this.commit(next)
     },
+    snap(raw) {
+      return snapNumericToBoundsAndStep(raw, this.bounds, this.precision)
+    },
+    clearHoldTimer() {
+      if (this._holdTimer) {
+        clearTimeout(this._holdTimer)
+        this._holdTimer = null
+      }
+    },
+    startHoldTimer() {
+      this.clearHoldTimer()
+      if (!this.fineScrub || this.fineScrub.active) return
+      this._holdTimer = setTimeout(() => {
+        this.activateFineScrub()
+      }, FINE_SCRUB_HOLD_MS)
+    },
+    activateFineScrub() {
+      if (!this.fineScrub || this.fineScrub.active) return
+      this.fineScrub.active = true
+      this.fineScrub.baseValue = this.snap(this.currentValue) ?? Number(this.bounds.min)
+      this.fineScrub.baseX = this.fineScrub.lastX
+      this.isFineScrubbing = true
+      try { navigator.vibrate?.(15) } catch (_) {}
+    },
     onSliderInput(e) {
+      if (this.fineScrub?.active) {
+        if (this.$refs.slider) this.$refs.slider.value = this.currentValue
+        return
+      }
       this.beginInteract()
       this.preview = Number(e.target.value)
+      this.startHoldTimer()
     },
     onSliderCommit(e) {
+      if (this.fineScrub?.active) return
       this.interacting = false
       this.flushSlider(e.target.value)
     },
     onSliderBlur(e) {
-      if (this.interacting) this.onSliderCommit(e)
+      if (this.interacting && !this.fineScrub) this.onSliderCommit(e)
     },
-    snap(raw) {
-      return snapNumericToBoundsAndStep(raw, this.bounds, this.precision)
+    onSliderPointerDown(e) {
+      this.beginInteract()
+      try { e.target.setPointerCapture?.(e.pointerId) } catch (err) {}
+      const rect = e.target.getBoundingClientRect()
+      this.fineScrub = {
+        active: false,
+        baseValue: this.snap(this.currentValue) ?? Number(this.bounds.min),
+        baseX: e.clientX,
+        lastX: e.clientX,
+        min: Number(this.bounds.min),
+        max: Number(this.bounds.max),
+        track: rect.width || 200,
+        pointerId: e.pointerId,
+      }
+      this.startHoldTimer()
+    },
+    onSliderPointerMove(e) {
+      const scrub = this.fineScrub
+      if (!scrub) return
+
+      if (!scrub.active) {
+        if (Math.abs(e.clientX - scrub.lastX) > FINE_SCRUB_JITTER_PX) {
+          scrub.lastX = e.clientX
+          this.startHoldTimer()
+        }
+        return
+      }
+
+      e.preventDefault()
+      if (!Number.isFinite(scrub.min) || !Number.isFinite(scrub.max) || !Number.isFinite(scrub.track) || scrub.track <= 0) return
+      const totalSpan = scrub.max - scrub.min
+      const dx = e.clientX - scrub.baseX
+      const raw = scrub.baseValue + (dx * totalSpan) / scrub.track / FINE_SCRUB_FACTOR
+      const next = this.snap(raw)
+      if (next === null) return
+      this.preview = next
+      if (this.$refs.slider) this.$refs.slider.value = next
+    },
+    onSliderPointerEnd(e) {
+      this.clearHoldTimer()
+      const wasFine = this.isFineScrubbing
+      this.fineScrub = null
+      this.isFineScrubbing = false
+      try { e.target.releasePointerCapture?.(e.pointerId) } catch (_) {}
+      this.interacting = false
+      if (wasFine || this.preview !== undefined) {
+        this.flushSlider(this.currentValue)
+      }
     },
     async resetToDefault() {
       const defaults = await api.getDefaults()
@@ -184,6 +266,9 @@ export const GalaxyToggleCard = {
   mounted() {
     if (this.param.options_endpoint) this.loadEndpointOptions()
   },
+  unmounted() {
+    this.clearHoldTimer()
+  },
   template: `
     <ScreenBrightnessControl v-if="param.ui_type === 'brightness'" :param="param" :value="value" :values="values"
       :locked="locked" :lock-message="lockMessage" @change="$emit('change', $event)" />
@@ -207,24 +292,33 @@ export const GalaxyToggleCard = {
           <FavoritesEditor />
         </div>
 
-        <div v-else-if="isSlider" class="gx-slider-row">
-          <span class="gx-row__value" style="min-width:64px; text-align:right;">{{ sliderDisplay }}</span>
-          <input type="range" class="gx-slider" :min="bounds.min" :max="bounds.max" :step="bounds.step"
+        <div v-else-if="isSlider" class="gx-slider-row" :class="{ 'is-fine-scrubbing': isFineScrubbing }">
+          <div class="gx-slider-header" style="display:flex; justify-content:space-between; align-items:center; width:100%;">
+            <div style="display:flex; align-items:baseline; gap:8px;">
+              <span class="gx-row__value">{{ sliderDisplay }}</span>
+              <span v-if="interacting" class="gx-slider-hint" style="font-size:0.75rem; opacity:0.6; user-select:none;">
+                {{ isFineScrubbing ? tr("Fine scrubbing") : tr("Hold to fine scrub") }}
+              </span>
+            </div>
+            <button class="gx-slider-reset" :disabled="locked || updating" @click="resetToDefault">{{ tr("Default") }}</button>
+          </div>
+          <input ref="slider" type="range" class="gx-slider" :min="bounds.min" :max="bounds.max" :step="bounds.step"
             :value="currentValue" :disabled="locked || updating"
             @input="onSliderInput" @change="onSliderCommit" @blur="onSliderBlur"
+            @pointerdown="onSliderPointerDown" @pointermove="onSliderPointerMove"
+            @pointerup="onSliderPointerEnd" @pointercancel="onSliderPointerEnd"
             @touchstart="beginInteract" @mousedown="beginInteract" @keydown="beginInteract" />
           <div v-if="displayParam.unit_type" class="gx-slider-meta">
             <span>{{ sliderRangeDisplay }}</span>
             <span>{{ tr("Step:") }} {{ sliderStepDisplay }}</span>
           </div>
-          <button class="gx-slider-reset" :disabled="locked || updating" @click="resetToDefault">{{ tr("Default") }}</button>
         </div>
 
-        <select v-else-if="isSelect" class="gx-field" :disabled="locked || updating" :value="String(value ?? '')" @change="onSelect">
+        <GalaxySelect v-else-if="isSelect" class="gx-field" :disabled="locked || updating" :value="String(value ?? '')" @change="onSelect">
           <option v-if="optionsLoading" value="">{{ tr("Loading...") }}</option>
           <option v-else-if="!selectOptions.length" value="">{{ tr("No options available") }}</option>
           <option v-for="opt in selectOptions" :key="String(opt.value)" :value="String(opt.value)">{{ tr(opt.label, opt.label) }}</option>
-        </select>
+        </GalaxySelect>
 
         <input v-else-if="isText" class="gx-field" :type="param.input_type || 'text'" :value="value ?? ''"
           :placeholder="param.placeholder || ''" :disabled="locked || updating" @change="onText" />

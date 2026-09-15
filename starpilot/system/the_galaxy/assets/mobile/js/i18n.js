@@ -105,6 +105,120 @@ const TRANSLATIONS = {
   },
 }
 
+// The settings catalog is shared with the native UI, so most of its labels
+// arrive from the device rather than this bundle. These common section names
+// and controls keep the Galaxy settings screen translated as well.
+const MORE_TRANSLATIONS = {
+  es: {
+    Favorites: "Favoritos", "Lateral (Steering)": "Lateral (Dirección)",
+    "Longitudinal (Speed & Following)": "Longitudinal (Velocidad y seguimiento)",
+    "Vision Speed Limits": "Límites de velocidad por visión", "Visual (Display & UI)": "Visual (Pantalla e interfaz)",
+    "Sounds & Alerts": "Sonidos y alertas", Vehicle: "Vehículo", "Wheel Controls": "Controles del volante",
+    "Device & Data": "Dispositivo y datos", Developer: "Desarrollador", "Advanced Lateral Tuning": "Ajuste lateral avanzado",
+    "Advanced steering control changes to fine-tune how openpilot drives.": "Cambios avanzados en el control de la dirección para ajustar cómo conduce openpilot.",
+    "Always On Lateral": "Lateral siempre activo", "openpilot's steering remains active even when the accelerator or brake pedals are pressed.": "La dirección de openpilot permanece activa incluso cuando se pisan el acelerador o los frenos.",
+    "Lane Changes": "Cambios de carril", "Allow openpilot to change lanes.": "Permitir que openpilot cambie de carril.",
+    "Lateral Tuning": "Ajuste lateral", "Miscellaneous steering control changes to fine-tune how openpilot drives.": "Cambios diversos del control de la dirección para ajustar cómo conduce openpilot.",
+    "Quality of Life": "Calidad de vida", "Steering control changes to fine-tune how openpilot drives.": "Cambios del control de la dirección para ajustar cómo conduce openpilot.",
+    "Enable V-ASM": "Activar V-ASM", "Favorites": "Favoritos", "Device & Data": "Dispositivo y datos",
+    Routes: "Rutas", Route: "Ruta", Selected: "Seleccionada", Recommended: "Recomendada", Alternative: "Alternativa", Select: "Seleccionar", "Choose a route": "Elegir una ruta",
+  },
+  fr: {
+    Favorites: "Favoris", "Lateral (Steering)": "Latéral (Direction)",
+    "Longitudinal (Speed & Following)": "Longitudinal (Vitesse et suivi)",
+    "Vision Speed Limits": "Limites de vitesse par vision", "Visual (Display & UI)": "Visuel (Affichage et interface)",
+    "Sounds & Alerts": "Sons et alertes", Vehicle: "Véhicule", "Wheel Controls": "Commandes au volant",
+    "Device & Data": "Appareil et données", Developer: "Développeur", "Advanced Lateral Tuning": "Réglage latéral avancé",
+    "Advanced steering control changes to fine-tune how openpilot drives.": "Modifications avancées de la direction pour régler finement le comportement d’openpilot.",
+    "Always On Lateral": "Direction latérale toujours active", "openpilot's steering remains active even when the accelerator or brake pedals are pressed.": "La direction d’openpilot reste active même lorsque l’accélérateur ou les freins sont enfoncés.",
+    "Lane Changes": "Changements de voie", "Allow openpilot to change lanes.": "Autoriser openpilot à changer de voie.",
+    "Lateral Tuning": "Réglage latéral", "Miscellaneous steering control changes to fine-tune how openpilot drives.": "Divers réglages de direction pour ajuster finement le comportement d’openpilot.",
+    "Quality of Life": "Confort d’utilisation", "Steering control changes to fine-tune how openpilot drives.": "Réglages de direction pour ajuster finement le comportement d’openpilot.",
+    "Enable V-ASM": "Activer V-ASM",
+    Routes: "Itinéraires", Route: "Itinéraire", Selected: "Sélectionné", Recommended: "Recommandé", Alternative: "Alternative", Select: "Sélectionner", "Choose a route": "Choisir un itinéraire",
+  },
+  ko: {
+    Favorites: "즐겨찾기", "Lateral (Steering)": "횡방향 (조향)",
+    "Longitudinal (Speed & Following)": "종방향 (속도 및 추종)",
+    "Vision Speed Limits": "비전 속도 제한", "Visual (Display & UI)": "시각 (디스플레이 및 UI)",
+    "Sounds & Alerts": "소리 및 경고", Vehicle: "차량", "Wheel Controls": "휠 컨트롤",
+    "Device & Data": "장치 및 데이터", Developer: "개발자", "Advanced Lateral Tuning": "고급 횡방향 튜닝",
+    "Advanced steering control changes to fine-tune how openpilot drives.": "openpilot의 주행 방식을 세밀하게 조정하는 고급 조향 제어 변경입니다.",
+    "Always On Lateral": "항상 활성화된 횡방향 제어", "openpilot's steering remains active even when the accelerator or brake pedals are pressed.": "가속 페달이나 브레이크 페달을 밟아도 openpilot 조향이 계속 활성화됩니다.",
+    "Lane Changes": "차선 변경", "Allow openpilot to change lanes.": "openpilot이 차선을 변경하도록 허용합니다.",
+    "Lateral Tuning": "횡방향 튜닝", "Miscellaneous steering control changes to fine-tune how openpilot drives.": "openpilot의 주행을 세밀하게 조정하는 기타 조향 제어 변경입니다.",
+    "Quality of Life": "편의 기능", "Steering control changes to fine-tune how openpilot drives.": "openpilot의 주행을 세밀하게 조정하는 조향 제어 변경입니다.",
+    "Enable V-ASM": "V-ASM 활성화",
+    Routes: "경로", Route: "경로", Selected: "선택됨", Recommended: "추천", Alternative: "대안", Select: "선택", "Choose a route": "경로 선택",
+  },
+  "zh-CHS": {
+    Favorites: "收藏", "Lateral (Steering)": "横向（转向）",
+    "Longitudinal (Speed & Following)": "纵向（速度和跟车）", "Vision Speed Limits": "视觉限速",
+    "Visual (Display & UI)": "视觉（显示和界面）", "Sounds & Alerts": "声音和提醒", Vehicle: "车辆",
+    "Wheel Controls": "方向盘控制", "Device & Data": "设备和数据", Developer: "开发者", "Advanced Lateral Tuning": "高级横向调校",
+    "Advanced steering control changes to fine-tune how openpilot drives.": "用于精细调整 openpilot 驾驶方式的高级转向控制设置。",
+    "Always On Lateral": "始终启用横向控制", "openpilot's steering remains active even when the accelerator or brake pedals are pressed.": "即使踩下加速或制动踏板，openpilot 转向仍保持启用。",
+    "Lane Changes": "变道", "Allow openpilot to change lanes.": "允许 openpilot 变道。", "Lateral Tuning": "横向调校",
+    "Miscellaneous steering control changes to fine-tune how openpilot drives.": "用于精细调整 openpilot 驾驶方式的其他转向控制设置。",
+    "Quality of Life": "使用体验", "Steering control changes to fine-tune how openpilot drives.": "用于精细调整 openpilot 驾驶方式的转向控制设置。",
+    "Enable V-ASM": "启用 V-ASM",
+    Routes: "路线", Route: "路线", Selected: "已选择", Recommended: "推荐", Alternative: "备选", Select: "选择", "Choose a route": "选择路线",
+  },
+}
+
+Object.keys(MORE_TRANSLATIONS).forEach((code) => Object.assign(TRANSLATIONS[code], MORE_TRANSLATIONS[code]))
+
+// A word-level fallback covers the many device-provided descriptions and the
+// older Galaxy views that still contain literal English labels. Exact phrases
+// above always win; this fallback only runs for a non-English selection.
+const TERM_TRANSLATIONS = {
+  es: {
+    "Advanced": "Avanzado", "Always On": "Siempre activo", "Lateral": "Lateral", "Steering": "Dirección", "Longitudinal": "Longitudinal", "Speed": "Velocidad", "Following": "Seguimiento", "Vision": "Visión", "Limits": "Límites", "Visual": "Visual", "Display": "Pantalla", "Sounds": "Sonidos", "Alerts": "Alertas", "Vehicle": "Vehículo", "Wheel": "Volante", "Controls": "Controles", "Device": "Dispositivo", "Data": "Datos", "Developer": "Desarrollador", "Favorites": "Favoritos", "Main": "Principal", "Tools": "Herramientas", "Recordings": "Grabaciones", "Cameras": "Cámaras", "Monitoring": "monitoreo", "Logs": "Registros", "Diagnostics": "diagnósticos", "Model": "Modelo", "Manager": "administrador", "Navigation": "Navegación", "Maps": "mapas", "System": "Sistema", "Laboratory": "Laboratorio", "Plots": "Gráficas", "Testing": "Pruebas", "Ground": "Área", "Theme": "Tema", "Maker": "creador", "Home": "Inicio", "Toggles": "Interruptores", "Install": "Instalar", "Update": "Actualizar", "Available": "disponible", "Loading": "Cargando", "Error": "Error", "Retry": "Reintentar", "Save": "Guardar", "Cancel": "Cancelar", "Close": "Cerrar", "Delete": "Eliminar", "All": "todo", "Search": "Buscar", "Clear": "Borrar", "Manage": "Administrar", "Connected": "Conectado", "Disconnect": "Desconectar", "Connect": "Conectar", "Pair": "Emparejar", "Refresh": "Actualizar", "Status": "Estado", "Samples": "Muestras", "Duration": "Duración", "Distance": "Distancia", "drives": "viajes", "hours": "horas", "engaged": "activado", "Onroad": "En carretera", "Offroad": "Fuera de carretera", "Enabled": "Activado", "Disabled": "Desactivado", "Default": "Predeterminado", "Working": "Procesando", "Run": "Ejecutar", "Reset": "Restablecer", "Download": "Descargar", "Network": "Red", "Current": "Actual", "Change": "Cambiar", "Changes": "Cambios", "Allow": "Permitir", "Use": "Usar", "Show": "Mostrar", "Hide": "Ocultar", "Enable": "Activar", "Disable": "Desactivar", "Automatic": "Automático", "Settings": "Configuración", "Language": "Idioma", "Routes": "Rutas", "Selected": "Seleccionada", "Recommended": "Recomendada", "Alternative": "Alternativa",
+  },
+  fr: {
+    "Advanced": "Avancé", "Always On": "Toujours actif", "Lateral": "Latéral", "Steering": "Direction", "Longitudinal": "Longitudinal", "Speed": "Vitesse", "Following": "Suivi", "Vision": "Vision", "Limits": "Limites", "Visual": "Visuel", "Display": "Affichage", "Sounds": "Sons", "Alerts": "Alertes", "Vehicle": "Véhicule", "Wheel": "Volant", "Controls": "Commandes", "Device": "Appareil", "Data": "Données", "Developer": "Développeur", "Favorites": "Favoris", "Main": "Principal", "Tools": "Outils", "Recordings": "Enregistrements", "Cameras": "Caméras", "Monitoring": "surveillance", "Logs": "Journaux", "Diagnostics": "diagnostics", "Model": "Modèle", "Manager": "gestionnaire", "Navigation": "Navigation", "Maps": "cartes", "System": "Système", "Laboratory": "Laboratoire", "Plots": "Graphiques", "Testing": "Tests", "Ground": "Zone", "Theme": "Thème", "Maker": "créateur", "Home": "Accueil", "Toggles": "Options", "Install": "Installer", "Update": "Mettre à jour", "Available": "disponible", "Loading": "Chargement", "Error": "Erreur", "Retry": "Réessayer", "Save": "Enregistrer", "Cancel": "Annuler", "Close": "Fermer", "Delete": "Supprimer", "All": "tout", "Search": "Rechercher", "Clear": "Effacer", "Manage": "Gérer", "Connected": "Connecté", "Disconnect": "Déconnecter", "Connect": "Connecter", "Pair": "Associer", "Refresh": "Actualiser", "Status": "État", "Samples": "Échantillons", "Duration": "Durée", "Distance": "Distance", "drives": "trajets", "hours": "heures", "engaged": "activé", "Onroad": "En route", "Offroad": "Hors route", "Enabled": "Activé", "Disabled": "Désactivé", "Default": "Par défaut", "Working": "En cours", "Run": "Exécuter", "Reset": "Réinitialiser", "Download": "Télécharger", "Network": "Réseau", "Current": "Actuel", "Change": "Modifier", "Changes": "Modifications", "Allow": "Autoriser", "Use": "Utiliser", "Show": "Afficher", "Hide": "Masquer", "Enable": "Activer", "Disable": "Désactiver", "Automatic": "Automatique", "Settings": "Paramètres", "Language": "Langue", "Routes": "Itinéraires", "Selected": "Sélectionné", "Recommended": "Recommandé", "Alternative": "Alternative",
+  },
+  ko: {
+    "Advanced": "고급", "Always On": "항상 활성화", "Lateral": "횡방향", "Steering": "조향", "Longitudinal": "종방향", "Speed": "속도", "Following": "추종", "Vision": "비전", "Limits": "제한", "Visual": "시각", "Display": "디스플레이", "Sounds": "소리", "Alerts": "경고", "Vehicle": "차량", "Wheel": "휠", "Controls": "제어", "Device": "장치", "Data": "데이터", "Developer": "개발자", "Favorites": "즐겨찾기", "Main": "메인", "Tools": "도구", "Recordings": "녹화", "Cameras": "카메라", "Monitoring": "모니터링", "Logs": "로그", "Diagnostics": "진단", "Model": "모델", "Manager": "관리자", "Navigation": "내비게이션", "Maps": "지도", "System": "시스템", "Laboratory": "연구소", "Plots": "플롯", "Testing": "테스트", "Ground": "공간", "Theme": "테마", "Maker": "제작", "Home": "홈", "Toggles": "토글", "Install": "설치", "Update": "업데이트", "Available": "사용 가능", "Loading": "로드 중", "Error": "오류", "Retry": "재시도", "Save": "저장", "Cancel": "취소", "Close": "닫기", "Delete": "삭제", "All": "모두", "Search": "검색", "Clear": "지우기", "Manage": "관리", "Connected": "연결됨", "Disconnect": "연결 해제", "Connect": "연결", "Pair": "페어링", "Refresh": "새로 고침", "Status": "상태", "Samples": "샘플", "Duration": "시간", "Distance": "거리", "drives": "주행", "hours": "시간", "engaged": "활성화", "Onroad": "주행 중", "Offroad": "오프로드", "Enabled": "활성화", "Disabled": "비활성화", "Default": "기본값", "Working": "처리 중", "Run": "실행", "Reset": "초기화", "Download": "다운로드", "Network": "네트워크", "Current": "현재", "Change": "변경", "Changes": "변경 사항", "Allow": "허용", "Use": "사용", "Show": "표시", "Hide": "숨기기", "Enable": "활성화", "Disable": "비활성화", "Automatic": "자동", "Settings": "설정", "Language": "언어", "Routes": "경로", "Selected": "선택됨", "Recommended": "추천", "Alternative": "대안",
+  },
+  "zh-CHS": {
+    "Advanced": "高级", "Always On": "始终启用", "Lateral": "横向", "Steering": "转向", "Longitudinal": "纵向", "Speed": "速度", "Following": "跟车", "Vision": "视觉", "Limits": "限制", "Visual": "视觉", "Display": "显示", "Sounds": "声音", "Alerts": "提醒", "Vehicle": "车辆", "Wheel": "方向盘", "Controls": "控制", "Device": "设备", "Data": "数据", "Developer": "开发者", "Favorites": "收藏", "Main": "主菜单", "Tools": "工具", "Recordings": "录制", "Cameras": "摄像头", "Monitoring": "监控", "Logs": "日志", "Diagnostics": "诊断", "Model": "模型", "Manager": "管理器", "Navigation": "导航", "Maps": "地图", "System": "系统", "Laboratory": "实验室", "Plots": "图表", "Testing": "测试", "Ground": "区域", "Theme": "主题", "Maker": "制作器", "Home": "主页", "Toggles": "开关", "Install": "安装", "Update": "更新", "Available": "可用", "Loading": "加载中", "Error": "错误", "Retry": "重试", "Save": "保存", "Cancel": "取消", "Close": "关闭", "Delete": "删除", "All": "全部", "Search": "搜索", "Clear": "清除", "Manage": "管理", "Connected": "已连接", "Disconnect": "断开连接", "Connect": "连接", "Pair": "配对", "Refresh": "刷新", "Status": "状态", "Samples": "样本", "Duration": "时长", "Distance": "距离", "drives": "驾驶次数", "hours": "小时", "engaged": "已启用", "Onroad": "行驶中", "Offroad": "非行驶", "Enabled": "已启用", "Disabled": "已停用", "Default": "默认", "Working": "处理中", "Run": "运行", "Reset": "重置", "Download": "下载", "Network": "网络", "Current": "当前", "Change": "更改", "Changes": "更改内容", "Allow": "允许", "Use": "使用", "Show": "显示", "Hide": "隐藏", "Enable": "启用", "Disable": "停用", "Automatic": "自动", "Settings": "设置", "Language": "语言", "Routes": "路线", "Selected": "已选择", "Recommended": "推荐", "Alternative": "备选",
+  },
+}
+
+Object.assign(TERM_TRANSLATIONS.es, { Route: "Ruta", Select: "Seleccionar" })
+Object.assign(TERM_TRANSLATIONS.fr, { Route: "Itinéraire", Select: "Sélectionner" })
+Object.assign(TERM_TRANSLATIONS.ko, { Route: "경로", Select: "선택" })
+Object.assign(TERM_TRANSLATIONS["zh-CHS"], { Route: "路线", Select: "选择" })
+
+function escapeRegExp(value) {
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
+}
+
+const TERM_REPLACERS = Object.fromEntries(Object.entries(TERM_TRANSLATIONS).map(([code, terms]) => [
+  code,
+  Object.entries(terms)
+    .sort(([a], [b]) => b.length - a.length)
+    .map(([source, target]) => [new RegExp(`(^|[^A-Za-z])${escapeRegExp(source)}(?=$|[^A-Za-z])`, "gi"), target, source.match(/[A-Za-z]+/g)?.length || 1]),
+]))
+
+function translateText(value) {
+  const source = String(value ?? "")
+  const exact = TRANSLATIONS[languageState?.code]?.[source]
+  if (exact) return exact
+  if (!languageState || languageState.code === "en" || /https?:\/\//i.test(source)) return source
+  let translated = source
+  let replacedWords = 0
+  for (const [pattern, replacement, wordCount] of TERM_REPLACERS[languageState.code] || []) {
+    translated = translated.replace(pattern, (_, prefix) => {
+      replacedWords += wordCount
+      return `${prefix}${replacement}`
+    })
+  }
+  const sourceWords = source.match(/[A-Za-z]+/g)?.length || 0
+  return sourceWords >= 4 && replacedWords / sourceWords < 0.8 ? source : translated
+}
+
 function storageValue() {
   try { return window.localStorage.getItem(STORAGE_KEY) || "en" } catch (e) { return "en" }
 }
@@ -116,17 +230,92 @@ export function normalizeLanguage(value) {
 
 export const languageState = reactive({ code: normalizeLanguage(storageValue()) })
 
+const translatedTextNodes = new WeakMap()
+const translatedAttributes = new WeakMap()
+let domObserver = null
+const TRANSLATABLE_ATTRIBUTES = ["aria-label", "placeholder", "title"]
+
+function canTranslateNode(node) {
+  const parent = node?.parentElement
+  return !!parent && !parent.closest("script, style, textarea, pre, [data-no-translate]")
+}
+
+function translateTextNode(node) {
+  if (!canTranslateNode(node)) return
+  const current = node.nodeValue || ""
+  if (!current.trim()) return
+  let state = translatedTextNodes.get(node)
+  if (!state) {
+    state = { source: current, output: current }
+    translatedTextNodes.set(node, state)
+  } else if (current !== state.output) {
+    // Vue replaced the source text (for example, a device-provided label).
+    state.source = current
+  }
+  const output = translateText(state.source)
+  if (output !== current) node.nodeValue = output
+  state.output = output
+}
+
+function translateElementAttributes(element) {
+  if (!element || element.matches("script, style, textarea, pre, [data-no-translate]")) return
+  let state = translatedAttributes.get(element)
+  if (!state) {
+    state = {}
+    translatedAttributes.set(element, state)
+  }
+  for (const attribute of TRANSLATABLE_ATTRIBUTES) {
+    if (!element.hasAttribute(attribute)) continue
+    const current = element.getAttribute(attribute) || ""
+    const previous = state[attribute]
+    if (!previous) state[attribute] = { source: current, output: current }
+    else if (current !== previous.output) previous.source = current
+    const entry = state[attribute]
+    const output = translateText(entry.source)
+    if (output !== current) element.setAttribute(attribute, output)
+    entry.output = output
+  }
+}
+
+export function translateDom(root = (typeof document !== "undefined" ? document.getElementById("galaxy-app") : null)) {
+  if (!root || typeof document === "undefined") return
+  translateElementAttributes(root)
+  const walker = document.createTreeWalker(root, NodeFilter.SHOW_TEXT)
+  let node
+  while ((node = walker.nextNode())) translateTextNode(node)
+  root.querySelectorAll("*").forEach(translateElementAttributes)
+}
+
+export function installDomTranslator(root = (typeof document !== "undefined" ? document.getElementById("galaxy-app") : null)) {
+  if (!root || typeof MutationObserver === "undefined") return
+  translateDom(root)
+  domObserver?.disconnect()
+  domObserver = new MutationObserver((records) => {
+    for (const record of records) {
+      if (record.type === "characterData") translateTextNode(record.target)
+      else if (record.type === "attributes") translateElementAttributes(record.target)
+      else record.addedNodes.forEach((node) => {
+        if (node.nodeType === Node.TEXT_NODE) translateTextNode(node)
+        else if (node.nodeType === Node.ELEMENT_NODE) translateDom(node)
+      })
+    }
+  })
+  domObserver.observe(root, { subtree: true, childList: true, characterData: true, attributes: true, attributeFilter: TRANSLATABLE_ATTRIBUTES })
+}
+
 export function setLanguage(value) {
   const code = normalizeLanguage(value)
   languageState.code = code
   try { window.localStorage.setItem(STORAGE_KEY, code) } catch (e) { /* storage can be unavailable in private webviews */ }
   if (typeof document !== "undefined") document.documentElement.lang = code === "zh-CHS" ? "zh-CN" : code
+  if (typeof document !== "undefined") translateDom(document.getElementById("galaxy-app"))
   return code
 }
 
 export function t(key, fallback = key) {
   const source = String(key ?? "")
-  return TRANSLATIONS[languageState.code]?.[source] || fallback || source
+  const translated = translateText(source)
+  return translated !== source ? translated : fallback || source
 }
 
 setLanguage(languageState.code)

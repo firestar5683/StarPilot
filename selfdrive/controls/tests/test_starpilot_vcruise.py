@@ -122,6 +122,44 @@ def test_active_slc_control_target_does_not_require_set_speed_limit():
   assert target == pytest.approx((48.0 * CV.MPH_TO_MS) - 0.4)
 
 
+@pytest.mark.parametrize(
+  ("slc_target_mph", "slc_offset_mph", "expected_v_cruise_mph"),
+  [
+    (30.0, 0.0, 30.0),
+    (25.0, 0.0, 25.0),
+    (24.0, 0.0, 24.0),
+    (20.0, 0.0, 20.0),
+    (15.0, 0.0, 15.0),
+    (0.0, 0.0, 35.0),
+    (20.0, 5.0, 25.0),
+  ],
+)
+def test_active_slc_target_constrains_vcruise_below_csc_minimum(slc_target_mph, slc_offset_mph, expected_v_cruise_mph):
+  _, vcruise = make_vcruise()
+  sm = make_sm(standstill=False)
+  toggles = make_toggles()
+  toggles.speed_limit_controller = True
+  toggles.is_metric = False
+  for index in range(1, 8):
+    setattr(toggles, f"speed_limit_offset{index}", slc_offset_mph * CV.MPH_TO_MS)
+
+  vcruise.slc.target = slc_target_mph * CV.MPH_TO_MS
+  vcruise.slc.source = "Dashboard"
+  vcruise.slc.update_limits = lambda *_args, **_kwargs: None
+  vcruise.slc.update_override = lambda *_args, **_kwargs: None
+
+  result = update_vcruise(
+    vcruise,
+    sm,
+    toggles,
+    now=10.0,
+    v_ego=35.0 * CV.MPH_TO_MS,
+    v_cruise=35.0 * CV.MPH_TO_MS,
+  )
+
+  assert result == pytest.approx(expected_v_cruise_mph * CV.MPH_TO_MS)
+
+
 def test_elantra_gets_lead_veto_margin_before_force_stop():
   assert get_lead_veto_distance(SimpleNamespace(carFingerprint="HYUNDAI_ELANTRA_2021")) == pytest.approx(90.0)
   assert get_lead_veto_distance(SimpleNamespace(carFingerprint="OTHER_CAR")) == pytest.approx(75.0)

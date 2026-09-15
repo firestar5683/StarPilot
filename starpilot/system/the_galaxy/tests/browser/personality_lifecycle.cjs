@@ -18,10 +18,10 @@ module.exports=async({page,curve,data,values,faults,counts,errors})=>{
   let release=gate('params');await poll();const n=curve.locator('input').nth(2);await n.fill('1.65');assert.equal(await n.inputValue(),'1.65');assert(await n.isEnabled());
   let before=counts().attempts;await n.press('Tab');assert.equal(counts().attempts,before);
   assert(await n.isDisabled());release();await idle();assert.equal(counts().attempts,before+1);assert.equal(data.profiles.traffic.acceleration.curve[2],1.65);results.push('numeric pending poll commits once');
-  // Off-road state changing while the change waits must prevent the PUT.
+  // Road state changing while the change waits must prevent the PUT.
   release=gate('params');await poll();before=counts().attempts;await edit('1.7');values.IsOnroad='True';values.IsOffroad='';release();
   await page.waitForFunction(()=>!document.querySelector('#app').__vue_app__._instance.proxy.curvePending);
-  assert.equal(counts().attempts,before);assert.equal(await n.inputValue(),'1.65');assert(await n.isDisabled());results.push('pending change rechecks offroad');
+  assert.equal(counts().attempts,before);assert.equal(await n.inputValue(),'1.65');assert(await n.isEnabled());results.push('pending change rechecks road state');
   values.IsOnroad='';values.IsOffroad='True';await poll();await idle();
   // In-flight PUT blocks repeat authoring until verified readback.
   release=gate('put');before=counts().attempts;await edit('1.75');await page.waitForFunction(()=>document.querySelector('#app').__vue_app__._instance.proxy.busy);

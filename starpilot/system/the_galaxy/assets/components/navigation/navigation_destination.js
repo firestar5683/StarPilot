@@ -790,7 +790,7 @@ export function NavDestination() {
               <section class="keys-required-wrapper">
                 <div class="keys-required-widget">
                   <div class="keys-required-title">Mapbox Keys Required</div>
-                  <p class="keys-required-text">You must set both your public and secret Mapbox keys before using navigation features.</p>
+                  <p class="keys-required-text">The public key powers destination search and the map. The secret key lets your comma calculate the on-device route and provide navigation turn desires. Add both keys before starting navigation.</p>
                   <a href="/manage_navigation_keys" class="keys-required-button">Go to "Manage Keys"</a>
                 </div>
               </section>
@@ -926,7 +926,7 @@ function NavigationDestination({
   isFavorited,
   favoriteRoutes = [],
   steps = []
-}) {
+  }) {
   async function cancelNavigation() {
     showSnackbar("Navigation cancelled...");
     removeRouteFromMap(map);
@@ -938,18 +938,32 @@ function NavigationDestination({
     await fetch("/api/navigation", { method: "DELETE" });
   }
   async function confirmDestination() {
+    let response;
+    let result = {};
+    try {
+      response = await fetch("/api/navigation", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name,
+          longitude: destinationCoordinates[0],
+          latitude: destinationCoordinates[1],
+          routeId,
+        })
+      });
+      result = await response.json().catch(() => ({}));
+    } catch {
+      showSnackbar("Could not reach the comma to start navigation.", "error");
+      return;
+    }
+    if (!response.ok) {
+      showSnackbar(result.message || "Failed to start navigation.", "error");
+      return;
+    }
+
     onConfirm?.();
     showSnackbar("Navigation set!");
     localStorage.setItem("activeRouteId", routeId);
-    await fetch("/api/navigation", {
-      method: "POST",
-      headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({
-        name,
-        longitude: destinationCoordinates[0],
-        latitude: destinationCoordinates[1]
-      })
-    });
     await loadFavorites();
     const searchInputEl = document.getElementById("search-field");
     if (searchInputEl) searchInputEl.value = "";

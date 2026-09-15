@@ -415,32 +415,40 @@ class TestVCruiseHelper:
 
       assert self.v_cruise_helper.v_cruise_kph == initial_v_cruise_kph
 
-  def test_stale_speed_limit_change_does_adjust_cruise(self):
-    self.enable(V_CRUISE_INITIAL * CV.KPH_TO_MS, False)
-    initial_v_cruise_kph = self.v_cruise_helper.v_cruise_kph
+  def test_stale_speed_limit_change_does_not_suppress_normal_cruise_buttons(self):
     plan = SimpleNamespace(speedLimitChanged=True, unconfirmedSlcSpeedLimit=0.0)
 
-    pressed_cs = car.CarState(cruiseState={"available": True})
-    pressed_cs.buttonEvents = [ButtonEvent(type=ButtonType.accelCruise, pressed=True)]
-    self.v_cruise_helper.update_v_cruise(
-      pressed_cs,
-      enabled=True,
-      is_metric=False,
-      speed_limit_changed=is_speed_limit_confirmation_pending(plan),
-      starpilot_toggles=self.starpilot_toggles,
-    )
+    for button_type, increases_speed in (
+      (ButtonType.accelCruise, True),
+      (ButtonType.decelCruise, False),
+    ):
+      self.enable(V_CRUISE_INITIAL * CV.KPH_TO_MS, False)
+      initial_v_cruise_kph = self.v_cruise_helper.v_cruise_kph
 
-    released_cs = car.CarState(cruiseState={"available": True})
-    released_cs.buttonEvents = [ButtonEvent(type=ButtonType.accelCruise, pressed=False)]
-    self.v_cruise_helper.update_v_cruise(
-      released_cs,
-      enabled=True,
-      is_metric=False,
-      speed_limit_changed=is_speed_limit_confirmation_pending(plan),
-      starpilot_toggles=self.starpilot_toggles,
-    )
+      pressed_cs = car.CarState(cruiseState={"available": True})
+      pressed_cs.buttonEvents = [ButtonEvent(type=button_type, pressed=True)]
+      self.v_cruise_helper.update_v_cruise(
+        pressed_cs,
+        enabled=True,
+        is_metric=False,
+        speed_limit_changed=is_speed_limit_confirmation_pending(plan),
+        starpilot_toggles=self.starpilot_toggles,
+      )
 
-    assert self.v_cruise_helper.v_cruise_kph > initial_v_cruise_kph
+      released_cs = car.CarState(cruiseState={"available": True})
+      released_cs.buttonEvents = [ButtonEvent(type=button_type, pressed=False)]
+      self.v_cruise_helper.update_v_cruise(
+        released_cs,
+        enabled=True,
+        is_metric=False,
+        speed_limit_changed=is_speed_limit_confirmation_pending(plan),
+        starpilot_toggles=self.starpilot_toggles,
+      )
+
+      if increases_speed:
+        assert self.v_cruise_helper.v_cruise_kph > initial_v_cruise_kph
+      else:
+        assert self.v_cruise_helper.v_cruise_kph < initial_v_cruise_kph
 
   def test_missing_custom_cruise_toggles_fall_back_to_single_step(self):
     self.enable(V_CRUISE_INITIAL * CV.KPH_TO_MS, False)

@@ -211,6 +211,61 @@ def test_disabled_big_profile_does_not_migrate_from_legacy_selection(tmp_path, m
   assert "ActiveBigModelVersion" not in params.values
 
 
+def test_selected_chestnut_artifacts_ready_ignores_cleared_runtime_flag(tmp_path, monkeypatch):
+  monkeypatch.setattr(model_manager, "MODELS_PATH", tmp_path)
+  (tmp_path / model_manager.ARTIFACT_METADATA_CACHE).write_text(json.dumps({
+    "big-one": {"uses_external_gpu": True},
+  }))
+  (tmp_path / "big-one_driving_tinygrad.pkl").write_bytes(b"compiled")
+
+  class FakeParams:
+    def __init__(self):
+      self.values = {
+        "ActiveBigModel": "big-one",
+        "ActiveBigModelName": "Big One",
+        "ActiveBigModelVersion": "v16",
+        "UsbGpuCompiled": False,
+      }
+
+    def get(self, key):
+      return self.values.get(key)
+
+  params = FakeParams()
+  assert not params.get("UsbGpuCompiled")
+  assert model_manager.selected_chestnut_artifacts_ready(params)
+
+  (tmp_path / "big-one_driving_tinygrad.pkl").unlink()
+  assert not model_manager.selected_chestnut_artifacts_ready(params)
+
+
+def test_selected_chestnut_artifacts_ready_accepts_model_lab_pair(tmp_path, monkeypatch):
+  monkeypatch.setattr(model_manager, "MODELS_PATH", tmp_path)
+  (tmp_path / model_manager.ARTIFACT_METADATA_CACHE).write_text(json.dumps({
+    model_id: {
+      "uses_external_gpu": False,
+      "accelerator_artifacts": {"chestnut": {"execution_device": "AMD"}},
+    }
+    for model_id in ("lateral", "longitudinal")
+  }))
+  for model_id in ("lateral", "longitudinal"):
+    (tmp_path / f"{model_id}_driving_chestnut_tinygrad.pkl").write_bytes(b"compiled")
+
+  class FakeParams:
+    def get(self, key):
+      return {
+        "ActiveBigModel": "none",
+        "ModelLabConfig": {
+          "enabled": True,
+          "lateralModel": "lateral",
+          "longitudinalModel": "longitudinal",
+        },
+      }.get(key)
+
+  assert model_manager.selected_chestnut_artifacts_ready(FakeParams())
+  (tmp_path / "longitudinal_driving_chestnut_tinygrad.pkl").unlink()
+  assert not model_manager.selected_chestnut_artifacts_ready(FakeParams())
+
+
 def test_runtime_model_metadata_does_not_overwrite_model_profiles(tmp_path, monkeypatch):
   monkeypatch.setattr(model_manager, "MODELS_PATH", tmp_path)
   (tmp_path / model_manager.ARTIFACT_METADATA_CACHE).write_text(json.dumps({

@@ -12,7 +12,7 @@ import { GalaxyToggleCard } from "../components/GalaxyToggleCard.js"
 import { GalaxySection } from "../components/GalaxySection.js"
 import { DevModeBanner } from "../components/DevModeBanner.js"
 import { LanguageSelector } from "../components/LanguageSelector.js"
-import { setLanguage, t } from "../i18n.js"
+import { languageState, setLanguage, t } from "../i18n.js"
 
 const LEGACY_PERSONALITY_KEYS = new Set([
   "AccelerationProfile", "AggressiveFollow", "AggressiveFollowHigh", "CustomAccelProfile",
@@ -21,6 +21,8 @@ const LEGACY_PERSONALITY_KEYS = new Set([
   "EVTuning", "HumanAcceleration", "RelaxedFollow", "RelaxedFollowHigh", "StandardFollow",
   "StandardFollowHigh", "TrafficFollow", "TruckTuning",
 ])
+
+const LANGUAGE_SECTION_SLUG = "language"
 
 export const Settings = {
   name: "Settings",
@@ -53,6 +55,7 @@ export const Settings = {
     },
     hiddenAdvancedCount() { return countAdvancedHiddenByDeveloperMode(this.layout, this.values) },
     searchActive() { return !!this.searchTerm },
+    currentLanguage() { return languageState.code },
     searchTerm: {
       get() { return store.search },
       set(v) { store.search = v },
@@ -114,9 +117,16 @@ export const Settings = {
     },
     applyRouteSection() {
       const route = store.route
+      if (route === "/settings") {
+        if (this.activeSectionSlug === LANGUAGE_SECTION_SLUG) {
+          const preferred = this.sections.find((s) => s.slug === this.defaultSectionSlug)
+          this.activeSectionSlug = (preferred || this.sections[0])?.slug || ""
+        }
+        return
+      }
       if (!route.startsWith("/settings/")) return
       const slug = route.replace(/^\/settings\/?/, "").split("?")[0].split("/")[0]
-      if (slug && this.sections.some((s) => s.slug === slug)) this.activeSectionSlug = slug
+      if (slug === LANGUAGE_SECTION_SLUG || this.sections.some((s) => s.slug === slug)) this.activeSectionSlug = slug
       if (store.params.open) this.expanded = { ...this.expanded, [store.params.open]: true }
     },
     lockReason(param) {
@@ -141,8 +151,6 @@ export const Settings = {
   template: `
     <div>
       <h2 style="margin-top:0;">{{ tr("Toggles") }}</h2>
-
-      <LanguageSelector :device-value="String(values.LanguageSetting || '')" />
 
       <DevModeBanner :hidden-count="hiddenAdvancedCount" :dev-mode-on="devModeOn" />
 
@@ -171,13 +179,20 @@ export const Settings = {
         <div v-else>
           <div class="gx-tabs" style="display:flex; flex-wrap:wrap; gap:8px; margin-bottom:16px;">
             <button v-for="s in sections" :key="s.slug" type="button"
-              class="gx-chip" :style="s.slug === activeSection.slug ? 'background: var(--primary); color: var(--on-primary);' : 'background: var(--surface-variant); color: var(--on-surface-variant); cursor:pointer;'"
+              class="gx-chip" :style="s.slug === activeSectionSlug ? 'background: var(--primary); color: var(--on-primary);' : 'background: var(--surface-variant); color: var(--on-surface-variant); cursor:pointer;'"
               @click="selectSection(s.slug)">
               {{ tr(s.name, s.name) }}
             </button>
+            <button type="button" class="gx-chip"
+              :style="activeSectionSlug === 'language' ? 'background: var(--primary); color: var(--on-primary);' : 'background: var(--surface-variant); color: var(--on-surface-variant); cursor:pointer;'"
+              @click="selectSection('language')">
+              {{ tr("Language") }}
+            </button>
           </div>
 
-          <div class="gx-card">
+          <LanguageSelector v-if="activeSectionSlug === 'language'" :device-value="currentLanguage" />
+
+          <div v-else class="gx-card">
             <div class="gx-section__header">
               <i class="bi" :class="activeSection.icon"></i>
               <span class="gx-section__title">{{ tr(activeSection.name, activeSection.name) }}</span>

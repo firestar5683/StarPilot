@@ -41,6 +41,8 @@ from openpilot.selfdrive.ui.onroad.starpilot.aethergauge import (
   _is_lead,
   _is_stop_light,
   _lead_data,
+  _to_display_distance,
+  _to_display_speed,
 )
 from openpilot.starpilot.common.experimental_state import CEStatus
 
@@ -50,6 +52,7 @@ aethergauge.ui_state = mock_ui_state
 @pytest.fixture(autouse=True)
 def reset_ui_state():
   mock_ui_state.sm.reset()
+  mock_ui_state.is_metric = False
   mock_ui_state.conditional_status = CEStatus["OFF"]
   mock_ui_state.starpilot_toggles.update({
     "conditional_experimental_mode": True,
@@ -133,6 +136,20 @@ def test_is_stop_light():
 
   mock_ui_state.sm["starpilotPlan"].redLight = False
   assert not _is_stop_light()
+
+
+@pytest.mark.parametrize(
+  ("is_metric", "expected_distance", "expected_speed"),
+  [
+    (False, (33, "ft"), (22, "mph")),
+    (True, (10, "m"), (36, "km/h")),
+  ],
+)
+def test_aether_gauge_uses_display_units(is_metric, expected_distance, expected_speed):
+  mock_ui_state.is_metric = is_metric
+
+  assert _to_display_distance(10.0) == expected_distance
+  assert _to_display_speed(10.0) == expected_speed
 
 
 def test_is_curve_speed_follows_csc_activation_without_mode_gate(monkeypatch):

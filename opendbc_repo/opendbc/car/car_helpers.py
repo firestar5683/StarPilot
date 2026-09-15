@@ -56,6 +56,20 @@ GM_CANDIDATE_PREFIXES = ("CHEVROLET_", "GMC_", "CADILLAC_", "BUICK_", "HOLDEN_")
 GM_CORE_FINGERPRINT_MSGS = frozenset((190, 201, 209, 211, 241))
 GM_CAMERA_BUS = 2
 GM_VOLT_CAMERA_MSG = 0x320
+GM_SUBURBAN_CAMERA_VIN_PREFIX = "1GNSKJKJ"
+GM_SUBURBAN_CAMERA_PT_SIGNATURE = {
+  190: 6,
+  201: 8,
+  209: 7,
+  211: 2,
+  241: 6,
+  304: 1,
+  320: 3,
+}
+GM_CAMERA_DIAGNOSTIC_MESSAGES = {
+  0x24b: 8,
+  0x64b: 8,
+}
 
 
 def _normalize_forced_candidate(candidate: str | None) -> str | None:
@@ -150,6 +164,24 @@ def _normalize_gm_volt_candidate(candidate: str | None, fingerprints: dict[int, 
     return "CHEVROLET_VOLT_CAMERA"
 
   return candidate
+
+
+def _normalize_gm_suburban_camera_candidate(candidate: str | None, fingerprints: dict[int, dict], vin: str | None) -> str | None:
+  """Resolve the 2019 Suburban camera-harness variant when CAN is shared with Yukon."""
+  if candidate not in (None, "GMC_YUKON", "GMC_YUKON_CC"):
+    return candidate
+
+  if not isinstance(vin, str) or not vin.startswith(GM_SUBURBAN_CAMERA_VIN_PREFIX):
+    return candidate
+
+  powertrain = fingerprints.get(0, {})
+  camera = fingerprints.get(GM_CAMERA_BUS, {})
+  if not all(powertrain.get(address) == length for address, length in GM_SUBURBAN_CAMERA_PT_SIGNATURE.items()):
+    return candidate
+  if not all(camera.get(address) == length for address, length in GM_CAMERA_DIAGNOSTIC_MESSAGES.items()):
+    return candidate
+
+  return "CHEVROLET_SUBURBAN_CAMERA"
 
 
 def _is_gm_candidate(candidate: str | None) -> bool:
@@ -306,6 +338,10 @@ def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multip
   fingerprinted_candidate = candidate
   stored_candidate = _normalize_forced_candidate(params.get("CarModel"))
   cached_candidate = _normalize_forced_candidate(getattr(cached_params, "carFingerprint", None))
+
+  if candidate is None and stored_candidate is None and cached_candidate is None:
+    candidate = _normalize_gm_suburban_camera_candidate(candidate, fingerprints, vin)
+    fingerprinted_candidate = candidate
 
   if candidate is None:
     gm_fallback_candidate = _get_gm_stored_candidate_fallback(fingerprints, stored_candidate, cached_candidate)

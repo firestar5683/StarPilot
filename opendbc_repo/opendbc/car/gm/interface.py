@@ -306,7 +306,7 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs[0].safetyParam |= GMSafetyFlags.HW_CAM_LONG.value
 
     elif is_camera_acc:
-      ret.alphaLongitudinalAvailable = (candidate not in CC_ONLY_CAR) and not ret.enableGasInterceptorDEPRECATED
+      ret.alphaLongitudinalAvailable = candidate not in (CC_ONLY_CAR | ALT_ACCS) and not ret.enableGasInterceptorDEPRECATED
       ret.networkLocation = NetworkLocation.fwdCamera
       ret.radarUnavailable = True
       ret.pcmCruise = not ret.enableGasInterceptorDEPRECATED
@@ -522,7 +522,7 @@ class CarInterface(CarInterfaceBase):
       ret.steerActuatorDelay = 0.2
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
-    elif candidate in (CAR.CHEVROLET_SUBURBAN, CAR.CHEVROLET_SUBURBAN_CC):
+    elif candidate in (CAR.CHEVROLET_SUBURBAN, CAR.CHEVROLET_SUBURBAN_ASCM, CAR.CHEVROLET_SUBURBAN_CAMERA, CAR.CHEVROLET_SUBURBAN_CC):
       ret.steerActuatorDelay = 0.2
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 

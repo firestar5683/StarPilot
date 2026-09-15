@@ -27,13 +27,14 @@ window.fetch=async (input, init={}) => {
   throw new Error('Unmocked request: '+method+' '+url.pathname);
 };
 paramsFixture.IsOnroad = ${process.env.GALAXY_DOM_ONROAD === '1'};
+paramsFixture.IsOffroad = ${process.env.GALAXY_DOM_ONROAD !== '1'};
 paramsFixture.GalaxyDeveloperMode = true;
 const profilesFixture = ${JSON.stringify(JSON.parse(fs.readFileSync(path.join(__dirname,'browser/fixtures/personality_profiles.json'))))};
 for (const [id,profile] of Object.entries(profilesFixture.profiles)) {
   for (const [category,config] of Object.entries(profile)) {config.preset='custom';config.curve=[...profilesFixture.reference_curves[id][category]];}
 }
 window.profileWrites=[];
-paramsFixture.IsOffroad=true;paramsFixture.CustomPersonalities=true;
+paramsFixture.CustomPersonalities=true;
 for(const key of ['TrafficPersonalityProfile','AggressivePersonalityProfile','StandardPersonalityProfile','RelaxedPersonalityProfile'])paramsFixture[key]=true;
 const baseFetch=window.fetch;
 window.fetch=async(input,init={})=>{

@@ -124,10 +124,10 @@ def test_drag_on_expanded_saved_curve_uses_plot_scale_but_caps_only_edited_point
   assert result["original"] == [6, 4] + [1] * 8
 
 
-def test_rendered_editor_has_parked_locks_units_and_all_three_profile_categories():
+def test_rendered_editor_has_confirmed_road_state_locks_units_and_all_three_profile_categories():
   source = DEVICE_SETTINGS_PATH.read_text(encoding="utf-8")
-  assert 'disabled="${() => !!state.values.IsOnroad' in source
-  assert 'aria-disabled="${() => !!state.values.IsOnroad || !!state.personalityMigrationRequired}"' in source
+  assert 'disabled="${() => !personalityRoadStateKnown()' in source
+  assert 'aria-disabled="${() => !personalityRoadStateKnown() || !!state.personalityMigrationRequired}"' in source
   assert "profileSpeedUnit" in source
   assert "m/s²" in source
   for category in ("acceleration", "braking", "following"):
@@ -144,7 +144,7 @@ def test_acceleration_and_braking_presets_render_from_weakest_to_strongest():
   assert 'braking: ["eco", "standard", "sport", "custom"]' in source
 
 
-def test_profile_master_and_advanced_controls_declare_parked_only_metadata():
+def test_profile_master_and_advanced_controls_are_editable_onroad():
   layout = json.loads(DEVICE_SETTINGS_LAYOUT_PATH.read_text(encoding="utf-8"))
   params = {param["key"]: param for section in layout for param in section.get("params", [])}
   keys = {
@@ -163,7 +163,7 @@ def test_profile_master_and_advanced_controls_declare_parked_only_metadata():
       for suffix in ("JerkAcceleration", "JerkDeceleration", "JerkDanger", "JerkSpeedDecrease", "JerkSpeed")
     },
   }
-  assert all(params[key].get("requires_offroad") is True for key in keys)
+  assert all(params[key].get("requires_offroad") is not True for key in keys)
 
 
 def test_profile_errors_are_escaped_before_the_legacy_html_snackbar_sink():
@@ -203,8 +203,9 @@ def test_each_personality_card_maps_to_its_persisted_enable_toggle():
   ]
 
 
-def test_each_personality_card_exposes_an_accessible_parked_only_enable_toggle():
+def test_each_personality_card_exposes_an_accessible_enable_toggle():
   source = DEVICE_SETTINGS_PATH.read_text(encoding="utf-8")
+  assert "PERSONALITY_EDITOR_PARAM_KEYS.has(param?.key) && !personalityRoadStateKnown()" in source
   assert "function renderPersonalityProfileToggle" in source
   toggle = source.split("function renderPersonalityProfileToggle", 1)[1].split("\n}", 1)[0]
   assert "personalityProfileParamKey(profile.id)" in toggle
@@ -445,7 +446,7 @@ def test_schema_migration_state_is_visible_and_blocks_profile_writes():
   assert "Migrate profiles" in source
   migration_warning = source.split('class="ds-personality-migration-warning"', 1)[1].split("</div>", 1)[0]
   assert '!state.values.IsOffroad' not in migration_warning
-  assert '!!state.values.IsOnroad || state.personalityMigrationInProgress' in migration_warning
+  assert 'parseRoadFlag(state.values.IsOnroad) === true || !personalityRoadStateKnown() || state.personalityMigrationInProgress' in source
   css = DEVICE_SETTINGS_CSS_PATH.read_text(encoding="utf-8")
   assert ".ds-personality-migration-warning" in css
 
@@ -487,7 +488,7 @@ def test_device_settings_polls_driving_state_and_units_while_visible():
   source = DEVICE_SETTINGS_PATH.read_text(encoding="utf-8")
   assert "function ensureUiContextPolling" in source
   refresh = source.split("async function refreshUiContextValues", 1)[1].split("\n}", 1)[0]
-  assert '["IsOnroad", "IsMetric"]' in refresh
+  assert '["IsOnroad", "IsOffroad", "IsMetric"]' in refresh
   assert '`/api/params?key=${encodeURIComponent(key)}`' in refresh
   polling = source.split("function ensureUiContextPolling", 1)[1].split("\n}", 1)[0]
   assert 'document.visibilityState === "visible"' in polling
@@ -519,7 +520,7 @@ def test_personality_cards_and_advanced_disclosures_have_unique_accessible_relat
   assert 'aria-controls="personality-advanced-${profile.id}"' in advanced
   assert 'id="personality-advanced-${profile.id}"' in source
   assert 'aria-hidden="true"' in advanced
-  manage = source.split('${() => p.is_parent_toggle', 1)[1].split("` : \"\"}", 1)[0]
+  manage = source.split('p.is_parent_toggle && (p.key === "CustomPersonalities"', 1)[1].split("` : \"\"}", 1)[0]
   assert 'aria-controls="${p.key === "CustomPersonalities" ? "personality-profiles-panel"' in manage
   assert 'aria-expanded="${() => state.expanded[p.key] ? "true" : "false"}"' in manage
 
@@ -616,16 +617,25 @@ def test_personality_responsive_layout_uses_available_card_width():
   assert 'context.setTransform(pixelRatio, 0, 0, pixelRatio, 0, 0)' in source
 
 
-def test_personality_save_blocks_onroad_even_for_synthetic_events():
+def test_personality_save_allows_confirmed_onroad_and_blocks_unknown_state():
   source = DEVICE_SETTINGS_PATH.read_text(encoding="utf-8")
+  road_state = "function parseRoadFlag" + source.split("function parseRoadFlag", 1)[1].split("\n}\n", 1)[0] + "\n}"
+  known = "function personalityRoadStateKnown" + source.split("function personalityRoadStateKnown", 1)[1].split("\n}\n", 1)[0] + "\n}"
   save = "async function savePersonalityCategory" + source.split("async function savePersonalityCategory", 1)[1].split("\n}\n", 1)[0] + "\n}"
   result = _run_node("""
-    const state = {values:{IsOnroad:true}};
-    const fetch = () => {throw new Error("On-road write attempted")};
-  """ + save + """
-    console.log(JSON.stringify(await savePersonalityCategory("standard", "acceleration", "eco", [])));
+    const state = {values:{IsOnroad:true,IsOffroad:false},personalityProfiles:{standard:{acceleration:{preset:"standard",curve:[]}}},personalityUpdating:{},personalityProfilesError:"",personalityProfilesLoading:false,personalityMigrationRequired:false};
+    const window = {location:{pathname:"/device_settings"}};
+    let writes = 0;
+    const fetch = async () => { writes++; return {ok:true,json:async()=>({profiles:{standard:{acceleration:{preset:"eco",curve:[]}}}})}; };
+    let uiContextPollInflight = null, personalityViewGeneration = 0;
+    const showParamSnackbar = () => {};
+  """ + road_state + known + save + """
+    const onroad = await savePersonalityCategory("standard", "acceleration", "eco", []);
+    state.values.IsOffroad = "unknown";
+    const uncertain = await savePersonalityCategory("standard", "acceleration", "eco", []);
+    console.log(JSON.stringify({onroad,uncertain,writes}));
   """)
-  assert result is False
+  assert result == {"onroad": True, "uncertain": False, "writes": 1}
 
 
 def test_responsive_canvas_keeps_metric_endpoint_labels_separate_and_scales_bitmap():
@@ -658,3 +668,35 @@ def test_responsive_canvas_keeps_metric_endpoint_labels_separate_and_scales_bitm
   assert [labels[0]["text"], labels[-1]["text"]] == ["0", "144.8"]
   for left, right in zip(labels, labels[1:]):
     assert left["x"] + left["width"] / 2 + 6 <= right["x"] - right["width"] / 2
+
+
+def test_classic_following_picker_displays_migrated_selection_and_current_traffic_option():
+  source = DEVICE_SETTINGS_PATH.read_text(encoding="utf-8")
+  functions = "\n".join(
+    "function " + name + source.split("function " + name, 1)[1].split("\n}\n", 1)[0] + "\n}"
+    for name in ("personalityPresetLabel", "personalityUpdateKey", "renderPersonalityCategoryField")
+  )
+  order = "const PERSONALITY_OPTION_ORDER = " + source.split("const PERSONALITY_OPTION_ORDER = ", 1)[1].split("\n}", 1)[0] + "\n};"
+  result = _run_node(order + functions + """
+    const state = {values: {}, personalityUpdating: {}, personalityMeta: {options: {following:
+      ['dom_default', 'close', 'medium', 'far', 'traffic', 'custom', 'legacy_close', 'legacy_medium', 'legacy_far']}}};
+    const PERSONALITY_CATEGORY_DEFINITIONS = {following: {label: 'Following'}};
+    const html = (parts, ...values) => parts.reduce((text, part, i) => {
+      let value = values[i];
+      if (typeof value === 'function') value = part.endsWith('@click="') ? '' : value();
+      return text + part + (Array.isArray(value) ? value.join('') : value ?? '');
+    }, '');
+    console.log(JSON.stringify(['legacy_close', 'legacy_medium', 'legacy_far', 'traffic', 'medium'].map(preset =>
+      renderPersonalityCategoryField({id: 'standard', label: 'Standard'}, 'following', {preset, curve: []}))));
+  """)
+  import re
+  for index, rendered in enumerate(result):
+    buttons = re.findall(r'<button.*?</button>', rendered, flags=re.S)
+    assert sum('aria-pressed="true"' in button for button in buttons) == 1
+    assert any(re.search(r'>\s*Traffic\s*</button>', button) for button in buttons)
+    if index < 3:
+      expected = ["Previous Close", "Previous Medium", "Previous Far"][index]
+      assert any(expected in button and 'aria-pressed="true"' in button for button in buttons)
+      assert 'Previous fixed following distance retained.' in rendered
+    else:
+      assert 'Previous ' not in rendered

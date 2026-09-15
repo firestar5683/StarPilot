@@ -16,9 +16,9 @@ def test_registry_empty_object_get_and_enable(monkeypatch, raw):
   saved = strict_profile_document(params.values[PERSONALITY_PROFILES_PARAM])
   assert saved is not None and saved['enabled']
   assert all(profile == {
-    'acceleration': {'preset':'standard','curve':[]},
-    'braking': {'preset':'standard','curve':[]},
-    'following': {'preset':'medium','curve':[]},
+    'acceleration': {'preset':'dom_default','curve':[]},
+    'braking': {'preset':'dom_default','curve':[]},
+    'following': {'preset':'dom_default','curve':[]},
   } for profile in saved['profiles'].values())
 
 @pytest.mark.parametrize('raw', [{}, '{}', b'{}'])

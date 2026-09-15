@@ -67,6 +67,7 @@ export function showSidebar() {
   const html = document.documentElement
   document.getElementById("sidebar")?.classList.add("visible")
   document.getElementById("sidebarUnderlay")?.classList.remove("hidden")
+  document.getElementById("menu_button")?.setAttribute("aria-expanded", "true")
   html.classList.add("no_scroll")
 }
 
@@ -77,6 +78,7 @@ export function hideSidebar() {
   const html = document.documentElement
   document.getElementById("sidebar")?.classList.remove("visible")
   document.getElementById("sidebarUnderlay")?.classList.add("hidden")
+  document.getElementById("menu_button")?.setAttribute("aria-expanded", "false")
   html.classList.remove("no_scroll")
 }
 

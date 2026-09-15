@@ -25,6 +25,9 @@ def test_router_and_settings_cache_bust_is_consistent():
 
   assert "/assets/components/settings.js?v=router-cycle-fix-5" in router
   assert "/assets/components/router.js?v=router-cycle-fix-8" in index
+  assert "/assets/components/sidebar.js?v=sidebar-pin-2" in router
+  assert "/assets/components/main.css?v=sidebar-pin-2" in index
+  assert "/assets/components/sidebar.css?v=sidebar-pin-2" in index
 
 
 def test_bluetooth_actions_use_reactive_disabled_bindings():
@@ -107,6 +110,27 @@ def test_bluetooth_and_controllers_sidebar_order():
   sentry = source.index('{ name: "Sentry Mode"')
   controllers = source.index('{ name: "Controllers"')
   assert toggles < bluetooth < sentry < controllers
+
+
+def test_sidebar_pin_state_and_responsive_drawer_are_wired():
+  sidebar = SIDEBAR_PATH.read_text(encoding="utf-8")
+  template = INDEX_PATH.read_text(encoding="utf-8")
+  sidebar_css = (REPO_ROOT / "starpilot/system/the_galaxy/assets/components/sidebar.css").read_text(encoding="utf-8")
+  main_css = (REPO_ROOT / "starpilot/system/the_galaxy/assets/components/main.css").read_text(encoding="utf-8")
+  navigation_css = (REPO_ROOT / "starpilot/system/the_galaxy/assets/components/navigation/navigation_destination.css").read_text(encoding="utf-8")
+
+  assert 'window.localStorage?.getItem(SIDEBAR_PINNED_KEY)' in sidebar
+  assert 'stored === "true"' in sidebar and 'defaultSidebarPinned' in sidebar
+  assert "try {" in sidebar
+  assert 'menuButton.dataset.boundClick !== "1"' in sidebar
+  assert 'class="sidebar-pin-button"' in sidebar
+  assert '<button id="menu_button"' in template
+  assert 'aria-controls="sidebar"' in template
+  assert "@media only screen and (max-width: 767px)" in sidebar_css
+  assert "@media only screen and (min-width: 768px)" in sidebar_css
+  assert "@media only screen and (min-width: var(--breakpoint-md))" not in sidebar_css
+  assert "html.galaxy-sidebar-pinned .content" in main_css
+  assert "html.galaxy-sidebar-pinned .map-wrapper" in navigation_css
 
 def test_model_laboratory_is_wired_into_classic_and_mobile_navigation():
   router = ROUTER_PATH.read_text(encoding="utf-8")

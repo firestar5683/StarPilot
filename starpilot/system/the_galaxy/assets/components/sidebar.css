@@ -1,11 +1,14 @@
 #menu_button {
   align-items: center;
   background-color: var(--main-fg);
+  border: 0;
   border-radius: 50%;
   bottom: var(--border-radius-xl);
+  cursor: pointer;
   display: flex;
   height: 50px;
   justify-content: center;
+  padding: 0;
   position: fixed;
   right: var(--border-radius-xl);
   width: 50px;
@@ -70,11 +73,12 @@
   font-size: var(--border-radius-xl);
   height: 100dvh;
   justify-content: space-between;
-  left: 0;
+  left: calc(-1 * var(--sidebar-width));
   min-width: var(--sidebar-width);
   overflow-y: auto;
   position: fixed;
   top: 0;
+  transition: var(--transition-fast);
   width: var(--sidebar-width);
   z-index: var(--z-sidebar);
 }
@@ -194,7 +198,26 @@
   margin: 0;
 }
 
+.sidebar-pin-button {
+  background: transparent;
+  border: 0;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: var(--font-size-lg);
+  margin-left: auto;
+  padding: var(--padding-xs);
+}
+
+.sidebar-pin-button:hover,
+.sidebar-pin-button:focus-visible {
+  color: var(--text-color);
+}
+
 .sidebar.visible {
+  left: 0;
+}
+
+.sidebar.pinned {
   left: 0;
 }
 
@@ -230,15 +253,13 @@
   transform: var(--hover-scale-sm);
 }
 
-@media only screen and (max-width: 768px) and (orientation: portrait) {
+@media only screen and (max-width: 767px) {
   #sidebarUnderlay {
     display: block;
   }
 
   .sidebar {
-    left: calc(-1 * var(--sidebar-width));
     overflow-y: scroll;
-    transition: var(--transition-fast);
   }
 
   .sidebar .menu_section>li>a {
@@ -254,34 +275,10 @@
 
 @media only screen and (min-width: 768px) {
   #menu_button {
-    display: none;
-  }
-}
-
-@media only screen and (max-width: var(--breakpoint-md)) {
-  #sidebarUnderlay {
-    display: block;
+    display: flex;
   }
 
-  .sidebar {
-    left: calc(-1 * var(--sidebar-width));
-    overflow-y: scroll;
-    transition: var(--transition-fast);
-  }
-
-  .sidebar .menu_section>li>a {
-    font-size: var(--padding-sm);
-  }
-
-  .sidebar .title {
-    flex-direction: row;
-    font-size: var(--border-radius-xl);
-    margin: 0;
-  }
-}
-
-@media only screen and (min-width: var(--breakpoint-md)) {
-  #menu_button {
+  html.galaxy-sidebar-pinned #menu_button {
     display: none;
   }
 }

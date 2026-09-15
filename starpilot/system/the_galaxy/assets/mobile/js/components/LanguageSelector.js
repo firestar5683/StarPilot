@@ -1,8 +1,10 @@
 import { api, showSnackbar } from "../api.js"
+import { GxNotice } from "./GxNotice.js"
 import { LANGUAGE_OPTIONS, languageState, normalizeLanguage, setLanguage, t } from "../i18n.js"
 
 export const LanguageSelector = {
   name: "LanguageSelector",
+  components: { GxNotice },
   props: { deviceValue: { type: String, default: "" } },
   data() {
     return { languages: LANGUAGE_OPTIONS, selected: languageState.code, saving: false, error: "" }
@@ -45,21 +47,21 @@ export const LanguageSelector = {
     },
   },
   template: `
-    <div class="gx-card" style="margin-bottom:16px;">
+    <div class="gx-card">
       <div class="gx-section__header">
         <i class="bi bi-translate"></i>
         <span class="gx-section__title">{{ tr("Language") }}</span>
       </div>
-      <div style="display:flex; align-items:center; gap:12px; flex-wrap:wrap;">
-        <label style="display:flex; align-items:center; gap:10px; flex:1; min-width:220px;">
-          <span>{{ tr("Select language") }}</span>
-          <select class="gx-field" style="max-width:220px;" :value="selected" :disabled="saving" @change="change">
-            <option v-for="option in languages" :key="option.value" :value="option.value">{{ tr(option.label, option.label) }}</option>
-          </select>
-        </label>
-        <small class="gx-row__desc">{{ tr("Galaxy uses English when no language is selected.") }}</small>
+      <div class="gx-row gx-row--stack">
+        <div class="gx-row__info">
+          <span class="gx-row__label">{{ tr("Select language") }}</span>
+          <span class="gx-row__desc">{{ tr("Galaxy uses English when no language is selected.") }}</span>
+        </div>
+        <GalaxySelect class="gx-field" :value="selected" :disabled="saving" @change="change">
+          <option v-for="option in languages" :key="option.value" :value="option.value">{{ tr(option.label, option.label) }}</option>
+        </GalaxySelect>
       </div>
-      <p v-if="error" class="gx-row__desc" style="color:var(--danger); margin:8px 0 0;">{{ error }}</p>
+      <GxNotice v-if="error" tone="danger" :text="error" style="margin: 0 var(--sp-4) var(--sp-4);" />
     </div>
   `,
 }

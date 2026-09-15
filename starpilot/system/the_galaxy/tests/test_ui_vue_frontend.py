@@ -26,6 +26,7 @@ def test_ui_app_shell_files_exist():
     "js/params.js",
     "js/i18n.js",
     "js/components/AppShell.js",
+    "js/components/DevicePicker.js",
     "js/components/GalaxyModal.js",
     "js/components/GalaxySection.js",
     "js/components/GalaxyEmbed.js",
@@ -60,6 +61,25 @@ def test_ui_index_wires_vue_and_mount_point():
   assert '"vue": "/assets/vendor/vue/vue.esm-browser.js"' in index
   assert '<title>Galaxy</title>' in index
   assert 'apple-mobile-web-app-title" content="Galaxy"' in index
+
+
+def test_ui_device_picker_uses_gateway_directory_and_preserves_local_galaxy():
+  picker = _read("js/components/DevicePicker.js")
+  shell = _read("js/components/AppShell.js")
+  css = _read("css/material.css")
+  param_keys = (REPO_ROOT / "common/params_keys.h").read_text(encoding="utf-8")
+
+  assert 'fetch("/_gateway/devices"' in picker
+  assert 'method: "PUT"' in picker
+  assert "/name`" in picker
+  assert "Rename comma" in picker
+  assert "hasMultipleDevices" in picker
+  assert "window.location.assign(device.path)" in picker
+  assert shell.index('<DevicePicker />') > shell.index('v-for="(links, section) in NAV"')
+  assert '"GalaxyDeviceName", {PERSISTENT | DONT_LOG, STRING' in param_keys
+  assert "localStorage" not in picker
+  assert ".gx-drawer.open ~ .blur-nav" in css
+  assert "Local Galaxy instances do not have the gateway directory endpoint." in picker
 
 
 def test_ui_uses_same_backend_endpoints():
@@ -280,9 +300,11 @@ def test_ui_eliminates_slider_toggle_flicker():
   assert "interacting" in card
   assert "onSliderCommit" in card
   assert "flushSlider" in card
-  # No mid-drag auto-commit timer: holding still must NOT release/lock.
+  # No mid-drag auto-commit timer: holding still must NOT release/lock or
+  # commit. A hold may only switch the slider into fine scrubbing.
   assert "commitTimer" not in card
-  assert "setTimeout" not in card
+  hold = card[card.index("startHoldTimer"):card.index("activateFineScrub")]
+  assert "flushSlider" not in hold and "commit" not in hold
   # Release (change) and blur (keyboard) both flush the commit.
   assert "interacting = false" in card
   assert "onSliderBlur" in card
@@ -309,11 +331,9 @@ def test_ui_developer_mode_banner_offers_unlock():
 
 def test_ui_has_bottom_navigation_and_drawer():
   shell = _read("js/components/AppShell.js")
-  # Exactly one navigation affordance: liquid-glass bottom nav (mobile) OR the
-  # drawer hamburger (desktop). Mobile shows a back button instead.
-  assert "liquid-glass-nav" in shell
+  assert "blur-nav" in shell
   assert "nav-item" in shell
-  assert "gx-menu-btn" in shell
+  assert "gx-appbar__menu" in shell
   assert "gx-back-btn" in shell
   assert "goBack" in shell or "back()" in shell
   assert "gx-drawer" in shell
@@ -329,23 +349,23 @@ def test_ui_search_visible_on_mobile_and_content_full_width():
   # Search must NOT be hidden on mobile (regression: it was display:none <600px).
   assert ".gx-appbar__search" in css
   # A single breakpoint picks mobile (bottom nav + back) vs desktop (drawer).
-  assert ".liquid-glass-nav { display: flex; }" in css
-  assert ".gx-menu-btn { display: none; }" in css
+  assert ".blur-nav { display: flex; }" in css
+  assert ".gx-appbar__menu { display: inline-flex; }" in css
   assert ".gx-back-btn { display: inline-flex; }" in css
   # Content + embedded tools fill the available width (no 760px cap).
   assert "max-width: none" in css
-  # Liquid Glass styling is present.
+  # Blur nav styling is present.
   assert "--glass-bg" in css
   assert "backdrop-filter" in css
 
 
-def test_ui_glass_nav_single_breakpoint_no_dual_nav():
+def test_ui_blur_nav_single_breakpoint_no_dual_nav():
   css = _read("css/material.css")
-  assert ".liquid-glass-nav" in css
+  assert ".blur-nav" in css
   assert "@media (min-width: 768px)" in css
-  assert ".liquid-glass-nav { display: none; }" in css
+  assert ".blur-nav { display: none; }" in css
   assert ".gx-back-btn { display: none; }" in css
-  assert ".gx-menu-btn { display: inline-flex; }" in css
+  assert ".gx-appbar__menu { display: inline-flex; }" in css
 
 
 def test_ui_settings_deep_links_and_dev_mode_updates():
@@ -477,11 +497,13 @@ def test_ui_all_remaining_classic_tools_native_no_embed():
   assert "GalaxyEmbed" not in tuning and "LateralTuningPanel" in tuning
   assert _read("js/components/MapsPanel.js") and _read("js/components/NavigationKeysPanel.js")
   destination = _read("js/components/NavigationDestinationPanel.js")
+  assert '"./views/Navigation.js?v=nav-destination-4"' in _read("js/app.js")
+  assert '"../components/NavigationDestinationPanel.js?v=nav-destination-4"' in _read("js/views/Navigation.js")
   assert "mapboxSuggest" in destination and "mapboxRetrieve" in destination
   assert "mapboxGeocode" in destination and "mapboxDirections" in destination
   assert "ref=\"map\"" in destination and "setNavigation(this.destination)" in destination
+  assert destination.count("methods: {") == 1 and "secondaryLabel," in destination
   assert _read("js/components/LateralTuningPanel.js")
-
   # Shared API surface added for the second batch of ported pages.
   for method in ["selectTestingGround",
                  "getSentryStatus", "getSentryEvents", "deleteSentryEvent", "sentryPushSubscribe",
@@ -511,6 +533,20 @@ def test_ui_all_remaining_classic_tools_native_no_embed():
   assert "inputRequired" in modal
   assert lateral.index('>Workspace status</span>') < lateral.index('>Saved Tunes</span>')
   assert lateral.index('>Saved Tunes</span>') < lateral.index('>Local Routes</span>')
+
+
+def test_navigation_requires_secret_key_before_starting_on_device_route():
+  destination = _read("js/components/NavigationDestinationPanel.js")
+  classic_destination = (REPO_ROOT / "starpilot/system/the_galaxy/assets/components/navigation/navigation_destination.js").read_text(encoding="utf-8")
+
+  assert 'mapboxSecret: ""' in destination
+  assert "hasRoutingKey()" in destination
+  assert "!query.trim() || !hasRoutingKey" in destination
+  assert "loadingRoute || !hasRoutingKey" in destination
+  assert "required for the comma to calculate the on-device route" in destination
+  assert "secret key lets your comma calculate the on-device route" in classic_destination
+  assert "if (!response.ok)" in classic_destination
+  assert 'result.message || "Failed to start navigation."' in classic_destination
 
 
 def test_ui_cameras_hub_vasm_and_pip_native_no_embed():
@@ -555,7 +591,11 @@ def test_ui_mobile_polish_regressions():
   assert "Automatically Install Updates" in system
   assert 'key: "AutomaticUpdates"' in system
   assert "!!fastStatus?.automaticUpdates" in system
-  assert "isOnroad || autoUpdateBusy || !!fastStatus?.running" in system
+  assert "isOnroad || autoUpdateBusy || updateInProgress" in system
+  assert "getGatewayDevices" in _read("js/api.js")
+  assert "rebootStorageScope" in system
+  assert "writeRebootMarker(this.rebootStorageScope" in system
+  assert "clearRebootMarker(this.rebootStorageScope" in system
 
   bluetooth = _read("js/components/BluetoothPanel.js")
   assert "methods: {\n    address," in bluetooth

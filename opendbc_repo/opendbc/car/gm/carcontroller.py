@@ -1159,9 +1159,12 @@ class CarController(CarControllerBase):
           if should_send_cc_button_spam(self.CP, CC, CS):
             if self.CP.carFingerprint != CAR.CADILLAC_XT4_CC:
               # Using extend instead of append since the message is only sent intermittently
-              lead_visible = bool(getattr(CS, "openpilot_lead_visible", CC.hudControl.leadVisible))
+              longitudinal_adjustment_active = bool(getattr(
+                CS, "openpilot_longitudinal_adjustment_active", CC.hudControl.leadVisible,
+              ))
               can_sends.extend(gmcan.create_gm_cc_spam_command(
-                self.packer_pt, self, CS, actuators, starpilot_toggles, lead_visible=lead_visible,
+                self.packer_pt, self, CS, actuators, starpilot_toggles,
+                longitudinal_adjustment_active=longitudinal_adjustment_active,
               ))
           else:
             if (CS.out.cruiseState.enabled and CC.enabled and self.frame % 52 == 0 and

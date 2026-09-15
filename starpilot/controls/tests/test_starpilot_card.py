@@ -1123,6 +1123,46 @@ def test_hyundai_main_aol_persists_after_brake_disengage_without_manual_aol_butt
   assert ret.alwaysOnLateralEnabled is True
 
 
+def test_aol_persists_through_longitudinal_speed_too_low_disable(monkeypatch, tmp_path):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+
+  card = spc.StarPilotCard(
+    SimpleNamespace(brand="gm"),
+    SimpleNamespace(alternativeExperience=spc.ALTERNATIVE_EXPERIENCE.ALWAYS_ON_LATERAL),
+  )
+  sm = make_sm()
+  sm["selfdriveState"].alertType = f"speedTooLow/{spc.ET.IMMEDIATE_DISABLE}"
+
+  ret = card.update(
+    make_car_state(available=True), SimpleNamespace(distancePressed=False), sm,
+    make_toggles(always_on_lateral_main=True),
+  )
+
+  assert ret.alwaysOnLateralAllowed is True
+  assert ret.alwaysOnLateralEnabled is True
+
+
+def test_aol_still_stops_for_other_immediate_disables(monkeypatch, tmp_path):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+
+  card = spc.StarPilotCard(
+    SimpleNamespace(brand="gm"),
+    SimpleNamespace(alternativeExperience=spc.ALTERNATIVE_EXPERIENCE.ALWAYS_ON_LATERAL),
+  )
+  sm = make_sm()
+  sm["selfdriveState"].alertType = f"controlsMismatch/{spc.ET.IMMEDIATE_DISABLE}"
+
+  ret = card.update(
+    make_car_state(available=True), SimpleNamespace(distancePressed=False), sm,
+    make_toggles(always_on_lateral_main=True),
+  )
+
+  assert ret.alwaysOnLateralAllowed is True
+  assert ret.alwaysOnLateralEnabled is False
+
+
 def test_non_button_aol_platform_keeps_main_aol_when_main_cruise_is_mapped(monkeypatch, tmp_path):
   monkeypatch.setattr(spc, "Params", FakeParams)
   monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)

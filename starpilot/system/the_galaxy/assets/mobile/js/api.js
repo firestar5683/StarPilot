@@ -42,6 +42,12 @@ function postOk(url, opts = {}) {
 }
 
 export const api = {
+  async getGatewayDevices() {
+    const response = await fetch("/_gateway/devices", { cache: "no-store" })
+    if (!response.ok) return null
+    return response.json()
+  },
+
   postAction(endpoint) { return request(endpoint, { method: "POST" }) },
   getOptions(endpoint) { return request(endpoint) },
 
@@ -185,6 +191,7 @@ export const api = {
 
   getNavigation() { return request("/api/navigation") },
   setNavigation(body) { return request("/api/navigation", { method: "POST", data: body }) },
+  clearNavigation() { return request("/api/navigation", { method: "DELETE" }) },
   getNavigationFavorites() { return request("/api/navigation/favorite", { cache: "no-store" }) },
   mapboxSuggest(query, accessToken, sessionToken, context = {}) {
     const params = new URLSearchParams({ access_token: accessToken, session_token: sessionToken, q: query, limit: "4", ...context })
@@ -207,6 +214,7 @@ export const api = {
   getNavigationKeys() { return request("/api/navigation_key") },
   setNavigationKey(body) { return request("/api/navigation_key", { method: "POST", data: body }) },
   navigationFavorite(body) { return request("/api/navigation/favorite", { method: "POST", data: body }) },
+  deleteNavigationFavorite(body) { return request("/api/navigation/favorite", { method: "DELETE", data: body }) },
   deleteNavigationKey(type) { return request(`/api/navigation_key?type=${encodeURIComponent(type)}`, { method: "DELETE" }) },
 
   async systemMonitor(signal) {
@@ -225,11 +233,27 @@ export const api = {
   restoreToggles(data) { return request("/api/toggles/restore", { method: "POST", data }) },
   resetTogglesDefault() { return request("/api/toggles/reset_default", { method: "POST" }) },
 
-  getUpdateBranches() { return request("/api/update/branches") },
+  getUpdateBranches() {
+    return request("/api/update/branches", { cache: "no-store" }).then((data) => {
+      if (!Array.isArray(data?.branches)) throw new Error(data?.error || "Update branch list unavailable.")
+      return data
+    })
+  },
   getUpdateBranch() { return request("/api/update/branch") },
   setUpdateBranch(branch) { return request("/api/update/branch", { method: "POST", data: { branch } }) },
+  getUpdateVersions(branch, { page = 1, head = "", signal } = {}) {
+    const query = new URLSearchParams({ branch, page: String(page) })
+    if (head) query.set("head", head)
+    return request(`/api/update/versions?${query}`, { cache: "no-store", signal })
+  },
+  installUpdateVersion(branch, commit) { return request("/api/update/version", { method: "POST", data: { branch, commit, confirmed: true } }) },
   updateFast() { return request("/api/update/fast", { method: "POST" }) },
-  getUpdateFastStatus() { return request("/api/update/fast/status") },
+  getUpdateFastStatus() {
+    return request("/api/update/fast/status", { cache: "no-store" }).then((data) => {
+      if (!data || typeof data !== "object" || typeof data.running !== "boolean") throw new Error(data?.error || "Update status unavailable.")
+      return data
+    })
+  },
   updateRecover() { return request("/api/update/recover", { method: "POST" }) },
   updateRollback() { return request("/api/update/rollback", { method: "POST" }) },
   factoryReset() { return request("/api/update/factory_reset", { method: "POST" }) },

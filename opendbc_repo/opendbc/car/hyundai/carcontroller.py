@@ -10,6 +10,7 @@ from opendbc.car.lateral import apply_driver_steer_torque_limits, apply_steer_an
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.hyundai import hyundaicanfd, hyundaican
 from opendbc.car.hyundai.hyundaicanfd import CanBus
+from opendbc.car.hyundai.lead_data import CanLeadDataState
 from opendbc.car.hyundai.values import HyundaiFlags, HyundaiSafetyFlags, HyundaiStarPilotFlags, Buttons, CarControllerParams, CAR, CANFD_ANGLE_LONGITUDINAL_CAR, \
                                         CANFD_RADAR_ECU_KEEPALIVE_CAR, CANFD_ALT_BUTTONS_RESUME_CAR, kia_ev6_gt_line_longitudinal_tuning, \
                                         KIA_EV6_GT_LINE_LONG_TUNING_TESTING_GROUND_ID
@@ -474,6 +475,7 @@ class CarController(CarControllerBase):
     self._ioniq_6_lane_change_ui_frames = 0
     self._ioniq_6_long_tuning = Ioniq6LongitudinalTuningState()
     self._genesis_g90_long_tuning = GenesisG90LongitudinalTuningState()
+    self._can_lead_data = CanLeadDataState()
     self._dash_lat_disengage_blink_frame = 0
     self._dash_lat_disengage_init = False
     self._dash_prev_lat_active = False
@@ -503,7 +505,9 @@ class CarController(CarControllerBase):
     return lka_icon, lfa_icon
 
   def _get_canfd_scc_lead_state(self, CC, CS, now_nanos):
-    openpilot_lead_visible = bool(getattr(CS, "openpilot_lead_visible", False) or CC.hudControl.leadVisible)
+    openpilot_lead_visible = bool(
+      getattr(CS, "openpilot_lead_visible", False) or getattr(CC.hudControl, "leadVisible", False)
+    )
     openpilot_lead_distance = float(np.clip(getattr(CS, "openpilot_lead_distance", 0.0), 0.0, 204.7))
     openpilot_lead_rel_speed = float(np.clip(getattr(CS, "openpilot_lead_rel_speed", 0.0), -16.4, 34.7))
     stock_camera_lead_fresh = now_nanos - getattr(CS, "stock_camera_lead_ts", 0) <= CANFD_CAMERA_LEAD_STALE_NS
@@ -757,6 +761,13 @@ class CarController(CarControllerBase):
     can_canfd_blended = bool(self.CP.flags & HyundaiFlags.CAN_CANFD_BLENDED)
     blended_hda2 = can_canfd_blended and bool(self.CP.flags & HyundaiFlags.CANFD_LKA_STEERING)
     longitudinal_active = bool(self.long_active_ecu and getattr(CC, "longActive", False))
+    lead_visible = bool(getattr(CS, "openpilot_lead_visible", False) or getattr(hud_control, "leadVisible", False))
+    lead_distance = float(np.clip(getattr(CS, "openpilot_lead_distance", 0.0), 0.0, 204.7))
+    lead_rel_speed = float(np.clip(getattr(CS, "openpilot_lead_rel_speed", 0.0), -170.0, 239.5))
+    if lead_visible and lead_distance <= CANFD_LEAD_MIN_DISTANCE:
+      lead_distance = CANFD_FALLBACK_LEAD_DISTANCE
+      lead_rel_speed = 0.0
+    lead_data = self._can_lead_data.update(lead_distance, lead_rel_speed, lead_visible)
 
     # HUD messages
     sys_warning, sys_state, left_lane_warning, right_lane_warning = process_hud_alert(CC.enabled, self.car_fingerprint,
@@ -836,7 +847,7 @@ class CarController(CarControllerBase):
         can_sends.extend(hyundaican.create_acc_commands(self.packer, CC.enabled, accel, jerk, int(self.frame / 2),
                                                         hud_control, set_speed_in_units, stopping,
                                                         CC.cruiseControl.override, use_fca, self.CP,
-                                                        main_cruise_enabled))
+                                                        main_cruise_enabled, lead_data))
 
     # 20 Hz LFA MFA message
     if self.frame % 5 == 0 and (self.CP.flags & HyundaiFlags.SEND_LFA.value or (self.long_active_ecu and blended_hda2)):
@@ -1022,14 +1033,17 @@ class CarController(CarControllerBase):
                                                                                  CC.leftBlinker,
                                                                                  CC.rightBlinker))
       if self.frame % 2 == 0:
+        lead_visible, lead_distance, lead_rel_speed = self._get_canfd_scc_lead_state(CC, CS, now_nanos)
         if self.CP.carFingerprint == CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN:
           scc_jerk_limits = get_hyundai_canfd_scc_jerk_limits(self.CP)
           acc_kwargs = {
             "jerk_upper": scc_jerk_limits[0],
             "jerk_lower": scc_jerk_limits[1],
+            "lead_distance": lead_distance,
+            "lead_rel_speed": lead_rel_speed,
+            "lead_visible": lead_visible,
           }
         else:
-          lead_visible, lead_distance, lead_rel_speed = self._get_canfd_scc_lead_state(CC, CS, now_nanos)
           acc_kwargs = {
             "main_mode_acc": int(CS.out.cruiseState.available),
             "direct_accel": True,

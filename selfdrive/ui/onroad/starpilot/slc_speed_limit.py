@@ -63,7 +63,6 @@ VISION_SPEED_LIMIT_CHANGE_THRESHOLD = 0.1  # m/s
 # is a procedural API consumed once per frame by StarPilotOnroadView.
 
 _pulse = {
-  "active": False,        # is the active source currently "Vision"?
   "last": 0.0,            # last resolved vision limit (m/s) seen while active
   "start": -VISION_SPEED_LIMIT_PULSE_SECONDS,  # get_time() stamp of the last change
 }
@@ -71,7 +70,6 @@ _pulse = {
 
 def _reset_pulse() -> None:
   """Clear pulse state when SLC goes hidden or stale."""
-  _pulse["active"] = False
   _pulse["last"] = 0.0
   _pulse["start"] = -VISION_SPEED_LIMIT_PULSE_SECONDS
 
@@ -79,15 +77,17 @@ def _reset_pulse() -> None:
 def _tick_pulse(source: str, resolved_ms: float) -> None:
   """Update pulse state once per frame from the resolved speed limit.
 
-  The pulse fires when the active source is "Vision" and either the source
-  just became active or the resolved value changed by at least
-  VISION_SPEED_LIMIT_CHANGE_THRESHOLD (m/s).
+  The pulse fires when the active source is "Vision" and its resolved value
+  changed by at least VISION_SPEED_LIMIT_CHANGE_THRESHOLD (m/s).
   """
   vision_active = source == "Vision" and resolved_ms > 0.0
-  if vision_active and (not _pulse["active"] or abs(resolved_ms - _pulse["last"]) >= VISION_SPEED_LIMIT_CHANGE_THRESHOLD):
+  if not vision_active:
+    _pulse["start"] = -VISION_SPEED_LIMIT_PULSE_SECONDS
+    return
+
+  if abs(resolved_ms - _pulse["last"]) >= VISION_SPEED_LIMIT_CHANGE_THRESHOLD:
     _pulse["start"] = rl.get_time()
-  _pulse["active"] = vision_active
-  _pulse["last"] = resolved_ms if vision_active else 0.0
+  _pulse["last"] = resolved_ms
 
 
 def _speed_limit_pulse_color(base: rl.Color, alpha: int) -> rl.Color:

@@ -27,7 +27,7 @@ module.exports = async ({page, data, values, faults, counts, errors}) => {
   // A road-state change during the read must reject the queued click.
   release = await gate(); attempts = counts().attempts;
   await custom.click(); values.IsOnroad='True'; values.IsOffroad=''; release(); await idle();
-  assert.equal(counts().attempts, attempts); assert(await custom.isDisabled());
+  assert.equal(counts().attempts, attempts); assert(await custom.isEnabled());
   values.IsOnroad=''; values.IsOffroad='True';
   await page.evaluate(async () => await document.querySelector('#app').__vue_app__._instance.proxy.refreshContext());
   // Multiple clicks waiting for one poll cannot produce overlapping PUTs.
@@ -42,5 +42,5 @@ module.exports = async ({page, data, values, faults, counts, errors}) => {
   await page.evaluate(() => document.querySelector('#app').__vue_app__.unmount());
   release(); await page.waitForTimeout(100); assert.equal(counts().attempts, attempts);
   assert.deepEqual(errors, []);
-  console.log('PASS: stable appearance across 3 polls; deferred click saves once; road transition blocks; pending PUT blocks overlaps; unmount cancels.');
+  console.log('PASS: stable appearance across 3 polls; deferred click saves once; road transition cancels queued write; pending PUT blocks overlaps; unmount cancels.');
 };

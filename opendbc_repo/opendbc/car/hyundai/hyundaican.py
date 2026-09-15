@@ -1,5 +1,6 @@
 import crcmod
 from opendbc.car.hyundai.hyundaicanfd import CanBus
+from opendbc.car.hyundai.lead_data import CanLeadData
 from opendbc.car.hyundai.values import CAR, HyundaiFlags
 
 hyundai_checksum = crcmod.mkCrcFun(0x11D, initCrc=0xFD, rev=False, xorOut=0xdf)
@@ -317,19 +318,20 @@ def create_acc_commands_can_canfd_blended_hda2(packer, enabled, accel, accel_las
 
 
 def create_acc_commands(packer, enabled, accel, upper_jerk, idx, hud_control, set_speed, stopping, long_override, use_fca, CP,
-                        main_cruise_enabled=True):
+                        main_cruise_enabled=True, lead_data: CanLeadData | None = None):
   commands = []
+  lead_data = lead_data or CanLeadData()
 
   scc11_values = {
     "MainMode_ACC": int(bool(main_cruise_enabled)),
     "TauGapSet": hud_control.leadDistanceBars,
     "VSetDis": set_speed if enabled else 0,
     "AliveCounterACC": idx % 0x10,
-    "ObjValid": 1, # close lead makes controls tighter
-    "ACC_ObjStatus": 1, # close lead makes controls tighter
+    "ObjValid": int(lead_data.lead_visible),
+    "ACC_ObjStatus": int(lead_data.lead_visible),
     "ACC_ObjLatPos": 0,
-    "ACC_ObjRelSpd": 0,
-    "ACC_ObjDist": 1, # close lead makes controls tighter
+    "ACC_ObjRelSpd": lead_data.lead_rel_speed,
+    "ACC_ObjDist": int(lead_data.lead_distance),
     }
   commands.append(packer.make_can_msg("SCC11", 0, scc11_values))
 
@@ -357,7 +359,8 @@ def create_acc_commands(packer, enabled, accel, upper_jerk, idx, hud_control, se
     "JerkUpperLimit": upper_jerk, # stock usually is 1.0 but sometimes uses higher values
     "JerkLowerLimit": 5.0, # stock usually is 0.5 but sometimes uses higher values
     "ACCMode": 2 if enabled and long_override else 1 if enabled else 4, # stock will always be 4 instead of 0 after first disengage
-    "ObjGap": 2 if hud_control.leadVisible else 0, # 5: >30, m, 4: 25-30 m, 3: 20-25 m, 2: < 20 m, 0: no lead
+    "ObjGap": lead_data.object_gap, # 5: >30 m, 4: 25-30 m, 3: 20-25 m, 2: <20 m, 0: no lead
+    "ObjDistStat": lead_data.object_rel_gap,
   }
   commands.append(packer.make_can_msg("SCC14", 0, scc14_values))
 

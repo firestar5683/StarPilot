@@ -123,6 +123,7 @@ function handleRouteEvents(map, clickLayerId, onRouteSelect, routes, useMetric, 
     const routeId = feature.properties.routeId;
     const route = routes.find((r, i) => (i === 0 ? 'main' : `alt-${i}`) === routeId);
     onRouteSelect(route, routeId);
+    highlightRoute(map, routes, routeId);
     showTooltip(e);
   });
   map.on('mouseenter', clickLayerId, showTooltip);

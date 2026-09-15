@@ -117,6 +117,32 @@ def test_standby_blanks_after_timeout_and_touch_wakes(monkeypatch):
   assert device._calculate_brightness() == 45
 
 
+def test_standby_powers_down_onroad_and_touch_wakes(monkeypatch):
+  now = 100.0
+  monkeypatch.setattr(ui_state_module.time, "monotonic", lambda: now)
+  monkeypatch.setattr(ui_state_module, "PC", False)
+  display_power = []
+  monkeypatch.setattr(ui_state_module.HARDWARE, "set_display_power", display_power.append)
+  device, state = make_device(monkeypatch, StandbyMode=True)
+  state.started = True
+  state.ignition = True
+  device._ignition = True
+  device._interaction_time = now - 1
+
+  device._update_wakefulness()
+
+  assert display_power == [False]
+  assert not device.awake
+  assert device._calculate_brightness() == 0
+
+  monkeypatch.setattr(ui_state_module.gui_app, "_mouse_events", [SimpleNamespace(left_down=True)])
+  device._update_wakefulness()
+
+  assert display_power == [False, True]
+  assert device.awake
+  assert device._calculate_brightness() == 45
+
+
 def test_hide_ui_blanks_after_timeout_and_touch_wakes(monkeypatch):
   now = 100.0
   monkeypatch.setattr(ui_state_module.time, "monotonic", lambda: now)

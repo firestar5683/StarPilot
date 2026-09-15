@@ -11,6 +11,7 @@ const TABS = {
   errors: "Error Logs",
   tmux: "Tmux Live Log",
   monitor: "System Monitor",
+  discord: "Get Help via Discord",
 }
 
 function parseLogDate(filename) {
@@ -38,7 +39,7 @@ export const Logs = {
     }
   },
   setup() {
-    return useTabRouting("/logs", { troubleshoot: "troubleshoot", errors: "errors", tmux: "tmux", monitor: "monitor" })
+    return useTabRouting("/logs", { troubleshoot: "troubleshoot", errors: "errors", tmux: "tmux", monitor: "monitor", discord: "discord" })
   },
   created() {
     this.stream = useLogStream({ endpoint: "/api/tmux_log/live", snapshotFn: () => api.tmuxSnapshot(), interval: 2000 })
@@ -226,6 +227,21 @@ export const Logs = {
 
       <template v-else-if="tab === 'monitor'">
         <SystemMonitor />
+      </template>
+
+      <template v-else-if="tab === 'discord'">
+        <section class="gx-card">
+          <div class="gx-section__header">
+            <i class="bi bi-discord"></i>
+            <span class="gx-section__title">{{ TABS.discord }}</span>
+          </div>
+          <div style="padding: var(--sp-4); display:grid; gap:12px;">
+            <p class="gx-note" style="margin:0;">StarPilot has a vibrant, welcoming community discord. Stop by to chat or ask questions!</p>
+            <a class="gx-btn" href="https://firestar.link/discord" target="_blank" rel="noopener" style="justify-self:start;">
+              <i class="bi bi-box-arrow-up-right"></i> Get Help via Discord
+            </a>
+          </div>
+        </section>
       </template>
 
       <template v-else>

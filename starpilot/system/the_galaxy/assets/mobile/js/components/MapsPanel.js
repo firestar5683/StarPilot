@@ -309,6 +309,7 @@ export const MapsPanel = {
   },
   template: `
     <div style="display:grid; gap:12px;">
+      <GxNotice v-if="error" tone="danger" :text="error" style="margin:0;" />
       <section class="gx-card">
         <div class="gx-section__header">
           <i class="bi bi-map"></i>
@@ -396,9 +397,9 @@ export const MapsPanel = {
           </div>
           <div class="gx-row" style="border-top:none; flex-wrap:wrap;">
             <span class="gx-row__label">Auto Update</span>
-            <select class="gx-field" style="flex:1; min-width:160px;" :value="scheduleDraft" @change="scheduleDraft = $event.target.value">
+            <GalaxySelect class="gx-field" style="flex:1; min-width:160px;" :value="scheduleDraft" @change="scheduleDraft = $event.target.value">
               <option v-for="opt in scheduleOptions" :key="opt.value" :value="opt.value">{{ opt.label }}</option>
-            </select>
+            </GalaxySelect>
             <button type="button" class="gx-btn gx-btn--tonal" :disabled="savingSchedule || !scheduleDirty" @click="saveSchedule">
               {{ savingSchedule ? 'Applying...' : 'Apply' }}
             </button>
@@ -451,8 +452,6 @@ export const MapsPanel = {
           </div>
         </div>
       </section>
-
-      <GxNotice v-if="error" tone="danger" :text="error" />
     </div>
   `,
 }

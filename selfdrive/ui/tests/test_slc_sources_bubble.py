@@ -113,3 +113,31 @@ def test_source_label_color_override_and_engagement_states():
   assert (color_ui_override.r, color_ui_override.g, color_ui_override.b, color_ui_override.a) == (
     COLORS.OVERRIDE.r, COLORS.OVERRIDE.g, COLORS.OVERRIDE.b, 255
   )
+
+
+def test_vision_pulse_ignores_same_limit_source_flapping(monkeypatch):
+  from openpilot.selfdrive.ui.onroad.starpilot import slc_speed_limit as slc
+
+  def rgba(color):
+    return color.r, color.g, color.b, color.a
+
+  now = [0.0]
+  monkeypatch.setattr(slc.rl, "get_time", lambda: now[0])
+  base = slc.rl.Color(255, 255, 255, 255)
+
+  slc._reset_pulse()
+  slc._tick_pulse("Vision", 15.6464)
+  now[0] = 0.5
+  assert rgba(slc._speed_limit_pulse_color(base, 255)) == (188, 132, 255, 255)
+
+  slc._tick_pulse("Map Data", 15.6464)
+  assert rgba(slc._speed_limit_pulse_color(base, 255)) == (255, 255, 255, 255)
+
+  now[0] = 0.6
+  slc._tick_pulse("Vision", 15.6464)
+  assert rgba(slc._speed_limit_pulse_color(base, 255)) == (255, 255, 255, 255)
+
+  now[0] = 0.7
+  slc._tick_pulse("Vision", 13.4112)
+  now[0] = 1.2
+  assert rgba(slc._speed_limit_pulse_color(base, 255)) == (188, 132, 255, 255)

@@ -11,6 +11,7 @@ from opendbc.car.toyota import toyotacan
 from opendbc.car.toyota.carcontroller import CarController, get_camry_hybrid_feedforward, get_long_tune, get_prius_feedforward, \
                                              get_prius_positive_feedforward_scale, \
                                              get_rav4_interceptor_pedal_scale, \
+                                             get_steer_rate_limit_frames, \
                                              limit_interceptor_pcm_accel, \
                                              limit_interceptor_stopping_accel, limit_no_lead_cruise_sign_flip, \
                                              limit_prius_stopping_accel, should_bypass_toyota_long_pid, supports_toyota_auto_hold, \
@@ -734,6 +735,10 @@ class TestToyotaFingerprint:
 
 
 class TestToyotaCarController:
+  def test_corolla_tss2_uses_early_steer_rate_fault_guard(self):
+    assert get_steer_rate_limit_frames(CAR.TOYOTA_COROLLA_TSS2) == 8
+    assert get_steer_rate_limit_frames(CAR.TOYOTA_RAV4_TSS2) == 18
+
   @staticmethod
   def _make_controller(*, standstill_req=False, last_standstill=False):
     controller = CarController.__new__(CarController)

@@ -39,6 +39,7 @@ from openpilot.system.hardware.chestnut.status import ChestnutStatus
 from openpilot.system.version import terms_version, training_version
 from openpilot.system.athena.registration import UNREGISTERED_DONGLE_ID
 
+from openpilot.starpilot.assets.model_manager import selected_chestnut_artifacts_ready
 from openpilot.starpilot.common.starpilot_variables import get_starpilot_toggles
 
 ThermalStatus = log.DeviceState.ThermalStatus
@@ -434,6 +435,9 @@ def hardware_thread(end_event, hw_queue) -> None:
       )
       chestnut_state = sm["chestnutState"]
       chestnut_valid = sm.alive["chestnutState"] and sm.valid["chestnutState"]
+      compiled = params.get_bool("UsbGpuCompiled")
+      if started_ts is None:
+        compiled = selected_chestnut_artifacts_ready(params)
       chestnut_status.update(
         started_ts is None,
         chestnut_expected,
@@ -441,7 +445,7 @@ def hardware_thread(end_event, hw_queue) -> None:
         chestnut.failed,
         params.get_bool("UsbGpuLoading"),
         params.get("UsbGpuActive"),
-        params.get_bool("UsbGpuCompiled"),
+        compiled,
         chestnut_state if chestnut_valid else None,
         set_offroad_alert_if_changed,
       )
@@ -460,7 +464,7 @@ def hardware_thread(end_event, hw_queue) -> None:
     msg.deviceState.maxTempC = all_comp_temp
 
     if fan_controller is not None:
-      msg.deviceState.fanSpeedPercentDesired = fan_controller.update(all_comp_temp, onroad_conditions["ignition"])
+      msg.deviceState.fanSpeedPercentDesired = fan_controller.update(all_comp_temp, onroad_conditions["ignition"], starpilot_toggles.aggressive_cooling)
 
     # StarPilot variables
     if starpilot_toggles.increase_thermal_limits:

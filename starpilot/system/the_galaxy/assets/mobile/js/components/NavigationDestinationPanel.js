@@ -1,5 +1,14 @@
 import { api, showSnackbar } from "../api.js"
-import { getMapboxSearchContext, addRouteToMap, removeRouteFromMap } from "../../../components/navigation/navigation_utilities.js?v=nav-search-context-2"
+import { GxNotice } from "./GxNotice.js"
+import {
+  getMapboxSearchContext,
+  addRouteToMap,
+  highlightRoute,
+  removeRouteFromMap,
+  formatSecondsToHuman,
+  formatMetersToHuman,
+  formatMetersToMiles,
+} from "../../../components/navigation/navigation_utilities.js?v=nav-route-selection-1"
 
 const MAPBOX_STYLE = "mapbox://styles/frogsgomoo/cmcfv151j000o01rcdxebhl76"
 
@@ -72,6 +81,7 @@ function secondaryLabel(place) {
 
 export const NavigationDestinationPanel = {
   name: "NavigationDestinationPanel",
+  components: { GxNotice },
   data() {
     return {
       loading: true,
@@ -83,7 +93,13 @@ export const NavigationDestinationPanel = {
       recentDestinations: [],
       favorites: [],
       destination: null,
+      routeSummary: null,
+      routes: [],
+      selectedRouteId: "main",
+      navigationStarted: false,
+      isMetric: false,
       mapboxPublic: "",
+      mapboxSecret: "",
       language: "",
       lastPosition: null,
       map: null,
@@ -97,6 +113,7 @@ export const NavigationDestinationPanel = {
   },
   computed: {
     hasMapbox() { return !!this.mapboxPublic },
+    hasRoutingKey() { return !!this.mapboxSecret },
     recentPlaces() {
       const seen = new Set()
       return [...this.favorites, ...this.recentDestinations].filter((place) => {
@@ -107,6 +124,15 @@ export const NavigationDestinationPanel = {
         return true
       }).slice(0, 10)
     },
+    favoriteDestination() {
+      const destination = coordinates(this.destination)
+      if (!destination) return null
+      return this.favorites.find((favorite) => {
+        const favoriteCoordinates = coordinates(favorite)
+        return favoriteCoordinates && Math.abs(favoriteCoordinates.latitude - destination.latitude) < 0.00001 && Math.abs(favoriteCoordinates.longitude - destination.longitude) < 0.00001
+      }) || null
+    },
+    isFavorite() { return !!this.favoriteDestination },
   },
   async mounted() {
     await this.load()
@@ -120,6 +146,14 @@ export const NavigationDestinationPanel = {
     }
   },
   methods: {
+    secondaryLabel,
+    isPlaceFavorite(place) {
+      const placeCoordinates = coordinates(place)
+      return !!placeCoordinates && this.favorites.some((favorite) => {
+        const favoriteCoordinates = coordinates(favorite)
+        return favoriteCoordinates && Math.abs(favoriteCoordinates.latitude - placeCoordinates.latitude) < 0.00001 && Math.abs(favoriteCoordinates.longitude - placeCoordinates.longitude) < 0.00001
+      })
+    },
     async load() {
       try {
         const [nav, favoritePayload] = await Promise.all([
@@ -127,7 +161,9 @@ export const NavigationDestinationPanel = {
           api.getNavigationFavorites().catch(() => ({ favorites: [] })),
         ])
         this.mapboxPublic = String(nav?.mapboxPublic || "").trim()
+        this.mapboxSecret = String(nav?.mapboxSecret || "").trim()
         this.language = String(nav?.language || "").trim()
+        this.isMetric = !!nav?.isMetric
         this.lastPosition = coordinates(nav?.lastPosition)
         this.favorites = Array.isArray(favoritePayload?.favorites) ? favoritePayload.favorites : []
         this.recentDestinations = parseJson(nav?.previousDestinations, [])
@@ -135,8 +171,12 @@ export const NavigationDestinationPanel = {
         const savedDestination = coordinates(nav?.destination) || coordinates(saved)
         if (savedDestination) {
           const raw = saved || nav?.destination || {}
-          this.destination = { ...raw, ...savedDestination, name: labelFor(raw) || "Current destination" }
+          const savedName = String(raw?.name || raw?.text || "").trim()
+          const savedRouteId = String(raw?.routeId || "main")
+          this.selectedRouteId = /^(?:main|alt-[1-9]\d*)$/.test(savedRouteId) ? savedRouteId : "main"
+          this.destination = { ...raw, ...savedDestination, name: savedName || labelFor(raw) || "Current destination" }
           this.query = this.destination.name
+          this.navigationStarted = true
         }
       } catch (e) {
         this.error = e?.message || "Failed to load navigation."
@@ -178,6 +218,11 @@ export const NavigationDestinationPanel = {
     },
     onInput(event) {
       this.destination = null
+      this.routeSummary = null
+      this.routes = []
+      this.selectedRouteId = "main"
+      this.navigationStarted = false
+      if (this.map) removeRouteFromMap(this.map)
       this.searchRequest += 1
       this.searching = false
       this.error = ""
@@ -204,7 +249,8 @@ export const NavigationDestinationPanel = {
       }
     },
     async resolvePlace(place) {
-      const placeLabel = labelFor(place) || this.query.trim()
+      const primaryLabel = String(place?.name || place?.text || "").trim()
+      const placeLabel = primaryLabel || labelFor(place) || this.query.trim()
       let coords = coordinates(place?.geometry?.coordinates) || coordinates(place)
       if (!coords && place?.mapbox_id) {
         const payload = await api.mapboxRetrieve(place.mapbox_id, this.mapboxPublic, this.sessionToken)
@@ -215,11 +261,12 @@ export const NavigationDestinationPanel = {
         coords = coordinates(payload?.features?.[0]?.geometry?.coordinates)
       }
       if (!coords) throw new Error("Could not determine that location.")
-      return { ...coords, name: placeLabel, place_name: placeLabel }
+      return { ...coords, name: primaryLabel || placeLabel, place_name: labelFor(place) || placeLabel }
     },
     async chooseSuggestion(place) {
       this.searching = true
       try {
+        this.selectedRouteId = "main"
         this.destination = await this.resolvePlace(place)
         this.query = this.destination.name
         this.suggestions = []
@@ -242,14 +289,21 @@ export const NavigationDestinationPanel = {
         showSnackbar("Add a Mapbox public key in App Keys first.", "error")
         return
       }
+      if (!this.hasRoutingKey) {
+        showSnackbar("Add a Mapbox secret key in App Keys first. It is required for the comma to calculate the on-device route and provide navigation turn desires.", "error")
+        return
+      }
       this.loadingRoute = true
       try {
         this.destination = place || await this.resolveQuery()
         if (!this.destination) throw new Error("Enter a destination first.")
+        const selectedRouteId = this.selectedRouteId || this.routeSummary?.routeId || "main"
+        this.destination = { ...this.destination, routeId: selectedRouteId }
         await api.setNavigation(this.destination)
+        this.navigationStarted = true
         this.query = this.destination.name
         this.suggestions = []
-        await this.previewDestination(this.destination)
+        await this.previewDestination(this.destination, selectedRouteId)
         showSnackbar("Destination set.")
       } catch (e) {
         this.error = e?.message || "Failed to set destination."
@@ -258,12 +312,76 @@ export const NavigationDestinationPanel = {
         this.loadingRoute = false
       }
     },
-    async previewDestination(place) {
+    async cancelNavigation() {
+      try {
+        await api.clearNavigation()
+        this.navigationStarted = false
+        this.destination = null
+        this.routeSummary = null
+        this.routes = []
+        this.selectedRouteId = "main"
+        this.query = ""
+        this.suggestions = []
+        if (this.map) removeRouteFromMap(this.map)
+        this.destinationMarker?.remove()
+        this.destinationMarker = null
+        showSnackbar("Navigation cancelled.")
+      } catch (e) {
+        showSnackbar(e?.message || "Could not cancel navigation.", "error")
+      }
+    },
+    async toggleFavorite() {
+      const destination = coordinates(this.destination)
+      if (!destination) return
+      const favorite = this.favoriteDestination
+      try {
+        if (favorite) {
+          await api.deleteNavigationFavorite(favorite)
+          showSnackbar("Removed from favorites.")
+        } else {
+          await api.navigationFavorite({
+            name: this.destination.name || this.query || "Favorite destination",
+            longitude: destination.longitude,
+            latitude: destination.latitude,
+            routeId: this.routeSummary?.routeId || null,
+          })
+          showSnackbar("Added to favorites.")
+        }
+        const payload = await api.getNavigationFavorites()
+        this.favorites = Array.isArray(payload?.favorites) ? payload.favorites : []
+      } catch (e) {
+        showSnackbar(e?.message || "Could not update favorites.", "error")
+      }
+    },
+    formatDistance(value) {
+      return this.isMetric ? formatMetersToHuman(value, true) : formatMetersToMiles(value)
+    },
+    formatDuration(value) { return formatSecondsToHuman(value) },
+    formatEta(value) {
+      const eta = new Date(Date.now() + Number(value || 0) * 1000)
+      return eta.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })
+    },
+    routeId(index) { return index === 0 ? "main" : `alt-${index}` },
+    selectRoute(route, routeId = "main") {
+      if (!route) return
+      this.selectedRouteId = routeId
+      if (this.destination) this.destination = { ...this.destination, routeId }
+      this.routeSummary = {
+        distance: Number(route.distance) || 0,
+        duration: Number(route.duration) || 0,
+        routeId,
+      }
+      if (this.map && this.routes.length) highlightRoute(this.map, this.routes, routeId)
+    },
+    async previewDestination(place, preferredRouteId = null) {
       if (!this.mapReady || !this.map || !place) return
       const mapboxgl = window.mapboxgl
       this.destinationMarker?.remove()
       this.destinationMarker = new mapboxgl.Marker({ color: "#9d72ff" }).setLngLat([place.longitude, place.latitude]).addTo(this.map)
       if (!this.lastPosition) {
+        this.routeSummary = null
+        this.routes = []
+        this.selectedRouteId = "main"
         this.map.flyTo({ center: [place.longitude, place.latitude], zoom: 14 })
         return
       }
@@ -271,48 +389,96 @@ export const NavigationDestinationPanel = {
         const payload = await api.mapboxDirections(this.lastPosition, place, this.mapboxPublic)
         const routes = Array.isArray(payload?.routes) ? payload.routes : []
         if (routes.length) {
+          const requestedRouteId = preferredRouteId || place.routeId || this.selectedRouteId || "main"
+          const selectedIndex = routes.findIndex((_, index) => this.routeId(index) === requestedRouteId)
+          const selectedRouteId = selectedIndex >= 0 ? requestedRouteId : "main"
+          this.routes = routes
+          this.selectRoute(routes[selectedIndex >= 0 ? selectedIndex : 0], selectedRouteId)
           removeRouteFromMap(this.map)
-          addRouteToMap(this.map, routes, [this.lastPosition.longitude, this.lastPosition.latitude], [place.longitude, place.latitude], () => {}, true, () => "main")
+          addRouteToMap(
+            this.map,
+            routes,
+            [this.lastPosition.longitude, this.lastPosition.latitude],
+            [place.longitude, place.latitude],
+            (route, routeId) => this.selectRoute(route, routeId),
+            this.isMetric,
+            () => this.selectedRouteId,
+          )
         } else {
+          this.routeSummary = null
+          this.routes = []
+          this.selectedRouteId = "main"
           this.map.fitBounds([[this.lastPosition.longitude, this.lastPosition.latitude], [place.longitude, place.latitude]], { padding: 80, duration: 500 })
         }
       } catch (e) {
+        this.routeSummary = null
+        this.routes = []
+        this.selectedRouteId = "main"
         this.map.fitBounds([[this.lastPosition.longitude, this.lastPosition.latitude], [place.longitude, place.latitude]], { padding: 80, duration: 500 })
       }
     },
     usePlace(place) { this.chooseSuggestion(place) },
   },
   template: `
-    <div style="display:grid; gap:12px;">
-      <section class="gx-card">
-        <div class="gx-section__header"><i class="bi bi-geo-alt-fill"></i><span class="gx-section__title">Navigation Destination</span></div>
-        <div style="padding:var(--sp-3); display:grid; gap:8px;">
-          <p v-if="!hasMapbox && !loading" class="gx-row__desc" style="margin:0;">Add a Mapbox public key in <a href="#/navigation/keys">App Keys</a> to search destinations and show the map.</p>
-          <div style="display:flex; gap:8px;">
-            <input class="gx-field" style="flex:1;" v-model="query" @input="onInput" @keyup.enter="setDestination()" placeholder="Search an address or place" autocomplete="off" />
-            <button type="button" class="gx-btn" :disabled="loadingRoute || searching || !query.trim()" @click="setDestination()"><i class="bi bi-send"></i> {{ loadingRoute ? 'Setting...' : 'Send' }}</button>
+    <div class="gx-navigation-stage">
+      <div v-if="loading || !hasMapbox" class="gx-navigation-empty gx-card">
+        <div class="gx-loading">{{ loading ? 'Loading navigation...' : 'Map unavailable until a Mapbox key is configured.' }}</div>
+        <p v-if="!hasMapbox && !loading">Add a Mapbox public key in <a href="#/navigation/keys">App Keys</a> to search destinations and show the map.</p>
+      </div>
+      <div v-else ref="map" class="gx-navigation-map"></div>
+
+      <div v-if="hasMapbox && !loading" class="gx-navigation-overlay">
+        <GxNotice v-if="!hasRoutingKey" tone="warn" icon="bi-key-fill" style="margin:0;">
+          The map and destination search only use your public Mapbox key. Add a <a href="#/navigation/keys">secret Mapbox key in App Keys</a> before starting navigation so the comma can calculate the on-device route and provide turn desires.
+        </GxNotice>
+        <section class="gx-navigation-search gx-card">
+          <div class="gx-navigation-search__row">
+            <i class="bi bi-search" aria-hidden="true"></i>
+            <input class="gx-field" v-model="query" @input="onInput" @keyup.enter="setDestination()" placeholder="Search here" aria-label="Search for a destination" autocomplete="off" />
+            <button type="button" class="gx-icon-btn gx-navigation-send" :disabled="loadingRoute || searching || !query.trim() || !hasRoutingKey" @click="setDestination()" aria-label="Send destination" :title="hasRoutingKey ? 'Send destination' : 'A Mapbox secret key is required to start navigation'"><i class="bi bi-send-fill"></i></button>
           </div>
-          <div v-if="searching" class="gx-row__desc">Searching...</div>
-          <div v-if="suggestions.length" style="display:grid; gap:4px;">
-            <button v-for="place in suggestions" :key="place.mapbox_id || place.id || place.name" type="button" class="gx-row" style="text-align:left; cursor:pointer;" @click="chooseSuggestion(place)">
-              <span class="gx-row__info"><span class="gx-row__label">{{ place.name || place.text || place.place_name || 'Unnamed location' }}</span><span class="gx-row__desc">{{ secondaryLabel(place) }}</span></span>
+          <div v-if="searching" class="gx-navigation-status">Searching...</div>
+          <div v-if="suggestions.length" class="gx-navigation-suggestions">
+            <button v-for="place in suggestions" :key="place.mapbox_id || place.id || place.name" type="button" class="gx-navigation-suggestion" @click="chooseSuggestion(place)">
+              <span><strong>{{ place.name || place.text || place.place_name || 'Unnamed location' }}</strong><small>{{ secondaryLabel(place) }}</small></span>
               <i class="bi bi-chevron-right"></i>
             </button>
           </div>
-          <div v-if="recentPlaces.length && !suggestions.length && !query" style="display:grid; gap:4px;">
-            <div class="gx-row__desc">Recent and favorite destinations</div>
-            <button v-for="place in recentPlaces" :key="place.id || place.name" type="button" class="gx-row" style="text-align:left; cursor:pointer;" @click="usePlace(place)">
-              <span class="gx-row__info"><span class="gx-row__label">{{ place.name || place.place_name }}</span><span class="gx-row__desc">{{ secondaryLabel(place) }}</span></span>
-              <i class="bi bi-clock-history"></i>
+        </section>
+
+        <section v-if="destination" class="gx-navigation-summary gx-card">
+          <div class="gx-navigation-summary__title">{{ destination.name || query || 'Destination' }}</div>
+          <div v-if="routeSummary" class="gx-navigation-summary__rows">
+            <div><span class="gx-navigation-summary__icon">🛣️</span><span>Distance:</span><strong>{{ formatDistance(routeSummary.distance) }}</strong></div>
+            <div><span class="gx-navigation-summary__icon">⌛</span><span>Duration:</span><strong>{{ formatDuration(routeSummary.duration) }}</strong></div>
+            <div><span class="gx-navigation-summary__icon">🕗</span><span>ETA:</span><strong>{{ formatEta(routeSummary.duration) }}</strong></div>
+          </div>
+          <div v-if="routes.length > 1" class="gx-navigation-route-picker" aria-label="Choose a route">
+            <div class="gx-navigation-route-picker__title">Routes</div>
+            <button v-for="(route, index) in routes" :key="routeId(index)" type="button"
+              class="gx-navigation-route-option" :class="{ selected: selectedRouteId === routeId(index) }"
+              :aria-pressed="selectedRouteId === routeId(index)" :aria-label="'Select route ' + (index + 1)"
+              @click="selectRoute(route, routeId(index))">
+              <span><strong>Route {{ index + 1 }}</strong><small>{{ selectedRouteId === routeId(index) ? 'Selected' : (index === 0 ? 'Recommended' : 'Alternative') }}</small></span>
+              <strong>{{ formatDistance(route.distance) }} · {{ formatDuration(route.duration) }}</strong>
             </button>
           </div>
-          <p v-if="error" class="gx-row__desc" style="color:var(--error); margin:0;">{{ error }}</p>
-        </div>
-      </section>
-      <section class="gx-card" style="overflow:hidden;">
-        <div v-if="loading || !hasMapbox" class="gx-loading" style="min-height:280px; display:grid; place-items:center;">{{ loading ? 'Loading navigation...' : 'Map unavailable until a Mapbox key is configured.' }}</div>
-        <div v-else ref="map" style="height:380px; width:100%; min-height:280px;"></div>
-      </section>
+          <div class="gx-navigation-summary__actions">
+            <button v-if="navigationStarted" type="button" class="gx-btn gx-btn--danger" @click="cancelNavigation"><i class="bi bi-x-lg"></i> Cancel Navigation</button>
+            <button v-else type="button" class="gx-btn gx-btn--success" :disabled="loadingRoute || !hasRoutingKey" :title="hasRoutingKey ? 'Start Navigation' : 'A Mapbox secret key is required to start navigation'" @click="setDestination(destination)"><i class="bi bi-sign-turn-right"></i> {{ loadingRoute ? 'Calculating...' : 'Start Navigation' }}</button>
+            <button type="button" class="gx-btn gx-btn--favorite" :class="{ active: isFavorite }" @click="toggleFavorite"><i class="bi" :class="isFavorite ? 'bi-heart-fill' : 'bi-heart'"></i> {{ isFavorite ? 'Unfavorite' : 'Favorite' }}</button>
+          </div>
+        </section>
+
+        <section v-if="recentPlaces.length && !suggestions.length && !query && !destination" class="gx-navigation-recent gx-card">
+          <div class="gx-navigation-recent__title">Recent and favorite destinations</div>
+          <button v-for="place in recentPlaces" :key="place.id || place.name" type="button" class="gx-navigation-suggestion" @click="usePlace(place)">
+            <span><strong>{{ place.name || place.place_name }}</strong><small>{{ secondaryLabel(place) }}</small></span>
+            <i class="bi" :class="isPlaceFavorite(place) ? 'bi-heart-fill' : 'bi-clock-history'"></i>
+          </button>
+        </section>
+        <GxNotice v-if="error" tone="danger" :text="error" style="margin:0;" />
+      </div>
     </div>
   `,
 }
