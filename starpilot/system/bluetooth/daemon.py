@@ -43,6 +43,7 @@ class BluetoothController:
     self._policy_disconnect_retry_after: dict[str, float] = {}
     self._scan_deadline = 0.0
     self._audio_test_deadline = 0.0
+    self._connected_published: bool | None = None
     self._sleep = sleep
     self.params.remove("BluetoothAudioTestActive")
     self.params_memory.remove("TestAlert")
@@ -383,15 +384,22 @@ class BluetoothController:
         self._reconnect_backoff[address] = (attempts, now + delay)
         cloudlog.warning(f"Bluetooth reconnect failed for {address}; retrying in {delay:.0f}s")
 
+  def _publish_connected(self, connected: bool) -> None:
+    if connected != self._connected_published:
+      self.params.put_bool("BluetoothConnected", connected)
+      self._connected_published = connected
+
   def maintain_connections(self) -> None:
     while True:
       time.sleep(2)
       now = time.monotonic()
       if not self.params.get_bool("BluetoothEnabled"):
         self._maintain_controller_offroad_policy({"offroad": self._offroad(), "devices": []}, now)
+        self._publish_connected(False)
         continue
       try:
         status = self.status()
+        self._publish_connected(any(device.get("connected") for device in status["devices"]))
         if not status["available"] or not status["powered"]:
           continue
         self._maintain_scan(status, now)
