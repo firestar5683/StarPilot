@@ -401,14 +401,17 @@ class CAR(Platforms):
       VWCarDocs("Volkswagen ID.5 2022-23"),
     ],
     VolkswagenCarSpecs(mass=2224, wheelbase=2.77),
-    chassis_codes={"E2"},
+    # E8 is also used by first-generation ID.4s; distinguish generations by model year.
+    chassis_codes={"E2", "E8"},
     wmis={WMI.VOLKSWAGEN_USA_SUV, WMI.VOLKSWAGEN_EUROPE_CAR, WMI.VOLKSWAGEN_EUROPE_SUV},
+    model_years={"M", "N", "P"},
   )
   VOLKSWAGEN_ID4_MK2 = VolkswagenMEBPlatformConfig(
     [VWCarDocs("Volkswagen ID.4 2024-25")],
     VolkswagenCarSpecs(mass=2224, wheelbase=2.77),
     chassis_codes={"E8"},
     wmis={WMI.VOLKSWAGEN_USA_SUV, WMI.VOLKSWAGEN_EUROPE_CAR, WMI.VOLKSWAGEN_EUROPE_SUV},
+    model_years={"R", "S"},
     flags=VolkswagenFlags.MEB_GEN2,
   )
   VOLKSWAGEN_JETTA_MK6 = VolkswagenPQPlatformConfig(

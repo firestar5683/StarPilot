@@ -141,6 +141,35 @@ class TestVolkswagenPlatformConfigs:
                               not platform.config.model_years & comp.config.model_years)
             assert both_meb and disjoint_years, f"Shared chassis codes: {comp}"
 
+  @pytest.mark.parametrize(("wmi", "chassis", "year", "expected"), (
+    ("1V2", "E8", "M", CAR.VOLKSWAGEN_ID4_MK1),
+    ("1V2", "E8", "N", CAR.VOLKSWAGEN_ID4_MK1),
+    ("1V2", "E8", "P", CAR.VOLKSWAGEN_ID4_MK1),
+    ("WVW", "E8", "P", CAR.VOLKSWAGEN_ID4_MK1),
+    ("WVG", "E8", "P", CAR.VOLKSWAGEN_ID4_MK1),
+    ("WVW", "E2", "M", CAR.VOLKSWAGEN_ID4_MK1),
+    ("WVW", "E2", "N", CAR.VOLKSWAGEN_ID4_MK1),
+    ("WVG", "E2", "P", CAR.VOLKSWAGEN_ID4_MK1),
+    ("1V2", "E8", "R", CAR.VOLKSWAGEN_ID4_MK2),
+    ("1V2", "E8", "S", CAR.VOLKSWAGEN_ID4_MK2),
+    ("1V2", "E8", "L", None),
+    ("1V2", "E8", "T", None),
+    ("1V2", "E8", "0", None),
+    ("WVW", "E2", "R", None),
+    ("WVW", "E2", "S", None),
+    ("TMB", "E8", "P", None),
+  ))
+  def test_id4_fuzzy_fingerprinting_model_year(self, wmi, chassis, year, expected):
+    # Synthetic VINs keep the regression independent of the platform configuration.
+    vin = f"{wmi}000{chassis}0{year}0000000"
+    live_fws = {(0x757, None): [b'\xf1\x871EA907572H \xf1\x890234']}
+    matches = FW_QUERY_CONFIG.match_fw_to_car_fuzzy(live_fws, vin, FW_VERSIONS)
+    assert matches == ({expected} if expected is not None else set())
+
+  @pytest.mark.parametrize("live_fws", ({}, {(0x757, None): [b"unknown radar firmware"]}))
+  def test_id4_fuzzy_fingerprinting_requires_known_radar(self, live_fws):
+    assert FW_QUERY_CONFIG.match_fw_to_car_fuzzy(live_fws, "1V2000E80P0000000", FW_VERSIONS) == set()
+
   def test_custom_fuzzy_fingerprinting(self, subtests):
     all_radar_fw = list({fw for ecus in FW_VERSIONS.values() for fw in ecus[Ecu.fwdRadar, 0x757, None]})
 
