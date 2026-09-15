@@ -148,6 +148,8 @@ def test_every_wake_choice_controls_its_own_event(key, selected):
     alert = state.sm['selfdriveState']
     alert.alertSize = 'small'
     alert.alertStatus = {'StandbyWakeInfoAlert': 'normal', 'StandbyWakeWarningAlert': 'userPrompt', 'StandbyWakeCriticalAlert': 'critical'}[key]
+  elif key == 'StandbyWakeButton':
+    state.params_memory.values['StandbyButtonPressTime'] = 99_500_000_000
   elif key == 'StandbyWakeTurnSignal':
     state.sm['carState'].leftBlinker = True
   else:
@@ -159,6 +161,7 @@ def test_every_wake_choice_controls_its_own_event(key, selected):
 
 def test_external_button_press_is_fresh_and_consumed_once():
   settings = dict.fromkeys(screen.SCREEN_WAKE_KEYS, False)
+  settings['StandbyWakeButton'] = True
   device, state, _ = make_device(**settings)
   device._update_wakefulness()
   state.params_memory.values['StandbyButtonPressTime'] = 99_500_000_000
@@ -173,7 +176,7 @@ def test_external_button_press_is_fresh_and_consumed_once():
 
 
 def test_consumed_button_press_is_not_replayed_between_ui_frames():
-  device, state, _ = make_device()
+  device, state, _ = make_device(StandbyWakeButton=True)
   device._update_wakefulness()
   state.params_memory.values['StandbyButtonPressTime'] = 99_500_000_000
   device._update_wakefulness()
@@ -206,6 +209,7 @@ def test_dom_alert_predicate_does_not_depend_on_renderer_hide_setting(device_typ
 
 def test_bluetooth_wake_during_ignition_only_standby():
   settings = dict.fromkeys(screen.SCREEN_WAKE_KEYS, False)
+  settings["StandbyWakeButton"] = True
   device, state, _ = make_device(**settings)
   state.started = False
   state.ignition = device._ignition = True

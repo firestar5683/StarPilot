@@ -22,8 +22,11 @@ SCREEN_WAKE_OPTIONS = (
   ('StandbyWakeWarningAlert', 'Warning alerts', True),
   ('StandbyWakeCriticalAlert', 'Critical / takeover alerts', True),
   ('StandbyWakeTurnSignal', 'Turn signals', False),
+  ('StandbyWakeButton', 'Bluetooth or steering wheel button', False),
 )
 SCREEN_WAKE_DESCRIPTIONS = {
+  'StandbyWakeButton':
+    'Wake the screen from Standby when a recognised Bluetooth, controller or steering wheel button is pressed, including buttons without an assigned action.',
   'StandbyWakeEngage': 'Wake the screen from Standby when StarPilot engages.',
   'StandbyWakeDisengage': 'Wake the screen from Standby when StarPilot disengages.',
   'StandbyWakeInfoAlert': 'Wake the screen from Standby and keep it awake while an informational alert is displayed.',

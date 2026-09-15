@@ -4751,7 +4751,7 @@
       {
         "key": "StandbyMode",
         "label": "Standby Mode",
-        "description": "Turn off the screen after the onroad timeout. Touch and recognised Bluetooth or steering wheel button presses always wake it. Choose additional wake events below.",
+        "description": "Turn off the screen after the onroad timeout. Touch and ignition changes always wake it. Choose additional wake events below.",
         "picker_description": "Turn off the driving screen after inactivity and choose additional wake events.",
         "data_type": "bool",
         "ui_type": "toggle",
@@ -4833,6 +4833,20 @@
         "key": "StandbyWakeTurnSignal",
         "label": "Turn signals",
         "description": "Wake the screen from Standby when a turn signal is activated.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "default": false,
+        "parent_key": "StandbyMode",
+        "visible_when_all_true": [
+          "ScreenManagement",
+          "StandbyMode"
+        ],
+        "settings_tier": "simple"
+      },
+      {
+        "key": "StandbyWakeButton",
+        "label": "Bluetooth or steering wheel button",
+        "description": "Wake the screen from Standby when a recognised Bluetooth, controller or steering wheel button is pressed, including buttons without an assigned action.",
         "data_type": "bool",
         "ui_type": "toggle",
         "default": false,

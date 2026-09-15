@@ -474,7 +474,8 @@ class Device:
     input_events = self._wake_input_events()
     selected_status_change = status_changed and status_key in self._wake_keys
     selected_turn_signal = bool(input_events & self._wake_keys)
-    button_pressed = self._standby_mode and (ui_state.started or ui_state.ignition) and "button" in input_events
+    button_pressed = (self._standby_mode and (ui_state.started or ui_state.ignition) and
+                      "StandbyWakeButton" in self._wake_keys and "button" in input_events)
     wake_for_onroad_event = (ui_state.started and self._standby_mode and self._screen_brightness_onroad != 0 and
                              (selected_status_change or self._visible_onroad_alert() or selected_turn_signal))
 

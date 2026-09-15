@@ -664,7 +664,7 @@ class WheelControlsDaemon:
 
   def _publish_button_press(self, timestamp: int) -> None:
     try:
-      if not all(self.params.get_bool(key) for key in ("ScreenManagement", "StandbyMode")):
+      if not all(self.params.get_bool(key) for key in ("ScreenManagement", "StandbyMode", "StandbyWakeButton")):
         return
       self.params_memory.put_int(STANDBY_BUTTON_PRESS_PARAM, timestamp)
     except Exception:
@@ -677,7 +677,7 @@ class WheelControlsDaemon:
     self._last_car_button_frame = 0
 
   def _configure_car_buttons(self) -> None:
-    if not all(self.params.get_bool(key) for key in ("ScreenManagement", "StandbyMode", "IsOnroad")):
+    if not all(self.params.get_bool(key) for key in ("ScreenManagement", "StandbyMode", "StandbyWakeButton", "IsOnroad")):
       self._close_car_buttons()
       return
     if self._car_state_sock is not None:

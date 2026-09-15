@@ -700,6 +700,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"StandardJerkSpeed", {PERSISTENT, FLOAT, "100.0", "100.0", 3}},
     {"StandardJerkSpeedDecrease", {PERSISTENT, FLOAT, "100.0", "100.0", 3}},
     {"StandbyMode", {PERSISTENT, BOOL, "0", "0", 1, SETTINGS_SIMPLE}},
+    {"StandbyWakeButton", {PERSISTENT, BOOL, "0", "0", 2, SETTINGS_SIMPLE}},
     {"StandbyButtonPressTime", {CLEAR_ON_MANAGER_START | DONT_LOG, INT, "0", "0"}},
     {"StandbyWakeEngage", {PERSISTENT, BOOL, "1", "1", 2, SETTINGS_SIMPLE}},
     {"StandbyWakeDisengage", {PERSISTENT, BOOL, "1", "1", 2, SETTINGS_SIMPLE}},

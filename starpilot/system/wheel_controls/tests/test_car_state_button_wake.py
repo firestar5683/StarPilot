@@ -24,7 +24,7 @@ def packet(timestamp, pressed=None, *, valid=True, button_type='accelCruise'):
 
 @pytest.fixture
 def car_buttons(monkeypatch):
-  params = FakeParams({'ScreenManagement': True, 'StandbyMode': True, 'IsOnroad': True})
+  params = FakeParams({'ScreenManagement': True, 'StandbyMode': True, 'StandbyWakeButton': True, 'IsOnroad': True})
   memory = FakeParams()
   daemon = wheel_controlsd.WheelControlsDaemon(params, memory)
   queued, subscriptions = [], []
@@ -65,7 +65,7 @@ def test_short_button_edge_survives_later_empty_frame_and_is_consumed_once(car_b
   assert len(subscriptions) == 1
 
 
-@pytest.mark.parametrize('disabled', ['ScreenManagement', 'StandbyMode', 'IsOnroad'])
+@pytest.mark.parametrize('disabled', ['ScreenManagement', 'StandbyMode', 'StandbyWakeButton', 'IsOnroad'])
 def test_subscription_only_runs_when_needed_and_reopens_cleanly(car_buttons, disabled):
   daemon, params, memory, queued, subscriptions, _boot, now = car_buttons
   params.put_bool(disabled, False)

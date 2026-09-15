@@ -300,7 +300,7 @@ class ScreenSettingsLayoutMici(NavScroller):
     self._onroad_timeout = self._timeout_button("ScreenTimeoutOnroad", "onroad timeout")
     standby = ScreenToggleMici("standby mode", self._params, "StandbyMode")
     self._wake_controls = [ScreenWakeToggleMici("wake: " + label.lower(), self._params, key, default) for key, label, default in SCREEN_WAKE_OPTIONS]
-    explanation = GreyBigButton("", "Standby sleeps the screen onroad. Touch and button presses always wake it.")
+    explanation = GreyBigButton("", "Standby sleeps the screen onroad. Touch and ignition changes always wake it.")
     self._refresh_controls = [management, offroad_timeout, self._onroad_timeout, standby, *self._wake_controls]
     for control in [offroad, onroad, offroad_timeout, self._onroad_timeout, standby, *self._wake_controls]:
       control.set_enabled(lambda: self._params.get_bool("ScreenManagement", default=True))

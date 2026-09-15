@@ -15,7 +15,7 @@ PRESS_PARAM = "StandbyButtonPressTime"
 
 @pytest.fixture
 def input_pipe():
-  params = FakeParams({"ScreenManagement": True, "StandbyMode": True})
+  params = FakeParams({"ScreenManagement": True, "StandbyMode": True, "StandbyWakeButton": True})
   memory = FakeParams()
   daemon = wheel_controlsd.WheelControlsDaemon(params, memory)
   read_fd, write_fd = os.pipe()
@@ -60,7 +60,7 @@ def test_selected_joystick_buttons_wake_without_executing_mappings(input_pipe, m
   assert actions == []
 
 
-@pytest.mark.parametrize("disabled_key", ["ScreenManagement", "StandbyMode"])
+@pytest.mark.parametrize("disabled_key", ["ScreenManagement", "StandbyMode", "StandbyWakeButton"])
 def test_enabling_standby_while_held_does_not_create_a_press(input_pipe, monkeypatch, disabled_key):
   _daemon, params, memory, _fd, send = input_pipe
   params.put_bool(disabled_key, False)
@@ -111,17 +111,19 @@ def test_wake_only_listener_does_not_reactivate_disabled_mappings(input_pipe, mo
   assert memory.get_int(PRESS_PARAM) == 999
 
 
-def test_enabled_mapping_still_executes_once_on_press_with_wake_timestamp(input_pipe, monkeypatch):
+@pytest.mark.parametrize("wake_enabled", [False, True])
+def test_enabled_mapping_still_executes_once_on_press_with_wake_timestamp(input_pipe, monkeypatch, wake_enabled):
   _daemon, params, memory, _fd, send = input_pipe
   wheel_controlsd.upsert_mapping(source(), 30, 2, params)
   actions = []
   monkeypatch.setattr(wheel_controlsd, "execute_mapping_slot", lambda slot, *_args: actions.append(slot))
   monkeypatch.setattr(wheel_controlsd.time, "monotonic_ns", lambda: 777)
+  params.put_bool("StandbyWakeButton", wake_enabled)
 
   for value in (1, 2, 0):
     send(wheel_controlsd.EV_KEY, 30, value)
   assert actions == [2]
-  assert memory.get_int(PRESS_PARAM) == 777
+  assert memory.get(PRESS_PARAM) == (777 if wake_enabled else None)
 
 
 def test_wake_timestamp_failure_does_not_interrupt_mapped_button_actions(input_pipe, monkeypatch):
@@ -162,7 +164,7 @@ def test_disconnected_device_does_not_suppress_next_press_on_reused_descriptor(i
   (False, True, True, True, True),
   (False, False, True, True, False),
   (False, True, False, True, False),
-  (False, True, True, False, True),
+  (False, True, True, False, False),
   (True, False, False, False, True),
 ])
 def test_manager_runs_listener_for_enabled_mappings_or_standby(started, mapping, management, standby, button, expected):

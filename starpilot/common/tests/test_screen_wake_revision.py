@@ -11,7 +11,7 @@ from test_screen_device_runtime import make_device
 
 EXPECTED = {
   'StandbyWakeEngage', 'StandbyWakeDisengage', 'StandbyWakeInfoAlert',
-  'StandbyWakeWarningAlert', 'StandbyWakeCriticalAlert', 'StandbyWakeTurnSignal',
+  'StandbyWakeWarningAlert', 'StandbyWakeCriticalAlert', 'StandbyWakeTurnSignal', 'StandbyWakeButton',
 }
 
 
@@ -27,17 +27,24 @@ def test_only_requested_wake_options_are_exposed():
   assert keys == EXPECTED
 
 
-@pytest.mark.parametrize('source', ['touch', 'button'])
-def test_touch_and_unassigned_button_always_wake_even_with_old_disabled_settings(source):
-  device, state, app = make_device(**disabled(), StandbyWakeTouch=False, StandbyWakeButton=False)
+def test_touch_always_wakes_with_all_options_disabled():
+  device, state, app = make_device(**disabled(), StandbyWakeTouch=False)
   device._update_wakefulness()
-  if source == 'touch':
-    app.mouse_events = [SimpleNamespace(left_down=True)]
-  else:
-    state.params_memory.values['StandbyButtonPressTime'] = 99_500_000_000
+  app.mouse_events = [SimpleNamespace(left_down=True)]
   device._update_wakefulness()
   assert device.awake
   assert device._calculate_brightness() > 0
+
+
+@pytest.mark.parametrize('enabled', [False, True])
+@pytest.mark.parametrize('brightness', [0, 101])
+def test_unassigned_buttons_only_wake_when_button_toggle_enabled(enabled, brightness):
+  device, state, _ = make_device(**{**disabled(), 'StandbyWakeButton': enabled}, ScreenBrightnessOnroad=brightness)
+  device._update_wakefulness()
+  state.params_memory.values['StandbyButtonPressTime'] = 99_500_000_000
+  device._update_wakefulness()
+  assert device.awake is enabled
+  assert (device._calculate_brightness() > 0) is enabled
 
 
 @pytest.mark.parametrize('field,value,old_key', [
@@ -98,8 +105,16 @@ def test_dom_manual_zero_suppresses_automatic_status_and_alert_wakes(event):
   assert device._calculate_brightness() == 5
 
 
-def test_dom_ignition_transition_remains_unconditional():
-  device, state, _ = make_device(**disabled(), StandbyWakeDriveState=False)
-  state.ignition = False
+@pytest.mark.parametrize('ignition', [False, True])
+@pytest.mark.parametrize('started', [False, True])
+@pytest.mark.parametrize('brightness', [0, 101])
+def test_dom_ignition_transition_remains_unconditional(ignition, started, brightness):
+  device, state, _ = make_device(**disabled(), StandbyWakeDriveState=False,
+                                 ScreenBrightness=brightness, ScreenBrightnessOnroad=brightness)
+  state.started = started
+  state.ignition = device._ignition = not ignition
+  device._interaction_time = 90
+  state.ignition = ignition
   device._update_wakefulness()
+  assert device.awake
   assert device._calculate_brightness() > 0
