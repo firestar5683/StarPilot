@@ -707,13 +707,21 @@ class SelfdriveD:
                          (contains_event_type(self.events, self.starpilot_events, ET.SOFT_DISABLE) or
                           contains_event_type(self.events, self.starpilot_events, ET.IMMEDIATE_DISABLE))
     no_system_errors = (not has_disable_events) or (len(self.events) == num_events)
-    # modeld publishes on the small model throughout the background load, so only the model
-    # swap itself can briefly disturb the stream. Suppressing for the whole load would hide
-    # a genuinely dead modeld for as long as the load takes.
+    # The model swap briefly disturbs the stream, so forgive everything around it.
     big_model_settling = time.monotonic() < self.big_model_swap_t + 2.
     all_checks = self.sm.all_checks()
     all_alive = self.sm.all_alive() if not all_checks else True
     all_freq_ok = self.sm.all_freq_ok() if not all_checks else True
+    # Loading the big model realizes its graph on the same QCOM GPU the small model drives
+    # on, which costs modeld frames for part of the load and drags modelV2 below its target
+    # rate. commIssueAvgFreq is NO_ENTRY, so that would block engaging on a small model that
+    # is working fine. Forgive only a slow modelV2, and only while a load is in flight --
+    # anything dying, and any other service, still reports normally.
+    if self.big_model_loading and not all_checks and all_alive and not all_freq_ok:
+      slow = {s for s, freq_ok in self.sm.freq_ok.items() if not freq_ok}
+      if slow and slow <= {'modelV2', 'drivingModelData', 'cameraOdometry'} and self.sm.all_valid():
+        all_freq_ok = True
+        all_checks = True
     report_comm_issue, self.valid_only_comm_issue_frames = evaluate_comm_issue(
       all_checks, all_alive, all_freq_ok, self.valid_only_comm_issue_frames,
     )

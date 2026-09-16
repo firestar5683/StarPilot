@@ -68,6 +68,30 @@ def test_big_model_loading_raises_no_alert():
   assert EVENTS[EventName.bigModelLoading] == {}
 
 
+def test_slow_modelv2_during_a_load_does_not_block_engaging():
+  """commIssueAvgFreq is NO_ENTRY, so a load-induced modelV2 slowdown blocks engaging.
+
+  Measured on drive 00000abd: modelV2 p95 hit 732 ms during the load while roadCameraState
+  stayed at 51 ms, and the resulting commIssue/commIssueAvgFreq storm ran 38.5 s - 47.9 s.
+  The forgiveness must be narrow: only a *slow* modelV2 family, only while loading, and only
+  when everything is still alive and valid.
+  """
+  from openpilot.selfdrive.selfdrived import selfdrived
+
+  source = (Path(selfdrived.__file__)).read_text(encoding="utf-8")
+  guard = next(
+    node for node in ast.walk(ast.parse(source))
+    if isinstance(node, ast.If) and "big_model_loading" in ast.dump(node.test)
+    and "all_freq_ok" in ast.dump(node.test)
+  )
+  test = ast.dump(guard.test)
+  # A dead service must still be reported, so aliveness is required, not forgiven.
+  assert "all_alive" in test
+  body = ast.dump(guard)
+  assert "all_valid" in body, "stale/invalid services must still raise commIssue"
+  assert "modelV2" in body, "only the modeld output services may be forgiven"
+
+
 def test_frame_drop_warning_is_suppressed_while_the_big_model_loads():
   """Loading realizes the big model's graph on QCOM, the GPU the small model drives on.
 
