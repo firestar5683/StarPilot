@@ -19,6 +19,19 @@ AudibleAlert = log.SelfdriveState.AudibleAlert
 StarPilotAudibleAlert = custom.StarPilotCarControl.HUDControl.AudibleAlert
 
 
+class _FakeBluetoothParams:
+  def __init__(self):
+    self.values = {"BluetoothAudioLocalMuted": False}
+    self.puts: list[tuple[str, bool]] = []
+
+  def put_bool(self, key, value):
+    self.values[key] = bool(value)
+    self.puts.append((key, bool(value)))
+
+  def get_bool(self, key):
+    return bool(self.values.get(key, False))
+
+
 class TestSoundd:
   def test_does_not_consume_car_state_reader(self):
     assert "carState" not in SOUNDD_SERVICES
@@ -150,14 +163,28 @@ class TestSoundd:
     soundd.get_sound_data = lambda _frames: samples
     data_out = np.zeros((2, 1), dtype=np.float32)
     soundd.pending_stream_status = None
+    soundd.bluetooth_local_muted = False
+    soundd.bluetooth_params = _FakeBluetoothParams()
 
     soundd.bluetooth_audio = type("Sink", (), {"submit": lambda self, _samples: True})()
     soundd.callback(data_out, 2, None, None)
     np.testing.assert_array_equal(data_out[:, 0], np.zeros(2, dtype=np.float32))
+    assert soundd.bluetooth_local_muted
+    assert soundd.bluetooth_params.get_bool("BluetoothAudioLocalMuted")
+    assert soundd.bluetooth_params.puts == [("BluetoothAudioLocalMuted", True)]
+
+    soundd.callback(data_out, 2, None, None)
+    assert soundd.bluetooth_params.puts == [("BluetoothAudioLocalMuted", True)]
 
     soundd.bluetooth_audio = type("Sink", (), {"submit": lambda self, _samples: False})()
     soundd.callback(data_out, 2, None, None)
     np.testing.assert_array_equal(data_out[:, 0], samples)
+    assert not soundd.bluetooth_local_muted
+    assert not soundd.bluetooth_params.get_bool("BluetoothAudioLocalMuted")
+    assert soundd.bluetooth_params.puts == [
+      ("BluetoothAudioLocalMuted", True),
+      ("BluetoothAudioLocalMuted", False),
+    ]
 
   def test_check_selfdrive_timeout_alert(self):
     sm = SubMaster(['selfdriveState'])
