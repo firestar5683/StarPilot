@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import math
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Any
 
 import numpy as np
@@ -9,6 +9,7 @@ import requests
 
 from cereal import log
 from openpilot.common.constants import CV
+from openpilot.starpilot.navigation.location_state import finite_number
 
 DIRECTIONS = ("left", "right", "straight")
 MODIFIABLE_DIRECTIONS = ("left", "right")
@@ -60,7 +61,7 @@ class Coordinate:
     haversine_dlon = math.sin(dlon / 2.0) ** 2
 
     a = haversine_dlat + math.cos(math.radians(self.latitude)) * math.cos(math.radians(other.latitude)) * haversine_dlon
-    return 2.0 * math.asin(math.sqrt(a)) * EARTH_MEAN_RADIUS
+    return 2.0 * math.asin(math.sqrt(min(1.0, max(0.0, a)))) * EARTH_MEAN_RADIUS
 
 
 @dataclass(frozen=True)
@@ -156,9 +157,10 @@ def normalize_lane_direction(direction: str) -> str:
 
 
 def maxspeed_to_ms(maxspeed: dict[str, str | float]) -> float:
-  unit = str(maxspeed["unit"])
-  speed = float(maxspeed["speed"])
-  return float(SPEED_CONVERSIONS[unit] * speed)
+  if not isinstance(maxspeed, dict):
+    return 0.0
+  speed = finite_number(maxspeed.get("speed"))
+  return SPEED_CONVERSIONS.get(maxspeed.get("unit"), 0.0) * max(speed or 0.0, 0.0)
 
 
 def field_valid(dat: dict[str, Any], field: str) -> bool:
@@ -166,6 +168,10 @@ def field_valid(dat: dict[str, Any], field: str) -> bool:
 
 
 def parse_banner_instructions(banners: Any, distance_to_maneuver: float = 0.0) -> dict[str, Any] | None:
+  if not isinstance(banners, list):
+    return None
+  banners = [banner for banner in banners if isinstance(banner, dict) and
+             finite_number(banner.get("distanceAlongGeometry")) is not None and isinstance(banner.get("primary"), dict)]
   if not banners:
     return None
 
@@ -178,27 +184,31 @@ def parse_banner_instructions(banners: Any, distance_to_maneuver: float = 0.0) -
   instruction["showFull"] = distance_to_maneuver < current_banner["distanceAlongGeometry"]
 
   primary = current_banner["primary"]
-  if field_valid(primary, "text"):
+  if isinstance(primary.get("text"), str):
     instruction["maneuverPrimaryText"] = primary["text"]
-  if field_valid(primary, "type"):
+  if isinstance(primary.get("type"), str):
     instruction["maneuverType"] = primary["type"]
-  if field_valid(primary, "modifier"):
+  if isinstance(primary.get("modifier"), str):
     instruction["maneuverModifier"] = string_to_direction(primary["modifier"])
 
-  if field_valid(current_banner, "secondary"):
-    instruction["maneuverSecondaryText"] = current_banner["secondary"]["text"]
+  if isinstance(current_banner.get("secondary"), dict):
+    text = current_banner["secondary"].get("text", "")
+    instruction["maneuverSecondaryText"] = text if isinstance(text, str) else ""
 
-  if field_valid(current_banner, "sub"):
+  if isinstance(current_banner.get("sub"), dict):
     lanes = []
-    for component in current_banner["sub"]["components"]:
-      if component["type"] != "lane":
+    components = current_banner["sub"].get("components") or []
+    for component in components if isinstance(components, list) else []:
+      if not isinstance(component, dict) or component.get("type") != "lane":
         continue
 
+      directions = component.get("directions")
+      directions = directions if isinstance(directions, list) else []
       lane = {
-        "active": component["active"],
-        "directions": [normalize_lane_direction(direction) for direction in component["directions"]],
+        "active": component.get("active") is True,
+        "directions": [normalize_lane_direction(direction) for direction in directions if isinstance(direction, str)],
       }
-      if field_valid(component, "active_direction"):
+      if isinstance(component.get("active_direction"), str):
         lane["activeDirection"] = normalize_lane_direction(component["active_direction"])
       lanes.append(lane)
     instruction["lanes"] = lanes
@@ -214,30 +224,54 @@ class NavigationRoute:
   steps: list[RouteStep]
   total_distance: float
   total_duration: float
+  maxspeeds: list[float] = field(default_factory=list)
 
   @classmethod
   def from_mapbox_route(cls, route_data: dict[str, Any]) -> "NavigationRoute" | None:
+    try:
+      return cls._from_mapbox_route(route_data)
+    except (KeyError, TypeError, ValueError, OverflowError, AttributeError):
+      return None
+
+  @classmethod
+  def _from_mapbox_route(cls, route_data: dict[str, Any]) -> NavigationRoute | None:
     geometry_data = route_data.get("geometry") or []
     steps_data = route_data.get("steps") or []
     if not geometry_data or not steps_data:
       return None
 
     geometry = [Coordinate(float(coord["latitude"]), float(coord["longitude"])) for coord in geometry_data]
+    if any(not (-90 <= point.latitude <= 90 and -180 <= point.longitude <= 180) for point in geometry):
+      return None
     cumulative_distances = [0.0]
     for index in range(1, len(geometry)):
       cumulative_distances.append(cumulative_distances[-1] + geometry[index - 1].distance_to(geometry[index]))
 
-    maxspeeds = [maxspeed_to_ms(item) for item in route_data.get("maxspeed", []) if field_valid(item, "speed") and field_valid(item, "unit")]
+    # Unknown/unlimited annotations still occupy a geometry segment.
+    maxspeeds = [maxspeed_to_ms(item) for item in route_data.get("maxspeed", [])]
 
     steps: list[RouteStep] = []
+    previous_index = 0
+    expected_distance = 0.0
     for step in steps_data:
       location = Coordinate(float(step["location"]["latitude"]), float(step["location"]["longitude"]))
-      closest_index = min(range(len(geometry)), key=lambda idx: location.distance_to(geometry[idx]))
-      maxspeed_ms = maxspeeds[min(closest_index, len(maxspeeds) - 1)] if maxspeeds else 0.0
+      if not (-90 <= location.latitude <= 90 and -180 <= location.longitude <= 180):
+        return None
+      # A maneuver location can occur more than once on a loop. Preserve order
+      # and use traveled step distance to distinguish identical vertices.
+      closest_index = min(range(previous_index, len(geometry)), key=lambda idx: (
+        location.distance_to(geometry[idx]), abs(cumulative_distances[idx] - expected_distance),
+      ))
+      previous_index = closest_index
+      maxspeed_ms = maxspeeds[closest_index] if closest_index < len(maxspeeds) else 0.0
+      distance, duration = float(step["distance"]), float(step["duration"])
+      if not math.isfinite(distance) or not math.isfinite(duration) or min(distance, duration) < 0:
+        return None
+      expected_distance = cumulative_distances[closest_index] + distance
       steps.append(RouteStep(
         banner_instructions=step.get("bannerInstructions", []),
-        distance=float(step["distance"]),
-        duration=float(step["duration"]),
+        distance=distance,
+        duration=duration,
         maneuver=str(step["maneuver"]),
         location=location,
         cumulative_distance=cumulative_distances[closest_index],
@@ -254,6 +288,7 @@ class NavigationRoute:
       steps=steps,
       total_distance=float(route_data.get("totalDistance", 0.0)),
       total_duration=float(route_data.get("totalDuration", 0.0)),
+      maxspeeds=maxspeeds,
     )
 
   def route_bearing_misaligned(self, closest_segment_index: int, current_bearing: float | None, v_ego: float) -> bool:
@@ -277,9 +312,13 @@ class NavigationRoute:
       best_segment_index = 0
       best_distance = float("inf")
       best_t = 0.0
+      projections = []
 
       for index in range(len(self.geometry) - 1):
         t, segment_distance = project_onto_segment(self.geometry[index], self.geometry[index + 1], position)
+        start = self.geometry_cumulative_distances[index]
+        end = self.geometry_cumulative_distances[index + 1]
+        projections.append((segment_distance, start + (end - start) * t))
         if segment_distance < best_distance:
           best_distance = segment_distance
           best_segment_index = index
@@ -289,6 +328,11 @@ class NavigationRoute:
       segment_start = self.geometry_cumulative_distances[closest_segment_index]
       segment_end = self.geometry_cumulative_distances[closest_segment_index + 1]
       closest_cumulative = segment_start + (segment_end - segment_start) * best_t
+      # Position alone cannot distinguish crossing/overlapping portions of the
+      # route. Withhold instructions instead of jumping to another visit.
+      if best_distance <= 40.0 and any(distance <= best_distance + 5.0 and abs(along - closest_cumulative) > 50.0
+             for distance, along in projections):
+        return None
       min_distance = best_distance
       closest_index = min(closest_segment_index + (1 if best_t >= 0.5 else 0), len(self.geometry) - 1)
 
@@ -300,8 +344,9 @@ class NavigationRoute:
     next_step_index = current_step_index + 1
     next_step = self.steps[next_step_index] if 0 <= next_step_index < len(self.steps) else None
 
-    distance_to_end_of_step = max(0.0, current_step.distance - (closest_cumulative - current_step.cumulative_distance))
-    distance_remaining = max(0.0, self.total_distance - closest_cumulative)
+    step_end = next_step.cumulative_distance if next_step is not None else self.geometry_cumulative_distances[-1]
+    distance_to_end_of_step = max(0.0, step_end - closest_cumulative)
+    distance_remaining = max(0.0, self.geometry_cumulative_distances[-1] - closest_cumulative)
 
     current_step_distance = max(current_step.distance, 1.0)
     remaining_current_duration = current_step.duration * min(distance_to_end_of_step / current_step_distance, 1.0)
@@ -309,11 +354,11 @@ class NavigationRoute:
     time_remaining = max(0.0, remaining_current_duration + later_duration)
 
     all_maneuvers: list[dict[str, Any]] = []
-    start_index = max(current_step_index, 0)
+    start_index = min(max(current_step_index + 1, 0), len(self.steps) - 1)
     end_index = min(start_index + 3, len(self.steps))
     for index in range(start_index, end_index):
       step = self.steps[index]
-      maneuver_distance = distance_to_end_of_step if index == start_index else max(0.0, step.cumulative_distance - closest_cumulative)
+      maneuver_distance = max(0.0, step.cumulative_distance - closest_cumulative)
       all_maneuvers.append({
         "distance": maneuver_distance,
         "type": step.maneuver,
@@ -330,7 +375,7 @@ class NavigationRoute:
       distance_to_end_of_step=distance_to_end_of_step,
       distance_remaining=distance_remaining,
       time_remaining=time_remaining,
-      current_speed_limit_ms=current_step.maxspeed_ms,
+      current_speed_limit_ms=self.maxspeeds[closest_segment_index] if closest_segment_index < len(self.maxspeeds) else 0.0,
       all_maneuvers=all_maneuvers,
     )
 
@@ -348,20 +393,22 @@ class NavigationRoute:
     return progress.distance_from_route > distance_threshold
 
   def arrived(self, progress: RouteProgress, v_ego: float) -> bool:
-    if v_ego >= 2.0 or not progress.all_maneuvers:
+    if v_ego >= 2.0 or not progress.all_maneuvers or progress.distance_from_route > 15.0:
       return False
-    current = progress.all_maneuvers[0]
-    destination_step = current["type"] == "arrive" or progress.current_step.maneuver == "arrive" or progress.current_step.instruction.startswith("Your destination")
+    destination_step = progress.current_step.maneuver == "arrive"
     if not destination_step and progress.next_step is not None:
       destination_step = progress.next_step.maneuver == "arrive" and progress.distance_to_end_of_step <= max(15.0, v_ego * 8.0)
     return destination_step and progress.distance_remaining <= 40.0
 
   def build_instruction_payload(self, progress: RouteProgress, *, use_vienna_sign: bool = False) -> dict[str, Any]:
     parsed = parse_banner_instructions(progress.current_step.banner_instructions, progress.distance_to_end_of_step) or {}
-    primary_text = parsed.get("maneuverPrimaryText") or progress.current_step.instruction
+    # Mapbox's maneuver belongs to the START of a step; its banner describes
+    # the upcoming maneuver at the END. The fallback must use the next step.
+    upcoming = progress.next_step or progress.current_step
+    primary_text = parsed.get("maneuverPrimaryText") or upcoming.instruction
     secondary_text = parsed.get("maneuverSecondaryText") or ""
-    maneuver_type = parsed.get("maneuverType") or progress.current_step.maneuver
-    maneuver_modifier = parsed.get("maneuverModifier") or progress.current_step.modifier
+    maneuver_type = parsed.get("maneuverType") or upcoming.maneuver
+    maneuver_modifier = parsed.get("maneuverModifier") or upcoming.modifier
     lanes = []
     for lane in parsed.get("lanes", []):
       directions = [direction for direction in lane.get("directions", []) if direction in LANE_DIRECTIONS]
@@ -450,10 +497,6 @@ class MapboxRouteEngine:
         {"longitude": coord[0], "latitude": coord[1]}
         for coord in route["geometry"]["coordinates"]
       ],
-      "maxspeed": [
-        {"speed": item["speed"], "unit": item["unit"]}
-        for item in leg.get("annotation", {}).get("maxspeed", [])
-        if field_valid(item, "speed") and field_valid(item, "unit")
-      ],
+      "maxspeed": leg.get("annotation", {}).get("maxspeed", []),
     }
     return NavigationRoute.from_mapbox_route(route_data)

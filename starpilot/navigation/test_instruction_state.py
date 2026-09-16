@@ -9,7 +9,7 @@ from openpilot.starpilot.navigation.instruction_state import NAV_INSTRUCTION_MAX
 def test_instruction_expires_without_a_new_write(monkeypatch, encode):
   now = [100.0]
   monkeypatch.setattr("time.monotonic", lambda: now[0])
-  state = {"valid": True, "updatedAtMonotonic": now[0], "maneuverModifier": "right"}
+  state = {"valid": True, "updatedAtMonotonic": now[0], "maneuverModifier": "right", "maneuverDistance": 10.0}
   raw = encode(state)
   assert parse_instruction_state(raw) == state
   now[0] += NAV_INSTRUCTION_MAX_AGE
@@ -29,3 +29,14 @@ def test_rejects_missing_invalid_future_or_stale_timestamp(monkeypatch, timestam
 def test_rejects_invalid_instruction(monkeypatch, raw):
   monkeypatch.setattr("time.monotonic", lambda: 100.0)
   assert parse_instruction_state(raw) == {}
+
+
+@pytest.mark.parametrize("change", [
+  {"maneuverDistance": None}, {"maneuverDistance": -1}, {"maneuverDistance": True}, {"maneuverDistance": "bad"},
+  {"maneuverDistance": float("nan")}, {"maneuverDistance": float("inf")}, {"maneuverDistance": 10**400},
+  {"nextManeuverDistance": "bad"}, {"laneCount": "bad"}, {"sameSideLaneCount": float("nan")}, {"activeLaneIndex": []},
+])
+def test_rejects_unusable_control_fields(monkeypatch, change):
+  monkeypatch.setattr("time.monotonic", lambda: 100.0)
+  state = {"valid": True, "updatedAtMonotonic": 100.0, "maneuverDistance": 10.0, **change}
+  assert parse_instruction_state(state) == {}

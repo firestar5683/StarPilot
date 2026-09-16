@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import json
 import threading
-from math import isfinite
 from time import monotonic
 
 import cereal.messaging as messaging
@@ -11,12 +9,12 @@ from openpilot.common.realtime import Ratekeeper
 from openpilot.common.swaglog import cloudlog
 
 from openpilot.starpilot.navigation.destination_store import parse_destination_json
+from openpilot.starpilot.navigation.location_state import parse_location_state
 from openpilot.starpilot.navigation.route_engine import Coordinate, MapboxRouteEngine, NavigationRoute, RouteProgress
 
 NAVIGATIOND_HZ = 1
 REROUTE_TRIGGER_SECONDS = 2.0
 ARRIVAL_CLEAR_SECONDS = 5.0
-LOCATION_STATE_STALE_SECONDS = 2.5
 
 
 class Navigationd:
@@ -129,34 +127,14 @@ class Navigationd:
     return started_at if started_at is not None else now
 
   def _update_location(self) -> tuple[bool, float]:
-    raw_state = self.params_memory.get("LastGPSPosition", encoding="utf-8") or ""
-    if not raw_state:
+    gps_state = parse_location_state(self.params_memory.get("LastGPSPosition"), now=monotonic())
+    if gps_state is None:
+      self._last_position = None
+      self._last_bearing = None
       return False, 0.0
-
-    try:
-      gps_state = json.loads(raw_state)
-    except json.JSONDecodeError:
-      return False, 0.0
-
-    if not isinstance(gps_state, dict) or not gps_state.get("hasFix", False):
-      return False, 0.0
-
-    latitude = float(gps_state.get("latitude", 0.0) or 0.0)
-    longitude = float(gps_state.get("longitude", 0.0) or 0.0)
-    if not isfinite(latitude) or not isfinite(longitude) or (abs(latitude) < 1e-6 and abs(longitude) < 1e-6):
-      return False, 0.0
-
-    updated_at = float(gps_state.get("updatedAtMonotonic", 0.0) or 0.0)
-    if updated_at > 0.0 and (monotonic() - updated_at) > LOCATION_STATE_STALE_SECONDS:
-      return False, 0.0
-
-    self._last_position = Coordinate(latitude, longitude)
-
-    bearing = float(gps_state.get("bearing", 0.0) or 0.0)
-    self._last_bearing = bearing if isfinite(bearing) else None
-
-    speed = float(gps_state.get("speed", 0.0) or 0.0)
-    return True, max(speed, 0.0)
+    self._last_position = Coordinate(gps_state["latitude"], gps_state["longitude"])
+    self._last_bearing = gps_state["bearing"]
+    return True, gps_state["speed"]
 
   def _maybe_update_route(self, current_destination: dict[str, object] | None) -> tuple[NavigationRoute | None, dict[str, object] | None, int]:
     route, active_destination, route_generation = self._snapshot_route()
@@ -191,6 +169,9 @@ class Navigationd:
 
     progress = route.get_progress(self._last_position)
     if progress is None:
+      self._off_route_started_at = None
+      self._bearing_misaligned_started_at = None
+      self._arrival_started_at = None
       return None, None
 
     now = monotonic()
@@ -221,9 +202,6 @@ class Navigationd:
     progress: RouteProgress | None, route_state: dict[str, object] | None,
   ) -> None:
     if route is None or destination is None or progress is None or route_state is None:
-      return
-
-    if progress.current_step_index >= len(route.steps) - 1:
       return
 
     now = float(route_state["now"])
