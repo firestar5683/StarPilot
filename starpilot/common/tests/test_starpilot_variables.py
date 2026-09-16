@@ -1,5 +1,7 @@
 from types import SimpleNamespace
 
+import pytest
+
 from openpilot.starpilot.common import starpilot_variables as spv
 
 
@@ -291,6 +293,23 @@ def test_disabled_conditional_experimental_toggles_are_off(monkeypatch, tmp_path
   assert toggles.conditional_model_stop_time == 0.0
   assert toggles.conditional_signal == 0.0
   assert toggles.conditional_signal_lane_detection is False
+
+
+@pytest.mark.parametrize("speed_mph", [0, 20, 100])
+def test_aol_brake_speed_round_trips_and_converts_to_mps(monkeypatch, tmp_path, speed_mph):
+  params_cls = spv.Params
+
+  def isolated_params(_path=None, memory=False, return_defaults=False):
+    return params_cls(str(tmp_path / ("memory" if memory else "params")), return_defaults=return_defaults)
+
+  monkeypatch.setattr(spv, "Params", isolated_params)
+  params = isolated_params()
+  params.put_bool("AlwaysOnLateral", True)
+  params.put_int("PauseAOLOnBrake", speed_mph)
+
+  assert params.get_int("PauseAOLOnBrake") == speed_mph
+  variables = spv.StarPilotVariables()
+  assert variables.starpilot_toggles.always_on_lateral_pause_speed == pytest.approx(speed_mph * spv.CV.MPH_TO_MS)
 
 
 def test_big_ui_exposes_developer_toggles_without_persisting_developer_ui(monkeypatch, tmp_path):
