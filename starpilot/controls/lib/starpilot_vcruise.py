@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-import json
 import math
 
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
+from openpilot.starpilot.navigation.instruction_state import parse_instruction_state
 
 from openpilot.starpilot.common.starpilot_variables import CRUISING_SPEED
 from openpilot.starpilot.controls.lib.curve_speed_controller import (
@@ -206,7 +206,6 @@ class StarPilotVCruise:
     self.stop_sign_confirmed = False
     self.stop_seen_on_approach_at = None
     self.nav_turn_target = 0.0
-    self._nav_instruction_state_raw = None
     self._nav_instruction_state = {}
     self._applied_slc_control_target = 0.0
     self.csc_controlling_speed = False
@@ -215,28 +214,7 @@ class StarPilotVCruise:
     self.csc_target = 0.0
 
   def _update_nav_instruction_state(self):
-    raw = self.starpilot_planner.params_memory.get("NavInstructionState") or {}
-    if raw == self._nav_instruction_state_raw:
-      return
-
-    self._nav_instruction_state_raw = raw
-    if not raw:
-      self._nav_instruction_state = {}
-      return
-
-    if isinstance(raw, dict):
-      self._nav_instruction_state = raw
-      return
-
-    if isinstance(raw, str):
-      try:
-        parsed = json.loads(raw)
-        self._nav_instruction_state = parsed if isinstance(parsed, dict) else {}
-        return
-      except Exception:
-        pass
-
-    self._nav_instruction_state = {}
+    self._nav_instruction_state = parse_instruction_state(self.starpilot_planner.params_memory.get("NavInstructionState"))
 
   @staticmethod
   def _elapsed_seconds(now, since):

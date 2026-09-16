@@ -35,6 +35,7 @@ from openpilot.starpilot.common.safe_mode import (
 from openpilot.starpilot.common.starpilot_utilities import ThreadManager, flash_panda, is_url_pingable, lock_doors, use_konik_server
 from openpilot.starpilot.common.starpilot_variables import ERROR_LOGS_PATH, StarPilotVariables
 from openpilot.starpilot.controls.starpilot_planner import StarPilotPlanner, serialize_starpilot_toggles
+from openpilot.starpilot.navigation.location_state import gps_position_from_service, parse_location_state
 from openpilot.starpilot.system.starpilot_stats import send_stats
 from openpilot.starpilot.system.starpilot_tracking import StarPilotTracking
 
@@ -69,31 +70,15 @@ def get_next_periodic_update_check(monotonic_now, phase_seconds):
   return next_check
 
 
-def build_gps_position(gps_location, speed):
-  return {
-    "latitude": gps_location.latitude,
-    "longitude": gps_location.longitude,
-    "bearing": gps_location.bearingDeg,
-    "speed": max(float(speed), 0.0),
-    "hasFix": bool(getattr(gps_location, "hasFix", False)),
-    "updatedAtMonotonic": time.monotonic(),
-    "updatedAtSec": time.time(),
-  }
-
-
 def gps_position_valid(gps_position):
-  if not gps_position:
-    return False
-  latitude = gps_position.get("latitude")
-  longitude = gps_position.get("longitude")
-  return bool(gps_position.get("hasFix")) and latitude is not None and longitude is not None and (latitude != 0 or longitude != 0)
+  return parse_location_state(gps_position) is not None
 
 
 def gps_position_signature(gps_position):
   return (
     round(float(gps_position["latitude"]), 6),
     round(float(gps_position["longitude"]), 6),
-    round(float(gps_position["bearing"]), 1),
+    round(gps_position["bearing"], 1) if gps_position["bearing"] is not None else None,
     bool(gps_position["hasFix"]),
   )
 
@@ -364,7 +349,7 @@ def starpilot_thread():
       starpilot_plan_send.starpilotPlan.themeUpdated = theme_manager.theme_updated
       pm.send("starpilotPlan", starpilot_plan_send)
 
-      gps_position = build_gps_position(sm[gps_location_service], getattr(sm["carState"], "vEgo", 0.0))
+      gps_position = gps_position_from_service(sm, gps_location_service, max(sm["carState"].vEgo, 0.0))
       if gps_position_valid(gps_position):
         gps_memory_state = json.dumps(gps_position, allow_nan=False)
         if (monotonic_now - last_offroad_gps_memory_write) >= OFFROAD_GPS_MEMORY_REFRESH_SECONDS:
@@ -378,6 +363,8 @@ def starpilot_thread():
           params.put("LastGPSPosition", gps_memory_state)
           last_offroad_gps_persist_signature = gps_signature
           last_offroad_gps_persist_write = monotonic_now
+      else:
+        params_memory.remove("LastGPSPosition")
 
     started_previously = started
 

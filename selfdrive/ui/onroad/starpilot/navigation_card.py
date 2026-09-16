@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import json
 import math
 from pathlib import Path
 
@@ -8,6 +7,7 @@ import pyray as rl
 
 from openpilot.common.params import UnknownKeyName
 from openpilot.selfdrive.ui.ui_state import ui_state
+from openpilot.starpilot.navigation.instruction_state import parse_instruction_state
 from openpilot.system.ui.lib.application import FontWeight, gui_app
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.widgets import Widget
@@ -174,17 +174,7 @@ class NavigationCardRenderer(Widget):
     if not (params.get("NavDestination") or ""):
       return
 
-    raw_state = ui_state.params_memory.get("NavInstructionState") or {}
-    if isinstance(raw_state, str):
-      try:
-        nav_state = json.loads(raw_state) if raw_state else {}
-      except json.JSONDecodeError:
-        return
-    elif isinstance(raw_state, dict):
-      nav_state = raw_state
-    else:
-      return
-
+    nav_state = parse_instruction_state(ui_state.params_memory.get("NavInstructionState"))
     if not nav_state.get("valid", False):
       return
 

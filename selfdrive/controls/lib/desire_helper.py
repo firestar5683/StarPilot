@@ -1,11 +1,10 @@
-import json
-
 import numpy as np
 
 from cereal import log
 from openpilot.common.constants import CV
 from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL
+from openpilot.starpilot.navigation.instruction_state import parse_instruction_state
 
 LaneChangeState = log.LaneChangeState
 LaneChangeDirection = log.LaneChangeDirection
@@ -74,32 +73,10 @@ class DesireHelper:
     self.lane_change_wait_timer = 0.0
     self.nav_desires_allowed = False
     self.nav_lane_positioning_allowed = False
-    self._nav_instruction_state_raw: object = None
     self._nav_instruction_state: dict[str, object] = {}
 
   def _update_nav_params(self):
-    raw = self.params_memory.get("NavInstructionState") or {}
-    if raw == self._nav_instruction_state_raw:
-      return
-
-    self._nav_instruction_state_raw = raw
-    if not raw:
-      self._nav_instruction_state = {}
-      return
-
-    if isinstance(raw, dict):
-      self._nav_instruction_state = raw
-      return
-
-    if isinstance(raw, str):
-      try:
-        parsed = json.loads(raw)
-        self._nav_instruction_state = parsed if isinstance(parsed, dict) else {}
-        return
-      except Exception:
-        pass
-
-    self._nav_instruction_state = {}
+    self._nav_instruction_state = parse_instruction_state(self.params_memory.get("NavInstructionState"))
 
   @staticmethod
   def _nav_keep_direction_is_clear(carstate, lane_change_direction):
