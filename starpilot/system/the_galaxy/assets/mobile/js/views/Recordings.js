@@ -99,6 +99,7 @@ export const Recordings = {
       if (this.sub === "screen" && !this.recordings.length && !this.screenLoading) this.loadScreenRecordings()
     },
     screenDisplayName(rec) {
+      if (!rec) return ""
       return rec.is_custom_name ? rec.filename.replace(/\.mp4$/i, "").replace(/_/g, " ") : formatScreenDate(rec.timestamp)
     },
     async loadRoutes() {
