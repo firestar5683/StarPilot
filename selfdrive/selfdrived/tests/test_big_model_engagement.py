@@ -13,7 +13,6 @@ def test_big_model_loading_does_not_block_engagement():
   # The big model loads in the background while the small model drives, so waiting for it
   # must never keep the driver from engaging.
   assert ET.NO_ENTRY not in EVENTS[EventName.bigModelLoading]
-  assert ET.PERMANENT in EVENTS[EventName.bigModelLoading]
 
 
 def test_big_model_pending_raises_no_alert():
@@ -63,22 +62,30 @@ def test_pending_is_raised_before_loading_is_cleared():
     "UsbGpuPending must be raised before UsbGpuLoading is cleared"
 
 
-def test_loading_banner_is_brief_and_hands_over_to_the_icon():
-  # The load can run for minutes; the banner announces the handover to the small model and
-  # then gets out of the way, leaving the blinking eGPU icon as the "still loading" cue.
+def test_big_model_loading_raises_no_alert():
+  # The blinking eGPU icon already says the big model is loading, so the banner was noise
+  # sitting on screen for the whole load.
+  assert EVENTS[EventName.bigModelLoading] == {}
+
+
+def test_frame_drop_warning_is_suppressed_while_the_big_model_loads():
+  """Loading realizes the big model's graph on QCOM, the GPU the small model drives on.
+
+  Measured on drive 00000ab7: the small model's own modelExecutionTime p95 went 37 ms ->
+  126 ms for a stretch of the load, which pushed frameDropPerc past the modeldLagging
+  threshold. The small model keeps publishing and driving correctly throughout, so the
+  warning is noise until the load is done.
+  """
   from openpilot.selfdrive.selfdrived import selfdrived
 
-  assert selfdrived.BIG_MODEL_LOADING_ALERT_SECONDS == 3.0
-
   source = (Path(selfdrived.__file__)).read_text(encoding="utf-8")
-  tree = ast.parse(source)
   guard = next(
-    node for node in ast.walk(tree)
-    if isinstance(node, ast.If) and "bigModelLoading" in ast.dump(node)
-    and "BIG_MODEL_LOADING_ALERT_SECONDS" in ast.dump(node.test)
+    node for node in ast.walk(ast.parse(source))
+    if isinstance(node, ast.If) and "modeldLagging" in ast.dump(node)
+    and "frameDropPerc" in ast.dump(node.test)
   )
-  # The alert must be gated on elapsed time, not added unconditionally every frame.
-  assert "big_model_loading_t" in ast.dump(guard.test)
+  assert "big_model_loading" in ast.dump(guard.test), \
+    "modeldLagging must not fire for frames the big-model load is costing"
 
 
 def _big_failed(*, attempted, loading, pending, big_active, model_unavailable=False):
