@@ -307,10 +307,12 @@ def handle_error(destination, error_message, error, download_param, progress_par
   if destination:
     delete_file(destination)
 
-  if params_memory and progress_param and "404" not in error_message:
+  if params_memory and progress_param:
     print(f"Error occurred: {error}")
     params_memory.put(progress_param, error_message)
-    params_memory.remove(download_param)
+    if download_param:
+      # Always release the download gate: a stuck param blocks every later request.
+      params_memory.remove(download_param)
 
 def handle_request_error(error, destination, download_param, progress_param, params_memory):
   error_map = {

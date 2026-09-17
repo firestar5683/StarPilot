@@ -51,3 +51,27 @@ def test_failed_download_releases_refresh_gate(cleanup_fault, operation):
   with pytest.raises(OSError):
     call()
   assert manager.downloading_model is False
+
+
+def test_error_releases_the_download_gate_even_for_404():
+  tree = ast.parse((Path(__file__).parents[1] / 'download_functions.py').read_text())
+  node = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == 'handle_error')
+
+  class Params:
+    def __init__(self):
+      self.values = {}
+      self.removed = []
+    def put(self, key, value):
+      self.values[key] = value
+    def remove(self, key):
+      self.removed.append(key)
+      self.values.pop(key, None)
+
+  ns = {'delete_file': lambda path: None}
+  exec(compile(ast.Module(body=[node], type_ignores=[]), 'download_functions.py', 'exec'), ns)
+  params = Params()
+  ns['handle_error'](None, 'Failed: Server error (404)', 'error', 'ModelToDownload', 'ModelDownloadProgress', params)
+  assert params.removed == ['ModelToDownload'], 'a 404 must not strand the download gate'
+  assert params.values['ModelDownloadProgress'] == 'Failed: Server error (404)'
+  # Missing params must not raise; callers pass None when there is no gate to release.
+  ns['handle_error'](None, 'Registration failed', 'error', None, None, None)
