@@ -1,4 +1,7 @@
+import json
 from types import SimpleNamespace
+
+import pytest
 
 from openpilot.starpilot.common import starpilot_variables as spv
 
@@ -62,7 +65,7 @@ def test_get_starpilot_toggles_uses_last_non_empty_broadcast(monkeypatch):
 
 
 def test_get_starpilot_toggles_uses_persisted_force_torque_request(monkeypatch):
-  params = SimpleNamespace(get_bool=lambda key: key == "ForceTorqueController")
+  params = SimpleNamespace(get_bool=lambda key: key == "ForceTorqueController", get=lambda _key: None)
   monkeypatch.setattr(spv.get_starpilot_toggles, "_params", params, raising=False)
 
   payload = '{"force_torque_controller": false}'
@@ -84,6 +87,8 @@ def test_get_starpilot_toggles_realtime_path_does_not_read_persisted_force_param
     def get_bool(self, key):
       raise AssertionError(f"unexpected persisted param read: {key}")
 
+    get = get_bool
+
   monkeypatch.setattr(spv.get_starpilot_toggles, "_params", UnexpectedParamsRead(), raising=False)
 
   payload = '{"force_offroad": false, "force_onroad": true, "force_torque_controller": false}'
@@ -95,7 +100,7 @@ def test_get_starpilot_toggles_realtime_path_does_not_read_persisted_force_param
 
 
 def test_get_starpilot_toggles_uses_live_rivian_angle_request(monkeypatch):
-  params = SimpleNamespace(get_bool=lambda key: key == "RivianAngleControl")
+  params = SimpleNamespace(get_bool=lambda key: key == "RivianAngleControl", get=lambda _key: None)
   monkeypatch.setattr(spv.get_starpilot_toggles, "_params", params, raising=False)
 
   payload = '{"rivian_angle_control": false}'
@@ -105,6 +110,30 @@ def test_get_starpilot_toggles_uses_live_rivian_angle_request(monkeypatch):
   )
 
   assert toggles.rivian_angle_control is True
+
+
+@pytest.mark.parametrize("selected,force,expected_force,expected_model", [
+  ("HYUNDAI_IONIQ_6", True, True, "HYUNDAI_IONIQ_6"),
+  ("HYUNDAI_IONIQ_6", False, False, "TOYOTA_COROLLA"),
+  (None, True, False, "TOYOTA_COROLLA"),
+  ("", True, False, "TOYOTA_COROLLA"),
+  ("MOCK", True, False, "TOYOTA_COROLLA"),
+  (b"CHEVROLET_BOLT_CC_2019_2021", True, True, "CHEVROLET_BOLT_CC_2018_2021"),
+])
+def test_startup_refreshes_forced_vehicle_selection(monkeypatch, selected, force, expected_force, expected_model):
+  params = SimpleNamespace(get=lambda key: selected if key == "CarModel" else None,
+                           get_bool=lambda key: force if key == "ForceFingerprint" else False)
+  monkeypatch.setattr(spv.get_starpilot_toggles, "_params", params, raising=False)
+  broadcast = {"force_fingerprint": not force, "car_model": "TOYOTA_COROLLA"}
+  monkeypatch.setattr(spv.get_starpilot_toggles, "_last_toggles_text", json.dumps(broadcast), raising=False)
+  # A forked startup process can have a cached broadcast but no new message.
+  sm = {"starpilotPlan": SimpleNamespace(starpilotToggles="")}
+
+  startup = spv.get_starpilot_toggles(sm, read_persisted_force_params=True)
+
+  assert startup.force_fingerprint is expected_force
+  assert startup.car_model == expected_model
+  assert vars(spv.get_starpilot_toggles(sm)) == broadcast
 
 
 class _FakeParams:

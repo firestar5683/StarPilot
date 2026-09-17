@@ -366,6 +366,11 @@ def get_starpilot_toggles(sm=messaging.SubMaster(["starpilotPlan"]), *, read_per
     if not hasattr(get_starpilot_toggles, "_params"):
       get_starpilot_toggles._params = Params(return_defaults=True)
 
+    # A forked card can inherit an older broadcast than the saved offroad selection.
+    car_model = normalize_legacy_car_model(get_starpilot_toggles._params.get("CarModel"))
+    toggles.force_fingerprint = get_starpilot_toggles._params.get_bool("ForceFingerprint") and bool(car_model) and car_model != "MOCK"
+    if toggles.force_fingerprint:
+      toggles.car_model = car_model
     toggles.force_offroad = get_starpilot_toggles._params.get_bool("ForceOffroad")
     toggles.force_onroad = get_starpilot_toggles._params.get_bool("ForceOnroad")
     # Controller selection happens before the first live StarPilot broadcast. Do
