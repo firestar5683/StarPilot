@@ -10,6 +10,7 @@ from difflib import SequenceMatcher
 
 from cereal import log
 from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR
+from opendbc.car.lateral import FRICTION_THRESHOLD, get_friction
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
@@ -339,6 +340,8 @@ class LatControlNNFF(LatControl):
           error = desired_lateral_accel - actual_lateral_accel
           friction_input = self.lat_accel_friction_factor * error + self.lat_jerk_friction_factor * lookahead_lateral_jerk
           ff = self.torque_from_lateral_accel(gravity_adjusted_lateral_accel, self.torque_params)
+          # get_friction returns lateral acceleration; NNFF feedforward uses torque.
+          ff += get_friction(friction_input, lateral_accel_deadzone, FRICTION_THRESHOLD, self.torque_params) / self.torque_params.latAccelFactor
       else:
         torque_from_measurement = self.torque_from_lateral_accel(measurement, self.torque_params)
         torque_from_setpoint = self.torque_from_lateral_accel(setpoint, self.torque_params)
