@@ -62,12 +62,19 @@ class ModelSourceWidget(LayoutWidget):
     return self.SIZE
 
   @staticmethod
-  def _big_model_failed(active: bool | None, usbgpu: bool, model_seen: bool, model_alive: bool) -> bool:
+  def _big_model_failed(active: bool | None, usbgpu: bool, model_seen: bool, model_alive: bool,
+                        pending: bool = False) -> bool:
+    # A model that finished loading but is waiting for the driver to disengage is not a failure.
+    if pending and usbgpu:
+      return False
     return active is False or not usbgpu or (active is True and model_seen and not model_alive)
 
   @staticmethod
-  def _status_for(loading: bool, small_model_engaged: bool, big_failed: bool) -> ModelSourceStatus:
-    if loading:
+  def _status_for(loading: bool, small_model_engaged: bool, big_failed: bool,
+                  pending: bool = False) -> ModelSourceStatus:
+    # Pending means the big model finished loading and is waiting for the next disengage,
+    # so the blinking loading icon stops: its absence is what tells the driver it is ready.
+    if loading and not pending:
       return ModelSourceStatus.LOADING
     if small_model_engaged:
       return ModelSourceStatus.FALLBACK_ENGAGED
@@ -84,16 +91,18 @@ class ModelSourceWidget(LayoutWidget):
     model_seen = sm.recv_frame["modelV2"] > ui_state.started_frame
     model_alive = sm.alive["modelV2"] if model_seen else True
     loading = ui_state.usbgpu_loading
-    big_failed = self._big_model_failed(ui_state.usbgpu_active, ui_state.usbgpu, model_seen, model_alive)
+    pending = ui_state.usbgpu_pending
+    big_failed = self._big_model_failed(ui_state.usbgpu_active, ui_state.usbgpu, model_seen, model_alive, pending)
     engaged = sm["selfdriveState"].enabled
 
-    if engaged and not self._engaged and not loading and ui_state.usbgpu_active is not True and model_seen:
+    if engaged and not self._engaged and not loading and not pending \
+       and ui_state.usbgpu_active is not True and model_seen:
       self._small_model_engaged = True
     if engaged != self._engaged:
       self._fade_time = rl.get_time() if engaged else 0.0
     self._engaged = engaged
     self._small_model_engaged &= big_failed
-    self._status = self._status_for(loading, self._small_model_engaged, big_failed)
+    self._status = self._status_for(loading, self._small_model_engaged, big_failed, pending)
 
   def _render(self, rect: rl.Rectangle) -> None:
     if self._status is None:

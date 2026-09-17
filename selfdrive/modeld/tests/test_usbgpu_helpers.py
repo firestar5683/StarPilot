@@ -1,5 +1,6 @@
 import io
 import struct
+import threading
 from types import MethodType
 from types import SimpleNamespace
 
@@ -269,43 +270,347 @@ def test_tinygrad_empty_thread_local_cache_holder_is_safe(monkeypatch):
   assert tinygrad_helpers._db_connection is holder
 
 
-def test_external_gpu_load_finishes_before_native_model_can_start(monkeypatch):
-  calls = []
-
+def _stub_big_model_loader(monkeypatch, calls, *, uses_external_gpu=True, model_error=None):
   class FakeModelState:
-    uses_external_gpu = True
-
     def __init__(self, cam_w, cam_h, external_gpu_active, model_id_override, write_model_version,
                  model_version_override):
       calls.append(("model", cam_w, cam_h, external_gpu_active, model_id_override,
                     write_model_version, model_version_override))
+      if model_error is not None:
+        raise model_error
+      self.uses_external_gpu = uses_external_gpu
 
     def warmup(self):
       calls.append("warmup")
 
+  monkeypatch.setattr(modeld, "set_core_affinity", lambda cores: calls.append(("affinity", tuple(cores))))
   monkeypatch.setattr(modeld, "wait_usbgpu_link", lambda: calls.append("link"))
-  monkeypatch.setattr(modeld, "wait_for_external_gpu_power_ready", lambda CP: calls.append(("power", CP)))
-  monkeypatch.setattr(modeld, "_set_hcq_wait_timeout", lambda timeout: calls.append(("timeout", timeout)))
+  monkeypatch.setattr(modeld, "wait_for_external_gpu_power_ready",
+                      lambda CP, cancel=None: calls.append(("power", CP)))
   monkeypatch.setattr(modeld, "_close_tinygrad_disk_cache_connection", lambda: calls.append("close_cache"))
   monkeypatch.setattr(modeld, "ModelState", FakeModelState)
-  monkeypatch.setattr(
-    modeld,
-    "tinygrad_dev_config",
-    lambda *_args: (_ for _ in ()).throw(AssertionError("runtime must not change tinygrad's process-global DEV")),
-  )
+  return FakeModelState
 
-  loaded = modeld._load_external_gpu_model(1928, 1208, "big-model", "v15", "car-params")
 
-  assert isinstance(loaded, FakeModelState)
+def test_background_big_model_load_leaves_the_running_model_untouched(monkeypatch):
+  calls = []
+  fake_model_state = _stub_big_model_loader(monkeypatch, calls)
+  # The small model is already driving on these process-global settings, so the background
+  # load must not touch tinygrad's DEV, its HCQ watchdog, or its shared buffer UOp cache.
+  for name, detail in (
+    ("tinygrad_dev_config", "runtime must not change tinygrad's process-global DEV"),
+    ("_set_hcq_wait_timeout", "the background load must not move the running model's HCQ watchdog"),
+    ("_isolate_next_model_artifact_load", "the background load must not evict the running model's buffers"),
+  ):
+    monkeypatch.setattr(modeld, name, lambda *_args, _d=detail: (_ for _ in ()).throw(AssertionError(_d)))
+
+  loader = modeld.BigModelLoader(1928, 1208, "car-params")
+  assert loader.start("big-model", "v15")
+  loader._thread.join(timeout=10)
+
+  loaded, error = loader.take()
+  assert isinstance(loaded, fake_model_state)
+  assert error == ""
+  # warmup() belongs here rather than at promotion: see
+  # test_big_model_warmup_stays_on_the_background_loader.
   assert calls == [
+    ("affinity", tuple(sorted(modeld.BIG_MODEL_LOADER_CORES))),
     ("power", "car-params"),
-    ("timeout", modeld.BIG_MODEL_LOAD_WAIT_TIMEOUT_MS),
     "link",
     ("model", 1928, 1208, True, "big-model", False, "v15"),
     "warmup",
     "close_cache",
-    ("timeout", modeld.BIG_MODEL_RUN_WAIT_TIMEOUT_MS),
   ]
+
+
+def test_big_model_load_gives_up_instead_of_loading_forever(monkeypatch):
+  # A load stuck inside tinygrad cannot be interrupted, so the timeout is what stops modeld
+  # reporting "loading" for the rest of the drive while the small model quietly drives.
+  release = threading.Event()
+  calls = []
+
+  class HangingModelState:
+    uses_external_gpu = True
+
+    def __init__(self, *_a, **_k):
+      release.wait(timeout=10)
+
+    def warmup(self):
+      pass
+
+  monkeypatch.setattr(modeld, "set_core_affinity", lambda cores: None)
+  monkeypatch.setattr(modeld, "wait_usbgpu_link", lambda: None)
+  monkeypatch.setattr(modeld, "wait_for_external_gpu_power_ready", lambda CP, cancel=None: None)
+  monkeypatch.setattr(modeld, "_close_tinygrad_disk_cache_connection", lambda: calls.append("close"))
+  monkeypatch.setattr(modeld, "ModelState", HangingModelState)
+
+  loader = modeld.BigModelLoader(1928, 1208, "car-params")
+  loader.start("big-model", "v15")
+  try:
+    assert loader.in_progress
+    assert not loader.timed_out
+
+    # Pretend the load has been running well past its budget.
+    loader.started_t -= modeld.BIG_MODEL_LOAD_TIMEOUT_SECONDS + 1
+    assert loader.timed_out
+    # take() must not hand over a model from a load we already gave up on.
+    assert loader.take() == (None, "")
+  finally:
+    release.set()
+    loader._thread.join(timeout=10)
+
+
+def test_big_model_load_timeout_leaves_room_for_a_normal_load():
+  # A healthy load measured ~26 s on device; the budget must not cut those off.
+  assert modeld.BIG_MODEL_LOAD_TIMEOUT_SECONDS > 60
+
+
+def test_big_model_warmup_stays_on_the_background_loader():
+  """Warming at promotion blocks the publish loop in one long stretch; warming on the
+  loader spreads the same work out while the small model is still driving.
+
+  Measured with warmup at promotion: modelV2 went silent for 13.0 s and 12.8 s on two
+  drives, starting the instant the model was collected, which tripped commIssue and blocked
+  the driver from engaging. Measured with warmup on the loader: worst in-load gap was
+  1.3-2.9 s, spread across the load. Neither is free, but only the second one leaves
+  modeld publishing when the driver wants to engage.
+  """
+  import ast
+  from pathlib import Path
+
+  source = (Path(modeld.__file__).with_name("modeld.py")).read_text(encoding="utf-8")
+  tree = ast.parse(source)
+
+  loader = next(n for n in ast.walk(tree)
+                if isinstance(n, ast.ClassDef) and n.name == "BigModelLoader")
+  assert "warmup" in ast.dump(loader), "the loader thread must warm the big model"
+
+  main_fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+  promote = next(n for n in ast.walk(main_fn)
+                 if isinstance(n, ast.If) and "_big_model_swap_allowed" in ast.dump(n.test))
+  assert "warmup" not in ast.dump(promote), \
+    "promotion must not warm the big model; it runs inside the 20 Hz publish loop"
+
+
+def test_chestnut_telemetry_is_suppressed_while_a_background_load_runs():
+  """Telemetry shares Chestnut's USB device with the model weight transfer.
+
+  ChestnutState._read_ina() issues USB control reads on the same device tinygrad streams
+  weights over. The old code loaded before the publish loop existed so the two never
+  overlapped; loading in the background makes them concurrent, which stalls the transfer
+  until it times out. Captured on four drives: the load never completed while telemetry
+  was polling at 10 Hz, and chestnutState first appeared only after the load on the one
+  drive that succeeded.
+  """
+  import ast
+  from pathlib import Path
+
+  source = (Path(modeld.__file__).with_name("modeld.py")).read_text(encoding="utf-8")
+  main_fn = next(n for n in ast.parse(source).body
+                 if isinstance(n, ast.FunctionDef) and n.name == "main")
+  assign = next(
+    node for node in ast.walk(main_fn)
+    if isinstance(node, ast.Assign)
+    and any(isinstance(t, ast.Name) and t.id == "send_chestnut" for t in node.targets)
+  )
+  guard = ast.dump(assign.value)
+  assert "big_loader" in guard and "in_progress" in guard, \
+    "chestnutState polling must be gated on the background loader being idle"
+
+
+def test_background_big_model_loader_avoids_the_realtime_cores():
+  """The loader must not share a core with modeld or the camera pipeline.
+
+  modeld is SCHED_FIFO on core 7 and threads inherit its affinity, so a loader left there is
+  starved behind the 20 Hz publish loop. Putting it on camerad's core instead stalls frame
+  delivery: measured p95 on roadCameraState went 50.8 ms -> 108.9 ms for the whole load.
+  """
+  assert modeld.BIG_MODEL_LOADER_CORES
+
+  reserved = {
+    7: "modeld (config_realtime_process(7, 54)) and dmonitoringmodeld",
+    6: "camerad (system/camerad/main.cc set_core_affinity({6}))",
+    5: "plannerd, radard, selfdrived, starpilot_process",
+    4: "card and controlsd",
+  }
+  for core, owner in reserved.items():
+    assert core not in modeld.BIG_MODEL_LOADER_CORES, f"core {core} belongs to {owner}"
+
+  # camerad pins itself in C++, which is easy to miss when auditing Python callers.
+  import re
+  from pathlib import Path
+
+  camerad_main = Path(modeld.__file__).parents[2] / "system" / "camerad" / "main.cc"
+  pinned = re.search(r"set_core_affinity\(\{([0-9,\s]+)\}\)", camerad_main.read_text(encoding="utf-8"))
+  assert pinned, "could not find camerad's core affinity"
+  camerad_cores = {int(c) for c in pinned.group(1).split(",") if c.strip()}
+  assert not (camerad_cores & modeld.BIG_MODEL_LOADER_CORES), \
+    f"the loader must not share camerad's cores {sorted(camerad_cores)}"
+
+
+@pytest.mark.parametrize("failure", [
+  dict(model_error=RuntimeError("artifact is corrupt")),
+  dict(uses_external_gpu=False),
+])
+def test_background_big_model_load_reports_failure_without_a_model(monkeypatch, failure):
+  calls = []
+  _stub_big_model_loader(monkeypatch, calls, **failure)
+
+  loader = modeld.BigModelLoader(1928, 1208, "car-params")
+  loader.start("big-model", "v15")
+  loader._thread.join(timeout=10)
+
+  loaded, error = loader.take()
+  assert loaded is None
+  assert error
+  assert not loader.in_progress
+  # Even a failed load must release the loader thread's own tinygrad cache handle.
+  assert "close_cache" in calls
+
+
+def test_background_big_model_load_is_handed_over_exactly_once(monkeypatch):
+  calls = []
+  fake_model_state = _stub_big_model_loader(monkeypatch, calls)
+
+  loader = modeld.BigModelLoader(1928, 1208, "car-params")
+  loader.start("big-model", "v15")
+  loader._thread.join(timeout=10)
+
+  assert isinstance(loader.take()[0], fake_model_state)
+  # A second take must not promote the same model again.
+  assert loader.take() == (None, "")
+
+
+def test_cancelled_big_model_load_never_builds_a_model(monkeypatch):
+  calls = []
+
+  def cancelling_power_wait(CP, cancel=None):
+    calls.append(("power", CP))
+    cancel.set()
+    raise modeld.BigModelLoadCancelled("cancelled while waiting for external GPU power")
+
+  _stub_big_model_loader(monkeypatch, calls)
+  monkeypatch.setattr(modeld, "wait_for_external_gpu_power_ready", cancelling_power_wait)
+
+  loader = modeld.BigModelLoader(1928, 1208, "car-params")
+  loader.start("big-model", "v15")
+  loader._thread.join(timeout=10)
+
+  loaded, error = loader.take()
+  assert loaded is None
+  assert error
+  assert not any(call[0] == "model" for call in calls if isinstance(call, tuple))
+
+
+def test_external_gpu_power_wait_aborts_when_the_loader_is_cancelled(monkeypatch):
+  cancel = threading.Event()
+  cancel.set()
+  monkeypatch.setattr(modeld, "SubMaster",
+                      lambda *_a, **_k: pytest.fail("a cancelled load must not start waiting on power"))
+
+  with pytest.raises(modeld.BigModelLoadCancelled):
+    modeld.wait_for_external_gpu_power_ready("car-params", cancel=cancel)
+
+
+def test_big_model_promotion_waits_for_the_driver_to_disengage(monkeypatch):
+  """Drive the real collect-and-promote blocks lifted out of main()'s loop."""
+  import ast
+  from pathlib import Path
+
+  source = (Path(modeld.__file__).with_name("modeld.py")).read_text(encoding="utf-8")
+  main_fn = next(n for n in ast.parse(source).body if isinstance(n, ast.FunctionDef) and n.name == "main")
+  def names(node):
+    return {n.id for n in ast.walk(node) if isinstance(n, ast.Name)}
+
+  collect_block = next(n for n in ast.walk(main_fn)
+                       if isinstance(n, ast.If) and "big_loader" in names(n.test)
+                       and "in_progress" in ast.dump(n.test))
+  promote_block = next(n for n in ast.walk(main_fn)
+                       if isinstance(n, ast.If) and "_big_model_swap_allowed" in names(n.test))
+  promote = compile(ast.Module(body=[collect_block, promote_block], type_ignores=[]),
+                    "<promotion>", "exec")
+
+  class FakeModel:
+    model_id = "big-model"
+    policy_generation = "v15"
+
+    def __init__(self):
+      self.reset = 0
+
+    def warmup(self):
+      # The real warmup() ends with _reset_state(); it runs at promotion, not on the loader.
+      self.reset += 1
+
+    def _reset_state(self):
+      self.reset += 1
+
+  class FakeLoader:
+    def __init__(self, model):
+      self.in_progress = True
+      self._model = model
+
+    def take(self):
+      return self._model, ""
+
+  written = {}
+  big = FakeModel()
+  loader = FakeLoader(big)
+  small = FakeModel()
+  small.model_id = "small-model"
+  scope = {
+    "big_loader": loader, "big_model": None, "model": small, "small_model": small,
+    "params": SimpleNamespace(put_bool=lambda k, v: written.__setitem__(k, v),
+                              put=lambda k, v: written.__setitem__(k, v)),
+    "cloudlog": SimpleNamespace(warning=lambda *_a: None, error=lambda *_a: None),
+    "vipc_dropped_frames": 0, "live_calib_seen": True, "external_gpu_active": False,
+    "run_count": 99, "frame_dropped_filter": SimpleNamespace(x=5.0),
+    "PublishState": lambda: "fresh", "publish_state": "stale",
+    "prev_action": "stale", "log": modeld.log, "chestnut_state": SimpleNamespace(big=False),
+    "set_runtime_model_params": lambda *_a: None,
+    "_big_model_swap_allowed": modeld._big_model_swap_allowed,
+  }
+  scope["sm"] = type("SM", (), {
+    "__getitem__": lambda _s, k: SimpleNamespace(enabled=scope["_engaged"]),
+    "alive": {"carControl": True, "carState": True},
+  })()
+
+  # Still loading: nothing is collected and the small model keeps driving.
+  scope["_engaged"] = True
+  exec(promote, scope)  # noqa: S102
+  assert scope["model"] is small and scope["big_model"] is None
+
+  # Load finishes while engaged: the model is collected but must NOT be promoted.
+  loader.in_progress = False
+  exec(promote, scope)  # noqa: S102
+  assert scope["big_model"] is big
+  assert scope["model"] is small, "must not swap models while the driver is engaged"
+  assert written["UsbGpuPending"] is True
+  assert written["UsbGpuLoading"] is False
+  assert big.reset == 0
+
+  # The driver disengages: now the big model takes over.
+  scope["_engaged"] = False
+  exec(promote, scope)  # noqa: S102
+  assert scope["model"] is big
+  assert big.reset == 1, "the big model must be warmed and reset before it drives"
+  assert scope["run_count"] == 0 and scope["frame_dropped_filter"].x == 0.
+  assert scope["publish_state"] == "fresh" and scope["prev_action"] != "stale"
+  assert written["UsbGpuActive"] is True and written["UsbGpuPending"] is False
+  assert scope["chestnut_state"].big is True
+
+
+@pytest.mark.parametrize("kwargs,expected", [
+  (dict(), True),
+  (dict(engaged=True), False),
+  (dict(carcontrol_alive=False), False),
+  (dict(carstate_alive=False), False),
+  (dict(vipc_dropped_frames=1), False),
+  (dict(live_calib_seen=False), False),
+])
+def test_big_model_swap_only_while_disengaged_with_fresh_state(kwargs, expected):
+  defaults = dict(engaged=False, carcontrol_alive=True, carstate_alive=True,
+                  vipc_dropped_frames=0, live_calib_seen=True)
+  assert modeld._big_model_swap_allowed(**(defaults | kwargs)) is expected
 
 
 def test_external_gpu_nonfinite_outputs_trigger_fallback(monkeypatch):

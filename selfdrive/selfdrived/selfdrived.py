@@ -255,7 +255,7 @@ class SelfdriveD:
     self.big_model_attempted = False
     self.big_model_active = False
     self.big_model_failed = False
-    self.big_model_ready_t = 0.
+    self.big_model_swap_t = 0.
     self.experimental_mode = False
     self.ecu_disable_failed = False
     self.ecu_disable_failed_checked = not (
@@ -394,15 +394,25 @@ class SelfdriveD:
     loading = self.params.get_bool("UsbGpuLoading")
     if loading:
       self.big_model_attempted = True
-    if self.big_model_loading and not loading:
-      self.big_model_ready_t = time.monotonic()
     self.big_model_loading = loading
+    # No alert while loading: the blinking eGPU icon already carries that state, and the
+    # small model is driving normally. big_model_loading still gates the frame-drop warning.
     if loading:
       self.events.add(EventName.bigModelLoading)
 
+    # The big model loads in the background while the small model drives, so it sits
+    # loaded-but-unused until the driver disengages. That is a success, not a failure, and
+    # it raises no alert: the driver sees it through the eGPU icon, not a banner.
+    pending = self.params.get_bool("UsbGpuPending")
+    if pending:
+      self.big_model_attempted = True
+
     big_active = self.params.get("UsbGpuActive")
+    if self.big_model_active != (big_active is True):
+      self.big_model_swap_t = time.monotonic()
     model_unavailable = self.big_model_active and self.sm.seen['modelV2'] and not self.sm.alive['modelV2']
-    big_failed = self.big_model_attempted and not loading and (big_active is False or model_unavailable)
+    big_failed = self.big_model_attempted and not loading and not pending and \
+                 (big_active is False or model_unavailable)
     if big_failed and not self.big_model_failed:
       self.events.add(EventName.bigModelFailed)
     self.big_model_failed = big_failed
@@ -697,10 +707,21 @@ class SelfdriveD:
                          (contains_event_type(self.events, self.starpilot_events, ET.SOFT_DISABLE) or
                           contains_event_type(self.events, self.starpilot_events, ET.IMMEDIATE_DISABLE))
     no_system_errors = (not has_disable_events) or (len(self.events) == num_events)
-    big_model_settling = self.big_model_loading or time.monotonic() < self.big_model_ready_t + 5.
+    # The model swap briefly disturbs the stream, so forgive everything around it.
+    big_model_settling = time.monotonic() < self.big_model_swap_t + 2.
     all_checks = self.sm.all_checks()
     all_alive = self.sm.all_alive() if not all_checks else True
     all_freq_ok = self.sm.all_freq_ok() if not all_checks else True
+    # Loading the big model realizes its graph on the same QCOM GPU the small model drives
+    # on, which costs modeld frames for part of the load and drags modelV2 below its target
+    # rate. commIssueAvgFreq is NO_ENTRY, so that would block engaging on a small model that
+    # is working fine. Forgive only a slow modelV2, and only while a load is in flight --
+    # anything dying, and any other service, still reports normally.
+    if self.big_model_loading and not all_checks and all_alive and not all_freq_ok:
+      slow = {s for s, freq_ok in self.sm.freq_ok.items() if not freq_ok}
+      if slow and slow <= {'modelV2', 'drivingModelData', 'cameraOdometry'} and self.sm.all_valid():
+        all_freq_ok = True
+        all_checks = True
     report_comm_issue, self.valid_only_comm_issue_frames = evaluate_comm_issue(
       all_checks, all_alive, all_freq_ok, self.valid_only_comm_issue_frames,
     )
@@ -798,7 +819,10 @@ class SelfdriveD:
 
     # TODO: fix simulator
     if not SIMULATION or REPLAY:
-      if self.sm['modelV2'].frameDropPerc > 20:
+      # Loading the big model realizes its graph on the same QCOM GPU the small model is
+      # driving on, which costs real frames for part of the load. The small model keeps
+      # publishing throughout, so warn about the drops only once the load is out of the way.
+      if self.sm['modelV2'].frameDropPerc > 20 and not self.big_model_loading:
         self.events.add(EventName.modeldLagging)
 
     # Decrement personality on configured steering-wheel button presses

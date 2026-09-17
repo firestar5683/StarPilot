@@ -32,6 +32,19 @@ def test_model_source_failure_detection_matches_the_backend_state_contract():
   assert not failed(True, True, False, True)
 
 
+def test_model_source_blinks_while_loading_then_clears_once_the_big_model_is_ready():
+  # The blinking icon is the driver's "still loading" cue, and its disappearance is how they
+  # know the next disengage/engage will pick up the big model.
+  status = model_source.ModelSourceWidget._status_for
+  failed = model_source.ModelSourceWidget._big_model_failed
+
+  assert status(True, False, False, False) is model_source.ModelSourceStatus.LOADING
+  assert status(True, False, False, True) is not model_source.ModelSourceStatus.LOADING
+  assert not failed(False, True, False, True, True)
+  # Chestnut going away while pending is still a genuine failure.
+  assert failed(False, False, False, True, True)
+
+
 def test_model_source_latches_small_model_engagement_until_the_big_model_recovers(monkeypatch):
   widget = object.__new__(model_source.ModelSourceWidget)
   widget._small_model_engaged = False
@@ -50,6 +63,7 @@ def test_model_source_latches_small_model_engagement_until_the_big_model_recover
       usbgpu_compiled=True,
       usbgpu_active=False,
       usbgpu_loading=False,
+      usbgpu_pending=False,
     ),
   )
   monkeypatch.setattr(model_source.rl, "get_time", lambda: 42.0)

@@ -532,9 +532,14 @@ EVENTS: dict[int, dict[str, Alert | AlertCallbackType]] = {
                                        "Ensure road ahead is clear"),
   },
 
-  EventName.bigModelLoading: {
-    ET.NO_ENTRY: NoEntryAlert("Big Model Loading"),
-  },
+  # bigModelLoading and bigModelPending carry no alerts on purpose: the blinking eGPU icon
+  # already says the big model is loading, and its absence says it is ready.
+  EventName.bigModelLoading: {},
+
+  # bigModelPending carries no alert on purpose: the eGPU icon clearing, and then turning
+  # green on the next engage, is the driver's cue. A banner here announced the model before
+  # it was usable.
+  EventName.bigModelPending: {},
 
   EventName.bigModelFailed: {
     ET.SOFT_DISABLE: soft_disable_alert("Big Model Failed"),

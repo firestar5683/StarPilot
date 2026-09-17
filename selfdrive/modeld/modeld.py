@@ -5,6 +5,7 @@ from functools import cached_property
 import json
 import os
 import struct
+import threading
 import usb1
 from openpilot.system.hardware import HARDWARE, TICI
 os.environ['GMMU'] = '0'
@@ -25,7 +26,7 @@ from openpilot.common.swaglog import cloudlog
 from openpilot.common.params import Params
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.file_chunker import file_chunked_exists, open_file_chunked
-from openpilot.common.realtime import config_realtime_process, DT_MDL
+from openpilot.common.realtime import config_realtime_process, set_core_affinity, DT_MDL
 from openpilot.common.transformations.camera import DEVICE_CAMERAS
 from openpilot.common.transformations.model import get_warp_matrix
 from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
@@ -105,6 +106,23 @@ EXTERNAL_GPU_POWER_WAIT_TIMEOUT_SECONDS = 60.0
 EXTERNAL_GPU_POWER_LOG_INTERVAL_SECONDS = 10.0
 LAT_SMOOTH_BP = [2.0, 8.0]
 
+# The background big-model loader must leave modeld's SCHED_FIFO core, because thread
+# affinity is inherited from config_realtime_process(7, 54) and the loader would otherwise
+# sit behind the 20 Hz publish loop. Every other core is spoken for as well -- 4 is
+# card/controlsd, 5 is plannerd/radard/selfdrived, 6 is camerad (system/camerad/main.cc),
+# 7 is modeld and dmonitoringmodeld -- so the loader floats across the little cores, which
+# run the non-realtime locationd/UI work, instead of pinning on top of one critical process.
+BIG_MODEL_LOADER_CORES = {0, 1, 2, 3}
+
+# A healthy load takes ~30 s once vehicle power is stable. If the AMD device never comes up
+# the tinygrad calls can block indefinitely, so give up rather than reporting "loading"
+# forever while the small model quietly keeps driving.
+BIG_MODEL_LOAD_TIMEOUT_SECONDS = 150.0
+
+
+class BigModelLoadCancelled(Exception):
+  """Raised inside the background loader when modeld no longer wants the big model."""
+
 
 def _set_hcq_wait_timeout(timeout_ms: int) -> None:
   """Update tinygrad's cached HCQ timeout for the external-GPU load/run phase."""
@@ -155,8 +173,10 @@ def _egmp_vehicle_ready(can_messages, bus: int) -> bool:
   )
 
 
-def wait_for_external_gpu_power_ready(CP=None) -> None:
+def wait_for_external_gpu_power_ready(CP=None, cancel=None) -> None:
   """Wait out vehicle startup power transitions before initializing Chestnut."""
+  if cancel is not None and cancel.is_set():
+    raise BigModelLoadCancelled("cancelled before waiting for external GPU power")
   device_type = HARDWARE.get_device_type()
   egmp_bus = _egmp_ready_bus(CP)
   services = ["pandaStates", "peripheralState"] + (["can"] if egmp_bus is not None else [])
@@ -167,6 +187,8 @@ def wait_for_external_gpu_power_ready(CP=None) -> None:
   wait_started = time.monotonic()
 
   while True:
+    if cancel is not None and cancel.is_set():
+      raise BigModelLoadCancelled("cancelled while waiting for external GPU power")
     sm.update(1000)
     now = time.monotonic()
     if egmp_bus is not None and sm.updated["can"] and _egmp_vehicle_ready(sm["can"], egmp_bus):
@@ -854,33 +876,123 @@ def _load_model_state(cam_w: int, cam_h: int, selected_model: str, external_gpu_
     )
 
 
-def _load_external_gpu_model(cam_w: int, cam_h: int, selected_model: str, model_version: str = "",
-                             CP=None, demo: bool = False) -> ModelState | None:
-  """Load and warm the USB-GPU model without running another tinygrad model concurrently."""
-  candidate = None
-  try:
-    if not demo:
-      wait_for_external_gpu_power_ready(CP)
-    _set_hcq_wait_timeout(BIG_MODEL_LOAD_WAIT_TIMEOUT_MS)
-    wait_usbgpu_link()
-    candidate = ModelState(
-      cam_w,
-      cam_h,
-      True,
-      model_id_override=selected_model,
-      write_model_version=False,
-      model_version_override=model_version,
-    )
-    if not candidate.uses_external_gpu:
-      raise RuntimeError("external GPU model resolved to the builtin model")
-    candidate.warmup()
-    return candidate
-  except Exception:
-    cloudlog.exception("external GPU model load or warmup failed")
-    return None
-  finally:
-    _close_tinygrad_disk_cache_connection()
-    _set_hcq_wait_timeout(BIG_MODEL_RUN_WAIT_TIMEOUT_MS)
+def _big_model_swap_allowed(engaged: bool, carcontrol_alive: bool, carstate_alive: bool,
+                            vipc_dropped_frames: int, live_calib_seen: bool) -> bool:
+  """Swapping models rebuilds the temporal input queues, so it must never happen under actuation.
+
+  Fails closed: without fresh carControl/carState we cannot trust that we are disengaged.
+  """
+  return (
+    not engaged
+    and carcontrol_alive
+    and carstate_alive
+    and vipc_dropped_frames == 0
+    and live_calib_seen
+  )
+
+
+class BigModelLoader:
+  """Load and warm the Chestnut model on a background thread while the small model drives.
+
+  Everything this touches must be safe against a concurrently running small model, so unlike
+  the synchronous path it never calls _set_hcq_wait_timeout (hoisted to modeld startup) or
+  _isolate_next_model_artifact_load (which evicts buffer UOps from a tinygrad global cache).
+  """
+
+  def __init__(self, cam_w: int, cam_h: int, CP=None, demo: bool = False):
+    self.cam_w = cam_w
+    self.cam_h = cam_h
+    self.CP = CP
+    self.demo = demo
+    self._thread: threading.Thread | None = None
+    self._cancel = threading.Event()
+    self._lock = threading.Lock()
+    self._result: ModelState | None = None
+    self._error = ""
+    self._model_id = ""
+    self._model_version = ""
+    self.started_t = 0.0
+
+  @property
+  def in_progress(self) -> bool:
+    return self._thread is not None and self._thread.is_alive()
+
+  @property
+  def timed_out(self) -> bool:
+    """A load stuck inside tinygrad cannot be interrupted, so the caller gives up on it.
+
+    The thread is a daemon and keeps running, but nothing will consume its result.
+    """
+    return self.in_progress and time.monotonic() - self.started_t > BIG_MODEL_LOAD_TIMEOUT_SECONDS
+
+  def start(self, model_id: str, model_version: str = "") -> bool:
+    if self.in_progress:
+      return False
+    with self._lock:
+      self._result = None
+      self._error = ""
+      self._model_id = model_id
+      self._model_version = model_version
+    self._cancel.clear()
+    self.started_t = time.monotonic()
+    self._thread = threading.Thread(target=self._run, name="big_model_loader", daemon=True)
+    self._thread.start()
+    return True
+
+  def cancel(self) -> None:
+    self._cancel.set()
+
+  def take(self) -> tuple[ModelState | None, str]:
+    """Hand over the finished load exactly once: (model, error). Both empty while in flight."""
+    if self._thread is None or self._thread.is_alive():
+      return None, ""
+    self._thread = None
+    with self._lock:
+      result, error = self._result, self._error
+      self._result = None
+      self._error = ""
+      return result, error
+
+  def _run(self) -> None:
+    try:
+      # Leave modeld's realtime core before doing any work; see BIG_MODEL_LOADER_CORES.
+      set_core_affinity(sorted(BIG_MODEL_LOADER_CORES))
+      if not self.demo:
+        wait_for_external_gpu_power_ready(self.CP, cancel=self._cancel)
+      if self._cancel.is_set():
+        raise BigModelLoadCancelled("cancelled before the external GPU link check")
+      wait_usbgpu_link()
+      candidate = ModelState(
+        self.cam_w,
+        self.cam_h,
+        True,
+        model_id_override=self._model_id,
+        write_model_version=False,
+        model_version_override=self._model_version,
+      )
+      if not candidate.uses_external_gpu:
+        raise RuntimeError("external GPU model resolved to the builtin model")
+      # warmup() runs the camera warp on QCOM, shared with the driving small model, so it
+      # costs some jitter here. It still belongs on this thread: doing it at promotion
+      # instead blocks the publish loop for ~13 s in one stretch, which trips commIssue and
+      # blocks the driver from engaging exactly when the model becomes available.
+      candidate.warmup()
+      if self._cancel.is_set():
+        raise BigModelLoadCancelled("cancelled after warmup")
+      with self._lock:
+        self._result = candidate
+      cloudlog.warning(f"background big model load finished in {time.monotonic() - self.started_t:.1f}s")
+    except BigModelLoadCancelled as exc:
+      cloudlog.warning(f"background big model load cancelled: {exc}")
+      with self._lock:
+        self._error = str(exc)
+    except Exception as exc:
+      cloudlog.exception("background big model load failed")
+      with self._lock:
+        self._error = str(exc) or exc.__class__.__name__
+    finally:
+      # tinygrad's disk cache handle is thread-local, so this closes only the loader's.
+      _close_tinygrad_disk_cache_connection()
 
 
 def _model_versions() -> dict[str, str]:
@@ -1058,9 +1170,16 @@ def main(demo=False):
   external_artifact = MODELS_PATH / f"{big_model_id}_driving_tinygrad.pkl"
   external_artifact_ready = external_model_selected and file_chunked_exists(external_artifact)
   external_gpu_requested = usbgpu_present_now and (bool(big_model_id) or model_lab_ready)
+  # The big model is loaded in the background while the small model drives, so the HCQ
+  # watchdog is set once here and never mutated again: it is process-global and shared by
+  # the QCOM and AMD devices, so changing it mid-drive would also move the small model's.
+  if external_gpu_requested:
+    _set_hcq_wait_timeout(BIG_MODEL_LOAD_WAIT_TIMEOUT_MS)
+
   params.put_bool("UsbGpuPresent", usbgpu_present_now)
   params.put_bool("UsbGpuCompiled", external_artifact_ready or model_lab_ready)
   params.put_bool("UsbGpuActive", False)
+  params.put_bool("UsbGpuPending", False)
   params.put_bool("UsbGpuLoading", external_gpu_requested)
   _set_model_lab_runtime(
     params,
@@ -1147,15 +1266,8 @@ def main(demo=False):
     else:
       CP = messaging.log_from_bytes(params.get("CarParams", block=True), car.CarParams)
 
-    big_model = _load_external_gpu_model(
-      vipc_client_main.width,
-      vipc_client_main.height,
-      selected_model,
-      selected_model_version,
-      CP,
-      demo,
-    )
-
+    # Start on the small model so openpilot is drivable immediately; the big model is loaded
+    # in the background below and promoted once the driver disengages.
     small_model = _load_model_state(
       vipc_client_main.width,
       vipc_client_main.height,
@@ -1165,10 +1277,7 @@ def main(demo=False):
       small_model_version,
       False,
     )
-    model = big_model if big_model is not None else small_model
-    if big_model is not None:
-      params.put("ModelVersion", model.policy_generation)
-      params.put("DrivingModelVersion", model.policy_generation)
+    model = small_model
   else:
     model = _load_model_state(
       vipc_client_main.width,
@@ -1183,9 +1292,15 @@ def main(demo=False):
     set_runtime_model_params(params, model.model_id, model.policy_generation)
 
   external_gpu_active = model_lab_active or model.uses_external_gpu
+  # Load the big model in the background so the small model can drive in the meantime.
+  big_loader = None
+  if external_gpu_requested and not model_lab_active and big_model_id:
+    big_loader = BigModelLoader(vipc_client_main.width, vipc_client_main.height, CP, demo)
+    big_loader.start(big_model_id, big_model_version)
   params.put_bool("UsbGpuCompiled", external_artifact_ready or model_lab_ready)
   params.put_bool("UsbGpuActive", external_gpu_active)
-  params.put_bool("UsbGpuLoading", False)
+  params.put_bool("UsbGpuPending", False)
+  params.put_bool("UsbGpuLoading", big_loader is not None)
   _set_model_lab_runtime(
     params,
     requested=model_lab_requested,
@@ -1340,6 +1455,61 @@ def main(demo=False):
         chestnut_state.big = False
       cloudlog.error(f"Model Laboratory stopped: {model_lab_error}")
 
+    # Collect a finished background big-model load, then promote it once the driver is
+    # disengaged. Swapping rebuilds the temporal input queues, so it must not happen
+    # under actuation.
+    if big_loader is not None and big_loader.timed_out:
+      big_loader.cancel()
+      big_loader = None
+      params.put_bool("UsbGpuLoading", False)
+      params.put_bool("UsbGpuPending", False)
+      params.put_bool("UsbGpuActive", False)
+      cloudlog.error(f"big model load exceeded {BIG_MODEL_LOAD_TIMEOUT_SECONDS:.0f}s, "
+                     "staying on the small model")
+    elif big_loader is not None and not big_loader.in_progress:
+      loaded_big_model, big_load_error = big_loader.take()
+      big_loader = None
+      if loaded_big_model is not None:
+        big_model = loaded_big_model
+        # Raise pending before clearing loading: selfdrived polls these separately at 100 Hz
+        # and reads "neither loading nor pending" as a failed load.
+        params.put_bool("UsbGpuPending", True)
+        params.put_bool("UsbGpuLoading", False)
+        cloudlog.warning("big model ready; waiting for the driver to disengage before using it")
+      else:
+        params.put_bool("UsbGpuPending", False)
+        params.put_bool("UsbGpuActive", False)
+        params.put_bool("UsbGpuLoading", False)
+        cloudlog.error(f"big model unavailable, staying on the small model: {big_load_error}")
+
+    if big_model is not None and model is not big_model and _big_model_swap_allowed(
+      sm["carControl"].enabled,
+      sm.alive["carControl"],
+      sm.alive["carState"],
+      vipc_dropped_frames,
+      live_calib_seen,
+    ):
+      # The loader already warmed this model, so the swap itself is just a pointer change
+      # plus a queue reset; it must stay cheap because it runs inside the publish loop.
+      big_model._reset_state()
+      model = big_model
+      external_gpu_active = True
+      # Nothing from the small model carries over: re-arm the frame-drop warmup and drop
+      # the rolling probability buffers and previous action, which are model specific.
+      run_count = 0
+      frame_dropped_filter.x = 0.
+      publish_state = PublishState()
+      prev_action = log.ModelDataV2.Action()
+      params.put("ModelVersion", model.policy_generation)
+      params.put("DrivingModelVersion", model.policy_generation)
+      set_runtime_model_params(params, model.model_id, model.policy_generation)
+      params.put_bool("UsbGpuActive", True)
+      params.put_bool("UsbGpuPending", False)
+      params.put_bool("UsbGpuLoading", False)
+      if chestnut_state is not None:
+        chestnut_state.big = True
+      cloudlog.warning(f"now driving on the big model {model.model_id}")
+
     frame_drop_ratio = frames_dropped / (1 + frames_dropped)
     dropped_frame = vipc_dropped_frames > 0
     if dropped_frame and (model.can_prepare_only or (model_lab_longitudinal is not None and model_lab_longitudinal.can_prepare_only)):
@@ -1357,6 +1527,9 @@ def main(demo=False):
     try:
       send_chestnut = (
         chestnut_state is not None and
+        # Telemetry shares the USB device with the model transfer, so polling it while a
+        # background load is in flight stalls that transfer until it times out.
+        (big_loader is None or not big_loader.in_progress) and
         run_count % round(ModelConstants.MODEL_FREQ / SERVICE_LIST["chestnutState"].frequency) == 0
       )
       if model_lab_longitudinal is not None:
@@ -1433,11 +1606,16 @@ def main(demo=False):
         cloudlog.exception("external GPU model failed, falling back to active small model")
         model = small_model
         big_model = None
+      # A failed big model is not retried in this drive, so stop any load still in flight.
+      if big_loader is not None:
+        big_loader.cancel()
+        big_loader = None
       params.put_bool("UsbGpuActive", False)
       external_gpu_active = False
       params.put("ModelVersion", model.policy_generation)
       params.put("DrivingModelVersion", model.policy_generation)
       set_runtime_model_params(params, model.model_id, model.policy_generation)
+      params.put_bool("UsbGpuPending", False)
       params.put_bool("UsbGpuLoading", False)
       if chestnut_state is not None:
         chestnut_state.big = False
