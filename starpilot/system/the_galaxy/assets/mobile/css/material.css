@@ -1357,6 +1357,9 @@ input[type="color"].gx-color {
 
 .gx-btn--block { width: 100%; }
 
+.gx-btn--warning { background: var(--warning); color: #1c160c; box-shadow: 0 4px 12px rgba(201, 130, 31, 0.25); }
+.gx-btn--warning:hover { background: #ffc987; }
+[data-theme="light"] .gx-btn--warning:hover { background: #d89436; }
 .gx-btn--danger { background: var(--error); color: var(--on-error); box-shadow: 0 4px 12px rgba(255, 82, 119, 0.3); }
 .gx-btn--danger:hover { background: #ff6b8b; }
 [data-theme="light"] .gx-btn--danger:hover { background: #e04b6f; }
