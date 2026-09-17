@@ -76,16 +76,24 @@ class GnssHealth:
     svs = list(report.sv)
     source = str(report.source)
 
-    if "glonass" in source:
+    # The two constellations arrive as separate reports at ~1Hz each. satelliteTimeIsKnown is only
+    # meaningful for GPS here - the modem leaves it clear on GLONASS satellites and reports their
+    # validity through the glonass* bits instead - so tracking one shared percentage made the
+    # readout flip between 100% and 0% twice a second.
+    is_glonass = "glonass" in source
+    if is_glonass:
       self._glonass_sv = len(svs)
     else:
       self._gps_sv = len(svs)
 
-    if svs:
+    if svs and not is_glonass:
       known = sum(1 for sv in svs if sv.measurementStatus.satelliteTimeIsKnown)
       self._sat_time_pct = 100.0 * known / len(svs)
+
+    if svs:
       noise = [sv.carrierNoise for sv in svs if sv.carrierNoise > 0]
-      self._cno = sum(noise) / len(noise) if noise else 0.0
+      if noise:
+        self._cno = sum(noise) / len(noise)
 
   def render(self, bounds: rl.Rectangle) -> None:
     self._update()
@@ -105,7 +113,7 @@ class GnssHealth:
                     TITLE_SIZE, 0, fix_color)
 
     ty += 34
-    rl.draw_text_ex(self._font, "time", rl.Vector2(tx, ty), ROW_SIZE, 0, _LABEL)
+    rl.draw_text_ex(self._font, "time G", rl.Vector2(tx, ty), ROW_SIZE, 0, _LABEL)
     rl.draw_text_ex(self._font, f"{self._sat_time_pct:.0f}%", rl.Vector2(tx + 120, ty),
                     ROW_SIZE, 0, _grade(self._sat_time_pct, SAT_TIME_GOOD, SAT_TIME_WARN))
 
