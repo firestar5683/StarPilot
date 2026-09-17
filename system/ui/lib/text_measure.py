@@ -1,8 +1,11 @@
 import pyray as rl
 from openpilot.system.ui.lib.application import FONT_SCALE, font_fallback
 from openpilot.system.ui.lib.emoji import find_emoji
+from openpilot.system.ui.lib.lru_cache import LRUCache
 
-_cache: dict[int, rl.Vector2] = {}
+_CACHE_MAXSIZE = 8192
+
+_cache: LRUCache[int, rl.Vector2] = LRUCache(_CACHE_MAXSIZE)
 
 
 def draw_text_with_shadow(font: rl.Font, text: str, pos: rl.Vector2, font_size: int, color: rl.Color,
