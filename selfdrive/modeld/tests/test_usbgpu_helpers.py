@@ -296,10 +296,11 @@ def test_background_big_model_load_leaves_the_running_model_untouched(monkeypatc
   calls = []
   fake_model_state = _stub_big_model_loader(monkeypatch, calls)
   # The small model is already driving on these process-global settings, so the background
-  # load must not touch tinygrad's DEV, its HCQ watchdog, or its shared buffer UOp cache.
+  # load must not touch tinygrad's DEV or its shared buffer UOp cache. The HCQ watchdog is
+  # the deliberate exception: see test_hcq_watchdog_is_raised_only_around_the_background_load.
+  monkeypatch.setattr(modeld, "_set_hcq_wait_timeout", lambda timeout: calls.append(("timeout", timeout)))
   for name, detail in (
     ("tinygrad_dev_config", "runtime must not change tinygrad's process-global DEV"),
-    ("_set_hcq_wait_timeout", "the background load must not move the running model's HCQ watchdog"),
     ("_isolate_next_model_artifact_load", "the background load must not evict the running model's buffers"),
   ):
     monkeypatch.setattr(modeld, name, lambda *_args, _d=detail: (_ for _ in ()).throw(AssertionError(_d)))
@@ -317,8 +318,10 @@ def test_background_big_model_load_leaves_the_running_model_untouched(monkeypatc
     ("affinity", tuple(sorted(modeld.BIG_MODEL_LOADER_CORES))),
     ("power", "car-params"),
     "link",
+    ("timeout", modeld.BIG_MODEL_LOAD_WAIT_TIMEOUT_MS),
     ("model", 1928, 1208, True, "big-model", False, "v15"),
     "warmup",
+    ("timeout", modeld.BIG_MODEL_RUN_WAIT_TIMEOUT_MS),
     "close_cache",
   ]
 
@@ -390,6 +393,60 @@ def test_big_model_warmup_stays_on_the_background_loader():
                  if isinstance(n, ast.If) and "_big_model_swap_allowed" in ast.dump(n.test))
   assert "warmup" not in ast.dump(promote), \
     "promotion must not warm the big model; it runs inside the 20 Hz publish loop"
+
+
+def test_hcq_watchdog_is_raised_only_around_the_background_load():
+  """The HCQ watchdog is process-global and shared with QCOM.
+
+  Leaving it at the 30 s load value for the whole drive meant a wedged *small* model took
+  30 s to fail instead of 3 s. Drive 00000ad4: modelV2 stopped at 34.3 s, the loader's
+  warmup blocked behind the same QCOM queue, and both hit the 30 s timeout together --
+  68 s with no model output. Raise it inside the loader and restore it in the finally.
+  """
+  import ast
+  from pathlib import Path
+
+  source = (Path(modeld.__file__).with_name("modeld.py")).read_text(encoding="utf-8")
+  tree = ast.parse(source)
+
+  main_fn = next(n for n in tree.body if isinstance(n, ast.FunctionDef) and n.name == "main")
+  assert "_set_hcq_wait_timeout" not in ast.dump(main_fn), \
+    "main() must not pin the watchdog for the whole drive"
+
+  run = next(n for n in ast.walk(tree) if isinstance(n, ast.FunctionDef) and n.name == "_run")
+  handler = next(n for n in ast.walk(run) if isinstance(n, ast.Try) and n.finalbody)
+  assert "BIG_MODEL_RUN_WAIT_TIMEOUT_MS" in ast.dump(ast.Module(body=handler.finalbody, type_ignores=[])), \
+    "the loader must restore the short watchdog when it finishes"
+
+
+def test_a_wedged_small_model_drops_frames_instead_of_killing_modeld():
+  """Restarting modeld blinds openpilot for ~35 s, which is worse than losing frames.
+
+  Drive 00000ad4 died on `RuntimeError: Wait timeout: 30000 ms!` from the QCOM timeline
+  while already running the small model, so there was no model to fall back to and the
+  exception propagated out of main().
+  """
+  import ast
+  from pathlib import Path
+
+  source = (Path(modeld.__file__).with_name("modeld.py")).read_text(encoding="utf-8")
+  main_fn = next(n for n in ast.parse(source).body
+                 if isinstance(n, ast.FunctionDef) and n.name == "main")
+  handler = next(
+    h for n in ast.walk(main_fn) if isinstance(n, ast.Try)
+    for h in n.handlers if "small_model" in ast.dump(h)
+  )
+  # The handler is `if model_lab_active: ... elif external_gpu_active: ... else: ...`, so the
+  # no-fallback branch is the else of the nested elif.
+  branch = next(n for n in ast.walk(handler)
+                if isinstance(n, ast.If) and "external_gpu_active" in ast.dump(n.test))
+  assert branch.orelse, "expected an else covering the case with no model to fall back to"
+  fallback = ast.dump(ast.Module(body=branch.orelse, type_ignores=[]))
+  assert "consecutive_model_failures" in fallback, "a transient wedge must not be fatal"
+  assert "Continue" in fallback, "the frame must be skipped rather than the process dying"
+  # Still die for a model that is genuinely broken rather than looping forever.
+  assert "Raise" in fallback
+  assert modeld.MAX_CONSECUTIVE_MODEL_FAILURES <= modeld.ModelConstants.MODEL_FREQ * 2
 
 
 def test_chestnut_telemetry_is_suppressed_while_a_background_load_runs():

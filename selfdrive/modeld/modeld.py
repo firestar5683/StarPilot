@@ -119,6 +119,11 @@ BIG_MODEL_LOADER_CORES = {0, 1, 2, 3}
 # forever while the small model quietly keeps driving.
 BIG_MODEL_LOAD_TIMEOUT_SECONDS = 150.0
 
+# A transient GPU queue wedge should cost frames, not the process: restarting modeld blinds
+# openpilot for ~35 s. Keep dying available for a model that is genuinely broken, though --
+# at 20 Hz this is a second of continuous failure.
+MAX_CONSECUTIVE_MODEL_FAILURES = 20
+
 
 class BigModelLoadCancelled(Exception):
   """Raised inside the background loader when modeld no longer wants the big model."""
@@ -962,6 +967,11 @@ class BigModelLoader:
       if self._cancel.is_set():
         raise BigModelLoadCancelled("cancelled before the external GPU link check")
       wait_usbgpu_link()
+      # Transferring weights over USB legitimately outlasts the run-time watchdog, so raise
+      # it for the load and put it back in the finally below. This is process-global and
+      # shared with QCOM, so the window is kept as short as possible: leaving it at 30 s
+      # meant a wedged *small* model took 30 s to fail instead of 3 s.
+      _set_hcq_wait_timeout(BIG_MODEL_LOAD_WAIT_TIMEOUT_MS)
       candidate = ModelState(
         self.cam_w,
         self.cam_h,
@@ -991,7 +1001,9 @@ class BigModelLoader:
       with self._lock:
         self._error = str(exc) or exc.__class__.__name__
     finally:
-      # tinygrad's disk cache handle is thread-local, so this closes only the loader's.
+      # Restore the short watchdog so a wedged small model fails fast for the rest of the
+      # drive, and close this thread's tinygrad disk cache handle (it is thread-local).
+      _set_hcq_wait_timeout(BIG_MODEL_RUN_WAIT_TIMEOUT_MS)
       _close_tinygrad_disk_cache_connection()
 
 
@@ -1170,12 +1182,6 @@ def main(demo=False):
   external_artifact = MODELS_PATH / f"{big_model_id}_driving_tinygrad.pkl"
   external_artifact_ready = external_model_selected and file_chunked_exists(external_artifact)
   external_gpu_requested = usbgpu_present_now and (bool(big_model_id) or model_lab_ready)
-  # The big model is loaded in the background while the small model drives, so the HCQ
-  # watchdog is set once here and never mutated again: it is process-global and shared by
-  # the QCOM and AMD devices, so changing it mid-drive would also move the small model's.
-  if external_gpu_requested:
-    _set_hcq_wait_timeout(BIG_MODEL_LOAD_WAIT_TIMEOUT_MS)
-
   params.put_bool("UsbGpuPresent", usbgpu_present_now)
   params.put_bool("UsbGpuCompiled", external_artifact_ready or model_lab_ready)
   params.put_bool("UsbGpuActive", False)
@@ -1324,6 +1330,7 @@ def main(demo=False):
   frame_id = 0
   last_vipc_frame_id = 0
   run_count = 0
+  consecutive_model_failures = 0
 
   model_transform_main = np.zeros((3, 3), dtype=np.float32)
   model_transform_extra = np.zeros((3, 3), dtype=np.float32)
@@ -1600,12 +1607,24 @@ def main(demo=False):
           config=model_lab_config,
           error=model_lab_error,
         )
-      else:
-        if not external_gpu_active or small_model is None:
-          raise
+      elif external_gpu_active and small_model is not None:
         cloudlog.exception("external GPU model failed, falling back to active small model")
         model = small_model
         big_model = None
+      else:
+        # Already on the small model, so there is nothing to fall back to. A GPU queue can
+        # wedge transiently (measured: a QCOM timeline timeout while a background load was
+        # warming up), and dying here costs ~35 s of restart during which nothing can
+        # engage. Drop the frame and let the next one retry instead.
+        cloudlog.exception("model inference failed; dropping this frame and retrying")
+        consecutive_model_failures += 1
+        if consecutive_model_failures > MAX_CONSECUTIVE_MODEL_FAILURES:
+          raise
+        # Nothing changed models, so leave the runtime state alone and just skip this frame.
+        # Keep the frame bookkeeping up to date or the next frame is counted as a drop too.
+        last_vipc_frame_id = meta_main.frame_id
+        model_output = None
+        continue
       # A failed big model is not retried in this drive, so stop any load still in flight.
       if big_loader is not None:
         big_loader.cancel()
@@ -1621,6 +1640,8 @@ def main(demo=False):
         chestnut_state.big = False
       run_count = 0
       model_output = None
+    else:
+      consecutive_model_failures = 0
 
     mt2 = time.perf_counter()
     model_execution_time = mt2 - mt1
