@@ -55,6 +55,16 @@ class GnssHealth:
 
   def _update(self) -> None:
     sm = ui_state.sm
+
+    # qcomgpsd publishes gpsLocation; gpsLocationExternal is only used by ublox/car-GPS devices,
+    # so checking that socket alone leaves hasFix stuck False on this hardware.
+    for service in ("gpsLocation", "gpsLocationExternal"):
+      if sm.valid.get(service, False) and sm.recv_frame[service] > 0:
+        self._has_fix = sm[service].hasFix
+        break
+
+    # qcomGnss multiplexes measurement/drMeasurement/svPoly, so only act on the variant that
+    # carries per-satellite status rather than returning early on the others.
     if not sm.valid.get("qcomGnss", False):
       return
 
@@ -76,9 +86,6 @@ class GnssHealth:
       self._sat_time_pct = 100.0 * known / len(svs)
       noise = [sv.carrierNoise for sv in svs if sv.carrierNoise > 0]
       self._cno = sum(noise) / len(noise) if noise else 0.0
-
-    if sm.valid.get("gpsLocationExternal", False):
-      self._has_fix = sm["gpsLocationExternal"].hasFix
 
   def render(self, bounds: rl.Rectangle) -> None:
     self._update()

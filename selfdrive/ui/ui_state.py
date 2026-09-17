@@ -64,6 +64,7 @@ class UIState:
         "selfdriveState",
         "longitudinalPlan",
         "gpsLocationExternal",
+        "gpsLocation",
         "qcomGnss",
         "mapdOut",
         "carOutput",
