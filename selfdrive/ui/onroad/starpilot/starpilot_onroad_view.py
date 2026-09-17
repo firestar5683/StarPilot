@@ -16,6 +16,7 @@ from openpilot.selfdrive.ui.onroad.starpilot.stopping_point import render_stoppi
 from openpilot.selfdrive.ui.onroad.starpilot.pause_indicators import render_lateral_paused, render_longitudinal_paused
 from openpilot.selfdrive.ui.onroad.starpilot.pulse_glide import get_pulse_glide_border_color, render_pulse_glide
 from openpilot.selfdrive.ui.onroad.starpilot.pip_sidecam import PipSideCamera
+from openpilot.selfdrive.ui.onroad.starpilot.gnss_health import GnssHealth
 from openpilot.selfdrive.ui.onroad.starpilot.favorite_radial_menu import FavoriteRadialMenu
 from openpilot.selfdrive.ui.onroad.starpilot.weather_icon import render_weather_icon
 from openpilot.selfdrive.ui.lib.starpilot_status import (
@@ -49,6 +50,7 @@ class StarPilotOnroadView(AugmentedRoadView):
     self._avg_fps = 0.0
 
     self._pip_sidecam = self._child(PipSideCamera())
+    self._gnss_health = GnssHealth()
     self._favorite_radial_menu = FavoriteRadialMenu(
       ui_state.ui_params,
       ui_state.params_memory,
@@ -142,6 +144,10 @@ class StarPilotOnroadView(AugmentedRoadView):
         self._render_road_name()
 
       self._pip_sidecam.render(self._content_rect)
+
+      # Always on: this is a temporary instrument for the eGPU RF-desense testing, and gating it
+      # behind a param would mean registering a new key in params_keys.h, which needs a rebuild.
+      self._gnss_health.render(self._content_rect)
 
       # The picker is an app-drawer modal, so it intentionally draws above
       # PiP and other on-road overlays while active.
