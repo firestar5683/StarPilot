@@ -44,8 +44,11 @@ class TrainingGuide(Widget):
     self._load_image_paths()
 
     # Load first image now so we show something immediately
-    self._textures = [gui_app.texture(self._image_paths[0])]
+    self._textures = [gui_app._load_texture_from_image(gui_app._load_image_from_path(self._image_paths[0]))]
     self._image_objs = []
+
+    self._released = False
+    self._lock = threading.Lock()
 
     threading.Thread(target=self._preload_thread, daemon=True).start()
 
@@ -58,7 +61,24 @@ class TrainingGuide(Widget):
     # PNG loading is slow in raylib, so we preload in a thread and upload to GPU in main thread
     # We've already loaded the first image on init
     for path in self._image_paths[1:]:
-      self._image_objs.append(gui_app._load_image_from_path(path))
+      image = gui_app._load_image_from_path(path)
+      with self._lock:
+        if self._released:
+          rl.unload_image(image)
+          return
+        self._image_objs.append(image)
+
+  def release(self):
+    # Unload all GPU textures and any pending CPU images held by this guide
+    with self._lock:
+      self._released = True
+      textures, self._textures = self._textures, []
+      images, self._image_objs = self._image_objs, []
+
+    for texture in textures:
+      rl.unload_texture(texture)
+    for image in images:
+      rl.unload_image(image)
 
   def _handle_mouse_release(self, mouse_pos):
     if rl.check_collision_point_rec(mouse_pos, STEP_RECTS[self._step]):
@@ -82,10 +102,15 @@ class TrainingGuide(Widget):
           self._completed_callback()
 
   def _update_state(self):
+    if self._released:
+      return
     if len(self._image_objs):
       self._textures.append(gui_app._load_texture_from_image(self._image_objs.pop(0)))
 
   def _render(self, _):
+    if not self._textures:
+      return -1
+
     # Safeguard against fast tapping
     step = min(self._step, len(self._textures) - 1)
     rl.draw_texture(self._textures[step], 0, 0, rl.WHITE)
@@ -183,6 +208,14 @@ class OnboardingWindow(Widget):
   @property
   def completed(self) -> bool:
     return self._accepted_terms and self._training_done
+
+  def hide_event(self):
+    # Free the training textures once onboarding is popped so they are not
+    # retained for the lifetime of the UI process
+    if self._training_guide is not None:
+      self._training_guide.release()
+      self._training_guide = None
+    super().hide_event()
 
   def _on_terms_declined(self):
     self._state = OnboardingState.DECLINE
