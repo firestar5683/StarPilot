@@ -2,6 +2,8 @@ from types import SimpleNamespace
 
 import pytest
 
+from cereal import log
+
 from opendbc.car.chrysler.values import CAR as CHRYSLER_CAR
 
 from openpilot.common.params import ParamKeyType
@@ -52,6 +54,10 @@ class FakeSM(dict):
   def __init__(self, *args, updated=None, **kwargs):
     super().__init__(*args, **kwargs)
     self.updated = updated or {}
+    self.valid = dict.fromkeys(self, True)
+
+  def all_checks(self, services):
+    return all(self.valid[s] for s in services)
 
 
 def make_sm():
@@ -60,7 +66,7 @@ def make_sm():
     "selfdriveState": SimpleNamespace(active=False, alertType=[], experimentalMode=False),
     "starpilotSelfdriveState": SimpleNamespace(alertType=[]),
     "starpilotPlan": SimpleNamespace(lateralCheck=True),
-    "liveCalibration": SimpleNamespace(calPerc=100),
+    "liveCalibration": SimpleNamespace(calPerc=100, calStatus=log.LiveCalibrationData.Status.calibrated),
   }, updated={"starpilotPlan": False})
 
 
@@ -1378,3 +1384,91 @@ def test_favorite_traffic_mode_action_is_consumed_when_not_active(monkeypatch, t
 
   assert card.traffic_mode_enabled is False
   assert card._favorite_traffic_mode_counter == 1
+
+
+@pytest.mark.parametrize(("status", "valid"), [
+  (log.LiveCalibrationData.Status.uncalibrated, True),
+  (log.LiveCalibrationData.Status.calibrated, False),
+])
+def test_aol_requires_completed_healthy_calibration(monkeypatch, tmp_path, status, valid):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+  card = spc.StarPilotCard(SimpleNamespace(brand="honda"),
+                           SimpleNamespace(alternativeExperience=spc.ALTERNATIVE_EXPERIENCE.ALWAYS_ON_LATERAL))
+  sm = make_sm()
+  toggles = make_toggles(always_on_lateral=True, always_on_lateral_lkas=True, lkas_allowed_for_aol=True)
+  cs = make_car_state(button_events=[SimpleNamespace(type=spc.ButtonType.lkas, pressed=True)])
+  fcs = SimpleNamespace(distancePressed=False)
+  sm["liveCalibration"].calStatus = status
+  # A reported 100% must not substitute for a completed, healthy calibration.
+  sm.valid["liveCalibration"] = valid
+  result = card.update(cs, fcs, sm, toggles)
+  assert not result.alwaysOnLateralAllowed and not result.alwaysOnLateralEnabled
+
+  sm["liveCalibration"].calStatus = log.LiveCalibrationData.Status.calibrated
+  sm.valid["liveCalibration"] = True
+  cs.buttonEvents = []
+  assert not card.update(cs, fcs, sm, toggles).alwaysOnLateralEnabled
+  cs.buttonEvents = [SimpleNamespace(type=spc.ButtonType.lkas, pressed=True)]
+  assert card.update(cs, fcs, sm, toggles).alwaysOnLateralEnabled
+
+
+@pytest.mark.parametrize("source", ["main", "controller", "availability", "engagement", "forte", "pacifica", "g70"])
+def test_aol_calibration_loss_requires_fresh_request(monkeypatch, tmp_path, source):
+  monkeypatch.setattr(spc, "Params", FakeParams)
+  monkeypatch.setattr(spc, "ERROR_LOGS_PATH", tmp_path)
+  cp = SimpleNamespace(brand="honda")
+  options = dict(always_on_lateral=True, lkas_allowed_for_aol=True)
+  if source in ("main", "g70", "forte"):
+    options["main_cruise_aol_toggle"] = True
+  elif source == "engagement":
+    options["always_on_lateral_lkas"] = True
+  elif source in ("availability", "pacifica"):
+    options["always_on_lateral_main"] = True
+  if source == "g70":
+    cp = SimpleNamespace(brand="hyundai", carFingerprint=spc.HYUNDAI_CAR.GENESIS_G70_2020)
+  elif source == "forte":
+    cp = SimpleNamespace(brand="hyundai", carFingerprint=spc.HYUNDAI_CAR.KIA_FORTE_2021_NON_SCC, flags=spc.HyundaiFlags.NON_SCC)
+  elif source == "pacifica":
+    cp = SimpleNamespace(brand="chrysler", carFingerprint=CHRYSLER_CAR.CHRYSLER_PACIFICA_2019_HYBRID, pcmCruise=True)
+  card = spc.StarPilotCard(cp, SimpleNamespace(alternativeExperience=spc.ALTERNATIVE_EXPERIENCE.ALWAYS_ON_LATERAL))
+  sm, cs, fcs = make_sm(), make_car_state(), SimpleNamespace(distancePressed=False)
+  toggles = make_toggles(**options)
+  counter = spc.CONTROLLER_ACTION_COUNTERS[spc.CONTROLLER_ACTION_TOGGLE_AOL]
+
+  def request():
+    # Release old states so each request supplies a fresh action/edge.
+    cs.cruiseState.available = cs.cruiseState.enabled = False
+    sm["selfdriveState"].active = False
+    card.update(cs, fcs, sm, toggles)
+    if source in ("main", "g70"):
+      cs.buttonEvents = [SimpleNamespace(type=spc.ButtonType.mainCruise, pressed=True)]
+    elif source == "controller":
+      card.params_memory.put_int(counter, card.params_memory.get_int(counter) + 1)
+    elif source == "engagement":
+      sm["selfdriveState"].active = True
+    else:
+      cs.cruiseState.available = True
+      cs.cruiseState.enabled = source == "pacifica"
+    card.update(cs, fcs, sm, toggles)
+    cs.buttonEvents = []
+    if source == "g70":
+      cs.cruiseState.available = True
+    # Controller actions are applied after enabled-state calculation.
+    return card.update(cs, fcs, sm, toggles)
+
+  card.update(cs, fcs, sm, toggles)
+  sm["liveCalibration"].calStatus = log.LiveCalibrationData.Status.uncalibrated
+  sm["liveCalibration"].calPerc = 0
+  assert not request().alwaysOnLateralEnabled
+  sm["liveCalibration"].calStatus = log.LiveCalibrationData.Status.calibrated
+  sm["liveCalibration"].calPerc = 100
+  assert not card.update(cs, fcs, sm, toggles).alwaysOnLateralEnabled
+
+  assert request().alwaysOnLateralEnabled
+  sm.valid["liveCalibration"] = False
+  result = card.update(cs, fcs, sm, toggles)
+  assert not result.alwaysOnLateralAllowed and not result.alwaysOnLateralEnabled
+  sm.valid["liveCalibration"] = True
+  assert not card.update(cs, fcs, sm, toggles).alwaysOnLateralEnabled
+  assert request().alwaysOnLateralEnabled
