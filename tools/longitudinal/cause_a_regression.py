@@ -283,7 +283,7 @@ def discover_t0004(output_root: Path) -> Episode | None:
     if end < lo or start > hi:
       continue
     frame = rows[s:e + 1]
-    low_prob = any((fnum(r.get("modelGasPressProb1"), 1.0) or 1.0) <= MODEL_DISABLE_THRESHOLD for r in frame)
+    low_prob = any(finite(r.get("modelGasPressProb1")) and float(r["modelGasPressProb1"]) <= MODEL_DISABLE_THRESHOLD for r in frame)
     clean_ratio = sum(clean_context(r) for r in frame) / max(len(frame), 1)
     coast_ratio = sum(coast_match(r) for r in frame) / max(len(frame), 1)
     demand_ratio = sum(positive_demand(r) for r in frame) / max(len(frame), 1)
