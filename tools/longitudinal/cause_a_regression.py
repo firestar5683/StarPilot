@@ -613,7 +613,8 @@ def build_global_variant_impact(output_root: Path, episode_map: dict[str, Episod
     })
 
   non_positive = [r for r in rows_out if not r["selected_positive_case"]]
-  protected = [r for r in non_positive if r["context"] in {"explicit_starpilot_gate", "lead_stop_brake_context", "red_light_only_context"}]
+  hard_protected = [r for r in non_positive if r["context"] in {"explicit_starpilot_gate", "lead_stop_brake_context"}]
+  redlight_observed = [r for r in non_positive if r["context"] == "red_light_only_context"]
 
   def changed_count(rows: list[dict[str, Any]], key: str) -> int:
     return sum(1 for r in rows if abs(float(r[key])) > 1e-6)
@@ -622,16 +623,22 @@ def build_global_variant_impact(output_root: Path, episode_map: dict[str, Episod
     "episodes_analyzed": len(rows_out),
     "positive_cases_present": sum(1 for r in rows_out if r["selected_positive_case"]),
     "non_positive_episodes": len(non_positive),
-    "protected_context_episodes": len(protected),
+    "hard_protected_context_episodes": len(hard_protected),
+    "redlight_observed_inactive_context_episodes": len(redlight_observed),
     "non_positive_changed": {
       "confirm_500ms": changed_count(non_positive, "confirm_500ms_delta_s"),
       "confirm_750ms": changed_count(non_positive, "confirm_750ms_delta_s"),
       "ce_off_positive_demand_bypass_250ms": changed_count(non_positive, "ce_off_bypass_delta_s"),
     },
-    "protected_context_changed": {
-      "confirm_500ms": changed_count(protected, "confirm_500ms_delta_s"),
-      "confirm_750ms": changed_count(protected, "confirm_750ms_delta_s"),
-      "ce_off_positive_demand_bypass_250ms": changed_count(protected, "ce_off_bypass_delta_s"),
+    "hard_protected_context_changed": {
+      "confirm_500ms": changed_count(hard_protected, "confirm_500ms_delta_s"),
+      "confirm_750ms": changed_count(hard_protected, "confirm_750ms_delta_s"),
+      "ce_off_positive_demand_bypass_250ms": changed_count(hard_protected, "ce_off_bypass_delta_s"),
+    },
+    "inactive_redlight_context_changed": {
+      "confirm_500ms": changed_count(redlight_observed, "confirm_500ms_delta_s"),
+      "confirm_750ms": changed_count(redlight_observed, "confirm_750ms_delta_s"),
+      "ce_off_positive_demand_bypass_250ms": changed_count(redlight_observed, "ce_off_bypass_delta_s"),
     },
     "note": (
       "A changed protected-context duration is a review flag, not proof of an unsafe patch; "
@@ -1076,14 +1083,16 @@ def main() -> int:
     case_results = [r for r in variants if r["case_id"] == cid]
     if case_results:
       lines.append("  " + cid + ": " + ", ".join(
-        f"{r['variant']}={r['clean_false_coast_seconds']:.3f}s" for r in case_results
+        f"{r['variant']}={r['core_false_coast_seconds']:.3f}s" for r in case_results
       ))
   lines += [
     "",
     "Global impact:",
     f"  episodes analyzed={global_summary.get('episodes_analyzed', 0)}",
     f"  non-positive changed @500ms={global_summary.get('non_positive_changed', {}).get('confirm_500ms', 'n/a')}",
-    f"  protected-context changed @500ms={global_summary.get('protected_context_changed', {}).get('confirm_500ms', 'n/a')}",
+    f"  hard-protected changed @500ms={global_summary.get('hard_protected_context_changed', {}).get('confirm_500ms', 'n/a')}",
+    f"  hard-protected changed @CE-off bypass={global_summary.get('hard_protected_context_changed', {}).get('ce_off_positive_demand_bypass_250ms', 'n/a')}",
+    f"  inactive-redLight changed @CE-off bypass={global_summary.get('inactive_redlight_context_changed', {}).get('ce_off_positive_demand_bypass_250ms', 'n/a')}",
     "",
     "Red-light cross-tab:",
     f"  active frames={redlight_cross_tab.get('frames_active', 0)}",
