@@ -68,6 +68,8 @@ class VariantResult:
   effective_gate_false_frames: int
   clean_false_coast_frames: int
   clean_false_coast_seconds: float
+  core_false_coast_frames: int
+  core_false_coast_seconds: float
   bypass_frames: int
 
 
@@ -433,6 +435,7 @@ def simulate_variant(rows: list[dict[str, str]], ep: Episode, name: str, confirm
   model_false = 0
   effective_false = 0
   clean_false = 0
+  core_false = 0
   bypass_frames = 0
 
   for row in rows:
@@ -461,8 +464,11 @@ def simulate_variant(rows: list[dict[str, str]], ep: Episode, name: str, confirm
     bypass = False
     if contextual_bypass and not model_effective and not bval(row.get("spDisableThrottle")):
       gap = speed_gap_kph(row)
+      # Today's diagnostic routes had Experimental/CEM/CCM/CEStopLights disabled.
+      # spRedLight can still be published by StarPilot's internal detector in that
+      # configuration, so do not treat it as an active control veto here.
       bypass = bool(
-        clean_context(row) and positive_demand(row) and
+        core_context_without_redlight(row) and positive_demand(row) and
         gap is not None and gap >= CLEAN_SPEED_GAP_KPH
       )
       if bypass:
@@ -478,6 +484,12 @@ def simulate_variant(rows: list[dict[str, str]], ep: Episode, name: str, confirm
     ):
       clean_false += 1
 
+    if (
+      not effective and core_context_without_redlight(row) and positive_demand(row) and
+      coast_match(row)
+    ):
+      core_false += 1
+
   return VariantResult(
     case_id=ep.case_id,
     variant=name,
@@ -485,6 +497,8 @@ def simulate_variant(rows: list[dict[str, str]], ep: Episode, name: str, confirm
     effective_gate_false_frames=effective_false,
     clean_false_coast_frames=clean_false,
     clean_false_coast_seconds=round(clean_false * step, 3),
+    core_false_coast_frames=core_false,
+    core_false_coast_seconds=round(core_false * step, 3),
     bypass_frames=bypass_frames,
   )
 
@@ -563,7 +577,7 @@ def build_global_variant_impact(output_root: Path, episode_map: dict[str, Episod
       ("baseline_250ms", 0.25, False),
       ("confirm_500ms", 0.50, False),
       ("confirm_750ms", 0.75, False),
-      ("context_bypass_250ms", 0.25, True),
+      ("ce_off_positive_demand_bypass_250ms", 0.25, True),
     ):
       r = simulate_variant(window, ep, name, confirm_s, contextual_bypass=bypass)
       results[name] = r
@@ -575,7 +589,7 @@ def build_global_variant_impact(output_root: Path, episode_map: dict[str, Episod
     base_s = seconds("baseline_250ms")
     c500_s = seconds("confirm_500ms")
     c750_s = seconds("confirm_750ms")
-    bypass_s = seconds("context_bypass_250ms")
+    bypass_s = seconds("ce_off_positive_demand_bypass_250ms")
 
     rows_out.append({
       "episode_id": episode_id,
@@ -587,14 +601,15 @@ def build_global_variant_impact(output_root: Path, episode_map: dict[str, Episod
       "baseline_false_s": base_s,
       "confirm_500ms_false_s": c500_s,
       "confirm_750ms_false_s": c750_s,
-      "context_bypass_false_s": bypass_s,
+      "ce_off_bypass_false_s": bypass_s,
       "confirm_500ms_delta_s": round(c500_s - base_s, 3),
       "confirm_750ms_delta_s": round(c750_s - base_s, 3),
-      "context_bypass_delta_s": round(bypass_s - base_s, 3),
+      "ce_off_bypass_delta_s": round(bypass_s - base_s, 3),
       "baseline_clean_false_coast_s": baseline.clean_false_coast_seconds,
       "confirm_500ms_clean_false_coast_s": results["confirm_500ms"].clean_false_coast_seconds,
       "confirm_750ms_clean_false_coast_s": results["confirm_750ms"].clean_false_coast_seconds,
-      "context_bypass_clean_false_coast_s": results["context_bypass_250ms"].clean_false_coast_seconds,
+      "ce_off_bypass_clean_false_coast_s": results["ce_off_positive_demand_bypass_250ms"].clean_false_coast_seconds,
+      "ce_off_bypass_core_false_coast_s": results["ce_off_positive_demand_bypass_250ms"].core_false_coast_seconds,
     })
 
   non_positive = [r for r in rows_out if not r["selected_positive_case"]]
@@ -611,12 +626,12 @@ def build_global_variant_impact(output_root: Path, episode_map: dict[str, Episod
     "non_positive_changed": {
       "confirm_500ms": changed_count(non_positive, "confirm_500ms_delta_s"),
       "confirm_750ms": changed_count(non_positive, "confirm_750ms_delta_s"),
-      "context_bypass_250ms": changed_count(non_positive, "context_bypass_delta_s"),
+      "ce_off_positive_demand_bypass_250ms": changed_count(non_positive, "ce_off_bypass_delta_s"),
     },
     "protected_context_changed": {
       "confirm_500ms": changed_count(protected, "confirm_500ms_delta_s"),
       "confirm_750ms": changed_count(protected, "confirm_750ms_delta_s"),
-      "context_bypass_250ms": changed_count(protected, "context_bypass_delta_s"),
+      "ce_off_positive_demand_bypass_250ms": changed_count(protected, "ce_off_bypass_delta_s"),
     },
     "note": (
       "A changed protected-context duration is a review flag, not proof of an unsafe patch; "
@@ -914,7 +929,7 @@ def criteria() -> dict[str, Any]:
       "baseline_250ms": {"confirm_s": 0.25},
       "confirm_500ms": {"confirm_s": 0.50},
       "confirm_750ms": {"confirm_s": 0.75},
-      "context_bypass_250ms": {
+      "ce_off_positive_demand_bypass_250ms": {
         "confirm_s": 0.25,
         "speed_gap_kph_gte": CLEAN_SPEED_GAP_KPH,
         "positive_demand_mps2_gt": POSITIVE_DEMAND_MPS2,
@@ -978,7 +993,7 @@ def main() -> int:
       ("baseline_250ms", 0.25, False),
       ("confirm_500ms", 0.50, False),
       ("confirm_750ms", 0.75, False),
-      ("context_bypass_250ms", 0.25, True),
+      ("ce_off_positive_demand_bypass_250ms", 0.25, True),
     ):
       result = simulate_variant(window, ep, name, confirm_s, contextual_bypass=bypass)
       variants.append(asdict(result))
