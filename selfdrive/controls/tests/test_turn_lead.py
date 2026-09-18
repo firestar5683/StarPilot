@@ -15,6 +15,7 @@ from openpilot.selfdrive.controls.controlsd import (
   turn_lead_allowed,
   update_twitch_guard,
 )
+from openpilot.selfdrive.modeld.modeld import get_model_lateral_smooth_seconds
 
 
 LateralControlMode = car.CarControl.Actuators.LateralControlMode
@@ -55,6 +56,22 @@ def test_non_rivian_control_smoothing_matches_starpilot(v_ego):
 ])
 def test_subaru_control_smoothing_uses_vehicle_schedule(v_ego, expected):
   assert get_control_lateral_smooth_seconds("subaru", v_ego, 0.4) == pytest.approx(expected)
+
+
+@pytest.mark.parametrize(("v_ego", "vehicle_smooth_seconds", "expected"), [
+  (0.0, 0.0, 0.1),
+  (5.0, 0.0, 0.1),
+  (30.0, 0.0, 0.1),
+  (0.0, 0.4, 0.4),
+  (5.0, 0.4, 0.2),
+  (30.0, 0.4, 0.0),
+])
+def test_subaru_model_and_control_smoothing_agree(v_ego, vehicle_smooth_seconds, expected):
+  CP = types.SimpleNamespace(brand="subaru", lateralSmoothSeconds=vehicle_smooth_seconds)
+  params = types.SimpleNamespace(get_bool=lambda key: False)
+
+  assert get_model_lateral_smooth_seconds(params, CP, v_ego) == pytest.approx(expected)
+  assert get_control_lateral_smooth_seconds(CP.brand, v_ego, CP.lateralSmoothSeconds) == pytest.approx(expected)
 
 
 @pytest.mark.parametrize(("v_ego", "expected"), [

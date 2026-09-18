@@ -210,6 +210,15 @@ def get_car_lateral_smooth_seconds(brand: str, v_ego: float, maximum: float) -> 
   return maximum
 
 
+def get_model_lateral_smooth_seconds(params, CP, v_ego: float) -> float:
+  default = CP.lateralSmoothSeconds if (CP.brand == "rivian" or CP.lateralSmoothSeconds > 0.0) else LAT_SMOOTH_SECONDS
+  maximum = _model_smooth_seconds(params, "LatSmoothSeconds", default)
+  # Keep this smoothing because the torque controller includes its delay.
+  if CP.brand == "subaru" and CP.lateralSmoothSeconds <= 0.0:
+    return maximum
+  return get_car_lateral_smooth_seconds(CP.brand, v_ego, maximum)
+
+
 class ChestnutState:
   """Publish bounded external-GPU and ASM2464 telemetry from modeld."""
 
@@ -1277,9 +1286,7 @@ def main(demo=False):
     is_rhd = sm["driverMonitoringState"].isRHD
     frame_id = sm["roadCameraState"].frameId
     v_ego = max(sm["carState"].vEgo, 0.)
-    lat_smooth_default = CP.lateralSmoothSeconds if (CP.brand == "rivian" or CP.lateralSmoothSeconds > 0.0) else LAT_SMOOTH_SECONDS
-    lat_smooth_maximum = _model_smooth_seconds(params, "LatSmoothSeconds", lat_smooth_default)
-    lat_smooth_seconds = get_car_lateral_smooth_seconds(CP.brand, v_ego, lat_smooth_maximum)
+    lat_smooth_seconds = get_model_lateral_smooth_seconds(params, CP, v_ego)
     lat_delay = sm["liveDelay"].lateralDelay + lat_smooth_seconds
     lateral_control_params = np.array([v_ego, lat_delay], dtype=np.float32)
     if sm.frame % 60 == 0:
