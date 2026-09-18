@@ -45,6 +45,8 @@ D:\OpenPilot\Output\Regression\A\
   manifest.json
   criteria.json
   variant_summary.csv
+  global_variant_impact.csv
+  global_variant_summary.json
   summary.txt
   T0004\timeline.csv
   T0008\timeline.csv
@@ -68,6 +70,11 @@ The harness compares:
   model gate only for clean below-target positive-demand frames.
 
 No policy is selected merely because it fixes the six positive cases.
+
+The global impact files also replay every checkpoint episode available in the
+episode table and classify non-positive controls, including explicit StarPilot
+gates and lead/stop/brake contexts. They quantify how much each candidate would
+change gate-closed duration outside Dataset A.
 
 ## Regression criteria
 
