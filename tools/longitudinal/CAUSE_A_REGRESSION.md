@@ -48,6 +48,10 @@ D:\OpenPilot\Output\Regression\A\
   global_variant_impact.csv
   global_variant_summary.json
   redlight_cross_tab.json
+  strict_cause_a_summary.json
+  strict_cause_a_frames.csv
+  strict_cause_a_episodes.csv
+  redlight_confounded_cause_a_episodes.csv
   summary.txt
   T0004\timeline.csv
   T0008\timeline.csv
@@ -107,3 +111,26 @@ reports two signatures:
 active timeline frame. A patch to the throttle gate must not be selected until
 this confounder is resolved, since delaying throttle suppression during a true
 stop-light approach could be unsafe.
+
+
+## Strict Cause-A discovery
+
+After the red-light cross-tab, the harness also searches every extracted active
+timeline for the full observable Cause-A signature with `redLight=False`:
+
+- `allowThrottle=False`
+- no brake, lead, shouldStop, forcingStop, disableThrottle, pulse-glide, or tracking-lead context
+- `gasPressProb[1] <= 0.35`
+- `aTarget` within 0.08 m/s² of physical coast acceleration
+- positive cruise-demand evidence
+
+Outputs:
+
+- `strict_cause_a_frames.csv`
+- `strict_cause_a_episodes.csv`
+- `strict_cause_a_summary.json`
+
+If `strict_episodes > 0`, the observable Cause-A mechanism occurs independently
+of the CEM red-light flag. If it is zero, the current positive set remains
+red-light-confounded and the next diagnostic target is the CEM/throttle
+interaction rather than the model throttle gate alone.
