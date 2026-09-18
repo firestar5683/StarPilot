@@ -1092,7 +1092,7 @@ def main() -> int:
       f"event={row.get('event_start_s', '-')}->{row.get('event_end_s', '-')} "
       f"signature={row.get('baseline_signature_pass', '-')}"
     )
-  lines += ["", "Variant clean false-coast seconds:"]
+  lines += ["", "Variant CE-off core false-coast seconds:"]
   for cid in CASE_IDS:
     case_results = [r for r in variants if r["case_id"] == cid]
     if case_results:
@@ -1124,8 +1124,8 @@ def main() -> int:
     f"  strict -> redLight within 2.0s={strict_summary['strict_followed_by_redlight_within_2_0s']}",
     f"  strict isolated >2.0s={strict_summary['strict_isolated_from_redlight_over_2_0s']}",
     "",
-    "Final patch selection is intentionally blocked until negative-control regression",
-    "is reviewed against non-Cause-A lead/stop/brake/disableThrottle episodes.",
+    "Final patch selection is blocked until the CE-off bypass is reviewed against",
+    "hard-protected lead/stop/brake/disableThrottle episodes.",
   ]
   (dataset_dir / "summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
   print("\n".join(lines))
