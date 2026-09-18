@@ -157,7 +157,7 @@ class MapsDownloadState:
 
 
 class MapsManagerView(PanelManagerView):
-  METRICS = MAPS_METRICS
+  METRICS = replace(MAPS_METRICS, header_height=FIXED_HEADER_HEIGHT)
   PANEL_STYLE = PANEL_STYLE
 
   def __init__(self, controller: StarPilotMapsLayout):
@@ -175,9 +175,6 @@ class MapsManagerView(PanelManagerView):
       )
     )
 
-  def _draw_header(self, rect: rl.Rectangle):
-    pass
-
   def _measure_content_height(self, content_width: float) -> float:
     downloaded, downloadable = self._controller._browse_regions_for_active_view()
     total_rows = len(downloaded) + len(downloadable)
@@ -188,7 +185,13 @@ class MapsManagerView(PanelManagerView):
       h += BROWSER_SECTION_HEADER_HEIGHT + 16.0
     return h
 
-  def _draw_static_elements(self, scroll_rect: rl.Rectangle, content_width: float):
+  def _target_at(self, mouse_pos):
+    if rl.check_collision_point_rec(mouse_pos, self._remove_rect):
+      return "action:remove_maps"
+    return super()._target_at(mouse_pos)
+
+  def _draw_header(self, scroll_rect: rl.Rectangle):
+    content_width = scroll_rect.width
     # 1. Pinned Status Card
     status_rect = rl.Rectangle(scroll_rect.x, scroll_rect.y, content_width, STATUS_CARD_HEIGHT)
     self._draw_status_card(status_rect)
@@ -210,8 +213,8 @@ class MapsManagerView(PanelManagerView):
     )
 
   def _draw_scroll_content(self, scroll_rect: rl.Rectangle, content_width: float):
-    rows_top_y = scroll_rect.y + FIXED_HEADER_HEIGHT
-    rows_visible_h = max(100.0, scroll_rect.height - FIXED_HEADER_HEIGHT)
+    rows_top_y = scroll_rect.y
+    rows_visible_h = scroll_rect.height
     rows_scissor_rect = rl.Rectangle(scroll_rect.x, rows_top_y, content_width, rows_visible_h)
 
     aether_begin_scissor_mode(
@@ -320,9 +323,6 @@ class MapsManagerView(PanelManagerView):
 
     aether_end_scissor_mode()
 
-    if self._content_height > rows_visible_h:
-      self._scrollbar.render(rows_scissor_rect, self._content_height, self._scroll_offset)
-
   def _draw_status_card(self, rect: rl.Rectangle):
     draw_list_group_shell(rect, style=PANEL_STYLE)
 
@@ -402,7 +402,8 @@ class MapsManagerView(PanelManagerView):
 
     self._remove_rect = rl.Rectangle(actions_x + sched_w + col_gap, bottom_y, remove_w, bottom_h)
     enabled = self._controller._remove_enabled()
-    hovered, pressed = self._interactive_state("action:remove_maps", self._remove_rect, pad_y=4)
+    hovered = rl.check_collision_point_rec(gui_app.last_mouse_event.pos, self._remove_rect)
+    pressed = self._pressed_target == "action:remove_maps"
 
     remove_bg = with_alpha(AetherListColors.DANGER_SOFT, 36 if (pressed or hovered) else (24 if enabled else 12))
     remove_border = with_alpha(AetherListColors.DANGER, 90 if (pressed or hovered) else (56 if enabled else 24))
