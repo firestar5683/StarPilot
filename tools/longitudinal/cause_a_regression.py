@@ -71,6 +71,9 @@ class VariantResult:
   core_false_coast_frames: int
   core_false_coast_seconds: float
   bypass_frames: int
+  hard_protected_bypass_frames: int
+  hard_protected_bypass_seconds: float
+  event_hard_protected_bypass_frames: int
 
 
 def finite(v: Any) -> bool:
@@ -222,8 +225,8 @@ def speed_gap_kph(row: dict[str, str]) -> float | None:
   return None
 
 
-def core_context_without_redlight(row: dict[str, str]) -> bool:
-  return not any((
+def hard_protected_frame(row: dict[str, str]) -> bool:
+  return any((
     bval(row.get("brakePressed")),
     bval(row.get("spDisableThrottle")),
     bval(row.get("spPulseGlideCoasting")),
@@ -232,7 +235,14 @@ def core_context_without_redlight(row: dict[str, str]) -> bool:
     bval(row.get("shouldStop")),
     bval(row.get("hasLead")),
     bval(row.get("leadOneStatus")),
+    bval(row.get("leadTwoStatus")),
+    bval(row.get("stopSignConfirmed")),
+    bval(row.get("spStopSignConfirmed")),
   ))
+
+
+def core_context_without_redlight(row: dict[str, str]) -> bool:
+  return not hard_protected_frame(row)
 
 
 def clean_context(row: dict[str, str]) -> bool:
@@ -437,6 +447,8 @@ def simulate_variant(rows: list[dict[str, str]], ep: Episode, name: str, confirm
   clean_false = 0
   core_false = 0
   bypass_frames = 0
+  hard_protected_bypass_frames = 0
+  event_hard_protected_bypass_frames = 0
 
   for row in rows:
     v_ego = fnum(row.get("vEgo"), 0.0) or 0.0
@@ -473,6 +485,11 @@ def simulate_variant(rows: list[dict[str, str]], ep: Episode, name: str, confirm
       )
       if bypass:
         bypass_frames += 1
+        if hard_protected_frame(row):
+          hard_protected_bypass_frames += 1
+          t = fnum(row.get("t_rel_s"))
+          if t is not None and ep.start_s <= t <= ep.end_s:
+            event_hard_protected_bypass_frames += 1
 
     effective = (model_effective or bypass) and not bval(row.get("spDisableThrottle"))
     if not effective:
@@ -500,6 +517,9 @@ def simulate_variant(rows: list[dict[str, str]], ep: Episode, name: str, confirm
     core_false_coast_frames=core_false,
     core_false_coast_seconds=round(core_false * step, 3),
     bypass_frames=bypass_frames,
+    hard_protected_bypass_frames=hard_protected_bypass_frames,
+    hard_protected_bypass_seconds=round(hard_protected_bypass_frames * step, 3),
+    event_hard_protected_bypass_frames=event_hard_protected_bypass_frames,
   )
 
 
@@ -610,6 +630,9 @@ def build_global_variant_impact(output_root: Path, episode_map: dict[str, Episod
       "confirm_750ms_clean_false_coast_s": results["confirm_750ms"].clean_false_coast_seconds,
       "ce_off_bypass_clean_false_coast_s": results["ce_off_positive_demand_bypass_250ms"].clean_false_coast_seconds,
       "ce_off_bypass_core_false_coast_s": results["ce_off_positive_demand_bypass_250ms"].core_false_coast_seconds,
+      "ce_off_bypass_hard_protected_frames": results["ce_off_positive_demand_bypass_250ms"].hard_protected_bypass_frames,
+      "ce_off_bypass_hard_protected_s": results["ce_off_positive_demand_bypass_250ms"].hard_protected_bypass_seconds,
+      "ce_off_bypass_event_hard_protected_frames": results["ce_off_positive_demand_bypass_250ms"].event_hard_protected_bypass_frames,
     })
 
   non_positive = [r for r in rows_out if not r["selected_positive_case"]]
@@ -639,6 +662,12 @@ def build_global_variant_impact(output_root: Path, episode_map: dict[str, Episod
       "confirm_500ms": changed_count(redlight_observed, "confirm_500ms_delta_s"),
       "confirm_750ms": changed_count(redlight_observed, "confirm_750ms_delta_s"),
       "ce_off_positive_demand_bypass_250ms": changed_count(redlight_observed, "ce_off_bypass_delta_s"),
+    },
+    "ce_off_bypass_frame_level_safety": {
+      "hard_protected_bypass_frames_total": sum(int(r.get("ce_off_bypass_hard_protected_frames", 0)) for r in rows_out),
+      "hard_protected_bypass_seconds_total": round(sum(float(r.get("ce_off_bypass_hard_protected_s", 0.0)) for r in rows_out), 3),
+      "event_hard_protected_bypass_frames_total": sum(int(r.get("ce_off_bypass_event_hard_protected_frames", 0)) for r in rows_out),
+      "pass": all(int(r.get("ce_off_bypass_hard_protected_frames", 0)) == 0 for r in rows_out),
     },
     "note": (
       "A changed protected-context duration is a review flag, not proof of an unsafe patch; "
@@ -944,6 +973,7 @@ def criteria() -> dict[str, Any]:
         "Force Stops or active CE stop-control behavior",
         "physical acceleration/deceleration limits",
       ],
+      "frame_level_safety_requirement": "hard_protected_bypass_frames_total == 0",
       "final_selection_requires_negative_controls": True,
     },
     "variants": {
@@ -1107,6 +1137,8 @@ def main() -> int:
     f"  hard-protected changed @500ms={global_summary.get('hard_protected_context_changed', {}).get('confirm_500ms', 'n/a')}",
     f"  hard-protected changed @CE-off bypass={global_summary.get('hard_protected_context_changed', {}).get('ce_off_positive_demand_bypass_250ms', 'n/a')}",
     f"  inactive-redLight changed @CE-off bypass={global_summary.get('inactive_redlight_context_changed', {}).get('ce_off_positive_demand_bypass_250ms', 'n/a')}",
+    f"  A3 protected bypass frames={global_summary.get('ce_off_bypass_frame_level_safety', {}).get('hard_protected_bypass_frames_total', 'n/a')}",
+    f"  A3 frame-level safety pass={global_summary.get('ce_off_bypass_frame_level_safety', {}).get('pass', 'n/a')}",
     "",
     "Red-light cross-tab:",
     f"  active frames={redlight_cross_tab.get('frames_active', 0)}",
