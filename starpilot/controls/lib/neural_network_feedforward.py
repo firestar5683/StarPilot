@@ -339,7 +339,10 @@ class LatControlNNFF(LatControl):
 
           error = desired_lateral_accel - actual_lateral_accel
           friction_input = self.lat_accel_friction_factor * error + self.lat_jerk_friction_factor * lookahead_lateral_jerk
-          friction_compensation = get_friction(friction_input, lateral_accel_deadzone, FRICTION_THRESHOLD, self.torque_params)
+          friction_compensation = (
+            get_friction(friction_input, lateral_accel_deadzone, FRICTION_THRESHOLD, self.torque_params)
+            if starpilot_toggles.nnff_lite else 0.0
+          )
           ff = self.torque_from_lateral_accel(gravity_adjusted_lateral_accel + friction_compensation, self.torque_params)
       else:
         torque_from_measurement = self.torque_from_lateral_accel(measurement, self.torque_params)
