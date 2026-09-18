@@ -23,6 +23,8 @@ import csv
 import json
 import math
 import os
+import io
+import zipfile
 from pathlib import Path
 from statistics import median
 from typing import Any
@@ -188,10 +190,45 @@ def main() -> int:
   args = ap.parse_args()
 
   transfer = args.checkpoint_dir / "checkpoint_transfer.csv"
-  if not transfer.exists():
-    raise SystemExit(f"Missing {transfer}")
+  transfer_rows: list[dict[str, str]]
 
-  transfer_rows = read_csv(transfer)
+  if transfer.exists():
+    transfer_rows = read_csv(transfer)
+    transfer_source = str(transfer)
+  else:
+    recursive = list(args.checkpoint_dir.rglob("checkpoint_transfer.csv"))
+    if recursive:
+      transfer = recursive[0]
+      transfer_rows = read_csv(transfer)
+      transfer_source = str(transfer)
+    else:
+      bundles = sorted(args.checkpoint_dir.glob("*CHATGPT_BUNDLE.zip"))
+      found = False
+      transfer_rows = []
+      transfer_source = ""
+      for bundle in bundles:
+        try:
+          with zipfile.ZipFile(bundle) as zf:
+            member = next(
+              (name for name in zf.namelist() if Path(name).name == "checkpoint_transfer.csv"),
+              None,
+            )
+            if member is None:
+              continue
+            text = zf.read(member).decode("utf-8-sig")
+            transfer_rows = list(csv.DictReader(io.StringIO(text)))
+            transfer_source = f"{bundle}!{member}"
+            found = True
+            break
+        except (OSError, zipfile.BadZipFile, UnicodeDecodeError):
+          continue
+      if not found:
+        raise SystemExit(
+          f"Could not find checkpoint_transfer.csv under {args.checkpoint_dir} "
+          f"or inside a *CHATGPT_BUNDLE.zip"
+        )
+
+  print(f"Transfer source                : {transfer_source}")
   segments = sorted({
     str(r.get("segment", "")).strip()
     for r in transfer_rows
