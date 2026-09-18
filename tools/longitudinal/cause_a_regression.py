@@ -751,6 +751,44 @@ def discover_cause_a_without_redlight(output_root: Path) -> tuple[list[dict[str,
   return strict_frames, strict_episodes, redlight_episodes
 
 
+
+def link_strict_episodes_to_redlight(
+  strict_episodes: list[dict[str, Any]],
+  redlight_episodes: list[dict[str, Any]],
+) -> list[dict[str, Any]]:
+  by_segment: dict[str, list[dict[str, Any]]] = {}
+  for row in redlight_episodes:
+    by_segment.setdefault(str(row["segment"]), []).append(row)
+  for rows in by_segment.values():
+    rows.sort(key=lambda r: float(r["start_s"]))
+
+  linked: list[dict[str, Any]] = []
+  for row in strict_episodes:
+    out = dict(row)
+    following = [
+      r for r in by_segment.get(str(row["segment"]), [])
+      if float(r["start_s"]) >= float(row["end_s"]) - 1e-9
+    ]
+    if following:
+      nxt = following[0]
+      gap = max(0.0, float(nxt["start_s"]) - float(row["end_s"]))
+      out["next_redlight_start_s"] = float(nxt["start_s"])
+      out["next_redlight_gap_s"] = round(gap, 3)
+      out["next_redlight_duration_s"] = float(nxt["duration_s"])
+      out["linked_within_0_5s"] = gap <= 0.5 + 1e-9
+      out["linked_within_1_0s"] = gap <= 1.0 + 1e-9
+      out["linked_within_2_0s"] = gap <= 2.0 + 1e-9
+    else:
+      out["next_redlight_start_s"] = None
+      out["next_redlight_gap_s"] = None
+      out["next_redlight_duration_s"] = None
+      out["linked_within_0_5s"] = False
+      out["linked_within_1_0s"] = False
+      out["linked_within_2_0s"] = False
+    linked.append(out)
+  return linked
+
+
 def build_redlight_cross_tab(output_root: Path) -> dict[str, Any]:
   counts = {
     "frames_total": 0,
@@ -972,18 +1010,28 @@ def main() -> int:
   )
 
   strict_frames, strict_episodes, redlight_episodes = discover_cause_a_without_redlight(output_root)
+  temporal_links = link_strict_episodes_to_redlight(strict_episodes, redlight_episodes)
   write_csv(dataset_dir / "strict_cause_a_frames.csv", strict_frames)
   write_csv(dataset_dir / "strict_cause_a_episodes.csv", strict_episodes)
+  write_csv(dataset_dir / "strict_cause_a_temporal_link.csv", temporal_links)
   write_csv(dataset_dir / "redlight_confounded_cause_a_episodes.csv", redlight_episodes)
+  linked_0_5 = sum(bool(r.get("linked_within_0_5s")) for r in temporal_links)
+  linked_1_0 = sum(bool(r.get("linked_within_1_0s")) for r in temporal_links)
+  linked_2_0 = sum(bool(r.get("linked_within_2_0s")) for r in temporal_links)
   strict_summary = {
     "strict_frames": len(strict_frames),
     "strict_episodes": len(strict_episodes),
     "strict_episode_duration_s_total": round(sum(float(r["duration_s"]) for r in strict_episodes), 3),
     "redlight_confounded_episodes": len(redlight_episodes),
     "redlight_confounded_duration_s_total": round(sum(float(r["duration_s"]) for r in redlight_episodes), 3),
+    "strict_followed_by_redlight_within_0_5s": linked_0_5,
+    "strict_followed_by_redlight_within_1_0s": linked_1_0,
+    "strict_followed_by_redlight_within_2_0s": linked_2_0,
+    "strict_isolated_from_redlight_over_2_0s": len(strict_episodes) - linked_2_0,
     "interpretation": (
-      "strict_episodes > 0 proves the Cause-A observable signature can occur "
-      "without StarPilot redLight, lead, stop, brake, or explicit throttle-gate context."
+      "A strict frame has redLight=False at that instant, but a nearby subsequent "
+      "redLight episode can show it is the pre-latch phase of the same model stop scene. "
+      "Treat only temporally isolated episodes as evidence of an independent Cause-A event."
     ),
   }
   (dataset_dir / "strict_cause_a_summary.json").write_text(
@@ -1033,6 +1081,10 @@ def main() -> int:
     f"  strict no-redLight episodes={strict_summary['strict_episodes']}",
     f"  strict no-redLight duration={strict_summary['strict_episode_duration_s_total']:.3f}s",
     f"  redLight-confounded episodes={strict_summary['redlight_confounded_episodes']}",
+    f"  strict -> redLight within 0.5s={strict_summary['strict_followed_by_redlight_within_0_5s']}",
+    f"  strict -> redLight within 1.0s={strict_summary['strict_followed_by_redlight_within_1_0s']}",
+    f"  strict -> redLight within 2.0s={strict_summary['strict_followed_by_redlight_within_2_0s']}",
+    f"  strict isolated >2.0s={strict_summary['strict_isolated_from_redlight_over_2_0s']}",
     "",
     "Final patch selection is intentionally blocked until negative-control regression",
     "is reviewed against non-Cause-A lead/stop/brake/disableThrottle episodes.",
