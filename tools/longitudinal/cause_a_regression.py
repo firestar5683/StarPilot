@@ -241,13 +241,14 @@ def coast_match(row: dict[str, str]) -> bool:
 
 
 def positive_demand(row: dict[str, str]) -> bool:
-  # aPlan0 is the closest extracted proxy for the planner/MPC request. If it is
-  # absent, a large positive cruise speed deficit is a conservative fallback.
-  a_plan = fnum(row.get("aPlan0"))
-  if a_plan is not None:
-    return a_plan > POSITIVE_DEMAND_MPS2
+  # aPlan0 is already downstream of the no-throttle MPC acceleration limit, so
+  # a negative aPlan0 cannot disprove upstream acceleration demand. A material
+  # cruise-speed deficit is therefore the primary observable demand signal.
   gap = speed_gap_kph(row)
-  return gap is not None and gap >= CLEAN_SPEED_GAP_KPH
+  if gap is not None and gap >= CLEAN_SPEED_GAP_KPH:
+    return True
+  a_plan = fnum(row.get("aPlan0"))
+  return a_plan is not None and a_plan > POSITIVE_DEMAND_MPS2
 
 
 def contiguous_false_groups(rows: list[dict[str, str]]) -> list[tuple[int, int]]:
