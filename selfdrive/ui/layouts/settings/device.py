@@ -118,7 +118,6 @@ class DeviceLayout(Widget):
     self._galaxy_keyboard = Keyboard(min_text_size=6, password_mode=True, show_password_toggle=True)
     self._galaxy_manage_dialog: MultiOptionDialog | None = None
     self._fcc_dialog: HtmlModal | None = None
-    self._training_guide: TrainingGuide | None = None
 
     self._galaxy_dir = get_galaxy_dir()
     self._galaxy_auth_path = self._galaxy_dir / "glxyauth"
@@ -391,9 +390,9 @@ class DeviceLayout(Widget):
     gui_app.push_widget(self._fcc_dialog)
 
   def _on_review_training_guide(self):
-    if not self._training_guide:
-      def completed_callback():
-        gui_app.pop_widget()
+    def completed_callback():
+      gui_app.pop_widget()
 
-      self._training_guide = TrainingGuide(completed_callback=completed_callback)
-    gui_app.push_widget(self._training_guide)
+    # Construct fresh each time: release() is one-way, and TrainingGuide.hide_event()
+    # frees the textures when the guide is popped, so it cannot be cached and reused.
+    gui_app.push_widget(TrainingGuide(completed_callback=completed_callback))

@@ -1,5 +1,4 @@
 import threading
-from types import SimpleNamespace
 
 from openpilot.selfdrive.ui.layouts import onboarding
 
@@ -45,24 +44,68 @@ def test_preload_thread_does_not_append_after_release(monkeypatch):
   assert unloaded == ["image:b.png"]
 
 
-def test_onboarding_window_hide_event_releases_training_guide(monkeypatch):
-  released = []
+def test_hide_event_releases_textures(monkeypatch):
+  unloaded = []
+  monkeypatch.setattr(onboarding.rl, "unload_texture", lambda texture: unloaded.append(texture))
+  monkeypatch.setattr(onboarding.rl, "unload_image", lambda image: None)
 
-  window = object.__new__(onboarding.OnboardingWindow)
-  window._children = []
-  window._training_guide = SimpleNamespace(release=lambda: released.append(True))
+  guide = object.__new__(onboarding.TrainingGuide)
+  guide._children = []
+  guide._lock = threading.Lock()
+  guide._released = False
+  guide._textures = ["texture-0"]
+  guide._image_objs = []
 
-  window.hide_event()
+  guide.hide_event()
 
-  assert released == [True]
-  assert window._training_guide is None
+  assert guide._released
+  assert guide._textures == []
+  assert unloaded == ["texture-0"]
 
 
-def test_onboarding_window_hide_event_without_training_guide(monkeypatch):
+def test_onboarding_window_registers_guide_as_child(monkeypatch):
+  created = []
+
+  class FakeGuide:
+    def __init__(self, completed_callback=None):
+      self.rendered = False
+      created.append(self)
+
+    def render(self, rect):
+      self.rendered = True
+
+  monkeypatch.setattr(onboarding, "TrainingGuide", FakeGuide)
+
   window = object.__new__(onboarding.OnboardingWindow)
   window._children = []
   window._training_guide = None
+  window._state = onboarding.OnboardingState.ONBOARDING
+  window._rect = onboarding.rl.Rectangle(0, 0, 100, 100)
+
+  window._render(None)
+
+  assert created == [window._training_guide]
+  assert window._training_guide in window._children
+  assert window._training_guide.rendered
+
+
+def test_onboarding_window_hide_event_releases_child_guide(monkeypatch):
+  unloaded = []
+  monkeypatch.setattr(onboarding.rl, "unload_texture", lambda texture: unloaded.append(texture))
+  monkeypatch.setattr(onboarding.rl, "unload_image", lambda image: None)
+
+  guide = object.__new__(onboarding.TrainingGuide)
+  guide._children = []
+  guide._lock = threading.Lock()
+  guide._released = False
+  guide._textures = ["texture-0"]
+  guide._image_objs = []
+
+  window = object.__new__(onboarding.OnboardingWindow)
+  window._children = []
+  window._child(guide)
 
   window.hide_event()
 
-  assert window._training_guide is None
+  assert guide._released
+  assert unloaded == ["texture-0"]

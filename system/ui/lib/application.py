@@ -833,14 +833,15 @@ class GuiApplication:
       self.request_high_fps()
 
   def texture(self, asset_path: str, width: int | None = None, height: int | None = None,
-              alpha_premultiply=False, keep_aspect_ratio=True, flip_x: bool = False) -> rl.Texture:
+              alpha_premultiply=False, keep_aspect_ratio=True, flip_x: bool = False,
+              cache: bool = True) -> rl.Texture:
     if width is not None:
       width = round(width)
     if height is not None:
       height = round(height)
 
     cache_key = f"{asset_path}_{width}_{height}_{alpha_premultiply}_{keep_aspect_ratio}_{flip_x}"
-    if cache_key in self._textures:
+    if cache and cache_key in self._textures:
       return self._textures[cache_key]
 
     with as_file(ASSETS_DIR.joinpath(asset_path)) as fspath:
@@ -852,7 +853,8 @@ class GuiApplication:
       texture_obj.width = width
       texture_obj.height = height
 
-    self._textures[cache_key] = texture_obj
+    if cache:
+      self._textures[cache_key] = texture_obj
     return texture_obj
 
   def cached_render_texture(self, cache_key: str, width: int, height: int,
