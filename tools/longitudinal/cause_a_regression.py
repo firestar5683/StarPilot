@@ -220,18 +220,25 @@ def speed_gap_kph(row: dict[str, str]) -> float | None:
   return None
 
 
-def clean_context(row: dict[str, str]) -> bool:
+def core_context_without_redlight(row: dict[str, str]) -> bool:
   return not any((
     bval(row.get("brakePressed")),
     bval(row.get("spDisableThrottle")),
     bval(row.get("spPulseGlideCoasting")),
     bval(row.get("spTrackingLead")),
     bval(row.get("spForcingStop")),
-    bval(row.get("spRedLight")),
     bval(row.get("shouldStop")),
     bval(row.get("hasLead")),
     bval(row.get("leadOneStatus")),
   ))
+
+
+def clean_context(row: dict[str, str]) -> bool:
+  return core_context_without_redlight(row) and not bval(row.get("spRedLight"))
+
+
+def redlight_only_context(row: dict[str, str]) -> bool:
+  return core_context_without_redlight(row) and bval(row.get("spRedLight"))
 
 
 def coast_match(row: dict[str, str]) -> bool:
@@ -375,13 +382,16 @@ def episode_metrics(ep: Episode, rows: list[dict[str, str]], step: float) -> dic
   coast = [r.get("estimatedCoastAccel") for r in frame]
   gaps = [speed_gap_kph(r) for r in frame]
   clean_ratio = sum(clean_context(r) for r in frame) / max(len(frame), 1)
+  core_clean_ratio = sum(core_context_without_redlight(r) for r in frame) / max(len(frame), 1)
+  redlight_only_ratio = sum(redlight_only_context(r) for r in frame) / max(len(frame), 1)
   coast_ratio = sum(coast_match(r) for r in frame) / max(len(frame), 1)
   demand_ratio = sum(positive_demand(r) for r in frame) / max(len(frame), 1)
   gas_min = safe_min(gas)
-  cause_a = (
+  cause_a_core = (
     gas_min is not None and gas_min <= MODEL_DISABLE_THRESHOLD and
-    clean_ratio >= 0.80 and coast_ratio >= 0.50 and demand_ratio >= 0.20
+    core_clean_ratio >= 0.80 and coast_ratio >= 0.50 and demand_ratio >= 0.20
   )
+  cause_a_strict = cause_a_core and clean_ratio >= 0.80
   return {
     "case_id": ep.case_id,
     "segment": ep.segment,
@@ -399,6 +409,8 @@ def episode_metrics(ep: Episode, rows: list[dict[str, str]], step: float) -> dic
     "estimatedCoastAccel_mean_mps2": safe_mean(coast),
     "speed_gap_max_kph": safe_max(gaps),
     "clean_context_ratio": round(clean_ratio, 4),
+    "core_context_without_redlight_ratio": round(core_clean_ratio, 4),
+    "redlight_only_context_ratio": round(redlight_only_ratio, 4),
     "coast_match_ratio": round(coast_ratio, 4),
     "positive_demand_ratio": round(demand_ratio, 4),
     "brake_pressed_ratio": round(ratio(frame, "brakePressed"), 4),
@@ -407,7 +419,9 @@ def episode_metrics(ep: Episode, rows: list[dict[str, str]], step: float) -> dic
     "sp_disable_throttle_ratio": round(ratio(frame, "spDisableThrottle"), 4),
     "sp_forcing_stop_ratio": round(ratio(frame, "spForcingStop"), 4),
     "sp_red_light_ratio": round(ratio(frame, "spRedLight"), 4),
-    "baseline_signature_pass": cause_a,
+    "core_signature_pass": cause_a_core,
+    "baseline_signature_pass": cause_a_strict,
+    "redlight_confounded": bool(cause_a_core and clean_ratio < 0.80 and redlight_only_ratio >= 0.80),
   }
 
 
@@ -494,10 +508,14 @@ def classify_episode_context(frame: list[dict[str, str]]) -> str:
     ratio(frame, "hasLead"),
     ratio(frame, "leadOneStatus"),
     ratio(frame, "spForcingStop"),
-    ratio(frame, "spRedLight"),
   )
   if safety_ratio > 0.05:
     return "lead_stop_brake_context"
+
+  redlight_ratio = ratio(frame, "spRedLight")
+  core_clean_ratio = sum(core_context_without_redlight(r) for r in frame) / max(len(frame), 1)
+  if redlight_ratio > 0.05 and core_clean_ratio >= 0.80:
+    return "red_light_only_context"
 
   clean_ratio = sum(clean_context(r) for r in frame) / max(len(frame), 1)
   demand_ratio = sum(positive_demand(r) for r in frame) / max(len(frame), 1)
@@ -580,7 +598,7 @@ def build_global_variant_impact(output_root: Path, episode_map: dict[str, Episod
     })
 
   non_positive = [r for r in rows_out if not r["selected_positive_case"]]
-  protected = [r for r in non_positive if r["context"] in {"explicit_starpilot_gate", "lead_stop_brake_context"}]
+  protected = [r for r in non_positive if r["context"] in {"explicit_starpilot_gate", "lead_stop_brake_context", "red_light_only_context"}]
 
   def changed_count(rows: list[dict[str, Any]], key: str) -> int:
     return sum(1 for r in rows if abs(float(r[key])) > 1e-6)
@@ -613,7 +631,9 @@ def criteria() -> dict[str, Any]:
     "cases": list(CASE_IDS),
     "baseline_signature": {
       "gasPressProb_min_lte": MODEL_DISABLE_THRESHOLD,
-      "clean_context_ratio_gte": 0.80,
+      "core_context_without_redlight_ratio_gte": 0.80,
+      "strict_clean_context_ratio_gte": 0.80,
+      "redlight_is_confounder_if_ratio_gte": 0.80,
       "coast_match_tolerance_mps2": COAST_MATCH_TOLERANCE,
       "coast_match_ratio_gte": 0.50,
       "positive_demand_ratio_gte": 0.20,
