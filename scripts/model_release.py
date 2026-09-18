@@ -29,6 +29,9 @@ from pathlib import Path
 
 
 OPENPILOT_REPO = "commaai/openpilot"
+# openpilot's .lfsconfig points LFS storage at Hugging Face, not github.com's own LFS.
+# The github.com LFS batch endpoint now 404s on every object; use the real backend.
+OPENPILOT_LFS_BATCH_URL = "https://huggingface.co/commaai/openpilot-lfs.git/info/lfs/objects/batch"
 RESOURCES_REPO = os.environ.get("STARPILOT_RESOURCES_REPO", "firestar5683/StarPilot-Resources")
 HF_BUCKET = os.environ.get("STARPILOT_HF_BUCKET", "StarPilot-Driving/StarPilot-Resources")
 RESOURCE_BRANCH = "Models"
@@ -80,7 +83,8 @@ def default_workspace() -> Path:
   return Path.home() / "Desktop" / "StarPilot-Model-Releases"
 
 
-def run(command: list[str], *, cwd: Path | None = None, capture: bool = False) -> subprocess.CompletedProcess:
+def run(command: list[str], *, cwd: Path | None = None, capture: bool = False,
+       env: dict[str, str] | None = None) -> subprocess.CompletedProcess:
   print("$ " + " ".join(shlex.quote(part) for part in command))
   return subprocess.run(
     command,
@@ -88,6 +92,7 @@ def run(command: list[str], *, cwd: Path | None = None, capture: bool = False) -
     check=True,
     text=capture,
     capture_output=capture,
+    env=env,
   )
 
 
@@ -160,7 +165,6 @@ def stream_response(response, destination: Path, prefix: bytes = b"") -> tuple[i
 
 
 def download_lfs_object(oid: str, expected_size: int, ref: str, destination: Path) -> tuple[int, str]:
-  batch_url = f"https://github.com/{OPENPILOT_REPO}.git/info/lfs/objects/batch"
   payload = json.dumps({
     "operation": "download",
     "transfers": ["basic"],
@@ -168,7 +172,7 @@ def download_lfs_object(oid: str, expected_size: int, ref: str, destination: Pat
     "ref": {"name": ref},
   }).encode("utf-8")
   with http_request(
-    batch_url,
+    OPENPILOT_LFS_BATCH_URL,
     method="POST",
     payload=payload,
     headers={"Accept": "application/vnd.git-lfs+json", "Content-Type": "application/vnd.git-lfs+json"},
@@ -395,6 +399,38 @@ def parse_pasted_release(text: str, model_id_override: str | None, behavior_vers
   )
 
 
+def release_from_source_file(source_file: Path, model_id_override: str | None, display_name_override: str | None,
+                             behavior_version: str) -> ReleaseInfo:
+  """Build a ReleaseInfo for a local ONNX that didn't come from an openpilot git commit.
+
+  Used when the model bot / commit only ships a precompiled artifact (e.g. an eGPU pkl)
+  and the real ONNX source has to be fetched by hand from elsewhere, such as
+  huggingface.co/commaai/openpilot_driving_models.
+  """
+  if not source_file.is_file():
+    raise ReleaseError(f"--source-file not found: {source_file}")
+  if source_file.suffix.lower() != ".onnx":
+    raise ReleaseError(f"--source-file must be a .onnx file: {source_file}")
+  display_name = display_name_override or source_name_from_path(source_file.name)
+  model_id = model_id_override or slug_model_id(display_name)
+  if not MODEL_ID_RE.fullmatch(model_id):
+    raise ReleaseError(f"Invalid model ID {model_id!r}; use lowercase letters, digits, '-' or '_' (pass --model-id)")
+  iteration_match = re.search(r"\b(v\d+)\b", display_name, flags=re.IGNORECASE)
+  return ReleaseInfo(
+    model_id=model_id,
+    display_name=display_name,
+    release_date=dt.date.today().isoformat(),
+    branch="",
+    source_ref="",
+    source_path=str(source_file),
+    input_format="supercombo" if "supercombo" in source_file.name.lower() else "split",
+    behavior_version=behavior_version,
+    uses_external_gpu=source_file.name.lower().startswith("big_"),
+    commits=[],
+    model_iteration=iteration_match.group(1).lower() if iteration_match else "",
+  )
+
+
 def resolve_branch_commit(branch: str) -> str:
   url = f"https://api.github.com/repos/{OPENPILOT_REPO}/commits/{urllib.parse.quote(branch, safe='')}"
   payload = get_json(url)
@@ -508,11 +544,16 @@ def remote_compile(info: ReleaseInfo, source: Path, ip: str, workspace: Path, ke
       stdout=subprocess.PIPE,
       stderr=subprocess.STDOUT,
       text=True,
+      encoding="utf-8",
+      errors="replace",
       bufsize=1,
     )
     assert process.stdout is not None
     for line in process.stdout:
-      print(f"[device] {line}", end="")
+      try:
+        print(f"[device] {line}", end="")
+      except UnicodeEncodeError:
+        print(f"[device] {line}".encode(sys.stdout.encoding or 'utf-8', errors='replace').decode(sys.stdout.encoding or 'utf-8'), end="")
       log.write(line)
     return_code = process.wait()
   if return_code != 0:
@@ -684,18 +725,62 @@ def validate_manifest_update(before: object, after: object, replacing_model_id: 
     )
 
 
-def find_hf() -> str:
-  candidates = [shutil.which("hf"), str(Path.home() / ".local/bin/hf")]
-  for candidate in candidates:
+def windows_user_site_candidates(python: str) -> list[str]:
+  """Compute the per-user site-packages path Windows Python installs use.
+
+  On some Windows installs, a Python interpreter that has huggingface_hub
+  importable interactively still fails to find it as a subprocess child: both
+  `import huggingface_hub` and even `pip show` fail the same way in that
+  child, because site.getusersitepackages() resolves to the wrong per-app
+  path (a Windows Store Python aliasing quirk) instead of that interpreter's
+  own user site-packages. That makes any subprocess-based probe of the
+  interpreter circular, so compute the conventional path directly instead:
+  %APPDATA%\\Python\\PythonXY\\site-packages. Querying sys.version_info alone
+  (no package import) does not trigger the broken resolution.
+  """
+  appdata = os.environ.get("APPDATA")
+  if not appdata:
+    return []
+  version = subprocess.run(
+    [python, "-c", "import sys; print(f'{sys.version_info[0]}{sys.version_info[1]}')"],
+    capture_output=True, text=True,
+  )
+  if version.returncode != 0 or not version.stdout.strip().isdigit():
+    return []
+  return [os.path.join(appdata, "Python", f"Python{version.stdout.strip()}", "site-packages")]
+
+
+def find_hf() -> tuple[list[str], dict[str, str] | None]:
+  """Return (command prefix, extra env) to invoke the Hugging Face CLI.
+
+  The installed `hf` launcher executable can fail to resolve its own Python
+  environment when invoked directly via subprocess (no shell/PATH context),
+  even though it works fine from an interactive shell. Prefer running the CLI
+  as a module of whichever Python actually has huggingface_hub importable.
+  """
+  for python in (sys.executable, shutil.which("python3"), shutil.which("python")):
+    if not python:
+      continue
+    probe = subprocess.run([python, "-c", "import huggingface_hub"], capture_output=True)
+    if probe.returncode == 0:
+      return [python, "-m", "huggingface_hub.cli.hf"], None
+    for site_packages in windows_user_site_candidates(python):
+      if not os.path.isdir(os.path.join(site_packages, "huggingface_hub")):
+        continue
+      env = {**os.environ, "PYTHONPATH": os.pathsep.join([site_packages, os.environ.get("PYTHONPATH", "")])}
+      probe = subprocess.run([python, "-c", "import huggingface_hub"], capture_output=True, env=env)
+      if probe.returncode == 0:
+        return [python, "-m", "huggingface_hub.cli.hf"], env
+  for candidate in (shutil.which("hf"), str(Path.home() / ".local/bin/hf")):
     if candidate and Path(candidate).is_file():
-      return candidate
+      return [candidate], None
   raise ReleaseError("Hugging Face CLI not found; install/authenticate `hf` first")
 
 
 def hf_copy(source: Path, bucket: str, remote_path: str) -> None:
-  hf = find_hf()
+  command, env = find_hf()
   destination = f"hf://buckets/{bucket}/{remote_path}"
-  run([hf, "buckets", "cp", str(source), destination, "--format", "quiet"])
+  run([*command, "buckets", "cp", str(source), destination, "--format", "quiet"], env=env)
 
 
 def refresh_huggingface_manifest(manifest: Path, bucket: str) -> dict:
@@ -704,7 +789,8 @@ def refresh_huggingface_manifest(manifest: Path, bucket: str) -> dict:
   manifest.parent.mkdir(parents=True, exist_ok=True)
   with tempfile.TemporaryDirectory(prefix=".model-release-", dir=manifest.parent) as temporary_dir:
     candidate = Path(temporary_dir) / manifest.name
-    run([find_hf(), "buckets", "cp", source, str(candidate), "--format", "quiet"])
+    hf_command, hf_env = find_hf()
+    run([*hf_command, "buckets", "cp", source, str(candidate), "--format", "quiet"], env=hf_env)
     try:
       payload = json.loads(candidate.read_text(encoding="utf-8"))
     except (OSError, json.JSONDecodeError) as error:
@@ -812,6 +898,13 @@ def parse_args() -> argparse.Namespace:
   parser.add_argument("commit", nargs="?", help="A single openpilot commit SHA; metadata is resolved from GitHub.")
   parser.add_argument("--text", help="Release text, otherwise paste it into stdin.")
   parser.add_argument("--text-file", type=Path, help="Read the pasted release text from a file.")
+  parser.add_argument("--source-file", type=Path,
+                      help="Use this local .onnx instead of downloading one from an openpilot commit/branch. "
+                           "For releases whose commit only ships a precompiled artifact (e.g. an eGPU pkl) "
+                           "and the real ONNX must be fetched by hand from elsewhere. Skips the runtime-change "
+                           "scan since there is no commit history to scan; review the source yourself first. "
+                           "Requires --model-id or a v-numbered name in --display-name.")
+  parser.add_argument("--display-name", help="Display name to record in the manifest when using --source-file.")
   parser.add_argument("--model-id", help="Override the ID parsed from the model name.")
   parser.add_argument("--behavior-version", default=DEFAULT_BEHAVIOR_VERSION, help="Runtime behavior version (default: v16).")
   parser.add_argument("--ip", help="Comma IP; prompted interactively when omitted.")
@@ -837,21 +930,32 @@ def main() -> int:
   try:
     if not re.fullmatch(r"v\d+", args.behavior_version.strip(), flags=re.IGNORECASE):
       raise ReleaseError("--behavior-version must look like v16")
-    text = read_release_text(args)
-    if not text.strip():
-      raise ReleaseError("No release text was supplied")
-    info = parse_pasted_release(text, args.model_id, args.behavior_version.strip().lower())
+
+    using_source_file = args.source_file is not None
+    text = ""
+    if using_source_file:
+      info = release_from_source_file(args.source_file.expanduser().resolve(), args.model_id,
+                                      args.display_name, args.behavior_version.strip().lower())
+    else:
+      text = read_release_text(args)
+      if not text.strip():
+        raise ReleaseError("No release text was supplied")
+      info = parse_pasted_release(text, args.model_id, args.behavior_version.strip().lower())
     if args.gpu is not None:
       info.uses_external_gpu = args.gpu
     print_summary(info)
 
-    findings = scan_runtime_changes(info)
-    if findings:
-      print_runtime_warning(findings)
-      if not args.allow_runtime_changes:
-        return 2
+    if using_source_file:
+      print("\nRuntime scan skipped: --source-file has no commit history to scan.")
+      print("Confirm yourself that no tinygrad/modeld/Chestnut runtime changes are needed before proceeding.")
     else:
-      print("Runtime scan: no tinygrad/modeld runtime files changed in the supplied commits.")
+      findings = scan_runtime_changes(info)
+      if findings:
+        print_runtime_warning(findings)
+        if not args.allow_runtime_changes:
+          return 2
+      else:
+        print("Runtime scan: no tinygrad/modeld runtime files changed in the supplied commits.")
 
     if args.dry_run:
       print("Dry run complete; no device or repository changes made.")
@@ -862,7 +966,15 @@ def main() -> int:
     for relative in ("onnx", "compiled", "logs", "results"):
       (workspace / relative).mkdir(parents=True, exist_ok=True)
     source = workspace / "onnx" / f"{info.model_id}_driving_supercombo.onnx"
-    source_result = download_source(info.source_ref, info.source_path, source, args.force)
+    if using_source_file:
+      local_source = Path(info.source_path)
+      if source.exists() and not args.force:
+        raise ReleaseError(f"Source already exists: {source}; use --force to replace it")
+      shutil.copy2(local_source, source)
+      source_result = {"path": str(source), "size": source.stat().st_size, "sha256": sha256_file(source),
+                       "url": str(local_source), "ref": "", "git_path": ""}
+    else:
+      source_result = download_source(info.source_ref, info.source_path, source, args.force)
     (workspace / "release.txt").write_text(text, encoding="utf-8")
     (workspace / "source.json").write_text(json.dumps({**source_result, "model": info.__dict__}, indent=2) + "\n", encoding="utf-8")
 
