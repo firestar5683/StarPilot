@@ -47,6 +47,7 @@ D:\OpenPilot\Output\Regression\A\
   variant_summary.csv
   global_variant_impact.csv
   global_variant_summary.json
+  redlight_cross_tab.json
   summary.txt
   T0004\timeline.csv
   T0008\timeline.csv
@@ -88,3 +89,21 @@ A selected patch must:
 
 The positive dataset is therefore necessary but not sufficient for choosing a
 final patch.
+
+
+## Red-light confounder check
+
+The original checkpoint-02 scanner did not exclude `starpilotPlan.redLight`
+when selecting suspicious model-gate episodes. The regression harness therefore
+reports two signatures:
+
+- `core_signature_pass`: low model gas probability + coast-clamped target +
+  positive-demand context with no brake/lead/forcingStop/disableThrottle cause.
+- `baseline_signature_pass`: the strict form above with `redLight=False`.
+- `redlight_confounded`: the core signature is present but the episode is
+  dominated by `redLight=True`.
+
+`redlight_cross_tab.json` measures this relationship across every extracted
+active timeline frame. A patch to the throttle gate must not be selected until
+this confounder is resolved, since delaying throttle suppression during a true
+stop-light approach could be unsafe.
