@@ -3,7 +3,7 @@ from openpilot.system.ui.lib.application import FONT_SCALE, font_fallback
 from openpilot.system.ui.lib.emoji import find_emoji
 from openpilot.system.ui.lib.lru_cache import LRUCache
 
-_CACHE_MAXSIZE = 8192
+_CACHE_MAXSIZE = 1024
 
 _cache: LRUCache[int, rl.Vector2] = LRUCache(_CACHE_MAXSIZE)
 
@@ -19,8 +19,9 @@ def measure_text_cached(font: rl.Font, text: str, font_size: int, spacing: float
   font = font_fallback(font)
   spacing = round(spacing, 4)
   key = hash((font.texture.id, text, font_size, spacing))
-  if key in _cache:
-    return _cache[key]
+  cached = _cache.get(key)
+  if cached is not None:
+    return cached
 
   # Measure normal characters without emojis, then add standard width for each found emoji
   emoji = find_emoji(text)

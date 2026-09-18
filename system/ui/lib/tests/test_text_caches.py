@@ -1,6 +1,17 @@
 from types import SimpleNamespace
 
+import pytest
+
 from openpilot.system.ui.lib import text_measure, wrap_text
+
+
+@pytest.fixture(autouse=True)
+def _clear_text_caches():
+  text_measure._cache.clear()
+  wrap_text._cache.clear()
+  yield
+  text_measure._cache.clear()
+  wrap_text._cache.clear()
 
 
 def _fake_font(font_id: int = 1):
@@ -17,7 +28,6 @@ def test_measure_cache_hits_and_is_bounded(monkeypatch):
   monkeypatch.setattr(text_measure, "font_fallback", lambda font: font)
   monkeypatch.setattr(text_measure, "find_emoji", lambda text: [])
   monkeypatch.setattr(text_measure.rl, "measure_text_ex", fake_measure)
-  text_measure._cache.clear()
 
   font = _fake_font()
 
@@ -41,7 +51,6 @@ def test_measure_cache_hits_and_is_bounded(monkeypatch):
 def test_wrap_cache_hits_and_is_bounded(monkeypatch):
   monkeypatch.setattr(wrap_text, "font_fallback", lambda font: font)
   monkeypatch.setattr(wrap_text, "measure_text_cached", lambda font, text, font_size, spacing=0: SimpleNamespace(x=float(len(text)), y=1.0))
-  wrap_text._cache.clear()
 
   font = _fake_font()
 

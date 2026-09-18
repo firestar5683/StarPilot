@@ -38,7 +38,7 @@ def _break_long_word(font: rl.Font, word: str, font_size: int, max_width: int, s
   return parts
 
 
-_CACHE_MAXSIZE = 1024
+_CACHE_MAXSIZE = 8192
 
 _cache: LRUCache[int, list[str]] = LRUCache(_CACHE_MAXSIZE)
 
@@ -47,8 +47,9 @@ def wrap_text(font: rl.Font, text: str, font_size: int, max_width: int, spacing:
   font = font_fallback(font)
   spacing = round(spacing, 4)
   key = hash((font.texture.id, text, font_size, max_width, spacing))
-  if key in _cache:
-    return _cache[key]
+  cached = _cache.get(key)
+  if cached is not None:
+    return cached
 
   if not text or max_width <= 0:
     return []
