@@ -922,12 +922,26 @@ def criteria() -> dict[str, Any]:
       "coast_match_ratio_gte": 0.50,
       "positive_demand_ratio_gte": 0.20,
     },
+    "diagnostic_profile_2026_09_17": {
+      "ExperimentalMode": False,
+      "ConditionalExperimental": False,
+      "ConditionalChill": False,
+      "CEStopLights": False,
+      "CEOpenRoad": False,
+      "CEModelStopTime": 0.0,
+      "AlphaLongitudinal": True,
+      "redLight_control_interpretation": (
+        "spRedLight is an internal detector observation for this corpus, not an enabled "
+        "stop-control feature; do not count it as a hard protection veto by itself."
+      ),
+    },
     "patch_pass": {
-      "primary": "reduce clean_false_coast_seconds versus baseline on every resolved Cause-A case",
+      "primary": "reduce core_false_coast_seconds versus baseline on every resolved Cause-A case",
       "must_preserve": [
         "explicit StarPilot disableThrottle",
         "driver brake",
-        "lead/stop/forcingStop/redLight protections",
+        "lead/shouldStop/forcingStop/stopSign protections",
+        "Force Stops or active CE stop-control behavior",
         "physical acceleration/deceleration limits",
       ],
       "final_selection_requires_negative_controls": True,
