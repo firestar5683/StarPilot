@@ -625,6 +625,105 @@ def build_global_variant_impact(output_root: Path, episode_map: dict[str, Episod
   }
   return rows_out, summary
 
+
+def build_redlight_cross_tab(output_root: Path) -> dict[str, Any]:
+  counts = {
+    "frames_total": 0,
+    "frames_active": 0,
+    "allow_false": 0,
+    "redlight_true": 0,
+    "allow_false_and_redlight_true": 0,
+    "allow_false_and_redlight_false": 0,
+    "gas_low": 0,
+    "gas_low_and_redlight_true": 0,
+    "gas_low_and_allow_false": 0,
+    "redlight_only_context_frames": 0,
+    "redlight_only_context_allow_false_frames": 0,
+    "redlight_only_context_allow_true_frames": 0,
+    "strict_clean_allow_false_frames": 0,
+    "segments_scanned": 0,
+  }
+
+  for path in sorted((output_root / "Segments").glob("*/timeline.csv")):
+    try:
+      rows = read_csv(path)
+    except Exception:
+      continue
+
+    counts["segments_scanned"] += 1
+
+    for row in rows:
+      counts["frames_total"] += 1
+
+      active = bool(
+        bval(row.get("longActive")) or
+        bval(row.get("active")) or
+        bval(row.get("spActive"))
+      )
+      if not active:
+        continue
+
+      counts["frames_active"] += 1
+
+      allow_false = not bval(row.get("allowThrottle"), default=True)
+      red = bval(row.get("spRedLight"))
+      gas_low = finite(row.get("modelGasPressProb1")) and float(row["modelGasPressProb1"]) <= MODEL_DISABLE_THRESHOLD
+      red_only = redlight_only_context(row)
+      strict_clean = clean_context(row)
+
+      if allow_false:
+        counts["allow_false"] += 1
+      if red:
+        counts["redlight_true"] += 1
+      if allow_false and red:
+        counts["allow_false_and_redlight_true"] += 1
+      if allow_false and not red:
+        counts["allow_false_and_redlight_false"] += 1
+      if gas_low:
+        counts["gas_low"] += 1
+      if gas_low and red:
+        counts["gas_low_and_redlight_true"] += 1
+      if gas_low and allow_false:
+        counts["gas_low_and_allow_false"] += 1
+      if red_only:
+        counts["redlight_only_context_frames"] += 1
+        if allow_false:
+          counts["redlight_only_context_allow_false_frames"] += 1
+        else:
+          counts["redlight_only_context_allow_true_frames"] += 1
+      if strict_clean and allow_false:
+        counts["strict_clean_allow_false_frames"] += 1
+
+  def frac(num: str, den: str) -> float | None:
+    d = counts[den]
+    return round(counts[num] / d, 6) if d else None
+
+  return {
+    **counts,
+    "ratios": {
+      "allow_false_given_active": frac("allow_false", "frames_active"),
+      "redlight_true_given_active": frac("redlight_true", "frames_active"),
+      "redlight_true_given_allow_false": frac("allow_false_and_redlight_true", "allow_false"),
+      "allow_false_given_redlight_true": frac("allow_false_and_redlight_true", "redlight_true"),
+      "redlight_true_given_gas_low": frac("gas_low_and_redlight_true", "gas_low"),
+      "allow_false_given_gas_low": frac("gas_low_and_allow_false", "gas_low"),
+      "allow_false_given_redlight_only_context": frac(
+        "redlight_only_context_allow_false_frames", "redlight_only_context_frames"
+      ),
+    },
+    "interpretation": {
+      "high_redlight_true_given_allow_false": (
+        "If this ratio is near 1.0, the original throttle-block candidate set is "
+        "strongly confounded by StarPilot CEM red-light state."
+      ),
+      "redlight_only_context": (
+        "This means redLight=True while brake/lead/shouldStop/forcingStop/"
+        "disableThrottle/pulse/tracking are all false."
+      ),
+    },
+  }
+
+
 def criteria() -> dict[str, Any]:
   return {
     "dataset": "Cause A",
@@ -742,6 +841,11 @@ def main() -> int:
     json.dumps(global_summary, indent=2, ensure_ascii=False), encoding="utf-8"
   )
 
+  redlight_cross_tab = build_redlight_cross_tab(output_root)
+  (dataset_dir / "redlight_cross_tab.json").write_text(
+    json.dumps(redlight_cross_tab, indent=2, ensure_ascii=False), encoding="utf-8"
+  )
+
   lines = [
     "StarPilot Cause-A regression dataset",
     "==================================",
@@ -773,6 +877,12 @@ def main() -> int:
     f"  episodes analyzed={global_summary.get('episodes_analyzed', 0)}",
     f"  non-positive changed @500ms={global_summary.get('non_positive_changed', {}).get('confirm_500ms', 'n/a')}",
     f"  protected-context changed @500ms={global_summary.get('protected_context_changed', {}).get('confirm_500ms', 'n/a')}",
+    "",
+    "Red-light cross-tab:",
+    f"  active frames={redlight_cross_tab.get('frames_active', 0)}",
+    f"  allowThrottle=False frames={redlight_cross_tab.get('allow_false', 0)}",
+    f"  redLight=True among allowThrottle=False={redlight_cross_tab.get('ratios', {}).get('redlight_true_given_allow_false', 'n/a')}",
+    f"  allowThrottle=False among redLight-only context={redlight_cross_tab.get('ratios', {}).get('allow_false_given_redlight_only_context', 'n/a')}",
     "",
     "Final patch selection is intentionally blocked until negative-control regression",
     "is reviewed against non-Cause-A lead/stop/brake/disableThrottle episodes.",
