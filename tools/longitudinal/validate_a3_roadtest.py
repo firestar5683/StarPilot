@@ -247,6 +247,7 @@ def main() -> int:
   opportunities: list[dict[str, Any]] = []
   violations: list[dict[str, Any]] = []
   protected_closed: list[dict[str, Any]] = []
+  unprotected_gate_closed: list[dict[str, Any]] = []
   clean_false_coast: list[dict[str, Any]] = []
 
   total_rows = 0
@@ -320,6 +321,11 @@ def main() -> int:
           rec = frame_record(segment, row, model_allow, gap, "protected_model_gate_closed")
           protected_closed.append(rec)
 
+        if active and not model_allow and not protected:
+          unprotected_gate_closed.append(
+            frame_record(segment, row, model_allow, gap, "unprotected_model_gate_closed")
+          )
+
         if (
           active and not protected and gap is not None and gap >= args.min_gap_kph and
           not actual_allow and coast_match(row)
@@ -333,6 +339,7 @@ def main() -> int:
   write_csv(out_dir / "a3_opportunity_frames.csv", opportunities)
   write_csv(out_dir / "a3_violation_frames.csv", violations)
   write_csv(out_dir / "protected_model_gate_frames.csv", protected_closed)
+  write_csv(out_dir / "unprotected_model_gate_frames.csv", unprotected_gate_closed)
   write_csv(out_dir / "clean_positive_demand_false_coast_frames.csv", clean_false_coast)
 
   opportunity_pass = len(opportunities) > 0 and len(violations) == 0
@@ -344,6 +351,31 @@ def main() -> int:
     if len(opportunities) == 0 and no_false_coast_pass
     else "FAIL"
   )
+
+  unprotected_gaps = sorted(
+    float(r["speed_gap_kph"])
+    for r in unprotected_gate_closed
+    if r.get("speed_gap_kph") is not None
+  )
+
+  def percentile(values: list[float], pct: float) -> float | None:
+    if not values:
+      return None
+    if len(values) == 1:
+      return values[0]
+    pos = (len(values) - 1) * pct
+    lo = int(math.floor(pos))
+    hi = int(math.ceil(pos))
+    if lo == hi:
+      return values[lo]
+    frac = pos - lo
+    return values[lo] * (1.0 - frac) + values[hi] * frac
+
+  max_gap_record = None
+  if unprotected_gate_closed:
+    with_gap = [r for r in unprotected_gate_closed if r.get("speed_gap_kph") is not None]
+    if with_gap:
+      max_gap_record = max(with_gap, key=lambda r: float(r["speed_gap_kph"]))
 
   summary = {
     "verdict": verdict,
@@ -360,6 +392,18 @@ def main() -> int:
     "a3_violations": len(violations),
     "clean_positive_demand_false_coast_frames": len(clean_false_coast),
     "protected_model_gate_closed_frames": len(protected_closed),
+    "unprotected_model_gate_closed_frames": len(unprotected_gate_closed),
+    "unprotected_gate_speed_gap": {
+      "max_kph": max(unprotected_gaps) if unprotected_gaps else None,
+      "p95_kph": percentile(unprotected_gaps, 0.95),
+      "p50_kph": percentile(unprotected_gaps, 0.50),
+      "frames_gap_ge_1_kph": sum(g >= 1.0 for g in unprotected_gaps),
+      "frames_gap_ge_3_kph": sum(g >= 3.0 for g in unprotected_gaps),
+      "frames_gap_ge_5_kph": sum(g >= 5.0 for g in unprotected_gaps),
+      "frames_gap_ge_7_kph": sum(g >= 7.0 for g in unprotected_gaps),
+      "max_gap_segment": max_gap_record.get("segment") if max_gap_record else None,
+      "max_gap_t_rel_s": max_gap_record.get("t_rel_s") if max_gap_record else None,
+    },
     "criteria": {
       "min_speed_gap_kph": args.min_gap_kph,
       "model_disable_threshold": MODEL_DISABLE_THRESHOLD,
@@ -387,6 +431,12 @@ def main() -> int:
   print(f"A3 violations                  : {len(violations)}")
   print(f"Clean positive-demand coast    : {len(clean_false_coast)}")
   print(f"Protected gate-closed frames   : {len(protected_closed)}")
+  print(f"Unprotected gate-closed frames : {len(unprotected_gate_closed)}")
+  print(f"Unprotected max speed gap      : {max(unprotected_gaps):.3f} km/h" if unprotected_gaps else "Unprotected max speed gap      : n/a")
+  print(f"Unprotected p95 speed gap      : {percentile(unprotected_gaps, 0.95):.3f} km/h" if unprotected_gaps else "Unprotected p95 speed gap      : n/a")
+  print(f"Gap >=1 / >=3 / >=5 / >=7     : {sum(g >= 1.0 for g in unprotected_gaps)} / {sum(g >= 3.0 for g in unprotected_gaps)} / {sum(g >= 5.0 for g in unprotected_gaps)} / {sum(g >= 7.0 for g in unprotected_gaps)}")
+  if max_gap_record:
+    print(f"Max-gap frame                  : {max_gap_record['segment']} @ {max_gap_record['t_rel_s']}s")
   print(f"VERDICT                        : {verdict}")
   print(f"Output                         : {out_dir}")
   return 0 if verdict != "FAIL" else 2
