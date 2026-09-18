@@ -48,6 +48,9 @@ from openpilot.selfdrive.modeld.compile_modeld import (
   derive_frame_skip,
   make_split_input_queues,
   make_supercombo_input_queues,
+  make_stateful_input_queues,
+  stateful_host_shapes,
+  stateful_image_shapes,
 )
 from openpilot.selfdrive.modeld.helpers import get_tg_input_devices, load_oob, tinygrad_dev_config, usbgpu_present
 from openpilot.selfdrive.modeld.usbgpu_link import wait_usbgpu_link
@@ -587,8 +590,15 @@ class ModelState:
     self.run_policy = artifact["run_policy"]
     self.warp_enqueue = artifact[(cam_w, cam_h)]
     self.can_prepare_only = self.image_history_pipeline == IMAGE_HISTORY_IN_WARP
+    self.onnx_history = self.model_type == 'supercombo' and bool(self.metadata['model'].get('state_pairs'))
 
-    if self.model_type == "supercombo":
+    if self.onnx_history:
+      metadata = self.metadata['model']
+      input_shapes = stateful_image_shapes(metadata)
+      self.output_slices = metadata['output_slices']
+      self.input_queues, self.npy = make_stateful_input_queues(metadata, self.QUEUE_DEV)
+      self.policy_input_shapes = stateful_host_shapes(metadata)
+    elif self.model_type == "supercombo":
       input_shapes = self.metadata["model"]["input_shapes"]
       self.output_slices = self.metadata["model"]["output_slices"]
       self.input_queues, self.npy = make_supercombo_input_queues(input_shapes, self.frame_skip, self.QUEUE_DEV)
@@ -698,7 +708,9 @@ class ModelState:
     return parsed
 
   def _reset_state(self) -> None:
-    if self.model_type == "supercombo":
+    if self.onnx_history:
+      self.input_queues, self.npy = make_stateful_input_queues(self.metadata['model'], self.QUEUE_DEV)
+    elif self.model_type == "supercombo":
       self.input_queues, self.npy = make_supercombo_input_queues(
         self.policy_input_shapes, self.frame_skip, self.QUEUE_DEV,
       )
