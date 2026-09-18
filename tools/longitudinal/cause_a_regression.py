@@ -467,6 +467,138 @@ def simulate_variant(rows: list[dict[str, str]], ep: Episode, name: str, confirm
   )
 
 
+
+def classify_episode_context(frame: list[dict[str, str]]) -> str:
+  if not frame:
+    return "empty"
+
+  explicit_ratio = max(
+    ratio(frame, "spDisableThrottle"),
+    ratio(frame, "spPulseGlideCoasting"),
+    ratio(frame, "spTrackingLead"),
+  )
+  if explicit_ratio > 0.05:
+    return "explicit_starpilot_gate"
+
+  safety_ratio = max(
+    ratio(frame, "brakePressed"),
+    ratio(frame, "shouldStop"),
+    ratio(frame, "hasLead"),
+    ratio(frame, "leadOneStatus"),
+    ratio(frame, "spForcingStop"),
+    ratio(frame, "spRedLight"),
+  )
+  if safety_ratio > 0.05:
+    return "lead_stop_brake_context"
+
+  clean_ratio = sum(clean_context(r) for r in frame) / max(len(frame), 1)
+  demand_ratio = sum(positive_demand(r) for r in frame) / max(len(frame), 1)
+  low_model_prob = any(
+    finite(r.get("modelGasPressProb1")) and float(r["modelGasPressProb1"]) <= MODEL_DISABLE_THRESHOLD
+    for r in frame
+  )
+
+  if low_model_prob and clean_ratio >= 0.80 and demand_ratio >= 0.20:
+    return "clean_model_gate_positive_demand"
+  if low_model_prob and clean_ratio >= 0.80:
+    return "clean_model_gate_other"
+  return "other"
+
+
+def build_global_variant_impact(output_root: Path, episode_map: dict[str, Episode],
+                                positive_ids: set[str]) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+  rows_out: list[dict[str, Any]] = []
+  cache: dict[str, list[dict[str, str]]] = {}
+
+  for episode_id, ep in sorted(episode_map.items()):
+    src = timeline_path(output_root, ep.segment)
+    if not src.exists():
+      continue
+
+    if ep.segment not in cache:
+      try:
+        cache[ep.segment] = sorted(
+          (r for r in read_csv(src) if finite(r.get("t_rel_s"))),
+          key=lambda r: float(r["t_rel_s"]),
+        )
+      except Exception:
+        continue
+
+    all_rows = cache[ep.segment]
+    window = select_window(all_rows, ep.start_s, ep.end_s, 1.0, 1.0)
+    frame = event_rows(all_rows, ep.start_s, ep.end_s)
+    if not window or not frame:
+      continue
+
+    step = infer_step(window)
+    context = classify_episode_context(frame)
+    results = {}
+    for name, confirm_s, bypass in (
+      ("baseline_250ms", 0.25, False),
+      ("confirm_500ms", 0.50, False),
+      ("confirm_750ms", 0.75, False),
+      ("context_bypass_250ms", 0.25, True),
+    ):
+      r = simulate_variant(window, ep, name, confirm_s, contextual_bypass=bypass)
+      results[name] = r
+
+    baseline = results["baseline_250ms"]
+    def seconds(name: str) -> float:
+      return round(results[name].effective_gate_false_frames * step, 3)
+
+    base_s = seconds("baseline_250ms")
+    c500_s = seconds("confirm_500ms")
+    c750_s = seconds("confirm_750ms")
+    bypass_s = seconds("context_bypass_250ms")
+
+    rows_out.append({
+      "episode_id": episode_id,
+      "selected_positive_case": episode_id in positive_ids,
+      "segment": ep.segment,
+      "start_s": round(ep.start_s, 3),
+      "end_s": round(ep.end_s, 3),
+      "context": context,
+      "baseline_false_s": base_s,
+      "confirm_500ms_false_s": c500_s,
+      "confirm_750ms_false_s": c750_s,
+      "context_bypass_false_s": bypass_s,
+      "confirm_500ms_delta_s": round(c500_s - base_s, 3),
+      "confirm_750ms_delta_s": round(c750_s - base_s, 3),
+      "context_bypass_delta_s": round(bypass_s - base_s, 3),
+      "baseline_clean_false_coast_s": baseline.clean_false_coast_seconds,
+      "confirm_500ms_clean_false_coast_s": results["confirm_500ms"].clean_false_coast_seconds,
+      "confirm_750ms_clean_false_coast_s": results["confirm_750ms"].clean_false_coast_seconds,
+      "context_bypass_clean_false_coast_s": results["context_bypass_250ms"].clean_false_coast_seconds,
+    })
+
+  non_positive = [r for r in rows_out if not r["selected_positive_case"]]
+  protected = [r for r in non_positive if r["context"] in {"explicit_starpilot_gate", "lead_stop_brake_context"}]
+
+  def changed_count(rows: list[dict[str, Any]], key: str) -> int:
+    return sum(1 for r in rows if abs(float(r[key])) > 1e-6)
+
+  summary = {
+    "episodes_analyzed": len(rows_out),
+    "positive_cases_present": sum(1 for r in rows_out if r["selected_positive_case"]),
+    "non_positive_episodes": len(non_positive),
+    "protected_context_episodes": len(protected),
+    "non_positive_changed": {
+      "confirm_500ms": changed_count(non_positive, "confirm_500ms_delta_s"),
+      "confirm_750ms": changed_count(non_positive, "confirm_750ms_delta_s"),
+      "context_bypass_250ms": changed_count(non_positive, "context_bypass_delta_s"),
+    },
+    "protected_context_changed": {
+      "confirm_500ms": changed_count(protected, "confirm_500ms_delta_s"),
+      "confirm_750ms": changed_count(protected, "confirm_750ms_delta_s"),
+      "context_bypass_250ms": changed_count(protected, "context_bypass_delta_s"),
+    },
+    "note": (
+      "A changed protected-context duration is a review flag, not proof of an unsafe patch; "
+      "lead/stop/brake protections may constrain acceleration independently of allowThrottle."
+    ),
+  }
+  return rows_out, summary
+
 def criteria() -> dict[str, Any]:
   return {
     "dataset": "Cause A",
@@ -566,6 +698,22 @@ def main() -> int:
   (dataset_dir / "criteria.json").write_text(json.dumps(criteria(), indent=2, ensure_ascii=False), encoding="utf-8")
   write_csv(dataset_dir / "variant_summary.csv", variants)
 
+  global_table_path, global_episode_map = find_episode_table(output_root, args.episodes_csv)
+  global_rows: list[dict[str, Any]] = []
+  global_summary: dict[str, Any] = {
+    "episodes_analyzed": 0,
+    "status": "episode table unavailable",
+  }
+  if global_episode_map:
+    global_rows, global_summary = build_global_variant_impact(
+      output_root, global_episode_map, set(CASE_IDS),
+    )
+    global_summary["episode_table"] = str(global_table_path) if global_table_path else None
+    write_csv(dataset_dir / "global_variant_impact.csv", global_rows)
+  (dataset_dir / "global_variant_summary.json").write_text(
+    json.dumps(global_summary, indent=2, ensure_ascii=False), encoding="utf-8"
+  )
+
   lines = [
     "StarPilot Cause-A regression dataset",
     "==================================",
@@ -593,8 +741,13 @@ def main() -> int:
       ))
   lines += [
     "",
+    "Global impact:",
+    f"  episodes analyzed={global_summary.get('episodes_analyzed', 0)}",
+    f"  non-positive changed @500ms={global_summary.get('non_positive_changed', {}).get('confirm_500ms', 'n/a')}",
+    f"  protected-context changed @500ms={global_summary.get('protected_context_changed', {}).get('confirm_500ms', 'n/a')}",
+    "",
     "Final patch selection is intentionally blocked until negative-control regression",
-    "is run against non-Cause-A lead/stop/brake/disableThrottle episodes.",
+    "is reviewed against non-Cause-A lead/stop/brake/disableThrottle episodes.",
   ]
   (dataset_dir / "summary.txt").write_text("\n".join(lines) + "\n", encoding="utf-8")
   print("\n".join(lines))
