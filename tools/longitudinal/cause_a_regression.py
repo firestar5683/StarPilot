@@ -626,6 +626,131 @@ def build_global_variant_impact(output_root: Path, episode_map: dict[str, Episod
   return rows_out, summary
 
 
+
+def _row_active(row: dict[str, str]) -> bool:
+  return bool(
+    bval(row.get("longActive")) or
+    bval(row.get("active")) or
+    bval(row.get("spActive"))
+  )
+
+
+def _strict_cause_a_frame(row: dict[str, str]) -> bool:
+  return bool(
+    _row_active(row) and
+    not bval(row.get("allowThrottle"), default=True) and
+    clean_context(row) and
+    finite(row.get("modelGasPressProb1")) and
+    float(row["modelGasPressProb1"]) <= MODEL_DISABLE_THRESHOLD and
+    coast_match(row) and
+    positive_demand(row)
+  )
+
+
+def _redlight_confounded_cause_a_frame(row: dict[str, str]) -> bool:
+  return bool(
+    _row_active(row) and
+    not bval(row.get("allowThrottle"), default=True) and
+    redlight_only_context(row) and
+    finite(row.get("modelGasPressProb1")) and
+    float(row["modelGasPressProb1"]) <= MODEL_DISABLE_THRESHOLD and
+    coast_match(row) and
+    positive_demand(row)
+  )
+
+
+def _group_candidate_rows(rows: list[dict[str, str]], predicate) -> list[tuple[int, int]]:
+  if not rows:
+    return []
+  step = infer_step(rows)
+  join_gap = max(0.12, step * 2.2)
+  groups: list[list[int]] = []
+  prev_t: float | None = None
+
+  for i, row in enumerate(rows):
+    if not predicate(row):
+      prev_t = None
+      continue
+
+    t = fnum(row.get("t_rel_s"))
+    if t is None:
+      prev_t = None
+      continue
+
+    if not groups or prev_t is None or t - prev_t > join_gap + 1e-9:
+      groups.append([i])
+    else:
+      groups[-1].append(i)
+    prev_t = t
+
+  return [(g[0], g[-1]) for g in groups]
+
+
+def discover_cause_a_without_redlight(output_root: Path) -> tuple[list[dict[str, Any]], list[dict[str, Any]], list[dict[str, Any]]]:
+  strict_frames: list[dict[str, Any]] = []
+  strict_episodes: list[dict[str, Any]] = []
+  redlight_episodes: list[dict[str, Any]] = []
+
+  for path in sorted((output_root / "Segments").glob("*/timeline.csv")):
+    try:
+      rows = sorted(
+        (r for r in read_csv(path) if finite(r.get("t_rel_s"))),
+        key=lambda r: float(r["t_rel_s"]),
+      )
+    except Exception:
+      continue
+
+    if not rows:
+      continue
+
+    segment = path.parent.name
+    step = infer_step(rows)
+
+    for row in rows:
+      if _strict_cause_a_frame(row):
+        strict_frames.append({
+          "segment": segment,
+          "t_rel_s": fnum(row.get("t_rel_s")),
+          "vEgo": fnum(row.get("vEgo")),
+          "vEgoKph": fnum(row.get("vEgoKph")),
+          "speed_gap_kph": speed_gap_kph(row),
+          "modelGasPressProb1": fnum(row.get("modelGasPressProb1")),
+          "aTarget": fnum(row.get("aTarget")),
+          "aPlan0": fnum(row.get("aPlan0")),
+          "estimatedCoastAccel": fnum(row.get("estimatedCoastAccel")),
+          "allowThrottle": bval(row.get("allowThrottle"), default=True),
+          "spRedLight": bval(row.get("spRedLight")),
+          "brakePressed": bval(row.get("brakePressed")),
+          "hasLead": bval(row.get("hasLead")),
+          "shouldStop": bval(row.get("shouldStop")),
+        })
+
+    for label, predicate, out in (
+      ("strict_no_redlight", _strict_cause_a_frame, strict_episodes),
+      ("redlight_confounded", _redlight_confounded_cause_a_frame, redlight_episodes),
+    ):
+      for s, e in _group_candidate_rows(rows, predicate):
+        frame = rows[s:e + 1]
+        start_s = float(frame[0]["t_rel_s"])
+        end_s = float(frame[-1]["t_rel_s"])
+        out.append({
+          "kind": label,
+          "segment": segment,
+          "start_s": round(start_s, 3),
+          "end_s": round(end_s, 3),
+          "duration_s": round(end_s - start_s + step, 3),
+          "frames": len(frame),
+          "gasPressProb_min": safe_min(r.get("modelGasPressProb1") for r in frame),
+          "gasPressProb_mean": safe_mean(r.get("modelGasPressProb1") for r in frame),
+          "aTarget_mean_mps2": safe_mean(r.get("aTarget") for r in frame),
+          "estimatedCoastAccel_mean_mps2": safe_mean(r.get("estimatedCoastAccel") for r in frame),
+          "aPlan0_max_mps2": safe_max(r.get("aPlan0") for r in frame),
+          "speed_gap_max_kph": safe_max(speed_gap_kph(r) for r in frame),
+        })
+
+  return strict_frames, strict_episodes, redlight_episodes
+
+
 def build_redlight_cross_tab(output_root: Path) -> dict[str, Any]:
   counts = {
     "frames_total": 0,
@@ -846,6 +971,25 @@ def main() -> int:
     json.dumps(redlight_cross_tab, indent=2, ensure_ascii=False), encoding="utf-8"
   )
 
+  strict_frames, strict_episodes, redlight_episodes = discover_cause_a_without_redlight(output_root)
+  write_csv(dataset_dir / "strict_cause_a_frames.csv", strict_frames)
+  write_csv(dataset_dir / "strict_cause_a_episodes.csv", strict_episodes)
+  write_csv(dataset_dir / "redlight_confounded_cause_a_episodes.csv", redlight_episodes)
+  strict_summary = {
+    "strict_frames": len(strict_frames),
+    "strict_episodes": len(strict_episodes),
+    "strict_episode_duration_s_total": round(sum(float(r["duration_s"]) for r in strict_episodes), 3),
+    "redlight_confounded_episodes": len(redlight_episodes),
+    "redlight_confounded_duration_s_total": round(sum(float(r["duration_s"]) for r in redlight_episodes), 3),
+    "interpretation": (
+      "strict_episodes > 0 proves the Cause-A observable signature can occur "
+      "without StarPilot redLight, lead, stop, brake, or explicit throttle-gate context."
+    ),
+  }
+  (dataset_dir / "strict_cause_a_summary.json").write_text(
+    json.dumps(strict_summary, indent=2, ensure_ascii=False), encoding="utf-8"
+  )
+
   lines = [
     "StarPilot Cause-A regression dataset",
     "==================================",
@@ -883,6 +1027,12 @@ def main() -> int:
     f"  allowThrottle=False frames={redlight_cross_tab.get('allow_false', 0)}",
     f"  redLight=True among allowThrottle=False={redlight_cross_tab.get('ratios', {}).get('redlight_true_given_allow_false', 'n/a')}",
     f"  allowThrottle=False among redLight-only context={redlight_cross_tab.get('ratios', {}).get('allow_false_given_redlight_only_context', 'n/a')}",
+    "",
+    "Strict Cause-A discovery:",
+    f"  strict no-redLight frames={strict_summary['strict_frames']}",
+    f"  strict no-redLight episodes={strict_summary['strict_episodes']}",
+    f"  strict no-redLight duration={strict_summary['strict_episode_duration_s_total']:.3f}s",
+    f"  redLight-confounded episodes={strict_summary['redlight_confounded_episodes']}",
     "",
     "Final patch selection is intentionally blocked until negative-control regression",
     "is reviewed against non-Cause-A lead/stop/brake/disableThrottle episodes.",
