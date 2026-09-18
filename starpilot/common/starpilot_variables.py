@@ -361,6 +361,8 @@ def get_starpilot_toggles(sm=messaging.SubMaster(["starpilotPlan"]), *, read_per
   # Only startup/state-management callers should synchronously read the backing
   # files; doing so from every 100 Hz control loop can stall critical processes.
   if read_persisted_force_params:
+    # Keep startup overrides separate from the cached broadcast used by realtime callers.
+    toggles = SimpleNamespace(**vars(toggles))
     if not hasattr(get_starpilot_toggles, "_params"):
       get_starpilot_toggles._params = Params(return_defaults=True)
 

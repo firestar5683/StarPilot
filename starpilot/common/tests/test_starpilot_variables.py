@@ -66,12 +66,17 @@ def test_get_starpilot_toggles_uses_persisted_force_torque_request(monkeypatch):
   monkeypatch.setattr(spv.get_starpilot_toggles, "_params", params, raising=False)
 
   payload = '{"force_torque_controller": false}'
-  toggles = spv.get_starpilot_toggles(
-    {"starpilotPlan": SimpleNamespace(starpilotToggles=payload)},
-    read_persisted_force_params=True,
-  )
+  sm = {"starpilotPlan": SimpleNamespace(starpilotToggles=payload)}
+  spv.process_starpilot_toggles.cache_clear()
+  try:
+    broadcast = spv.get_starpilot_toggles(sm)
+    toggles = spv.get_starpilot_toggles(sm, read_persisted_force_params=True)
 
-  assert toggles.force_torque_controller is True
+    assert toggles.force_torque_controller is True
+    assert broadcast.force_torque_controller is False
+    assert spv.get_starpilot_toggles(sm).force_torque_controller is False
+  finally:
+    spv.process_starpilot_toggles.cache_clear()
 
 
 def test_get_starpilot_toggles_realtime_path_does_not_read_persisted_force_params(monkeypatch):
