@@ -334,11 +334,18 @@ def resolve_episodes(output_root: Path, explicit_csv: Path | None) -> tuple[dict
     notes.append(f"episode table: {table_path}")
   resolved = {cid: table[cid] for cid in CASE_IDS if cid in table}
 
-  if "T0004" not in resolved:
-    hist = discover_t0004(output_root)
-    if hist:
-      resolved["T0004"] = hist
-      notes.append("T0004 auto-discovered in historical segment")
+  # T0004 is the historical reference case. Prefer its known historical segment
+  # even if another checkpoint table happens to reuse the T0004 episode label.
+  hist = discover_t0004(output_root)
+  if hist:
+    table_t0004 = resolved.get("T0004")
+    if table_t0004 is not None and table_t0004.segment != HISTORICAL_T0004_SEGMENT:
+      notes.append(
+        f"T0004 table entry {table_t0004.segment} overridden by historical reference "
+        f"{HISTORICAL_T0004_SEGMENT}"
+      )
+    resolved["T0004"] = hist
+    notes.append("T0004 auto-discovered in historical segment")
 
   missing = [cid for cid in CASE_IDS if cid not in resolved]
   if missing:
