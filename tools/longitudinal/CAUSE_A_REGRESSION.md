@@ -128,9 +128,23 @@ Outputs:
 
 - `strict_cause_a_frames.csv`
 - `strict_cause_a_episodes.csv`
+- `strict_cause_a_temporal_link.csv`
 - `strict_cause_a_summary.json`
 
 If `strict_episodes > 0`, the observable Cause-A mechanism occurs independently
 of the CEM red-light flag. If it is zero, the current positive set remains
 red-light-confounded and the next diagnostic target is the CEM/throttle
 interaction rather than the model throttle gate alone.
+
+
+## Temporal red-light linkage
+
+A frame with `redLight=False` is not automatically independent of CEM stop
+detection. The harness now links each strict no-redLight episode to the next
+redLight-confounded Cause-A episode in the same segment and reports gaps at
+0.5 s, 1.0 s, and 2.0 s.
+
+For the current regression corpus, all discovered strict no-redLight episodes
+are followed by a redLight-confounded episode within 2.0 s. Therefore they
+should be treated as likely pre-latch stop-scene behavior, not as independent
+open-road proof of a throttle-gate defect.
