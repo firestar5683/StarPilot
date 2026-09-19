@@ -6,7 +6,7 @@ The conductor receives only road messages already delivered by replay. It reques
 
 ## Reading the overlay
 
-RoadScore uses a native-style icon and label group in the free area below driver monitoring and current speed, left of the speed-limit sign. A 40-pixel musical mark accompanies a 20-pixel action title and 14-pixel supporting identity. Local text shadows preserve contrast without a panel covering the camera. Normal buffer/backend detail is omitted; degraded state remains explicit. The group yields to actual native navigation cards and alerts.
+RoadScore uses a native-style icon and label group in the free area below driver monitoring and current speed, left of the speed-limit sign. A 50-pixel musical mark matches the native steering wheel and accompanies a fixed 20-pixel RoadScore title and 14-pixel supporting identity. Local text shadows preserve contrast without a panel covering the camera. Normal buffer/backend detail is omitted; degraded state remains explicit. The group yields to actual native navigation cards and alerts.
 
 | Display | Meaning |
 | --- | --- |
@@ -47,3 +47,5 @@ The active native overlay is `prototype/overlay.py`; the pure presentation helpe
 The contextual line names reported musical cues: Turn signal / percussion, Curve ahead / build, Curve apex / impact, Navigation turn / accent, and arrival/stop/resume cues. Active cues take priority over queued cues; queued cues are explicitly prefixed Next. A brief curve apex takes priority over ongoing signal percussion. Unknown kinds are labeled Music cue without guessing a road cause. The archived player supplies these fields from the original scheduler timing.
 
 The score ribbon yields completely to native selfdrive/StarPilot alerts and their fade-out. Optional `ROADSCORE_CAPTURE_EVENTS=1` captures the first displayed active cue of each kind into the ignored replay output for UI review; it does not alter status or music.
+
+The supporting action line stays at a fixed anchor. Brief completed cues may remain for up to 2.5 seconds labeled Recent; queued cues must remain present for 0.4 seconds before display. New active cues and degraded state update immediately. This changes presentation only; raw scheduler status and capture timing remain unchanged.

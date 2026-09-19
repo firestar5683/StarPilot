@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'prototype'))
-from overlay_view import display_text, fit_text, overlay_view, hud_bounds
+from overlay_view import display_text, fit_text, overlay_view, hud_bounds, EventPresentation
 
 
 class OverlayTests(unittest.TestCase):
@@ -56,6 +56,26 @@ class OverlayTests(unittest.TestCase):
     self.assertLessEqual(x + width, 472)
     self.assertLessEqual(y + height, 240)
     self.assertIsNone(hud_bounds(320, 240))
+
+  def test_recent_linger_is_explicit_and_new_active_cue_is_immediate(self):
+    presenter = EventPresentation()
+    active = overlay_view(dict(gesture_active=['turn_signal'], readiness='READY'))
+    self.assertEqual(presenter.update(active, 0)['event_state'], 'active')
+    recent = presenter.update(overlay_view({'readiness': 'READY'}), .2)
+    self.assertEqual(recent['event'], 'Recent: Turn signal')
+    self.assertEqual(recent['event_state'], 'recent')
+    apex = presenter.update(overlay_view(dict(gesture_active=['curve_apex'], readiness='READY')), .3)
+    self.assertEqual(apex['event'], 'Curve apex / impact')
+    self.assertEqual(presenter.update(overlay_view({'readiness': 'READY'}), 3)['event'], '')
+
+  def test_queue_debounce_and_degraded_never_wait(self):
+    presenter = EventPresentation()
+    queued = overlay_view(dict(gesture_queued=[{'kind': 'curve_apex'}], readiness='READY'))
+    self.assertEqual(presenter.update(queued, 0)['event'], '')
+    self.assertEqual(presenter.update(queued, .5)['event'], 'Next: Curve apex')
+    degraded = presenter.update(overlay_view(dict(readiness='DEGRADED', holding_accepted_music=True)), .6)
+    self.assertEqual(degraded['activity'], 'DEGRADED')
+    self.assertEqual(degraded['note'], 'Holding accepted music')
 
   def test_missing_buffer_is_not_zero(self):
     for value in (None, float('nan'), float('inf'), '12', True):

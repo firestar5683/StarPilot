@@ -97,6 +97,38 @@ def fit_text(text, max_width, measure):
   return text.rstrip() + '...' if text else ''
 
 
+class EventPresentation:
+  """Stable visual history; ended cues are explicitly marked Recent, never active."""
+  def __init__(self):
+    self.last_active = None
+    self.last_active_at = -math.inf
+    self.pending = None
+    self.pending_since = 0.
+
+  def update(self, view, now):
+    result = dict(view)
+    if view['activity'] == 'DEGRADED':
+      self.last_active = None
+      self.pending = None
+      return result
+    if view['event_state'] == 'active':
+      self.last_active = view['event'].split(' / ')[0]
+      self.last_active_at = now
+      self.pending = None
+      return result
+    if self.last_active and now - self.last_active_at < 2.5:
+      result.update(event='Recent: ' + self.last_active, event_state='recent', event_kind=None)
+      return result
+    if view['event_state'] == 'queued':
+      if view['event'] != self.pending:
+        self.pending, self.pending_since = view['event'], now
+      if now - self.pending_since < .4:
+        result.update(event='', event_state='', event_kind=None)
+    else:
+      self.pending = None
+    return result
+
+
 def hud_bounds(screen_width, screen_height):
   """Accessory slot below DM/speed, left of the native speed-limit sign."""
   width = min(286, screen_width - 64 - 144 - 16)
@@ -105,8 +137,8 @@ def hud_bounds(screen_width, screen_height):
   return (16, 88, width, 60)
 
 
-def draw_panel(rl, font, state, screen_width, screen_height, emphasis_font=None):
-  view = overlay_view(state)
+def draw_panel(rl, font, state, screen_width, screen_height, emphasis_font=None, presentation=None):
+  view = presentation or overlay_view(state)
   bounds = hud_bounds(screen_width, screen_height)
   if bounds is None:
     return view
@@ -118,32 +150,30 @@ def draw_panel(rl, font, state, screen_width, screen_height, emphasis_font=None)
   section = view['section'].removeprefix('INTENT: ').split(' > ')[0].title()
   if section in ('Archived Score', 'Waiting For Score'):
     section = ''
-  identity = 'Stored score' if view['stored'] else view['profile']
+  identity = 'Stored' if view['stored'] else view['profile']
   subtitle = identity + (' / ' + section if section else '')
   title = 'RoadScore'
   if view['activity'] == 'DEGRADED':
-    title = 'Music on hold' if state.get('holding_accepted_music') else ('Composer offline' if state.get('worker_failed') else 'Reserve in use')
-    subtitle = 'DEGRADED / ' + identity
+    subtitle = 'DEGRADED / ' + ('Music on hold' if state.get('holding_accepted_music') else 'Composer unavailable')
   elif view['event']:
-    title, _, effect = view['event'].partition(' / ')
-    subtitle = identity + (' / ' + effect.capitalize() if effect else '')
+    subtitle = identity + ' / ' + view['event'].split(' / ')[0]
   elif view['activity'] == 'GENERATING':
-    title = 'Composing'
+    subtitle = identity + ' / Composing'
   elif view['activity'] == 'PREPARING':
-    title = 'Preparing music'
-  # Match native icon/label groups: no enclosing dashboard panel.
-  rl.draw_circle(int(x + 20), int(y + 28), 21, rl.Color(0, 0, 0, 150))
+    subtitle = identity + ' / Preparing'
+  # Match the native steering wheel's 50px identity, with fixed text anchors.
+  rl.draw_circle(int(x + 25), int(y + 29), 25, rl.Color(0, 0, 0, 150))
   icon_color = accent if view['activity'] == 'DEGRADED' else rl.WHITE
-  rl.draw_circle(int(x + 12), int(y + 36), 4, icon_color)
-  rl.draw_circle(int(x + 27), int(y + 32), 4, icon_color)
-  for left, top, w, h in ((14, 16, 2.5, 20), (29, 12, 2.5, 20), (14, 12, 17.5, 3.5)):
+  rl.draw_circle(int(x + 14), int(y + 38), 5, icon_color)
+  rl.draw_circle(int(x + 33), int(y + 34), 5, icon_color)
+  for left, top, w, h in ((17, 14, 3, 24), (36, 10, 3, 24), (17, 10, 22, 4)):
     rl.draw_rectangle_rounded(rl.Rectangle(x + left, y + top, w, h), .2, 4, icon_color)
   def text(label, top, size, face, tint, available):
     label = fit_text(label, available, lambda value: rl.measure_text_ex(face, value, size, 0).x)
     # Native HUD text uses local shadows; avoid an opaque rectangle over the road.
     for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1), (1, 2)):
-      rl.draw_text_ex(face, label, rl.Vector2(x + 52 + dx, y + top + dy), size, 0, rl.Color(0, 0, 0, 210))
-    rl.draw_text_ex(face, label, rl.Vector2(x + 52, y + top), size, 0, tint)
-  text(title, 5, 20, title_font, accent if view['activity'] == 'DEGRADED' else rl.WHITE, width - 52)
-  text(subtitle, 33, 14, font, muted, width - 52)
+      rl.draw_text_ex(face, label, rl.Vector2(x + 64 + dx, y + top + dy), size, 0, rl.Color(0, 0, 0, 210))
+    rl.draw_text_ex(face, label, rl.Vector2(x + 64, y + top), size, 0, tint)
+  text(title, 5, 20, title_font, accent if view['activity'] == 'DEGRADED' else rl.WHITE, width - 64)
+  text(subtitle, 33, 14, font, muted, width - 64)
   return view
