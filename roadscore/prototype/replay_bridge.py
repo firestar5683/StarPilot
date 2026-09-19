@@ -4,7 +4,7 @@ One ordered, bounded stream. The existing replay owns video and route discovery.
 import argparse,json,struct,sys,time,os,signal
 from pathlib import Path
 from cereal import messaging,log
-SERVICES=['modelV2','carState','navInstruction','navRoute','longitudinalPlan','starpilotPlan','livePose']
+SERVICES=['modelV2','carState','navInstruction','navRoute','longitudinalPlan','starpilotPlan','livePose','selfdriveState']
 p=argparse.ArgumentParser();p.add_argument('mode',choices=['send','receive']);p.add_argument('--root',default='/data/roadscore');p.add_argument('--seconds',type=float,default=0);p.add_argument('--route',default='normal-replay');a=p.parse_args()
 def packet(stream,data):
  data=struct.pack('!d',time.monotonic())+data

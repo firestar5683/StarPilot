@@ -15,7 +15,7 @@ def archive(route,run,start=0):
  (run/'host_heard.flac').symlink_to(dest/'score.flac')
  if (run/'quality').exists():
   shutil.move(str(run/'quality'),str(dest/'quality'));(run/'quality').symlink_to(dest/'quality',target_is_directory=True)
- for filename in ['host_audio.jsonl','host_audio_summary.json','clock_sync.json','clock_sync_after.json','launch.json','summary.json','jobs.jsonl','boundaries.jsonl','ending.json','bridge.json','runtime_manifest.json','song_form.json','gesture_grid.json','gestures.json','composition.json','settings.json','quality_events.jsonl','ace_link.jsonl']:
+ for filename in ['host_audio.jsonl','host_audio_summary.json','clock_sync.json','clock_sync_after.json','launch.json','summary.json','jobs.jsonl','boundaries.jsonl','ending.json','bridge.json','runtime_manifest.json','song_form.json','gesture_grid.json','gestures.json','shaker_grid.json','shaker_events.json','core_apex_events.json','composition.json','settings.json','quality_events.jsonl','ace_link.jsonl']:
   if (run/filename).exists():shutil.copy2(run/filename,dest/filename)
  blocks=[b for x in (run/'host_audio.jsonl').read_text().splitlines() if (b:=json.loads(x)).get('audio_s') is not None]
  # The first model's absolute time relative to native route start is recorded by sender.

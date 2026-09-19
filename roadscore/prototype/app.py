@@ -12,6 +12,9 @@ from phrase import pulse,cadence_runway,mix_cadence
 from driving_music import DrivingDSP
 from event_music import EventDSP
 from input_clock import InputClock
+from engagement_presentation import EngagementPresentation,PresentationConfig,engagement_active
+from signal_shaker import SignalShaker,assess_grid,profile_tempo_prior
+from core_apex import CoreApex
 from rolling import anchor_options,INITIAL_END,WINDOW,LATENT_SECONDS,trajectory
 from musical import Arrival,MusicalDSP,analyze_music,ending_gesture,match_continuation
 p=argparse.ArgumentParser();p.add_argument('--root',default='/data/roadscore');p.add_argument('--input',choices=['live','replay'],default='replay');p.add_argument('--audible',action='store_true');p.add_argument('--no-conductor',action='store_true');a=p.parse_args();from audio_policy import allow_output;a.audible=allow_output(a.audible);a.mute=not a.audible
@@ -51,6 +54,12 @@ if composer=='ace':
 config=configuration();validate_render_mode(render_mode,composer,config.get('song_form_experimental',False));identity=config.get('identity','legacy');identity=identity if identity in styles else 'legacy'
 rolling_mode=config.get('rolling',False);rolling_anchors={k:anchor_options(root,k) for k in styles if (root/f'assets/source_{k}.wav').exists()} if rolling_mode and composer!='ace' else {}
 drive_events=config.get('drive_events',False) or config.get('event_music',False);phrase_runway=config.get('phrase_runway',False)
+presentation_config=PresentationConfig.read(config.get('engagement_presentation'))
+shaker_enabled=config.get('signal_shaker',{}).get('enabled') is True
+apex_enabled=config.get('core_apex',{}).get('enabled') is True
+if (presentation_config.enabled or shaker_enabled or apex_enabled) and render_mode!='gold-core':raise ValueError('Optional presentation layers require gold-core baseline')
+presentation=EngagementPresentation(rate,block) if presentation_config.enabled else None
+engagement=(False,False,0,0.,0);signal_state=(False,False,0,0.,0)
 initial_identity=identity;musical_mode=config.get('musical',False);arrival=Arrival();ending_start=None;ending_audio=None;ending_info={};playing_identity=identity;identity_queue=[];last_requested_identity=identity
 usable_frames=WINDOW if rolling_mode else (301 if musical_mode else 323)
 source_path=root/f'assets/source_{identity}.wav' if identity!='legacy' else root/'assets/source.wav'
@@ -88,6 +97,13 @@ if config.get('gesture_layer',False) and render_mode=='current':
  gesture_grid=grid(gesture_source,rate,gesture_pulse['bpm'] if gesture_pulse['confidence']>=.25 else music_info['bpm'])
  gestures=MusicalGestures(gesture_source,rate,gesture_grid['bpm'],gesture_grid['beat_phase'])
  (run/'gesture_grid.json').write_text(json.dumps(gesture_grid))
+shaker=None;apex=None
+if shaker_enabled or apex_enabled:
+ profile_manifest=json.loads((root/'experiments/ace_chestnut_20260916/profiles'/ace_profile/'profile.json').read_text())
+ shaker_grid,shaker_analysis=assess_grid(source,rate,profile_tempo_prior(profile_manifest))
+ shaker=SignalShaker(shaker_grid,rate,enabled=shaker_enabled)
+ apex=CoreApex(shaker_grid,rate,enabled=apex_enabled)
+ (run/'shaker_grid.json').write_text(json.dumps({'grid':shaker.snapshot(),'analysis':shaker_analysis},indent=2))
 if config.get('composition_control',False):
  from composition_policy import CompositionPolicy
  composition=CompositionPolicy(extended_buffer=composer=='ace')
@@ -151,8 +167,13 @@ def callback(out,n,ti,status):
  if section_bank is not None:chunk=section_bank.render(n)
  rendered=render_audio(render_mode,chunk,dsp,amount,ending,gestures,mix_cadence,
   (ending_audio,frames-n,ending_start,rate) if musical_mode and ending_start is not None else None)
+ active,fresh=engagement_active(engagement[1],engagement[0],engagement[2],engagement[4],engagement[3],callback_wall)
+ signal_on,signal_fresh=engagement_active(signal_state[1],signal_state[0],signal_state[2],signal_state[4],signal_state[3],callback_wall)
+ if shaker is not None:rendered=shaker.process(rendered,frames-n,signal_on,signal_fresh)
+ if apex is not None:rendered=apex.process(rendered,frames-n,event_state)
+ if presentation is not None:rendered=presentation.process(rendered,active,presentation_config)
  out[:]=0 if a.mute else rendered
- try:capture.put_nowait((rendered,chunk,{'audio_s':(frames-n)/rate,'callback_wall':callback_wall,'command_received_wall':command_wall,'replay_origin_wall':replay_origin_wall,'dac_delay':float(ti.outputBufferDacTime-ti.currentTime),'route_t':source_time,'amount':amount,'phase':event_state['phase'],'strength':event_state.get('strength',0),'predicted_peak':event_state.get('predicted_peak'),'activation':event_state.get('activation'),'kind':event_state.get('kind','curve'),'cadence_entry_audio_s':None if ending_start is None else ending_start/rate,'runway_active':ending_start is not None and frames-n<ending_start,'muted':a.mute,'portaudio_status':str(status),'callback_processing_seconds':time.monotonic()-callback_wall}))
+ try:capture.put_nowait((rendered,chunk,{'signal_shaker_enabled':shaker_enabled,'signal_on':signal_on,'signal_fresh':signal_fresh,'engagement_presentation_enabled':presentation_config.enabled,'engagement_active':active,'engagement_fresh':fresh,'audio_s':(frames-n)/rate,'callback_wall':callback_wall,'command_received_wall':command_wall,'replay_origin_wall':replay_origin_wall,'dac_delay':float(ti.outputBufferDacTime-ti.currentTime),'route_t':source_time,'amount':amount,'phase':event_state['phase'],'strength':event_state.get('strength',0),'predicted_peak':event_state.get('predicted_peak'),'activation':event_state.get('activation'),'kind':event_state.get('kind','curve'),'cadence_entry_audio_s':None if ending_start is None else ending_start/rate,'runway_active':ending_start is not None and frames-n<ending_start,'muted':a.mute,'portaudio_status':str(status),'callback_processing_seconds':time.monotonic()-callback_wall}))
  except queue.Full:underflows+=1
 # Optional prewarmed continuation gives ~52 seconds before replay starts.
 warm=root/'generated/job_-1.wav'
@@ -164,7 +185,7 @@ if composer!='ace' and warm.exists() and (root/'generated/worker_ready').exists(
  end=round(usable_frames*4096/44100*rate) if musical_mode else len(w)
  append(w[round((warm_meta['retained_seconds']-2)*rate):end],overlap=2.,match=musical_mode and not rolling_mode)
  lastlatent=str(root/'generated/job_-1.npy')
-sm=messaging.SubMaster(['modelV2','carState','navInstruction','navRoute','longitudinalPlan','starpilotPlan','livePose'],poll='modelV2')
+sm=messaging.SubMaster(['modelV2','carState','navInstruction','navRoute','longitudinalPlan','starpilotPlan','livePose','selfdriveState'],poll='modelV2')
 # Warm PortAudio before publishing ready; replay starts only once consumer exists.
 if export:
  from render_clock import RenderClock
@@ -182,6 +203,13 @@ try:
   while True:
    if getattr(stream,'error',None):raise RuntimeError('Remote render clock failed') from stream.error
    sm.update(100)
+   control_wall=time.monotonic();latest_source=max(sm.logMonoTime.values())
+   if sm.updated['selfdriveState']:
+    engagement=(bool(sm['selfdriveState'].active),bool(sm.valid['selfdriveState']),sm.logMonoTime['selfdriveState'],control_wall,latest_source)
+   else:engagement=(*engagement[:4],latest_source)
+   if sm.updated['carState']:
+    signal_state=(bool(sm['carState'].leftBlinker or sm['carState'].rightBlinker),bool(sm.valid['carState']),sm.logMonoTime['carState'],control_wall,latest_source)
+   else:signal_state=(*signal_state[:4],latest_source)
    clock=clock_source.read(sm)
    if clock is None:continue
    if clock['done']:
@@ -307,7 +335,7 @@ try:
      if composition:
       style=composition.choose(frames,rate,nav if navfresh else {},speed,buffered);phase=style;mix=None
      generation_index+=1
-     job+=1;req={'id':job,'run_id':run_id,'identity':identity,'previous_identity':last_requested_identity,'source_end':usable_frames,'seconds_total':120 if rolling_mode else (30 if style=='closing' else (120 if musical_mode else 30)),'conditioning':style,'nav_revision':nav_revision,'latents':lastlatent,'cutoff_ns':available_ns,'input_times':dict(sm.logMonoTime),'play_at_audio_s':frames/rate+buffered,'route_t':now,'intent':state['phase'],'nav':nav if navfresh else {},'trajectory':phase,'conditioning_mix':mix if rolling_mode else None,**(rolling_anchors[identity] if rolling_mode and composer!='ace' else {})}
+     job+=1;req={'id':job,'run_id':run_id,'identity':identity,'previous_identity':last_requested_identity,'source_end':usable_frames,'seconds_total':120 if rolling_mode else (30 if style=='closing' else (120 if musical_mode else 30)),'conditioning':style,'nav_revision':nav_revision,'latents':lastlatent,'cutoff_ns':available_ns,'input_times':{k:v for k,v in sm.logMonoTime.items() if k!='selfdriveState'},'play_at_audio_s':frames/rate+buffered,'route_t':now,'intent':state['phase'],'nav':nav if navfresh else {},'trajectory':phase,'conditioning_mix':mix if rolling_mode else None,**(rolling_anchors[identity] if rolling_mode and composer!='ace' else {})}
      if composition:
       req.update(anchor_frames=0,context_frames=44,seconds_total=30 if style=='closing' else 120)
      if base_seed is not None:req.update(seed=sample_seed(base_seed,'continuation',generation_index-1),generation_seed=base_seed,generation_index=generation_index-1)
@@ -317,6 +345,10 @@ try:
      with (run/'jobs.jsonl').open('a') as audit:audit.write(json.dumps(req)+'\n')
      f=root/'generated/request.tmp';f.write_text(json.dumps(req));f.replace(root/'generated/request.json');inflight=True;budget_waiting=False;job_started=time.monotonic();last_requested_identity=identity
     snapshot={'composer':composer,'render_mode':render_mode,'readiness':'DEGRADED' if worker_failed or quality_failures or holding else 'READY','profile':ace_profile if composer=='ace' else None,'safe_extensions':len(safe_extensions),'holding_accepted_music':holding,'quality_failures':quality_failures,'style':PROFILES[ace_profile]['name'] if composer=='ace' else styles.get(identity,{}).get('name',identity),'section':'OUTRO' if ending_start is not None else 'CONTINUATION','identity':identity,'playing_identity':playing_identity,'musical_mode':musical_mode,'route':clock['route'],'route_t':now,'elapsed':frames/rate,'kind':state.get('kind','curve'),'phase':state['phase'],'amount':state['amount'],'lead':state['lead'],'activation':state['activation'],'predicted_peak':state['predicted_peak'],'strength':state['strength'],'predicted_turn_radians':state.get('predicted_turn_radians'),'detector':state.get('detector'),'qualified_since':state.get('qualified_since'),'command_wall':time.monotonic(),'speed':speed,'steering':float(sm['carState'].steeringAngleDeg),'model_age':(sm.logMonoTime['modelV2']-m.timestampEof)/1e9,'source_cutoff_ns':available_ns,'model_mono_ns':sm.logMonoTime['modelV2'],'buffered':buffered,'fallbacks':fallbacks,'underflows':underflows,'job_inflight':inflight,'generation_elapsed_seconds':max(0.,time.monotonic()-job_started) if inflight else None,'worker_failed':worker_failed,'completed_jobs':sum(not j.get('error') and not j.get('quality_rejected') for j in generation),'nav':nav,'nav_revision':nav_revision,'discarded_jobs':len(discarded_jobs),'arrival_at':arrival_at,'replay_late':clock['late']}
+    if presentation is not None:
+     engagement_on,engagement_fresh=engagement_active(engagement[1],engagement[0],engagement[2],engagement[4],engagement[3],time.monotonic())
+     snapshot.update(presentation.snapshot(presentation_config,engagement_on,engagement_fresh))
+    if shaker is not None:snapshot['signal_shaker']=shaker.snapshot()
     if songform:snapshot.update(songform.snapshot())
     if composition:snapshot.update(composition.snapshot(frames/rate))
     if gestures:snapshot.update(gestures.status())
@@ -324,6 +356,8 @@ try:
    if time.monotonic()-last_progress>15:raise RuntimeError('Replay model input stalled')
 finally:
  audio_started=False
+ if apex is not None:(run/'core_apex_events.json').write_text(json.dumps(apex.events,indent=2))
+ if shaker is not None:(run/'shaker_events.json').write_text(json.dumps({'sequences':shaker.events,'pulse_frames':shaker.pulse_frames,'settings':shaker.snapshot()},indent=2))
  if gestures:(run/'gestures.json').write_text(json.dumps({'events':gestures.events,'bpm':gestures.bpm,'source_derived':True,'tonal_key_not_inferred':True},indent=2))
  if composition:(run/'composition.json').write_text(json.dumps({'events':composition.events,**composition.snapshot(frames/rate)},indent=2))
  if songform:
