@@ -15,6 +15,8 @@ else:
 P=Path(__file__).resolve().parent;R=P.parents[1];G=R/'generated'
 sys.path.insert(0,str(R/'prototype'))
 from ace_profiles import selected
+from generation_seed import configured_seed,sample_seed
+base_seed=configured_seed()
 from quality_gate import QualifiedGenerator,POLICY
 from link_health import LinkProbe
 from tinygrad import Device
@@ -27,7 +29,7 @@ def write_json(path,data):
  tmp=path.with_suffix('.tmp');tmp.write_text(json.dumps(data,indent=2));tmp.replace(path)
 def save_wave(path,wave):sf.write(path,wave*POLICY.output_gain,48000,subtype='FLOAT')
 try:
- write_json(G/'ace_worker_state.json',{'pid':os.getpid(),'profile':profile,'phase':'preparing'})
+ write_json(G/'ace_worker_state.json',{'pid':os.getpid(),'generation_seed':base_seed,'profile':profile,'phase':'preparing'})
  load_started=time.monotonic()
  c=Composer(P,profile=profile) if windowed else Composer(P)
  model_load_seconds=time.monotonic()-load_started
@@ -51,7 +53,7 @@ try:
  initial=None;last=None;preparation=[];slot=0
  while initial is None or len(initial)/48000<POLICY.initial_buffer_seconds:
   role=('initial' if windowed else 'verse') if initial is None else ('verse' if windowed else 'repaint_verse')
-  wave,last_new,stats=qualified.run(role,33602+slot,last,record=record_for('prepare_'+preparation_id+'_'+str(slot)))
+  wave,last_new,stats=qualified.run(role,33602+slot if base_seed is None else sample_seed(base_seed,"prepare",slot),last,record=record_for('prepare_'+preparation_id+'_'+str(slot)))
   preparation.append(stats)
   if wave is None:raise RuntimeError('Preparation rejected after bounded quality retries; inspect generated/quality')
   if initial is None:initial=wave.copy()
@@ -62,8 +64,8 @@ try:
   last=last_new;slot+=1
   if slot>8:raise RuntimeError('Initial buffer did not fill within bounded preparation')
  save_wave(G/'ace_initial.wav',initial);np.save(G/'ace_initial.npy',last)
- write_json(G/'ace_initial.json',{'composer':'ace','startup_seconds':time.monotonic()-BOOT,'model_load_seconds':model_load_seconds,'host_peak_rss_kib':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,'duration':len(initial)/48000,'source_identity':'kpop_control','prepared_profile':profile if windowed else 'legacy','preparation_id':preparation_id,'continuation_policy':'quality-gated fixed lookahead','generation':preparation,'prepared_identity':True,'output_gain':POLICY.output_gain,'created_wall':time.time()})
- write_json(G/'ace_worker_state.json',{'pid':os.getpid(),'profile':profile,'phase':'READY','initial_buffer_seconds':len(initial)/48000})
+ write_json(G/'ace_initial.json',{'generation_seed':base_seed,'composer':'ace','startup_seconds':time.monotonic()-BOOT,'model_load_seconds':model_load_seconds,'host_peak_rss_kib':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,'duration':len(initial)/48000,'source_identity':'kpop_control','prepared_profile':profile if windowed else 'legacy','preparation_id':preparation_id,'continuation_policy':'quality-gated fixed lookahead','generation':preparation,'prepared_identity':True,'output_gain':POLICY.output_gain,'created_wall':time.time()})
+ write_json(G/'ace_worker_state.json',{'pid':os.getpid(),'generation_seed':base_seed,'profile':profile,'phase':'READY','initial_buffer_seconds':len(initial)/48000})
  (G/'request.json').unlink(missing_ok=True);ready.write_text('ace');print('ACE_READY',flush=True)
  while True:
   request=G/'request.json'
@@ -72,6 +74,7 @@ try:
   if req.get('composer')!='ace':raise ValueError('ACE worker received a request for a different backend')
   if req.get('profile',profile)!=profile:raise ValueError('Resident ACE profile mismatch; stop and prepare requested profile before replay')
   if req.get('identity')!='kpop_control':raise ValueError('ACE experimental worker only has the prepared kpop_control identity')
+  if req.get('generation_seed')!=base_seed:raise ValueError('Generation request does not match prepared session seed')
   job=int(req['id']);busy=G/'busy';busy.write_text(str(job));start=time.monotonic()
   try:
    case={'base':'repaint_verse','approach':'repaint_chorus','bridge_transition':'repaint_bridge','closing':'repaint_outro'}.get(req['conditioning'])
@@ -80,7 +83,7 @@ try:
    if windowed:case=case.removeprefix('repaint_')
    previous=np.load(req['latents'])
    deadline=req.get('playback_deadline_monotonic')
-   wave,latent,stats=qualified.run(case,job%(2**32),previous,deadline=deadline,record=record_for(job))
+   wave,latent,stats=qualified.run(case,int(req.get('seed',job%(2**32))),previous,deadline=deadline,record=record_for(job))
    if wave is None:
     write_json(G/f'result_{job}.json',{**req,**stats,'id':job,'composer':'ace','seconds':time.monotonic()-start});continue
    wav=G/f'ace_job_{job}.wav';lat=G/f'ace_job_{job}.npy';save_wave(wav,wave);np.save(lat,latent)
@@ -91,4 +94,4 @@ try:
   finally:busy.unlink(missing_ok=True)
 finally:
  ready.unlink(missing_ok=True)
- write_json(G/'ace_worker_state.json',{'pid':os.getpid(),'profile':profile,'phase':'Stopped'})
+ write_json(G/'ace_worker_state.json',{'pid':os.getpid(),'generation_seed':base_seed,'profile':profile,'phase':'Stopped'})

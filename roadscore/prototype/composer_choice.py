@@ -17,8 +17,11 @@ def check_available():
  if any(selected in command and 'python' in command for command in commands):
   if choice()=='ace':
    from ace_profiles import selected as selected_profile
-   try:profile=json.loads((ROOT/'generated/ace_worker_state.json').read_text())['profile']
+   try:
+    worker_state=json.loads((ROOT/'generated/ace_worker_state.json').read_text());profile=worker_state['profile']
    except (OSError,ValueError,KeyError):raise SystemExit('ACE worker profile unavailable; restart preparation explicitly')
+   from generation_seed import configured_seed
+   if worker_state.get('generation_seed')!=configured_seed():raise SystemExit('Resident ACE seed differs; stop owned worker and prepare requested seed')
    if profile!=selected_profile():raise SystemExit('Resident ACE profile differs; stop owned worker and prepare requested profile')
   return
  lockpath=ROOT/'generated/gpu.lock'

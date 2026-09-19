@@ -34,6 +34,12 @@ def configuration():
 from composer_choice import choice
 from composer_audio import result_window
 from generation_budget import GenerationBudget
+from generation_seed import configured_seed,sample_seed
+base_seed=configured_seed();generation_index=0
+if base_seed is not None:
+ if choice()!="ace":raise ValueError("Deterministic session seeds currently require ACE")
+ prepared=json.loads((root/"generated/ace_initial.json").read_text())
+ if prepared.get("generation_seed")!=base_seed:raise ValueError("Resident preparation seed differs from requested session seed")
 generation_budget=GenerationBudget();budget_waiting=False
 composer=choice()
 from ace_profiles import selected,PROFILES
@@ -300,9 +306,11 @@ try:
       style=songform.next['section'] if songform.next else songform.section;phase=style;mix=None
      if composition:
       style=composition.choose(frames,rate,nav if navfresh else {},speed,buffered);phase=style;mix=None
+     generation_index+=1
      job+=1;req={'id':job,'run_id':run_id,'identity':identity,'previous_identity':last_requested_identity,'source_end':usable_frames,'seconds_total':120 if rolling_mode else (30 if style=='closing' else (120 if musical_mode else 30)),'conditioning':style,'nav_revision':nav_revision,'latents':lastlatent,'cutoff_ns':available_ns,'input_times':dict(sm.logMonoTime),'play_at_audio_s':frames/rate+buffered,'route_t':now,'intent':state['phase'],'nav':nav if navfresh else {},'trajectory':phase,'conditioning_mix':mix if rolling_mode else None,**(rolling_anchors[identity] if rolling_mode and composer!='ace' else {})}
      if composition:
       req.update(anchor_frames=0,context_frames=44,seconds_total=30 if style=='closing' else 120)
+     if base_seed is not None:req.update(seed=sample_seed(base_seed,'continuation',generation_index-1),generation_seed=base_seed,generation_index=generation_index-1)
      if composer=='ace':
       req={k:v for k,v in req.items() if k not in ('source_end','seconds_total','context_frames','anchor_frames','conditioning_mix')}
       req.update(composer='ace',profile=ace_profile,buffer_seconds=buffered,playback_deadline_monotonic=time.monotonic()+buffered)
