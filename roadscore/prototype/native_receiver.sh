@@ -9,10 +9,12 @@ flock -n 9 || { echo "Another native RoadScore session owns this bench"; exit 1;
 power_pid=""
 audio_pid=""
 bridge_pid=""
+worker_reused=1
+resident_keep=0
 cleanup() {
   if [ -n "$bridge_pid" ]; then kill "$bridge_pid" 2>/dev/null || true; wait "$bridge_pid" 2>/dev/null || true; fi
   if [ -n "$audio_pid" ]; then kill "$audio_pid" 2>/dev/null || true; wait "$audio_pid" 2>/dev/null || true; fi
-  if [ -n "$power_pid" ]; then kill "$power_pid" 2>/dev/null || true; wait "$power_pid" 2>/dev/null || true; fi
+  if [ -n "$power_pid" ] && [ "$resident_keep" != 1 ]; then kill "$power_pid" 2>/dev/null || true; wait "$power_pid" 2>/dev/null || true; fi
 }
 trap cleanup EXIT
 trap 'exit 130' HUP INT TERM
@@ -22,9 +24,13 @@ export ROADSCORE_WORKER="$worker_script"
 preparation_wait=360
 if [ "${ROADSCORE_COMPOSER:-ace}" = ace ]; then preparation_wait=1500; fi
 if ! pgrep -f "^/data/sa3-feasibility/venv/bin/python -u ${worker_script}$" >/dev/null; then
+  worker_reused=0
   rm -f generated/worker_ready
-  env -u OPENPILOT_PREFIX /usr/local/venv/bin/python -u prototype/power_worker.py > results/native_worker.log 2>&1 < /dev/null &
+  setsid env -u OPENPILOT_PREFIX /usr/local/venv/bin/python -u prototype/power_worker.py > results/native_worker.log 2>&1 < /dev/null &
   power_pid=$!
+  if [ "${ROADSCORE_RESIDENT:-0}" = 1 ]; then
+    /usr/local/venv/bin/python -c 'import json,sys,time; from pathlib import Path; p=int(sys.argv[1]); Path("generated/resident_owner.json").write_text(json.dumps({"power_worker_pid":p,"process_start_ticks":Path(f"/proc/{p}/stat").read_text().split()[21],"created_wall":time.time(),"stop":"SIGTERM power_worker_pid; it restores CPU and stops its child"}))' "$power_pid"
+  fi
 fi
 for attempt in $(seq 1 "$preparation_wait"); do
   [ -f generated/worker_ready ] && break
@@ -33,7 +39,14 @@ for attempt in $(seq 1 "$preparation_wait"); do
   sleep 1
 done
 [ -f generated/worker_ready ] || { echo 'Worker preparation timed out'; exit 1; }
-if [ "${ROADSCORE_COMPOSER:-ace}" = ace ]; then /usr/local/venv/bin/python prototype/prepared_session.py; fi
+if [ "${ROADSCORE_COMPOSER:-ace}" = ace ]; then
+  if [ "${ROADSCORE_RESIDENT:-0}" = 1 ] && [ "$worker_reused" = 1 ]; then
+    ROADSCORE_PREPARE_RESIDENT=1 /usr/local/venv/bin/python prototype/prepared_session.py
+  else
+    /usr/local/venv/bin/python prototype/prepared_session.py
+  fi
+fi
+if [ "${ROADSCORE_RESIDENT:-0}" = 1 ]; then resident_keep=1; fi
 export OPENPILOT_PREFIX=roadscore_native
 export PYTHONPATH=/data/openpilot:/data/roadscore/prototype:/data/roadscore-feasibility/venv/lib/python3.12/site-packages
 mkdir -p /dev/shm/msgq_roadscore_native

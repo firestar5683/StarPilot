@@ -25,6 +25,11 @@ p=argparse.ArgumentParser();p.add_argument('--root',default='/data/roadscore');p
 def terminate(sig,frame):raise KeyboardInterrupt
 signal.signal(signal.SIGTERM,terminate)
 root=Path(a.root)
+if os.environ.get('ROADSCORE_RESIDENT')=='1':
+ import atexit
+ from resident_session import session_lease
+ playback_lease=session_lease(root/'generated');playback_lease.__enter__()
+ atexit.register(playback_lease.__exit__,None,None,None)
 from privacy_guard import install
 install(root)
 run=root/'results/current';run.mkdir(parents=True,exist_ok=True)
