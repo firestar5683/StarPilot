@@ -31,6 +31,8 @@ if resident and composition_policy!='hook-cache-v1':raise ValueError('Resident m
 if resident and (G/'session_request.json').exists():raise RuntimeError('Unacknowledged resident request requires owner inspection before restart')
 from contextlib import nullcontext
 from resident_session import session_lease,validate_session
+from startup_buffer import initial_target
+initial_buffer_target=initial_target(os.environ,composition_policy,POLICY.initial_buffer_seconds)
 from tinygrad import Device
 profile=selected();preparation_id=f'{profile}_{time.time_ns()}'
 lock=open(G/'gpu.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -87,7 +89,7 @@ try:
   write_json(G/'ace_worker_state.json',{'pid':os.getpid(),'generation_seed':base_seed,'composition_policy':composition_policy,'profile':profile,'phase':'preparing','accepted_chunks':0,'accepted_buffer_seconds':0.,'elapsed_seconds':0.,'resident_reused':bool(selection)})
   print('ACE_PREPARING',profile,flush=True)
   initial=None;last=None;preparation=[];slot=0;first_accepted_audio_seconds=None
-  while initial is None or len(initial)/48000<POLICY.initial_buffer_seconds:
+  while initial is None or len(initial)/48000<initial_buffer_target:
    role=('initial' if windowed else 'verse') if initial is None else ('verse' if windowed else 'repaint_verse')
    if planned:role=planned.begin(last)
    wave,last_new,stats=qualified.run(role,sample_seed(base_seed,"prepare",slot),last,record=record_for('prepare_'+preparation_id+'_'+str(slot)))
@@ -104,7 +106,7 @@ try:
    write_json(G/'ace_worker_state.json',{'pid':os.getpid(),'generation_seed':base_seed,'composition_policy':composition_policy,'profile':profile,'phase':'preparing','accepted_chunks':slot,'accepted_buffer_seconds':len(initial)/48000,'first_accepted_audio_seconds':first_accepted_audio_seconds,'elapsed_seconds':time.monotonic()-session_started})
    if slot>8:raise RuntimeError('Initial buffer did not fill within bounded preparation')
   save_wave(G/'ace_initial.wav',initial);np.save(G/'ace_initial.npy',last)
-  write_json(G/'ace_initial.json',{'generation_seed':base_seed,'composition_policy':composition_policy,'composer':'ace','startup_seconds':time.monotonic()-session_started,'first_accepted_audio_seconds':first_accepted_audio_seconds,'model_load_seconds':0. if selection else model_load_seconds,'resident_model_load_seconds':model_load_seconds,'worker_uptime_seconds':time.monotonic()-BOOT,'resident_reused':bool(selection),'resident_capable':resident,'resident_model_identity':str(id(c)),'conditioning_bank_sha256':planned.bank_hash if resident else None,'host_peak_rss_kib':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,'duration':len(initial)/48000,'source_identity':'kpop_control','prepared_profile':profile if windowed else 'legacy','preparation_id':preparation_id,'continuation_policy':'quality-gated fixed lookahead','generation':preparation,'prepared_identity':True,'output_gain':POLICY.output_gain,'created_wall':time.time()})
+  write_json(G/'ace_initial.json',{'generation_seed':base_seed,'composition_policy':composition_policy,'composer':'ace','startup_seconds':time.monotonic()-session_started,'first_accepted_audio_seconds':first_accepted_audio_seconds,'model_load_seconds':0. if selection else model_load_seconds,'resident_model_load_seconds':model_load_seconds,'worker_uptime_seconds':time.monotonic()-BOOT,'resident_reused':bool(selection),'resident_capable':resident,'resident_model_identity':str(id(c)),'conditioning_bank_sha256':planned.bank_hash if resident else None,'host_peak_rss_kib':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,'duration':len(initial)/48000,'initial_buffer_target_seconds':initial_buffer_target,'source_identity':'kpop_control','prepared_profile':profile if windowed else 'legacy','preparation_id':preparation_id,'continuation_policy':'quality-gated fixed lookahead','generation':preparation,'prepared_identity':True,'output_gain':POLICY.output_gain,'created_wall':time.time()})
   write_json(G/'ace_worker_state.json',{'pid':os.getpid(),'generation_seed':base_seed,'composition_policy':composition_policy,'profile':profile,'phase':'READY','initial_buffer_seconds':len(initial)/48000})
   (G/'request.json').unlink(missing_ok=True);ready.write_text('ace');print('ACE_READY',flush=True)
  with session_lease(G) if resident else nullcontext():prepare_session()

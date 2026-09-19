@@ -42,7 +42,7 @@ def worker(tmp_path, monkeypatch):
                G=tmp_path,Path=Path,os=os,time=time,np=np,resource=resource,BOOT=time.monotonic(),
                ready=tmp_path/'worker_ready',CachedComposition=Plan,QualifiedGenerator=Generator,
                generate=None,HOOK_POLICY=policy,POLICY=policy,windowed=True,resident=True,c=model,
-               model_load_seconds=12.,record_for=lambda job:None,sample_seed=sample_seed,
+               model_load_seconds=12.,initial_buffer_target=.01,record_for=lambda job:None,sample_seed=sample_seed,
                write_json=lambda path,value:saved.update({path.name:value}),
                save_wave=lambda path,wave:audio.append(wave.copy()))
     exec(code,state)
