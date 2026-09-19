@@ -22,7 +22,8 @@ def local_source(route,root=ROOT):
  for parent in candidates:
   if (parent/'.acquiring').exists() or cache_complete(parent) is False:continue
   if any(parent.glob(name+'--*/rlog*')) or any(parent.glob(name+'--*/qlog*')):return parent
- return None
+ from cache_discovery import prepared_source
+ return prepared_source(route,root)
 
 def fetch(route):
  # Same authenticated endpoints and host fallback as native replay. Never prints signed URLs.
