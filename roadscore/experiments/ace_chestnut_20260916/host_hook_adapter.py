@@ -42,9 +42,24 @@ def continuation_inputs(context, prefix):
     return result, source, mask
 
 
+class PreparationOnlyDecoder:
+    """Dispatch marker, never a model: accidental diffusion must fail closed."""
+    def __call__(self, *args, **kwargs):
+        raise RuntimeError('Host diffusion disabled in preparation-only service')
+
+
+def release_preparation_decoder(handler):
+    # Official code selects the capture boundary only when mlx_decoder is not None.
+    # Require real initialization first; do not fake a successful model conversion.
+    if not handler.use_mlx_dit or handler.mlx_decoder is None or handler.model.decoder is not None:
+        raise RuntimeError('Release requires verified MLX conversion and disabled Torch decoder')
+    handler.mlx_decoder = PreparationOnlyDecoder()
+
+
 class HostHookAdapter:
     """One serialized host model instance; initialize only on actual cache miss."""
-    def __init__(self, assets_root):
+    def __init__(self, assets_root, *, preparation_only=False):
+        self.preparation_only = preparation_only
         self.base = Path(assets_root).resolve() / 'experiments/composition_20260916'
         self.handler = self.lm = None
         self.lock = threading.Lock()
@@ -66,7 +81,7 @@ class HostHookAdapter:
             model = tree_hash(self.base / 'models/ace/checkpoints')
             official = tree_hash(self.base / 'vendor/ACE-Step-1.5/acestep')
             local = hashlib.sha256(Path(__file__).read_bytes()).hexdigest()
-            preparation = hashlib.sha256((official + local).encode()).hexdigest()
+            preparation = hashlib.sha256((official + local + ('preparation-only-v1' if self.preparation_only else 'full-host-v1')).encode()).hexdigest()
             self._fingerprints = {'model_fingerprint': model, 'preparation_fingerprint': preparation}
         return dict(self._fingerprints)
 
@@ -107,6 +122,14 @@ class HostHookAdapter:
             device='mps', use_mlx_dit=True, offload_to_cpu=True, offload_dit_to_cpu=True)
         if not ok or not handler.use_mlx_dit or handler.mlx_decoder is None:
             raise RuntimeError(f'No safe MLX preparation boundary: {status}')
+        if self.preparation_only:
+            release_preparation_decoder(handler)
+            import gc
+            import mlx.core as mx
+            import torch
+            gc.collect()
+            mx.clear_cache()
+            torch.mps.empty_cache()
         self.handler, self.lm = handler, lm
 
     def __call__(self, request, sources, output):
@@ -162,6 +185,7 @@ class HostHookAdapter:
                 (output / 'prepared.json').write_text(json.dumps({
                     'request_key': request.cache_key, 'semantic_seed': request.semantic_seed,
                     'semantic_plan_present': True, 'audio_diffusion_called': False,
+                    'host_preparation_only': self.preparation_only,
                     'conditioning_strategy': 'full semantic planning per bounded window; actual hook audio reference; committed latent prefix',
                     'native_validated': False, 'request': request.identity()}, indent=2))
                 from hook_planning import validate_prepared

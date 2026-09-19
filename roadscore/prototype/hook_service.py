@@ -72,7 +72,7 @@ def main():
  parser=argparse.ArgumentParser();parser.add_argument('--assets-root',type=Path,required=True);parser.add_argument('--cache',type=Path,required=True);parser.add_argument('--ready',type=Path,required=True);args=parser.parse_args()
  sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'experiments/ace_chestnut_20260916'))
  from host_hook_adapter import HostHookAdapter
- token=os.environ['ROADSCORE_PLANNER_TOKEN'];adapter=HostHookAdapter(args.assets_root)
+ token=os.environ['ROADSCORE_PLANNER_TOKEN'];adapter=HostHookAdapter(args.assets_root, preparation_only=True)
  server=make_server(adapter,PlanCache(args.cache),token)
  identity=adapter.fingerprints()
  args.ready.write_text(json.dumps({'port':server.server_port,**identity}))

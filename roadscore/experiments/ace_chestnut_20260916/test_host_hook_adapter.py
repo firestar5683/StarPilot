@@ -1,9 +1,10 @@
 import unittest
+import weakref
 import tempfile
 from pathlib import Path
 from types import SimpleNamespace
 import numpy as np
-from host_hook_adapter import continuation_inputs, finish_capture
+from host_hook_adapter import continuation_inputs, finish_capture, release_preparation_decoder, PreparationOnlyDecoder, HostHookAdapter
 from test_hook_planning import fake_prepare, request
 
 
@@ -23,6 +24,22 @@ class PrefixTests(unittest.TestCase):
             (output / 'context_latents.npy').unlink()
             with self.assertRaises(FileNotFoundError):
                 finish_capture(True, expected, req, {}, output)
+
+    def test_preparation_only_releases_weights_but_keeps_capture_dispatch(self):
+        class Decoder: pass
+        handler = SimpleNamespace(use_mlx_dit=True, mlx_decoder=Decoder(), model=SimpleNamespace(decoder=None))
+        reference = weakref.ref(handler.mlx_decoder)
+        release_preparation_decoder(handler)
+        self.assertIsNone(reference())
+        self.assertIsInstance(handler.mlx_decoder, PreparationOnlyDecoder)
+        self.assertTrue(handler.use_mlx_dit)
+        with self.assertRaises(RuntimeError): handler.mlx_decoder(None)
+
+    def test_release_cannot_mask_failed_conversion_or_torch_fallback(self):
+        for use_mlx, decoder, torch_decoder in [(False, object(), None), (True, None, None), (True, object(), object())]:
+            handler = SimpleNamespace(use_mlx_dit=use_mlx, mlx_decoder=decoder, model=SimpleNamespace(decoder=torch_decoder))
+            with self.assertRaises(RuntimeError): release_preparation_decoder(handler)
+        self.assertFalse(HostHookAdapter('/unused').preparation_only)
 
     def test_exactprefix_only_future_hints_survive(self):
         context = np.arange(1 * 1125 * 128, dtype=np.float32).reshape(1, 1125, 128)
