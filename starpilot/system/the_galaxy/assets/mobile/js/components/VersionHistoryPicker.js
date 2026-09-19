@@ -5,7 +5,7 @@ function validDate(value) {
   return date && Number.isFinite(date.getTime()) ? date : null
 }
 
-function dateLabel(date) {
+export function dateLabel(date) {
   return date.toLocaleDateString(undefined, { day: "numeric", month: "short", year: "numeric" })
 }
 
@@ -94,15 +94,14 @@ export const VersionHistoryPicker = {
       const width = viewport?.width || window.innerWidth
       const height = viewport?.height || window.innerHeight
       const menu = this.$refs.menu
-      const rect = this.$refs.button.getBoundingClientRect()
       let zoom = 1
       for (let node = menu; node; node = node.parentElement) zoom *= Number.parseFloat(getComputedStyle(node).zoom) || 1
-      const menuWidth = Math.min(Math.max(rect.width, 420), width - 24)
-      const menuHeight = Math.min(640, height - 24)
+      const menuWidth = Math.min(Math.max(540, width - 48), width - 24)
+      const menuHeight = Math.min(640, height - 32)
       menu.style.width = `${menuWidth / zoom}px`
       menu.style.height = `${menuHeight / zoom}px`
-      menu.style.left = `${Math.max(12, Math.min(rect.left, width - menuWidth - 12)) / zoom}px`
-      menu.style.top = `${Math.max(12, Math.min(rect.bottom + 6, height - menuHeight - 12)) / zoom}px`
+      menu.style.left = `${Math.max(12, (width - menuWidth) / 2) / zoom}px`
+      menu.style.top = `${Math.max(16, (height - menuHeight) / 2) / zoom}px`
     },
     select(sha) {
       if (this.disabled || !/^[a-f0-9]{40}$/.test(sha) || !(this.releaseBranch ? releaseVersions(this.commits) : this.commits).some(commit => commit.sha === sha)) return
@@ -152,21 +151,21 @@ export const VersionHistoryPicker = {
           <span style="white-space:normal; overflow-wrap:anywhere;">{{ label }}</span><i class="bi bi-chevron-down" aria-hidden="true"></i>
         </button>
       </span>
-      <p class="gx-note" style="margin:6px 0 0;">{{ range }}. {{ hasMore ? (releaseBranch ? 'Open the picker to load older versions.' : 'Open the picker to load older days.') : (commits.length && !error ? 'All available history loaded.' : 'Open the picker to browse history.') }}</p>
+      <p class="gx-note" style="margin:14px 0 0; padding-top:2px;">{{ range }}. {{ hasMore ? (releaseBranch ? 'Open the picker to load older versions.' : 'Open the picker to load older days.') : (commits.length && !error ? 'All available history loaded.' : 'Open the picker to browse history.') }}</p>
       <p v-if="notice" class="gx-note" role="status" style="margin:6px 0 0;">{{ notice }}</p>
       <dialog ref="menu" :id="uid + '-dialog'" class="gx-select-menu gx-history-menu" :aria-labelledby="uid + '-title'" :aria-describedby="uid + '-help'"
         style="padding:0; overflow:hidden;" @cancel.prevent="close" @click="event => { if (event.target === $refs.menu) close() }" @keydown="menuKey">
         <div style="height:100%; display:flex; flex-direction:column; min-height:0;">
-          <div style="padding:14px 16px; border-bottom:1px solid var(--outline-variant);">
+          <div style="padding:16px 20px; border-bottom:1px solid var(--outline-variant); background:rgba(255, 255, 255, 0.03);">
             <div style="display:flex; align-items:center; justify-content:space-between; gap:12px;">
-              <strong :id="uid + '-title'">{{ releaseBranch ? 'Earlier StarPilot versions' : 'Earlier versions by day' }}</strong>
-              <button ref="close" type="button" class="gx-btn gx-btn--tonal" aria-label="Close version history" style="min-width:44px; padding:8px;" @click="close">✕</button>
+              <strong :id="uid + '-title'" style="font-size:var(--fs-base);">{{ releaseBranch ? 'Earlier StarPilot versions' : 'Earlier versions by day' }}</strong>
+              <button ref="close" type="button" class="gx-btn gx-btn--tonal gx-btn--icon" aria-label="Close version history" style="min-width:36px; min-height:36px; padding:0; display:inline-flex; align-items:center; justify-content:center;" @click="close">✕</button>
             </div>
             <p class="gx-note" style="margin:6px 0;" aria-live="polite">{{ range }}</p>
             <p v-if="notice" class="gx-note" role="status" style="margin:6px 0;">{{ notice }}</p>
             <p :id="uid + '-help'" class="gx-note" style="margin:0;">{{ releaseBranch ? 'Each version uses its newest build. Build dates are shown in your local time.' : 'Expand a day to choose a build. Build dates are shown in your local time.' }}</p>
           </div>
-          <div ref="scroll" style="overflow-y:auto; overscroll-behavior:contain; min-height:0; flex:1; padding:6px;" :aria-busy="loading">
+          <div ref="scroll" style="overflow-y:auto; overscroll-behavior:contain; min-height:0; flex:1; padding:10px 14px;" :aria-busy="loading">
             <div v-if="releaseBranch" role="listbox" aria-label="StarPilot releases">
               <button v-for="commit in choices" :key="commit.sha" type="button" role="option" :data-value="commit.sha" :aria-selected="commit.sha === value" :disabled="disabled" @click="select(commit.sha)">
                 <span style="min-width:0; overflow-wrap:anywhere;">{{ versionTitle(commit, true) }}</span>
@@ -174,14 +173,14 @@ export const VersionHistoryPicker = {
               </button>
             </div>
             <template v-else>
-            <section v-for="group in groups" :key="group.key" :data-day-group="group.key" style="border-bottom:1px solid var(--outline-variant);">
+            <section v-for="group in groups" :key="group.key" :data-day-group="group.key" class="gx-history-day-group">
               <button type="button" class="gx-btn gx-btn--tonal" :data-day="group.key" :aria-expanded="expanded[group.key]" :aria-controls="uid + '-' + group.key"
-                style="width:100%; display:flex; justify-content:space-between; gap:12px; text-align:left; padding:12px; border-radius:8px; margin:2px 0;"
+                style="width:100%; display:flex; justify-content:space-between; gap:12px; text-align:left; padding:12px 14px; border-radius:inherit; margin:0;"
                 @click="expanded[group.key] = !expanded[group.key]">
                 <span>{{ group.label }} <small style="opacity:.7;">· {{ group.commits.length }} {{ group.commits.length === 1 ? 'build' : 'builds' }}</small></span>
                 <i :class="expanded[group.key] ? 'bi bi-chevron-up' : 'bi bi-chevron-down'" aria-hidden="true"></i>
               </button>
-              <div v-if="expanded[group.key]" :id="uid + '-' + group.key" role="listbox" :aria-label="group.label + ' versions'">
+              <div v-if="expanded[group.key]" :id="uid + '-' + group.key" role="listbox" :aria-label="group.label + ' versions'" style="padding:4px 8px 8px;">
                 <button v-for="commit in group.commits" :key="commit.sha" type="button" role="option" :data-value="commit.sha" :aria-selected="commit.sha === value" :disabled="disabled" @click="select(commit.sha)">
                   <span style="min-width:0; overflow-wrap:anywhere;">
                     <span>{{ versionTitle(commit, releaseBranch) }}</span>
@@ -191,7 +190,7 @@ export const VersionHistoryPicker = {
             </section>
             </template>
           </div>
-            <div style="padding:12px 16px; border-top:1px solid var(--outline-variant); flex-shrink:0;">
+            <div style="padding:14px 20px; border-top:1px solid var(--outline-variant); flex-shrink:0; background:rgba(255, 255, 255, 0.02);">
               <p v-if="error" class="gx-note gx-note--danger" role="alert" style="overflow-wrap:anywhere;">{{ error }}</p>
               <p v-if="loading" class="gx-note" role="status">Loading older history…</p>
               <button v-if="hasMore || error" type="button" class="gx-btn gx-btn--tonal" :aria-disabled="loading || disabled" style="width:100%; white-space:normal;" @click="loadMore">{{ error ? 'Retry history' : (releaseBranch ? 'Load older versions' : 'Load older days') }}</button>
