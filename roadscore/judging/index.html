@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>RoadScore · Blind judging</title>
+<style>
+:root{color-scheme:dark;font-family:system-ui;background:#0c1220;color:#ecf1fb}body{max-width:1000px;margin:40px auto;padding:0 24px}h1{font-size:2.6rem;letter-spacing:-.04em}p{color:#bbc6dd;line-height:1.6}.banner{padding:18px;border:1px solid #40557b;border-radius:12px;background:#19253b}nav{display:flex;gap:8px;flex-wrap:wrap;margin:24px 0}button,select,input,textarea{font:inherit;color:inherit;background:#1b2940;border:1px solid #53617c;border-radius:6px;padding:10px}button{cursor:pointer}button[aria-pressed=true]{background:#b6d5ff;color:#101a2b}article{background:#131e30;padding:24px;border-radius:16px;margin:24px 0}label{display:block;margin:18px 0}select{margin-left:12px}textarea{display:block;width:95%;min-height:90px;margin-top:8px}video,audio{width:100%;margin:12px 0}small{color:#b4c1d9}.actions{display:flex;gap:12px;flex-wrap:wrap}footer{margin:30px 0;color:#a7b8d4}
+</style></head><body>
+<h1>Listen to the road.</h1><p>Eleven anonymous routes. Judge the musical experience and how it responds to the drive.</p>
+<div class="banner" id="state">Preparation only. No final scores are attached. Ratings stay unscored until you review a supplied recording.</div>
+<label>Anonymous judging session <input id="session" placeholder="Session code" maxlength="80"></label>
+<label>Load batch identity <input id="batch" type="file" accept="application/json"></label>
+<p><small>Choose the batch.json supplied with this page. This ties exported ratings to the frozen anonymous mapping without revealing identities.</small></p>
+<nav aria-label="Choose anonymous route" id="nav"></nav><article id="entry"></article>
+<div class="actions"><button id="export">Export ratings</button><button id="save">Save on this browser</button></div>
+<p id="notice" role="status"></p><footer>No autoplay, uploads, external scripts, route identities, or automatic rankings. Road footage may contain recognizable places; anonymous labels do not anonymize the footage.</footer>
+<script>
+'use strict';
+const labels=Array.from('ABCDEFGHIJK'), criteria=['Musical coherence','Continuity at transitions','Response to road events','Sense of development','Ending quality'];
+let active='A',batchId=null,media={},ratings=Object.fromEntries(labels.map(x=>[x,{scores:{},notes:'',reviewed:false}]));
+const entry=document.querySelector('#entry'), notice=document.querySelector('#notice');
+function render(){
+ document.querySelectorAll('nav button').forEach(b=>b.setAttribute('aria-pressed',String(b.textContent===active)));
+ entry.replaceChildren();const h=document.createElement('h2');h.textContent='Route '+active;entry.append(h);
+ const p=document.createElement('p');p.textContent=media[active]?'Recording attached for this session. Playback requires pressing Play.':'Recording pending. Attach only the approved anonymous recording supplied by the operator.';entry.append(p);
+ const input=document.createElement('input');input.type='file';input.accept='audio/*,video/*';input.setAttribute('aria-label','Attach anonymous recording for '+active);
+ input.onchange=()=>{const file=input.files[0];if(!file)return;if(media[active])URL.revokeObjectURL(media[active].url);media[active]={url:URL.createObjectURL(file),video:file.type.startsWith('video/')};ratings[active].reviewed=false;ratings[active].scores={};render()};entry.append(input);
+ if(media[active]){const player=document.createElement(media[active].video?'video':'audio');player.controls=true;player.preload='none';player.src=media[active].url;entry.append(player)}
+ const checked=document.createElement('label'),box=document.createElement('input');box.type='checkbox';box.checked=ratings[active].reviewed;box.disabled=!media[active];box.onchange=()=>{ratings[active].reviewed=box.checked;render()};checked.append(box,' I reviewed this recording');entry.append(checked);
+ criteria.forEach(c=>{const label=document.createElement('label');label.append(c);const select=document.createElement('select');select.disabled=!media[active]||!ratings[active].reviewed;[['','Unscored'],['na','Not observable'],['1','1 · Poor'],['2','2'],['3','3 · Mixed'],['4','4'],['5','5 · Excellent']].forEach(([v,t])=>{const o=document.createElement('option');o.value=v;o.textContent=t;select.append(o)});select.value=ratings[active].scores[c]||'';select.onchange=()=>ratings[active].scores[c]=select.value;label.append(select);entry.append(label)});
+ const label=document.createElement('label');label.textContent='Notes and recording timestamps';const notes=document.createElement('textarea');notes.value=ratings[active].notes;notes.oninput=()=>ratings[active].notes=notes.value;label.append(notes);entry.append(label);
+}
+labels.forEach(x=>{const b=document.createElement('button');b.textContent=x;b.onclick=()=>{active=x;render()};document.querySelector('#nav').append(b)});
+document.querySelector('#batch').onchange=async e=>{try{const b=JSON.parse(await e.target.files[0].text());if(!/^[a-f0-9]{64}$/.test(b.batch_id)||JSON.stringify(b.labels)!==JSON.stringify(labels))throw Error();batchId=b.batch_id;Object.values(media).forEach(m=>URL.revokeObjectURL(m.url));media={};ratings=Object.fromEntries(labels.map(x=>[x,{scores:{},notes:'',reviewed:false}]));document.querySelector('#session').value='';let saved=null;try{saved=localStorage.getItem('roadscore-judging-'+batchId)}catch{notice.textContent='Browser storage unavailable; export a backup.'}if(saved){const state=JSON.parse(saved);ratings=state.ratings;document.querySelector('#session').value=state.session;labels.forEach(x=>ratings[x].reviewed=false)}document.querySelector('#state').textContent='Anonymous batch loaded. Attach approved recordings by label; no final generation runs from this page.';render()}catch{notice.textContent='Could not load batch identity or saved ratings.'}};
+function result(){return{schema_version:1,batch_id:batchId,session:document.querySelector('#session').value,exported_at:new Date().toISOString(),ratings}}
+document.querySelector('#save').onclick=()=>{if(!batchId){notice.textContent='Load batch identity first.';return}try{localStorage.setItem('roadscore-judging-'+batchId,JSON.stringify(result()));notice.textContent='Saved in this browser. Recordings are not stored; export a backup.'}catch{notice.textContent='Browser storage unavailable. Export ratings instead.'}};
+document.querySelector('#export').onclick=()=>{if(!batchId||!document.querySelector('#session').value.trim()){notice.textContent='Load batch identity and enter an anonymous session code before exporting.';return}const a=document.createElement('a'),url=URL.createObjectURL(new Blob([JSON.stringify(result(),null,2)],{type:'application/json'}));a.href=url;a.download='blind-ratings.json';a.click();setTimeout(()=>URL.revokeObjectURL(url),1000);notice.textContent='Ratings exported; blank and not-observable values are not zero scores.'};render();
+</script></body></html>
