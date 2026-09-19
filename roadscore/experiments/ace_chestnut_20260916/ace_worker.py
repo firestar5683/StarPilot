@@ -16,7 +16,7 @@ sys.path.insert(0,str(R/'prototype'))
 from ace_profiles import selected
 from generation_seed import configured_seed,sample_seed
 base_seed=configured_seed(required=True)
-from quality_gate import QualifiedGenerator,POLICY
+from quality_gate import QualifiedGenerator,POLICY,HOOK_POLICY
 from link_health import LinkProbe
 from hook_service import Client
 from planned_composition import PlannedComposition
@@ -52,7 +52,7 @@ try:
    wave,latent,stats=sample(role,seed,previous);stats['power_limit_watts']=float(os.environ['AM_POWER_LIMIT']) if os.environ.get('AM_POWER_LIMIT') else None;stats['link_session']=probe.session;stats['host_peak_rss_kib']=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss;stats['tracked_allocation_bytes']=probe.last.get('allocator_bytes');return wave,latent,stats
   except Exception as e:
    probe.sample('generation_exception',error=str(e),role=role,seed=seed);raise
- qualified=QualifiedGenerator(generate)
+ qualified=QualifiedGenerator(generate,policy=HOOK_POLICY if planned else POLICY)
  def record_for(job):
   folder=G/'quality'/str(job);folder.mkdir(parents=True,exist_ok=True)
   def record(attempt,wave,latent,row):

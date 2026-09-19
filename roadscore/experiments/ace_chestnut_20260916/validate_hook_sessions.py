@@ -13,7 +13,7 @@ sys.path.insert(0, str(Path(__file__).resolve().parents[2] / 'prototype'))
 from generation_seed import sample_seed
 from hook_planning import PlanCache, digest, next_section, request_plan
 from host_hook_adapter import HostHookAdapter
-from quality_gate import inspect
+from quality_gate import inspect, HOOK_POLICY
 from session_seed import select_session
 from window_policy import retained_end
 
@@ -38,8 +38,10 @@ def main():
     for session in sessions:
         select_session(session['generation_seed'])
     report = {'sessions': sessions, 'backend': 'Mac MLX offline; not native runtime equivalence',
+              'quality_policy': HOOK_POLICY.version,
               'seed_selection': 'normal fresh-session selector; no rerolls or seed shopping',
               'musical_acceptance': 'pending listening; energy checks cannot establish hook quality',
+              'quality_artifacts': 'quality/*_committed.wav is raw before gain, includes retained prefix; paired latent/quality records',
               'retry_of': str(args.session_manifest) if args.session_manifest else None,
               'runs': [], 'status': 'starting'}
     if args.resume:
@@ -116,7 +118,12 @@ def main():
             decode_seconds = time.monotonic() - tick
             frames, endpoint = retained_end(wave, 48000, request.prefix_seconds, 28 if index == 0 else 36)
             committed = wave[:frames * 1920]
-            quality = inspect(committed, 48000, request.prefix_seconds, role=role)
+            quality = inspect(committed, 48000, request.prefix_seconds, role=role, policy=HOOK_POLICY)
+            diagnostics = run / 'quality'
+            diagnostics.mkdir(exist_ok=True)
+            sf.write(diagnostics / f'{index:02d}_committed.wav', committed, 48000, subtype='FLOAT')
+            np.save(diagnostics / f'{index:02d}_committed.npy', latent.detach().float().cpu().numpy()[:, :frames])
+            (diagnostics / f'{index:02d}_quality.json').write_text(json.dumps(quality, indent=2))
             new = committed[request.prefix_seconds * 48000:]
             sf.write(run / f'{index:02d}_{role}.wav', new * np.float32(.65), 48000, subtype='FLOAT')
             np.save(run / 'prefix.npy', latent.detach().float().cpu().numpy()[:, frames-200:frames])

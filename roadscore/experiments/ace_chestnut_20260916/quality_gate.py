@@ -29,6 +29,19 @@ class QualityPolicy:
  initial_buffer_seconds: float = 112.
 POLICY=QualityPolicy()
 
+@dataclass(frozen=True)
+class HookQualityPolicy(QualityPolicy):
+ version: str = 'prism-hook-precommit-v3'
+ max_leading_quiet_seconds: float = 1.
+HOOK_POLICY=HookQualityPolicy()
+
+def leading_seam_gap(result,policy):
+ limit=getattr(policy,'max_leading_quiet_seconds',None)
+ return (limit is not None and result['role']!='outro' and result['prefix_seconds']>0
+         and result['leading_quiet_seconds']>=limit-1e-6
+         and min(result['source_energy_rms'],result['new_energy_rms_p80'])>4*result['quiet_threshold'])
+
+
 def spans(mask,step):
  result=[];start=None
  for i,value in enumerate(list(mask)+[False]):
@@ -59,6 +72,7 @@ def inspect(wave,rate,prefix_seconds,*,role='verse',policy=POLICY,endpoint_error
  # A quiet interval can straddle a measurement window; reserve one window
  # so a nominal two-second gap does not evade the gate through block alignment.
  result['quiet_span_uncertainty_seconds']=policy.window_seconds
+ if leading_seam_gap(result,policy):reasons.append('leading_continuation_gap')
  if role=='outro':
   if leading>=min(policy.outro_leading_limit_seconds,len(new)/rate*.5):reasons.append('outro_silent_before_final_phrase')
  else:
