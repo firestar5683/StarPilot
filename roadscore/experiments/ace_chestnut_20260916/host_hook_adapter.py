@@ -76,13 +76,13 @@ class HostHookAdapter:
         from acestep.handler import AceStepHandler
         from acestep.llm_inference import LLMHandler
         handler, lm = AceStepHandler(), LLMHandler()
+        status, ok = lm.initialize(str(self.base / 'models/ace/checkpoints'), 'acestep-5Hz-lm-1.7B', backend='mlx', device='mps')
+        if not ok:
+            raise RuntimeError(status)
         status, ok = handler.initialize_service(str(self.base / 'models/ace'), config_path='acestep-v15-turbo',
             device='mps', use_mlx_dit=True, offload_to_cpu=True, offload_dit_to_cpu=False)
         if not ok or not handler.use_mlx_dit or handler.mlx_decoder is None:
             raise RuntimeError(f'No safe MLX preparation boundary: {status}')
-        status, ok = lm.initialize(str(self.base / 'models/ace/checkpoints'), 'acestep-5Hz-lm-1.7B', backend='mlx', device='mps')
-        if not ok:
-            raise RuntimeError(status)
         self.handler, self.lm = handler, lm
 
     def __call__(self, request, sources, output):
