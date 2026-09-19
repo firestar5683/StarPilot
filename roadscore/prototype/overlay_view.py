@@ -33,6 +33,15 @@ GESTURE_LABELS = {
 
 
 def gesture_view(state):
+  engagement = state.get('engagement_presentation') or {}
+  if engagement.get('enabled') and engagement.get('input_fresh') and engagement.get('rendered_state') == 'transition':
+    return ('Engaged / Opening music' if engagement.get('active') else 'Disengaged / Contained music'), 'active', 'engagement'
+  for field, label, kind in [('core_apex', 'Curve apex / Musical breath', 'curve_apex'),
+                             ('signal_shaker', 'Turn signal / Shaker', 'turn_signal'),
+                             ('alert_accent', 'Road alert / Percussion', 'native_alert')]:
+    presentation = state.get(field) or {}
+    if presentation.get('enabled') and presentation.get('rendered_active'):
+      return label, 'active', kind
   active = state.get('gesture_active')
   active = [kind for kind in active if isinstance(kind, str)] if isinstance(active, (list, tuple)) else []
   for kind, (_, label) in GESTURE_LABELS.items():

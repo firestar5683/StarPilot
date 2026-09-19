@@ -1,3 +1,7 @@
+2026-09-19 standalone recovery: current generic planner conditioning is being prepared for local cached use; fresh native ACE sampling remains per launch. Main includes the standalone cache consumer contract, visible-home badge correction, exact archived Mac replay fixes, and conservative-v2 presentation. Native acceptance is NOT complete: the sole hardware owner cannot reach the comma on the latest network. No current run, GPU health, or startup improvement is claimed. Protected gold and fallback remain unchanged.
+
+Mac archived replay passed actual UI capture and exact final-sample playback against a complete historical archive. Presentation passed 33 offline tests; an actual 27-second opening gives a coherent estimated beat after removing the former 30-second minimum. Native alert accents are sparse, beat-aligned and suppressed during competing cues. Subjective cue salience still requires listening.
+
 # Event checkpoint — clean 45 W native replay
 
 Prism completed a full 254.1-second muted route on the event comma + Chestnut with six accepted fresh music jobs, no holds, no underflows, no worker failure, and clean causal timing. Camera, path, lanes, navigation and ten curve activations were recorded. See [event evidence](EVENT.md). This is an instrumented replay pass; physical listening, Bluetooth and modeld coexistence remain unverified. Community judging has not begun.
