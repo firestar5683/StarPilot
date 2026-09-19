@@ -65,45 +65,48 @@ def fit_text(text, max_width, measure):
 
 
 def draw_panel(rl, font, state, screen_width, screen_height):
+  """A content-sized edge ribbon; leave the road and native right rail clear."""
   view = overlay_view(state)
-  width = min(320, screen_width * .55, screen_width - 24)
-  height = 112 if view['note'] or view['event'] else 94
-  x, y = 12, max(12, screen_height - height - 12)
   color = {'READY': (123, 229, 193), 'GENERATING': (131, 192, 255),
-           'DEGRADED': (255, 197, 112), 'PREPARING': (180, 190, 204)}[view['activity']]
+           'DEGRADED': (255, 197, 112), 'PREPARING': (196, 204, 214)}[view['activity']]
   accent = rl.Color(*color, 255)
-  muted = rl.Color(180, 190, 204, 255)
-  rl.draw_rectangle_rounded(rl.Rectangle(x, y, width, height), .12, 8, rl.Color(15, 22, 31, 235))
-
-  def text(label, left, top, size=13, tint=rl.WHITE, available=None):
-    available = width - left - 12 if available is None else available
-    label = fit_text(label, available, lambda s: rl.measure_text_ex(font, s, size, 0).x)
-    rl.draw_text_ex(font, label, rl.Vector2(x + left, y + top), size, 0, tint)
-
-  badge_width = rl.measure_text_ex(font, view['activity'], 11, 0).x + 16
-  rl.draw_rectangle_rounded(rl.Rectangle(x + width - badge_width - 10, y + 10, badge_width, 22), .4, 8, rl.Color(*color, 28))
-  text(view['activity'], width - badge_width - 2, 15, 11, accent)
-  text('RoadScore', 12, 12, 17, available=width - badge_width - 34)
-  text(view['profile'].upper(), 12, 35, 15)
-  text(view['section'], 12, 55, 11, muted)
+  muted = rl.Color(210, 218, 225, 255)
+  measure = lambda label, size: rl.measure_text_ex(font, label, size, 0).x
+  section = view['section'].removeprefix('INTENT: ')
+  if section in ('ARCHIVED SCORE', 'WAITING FOR SCORE'):
+    section = ''
+  elif state.get('form_labels_are_intent'):
+    section = 'intent ' + section.title()
+  else:
+    section = section.title()
+  primary = view['profile'] + (' / ' + section if section else '')
+  if view['activity'] == 'DEGRADED':
+    detail = view['note']
+  elif view['event']:
+    detail = view['event'].capitalize()
+  elif view['activity'] == 'GENERATING':
+    detail = view['note']
+  else:
+    detail = 'Archived playback' if view['stored'] else ' / '.join(filter(None, view['backend']))
+  secondary = 'RoadScore' + (' / ' + detail if detail else '')
   buffer = view['buffered']
-  label = 'BUFFER ' + ('--' if buffer is None else f'{buffer:.0f}s')
-  label_width = rl.measure_text_ex(font, label, 11, 0).x
-  buffer_left = width - label_width - 12
-  text(label, buffer_left, 75, 11, accent)
-  left, right = view['backend']
-  text(left, 12, 75, 11, muted, available=buffer_left - 24)
-  if right:
-    offset = 12 + rl.measure_text_ex(font, left, 11, 0).x
-    # A geometric middle dot avoids missing-glyph boxes in the native font.
-    rl.draw_circle(int(x + offset + 7), int(y + 81), 1.5, muted)
-    text(right, offset + 15, 75, 11, muted, available=buffer_left - offset - 27)
-  if view['note'] and view['event']:
-    # Give road gestures their own space so job timing cannot push them offscreen.
-    event_width = min((width - 36) / 2, rl.measure_text_ex(font, view['event'], 10, 0).x)
-    event_left = width - event_width - 12
-    text(view['note'], 12, 95, 10, accent, available=event_left - 24)
-    text(view['event'], event_left, 95, 10, muted, available=event_width)
-  elif view['note'] or view['event']:
-    text(view['note'] or view['event'], 12, 95, 10, accent)
+  reserve = '--' if buffer is None else f'{buffer:.0f}s'
+  activity_width = measure(view['activity'], 9)
+  max_width = min(300, screen_width * .64, screen_width - 24)
+  width = min(max_width, max(210, measure(primary, 11) + activity_width + 38,
+                             measure(secondary, 9) + measure(reserve, 9) + 30))
+  x, y, height = 12, max(12, screen_height - 42), 34
+  # One quiet translucent surface, with no enclosing badge or oversized title.
+  rl.draw_rectangle_rounded(rl.Rectangle(x, y, width, height), .4, 8, rl.Color(8, 13, 18, 184))
+  def text(label, left, top, size, tint, available):
+    label = fit_text(label, max(0, available), lambda value: measure(value, size))
+    rl.draw_text_ex(font, label, rl.Vector2(x + left, y + top), size, 0, tint)
+  activity_left = width - activity_width - 9
+  text(primary, 9, 5, 11, rl.WHITE, activity_left - 24)
+  rl.draw_circle(int(x + activity_left - 7), int(y + 10), 2, accent)
+  text(view['activity'], activity_left, 6, 9, accent, activity_width + 1)
+  reserve_width = measure(reserve, 9)
+  text(secondary, 9, 21, 9, accent if view['activity'] == 'DEGRADED' else muted,
+       width - reserve_width - 29)
+  text(reserve, width - reserve_width - 9, 21, 9, muted, reserve_width + 1)
   return view
