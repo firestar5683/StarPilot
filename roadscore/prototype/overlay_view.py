@@ -65,7 +65,7 @@ def fit_text(text, max_width, measure):
 
 
 def draw_panel(rl, font, state, screen_width, screen_height):
-  """A content-sized edge ribbon; leave the road and native right rail clear."""
+  """A compact score ribbon centered over the camera, clear of the right rail."""
   view = overlay_view(state)
   color = {'READY': (123, 229, 193), 'GENERATING': (131, 192, 255),
            'DEGRADED': (255, 197, 112), 'PREPARING': (196, 204, 214)}[view['activity']]
@@ -93,20 +93,30 @@ def draw_panel(rl, font, state, screen_width, screen_height):
   reserve = '--' if buffer is None else f'{buffer:.0f}s'
   activity_width = measure(view['activity'], 9)
   max_width = min(300, screen_width * .64, screen_width - 24)
-  width = min(max_width, max(210, measure(primary, 11) + activity_width + 38,
-                             measure(secondary, 9) + measure(reserve, 9) + 30))
-  x, y, height = 12, max(12, screen_height - 42), 34
+  width = min(max_width, max(210, measure(primary, 11) + activity_width + 57,
+                             measure(secondary, 9) + measure(reserve, 9) + 60))
+  camera_width = screen_width - 64  # Native mici control rail stays unobstructed.
+  x, y, height = max(12, (camera_width - width) / 2), 8, 34
   # One quiet translucent surface, with no enclosing badge or oversized title.
   rl.draw_rectangle_rounded(rl.Rectangle(x, y, width, height), .4, 8, rl.Color(8, 13, 18, 184))
   def text(label, left, top, size, tint, available):
     label = fit_text(label, max(0, available), lambda value: measure(value, size))
     rl.draw_text_ex(font, label, rl.Vector2(x + left, y + top), size, 0, tint)
+  # Connected notes are a score identity mark, not an animated compute claim.
+  rl.draw_circle(int(x + 11), int(y + 23), 2.5, muted)
+  rl.draw_circle(int(x + 20), int(y + 21), 2.5, muted)
+  for left, top, w, h in ((12, 10, 1.5, 13), (21, 8, 1.5, 13), (12, 8, 10.5, 2.5)):
+    rl.draw_rectangle_rounded(rl.Rectangle(x + left, y + top, w, h), .2, 4, muted)
   activity_left = width - activity_width - 9
-  text(primary, 9, 5, 11, rl.WHITE, activity_left - 24)
+  text(primary, 30, 5, 11, rl.WHITE, activity_left - 45)
   rl.draw_circle(int(x + activity_left - 7), int(y + 10), 2, accent)
   text(view['activity'], activity_left, 6, 9, accent, activity_width + 1)
   reserve_width = measure(reserve, 9)
-  text(secondary, 9, 21, 9, accent if view['activity'] == 'DEGRADED' else muted,
-       width - reserve_width - 29)
+  text(secondary, 30, 21, 9, accent if view['activity'] == 'DEGRADED' else muted,
+       width - reserve_width - 62)
+  # Three quiet queue bars distinguish buffered seconds from job elapsed time.
+  for i, bar_height in enumerate((3, 5, 7)):
+    rl.draw_rectangle_rounded(rl.Rectangle(x + width - reserve_width - 21 + i * 3,
+                                         y + 29 - bar_height, 1.5, bar_height), .2, 4, muted)
   text(reserve, width - reserve_width - 9, 21, 9, muted, reserve_width + 1)
   return view

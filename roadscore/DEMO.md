@@ -6,7 +6,7 @@ The conductor receives only road messages already delivered by replay. It reques
 
 ## Reading the overlay
 
-A 34-pixel translucent ribbon sits at the lower-left edge of the comma four's 536 × 240 canvas, leaving the road visible. Its width follows the content, capped at 300 pixels. Profile and section lead, with a compact state indicator; the second line shows RoadScore, backend or a contextual event, and a quiet buffer time. Degraded explanations take priority over other detail.
+A 34-pixel translucent ribbon sits at the top center of the camera area on the comma four's 536 × 240 canvas, leaving the road visible and the native right control rail clear. A geometric musical-note mark identifies the score, and small queue bars identify buffered seconds. Its width follows the content, capped at 300 pixels. Profile and section lead, with a compact state indicator; the second line shows RoadScore, backend or a contextual event, and a quiet buffer time. Degraded explanations take priority over other detail.
 
 | Display | Meaning |
 | --- | --- |
