@@ -40,7 +40,7 @@ def overlay_view(state):
   elif degraded:
     note = 'Quality check / reserve in use'
   elif state.get('job_inflight'):
-    note = 'New passage' + (f' / {elapsed:.1f}s elapsed' if elapsed is not None else '')
+    note = f'Job {elapsed:.1f}s elapsed' if elapsed is not None else 'New passage in progress'
   event = ''
   if state.get('turn_signal_music'):
     event = 'Signal percussion'
@@ -50,10 +50,8 @@ def overlay_view(state):
     event = 'Queued ' + display_text(state['gesture_queued'][0].get('kind')).replace('_', ' ')
   elif (lead := seconds(state.get('lead'))) is not None and lead > 0:
     event = f'Curve in {lead:.1f}s'
-  if event:
-    note = f'{note} / {event}' if note else event
   return dict(profile=display_text(profile), section=section, backend=backend, activity=activity,
-              buffered=seconds(state.get('buffered')), note=note,
+              buffered=seconds(state.get('buffered')), note=note, event=event,
               ready=readiness == 'READY' and not degraded, stored=stored)
 
 
@@ -68,8 +66,8 @@ def fit_text(text, max_width, measure):
 
 def draw_panel(rl, font, state, screen_width, screen_height):
   view = overlay_view(state)
-  width = min(340, screen_width - 24)
-  height = 146 if view['note'] else 126
+  width = min(320, screen_width * .55, screen_width - 24)
+  height = 112 if view['note'] or view['event'] else 94
   x, y = 12, max(12, screen_height - height - 12)
   color = {'READY': (123, 229, 193), 'GENERATING': (131, 192, 255),
            'DEGRADED': (255, 197, 112), 'PREPARING': (180, 190, 204)}[view['activity']]
@@ -86,20 +84,26 @@ def draw_panel(rl, font, state, screen_width, screen_height):
   rl.draw_rectangle_rounded(rl.Rectangle(x + width - badge_width - 10, y + 10, badge_width, 22), .4, 8, rl.Color(*color, 28))
   text(view['activity'], width - badge_width - 2, 15, 11, accent)
   text('RoadScore', 12, 12, 17, available=width - badge_width - 34)
-  text(view['profile'], 12, 39, 17)
-  text(view['section'], 12, 62, 12, muted)
+  text(view['profile'].upper(), 12, 35, 15)
+  text(view['section'], 12, 55, 11, muted)
+  buffer = view['buffered']
+  label = 'BUFFER ' + ('--' if buffer is None else f'{buffer:.0f}s')
+  label_width = rl.measure_text_ex(font, label, 11, 0).x
+  buffer_left = width - label_width - 12
+  text(label, buffer_left, 75, 11, accent)
   left, right = view['backend']
-  text(left, 12, 83, 11, muted)
+  text(left, 12, 75, 11, muted, available=buffer_left - 24)
   if right:
     offset = 12 + rl.measure_text_ex(font, left, 11, 0).x
     # A geometric middle dot avoids missing-glyph boxes in the native font.
-    rl.draw_circle(int(x + offset + 7), int(y + 89), 1.5, muted)
-    text(right, offset + 15, 83, 11, muted)
-  buffer = view['buffered']
-  text('BUFFER', 12, 105, 11, muted)
-  label = '--' if buffer is None else f'{buffer:.0f}s'
-  label_width = rl.measure_text_ex(font, label, 13, 0).x
-  text(label, width - label_width - 12, 103, 13, accent)
-  if view['note']:
-    text(view['note'], 12, 126, 11, accent)
+    rl.draw_circle(int(x + offset + 7), int(y + 81), 1.5, muted)
+    text(right, offset + 15, 75, 11, muted, available=buffer_left - offset - 27)
+  if view['note'] and view['event']:
+    # Give road gestures their own space so job timing cannot push them offscreen.
+    event_width = min((width - 36) / 2, rl.measure_text_ex(font, view['event'], 10, 0).x)
+    event_left = width - event_width - 12
+    text(view['note'], 12, 95, 10, accent, available=event_left - 24)
+    text(view['event'], event_left, 95, 10, muted, available=event_width)
+  elif view['note'] or view['event']:
+    text(view['note'] or view['event'], 12, 95, 10, accent)
   return view

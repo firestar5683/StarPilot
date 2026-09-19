@@ -6,7 +6,7 @@ The conductor receives only road messages already delivered by replay. It reques
 
 ## Reading the overlay
 
-The compact lower-left panel leaves the existing camera, lane and path display in place. Its rows show RoadScore's activity, profile, section, compute backend and buffered music.
+The lower-left panel is 94–112 logical pixels tall on the comma four's 536 × 240 canvas, with width limited to 55% of the screen. The existing camera, lane and path display stays in place. Its rows show RoadScore's activity, profile, section, compute backend and buffered music.
 
 | Display | Meaning |
 | --- | --- |
@@ -38,6 +38,8 @@ python3 -m unittest discover -s roadscore/tests -v
 python3 roadscore/tools/preview_overlay.py --output roadscore/results/ui-polish/overlay-states.png
 ```
 
-The preview renders six synthetic states with the repository's Inter bitmap font atlas: preparation, ready, generating, accepted-music hold, failed composer and stored score. It uses CPU image drawing and does not open a window, contact a device, start a worker, run replay or open an audio stream. It is a layout review, not a native-rendering or hardware-validation claim. The output stays in ignored `results/`.
+The preview renders six full 536 × 240 synthetic canvases with the repository's Inter bitmap font atlas: preparation, ready, generating, accepted-music hold, failed composer and stored score. It uses CPU image drawing and does not open a window, contact a device, start a worker, run replay or open an audio stream. It is a layout review, not a native-rendering or hardware-validation claim. The output stays in ignored `results/`.
+
+Generation timing and road gestures have separate space in the footer, so an active job cannot hide the event. The startup label uses the selected Prism/Aurora profile; stored playback is labeled as such from preparation onward.
 
 The active native overlay is `prototype/overlay.py`; the pure presentation helper is `prototype/overlay_view.py`. `prototype/index.html` and `prototype/native_display.py` are older excerpt-specific bench interfaces, not the normal onroad demo. The historical style selector is not an ACE profile selector. Keep those older entrypoints distinct when presenting the current demo.

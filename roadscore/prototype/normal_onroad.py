@@ -27,7 +27,9 @@ env['ROADSCORE_COMPOSER']=a.composer
 env['ROADSCORE_ACE_PROFILE']=a.profile
 env['ROADSCORE_OVERLAY_CAPTURE']=str(out/'overlay.png')
 env['ROADSCORE_STATUS_FILE']=str(out/'roadscore_status.json')
-(out/'roadscore_status.json').write_text(json.dumps({'readiness':'Preparing','style':settings.style}))
+initial_display={'readiness':'Preparing','composer':a.composer,'profile':a.profile if a.composer=='ace' else None,'style':a.profile.title() if a.composer=='ace' else settings.style}
+if a.replay:initial_display.update(style='Stored score',section='ARCHIVED SCORE',compute='none')
+(out/'roadscore_status.json').write_text(json.dumps(initial_display))
 env['ROADSCORE_OVERLAY']='1' if settings.overlay else '0'
 env['ROADSCORE_FORCE_MUTE']='0' if a.audible else '1'
 env['ROADSCORE_ORIGIN_FILE']=str(out/'replay_origin.json')

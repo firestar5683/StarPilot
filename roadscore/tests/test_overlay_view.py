@@ -22,6 +22,12 @@ class OverlayTests(unittest.TestCase):
     self.assertTrue(view['ready'])
     self.assertIn('12.3s', view['note'])
 
+  def test_gesture_remains_separate_from_generation_timing(self):
+    view = overlay_view(dict(readiness='READY', job_inflight=True, generation_elapsed_seconds=123.4,
+                             turn_signal_music=True))
+    self.assertEqual(view['event'], 'Signal percussion')
+    self.assertIn('123.4s', view['note'])
+
   def test_missing_buffer_is_not_zero(self):
     for value in (None, float('nan'), float('inf'), '12', True):
       self.assertIsNone(overlay_view({'buffered': value})['buffered'])

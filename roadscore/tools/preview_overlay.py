@@ -65,11 +65,15 @@ def main():
            dict(base, readiness='DEGRADED', holding_accepted_music=True, job_inflight=True, buffered=18),
            dict(base, worker_failed=True, buffered=0),
            dict(readiness='READY', style='Stored score', section='ARCHIVED SCORE', compute='none', buffered=92)]
-  board = Image.new('RGBA', (728, 564), '#080e16')
+  # Match the comma four UI's logical canvas, not a cropped panel.
+  width, height = 536, 240
+  board = Image.new('RGBA', (width * 2, height * 3), '#080e16')
   for index, state in enumerate(cases):
-    panel = Image.new('RGBA', (364, 188), '#080e16')
-    draw_panel(Canvas(panel, ROOT / 'selfdrive/assets/fonts/Inter-Medium.fnt'), None, state, 364, 176)
-    board.paste(panel, ((index % 2) * 364, (index // 2) * 188))
+    panel = Image.new('RGBA', (width, height), '#080e16')
+    canvas = Canvas(panel, ROOT / 'selfdrive/assets/fonts/Inter-Medium.fnt')
+    canvas.draw_text_ex(None, 'SYNTHETIC UI / 536 x 240', canvas.Vector2(12, 12), 11, 0, (120, 135, 150, 255))
+    draw_panel(canvas, None, state, width, height)
+    board.paste(panel, ((index % 2) * width, (index // 2) * height))
   args.output.parent.mkdir(parents=True, exist_ok=True)
   board.convert('RGB').save(args.output)
   print(args.output)
