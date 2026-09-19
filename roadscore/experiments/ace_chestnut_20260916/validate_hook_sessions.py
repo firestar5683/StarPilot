@@ -57,7 +57,12 @@ def main():
     import torch
     import soundfile as sf
     generated_windows = 0
-    for session_index, session in enumerate(sessions):
+    for session in sessions[len(report['runs']):]:
+        report['runs'].append(dict(session, windows=[], status='preparing'))
+    save()
+    order = sorted(range(len(sessions)), key=lambda index: len(report['runs'][index]['windows']))
+    for session_index in order:
+        session = sessions[session_index]
         seed = session['generation_seed']
         run = args.output / f'session_{session_index + 1}'
         run.mkdir(exist_ok=args.resume)
@@ -66,7 +71,7 @@ def main():
         else:
             entry = dict(session, windows=[], status='preparing')
             report['runs'].append(entry)
-        if entry['status'] in ('quality_failed', 'technical_pass_listening_pending'):
+        if entry['status'] == 'quality_failed' or len(entry['windows']) >= args.windows:
             continue
         sources, previous_plan, pieces = {}, None, []
         completed = len(entry['windows'])
