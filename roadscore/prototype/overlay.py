@@ -53,7 +53,8 @@ def install():
    if int(size.raw)>0:alert_clear_after=now+1.
   frames+=1
   if frames==1:path.with_name('ui_capture_origin.json').write_text(json.dumps({'wall':time.monotonic(),'frame':0}))
-  bounds=(startup_bounds(gui_app.width,gui_app.height,home_footer_right or 0) if not ui_state.started else hud_bounds(gui_app.width,gui_app.height))
+  startup=home_footer_right is not None or not ui_state.started
+  bounds=(startup_bounds(gui_app.width,gui_app.height,home_footer_right or 0) if startup else hud_bounds(gui_app.width,gui_app.height))
   def audit(visible,reason,presentation=None):
    evidence={'frame':frames-1,'frames':frames,'native_gpu_icon':False,'wall':now,'state':state,'overlay_visible':visible,'overlay_hidden_reason':reason,
              'started':bool(ui_state.started),'home_rect':home_rect,'home_footer_right':home_footer_right,
@@ -74,10 +75,12 @@ def install():
    audit(False,'native_navigation');return
   if not ui_state.started and home_footer_right is None:
    audit(False,'home_not_visible');return
+  if home_rect and -home_rect[2]+1 < home_rect[0] < -1:
+   audit(False,'home_transition');return
   if bounds is None:
    audit(False,'no_free_space');return
   presentation=event_presentation.update(overlay_view(state),now)
-  view=draw_panel(rl,gui_app.font(FontWeight.NORMAL),state,gui_app.width,gui_app.height,gui_app.font(FontWeight.SEMI_BOLD),presentation,startup=not ui_state.started,footer_right=home_footer_right or 0)
+  view=draw_panel(rl,gui_app.font(FontWeight.NORMAL),state,gui_app.width,gui_app.height,gui_app.font(FontWeight.SEMI_BOLD),presentation,startup=startup,footer_right=home_footer_right or 0)
   ready=view['ready']
   audit(True,None,view)
   from openpilot.selfdrive.ui.ui_state import ui_state

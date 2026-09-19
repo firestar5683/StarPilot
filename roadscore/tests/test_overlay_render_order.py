@@ -58,7 +58,7 @@ class OverlayRenderOrderTests(unittest.TestCase):
       nav._render(None)
       yield True
     gui=NS(render=native_frames,width=536,height=240,font=lambda _:None)
-    state=NS(started=False,sm={s:NS(alertSize=NS(raw=0)) for s in ('selfdriveState','starpilotSelfdriveState')})
+    state=NS(started=True,sm={s:NS(alertSize=NS(raw=0)) for s in ('selfdriveState','starpilotSelfdriveState')})
     modules={'pyray':NS(), 'openpilot.system.ui.lib.application':NS(gui_app=gui,FontWeight=NS(NORMAL=0,SEMI_BOLD=1)),
              'openpilot.selfdrive.ui.mici.layouts.home':NS(MiciHomeLayout=Home),
              'openpilot.selfdrive.ui.onroad.starpilot.navigation_card':NS(NavigationCardRenderer=Nav),
