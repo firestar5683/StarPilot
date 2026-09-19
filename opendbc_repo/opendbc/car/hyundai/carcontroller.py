@@ -441,12 +441,6 @@ def suppress_redundant_gv70_brake_cancel(CP, brake_pressed: bool, lat_active: bo
   )
 
 
-def clear_ioniq_6_torque_when_request_inactive(CP, apply_torque: int, apply_steer_req: bool) -> int:
-  if CP.carFingerprint == CAR.HYUNDAI_IONIQ_6 and not apply_steer_req:
-    return 0
-  return apply_torque
-
-
 class CarController(CarControllerBase):
   def __init__(self, dbc_names, CP):
     super().__init__(dbc_names, CP)
@@ -641,8 +635,6 @@ class CarController(CarControllerBase):
 
       if not CC.latActive:
         apply_torque = 0
-
-      apply_torque = clear_ioniq_6_torque_when_request_inactive(self.CP, apply_torque, apply_steer_req)
 
       # Hold torque with induced temporary fault when cutting the actuation bit
       # FIXME: we don't use this with CAN FD?
