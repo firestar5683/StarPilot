@@ -79,8 +79,23 @@ class HostHookAdapter:
         status, ok = lm.initialize(str(self.base / 'models/ace/checkpoints'), 'acestep-5Hz-lm-1.7B', backend='mlx', device='mps')
         if not ok:
             raise RuntimeError(status)
+        original_init = handler._init_mlx_dit
+        def initialize_without_duplicate(*args, **kwargs):
+            ok = original_init(*args, **kwargs)
+            if not ok or handler.mlx_decoder is None:
+                raise RuntimeError('MLX conversion failed; refusing Torch diffusion fallback')
+            import gc
+            import torch
+            handler.model.decoder = None
+            def no_torch_diffusion(*args, **kwargs):
+                raise RuntimeError('Torch diffusion disabled after verified MLX conversion')
+            handler.model.generate_audio = no_torch_diffusion
+            gc.collect()
+            torch.mps.empty_cache()
+            return ok
+        handler._init_mlx_dit = initialize_without_duplicate
         status, ok = handler.initialize_service(str(self.base / 'models/ace'), config_path='acestep-v15-turbo',
-            device='mps', use_mlx_dit=True, offload_to_cpu=True, offload_dit_to_cpu=False)
+            device='mps', use_mlx_dit=True, offload_to_cpu=True, offload_dit_to_cpu=True)
         if not ok or not handler.use_mlx_dit or handler.mlx_decoder is None:
             raise RuntimeError(f'No safe MLX preparation boundary: {status}')
         self.handler, self.lm = handler, lm
