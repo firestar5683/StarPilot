@@ -74,7 +74,8 @@ All three entrypoints do the same thing. `./dev` is the shortest general-purpose
 ### Available host commands
 
 - `./dev replay [args...]`
-- `./onroad [jobs] (--c3 | --c4 | --all | --replay-only) <route-or-replay-args...>`
+- `./onroad [jobs] (--c3 | --c4 | --all | --replay-only) [--galaxy] <route-or-replay-args...>`
+- `./dev galaxy [--live [port]]`
 - `./dev cabana [args...]`
 - `./dev plotjuggler [args...]`
 - `./dev juggle [args...]`
@@ -83,6 +84,11 @@ All three entrypoints do the same thing. `./dev` is the shortest general-purpose
 
 `./onroad` replays a route into a desktop UI to watch live. To record one to an mp4 instead of
 watching it in real time, use `tools/clip/run.py` (see [tools/clip/README.md](clip/README.md)).
+
+`./dev galaxy` serves the Galaxy web UI in your browser, so you can check layout changes on
+your desktop before pushing to a device. Add `--live` to serve your working tree with reload
+enabled -- it builds the host runtime on first run, then hands off to `scripts/galaxy_live.sh`.
+See [the Galaxy README](../starpilot/system/the_galaxy/README.md) for the full workflow.
 
 ### Desktop UI shorthands
 
@@ -146,8 +152,15 @@ That means:
 
 Current bucket split:
 
-- shared bucket: `./c3`, `./c4`, `./dev replay`, `./dev plotjuggler`, `./dev juggle`, `./dev shell`
+- shared bucket: `./c3`, `./c4`, `./dev replay`, `./dev galaxy`, `./dev plotjuggler`, `./dev juggle`, `./dev shell`
 - cabana bucket: `./dev cabana`
+
+`./dev galaxy --live` is the exception to the "long-running sessions hold the lock" rule: it
+takes the shared lock only while building the host runtime, then releases it before serving.
+A live Galaxy session and `./c3` can run side by side. Only one live Galaxy session runs at a
+time; `sync_worktree` preserves the live symlink only while that session's pidfile is alive, so
+a finished session leaves no stale link behind. The snapshot `./dev galaxy` refuses to start
+while one is live, since it would otherwise serve the live working tree instead of a snapshot.
 
 This prevents one command from syncing or rebuilding over another live host session while still allowing the common Cabana + PlotJuggler pairing.
 
@@ -175,6 +188,13 @@ Use `./c3` or `./c4` when:
 
 - you want the desktop UI variants
 - you want them to build/run from the isolated host cache instead of touching tracked files
+
+Use `./dev galaxy` when:
+
+- you want to preview the Galaxy web UI in a browser on your desktop
+- use `--live` for layout work, so edits under `starpilot/system/the_galaxy/` appear on refresh
+- use it bare for a stable snapshot that ignores whatever you are currently editing
+- use `./onroad --galaxy <route>` when the panels you are working on need replayed data
 
 ## Troubleshooting
 
