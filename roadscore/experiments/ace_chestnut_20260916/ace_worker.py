@@ -21,8 +21,11 @@ from link_health import LinkProbe
 from hook_service import Client
 from planned_composition import PlannedComposition
 composition_policy=os.environ.get('ROADSCORE_COMPOSITION_POLICY','prepared-v1')
-if composition_policy not in ('prepared-v1','hook-v2'):raise ValueError('Unknown composition policy')
-if composition_policy=='hook-v2' and not windowed:raise ValueError('Hook planning requires windowed native sampler')
+if composition_policy not in ('prepared-v1','hook-v2','hook-cache-v1'):raise ValueError('Unknown composition policy')
+if composition_policy in ('hook-v2','hook-cache-v1') and not windowed:raise ValueError('Hook planning requires windowed native sampler')
+if composition_policy=='hook-cache-v1':
+ from cached_composition import CachedComposition,validate_bank
+ validate_bank(Path(os.environ['ROADSCORE_PLAN_BANK']),profile=selected())
 from tinygrad import Device
 profile=selected();preparation_id=f'{profile}_{time.time_ns()}'
 lock=open(G/'gpu.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -40,10 +43,13 @@ try:
  probe=LinkProbe(Device['AMD'],G/'ace_link.jsonl');probe.install_failure_hook(contain=True)
  if windowed:c.decoder.trace=probe.trace
  planned=None
- if composition_policy=='hook-v2':
+ if composition_policy in ('hook-v2','hook-cache-v1'):
   from ace_runtime import Composer as NativeComposer
   from window_policy import retained_end
-  planned=PlannedComposition(Client(os.environ['ROADSCORE_PLANNER_URL'],os.environ['ROADSCORE_PLANNER_TOKEN']),G/'hook_sessions'/preparation_id,base_seed,profile)
+  if composition_policy=='hook-cache-v1':
+   planned=CachedComposition(Path(os.environ['ROADSCORE_PLAN_BANK']),G/'hook_sessions'/preparation_id,base_seed,profile)
+  else:
+   planned=PlannedComposition(Client(os.environ['ROADSCORE_PLANNER_URL'],os.environ['ROADSCORE_PLANNER_TOKEN']),G/'hook_sessions'/preparation_id,base_seed,profile)
   def planned_generate(role,seed,previous):return planned.generate(lambda case,seed,previous:NativeComposer.generate(c,case,seed,previous),seed,previous,retained_end)
  sample=planned_generate if planned else c.generate
  def generate(role,seed,previous):

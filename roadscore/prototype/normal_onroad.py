@@ -8,7 +8,8 @@ from pathlib import Path
 from clock_sync import measure
 from receiver_environment import assignments as receiver_assignments,resolve_compute
 from presentation_policy import select_launch
-from hook_launch import enabled as hook_enabled, start_planner
+from hook_launch import start_planner
+from composition_launch import configure as configure_composition
 from launch_health import check_children, describe_failure, write_failure
 from session_seed import select_session, seed_argument, seed_environment, remote_assignments
 R=Path(__file__).resolve().parents[1]
@@ -25,7 +26,8 @@ if not a.replay and a.composer=='ace':
  session=select_session(a.roadscore_seed,judging_seed=judging_seed)
 presentation=select_launch(a.composer,a.profile,replay=a.replay,judging=bool(session and session['seed_origin']=='judging-route'),render_mode=a.render_mode,policy=a.roadscore_presentation)
 a.render_mode=presentation['render_mode']
-composition_policy='hook-v2' if hook_enabled(session,a.replay,a.composer) and not a.transport_only else 'prepared-v1'
+composition_environment=os.environ.copy();composition_environment['ROADSCORE_ACE_PROFILE']=a.profile
+composition_policy=configure_composition(session,a.replay,a.composer,native=native,transport_only=a.transport_only,environ=composition_environment,root=R)
 from settings import Settings,resolve_route
 a.routeid=resolve_route(p,a.route,a.routeid)
 from route_favorites import resolve_favorite
@@ -40,7 +42,7 @@ for path in [py,replay,rt/'selfdrive/ui/ui.py']:
 if native:
  from native_ownership import verify_offroad
  verify_offroad()
-out=R/'results'/('normal_'+str(int(time.time())));out.mkdir();env=os.environ.copy();env.update(PYTHONDONTWRITEBYTECODE='1',ZMQ='1',OPENPILOT_ZMQ_NAMESPACE='roadscore-native-'+str(os.getpid()),PARAMS_ROOT=str(out/'params'),BASEDIR=str(rt),NOBOARD='1',SIMULATION='1',SKIP_FW_QUERY='1',BIG='0',SP_ALLOW_DESKTOP_FAKE_WIFI='0',SP_ALLOW_DESKTOP_FAKE_BLUETOOTH='0',SP_ONROAD_NAV_DEMO='0',SP_ONROAD_CEM_DEMO='0')
+out=R/'results'/('normal_'+str(int(time.time())));out.mkdir();env=composition_environment.copy();env.update(PYTHONDONTWRITEBYTECODE='1',ZMQ='1',OPENPILOT_ZMQ_NAMESPACE='roadscore-native-'+str(os.getpid()),PARAMS_ROOT=str(out/'params'),BASEDIR=str(rt),NOBOARD='1',SIMULATION='1',SKIP_FW_QUERY='1',BIG='0',SP_ALLOW_DESKTOP_FAKE_WIFI='0',SP_ALLOW_DESKTOP_FAKE_BLUETOOTH='0',SP_ONROAD_NAV_DEMO='0',SP_ONROAD_CEM_DEMO='0')
 if session:
  env.update(seed_environment(session));(out/'session_seed.json').write_text(json.dumps(session,indent=2));print('RoadScore session seed:',session['generation_seed'],'('+session['seed_origin']+')',flush=True)
 else:

@@ -28,6 +28,14 @@ class PersistentAssetsTest(unittest.TestCase):
         self.assertEqual(restore_links(self.root, self.data), [])
         self.assertEqual((self.root / 'experiments/ace_chestnut_20260916/weights/model').read_bytes(), b'preserved')
 
+    def test_optional_native_cache_and_build_reconnected(self):
+        self.provision()
+        for name in ('routes', 'native_build'):
+            (self.data / 'roadscore-event-state' / name).mkdir()
+        self.assertEqual(len(restore_links(self.root, self.data)), 9)
+        self.assertTrue((self.root / 'routes').is_symlink())
+        self.assertTrue((self.root / 'native_build').is_symlink())
+
     def test_existing_data_is_never_overwritten_or_partially_modified(self):
         self.provision()
         (self.root / 'runtime.json').write_text('local settings')

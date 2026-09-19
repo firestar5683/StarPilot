@@ -11,6 +11,10 @@ def restore_links(root, data=Path('/data')):
     mapping = {name: state / name for name in ('generated', 'results', 'assets', 'runtime.json')}
     mapping.update({f'experiments/ace_chestnut_20260916/{name}': assets / 'ace' / name
                     for name in ('weights', 'vae_weights', 'profiles')})
+    # Optional provisioned native cache/build folders survive checkout replacement.
+    for name in ('routes', 'native_build'):
+        if (state / name).is_dir():
+            mapping[name] = state / name
     missing = []
     for relative, target in mapping.items():
         valid = target.is_file() if relative == 'runtime.json' else target.is_dir()
