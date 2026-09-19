@@ -2,6 +2,7 @@ import math
 
 import pyray as rl
 from dataclasses import dataclass
+from openpilot.selfdrive.ui.mici.onroad.hud_layout import steering_warning_rect
 from openpilot.common.constants import CV
 from openpilot.selfdrive.ui.onroad.starpilot.torque_bar import TorqueBar
 from openpilot.selfdrive.ui.onroad.starpilot.rivian_lateral_mode import rivian_lateral_mode
@@ -405,9 +406,10 @@ class HudRenderer(Widget):
 
     if self._show_wheel_critical:
       # Draw exclamation point icon
-      EXCLAMATION_POINT_SPACING = 10
-      exclamation_pos_x = pos_x - self._txt_exclamation_point.width / 2 + wheel_txt.width / 2 + EXCLAMATION_POINT_SPACING
-      exclamation_pos_y = pos_y - self._txt_exclamation_point.height / 2
+      exclamation_pos_x, exclamation_pos_y, _, _ = steering_warning_rect(
+        pos_x, pos_y, wheel_txt.width, wheel_txt.height, rotation,
+        self._txt_exclamation_point.width, self._txt_exclamation_point.height,
+      )
       rl.draw_texture(self._txt_exclamation_point, int(exclamation_pos_x), int(exclamation_pos_y), rl.WHITE)
 
   def _draw_set_speed(self, rect: rl.Rectangle) -> None:
