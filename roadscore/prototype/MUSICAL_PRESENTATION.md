@@ -102,3 +102,37 @@ expires its indicator. Engagement exposes `rendered_open_mix` and
 `rendered_state` (`open`, `transition`, `contained`) after actual processing,
 plus `rendered_block_end_seconds`. Display it only when enabled, current and
 actually applied; `active` is input provenance, not proof the ramp has finished.
+
+## Normal-launch policy resolver
+
+`presentation_policy.select_launch(...)` is the launcher integration hook.
+Fresh normal ACE Prism resolves to gold-core + conservative-v1 automatically.
+An explicit `policy='off'` retains raw gold-core; explicit `render_mode='current'`
+selects the legacy rendering with new presentation layers off. Stored playback
+resolves to current/off and rejects remix flags. Official judging resolves to
+current/frozen, retaining its frozen runtime config; adopting another policy
+requires a separately bound versioned cohort, not an inherited normal default.
+
+The launcher must export/forward `ROADSCORE_PRESENTATION_POLICY` from this result
+alongside `ROADSCORE_RENDER_MODE`; do not inherit stale environment values.
+`effective_config` overlays only presentation keys in memory. It never changes
+the global runtime file, seeds, generation policy, profiles or composition.
+The runtime manifest records the effective configuration and policy. Absence of
+the environment selector preserves frozen behavior for existing internal callers.
+Launcher/CLI ownership remains with the composition integration owner.
+
+## Approved-run procedure after software/plan release
+
+Current event operating point is100W; no new power investigation gate or sweep.
+The sole hardware owner first confirms idle/offroad ownership and preserves
+current source/config/archive indices. Stage only the reviewed combined source,
+verify actual100W readback and matchingTC_OPT2, weights and prepared plan hashes,
+then use the normal one-command route path with a newly persisted session seed.
+No special cue timestamps or route-specific settings. Keep output muted unless
+separately authorized for attended audio. Capture actual render-mode/policy,
+firstaccepted/ready timing, perjob generation/decodeRTF, link health, minbuffer,
+underflows/holds, actual rendered cue frames and engagement freshness/mix.
+Save exact dry/heard audio, seed/conditioning manifest, source hashes and normal
+UI recording; verify causal input times and archive synchronization. Preserve
+fault evidence and stop if a fault occurs; no automatic resets/power sweep.
+Hardware stays idle until the root releases the reviewed combined plan.

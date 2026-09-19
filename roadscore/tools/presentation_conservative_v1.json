@@ -1,5 +1,5 @@
 {
-  "presentation_policy_version": "conservative-v1-review-candidate",
+  "presentation_policy_version": "conservative-v1",
   "signal_shaker": {"enabled": true},
   "core_apex": {"enabled": true},
   "engagement_presentation": {"version": 2, "enabled": true, "attack_ms": 220, "release_ms": 650}
