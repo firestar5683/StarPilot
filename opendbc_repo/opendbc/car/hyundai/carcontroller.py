@@ -42,6 +42,7 @@ IONIQ_6_RESPONSE_MULTIPLIER = 1.2
 IONIQ_6_CANFD_SCC_ACCEL_STEP = (6.0 / 50.0) * IONIQ_6_RESPONSE_MULTIPLIER
 IONIQ_6_CANFD_SCC_DECEL_STEP = (15.0 / 50.0) * IONIQ_6_RESPONSE_MULTIPLIER
 EV9_CANFD_SCC_DECEL_STEP = 10.0 / 50.0
+EV9_OP_LONG_ANGLE_TARGET_MAX = 140.0
 RAY_PEDAL_COMMAND_CAP = 0.35  # Ray firmware voltage scaling is route-derived; validate before raising.
 RAY_PEDAL_RATE_UP = 0.012     # per 25 Hz command (0.30 normalized pedal per second)
 RAY_PEDAL_RATE_DOWN = 0.06
@@ -595,6 +596,9 @@ class CarController(CarControllerBase):
       desired_angle = float(np.clip(actuators.steeringAngleDeg,
                                     -self.params.ANGLE_LIMITS.STEER_ANGLE_MAX,
                                     self.params.ANGLE_LIMITS.STEER_ANGLE_MAX))
+      if self.CP.carFingerprint == CAR.KIA_EV9 and direct_angle_control:
+        # Bound the autonomous target before filtering, preserving inactive references and rate-limited reentry.
+        desired_angle = float(np.clip(desired_angle, -EV9_OP_LONG_ANGLE_TARGET_MAX, EV9_OP_LONG_ANGLE_TARGET_MAX))
       self.angle_filter.update_alpha(get_angle_smoothing_alpha(self.CP, CS.out.vEgo))
       desired_angle = self.angle_filter.update(desired_angle)
 

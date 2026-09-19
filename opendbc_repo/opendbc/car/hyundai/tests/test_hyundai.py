@@ -4272,3 +4272,76 @@ class TestHyundaiFingerprint:
         platforms_with_shared_codes.add(platform)
 
     assert platforms_with_shared_codes == excluded_platforms
+
+
+class TestHyundaiAngleTargetCap:
+  @staticmethod
+  def setup_controller(candidate, direct):
+    fingerprint = gen_empty_fingerprint()
+    CP = CarInterface.get_params(candidate, fingerprint, [], direct, False, False, None)
+    CP.openpilotLongitudinalControl = direct
+    CP.flags = int(CP.flags | HyundaiFlags.CANFD_LKA_STEERING | HyundaiFlags.CANFD_LKA_STEERING_ALT)
+    toggles = get_test_toggles()
+    FPCP = CarInterface.get_starpilot_params(candidate, fingerprint, [], CP, toggles)
+    cs = CarState(CP, FPCP)
+    cs.out = structs.CarState.new_message()
+    cs.out.gearShifter = structs.CarState.GearShifter.drive
+    cs.out.vEgo = cs.out.vEgoRaw = 5.0
+    cs.lfa_block_msg = {f"BYTE{i}": 0 for i in range(3, 32) if i != 7}
+    cs.lfa_block_msg["COUNTER"] = 0
+    controller = CarController(DBC[candidate], CP)
+    controller.long_active_ecu = direct
+    controller._ecu_disable_checked = True
+    cc = CarControl.new_message()
+    cc.enabled = cc.latActive = True
+    message = "ADAS_CMD_35_10ms" if direct else "LKAS_ALT"
+    bus = controller.CAN.ECAN if direct else controller.CAN.ACAN
+    parser = CANParser(DBC[candidate][Bus.pt], [(message, 0)], bus)
+    return controller, cs, cc, toggles, parser, message
+
+  @pytest.mark.parametrize("candidate,direct,expected", [
+    (CAR.KIA_EV9, True, 140.0),
+    (CAR.KIA_EV9, False, 200.0),
+    (CAR.HYUNDAI_IONIQ_5_PE, True, 200.0),
+  ])
+  def test_ev9_target_cap_scope_holds_active_and_reverses(self, candidate, direct, expected):
+    controller, cs, cc, toggles, parser, message = self.setup_controller(candidate, direct)
+    active_signal = "ADAS_ActvACILvl2Sta" if direct else "LKAS_ANGLE_ACTIVE"
+    for frame in range(600):
+      sign = 1 if frame < 300 else -1
+      # AOL and engaged longitudinal control use the same configured steering path.
+      cc.longActive = frame >= 300
+      cc.actuators.steeringAngleDeg = sign * 200
+      cs.out.steeringAngleDeg = cs.angle_steering_angle = controller.apply_angle_last
+      now = 1_000_000_000 + frame * 10_000_000
+      _, messages = controller.update(cc.as_reader(), cs, now, toggles)
+      steering = [msg for msg in messages if msg[0] == (0xCB if direct else 0x110)]
+      assert len(steering) == 1
+      parser.update([(now, steering)])
+      values = parser.vl[message]
+      assert values[active_signal] == 2
+      assert values["ADAS_ACIAnglTqRedcGainVal"] > 0
+      assert abs(values["ADAS_StrAnglReqVal"]) <= expected + 0.1
+      if frame in (299, 599):
+        assert values["ADAS_StrAnglReqVal"] == pytest.approx(sign * expected, abs=0.1)
+
+  @pytest.mark.parametrize("sign", [-1, 1])
+  def test_ev9_target_cap_preserves_inactive_measurement_and_gradual_reentry(self, sign):
+    controller, cs, cc, toggles, parser, message = self.setup_controller(CAR.KIA_EV9, True)
+    cc.actuators.steeringAngleDeg = sign * 240
+    cs.out.steeringAngleDeg = cs.angle_steering_angle = sign * 200
+    cc.latActive = False
+    _, messages = controller.update(cc.as_reader(), cs, 1_000_000_000, toggles)
+    parser.update([(1_000_000_000, [msg for msg in messages if msg[0] == 0xCB])])
+    assert parser.vl[message]["ADAS_ActvACILvl2Sta"] == 1
+    assert parser.vl[message]["ADAS_StrAnglReqVal"] == pytest.approx(sign * 200)
+
+    cc.latActive = True
+    previous = controller.apply_angle_last
+    _, messages = controller.update(cc.as_reader(), cs, 1_010_000_000, toggles)
+    parser.update([(1_010_000_000, [msg for msg in messages if msg[0] == 0xCB])])
+    values = parser.vl[message]
+    assert values["ADAS_ActvACILvl2Sta"] == 2
+    # This is a target cap, not an instantaneous wire-angle clamp after manual input.
+    assert 140 < abs(values["ADAS_StrAnglReqVal"]) < 200
+    assert abs(controller.apply_angle_last - previous) <= controller.params.ANGLE_LIMITS.MAX_ANGLE_RATE
