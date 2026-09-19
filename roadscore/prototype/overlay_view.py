@@ -97,59 +97,53 @@ def fit_text(text, max_width, measure):
   return text.rstrip() + '...' if text else ''
 
 
-def draw_panel(rl, font, state, screen_width, screen_height):
-  """A compact score ribbon centered over the camera, clear of the right rail."""
+def hud_bounds(screen_width, screen_height):
+  """Accessory slot below DM/speed, left of the native speed-limit sign."""
+  width = min(286, screen_width - 64 - 144 - 16)
+  if width < 230 or screen_height < 224:
+    return None
+  return (16, 88, width, 60)
+
+
+def draw_panel(rl, font, state, screen_width, screen_height, emphasis_font=None):
   view = overlay_view(state)
-  color = {'READY': (123, 229, 193), 'GENERATING': (131, 192, 255),
-           'DEGRADED': (255, 197, 112), 'PREPARING': (196, 204, 214)}[view['activity']]
-  accent = rl.Color(*color, 255)
-  muted = rl.Color(210, 218, 225, 255)
-  measure = lambda label, size: rl.measure_text_ex(font, label, size, 0).x
-  section = view['section'].removeprefix('INTENT: ')
-  if section in ('ARCHIVED SCORE', 'WAITING FOR SCORE'):
+  bounds = hud_bounds(screen_width, screen_height)
+  if bounds is None:
+    return view
+  x, y, width, height = bounds
+  title_font = emphasis_font or font
+  accent = rl.Color(*({'READY': (123, 229, 193), 'GENERATING': (131, 192, 255),
+                     'DEGRADED': (255, 197, 112), 'PREPARING': (196, 204, 214)}[view['activity']]), 255)
+  muted = rl.Color(235, 239, 243, 255)
+  section = view['section'].removeprefix('INTENT: ').split(' > ')[0].title()
+  if section in ('Archived Score', 'Waiting For Score'):
     section = ''
-  elif state.get('form_labels_are_intent'):
-    section = 'intent ' + section.title()
-  else:
-    section = section.title()
-  primary = view['profile'] + (' / ' + section if section else '')
+  identity = 'Stored score' if view['stored'] else view['profile']
+  subtitle = identity + (' / ' + section if section else '')
+  title = 'RoadScore'
   if view['activity'] == 'DEGRADED':
-    detail = view['note']
+    title = 'Music on hold' if state.get('holding_accepted_music') else ('Composer offline' if state.get('worker_failed') else 'Reserve in use')
+    subtitle = 'DEGRADED / ' + identity
   elif view['event']:
-    detail = view['event']
+    title, _, effect = view['event'].partition(' / ')
+    subtitle = identity + (' / ' + effect.capitalize() if effect else '')
   elif view['activity'] == 'GENERATING':
-    detail = view['note']
-  else:
-    detail = 'Archived playback' if view['stored'] else ' / '.join(filter(None, view['backend']))
-  secondary = detail if view['event'] or view['activity'] == 'DEGRADED' else 'RoadScore' + (' / ' + detail if detail else '')
-  buffer = view['buffered']
-  reserve = '--' if buffer is None else f'{buffer:.0f}s'
-  activity_width = measure(view['activity'], 9)
-  max_width = min(300, screen_width * .64, screen_width - 24)
-  width = min(max_width, max(210, measure(primary, 11) + activity_width + 57,
-                             measure(secondary, 10) + measure(reserve, 9) + 60))
-  camera_width = screen_width - 64  # Native mici control rail stays unobstructed.
-  x, y, height = max(12, (camera_width - width) / 2), 8, 34
-  # One quiet translucent surface, with no enclosing badge or oversized title.
-  rl.draw_rectangle_rounded(rl.Rectangle(x, y, width, height), .4, 8, rl.Color(8, 13, 18, 184))
-  def text(label, left, top, size, tint, available):
-    label = fit_text(label, max(0, available), lambda value: measure(value, size))
-    rl.draw_text_ex(font, label, rl.Vector2(x + left, y + top), size, 0, tint)
-  # Connected notes are a score identity mark, not an animated compute claim.
-  rl.draw_circle(int(x + 11), int(y + 23), 2.5, muted)
-  rl.draw_circle(int(x + 20), int(y + 21), 2.5, muted)
-  for left, top, w, h in ((12, 10, 1.5, 13), (21, 8, 1.5, 13), (12, 8, 10.5, 2.5)):
-    rl.draw_rectangle_rounded(rl.Rectangle(x + left, y + top, w, h), .2, 4, muted)
-  activity_left = width - activity_width - 9
-  text(primary, 30, 5, 11, rl.WHITE, activity_left - 45)
-  rl.draw_circle(int(x + activity_left - 7), int(y + 10), 2, accent)
-  text(view['activity'], activity_left, 6, 9, accent, activity_width + 1)
-  reserve_width = measure(reserve, 9)
-  text(secondary, 30, 21, 10, accent if view['activity'] == 'DEGRADED' or view['event_state'] == 'active' else muted,
-       width - reserve_width - 62)
-  # Three quiet queue bars distinguish buffered seconds from job elapsed time.
-  for i, bar_height in enumerate((3, 5, 7)):
-    rl.draw_rectangle_rounded(rl.Rectangle(x + width - reserve_width - 21 + i * 3,
-                                         y + 29 - bar_height, 1.5, bar_height), .2, 4, muted)
-  text(reserve, width - reserve_width - 9, 21, 9, muted, reserve_width + 1)
+    title = 'Composing'
+  elif view['activity'] == 'PREPARING':
+    title = 'Preparing music'
+  # Match native icon/label groups: no enclosing dashboard panel.
+  rl.draw_circle(int(x + 20), int(y + 28), 21, rl.Color(0, 0, 0, 150))
+  icon_color = accent if view['activity'] == 'DEGRADED' else rl.WHITE
+  rl.draw_circle(int(x + 12), int(y + 36), 4, icon_color)
+  rl.draw_circle(int(x + 27), int(y + 32), 4, icon_color)
+  for left, top, w, h in ((14, 16, 2.5, 20), (29, 12, 2.5, 20), (14, 12, 17.5, 3.5)):
+    rl.draw_rectangle_rounded(rl.Rectangle(x + left, y + top, w, h), .2, 4, icon_color)
+  def text(label, top, size, face, tint, available):
+    label = fit_text(label, available, lambda value: rl.measure_text_ex(face, value, size, 0).x)
+    # Native HUD text uses local shadows; avoid an opaque rectangle over the road.
+    for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1), (1, 2)):
+      rl.draw_text_ex(face, label, rl.Vector2(x + 52 + dx, y + top + dy), size, 0, rl.Color(0, 0, 0, 210))
+    rl.draw_text_ex(face, label, rl.Vector2(x + 52, y + top), size, 0, tint)
+  text(title, 5, 20, title_font, accent if view['activity'] == 'DEGRADED' else rl.WHITE, width - 52)
+  text(subtitle, 33, 14, font, muted, width - 52)
   return view

@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'prototype'))
-from overlay_view import display_text, fit_text, overlay_view
+from overlay_view import display_text, fit_text, overlay_view, hud_bounds
 
 
 class OverlayTests(unittest.TestCase):
@@ -45,6 +45,17 @@ class OverlayTests(unittest.TestCase):
     self.assertEqual(overlay_view({'lead': 4})['event'], '')
     self.assertEqual(overlay_view(dict(kind='navigation', phase='anticipation', lead=4))['event'], '')
     self.assertEqual(overlay_view(dict(kind='curve', phase='anticipation', lead=4))['event'], 'Curve ahead / 4.0s')
+
+  def test_native_slot_clears_speed_sign_driver_and_steering(self):
+    x, y, width, height = hud_bounds(536, 240)
+    # Measured native screenshot + native widget dimensions, with safety margins.
+    occupied = [(8, 4, 72, 72), (160, 0, 158, 76), (328, 16, 120, 144),
+                (0, 160, 80, 80), (472, 0, 64, 240)]
+    for ox, oy, ow, oh in occupied:
+      self.assertTrue(x + width <= ox or ox + ow <= x or y + height <= oy or oy + oh <= y)
+    self.assertLessEqual(x + width, 472)
+    self.assertLessEqual(y + height, 240)
+    self.assertIsNone(hud_bounds(320, 240))
 
   def test_missing_buffer_is_not_zero(self):
     for value in (None, float('nan'), float('inf'), '12', True):

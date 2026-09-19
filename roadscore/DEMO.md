@@ -6,7 +6,7 @@ The conductor receives only road messages already delivered by replay. It reques
 
 ## Reading the overlay
 
-A 34-pixel translucent ribbon sits at the top center of the camera area on the comma four's 536 × 240 canvas, leaving the road visible and the native right control rail clear. A geometric musical-note mark identifies the score, and small queue bars identify buffered seconds. Its width follows the content, capped at 300 pixels. Profile and section lead, with a compact state indicator; the second line shows RoadScore, backend or a contextual event, and a quiet buffer time. Degraded explanations take priority over other detail.
+RoadScore uses a native-style icon and label group in the free area below driver monitoring and current speed, left of the speed-limit sign. A 40-pixel musical mark accompanies a 20-pixel action title and 14-pixel supporting identity. Local text shadows preserve contrast without a panel covering the camera. Normal buffer/backend detail is omitted; degraded state remains explicit. The group yields to actual native navigation cards and alerts.
 
 | Display | Meaning |
 | --- | --- |
