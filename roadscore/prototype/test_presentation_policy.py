@@ -7,7 +7,7 @@ class PolicyTests(unittest.TestCase):
   fragment=Path(__file__).resolve().parents[1]/'tools/presentation_conservative_v1.json'
   self.assertEqual(json.loads(fragment.read_text()),CONSERVATIVE)
  def test_normal_prism_gets_integrated_policy_without_extra_flags(self):
-  self.assertEqual(select_launch('ace','prism'),{'render_mode':'gold-core','policy':'conservative-v1'})
+  self.assertEqual(select_launch('ace','prism'),{'render_mode':'gold-core','policy':'conservative-v2'})
  def test_explicit_optouts(self):
   self.assertEqual(select_launch('ace','prism',policy='off'),{'render_mode':'gold-core','policy':'off'})
   self.assertEqual(select_launch('ace','prism',render_mode='current'),{'render_mode':'current','policy':'off'})
@@ -27,6 +27,13 @@ class PolicyTests(unittest.TestCase):
   self.assertEqual(effective_config(original,{}),original)
   off=effective_config(original,{'ROADSCORE_PRESENTATION_POLICY':'off'})
   self.assertFalse(off['signal_shaker']['enabled']);self.assertFalse(off['engagement_presentation']['enabled'])
+ def test_v2_keeps_frozen_and_legacy_alerts_off(self):
+  config={'alert_accent':{'enabled':True}}
+  for policy in ('off','conservative-v1'):
+   self.assertFalse(effective_config(config,{'ROADSCORE_PRESENTATION_POLICY':policy})['alert_accent']['enabled'])
+  latest=effective_config({}, {'ROADSCORE_PRESENTATION_POLICY':'conservative-v2'})
+  self.assertTrue(latest['alert_accent']['enabled'])
+  self.assertEqual(latest['core_apex']['dip_db'],-3.)
  def test_other_backend_and_legacy_incompatibility(self):
   self.assertEqual(select_launch('sa3','prism'),{'render_mode':'current','policy':'off'})
   with self.assertRaises(ValueError):select_launch('ace','prism',render_mode='current',policy='conservative-v1')

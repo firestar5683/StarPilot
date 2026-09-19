@@ -25,13 +25,14 @@ def profile_tempo_prior(manifest):
 
 def assess_grid(wave, rate, bpm_prior=None):
  """Assess once outside callback. Conflicting acoustic tempo wins a veto, not a guessed beat."""
- if len(wave)<30*rate:return ShakerGrid(128.,0.,0.,0.,False,'insufficient audio for grid'),{}
- g=estimate_grid(wave[:30*rate],rate,bpm_prior)
+ if len(wave)<12*rate:return ShakerGrid(128.,0.,0.,0.,False,'insufficient audio for grid'),{}
+ wave=wave[:30*rate];half=len(wave)//2;half_seconds=half/rate
+ g=estimate_grid(wave,rate,bpm_prior)
  best=max(x['autocorrelation'] for x in g['tempo_candidates'])
  agreement=g['pulse_confidence']/max(best,1e-9)
  # Bar accent confidence is not beat-phase confidence. Compare phase of two halves.
- a=estimate_grid(wave[:15*rate],rate,g['bpm']);b=estimate_grid(wave[15*rate:30*rate],rate,g['bpm'])
- period=60/g['bpm'];drift=abs(((b['beat_phase']+15-a['beat_phase']+period/2)%period)-period/2)
+ a=estimate_grid(wave[:half],rate,g['bpm']);b=estimate_grid(wave[half:],rate,g['bpm'])
+ period=60/g['bpm'];drift=abs(((b['beat_phase']+half_seconds-a['beat_phase']+period/2)%period)-period/2)
  phase=max(0.,1.-drift/(period*.25))
  coherent=bpm_prior is not None and agreement>=.85 and abs(g['bpm']/bpm_prior-1)<.08 and abs(a['bpm']/b['bpm']-1)<.03
  reason='coherent estimated pulse; downbeat unverified' if coherent else 'tempo/phase ambiguity; rhythmic additions bypassed'

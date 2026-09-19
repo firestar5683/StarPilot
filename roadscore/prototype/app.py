@@ -16,6 +16,7 @@ from presentation_policy import effective_config,selected as presentation_policy
 from engagement_presentation import EngagementPresentation,PresentationConfig,engagement_active
 from signal_shaker import SignalShaker,assess_grid,profile_tempo_prior
 from core_apex import CoreApex
+from alert_accent import AlertAccent
 from presentation_status import export_status
 from rolling import anchor_options,INITIAL_END,WINDOW,LATENT_SECONDS,trajectory
 from musical import Arrival,MusicalDSP,analyze_music,ending_gesture,match_continuation
@@ -59,9 +60,10 @@ drive_events=config.get('drive_events',False) or config.get('event_music',False)
 presentation_config=PresentationConfig.read(config.get('engagement_presentation'))
 shaker_enabled=config.get('signal_shaker',{}).get('enabled') is True
 apex_enabled=config.get('core_apex',{}).get('enabled') is True
-if (presentation_config.enabled or shaker_enabled or apex_enabled) and render_mode!='gold-core':raise ValueError('Optional presentation layers require gold-core baseline')
+alert_enabled=config.get('alert_accent',{}).get('enabled') is True
+if (presentation_config.enabled or shaker_enabled or apex_enabled or alert_enabled) and render_mode!='gold-core':raise ValueError('Optional presentation layers require gold-core baseline')
 presentation=EngagementPresentation(rate,block) if presentation_config.enabled else None
-engagement=(False,False,0,0.,0);signal_state=(False,False,0,0.,0)
+engagement=(False,False,0,0.,0);signal_state=(False,False,0,0.,0);alert_state=(None,False)
 initial_identity=identity;musical_mode=config.get('musical',False);arrival=Arrival();ending_start=None;ending_audio=None;ending_info={};playing_identity=identity;identity_queue=[];last_requested_identity=identity
 usable_frames=WINDOW if rolling_mode else (301 if musical_mode else 323)
 source_path=root/f'assets/source_{identity}.wav' if identity!='legacy' else root/'assets/source.wav'
@@ -99,12 +101,13 @@ if config.get('gesture_layer',False) and render_mode=='current':
  gesture_grid=grid(gesture_source,rate,gesture_pulse['bpm'] if gesture_pulse['confidence']>=.25 else music_info['bpm'])
  gestures=MusicalGestures(gesture_source,rate,gesture_grid['bpm'],gesture_grid['beat_phase'])
  (run/'gesture_grid.json').write_text(json.dumps(gesture_grid))
-shaker=None;apex=None
-if shaker_enabled or apex_enabled:
+shaker=None;apex=None;alert_accent=None
+if shaker_enabled or apex_enabled or alert_enabled:
  profile_manifest=json.loads((root/'experiments/ace_chestnut_20260916/profiles'/ace_profile/'profile.json').read_text())
  shaker_grid,shaker_analysis=assess_grid(source,rate,profile_tempo_prior(profile_manifest))
  shaker=SignalShaker(shaker_grid,rate,enabled=shaker_enabled)
- apex=CoreApex(shaker_grid,rate,enabled=apex_enabled)
+ apex=CoreApex(shaker_grid,rate,enabled=apex_enabled,dip_db=config.get('core_apex',{}).get('dip_db',-1.))
+ alert_accent=AlertAccent(shaker_grid,rate,enabled=alert_enabled)
  (run/'shaker_grid.json').write_text(json.dumps({'grid':shaker.snapshot(),'analysis':shaker_analysis},indent=2))
 if config.get('composition_control',False):
  from composition_policy import CompositionPolicy
@@ -173,6 +176,10 @@ def callback(out,n,ti,status):
  signal_on,signal_fresh=engagement_active(signal_state[1],signal_state[0],signal_state[2],signal_state[4],signal_state[3],callback_wall)
  if shaker is not None:rendered=shaker.process(rendered,frames-n,signal_on,signal_fresh)
  if apex is not None:rendered=apex.process(rendered,frames-n,event_state)
+ if alert_accent is not None:
+  alert_key,meaningful=alert_state
+  competing=bool((shaker is not None and shaker.active) or (apex is not None and apex.rendered_active) or (presentation is not None and abs(presentation.mix-float(active))>.01))
+  rendered=alert_accent.process(rendered,frames-n,alert_key,meaningful,fresh,competing)
  if presentation is not None:rendered=presentation.process(rendered,active,presentation_config)
  out[:]=0 if a.mute else rendered
  try:capture.put_nowait((rendered,chunk,{'signal_shaker_enabled':shaker_enabled,'signal_on':signal_on,'signal_fresh':signal_fresh,'engagement_presentation_enabled':presentation_config.enabled,'engagement_active':active,'engagement_fresh':fresh,'audio_s':(frames-n)/rate,'callback_wall':callback_wall,'command_received_wall':command_wall,'replay_origin_wall':replay_origin_wall,'dac_delay':float(ti.outputBufferDacTime-ti.currentTime),'route_t':source_time,'amount':amount,'phase':event_state['phase'],'strength':event_state.get('strength',0),'predicted_peak':event_state.get('predicted_peak'),'activation':event_state.get('activation'),'kind':event_state.get('kind','curve'),'cadence_entry_audio_s':None if ending_start is None else ending_start/rate,'runway_active':ending_start is not None and frames-n<ending_start,'muted':a.mute,'portaudio_status':str(status),'callback_processing_seconds':time.monotonic()-callback_wall}))
@@ -207,6 +214,7 @@ try:
    sm.update(100)
    control_wall=time.monotonic();latest_source=max(sm.logMonoTime.values())
    if sm.updated['selfdriveState']:
+    alert_state=(str(sm['selfdriveState'].alertType),int(sm['selfdriveState'].alertStatus.raw)>0 and int(sm['selfdriveState'].alertSize.raw)>0)
     engagement=(bool(sm['selfdriveState'].active),bool(sm.valid['selfdriveState']),sm.logMonoTime['selfdriveState'],control_wall,latest_source)
    else:engagement=(*engagement[:4],latest_source)
    if sm.updated['carState']:
@@ -352,6 +360,7 @@ try:
      snapshot.update(presentation.snapshot(presentation_config,engagement_on,engagement_fresh))
     if shaker is not None:snapshot['signal_shaker']=shaker.snapshot()
     if apex is not None:snapshot['core_apex']=apex.snapshot()
+    if alert_accent is not None:snapshot['alert_accent']=alert_accent.snapshot()
     if songform:snapshot.update(songform.snapshot())
     if composition:snapshot.update(composition.snapshot(frames/rate))
     if gestures:snapshot.update(gestures.status())
@@ -359,6 +368,7 @@ try:
    if time.monotonic()-last_progress>15:raise RuntimeError('Replay model input stalled')
 finally:
  audio_started=False
+ if alert_accent is not None:(run/'alert_accent_events.json').write_text(json.dumps(alert_accent.events,indent=2))
  if apex is not None:(run/'core_apex_events.json').write_text(json.dumps(apex.events,indent=2))
  if shaker is not None:(run/'shaker_events.json').write_text(json.dumps({'sequences':shaker.events,'pulse_frames':shaker.pulse_frames,'settings':shaker.snapshot()},indent=2))
  if gestures:(run/'gestures.json').write_text(json.dumps({'events':gestures.events,'bpm':gestures.bpm,'source_derived':True,'tonal_key_not_inferred':True},indent=2))
