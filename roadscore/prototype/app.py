@@ -33,6 +33,8 @@ def configuration():
  except (FileNotFoundError,json.JSONDecodeError):return {}
 from composer_choice import choice
 from composer_audio import result_window
+from render_policy import selected as render_mode_selected, validate as validate_render_mode, render as render_audio, ring_only as render_ring_only
+render_mode=render_mode_selected()
 from generation_budget import GenerationBudget
 from generation_seed import configured_seed,sample_seed
 base_seed=configured_seed();generation_index=0
@@ -46,7 +48,7 @@ from ace_profiles import selected,PROFILES
 ace_profile=selected()
 if composer=='ace':
  from ending_policy import safe_ending_gesture as ending_gesture
-config=configuration();identity=config.get('identity','legacy');identity=identity if identity in styles else 'legacy'
+config=configuration();validate_render_mode(render_mode,composer,config.get('song_form_experimental',False));identity=config.get('identity','legacy');identity=identity if identity in styles else 'legacy'
 rolling_mode=config.get('rolling',False);rolling_anchors={k:anchor_options(root,k) for k in styles if (root/f'assets/source_{k}.wav').exists()} if rolling_mode and composer!='ace' else {}
 drive_events=config.get('drive_events',False) or config.get('event_music',False);phrase_runway=config.get('phrase_runway',False)
 initial_identity=identity;musical_mode=config.get('musical',False);arrival=Arrival();ending_start=None;ending_audio=None;ending_info={};playing_identity=identity;identity_queue=[];last_requested_identity=identity
@@ -70,7 +72,7 @@ if config.get('song_form_experimental',False):
  from section_bank import SectionBank
  section_bank=SectionBank(root/'results/overnight/sections',rate);songform=SongForm(section_bank.clips['verse'][1]['bpm'])
 gestures=None;composition=None
-if config.get('gesture_layer',False):
+if config.get('gesture_layer',False) and render_mode=='current':
  if composer=='ace':
   if config.get('gesture_version',4)>=4:
    from musical_gestures_v4 import MusicalGestures
@@ -134,7 +136,7 @@ def callback(out,n,ti,status):
  if status:underflows+=1
  if not audio_started:out.fill(0);return
  with lock:
-  ring_only=musical_mode and ending_start is not None and frames-ending_start>=rate*.3
+  ring_only=render_ring_only(render_mode,musical_mode,ending_start,frames,rate)
   if not ring_only and len(audio)-position<n:
    # Bounded emergency repeat of actual generated source, with crossfade.
    # Last-resort emergency; normal loop extension is prepared by the main thread.
@@ -147,10 +149,8 @@ def callback(out,n,ti,status):
  if drive_events:dsp.event_state=event_state if ending_start is None else {'phase':'neutral','strength':0}
  if ending_start is not None and frames-n<ending_start:amount=0.
  if section_bank is not None:chunk=section_bank.render(n)
- rendered=dsp.process(chunk,amount,ending)
- if gestures is not None:rendered=gestures.render(rendered)
- if musical_mode and ending_start is not None:
-  rendered=mix_cadence(rendered,ending_audio,frames-n,ending_start,rate)
+ rendered=render_audio(render_mode,chunk,dsp,amount,ending,gestures,mix_cadence,
+  (ending_audio,frames-n,ending_start,rate) if musical_mode and ending_start is not None else None)
  out[:]=0 if a.mute else rendered
  try:capture.put_nowait((rendered,chunk,{'audio_s':(frames-n)/rate,'callback_wall':callback_wall,'command_received_wall':command_wall,'replay_origin_wall':replay_origin_wall,'dac_delay':float(ti.outputBufferDacTime-ti.currentTime),'route_t':source_time,'amount':amount,'phase':event_state['phase'],'strength':event_state.get('strength',0),'predicted_peak':event_state.get('predicted_peak'),'activation':event_state.get('activation'),'kind':event_state.get('kind','curve'),'cadence_entry_audio_s':None if ending_start is None else ending_start/rate,'runway_active':ending_start is not None and frames-n<ending_start,'muted':a.mute,'portaudio_status':str(status),'callback_processing_seconds':time.monotonic()-callback_wall}))
  except queue.Full:underflows+=1
@@ -316,7 +316,7 @@ try:
       req.update(composer='ace',profile=ace_profile,buffer_seconds=buffered,playback_deadline_monotonic=time.monotonic()+buffered)
      with (run/'jobs.jsonl').open('a') as audit:audit.write(json.dumps(req)+'\n')
      f=root/'generated/request.tmp';f.write_text(json.dumps(req));f.replace(root/'generated/request.json');inflight=True;budget_waiting=False;job_started=time.monotonic();last_requested_identity=identity
-    snapshot={'composer':composer,'readiness':'DEGRADED' if worker_failed or quality_failures or holding else 'READY','profile':ace_profile if composer=='ace' else None,'safe_extensions':len(safe_extensions),'holding_accepted_music':holding,'quality_failures':quality_failures,'style':PROFILES[ace_profile]['name'] if composer=='ace' else styles.get(identity,{}).get('name',identity),'section':'OUTRO' if ending_start is not None else 'CONTINUATION','identity':identity,'playing_identity':playing_identity,'musical_mode':musical_mode,'route':clock['route'],'route_t':now,'elapsed':frames/rate,'kind':state.get('kind','curve'),'phase':state['phase'],'amount':state['amount'],'lead':state['lead'],'activation':state['activation'],'predicted_peak':state['predicted_peak'],'strength':state['strength'],'predicted_turn_radians':state.get('predicted_turn_radians'),'detector':state.get('detector'),'qualified_since':state.get('qualified_since'),'command_wall':time.monotonic(),'speed':speed,'steering':float(sm['carState'].steeringAngleDeg),'model_age':(sm.logMonoTime['modelV2']-m.timestampEof)/1e9,'source_cutoff_ns':available_ns,'model_mono_ns':sm.logMonoTime['modelV2'],'buffered':buffered,'fallbacks':fallbacks,'underflows':underflows,'job_inflight':inflight,'generation_elapsed_seconds':max(0.,time.monotonic()-job_started) if inflight else None,'worker_failed':worker_failed,'completed_jobs':sum(not j.get('error') and not j.get('quality_rejected') for j in generation),'nav':nav,'nav_revision':nav_revision,'discarded_jobs':len(discarded_jobs),'arrival_at':arrival_at,'replay_late':clock['late']}
+    snapshot={'composer':composer,'render_mode':render_mode,'readiness':'DEGRADED' if worker_failed or quality_failures or holding else 'READY','profile':ace_profile if composer=='ace' else None,'safe_extensions':len(safe_extensions),'holding_accepted_music':holding,'quality_failures':quality_failures,'style':PROFILES[ace_profile]['name'] if composer=='ace' else styles.get(identity,{}).get('name',identity),'section':'OUTRO' if ending_start is not None else 'CONTINUATION','identity':identity,'playing_identity':playing_identity,'musical_mode':musical_mode,'route':clock['route'],'route_t':now,'elapsed':frames/rate,'kind':state.get('kind','curve'),'phase':state['phase'],'amount':state['amount'],'lead':state['lead'],'activation':state['activation'],'predicted_peak':state['predicted_peak'],'strength':state['strength'],'predicted_turn_radians':state.get('predicted_turn_radians'),'detector':state.get('detector'),'qualified_since':state.get('qualified_since'),'command_wall':time.monotonic(),'speed':speed,'steering':float(sm['carState'].steeringAngleDeg),'model_age':(sm.logMonoTime['modelV2']-m.timestampEof)/1e9,'source_cutoff_ns':available_ns,'model_mono_ns':sm.logMonoTime['modelV2'],'buffered':buffered,'fallbacks':fallbacks,'underflows':underflows,'job_inflight':inflight,'generation_elapsed_seconds':max(0.,time.monotonic()-job_started) if inflight else None,'worker_failed':worker_failed,'completed_jobs':sum(not j.get('error') and not j.get('quality_rejected') for j in generation),'nav':nav,'nav_revision':nav_revision,'discarded_jobs':len(discarded_jobs),'arrival_at':arrival_at,'replay_late':clock['late']}
     if songform:snapshot.update(songform.snapshot())
     if composition:snapshot.update(composition.snapshot(frames/rate))
     if gestures:snapshot.update(gestures.status())

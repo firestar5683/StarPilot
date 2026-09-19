@@ -1,10 +1,11 @@
 """Implementation provenance only; no route/model-content reads."""
 import hashlib,json,subprocess
+from render_policy import selected as render_mode_selected
 from pathlib import Path
 from composer_choice import choice,NAMES
 from ace_profiles import selected
-root=Path('/data/roadscore');files=[root/'prototype'/name for name in ['app.py','worker.py','core.py','musical.py','rolling.py','event_music.py','render_clock.py','song_form.py','section_bank.py','bar_grid.py','audio_policy.py','musical_gestures.py','gesture_bank.py','composition_policy.py','graph_cache.py']]+[Path('/data/sa3-feasibility/native_sa3.py')]
-result={'backend':NAMES[choice()],'composer':choice(),'implementation_sha256':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in files if p.exists()},'runtime':json.loads((root/'runtime.json').read_text()),'weight_hash':'not collected in this integration pass'}
+root=Path('/data/roadscore');files=[root/'prototype'/name for name in ['app.py','render_policy.py','worker.py','core.py','musical.py','rolling.py','event_music.py','render_clock.py','song_form.py','section_bank.py','bar_grid.py','audio_policy.py','musical_gestures.py','gesture_bank.py','composition_policy.py','graph_cache.py']]+[Path('/data/sa3-feasibility/native_sa3.py')]
+result={'render_mode':render_mode_selected(),'backend':NAMES[choice()],'composer':choice(),'implementation_sha256':{str(p):hashlib.sha256(p.read_bytes()).hexdigest() for p in files if p.exists()},'runtime':json.loads((root/'runtime.json').read_text()),'weight_hash':'not collected in this integration pass'}
 source=root/('assets/source_'+result['runtime'].get('identity','legacy')+'.wav')
 if choice()=='ace':
  source=root/'generated/ace_initial.wav'
