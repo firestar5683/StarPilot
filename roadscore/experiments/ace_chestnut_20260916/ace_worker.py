@@ -67,7 +67,7 @@ try:
    return {'directory':str(folder),'stem':stem.name,'output_gain':POLICY.output_gain}
   return record
  print('ACE_PREPARING',profile,flush=True)
- initial=None;last=None;preparation=[];slot=0
+ initial=None;last=None;preparation=[];slot=0;first_accepted_audio_seconds=None
  while initial is None or len(initial)/48000<POLICY.initial_buffer_seconds:
   role=('initial' if windowed else 'verse') if initial is None else ('verse' if windowed else 'repaint_verse')
   if planned:role=planned.begin(last)
@@ -75,15 +75,17 @@ try:
   preparation.append(stats)
   if wave is None:raise RuntimeError('Preparation rejected after bounded quality retries; inspect generated/quality')
   if planned:planned.accept(wave,last_new)
-  if initial is None:initial=wave.copy()
+  if initial is None:
+   first_accepted_audio_seconds=time.monotonic()-BOOT;initial=wave.copy()
   else:
    overlap=2*48000;prefix=round(stats['prefix_seconds']*48000);alpha=np.linspace(0,1,overlap)[:,None]
    initial[-overlap:]=initial[-overlap:]*(1-alpha)+wave[prefix-overlap:prefix]*alpha
    initial=np.concatenate([initial,wave[prefix:]])
   last=last_new;slot+=1
+  write_json(G/'ace_worker_state.json',{'pid':os.getpid(),'generation_seed':base_seed,'composition_policy':composition_policy,'profile':profile,'phase':'preparing','accepted_chunks':slot,'accepted_buffer_seconds':len(initial)/48000,'first_accepted_audio_seconds':first_accepted_audio_seconds,'elapsed_seconds':time.monotonic()-BOOT})
   if slot>8:raise RuntimeError('Initial buffer did not fill within bounded preparation')
  save_wave(G/'ace_initial.wav',initial);np.save(G/'ace_initial.npy',last)
- write_json(G/'ace_initial.json',{'generation_seed':base_seed,'composition_policy':composition_policy,'composer':'ace','startup_seconds':time.monotonic()-BOOT,'model_load_seconds':model_load_seconds,'host_peak_rss_kib':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,'duration':len(initial)/48000,'source_identity':'kpop_control','prepared_profile':profile if windowed else 'legacy','preparation_id':preparation_id,'continuation_policy':'quality-gated fixed lookahead','generation':preparation,'prepared_identity':True,'output_gain':POLICY.output_gain,'created_wall':time.time()})
+ write_json(G/'ace_initial.json',{'generation_seed':base_seed,'composition_policy':composition_policy,'composer':'ace','startup_seconds':time.monotonic()-BOOT,'first_accepted_audio_seconds':first_accepted_audio_seconds,'model_load_seconds':model_load_seconds,'host_peak_rss_kib':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,'duration':len(initial)/48000,'source_identity':'kpop_control','prepared_profile':profile if windowed else 'legacy','preparation_id':preparation_id,'continuation_policy':'quality-gated fixed lookahead','generation':preparation,'prepared_identity':True,'output_gain':POLICY.output_gain,'created_wall':time.time()})
  write_json(G/'ace_worker_state.json',{'pid':os.getpid(),'generation_seed':base_seed,'composition_policy':composition_policy,'profile':profile,'phase':'READY','initial_buffer_seconds':len(initial)/48000})
  (G/'request.json').unlink(missing_ok=True);ready.write_text('ace');print('ACE_READY',flush=True)
  while True:
