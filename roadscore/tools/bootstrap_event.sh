@@ -10,6 +10,7 @@ if [ -e /data/roadscore ]; then
 else
   ln -s "$root" /data/roadscore
 fi
+/usr/local/venv/bin/python "$root/prototype/persistent_assets.py" --root "$root"
 mkdir -p "$root"/{generated,results/event_night_one,routes,assets,.cache/uv,tmp} /data/roadscore-feasibility/{cache,tmp} /data/sa3-feasibility
 # AGNOS /home has only a small overlay. Never use it for package downloads.
 export UV_CACHE_DIR="$root/.cache/uv" TMPDIR="$root/tmp"

@@ -3,6 +3,7 @@ set -euo pipefail
 cd /data/openpilot
 env -u OPENPILOT_PREFIX -u PARAMS_ROOT /usr/local/venv/bin/python -c 'from openpilot.common.params import Params; assert not Params().get_bool("IsOnroad")'
 cd /data/roadscore
+/usr/local/venv/bin/python prototype/persistent_assets.py
 exec 9>generated/native_session.lock
 flock -n 9 || { echo "Another native RoadScore session owns this bench"; exit 1; }
 power_pid=""
