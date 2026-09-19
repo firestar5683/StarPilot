@@ -6,7 +6,7 @@ No RoadScore event annotations, route allowlist, custom camera drawing, or model
 import argparse,os,subprocess,time,signal,shlex,json
 from pathlib import Path
 from clock_sync import measure
-from receiver_environment import assignments as receiver_assignments
+from receiver_environment import assignments as receiver_assignments,resolve_compute
 from presentation_policy import select_launch
 from hook_launch import enabled as hook_enabled, start_planner
 from session_seed import select_session, seed_argument, seed_environment, remote_assignments
@@ -39,6 +39,9 @@ if session:
  env.update(seed_environment(session));(out/'session_seed.json').write_text(json.dumps(session,indent=2));print('RoadScore session seed:',session['generation_seed'],'('+session['seed_origin']+')',flush=True)
 else:
  env.pop('ROADSCORE_GENERATION_SEED',None);env.pop('ROADSCORE_SEED_ORIGIN',None)
+compute=resolve_compute(env,composer=a.composer,replay=a.replay,judging=bool(session and session['seed_origin']=='judging-route'),transport_only=a.transport_only)
+(out/'compute_settings.json').write_text(json.dumps(compute,indent=2))
+if session:print('Requested Chestnut cap:',compute['requested_power_limit_watts'],'W; TC_OPT:',compute['tc_opt'],'(actual readback recorded separately)',flush=True)
 (out/'settings.json').write_text(json.dumps({**settings.snapshot(a.headless),'composer':a.composer,'profile':a.profile,'render_mode':a.render_mode,'presentation_policy':presentation['policy'],'composition_policy':composition_policy,**(session or {})},indent=2))
 env['ROADSCORE_RENDER_MODE']=a.render_mode
 env['ROADSCORE_PRESENTATION_POLICY']=presentation['policy']
