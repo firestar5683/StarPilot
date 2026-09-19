@@ -976,8 +976,16 @@ IONIQ_6_LOW_SPEED_PID_RESET_SPEED = 0.1 * CV.MPH_TO_MS
 # oscillates. FADE_MAX 0.50 -> 0.34 lowers the depth of that swing and LAT_WIDTH 0.06 -> 0.14
 # spreads the transition well outside the +/-0.19 band the weave lives in, so crossing lane
 # center no longer steps the gain.
+#
+# Follow-up, drive 00000aec 2026-09-19: the widths did their job (56mph+ in-band steering
+# oscillation 0.516 -> 0.255 deg) but moved the loop DOWN into the deep part of the fade --
+# it now sits at |lat accel| < 0.15 about 78% of the time (was 52%), where FADE_MAX sets the
+# friction compensation actually applied. Same log's no-ADAS hands-off windows measured the
+# bare car at 0.065 deg vs 0.325 deg under openpilot, so the residual is still control-side,
+# not a floor set by the car. 0.34 -> 0.20 cuts the remaining swing (30% -> 16% of mean)
+# while keeping a real fade. Stock openpilot has no fade at all here (0.0).
 IONIQ_6_FRICTION_JERK_DEADZONE = 0.30
-IONIQ_6_FRICTION_CENTER_FADE_MAX = 0.34
+IONIQ_6_FRICTION_CENTER_FADE_MAX = 0.20
 IONIQ_6_FRICTION_CENTER_FADE_LAT = 0.15
 IONIQ_6_FRICTION_CENTER_FADE_LAT_WIDTH = 0.14
 IONIQ_6_FRICTION_CENTER_FADE_SPEED = 18.0
