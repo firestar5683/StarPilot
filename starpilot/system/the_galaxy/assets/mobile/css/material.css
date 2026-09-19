@@ -2479,6 +2479,30 @@ button.gx-chip:hover {
   display: inline-block;
 }
 
+.gx-upload-arrow {
+  animation: gx-upload-bounce 1s ease-in-out infinite;
+  display: inline-block;
+}
+
+@keyframes gx-upload-bounce {
+  0%, 100% { opacity: 1; transform: translateY(0); }
+  50% { opacity: 0.45; transform: translateY(-3px); }
+}
+
+.gx-reboot-note {
+  align-items: center;
+  display: flex;
+  gap: var(--sp-2);
+  margin-top: var(--sp-3);
+}
+
+.gx-reboot-note i {
+  color: var(--primary);
+  font-size: 1.2rem;
+}
+
+.gx-reconnected-note i { color: var(--success); }
+
 #snackbar_wrapper {
   position: fixed;
   top: calc(var(--sp-4) + env(safe-area-inset-top, 0px));

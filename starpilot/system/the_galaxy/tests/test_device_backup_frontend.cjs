@@ -64,7 +64,7 @@ const ctx = {
 };
 vm.createContext(ctx);
 const source = fs.readFileSync(path.join(base, 'views/SystemTools.js'), 'utf8')
-  .replace(/^import[^\n]+\n/gm, '').replace('export const SystemTools', 'const SystemTools');
+  .replace(/^import[^\n]+\n/gm, '').replace(/^export const /gm, 'const ');
 vm.runInContext(source + '\nthis.view = SystemTools;', ctx);
 (async () => {
   const view = {...ctx.view.data(), ...ctx.view.methods, loadProfiles: async () => {}};
@@ -115,6 +115,23 @@ vm.runInContext(source + '\nthis.view = SystemTools;', ctx);
   downloadModels = false;
   await view.rebootAfterRestore();
   assert.equal(finishes.at(-1), false);
+  assert.equal(view.deviceRestoreStage, 'rebooting', 'a no-download finish tracks the reboot so the UI can show it');
+  assert.equal(view.rebootPending, true, 'a restore reboot uses the shared reboot watch');
+  assert.equal(view.rebootReason, 'restore', 'the shared watch is tagged as a restore reboot');
+  status = {stage:'rebooting', message:'Reboot requested.'};
+  await view.loadDeviceRestoreStatus();
+  assert.equal(view.deviceReconnected, false, 'still rebooting stays unreconnected');
+  view.clearRebootPending();
+  assert.equal(view.deviceReconnected, true, 'finishing the shared watch marks the backup section reconnected');
+  assert.equal(view.reconnectedNotice, false, 'a restore reboot must not light up the updates card');
+  // The reverse: an update reboot reconnects in its own section.
+  view.rebootReason = 'update';
+  view.rebootPending = true;
+  view.deviceReconnected = false;
+  view.reconnectedNotice = false;
+  view.clearRebootPending();
+  assert.equal(view.reconnectedNotice, true, 'an update reboot keeps its own reconnect notice');
+  assert.equal(view.deviceReconnected, false, 'an update reboot must not light up the backup section');
   restoreFails = true;
   const promptCount = prompts.length;
   const finishCount = finishes.length;
@@ -193,6 +210,12 @@ vm.runInContext(source + '\nthis.view = SystemTools;', ctx);
   assert.match(section, /@click="backupDevice"/);
   assert.match(section, /@change="onDeviceRestoreFile"/);
   assert.match(section, /v-if="deviceRecoveryPending"[^>]*@click="discardDeviceRecovery"/);
+  assert.match(section, /gx-upload-arrow/, 'restore button animates the upload arrow while restoring');
+  assert.match(section, /v-if="deviceRebooting"/, 'a rebooting indicator sits below the backup buttons');
+  assert.match(section, /Device rebooting/);
+  assert.match(section, /Keep ignition off and wait for Galaxy to reconnect/);
+  assert.match(section, /v-else-if="deviceReconnected"/, 'a connected indicator replaces it once Galaxy returns');
+  assert.match(section, /Device reconnected/);
   assert.ok(!section.includes('href="/device_backup"'));
   const calls = [];
   const network = {FormData, fetch:async (url, options) => {calls.push({url, options}); return {ok:true, json:async()=>({success:true})};}};

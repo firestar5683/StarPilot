@@ -53,14 +53,15 @@ function readRebootMarker(scope = LOCAL_DEVICE_SCOPE) {
     if (!raw) return null
     const parsed = JSON.parse(raw)
     const startedAt = Number(parsed?.startedAt)
-    return Number.isFinite(startedAt) && startedAt > 0 ? startedAt : null
+    if (!Number.isFinite(startedAt) || startedAt <= 0) return null
+    return { startedAt, reason: parsed?.reason === "restore" ? "restore" : "update" }
   } catch (e) {
     return null
   }
 }
 
-function writeRebootMarker(scope, startedAt) {
-  try { localStorage.setItem(rebootStorageKey(scope), JSON.stringify({ startedAt })) } catch (e) { }
+function writeRebootMarker(scope, startedAt, reason = "update") {
+  try { localStorage.setItem(rebootStorageKey(scope), JSON.stringify({ startedAt, reason })) } catch (e) { }
 }
 
 function clearRebootMarker(scope) {
@@ -172,6 +173,7 @@ export const SystemTools = {
       rebootPending: false,
       rebootStartedAt: 0,
       rebootOfflineSeen: false,
+      rebootReason: "",
       reconnectedNotice: false,
       busy: "",
       autoUpdateBusy: false,
@@ -184,6 +186,7 @@ export const SystemTools = {
       deviceRestoreModels: [],
       deviceRecoveryPending: false,
       deviceRestoreStage: "idle",
+      deviceReconnected: false,
       tailscaleInstalled: false,
       tailscaleLoaded: false,
       tailscaleBusy: false,
@@ -196,7 +199,8 @@ export const SystemTools = {
       this.rebootStorageScope = scope
       const marker = readRebootMarker(scope)
       this.rebootPending = !!marker
-      this.rebootStartedAt = marker || 0
+      this.rebootStartedAt = marker?.startedAt || 0
+      this.rebootReason = marker?.reason || ""
     }).finally(() => {
       if (this.rebootScopeCancelled) return
       // Paint the locally known branch/commit immediately, then let the poll
@@ -252,10 +256,11 @@ export const SystemTools = {
       return this.branchLoading || this.isOnroad || !!this.fastStatus?.isOnroad || this.updateInProgress || !!this.busy
     },
     statusRebooting() { return String(this.fastStatus?.stage || "").trim().toLowerCase() === "rebooting" },
+    restoreReboot() { return this.rebootPending && this.rebootReason === "restore" },
     updateInProgress() { return !!this.fastStatus?.running || this.statusRebooting || this.rebootPending },
     statusPollingNeeded() { return !this.fastStatus || !this.remoteChecked || this.updateInProgress || this.rebootPending },
     statusNotice() {
-      if (this.rebootPending) return {
+      if (this.rebootPending && !this.restoreReboot) return {
         title: "Device rebooting",
         text: this.statusUnavailable
           ? "The device is temporarily offline. Galaxy will keep checking until it reconnects."
@@ -264,7 +269,8 @@ export const SystemTools = {
       if (this.reconnectedNotice) return { title: "Device reconnected", text: "Galaxy is connected again and the update status is current." }
       return null
     },
-    statusSpinning() { return !this.remoteChecked || this.rebootPending || this.statusRebooting },
+    statusSpinning() { return !this.remoteChecked || this.statusRebooting || (this.rebootPending && !this.restoreReboot) },
+    deviceRebooting() { return this.deviceBackupBusy === "reboot" || this.restoreReboot },
     versionChoices() { return this.targetBranch === "StarPilot" ? releaseVersions(this.versionCommits) : this.versionCommits },
     installVersionBlocked() {
       return this.branchSwitchBlocked || this.branchBusy || !this.branches.includes(this.targetBranch) ||
@@ -450,11 +456,7 @@ export const SystemTools = {
         if (!status) throw new Error("Update status unavailable")
         if (local && this.remoteChecked) return
         const stage = String(status.stage || "").trim().toLowerCase()
-        if (stage === "rebooting" && !this.rebootPending) {
-          this.rebootPending = true
-          this.rebootStartedAt = Date.now()
-          writeRebootMarker(this.rebootStartedAt)
-        }
+        if (stage === "rebooting" && !this.rebootPending) this.markRebootPending("update")
         const pendingAge = this.rebootStartedAt ? Date.now() - this.rebootStartedAt : 0
         const deviceReturned = this.rebootPending && !status.running && stage !== "rebooting" &&
           (this.statusUnavailable || pendingAge >= 30_000)
@@ -474,19 +476,25 @@ export const SystemTools = {
         if (throwOnError) throw e
       }
     },
-    markRebootPending() {
+    markRebootPending(reason = "update") {
+      if (this.rebootPending) return
       this.rebootPending = true
       this.rebootStartedAt = Date.now()
       this.rebootOfflineSeen = false
+      this.rebootReason = reason
       this.reconnectedNotice = false
-      writeRebootMarker(this.rebootStorageScope, this.rebootStartedAt)
+      this.deviceReconnected = false
+      writeRebootMarker(this.rebootStorageScope, this.rebootStartedAt, reason)
     },
     clearRebootPending(showNotice = true) {
+      const reason = this.rebootReason
       this.rebootPending = false
       this.rebootStartedAt = 0
       this.rebootOfflineSeen = false
       clearRebootMarker(this.rebootStorageScope)
-      if (showNotice) this.reconnectedNotice = true
+      if (!showNotice) return
+      if (reason === "restore") this.deviceReconnected = true
+      else this.reconnectedNotice = true
     },
     async backupDevice() {
       if (this.deviceBackupBusy || this.isOnroad) return
@@ -544,6 +552,7 @@ export const SystemTools = {
       this.deviceRestoreReady = false
       this.deviceBackupBusy = "restore"
       this.deviceBackupError = false
+      this.deviceReconnected = false
       this.deviceBackupMessage = "Uploading and restoring backup. Keep this page open and the vehicle parked."
       try {
         const result = await api.restoreDevice(file)
@@ -576,6 +585,8 @@ export const SystemTools = {
         this.deviceBackupError = ["error", "restore_error"].includes(result.stage)
         this.deviceRecoveryPending = result.recoveryPending === true
         this.deviceBackupBusy = result.stage === "downloading" ? "models" : ""
+        // The shared update-status poll detects the reconnect; this just arms it for a restore reboot.
+        if (result.stage === "rebooting") this.markRebootPending("restore")
         if (prompt && this.deviceRestoreReady) await this.rebootAfterRestore()
       } catch (error) {
         if (this.deviceBackupBusy === "models") {
@@ -610,7 +621,9 @@ export const SystemTools = {
         const result = await api.rebootAfterDeviceRestore(downloadModels)
         this.deviceBackupMessage = result?.message || "Finishing restore..."
         this.deviceRestoreReady = false
+        this.deviceRestoreStage = result?.stage || this.deviceRestoreStage
         this.deviceBackupBusy = result?.stage === "downloading" ? "models" : ""
+        if (result?.stage === "rebooting") this.markRebootPending("restore")
         if (result?.stage === "error") {
           this.deviceRestoreReady = true
           this.deviceBackupError = true
@@ -1211,7 +1224,7 @@ export const SystemTools = {
               <i class="bi bi-download"></i> {{ deviceBackupBusy === 'backup' ? 'Creating Backup...' : 'Download Full Backup' }}
             </button>
             <button type="button" class="gx-btn gx-btn--tonal" :disabled="!!deviceBackupBusy || isOnroad" @click="$refs.deviceRestoreInput.click()">
-              <i class="bi bi-upload"></i> {{ deviceBackupBusy === 'restore' ? 'Restoring...' : 'Restore Full Backup' }}
+              <i class="bi" :class="deviceBackupBusy === 'restore' ? 'bi-upload gx-upload-arrow' : 'bi-upload'"></i> {{ deviceBackupBusy === 'restore' ? 'Restoring...' : 'Restore Full Backup' }}
             </button>
             <button v-if="deviceRestoreReady" type="button" class="gx-btn" :disabled="!!deviceBackupBusy || isOnroad" @click="rebootAfterRestore">
               Finish Restore and Reboot
@@ -1222,7 +1235,15 @@ export const SystemTools = {
             <input ref="deviceRestoreInput" type="file" accept=".zip" style="display:none;" @change="onDeviceRestoreFile" />
           </div>
           <p v-if="isOnroad" class="gx-note" style="margin-top:var(--sp-3);">Park the vehicle before backup or restore.</p>
-          <p v-if="deviceBackupMessage" class="gx-note" style="margin-top:var(--sp-3);" :role="deviceBackupError ? 'alert' : 'status'" aria-live="polite">{{ deviceBackupMessage }}</p>
+          <div v-if="deviceRebooting" class="gx-reboot-note" role="status" aria-live="polite">
+            <i class="bi bi-arrow-repeat gx-spin" aria-hidden="true"></i>
+            <p class="gx-note" style="margin:0;"><strong>Device rebooting</strong> Keep ignition off and wait for Galaxy to reconnect.</p>
+          </div>
+          <div v-else-if="deviceReconnected" class="gx-reboot-note gx-reconnected-note" role="status" aria-live="polite">
+            <i class="bi bi-check-circle-fill" aria-hidden="true"></i>
+            <p class="gx-note" style="margin:0;"><strong>Device reconnected</strong> Galaxy is back online.</p>
+          </div>
+          <p v-else-if="deviceBackupMessage" class="gx-note" style="margin-top:var(--sp-3);" :role="deviceBackupError ? 'alert' : 'status'" aria-live="polite">{{ deviceBackupMessage }}</p>
         </div>
       </GalaxySection>
 
