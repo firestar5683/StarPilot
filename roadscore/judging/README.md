@@ -160,3 +160,39 @@ Nine synthetic preparation/cache/analysis tests pass, including resumable authen
 fetch mocks and Connect/native range distinctions. Python compilation and JavaScript
 syntax checks pass. Interactive browser verification was not completed: the browser
 security policy rejected the local file URL. No workaround or audio playback was used.
+
+## Offline integration export
+
+`export_handoff.py` adapts the preserved preparation manifest to the event runner's
+`submissions`, `start_seconds`, and `duration_seconds` schema. It preserves the
+existing labels, seeds and configuration, and rejects unresolved ranges. Always
+choose a fresh ignored output directory; it never overwrites integration manifests
+or official-attempt ledgers.
+
+```sh
+python3 roadscore/judging/export_handoff.py \
+  --manifest roadscore/results/community_BATCH/manifest.private.json \
+  --output roadscore/results/community_EXPORT
+```
+
+The default verifies cached hashes and writes a private transfer plan, without
+copying assets. `--materialize` copies those verified assets to a new portable
+`routes/` native layout, retaining an 8 GiB disk reserve (`--reserve-gib`). It does
+not access the device or download files. Copy failures preserve originals and
+remove partial copies. Local `prepare.py cache` copies enforce the same reserve.
+Fetch retries preserve unprocessed inventory even if a download fails midway.
+
+A native `cache_manifest.json` is emitted only for complete selected full logs,
+route-zero clock reference, full front camera, verified extent and completed
+analysis. Incomplete materialized caches carry `.acquiring` and cannot pass the
+normal complete-cache check. qlogs/previews remain diagnostics. Excerpt caches
+cover the selected interval and reference only; their manifest does not claim
+whole-route completeness.
+
+The export always sets `generation_authorized: false`. Its schema is
+`roadscore-judging-handoff-v1`; the runner must reject it unless generation is
+explicitly authorized, `preparation_ready` is true, and `preparation_blockers` is
+empty. Frozen configuration, hardware handoff, physical/cache transfer and existing
+official-attempt reconciliation still belong to the integration owner. Neither
+exporting nor cache materialization grants generation permission. Never replace
+an existing attempt merely to adopt this schema.

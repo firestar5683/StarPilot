@@ -178,7 +178,30 @@ def selected_segments(row, available):
   return wanted
 
 
-def cache_local(manifest, roots):
+def copy_with_reserve(source, destination, reserve_gib=8):
+  """Copy atomically while retaining a free-space reserve, including partial writes."""
+  reserve = reserve_gib * 1024**3
+  if not math.isfinite(reserve) or reserve < 0:
+    raise ValueError('Disk reserve must be finite and nonnegative')
+  source, destination = Path(source), Path(destination)
+  destination.parent.mkdir(parents=True, exist_ok=True)
+  if shutil.disk_usage(destination.parent).free - source.stat().st_size < reserve:
+    raise OSError('Disk reserve reached')
+  partial = destination.with_suffix(destination.suffix + '.partial')
+  try:
+    with source.open('rb') as src, partial.open('wb') as out:
+      for chunk in iter(lambda: src.read(1024 * 1024), b''):
+        if shutil.disk_usage(destination.parent).free - len(chunk) < reserve:
+          raise OSError('Disk reserve reached')
+        out.write(chunk)
+    if digest(partial) != digest(source):
+      raise ValueError('Cache copy checksum mismatch')
+    partial.replace(destination)
+  finally:
+    partial.unlink(missing_ok=True)
+
+
+def cache_local(manifest, roots, reserve_gib=8):
   """Copy only selected original logs/front video, never prior generated scores."""
   batch = json.loads(manifest.read_text())
   for row in batch['routes']:
@@ -204,11 +227,7 @@ def cache_local(manifest, roots):
         dest.parent.mkdir(parents=True, exist_ok=True)
         checksum = digest(src)
         if not dest.exists() or digest(dest) != checksum:
-          tmp = dest.with_suffix(dest.suffix + '.partial')
-          shutil.copyfile(src, tmp)
-          if digest(tmp) != checksum:
-            raise ValueError('Cache copy checksum mismatch')
-          tmp.replace(dest)
+          copy_with_reserve(src, dest, reserve_gib)
         files.append({'segment': segment, 'path': str(dest.relative_to(manifest.parent)), 'bytes': dest.stat().st_size, 'sha256': checksum})
         segment_assets.append(asset)
       if not any(a.startswith('rlog') for a in segment_assets):
@@ -255,8 +274,9 @@ def fetch_remote(manifest, logs_only=False, reserve_gib=8, preview_video=False):
       wanted = selected_segments(row, [s for s, _ in assets])
       download_segments = sorted(set(wanted + ([0] if row['selection']['segments'] is None else [])))
       name = row['route'].split('/')[1]
-      files, missing = [], []
       previous_files = {f['path']: f for f in row.get('cache', {}).get('files', [])}
+      # Keep unprocessed entries through interrupted retries and logs-only passes.
+      files, missing = list(previous_files.values()), []
       row['cache'] = {'files': files, 'selected_segments': wanted, 'missing': missing,
                       'extent_verified_against_remote_listing': True, 'remote_segments': sorted({s for s, _ in assets})}
       row['cache_status'] = 'acquiring'
@@ -284,7 +304,9 @@ def fetch_remote(manifest, logs_only=False, reserve_gib=8, preview_video=False):
             if not tmp.stat().st_size:
               raise ValueError('Empty remote asset')
             tmp.replace(dest)
-          files.append({'segment': segment, 'path': str(dest.relative_to(manifest.parent)), 'bytes': dest.stat().st_size, 'sha256': digest(dest), 'clock_reference_only': segment not in wanted})
+          relative = str(dest.relative_to(manifest.parent))
+          files[:] = [f for f in files if f['path'] != relative]
+          files.append({'segment': segment, 'path': relative, 'bytes': dest.stat().st_size, 'sha256': digest(dest), 'clock_reference_only': segment not in wanted})
           write_json(manifest, batch)
         if not any(a in chosen for a in ASSETS[:3]):
           missing.append({'segment': segment, 'asset': 'rlog'})
@@ -340,6 +362,7 @@ def main():
   p = sub.add_parser('cache')
   p.add_argument('--manifest', required=True, type=Path)
   p.add_argument('--source', action='append', default=[], type=Path)
+  p.add_argument('--reserve-gib', type=float, default=8)
   p = sub.add_parser('fetch')
   p.add_argument('--manifest', required=True, type=Path)
   modes = p.add_mutually_exclusive_group()
@@ -352,7 +375,7 @@ def main():
   if args.action == 'prepare':
     prepare(args.submissions, args.output, args.acknowledge_same_route_selections, args.existing_manifest)
   elif args.action == 'cache':
-    cache_local(args.manifest, args.source)
+    cache_local(args.manifest, args.source, args.reserve_gib)
   elif args.action == 'fetch':
     fetch_remote(args.manifest, args.logs_only, args.reserve_gib, args.preview_video)
   else:
