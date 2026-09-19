@@ -116,9 +116,16 @@ try:
  else:
   remote_policy=receiver_assignments(env)
   receiver_command=(['env','-u','ZMQ','ROADSCORE_AUDIBLE='+('1' if a.audible else '0'),'bash',str(R/'prototype/native_receiver.sh'),a.routeid] if native else ['ssh',a.bench,(remote_assignments(session) if session else '')+remote_policy+'ROADSCORE_RENDER_MODE='+a.render_mode+' ROADSCORE_COMPOSER='+a.composer+' ROADSCORE_ACE_PROFILE='+a.profile+' ROADSCORE_PCM_RETURN=1 '+('ROADSCORE_NO_GENERATION=1 ' if a.transport_only else '')+'bash /data/roadscore/prototype/native_receiver.sh '+shlex.quote(a.routeid)])
+  receiver_launch_wall=time.time();last_preparation_status=0.
   receiver=launch(receiver_command,'receiver',stdin=subprocess.PIPE)
   deadline=time.monotonic()+(1560 if a.composer=='ace' else 420)
   while b'BRIDGE_READY' not in (out/'receiver.log').read_bytes():
+   if native and session and time.monotonic()-last_preparation_status>=1:
+    from preparation_progress import current_progress
+    progress=current_progress(R/'generated/ace_worker_state.json',seed=session['generation_seed'],profile=a.profile,launch_wall=receiver_launch_wall)
+    if progress is not None:
+     temporary=out/'roadscore_status.tmp';temporary.write_text(json.dumps({**initial_display,**progress}));temporary.replace(out/'roadscore_status.json')
+    last_preparation_status=time.monotonic()
    check_children(named_children,remote=not native,include_receiver=True)
    if receiver.poll() is not None or time.monotonic()>deadline:raise RuntimeError('Bench receiver failed: '+(out/'receiver.log').read_text())
    time.sleep(.2)
