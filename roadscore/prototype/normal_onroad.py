@@ -179,7 +179,7 @@ try:
    subprocess.run([str(py),str(R/'prototype/archive_native.py'),str(out),a.routeid,str(a.start)],env=env,cwd=rt,check=True)
   if not native:
    # Preserve generated decisions with the exact host presentation audio.
-   for filename in ['summary.json','jobs.jsonl','boundaries.jsonl','ending.json','bridge.json','trace.jsonl','runtime_manifest.json','song_form.json','gesture_grid.json','gestures.json','composition.json','quality_events.jsonl','shaker_grid.json','shaker_events.json','core_apex_events.json','alert_accent_events.json','dry.wav','audio_blocks.jsonl']:
+   for filename in ['summary.json','jobs.jsonl','boundaries.jsonl','ending.json','bridge.json','trace.jsonl','runtime_manifest.json','song_form.json','gesture_grid.json','gestures.json','composition.json','quality_events.jsonl','shaker_grid.json','shaker_events.json','core_apex_events.json','rhythm_timeline.json','alert_accent_events.json','dry.wav','audio_blocks.jsonl']:
     subprocess.run(['scp',a.bench+':/data/roadscore/results/current/'+filename,str(out/filename)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=filename in ('dry.wav','audio_blocks.jsonl'))
    subprocess.run(['scp','-r',a.bench+':/data/roadscore/results/current/quality',str(out/'quality')],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
    if a.composer=='ace':subprocess.run(['scp',a.bench+':/data/roadscore/generated/ace_link.jsonl',str(out/'ace_link.jsonl')],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

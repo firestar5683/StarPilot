@@ -11,7 +11,7 @@ if not blocks:raise RuntimeError('No final audio blocks; refusing empty archive'
 for b in blocks:b.update(host_audio_s=b['audio_s'],host_dac_wall=b['callback_wall']+b['dac_delay'],presentation_host='comma')
 (out/'host_audio.jsonl').write_text(''.join(json.dumps(b)+'\n' for b in blocks))
 (out/'host_audio_summary.json').write_text(json.dumps({'first_host_dac_wall':blocks[0]['host_dac_wall'],'presentation_host':'comma','muted':blocks[0]['muted'],'portaudio_flags':sum(bool(b.get('portaudio_status')) for b in blocks)}))
-for name in ['summary.json','jobs.jsonl','boundaries.jsonl','ending.json','bridge.json','trace.jsonl','runtime_manifest.json','song_form.json','gesture_grid.json','gestures.json','shaker_grid.json','shaker_events.json','core_apex_events.json','alert_accent_events.json','dry.wav','audio_blocks.jsonl','composition.json','quality_events.jsonl']:
+for name in ['summary.json','jobs.jsonl','boundaries.jsonl','ending.json','bridge.json','trace.jsonl','runtime_manifest.json','song_form.json','gesture_grid.json','gestures.json','shaker_grid.json','shaker_events.json','core_apex_events.json','rhythm_timeline.json','alert_accent_events.json','dry.wav','audio_blocks.jsonl','composition.json','quality_events.jsonl']:
  if (run/name).exists():shutil.copy2(run/name,out/name)
 if (run/'quality').exists():shutil.copytree(run/'quality',out/'quality')
 if (root/'generated/ace_link.jsonl').exists():shutil.copy2(root/'generated/ace_link.jsonl',out/'ace_link.jsonl')
