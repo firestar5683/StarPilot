@@ -22,10 +22,10 @@ class OverlayTests(unittest.TestCase):
     self.assertTrue(view['ready'])
     self.assertIn('12.3s', view['note'])
 
-  def test_gesture_remains_separate_from_generation_timing(self):
+  def test_legacy_signal_does_not_claim_audible_cue(self):
     view = overlay_view(dict(readiness='READY', job_inflight=True, generation_elapsed_seconds=123.4,
                              turn_signal_music=True))
-    self.assertEqual(view['event'], 'Turn signal cue')
+    self.assertEqual(view['event'], '')
     self.assertIn('123.4s', view['note'])
 
   def test_active_cue_precedes_queued_and_persistent_signal(self):
@@ -34,17 +34,23 @@ class OverlayTests(unittest.TestCase):
     self.assertEqual(view['event'], 'Curve apex / impact')
     self.assertEqual(view['event_state'], 'active')
 
-  def test_queued_cue_does_not_claim_current_music(self):
+  def test_queued_cue_is_hidden(self):
     view = overlay_view(dict(turn_signal_music=True, gesture_queued=[{'kind': 'turn_signal'}]))
-    self.assertEqual(view['event'], 'Next: Turn signal')
-    self.assertEqual(view['event_state'], 'queued')
+    self.assertEqual(view['event'], '')
+    self.assertEqual(view['event_state'], '')
+
+  def test_signal_sequence_and_grid_are_not_proof_of_played_audio(self):
+    for rhythm_enabled in (False, True):
+      view = overlay_view({'readiness': 'READY', 'signal_shaker': {
+        'enabled': True, 'sequence_active': True, 'rhythm_enabled': rhythm_enabled}})
+      self.assertEqual(view['event'], '')
 
   def test_unknown_and_malformed_cues_do_not_invent_a_road_reason(self):
     self.assertEqual(overlay_view({'gesture_active': ['unknown_future_kind']})['event'], 'Music cue')
     self.assertEqual(overlay_view({'gesture_active': 'curve_apex', 'gesture_queued': [None, {}, 3]})['event'], '')
     self.assertEqual(overlay_view({'lead': 4})['event'], '')
     self.assertEqual(overlay_view(dict(kind='navigation', phase='anticipation', lead=4))['event'], '')
-    self.assertEqual(overlay_view(dict(kind='curve', phase='anticipation', lead=4))['event'], 'Curve ahead / 4.0s')
+    self.assertEqual(overlay_view(dict(kind='curve', phase='anticipation', lead=4))['event'], '')
 
   def test_native_slot_clears_speed_sign_driver_and_steering(self):
     x, y, width, height = hud_bounds(536, 240)
@@ -68,11 +74,11 @@ class OverlayTests(unittest.TestCase):
     self.assertEqual(apex['event'], 'Curve apex / impact')
     self.assertEqual(presenter.update(overlay_view({'readiness': 'READY'}), 3)['event'], '')
 
-  def test_queue_debounce_and_degraded_never_wait(self):
+  def test_hidden_queue_and_degraded_never_wait(self):
     presenter = EventPresentation()
     queued = overlay_view(dict(gesture_queued=[{'kind': 'curve_apex'}], readiness='READY'))
     self.assertEqual(presenter.update(queued, 0)['event'], '')
-    self.assertEqual(presenter.update(queued, .5)['event'], 'Next: Curve apex')
+    self.assertEqual(presenter.update(queued, .5)['event'], '')
     degraded = presenter.update(overlay_view(dict(readiness='DEGRADED', holding_accepted_music=True)), .6)
     self.assertEqual(degraded['activity'], 'DEGRADED')
     self.assertEqual(degraded['note'], 'Holding accepted music')

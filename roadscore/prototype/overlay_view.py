@@ -35,24 +35,11 @@ GESTURE_LABELS = {
 def gesture_view(state):
   active = state.get('gesture_active')
   active = [kind for kind in active if isinstance(kind, str)] if isinstance(active, (list, tuple)) else []
-  queued = state.get('gesture_queued')
-  queued = [item.get('kind') for item in queued if isinstance(item, dict) and isinstance(item.get('kind'), str)] if isinstance(queued, (list, tuple)) else []
   for kind, (_, label) in GESTURE_LABELS.items():
     if kind in active:
       return label, 'active', kind
   if active:
     return 'Music cue', 'active', None
-  for kind in queued:
-    if kind in GESTURE_LABELS:
-      return 'Next: ' + GESTURE_LABELS[kind][0], 'queued', kind
-  if queued:
-    return 'Next: music cue', 'queued', None
-  # This legacy flag can include queued cues; it does not prove audible playback.
-  if state.get('turn_signal_music'):
-    return 'Turn signal cue', 'reported', 'turn_signal'
-  lead = seconds(state.get('lead'))
-  if state.get('kind') == 'curve' and state.get('phase') == 'anticipation' and lead is not None and lead > 0:
-    return f'Curve ahead / {lead:.1f}s', 'anticipated', 'curve_prepare'
   return '', '', None
 
 
@@ -102,30 +89,19 @@ class EventPresentation:
   def __init__(self):
     self.last_active = None
     self.last_active_at = -math.inf
-    self.pending = None
-    self.pending_since = 0.
 
   def update(self, view, now):
     result = dict(view)
     if view['activity'] == 'DEGRADED':
       self.last_active = None
-      self.pending = None
       return result
     if view['event_state'] == 'active':
       self.last_active = view['event'].split(' / ')[0]
       self.last_active_at = now
-      self.pending = None
       return result
     if self.last_active and now - self.last_active_at < 2.5:
       result.update(event='Recent: ' + self.last_active, event_state='recent', event_kind=None)
       return result
-    if view['event_state'] == 'queued':
-      if view['event'] != self.pending:
-        self.pending, self.pending_since = view['event'], now
-      if now - self.pending_since < .4:
-        result.update(event='', event_state='', event_kind=None)
-    else:
-      self.pending = None
     return result
 
 
@@ -154,13 +130,14 @@ def draw_panel(rl, font, state, screen_width, screen_height, emphasis_font=None,
   subtitle = identity + (' / ' + section if section else '')
   title = 'RoadScore'
   if view['activity'] == 'DEGRADED':
-    subtitle = 'DEGRADED / ' + ('Music on hold' if state.get('holding_accepted_music') else 'Composer unavailable')
+    subtitle = ('Music on hold' if state.get('holding_accepted_music') else
+                'Composer unavailable' if state.get('worker_failed') else 'Reserve in use')
   elif view['event']:
-    subtitle = identity + ' / ' + view['event'].split(' / ')[0]
+    subtitle = view['event'].split(' / ')[0]
   elif view['activity'] == 'GENERATING':
     subtitle = identity + ' / Composing'
   elif view['activity'] == 'PREPARING':
-    subtitle = identity + ' / Preparing'
+    subtitle = 'Preparing music' if identity == 'Preparing' else identity + ' / Preparing'
   # Match the native steering wheel's 50px identity, with fixed text anchors.
   rl.draw_circle(int(x + 25), int(y + 29), 25, rl.Color(0, 0, 0, 150))
   icon_color = accent if view['activity'] == 'DEGRADED' else rl.WHITE
@@ -168,12 +145,15 @@ def draw_panel(rl, font, state, screen_width, screen_height, emphasis_font=None,
   rl.draw_circle(int(x + 33), int(y + 34), 5, icon_color)
   for left, top, w, h in ((17, 14, 3, 24), (36, 10, 3, 24), (17, 10, 22, 4)):
     rl.draw_rectangle_rounded(rl.Rectangle(x + left, y + top, w, h), .2, 4, icon_color)
-  def text(label, top, size, face, tint, available):
+  def text(label, top, size, face, tint, available, left=64):
     label = fit_text(label, available, lambda value: rl.measure_text_ex(face, value, size, 0).x)
     # Native HUD text uses local shadows; avoid an opaque rectangle over the road.
     for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1), (1, 2)):
-      rl.draw_text_ex(face, label, rl.Vector2(x + 64 + dx, y + top + dy), size, 0, rl.Color(0, 0, 0, 210))
-    rl.draw_text_ex(face, label, rl.Vector2(x + 64, y + top), size, 0, tint)
-  text(title, 5, 20, title_font, accent if view['activity'] == 'DEGRADED' else rl.WHITE, width - 64)
-  text(subtitle, 33, 14, font, muted, width - 64)
+      rl.draw_text_ex(face, label, rl.Vector2(x + left + dx, y + top + dy), size, 0, rl.Color(0, 0, 0, 210))
+    rl.draw_text_ex(face, label, rl.Vector2(x + left, y + top), size, 0, tint)
+  text(title, 5, 20, title_font, accent if view['activity'] == 'DEGRADED' else rl.WHITE, 118)
+  reserve = '' if view['stored'] or view['buffered'] is None else f"{int(view['buffered'])}s buffer"
+  if reserve:
+    text(reserve, 11, 12, font, accent, width - 190, left=190)
+  text(subtitle, 33, 16, font, muted, width - 64)
   return view
