@@ -1,0 +1,76 @@
+{
+  "profile": "prism",
+  "style": "128 BPM D minor crystal-pluck K-pop/game score",
+  "preparation_host": "Mac official ACE; runtime needs only prepared tensors",
+  "initial_seed": 33602,
+  "roles": {
+    "initial": {
+      "source_case": "shape_30",
+      "commit_seconds": 28,
+      "sha256": {
+        "encoder_hidden_states.npy": "fb714c64c3ac3bbef9bb2a9d7a66b18640f3c4735633ce6977e703d2c8b59da3",
+        "encoder_attention_mask.npy": "387c8d6f3ddd924f887009a9a5bb5dbe3996f4e497b5634d883d4b1dc9d4aa64",
+        "context_latents.npy": "ecfe4d7552fe3e845e399057ce6d4f6731e422d736f7bdb3491c2245321dd8e7"
+      }
+    },
+    "verse": {
+      "source_case": "window45_verse",
+      "commit_seconds": 36,
+      "sha256": {
+        "encoder_hidden_states.npy": "d76ce45db0e4d23f01da74adf58f6c5daea86d1cd87ace08870ff85855d7e5cd",
+        "sampler_repaint_mask.npy": "23e125ba44df015ed3eb5f5786efd671841907f7431b0ed299d21f43be688535",
+        "sampler_clean_src_latents.npy": "bdb4b19e3846ab9097f00a2257aa2a72fc6fb857a56648d3100aa72e90b47800",
+        "encoder_attention_mask.npy": "51d2fc2e3fc4dfe9b86ce9ea4b2cb2ad28a7ccd1f30e7ffdf4ecd4017d3f0450",
+        "context_latents.npy": "e568aa9b8e29698b079d6140549cb60ff1479005a63d61fa13b56826b8090f8b"
+      }
+    },
+    "prechorus": {
+      "source_case": "window45_prechorus",
+      "commit_seconds": 36,
+      "sha256": {
+        "encoder_hidden_states.npy": "b792d763508e9c7611ed1575ca2e7fac026c0fefa528975cea47fc97fccd95f0",
+        "sampler_repaint_mask.npy": "23e125ba44df015ed3eb5f5786efd671841907f7431b0ed299d21f43be688535",
+        "sampler_clean_src_latents.npy": "bdb4b19e3846ab9097f00a2257aa2a72fc6fb857a56648d3100aa72e90b47800",
+        "encoder_attention_mask.npy": "87a7836bab6ab381b27f15c866ae49fd73992fd181d1be0c9be99a0750b0d5cd",
+        "context_latents.npy": "e568aa9b8e29698b079d6140549cb60ff1479005a63d61fa13b56826b8090f8b"
+      }
+    },
+    "chorus": {
+      "source_case": "window45_chorus",
+      "commit_seconds": 36,
+      "sha256": {
+        "encoder_hidden_states.npy": "f01265d36b2d830fb3b151d42c0f2d9aafe0c4ef2c73dbd9fd17b9ba3466fc4c",
+        "sampler_repaint_mask.npy": "23e125ba44df015ed3eb5f5786efd671841907f7431b0ed299d21f43be688535",
+        "sampler_clean_src_latents.npy": "bdb4b19e3846ab9097f00a2257aa2a72fc6fb857a56648d3100aa72e90b47800",
+        "encoder_attention_mask.npy": "b015023499c13ff0e76b48ccc0510f651969e35ff80486e0380aefc6224393ef",
+        "context_latents.npy": "e568aa9b8e29698b079d6140549cb60ff1479005a63d61fa13b56826b8090f8b"
+      }
+    },
+    "bridge": {
+      "source_case": "window45_bridge",
+      "commit_seconds": 36,
+      "sha256": {
+        "encoder_hidden_states.npy": "1dcaa8ca37151fe26a3ca94394cf868f3017a5ee790c69d02daa72ceed95cc7f",
+        "sampler_repaint_mask.npy": "23e125ba44df015ed3eb5f5786efd671841907f7431b0ed299d21f43be688535",
+        "sampler_clean_src_latents.npy": "bdb4b19e3846ab9097f00a2257aa2a72fc6fb857a56648d3100aa72e90b47800",
+        "encoder_attention_mask.npy": "7b4915630185a35d27e55466f9b5ad94126eff08a71ffce79f355db12501ac4b",
+        "context_latents.npy": "e568aa9b8e29698b079d6140549cb60ff1479005a63d61fa13b56826b8090f8b"
+      }
+    },
+    "outro": {
+      "source_case": "window45_outro",
+      "commit_seconds": 36,
+      "sha256": {
+        "encoder_hidden_states.npy": "d27063328fd032e4fb381686c8d6556704bec83e40125917c288da06cd746865",
+        "sampler_repaint_mask.npy": "23e125ba44df015ed3eb5f5786efd671841907f7431b0ed299d21f43be688535",
+        "sampler_clean_src_latents.npy": "bdb4b19e3846ab9097f00a2257aa2a72fc6fb857a56648d3100aa72e90b47800",
+        "encoder_attention_mask.npy": "373f9b9c805a851ca57cf7107e64263bd9019cfde8934fbbe63d0e8c04c1b688",
+        "context_latents.npy": "e568aa9b8e29698b079d6140549cb60ff1479005a63d61fa13b56826b8090f8b"
+      }
+    }
+  },
+  "policy": "initial30s commit28; continuation45s preserve8 commit36; final9s lookahead excluded; adaptive terminal-energy endpoint checked before next-prefix selection",
+  "demo_status": "primary",
+  "active_demo": true,
+  "human_profile_accepted": true
+}

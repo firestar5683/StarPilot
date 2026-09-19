@@ -1,0 +1,16 @@
+{
+  "parameters_by_component": {
+    "decoder": 1575458880,
+    "detokenizer": 105011776,
+    "encoder": 608367616,
+    "null_condition_emb": 2048,
+    "tokenizer": 105032198
+  },
+  "fp16_bytes_by_component": {
+    "decoder": 3150917760,
+    "detokenizer": 210023552,
+    "encoder": 1216735232,
+    "null_condition_emb": 4096,
+    "tokenizer": 210064396
+  }
+}

@@ -1,0 +1,76 @@
+{
+  "profile": "aurora",
+  "style": "116 BPM A minor warm analog and bell game score",
+  "preparation_host": "Mac official ACE; runtime needs only prepared tensors",
+  "initial_seed": 33602,
+  "roles": {
+    "initial": {
+      "source_case": "aurora_initial",
+      "commit_seconds": 28,
+      "sha256": {
+        "encoder_hidden_states.npy": "1ae318504ffcabfa410422a9a668be4a9c6fa4a091cc7df6c3785bee4d7751f9",
+        "encoder_attention_mask.npy": "387c8d6f3ddd924f887009a9a5bb5dbe3996f4e497b5634d883d4b1dc9d4aa64",
+        "context_latents.npy": "e7ecbdadf839437766bb8a892cc9863dac6191121a853fa7ae4e76f8a52c9336"
+      }
+    },
+    "verse": {
+      "source_case": "aurora45_verse",
+      "commit_seconds": 36,
+      "sha256": {
+        "encoder_hidden_states.npy": "a3b65fb32c2097d0d00b4094ad72ae2df0410b4cb3abe6080842951d2afe1eea",
+        "sampler_repaint_mask.npy": "23e125ba44df015ed3eb5f5786efd671841907f7431b0ed299d21f43be688535",
+        "sampler_clean_src_latents.npy": "04ff5d1b51ed119f5bd2ff205e465c11f5f9f5877cd96bbbee68a2d3d6971e27",
+        "encoder_attention_mask.npy": "6e1216ef2d11da507c91e263f8d0a22e6532a22bf854efafa483598de6d6fa89",
+        "context_latents.npy": "f853ef13a64ce6af9c2858c2d4a00a3b94bbd84423af9460d44f67910b354e42"
+      }
+    },
+    "prechorus": {
+      "source_case": "aurora45_prechorus",
+      "commit_seconds": 36,
+      "sha256": {
+        "encoder_hidden_states.npy": "c7a27a3ff68ed347adba100fef157c139064a1bc4690d9a51b1f2dba6019dd81",
+        "sampler_repaint_mask.npy": "23e125ba44df015ed3eb5f5786efd671841907f7431b0ed299d21f43be688535",
+        "sampler_clean_src_latents.npy": "04ff5d1b51ed119f5bd2ff205e465c11f5f9f5877cd96bbbee68a2d3d6971e27",
+        "encoder_attention_mask.npy": "aa66e6310f33423148493b3604b915e9b180122eb8a2dbbe66c3f69511f888ed",
+        "context_latents.npy": "f853ef13a64ce6af9c2858c2d4a00a3b94bbd84423af9460d44f67910b354e42"
+      }
+    },
+    "chorus": {
+      "source_case": "aurora45_chorus",
+      "commit_seconds": 36,
+      "sha256": {
+        "encoder_hidden_states.npy": "be0422d6f198206abb64b7f30a9bf0537168c8134c1a2ea448512c980533f250",
+        "sampler_repaint_mask.npy": "23e125ba44df015ed3eb5f5786efd671841907f7431b0ed299d21f43be688535",
+        "sampler_clean_src_latents.npy": "04ff5d1b51ed119f5bd2ff205e465c11f5f9f5877cd96bbbee68a2d3d6971e27",
+        "encoder_attention_mask.npy": "ed3bcf6ce8d1d8fcdc7faab0a91738631530157bce947c72f6d12f9c324232fa",
+        "context_latents.npy": "f853ef13a64ce6af9c2858c2d4a00a3b94bbd84423af9460d44f67910b354e42"
+      }
+    },
+    "bridge": {
+      "source_case": "aurora45_bridge",
+      "commit_seconds": 36,
+      "sha256": {
+        "encoder_hidden_states.npy": "1702225f31f0c309c9c94fccac1c953fa626b039a74c2220b0c865c8bc5ddb2e",
+        "sampler_repaint_mask.npy": "23e125ba44df015ed3eb5f5786efd671841907f7431b0ed299d21f43be688535",
+        "sampler_clean_src_latents.npy": "04ff5d1b51ed119f5bd2ff205e465c11f5f9f5877cd96bbbee68a2d3d6971e27",
+        "encoder_attention_mask.npy": "fd433241e69115e0cc98054e25b2ee9faff790becd1d3246aaf5fda998b4f1c2",
+        "context_latents.npy": "f853ef13a64ce6af9c2858c2d4a00a3b94bbd84423af9460d44f67910b354e42"
+      }
+    },
+    "outro": {
+      "source_case": "aurora45_outro",
+      "commit_seconds": 36,
+      "sha256": {
+        "encoder_hidden_states.npy": "f96508e30e9e5eb62b9969f76ffb0ed949c4606d82c0922d19f650ed261f6e27",
+        "sampler_repaint_mask.npy": "23e125ba44df015ed3eb5f5786efd671841907f7431b0ed299d21f43be688535",
+        "sampler_clean_src_latents.npy": "04ff5d1b51ed119f5bd2ff205e465c11f5f9f5877cd96bbbee68a2d3d6971e27",
+        "encoder_attention_mask.npy": "7500eb6f46dc92ae93b5466fc431ea04f7b245cb8c1407d1fddf682d8b9db407",
+        "context_latents.npy": "f853ef13a64ce6af9c2858c2d4a00a3b94bbd84423af9460d44f67910b354e42"
+      }
+    }
+  },
+  "policy": "initial30s commit28; continuation45s preserve8 commit36; final9s lookahead excluded; adaptive terminal-energy endpoint checked before next-prefix selection",
+  "demo_status": "backup",
+  "active_demo": true,
+  "human_profile_accepted": true
+}

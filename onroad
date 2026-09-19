@@ -3,4 +3,10 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+# RoadScore owns its replay/audio lifecycle only when explicitly requested.
+for argument in "$@"; do
+  if [[ "$argument" == "--roadscore" ]]; then
+    exec "${ROOT_DIR}/roadscore/onroad" "$@"
+  fi
+done
 exec "${ROOT_DIR}/scripts/host_tool_runner.sh" onroad "$@"

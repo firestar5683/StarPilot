@@ -1,0 +1,14 @@
+{
+  "identity": "kpop_control",
+  "musical": true,
+  "rolling": true,
+  "arrangement": false,
+  "drive_events": true,
+  "event_music": true,
+  "curve_handoff": true,
+  "phrase_runway": true,
+  "curve_threshold": 0.8,
+  "song_form_experimental": false,
+  "gesture_layer": true,
+  "composition_control": true
+}

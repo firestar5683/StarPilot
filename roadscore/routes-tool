@@ -1,0 +1,11 @@
+#!/usr/bin/env bash
+set -euo pipefail
+root="$(cd "$(dirname "$0")" && pwd)"
+if [ "${1:-inventory}" = fetch ]; then
+  runtime="${ROADSCORE_RUNTIME:-/Users/dominickthompson/starpilot/.host_runtime/darwin/worktree}"
+  python="$runtime/.venv/bin/python3"
+  if [ -f /TICI ]; then runtime=/data/openpilot; python=/usr/local/venv/bin/python; fi
+  cd "$runtime"
+  PYTHONPATH="$runtime${PYTHONPATH:+:$PYTHONPATH}" exec "$python" "$root/prototype/route_library.py" "$@"
+fi
+exec python3 "$root/prototype/route_library.py" "${@:-inventory}"

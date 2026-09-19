@@ -1,0 +1,84 @@
+{
+  "nocturne": {
+    "name": "Nocturne \u00b7 chamber score",
+    "prompt": "Instrumental intimate chamber film score. Felt piano repeats a memorable four note motif, solo cello answers, warm viola harmonies, delicate brushed percussion. Spacious restrained verses evolving into expressive ensemble phrases. Acoustic instruments, no singing, no electronic dance beat."
+  },
+  "horizon": {
+    "name": "Horizon \u00b7 post-rock",
+    "prompt": "Instrumental cinematic post rock. Interlocking clean electric guitar arpeggios, melodic bass guitar, spacious live acoustic drums, bowed guitar swells. A recurring melodic guitar theme develops from a restrained opening into expansive layered phrases. Warm human performance, no vocals."
+  },
+  "orbit": {
+    "name": "Orbit \u00b7 analog sequencer",
+    "prompt": "Instrumental Berlin school analog synthesizer score. A distinctive evolving sequencer motif, round Moog bass, shimmering tape echo, slow suspended chords, sparse organic hand percussion. Spacious hypnotic progression with rhythmic development and room for larger peaks. No vocals."
+  },
+  "canopy": {
+    "name": "Canopy \u00b7 organic ambient",
+    "prompt": "Instrumental organic ambient soundtrack. Resonant marimba motif, soft plucked acoustic guitar, breathy wooden flute phrases, subtle frame drum, spacious string harmonics. Gentle interwoven melodies, tactile acoustic textures and an unhurried evolving pulse. No vocals, no heavy drums."
+  },
+  "horizon_drive": {
+    "name": "Horizon Drive \u00b7 rhythmic electronic rock",
+    "prompt": "Instrumental energetic electronic rock and cinematic post-rock band, 108 BPM steady driving groove. Prominent punchy acoustic drum kit with kick, snare backbeat, crisp hi-hats and tom fills. Audible melodic electric bass locks with the drums. Rhythmic muted electric guitar riffs, interlocking lead guitar melody and warm analog synth counterlines. Multiple musicians playing together with harmonic movement and a recurring hook. Warm detailed band production, forward motion, moderate full-band energy, no singing or voices."
+  },
+  "ignition": {
+    "name": "Progressive electronic",
+    "prompt": "Instrumental progressive house, 126 BPM four on the floor kick, sidechain pumping warm chords, syncopated plucked synth hook, crisp claps and open hats. Minor verse moving to a bright suspended chord chorus, melodic bass sequence and evolving eight bar arrangement. Club production, energetic and detailed.",
+    "event_style": "electronic",
+    "trajectory": [
+      "develop",
+      "release",
+      "develop",
+      "base",
+      "release",
+      "develop"
+    ]
+  },
+  "nightshift": {
+    "name": "Outrun synthwave",
+    "prompt": "Instrumental outrun synthwave, 112 BPM gated snare backbeat, sixteenth note analog bass ostinato, bright octave arpeggiator, expressive soaring polysynth lead. Dramatic minor key with borrowed major chords, retro drum machine fills, contrasting register and countermelodies.",
+    "event_style": "synthwave",
+    "trajectory": [
+      "develop",
+      "release",
+      "develop",
+      "base",
+      "release",
+      "develop"
+    ]
+  },
+  "brassline": {
+    "name": "Live funk groove",
+    "prompt": "Instrumental live funk fusion band, 104 BPM syncopated electric bass guitar, tight ghost note snare and dry kick, wah rhythm guitar, Rhodes electric piano with jazzy extended chord changes, short unison brass riffs. Improvised keyboard answers and lively drum fills, human pocket, warm room sound.",
+    "event_style": "groove",
+    "trajectory": [
+      "develop",
+      "release",
+      "develop",
+      "base",
+      "release",
+      "develop"
+    ]
+  },
+  "ignition_arc": {
+    "name": "Ignition \u00b7 contrasting arrangement",
+    "prompt": "Progressive electronic identity with independently conditioned contrasting sections.",
+    "event_style": "electronic",
+    "trajectory": [
+      "explore",
+      "develop",
+      "build",
+      "peak",
+      "release",
+      "develop"
+    ]
+  },
+  "songform": {
+    "name": "Breakbeat \u00b7 song form (experimental)",
+    "prompt": "Same-identity explicit verse, chorus and bridge conditioning. Human musical validation pending.",
+    "event_style": "electronic"
+  },
+  "kpop_control": {
+    "name": "K-Pop/Game (experimental)",
+    "prompt": "Shared instrumental modern pop and game-score target; continuous generated transitions and source-derived gestures. Human musical acceptance pending.",
+    "event_style": "electronic"
+  }
+}

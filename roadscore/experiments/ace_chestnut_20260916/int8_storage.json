@@ -1,0 +1,6 @@
+{
+  "scheme": "row symmetric int8, FP16 scale, GPU dequantize once at load; FP16 resident computation",
+  "baseline_payload_bytes": 3150917760,
+  "quantized_payload_bytes": 1578352768,
+  "quantized_matrices": 271
+}

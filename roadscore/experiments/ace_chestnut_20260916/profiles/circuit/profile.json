@@ -1,0 +1,76 @@
+{
+  "profile": "circuit",
+  "style": "136 BPM E minor funky guitar/clavinet game score",
+  "preparation_host": "Mac official ACE; runtime needs only prepared tensors",
+  "initial_seed": 33602,
+  "roles": {
+    "initial": {
+      "source_case": "circuit_initial",
+      "commit_seconds": 28,
+      "sha256": {
+        "encoder_hidden_states.npy": "634ef30089514eb57e9a0d7b4cc21baa8bff670c5e3d71580a867cd68f2d4ccd",
+        "encoder_attention_mask.npy": "039da765e791f4350dff6c03876b78ee30c32c52383e907f0054b6e70825333d",
+        "context_latents.npy": "00889e88d17bfb735599e6f4ca24f0752673fb8a723f7f753a3f400215bf3507"
+      }
+    },
+    "verse": {
+      "source_case": "circuit45_verse",
+      "commit_seconds": 36,
+      "sha256": {
+        "encoder_hidden_states.npy": "8888de3abd055200794674b26eec8c2967a00741aee068f9fbb6baf7ddb0f1f5",
+        "sampler_repaint_mask.npy": "23e125ba44df015ed3eb5f5786efd671841907f7431b0ed299d21f43be688535",
+        "sampler_clean_src_latents.npy": "e35a5c69d3c75743c3cd5e4764e7a01cd477472902a7f7c3746116d7ec5ff63c",
+        "encoder_attention_mask.npy": "4c82843a69fdf02a266bef3d63e086b416625b54935787cf95b4878cc7412377",
+        "context_latents.npy": "89a35de6538d5ec295f4bbdb74066f8f4b03e969aa3e8c5328edc7f2c1d852ae"
+      }
+    },
+    "prechorus": {
+      "source_case": "circuit45_prechorus",
+      "commit_seconds": 36,
+      "sha256": {
+        "encoder_hidden_states.npy": "d9b163348b666f9f6eb704026971f298eb26efab32bc263b48c0e010cf1fd3fa",
+        "sampler_repaint_mask.npy": "23e125ba44df015ed3eb5f5786efd671841907f7431b0ed299d21f43be688535",
+        "sampler_clean_src_latents.npy": "e35a5c69d3c75743c3cd5e4764e7a01cd477472902a7f7c3746116d7ec5ff63c",
+        "encoder_attention_mask.npy": "84b2a36efd197d214639d43c9f460d47370a83d23496555defa224f7c00fce68",
+        "context_latents.npy": "89a35de6538d5ec295f4bbdb74066f8f4b03e969aa3e8c5328edc7f2c1d852ae"
+      }
+    },
+    "chorus": {
+      "source_case": "circuit45_chorus",
+      "commit_seconds": 36,
+      "sha256": {
+        "encoder_hidden_states.npy": "e033069ed771454024411d350255b99d7ca7d4eba00e8ab0678339ba20b17894",
+        "sampler_repaint_mask.npy": "23e125ba44df015ed3eb5f5786efd671841907f7431b0ed299d21f43be688535",
+        "sampler_clean_src_latents.npy": "e35a5c69d3c75743c3cd5e4764e7a01cd477472902a7f7c3746116d7ec5ff63c",
+        "encoder_attention_mask.npy": "84578ac4aeefad7c827b6cc11a9f2d4f64f33686ef7b362880e46fd345230256",
+        "context_latents.npy": "89a35de6538d5ec295f4bbdb74066f8f4b03e969aa3e8c5328edc7f2c1d852ae"
+      }
+    },
+    "bridge": {
+      "source_case": "circuit45_bridge",
+      "commit_seconds": 36,
+      "sha256": {
+        "encoder_hidden_states.npy": "f31d812ba2be87c211beeeab0cc66e800b8db8fed134dc5c65a822c615946c67",
+        "sampler_repaint_mask.npy": "23e125ba44df015ed3eb5f5786efd671841907f7431b0ed299d21f43be688535",
+        "sampler_clean_src_latents.npy": "e35a5c69d3c75743c3cd5e4764e7a01cd477472902a7f7c3746116d7ec5ff63c",
+        "encoder_attention_mask.npy": "f46fe5610f09509ef803a41dfb50f545a509ee0115088b4fef1779bde9847572",
+        "context_latents.npy": "89a35de6538d5ec295f4bbdb74066f8f4b03e969aa3e8c5328edc7f2c1d852ae"
+      }
+    },
+    "outro": {
+      "source_case": "circuit45_outro",
+      "commit_seconds": 36,
+      "sha256": {
+        "encoder_hidden_states.npy": "48522f5a8b8f197b58caab6be59f2d9db74be54901d21a28b8dde6393691fb61",
+        "sampler_repaint_mask.npy": "23e125ba44df015ed3eb5f5786efd671841907f7431b0ed299d21f43be688535",
+        "sampler_clean_src_latents.npy": "e35a5c69d3c75743c3cd5e4764e7a01cd477472902a7f7c3746116d7ec5ff63c",
+        "encoder_attention_mask.npy": "ed3bcf6ce8d1d8fcdc7faab0a91738631530157bce947c72f6d12f9c324232fa",
+        "context_latents.npy": "89a35de6538d5ec295f4bbdb74066f8f4b03e969aa3e8c5328edc7f2c1d852ae"
+      }
+    }
+  },
+  "policy": "initial30s commit28; continuation45s preserve8 commit36; final9s lookahead excluded; adaptive terminal-energy endpoint checked before next-prefix selection",
+  "demo_status": "archive",
+  "active_demo": false,
+  "human_profile_accepted": false
+}
