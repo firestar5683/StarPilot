@@ -1,9 +1,29 @@
 import unittest
+import tempfile
+from pathlib import Path
+from types import SimpleNamespace
 import numpy as np
-from host_hook_adapter import continuation_inputs
+from host_hook_adapter import continuation_inputs, finish_capture
+from test_hook_planning import fake_prepare, request
 
 
 class PrefixTests(unittest.TestCase):
+    def test_thread_capture_requires_completion_expected_error_and_valid_assets(self):
+        with tempfile.TemporaryDirectory() as directory:
+            output = Path(directory)
+            req = request()
+            fake_prepare(req, {}, output)
+            expected = SimpleNamespace(success=False, error="'outputs'")
+            finish_capture(True, expected, req, {}, output)
+            finish_capture(True, None, req, {}, output)
+            for complete, result in ((False, expected), (True, SimpleNamespace(success=False, error='unrelated failure')),
+                                     (True, SimpleNamespace(success=True, error=None))):
+                with self.assertRaises(RuntimeError):
+                    finish_capture(complete, result, req, {}, output)
+            (output / 'context_latents.npy').unlink()
+            with self.assertRaises(FileNotFoundError):
+                finish_capture(True, expected, req, {}, output)
+
     def test_exactprefix_only_future_hints_survive(self):
         context = np.arange(1 * 1125 * 128, dtype=np.float32).reshape(1, 1125, 128)
         original = context.copy()

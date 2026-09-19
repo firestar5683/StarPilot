@@ -18,6 +18,15 @@ class Captured(BaseException):
     pass
 
 
+def finish_capture(completed, result, request, sources, output):
+    from hook_planning import validate_prepared
+    if not completed:
+        raise RuntimeError('Semantic preparation did not reach the completed capture boundary')
+    if result is not None and (result.success or str(result.error) != "'outputs'"):
+        raise RuntimeError(f'Unexpected result after capture: {result.success}: {result.error}')
+    validate_prepared(request, output, sources)
+
+
 def continuation_inputs(context, prefix):
     """Keep planned future hints; overwrite only exact already-committed8s prefix."""
     if context.ndim != 3 or context.shape[0] != 1 or context.shape[2] != 128:
@@ -118,6 +127,7 @@ class HostHookAdapter:
             original_diffusion = self.handler._mlx_run_diffusion
             original_plan = self.lm.generate_with_stop_condition
             captured_plan = {}
+            completed = threading.Event()
 
             def plan(*args, **kwargs):
                 result = original_plan(*args, **kwargs)
@@ -154,6 +164,9 @@ class HostHookAdapter:
                     'semantic_plan_present': True, 'audio_diffusion_called': False,
                     'conditioning_strategy': 'full semantic planning per bounded window; actual hook audio reference; committed latent prefix',
                     'native_validated': False, 'request': request.identity()}, indent=2))
+                from hook_planning import validate_prepared
+                validate_prepared(request, output, sources)
+                completed.set()
                 raise Captured()
 
             self.handler._mlx_run_diffusion = capture
@@ -169,8 +182,9 @@ class HostHookAdapter:
                         GenerationConfig(batch_size=1, allow_lm_batch=False, use_random_seed=False,
                                          seeds=[request.semantic_seed], audio_format='wav'), save_dir=None)
                 except Captured:
+                    finish_capture(completed.is_set(), None, request, sources, output)
                     return
-                raise RuntimeError(f'Expected preparation boundary, got {result.success}: {result.error}')
+                finish_capture(completed.is_set(), result, request, sources, output)
             finally:
                 self.handler._mlx_run_diffusion = original_diffusion
                 self.lm.generate_with_stop_condition = original_plan
