@@ -13,7 +13,7 @@ class AlertAccent:
 
  def process(self, pcm, start, key, meaningful, fresh, competing=False):
   self.rendered_active=False
-  if not self.enabled or not self.grid.usable:return pcm
+  if not self.enabled:return pcm
   current=key if meaningful and fresh else None
   if current!=self.key:
    self.key=current;self.since=start;self.handled=False;self.pending=[]
@@ -21,7 +21,7 @@ class AlertAccent:
    self.pending=[]
    if current:self.handled=True
    return pcm
-  if current and not self.handled and start-self.since>=round(.2*self.rate):
+  if self.grid.usable and current and not self.handled and start-self.since>=round(.2*self.rate):
    self.handled=True
    if start-self.last>=12*self.rate and sum(start-e['frame']<60*self.rate for e in self.events)<3:
     beat=self.rate*60/self.grid.bpm;origin=self.grid.beat_phase*self.rate

@@ -54,17 +54,23 @@ class SignalShaker:
   grain=grain*env;grain/=max(abs(grain).max(),1e-9)
   self.grain=np.column_stack((grain,grain)).astype(np.float32)*self.peak
   self.step=rate*60/grid.bpm/2 if grid.usable else 1.;self.origin=grid.beat_phase*rate
+ def set_grid(self,grid,start_frame):
+  if grid is self.grid:return
+  self.grid=grid;self.step=self.rate*60/grid.bpm/2 if grid.usable else 1.;self.origin=grid.beat_phase*self.rate
+  if self.active and grid.usable:
+   earliest=max(start_frame,(self.pulse_frames[-1]+self.step*.5) if self.pulse_frames else start_frame)
+   self.next_tick=math.ceil((earliest-self.origin)/self.step-1e-10)
  def process(self,pcm,start_frame,signal_on,signal_fresh):
   self.rendered_active=False;self.rendered_peak=0.;self.rendered_start=start_frame;self.rendered_end=start_frame+len(pcm)
-  if not self.enabled or not self.grid.usable:return pcm
+  if not self.enabled:return pcm
   end=start_frame+len(pcm)
-  if signal_fresh and signal_on:
+  if self.grid.usable and signal_fresh and signal_on:
    self.last_on=start_frame
    if not self.active:
     self.active=True;self.stop_frame=None;self.sequence_pulses=0;self.sequence_start=start_frame
     tick=math.ceil((start_frame-self.origin)/self.step-1e-10);self.next_tick=tick
     self.sequence_starts.append(start_frame);self.events.append({'kind':'sequence_start','frame':start_frame,'next_pulse_frame':round(self.origin+tick*self.step)})
-  if self.active and (not signal_fresh or (self.last_on is not None and start_frame-self.last_on>self.debounce)):
+  if self.active and (not self.grid.usable or not signal_fresh or (self.last_on is not None and start_frame-self.last_on>self.debounce)):
    self.active=False;self.stop_frame=start_frame;self.events.append({'kind':'release','frame':start_frame})
   overlay=np.zeros((len(pcm),2),np.float32)
   take=min(len(pcm),len(self.tail));overlay[:take]+=self.tail[:take];self.tail=self.tail[take:].copy()

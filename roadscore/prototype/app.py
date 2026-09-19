@@ -17,6 +17,7 @@ from engagement_presentation import EngagementPresentation,PresentationConfig,en
 from signal_shaker import SignalShaker,assess_grid,profile_tempo_prior
 from core_apex import CoreApex
 from alert_accent import AlertAccent
+from rhythm_timeline import RhythmTimeline
 from presentation_status import export_status
 from rolling import anchor_options,INITIAL_END,WINDOW,LATENT_SECONDS,trajectory
 from musical import Arrival,MusicalDSP,analyze_music,ending_gesture,match_continuation
@@ -101,10 +102,12 @@ if config.get('gesture_layer',False) and render_mode=='current':
  gesture_grid=grid(gesture_source,rate,gesture_pulse['bpm'] if gesture_pulse['confidence']>=.25 else music_info['bpm'])
  gestures=MusicalGestures(gesture_source,rate,gesture_grid['bpm'],gesture_grid['beat_phase'])
  (run/'gesture_grid.json').write_text(json.dumps(gesture_grid))
-shaker=None;apex=None;alert_accent=None
+shaker=None;apex=None;alert_accent=None;rhythm_timeline=None
 if shaker_enabled or apex_enabled or alert_enabled:
  profile_manifest=json.loads((root/'experiments/ace_chestnut_20260916/profiles'/ace_profile/'profile.json').read_text())
  shaker_grid,shaker_analysis=assess_grid(source,rate,profile_tempo_prior(profile_manifest))
+ rhythm_timeline=RhythmTimeline(rate,profile_tempo_prior(profile_manifest));rhythm_timeline.add(source,0)
+ shaker_grid=rhythm_timeline.at(0)
  shaker=SignalShaker(shaker_grid,rate,enabled=shaker_enabled)
  apex=CoreApex(shaker_grid,rate,enabled=apex_enabled,dip_db=config.get('core_apex',{}).get('dip_db',-1.))
  alert_accent=AlertAccent(shaker_grid,rate,enabled=alert_enabled)
@@ -144,6 +147,9 @@ def append(wave,overlap=2.,match=False):
  global audio
  n=min(int(overlap*rate),len(audio)-position,len(wave))
  levels={}
+ if rhythm_timeline is not None and threading.current_thread() is threading.main_thread():
+  with lock:boundary=frames+len(audio)-position-n
+  rhythm_timeline.add(wave,boundary)
  if match:wave,levels=match_continuation(audio,wave,n)
  with (run/'boundaries.jsonl').open('a') as f:f.write(json.dumps({'overlap_start_audio_s':frames/rate+(len(audio)-position-n)/rate,'new_material_audio_s':frames/rate+(len(audio)-position)/rate,'anchor_seconds':44*LATENT_SECONDS if rolling_mode else 0,**levels})+'\n')
  if n>0:
@@ -174,6 +180,11 @@ def callback(out,n,ti,status):
   (ending_audio,frames-n,ending_start,rate) if musical_mode and ending_start is not None else None)
  active,fresh=engagement_active(engagement[1],engagement[0],engagement[2],engagement[4],engagement[3],callback_wall)
  signal_on,signal_fresh=engagement_active(signal_state[1],signal_state[0],signal_state[2],signal_state[4],signal_state[3],callback_wall)
+ if rhythm_timeline is not None:
+  audible_grid=rhythm_timeline.at(frames-n)
+  if shaker is not None:shaker.set_grid(audible_grid,frames-n)
+  if apex is not None:apex.grid=audible_grid
+  if alert_accent is not None:alert_accent.grid=audible_grid
  if shaker is not None:rendered=shaker.process(rendered,frames-n,signal_on,signal_fresh)
  if apex is not None:rendered=apex.process(rendered,frames-n,event_state)
  if alert_accent is not None:
@@ -368,6 +379,7 @@ try:
    if time.monotonic()-last_progress>15:raise RuntimeError('Replay model input stalled')
 finally:
  audio_started=False
+ if rhythm_timeline is not None:(run/'rhythm_timeline.json').write_text(json.dumps(rhythm_timeline.snapshot(),indent=2))
  if alert_accent is not None:(run/'alert_accent_events.json').write_text(json.dumps(alert_accent.events,indent=2))
  if apex is not None:(run/'core_apex_events.json').write_text(json.dumps(apex.events,indent=2))
  if shaker is not None:(run/'shaker_events.json').write_text(json.dumps({'sequences':shaker.events,'pulse_frames':shaker.pulse_frames,'settings':shaker.snapshot()},indent=2))
