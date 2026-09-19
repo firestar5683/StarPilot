@@ -61,7 +61,11 @@ def overlay_view(state):
     section = 'INTENT: ' + section
   elapsed = seconds(state.get('generation_elapsed_seconds'))
   note = ''
-  if state.get('holding_accepted_music'):
+  if state.get('failure_kind') in ('connection_lost', 'transport_unreachable'):
+    note = 'Connection lost'
+  elif state.get('failure_kind') == 'launch_failed':
+    note = 'Preparation stopped'
+  elif state.get('holding_accepted_music'):
     note = 'Holding accepted music'
   elif state.get('worker_failed'):
     note = 'Composer unavailable'
@@ -138,7 +142,9 @@ def draw_panel(rl, font, state, screen_width, screen_height, emphasis_font=None,
   subtitle = identity + (' / ' + section if section else '')
   title = 'RoadScore'
   if view['activity'] == 'DEGRADED':
-    subtitle = ('Music on hold' if state.get('holding_accepted_music') else
+    subtitle = ('Connection lost' if state.get('failure_kind') in ('connection_lost', 'transport_unreachable') else
+                'Preparation stopped' if state.get('failure_kind') == 'launch_failed' else
+                'Music on hold' if state.get('holding_accepted_music') else
                 'Composer unavailable' if state.get('worker_failed') else 'Reserve in use')
   elif view['event']:
     subtitle = view['event'].split(' / ')[0]

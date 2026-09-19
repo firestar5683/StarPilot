@@ -9,6 +9,7 @@ from clock_sync import measure
 from receiver_environment import assignments as receiver_assignments,resolve_compute
 from presentation_policy import select_launch
 from hook_launch import enabled as hook_enabled, start_planner
+from launch_health import check_children, describe_failure, write_failure
 from session_seed import select_session, seed_argument, seed_environment, remote_assignments
 R=Path(__file__).resolve().parents[1]
 native=Path('/TICI').exists()
@@ -74,10 +75,10 @@ if a.replay:
  from score_archive import latest
  try:score=latest(a.routeid)
  except FileNotFoundError:raise SystemExit('No stored RoadScore exists for this route. Generate a score first.')
-display=None;children=[];logs=[];launch_started=time.monotonic()
+display=None;children=[];named_children={};failure=None;logs=[];launch_started=time.monotonic()
 print(('Preparing stored score replay; no generation. ' if a.replay else ('Preparing ACE replay; first preparation may take 10–15 minutes. ' if a.composer=='ace' else 'Preparing RoadScore replay; cold preparation can take 2–3 minutes. '))+('Host speaker enabled.' if a.audible else 'Muted host capture.'),flush=True)
 def launch(cmd,name,**kw):
- f=(out/(name+'.log')).open('wb');logs.append(f);c=subprocess.Popen(cmd,stdout=f,stderr=f,env=env,cwd=rt,start_new_session=True,**kw);children.append(c);return c
+ f=(out/(name+'.log')).open('wb');logs.append(f);c=subprocess.Popen(cmd,stdout=f,stderr=f,env=env,cwd=rt,start_new_session=True,**kw);children.append(c);named_children[name]=c;return c
 try:
  if not native and Path('/usr/bin/caffeinate').exists():launch(['/usr/bin/caffeinate','-i'],'wake_assertion')
  if composition_policy=='hook-v2' and not a.transport_only:start_planner(launch,env,out,R,a.bench,native=native)
@@ -104,6 +105,7 @@ try:
   receiver=launch(receiver_command,'receiver',stdin=subprocess.PIPE)
   deadline=time.monotonic()+(1560 if a.composer=='ace' else 420)
   while b'BRIDGE_READY' not in (out/'receiver.log').read_bytes():
+   check_children(named_children,remote=not native,include_receiver=True)
    if receiver.poll() is not None or time.monotonic()>deadline:raise RuntimeError('Bench receiver failed: '+(out/'receiver.log').read_text())
    time.sleep(.2)
   audio_host=None
@@ -112,12 +114,14 @@ try:
    audio_host=launch([str(R/'.analysis-venv/bin/python'),str(R/'prototype/host_audio.py'),'--bench',a.bench,'--out',str(out),'--clock',str(out/'clock_sync.json')]+(['--audible'] if a.audible else [])+(['--device',a.audio_device] if a.audio_device else []),'host_audio')
    deadline=time.monotonic()+20
    while not (out/'host_audio_ready').exists():
+    check_children(named_children,remote=not native,include_receiver=True)
     if audio_host.poll() is not None or time.monotonic()>deadline:raise RuntimeError('Host audio failed; see host_audio.log')
     time.sleep(.1)
   f=(out/'sender.log').open('wb');logs.append(f)
   sender=subprocess.Popen([str(py),str(R/'prototype/replay_bridge.py'),'send','--seconds',str(a.duration)],stdout=receiver.stdin,stderr=f,env=env,cwd=rt,start_new_session=True);children.append(sender);receiver.stdin.close()
   deadline=time.monotonic()+15
   while b'BRIDGE_SUBSCRIBED' not in (out/'sender.log').read_bytes():
+   check_children(named_children,remote=not native,include_receiver=True)
    if sender.poll() is not None or time.monotonic()>deadline:raise RuntimeError('Replay subscriber failed')
    time.sleep(.1)
  if a.replay:(out/'roadscore_status.json').write_text(json.dumps({'readiness':'READY','style':'Stored score','section':'ARCHIVED SCORE','compute':'none'}))
@@ -126,6 +130,7 @@ try:
  end_watch=ReplayEnd();end_reason='requested duration'
  state_path=Path('/tmp/replay_state_'+env.get('OPENPILOT_PREFIX','default')+'.json')
  while sender.poll() is None:
+  check_children(named_children,remote=not native,include_receiver=True,allow_clean_receiver=True)
   if receiver is not None and receiver.poll() not in (None,0):raise RuntimeError('RoadScore receiver failed; see receiver.log')
   if native and not a.replay:
    try:(out/'roadscore_status.json').write_text((R/'results/current/status.json').read_text())
@@ -163,12 +168,21 @@ try:
    if a.composer=='ace':subprocess.run(['scp',a.bench+':/data/roadscore/generated/ace_link.jsonl',str(out/'ace_link.jsonl')],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
    from score_archive import archive
    archived=archive(a.routeid,out,a.start);print('Score archived:',archived,flush=True)
+except Exception as error:
+ try:
+  check_children(named_children,remote=not native,include_receiver=True,allow_clean_receiver=True)
+ except Exception as child_error:
+  error=child_error
+ failure=describe_failure(error)
+ write_failure(out/'roadscore_status.json',failure)
+ raise
 finally:
  for c in reversed(children):
   if c.poll() is None:
    os.killpg(c.pid,signal.SIGTERM)
    try:c.wait(timeout=10)
    except subprocess.TimeoutExpired:os.killpg(c.pid,signal.SIGKILL);c.wait()
+ if failure:write_failure(out/'roadscore_status.json',failure)
  if display:display.close()
  for f in logs:f.close()
  print('Replay processes stopped. Worker ownership remains with its supervisor.',flush=True)
