@@ -1,5 +1,6 @@
 """Private single-attempt native judging orchestration. No musical selection or uploads."""
 import argparse
+import hashlib
 import json
 import os
 from pathlib import Path
@@ -30,6 +31,11 @@ def main():
         row.update(json.loads(ranges.read_text()).get(args.label, {}))
     if row.get('range_resolution') == 'pending metadata':
         raise SystemExit('Resolve submitted range before launching this entry')
+    frozen = ROOT / 'generated/judging_configuration.private.json'
+    if frozen.exists():
+        for name, digest in json.loads(frozen.read_text()).items():
+            if hashlib.sha256((ROOT/name).read_bytes()).hexdigest() != digest:
+                raise SystemExit('Frozen judging configuration changed: '+name)
     out = ROOT / 'results/community_judging'
     out.mkdir(exist_ok=True, mode=0o700)
     ledger = out / f'official_{args.label}.json'
@@ -55,7 +61,7 @@ def main():
             state = json.loads((ROOT / 'generated/ace_worker_state.json').read_text())
             if state.get('generation_seed') == row['seed'] and state.get('phase') == 'READY':
                 break
-            if state.get('phase') == 'Stopped' or time.monotonic() > deadline:
+            if (state.get('generation_seed') == row['seed'] and state.get('phase') == 'Stopped') or time.monotonic() > deadline:
                 raise RuntimeError('Preparation stopped or timed out; original attempt retained')
             time.sleep(5)
         initial = json.loads((ROOT / 'generated/ace_initial.json').read_text())
