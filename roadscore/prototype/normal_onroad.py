@@ -6,6 +6,7 @@ No RoadScore event annotations, route allowlist, custom camera drawing, or model
 import argparse,os,subprocess,time,signal,shlex,json
 from pathlib import Path
 from clock_sync import measure
+from receiver_environment import assignments as receiver_assignments
 from presentation_policy import select_launch
 from hook_launch import enabled as hook_enabled, start_planner
 from session_seed import select_session, seed_argument, seed_environment, remote_assignments
@@ -95,7 +96,7 @@ try:
    if sender.poll() is not None or time.monotonic()>deadline:raise RuntimeError('Stored audio failed; see stored_audio.log')
    time.sleep(.1)
  else:
-  remote_policy=' '.join(k+'='+shlex.quote(env[k]) for k in ('ROADSCORE_PRESENTATION_POLICY','ROADSCORE_COMPOSITION_POLICY','ROADSCORE_PLANNER_URL','ROADSCORE_PLANNER_TOKEN') if k in env)+' '
+  remote_policy=receiver_assignments(env)
   receiver_command=(['env','-u','ZMQ','ROADSCORE_AUDIBLE='+('1' if a.audible else '0'),'bash',str(R/'prototype/native_receiver.sh'),a.routeid] if native else ['ssh',a.bench,(remote_assignments(session) if session else '')+remote_policy+'ROADSCORE_RENDER_MODE='+a.render_mode+' ROADSCORE_COMPOSER='+a.composer+' ROADSCORE_ACE_PROFILE='+a.profile+' ROADSCORE_PCM_RETURN=1 '+('ROADSCORE_NO_GENERATION=1 ' if a.transport_only else '')+'bash /data/roadscore/prototype/native_receiver.sh '+shlex.quote(a.routeid)])
   receiver=launch(receiver_command,'receiver',stdin=subprocess.PIPE)
   deadline=time.monotonic()+(1560 if a.composer=='ace' else 420)
@@ -153,8 +154,8 @@ try:
    subprocess.run([str(py),str(R/'prototype/archive_native.py'),str(out),a.routeid,str(a.start)],env=env,cwd=rt,check=True)
   if not native:
    # Preserve generated decisions with the exact host presentation audio.
-   for filename in ['summary.json','jobs.jsonl','boundaries.jsonl','ending.json','bridge.json','trace.jsonl','runtime_manifest.json','song_form.json','gesture_grid.json','gestures.json','composition.json','quality_events.jsonl','shaker_grid.json','shaker_events.json','core_apex_events.json']:
-    subprocess.run(['scp',a.bench+':/data/roadscore/results/current/'+filename,str(out/filename)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+   for filename in ['summary.json','jobs.jsonl','boundaries.jsonl','ending.json','bridge.json','trace.jsonl','runtime_manifest.json','song_form.json','gesture_grid.json','gestures.json','composition.json','quality_events.jsonl','shaker_grid.json','shaker_events.json','core_apex_events.json','dry.wav','audio_blocks.jsonl']:
+    subprocess.run(['scp',a.bench+':/data/roadscore/results/current/'+filename,str(out/filename)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=filename in ('dry.wav','audio_blocks.jsonl'))
    subprocess.run(['scp','-r',a.bench+':/data/roadscore/results/current/quality',str(out/'quality')],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
    if a.composer=='ace':subprocess.run(['scp',a.bench+':/data/roadscore/generated/ace_link.jsonl',str(out/'ace_link.jsonl')],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
    from score_archive import archive
@@ -168,3 +169,6 @@ finally:
  if display:display.close()
  for f in logs:f.close()
  print('Replay processes stopped. Worker ownership remains with its supervisor.',flush=True)
+if a.capture_ui and not native and (out/'normal_ui.mp4').exists():
+ subprocess.run([str(R/'.analysis-venv/bin/python'),str(R/'prototype/synchronize_capture.py'),str(out)],check=True)
+ print('Synchronized muted capture:',out/'synchronized.mp4',flush=True)

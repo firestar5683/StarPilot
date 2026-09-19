@@ -16,6 +16,7 @@ from presentation_policy import effective_config,selected as presentation_policy
 from engagement_presentation import EngagementPresentation,PresentationConfig,engagement_active
 from signal_shaker import SignalShaker,assess_grid,profile_tempo_prior
 from core_apex import CoreApex
+from presentation_status import export_status
 from rolling import anchor_options,INITIAL_END,WINDOW,LATENT_SECONDS,trajectory
 from musical import Arrival,MusicalDSP,analyze_music,ending_gesture,match_continuation
 p=argparse.ArgumentParser();p.add_argument('--root',default='/data/roadscore');p.add_argument('--input',choices=['live','replay'],default='replay');p.add_argument('--audible',action='store_true');p.add_argument('--no-conductor',action='store_true');a=p.parse_args();from audio_policy import allow_output;a.audible=allow_output(a.audible);a.mute=not a.audible
@@ -129,7 +130,7 @@ def recorder():
   while not stop.is_set() or not capture.empty():
    try:
     wet,raw,meta=capture.get(timeout=.1);f.write(wet);dry.write(raw);timing.write(json.dumps(meta)+'\n')
-    meta['roadscore']={k:snapshot.get(k) for k in ['composer','job_inflight','generation_elapsed_seconds','readiness','profile','safe_extensions','quality_failures','holding_accepted_music','identity','style','playing_identity','phase','lead','buffered','arrival_at','worker_failed','section','next_section','scheduled','gesture_active','gesture_queued','turn_signal_music','outro_heard_seconds','form_labels_are_intent']}
+    meta['roadscore']=export_status(snapshot)
     if export and not export_errors:
      try:export.send(wet,meta)
      except Exception as e:
