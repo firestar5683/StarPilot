@@ -839,7 +839,9 @@ IONIQ_6_UNWIND_FRICTION_REDUCTION_LEFT = 3.55
 IONIQ_6_UNWIND_FRICTION_REDUCTION_RIGHT = 9.10
 IONIQ_6_CENTER_TAPER_MAX = 0.082
 IONIQ_6_CENTER_TAPER_LAT = 0.24
-IONIQ_6_CENTER_TAPER_LAT_WIDTH = 0.025
+# Sharpest knee in the stack (0.025) and it sat just above the weave band; widened so the
+# gain varies smoothly rather than switching as the setpoint sweeps through 0.24.
+IONIQ_6_CENTER_TAPER_LAT_WIDTH = 0.08
 IONIQ_6_CENTER_TAPER_SPEED = 18.0
 IONIQ_6_CENTER_TAPER_SPEED_WIDTH = 2.5
 IONIQ_6_HIGHWAY_CENTER_TAPER_MAX = 0.046
@@ -849,7 +851,10 @@ IONIQ_6_HIGHWAY_CENTER_TAPER_SPEED = 24.5
 IONIQ_6_HIGHWAY_CENTER_TAPER_SPEED_WIDTH = 1.8
 IONIQ_6_HIGHWAY_OUTPUT_TAPER_MAX = 0.10
 IONIQ_6_HIGHWAY_OUTPUT_TAPER_LAT = 0.14
-IONIQ_6_HIGHWAY_OUTPUT_TAPER_LAT_WIDTH = 0.04
+# 0.04 put a hard knee right at the centre of the highway weave band (|lat accel| ~0.13-0.18):
+# output gain stepped ~9% within a single half-cycle. Widened so the taper is effectively
+# constant across the oscillation amplitude while still reaching full reduction on straights.
+IONIQ_6_HIGHWAY_OUTPUT_TAPER_LAT_WIDTH = 0.12
 IONIQ_6_HIGHWAY_OUTPUT_TAPER_SPEED = 23.5
 IONIQ_6_HIGHWAY_OUTPUT_TAPER_SPEED_WIDTH = 2.0
 IONIQ_6_HIGHWAY_TRANSITION_OUTPUT_TAPER_MAX = 0.18
@@ -866,8 +871,13 @@ IONIQ_6_LOW_MID_CENTER_TAPER_SPEED_WIDTH = 1.5
 IONIQ_6_DIRECTIONAL_TAPER_LAT_START = 0.19
 IONIQ_6_DIRECTIONAL_TAPER_LAT_END = 0.90
 IONIQ_6_DIRECTIONAL_TAPER_LAT_WIDTH = 0.06
-IONIQ_6_DIRECTIONAL_TAPER_BASE_LEFT = 0.11
-IONIQ_6_DIRECTIONAL_TAPER_BASE_RIGHT = 0.45
+# BASE_RIGHT was 4x BASE_LEFT, so a symmetric weave got 16.2% more gain reduction turning
+# right than left (measured over drive 00000ade: left taper 0.943 vs right 0.801). An
+# asymmetric gain can't settle -- each half-cycle is corrected differently, which is what
+# sustains the limit cycle. Kept the right-heavy bias this car genuinely wants, but pulled
+# the two within ~1.6x instead of 4x.
+IONIQ_6_DIRECTIONAL_TAPER_BASE_LEFT = 0.17
+IONIQ_6_DIRECTIONAL_TAPER_BASE_RIGHT = 0.28
 IONIQ_6_DIRECTIONAL_TAPER_UNWIND_LEFT = 1.10
 IONIQ_6_DIRECTIONAL_TAPER_UNWIND_RIGHT = 2.10
 IONIQ_6_DIRECTIONAL_TAPER_FLOOR_LEFT = 0.48
@@ -958,10 +968,18 @@ IONIQ_6_LOW_SPEED_PID_RESET_SPEED = 0.1 * CV.MPH_TO_MS
 # (~0.5 Hz) weave on straights: the 0.09/0.39 small-signal slope plus the jerk feed acts as
 # extra P/D gain right where there is no breakaway torque to overcome. Deadzone the jerk
 # feed below straight-line noise levels and fade friction near center at highway speed.
+#
+# The fade itself became the next oscillator (0.58-0.75 Hz highway weave, +/-17 cm in lane,
+# drive 00000ade 2026-09-18). Highway cruising spends ~52% of its time at |lat accel| < 0.14,
+# i.e. sitting ON this fade's knee, so the friction term swung 0.54 <-> 1.00 (61% of its mean)
+# every half-cycle -- a gain-scheduled loop modulating its own gain at the frequency it
+# oscillates. FADE_MAX 0.50 -> 0.34 lowers the depth of that swing and LAT_WIDTH 0.06 -> 0.14
+# spreads the transition well outside the +/-0.19 band the weave lives in, so crossing lane
+# center no longer steps the gain.
 IONIQ_6_FRICTION_JERK_DEADZONE = 0.30
-IONIQ_6_FRICTION_CENTER_FADE_MAX = 0.50
+IONIQ_6_FRICTION_CENTER_FADE_MAX = 0.34
 IONIQ_6_FRICTION_CENTER_FADE_LAT = 0.15
-IONIQ_6_FRICTION_CENTER_FADE_LAT_WIDTH = 0.06
+IONIQ_6_FRICTION_CENTER_FADE_LAT_WIDTH = 0.14
 IONIQ_6_FRICTION_CENTER_FADE_SPEED = 18.0
 IONIQ_6_FRICTION_CENTER_FADE_SPEED_WIDTH = 2.5
 # Newer Ioniq 6 highway center-chatter correction; activation is firmware-gated.
