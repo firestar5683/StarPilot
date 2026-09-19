@@ -84,6 +84,7 @@ try:
    profile,base_seed,preparation_id,planned=new_profile,new_seed,next_id,next_plan
    qualified=QualifiedGenerator(generate,policy=HOOK_POLICY)
   session_started=time.monotonic() if selection else BOOT
+  write_json(G/'ace_worker_state.json',{'pid':os.getpid(),'generation_seed':base_seed,'composition_policy':composition_policy,'profile':profile,'phase':'preparing','accepted_chunks':0,'accepted_buffer_seconds':0.,'elapsed_seconds':0.,'resident_reused':bool(selection)})
   print('ACE_PREPARING',profile,flush=True)
   initial=None;last=None;preparation=[];slot=0;first_accepted_audio_seconds=None
   while initial is None or len(initial)/48000<POLICY.initial_buffer_seconds:
