@@ -25,6 +25,9 @@ def main():
     args = parser.parse_args()
     manifest = json.loads(args.manifest.read_text())
     row = next(r for r in manifest['submissions'] if r['label'] == args.label)
+    ranges = args.manifest.with_name('judging_ranges.private.json')
+    if ranges.exists():
+        row.update(json.loads(ranges.read_text()).get(args.label, {}))
     if row.get('range_resolution') == 'pending metadata':
         raise SystemExit('Resolve submitted range before launching this entry')
     out = ROOT / 'results/community_judging'
@@ -80,7 +83,10 @@ def main():
         record.update(phase='finished' if result.returncode == 0 else 'failed', exit_code=result.returncode,
                       run_paths=[str(r) for r in runs], ended_wall=time.time())
         for run in runs:
-            subprocess.run([PYTHON, str(ROOT / 'tools/event_replay_audit.py'), str(run)], stdout=subprocess.DEVNULL, check=True)
+            audit_args = [PYTHON, str(ROOT / 'tools/event_replay_audit.py'), str(run)]
+            if row.get('duration_seconds', 86400) < 86400:
+                audit_args += ['--expected-duration', str(row['duration_seconds'])]
+            subprocess.run(audit_args, stdout=subprocess.DEVNULL, check=True)
     except Exception as error:
         record.update(phase='failed', error_type=type(error).__name__, error=str(error), ended_wall=time.time())
         raise

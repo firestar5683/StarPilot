@@ -4,7 +4,7 @@ import json
 from pathlib import Path
 
 
-def audit(run):
+def audit(run, expected_duration=None):
     def read(name):
         p = run / name
         return json.loads(p.read_text()) if p.exists() else {}
@@ -34,6 +34,10 @@ def audit(run):
         'path': last_ui.get('nonempty_path_draws', 0) > 0,
         'lanes': last_ui.get('nonempty_lane_draws', 0) > 0,
     }
+    if expected_duration is not None:
+        if expected_duration <= 0:raise ValueError('Expected duration must be positive')
+        checks.pop('native_eof')
+        checks['submitted_range_complete'] = launch.get('end_reason') == 'requested duration' and abs(summary.get('audio_seconds', 0)-expected_duration) <= 1
     return {
         'checks': checks, 'instrumented_pass': all(checks.values()),
         'audio_seconds': summary.get('audio_seconds'), 'accepted_jobs': len(accepted),
@@ -49,7 +53,8 @@ def audit(run):
 if __name__ == '__main__':
     parser = argparse.ArgumentParser()
     parser.add_argument('run', type=Path)
+    parser.add_argument('--expected-duration', type=float)
     args = parser.parse_args()
-    result = audit(args.run)
+    result = audit(args.run, args.expected_duration)
     (args.run / 'event_replay_audit.json').write_text(json.dumps(result, indent=2))
     print(json.dumps(result, indent=2))

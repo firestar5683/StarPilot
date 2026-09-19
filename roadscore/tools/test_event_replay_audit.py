@@ -6,6 +6,14 @@ from event_replay_audit import audit
 
 
 class AuditTests(unittest.TestCase):
+    def test_submitted_range_requires_complete_duration(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            (root / "launch.json").write_text(json.dumps({"end_reason": "requested duration"}))
+            (root / "summary.json").write_text(json.dumps({"audio_seconds": 50}))
+            self.assertFalse(audit(root, 100)["checks"]["submitted_range_complete"])
+            self.assertTrue(audit(root, 50)["checks"]["submitted_range_complete"])
+
     def test_missing_evidence_cannot_pass(self):
         with tempfile.TemporaryDirectory() as directory:
             self.assertFalse(audit(Path(directory))['instrumented_pass'])
