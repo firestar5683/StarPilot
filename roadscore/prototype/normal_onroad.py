@@ -14,6 +14,9 @@ from launch_health import check_children, describe_failure, write_failure
 from session_seed import select_session, seed_argument, seed_environment, remote_assignments
 R=Path(__file__).resolve().parents[1]
 native=Path('/TICI').exists()
+if native:
+ from persistent_assets import restore_links
+ restore_links(R)
 def interrupt(*_):raise KeyboardInterrupt
 signal.signal(signal.SIGTERM,interrupt)
 p=argparse.ArgumentParser();p.add_argument('--roadscore-seed',type=seed_argument,help='Reproduce an ACE session; normal launches choose a fresh seed');p.add_argument('--render-mode',choices=['current','gold-core'],default=None,help='ACE rendering mode');p.add_argument('--roadscore-presentation',choices=['conservative-v2','conservative-v1','off','frozen']);p.add_argument('route',nargs='?');p.add_argument('--routeid');p.add_argument('--roadscore',action='store_true',required=True);p.add_argument('--replay',action='store_true',help='Play recorded final score without Chestnut');p.add_argument('--score-archive',type=Path,help='Imported local archive for --replay');p.add_argument('--start',type=int,default=None);p.add_argument('--duration',type=float,default=float('inf'),help='Optional duration limit; normally replay to route EOF');p.add_argument('--audible',action='store_true',help='Compatibility flag; output is audible by default outside automated sessions');p.add_argument('--muted',action='store_true');p.add_argument('--no-overlay',action='store_true');p.add_argument('--capture-ui',action='store_true',help='Record the normal UI internally without speaker output');p.add_argument('--audio-device',default=None,help='Development host output device; default is the system output');p.add_argument('--transport-only',action='store_true');p.add_argument('--headless',action='store_true');p.add_argument('--runtime',type=Path,default=Path('/data/openpilot') if native else Path(os.environ.get('ROADSCORE_RUNTIME','/Users/dominickthompson/starpilot/.host_runtime/darwin/worktree')));p.add_argument('--bench',default=device_target());p.add_argument('--composer',choices=['sa3','ace'],default=choice(),help='ACE Prism is the event default; SA3 is an explicit fallback');p.add_argument('--profile',choices=['prism','aurora'],default='prism');a=p.parse_args()
@@ -176,7 +179,7 @@ try:
    subprocess.run([str(py),str(R/'prototype/archive_native.py'),str(out),a.routeid,str(a.start)],env=env,cwd=rt,check=True)
   if not native:
    # Preserve generated decisions with the exact host presentation audio.
-   for filename in ['summary.json','jobs.jsonl','boundaries.jsonl','ending.json','bridge.json','trace.jsonl','runtime_manifest.json','song_form.json','gesture_grid.json','gestures.json','composition.json','quality_events.jsonl','shaker_grid.json','shaker_events.json','core_apex_events.json','dry.wav','audio_blocks.jsonl']:
+   for filename in ['summary.json','jobs.jsonl','boundaries.jsonl','ending.json','bridge.json','trace.jsonl','runtime_manifest.json','song_form.json','gesture_grid.json','gestures.json','composition.json','quality_events.jsonl','shaker_grid.json','shaker_events.json','core_apex_events.json','alert_accent_events.json','dry.wav','audio_blocks.jsonl']:
     subprocess.run(['scp',a.bench+':/data/roadscore/results/current/'+filename,str(out/filename)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,check=filename in ('dry.wav','audio_blocks.jsonl'))
    subprocess.run(['scp','-r',a.bench+':/data/roadscore/results/current/quality',str(out/'quality')],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
    if a.composer=='ace':subprocess.run(['scp',a.bench+':/data/roadscore/generated/ace_link.jsonl',str(out/'ace_link.jsonl')],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
