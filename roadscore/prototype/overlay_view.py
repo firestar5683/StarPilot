@@ -113,9 +113,17 @@ def hud_bounds(screen_width, screen_height):
   return (16, 88, width, 60)
 
 
-def draw_panel(rl, font, state, screen_width, screen_height, emphasis_font=None, presentation=None):
+def startup_bounds(screen_width, screen_height, footer_right=188):
+  width, height, margin = 230, 60, 12
+  x, y = screen_width - width - margin, screen_height - height - 8
+  if screen_height < 224 or x < footer_right + margin:
+    return None
+  return (x, y, width, height)
+
+
+def draw_panel(rl, font, state, screen_width, screen_height, emphasis_font=None, presentation=None, startup=False, footer_right=188):
   view = presentation or overlay_view(state)
-  bounds = hud_bounds(screen_width, screen_height)
+  bounds = startup_bounds(screen_width, screen_height, footer_right) if startup else hud_bounds(screen_width, screen_height)
   if bounds is None:
     return view
   x, y, width, height = bounds

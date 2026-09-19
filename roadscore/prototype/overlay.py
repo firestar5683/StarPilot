@@ -7,7 +7,7 @@ def install():
  if os.environ.get('ROADSCORE_OVERLAY')!='1':return
  import pyray as rl
  from openpilot.system.ui.lib.application import gui_app,FontWeight
- original=gui_app.render;last=0.;state={};frames=0;captured=False;capture_ready_since=None;captured_events=set();alert_clear_after=0.;native_nav_visible=False;event_presentation=EventPresentation();alert_seen_at=None;alert_captured=False
+ original=gui_app.render;last=0.;state={};frames=0;captured=False;capture_ready_since=None;captured_events=set();alert_clear_after=0.;native_nav_visible=False;home_footer_right=None;event_presentation=EventPresentation();alert_seen_at=None;alert_captured=False
  # Observe the actual native nav card; it keeps priority over this accessory.
  from openpilot.selfdrive.ui.onroad.starpilot.navigation_card import NavigationCardRenderer
  original_nav_render=NavigationCardRenderer._render
@@ -17,6 +17,15 @@ def install():
   native_nav_visible=native_nav_visible or widget._valid
   return result
  NavigationCardRenderer._render=nav_render
+ from openpilot.selfdrive.ui.mici.layouts.home import MiciHomeLayout
+ original_home_render=MiciHomeLayout._render
+ def home_render(widget,rect):
+  nonlocal home_footer_right
+  result=original_home_render(widget,rect)
+  if abs(widget.rect.x)<1 and abs(widget.rect.y)<1:
+   home_footer_right=max((w.rect.x+w.rect.width for w in widget._status_bar_layout.widgets if w.is_visible),default=0)
+  return result
+ MiciHomeLayout._render=home_render
  path=Path(os.environ['ROADSCORE_STATUS_FILE'])
  def capture_image(target):
   from PIL import Image
@@ -51,8 +60,9 @@ def install():
    return
   alert_seen_at=None
   if native_nav_visible:return
+  if not ui_state.started and home_footer_right is None:return
   presentation=event_presentation.update(overlay_view(state),now)
-  view=draw_panel(rl,gui_app.font(FontWeight.NORMAL),state,gui_app.width,gui_app.height,gui_app.font(FontWeight.SEMI_BOLD),presentation)
+  view=draw_panel(rl,gui_app.font(FontWeight.NORMAL),state,gui_app.width,gui_app.height,gui_app.font(FontWeight.SEMI_BOLD),presentation,startup=not ui_state.started,footer_right=home_footer_right or 0)
   ready=view['ready']
   if frames%60==1:path.with_name('overlay_status.json').write_text(json.dumps({'frames':frames,'native_gpu_icon':False,'presentation':view,'state':state}))
   from openpilot.selfdrive.ui.ui_state import ui_state
@@ -67,9 +77,9 @@ def install():
     captured_events.add(kind);capture_target=Path(capture_path).with_name('overlay-event-'+kind+'.png')
   if capture_target is not None:capture_image(capture_target)
  def render(*args,**kwargs):
-  nonlocal native_nav_visible
+  nonlocal native_nav_visible,home_footer_right
   for should_render in original(*args,**kwargs):
-   native_nav_visible=False
+   native_nav_visible=False;home_footer_right=None
    yield should_render
    if should_render:draw()
  gui_app.render=render

@@ -4,7 +4,7 @@ import unittest
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'prototype'))
-from overlay_view import display_text, fit_text, overlay_view, hud_bounds, EventPresentation
+from overlay_view import display_text, fit_text, overlay_view, hud_bounds, startup_bounds, EventPresentation
 
 
 class OverlayTests(unittest.TestCase):
@@ -51,6 +51,13 @@ class OverlayTests(unittest.TestCase):
     self.assertEqual(overlay_view({'lead': 4})['event'], '')
     self.assertEqual(overlay_view(dict(kind='navigation', phase='anticipation', lead=4))['event'], '')
     self.assertEqual(overlay_view(dict(kind='curve', phase='anticipation', lead=4))['event'], '')
+
+  def test_startup_badge_clears_home_text_and_visible_footer_icons(self):
+    self.assertEqual(startup_bounds(536, 240), (294, 172, 230, 60))
+    self.assertEqual(startup_bounds(536, 240, 256), (294, 172, 230, 60))
+    self.assertIsNone(startup_bounds(536, 240, 306))
+    self.assertIsNone(startup_bounds(320, 240))
+    self.assertEqual(hud_bounds(536, 240), (16, 88, 286, 60))
 
   def test_native_slot_clears_speed_sign_driver_and_steering(self):
     x, y, width, height = hud_bounds(536, 240)
