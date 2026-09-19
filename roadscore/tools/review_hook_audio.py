@@ -3,11 +3,12 @@ import argparse
 import hashlib
 import html
 import json
+import os
 from pathlib import Path
 
 import numpy as np
 from scipy.io import wavfile
-from scipy.signal import resample_poly, stft
+from scipy.signal import resample_poly, stft, find_peaks
 
 
 def load(path):
@@ -84,15 +85,42 @@ def assembly_check(pcm, parts, rate):
           'limit': 'Saved windows omit regenerated prefixes. The expected 2s crossfade regions cannot be reconstructed from these files; float32 resume roundoff allowed up to 5e-7.'}
 
 
+def contrast(pcm, rate):
+  hop = max(1, rate // 100)
+  envelope = np.array([rms(pcm[i:i+hop]) for i in range(0, len(pcm)-hop+1, hop)])
+  onset = np.maximum(0, np.diff(envelope))
+  threshold = np.median(onset) + 3*np.median(abs(onset-np.median(onset)))
+  peaks, _ = find_peaks(onset, height=max(float(threshold), .001), distance=12)
+  return {'rms': rms(pcm), 'peak': float(np.max(abs(pcm))),
+          'envelope_variation': float(envelope.std()/max(envelope.mean(), 1e-12)),
+          'detected_onsets_per_second': float(len(peaks)/(len(pcm)/rate))}
+
+
+def compare_initial(current, other):
+  rate, pcm = load(current)
+  other_rate, original = load(other)
+  if rate != other_rate:
+    return {'error': 'Sample rates differ; comparison skipped'}
+  n = min(len(pcm), len(original))
+  a, b = contrast(pcm[:n], rate), contrast(original[:n], rate)
+  return {'matched_start_seconds': n/rate, 'current': a, 'reference': b,
+          'rms_change_db': float(20*np.log10(max(a['rms'], 1e-12)/max(b['rms'], 1e-12))),
+          'reference_sha256': hashlib.sha256(other.read_bytes()).hexdigest(),
+          'limits': 'Fixed gain, same-length opening comparison. Onsets use 10ms RMS changes with a 120ms minimum separation; density and envelope variation do not establish groove or musical quality.'}
+
+
 def main():
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument('directory', type=Path)
+  parser.add_argument('--baseline', type=Path)
+  parser.add_argument('--reference', type=Path)
   args = parser.parse_args()
   root = args.directory
   validation = json.loads((root / 'validation.json').read_text())
   report = {'scope': 'All sessions retained, original samples/gain unchanged; no listening judgment.',
             'limits': 'Silence is channel-combined RMS below -80 dBFS in 100ms blocks. Repetition compares exact non-silent 1s blocks and zero-lag 4s waveform blocks; it does not measure memorable melody, shifted phrases, or musical quality. RMS/centroid section contrast can reflect level/timbre alone.',
             'sessions': []}
+  baseline = json.loads((args.baseline / 'validation.json').read_text()) if args.baseline else None
   cards = []
   for number, seed in enumerate(validation['sessions'], 1):
     folder = root / f'session_{number}'
@@ -114,17 +142,28 @@ def main():
       entry['assembly'] = assembly_check(pcm, [wave for _, wave in parts], rate) if parts and all(r == rate for r, _ in parts) else {'status': 'sample rate mismatch or missing windows'}
       seams = np.cumsum([len(wave) for _, wave in parts])[:-1]
       entry['seams'] = [dict(seconds=float(i/rate), sample_step=float(np.max(abs(pcm[i]-pcm[i-1])))) for i in seams]
+    initial = folder / '00_initial.wav'
+    original = args.baseline / folder.name / '00_initial.wav' if args.baseline else None
+    if initial.exists():
+      if original and original.exists() and baseline['sessions'][number-1]['generation_seed'] == seed['generation_seed']:
+        entry['same_seed_initial_comparison'] = compare_initial(initial, original)
+      if args.reference:
+        entry['gold_initial_comparison'] = compare_initial(initial, args.reference)
     report['sessions'].append(entry)
     title = f'Session {number}' + (' · Complete' if status == 'technical_pass_listening_pending' else ' · Stopped early' if status == 'quality_failed' else ' · Partial' if core.exists() else ' · Pending')
     core_label = 'Full session' if status == 'technical_pass_listening_pending' else 'Available audio (partial)'
     choices = ([core] if core.exists() else []) + windows
     options = ''.join(f'<option value="session_{number}/{html.escape(p.name)}">{html.escape(core_label if p == core else p.stem.replace("_", " "))}</option>' for p in choices)
+    if original and original.exists() and 'same_seed_initial_comparison' in entry:
+      options += f'<option value="{html.escape(os.path.relpath(original, root))}">Earlier version · same seed · opening</option>'
     player = (f'<select aria-label="Session {number} section">{options}</select><audio controls preload="metadata" src="session_{number}/{html.escape(choices[0].name)}"></audio>'
               if choices else '<p class="pending">Session audio is not available yet.</p>')
     metrics = entry.get('core', {})
     summary = (f'{metrics["seconds"]:.1f}s · peak {metrics["peak"]:.3f} · {metrics["samples_at_or_above_full_scale"]} full-scale samples'
                if metrics and 'error' not in metrics else 'Screening pending')
     cards.append(f'<section><h2>{title}</h2><p class="seed">Seed {seed["generation_seed"]}</p>{player}<p>{summary}</p></section>')
+  if args.reference:
+    cards.append(f'<section><h2>Protected GOLD reference</h2><p>Original 28-second reference, unchanged gain.</p><audio controls preload="metadata" src="{html.escape(os.path.relpath(args.reference, root))}"></audio></section>')
   (root / 'audio_screening.json').write_text(json.dumps(report, indent=2))
   page = '''<!doctype html><html lang="en"><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>RoadScore · Fresh hook review</title><style>
   :root{color-scheme:dark;font:16px system-ui;background:#101417;color:#eef2f4}body{max-width:980px;margin:40px auto;padding:0 24px}h1{font-size:32px;margin-bottom:12px}p{line-height:1.55;color:#c1cbd1}section{padding:24px;border:1px solid #344149;border-radius:16px;margin:20px 0}h2{margin:0}audio{width:100%;margin:12px 0}.seed{font:13px ui-monospace;color:#9cabb5}a{color:#91d7c5}select{padding:8px;margin-top:16px;background:#26383e;color:white;border:1px solid #61767f;border-radius:8px}li{padding:6px}button{background:#26383e;color:white;border:1px solid #61767f;border-radius:8px;padding:10px 16px;cursor:pointer}
