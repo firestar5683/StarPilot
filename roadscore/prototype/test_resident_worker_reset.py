@@ -77,3 +77,10 @@ def test_wrong_bank_does_not_change_existing_session(worker):
     state,saved,audio,model=worker
     with pytest.raises(ValueError,match='identity changed'):state['prepare_session'](selection(124,'b'*64))
     assert state['base_seed']==123 and audio==[]
+
+
+def test_nonresident_launch_cannot_reuse_resident_audio_with_same_seed():
+    from prepared_session import verify
+    metadata={'generation_seed':123,'prepared_profile':'prism','composition_policy':'hook-cache-v1','resident_capable':True}
+    env={'ROADSCORE_GENERATION_SEED':'123','ROADSCORE_ACE_PROFILE':'prism','ROADSCORE_COMPOSITION_POLICY':'hook-cache-v1'}
+    with pytest.raises(ValueError,match='opted-in'):verify(metadata,env)
