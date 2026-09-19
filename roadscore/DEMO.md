@@ -43,3 +43,7 @@ The preview renders six full 536 × 240 synthetic canvases with the repository's
 Road gestures take priority over job timing in the detail row; degraded explanations take priority over both. The startup label uses the selected Prism/Aurora profile; stored playback is labeled as such from preparation onward.
 
 The active native overlay is `prototype/overlay.py`; the pure presentation helper is `prototype/overlay_view.py`. `prototype/index.html` and `prototype/native_display.py` are older excerpt-specific bench interfaces, not the normal onroad demo. The historical style selector is not an ACE profile selector. Keep those older entrypoints distinct when presenting the current demo.
+
+The contextual line names reported musical cues: Turn signal / percussion, Curve ahead / build, Curve apex / impact, Navigation turn / accent, and arrival/stop/resume cues. Active cues take priority over queued cues; queued cues are explicitly prefixed Next. A brief curve apex takes priority over ongoing signal percussion. Unknown kinds are labeled Music cue without guessing a road cause. The archived player supplies these fields from the original scheduler timing.
+
+The score ribbon yields completely to native selfdrive/StarPilot alerts and their fade-out. Optional `ROADSCORE_CAPTURE_EVENTS=1` captures the first displayed active cue of each kind into the ignored replay output for UI review; it does not alter status or music.

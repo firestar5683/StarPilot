@@ -25,8 +25,26 @@ class OverlayTests(unittest.TestCase):
   def test_gesture_remains_separate_from_generation_timing(self):
     view = overlay_view(dict(readiness='READY', job_inflight=True, generation_elapsed_seconds=123.4,
                              turn_signal_music=True))
-    self.assertEqual(view['event'], 'Signal percussion')
+    self.assertEqual(view['event'], 'Turn signal cue')
     self.assertIn('123.4s', view['note'])
+
+  def test_active_cue_precedes_queued_and_persistent_signal(self):
+    view = overlay_view(dict(turn_signal_music=True, gesture_active=['turn_signal_sustain', 'curve_apex'],
+                             gesture_queued=[{'kind': 'arrival'}]))
+    self.assertEqual(view['event'], 'Curve apex / impact')
+    self.assertEqual(view['event_state'], 'active')
+
+  def test_queued_cue_does_not_claim_current_music(self):
+    view = overlay_view(dict(turn_signal_music=True, gesture_queued=[{'kind': 'turn_signal'}]))
+    self.assertEqual(view['event'], 'Next: Turn signal')
+    self.assertEqual(view['event_state'], 'queued')
+
+  def test_unknown_and_malformed_cues_do_not_invent_a_road_reason(self):
+    self.assertEqual(overlay_view({'gesture_active': ['unknown_future_kind']})['event'], 'Music cue')
+    self.assertEqual(overlay_view({'gesture_active': 'curve_apex', 'gesture_queued': [None, {}, 3]})['event'], '')
+    self.assertEqual(overlay_view({'lead': 4})['event'], '')
+    self.assertEqual(overlay_view(dict(kind='navigation', phase='anticipation', lead=4))['event'], '')
+    self.assertEqual(overlay_view(dict(kind='curve', phase='anticipation', lead=4))['event'], 'Curve ahead / 4.0s')
 
   def test_missing_buffer_is_not_zero(self):
     for value in (None, float('nan'), float('inf'), '12', True):

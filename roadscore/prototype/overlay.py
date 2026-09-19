@@ -7,15 +7,21 @@ def install():
  if os.environ.get('ROADSCORE_OVERLAY')!='1':return
  import pyray as rl
  from openpilot.system.ui.lib.application import gui_app,FontWeight
- original=gui_app.render;last=0.;state={};frames=0;captured=False;capture_ready_since=None
+ original=gui_app.render;last=0.;state={};frames=0;captured=False;capture_ready_since=None;captured_events=set();alert_clear_after=0.
  path=Path(os.environ['ROADSCORE_STATUS_FILE'])
  def draw():
-  nonlocal last,state,frames,captured,capture_ready_since
+  nonlocal last,state,frames,captured,capture_ready_since,alert_clear_after
   now=time.monotonic()
   if now-last>.2:
    try:state=json.loads(path.read_text())
    except (OSError,ValueError):pass
    last=now
+  from openpilot.selfdrive.ui.ui_state import ui_state
+  # The native alert owns the display. Leave room for its existing fade-out too.
+  for service in ('selfdriveState','starpilotSelfdriveState'):
+   size=ui_state.sm[service].alertSize
+   if int(size.raw)>0:alert_clear_after=now+1.
+  if now<alert_clear_after:return
   view=draw_panel(rl,gui_app.font(FontWeight.NORMAL),state,gui_app.width,gui_app.height)
   ready=view['ready']
   frames+=1
@@ -25,8 +31,15 @@ def install():
   if frames%60==1:path.with_name('overlay_status.json').write_text(json.dumps({'frames':frames,'native_gpu_icon':False,'presentation':view,'state':state}))
   from openpilot.selfdrive.ui.ui_state import ui_state
   if ready and ui_state.started and capture_ready_since is None:capture_ready_since=now
-  if capture_ready_since is not None and now-capture_ready_since>=5 and ui_state.started and not captured and os.environ.get("ROADSCORE_OVERLAY_CAPTURE"):
-   captured=True
+  capture_target=None
+  capture_path=os.environ.get("ROADSCORE_OVERLAY_CAPTURE")
+  if capture_path and ui_state.started:
+   if capture_ready_since is not None and now-capture_ready_since>=5 and not captured:
+    captured=True;capture_target=Path(capture_path)
+   kind=view.get('event_kind')
+   if os.environ.get('ROADSCORE_CAPTURE_EVENTS')=='1' and view.get('event_state')=='active' and kind and kind not in captured_events:
+    captured_events.add(kind);capture_target=Path(capture_path).with_name('overlay-event-'+kind+'.png')
+  if capture_target is not None:
    from PIL import Image
    rl.rl_draw_render_batch_active()
    image=rl.load_image_from_texture(gui_app._render_texture.texture) if gui_app._render_texture else rl.load_image_from_screen()
@@ -34,7 +47,7 @@ def install():
     data=bytes(rl.ffi.buffer(image.data,image.width*image.height*4))
     picture=Image.frombytes('RGBA',(image.width,image.height),data)
     if gui_app._render_texture:picture=picture.transpose(Image.Transpose.FLIP_TOP_BOTTOM)
-    picture.save(os.environ['ROADSCORE_OVERLAY_CAPTURE'])
+    picture.save(capture_target)
    finally:rl.unload_image(image)
  def render(*args,**kwargs):
   for should_render in original(*args,**kwargs):
