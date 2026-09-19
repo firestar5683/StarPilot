@@ -18,6 +18,11 @@ from generation_seed import configured_seed,sample_seed
 base_seed=configured_seed(required=True)
 from quality_gate import QualifiedGenerator,POLICY
 from link_health import LinkProbe
+from hook_service import Client
+from planned_composition import PlannedComposition
+composition_policy=os.environ.get('ROADSCORE_COMPOSITION_POLICY','prepared-v1')
+if composition_policy not in ('prepared-v1','hook-v2'):raise ValueError('Unknown composition policy')
+if composition_policy=='hook-v2' and not windowed:raise ValueError('Hook planning requires windowed native sampler')
 from tinygrad import Device
 profile=selected();preparation_id=f'{profile}_{time.time_ns()}'
 lock=open(G/'gpu.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -28,16 +33,23 @@ def write_json(path,data):
  tmp=path.with_suffix('.tmp');tmp.write_text(json.dumps(data,indent=2));tmp.replace(path)
 def save_wave(path,wave):sf.write(path,wave*POLICY.output_gain,48000,subtype='FLOAT')
 try:
- write_json(G/'ace_worker_state.json',{'pid':os.getpid(),'generation_seed':base_seed,'profile':profile,'phase':'preparing'})
+ write_json(G/'ace_worker_state.json',{'pid':os.getpid(),'generation_seed':base_seed,'composition_policy':composition_policy,'profile':profile,'phase':'preparing'})
  load_started=time.monotonic()
  c=Composer(P,profile=profile) if windowed else Composer(P)
  model_load_seconds=time.monotonic()-load_started
  probe=LinkProbe(Device['AMD'],G/'ace_link.jsonl');probe.install_failure_hook(contain=True)
  if windowed:c.decoder.trace=probe.trace
+ planned=None
+ if composition_policy=='hook-v2':
+  from ace_runtime import Composer as NativeComposer
+  from window_policy import retained_end
+  planned=PlannedComposition(Client(os.environ['ROADSCORE_PLANNER_URL'],os.environ['ROADSCORE_PLANNER_TOKEN']),G/'hook_sessions'/preparation_id,base_seed,profile)
+  def planned_generate(role,seed,previous):return planned.generate(lambda case,seed,previous:NativeComposer.generate(c,case,seed,previous),seed,previous,retained_end)
+ sample=planned_generate if planned else c.generate
  def generate(role,seed,previous):
   probe.preflight(role=role,seed=seed)
   try:
-   wave,latent,stats=c.generate(role,seed,previous);stats['power_limit_watts']=float(os.environ['AM_POWER_LIMIT']) if os.environ.get('AM_POWER_LIMIT') else None;stats['link_session']=probe.session;stats['host_peak_rss_kib']=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss;stats['tracked_allocation_bytes']=probe.last.get('allocator_bytes');return wave,latent,stats
+   wave,latent,stats=sample(role,seed,previous);stats['power_limit_watts']=float(os.environ['AM_POWER_LIMIT']) if os.environ.get('AM_POWER_LIMIT') else None;stats['link_session']=probe.session;stats['host_peak_rss_kib']=resource.getrusage(resource.RUSAGE_SELF).ru_maxrss;stats['tracked_allocation_bytes']=probe.last.get('allocator_bytes');return wave,latent,stats
   except Exception as e:
    probe.sample('generation_exception',error=str(e),role=role,seed=seed);raise
  qualified=QualifiedGenerator(generate)
@@ -52,9 +64,11 @@ try:
  initial=None;last=None;preparation=[];slot=0
  while initial is None or len(initial)/48000<POLICY.initial_buffer_seconds:
   role=('initial' if windowed else 'verse') if initial is None else ('verse' if windowed else 'repaint_verse')
+  if planned:role=planned.begin(last)
   wave,last_new,stats=qualified.run(role,sample_seed(base_seed,"prepare",slot),last,record=record_for('prepare_'+preparation_id+'_'+str(slot)))
   preparation.append(stats)
   if wave is None:raise RuntimeError('Preparation rejected after bounded quality retries; inspect generated/quality')
+  if planned:planned.accept(wave,last_new)
   if initial is None:initial=wave.copy()
   else:
    overlap=2*48000;prefix=round(stats['prefix_seconds']*48000);alpha=np.linspace(0,1,overlap)[:,None]
@@ -63,8 +77,8 @@ try:
   last=last_new;slot+=1
   if slot>8:raise RuntimeError('Initial buffer did not fill within bounded preparation')
  save_wave(G/'ace_initial.wav',initial);np.save(G/'ace_initial.npy',last)
- write_json(G/'ace_initial.json',{'generation_seed':base_seed,'composer':'ace','startup_seconds':time.monotonic()-BOOT,'model_load_seconds':model_load_seconds,'host_peak_rss_kib':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,'duration':len(initial)/48000,'source_identity':'kpop_control','prepared_profile':profile if windowed else 'legacy','preparation_id':preparation_id,'continuation_policy':'quality-gated fixed lookahead','generation':preparation,'prepared_identity':True,'output_gain':POLICY.output_gain,'created_wall':time.time()})
- write_json(G/'ace_worker_state.json',{'pid':os.getpid(),'generation_seed':base_seed,'profile':profile,'phase':'READY','initial_buffer_seconds':len(initial)/48000})
+ write_json(G/'ace_initial.json',{'generation_seed':base_seed,'composition_policy':composition_policy,'composer':'ace','startup_seconds':time.monotonic()-BOOT,'model_load_seconds':model_load_seconds,'host_peak_rss_kib':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,'duration':len(initial)/48000,'source_identity':'kpop_control','prepared_profile':profile if windowed else 'legacy','preparation_id':preparation_id,'continuation_policy':'quality-gated fixed lookahead','generation':preparation,'prepared_identity':True,'output_gain':POLICY.output_gain,'created_wall':time.time()})
+ write_json(G/'ace_worker_state.json',{'pid':os.getpid(),'generation_seed':base_seed,'composition_policy':composition_policy,'profile':profile,'phase':'READY','initial_buffer_seconds':len(initial)/48000})
  (G/'request.json').unlink(missing_ok=True);ready.write_text('ace');print('ACE_READY',flush=True)
  while True:
   request=G/'request.json'
@@ -81,10 +95,12 @@ try:
    if case is None:raise ValueError('Unsupported ACE section intent')
    if windowed:case=case.removeprefix('repaint_')
    previous=np.load(req['latents'])
+   if planned:case=planned.begin(previous,arrival=case=='outro')
    deadline=req.get('playback_deadline_monotonic')
-   wave,latent,stats=qualified.run(case,int(req.get('seed',job%(2**32))),previous,deadline=deadline,record=record_for(job))
+   wave,latent,stats=qualified.run(case,int(req['seed']),previous,deadline=deadline,record=record_for(job))
    if wave is None:
     write_json(G/f'result_{job}.json',{**req,**stats,'id':job,'composer':'ace','seconds':time.monotonic()-start});continue
+   if planned:planned.accept(wave,latent)
    wav=G/f'ace_job_{job}.wav';lat=G/f'ace_job_{job}.npy';save_wave(wav,wave);np.save(lat,latent)
    result={**req,**stats,'id':job,'composer':'ace','backend':'ACE-Step1.5 turbo native Chestnut, prepared identity','wav':str(wav),'latents':str(lat),'seconds':time.monotonic()-start,'retained_seconds':stats['prefix_seconds'],'new_audio_start_frame':round(stats['prefix_seconds']*48000),'overlap_frames':96000,'sample_rate':48000,'output_gain':POLICY.output_gain,'conditioning':req['conditioning']}
    write_json(G/f'result_{job}.json',result);print('ACE_RESULT',job,result['seconds'],flush=True)
@@ -93,4 +109,4 @@ try:
   finally:busy.unlink(missing_ok=True)
 finally:
  ready.unlink(missing_ok=True)
- write_json(G/'ace_worker_state.json',{'pid':os.getpid(),'generation_seed':base_seed,'profile':profile,'phase':'Stopped'})
+ write_json(G/'ace_worker_state.json',{'pid':os.getpid(),'generation_seed':base_seed,'composition_policy':composition_policy,'profile':profile,'phase':'Stopped'})

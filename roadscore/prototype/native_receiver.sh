@@ -32,6 +32,7 @@ for attempt in $(seq 1 "$preparation_wait"); do
   sleep 1
 done
 [ -f generated/worker_ready ] || { echo 'Worker preparation timed out'; exit 1; }
+if [ "${ROADSCORE_COMPOSER:-ace}" = ace ]; then /usr/local/venv/bin/python prototype/prepared_session.py; fi
 export OPENPILOT_PREFIX=roadscore_native
 export PYTHONPATH=/data/openpilot:/data/roadscore/prototype:/data/roadscore-feasibility/venv/lib/python3.12/site-packages
 mkdir -p /dev/shm/msgq_roadscore_native
