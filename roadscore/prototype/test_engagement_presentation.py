@@ -60,6 +60,14 @@ class PresentationTests(unittest.TestCase):
       self.assertEqual(engagement_active(valid,True,stamp,latest,10.,wall),(False,False))
     self.assertEqual(engagement_active(True,False,2e9,2.1e9,10.,10.1),(False,True))
 
+  def test_status_reports_applied_mix_not_requested_state(self):
+    dsp=EngagementPresentation();x=np.ones((4800,2),np.float32)*.1
+    dsp.process(x,False,ON);status=dsp.snapshot(ON,False,True)['engagement_presentation']
+    self.assertEqual(status['rendered_state'],'transition');self.assertGreater(status['rendered_open_mix'],0)
+    self.assertEqual(status['rendered_block_end_seconds'],.1)
+    for _ in range(8):dsp.process(x,False,ON)
+    self.assertEqual(dsp.snapshot(ON,False,True)['engagement_presentation']['rendered_state'],'contained')
+
   def test_configuration_fail_closed_and_clamps(self):
     self.assertFalse(PresentationConfig.read({'version':3,'enabled':True}).enabled)
     self.assertFalse(PresentationConfig.read({'enabled':'true'}).enabled)

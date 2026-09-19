@@ -349,6 +349,7 @@ try:
      engagement_on,engagement_fresh=engagement_active(engagement[1],engagement[0],engagement[2],engagement[4],engagement[3],time.monotonic())
      snapshot.update(presentation.snapshot(presentation_config,engagement_on,engagement_fresh))
     if shaker is not None:snapshot['signal_shaker']=shaker.snapshot()
+    if apex is not None:snapshot['core_apex']=apex.snapshot()
     if songform:snapshot.update(songform.snapshot())
     if composition:snapshot.update(composition.snapshot(frames/rate))
     if gestures:snapshot.update(gestures.status())

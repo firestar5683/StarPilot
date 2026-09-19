@@ -45,6 +45,7 @@ def engagement_active(valid, active, source_ns, latest_source_ns, received_wall,
 class EngagementPresentation:
   def __init__(self, rate=48000, max_frames=4800):
     self.rate = rate
+    self.frames_processed = 0
     self.max_frames = max_frames
     self.sos = butter(2, 4500, fs=rate, output='sos').astype(np.float32)
     self.zi = np.zeros((len(self.sos), 2, 2), np.float32)
@@ -65,6 +66,7 @@ class EngagementPresentation:
     """
     if not len(pcm):
       return pcm
+    self.frames_processed += len(pcm)
     # Keep filter warm even during bypass; allocated size bounded by max_frames.
     target = 1. if active or not config.enabled else 0.
     output = None if target == 1. and self.mix == 1. else np.empty_like(pcm)
@@ -101,5 +103,7 @@ class EngagementPresentation:
 
   def snapshot(self, config, active, fresh):
     return {'engagement_presentation': {**asdict(config), 'active': active,
-            'input_fresh': fresh, 'source': 'selfdriveState.active',
+            'input_fresh': fresh, 'rendered_open_mix': self.mix,
+            'rendered_state': ('open' if self.mix >= 1. else 'contained' if self.mix <= 0. else 'transition'),
+            'rendered_block_end_seconds': self.frames_processed/self.rate, 'source': 'selfdriveState.active',
             'unknown_policy': 'contained', 'added_delay_samples': 0}}

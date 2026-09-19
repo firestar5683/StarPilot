@@ -43,6 +43,7 @@ class SignalShaker:
   self.debounce=round(debounce_seconds*rate);self.release=round(.16*rate)
   self.last_on=None;self.active=False;self.next_tick=None;self.stop_frame=None;self.tail=np.zeros((0,2),np.float32)
   self.sequence_pulses=0;self.sequence_start=0
+  self.rendered_active=False;self.rendered_peak=0.;self.rendered_start=0;self.rendered_end=0
   self.sequence_starts=[];self.pulse_frames=[];self.events=[]
   # Fixed filtered grains, prepared before audio. No callback RNG or file/FFT operations.
   n=round(.085*rate);t=np.arange(n)/rate;rng=np.random.default_rng(1701)
@@ -53,6 +54,7 @@ class SignalShaker:
   self.grain=np.column_stack((grain,grain)).astype(np.float32)*self.peak
   self.step=rate*60/grid.bpm/2 if grid.usable else 1.;self.origin=grid.beat_phase*rate
  def process(self,pcm,start_frame,signal_on,signal_fresh):
+  self.rendered_active=False;self.rendered_peak=0.;self.rendered_start=start_frame;self.rendered_end=start_frame+len(pcm)
   if not self.enabled or not self.grid.usable:return pcm
   end=start_frame+len(pcm)
   if signal_fresh and signal_on:
@@ -76,7 +78,8 @@ class SignalShaker:
   if self.stop_frame is not None:
    envelope=np.clip(1-(np.arange(start_frame,end)-self.stop_frame)/self.release,0,1).astype(np.float32)
    overlay*=envelope[:,None]
-  if not np.any(overlay):return pcm
+  self.rendered_peak=float(np.max(np.abs(overlay),initial=0));self.rendered_active=self.rendered_peak>0
+  if not self.rendered_active:return pcm
   return pcm+overlay
  def snapshot(self):
-  return {'enabled':self.enabled,'grid':asdict(self.grid),'rhythm_enabled':self.enabled and self.grid.usable,'uncertain_policy':'no added pulses','sequence_active':self.active,'peak_limit':self.peak,'subdivision':'eighth notes','debounce_seconds':self.debounce/self.rate,'maximum_pulses_per_sequence':32}
+  return {'rendered_active':self.rendered_active,'rendered_peak':self.rendered_peak,'rendered_block_start_seconds':self.rendered_start/self.rate,'rendered_block_end_seconds':self.rendered_end/self.rate,'enabled':self.enabled,'grid':asdict(self.grid),'rhythm_enabled':self.enabled and self.grid.usable,'uncertain_policy':'no added pulses','sequence_active':self.active,'peak_limit':self.peak,'subdivision':'eighth notes','debounce_seconds':self.debounce/self.rate,'maximum_pulses_per_sequence':32}

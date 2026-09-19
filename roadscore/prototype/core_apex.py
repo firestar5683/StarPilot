@@ -4,8 +4,9 @@ import numpy as np
 
 class CoreApex:
  def __init__(self, grid, rate=48000, enabled=False):
-  self.grid=grid;self.rate=rate;self.enabled=enabled;self.last_activation=None;self.peak=None;self.events=[]
+  self.grid=grid;self.rate=rate;self.enabled=enabled;self.last_activation=None;self.peak=None;self.events=[];self.rendered_active=False;self.rendered_end=0.
  def process(self, pcm, start_frame, state):
+  self.rendered_active=False;self.rendered_end=(start_frame+len(pcm))/self.rate
   if not self.enabled or not self.grid.usable:return pcm
   activation=state.get('activation');lead=state.get('lead');now=start_frame/self.rate
   if (state.get('kind')=='curve' and state.get('phase')=='anticipation' and activation is not None
@@ -20,4 +21,7 @@ class CoreApex:
   # Half-second breath, then original unity source at the estimated apex. Never boosts/clips the hook.
   gain=np.ones(len(pcm),np.float32);inside=(offset>-.7)&(offset<0)
   gain[inside]=1-(1-10**(-1/20))*np.sin(np.pi*(offset[inside]+.7)/.7)**2
-  return pcm if not inside.any() else pcm*gain[:,None]
+  self.rendered_active=bool(inside.any() and np.any(pcm[inside]))
+  return pcm if not self.rendered_active else pcm*gain[:,None]
+ def snapshot(self):
+  return {'enabled':self.enabled,'rhythm_enabled':self.enabled and self.grid.usable,'rendered_active':self.rendered_active,'rendered_block_end_seconds':self.rendered_end}

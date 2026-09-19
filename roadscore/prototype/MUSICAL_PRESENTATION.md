@@ -84,3 +84,21 @@ The normal launcher must use gold-core when this fragment is eventually selected
 copying the fragment is not itself an instruction to run hardware. Defaults in
 existing runtime configurations remain unchanged. Full archive source hashes and
 runtime configuration record the selected presentation policy version.
+
+## Honest UI contract
+
+`status.signal_shaker.rendered_active` is true only when the most recent audio
+block actually contains nonzero added shaker samples (including the release
+tail). `rendered_peak` is that addition's peak; block start/end seconds use the
+same audio timeline as `status.elapsed`. It resets false every callback, even
+when a signal remains active after its32-pulse budget. `sequence_active` and
+`rhythm_enabled` alone do not establish audible output. UI should expire an
+indicator if elapsed minus rendered_block_end_seconds exceeds0.25s, or if the
+status itself is stale. Never display a queued prediction as a played cue.
+
+`status.core_apex.rendered_active` similarly means a source-bearing block was
+actually attenuated; it is false at the unity apex. The same block-end timestamp
+expires its indicator. Engagement exposes `rendered_open_mix` and
+`rendered_state` (`open`, `transition`, `contained`) after actual processing,
+plus `rendered_block_end_seconds`. Display it only when enabled, current and
+actually applied; `active` is input provenance, not proof the ramp has finished.

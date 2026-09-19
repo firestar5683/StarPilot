@@ -30,6 +30,12 @@ class ShakerTests(unittest.TestCase):
   for i in range(20):
    y=s.process(x,i*4800,True,True);self.assertLessEqual(abs(y-x).max(),.012001)
   np.testing.assert_array_equal(x,before)
+ def test_audible_flag_expires_after_budget_despite_active_sequence(self):
+  s=SignalShaker(GRID,enabled=True);x=np.zeros((4800,2),np.float32);heard=False
+  for i in range(100):
+   s.process(x,i*4800,True,True);heard |= s.snapshot()['rendered_active']
+  self.assertTrue(heard);self.assertTrue(s.active);self.assertFalse(s.snapshot()['rendered_active'])
+  self.assertEqual(s.snapshot()['rendered_block_end_seconds'],10.)
  def test_new_sequence_after_quiet_gap(self):
   s=SignalShaker(GRID,enabled=True);x=np.zeros((4800,2),np.float32)
   for i in range(50):s.process(x,i*4800,i<5 or i>=35,True)
