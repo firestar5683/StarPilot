@@ -21,7 +21,15 @@ def start_planner(launch, env, out, roadscore, bench, native=False):
  if not python.is_file():raise RuntimeError('Existing Mac ACE preparation environment missing: '+str(python))
  env['ROADSCORE_PLANNER_TOKEN']=secrets.token_urlsafe(32)
  ready=out/'planner_ready.json'
- planner=launch([str(python),str(roadscore/'prototype/hook_service.py'),'--assets-root',str(assets),'--cache',str(assets/'cache/hook-plans-v2'),'--ready',str(ready)],'semantic_planner')
+ previous={key:env.get(key) for key in ('PYTHONPATH','PYTORCH_ENABLE_MPS_FALLBACK')}
+ try:
+  env['PYTHONPATH']=os.pathsep.join(str(roadscore/path) for path in ('prototype','experiments/ace_chestnut_20260916'))
+  env['PYTORCH_ENABLE_MPS_FALLBACK']='1'
+  planner=launch([str(python),str(roadscore/'prototype/hook_service.py'),'--assets-root',str(assets),'--cache',str(assets/'cache/hook-plans-v2'),'--ready',str(ready)],'semantic_planner')
+ finally:
+  for key,value in previous.items():
+   if value is None:env.pop(key,None)
+   else:env[key]=value
  deadline=time.monotonic()+300
  while not ready.exists():
   if planner.poll() is not None or time.monotonic()>deadline:raise RuntimeError('Host semantic planner failed; see semantic_planner.log')

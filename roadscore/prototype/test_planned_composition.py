@@ -43,6 +43,8 @@ class IntegrationTests(unittest.TestCase):
   self.assertEqual(run.begin(None),'initial')
   wave,latent,stats=run.generate(sampler,11,None,retain)
   self.assertEqual(len(wave),28*48000);self.assertEqual(latent.shape,(1,700,64))
+  self.assertAlmostEqual(stats['end_to_end_seconds'],stats['host_preparation_seconds']+1.1)
+  self.assertAlmostEqual(stats['end_to_end_rtf_new_audio'],stats['end_to_end_seconds']/28)
   initial_key=stats['plan_key'];run.accept(wave,latent)
   committed=latent.copy()
   self.assertEqual(run.begin(committed),'verse')

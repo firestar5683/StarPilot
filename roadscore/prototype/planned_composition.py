@@ -43,6 +43,8 @@ class PlannedComposition:
   if len(committed)!=frames*1920 or z.shape[1]!=frames:raise ValueError('Native sampler returned incomplete planned window')
   model_duration=stats['duration'];duration=frames/25;new=duration-stats['prefix_seconds']
   if new<=0 or not np.isfinite(committed).all():raise ValueError('Invalid committed planned audio')
+  end_to_end=self.pending['host_preparation_seconds']+stats.get('wall_seconds',stats['generation_seconds']+stats['decode_seconds'])
+  stats.update(end_to_end_seconds=end_to_end,end_to_end_rtf_new_audio=end_to_end/new)
   stats.update(self.pending,case=role,prepared_profile=self.profile,model_duration=model_duration,duration=duration,new_seconds=new,discarded_lookahead_seconds=model_duration-duration,endpoint=endpoint,composition_policy='hook-v2',preparation_host='authenticated host semantic planner',warm_rtf_new_audio=(stats['generation_seconds']+stats['decode_seconds'])/new)
   return committed,z,stats
  def accept(self,wave,latent):
