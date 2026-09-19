@@ -1,4 +1,6 @@
 import json
+import ast
+from types import SimpleNamespace
 from pathlib import Path
 import tempfile
 import unittest
@@ -38,6 +40,22 @@ class CachedTests(unittest.TestCase):
   run.accept(wave,new);self.assertEqual(run.begin(new,arrival=True),'outro')
   # A scheduler-discarded candidate cannot advance the musical parent.
   self.assertEqual(run.begin(latent),'verse')
+ def test_actual_native_preparer_rebinds_only_fresh_tail(self):
+  source=Path(__file__).resolve().parents[1]/'experiments/ace_chestnut_20260916/ace_runtime.py'
+  tree=ast.parse(source.read_text())
+  cls=next(node for node in tree.body if isinstance(node,ast.ClassDef) and node.name=='Composer')
+  method=next(node for node in cls.body if isinstance(node,ast.FunctionDef) and node.name=='prepare')
+  namespace={'np':np,'json':json}
+  exec(compile(ast.Module(body=[method],type_ignores=[]),str(source),'exec'),namespace)
+  actual=np.arange(700*64,dtype=np.float32).reshape(1,700,64)/10000
+  before=np.load(self.bank/'verse/context_latents.npy')
+  _,context,_,source_latent,mask,_,_=namespace['prepare'](SimpleNamespace(root=self.root),str(self.bank/'verse'),actual)
+  np.testing.assert_array_equal(context[:,:200,:64],actual[:,-200:].astype(np.float16))
+  np.testing.assert_array_equal(source_latent[:,:200],actual[:,-200:].astype(np.float16))
+  np.testing.assert_array_equal(context[:,200:],before[:,200:].astype(np.float16))
+  np.testing.assert_array_equal(np.load(self.bank/'verse/context_latents.npy'),before)
+  self.assertFalse(mask[:,:200].any());self.assertTrue(mask[:,200:].all())
+
  def test_incomplete_stale_and_pcm_banks_refused(self):
   path=self.bank/'bank.json';value=json.loads(path.read_text());value['plan_version']='old';path.write_text(json.dumps(value))
   with self.assertRaises(ValueError):validate_bank(self.bank)
