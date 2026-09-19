@@ -25,21 +25,21 @@ def fake_prepare(req, sources, out):
 
 
 class PlanningTests(unittest.TestCase):
-    def test_gold_groove_reaches_every_prepared_role_and_invalidates_old_plans(self):
+    def test_open_melody_reaches_every_prepared_role_and_invalidates_old_plans(self):
         initial = request()
-        gold = ('Instrumental polished K-pop and modern electronic game score. No vocals, no singing, no speech. '
+        identity = ('Instrumental polished K-pop and modern electronic game score. No vocals, no singing, no speech. '
                 'Continuous tight drum groove, punchy bass, memorable recurring hook, polished dynamic arrangement. '
-                '128 BPM, D minor. Crystal pluck arpeggios and a playful four-note rising synth motif; '
+                '128 BPM, D minor. Crystal pluck arpeggios and a playful, memorable synth melody with a clear recurring hook; '
                 'crisp electronic snare, rubbery syncopated bass and bright glass leads.')
-        self.assertTrue(initial.caption.startswith(gold))
+        self.assertTrue(initial.caption.startswith(identity))
         self.assertIn('Enter immediately', initial.caption)
         self.assertEqual(initial.lyrics, '[Instrumental]\n[Verse]')
-        self.assertNotEqual(initial.cache_key, replace(initial, version='roadscore-hook-plan-v2').cache_key)
+        self.assertNotEqual(initial.cache_key, replace(initial, version='roadscore-hook-plan-v3-gold-groove').cache_key)
         for role in ('verse', 'prechorus', 'chorus', 'bridge', 'outro'):
             current = request(plan_index=1, section=role, window_seconds=45,
                               hook_reference_sha256='c'*64, committed_prefix_sha256='d'*64,
                               previous_plan_sha256='e'*64)
-            self.assertTrue(current.caption.startswith(gold))
+            self.assertTrue(current.caption.startswith(identity))
             self.assertNotIn('breathing space', current.caption)
             self.assertNotIn('lighter', current.caption)
             self.assertEqual(current.prefix_seconds, 8)

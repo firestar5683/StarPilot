@@ -14,12 +14,12 @@ import tempfile
 
 import numpy as np
 
-VERSION = 'roadscore-hook-plan-v3-gold-groove'
+VERSION = 'roadscore-hook-plan-v4-open-melody'
 PROFILES = {
     'prism': {'bpm': 128, 'keyscale': 'D minor', 'identity':
               'Instrumental polished K-pop and modern electronic game score. No vocals, no singing, no speech. '
               'Continuous tight drum groove, punchy bass, memorable recurring hook, polished dynamic arrangement. '
-              '128 BPM, D minor. Crystal pluck arpeggios and a playful four-note rising synth motif; '
+              '128 BPM, D minor. Crystal pluck arpeggios and a playful, memorable synth melody with a clear recurring hook; '
               'crisp electronic snare, rubbery syncopated bass and bright glass leads.'},
     'aurora': {'bpm': 116, 'keyscale': 'A minor', 'identity':
                'Instrumental melodic game score; warm analog synths, shimmering bell answers, '
