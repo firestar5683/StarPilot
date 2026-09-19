@@ -3,9 +3,11 @@ import hashlib
 import os
 
 
-def configured_seed():
+def configured_seed(required=False):
     value = os.environ.get('ROADSCORE_GENERATION_SEED')
     if value is None:
+        if required:
+            raise ValueError("ACE requires a session seed; launch through ./onroad --roadscore or provide an explicit seed")
         return None
     seed = int(value)
     if not 0 <= seed < 2**32:

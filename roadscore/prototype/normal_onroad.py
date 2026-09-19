@@ -6,13 +6,19 @@ No RoadScore event annotations, route allowlist, custom camera drawing, or model
 import argparse,os,subprocess,time,signal,shlex,json
 from pathlib import Path
 from clock_sync import measure
+from session_seed import select_session, seed_argument, seed_environment, remote_assignments
 R=Path(__file__).resolve().parents[1]
 native=Path('/TICI').exists()
 def interrupt(*_):raise KeyboardInterrupt
 signal.signal(signal.SIGTERM,interrupt)
-p=argparse.ArgumentParser();p.add_argument('--render-mode',choices=['current','gold-core'],default='current',help='Explicit ACE output-only gold core bypass');p.add_argument('route',nargs='?');p.add_argument('--routeid');p.add_argument('--roadscore',action='store_true',required=True);p.add_argument('--replay',action='store_true',help='Play recorded final score without Chestnut');p.add_argument('--start',type=int,default=0);p.add_argument('--duration',type=float,default=180);p.add_argument('--audible',action='store_true',help='Compatibility flag; output is audible by default outside automated sessions');p.add_argument('--muted',action='store_true');p.add_argument('--no-overlay',action='store_true');p.add_argument('--capture-ui',action='store_true',help='Record the normal UI internally without speaker output');p.add_argument('--audio-device',default=None,help='Development host output device; default is the system output');p.add_argument('--transport-only',action='store_true');p.add_argument('--headless',action='store_true');p.add_argument('--runtime',type=Path,default=Path('/data/openpilot') if native else Path(os.environ.get('ROADSCORE_RUNTIME','/Users/dominickthompson/starpilot/.host_runtime/darwin/worktree')));p.add_argument('--bench',default=device_target());p.add_argument('--composer',choices=['sa3','ace'],default=choice(),help='ACE Prism is the event default; SA3 is an explicit fallback');p.add_argument('--profile',choices=['prism','aurora'],default='prism');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--roadscore-seed',type=seed_argument,help='Reproduce an ACE session; normal launches choose a fresh seed');p.add_argument('--render-mode',choices=['current','gold-core'],default='current',help='Explicit ACE output-only gold core bypass');p.add_argument('route',nargs='?');p.add_argument('--routeid');p.add_argument('--roadscore',action='store_true',required=True);p.add_argument('--replay',action='store_true',help='Play recorded final score without Chestnut');p.add_argument('--start',type=int,default=0);p.add_argument('--duration',type=float,default=float('inf'),help='Optional duration limit; normally replay to route EOF');p.add_argument('--audible',action='store_true',help='Compatibility flag; output is audible by default outside automated sessions');p.add_argument('--muted',action='store_true');p.add_argument('--no-overlay',action='store_true');p.add_argument('--capture-ui',action='store_true',help='Record the normal UI internally without speaker output');p.add_argument('--audio-device',default=None,help='Development host output device; default is the system output');p.add_argument('--transport-only',action='store_true');p.add_argument('--headless',action='store_true');p.add_argument('--runtime',type=Path,default=Path('/data/openpilot') if native else Path(os.environ.get('ROADSCORE_RUNTIME','/Users/dominickthompson/starpilot/.host_runtime/darwin/worktree')));p.add_argument('--bench',default=device_target());p.add_argument('--composer',choices=['sa3','ace'],default=choice(),help='ACE Prism is the event default; SA3 is an explicit fallback');p.add_argument('--profile',choices=['prism','aurora'],default='prism');a=p.parse_args()
 if a.replay and a.render_mode!='current':raise SystemExit('Stored scores retain their recorded rendering; do not apply gold-core to a finished mix')
 if a.render_mode=='gold-core' and a.composer!='ace':raise SystemExit('Gold core requires ACE')
+if a.roadscore_seed is not None and (a.replay or a.composer!='ace'):raise SystemExit('--roadscore-seed applies only to fresh ACE generation')
+session=None
+if not a.replay and a.composer=='ace':
+ judging_seed=os.environ.get('ROADSCORE_GENERATION_SEED') if os.environ.get('ROADSCORE_SEED_ORIGIN')=='judging-route' and a.roadscore_seed is not None else None
+ session=select_session(a.roadscore_seed,judging_seed=judging_seed)
 from settings import Settings,resolve_route
 a.routeid=resolve_route(p,a.route,a.routeid)
 settings=Settings(mode='stored' if a.replay else 'generate',muted=a.muted,overlay=not a.no_overlay,output_device=a.audio_device)
@@ -24,7 +30,11 @@ if native:
  from native_ownership import verify_offroad
  verify_offroad()
 out=R/'results'/('normal_'+str(int(time.time())));out.mkdir();env=os.environ.copy();env.update(PYTHONDONTWRITEBYTECODE='1',ZMQ='1',OPENPILOT_ZMQ_NAMESPACE='roadscore-native-'+str(os.getpid()),PARAMS_ROOT=str(out/'params'),BASEDIR=str(rt),NOBOARD='1',SIMULATION='1',SKIP_FW_QUERY='1',BIG='0',SP_ALLOW_DESKTOP_FAKE_WIFI='0',SP_ALLOW_DESKTOP_FAKE_BLUETOOTH='0',SP_ONROAD_NAV_DEMO='0',SP_ONROAD_CEM_DEMO='0')
-(out/'settings.json').write_text(json.dumps({**settings.snapshot(a.headless),'composer':a.composer,'profile':a.profile,'render_mode':a.render_mode},indent=2))
+if session:
+ env.update(seed_environment(session));(out/'session_seed.json').write_text(json.dumps(session,indent=2));print('RoadScore session seed:',session['generation_seed'],'('+session['seed_origin']+')',flush=True)
+else:
+ env.pop('ROADSCORE_GENERATION_SEED',None);env.pop('ROADSCORE_SEED_ORIGIN',None)
+(out/'settings.json').write_text(json.dumps({**settings.snapshot(a.headless),'composer':a.composer,'profile':a.profile,'render_mode':a.render_mode,**(session or {})},indent=2))
 env['ROADSCORE_RENDER_MODE']=a.render_mode
 env['ROADSCORE_COMPOSER']=a.composer
 env['ROADSCORE_ACE_PROFILE']=a.profile
@@ -78,7 +88,7 @@ try:
    if sender.poll() is not None or time.monotonic()>deadline:raise RuntimeError('Stored audio failed; see stored_audio.log')
    time.sleep(.1)
  else:
-  receiver_command=(['env','-u','ZMQ','ROADSCORE_AUDIBLE='+('1' if a.audible else '0'),'bash',str(R/'prototype/native_receiver.sh'),a.routeid] if native else ['ssh',a.bench,'ROADSCORE_RENDER_MODE='+a.render_mode+' ROADSCORE_COMPOSER='+a.composer+' ROADSCORE_ACE_PROFILE='+a.profile+' ROADSCORE_PCM_RETURN=1 '+('ROADSCORE_NO_GENERATION=1 ' if a.transport_only else '')+'bash /data/roadscore/prototype/native_receiver.sh '+shlex.quote(a.routeid)])
+  receiver_command=(['env','-u','ZMQ','ROADSCORE_AUDIBLE='+('1' if a.audible else '0'),'bash',str(R/'prototype/native_receiver.sh'),a.routeid] if native else ['ssh',a.bench,(remote_assignments(session) if session else '')+'ROADSCORE_RENDER_MODE='+a.render_mode+' ROADSCORE_COMPOSER='+a.composer+' ROADSCORE_ACE_PROFILE='+a.profile+' ROADSCORE_PCM_RETURN=1 '+('ROADSCORE_NO_GENERATION=1 ' if a.transport_only else '')+'bash /data/roadscore/prototype/native_receiver.sh '+shlex.quote(a.routeid)])
   receiver=launch(receiver_command,'receiver',stdin=subprocess.PIPE)
   deadline=time.monotonic()+(1560 if a.composer=='ace' else 420)
   while b'BRIDGE_READY' not in (out/'receiver.log').read_bytes():
@@ -121,7 +131,7 @@ try:
   time.sleep(.5)
  if sender.poll() not in [None,0]:raise RuntimeError('Replay sender failed')
  if sender.poll() is None:os.killpg(sender.pid,signal.SIGTERM);sender.wait(timeout=5)
- (out/'launch.json').write_text(json.dumps({'render_mode':a.render_mode,'route':a.routeid,'mode':'stored-score' if a.replay else 'fresh-generation','host':'comma' if native else 'development host','compute':'none' if a.replay else ('local Chestnut' if native else 'remote Chestnut'),'local_cache':str(local) if local else None,'native_replay_args':args,'end_reason':end_reason,'duration_wall':time.monotonic()-started,'startup_seconds':started-launch_started,'headless':a.headless,'ui':'existing selfdrive/ui/ui.py','muted':not a.audible},indent=2))
+ (out/'launch.json').write_text(json.dumps({**(session or {}),'render_mode':a.render_mode,'route':a.routeid,'mode':'stored-score' if a.replay else 'fresh-generation','host':'comma' if native else 'development host','compute':'none' if a.replay else ('local Chestnut' if native else 'remote Chestnut'),'local_cache':str(local) if local else None,'native_replay_args':args,'end_reason':end_reason,'duration_wall':time.monotonic()-started,'startup_seconds':started-launch_started,'headless':a.headless,'ui':'existing selfdrive/ui/ui.py','muted':not a.audible},indent=2))
  if not a.replay:
   receiver.wait(timeout=35)
   if not (out/'replay_origin.json').exists():raise RuntimeError('Replay delivered no model clock; refusing empty score')
@@ -135,7 +145,7 @@ try:
    subprocess.run([str(py),str(R/'prototype/archive_native.py'),str(out),a.routeid,str(a.start)],env=env,cwd=rt,check=True)
   if not native:
    # Preserve generated decisions with the exact host presentation audio.
-   for filename in ['summary.json','jobs.jsonl','boundaries.jsonl','ending.json','bridge.json','trace.jsonl','runtime_manifest.json','song_form.json','gesture_grid.json','gestures.json','composition.json','quality_events.jsonl']:
+   for filename in ['summary.json','jobs.jsonl','boundaries.jsonl','ending.json','bridge.json','trace.jsonl','runtime_manifest.json','song_form.json','gesture_grid.json','gestures.json','composition.json','quality_events.jsonl','shaker_grid.json','shaker_events.json','core_apex_events.json']:
     subprocess.run(['scp',a.bench+':/data/roadscore/results/current/'+filename,str(out/filename)],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
    subprocess.run(['scp','-r',a.bench+':/data/roadscore/results/current/quality',str(out/'quality')],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
    if a.composer=='ace':subprocess.run(['scp',a.bench+':/data/roadscore/generated/ace_link.jsonl',str(out/'ace_link.jsonl')],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)

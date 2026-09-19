@@ -37,7 +37,7 @@ from render_policy import selected as render_mode_selected, validate as validate
 render_mode=render_mode_selected()
 from generation_budget import GenerationBudget
 from generation_seed import configured_seed,sample_seed
-base_seed=configured_seed();generation_index=0
+base_seed=configured_seed(required=choice()=="ace");generation_index=0
 if base_seed is not None:
  if choice()!="ace":raise ValueError("Deterministic session seeds currently require ACE")
  prepared=json.loads((root/"generated/ace_initial.json").read_text())

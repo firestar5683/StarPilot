@@ -105,6 +105,7 @@ def main():
             json.dump(record, stream, indent=2)
         os.chmod(ledger, 0o600)
     env['ROADSCORE_GENERATION_SEED'] = str(row['seed'])
+    env['ROADSCORE_SEED_ORIGIN'] = 'judging-route'
     service = ROOT / 'prototype/worker_service.py'
     try:
         if not args.resume_preparation:
@@ -136,6 +137,7 @@ def main():
         save(ledger, record)
         command = [str(ROOT.parent / 'onroad'), '--routeid', row['route'], '--roadscore',
                    '--composer', 'ace', '--profile', 'prism', '--muted',
+                   '--roadscore-seed', str(row['seed']),
                    '--start', str(row.get('start_seconds', 0)), '--duration', str(row.get('duration_seconds', 86400))]
         with (out / f'console_{args.label}.log').open('wb') as log:
             result = subprocess.run(command, env=env, cwd=ROOT.parent, stdout=log, stderr=subprocess.STDOUT)

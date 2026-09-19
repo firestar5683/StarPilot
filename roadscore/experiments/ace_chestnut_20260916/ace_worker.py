@@ -15,7 +15,7 @@ P=Path(__file__).resolve().parent;R=P.parents[1];G=R/'generated'
 sys.path.insert(0,str(R/'prototype'))
 from ace_profiles import selected
 from generation_seed import configured_seed,sample_seed
-base_seed=configured_seed()
+base_seed=configured_seed(required=True)
 from quality_gate import QualifiedGenerator,POLICY
 from link_health import LinkProbe
 from tinygrad import Device
@@ -52,7 +52,7 @@ try:
  initial=None;last=None;preparation=[];slot=0
  while initial is None or len(initial)/48000<POLICY.initial_buffer_seconds:
   role=('initial' if windowed else 'verse') if initial is None else ('verse' if windowed else 'repaint_verse')
-  wave,last_new,stats=qualified.run(role,33602+slot if base_seed is None else sample_seed(base_seed,"prepare",slot),last,record=record_for('prepare_'+preparation_id+'_'+str(slot)))
+  wave,last_new,stats=qualified.run(role,sample_seed(base_seed,"prepare",slot),last,record=record_for('prepare_'+preparation_id+'_'+str(slot)))
   preparation.append(stats)
   if wave is None:raise RuntimeError('Preparation rejected after bounded quality retries; inspect generated/quality')
   if initial is None:initial=wave.copy()
