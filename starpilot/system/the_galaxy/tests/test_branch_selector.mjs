@@ -13,16 +13,115 @@ function fixture() {
     setUpdateBranch: async branch => calls.push({legacy: branch}),
     installUpdateVersion: async (branch, commit) => calls.push({branch, commit}),
     getUpdateFastStatus: async () => ({running: false, isOnroad: false, versionPin: null}),
+    getUpdateBranches: async () => ({branches: ['Dom', 'SunnyPilot', 'StarPilot', 'feature/new'], currentBranch: 'Dom'}),
     getUpdateVersions: async (branch, options) => {reads.push({branch, ...options}); return {branch, head: HEAD, page: options.page, hasMore: options.page === 1, commits: [{sha: options.page === 1 ? SHA : 'c'.repeat(40), date: '2026-09-10T12:00:00Z', subject: 'Fix launch'}]}},
   }
   const context = vm.createContext({api, AbortController, showSnackbar: (...args) => messages.push(args), GalaxySection: {}, GalaxySelect: {}, GxNotice: {}, GalaxyConfirm: async options => {confirmations.push(options); return confirm()}})
   vm.runInContext(fs.readFileSync(js + 'components/VersionHistoryPicker.js', 'utf8').replace(/export /g, ''), context)
-  vm.runInContext(source.replace(/^import .*$/gm, '').replace('export const SystemTools =', 'globalThis.component ='), context)
+  vm.runInContext(source.replace(/^import .*$/gm, '').replace('export const SystemTools =', 'globalThis.component =').replace('export const VersionTier =', 'globalThis.VersionTier ='), context)
   const component = context.component
   const instance = {...component.data(), ...component.methods, branches: ['Dom', 'SunnyPilot', 'StarPilot', 'feature/test'], currentBranch: 'feature/local', branchLoading: false}
   for (const [key, getter] of Object.entries(component.computed)) Object.defineProperty(instance, key, {get: () => getter.call(instance)})
-  return {instance, calls, confirmations, messages, reads, api, setConfirm: fn => {confirm = fn}}
+  return {instance, calls, confirmations, messages, reads, api, tier: context.VersionTier, setConfirm: fn => {confirm = fn}}
 }
+test('pending summary names the destination branch and pinned version', () => {
+  const {instance} = fixture()
+  const setup = (overrides = {}) => Object.assign(instance, {
+    currentBranch: 'StarPilot',
+    fastStatus: {branch: 'StarPilot', localCommit: SHA, remoteCommit: HEAD, updateAvailable: false, versionPin: null},
+    busy: '', rebootPending: false, versionMode: 'latest', selectedCommit: '', versionCommits: [],
+  }, overrides)
+  let state = setup({targetBranch: 'Dom'})
+  assert.match(state.pendingSummary, /Currently StarPilot → will switch to Dom \(latest\)/)
+  state = setup({targetBranch: 'Dom', versionMode: 'earlier', selectedCommit: SHA, versionCommits: [{sha: SHA, subject: 'Fix'}]})
+  assert.match(state.pendingSummary, /Currently StarPilot → will install Dom @/)
+  assert.match(state.pendingSummary, /pauses automatic updates/)
+  state = setup({targetBranch: 'StarPilot', versionMode: 'earlier', selectedCommit: SHA, versionCommits: [{sha: SHA, version: '6.7.7'}]})
+  assert.match(state.pendingSummary, /Currently StarPilot → will install StarPilot @ 6\.7\.7 \(pauses automatic updates\)/)
+  state = setup({targetBranch: 'StarPilot'})
+  assert.equal(state.pendingSummary, '')
+})
+
+test('single status button names and colors the pending action', () => {
+  const {instance} = fixture()
+  const setup = (overrides = {}) => Object.assign(instance, {
+    currentBranch: 'StarPilot',
+    fastStatus: {branch: 'StarPilot', localCommit: SHA, remoteCommit: HEAD, updateAvailable: false, versionPin: null},
+    busy: '', rebootPending: false, versionMode: 'latest', selectedCommit: '', versionCommits: [],
+  }, overrides)
+  let state = setup({targetBranch: 'Dom'})
+  assert.equal(state.pendingKind, 'switch')
+  assert.equal(state.pendingLabel, 'Switch to Dom')
+  assert.equal(state.pendingButtonClass, 'gx-btn gx-btn--switch')
+  state = setup({targetBranch: 'StarPilot', fastStatus: {branch: 'StarPilot', localCommit: SHA, remoteCommit: HEAD, updateAvailable: true, versionPin: null}})
+  assert.equal(state.pendingKind, 'update')
+  assert.equal(state.pendingLabel, 'Update StarPilot')
+  assert.equal(state.pendingButtonClass, 'gx-btn')
+  state = setup({targetBranch: 'StarPilot', versionMode: 'earlier', selectedCommit: SHA, versionCommits: [{sha: SHA, version: '6.7.7'}]})
+  assert.equal(state.pendingKind, 'version')
+  assert.equal(state.pendingLabel, 'Install StarPilot @ 6.7.7')
+  assert.equal(state.pendingButtonClass, 'gx-btn gx-btn--version')
+  state = setup({targetBranch: 'Dom', versionMode: 'earlier', selectedCommit: SHA, versionCommits: [{sha: SHA, subject: 'Fix'}]})
+  assert.equal(state.pendingLabel, 'Switch to Dom @ ' + SHA.slice(0, 7))
+  assert.equal(state.pendingButtonClass, 'gx-btn gx-btn--version')
+  state = setup({targetBranch: 'Dom', versionMode: 'earlier', selectedCommit: ''})
+  assert.equal(state.pendingKind, 'none')
+  assert.equal(state.pendingLabel, 'Select a version')
+  state = setup({targetBranch: 'StarPilot'})
+  assert.equal(state.pendingKind, 'current')
+  assert.equal(state.pendingLabel, 'Up to date · Check again')
+  state = setup({targetBranch: 'StarPilot', fastStatus: {branch: 'StarPilot', localCommit: SHA, remoteCommit: '', versionPin: null}})
+  assert.equal(state.pendingKind, 'failed')
+  assert.equal(state.pendingLabel, 'Check again')
+})
+
+test('status card waits for the first status attempt before showing the fallback', async () => {
+  const {instance, api} = fixture()
+  assert.equal(instance.statusChecked, false)
+  api.getUpdateFastStatus = async () => ({running: false, isOnroad: false, versionPin: null, branch: 'Dom', localCommit: SHA, remoteCommit: HEAD})
+  await instance.loadFastStatus()
+  assert.equal(instance.statusChecked, true)
+  assert.equal(instance.fastStatus.branch, 'Dom')
+
+  const {instance: failed, api: failedApi} = fixture()
+  failedApi.getUpdateFastStatus = async () => { throw new Error('offline') }
+  await failed.loadFastStatus()
+  assert.equal(failed.statusChecked, true)
+  assert.equal(failed.statusUnavailable, true)
+  assert.equal(failed.fastStatus, null)
+})
+
+test('local status paints the card immediately and the remote check fills in after', async () => {
+  const {instance, api} = fixture()
+  const calls = []
+  api.getUpdateFastStatus = async ({local = false} = {}) => {
+    calls.push(local)
+    const base = {running: false, isOnroad: false, versionPin: null, branch: 'Dom', localCommit: SHA, automaticUpdates: false}
+    return local ? {...base, remoteCommit: '', updateAvailable: false} : {...base, remoteCommit: HEAD, updateAvailable: true}
+  }
+  await instance.loadFastStatus({local: true})
+  assert.equal(instance.statusChecked, true)
+  assert.equal(instance.remoteChecked, false, 'a local response must not claim the remote check is done')
+  assert.equal(instance.updateAvailable, false)
+  assert.equal(instance.statusPollingNeeded, true, 'polling must continue until the remote check lands')
+
+  await instance.loadFastStatus()
+  assert.equal(instance.remoteChecked, true)
+  assert.equal(instance.updateAvailable, true)
+  assert.equal(instance.statusPollingNeeded, false)
+  assert.deepEqual(calls, [true, false])
+})
+
+test('a late local response cannot overwrite a finished remote check', async () => {
+  const {instance, api} = fixture()
+  instance.remoteChecked = true
+  instance.fastStatus = {running: false, isOnroad: false, versionPin: null, branch: 'Dom', remoteCommit: HEAD, updateAvailable: true}
+  api.getUpdateFastStatus = async () => ({running: false, isOnroad: false, versionPin: null, branch: 'Dom', remoteCommit: '', updateAvailable: false})
+  await instance.loadFastStatus({local: true})
+  assert.equal(instance.fastStatus.remoteCommit, HEAD)
+  assert.equal(instance.fastStatus.updateAvailable, true)
+})
+
 test('primary and Other choices stage a target without installing or confirming', async () => {
   const {instance, calls, confirmations} = fixture()
   await instance.onPrimaryBranchSelect({target: {value: 'Dom'}})
@@ -168,6 +267,19 @@ test('GalaxySelect reads optional option descriptions without adding them to col
   assert.equal(instance.label, 'Dom')
 })
 
+test('GalaxySelect extracts current branch status and badge for stand-out rendering', () => {
+  const context = vm.createContext({document: {getElementById() {}}})
+  vm.runInContext(fs.readFileSync(js + 'components/GalaxySelect.js', 'utf8').replace('export const GalaxySelect =', 'globalThis.component ='), context)
+  const native = {value: 'feature', options: [{value: 'main', label: 'main'}, {value: 'feature', label: 'feature', dataset: {current: 'true', badge: 'current'}}], selectedOptions: [{label: 'feature'}]}
+  const instance = {...context.component.data(), $refs: {native}, $attrs: {}, current: 'feature'}
+  context.component.methods.sync.call(instance)
+  assert.equal(instance.items[1].label, 'feature')
+  assert.equal(instance.items[1].current, true)
+  assert.equal(instance.items[1].badge, 'current')
+  assert.equal(instance.items[0].current, false)
+  assert.equal(instance.label, 'feature')
+})
+
 test('GalaxySelect ignores a second open request while its menu is open', async () => {
   const context = vm.createContext({document: {getElementById() {}}})
   vm.runInContext(fs.readFileSync(js + 'components/GalaxySelect.js', 'utf8').replace('export const GalaxySelect =', 'globalThis.component ='), context)
@@ -290,3 +402,15 @@ test('Latest explains normal OS handling and local-edit behavior; historical con
   assert.match(confirmations[1].message, /updates will be paused/)
   assert.match(confirmations[1].message, /code changes are backed up/)
 })
+
+test('refreshBranches updates remote branch list and resets fallback notice', async () => {
+  const {instance, messages} = fixture()
+  instance.branchListFallback = true
+  await instance.refreshBranches()
+  assert.equal(instance.branchRefreshing, false)
+  assert.equal(instance.branchListFallback, false)
+  assert.ok(instance.branches.includes('feature/new'))
+  assert.equal(messages.length, 1)
+  assert.match(messages[0][0], /refreshed/i)
+})
+
