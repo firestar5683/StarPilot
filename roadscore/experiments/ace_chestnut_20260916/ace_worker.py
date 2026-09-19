@@ -1,8 +1,7 @@
 """Opt-in, offroad resident ACE composer. No route reads or physical audio output."""
 import os
 os.environ.setdefault('TC_OPT','2')
-# Event default: unrestricted VAE execution lost GPU access; 30 W passed fixed repeats.
-os.environ.setdefault('AM_POWER_LIMIT','30')
+# Full-speed is the event default. A cap must be an explicit failure mitigation.
 import time,json,fcntl,signal,traceback,sys,resource
 BOOT=time.monotonic()
 from pathlib import Path

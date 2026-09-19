@@ -3,6 +3,8 @@ import argparse
 import hashlib
 import json
 import os
+import math
+import re
 from pathlib import Path
 import subprocess
 import time
@@ -19,9 +21,9 @@ def save(path, value):
 
 
 
-def validate_frozen_configuration(root):
+def validate_frozen_configuration(root, frozen=None):
     """Refuse official work unless a nonempty local freeze verifies completely."""
-    frozen = root / 'generated/judging_configuration.private.json'
+    frozen = frozen or root / 'generated/judging_configuration.private.json'
     try:
         entries = json.loads(frozen.read_text())
     except (OSError, ValueError) as error:
@@ -53,6 +55,27 @@ def validate_handoff_readiness(manifest, row):
             raise SystemExit('Judging handoff preparation is incomplete or blocked')
 
 
+def attempt_configuration(manifest, manifest_path, root):
+    """Keep future policy evidence separate from historical attempts and freezes."""
+    config = manifest['configuration']
+    if manifest.get('schema') != 'roadscore-judging-handoff-v1':
+        raise SystemExit('Export a versioned judging handoff; historical attempts are preserved')
+    version = config.get('policy_version', '')
+    if not isinstance(version, str) or not re.fullmatch(r'[A-Za-z0-9][A-Za-z0-9_-]{0,79}', version):
+        raise SystemExit('A safe, explicit judging policy_version is required')
+    mode, cap = config.get('hardware_mode'), config.get('power_limit_watts')
+    env = os.environ.copy()
+    env.pop('AM_POWER_LIMIT', None)
+    if mode == 'full-speed' and cap is None:
+        pass
+    elif mode == 'capped' and isinstance(cap, (int, float)) and not isinstance(cap, bool) and math.isfinite(cap) and cap > 0:
+        env['AM_POWER_LIMIT'] = str(cap)
+    else:
+        raise SystemExit('Declare full-speed with no cap, or an explicit capped policy')
+    return (root / 'results/community_judging' / version,
+            manifest_path.with_name('configuration.freeze.private.json'), env)
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('manifest', type=Path)
@@ -67,9 +90,9 @@ def main():
     if row.get('range_resolution') == 'pending metadata':
         raise SystemExit('Resolve submitted range before launching this entry')
     validate_handoff_readiness(manifest, row)
-    validate_frozen_configuration(ROOT)
-    out = ROOT / 'results/community_judging'
-    out.mkdir(exist_ok=True, mode=0o700)
+    out, frozen, env = attempt_configuration(manifest, args.manifest, ROOT)
+    validate_frozen_configuration(ROOT, frozen)
+    out.mkdir(parents=True, exist_ok=True, mode=0o700)
     ledger = out / f'official_{args.label}.json'
     if ledger.exists():
         record = json.loads(ledger.read_text())
@@ -81,8 +104,7 @@ def main():
         with ledger.open('x') as stream:
             json.dump(record, stream, indent=2)
         os.chmod(ledger, 0o600)
-    env = os.environ.copy()
-    env.update(ROADSCORE_GENERATION_SEED=str(row['seed']), AM_POWER_LIMIT='45')
+    env['ROADSCORE_GENERATION_SEED'] = str(row['seed'])
     service = ROOT / 'prototype/worker_service.py'
     try:
         if not args.resume_preparation:

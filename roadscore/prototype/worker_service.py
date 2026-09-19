@@ -34,7 +34,7 @@ def offroad():
 def serve():
  STATE.parent.mkdir(exist_ok=True);lock=(STATE.parent/'worker_service.lock').open('w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
  if not offroad():raise SystemExit('Resident preparation requires a verified offroad bench')
- record={'pid':os.getpid(),'start_ticks':stamp(os.getpid()),'started_wall':time.time(),'gpu_power_limit_watts':os.environ.get('AM_POWER_LIMIT','30' if choice()=='ace' else None),'ownership':'explicit resident service','phase':'Preparing','composer':choice(),'profile':selected() if choice()=='ace' else None};write_state(record);child=None;stop=False
+ record={'pid':os.getpid(),'start_ticks':stamp(os.getpid()),'started_wall':time.time(),'gpu_power_limit_watts':os.environ.get('AM_POWER_LIMIT'),'ownership':'explicit resident service','phase':'Preparing','composer':choice(),'profile':selected() if choice()=='ace' else None};write_state(record);child=None;stop=False
  def interrupt(*_):
   nonlocal stop;stop=True
  signal.signal(signal.SIGTERM,interrupt);signal.signal(signal.SIGINT,interrupt)
