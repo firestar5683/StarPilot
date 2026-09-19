@@ -19,7 +19,7 @@ def audio_alignment(run, video_origin):
         if origin is None:
             raise ValueError('Stored audio has no DAC timeline')
         score = Path(summary['score']) / 'score.flac'
-        start = summary['source_frame_start'] / 48000 + video_origin - origin
+        start = summary['source_frame_start'] / summary.get('sample_rate',48000) + video_origin - origin
         kind = 'stored score DAC origin'
     if not score.is_file():
         raise FileNotFoundError(score)
@@ -29,11 +29,14 @@ def audio_alignment(run, video_origin):
 def video_frames(run, frames):
     """Trim preparation using the recorded host capture interval, never a manual offset."""
     fresh = Path(run) / 'host_audio_summary.json'
-    if not fresh.exists():
-        return list(range(len(frames)))
-    summary = json.loads(fresh.read_text())
-    start = summary['first_host_dac_wall']
-    end = start + summary['host_frames'] / 48000
+    if fresh.exists():
+        summary = json.loads(fresh.read_text())
+        start = summary['first_host_dac_wall']
+        end = start + summary['host_frames'] / 48000
+    else:
+        summary = json.loads((Path(run) / 'stored_summary.json').read_text())
+        start = summary['first_dac_wall']
+        end = start + (summary['source_frame_end'] - summary['source_frame_start']) / summary.get('sample_rate',48000)
     selected = [i for i, frame in enumerate(frames) if start <= frame['wall'] <= end]
     if len(selected) < 2:
         raise ValueError('Insufficient UI/audio timeline overlap')

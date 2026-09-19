@@ -53,6 +53,6 @@ def main():
      tmp=a.out/'roadscore_status.tmp';tmp.write_text(json.dumps(state));tmp.replace(a.out/'roadscore_status.json');last_status=time.monotonic()
     if started and time.monotonic()-started>=a.duration:break
  finally:
-  (a.out/'stored_summary.json').write_text(json.dumps({'score':str(a.score),'first_dac_wall':first_dac_wall,'frames_presented':count,'portaudio_flags':flags,'muted':not a.audible,'first_model_ns':initial[0] if initial else None,'generation_invoked':False,'source_frame_start':first_frame,'source_frame_end':last_frame,'contiguous_samples_verified':first_frame is not None and digest.hexdigest()==hashlib.sha256(audio[first_frame:last_frame].tobytes()).hexdigest(),'max_clock_alignment_error_seconds':max_error,'synchronization':'original logMonoTime plus recorded host DAC/sample origin'},indent=2))
+  (a.out/'stored_summary.json').write_text(json.dumps({'score':str(a.score),'first_dac_wall':first_dac_wall,'sample_rate':rate,'frames_presented':count,'portaudio_flags':flags,'muted':not a.audible,'first_model_ns':initial[0] if initial else None,'generation_invoked':False,'source_frame_start':first_frame,'source_frame_end':last_frame,'contiguous_samples_verified':first_frame is not None and digest.hexdigest()==hashlib.sha256(audio[first_frame:last_frame].tobytes()).hexdigest(),'max_clock_alignment_error_seconds':max_error,'synchronization':'original logMonoTime plus recorded host DAC/sample origin'},indent=2))
  if max_error>.05:raise RuntimeError('Stored-score audio clock drift exceeded 50ms')
 if __name__=='__main__':main()

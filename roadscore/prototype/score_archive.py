@@ -5,8 +5,12 @@ from route_library import ROOT,identity
 
 def prefer_new_score(new,old):
  def coverage(m):return (bool(m.get('full_route')) and m.get('replay_start_seconds',0)==0,m.get('replay_start_seconds',0)==0,float(m.get('audio_seconds',0)))
+ if old.get('complete') is True and new.get('complete') is False:return False
  if coverage(new)[0] and coverage(old)[0]:return True
  return coverage(new)>=coverage(old)
+
+def recording_complete(blocks, launch, bridge):
+ return bool(blocks) and launch.get('end_reason')=='native final segment exhausted' and not bridge.get('failure')
 
 def archive(route,run,start=0):
  dongle,name=identity(route);parent=ROOT/'routes'/dongle/name/'roadscore';parent.mkdir(parents=True,exist_ok=True)
@@ -28,7 +32,10 @@ def archive(route,run,start=0):
  if (run/'runtime_manifest.json').exists():
   manifest=json.loads((run/'runtime_manifest.json').read_text());meta['source_identity']=manifest.get('source_identity',{'note':'See runtime manifest; source hash unavailable in this older run'});meta['backend']=manifest.get('backend',meta['backend']);meta['composer']=manifest.get('composer','sa3');meta['profile']=manifest.get('ace_initial_provenance',{}).get('prepared_profile')
  launch=json.loads((run/'launch.json').read_text()) if (run/'launch.json').exists() else {}
- meta['full_route']=launch.get('end_reason')=='native final segment exhausted' and start==0
+ bridge=json.loads((run/'bridge.json').read_text()) if (run/'bridge.json').exists() else {}
+ meta['complete']=recording_complete(blocks,launch,bridge)
+ meta['completion_reason']='native EOF with captured audio' if meta['complete'] else 'partial or unverified end of recording'
+ meta['full_route']=meta['complete'] and start==0
  meta['audio_seconds']=blocks[-1]['audio_s']+.1 if blocks else 0
  meta['output_underruns']=audio_stats.get('portaudio_flags',0)
  meta['capture_timing_clean']=not any(audio_stats.get(k,0) for k in ['portaudio_flags','starved_callbacks','late_frames'])

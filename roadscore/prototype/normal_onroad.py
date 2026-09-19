@@ -15,7 +15,8 @@ R=Path(__file__).resolve().parents[1]
 native=Path('/TICI').exists()
 def interrupt(*_):raise KeyboardInterrupt
 signal.signal(signal.SIGTERM,interrupt)
-p=argparse.ArgumentParser();p.add_argument('--roadscore-seed',type=seed_argument,help='Reproduce an ACE session; normal launches choose a fresh seed');p.add_argument('--render-mode',choices=['current','gold-core'],default=None,help='ACE rendering mode');p.add_argument('--roadscore-presentation',choices=['conservative-v1','off','frozen']);p.add_argument('route',nargs='?');p.add_argument('--routeid');p.add_argument('--roadscore',action='store_true',required=True);p.add_argument('--replay',action='store_true',help='Play recorded final score without Chestnut');p.add_argument('--start',type=int,default=None);p.add_argument('--duration',type=float,default=float('inf'),help='Optional duration limit; normally replay to route EOF');p.add_argument('--audible',action='store_true',help='Compatibility flag; output is audible by default outside automated sessions');p.add_argument('--muted',action='store_true');p.add_argument('--no-overlay',action='store_true');p.add_argument('--capture-ui',action='store_true',help='Record the normal UI internally without speaker output');p.add_argument('--audio-device',default=None,help='Development host output device; default is the system output');p.add_argument('--transport-only',action='store_true');p.add_argument('--headless',action='store_true');p.add_argument('--runtime',type=Path,default=Path('/data/openpilot') if native else Path(os.environ.get('ROADSCORE_RUNTIME','/Users/dominickthompson/starpilot/.host_runtime/darwin/worktree')));p.add_argument('--bench',default=device_target());p.add_argument('--composer',choices=['sa3','ace'],default=choice(),help='ACE Prism is the event default; SA3 is an explicit fallback');p.add_argument('--profile',choices=['prism','aurora'],default='prism');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--roadscore-seed',type=seed_argument,help='Reproduce an ACE session; normal launches choose a fresh seed');p.add_argument('--render-mode',choices=['current','gold-core'],default=None,help='ACE rendering mode');p.add_argument('--roadscore-presentation',choices=['conservative-v1','off','frozen']);p.add_argument('route',nargs='?');p.add_argument('--routeid');p.add_argument('--roadscore',action='store_true',required=True);p.add_argument('--replay',action='store_true',help='Play recorded final score without Chestnut');p.add_argument('--score-archive',type=Path,help='Imported local archive for --replay');p.add_argument('--start',type=int,default=None);p.add_argument('--duration',type=float,default=float('inf'),help='Optional duration limit; normally replay to route EOF');p.add_argument('--audible',action='store_true',help='Compatibility flag; output is audible by default outside automated sessions');p.add_argument('--muted',action='store_true');p.add_argument('--no-overlay',action='store_true');p.add_argument('--capture-ui',action='store_true',help='Record the normal UI internally without speaker output');p.add_argument('--audio-device',default=None,help='Development host output device; default is the system output');p.add_argument('--transport-only',action='store_true');p.add_argument('--headless',action='store_true');p.add_argument('--runtime',type=Path,default=Path('/data/openpilot') if native else Path(os.environ.get('ROADSCORE_RUNTIME','/Users/dominickthompson/starpilot/.host_runtime/darwin/worktree')));p.add_argument('--bench',default=device_target());p.add_argument('--composer',choices=['sa3','ace'],default=choice(),help='ACE Prism is the event default; SA3 is an explicit fallback');p.add_argument('--profile',choices=['prism','aurora'],default='prism');a=p.parse_args()
+explicit_start=a.start
 if a.render_mode=='gold-core' and a.composer!='ace':raise SystemExit('Gold core requires ACE')
 if a.roadscore_seed is not None and (a.replay or a.composer!='ace'):raise SystemExit('--roadscore-seed applies only to fresh ACE generation')
 session=None
@@ -71,14 +72,18 @@ env['PYTHONPATH']+=':'+('/data/roadscore-feasibility/venv/lib/python3.12/site-pa
 from route_library import local_source
 local=local_source(a.routeid)
 services='roadEncodeIdx,wideRoadEncodeIdx,driverEncodeIdx,modelV2,controlsState,onroadEvents,liveCalibration,radarState,deviceState,pandaStates,carParams,driverMonitoringState,carState,driverStateV2,roadCameraState,wideRoadCameraState,managerState,selfdriveState,longitudinalPlan,gpsLocationExternal,mapdOut,carOutput,carControl,liveParameters,starpilotCarState,starpilotPlan,starpilotRadarState,starpilotSelfdriveState,liveTracks,liveDelay,liveTorqueParameters,navInstruction,navRoute,livePose'
+score=None;stored_limit=None
+if a.score_archive and not a.replay:p.error('--score-archive requires --replay')
+if a.replay:
+ if not native and not local:raise SystemExit('Archived Mac replay requires a local route cache; no network fetch is started')
+ from score_archive import latest
+ from stored_replay_policy import replay_archive
+ try:score=a.score_archive.resolve() if a.score_archive else latest(a.routeid)
+ except FileNotFoundError:raise SystemExit('No stored RoadScore exists for this route. Generate a score first.')
+ a.start,stored_limit=replay_archive(score,a.routeid,explicit_start)
 args=[a.routeid,'--allow',services,'--start',str(a.start),'--no-loop','--headless','--cache','2']
 if local:args+=['--data_dir',str(local)]
 if native:args+=['--no-hw-decoder']
-score=None
-if a.replay:
- from score_archive import latest
- try:score=latest(a.routeid)
- except FileNotFoundError:raise SystemExit('No stored RoadScore exists for this route. Generate a score first.')
 display=None;children=[];named_children={};failure=None;logs=[];launch_started=time.monotonic()
 print(('Preparing stored score replay; no generation. ' if a.replay else ('Preparing ACE replay; first preparation may take 10–15 minutes. ' if a.composer=='ace' else 'Preparing RoadScore replay; cold preparation can take 2–3 minutes. '))+('Host speaker enabled.' if a.audible else 'Muted host capture.'),flush=True)
 def launch(cmd,name,**kw):
@@ -141,11 +146,14 @@ try:
    except OSError:pass
   try:
    native_state=json.loads(state_path.read_text())
-   if end_watch.observe(native_state,(out/'replay.log').read_text(),time.monotonic()):end_reason='native final segment exhausted';break
+   if end_watch.observe(native_state,(out/'replay.log').read_text(),time.monotonic()):
+    end_reason='native final segment exhausted'
+    if not a.replay:break
   except (FileNotFoundError,json.JSONDecodeError):pass
   if player.poll() is not None and time.monotonic()-started>2:
    if player.returncode:raise RuntimeError('Native replay failed; see replay.log')
-   break
+   if not a.replay:break
+  if a.replay and time.monotonic()-started>stored_limit:raise TimeoutError('Stored score did not finish within its recorded extent')
   if audio_host is not None and audio_host.poll() is not None:raise RuntimeError('Host PCM stream stopped; see host_audio.log')
   if not a.headless and ui.poll() is not None:raise RuntimeError('Existing normal UI exited; see ui.log')
   if time.monotonic()-started>a.duration+90:raise TimeoutError('No progressing replay messages')
