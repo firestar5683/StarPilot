@@ -14,31 +14,25 @@ import tempfile
 
 import numpy as np
 
-VERSION = 'roadscore-hook-plan-v2'
+VERSION = 'roadscore-hook-plan-v3-gold-groove'
 PROFILES = {
     'prism': {'bpm': 128, 'keyscale': 'D minor', 'identity':
-              'Polished instrumental K-pop and modern electronic game score; crystal pluck '
-              'arpeggios, bright glass synth leads, punchy syncopated bass and tight electronic drums.'},
+              'Instrumental polished K-pop and modern electronic game score. No vocals, no singing, no speech. '
+              'Continuous tight drum groove, punchy bass, memorable recurring hook, polished dynamic arrangement. '
+              '128 BPM, D minor. Crystal pluck arpeggios and a playful four-note rising synth motif; '
+              'crisp electronic snare, rubbery syncopated bass and bright glass leads.'},
     'aurora': {'bpm': 116, 'keyscale': 'A minor', 'identity':
                'Instrumental melodic game score; warm analog synths, shimmering bell answers, '
                'octave bass ostinato and syncopated dance-pop drums.'},
 }
-HOOK = (
-    'Build this composition around one distinctive compact four-to-six-note melodic hook '
-    'with a recognizable rhythmic signature and an answering phrase. Choose its notes and '
-    'contour for this composition. Establish it clearly, leave breathing space, and preserve '
-    'that SAME melodic and rhythmic identity across subsequent sections. Develop accompaniment, '
-    'register, articulation and dynamics rather than substituting unrelated lead melodies or '
-    'mechanically repeating an unchanged loop. When established musical reference is supplied, '
-    'continue its actual hook rather than inventing a replacement. '
-)
+HOOK = 'Keep the hook recognizable as its rhythm, register and accompaniment develop. '
 ROLES = {
-    'initial': 'Introduce the new composition\'s memorable hook and its answer, establish the groove, then develop it into an open-ended verse. ',
-    'verse': 'Use recognizable hook fragments and a lighter call-and-response over an active groove. Develop accompaniment while leaving space for the full melody to return. ',
-    'prechorus': 'Build tension with shorter fragments of the same hook, rising register and denser subdivisions; aim toward a chorus without inventing a new main melody. ',
-    'chorus': 'Bring back the complete established hook prominently with its signature rhythm, fuller bass and drums, and a wider-register answer. Deliver a melodic payoff, not just louder texture. ',
-    'bridge': 'Contrast the arrangement with a spacious rhythmic or register transformation of the same hook in compatible timbre and harmony, then prepare its recognizable return. ',
-    'outro': 'Return to the recognizable original hook, answer and resolve it; thin the arrangement and allow an intentional closing fade. ',
+    'initial': 'Enter immediately with the full tight groove, punchy bass and a clear catchy hook; no extended soft intro. ',
+    'verse': 'Keep the bass and drums strong and danceable; develop the recognizable hook with playful call-and-response. ',
+    'prechorus': 'Build rhythmic drive with rising hook fragments, active bass and crisp drum fills toward a strong chorus payoff. ',
+    'chorus': 'Deliver the full catchy hook prominently with driving bass, emphatic snare and a bright answering lead; make the melodic payoff immediate. ',
+    'bridge': 'Briefly transform the hook register and rhythm while the bass and drum groove continues, then set up its full return. ',
+    'outro': 'Return to the full recognizable hook with a final strong groove, then resolve deliberately and fade. ',
 }
 FORM_CYCLE = ('verse', 'prechorus', 'chorus', 'verse', 'bridge', 'chorus')
 
@@ -117,14 +111,16 @@ def request_plan(*, session_seed, plan_index, profile, section, window_seconds,
             raise ValueError('Continuation needs current-session hook, committed prefix and prior plan identities')
         prefix = 8
     family = PROFILES[profile]
-    caption = (family['identity'] + f" {family['bpm']} BPM, {family['keyscale']}, 4/4. No vocals, singing or speech. "
-               + HOOK + ROLES[section])
+    identity = family['identity']
+    if profile != 'prism':
+        identity += f" {family['bpm']} BPM, {family['keyscale']}. No vocals, singing or speech."
+    caption = identity + ' 4/4. ' + HOOK + ROLES[section]
     if section != 'outro':
         caption += ('This window is part of an ongoing composition, not a whole short song: '
                     'keep an audible groove and hand off naturally without an ending, terminal fade or silence. ')
     return PlanRequest(VERSION, session_seed, semantic_seed, plan_index, profile, section,
                        window_seconds, prefix, family['bpm'], family['keyscale'], caption,
-                       '[Instrumental]\n[' + ('Intro' if section == 'initial' else 'Pre-Chorus' if section == 'prechorus' else section.title()) + ']',
+                       '[Instrumental]\n[' + ('Verse' if section == 'initial' else 'Pre-Chorus' if section == 'prechorus' else section.title()) + ']',
                        model_fingerprint, preparation_fingerprint, *context)
 
 
