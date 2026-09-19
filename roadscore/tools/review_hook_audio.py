@@ -69,6 +69,21 @@ def screen(path):
               strongest_aligned_4s_waveform_match=best, spectral_centroid_hz=centroid)
 
 
+def assembly_check(pcm, parts, rate):
+  expected = np.concatenate(parts)
+  if pcm.shape != expected.shape:
+    return {'status': 'pending or inconsistent length', 'core_frames': len(pcm), 'window_frames': len(expected)}
+  seams = np.cumsum([len(wave) for wave in parts])[:-1]
+  include = np.ones(len(pcm), dtype=bool)
+  for seam in seams:
+    include[max(0, seam-2*rate):seam] = False
+  residual = float(np.max(abs(pcm[include]-expected[include]))) if include.any() else None
+  return {'status': 'matches outside crossfades' if residual is not None and residual <= 5e-7 else 'unexpected difference outside crossfades',
+          'excluded_regions_seconds': [[float(max(0, i/rate-2)), float(i/rate)] for i in seams],
+          'max_residual_outside_crossfades': residual,
+          'limit': 'Saved windows omit regenerated prefixes. The expected 2s crossfade regions cannot be reconstructed from these files; float32 resume roundoff allowed up to 5e-7.'}
+
+
 def main():
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument('directory', type=Path)
@@ -83,7 +98,10 @@ def main():
     folder = root / f'session_{number}'
     core = folder / 'core.wav'
     windows = sorted(folder.glob('[0-9][0-9]_*.wav'))
-    entry = {'session': number, 'seed': seed['generation_seed'], 'complete_core_available': core.exists(),
+    run = validation.get('runs', [])[number-1] if len(validation.get('runs', [])) >= number else {}
+    status = run.get('status', 'not started')
+    finished = status in ('technical_pass_listening_pending', 'quality_failed')
+    entry = {'generation_status': status, 'session_finished': finished, 'session': number, 'seed': seed['generation_seed'], 'core_available': core.exists(),
              'windows': [screen(p) for p in windows]}
     entry['section_contrast'] = [dict(from_file=a['file'], to_file=b['file'],
       rms_change_db=float(20*np.log10(max(b['rms'], 1e-12)/max(a['rms'], 1e-12))),
@@ -93,14 +111,14 @@ def main():
       entry['core'] = screen(core)
       rate, pcm = load(core)
       parts = [load(p) for p in windows]
-      entry['core_matches_ordered_windows_exactly'] = bool(parts and all(r == rate for r, _ in parts)
-          and np.array_equal(pcm, np.concatenate([wave for _, wave in parts])))
+      entry['assembly'] = assembly_check(pcm, [wave for _, wave in parts], rate) if parts and all(r == rate for r, _ in parts) else {'status': 'sample rate mismatch or missing windows'}
       seams = np.cumsum([len(wave) for _, wave in parts])[:-1]
       entry['seams'] = [dict(seconds=float(i/rate), sample_step=float(np.max(abs(pcm[i]-pcm[i-1])))) for i in seams]
     report['sessions'].append(entry)
-    title = f'Session {number}'
+    title = f'Session {number}' + (' · Complete' if status == 'technical_pass_listening_pending' else ' · Stopped early' if status == 'quality_failed' else ' · Partial' if core.exists() else ' · Pending')
+    core_label = 'Full session' if status == 'technical_pass_listening_pending' else 'Available audio (partial)'
     choices = ([core] if core.exists() else []) + windows
-    options = ''.join(f'<option value="session_{number}/{html.escape(p.name)}">{html.escape("Full session" if p == core else p.stem.replace("_", " "))}</option>' for p in choices)
+    options = ''.join(f'<option value="session_{number}/{html.escape(p.name)}">{html.escape(core_label if p == core else p.stem.replace("_", " "))}</option>' for p in choices)
     player = (f'<select aria-label="Session {number} section">{options}</select><audio controls preload="metadata" src="session_{number}/{html.escape(choices[0].name)}"></audio>'
               if choices else '<p class="pending">Session audio is not available yet.</p>')
     metrics = entry.get('core', {})
@@ -117,7 +135,7 @@ def main():
   document.querySelector('#stop').addEventListener('click',()=>players.forEach(player=>player.pause()));
   </script></html>'''
   (root / 'listen.html').write_text(page)
-  print(json.dumps([{'session': e['session'], 'windows': len(e['windows']), 'core': e['complete_core_available']} for e in report['sessions']]))
+  print(json.dumps([{'session': e['session'], 'windows': len(e['windows']), 'core': e['core_available']} for e in report['sessions']]))
 
 
 if __name__ == '__main__':

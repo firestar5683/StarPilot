@@ -5,10 +5,18 @@ from pathlib import Path
 import numpy as np
 from scipy.io import wavfile
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'tools'))
-from review_hook_audio import screen
+from review_hook_audio import screen, assembly_check
 
 
 class AudioScreeningTests(unittest.TestCase):
+  def test_expected_crossfade_is_excluded_but_other_changes_are_reported(self):
+    parts = [np.zeros((40, 2)), np.ones((40, 2))]
+    core = np.concatenate(parts)
+    core[20:40] = .3
+    self.assertEqual(assembly_check(core, parts, 10)['status'], 'matches outside crossfades')
+    core[2] = .1
+    self.assertEqual(assembly_check(core, parts, 10)['status'], 'unexpected difference outside crossfades')
+
   def test_detects_clipping_silence_and_repeated_blocks(self):
     rate = 48000
     block = np.random.default_rng(17).normal(0, .05, (rate, 2)).astype('float32')
