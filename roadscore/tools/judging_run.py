@@ -18,6 +18,41 @@ def save(path, value):
     temp.replace(path)
 
 
+
+def validate_frozen_configuration(root):
+    """Refuse official work unless a nonempty local freeze verifies completely."""
+    frozen = root / 'generated/judging_configuration.private.json'
+    try:
+        entries = json.loads(frozen.read_text())
+    except (OSError, ValueError) as error:
+        raise SystemExit('Valid frozen judging configuration is required') from error
+    if not isinstance(entries, dict) or not entries:
+        raise SystemExit('Frozen judging configuration must be a nonempty file/hash mapping')
+    for name, digest in entries.items():
+        if (not isinstance(name, str) or not name or Path(name).is_absolute()
+                or '..' in Path(name).parts or not isinstance(digest, str)
+                or len(digest) != 64 or any(c not in '0123456789abcdef' for c in digest)):
+            raise SystemExit('Invalid frozen judging configuration entry')
+        path = root / name
+        if not path.resolve().is_relative_to(root.resolve()):
+            raise SystemExit('Frozen judging configuration path escapes project')
+        try:
+            actual = hashlib.sha256(path.read_bytes()).hexdigest()
+        except OSError as error:
+            raise SystemExit('Frozen judging configuration file unavailable: ' + name) from error
+        if actual != digest:
+            raise SystemExit('Frozen judging configuration changed: ' + name)
+
+
+def validate_handoff_readiness(manifest, row):
+    """Preparation exports are inert until explicitly authorized and complete."""
+    if manifest.get('schema') == 'roadscore-judging-handoff-v1':
+        if manifest.get('generation_authorized') is not True:
+            raise SystemExit('Judging handoff has not been authorized for generation')
+        if row.get('preparation_ready') is not True or row.get('preparation_blockers') != []:
+            raise SystemExit('Judging handoff preparation is incomplete or blocked')
+
+
 def main():
     parser = argparse.ArgumentParser()
     parser.add_argument('manifest', type=Path)
@@ -31,11 +66,8 @@ def main():
         row.update(json.loads(ranges.read_text()).get(args.label, {}))
     if row.get('range_resolution') == 'pending metadata':
         raise SystemExit('Resolve submitted range before launching this entry')
-    frozen = ROOT / 'generated/judging_configuration.private.json'
-    if frozen.exists():
-        for name, digest in json.loads(frozen.read_text()).items():
-            if hashlib.sha256((ROOT/name).read_bytes()).hexdigest() != digest:
-                raise SystemExit('Frozen judging configuration changed: '+name)
+    validate_handoff_readiness(manifest, row)
+    validate_frozen_configuration(ROOT)
     out = ROOT / 'results/community_judging'
     out.mkdir(exist_ok=True, mode=0o700)
     ledger = out / f'official_{args.label}.json'
