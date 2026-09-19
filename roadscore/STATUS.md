@@ -1,3 +1,7 @@
+# Event checkpoint — clean 45 W native replay
+
+Prism completed a full 254.1-second muted route on the event comma + Chestnut with six accepted fresh music jobs, no holds, no underflows, no worker failure, and clean causal timing. Camera, path, lanes, navigation and ten curve activations were recorded. See [event evidence](EVENT.md). This is an instrumented replay pass; physical listening, Bluetooth and modeld coexistence remain unverified. Community judging has not begun.
+
 # Event checkpoint — RoadScore branch
 
 Current event work and exact failures are recorded in [EVENT.md](EVENT.md). Source is migrated. Official Chestnut validation and 30 W Prism preparation pass; native replay still has unresolved timing/ending-context failures. A 45 W fixed-decoder comparison passed 40/40 and full-model testing is starting. No event-baseline or judging-batch pass is claimed. All automated audio remains muted; no files have been pushed by this work.

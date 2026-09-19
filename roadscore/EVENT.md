@@ -95,3 +95,15 @@ ACE is now the event default; explicit SA3 selection is preserved. Composer test
 Actual native Params report `Model=DrivingModel=rdf43`, version v15, real `IsOnroad=false`. The built-in model path uses the QCOM backend and does not select an external-GPU artifact merely because Chestnut is connected. Model Lab configuration must still be checked before any test.
 
 The existing `selfdrive/test/process_replay/process_replay.py` supports isolated `modeld` execution in an `OpenpilotPrefix`, feeding road/wide camera frames and device/calibration/car state; it publishes modelV2, drivingModelData and cameraOdometry. The cached known route contains `fcamera.hevc`, `ecamera.hevc` and rlog. A bounded test should call that local harness directly and record execution times first alone, then during ACE generation. Do not use the CI model-replay report/upload entrypoint for private routes. No coexistence or live-driving test has been run.
+
+### 45 W full preparation
+
+The explicitly capped 45 W resident worker completed 112 seconds of accepted Prism audio in 530.441 seconds, including 38.190 seconds model load. Peak host RSS was 758,308 KiB; tracked allocation reached 5,789,487,104 bytes. Initial 28-second music required 13.651 seconds generation plus 6.206 seconds decode (0.709 RTF excluding cold compile). Warm continuation required 19.51–19.59 seconds generation plus 10.30–10.32 seconds decode per 28 new seconds (1.065–1.068 compute RTF; 30.12–30.42 seconds wall). This does not establish sustained faster-than-playback continuation.
+
+Native muted replay `normal_1789795416` is running without continuous UI video encoding. Camera/path auditing and the overlay image remain enabled; the causal timing guard is unchanged. No event native pass is claimed before its final audit. Exact preparation metadata is preserved privately in `results/event_night_one/prism_power45/`.
+
+### First clean event native replay — 45 W
+
+`normal_1789795416` passed the instrumented native gate through final-segment EOF: 254.1 seconds captured, six accepted fresh generation jobs, zero accepted-music holds, zero underflows, zero emergency fallbacks, no worker failure, zero output flags and all blocks muted. Camera accepted 5,088 frames; path/lane drawing, navigation and ten curve activations were observed. All request timestamps were causal. Maximum source-clock drift was 24.671 ms. Continuous UI video encoding was disabled; the overlay snapshot and UI audit remain available. This single pass does not prove that encoding caused the earlier timing failure.
+
+The local private evidence is `results/event_night_one/prism_power45/`: preparation metadata, native audit, overlay and captured score. The reusable post-run audit correctly rejects the earlier full-route failure and has three focused negative-evidence tests. It does not claim human musical approval, physical speaker/Bluetooth validation or modeld coexistence. Phase 2 has not yet begun; the native prerequisite is now met. No upload or push was performed.
