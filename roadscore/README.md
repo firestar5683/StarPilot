@@ -10,11 +10,23 @@ recorded cereal → semantic road state → section requests → ACE on Chestnut
 
 Only already-delivered messages enter musical decisions. The ordinary replay engine owns route resolution, camera video, path/lane display, and playback timing. Existing generated music may be held when fresh material is unavailable; holds are recorded and are not counted as new generation.
 
+## Demo and source guide
+
+- [Demo explanation and overlay legend](DEMO.md): what the audience sees and what each state means.
+- [Event evidence](EVENT.md): measurements and preserved failures on the event hardware; read the latest checkpoint.
+- [Status history](STATUS.md): event summary followed by explicitly historical pre-event results.
+- `prototype/overlay.py` and `prototype/overlay_view.py`: native overlay integration and read-only presentation.
+- `prototype/`: score runtime, composition, gestures, transport and archival code.
+- `tools/`: development and event utilities; [offline UI preview](DEMO.md#offline-ui-review) needs no device.
+- `tests/`: isolated UI tests. Existing runtime tests remain beside their modules and in `experiments/`.
+- `experiments/`, `chestnut_music/`, `chestnut_stable_audio/`: research and historical backend work.
+- `routes/`, `results/`, model assets: private local data, excluded from Git.
+
 ## Event status
 
 Source lives in this repository on the `RoadScore` branch and on the event comma at `/data/openpilot/roadscore`. `/data/roadscore` is a compatibility symlink. See [EVENT.md](EVENT.md) for current measurements and preserved failures.
 
-The official Chestnut example passed. Unrestricted decoder runs lost GPU access; a 30 W cap passed 40 repeated decodes and full Prism preparation. At that cap, warm continuation takes approximately 44s per 28s of new music (RTF 1.57). A 45 W comparison is underway. **The event native-replay acceptance gate is not yet complete.** Live/modeld coexistence and physical speaker/Bluetooth validation remain pending.
+The latest recorded checkpoint in [EVENT.md](EVENT.md#first-clean-event-native-replay--45-w) reports a complete 254.1-second muted native Prism replay at an explicitly selected 45 W: six accepted fresh jobs, no holds, no underflows and no worker failure. This is one instrumented pass, not a production-reliability claim. Live/modeld coexistence and physical speaker/Bluetooth validation remain pending. Earlier 30 W results and failed runs are preserved in that report.
 
 ## Run on the event comma
 
