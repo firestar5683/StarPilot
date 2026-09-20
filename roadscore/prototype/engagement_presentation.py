@@ -43,11 +43,12 @@ def engagement_active(valid, active, source_ns, latest_source_ns, received_wall,
 
 
 class EngagementPresentation:
-  def __init__(self, rate=48000, max_frames=4800):
+  def __init__(self, rate=48000, max_frames=4800, *, cutoff_hz=4500., width=.85, gain=.8912509):
     self.rate = rate
     self.frames_processed = 0
     self.max_frames = max_frames
-    self.sos = butter(2, 4500, fs=rate, output='sos').astype(np.float32)
+    self.width=float(width);self.gain=float(gain)
+    self.sos = butter(2, cutoff_hz, fs=rate, output='sos').astype(np.float32)
     self.zi = np.zeros((len(self.sos), 2, 2), np.float32)
     self.mix = 1.  # startup bypass; opting in ramps into contained presentation
     self.indices = np.arange(1, max_frames + 1, dtype=np.float32)
@@ -58,7 +59,7 @@ class EngagementPresentation:
     # Exercise scipy dispatch before audio callbacks.
     sosfilt(self.sos, np.zeros((1, 2), np.float32), axis=0, zi=self.zi)
 
-  def process(self, pcm, active, config):
+  def process(self, pcm, active, config, *, target_mix=None):
     """Stereo float32 in/out, same frames, never mutates caller PCM.
 
     Fully bypassed output is original PCM (read-only use by downstream). Split
@@ -69,6 +70,9 @@ class EngagementPresentation:
     self.frames_processed += len(pcm)
     # Keep filter warm even during bypass; allocated size bounded by max_frames.
     target = 1. if active or not config.enabled else 0.
+    if config.enabled and target_mix is not None:
+      if not math.isfinite(target_mix) or not 0<=target_mix<=1:raise ValueError("Invalid presentation mix")
+      target=float(target_mix)
     output = None if target == 1. and self.mix == 1. else np.empty_like(pcm)
     for start in range(0, len(pcm), self.max_frames):
       x = pcm[start:start + self.max_frames]
@@ -89,9 +93,9 @@ class EngagementPresentation:
       mid *= .5
       wet = self.scratch[:n]
       np.subtract(low, mid[:, None], out=wet)
-      wet *= .85
+      wet *= self.width
       wet += mid[:, None]
-      wet *= .8912509
+      wet *= self.gain
       delta = self.delta[:n]
       np.subtract(x, wet, out=delta)
       np.multiply(delta, ramp[:, None], out=delta)
