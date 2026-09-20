@@ -1,6 +1,7 @@
 """Native replay UI view of acknowledged demo controls; never publishes messages."""
 import json
 import math
+import re
 import time
 from pathlib import Path
 
@@ -9,10 +10,15 @@ from demo_engagement import MODES, SIGNAL_MODES
 
 
 def isolated_replay(environ):
-  return (environ.get('ROADSCORE_REPLAY_UI_CONTROLS') == '1'
-          and environ.get('SIMULATION') == '1'
-          and not environ.get('ZMQ')
-          and environ.get('OPENPILOT_PREFIX') == 'roadscore_replay')
+  if environ.get('ROADSCORE_REPLAY_UI_CONTROLS') != '1' or environ.get('SIMULATION') != '1':
+    return False
+  if not environ.get('ZMQ'):
+    return environ.get('OPENPILOT_PREFIX') == 'roadscore_replay'
+  session = environ.get('ROADSCORE_SHOWCASE_SESSION', '')
+  return (environ.get('ROADSCORE_PREPARED_SHOWCASE') == '1'
+          and environ.get('ZMQ') == '1'
+          and bool(re.fullmatch(r'[a-zA-Z0-9-]{8,80}', session))
+          and environ.get('OPENPILOT_ZMQ_NAMESPACE') == 'roadscore-showcase-' + session)
 
 
 def apply_turn_intent(widget, signal_mode):
