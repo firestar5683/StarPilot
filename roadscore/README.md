@@ -12,6 +12,7 @@ Only already-delivered messages enter musical decisions. The ordinary replay eng
 
 ## Demo and source guide
 
+- [Interactive saved showcase](MAC_SHOWCASE.md): `./onroad --roadscore route1 --demo --fullscreen` on the Mac starts synchronized native replays with Galaxy controls and comma audio. Saved demos need no model warm-up.
 - [Demo explanation and overlay legend](DEMO.md): what the audience sees and what each state means.
 - [Event evidence](EVENT.md): measurements and preserved failures on the event hardware; read the latest checkpoint.
 - [Status history](STATUS.md): event summary followed by explicitly historical pre-event results.

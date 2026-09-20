@@ -16,6 +16,8 @@ The command prepares both local native replay engines, then releases their start
 
 Use Galaxy for engagement and turn-signal controls. The Mac follows the same applied presentation selections. No browser control page opens and no video is streamed from the comma. Small Galaxy status updates keep the local playheads approximately aligned; this is independent playback, not frame-exact mirroring. The buttons affect replay appearance and musical presentation only, never vehicle control. Ctrl+C stops both owned demo sessions and leaves the resident ACE worker intact.
 
+Left, Right and Off replace the recorded turn signals until Recorded is selected again. This applies to the music, native arrows and ordinary lane-change prompts on both displays. Off releases the shaker smoothly without starting more pulses. Important native alerts retain priority. Engagement and signal selections are independent.
+
 Route1 is currently registered and ready. Route2–4 remain unavailable until their own matching core recordings are prepared and verified. Never substitute another route's music archive to bypass this check.
 
 The local configuration is ignored by Git: `roadscore/assets/demo_catalog.json` stores the explicit comma address, local controls port and registered routes. The comma has its own catalog pointing to persistent local assets. Each entry needs the route identity, a compatible completed archive and an optional matching curve plan. No discovery or automatic target switching occurs.
