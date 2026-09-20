@@ -77,4 +77,9 @@ def update(self,*args,**kw):
 UIState.update=update;CameraView._accept_frame=accept;CameraView._render_textures=textures;ModelRenderer._draw_path=path;ModelRenderer._draw_lane_lines=lanes
 from overlay import install
 install()
+if os.environ.get('ROADSCORE_FULLSCREEN')=='1':
+ from showcase_fullscreen import install as install_fullscreen
+ from openpilot.system.ui.lib.application import gui_app
+ import pyray as rl
+ install_fullscreen(rl,gui_app)
 runpy.run_path(str(Path(os.environ['BASEDIR'])/'selfdrive/ui/ui.py'),run_name='__main__')

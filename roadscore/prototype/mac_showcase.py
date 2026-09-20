@@ -387,6 +387,7 @@ def parser():
   p.add_argument('--presentation-root',type=Path,help=argparse.SUPPRESS)
   p.add_argument('--output-identity',help=argparse.SUPPRESS)
   p.add_argument('--hold-start',action='store_true',help=argparse.SUPPRESS)
+  p.add_argument('--fullscreen',action='store_true',help='Show the native Mac UI fullscreen; F/F11 toggles, Escape returns to its window')
   p.add_argument('--follow-playhead',action='store_true',help=argparse.SUPPRESS)
   def paired_url(value):
     try:GalaxyPeer(value,allow_lan_http=True)
@@ -440,6 +441,7 @@ def main():
   env=os.environ.copy()
   env.update(PYTHONDONTWRITEBYTECODE='1',ZMQ='1',OPENPILOT_ZMQ_NAMESPACE='roadscore-showcase-'+session,ROADSCORE_SHOWCASE_SESSION=session,ROADSCORE_PREPARED_SHOWCASE='1',ROADSCORE_REPLAY_UI_CONTROLS='1',PARAMS_ROOT=str(out/'params'),BASEDIR=str(rt),NOBOARD='1',SIMULATION='1',SKIP_FW_QUERY='1',BIG='0',SP_ALLOW_DESKTOP_FAKE_WIFI='0',SP_ALLOW_DESKTOP_FAKE_BLUETOOTH='0',SP_ONROAD_NAV_DEMO='0',SP_ONROAD_CEM_DEMO='0',ROADSCORE_CLEAN_DEMO_UI='1',ROADSCORE_OVERLAY='1',ROADSCORE_STATUS_FILE=str(out/'status.json'),ROADSCORE_UI_AUDIT=str(out/'ui_audit.jsonl'),ROADSCORE_OVERLAY_CAPTURE=str(out/'overlay.png'),ROADSCORE_PRESENTATION_POLICY='conservative-v4')
   env['OPENPILOT_PREFIX']='roadscore-showcase-'+session
+  env['ROADSCORE_FULLSCREEN']='1' if a.fullscreen and not a.headless else '0'
   env['ROADSCORE_AUDIO_DRAIN_FILE']=str(out/'audio_drained.json')
   env['PWD']=str(rt)
   env['PYTHONPATH']=':'.join(map(str,[HERE,rt,rt/'starpilot/third_party',*rt.glob('*_repo'),project/'roadscore/.analysis-venv/lib/python3.12/site-packages']))
