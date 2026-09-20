@@ -13,17 +13,20 @@ class DemoEngagement:
   self.input_mode=input_mode;self.clock=clock;self.started=clock();self.mode='recorded'
 
  def poll(self):
-  self.mode='recorded'
-  if self.input_mode!='replay':return self.mode
+  mode='recorded'
+  if self.input_mode!='replay':
+   self.mode=mode
+   return mode
   try:
    value=json.loads(self.path.read_text())
    stamp=value.get('created_wall')
    if (value.get('version')==1 and value.get('session_id')==self.session_id
        and value.get('mode') in MODES and type(stamp) in (int,float)
        and math.isfinite(stamp) and self.started<=stamp<=self.clock()):
-    self.mode=value['mode']
+    mode=value['mode']
   except (OSError,ValueError,AttributeError):pass
-  return self.mode
+  self.mode=mode
+  return mode
 
 
 def presentation_active(mode, recorded_active):
