@@ -12,8 +12,9 @@ class MotionPresentation:
 
   def process(self, pcm, *, speed, source_fresh, engagement_open_mix=1.):
     dt=len(pcm)/self.rate
-    self.fresh=bool(source_fresh and math.isfinite(speed) and speed>=0.)
+    self.fresh=bool(source_fresh and math.isfinite(speed) and speed>=-.05)
     if self.fresh:
+      speed=max(0.,speed)
       self.stop_seconds=self.stop_seconds+dt if speed<=.25 else 0.
       self.move_seconds=self.move_seconds+dt if speed>=.8 else 0.
       if self.stop_seconds>=.4:self.stopped=True
@@ -30,5 +31,5 @@ class MotionPresentation:
                 target_open_mix=self.target,rendered_open_mix=self.dsp.mix,cutoff_hz=900.,
                 lift_ms=self.config.attack_ms,contain_ms=self.config.release_ms,
                 stop_threshold_mps=.25,move_threshold_mps=.8,stop_dwell_seconds=.4,move_dwell_seconds=.15,
-                gain=1.,width=1.,added_delay_samples=0,unknown_policy='smooth bypass',
+                gain=1.,width=1.,negative_speed_tolerance_mps=.05,added_delay_samples=0,unknown_policy='smooth bypass',
                 source='fresh current carState.vEgo; no future data')}

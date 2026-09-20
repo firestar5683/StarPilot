@@ -32,6 +32,18 @@ class MotionTests(unittest.TestCase):
     y=self.run_blocks(dsp,speed=float('nan'),source_fresh=False)
     self.assertTrue(np.array_equal(y,self.pcm));self.assertFalse(dsp.stopped)
 
+  def test_near_zero_signed_noise_does_not_reset_stop_dwell(self):
+    dsp=MotionPresentation(enabled=True)
+    for i in range(25):
+      y=dsp.process(self.pcm,speed=(-1 if i%2 else 1)*1e-25,source_fresh=True)
+    self.assertTrue(dsp.stopped);self.assertTrue(dsp.fresh)
+    self.assertLess(np.std(y)/np.std(self.pcm),.05)
+    self.assertTrue(np.array_equal(self.run_blocks(dsp,speed=1.,source_fresh=True),self.pcm))
+    for invalid in (float('nan'),float('inf'),-.06):
+      y=self.run_blocks(dsp,speed=invalid,source_fresh=True)
+      self.assertFalse(dsp.fresh);self.assertFalse(dsp.stopped)
+      self.assertTrue(np.array_equal(y,self.pcm))
+
   def test_engagement_owns_inactive_presentation(self):
     dsp=MotionPresentation(enabled=True);eng=EngagementPresentation();config=PresentationConfig(enabled=True)
     y=self.run_blocks(dsp,speed=0.,source_fresh=True,engagement_open_mix=0.)

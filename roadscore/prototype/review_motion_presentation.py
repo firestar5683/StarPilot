@@ -34,7 +34,7 @@ def render(locked,out):
       before=time.perf_counter()
       y=dsp.process(pcm,speed=row.get('speed',0.),source_fresh=fresh,engagement_open_mix=open_mix)
       times.append(time.perf_counter()-before);dst.write(y)
-      states.append(dict(audio_s=start/rate,steering=row.get('steering'),speed=row.get('speed'),fresh=fresh,**dsp.snapshot()['motion_presentation']))
+      states.append(dict(audio_s=start/rate,route_t=row.get('route_t'),source_age_seconds=block['callback_wall']-row.get('command_wall',block['callback_wall']),signal_fresh=block.get('signal_fresh'),steering=row.get('steering'),speed=row.get('speed'),fresh=fresh,**dsp.snapshot()['motion_presentation']))
   transitions=[state for previous,state in zip(states,states[1:]) if previous['stopped'] and not state['stopped'] and state['fresh'] and state.get('speed',0)>=.8]
   event=transitions[0] if transitions else min(states,key=lambda x:x['rendered_open_mix'])
   start=max(0.,min(info.duration-45,event['audio_s']-15));end=min(info.duration,start+45)
@@ -52,7 +52,7 @@ def render(locked,out):
               physical_bluetooth_latency='Not measured; these files compare musical processing, not speaker/video synchronization',
               settings=dsp.snapshot(),sample_frames=info.frames)
   (out/'report.json').write_text(json.dumps(report,indent=2));(out/'motion_states.json').write_text(json.dumps(states))
-  (out/'index.html').write_text('''<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>RoadScore motion A/B</title><style>body{background:#101016;color:#eee;font:18px system-ui;max-width:760px;margin:40px auto;padding:20px}audio{width:100%;margin:12px 0}p{line-height:1.5;color:#bbb}</style><h1>Curve presentation A/B</h1><p>Same accepted recording and same 45-second excerpt. B uses a strong 900 Hz low-pass while stopped and opens as the car starts moving. No regeneration, new melody, gain normalization or event samples.</p><h2>A · Locked baseline</h2><audio controls src="A_baseline.wav"></audio><h2>B · Optional motion containment</h2><audio controls src="B_motion.wav"></audio><p>Default remains off. This is a musical comparison, not Bluetooth/video synchronization. Existing engagement processing remains intact. This cannot isolate a lead instrument from a stereo mix.</p>''')
+  (out/'index.html').write_text('''<!doctype html><meta name="viewport" content="width=device-width,initial-scale=1"><title>RoadScore motion A/B</title><style>body{background:#101016;color:#eee;font:18px system-ui;max-width:760px;margin:40px auto;padding:20px}audio{width:100%;margin:12px 0}p{line-height:1.5;color:#bbb}</style><h1>Stop / pullaway presentation A/B</h1><p>Same accepted recording and same 45-second excerpt. B uses a strong 900 Hz low-pass while stopped and opens as the car starts moving. No regeneration, new melody, gain normalization or event samples.</p><h2>A · Locked baseline</h2><audio controls src="A_baseline.wav"></audio><h2>B · Optional motion containment</h2><audio controls src="B_motion.wav"></audio><p>Default remains off. This is a musical comparison, not Bluetooth/video synchronization. Existing engagement processing remains intact. This cannot isolate a lead instrument from a stereo mix.</p>''')
   return report
 
 if __name__=='__main__':
