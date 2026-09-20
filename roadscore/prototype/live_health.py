@@ -29,6 +29,18 @@ def local_model_placement(metadata, active, loading):
   return metadata.get("uses_external_gpu") is False and (active is False or active in (b"0", "0")) and (loading is False or loading in (b"0", "0"))
 
 
+def passive_startup(params):
+  values={}
+  for key,param in (('controls_ready','ControlsReady'),('firmware_query_done','FirmwareQueryDone'),('obd_multiplexing_enabled','ObdMultiplexingEnabled')):
+    value=params.get(param)
+    if type(value) is bool:values[key]=value
+    elif value in (b'0','0'):values[key]=False
+    elif value in (b'1','1'):values[key]=True
+    elif value is None and param=='ControlsReady':values[key]=False
+    else:values[key]=None
+  return values
+
+
 def evaluate(snapshot, record, now):
   ages=snapshot.get('ages',{});valid=snapshot.get('valid',{})
   # These are stale-input guards, not performance/coexistence acceptance limits.
@@ -139,7 +151,7 @@ class LiveHealth:
       fields=(self.proc/str(pid)/'stat').read_text().rsplit(') ',1)[1].split()
       owner=owner and fields[0]!='Z' and int(fields[19])/os.sysconf('SC_CLK_TCK')<=link['monotonic']<=now
     except (OSError,ValueError,KeyError,IndexError,TypeError):owner=False
-    return {'monotonic':now,'car_identity':car_info,'car_id':identity(car_info),'baseline_id':identity({'git':build,'model':model,'version':version}),
+    return {'monotonic':now,'passive_startup':passive_startup(self.params),'car_identity':car_info,'car_id':identity(car_info),'baseline_id':identity({'git':build,'model':model,'version':version}),
             'git_commit':build,'driving_model':model,'driving_model_version':version,'driving_model_local':local_model_placement(load_model_artifact_metadata(model),self.params.get('UsbGpuActive'),self.params.get('UsbGpuLoading')),
             'chestnut_present':chestnut_firmware_ready(),'model_geometry_valid':len(m.get('position',{}).get('t',[]))==33,'ages':ages,'valid':valid,'car':payload['carState'],'device':d,'pandas':pandas,'events':events,
             'control':payload['carControl'],'selfdrive_state':payload['selfdriveState'],'calibration':payload['liveCalibration'].get('calStatus'),'processes':processes,'metrics':metrics,'link':link,'link_owner_verified':bool(owner)}

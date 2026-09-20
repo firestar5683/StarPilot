@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from live_health import evaluate,LiveHealth,SERVICES,METRICS,local_model_placement
+from live_health import evaluate,LiveHealth,SERVICES,METRICS,local_model_placement,passive_startup
 
 
 def sample(now=100.):
@@ -21,6 +21,17 @@ def authorization():
 
 
 class Tests(unittest.TestCase):
+ def test_passive_startup_reads_actual_flags_without_writes(self):
+  class Params:
+   def __init__(self,values):self.values=values
+   def get(self,key):return self.values.get(key)
+  p=Params({'ControlsReady':False,'FirmwareQueryDone':True,'ObdMultiplexingEnabled':False})
+  self.assertEqual(passive_startup(p),{'controls_ready':False,'firmware_query_done':True,'obd_multiplexing_enabled':False})
+  self.assertEqual(passive_startup(Params({})),{'controls_ready':False,'firmware_query_done':None,'obd_multiplexing_enabled':None})
+  p.values={'ControlsReady':b'1','FirmwareQueryDone':b'1','ObdMultiplexingEnabled':b'0'}
+  self.assertEqual(passive_startup(p),{'controls_ready':True,'firmware_query_done':True,'obd_multiplexing_enabled':False})
+  p.values={'ControlsReady':'invalid'}
+  self.assertIsNone(passive_startup(p)['controls_ready'])
  def test_passive_mode_requires_pinned_nonactuating_evidence(self):
   d=sample();d.update(live_mode='passive-observer-v1',car_identity={'passive':True,'notCar':False,'dashcamOnly':True,'safety':[{'model':'noOutput','param':0}]},control={'enabled':False,'latActive':False,'longActive':False},selfdrive_state={'enabled':False,'active':False})
   d['pandas']=[{'safetyModel':'noOutput','controlsAllowed':False,'faults':[],'safetyRxChecksInvalid':False}]
