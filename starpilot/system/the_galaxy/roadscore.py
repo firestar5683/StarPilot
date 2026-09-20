@@ -5,6 +5,7 @@ from pathlib import Path
 import importlib.util
 import sys
 import threading
+import time
 from urllib.parse import urlsplit
 
 PROFILES = [{"id": "prism", "name": "Prism"}, {"id": "aurora", "name": "Aurora"}]
@@ -205,6 +206,13 @@ def register(app, params):
     data = request.get_json(silent=True)
     if not isinstance(data, dict):
       return jsonify(error='Expected an object'), 400
+    if action == 'clock':
+      if data:
+        return jsonify(error='Clock request takes no arguments'), 400
+      # Read-only synchronization must not include subprocess or output-lock delays.
+      response = jsonify(ok=True, server_ms=time.monotonic() * 1000)
+      response.headers['Cache-Control'] = 'no-store'
+      return response
     try:
       return jsonify(operator.operate(action, data, real_offroad()))
     except (ValueError, OSError) as error:

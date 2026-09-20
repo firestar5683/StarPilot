@@ -11,6 +11,29 @@ def load(name):
   return module
 operator = load('roadscore')
 
+class ClockEndpointTests(unittest.TestCase):
+  def test_clock_avoids_output_and_safety_work_but_start_does_not(self):
+    from flask import Flask
+    from unittest.mock import patch
+    import operator_output
+    app = Flask(__name__)
+    with patch.object(operator, 'Operator') as factory, patch.object(operator_output, 'real_offroad', return_value=False) as offroad:
+      operator.register(app, None)
+      client = app.test_client()
+      response = client.post('/api/roadscore/clock', json={})
+      self.assertEqual(response.status_code, 200)
+      self.assertGreater(response.json['server_ms'], 0)
+      self.assertEqual(response.headers['Cache-Control'], 'no-store')
+      offroad.assert_not_called()
+      factory.return_value.operate.assert_not_called()
+      self.assertEqual(client.post('/api/roadscore/clock', json={'extra': 1}).status_code, 400)
+      self.assertEqual(client.post('/api/roadscore/clock', json={}, headers={'Origin': 'https://unrelated.example'}).status_code, 403)
+      factory.return_value.operate.return_value = {'ok': False}
+      client.post('/api/roadscore/calibration_start', json={'attended': True})
+      offroad.assert_called_once()
+      factory.return_value.operate.assert_called_once_with('calibration_start', {'attended': True}, False)
+
+
 class OriginTests(unittest.TestCase):
   def test_local_and_tunneled_same_origin(self):
     allowed = operator.control_origin_allowed
