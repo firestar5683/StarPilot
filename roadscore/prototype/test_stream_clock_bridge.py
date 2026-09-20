@@ -53,5 +53,11 @@ class StreamClockBridgeTests(unittest.TestCase):
     self.assertAlmostEqual(bridge.offset,-400.)
     self.assertAlmostEqual(bridge.dac_wall(501.),101.)
 
+  def test_bluetooth_dac_estimate_can_adjust_during_silent_priming(self):
+    samples=[(100.+i*.015,500.+i*.015,500.+i*.015+.06) for i in range(8)]
+    samples[4]=(samples[4][0],samples[4][1],samples[3][2]-.002235)
+    bridge=StreamClockBridge.from_callbacks(samples)
+    self.assertAlmostEqual(bridge.offset,-400.)
+
 
 if __name__=='__main__':unittest.main()
