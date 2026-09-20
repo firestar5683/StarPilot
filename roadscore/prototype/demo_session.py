@@ -52,6 +52,7 @@ class DemoSession:
     pid = owner.get('pid')
     running = type(pid) is int and pid > 1 and self.ticks(pid) == owner.get('start_ticks') and owner.get('start_ticks') is not None
     result = {key: owner.get(key) for key in ('request_id', 'alias', 'route', 'pid', 'out', 'muted')}
+    result['screen_mirror'] = owner.get('screen_mirror') is True
     result.update(running=bool(running), generation_invoked=False)
     if owner.get('out'):
       out = Path(owner['out'])
@@ -65,17 +66,20 @@ class DemoSession:
     return result
 
   def start(self, data):
-    if (not isinstance(data, dict) or set(data) != {'alias', 'request_id', 'muted'}
+    required = {'alias', 'request_id', 'muted'}
+    if (not isinstance(data, dict) or not required <= set(data) or set(data) - required - {'screen_mirror'}
         or not isinstance(data['request_id'], str) or not re.fullmatch(r'[a-zA-Z0-9-]{8,80}', data['request_id'])
-        or type(data['muted']) is not bool):
-      raise ValueError('Saved demo requires an alias, request ID and explicit output choice')
+        or type(data['muted']) is not bool or type(data.get('screen_mirror', False)) is not bool):
+      raise ValueError('Saved demo requires an alias, request ID, explicit output choice and optional screen_mirror boolean')
+    data = {**data, 'screen_mirror': data.get('screen_mirror', False)}
     if not self.offroad():
       raise ValueError('Saved demo playback requires the vehicle to be offroad')
     selected = entry(self.root, data['alias'])
     with self.lock:
       current = self.status()
       if current['running']:
-        if current['request_id'] == data['request_id'] and current['alias'] == data['alias'] and current['muted'] == data['muted']:
+        if (current['request_id'] == data['request_id'] and current['alias'] == data['alias']
+            and current['muted'] == data['muted'] and current['screen_mirror'] == data['screen_mirror']):
           return current
         raise ValueError('A saved demo is already running; stop that owned session first')
       if read(self.owner_path).get('request_id') == data['request_id']:
@@ -91,8 +95,9 @@ class DemoSession:
                  '--score-archive', selected['archive']]
       if selected.get('curve_plan'): command += ['--curve-plan', selected['curve_plan']]
       if data['muted']: command.append('--muted')
+      if data['screen_mirror']: command.append('--screen-mirror')
       env = os.environ.copy()
-      for key in ('ZMQ', 'OPENPILOT_PREFIX', 'OPENPILOT_ZMQ_NAMESPACE', 'PARAMS_ROOT'):
+      for key in ('ZMQ', 'OPENPILOT_PREFIX', 'OPENPILOT_ZMQ_NAMESPACE', 'PARAMS_ROOT', 'ROADSCORE_MIRROR_DIR'):
         env.pop(key, None)
       env['PYTHONPATH'] = ':'.join((str(self.root/'prototype'), '/data/openpilot', '/data/roadscore-feasibility/venv/lib/python3.12/site-packages'))
       with (out/'launcher.log').open('wb') as log:

@@ -63,6 +63,19 @@ class NativePreparedTests(unittest.TestCase):
     self.assertIn('--presentation-root',args);self.assertIn('bluealsa:AA:BB',args)
     self.assertTrue(args[1].endswith('/mac_showcase.py'))
     self.assertFalse(any('ace_worker' in item or 'power_worker' in item for item in args))
+  def test_continuous_capture_is_absent_even_with_inherited_mirror_directory(self):
+    from screen_mirror import ScreenMirror
+    inherited={'ROADSCORE_MIRROR_DIR':'/old/session/mirror'}
+    for choice in ({}, {'screen_mirror':False}):
+      env=native_environment(Path(self.tmp.name),self.root,self.out,'session-123',inherited,**choice)
+      self.assertNotIn('ROADSCORE_MIRROR_DIR',env)
+      self.assertIsNone(ScreenMirror.from_environ(env))
+    self.assertEqual(inherited['ROADSCORE_MIRROR_DIR'],'/old/session/mirror')
+  def test_explicit_legacy_mirror_uses_only_this_owned_output(self):
+    env=native_environment(Path(self.tmp.name),self.root,self.out,'session-123',
+                           {'ROADSCORE_MIRROR_DIR':'/old/session/mirror'},screen_mirror=True)
+    self.assertEqual(env['ROADSCORE_MIRROR_DIR'],str(self.out/'mirror'))
+    self.assertEqual(env['ROADSCORE_REPLAY_PRIME'],'1')
   def test_native_replay_uses_only_given_local_cache(self):
     meta={'native_replay_args':['fixture','--data_dir','old','--start','149']}
     args=replay_arguments(meta,Path('/local/playback'))

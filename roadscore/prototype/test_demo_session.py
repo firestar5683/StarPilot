@@ -4,6 +4,7 @@ from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
+from unittest.mock import patch
 
 from demo_catalog import entry
 from demo_session import DemoSession, write
@@ -45,11 +46,39 @@ class SavedDemoTests(unittest.TestCase):
     command,options=self.calls[0]
     self.assertTrue(command[1].endswith('/native_prepared_showcase.py'))
     self.assertIn('--hold-start',command);self.assertIn('--muted',command)
+    self.assertNotIn('--screen-mirror',command)
+    self.assertFalse(current['screen_mirror'])
     self.assertTrue(options['close_fds']);self.assertTrue(options['start_new_session'])
     with self.assertRaises(ValueError):self.service.start({**self.request,'request_id':'different-request'})
     with self.assertRaises(ValueError):self.service.stop({'request_id':'different-request'})
     self.service.stop({'request_id':self.request['request_id']})
     self.assertEqual(self.stops,[123])
+
+  def test_capture_is_explicit_and_part_of_launch_identity(self):
+    with patch.dict('os.environ',{'ROADSCORE_MIRROR_DIR':'/inherited/mirror'}):
+      current=self.service.start({**self.request,'screen_mirror':True})
+    self.assertTrue(current['screen_mirror'])
+    command,options=self.calls[0]
+    self.assertIn('--screen-mirror',command)
+    self.assertNotIn('ROADSCORE_MIRROR_DIR',options['env'])
+    self.assertEqual(self.service.start({**self.request,'screen_mirror':True})['pid'],123)
+    with self.assertRaises(ValueError):self.service.start(self.request)
+    self.assertEqual(len(self.calls),1)
+
+  def test_optional_capture_defaults_to_false_without_inherited_activation(self):
+    with patch.dict('os.environ',{'ROADSCORE_MIRROR_DIR':'/inherited/mirror'}):
+      current=self.service.start(self.request)
+    self.assertFalse(current['screen_mirror'])
+    self.assertEqual(self.service.start({**self.request,'screen_mirror':False})['pid'],123)
+    self.assertNotIn('ROADSCORE_MIRROR_DIR',self.calls[0][1]['env'])
+    with self.assertRaises(ValueError):self.service.start({**self.request,'screen_mirror':True})
+
+  def test_capture_api_rejects_nonbooleans_and_unknown_fields_before_spawning(self):
+    for value in (None,0,1,'true','false',[],{}):
+      with self.subTest(value=value),self.assertRaises(ValueError):
+        self.service.start({**self.request,'screen_mirror':value})
+    with self.assertRaises(ValueError):self.service.start({**self.request,'mirror':True})
+    self.assertEqual(self.calls,[])
 
   def test_matching_ready_session_is_required_for_release(self):
     current=self.service.start(self.request);out=Path(current['out'])

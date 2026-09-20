@@ -67,14 +67,14 @@ def start_deadline(path, session, now):
   except (OSError, ValueError):return None
 
 
-def native_environment(project, root, out, session, inherited=None):
+def native_environment(project, root, out, session, inherited=None, *, screen_mirror=False):
   env = dict(os.environ if inherited is None else inherited)
-  for key in ('ZMQ','PARAMS_ROOT','OPENPILOT_ZMQ_NAMESPACE','ROADSCORE_PCM_RETURN','ROADSCORE_RESIDENT','ROADSCORE_GENERATION_SEED','ROADSCORE_SEED_ORIGIN'):
+  for key in ('ZMQ','PARAMS_ROOT','OPENPILOT_ZMQ_NAMESPACE','ROADSCORE_PCM_RETURN','ROADSCORE_RESIDENT','ROADSCORE_GENERATION_SEED','ROADSCORE_SEED_ORIGIN','ROADSCORE_MIRROR_DIR'):
     env.pop(key, None)
   env.update(PYTHONDONTWRITEBYTECODE='1',OPENPILOT_PREFIX='roadscore_replay',BASEDIR=str(project),PWD=str(project),NOBOARD='1',SIMULATION='1',SKIP_FW_QUERY='1',BIG='0',ROADSCORE_PREPARED_SHOWCASE='1',ROADSCORE_SHOWCASE_SESSION=session,ROADSCORE_REPLAY_UI_CONTROLS='1',ROADSCORE_CLEAN_DEMO_UI='1',ROADSCORE_OVERLAY='1',ROADSCORE_STATUS_FILE=str(out/'status.json'),ROADSCORE_UI_AUDIT=str(out/'ui_audit.jsonl'),ROADSCORE_OVERLAY_CAPTURE=str(out/'overlay.png'),ROADSCORE_AUDIO_DRAIN_FILE=str(out/'audio_drained.json'),ROADSCORE_PRESENTATION_POLICY='conservative-v4',SP_ALLOW_DESKTOP_FAKE_WIFI='0',SP_ALLOW_DESKTOP_FAKE_BLUETOOTH='0',SP_ONROAD_NAV_DEMO='0',SP_ONROAD_CEM_DEMO='0')
   paths=[HERE,project,project/'starpilot/third_party',*project.glob('*_repo'),Path('/data/roadscore-feasibility/venv/lib/python3.12/site-packages')]
   env['PYTHONPATH']=':'.join(map(str,paths))
-  env['ROADSCORE_MIRROR_DIR']=str(out/'mirror')
+  if screen_mirror:env['ROADSCORE_MIRROR_DIR']=str(out/'mirror')
   env['ROADSCORE_REPLAY_PRIME']='1'
   return env
 
@@ -132,6 +132,7 @@ def main():
   p.add_argument('--project-root',type=Path,default=Path('/data/openpilot'))
   p.add_argument('--score-archive',type=Path);p.add_argument('--curve-plan',type=Path)
   p.add_argument('--out',type=Path);p.add_argument('--muted',action='store_true');p.add_argument('--headless',action='store_true')
+  p.add_argument('--screen-mirror',action='store_true',help='Capture the native UI for the legacy screen-mirror viewer')
   p.add_argument('--check',action='store_true');p.add_argument('--hold-start',action='store_true')
   p.add_argument('--start-timeout',type=float,default=120.);p.add_argument('--duration',type=float,default=float('inf'))
   a=p.parse_args()
@@ -163,7 +164,7 @@ def main():
   for path in (py,replay,project/'selfdrive/ui/ui.py',HERE/'mac_showcase.py'):
     if not path.is_file():raise FileNotFoundError(path)
   args=replay_arguments(meta,local)
-  checked=dict(route=route,archive=str(archive),seconds=duration,local_cache=str(local),generation_invoked=False,requires_chestnut=False,replay_args=args)
+  checked=dict(route=route,archive=str(archive),seconds=duration,local_cache=str(local),generation_invoked=False,requires_chestnut=False,replay_args=args,screen_mirror=a.screen_mirror)
   if a.check:
     print(json.dumps(checked,indent=2));return
   from native_ownership import verify_offroad,DisplayOwner
@@ -187,7 +188,7 @@ def main():
       if any(path.name!='launcher.log' for path in out.iterdir()):raise ValueError('Prepared output directory must contain only its supervisor launcher.log')
     else:out.mkdir(parents=True)
     previous=install_current(root,out,session)
-    env=native_environment(project,root,out,session)
+    env=native_environment(project,root,out,session,screen_mirror=a.screen_mirror)
     env['ROADSCORE_FORCE_MUTE']='1' if muted else '0'
     Path('/dev/shm/msgq_roadscore_replay').mkdir(exist_ok=True)
     launch={**checked,'mode':'prepared-interactive-showcase','session_id':session,'muted':muted,'core_sha256':hashlib.sha256((archive/'dry.wav').read_bytes()).hexdigest(),'previous_current':str(previous) if previous else None,'curve_plan':str(a.curve_plan) if a.curve_plan else None}

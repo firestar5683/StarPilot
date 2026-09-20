@@ -114,7 +114,7 @@ def mirror_main():
   signal.signal(signal.SIGTERM,interrupt)
   try:
     launched=True
-    peer.call('demo_start',{'alias':args.route,'request_id':request_id,'muted':args.muted})
+    peer.call('demo_start',{'alias':args.route,'request_id':request_id,'muted':args.muted,'screen_mirror':True})
     url=f'http://127.0.0.1:{server.server_port}'
     print('RoadScore saved demo. No model generation. Controls and mirrored screen: '+url,flush=True)
     if not args.no_browser:subprocess.Popen(['/usr/bin/open',url],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
@@ -231,8 +231,10 @@ def native_pair_main():
   try:
     launched=True
     peer.call('demo_start',{'alias':args.route,'request_id':request_id,'muted':args.muted})
+    env=os.environ.copy()
+    env.pop('ROADSCORE_MIRROR_DIR',None)
     with (out/'mac.log').open('wb') as log:
-      process=subprocess.Popen(command,cwd=project,stdin=subprocess.DEVNULL,stdout=log,
+      process=subprocess.Popen(command,cwd=project,env=env,stdin=subprocess.DEVNULL,stdout=log,
                                stderr=subprocess.STDOUT,start_new_session=True,close_fds=True)
     print('Preparing saved RoadScore on comma and native Mac UI. No model generation.',flush=True)
     deadline=time.monotonic()+100
