@@ -13,6 +13,7 @@ import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from paired_demo_controls import DISCLOSURE, GalaxyPeer, PairedDemoControls
+from replay_sync import ReplayFollower, start_deadline, validate_follow_options
 
 HERE = Path(__file__).resolve().parent
 
@@ -21,6 +22,32 @@ def write_json(path, value):
   temporary = Path(str(path)+'.tmp')
   temporary.write_text(json.dumps(value))
   temporary.replace(path)
+
+
+def cleanup_children(children, logs):
+  # A repeated stop must not interrupt cleanup of separately owned groups.
+  signal.signal(signal.SIGTERM,signal.SIG_IGN)
+  signal.signal(signal.SIGINT,signal.SIG_IGN)
+  for child in reversed(children):
+    if child.poll() is None:
+      try:os.killpg(child.pid,signal.SIGTERM)
+      except ProcessLookupError:pass
+      except OSError as error:print('Child termination failed:',error,flush=True)
+  deadline=time.monotonic()+5.
+  for child in reversed(children):
+    try:
+      child.wait(timeout=max(0.,deadline-time.monotonic()))
+    except subprocess.TimeoutExpired:
+      try:os.killpg(child.pid,signal.SIGKILL)
+      except ProcessLookupError:pass
+      except OSError as error:print('Child force-stop failed:',error,flush=True)
+      try:child.wait(timeout=2.)
+      except subprocess.TimeoutExpired:print('Child could not be reaped:',child.pid,flush=True)
+      except (OSError,ChildProcessError) as error:print('Child reap failed:',error,flush=True)
+    except (OSError,ChildProcessError) as error:print('Child reap failed:',error,flush=True)
+  for log in logs:
+    try:log.close()
+    except OSError:pass
 
 
 def control_server(project, out, shared, port, forwarder=None, *, follow_peer=False):
@@ -146,6 +173,9 @@ def control_server(project, out, shared, port, forwarder=None, *, follow_peer=Fa
       if forwarder is not None:forwarder.close()
       super().server_close()
   server = ControlServer(('127.0.0.1',port),Handler)
+  def following_snapshot():
+    with control_lock:return following['snapshot']
+  server.following_snapshot = following_snapshot
   threading.Thread(target=server.serve_forever,daemon=True).start()
   if following['enabled']:threading.Thread(target=follow,name='galaxy-control-follower',daemon=True).start()
   return server
@@ -160,9 +190,16 @@ def audio_worker(a):
   from operator_output import PresentationDelay
   from prepared_core import load_archive, initial_frame, PreparedPresentation
   from prepared_clock import PreparedClock
+  from stream_clock_bridge import StreamClockBridge
   audio, rate, meta = load_archive(a.score_archive, a.route)
   processor = PreparedPresentation(a.score_archive, rate)
   playback_clock = PreparedClock(rate)
+  sync = ReplayFollower(a.route,meta['first_model_ns'],duration=len(audio)/rate) if a.follow_playhead else None
+  prefix = os.environ.get('OPENPILOT_PREFIX','')
+  if sync is not None and prefix != 'roadscore-showcase-'+os.environ['ROADSCORE_SHOWCASE_SESSION']:
+    raise ValueError('Playhead following requires this isolated Mac replay prefix')
+  replay_state_path = Path('/tmp/replay_state_'+prefix+'.json')
+  replay_command_path = Path('/tmp/replay_cmd_'+prefix+'.json')
   session = os.environ['ROADSCORE_SHOWCASE_SESSION']
   controls = DemoEngagement(a.out, session, 'replay')
   delay = PresentationDelay(a.presentation_root or a.out,output_provider=lambda: {'id':a.output_identity} if a.output_identity else None)
@@ -184,19 +221,27 @@ def audio_worker(a):
   rendered = None
   done = False
   errors = []
+  clock_errors = []
+  bridge = None
   flags = 0
   max_drift = 0.
   first_frame = None
+  callback_revision = 0
   shared = dict(state='PREPARING',audio_s=0.,muted=a.muted)
   def callback(out, n, ti, status):
-    nonlocal position,rendered,done,flags,max_drift,first_frame
+    nonlocal position,rendered,done,flags,max_drift,first_frame,callback_revision
     out.fill(0)
-    if anchor is None or done:return
-    now=time.monotonic();dac=now+float(ti.outputBufferDacTime-ti.currentTime)
-    expected=initial_frame(meta,anchor[0],dac-anchor[1],rate)
+    if anchor is None or bridge is None or done:return
+    now=time.monotonic()
+    active_anchor=anchor
+    expected=None;dac=None;start=position
     if status:flags+=1
     try:
-      chunk,clock_info=playback_clock.render(audio,expected,n)
+      dac=bridge.dac_wall(float(ti.outputBufferDacTime))
+      expected=initial_frame(meta,active_anchor[0],dac-active_anchor[1],rate)
+      explicit_seek=sync is not None and active_anchor[2]!=callback_revision
+      chunk,clock_info=playback_clock.render(audio,expected,n,explicit_seek=explicit_seek)
+      callback_revision=active_anchor[2]
       start=clock_info['source_frame'];position=clock_info['next_source_frame']
       if first_frame is None:first_frame=start
       max_drift=max(max_drift,abs(clock_info['pre_error_frames'])/rate)
@@ -205,16 +250,23 @@ def audio_worker(a):
       if not a.muted:out[:]=wet
       if start+n>=len(audio):done=True
     except Exception as error:
+      clock_errors.append(dict(error=repr(error),callback_wall=now,portaudio_current_time=float(ti.currentTime),
+                               portaudio_dac_time=float(ti.outputBufferDacTime),dac_wall=dac,
+                               expected_frame=expected,start_frame=start,next_source_frame=position,
+                               clock_position=playback_clock.position,anchor_model_ns=active_anchor[0],anchor_wall=active_anchor[1]))
       errors.append(repr(error));done=True
   started=None;last_status=0.
   trace=(a.out/'presentation.jsonl').open('w',buffering=1)
+  sync_trace=(a.out/'replay_sync.jsonl').open('w',buffering=1) if sync is not None else None
+  last_sync=0.
   forwarder = PairedDemoControls(GalaxyPeer(a.paired_comma,allow_lan_http=True),enabled=True) if a.paired_comma and not a.no_control_server else None
   server = None
   try:
     if not a.no_control_server:
       server = control_server(a.project_root,a.out,shared,a.port,forwarder,follow_peer=forwarder is not None)
       write_json(a.out/'controls.json',{'url':f'http://127.0.0.1:{server.server_port}/'})
-    with sd.OutputStream(device=a.audio_device,samplerate=rate,channels=2,blocksize=960,dtype='float32',callback=callback):
+    with sd.OutputStream(device=a.audio_device,samplerate=rate,channels=2,blocksize=960,dtype='float32',callback=callback) as stream:
+      bridge=StreamClockBridge.measure(lambda:stream.time)
       (a.out/'prepared_ready').write_text('ready')
       while not done:
         sm.update(50);now=time.monotonic();controls.poll()
@@ -227,14 +279,40 @@ def audio_worker(a):
         update['route_t']=state['route_t']
         if sm.updated['modelV2']:
           mono=sm.logMonoTime['modelV2']
-          if anchor is None:anchor=(mono,now);started=now
-          if abs((mono-anchor[0])/1e9-(now-anchor[1]))>.75:raise RuntimeError('Prepared showcase left its 1x replay clock')
+          if anchor is None:anchor=(mono,now,0);started=now
+          drift=(mono-anchor[0])/1e9-(now-anchor[1])
+          if sync is not None and sync.consume_reanchor(drift,now):
+            # This mode is always muted. Reset presentation filters outside the
+            # callback before publishing the new original-model/audio anchor.
+            processor=PreparedPresentation(a.score_archive,rate)
+            conductor=Conductor(handoff=True)
+            delay=PresentationDelay(a.presentation_root or a.out,output_provider=lambda: {'id':a.output_identity} if a.output_identity else None)
+            rendered=None
+            anchor=(mono,now,anchor[2]+1)
+            drift=0.
+            sync_trace.write(json.dumps(dict(wall=now,status='reanchored',source_model_ns=mono))+'\n')
+          if abs(drift)>.75:raise RuntimeError('Prepared showcase left its 1x replay clock')
           route_t=(mono-meta['first_model_ns'])/1e9
           update['route_t']=route_t
           m=sm['modelV2']
           curve=conductor.update(route_t,{'mono':mono,'eof':m.timestampEof,'t':list(m.orientationRate.t),'yaw':list(m.orientationRate.z),'v':list(m.velocity.x)},float(c.vEgo)) if fresh('modelV2') and len(m.position.t)==33 else conductor.state(route_t)
           update['curve']=staged.state(route_t,a.route,curve) if staged else curve
         state=update
+        if sync is not None and anchor is not None and now-last_sync>=.25:
+          try:
+            replay_state=json.loads(replay_state_path.read_text())
+            replay_age=time.time()-replay_state_path.stat().st_mtime
+          except (OSError,ValueError):replay_state=None;replay_age=float('inf')
+          measurement=sync.evaluate(server.following_snapshot(),sm.logMonoTime['modelV2'],received['modelV2'],
+                                    replay_state,now=now,replay_age=replay_age)
+          if measurement['command'] is not None:
+            if replay_command_path.exists():measurement.update(status='paused',reason='local_command_pending',command=None)
+            else:
+              write_json(replay_command_path,measurement['command'])
+              drift=(sm.logMonoTime['modelV2']-anchor[0])/1e9-(received['modelV2']-anchor[1])
+              sync.issued(measurement,now,drift)
+          shared['replay_sync']={key:value for key,value in measurement.items() if key!='command'}
+          sync_trace.write(json.dumps(dict(wall=now,**measurement))+'\n');last_sync=now
         if now-last_status>=.08:
           shared.update(state='READY' if anchor else 'PREPARING',audio_s=max(0,(position or 0)/rate))
           snapshot=dict(command_wall=now,input_mode='replay',compute='prepared-core',composer='ace',profile='prism',style='Prism',readiness=shared['state'],section='PREPARED PRISM',route=a.route,buffered=max(0,(len(audio)-(position or 0))/rate),presentation_session_id=session,demo_engagement_mode=controls.mode,demo_signal_mode=controls.signal_mode,engagement_presentation={'enabled':True},generation_invoked=False)
@@ -242,6 +320,7 @@ def audio_worker(a):
             snapshot.update(route_t=float(state['route_t']),elapsed=max(0,(position or 0)/rate),
                             source_model_ns=int(sm.logMonoTime['modelV2']))
           snapshot['prepared_clock']=playback_clock.snapshot()
+          if sync is not None:snapshot['replay_sync']=shared.get('replay_sync')
           snapshot=delay.apply(snapshot,rendered)
           # The command API must remain available during initial DAC lead-in.
           snapshot.setdefault('engagement_presentation',{'enabled':True})
@@ -257,8 +336,10 @@ def audio_worker(a):
           try:server.shutdown()
           finally:server.server_close()
         elif forwarder is not None:forwarder.close()
-      finally:trace.close()
-    write_json(a.out/'prepared_summary.json',dict(generation_invoked=False,source=str(a.score_archive),first_source_frame=first_frame,last_source_frame=position,sample_rate=rate,portaudio_flags=flags,max_clock_error_seconds=max_drift,prepared_clock=playback_clock.snapshot(),callback_errors=errors,muted=a.muted,session_id=session,manual_scope='isolated replay display and presentation only'))
+      finally:
+        trace.close()
+        if sync_trace is not None:sync_trace.close()
+    write_json(a.out/'prepared_summary.json',dict(generation_invoked=False,source=str(a.score_archive),first_source_frame=first_frame,last_source_frame=position,sample_rate=rate,portaudio_flags=flags,max_clock_error_seconds=max_drift,prepared_clock=playback_clock.snapshot(),stream_clock_bridge=bridge.snapshot() if bridge else None,callback_errors=errors,clock_errors=clock_errors,muted=a.muted,session_id=session,manual_scope='isolated replay display and presentation only'))
   if errors:raise RuntimeError(errors[0])
   if playback_clock.snapshot()['max_post_error_seconds']>.05:raise RuntimeError('Prepared audio clock drift remained above 50 ms after recovery')
 
@@ -293,6 +374,8 @@ def parser():
   p.add_argument('--no-control-server',action='store_true',help=argparse.SUPPRESS)
   p.add_argument('--presentation-root',type=Path,help=argparse.SUPPRESS)
   p.add_argument('--output-identity',help=argparse.SUPPRESS)
+  p.add_argument('--hold-start',action='store_true',help=argparse.SUPPRESS)
+  p.add_argument('--follow-playhead',action='store_true',help=argparse.SUPPRESS)
   def paired_url(value):
     try:GalaxyPeer(value,allow_lan_http=True)
     except ValueError as error:raise argparse.ArgumentTypeError(str(error)) from error
@@ -311,6 +394,7 @@ def main():
   if a.audio_worker:
     if a.no_control_server and a.paired_comma:raise SystemExit('Paired controls require the local control server')
     if a.port is None:a.port=0
+    validate_follow_options(a)
     return audio_worker(a)
   if a.no_control_server:raise SystemExit('--no-control-server is an internal prepared audio-worker option')
   if sys.platform!='darwin' or Path('/TICI').exists():raise SystemExit('Prepared Mac showcase runs only on the Mac')
@@ -323,6 +407,7 @@ def main():
   try:
     config=json.loads(config_path.read_text()) if config_path.is_file() else {}
     apply_showcase_config(a,config)
+    validate_follow_options(a)
   except (OSError,ValueError,TypeError) as error:raise SystemExit('Invalid prepared showcase configuration: '+str(error)) from error
   launch=json.loads((a.score_archive/'launch.json').read_text())
   if launch['route']!=a.route:raise SystemExit('Prepared score belongs to a different route')
@@ -349,6 +434,7 @@ def main():
   args=launch['native_replay_args'][:]
   args[args.index('--data_dir')+1]=str(local)
   if '--no-hw-decoder' in args:args.remove('--no-hw-decoder')
+  if a.follow_playhead and '--headless' not in args:args.append('--headless')
   write_json(out/'status.json',dict(readiness='PREPARING',style='Prism',compute='prepared-core'))
   write_json(out/'launch.json',dict(core_sha256=hashlib.sha256((a.score_archive/'dry.wav').read_bytes()).hexdigest(),curve_plan_sha256=hashlib.sha256(a.curve_plan.read_bytes()).hexdigest() if a.curve_plan else None,mode='prepared-interactive-showcase',route=a.route,source=str(a.score_archive),runtime=str(rt),native_replay_args=args,generation_invoked=False,network_required=False,session_id=session,muted=a.muted or a.headless,paired_comma=a.paired_comma,paired_controls_scope=DISCLOSURE))
   check=subprocess.run([str(py),'-c','from cereal import messaging; import sounddevice,soundfile; from prepared_core import load_archive; import sys; a,r,m=load_archive(sys.argv[1],sys.argv[2]); print("Prepared core:",len(a)/r,"seconds; local replay ready")',str(a.score_archive),a.route],cwd=rt,env=env)
@@ -366,17 +452,38 @@ def main():
     with (out/'seed.log').open('w') as log:subprocess.run([str(py),str(rt/'tools/replay/onroad_config.py'),'seed',*args],env=env,cwd=rt,stdout=log,stderr=subprocess.STDOUT,check=True)
     seed_finished=time.monotonic()
     if not a.headless:ui=start([str(py),str(HERE/'normal_ui_audit.py')],'ui')
-    audio=start([str(py),str(__file__),'--audio-worker',a.route,'--score-archive',str(a.score_archive),'--project-root',str(project),'--out',str(out),'--duration',str(a.duration),'--port',str(a.port)]+(['--curve-plan',str(a.curve_plan)] if a.curve_plan else [])+(['--muted'] if a.muted or a.headless else [])+(['--audio-device',a.audio_device] if a.audio_device else [])+(['--paired-comma',a.paired_comma] if a.paired_comma else []),'audio')
+    audio=start([str(py),str(__file__),'--audio-worker',a.route,'--score-archive',str(a.score_archive),'--project-root',str(project),'--out',str(out),'--duration',str(a.duration),'--port',str(a.port)]+(['--curve-plan',str(a.curve_plan)] if a.curve_plan else [])+(['--muted'] if a.muted or a.headless else [])+(['--audio-device',a.audio_device] if a.audio_device else [])+(['--paired-comma',a.paired_comma] if a.paired_comma else [])+(['--follow-playhead'] if a.follow_playhead else []),'audio')
     deadline=time.monotonic()+30
     while not (out/'prepared_ready').exists():
       if audio.poll() is not None or time.monotonic()>deadline:raise RuntimeError('Prepared audio did not become ready; see '+str(out/'audio.log'))
       time.sleep(.1)
+    if a.hold_start and not a.headless:
+      while not (out/'ui_audit.jsonl').is_file() or (out/'ui_audit.jsonl').stat().st_size==0:
+        if ui.poll() is not None or audio.poll() is not None or time.monotonic()>deadline:
+          raise RuntimeError('Native UI did not become ready for the held start')
+        time.sleep(.1)
     ready_at=time.monotonic()
     write_json(out/'startup.json',dict(launch_to_prepared_ready_seconds=ready_at-launch_started,local_parameter_seed_seconds=seed_finished-seed_started,generation_seconds=0.,model_loading_seconds=0.,compile_seconds=0.))
     controls_url=json.loads((out/'controls.json').read_text())['url']
     print('Replay controls:',controls_url,flush=True)
     if not a.no_browser and not a.headless:subprocess.Popen(['/usr/bin/open',controls_url],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
+    write_json(out/'demo_ready.json',dict(session_id=session,ready=True,route=a.route,held=a.hold_start))
+    if a.hold_start:
+      deadline=time.monotonic()+120.
+      while True:
+        if audio.poll() is not None or (not a.headless and ui.poll() is not None):raise RuntimeError('Prepared Mac child exited before start')
+        now=time.monotonic()
+        if now>=deadline:raise TimeoutError('Prepared Mac start barrier expired')
+        try:release=start_deadline(json.loads((out/'start.json').read_text()),session,now)
+        except (OSError,ValueError):release=None
+        if release is not None:
+          while time.monotonic()<release:
+            if audio.poll() is not None or (not a.headless and ui.poll() is not None):raise RuntimeError('Prepared Mac child exited before release')
+            time.sleep(min(.02,max(0.,release-time.monotonic())))
+          break
+        time.sleep(.05)
     replay=start([str(rt/'tools/replay/replay'),*args],'replay')
+    write_json(out/'demo_started.json',dict(session_id=session,route=a.route,wall=time.monotonic()))
     print('Prepared RoadScore showcase running locally. Ctrl+C stops it. Output:',out,flush=True)
     while audio.poll() is None:
       if replay.poll() not in (None,0):raise RuntimeError('Local replay failed; see '+str(out/'replay.log'))
@@ -384,12 +491,7 @@ def main():
       time.sleep(.2)
     if audio.returncode:raise RuntimeError('Prepared audio failed; see '+str(out/'audio.log'))
   finally:
-    for child in reversed(children):
-      if child.poll() is None:
-        os.killpg(child.pid,signal.SIGTERM)
-        try:child.wait(timeout=5)
-        except subprocess.TimeoutExpired:os.killpg(child.pid,signal.SIGKILL);child.wait()
-    for log in logs:log.close()
+    cleanup_children(children,logs)
     print('Local prepared showcase stopped.',flush=True)
 
 if __name__=='__main__':main()
