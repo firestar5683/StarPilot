@@ -185,10 +185,13 @@ def read_ready(path, route):
 
 def stop_mac(process):
   if process is not None and process.poll() is None:
-    os.killpg(process.pid,signal.SIGTERM)
-    try:process.wait(timeout=12)
+    try:os.killpg(process.pid,signal.SIGTERM)
+    except ProcessLookupError:return
+    try:process.wait(timeout=25)
     except subprocess.TimeoutExpired:
-      os.killpg(process.pid,signal.SIGKILL);process.wait(timeout=5)
+      try:os.killpg(process.pid,signal.SIGKILL)
+      except ProcessLookupError:return
+      process.wait(timeout=5)
 
 
 def native_pair_main():
@@ -231,6 +234,7 @@ def native_pair_main():
       if process.poll() is not None:raise RuntimeError('Mac replay failed to prepare; see '+str(out/'mac.log'))
       ready=peer.call('demo_ready',{})
       if ready.get('request_id')!=request_id:raise RuntimeError('Device demo ownership changed')
+      if ready.get('route')!=selected['route']:raise RuntimeError('Comma and Mac showcase routes do not match')
       if ready.get('failure'):raise RuntimeError(ready['failure'])
       if not ready.get('running'):raise RuntimeError('Saved comma demo failed to prepare')
       local=read_ready(mac_out/'demo_ready.json',selected['route'])
