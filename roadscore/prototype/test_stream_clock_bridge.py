@@ -34,5 +34,18 @@ class StreamClockBridgeTests(unittest.TestCase):
   def test_invalid_dac_timestamp_is_rejected(self):
     with self.assertRaises(ValueError):StreamClockBridge(0.,0.).dac_wall(float('nan'))
 
+  def test_silent_callbacks_calibrate_once_without_get_stream_time(self):
+    delays=[.002,.008,.003,.0003,.004,.006,.001,.002]
+    observations=[(100.+i*.02+delay,500.+i*.02,500.+i*.02+.04) for i,delay in enumerate(delays)]
+    bridge=StreamClockBridge.from_callbacks(observations)
+    self.assertAlmostEqual(bridge.offset,-399.9997)
+    self.assertAlmostEqual(bridge.dac_wall(501.04),101.0403)
+    self.assertAlmostEqual(bridge.offset_spread,.0077)
+    self.assertIsNone(bridge.uncertainty)
+
+  def test_uninitialized_or_nonadvancing_callback_clock_is_not_used(self):
+    for samples in ([(1.,0.,0.)]*8,[(1.+i*.02,500.,500.04) for i in range(8)],[]):
+      with self.assertRaises(ValueError):StreamClockBridge.from_callbacks(samples)
+
 
 if __name__=='__main__':unittest.main()

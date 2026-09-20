@@ -7,6 +7,34 @@ class StreamClockBridge:
   def __init__(self, offset, uncertainty):
     self.offset = offset
     self.uncertainty = uncertainty
+    self.source = 'bracketed-stream-time'
+    self.offset_spread = None
+
+  @classmethod
+  def from_callbacks(cls, observations):
+    """Freeze one offset from silent pre-roll, before any route is released.
+
+    Some ALSA streams report zero from stream.time until their first callback,
+    then return the latest callback timestamp. Callback entry is later than its
+    timestamp: the minimum offset minimizes that nonnegative scheduling bias.
+    It does not measure Bluetooth acoustic latency.
+    """
+    if len(observations)<8:raise ValueError('Output clock needs more silent callbacks')
+    offsets=[];previous=None
+    for wall,current,dac in observations:
+      if (not all(type(value) in (int,float) and math.isfinite(value) for value in (wall,current,dac))
+          or current<=0 or dac<=0 or not -.02<=dac-current<=5):
+        raise ValueError('Invalid callback clock sample')
+      if previous is not None and (wall<previous[0] or current<=previous[1] or dac<=previous[2]):
+        raise ValueError('Output callback clock did not advance')
+      previous=(wall,current,dac)
+      offsets.append(wall-current)
+    if observations[-1][1]-observations[0][1]<.1:
+      raise ValueError('Output callback clock observation was too short')
+    bridge=cls(min(offsets),None)
+    bridge.source='silent-callback-minimum-entry-offset'
+    bridge.offset_spread=max(offsets)-min(offsets)
+    return bridge
 
   @classmethod
   def measure(cls, stream_time, *, clock=time.monotonic, samples=5):
@@ -33,4 +61,5 @@ class StreamClockBridge:
   def snapshot(self):
     return {'portaudio_to_monotonic_seconds':self.offset,
             'measurement_uncertainty_seconds':self.uncertainty,
+            'calibration_source':self.source,'callback_offset_spread_seconds':self.offset_spread,
             'mapping':'fixed-stream-clock-offset'}
