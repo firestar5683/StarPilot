@@ -18,7 +18,11 @@ Use Galaxy for engagement and turn-signal controls. The Mac follows the same app
 
 Left, Right and Off replace the recorded turn signals until Recorded is selected again. This applies to the music, native arrows and ordinary lane-change prompts on both displays. Off releases the shaker smoothly without starting more pulses. Important native alerts retain priority. Engagement and signal selections are independent.
 
-Route1 is currently registered and ready. Route2–4 remain unavailable until their own matching core recordings are prepared and verified. Never substitute another route's music archive to bypass this check.
+Each registered alias uses its own matching route and preserved ACE/Prism performance. Replace `route1` in the command with another ready alias; no manual audio staging is needed. Readiness is recorded in the local catalog, and unprepared entries are rejected before playback. Never substitute another route's music archive to bypass this check.
+
+The event recordings are approximately 5:02 for route1, 5:06 for route2, 7:33 for route3 and 1:45 for route4. Route1 remains the primary showcase. Route3 includes an accepted-music extension at the ending: a two-second blend followed by 6.3 seconds of repeated accepted material. Route4's original recording logged one output-scheduling underflow; its saved PCM is continuous, and the subsequent 20-second saved-playback check had no output flags.
+
+Route2 completed its full saved recording on the Mac, including the recorded tail after the last road frame. Route3 and route4 use the same saved path and have separate archive checks and short playback checks; this is not a claim of full-route physical listening acceptance. Galaxy's Off, opposite-direction override and Recorded reset were checked against real route2 events on the comma, including the native arrow and prompt.
 
 The local configuration is ignored by Git: `roadscore/assets/demo_catalog.json` stores the explicit comma address, local controls port and registered routes. The comma has its own catalog pointing to persistent local assets. Each entry needs the route identity, a compatible completed archive and an optional matching curve plan. No discovery or automatic target switching occurs.
 
