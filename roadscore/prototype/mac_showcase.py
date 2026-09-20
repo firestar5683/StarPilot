@@ -6,6 +6,7 @@ import json
 import math
 import os
 from pathlib import Path
+import runpy
 import signal
 import subprocess
 import sys
@@ -496,11 +497,16 @@ def parent_main(a):
   for path in (py,rt/'tools/replay/replay',rt/'selfdrive/ui/ui.py'):
     if not path.exists():raise SystemExit('Missing existing host runtime: '+str(path))
   session=uuid.uuid4().hex
+  from replay_namespace import choose_namespace
+  # The UI also publishes services (including uiDebug), so validate the whole
+  # runtime registry rather than just the replay's --allow list.
+  namespace=choose_namespace(session,runpy.run_path(str(rt/'cereal/services.py'))['SERVICE_LIST'])
+  session=namespace.removeprefix('roadscore-showcase-')
   out=a.out or project/'roadscore/results'/('mac_showcase_'+str(int(time.time())))
   out.mkdir(parents=True,exist_ok=False)
   env=os.environ.copy()
-  env.update(PYTHONDONTWRITEBYTECODE='1',ZMQ='1',OPENPILOT_ZMQ_NAMESPACE='roadscore-showcase-'+session,ROADSCORE_SHOWCASE_SESSION=session,ROADSCORE_PREPARED_SHOWCASE='1',ROADSCORE_REPLAY_UI_CONTROLS='1',PARAMS_ROOT=str(out/'params'),BASEDIR=str(rt),NOBOARD='1',SIMULATION='1',SKIP_FW_QUERY='1',BIG='0',SP_ALLOW_DESKTOP_FAKE_WIFI='0',SP_ALLOW_DESKTOP_FAKE_BLUETOOTH='0',SP_ONROAD_NAV_DEMO='0',SP_ONROAD_CEM_DEMO='0',ROADSCORE_CLEAN_DEMO_UI='1',ROADSCORE_OVERLAY='1',ROADSCORE_STATUS_FILE=str(out/'status.json'),ROADSCORE_UI_AUDIT=str(out/'ui_audit.jsonl'),ROADSCORE_OVERLAY_CAPTURE=str(out/'overlay.png'),ROADSCORE_PRESENTATION_POLICY='conservative-v4')
-  env['OPENPILOT_PREFIX']='roadscore-showcase-'+session
+  env.update(PYTHONDONTWRITEBYTECODE='1',ZMQ='1',OPENPILOT_ZMQ_NAMESPACE=namespace,ROADSCORE_SHOWCASE_SESSION=session,ROADSCORE_PREPARED_SHOWCASE='1',ROADSCORE_REPLAY_UI_CONTROLS='1',PARAMS_ROOT=str(out/'params'),BASEDIR=str(rt),NOBOARD='1',SIMULATION='1',SKIP_FW_QUERY='1',BIG='0',SP_ALLOW_DESKTOP_FAKE_WIFI='0',SP_ALLOW_DESKTOP_FAKE_BLUETOOTH='0',SP_ONROAD_NAV_DEMO='0',SP_ONROAD_CEM_DEMO='0',ROADSCORE_CLEAN_DEMO_UI='1',ROADSCORE_OVERLAY='1',ROADSCORE_STATUS_FILE=str(out/'status.json'),ROADSCORE_UI_AUDIT=str(out/'ui_audit.jsonl'),ROADSCORE_OVERLAY_CAPTURE=str(out/'overlay.png'),ROADSCORE_PRESENTATION_POLICY='conservative-v4')
+  env['OPENPILOT_PREFIX']=namespace
   env['ROADSCORE_FULLSCREEN']='1' if a.fullscreen and not a.headless else '0'
   env['ROADSCORE_AUDIO_DRAIN_FILE']=str(out/'audio_drained.json')
   env['PWD']=str(rt)
@@ -510,7 +516,7 @@ def parent_main(a):
   if '--no-hw-decoder' in args:args.remove('--no-hw-decoder')
   if a.follow_playhead and '--headless' not in args:args.append('--headless')
   write_json(out/'status.json',dict(readiness='PREPARING',style='Prism',compute='prepared-core'))
-  write_json(out/'launch.json',dict(core_sha256=hashlib.sha256((a.score_archive/'dry.wav').read_bytes()).hexdigest(),curve_plan_sha256=hashlib.sha256(a.curve_plan.read_bytes()).hexdigest() if a.curve_plan else None,mode='prepared-interactive-showcase',route=a.route,source=str(a.score_archive),runtime=str(rt),native_replay_args=args,generation_invoked=False,network_required=False,session_id=session,muted=a.muted or a.headless,paired_comma=a.paired_comma,paired_controls_scope=DISCLOSURE))
+  write_json(out/'launch.json',dict(core_sha256=hashlib.sha256((a.score_archive/'dry.wav').read_bytes()).hexdigest(),curve_plan_sha256=hashlib.sha256(a.curve_plan.read_bytes()).hexdigest() if a.curve_plan else None,mode='prepared-interactive-showcase',route=a.route,source=str(a.score_archive),runtime=str(rt),native_replay_args=args,generation_invoked=False,network_required=False,session_id=session,zmq_namespace=namespace,muted=a.muted or a.headless,paired_comma=a.paired_comma,paired_controls_scope=DISCLOSURE))
   check=subprocess.run([str(py),'-c','from cereal import messaging; import sounddevice,soundfile; from prepared_core import load_archive; import sys; a,r,m=load_archive(sys.argv[1],sys.argv[2]); print("Prepared core:",len(a)/r,"seconds; local replay ready")',str(a.score_archive),a.route],cwd=rt,env=env)
   if check.returncode:raise SystemExit(check.returncode)
   if a.check:return

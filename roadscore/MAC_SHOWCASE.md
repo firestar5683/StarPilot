@@ -34,6 +34,8 @@ Route2 completed its full saved recording on the Mac, including the recorded tai
 
 The local configuration is ignored by Git: `roadscore/assets/demo_catalog.json` stores the explicit comma address, local controls port and registered routes. The comma has its own catalog pointing to persistent local assets. Each entry needs the route identity, a compatible completed archive and an optional matching curve plan. No discovery or automatic target switching occurs.
 
+The Mac launcher checks the complete runtime message registry before choosing its session namespace. This prevents the UI's own publishers, such as `uiDebug`, from hashing to the same TCP port as replay messages. The camera port is also reserved. The selected namespace is recorded in the Mac session's `launch.json`.
+
 The dual-native mode completed a full301.7-second FiiO audible run with Galaxy controls reaching both screens and successful cleanup. Tracking skew was85ms median and171ms at the95th percentile. Network delays sometimes paused corrections while replay continued. There were no callback or clock exceptions, but28 audio status flags and21 forward clock corrections were recorded, so completion does not establish glitch-free output. Fullscreen also passed an8-second native Mac replay check with no output flags or clock exceptions. The public JLab speaker still needs its own physical output/timing check.
 
 For a Mac-only interactive fallback, use:
