@@ -1,10 +1,11 @@
 """Presentation contracts only; these tests never import the runtime or device tools."""
 import sys
 import unittest
+from types import SimpleNamespace as NS
 from pathlib import Path
 
 sys.path.insert(0, str(Path(__file__).resolve().parents[1] / 'prototype'))
-from overlay_view import display_text, fit_text, overlay_view, hud_bounds, startup_bounds, EventPresentation
+from overlay_view import display_text, fit_text, overlay_view, hud_bounds, startup_bounds, EventPresentation, draw_panel
 
 
 class OverlayTests(unittest.TestCase):
@@ -72,18 +73,43 @@ class OverlayTests(unittest.TestCase):
     self.assertEqual(startup_bounds(536, 240, 256), (294, 172, 230, 60))
     self.assertIsNone(startup_bounds(536, 240, 306))
     self.assertIsNone(startup_bounds(320, 240))
-    self.assertEqual(hud_bounds(536, 240), (16, 88, 286, 60))
+    self.assertEqual(hud_bounds(536, 240), (170, 10, 148, 132))
 
   def test_native_slot_clears_speed_sign_driver_and_steering(self):
     x, y, width, height = hud_bounds(536, 240)
-    # Measured native screenshot + native widget dimensions, with safety margins.
-    occupied = [(8, 4, 72, 72), (160, 0, 158, 76), (328, 16, 120, 144),
+    # Native MAX is left aligned and extends through y=145, including its fade.
+    # The regression was caused by assuming this large group was centred.
+    occupied = [(0, 0, 162, 145), (328, 16, 120, 144),
                 (0, 160, 80, 80), (472, 0, 64, 240)]
     for ox, oy, ow, oh in occupied:
       self.assertTrue(x + width <= ox or ox + ow <= x or y + height <= oy or oy + oh <= y)
     self.assertLessEqual(x + width, 472)
     self.assertLessEqual(y + height, 240)
     self.assertIsNone(hud_bounds(320, 240))
+
+  def test_stacked_badge_keeps_native_sized_icon_and_labels_inside_slot(self):
+    class Canvas:
+      WHITE = (255, 255, 255, 255)
+      Color = staticmethod(lambda *value: value)
+      Vector2 = staticmethod(lambda x,y: NS(x=x,y=y))
+      Rectangle = staticmethod(lambda x,y,w,h: (x,y,w,h))
+      def __init__(self): self.texts=[];self.circles=[]
+      def measure_text_ex(self,font,text,size,spacing): return NS(x=len(text)*size*.56)
+      def draw_text_ex(self,font,text,pos,size,spacing,color): self.texts.append((text,pos,size))
+      def draw_circle(self,x,y,radius,color): self.circles.append((x,y,radius))
+      def draw_rectangle_rounded(self,*args): pass
+    canvas=Canvas()
+    state=dict(readiness='READY',compute='prepared-core',profile='prism',section='PREPARED PRISM',buffered=296)
+    draw_panel(canvas,None,state,536,240)
+    x,y,w,h=hud_bounds(536,240)
+    self.assertEqual(canvas.circles[0][2],25)
+    self.assertTrue(any(text=='RoadScore' and size==20 for text,_,size in canvas.texts))
+    self.assertTrue(any(text=='Prism' and size==16 for text,_,size in canvas.texts))
+    for text,pos,size in canvas.texts:
+      self.assertGreaterEqual(pos.x,x-1)
+      self.assertLessEqual(pos.x+canvas.measure_text_ex(None,text,size,0).x,x+w+1)
+      self.assertGreaterEqual(pos.y,y)
+      self.assertLessEqual(pos.y+size,y+h)
 
   def test_recent_linger_is_explicit_and_new_active_cue_is_immediate(self):
     presenter = EventPresentation()

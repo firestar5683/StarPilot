@@ -142,11 +142,14 @@ class EventPresentation:
 
 
 def hud_bounds(screen_width, screen_height):
-  """Accessory slot below DM/speed, left of the native speed-limit sign."""
-  width = min(286, screen_width - 64 - 144 - 16)
-  if width < 230 or screen_height < 224:
+  """Stable top-middle slot between native MAX speed and the speed-limit sign."""
+  # Mici's MAX speed group occupies the leftmost 162px, not the centre.
+  # Reserve the 64px sidebar and the sign's 144px right-hand footprint.
+  left, right = 170, screen_width - 64 - 144 - 10
+  width = min(150, right - left)
+  if width < 148 or screen_height < 224:
     return None
-  return (16, 88, width, 60)
+  return (left + (right - left - width) / 2, 10, width, 132)
 
 
 def startup_bounds(screen_width, screen_height, footer_right=188):
@@ -168,7 +171,7 @@ def draw_panel(rl, font, state, screen_width, screen_height, emphasis_font=None,
                      'DEGRADED': (255, 197, 112), 'PREPARING': (196, 204, 214)}[view['activity']]), 255)
   muted = rl.Color(235, 239, 243, 255)
   section = view['section'].removeprefix('INTENT: ').split(' > ')[0].title()
-  if section in ('Archived Score', 'Waiting For Score'):
+  if section in ('Archived Score', 'Waiting For Score', 'Prepared Prism'):
     section = ''
   identity = 'Stored' if view['stored'] else view['profile']
   subtitle = identity + (' / ' + section if section else '')
@@ -185,21 +188,34 @@ def draw_panel(rl, font, state, screen_width, screen_height, emphasis_font=None,
   elif view['activity'] == 'PREPARING':
     subtitle = 'Preparing music' if identity == 'Preparing' else identity + ' / Preparing'
   # Match the native steering wheel's 50px identity, with fixed text anchors.
-  rl.draw_circle(int(x + 25), int(y + 29), 25, rl.Color(0, 0, 0, 150))
+  icon_x, icon_y = (x, y + 4) if startup else (x + (width - 50) / 2, y)
+  rl.draw_circle(int(icon_x + 25), int(icon_y + 25), 25, rl.Color(0, 0, 0, 150))
   icon_color = accent if view['activity'] == 'DEGRADED' else rl.WHITE
-  rl.draw_circle(int(x + 14), int(y + 38), 5, icon_color)
-  rl.draw_circle(int(x + 33), int(y + 34), 5, icon_color)
+  rl.draw_circle(int(icon_x + 14), int(icon_y + 34), 5, icon_color)
+  rl.draw_circle(int(icon_x + 33), int(icon_y + 30), 5, icon_color)
   for left, top, w, h in ((17, 14, 3, 24), (36, 10, 3, 24), (17, 10, 22, 4)):
-    rl.draw_rectangle_rounded(rl.Rectangle(x + left, y + top, w, h), .2, 4, icon_color)
+    rl.draw_rectangle_rounded(rl.Rectangle(icon_x + left, icon_y + top - 4, w, h), .2, 4, icon_color)
   def text(label, top, size, face, tint, available, left=64):
     label = fit_text(label, available, lambda value: rl.measure_text_ex(face, value, size, 0).x)
     # Native HUD text uses local shadows; avoid an opaque rectangle over the road.
     for dx, dy in ((-1, 0), (1, 0), (0, -1), (0, 1), (1, 2)):
       rl.draw_text_ex(face, label, rl.Vector2(x + left + dx, y + top + dy), size, 0, rl.Color(0, 0, 0, 210))
     rl.draw_text_ex(face, label, rl.Vector2(x + left, y + top), size, 0, tint)
-  text(title, 5, 20, title_font, accent if view['activity'] == 'DEGRADED' else rl.WHITE, 118)
   reserve = '' if view['stored'] or view['buffered'] is None else f"{int(view['buffered'])}s buffer"
-  if reserve:
-    text(reserve, 11, 12, font, accent, width - 190, left=190)
-  text(subtitle, 33, 16, font, muted, width - 64)
+  if startup:
+    text(title, 5, 20, title_font, accent if view['activity'] == 'DEGRADED' else rl.WHITE, 118)
+    if reserve:
+      text(reserve, 11, 12, font, accent, width - 190, left=190)
+    text(subtitle, 33, 16, font, muted, width - 64)
+  else:
+    if view['event_state'] == 'active':
+      subtitle = subtitle.replace('Simulated ', 'Demo: ')
+    def centered(label, top, size, face, tint):
+      label = fit_text(label, width, lambda value: rl.measure_text_ex(face, value, size, 0).x)
+      left = (width - rl.measure_text_ex(face, label, size, 0).x) / 2
+      text(label, top, size, face, tint, width, left=left)
+    centered(title, 56, 20, title_font, accent if view['activity'] == 'DEGRADED' else rl.WHITE)
+    centered(subtitle, 82, 16, font, muted)
+    if reserve:
+      centered(reserve, 108, 12, font, accent)
   return view
