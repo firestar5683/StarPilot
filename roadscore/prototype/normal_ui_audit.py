@@ -14,6 +14,15 @@ UIState._update_state=replay_state
 preparation_wake=PreparationWake(os.environ.get("ROADSCORE_STATUS_FILE"),Path("/TICI").exists())
 from openpilot.selfdrive.ui.onroad.cameraview import CameraView
 from openpilot.selfdrive.ui.mici.onroad.model_renderer import ModelRenderer
+if os.environ.get('ROADSCORE_CLEAN_DEMO_UI')=='1':
+ from openpilot.selfdrive.ui.mici.onroad.augmented_road_view import StandstillTimerOverlay
+ from openpilot.selfdrive.ui.onroad.model_renderer import ModelRenderer as StandardModelRenderer
+ from openpilot.selfdrive.ui.onroad.starpilot.widgets.stopped_timer import StoppedTimerWidget
+ # Process-local presentation overrides; user settings and normal driving stay intact.
+ ModelRenderer._draw_lead_info=lambda self,*args,**kwargs:None
+ StandardModelRenderer._draw_lead_metrics=lambda self,*args,**kwargs:None
+ StandstillTimerOverlay.render=lambda self,*args,**kwargs:False
+ StoppedTimerWidget._update_timer=lambda self:0
 counts={'accepted_camera_frames':0,'path_draw_calls':0,'lane_draw_calls':0,'nonempty_path_draws':0,'nonempty_lane_draws':0,'camera_texture_draws':0};last=0.;original_update=UIState.update;original_accept=CameraView._accept_frame;original_path=ModelRenderer._draw_path;original_lanes=ModelRenderer._draw_lane_lines;original_textures=CameraView._render_textures
 out=Path(os.environ['ROADSCORE_UI_AUDIT']).open('w',buffering=1)
 def accept(self,*args,**kw):
