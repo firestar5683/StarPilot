@@ -41,9 +41,19 @@ def evaluate_passive_observer(snapshot, requested_mode):
     pandas=snapshot.get('pandas')
     if not isinstance(pandas,list) or not pandas:
         reasons.append('Actual panda safety evidence is missing');pandas=[]
+    actual_modes={p.get('safetyModel') for p in pandas if isinstance(p,dict)}
+    elm=actual_modes=={'elm327'}
+    if len(actual_modes)>1:reasons.append('Mixed panda startup safety modes are not an established passive baseline')
+    if elm:
+        startup=_mapping(snapshot.get('passive_startup'))
+        if startup.get('controls_ready') is not False:reasons.append('ELM passive baseline requires actual ControlsReady=false')
+        if startup.get('firmware_query_done') is not True:reasons.append('ELM passive baseline requires completed firmware query')
+        if startup.get('obd_multiplexing_enabled') is not False:reasons.append('ELM parameter-1 baseline requires OBD multiplexing disabled')
     for index,panda in enumerate(pandas):
         if not isinstance(panda,dict):reasons.append(f'Panda {index} evidence is malformed');continue
-        if panda.get('safetyModel')!='noOutput':reasons.append(f'Panda {index} is not actually noOutput')
+        if panda.get('safetyModel') not in ('noOutput','elm327'):reasons.append(f'Panda {index} is not in a supported passive safety mode')
+        if panda.get('safetyModel')=='elm327' and (type(panda.get('safetyParam')) is not int or panda['safetyParam']!=1):
+            reasons.append(f'Panda {index} is not the expected ELM327 parameter-1 startup state')
         if panda.get('controlsAllowed') is not False:reasons.append(f'Panda {index} permits or has unknown actuation')
         if panda.get('faults')!=[]:reasons.append(f'Panda {index} fault state is not explicitly clear')
         if panda.get('safetyRxChecksInvalid') is not False:reasons.append(f'Panda {index} safety receive checks are invalid or unknown')
@@ -60,10 +70,10 @@ def evaluate_passive_observer(snapshot, requested_mode):
     # baseline hashes. Runtime freshness/booleans are validated above, not hashed.
     material={'mode':MODE,'passive':cp.get('passive'),'notCar':cp.get('notCar'),
               'dashcamOnly':cp.get('dashcamOnly'),'configured_safety':configs,
-              'actual_panda_safety':[p.get('safetyModel') if isinstance(p,dict) else None for p in pandas]}
+              'actual_panda_safety':[{'model':p.get('safetyModel'),'parameter':p.get('safetyParam') if p.get('safetyModel')=='elm327' else 0} if isinstance(p,dict) else None for p in pandas]}
     mode_identity=hashlib.sha256(json.dumps(material,sort_keys=True,separators=(',',':')).encode()).hexdigest() if not reasons else None
     return {'mode':MODE,'safety_eligible':not reasons,'reasons':reasons,'mode_identity':mode_identity,
-            'engagement_available':False,'label':'Passive observer — vehicle engagement unavailable'}
+            'engagement_available':False,'diagnostic_tx_possible':elm,'actual_passive_variant':'elm327-diagnostic' if elm else 'noOutput','label':'Passive observer — vehicle engagement unavailable'}
 
 
 def authorization_mode_matches(record, assessment):

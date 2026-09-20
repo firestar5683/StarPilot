@@ -69,3 +69,38 @@ def test_explicit_mode_no_auto_inference_and_input_unchanged():
 def test_malformed_fields_fail_closed(field):
     snapshot=healthy();snapshot[field]=None
     assert not evaluate_passive_observer(snapshot,MODE)['safety_eligible']
+
+
+def elm_baseline():
+    snapshot=healthy();snapshot['pandas'][0].update(safetyModel='elm327',safetyParam=1)
+    snapshot['passive_startup']={'controls_ready':False,'firmware_query_done':True,'obd_multiplexing_enabled':False}
+    return snapshot
+
+
+def test_exact_upstream_passive_elm_state_is_diagnostic_not_tx_disabled():
+    result=evaluate_passive_observer(elm_baseline(),MODE)
+    assert result['safety_eligible'] and result['diagnostic_tx_possible']
+    assert result['actual_passive_variant']=='elm327-diagnostic'
+    assert not result['engagement_available']
+    nooutput=evaluate_passive_observer(healthy(),MODE)
+    assert result['mode_identity']!=nooutput['mode_identity']
+
+@pytest.mark.parametrize('field,value',[('controls_ready',True),('controls_ready',None),('firmware_query_done',False),('firmware_query_done',None),('obd_multiplexing_enabled',True),('obd_multiplexing_enabled',None)])
+def test_elm_requires_exact_observed_startup_conditions(field,value):
+    snapshot=elm_baseline();snapshot['passive_startup'][field]=value
+    assert not evaluate_passive_observer(snapshot,MODE)['safety_eligible']
+
+@pytest.mark.parametrize('parameter',(0,2,None,True,'1'))
+def test_elm_parameter_mismatch_rejected(parameter):
+    snapshot=elm_baseline();snapshot['pandas'][0]['safetyParam']=parameter
+    assert not evaluate_passive_observer(snapshot,MODE)['safety_eligible']
+
+
+def test_elm_does_not_waive_faults_or_active_flags():
+    for field,value in [('faults',['interruptRateCan2']),('controlsAllowed',True),('safetyRxChecksInvalid',True)]:
+        snapshot=elm_baseline();snapshot['pandas'][0][field]=value
+        assert not evaluate_passive_observer(snapshot,MODE)['safety_eligible']
+    snapshot=elm_baseline();snapshot['control']['latActive']=True
+    assert not evaluate_passive_observer(snapshot,MODE)['safety_eligible']
+    snapshot=elm_baseline();snapshot['pandas'].append(deepcopy(healthy()['pandas'][0]))
+    assert not evaluate_passive_observer(snapshot,MODE)['safety_eligible']
