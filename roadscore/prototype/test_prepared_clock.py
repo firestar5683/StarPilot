@@ -67,9 +67,57 @@ class PreparedClockTests(unittest.TestCase):
     _,info=clock.render(self.core,4800,960,explicit_seek=True)
     self.assertEqual(info['correction']['kind'],'explicit-seek');self.assertEqual(clock.position,5760)
     self.assertEqual(clock.explicit_seeks,1);self.assertEqual(clock.corrections,0)
-  def test_repeated_clock_instability_during_fade_is_rejected(self):
-    clock=PreparedClock();clock.render(self.core,0,960);clock.render(self.core,48000,960)
-    with self.assertRaises(ClockDiscontinuity):clock.render(self.core,96000,960)
+  def test_bounded_dac_bounce_finishes_blend_before_latest_correction(self):
+    before=self.core.copy()
+    for delta in (-3149,3149):
+      with self.subTest(delta=delta):
+        clock=PreparedClock();reference=PreparedClock()
+        for item in (clock,reference):item.render(self.core,96000,960)
+        previous=clock.position;target=previous+delta
+        first,_=clock.render(self.core,target,960)
+        reference.render(self.core,target,960)
+        # DAC estimate returns to its old trajectory midway through the fade.
+        second,deferred=clock.render(self.core,previous+960,960)
+        uninterrupted,_=reference.render(self.core,target+960,960)
+        np.testing.assert_array_equal(second,uninterrupted)
+        self.assertTrue(deferred['correction_deferred']);self.assertIsNone(deferred['correction'])
+        self.assertEqual(deferred['post_error_frames'],-delta)
+        self.assertEqual(clock.corrections,1);self.assertIsNone(clock.fade_from)
+        # Use the newest estimate, rather than the older deferred target.
+        latest=previous+1920+137
+        third,resumed=clock.render(self.core,latest,960)
+        fourth,last=clock.render(self.core,latest+960,960)
+        self.assertEqual(resumed['correction']['to_frame'],latest)
+        self.assertFalse(resumed['correction_deferred'])
+        self.assertLess(np.max(abs(third[0]-self.core[target+1920])),.001)
+        np.testing.assert_allclose(fourth[-1],self.core[latest+1919],atol=3e-8)
+        self.assertEqual(np.concatenate((first,second,third,fourth)).shape,(3840,2))
+        self.assertEqual(clock.position,latest+1920);self.assertEqual(clock.corrections,2)
+        self.assertEqual(last['post_error_frames'],0);self.assertEqual(clock.explicit_seeks,0)
+    np.testing.assert_array_equal(self.core,before)
+
+  def test_transient_deferred_estimate_is_not_applied_later(self):
+    clock=PreparedClock();clock.render(self.core,96000,960)
+    target=clock.position-3149
+    clock.render(self.core,target,960)
+    _,deferred=clock.render(self.core,target+960+3149,960)
+    self.assertTrue(deferred['correction_deferred'])
+    pcm,settled=clock.render(self.core,target+1920,960)
+    self.assertIsNone(settled['correction']);self.assertEqual(clock.corrections,1)
+    np.testing.assert_array_equal(pcm,self.core[target+1920:target+2880])
+
+  def test_out_of_bound_clock_change_during_fade_is_still_rejected(self):
+    clock=PreparedClock();clock.render(self.core,96000,960);clock.render(self.core,100800,960)
+    position=clock.position;fade=(clock.fade_from,clock.fade_done)
+    for target in (position-12001,position+5*48000+1):
+      with self.assertRaises(ClockDiscontinuity):clock.render(self.core,target,960)
+      self.assertEqual(clock.position,position);self.assertEqual((clock.fade_from,clock.fade_done),fade)
+
+  def test_explicit_seek_during_fade_is_not_deferred(self):
+    clock=PreparedClock();clock.render(self.core,96000,960);clock.render(self.core,100800,960)
+    _,info=clock.render(self.core,4800,960,explicit_seek=True)
+    self.assertEqual(info['correction']['kind'],'explicit-seek');self.assertFalse(info['correction_deferred'])
+    self.assertEqual(clock.position,5760);self.assertEqual(clock.explicit_seeks,1)
   def test_original_negative_audio_origin_and_tail_are_zero_padded(self):
     clock=PreparedClock();first,_=clock.render(self.core,-480,960)
     np.testing.assert_array_equal(first[:480],np.zeros((480,2)))

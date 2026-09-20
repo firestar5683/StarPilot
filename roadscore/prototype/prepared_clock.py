@@ -58,20 +58,24 @@ class PreparedClock:
     previous=expected_frame if initial else self.position
     delta=expected_frame-previous
     self.max_pre_error=max(self.max_pre_error,abs(delta))
-    correction=None
+    correction=None;deferred=False
     if not initial and (explicit_seek or abs(delta)>self.threshold):
       if not explicit_seek:
         if delta < -self.maximum_backward:raise ClockDiscontinuity('Prepared audio clock moved backwards beyond the output-delay recovery bound')
         if delta>self.maximum_forward:raise ClockDiscontinuity('Prepared audio clock discontinuity exceeds the recovery bound')
-        if self.fade_from is not None:raise ClockDiscontinuity('Prepared audio clock changed again during recovery')
-      kind='explicit-seek' if explicit_seek else 'backward-dac-recovery' if delta<0 else 'forward-clock-recovery'
-      correction={'kind':kind,'from_frame':previous,'to_frame':expected_frame,'delta_frames':delta,'crossfade_frames':self.fade_frames}
-      self.events.append(correction)
-      self.corrections+=not explicit_seek
-      self.explicit_seeks+=explicit_seek
-      self.fade_from=previous
-      self.fade_done=0
-      self.position=expected_frame
+        # Finish the existing blend before correcting another bounded DAC
+        # estimate change. Do not queue this target: the next callback after
+        # the fade must use its newest estimate. Bounds still apply immediately.
+        deferred=self.fade_from is not None
+      if not deferred:
+        kind='explicit-seek' if explicit_seek else 'backward-dac-recovery' if delta<0 else 'forward-clock-recovery'
+        correction={'kind':kind,'from_frame':previous,'to_frame':expected_frame,'delta_frames':delta,'crossfade_frames':self.fade_frames}
+        self.events.append(correction)
+        self.corrections+=not explicit_seek
+        self.explicit_seeks+=explicit_seek
+        self.fade_from=previous
+        self.fade_done=0
+        self.position=expected_frame
     elif initial:self.position=expected_frame
     start=self.position
     result=self._slice(core,start,frames)
@@ -89,7 +93,7 @@ class PreparedClock:
     self.max_post_error=max(self.max_post_error,abs(post_error))
     return result,{'source_frame':start,'next_source_frame':self.position,'expected_frame':expected_frame,
                    'pre_error_frames':delta,'post_error_frames':post_error,'crossfade_frames_rendered':faded,
-                   'correction':correction}
+                   'correction':correction,'correction_deferred':deferred}
 
   def snapshot(self):
     return {'next_source_frame':self.position,'corrections':self.corrections,'explicit_seeks':self.explicit_seeks,
