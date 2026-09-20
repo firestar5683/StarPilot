@@ -85,6 +85,8 @@ class SignalShaker:
   if self.stop_frame is not None:
    envelope=np.clip(1-(np.arange(start_frame,end)-self.stop_frame)/self.release,0,1).astype(np.float32)
    overlay*=envelope[:,None]
+  # Add percussion only within available sample headroom; preserve the source.
+  np.clip(overlay,-np.maximum(0.,1.+pcm),np.maximum(0.,1.-pcm),out=overlay)
   self.rendered_peak=float(np.max(np.abs(overlay),initial=0));self.rendered_active=self.rendered_peak>0
   if not self.rendered_active:return pcm
   return pcm+overlay
