@@ -1,6 +1,7 @@
 """Private native-layout route cache. Does not feed pre-analysis to RoadScore."""
 import argparse,json,os,re,shutil,hashlib
 from pathlib import Path
+from playback_cache import validated_playback
 ROOT=Path(__file__).resolve().parents[1]
 def identity(route):
  parts=route.replace('|','/').split('/')
@@ -21,9 +22,10 @@ def local_source(route,root=ROOT):
  candidates += [Path(x) for x in os.environ.get('ROADSCORE_ROUTE_PATHS','/data/media/0/realdata').split(':') if x]
  for parent in candidates:
   if (parent/'.acquiring').exists() or cache_complete(parent) is False:continue
-  if any(parent.glob(name+'--*/rlog*')) or any(parent.glob(name+'--*/qlog*')):return parent
+  if any(parent.glob(name+'--*/rlog*')) or any(parent.glob(name+'--*/qlog*')):return validated_playback(parent,route) or parent
  from cache_discovery import prepared_source
- return prepared_source(route,root)
+ parent=prepared_source(route,root)
+ return (validated_playback(parent,route) or parent) if parent is not None else None
 
 def fetch(route):
  # Same authenticated endpoints and host fallback as native replay. Never prints signed URLs.
@@ -73,7 +75,7 @@ def inventory():
    if source is None:continue
    segments=sorted(source.glob(name+'--*'),key=lambda p:int(p.name.rsplit('--',1)[1]))
    logs=all(any(x.glob('rlog*')) or any(x.glob('qlog*')) for x in segments)
-   video=all((x/'fcamera.hevc').exists() or (x/'qcamera.ts').exists() for x in segments)
+   video=all((x/'fcamera.h264').exists() or (x/'fcamera.hevc').exists() or (x/'qcamera.ts').exists() for x in segments)
    evidence=ROOT/'routes'/dongle.name/name/'acceptance.json'
    tested=json.loads(evidence.read_text()) if evidence.exists() else None
    audit_path=ROOT/'routes'/dongle.name/name/'inventory.json';audit=json.loads(audit_path.read_text()) if audit_path.exists() else {}
