@@ -14,8 +14,9 @@ from input_clock import InputClock
 from presentation_policy import effective_config,selected as presentation_policy_selected
 from engagement_presentation import EngagementPresentation,PresentationConfig,engagement_active
 from motion_presentation import MotionPresentation
-from signal_shaker import SignalShaker,assess_grid,profile_tempo_prior
+from signal_shaker import SignalShaker,profile_tempo_prior
 from core_apex import CoreApex
+from curve_reaction import CurveReaction
 from alert_accent import AlertAccent
 from rhythm_timeline import RhythmTimeline
 from presentation_status import export_status
@@ -84,7 +85,9 @@ motion=MotionPresentation(rate,enabled=motion_enabled) if motion_enabled else No
 shaker_enabled=config.get('signal_shaker',{}).get('enabled') is True
 apex_enabled=config.get('core_apex',{}).get('enabled') is True
 alert_enabled=config.get('alert_accent',{}).get('enabled') is True
-if (motion_enabled or presentation_config.enabled or shaker_enabled or apex_enabled or alert_enabled) and render_mode!='gold-core':raise ValueError('Optional presentation layers require gold-core baseline')
+curve_enabled=config.get('curve_reaction',{}).get('enabled') is True
+road_model_valid=False
+if (motion_enabled or presentation_config.enabled or shaker_enabled or apex_enabled or alert_enabled or curve_enabled) and render_mode!='gold-core':raise ValueError('Optional presentation layers require gold-core baseline')
 presentation=EngagementPresentation(rate,block) if presentation_config.enabled else None
 motion_state=(0.,False,0,0.,0)
 engagement=(False,False,0,0.,0);signal_state=(False,False,0,0.,0);alert_state=(None,False)
@@ -125,16 +128,16 @@ if config.get('gesture_layer',False) and render_mode=='current':
  gesture_grid=grid(gesture_source,rate,gesture_pulse['bpm'] if gesture_pulse['confidence']>=.25 else music_info['bpm'])
  gestures=MusicalGestures(gesture_source,rate,gesture_grid['bpm'],gesture_grid['beat_phase'])
  (run/'gesture_grid.json').write_text(json.dumps(gesture_grid))
-shaker=None;apex=None;alert_accent=None;rhythm_timeline=None
-if shaker_enabled or apex_enabled or alert_enabled:
+shaker=None;apex=None;alert_accent=None;curve_reaction=None;rhythm_timeline=None
+if shaker_enabled or apex_enabled or alert_enabled or curve_enabled:
  profile_manifest=json.loads((root/'experiments/ace_chestnut_20260916/profiles'/ace_profile/'profile.json').read_text())
- shaker_grid,shaker_analysis=assess_grid(source,rate,profile_tempo_prior(profile_manifest))
  rhythm_timeline=RhythmTimeline(rate,profile_tempo_prior(profile_manifest));rhythm_timeline.add(source,0)
  shaker_grid=rhythm_timeline.at(0)
  shaker=SignalShaker(shaker_grid,rate,enabled=shaker_enabled,peak=config.get('signal_shaker',{}).get('peak',.012))
- apex=CoreApex(shaker_grid,rate,enabled=apex_enabled,dip_db=config.get('core_apex',{}).get('dip_db',-1.))
+ apex=CoreApex(shaker_grid,rate,enabled=apex_enabled and not curve_enabled,dip_db=config.get('core_apex',{}).get('dip_db',-1.))
  alert_accent=AlertAccent(shaker_grid,rate,enabled=alert_enabled)
- (run/'shaker_grid.json').write_text(json.dumps({'grid':shaker.snapshot(),'analysis':shaker_analysis},indent=2))
+ curve_reaction=CurveReaction(shaker_grid,rate,enabled=curve_enabled)
+ (run/'shaker_grid.json').write_text(json.dumps({'grid':shaker.snapshot(),'analysis':rhythm_timeline.snapshot()},indent=2))
 if config.get('composition_control',False):
  from composition_policy import CompositionPolicy
  composition=CompositionPolicy(extended_buffer=composer=='ace')
@@ -209,6 +212,7 @@ def callback(out,n,ti,status):
   audible_grid=rhythm_timeline.at(frames-n)
   if shaker is not None:shaker.set_grid(audible_grid,frames-n)
   if apex is not None:apex.grid=audible_grid
+  if curve_reaction is not None:curve_reaction.grid=audible_grid
   if alert_accent is not None:alert_accent.grid=audible_grid
  alert_priority=False
  if alert_accent is not None:
@@ -224,6 +228,10 @@ def callback(out,n,ti,status):
   accented=apex.process(rendered,frames-n,event_state)
   if alert_priority:apex.rendered_active=False
   else:rendered=accented
+ if curve_reaction is not None:
+  curve_fresh=road_model_valid and 0<=callback_wall-command_wall<=.5
+  motion_blocked=bool(motion is not None and motion.stopped and motion.fresh)
+  rendered=curve_reaction.process(rendered,frames-n,event_state,source_fresh=curve_fresh,blocked=alert_priority or motion_blocked)
  if motion is not None:
   _,motion_fresh=engagement_active(motion_state[1],True,motion_state[2],motion_state[4],motion_state[3],callback_wall)
   rendered=motion.process(rendered,speed=motion_state[0],source_fresh=motion_fresh)
@@ -235,6 +243,7 @@ def callback(out,n,ti,status):
  if apex is not None:cue['core_apex']=apex.snapshot()
  if alert_accent is not None:cue['alert_accent']=alert_accent.snapshot()
  if motion is not None:cue.update(motion.snapshot())
+ if curve_reaction is not None:cue.update(curve_reaction.snapshot())
  rendered_presentation=dict(sequence=frames-n,callback_wall=callback_wall,
                             dac_wall=callback_wall+float(ti.outputBufferDacTime-ti.currentTime),cues=cue)
  try:capture.put_nowait((rendered,chunk,{'motion_presentation':motion.snapshot() if motion is not None else None,'signal_shaker_enabled':shaker_enabled,'signal_on':signal_on,'signal_fresh':signal_fresh,'engagement_presentation_enabled':presentation_config.enabled,'engagement_active':active,'engagement_fresh':fresh,'audio_s':(frames-n)/rate,'callback_wall':callback_wall,'command_received_wall':command_wall,'replay_origin_wall':replay_origin_wall,'dac_delay':float(ti.outputBufferDacTime-ti.currentTime),'route_t':source_time,'amount':amount,'phase':event_state['phase'],'strength':event_state.get('strength',0),'predicted_peak':event_state.get('predicted_peak'),'activation':event_state.get('activation'),'kind':event_state.get('kind','curve'),'cadence_entry_audio_s':None if ending_start is None else ending_start/rate,'runway_active':ending_start is not None and frames-n<ending_start,'muted':a.mute,'portaudio_status':str(status),'callback_processing_seconds':time.monotonic()-callback_wall}))
@@ -287,6 +296,7 @@ try:
     break
    origin=clock['origin_ns'];replay_origin_wall=clock.get('origin_wall')
    if sm.updated['modelV2']:
+    road_model_valid=bool(sm.valid['modelV2'])
     last_progress=time.monotonic();m=sm['modelV2'];now=(sm.logMonoTime['modelV2']-origin)/1e9
     if not audio_started:audio_started=True;startmono=time.monotonic()
     speed=float(sm['carState'].vEgo);available_ns=max(sm.logMonoTime.values())
@@ -417,6 +427,7 @@ try:
      engagement_on,engagement_fresh=engagement_active(engagement[1],engagement[0],engagement[2],engagement[4],engagement[3],time.monotonic())
      snapshot.update(presentation.snapshot(presentation_config,engagement_on,engagement_fresh))
     if motion is not None:snapshot.update(motion.snapshot())
+    if curve_reaction is not None:snapshot.update(curve_reaction.snapshot())
     if shaker is not None:snapshot['signal_shaker']=shaker.snapshot()
     if apex is not None:snapshot['core_apex']=apex.snapshot()
     if alert_accent is not None:snapshot['alert_accent']=alert_accent.snapshot()

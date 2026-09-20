@@ -439,7 +439,7 @@ class OutputOwner:
 
 PRESENTATION_FIELDS = ('phase', 'kind', 'amount', 'activation', 'strength', 'section', 'next_section',
                        'gesture_active', 'gesture_queued', 'turn_signal_music', 'lead', 'predicted_peak', 'scheduled',
-                       'signal_shaker', 'core_apex', 'alert_accent', 'engagement_presentation', 'motion_presentation')
+                       'signal_shaker', 'core_apex', 'alert_accent', 'engagement_presentation', 'motion_presentation', 'curve_reaction')
 
 
 class PresentationDelay:

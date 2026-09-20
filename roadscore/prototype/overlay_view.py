@@ -33,9 +33,23 @@ GESTURE_LABELS = {
 
 
 def gesture_view(state):
+  alert = state.get('alert_accent') or {}
+  if alert.get('enabled') and alert.get('rendered_active'):
+    return 'Road alert / Percussion', 'active', 'native_alert'
   engagement = state.get('engagement_presentation') or {}
   if engagement.get('enabled') and engagement.get('input_fresh') and engagement.get('rendered_state') == 'transition':
     return ('Engaged / Opening music' if engagement.get('active') else 'Disengaged / Contained music'), 'active', 'engagement'
+  motion = state.get('motion_presentation') or {}
+  if motion.get('enabled') and motion.get('input_fresh'):
+    mix, target = motion.get('rendered_open_mix'), motion.get('target_open_mix')
+    if isinstance(mix, (int, float)) and isinstance(target, (int, float)) and abs(mix-target) > .01:
+      return ('Stopped / Music contained' if motion.get('stopped') else 'Pull away / Music opens'), 'active', 'motion'
+  curve = state.get('curve_reaction') or {}
+  if curve.get('enabled') and curve.get('input_fresh'):
+    if curve.get('rendered_phase') == 'apex':
+      return 'Curve apex / Music opens', 'active', 'curve_apex'
+    if curve.get('rendered_phase') == 'build':
+      return 'Curve / Building', 'active', 'curve_prepare'
   for field, label, kind in [('core_apex', 'Curve apex / Musical breath', 'curve_apex'),
                              ('signal_shaker', 'Turn signal / Shaker', 'turn_signal'),
                              ('alert_accent', 'Road alert / Percussion', 'native_alert')]:

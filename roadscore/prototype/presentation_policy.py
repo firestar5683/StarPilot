@@ -12,7 +12,7 @@ CONSERVATIVE = {
 
 CONSERVATIVE_V2 = {**copy.deepcopy(CONSERVATIVE), 'presentation_policy_version':'conservative-v2', 'alert_accent':{'enabled':True}, 'core_apex':{'enabled':True,'dip_db':-3.}}
 
-CONSERVATIVE_V3 = {**copy.deepcopy(CONSERVATIVE_V2), 'presentation_policy_version':'conservative-v3', 'stopped_motion':{'enabled':True}, 'signal_shaker':{'enabled':True,'peak':.018}}
+CONSERVATIVE_V3 = {**copy.deepcopy(CONSERVATIVE_V2), 'presentation_policy_version':'conservative-v3', 'stopped_motion':{'enabled':True}, 'curve_reaction':{'enabled':True}, 'signal_shaker':{'enabled':True,'peak':.018}}
 
 def select_launch(composer, profile, replay=False, judging=False, render_mode=None, policy=None):
  if policy is not None and policy not in POLICIES:raise ValueError('Unknown presentation policy')
@@ -47,5 +47,5 @@ def effective_config(config,environ=None):
   result.update(copy.deepcopy(CONSERVATIVE_V3 if policy=='conservative-v3' else CONSERVATIVE_V2 if policy=='conservative-v2' else CONSERVATIVE))
   if policy=='conservative-v1':result['alert_accent']={'enabled':False}
  else:
-  result.update(presentation_policy_version='off',stopped_motion={'enabled':False},alert_accent={'enabled':False},signal_shaker={'enabled':False},core_apex={'enabled':False},engagement_presentation={'version':2,'enabled':False})
+  result.update(presentation_policy_version='off',stopped_motion={'enabled':False},curve_reaction={'enabled':False},alert_accent={'enabled':False},signal_shaker={'enabled':False},core_apex={'enabled':False},engagement_presentation={'version':2,'enabled':False})
  return result

@@ -8,6 +8,16 @@ from overlay_view import display_text, fit_text, overlay_view, hud_bounds, start
 
 
 class OverlayTests(unittest.TestCase):
+  def test_live_reactions_describe_rendered_audio(self):
+    for phase, label in [('build', 'Curve / Building'), ('apex', 'Curve apex / Music opens')]:
+      cue = dict(enabled=True, input_fresh=True, rendered_phase=phase)
+      self.assertEqual(overlay_view({'curve_reaction':cue})['event'], label)
+      cue['input_fresh'] = False
+      self.assertEqual(overlay_view({'curve_reaction':cue})['event'], '')
+    cue = dict(enabled=True,input_fresh=True,rendered_open_mix=.5,target_open_mix=1.,stopped=False)
+    self.assertEqual(overlay_view({'motion_presentation':cue})['event'], 'Pull away / Music opens')
+    self.assertEqual(overlay_view({'motion_presentation':cue,'alert_accent':dict(enabled=True,rendered_active=True)})['event'], 'Road alert / Percussion')
+
   def test_degradation_takes_priority_over_generation(self):
     for reason in ('worker_failed', 'holding_accepted_music', 'quality_failures'):
       with self.subTest(reason=reason):
