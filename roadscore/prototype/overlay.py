@@ -8,6 +8,8 @@ def install():
  if os.environ.get('ROADSCORE_OVERLAY')!='1':return
  import pyray as rl
  from openpilot.system.ui.lib.application import gui_app,FontWeight
+ from screen_mirror import ScreenMirror,read_ui_rgba
+ mirror=ScreenMirror.from_environ(os.environ)
  original=gui_app.render;last=0.;state={};raw_state={};frames=0;captured=False;capture_ready_since=None;captured_events=set();alert_clear_after=0.;native_nav_visible=False;home_footer_right=None;home_rect=None;status_mtime=None;status_read_error=None;event_presentation=EventPresentation();alert_seen_at=None;alert_captured=False
  # Observe the actual native nav card; it keeps priority over this accessory.
  from openpilot.selfdrive.ui.onroad.starpilot.navigation_card import NavigationCardRenderer
@@ -100,8 +102,15 @@ def install():
   if capture_target is not None:capture_image(capture_target)
  def render(*args,**kwargs):
   nonlocal native_nav_visible,home_footer_right,home_rect
-  for should_render in original(*args,**kwargs):
-   yield should_render
-   if should_render:draw()
-   native_nav_visible=False;home_footer_right=None;home_rect=None
+  try:
+   for should_render in original(*args,**kwargs):
+    yield should_render
+    if should_render:
+     draw()
+     if mirror is not None:
+      from openpilot.selfdrive.ui.ui_state import ui_state
+      mirror.capture(lambda:read_ui_rgba(rl,gui_app),started=bool(ui_state.started),session_id=raw_state.get('presentation_session_id'))
+    native_nav_visible=False;home_footer_right=None;home_rect=None
+  finally:
+   if mirror is not None:mirror.close()
  gui_app.render=render

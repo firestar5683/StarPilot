@@ -7,7 +7,7 @@ import time
 import unittest
 from pathlib import Path
 from types import SimpleNamespace as NS
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT/'roadscore/prototype'))
@@ -57,6 +57,8 @@ class OverlayRenderOrderTests(unittest.TestCase):
       home._render(home.rect)
       nav._render(None)
       yield True
+      state.roadscore_replay_prompt_active=True
+      yield True
     gui=NS(render=native_frames,width=536,height=240,font=lambda _:None)
     state=NS(started=True,sm={s:NS(alertSize=NS(raw=0)) for s in ('selfdriveState','starpilotSelfdriveState')})
     modules={'pyray':NS(), 'openpilot.system.ui.lib.application':NS(gui_app=gui,FontWeight=NS(NORMAL=0,SEMI_BOLD=1)),
@@ -64,9 +66,10 @@ class OverlayRenderOrderTests(unittest.TestCase):
              'openpilot.selfdrive.ui.onroad.starpilot.navigation_card':NS(NavigationCardRenderer=Nav),
              'openpilot.selfdrive.ui.ui_state':NS(ui_state=state)}
     with tempfile.TemporaryDirectory() as folder:
-      path=Path(folder)/'roadscore_status.json';path.write_text(json.dumps({'readiness':'PREPARING','profile':'prism'}))
+      path=Path(folder)/'roadscore_status.json';path.write_text(json.dumps({'readiness':'PREPARING','profile':'prism','presentation_session_id':'current-session'}))
       os.utime(path,(time.time()-300,time.time()-300))
-      with patch.dict(sys.modules,modules),patch.dict(os.environ,{'ROADSCORE_OVERLAY':'1','ROADSCORE_STATUS_FILE':str(path),'ROADSCORE_CAPTURE_TIMING':'1'}),patch.object(overlay,'draw_panel',return_value=overlay_view({'readiness':'PREPARING'})) as draw:
+      mirror=NS(capture=Mock(),close=Mock())
+      with patch('screen_mirror.ScreenMirror.from_environ',return_value=mirror),patch.dict(sys.modules,modules),patch.dict(os.environ,{'ROADSCORE_OVERLAY':'1','ROADSCORE_STATUS_FILE':str(path),'ROADSCORE_CAPTURE_TIMING':'1'}),patch.object(overlay,'draw_panel',return_value=overlay_view({'readiness':'PREPARING'})) as draw:
         overlay.install();list(gui.render())
       rows=[json.loads(line) for line in path.with_name('ui_frames.jsonl').read_text().splitlines()]
       self.assertTrue(rows[0]['overlay_visible'])
@@ -76,6 +79,12 @@ class OverlayRenderOrderTests(unittest.TestCase):
       self.assertFalse(rows[1]['overlay_visible'])
       self.assertEqual(rows[1]['overlay_hidden_reason'],'native_navigation')
       self.assertEqual(draw.call_count,1)
+      self.assertEqual(rows[2]['overlay_hidden_reason'],'native_alert')
+      self.assertEqual(mirror.capture.call_count,3)
+      for call in mirror.capture.call_args_list:
+        self.assertTrue(call.kwargs['started'])
+        self.assertEqual(call.kwargs['session_id'],'current-session')
+      mirror.close.assert_called_once()
       self.assertTrue(path.with_name('overlay_status.json').exists())
 
 
