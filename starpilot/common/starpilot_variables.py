@@ -26,7 +26,7 @@ from opendbc.car.toyota.values import CAR as TOYOTA_CAR, ToyotaStarPilotFlags
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.constants import CV
 from openpilot.common.params import Params
-from openpilot.selfdrive.controls.lib.latcontrol_torque import KP
+from openpilot.selfdrive.controls.lib.latcontrol_torque import KP, TORQUE_KP_BY_CAR
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.starpilot.common.model_versions import is_tinygrad_model_version
 from openpilot.starpilot.common.lateral_delay import full_lateral_delay
@@ -677,6 +677,9 @@ class StarPilotVariables:
     toggle.has_zss = toggle.car_make == "toyota" and bool(FPCP.flags & ToyotaStarPilotFlags.ZSS.value)
     toggle.redneck_cruise_available = bool(FPCP.redneckCruiseAvailable)
     is_angle_car = CP.steerControlType == car.CarParams.SteerControlType.angle
+    lateral_tuning = self.get_value("LateralTune")
+    toggle.nnff = self.get_value("NNFF", condition=lateral_tuning and has_nnff and not is_angle_car)
+    toggle.nnff_lite = self.get_value("NNFFLite", condition=not toggle.nnff and lateral_tuning and not is_angle_car)
     latAccelFactor = CP.lateralTuning.torque.latAccelFactor
     if not math.isfinite(latAccelFactor):
       latAccelFactor = 0.0
@@ -714,6 +717,8 @@ class StarPilotVariables:
     steerActuatorDelay = CP.steerActuatorDelay
     fullSteerActuatorDelay = full_lateral_delay(steerActuatorDelay)
     steerKp = KP
+    if is_torque_car and not is_angle_car and not (toggle.nnff or toggle.nnff_lite):
+      steerKp = TORQUE_KP_BY_CAR.get(toggle.car_model, KP)
     steerRatio = CP.steerRatio
     toggle.stoppingDecelRate = CP.stoppingDecelRate
     toggle.vEgoStarting = CP.vEgoStarting
@@ -1181,10 +1186,7 @@ class StarPilotVariables:
     toggle.lane_change_jerk_factor = min(1.0, j_req * 1.3 / 5.0)
     toggle.lane_change_time_max = 10.0 + (10 - pace) * 2.0 / 9.0
 
-    lateral_tuning = self.get_value("LateralTune")
     toggle.force_torque_controller = self.get_value("ForceTorqueController", condition=lateral_tuning and not is_angle_car)
-    toggle.nnff = self.get_value("NNFF", condition=lateral_tuning and has_nnff and not is_angle_car)
-    toggle.nnff_lite = self.get_value("NNFFLite", condition=not toggle.nnff and lateral_tuning and not is_angle_car)
     toggle.nav_desires_allowed = self.get_value("NavDesiresAllowed")
     toggle.nav_lane_positioning_allowed = self.get_value("NavLanePositioningAllowed")
     toggle.use_turn_desires = self.get_value("TurnDesires", condition=lateral_tuning)
