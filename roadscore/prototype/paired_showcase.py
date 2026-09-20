@@ -210,6 +210,10 @@ def native_pair_main():
   selected=entry(root,args.route)
   config=json.loads((root/'assets/demo_catalog.json').read_text())
   peer=DemoPeer(args.peer or config.get('paired_comma'))
+  if not args.check:
+    from mac_replay_ownership import preflight, ReplayBusy
+    try:preflight(root)
+    except ReplayBusy as error:raise SystemExit(str(error)) from error
   if peer.call('status').get('offroad') is not True:raise SystemExit('Comma must be offroad for the saved demo')
   if args.check:
     print(json.dumps({'route':selected['route'],'alias':args.route,'peer_offroad':True,
