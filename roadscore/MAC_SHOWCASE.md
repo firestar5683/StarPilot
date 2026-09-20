@@ -20,6 +20,14 @@ Left, Right and Off replace the recorded turn signals until Recorded is selected
 
 Each registered alias uses its own matching route and preserved ACE/Prism performance. Replace `route1` in the command with another ready alias; no manual audio staging is needed. Readiness is recorded in the local catalog, and unprepared entries are rejected before playback. Never substitute another route's music archive to bypass this check.
 
+The separately registered `route5` option uses route1's same footage with an explicitly staged gold-seed soundtrack. Its opening comes from the preserved original seed33602, followed by that recording's existing continuations. This is saved standalone music with real replay-driven presentation, not a claim that the music was freshly composed for route1. Its manifest pins the original route recording's clock, ending and hashes, and requires exactly the same sample count. Route1 remains the unchanged default.
+
+```sh
+./onroad --roadscore route5 --demo --fullscreen
+```
+
+Route5 retains engagement and motion effects throughout. Signal motifs are most reliable after25 seconds; uncertain musical grids suppress rhythmic additions. The curve near2:01.5 retains its bass build/return but omits the extra quantized cut/impact. Route1 retains its original staging.
+
 The event recordings are approximately 5:02 for route1, 5:06 for route2, 7:33 for route3 and 1:45 for route4. Route1 remains the primary showcase. Route3 includes an accepted-music extension at the ending: a two-second blend followed by 6.3 seconds of repeated accepted material. Route4's original recording logged one output-scheduling underflow; its saved PCM is continuous, and the subsequent 20-second saved-playback check had no output flags.
 
 Route2 completed its full saved recording on the Mac, including the recorded tail after the last road frame. Route3 and route4 use the same saved path and have separate archive checks and short playback checks; this is not a claim of full-route physical listening acceptance. Galaxy's Off, opposite-direction override and Recorded reset were checked against real route2 events on the comma, including the native arrow and prompt.
@@ -40,6 +48,8 @@ Compatible archives contain `dry.wav`, `launch.json`, `audio_blocks.jsonl`, `rep
 
 Both saved launchers support `--muted`, `--duration SECONDS` and `--no-browser`. Paired `--check` contacts Galaxy to verify the target is offroad; independent `--check` validates local prerequisites only. The controls server binds to loopback and refuses an occupied port. The paired target must be an explicit private IPv4 address on Galaxy port 8082.
 
-The independent mode can follow Galaxy controls with `--paired-comma URL`, but controls alone do not synchronize playback. The paired `--demo` launcher additionally holds both starts and enables playhead following. The Mac follows the comma; it never adjusts the comma's audio clock to match its screen. `--demo --screen-mirror` explicitly enables JPEG capture for the earlier browser mirror. Normal paired playback does not capture or encode a video feed.
+The independent mode can follow Galaxy controls with `--paired-comma URL`, but controls alone do not synchronize playback. The paired `--demo` launcher additionally holds both starts and enables playhead following. The Mac follows the comma; it never adjusts the comma's audio clock to match its screen. If the Mac replay fails after playback begins, the launcher records a degraded display and lets healthy comma audio finish. Startup failure, native failure, ownership changes and Ctrl+C still stop the owned pair. `--demo --screen-mirror` explicitly enables JPEG capture for the earlier browser mirror. Normal paired playback does not capture or encode a video feed.
+
+Prepared native Bluetooth playback requests250ms of output buffering while retaining20ms callbacks. The backend may round this request; both requested and actual latency are recorded in `prepared_summary.json`, along with callback gaps, processing times and underflow flags. DAC timestamps continue to drive presentation timing, so no second manual delay is added for this queue. Mac, system-speaker and calibration defaults are unchanged.
 
 Ordinary `./onroad --roadscore route1` remains the fresh-generation path. Gold music and historical recordings are preserved. The deliverable is interactive replay; an MP4 is not a substitute.
