@@ -167,7 +167,7 @@ class Operator:
               'reason':'' if available else 'Start a RoadScore replay to simulate displayed engagement, signals and music.'}
     if available:
       result['route'] = state['route']
-      result['readiness'] = state.get('readiness')
+      if state.get('readiness') in STATES:result['readiness'] = state['readiness']
       result['compute'] = state.get('compute')
       result['status_age_seconds'] = time.monotonic()-stamp
       values = {key:state.get(key) for key in ('route_t','elapsed','source_model_ns')}

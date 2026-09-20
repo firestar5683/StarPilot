@@ -17,7 +17,7 @@ CONSERVATIVE_V3 = {**copy.deepcopy(CONSERVATIVE_V2), 'presentation_policy_versio
 CONSERVATIVE_V4 = {**copy.deepcopy(CONSERVATIVE_V3),
  'presentation_policy_version':'conservative-v4',
  'curve_reaction':{'enabled':True,'bass_build':True},
- 'signal_shaker':{'enabled':True,'peak':.055,'after_containment':True,'contained_gain':.45},
+ 'signal_shaker':{'enabled':True,'peak':.14,'accented':True,'after_containment':True,'contained_gain':.8},
  'engagement_presentation':{'version':2,'enabled':True,'attack_ms':220,'release_ms':650,
                           'cutoff_hz':1000.,'width':.55,'gain':.6683439},
 }

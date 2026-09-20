@@ -55,7 +55,7 @@ class PreparedPresentation:
     rows = json.loads((Path(archive)/'rhythm_timeline.json').read_text())
     self.rhythm.entries = tuple((int(row['start_frame']), int(row['end_frame']), ShakerGrid(**row['grid'])) for row in rows)
     grid = self.rhythm.at(0)
-    self.shaker = SignalShaker(grid, rate, enabled=True, peak=config['signal_shaker'].get('peak', .018))
+    self.shaker = SignalShaker(grid, rate, enabled=True, peak=config['signal_shaker'].get('peak', .018),accented=config['signal_shaker'].get('accented',False))
     self.curve = CurveReaction(grid, rate, enabled=True, bass_build=config.get('curve_reaction', {}).get('bass_build', False))
     self.alert = AlertAccent(grid, rate, enabled=True)
     self.contained_gain = config['signal_shaker'].get('contained_gain', 1.)

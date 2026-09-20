@@ -141,7 +141,7 @@ if shaker_enabled or apex_enabled or alert_enabled or curve_enabled:
  profile_manifest=json.loads((root/'experiments/ace_chestnut_20260916/profiles'/ace_profile/'profile.json').read_text())
  rhythm_timeline=RhythmTimeline(rate,profile_tempo_prior(profile_manifest));rhythm_timeline.add(source,0)
  shaker_grid=rhythm_timeline.at(0)
- shaker=SignalShaker(shaker_grid,rate,enabled=shaker_enabled,peak=config.get('signal_shaker',{}).get('peak',.012))
+ shaker=SignalShaker(shaker_grid,rate,enabled=shaker_enabled,peak=config.get('signal_shaker',{}).get('peak',.012),accented=config.get('signal_shaker',{}).get('accented',False))
  apex=CoreApex(shaker_grid,rate,enabled=apex_enabled and not curve_enabled,dip_db=config.get('core_apex',{}).get('dip_db',-1.))
  alert_accent=AlertAccent(shaker_grid,rate,enabled=alert_enabled)
  curve_reaction=CurveReaction(shaker_grid,rate,enabled=curve_enabled,bass_build=config.get('curve_reaction',{}).get('bass_build') is True)
