@@ -39,7 +39,7 @@ def validated_playback(parent,route):
       if source==target:
         if before.st_size!=after.st_size:return None
       else:
-        if source.suffix!='.hevc' or target.suffix!='.h264' or source.stem!=target.stem:return None
+        if source.name!='fcamera.hevc' or target.name not in ('fcamera.h264','fcamera.ts'):return None
         if (derived/source).exists():return None
         video=entry['video_validation']
         if (type(video['source_frames']) is not int or video['source_frames']<=0

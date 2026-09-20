@@ -25,6 +25,12 @@ class PlaybackCacheTests(unittest.TestCase):
   (self.parent/'playback/playback_manifest.json').write_text(json.dumps(self.manifest))
  def test_normal_path_selects_complete_derived_cache(self):
   self.assertEqual(local_source(ROUTE,self.root),self.parent/'playback')
+ def test_transport_stream_container_is_selected(self):
+  for entry in self.manifest['files']:
+   if entry['path'].endswith('.h264'):
+    original=self.parent/'playback'/entry['path'];entry['path']=entry['path'].replace('.h264','.ts')
+    original.rename(self.parent/'playback'/entry['path'])
+  self.save();self.assertEqual(local_source(ROUTE,self.root),self.parent/'playback')
  def test_stale_source_falls_back(self):
   (self.parent/self.manifest['files'][0]['source']).write_bytes(b'changed!')
   self.assertEqual(local_source(ROUTE,self.root),self.parent)
