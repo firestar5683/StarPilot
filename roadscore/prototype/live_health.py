@@ -25,7 +25,7 @@ def identity(value):
 
 
 def local_model_placement(metadata, active, loading):
-  return metadata.get("uses_external_gpu") is False and active in (b"0", "0") and loading in (b"0", "0")
+  return metadata.get("uses_external_gpu") is False and (active is False or active in (b"0", "0")) and (loading is False or loading in (b"0", "0"))
 
 
 def evaluate(snapshot, record, now):

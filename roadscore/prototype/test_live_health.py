@@ -23,6 +23,8 @@ def authorization():
 class Tests(unittest.TestCase):
  def test_model_placement_requires_actual_runtime_flags(self):
   self.assertTrue(local_model_placement({"uses_external_gpu":False},b"0",b"0"))
+  self.assertTrue(local_model_placement({"uses_external_gpu":False},False,False))
+  self.assertFalse(local_model_placement({"uses_external_gpu":False},None,False))
   for active,loading in ((None,b"0"),(b"1",b"0"),(b"0",None),(b"0",b"1")):
    self.assertFalse(local_model_placement({"uses_external_gpu":False},active,loading))
   self.assertFalse(local_model_placement({},b"0",b"0"))
