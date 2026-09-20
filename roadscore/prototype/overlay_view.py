@@ -38,16 +38,16 @@ def gesture_view(state):
     return 'Road alert / Percussion', 'active', 'native_alert'
   demo = state.get('replay_demo') or {}
   signal = demo.get('signal_mode')
-  if signal in ('left', 'right', 'off'):
+  if signal in ('left', 'right'):
     shaker = state.get('signal_shaker') or {}
-    description = 'Shaker' if shaker.get('rendered_active') else 'Replay signal' if signal != 'off' else 'Recorded signals muted'
-    title = f'Simulated {signal}' + (' shaker' if shaker.get('rendered_active') else '')
+    description = 'Shaker' if shaker.get('rendered_active') else 'Replay signal'
+    title = f'{signal.title()} signal'
     return f'{title} / {description}', 'active', 'simulated_signal'
   engagement = state.get('engagement_presentation') or {}
   if engagement.get('enabled') and not engagement.get('simulated') and engagement.get('input_fresh') and engagement.get('rendered_state') == 'transition':
     return ('Engaged / Opening music' if engagement.get('active') else 'Disengaged / Contained music'), 'active', 'engagement'
   if engagement.get('enabled') and engagement.get('simulated'):
-    return ('Simulated engage / Music opens' if engagement.get('active') else 'Simulated disengage / Music contained'), 'active', 'simulated_engagement'
+    return ('Music opens' if engagement.get('active') else 'Music contained'), 'active', 'simulated_engagement'
   motion = state.get('motion_presentation') or {}
   if motion.get('enabled') and motion.get('input_fresh'):
     mix, target = motion.get('rendered_open_mix'), motion.get('target_open_mix')
@@ -208,8 +208,6 @@ def draw_panel(rl, font, state, screen_width, screen_height, emphasis_font=None,
       text(reserve, 11, 12, font, accent, width - 190, left=190)
     text(subtitle, 33, 16, font, muted, width - 64)
   else:
-    if view['event_state'] == 'active':
-      subtitle = subtitle.replace('Simulated ', 'Demo: ')
     def centered(label, top, size, face, tint):
       label = fit_text(label, width, lambda value: rl.measure_text_ex(face, value, size, 0).x)
       left = (width - rl.measure_text_ex(face, label, size, 0).x) / 2

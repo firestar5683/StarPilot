@@ -9,11 +9,29 @@ from overlay_view import display_text, fit_text, overlay_view, hud_bounds, start
 
 
 class OverlayTests(unittest.TestCase):
-  def test_simulation_label_survives_engagement_ramp(self):
+  def test_simulated_engagement_describes_music_and_preserves_event_metadata(self):
     for active in (False, True):
       view = overlay_view({'engagement_presentation':dict(enabled=True,simulated=True,active=active,input_fresh=True,rendered_state='transition')})
       self.assertEqual(view['event_kind'], 'simulated_engagement')
-      self.assertTrue(view['event'].startswith('Simulated '))
+      self.assertEqual(view['event'], 'Music opens' if active else 'Music contained')
+
+  def test_manual_signal_off_is_not_a_music_event_or_roadscore_off_state(self):
+    state = dict(readiness='READY', profile='prism', replay_demo={'signal_mode':'off'})
+    self.assertEqual(overlay_view(state)['event'], '')
+    self.assertEqual(overlay_view(state)['activity'], 'READY')
+    state['curve_reaction'] = dict(enabled=True,input_fresh=True,rendered_phase='build')
+    self.assertEqual(overlay_view(state)['event'], 'Curve / Building')
+    state['engagement_presentation'] = dict(enabled=True,simulated=True,active=False)
+    self.assertEqual(overlay_view(state)['event'], 'Music contained')
+
+  def test_manual_signal_names_direction_without_claiming_inaudible_shaker(self):
+    for signal in ('left', 'right'):
+      for rendered in (False, True):
+        state = dict(replay_demo={'signal_mode':signal}, signal_shaker={'rendered_active':rendered})
+        view = overlay_view(state)
+        self.assertEqual(view['event'].split(' / ')[0], signal.title() + ' signal')
+        self.assertEqual('Shaker' in view['event'], rendered)
+        self.assertEqual(view['event_kind'], 'simulated_signal')
   def test_live_reactions_describe_rendered_audio(self):
     for phase, label in [('build', 'Curve / Building'), ('apex', 'Curve apex / Music opens')]:
       cue = dict(enabled=True, input_fresh=True, rendered_phase=phase)
