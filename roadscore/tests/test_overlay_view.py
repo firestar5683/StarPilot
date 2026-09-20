@@ -8,6 +8,11 @@ from overlay_view import display_text, fit_text, overlay_view, hud_bounds, start
 
 
 class OverlayTests(unittest.TestCase):
+  def test_simulation_label_survives_engagement_ramp(self):
+    for active in (False, True):
+      view = overlay_view({'engagement_presentation':dict(enabled=True,simulated=True,active=active,input_fresh=True,rendered_state='transition')})
+      self.assertEqual(view['event_kind'], 'simulated_engagement')
+      self.assertTrue(view['event'].startswith('Simulated '))
   def test_live_reactions_describe_rendered_audio(self):
     for phase, label in [('build', 'Curve / Building'), ('apex', 'Curve apex / Music opens')]:
       cue = dict(enabled=True, input_fresh=True, rendered_phase=phase)

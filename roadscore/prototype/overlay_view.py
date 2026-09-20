@@ -37,8 +37,10 @@ def gesture_view(state):
   if alert.get('enabled') and alert.get('rendered_active'):
     return 'Road alert / Percussion', 'active', 'native_alert'
   engagement = state.get('engagement_presentation') or {}
-  if engagement.get('enabled') and engagement.get('input_fresh') and engagement.get('rendered_state') == 'transition':
+  if engagement.get('enabled') and not engagement.get('simulated') and engagement.get('input_fresh') and engagement.get('rendered_state') == 'transition':
     return ('Engaged / Opening music' if engagement.get('active') else 'Disengaged / Contained music'), 'active', 'engagement'
+  if engagement.get('enabled') and engagement.get('simulated'):
+    return ('Simulated engage / Music opens' if engagement.get('active') else 'Simulated disengage / Music contained'), 'active', 'simulated_engagement'
   motion = state.get('motion_presentation') or {}
   if motion.get('enabled') and motion.get('input_fresh'):
     mix, target = motion.get('rendered_open_mix'), motion.get('target_open_mix')
