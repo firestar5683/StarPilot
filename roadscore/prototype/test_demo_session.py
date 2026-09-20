@@ -69,5 +69,15 @@ class SavedDemoTests(unittest.TestCase):
     self.assertEqual(self.stops,[])
     with self.assertRaises(ValueError):self.service.start(self.request)
 
+  def test_prepared_playback_reserves_output_from_calibration(self):
+    from operator_output import playback_process_active
+    proc=self.root/'proc';child=proc/'45';child.mkdir(parents=True)
+    for command in (b'python\0/data/roadscore/prototype/native_prepared_showcase.py\0--demo',
+                    b'python\0/data/roadscore/prototype/mac_showcase.py\0--audio-worker'):
+      (child/'cmdline').write_bytes(command)
+      self.assertTrue(playback_process_active(proc))
+    (child/'cmdline').write_bytes(b'python\0/data/roadscore/prototype/worker_service.py')
+    self.assertFalse(playback_process_active(proc))
+
 
 if __name__=='__main__':unittest.main()

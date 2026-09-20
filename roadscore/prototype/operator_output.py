@@ -100,7 +100,8 @@ def playback_process_active(proc=Path('/proc')):
       if not path.name.isdigit():continue
       try:cmd=(path/'cmdline').read_bytes().replace(b'\0',b' ')
       except OSError:continue
-      if any(name in cmd for name in (b'/prototype/app.py',b'/prototype/stored_score.py')):return True
+      if any(name in cmd for name in (b'/prototype/app.py',b'/prototype/stored_score.py',b'/prototype/native_prepared_showcase.py')):return True
+      if b'/prototype/mac_showcase.py' in cmd and b'--audio-worker' in cmd:return True
   except OSError:return True
   return False
 
