@@ -6,6 +6,8 @@ import re
 import subprocess
 import sys
 
+PCM_NAME = 'roadscore_bluetooth'
+
 ADDRESS = re.compile(r'^(?:[0-9A-F]{2}:){5}[0-9A-F]{2}$')
 
 
@@ -43,14 +45,15 @@ def prepare_output(directory, *, env=None, reader=real_selection,
     raise ValueError('A valid system ALSA configuration file is required')
   path=Path(directory).resolve()/'roadscore-bluealsa.conf'
   path.parent.mkdir(parents=True, exist_ok=True)
-  config=f'<{base}>\n\ndefaults.bluealsa.!device "{address}"\ndefaults.bluealsa.!profile "a2dp"\n'
+  config=(f'<{base}>\n\npcm.{PCM_NAME} {{\n  type bluealsa\n  device "{address}"\n'
+          '  profile "a2dp"\n  hint { show on description "RoadScore selected Bluetooth speaker" }\n}\n')
   # Exclusive creation protects existing configuration and keeps the change process-local.
   with path.open('x') as handle:
     os.chmod(path, 0o600)
     handle.write(config)
   env['ALSA_CONFIG_PATH']=str(path)
   return {'bluetooth_selected':True, 'address':address, 'output_identity':f'bluealsa:{address}',
-          'profile':'a2dp', 'sample_rate':48000, 'channels':2, 'alsa_config':str(path),
+          'profile':'a2dp', 'pcm_name':PCM_NAME, 'sample_rate':48000, 'channels':2, 'alsa_config':str(path),
           'timing_source':'PortAudio host/backend estimate; not measured acoustic Bluetooth latency',
           'physical_latency_ms':None}
 
@@ -59,8 +62,8 @@ def select_device(devices, metadata):
   if not metadata.get('bluetooth_selected'):
     return None
   matches=[index for index, device in enumerate(devices)
-           if str(device.get('name', '')).strip().lower()=='bluealsa'
+           if str(device.get('name', '')).strip().lower()==metadata.get('pcm_name', PCM_NAME)
            and device.get('max_output_channels', 0)>=2]
   if len(matches)!=1:
-    raise RuntimeError('Selected Bluetooth speaker requires one stereo BlueALSA output; no speaker fallback')
+    raise RuntimeError('Selected Bluetooth speaker requires one selected RoadScore Bluetooth PCM; no speaker fallback')
   return matches[0]

@@ -13,13 +13,15 @@ class BluetoothOutputTests(unittest.TestCase):
    meta=prepare_output(Path(d)/'run',env=env,reader=lambda _:dict(enabled=True,address='aa:bb:cc:dd:ee:ff'),alsa_base=base,loaded_modules={})
    text=Path(env['ALSA_CONFIG_PATH']).read_text()
    self.assertIn(f'<{base}>',text)
-   self.assertIn('defaults.bluealsa.!device "AA:BB:CC:DD:EE:FF"',text)
+   self.assertIn('pcm.roadscore_bluetooth {',text)
+   self.assertIn('device "AA:BB:CC:DD:EE:FF"',text)
+   self.assertNotIn('defaults.bluealsa',text)
    self.assertEqual(base.read_text(),'system config')
    self.assertEqual(env['OPENPILOT_PREFIX'],'replay')
    self.assertIsNone(meta['physical_latency_ms'])
-   self.assertEqual(select_device([{'name':'default','max_output_channels':2},{'name':'bluealsa','max_output_channels':128}],meta),1)
+   self.assertEqual(select_device([{'name':'default','max_output_channels':2},{'name':'roadscore_bluetooth','max_output_channels':128}],meta),1)
  def test_missing_or_ambiguous_bluetooth_does_not_fallback(self):
-  for devices in [[],[{'name':'default','max_output_channels':2}], [{'name':'bluealsa','max_output_channels':1}], [{'name':'bluealsa','max_output_channels':2}]*2]:
+  for devices in [[],[{'name':'default','max_output_channels':2}], [{'name':'bluealsa','max_output_channels':128}], [{'name':'roadscore_bluetooth','max_output_channels':1}], [{'name':'roadscore_bluetooth','max_output_channels':2}]*2]:
    with self.assertRaises(RuntimeError):select_device(devices,{'bluetooth_selected':True})
  def test_disabled_does_not_touch_configuration(self):
   env={};self.assertEqual(prepare_output('/unused',env=env,reader=lambda _:dict(enabled=False)),{'bluetooth_selected':False});self.assertEqual(env,{})
