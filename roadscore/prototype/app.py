@@ -1,5 +1,5 @@
 """Runtime: cereal inputs only; no route-file access. Bench audio and private status UI."""
-import argparse,json,time,threading,queue,traceback,signal,os,gc,shutil
+import argparse,json,time,threading,queue,traceback,signal,os,gc,shutil,sys
 from pathlib import Path
 import numpy as np
 import soundfile as sf
@@ -26,6 +26,7 @@ def terminate(sig,frame):raise KeyboardInterrupt
 signal.signal(signal.SIGTERM,terminate)
 root=Path(a.root)
 run=root/'results/current';run.mkdir(parents=True,exist_ok=True)
+(run/'audio_drained.json').unlink(missing_ok=True)
 output_metadata={'bluetooth_selected':False,'muted':a.mute}
 if Path('/TICI').exists() and not a.mute and os.environ.get('ROADSCORE_PCM_RETURN')!='1':
  from bluetooth_output import prepare_output
@@ -407,6 +408,9 @@ try:
    if time.monotonic()-last_progress>15:raise RuntimeError('Replay model input stalled')
 finally:
  audio_started=False
+ stream.close()
+ drained={'drained':sys.exc_info()[0] is None,'wall':time.monotonic(),'reason':'stream_closed' if sys.exc_info()[0] is None else 'failed','pid':os.getpid()}
+ drain_tmp=run/'audio_drained.tmp';drain_tmp.write_text(json.dumps(drained));drain_tmp.replace(run/'audio_drained.json')
  if rhythm_timeline is not None:(run/'rhythm_timeline.json').write_text(json.dumps(rhythm_timeline.snapshot(),indent=2))
  if alert_accent is not None:(run/'alert_accent_events.json').write_text(json.dumps(alert_accent.events,indent=2))
  if apex is not None:(run/'core_apex_events.json').write_text(json.dumps(apex.events,indent=2))
@@ -415,7 +419,7 @@ finally:
  if composition:(run/'composition.json').write_text(json.dumps({'events':composition.events,**composition.snapshot(frames/rate)},indent=2))
  if songform:
   (run/'song_form.json').write_text(json.dumps({'decisions':songform.events,'waveform_events':section_bank.events,'experimental':True,'human_listening_verified':False},indent=2))
- (run/'gc_events.json').write_text(json.dumps(gc_events));gc.callbacks.remove(gc_audit);gc.unfreeze();load_pool.shutdown();stop.set();record_thread.join(timeout=5);trace.close();stream.close()
+ (run/'gc_events.json').write_text(json.dumps(gc_events));gc.callbacks.remove(gc_audit);gc.unfreeze();load_pool.shutdown();stop.set();record_thread.join(timeout=5);trace.close()
  if export:export.close()
  (run/'summary.json').write_text(json.dumps({'audio_seconds':frames/rate,'fallbacks':fallbacks,'underflows':underflows,'generation':generation,'safe_extensions':safe_extensions,'emergency_fallbacks':fallbacks,'accepted_music_holds':len(safe_extensions),'total_fallback_events':fallbacks+len(safe_extensions),'quality_failures':quality_failures,'discarded_jobs':discarded_jobs,'arrival_at':arrival_at},indent=2))
  print('Audio complete',frames/rate,'fallbacks',fallbacks,'underflows',underflows,flush=True)
