@@ -50,13 +50,19 @@ def busy(path):
     return True
 
 
-def real_offroad():
-  env=os.environ.copy()
-  for key in ('OPENPILOT_PREFIX','PARAMS_ROOT','ZMQ'):env.pop(key,None)
+def real_offroad(params=Path('/data/params/d')):
+  # Native Params uses /data/params + /d and getBool compares exact bytes to "1".
+  # Explicit paths deliberately ignore the replay process's Params namespace.
   try:
-    code='from openpilot.common.params import Params; p=Params(); print(int(p.get_bool("IsOffroad") and not p.get_bool("IsOnroad")))'
-    return subprocess.check_output(['/usr/local/venv/bin/python','-c',code],cwd='/data/openpilot',env=env,text=True,timeout=3).strip()=='1'
-  except (OSError,subprocess.SubprocessError):return False
+    return (params/'IsOffroad').read_bytes()==b'1' and (params/'IsOnroad').read_bytes()==b'0'
+  except OSError:return False
+
+
+def real_bluetooth_selection(params=Path('/data/params/d')):
+  try:
+    return {'enabled':(params/'BluetoothEnabled').read_bytes()==b'1',
+            'address':(params/'BluetoothAudioAddress').read_text().strip()}
+  except (OSError,UnicodeError):return {'enabled':False,'address':''}
 
 
 def describe_output(selected,status):
@@ -70,10 +76,9 @@ def describe_output(selected,status):
 
 
 def selected_output():
-  from bluetooth_output import real_selection
   try:
     from openpilot.starpilot.system.bluetooth.protocol import BluetoothClient
-    selected=real_selection()
+    selected=real_bluetooth_selection()
     status=BluetoothClient(timeout=2).status()
     return describe_output(selected,BluetoothClient.serialize_status(status))
   except (OSError,ValueError,ImportError,subprocess.SubprocessError):return None
@@ -173,8 +178,8 @@ class OutputOwner:
     if not self.offroad():
       raise ValueError('Park before changing RoadScore')
 
-  def status(self):
-    output = self.output_provider()
+  def status(self, output=None, supplied=False):
+    output = output if supplied else self.output_provider()
     muted = (self.root / '.session-muted').exists() or os.environ.get('ROADSCORE_FORCE_MUTE') == '1'
     active = playback_process_active() or busy(self.root / 'generated/session.lock')
     worker = read(self.root / 'generated/ace_worker_state.json')
@@ -203,14 +208,15 @@ class OutputOwner:
         session['operator_lease'].__exit__(None, None, None)
 
   def _check_session(self, token):
+    # Potentially slow BlueZ IPC must not serialize the tap/poll handlers.
+    output=self.output_provider();parked=self.offroad();playing=playback_process_active()
     with self.lock:
       session = self.session
       if session is None or session['token'] != token:
         return False
-      output = self.output_provider()
-      if (not self.offroad() or self.clock() > session['deadline'] or
+      if (not parked or self.clock() > session['deadline'] or
           self.clock() - session['last_client'] > 7 or not output or output['id'] != session['output']['id'] or
-          output['muted'] or not output['connected'] or playback_process_active() or session['sink'].failed or
+          output['muted'] or not output['connected'] or playing or session['sink'].failed or
           (self.root / '.session-muted').exists() or os.environ.get('ROADSCORE_FORCE_MUTE') == '1'):
         self._close()
         return False
@@ -224,9 +230,10 @@ class OutputOwner:
         return
 
   def dispatch(self, action, **data):
+    if action=='status':
+      output=self.output_provider()
+      with self.lock:return self.status(output=output,supplied=True)
     with self.lock:
-      if action == 'status':
-        return self.status()
       if action == 'clock':
         return dict(ok=True, server_ms=self.clock() * 1000)
       if action == 'calibration_cancel':

@@ -131,6 +131,33 @@ class OutputTests(unittest.TestCase):
     failure=json.loads((self.root/'generated/calibration_failure.json').read_text())
     self.assertIn('PortAudioError',failure['error'])
 
+  def test_real_params_reads_ignore_replay_namespace_and_fail_closed(self):
+    import os
+    params=self.root/'real';params.mkdir()
+    with patch.dict(os.environ,{'OPENPILOT_PREFIX':'replay','PARAMS_ROOT':'/not-real'}),patch.object(m.subprocess,'check_output',side_effect=AssertionError('No subprocess')):
+      self.assertFalse(m.real_offroad(params))
+      (params/'IsOffroad').write_bytes(b'1');(params/'IsOnroad').write_bytes(b'0')
+      self.assertTrue(m.real_offroad(params))
+      (params/'IsOnroad').write_bytes(b'1');self.assertFalse(m.real_offroad(params))
+      (params/'BluetoothEnabled').write_bytes(b'1');(params/'BluetoothAudioAddress').write_text('AA:BB:CC:DD:EE:FF')
+      self.assertEqual(m.real_bluetooth_selection(params)['address'],'AA:BB:CC:DD:EE:FF')
+
+  def test_slow_watchdog_output_lookup_does_not_block_taps(self):
+    import threading,time
+    token=self.owner.dispatch('calibration_start',attended=True)['session']
+    for i in range(9):self.owner.session['sink'].callback(i,100000+i*600)
+    self.clock.value=105.
+    entered=threading.Event();release=threading.Event()
+    def slow():entered.set();release.wait(2);return self.output
+    self.owner.output_provider=slow
+    thread=threading.Thread(target=self.owner._check_session,args=(token,));thread.start();self.assertTrue(entered.wait(1))
+    start=time.perf_counter()
+    self.owner.dispatch('calibration_poll',session=token)
+    self.owner.dispatch('calibration_tap',session=token,server_ms=105000,uncertainty_ms=3)
+    elapsed=time.perf_counter()-start
+    release.set();thread.join(2)
+    self.assertLess(elapsed,.1)
+
   def test_selected_speaker_identity_never_falls_back(self):
     selected=dict(enabled=True,address='AA:BB:CC:DD:EE:FF')
     status=dict(enabled=True,powered=True,devices=[dict(address='11:22:33:44:55:66',name='Other',connected=True,audio=True)])
