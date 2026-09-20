@@ -90,7 +90,7 @@ args=[a.routeid,'--allow',services,'--start',str(a.start),'--no-loop','--headles
 if local:args+=['--data_dir',str(local)]
 if native:args+=['--no-hw-decoder']
 display=None;children=[];named_children={};failure=None;logs=[];launch_started=time.monotonic()
-print(('Preparing stored score replay; no generation. ' if a.replay else ('Preparing ACE replay; first preparation may take 10–15 minutes. ' if a.composer=='ace' else 'Preparing RoadScore replay; cold preparation can take 2–3 minutes. '))+('Host speaker enabled.' if a.audible else 'Muted host capture.'),flush=True)
+print(('Preparing stored score replay; no generation. ' if a.replay else 'Preparing RoadScore; waiting for accepted audio. ')+('Speaker output enabled.' if a.audible else 'Muted capture.'),flush=True)
 def launch(cmd,name,**kw):
  f=(out/(name+'.log')).open('wb');logs.append(f);c=subprocess.Popen(cmd,stdout=f,stderr=f,env=env,cwd=rt,start_new_session=True,**kw);children.append(c);named_children[name]=c;return c
 try:
