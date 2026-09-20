@@ -1,4 +1,4 @@
-import { RoadScore } from "./views/RoadScore.js?v=calibration-bars-2"
+import { RoadScore } from "./views/RoadScore.js?v=calibration-markers-3"
 import { createApp, h } from "vue"
 import { AppShell } from "./components/AppShell.js?v=roadscore-calibration-2"
 import { Home } from "./views/Home.js"
