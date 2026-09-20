@@ -39,6 +39,29 @@ class PreparedClockTests(unittest.TestCase):
     for target in (0,position+6*48000):
       with self.assertRaises(ClockDiscontinuity):clock.render(self.core,target,960)
       self.assertEqual(clock.position,position)
+
+  def test_measured_65ms_bluetooth_delay_correction_crossfades(self):
+    # Saved0217 failed with next8757465 vs expected8754316: 3149 frames,
+    # or65.60ms backwards in the estimated DAC clock, not in model messages.
+    clock=PreparedClock();clock.render(self.core,96000,960)
+    previous=clock.position;target=previous-3149
+    first,info=clock.render(self.core,target,960)
+    second,last=clock.render(self.core,target+960,960)
+    self.assertEqual(info['correction']['kind'],'backward-dac-recovery')
+    self.assertEqual(info['correction']['delta_frames'],-3149)
+    self.assertEqual(first.shape,(960,2));self.assertEqual(second.shape,(960,2))
+    self.assertLess(np.max(abs(first[0]-self.core[previous])),.001)
+    np.testing.assert_allclose(second[-1],self.core[target+1919],atol=3e-8)
+    self.assertEqual(last['post_error_frames'],0)
+    self.assertEqual(clock.explicit_seeks,0);self.assertEqual(clock.corrections,1)
+    self.assertIsNone(clock.fade_from)
+
+  def test_reverse_clock_recovery_has_a_separate_small_bound(self):
+    clock=PreparedClock();clock.render(self.core,96000,960)
+    before=clock.position
+    with self.assertRaises(ClockDiscontinuity):clock.render(self.core,before-12001,960)
+    self.assertEqual(clock.position,before)
+    with self.assertRaises(ValueError):PreparedClock(maximum_backward_seconds=1.)
   def test_explicit_seek_can_rebase_backwards(self):
     clock=PreparedClock();clock.render(self.core,96000,960)
     _,info=clock.render(self.core,4800,960,explicit_seek=True)
