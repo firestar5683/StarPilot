@@ -3,7 +3,7 @@ import json
 from pathlib import Path
 import tempfile
 import unittest
-from live_health import evaluate,LiveHealth,SERVICES,METRICS
+from live_health import evaluate,LiveHealth,SERVICES,METRICS,local_model_placement
 
 
 def sample(now=100.):
@@ -21,6 +21,12 @@ def authorization():
 
 
 class Tests(unittest.TestCase):
+ def test_model_placement_requires_actual_runtime_flags(self):
+  self.assertTrue(local_model_placement({"uses_external_gpu":False},b"0",b"0"))
+  for active,loading in ((None,b"0"),(b"1",b"0"),(b"0",None),(b"0",b"1")):
+   self.assertFalse(local_model_placement({"uses_external_gpu":False},active,loading))
+  self.assertFalse(local_model_placement({},b"0",b"0"))
+  self.assertFalse(local_model_placement({"uses_external_gpu":True},b"0",b"0"))
  def test_genuine_bounds_and_authorization(self):
   d=sample();o,a=evaluate(d,authorization(),100.)
   self.assertTrue(o.modeld_healthy and o.device_healthy and o.chestnut_healthy and a.user_authorized)

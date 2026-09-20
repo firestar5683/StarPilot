@@ -24,6 +24,10 @@ def identity(value):
   return hashlib.sha256(json.dumps(value,sort_keys=True,separators=(',',':')).encode()).hexdigest()
 
 
+def local_model_placement(metadata, active, loading):
+  return metadata.get("uses_external_gpu") is False and active in (b"0", "0") and loading in (b"0", "0")
+
+
 def evaluate(snapshot, record, now):
   ages=snapshot.get('ages',{});valid=snapshot.get('valid',{})
   # These are stale-input guards, not performance/coexistence acceptance limits.
@@ -126,7 +130,7 @@ class LiveHealth:
       owner=owner and fields[0]!='Z' and int(fields[19])/os.sysconf('SC_CLK_TCK')<=link['monotonic']<=now
     except (OSError,ValueError,KeyError,IndexError,TypeError):owner=False
     return {'monotonic':now,'car_identity':car_info,'car_id':identity(car_info),'baseline_id':identity({'git':build,'model':model,'version':version}),
-            'git_commit':build,'driving_model':model,'driving_model_version':version,'driving_model_local':load_model_artifact_metadata(model).get('uses_external_gpu') is False,
+            'git_commit':build,'driving_model':model,'driving_model_version':version,'driving_model_local':local_model_placement(load_model_artifact_metadata(model),self.params.get('UsbGpuActive'),self.params.get('UsbGpuLoading')),
             'chestnut_present':chestnut_firmware_ready(),'model_geometry_valid':len(m.get('position',{}).get('t',[]))==33,'ages':ages,'valid':valid,'car':payload['carState'],'device':d,'pandas':pandas,'events':events,
             'calibration':payload['liveCalibration'].get('calStatus'),'processes':processes,'metrics':metrics,'link':link,'link_owner_verified':bool(owner)}
 
