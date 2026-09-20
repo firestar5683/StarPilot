@@ -165,12 +165,13 @@ def local_start_deadline(release, request_id, peer_session, sent, received):
   return deadline
 
 
-def mac_command(project, alias, selected, peer_url, out, duration):
+def mac_command(project, alias, selected, peer_url, out, duration, *, fullscreen=False):
   command = [str(project/'onroad'),'--roadscore',alias,'--prepared-showcase',
              '--score-archive',selected['archive'],'--paired-comma',peer_url,
              '--muted','--no-browser','--port','0','--hold-start','--follow-playhead',
              '--out',str(out),'--duration',str(duration)]
   if selected.get('curve_plan'):command += ['--curve-plan',selected['curve_plan']]
+  if fullscreen:command.append('--fullscreen')
   return command
 
 
@@ -200,6 +201,7 @@ def native_pair_main():
   parser.add_argument('route',nargs='?',default='route1')
   parser.add_argument('--muted',action='store_true');parser.add_argument('--check',action='store_true')
   parser.add_argument('--no-browser',action='store_true',help=argparse.SUPPRESS)
+  parser.add_argument('--fullscreen',action='store_true',help='Fill the Mac display with the native replay')
   parser.add_argument('--peer');parser.add_argument('--duration',type=float,default=float('inf'))
   args=parser.parse_args()
   if math.isnan(args.duration) or args.duration<=0:raise SystemExit('Duration must be positive')
@@ -216,7 +218,7 @@ def native_pair_main():
   out=root/'results'/('paired_showcase_'+request_id)
   out.mkdir(parents=True,exist_ok=False)
   mac_out=out/'mac'
-  command=mac_command(project,args.route,selected,peer.peer.base_url,mac_out,args.duration)
+  command=mac_command(project,args.route,selected,peer.peer.base_url,mac_out,args.duration,fullscreen=args.fullscreen)
   (out/'launch.json').write_text(json.dumps(dict(request_id=request_id,route=selected['route'],
       command=command,archive=selected['archive'],generation_invoked=False,screen_mirror=False,muted=args.muted),indent=2))
   process=None;launched=False;began=time.monotonic()

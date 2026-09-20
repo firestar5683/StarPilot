@@ -43,6 +43,11 @@ class NativePairTests(unittest.TestCase):
       path.write_text(json.dumps({'ready':True,'route':'route','session_id':'local'}))
       self.assertEqual(read_ready(path,'route')['session_id'],'local')
 
+  def test_fullscreen_is_forwarded_only_to_local_native_window(self):
+    command=mac_command(Path('/project'),'route1',{'archive':'/protected/core'},
+                        'http://192.168.1.2:8082',Path('/owned/mac'),12.,fullscreen=True)
+    self.assertIn('--fullscreen',command)
+
 
 class MirrorControlTests(unittest.TestCase):
   def setUp(self):
