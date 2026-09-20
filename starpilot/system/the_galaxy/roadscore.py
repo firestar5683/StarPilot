@@ -11,6 +11,27 @@ PROFILES = [{"id": "prism", "name": "Prism"}, {"id": "aurora", "name": "Aurora"}
 STATES = {"COLD", "PREPARING", "READY", "GENERATING", "DEGRADED"}
 
 
+def control_origin_allowed(origin, host, scheme, fetch_site=None):
+  # Browser-owned Fetch Metadata preserves same-origin identity through Galaxy's
+  # reverse tunnel, whose internal Host differs from the public page address.
+  if fetch_site and fetch_site != 'same-origin':
+    return False
+  if not origin:
+    return True
+  try:
+    source = urlsplit(origin)
+    target = urlsplit(f'{scheme}://{host}')
+    if source.scheme not in {'http', 'https'} or not source.hostname or source.username or source.password or source.path or source.query or source.fragment:
+      return False
+    source_port = source.port or (443 if source.scheme == 'https' else 80)
+    target_port = target.port or (443 if target.scheme == 'https' else 80)
+  except ValueError:
+    return False
+  if fetch_site == 'same-origin':
+    return True
+  return (source.scheme, source.hostname, source_port) == (target.scheme, target.hostname, target_port)
+
+
 def read_json(path):
   try:
     value = json.loads(path.read_text())
@@ -177,7 +198,7 @@ def register(app, params):
   @app.route('/api/roadscore/<action>', methods=['POST'])
   def roadscore_operation(action):
     origin = request.headers.get('Origin')
-    if origin and urlsplit(origin).netloc != request.host:
+    if not control_origin_allowed(origin, request.host, request.scheme, request.headers.get('Sec-Fetch-Site')):
       return jsonify(error='Cross-origin controls are not allowed'), 403
     if not request.is_json:
       return jsonify(error='JSON request required'), 415

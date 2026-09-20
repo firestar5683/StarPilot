@@ -11,6 +11,24 @@ def load(name):
   return module
 operator = load('roadscore')
 
+class OriginTests(unittest.TestCase):
+  def test_local_and_tunneled_same_origin(self):
+    allowed = operator.control_origin_allowed
+    self.assertTrue(allowed('http://192.168.8.156:8082', '192.168.8.156:8082', 'http'))
+    self.assertTrue(allowed('https://galaxy.firestar.link', 'device.devices.local', 'http', 'same-origin'))
+    self.assertTrue(allowed('http://localhost:80', 'localhost', 'http'))
+    self.assertTrue(allowed(None, 'localhost', 'http'))
+
+  def test_cross_origin_and_opaque_origins_denied(self):
+    allowed = operator.control_origin_allowed
+    for origin in ['null', 'https://unrelated.example', 'http://localhost:8082', 'https://localhost']:
+      self.assertFalse(allowed(origin, 'localhost', 'http'))
+    for site in ['cross-site', 'same-site', 'none']:
+      self.assertFalse(allowed('http://localhost', 'localhost', 'http', site))
+    for origin in ['null', 'http://user@localhost', 'http://localhost/path', 'http://localhost:bad']:
+      self.assertFalse(allowed(origin, 'localhost', 'http', 'same-origin'))
+
+
 class OperatorTests(unittest.TestCase):
   def test_validation(self):
     for value in [True, 1.5, -501, 1501, float('nan'), '100']:
