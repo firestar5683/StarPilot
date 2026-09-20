@@ -16,6 +16,7 @@ class CameraServer {
 public:
   CameraServer(std::pair<int, int> camera_size[MAX_CAMERAS] = nullptr);
   ~CameraServer();
+  bool primeFrame(CameraType type, FrameReader* fr, const Event *event);
   void pushFrame(CameraType type, FrameReader* fr, const Event *event);
   void waitForSent();
 

@@ -2,6 +2,9 @@
 
 #include <capnp/dynamic.h>
 #include <csignal>
+#include <cstdlib>
+#include <stdexcept>
+#include "tools/replay/startup_prime.h"
 #include "cereal/services.h"
 #include "common/params.h"
 #include "tools/replay/util.h"
@@ -18,6 +21,8 @@ Replay::Replay(const std::string &route, std::vector<std::string> allow, std::ve
                SubMaster *sm, uint32_t flags, const std::string &data_dir, bool auto_source)
     : sm_(sm), flags_(flags), seg_mgr_(std::make_unique<SegmentManager>(route, flags, data_dir, auto_source)) {
   std::signal(SIGUSR1, interrupt_sleep_handler);
+  const char *prime = std::getenv("ROADSCORE_REPLAY_PRIME");
+  startup_prime_ = prime && std::string(prime) == "1";
 
   if (!(flags_ & REPLAY_FLAG_ALL_SERVICES)) {
     block.insert(block.end(), {"bookmarkButton", "uiDebug", "userBookmark"});
@@ -91,7 +96,9 @@ void Replay::interruptStream(const std::function<bool()> &update_fn) {
   }
   {
     interrupt_requested_ = true;
+    const uint64_t lock_start = nanos_since_boot();
     std::unique_lock lock(stream_lock_);
+    if (startup_prime_) rInfo("REPLAY_STREAM_INTERRUPT_WAIT seconds=%.6f", (nanos_since_boot() - lock_start) / 1e9);
     events_ready_ = update_fn();
     interrupt_requested_ = user_paused_;
   }
@@ -125,6 +132,15 @@ void Replay::seekTo(double seconds, bool relative) {
 void Replay::checkSeekProgress() {
   if (!seg_mgr_->getEventData()->isSegmentLoaded(current_segment_.load())) return;
 
+  if (startup_prime_ && !startup_primed_) {
+    std::vector<int> available, loaded;
+    for (const auto &[n, unused] : seg_mgr_->route_.segments()) available.push_back(n);
+    for (const auto &[n, unused] : seg_mgr_->getEventData()->segments) loaded.push_back(n);
+    if (!startup_cache_ready(available, loaded, current_segment_.load(), seg_mgr_->segment_cache_limit_)) {
+      rInfo("REPLAY_STARTUP_CACHE_WAIT loaded=%zu cache=%d", loaded.size(), seg_mgr_->segment_cache_limit_);
+      return;
+    }
+  }
   double seek_to = seeking_to_.exchange(-1.0, std::memory_order_acquire);
   if (seek_to >= 0 && onSeekedTo) {
     onSeekedTo(seek_to);
@@ -270,11 +286,29 @@ void Replay::streamThread() {
       continue;
     }
 
+    if (startup_prime_ && !startup_primed_) {
+      const uint64_t prime_start = nanos_since_boot();
+      if (camera_server_) {
+        auto camera = std::find_if(first, events.cend(), [](const Event &e) {
+          return e.which == cereal::Event::ROAD_ENCODE_IDX && e.eidx_segnum >= 0;
+        });
+        if (camera == events.cend()) throw std::runtime_error("Startup prime has no road camera event");
+        auto segment = event_data_->segments.find(camera->eidx_segnum);
+        if (segment == event_data_->segments.end() || !segment->second->frames[RoadCam] ||
+            !camera_server_->primeFrame(RoadCam, segment->second->frames[RoadCam].get(), &*camera)) {
+          throw std::runtime_error("Startup road camera prime failed");
+        }
+      }
+      startup_primed_ = true;
+      rInfo("REPLAY_STARTUP_PRIMED seconds=%.6f", (nanos_since_boot() - prime_start) / 1e9);
+    }
     auto it = publishEvents(first, events.cend());
 
     // Ensure frames are sent before unlocking to prevent race conditions
     if (camera_server_) {
+      const uint64_t drain_start = nanos_since_boot();
       camera_server_->waitForSent();
+      if (startup_prime_) rInfo("REPLAY_CAMERA_DRAIN seconds=%.6f", (nanos_since_boot() - drain_start) / 1e9);
     }
 
     if (it == events.cend() && !hasFlag(REPLAY_FLAG_NO_LOOP)) {
@@ -317,6 +351,7 @@ std::vector<Event>::const_iterator Replay::publishEvents(std::vector<Event>::con
     // - A negative time_diff may indicate slow execution or system wake-up,
     // - A time_diff exceeding 1 second suggests a skipped segment.
     if ((time_diff < -1e9 || time_diff >= 1e9) || speed_ != prev_replay_speed) {
+      if (startup_prime_) rWarning("REPLAY_CLOCK_REANCHOR lag_seconds=%.6f", -time_diff / 1e9);
       evt_start_ts = evt.mono_time;
       loop_start_ts = current_nanos;
       prev_replay_speed = speed_;

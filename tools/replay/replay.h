@@ -85,6 +85,8 @@ private:
   std::mutex stream_lock_;
   bool user_paused_ = false;
   std::condition_variable stream_cv_;
+  bool startup_prime_ = false;
+  std::atomic<bool> startup_primed_ = false;
   std::atomic<int> current_segment_ = 0;
   std::atomic<double> seeking_to_ = -1.0;
   std::atomic<bool> exit_ = false;

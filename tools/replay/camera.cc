@@ -105,6 +105,15 @@ VisionBuf *CameraServer::getFrame(Camera &cam, FrameReader *fr, int32_t segment_
   return nullptr;
 }
 
+bool CameraServer::primeFrame(CameraType type, FrameReader *fr, const Event *event) {
+  // Before first publication the camera queue is empty; decode without sending a future frame.
+  waitForSent();
+  capnp::FlatArrayMessageReader reader(event->data);
+  auto evt = reader.getRoot<cereal::Event>();
+  auto eidx = capnp::AnyStruct::Reader(evt).getPointerSection()[0].getAs<cereal::EncodeIndex>();
+  return getFrame(cameras_[type], fr, eidx.getSegmentId(), eidx.getFrameId()) != nullptr;
+}
+
 void CameraServer::pushFrame(CameraType type, FrameReader *fr, const Event *event) {
   auto &cam = cameras_[type];
   if (cam.width != fr->width || cam.height != fr->height) {
