@@ -25,7 +25,7 @@ class StreamClockBridge:
       if (not all(type(value) in (int,float) and math.isfinite(value) for value in (wall,current,dac))
           or current<=0 or dac<=0 or not -.02<=dac-current<=5):
         raise ValueError('Invalid callback clock sample')
-      if previous is not None and (wall<previous[0] or current<=previous[1] or dac<=previous[2]):
+      if previous is not None and (wall<previous[0] or current<previous[1] or dac<=previous[2]):
         raise ValueError('Output callback clock did not advance')
       previous=(wall,current,dac)
       offsets.append(wall-current)

@@ -47,5 +47,11 @@ class StreamClockBridgeTests(unittest.TestCase):
     for samples in ([(1.,0.,0.)]*8,[(1.+i*.02,500.,500.04) for i in range(8)],[]):
       with self.assertRaises(ValueError):StreamClockBridge.from_callbacks(samples)
 
+  def test_coreaudio_batch_may_repeat_current_time_while_dac_advances(self):
+    samples=[(100.+i*.02,500.+(i//2)*.04,500.1+i*.02) for i in range(8)]
+    bridge=StreamClockBridge.from_callbacks(samples)
+    self.assertAlmostEqual(bridge.offset,-400.)
+    self.assertAlmostEqual(bridge.dac_wall(501.),101.)
+
 
 if __name__=='__main__':unittest.main()
