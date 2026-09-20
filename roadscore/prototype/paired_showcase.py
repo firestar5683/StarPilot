@@ -260,6 +260,7 @@ def native_pair_main():
     print('Galaxy: '+peer.peer.base_url+'/mobile/#/roadscore',flush=True)
     print('Session evidence: '+str(out),flush=True)
     started=time.monotonic()
+    mac_finished=False
     while time.monotonic()-started<args.duration:
       current=peer.call('demo_ready',{})
       if current.get('request_id')!=request_id:raise RuntimeError('Device demo ownership changed')
@@ -267,19 +268,14 @@ def native_pair_main():
       if not current.get('running'):
         if current.get('complete'):break
         raise RuntimeError('Device demo stopped before completion')
-      if process.poll() is not None:
-        # Both route streams reach EOF independently; permit a short final tail.
-        if process.returncode:raise RuntimeError('Mac native replay failed; see '+str(out/'mac.log'))
-        print('Mac replay completed; waiting for comma audio to drain.',flush=True)
-        tail=time.monotonic()+5
-        while time.monotonic()<tail:
-          current=peer.call('demo_ready',{})
-          if current.get('request_id')!=request_id:raise RuntimeError('Device demo ownership changed')
-          if current.get('failure'):raise RuntimeError(current['failure'])
-          if current.get('complete'):break
-          time.sleep(.25)
-        if not current.get('complete'):raise RuntimeError('Mac replay ended before comma playback completed')
-        break
+      if not mac_finished and (code:=process.poll()) is not None:
+        mac_finished=True
+        degraded=dict(state='DEGRADED',component='mac_display',returncode=code,
+                      request_id=request_id,wall=time.monotonic(),native_audio='continuing',
+                      log=str(out/'mac.log'))
+        try:(out/'mac_display.json').write_text(json.dumps(degraded,indent=2))
+        except OSError as error:print('Could not record Mac display status: '+str(error),flush=True)
+        print('Mac replay '+('failed' if code else 'ended')+'; comma audio continues to its own end. See '+str(out/'mac.log'),flush=True)
       time.sleep(.5)
   finally:
     # A second interrupt must not abandon the native windows or owned peer.
