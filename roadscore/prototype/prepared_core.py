@@ -66,6 +66,9 @@ class RecordedTail:
 def load_archive(path, route):
   path = Path(path)
   launch = json.loads((path/'launch.json').read_text())
+  if launch.get('render_mode') == 'staged-demo-music':
+    from staged_music import load_staged_music
+    return load_staged_music(path, route, launch, load_archive)
   origin = json.loads((path/'replay_origin.json').read_text())
   if launch.get('route') != route or launch.get('render_mode') != 'gold-core':
     raise ValueError('Prepared showcase requires matching route and original ACE core render')
