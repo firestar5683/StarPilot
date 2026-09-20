@@ -79,7 +79,7 @@ def audio_worker(a):
   conductor = Conductor(handoff=True)
   staged = None
   plan_path = a.curve_plan
-  if plan_path is not None and plan_path.exists():
+  if plan_path is not None:
     from demo_curve_plan import ReplayCurvePlan
     value = json.loads(plan_path.read_text())
     if value['route'] != a.route or value['replay_start'] != int(meta['native_replay_args'][meta['native_replay_args'].index('--start')+1]):
@@ -120,6 +120,7 @@ def audio_worker(a):
     except Exception as error:
       errors.append(repr(error));done=True
   started=None;last_status=0.
+  trace=(a.out/'presentation.jsonl').open('w',buffering=1)
   try:
     with sd.OutputStream(device=a.audio_device,samplerate=rate,channels=2,blocksize=960,dtype='float32',callback=callback):
       (a.out/'prepared_ready').write_text('ready')
@@ -146,11 +147,12 @@ def audio_worker(a):
           snapshot=delay.apply(snapshot,rendered)
           # The command API must remain available during initial DAC lead-in.
           snapshot.setdefault('engagement_presentation',{'enabled':True})
-          write_json(a.out/'status.json',snapshot);last_status=now
+          write_json(a.out/'status.json',snapshot)
+          trace.write(json.dumps({**snapshot,'audio_s':shared['audio_s']})+'\n');last_status=now
         if started and now-started>=a.duration:break
         if started and now-received['modelV2']>2 and (position or 0)/rate < len(audio)/rate-2:raise RuntimeError('Replay model stream stopped before prepared audio ended')
   finally:
-    server.shutdown()
+    server.shutdown();trace.close()
     write_json(a.out/'prepared_summary.json',dict(generation_invoked=False,source=str(a.score_archive),first_source_frame=first_frame,last_source_frame=position,sample_rate=rate,portaudio_flags=flags,max_clock_error_seconds=max_drift,callback_errors=errors,muted=a.muted,session_id=session,manual_scope='isolated replay display and presentation only'))
   if errors:raise RuntimeError(errors[0])
   if max_drift>.05:raise RuntimeError('Prepared audio clock drift exceeded 50 ms')
@@ -176,6 +178,7 @@ def main():
   a=parser().parse_args()
   if a.audio_worker:return audio_worker(a)
   if sys.platform!='darwin' or Path('/TICI').exists():raise SystemExit('Prepared Mac showcase runs only on the Mac')
+  launch_started=time.monotonic()
   project=a.project_root.resolve();rt=a.runtime or project/'.host_runtime/darwin/worktree'
   py=rt.parent/'venv/bin/python'
   from route_favorites import resolve_favorite
@@ -222,13 +225,17 @@ def main():
   def stop(*_):raise KeyboardInterrupt
   signal.signal(signal.SIGTERM,stop)
   try:
+    seed_started=time.monotonic()
     with (out/'seed.log').open('w') as log:subprocess.run([str(py),str(rt/'tools/replay/onroad_config.py'),'seed',*args],env=env,cwd=rt,stdout=log,stderr=subprocess.STDOUT,check=True)
+    seed_finished=time.monotonic()
     if not a.headless:ui=start([str(py),str(HERE/'normal_ui_audit.py')],'ui')
     audio=start([str(py),str(__file__),'--audio-worker',a.route,'--score-archive',str(a.score_archive),'--project-root',str(project),'--out',str(out),'--duration',str(a.duration),'--port',str(a.port)]+(['--curve-plan',str(a.curve_plan)] if a.curve_plan else [])+(['--muted'] if a.muted or a.headless else [])+(['--audio-device',a.audio_device] if a.audio_device else []),'audio')
     deadline=time.monotonic()+30
     while not (out/'prepared_ready').exists():
       if audio.poll() is not None or time.monotonic()>deadline:raise RuntimeError('Prepared audio did not become ready; see '+str(out/'audio.log'))
       time.sleep(.1)
+    ready_at=time.monotonic()
+    write_json(out/'startup.json',dict(launch_to_prepared_ready_seconds=ready_at-launch_started,local_parameter_seed_seconds=seed_finished-seed_started,generation_seconds=0.,model_loading_seconds=0.,compile_seconds=0.))
     controls_url=json.loads((out/'controls.json').read_text())['url']
     print('Replay controls:',controls_url,flush=True)
     if not a.no_browser and not a.headless:subprocess.Popen(['/usr/bin/open',controls_url],stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL)
