@@ -29,7 +29,7 @@ class LiveController:
             return {**status,'available':True,'can_enable':not status.get('enabled',False) and not reason,
                     'reason':reason or status.get('reason','')}
         except Exception as error:
-            return dict(available=False,enabled=False,state='DEGRADED',can_enable=False,reason='Live supervisor status unavailable: '+str(error))
+            return dict(available=False,enabled=None,state='DEGRADED',can_enable=False,reason='Live supervisor status unavailable: '+str(error))
 
     def set_enabled(self, enabled):
         if type(enabled) is not bool:raise ValueError('enabled must be a boolean')

@@ -52,3 +52,11 @@ def test_missing_adapter_unavailable():
     assert not controller.status()['available'] and not controller.status()['can_enable']
     with pytest.raises(RuntimeError):controller.set_enabled(True)
     assert controller.set_enabled(False)['enabled'] is False
+
+def test_failed_status_does_not_claim_audio_is_stopped():
+    adapter=Mock()
+    adapter.status.side_effect=RuntimeError('unreachable')
+    controller=LiveController(adapter=adapter)
+    assert controller.status()['enabled'] is None
+    controller.set_enabled(False)
+    adapter.stop_owned.assert_called_once()
