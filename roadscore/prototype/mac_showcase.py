@@ -411,6 +411,14 @@ def main():
     return audio_worker(a)
   if a.no_control_server:raise SystemExit('--no-control-server is an internal prepared audio-worker option')
   if sys.platform!='darwin' or Path('/TICI').exists():raise SystemExit('Prepared Mac showcase runs only on the Mac')
+  if a.check:return parent_main(a)
+  from mac_replay_ownership import ReplayBusy, mac_replay_lease
+  try:
+    with mac_replay_lease(a.project_root.resolve()/'roadscore'):return parent_main(a)
+  except ReplayBusy as error:raise SystemExit(str(error)) from None
+
+
+def parent_main(a):
   launch_started=time.monotonic()
   project=a.project_root.resolve();rt=a.runtime or project/'.host_runtime/darwin/worktree'
   py=rt.parent/'venv/bin/python'
