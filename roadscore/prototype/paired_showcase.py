@@ -1,10 +1,12 @@
-"""Launch one saved native replay and mirror its actual UI on the Mac."""
+"""Launch saved native replays on comma and Mac, with Galaxy as control master."""
 import argparse
 import json
+import math
 import os
 from pathlib import Path
 import signal
 import subprocess
+import sys
 import threading
 import time
 import uuid
@@ -83,9 +85,10 @@ def control_server(peer, request_id, port, state):
   return server
 
 
-def main():
+def mirror_main():
   parser=argparse.ArgumentParser(description=__doc__)
   parser.add_argument('--roadscore',action='store_true');parser.add_argument('--demo',action='store_true')
+  parser.add_argument('--screen-mirror',action='store_true')
   parser.add_argument('route',nargs='?',default='route1')
   parser.add_argument('--muted',action='store_true');parser.add_argument('--check',action='store_true')
   parser.add_argument('--no-browser',action='store_true');parser.add_argument('--port',type=int)
@@ -143,6 +146,143 @@ def main():
       except Exception as error:print('Could not confirm device demo stop: '+str(error),flush=True)
     server.shutdown();server.server_close()
     print('Saved demo stopped. Elapsed %.1f seconds.'%(time.monotonic()-began),flush=True)
+
+
+def local_start_deadline(release, request_id, peer_session, sent, received):
+  """Translate a short peer-relative countdown without comparing host clocks."""
+  if release.get('request_id') != request_id or release.get('session_id') != peer_session:
+    raise ValueError('Prepared playback release belongs to another session')
+  values = [release.get('start_at_wall'), release.get('server_wall'), sent, received]
+  if any(type(value) not in (int,float) or not math.isfinite(value) for value in values):
+    raise ValueError('Invalid prepared playback clock')
+  start,server,sent,received = values
+  rtt = received-sent
+  if not 0 <= rtt <= .5 or not 0 < start-server <= 5:
+    raise ValueError('Playback release timing is too uncertain')
+  deadline = received + (start-server) - rtt/2
+  if deadline <= received:
+    raise ValueError('Playback release arrived too late')
+  return deadline
+
+
+def mac_command(project, alias, selected, peer_url, out, duration):
+  command = [str(project/'onroad'),'--roadscore',alias,'--prepared-showcase',
+             '--score-archive',selected['archive'],'--paired-comma',peer_url,
+             '--muted','--no-browser','--port','0','--hold-start','--follow-playhead',
+             '--out',str(out),'--duration',str(duration)]
+  if selected.get('curve_plan'):command += ['--curve-plan',selected['curve_plan']]
+  return command
+
+
+def read_ready(path, route):
+  try:value=json.loads(path.read_text())
+  except (OSError,ValueError):return None
+  if not isinstance(value,dict) or value.get('ready') is not True:return None
+  if value.get('route')!=route or not isinstance(value.get('session_id'),str) or not value['session_id']:
+    raise ValueError('Mac prepared replay identity does not match the selected route')
+  return value
+
+
+def stop_mac(process):
+  if process is not None and process.poll() is None:
+    os.killpg(process.pid,signal.SIGTERM)
+    try:process.wait(timeout=12)
+    except subprocess.TimeoutExpired:
+      os.killpg(process.pid,signal.SIGKILL);process.wait(timeout=5)
+
+
+def native_pair_main():
+  parser=argparse.ArgumentParser(description=__doc__)
+  parser.add_argument('--roadscore',action='store_true');parser.add_argument('--demo',action='store_true')
+  parser.add_argument('route',nargs='?',default='route1')
+  parser.add_argument('--muted',action='store_true');parser.add_argument('--check',action='store_true')
+  parser.add_argument('--no-browser',action='store_true',help=argparse.SUPPRESS)
+  parser.add_argument('--peer');parser.add_argument('--duration',type=float,default=float('inf'))
+  args=parser.parse_args()
+  if math.isnan(args.duration) or args.duration<=0:raise SystemExit('Duration must be positive')
+  root=HERE.parent;project=root.parent
+  from demo_catalog import entry
+  selected=entry(root,args.route)
+  config=json.loads((root/'assets/demo_catalog.json').read_text())
+  peer=DemoPeer(args.peer or config.get('paired_comma'))
+  if peer.call('status').get('offroad') is not True:raise SystemExit('Comma must be offroad for the saved demo')
+  if args.check:
+    print(json.dumps({'route':selected['route'],'alias':args.route,'peer_offroad':True,
+                      'generation_invoked':False,'display':'native Mac replay','audio':'comma','screen_mirror':False}));return
+  request_id=uuid.uuid4().hex
+  out=root/'results'/('paired_showcase_'+request_id)
+  out.mkdir(parents=True,exist_ok=False)
+  mac_out=out/'mac'
+  command=mac_command(project,args.route,selected,peer.peer.base_url,mac_out,args.duration)
+  (out/'launch.json').write_text(json.dumps(dict(request_id=request_id,route=selected['route'],
+      command=command,archive=selected['archive'],generation_invoked=False,screen_mirror=False,muted=args.muted),indent=2))
+  process=None;launched=False;began=time.monotonic()
+  def interrupt(*_):raise KeyboardInterrupt
+  signal.signal(signal.SIGTERM,interrupt)
+  try:
+    launched=True
+    peer.call('demo_start',{'alias':args.route,'request_id':request_id,'muted':args.muted})
+    with (out/'mac.log').open('wb') as log:
+      process=subprocess.Popen(command,cwd=project,stdin=subprocess.DEVNULL,stdout=log,
+                               stderr=subprocess.STDOUT,start_new_session=True,close_fds=True)
+    print('Preparing saved RoadScore on comma and native Mac UI. No model generation.',flush=True)
+    deadline=time.monotonic()+100
+    while True:
+      if process.poll() is not None:raise RuntimeError('Mac replay failed to prepare; see '+str(out/'mac.log'))
+      ready=peer.call('demo_ready',{})
+      if ready.get('request_id')!=request_id:raise RuntimeError('Device demo ownership changed')
+      if ready.get('failure'):raise RuntimeError(ready['failure'])
+      if not ready.get('running'):raise RuntimeError('Saved comma demo failed to prepare')
+      local=read_ready(mac_out/'demo_ready.json',selected['route'])
+      if ready.get('prepared') and local is not None:break
+      if time.monotonic()>deadline:raise TimeoutError('Saved replay preparation timed out')
+      time.sleep(.15)
+    sent=time.monotonic()
+    release=peer.call('demo_play',{'request_id':request_id,'session_id':ready['ready_session_id']})
+    received=time.monotonic()
+    start_at=local_start_deadline(release,request_id,ready['ready_session_id'],sent,received)
+    gate={'session_id':local['session_id'],'play':True,'start_at_wall':start_at}
+    temporary=mac_out/'start.tmp';temporary.write_text(json.dumps(gate));temporary.replace(mac_out/'start.json')
+    (out/'release.json').write_text(json.dumps({'peer':release,'local':gate,'rtt_s':received-sent}))
+    print('Playing native replay on both screens; audio from comma. Use Galaxy for engagement and signals.',flush=True)
+    print('Galaxy: '+peer.peer.base_url+'/mobile/#/roadscore',flush=True)
+    print('Session evidence: '+str(out),flush=True)
+    started=time.monotonic()
+    while time.monotonic()-started<args.duration:
+      current=peer.call('demo_ready',{})
+      if current.get('request_id')!=request_id:raise RuntimeError('Device demo ownership changed')
+      if current.get('failure'):raise RuntimeError(current['failure'])
+      if not current.get('running'):
+        if current.get('complete'):break
+        raise RuntimeError('Device demo stopped before completion')
+      if process.poll() is not None:
+        # Both route streams reach EOF independently; permit a short final tail.
+        if process.returncode:raise RuntimeError('Mac native replay failed; see '+str(out/'mac.log'))
+        print('Mac replay completed; waiting for comma audio to drain.',flush=True)
+        tail=time.monotonic()+5
+        while time.monotonic()<tail:
+          current=peer.call('demo_ready',{})
+          if current.get('request_id')!=request_id:raise RuntimeError('Device demo ownership changed')
+          if current.get('failure'):raise RuntimeError(current['failure'])
+          if current.get('complete'):break
+          time.sleep(.25)
+        if not current.get('complete'):raise RuntimeError('Mac replay ended before comma playback completed')
+        break
+      time.sleep(.5)
+  finally:
+    # A second interrupt must not abandon the native windows or owned peer.
+    signal.signal(signal.SIGTERM,signal.SIG_IGN);signal.signal(signal.SIGINT,signal.SIG_IGN)
+    try:stop_mac(process)
+    finally:
+      if launched:
+        try:peer.call('demo_stop',{'request_id':request_id})
+        except Exception as error:print('Could not confirm device demo stop: '+str(error),flush=True)
+    print('Paired native demo stopped. Elapsed %.1f seconds.'%(time.monotonic()-began),flush=True)
+
+
+def main():
+  if '--screen-mirror' in sys.argv:mirror_main()
+  else:native_pair_main()
 
 
 if __name__=='__main__':main()

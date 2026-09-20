@@ -1,10 +1,47 @@
 import json
+from pathlib import Path
+import tempfile
 from types import SimpleNamespace
 import unittest
 from urllib.error import HTTPError
 from urllib.request import Request, urlopen
 
-from paired_showcase import DemoPeer, control_server
+from paired_showcase import DemoPeer, control_server, local_start_deadline, mac_command, read_ready
+
+
+class NativePairTests(unittest.TestCase):
+  def test_release_uses_relative_countdown_across_different_clock_origins(self):
+    release={'request_id':'owned','session_id':'peer','server_wall':10000.,'start_at_wall':10001.}
+    self.assertAlmostEqual(local_start_deadline(release,'owned','peer',40.,40.1),41.05)
+
+  def test_rejects_foreign_session_stale_release_and_uncertain_rtt(self):
+    release={'request_id':'owned','session_id':'peer','server_wall':10000.,'start_at_wall':10001.}
+    for changed,sent,received in (({'session_id':'old'},40.,40.1),
+                                   ({'request_id':'other'},40.,40.1),
+                                   ({'start_at_wall':9999.},40.,40.1),
+                                   ({'server_wall':float('nan')},40.,40.1),
+                                   ({},40.,41.)):
+      with self.assertRaises(ValueError):local_start_deadline({**release,**changed},'owned','peer',sent,received)
+
+  def test_mac_uses_existing_native_command_silently_with_hold_and_follower(self):
+    command=mac_command(Path('/project'),'route1',{'archive':'/protected/core','curve_plan':'/protected/curve.json'},
+                        'http://192.168.1.2:8082',Path('/owned/mac'),12.)
+    self.assertEqual(command[:4],['/project/onroad','--roadscore','route1','--prepared-showcase'])
+    for flag in ('--muted','--no-browser','--hold-start','--follow-playhead'):self.assertIn(flag,command)
+    self.assertEqual(command[command.index('--port')+1],'0')
+    self.assertEqual(command[command.index('--score-archive')+1],'/protected/core')
+    self.assertNotIn('--screen-mirror',command)
+
+  def test_local_barrier_requires_matching_prepared_identity(self):
+    with tempfile.TemporaryDirectory() as directory:
+      path=Path(directory)/'demo_ready.json'
+      self.assertIsNone(read_ready(path,'route'))
+      path.write_text(json.dumps({'ready':False,'route':'route','session_id':'local'}))
+      self.assertIsNone(read_ready(path,'route'))
+      path.write_text(json.dumps({'ready':True,'route':'other','session_id':'local'}))
+      with self.assertRaises(ValueError):read_ready(path,'route')
+      path.write_text(json.dumps({'ready':True,'route':'route','session_id':'local'}))
+      self.assertEqual(read_ready(path,'route')['session_id'],'local')
 
 
 class MirrorControlTests(unittest.TestCase):
