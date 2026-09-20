@@ -104,6 +104,19 @@ class Operator:
     self.live_owner = None
     self.live_init_lock = threading.Lock()
     self.output_init_lock = threading.Lock()
+    self.demo_owner = None
+    self.demo_init_lock = threading.Lock()
+
+  def demo_controller(self):
+    if not self.device:
+      raise ValueError('Paired demo launch is available on the comma')
+    with self.demo_init_lock:
+      if self.demo_owner is None:
+        path = self.root/'prototype'
+        if str(path) not in sys.path:sys.path.insert(0,str(path))
+        from demo_session import DemoSession
+        self.demo_owner = DemoSession(self.root, self.offroad)
+    return self.demo_owner
 
   def live_controller(self):
     if not self.device:
@@ -150,8 +163,17 @@ class Operator:
     available=bool(fresh and state.get('engagement_presentation',{}).get('enabled') is True and state.get('input_mode')=='replay' and state.get('route') not in (None,'','live') and isinstance(session,str) and session)
     mode=state.get('demo_engagement_mode','recorded')
     signal_mode=state.get('demo_signal_mode','recorded')
-    return {'available':available,'session_id':session if available else None,'signal_mode':signal_mode if signal_mode in ('recorded','left','right','off') else 'recorded','mode':mode if mode in ('recorded','engaged','disengaged') else 'recorded',
-            'reason':'' if available else 'Start a RoadScore replay to simulate displayed engagement, signals and music.'}
+    result = {'available':available,'session_id':session if available else None,'signal_mode':signal_mode if signal_mode in ('recorded','left','right','off') else 'recorded','mode':mode if mode in ('recorded','engaged','disengaged') else 'recorded',
+              'reason':'' if available else 'Start a RoadScore replay to simulate displayed engagement, signals and music.'}
+    if available:
+      result['route'] = state['route']
+      result['readiness'] = state.get('readiness')
+      result['compute'] = state.get('compute')
+      result['status_age_seconds'] = time.monotonic()-stamp
+      values = {key:state.get(key) for key in ('route_t','elapsed','source_model_ns')}
+      if all(type(value) in (int,float) and math.isfinite(value) for value in values.values()):
+        result['playhead'] = {**values,'sampled_wall':stamp,'server_wall':time.monotonic()}
+    return result
 
   def demo_engagement(self,data,field='mode'):
     allowed=('recorded','engaged','disengaged') if field=='mode' else ('recorded','left','right','off')
@@ -197,10 +219,12 @@ class Operator:
       state = output['state']
     demo=self.demo_status()
     if not offroad:demo.update(available=False,reason='Replay simulation requires the vehicle to be offroad.')
+    prepared_demo = demo['available'] and demo.get('compute') == 'prepared-core'
+    if prepared_demo and demo.get('readiness') in STATES:state = demo['readiness']
     return dict(available=self.device and self.root.exists(), state=state, profiles=PROFILES, live=self.live_status(), demo=demo,
                 profile=worker.get('profile') if live else settings.get('profile', 'prism'),
                 selected_profile=settings.get('profile', 'prism'),
-                composer='ace' if live else None, backend='Chestnut' if live else None,
+                composer='ace' if live or prepared_demo else None, backend='Prepared local audio' if prepared_demo else 'Chestnut' if live else None,
                 generation_seed=worker.get('generation_seed') if live else None,
                 offroad=bool(offroad), locked=bool(locked), preparing=self.preparing,
                 can_prepare=False,
@@ -209,6 +233,14 @@ class Operator:
                 calibrating=output.get('calibrating', False), session_muted=output.get('session_muted', True), output=output.get('output'), latency_ms=output.get('latency_ms'), error=self.error or output.get('error'))
 
   def operate(self, action, data, offroad):
+    if action in ('demo_start','demo_ready','demo_play','demo_stop'):
+      if not offroad:raise ValueError('Saved demo playback requires the vehicle to be offroad')
+      owner = self.demo_controller()
+      if action == 'demo_start':return owner.start(data)
+      if action == 'demo_play':return owner.release(data)
+      if action == 'demo_stop':return owner.stop(data)
+      if data:raise ValueError('Demo readiness takes no arguments')
+      return owner.status()
     if action in ('demo_engagement','demo_signal'):
       if not offroad:raise ValueError('Replay simulation requires the vehicle to be offroad')
       return self.demo_engagement(data,'signal_mode' if action=='demo_signal' else 'mode')

@@ -60,5 +60,15 @@ class DemoTests(unittest.TestCase):
   for payload in ({'mode':'engaged'}, {'mode':'engaged','session_id':'session-a','pid':1}):
    with self.assertRaises(ValueError):self.operator.operate('demo_engagement',payload,True)
   self.assertFalse((self.run/'demo_engagement.json').exists())
+ def test_prepared_demo_readiness_does_not_require_a_warm_worker(self):
+  from unittest.mock import patch
+  self.state.update(readiness='READY',compute='prepared-core',route_t=12.,elapsed=12.1,source_model_ns=123456789)
+  self.write()
+  with patch.object(module,'current_worker',return_value={}),patch.object(self.operator,'target',return_value={}),patch.object(self.operator,'live_status',return_value={'enabled':False}):
+   state=self.operator.status(True)
+  self.assertEqual(state['state'],'READY')
+  self.assertEqual(state['backend'],'Prepared local audio')
+  self.assertEqual(state['demo']['playhead']['route_t'],12.)
+  self.assertGreaterEqual(state['demo']['status_age_seconds'],0.)
 
 if __name__=='__main__':unittest.main()
