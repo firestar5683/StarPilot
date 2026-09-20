@@ -21,8 +21,12 @@ def check_available():
     worker_state=json.loads((ROOT/'generated/ace_worker_state.json').read_text());profile=worker_state['profile']
    except (OSError,ValueError,KeyError):raise SystemExit('ACE worker profile unavailable; restart preparation explicitly')
    from generation_seed import configured_seed
-   if worker_state.get('generation_seed')!=configured_seed():raise SystemExit('Resident ACE seed differs; stop owned worker and prepare requested seed')
-   if profile!=selected_profile():raise SystemExit('Resident ACE profile differs; stop owned worker and prepare requested profile')
+   resident_handoff=False
+   if os.environ.get('ROADSCORE_RESIDENT')=='1' and os.environ.get('ROADSCORE_SEED_ORIGIN')!='judging-route':
+    try:resident_handoff=json.loads((ROOT/'generated/ace_initial.json').read_text()).get('resident_capable') is True
+    except (OSError,ValueError):pass
+   if not resident_handoff and worker_state.get('generation_seed')!=configured_seed():raise SystemExit('Resident ACE seed differs; stop owned worker and prepare requested seed')
+   if not resident_handoff and profile!=selected_profile():raise SystemExit('Resident ACE profile differs; stop owned worker and prepare requested profile')
   return
  lockpath=ROOT/'generated/gpu.lock'
  if lockpath.exists():
