@@ -6,6 +6,7 @@ import os
 from pathlib import Path
 import time
 from live_supervisor import Observation, Authorization
+from passive_observer_policy import MODE as PASSIVE_MODE, evaluate_passive_observer, authorization_mode_matches
 
 SERVICES=('carState','modelV2','selfdriveState','pandaStates','deviceState','managerState','liveCalibration','carControl','controlsState','onroadEvents')
 METRICS=('model_execution_ms','model_drop_percent','model_age_ms','control_age_ms','cpu_percent','max_temp_c','modeld_cpu_percent','controlsd_cpu_percent')
@@ -34,6 +35,11 @@ def evaluate(snapshot, record, now):
   fresh={k:valid.get(k) is True and finite(ages.get(k)) and ages[k]<= (2. if k in ('deviceState','managerState','liveCalibration','pandaStates','onroadEvents') else .5) for k in SERVICES}
   car=snapshot.get('car',{});device=snapshot.get('device',{});pandas=snapshot.get('pandas',[])
   safety=bool(pandas) and all(not p.get('faults') and p.get('safetyRxChecksInvalid') is False and p.get('safetyModel') not in (None,'silent','noOutput') for p in pandas)
+  mode=snapshot.get('live_mode','assisted-v1')
+  passive=evaluate_passive_observer(snapshot,mode) if mode==PASSIVE_MODE else None
+  if passive is not None:safety=passive['safety_eligible']
+  mode_ok=mode in ('assisted-v1',PASSIVE_MODE)
+  if mode=='assisted-v1' and snapshot.get('car_identity',{}).get('passive') is True:safety=False
   car_ok=fresh['carState'] and car.get('canValid') is True and car.get('canTimeout') is False and finite(car.get('vEgo'))
   parked=car_ok and car.get('standstill') is True and car['vEgo']<=.1
   calibration=fresh['liveCalibration'] and snapshot.get('calibration')=='calibrated'
@@ -43,10 +49,11 @@ def evaluate(snapshot, record, now):
   device_ok=fresh['deviceState'] and device.get('thermalStatus')=='ok' and finite(snapshot.get('metrics',{}).get('max_temp_c'))
   events=snapshot.get('events',[])
   event_fault=any(e.get('immediateDisable') or e.get('softDisable') for e in events)
-  hard=all(fresh.values()) and car_ok and calibration and safety and running and local and model_ok and device_ok and not event_fault and snapshot.get('chestnut_present') is True
+  hard=mode_ok and all(fresh.values()) and car_ok and calibration and safety and running and local and model_ok and device_ok and not event_fault and snapshot.get('chestnut_present') is True
   matched=(record.get('schema')=='roadscore-live-authorization-v1' and record.get('measured_parked') is True
            and bool(snapshot.get('car_id')) and bool(snapshot.get('baseline_id'))
-           and record.get('car_id')==snapshot['car_id'] and record.get('baseline_id')==snapshot['baseline_id'])
+           and record.get('car_id')==snapshot['car_id'] and record.get('baseline_id')==snapshot['baseline_id']
+           and (authorization_mode_matches(record,passive) if passive is not None else record.get('live_mode','assisted-v1')=='assisted-v1'))
   bounds=record.get('bounds',{});metrics=snapshot.get('metrics',{})
   exceeded=[key for key in METRICS if not finite(metrics.get(key)) or not finite(bounds.get(key+'_max')) or metrics[key]>bounds[key+'_max']]
   link=snapshot.get('link',{});link_age=now-link.get('monotonic',float('-inf'))
@@ -57,7 +64,10 @@ def evaluate(snapshot, record, now):
                      record.get('coexistence_verified') is True,record.get('user_authorized') is True)
   obs=Observation(now,parked,model_ok,car_ok,hard and accepted,device_ok and accepted,gpu,
                   snapshot.get('baseline_id',''),snapshot.get('car_id',''),local)
-  snapshot.update(diagnostic_healthy=bool(hard and parked),fresh=fresh,measured_bounds_accepted=accepted,
+  checks={'supported_live_mode':mode_ok,'fresh_services':all(fresh.values()),'car_CAN':car_ok,'calibration':calibration,'safety':safety,'processes':running,'local_driving_model':local,'model':model_ok,'device_thermal':device_ok,'no_disable_event':not event_fault,'Chestnut_present':snapshot.get('chestnut_present') is True}
+  reasons=[name for name,ok in checks.items() if not ok]
+  if passive is not None:reasons.extend(passive['reasons'])
+  snapshot.update(blocker_reasons=reasons,passive_observer=passive,diagnostic_healthy=bool(hard and parked),fresh=fresh,measured_bounds_accepted=accepted,
                   missing_or_exceeded_metrics=exceeded,authorization_matches=matched,link_fresh=link_fresh,
                   production_healthy=bool(hard and accepted and gpu))
   return obs,auth
@@ -93,7 +103,7 @@ class LiveHealth:
     raw=self.params.get('CarParams')
     if not raw:raise RuntimeError('Actual CarParams unavailable')
     with car.CarParams.from_bytes(raw) as cp:
-      car_info={'fingerprint':cp.carFingerprint,'firmware':[{'ecu':str(f.ecu),'address':f.address,'version_sha256':hashlib.sha256(bytes(f.fwVersion)).hexdigest()} for f in cp.carFw],
+      car_info={'fingerprint':cp.carFingerprint,'passive':bool(cp.passive),'notCar':bool(cp.notCar),'dashcamOnly':bool(cp.dashcamOnly),'firmware':[{'ecu':str(f.ecu),'address':f.address,'version_sha256':hashlib.sha256(bytes(f.fwVersion)).hexdigest()} for f in cp.carFw],
                 'safety':[{'model':str(s.safetyModel),'param':s.safetyParam} for s in cp.safetyConfigs]}
     def text(key):
       value=self.params.get(key);return value.decode() if isinstance(value,bytes) else value
@@ -132,12 +142,14 @@ class LiveHealth:
     return {'monotonic':now,'car_identity':car_info,'car_id':identity(car_info),'baseline_id':identity({'git':build,'model':model,'version':version}),
             'git_commit':build,'driving_model':model,'driving_model_version':version,'driving_model_local':local_model_placement(load_model_artifact_metadata(model),self.params.get('UsbGpuActive'),self.params.get('UsbGpuLoading')),
             'chestnut_present':chestnut_firmware_ready(),'model_geometry_valid':len(m.get('position',{}).get('t',[]))==33,'ages':ages,'valid':valid,'car':payload['carState'],'device':d,'pandas':pandas,'events':events,
-            'calibration':payload['liveCalibration'].get('calStatus'),'processes':processes,'metrics':metrics,'link':link,'link_owner_verified':bool(owner)}
+            'control':payload['carControl'],'selfdrive_state':payload['selfdriveState'],'calibration':payload['liveCalibration'].get('calStatus'),'processes':processes,'metrics':metrics,'link':link,'link_owner_verified':bool(owner)}
 
   def collect(self):
     now=self.clock()
     try:snapshot=self.reader(now) if self.reader else self._read(now)
     except Exception as error:snapshot={'monotonic':now,'error':str(error),'car_id':'','baseline_id':''}
+    config=read_json(self.root/'generated/live_config.json')
+    snapshot['live_mode']=config.get('live_mode','assisted-v1') if isinstance(config,dict) else 'invalid'
     record=read_json(self.root/'generated/live_authorization.json')
     result=evaluate(snapshot,record,now);self.last_snapshot=snapshot
     return result

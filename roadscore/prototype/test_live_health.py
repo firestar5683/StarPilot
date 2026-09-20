@@ -21,6 +21,24 @@ def authorization():
 
 
 class Tests(unittest.TestCase):
+ def test_passive_mode_requires_pinned_nonactuating_evidence(self):
+  d=sample();d.update(live_mode='passive-observer-v1',car_identity={'passive':True,'notCar':False,'dashcamOnly':True,'safety':[{'model':'noOutput','param':0}]},control={'enabled':False,'latActive':False,'longActive':False},selfdrive_state={'enabled':False,'active':False})
+  d['pandas']=[{'safetyModel':'noOutput','controlsAllowed':False,'faults':[],'safetyRxChecksInvalid':False}]
+  o,_=evaluate(d,{},100.);self.assertTrue(d['diagnostic_healthy']);self.assertFalse(o.modeld_healthy)
+  r=authorization();r.update(live_mode='passive-observer-v1',passive_mode_identity=d['passive_observer']['mode_identity'])
+  o,_=evaluate(d,r,100.);self.assertTrue(o.modeld_healthy)
+  for key,value in [('live_mode','assisted-v1'),('passive_mode_identity','wrong')]:
+   bad=dict(r);bad[key]=value;o,_=evaluate(copy.deepcopy(d),bad,100.);self.assertFalse(o.modeld_healthy)
+  for alteration in ('actuation','calibration','fault','elm327','unknownmode'):
+   bad=copy.deepcopy(d)
+   if alteration=='actuation':bad['control']['latActive']=True
+   if alteration=='calibration':bad['calibration']='uncalibrated'
+   if alteration=='fault':bad['pandas'][0]['faults']=['relayMalfunction']
+   if alteration=='elm327':bad['pandas'][0]['safetyModel']='elm327';bad['pandas'][0]['faults']=['canError']
+   if alteration=='unknownmode':bad['live_mode']='anything'
+   o,_=evaluate(bad,r,100.);self.assertFalse(o.modeld_healthy);self.assertFalse(bad['diagnostic_healthy']);self.assertTrue(bad['blocker_reasons'])
+ def test_passive_car_cannot_use_default_assisted_gate(self):
+  d=sample();d['car_identity']={'passive':True};o,_=evaluate(d,authorization(),100.);self.assertFalse(o.modeld_healthy)
  def test_model_placement_requires_actual_runtime_flags(self):
   self.assertTrue(local_model_placement({"uses_external_gpu":False},b"0",b"0"))
   self.assertTrue(local_model_placement({"uses_external_gpu":False},False,False))
