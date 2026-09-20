@@ -26,6 +26,35 @@ class CurveTests(unittest.TestCase):
   self.assertTrue(np.array_equal(y,self.pcm))
   for i in range(15,20):y=dsp.process(self.pcm,i*4800,self.state,source_fresh=False)
   self.assertTrue(np.array_equal(y,self.pcm))
+ def test_stale_or_blocked_payoff_cannot_show_apex(self):
+  for kwargs in ({'blocked':True},{'source_fresh':False}):
+   dsp=CurveReaction(GRID,enabled=True)
+   for i in range(10):dsp.process(self.pcm,i*4800,self.state)
+   event={**self.state,'phase':'event'}
+   dsp.process(self.pcm,48000,event)
+   dsp.process(self.pcm,52800,event,**kwargs)
+   view=dsp.snapshot()['curve_reaction']
+   self.assertEqual(view['rendered_phase'],'neutral');self.assertFalse(view['rendered_active'])
+   self.assertIsNone(view['payoff_audio_s'])
+   dsp.process(self.pcm,57600,event)
+   self.assertEqual(dsp.snapshot()['curve_reaction']['rendered_phase'],'neutral')
+ def test_missing_activation_and_unbuilt_event_never_claim_payoff(self):
+  for activation in (None,float('nan'),True):
+   dsp=CurveReaction(GRID,enabled=True)
+   for i in range(5):y=dsp.process(self.pcm,i*4800,{**self.state,'activation':activation})
+   self.assertTrue(np.array_equal(y,self.pcm))
+   self.assertEqual(dsp.snapshot()['curve_reaction']['rendered_phase'],'neutral')
+  dsp=CurveReaction(GRID,enabled=True)
+  dsp.process(self.pcm,0,{**self.state,'phase':'event'})
+  self.assertIsNone(dsp.payoff)
+ def test_quantized_wait_processes_each_sample_once(self):
+  dsp=CurveReaction(GRID,enabled=True)
+  dsp.process(self.pcm,0,self.state)
+  before=dsp.dsp.frames_processed
+  # Next eighth is11250; this entire100ms block precedes that boundary.
+  dsp.process(self.pcm,4800,{**self.state,'phase':'event'})
+  self.assertEqual(dsp.dsp.frames_processed-before,len(self.pcm))
+  self.assertGreater(dsp.payoff,9600)
  def test_uncertain_grid_has_filter_release_without_added_notes(self):
   grid=ShakerGrid(128,0,0,0,False,'uncertain');dsp=CurveReaction(grid,enabled=True)
   silence=np.zeros_like(self.pcm)
