@@ -1,3 +1,4 @@
+import { RoadScore } from "./views/RoadScore.js"
 import { createApp, h } from "vue"
 import { AppShell } from "./components/AppShell.js"
 import { Home } from "./views/Home.js"
@@ -45,6 +46,7 @@ const VIEWS = {
   "/tuning": Tuning,
   "/navigation": Navigation,
   "/vehicle": Vehicle,
+  "/roadscore": RoadScore,
   "/bluetooth": Bluetooth,
   "/system": SystemTools,
   "/embed": ToolEmbed,

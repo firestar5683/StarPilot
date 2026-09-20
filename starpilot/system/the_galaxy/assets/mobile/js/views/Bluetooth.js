@@ -24,6 +24,7 @@ export const Bluetooth = {
       <template v-if="tab === 'bluetooth'">
         <GalaxySection title="Bluetooth Devices" icon="bi-bluetooth" :collapsible="false">
           <BluetoothPanel />
+          <a class="gx-btn" href="#/roadscore">RoadScore audio timing calibration</a>
         </GalaxySection>
       </template>
 

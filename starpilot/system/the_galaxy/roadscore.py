@@ -1,0 +1,162 @@
+"""Galaxy's local-only RoadScore operator API. Never discovers or contacts a bench."""
+import json
+from pathlib import Path
+import importlib.util
+import sys
+import threading
+from urllib.parse import urlsplit
+
+PROFILES = [{"id": "prism", "name": "Prism"}, {"id": "aurora", "name": "Aurora"}]
+STATES = {"COLD", "PREPARING", "READY", "GENERATING", "DEGRADED"}
+
+
+def read_json(path):
+  try:
+    value = json.loads(path.read_text())
+    return value if isinstance(value, dict) else {}
+  except (OSError, ValueError):
+    return {}
+
+
+def validate_settings(data):
+  if not isinstance(data, dict) or set(data) - {"profile", "latency_ms"}:
+    raise ValueError("Unsupported setting")
+  if "profile" in data and data["profile"] not in {p["id"] for p in PROFILES}:
+    raise ValueError("Unknown style")
+  if "latency_ms" in data:
+    value = data["latency_ms"]
+    if type(value) is not int or not 0 <= value <= 1500:
+      raise ValueError("Timing correction must be whole milliseconds from 0 to 1500")
+  return data
+
+
+class Operator:
+  def __init__(self, root=Path('/data/roadscore'), device=None, offroad=lambda: False):
+    self.root = root
+    self.offroad = offroad
+    self.device = Path('/TICI').exists() if device is None else device
+    self.lock = threading.Lock()
+    self.preparing = False
+    self.error = None
+    self.output_owner = None
+    self.output_init_lock = threading.Lock()
+
+  def target(self, action, **payload):
+    if not self.device:
+      raise ValueError('Target output is available only on the comma')
+    with self.output_init_lock:
+      if self.output_owner is None:
+        path = self.root / 'prototype/operator_output.py'
+        if str(path.parent) not in sys.path:sys.path.insert(0,str(path.parent))
+        spec = importlib.util.spec_from_file_location('roadscore_operator_output', path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        self.output_owner = module.OutputOwner(self.root, self.offroad)
+    return self.output_owner.dispatch(action, **payload)
+
+  def status(self, offroad):
+    settings = read_json(self.root / 'generated/operator_settings.json')
+    service = read_json(self.root / 'generated/worker_service.json')
+    live = False
+    try:
+      pid = int(service['pid'])
+      cmd = Path(f'/proc/{pid}/cmdline').read_bytes()
+      ticks = Path(f'/proc/{pid}/stat').read_text().split(') ', 1)[1].split()[19]
+      live = ticks == service.get('start_ticks') and b'worker_service.py' in cmd
+    except (OSError, ValueError, KeyError):
+      pass
+    try:
+      output = self.target('status') if self.device else {}
+    except (OSError, ValueError):
+      output = {}
+    # Without the output owner, playback/judging state cannot be proved safe.
+    locked = output.get('judging_locked', True) or output.get('playback_active', True)
+    worker = read_json(self.root / 'generated/ace_worker_state.json')
+    phase = str(worker.get('phase', service.get('phase', '')) if live else service.get('phase', '')).upper()
+    state = ('DEGRADED' if phase == 'FAILED' else 'COLD') if not live else {'PREPARING': 'PREPARING', 'READY': 'READY', 'FAILED': 'DEGRADED', 'GENERATING': 'GENERATING'}.get(phase, 'COLD')
+    if live and (self.root/'generated/busy').exists():state='GENERATING'
+    if output.get('state') in STATES:
+      state = output['state']
+    return dict(available=self.device and self.root.exists(), state=state, profiles=PROFILES,
+                profile=worker.get('profile', service.get('profile')) if live else settings.get('profile', 'prism'),
+                selected_profile=settings.get('profile', 'prism'),
+                composer=service.get('composer') if live else None, backend='Chestnut' if live else None,
+                offroad=bool(offroad), locked=bool(locked), preparing=self.preparing,
+                can_prepare=False,
+                can_edit=False, can_calibrate=offroad and not locked and output.get('calibration', False),
+                can_adjust=offroad and not locked and not output.get('calibrating', False) and output.get('timing_compensation', False),
+                calibrating=output.get('calibrating', False), session_muted=output.get('session_muted', True), output=output.get('output'), latency_ms=output.get('latency_ms'), error=self.error)
+
+  def operate(self, action, data, offroad):
+    if not offroad and action != 'calibration_cancel':
+      raise ValueError('RoadScore controls are available while parked')
+    with self.lock:
+      if action == 'clock':
+        return self.target('clock')
+      if action in {'calibration_start', 'calibration_tap', 'calibration_result', 'calibration_cancel', 'calibration_poll', 'test'}:
+        if action == 'calibration_start' and data != {'attended': True}:
+          raise ValueError('Confirm that you are ready to hear the clicks')
+        if action == 'calibration_tap':
+          if set(data) != {'session', 'server_ms', 'uncertainty_ms'} or not isinstance(data['session'], str) or len(data['session']) > 100 or type(data['server_ms']) not in (int, float) or not 0 <= data['server_ms'] < 1e15:
+            raise ValueError('Invalid tap')
+        elif action in {'calibration_result', 'calibration_cancel', 'calibration_poll'}:
+          if set(data) != {'session'} or not isinstance(data['session'], str) or len(data['session']) > 100:
+            raise ValueError('Invalid session')
+        elif action == 'test' and data != {'attended': True}:
+          raise ValueError('Confirm attended audio test')
+        return self.target(action, **data)
+      status = self.status(offroad)
+      if status['locked']:
+        raise ValueError('Controls are locked during playback/judging or while output status is unavailable')
+      if action == 'settings':
+        data = validate_settings(data)
+        if 'profile' in data:raise ValueError('Style changes are unavailable during this demo; use the normal launcher')
+        if 'latency_ms' in data:
+          if not status['can_adjust']:
+            raise ValueError('Output timing compensation is unavailable')
+          self.target('set_latency', latency_ms=data['latency_ms'])
+        path = self.root / 'generated/operator_settings.json'
+        with self.output_owner.operator_lease():
+          self.output_owner.safe()
+          previous = read_json(path)
+          previous.update(data)
+          path.parent.mkdir(parents=True, exist_ok=True)
+          temporary = path.with_suffix('.tmp')
+          temporary.write_text(json.dumps(previous))
+          temporary.replace(path)
+        return {'ok': True}
+      if action == 'prepare':
+        raise ValueError('Prepare from the normal RoadScore launcher; Galaxy preparation is not enabled')
+      raise ValueError('Unknown RoadScore operation')
+
+
+def register(app, params):
+  from flask import jsonify, request
+  prototype=Path('/data/roadscore/prototype')
+  if str(prototype) not in sys.path:sys.path.insert(0,str(prototype))
+  from operator_output import real_offroad
+  operator = Operator(offroad=real_offroad)
+
+  @app.route('/api/roadscore/status')
+  def roadscore_status():
+    response = jsonify(operator.status(real_offroad()))
+    response.headers['Cache-Control'] = 'no-store'
+    return response
+
+  @app.route('/api/roadscore/<action>', methods=['POST'])
+  def roadscore_operation(action):
+    origin = request.headers.get('Origin')
+    if origin and urlsplit(origin).netloc != request.host:
+      return jsonify(error='Cross-origin controls are not allowed'), 403
+    if not request.is_json:
+      return jsonify(error='JSON request required'), 415
+    data = request.get_json(silent=True)
+    if not isinstance(data, dict):
+      return jsonify(error='Expected an object'), 400
+    try:
+      return jsonify(operator.operate(action, data, real_offroad()))
+    except (ValueError, OSError) as error:
+      return jsonify(error=str(error)), 409
+    except Exception:
+      app.logger.exception('RoadScore operator action failed')
+      return jsonify(error='RoadScore output is unavailable; check the local service'), 503

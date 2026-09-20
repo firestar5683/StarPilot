@@ -11,6 +11,7 @@ const MENU_ITEMS = {
   ],
   tools: [
     { name: "Toggles", link: "/device_settings", icon: "bi-toggle-on" },
+    { name: "RoadScore", link: "/mobile/#/roadscore", icon: "bi-music-note-beamed" },
     { name: "Bluetooth", link: "/bluetooth", icon: "bi-bluetooth" },
     { name: "Download Speed Limits", link: "/download_speed_limits", icon: "bi-download" },
     { name: "Error Logs", link: "/manage_error_logs", icon: "bi-exclamation-triangle" },

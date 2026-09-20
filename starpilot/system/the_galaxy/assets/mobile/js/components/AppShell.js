@@ -9,6 +9,7 @@ const NAV = {
     { name: "Recordings", link: "/recordings", icon: "bi-camera-reels" },
   ],
   tools: [
+    { name: "RoadScore", link: "/roadscore", icon: "bi-music-note-beamed", desc: "Composer, output & timing" },
     { name: "Bluetooth", link: "/bluetooth", icon: "bi-bluetooth" },
     { name: "Cameras & Monitoring", link: "/cameras", icon: "bi-camera-video" },
     { name: "Galaxy", link: "/galaxy", icon: "bi-globe2" },

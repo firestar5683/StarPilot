@@ -5356,6 +5356,8 @@ class GalaxySlugMiddleware:
 
 
 def setup(app):
+  from openpilot.starpilot.system.the_galaxy.roadscore import register as register_roadscore
+  register_roadscore(app, params)
   from openpilot.starpilot.assets.model_sizes import ModelSizes
   model_sizes = ModelSizes()
   if not isinstance(app.wsgi_app, GalaxySlugMiddleware):
