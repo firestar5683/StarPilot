@@ -99,7 +99,34 @@ class Operator:
     self.preparing = False
     self.error = None
     self.output_owner = None
+    self.live_owner = None
+    self.live_init_lock = threading.Lock()
     self.output_init_lock = threading.Lock()
+
+  def live_controller(self):
+    if not self.device:
+      raise ValueError('Live RoadScore is available only on the comma')
+    with self.live_init_lock:
+      if self.live_owner is None:
+        path = self.root / 'prototype/live_controller.py'
+        if not path.is_file():
+          raise ValueError('Live RoadScore is not available on this installation')
+        if str(path.parent) not in sys.path:sys.path.insert(0, str(path.parent))
+        spec = importlib.util.spec_from_file_location('roadscore_live_controller', path)
+        module = importlib.util.module_from_spec(spec)
+        sys.modules[spec.name] = module
+        spec.loader.exec_module(module)
+        self.live_owner = module.LiveController(root=self.root)
+    return self.live_owner
+
+  def live_status(self):
+    try:
+      value = self.live_controller().status()
+      if not isinstance(value, dict):raise ValueError('Invalid live status')
+      return value
+    except (OSError, ValueError, ImportError):
+      return {'available': False, 'enabled': None, 'state': 'UNAVAILABLE', 'can_enable': False,
+              'reason': 'Live status cannot be verified. Enable is unavailable.'}
 
   def target(self, action, **payload):
     if not self.device:
@@ -129,7 +156,7 @@ class Operator:
     if live and (self.root/'generated/busy').exists():state='GENERATING'
     if output.get('state') in STATES:
       state = output['state']
-    return dict(available=self.device and self.root.exists(), state=state, profiles=PROFILES,
+    return dict(available=self.device and self.root.exists(), state=state, profiles=PROFILES, live=self.live_status(),
                 profile=worker.get('profile') if live else settings.get('profile', 'prism'),
                 selected_profile=settings.get('profile', 'prism'),
                 composer='ace' if live else None, backend='Chestnut' if live else None,
@@ -141,6 +168,15 @@ class Operator:
                 calibrating=output.get('calibrating', False), session_muted=output.get('session_muted', True), output=output.get('output'), latency_ms=output.get('latency_ms'), error=self.error or output.get('error'))
 
   def operate(self, action, data, offroad):
+    if action == 'live':
+      if set(data) != {'enabled'} or type(data['enabled']) is not bool:
+        raise ValueError('Live RoadScore requires an enabled boolean')
+      controller = self.live_controller()
+      if data['enabled']:
+        status = controller.status()
+        if status.get('available') is not True or status.get('can_enable') is not True:
+          raise ValueError(status.get('reason') or 'Live driving readiness has not been confirmed')
+      return controller.set_enabled(data['enabled'])
     if not offroad and action != 'calibration_cancel':
       raise ValueError('RoadScore controls are available while parked')
     with self.lock:

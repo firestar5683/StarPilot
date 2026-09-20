@@ -2,10 +2,19 @@ import { GalaxySection } from '../components/GalaxySection.js'
 
 export const RoadScore = {
   name: 'RoadScore', components: { GalaxySection },
-  data() { return { status: {}, error: '', busy: false, profile: 'prism', latency: 0, session: null, taps: 0, result: null, timer: null, calibrationTimer: null, clockOffset: 0, uncertainty: null, testMode: false, beat: '', sessionStarted: 0, latencyInitialized: false, outputIdentity: null, testClicks: [], animation: null, countIn: 8, bpm: 100, beatIndex: -1, cue: 'Getting ready…', lastTapInput: -1000, targetTaps: 12, finishing: false, calibrationStage: 'markers', coarseResult: null } },
+  data() { return { status: {}, error: '', busy: false, liveStarting: false, profile: 'prism', latency: 0, session: null, taps: 0, result: null, timer: null, calibrationTimer: null, clockOffset: 0, uncertainty: null, testMode: false, beat: '', sessionStarted: 0, latencyInitialized: false, outputIdentity: null, testClicks: [], animation: null, countIn: 8, bpm: 100, beatIndex: -1, cue: 'Getting ready…', lastTapInput: -1000, targetTaps: 12, finishing: false, calibrationStage: 'markers', coarseResult: null } },
   mounted() { window.addEventListener('keydown', this.keyTap); this.refresh(); this.timer = setInterval(() => this.refresh(), 2000) },
   beforeUnmount() { window.removeEventListener('keydown', this.keyTap); clearInterval(this.timer); clearInterval(this.calibrationTimer); cancelAnimationFrame(this.animation); if (this.session) this.action('calibration_cancel', {session: this.session}) },
   methods: {
+    async setLive(enabled, event) {
+      if (event) event.target.checked = this.status.live?.enabled === true
+      if (enabled) this.liveStarting = true
+      this.error = ''
+      try {
+        await this.quick('live', {enabled})
+      } catch (error) { this.error = error.message }
+      finally { this.liveStarting = false; await this.refresh() }
+    },
     async refresh() {
       try {
         const response = await fetch('/api/roadscore/status', {cache: 'no-store'})
@@ -119,6 +128,13 @@ export const RoadScore = {
     <div class="gx-view">
       <h2 style="margin-top:0"><i class="bi bi-music-note-beamed"></i> RoadScore</h2>
       <p style="color:var(--text-muted)">Music shaped by the road.</p>
+      <GalaxySection title="Live music" icon="bi-music-note-beamed" :collapsible="false"><div style="padding:16px">
+        <div class="gx-row"><div><strong>RoadScore</strong><div class="gx-row__desc">{{ status.live?.state || 'UNAVAILABLE' }}</div></div>
+          <label class="gx-switch"><input type="checkbox" aria-label="Enable live RoadScore" :checked="status.live?.enabled === true" :disabled="!status.live?.available || (!status.live?.enabled && (!status.live?.can_enable || liveStarting))" @change="setLive($event.target.checked, $event)"><span class="gx-switch__track"></span><span class="gx-switch__thumb"></span></label>
+        </div>
+        <p class="gx-row__desc">{{status.live?.reason || 'Live driving readiness has not been confirmed.'}}</p>
+        <button class="gx-btn" @click="setLive(false)">Stop RoadScore</button>
+      </div></GalaxySection>
       <GalaxySection title="Composer" icon="bi-music-note-beamed" :collapsible="false"><div style="padding:16px">
         <div class="gx-row"><div><strong>{{ status.state || 'UNAVAILABLE' }}</strong><div class="gx-row__desc">{{ status.composer ? status.composer.toUpperCase() : 'Composer not connected' }}{{ status.backend ? ' · ' + status.backend : '' }}{{ status.composer && status.profile ? ' · ' + status.profile.toUpperCase() : '' }}</div></div></div>
         <div class="gx-row"><label for="roadscore-style">Next style</label><select class="gx-field" id="roadscore-style" v-model="profile" :disabled="busy || !status.can_edit" @change="action('settings', {profile})"><option v-for="p in status.profiles || []" :value="p.id">{{p.name}}</option></select></div>
