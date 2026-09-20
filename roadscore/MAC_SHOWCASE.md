@@ -20,7 +20,7 @@ Route1 is currently registered and ready. Route2–4 remain unavailable until th
 
 The local configuration is ignored by Git: `roadscore/assets/demo_catalog.json` stores the explicit comma address, local controls port and registered routes. The comma has its own catalog pointing to persistent local assets. Each entry needs the route identity, a compatible completed archive and an optional matching curve plan. No discovery or automatic target switching occurs.
 
-The previous screen-mirror mode passed two short muted tests. Its audible test later exposed a DAC clock mapping error; the stable per-stream clock mapping and native dual-replay path require their own device validation. FiiO headphones and the public JLab speaker need separate listening checks.
+The dual-native mode completed a full301.7-second FiiO audible run with Galaxy controls reaching both screens and successful cleanup. Tracking skew was85ms median and171ms at the95th percentile. Network delays sometimes paused corrections while replay continued. There were no callback or clock exceptions, but28 audio status flags and21 forward clock corrections were recorded, so completion does not establish glitch-free output. Fullscreen also passed an8-second native Mac replay check with no output flags or clock exceptions. The public JLab speaker still needs its own physical output/timing check.
 
 For a Mac-only interactive fallback, use:
 
