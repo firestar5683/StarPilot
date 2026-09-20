@@ -39,8 +39,8 @@ def assess_grid(wave, rate, bpm_prior=None):
  return ShakerGrid(g['bpm'],g['beat_phase'],g['pulse_confidence'],phase,coherent,reason),{**g,'acoustic_agreement':agreement,'phase_drift_seconds':drift,'phase_confidence':phase}
 
 class SignalShaker:
- def __init__(self,grid,rate=48000,enabled=False,peak=.012,debounce_seconds=1.2):
-  self.grid=grid;self.rate=rate;self.enabled=enabled;self.peak=min(.08,max(0.,float(peak)))
+ def __init__(self,grid,rate=48000,enabled=False,peak=.012,debounce_seconds=1.2,accented=False):
+  self.grid=grid;self.rate=rate;self.enabled=enabled;self.peak=min(.16,max(0.,float(peak)));self.accented=bool(accented)
   self.debounce=round(debounce_seconds*rate);self.release=round(.16*rate)
   self.last_on=None;self.active=False;self.next_tick=None;self.stop_frame=None;self.tail=np.zeros((0,2),np.float32)
   self.sequence_pulses=0;self.sequence_start=0;self.sequence_key=None
@@ -48,10 +48,11 @@ class SignalShaker:
   self.rendered_active=False;self.rendered_peak=0.;self.rendered_start=0;self.rendered_end=0
   self.sequence_starts=[];self.pulse_frames=[];self.events=[]
   # Fixed filtered grains, prepared before audio. No callback RNG or file/FFT operations.
-  n=round(.085*rate);t=np.arange(n)/rate;rng=np.random.default_rng(1701)
+  n=round((.115 if self.accented else .085)*rate);t=np.arange(n)/rate;rng=np.random.default_rng(1701)
   noise=rng.standard_normal(n);freq=np.fft.rfftfreq(n,1/rate);spectrum=np.fft.rfft(noise)
-  spectrum*=np.clip((freq-2300)/1000,0,1)*np.clip((11500-freq)/3000,0,1)
-  grain=np.fft.irfft(spectrum,n);env=(1-np.exp(-t/.004))*np.exp(-t/.022)
+  low,high,decay=(1400,10500,.035) if self.accented else (2300,11500,.022)
+  spectrum*=np.clip((freq-low)/1000,0,1)*np.clip((high-freq)/3000,0,1)
+  grain=np.fft.irfft(spectrum,n);env=(1-np.exp(-t/.004))*np.exp(-t/decay)
   grain=grain*env;grain/=max(abs(grain).max(),1e-9)
   self.grain=np.column_stack((grain,grain)).astype(np.float32)*self.peak
   self.step=rate*60/grid.bpm/2 if grid.usable else 1.;self.origin=grid.beat_phase*rate
@@ -85,7 +86,15 @@ class SignalShaker:
   while self.active and self.sequence_pulses<32 and round(self.origin+self.next_tick*self.step)<end:
    frame=round(self.origin+self.next_tick*self.step);self.next_tick+=1
    if frame<start_frame:continue
-   gain=1. if self.next_tick%2 else .65;grain=self.grain*gain;offset=frame-start_frame;count=min(len(grain),len(pcm)-offset)
+   if self.accented:
+    # A single first-bar statement, followed by quieter eighth-note support.
+    accents=(1.,.6,.8,.6,.95,.6,.8,.7)
+    gain=accents[self.sequence_pulses%8]*(1. if self.sequence_pulses<8 else .65)
+    pan=(1.,.65) if key=='left' else (.65,1.) if key=='right' else (1.,1.)
+    grain=self.grain*gain*np.asarray(pan,dtype=np.float32)
+   else:
+    gain=1. if self.next_tick%2 else .65;grain=self.grain*gain
+   offset=frame-start_frame;count=min(len(grain),len(pcm)-offset)
    overlay[offset:offset+count]+=grain[:count]
    if count<len(grain):
     rest=grain[count:];new=np.zeros((max(len(rest),len(self.tail)),2),np.float32);new[:len(self.tail)]+=self.tail;new[:len(rest)]+=rest;self.tail=new
@@ -100,9 +109,10 @@ class SignalShaker:
   self.suppression_reason=('rendered' if self.rendered_active else
     'uncertain beat grid' if not self.grid.usable else
     'stale signal source' if not signal_fresh else
+    'presentation priority' if self.active and self.presentation_gain<=0 else
     'sequence budget exhausted' if self.active and self.sequence_pulses>=32 else
     'waiting for next eighth note' if self.active else 'no signal sequence')
   if not self.rendered_active:return pcm
   return pcm+overlay
  def snapshot(self):
-  return {'rendered_active':self.rendered_active,'rendered_peak':self.rendered_peak,'rendered_block_start_seconds':self.rendered_start/self.rate,'rendered_block_end_seconds':self.rendered_end/self.rate,'enabled':self.enabled,'grid':asdict(self.grid),'rhythm_enabled':self.enabled and self.grid.usable,'uncertain_policy':'no added pulses','sequence_active':self.active,'peak_limit':self.peak,'subdivision':'eighth notes','debounce_seconds':self.debounce/self.rate,'maximum_pulses_per_sequence':32,'sequence_pulses':self.sequence_pulses,'remaining_pulses':max(0,32-self.sequence_pulses),'suppression_reason':self.suppression_reason,'presentation_gain':self.presentation_gain,'direction':self.sequence_key}
+  return {'rendered_active':self.rendered_active,'rendered_peak':self.rendered_peak,'rendered_block_start_seconds':self.rendered_start/self.rate,'rendered_block_end_seconds':self.rendered_end/self.rate,'enabled':self.enabled,'grid':asdict(self.grid),'rhythm_enabled':self.enabled and self.grid.usable,'uncertain_policy':'no added pulses','sequence_active':self.active,'peak_limit':self.peak,'accented':self.accented,'subdivision':'eighth notes','debounce_seconds':self.debounce/self.rate,'maximum_pulses_per_sequence':32,'sequence_pulses':self.sequence_pulses,'remaining_pulses':max(0,32-self.sequence_pulses),'suppression_reason':self.suppression_reason,'presentation_gain':self.presentation_gain,'direction':self.sequence_key}

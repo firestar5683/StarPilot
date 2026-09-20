@@ -76,4 +76,35 @@ class ShakerTests(unittest.TestCase):
   for i in range(100):s.process(x[:4800],i*4800,True,True)
   self.assertEqual(s.snapshot()['suppression_reason'],'sequence budget exhausted')
 
+ def test_accented_signal_is_directional_and_first_bar_is_strongest(self):
+  x=np.zeros((4800,2),np.float32)
+  samples=[];s=SignalShaker(GRID,enabled=True,peak=.14,accented=True)
+  for i in range(90):samples.append(s.process(x,i*4800,True,True,sequence_key='left'))
+  y=np.concatenate(samples)
+  self.assertAlmostEqual(float(abs(y).max()),.14,places=6)
+  np.testing.assert_allclose(y[:,1],y[:,0]*.65,atol=1e-8)
+  first=s.pulse_frames[0];n=len(s.grain)
+  later=s.pulse_frames[8]
+  np.testing.assert_allclose(y[later:later+n],y[first:first+n]*.65,atol=1e-8)
+  self.assertEqual(len(s.sequence_starts),1)
+  self.assertEqual(len(s.pulse_frames),32)
+
+ def test_accented_signal_keeps_unknown_phase_and_headroom_guards(self):
+  unknown=ShakerGrid(128,0,.8,0,True,'unverified phase')
+  x=np.full((48000,2),.98,np.float32)
+  self.assertIs(SignalShaker(unknown,enabled=True,peak=.14,accented=True).process(x,0,True,True),x)
+  s=SignalShaker(GRID,enabled=True,peak=9,accented=True)
+  y=s.process(x,0,True,True,sequence_key='right')
+  self.assertEqual(s.peak,.16);self.assertLessEqual(float(y.max()),1.)
+  np.testing.assert_array_equal(x,np.full_like(x,.98))
+
+ def test_silenced_priority_is_reported_and_does_not_restart_sequence(self):
+  s=SignalShaker(GRID,enabled=True,peak=.14,accented=True)
+  x=np.zeros((4800,2),np.float32)
+  for i in range(40):
+   np.testing.assert_array_equal(s.process(x,i*4800,True,True,sequence_key='left',presentation_gain=0),x)
+  self.assertEqual(s.snapshot()['suppression_reason'],'presentation priority')
+  self.assertEqual(len(s.sequence_starts),1)
+  self.assertGreater(s.sequence_pulses,0)
+
 if __name__=='__main__':unittest.main()
