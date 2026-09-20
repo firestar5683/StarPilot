@@ -61,7 +61,7 @@ export const RoadScore = {
         if (this.session !== token) return
         this.testClicks = value.clicks
         if (performance.now() - this.sessionStarted > (this.testMode ? 14000 : 55000)) {
-          if (!this.testMode && this.taps >= 8) await this.finish()
+          if (!this.testMode && this.taps >= this.targetTaps) await this.finish()
           else { await this.cancel(); if (!this.testMode) this.error = 'Not enough chime taps. Start again and tap only when you hear each chime.' }
         }
       } catch (error) { if (this.session === token) { this.error = error.message; this.session = null; clearInterval(this.calibrationTimer) } }
@@ -135,7 +135,7 @@ export const RoadScore = {
           <strong>{{cue}}</strong><div style="font-size:72px" aria-live="off">{{beat}}</div>
           <button v-if="!testMode" class="gx-btn" style="flex:1;width:100%;touch-action:manipulation;font-size:28px" :disabled="beatIndex < countIn || taps >= 16" @pointerdown.prevent="tap">{{beatIndex < countIn ? 'Listen first' : 'Hear a chime? Tap here or press Space'}}<br>{{taps}} / {{targetTaps}} chimes</button>
           <p>Listen to the speaker, not the screen · one tap per chime</p>
-          <button v-if="!testMode" class="gx-btn" :disabled="taps < 8 || busy" @click="finish">Calculate correction</button><button class="gx-btn" @click="cancel">Cancel</button>
+          <button class="gx-btn" @click="cancel">Cancel</button>
         </div></Teleport></template>
         <p v-if="result">Suggested correction: {{result.latency_ms}} ms · {{result.accepted_taps}} accepted taps · {{result.spread_ms}} ms spread. Includes tap reaction time. Review and Save above; the saved value has not changed.</p>
         <button class="gx-btn" :disabled="busy || session || !status.can_calibrate" @click="start(true)">Test timing</button>
