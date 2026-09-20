@@ -120,9 +120,21 @@ class ReplaySyncTests(unittest.TestCase):
                  playback_clock=PreparedClock(),audio=np.zeros((480000,2),np.float32),
                  processor=SimpleNamespace(process=lambda chunk,*args:(chunk,{})),state={},
                  controls=SimpleNamespace(selection=('recorded','recorded')),a=SimpleNamespace(muted=True),
-                 errors=[],clock_errors=[])
+                 errors=[],clock_errors=[],clock_observations=[])
     exec(compile(ast.Module(body=[callback],type_ignores=[]),str(path),'exec'),context)
     out=np.ones((960,2),np.float32)
+    # Startup gathers only a bounded set of silent observations. No stream.time
+    # getter, model anchor, source-frame processing or output is required.
+    saved_bridge=context['bridge'];context['bridge']=None
+    for i in range(30):
+      context['time'].monotonic=lambda i=i:99.+i*.02
+      context['callback'](out,960,SimpleNamespace(currentTime=499.+i*.02,outputBufferDacTime=499.04+i*.02),False)
+      self.assertFalse(out.any())
+    self.assertEqual(len(context['clock_observations']),24)
+    self.assertIsNone(context['position'])
+    calibrated=StreamClockBridge.from_callbacks(context['clock_observations'][:20])
+    self.assertAlmostEqual(calibrated.offset,-400.)
+    context['bridge']=saved_bridge;context['time'].monotonic=lambda:100.08
     context['callback'](out,960,SimpleNamespace(currentTime=500.,outputBufferDacTime=500.056),False)
     context['time'].monotonic=lambda:100.04
     context['callback'](out,960,SimpleNamespace(currentTime=500.02,outputBufferDacTime=500.076),False)

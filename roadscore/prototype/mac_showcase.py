@@ -222,6 +222,7 @@ def audio_worker(a):
   done = False
   errors = []
   clock_errors = []
+  clock_observations = []
   bridge = None
   flags = 0
   max_drift = 0.
@@ -231,7 +232,11 @@ def audio_worker(a):
   def callback(out, n, ti, status):
     nonlocal position,rendered,done,flags,max_drift,first_frame,callback_revision
     out.fill(0)
-    if anchor is None or bridge is None or done:return
+    if bridge is None:
+      if len(clock_observations)<24:
+        clock_observations.append((float(time.monotonic()),float(ti.currentTime),float(ti.outputBufferDacTime)))
+      return
+    if anchor is None or done:return
     now=time.monotonic()
     active_anchor=anchor
     expected=None;dac=None;start=position
@@ -266,7 +271,14 @@ def audio_worker(a):
       server = control_server(a.project_root,a.out,shared,a.port,forwarder,follow_peer=forwarder is not None)
       write_json(a.out/'controls.json',{'url':f'http://127.0.0.1:{server.server_port}/'})
     with sd.OutputStream(device=a.audio_device,samplerate=rate,channels=2,blocksize=960,dtype='float32',callback=callback) as stream:
-      bridge=StreamClockBridge.measure(lambda:stream.time)
+      calibration_deadline=time.monotonic()+2.
+      while len(clock_observations)<20:
+        if not stream.active:raise RuntimeError('Output stream stopped during silent clock calibration')
+        if time.monotonic()>=calibration_deadline:raise TimeoutError('Output clock did not provide 20 silent callbacks')
+        time.sleep(.01)
+      observations=list(clock_observations[:20])
+      write_json(a.out/'stream_clock_calibration.json',dict(silent_callback_samples=observations))
+      bridge=StreamClockBridge.from_callbacks(observations)
       (a.out/'prepared_ready').write_text('ready')
       while not done:
         sm.update(50);now=time.monotonic();controls.poll()
