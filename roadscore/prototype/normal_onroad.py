@@ -11,6 +11,7 @@ from presentation_policy import select_launch
 from hook_launch import start_planner
 from composition_launch import configure as configure_composition
 from launch_health import check_children, describe_failure, write_failure
+from receiver_diagnostics import receiver_failure
 from session_seed import select_session, seed_argument, seed_environment, remote_assignments
 R=Path(__file__).resolve().parents[1]
 native=Path('/TICI').exists()
@@ -128,7 +129,7 @@ try:
      temporary=out/'roadscore_status.tmp';temporary.write_text(json.dumps({**initial_display,**progress}));temporary.replace(out/'roadscore_status.json')
     last_preparation_status=time.monotonic()
    check_children(named_children,remote=not native,include_receiver=True)
-   if receiver.poll() is not None or time.monotonic()>deadline:raise RuntimeError('Bench receiver failed: '+(out/'receiver.log').read_text())
+   if receiver.poll() is not None or time.monotonic()>deadline:raise RuntimeError('Bench receiver failed or timed out; see receiver.log')
    time.sleep(.2)
   audio_host=None
   if not native:
@@ -198,9 +199,10 @@ except Exception as error:
   check_children(named_children,remote=not native,include_receiver=True,allow_clean_receiver=True)
  except Exception as child_error:
   error=child_error
+ error=receiver_failure(error,out/'receiver.log')
  failure=describe_failure(error)
  write_failure(out/'roadscore_status.json',failure)
- raise
+ raise error from None
 finally:
  for c in reversed(children):
   if c.poll() is None:
