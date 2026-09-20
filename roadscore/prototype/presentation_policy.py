@@ -19,7 +19,7 @@ CONSERVATIVE_V4 = {**copy.deepcopy(CONSERVATIVE_V3),
  'curve_reaction':{'enabled':True,'bass_build':True},
  'signal_shaker':{'enabled':True,'peak':.055,'after_containment':True,'contained_gain':.45},
  'engagement_presentation':{'version':2,'enabled':True,'attack_ms':220,'release_ms':650,
-                          'cutoff_hz':1300.,'width':.65,'gain':.7079458},
+                          'cutoff_hz':1000.,'width':.55,'gain':.6683439},
 }
 
 def select_launch(composer, profile, replay=False, judging=False, render_mode=None, policy=None):

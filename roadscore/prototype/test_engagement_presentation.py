@@ -77,17 +77,33 @@ class PresentationTests(unittest.TestCase):
   def test_v4_containment_is_stronger_and_still_recovers_exact_core(self):
     from presentation_policy import CONSERVATIVE_V4
     config=PresentationConfig.read(CONSERVATIVE_V4['engagement_presentation'])
-    old=EngagementPresentation();old.mix=0
+    old=EngagementPresentation(cutoff_hz=1300.,width=.65,gain=.7079458);old.mix=0
     new=EngagementPresentation(cutoff_hz=config.cutoff_hz,width=config.width,gain=config.gain);new.mix=0
     t=np.arange(48000)/48000
     x=np.column_stack([np.sin(t*2*np.pi*6000),-np.sin(t*2*np.pi*6000)]).astype('float32')*.4
     before=old.process(x,False,ON);after=new.process(x,False,config)
-    self.assertLess(np.sqrt(np.mean(after[4800:]**2)),np.sqrt(np.mean(before[4800:]**2))*.12)
+    self.assertLess(np.sqrt(np.mean(after[4800:]**2)),np.sqrt(np.mean(before[4800:]**2))*.55)
     resumed=new.process(x,True,config)
     np.testing.assert_array_equal(resumed[12000:],x[12000:])
-    self.assertEqual(new.snapshot(config,True,True)['engagement_presentation']['cutoff_hz'],1300.)
+    self.assertEqual(new.snapshot(config,True,True)['engagement_presentation']['cutoff_hz'],1000.)
     self.assertEqual(PresentationConfig.read({'width':float('nan'),'gain':9,'cutoff_hz':0}).width,.85)
     self.assertEqual(PresentationConfig.read({'gain':9}).gain,1.)
     self.assertEqual(PresentationConfig.read({'cutoff_hz':0}).cutoff_hz,300.)
+
+  def test_v4_transitions_remain_smooth_and_keep_sample_timing(self):
+    from presentation_policy import CONSERVATIVE_V4
+    config=PresentationConfig.read(CONSERVATIVE_V4['engagement_presentation'])
+    dsp=EngagementPresentation(cutoff_hz=config.cutoff_hz,width=config.width,gain=config.gain)
+    block=np.full((4800,2),.25,np.float32)
+    dsp.process(block,True,config)
+    contained=np.concatenate([dsp.process(block,False,config) for _ in range(8)])
+    self.assertLess(np.max(np.abs(np.diff(contained[:,0]))),.00001)
+    self.assertEqual(dsp.mix,0.)
+    self.assertAlmostEqual(float(contained[-1,0]),.25*10**(-3.5/20),places=5)
+    resumed=np.concatenate([dsp.process(block,True,config) for _ in range(3)])
+    self.assertLess(np.max(np.abs(np.diff(resumed[:,0]))),.00001)
+    np.testing.assert_array_equal(resumed[10560:],np.full((3840,2),.25,np.float32))
+    self.assertEqual(dsp.frames_processed,57600)
+    self.assertEqual(dsp.snapshot(config,True,True)['engagement_presentation']['added_delay_samples'],0)
 
 if __name__=='__main__':unittest.main()

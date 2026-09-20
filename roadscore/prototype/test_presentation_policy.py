@@ -52,7 +52,7 @@ class PolicyTests(unittest.TestCase):
   self.assertNotIn('cutoff_hz',previous['engagement_presentation'])
   self.assertEqual(current['signal_shaker']['peak'],.055)
   self.assertTrue(current['signal_shaker']['after_containment'])
-  self.assertEqual(current['engagement_presentation']['cutoff_hz'],1300.)
+  self.assertEqual(current['engagement_presentation']['cutoff_hz'],1000.)
   self.assertEqual(select_launch('ace','prism',policy='conservative-v3')['policy'],'conservative-v3')
   with self.assertRaises(ValueError):select_launch('ace','prism',judging=True,policy='conservative-v4')
 
