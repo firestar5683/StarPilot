@@ -98,6 +98,32 @@ def worker_arguments(project, root, out, archive, route, muted, curve_plan=None,
   return args
 
 
+def cleanup_owned(children, display, logs):
+  """Finish owned cleanup even if the parent sends a second stop signal."""
+  previous = {sig: signal.signal(sig, signal.SIG_IGN) for sig in (signal.SIGTERM, signal.SIGINT)}
+  errors = []
+  try:
+    for child in reversed(list(children.values())):
+      try:
+        if child.poll() is None:
+          try: os.killpg(child.pid, signal.SIGTERM)
+          except ProcessLookupError: pass
+          try: child.wait(timeout=5)
+          except subprocess.TimeoutExpired:
+            try: os.killpg(child.pid, signal.SIGKILL)
+            except ProcessLookupError: pass
+            child.wait(timeout=5)
+      except Exception as error:
+        errors.append(type(error).__name__ + ': ' + str(error))
+  finally:
+    try:
+      if display is not None: display.close()
+    finally:
+      for log in logs: log.close()
+      for sig, handler in previous.items(): signal.signal(sig, handler)
+  return errors
+
+
 def main():
   p=argparse.ArgumentParser(description=__doc__)
   p.add_argument('--roadscore',action='store_true');p.add_argument('--demo',action='store_true')
@@ -220,13 +246,8 @@ def main():
       write_json(out/'demo_failure.json',dict(session_id=session,error=failure,wall=time.monotonic()))
       raise
     finally:
-      for child in reversed(list(children.values())):
-        if child.poll() is None:
-          os.killpg(child.pid,signal.SIGTERM)
-          try:child.wait(timeout=5)
-          except subprocess.TimeoutExpired:os.killpg(child.pid,signal.SIGKILL);child.wait()
-      if display is not None:display.close()
-      for log in logs:log.close()
+      cleanup_errors=cleanup_owned(children,display,logs)
+      if cleanup_errors:write_json(out/'cleanup_errors.json',dict(errors=cleanup_errors))
       write_json(out/'status.json',dict(readiness='DEGRADED' if failure else 'COLD',compute='prepared-core',route=route,presentation_session_id=session,command_wall=time.monotonic(),input_mode='stopped',error=failure))
       print('Prepared native demo stopped. Existing composer ownership unchanged.',flush=True)
 
