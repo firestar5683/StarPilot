@@ -26,16 +26,15 @@ class AlertAccent:
    self.pending=[]
    return pcm
   elapsed=(start-self.since)/self.rate
-  if self.grid.usable and current and not self.handled and elapsed>=.2:
-   # Ordinary cues can defer a warning briefly, but cannot permanently erase it.
-   if not competing or elapsed>=.7:
-    self.handled=True
-    if start-self.last>=12*self.rate and sum(start-e['frame']<60*self.rate for e in self.events)<3:
-     beat=self.rate*60/self.grid.bpm;origin=self.grid.beat_phase*self.rate
-     frame=round(origin+math.ceil((start-origin)/beat-1e-10)*beat)
-     self.pending=[(frame,1.),(frame+round(beat/2),.55),(frame+round(beat),.8)]
-     self.last=start;self.events.append({'kind':'native_alert_fill','frame':start,'scheduled_frame':frame,'alert':current,
-                                       'competition_deferred':bool(competing),'priority':'warning over routine cues'})
+  if self.grid.usable and current and not self.handled and elapsed>=.05:
+   # Warning priority replaces routine-cue deferral; qualify one stable input first.
+   self.handled=True
+   if start-self.last>=12*self.rate and sum(start-e['frame']<60*self.rate for e in self.events)<3:
+    beat=self.rate*60/self.grid.bpm;origin=self.grid.beat_phase*self.rate
+    frame=round(origin+math.ceil((start-origin)/(beat/2)-1e-10)*(beat/2))
+    self.pending=[(frame,1.),(frame+round(beat/2),.55),(frame+round(beat),.8)]
+    self.last=start;self.events.append({'kind':'native_alert_fill','frame':start,'scheduled_frame':frame,'alert':current,
+                                      'competition_deferred':bool(competing),'priority':'warning over routine cues'})
   self.priority_active=bool(self.pending)
   end=start+len(pcm);overlay=None;duck=None;remaining=[]
   for frame,gain in self.pending:
@@ -56,5 +55,5 @@ class AlertAccent:
  def snapshot(self):
   return {'enabled':self.enabled,'rhythm_enabled':self.enabled and self.grid.usable,
           'rendered_active':self.rendered_active,'priority_active':self.priority_active,
-          'minimum_spacing_seconds':12,'maximum_per_minute':3,'maximum_competition_deferral_seconds':.5,
-          'peak_limit':.045,'duck_db':1.5,'fill':'beat, eighth, next beat','source':'selfdriveState.alertStatus'}
+          'minimum_spacing_seconds':12,'maximum_per_minute':3,'maximum_competition_deferral_seconds':0.,'qualification_seconds':.05,
+          'peak_limit':.045,'duck_db':1.5,'fill':'next eighth, plus eighth, plus beat','source':'selfdriveState.alertStatus'}

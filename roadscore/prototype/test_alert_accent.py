@@ -17,13 +17,13 @@ class AccentTests(unittest.TestCase):
  def test_persistent_alert_once_and_grid_aligned(self):
   accent,heard=self.render(['takeover']*200)
   self.assertTrue(heard);self.assertEqual(len(accent.events),1)
-  self.assertEqual(accent.events[0]['scheduled_frame'],5000)
+  self.assertEqual(accent.events[0]['scheduled_frame'],1000)
  def test_tiny_changes_omitted_but_competing_cues_do_not_erase_warning(self):
   self.assertFalse(self.render(['a','b']*100)[1])
   accent,heard=self.render(['a']*100,competing=True)
   self.assertTrue(heard);self.assertEqual(len(accent.events),1)
-  self.assertGreaterEqual(accent.events[0]['frame'],round(.7*8000))
-  self.assertLess(accent.events[0]['scheduled_frame'],round(1.3*8000))
+  self.assertGreaterEqual(accent.events[0]['frame'],round(.05*8000))
+  self.assertLess(accent.events[0]['scheduled_frame'],round(.4*8000))
   self.assertFalse(self.render(['a']*100,fresh=False)[1])
  def test_density_limit(self):
   accent,_=self.render([str(i//30) for i in range(600)])
@@ -36,6 +36,14 @@ class AccentTests(unittest.TestCase):
   for i in range(3):a.process(x,i*800,'a',True,True)
   self.assertTrue(a.pending)
   self.assertIs(a.process(x,2400,'a',True,False),x);self.assertFalse(a.pending)
+ def test_128bpm_next_eighth_has_no_competition_delay(self):
+  grid=ShakerGrid(128,.099,.8,.9,True,'test')
+  a=AlertAccent(grid,rate=48000,enabled=True);x=np.full((4800,2),.1,np.float32)
+  a.process(x,0,'warning',True,True,True)
+  a.process(x,4800,'warning',True,True,True)
+  self.assertEqual(len(a.events),1)
+  self.assertLessEqual(a.events[0]['scheduled_frame']/48000,.1+60/128/2+.0001)
+  self.assertTrue(a.priority_active)
  def test_headroom_and_no_notification_in_rest(self):
   a=AlertAccent(GRID,rate=8000,enabled=True);x=np.full((800,2),.999,np.float32)
   for i in range(20):
