@@ -60,3 +60,20 @@ class ResidentTests(unittest.TestCase):
   self.assertEqual(original,(self.root/'session_request.json').read_bytes())
 
 if __name__=='__main__':unittest.main()
+
+class BufferProtocolTests(ResidentTests):
+ def test_old_worker_fails_before_queue(self):
+  (self.root/'ace_initial.json').write_text(json.dumps({'resident_capable':True}))
+  with self.assertRaisesRegex(RuntimeError,'restart it once'):
+   request_preparation(self.root,'prism',123,'hook-cache-v1','a'*64,initial_buffer_seconds=40,short_startup_test=True)
+  self.assertFalse((self.root/'session_request.json').exists())
+ def test_echo_without_applied_target_fails(self):
+  (self.root/'ace_initial.json').write_text(json.dumps({'resident_session_protocol':2}))
+  self.responder()
+  with self.assertRaisesRegex(RuntimeError,'applied buffer'):
+   request_preparation(self.root,'prism',123,'hook-cache-v1','a'*64,initial_buffer_seconds=40,short_startup_test=True)
+ def test_exact_applied_target_succeeds(self):
+  (self.root/'ace_initial.json').write_text(json.dumps({'resident_session_protocol':2}))
+  self.responder({'applied_initial_buffer_target_seconds':40})
+  result=request_preparation(self.root,'prism',123,'hook-cache-v1','a'*64,initial_buffer_seconds=40,short_startup_test=True)
+  self.assertEqual(result['initial_buffer_target_seconds'],40)

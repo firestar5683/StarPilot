@@ -15,5 +15,5 @@ def configure(session, replay, composer, *, native, transport_only, environ, roo
     environ.pop('ROADSCORE_PLANNER_URL', None)
     environ.pop('ROADSCORE_PLANNER_TOKEN', None)
     environ.setdefault('ROADSCORE_RESIDENT', '1')
-    environ.setdefault('ROADSCORE_INITIAL_BUFFER_SECONDS', '100')
+    environ.setdefault('ROADSCORE_INITIAL_BUFFER_SECONDS', '40' if environ.get('ROADSCORE_TEST_SHORT_STARTUP') == '1' else '100')
     return 'hook-cache-v1'

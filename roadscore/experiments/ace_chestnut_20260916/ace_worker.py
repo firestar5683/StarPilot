@@ -31,8 +31,8 @@ if resident and composition_policy!='hook-cache-v1':raise ValueError('Resident m
 if resident and (G/'session_request.json').exists():raise RuntimeError('Unacknowledged resident request requires owner inspection before restart')
 from contextlib import nullcontext
 from resident_session import session_lease,validate_session
-from startup_buffer import initial_target
-initial_buffer_target=initial_target(os.environ,composition_policy,POLICY.initial_buffer_seconds)
+from startup_buffer import initial_target,session_target,SESSION_PROTOCOL
+boot_initial_buffer_target=initial_buffer_target=initial_target(os.environ,composition_policy,POLICY.initial_buffer_seconds)
 from tinygrad import Device
 profile=selected();preparation_id=f'{profile}_{time.time_ns()}'
 lock=open(G/'gpu.lock','w');fcntl.flock(lock,fcntl.LOCK_EX|fcntl.LOCK_NB)
@@ -74,9 +74,10 @@ try:
    return {'directory':str(folder),'stem':stem.name,'output_gain':POLICY.output_gain}
   return record
  def prepare_session(selection=None):
-  global profile,base_seed,preparation_id,planned,qualified
+  global profile,base_seed,preparation_id,planned,qualified,initial_buffer_target
   if selection is not None:
    new_profile,new_seed,new_policy,bank_hash=validate_session(selection)
+   next_buffer_target=session_target(selection,new_policy,boot_initial_buffer_target)
    if new_policy!=composition_policy or bank_hash!=planned.bank_hash:raise ValueError('Resident conditioning identity changed')
    if (G/'request.json').exists() or (G/'busy').exists():raise RuntimeError('Pending continuation prevents session reset')
    next_id=f'{new_profile}_{time.time_ns()}'
@@ -84,6 +85,7 @@ try:
    if next_plan.bank_hash!=bank_hash:raise ValueError('Conditioning bank changed on disk')
    ready.unlink(missing_ok=True)
    profile,base_seed,preparation_id,planned=new_profile,new_seed,next_id,next_plan
+   initial_buffer_target=next_buffer_target
    qualified=QualifiedGenerator(generate,policy=HOOK_POLICY)
   session_started=time.monotonic() if selection else BOOT
   write_json(G/'ace_worker_state.json',{'pid':os.getpid(),'generation_seed':base_seed,'composition_policy':composition_policy,'profile':profile,'phase':'preparing','accepted_chunks':0,'accepted_buffer_seconds':0.,'elapsed_seconds':0.,'resident_reused':bool(selection)})
@@ -106,7 +108,7 @@ try:
    write_json(G/'ace_worker_state.json',{'pid':os.getpid(),'generation_seed':base_seed,'composition_policy':composition_policy,'profile':profile,'phase':'preparing','accepted_chunks':slot,'accepted_buffer_seconds':len(initial)/48000,'first_accepted_audio_seconds':first_accepted_audio_seconds,'elapsed_seconds':time.monotonic()-session_started})
    if slot>8:raise RuntimeError('Initial buffer did not fill within bounded preparation')
   save_wave(G/'ace_initial.wav',initial);np.save(G/'ace_initial.npy',last)
-  write_json(G/'ace_initial.json',{'generation_seed':base_seed,'composition_policy':composition_policy,'composer':'ace','startup_seconds':time.monotonic()-session_started,'first_accepted_audio_seconds':first_accepted_audio_seconds,'model_load_seconds':0. if selection else model_load_seconds,'resident_model_load_seconds':model_load_seconds,'worker_uptime_seconds':time.monotonic()-BOOT,'resident_reused':bool(selection),'resident_capable':resident,'resident_model_identity':str(id(c)),'conditioning_bank_sha256':planned.bank_hash if resident else None,'host_peak_rss_kib':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,'duration':len(initial)/48000,'initial_buffer_target_seconds':initial_buffer_target,'source_identity':'kpop_control','prepared_profile':profile if windowed else 'legacy','preparation_id':preparation_id,'continuation_policy':'quality-gated fixed lookahead','generation':preparation,'prepared_identity':True,'output_gain':POLICY.output_gain,'created_wall':time.time()})
+  write_json(G/'ace_initial.json',{'generation_seed':base_seed,'composition_policy':composition_policy,'composer':'ace','startup_seconds':time.monotonic()-session_started,'first_accepted_audio_seconds':first_accepted_audio_seconds,'model_load_seconds':0. if selection else model_load_seconds,'resident_model_load_seconds':model_load_seconds,'worker_uptime_seconds':time.monotonic()-BOOT,'resident_reused':bool(selection),'resident_capable':resident,'resident_session_protocol':SESSION_PROTOCOL if resident else None,'resident_model_identity':str(id(c)),'conditioning_bank_sha256':planned.bank_hash if resident else None,'host_peak_rss_kib':resource.getrusage(resource.RUSAGE_SELF).ru_maxrss,'duration':len(initial)/48000,'initial_buffer_target_seconds':initial_buffer_target,'source_identity':'kpop_control','prepared_profile':profile if windowed else 'legacy','preparation_id':preparation_id,'continuation_policy':'quality-gated fixed lookahead','generation':preparation,'prepared_identity':True,'output_gain':POLICY.output_gain,'created_wall':time.time()})
   write_json(G/'ace_worker_state.json',{'pid':os.getpid(),'generation_seed':base_seed,'composition_policy':composition_policy,'profile':profile,'phase':'READY','initial_buffer_seconds':len(initial)/48000})
   (G/'request.json').unlink(missing_ok=True);ready.write_text('ace');print('ACE_READY',flush=True)
  with session_lease(G) if resident else nullcontext():prepare_session()
@@ -116,7 +118,7 @@ try:
    selection=json.loads(session_request.read_text());session_request.unlink()
    try:
     with session_lease(G):prepare_session(selection)
-    write_json(G/'session_result.json',{**selection,'phase':'READY','preparation_id':preparation_id})
+    write_json(G/'session_result.json',{**selection,'phase':'READY','preparation_id':preparation_id,'applied_initial_buffer_target_seconds':initial_buffer_target})
    except BlockingIOError:
     write_json(G/'session_result.json',{'id':selection.get('id'),'error':'Playback owns the resident session'})
    except Exception as error:

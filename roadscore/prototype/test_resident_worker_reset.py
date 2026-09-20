@@ -9,6 +9,7 @@ import numpy as np
 import pytest
 from generation_seed import sample_seed
 from resident_session import validate_session
+from startup_buffer import session_target,SESSION_PROTOCOL
 
 BANK = 'a' * 64
 
@@ -42,7 +43,7 @@ def worker(tmp_path, monkeypatch):
                G=tmp_path,Path=Path,os=os,time=time,np=np,resource=resource,BOOT=time.monotonic(),
                ready=tmp_path/'worker_ready',CachedComposition=Plan,QualifiedGenerator=Generator,
                generate=None,HOOK_POLICY=policy,POLICY=policy,windowed=True,resident=True,c=model,
-               model_load_seconds=12.,initial_buffer_target=.01,record_for=lambda job:None,sample_seed=sample_seed,
+               model_load_seconds=12.,initial_buffer_target=.01,boot_initial_buffer_target=.01,session_target=session_target,SESSION_PROTOCOL=SESSION_PROTOCOL,record_for=lambda job:None,sample_seed=sample_seed,
                write_json=lambda path,value:saved.update({path.name:value}),
                save_wave=lambda path,wave:audio.append(wave.copy()))
     exec(code,state)
@@ -84,3 +85,17 @@ def test_nonresident_launch_cannot_reuse_resident_audio_with_same_seed():
     metadata={'generation_seed':123,'prepared_profile':'prism','composition_policy':'hook-cache-v1','resident_capable':True}
     env={'ROADSCORE_GENERATION_SEED':'123','ROADSCORE_ACE_PROFILE':'prism','ROADSCORE_COMPOSITION_POLICY':'hook-cache-v1'}
     with pytest.raises(ValueError,match='opted-in'):verify(metadata,env)
+
+def test_explicit_session_target_replaces_boot_target(worker):
+    state,saved,audio,model=worker
+    class BufferGenerator(Generator):
+        def run(self,role,seed,previous,record):
+            assert previous is None
+            return np.zeros((40*48000,2),dtype=np.float32),np.zeros((1,4,64)),{'prefix_seconds':0}
+    state['QualifiedGenerator']=BufferGenerator
+    request={**selection(),'session_protocol':2,'initial_buffer_target_seconds':40,'startup_policy':'short-startup-test-v1'}
+    state['prepare_session'](request)
+    assert state['initial_buffer_target']==40
+    assert saved['ace_initial.json']['initial_buffer_target_seconds']==40
+    assert saved['ace_initial.json']['duration']==40
+    assert state['c'] is model

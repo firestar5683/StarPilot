@@ -7,6 +7,7 @@ from pathlib import Path
 import re
 import time
 import uuid
+from startup_buffer import session_target, require_session_protocol, SESSION_PROTOCOL
 
 
 @contextmanager
@@ -40,13 +41,20 @@ def validate_session(request):
         raise ValueError('Resident handoff requires hook-cache-v1')
     if not isinstance(bank, str) or re.fullmatch('[0-9a-f]{64}', bank) is None:
         raise ValueError('Resident handoff requires the conditioning bank SHA-256')
+    session_target(request, policy)
     return profile, seed, policy, bank
 
 
-def request_preparation(generated, profile, seed, composition_policy, bank_sha256, timeout=1560):
+def request_preparation(generated, profile, seed, composition_policy, bank_sha256, timeout=1560, *, initial_buffer_seconds=None, short_startup_test=False):
     generated = Path(generated)
     selection = {'profile': profile, 'generation_seed': seed,
                  'composition_policy': composition_policy, 'bank_sha256': bank_sha256}
+    if initial_buffer_seconds is not None:
+        if short_startup_test:selection['startup_policy']='short-startup-test-v1'
+        selection.update(session_protocol=SESSION_PROTOCOL, initial_buffer_target_seconds=initial_buffer_seconds)
+        # Old workers echo unknown request fields: capability must be checked before enqueue.
+        metadata = json.loads((generated / 'ace_initial.json').read_text())
+        require_session_protocol(metadata)
     validate_session(selection)
     if not math.isfinite(timeout) or timeout <= 0:
         raise ValueError('Preparation timeout must be finite and positive')
@@ -73,6 +81,8 @@ def request_preparation(generated, profile, seed, composition_policy, bank_sha25
                     raise RuntimeError(str(result['error']))
                 if validate_session(result) != validate_session(selection):
                     raise RuntimeError('Resident acknowledgment belongs to a different session')
+                if initial_buffer_seconds is not None and result.get('applied_initial_buffer_target_seconds') != initial_buffer_seconds:
+                    raise RuntimeError('Resident worker did not acknowledge the applied buffer target')
                 if result.get('phase') != 'READY' or not result.get('preparation_id'):
                     raise RuntimeError('Resident preparation did not report READY with provenance')
                 return result
