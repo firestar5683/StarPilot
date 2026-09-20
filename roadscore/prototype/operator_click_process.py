@@ -16,9 +16,11 @@ class ClickSequence:
     self.beats = [round((start + i * INTERVAL) * RATE) for i in range(count)]
     self.pcm = np.zeros((self.beats[-1] + RATE, 2), dtype='float32')
     t = np.arange(round(.018 * RATE)) / RATE
-    click = (.07 * np.sin(2 * np.pi * 1100 * t) * np.exp(-t * 180)).astype('float32')
+    downbeat = (.07 * np.sin(2 * np.pi * 1760 * t) * np.exp(-t * 180)).astype('float32')
+    beat_click = (.0455 * np.sin(2 * np.pi * 880 * t) * np.exp(-t * 180)).astype('float32')
     for index,beat in enumerate(self.beats):
-      self.pcm[beat:beat + len(click)] = click[:, None]*(1.0 if index%4==0 else .65)
+      click = downbeat if index % 4 == 0 else beat_click
+      self.pcm[beat:beat + len(click)] = click[:, None]
     self.stream = sd.OutputStream(device=device, samplerate=RATE, channels=2, dtype='float32', blocksize=480,
                                   callback=self.callback)
 
