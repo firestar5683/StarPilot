@@ -353,7 +353,7 @@ def audio_worker(a):
         if sync_trace is not None:sync_trace.close()
     write_json(a.out/'prepared_summary.json',dict(generation_invoked=False,source=str(a.score_archive),first_source_frame=first_frame,last_source_frame=position,sample_rate=rate,portaudio_flags=flags,max_clock_error_seconds=max_drift,prepared_clock=playback_clock.snapshot(),stream_clock_bridge=bridge.snapshot() if bridge else None,callback_errors=errors,clock_errors=clock_errors,muted=a.muted,session_id=session,manual_scope='isolated replay display and presentation only'))
   if errors:raise RuntimeError(errors[0])
-  if playback_clock.snapshot()['max_post_error_seconds']>.05:raise RuntimeError('Prepared audio clock drift remained above 50 ms after recovery')
+  if abs(playback_clock.snapshot()['current_post_error_seconds'])>.05:raise RuntimeError('Prepared audio clock drift remained above 50 ms after recovery')
 
 
 def apply_showcase_config(a, config):

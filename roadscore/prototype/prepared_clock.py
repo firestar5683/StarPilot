@@ -37,6 +37,7 @@ class PreparedClock:
     self.explicit_seeks=0
     self.max_pre_error=0
     self.max_post_error=0
+    self.current_post_error=0
     self.events=deque(maxlen=64)
 
   @staticmethod
@@ -90,6 +91,7 @@ class PreparedClock:
       if self.fade_done>=self.fade_frames:self.fade_from=None
     self.position+=frames
     post_error=expected_frame-start
+    self.current_post_error=post_error
     self.max_post_error=max(self.max_post_error,abs(post_error))
     return result,{'source_frame':start,'next_source_frame':self.position,'expected_frame':expected_frame,
                    'pre_error_frames':delta,'post_error_frames':post_error,'crossfade_frames_rendered':faded,
@@ -98,6 +100,7 @@ class PreparedClock:
   def snapshot(self):
     return {'next_source_frame':self.position,'corrections':self.corrections,'explicit_seeks':self.explicit_seeks,
             'max_pre_error_seconds':self.max_pre_error/self.rate,'max_post_error_seconds':self.max_post_error/self.rate,
+            'current_post_error_seconds':self.current_post_error/self.rate,
             'crossfade_ms':1000*self.fade_frames/self.rate,'recovery_in_progress':self.fade_from is not None,
             'maximum_backward_recovery_seconds':self.maximum_backward/self.rate,
             'events':list(self.events),'added_delay_samples':0,'resampling':False}

@@ -147,6 +147,29 @@ class ReplaySyncTests(unittest.TestCase):
     self.assertEqual(context['clock_errors'][0]['portaudio_current_time'],500.04)
     self.assertIn('next_source_frame',context['clock_errors'][0])
 
+  def test_worker_final_residual_rejects_unfinished_bounce_but_accepts_recovery(self):
+    import numpy as np
+    from prepared_clock import PreparedClock
+    # Exercise the real worker's final gate without creating runtime services.
+    path=Path(__file__).with_name('mac_showcase.py')
+    worker=next(node for node in ast.parse(path.read_text()).body if isinstance(node,ast.FunctionDef) and node.name=='audio_worker')
+    final_gate=compile(ast.Module(body=[worker.body[-1]],type_ignores=[]),str(path),'exec')
+    core=np.zeros((480000,2),np.float32)
+    for delta in (-3149,3149):
+      with self.subTest(delta=delta):
+        clock=PreparedClock();clock.render(core,96000,960)
+        previous=clock.position;target=previous+delta
+        clock.render(core,target,960)
+        clock.render(core,previous+960,960)
+        self.assertGreater(abs(clock.snapshot()['current_post_error_seconds']),.05)
+        with self.assertRaisesRegex(RuntimeError,'drift remained'):
+          exec(final_gate,{'playback_clock':clock})
+        clock.render(core,previous+1920,960)
+        clock.render(core,previous+2880,960)
+        self.assertEqual(clock.snapshot()['current_post_error_seconds'],0)
+        self.assertGreater(clock.snapshot()['max_post_error_seconds'],.05)
+        exec(final_gate,{'playback_clock':clock})
+
   def test_cleanup_stops_all_groups_before_reaping_and_survives_race(self):
     import signal
     events=[]
