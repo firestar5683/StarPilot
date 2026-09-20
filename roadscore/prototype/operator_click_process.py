@@ -5,11 +5,12 @@ from operator_output import COUNT, COUNT_IN, REFINE_COUNT, TEST_COUNT, INTERVAL,
 
 class ClickSequence:
   """Prebuilt low-level click PCM; callback only copies memory and timestamps."""
-  def __init__(self, on_click, device, count=COUNT):
+  def __init__(self, on_click, device, count=COUNT, on_timing=None):
     import numpy as np
     import sounddevice as sd
     self.sd = sd
     self.on_click = on_click
+    self.on_timing = on_timing
     self.index = 0
     self.failed = False
     start = 2.0
@@ -41,10 +42,19 @@ class ClickSequence:
     if end > self.index:
       out[:end-self.index] = self.pcm[self.index:end]
     # PortAudio host clock mapped to the local monotonic clock at callback time.
-    dac = time.monotonic() + float(timing.outputBufferDacTime - timing.currentTime)
+    callback_wall=time.monotonic()
+    dac_lead=float(timing.outputBufferDacTime-timing.currentTime)
+    dac=callback_wall+dac_lead
     for index, beat in enumerate(self.beats):
       if self.index <= beat < self.index + frames:
-        self.on_click(index, 1000 * (dac + (beat - self.index) / RATE))
+        offset=(beat-self.index)/RATE
+        projected=dac+offset
+        self.on_click(index,1000*projected)
+        if self.on_timing is not None:
+          self.on_timing(dict(beat=index,server_ms=1000*projected,callback_wall=callback_wall,
+                             sample_offset_seconds=offset,dac_lead_seconds=dac_lead,dac_projected_wall=projected,
+                             portaudio_current_time=float(timing.currentTime),portaudio_dac_time=float(timing.outputBufferDacTime),
+                             stream_settings=dict(rate=RATE,channels=2,blocksize=480,callback_frames=frames,dtype='float32')))
     self.index += frames
 
   def start(self):
@@ -71,7 +81,7 @@ def main():
     device=select_device(sd.query_devices(),metadata)
     sd.check_output_settings(device=device,channels=2,dtype='float32',samplerate=RATE)
     events=queue.SimpleQueue()
-    sink=ClickSequence(lambda i,at:events.put((i,at)),device,args.count)
+    sink=ClickSequence(lambda *_:None,device,args.count,on_timing=events.put)
     parent=os.getppid();last_check=0.
     sink.start()
     try:
@@ -82,8 +92,8 @@ def main():
           if not real_offroad():raise RuntimeError('Calibration ended because the device is no longer parked')
         if sink.failed:raise RuntimeError('Audio callback timing failed; retry calibration')
         try:
-          beat,at=events.get(timeout=.1)
-          print(json.dumps({'beat':beat,'server_ms':at,'timing':'host DAC estimate; includes unmeasured Bluetooth delay'}),flush=True)
+          event=events.get(timeout=.1)
+          print(json.dumps({**event,'timing':'host DAC projection; residual includes human timing bias and unmeasured output delay'}),flush=True)
         except queue.Empty:pass
     finally:sink.close()
 

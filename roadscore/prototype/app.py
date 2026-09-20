@@ -27,6 +27,7 @@ signal.signal(signal.SIGTERM,terminate)
 root=Path(a.root)
 run=root/'results/current';run.mkdir(parents=True,exist_ok=True)
 (run/'audio_drained.json').unlink(missing_ok=True)
+presentation_session_id=f'{os.getpid()}-{time.monotonic_ns()}'
 output_metadata={'bluetooth_selected':False,'muted':a.mute}
 if Path('/TICI').exists() and not a.mute and os.environ.get('ROADSCORE_PCM_RETURN')!='1':
  from bluetooth_output import prepare_output
@@ -37,7 +38,7 @@ output_device=select_device(sd.query_devices(),output_metadata) if output_metada
 if output_device is not None:
  sd.check_output_settings(device=output_device,channels=2,dtype='float32',samplerate=48000)
  output_metadata['portaudio_device']=output_device
-from operator_output import PresentationDelay
+from operator_output import PresentationDelay, PRESENTATION_FIELDS
 presentation_delay=PresentationDelay(root,output_provider=lambda: {'id':output_metadata['output_identity']} if output_metadata.get('bluetooth_selected') else None)
 (run/'output_device.json').write_text(json.dumps(output_metadata,indent=2)+'\n')
 if os.environ.get('ROADSCORE_RESIDENT')=='1':
@@ -178,8 +179,10 @@ def append(wave,overlap=2.,match=False):
   alpha=np.linspace(0,1,n,dtype=np.float32)[:,None]
   audio=np.concatenate([audio[:-n],audio[-n:]*(1-alpha)+wave[:n]*alpha,wave[n:]])
  else:audio=np.concatenate([audio,wave])
+rendered_presentation=None
+presentation_narrative={}
 def callback(out,n,ti,status):
- global position,audio,fallbacks,underflows,frames
+ global position,audio,fallbacks,underflows,frames,rendered_presentation
  event_state,source_time,command_wall=render_state
  callback_wall=time.monotonic()
  if status:underflows+=1
@@ -218,6 +221,14 @@ def callback(out,n,ti,status):
   rendered=motion.process(rendered,speed=motion_state[0],source_fresh=motion_fresh)
  if presentation is not None:rendered=presentation.process(rendered,active,presentation_config)
  out[:]=0 if a.mute else rendered
+ cue={**presentation_narrative,**{key:event_state[key] for key in PRESENTATION_FIELDS if key in event_state}}
+ if presentation is not None:cue.update(presentation.snapshot(presentation_config,active,fresh))
+ if shaker is not None:cue['signal_shaker']=shaker.snapshot()
+ if apex is not None:cue['core_apex']=apex.snapshot()
+ if alert_accent is not None:cue['alert_accent']=alert_accent.snapshot()
+ if motion is not None:cue.update(motion.snapshot())
+ rendered_presentation=dict(sequence=frames-n,callback_wall=callback_wall,
+                            dac_wall=callback_wall+float(ti.outputBufferDacTime-ti.currentTime),cues=cue)
  try:capture.put_nowait((rendered,chunk,{'motion_presentation':motion.snapshot() if motion is not None else None,'signal_shaker_enabled':shaker_enabled,'signal_on':signal_on,'signal_fresh':signal_fresh,'engagement_presentation_enabled':presentation_config.enabled,'engagement_active':active,'engagement_fresh':fresh,'audio_s':(frames-n)/rate,'callback_wall':callback_wall,'command_received_wall':command_wall,'replay_origin_wall':replay_origin_wall,'dac_delay':float(ti.outputBufferDacTime-ti.currentTime),'route_t':source_time,'amount':amount,'phase':event_state['phase'],'strength':event_state.get('strength',0),'predicted_peak':event_state.get('predicted_peak'),'activation':event_state.get('activation'),'kind':event_state.get('kind','curve'),'cadence_entry_audio_s':None if ending_start is None else ending_start/rate,'runway_active':ending_start is not None and frames-n<ending_start,'muted':a.mute,'portaudio_status':str(status),'callback_processing_seconds':time.monotonic()-callback_wall}))
  except queue.Full:underflows+=1
 # Optional prewarmed continuation gives ~52 seconds before replay starts.
@@ -404,7 +415,9 @@ try:
     if songform:snapshot.update(songform.snapshot())
     if composition:snapshot.update(composition.snapshot(frames/rate))
     if gestures:snapshot.update(gestures.status())
-    trace.write(json.dumps(snapshot)+'\n');f=run/'status.tmp';f.write_text(json.dumps(presentation_delay.apply(snapshot)));f.replace(run/'status.json')
+    snapshot['presentation_session_id']=presentation_session_id
+    presentation_narrative={key:snapshot[key] for key in ('section','next_section','gesture_active','gesture_queued','turn_signal_music') if key in snapshot}
+    trace.write(json.dumps(snapshot)+'\n');f=run/'status.tmp';f.write_text(json.dumps(presentation_delay.apply(snapshot,rendered_presentation)));f.replace(run/'status.json')
    if time.monotonic()-last_progress>15:raise RuntimeError('Replay model input stalled')
 finally:
  audio_started=False

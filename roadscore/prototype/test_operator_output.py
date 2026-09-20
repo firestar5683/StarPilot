@@ -81,6 +81,20 @@ class OutputTests(unittest.TestCase):
       self.assertEqual(result['latency_ms'],latency)
       self.assertFalse((self.root/'generated/output_timing.json').exists())
 
+  def test_calibration_preserves_callback_and_dac_evidence_per_pair(self):
+    token=self.owner.dispatch('calibration_start',attended=True)['session']
+    for index,offset in enumerate(m.MARKER_OFFSETS):
+      click=100000+offset*1000;self.clock.value=(click+200)/1000
+      detail=dict(callback_wall=click/1000-.308,sample_offset_seconds=0,dac_lead_seconds=.308,
+                  dac_projected_wall=click/1000,stream_settings={'rate':48000,'blocksize':480,'channels':2})
+      self.owner.session['sink'].callback(index+8,click,detail)
+      self.owner.dispatch('calibration_tap',session=token,server_ms=click+200,uncertainty_ms=3)
+    result=self.owner.dispatch('calibration_result',session=token)
+    self.assertTrue(result['timing_instrumentation_complete'])
+    self.assertEqual(result['timing_reference'],m.TIMING_REFERENCE)
+    self.assertEqual(result['pairs'][0]['timing']['dac_lead_seconds'],.308)
+    self.assertEqual(result['pairs'][0]['timing']['stream_settings']['blocksize'],480)
+
   def test_missed_marker_is_not_paired_to_next_or_partial_result(self):
     token=self.owner.dispatch('calibration_start',attended=True)['session']
     first=100000+m.MARKER_OFFSETS[0]*1000
@@ -167,6 +181,60 @@ class OutputTests(unittest.TestCase):
     shown=delay.apply(next_snapshot)
     self.assertEqual(shown['phase'],'curve');self.assertEqual(shown['readiness'],'DEGRADED')
     self.assertEqual(shown['buffered'],80);self.assertEqual(next_snapshot['phase'],'apex')
+
+  def test_legacy_correction_remains_unverified_without_reinterpretation(self):
+    path=self.root/'generated/output_timing.json';path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps({'speaker-a':24}))
+    record=m.correction_record(self.root,'speaker-a')
+    self.assertEqual(record['status'],'legacy-unverified')
+    self.assertEqual(record['legacy_latency_ms'],24)
+    self.assertEqual(m.correction(self.root,'speaker-a'),0)
+    self.assertEqual(json.loads(path.read_text())['speaker-a'],24)
+    self.owner.dispatch('set_latency',latency_ms=15)
+    self.assertEqual(m.correction(self.root,'speaker-a'),15)
+    self.assertEqual(json.loads(path.read_text())['speaker-a']['timing_reference'],m.TIMING_REFERENCE)
+
+  def test_legacy_saved_refinement_migrates_only_matching_provenance(self):
+    path=self.root/'generated/output_timing.json';path.parent.mkdir(exist_ok=True)
+    latest=path.with_name('calibration_latest_result.json')
+    result=dict(method=m.REFINE_METHOD,output={'id':'speaker-a'},latency_ms=15,accepted_taps=16,created_wall=123.)
+    for changes in ({'method':m.METHOD},{'output':{'id':'speaker-b'}},{'latency_ms':24},{'accepted_taps':0}):
+      path.write_text(json.dumps({'speaker-a':15}))
+      latest.write_text(json.dumps({**result,**changes}))
+      self.assertEqual(m.correction_record(self.root,'speaker-a')['status'],'legacy-unverified')
+      self.assertEqual(json.loads(path.read_text())['speaker-a'],15)
+    latest.write_text(json.dumps(result))
+    migrated=m.correction_record(self.root,'speaker-a')
+    self.assertEqual(migrated['latency_ms'],15)
+    self.assertEqual(migrated['status'],'dac-residual-estimate')
+    self.assertEqual(migrated['migrated_legacy_value'],15)
+    self.assertEqual(json.loads(path.read_text())['speaker-a']['timing_reference'],m.TIMING_REFERENCE)
+
+  def test_callback_dac_plus_residual_and_variable_lead_preserve_raw_core(self):
+    import copy
+    self.owner.dispatch('set_latency',latency_ms=15)
+    delay=m.PresentationDelay(self.root,lambda:self.output,self.clock)
+    raw={'phase':'future-control-state','route_t':33,'elapsed':10,'source_cutoff_ns':123,'buffered':90,'readiness':'READY'}
+    untouched=copy.deepcopy(raw)
+    rendered=dict(sequence=0,callback_wall=100.,dac_wall=100.308,cues={'phase':'actually-rendered-curve'})
+    first=delay.apply(raw,rendered)
+    self.assertNotIn('phase',first)
+    self.assertAlmostEqual(first['presentation_timeline'][0]['audible_wall'],100.323)
+    self.clock.value=100.322
+    self.assertNotIn('phase',delay.apply(raw,rendered))
+    self.clock.value=100.324
+    shown=delay.apply(raw,rendered)
+    self.assertEqual(shown['phase'],'actually-rendered-curve')
+    self.assertEqual(len(shown['presentation_timeline']),1)
+    next_render=dict(sequence=4800,callback_wall=100.1,dac_wall=100.55,cues={'phase':'actually-rendered-apex'})
+    self.assertEqual(delay.apply(raw,next_render)['phase'],'actually-rendered-curve')
+    self.clock.value=100.566
+    shown=delay.apply(raw,next_render)
+    self.assertEqual(shown['phase'],'actually-rendered-apex')
+    self.assertEqual(raw,untouched)
+    self.assertEqual(shown['source_cutoff_ns'],123);self.assertEqual(shown['buffered'],90)
+    self.assertEqual(shown['presentation_timing_reference'],'portaudio-dac-plus-residual-v1')
+    self.assertAlmostEqual(shown['presentation_timeline'][-1]['audible_wall'],100.565)
 
   def test_rendered_cues_delay_without_touching_raw_audio_clock_or_core(self):
     import copy
@@ -258,10 +326,10 @@ class OutputTests(unittest.TestCase):
       def stop(self):pass
       def close(self):pass
     fake=types.SimpleNamespace(OutputStream=Stream,query_devices=lambda:[dict(name='pulse',max_output_channels=2)])
-    stamps=[]
+    stamps=[];timing_records=[]
     with patch.dict(sys.modules,{'sounddevice':fake}):
       from operator_click_process import ClickSequence
-      sink=ClickSequence(lambda i,at:stamps.append((i,at)),0,count=m.TEST_COUNT)
+      sink=ClickSequence(lambda i,at:stamps.append((i,at)),0,count=m.TEST_COUNT,on_timing=timing_records.append)
       second=ClickSequence(lambda *_:None,0,count=m.TEST_COUNT)
       markers=ClickSequence(lambda *_:None,0,count=m.COUNT)
       markers_again=ClickSequence(lambda *_:None,0,count=m.COUNT)
@@ -289,6 +357,11 @@ class OutputTests(unittest.TestCase):
       out=np.zeros((480,2),dtype=np.float32)
       sink.callback(out,480,types.SimpleNamespace(outputBufferDacTime=8.02,currentTime=8),False)
     self.assertAlmostEqual(stamps[0][1],50020)
+    self.assertEqual(timing_records[0]['callback_wall'],50)
+    self.assertAlmostEqual(timing_records[0]['dac_lead_seconds'],.02)
+    self.assertEqual(timing_records[0]['sample_offset_seconds'],0)
+    self.assertAlmostEqual(timing_records[0]['dac_projected_wall'],50.02)
+    self.assertEqual(timing_records[0]['stream_settings']['blocksize'],480)
     self.assertTrue(np.any(out))
 
 if __name__=='__main__':unittest.main()

@@ -23,6 +23,7 @@ COUNT_IN = 8
 COUNT = 20
 REFINE_COUNT = 24
 REFINE_METHOD = 'coarse-anchored-rhythm-v1'
+TIMING_REFERENCE = 'portaudio-dac-residual-v1'
 MARKER_COUNT = COUNT - COUNT_IN
 METHOD = 'irregular-marker-reaction-v1'
 MARKER_INTERVALS = (1.8, 2.4, 2.1, 2.7, 1.9, 2.5, 2.2, 2.8, 2.0, 2.6, 2.3)
@@ -104,9 +105,34 @@ def playback_process_active(proc=Path('/proc')):
   return False
 
 
+def correction_record(root, identity):
+  path=Path(root)/'generated/output_timing.json'
+  values=read(path);value=values.get(identity)
+  if (isinstance(value,dict) and value.get('timing_reference')==TIMING_REFERENCE and
+      type(value.get('latency_ms')) is int and 0<=value['latency_ms']<=1500):
+    return {**value,'status':'dac-residual-estimate'}
+  if type(value) is int and 0<=value<=1500:
+    result=read(Path(root)/'generated/calibration_latest_result.json')
+    if (result.get('method')==REFINE_METHOD and result.get('output',{}).get('id')==identity and
+        type(result.get('latency_ms')) is int and result['latency_ms']==value and
+        type(result.get('accepted_taps')) is int and result['accepted_taps']>=8):
+      migrated=dict(latency_ms=value,timing_reference=TIMING_REFERENCE,saved_wall=time.time(),
+                    source='matching saved two-stage DAC-relative refinement',
+                    migrated_legacy_value=value,calibration_created_wall=result.get('created_wall'),
+                    calibration_method=result['method'])
+      values[identity]=migrated
+      try:
+        temporary=path.with_name(path.name+f'.{os.getpid()}.{threading.get_ident()}.tmp')
+        temporary.write_text(json.dumps(values));temporary.replace(path)
+      except OSError:
+        return dict(latency_ms=0,status='legacy-unverified',legacy_latency_ms=value,migration_error='Could not persist timing reference')
+      return {**migrated,'status':'dac-residual-estimate'}
+    return dict(latency_ms=0,status='legacy-unverified',legacy_latency_ms=value)
+  return dict(latency_ms=0,status='uncalibrated')
+
+
 def correction(root, identity):
-  value = read(Path(root) / 'generated/output_timing.json').get(identity, 0)
-  return value if type(value) is int and 0 <= value <= 1500 else 0
+  return correction_record(root,identity)['latency_ms']
 
 
 def robust_offset(pairs):
@@ -170,7 +196,7 @@ class ClickSink:
           value=json.loads(line)
           if value.get('error'):
             self.error=str(value['error'])[-1500:];self.failed=True
-          if 'beat' in value:self.on_click(value['beat'],value['server_ms'])
+          if 'beat' in value:self.on_click(value['beat'],value['server_ms'],value)
         code=self.process.wait();diagnostic_thread.join(timeout=.2)
         if code!=0 and not self.closed:
           self.error=self.error or f'Calibration audio process exited with status {code}. '+self.stderr_tail.strip()[-1500:]
@@ -215,7 +241,7 @@ class OutputOwner:
     return dict(ok=True, error=(getattr(self.session['sink'],'error',None) if self.session else None) or self.last_error, calibrating=self.session is not None, output=output, latency_ms=correction(self.root, output['id']) if output else None,
                 judging_locked=locked, playback_active=active and self.session is None,
                 calibration=bool(output and output['connected'] and not output['muted'] and not muted),
-                timing_compensation=bool(output), session_muted=muted)
+                timing_compensation=bool(output), timing_correction=correction_record(self.root,output['id']) if output else None, session_muted=muted)
 
   def _close(self):
     session, self.session = self.session, None
@@ -291,13 +317,16 @@ class OutputOwner:
           raise
         self.last_error=None;self.failed_token=None
         token = secrets.token_hex(16)
-        clicks = {}
+        clicks = {};click_timing={}
+        def record_click(index,at,details=None):
+          clicks[index]=at
+          if details:click_timing[index]=details
         try:
-          sink = self.sink_factory(lambda index, at: clicks.__setitem__(index, at), count=count)
+          sink = self.sink_factory(record_click, count=count)
           if self.output_provider() != state['output']:
             sink.close()
             raise ValueError('Output changed before calibration began')
-          self.session = dict(token=token, sink=sink, clicks=clicks, taps={}, output=state['output'],
+          self.session = dict(token=token, sink=sink, clicks=clicks, click_timing=click_timing, taps={}, output=state['output'],
                               operator_lease=operator, session_lease=session_lease, last_client=self.clock(),
                               deadline=self.clock() + (15 if action == 'test' else 60), test=action == 'test', coarse=coarse)
           sink.start()
@@ -327,7 +356,8 @@ class OutputOwner:
           if not output or not output['connected']:
             raise ValueError('Output disconnected')
           path = self.root / 'generated/output_timing.json'
-          values = read(path); values[output['id']] = value
+          values = read(path); values[output['id']] = dict(latency_ms=value,timing_reference=TIMING_REFERENCE,
+                                                         saved_wall=time.time(),source='operator-confirmed DAC residual estimate')
           temp = path.with_suffix('.tmp'); temp.write_text(json.dumps(values)); temp.replace(path)
         return dict(ok=True, latency_ms=value)
       session = self.session
@@ -377,8 +407,10 @@ class OutputOwner:
           result.update(method=METHOD,bpm=BPM,count_in_beats=COUNT_IN,marker_count=MARKER_COUNT,
                         beat_pairing='sequential absolute marker timestamps; no modulo pairing',whole_beat_ambiguity_possible=False,
                         measurement='Bluetooth/output delay plus human reaction time; not a physical latency measurement',
-                        output=session['output'],created_wall=time.time(),
-                        pairs=[dict(marker=index,server_ms=click,tap_ms=tap,offset_ms=tap-click)
+                        output=session['output'],created_wall=time.time(),timing_reference=TIMING_REFERENCE,
+                        timing_instrumentation_complete=all(index in session['click_timing'] for index in session['taps']),
+                        pairs=[dict(marker=index,server_ms=click,tap_ms=tap,offset_ms=tap-click,
+                                               timing=session['click_timing'].get(index))
                                for index,(click,tap) in session['taps'].items()])
           if session.get('coarse'):
             coarse=session['coarse'];interval_ms=round(INTERVAL*1000)
@@ -407,7 +439,7 @@ class OutputOwner:
 
 PRESENTATION_FIELDS = ('phase', 'kind', 'amount', 'activation', 'strength', 'section', 'next_section',
                        'gesture_active', 'gesture_queued', 'turn_signal_music', 'lead', 'predicted_peak', 'scheduled',
-                       'signal_shaker', 'core_apex', 'alert_accent', 'engagement_presentation')
+                       'signal_shaker', 'core_apex', 'alert_accent', 'engagement_presentation', 'motion_presentation')
 
 
 class PresentationDelay:
@@ -420,6 +452,7 @@ class PresentationDelay:
     self.delay_ms = 0
     self.identity = None
     self.output = None
+    self.last_sequence=None
     if output_provider is selected_output:
       def monitor():
         while True:
@@ -428,23 +461,38 @@ class PresentationDelay:
       threading.Thread(target=monitor, daemon=True).start()
       self.provider = lambda: self.output
 
-  def apply(self, snapshot):
+  def apply(self, snapshot, rendered=None):
     now = self.clock()
     if now - self.last_check > 2:
       output = self.provider()
       identity = output.get('id') if output else None
       if identity != self.identity:
-        self.queue.clear(); self.shown = {}
+        self.queue.clear(); self.shown = {};self.last_sequence=None
       self.identity = identity
-      self.delay_ms = correction(self.root, identity) if identity else 0
+      self.record = correction_record(self.root,identity) if identity else dict(latency_ms=0,status='uncalibrated')
+      self.delay_ms = self.record['latency_ms']
       self.last_check = now
-    cues = {key: snapshot[key] for key in PRESENTATION_FIELDS if key in snapshot}
-    self.queue.append((now + self.delay_ms / 1000, cues))
-    while self.queue and self.queue[0][0] <= now:
-      _, self.shown = self.queue.popleft()
+    if rendered is not None:
+      sequence=rendered['sequence']
+      if sequence!=self.last_sequence:
+        self.last_sequence=sequence
+        due=rendered['dac_wall']+self.delay_ms/1000
+        self.queue.append(dict(audible_wall=due,sequence=sequence,
+                               callback_wall=rendered['callback_wall'],dac_wall=rendered['dac_wall'],
+                               cues={key:rendered['cues'][key] for key in PRESENTATION_FIELDS if key in rendered['cues']}))
+    else:
+      # Callers without callback timing retain an explicitly unverified compatibility path.
+      self.queue.append(dict(audible_wall=now+self.delay_ms/1000,sequence=None,
+                             cues={key:snapshot[key] for key in PRESENTATION_FIELDS if key in snapshot}))
+    due=[entry for entry in self.queue if entry['audible_wall']<=now]
+    if due:self.shown=max(due,key=lambda entry:entry['audible_wall'])['cues']
+    while len(self.queue)>64:self.queue.popleft()
     display = dict(snapshot)
-    for key in PRESENTATION_FIELDS:
-      display.pop(key, None)
+    for key in PRESENTATION_FIELDS:display.pop(key,None)
     display.update(self.shown)
-    display['presentation_latency_ms'] = self.delay_ms
+    display['presentation_latency_ms']=self.delay_ms
+    display['presentation_timing_reference']='portaudio-dac-plus-residual-v1' if rendered is not None else 'unverified-observation-clock'
+    display['presentation_clock']='device-monotonic-seconds'
+    display['presentation_correction']=self.record
+    display['presentation_timeline']=list(self.queue)
     return display
