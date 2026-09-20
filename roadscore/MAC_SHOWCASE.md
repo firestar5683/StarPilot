@@ -12,7 +12,7 @@ Add `--fullscreen` to fill the Mac display while preserving the native layout:
 
 Press **F** or **F11** to toggle fullscreen. **Escape** returns to the window without stopping playback. The native aspect ratio is preserved with letterboxing; this does not select a different driving UI.
 
-The command prepares both local native replay engines, then releases their start barriers together. The Mac decodes its own cached video and follows the comma’s route playhead. Audio plays from the comma only, through its selected output. No ACE generation or model warm-up occurs. The previous single-device saved-replay setup took 17.13 seconds for loading, replay parameters and UI startup; measure the paired path separately.
+The command prepares both local native replay engines, then releases their start barriers together. The comma primes its local route cache and first camera frame before publishing road state. The Mac decodes its own cached video and follows the comma’s route playhead. Audio plays from the comma only, through its selected output. No ACE generation or model warm-up occurs. The previous single-device saved-replay setup took 17.13 seconds for loading, replay parameters and UI startup; measure the paired path separately.
 
 Use Galaxy for engagement and turn-signal controls. The Mac follows the same applied presentation selections. No browser control page opens and no video is streamed from the comma. Small Galaxy status updates keep the local playheads approximately aligned; this is independent playback, not frame-exact mirroring. The buttons affect replay appearance and musical presentation only, never vehicle control. Ctrl+C stops both owned demo sessions and leaves the resident ACE worker intact.
 
@@ -40,6 +40,6 @@ Compatible archives contain `dry.wav`, `launch.json`, `audio_blocks.jsonl`, `rep
 
 Both saved launchers support `--muted`, `--duration SECONDS` and `--no-browser`. Paired `--check` contacts Galaxy to verify the target is offroad; independent `--check` validates local prerequisites only. The controls server binds to loopback and refuses an occupied port. The paired target must be an explicit private IPv4 address on Galaxy port 8082.
 
-The independent mode can follow Galaxy controls with `--paired-comma URL`, but controls alone do not synchronize playback. The paired `--demo` launcher additionally holds both starts and enables playhead following. `--demo --screen-mirror` retains the earlier explicit browser mirror for diagnosis; it is not the normal demo.
+The independent mode can follow Galaxy controls with `--paired-comma URL`, but controls alone do not synchronize playback. The paired `--demo` launcher additionally holds both starts and enables playhead following. The Mac follows the comma; it never adjusts the comma's audio clock to match its screen. `--demo --screen-mirror` explicitly enables JPEG capture for the earlier browser mirror. Normal paired playback does not capture or encode a video feed.
 
 Ordinary `./onroad --roadscore route1` remains the fresh-generation path. Gold music and historical recordings are preserved. The deliverable is interactive replay; an MP4 is not a substitute.
