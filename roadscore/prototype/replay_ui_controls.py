@@ -68,7 +68,7 @@ def replay_turn_alert(widget, signal_mode, native_alert, alert_factory):
     return None
   alert_type = 'preLaneChange' + signal_mode.title() + '/warning'
   if previous_demo is None or previous_demo.alert_type != alert_type:
-    previous_demo = alert_factory(text1='Steer ' + signal_mode.title(), text2='Replay simulation', alert_type=alert_type)
+    previous_demo = alert_factory(text1='Steer ' + signal_mode.title(), text2='Confirm Lane Change', alert_type=alert_type)
   widget._roadscore_demo_alert = widget._prev_alert = previous_demo
   return previous_demo
 

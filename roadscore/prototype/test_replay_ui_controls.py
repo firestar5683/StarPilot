@@ -138,7 +138,7 @@ class Tests(unittest.TestCase):
       before=self.view['selfdriveState'].to_dict()
       prompt=replay_turn_alert(widget,self.view.signal_mode,None,SimpleNamespace)
       self.assertEqual(prompt.text1,'Steer '+signal.title())
-      self.assertEqual(prompt.text2,'Replay simulation')
+      self.assertEqual(prompt.text2,'Confirm Lane Change')
       self.assertEqual(prompt.alert_type,'preLaneChange'+signal.title()+'/warning')
       self.assertIs(widget._prev_alert,prompt)
       self.assertEqual(self.view['selfdriveState'].to_dict(),before)
