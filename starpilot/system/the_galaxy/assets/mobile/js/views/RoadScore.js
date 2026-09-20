@@ -75,7 +75,7 @@ export const RoadScore = {
       const first = this.testClicks.find(click => click.beat === 0)
       const index = first ? Math.floor((now - first.server_ms) / (60000 / this.bpm)) : -1
       this.beatIndex = index
-      this.beat = index >= 0 && index < (this.testMode ? 12 : this.calibrationStage === 'rhythm' ? this.countIn + this.targetTaps : this.countIn) ? String(index % 4 + 1) : '♪'
+      this.beat = index >= 0 && index < (this.testMode ? 12 : this.countIn) ? String(index % 4 + 1) : '♪'
       this.cue = index < 0 ? 'Getting ready…' : index < this.countIn && !this.testMode ? `Listen · count-in bar ${Math.floor(index / 4) + 1} of 2` : this.testMode ? (index < 12 ? `Watch and listen · bar ${Math.floor(index / 4) + 1} of 3` : 'Test complete') : this.calibrationStage === 'rhythm' ? 'Tap with every beat · keep a steady rhythm' : 'Tap once when you hear each chime · wait through the gaps'
       this.animation = requestAnimationFrame(() => this.animateBeat())
     },
@@ -140,7 +140,7 @@ export const RoadScore = {
         <template v-if="session"><Teleport to="body"><div role="dialog" aria-modal="true" aria-label="Bluetooth timing calibration" style="position:fixed;inset:0;z-index:100000;background:var(--bg-primary,#090914);display:flex;flex-direction:column;padding:24px;gap:16px;text-align:center">
           <strong>{{cue}}</strong><div style="font-size:72px" aria-live="off">{{beat}}</div>
           <button v-if="!testMode" class="gx-btn" style="flex:1;width:100%;touch-action:manipulation;font-size:28px" :disabled="beatIndex < countIn || taps >= 16" @pointerdown.prevent="tap">{{beatIndex < countIn ? 'Listen first' : calibrationStage === 'rhythm' ? 'Tap with the beat · screen or Space' : 'Hear a chime? Tap here or press Space'}}<br>{{taps}} / {{targetTaps}} taps</button>
-          <p>{{calibrationStage === 'rhythm' ? 'Start on bar three · tap every beat for four bars' : 'Listen to the speaker, not the screen · one tap per chime'}}</p>
+          <p>{{calibrationStage === 'rhythm' ? 'Follow the sound · start on bar three and tap every beat for four bars' : 'Listen to the speaker, not the screen · one tap per chime'}}</p>
           <button v-if="!testMode && calibrationStage === 'rhythm'" class="gx-btn" :disabled="taps < 8 || busy" @click="finish">Finish and calculate</button><button class="gx-btn" @click="cancel">Cancel</button>
         </div></Teleport></template>
         <p v-if="result && calibrationStage === 'markers'">Placement estimate: {{result.latency_ms}} ms, including reaction time. Continue to Step 2 before saving.</p>
