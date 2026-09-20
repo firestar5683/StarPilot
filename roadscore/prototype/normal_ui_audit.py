@@ -4,11 +4,14 @@ from pathlib import Path
 from openpilot.selfdrive.ui.ui_state import UIState, device
 from preparing_awake import PreparationWake
 from replay_display_hold import ReplayDisplayHold
+from replay_ui_controls import ReplayUIControls, ReplayStateView, isolated_replay
+replay_controls=ReplayUIControls(os.environ['ROADSCORE_STATUS_FILE'],enabled=isolated_replay(os.environ))
 display_hold=ReplayDisplayHold(os.environ.get("ROADSCORE_AUDIO_DRAIN_FILE"), enabled=os.environ.get("OPENPILOT_PREFIX")=="roadscore_replay")
 original_state=UIState._update_state
 def replay_state(self,*args,**kwargs):
  result=original_state(self,*args,**kwargs)
  self.started=display_hold.apply(self.started)
+ if isinstance(self.sm,ReplayStateView):self.sm.apply_native_mode(self)
  return result
 UIState._update_state=replay_state
 preparation_wake=PreparationWake(os.environ.get("ROADSCORE_STATUS_FILE"),Path("/TICI").exists())
@@ -42,10 +45,12 @@ def textures(self,*args,**kw):
  return original_textures(self,*args,**kw)
 def update(self,*args,**kw):
  global last
+ if replay_controls.enabled and not isinstance(self.sm,ReplayStateView):
+  self.sm=ReplayStateView(self.sm,replay_controls)
  preparation_wake.update(self,device)
  result=original_update(self,*args,**kw);now=time.monotonic()
  if now-last>=1:
-  out.write(json.dumps({'wall':now,'started':bool(self.started),'speed':float(self.sm['carState'].vEgo),'model_mono_ns':self.sm.logMonoTime['modelV2'],'model_points':len(self.sm['modelV2'].position.x),**counts})+'\n');last=now
+  out.write(json.dumps({'wall':now,'started':bool(self.started),'speed':float(self.sm['carState'].vEgo),'model_mono_ns':self.sm.logMonoTime['modelV2'],'model_points':len(self.sm['modelV2'].position.x),'replay_demo':self.sm.snapshot() if isinstance(self.sm,ReplayStateView) else None,'engaged':bool(self.engaged),'aol':bool(self.always_on_lateral_active),'ui_status':str(self.status),**counts})+'\n');last=now
  return result
 UIState.update=update;CameraView._accept_frame=accept;CameraView._render_textures=textures;ModelRenderer._draw_path=path;ModelRenderer._draw_lane_lines=lanes
 from overlay import install

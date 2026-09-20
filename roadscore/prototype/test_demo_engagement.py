@@ -1,6 +1,6 @@
 import json,tempfile,unittest
 from pathlib import Path
-from demo_engagement import DemoEngagement,presentation_active,annotate
+from demo_engagement import DemoEngagement,presentation_active,presentation_signal,annotate
 
 class Tests(unittest.TestCase):
  def test_modes_are_session_scoped_and_resettable(self):
@@ -32,5 +32,21 @@ class Tests(unittest.TestCase):
   self.assertTrue(out['engagement_presentation']['simulated'])
   self.assertFalse(out['engagement_presentation']['recorded_active'])
   self.assertNotIn('simulated',original['engagement_presentation'])
+ def test_combined_selection_is_atomic_and_legacy_resets_signals(self):
+  with tempfile.TemporaryDirectory() as d:
+   c=DemoEngagement(d,'new','replay',clock=lambda:10)
+   value=dict(version=1,session_id='new',mode='disengaged',signal_mode='left',created_wall=10)
+   c.path.write_text(json.dumps(value));c.poll()
+   self.assertEqual(c.selection,('disengaged','left'))
+   value.pop('signal_mode');c.path.write_text(json.dumps(value));c.poll()
+   self.assertEqual(c.selection,('disengaged','recorded'))
+   value['signal_mode']='both';c.path.write_text(json.dumps(value));c.poll()
+   self.assertEqual(c.selection,('recorded','recorded'))
+ def test_signal_choice_preserves_recorded_and_suppresses_when_off(self):
+  self.assertTrue(presentation_signal('left',False))
+  self.assertTrue(presentation_signal('right',False))
+  self.assertFalse(presentation_signal('off',True))
+  self.assertTrue(presentation_signal('recorded',True))
+  self.assertFalse(presentation_signal('recorded',False))
 
 if __name__=='__main__':unittest.main()

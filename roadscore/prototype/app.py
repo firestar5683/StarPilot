@@ -11,7 +11,7 @@ from phrase import pulse,cadence_runway,mix_cadence
 from driving_music import DrivingDSP
 from event_music import EventDSP
 from input_clock import InputClock
-from demo_engagement import DemoEngagement,presentation_active,annotate as annotate_demo_engagement
+from demo_engagement import DemoEngagement,presentation_active,presentation_signal,controls_snapshot,annotate as annotate_demo_engagement
 from presentation_policy import effective_config,selected as presentation_policy_selected
 from engagement_presentation import EngagementPresentation,PresentationConfig,engagement_active
 from motion_presentation import MotionPresentation
@@ -209,9 +209,10 @@ def callback(out,n,ti,status):
  rendered=render_audio(render_mode,chunk,dsp,amount,ending,gestures,mix_cadence,
   (ending_audio,frames-n,ending_start,rate) if musical_mode and ending_start is not None else None)
  active,fresh=engagement_active(engagement[1],engagement[0],engagement[2],engagement[4],engagement[3],callback_wall)
- recorded_active=active;demo_mode=demo_engagement.mode
+ recorded_active=active;demo_mode,demo_signal_mode=demo_engagement.selection
  active=presentation_active(demo_mode,recorded_active)
  signal_on,signal_fresh=engagement_active(signal_state[1],signal_state[0],signal_state[2],signal_state[4],signal_state[3],callback_wall)
+ recorded_signal=signal_on;signal_on=presentation_signal(demo_signal_mode,recorded_signal)
  if rhythm_timeline is not None:
   audible_grid=rhythm_timeline.at(frames-n)
   if shaker is not None:shaker.set_grid(audible_grid,frames-n)
@@ -242,6 +243,7 @@ def callback(out,n,ti,status):
  if presentation is not None:rendered=presentation.process(rendered,active,presentation_config)
  out[:]=0 if a.mute else rendered
  cue={**presentation_narrative,**{key:event_state[key] for key in PRESENTATION_FIELDS if key in event_state}}
+ cue['replay_demo']=controls_snapshot(demo_mode,demo_signal_mode)
  if presentation is not None:cue.update(annotate_demo_engagement(presentation.snapshot(presentation_config,active,fresh),demo_mode,recorded_active))
  if shaker is not None:cue['signal_shaker']=shaker.snapshot()
  if apex is not None:cue['core_apex']=apex.snapshot()
@@ -250,7 +252,7 @@ def callback(out,n,ti,status):
  if curve_reaction is not None:cue.update(curve_reaction.snapshot())
  rendered_presentation=dict(sequence=frames-n,callback_wall=callback_wall,
                             dac_wall=callback_wall+float(ti.outputBufferDacTime-ti.currentTime),cues=cue)
- try:capture.put_nowait((rendered,chunk,{'motion_presentation':motion.snapshot() if motion is not None else None,'signal_shaker_enabled':shaker_enabled,'signal_on':signal_on,'signal_fresh':signal_fresh,'engagement_presentation_enabled':presentation_config.enabled,'engagement_active':active,'engagement_recorded_active':recorded_active,'demo_engagement_mode':demo_mode,'engagement_fresh':fresh,'audio_s':(frames-n)/rate,'callback_wall':callback_wall,'command_received_wall':command_wall,'replay_origin_wall':replay_origin_wall,'dac_delay':float(ti.outputBufferDacTime-ti.currentTime),'route_t':source_time,'amount':amount,'phase':event_state['phase'],'strength':event_state.get('strength',0),'predicted_peak':event_state.get('predicted_peak'),'activation':event_state.get('activation'),'kind':event_state.get('kind','curve'),'cadence_entry_audio_s':None if ending_start is None else ending_start/rate,'runway_active':ending_start is not None and frames-n<ending_start,'muted':a.mute,'portaudio_status':str(status),'callback_processing_seconds':time.monotonic()-callback_wall}))
+ try:capture.put_nowait((rendered,chunk,{'motion_presentation':motion.snapshot() if motion is not None else None,'signal_shaker_enabled':shaker_enabled,'signal_on':signal_on,'signal_fresh':signal_fresh,'engagement_presentation_enabled':presentation_config.enabled,'engagement_active':active,'engagement_recorded_active':recorded_active,'demo_engagement_mode':demo_mode,'demo_signal_mode':demo_signal_mode,'signal_recorded_on':recorded_signal,'engagement_fresh':fresh,'audio_s':(frames-n)/rate,'callback_wall':callback_wall,'command_received_wall':command_wall,'replay_origin_wall':replay_origin_wall,'dac_delay':float(ti.outputBufferDacTime-ti.currentTime),'route_t':source_time,'amount':amount,'phase':event_state['phase'],'strength':event_state.get('strength',0),'predicted_peak':event_state.get('predicted_peak'),'activation':event_state.get('activation'),'kind':event_state.get('kind','curve'),'cadence_entry_audio_s':None if ending_start is None else ending_start/rate,'runway_active':ending_start is not None and frames-n<ending_start,'muted':a.mute,'portaudio_status':str(status),'callback_processing_seconds':time.monotonic()-callback_wall}))
  except queue.Full:underflows+=1
 # Optional prewarmed continuation gives ~52 seconds before replay starts.
 warm=root/'generated/job_-1.wav'
@@ -442,6 +444,8 @@ try:
     snapshot['presentation_session_id']=presentation_session_id
     snapshot['input_mode']=a.input
     snapshot['demo_engagement_mode']=demo_engagement.mode
+    snapshot['demo_signal_mode']=demo_engagement.signal_mode
+    snapshot['replay_demo']=controls_snapshot(*demo_engagement.selection)
     presentation_narrative={key:snapshot[key] for key in ('section','next_section','gesture_active','gesture_queued','turn_signal_music') if key in snapshot}
     trace.write(json.dumps(snapshot)+'\n');f=run/'status.tmp';f.write_text(json.dumps(presentation_delay.apply(snapshot,rendered_presentation)));f.replace(run/'status.json')
    if time.monotonic()-last_progress>15:raise RuntimeError('Replay model input stalled')

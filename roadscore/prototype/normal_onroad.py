@@ -71,6 +71,7 @@ if a.replay:initial_display.update(style='Stored score',section='ARCHIVED SCORE'
 (out/'roadscore_status.json').write_text(json.dumps(initial_display))
 env['ROADSCORE_OVERLAY']='1' if settings.overlay else '0'
 env['ROADSCORE_CLEAN_DEMO_UI']='1'
+env['ROADSCORE_REPLAY_UI_CONTROLS']='1' if native and not a.replay else '0'
 env['ROADSCORE_FORCE_MUTE']='0' if a.audible else '1'
 env['ROADSCORE_ORIGIN_FILE']=str(out/'replay_origin.json')
 env['ROADSCORE_UI_AUDIT']=str(out/'ui_audit.jsonl');env['PWD']=str(rt)

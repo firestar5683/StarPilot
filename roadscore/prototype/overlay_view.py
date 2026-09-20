@@ -36,6 +36,12 @@ def gesture_view(state):
   alert = state.get('alert_accent') or {}
   if alert.get('enabled') and alert.get('rendered_active'):
     return 'Road alert / Percussion', 'active', 'native_alert'
+  demo = state.get('replay_demo') or {}
+  signal = demo.get('signal_mode')
+  if signal in ('left', 'right', 'off'):
+    shaker = state.get('signal_shaker') or {}
+    description = 'Shaker' if shaker.get('rendered_active') else 'Replay signal' if signal != 'off' else 'Recorded signals muted'
+    return f'Simulated {signal} / {description}', 'active', 'simulated_signal'
   engagement = state.get('engagement_presentation') or {}
   if engagement.get('enabled') and not engagement.get('simulated') and engagement.get('input_fresh') and engagement.get('rendered_state') == 'transition':
     return ('Engaged / Opening music' if engagement.get('active') else 'Disengaged / Contained music'), 'active', 'engagement'
