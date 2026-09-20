@@ -51,7 +51,7 @@ class PreparedTests(unittest.TestCase):
     rate=48000;payoff=2.5
     samples=np.arange(4*rate)/rate
     core=np.repeat((.15*np.sin(2*np.pi*90*samples))[:,None],2,axis=1).astype(np.float32)
-    before=core.copy();chunks=[]
+    before=core.copy();chunks=[];signal_blocks_during_build=0
     for frame in range(0,len(core),960):
       now=frame/rate
       curve=dict(kind='curve',phase='anticipation' if now<payoff else 'event',
@@ -60,10 +60,14 @@ class PreparedTests(unittest.TestCase):
       if now<.2 or now>=3.5:curve=dict(kind='curve',phase='neutral',amount=0.,activation=None)
       state=dict(active=True,signal_on=True,fresh=True,car_fresh=True,model_fresh=True,
                  speed=10.,alert_key='',alert_meaningful=False,curve=curve,route_t=now)
-      wet,_=engine.process(core[frame:frame+960],frame,state,('engaged','left'))
+      wet,cues=engine.process(core[frame:frame+960],frame,state,('engaged','left'))
+      if .5<now<2 and cues['signal_shaker']['rendered_active']:
+        signal_blocks_during_build+=1
+        self.assertEqual(cues['curve_reaction']['build_drop']['rendered_roll_peak'],0.)
       chunks.append(wet)
     result=np.concatenate(chunks)
     self.assertEqual(engine.curve.impact.actual_payoff,round(payoff*rate))
+    self.assertGreater(signal_blocks_during_build,5)
     self.assertLess(float(np.max(abs(result[round((payoff-.08)*rate):round((payoff-.02)*rate)]))),1e-6)
     self.assertGreater(float(np.sqrt(np.mean(result[round((payoff+.04)*rate):round((payoff+.12)*rate)]**2))),.09)
     np.testing.assert_array_equal(core,before)

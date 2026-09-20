@@ -25,7 +25,7 @@ class CurveBuildDrop:
     self.status=dict(rendered_stage='bypass',rendered_active=False,added_delay_samples=0)
 
   def process(self, pcm, start_frame, grid, build_start_frame, payoff_frame, *, enabled=False,
-              source_fresh=True, blocked=False):
+              source_fresh=True, blocked=False, allow_roll=True):
     """Same frames, no input mutation. Caller supplies and authorizes the schedule.
 
     Disabling a fully bypassed instance is bit exact; cancelling an active effect
@@ -56,8 +56,9 @@ class CurveBuildDrop:
       if not np.any(strength):
         self.tail=np.zeros((0,2),np.float32);outputs.append(x);continue
       frames=self.indices[:n]+first
+      if not allow_roll:self.tail=np.zeros((0,2),np.float32)
       roll=np.zeros_like(x);take=min(n,len(self.tail));roll[:take]+=self.tail[:take];self.tail=self.tail[take:].copy()
-      if requested and first<cut_start and end>build:
+      if allow_roll and requested and first<cut_start and end>build:
         beat=self.rate*60/grid.bpm;origin=grid.beat_phase*self.rate
         # Eighth notes establish the motif; the final four beats use sixteenths.
         boundary=max(build,payoff-4*beat)
@@ -107,7 +108,7 @@ class CurveBuildDrop:
       if self.strength==0 and not valid:self.schedule=None
       result=pcm
     else:result=np.concatenate(outputs) if len(outputs)>1 else outputs[0]
-    self.status=dict(enabled=bool(enabled),input_fresh=bool(source_fresh),blocked=bool(blocked),grid_usable=bool(grid.usable),
+    self.status=dict(enabled=bool(enabled),input_fresh=bool(source_fresh),blocked=bool(blocked),grid_usable=bool(grid.usable),roll_allowed=bool(allow_roll),
       rendered_stage=stage,rendered_active=any_active,rendered_strength=self.strength,rendered_roll_peak=max(peaks,default=0.),
       rendered_cut_gain_min=cut_min,planned_build_frame=None if self.schedule is None else self.schedule[0],
       planned_payoff_frame=None if self.schedule is None else self.schedule[1],actual_payoff_frame=self.actual_payoff,

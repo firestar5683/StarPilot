@@ -74,6 +74,7 @@ def native_environment(project, root, out, session, inherited=None):
   env.update(PYTHONDONTWRITEBYTECODE='1',OPENPILOT_PREFIX='roadscore_replay',BASEDIR=str(project),PWD=str(project),NOBOARD='1',SIMULATION='1',SKIP_FW_QUERY='1',BIG='0',ROADSCORE_PREPARED_SHOWCASE='1',ROADSCORE_SHOWCASE_SESSION=session,ROADSCORE_REPLAY_UI_CONTROLS='1',ROADSCORE_CLEAN_DEMO_UI='1',ROADSCORE_OVERLAY='1',ROADSCORE_STATUS_FILE=str(out/'status.json'),ROADSCORE_UI_AUDIT=str(out/'ui_audit.jsonl'),ROADSCORE_OVERLAY_CAPTURE=str(out/'overlay.png'),ROADSCORE_AUDIO_DRAIN_FILE=str(out/'audio_drained.json'),ROADSCORE_PRESENTATION_POLICY='conservative-v4',SP_ALLOW_DESKTOP_FAKE_WIFI='0',SP_ALLOW_DESKTOP_FAKE_BLUETOOTH='0',SP_ONROAD_NAV_DEMO='0',SP_ONROAD_CEM_DEMO='0')
   paths=[HERE,project,project/'starpilot/third_party',*project.glob('*_repo'),Path('/data/roadscore-feasibility/venv/lib/python3.12/site-packages')]
   env['PYTHONPATH']=':'.join(map(str,paths))
+  env['ROADSCORE_MIRROR_DIR']=str(out/'mirror')
   return env
 
 
@@ -112,11 +113,11 @@ def main():
   from route_favorites import resolve_favorite
   route,_=resolve_favorite(a.route,root/'routes/favorites.json')
   if a.score_archive is None:
-    registry=json.loads((root/'assets/prepared_showcase.json').read_text())
-    entry=registry.get('routes',{}).get(a.route,registry)
-    if entry.get('route')!=route:raise ValueError('No matching prepared showcase registered')
-    a.score_archive=Path(entry['archive'])
-    if a.curve_plan is None and entry.get('curve_plan'):a.curve_plan=Path(entry['curve_plan'])
+    from demo_catalog import entry
+    selected=entry(root,a.route)
+    if selected['route']!=route:raise ValueError('No matching prepared showcase registered')
+    a.score_archive=Path(selected['archive'])
+    if a.curve_plan is None and selected.get('curve_plan'):a.curve_plan=Path(selected['curve_plan'])
   archive=a.score_archive.resolve(strict=True)
   from prepared_core import load_archive
   audio,rate,meta=load_archive(archive,route)

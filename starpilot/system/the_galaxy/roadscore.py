@@ -296,11 +296,30 @@ class Operator:
 
 
 def register(app, params):
-  from flask import jsonify, request
+  from flask import jsonify, request, Response
   prototype=Path('/data/roadscore/prototype')
   if str(prototype) not in sys.path:sys.path.insert(0,str(prototype))
   from operator_output import real_offroad
   operator = Operator(offroad=real_offroad)
+
+  @app.route('/api/roadscore/demo_frame')
+  def roadscore_demo_frame():
+    if not real_offroad():return jsonify(error='Saved replay mirror is offroad only'),409
+    owner=operator.demo_controller().status()
+    if not owner.get('running') or request.args.get('request_id')!=owner.get('request_id'):
+      return jsonify(error='No matching saved replay is active'),409
+    folder=Path(owner['out'])/'mirror'
+    frame=read_json(folder/'frame.json')
+    stamp=frame.get('captured_wall')
+    age=time.monotonic()-stamp if type(stamp) in (int,float) and math.isfinite(stamp) else float('inf')
+    if not 0<=age<=1 or frame.get('session_id')!=owner.get('ready_session_id'):
+      return jsonify(error='Waiting for a fresh replay image'),503
+    try:data=(folder/'latest.jpg').read_bytes()
+    except OSError:return jsonify(error='Replay image unavailable'),503
+    if not data.startswith(b'\xff\xd8') or len(data)>1500000:return jsonify(error='Invalid replay image'),503
+    response=Response(data,mimetype='image/jpeg')
+    response.headers.update({'Cache-Control':'no-store','X-RoadScore-Frame':str(frame.get('frame_id','')),'X-RoadScore-Age-Ms':str(round(age*1000,1))})
+    return response
 
   @app.route('/api/roadscore/status')
   def roadscore_status():

@@ -60,7 +60,8 @@ class DemoSession:
       result['ready_session_id'] = ready.get('session_id') if result['prepared'] else None
       state = read(out/'status.json')
       result['presentation_session_id'] = state.get('presentation_session_id') if running else None
-      result['failure'] = read(out/'failure.json').get('error')
+      result['failure'] = read(out/'demo_failure.json').get('error')
+      result['complete'] = read(out/'demo_complete.json').get('complete') is True
     return result
 
   def start(self, data):

@@ -1,6 +1,13 @@
 #!/usr/bin/env bash
 set -euo pipefail
 for argument in "$@"; do
+  if [[ "$argument" == "--demo" ]]; then
+    if [ -f /TICI ]; then
+      export PYTHONPATH="/data/roadscore-feasibility/venv/lib/python3.12/site-packages${PYTHONPATH:+:$PYTHONPATH}"
+      exec /usr/local/venv/bin/python "$(dirname "$0")/prototype/native_prepared_showcase.py" "$@"
+    fi
+    exec python3 "$(dirname "$0")/prototype/paired_showcase.py" "$@"
+  fi
   if [[ "$argument" == "--prepared-showcase" ]]; then
     exec python3 "$(dirname "$0")/prototype/mac_showcase.py" "$@"
   fi

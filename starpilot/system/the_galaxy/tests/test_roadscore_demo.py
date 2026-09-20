@@ -70,5 +70,24 @@ class DemoTests(unittest.TestCase):
   self.assertEqual(state['backend'],'Prepared local audio')
   self.assertEqual(state['demo']['playhead']['route_t'],12.)
   self.assertGreaterEqual(state['demo']['status_age_seconds'],0.)
+ def test_mirror_frame_requires_fresh_owned_session_and_offroad(self):
+  from flask import Flask
+  from unittest.mock import patch
+  import operator_output
+  app=Flask(__name__)
+  folder=self.run/'mirror';folder.mkdir()
+  (folder/'latest.jpg').write_bytes(b'\xff\xd8fixture\xff\xd9')
+  frame={'session_id':'ready-session','frame_id':1,'captured_wall':time.monotonic()}
+  (folder/'frame.json').write_text(json.dumps(frame))
+  with patch.object(module,'Operator') as factory,patch.object(operator_output,'real_offroad',return_value=True) as parked:
+   factory.return_value.demo_controller.return_value.status.return_value={'running':True,'request_id':'owned-request','ready_session_id':'ready-session','out':str(self.run)}
+   module.register(app,None);client=app.test_client()
+   self.assertEqual(client.get('/api/roadscore/demo_frame?request_id=wrong').status_code,409)
+   response=client.get('/api/roadscore/demo_frame?request_id=owned-request')
+   self.assertEqual(response.status_code,200);self.assertEqual(response.mimetype,'image/jpeg')
+   frame['captured_wall']=time.monotonic()-2;(folder/'frame.json').write_text(json.dumps(frame))
+   self.assertEqual(client.get('/api/roadscore/demo_frame?request_id=owned-request').status_code,503)
+   parked.return_value=False
+   self.assertEqual(client.get('/api/roadscore/demo_frame?request_id=owned-request').status_code,409)
 
 if __name__=='__main__':unittest.main()

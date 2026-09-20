@@ -159,8 +159,10 @@ def audio_worker(a):
   from demo_engagement import DemoEngagement
   from operator_output import PresentationDelay
   from prepared_core import load_archive, initial_frame, PreparedPresentation
+  from prepared_clock import PreparedClock
   audio, rate, meta = load_archive(a.score_archive, a.route)
   processor = PreparedPresentation(a.score_archive, rate)
+  playback_clock = PreparedClock(rate)
   session = os.environ['ROADSCORE_SHOWCASE_SESSION']
   controls = DemoEngagement(a.out, session, 'replay')
   delay = PresentationDelay(a.presentation_root or a.out,output_provider=lambda: {'id':a.output_identity} if a.output_identity else None)
@@ -192,14 +194,12 @@ def audio_worker(a):
     if anchor is None or done:return
     now=time.monotonic();dac=now+float(ti.outputBufferDacTime-ti.currentTime)
     expected=initial_frame(meta,anchor[0],dac-anchor[1],rate)
-    if position is None:position=expected;first_frame=position
-    start=position;position+=n
-    max_drift=max(max_drift,abs(start-expected)/rate)
     if status:flags+=1
-    chunk=np.zeros((n,2),np.float32)
-    lo=max(0,-start);hi=min(n,len(audio)-start)
-    if hi>lo:chunk[lo:hi]=audio[start+lo:start+hi]
     try:
+      chunk,clock_info=playback_clock.render(audio,expected,n)
+      start=clock_info['source_frame'];position=clock_info['next_source_frame']
+      if first_frame is None:first_frame=start
+      max_drift=max(max_drift,abs(clock_info['pre_error_frames'])/rate)
       wet,cues=processor.process(chunk,start,state,controls.selection)
       rendered=dict(sequence=start,callback_wall=now,dac_wall=dac,cues=cues)
       if not a.muted:out[:]=wet
@@ -241,6 +241,7 @@ def audio_worker(a):
           if anchor is not None and state['route_t'] is not None and np.isfinite(state['route_t']):
             snapshot.update(route_t=float(state['route_t']),elapsed=max(0,(position or 0)/rate),
                             source_model_ns=int(sm.logMonoTime['modelV2']))
+          snapshot['prepared_clock']=playback_clock.snapshot()
           snapshot=delay.apply(snapshot,rendered)
           # The command API must remain available during initial DAC lead-in.
           snapshot.setdefault('engagement_presentation',{'enabled':True})
@@ -257,9 +258,9 @@ def audio_worker(a):
           finally:server.server_close()
         elif forwarder is not None:forwarder.close()
       finally:trace.close()
-    write_json(a.out/'prepared_summary.json',dict(generation_invoked=False,source=str(a.score_archive),first_source_frame=first_frame,last_source_frame=position,sample_rate=rate,portaudio_flags=flags,max_clock_error_seconds=max_drift,callback_errors=errors,muted=a.muted,session_id=session,manual_scope='isolated replay display and presentation only'))
+    write_json(a.out/'prepared_summary.json',dict(generation_invoked=False,source=str(a.score_archive),first_source_frame=first_frame,last_source_frame=position,sample_rate=rate,portaudio_flags=flags,max_clock_error_seconds=max_drift,prepared_clock=playback_clock.snapshot(),callback_errors=errors,muted=a.muted,session_id=session,manual_scope='isolated replay display and presentation only'))
   if errors:raise RuntimeError(errors[0])
-  if max_drift>.05:raise RuntimeError('Prepared audio clock drift exceeded 50 ms')
+  if playback_clock.snapshot()['max_post_error_seconds']>.05:raise RuntimeError('Prepared audio clock drift remained above 50 ms after recovery')
 
 
 def apply_showcase_config(a, config):

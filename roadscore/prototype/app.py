@@ -243,6 +243,7 @@ def callback(out,n,ti,status):
   curve_fresh=road_model_valid and 0<=callback_wall-command_wall<=.5
   motion_blocked=bool(motion is not None and motion.stopped and motion.fresh)
   curve_state=event_state.get('demo_curve_state',event_state)
+  curve_state={**curve_state,'manual_signal_priority':demo_signal_mode in ('left','right') and signal_fresh}
   curve_grid=None
   if curve_state.get('demo_build_drop') and rhythm_timeline is not None:
    target_frame=frames-n+round((curve_state['predicted_peak']-source_time)*rate)

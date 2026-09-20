@@ -49,7 +49,8 @@ class CurveReaction:
   result=self._filter(pcm,start_frame,filtered_state,source_fresh,blocked,self.impact_payoff if armed else None)
   if self.impact is not None:
    result=self.impact.process(result,start_frame,self.grid,self.impact_start,self.impact_payoff,
-                              enabled=armed,source_fresh=source_fresh,blocked=blocked)
+                              enabled=armed,source_fresh=source_fresh,blocked=blocked,
+                              allow_roll=not state.get('manual_signal_priority',False))
   if not valid:
    self.impact_activation=None;self.impact_payoff=None;self.impact_start=None;self.impact_grid=None
   return result
