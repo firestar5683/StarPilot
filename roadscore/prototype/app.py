@@ -13,6 +13,7 @@ from event_music import EventDSP
 from input_clock import InputClock
 from presentation_policy import effective_config,selected as presentation_policy_selected
 from engagement_presentation import EngagementPresentation,PresentationConfig,engagement_active
+from motion_presentation import MotionPresentation
 from signal_shaker import SignalShaker,assess_grid,profile_tempo_prior
 from core_apex import CoreApex
 from alert_accent import AlertAccent
@@ -76,11 +77,14 @@ config=effective_config(configuration());validate_render_mode(render_mode,compos
 rolling_mode=config.get('rolling',False);rolling_anchors={k:anchor_options(root,k) for k in styles if (root/f'assets/source_{k}.wav').exists()} if rolling_mode and composer!='ace' else {}
 drive_events=config.get('drive_events',False) or config.get('event_music',False);phrase_runway=config.get('phrase_runway',False)
 presentation_config=PresentationConfig.read(config.get('engagement_presentation'))
+motion_enabled=config.get('stopped_motion',{}).get('enabled') is True
+motion=MotionPresentation(rate,enabled=motion_enabled) if motion_enabled else None
 shaker_enabled=config.get('signal_shaker',{}).get('enabled') is True
 apex_enabled=config.get('core_apex',{}).get('enabled') is True
 alert_enabled=config.get('alert_accent',{}).get('enabled') is True
-if (presentation_config.enabled or shaker_enabled or apex_enabled or alert_enabled) and render_mode!='gold-core':raise ValueError('Optional presentation layers require gold-core baseline')
+if (motion_enabled or presentation_config.enabled or shaker_enabled or apex_enabled or alert_enabled) and render_mode!='gold-core':raise ValueError('Optional presentation layers require gold-core baseline')
 presentation=EngagementPresentation(rate,block) if presentation_config.enabled else None
+motion_state=(0.,False,0,0.,0)
 engagement=(False,False,0,0.,0);signal_state=(False,False,0,0.,0);alert_state=(None,False)
 initial_identity=identity;musical_mode=config.get('musical',False);arrival=Arrival();ending_start=None;ending_audio=None;ending_info={};playing_identity=identity;identity_queue=[];last_requested_identity=identity
 usable_frames=WINDOW if rolling_mode else (301 if musical_mode else 323)
@@ -208,9 +212,12 @@ def callback(out,n,ti,status):
   alert_key,meaningful=alert_state
   competing=bool((shaker is not None and shaker.active) or (apex is not None and apex.rendered_active) or (presentation is not None and abs(presentation.mix-float(active))>.01))
   rendered=alert_accent.process(rendered,frames-n,alert_key,meaningful,fresh,competing)
+ if motion is not None:
+  _,motion_fresh=engagement_active(motion_state[1],True,motion_state[2],motion_state[4],motion_state[3],callback_wall)
+  rendered=motion.process(rendered,speed=motion_state[0],source_fresh=motion_fresh)
  if presentation is not None:rendered=presentation.process(rendered,active,presentation_config)
  out[:]=0 if a.mute else rendered
- try:capture.put_nowait((rendered,chunk,{'signal_shaker_enabled':shaker_enabled,'signal_on':signal_on,'signal_fresh':signal_fresh,'engagement_presentation_enabled':presentation_config.enabled,'engagement_active':active,'engagement_fresh':fresh,'audio_s':(frames-n)/rate,'callback_wall':callback_wall,'command_received_wall':command_wall,'replay_origin_wall':replay_origin_wall,'dac_delay':float(ti.outputBufferDacTime-ti.currentTime),'route_t':source_time,'amount':amount,'phase':event_state['phase'],'strength':event_state.get('strength',0),'predicted_peak':event_state.get('predicted_peak'),'activation':event_state.get('activation'),'kind':event_state.get('kind','curve'),'cadence_entry_audio_s':None if ending_start is None else ending_start/rate,'runway_active':ending_start is not None and frames-n<ending_start,'muted':a.mute,'portaudio_status':str(status),'callback_processing_seconds':time.monotonic()-callback_wall}))
+ try:capture.put_nowait((rendered,chunk,{'motion_presentation':motion.snapshot() if motion is not None else None,'signal_shaker_enabled':shaker_enabled,'signal_on':signal_on,'signal_fresh':signal_fresh,'engagement_presentation_enabled':presentation_config.enabled,'engagement_active':active,'engagement_fresh':fresh,'audio_s':(frames-n)/rate,'callback_wall':callback_wall,'command_received_wall':command_wall,'replay_origin_wall':replay_origin_wall,'dac_delay':float(ti.outputBufferDacTime-ti.currentTime),'route_t':source_time,'amount':amount,'phase':event_state['phase'],'strength':event_state.get('strength',0),'predicted_peak':event_state.get('predicted_peak'),'activation':event_state.get('activation'),'kind':event_state.get('kind','curve'),'cadence_entry_audio_s':None if ending_start is None else ending_start/rate,'runway_active':ending_start is not None and frames-n<ending_start,'muted':a.mute,'portaudio_status':str(status),'callback_processing_seconds':time.monotonic()-callback_wall}))
  except queue.Full:underflows+=1
 # Optional prewarmed continuation gives ~52 seconds before replay starts.
 warm=root/'generated/job_-1.wav'
@@ -246,8 +253,11 @@ try:
     engagement=(bool(sm['selfdriveState'].active),bool(sm.valid['selfdriveState']),sm.logMonoTime['selfdriveState'],control_wall,latest_source)
    else:engagement=(*engagement[:4],latest_source)
    if sm.updated['carState']:
+    motion_state=(float(sm['carState'].vEgo),bool(sm.valid['carState']),sm.logMonoTime['carState'],control_wall,latest_source)
     signal_state=(bool(sm['carState'].leftBlinker or sm['carState'].rightBlinker),bool(sm.valid['carState']),sm.logMonoTime['carState'],control_wall,latest_source)
-   else:signal_state=(*signal_state[:4],latest_source)
+   else:
+    signal_state=(*signal_state[:4],latest_source)
+    motion_state=(*motion_state[:4],latest_source)
    clock=clock_source.read(sm)
    if clock is None:continue
    if clock['done']:
@@ -386,6 +396,7 @@ try:
     if presentation is not None:
      engagement_on,engagement_fresh=engagement_active(engagement[1],engagement[0],engagement[2],engagement[4],engagement[3],time.monotonic())
      snapshot.update(presentation.snapshot(presentation_config,engagement_on,engagement_fresh))
+    if motion is not None:snapshot.update(motion.snapshot())
     if shaker is not None:snapshot['signal_shaker']=shaker.snapshot()
     if apex is not None:snapshot['core_apex']=apex.snapshot()
     if alert_accent is not None:snapshot['alert_accent']=alert_accent.snapshot()

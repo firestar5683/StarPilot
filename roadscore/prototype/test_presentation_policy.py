@@ -34,6 +34,13 @@ class PolicyTests(unittest.TestCase):
   latest=effective_config({}, {'ROADSCORE_PRESENTATION_POLICY':'conservative-v2'})
   self.assertTrue(latest['alert_accent']['enabled'])
   self.assertEqual(latest['core_apex']['dip_db'],-3.)
+ def test_stopped_motion_candidate_preserves_default_and_optout(self):
+  self.assertEqual(select_launch('ace','prism')['policy'],'conservative-v2')
+  candidate=effective_config({}, {'ROADSCORE_PRESENTATION_POLICY':'conservative-v3'})
+  self.assertTrue(candidate['stopped_motion']['enabled'])
+  self.assertTrue(candidate['engagement_presentation']['enabled'])
+  self.assertFalse(effective_config(candidate, {'ROADSCORE_PRESENTATION_POLICY':'off'})['stopped_motion']['enabled'])
+  with self.assertRaises(ValueError):select_launch('sa3','prism',policy='conservative-v3')
  def test_other_backend_and_legacy_incompatibility(self):
   self.assertEqual(select_launch('sa3','prism'),{'render_mode':'current','policy':'off'})
   with self.assertRaises(ValueError):select_launch('ace','prism',render_mode='current',policy='conservative-v1')

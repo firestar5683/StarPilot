@@ -2,7 +2,7 @@
 import copy
 import os
 
-POLICIES = ('conservative-v1', 'conservative-v2', 'off', 'frozen')
+POLICIES = ('conservative-v1', 'conservative-v2', 'conservative-v3', 'off', 'frozen')
 CONSERVATIVE = {
  'presentation_policy_version': 'conservative-v1',
  'signal_shaker': {'enabled': True},
@@ -11,6 +11,8 @@ CONSERVATIVE = {
 }
 
 CONSERVATIVE_V2 = {**copy.deepcopy(CONSERVATIVE), 'presentation_policy_version':'conservative-v2', 'alert_accent':{'enabled':True}, 'core_apex':{'enabled':True,'dip_db':-3.}}
+
+CONSERVATIVE_V3 = {**copy.deepcopy(CONSERVATIVE_V2), 'presentation_policy_version':'conservative-v3', 'stopped_motion':{'enabled':True}}
 
 def select_launch(composer, profile, replay=False, judging=False, render_mode=None, policy=None):
  if policy is not None and policy not in POLICIES:raise ValueError('Unknown presentation policy')
@@ -28,7 +30,7 @@ def select_launch(composer, profile, replay=False, judging=False, render_mode=No
  normal_prism=composer=='ace' and profile=='prism'
  mode=render_mode or ('gold-core' if normal_prism else 'current')
  chosen=policy or ('conservative-v2' if normal_prism and mode=='gold-core' else 'off')
- if chosen in ('conservative-v1','conservative-v2') and (composer!='ace' or mode!='gold-core'):
+ if chosen in ('conservative-v1','conservative-v2','conservative-v3') and (composer!='ace' or mode!='gold-core'):
   raise ValueError('Conservative presentation requires ACE gold-core rendering')
  return {'render_mode':mode,'policy':chosen}
 
@@ -41,9 +43,9 @@ def effective_config(config,environ=None):
  """Return a copy; never mutate the global runtime file or an archived policy."""
  result=copy.deepcopy(config);policy=selected(environ)
  if policy=='frozen':return result
- if policy in ('conservative-v1','conservative-v2'):
-  result.update(copy.deepcopy(CONSERVATIVE_V2 if policy=='conservative-v2' else CONSERVATIVE))
+ if policy in ('conservative-v1','conservative-v2','conservative-v3'):
+  result.update(copy.deepcopy(CONSERVATIVE_V3 if policy=='conservative-v3' else CONSERVATIVE_V2 if policy=='conservative-v2' else CONSERVATIVE))
   if policy=='conservative-v1':result['alert_accent']={'enabled':False}
  else:
-  result.update(presentation_policy_version='off',alert_accent={'enabled':False},signal_shaker={'enabled':False},core_apex={'enabled':False},engagement_presentation={'version':2,'enabled':False})
+  result.update(presentation_policy_version='off',stopped_motion={'enabled':False},alert_accent={'enabled':False},signal_shaker={'enabled':False},core_apex={'enabled':False},engagement_presentation={'version':2,'enabled':False})
  return result
