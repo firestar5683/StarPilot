@@ -122,3 +122,23 @@ def test_production_app_uses_live_namespace_preserves_prior_current(tmp_path):
     assert 'OPENPILOT_PREFIX' not in env and 'ZMQ' not in env
     assert (owned.folder/'previous_current/evidence').read_text()=='keep'
     with patch('live_owned_processes.os.killpg'):owned.stop_owned()
+
+def test_diagnostic_promotes_only_after_explicit_verified_on(engine):
+    engine.collector.authorization=replace(AUTH,coexistence_verified=False)
+    engine.command({'command':'diagnostic'});engine.tick();session=engine.supervisor.session_id
+    with pytest.raises(RuntimeError):engine.command({'command':'enable'})
+    engine.collector.authorization=AUTH
+    engine.command({'command':'enable'})
+    assert not engine.diagnostic and engine.supervisor.session_id==session
+    engine.owned.start_app.assert_not_called()
+    engine.command({'command':'driver_ready','session_id':session})
+    engine.owned.start_app.assert_called_once()
+
+def test_ready_file_alone_does_not_claim_live_playback(tmp_path):
+    owned,popen=fixture_owned(tmp_path);owned.app=Mock();owned.app.poll.return_value=None
+    current=tmp_path/'results/current';current.mkdir(parents=True);(current/'ready').write_text('ready')
+    assert not owned.health()['app_ready']
+    (current/'status.json').write_text(json.dumps({'route':'live','command_wall':owned.clock(),'elapsed':1}))
+    assert owned.health()['app_ready']
+    (current/'status.json').write_text(json.dumps({'route':'live','command_wall':owned.clock()-3,'elapsed':1}))
+    assert not owned.health()['app_ready']

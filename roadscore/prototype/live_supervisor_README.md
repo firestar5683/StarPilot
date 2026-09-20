@@ -27,10 +27,16 @@ preflight/model-local evidence is required, but **production coexistence
 authorization is not required** so it can be measured. It launches only the muted
 worker and never app/audio. Health evidence is recorded in a unique local
 results/live/<session>/ directory through preparation and at most120 seconds of
-ready observation. It cannot confirm driver-ready or promote itself to a
-production session. Diagnostic readiness is not GPU/coexistence approval.
+ready observation. It cannot confirm driver-ready or automatically promote itself. Once the owner
+records genuine measured coexistence authorization, an explicit ON request can
+promote the same parked READY session after all production guards pass; this is
+recorded separately and still requires driver-ready. Keeping that worker avoids
+a circular requirement to prove fresh worker health after first killing it.
+Diagnostic readiness alone is not GPU/coexistence approval.
 
-Production ON uses the original full authorization guards. Explicit
+Production ON uses the original full authorization guards. Live readiness requires
+a fresh current-status record with route=live and advancing playback as well as
+the app ready file; a PortAudio initialization marker alone is insufficient. Explicit
 `confirm_driver_ready(session_id, audible=False)` rechecks the exact prepared
 session and fresh parked health, then starts app --input live using the real
 default namespace. Audible output must be explicitly requested and still passes

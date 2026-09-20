@@ -86,12 +86,16 @@ class OwnedLiveProcesses:
         env['PYTHONPATH']=':'.join(['/data/openpilot',str(self.root/'prototype'),'/data/roadscore-feasibility/venv/lib/python3.12/site-packages'])
         env['ROADSCORE_LIVE_SESSION_ID']=session_id
         log=(self.folder/'app.log').open('ab');self.logs.append(log)
+        self.app_started=self.clock()
         self.app=self.popen(['/usr/local/venv/bin/python','-u',str(self.root/'prototype/app.py'),'--root',str(self.root),'--input','live']+(['--audible'] if audible else []),cwd='/data/openpilot',env=env,stdout=log,stderr=log,stdin=subprocess.DEVNULL,start_new_session=True)
 
     def health(self):
+        status=read(self.root/'results/current/status.json')
+        live_ready=(status.get('route')=='live' and isinstance(status.get('command_wall'),(int,float))
+                    and 0<=self.clock()-status['command_wall']<=1. and status.get('elapsed',0)>0)
         return dict(worker_healthy=self.worker is not None and self.worker.poll() is None,
                     accepted_ready=self.accepted_ready(),app_healthy=self.app is None or self.app.poll() is None,
-                    app_ready=self.app is not None and self.app.poll() is None and (self.root/'results/current/ready').exists())
+                    app_ready=live_ready and self.app is not None and self.app.poll() is None and (self.root/'results/current/ready').exists())
 
     def signal_stop(self):
         self.stop_requested.set()

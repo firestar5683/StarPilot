@@ -27,7 +27,7 @@ class LiveController:
             if status.get('available') is False:return status
             observation,authorization=self.adapter.health_and_authorization()
             reason=blocked_reason(observation,authorization,self.clock(),require_parked=True)
-            return {**status,'available':True,'can_enable':not status.get('enabled',False) and not reason,
+            return {**status,'available':True,'can_enable':(not status.get('enabled',False) or (status.get('diagnostic') and status.get('state')=='READY')) and not reason,
                     'reason':reason or status.get('reason','')}
         except Exception as error:
             return dict(available=False,enabled=None,state='DEGRADED',can_enable=False,reason='Live supervisor status unavailable: '+str(error))
