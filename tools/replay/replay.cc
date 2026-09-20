@@ -134,8 +134,9 @@ void Replay::checkSeekProgress() {
 
   if (startup_prime_ && !startup_primed_) {
     std::vector<int> available, loaded;
+    const auto startup_data = seg_mgr_->getEventData();
     for (const auto &[n, unused] : seg_mgr_->route_.segments()) available.push_back(n);
-    for (const auto &[n, unused] : seg_mgr_->getEventData()->segments) loaded.push_back(n);
+    for (const auto &[n, unused] : startup_data->segments) loaded.push_back(n);
     if (!startup_cache_ready(available, loaded, current_segment_.load(), seg_mgr_->segment_cache_limit_)) {
       rInfo("REPLAY_STARTUP_CACHE_WAIT loaded=%zu cache=%d", loaded.size(), seg_mgr_->segment_cache_limit_);
       return;
