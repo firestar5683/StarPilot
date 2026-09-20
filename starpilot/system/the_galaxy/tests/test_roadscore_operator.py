@@ -49,4 +49,38 @@ class AppliedSettingsTests(unittest.TestCase):
         with self.assertRaises(ValueError): obj.operate('settings',{'profile':'prism'},True)
       with self.assertRaises(ValueError):obj.operate('prepare',{'seed':17},True)
 
+
+class CurrentWorkerTests(unittest.TestCase):
+  def test_current_resident_identity_seed_and_reused_pid(self):
+    import json,os
+    from unittest.mock import patch
+    with tempfile.TemporaryDirectory() as directory:
+      root=Path(directory);generated=root/'generated';generated.mkdir();proc=root/'proc';proc.mkdir()
+      (proc/'stat').write_text('btime 1\n')
+      def process(pid,parent,ticks,script):
+        folder=proc/str(pid);folder.mkdir(exist_ok=True)
+        fields=['S',str(parent)]+['0']*17+[str(ticks)]
+        (folder/'stat').write_text(f'{pid} (python) '+' '.join(fields))
+        (folder/'cmdline').write_bytes(b'python\0/data/openpilot/roadscore/'+script.encode()+b'\0')
+      process(10,1,100,'prototype/power_worker.py');process(11,10,200,'experiments/ace_chestnut_20260916/ace_worker.py')
+      worker=dict(pid=11,generation_seed=123,profile='prism',phase='READY')
+      (generated/'resident_owner.json').write_text(json.dumps(dict(power_worker_pid=10,process_start_ticks='100')))
+      (generated/'ace_worker_state.json').write_text(json.dumps(worker))
+      (generated/'ace_initial.json').write_text(json.dumps(dict(generation_seed=123,prepared_profile='prism')))
+      (generated/'worker_ready').write_text('ace')
+      (generated/'worker_service.json').write_text(json.dumps(dict(pid=999,phase='Failed',composer='sa3')))
+      self.assertEqual(operator.current_worker(root,proc),worker)
+      obj=operator.Operator(root,device=True)
+      with patch.object(operator,'current_worker',return_value=worker),patch.object(obj,'target',return_value={}):
+        self.assertEqual(obj.status(True)['state'],'READY');self.assertEqual(obj.status(True)['composer'],'ace');self.assertEqual(obj.status(True)['generation_seed'],123)
+        (generated/'busy').touch();self.assertEqual(obj.status(True)['state'],'GENERATING')
+      (generated/'ace_initial.json').write_text(json.dumps(dict(generation_seed=124,prepared_profile='prism')))
+      self.assertEqual(operator.current_worker(root,proc),{})
+      worker['phase']='PREPARING';(generated/'ace_worker_state.json').write_text(json.dumps(worker))
+      self.assertEqual(operator.current_worker(root,proc)['phase'],'PREPARING')
+      process(10,1,101,'prototype/power_worker.py');self.assertEqual(operator.current_worker(root,proc),{})
+      process(10,1,100,'prototype/power_worker.py')
+      os.utime(generated/'ace_worker_state.json',(0,0));self.assertEqual(operator.current_worker(root,proc),{})
+      (proc/'11/cmdline').unlink();self.assertEqual(operator.current_worker(root,proc),{})
+
 if __name__ == '__main__': unittest.main()

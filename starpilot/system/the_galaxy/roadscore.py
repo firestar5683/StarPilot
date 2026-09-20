@@ -1,5 +1,6 @@
 """Galaxy's local-only RoadScore operator API. Never discovers or contacts a bench."""
 import json
+import os
 from pathlib import Path
 import importlib.util
 import sys
@@ -30,6 +31,38 @@ def validate_settings(data):
   return data
 
 
+def current_worker(root, proc=Path('/proc')):
+  """Verify the current ACE child and its recorded resident power supervisor."""
+  root=Path(root);worker_path=root/'generated/ace_worker_state.json'
+  worker=read_json(worker_path);owner=read_json(root/'generated/resident_owner.json')
+  try:
+    pid=int(worker['pid']);parent=int(owner['power_worker_pid'])
+    if pid<=0 or parent<=0:return {}
+    def process(identity,suffix):
+      directory=proc/str(identity)
+      arguments=(directory/'cmdline').read_bytes().split(b'\0')
+      if not any(argument.endswith(suffix.encode()) for argument in arguments):raise ValueError('Wrong process')
+      fields=(directory/'stat').read_text().rsplit(') ',1)[1].split()
+      if fields[0]=='Z':raise ValueError('Exited process')
+      return fields
+    child=process(pid,'/ace_worker.py');supervisor=process(parent,'/power_worker.py')
+    if int(child[1])!=parent or str(owner['process_start_ticks'])!=supervisor[19]:return {}
+    recorded=worker.get('process_start_ticks',worker.get('start_ticks'))
+    if recorded is not None and str(recorded)!=child[19]:return {}
+    boot=next(int(line.split()[1]) for line in (proc/'stat').read_text().splitlines() if line.startswith('btime '))
+    if worker_path.stat().st_mtime+1 < boot+int(child[19])/os.sysconf('SC_CLK_TCK'):return {}
+    if type(worker.get('generation_seed')) is not int or not 0<=worker['generation_seed']<2**32:return {}
+    if worker.get('profile') not in {'prism','aurora'}:return {}
+    phase=str(worker.get('phase','')).upper()
+    if phase not in {'PREPARING','READY','GENERATING','FAILED'}:return {}
+    if phase=='READY':
+      initial=read_json(root/'generated/ace_initial.json')
+      if initial.get('generation_seed')!=worker['generation_seed'] or initial.get('prepared_profile')!=worker['profile']:return {}
+      if (root/'generated/worker_ready').read_text().strip()!='ace':return {}
+    return worker
+  except (OSError,ValueError,KeyError,IndexError,StopIteration):return {}
+
+
 class Operator:
   def __init__(self, root=Path('/data/roadscore'), device=None, offroad=lambda: False):
     self.root = root
@@ -56,31 +89,24 @@ class Operator:
 
   def status(self, offroad):
     settings = read_json(self.root / 'generated/operator_settings.json')
-    service = read_json(self.root / 'generated/worker_service.json')
-    live = False
-    try:
-      pid = int(service['pid'])
-      cmd = Path(f'/proc/{pid}/cmdline').read_bytes()
-      ticks = Path(f'/proc/{pid}/stat').read_text().split(') ', 1)[1].split()[19]
-      live = ticks == service.get('start_ticks') and b'worker_service.py' in cmd
-    except (OSError, ValueError, KeyError):
-      pass
+    worker=current_worker(self.root)
+    live=bool(worker)
     try:
       output = self.target('status') if self.device else {}
     except (OSError, ValueError):
       output = {}
     # Without the output owner, playback/judging state cannot be proved safe.
     locked = output.get('judging_locked', True) or output.get('playback_active', True)
-    worker = read_json(self.root / 'generated/ace_worker_state.json')
-    phase = str(worker.get('phase', service.get('phase', '')) if live else service.get('phase', '')).upper()
+    phase = str(worker.get('phase','')).upper()
     state = ('DEGRADED' if phase == 'FAILED' else 'COLD') if not live else {'PREPARING': 'PREPARING', 'READY': 'READY', 'FAILED': 'DEGRADED', 'GENERATING': 'GENERATING'}.get(phase, 'COLD')
     if live and (self.root/'generated/busy').exists():state='GENERATING'
     if output.get('state') in STATES:
       state = output['state']
     return dict(available=self.device and self.root.exists(), state=state, profiles=PROFILES,
-                profile=worker.get('profile', service.get('profile')) if live else settings.get('profile', 'prism'),
+                profile=worker.get('profile') if live else settings.get('profile', 'prism'),
                 selected_profile=settings.get('profile', 'prism'),
-                composer=service.get('composer') if live else None, backend='Chestnut' if live else None,
+                composer='ace' if live else None, backend='Chestnut' if live else None,
+                generation_seed=worker.get('generation_seed') if live else None,
                 offroad=bool(offroad), locked=bool(locked), preparing=self.preparing,
                 can_prepare=False,
                 can_edit=False, can_calibrate=offroad and not locked and output.get('calibration', False),
