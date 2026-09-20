@@ -19,6 +19,16 @@ def test_native_bank_validated_and_network_credentials_removed(tmp_path):
         assert run(env) == 'hook-cache-v1'
     assert calls == [(tmp_path, {'profile': 'prism'})]
     assert 'ROADSCORE_PLANNER_URL' not in env and 'ROADSCORE_PLANNER_TOKEN' not in env
+    assert env['ROADSCORE_RESIDENT'] == '1'
+    assert env['ROADSCORE_INITIAL_BUFFER_SECONDS'] == '100'
+
+def test_explicit_resident_optout_and_buffer_preserved(tmp_path):
+    env = {'ROADSCORE_PLAN_BANK': str(tmp_path), 'ROADSCORE_RESIDENT': '0',
+           'ROADSCORE_INITIAL_BUFFER_SECONDS': '112'}
+    with patch.dict(sys.modules, cached_composition=SimpleNamespace(validate_bank=lambda *args, **kw: None)):
+        assert run(env) == 'hook-cache-v1'
+    assert env['ROADSCORE_RESIDENT'] == '0'
+    assert env['ROADSCORE_INITIAL_BUFFER_SECONDS'] == '112'
 
 def test_invalid_native_bank_never_falls_back():
     def reject(*args, **kwargs): raise ValueError('missing current plan bank')
