@@ -103,7 +103,7 @@ def _session(status):
   demo = status.get('demo')
   live = status.get('live', {})
   if (status.get('available') is not True or status.get('offroad') is not True
-      or status.get('state') not in ('READY', 'GENERATING')
+      or (demo.get('readiness',status.get('state')) if isinstance(demo,dict) else None) not in ('READY', 'GENERATING')
       or not isinstance(demo, dict) or demo.get('available') is not True
       or (isinstance(live, dict) and live.get('enabled') is True)):
     raise ValueError('peer_not_ready_for_replay')
@@ -140,6 +140,35 @@ class PairedDemoControls:
     self._lock = threading.Lock()
     self._active = None
     self._closed = False
+    self._bound_session = None
+    self._write_revision = 0
+
+  def read_status(self):
+    """Read applied Galaxy state on a background thread; never from audio/HTTP.
+
+    The first validated read pins this peer replay session. Later sessions are
+    rejected until a new forwarder is constructed. Return the full validated
+    JSON plus Mac receipt/request times for a separate clock consumer; those
+    timestamps alone do not establish playback synchronization.
+    """
+    with self._lock:
+      if self._closed or not self.enabled:raise ValueError('forwarder_disabled')
+      if self._active is not None:raise ValueError('peer_action_in_progress')
+      revision = self._write_revision
+    started = time.monotonic()
+    headers = {'Accept':'application/json','Cache-Control':'no-store'}
+    if self.peer.session_cookie is not None:headers['Cookie']='galaxy_session='+self.peer.session_cookie
+    status = self.transport('GET',self.peer.base_url+'/api/roadscore/status',None,headers,min(self.timeout,.75))
+    received = time.monotonic()
+    if received-started >= min(self.timeout,.75):raise TimeoutError()
+    session = _session(status)
+    with self._lock:
+      if self._closed:raise ValueError('forwarder_disabled')
+      if revision != self._write_revision or self._active is not None:raise ValueError('peer_action_in_progress')
+      if self._bound_session is None:self._bound_session=session
+      elif session != self._bound_session:raise ValueError('peer_session_changed')
+    return dict(session_id=session,mode=status['demo']['mode'],signal_mode=status['demo']['signal_mode'],
+                request_started_wall=started,received_wall=received,peer_status=status)
 
   def _result(self, status, action, value, *, acknowledged=False, applied=False,
               error=None, session_id=None, delivery_unknown=False):
@@ -168,6 +197,7 @@ class PairedDemoControls:
       operation = {'future': future, 'action': action, 'value': value,
                    'sent': False, 'acknowledged': False, 'session': None, 'settled': False}
       self._active = operation
+      self._write_revision += 1
     deadline = time.monotonic() + self.timeout
     timer = threading.Timer(self.timeout, self._expire, args=(operation,))
     timer.daemon = True
@@ -213,6 +243,9 @@ class PairedDemoControls:
       action, value = operation['action'], operation['value']
       field_name = ACTIONS[action][0]
       session = _session(request('GET', 'status'))
+      with self._lock:
+        if self._bound_session is not None and session != self._bound_session:
+          raise ValueError('peer_session_changed')
       operation['session'] = session
       reply = request('POST', action, {'session_id': session, field_name: value})
       if (not isinstance(reply, dict) or reply.get('requested_' + field_name) != value

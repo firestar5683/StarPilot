@@ -126,6 +126,63 @@ class PairedTests(unittest.TestCase):
     self.assertTrue(target(result)['applied'])
     self.assertEqual(self.transport.calls[1][2], {'session_id': 'independent-peer-session', 'mode': 'disengaged'})
 
+  def test_read_status_only_gets_applied_state_and_exposes_clock_sample(self):
+    controls = self.forwarder()
+    self.transport.status['demo'].update(mode='engaged',signal_mode='right',playhead={'source_model_ns':123})
+    value = controls.read_status()
+    self.assertEqual((value['mode'],value['signal_mode']),('engaged','right'))
+    self.assertEqual(value['peer_status']['demo']['playhead'],{'source_model_ns':123})
+    self.assertGreaterEqual(value['received_wall'],value['request_started_wall'])
+    self.assertEqual([call[0] for call in self.transport.calls],['GET'])
+
+  def test_followed_peer_session_cannot_reset_or_receive_new_writes(self):
+    controls = self.forwarder()
+    controls.read_status()
+    self.transport.status['demo']['session_id']='restarted-peer'
+    with self.assertRaisesRegex(ValueError,'peer_session_changed'):controls.read_status()
+    result = target(controls.submit('demo_signal','left').result(1))
+    self.assertEqual(result['error'],'peer_session_changed')
+    self.assertTrue(all(call[0]=='GET' for call in self.transport.calls))
+
+  def test_prepared_replay_readiness_does_not_require_an_ace_worker(self):
+    controls=self.forwarder()
+    self.transport.status['state']='COLD'
+    self.transport.status['demo'].update(readiness='READY',compute='prepared-core')
+    self.assertEqual(controls.read_status()['mode'],'recorded')
+    self.transport.status['state']='READY'
+    self.transport.status['demo']['readiness']='PREPARING'
+    with self.assertRaisesRegex(ValueError,'peer_not_ready_for_replay'):controls.read_status()
+
+  def test_late_status_and_disabled_reader_never_return_applied_state(self):
+    controls = self.forwarder()
+    with patch('paired_demo_controls.time.monotonic',side_effect=[100.,101.]):
+      with self.assertRaises(TimeoutError):controls.read_status()
+    controls.close()
+    before = len(self.transport.calls)
+    with self.assertRaisesRegex(ValueError,'forwarder_disabled'):controls.read_status()
+    self.assertEqual(len(self.transport.calls),before)
+
+  def test_read_started_before_mac_write_cannot_restore_old_peer_state(self):
+    entered,release=threading.Event(),threading.Event()
+    original=self.transport
+    old=copy.deepcopy(original.status)
+    def transport(method,*args):
+      if threading.current_thread().name=='test-status-reader':
+        entered.set();release.wait(1);return old
+      return original(method,*args)
+    self.transport=transport
+    controls=self.forwarder()
+    errors=[]
+    def read():
+      try:controls.read_status()
+      except Exception as error:errors.append(str(error))
+    reader=threading.Thread(target=read,name='test-status-reader',daemon=True)
+    reader.start();self.assertTrue(entered.wait(.5))
+    try:self.assertTrue(target(controls.submit('demo_engagement','engaged').result(1))['applied'])
+    finally:release.set()
+    reader.join(1)
+    self.assertEqual(errors,['peer_action_in_progress'])
+
   def test_current_galaxy_operator_wire_contract_without_network(self):
     source = Path(__file__).resolve().parents[2] / 'starpilot/system/the_galaxy/roadscore.py'
     spec = importlib.util.spec_from_file_location('paired_test_galaxy', source)

@@ -49,8 +49,8 @@ class ControlTests(unittest.TestCase):
     self.state['command_wall'] = time.monotonic()
     (self.out/'status.json').write_text(json.dumps(self.state))
 
-  def start(self, forwarder=None):
-    self.server = control_server(self.project,self.out,dict(state='READY',audio_s=1.,muted=True),0,forwarder)
+  def start(self, forwarder=None, follow_peer=False):
+    self.server = control_server(self.project,self.out,dict(state='READY',audio_s=1.,muted=True),0,forwarder,follow_peer=follow_peer)
     self.assertEqual(self.server.server_address[0], '127.0.0.1')
 
   def stop(self):
@@ -171,6 +171,72 @@ class ControlTests(unittest.TestCase):
     for value in ('http://device.local:8082','http://8.8.8.8:8082','http://192.168.1.50:8082/mobile/#/roadscore'):
       with self.subTest(url=value),contextlib.redirect_stderr(io.StringIO()),self.assertRaises(SystemExit):
         parser().parse_args(['--paired-comma',value])
+
+  def test_native_worker_portability_hooks_preserve_mac_defaults(self):
+    defaults=parser().parse_args([])
+    self.assertFalse(defaults.no_control_server)
+    self.assertIsNone(defaults.presentation_root)
+    self.assertIsNone(defaults.output_identity)
+    native=parser().parse_args(['--audio-worker','--no-control-server','--presentation-root','/fixture/native',
+                               '--output-identity','speaker-fixture'])
+    self.assertTrue(native.no_control_server)
+    self.assertEqual(native.presentation_root,Path('/fixture/native'))
+    self.assertEqual(native.output_identity,'speaker-fixture')
+
+  def wait_for(self, predicate):
+    deadline=time.monotonic()+1.5
+    while not predicate():
+      if time.monotonic()>deadline:self.fail('Mock follower did not reach expected state')
+      time.sleep(.01)
+
+  def following_peer(self):
+    status=dict(available=True,offroad=True,state='READY',live={'enabled':False},
+                demo=dict(available=True,session_id='comma-session',mode='recorded',signal_mode='recorded'))
+    calls=[]
+    def transport(method,*args):
+      calls.append(method)
+      if method!='GET':raise AssertionError('Follower must never POST to Galaxy')
+      return copy.deepcopy(status)
+    peer=PairedDemoControls(GalaxyPeer('http://192.168.1.50:8082',allow_lan_http=True),enabled=True,transport=transport)
+    self.start(peer,follow_peer=True)
+    self.wait_for(lambda:self.request()[1]['paired_controls']['following']['status']=='following')
+    return status,calls
+
+  def test_phone_changes_reconcile_locally_without_feedback_posts(self):
+    peer,calls=self.following_peer()
+    peer['demo'].update(mode='engaged',signal_mode='left')
+    path=self.out/'demo_engagement.json'
+    self.wait_for(lambda:path.exists() and json.loads(path.read_text()).get('signal_mode')=='left')
+    command=json.loads(path.read_text())
+    self.assertEqual((command['mode'],command['signal_mode'],command['session_id']),('engaged','left','mac-session'))
+    self.state.update(demo_engagement_mode='engaged',demo_signal_mode='left');self.write_state()
+    self.wait_for(lambda:self.request()[1]['paired_controls']['following']['status']=='following')
+    view=self.request()[1]['paired_controls']['following']
+    self.assertEqual(view['snapshot']['session_id'],'comma-session')
+    # Galaxy remains authoritative if the Mac later diverges from its state.
+    self.state['demo_engagement_mode']='disengaged';self.write_state()
+    previous=path.stat().st_mtime_ns
+    self.wait_for(lambda:path.stat().st_mtime_ns!=previous)
+    self.assertEqual(json.loads(path.read_text())['mode'],'engaged')
+    self.assertTrue(calls and all(method=='GET' for method in calls))
+
+  def test_stale_and_reset_peer_pause_without_replacing_local_controls(self):
+    peer,calls=self.following_peer()
+    peer['demo']['available']=False
+    self.wait_for(lambda:self.request()[1]['paired_controls']['following']['error']=='peer_not_ready_for_replay')
+    self.assertFalse((self.out/'demo_engagement.json').exists())
+    peer['demo'].update(available=True,session_id='new-comma-session',mode='engaged')
+    self.wait_for(lambda:self.request()[1]['paired_controls']['following']['error']=='peer_session_changed')
+    self.assertIsNone(self.request()[1]['paired_controls']['following']['snapshot'])
+    self.assertFalse((self.out/'demo_engagement.json').exists())
+    self.assertTrue(all(method=='GET' for method in calls))
+
+  def test_local_session_reset_cannot_receive_old_mirror_commands(self):
+    peer,_=self.following_peer()
+    self.state['presentation_session_id']='new-mac-session';self.write_state()
+    peer['demo']['mode']='engaged'
+    self.wait_for(lambda:self.request()[1]['paired_controls']['following']['error']=='local_session_changed')
+    self.assertFalse((self.out/'demo_engagement.json').exists())
 
 
 class RememberedConfigTests(unittest.TestCase):

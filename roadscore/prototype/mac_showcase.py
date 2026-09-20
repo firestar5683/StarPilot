@@ -23,7 +23,7 @@ def write_json(path, value):
   temporary.replace(path)
 
 
-def control_server(project, out, shared, port, forwarder=None):
+def control_server(project, out, shared, port, forwarder=None, *, follow_peer=False):
   spec = importlib.util.spec_from_file_location('showcase_galaxy', project/'starpilot/system/the_galaxy/roadscore.py')
   module = importlib.util.module_from_spec(spec)
   spec.loader.exec_module(module)
@@ -33,10 +33,17 @@ def control_server(project, out, shared, port, forwarder=None):
   operator = module.Operator(operator_root, device=False, offroad=lambda: True)
   control_lock = threading.Lock()
   sequence = 0
+  follower_stop = threading.Event()
+  following = dict(enabled=bool(follow_peer and forwarder),status='waiting',error=None,snapshot=None)
+  local_session = None
+  last_mirror_write = None
   paired = dict(enabled=forwarder is not None, sequence=0, request=None, music_video_synchronized=False, disclosure=DISCLOSURE,
                 targets={'comma':dict(status='idle' if forwarder else 'disabled',acknowledged=False,applied=False,error=None)})
   def paired_snapshot(demo):
-    with control_lock:result = {**paired, 'targets':dict(paired['targets'])}
+    with control_lock:result = {**paired, 'targets':dict(paired['targets']), 'following':dict(following)}
+    snapshot = result['following']['snapshot']
+    if snapshot and time.monotonic()-snapshot['received_wall']>1.5:
+      result['following'].update(status='stale',error='peer_status_stale',snapshot=None)
     result['targets']['mac'] = dict(status='ready' if demo['available'] else 'unready',
                                    mode=demo['mode'],signal_mode=demo['signal_mode'],acknowledged=False,applied=False)
     request = result['request']
@@ -52,6 +59,38 @@ def control_server(project, out, shared, port, forwarder=None):
     with control_lock:
       # A slow result cannot replace the status of a newer button action.
       if sequence == request_sequence:paired['targets'] = result['targets']
+  def follow_once():
+    nonlocal local_session,last_mirror_write
+    with control_lock:before=sequence
+    try:
+      snapshot=forwarder.read_status()
+      with control_lock:
+        if follower_stop.is_set():return
+        if sequence != before:
+          following.update(status='pending',error='peer_action_in_progress',snapshot=None);return
+        demo=operator.demo_status()
+        if not demo['available']:raise ValueError('local_replay_unready')
+        if local_session is None:local_session=demo['session_id']
+        elif demo['session_id']!=local_session:raise ValueError('local_session_changed')
+        signature=(snapshot['session_id'],local_session,snapshot['mode'],snapshot['signal_mode'],sequence)
+        matching=all(demo[field]==snapshot[field] for field in ('mode','signal_mode'))
+        if not matching and last_mirror_write!=signature:
+          # Write only local replay commands with the Mac's own session. This
+          # path never calls submit(), so following Galaxy cannot feed back.
+          for field in ('mode','signal_mode'):
+            if demo[field]!=snapshot[field]:operator.demo_engagement({'session_id':local_session,field:snapshot[field]},field)
+          last_mirror_write=signature
+        if matching:last_mirror_write=None
+        following.update(status='following' if matching else 'applying',error=None,snapshot=snapshot)
+    except Exception as error:
+      known={'peer_action_in_progress','peer_session_changed','local_session_changed','local_replay_unready',
+             'peer_not_ready_for_replay','invalid_peer_session','forwarder_disabled'}
+      reason=str(error) if str(error) in known else 'peer_timeout' if isinstance(error,TimeoutError) else 'peer_status_unavailable'
+      with control_lock:following.update(status='paused',error=reason,snapshot=None)
+  def follow():
+    while not follower_stop.is_set():
+      follow_once()
+      follower_stop.wait(.25)
   class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):pass
     def send_json(self, value, status=200):
@@ -100,10 +139,12 @@ def control_server(project, out, shared, port, forwarder=None):
       except (ValueError, TypeError) as error:self.send_json({'error':str(error)},400)
   class ControlServer(ThreadingHTTPServer):
     def server_close(self):
+      follower_stop.set()
       if forwarder is not None:forwarder.close()
       super().server_close()
   server = ControlServer(('127.0.0.1',port),Handler)
   threading.Thread(target=server.serve_forever,daemon=True).start()
+  if following['enabled']:threading.Thread(target=follow,name='galaxy-control-follower',daemon=True).start()
   return server
 
 
@@ -119,7 +160,7 @@ def audio_worker(a):
   processor = PreparedPresentation(a.score_archive, rate)
   session = os.environ['ROADSCORE_SHOWCASE_SESSION']
   controls = DemoEngagement(a.out, session, 'replay')
-  delay = PresentationDelay(a.out,output_provider=lambda: None)
+  delay = PresentationDelay(a.presentation_root or a.out,output_provider=lambda: {'id':a.output_identity} if a.output_identity else None)
   sm = messaging.SubMaster(['modelV2','carState','selfdriveState'],poll='modelV2')
   conductor = Conductor(handoff=True)
   staged = None
@@ -164,11 +205,12 @@ def audio_worker(a):
       errors.append(repr(error));done=True
   started=None;last_status=0.
   trace=(a.out/'presentation.jsonl').open('w',buffering=1)
-  forwarder = PairedDemoControls(GalaxyPeer(a.paired_comma,allow_lan_http=True),enabled=True) if a.paired_comma else None
+  forwarder = PairedDemoControls(GalaxyPeer(a.paired_comma,allow_lan_http=True),enabled=True) if a.paired_comma and not a.no_control_server else None
   server = None
   try:
-    server = control_server(a.project_root,a.out,shared,a.port,forwarder)
-    write_json(a.out/'controls.json',{'url':f'http://127.0.0.1:{server.server_port}/'})
+    if not a.no_control_server:
+      server = control_server(a.project_root,a.out,shared,a.port,forwarder,follow_peer=forwarder is not None)
+      write_json(a.out/'controls.json',{'url':f'http://127.0.0.1:{server.server_port}/'})
     with sd.OutputStream(device=a.audio_device,samplerate=rate,channels=2,blocksize=960,dtype='float32',callback=callback):
       (a.out/'prepared_ready').write_text('ready')
       while not done:
@@ -241,6 +283,9 @@ def parser():
   p.add_argument('--out',type=Path)
   p.add_argument('--duration',type=float,default=float('inf'))
   p.add_argument('--port',type=int,default=None,help='Override the saved local controls port; 0 selects an available port')
+  p.add_argument('--no-control-server',action='store_true',help=argparse.SUPPRESS)
+  p.add_argument('--presentation-root',type=Path,help=argparse.SUPPRESS)
+  p.add_argument('--output-identity',help=argparse.SUPPRESS)
   def paired_url(value):
     try:GalaxyPeer(value,allow_lan_http=True)
     except ValueError as error:raise argparse.ArgumentTypeError(str(error)) from error
@@ -257,8 +302,10 @@ def parser():
 def main():
   a=parser().parse_args()
   if a.audio_worker:
+    if a.no_control_server and a.paired_comma:raise SystemExit('Paired controls require the local control server')
     if a.port is None:a.port=0
     return audio_worker(a)
+  if a.no_control_server:raise SystemExit('--no-control-server is an internal prepared audio-worker option')
   if sys.platform!='darwin' or Path('/TICI').exists():raise SystemExit('Prepared Mac showcase runs only on the Mac')
   launch_started=time.monotonic()
   project=a.project_root.resolve();rt=a.runtime or project/'.host_runtime/darwin/worktree'
