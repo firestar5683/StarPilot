@@ -1,3 +1,4 @@
+import ast
 import json
 import tempfile
 import unittest
@@ -6,7 +7,7 @@ from types import SimpleNamespace
 
 from cereal import log, car, custom
 from cue_timing import REFERENCE
-from replay_ui_controls import ReplayUIControls, ReplayStateView, isolated_replay, apply_turn_intent
+from replay_ui_controls import ReplayUIControls, ReplayStateView, isolated_replay, apply_turn_intent, replay_turn_alert
 
 
 class Subscriber:
@@ -116,5 +117,107 @@ class Tests(unittest.TestCase):
     self.assertTrue(apply_turn_intent(widget,'off'));self.assertEqual(widget._turn_intent_direction,0)
     self.assertEqual(widget._turn_intent_alpha_filter.target,0)
     self.assertFalse(apply_turn_intent(widget,'recorded'))
+
+  def test_signal_off_fades_correct_side_and_recorded_clears_simulation(self):
+    class Filter:
+      x=1
+      def update(self,target):self.x=(self.x+target)/2
+    widget=SimpleNamespace(_pre=False,_turn_intent_direction=0,FADE_IN_ANGLE=30,
+                           _turn_intent_alpha_filter=Filter(),_turn_intent_rotation_filter=Filter())
+    apply_turn_intent(widget,'right');apply_turn_intent(widget,'off')
+    self.assertEqual(widget._turn_intent_direction,1)
+    self.assertGreater(widget._turn_intent_alpha_filter.x,.01)
+    self.assertFalse(apply_turn_intent(widget,'recorded'))
+    self.assertEqual(widget._turn_intent_alpha_filter.x,0)
+    self.assertEqual(widget._turn_intent_direction,0)
+
+  def test_native_steer_prompt_labels_directions_and_independent_reset(self):
+    widget=SimpleNamespace(_prev_alert=None,_alpha_filter=SimpleNamespace(x=0))
+    for mode,signal in [('recorded','left'),('engaged','right'),('disengaged','left')]:
+      self.state(mode,signal);self.view.update()
+      before=self.view['selfdriveState'].to_dict()
+      prompt=replay_turn_alert(widget,self.view.signal_mode,None,SimpleNamespace)
+      self.assertEqual(prompt.text1,'Steer '+signal.title())
+      self.assertEqual(prompt.text2,'Replay simulation')
+      self.assertEqual(prompt.alert_type,'preLaneChange'+signal.title()+'/warning')
+      self.assertIs(widget._prev_alert,prompt)
+      self.assertEqual(self.view['selfdriveState'].to_dict(),before)
+    for reset in ('off','recorded'):
+      replay_turn_alert(widget,'right',None,SimpleNamespace)
+      self.state('engaged',reset);self.view.update()
+      self.assertTrue(self.view['selfdriveState'].enabled)
+      self.assertIsNone(replay_turn_alert(widget,self.view.signal_mode,None,SimpleNamespace))
+      self.assertIsNone(widget._prev_alert)
+
+  def test_native_alert_and_fade_preempt_simulated_prompt(self):
+    native=SimpleNamespace(text1='Recorded alert',alert_type='laneChangeBlocked/warning')
+    widget=SimpleNamespace(_prev_alert=None,_alpha_filter=SimpleNamespace(x=1))
+    replay_turn_alert(widget,'left',None,SimpleNamespace)
+    widget._prev_alert=native  # Native get_alert caches its own alert before the adapter.
+    self.assertIs(replay_turn_alert(widget,'right',native,SimpleNamespace),native)
+    self.assertIs(widget._prev_alert,native)
+    self.assertIsNone(replay_turn_alert(widget,'right',None,SimpleNamespace))
+    self.assertIs(widget._prev_alert,native)
+    self.assertIsNone(replay_turn_alert(widget,'off',None,SimpleNamespace))
+    self.assertIs(widget._prev_alert,native)
+    widget._alpha_filter.x=.005
+    prompt=replay_turn_alert(widget,'right',None,SimpleNamespace)
+    self.assertEqual(prompt.text1,'Steer Right')
+
+  def test_stale_or_unhealthy_replay_clears_only_simulated_prompt(self):
+    widget=SimpleNamespace(_prev_alert=None,_alpha_filter=SimpleNamespace(x=1))
+    self.state();self.view.update()
+    replay_turn_alert(widget,self.view.signal_mode,None,SimpleNamespace)
+    self.state(command_wall=90);self.view.update()
+    self.assertIsNone(replay_turn_alert(widget,self.view.signal_mode,None,SimpleNamespace))
+    self.assertIsNone(widget._prev_alert)
+    self.state();self.view.update()
+    replay_turn_alert(widget,self.view.signal_mode,None,SimpleNamespace)
+    self.sm.alive['carState']=False;self.view.update()
+    self.assertIsNone(replay_turn_alert(widget,self.view.signal_mode,None,SimpleNamespace))
+    self.assertIsNone(widget._prev_alert)
+
+  def test_renderer_hook_drives_native_side_icon_and_yields_to_alerts(self):
+    # Execute the real hook and native icon layout without importing Linux messaging or opening a window.
+    root=Path(__file__).resolve().parents[2]
+    ui=SimpleNamespace(started=True)
+    rectangle=lambda *values:SimpleNamespace(x=values[0],y=values[1],width=values[2],height=values[3])
+    namespace=dict(ReplayStateView=ReplayStateView,replay_turn_alert=replay_turn_alert,ui_state=ui,
+                   original_get_alert=lambda widget,sm:getattr(widget,'native_alert',None),
+                   Alert=lambda **fields:SimpleNamespace(**fields),AlertSize=SimpleNamespace(mid=2),
+                   AlertStatus=SimpleNamespace(normal=0),replay_arrow_mode='recorded',
+                   rl=SimpleNamespace(Rectangle=rectangle),IconSide=SimpleNamespace(left='left',right='right'),
+                   IconLayout=lambda texture,side,*margins:SimpleNamespace(texture=texture,side=side),
+                   AlertLayout=lambda text_rect,icon:SimpleNamespace(text_rect=text_rect,icon=icon))
+    for source,name in [(Path(__file__).with_name('normal_ui_audit.py'),'replay_get_alert'),
+                        (root/'selfdrive/ui/mici/onroad/alert_renderer.py','_icon_helper')]:
+      node=next(node for node in ast.walk(ast.parse(source.read_text())) if isinstance(node,ast.FunctionDef) and node.name==name)
+      node.returns=None
+      for arg in node.args.args:arg.annotation=None
+      exec(compile(ast.Module(body=[node],type_ignores=[]),str(source),'exec'),namespace)
+    widget=SimpleNamespace(_prev_alert=None,_alpha_filter=SimpleNamespace(x=0),_alert_y_filter=SimpleNamespace(x=0),
+                           _rect=rectangle(0,0,500,240),_txt_turn_signal_left=SimpleNamespace(width=104),
+                           _txt_turn_signal_right=SimpleNamespace(width=104),_last_icon_side=None)
+    namespace['ALERT_MARGIN']=18
+    for side in ('left','right'):
+      self.state('recorded',side);self.view.update()
+      prompt=namespace['replay_get_alert'](widget,self.view)
+      self.assertEqual(prompt.text1,'Steer '+side.title())
+      icon=namespace['_icon_helper'](widget,prompt).icon
+      self.assertEqual(icon.side,side)
+      self.assertIs(icon.texture,getattr(widget,'_txt_turn_signal_'+side))
+      self.assertTrue(ui.roadscore_replay_prompt_active)
+      self.assertEqual(namespace['replay_arrow_mode'],side)
+    native=SimpleNamespace(text1='Recorded critical alert')
+    widget.native_alert=widget._prev_alert=native
+    self.assertIs(namespace['replay_get_alert'](widget,self.view),native)
+    self.assertFalse(ui.roadscore_replay_prompt_active)
+    self.assertEqual(namespace['replay_arrow_mode'],'recorded')
+    widget.native_alert=None;widget._alpha_filter.x=1
+    self.assertIsNone(namespace['replay_get_alert'](widget,self.view))
+    self.assertEqual(namespace['replay_arrow_mode'],'recorded')
+    widget._prev_alert=None;ui.started=False
+    self.assertIsNone(namespace['replay_get_alert'](widget,self.view))
+    self.assertFalse(ui.roadscore_replay_prompt_active)
 
 if __name__=='__main__':unittest.main()

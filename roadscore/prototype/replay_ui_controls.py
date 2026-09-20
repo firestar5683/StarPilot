@@ -18,7 +18,13 @@ def isolated_replay(environ):
 def apply_turn_intent(widget, signal_mode):
   """Use the existing native arrow textures/animation without inventing events."""
   if signal_mode not in ('left', 'right', 'off'):
+    if getattr(widget, '_roadscore_simulated_turn', False):
+      widget._pre = False
+      widget._turn_intent_direction = 0
+      widget._turn_intent_alpha_filter.x = widget._turn_intent_rotation_filter.x = 0
+      widget._roadscore_simulated_turn = False
     return False
+  widget._roadscore_simulated_turn = True
   direction = -1 if signal_mode == 'left' else 1 if signal_mode == 'right' else 0
   if direction:
     if not widget._pre or widget._turn_intent_direction != direction:
@@ -29,10 +35,36 @@ def apply_turn_intent(widget, signal_mode):
     widget._turn_intent_rotation_filter.update(0)
   else:
     widget._pre = False
-    widget._turn_intent_direction = 0
     widget._turn_intent_alpha_filter.update(0)
     widget._turn_intent_rotation_filter.update(0)
+    # Keep the outgoing texture's direction until its native fade is invisible.
+    if widget._turn_intent_alpha_filter.x <= 1e-2:
+      widget._turn_intent_direction = 0
   return True
+
+
+def replay_turn_alert(widget, signal_mode, native_alert, alert_factory):
+  """Select a native display object, never an alert message or driving event."""
+  previous_demo = getattr(widget, '_roadscore_demo_alert', None)
+  if native_alert is not None:
+    if widget._prev_alert is previous_demo:
+      widget._prev_alert = None
+    widget._roadscore_demo_alert = None
+    return native_alert
+  if signal_mode not in ('left', 'right'):
+    if previous_demo is not None and widget._prev_alert is previous_demo:
+      widget._prev_alert = None
+      widget._alpha_filter.x = 0
+    widget._roadscore_demo_alert = None
+    return None
+  # A recorded/native alert also owns its normal fade-out interval.
+  if widget._prev_alert is not None and widget._prev_alert is not previous_demo and widget._alpha_filter.x > .01:
+    return None
+  alert_type = 'preLaneChange' + signal_mode.title() + '/warning'
+  if previous_demo is None or previous_demo.alert_type != alert_type:
+    previous_demo = alert_factory(text1='Steer ' + signal_mode.title(), text2='Replay simulation', alert_type=alert_type)
+  widget._roadscore_demo_alert = widget._prev_alert = previous_demo
+  return previous_demo
 
 
 class ReplayUIControls:

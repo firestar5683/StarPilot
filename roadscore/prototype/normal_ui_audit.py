@@ -4,15 +4,28 @@ from pathlib import Path
 from openpilot.selfdrive.ui.ui_state import UIState, device
 from preparing_awake import PreparationWake
 from replay_display_hold import ReplayDisplayHold
-from replay_ui_controls import ReplayUIControls, ReplayStateView, isolated_replay, apply_turn_intent
+from replay_ui_controls import ReplayUIControls, ReplayStateView, isolated_replay, apply_turn_intent, replay_turn_alert
 replay_controls=ReplayUIControls(os.environ['ROADSCORE_STATUS_FILE'],enabled=isolated_replay(os.environ))
 if replay_controls.enabled:
  from openpilot.selfdrive.ui.mici.onroad.hud_renderer import TurnIntent
+ from openpilot.selfdrive.ui.mici.onroad.alert_renderer import AlertRenderer, Alert, AlertSize, AlertStatus
  from openpilot.selfdrive.ui.ui_state import ui_state
+ replay_arrow_mode='recorded'
+ ui_state.roadscore_replay_prompt_active=False
+ original_get_alert=AlertRenderer.get_alert
+ def replay_get_alert(self,sm):
+  global replay_arrow_mode
+  native_alert=original_get_alert(self,sm)
+  mode=sm.signal_mode if isinstance(sm,ReplayStateView) and ui_state.started else 'recorded'
+  result=replay_turn_alert(self,mode,native_alert,lambda **fields:Alert(size=AlertSize.mid,status=AlertStatus.normal,**fields))
+  ui_state.roadscore_replay_prompt_active=result is not None and result is getattr(self,'_roadscore_demo_alert',None)
+  replay_arrow_mode='recorded' if not ui_state.roadscore_replay_prompt_active and (native_alert is not None or self._prev_alert is not None) else mode
+  return result
+ AlertRenderer.get_alert=replay_get_alert
  original_turn_intent=TurnIntent._update_state
  def replay_turn_intent(self):
   sm=ui_state.sm
-  if isinstance(sm,ReplayStateView) and apply_turn_intent(self,sm.signal_mode):return
+  if isinstance(sm,ReplayStateView) and apply_turn_intent(self,replay_arrow_mode):return
   return original_turn_intent(self)
  TurnIntent._update_state=replay_turn_intent
 display_hold=ReplayDisplayHold(os.environ.get("ROADSCORE_AUDIO_DRAIN_FILE"), enabled=os.environ.get("OPENPILOT_PREFIX")=="roadscore_replay")
@@ -59,7 +72,7 @@ def update(self,*args,**kw):
  preparation_wake.update(self,device)
  result=original_update(self,*args,**kw);now=time.monotonic()
  if now-last>=1:
-  out.write(json.dumps({'wall':now,'started':bool(self.started),'speed':float(self.sm['carState'].vEgo),'model_mono_ns':self.sm.logMonoTime['modelV2'],'model_points':len(self.sm['modelV2'].position.x),'replay_demo':self.sm.snapshot() if isinstance(self.sm,ReplayStateView) else None,'engaged':bool(self.engaged),'aol':bool(self.always_on_lateral_active),'ui_status':str(self.status),**counts})+'\n');last=now
+  out.write(json.dumps({'wall':now,'started':bool(self.started),'speed':float(self.sm['carState'].vEgo),'model_mono_ns':self.sm.logMonoTime['modelV2'],'model_points':len(self.sm['modelV2'].position.x),'replay_demo':self.sm.snapshot() if isinstance(self.sm,ReplayStateView) else None,'engaged':bool(self.engaged),'aol':bool(self.always_on_lateral_active),'ui_status':str(self.status),'replay_turn_prompt':bool(getattr(self,'roadscore_replay_prompt_active',False)),**counts})+'\n');last=now
  return result
 UIState.update=update;CameraView._accept_frame=accept;CameraView._render_textures=textures;ModelRenderer._draw_path=path;ModelRenderer._draw_lane_lines=lanes
 from overlay import install
