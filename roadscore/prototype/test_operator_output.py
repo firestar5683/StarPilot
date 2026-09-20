@@ -255,6 +255,61 @@ class OutputTests(unittest.TestCase):
     bypass=delay.apply(current)
     self.assertEqual(bypass['presentation_latency_ms'],0);self.assertFalse(bypass['signal_shaker']['rendered_active'])
 
+  def test_timeline_compaction_preserves_audible_selection_across_dac_reordering(self):
+    from cue_timing import audible_state, REFERENCE
+    # Entries arrive in callback order; corrected DAC timestamps can move
+    # backward, and equal timestamps must retain audible_state's first winner.
+    walls=[95.,99.,98.,100.4,100.1,98.,99.8,97.,101.]
+    timeline=[dict(audible_wall=wall,sequence=i,cues=dict(phase=str(i),replay_demo=dict(mode='engaged',signal_mode='left')))
+              for i,wall in enumerate(walls)]
+    compact=m.recent_presentation_timeline(timeline,100.,100.02)
+    self.assertEqual([entry['sequence'] for entry in compact],[1,2,3,4,6,8])
+    raw=dict(presentation_timing_reference=REFERENCE,presentation_timeline=timeline,
+             route_t=25.,elapsed=29.,source_model_ns=123,readiness='READY')
+    pruned={**raw,'presentation_timeline':compact}
+    samples=[98.,98.000001,99.,99.8,100.,100.099999,100.1,100.4,101.,103.]
+    for now in samples:
+      with self.subTest(now=now):
+        before=audible_state(raw,now);after=audible_state(pruned,now)
+        before.pop('presentation_timeline');after.pop('presentation_timeline')
+        self.assertEqual(before,after)
+    # Every future cue survives, even if an older callback had the later DAC.
+    self.assertTrue(all(entry in compact for entry in timeline if entry['audible_wall']>100.))
+
+  def test_presentation_only_compacts_export_keeps_queue_and_recent_history(self):
+    from cue_timing import audible_state
+    delay=m.PresentationDelay(self.root,lambda:None,self.clock)
+    for i in range(80):
+      self.clock.value=100.+i*.1
+      raw=dict(command_wall=self.clock.value-.01,route_t=i*.1,source_model_ns=i,readiness='READY')
+      rendered=dict(sequence=i,callback_wall=self.clock.value,dac_wall=self.clock.value+.15,
+                    cues=dict(phase=str(i)))
+      shown=delay.apply(raw,rendered)
+    self.assertEqual(len(delay.queue),64)
+    self.assertLess(len(shown['presentation_timeline']),26)
+    full={**shown,'presentation_timeline':list(delay.queue)}
+    cutoff=raw['command_wall']-2.
+    # Includes a reader that sampled now before this status was produced,
+    # exact cue boundaries, and delayed reads with no further status writes.
+    samples=[cutoff,raw['command_wall']-.1,self.clock.value,self.clock.value+3]
+    samples += [item['audible_wall']+offset for item in delay.queue
+                if item['audible_wall']>=cutoff for offset in (-1e-8,0,1e-8)]
+    for now in samples:
+      before=audible_state(full,now);after=audible_state(shown,now)
+      before.pop('presentation_timeline');after.pop('presentation_timeline')
+      self.assertEqual(before,after)
+    self.assertEqual(shown['phase'],delay.shown['phase'])
+    self.assertEqual(shown['source_model_ns'],79)
+    self.assertEqual(shown['route_t'],7.9)
+
+  def test_timeline_compaction_falls_back_without_a_valid_status_clock(self):
+    timeline=[dict(audible_wall=i,cues=dict(phase=str(i))) for i in range(10)]
+    for stamp in (None,True,'10',float('nan'),float('inf'),11.):
+      with self.subTest(stamp=stamp):
+        self.assertEqual(m.recent_presentation_timeline(timeline,stamp,10.),timeline)
+    future=[dict(audible_wall=20.,cues={}),dict(audible_wall=19.,cues={})]
+    self.assertEqual(m.recent_presentation_timeline(future,10.,10.),future)
+
   def test_watchdog_cancels_own_audio_and_releases_leases(self):
     token=self.owner.dispatch('calibration_start',attended=True)['session']
     sink=self.owner.session['sink']

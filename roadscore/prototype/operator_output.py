@@ -443,6 +443,26 @@ PRESENTATION_FIELDS = ('phase', 'kind', 'amount', 'activation', 'strength', 'sec
                        'signal_shaker', 'core_apex', 'alert_accent', 'engagement_presentation', 'motion_presentation', 'curve_reaction', 'replay_demo')
 
 
+def recent_presentation_timeline(queue, command_wall, now):
+  """Preserve cue selection from two seconds before this status onward.
+
+  Readers can sample their clock before reading the newly published status.
+  Keep a lookback matching replay controls' freshness window, the latest cue
+  already due at its start, and every later cue. DAC corrections can reorder
+  entries, so neither insertion order nor audio sequence determines expiry.
+  """
+  timeline = list(queue)
+  if type(command_wall) not in (int, float) or not math.isfinite(command_wall) or command_wall > now:
+    return timeline
+  cutoff = command_wall - 2.
+  due = [entry for entry in timeline if entry['audible_wall'] <= cutoff]
+  if not due:
+    return timeline
+  # max() keeps the first equal timestamp, just like cue_timing.audible_state.
+  selected = max(due, key=lambda entry: entry['audible_wall'])
+  return [entry for entry in timeline if entry is selected or entry['audible_wall'] > cutoff]
+
+
 class PresentationDelay:
   """Delay only visual music cues. Health/counters and the entire causal core stay current."""
   def __init__(self, root, output_provider=selected_output, clock=time.monotonic):
@@ -495,5 +515,5 @@ class PresentationDelay:
     display['presentation_timing_reference']='portaudio-dac-plus-residual-v1' if rendered is not None else 'unverified-observation-clock'
     display['presentation_clock']='device-monotonic-seconds'
     display['presentation_correction']=self.record
-    display['presentation_timeline']=list(self.queue)
+    display['presentation_timeline']=recent_presentation_timeline(self.queue,snapshot.get('command_wall'),now)
     return display
