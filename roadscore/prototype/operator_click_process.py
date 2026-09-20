@@ -76,4 +76,9 @@ def main():
         except queue.Empty:pass
     finally:sink.close()
 
-if __name__=='__main__':main()
+if __name__=='__main__':
+  import json,sys,traceback
+  try:main()
+  except Exception as error:
+    print(json.dumps({'error':f'{type(error).__name__}: {error}'[:1500]}),flush=True)
+    traceback.print_exc();sys.exit(1)

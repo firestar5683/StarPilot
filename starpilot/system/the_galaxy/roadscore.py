@@ -138,7 +138,7 @@ class Operator:
                 can_prepare=False,
                 can_edit=False, can_calibrate=offroad and not locked and output.get('calibration', False),
                 can_adjust=offroad and not locked and not output.get('calibrating', False) and output.get('timing_compensation', False),
-                calibrating=output.get('calibrating', False), session_muted=output.get('session_muted', True), output=output.get('output'), latency_ms=output.get('latency_ms'), error=self.error)
+                calibrating=output.get('calibrating', False), session_muted=output.get('session_muted', True), output=output.get('output'), latency_ms=output.get('latency_ms'), error=self.error or output.get('error'))
 
   def operate(self, action, data, offroad):
     if not offroad and action != 'calibration_cancel':

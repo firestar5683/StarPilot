@@ -116,6 +116,7 @@ class ClickSink:
   """Own a separate local process so each session binds ALSA before PortAudio loads."""
   def __init__(self,on_click,count=COUNT):
     self.on_click=on_click;self.count=count;self.process=None;self.failed=False;self.closed=False
+    self.error=None;self.stderr_tail='';self.log_path=Path(__file__).resolve().parents[1]/'generated/calibration-last-error.log'
     self.output=selected_output()
     if not self.output or not self.output['connected']:raise ValueError('Selected Bluetooth speaker is disconnected')
 
@@ -124,15 +125,30 @@ class ClickSink:
     for key in ('OPENPILOT_PREFIX','PARAMS_ROOT','ZMQ'):env.pop(key,None)
     self.process=subprocess.Popen(['/usr/local/venv/bin/python',str(Path(__file__).with_name('operator_click_process.py')),
                                   '--address',self.output['address'],'--count',str(self.count)],
-                                 stdout=subprocess.PIPE,stderr=subprocess.DEVNULL,text=True,env=env)
+                                 stdout=subprocess.PIPE,stderr=subprocess.PIPE,text=True,env=env)
+    def stderr_reader():
+      try:
+        while True:
+          chunk=self.process.stderr.read(4096)
+          if not chunk:break
+          self.stderr_tail=(self.stderr_tail+chunk)[-16384:]
+          self.log_path.parent.mkdir(parents=True,exist_ok=True)
+          self.log_path.write_text(self.stderr_tail)
+      except OSError:pass
+    diagnostic_thread=threading.Thread(target=stderr_reader,daemon=True);diagnostic_thread.start()
     def collect():
       try:
         for line in self.process.stdout:
           value=json.loads(line)
-          if value.get('error'):self.failed=True
+          if value.get('error'):
+            self.error=str(value['error'])[-1500:];self.failed=True
           if 'beat' in value:self.on_click(value['beat'],value['server_ms'])
-        if self.process.wait()!=0 and not self.closed:self.failed=True
-      except (OSError,ValueError):self.failed=True
+        code=self.process.wait();diagnostic_thread.join(timeout=.2)
+        if code!=0 and not self.closed:
+          self.error=self.error or f'Calibration audio process exited with status {code}. '+self.stderr_tail.strip()[-1500:]
+          self.failed=True
+      except (OSError,ValueError) as error:
+        self.error=f'Calibration output protocol failed: {error}';self.failed=True
     threading.Thread(target=collect,daemon=True).start()
 
   def close(self):
@@ -148,6 +164,7 @@ class OutputOwner:
     self.root, self.offroad, self.sink_factory, self.output_provider, self.clock = Path(root), offroad, sink_factory, output_provider, clock
     self.lock = threading.RLock()
     self.session = None
+    self.last_error=None;self.failed_token=None
 
   def operator_lease(self):
     return lease(self.root / 'generated/operator.lock')
@@ -167,7 +184,7 @@ class OutputOwner:
       worker_busy = False
     active = active or worker_busy
     locked = busy(self.root / 'generated/operator.lock') and self.session is None
-    return dict(ok=True, calibrating=self.session is not None, output=output, latency_ms=correction(self.root, output['id']) if output else None,
+    return dict(ok=True, error=(getattr(self.session['sink'],'error',None) if self.session else None) or self.last_error, calibrating=self.session is not None, output=output, latency_ms=correction(self.root, output['id']) if output else None,
                 judging_locked=locked, playback_active=active and self.session is None,
                 calibration=bool(output and output['connected'] and not output['muted'] and not muted),
                 timing_compensation=bool(output), session_muted=muted)
@@ -175,6 +192,10 @@ class OutputOwner:
   def _close(self):
     session, self.session = self.session, None
     if session:
+      if session['sink'].failed:
+        self.failed_token=session['token'];self.last_error=getattr(session['sink'],'error',None) or 'Calibration audio process failed; inspect generated/calibration-last-error.log'
+        try:(self.root/'generated/calibration_failure.json').write_text(json.dumps({'error':self.last_error,'wall':time.time()}))
+        except OSError:pass
       try:
         session['sink'].close()
       finally:
@@ -230,6 +251,7 @@ class OutputOwner:
         except BaseException:
           operator.__exit__(None, None, None)
           raise
+        self.last_error=None;self.failed_token=None
         token = secrets.token_hex(16)
         clicks = {}
         try:
@@ -266,7 +288,10 @@ class OutputOwner:
         return dict(ok=True, latency_ms=value)
       session = self.session
       if not session or data.get('session') != session['token']:
+        if data.get('session')==self.failed_token and self.last_error:raise ValueError(self.last_error)
         raise ValueError('Calibration expired; start again')
+      if session['sink'].failed:
+        self._close();raise ValueError(self.last_error)
       session['last_client'] = self.clock()
       if action == 'calibration_cancel':
         self._close(); return dict(ok=True)

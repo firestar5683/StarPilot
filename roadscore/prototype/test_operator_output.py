@@ -120,6 +120,17 @@ class OutputTests(unittest.TestCase):
     self.assertFalse(self.owner._check_session(token))
     self.assertFalse(m.busy(self.root/'generated/operator.lock'))
 
+  def test_child_failure_survives_watchdog_and_reaches_poll_status(self):
+    token=self.owner.dispatch('calibration_start',attended=True)['session']
+    self.owner.session['sink'].failed=True
+    self.owner.session['sink'].error='PortAudioError: selected BlueALSA PCM could not open'
+    self.assertFalse(self.owner._check_session(token))
+    self.assertIn('BlueALSA',self.owner.status()['error'])
+    with self.assertRaisesRegex(ValueError,'BlueALSA'):
+      self.owner.dispatch('calibration_poll',session=token)
+    failure=json.loads((self.root/'generated/calibration_failure.json').read_text())
+    self.assertIn('PortAudioError',failure['error'])
+
   def test_selected_speaker_identity_never_falls_back(self):
     selected=dict(enabled=True,address='AA:BB:CC:DD:EE:FF')
     status=dict(enabled=True,powered=True,devices=[dict(address='11:22:33:44:55:66',name='Other',connected=True,audio=True)])
