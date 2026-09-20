@@ -7,7 +7,7 @@ class PolicyTests(unittest.TestCase):
   fragment=Path(__file__).resolve().parents[1]/'tools/presentation_conservative_v1.json'
   self.assertEqual(json.loads(fragment.read_text()),CONSERVATIVE)
  def test_normal_prism_gets_integrated_policy_without_extra_flags(self):
-  self.assertEqual(select_launch('ace','prism'),{'render_mode':'gold-core','policy':'conservative-v3'})
+  self.assertEqual(select_launch('ace','prism'),{'render_mode':'gold-core','policy':'conservative-v4'})
  def test_explicit_optouts(self):
   self.assertEqual(select_launch('ace','prism',policy='off'),{'render_mode':'gold-core','policy':'off'})
   self.assertEqual(select_launch('ace','prism',render_mode='current'),{'render_mode':'current','policy':'off'})
@@ -35,7 +35,7 @@ class PolicyTests(unittest.TestCase):
   self.assertTrue(latest['alert_accent']['enabled'])
   self.assertEqual(latest['core_apex']['dip_db'],-3.)
  def test_stopped_motion_candidate_preserves_default_and_optout(self):
-  self.assertEqual(select_launch('ace','prism')['policy'],'conservative-v3')
+  self.assertEqual(select_launch('ace','prism')['policy'],'conservative-v4')
   candidate=effective_config({}, {'ROADSCORE_PRESENTATION_POLICY':'conservative-v3'})
   self.assertTrue(candidate['stopped_motion']['enabled'])
   self.assertTrue(candidate['engagement_presentation']['enabled'])
@@ -45,4 +45,15 @@ class PolicyTests(unittest.TestCase):
   self.assertEqual(select_launch('sa3','prism'),{'render_mode':'current','policy':'off'})
   with self.assertRaises(ValueError):select_launch('ace','prism',render_mode='current',policy='conservative-v1')
   with self.assertRaises(ValueError):effective_config({}, {'ROADSCORE_PRESENTATION_POLICY':'typo'})
+ def test_v4_strengthens_only_presentation_and_preserves_previous_policy(self):
+  previous=effective_config({}, {'ROADSCORE_PRESENTATION_POLICY':'conservative-v3'})
+  current=effective_config({}, {'ROADSCORE_PRESENTATION_POLICY':'conservative-v4'})
+  self.assertEqual(previous['signal_shaker']['peak'],.018)
+  self.assertNotIn('cutoff_hz',previous['engagement_presentation'])
+  self.assertEqual(current['signal_shaker']['peak'],.055)
+  self.assertTrue(current['signal_shaker']['after_containment'])
+  self.assertEqual(current['engagement_presentation']['cutoff_hz'],1300.)
+  self.assertEqual(select_launch('ace','prism',policy='conservative-v3')['policy'],'conservative-v3')
+  with self.assertRaises(ValueError):select_launch('ace','prism',judging=True,policy='conservative-v4')
+
 if __name__=='__main__':unittest.main()

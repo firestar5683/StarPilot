@@ -74,4 +74,20 @@ class PresentationTests(unittest.TestCase):
     self.assertEqual(PresentationConfig.read({'attack_ms':0}).attack_ms,20)
     self.assertEqual(PresentationConfig.read({'release_ms':float('nan')}).release_ms,650)
 
+  def test_v4_containment_is_stronger_and_still_recovers_exact_core(self):
+    from presentation_policy import CONSERVATIVE_V4
+    config=PresentationConfig.read(CONSERVATIVE_V4['engagement_presentation'])
+    old=EngagementPresentation();old.mix=0
+    new=EngagementPresentation(cutoff_hz=config.cutoff_hz,width=config.width,gain=config.gain);new.mix=0
+    t=np.arange(48000)/48000
+    x=np.column_stack([np.sin(t*2*np.pi*6000),-np.sin(t*2*np.pi*6000)]).astype('float32')*.4
+    before=old.process(x,False,ON);after=new.process(x,False,config)
+    self.assertLess(np.sqrt(np.mean(after[4800:]**2)),np.sqrt(np.mean(before[4800:]**2))*.12)
+    resumed=new.process(x,True,config)
+    np.testing.assert_array_equal(resumed[12000:],x[12000:])
+    self.assertEqual(new.snapshot(config,True,True)['engagement_presentation']['cutoff_hz'],1300.)
+    self.assertEqual(PresentationConfig.read({'width':float('nan'),'gain':9,'cutoff_hz':0}).width,.85)
+    self.assertEqual(PresentationConfig.read({'gain':9}).gain,1.)
+    self.assertEqual(PresentationConfig.read({'cutoff_hz':0}).cutoff_hz,300.)
+
 if __name__=='__main__':unittest.main()

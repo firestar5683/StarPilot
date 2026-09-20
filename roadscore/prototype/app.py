@@ -90,7 +90,10 @@ alert_enabled=config.get('alert_accent',{}).get('enabled') is True
 curve_enabled=config.get('curve_reaction',{}).get('enabled') is True
 road_model_valid=False
 if (motion_enabled or presentation_config.enabled or shaker_enabled or apex_enabled or alert_enabled or curve_enabled) and render_mode!='gold-core':raise ValueError('Optional presentation layers require gold-core baseline')
-presentation=EngagementPresentation(rate,block) if presentation_config.enabled else None
+presentation=EngagementPresentation(rate,block,cutoff_hz=presentation_config.cutoff_hz,
+ width=presentation_config.width,gain=presentation_config.gain) if presentation_config.enabled else None
+shaker_after_containment=config.get('signal_shaker',{}).get('after_containment') is True
+shaker_contained_gain=float(np.clip(config.get('signal_shaker',{}).get('contained_gain',1.),0.,1.))
 motion_state=(0.,False,0,0.,0)
 engagement=(False,False,0,0.,0);signal_state=(False,False,0,0.,0);alert_state=(None,False)
 initial_identity=identity;musical_mode=config.get('musical',False);arrival=Arrival();ending_start=None;ending_audio=None;ending_info={};playing_identity=identity;identity_queue=[];last_requested_identity=identity
@@ -225,7 +228,7 @@ def callback(out,n,ti,status):
   competing=bool((shaker is not None and shaker.active) or (apex is not None and apex.rendered_active) or (presentation is not None and abs(presentation.mix-float(active))>.01))
   rendered=alert_accent.process(rendered,frames-n,alert_key,meaningful,fresh,competing)
   alert_priority=alert_accent.priority_active
- if shaker is not None:
+ if shaker is not None and not shaker_after_containment:
   shaken=shaker.process(rendered,frames-n,signal_on,signal_fresh)
   if alert_priority:shaker.rendered_active=False;shaker.rendered_peak=0.
   else:rendered=shaken
@@ -241,6 +244,13 @@ def callback(out,n,ti,status):
   _,motion_fresh=engagement_active(motion_state[1],True,motion_state[2],motion_state[4],motion_state[3],callback_wall)
   rendered=motion.process(rendered,speed=motion_state[0],source_fresh=motion_fresh)
  if presentation is not None:rendered=presentation.process(rendered,active,presentation_config)
+ if shaker is not None and shaker_after_containment:
+  open_mix=presentation.mix if presentation is not None else 1.
+  if motion is not None:open_mix=min(open_mix,motion.dsp.mix)
+  cue_gain=shaker_contained_gain+(1.-shaker_contained_gain)*open_mix
+  shaken=shaker.process(rendered,frames-n,signal_on,signal_fresh,sequence_key=demo_signal_mode,presentation_gain=cue_gain)
+  if alert_priority:shaker.rendered_active=False;shaker.rendered_peak=0.;shaker.suppression_reason='meaningful alert priority'
+  else:rendered=shaken
  out[:]=0 if a.mute else rendered
  cue={**presentation_narrative,**{key:event_state[key] for key in PRESENTATION_FIELDS if key in event_state}}
  cue['replay_demo']=controls_snapshot(demo_mode,demo_signal_mode)

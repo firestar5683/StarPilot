@@ -40,10 +40,11 @@ def assess_grid(wave, rate, bpm_prior=None):
 
 class SignalShaker:
  def __init__(self,grid,rate=48000,enabled=False,peak=.012,debounce_seconds=1.2):
-  self.grid=grid;self.rate=rate;self.enabled=enabled;self.peak=min(.02,max(0.,float(peak)))
+  self.grid=grid;self.rate=rate;self.enabled=enabled;self.peak=min(.08,max(0.,float(peak)))
   self.debounce=round(debounce_seconds*rate);self.release=round(.16*rate)
   self.last_on=None;self.active=False;self.next_tick=None;self.stop_frame=None;self.tail=np.zeros((0,2),np.float32)
-  self.sequence_pulses=0;self.sequence_start=0
+  self.sequence_pulses=0;self.sequence_start=0;self.sequence_key=None
+  self.presentation_gain=1.;self.suppression_reason='not rendered'
   self.rendered_active=False;self.rendered_peak=0.;self.rendered_start=0;self.rendered_end=0
   self.sequence_starts=[];self.pulse_frames=[];self.events=[]
   # Fixed filtered grains, prepared before audio. No callback RNG or file/FFT operations.
@@ -60,16 +61,23 @@ class SignalShaker:
   if self.active and grid.usable:
    earliest=max(start_frame,(self.pulse_frames[-1]+self.step*.5) if self.pulse_frames else start_frame)
    self.next_tick=math.ceil((earliest-self.origin)/self.step-1e-10)
- def process(self,pcm,start_frame,signal_on,signal_fresh):
+ def process(self,pcm,start_frame,signal_on,signal_fresh,*,sequence_key=None,presentation_gain=1.):
   self.rendered_active=False;self.rendered_peak=0.;self.rendered_start=start_frame;self.rendered_end=start_frame+len(pcm)
+  self.presentation_gain=float(np.clip(presentation_gain,0.,1.)) if math.isfinite(presentation_gain) else 0.
+  self.suppression_reason='disabled'
   if not self.enabled:return pcm
+  key=sequence_key if sequence_key in ('left','right') else None
+  changed=key is not None and self.sequence_key is not None and key!=self.sequence_key
+  self.sequence_key=key
   end=start_frame+len(pcm)
   if self.grid.usable and signal_fresh and signal_on:
    self.last_on=start_frame
-   if not self.active:
+   # Only a deliberate opposite-direction command may restart an active motif.
+   # One bar cooldown prevents rapid button presses from adding percussion spam.
+   if not self.active or (changed and start_frame-self.sequence_start>=8*self.step):
     self.active=True;self.stop_frame=None;self.sequence_pulses=0;self.sequence_start=start_frame
     tick=math.ceil((start_frame-self.origin)/self.step-1e-10);self.next_tick=tick
-    self.sequence_starts.append(start_frame);self.events.append({'kind':'sequence_start','frame':start_frame,'next_pulse_frame':round(self.origin+tick*self.step)})
+    self.sequence_starts.append(start_frame);self.events.append({'kind':'sequence_start','frame':start_frame,'direction':key,'next_pulse_frame':round(self.origin+tick*self.step)})
   if self.active and (not self.grid.usable or not signal_fresh or (self.last_on is not None and start_frame-self.last_on>self.debounce)):
    self.active=False;self.stop_frame=start_frame;self.events.append({'kind':'release','frame':start_frame})
   overlay=np.zeros((len(pcm),2),np.float32)
@@ -85,10 +93,16 @@ class SignalShaker:
   if self.stop_frame is not None:
    envelope=np.clip(1-(np.arange(start_frame,end)-self.stop_frame)/self.release,0,1).astype(np.float32)
    overlay*=envelope[:,None]
+  overlay*=self.presentation_gain
   # Add percussion only within available sample headroom; preserve the source.
   np.clip(overlay,-np.maximum(0.,1.+pcm),np.maximum(0.,1.-pcm),out=overlay)
   self.rendered_peak=float(np.max(np.abs(overlay),initial=0));self.rendered_active=self.rendered_peak>0
+  self.suppression_reason=('rendered' if self.rendered_active else
+    'uncertain beat grid' if not self.grid.usable else
+    'stale signal source' if not signal_fresh else
+    'sequence budget exhausted' if self.active and self.sequence_pulses>=32 else
+    'waiting for next eighth note' if self.active else 'no signal sequence')
   if not self.rendered_active:return pcm
   return pcm+overlay
  def snapshot(self):
-  return {'rendered_active':self.rendered_active,'rendered_peak':self.rendered_peak,'rendered_block_start_seconds':self.rendered_start/self.rate,'rendered_block_end_seconds':self.rendered_end/self.rate,'enabled':self.enabled,'grid':asdict(self.grid),'rhythm_enabled':self.enabled and self.grid.usable,'uncertain_policy':'no added pulses','sequence_active':self.active,'peak_limit':self.peak,'subdivision':'eighth notes','debounce_seconds':self.debounce/self.rate,'maximum_pulses_per_sequence':32}
+  return {'rendered_active':self.rendered_active,'rendered_peak':self.rendered_peak,'rendered_block_start_seconds':self.rendered_start/self.rate,'rendered_block_end_seconds':self.rendered_end/self.rate,'enabled':self.enabled,'grid':asdict(self.grid),'rhythm_enabled':self.enabled and self.grid.usable,'uncertain_policy':'no added pulses','sequence_active':self.active,'peak_limit':self.peak,'subdivision':'eighth notes','debounce_seconds':self.debounce/self.rate,'maximum_pulses_per_sequence':32,'sequence_pulses':self.sequence_pulses,'remaining_pulses':max(0,32-self.sequence_pulses),'suppression_reason':self.suppression_reason,'presentation_gain':self.presentation_gain,'direction':self.sequence_key}

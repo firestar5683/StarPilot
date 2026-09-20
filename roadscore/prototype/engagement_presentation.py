@@ -16,6 +16,9 @@ class PresentationConfig:
   enabled: bool = False
   attack_ms: float = 220.
   release_ms: float = 650.
+  cutoff_hz: float = 4500.
+  width: float = .85
+  gain: float = .8912509
 
   @classmethod
   def read(cls, value):
@@ -27,8 +30,16 @@ class PresentationConfig:
         return min(5000., max(20., n)) if math.isfinite(n) else default
       except (TypeError, ValueError):
         return default
+    def bounded(key, default, low, high):
+      try:
+        n = float(value.get(key, default))
+        return min(high, max(low, n)) if math.isfinite(n) else default
+      except (TypeError, ValueError):
+        return default
     return cls(enabled=value.get('enabled') is True,
-               attack_ms=duration('attack_ms', 220.), release_ms=duration('release_ms', 650.))
+               attack_ms=duration('attack_ms', 220.), release_ms=duration('release_ms', 650.),
+               cutoff_hz=bounded('cutoff_hz', 4500., 300., 12000.),
+               width=bounded('width', .85, 0., 1.), gain=bounded('gain', .8912509, .25, 1.))
 
 
 def engagement_active(valid, active, source_ns, latest_source_ns, received_wall, now_wall):
@@ -47,7 +58,7 @@ class EngagementPresentation:
     self.rate = rate
     self.frames_processed = 0
     self.max_frames = max_frames
-    self.width=float(width);self.gain=float(gain)
+    self.cutoff_hz=float(cutoff_hz);self.width=float(width);self.gain=float(gain)
     self.sos = butter(2, cutoff_hz, fs=rate, output='sos').astype(np.float32)
     self.zi = np.zeros((len(self.sos), 2, 2), np.float32)
     self.mix = 1.  # startup bypass; opting in ramps into contained presentation
@@ -87,7 +98,7 @@ class EngagementPresentation:
       np.add(ramp, self.mix, out=ramp)
       np.clip(ramp, min(self.mix, target), max(self.mix, target), out=ramp)
       self.mix = float(ramp[-1])
-      # Contained: 85% stereo width and -1 dB. Convex mixing avoids gain boosts.
+      # Contained settings are fixed at startup. Convex mixing avoids gain boosts.
       mid = self.mid[:n]
       np.add(low[:, 0], low[:, 1], out=mid)
       mid *= .5
@@ -110,4 +121,5 @@ class EngagementPresentation:
             'input_fresh': fresh, 'rendered_open_mix': self.mix,
             'rendered_state': ('open' if self.mix >= 1. else 'contained' if self.mix <= 0. else 'transition'),
             'rendered_block_end_seconds': self.frames_processed/self.rate, 'source': 'selfdriveState.active',
+            'cutoff_hz': self.cutoff_hz, 'width': self.width, 'gain': self.gain,
             'unknown_policy': 'contained', 'added_delay_samples': 0}}

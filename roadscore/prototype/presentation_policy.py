@@ -2,7 +2,7 @@
 import copy
 import os
 
-POLICIES = ('conservative-v1', 'conservative-v2', 'conservative-v3', 'off', 'frozen')
+POLICIES = ('conservative-v1', 'conservative-v2', 'conservative-v3', 'conservative-v4', 'off', 'frozen')
 CONSERVATIVE = {
  'presentation_policy_version': 'conservative-v1',
  'signal_shaker': {'enabled': True},
@@ -13,6 +13,13 @@ CONSERVATIVE = {
 CONSERVATIVE_V2 = {**copy.deepcopy(CONSERVATIVE), 'presentation_policy_version':'conservative-v2', 'alert_accent':{'enabled':True}, 'core_apex':{'enabled':True,'dip_db':-3.}}
 
 CONSERVATIVE_V3 = {**copy.deepcopy(CONSERVATIVE_V2), 'presentation_policy_version':'conservative-v3', 'stopped_motion':{'enabled':True}, 'curve_reaction':{'enabled':True}, 'signal_shaker':{'enabled':True,'peak':.018}}
+
+CONSERVATIVE_V4 = {**copy.deepcopy(CONSERVATIVE_V3),
+ 'presentation_policy_version':'conservative-v4',
+ 'signal_shaker':{'enabled':True,'peak':.055,'after_containment':True,'contained_gain':.45},
+ 'engagement_presentation':{'version':2,'enabled':True,'attack_ms':220,'release_ms':650,
+                          'cutoff_hz':1300.,'width':.65,'gain':.7079458},
+}
 
 def select_launch(composer, profile, replay=False, judging=False, render_mode=None, policy=None):
  if policy is not None and policy not in POLICIES:raise ValueError('Unknown presentation policy')
@@ -29,8 +36,8 @@ def select_launch(composer, profile, replay=False, judging=False, render_mode=No
   return {'render_mode':'current','policy':'frozen'}
  normal_prism=composer=='ace' and profile=='prism'
  mode=render_mode or ('gold-core' if normal_prism else 'current')
- chosen=policy or ('conservative-v3' if normal_prism and mode=='gold-core' else 'off')
- if chosen in ('conservative-v1','conservative-v2','conservative-v3') and (composer!='ace' or mode!='gold-core'):
+ chosen=policy or ('conservative-v4' if normal_prism and mode=='gold-core' else 'off')
+ if chosen in ('conservative-v1','conservative-v2','conservative-v3','conservative-v4') and (composer!='ace' or mode!='gold-core'):
   raise ValueError('Conservative presentation requires ACE gold-core rendering')
  return {'render_mode':mode,'policy':chosen}
 
@@ -43,8 +50,8 @@ def effective_config(config,environ=None):
  """Return a copy; never mutate the global runtime file or an archived policy."""
  result=copy.deepcopy(config);policy=selected(environ)
  if policy=='frozen':return result
- if policy in ('conservative-v1','conservative-v2','conservative-v3'):
-  result.update(copy.deepcopy(CONSERVATIVE_V3 if policy=='conservative-v3' else CONSERVATIVE_V2 if policy=='conservative-v2' else CONSERVATIVE))
+ if policy in ('conservative-v1','conservative-v2','conservative-v3','conservative-v4'):
+  result.update(copy.deepcopy(CONSERVATIVE_V4 if policy=='conservative-v4' else CONSERVATIVE_V3 if policy=='conservative-v3' else CONSERVATIVE_V2 if policy=='conservative-v2' else CONSERVATIVE))
   if policy=='conservative-v1':result['alert_accent']={'enabled':False}
  else:
   result.update(presentation_policy_version='off',stopped_motion={'enabled':False},curve_reaction={'enabled':False},alert_accent={'enabled':False},signal_shaker={'enabled':False},core_apex={'enabled':False},engagement_presentation={'version':2,'enabled':False})

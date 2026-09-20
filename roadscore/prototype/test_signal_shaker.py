@@ -46,4 +46,34 @@ class ShakerTests(unittest.TestCase):
    state={'kind':'curve','phase':'anticipation','lead':.5,'activation':i//10}
    y=c.process(x,i*4800,state);self.assertTrue(np.all(y<=x));self.assertTrue(np.all(y>=x*10**(-1/20)-1e-6))
   self.assertLessEqual(len(c.events),3);np.testing.assert_array_equal(x,before)
+ def test_deliberate_opposite_direction_restarts_once_not_each_callback(self):
+  s=SignalShaker(GRID,enabled=True,peak=.055);x=np.zeros((4800,2),np.float32)
+  for i in range(140):
+   direction='left' if i<90 else 'right'
+   s.process(x,i*4800,True,True,sequence_key=direction)
+  self.assertEqual(len(s.sequence_starts),2)
+  self.assertEqual([e['direction'] for e in s.events if e['kind']=='sequence_start'],['left','right'])
+  self.assertGreater(len(s.pulse_frames),32)
+  self.assertEqual(s.snapshot()['remaining_pulses'],32-s.sequence_pulses)
+ def test_rapid_direction_changes_do_not_restart_and_stale_input_stays_silent(self):
+  s=SignalShaker(GRID,enabled=True);x=np.zeros((4800,2),np.float32)
+  for i in range(18):s.process(x,i*4800,True,True,sequence_key='left' if i%2 else 'right')
+  self.assertEqual(len(s.sequence_starts),1)
+  for i in range(18,28):s.process(x,i*4800,True,False,sequence_key='left' if i%2 else 'right')
+  self.assertFalse(s.rendered_active);self.assertFalse(s.active)
+  self.assertEqual(s.snapshot()['suppression_reason'],'stale signal source')
+ def test_stronger_cue_scales_and_respects_final_output_headroom(self):
+  old=SignalShaker(GRID,enabled=True,peak=.018);new=SignalShaker(GRID,enabled=True,peak=.055)
+  x=np.zeros((48000,2),np.float32)
+  before=old.process(x,0,True,True);after=new.process(x,0,True,True)
+  np.testing.assert_allclose(after,before*(.055/.018),atol=1e-8)
+  contained=SignalShaker(GRID,enabled=True,peak=.055).process(x,0,True,True,presentation_gain=.45)
+  np.testing.assert_allclose(contained,after*.45,atol=1e-8)
+  for value in (.99,-.99):
+   y=SignalShaker(GRID,enabled=True,peak=.055).process(np.full_like(x,value),0,True,True)
+   self.assertLessEqual(float(abs(y).max()),1.)
+  s=SignalShaker(GRID,enabled=True)
+  for i in range(100):s.process(x[:4800],i*4800,True,True)
+  self.assertEqual(s.snapshot()['suppression_reason'],'sequence budget exhausted')
+
 if __name__=='__main__':unittest.main()
