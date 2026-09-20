@@ -114,6 +114,7 @@ class ReplaySyncTests(unittest.TestCase):
     callback=next(node for node in worker.body if isinstance(node,ast.FunctionDef) and node.name=='callback')
     callback.body=[ast.copy_location(ast.Global(names=node.names),node) if isinstance(node,ast.Nonlocal) else node for node in callback.body]
     context=dict(position=None,rendered=None,done=False,flags=0,max_drift=0.,first_frame=None,callback_revision=0,
+                 last_callback_wall=None,callback_timing=dict(count=0,total_seconds=0.,max_seconds=0.,max_gap_seconds=0.,over_budget=0,events=[]),
                  anchor=(100_000_000_000,100.,0),bridge=StreamClockBridge(-400.,.0001),
                  time=SimpleNamespace(monotonic=lambda:100.08),meta={},rate=48000,
                  initial_frame=lambda meta,mono,elapsed,rate:round(elapsed*rate),sync=None,
@@ -146,6 +147,17 @@ class ReplaySyncTests(unittest.TestCase):
     self.assertTrue(context['done']);self.assertEqual(len(context['clock_errors']),1)
     self.assertEqual(context['clock_errors'][0]['portaudio_current_time'],500.04)
     self.assertIn('next_source_frame',context['clock_errors'][0])
+    context.update(done=False)
+    moments=iter([100.2,100.23])
+    context['time'].monotonic=lambda:next(moments)
+    context['callback'](out,960,SimpleNamespace(currentTime=500.06,outputBufferDacTime=500.116),'output underflow')
+    timing=context['callback_timing']
+    self.assertEqual(timing['count'],4)
+    self.assertEqual(timing['over_budget'],1)
+    self.assertAlmostEqual(timing['max_seconds'],.03)
+    self.assertAlmostEqual(timing['max_gap_seconds'],.16)
+    self.assertEqual(timing['events'][-1]['status'],'output underflow')
+    self.assertEqual(timing['events'][-1]['wall'],100.2)
 
   def test_worker_final_residual_rejects_unfinished_bounce_but_accepts_recovery(self):
     import numpy as np

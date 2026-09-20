@@ -229,9 +229,14 @@ def audio_worker(a):
   max_drift = 0.
   first_frame = None
   callback_revision = 0
+  callback_timing = dict(count=0,total_seconds=0.,max_seconds=0.,max_gap_seconds=0.,over_budget=0,events=[])
+  last_callback_wall = None
+  source_clock = dict(last_drift_seconds=0.,max_abs_drift_seconds=0.)
+  output_latency = None
+  failure = None
   shared = dict(state='PREPARING',audio_s=0.,muted=a.muted)
   def callback(out, n, ti, status):
-    nonlocal position,rendered,done,flags,max_drift,first_frame,callback_revision
+    nonlocal position,rendered,done,flags,max_drift,first_frame,callback_revision,last_callback_wall
     out.fill(0)
     if bridge is None:
       if len(clock_observations)<24:
@@ -239,6 +244,8 @@ def audio_worker(a):
       return
     if anchor is None or done:return
     now=time.monotonic()
+    gap=now-last_callback_wall if last_callback_wall is not None else 0.
+    last_callback_wall=now
     active_anchor=anchor
     expected=None;dac=None;start=position
     if status:flags+=1
@@ -261,6 +268,15 @@ def audio_worker(a):
                                expected_frame=expected,start_frame=start,next_source_frame=position,
                                clock_position=playback_clock.position,anchor_model_ns=active_anchor[0],anchor_wall=active_anchor[1]))
       errors.append(repr(error));done=True
+    finally:
+      elapsed=time.monotonic()-now
+      callback_timing['count']+=1
+      callback_timing['total_seconds']+=elapsed
+      callback_timing['max_seconds']=max(callback_timing['max_seconds'],elapsed)
+      callback_timing['max_gap_seconds']=max(callback_timing['max_gap_seconds'],gap)
+      callback_timing['over_budget']+=int(elapsed>n/rate)
+      if (status or elapsed>n/rate or gap>2*n/rate) and len(callback_timing['events'])<128:
+        callback_timing['events'].append(dict(wall=now,source_frame=start,seconds=elapsed,gap_seconds=gap,status=str(status)))
   started=None;last_status=0.
   trace=(a.out/'presentation.jsonl').open('w',buffering=1)
   sync_trace=(a.out/'replay_sync.jsonl').open('w',buffering=1) if sync is not None else None
@@ -272,6 +288,7 @@ def audio_worker(a):
       server = control_server(a.project_root,a.out,shared,a.port,forwarder,follow_peer=forwarder is not None)
       write_json(a.out/'controls.json',{'url':f'http://127.0.0.1:{server.server_port}/'})
     with sd.OutputStream(device=a.audio_device,samplerate=rate,channels=2,blocksize=960,dtype='float32',callback=callback) as stream:
+      output_latency=float(stream.latency)
       calibration_deadline=time.monotonic()+2.
       while len(clock_observations)<20:
         if not stream.active:raise RuntimeError('Output stream stopped during silent clock calibration')
@@ -305,7 +322,8 @@ def audio_worker(a):
             anchor=(mono,now,anchor[2]+1)
             drift=0.
             sync_trace.write(json.dumps(dict(wall=now,status='reanchored',source_model_ns=mono))+'\n')
-          if abs(drift)>.75:raise RuntimeError('Prepared showcase left its 1x replay clock')
+          source_clock.update(last_drift_seconds=drift,max_abs_drift_seconds=max(source_clock['max_abs_drift_seconds'],abs(drift)),wall=now,source_model_ns=int(mono))
+          if abs(drift)>.75:raise RuntimeError(f'Prepared showcase left its 1x replay clock: drift={drift:.6f}s')
           route_t=(mono-meta['first_model_ns'])/1e9
           update['route_t']=route_t
           m=sm['modelV2']
@@ -345,8 +363,11 @@ def audio_worker(a):
             and ((position or 0)/rate < len(audio)/rate-2 or tail.terminal_wall is not None)
             and not tail.allows_stale(int(sm.logMonoTime['modelV2']),now)):
           raise RuntimeError('Replay model stream stopped before prepared audio ended')
+  except BaseException as error:
+    failure=repr(error)
+    raise
   finally:
-    try:write_json(a.out/'audio_drained.json',dict(wall=time.monotonic(),drained=not errors))
+    try:write_json(a.out/'audio_drained.json',dict(wall=time.monotonic(),drained=not errors and failure is None))
     finally:
       try:
         if server is not None:
@@ -356,7 +377,7 @@ def audio_worker(a):
       finally:
         trace.close()
         if sync_trace is not None:sync_trace.close()
-    write_json(a.out/'prepared_summary.json',dict(generation_invoked=False,source=str(a.score_archive),first_source_frame=first_frame,last_source_frame=position,sample_rate=rate,portaudio_flags=flags,max_clock_error_seconds=max_drift,prepared_clock=playback_clock.snapshot(),stream_clock_bridge=bridge.snapshot() if bridge else None,callback_errors=errors,clock_errors=clock_errors,archived_tail=meta['archived_tail'],muted=a.muted,session_id=session,manual_scope='isolated replay display and presentation only'))
+    write_json(a.out/'prepared_summary.json',dict(generation_invoked=False,source=str(a.score_archive),first_source_frame=first_frame,last_source_frame=position,sample_rate=rate,portaudio_flags=flags,max_clock_error_seconds=max_drift,prepared_clock=playback_clock.snapshot(),stream_clock_bridge=bridge.snapshot() if bridge else None,callback_errors=errors,clock_errors=clock_errors,callback_timing=callback_timing,output_latency_seconds=output_latency,source_clock=source_clock,failure=failure,archived_tail=meta['archived_tail'],muted=a.muted,session_id=session,manual_scope='isolated replay display and presentation only'))
   if errors:raise RuntimeError(errors[0])
   if abs(playback_clock.snapshot()['current_post_error_seconds'])>.05:raise RuntimeError('Prepared audio clock drift remained above 50 ms after recovery')
 
