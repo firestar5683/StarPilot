@@ -235,7 +235,7 @@ class BlueZClient:
         continue
       props = interfaces[DEVICE_IFACE]
       uuids = [str(value).lower() for value in props.get("UUIDs", [])]
-      audio, controller = device_capabilities(uuids, int(props.get("Class", 0)), str(props.get("Icon", "")))
+      audio, controller, serial = device_capabilities(uuids, int(props.get("Class", 0)), str(props.get("Icon", "")))
       device = {
         "path": path,
         "address": str(props.get("Address", "")),
@@ -248,9 +248,10 @@ class BlueZClient:
         "uuids": uuids,
         "audio": audio,
         "controller": controller,
+        "serial": serial,
       }
       if include_hidden or show_pairing_device(device["address"], device["name"], device["paired"], device["trusted"], device["connected"],
-                                               device["blocked"], audio, controller, include_discovering):
+                                               device["blocked"], audio, controller, serial, include_discovering):
         devices.append(device)
     return sorted(devices, key=lambda device: (not device["connected"], not device["paired"], -(device["rssi"] or -127), device["name"].lower()))
 

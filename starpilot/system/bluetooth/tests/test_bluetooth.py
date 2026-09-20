@@ -8,7 +8,7 @@ import pytest
 from openpilot.starpilot.system.bluetooth.audio import BluetoothAudioSink
 from openpilot.starpilot.system.bluetooth.bluez import PairingAgent
 from openpilot.starpilot.system.bluetooth.daemon import BluetoothController
-from openpilot.starpilot.system.bluetooth.protocol import (A2DP_SINK_UUID, HID_UUID, BluetoothClient, BluetoothDevice, BluetoothStatus,
+from openpilot.starpilot.system.bluetooth.protocol import (A2DP_SINK_UUID, HID_UUID, SPP_UUID, BluetoothClient, BluetoothDevice, BluetoothStatus,
                                                            device_capabilities, show_pairing_device)
 from openpilot.system import hardware
 from openpilot.system.ui.lib.bluetooth_manager import BluetoothManager
@@ -169,23 +169,26 @@ class FakeProcess:
 
 
 def test_protocol_round_trip_and_capabilities():
-  audio, controller = device_capabilities([A2DP_SINK_UUID, HID_UUID])
-  assert audio and controller
+  audio, controller, serial = device_capabilities([A2DP_SINK_UUID, HID_UUID, SPP_UUID])
+  assert audio and controller and serial
   status = BluetoothStatus.from_dict({
     "available": True,
     "enabled": True,
-    "devices": [{"address": "00:11:22:33:44:55", "name": "Combo", "uuids": [A2DP_SINK_UUID, HID_UUID], "audio": True, "controller": True}],
+    "devices": [{"address": "00:11:22:33:44:55", "name": "Combo", "uuids": [A2DP_SINK_UUID, HID_UUID, SPP_UUID],
+                 "audio": True, "controller": True, "serial": True}],
   })
-  assert status.devices == (BluetoothDevice("00:11:22:33:44:55", "Combo", uuids=(A2DP_SINK_UUID, HID_UUID), audio=True, controller=True),)
+  assert status.devices == (BluetoothDevice("00:11:22:33:44:55", "Combo", uuids=(A2DP_SINK_UUID, HID_UUID, SPP_UUID),
+                                            audio=True, controller=True, serial=True),)
 
 
 def test_pairing_list_filters_anonymous_and_irrelevant_advertisements():
-  assert not show_pairing_device("00:11:22:33:44:55", "00:11:22:33:44:55", False, False, False, False, False, False)
-  assert not show_pairing_device("00:11:22:33:44:55", "Nearby sensor", False, False, False, False, False, False)
-  assert show_pairing_device("00:11:22:33:44:55", "Media Remote", False, False, False, False, False, True)
-  assert show_pairing_device("00:11:22:33:44:55", "Media Remote", False, False, False, False, False, True, True)
-  assert not show_pairing_device("00:11:22:33:44:55", "Nearby sensor", False, False, False, False, False, False, True)
-  assert show_pairing_device("00:11:22:33:44:55", "Known device", True, True, False, False, False, False)
+  assert not show_pairing_device("00:11:22:33:44:55", "00:11:22:33:44:55", False, False, False, False, False, False, False)
+  assert not show_pairing_device("00:11:22:33:44:55", "Nearby sensor", False, False, False, False, False, False, False)
+  assert show_pairing_device("00:11:22:33:44:55", "Media Remote", False, False, False, False, False, True, False)
+  assert show_pairing_device("00:11:22:33:44:55", "Serial Adapter", False, False, False, False, False, False, True)
+  assert show_pairing_device("00:11:22:33:44:55", "Media Remote", False, False, False, False, False, True, False, True)
+  assert not show_pairing_device("00:11:22:33:44:55", "Nearby sensor", False, False, False, False, False, False, False, True)
+  assert show_pairing_device("00:11:22:33:44:55", "Known device", True, True, False, False, False, False, False)
 
 
 def test_desktop_fake_bluetooth_is_stateful_and_interactive(monkeypatch, tmp_path):

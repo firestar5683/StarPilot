@@ -179,6 +179,8 @@ testpaths = [
   "system/tests",
   "system/ubloxd",
   "system/webrtc",
+  "starpilot/system/bluetooth/tests",
+  "starpilot/system/obd/tests",
   "tools/lib/tests",
   "tools/replay",
   "tools/cabana",

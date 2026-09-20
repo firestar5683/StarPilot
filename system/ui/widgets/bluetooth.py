@@ -45,6 +45,8 @@ def device_status_text(device: BluetoothDevice, operation: str, selected_audio: 
     capabilities.append(tr("audio output") if selected_audio.upper() == device.address.upper() else tr("audio"))
   if device.controller:
     capabilities.append(tr("controller"))
+  if device.serial:
+    capabilities.append(tr("serial"))
   capability_text = " / ".join(capabilities)
 
   if device.connected:

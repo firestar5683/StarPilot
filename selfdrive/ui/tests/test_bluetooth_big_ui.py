@@ -103,9 +103,11 @@ def test_settings_constructs_a_dedicated_bluetooth_panel(monkeypatch):
 
 def test_device_status_prioritizes_operations_then_connection_and_capabilities():
   device = make_device(paired=True, connected=True, audio=True, controller=True)
+  serial_device = make_device(serial=True)
 
   assert device_status_text(device, "connecting", ADDRESS) == "Connecting..."
   assert device_status_text(device, "", ADDRESS) == "Connected / audio output / controller"
+  assert device_status_text(serial_device, "", "") == "Tap to pair / serial"
 
 
 def test_device_action_policy_matches_the_daemon_onroad_rules():

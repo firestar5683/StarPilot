@@ -16,6 +16,7 @@ BLUETOOTH_RADIO_HELPER = "/usr/comma/bluetooth-radio"
 A2DP_SINK_UUID = "0000110b-0000-1000-8000-00805f9b34fb"
 HID_UUID = "00001124-0000-1000-8000-00805f9b34fb"
 HOG_UUID = "00001812-0000-1000-8000-00805f9b34fb"
+SPP_UUID = "00001101-0000-1000-8000-00805f9b34fb"
 COMMAND_TIMEOUTS = {
   "set_power": 90.0,
   "start_scan": 20.0,
@@ -40,6 +41,7 @@ class BluetoothDevice:
   uuids: tuple[str, ...] = ()
   audio: bool = False
   controller: bool = False
+  serial: bool = False
 
   @classmethod
   def from_dict(cls, value: dict[str, Any]) -> "BluetoothDevice":
@@ -54,6 +56,7 @@ class BluetoothDevice:
       uuids=tuple(str(uuid).lower() for uuid in value.get("uuids", ())),
       audio=bool(value.get("audio", False)),
       controller=bool(value.get("controller", False)),
+      serial=bool(value.get("serial", False)),
     )
 
 
@@ -86,21 +89,22 @@ class BluetoothStatus:
     )
 
 
-def device_capabilities(uuids: list[str] | tuple[str, ...], bluetooth_class: int = 0, icon: str = "") -> tuple[bool, bool]:
+def device_capabilities(uuids: list[str] | tuple[str, ...], bluetooth_class: int = 0, icon: str = "") -> tuple[bool, bool, bool]:
   normalized = {str(uuid).lower() for uuid in uuids}
   major_class = (int(bluetooth_class) >> 8) & 0x1F
   audio = A2DP_SINK_UUID in normalized or major_class == 0x04 or icon in {"audio-card", "audio-headphones", "audio-headset"}
   controller = HID_UUID in normalized or HOG_UUID in normalized or major_class == 0x05 or icon in {"input-gaming", "input-mouse", "input-keyboard"}
-  return audio, controller
+  serial = SPP_UUID in normalized
+  return audio, controller, serial
 
 
 def show_pairing_device(address: str, name: str, paired: bool, trusted: bool, connected: bool, blocked: bool,
-                        audio: bool, controller: bool, discovering: bool = False) -> bool:
+                        audio: bool, controller: bool, serial: bool, discovering: bool = False) -> bool:
   known = paired or trusted or connected
   normalized_address = "".join(character for character in address.upper() if character.isalnum())
   normalized_name = "".join(character for character in name.upper() if character.isalnum())
   named = bool(name) and name != "Unknown device" and normalized_name != normalized_address
-  return known or (named and not blocked and (audio or controller))
+  return known or (named and not blocked and (audio or controller or serial))
 
 
 class _DesktopFakeBluetooth:

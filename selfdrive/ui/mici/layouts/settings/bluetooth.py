@@ -56,6 +56,8 @@ class BluetoothDeviceButton(BigButton):
         capabilities.append("audio")
       if self.device.controller:
         capabilities.append("controller")
+      if self.device.serial:
+        capabilities.append("serial")
       self.set_value("connected" + (f" / {' / '.join(capabilities)}" if capabilities else ""))
       self.set_enabled(True)
     elif self.device.paired:
@@ -67,6 +69,8 @@ class BluetoothDeviceButton(BigButton):
         capabilities.append("audio")
       if self.device.controller:
         capabilities.append("controller")
+      if self.device.serial:
+        capabilities.append("serial")
       self.set_value("pair" + (f" / {' / '.join(capabilities)}" if capabilities else ""))
       self.set_enabled(self._offroad)
 
@@ -264,7 +268,7 @@ class BluetoothLayoutMici(NavScroller):
       status.offroad,
       status.selected_audio,
       status.pairing_address,
-      tuple((device.address, device.name, device.paired, device.connected, device.audio, device.controller) for device in status.devices),
+      tuple((device.address, device.name, device.paired, device.connected, device.audio, device.controller, device.serial) for device in status.devices),
     )
     if signature != self._last_signature:
       self._last_signature = signature
