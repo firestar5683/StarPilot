@@ -83,9 +83,23 @@ done
 bridge_status=0
 wait "$bridge_pid" || bridge_status=$?
 bridge_pid=""
-for attempt in $(seq 1 8); do
-  kill -0 "$audio_pid" 2>/dev/null || break
-  sleep 1
-done
-
+# EOF closes the audio stream; keep the replay display alive while it drains.
+# Never silently turn a slow/failed audio shutdown into a successful archive.
+if [ -n "$audio_pid" ]; then
+  for attempt in $(seq 1 150); do
+    kill -0 "$audio_pid" 2>/dev/null || break
+    sleep .2
+  done
+  if kill -0 "$audio_pid" 2>/dev/null; then
+    echo 'RoadScore audio did not finish within 30 seconds after replay EOF'
+    exit 1
+  fi
+  audio_status=0
+  wait "$audio_pid" || audio_status=$?
+  audio_pid=""
+  if [ "$audio_status" != 0 ]; then
+    cat results/current/app.log
+    exit "$audio_status"
+  fi
+fi
 exit "$bridge_status"

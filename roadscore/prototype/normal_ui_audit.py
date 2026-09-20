@@ -3,6 +3,14 @@ import os,json,time,runpy
 from pathlib import Path
 from openpilot.selfdrive.ui.ui_state import UIState, device
 from preparing_awake import PreparationWake
+from replay_display_hold import ReplayDisplayHold
+display_hold=ReplayDisplayHold(os.environ.get("ROADSCORE_AUDIO_DRAIN_FILE"), enabled=os.environ.get("OPENPILOT_PREFIX")=="roadscore_replay")
+original_state=UIState._update_state
+def replay_state(self,*args,**kwargs):
+ result=original_state(self,*args,**kwargs)
+ self.started=display_hold.apply(self.started)
+ return result
+UIState._update_state=replay_state
 preparation_wake=PreparationWake(os.environ.get("ROADSCORE_STATUS_FILE"),Path("/TICI").exists())
 from openpilot.selfdrive.ui.onroad.cameraview import CameraView
 from openpilot.selfdrive.ui.mici.onroad.model_renderer import ModelRenderer
