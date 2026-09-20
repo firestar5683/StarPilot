@@ -4,7 +4,7 @@ from pathlib import Path
 from openpilot.selfdrive.ui.ui_state import UIState, device
 from preparing_awake import PreparationWake
 from replay_display_hold import ReplayDisplayHold
-from replay_ui_controls import ReplayUIControls, ReplayStateView, isolated_replay, apply_turn_intent, replay_turn_alert
+from replay_ui_controls import ReplayUIControls, ReplayStateView, isolated_replay, apply_turn_intent, replay_turn_alert, restore_recorded_turn_icon
 replay_controls=ReplayUIControls(os.environ['ROADSCORE_STATUS_FILE'],enabled=isolated_replay(os.environ))
 if replay_controls.enabled:
  from openpilot.selfdrive.ui.mici.onroad.hud_renderer import TurnIntent
@@ -17,6 +17,7 @@ if replay_controls.enabled:
   global replay_arrow_mode
   native_alert=original_get_alert(self,sm)
   mode=sm.signal_mode if isinstance(sm,ReplayStateView) and ui_state.started else 'recorded'
+  if isinstance(sm,ReplayStateView):restore_recorded_turn_icon(self,mode,sm.recorded_turn_side())
   result=replay_turn_alert(self,mode,native_alert,lambda **fields:Alert(size=AlertSize.mid,status=AlertStatus.normal,**fields))
   ui_state.roadscore_replay_prompt_active=result is not None and result is getattr(self,'_roadscore_demo_alert',None)
   native_priority=not ui_state.roadscore_replay_prompt_active and (result is not None or self._prev_alert is not None)

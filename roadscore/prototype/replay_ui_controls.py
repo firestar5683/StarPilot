@@ -91,6 +91,20 @@ def replay_turn_alert(widget, signal_mode, native_alert, alert_factory):
   return previous_demo
 
 
+def restore_recorded_turn_icon(widget, signal_mode, recorded_side):
+  """Keep native laneChange's cached side separate from simulated steer icons."""
+  previous = getattr(widget, '_roadscore_icon_mode', 'recorded')
+  if signal_mode != 'recorded':
+    if previous == 'recorded':
+      widget._roadscore_recorded_icon_side = getattr(widget, '_last_icon_side', None)
+    if recorded_side in ('left', 'right'):
+      widget._roadscore_recorded_icon_side = recorded_side
+  elif previous != 'recorded':
+    widget._last_icon_side = (recorded_side if recorded_side in ('left', 'right')
+                              else getattr(widget, '_roadscore_recorded_icon_side', None))
+  widget._roadscore_icon_mode = signal_mode
+
+
 class ReplayUIControls:
   def __init__(self, status_path, *, enabled=False, clock=time.monotonic):
     self.path = Path(status_path)
@@ -187,6 +201,20 @@ class ReplayStateView:
       # These are UI instance fields, not real driving Params.
       state.always_on_lateral_active = self.mode == 'disengaged'
       state.switchback_mode_enabled = False
+
+  def recorded_turn_side(self):
+    """Read original fresh direction, never the UI's manual blinker copies."""
+    sm = self.subscriber
+    if sm.valid.get('modelV2', False) and sm.alive.get('modelV2', False):
+      meta = sm['modelV2'].meta
+      side = str(meta.laneChangeDirection)
+      if str(meta.laneChangeState) != 'off' and side in ('left', 'right'):
+        return side
+    if sm.valid.get('carState', False) and sm.alive.get('carState', False):
+      car = sm['carState']
+      if bool(car.leftBlinker) != bool(car.rightBlinker):
+        return 'left' if car.leftBlinker else 'right'
+    return None
 
   def snapshot(self):
     return {'mode': self.mode, 'signal_mode': self.signal_mode,

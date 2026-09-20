@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from cereal import log, car, custom
 from cue_timing import REFERENCE
-from replay_ui_controls import ReplayUIControls, ReplayStateView, isolated_replay, apply_turn_intent, replay_turn_alert
+from replay_ui_controls import ReplayUIControls, ReplayStateView, isolated_replay, apply_turn_intent, replay_turn_alert, restore_recorded_turn_icon
 
 
 class Subscriber:
@@ -17,6 +17,7 @@ class Subscriber:
       'starpilotSelfdriveState': custom.StarPilotSelfdriveState.new_message(),
       'starpilotCarState': custom.StarPilotCarState.new_message(alwaysOnLateralEnabled=False, pauseLateral=True),
       'carState': car.CarState.new_message(leftBlinker=False, rightBlinker=True, vEgo=12),
+      'modelV2': log.ModelDataV2.new_message(),
     }
     self.updated = {key: False for key in self.builders}
     self.valid = {key: True for key in self.builders}
@@ -66,6 +67,31 @@ class Tests(unittest.TestCase):
     self.sm.builders['selfdriveState'].enabled=False
     self.state('recorded','recorded');self.view.update()
     self.assertFalse(self.view['selfdriveState'].enabled);self.assertTrue(self.view['carState'].rightBlinker)
+  def test_recorded_icon_direction_uses_original_fresh_model_and_blinkers(self):
+    self.state('recorded','left');self.view.update()
+    self.assertTrue(self.view['carState'].leftBlinker)
+    self.assertEqual(self.view.recorded_turn_side(),'right')
+    model=self.sm.builders['modelV2'].meta
+    model.laneChangeState='laneChangeStarting';model.laneChangeDirection='left'
+    self.assertEqual(self.view.recorded_turn_side(),'left')
+    self.sm.alive['modelV2']=False
+    self.assertEqual(self.view.recorded_turn_side(),'right')
+    self.sm.builders['carState'].leftBlinker=True
+    self.assertIsNone(self.view.recorded_turn_side())  # Both blinkers are ambiguous.
+    self.sm.builders['carState'].leftBlinker=False;self.sm.valid['carState']=False
+    self.assertIsNone(self.view.recorded_turn_side())
+  def test_recorded_icon_cache_survives_manual_off_and_unknown_direction(self):
+    widget=SimpleNamespace(_last_icon_side='right')
+    restore_recorded_turn_icon(widget,'left','right')
+    widget._last_icon_side='left'  # Native renderer draws the simulated prompt.
+    restore_recorded_turn_icon(widget,'off',None)
+    self.assertEqual(widget._last_icon_side,'left')  # Do not alter its normal fade.
+    restore_recorded_turn_icon(widget,'recorded',None)
+    self.assertEqual(widget._last_icon_side,'right')
+    widget=SimpleNamespace(_last_icon_side=None)
+    restore_recorded_turn_icon(widget,'left',None);widget._last_icon_side='left'
+    restore_recorded_turn_icon(widget,'recorded',None)
+    self.assertIsNone(widget._last_icon_side)  # Never promote a manual side to recorded.
   def test_no_override_without_fresh_same_replay_session(self):
     self.state();self.view.update()
     for patch in ({'command_wall':97},{'command_wall':101},{'command_wall':float('nan')},
@@ -258,7 +284,8 @@ class Tests(unittest.TestCase):
     root=Path(__file__).resolve().parents[2]
     ui=SimpleNamespace(started=True)
     rectangle=lambda *values:SimpleNamespace(x=values[0],y=values[1],width=values[2],height=values[3])
-    namespace=dict(ReplayStateView=ReplayStateView,replay_turn_alert=replay_turn_alert,ui_state=ui,
+    namespace=dict(ReplayStateView=ReplayStateView,replay_turn_alert=replay_turn_alert,
+                   restore_recorded_turn_icon=restore_recorded_turn_icon,ui_state=ui,
                    original_get_alert=lambda widget,sm:getattr(widget,'native_alert',None),
                    Alert=lambda **fields:SimpleNamespace(**fields),AlertSize=SimpleNamespace(mid=2),
                    AlertStatus=SimpleNamespace(normal=0),replay_arrow_mode='recorded',
@@ -284,6 +311,25 @@ class Tests(unittest.TestCase):
       self.assertIs(icon.texture,getattr(widget,'_txt_turn_signal_'+side))
       self.assertTrue(ui.roadscore_replay_prompt_active)
       self.assertEqual(namespace['replay_arrow_mode'],side)
+    # Route2 at64.4s: manual Left has populated the native cache, while the
+    # recording is already changing lanes right with a directionless alert.
+    self.state('recorded','left');self.view.update()
+    prompt=namespace['replay_get_alert'](widget,self.view)
+    namespace['_icon_helper'](widget,prompt)
+    self.assertEqual(widget._last_icon_side,'left')
+    model=self.sm.builders['modelV2'].meta
+    model.laneChangeState='laneChangeStarting';model.laneChangeDirection='right'
+    self.state('recorded','recorded');self.view.update()
+    native=SimpleNamespace(text1='Changing Lanes',alert_type='laneChange/warning',status=0)
+    widget.native_alert=widget._prev_alert=native
+    restored=namespace['replay_get_alert'](widget,self.view)
+    self.assertIs(restored,native)
+    icon=namespace['_icon_helper'](widget,restored).icon
+    self.assertEqual(icon.side,'right');self.assertIs(icon.texture,widget._txt_turn_signal_right)
+    self.assertFalse(ui.roadscore_replay_prompt_active)
+    self.assertEqual(namespace['replay_arrow_mode'],'recorded')
+    # Important native alerts continue to preempt manual simulated arrows.
+    self.state('recorded','left');self.view.update()
     native=SimpleNamespace(text1='Recorded critical alert')
     widget.native_alert=widget._prev_alert=native
     self.assertIs(namespace['replay_get_alert'](widget,self.view),native)
