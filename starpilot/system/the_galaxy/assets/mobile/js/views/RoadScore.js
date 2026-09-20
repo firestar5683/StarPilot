@@ -136,12 +136,19 @@ export const RoadScore = {
         <button class="gx-btn" @click="setLive(false)">Stop RoadScore</button>
       </div></GalaxySection>
       <GalaxySection title="Replay simulation" icon="bi-play-circle" :collapsible="false"><div style="padding:16px">
-        <p class="gx-row__desc">Music presentation only. These buttons do not engage or control the vehicle.</p>
+        <p class="gx-row__desc">Replay simulation changes displayed engagement, turn signals and music. It does not engage or control the vehicle.</p>
         <p><strong>{{status.demo?.available ? (status.demo.mode === 'engaged' ? 'Simulated engage' : status.demo.mode === 'disengaged' ? 'Simulated disengage' : 'Using recorded state') : 'Replay unavailable'}}</strong></p>
         <div style="display:flex;gap:8px;flex-wrap:wrap">
           <button class="gx-btn" :disabled="busy || !status.demo?.available" @click="action('demo_engagement', {session_id:status.demo.session_id, mode:'engaged'})">Simulate engage</button>
           <button class="gx-btn" :disabled="busy || !status.demo?.available" @click="action('demo_engagement', {session_id:status.demo.session_id, mode:'disengaged'})">Simulate disengage</button>
           <button class="gx-btn" :disabled="busy || !status.demo?.available" @click="action('demo_engagement', {session_id:status.demo.session_id, mode:'recorded'})">Use recorded state</button>
+        </div>
+        <p><strong>{{status.demo?.signal_mode === 'recorded' ? 'Using recorded signals' : 'Simulated signals: ' + (status.demo?.signal_mode || 'recorded')}}</strong></p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="gx-btn" :disabled="busy || !status.demo?.available" @click="action('demo_signal', {session_id:status.demo.session_id, signal_mode:'left'})">Left signal</button>
+          <button class="gx-btn" :disabled="busy || !status.demo?.available" @click="action('demo_signal', {session_id:status.demo.session_id, signal_mode:'right'})">Right signal</button>
+          <button class="gx-btn" :disabled="busy || !status.demo?.available" @click="action('demo_signal', {session_id:status.demo.session_id, signal_mode:'off'})">Signals off</button>
+          <button class="gx-btn" :disabled="busy || !status.demo?.available" @click="action('demo_signal', {session_id:status.demo.session_id, signal_mode:'recorded'})">Use recorded signals</button>
         </div>
         <p v-if="!status.demo?.available" class="gx-row__desc">{{status.demo?.reason}}</p>
       </div></GalaxySection>

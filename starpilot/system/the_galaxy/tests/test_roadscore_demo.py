@@ -24,6 +24,30 @@ class DemoTests(unittest.TestCase):
    self.assertEqual(value['version'],1);self.assertEqual(value['mode'],mode);self.assertEqual(value['session_id'],'session-a');self.assertEqual(result['requested_mode'],mode)
    self.assertLessEqual(value['created_wall'],time.monotonic())
   self.assertEqual({p.name for p in self.run.iterdir()},{'status.json','demo_engagement.json'})
+ def signal(self,mode='left',session='session-a',offroad=True):
+  return self.operator.operate('demo_signal',{'signal_mode':mode,'session_id':session},offroad)
+ def test_mixed_commands_preserve_other_unacknowledged_choice(self):
+  self.command('disengaged');self.signal('left')
+  value=json.loads((self.run/'demo_engagement.json').read_text())
+  self.assertEqual((value['mode'],value['signal_mode']),('disengaged','left'))
+  self.command('engaged');self.signal('off');self.command('recorded')
+  value=json.loads((self.run/'demo_engagement.json').read_text())
+  self.assertEqual((value['mode'],value['signal_mode']),('recorded','off'))
+  self.signal('recorded');self.assertEqual(json.loads((self.run/'demo_engagement.json').read_text())['signal_mode'],'recorded')
+ def test_legacy_command_and_cross_session_file(self):
+  path=self.run/'demo_engagement.json'
+  path.write_text(json.dumps({'version':1,'session_id':'session-a','mode':'engaged','created_wall':time.monotonic()}))
+  self.signal();self.assertEqual(json.loads(path.read_text())['mode'],'engaged')
+  path.write_text(json.dumps({'version':1,'session_id':'old','mode':'disengaged','signal_mode':'right','created_wall':time.monotonic()}))
+  self.signal();self.assertEqual(json.loads(path.read_text())['mode'],'recorded')
+ def test_signal_gates_and_status(self):
+  for kwargs in ({'session':'old'},{'offroad':False},{'mode':'hazard'}):
+   with self.assertRaises(ValueError):self.signal(**kwargs)
+  self.state['demo_signal_mode']='right';self.write();self.assertEqual(self.operator.demo_status()['signal_mode'],'right')
+  self.state['command_wall']=time.monotonic()-3;self.write()
+  with self.assertRaises(ValueError):self.signal()
+  self.state['command_wall']=time.monotonic();self.state['input_mode']='live';self.write()
+  with self.assertRaises(ValueError):self.signal()
  def test_live_stale_future_unknown_and_disabled_rejected(self):
   original=dict(self.state)
   for patch in ({'input_mode':'live'},{'route':'live'},{'input_mode':None},{'command_wall':time.monotonic()-3},{'command_wall':time.monotonic()+10},{'command_wall':float('nan')},{'engagement_presentation':{'enabled':False}},{'presentation_session_id':None}):

@@ -1,4 +1,4 @@
-import { RoadScore } from "./views/RoadScore.js?v=replay-engagement-1"
+import { RoadScore } from "./views/RoadScore.js?v=replay-controls-2"
 import { createApp, h } from "vue"
 import { AppShell } from "./components/AppShell.js?v=roadscore-calibration-2"
 import { Home } from "./views/Home.js"

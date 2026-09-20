@@ -149,18 +149,28 @@ class Operator:
     fresh=type(stamp) in (int,float) and math.isfinite(stamp) and 0<=time.monotonic()-stamp<=2
     available=bool(fresh and state.get('engagement_presentation',{}).get('enabled') is True and state.get('input_mode')=='replay' and state.get('route') not in (None,'','live') and isinstance(session,str) and session)
     mode=state.get('demo_engagement_mode','recorded')
-    return {'available':available,'session_id':session if available else None,'mode':mode if mode in ('recorded','engaged','disengaged') else 'recorded',
-            'reason':'' if available else 'Start a RoadScore replay to simulate musical engagement.'}
+    signal_mode=state.get('demo_signal_mode','recorded')
+    return {'available':available,'session_id':session if available else None,'signal_mode':signal_mode if signal_mode in ('recorded','left','right','off') else 'recorded','mode':mode if mode in ('recorded','engaged','disengaged') else 'recorded',
+            'reason':'' if available else 'Start a RoadScore replay to simulate displayed engagement, signals and music.'}
 
-  def demo_engagement(self,data):
-    if not isinstance(data,dict) or set(data)!={'session_id','mode'} or data['mode'] not in ('recorded','engaged','disengaged'):
+  def demo_engagement(self,data,field='mode'):
+    allowed=('recorded','engaged','disengaged') if field=='mode' else ('recorded','left','right','off')
+    if not isinstance(data,dict) or set(data)!={'session_id',field} or data[field] not in allowed:
       raise ValueError('Invalid replay simulation command')
     with self.lock:
       status=self.demo_status()
       if not status['available'] or data['session_id']!=status['session_id']:
         raise ValueError('A fresh matching RoadScore replay is required; live driving cannot be simulated')
       run=(self.root/'results/current').resolve(strict=True)
-      command={'version':1,'session_id':status['session_id'],'mode':data['mode'],'created_wall':time.monotonic()}
+      now=time.monotonic()
+      previous=read_json(run/'demo_engagement.json')
+      stamp=previous.get('created_wall')
+      previous_valid=(previous.get('version')==1 and previous.get('session_id')==status['session_id'] and type(stamp) in (int,float) and math.isfinite(stamp) and 0<=stamp<=now)
+      modes={key:previous.get(key,'recorded') if previous_valid else status[key] for key in ('mode','signal_mode')}
+      if modes['mode'] not in ('recorded','engaged','disengaged'):modes['mode']='recorded'
+      if modes['signal_mode'] not in ('recorded','left','right','off'):modes['signal_mode']='recorded'
+      modes[field]=data[field]
+      command={'version':1,'session_id':status['session_id'],**modes,'created_wall':now}
       temporary=None
       try:
         with tempfile.NamedTemporaryFile(mode='w',dir=run,prefix='.demo-engagement-',delete=False) as stream:
@@ -168,7 +178,7 @@ class Operator:
         temporary.replace(run/'demo_engagement.json')
       finally:
         if temporary is not None:temporary.unlink(missing_ok=True)
-      return {'requested_mode':data['mode'],'demo':self.demo_status()}
+      return {'requested_'+field:data[field],'demo':self.demo_status()}
 
   def status(self, offroad):
     settings = read_json(self.root / 'generated/operator_settings.json')
@@ -199,9 +209,9 @@ class Operator:
                 calibrating=output.get('calibrating', False), session_muted=output.get('session_muted', True), output=output.get('output'), latency_ms=output.get('latency_ms'), error=self.error or output.get('error'))
 
   def operate(self, action, data, offroad):
-    if action == 'demo_engagement':
+    if action in ('demo_engagement','demo_signal'):
       if not offroad:raise ValueError('Replay simulation requires the vehicle to be offroad')
-      return self.demo_engagement(data)
+      return self.demo_engagement(data,'signal_mode' if action=='demo_signal' else 'mode')
     if action == 'live':
       if set(data) != {'enabled'} or type(data['enabled']) is not bool:
         raise ValueError('Live RoadScore requires an enabled boolean')
