@@ -35,6 +35,8 @@ output_device=select_device(sd.query_devices(),output_metadata) if output_metada
 if output_device is not None:
  sd.check_output_settings(device=output_device,channels=2,dtype='float32',samplerate=48000)
  output_metadata['portaudio_device']=output_device
+from operator_output import PresentationDelay
+presentation_delay=PresentationDelay(root,output_provider=lambda: {'id':output_metadata['output_identity']} if output_metadata.get('bluetooth_selected') else None)
 (run/'output_device.json').write_text(json.dumps(output_metadata,indent=2)+'\n')
 if os.environ.get('ROADSCORE_RESIDENT')=='1':
  import atexit
@@ -390,7 +392,7 @@ try:
     if songform:snapshot.update(songform.snapshot())
     if composition:snapshot.update(composition.snapshot(frames/rate))
     if gestures:snapshot.update(gestures.status())
-    trace.write(json.dumps(snapshot)+'\n');f=run/'status.tmp';f.write_text(json.dumps(snapshot));f.replace(run/'status.json')
+    trace.write(json.dumps(snapshot)+'\n');f=run/'status.tmp';f.write_text(json.dumps(presentation_delay.apply(snapshot)));f.replace(run/'status.json')
    if time.monotonic()-last_progress>15:raise RuntimeError('Replay model input stalled')
 finally:
  audio_started=False

@@ -86,6 +86,25 @@ class OutputTests(unittest.TestCase):
     self.assertEqual(shown['phase'],'curve');self.assertEqual(shown['readiness'],'DEGRADED')
     self.assertEqual(shown['buffered'],80);self.assertEqual(next_snapshot['phase'],'apex')
 
+  def test_rendered_cues_delay_without_touching_raw_audio_clock_or_core(self):
+    import copy
+    self.owner.dispatch('set_latency',latency_ms=250)
+    delay=m.PresentationDelay(self.root,lambda:self.output,self.clock)
+    raw=dict(signal_shaker={'rendered_active':True},core_apex={'rendered_active':True},alert_accent={'rendered_active':False},engagement_presentation={'active':True},elapsed=50,route_t=10,source_cutoff_ns=123,buffered=80,readiness='READY')
+    original=copy.deepcopy(raw)
+    first=delay.apply(raw)
+    self.assertNotIn('signal_shaker',first)
+    self.assertEqual(first['elapsed'],50);self.assertEqual(first['source_cutoff_ns'],123)
+    self.clock.value+=.26
+    current={**raw,'signal_shaker':{'rendered_active':False},'route_t':11,'elapsed':50.26,'readiness':'DEGRADED'}
+    shown=delay.apply(current)
+    self.assertTrue(shown['signal_shaker']['rendered_active'])
+    self.assertEqual(shown['readiness'],'DEGRADED');self.assertEqual(shown['route_t'],11)
+    self.assertEqual(raw,original);self.assertFalse(current['signal_shaker']['rendered_active'])
+    self.output=None;self.clock.value+=3
+    bypass=delay.apply(current)
+    self.assertEqual(bypass['presentation_latency_ms'],0);self.assertFalse(bypass['signal_shaker']['rendered_active'])
+
   def test_watchdog_cancels_own_audio_and_releases_leases(self):
     token=self.owner.dispatch('calibration_start',attended=True)['session']
     sink=self.owner.session['sink']
