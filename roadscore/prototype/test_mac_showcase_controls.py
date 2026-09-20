@@ -11,7 +11,7 @@ import threading
 import time
 import unittest
 
-from mac_showcase import control_server, parser
+from mac_showcase import apply_showcase_config, control_server, parser
 from paired_demo_controls import GalaxyPeer, PairedDemoControls
 
 
@@ -171,6 +171,59 @@ class ControlTests(unittest.TestCase):
     for value in ('http://device.local:8082','http://8.8.8.8:8082','http://192.168.1.50:8082/mobile/#/roadscore'):
       with self.subTest(url=value),contextlib.redirect_stderr(io.StringIO()),self.assertRaises(SystemExit):
         parser().parse_args(['--paired-comma',value])
+
+
+class RememberedConfigTests(unittest.TestCase):
+  def setUp(self):
+    self.config = dict(route='route1',archive='/fixture/archive',paired_comma='http://192.168.1.50:8082',controls_port=56976)
+
+  def resolve(self, flags=(), config=None):
+    return apply_showcase_config(parser().parse_args(list(flags)),self.config if config is None else config)
+
+  def test_saved_pair_and_stable_port_without_recurring_flags(self):
+    value = self.resolve()
+    self.assertEqual(value.paired_comma,self.config['paired_comma'])
+    self.assertEqual(value.port,56976)
+    self.assertEqual(value.score_archive,Path('/fixture/archive'))
+
+  def test_absent_optional_choices_remain_unpaired_and_ephemeral(self):
+    value = self.resolve(config={'route':'route1','archive':'/fixture/archive'})
+    self.assertIsNone(value.paired_comma)
+    self.assertEqual(value.port,0)
+    value = self.resolve(['--score-archive','/explicit/archive'],config={})
+    self.assertIsNone(value.paired_comma)
+    self.assertEqual(value.port,0)
+
+  def test_cli_pair_and_zero_port_override_saved_values(self):
+    url = 'http://192.168.1.51:8082'
+    value = self.resolve(['--paired-comma',url,'--port','0','--score-archive','/explicit/archive'])
+    self.assertEqual(value.paired_comma,url)
+    self.assertEqual(value.port,0)
+    self.assertEqual(value.score_archive,Path('/explicit/archive'))
+
+  def test_unpaired_overrides_remembered_target_for_one_launch(self):
+    value = self.resolve(['--unpaired'])
+    self.assertIsNone(value.paired_comma)
+    self.assertEqual(value.port,56976)
+    self.assertEqual(self.config['paired_comma'],'http://192.168.1.50:8082')
+    with contextlib.redirect_stderr(io.StringIO()),self.assertRaises(SystemExit):
+      parser().parse_args(['--unpaired','--paired-comma',self.config['paired_comma']])
+
+  def test_saved_peer_cannot_leak_to_different_explicit_route(self):
+    value = self.resolve(['different-route','--score-archive','/explicit/archive'])
+    self.assertIsNone(value.paired_comma)
+    self.assertEqual(value.port,0)
+    with self.assertRaises(ValueError):self.resolve(['different-route'])
+
+  def test_invalid_saved_choices_fail_without_peer_contact(self):
+    for value in (-1,65536,True,'56976',None):
+      with self.subTest(port=value),self.assertRaises(ValueError):
+        self.resolve(config={**self.config,'controls_port':value})
+    for value in ('http://remote.example:8082','http://8.8.8.8:8082','',False):
+      with self.subTest(peer=value),self.assertRaises(ValueError):
+        self.resolve(config={**self.config,'paired_comma':value})
+    value = self.resolve(config={**self.config,'paired_comma':None})
+    self.assertIsNone(value.paired_comma)
 
 
 if __name__=='__main__':unittest.main()

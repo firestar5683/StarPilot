@@ -214,6 +214,22 @@ def audio_worker(a):
   if max_drift>.05:raise RuntimeError('Prepared audio clock drift exceeded 50 ms')
 
 
+def apply_showcase_config(a, config):
+  """Resolve the matching route's saved choices once; explicit CLI choices win."""
+  if not isinstance(config, dict):raise ValueError('Prepared showcase configuration must be an object')
+  matching = config.get('route') == a.route
+  if a.score_archive is None:
+    if not matching or not config.get('archive'):raise ValueError('No prepared showcase configured for this route')
+    a.score_archive = Path(config['archive'])
+    if a.curve_plan is None and config.get('curve_plan'):a.curve_plan = Path(config['curve_plan'])
+  if a.unpaired:a.paired_comma = None
+  elif a.paired_comma is None and matching:a.paired_comma = config.get('paired_comma')
+  if a.paired_comma is not None:GalaxyPeer(a.paired_comma,allow_lan_http=True)
+  if a.port is None:a.port = config.get('controls_port',0) if matching else 0
+  if type(a.port) is not int or not 0 <= a.port <= 65535:raise ValueError('Controls port must be an integer from 0 to 65535')
+  return a
+
+
 def parser():
   p=argparse.ArgumentParser()
   p.add_argument('--roadscore',action='store_true');p.add_argument('--prepared-showcase',action='store_true')
@@ -224,13 +240,15 @@ def parser():
   p.add_argument('--runtime',type=Path)
   p.add_argument('--out',type=Path)
   p.add_argument('--duration',type=float,default=float('inf'))
-  p.add_argument('--port',type=int,default=0)
+  p.add_argument('--port',type=int,default=None,help='Override the saved local controls port; 0 selects an available port')
   def paired_url(value):
     try:GalaxyPeer(value,allow_lan_http=True)
     except ValueError as error:raise argparse.ArgumentTypeError(str(error)) from error
     return value
-  p.add_argument('--paired-comma',type=paired_url,default=None,metavar='URL',
-                 help='Optional explicit Galaxy LAN URL http://PRIVATE_IPV4:8082; forwards replay controls only')
+  pairing=p.add_mutually_exclusive_group()
+  pairing.add_argument('--paired-comma',type=paired_url,default=None,metavar='URL',
+                       help='Override the saved Galaxy LAN URL http://PRIVATE_IPV4:8082; forwards replay controls only')
+  pairing.add_argument('--unpaired',action='store_true',help='Use Mac-only controls for this launch, overriding a saved comma target')
   p.add_argument('--muted',action='store_true');p.add_argument('--headless',action='store_true')
   p.add_argument('--no-browser',action='store_true');p.add_argument('--audio-device');p.add_argument('--check',action='store_true');p.add_argument('--audio-worker',action='store_true',help=argparse.SUPPRESS)
   return p
@@ -238,18 +256,20 @@ def parser():
 
 def main():
   a=parser().parse_args()
-  if a.audio_worker:return audio_worker(a)
+  if a.audio_worker:
+    if a.port is None:a.port=0
+    return audio_worker(a)
   if sys.platform!='darwin' or Path('/TICI').exists():raise SystemExit('Prepared Mac showcase runs only on the Mac')
   launch_started=time.monotonic()
   project=a.project_root.resolve();rt=a.runtime or project/'.host_runtime/darwin/worktree'
   py=rt.parent/'venv/bin/python'
   from route_favorites import resolve_favorite
   a.route,_=resolve_favorite(a.route,project/'roadscore/routes/favorites.json')
-  if a.score_archive is None:
-    config=json.loads((project/'roadscore/assets/prepared_showcase.json').read_text())
-    if config['route']!=a.route:raise SystemExit('No prepared showcase configured for this route')
-    a.score_archive=Path(config['archive'])
-    if a.curve_plan is None and config.get('curve_plan'):a.curve_plan=Path(config['curve_plan'])
+  config_path=project/'roadscore/assets/prepared_showcase.json'
+  try:
+    config=json.loads(config_path.read_text()) if config_path.is_file() else {}
+    apply_showcase_config(a,config)
+  except (OSError,ValueError,TypeError) as error:raise SystemExit('Invalid prepared showcase configuration: '+str(error)) from error
   launch=json.loads((a.score_archive/'launch.json').read_text())
   if launch['route']!=a.route:raise SystemExit('Prepared score belongs to a different route')
   from route_library import local_source
