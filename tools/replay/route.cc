@@ -188,6 +188,8 @@ void Route::addFileToSegment(int n, const std::string &file) {
     segments_[n].qlog = file;
   } else if (name == "fcamera.hevc") {
     segments_[n].road_cam = file;
+  } else if (name == "fcamera.h264" && segments_[n].road_cam.empty()) {
+    segments_[n].road_cam = file;
   } else if (name == "dcamera.hevc") {
     segments_[n].driver_cam = file;
   } else if (name == "ecamera.hevc") {
