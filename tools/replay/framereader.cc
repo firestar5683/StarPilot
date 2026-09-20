@@ -1,6 +1,8 @@
 #include "tools/replay/framereader.h"
 
 #include <map>
+#include <cstdlib>
+#include "tools/replay/decode_threads.h"
 #include <memory>
 #include <tuple>
 #include <utility>
@@ -152,9 +154,32 @@ bool FFmpegVideoDecoder::open(AVCodecParameters *codecpar, bool hw_decoder) {
     rWarning("No device with hardware decoder found. fallback to CPU decoding.");
   }
 
+  const int slice_threads = replay_decode_threads(std::getenv("ROADSCORE_REPLAY_DECODE_THREADS"));
+  if (slice_threads < 0) {
+    rError("ROADSCORE_REPLAY_DECODE_THREADS must be an integer from 1 to 4");
+    return false;
+  }
+  const bool configure_slices = slice_threads > 0 && hw_device_ctx == nullptr;
+  if (configure_slices) {
+    if (!(decoder->capabilities & AV_CODEC_CAP_SLICE_THREADS)) {
+      rError("Requested software decoder does not support slice threading");
+      return false;
+    }
+    decoder_ctx->thread_count = slice_threads;
+    decoder_ctx->thread_type = FF_THREAD_SLICE;
+  }
+
   if (avcodec_open2(decoder_ctx, decoder, nullptr) < 0) {
     rError("Failed to open codec");
     return false;
+  }
+  if (configure_slices) {
+    rInfo("REPLAY_SOFTWARE_DECODER requested_threads=%d threads=%d active_thread_type=%d", slice_threads,
+          decoder_ctx->thread_count, decoder_ctx->active_thread_type);
+    if (decoder_ctx->active_thread_type & FF_THREAD_FRAME) {
+      rError("Frame threading is incompatible with replay's immediate-frame decoder");
+      return false;
+    }
   }
   return true;
 }
