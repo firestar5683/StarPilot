@@ -16,6 +16,53 @@ from rhythm_timeline import RhythmTimeline
 from signal_shaker import SignalShaker, ShakerGrid
 
 
+def archive_tail_proof(bridge, launch, origin, duration, offset):
+  """Recognize a bounded recorded tail after the bridge's final modelV2.
+
+  replay_bridge records last_t only from modelV2, relative to origin_ns. The
+  original replay supervisor must also have confirmed the actual route EOF.
+  Missing or invalid optional evidence grants no exemption from stream loss.
+  """
+  if (not isinstance(bridge, dict) or launch.get('end_reason') != 'native final segment exhausted'
+      or bridge.get('route') != launch.get('route') or 'failure' not in bridge or bridge['failure'] is not None
+      or type(bridge.get('origin_ns')) is not int or bridge['origin_ns'] != origin.get('first_model_ns')
+      or type(bridge.get('messages')) is not int or bridge['messages'] <= 0
+      or bridge.get('clock') != 'zero at first model received; source logMonoTime remains unchanged'):
+    return None
+  last = bridge.get('last_t')
+  if any(type(value) not in (int,float) or not math.isfinite(value) for value in (last,duration,offset)) or last < 0:
+    return None
+  tail = duration + offset - last
+  if not 0 < tail <= 10:
+    return None
+  return dict(terminal_model_ns=bridge['origin_ns']+round(last*1e9),terminal_route_t=last,
+              tail_seconds=tail,source='bridge.json modelV2 endpoint at confirmed replay EOF')
+
+
+class RecordedTail:
+  def __init__(self, proof):
+    self.proof = proof
+    self.terminal_wall = self.progress_wall = self.position = None
+
+  def matches(self, model_ns):
+    # At most 1 ns accounts for floating-point reconstruction of last_t.
+    return bool(self.proof and type(model_ns) is int and abs(model_ns-self.proof['terminal_model_ns']) <= 1)
+
+  def observe(self, model_ns, wall, position):
+    if not self.proof:return
+    if self.matches(model_ns) and self.terminal_wall is None:self.terminal_wall = wall
+    if type(position) is int and (self.position is None or position > self.position):
+      self.position, self.progress_wall = position, wall
+
+  def allows_stale(self, model_ns, wall):
+    # Duplicate terminal messages never refresh this deadline. The extra second
+    # covers the existing 750 ms source-clock guard and callback quantization.
+    # PCM must continue advancing, and its original file length is unchanged.
+    return bool(self.matches(model_ns) and self.terminal_wall is not None and self.progress_wall is not None
+                and 0 <= wall-self.terminal_wall <= self.proof['tail_seconds']+1.
+                and 0 <= wall-self.progress_wall <= 1.)
+
+
 def load_archive(path, route):
   path = Path(path)
   launch = json.loads((path/'launch.json').read_text())
@@ -37,7 +84,11 @@ def load_archive(path, route):
   offset = first['callback_wall'] + first['dac_delay'] - origin['host_received_wall']
   if abs(offset) > 2:
     raise ValueError('Unexpected original audio clock offset')
-  return audio, rate, {**launch, **origin, 'audio_offset': offset, 'duration': len(audio)/rate}
+  try:bridge = json.loads((path/'bridge.json').read_text())
+  except (OSError,ValueError):bridge = None
+  duration = len(audio)/rate
+  tail = archive_tail_proof(bridge,launch,origin,duration,offset)
+  return audio, rate, {**launch, **origin, 'audio_offset': offset, 'duration': duration, 'archived_tail': tail}
 
 
 def initial_frame(meta, mono_ns, dac_since_receipt, rate):

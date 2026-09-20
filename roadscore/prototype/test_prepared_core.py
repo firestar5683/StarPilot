@@ -1,10 +1,12 @@
+import ast
 import json
 from pathlib import Path
 import tempfile
+from types import SimpleNamespace
 import unittest
 import numpy as np
 import soundfile as sf
-from prepared_core import load_archive, initial_frame, PreparedPresentation
+from prepared_core import load_archive, initial_frame, PreparedPresentation, archive_tail_proof, RecordedTail
 from replay_ui_controls import isolated_replay
 
 
@@ -23,6 +25,17 @@ class PreparedTests(unittest.TestCase):
     np.testing.assert_array_equal(pcm,self.pcm)
     self.assertEqual(initial_frame(meta,1000000000,.15,rate),0)
     self.assertEqual(initial_frame(meta,1500000000,.15,rate),24000)
+    self.assertIsNone(meta['archived_tail'])
+  def test_optional_terminal_proof_keeps_original_pcm(self):
+    bridge=dict(route='fixture',origin_ns=1000000000,last_t=.7,failure=None,messages=100,
+                clock='zero at first model received; source logMonoTime remains unchanged')
+    (self.path/'bridge.json').write_text(json.dumps(bridge))
+    pcm,rate,meta=load_archive(self.path,'fixture')
+    np.testing.assert_array_equal(pcm,self.pcm)
+    self.assertEqual(meta['archived_tail']['terminal_model_ns'],1700000000)
+    self.assertAlmostEqual(meta['archived_tail']['tail_seconds'],.45)
+    (self.path/'bridge.json').write_text('incomplete JSON')
+    self.assertIsNone(load_archive(self.path,'fixture')[2]['archived_tail'])
   def test_wrong_route_and_final_pcm_rejected(self):
     with self.assertRaises(ValueError):load_archive(self.path,'other')
     (self.path/'launch.json').write_text(json.dumps(dict(route='fixture',render_mode='current',end_reason='native final segment exhausted')))
@@ -88,5 +101,76 @@ class PreparedTests(unittest.TestCase):
     np.testing.assert_array_equal(core,before)
     self.assertEqual(result.shape,core.shape)
     self.assertTrue(np.isfinite(result).all())
+
+
+class ArchivedTailTests(unittest.TestCase):
+  def setUp(self):
+    self.origin={'first_model_ns':36517892685238}
+    self.launch={'route':'fixture','end_reason':'native final segment exhausted'}
+    self.bridge=dict(route='fixture',origin_ns=self.origin['first_model_ns'],last_t=300.000663318,
+                     failure=None,messages=84032,clock='zero at first model received; source logMonoTime remains unchanged')
+  def proof(self,bridge=None,launch=None,duration=306.2):
+    return archive_tail_proof(self.bridge if bridge is None else bridge,self.launch if launch is None else launch,
+                              self.origin,duration,.173852003)
+  def test_measured_terminal_model_and_recorded_tail(self):
+    proof=self.proof()
+    self.assertEqual(proof['terminal_model_ns'],36817893348556)
+    self.assertAlmostEqual(proof['tail_seconds'],6.373188685)
+    for delta in (-1,0,1):
+      tail=RecordedTail(proof);tail.observe(proof['terminal_model_ns']+delta,300.,100)
+      tail.observe(proof['terminal_model_ns']+delta,303.,200)
+      self.assertTrue(tail.allows_stale(proof['terminal_model_ns']+delta,303.))
+    for delta in (-2,2,-50_000_000):
+      self.assertFalse(tail.allows_stale(proof['terminal_model_ns']+delta,303.))
+    for age in (-1,float('nan'),proof['tail_seconds']+1.001):
+      self.assertFalse(tail.allows_stale(proof['terminal_model_ns'],300.+age))
+    self.assertFalse(RecordedTail(None).allows_stale(proof['terminal_model_ns'],303.))
+  def test_duplicate_endpoint_cannot_extend_deadline_and_pcm_must_progress(self):
+    proof=self.proof();mono=proof['terminal_model_ns'];tail=RecordedTail(proof)
+    tail.observe(mono,300.,100)
+    tail.observe(mono,301.,200)
+    self.assertEqual(tail.terminal_wall,300.)
+    self.assertTrue(tail.allows_stale(mono,301.))
+    tail.observe(mono,302.1,200)
+    self.assertFalse(tail.allows_stale(mono,302.1))
+    # A bounded backwards DAC correction cannot masquerade as forward progress.
+    tail.observe(mono,302.2,150)
+    self.assertFalse(tail.allows_stale(mono,302.2))
+    tail.observe(mono,302.3,201)
+    self.assertTrue(tail.allows_stale(mono,302.3))
+    tail.observe(mono,308.,300)
+    self.assertFalse(tail.allows_stale(mono,308.))
+  def test_incomplete_foreign_failed_or_excessive_tail_proof_is_rejected(self):
+    for patch in ({'route':'other'},{'origin_ns':100},{'failure':'lost pipe'},
+                  {'last_t':float('nan')},{'last_t':True},{'last_t':-1},{'messages':0},{'clock':'unknown'}):
+      with self.subTest(patch=patch):self.assertIsNone(self.proof({**self.bridge,**patch}))
+    self.assertIsNone(self.proof({key:value for key,value in self.bridge.items() if key!='failure'}))
+    self.assertIsNone(self.proof(launch={**self.launch,'end_reason':'requested duration'}))
+    self.assertIsNone(self.proof(duration=311.))
+    self.assertIsNone(self.proof(duration=299.))
+  def test_real_worker_stream_loss_gate_accepts_only_bounded_exact_endpoint(self):
+    path=Path(__file__).with_name('mac_showcase.py')
+    worker=next(node for node in ast.parse(path.read_text()).body if isinstance(node,ast.FunctionDef) and node.name=='audio_worker')
+    guard=next(node for node in ast.walk(worker) if isinstance(node,ast.If) and len(node.body)==1
+               and isinstance(node.body[0],ast.Raise)
+               and 'Replay model stream stopped before prepared audio ended' in ast.unparse(node))
+    code=compile(ast.Module(body=[guard],type_ignores=[]),str(path),'exec')
+    proof=self.proof()
+    tail=RecordedTail(proof);tail.observe(proof['terminal_model_ns'],300.,300*48000)
+    tail.observe(proof['terminal_model_ns'],303.,303*48000)
+    context=dict(started=1.,now=303.,received={'modelV2':300.},position=303*48000,rate=48000,
+                 audio=range(round(306.2*48000)),tail=tail,
+                 sm=SimpleNamespace(logMonoTime={'modelV2':proof['terminal_model_ns']}))
+    exec(code,context)
+    context['sm'].logMonoTime['modelV2']-=50_000_000
+    with self.assertRaisesRegex(RuntimeError,'stream stopped'):exec(code,context)
+    context['sm'].logMonoTime['modelV2']=proof['terminal_model_ns']
+    context['now']=308.
+    with self.assertRaisesRegex(RuntimeError,'stream stopped'):exec(code,context)
+    context['now']=303.;context['tail']=RecordedTail(None)
+    with self.assertRaisesRegex(RuntimeError,'stream stopped'):exec(code,context)
+    # A stuck callback cannot hide forever inside the old final-two-second grace.
+    context.update(now=305.,position=305*48000,tail=tail)
+    with self.assertRaisesRegex(RuntimeError,'stream stopped'):exec(code,context)
 
 if __name__=='__main__':unittest.main()
