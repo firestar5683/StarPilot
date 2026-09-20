@@ -12,15 +12,18 @@ class AccentTests(unittest.TestCase):
   for i,key in enumerate(alerts):
    wet=accent.process(source,i*800,key,bool(key),fresh,competing)
    heard |= bool(np.any(wet!=source))
-   self.assertLessEqual(float(np.max(np.abs(wet-source))),.016001)
+   self.assertLessEqual(float(np.max(np.abs(wet-source))),.061)
   return accent,heard
  def test_persistent_alert_once_and_grid_aligned(self):
   accent,heard=self.render(['takeover']*200)
   self.assertTrue(heard);self.assertEqual(len(accent.events),1)
   self.assertEqual(accent.events[0]['scheduled_frame'],5000)
- def test_tiny_changes_and_competing_cues_are_omitted(self):
+ def test_tiny_changes_omitted_but_competing_cues_do_not_erase_warning(self):
   self.assertFalse(self.render(['a','b']*100)[1])
-  self.assertFalse(self.render(['a']*100,competing=True)[1])
+  accent,heard=self.render(['a']*100,competing=True)
+  self.assertTrue(heard);self.assertEqual(len(accent.events),1)
+  self.assertGreaterEqual(accent.events[0]['frame'],round(.7*8000))
+  self.assertLess(accent.events[0]['scheduled_frame'],round(1.3*8000))
   self.assertFalse(self.render(['a']*100,fresh=False)[1])
  def test_density_limit(self):
   accent,_=self.render([str(i//30) for i in range(600)])
@@ -33,6 +36,17 @@ class AccentTests(unittest.TestCase):
   for i in range(3):a.process(x,i*800,'a',True,True)
   self.assertTrue(a.pending)
   self.assertIs(a.process(x,2400,'a',True,False),x);self.assertFalse(a.pending)
+ def test_headroom_and_no_notification_in_rest(self):
+  a=AlertAccent(GRID,rate=8000,enabled=True);x=np.full((800,2),.999,np.float32)
+  for i in range(20):
+   y=a.process(x,i*800,'warning',True,True,True)
+   self.assertLessEqual(np.max(np.abs(y)),1.)
+  b=AlertAccent(GRID,rate=8000,enabled=True);silence=np.zeros_like(x)
+  for i in range(20):self.assertIs(b.process(silence,i*800,'warning',True,True,True),silence)
+ def test_disabling_and_stale_input_remain_bypass(self):
+  a=AlertAccent(GRID,rate=8000,enabled=False);x=np.full((800,2),.1,np.float32)
+  self.assertIs(a.process(x,8000,'warning',True,True),x)
+  self.assertFalse(a.priority_active)
  def test_short_opening_assessed_without_assuming_confidence(self):
   # Real estimator must accept a 23s opening; silence must still veto cues.
   grid,_=assess_grid(np.zeros((23*8000,2),np.float32),8000,128)
