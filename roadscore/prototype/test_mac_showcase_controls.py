@@ -191,7 +191,7 @@ class ControlTests(unittest.TestCase):
 
   def following_peer(self):
     status=dict(available=True,offroad=True,state='READY',live={'enabled':False},
-                demo=dict(available=True,session_id='comma-session',mode='recorded',signal_mode='recorded'))
+                demo=dict(available=True,session_id='comma-session',route='fixture-route',mode='recorded',signal_mode='recorded'))
     calls=[]
     def transport(method,*args):
       calls.append(method)
@@ -236,6 +236,13 @@ class ControlTests(unittest.TestCase):
     self.state['presentation_session_id']='new-mac-session';self.write_state()
     peer['demo']['mode']='engaged'
     self.wait_for(lambda:self.request()[1]['paired_controls']['following']['error']=='local_session_changed')
+    self.assertFalse((self.out/'demo_engagement.json').exists())
+
+  def test_different_local_route_cannot_receive_peer_controls(self):
+    peer,_=self.following_peer()
+    self.state['route']='other-route';self.write_state()
+    peer['demo']['mode']='engaged'
+    self.wait_for(lambda:self.request()[1]['paired_controls']['following']['error']=='peer_route_mismatch')
     self.assertFalse((self.out/'demo_engagement.json').exists())
 
 

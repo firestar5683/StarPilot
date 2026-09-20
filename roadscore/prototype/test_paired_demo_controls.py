@@ -16,7 +16,7 @@ from paired_demo_controls import GalaxyPeer, PairedDemoControls, _NoRedirect, _h
 BASE = 'https://galaxy.firestar.link/ABCDEFGHIJKLMNOP'
 COOKIE = 'ABCDEFGHIJKLMNOP%3A' + 'a' * 64
 READY = {'available': True, 'offroad': True, 'state': 'READY', 'live': {'enabled': False},
-         'demo': {'available': True, 'session_id': 'independent-peer-session',
+         'demo': {'available': True, 'session_id': 'independent-peer-session', 'route':'fixture-route',
                   'mode': 'recorded', 'signal_mode': 'recorded'}}
 
 
@@ -152,6 +152,15 @@ class PairedTests(unittest.TestCase):
     self.transport.status['state']='READY'
     self.transport.status['demo']['readiness']='PREPARING'
     with self.assertRaisesRegex(ValueError,'peer_not_ready_for_replay'):controls.read_status()
+
+  def test_follower_requires_and_pins_exact_route_identity(self):
+    controls=self.forwarder()
+    self.transport.status['demo'].pop('route')
+    with self.assertRaisesRegex(ValueError,'invalid_peer_route'):controls.read_status()
+    self.transport.status['demo']['route']='fixture-route'
+    self.assertEqual(controls.read_status()['route'],'fixture-route')
+    self.transport.status['demo']['route']='different-route'
+    with self.assertRaisesRegex(ValueError,'peer_route_changed'):controls.read_status()
 
   def test_late_status_and_disabled_reader_never_return_applied_state(self):
     controls = self.forwarder()

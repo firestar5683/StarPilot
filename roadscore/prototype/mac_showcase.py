@@ -70,6 +70,8 @@ def control_server(project, out, shared, port, forwarder=None, *, follow_peer=Fa
           following.update(status='pending',error='peer_action_in_progress',snapshot=None);return
         demo=operator.demo_status()
         if not demo['available']:raise ValueError('local_replay_unready')
+        local_route=demo.get('route') or module.read_json(out/'status.json').get('route')
+        if snapshot['route']!=local_route:raise ValueError('peer_route_mismatch')
         if local_session is None:local_session=demo['session_id']
         elif demo['session_id']!=local_session:raise ValueError('local_session_changed')
         signature=(snapshot['session_id'],local_session,snapshot['mode'],snapshot['signal_mode'],sequence)
@@ -84,7 +86,8 @@ def control_server(project, out, shared, port, forwarder=None, *, follow_peer=Fa
         following.update(status='following' if matching else 'applying',error=None,snapshot=snapshot)
     except Exception as error:
       known={'peer_action_in_progress','peer_session_changed','local_session_changed','local_replay_unready',
-             'peer_not_ready_for_replay','invalid_peer_session','forwarder_disabled'}
+             'peer_not_ready_for_replay','invalid_peer_session','forwarder_disabled','invalid_peer_route',
+             'peer_route_changed','peer_route_mismatch'}
       reason=str(error) if str(error) in known else 'peer_timeout' if isinstance(error,TimeoutError) else 'peer_status_unavailable'
       with control_lock:following.update(status='paused',error=reason,snapshot=None)
   def follow():
@@ -235,6 +238,9 @@ def audio_worker(a):
         if now-last_status>=.08:
           shared.update(state='READY' if anchor else 'PREPARING',audio_s=max(0,(position or 0)/rate))
           snapshot=dict(command_wall=now,input_mode='replay',compute='prepared-core',composer='ace',profile='prism',style='Prism',readiness=shared['state'],section='PREPARED PRISM',route=a.route,buffered=max(0,(len(audio)-(position or 0))/rate),presentation_session_id=session,demo_engagement_mode=controls.mode,demo_signal_mode=controls.signal_mode,engagement_presentation={'enabled':True},generation_invoked=False)
+          if anchor is not None and state['route_t'] is not None and np.isfinite(state['route_t']):
+            snapshot.update(route_t=float(state['route_t']),elapsed=max(0,(position or 0)/rate),
+                            source_model_ns=int(sm.logMonoTime['modelV2']))
           snapshot=delay.apply(snapshot,rendered)
           # The command API must remain available during initial DAC lead-in.
           snapshot.setdefault('engagement_presentation',{'enabled':True})

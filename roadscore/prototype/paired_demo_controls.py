@@ -141,6 +141,7 @@ class PairedDemoControls:
     self._active = None
     self._closed = False
     self._bound_session = None
+    self._bound_route = None
     self._write_revision = 0
 
   def read_status(self):
@@ -162,12 +163,15 @@ class PairedDemoControls:
     received = time.monotonic()
     if received-started >= min(self.timeout,.75):raise TimeoutError()
     session = _session(status)
+    route = status['demo'].get('route')
+    if not isinstance(route,str) or not route or route=='live':raise ValueError('invalid_peer_route')
     with self._lock:
       if self._closed:raise ValueError('forwarder_disabled')
       if revision != self._write_revision or self._active is not None:raise ValueError('peer_action_in_progress')
-      if self._bound_session is None:self._bound_session=session
+      if self._bound_session is None:self._bound_session,self._bound_route=session,route
       elif session != self._bound_session:raise ValueError('peer_session_changed')
-    return dict(session_id=session,mode=status['demo']['mode'],signal_mode=status['demo']['signal_mode'],
+      elif route != self._bound_route:raise ValueError('peer_route_changed')
+    return dict(session_id=session,route=route,mode=status['demo']['mode'],signal_mode=status['demo']['signal_mode'],
                 request_started_wall=started,received_wall=received,peer_status=status)
 
   def _result(self, status, action, value, *, acknowledged=False, applied=False,
