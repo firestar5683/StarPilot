@@ -83,7 +83,7 @@ def overlay_view(state):
     activity = 'PREPARING'
   stored = state.get('compute') == 'none'
   composer = display_text(state.get('composer')).upper()
-  backend = ('STORED SCORE', 'NO COMPUTE') if stored else ((composer, 'CHESTNUT') if composer in ('ACE', 'SA3') else ('LOCAL SCORE', ''))
+  backend = ('PREPARED', 'LOCAL') if state.get('compute')=='prepared-core' else (('STORED SCORE', 'NO COMPUTE') if stored else ((composer, 'CHESTNUT') if composer in ('ACE', 'SA3') else ('LOCAL SCORE', '')))
   profile = state.get('style') or str(state.get('profile') or 'Preparing').title()
   section = display_text(state.get('section') or 'Waiting for score').upper()
   section = section.removesuffix(' / CONTINUOUS')

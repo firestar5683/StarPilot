@@ -69,10 +69,14 @@ class PreparedPresentation:
     self.curve.grid = self.alert.grid = grid
     competing = self.shaker.active or abs(self.engagement.mix-float(active)) > .01
     result = self.alert.process(pcm, frame, state['alert_key'], state['alert_meaningful'], state['fresh'], competing)
-    result = self.curve.process(result, frame, state['curve'], source_fresh=state['model_fresh'], blocked=self.alert.priority_active or (self.motion.stopped and self.motion.fresh))
+    curve_grid=None
+    if state['curve'].get('demo_build_drop') and state.get('route_t') is not None:
+      curve_grid=self.rhythm.at(frame+round((state['curve']['predicted_peak']-state['route_t'])*self.rhythm.rate))
+    result = self.curve.process(result, frame, state['curve'], source_fresh=state['model_fresh'], blocked=self.alert.priority_active or (self.motion.stopped and self.motion.fresh),route_time=state.get('route_t'),payoff_grid=curve_grid)
     result = self.motion.process(result, speed=state['speed'], source_fresh=state['car_fresh'])
     result = self.engagement.process(result, active, self.config)
     gain = self.contained_gain+(1-self.contained_gain)*min(self.engagement.mix, self.motion.dsp.mix)
+    if self.curve.impact is not None and self.curve.impact.snapshot().get('rendered_active'):gain=0.
     shaken = self.shaker.process(result, frame, signal_on, state['car_fresh'], sequence_key=signal_mode, presentation_gain=gain)
     if not self.alert.priority_active:
       result = shaken

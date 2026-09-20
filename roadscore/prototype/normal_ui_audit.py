@@ -28,7 +28,7 @@ if replay_controls.enabled:
   if isinstance(sm,ReplayStateView) and apply_turn_intent(self,replay_arrow_mode):return
   return original_turn_intent(self)
  TurnIntent._update_state=replay_turn_intent
-display_hold=ReplayDisplayHold(os.environ.get("ROADSCORE_AUDIO_DRAIN_FILE"), enabled=os.environ.get("OPENPILOT_PREFIX")=="roadscore_replay")
+display_hold=ReplayDisplayHold(os.environ.get("ROADSCORE_AUDIO_DRAIN_FILE"), enabled=os.environ.get("OPENPILOT_PREFIX")=="roadscore_replay" or replay_controls.enabled)
 original_state=UIState._update_state
 def replay_state(self,*args,**kwargs):
  result=original_state(self,*args,**kwargs)

@@ -79,6 +79,20 @@ class CurveTests(unittest.TestCase):
   self.assertTrue(np.array_equal(source,original));self.assertTrue(np.isfinite(wave).all())
   self.assertLess(np.abs(wave).max(),1.)
   self.assertEqual(dsp.snapshot()['curve_reaction']['source'],'known replay route event')
+ def test_explicit_cut_drop_schedules_before_apex_and_returns_to_core(self):
+  rate=48000;t=np.arange(rate*4)/rate
+  pcm=np.column_stack([.2*np.sin(2*np.pi*80*t)+.1*np.sin(2*np.pi*1000*t)]*2).astype('float32')
+  grid=ShakerGrid(120,0,1,1,True,'fixture');dsp=CurveReaction(grid,enabled=True,bass_build=True)
+  output=[]
+  for frame in range(0,len(pcm),4800):
+   now=frame/rate
+   state=dict(kind='curve',phase='anticipation' if now<3 else 'event',amount=min(1.,now/3),activation=0.,predicted_peak=3.,demo_staged_curve=True,demo_build_drop=True)
+   output.append(dsp.process(pcm[frame:frame+4800],frame,state,route_time=now,payoff_grid=grid))
+  result=np.concatenate(output)
+  self.assertEqual(dsp.impact_payoff,3*rate)
+  self.assertEqual(dsp.impact.snapshot()['actual_payoff_frame'],3*rate)
+  self.assertLess(np.max(abs(result[round(2.9*rate):3*rate])),1e-6)
+  np.testing.assert_array_equal(result[round(3.6*rate):],pcm[round(3.6*rate):])
 
 
 if __name__=='__main__':unittest.main()

@@ -37,7 +37,8 @@ def main():
    state={key:row.get(key) for key in ('kind','phase','amount','activation','predicted_peak')}
    if staged:state=plan.state(row['route_t'],plan.value['route'],state)
    dsp.grid=timeline.at(frame)
-   began=time.perf_counter();output.append(dsp.process(wave[offset:offset+4800],frame,state));timings.append(time.perf_counter()-began)
+   target=frame+round((state.get('predicted_peak',row['route_t'])-row['route_t'])*rate) if state.get('demo_build_drop') else frame
+   began=time.perf_counter();output.append(dsp.process(wave[offset:offset+4800],frame,state,route_time=row['route_t'],payoff_grid=timeline.at(target)));timings.append(time.perf_counter()-began)
    events.append({'audio_s':frame/rate,'route_s':row['route_t'],**dsp.snapshot()['curve_reaction']})
   audio=np.concatenate(output);sf.write(args.output/name,audio,rate,subtype='FLOAT')
   report['files'][name]={'peak':float(abs(audio).max()),'over_full_scale':int(np.count_nonzero(abs(audio)>1)),

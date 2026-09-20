@@ -86,7 +86,7 @@ def audio_worker(a):
       raise ValueError('Staged curve plan does not match prepared route/start')
     staged = ReplayCurvePlan(value)
     write_json(a.out/'demo_curve_plan.json',value)
-  state = dict(active=False,signal_on=False,fresh=False,car_fresh=False,model_fresh=False,speed=0.,alert_key='',alert_meaningful=False,curve={'kind':'curve','phase':'neutral','amount':0.,'activation':None})
+  state = dict(active=False,signal_on=False,fresh=False,car_fresh=False,model_fresh=False,speed=0.,alert_key='',alert_meaningful=False,route_t=None,curve={'kind':'curve','phase':'neutral','amount':0.,'activation':None})
   received = {name:float('-inf') for name in sm.services}
   anchor = None
   position = None
@@ -132,11 +132,13 @@ def audio_worker(a):
         def fresh(name):return bool(sm.valid[name] and 0<=now-received[name]<=.6 and 0<=(latest-sm.logMonoTime[name])/1e9<=1.)
         c=sm['carState'];s=sm['selfdriveState']
         update=dict(active=bool(s.active) and fresh('selfdriveState'),signal_on=bool(c.leftBlinker or c.rightBlinker),fresh=fresh('selfdriveState'),car_fresh=fresh('carState'),model_fresh=fresh('modelV2'),speed=float(c.vEgo),alert_key=str(s.alertType),alert_meaningful=int(s.alertStatus.raw)>0 and int(s.alertSize.raw)>0,curve=state['curve'])
+        update['route_t']=state['route_t']
         if sm.updated['modelV2']:
           mono=sm.logMonoTime['modelV2']
           if anchor is None:anchor=(mono,now);started=now
           if abs((mono-anchor[0])/1e9-(now-anchor[1]))>.75:raise RuntimeError('Prepared showcase left its 1x replay clock')
           route_t=(mono-meta['first_model_ns'])/1e9
+          update['route_t']=route_t
           m=sm['modelV2']
           curve=conductor.update(route_t,{'mono':mono,'eof':m.timestampEof,'t':list(m.orientationRate.t),'yaw':list(m.orientationRate.z),'v':list(m.velocity.x)},float(c.vEgo)) if fresh('modelV2') and len(m.position.t)==33 else conductor.state(route_t)
           update['curve']=staged.state(route_t,a.route,curve) if staged else curve
@@ -152,6 +154,7 @@ def audio_worker(a):
         if started and now-started>=a.duration:break
         if started and now-received['modelV2']>2 and (position or 0)/rate < len(audio)/rate-2:raise RuntimeError('Replay model stream stopped before prepared audio ended')
   finally:
+    write_json(a.out/'audio_drained.json',dict(wall=time.monotonic(),drained=not errors))
     server.shutdown();trace.close()
     write_json(a.out/'prepared_summary.json',dict(generation_invoked=False,source=str(a.score_archive),first_source_frame=first_frame,last_source_frame=position,sample_rate=rate,portaudio_flags=flags,max_clock_error_seconds=max_drift,callback_errors=errors,muted=a.muted,session_id=session,manual_scope='isolated replay display and presentation only'))
   if errors:raise RuntimeError(errors[0])
@@ -206,7 +209,8 @@ def main():
   out.mkdir(parents=True,exist_ok=False)
   env=os.environ.copy()
   env.update(PYTHONDONTWRITEBYTECODE='1',ZMQ='1',OPENPILOT_ZMQ_NAMESPACE='roadscore-showcase-'+session,ROADSCORE_SHOWCASE_SESSION=session,ROADSCORE_PREPARED_SHOWCASE='1',ROADSCORE_REPLAY_UI_CONTROLS='1',PARAMS_ROOT=str(out/'params'),BASEDIR=str(rt),NOBOARD='1',SIMULATION='1',SKIP_FW_QUERY='1',BIG='0',SP_ALLOW_DESKTOP_FAKE_WIFI='0',SP_ALLOW_DESKTOP_FAKE_BLUETOOTH='0',SP_ONROAD_NAV_DEMO='0',SP_ONROAD_CEM_DEMO='0',ROADSCORE_CLEAN_DEMO_UI='1',ROADSCORE_OVERLAY='1',ROADSCORE_STATUS_FILE=str(out/'status.json'),ROADSCORE_UI_AUDIT=str(out/'ui_audit.jsonl'),ROADSCORE_OVERLAY_CAPTURE=str(out/'overlay.png'),ROADSCORE_PRESENTATION_POLICY='conservative-v4')
-  env.pop('OPENPILOT_PREFIX',None)
+  env['OPENPILOT_PREFIX']='roadscore-showcase-'+session
+  env['ROADSCORE_AUDIO_DRAIN_FILE']=str(out/'audio_drained.json')
   env['PWD']=str(rt)
   env['PYTHONPATH']=':'.join(map(str,[HERE,rt,rt/'starpilot/third_party',*rt.glob('*_repo'),project/'roadscore/.analysis-venv/lib/python3.12/site-packages']))
   args=launch['native_replay_args'][:]

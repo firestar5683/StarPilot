@@ -242,7 +242,12 @@ def callback(out,n,ti,status):
  if curve_reaction is not None:
   curve_fresh=road_model_valid and 0<=callback_wall-command_wall<=.5
   motion_blocked=bool(motion is not None and motion.stopped and motion.fresh)
-  rendered=curve_reaction.process(rendered,frames-n,event_state.get('demo_curve_state',event_state),source_fresh=curve_fresh,blocked=alert_priority or motion_blocked)
+  curve_state=event_state.get('demo_curve_state',event_state)
+  curve_grid=None
+  if curve_state.get('demo_build_drop') and rhythm_timeline is not None:
+   target_frame=frames-n+round((curve_state['predicted_peak']-source_time)*rate)
+   curve_grid=rhythm_timeline.at(target_frame)
+  rendered=curve_reaction.process(rendered,frames-n,curve_state,source_fresh=curve_fresh,blocked=alert_priority or motion_blocked,route_time=source_time,payoff_grid=curve_grid)
  if motion is not None:
   _,motion_fresh=engagement_active(motion_state[1],True,motion_state[2],motion_state[4],motion_state[3],callback_wall)
   rendered=motion.process(rendered,speed=motion_state[0],source_fresh=motion_fresh)
@@ -251,6 +256,8 @@ def callback(out,n,ti,status):
   open_mix=presentation.mix if presentation is not None else 1.
   if motion is not None:open_mix=min(open_mix,motion.dsp.mix)
   cue_gain=shaker_contained_gain+(1.-shaker_contained_gain)*open_mix
+  curve_priority=bool(curve_reaction is not None and curve_reaction.impact is not None and curve_reaction.impact.snapshot().get('rendered_active'))
+  if curve_priority:cue_gain=0.
   shaken=shaker.process(rendered,frames-n,signal_on,signal_fresh,sequence_key=demo_signal_mode,presentation_gain=cue_gain)
   if alert_priority:shaker.rendered_active=False;shaker.rendered_peak=0.;shaker.suppression_reason='meaningful alert priority'
   else:rendered=shaken

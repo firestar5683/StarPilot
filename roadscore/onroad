@@ -1,5 +1,10 @@
 #!/usr/bin/env bash
 set -euo pipefail
+for argument in "$@"; do
+  if [[ "$argument" == "--prepared-showcase" ]]; then
+    exec python3 "$(dirname "$0")/prototype/mac_showcase.py" "$@"
+  fi
+done
 if [ -f /TICI ]; then
   # A plain device shell does not activate openpilot's Python environment.
   export PYTHONPATH="/data/roadscore-feasibility/venv/lib/python3.12/site-packages${PYTHONPATH:+:$PYTHONPATH}"

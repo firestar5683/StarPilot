@@ -15,6 +15,8 @@ def validate(value):
   raise ValueError('Curve plan requires its exact route identity')
  if type(value.get('replay_start')) is not int or value['replay_start']<0:
   raise ValueError('Curve plan requires its exact replay start')
+ if value.get('treatment','bass-return') not in ('bass-return','build-cut-drop'):
+  raise ValueError('Unknown demo curve treatment')
  events=value.get('curves')
  if not isinstance(events,list) or not 1<=len(events)<=3:
   raise ValueError('Curve plan requires one to three measured events')
@@ -61,5 +63,5 @@ class ReplayCurvePlan:
     amount=progress*progress*(3.-2.*progress)
     return {**recorded,'kind':'curve','activation':start,'predicted_peak':apex,
             'phase':'anticipation' if now<apex else 'event','amount':amount,
-            'demo_staged_curve':True}
+            'demo_staged_curve':True,'demo_build_drop':self.value.get('treatment')=='build-cut-drop'}
   return recorded
