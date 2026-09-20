@@ -79,6 +79,7 @@ def main():
   while time.monotonic() - start < args.seconds:
     sm.update(100)
     now = time.monotonic()
+    source_now = time.clock_gettime(getattr(time, 'CLOCK_BOOTTIME', time.CLOCK_MONOTONIC))
     for event in messaging.drain_sock(can_socket, wait_for_one=False):
       last_can = event.logMonoTime / 1e9
       for frame in event.can:
@@ -93,12 +94,12 @@ def main():
       continue
     next_report = now + 1
     row = {'kind': 'observation', 'elapsed': now-start, 'topics': {},
-           'can_age_s': None if last_can is None else now-last_can,
+           'can_age_s': None if last_can is None else source_now-last_can,
            'brake_can_counts_total': {hex(k): v for k, v in counts.items()},
            'brake_raw_values_seen': {hex(k): sorted(v) for k, v in brake_values.items()}}
     for topic in topics:
       entry = {'seen': bool(sm.seen[topic]), 'valid': bool(sm.valid[topic]), 'alive': bool(sm.alive[topic]),
-               'age_s': now-sm.logMonoTime[topic]/1e9 if sm.seen[topic] else None}
+               'age_s': source_now-sm.logMonoTime[topic]/1e9 if sm.seen[topic] else None}
       if sm.seen[topic]:
         if topic in FIELDS:
           entry['data'] = select(sm[topic], FIELDS[topic])
