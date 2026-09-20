@@ -18,6 +18,7 @@ import time
 
 BPM = 100
 INTERVAL = 60 / BPM
+TEST_COUNT = 12
 COUNT_IN = 8
 COUNT = 20
 MARKER_COUNT = COUNT - COUNT_IN
@@ -268,7 +269,7 @@ class OutputOwner:
         token = secrets.token_hex(16)
         clicks = {}
         try:
-          sink = self.sink_factory(lambda index, at: clicks.__setitem__(index, at), count=4 if action == 'test' else COUNT)
+          sink = self.sink_factory(lambda index, at: clicks.__setitem__(index, at), count=TEST_COUNT if action == 'test' else COUNT)
           if self.output_provider() != state['output']:
             sink.close()
             raise ValueError('Output changed before calibration began')
@@ -283,7 +284,7 @@ class OutputOwner:
             session_lease.__exit__(None, None, None); operator.__exit__(None, None, None)
           raise
         threading.Thread(target=self._watch, args=(token,), daemon=True).start()
-        return dict(ok=True, session=token, interval_ms=round(INTERVAL * 1000), beats=4 if action=='test' else COUNT,
+        return dict(ok=True, session=token, interval_ms=round(INTERVAL * 1000), beats=TEST_COUNT if action=='test' else COUNT,
                     count_in=COUNT_IN,bpm=BPM,beats_per_bar=4,method=METHOD,marker_count=MARKER_COUNT,target_taps=MARKER_COUNT,
                     marker_offsets_ms=[round(at*1000) for at in MARKER_OFFSETS],
                     instructions='Listen to two bars without tapping. Then tap once at the START of each two-tone marker; wait through the silence. The estimate includes your reaction time.')

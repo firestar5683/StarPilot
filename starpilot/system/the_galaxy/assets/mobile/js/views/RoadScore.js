@@ -73,8 +73,8 @@ export const RoadScore = {
       const first = this.testClicks.find(click => click.beat === 0)
       const index = first ? Math.floor((now - first.server_ms) / (60000 / this.bpm)) : -1
       this.beatIndex = index
-      this.beat = index >= 0 && index < this.countIn ? String(index % 4 + 1) : '♪'
-      this.cue = index < 0 ? 'Getting ready…' : index < this.countIn && !this.testMode ? `Listen · count-in bar ${Math.floor(index / 4) + 1} of 2` : this.testMode ? 'Watch and listen' : 'Tap once when you hear each chime · wait through the gaps'
+      this.beat = index >= 0 && index < (this.testMode ? 12 : this.countIn) ? String(index % 4 + 1) : '♪'
+      this.cue = index < 0 ? 'Getting ready…' : index < this.countIn && !this.testMode ? `Listen · count-in bar ${Math.floor(index / 4) + 1} of 2` : this.testMode ? (index < 12 ? `Watch and listen · bar ${Math.floor(index / 4) + 1} of 3` : 'Test complete') : 'Tap once when you hear each chime · wait through the gaps'
       this.animation = requestAnimationFrame(() => this.animateBeat())
     },
     keyTap(event) {

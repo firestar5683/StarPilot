@@ -211,10 +211,12 @@ class OutputTests(unittest.TestCase):
     stamps=[]
     with patch.dict(sys.modules,{'sounddevice':fake}):
       from operator_click_process import ClickSequence
-      sink=ClickSequence(lambda i,at:stamps.append((i,at)),0,count=4)
-      second=ClickSequence(lambda *_:None,0,count=4)
+      sink=ClickSequence(lambda i,at:stamps.append((i,at)),0,count=m.TEST_COUNT)
+      second=ClickSequence(lambda *_:None,0,count=m.TEST_COUNT)
       markers=ClickSequence(lambda *_:None,0,count=m.COUNT)
       markers_again=ClickSequence(lambda *_:None,0,count=m.COUNT)
+    self.assertEqual(len(sink.beats), 12)
+    self.assertTrue(all(b-a == 28800 for a,b in zip(sink.beats,sink.beats[1:])))
     self.assertTrue(np.array_equal(sink.pcm,second.pcm))
     self.assertTrue(np.array_equal(markers.pcm,markers_again.pcm))
     self.assertEqual(len(markers.beats),20)
