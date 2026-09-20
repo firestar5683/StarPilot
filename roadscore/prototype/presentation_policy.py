@@ -12,7 +12,7 @@ CONSERVATIVE = {
 
 CONSERVATIVE_V2 = {**copy.deepcopy(CONSERVATIVE), 'presentation_policy_version':'conservative-v2', 'alert_accent':{'enabled':True}, 'core_apex':{'enabled':True,'dip_db':-3.}}
 
-CONSERVATIVE_V3 = {**copy.deepcopy(CONSERVATIVE_V2), 'presentation_policy_version':'conservative-v3', 'stopped_motion':{'enabled':True}}
+CONSERVATIVE_V3 = {**copy.deepcopy(CONSERVATIVE_V2), 'presentation_policy_version':'conservative-v3', 'stopped_motion':{'enabled':True}, 'signal_shaker':{'enabled':True,'peak':.018}}
 
 def select_launch(composer, profile, replay=False, judging=False, render_mode=None, policy=None):
  if policy is not None and policy not in POLICIES:raise ValueError('Unknown presentation policy')
@@ -29,7 +29,7 @@ def select_launch(composer, profile, replay=False, judging=False, render_mode=No
   return {'render_mode':'current','policy':'frozen'}
  normal_prism=composer=='ace' and profile=='prism'
  mode=render_mode or ('gold-core' if normal_prism else 'current')
- chosen=policy or ('conservative-v2' if normal_prism and mode=='gold-core' else 'off')
+ chosen=policy or ('conservative-v3' if normal_prism and mode=='gold-core' else 'off')
  if chosen in ('conservative-v1','conservative-v2','conservative-v3') and (composer!='ace' or mode!='gold-core'):
   raise ValueError('Conservative presentation requires ACE gold-core rendering')
  return {'render_mode':mode,'policy':chosen}

@@ -7,7 +7,7 @@ class PolicyTests(unittest.TestCase):
   fragment=Path(__file__).resolve().parents[1]/'tools/presentation_conservative_v1.json'
   self.assertEqual(json.loads(fragment.read_text()),CONSERVATIVE)
  def test_normal_prism_gets_integrated_policy_without_extra_flags(self):
-  self.assertEqual(select_launch('ace','prism'),{'render_mode':'gold-core','policy':'conservative-v2'})
+  self.assertEqual(select_launch('ace','prism'),{'render_mode':'gold-core','policy':'conservative-v3'})
  def test_explicit_optouts(self):
   self.assertEqual(select_launch('ace','prism',policy='off'),{'render_mode':'gold-core','policy':'off'})
   self.assertEqual(select_launch('ace','prism',render_mode='current'),{'render_mode':'current','policy':'off'})
@@ -35,7 +35,7 @@ class PolicyTests(unittest.TestCase):
   self.assertTrue(latest['alert_accent']['enabled'])
   self.assertEqual(latest['core_apex']['dip_db'],-3.)
  def test_stopped_motion_candidate_preserves_default_and_optout(self):
-  self.assertEqual(select_launch('ace','prism')['policy'],'conservative-v2')
+  self.assertEqual(select_launch('ace','prism')['policy'],'conservative-v3')
   candidate=effective_config({}, {'ROADSCORE_PRESENTATION_POLICY':'conservative-v3'})
   self.assertTrue(candidate['stopped_motion']['enabled'])
   self.assertTrue(candidate['engagement_presentation']['enabled'])

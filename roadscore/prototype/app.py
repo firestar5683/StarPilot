@@ -131,7 +131,7 @@ if shaker_enabled or apex_enabled or alert_enabled:
  shaker_grid,shaker_analysis=assess_grid(source,rate,profile_tempo_prior(profile_manifest))
  rhythm_timeline=RhythmTimeline(rate,profile_tempo_prior(profile_manifest));rhythm_timeline.add(source,0)
  shaker_grid=rhythm_timeline.at(0)
- shaker=SignalShaker(shaker_grid,rate,enabled=shaker_enabled)
+ shaker=SignalShaker(shaker_grid,rate,enabled=shaker_enabled,peak=config.get('signal_shaker',{}).get('peak',.012))
  apex=CoreApex(shaker_grid,rate,enabled=apex_enabled,dip_db=config.get('core_apex',{}).get('dip_db',-1.))
  alert_accent=AlertAccent(shaker_grid,rate,enabled=alert_enabled)
  (run/'shaker_grid.json').write_text(json.dumps({'grid':shaker.snapshot(),'analysis':shaker_analysis},indent=2))
@@ -210,12 +210,20 @@ def callback(out,n,ti,status):
   if shaker is not None:shaker.set_grid(audible_grid,frames-n)
   if apex is not None:apex.grid=audible_grid
   if alert_accent is not None:alert_accent.grid=audible_grid
- if shaker is not None:rendered=shaker.process(rendered,frames-n,signal_on,signal_fresh)
- if apex is not None:rendered=apex.process(rendered,frames-n,event_state)
+ alert_priority=False
  if alert_accent is not None:
   alert_key,meaningful=alert_state
   competing=bool((shaker is not None and shaker.active) or (apex is not None and apex.rendered_active) or (presentation is not None and abs(presentation.mix-float(active))>.01))
   rendered=alert_accent.process(rendered,frames-n,alert_key,meaningful,fresh,competing)
+  alert_priority=alert_accent.priority_active
+ if shaker is not None:
+  shaken=shaker.process(rendered,frames-n,signal_on,signal_fresh)
+  if alert_priority:shaker.rendered_active=False;shaker.rendered_peak=0.
+  else:rendered=shaken
+ if apex is not None:
+  accented=apex.process(rendered,frames-n,event_state)
+  if alert_priority:apex.rendered_active=False
+  else:rendered=accented
  if motion is not None:
   _,motion_fresh=engagement_active(motion_state[1],True,motion_state[2],motion_state[4],motion_state[3],callback_wall)
   rendered=motion.process(rendered,speed=motion_state[0],source_fresh=motion_fresh)
