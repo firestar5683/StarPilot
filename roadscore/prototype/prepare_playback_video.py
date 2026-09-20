@@ -35,7 +35,7 @@ def validate_output(source, output, timestamps):
     raise ValueError('Output timestamps are not aligned with source frame indices')
   if abs(float(output['duration'])-count/float(rate))>tolerance:
     raise ValueError('Output duration differs')
-  return {'source_frames':count,'output_frames':count,'width':source['width'],'height':source['height'],
+  return {'codec':'h264','source_frames':count,'output_frames':count,'width':source['width'],'height':source['height'],
           'frame_order_verified':True,'timing_verified':True,'rate':str(rate),
           'duration':count/float(rate),'verification':'one-to-one sequential transcode; no frame filters, passthrough timing, no B frames; decoded counts and every output PTS checked'}
 
