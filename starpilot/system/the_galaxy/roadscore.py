@@ -36,8 +36,8 @@ def current_worker(root, proc=Path('/proc')):
   root=Path(root);worker_path=root/'generated/ace_worker_state.json'
   worker=read_json(worker_path);owner=read_json(root/'generated/resident_owner.json')
   try:
-    pid=int(worker['pid']);parent=int(owner['power_worker_pid'])
-    if pid<=0 or parent<=0:return {}
+    pid=int(worker['pid']);parent=int(owner.get('power_worker_pid',0))
+    if pid<=0:return {}
     def process(identity,suffix):
       directory=proc/str(identity)
       arguments=(directory/'cmdline').read_bytes().split(b'\0')
@@ -45,8 +45,13 @@ def current_worker(root, proc=Path('/proc')):
       fields=(directory/'stat').read_text().rsplit(') ',1)[1].split()
       if fields[0]=='Z':raise ValueError('Exited process')
       return fields
-    child=process(pid,'/ace_worker.py');supervisor=process(parent,'/power_worker.py')
-    if int(child[1])!=parent or str(owner['process_start_ticks'])!=supervisor[19]:return {}
+    child=process(pid,'/ace_worker.py')
+    actual_parent=int(child[1]);supervisor=process(actual_parent,'/power_worker.py')
+    resident_valid=actual_parent==parent and str(owner.get('process_start_ticks',''))==supervisor[19]
+    if not resident_valid:
+      service=read_json(root/'generated/worker_service.json')
+      service_pid=int(service['pid']);service_process=process(service_pid,'/worker_service.py')
+      if int(supervisor[1])!=service_pid or str(service['start_ticks'])!=service_process[19]:return {}
     recorded=worker.get('process_start_ticks',worker.get('start_ticks'))
     if recorded is not None and str(recorded)!=child[19]:return {}
     boot=next(int(line.split()[1]) for line in (proc/'stat').read_text().splitlines() if line.startswith('btime '))

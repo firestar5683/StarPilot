@@ -50,14 +50,17 @@ class OutputTests(unittest.TestCase):
 
   def test_paired_beats_outliers_duplicate_and_save(self):
     token=self.owner.dispatch('calibration_start', attended=True)['session']
-    offsets=[200,201,198,202,199,203,197,200,201,199,1000,205]
-    for i, offset in enumerate(offsets):
-      click=100000+i*2400; self.clock.value=(click+offset)/1000
+    for i in range(8):self.owner.session['sink'].callback(i,100000+i*600)
+    with self.assertRaises(ValueError):self.owner.dispatch('calibration_tap',session=token,server_ms=100200,uncertainty_ms=3)
+    offsets=[200,201,198,202,199,203,197,200,201,199,400,205,200,201,199,200]
+    for index, offset in enumerate(offsets):
+      i=index+8;click=100000+i*600;self.clock.value=(click+offset)/1000
       self.owner.session['sink'].callback(i,click)
       self.owner.dispatch('calibration_tap', session=token, server_ms=click+offset, uncertainty_ms=3)
-    with self.assertRaises(ValueError): self.owner.dispatch('calibration_tap', session=token, server_ms=126605, uncertainty_ms=3)
+      with self.assertRaises(ValueError):self.owner.dispatch('calibration_tap',session=token,server_ms=click+offset+5,uncertainty_ms=3)
     result=self.owner.dispatch('calibration_result',session=token)
     self.assertEqual(result['latency_ms'],200);self.assertEqual(result['rejected_taps'],1)
+    self.assertEqual(result['count_in_beats'],8);self.assertTrue(result['whole_beat_ambiguity_possible'])
     self.assertFalse((self.root/'generated/output_timing.json').exists())
     self.owner.dispatch('set_latency',latency_ms=result['latency_ms'])
     self.assertEqual(self.owner.status()['latency_ms'],200)
@@ -145,6 +148,8 @@ class OutputTests(unittest.TestCase):
       second=ClickSequence(lambda *_:None,0,count=4)
     self.assertTrue(np.array_equal(sink.pcm,second.pcm))
     self.assertLessEqual(abs(sink.pcm).max(),.071)
+    self.assertEqual(sink.beats[1]-sink.beats[0],28800)
+    self.assertGreater(abs(sink.pcm[sink.beats[0]:sink.beats[0]+1000]).max(),abs(sink.pcm[sink.beats[1]:sink.beats[1]+1000]).max())
     sink.index=sink.beats[0]
     with patch('operator_click_process.time.monotonic',return_value=50):
       out=np.zeros((480,2),dtype=np.float32)

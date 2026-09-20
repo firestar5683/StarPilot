@@ -1,11 +1,11 @@
 """Explicitly attended calibration process; no import-time audio output."""
 import time
 RATE=48000
-INTERVAL=2.4
+INTERVAL=.6
 
 class ClickSequence:
   """Prebuilt low-level click PCM; callback only copies memory and timestamps."""
-  def __init__(self, on_click, device, count=12):
+  def __init__(self, on_click, device, count=24):
     import numpy as np
     import sounddevice as sd
     self.sd = sd
@@ -17,8 +17,8 @@ class ClickSequence:
     self.pcm = np.zeros((self.beats[-1] + RATE, 2), dtype='float32')
     t = np.arange(round(.018 * RATE)) / RATE
     click = (.07 * np.sin(2 * np.pi * 1100 * t) * np.exp(-t * 180)).astype('float32')
-    for beat in self.beats:
-      self.pcm[beat:beat + len(click)] = click[:, None]
+    for index,beat in enumerate(self.beats):
+      self.pcm[beat:beat + len(click)] = click[:, None]*(1.0 if index%4==0 else .65)
     self.stream = sd.OutputStream(device=device, samplerate=RATE, channels=2, dtype='float32', blocksize=480,
                                   callback=self.callback)
 
@@ -49,7 +49,7 @@ def main():
   from pathlib import Path
   from bluetooth_output import prepare_output,select_device
   from operator_output import real_offroad,selected_output
-  p=argparse.ArgumentParser();p.add_argument('--address',required=True);p.add_argument('--count',type=int,choices=[4,12],required=True);args=p.parse_args()
+  p=argparse.ArgumentParser();p.add_argument('--address',required=True);p.add_argument('--count',type=int,choices=[4,24],required=True);args=p.parse_args()
   output=selected_output()
   if not real_offroad() or not output or not output['connected'] or output['address']!=args.address:
     raise RuntimeError('Park and reconnect the selected Bluetooth speaker before calibration')

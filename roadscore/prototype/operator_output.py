@@ -16,8 +16,10 @@ import subprocess
 import threading
 import time
 
-INTERVAL = 2.4
-COUNT = 12
+BPM = 100
+INTERVAL = 60 / BPM
+COUNT_IN = 8
+COUNT = 24
 RATE = 48000
 
 
@@ -246,7 +248,7 @@ class OutputOwner:
             session_lease.__exit__(None, None, None); operator.__exit__(None, None, None)
           raise
         threading.Thread(target=self._watch, args=(token,), daemon=True).start()
-        return dict(ok=True, session=token, interval_ms=round(INTERVAL * 1000), beats=COUNT)
+        return dict(ok=True, session=token, interval_ms=round(INTERVAL * 1000), beats=COUNT,count_in=COUNT_IN,bpm=BPM,beats_per_bar=4)
       if action == 'set_latency':
         value = data.get('latency_ms')
         if type(value) is not int or not 0 <= value <= 1500:
@@ -277,16 +279,24 @@ class OutputOwner:
           raise ValueError('Clock synchronization is too uncertain; retry')
         if abs(at - self.clock() * 1000) > 2000:
           raise ValueError('Stale tap')
-        # At 2400 ms spacing, -500..1500 ms windows cannot overlap.
-        candidates = [(index, click) for index, click in list(session['clicks'].items()) if -500 <= at - click <= 1500]
-        if len(candidates) != 1 or candidates[0][0] in session['taps']:
-          raise ValueError('Tap once per click, in time with the sound')
-        index, click = candidates[0]
+        if session['test']:raise ValueError('Test mode does not collect taps')
+        if COUNT_IN not in session['clicks'] or at<session['clicks'][COUNT_IN]:
+          raise ValueError('Listen for two full bars; start tapping on bar three')
+        index=COUNT_IN+len(session['taps'])
+        if index>=COUNT or index not in session['clicks']:
+          raise ValueError('Wait for the next beat')
+        click=session['clicks'][index]
+        previous=max((tap for _,tap in session['taps'].values()),default=float('-inf'))
+        if at-previous<INTERVAL*1000*.45:
+          raise ValueError('Tap once per beat')
+        if not 0<=at-click<=1500:
+          raise ValueError('Beat sequence was missed; restart with the two-bar count-in')
         session['taps'][index] = (click, at)
         return dict(ok=True, accepted_taps=len(session['taps']))
       if action == 'calibration_result':
         try:
           result = robust_offset(list(session['taps'].values()))
+          result.update(bpm=BPM,count_in_beats=COUNT_IN,beat_pairing='sequential after two-bar count-in',whole_beat_ambiguity_possible=True)
         finally:
           self._close()
         return dict(ok=True, **result)

@@ -79,6 +79,11 @@ class CurrentWorkerTests(unittest.TestCase):
       worker['phase']='PREPARING';(generated/'ace_worker_state.json').write_text(json.dumps(worker))
       self.assertEqual(operator.current_worker(root,proc)['phase'],'PREPARING')
       process(10,1,101,'prototype/power_worker.py');self.assertEqual(operator.current_worker(root,proc),{})
+      process(9,1,90,'prototype/worker_service.py');process(10,9,101,'prototype/power_worker.py')
+      (generated/'worker_service.json').write_text(json.dumps(dict(pid=9,start_ticks='90')))
+      self.assertEqual(operator.current_worker(root,proc)['phase'],'PREPARING')
+      process(9,1,91,'prototype/worker_service.py');self.assertEqual(operator.current_worker(root,proc),{})
+
       process(10,1,100,'prototype/power_worker.py')
       os.utime(generated/'ace_worker_state.json',(0,0));self.assertEqual(operator.current_worker(root,proc),{})
       (proc/'11/cmdline').unlink();self.assertEqual(operator.current_worker(root,proc),{})
