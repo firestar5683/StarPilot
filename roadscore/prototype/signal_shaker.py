@@ -68,10 +68,11 @@ class SignalShaker:
   self.suppression_reason='disabled'
   if not self.enabled:return pcm
   key=sequence_key if sequence_key in ('left','right') else None
+  explicit_off=sequence_key=='off'
   changed=key is not None and self.sequence_key is not None and key!=self.sequence_key
   self.sequence_key=key
   end=start_frame+len(pcm)
-  if self.grid.usable and signal_fresh and signal_on:
+  if self.grid.usable and signal_fresh and signal_on and not explicit_off:
    self.last_on=start_frame
    # Only a deliberate opposite-direction command may restart an active motif.
    # One bar cooldown prevents rapid button presses from adding percussion spam.
@@ -79,7 +80,7 @@ class SignalShaker:
     self.active=True;self.stop_frame=None;self.sequence_pulses=0;self.sequence_start=start_frame
     tick=math.ceil((start_frame-self.origin)/self.step-1e-10);self.next_tick=tick
     self.sequence_starts.append(start_frame);self.events.append({'kind':'sequence_start','frame':start_frame,'direction':key,'next_pulse_frame':round(self.origin+tick*self.step)})
-  if self.active and (not self.grid.usable or not signal_fresh or (self.last_on is not None and start_frame-self.last_on>self.debounce)):
+  if self.active and (explicit_off or not self.grid.usable or not signal_fresh or (self.last_on is not None and start_frame-self.last_on>self.debounce)):
    self.active=False;self.stop_frame=start_frame;self.events.append({'kind':'release','frame':start_frame})
   overlay=np.zeros((len(pcm),2),np.float32)
   take=min(len(pcm),len(self.tail));overlay[:take]+=self.tail[:take];self.tail=self.tail[take:].copy()

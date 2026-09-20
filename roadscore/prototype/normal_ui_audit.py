@@ -19,13 +19,19 @@ if replay_controls.enabled:
   mode=sm.signal_mode if isinstance(sm,ReplayStateView) and ui_state.started else 'recorded'
   result=replay_turn_alert(self,mode,native_alert,lambda **fields:Alert(size=AlertSize.mid,status=AlertStatus.normal,**fields))
   ui_state.roadscore_replay_prompt_active=result is not None and result is getattr(self,'_roadscore_demo_alert',None)
-  replay_arrow_mode='recorded' if not ui_state.roadscore_replay_prompt_active and (native_alert is not None or self._prev_alert is not None) else mode
+  native_priority=not ui_state.roadscore_replay_prompt_active and (result is not None or self._prev_alert is not None)
+  replay_arrow_mode='off' if mode!='recorded' and native_priority else mode
   return result
  AlertRenderer.get_alert=replay_get_alert
  original_turn_intent=TurnIntent._update_state
  def replay_turn_intent(self):
   sm=ui_state.sm
-  if isinstance(sm,ReplayStateView) and apply_turn_intent(self,replay_arrow_mode):return
+  if isinstance(sm,ReplayStateView):
+   mode=sm.signal_mode if ui_state.started else 'recorded'
+   # Never fall through to recorded onroadEvents under a manual selection,
+   # including the frame before the alert renderer observes the new command.
+   if mode!='recorded' and replay_arrow_mode not in ('left','right'):mode='off'
+   if apply_turn_intent(self,mode):return
   return original_turn_intent(self)
  TurnIntent._update_state=replay_turn_intent
 display_hold=ReplayDisplayHold(os.environ.get("ROADSCORE_AUDIO_DRAIN_FILE"), enabled=os.environ.get("OPENPILOT_PREFIX")=="roadscore_replay" or replay_controls.enabled)

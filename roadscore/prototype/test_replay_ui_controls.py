@@ -14,6 +14,7 @@ class Subscriber:
   def __init__(self):
     self.builders = {
       'selfdriveState': log.SelfdriveState.new_message(enabled=True, active=True, state='enabled', alertText1='Recorded alert'),
+      'starpilotSelfdriveState': custom.StarPilotSelfdriveState.new_message(),
       'starpilotCarState': custom.StarPilotCarState.new_message(alwaysOnLateralEnabled=False, pauseLateral=True),
       'carState': car.CarState.new_message(leftBlinker=False, rightBlinker=True, vEgo=12),
     }
@@ -149,6 +150,81 @@ class Tests(unittest.TestCase):
       self.assertIsNone(replay_turn_alert(widget,self.view.signal_mode,None,SimpleNamespace))
       self.assertIsNone(widget._prev_alert)
 
+  def test_manual_signals_replace_recorded_blinkers_and_routine_alerts_only(self):
+    for service in ('selfdriveState','starpilotSelfdriveState'):
+      source=self.sm.builders[service]
+      source.alertType='preLaneChangeRight/warning';source.alertSize='mid';source.alertStatus='normal'
+      source.alertText1='Steer Right';source.alertText2='Confirm Lane Change'
+    before={key:value.to_dict() for key,value in self.sm.builders.items()}
+    for selection,blinkers in [('left',(True,False)),('right',(False,True)),('off',(False,False))]:
+      self.state('recorded',selection);self.view.update()
+      self.assertEqual((self.view['carState'].leftBlinker,self.view['carState'].rightBlinker),blinkers)
+      self.assertTrue(self.view['selfdriveState'].enabled)
+      for service in ('selfdriveState','starpilotSelfdriveState'):
+        self.assertEqual(str(self.view[service].alertSize),'none')
+        self.assertEqual(self.view[service].alertType,'')
+      for key,value in self.sm.builders.items():self.assertEqual(value.to_dict(),before[key])
+    self.state('recorded','recorded');self.view.update()
+    self.assertTrue(self.view['carState'].rightBlinker)
+    for service in ('selfdriveState','starpilotSelfdriveState'):
+      self.assertEqual(self.view[service].alertType,'preLaneChangeRight/warning')
+    for kind,status in [('laneChangeBlocked/warning','normal'),('steerUnavailable/immediateDisable','critical'),
+                        ('preLaneChangeRight/warning','critical')]:
+      for service in ('selfdriveState','starpilotSelfdriveState'):
+        self.sm.builders[service].alertType=kind;self.sm.builders[service].alertStatus=status
+      self.state('recorded','off');self.view.update()
+      for service in ('selfdriveState','starpilotSelfdriveState'):self.assertEqual(self.view[service].alertType,kind)
+
+  def test_manual_prompt_replaces_recorded_turn_and_its_cached_fade(self):
+    for kind in ('preLaneChangeLeft/warning','preLaneChangeRight/warning','laneChange/warning'):
+      for selection in ('left','right','off'):
+        recorded=SimpleNamespace(text1='Recorded turn',alert_type=kind,status=0)
+        widget=SimpleNamespace(_prev_alert=recorded,_alpha_filter=SimpleNamespace(x=1))
+        result=replay_turn_alert(widget,selection,recorded,SimpleNamespace)
+        if selection=='off':
+          self.assertIsNone(result);self.assertIsNone(widget._prev_alert);self.assertEqual(widget._alpha_filter.x,0)
+        else:self.assertEqual(result.text1,'Steer '+selection.title())
+        self.assertIs(replay_turn_alert(widget,'recorded',recorded,SimpleNamespace),recorded)
+
+  def test_manual_arrow_hook_never_falls_back_to_recorded_onroad_events(self):
+    class Filter:
+      x=1.
+      def update(self,target):self.x=target
+    widget=SimpleNamespace(_pre=True,_turn_intent_direction=1,FADE_IN_ANGLE=30,
+                           _turn_intent_alpha_filter=Filter(),_turn_intent_rotation_filter=Filter())
+    calls=[]
+    namespace=dict(ui_state=SimpleNamespace(started=True,sm=self.view),ReplayStateView=ReplayStateView,
+                   apply_turn_intent=apply_turn_intent,replay_arrow_mode='recorded',
+                   original_turn_intent=lambda widget:calls.append('recorded events'))
+    source=Path(__file__).with_name('normal_ui_audit.py')
+    node=next(node for node in ast.walk(ast.parse(source.read_text())) if isinstance(node,ast.FunctionDef) and node.name=='replay_turn_intent')
+    exec(compile(ast.Module(body=[node],type_ignores=[]),str(source),'exec'),namespace)
+    self.state('recorded','off');self.view.update();namespace['replay_turn_intent'](widget)
+    self.assertEqual(widget._turn_intent_direction,0);self.assertEqual(widget._turn_intent_alpha_filter.x,0)
+    for direction,expected in [('left',-1),('right',1)]:
+      self.state('recorded',direction);self.view.update();namespace['replay_arrow_mode']=direction
+      namespace['replay_turn_intent'](widget);self.assertEqual(widget._turn_intent_direction,expected)
+    self.assertEqual(calls,[])
+    namespace['replay_arrow_mode']='off'  # An unrelated native alert owns the display.
+    namespace['replay_turn_intent'](widget);self.assertEqual(calls,[])
+    self.state('recorded','recorded');self.view.update();namespace['replay_turn_intent'](widget)
+    self.assertEqual(calls,['recorded events'])
+
+  def test_filtered_turn_still_exposes_important_secondary_native_alert(self):
+    source=Path(__file__).resolve().parents[2]/'selfdrive/ui/mici/onroad/alert_renderer.py'
+    node=next(node for node in ast.walk(ast.parse(source.read_text())) if isinstance(node,ast.FunctionDef) and node.name=='get_alert')
+    node.returns=None
+    for arg in node.args.args:arg.annotation=None
+    namespace=dict(Alert=SimpleNamespace,AlertSize=log.SelfdriveState.AlertSize,custom=custom)
+    exec(compile(ast.Module(body=[node],type_ignores=[]),str(source),'exec'),namespace)
+    self.sm.updated['selfdriveState']=True
+    ss=self.sm.builders['selfdriveState'];ss.alertType='preLaneChangeRight/warning';ss.alertSize='mid'
+    critical=self.sm.builders['starpilotSelfdriveState'];critical.alertType='steerUnavailable/immediateDisable'
+    critical.alertSize='full';critical.alertStatus='critical';critical.alertText1='Take control'
+    self.state('recorded','off');self.view.update()
+    result=namespace['get_alert'](SimpleNamespace(_prev_alert=None),self.view)
+    self.assertEqual(result.text1,'Take control');self.assertEqual(result.alert_type,critical.alertType)
+
   def test_native_alert_and_fade_preempt_simulated_prompt(self):
     native=SimpleNamespace(text1='Recorded alert',alert_type='laneChangeBlocked/warning')
     widget=SimpleNamespace(_prev_alert=None,_alpha_filter=SimpleNamespace(x=1))
@@ -212,10 +288,10 @@ class Tests(unittest.TestCase):
     widget.native_alert=widget._prev_alert=native
     self.assertIs(namespace['replay_get_alert'](widget,self.view),native)
     self.assertFalse(ui.roadscore_replay_prompt_active)
-    self.assertEqual(namespace['replay_arrow_mode'],'recorded')
+    self.assertEqual(namespace['replay_arrow_mode'],'off')
     widget.native_alert=None;widget._alpha_filter.x=1
     self.assertIsNone(namespace['replay_get_alert'](widget,self.view))
-    self.assertEqual(namespace['replay_arrow_mode'],'recorded')
+    self.assertEqual(namespace['replay_arrow_mode'],'off')
     widget._prev_alert=None;ui.started=False
     self.assertIsNone(namespace['replay_get_alert'](widget,self.view))
     self.assertFalse(ui.roadscore_replay_prompt_active)

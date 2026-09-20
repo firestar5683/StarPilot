@@ -9,6 +9,12 @@ from cue_timing import audible_state, REFERENCE
 from demo_engagement import MODES, SIGNAL_MODES
 
 
+def routine_turn_alert(alert_type, status=0):
+  """Only ordinary recorded lane-change guidance is replaced by manual signals."""
+  return (alert_type in ('preLaneChangeLeft/warning','preLaneChangeRight/warning','laneChange/warning')
+          and int(getattr(status,'raw',status))==0)
+
+
 def isolated_replay(environ):
   if environ.get('ROADSCORE_REPLAY_UI_CONTROLS') != '1' or environ.get('SIMULATION') != '1':
     return False
@@ -30,6 +36,7 @@ def apply_turn_intent(widget, signal_mode):
       widget._turn_intent_alpha_filter.x = widget._turn_intent_rotation_filter.x = 0
       widget._roadscore_simulated_turn = False
     return False
+  previous_manual=getattr(widget,'_roadscore_simulated_turn',False)
   widget._roadscore_simulated_turn = True
   direction = -1 if signal_mode == 'left' else 1 if signal_mode == 'right' else 0
   if direction:
@@ -40,6 +47,10 @@ def apply_turn_intent(widget, signal_mode):
     widget._turn_intent_alpha_filter.update(1)
     widget._turn_intent_rotation_filter.update(0)
   else:
+    if not previous_manual:
+      # Off must not inherit a still-visible arrow from recorded onroadEvents.
+      widget._turn_intent_direction = 0
+      widget._turn_intent_alpha_filter.x = widget._turn_intent_rotation_filter.x = 0
     widget._pre = False
     widget._turn_intent_alpha_filter.update(0)
     widget._turn_intent_rotation_filter.update(0)
@@ -52,6 +63,13 @@ def apply_turn_intent(widget, signal_mode):
 def replay_turn_alert(widget, signal_mode, native_alert, alert_factory):
   """Select a native display object, never an alert message or driving event."""
   previous_demo = getattr(widget, '_roadscore_demo_alert', None)
+  if signal_mode in ('left','right','off'):
+    if native_alert is not None and routine_turn_alert(getattr(native_alert,'alert_type',''),getattr(native_alert,'status',0)):
+      native_alert=None
+    previous=widget._prev_alert
+    if previous is not None and previous is not previous_demo and routine_turn_alert(getattr(previous,'alert_type',''),getattr(previous,'status',0)):
+      widget._prev_alert=None
+      widget._alpha_filter.x=0
   if native_alert is not None:
     if widget._prev_alert is previous_demo:
       widget._prev_alert = None
@@ -142,19 +160,24 @@ class ReplayStateView:
     original = self.subscriber[service]
     engagement = self.mode != 'recorded' and service in ('selfdriveState', 'starpilotCarState')
     signals = self.signal_mode != 'recorded' and service == 'carState'
-    if not (engagement or signals):
+    turn_alert = (self.signal_mode != 'recorded' and service in ('selfdriveState','starpilotSelfdriveState')
+                  and routine_turn_alert(original.alertType,original.alertStatus))
+    if not (engagement or signals or turn_alert):
       return original
     if service not in self.copies:
       message = original.as_builder()
-      if service == 'selfdriveState':
+      if engagement and service == 'selfdriveState':
         message.enabled = message.active = self.mode == 'engaged'
         message.state = 'enabled' if self.mode == 'engaged' else 'disabled'
-      elif service == 'starpilotCarState':
+      elif engagement and service == 'starpilotCarState':
         message.alwaysOnLateralEnabled = self.mode == 'disengaged'
         message.pauseLateral = False
-      else:
+      elif signals:
         message.leftBlinker = self.signal_mode == 'left'
         message.rightBlinker = self.signal_mode == 'right'
+      if turn_alert:
+        message.alertSize = 'none'
+        message.alertText1 = message.alertText2 = message.alertType = ''
       self.copies[service] = message
     return self.copies[service].as_reader()
 

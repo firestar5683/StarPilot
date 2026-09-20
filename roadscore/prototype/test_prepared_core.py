@@ -46,6 +46,21 @@ class PreparedTests(unittest.TestCase):
     for key in ('ROADSCORE_PREPARED_SHOWCASE','ROADSCORE_SHOWCASE_SESSION','SIMULATION'):
       self.assertFalse(isolated_replay({**env,key:''}))
     self.assertFalse(isolated_replay({**env,'OPENPILOT_ZMQ_NAMESPACE':'roadscore-native-abc'}))
+  def test_signal_off_overrides_recorded_blinker_through_complete_presentation(self):
+    engine=PreparedPresentation(self.path)
+    state=dict(active=True,signal_on=True,fresh=True,car_fresh=True,model_fresh=True,speed=10.,
+               alert_key='',alert_meaningful=False,curve=dict(kind='curve',phase='neutral',amount=0.,activation=None))
+    block=np.zeros((960,2),np.float32)
+    engine.process(block,0,state,('engaged','left'))
+    count=len(engine.shaker.pulse_frames)
+    for frame in range(960,48000,960):
+      _,cues=engine.process(block,frame,state,('engaged','off'))
+    self.assertEqual(len(engine.shaker.pulse_frames),count)
+    self.assertFalse(cues['signal_shaker']['sequence_active'])
+    self.assertFalse(cues['signal_shaker']['rendered_active'])
+    self.assertEqual(cues['replay_demo']['signal_mode'],'off')
+    engine.process(block,48000,state,('engaged','recorded'))
+    self.assertGreater(len(engine.shaker.pulse_frames),count)
   def test_staged_cut_stays_clear_with_signal_and_full_presentation_stack(self):
     engine=PreparedPresentation(self.path)
     rate=48000;payoff=2.5

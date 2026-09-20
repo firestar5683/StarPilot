@@ -25,6 +25,24 @@ class ShakerTests(unittest.TestCase):
   s.process(x,0,True,True);s.process(x,4800,True,True)
   for i in range(2,8):y=s.process(x,i*4800,True,False)
   np.testing.assert_array_equal(y,x);self.assertFalse(s.active)
+ def test_explicit_off_stops_new_pulses_with_smooth_tail_and_recorded_can_resume(self):
+  s=SignalShaker(ShakerGrid(120,0,1,1,True,'fixture'),enabled=True)
+  block=np.zeros((960,2),np.float32)
+  s.process(block,0,True,True,sequence_key='left')
+  count=len(s.pulse_frames)
+  tail=s.process(block,960,False,True,sequence_key='off')
+  self.assertFalse(s.active);self.assertEqual(s.stop_frame,960)
+  self.assertGreater(float(abs(tail).max()),0)  # Existing grain fades instead of cutting abruptly.
+  for frame in range(1920,48000,960):result=s.process(block,frame,False,True,sequence_key='off')
+  self.assertEqual(len(s.pulse_frames),count)
+  np.testing.assert_array_equal(result,block)
+  s.process(block,48000,True,True,sequence_key='recorded')
+  self.assertTrue(s.active);self.assertGreater(len(s.pulse_frames),count)
+ def test_recorded_blink_gap_still_uses_original_debounce(self):
+  s=SignalShaker(ShakerGrid(120,0,1,1,True,'fixture'),enabled=True)
+  block=np.zeros((960,2),np.float32)
+  for frame in range(0,24000,960):s.process(block,frame,frame==0,True,sequence_key='recorded')
+  self.assertTrue(s.active);self.assertGreater(len(s.pulse_frames),1)
  def test_no_input_mutation_and_bounded_overlay(self):
   s=SignalShaker(GRID,enabled=True);x=np.ones((4800,2),np.float32)*.2;before=x.copy()
   for i in range(20):
