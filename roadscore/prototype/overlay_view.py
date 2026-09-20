@@ -41,7 +41,8 @@ def gesture_view(state):
   if signal in ('left', 'right', 'off'):
     shaker = state.get('signal_shaker') or {}
     description = 'Shaker' if shaker.get('rendered_active') else 'Replay signal' if signal != 'off' else 'Recorded signals muted'
-    return f'Simulated {signal} / {description}', 'active', 'simulated_signal'
+    title = f'Simulated {signal}' + (' shaker' if shaker.get('rendered_active') else '')
+    return f'{title} / {description}', 'active', 'simulated_signal'
   engagement = state.get('engagement_presentation') or {}
   if engagement.get('enabled') and not engagement.get('simulated') and engagement.get('input_fresh') and engagement.get('rendered_state') == 'transition':
     return ('Engaged / Opening music' if engagement.get('active') else 'Disengaged / Contained music'), 'active', 'engagement'

@@ -6,7 +6,7 @@ from types import SimpleNamespace
 
 from cereal import log, car, custom
 from cue_timing import REFERENCE
-from replay_ui_controls import ReplayUIControls, ReplayStateView, isolated_replay
+from replay_ui_controls import ReplayUIControls, ReplayStateView, isolated_replay, apply_turn_intent
 
 
 class Subscriber:
@@ -104,5 +104,17 @@ class Tests(unittest.TestCase):
     state=delay.apply(snapshot,dict(sequence=1,callback_wall=99.5,dac_wall=99.8,cues=cues))
     self.path.write_text(json.dumps(state));self.view.update()
     self.assertEqual((self.view.mode,self.view.signal_mode),('disengaged','right'))
+  def test_native_turn_arrow_direction_and_recorded_fallback(self):
+    class Filter:
+      x=0
+      def update(self,target):self.target=target
+    widget=SimpleNamespace(_pre=False,_turn_intent_direction=0,FADE_IN_ANGLE=30,
+                           _turn_intent_alpha_filter=Filter(),_turn_intent_rotation_filter=Filter())
+    self.assertTrue(apply_turn_intent(widget,'left'))
+    self.assertEqual(widget._turn_intent_direction,-1);self.assertEqual(widget._turn_intent_alpha_filter.target,1)
+    self.assertTrue(apply_turn_intent(widget,'right'));self.assertEqual(widget._turn_intent_direction,1)
+    self.assertTrue(apply_turn_intent(widget,'off'));self.assertEqual(widget._turn_intent_direction,0)
+    self.assertEqual(widget._turn_intent_alpha_filter.target,0)
+    self.assertFalse(apply_turn_intent(widget,'recorded'))
 
 if __name__=='__main__':unittest.main()

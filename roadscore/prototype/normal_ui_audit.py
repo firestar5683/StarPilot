@@ -4,8 +4,17 @@ from pathlib import Path
 from openpilot.selfdrive.ui.ui_state import UIState, device
 from preparing_awake import PreparationWake
 from replay_display_hold import ReplayDisplayHold
-from replay_ui_controls import ReplayUIControls, ReplayStateView, isolated_replay
+from replay_ui_controls import ReplayUIControls, ReplayStateView, isolated_replay, apply_turn_intent
 replay_controls=ReplayUIControls(os.environ['ROADSCORE_STATUS_FILE'],enabled=isolated_replay(os.environ))
+if replay_controls.enabled:
+ from openpilot.selfdrive.ui.mici.onroad.hud_renderer import TurnIntent
+ from openpilot.selfdrive.ui.ui_state import ui_state
+ original_turn_intent=TurnIntent._update_state
+ def replay_turn_intent(self):
+  sm=ui_state.sm
+  if isinstance(sm,ReplayStateView) and apply_turn_intent(self,sm.signal_mode):return
+  return original_turn_intent(self)
+ TurnIntent._update_state=replay_turn_intent
 display_hold=ReplayDisplayHold(os.environ.get("ROADSCORE_AUDIO_DRAIN_FILE"), enabled=os.environ.get("OPENPILOT_PREFIX")=="roadscore_replay")
 original_state=UIState._update_state
 def replay_state(self,*args,**kwargs):

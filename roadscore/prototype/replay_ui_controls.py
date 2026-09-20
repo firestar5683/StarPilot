@@ -15,6 +15,26 @@ def isolated_replay(environ):
           and environ.get('OPENPILOT_PREFIX') == 'roadscore_replay')
 
 
+def apply_turn_intent(widget, signal_mode):
+  """Use the existing native arrow textures/animation without inventing events."""
+  if signal_mode not in ('left', 'right', 'off'):
+    return False
+  direction = -1 if signal_mode == 'left' else 1 if signal_mode == 'right' else 0
+  if direction:
+    if not widget._pre or widget._turn_intent_direction != direction:
+      widget._turn_intent_rotation_filter.x = -direction * widget.FADE_IN_ANGLE
+    widget._pre = True
+    widget._turn_intent_direction = direction
+    widget._turn_intent_alpha_filter.update(1)
+    widget._turn_intent_rotation_filter.update(0)
+  else:
+    widget._pre = False
+    widget._turn_intent_direction = 0
+    widget._turn_intent_alpha_filter.update(0)
+    widget._turn_intent_rotation_filter.update(0)
+  return True
+
+
 class ReplayUIControls:
   def __init__(self, status_path, *, enabled=False, clock=time.monotonic):
     self.path = Path(status_path)
