@@ -75,6 +75,7 @@ def native_environment(project, root, out, session, inherited=None):
   paths=[HERE,project,project/'starpilot/third_party',*project.glob('*_repo'),Path('/data/roadscore-feasibility/venv/lib/python3.12/site-packages')]
   env['PYTHONPATH']=':'.join(map(str,paths))
   env['ROADSCORE_MIRROR_DIR']=str(out/'mirror')
+  env['ROADSCORE_REPLAY_PRIME']='1'
   return env
 
 

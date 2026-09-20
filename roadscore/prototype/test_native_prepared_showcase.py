@@ -52,6 +52,11 @@ class NativePreparedTests(unittest.TestCase):
     self.assertEqual(env['OPENPILOT_PREFIX'],'roadscore_replay')
     self.assertEqual(env['ROADSCORE_STATUS_FILE'],str(self.out/'status.json'))
     for key in ('ZMQ','PARAMS_ROOT','OPENPILOT_ZMQ_NAMESPACE','ROADSCORE_PCM_RETURN','ROADSCORE_GENERATION_SEED'):self.assertNotIn(key,env)
+  def test_saved_playback_primes_camera_and_cache_before_source_clock_starts(self):
+    for inherited in ({}, {'ROADSCORE_REPLAY_PRIME':'0'}):
+      with self.subTest(inherited=inherited):
+        env=native_environment(Path(self.tmp.name),self.root,self.out,'session',inherited)
+        self.assertEqual(env['ROADSCORE_REPLAY_PRIME'],'1')
   def test_worker_reuses_existing_pcm_dsp_and_output_identity(self):
     args=worker_arguments(Path(self.tmp.name),self.root,self.out,Path('/archive'),'fixture',False,output={'bluetooth_selected':True,'pcm_name':'roadscore_bluetooth','output_identity':'bluealsa:AA:BB'})
     self.assertIn('--audio-worker',args);self.assertIn('--no-control-server',args)
