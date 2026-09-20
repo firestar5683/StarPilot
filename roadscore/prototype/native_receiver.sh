@@ -26,7 +26,8 @@ if [ "${ROADSCORE_COMPOSER:-ace}" = ace ]; then preparation_wait=1500; fi
 if ! pgrep -f "^/data/sa3-feasibility/venv/bin/python -u ${worker_script}$" >/dev/null; then
   worker_reused=0
   rm -f generated/worker_ready
-  setsid env -u OPENPILOT_PREFIX /usr/local/venv/bin/python -u prototype/power_worker.py > results/native_worker.log 2>&1 < /dev/null &
+  # Only this receiver owns fd 9; the warm resident must not retain its session lock.
+  setsid env -u OPENPILOT_PREFIX /usr/local/venv/bin/python -u prototype/power_worker.py > results/native_worker.log 2>&1 < /dev/null 9>&- &
   power_pid=$!
   if [ "${ROADSCORE_RESIDENT:-0}" = 1 ]; then
     /usr/local/venv/bin/python -c 'import json,sys,time; from pathlib import Path; p=int(sys.argv[1]); Path("generated/resident_owner.json").write_text(json.dumps({"power_worker_pid":p,"process_start_ticks":Path(f"/proc/{p}/stat").read_text().split()[21],"created_wall":time.time(),"stop":"SIGTERM power_worker_pid; it restores CPU and stops its child"}))' "$power_pid"
@@ -55,7 +56,7 @@ mkdir -p results/current
 /usr/local/venv/bin/python prototype/runtime_manifest.py
 audio_args=()
 if [ "${ROADSCORE_AUDIBLE:-0}" = 1 ]; then audio_args+=(--audible); fi
-/usr/local/venv/bin/python -u prototype/app.py "${audio_args[@]}" > results/current/app.log 2>&1 < /dev/null &
+/usr/local/venv/bin/python -u prototype/app.py "${audio_args[@]}" > results/current/app.log 2>&1 < /dev/null 9>&- &
 audio_pid=$!
 for attempt in $(seq 1 30); do
   [ -f results/current/ready ] && break
@@ -65,7 +66,7 @@ done
 [ -f results/current/ready ] || { cat results/current/app.log; exit 1; }
 # Supervise score failures during delivery rather than leaving silent replay running.
 exec 8<&0
-/usr/local/venv/bin/python -u prototype/replay_bridge.py receive --route "$1" <&8 8<&- &
+/usr/local/venv/bin/python -u prototype/replay_bridge.py receive --route "$1" <&8 8<&- 9>&- &
 bridge_pid=$!
 exec 8<&-
 while kill -0 "$bridge_pid" 2>/dev/null; do
