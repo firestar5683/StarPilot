@@ -2,7 +2,6 @@
 import argparse,json,time,threading,queue,traceback,signal,os,gc,shutil
 from pathlib import Path
 import numpy as np
-import sounddevice as sd
 import soundfile as sf
 from scipy.signal import resample_poly
 from cereal import messaging
@@ -25,6 +24,18 @@ p=argparse.ArgumentParser();p.add_argument('--root',default='/data/roadscore');p
 def terminate(sig,frame):raise KeyboardInterrupt
 signal.signal(signal.SIGTERM,terminate)
 root=Path(a.root)
+run=root/'results/current';run.mkdir(parents=True,exist_ok=True)
+output_metadata={'bluetooth_selected':False,'muted':a.mute}
+if Path('/TICI').exists() and not a.mute and os.environ.get('ROADSCORE_PCM_RETURN')!='1':
+ from bluetooth_output import prepare_output
+ output_metadata.update(prepare_output(run))
+import sounddevice as sd
+from bluetooth_output import select_device
+output_device=select_device(sd.query_devices(),output_metadata) if output_metadata['bluetooth_selected'] else None
+if output_device is not None:
+ sd.check_output_settings(device=output_device,channels=2,dtype='float32',samplerate=48000)
+ output_metadata['portaudio_device']=output_device
+(run/'output_device.json').write_text(json.dumps(output_metadata,indent=2)+'\n')
 if os.environ.get('ROADSCORE_RESIDENT')=='1':
  import atexit
  from resident_session import session_lease
@@ -32,7 +43,6 @@ if os.environ.get('ROADSCORE_RESIDENT')=='1':
  atexit.register(playback_lease.__exit__,None,None,None)
 from privacy_guard import install
 install(root)
-run=root/'results/current';run.mkdir(parents=True,exist_ok=True)
 gc_events=[];gc_started={}
 def gc_audit(phase,info):
  if phase=='start':gc_started[info['generation']]=time.monotonic()
@@ -215,7 +225,7 @@ sm=messaging.SubMaster(['modelV2','carState','navInstruction','navRoute','longit
 if export:
  from render_clock import RenderClock
  stream=RenderClock(callback,rate,2,block)
-else:stream=sd.OutputStream(samplerate=rate,channels=2,blocksize=block,dtype='float32',callback=callback)
+else:stream=sd.OutputStream(device=output_device,samplerate=rate,channels=2,blocksize=block,dtype='float32',callback=callback)
 trace=(run/'trace.jsonl').open('w',buffering=1)
 (root/'generated').mkdir(exist_ok=True)
 # Startup scipy/cereal graphs are long-lived. Exclude them from repeated full scans
