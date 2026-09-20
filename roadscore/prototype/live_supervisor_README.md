@@ -5,18 +5,44 @@
 `set_enabled(bool)` starts parked preparation or stops only owned live processes.
 OFF bypasses health/parked gates. ON rechecks current health server-side.
 
-**There is no installed target adapter in this change.** Default status is
-available=false, can_enable=false. No process launches, hardware probes, Params
-writes, car-control publishers, model selection, or device access occur here.
-This is reviewed orchestration policy plus an explicit disabled integration
-boundary, not a road-tested live service.
+A real `live_target_adapter` now provides the local Unix-socket client and
+`live_target_daemon` owns persistent lifecycle/watchdog state. Galaxy requests do
+not own children. The daemon starts on demand only on /TICI; Mac clients report
+unavailable and never SSH. Its required `live_health.LiveHealth(root)` collector
+is developed separately and must be integrated. Missing collector remains a
+clear startup failure, never a fabricated readiness result.
 
-The controller expects `live_target_adapter.create(root)` to return a persistent
-service client with status(), health_and_authorization(), enable(observation,
-authorization), and stop_owned(). Its daemon can use LiveSupervisor. It must
-atomically revalidate on start and tick frequently enough to meet the health
-freshness bound. Fresh accepted worker readiness must match the exact session
-seed/bank/profile; an old worker_ready file is not sufficient.
+The daemon starts direct ACE via run_worker.sh with a fresh seed, current checked
+conditioning bank, unchanged quality policy and existing worker GPU lock. It
+holds native_session.lock, refuses any external GPU owner, verifies initial audio
+against exact owned worker PID/seed/profile/bank, and waits for accepted READY.
+No bench supervisor, CPU writes, manager changes, replay Params, or fake messages
+are used. Configuration comes from generated/live_config.json (profile,
+plan_bank, initial_buffer_seconds, optional explicit power_limit_watts). No
+inherited cap or hidden new cap is selected. Normal baseline config/identity must
+already exist; no arbitrary fallback conditioning is generated.
+
+`prepare_diagnostic()` is a separate bounded parked-only action: genuine fresh
+preflight/model-local evidence is required, but **production coexistence
+authorization is not required** so it can be measured. It launches only the muted
+worker and never app/audio. Health evidence is recorded in a unique local
+results/live/<session>/ directory through preparation and at most120 seconds of
+ready observation. It cannot confirm driver-ready or promote itself to a
+production session. Diagnostic readiness is not GPU/coexistence approval.
+
+Production ON uses the original full authorization guards. Explicit
+`confirm_driver_ready(session_id, audible=False)` rechecks the exact prepared
+session and fresh parked health, then starts app --input live using the real
+default namespace. Audible output must be explicitly requested and still passes
+the app's existing output/mute checks. Prior results/current is preserved inside
+the new session directory rather than deleted. Root's independent app live-input
+and stale-input guard integration is required before target playback validation.
+
+OFF immediately signals ONLY child process groups whose Popen handles this daemon
+owns, cancels queued starts, and reaps them with bounded SIGKILL fallback. It does
+not pgrep/killall, adopt external PIDs, or stop another supervisor. Normal daemon
+termination also stops children; hard power loss/SIGKILL requires hardware-owner
+inspection before restart and is not a license to kill an unrelated worker.
 
 The adapter must collect genuine modelV2/carState/manager/device/Chestnut health.
 Observation age must be <=1 second. Input booleans must reflect per-message ages,

@@ -24,6 +24,7 @@ class LiveController:
                         reason='Live target health/lifecycle adapter is not installed; hardware readiness is unverified')
         try:
             status=self.adapter.status()
+            if status.get('available') is False:return status
             observation,authorization=self.adapter.health_and_authorization()
             reason=blocked_reason(observation,authorization,self.clock(),require_parked=True)
             return {**status,'available':True,'can_enable':not status.get('enabled',False) and not reason,
@@ -45,3 +46,12 @@ class LiveController:
         # Adapter must recheck atomically with launch and continue its watchdog.
         self.adapter.enable(observation,authorization)
         return self.status()
+
+
+    def prepare_diagnostic(self):
+        if self.adapter is None:raise RuntimeError('Live target adapter unavailable')
+        return self.adapter.prepare_diagnostic()
+
+    def confirm_driver_ready(self,session_id,*,audible=False):
+        if self.adapter is None:raise RuntimeError('Live target adapter unavailable')
+        return self.adapter.confirm_driver_ready(session_id,audible=audible)
