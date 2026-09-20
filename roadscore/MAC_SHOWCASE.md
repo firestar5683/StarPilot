@@ -1,39 +1,31 @@
-The prepared Mac showcase runs native onroad replay with a preserved ACE core recording and the current real-time presentation layer. It does not load ACE, contact Chestnut, or regenerate music.
+From the Mac, start the saved showcase on the comma and mirror its actual onroad screen:
 
 ```sh
-./onroad --roadscore route1 --prepared-showcase
+./onroad --roadscore route1 --demo
 ```
 
-The launcher opens the normal UI and a local control page. Engage/disengage and turn-signal buttons use the same Galaxy command writer and presentation controls as the comma replay. The displayed vehicle state is explicitly a replay simulation. Ctrl+C stops the Mac session and its children.
+The command loads the selected A recording on the comma, starts its native route replay, and opens [the Mac display and controls](http://127.0.0.1:56976/). Audio plays from the comma through its selected output. No ACE generation or model warm-up occurs. The first measured saved-replay setup took 17.13 seconds for loading, replay parameters and UI startup.
 
-Local setup lives in ignored `roadscore/assets/prepared_showcase.json`:
+Galaxy and the Mac page control the same native presentation session. Engagement and turn-signal buttons affect replay appearance and musical presentation only. They do not control a vehicle. The Mac shows actual comma frames; there is no second replay clock to synchronize. Video mirroring requires the local network. Ctrl+C in the launcher stops its owned demo session and leaves the resident ACE worker intact.
 
-```json
-{"route":"DONGLE/ROUTE","archive":"/absolute/path/to/completed/core/archive","curve_plan":"/absolute/path/to/optional/showcase_curve_plan.json","paired_comma":"http://192.168.1.50:8082","controls_port":56976}
-```
+Route1 is currently registered and ready. Route2–4 remain unavailable until their own matching core recordings are prepared and verified. Never substitute another route's music archive to bypass this check.
 
-`paired_comma` and `controls_port` are optional, explicit local choices. Replace the example IP with the comma's actual private IPv4 address. Saving both lets the normal command open the same [demo control page](http://127.0.0.1:56976/) with Mac + comma controls enabled on subsequent launches. No configured target means Mac-only controls; no configured port means an available temporary port. These choices apply only to the matching configured route.
+The local configuration is ignored by Git: `roadscore/assets/demo_catalog.json` stores the explicit comma address, local controls port and registered routes. The comma has its own catalog pointing to persistent local assets. Each entry needs the route identity, a compatible completed archive and an optional matching curve plan. No discovery or automatic target switching occurs.
 
-The archive must contain `dry.wav`, `launch.json`, `audio_blocks.jsonl`, `replay_origin.json`, and `rhythm_timeline.json`. The route must already be cached locally. The dry source is used at unity gain; the recorded final mix is never processed a second time. Original model timestamps and measured DAC/sample offsets keep the music aligned to the replay. An optional staged curve plan must match the exact route and replay start.
+Two short muted paired tests verified native replay, fresh JPEG frames, Galaxy engagement/signal acknowledgments and clean shutdown. Those tests do not establish physical speaker audibility, Bluetooth timing or full-route acceptance. FiiO headphones and the public JLab speaker need separate listening checks.
 
-`--score-archive PATH` selects another compatible complete recording explicitly. `--check` validates the local prerequisites without starting playback. `--muted`, `--duration SECONDS`, and `--no-browser` support verification. Live generation and the existing stored final-score replay retain their separate launch modes.
-
-The Mac uses its selected system audio output. Bluetooth delay estimates from the comma do not transfer automatically to a different Mac output.
-
-The saved target needs no recurring CLI flag. To override it for one launch:
+For a Mac-only interactive fallback, use:
 
 ```sh
-./onroad --roadscore route1 --prepared-showcase --paired-comma http://192.168.1.50:8082
+./onroad --roadscore route1 --prepared-showcase --unpaired
 ```
 
-`--unpaired` overrides a saved target for a Mac-only launch. `--port NUMBER` overrides the saved control port; `--port 0` selects an available temporary port. An occupied fixed port produces an error; it does not attach to or replace the existing session.
+This opens native onroad replay on the Mac and processes the same preserved core with the current presentation layer. It needs the route cached on the Mac and ignored `roadscore/assets/prepared_showcase.json`, containing `route`, `archive` and optional `curve_plan`. The Mac uses its selected system audio output. A comma Bluetooth correction does not automatically apply to a Mac output.
 
-The comma must already have a fresh, ready RoadScore replay running while offroad. Each button writes the Mac action first, then forwards only that engagement or signal action in the background using the comma's own session ID. The page names the enabled targets and reports whether the comma received or applied the latest command. An unavailable comma leaves the Mac buttons usable. A timeout can mean delivery is unknown; peer writes are not retried. Galaxy's freshly observed state remains authoritative for the Mac.
+Compatible archives contain `dry.wav`, `launch.json`, `audio_blocks.jsonl`, `replay_origin.json` and `rhythm_timeline.json`. Original dry PCM is used at unity gain, with the recorded model/DAC clock. The final mix is not processed twice. `--score-archive PATH` explicitly selects another compatible archive for the independent mode.
 
-With a saved paired target, Galaxy is the control master. Engagement and signal changes made directly in Galaxy, including from a phone, are read in the background and applied through the Mac's local replay command writer. The follower uses Galaxy's fresh runtime-applied state, not an unconfirmed button receipt. Once pending Mac-origin requests finish, the Mac reconciles to Galaxy; a rejected Mac change may therefore return to Galaxy's current selection. No follower action writes back to Galaxy, starts playback, or controls the vehicle.
+Both saved launchers support `--muted`, `--duration SECONDS` and `--no-browser`. Paired `--check` contacts Galaxy to verify the target is offroad; independent `--check` validates local prerequisites only. The controls server binds to loopback and refuses an occupied port. The paired target must be an explicit private IPv4 address on Galaxy port 8082.
 
-Both replay sessions are pinned independently. Stale or unavailable Galaxy state pauses mirroring; a changed comma or Mac session requires reconnecting with a new Mac demo session. `/status` exposes the latest fresh validated Galaxy JSON and Mac request/receipt times under `paired_controls.following.snapshot` for separate timing inspection. These observations do not establish video or music synchronization.
+The independent mode can also follow Galaxy controls with `--paired-comma URL`, but that does not synchronize its independent video/audio clocks. Use `--demo` for the actual screen mirror.
 
-Configuration is read when the Mac launcher starts. Changing the file or refreshing a currently running page does not enable pairing in that existing Python session. Let it finish or stop it deliberately, launch the demo again, then refresh the same page if using the saved port.
-
-The local control page remains bound to `127.0.0.1`. Pairing permits only an explicit private IPv4 address on port 8082, without redirects or discovery. The existing LAN Galaxy service uses offroad and fresh replay-session checks; it has no separate HTTP login or encryption. `--check` does not contact the peer. Pairing neither starts the comma nor synchronizes its video or music with the Mac.
+Ordinary `./onroad --roadscore route1` remains the fresh-generation path. Gold music and the protected movie fallback are unchanged.
