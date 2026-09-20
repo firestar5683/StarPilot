@@ -3,6 +3,7 @@ import argparse
 import importlib.util
 import hashlib
 import json
+import math
 import os
 from pathlib import Path
 import signal
@@ -181,7 +182,29 @@ def control_server(project, out, shared, port, forwarder=None, *, follow_peer=Fa
   return server
 
 
+def output_latency_seconds(value):
+  try:seconds=float(value)
+  except (TypeError,ValueError):raise argparse.ArgumentTypeError('Output latency must be 0.02–0.5 seconds') from None
+  if isinstance(value,bool) or not math.isfinite(seconds) or not .02<=seconds<=.5:
+    raise argparse.ArgumentTypeError('Output latency must be 0.02–0.5 seconds')
+  return seconds
+
+
+def native_bluetooth_latency(a, environ=None):
+  value=a.output_latency
+  if value is None:return None
+  env=os.environ if environ is None else environ
+  from bluetooth_output import ADDRESS, PCM_NAME
+  identity=a.output_identity or ''
+  if (not a.audio_worker or not a.no_control_server or env.get('OPENPILOT_PREFIX')!='roadscore_replay'
+      or env.get('ROADSCORE_PREPARED_SHOWCASE')!='1' or a.audio_device!=PCM_NAME
+      or not identity.startswith('bluealsa:') or not ADDRESS.fullmatch(identity.removeprefix('bluealsa:'))):
+    raise ValueError('Output latency override requires the prepared native Bluetooth worker')
+  return output_latency_seconds(value)
+
+
 def audio_worker(a):
+  requested_output_latency=native_bluetooth_latency(a)
   import numpy as np
   import sounddevice as sd
   from cereal import messaging
@@ -287,7 +310,7 @@ def audio_worker(a):
     if not a.no_control_server:
       server = control_server(a.project_root,a.out,shared,a.port,forwarder,follow_peer=forwarder is not None)
       write_json(a.out/'controls.json',{'url':f'http://127.0.0.1:{server.server_port}/'})
-    with sd.OutputStream(device=a.audio_device,samplerate=rate,channels=2,blocksize=960,dtype='float32',callback=callback) as stream:
+    with sd.OutputStream(device=a.audio_device,samplerate=rate,channels=2,blocksize=960,dtype='float32',latency=requested_output_latency,callback=callback) as stream:
       output_latency=float(stream.latency)
       calibration_deadline=time.monotonic()+2.
       while len(clock_observations)<20:
@@ -377,7 +400,7 @@ def audio_worker(a):
       finally:
         trace.close()
         if sync_trace is not None:sync_trace.close()
-    write_json(a.out/'prepared_summary.json',dict(generation_invoked=False,source=str(a.score_archive),first_source_frame=first_frame,last_source_frame=position,sample_rate=rate,portaudio_flags=flags,max_clock_error_seconds=max_drift,prepared_clock=playback_clock.snapshot(),stream_clock_bridge=bridge.snapshot() if bridge else None,callback_errors=errors,clock_errors=clock_errors,callback_timing=callback_timing,output_latency_seconds=output_latency,source_clock=source_clock,failure=failure,archived_tail=meta['archived_tail'],muted=a.muted,session_id=session,manual_scope='isolated replay display and presentation only'))
+    write_json(a.out/'prepared_summary.json',dict(generation_invoked=False,source=str(a.score_archive),first_source_frame=first_frame,last_source_frame=position,sample_rate=rate,portaudio_flags=flags,max_clock_error_seconds=max_drift,prepared_clock=playback_clock.snapshot(),stream_clock_bridge=bridge.snapshot() if bridge else None,callback_errors=errors,clock_errors=clock_errors,callback_timing=callback_timing,requested_output_latency_seconds=requested_output_latency,output_latency_seconds=output_latency,source_clock=source_clock,failure=failure,archived_tail=meta['archived_tail'],muted=a.muted,session_id=session,manual_scope='isolated replay display and presentation only'))
   if errors:raise RuntimeError(errors[0])
   if abs(playback_clock.snapshot()['current_post_error_seconds'])>.05:raise RuntimeError('Prepared audio clock drift remained above 50 ms after recovery')
 
@@ -412,6 +435,7 @@ def parser():
   p.add_argument('--no-control-server',action='store_true',help=argparse.SUPPRESS)
   p.add_argument('--presentation-root',type=Path,help=argparse.SUPPRESS)
   p.add_argument('--output-identity',help=argparse.SUPPRESS)
+  p.add_argument('--output-latency',type=output_latency_seconds,help=argparse.SUPPRESS)
   p.add_argument('--hold-start',action='store_true',help=argparse.SUPPRESS)
   p.add_argument('--fullscreen',action='store_true',help='Show the native Mac UI fullscreen; F/F11 toggles, Escape returns to its window')
   p.add_argument('--follow-playhead',action='store_true',help=argparse.SUPPRESS)
@@ -430,6 +454,8 @@ def parser():
 
 def main():
   a=parser().parse_args()
+  if a.output_latency is not None and not a.audio_worker:
+    raise ValueError('Output latency override is private to the prepared native Bluetooth worker')
   if a.audio_worker:
     if a.no_control_server and a.paired_comma:raise SystemExit('Paired controls require the local control server')
     if a.port is None:a.port=0

@@ -95,7 +95,7 @@ def worker_arguments(project, root, out, archive, route, muted, curve_plan=None,
   if muted:args.append('--muted')
   if curve_plan is not None:args += ['--curve-plan',str(curve_plan)]
   if output.get('bluetooth_selected'):
-    args += ['--audio-device',output['pcm_name'],'--output-identity',output['output_identity']]
+    args += ['--audio-device',output['pcm_name'],'--output-identity',output['output_identity'],'--output-latency','0.25']
   return args
 
 

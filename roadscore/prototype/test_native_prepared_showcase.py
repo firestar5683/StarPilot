@@ -61,8 +61,14 @@ class NativePreparedTests(unittest.TestCase):
     args=worker_arguments(Path(self.tmp.name),self.root,self.out,Path('/archive'),'fixture',False,output={'bluetooth_selected':True,'pcm_name':'roadscore_bluetooth','output_identity':'bluealsa:AA:BB'})
     self.assertIn('--audio-worker',args);self.assertIn('--no-control-server',args)
     self.assertIn('--presentation-root',args);self.assertIn('bluealsa:AA:BB',args)
+    self.assertEqual(args[args.index('--output-latency')+1],'0.25')
     self.assertTrue(args[1].endswith('/mac_showcase.py'))
     self.assertFalse(any('ace_worker' in item or 'power_worker' in item for item in args))
+  def test_system_output_keeps_its_existing_latency_default(self):
+    for output in (None, {'bluetooth_selected':False}):
+      args=worker_arguments(Path(self.tmp.name),self.root,self.out,Path('/archive'),'fixture',False,output=output)
+      self.assertNotIn('--output-latency',args)
+      self.assertNotIn('--output-identity',args)
   def test_continuous_capture_is_absent_even_with_inherited_mirror_directory(self):
     from screen_mirror import ScreenMirror
     inherited={'ROADSCORE_MIRROR_DIR':'/old/session/mirror'}
