@@ -135,6 +135,16 @@ export const RoadScore = {
         <p class="gx-row__desc">{{status.live?.reason || 'Live driving readiness has not been confirmed.'}}</p>
         <button class="gx-btn" @click="setLive(false)">Stop RoadScore</button>
       </div></GalaxySection>
+      <GalaxySection title="Replay simulation" icon="bi-play-circle" :collapsible="false"><div style="padding:16px">
+        <p class="gx-row__desc">Music presentation only. These buttons do not engage or control the vehicle.</p>
+        <p><strong>{{status.demo?.available ? (status.demo.mode === 'engaged' ? 'Simulated engage' : status.demo.mode === 'disengaged' ? 'Simulated disengage' : 'Using recorded state') : 'Replay unavailable'}}</strong></p>
+        <div style="display:flex;gap:8px;flex-wrap:wrap">
+          <button class="gx-btn" :disabled="busy || !status.demo?.available" @click="action('demo_engagement', {session_id:status.demo.session_id, mode:'engaged'})">Simulate engage</button>
+          <button class="gx-btn" :disabled="busy || !status.demo?.available" @click="action('demo_engagement', {session_id:status.demo.session_id, mode:'disengaged'})">Simulate disengage</button>
+          <button class="gx-btn" :disabled="busy || !status.demo?.available" @click="action('demo_engagement', {session_id:status.demo.session_id, mode:'recorded'})">Use recorded state</button>
+        </div>
+        <p v-if="!status.demo?.available" class="gx-row__desc">{{status.demo?.reason}}</p>
+      </div></GalaxySection>
       <GalaxySection title="Composer" icon="bi-music-note-beamed" :collapsible="false"><div style="padding:16px">
         <div class="gx-row"><div><strong>{{ status.state || 'UNAVAILABLE' }}</strong><div class="gx-row__desc">{{ status.composer ? status.composer.toUpperCase() : 'Composer not connected' }}{{ status.backend ? ' · ' + status.backend : '' }}{{ status.composer && status.profile ? ' · ' + status.profile.toUpperCase() : '' }}</div></div></div>
         <div class="gx-row"><label for="roadscore-style">Next style</label><select class="gx-field" id="roadscore-style" v-model="profile" :disabled="busy || !status.can_edit" @change="action('settings', {profile})"><option v-for="p in status.profiles || []" :value="p.id">{{p.name}}</option></select></div>

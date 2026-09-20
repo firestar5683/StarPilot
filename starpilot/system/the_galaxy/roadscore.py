@@ -1,5 +1,7 @@
 """Galaxy's local-only RoadScore operator API. Never discovers or contacts a bench."""
 import json
+import math
+import tempfile
 import os
 from pathlib import Path
 import importlib.util
@@ -141,6 +143,33 @@ class Operator:
         self.output_owner = module.OutputOwner(self.root, self.offroad)
     return self.output_owner.dispatch(action, **payload)
 
+  def demo_status(self):
+    state=read_json(self.root/'results/current/status.json')
+    stamp=state.get('command_wall');session=state.get('presentation_session_id')
+    fresh=type(stamp) in (int,float) and math.isfinite(stamp) and 0<=time.monotonic()-stamp<=2
+    available=bool(fresh and state.get('engagement_presentation',{}).get('enabled') is True and state.get('input_mode')=='replay' and state.get('route') not in (None,'','live') and isinstance(session,str) and session)
+    mode=state.get('demo_engagement_mode','recorded')
+    return {'available':available,'session_id':session if available else None,'mode':mode if mode in ('recorded','engaged','disengaged') else 'recorded',
+            'reason':'' if available else 'Start a RoadScore replay to simulate musical engagement.'}
+
+  def demo_engagement(self,data):
+    if not isinstance(data,dict) or set(data)!={'session_id','mode'} or data['mode'] not in ('recorded','engaged','disengaged'):
+      raise ValueError('Invalid replay simulation command')
+    with self.lock:
+      status=self.demo_status()
+      if not status['available'] or data['session_id']!=status['session_id']:
+        raise ValueError('A fresh matching RoadScore replay is required; live driving cannot be simulated')
+      run=(self.root/'results/current').resolve(strict=True)
+      command={'version':1,'session_id':status['session_id'],'mode':data['mode'],'created_wall':time.monotonic()}
+      temporary=None
+      try:
+        with tempfile.NamedTemporaryFile(mode='w',dir=run,prefix='.demo-engagement-',delete=False) as stream:
+          temporary=Path(stream.name);json.dump(command,stream)
+        temporary.replace(run/'demo_engagement.json')
+      finally:
+        if temporary is not None:temporary.unlink(missing_ok=True)
+      return {'requested_mode':data['mode'],'demo':self.demo_status()}
+
   def status(self, offroad):
     settings = read_json(self.root / 'generated/operator_settings.json')
     worker=current_worker(self.root)
@@ -156,7 +185,9 @@ class Operator:
     if live and (self.root/'generated/busy').exists():state='GENERATING'
     if output.get('state') in STATES:
       state = output['state']
-    return dict(available=self.device and self.root.exists(), state=state, profiles=PROFILES, live=self.live_status(),
+    demo=self.demo_status()
+    if not offroad:demo.update(available=False,reason='Replay simulation requires the vehicle to be offroad.')
+    return dict(available=self.device and self.root.exists(), state=state, profiles=PROFILES, live=self.live_status(), demo=demo,
                 profile=worker.get('profile') if live else settings.get('profile', 'prism'),
                 selected_profile=settings.get('profile', 'prism'),
                 composer='ace' if live else None, backend='Chestnut' if live else None,
@@ -168,6 +199,9 @@ class Operator:
                 calibrating=output.get('calibrating', False), session_muted=output.get('session_muted', True), output=output.get('output'), latency_ms=output.get('latency_ms'), error=self.error or output.get('error'))
 
   def operate(self, action, data, offroad):
+    if action == 'demo_engagement':
+      if not offroad:raise ValueError('Replay simulation requires the vehicle to be offroad')
+      return self.demo_engagement(data)
     if action == 'live':
       if set(data) != {'enabled'} or type(data['enabled']) is not bool:
         raise ValueError('Live RoadScore requires an enabled boolean')
