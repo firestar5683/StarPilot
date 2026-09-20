@@ -59,6 +59,7 @@ env['ROADSCORE_PRESENTATION_POLICY']=presentation['policy']
 env['ROADSCORE_COMPOSITION_POLICY']=composition_policy
 env['ROADSCORE_COMPOSER']=a.composer
 env['ROADSCORE_ACE_PROFILE']=a.profile
+if native:env.setdefault('ROADSCORE_REPLAY_PRIME','1')
 env['ROADSCORE_OVERLAY_CAPTURE']=str(out/'overlay.png')
 env['ROADSCORE_STATUS_FILE']=str(out/'roadscore_status.json')
 initial_display={'readiness':'Preparing','composer':a.composer,'profile':a.profile if a.composer=='ace' else None,'render_mode':a.render_mode,'style':a.profile.title() if a.composer=='ace' else settings.style}
