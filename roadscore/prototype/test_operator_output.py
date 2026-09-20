@@ -52,20 +52,49 @@ class OutputTests(unittest.TestCase):
     token=self.owner.dispatch('calibration_start', attended=True)['session']
     for i in range(8):self.owner.session['sink'].callback(i,100000+i*600)
     with self.assertRaises(ValueError):self.owner.dispatch('calibration_tap',session=token,server_ms=100200,uncertainty_ms=3)
-    offsets=[200,201,198,202,199,203,197,200,201,199,400,205,200,201,199,200]
+    offsets=[200,201,198,202,199,203,197,200,201,199,400,205]
     for index, offset in enumerate(offsets):
-      i=index+8;click=100000+i*600;self.clock.value=(click+offset)/1000
+      i=index+8;click=100000+m.MARKER_OFFSETS[index]*1000;self.clock.value=(click+offset)/1000
       self.owner.session['sink'].callback(i,click)
       self.owner.dispatch('calibration_tap', session=token, server_ms=click+offset, uncertainty_ms=3)
       with self.assertRaises(ValueError):self.owner.dispatch('calibration_tap',session=token,server_ms=click+offset+5,uncertainty_ms=3)
     result=self.owner.dispatch('calibration_result',session=token)
     self.assertEqual(result['latency_ms'],200);self.assertEqual(result['rejected_taps'],1)
-    self.assertEqual(result['count_in_beats'],8);self.assertTrue(result['whole_beat_ambiguity_possible'])
+    self.assertEqual(result['count_in_beats'],8);self.assertFalse(result['whole_beat_ambiguity_possible'])
+    saved=json.loads((self.root/'generated/calibration_latest_result.json').read_text())
+    self.assertEqual(saved['output']['id'],'speaker-a');self.assertEqual(saved['method'],m.METHOD)
+    self.assertTrue(saved['includes_human_tap_bias']);self.assertEqual(len(saved['pairs']),12)
     self.assertFalse((self.root/'generated/output_timing.json').exists())
     self.owner.dispatch('set_latency',latency_ms=result['latency_ms'])
     self.assertEqual(self.owner.status()['latency_ms'],200)
     self.output={**self.output,'id':'speaker-b'}
     self.assertEqual(self.owner.status()['latency_ms'],0)
+
+  def test_marker_pairing_distinguishes_whole_beat_offsets(self):
+    for latency in (24,624):
+      token=self.owner.dispatch('calibration_start',attended=True)['session']
+      for index,offset in enumerate(m.MARKER_OFFSETS):
+        click=100000+offset*1000;self.clock.value=(click+latency)/1000
+        self.owner.session['sink'].callback(index+8,click)
+        self.owner.dispatch('calibration_tap',session=token,server_ms=click+latency,uncertainty_ms=3)
+      result=self.owner.dispatch('calibration_result',session=token)
+      self.assertEqual(result['latency_ms'],latency)
+      self.assertFalse((self.root/'generated/output_timing.json').exists())
+
+  def test_missed_marker_is_not_paired_to_next_or_partial_result(self):
+    token=self.owner.dispatch('calibration_start',attended=True)['session']
+    first=100000+m.MARKER_OFFSETS[0]*1000
+    second=100000+m.MARKER_OFFSETS[1]*1000
+    self.owner.session['sink'].callback(8,first);self.owner.session['sink'].callback(9,second)
+    self.clock.value=(second+24)/1000
+    with self.assertRaisesRegex(ValueError,'marker was missed'):
+      self.owner.dispatch('calibration_tap',session=token,server_ms=second+24,uncertainty_ms=3)
+    with self.assertRaisesRegex(ValueError,'marker was missed'):
+      self.owner.dispatch('calibration_result',session=token)
+    self.assertFalse((self.root/'generated/calibration_latest_result.json').exists())
+    token=self.owner.dispatch('calibration_start',attended=True)['session']
+    with self.assertRaisesRegex(ValueError,'all twelve'):
+      self.owner.dispatch('calibration_result',session=token)
 
   def test_uncertain_clock_stale_token_and_judging_lock(self):
     token=self.owner.dispatch('calibration_start',attended=True)['session']
@@ -184,7 +213,18 @@ class OutputTests(unittest.TestCase):
       from operator_click_process import ClickSequence
       sink=ClickSequence(lambda i,at:stamps.append((i,at)),0,count=4)
       second=ClickSequence(lambda *_:None,0,count=4)
+      markers=ClickSequence(lambda *_:None,0,count=m.COUNT)
+      markers_again=ClickSequence(lambda *_:None,0,count=m.COUNT)
     self.assertTrue(np.array_equal(sink.pcm,second.pcm))
+    self.assertTrue(np.array_equal(markers.pcm,markers_again.pcm))
+    self.assertEqual(len(markers.beats),20)
+    self.assertEqual(markers.beats[8],round(8.6*48000))
+    self.assertTrue(all(value>1.5 for value in np.diff(markers.beats[8:])/48000))
+    self.assertGreater(len(set(np.diff(markers.beats[8:]))),3)
+    for beat,next_beat in zip(markers.beats[8:],markers.beats[9:]):
+      self.assertTrue(np.any(markers.pcm[beat:beat+2160]))
+      self.assertTrue(np.any(markers.pcm[beat+3840:beat+6000]))
+      self.assertFalse(np.any(markers.pcm[beat+6240:next_beat]))
     self.assertLessEqual(abs(sink.pcm).max(),.071)
     self.assertEqual(sink.beats[1]-sink.beats[0],28800)
     self.assertGreater(abs(sink.pcm[sink.beats[0]:sink.beats[0]+1000]).max(),abs(sink.pcm[sink.beats[1]:sink.beats[1]+1000]).max())

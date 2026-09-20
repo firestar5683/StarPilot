@@ -1,11 +1,11 @@
 """Explicitly attended calibration process; no import-time audio output."""
 import time
 RATE=48000
-INTERVAL=.6
+from operator_output import COUNT, COUNT_IN, INTERVAL, MARKER_OFFSETS
 
 class ClickSequence:
   """Prebuilt low-level click PCM; callback only copies memory and timestamps."""
-  def __init__(self, on_click, device, count=24):
+  def __init__(self, on_click, device, count=COUNT):
     import numpy as np
     import sounddevice as sd
     self.sd = sd
@@ -13,13 +13,22 @@ class ClickSequence:
     self.index = 0
     self.failed = False
     start = 2.0
-    self.beats = [round((start + i * INTERVAL) * RATE) for i in range(count)]
+    if count not in (4,COUNT):raise ValueError('Unsupported calibration sequence')
+    offsets=[start+i*INTERVAL for i in range(4 if count==4 else COUNT_IN)]
+    if count==COUNT:offsets+=list(MARKER_OFFSETS)
+    self.beats = [round(at * RATE) for at in offsets]
     self.pcm = np.zeros((self.beats[-1] + RATE, 2), dtype='float32')
     t = np.arange(round(.018 * RATE)) / RATE
     downbeat = (.07 * np.sin(2 * np.pi * 1760 * t) * np.exp(-t * 180)).astype('float32')
     beat_click = (.0455 * np.sin(2 * np.pi * 880 * t) * np.exp(-t * 180)).astype('float32')
+    tone_t = np.arange(round(.045 * RATE)) / RATE
+    envelope = np.sin(np.pi * np.arange(len(tone_t)) / len(tone_t)) ** 2
+    marker = np.zeros(round(.13 * RATE), dtype='float32')
+    marker[:len(tone_t)] = .07 * np.sin(2 * np.pi * 880 * tone_t) * envelope
+    second = round(.08 * RATE)
+    marker[second:second + len(tone_t)] = .07 * np.sin(2 * np.pi * 1760 * tone_t) * envelope
     for index,beat in enumerate(self.beats):
-      click = downbeat if index % 4 == 0 else beat_click
+      click = marker if index >= COUNT_IN else downbeat if index % 4 == 0 else beat_click
       self.pcm[beat:beat + len(click)] = click[:, None]
     self.stream = sd.OutputStream(device=device, samplerate=RATE, channels=2, dtype='float32', blocksize=480,
                                   callback=self.callback)
@@ -51,7 +60,7 @@ def main():
   from pathlib import Path
   from bluetooth_output import prepare_output,select_device
   from operator_output import real_offroad,selected_output
-  p=argparse.ArgumentParser();p.add_argument('--address',required=True);p.add_argument('--count',type=int,choices=[4,24],required=True);args=p.parse_args()
+  p=argparse.ArgumentParser();p.add_argument('--address',required=True);p.add_argument('--count',type=int,choices=[4,COUNT],required=True);args=p.parse_args()
   output=selected_output()
   if not real_offroad() or not output or not output['connected'] or output['address']!=args.address:
     raise RuntimeError('Park and reconnect the selected Bluetooth speaker before calibration')

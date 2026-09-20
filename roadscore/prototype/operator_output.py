@@ -19,7 +19,13 @@ import time
 BPM = 100
 INTERVAL = 60 / BPM
 COUNT_IN = 8
-COUNT = 24
+COUNT = 20
+MARKER_COUNT = COUNT - COUNT_IN
+METHOD = 'irregular-marker-reaction-v1'
+MARKER_INTERVALS = (1.8, 2.4, 2.1, 2.7, 1.9, 2.5, 2.2, 2.8, 2.0, 2.6, 2.3)
+MARKER_OFFSETS = (8.6,)
+for _interval in MARKER_INTERVALS:
+  MARKER_OFFSETS += (round(MARKER_OFFSETS[-1] + _interval, 3),)
 RATE = 48000
 
 
@@ -102,13 +108,13 @@ def correction(root, identity):
 
 def robust_offset(pairs):
   if len(pairs) < 8:
-    raise ValueError('At least eight different beats are required')
+    raise ValueError('At least eight different markers are required')
   differences = [tap - click for click, tap in pairs]
   center = median(differences)
   mad = median(abs(value - center) for value in differences)
   accepted = [value for value in differences if abs(value - center) <= max(35, 4.4478 * mad)]
   if len(accepted) < 8 or len(accepted) < len(pairs) * .65:
-    raise ValueError('Tap rhythm was inconsistent; retry')
+    raise ValueError('Tap timing was inconsistent; retry')
   spread = median(abs(value - median(accepted)) for value in accepted)
   if spread > 80:
     raise ValueError('Tap timing varied too much; retry')
@@ -268,7 +274,7 @@ class OutputOwner:
             raise ValueError('Output changed before calibration began')
           self.session = dict(token=token, sink=sink, clicks=clicks, taps={}, output=state['output'],
                               operator_lease=operator, session_lease=session_lease, last_client=self.clock(),
-                              deadline=self.clock() + (15 if action == 'test' else 40), test=action == 'test')
+                              deadline=self.clock() + (15 if action == 'test' else 60), test=action == 'test')
           sink.start()
         except BaseException:
           if self.session:
@@ -277,7 +283,10 @@ class OutputOwner:
             session_lease.__exit__(None, None, None); operator.__exit__(None, None, None)
           raise
         threading.Thread(target=self._watch, args=(token,), daemon=True).start()
-        return dict(ok=True, session=token, interval_ms=round(INTERVAL * 1000), beats=COUNT,count_in=COUNT_IN,bpm=BPM,beats_per_bar=4)
+        return dict(ok=True, session=token, interval_ms=round(INTERVAL * 1000), beats=4 if action=='test' else COUNT,
+                    count_in=COUNT_IN,bpm=BPM,beats_per_bar=4,method=METHOD,marker_count=MARKER_COUNT,target_taps=MARKER_COUNT,
+                    marker_offsets_ms=[round(at*1000) for at in MARKER_OFFSETS],
+                    instructions='Listen to two bars without tapping. Then tap once at the START of each two-tone marker; wait through the silence. The estimate includes your reaction time.')
       if action == 'set_latency':
         value = data.get('latency_ms')
         if type(value) is not int or not 0 <= value <= 1500:
@@ -304,7 +313,7 @@ class OutputOwner:
         self._close(); return dict(ok=True)
       if action == 'calibration_poll':
         delay = correction(self.root, session['output']['id']) if session['test'] else 0
-        return dict(ok=True, clicks=[{'beat': index, 'server_ms': at + delay} for index, at in list(session['clicks'].items())], test=session['test'])
+        return dict(ok=True, clicks=[{'beat': index, 'server_ms': at + delay, 'kind':'marker' if index>=COUNT_IN and not session['test'] else 'count_in'} for index, at in list(session['clicks'].items())], test=session['test'])
       if action == 'calibration_tap':
         at, uncertainty = data.get('server_ms'), data.get('uncertainty_ms')
         if type(at) not in (int, float) or not math.isfinite(at) or type(uncertainty) not in (int, float) or not 0 <= uncertainty <= 25:
@@ -312,23 +321,34 @@ class OutputOwner:
         if abs(at - self.clock() * 1000) > 2000:
           raise ValueError('Stale tap')
         if session['test']:raise ValueError('Test mode does not collect taps')
+        if session.get('pairing_error'):raise ValueError(session['pairing_error'])
         if COUNT_IN not in session['clicks'] or at<session['clicks'][COUNT_IN]:
-          raise ValueError('Listen for two full bars; start tapping on bar three')
+          raise ValueError('Listen for two full bars; tap only the two-tone markers after the count-in')
         index=COUNT_IN+len(session['taps'])
         if index>=COUNT or index not in session['clicks']:
-          raise ValueError('Wait for the next beat')
+          raise ValueError('Wait for the next two-tone marker')
         click=session['clicks'][index]
         previous=max((tap for _,tap in session['taps'].values()),default=float('-inf'))
         if at-previous<INTERVAL*1000*.45:
-          raise ValueError('Tap once per beat')
+          raise ValueError('Tap once per marker')
         if not 0<=at-click<=1500:
-          raise ValueError('Beat sequence was missed; restart with the two-bar count-in')
+          session['pairing_error']='A marker was missed or tapped outside its 0–1500 ms window; restart the measurement'
+          raise ValueError(session['pairing_error'])
         session['taps'][index] = (click, at)
         return dict(ok=True, accepted_taps=len(session['taps']))
       if action == 'calibration_result':
         try:
+          if session.get('pairing_error'):raise ValueError(session['pairing_error'])
+          if len(session['taps'])!=MARKER_COUNT:raise ValueError('Tap all twelve markers before finishing; restart if a marker was missed')
           result = robust_offset(list(session['taps'].values()))
-          result.update(bpm=BPM,count_in_beats=COUNT_IN,beat_pairing='sequential after two-bar count-in',whole_beat_ambiguity_possible=True)
+          result.update(method=METHOD,bpm=BPM,count_in_beats=COUNT_IN,marker_count=MARKER_COUNT,
+                        beat_pairing='sequential absolute marker timestamps; no modulo pairing',whole_beat_ambiguity_possible=False,
+                        measurement='Bluetooth/output delay plus human reaction time; not a physical latency measurement',
+                        output=session['output'],created_wall=time.time(),
+                        pairs=[dict(marker=index,server_ms=click,tap_ms=tap,offset_ms=tap-click)
+                               for index,(click,tap) in session['taps'].items()])
+          path=self.root/'generated/calibration_latest_result.json'
+          temp=path.with_suffix('.tmp');temp.write_text(json.dumps(result));temp.replace(path)
         finally:
           self._close()
         return dict(ok=True, **result)
