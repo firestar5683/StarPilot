@@ -53,6 +53,7 @@ def install():
   for service in ('selfdriveState','starpilotSelfdriveState'):
    size=ui_state.sm[service].alertSize
    if int(size.raw)>0:alert_clear_after=now+1.
+  if getattr(ui_state,'roadscore_replay_prompt_active',False):alert_clear_after=now+1.
   frames+=1
   if frames==1:path.with_name('ui_capture_origin.json').write_text(json.dumps({'wall':time.monotonic(),'frame':0}))
   startup=home_footer_right is not None or not ui_state.started

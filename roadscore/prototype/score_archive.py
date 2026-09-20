@@ -1,5 +1,5 @@
 """Route-owned exact rendered score and compact decisions; no regeneration recipe."""
-import json,shutil,subprocess,time
+import hashlib,json,shutil,subprocess,time
 from pathlib import Path
 from route_library import ROOT,identity
 
@@ -12,6 +12,13 @@ def prefer_new_score(new,old):
 def recording_complete(blocks, launch, bridge):
  return bool(blocks) and launch.get('end_reason')=='native final segment exhausted' and not bridge.get('failure')
 
+def staging_provenance(run):
+ path=Path(run)/'demo_curve_plan.json'
+ if not path.is_file():return {}
+ return {'presentation_demo_only':True,'demo_curve_plan_file':path.name,
+         'demo_curve_plan_sha256':hashlib.sha256(path.read_bytes()).hexdigest(),
+         'presentation_staging':'Known recorded curve timing shapes presentation only; composer inputs remain causal.'}
+
 def archive(route,run,start=0):
  dongle,name=identity(route);parent=ROOT/'routes'/dongle/name/'roadscore';parent.mkdir(parents=True,exist_ok=True)
  dest=parent/run.name;dest.mkdir(exist_ok=False)
@@ -19,7 +26,7 @@ def archive(route,run,start=0):
  (run/'host_heard.flac').symlink_to(dest/'score.flac')
  if (run/'quality').exists():
   shutil.move(str(run/'quality'),str(dest/'quality'));(run/'quality').symlink_to(dest/'quality',target_is_directory=True)
- for filename in ['host_audio.jsonl','host_audio_summary.json','clock_sync.json','clock_sync_after.json','launch.json','summary.json','jobs.jsonl','boundaries.jsonl','ending.json','bridge.json','runtime_manifest.json','song_form.json','gesture_grid.json','gestures.json','shaker_grid.json','shaker_events.json','core_apex_events.json','composition.json','settings.json','quality_events.jsonl','ace_link.jsonl']:
+ for filename in ['host_audio.jsonl','host_audio_summary.json','clock_sync.json','clock_sync_after.json','launch.json','summary.json','jobs.jsonl','boundaries.jsonl','ending.json','bridge.json','runtime_manifest.json','song_form.json','gesture_grid.json','gestures.json','shaker_grid.json','shaker_events.json','core_apex_events.json','composition.json','settings.json','quality_events.jsonl','ace_link.jsonl','demo_curve_plan.json']:
   if (run/filename).exists():shutil.copy2(run/filename,dest/filename)
  blocks=[b for x in (run/'host_audio.jsonl').read_text().splitlines() if (b:=json.loads(x)).get('audio_s') is not None]
  # The first model's absolute time relative to native route start is recorded by sender.
@@ -38,6 +45,7 @@ def archive(route,run,start=0):
  meta['full_route']=meta['complete'] and start==0
  meta['audio_seconds']=blocks[-1]['audio_s']+.1 if blocks else 0
  meta['output_underruns']=audio_stats.get('portaudio_flags',0)
+ meta.update(staging_provenance(run))
  meta['capture_timing_clean']=not any(audio_stats.get(k,0) for k in ['portaudio_flags','starved_callbacks','late_frames'])
  if not meta['capture_timing_clean']:meta['timing_limitation']='Lossless rendered PCM and per-block DAC timing are retained. Hardware output interruptions are not reproduced by contiguous stored playback.'
  (dest/'metadata.json').write_text(json.dumps(meta,indent=2))
@@ -45,8 +53,8 @@ def archive(route,run,start=0):
  last=None
  with (dest/'events.jsonl').open('w') as out:
   for b in blocks:
-   event={k:b.get(k) for k in ['route_t','audio_s','phase','kind','activation','strength','predicted_peak','cadence_entry_audio_s']}
-   key=tuple(event.get(k) for k in ['phase','kind','activation','cadence_entry_audio_s'])
+   event={k:b.get(k) for k in ['route_t','audio_s','phase','kind','activation','strength','predicted_peak','cadence_entry_audio_s','demo_curve_state']}
+   key=tuple(event.get(k) for k in ['phase','kind','activation','cadence_entry_audio_s'])+(json.dumps(event['demo_curve_state'],sort_keys=True),)
    if key!=last:out.write(json.dumps(event)+'\n');last=key
  if (run/'trace.jsonl').exists():
   last=None

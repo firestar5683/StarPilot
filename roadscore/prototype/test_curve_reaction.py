@@ -61,5 +61,24 @@ class CurveTests(unittest.TestCase):
   for i in range(10):self.assertFalse(np.any(dsp.process(silence,i*4800,self.state)))
   dsp.process(silence,48000,{**self.state,'phase':'event'})
   self.assertEqual(dsp.payoff,48000)
+ def test_bass_build_removes_low_end_then_restores_exact_song(self):
+  rate=48000;t=np.arange(rate*5)/rate
+  source=np.column_stack([.22*np.sin(2*np.pi*80*t)+.1*np.sin(2*np.pi*2000*t)]*2).astype('float32')
+  original=source.copy();dsp=CurveReaction(GRID,enabled=True,bass_build=True);output=[]
+  for start in range(0,len(source),4800):
+   now=start/rate
+   state={**self.state,'amount':min(1.,now/3),'phase':'anticipation' if now<3.5 else 'event','demo_staged_curve':True}
+   output.append(dsp.process(source[start:start+4800],start,state))
+  wave=np.concatenate(output)
+  def magnitude(samples,hz):
+   spectrum=np.abs(np.fft.rfft(samples[:,0]));return spectrum[round(hz*len(samples)/rate)]
+  before=source[rate*3:rate*3+4800];build=wave[rate*3:rate*3+4800]
+  self.assertLess(magnitude(build,80),magnitude(before,80)*.15)
+  self.assertGreater(magnitude(build,2000),magnitude(before,2000)*.8)
+  self.assertTrue(np.array_equal(wave[rate*4:],source[rate*4:]))
+  self.assertTrue(np.array_equal(source,original));self.assertTrue(np.isfinite(wave).all())
+  self.assertLess(np.abs(wave).max(),1.)
+  self.assertEqual(dsp.snapshot()['curve_reaction']['source'],'known replay route event')
+
 
 if __name__=='__main__':unittest.main()

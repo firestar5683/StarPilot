@@ -18,6 +18,7 @@ from motion_presentation import MotionPresentation
 from signal_shaker import SignalShaker,profile_tempo_prior
 from core_apex import CoreApex
 from curve_reaction import CurveReaction
+from demo_curve_plan import ReplayCurvePlan
 from alert_accent import AlertAccent
 from rhythm_timeline import RhythmTimeline
 from presentation_status import export_status
@@ -78,6 +79,8 @@ from ace_profiles import selected,PROFILES
 ace_profile=selected()
 if composer=='ace':
  from ending_policy import safe_ending_gesture as ending_gesture
+demo_curve_plan=ReplayCurvePlan.from_environment(a.input,os.environ)
+if demo_curve_plan:(run/'demo_curve_plan.json').write_text(json.dumps(demo_curve_plan.value,indent=2))
 config=effective_config(configuration());validate_render_mode(render_mode,composer,config.get('song_form_experimental',False));identity=config.get('identity','legacy');identity=identity if identity in styles else 'legacy'
 rolling_mode=config.get('rolling',False);rolling_anchors={k:anchor_options(root,k) for k in styles if (root/f'assets/source_{k}.wav').exists()} if rolling_mode and composer!='ace' else {}
 drive_events=config.get('drive_events',False) or config.get('event_music',False);phrase_runway=config.get('phrase_runway',False)
@@ -141,7 +144,7 @@ if shaker_enabled or apex_enabled or alert_enabled or curve_enabled:
  shaker=SignalShaker(shaker_grid,rate,enabled=shaker_enabled,peak=config.get('signal_shaker',{}).get('peak',.012))
  apex=CoreApex(shaker_grid,rate,enabled=apex_enabled and not curve_enabled,dip_db=config.get('core_apex',{}).get('dip_db',-1.))
  alert_accent=AlertAccent(shaker_grid,rate,enabled=alert_enabled)
- curve_reaction=CurveReaction(shaker_grid,rate,enabled=curve_enabled)
+ curve_reaction=CurveReaction(shaker_grid,rate,enabled=curve_enabled,bass_build=config.get('curve_reaction',{}).get('bass_build') is True)
  (run/'shaker_grid.json').write_text(json.dumps({'grid':shaker.snapshot(),'analysis':rhythm_timeline.snapshot()},indent=2))
 if config.get('composition_control',False):
  from composition_policy import CompositionPolicy
@@ -239,7 +242,7 @@ def callback(out,n,ti,status):
  if curve_reaction is not None:
   curve_fresh=road_model_valid and 0<=callback_wall-command_wall<=.5
   motion_blocked=bool(motion is not None and motion.stopped and motion.fresh)
-  rendered=curve_reaction.process(rendered,frames-n,event_state,source_fresh=curve_fresh,blocked=alert_priority or motion_blocked)
+  rendered=curve_reaction.process(rendered,frames-n,event_state.get('demo_curve_state',event_state),source_fresh=curve_fresh,blocked=alert_priority or motion_blocked)
  if motion is not None:
   _,motion_fresh=engagement_active(motion_state[1],True,motion_state[2],motion_state[4],motion_state[3],callback_wall)
   rendered=motion.process(rendered,speed=motion_state[0],source_fresh=motion_fresh)
@@ -262,7 +265,7 @@ def callback(out,n,ti,status):
  if curve_reaction is not None:cue.update(curve_reaction.snapshot())
  rendered_presentation=dict(sequence=frames-n,callback_wall=callback_wall,
                             dac_wall=callback_wall+float(ti.outputBufferDacTime-ti.currentTime),cues=cue)
- try:capture.put_nowait((rendered,chunk,{'motion_presentation':motion.snapshot() if motion is not None else None,'signal_shaker_enabled':shaker_enabled,'signal_on':signal_on,'signal_fresh':signal_fresh,'engagement_presentation_enabled':presentation_config.enabled,'engagement_active':active,'engagement_recorded_active':recorded_active,'demo_engagement_mode':demo_mode,'demo_signal_mode':demo_signal_mode,'signal_recorded_on':recorded_signal,'engagement_fresh':fresh,'audio_s':(frames-n)/rate,'callback_wall':callback_wall,'command_received_wall':command_wall,'replay_origin_wall':replay_origin_wall,'dac_delay':float(ti.outputBufferDacTime-ti.currentTime),'route_t':source_time,'amount':amount,'phase':event_state['phase'],'strength':event_state.get('strength',0),'predicted_peak':event_state.get('predicted_peak'),'activation':event_state.get('activation'),'kind':event_state.get('kind','curve'),'cadence_entry_audio_s':None if ending_start is None else ending_start/rate,'runway_active':ending_start is not None and frames-n<ending_start,'muted':a.mute,'portaudio_status':str(status),'callback_processing_seconds':time.monotonic()-callback_wall}))
+ try:capture.put_nowait((rendered,chunk,{'motion_presentation':motion.snapshot() if motion is not None else None,'signal_shaker_enabled':shaker_enabled,'signal_on':signal_on,'signal_fresh':signal_fresh,'engagement_presentation_enabled':presentation_config.enabled,'engagement_active':active,'engagement_recorded_active':recorded_active,'demo_engagement_mode':demo_mode,'demo_signal_mode':demo_signal_mode,'demo_curve_state':event_state.get('demo_curve_state'),'signal_recorded_on':recorded_signal,'engagement_fresh':fresh,'audio_s':(frames-n)/rate,'callback_wall':callback_wall,'command_received_wall':command_wall,'replay_origin_wall':replay_origin_wall,'dac_delay':float(ti.outputBufferDacTime-ti.currentTime),'route_t':source_time,'amount':amount,'phase':event_state['phase'],'strength':event_state.get('strength',0),'predicted_peak':event_state.get('predicted_peak'),'activation':event_state.get('activation'),'kind':event_state.get('kind','curve'),'cadence_entry_audio_s':None if ending_start is None else ending_start/rate,'runway_active':ending_start is not None and frames-n<ending_start,'muted':a.mute,'portaudio_status':str(status),'callback_processing_seconds':time.monotonic()-callback_wall}))
  except queue.Full:underflows+=1
 # Optional prewarmed continuation gives ~52 seconds before replay starts.
 warm=root/'generated/job_-1.wav'
@@ -322,7 +325,8 @@ try:
     else:state=con.state(now)
     samples=[(float(t),float(y)) for t,y in zip(m.orientationRate.t,m.orientationRate.z) if 1<=t<=8]
     state['predicted_turn_radians']=sum((y0+y1)*.5*(t1-t0) for (t0,y0),(t1,y1) in zip(samples,samples[1:]) if 0<t1-t0<2)
-    render_state=(state,now,time.monotonic())
+    presentation_state={**state,'demo_curve_state':demo_curve_plan.state(now,clock['route'],state)} if demo_curve_plan else state
+    render_state=(presentation_state,now,time.monotonic())
     if sm.updated['navRoute']:
      nav={};arrival_since=None;nav_revision+=1
      arrival.route_change(bool(sm.valid['navRoute']))

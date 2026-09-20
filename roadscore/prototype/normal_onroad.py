@@ -8,6 +8,7 @@ from pathlib import Path
 from clock_sync import measure
 from receiver_environment import assignments as receiver_assignments,resolve_compute
 from presentation_policy import select_launch
+from demo_curve_plan import launch_plan
 from hook_launch import start_planner
 from composition_launch import configure as configure_composition
 from launch_health import check_children, describe_failure, write_failure
@@ -20,7 +21,7 @@ if native:
  restore_links(R)
 def interrupt(*_):raise KeyboardInterrupt
 signal.signal(signal.SIGTERM,interrupt)
-p=argparse.ArgumentParser();p.add_argument('--roadscore-seed',type=seed_argument,help='Reproduce an ACE session; normal launches choose a fresh seed');p.add_argument('--render-mode',choices=['current','gold-core'],default=None,help='ACE rendering mode');p.add_argument('--roadscore-presentation',choices=['conservative-v3','conservative-v2','conservative-v1','off','frozen']);p.add_argument('route',nargs='?');p.add_argument('--routeid');p.add_argument('--roadscore',action='store_true',required=True);p.add_argument('--replay',action='store_true',help='Play recorded final score without Chestnut');p.add_argument('--score-archive',type=Path,help='Imported local archive for --replay');p.add_argument('--start',type=int,default=None);p.add_argument('--duration',type=float,default=float('inf'),help='Optional duration limit; normally replay to route EOF');p.add_argument('--audible',action='store_true',help='Compatibility flag; output is audible by default outside automated sessions');p.add_argument('--muted',action='store_true');p.add_argument('--no-overlay',action='store_true');p.add_argument('--capture-ui',action='store_true',help='Record the normal UI internally without speaker output');p.add_argument('--audio-device',default=None,help='Development host output device; default is the system output');p.add_argument('--transport-only',action='store_true');p.add_argument('--headless',action='store_true');p.add_argument('--runtime',type=Path,default=Path('/data/openpilot') if native else Path(os.environ.get('ROADSCORE_RUNTIME','/Users/dominickthompson/starpilot/.host_runtime/darwin/worktree')));p.add_argument('--bench',default=device_target());p.add_argument('--composer',choices=['sa3','ace'],default=choice(),help='ACE Prism is the event default; SA3 is an explicit fallback');p.add_argument('--profile',choices=['prism','aurora'],default='prism');a=p.parse_args()
+p=argparse.ArgumentParser();p.add_argument('--roadscore-seed',type=seed_argument,help='Reproduce an ACE session; normal launches choose a fresh seed');p.add_argument('--render-mode',choices=['current','gold-core'],default=None,help='ACE rendering mode');p.add_argument('--roadscore-presentation',choices=['conservative-v4','conservative-v3','conservative-v2','conservative-v1','off','frozen']);p.add_argument('route',nargs='?');p.add_argument('--routeid');p.add_argument('--roadscore',action='store_true',required=True);p.add_argument('--replay',action='store_true',help='Play recorded final score without Chestnut');p.add_argument('--score-archive',type=Path,help='Imported local archive for --replay');p.add_argument('--start',type=int,default=None);p.add_argument('--duration',type=float,default=float('inf'),help='Optional duration limit; normally replay to route EOF');p.add_argument('--audible',action='store_true',help='Compatibility flag; output is audible by default outside automated sessions');p.add_argument('--muted',action='store_true');p.add_argument('--no-overlay',action='store_true');p.add_argument('--capture-ui',action='store_true',help='Record the normal UI internally without speaker output');p.add_argument('--audio-device',default=None,help='Development host output device; default is the system output');p.add_argument('--transport-only',action='store_true');p.add_argument('--headless',action='store_true');p.add_argument('--runtime',type=Path,default=Path('/data/openpilot') if native else Path(os.environ.get('ROADSCORE_RUNTIME','/Users/dominickthompson/starpilot/.host_runtime/darwin/worktree')));p.add_argument('--bench',default=device_target());p.add_argument('--composer',choices=['sa3','ace'],default=choice(),help='ACE Prism is the event default; SA3 is an explicit fallback');p.add_argument('--profile',choices=['prism','aurora'],default='prism');a=p.parse_args()
 explicit_start=a.start
 if a.render_mode=='gold-core' and a.composer!='ace':raise SystemExit('Gold core requires ACE')
 if a.roadscore_seed is not None and (a.replay or a.composer!='ace'):raise SystemExit('--roadscore-seed applies only to fresh ACE generation')
@@ -57,6 +58,12 @@ if session:print('Requested Chestnut cap:',compute['requested_power_limit_watts'
 (out/'settings.json').write_text(json.dumps({**settings.snapshot(a.headless),'composer':a.composer,'profile':a.profile,'render_mode':a.render_mode,'presentation_policy':presentation['policy'],'composition_policy':composition_policy,**(session or {})},indent=2))
 env['ROADSCORE_RENDER_MODE']=a.render_mode
 env['ROADSCORE_PRESENTATION_POLICY']=presentation['policy']
+env.pop('ROADSCORE_DEMO_CURVE_PLAN',None)
+demo_curve=launch_plan(R/'assets/showcase_curve_plan.json',a.routeid,a.start,native=native,replay=a.replay,judging=bool(session and session['seed_origin']=='judging-route'),policy=presentation['policy'])
+if demo_curve:
+ env['ROADSCORE_DEMO_CURVE_PLAN']=json.dumps(demo_curve,separators=(',',':'))
+ (out/'demo_curve_plan.json').write_text(json.dumps(demo_curve,indent=2))
+ print('Showcase presentation: staged build and bass return at a measured route curve.',flush=True)
 env['ROADSCORE_COMPOSITION_POLICY']=composition_policy
 env['ROADSCORE_COMPOSER']=a.composer
 env['ROADSCORE_ACE_PROFILE']=a.profile
