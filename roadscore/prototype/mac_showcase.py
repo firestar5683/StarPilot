@@ -12,6 +12,7 @@ import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from paired_demo_controls import DISCLOSURE, GalaxyPeer, PairedDemoControls
 
 HERE = Path(__file__).resolve().parent
 
@@ -22,7 +23,7 @@ def write_json(path, value):
   temporary.replace(path)
 
 
-def control_server(project, out, shared, port):
+def control_server(project, out, shared, port, forwarder=None):
   spec = importlib.util.spec_from_file_location('showcase_galaxy', project/'starpilot/system/the_galaxy/roadscore.py')
   module = importlib.util.module_from_spec(spec)
   spec.loader.exec_module(module)
@@ -30,6 +31,27 @@ def control_server(project, out, shared, port):
   (operator_root/'results').mkdir(parents=True)
   (operator_root/'results/current').symlink_to(out)
   operator = module.Operator(operator_root, device=False, offroad=lambda: True)
+  control_lock = threading.Lock()
+  sequence = 0
+  paired = dict(enabled=forwarder is not None, sequence=0, request=None, music_video_synchronized=False, disclosure=DISCLOSURE,
+                targets={'comma':dict(status='idle' if forwarder else 'disabled',acknowledged=False,applied=False,error=None)})
+  def paired_snapshot(demo):
+    with control_lock:result = {**paired, 'targets':dict(paired['targets'])}
+    result['targets']['mac'] = dict(status='ready' if demo['available'] else 'unready',
+                                   mode=demo['mode'],signal_mode=demo['signal_mode'],acknowledged=False,applied=False)
+    request = result['request']
+    if request:
+      applied = demo['available'] and demo['session_id'] == request['session_id'] and demo[request['field']] == request['value']
+      result['targets']['mac'].update(acknowledged=True,applied=bool(applied),action=request['action'],value=request['value'])
+    return result
+  def failed_peer():
+    return dict(targets={'comma':dict(status='failed',acknowledged=False,applied=False,error='peer_submission_failed')})
+  def received(future, request_sequence):
+    try:result = future.result()
+    except Exception:result = failed_peer()
+    with control_lock:
+      # A slow result cannot replace the status of a newer button action.
+      if sequence == request_sequence:paired['targets'] = result['targets']
   class Handler(BaseHTTPRequestHandler):
     def log_message(self, *args):pass
     def send_json(self, value, status=200):
@@ -41,23 +63,46 @@ def control_server(project, out, shared, port):
       self.end_headers();self.wfile.write(data)
     def do_GET(self):
       if self.path == '/status':
-        self.send_json({'demo': operator.demo_status(), **shared})
+        demo = operator.demo_status()
+        self.send_json({'demo': demo, **shared, 'paired_controls':paired_snapshot(demo)})
       elif self.path == '/':
         data = (HERE/'mac_showcase.html').read_bytes()
         self.send_response(200);self.send_header('Content-Type', 'text/html; charset=utf-8');self.send_header('Content-Length', str(len(data)));self.end_headers();self.wfile.write(data)
       else:self.send_error(404)
     def do_POST(self):
+      nonlocal sequence
       if self.path != '/control':self.send_error(404);return
-      if not module.control_origin_allowed(self.headers.get('Origin'), self.headers.get('Host'), 'http', self.headers.get('Sec-Fetch-Site')):
+      allowed_hosts = {f'127.0.0.1:{self.server.server_port}',f'localhost:{self.server.server_port}'}
+      if (self.headers.get('Host') not in allowed_hosts
+          or not module.control_origin_allowed(self.headers.get('Origin'), self.headers.get('Host'), 'http', self.headers.get('Sec-Fetch-Site'))):
         self.send_json({'error':'Cross-origin controls are not allowed'},403);return
       try:
         length = int(self.headers.get('Content-Length', '0'))
         if not 0 < length <= 1024:raise ValueError('Invalid control size')
         data = json.loads(self.rfile.read(length))
         field = 'signal_mode' if 'signal_mode' in data else 'mode'
-        self.send_json(operator.demo_engagement(data, field))
+        future = None
+        with control_lock:
+          # Serialize local writes with their submissions. The peer is optional;
+          # waiting for its network/status response never holds this lock.
+          result = operator.demo_engagement(data, field)
+          sequence += 1;request_sequence = sequence
+          action = 'demo_signal' if field == 'signal_mode' else 'demo_engagement'
+          paired.update(sequence=sequence,request=dict(action=action,field=field,value=data[field],session_id=data['session_id']))
+          if forwarder is not None:
+            try:
+              future = forwarder.submit(action, data[field])
+              paired['targets'] = {'comma':dict(status='pending',action=action,value=data[field],
+                                               acknowledged=False,applied=False,error=None)}
+            except Exception:paired['targets'] = failed_peer()['targets']
+        if future is not None:future.add_done_callback(lambda completed:received(completed,request_sequence))
+        self.send_json({**result,'control_sequence':request_sequence})
       except (ValueError, TypeError) as error:self.send_json({'error':str(error)},400)
-  server = ThreadingHTTPServer(('127.0.0.1',port),Handler)
+  class ControlServer(ThreadingHTTPServer):
+    def server_close(self):
+      if forwarder is not None:forwarder.close()
+      super().server_close()
+  server = ControlServer(('127.0.0.1',port),Handler)
   threading.Thread(target=server.serve_forever,daemon=True).start()
   return server
 
@@ -97,8 +142,6 @@ def audio_worker(a):
   max_drift = 0.
   first_frame = None
   shared = dict(state='PREPARING',audio_s=0.,muted=a.muted)
-  server = control_server(a.project_root,a.out,shared,a.port)
-  write_json(a.out/'controls.json',{'url':f'http://127.0.0.1:{server.server_port}/'})
   def callback(out, n, ti, status):
     nonlocal position,rendered,done,flags,max_drift,first_frame
     out.fill(0)
@@ -121,7 +164,11 @@ def audio_worker(a):
       errors.append(repr(error));done=True
   started=None;last_status=0.
   trace=(a.out/'presentation.jsonl').open('w',buffering=1)
+  forwarder = PairedDemoControls(GalaxyPeer(a.paired_comma,allow_lan_http=True),enabled=True) if a.paired_comma else None
+  server = None
   try:
+    server = control_server(a.project_root,a.out,shared,a.port,forwarder)
+    write_json(a.out/'controls.json',{'url':f'http://127.0.0.1:{server.server_port}/'})
     with sd.OutputStream(device=a.audio_device,samplerate=rate,channels=2,blocksize=960,dtype='float32',callback=callback):
       (a.out/'prepared_ready').write_text('ready')
       while not done:
@@ -154,8 +201,14 @@ def audio_worker(a):
         if started and now-started>=a.duration:break
         if started and now-received['modelV2']>2 and (position or 0)/rate < len(audio)/rate-2:raise RuntimeError('Replay model stream stopped before prepared audio ended')
   finally:
-    write_json(a.out/'audio_drained.json',dict(wall=time.monotonic(),drained=not errors))
-    server.shutdown();trace.close()
+    try:write_json(a.out/'audio_drained.json',dict(wall=time.monotonic(),drained=not errors))
+    finally:
+      try:
+        if server is not None:
+          try:server.shutdown()
+          finally:server.server_close()
+        elif forwarder is not None:forwarder.close()
+      finally:trace.close()
     write_json(a.out/'prepared_summary.json',dict(generation_invoked=False,source=str(a.score_archive),first_source_frame=first_frame,last_source_frame=position,sample_rate=rate,portaudio_flags=flags,max_clock_error_seconds=max_drift,callback_errors=errors,muted=a.muted,session_id=session,manual_scope='isolated replay display and presentation only'))
   if errors:raise RuntimeError(errors[0])
   if max_drift>.05:raise RuntimeError('Prepared audio clock drift exceeded 50 ms')
@@ -172,6 +225,12 @@ def parser():
   p.add_argument('--out',type=Path)
   p.add_argument('--duration',type=float,default=float('inf'))
   p.add_argument('--port',type=int,default=0)
+  def paired_url(value):
+    try:GalaxyPeer(value,allow_lan_http=True)
+    except ValueError as error:raise argparse.ArgumentTypeError(str(error)) from error
+    return value
+  p.add_argument('--paired-comma',type=paired_url,default=None,metavar='URL',
+                 help='Optional explicit Galaxy LAN URL http://PRIVATE_IPV4:8082; forwards replay controls only')
   p.add_argument('--muted',action='store_true');p.add_argument('--headless',action='store_true')
   p.add_argument('--no-browser',action='store_true');p.add_argument('--audio-device');p.add_argument('--check',action='store_true');p.add_argument('--audio-worker',action='store_true',help=argparse.SUPPRESS)
   return p
@@ -217,7 +276,7 @@ def main():
   args[args.index('--data_dir')+1]=str(local)
   if '--no-hw-decoder' in args:args.remove('--no-hw-decoder')
   write_json(out/'status.json',dict(readiness='PREPARING',style='Prism',compute='prepared-core'))
-  write_json(out/'launch.json',dict(core_sha256=hashlib.sha256((a.score_archive/'dry.wav').read_bytes()).hexdigest(),curve_plan_sha256=hashlib.sha256(a.curve_plan.read_bytes()).hexdigest() if a.curve_plan else None,mode='prepared-interactive-showcase',route=a.route,source=str(a.score_archive),runtime=str(rt),native_replay_args=args,generation_invoked=False,network_required=False,session_id=session,muted=a.muted or a.headless))
+  write_json(out/'launch.json',dict(core_sha256=hashlib.sha256((a.score_archive/'dry.wav').read_bytes()).hexdigest(),curve_plan_sha256=hashlib.sha256(a.curve_plan.read_bytes()).hexdigest() if a.curve_plan else None,mode='prepared-interactive-showcase',route=a.route,source=str(a.score_archive),runtime=str(rt),native_replay_args=args,generation_invoked=False,network_required=False,session_id=session,muted=a.muted or a.headless,paired_comma=a.paired_comma,paired_controls_scope=DISCLOSURE))
   check=subprocess.run([str(py),'-c','from cereal import messaging; import sounddevice,soundfile; from prepared_core import load_archive; import sys; a,r,m=load_archive(sys.argv[1],sys.argv[2]); print("Prepared core:",len(a)/r,"seconds; local replay ready")',str(a.score_archive),a.route],cwd=rt,env=env)
   if check.returncode:raise SystemExit(check.returncode)
   if a.check:return
@@ -233,7 +292,7 @@ def main():
     with (out/'seed.log').open('w') as log:subprocess.run([str(py),str(rt/'tools/replay/onroad_config.py'),'seed',*args],env=env,cwd=rt,stdout=log,stderr=subprocess.STDOUT,check=True)
     seed_finished=time.monotonic()
     if not a.headless:ui=start([str(py),str(HERE/'normal_ui_audit.py')],'ui')
-    audio=start([str(py),str(__file__),'--audio-worker',a.route,'--score-archive',str(a.score_archive),'--project-root',str(project),'--out',str(out),'--duration',str(a.duration),'--port',str(a.port)]+(['--curve-plan',str(a.curve_plan)] if a.curve_plan else [])+(['--muted'] if a.muted or a.headless else [])+(['--audio-device',a.audio_device] if a.audio_device else []),'audio')
+    audio=start([str(py),str(__file__),'--audio-worker',a.route,'--score-archive',str(a.score_archive),'--project-root',str(project),'--out',str(out),'--duration',str(a.duration),'--port',str(a.port)]+(['--curve-plan',str(a.curve_plan)] if a.curve_plan else [])+(['--muted'] if a.muted or a.headless else [])+(['--audio-device',a.audio_device] if a.audio_device else [])+(['--paired-comma',a.paired_comma] if a.paired_comma else []),'audio')
     deadline=time.monotonic()+30
     while not (out/'prepared_ready').exists():
       if audio.poll() is not None or time.monotonic()>deadline:raise RuntimeError('Prepared audio did not become ready; see '+str(out/'audio.log'))

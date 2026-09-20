@@ -3,5 +3,31 @@
 <h1>RoadScore replay</h1><p>Prepared Prism music · live presentation controls<br>These controls simulate the replay display and music only.</p>
 <section><button data-field="mode" data-value="engaged">Simulate engage</button><button data-field="mode" data-value="disengaged">Simulate disengage</button><button data-field="mode" data-value="recorded">Recorded engagement</button></section>
 <section><button data-field="signal_mode" data-value="left">Left signal</button><button data-field="signal_mode" data-value="right">Right signal</button><button data-field="signal_mode" data-value="off">Signals off</button><button data-field="signal_mode" data-value="recorded">Recorded signals</button></section>
-<p id="state">Waiting for replay…</p><p id="error"></p><small>No model generation, vehicle control, or connection to the comma.</small>
-<script>let session;const buttons=[...document.querySelectorAll('button')];buttons.forEach(b=>b.onclick=async()=>{try{const r=await fetch('/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:session,[b.dataset.field]:b.dataset.value})});const j=await r.json();if(!r.ok)throw Error(j.error);document.querySelector('#error').textContent=''}catch(e){document.querySelector('#error').textContent=e.message}});async function refresh(){try{const r=await fetch('/status');const j=await r.json();session=j.demo.session_id;buttons.forEach(b=>{b.disabled=!j.demo.available;b.classList.toggle('on',j.demo[b.dataset.field]===b.dataset.value)});document.querySelector('#state').textContent=j.state+' · '+Math.max(0,j.audio_s||0).toFixed(1)+' s · '+(j.muted?'MUTED':'system audio output')}catch(e){buttons.forEach(b=>b.disabled=true);document.querySelector('#state').textContent='Replay stopped'}setTimeout(refresh,150)}refresh();</script>
+<p id="state">Waiting for replay…</p><p id="targets" aria-live="polite">Mac waiting; comma not paired</p><p id="error"></p><small>No model generation or vehicle control. Optional comma pairing forwards controls only. Video and music are not synchronized.</small>
+<script>
+let session;const buttons=[...document.querySelectorAll('button')];
+buttons.forEach(b=>b.onclick=async()=>{try{const r=await fetch('/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:session,[b.dataset.field]:b.dataset.value})});const j=await r.json();if(!r.ok)throw Error(j.error);document.querySelector('#error').textContent=''}catch(e){document.querySelector('#error').textContent=e.message}});
+function commaStatus(paired){
+  if(!paired?.enabled)return 'not paired';
+  const peer=paired.targets?.comma||{};const action=peer.value?' ('+peer.value+')':'';
+  const errors={peer_not_ready_for_replay:'unready for replay',invalid_peer_session:'no fresh replay session',peer_session_changed:'replay session changed',peer_http_409:'replay session or readiness changed',peer_http_401:'authentication failed',peer_http_403:'access rejected',peer_transport_error:'unreachable',peer_submission_failed:'forwarding unavailable',forwarder_closed:'forwarding stopped'};
+  if(peer.status==='idle')return 'configured · awaiting a button action';
+  if(peer.status==='pending')return 'sending'+action;
+  if(peer.status==='applied')return 'last command applied'+action;
+  if(peer.status==='acknowledged')return 'received'+action+' · application unconfirmed';
+  if(peer.status==='busy')return 'latest command not sent · previous command pending';
+  const reason=errors[peer.error]||(peer.status==='timed_out'?'timed out':'command failed');
+  return reason+action+(peer.acknowledged?' · received; application unconfirmed':peer.delivery_unknown?' · delivery unknown':' · not confirmed');
+}
+async function refresh(){
+  try{
+    const r=await fetch('/status');if(!r.ok)throw Error('Status unavailable');const j=await r.json();session=j.demo.session_id;
+    // Peer readiness never disables the independent local controls.
+    buttons.forEach(b=>{b.disabled=!j.demo.available;b.classList.toggle('on',j.demo[b.dataset.field]===b.dataset.value)});
+    document.querySelector('#state').textContent=j.state+' · '+Math.max(0,j.audio_s||0).toFixed(1)+' s · '+(j.muted?'MUTED':'system audio output');
+    const local=j.demo.available?j.demo.mode+' / signals '+j.demo.signal_mode:'unready';
+    document.querySelector('#targets').textContent='Mac '+local+'; comma '+commaStatus(j.paired_controls);
+  }catch(e){buttons.forEach(b=>b.disabled=true);document.querySelector('#state').textContent='Replay stopped';document.querySelector('#targets').textContent='Mac disconnected; comma status unknown'}
+  setTimeout(refresh,150);
+}refresh();
+</script>

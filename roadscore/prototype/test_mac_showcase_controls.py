@@ -1,0 +1,176 @@
+"""Loopback HTTP integration with mocked peer transport; no audio or peer access."""
+from concurrent.futures import Future
+import contextlib
+import copy
+import http.client
+import io
+import json
+from pathlib import Path
+import tempfile
+import threading
+import time
+import unittest
+
+from mac_showcase import control_server, parser
+from paired_demo_controls import GalaxyPeer, PairedDemoControls
+
+
+class ManualForwarder:
+  def __init__(self, out):
+    self.out = out
+    self.calls = []
+    self.closed = False
+
+  def submit(self, action, value):
+    # This mock observes the real local Galaxy command file before forwarding.
+    command = json.loads((self.out/'demo_engagement.json').read_text())
+    field = 'mode' if action == 'demo_engagement' else 'signal_mode'
+    if command[field] != value:raise AssertionError('Peer submitted before local write')
+    future = Future()
+    self.calls.append((action, value, future))
+    return future
+
+  def close(self):self.closed = True
+
+
+class ControlTests(unittest.TestCase):
+  def setUp(self):
+    self.temp = tempfile.TemporaryDirectory()
+    self.addCleanup(self.temp.cleanup)
+    self.out = Path(self.temp.name)
+    self.project = Path(__file__).resolve().parents[2]
+    self.state = dict(input_mode='replay',route='fixture-route',presentation_session_id='mac-session',
+                      command_wall=time.monotonic(),engagement_presentation={'enabled':True})
+    self.write_state()
+    self.server = None
+    self.addCleanup(self.stop)
+
+  def write_state(self):
+    self.state['command_wall'] = time.monotonic()
+    (self.out/'status.json').write_text(json.dumps(self.state))
+
+  def start(self, forwarder=None):
+    self.server = control_server(self.project,self.out,dict(state='READY',audio_s=1.,muted=True),0,forwarder)
+    self.assertEqual(self.server.server_address[0], '127.0.0.1')
+
+  def stop(self):
+    if self.server is not None:
+      try:self.server.shutdown()
+      finally:self.server.server_close();self.server=None
+
+  def request(self, method='GET', path='/status', body=None, headers=None):
+    connection = http.client.HTTPConnection('127.0.0.1',self.server.server_port,timeout=1)
+    try:
+      connection.request(method,path,None if body is None else json.dumps(body),headers=headers or {'Content-Type':'application/json'})
+      response = connection.getresponse()
+      return response.status,json.loads(response.read())
+    finally:connection.close()
+
+  def command(self, value='engaged', field='mode', session='mac-session', headers=None):
+    return self.request('POST','/control',{'session_id':session,field:value},headers)
+
+  def test_default_has_no_peer_and_local_ack_is_not_application(self):
+    self.start()
+    status, result = self.command()
+    self.assertEqual(status,200)
+    self.assertEqual(result['requested_mode'],'engaged')
+    status, result = self.request()
+    paired = result['paired_controls']
+    self.assertFalse(paired['enabled'])
+    self.assertEqual(paired['targets']['comma']['status'],'disabled')
+    self.assertTrue(paired['targets']['mac']['acknowledged'])
+    self.assertFalse(paired['targets']['mac']['applied'])
+    self.state['demo_engagement_mode']='engaged';self.write_state()
+    self.assertTrue(self.request()[1]['paired_controls']['targets']['mac']['applied'])
+
+  def test_local_write_then_peer_submission_and_session_rejection(self):
+    peer = ManualForwarder(self.out)
+    self.start(peer)
+    self.assertEqual(self.command(session='old-session')[0],400)
+    self.assertEqual(peer.calls,[])
+    self.assertEqual(self.command('left','signal_mode')[0],200)
+    paired = self.request()[1]['paired_controls']
+    self.assertEqual(paired['sequence'],1)
+    self.assertEqual(paired['request']['session_id'],'mac-session')
+    self.assertEqual(paired['targets']['comma']['status'],'pending')
+    self.assertEqual(peer.calls[0][:2],('demo_signal','left'))
+    self.assertFalse(paired['music_video_synchronized'])
+
+  def test_older_peer_result_cannot_replace_newer_action(self):
+    peer = ManualForwarder(self.out)
+    self.start(peer)
+    self.assertEqual(self.command('left','signal_mode')[1]['control_sequence'],1)
+    self.assertEqual(self.command('right','signal_mode')[1]['control_sequence'],2)
+    peer.calls[0][2].set_result({'targets':{'comma':{'status':'applied','value':'left','applied':True}}})
+    paired = self.request()[1]['paired_controls']
+    self.assertEqual(paired['sequence'],2)
+    self.assertEqual(paired['targets']['comma']['status'],'pending')
+    self.assertEqual(paired['targets']['comma']['value'],'right')
+    peer.calls[1][2].set_result({'targets':{'comma':{'status':'failed','value':'right','error':'peer_not_ready_for_replay'}}})
+    status = self.request()[1]
+    self.assertTrue(status['demo']['available'])
+    self.assertEqual(status['paired_controls']['targets']['comma']['error'],'peer_not_ready_for_replay')
+
+  def test_cross_origin_and_rebinding_host_rejected_before_both_writes(self):
+    peer = ManualForwarder(self.out)
+    self.start(peer)
+    for headers in ({'Origin':'https://other.example','Sec-Fetch-Site':'cross-site'},
+                    {'Host':'other.example','Origin':'http://other.example'}):
+      self.assertEqual(self.command(headers=headers)[0],403)
+    self.assertEqual(peer.calls,[])
+    self.assertFalse((self.out/'demo_engagement.json').exists())
+    origin = f'http://127.0.0.1:{self.server.server_port}'
+    self.assertEqual(self.command(headers={'Origin':origin,'Sec-Fetch-Site':'same-origin'})[0],200)
+
+  def test_peer_future_failure_keeps_local_controls_ready(self):
+    peer = ManualForwarder(self.out)
+    self.start(peer)
+    self.assertEqual(self.command()[0],200)
+    peer.calls[0][2].set_exception(RuntimeError('Mock peer error'))
+    result = self.request()[1]
+    self.assertTrue(result['demo']['available'])
+    self.assertEqual(result['paired_controls']['targets']['comma']['error'],'peer_submission_failed')
+    self.assertEqual(self.command('disengaged')[0],200)
+    self.stop()
+    self.assertTrue(peer.closed)
+
+  def test_slow_mock_peer_never_delays_local_http_and_uses_own_session(self):
+    entered, release = threading.Event(), threading.Event()
+    calls = []
+    peer_status = dict(available=True,offroad=True,state='READY',live={'enabled':False},
+                       demo=dict(available=True,session_id='comma-session',mode='recorded',signal_mode='recorded'))
+    def transport(method, url, payload, headers, timeout):
+      calls.append((method,payload))
+      if len(calls)==1:entered.set();release.wait(1)
+      if method=='GET':return copy.deepcopy(peer_status)
+      field = 'signal_mode' if url.endswith('demo_signal') else 'mode'
+      peer_status['demo'][field]=payload[field]
+      return {'requested_'+field:payload[field],'demo':copy.deepcopy(peer_status['demo'])}
+    forwarder = PairedDemoControls(GalaxyPeer('http://192.168.1.50:8082',allow_lan_http=True),enabled=True,transport=transport)
+    self.start(forwarder)
+    try:
+      before = time.monotonic()
+      self.assertEqual(self.command('left','signal_mode')[0],200)
+      self.assertLess(time.monotonic()-before,.25)
+      self.assertTrue(entered.wait(.5))
+      self.assertEqual(self.request()[1]['paired_controls']['targets']['comma']['status'],'pending')
+    finally:release.set()
+    deadline = time.monotonic()+1
+    while True:
+      result = self.request()[1]['paired_controls']['targets']['comma']
+      if result['status']!='pending' or time.monotonic()>deadline:break
+      time.sleep(.01)
+    self.assertTrue(result['applied'])
+    self.assertEqual(calls[1][1],{'session_id':'comma-session','signal_mode':'left'})
+    self.assertEqual(json.loads((self.out/'demo_engagement.json').read_text())['session_id'],'mac-session')
+
+  def test_cli_pairing_is_explicit_and_lan_only_without_credentials(self):
+    self.assertIsNone(parser().parse_args([]).paired_comma)
+    value = 'http://192.168.1.50:8082'
+    self.assertEqual(parser().parse_args(['--paired-comma',value]).paired_comma,value)
+    for value in ('http://device.local:8082','http://8.8.8.8:8082','http://192.168.1.50:8082/mobile/#/roadscore'):
+      with self.subTest(url=value),contextlib.redirect_stderr(io.StringIO()),self.assertRaises(SystemExit):
+        parser().parse_args(['--paired-comma',value])
+
+
+if __name__=='__main__':unittest.main()
