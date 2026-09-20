@@ -60,7 +60,9 @@ env['ROADSCORE_PRESENTATION_POLICY']=presentation['policy']
 env['ROADSCORE_COMPOSITION_POLICY']=composition_policy
 env['ROADSCORE_COMPOSER']=a.composer
 env['ROADSCORE_ACE_PROFILE']=a.profile
-if native:env.setdefault('ROADSCORE_REPLAY_PRIME','1')
+if native:
+ env.setdefault('ROADSCORE_REPLAY_PRIME','1')
+ env['ROADSCORE_NATIVE_CUE_CLOCK']='1'
 if native and not a.replay:env['ROADSCORE_AUDIO_DRAIN_FILE']=str(R/'results/current/audio_drained.json')
 env['ROADSCORE_OVERLAY_CAPTURE']=str(out/'overlay.png')
 env['ROADSCORE_STATUS_FILE']=str(out/'roadscore_status.json')
@@ -92,6 +94,7 @@ if a.replay:
 args=[a.routeid,'--allow',services,'--start',str(a.start),'--no-loop','--headless','--cache','2']
 if local:args+=['--data_dir',str(local)]
 if native:args+=['--no-hw-decoder']
+status_relay=None
 display=None;children=[];named_children={};failure=None;logs=[];launch_started=time.monotonic()
 print(('Preparing stored score replay; no generation. ' if a.replay else 'Preparing RoadScore; waiting for accepted audio. ')+('Speaker output enabled.' if a.audible else 'Muted capture.'),flush=True)
 def launch(cmd,name,**kw):
@@ -148,6 +151,9 @@ try:
    check_children(named_children,remote=not native,include_receiver=True)
    if sender.poll() is not None or time.monotonic()>deadline:raise RuntimeError('Replay subscriber failed')
    time.sleep(.1)
+ if native and not a.replay:
+  from status_relay import StatusRelay
+  status_relay=StatusRelay(R/'results/current/status.json',out/'roadscore_status.json');status_relay.start()
  if a.replay:(out/'roadscore_status.json').write_text(json.dumps({'readiness':'READY','style':'Stored score','section':'ARCHIVED SCORE','compute':'none'}))
  player=launch([str(replay),*args],'replay');started=time.monotonic();print('Normal replay running; '+('host speaker enabled' if a.audible else 'bench muted')+'. Output:',out,flush=True)
  from replay_end import ReplayEnd
@@ -156,9 +162,6 @@ try:
  while sender.poll() is None:
   check_children(named_children,remote=not native,include_receiver=True,allow_clean_receiver=True)
   if receiver is not None and receiver.poll() not in (None,0):raise RuntimeError('RoadScore receiver failed; see receiver.log')
-  if native and not a.replay:
-   try:(out/'roadscore_status.json').write_text((R/'results/current/status.json').read_text())
-   except OSError:pass
   try:
    native_state=json.loads(state_path.read_text())
    if end_watch.observe(native_state,(out/'replay.log').read_text(),time.monotonic()):
@@ -196,6 +199,7 @@ try:
    from score_archive import archive
    archived=archive(a.routeid,out,a.start);print('Score archived:',archived,flush=True)
 except Exception as error:
+ if status_relay:status_relay.close()
  try:
   check_children(named_children,remote=not native,include_receiver=True,allow_clean_receiver=True)
  except Exception as child_error:
@@ -205,6 +209,7 @@ except Exception as error:
  write_failure(out/'roadscore_status.json',failure)
  raise error from None
 finally:
+ if status_relay:status_relay.close()
  for c in reversed(children):
   if c.poll() is None:
    os.killpg(c.pid,signal.SIGTERM)

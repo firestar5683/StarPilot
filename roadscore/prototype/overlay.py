@@ -2,12 +2,13 @@
 import json,time,os
 from overlay_view import draw_panel, overlay_view, EventPresentation, hud_bounds, startup_bounds
 from pathlib import Path
+from cue_timing import audible_state
 
 def install():
  if os.environ.get('ROADSCORE_OVERLAY')!='1':return
  import pyray as rl
  from openpilot.system.ui.lib.application import gui_app,FontWeight
- original=gui_app.render;last=0.;state={};frames=0;captured=False;capture_ready_since=None;captured_events=set();alert_clear_after=0.;native_nav_visible=False;home_footer_right=None;home_rect=None;status_mtime=None;status_read_error=None;event_presentation=EventPresentation();alert_seen_at=None;alert_captured=False
+ original=gui_app.render;last=0.;state={};raw_state={};frames=0;captured=False;capture_ready_since=None;captured_events=set();alert_clear_after=0.;native_nav_visible=False;home_footer_right=None;home_rect=None;status_mtime=None;status_read_error=None;event_presentation=EventPresentation();alert_seen_at=None;alert_captured=False
  # Observe the actual native nav card; it keeps priority over this accessory.
  from openpilot.selfdrive.ui.onroad.starpilot.navigation_card import NavigationCardRenderer
  original_nav_render=NavigationCardRenderer._render
@@ -39,13 +40,14 @@ def install():
    picture.save(target)
   finally:rl.unload_image(image)
  def draw():
-  nonlocal last,state,frames,captured,capture_ready_since,alert_clear_after,alert_seen_at,alert_captured,status_mtime,status_read_error
+  nonlocal last,state,raw_state,frames,captured,capture_ready_since,alert_clear_after,alert_seen_at,alert_captured,status_mtime,status_read_error
   now=time.monotonic()
-  if now-last>.2:
+  if now-last>.04:
    try:
-    state=json.loads(path.read_text());status_mtime=path.stat().st_mtime;status_read_error=None
+    raw_state=json.loads(path.read_text());status_mtime=path.stat().st_mtime;status_read_error=None
    except (OSError,ValueError) as error:status_read_error=type(error).__name__
    last=now
+  state=audible_state(raw_state,now) if os.environ.get('ROADSCORE_NATIVE_CUE_CLOCK')=='1' else raw_state
   from openpilot.selfdrive.ui.ui_state import ui_state
   # The native alert owns the display. Leave room for its existing fade-out too.
   for service in ('selfdriveState','starpilotSelfdriveState'):
@@ -83,6 +85,7 @@ def install():
   view=draw_panel(rl,gui_app.font(FontWeight.NORMAL),state,gui_app.width,gui_app.height,gui_app.font(FontWeight.SEMI_BOLD),presentation,startup=startup,footer_right=home_footer_right or 0)
   ready=view['ready']
   audit(True,None,view)
+  state=audible_state(raw_state,now) if os.environ.get('ROADSCORE_NATIVE_CUE_CLOCK')=='1' else raw_state
   from openpilot.selfdrive.ui.ui_state import ui_state
   if ready and ui_state.started and capture_ready_since is None:capture_ready_since=now
   capture_target=None
