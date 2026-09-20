@@ -4,6 +4,14 @@ From the Mac, start the saved showcase on the comma and in a native Mac onroad w
 ./onroad --roadscore route1 --demo
 ```
 
+Add `--fullscreen` to fill the Mac display while preserving the native layout:
+
+```sh
+./onroad --roadscore route1 --demo --fullscreen
+```
+
+Press **F** or **F11** to toggle fullscreen. **Escape** returns to the window without stopping playback. The native aspect ratio is preserved with letterboxing; this does not select a different driving UI.
+
 The command prepares both local native replay engines, then releases their start barriers together. The Mac decodes its own cached video and follows the comma’s route playhead. Audio plays from the comma only, through its selected output. No ACE generation or model warm-up occurs. The previous single-device saved-replay setup took 17.13 seconds for loading, replay parameters and UI startup; measure the paired path separately.
 
 Use Galaxy for engagement and turn-signal controls. The Mac follows the same applied presentation selections. No browser control page opens and no video is streamed from the comma. Small Galaxy status updates keep the local playheads approximately aligned; this is independent playback, not frame-exact mirroring. The buttons affect replay appearance and musical presentation only, never vehicle control. Ctrl+C stops both owned demo sessions and leaves the resident ACE worker intact.
