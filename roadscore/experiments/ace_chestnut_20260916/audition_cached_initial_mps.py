@@ -165,8 +165,8 @@ def main():
     parser.add_argument('--seeds', type=int, nargs='+', default=[BASELINE, 3277374468])
     parser.add_argument('--check-only', action='store_true')
     args = parser.parse_args()
-    if not 1 <= len(args.seeds) <= 2 or args.seeds[0] != BASELINE or any(not 0 <= n < 2**32 for n in args.seeds):
-        parser.error('One or two uint32 seeds, beginning with native baseline1496885951, are required')
+    if not 1 <= len(args.seeds) <= 8 or len(set(args.seeds)) != len(args.seeds) or any(not 0 <= n < 2**32 for n in args.seeds):
+        parser.error('One to eight distinct uint32 seeds are required')
     args.output.mkdir(parents=True, exist_ok=False)
     report = {'status': 'verifying_inputs', 'backend': 'Mac PyTorch MPS; exported FP16 DiT; exported-weight FP32 VAE',
               'cross_backend_guarantee': False, 'musical_acceptance': 'pending user listening; no best seed selected',
