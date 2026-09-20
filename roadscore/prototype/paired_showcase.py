@@ -11,6 +11,8 @@ import threading
 import time
 import uuid
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from http.client import IncompleteRead
+from urllib.error import HTTPError, URLError
 from urllib.parse import urlencode
 from urllib.request import Request, build_opener, ProxyHandler
 
@@ -195,6 +197,48 @@ def stop_mac(process):
       process.wait(timeout=5)
 
 
+def retryable_status_error(error):
+  if isinstance(error, HTTPError):
+    return error.code in (408, 429, 500, 502, 503, 504)
+  return isinstance(error, (URLError, TimeoutError, ConnectionError, IncompleteRead))
+
+
+class PlaybackMonitor:
+  """Retry only status reads, without restarting or stopping native playback."""
+  def __init__(self, peer, out, request_id):
+    self.peer, self.out, self.request_id = peer, out, request_id
+    self.failures = self.total_failures = 0
+    self.handoff = False
+
+  def record(self, state, error=None):
+    report = dict(state=state,request_id=self.request_id,wall=time.monotonic(),
+                  consecutive_failures=self.failures,total_failures=self.total_failures,
+                  error=repr(error) if error else None,native_stop_requested=False)
+    try:(self.out/'peer_monitor.json').write_text(json.dumps(report,indent=2))
+    except OSError as error:print('Could not record connection status: '+str(error),flush=True)
+
+  def read(self):
+    try:return self.peer.call('demo_ready',{})
+    except Exception as error:
+      if not retryable_status_error(error):raise
+      self.failures += 1;self.total_failures += 1
+      self.handoff = self.failures >= 4
+      self.record('UNREACHABLE' if self.handoff else 'RETRYING',error)
+      if self.failures == 1:
+        print('Galaxy status unavailable; leaving playback running and retrying.',flush=True)
+      if self.handoff:
+        print('Galaxy monitoring lost after four attempts. Comma playback has NOT been stopped; '
+              'it can finish locally. Reconnect to Galaxy to check or stop it.',flush=True)
+      else:time.sleep((.5,1.,2.)[self.failures-1])
+      return None
+
+  def recovered(self):
+    if self.failures:
+      self.failures = 0
+      self.record('CONNECTED')
+      print('Galaxy monitoring restored; playback was not restarted.',flush=True)
+
+
 def native_pair_main():
   parser=argparse.ArgumentParser(description=__doc__)
   parser.add_argument('--roadscore',action='store_true');parser.add_argument('--demo',action='store_true')
@@ -225,7 +269,7 @@ def native_pair_main():
   command=mac_command(project,args.route,selected,peer.peer.base_url,mac_out,args.duration,fullscreen=args.fullscreen)
   (out/'launch.json').write_text(json.dumps(dict(request_id=request_id,route=selected['route'],
       command=command,archive=selected['archive'],generation_invoked=False,screen_mirror=False,muted=args.muted),indent=2))
-  process=None;launched=False;began=time.monotonic()
+  process=None;launched=False;leave_native_running=False;began=time.monotonic()
   def interrupt(*_):raise KeyboardInterrupt
   signal.signal(signal.SIGTERM,interrupt)
   try:
@@ -261,10 +305,17 @@ def native_pair_main():
     print('Session evidence: '+str(out),flush=True)
     started=time.monotonic()
     mac_finished=False
+    monitor=PlaybackMonitor(peer,out,request_id)
     while time.monotonic()-started<args.duration:
-      current=peer.call('demo_ready',{})
+      current=monitor.read()
+      if current is None:
+        if monitor.handoff:
+          leave_native_running=True
+          break
+        continue
       if current.get('request_id')!=request_id:raise RuntimeError('Device demo ownership changed')
       if current.get('failure'):raise RuntimeError(current['failure'])
+      monitor.recovered()
       if not current.get('running'):
         if current.get('complete'):break
         raise RuntimeError('Device demo stopped before completion')
@@ -277,15 +328,19 @@ def native_pair_main():
         except OSError as error:print('Could not record Mac display status: '+str(error),flush=True)
         print('Mac replay '+('failed' if code else 'ended')+'; comma audio continues to its own end. See '+str(out/'mac.log'),flush=True)
       time.sleep(.5)
+  except KeyboardInterrupt:
+    leave_native_running=False
+    raise
   finally:
     # A second interrupt must not abandon the native windows or owned peer.
     signal.signal(signal.SIGTERM,signal.SIG_IGN);signal.signal(signal.SIGINT,signal.SIG_IGN)
     try:stop_mac(process)
     finally:
-      if launched:
+      if launched and not leave_native_running:
         try:peer.call('demo_stop',{'request_id':request_id})
         except Exception as error:print('Could not confirm device demo stop: '+str(error),flush=True)
-    print('Paired native demo stopped. Elapsed %.1f seconds.'%(time.monotonic()-began),flush=True)
+    print(('Mac demo closed; comma playback left running because its status is unknown.' if leave_native_running
+           else 'Paired native demo stopped.')+' Elapsed %.1f seconds.'%(time.monotonic()-began),flush=True)
 
 
 def main():
