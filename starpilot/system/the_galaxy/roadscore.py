@@ -146,8 +146,8 @@ class Operator:
     with self.lock:
       if action == 'clock':
         return self.target('clock')
-      if action in {'calibration_start', 'calibration_tap', 'calibration_result', 'calibration_cancel', 'calibration_poll', 'test'}:
-        if action == 'calibration_start' and data != {'attended': True}:
+      if action in {'calibration_start', 'calibration_refine', 'calibration_tap', 'calibration_result', 'calibration_cancel', 'calibration_poll', 'test'}:
+        if action in {'calibration_start','calibration_refine'} and data != {'attended': True}:
           raise ValueError('Confirm that you are ready to hear the clicks')
         if action == 'calibration_tap':
           if set(data) != {'session', 'server_ms', 'uncertainty_ms'} or not isinstance(data['session'], str) or len(data['session']) > 100 or type(data['server_ms']) not in (int, float) or not 0 <= data['server_ms'] < 1e15:

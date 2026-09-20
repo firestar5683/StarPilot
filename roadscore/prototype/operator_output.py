@@ -21,6 +21,8 @@ INTERVAL = 60 / BPM
 TEST_COUNT = 12
 COUNT_IN = 8
 COUNT = 20
+REFINE_COUNT = 24
+REFINE_METHOD = 'coarse-anchored-rhythm-v1'
 MARKER_COUNT = COUNT - COUNT_IN
 METHOD = 'irregular-marker-reaction-v1'
 MARKER_INTERVALS = (1.8, 2.4, 2.1, 2.7, 1.9, 2.5, 2.2, 2.8, 2.0, 2.6, 2.3)
@@ -122,6 +124,20 @@ def robust_offset(pairs):
   raw = round(median(accepted))
   return dict(latency_ms=max(0, min(1500, raw)), raw_offset_ms=raw, accepted_taps=len(accepted),
               rejected_taps=len(pairs) - len(accepted), spread_ms=round(spread), includes_human_tap_bias=True)
+
+
+def rhythm_pair(clicks, at, coarse):
+  interval_ms=INTERVAL*1000
+  margin=max(60,3*coarse.get('spread_ms',0))
+  if margin>=interval_ms/2:raise ValueError('Coarse estimate is too uncertain; repeat the chimes')
+  approximate=at-coarse['latency_ms']
+  candidates=[(index,click) for index,click in clicks.items() if COUNT_IN<=index<REFINE_COUNT]
+  if not candidates:raise ValueError('Wait for the third bar before tapping')
+  index,click=min(candidates,key=lambda pair:abs(approximate-pair[1]))
+  if abs(approximate-click)>=interval_ms/2-margin:
+    raise ValueError('Whole-beat choice is ambiguous; repeat the chimes, then tap with the rhythm')
+  if not 0<=at-click<=1500:raise ValueError('Rhythmic offset is outside 0–1500 ms; repeat calibration')
+  return index,click
 
 
 class ClickSink:
@@ -249,7 +265,7 @@ class OutputOwner:
           return dict(ok=True)
         raise ValueError('Calibration expired; start again')
       self.safe()
-      if action in ('calibration_start', 'test'):
+      if action in ('calibration_start', 'calibration_refine', 'test'):
         if data != {'attended': True}:
           raise ValueError('Confirm attended audio')
         if self.session:
@@ -257,6 +273,14 @@ class OutputOwner:
         state = self.status()
         if state['judging_locked'] or state['playback_active'] or not state['calibration']:
           raise ValueError('Audio is busy, muted or unavailable')
+        coarse=None
+        if action=='calibration_refine':
+          coarse=read(self.root/'generated/calibration_coarse_result.json') or read(self.root/'generated/calibration_latest_result.json')
+          if (coarse.get('method')!=METHOD or coarse.get('output',{}).get('id')!=state['output']['id'] or
+              not 0<=time.time()-coarse.get('created_wall',0)<=600 or type(coarse.get('latency_ms')) is not int or
+              not 0<=coarse['latency_ms']<=1500 or coarse.get('accepted_taps',0)<8):
+            raise ValueError('First complete the chimes on this speaker; coarse estimates expire after ten minutes')
+        count=TEST_COUNT if action=='test' else REFINE_COUNT if coarse else COUNT
         operator = self.operator_lease()
         operator.__enter__()
         session_lease = lease(self.root / 'generated/session.lock')
@@ -269,13 +293,13 @@ class OutputOwner:
         token = secrets.token_hex(16)
         clicks = {}
         try:
-          sink = self.sink_factory(lambda index, at: clicks.__setitem__(index, at), count=TEST_COUNT if action == 'test' else COUNT)
+          sink = self.sink_factory(lambda index, at: clicks.__setitem__(index, at), count=count)
           if self.output_provider() != state['output']:
             sink.close()
             raise ValueError('Output changed before calibration began')
           self.session = dict(token=token, sink=sink, clicks=clicks, taps={}, output=state['output'],
                               operator_lease=operator, session_lease=session_lease, last_client=self.clock(),
-                              deadline=self.clock() + (15 if action == 'test' else 60), test=action == 'test')
+                              deadline=self.clock() + (15 if action == 'test' else 60), test=action == 'test', coarse=coarse)
           sink.start()
         except BaseException:
           if self.session:
@@ -284,10 +308,13 @@ class OutputOwner:
             session_lease.__exit__(None, None, None); operator.__exit__(None, None, None)
           raise
         threading.Thread(target=self._watch, args=(token,), daemon=True).start()
-        return dict(ok=True, session=token, interval_ms=round(INTERVAL * 1000), beats=TEST_COUNT if action=='test' else COUNT,
-                    count_in=COUNT_IN,bpm=BPM,beats_per_bar=4,method=METHOD,marker_count=MARKER_COUNT,target_taps=MARKER_COUNT,
-                    marker_offsets_ms=[round(at*1000) for at in MARKER_OFFSETS],
-                    instructions='Listen to two bars without tapping. Then tap once at the START of each two-tone marker; wait through the silence. The estimate includes your reaction time.')
+        return dict(ok=True, session=token, interval_ms=round(INTERVAL * 1000), beats=count,
+                    count_in=COUNT_IN,bpm=BPM,beats_per_bar=4,method=REFINE_METHOD if coarse else METHOD,
+                    marker_count=0 if coarse else MARKER_COUNT,target_taps=16 if coarse else MARKER_COUNT,
+                    min_taps=8 if coarse else MARKER_COUNT,coarse_offset_ms=coarse['latency_ms'] if coarse else None,
+                    marker_offsets_ms=[] if coarse else [round(at*1000) for at in MARKER_OFFSETS],
+                    instructions=('Listen for two bars, then tap steadily with the heard beat. Missed beats are allowed.' if coarse else
+                                  'Listen to two bars without tapping. Then tap once at the START of each two-tone marker; wait through the silence. The estimate includes your reaction time.'))
       if action == 'set_latency':
         value = data.get('latency_ms')
         if type(value) is not int or not 0 <= value <= 1500:
@@ -314,7 +341,7 @@ class OutputOwner:
         self._close(); return dict(ok=True)
       if action == 'calibration_poll':
         delay = correction(self.root, session['output']['id']) if session['test'] else 0
-        return dict(ok=True, clicks=[{'beat': index, 'server_ms': at + delay, 'kind':'marker' if index>=COUNT_IN and not session['test'] else 'count_in'} for index, at in list(session['clicks'].items())], test=session['test'])
+        return dict(ok=True, clicks=[{'beat': index, 'server_ms': at + delay, 'kind':('rhythm' if session.get('coarse') else 'marker') if index>=COUNT_IN and not session['test'] else 'count_in'} for index, at in list(session['clicks'].items())], test=session['test'])
       if action == 'calibration_tap':
         at, uncertainty = data.get('server_ms'), data.get('uncertainty_ms')
         if type(at) not in (int, float) or not math.isfinite(at) or type(uncertainty) not in (int, float) or not 0 <= uncertainty <= 25:
@@ -323,6 +350,11 @@ class OutputOwner:
           raise ValueError('Stale tap')
         if session['test']:raise ValueError('Test mode does not collect taps')
         if session.get('pairing_error'):raise ValueError(session['pairing_error'])
+        if session.get('coarse'):
+          index,click=rhythm_pair(session['clicks'],at,session['coarse'])
+          if index in session['taps']:raise ValueError('This beat already has a tap')
+          session['taps'][index]=(click,at)
+          return dict(ok=True,accepted_taps=len(session['taps']),paired_beat=index)
         if COUNT_IN not in session['clicks'] or at<session['clicks'][COUNT_IN]:
           raise ValueError('Listen for two full bars; tap only the two-tone markers after the count-in')
         index=COUNT_IN+len(session['taps'])
@@ -340,7 +372,7 @@ class OutputOwner:
       if action == 'calibration_result':
         try:
           if session.get('pairing_error'):raise ValueError(session['pairing_error'])
-          if len(session['taps'])!=MARKER_COUNT:raise ValueError('Tap all twelve markers before finishing; restart if a marker was missed')
+          if not session.get('coarse') and len(session['taps'])!=MARKER_COUNT:raise ValueError('Tap all twelve markers before finishing; restart if a marker was missed')
           result = robust_offset(list(session['taps'].values()))
           result.update(method=METHOD,bpm=BPM,count_in_beats=COUNT_IN,marker_count=MARKER_COUNT,
                         beat_pairing='sequential absolute marker timestamps; no modulo pairing',whole_beat_ambiguity_possible=False,
@@ -348,6 +380,23 @@ class OutputOwner:
                         output=session['output'],created_wall=time.time(),
                         pairs=[dict(marker=index,server_ms=click,tap_ms=tap,offset_ms=tap-click)
                                for index,(click,tap) in session['taps'].items()])
+          if session.get('coarse'):
+            coarse=session['coarse'];interval_ms=round(INTERVAL*1000)
+            phase=result['raw_offset_ms']%interval_ms
+            branch=phase+round((coarse['latency_ms']-phase)/interval_ms)*interval_ms
+            margin=max(60,3*coarse.get('spread_ms',0),3*result['spread_ms'])
+            if abs(branch-coarse['latency_ms'])>=interval_ms/2-margin or not 0<=branch<=1500:
+              raise ValueError('Whole-beat choice is ambiguous; repeat the chimes and rhythm')
+            result.update(latency_ms=branch,raw_offset_ms=branch,method=REFINE_METHOD,marker_count=0,
+                          beat_pairing='nearest coarse-corrected rhythmic beat; no sequential tap shift',
+                          whole_beat_ambiguity_possible=True,
+                          phase_offset_ms=phase,coarse_offset_ms=coarse['latency_ms'],
+                          coarse_result=coarse,branch_margin_ms=interval_ms/2-abs(branch-coarse['latency_ms']),
+                          measurement='Coarse-anchored rhythmic tap estimate; human timing bias remains, not a physical latency measurement',
+                          branch_assumption='Coarse reaction bias and rhythmic tap error must differ by less than half a beat; borderline estimates are rejected')
+          else:
+            path=self.root/'generated/calibration_coarse_result.json'
+            temp=path.with_suffix('.tmp');temp.write_text(json.dumps(result));temp.replace(path)
           path=self.root/'generated/calibration_latest_result.json'
           temp=path.with_suffix('.tmp');temp.write_text(json.dumps(result));temp.replace(path)
         finally:

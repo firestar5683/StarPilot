@@ -1,7 +1,7 @@
 """Explicitly attended calibration process; no import-time audio output."""
 import time
 RATE=48000
-from operator_output import COUNT, COUNT_IN, TEST_COUNT, INTERVAL, MARKER_OFFSETS
+from operator_output import COUNT, COUNT_IN, REFINE_COUNT, TEST_COUNT, INTERVAL, MARKER_OFFSETS
 
 class ClickSequence:
   """Prebuilt low-level click PCM; callback only copies memory and timestamps."""
@@ -13,8 +13,8 @@ class ClickSequence:
     self.index = 0
     self.failed = False
     start = 2.0
-    if count not in (TEST_COUNT,COUNT):raise ValueError('Unsupported calibration sequence')
-    offsets=[start+i*INTERVAL for i in range(TEST_COUNT if count==TEST_COUNT else COUNT_IN)]
+    if count not in (TEST_COUNT,COUNT,REFINE_COUNT):raise ValueError('Unsupported calibration sequence')
+    offsets=[start+i*INTERVAL for i in range(COUNT_IN if count==COUNT else count)]
     if count==COUNT:offsets+=list(MARKER_OFFSETS)
     self.beats = [round(at * RATE) for at in offsets]
     self.pcm = np.zeros((self.beats[-1] + RATE, 2), dtype='float32')
@@ -60,7 +60,7 @@ def main():
   from pathlib import Path
   from bluetooth_output import prepare_output,select_device
   from operator_output import real_offroad,selected_output
-  p=argparse.ArgumentParser();p.add_argument('--address',required=True);p.add_argument('--count',type=int,choices=[TEST_COUNT,COUNT],required=True);args=p.parse_args()
+  p=argparse.ArgumentParser();p.add_argument('--address',required=True);p.add_argument('--count',type=int,choices=[TEST_COUNT,COUNT,REFINE_COUNT],required=True);args=p.parse_args()
   output=selected_output()
   if not real_offroad() or not output or not output['connected'] or output['address']!=args.address:
     raise RuntimeError('Park and reconnect the selected Bluetooth speaker before calibration')

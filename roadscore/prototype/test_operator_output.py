@@ -96,6 +96,56 @@ class OutputTests(unittest.TestCase):
     with self.assertRaisesRegex(ValueError,'all twelve'):
       self.owner.dispatch('calibration_result',session=token)
 
+  def coarse_fixture(self, offset=800, age=0, identity='speaker-a'):
+    import time
+    path=self.root/'generated/calibration_coarse_result.json';path.parent.mkdir(exist_ok=True)
+    path.write_text(json.dumps(dict(method=m.METHOD,output={'id':identity},created_wall=time.time()-age,
+                                    latency_ms=offset,spread_ms=4,accepted_taps=12)))
+
+  def test_refine_requires_recent_same_speaker_coarse(self):
+    with self.assertRaisesRegex(ValueError,'First complete'):
+      self.owner.dispatch('calibration_refine',attended=True)
+    for age,identity in ((601,'speaker-a'),(0,'other')):
+      self.coarse_fixture(age=age,identity=identity)
+      with self.assertRaisesRegex(ValueError,'First complete'):
+        self.owner.dispatch('calibration_refine',attended=True)
+    self.coarse_fixture()
+    with self.assertRaisesRegex(ValueError,'attended'):
+      self.owner.dispatch('calibration_refine')
+
+  def test_refine_recovers_branch_without_shift_on_missed_beats(self):
+    for coarse,actual in ((800,624),(200,24)):
+      self.coarse_fixture(coarse)
+      response=self.owner.dispatch('calibration_refine',attended=True);token=response['session']
+      self.assertEqual(response['beats'],24);self.assertEqual(response['target_taps'],16)
+      self.assertEqual(self.owner.session['sink'].count,24)
+      for i in range(24):self.owner.session['sink'].callback(i,100000+i*600)
+      for index in (8,9,11,12,14,15,17,18,20,21,22,23):
+        at=100000+index*600+actual;self.clock.value=at/1000
+        answer=self.owner.dispatch('calibration_tap',session=token,server_ms=at,uncertainty_ms=3)
+        self.assertEqual(answer['paired_beat'],index)
+        with self.assertRaisesRegex(ValueError,'already'):
+          self.owner.dispatch('calibration_tap',session=token,server_ms=at+2,uncertainty_ms=3)
+      result=self.owner.dispatch('calibration_result',session=token)
+      self.assertEqual(result['latency_ms'],actual);self.assertEqual(result['phase_offset_ms'],24)
+      self.assertEqual(result['method'],m.REFINE_METHOD);self.assertEqual(result['accepted_taps'],12)
+      self.assertEqual(result['coarse_result']['latency_ms'],coarse)
+      self.assertFalse((self.root/'generated/output_timing.json').exists())
+      self.assertEqual(json.loads((self.root/'generated/calibration_latest_result.json').read_text())['latency_ms'],actual)
+
+  def test_refine_rejects_half_beat_ambiguity_and_count_in(self):
+    self.coarse_fixture(324)
+    token=self.owner.dispatch('calibration_refine',attended=True)['session']
+    for i in range(24):self.owner.session['sink'].callback(i,100000+i*600)
+    self.clock.value=105.124
+    with self.assertRaisesRegex(ValueError,'ambiguous'):
+      self.owner.dispatch('calibration_tap',session=token,server_ms=104824,uncertainty_ms=3)
+    self.assertFalse(self.owner.session['taps'])
+    with self.assertRaisesRegex(ValueError,'ambiguous'):
+      self.owner.dispatch('calibration_tap',session=token,server_ms=104224,uncertainty_ms=3)
+    with self.assertRaisesRegex(ValueError,'eight'):
+      self.owner.dispatch('calibration_result',session=token)
+
   def test_uncertain_clock_stale_token_and_judging_lock(self):
     token=self.owner.dispatch('calibration_start',attended=True)['session']
     self.owner.session['sink'].callback(0,100000)
@@ -215,11 +265,15 @@ class OutputTests(unittest.TestCase):
       second=ClickSequence(lambda *_:None,0,count=m.TEST_COUNT)
       markers=ClickSequence(lambda *_:None,0,count=m.COUNT)
       markers_again=ClickSequence(lambda *_:None,0,count=m.COUNT)
+      refine=ClickSequence(lambda *_:None,0,count=m.REFINE_COUNT)
     self.assertEqual(len(sink.beats), 12)
     self.assertTrue(all(b-a == 28800 for a,b in zip(sink.beats,sink.beats[1:])))
     self.assertTrue(np.array_equal(sink.pcm,second.pcm))
     self.assertTrue(np.array_equal(markers.pcm,markers_again.pcm))
     self.assertEqual(len(markers.beats),20)
+    self.assertEqual(len(refine.beats),24)
+    self.assertTrue(np.all(np.diff(refine.beats)==28800))
+    self.assertFalse(np.any(refine.pcm[refine.beats[8]+2000:refine.beats[9]]))
     self.assertEqual(markers.beats[8],round(8.6*48000))
     self.assertTrue(all(value>1.5 for value in np.diff(markers.beats[8:])/48000))
     self.assertGreater(len(set(np.diff(markers.beats[8:]))),3)
