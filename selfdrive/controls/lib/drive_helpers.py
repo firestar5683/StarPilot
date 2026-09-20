@@ -1,4 +1,5 @@
 import numpy as np
+from cereal import log
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.realtime import DT_CTRL, DT_MDL
 
@@ -67,6 +68,10 @@ def get_accel_from_plan(speeds, accels, t_idxs, action_t=DT_MDL, vEgoStopping=0.
 
 # Backward-compatible alias used by tinygrad_modeld.
 get_accel_from_plan_tomb_raider = get_accel_from_plan
+
+
+def lateral_calibration_ready(sm) -> bool:
+  return sm.all_checks(['liveCalibration']) and sm['liveCalibration'].calStatus == log.LiveCalibrationData.Status.calibrated
 
 
 def get_lateral_active(enabled: bool, active: bool, always_on_lateral_enabled: bool,
