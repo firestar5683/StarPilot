@@ -338,18 +338,12 @@ if ! python_ui_runtime_ok >/dev/null 2>&1; then
   run_scons "${jobs}" \
     selfdrive/controls/lib/lateral_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so \
     selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so
-  (
-    cd "${ROOT_DIR}/msgq_repo"
-    local_scons_bin="${ROOT_DIR}/.venv/bin/scons"
-    if [[ -x "${local_scons_bin}" ]]; then
-      SP_DISABLE_AUTO_DEVICE_SCONS=1 "${local_scons_bin}" -j"${jobs}" msgq/ipc_pyx.so msgq/visionipc/visionipc_pyx.so
-    elif "${PY_BIN}" -m SCons --version >/dev/null 2>&1; then
-      SP_DISABLE_AUTO_DEVICE_SCONS=1 "${PY_BIN}" -m SCons -j"${jobs}" msgq/ipc_pyx.so msgq/visionipc/visionipc_pyx.so
-    else
-      echo "SCons not found in .venv after sync."
-      exit 1
-    fi
-  )
+
+  # Build msgq extensions through the root SConstruct so they link against
+  # StarPilot's common library instead of msgq_repo's standalone environment.
+  run_scons "${jobs}" \
+    msgq_repo/msgq/ipc_pyx.so \
+    msgq_repo/msgq/visionipc/visionipc_pyx.so
 fi
 
 if ! python_ui_runtime_ok >/dev/null 2>&1; then
