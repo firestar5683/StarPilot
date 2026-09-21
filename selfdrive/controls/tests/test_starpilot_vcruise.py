@@ -1,4 +1,5 @@
 import datetime
+import time
 
 import pytest
 
@@ -42,6 +43,8 @@ class FakeParams:
 
 
 def make_vcruise(*, red_light=False, raw_model_stopped=False, forcing_stop=False, nav_state=None, road_curvature=0.0):
+  if nav_state:
+    nav_state = {"updatedAtMonotonic": time.monotonic(), **nav_state}
   planner = SimpleNamespace(
     params=FakeParams(),
     params_memory=FakeParams({"NavInstructionState": nav_state or {}}),
@@ -63,6 +66,25 @@ def make_vcruise(*, red_light=False, raw_model_stopped=False, forcing_stop=False
   # what the not-committed branch would have left behind on the frame before commit
   vcruise.force_stop_distance_cap = planner.model_length
   return planner, vcruise
+
+
+def test_navigation_speed_target_expires_when_publisher_stops(monkeypatch):
+  now = [100.0]
+  monkeypatch.setattr(time, "monotonic", lambda: now[0])
+  planner, vcruise = make_vcruise(nav_state={
+    "valid": True, "maneuverType": "turn", "maneuverModifier": "right", "maneuverDistance": 10.0,
+  })
+  toggles = make_toggles()
+  toggles.nav_longitudinal_allowed = True
+  sm = make_sm(standstill=False)
+  assert 0.0 < vcruise._get_nav_turn_control_target(20.0, sm, toggles) < 20.0
+
+  now[0] = 103.0
+  assert vcruise._get_nav_turn_control_target(20.0, sm, toggles) == 0.0
+
+  state = planner.params_memory.values["NavInstructionState"]
+  planner.params_memory.values["NavInstructionState"] = {**state, "updatedAtMonotonic": now[0]}
+  assert 0.0 < vcruise._get_nav_turn_control_target(20.0, sm, toggles) < 20.0
 
 
 def make_sm(*, standstill=True, min_steer_speed=0.0, car_fingerprint=""):

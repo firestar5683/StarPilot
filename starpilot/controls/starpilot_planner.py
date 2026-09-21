@@ -29,6 +29,7 @@ from openpilot.starpilot.controls.lib.starpilot_events import StarPilotEvents
 from openpilot.starpilot.controls.lib.starpilot_following import StarPilotFollowing
 from openpilot.starpilot.controls.lib.starpilot_vcruise import StarPilotVCruise
 from openpilot.starpilot.controls.lib.weather_checker import WeatherChecker
+from openpilot.starpilot.navigation.location_state import gps_position_from_service
 
 RADARLESS_TRACK_HOLD_TIME = 0.45
 FORCE_STOP_JERK_SCALE = 0.20  # accel-change cost multiplier for the whole stop approach,
@@ -127,28 +128,22 @@ class StarPilotPlanner:
     v_cruise = v_cruise_kph * CV.KPH_TO_MS
     v_ego = max(sm["carState"].vEgo, 0)
 
-    gps_location = sm[self.gps_location_service]
-    self.gps_position = {
-      "latitude": gps_location.latitude,
-      "longitude": gps_location.longitude,
-      "bearing": gps_location.bearingDeg,
-      "speed": v_ego,
-      "hasFix": bool(getattr(gps_location, "hasFix", False)),
-      "updatedAtMonotonic": time.monotonic(),
-      "updatedAtSec": time.time(),
-    }
-    self.gps_valid = self.gps_position["hasFix"] and (self.gps_position["latitude"] != 0 or self.gps_position["longitude"] != 0)
-    bearing = self.gps_position["bearing"]
+    self.gps_position = gps_position_from_service(sm, self.gps_location_service, v_ego)
+    self.gps_valid = self.gps_position is not None
+    bearing = self.gps_position["bearing"] if self.gps_valid else None
     if self.gps_valid:
       gps_memory_state = json.dumps(_sanitize_json_value(self.gps_position), allow_nan=False)
-      now_mono = self.gps_position["updatedAtMonotonic"]
+      now_mono = time.monotonic()
       should_refresh_memory = gps_memory_state != self._last_gps_memory_state and (now_mono - self._last_gps_memory_write) >= 0.25
       if should_refresh_memory:
         self.params_memory.put_nonblocking("LastGPSPosition", gps_memory_state)
         self._last_gps_memory_state = gps_memory_state
         self._last_gps_memory_write = now_mono
+    elif self._last_gps_memory_state:
+      self.params_memory.remove("LastGPSPosition")
+      self._last_gps_memory_state = ""
 
-    if getattr(starpilot_toggles, "compass", False) and abs(bearing - self._prev_gps_bearing) > 0.5:
+    if bearing is not None and getattr(starpilot_toggles, "compass", False) and abs(bearing - self._prev_gps_bearing) > 0.5:
       self._prev_gps_bearing = bearing
 
     if v_ego >= starpilot_toggles.minimum_lane_change_speed:

@@ -1,8 +1,6 @@
 #!/usr/bin/env python3
 from __future__ import annotations
-import json
 import threading
-from math import isfinite
 from time import monotonic
 
 import cereal.messaging as messaging
@@ -11,12 +9,12 @@ from openpilot.common.realtime import Ratekeeper
 from openpilot.common.swaglog import cloudlog
 
 from openpilot.starpilot.navigation.destination_store import parse_destination_json
+from openpilot.starpilot.navigation.location_state import parse_location_state
 from openpilot.starpilot.navigation.route_engine import Coordinate, MapboxRouteEngine, NavigationRoute, RouteProgress
 
 NAVIGATIOND_HZ = 1
 REROUTE_TRIGGER_SECONDS = 2.0
 ARRIVAL_CLEAR_SECONDS = 5.0
-LOCATION_STATE_STALE_SECONDS = 2.5
 
 
 class Navigationd:
@@ -41,7 +39,6 @@ class Navigationd:
     self._off_route_started_at: float | None = None
     self._bearing_misaligned_started_at: float | None = None
     self._arrival_started_at: float | None = None
-    self._last_nav_state: dict[str, object] | None = None
 
   @staticmethod
   def _destination_key(destination: dict[str, object] | None) -> tuple[str, str, float, float] | None:
@@ -96,7 +93,11 @@ class Navigationd:
       self._requested_destination_key = destination_key
 
     def worker():
-      route = self.route_engine.fetch_route(token, position, destination, bearing)
+      try:
+        route = self.route_engine.fetch_route(token, position, destination, bearing)
+      except Exception:
+        cloudlog.exception("navigationd route fetch failed")
+        route = None
       with self._route_lock:
         still_current = self._requested_destination_key == destination_key
         self._route_fetch_inflight = False
@@ -126,37 +127,27 @@ class Navigationd:
     return started_at if started_at is not None else now
 
   def _update_location(self) -> tuple[bool, float]:
-    raw_state = self.params_memory.get("LastGPSPosition", encoding="utf-8") or ""
-    if not raw_state:
+    gps_state = parse_location_state(self.params_memory.get("LastGPSPosition"), now=monotonic())
+    if gps_state is None:
+      self._last_position = None
+      self._last_bearing = None
       return False, 0.0
-
-    try:
-      gps_state = json.loads(raw_state)
-    except json.JSONDecodeError:
-      return False, 0.0
-
-    if not isinstance(gps_state, dict) or not gps_state.get("hasFix", False):
-      return False, 0.0
-
-    latitude = float(gps_state.get("latitude", 0.0) or 0.0)
-    longitude = float(gps_state.get("longitude", 0.0) or 0.0)
-    if not isfinite(latitude) or not isfinite(longitude) or (abs(latitude) < 1e-6 and abs(longitude) < 1e-6):
-      return False, 0.0
-
-    updated_at = float(gps_state.get("updatedAtMonotonic", 0.0) or 0.0)
-    if updated_at > 0.0 and (monotonic() - updated_at) > LOCATION_STATE_STALE_SECONDS:
-      return False, 0.0
-
-    self._last_position = Coordinate(latitude, longitude)
-
-    bearing = float(gps_state.get("bearing", 0.0) or 0.0)
-    self._last_bearing = bearing if isfinite(bearing) else None
-
-    speed = float(gps_state.get("speed", 0.0) or 0.0)
-    return True, max(speed, 0.0)
+    self._last_position = Coordinate(gps_state["latitude"], gps_state["longitude"])
+    self._last_bearing = gps_state["bearing"]
+    return True, gps_state["speed"]
 
   def _maybe_update_route(self, current_destination: dict[str, object] | None) -> tuple[NavigationRoute | None, dict[str, object] | None, int]:
     route, active_destination, route_generation = self._snapshot_route()
+    destination_key = self._destination_key(current_destination)
+    with self._route_lock:
+      requested_key = self._requested_destination_key
+
+    # Invalidate a superseded request even before its first route has arrived.
+    # Keep the worker in flight until it finishes, so requests remain serialized.
+    if ((requested_key is not None and destination_key != requested_key) or
+        (active_destination is not None and destination_key != self._destination_key(active_destination))):
+      self._clear_route()
+      route, active_destination, route_generation = self._snapshot_route()
 
     if current_destination is None:
       if route is not None or active_destination is not None:
@@ -178,6 +169,9 @@ class Navigationd:
 
     progress = route.get_progress(self._last_position)
     if progress is None:
+      self._off_route_started_at = None
+      self._bearing_misaligned_started_at = None
+      self._arrival_started_at = None
       return None, None
 
     now = monotonic()
@@ -203,11 +197,11 @@ class Navigationd:
       "now": now,
     }
 
-  def _maybe_recompute(self, route: NavigationRoute | None, destination: dict[str, object] | None, progress: RouteProgress | None, route_state: dict[str, object] | None) -> None:
+  def _maybe_recompute(
+    self, route: NavigationRoute | None, destination: dict[str, object] | None,
+    progress: RouteProgress | None, route_state: dict[str, object] | None,
+  ) -> None:
     if route is None or destination is None or progress is None or route_state is None:
-      return
-
-    if progress.current_step_index >= len(route.steps) - 1:
       return
 
     now = float(route_state["now"])
@@ -254,13 +248,9 @@ class Navigationd:
     location_valid: bool,
     payload: dict[str, object] | None = None,
   ) -> None:
-    if route is None or progress is None or not location_valid:
-      if self._last_nav_state is not None:
-        self.params_memory.remove("NavInstructionState")
-        self._last_nav_state = None
-      return
-
-    if payload is None:
+    if route is None or progress is None or not location_valid or payload is None:
+      # This may be a new process with an instruction left by its predecessor.
+      self.params_memory.remove("NavInstructionState")
       return
 
     all_maneuvers = payload.get("allManeuvers") or []
@@ -301,6 +291,7 @@ class Navigationd:
 
     state = {
       "valid": True,
+      "updatedAtMonotonic": monotonic(),
       "maneuverModifier": str(payload.get("maneuverModifier") or ""),
       "maneuverType": str(payload.get("maneuverType") or ""),
       "laneCount": len(lanes),
@@ -316,9 +307,8 @@ class Navigationd:
       "nextManeuverModifier": str(next_maneuver.get("modifier") or ""),
       "nextManeuverDistance": float(next_maneuver.get("distance") or 0.0),
     }
-    if state != self._last_nav_state:
-      self.params_memory.put_nonblocking("NavInstructionState", state)
-      self._last_nav_state = state
+    # Refresh the heartbeat at standstill too, even if the instruction is identical.
+    self.params_memory.put_nonblocking("NavInstructionState", state)
 
   def _publish_nav_route_if_needed(self) -> None:
     route, _, route_generation = self._snapshot_route()
@@ -347,21 +337,22 @@ class Navigationd:
       progress, route_state = self._build_progress(route, location_valid, v_ego)
       self._maybe_recompute(route, current_destination or active_destination, progress, route_state)
       updated_route, active_destination, _ = self._snapshot_route()
-      if updated_route is not route and updated_route is not None and location_valid and self._last_position is not None:
-        progress = updated_route.get_progress(self._last_position)
+      if updated_route is not route:
+        progress, route_state = self._build_progress(updated_route, location_valid, v_ego)
       route = updated_route
       if route is None:
         progress = None
 
       payload = None
-      if route is not None and progress is not None and location_valid:
+      guidance_valid = bool(location_valid and route_state is not None and not route_state["offRoute"] and not route_state["misaligned"])
+      if route is not None and progress is not None and guidance_valid:
         payload = route.build_instruction_payload(
           progress,
           use_vienna_sign=self.params.get_bool("UseVienna"),
         )
 
-      self._publish_nav_instruction(route, progress, location_valid, payload)
-      self._publish_nav_state(route, progress, location_valid, payload)
+      self._publish_nav_instruction(route, progress, guidance_valid, payload)
+      self._publish_nav_state(route, progress, guidance_valid, payload)
       self._publish_nav_route_if_needed()
       self.rk.keep_time()
 
