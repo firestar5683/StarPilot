@@ -1210,29 +1210,37 @@ class TestLatControl:
     assert lac_log.active
     assert tapered_output == pytest.approx(base_output * 0.5)
 
-  def test_genesis_g70_angle_output_taper_update_path(self, monkeypatch):
-    monkeypatch.setattr(latcontrol_torque, "get_genesis_g70_angle_output_scale", lambda *_args: 1.0)
-    controller, VM, CS, params, starpilot_toggles = self._build_torque_controller(HYUNDAI.GENESIS_G70_2020)
-    CS.vEgo = 15.0
-    CS.steeringAngleDeg = 85.0
-    base_output, _, lac_log = controller.update(
-      True, CS, VM, params, False, 0.004, False, 0.2, None, None, starpilot_toggles,
-    )
+  @pytest.mark.parametrize("angle_offset", (0.0, 15.0, 30.0))
+  @pytest.mark.parametrize("magnitude", (0.01, 0.125, 0.25))
+  def test_genesis_g70_angle_output_taper_update_path(self, angle_offset, magnitude):
+    high_angle = latcontrol_vehicle_tunes.GENESIS_G70_ANGLE_OUTPUT_TAPER_START + angle_offset
+    for angle in (-high_angle, 0.0, high_angle):
+      for pid_output in (-magnitude, 0.0, magnitude):
+        outputs = []
+        for taper in (lambda *_args: 1.0, get_genesis_g70_angle_output_scale):
+          controller, VM, CS, params, starpilot_toggles = self._build_torque_controller(HYUNDAI.GENESIS_G70_2020)
+          CS.vEgo = 15.0
+          CS.steeringAngleDeg = angle
+          CS.steeringPressed = True  # Disable output smoothing.
+          with pytest.MonkeyPatch.context() as patch:
+            patch.setattr(controller.pid, "update", lambda *_args, value=pid_output, **_kwargs: value)
+            patch.setattr(latcontrol_torque, "get_genesis_g70_angle_output_scale", taper)
+            output, _, lac_log = controller.update(
+              True, CS, VM, params, False, 0.0, False, 0.2, None, None, starpilot_toggles,
+            )
+          assert lac_log.active
+          outputs.append(output)
 
-    monkeypatch.setattr(latcontrol_torque, "get_genesis_g70_angle_output_scale", lambda *_args: 0.5)
-    tapered_controller, tapered_VM, tapered_CS, tapered_params, tapered_toggles = self._build_torque_controller(
-      HYUNDAI.GENESIS_G70_2020,
-    )
-    tapered_CS.vEgo = 15.0
-    tapered_CS.steeringAngleDeg = 85.0
-    tapered_output, _, _ = tapered_controller.update(
-      True, tapered_CS, tapered_VM, tapered_params, False, 0.004, False, 0.2, None, None, tapered_toggles,
-    )
-
-    assert controller.is_genesis_g70
-    assert lac_log.active
-    assert base_output != 0.0
-    assert tapered_output == pytest.approx(base_output * 0.5)
+        base_output, tapered_output = outputs
+        if pid_output == 0.0:
+          assert base_output == tapered_output == 0.0
+        else:
+          assert base_output * pid_output < 0.0
+          assert tapered_output * base_output > 0.0
+          if base_output * angle > 0.0:
+            assert 0.0 < abs(tapered_output) < abs(base_output)
+          else:
+            assert tapered_output == pytest.approx(base_output)
 
   def test_ram_1500_transition_taper_curve(self):
     assert get_ram_1500_transition_output_scale(0.4, 0.2, 17.0) == pytest.approx(1.0)
