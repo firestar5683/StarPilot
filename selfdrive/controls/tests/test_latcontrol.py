@@ -1212,7 +1212,7 @@ class TestLatControl:
 
   @pytest.mark.parametrize("angle_offset", (0.0, 15.0, 30.0))
   @pytest.mark.parametrize("magnitude", (0.01, 0.125, 0.25))
-  def test_genesis_g70_angle_output_taper_update_path(self, angle_offset, magnitude):
+  def test_genesis_g70_angle_output_taper_update_path(self, monkeypatch, angle_offset, magnitude):
     high_angle = latcontrol_vehicle_tunes.GENESIS_G70_ANGLE_OUTPUT_TAPER_START + angle_offset
     for angle in (-high_angle, 0.0, high_angle):
       for pid_output in (-magnitude, 0.0, magnitude):
@@ -1222,7 +1222,7 @@ class TestLatControl:
           CS.vEgo = 15.0
           CS.steeringAngleDeg = angle
           CS.steeringPressed = True  # Disable output smoothing.
-          with pytest.MonkeyPatch.context() as patch:
+          with monkeypatch.context() as patch:
             patch.setattr(controller.pid, "update", lambda *_args, value=pid_output, **_kwargs: value)
             patch.setattr(latcontrol_torque, "get_genesis_g70_angle_output_scale", taper)
             output, _, lac_log = controller.update(
