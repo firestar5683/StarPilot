@@ -98,6 +98,172 @@ For the StarPilot host workflow, the combined desktop launcher is:
 ./onroad --c3 <route-name>
 ```
 
+## Desktop UI Recording
+
+StarPilot can record the rendered onroad UI while replaying a route on a desktop. The additional recording modes below are desktop-only and are not enabled on comma hardware.
+
+The C3 and C4 interfaces can be selected with `--c3` and `--c4`:
+
+```bash
+./onroad --c3 <route-name>
+./onroad --c4 <route-name>
+```
+
+### Local comma routes
+
+Routes copied directly from a comma device can use names such as `00000040--d083928baf`, with numbered segment directories:
+
+```text
+00000040--d083928baf--0/
+00000040--d083928baf--1/
+00000040--d083928baf--2/
+```
+
+Replay the route by specifying its parent directory:
+
+```bash
+./onroad --c4 "00000040--d083928baf" --data_dir="/path/to/routes"
+```
+
+The desktop replay configuration can load the logged route parameters from this local route format instead of falling back to desktop defaults.
+
+### Recording modes
+
+Recording is enabled with `RECORD=1`.
+
+| Variable | Description |
+| --- | --- |
+| `RECORD_COMBINED=1` | Record the camera and rendered UI/HUD together |
+| `RECORD_HUD_ONLY=1` | Record only the HUD with a transparent background |
+| `RECORD_CAMERA_ONLY=1` | Record only the transformed camera view on the C4/Mici UI |
+| `RECORD_METRIC=1` | Force metric units for the desktop recording |
+| `RECORD_CAMERA_VIEW=auto` | Use automatic camera selection |
+| `RECORD_CAMERA_VIEW=standard` | Force the standard road camera |
+| `RECORD_CAMERA_VIEW=wide` | Force the wide road camera |
+| `RECORD_CAMERA_RESOLUTION=render` | Use the normal rendered UI resolution |
+| `RECORD_CAMERA_RESOLUTION=source` | Use the near-source C4/Mici recording scale |
+| `RECORD_DURATION=<seconds>` | Stop after the requested amount of recorded video |
+| `RECORD_OUTPUT=<path>` | Set the recording output path |
+| `RECORD_QUALITY=<crf>` | Set H.264 CRF quality for normal/combined recording |
+| `RECORD_BITRATE=<bitrate>` | Set an H.264 target bitrate instead of CRF |
+
+`RECORD_CAMERA_VIEW` supports `auto`, `standard`, and `wide` on both the C3 and C4 desktop interfaces.
+
+### C4 recording resolution
+
+The C4/Mici UI has a base canvas of 536x240.
+
+`RECORD_CAMERA_RESOLUTION=source` uses a 2.5x scale, producing a 1340x600 recording. This preserves the UI aspect ratio and geometry so camera transformations and overlays remain aligned.
+
+This is a near-source rendering mode, not a raw 1344x760 camera export.
+
+Example:
+
+```bash
+RECORD=1 \
+RECORD_COMBINED=1 \
+RECORD_METRIC=1 \
+RECORD_CAMERA_VIEW=standard \
+RECORD_CAMERA_RESOLUTION=source \
+RECORD_DURATION=20 \
+RECORD_OUTPUT="$HOME/StarPilotRoutes/c4-combined" \
+RECORD_QUALITY=16 \
+./onroad --c4 "00000040--d083928baf" \
+  --data_dir="$HOME/StarPilotRoutes"
+```
+
+For a higher-resolution C4 HUD, use the normal render mode with an explicit scale. For example, `SCALE=4.5` produces a 2412x1080 canvas:
+
+```bash
+SCALE=4.5 \
+RECORD=1 \
+RECORD_COMBINED=1 \
+RECORD_METRIC=1 \
+RECORD_CAMERA_VIEW=standard \
+RECORD_OUTPUT="$HOME/StarPilotRoutes/c4-1080" \
+RECORD_QUALITY=16 \
+./onroad --c4 "00000040--d083928baf" \
+  --data_dir="$HOME/StarPilotRoutes"
+```
+
+### C3 recording
+
+The C3 desktop UI has a native 2160x1080 canvas. Use `SCALE=1` to record it at that resolution:
+
+```bash
+SCALE=1 \
+RECORD=1 \
+RECORD_COMBINED=1 \
+RECORD_METRIC=1 \
+RECORD_CAMERA_VIEW=wide \
+RECORD_DURATION=20 \
+RECORD_OUTPUT="$HOME/StarPilotRoutes/c3-wide" \
+RECORD_QUALITY=16 \
+./onroad --c3 "00000040--d083928baf" \
+  --data_dir="$HOME/StarPilotRoutes"
+```
+
+### Transparent HUD recording
+
+HUD-only mode records the interface without the camera image.
+
+Camera frames continue to be processed internally so camera geometry, calibration, and model-overlay transformations remain correctly aligned. Only the camera pixels are omitted from the rendered recording.
+
+The output uses lossless PNG/RGBA frames in a Matroska container, preserving the alpha channel:
+
+```bash
+RECORD=1 \
+RECORD_HUD_ONLY=1 \
+RECORD_METRIC=1 \
+RECORD_CAMERA_VIEW=standard \
+RECORD_OUTPUT="$HOME/StarPilotRoutes/hud" \
+./onroad --c4 "00000040--d083928baf" \
+  --data_dir="$HOME/StarPilotRoutes"
+```
+
+The resulting `.mkv` can therefore be composited over another video while retaining the HUD transparency.
+
+### Camera-only recording
+
+On the C4/Mici UI, camera-only mode stops rendering after the transformed camera frame, omitting the HUD and other UI elements.
+
+The recording uses lossless FFVHUFF in a Matroska container:
+
+```bash
+RECORD=1 \
+RECORD_CAMERA_ONLY=1 \
+RECORD_CAMERA_VIEW=wide \
+RECORD_CAMERA_RESOLUTION=source \
+RECORD_OUTPUT="$HOME/StarPilotRoutes/camera-wide" \
+./onroad --c4 "00000040--d083928baf" \
+  --data_dir="$HOME/StarPilotRoutes"
+```
+
+### Recording duration
+
+`RECORD_DURATION` stops recording according to the number of rendered recording frames rather than wall-clock time.
+
+For example:
+
+```bash
+RECORD=1 RECORD_COMBINED=1 RECORD_DURATION=30 ...
+```
+
+stops after the number of rendered frames corresponding to 30 seconds at the normal recording frame rate.
+
+### Output formats
+
+The recording mode determines the output format:
+
+| Mode | Container | Codec | Purpose |
+| --- | --- | --- | --- |
+| Normal `RECORD` | MP4 | H.264 | Standard UI recording |
+| `RECORD_COMBINED` | MP4 | H.264 | Camera + HUD/UI |
+| `RECORD_HUD_ONLY` | MKV | PNG/RGBA | Lossless HUD with transparency |
+| `RECORD_CAMERA_ONLY` | MKV | FFVHUFF | Lossless transformed camera recording |
+
+For H.264 recording, `RECORD_QUALITY` controls the CRF value. `RECORD_BITRATE` can instead be used to specify a target bitrate.
+
 ## Work with plotjuggler
 If you want to use replay with plotjuggler, you can stream messages by running:
 
