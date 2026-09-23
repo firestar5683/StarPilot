@@ -48,7 +48,7 @@ def enabled_source_titles(
 def source_content_metrics(row_count: int) -> tuple[int, int, int]:
   """Return logical text size, icon size, and icon gap for the visible rows."""
   if row_count <= 3:
-    return 30, 34, 7
+    return 34, 39, 7
   if row_count == 4:
     return 30, 32, 7
   return 28, 30, 6

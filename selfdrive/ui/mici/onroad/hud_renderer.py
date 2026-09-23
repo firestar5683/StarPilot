@@ -6,6 +6,9 @@ from openpilot.common.constants import CV
 from openpilot.selfdrive.ui.onroad.starpilot.torque_bar import TorqueBar
 from openpilot.selfdrive.ui.onroad.starpilot.rivian_lateral_mode import rivian_lateral_mode
 from openpilot.selfdrive.ui.mici.onroad.speed_limit_utils import resolve_display_speed_limit_ms
+from openpilot.selfdrive.ui.lib.speed_limit import (
+  max_matches_speed_limit, pending_speed_limit_offset, speed_limit_override_mode,
+)
 from openpilot.selfdrive.ui.lib.speed_limit_pulse import SpeedLimitPulse
 from openpilot.selfdrive.ui.onroad.starpilot.navigation_card import NavigationCardRenderer
 from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
@@ -27,15 +30,7 @@ CRUISE_DISABLED_CHAR = '–'
 
 SET_SPEED_PERSISTENCE = 2.5  # seconds
 
-SPEED_LIMIT_PROMPT_CARD_WIDTH = 500
-SPEED_LIMIT_PROMPT_CARD_HEIGHT = 208
-SPEED_LIMIT_PROMPT_BUTTON_SIZE = 112
-SPEED_LIMIT_PROMPT_BUTTON_GAP = 28
-SPEED_LIMIT_PROMPT_CARD_PADDING = 34
-SPEED_LIMIT_PROMPT_US_SIGN_WIDTH = 132
-SPEED_LIMIT_PROMPT_US_SIGN_HEIGHT = 150
-SPEED_LIMIT_PROMPT_EU_SIGN_SIZE = 148
-SPEED_LIMIT_PROMPT_CENTER_OFFSET_X = -26
+PENDING_BLINK_MS = 500
 VISION_SPEED_LIMIT_PULSE_SECONDS = 1.0
 VISION_SPEED_LIMIT_PULSE_COLOR = rl.Color(188, 132, 255, 255)
 
@@ -132,14 +127,12 @@ class HudRenderer(Widget):
     self._speed_limit: float = 0.0
     self._speed_limit_offset: float = 0.0
     self._show_speed_limit_offset: bool = False
-    self._speed_limit_overridden: bool = False
+    self._speed_limit_override_mode: str = ""
+    self._max_matches_limit: bool = False
     self._pending_speed_limit: float = 0.0
+    self._pending_speed_limit_offset: float = 0.0
+    self._pending_speed_limit_confirmation: bool = False
     self._speed_limit_pulse = SpeedLimitPulse()
-    self._prompt_visible: bool = False
-    self._prompt_card_rect: rl.Rectangle = rl.Rectangle(0, 0, 0, 0)
-    self._prompt_sign_rect: rl.Rectangle = rl.Rectangle(0, 0, 0, 0)
-    self._prompt_deny_rect: rl.Rectangle = rl.Rectangle(0, 0, 0, 0)
-    self._prompt_accept_rect: rl.Rectangle = rl.Rectangle(0, 0, 0, 0)
 
     self._can_draw_top_icons = True
     self._show_wheel_critical = False
@@ -211,9 +204,11 @@ class HudRenderer(Widget):
     )
 
     v_cruise_cluster = car_state.vCruiseCluster
-    set_speed = (
+    raw_set_speed = (
       controls_state.vCruiseDEPRECATED if v_cruise_cluster == 0.0 else v_cruise_cluster
     )
+    set_speed_offset = ui_state.starpilot_toggles.get("set_speed_offset", 0.0)
+    set_speed = raw_set_speed + set_speed_offset if 0 < raw_set_speed < SET_SPEED_NA else raw_set_speed
     engaged = sm['selfdriveState'].enabled
     if (engaged and not self._engaged and not ui_state.usbgpu_loading and ui_state.usbgpu_active is not True and
         sm.recv_frame['modelV2'] > ui_state.started_frame):
@@ -224,7 +219,7 @@ class HudRenderer(Widget):
       self._set_speed_changed_time = rl.get_time()
     self._engaged = engaged
     self.set_speed = set_speed
-    self.is_cruise_set = 0 < self.set_speed < SET_SPEED_NA
+    self.is_cruise_set = 0 < raw_set_speed < SET_SPEED_NA
     self.is_cruise_available = self.set_speed != -1
 
     v_ego_cluster = car_state.vEgoCluster
@@ -259,36 +254,52 @@ class HudRenderer(Widget):
           starpilot_plan.slcSpeedLimitSource, resolved_speed_limit, speed_conversion, rl.get_time(), ui_state.started_frame,
         )
 
-        display_speed_limit = starpilot_plan.slcOverriddenSpeed if starpilot_plan.slcOverriddenSpeed > 0 else resolved_speed_limit
-        self._speed_limit = max(0.0, display_speed_limit * speed_conversion)
+        self._speed_limit = max(0.0, resolved_speed_limit * speed_conversion)
         self._speed_limit_offset = starpilot_plan.slcSpeedLimitOffset * speed_conversion
-        self._speed_limit_overridden = bool(starpilot_plan.slcOverriddenSpeed > 0 and starpilot_plan.slcSpeedLimit > 0)
-        if self._speed_limit > 0 and not self._speed_limit_overridden and not self._show_speed_limit_offset:
+        self._speed_limit_override_mode = speed_limit_override_mode(starpilot_plan, getattr(car_state, "gasPressed", False))
+        self._max_matches_limit = sm.valid.get("starpilotPlan", False) and max_matches_speed_limit(
+          starpilot_plan,
+          set_speed,
+          ui_state.is_metric,
+          ui_state.ui_params.get_int("SLCFallback") if hasattr(ui_state.ui_params, "get_int") else 2,
+        )
+        if self._speed_limit > 0 and not self._show_speed_limit_offset:
           self._speed_limit += self._speed_limit_offset
-        self._pending_speed_limit = max(0.0, starpilot_plan.unconfirmedSlcSpeedLimit * speed_conversion)
+        pending_limit = starpilot_plan.unconfirmedSlcSpeedLimit
+        self._pending_speed_limit_confirmation = starpilot_plan.speedLimitChanged and pending_limit > 1
+        if not self._pending_speed_limit_confirmation:
+          pending_limit = 0.0
+        pending_offset = pending_speed_limit_offset(pending_limit, ui_state.is_metric, ui_state.starpilot_toggles)
+        if not self._show_speed_limit_offset:
+          pending_limit = max(0.0, pending_limit + pending_offset)
+        self._pending_speed_limit = pending_limit * speed_conversion
+        self._pending_speed_limit_offset = pending_offset * speed_conversion
       else:
         self._speed_limit = 0.0
         self._speed_limit_offset = 0.0
         self._show_speed_limit_offset = False
-        self._speed_limit_overridden = False
+        self._speed_limit_override_mode = ""
+        self._max_matches_limit = False
         self._pending_speed_limit = 0.0
+        self._pending_speed_limit_offset = 0.0
+        self._pending_speed_limit_confirmation = False
         self._speed_limit_pulse.clear()
-      self._prompt_visible = self._pending_speed_limit > 0
     else:
       self._show_speed_limit = False
       self._speed_limit = 0.0
       self._speed_limit_offset = 0.0
       self._show_speed_limit_offset = False
-      self._speed_limit_overridden = False
+      self._speed_limit_override_mode = ""
+      self._max_matches_limit = False
       self._pending_speed_limit = 0.0
+      self._pending_speed_limit_offset = 0.0
+      self._pending_speed_limit_confirmation = False
       self._speed_limit_pulse.clear()
-      self._prompt_visible = False
 
   def prepare(self, rect: rl.Rectangle) -> None:
     """Update HUD state once before drawing background/foreground passes."""
     self.set_rect(rect)
     self._update_state()
-    self._update_prompt_layout(rect)
 
   def render_background(self) -> None:
     """Draw HUD elements that should sit behind alerts."""
@@ -307,7 +318,6 @@ class HudRenderer(Widget):
       self._draw_model_source(self._rect)
 
     self._draw_steering_wheel(self._rect)
-    self._draw_speed_limit_prompt(self._rect)
 
   def user_interacting(self) -> bool:
     return self._navigation_card.is_pressed
@@ -406,7 +416,16 @@ class HudRenderer(Widget):
 
   def _draw_set_speed(self, rect: rl.Rectangle) -> None:
     """Draw the MAX speed indicator box."""
-    alpha = self._set_speed_alpha_filter.update(0 < rl.get_time() - self._set_speed_changed_time < SET_SPEED_PERSISTENCE and
+    if ui_state.starpilot_toggles.get("hide_max_speed", False):
+      self._set_speed_alpha_filter.update(0)
+      return
+
+    distinct_slc_max = (
+      self._show_speed_limit and ui_state.ui_params.get_bool("SpeedLimitController") and
+      self._speed_limit > 0 and not self._max_matches_limit
+    )
+    recently_changed = 0 < rl.get_time() - self._set_speed_changed_time < SET_SPEED_PERSISTENCE
+    alpha = self._set_speed_alpha_filter.update((recently_changed or distinct_slc_max) and
                                                 self._can_draw_top_icons and self._engaged)
     if alpha < 1e-2:
       return
@@ -463,6 +482,7 @@ class HudRenderer(Widget):
     footer_top: float = 0.0,
     border_color = None,
     text_color = None,
+    pending: bool = False,
   ) -> None:
     border_color = border_color or rl.Color(255, 255, 255, sign_alpha)
     text_color = text_color or rl.Color(255, 255, 255, sign_alpha)
@@ -475,7 +495,7 @@ class HudRenderer(Widget):
     )
     rl.draw_rectangle_rounded_lines_ex(inner_border_rect, 0.14, 16, max(border_thickness - 2, 1), border_color)
 
-    speed_label = tr("SPEED")
+    speed_label = tr("PENDING") if pending else tr("SPEED")
     limit_label = tr("LIMIT")
     speed_label_size = measure_text_cached(self._font_semi_bold, speed_label, header_font_size)
     limit_label_size = measure_text_cached(self._font_semi_bold, limit_label, header_font_size)
@@ -525,16 +545,18 @@ class HudRenderer(Widget):
     if not self._show_speed_limit:
       return
 
-    display_speed = self._speed_limit if self._speed_limit > 0 else self._pending_speed_limit
-    if display_speed <= 0:
+    pending = self._pending_speed_limit_confirmation
+    display_speed = self._pending_speed_limit if pending else self._speed_limit
+    if display_speed <= 0 and not pending:
       return
 
-    sign_alpha = 72 if self._speed_limit_overridden and self._pending_speed_limit <= 0 else 255
+    sign_alpha = 255
     use_vienna_speed_limit = ui_state.ui_params.get_bool("UseVienna")
-    speed_text = str(round(display_speed))
+    speed_text = "–" if pending and display_speed <= 1 else str(round(display_speed))
     offset_text = ""
-    if self._show_speed_limit_offset and not self._speed_limit_overridden:
-      rounded_offset = round(self._speed_limit_offset)
+    if self._show_speed_limit_offset:
+      offset = self._pending_speed_limit_offset if pending else self._speed_limit_offset
+      rounded_offset = round(offset)
       offset_text = "–" if rounded_offset == 0 else f"{rounded_offset:+d}"
 
     sign_width = 118 if use_vienna_speed_limit else 116
@@ -543,13 +565,25 @@ class HudRenderer(Widget):
     sign_x = base_x
     sign_y = rect.y + (28 if use_vienna_speed_limit else 20)
     widget_color = self._speed_limit_pulse_color(rl.Color(255, 255, 255, 255), sign_alpha)
+    if pending:
+      blink_on = int(rl.get_time() * 1000) % 1000 < PENDING_BLINK_MS
+      pending_border = self._speed_limit_pulse_color(
+        rl.Color(255, 255, 255, 255) if blink_on else rl.Color(201, 34, 49, 255), sign_alpha,
+      )
+    else:
+      blink_on = False
+      pending_border = widget_color
 
     if use_vienna_speed_limit:
       center_x = sign_x + sign_width / 2
       center_y = sign_y + sign_height / 2
       radius = sign_width / 2
       ring_color = self._speed_limit_pulse_color(rl.Color(201, 34, 49, 255), sign_alpha)
-      text_color = self._speed_limit_pulse_color(rl.Color(0, 0, 0, 255), sign_alpha)
+      if pending:
+        text_base = rl.Color(0, 0, 0, 255) if blink_on else rl.Color(201, 34, 49, 255)
+      else:
+        text_base = rl.Color(0, 0, 0, 255)
+      text_color = self._speed_limit_pulse_color(text_base, sign_alpha)
 
       rl.draw_circle(int(center_x), int(center_y), radius, rl.Color(255, 255, 255, sign_alpha))
       rl.draw_ring(
@@ -562,15 +596,14 @@ class HudRenderer(Widget):
         ring_color,
       )
 
-      font_size = 58 if len(speed_text) <= 2 else 48
+      font_size = (50 if len(speed_text) <= 2 else 42) if offset_text else (58 if len(speed_text) <= 2 else 48)
       text_size = measure_text_cached(self._font_bold, speed_text, font_size)
       text_pos = rl.Vector2(center_x - text_size.x / 2, center_y - text_size.y / 2 + (-14 if offset_text else 4))
       rl.draw_text_ex(self._font_bold, speed_text, text_pos, font_size, 0, text_color)
       if offset_text:
-        offset_font_size = 34
-        offset_size = measure_text_cached(self._font_semi_bold, offset_text, offset_font_size)
+        offset_size = measure_text_cached(self._font_semi_bold, offset_text, 34)
         offset_pos = rl.Vector2(center_x - offset_size.x / 2, sign_y + sign_height - 42)
-        rl.draw_text_ex(self._font_semi_bold, offset_text, offset_pos, offset_font_size, 0, text_color)
+        rl.draw_text_ex(self._font_semi_bold, offset_text, offset_pos, 34, 0, text_color)
     else:
       sign_rect = rl.Rectangle(sign_x, sign_y, sign_width, sign_height)
       self._draw_us_speed_limit_sign(
@@ -586,138 +619,22 @@ class HudRenderer(Widget):
         footer_text=offset_text,
         footer_font_size=28 if offset_text else 0,
         footer_top=100,
-        border_color=widget_color,
+        border_color=pending_border,
         text_color=widget_color,
+        pending=pending,
       )
 
-  def _update_prompt_layout(self, rect: rl.Rectangle) -> None:
-    if not self._prompt_visible:
-      self._prompt_card_rect = rl.Rectangle(0, 0, 0, 0)
-      self._prompt_sign_rect = rl.Rectangle(0, 0, 0, 0)
-      self._prompt_deny_rect = rl.Rectangle(0, 0, 0, 0)
-      self._prompt_accept_rect = rl.Rectangle(0, 0, 0, 0)
-      return
-
-    use_vienna_speed_limit = ui_state.ui_params.get_bool("UseVienna")
-    sign_width = SPEED_LIMIT_PROMPT_EU_SIGN_SIZE if use_vienna_speed_limit else SPEED_LIMIT_PROMPT_US_SIGN_WIDTH
-    sign_height = SPEED_LIMIT_PROMPT_EU_SIGN_SIZE if use_vienna_speed_limit else SPEED_LIMIT_PROMPT_US_SIGN_HEIGHT
-    button_size = SPEED_LIMIT_PROMPT_BUTTON_SIZE
-    card_margin_x = 8
-    card_margin_y = 8
-    card_x = rect.x + card_margin_x + SPEED_LIMIT_PROMPT_CENTER_OFFSET_X
-    card_y = rect.y + card_margin_y
-    card_width = max(
-      SPEED_LIMIT_PROMPT_CARD_WIDTH,
-      rect.width - card_margin_x * 2,
-    )
-    card_height = max(
-      SPEED_LIMIT_PROMPT_CARD_HEIGHT,
-      rect.height - card_margin_y * 2,
-    )
-    card_rect = rl.Rectangle(card_x, card_y, card_width, card_height)
-
-    controls_center_y = card_y + card_height * 0.72
-    controls_y = controls_center_y - button_size / 2
-    deny_x = card_x + SPEED_LIMIT_PROMPT_CARD_PADDING
-    sign_x = card_x + (card_width - sign_width) / 2
-    sign_y = controls_center_y - sign_height / 2
-    accept_x = card_x + card_width - SPEED_LIMIT_PROMPT_CARD_PADDING - button_size
-
-    self._prompt_card_rect = card_rect
-    self._prompt_sign_rect = rl.Rectangle(sign_x, sign_y, sign_width, sign_height)
-    self._prompt_deny_rect = rl.Rectangle(deny_x, controls_y, button_size, button_size)
-    self._prompt_accept_rect = rl.Rectangle(accept_x, controls_y, button_size, button_size)
-
-  def _draw_prompt_button(self, rect: rl.Rectangle, symbol: str, fill: rl.Color, outline: rl.Color, pressed: bool) -> None:
-    scale = 0.95 if pressed else 1.0
-    width = rect.width * scale
-    height = rect.height * scale
-    x = rect.x + (rect.width - width) / 2
-    y = rect.y + (rect.height - height) / 2
-    button_rect = rl.Rectangle(x, y, width, height)
-    center = rl.Vector2(button_rect.x + button_rect.width / 2, button_rect.y + button_rect.height / 2)
-    radius = min(button_rect.width, button_rect.height) / 2
-
-    draw_circle_gradient_compat(center.x, center.y, radius, rl.Color(0, 0, 0, 90), rl.BLANK)
-    rl.draw_circle(int(center.x), int(center.y), radius, fill)
-    rl.draw_ring(center, radius - 6, radius, 0, 360, 48, outline)
-
-    symbol_size = 88 if symbol == "+" else 98
-    symbol_text = tr(symbol)
-    symbol_measure = measure_text_cached(self._font_display, symbol_text, symbol_size)
-    symbol_pos = rl.Vector2(center.x - symbol_measure.x / 2, center.y - symbol_measure.y / 2 - (6 if symbol == "-" else 0))
-    rl.draw_text_ex(self._font_display, symbol_text, symbol_pos, symbol_size, 0, rl.WHITE)
-
-  def _draw_speed_limit_prompt(self, rect: rl.Rectangle) -> None:
-    if not self._prompt_visible:
-      return
-
-    accent_color = rl.Color(255, 115, 0, 255)
-    card_rect = self._prompt_card_rect
-    rl.draw_rectangle_rounded(card_rect, 0.14, 18, rl.Color(10, 10, 10, 210))
-    rl.draw_rectangle_rounded_lines_ex(card_rect, 0.14, 18, 4, accent_color)
-
-    title_text = tr("NEW SPEED LIMIT")
-    title_size = measure_text_cached(self._font_semi_bold, title_text, 28)
-    title_pos = rl.Vector2(card_rect.x + card_rect.width / 2 - title_size.x / 2, card_rect.y + 18)
-    rl.draw_text_ex(self._font_semi_bold, title_text, title_pos, 28, 0, rl.Color(255, 255, 255, 235))
-
-    use_vienna_speed_limit = ui_state.ui_params.get_bool("UseVienna")
-    speed_text = str(round(self._pending_speed_limit))
-    sign_rect = self._prompt_sign_rect
-
-    if use_vienna_speed_limit:
-      center_x = sign_rect.x + sign_rect.width / 2
-      center_y = sign_rect.y + sign_rect.height / 2
-      radius = sign_rect.width / 2
-
-      rl.draw_circle(int(center_x), int(center_y), radius, rl.WHITE)
-      rl.draw_ring(
-        rl.Vector2(center_x, center_y),
-        radius - 14,
-        radius,
-        0,
-        360,
-        64,
-        rl.Color(201, 34, 49, 255),
-      )
-
-      font_size = 78 if len(speed_text) <= 2 else 66
-      text_size = measure_text_cached(self._font_bold, speed_text, font_size)
-      text_pos = rl.Vector2(center_x - text_size.x / 2, center_y - text_size.y / 2 + 4)
-      rl.draw_text_ex(self._font_bold, speed_text, text_pos, font_size, 0, rl.BLACK)
-    else:
-      self._draw_us_speed_limit_sign(
-        sign_rect,
-        speed_text,
-        255,
-        border_thickness=5,
-        header_font_size=24,
-        header_gap=20,
-        speed_font_size=72 if len(speed_text) <= 2 else 60,
-        header_top=14,
-        speed_top=66,
-      )
-
-    self._draw_prompt_button(
-      self._prompt_deny_rect,
-      "-",
-      rl.Color(104, 20, 20, 235),
-      rl.Color(255, 78, 78, 255),
-      False,
-    )
-    self._draw_prompt_button(
-      self._prompt_accept_rect,
-      "+",
-      rl.Color(12, 110, 66, 235),
-      rl.Color(78, 255, 173, 255),
-      False,
-    )
-
-    hint_text = tr("SET/+ TO CONFIRM  RES/- TO DENY")
-    hint_size = measure_text_cached(self._font_medium, hint_text, 24)
-    hint_pos = rl.Vector2(card_rect.x + card_rect.width / 2 - hint_size.x / 2, card_rect.y + 60)
-    rl.draw_text_ex(self._font_medium, hint_text, hint_pos, 24, 0, rl.Color(255, 255, 255, 180))
+    if self._speed_limit_override_mode and not pending:
+      badge_text = tr(self._speed_limit_override_mode.upper())
+      badge_size = measure_text_cached(self._font_semi_bold, badge_text, 18)
+      badge_width = min(sign_width, max(84, badge_size.x + 20))
+      badge_rect = rl.Rectangle(sign_x + (sign_width - badge_width) / 2, sign_y + sign_height + 4, badge_width, 28)
+      rl.draw_rectangle_rounded(badge_rect, 0.2, 8, rl.Color(12, 16, 20, 225))
+      rl.draw_rectangle_rounded_lines_ex(badge_rect, 0.2, 8, 2, widget_color)
+      rl.draw_text_ex(self._font_semi_bold, badge_text,
+                      rl.Vector2(badge_rect.x + (badge_width - badge_size.x) / 2,
+                                 badge_rect.y + (badge_rect.height - badge_size.y) / 2),
+                      18, 0, widget_color)
 
   def _draw_current_speed(self, rect: rl.Rectangle) -> None:
     """Draw the current vehicle speed and unit."""

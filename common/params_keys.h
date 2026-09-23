@@ -664,7 +664,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"SLCAbbreviatedSources", {PERSISTENT, BOOL, "0", "0", 3}},
     {"SLCActiveSourcesOnly", {PERSISTENT, BOOL, "0", "0", 3}},
     {"SLCConfirmation", {PERSISTENT, BOOL, "0", "0", 0}},
-    {"SLCConfirmationHigher", {PERSISTENT, BOOL, "0", "0", 0}},
+    {"SLCConfirmationHigher", {PERSISTENT, BOOL, "1", "0", 0}},
     {"SLCConfirmationLower", {PERSISTENT, BOOL, "0", "0", 0}},
     {"SLCFallback", {PERSISTENT, INT, "2", "0", 1}},
     {"SLCLookaheadHigher", {PERSISTENT, INT, "0", "0", 2}},

@@ -450,7 +450,6 @@ class StarPilotVariables:
     self.params_memory = Params(memory=True)
     migrate_cancel_button_controls(self.params)
     migrate_aol_lkas_to_button_control(self.params)
-
     self.starpilot_toggles = SimpleNamespace()
     toggle = self.starpilot_toggles
 
@@ -1455,9 +1454,8 @@ class StarPilotVariables:
     toggle.slc_fallback_previous_speed_limit = slc_fallback_method == 2
     toggle.slc_fallback_set_speed = slc_fallback_method == 0
     toggle.slc_mapbox_filler = self.get_value("SLCMapboxFiller", condition=(toggle.show_speed_limits or toggle.speed_limit_controller) and self.params.get("MapboxSecretKey") is not None)
-    speed_limit_confirmation = self.get_value("SLCConfirmation", condition=toggle.speed_limit_controller)
-    toggle.speed_limit_confirmation_higher = self.get_value("SLCConfirmationHigher", condition=speed_limit_confirmation)
-    toggle.speed_limit_confirmation_lower = self.get_value("SLCConfirmationLower", condition=speed_limit_confirmation)
+    toggle.speed_limit_confirmation_higher = self.get_value("SLCConfirmationHigher", condition=toggle.speed_limit_controller)
+    toggle.speed_limit_confirmation_lower = self.get_value("SLCConfirmationLower", condition=toggle.speed_limit_controller)
     slc_override_method = self.get_value("SLCOverride", cast=float, condition=toggle.speed_limit_controller)
     toggle.speed_limit_controller_override_manual = slc_override_method == 1
     toggle.speed_limit_controller_override_set_speed = slc_override_method == 2

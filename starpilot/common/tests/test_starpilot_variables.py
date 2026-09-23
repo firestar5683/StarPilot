@@ -163,6 +163,13 @@ def test_ford_lkas_default_migration_preserves_custom_mapping():
   assert params.get_int("LKASButtonControl") == spv.BUTTON_FUNCTIONS["BOOKMARK"]
 
 
+def test_speed_limit_confirmation_defaults_to_higher_only(tmp_path):
+  params = spv.Params(str(tmp_path), return_defaults=True)
+
+  assert params.get_bool("SLCConfirmationHigher") is True
+  assert params.get_bool("SLCConfirmationLower") is False
+
+
 def test_ford_lkas_default_migration_ignores_other_brands():
   params = _FakeParams(ints={"LKASButtonControl": spv.BUTTON_FUNCTIONS["EXPERIMENTAL_MODE"]})
 

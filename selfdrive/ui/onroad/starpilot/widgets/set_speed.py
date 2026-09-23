@@ -8,6 +8,7 @@ from openpilot.selfdrive.ui.onroad.hud_renderer import (
   UI_CONFIG, FONT_SIZES, COLORS, CRUISE_DISABLED_CHAR
 )
 from openpilot.selfdrive.ui.onroad.starpilot.widget_style import draw_control_card
+from openpilot.selfdrive.ui.lib.speed_limit import max_matches_speed_limit
 
 class SetSpeedWidget(LayoutWidget):
   def __init__(self, hud_renderer):
@@ -18,9 +19,25 @@ class SetSpeedWidget(LayoutWidget):
 
   @property
   def is_visible(self) -> bool:
+    params = ui_state.ui_params
+    sm = ui_state.sm
+    redundant_with_limit = False
+    if (
+      params.get_bool("SpeedLimitController") and params.get_bool("ShowSpeedLimits") and
+      sm.valid.get("starpilotPlan", False) and
+      sm.recv_frame["starpilotPlan"] >= ui_state.started_frame
+    ):
+      car_state = sm["carState"]
+      max_speed_kph = car_state.vCruise
+      if 0 < max_speed_kph < 255:
+        max_speed_kph += ui_state.starpilot_toggles.get("set_speed_offset", 0.0)
+      redundant_with_limit = max_matches_speed_limit(
+        sm["starpilotPlan"], max_speed_kph, ui_state.is_metric, params.get_int("SLCFallback"),
+      )
     return (
       self.hud_renderer.is_cruise_available
       and not ui_state.starpilot_toggles.get("hide_max_speed", False)
+      and not redundant_with_limit
     )
 
   def get_size(self) -> tuple[float, float]:

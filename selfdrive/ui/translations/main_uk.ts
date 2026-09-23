@@ -1687,8 +1687,8 @@
         <translation>Завчасний нижчий ліміт</translation>
     </message>
     <message>
-        <source>Match Speed Limit on Engage</source>
-        <translation>Відповідність обмеженню швидкості при активації</translation>
+        <source>Set MAX to Limit on Engage</source>
+        <translation>Встановлювати MAX за обмеженням при активації</translation>
     </message>
     <message>
         <source>Use Mapbox as Fallback</source>

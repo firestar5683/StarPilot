@@ -495,7 +495,6 @@ class StarPilotLongitudinalLayout(_SettingsPage):
     cc_on = lambda: self._params.get_bool("ConditionalChill")
     ce_lead = lambda: ce_on() and self._params.get_bool("CELead")
     csc_on = lambda: self._params.get_bool("CurveSpeedController")
-    confirmation_on = lambda: self._params.get_bool("SLCConfirmation")
     
     # ── 1. Longitudinal Tuning Rows ──
     self._tune_rows = [
@@ -596,24 +595,18 @@ class StarPilotLongitudinalLayout(_SettingsPage):
                  subtitle="",
                  get_value=self._get_priority_value,
                  on_click=self._on_priority_clicked),
-      SettingRow("SetSpeedLimit", "toggle", tr_noop("Auto Match Speed Limits"),
-                 subtitle="",
+      SettingRow("SetSpeedLimit", "toggle", tr_noop("Set MAX to Limit on Engage"),
+                 subtitle=tr_noop("Set MAX to the current speed limit when openpilot engages."),
                  get_state=lambda: self._params.get_bool("SetSpeedLimit"),
                  set_state=lambda s: self._params.put_bool("SetSpeedLimit", s)),
-      SettingRow("SLCConfirmation", "toggle", tr_noop("Confirm New Limits"),
-                 subtitle="",
-                 get_state=lambda: self._params.get_bool("SLCConfirmation"),
-                 set_state=lambda s: self._params.put_bool("SLCConfirmation", s)),
-      SettingRow("SLCConfirmationLower", "toggle", tr_noop("Confirm Lower"),
-                 subtitle="",
+      SettingRow("SLCConfirmationLower", "toggle", tr_noop("Confirm Lower Limits"),
+                 subtitle=tr_noop("Ask before applying a lower speed limit."),
                  get_state=lambda: self._params.get_bool("SLCConfirmationLower"),
-                 set_state=lambda s: self._params.put_bool("SLCConfirmationLower", s),
-                 visible=confirmation_on),
-      SettingRow("SLCConfirmationHigher", "toggle", tr_noop("Confirm Higher"),
-                 subtitle="",
+                 set_state=lambda s: self._params.put_bool("SLCConfirmationLower", s)),
+      SettingRow("SLCConfirmationHigher", "toggle", tr_noop("Confirm Higher Limits"),
+                 subtitle=tr_noop("Ask before applying a higher speed limit."),
                  get_state=lambda: self._params.get_bool("SLCConfirmationHigher"),
-                 set_state=lambda s: self._params.put_bool("SLCConfirmationHigher", s),
-                 visible=confirmation_on),
+                 set_state=lambda s: self._params.put_bool("SLCConfirmationHigher", s)),
       SettingRow("SLCLookHigher", "value", tr_noop("Higher Lookahead"),
                  subtitle="",
                  get_value=lambda: f"{self._params.get_int('SLCLookaheadHigher')}s",
@@ -635,11 +628,6 @@ class StarPilotLongitudinalLayout(_SettingsPage):
                  subtitle="",
                  get_state=lambda: self._params.get_bool("SpeedLimitSources"),
                  set_state=lambda s: self._params.put_bool("SpeedLimitSources", s)),
-      SettingRow("SLCAbbreviatedSources", "toggle", tr_noop("Abbreviated Sources"),
-                 subtitle=tr_noop("Render speed-limit sources as compact text labels (e.g. Dash-45)."),
-                 get_state=lambda: self._params.get_bool("SLCAbbreviatedSources"),
-                 set_state=lambda s: self._params.put_bool("SLCAbbreviatedSources", s),
-                 visible=self._sources_visible),
       SettingRow("SLCActiveSourcesOnly", "toggle", tr_noop("Active Sources Only"),
                  subtitle=tr_noop("Hide source rows that have no current speed limit reading."),
                  get_state=lambda: self._params.get_bool("SLCActiveSourcesOnly"),
@@ -836,7 +824,7 @@ class StarPilotLongitudinalLayout(_SettingsPage):
     pt_personality = self._make_parent("CustomPersonalities", "Driving Personalities")
     pt_daily = self._make_parent("QOLLongitudinal", "Quality of Life")
     pt_slc = self._make_parent("SpeedLimitController", "Speed Limit Controller",
-      "Limit the car's maximum speed to the current speed limit.")
+      "Use the speed limit as a target beneath MAX. Press + above the limit for a manual override; the accelerator temporarily overrides while pressed.")
     pt_vision_speed_limits = self._make_parent("VisionSpeedLimitDetection", "Vision Speed Limits",
       "Detect and display speed-limit signs without enabling the Speed Limit Controller.")
     pt_csc = self._make_parent("CurveSpeedController", "Curve Speed Controller",
@@ -877,7 +865,7 @@ class StarPilotLongitudinalLayout(_SettingsPage):
       self,
       [SettingSection(title="", rows=self._slc_rows)],
       header_title=tr_noop("Speed Limit Controller"),
-      header_subtitle=tr_noop("Press + above a limit for a persistent override; hold the gas pedal for a temporary override."),
+      header_subtitle=tr_noop("Use the speed limit as a target beneath MAX. Press + above it for a manual override; the accelerator temporarily overrides while pressed."),
       parent_toggle=pt_slc,
       panel_style=PANEL_STYLE,
     )
