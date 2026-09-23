@@ -2,11 +2,17 @@
 <style>body{background:#101215;color:#eee;font:20px -apple-system,system-ui;margin:35px auto;max-width:760px;padding:15px}h1{font-size:34px;margin-bottom:8px}p{color:#aaa;line-height:1.5}section{margin-top:30px}button{font:inherit;background:#282d34;color:white;border:1px solid #454d59;border-radius:12px;padding:18px;margin:6px;cursor:pointer}button.on{background:#245e95;border-color:#78c7ff}button:disabled{opacity:.4;cursor:default}small{color:#aaa}#error{color:#ffba94}</style>
 <h1>RoadScore demo controls</h1><p>Prepared Prism music · live presentation controls<br>These controls simulate the replay display and music only.</p>
 <p id="scope" aria-live="polite">Checking control targets…</p>
+<section><label for="timeline">Timeline <span id="timeLabel">0:00</span></label><input id="timeline" type="range" min="0" max="300" step="0.1" value="0" style="display:block;width:100%;margin:20px 0" aria-label="Demo timeline"></section>
 <section><button data-field="mode" data-value="engaged">Simulate engage</button><button data-field="mode" data-value="disengaged">Simulate disengage</button><button data-field="mode" data-value="recorded">Recorded engagement</button></section>
 <section><button data-field="signal_mode" data-value="left">Left signal</button><button data-field="signal_mode" data-value="right">Right signal</button><button data-field="signal_mode" data-value="off">Signals off</button><button data-field="signal_mode" data-value="recorded">Recorded signals</button></section>
 <p id="state">Waiting for replay…</p><p id="targets" aria-live="polite">Mac waiting; comma not paired</p><p id="following" aria-live="polite"></p><p id="error"></p><small>Saved Prism music with real-time replay reactions. No vehicle control.</small>
 <script>
-let session;const buttons=[...document.querySelectorAll('button')];
+let session, dragging=false;
+const timeline=document.querySelector('#timeline');
+const stamp=n=>Math.floor(n/60)+':'+String(Math.floor(n%60)).padStart(2,'0');
+timeline.oninput=()=>{dragging=true;document.querySelector('#timeLabel').textContent=stamp(+timeline.value)};
+timeline.onchange=async()=>{try{const r=await fetch('/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:session,seek_seconds:+timeline.value})});const j=await r.json();if(!r.ok)throw Error(j.error);document.querySelector('#error').textContent=''}catch(e){document.querySelector('#error').textContent=e.message}finally{dragging=false}};
+const buttons=[...document.querySelectorAll('button')];
 buttons.forEach(b=>b.onclick=async()=>{try{const r=await fetch('/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:session,[b.dataset.field]:b.dataset.value})});const j=await r.json();if(!r.ok)throw Error(j.error);document.querySelector('#error').textContent=''}catch(e){document.querySelector('#error').textContent=e.message}});
 function commaStatus(paired){
   if(!paired?.enabled)return 'not paired';
@@ -25,6 +31,8 @@ function commaStatus(paired){
 async function refresh(){
   try{
     const r=await fetch('/status');if(!r.ok)throw Error('Status unavailable');const j=await r.json();session=j.demo.session_id;
+    timeline.disabled=!j.demo.available||!j.seek_enabled;timeline.max=Math.max(0,(j.duration_s||1)-1);
+    if(!dragging&&!j.seeking){timeline.value=j.audio_s||0;document.querySelector('#timeLabel').textContent=stamp(j.audio_s||0)+' / '+stamp(j.duration_s||0)}
     // Peer readiness never disables the independent local controls.
     buttons.forEach(b=>{b.disabled=!j.demo.available;b.classList.toggle('on',j.demo[b.dataset.field]===b.dataset.value)});
     document.querySelector('#state').textContent=j.state+' · '+Math.max(0,j.audio_s||0).toFixed(1)+' s · '+(j.muted?'MUTED':'system audio output');

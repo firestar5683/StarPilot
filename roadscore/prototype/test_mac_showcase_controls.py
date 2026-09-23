@@ -45,6 +45,18 @@ class ControlTests(unittest.TestCase):
     self.server = None
     self.addCleanup(self.stop)
 
+  def test_local_timeline_bounds_and_session(self):
+    shared = dict(state='READY', audio_s=1., muted=True, seek_enabled=True, duration_s=301.7)
+    self.server = control_server(self.project, self.out, shared, 0)
+    for target in (-1, 301.7, True, '20'):
+      status, _ = self.request('POST', '/control', {'session_id':'mac-session', 'seek_seconds':target})
+      self.assertEqual(status, 400)
+    status, _ = self.request('POST', '/control', {'session_id':'stale', 'seek_seconds':20})
+    self.assertEqual(status, 400)
+    status, _ = self.request('POST', '/control', {'session_id':'mac-session', 'seek_seconds':20})
+    self.assertEqual(status, 200)
+    self.assertEqual(shared['seek_request'][0], 20)
+
   def write_state(self):
     self.state['command_wall'] = time.monotonic()
     (self.out/'status.json').write_text(json.dumps(self.state))

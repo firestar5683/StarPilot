@@ -151,6 +151,16 @@ def control_server(project, out, shared, port, forwarder=None, *, follow_peer=Fa
         length = int(self.headers.get('Content-Length', '0'))
         if not 0 < length <= 1024:raise ValueError('Invalid control size')
         data = json.loads(self.rfile.read(length))
+        if 'seek_seconds' in data:
+          demo = operator.demo_status()
+          target = data['seek_seconds']
+          if (forwarder is not None or not shared.get('seek_enabled') or not demo['available']
+              or data.get('session_id') != demo['session_id']):
+            raise ValueError('Seeking requires the current local replay session')
+          if type(target) not in (int, float) or not math.isfinite(target) or not 0 <= target <= shared['duration_s']-1:
+            raise ValueError('Seek outside the saved demo')
+          shared['seek_request'] = (float(target), time.monotonic())
+          self.send_json({'seek_seconds':target});return
         field = 'signal_mode' if 'signal_mode' in data else 'mode'
         future = None
         with control_lock:
@@ -258,7 +268,8 @@ def audio_worker(a):
   source_clock = dict(last_drift_seconds=0.,max_abs_drift_seconds=0.)
   output_latency = None
   failure = None
-  shared = dict(state='PREPARING',audio_s=0.,muted=a.muted)
+  shared = dict(state='PREPARING',audio_s=0.,muted=a.muted,duration_s=len(audio)/rate,seek_enabled=not a.paired_comma, seeking=False)
+  pending_seek = None
   def callback(out, n, ti, status):
     nonlocal position,rendered,done,flags,max_drift,first_frame,callback_revision,last_callback_wall
     out.fill(0)
@@ -266,7 +277,7 @@ def audio_worker(a):
       if len(clock_observations)<24:
         clock_observations.append((float(time.monotonic()),float(ti.currentTime),float(ti.outputBufferDacTime)))
       return
-    if anchor is None or done:return
+    if anchor is None or done or shared['seeking']:return
     now=time.monotonic()
     gap=now-last_callback_wall if last_callback_wall is not None else 0.
     last_callback_wall=now
@@ -276,7 +287,7 @@ def audio_worker(a):
     try:
       dac=bridge.dac_wall(float(ti.outputBufferDacTime))
       expected=initial_frame(meta,active_anchor[0],dac-active_anchor[1],rate)
-      explicit_seek=sync is not None and active_anchor[2]!=callback_revision
+      explicit_seek=active_anchor[2]!=callback_revision
       chunk,clock_info=playback_clock.render(audio,expected,n,explicit_seek=explicit_seek)
       callback_revision=active_anchor[2]
       start=clock_info['source_frame'];position=clock_info['next_source_frame']
@@ -324,6 +335,17 @@ def audio_worker(a):
       (a.out/'prepared_ready').write_text('ready')
       while not done:
         sm.update(50);now=time.monotonic();controls.poll()
+        request = shared.pop('seek_request', None)
+        if request is not None and anchor is not None:
+          target, _ = request
+          transport = json.loads(replay_state_path.read_text())
+          current_audio = (sm.logMonoTime['modelV2']-meta['first_model_ns'])/1e9-meta['audio_offset']
+          seek_to = transport['cur_sec'] + target-current_audio
+          shared['seeking'] = True
+          pending_seek = (target, now+12.)
+          write_json(replay_command_path, {'seek':seek_to, 'play':True})
+        if pending_seek is not None and now > pending_seek[1]:
+          raise TimeoutError('Replay did not acknowledge the timeline seek')
         tail.observe(int(sm.logMonoTime['modelV2']),now,position)
         for name in received:
           if sm.updated[name]:received[name]=now
@@ -335,6 +357,17 @@ def audio_worker(a):
         if sm.updated['modelV2']:
           mono=sm.logMonoTime['modelV2']
           if anchor is None:anchor=(mono,now,0);started=now
+          if pending_seek is not None:
+            at = (mono-meta['first_model_ns'])/1e9-meta['audio_offset']
+            if replay_command_path.exists() or abs(at-pending_seek[0]) > 1.5:
+              continue
+            processor=PreparedPresentation(a.score_archive,rate)
+            conductor=Conductor(handoff=True)
+            tail=RecordedTail(meta['archived_tail'])
+            rendered=None
+            anchor=(mono,now,anchor[2]+1)
+            pending_seek=None
+            shared['seeking']=False
           drift=(mono-anchor[0])/1e9-(now-anchor[1])
           if sync is not None and sync.consume_reanchor(drift,now):
             # This mode is always muted. Reset presentation filters outside the
@@ -383,7 +416,7 @@ def audio_worker(a):
           write_json(a.out/'status.json',snapshot)
           trace.write(json.dumps({**snapshot,'audio_s':shared['audio_s']})+'\n');last_status=now
         if started and now-started>=a.duration:break
-        if (started and now-received['modelV2']>2
+        if (started and pending_seek is None and now-received['modelV2']>2
             and ((position or 0)/rate < len(audio)/rate-2 or tail.terminal_wall is not None)
             and not tail.allows_stale(int(sm.logMonoTime['modelV2']),now)):
           raise RuntimeError('Replay model stream stopped before prepared audio ended')
