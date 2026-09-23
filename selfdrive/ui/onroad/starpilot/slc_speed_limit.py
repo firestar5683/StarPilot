@@ -18,6 +18,9 @@ from openpilot.selfdrive.ui.onroad.starpilot.source_bubble_layout import (
 )
 from openpilot.selfdrive.ui.lib.starpilot_state import starpilot_state
 from openpilot.selfdrive.ui.lib.speed_limit_pulse import SpeedLimitPulse
+from openpilot.selfdrive.ui.lib.speed_limit import (
+  max_matches_speed_limit, pending_speed_limit_offset, speed_limit_override_mode,
+)
 
 _WHITE = rl.Color(255, 255, 255, 255)
 
@@ -64,6 +67,10 @@ def _reset_pulse() -> None:
 def _tick_pulse(source: str, resolved_ms: float) -> None:
   speed_conversion = CV.MS_TO_KPH if ui_state.is_metric else CV.MS_TO_MPH
   _pulse.update(source, resolved_ms, speed_conversion, rl.get_time(), ui_state.started_frame)
+
+
+def _format_offset(offset: float) -> str:
+  return f"{'+' if offset > 0 else '-'}{abs(int(round(offset)))}" if offset != 0 else "\u2013"
 
 
 def _speed_limit_pulse_color(base: rl.Color, alpha: int) -> rl.Color:
@@ -121,6 +128,16 @@ def _get_slc_state():
   )
 
   slc_overridden_speed = plan.slcOverriddenSpeed
+  car_state = sm["carState"]
+  pending_limit = plan.unconfirmedSlcSpeedLimit if speed_limit_changed and unconfirmed_valid else 0.0
+  pending_offset = pending_speed_limit_offset(pending_limit, ui_state.is_metric, ui_state.starpilot_toggles)
+  override_mode = speed_limit_override_mode(plan, getattr(car_state, "gasPressed", False))
+  max_matches_limit = max_matches_speed_limit(
+    plan,
+    getattr(car_state, "vCruise", 0.0) + ui_state.starpilot_toggles.get("set_speed_offset", 0.0),
+    ui_state.is_metric,
+    params.get_int("SLCFallback") if hasattr(params, "get_int") else 2,
+  )
   # Keep the source limit visible when overridden.
   speed_limit = plan.slcSpeedLimit
 
@@ -128,15 +145,18 @@ def _get_slc_state():
   # change detector so the comparison is unit-stable across km/h ↔ mph flips.
   resolved_ms = speed_limit
 
-  # Add the per-limit offset to the displayed value only when NOT overridden
-  # AND ShowSLCOffset is off (when the offset toggle is on, it's rendered as
-  # a separate field below the speed number instead).
-  if slc_overridden_speed == 0 and not show_offset:
+  # Keep the same effective SLC target on screen while overridden. When the
+  # offset toggle is on, the offset is shown separately instead.
+  if not show_offset:
     speed_limit += plan.slcSpeedLimitOffset
   speed_limit *= speed_conversion
 
   speed_limit_offset = plan.slcSpeedLimitOffset * speed_conversion
-  offset_str = f"{'+' if speed_limit_offset > 0 else '-'}{abs(int(round(speed_limit_offset)))}" if speed_limit_offset != 0 else "\u2013"
+  offset_str = _format_offset(speed_limit_offset)
+
+  pending_display_limit = pending_limit if show_offset else max(0.0, pending_limit + pending_offset)
+  pending_display_limit *= speed_conversion
+  pending_offset_str = _format_offset(pending_offset * speed_conversion)
 
   # Update the vision-source pulse once per frame, after resolved_ms is known
   # and before any sign colors are computed downstream.
@@ -146,8 +166,11 @@ def _get_slc_state():
     'speed_limit': speed_limit,
     'speed_limit_str': "\u2013" if speed_limit <= 1 else str(int(round(speed_limit))),
     'slc_overridden_speed': slc_overridden_speed,
+    'override_mode': override_mode,
+    'max_matches_limit': max_matches_limit,
     'speed_limit_source': plan.slcSpeedLimitSource,
-    'unconfirmed_speed_limit': max(0.0, plan.unconfirmedSlcSpeedLimit * speed_conversion),
+    'unconfirmed_speed_limit': pending_display_limit,
+    'unconfirmed_offset_str': pending_offset_str,
     'unconfirmed_valid': unconfirmed_valid,
     'speed_limit_changed': speed_limit_changed,
     'show_offset': show_offset,
@@ -155,7 +178,6 @@ def _get_slc_state():
     'offset_str': offset_str,
     'speed_conversion': speed_conversion,
     'speed_unit': " km/h" if ui_state.is_metric else " mph",
-    'slc_abbreviated_sources': params.get_bool("SLCAbbreviatedSources"),
     'slc_active_sources_only': params.get_bool("SLCActiveSourcesOnly"),
     'slc_enabled_sources': enabled_source_titles(
       primary_priority,
@@ -195,6 +217,9 @@ _ACTIVE_SOURCE_LABELS = {title: abbrev.upper() for title, abbrev, *_ in SOURCE_D
 
 
 def _active_source_label(state: dict) -> str:
+  override_mode = state.get("override_mode")
+  if override_mode:
+    return tr(override_mode.upper())
   source = state.get("speed_limit_source")
   if not source or source == "None":
     return tr("LIMIT")
@@ -272,14 +297,18 @@ def _draw_us_sign(x: float, y: float, sign_width: float, sign_height: float,
   font_semi = _get_semi_bold()
   cx = x + sign_width / 2
 
-  # Pending layout: "PENDING" + "LIMIT" + speed (no offset shown when pending).
+  # Pending follows the active sign's offset display preference.
   if pending:
     pending_size = measure_text_cached(font_semi, tr("PENDING"), FONT_LABEL - 2)
     rl.draw_text_ex(font_semi, tr("PENDING"), rl.Vector2(cx - pending_size.x / 2, y + 20), FONT_LABEL - 2, 0, text_color)
     limit_size = measure_text_cached(font_semi, tr("LIMIT"), FONT_LABEL)
     rl.draw_text_ex(font_semi, tr("LIMIT"), rl.Vector2(cx - limit_size.x / 2, y + 48), FONT_LABEL, 0, text_color)
-    speed_size = measure_text_cached(font_bold, speed_text, FONT_SPEED - 6)
-    rl.draw_text_ex(font_bold, speed_text, rl.Vector2(cx - speed_size.x / 2, y + 85), FONT_SPEED - 6, 0, text_color)
+    speed_font_size = FONT_SPEED - 20 if show_offset else FONT_SPEED - 6
+    speed_top = 77 if show_offset else 85
+    speed_size = measure_text_cached(font_bold, speed_text, speed_font_size)
+    rl.draw_text_ex(font_bold, speed_text, rl.Vector2(cx - speed_size.x / 2, y + speed_top), speed_font_size, 0, text_color)
+    if show_offset:
+      _draw_offset_chip(card_rect, offset_str, text_color)
   elif show_offset:
     # Offset ON: source at the top, speed below it, and the offset in a chip.
     source_size = measure_text_cached(font_semi, source_label, FONT_SOURCE)
@@ -334,11 +363,17 @@ def _draw_eu_sign(x: float, y: float, speed_text: str, offset_str: str,
     base_text = rl.Color(0, 0, 0, 255)
   text_color = _speed_limit_pulse_color(base_text, text_alpha)
 
-  # Pending: text centered (no offset display)
+  # Pending follows the active sign's offset display preference.
   if pending:
     speed_size = measure_text_cached(font_bold, speed_text, eu_font)
-    speed_pos = rl.Vector2(center_x - speed_size.x / 2, center_y - speed_size.y / 2)
+    speed_pos = rl.Vector2(center_x - speed_size.x / 2,
+                           center_y - speed_size.y / 2 - (5 if show_offset else 0))
     rl.draw_text_ex(font_bold, speed_text, speed_pos, eu_font, 0, text_color)
+    if show_offset:
+      font_semi = _get_semi_bold()
+      offset_size = measure_text_cached(font_semi, offset_str, FONT_EU_OFFSET)
+      offset_pos = rl.Vector2(center_x - offset_size.x / 2, y + 122)
+      rl.draw_text_ex(font_semi, offset_str, offset_pos, FONT_EU_OFFSET, 0, text_color)
   elif not show_offset:
     font_semi = _get_semi_bold()
     source_size = measure_text_cached(font_semi, source_label, FONT_LABEL - 4)
@@ -380,10 +415,12 @@ def _draw_sign(state: dict, rect: rl.Rectangle, *, pending: bool = False):
   source_label = _active_source_label(state)
 
   if state['use_vienna']:
-    _draw_eu_sign(rect.x, rect.y, speed_text, state['offset_str'], source_label, text_alpha,
+    offset_str = state['unconfirmed_offset_str'] if pending else state['offset_str']
+    _draw_eu_sign(rect.x, rect.y, speed_text, offset_str, source_label, text_alpha,
                    state['show_offset'], pending=pending)
   else:
-    _draw_us_sign(rect.x, rect.y, rect.width, rect.height, speed_text, state['offset_str'],
+    offset_str = state['unconfirmed_offset_str'] if pending else state['offset_str']
+    _draw_us_sign(rect.x, rect.y, rect.width, rect.height, speed_text, offset_str,
                    source_label, text_alpha, state['show_offset'], pending=pending,
                    is_overridden=is_overridden)
 
@@ -391,7 +428,7 @@ def _draw_sign(state: dict, rect: rl.Rectangle, *, pending: bool = False):
 # ── Sources Bubble (expandable overlay) ────────────────────────────────
 
 # Fixed outer footprint; the content scale adapts to the visible row count.
-_SOURCE_PANEL_WIDTH = 248
+_SOURCE_PANEL_WIDTH = 280
 _SOURCE_PANEL_GAP = 20
 _SOURCE_PANEL_PAD_X = 9
 _SOURCE_PANEL_PAD_Y = 2
@@ -536,7 +573,7 @@ def _draw_sources_bubble(state: dict, sign_rect: rl.Rectangle):
   active_source = state['speed_limit_source']
   enabled_sources = state.get('slc_enabled_sources', ())
   active_only = state.get('slc_active_sources_only', False)
-  abbreviated = state.get('slc_abbreviated_sources', False)
+  abbreviated = False
 
   panel_rect = rl.Rectangle(
     sign_rect.x + sign_rect.width + _SOURCE_PANEL_GAP,

@@ -2074,42 +2074,31 @@
       {
         "key": "SpeedLimitController",
         "label": "Speed Limit Controller",
-        "description": "Limit openpilot's maximum driving speed using configured map, dashboard, and optional vision sources. Press + above a limit for a persistent override; hold the gas pedal for a temporary override.",
-        "picker_description": "Press + above a limit for a persistent override; hold the gas pedal for a temporary override.",
+        "description": "Use the speed limit as a target beneath MAX. Raise MAX above the limit for a manual override; the accelerator temporarily overrides while pressed.",
+        "picker_description": "The speed limit is a target beneath MAX. Raise MAX for a manual override; the accelerator temporarily overrides while pressed.",
         "data_type": "bool",
         "ui_type": "toggle",
         "is_parent_toggle": true,
-        "settings_tier": "advanced"
-      },
-      {
-        "key": "SLCConfirmation",
-        "label": "Confirm New Speed Limits",
-        "description": "Ask before changing to a new speed limit. To accept, tap the flashing on-screen widget or press the Cruise Increase button. To deny, press the Cruise Decrease button or ignore the prompt for 30 seconds.",
-        "picker_description": "Asks before applying a new speed limit.",
-        "data_type": "bool",
-        "ui_type": "toggle",
-        "is_parent_toggle": true,
-        "parent_key": "SpeedLimitController",
         "settings_tier": "advanced"
       },
       {
         "key": "SLCConfirmationLower",
         "label": "Confirm Lower Limits",
-        "description": "Require confirmation before applying a newly detected lower speed limit.",
-        "picker_description": "Asks before applying a lower speed limit.",
+        "description": "Ask before applying a newly detected lower speed limit. Press + to apply; press − to keep the current limit, or let the prompt time out.",
+        "picker_description": "Ask before applying a lower speed limit.",
         "data_type": "bool",
         "ui_type": "toggle",
-        "parent_key": "SLCConfirmation",
+        "parent_key": "SpeedLimitController",
         "settings_tier": "advanced"
       },
       {
         "key": "SLCConfirmationHigher",
         "label": "Confirm Higher Limits",
-        "description": "Require confirmation before applying a newly detected higher speed limit.",
-        "picker_description": "Asks before applying a higher speed limit.",
+        "description": "Ask before applying a newly detected higher speed limit. Press + to apply; press − to keep the current limit, or let the prompt time out.",
+        "picker_description": "Ask before applying a higher speed limit.",
         "data_type": "bool",
         "ui_type": "toggle",
-        "parent_key": "SLCConfirmation",
+        "parent_key": "SpeedLimitController",
         "settings_tier": "advanced"
       },
       {
@@ -2136,9 +2125,9 @@
       },
       {
         "key": "SetSpeedLimit",
-        "label": "Match Speed Limit on Engage",
-        "description": "When openpilot is first enabled, automatically set the max speed to the current posted limit.",
-        "picker_description": "Matches the speed limit when openpilot engages.",
+        "label": "Set MAX to Limit on Engage",
+        "description": "When openpilot engages, set MAX to the current speed limit if one is available.",
+        "picker_description": "Sets MAX to the current limit when openpilot engages.",
         "data_type": "bool",
         "ui_type": "toggle",
         "parent_key": "SpeedLimitController",
@@ -2469,19 +2458,9 @@
         "settings_tier": "advanced"
       },
       {
-        "key": "SLCAbbreviatedSources",
-        "label": "Show Abbreviated Icon Sources",
-        "description": "Render the speed-limit sources as compact text labels (e.g. \"Dash-45\", \"MapD-30\") without icons.",
-        "picker_description": "Shows speed-limit sources as compact text labels.",
-        "data_type": "bool",
-        "ui_type": "toggle",
-        "parent_key": "SpeedLimitController",
-        "settings_tier": "advanced"
-      },
-      {
         "key": "SLCActiveSourcesOnly",
         "label": "Only Show Sources With Speed Limits",
-        "description": "Hide source rows that have no current speed limit reading. Works with both abbreviated and full display.",
+        "description": "Hide source rows that have no current speed limit reading.",
         "picker_description": "Hides speed-limit sources with no current reading.",
         "data_type": "bool",
         "ui_type": "toggle",

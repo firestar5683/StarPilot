@@ -582,16 +582,16 @@ def test_set_speed_override_handles_higher_limit_changes():
     assert controller.override_slc
     assert controller.overridden_speed == pytest.approx(mph(55))
 
-    # A higher limit below the selected override preserves it.
+    # A newly applied limit clears MANUAL, even when the selected MAX is higher.
     controller.update_limits(mph(45), datetime.now(timezone.utc), False, mph(55), mph(50), make_sm(gas_pressed=False))
     controller.update_override(mph(55), 0.0, mph(50), 0.0, make_sm(gas_pressed=False))
 
     assert controller.target == pytest.approx(mph(45))
     assert controller.source == "Dashboard"
-    assert controller.overridden_speed == pytest.approx(mph(55))
-    assert controller.override_slc
+    assert controller.overridden_speed == 0
+    assert not controller.override_slc
 
-    # A higher effective target that reaches the override clears it without re-arming.
+    # A later target change does not re-arm MANUAL while MAX stays steady.
     controller.update_limits(mph(55), datetime.now(timezone.utc), False, mph(55), mph(50), make_sm(gas_pressed=False))
     controller.update_override(mph(55), 0.0, mph(50), 0.0, make_sm(gas_pressed=False))
     assert controller.target == pytest.approx(mph(55))
@@ -746,14 +746,14 @@ def test_confirmation_accel_press_does_not_arm_set_speed_override():
 
 
 @pytest.mark.parametrize(
-  ("current_limit", "desired_limit", "accel_pressed", "decel_pressed"),
+  ("current_limit", "desired_limit", "accel_pressed", "decel_pressed", "force_max_to_limit"),
   [
-    (65, 45, False, True),
-    (35, 45, True, False),
+    (65, 45, False, True, False),
+    (35, 45, True, False, True),
   ],
 )
 def test_disabled_confirmation_does_not_consume_wheel_input(
-  current_limit, desired_limit, accel_pressed, decel_pressed,
+  current_limit, desired_limit, accel_pressed, decel_pressed, force_max_to_limit,
 ):
   controller = make_controller()
   try:
@@ -780,7 +780,10 @@ def test_disabled_confirmation_does_not_consume_wheel_input(
     assert controller.unconfirmed_speed_limit == 0
     assert not controller._set_speed_override_input_consumed
     assert "SpeedLimitAccepted" not in controller.starpilot_planner.params_memory.values
-    assert "SLCForceCruiseSpeed" not in controller.starpilot_planner.params_memory.values
+    if force_max_to_limit:
+      assert controller.starpilot_planner.params_memory.get_float("SLCForceCruiseSpeed") == pytest.approx(mph(desired_limit))
+    else:
+      assert "SLCForceCruiseSpeed" not in controller.starpilot_planner.params_memory.values
   finally:
     controller.shutdown()
 
@@ -900,7 +903,7 @@ def test_disabling_confirmation_clears_pending_confirmation_immediately(
 
 
 @pytest.mark.parametrize("accepted_by_accel_button", [True, False])
-def test_higher_confirmation_raises_cruise_speed_to_target_with_offset(accepted_by_accel_button):
+def test_higher_confirmation_raises_max_that_was_tracking_old_target_with_offset(accepted_by_accel_button):
   controller = make_controller(
     speed_limit_confirmation_higher=True,
     speed_limit_offset4=mph(5),
@@ -915,16 +918,61 @@ def test_higher_confirmation_raises_cruise_speed_to_target_with_offset(accepted_
       controller.starpilot_planner.params_memory.values["SpeedLimitAccepted"] = True
 
     controller.handle_limit_change(
-      "Dashboard", mph(45), "", mph(40),
+      "Dashboard", mph(45), "", mph(35),
       make_sm(
         gas_pressed=False,
         accel_pressed=accepted_by_accel_button,
-        v_cruise_kph=40 * CV.MPH_TO_KPH,
+        v_cruise_kph=35 * CV.MPH_TO_KPH,
       ),
     )
 
     assert controller.target == pytest.approx(mph(45))
     assert controller.starpilot_planner.params_memory.get_float("SLCForceCruiseSpeed") == pytest.approx(mph(50))
+  finally:
+    controller.shutdown()
+
+
+@pytest.mark.parametrize(
+  ("set_speed_offset_mph", "raw_max_mph", "expected_raw_max_mph"),
+  [(0, 35, 65), (5, 30, 60)],
+)
+def test_higher_limit_raises_max_when_it_was_tracking_old_limit(set_speed_offset_mph, raw_max_mph, expected_raw_max_mph):
+  controller = make_controller(set_speed_offset=set_speed_offset_mph * CV.MPH_TO_KPH)
+  try:
+    controller.source = "Dashboard"
+    controller.target = mph(35)
+    controller.previous_source = "Dashboard"
+    controller.previous_target = mph(35)
+    controller.last_valid_limit = mph(35)
+
+    controller.handle_limit_change(
+      "Dashboard", mph(65), "", mph(raw_max_mph),
+      make_sm(gas_pressed=False, v_cruise_kph=raw_max_mph * CV.MPH_TO_KPH),
+    )
+
+    assert controller.target == pytest.approx(mph(65))
+    assert controller.starpilot_planner.params_memory.get_float("SLCForceCruiseSpeed") == pytest.approx(mph(expected_raw_max_mph))
+  finally:
+    controller.shutdown()
+
+
+@pytest.mark.parametrize("set_speed", [30, 45])
+def test_higher_limit_does_not_raise_a_deliberate_max(set_speed):
+  controller = make_controller()
+  try:
+    controller.source = "Dashboard"
+    controller.target = mph(35)
+    controller.previous_source = "Dashboard"
+    controller.previous_target = mph(35)
+    controller.last_valid_limit = mph(35)
+
+    controller.handle_limit_change(
+      "Dashboard", mph(65), "", mph(set_speed),
+      make_sm(gas_pressed=False, v_cruise_kph=set_speed * CV.MPH_TO_KPH),
+    )
+
+    assert controller.target == pytest.approx(mph(65))
+    assert "SLCForceCruiseSpeed" not in controller.starpilot_planner.params_memory.values
   finally:
     controller.shutdown()
 
@@ -981,6 +1029,32 @@ def test_adopt_speed_limit_clears_complete_override_state():
 
     assert controller.overridden_speed == 0
     assert not controller.override_slc
+  finally:
+    controller.shutdown()
+
+
+def test_adopt_speed_limit_exits_manual_without_changing_max():
+  controller = make_controller()
+  try:
+    controller.source = "Dashboard"
+    controller.target = mph(45)
+    controller.previous_source = "Dashboard"
+    controller.previous_target = mph(45)
+    controller.last_valid_limit = mph(45)
+    controller.override_slc = True
+    controller.overridden_speed = mph(55)
+    controller._persistent_override_speed = mph(55)
+    controller._prev_v_cruise = mph(55)
+    controller._slc_adopt_counter = 3
+    controller.starpilot_planner.params_memory.values["SLCAdoptSpeedLimit"] = True
+    sm = make_sm(gas_pressed=False, v_cruise_kph=55 * CV.MPH_TO_KPH)
+
+    controller.update_limits(mph(45), datetime.now(timezone.utc), False, mph(55), mph(50), sm)
+    controller.update_override(mph(55), 0.0, mph(50), 0.0, sm)
+
+    assert controller._persistent_override_speed == 0
+    assert not controller.override_slc
+    assert "SLCForceCruiseSpeed" not in controller.starpilot_planner.params_memory.values
   finally:
     controller.shutdown()
 

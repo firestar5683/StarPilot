@@ -9,7 +9,7 @@ from openpilot.selfdrive.ui.onroad.starpilot.source_bubble_layout import (
 
 
 def test_source_content_metrics_scale_with_visible_row_count():
-  assert source_content_metrics(3) == (30, 34, 7)
+  assert source_content_metrics(3) == (34, 39, 7)
   assert source_content_metrics(4) == (30, 32, 7)
   assert source_content_metrics(5) == (28, 30, 6)
 

@@ -62,6 +62,10 @@ class SpeedLimitWidget(LayoutWidget):
       Params(memory=True).put_bool("SpeedLimitAccepted", True)
       return
 
+    if state.get("slc_overridden_speed", 0.0) > 0.0:
+      Params(memory=True).put_bool("SLCAdoptSpeedLimit", True)
+      return
+
     params = ui_state.ui_params
     current = params.get_bool("SpeedLimitSources")
     params.put_bool("SpeedLimitSources", not current)
