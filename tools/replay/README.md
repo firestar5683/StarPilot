@@ -111,21 +111,53 @@ The C3 and C4 interfaces can be selected with `--c3` and `--c4`:
 
 ### Local comma routes
 
-Routes copied directly from a comma device can use names such as `00000040--d083928baf`, with numbered segment directories:
+Routes copied directly from a comma device can be replayed locally without first downloading the route through a comma account.
+
+On the comma device, recorded segments are stored under:
 
 ```text
-00000040--d083928baf--0/
-00000040--d083928baf--1/
-00000040--d083928baf--2/
+/data/media/0/realdata/
 ```
 
-Replay the route by specifying its parent directory:
+A route is split into numbered segment directories. For example:
+
+```text
+/data/media/0/realdata/00000040--d083928baf--0/
+/data/media/0/realdata/00000040--d083928baf--1/
+/data/media/0/realdata/00000040--d083928baf--2/
+```
+
+A segment can contain files such as:
+
+```text
+rlog.zst
+qlog.zst
+fcamera.hevc
+ecamera.hevc
+dcamera.hevc
+qcamera.ts
+```
+
+With SSH access already enabled on the comma, a complete route can be copied to the desktop with `rsync`:
 
 ```bash
-./onroad --c4 "00000040--d083928baf" --data_dir="/path/to/routes"
+mkdir -p ~/StarPilotRoutes
+
+rsync -av --progress \
+  'comma@<comma-ip>:/data/media/0/realdata/00000040--d083928baf--*' \
+  ~/StarPilotRoutes/
 ```
 
-The desktop replay configuration can load the logged route parameters from this local route format instead of falling back to desktop defaults.
+The copied route can then be replayed by specifying its parent directory:
+
+```bash
+./onroad --c4 "00000040--d083928baf" \
+  --data_dir="$HOME/StarPilotRoutes"
+```
+
+This local comma route format is accepted by replay itself but is not recognized by `SegmentRange`.
+
+The desktop replay configuration therefore includes a local-route fallback that locates `initData` for these routes and restores the logged route parameters instead of silently falling back to desktop defaults.
 
 ### Recording modes
 
