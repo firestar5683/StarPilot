@@ -4,7 +4,7 @@
 <p id="scope" aria-live="polite">Checking control targets…</p>
 <section><button data-field="mode" data-value="engaged">Simulate engage</button><button data-field="mode" data-value="disengaged">Simulate disengage</button><button data-field="mode" data-value="recorded">Recorded engagement</button></section>
 <section><button data-field="signal_mode" data-value="left">Left signal</button><button data-field="signal_mode" data-value="right">Right signal</button><button data-field="signal_mode" data-value="off">Signals off</button><button data-field="signal_mode" data-value="recorded">Recorded signals</button></section>
-<p id="state">Waiting for replay…</p><p id="targets" aria-live="polite">Mac waiting; comma not paired</p><p id="following" aria-live="polite"></p><p id="error"></p><small>No model generation or vehicle control. Galaxy control mirroring does not synchronize video or music.</small>
+<p id="state">Waiting for replay…</p><p id="targets" aria-live="polite">Mac waiting; comma not paired</p><p id="following" aria-live="polite"></p><p id="error"></p><small>Saved Prism music with real-time replay reactions. No vehicle control.</small>
 <script>
 let session;const buttons=[...document.querySelectorAll('button')];
 buttons.forEach(b=>b.onclick=async()=>{try{const r=await fetch('/control',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({session_id:session,[b.dataset.field]:b.dataset.value})});const j=await r.json();if(!r.ok)throw Error(j.error);document.querySelector('#error').textContent=''}catch(e){document.querySelector('#error').textContent=e.message}});
@@ -29,11 +29,11 @@ async function refresh(){
     buttons.forEach(b=>{b.disabled=!j.demo.available;b.classList.toggle('on',j.demo[b.dataset.field]===b.dataset.value)});
     document.querySelector('#state').textContent=j.state+' · '+Math.max(0,j.audio_s||0).toFixed(1)+' s · '+(j.muted?'MUTED':'system audio output');
     const follow=j.paired_controls?.following;
-    document.querySelector('#scope').textContent=follow?.enabled?'Galaxy is master · phone and comma controls are mirrored to this Mac':j.paired_controls?.enabled?'Mac + comma controls enabled · each button requests the same change on both':'Mac-only controls · comma is not paired in this session';
+    document.querySelector('#scope').textContent=follow?.enabled?'Galaxy is master · phone and comma controls are mirrored to this Mac':j.paired_controls?.enabled?'Mac + comma controls enabled · each button requests the same change on both':'Local Mac replay · audio through the Mac';
     const followErrors={peer_session_changed:'Comma replay restarted · reconnect this Mac session',local_session_changed:'Mac replay changed · reconnect this session',peer_route_mismatch:'Comma and Mac routes do not match',peer_route_changed:'Comma route changed · reconnect this Mac session',invalid_peer_route:'Galaxy route identity unavailable',peer_action_in_progress:'Waiting for the Mac request to reach Galaxy',local_replay_unready:'Waiting for the Mac replay',peer_not_ready_for_replay:'Waiting for a fresh comma replay',peer_status_stale:'Galaxy status is stale',peer_timeout:'Galaxy status timed out'};
     document.querySelector('#following').textContent=!follow?.enabled?'':follow.status==='following'?'Mac controls match fresh Galaxy state':follow.status==='applying'?'Applying Galaxy controls on Mac':followErrors[follow.error]||'Galaxy control mirroring paused · status unavailable';
     const local=j.demo.available?j.demo.mode+' / signals '+j.demo.signal_mode:'unready';
-    document.querySelector('#targets').textContent='Mac '+local+'; comma '+commaStatus(j.paired_controls);
+    document.querySelector('#targets').textContent='Mac '+local+(j.paired_controls?.enabled?'; comma '+commaStatus(j.paired_controls):'');
   }catch(e){buttons.forEach(b=>b.disabled=true);document.querySelector('#scope').textContent='Session ended · relaunch the demo, then refresh this page';document.querySelector('#state').textContent='Replay stopped';document.querySelector('#targets').textContent='Mac disconnected; comma status unknown';document.querySelector('#following').textContent=''}
   setTimeout(refresh,150);
 }refresh();
