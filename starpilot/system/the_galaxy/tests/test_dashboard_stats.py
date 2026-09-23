@@ -8,6 +8,8 @@ import pytest
 from pathlib import Path
 from types import ModuleType, SimpleNamespace
 
+from openpilot.starpilot.system.the_galaxy import sentry_backend
+
 
 MODULE_DIR = Path(__file__).resolve().parents[1]
 if str(MODULE_DIR) not in sys.path:
@@ -2135,23 +2137,24 @@ def test_maps_status_returns_known_storage_from_v2_cache(monkeypatch):
 
 def test_sentry_notification_rate_limit_persists_and_expires(monkeypatch, tmp_path):
   server = _load_server_module()
+  sentry_backend._galaxy = vars(server)  # normally set by server.setup(app) -> register_sentry_routes()
   rate_limit_path = tmp_path / "sentry_notification_rate_limit.json"
   now = [1000.0]
-  monkeypatch.setattr(server, "_sentry_notification_rate_limit_path", lambda: rate_limit_path)
-  monkeypatch.setattr(server.time, "time", lambda: now[0])
-  server._SENTRY_NOTIFICATION_LAST_AT = None
+  monkeypatch.setattr(sentry_backend, "_sentry_notification_rate_limit_path", lambda: rate_limit_path)
+  monkeypatch.setattr(sentry_backend.time, "time", lambda: now[0])
+  sentry_backend._SENTRY_NOTIFICATION_LAST_AT = None
   event = {"eventId": "event-1"}
 
-  assert server._claim_sentry_notification_slot(event) is True
+  assert sentry_backend._claim_sentry_notification_slot(event) is True
   assert rate_limit_path.exists()
-  server._SENTRY_NOTIFICATION_LAST_AT = None
-  assert server._claim_sentry_notification_slot({"eventId": "event-2"}) is False
+  sentry_backend._SENTRY_NOTIFICATION_LAST_AT = None
+  assert sentry_backend._claim_sentry_notification_slot({"eventId": "event-2"}) is False
 
-  now[0] += server.SENTRY_NOTIFICATION_RATE_LIMIT_SECONDS - 0.1
-  assert server._claim_sentry_notification_slot({"eventId": "event-3"}) is False
+  now[0] += sentry_backend.SENTRY_NOTIFICATION_RATE_LIMIT_SECONDS - 0.1
+  assert sentry_backend._claim_sentry_notification_slot({"eventId": "event-3"}) is False
 
   now[0] += 0.1
-  assert server._claim_sentry_notification_slot({"eventId": "event-4"}) is True
+  assert sentry_backend._claim_sentry_notification_slot({"eventId": "event-4"}) is True
 
 
 def test_troubleshoot_steer_delay_normalizes_vehicle_delay_for_display():
