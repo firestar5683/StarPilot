@@ -1152,14 +1152,56 @@ def test_gm_stock_truck_positive_i_bleeds_on_coast_request():
   lc = LongControl(CP)
   lc.pid.i = 0.25
   lc.last_output_accel = 0.20
-  CS = car.CarState.new_message(vEgo=20.0, aEgo=0.0, brakePressed=False)
+  CS = car.CarState.new_message(vEgo=20.0, aEgo=0.20, brakePressed=False)
   CS.cruiseState.standstill = False
 
   lc.vehicle_tuning.trim_gm_truck_positive_hold_integrator(
-    lc.pid, lc.last_output_accel, -0.02, -0.02, CS,
+    lc.pid, lc.last_output_accel, -0.02, -0.22, CS,
   )
 
   assert lc.pid.i < 0.25
+
+
+def test_gm_stock_truck_positive_i_holds_speed_on_coast_request():
+  CP = make_longcontrol_cp(
+    brand="gm",
+    carFingerprint=CAR.CHEVROLET_SILVERADO,
+    enableGasInterceptorDEPRECATED=False,
+  )
+  lc = LongControl(CP)
+  lc.pid.i = 0.25
+  lc.last_output_accel = 0.20
+  CS = car.CarState.new_message(vEgo=30.0, aEgo=0.0, brakePressed=False)
+
+  for _ in range(100):
+    lc.vehicle_tuning.trim_gm_truck_positive_hold_integrator(
+      lc.pid, lc.last_output_accel, -0.02, -0.02, CS,
+    )
+
+  assert lc.pid.i == pytest.approx(0.25, abs=1e-9)
+
+
+def test_gm_stock_truck_positive_i_bleeds_gradually_on_decel_request():
+  CP = make_longcontrol_cp(
+    brand="gm",
+    carFingerprint=CAR.CHEVROLET_SILVERADO,
+    enableGasInterceptorDEPRECATED=False,
+  )
+  lc = LongControl(CP)
+  lc.pid.i = 0.25
+  lc.last_output_accel = 0.20
+  CS = car.CarState.new_message(vEgo=30.0, aEgo=0.0, brakePressed=False)
+
+  lc.vehicle_tuning.trim_gm_truck_positive_hold_integrator(
+    lc.pid, lc.last_output_accel, -0.30, -0.30, CS,
+  )
+  assert 0.23 < lc.pid.i < 0.25
+
+  for _ in range(99):
+    lc.vehicle_tuning.trim_gm_truck_positive_hold_integrator(
+      lc.pid, lc.last_output_accel, -0.30, -0.30, CS,
+    )
+  assert lc.pid.i < 0.01
 
 
 def test_gm_stock_truck_target_filter_smooths_mild_follow_reversals():
@@ -1213,6 +1255,55 @@ def test_gm_stock_truck_target_filter_bypasses_urgent_braking():
   tuning.reset()
   tuning.shape_gm_truck_accel_target(0.25, 20.0, False)
   assert tuning.shape_gm_truck_accel_target(0.10, 20.0, True) == pytest.approx(0.10)
+
+
+def test_gm_stock_truck_target_rises_slowly_above_65_mph():
+  CP = make_longcontrol_cp(
+    brand="gm",
+    carFingerprint=CAR.CHEVROLET_SILVERADO,
+    enableGasInterceptorDEPRECATED=False,
+  )
+  tuning = LongControl(CP).vehicle_tuning
+  tuning.shape_gm_truck_accel_target(0.0, 31.0, False)
+
+  for _ in range(100):
+    shaped = tuning.shape_gm_truck_accel_target(0.50, 31.0, False)
+
+  assert shaped == pytest.approx(0.15, abs=0.01)
+
+
+def test_gm_stock_truck_target_rise_limit_releases_braking_first():
+  CP = make_longcontrol_cp(
+    brand="gm",
+    carFingerprint=CAR.CHEVROLET_SILVERADO,
+    enableGasInterceptorDEPRECATED=False,
+  )
+  tuning = LongControl(CP).vehicle_tuning
+  tuning.shape_gm_truck_accel_target(-0.40, 31.0, False)
+
+  for _ in range(100):
+    shaped = tuning.shape_gm_truck_accel_target(0.50, 31.0, False)
+
+  assert 0.0 < shaped < 0.16
+
+
+def test_gm_stock_truck_target_rise_limit_leaves_low_speed_and_decel_alone():
+  CP = make_longcontrol_cp(
+    brand="gm",
+    carFingerprint=CAR.CHEVROLET_SILVERADO,
+    enableGasInterceptorDEPRECATED=False,
+  )
+  tuning = LongControl(CP).vehicle_tuning
+  tuning.shape_gm_truck_accel_target(0.0, 20.0, False)
+  for _ in range(100):
+    city = tuning.shape_gm_truck_accel_target(0.50, 20.0, False)
+  assert city > 0.49
+
+  tuning.reset()
+  tuning.shape_gm_truck_accel_target(0.30, 31.0, False)
+  decel = tuning.shape_gm_truck_accel_target(-0.10, 31.0, False)
+  expected = 0.30 + vehicle_tunes.DT_CTRL / (vehicle_tunes.GM_TRUCK_TARGET_FILTER_DOWN_TAU + vehicle_tunes.DT_CTRL) * (-0.40)
+  assert decel == pytest.approx(expected)
 
 
 def test_gm_stock_truck_target_filter_bypasses_low_speed_and_other_cars():
@@ -1413,7 +1504,7 @@ def test_toyota_sienna_target_filter_does_not_change_other_vehicles():
   assert tuning.shape_toyota_sienna_accel_target(-0.20, 20.0, False) == pytest.approx(-0.20)
 
 
-def test_gm_stock_truck_positive_i_bleeds_during_light_highway_accel_request():
+def test_gm_stock_truck_positive_i_bleeds_when_overshooting_light_highway_accel_request():
   CP = car.CarParams.new_message()
   CP.brand = "gm"
   CP.carFingerprint = "CHEVROLET_SILVERADO"
@@ -1426,14 +1517,54 @@ def test_gm_stock_truck_positive_i_bleeds_during_light_highway_accel_request():
   lc = LongControl(CP)
   lc.pid.i = 0.25
   lc.last_output_accel = 0.20
-  CS = car.CarState.new_message(vEgo=20.0, aEgo=0.0, brakePressed=False)
+  CS = car.CarState.new_message(vEgo=20.0, aEgo=0.20, brakePressed=False)
   CS.cruiseState.standstill = False
 
   lc.vehicle_tuning.trim_gm_truck_positive_hold_integrator(
-    lc.pid, lc.last_output_accel, 0.05, 0.05, CS,
+    lc.pid, lc.last_output_accel, 0.05, -0.15, CS,
   )
 
   assert lc.pid.i < 0.25
+
+
+def test_gm_stock_truck_positive_i_holds_during_light_highway_accel_request():
+  CP = make_longcontrol_cp(
+    brand="gm",
+    carFingerprint=CAR.CHEVROLET_SILVERADO,
+    enableGasInterceptorDEPRECATED=False,
+  )
+  lc = LongControl(CP)
+  lc.pid.i = 0.25
+  lc.last_output_accel = 0.30
+  CS = car.CarState.new_message(vEgo=30.0, aEgo=0.02, brakePressed=False)
+
+  for _ in range(100):
+    lc.vehicle_tuning.trim_gm_truck_positive_hold_integrator(
+      lc.pid, lc.last_output_accel, 0.05, 0.03, CS,
+    )
+
+  assert lc.pid.i == pytest.approx(0.25, abs=1e-9)
+
+
+def test_gm_stock_truck_cruise_keeps_integrator_near_light_target():
+  CP = make_longcontrol_cp(
+    brand="gm",
+    carFingerprint=CAR.CHEVROLET_SILVERADO,
+    enableGasInterceptorDEPRECATED=False,
+  )
+  CP.longitudinalTuning.kiV = [0.1]
+  lc = LongControl(CP)
+  lc.long_control_state = LongCtrlState.pid
+  lc.pid.i = 0.20
+  lc.last_output_accel = 0.28
+  CS = car.CarState.new_message(vEgo=30.0, aEgo=0.0, brakePressed=False)
+  CS.cruiseState.standstill = False
+
+  for a_target in (0.12, 0.09, 0.06, 0.09, 0.12) * 40:
+    lc.update(active=True, CS=CS, a_target=a_target, should_stop=False,
+              accel_limits=(-3.5, 2.0), starpilot_toggles=make_toggles())
+
+  assert lc.pid.i > 0.20
 
 
 def test_gm_stock_truck_positive_i_trim_keeps_meaningful_accel_request():
