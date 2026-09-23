@@ -142,3 +142,33 @@ def test_ready_file_alone_does_not_claim_live_playback(tmp_path):
     assert owned.health()['app_ready']
     (current/'status.json').write_text(json.dumps({'route':'live','command_wall':owned.clock()-3,'elapsed':1}))
     assert not owned.health()['app_ready']
+
+
+def test_auto_play_starts_audibly_only_after_accepted_buffer(engine):
+    engine.owned.app_started=10.
+    engine.owned.health.return_value['accepted_ready']=False
+    engine.command({'command':'enable','auto_play':True})
+    engine.tick()
+    engine.owned.start_app.assert_not_called()
+    engine.owned.health.return_value['accepted_ready']=True
+    engine.tick()
+    engine.owned.start_app.assert_called_once_with(engine.supervisor.session_id,audible=True)
+    assert engine.supervisor.state=='STARTING'
+    engine.owned.health.return_value['app_ready']=True
+    engine.tick()
+    assert engine.supervisor.state=='LIVE'
+
+
+def test_auto_play_does_not_bypass_parked_health(engine):
+    engine.command({'command':'enable','auto_play':True})
+    engine.collector.observation=replace(GOOD,parked=False)
+    engine.tick()
+    engine.owned.start_app.assert_not_called()
+    assert not engine.supervisor.enabled
+
+
+def test_diagnostic_ignores_auto_play_request(engine):
+    engine.command({'command':'diagnostic','auto_play':True})
+    engine.tick()
+    engine.owned.start_app.assert_not_called()
+    assert engine.supervisor.state=='READY'

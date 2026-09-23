@@ -127,36 +127,18 @@ export const RoadScore = {
   template: `
     <div class="gx-view">
       <h2 style="margin-top:0"><i class="bi bi-music-note-beamed"></i> RoadScore</h2>
-      <p style="color:var(--text-muted)">Music shaped by the road.</p>
+      <p style="color:var(--text-muted)">Music shaped by the road. Plays through the system’s default audio output.</p>
       <GalaxySection title="Live music" icon="bi-music-note-beamed" :collapsible="false"><div style="padding:16px">
         <div class="gx-row"><div><strong>RoadScore</strong><div class="gx-row__desc">{{ status.live?.state || 'UNAVAILABLE' }}</div></div>
           <label class="gx-switch"><input type="checkbox" aria-label="Enable live RoadScore" :checked="status.live?.enabled === true" :disabled="!status.live?.available || (!status.live?.enabled && (!status.live?.can_enable || liveStarting))" @change="setLive($event.target.checked, $event)"><span class="gx-switch__track"></span><span class="gx-switch__thumb"></span></label>
         </div>
-        <p class="gx-row__desc">{{status.live?.reason || 'Live driving readiness has not been confirmed.'}}</p>
+        <p class="gx-row__desc">{{status.live?.reason || (status.live?.state === 'LIVE' ? 'Music is reacting to live road signals.' : status.live?.can_enable ? 'Ready to enable.' : 'Live readiness has not been confirmed.')}}</p>
         <button class="gx-btn" @click="setLive(false)">Stop RoadScore</button>
-      </div></GalaxySection>
-      <GalaxySection title="Replay simulation" icon="bi-play-circle" :collapsible="false"><div style="padding:16px">
-        <p class="gx-row__desc">Replay simulation changes displayed engagement, turn signals and music. It does not engage or control the vehicle.</p>
-        <p><strong>{{status.demo?.available ? (status.demo.mode === 'engaged' ? 'Simulated engage' : status.demo.mode === 'disengaged' ? 'Simulated disengage' : 'Using recorded engagement') : 'Replay unavailable'}}</strong></p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="gx-btn" :disabled="busy || !status.demo?.available" @click="action('demo_engagement', {session_id:status.demo.session_id, mode:'engaged'})">Simulate engage</button>
-          <button class="gx-btn" :disabled="busy || !status.demo?.available" @click="action('demo_engagement', {session_id:status.demo.session_id, mode:'disengaged'})">Simulate disengage</button>
-          <button class="gx-btn" :disabled="busy || !status.demo?.available" @click="action('demo_engagement', {session_id:status.demo.session_id, mode:'recorded'})">Recorded engagement</button>
-        </div>
-        <p><strong>{{status.demo?.signal_mode === 'recorded' ? 'Using recorded signals' : 'Simulated signals: ' + (status.demo?.signal_mode || 'recorded')}}</strong></p>
-        <div style="display:flex;gap:8px;flex-wrap:wrap">
-          <button class="gx-btn" :disabled="busy || !status.demo?.available" @click="action('demo_signal', {session_id:status.demo.session_id, signal_mode:'left'})">Left signal</button>
-          <button class="gx-btn" :disabled="busy || !status.demo?.available" @click="action('demo_signal', {session_id:status.demo.session_id, signal_mode:'right'})">Right signal</button>
-          <button class="gx-btn" :disabled="busy || !status.demo?.available" @click="action('demo_signal', {session_id:status.demo.session_id, signal_mode:'off'})">Signals off</button>
-          <button class="gx-btn" :disabled="busy || !status.demo?.available" @click="action('demo_signal', {session_id:status.demo.session_id, signal_mode:'recorded'})">Use recorded signals</button>
-        </div>
-        <p v-if="!status.demo?.available" class="gx-row__desc">{{status.demo?.reason}}</p>
       </div></GalaxySection>
       <GalaxySection title="Composer" icon="bi-music-note-beamed" :collapsible="false"><div style="padding:16px">
         <div class="gx-row"><div><strong>{{ status.state || 'UNAVAILABLE' }}</strong><div class="gx-row__desc">{{ status.composer ? status.composer.toUpperCase() : 'Composer not connected' }}{{ status.backend ? ' · ' + status.backend : '' }}{{ status.composer && status.profile ? ' · ' + status.profile.toUpperCase() : '' }}</div></div></div>
-        <div class="gx-row"><label for="roadscore-style">Next style</label><select class="gx-field" id="roadscore-style" v-model="profile" :disabled="busy || !status.can_edit" @change="action('settings', {profile})"><option v-for="p in status.profiles || []" :value="p.id">{{p.name}}</option></select></div>
-        <button class="gx-btn" :disabled="busy || !status.can_prepare" @click="action('prepare')">{{status.preparing ? 'Preparing…' : 'Prepare composer'}}</button>
-        <p class="gx-row__desc">{{ status.locked ? 'Controls unlock when the output service confirms playback and judging are idle.' : 'Use the normal RoadScore launcher to prepare or change styles.' }}</p>
+        <div class="gx-row"><label for="roadscore-style">Style</label><select class="gx-field" id="roadscore-style" v-model="profile" :disabled="busy || !status.can_edit" @change="action('settings', {profile})"><option v-for="p in status.profiles || []" :value="p.id">{{p.name}}</option></select></div>
+        <p class="gx-row__desc">Choose a style before enabling. RoadScore prepares and starts automatically when ready; stop it before changing styles.</p>
       </div></GalaxySection>
       <GalaxySection title="Audio output" icon="bi-speaker" :collapsible="false"><div style="padding:16px">
         <div class="gx-row"><strong>{{status.output?.name || 'Output unavailable'}}</strong><span>{{status.output?.connected ? 'Connected' : 'Not verified'}}</span></div>

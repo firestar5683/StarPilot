@@ -221,14 +221,15 @@ class Operator:
     if not offroad:demo.update(available=False,reason='Replay simulation requires the vehicle to be offroad.')
     prepared_demo = demo['available'] and demo.get('compute') == 'prepared-core'
     if prepared_demo and demo.get('readiness') in STATES:state = demo['readiness']
-    return dict(available=self.device and self.root.exists(), state=state, profiles=PROFILES, live=self.live_status(), demo=demo,
+    live_status=self.live_status()
+    return dict(available=self.device and self.root.exists(), state=state, profiles=PROFILES, live=live_status, demo=demo,
                 profile=worker.get('profile') if live else settings.get('profile', 'prism'),
                 selected_profile=settings.get('profile', 'prism'),
                 composer='ace' if live or prepared_demo else None, backend='Prepared local audio' if prepared_demo else 'Chestnut' if live else None,
                 generation_seed=worker.get('generation_seed') if live else None,
                 offroad=bool(offroad), locked=bool(locked), preparing=self.preparing,
                 can_prepare=False,
-                can_edit=False, can_calibrate=offroad and not locked and output.get('calibration', False),
+                can_edit=bool((offroad or live_status.get('parked') is True) and live_status.get('enabled') is False), can_calibrate=offroad and not locked and output.get('calibration', False),
                 can_adjust=offroad and not locked and not output.get('calibrating', False) and output.get('timing_compensation', False),
                 calibrating=output.get('calibrating', False), session_muted=output.get('session_muted', True), output=output.get('output'), latency_ms=output.get('latency_ms'), error=self.error or output.get('error'))
 
@@ -253,6 +254,17 @@ class Operator:
         if status.get('available') is not True or status.get('can_enable') is not True:
           raise ValueError(status.get('reason') or 'Live driving readiness has not been confirmed')
       return controller.set_enabled(data['enabled'])
+    if action == 'settings' and isinstance(data,dict) and set(data) == {'profile'}:
+      data=validate_settings(data)
+      with self.lock:
+        live_status=self.live_status()
+        if (not offroad and live_status.get('parked') is not True) or live_status.get('enabled') is not False:
+          raise ValueError('Stop RoadScore and park before changing style')
+        path=self.root/'generated/operator_settings.json'
+        previous=read_json(path);previous.update(data)
+        path.parent.mkdir(parents=True,exist_ok=True)
+        temporary=path.with_suffix('.tmp');temporary.write_text(json.dumps(previous));temporary.replace(path)
+      return {'ok':True}
     if not offroad and action != 'calibration_cancel':
       raise ValueError('RoadScore controls are available while parked')
     with self.lock:

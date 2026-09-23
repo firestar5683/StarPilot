@@ -62,7 +62,7 @@ class TargetAdapter:
             return self.collector.collect()
 
     def enable(self,observation=None,authorization=None):
-        self._ensure();return self._call('enable')
+        self._ensure();return self._call('enable',auto_play=True)
 
     def prepare_diagnostic(self):
         self._ensure();return self._call('diagnostic')

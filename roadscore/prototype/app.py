@@ -33,7 +33,7 @@ run=root/'results/current';run.mkdir(parents=True,exist_ok=True)
 presentation_session_id=f'{os.getpid()}-{time.monotonic_ns()}'
 demo_engagement=DemoEngagement(run,presentation_session_id,a.input)
 output_metadata={'bluetooth_selected':False,'muted':a.mute}
-if Path('/TICI').exists() and not a.mute and os.environ.get('ROADSCORE_PCM_RETURN')!='1':
+if Path('/TICI').exists() and not a.mute and os.environ.get('ROADSCORE_PCM_RETURN')!='1' and os.environ.get('ROADSCORE_OUTPUT_POLICY')!='system-default':
  from bluetooth_output import prepare_output
  output_metadata.update(prepare_output(run))
 import sounddevice as sd

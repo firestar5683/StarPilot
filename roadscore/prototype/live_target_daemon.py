@@ -18,7 +18,7 @@ from live_owned_processes import OwnedLiveProcesses
 class Engine:
     def __init__(self,root,collector,owned=None,*,clock=time.monotonic):
         self.root=Path(root);self.collector=collector;self.owned=owned or OwnedLiveProcesses(root)
-        self.clock=clock;self.diagnostic=False;self.audible=False;self.stop_event=threading.Event();self.commands=queue.Queue()
+        self.clock=clock;self.auto_play=False;self.diagnostic=False;self.audible=False;self.stop_event=threading.Event();self.commands=queue.Queue()
         self.owned.cancel_check=self.stop_event.is_set
         self.supervisor=LiveSupervisor(self._prepare,self._app,self.owned.stop_owned,clock=clock)
         self.observation=None;self.authorization=None;self.health_error='No live observations yet';self.started=None;self.last_recorded=0.;self.diagnostic_ready_at=None
@@ -43,6 +43,7 @@ class Engine:
 
     def status(self):
         return {**self.supervisor.status(),'available':True,'diagnostic':self.diagnostic,'health_error':self.health_error,
+                'parked':bool(self.observation is not None and self.observation.parked and 0<=self.clock()-self.observation.monotonic<=1.),
                 'can_prepare_diagnostic':not self.supervisor.enabled and self.diagnostic_ok(),
                 'metrics':self.collector.last_snapshot}
 
@@ -56,6 +57,7 @@ class Engine:
         if action not in ('enable','diagnostic','driver_ready'):raise ValueError('Unknown live action')
         if self.stop_event.is_set():raise RuntimeError('Owned live processes are stopping')
         self.refresh()
+        if action=='enable' and type(payload.get('auto_play',False)) is not bool:raise ValueError('auto_play must be boolean')
         if action=='driver_ready':
             if type(payload.get('audible',False)) is not bool:raise ValueError('audible must be boolean')
             if self.diagnostic:raise RuntimeError('Diagnostic preparation cannot start playback or authorize driving')
@@ -65,12 +67,13 @@ class Engine:
             if action=='enable' and self.diagnostic and self.supervisor.state=='READY':
                 reason=blocked_reason(self.observation,self.authorization,self.clock(),require_parked=True)
                 if reason:raise RuntimeError(reason)
-                self.diagnostic=False;self.owned.diagnostic=False;self.supervisor.reason='Verified live preparation; explicit current driver-ready confirmation required'
+                self.auto_play=payload.get('auto_play',False);self.audible=self.auto_play
+                self.diagnostic=False;self.owned.diagnostic=False;self.supervisor.reason=('Starting prepared music' if self.auto_play else 'Verified live preparation; explicit current driver-ready confirmation required')
                 if getattr(self.owned,'folder',None) is not None:
                     (self.owned.folder/'production_authorization.json').write_text(json.dumps({'wall':time.time(),'session_id':self.supervisor.session_id,'authorization':asdict(self.authorization)}))
                 return self.status()
             raise RuntimeError('A live session already exists; stop it before changing mode')
-        self.diagnostic=action=='diagnostic';self.audible=False;self.diagnostic_ready_at=None
+        self.diagnostic=action=='diagnostic';self.auto_play=action=='enable' and payload.get('auto_play',False);self.audible=self.auto_play;self.diagnostic_ready_at=None
         if self.diagnostic:
             if not self.diagnostic_ok():raise RuntimeError('Fresh healthy parked diagnostic preflight is required')
             # This authorizes only muted worker preparation, not production capability.
@@ -106,6 +109,8 @@ class Engine:
             if self.supervisor.state=='LIVE' and not health['app_ready']:
                 self.supervisor.stop('Live app status is stale or playback has stopped');return
             self.supervisor.tick(self.observation,self.authorization,**health)
+            if self.auto_play and self.supervisor.state=='READY' and not self.stop_event.is_set():
+                self.supervisor.confirm_driver_ready(self.supervisor.session_id,self.observation,self.authorization)
             if self.supervisor.state=='STARTING' and self.clock()-getattr(self.owned,'app_started',self.clock())>30:
                 self.supervisor.stop('Live app failed to establish current input/playback readiness')
         if self.started is not None and self.clock()-self.started>1500 and self.supervisor.state=='PREPARING':

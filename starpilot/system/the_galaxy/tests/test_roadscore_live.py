@@ -18,6 +18,17 @@ class LiveTests(unittest.TestCase):
     self.operator.live_owner = self.controller
     self.operator.target = Mock(side_effect=AssertionError('Bench/output owner must not be controlled'))
 
+  def test_style_persists_without_output_or_bench_actions(self):
+    self.operator.operate('settings', {'profile':'aurora'}, True)
+    settings=module.read_json(Path(self.folder.name)/'generated/operator_settings.json')
+    self.assertEqual(settings['profile'],'aurora')
+    self.operator.target.assert_not_called()
+    self.controller.status.return_value['enabled']=True
+    with self.assertRaises(ValueError):self.operator.operate('settings', {'profile':'prism'}, True)
+
+  def test_unimplemented_style_is_rejected(self):
+    with self.assertRaises(ValueError):self.operator.operate('settings', {'profile':'fake'}, True)
+
   def test_off_is_allowed_onroad_without_authorization_or_status(self):
     self.controller.status.side_effect = RuntimeError('Health snapshot unavailable')
     self.controller.set_enabled.return_value = {'enabled': False, 'state': 'STOPPING'}

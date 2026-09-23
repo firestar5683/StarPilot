@@ -33,9 +33,9 @@ class OwnedLiveProcesses:
             with (generated/'gpu.lock').open('a') as check:
                 fcntl.flock(check,fcntl.LOCK_EX|fcntl.LOCK_NB)
             config=read(generated/'live_config.json')
-            profile=config.get('profile','prism')
+            profile=read(generated/'operator_settings.json').get('profile',config.get('profile','prism'))
             if profile not in ('prism','aurora'):raise ValueError('Unsupported live profile')
-            bank=Path(config.get('plan_bank','/data/roadscore-event-assets/conditioning/current'))
+            bank=Path(config.get('plan_banks',{}).get(profile,config.get('plan_bank','/data/roadscore-event-assets/conditioning/current')))
             from cached_composition import validate_bank,digest
             validate_bank(bank,profile=profile)
             self.bank_hash=digest(bank/'bank.json')
@@ -85,6 +85,7 @@ class OwnedLiveProcesses:
         env=self.env.copy();env['ROADSCORE_FORCE_MUTE']='0' if audible else '1'
         env['PYTHONPATH']=':'.join(['/data/openpilot',str(self.root/'prototype'),'/data/roadscore-feasibility/venv/lib/python3.12/site-packages'])
         env['ROADSCORE_LIVE_SESSION_ID']=session_id
+        env['ROADSCORE_OUTPUT_POLICY']='system-default'
         log=(self.folder/'app.log').open('ab');self.logs.append(log)
         self.app_started=self.clock()
         self.app=self.popen(['/usr/local/venv/bin/python','-u',str(self.root/'prototype/app.py'),'--root',str(self.root),'--input','live']+(['--audible'] if audible else []),cwd='/data/openpilot',env=env,stdout=log,stderr=log,stdin=subprocess.DEVNULL,start_new_session=True)
