@@ -170,8 +170,10 @@ class StarPilotLateralLayout(_SettingsPage):
       SettingRow(
         "MinimumLaneChangeSpeed", "value", tr_noop("Min Lane Change Speed"),
         subtitle=tr_noop("Lowest speed at which openpilot will change lanes."),
-        get_value=lambda: f"{p.get_int('MinimumLaneChangeSpeed')} mph",
-        on_click=lambda: self._show_slider("MinimumLaneChangeSpeed", 0, 100, unit=" mph"),
+        get_value=lambda: f"{p.get_int('MinimumLaneChangeSpeed')} {'km/h' if p.get_bool('IsMetric') else 'mph'}",
+        on_click=lambda: self._show_slider(
+          "MinimumLaneChangeSpeed", 0, 150 if p.get_bool("IsMetric") else 99, unit=" km/h" if p.get_bool("IsMetric") else " mph",
+        ),
         visible=lc_on,
       ),
       SettingRow(
