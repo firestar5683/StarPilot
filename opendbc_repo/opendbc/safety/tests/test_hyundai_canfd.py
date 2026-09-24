@@ -14,7 +14,7 @@ from opendbc.car.vehicle_model import VehicleModel
 from opendbc.safety import ALTERNATIVE_EXPERIENCE
 from opendbc.safety.tests.libsafety import libsafety_py
 import opendbc.safety.tests.common as common
-from opendbc.safety.tests.common import CANPackerSafety, away_round, round_speed
+from opendbc.safety.tests.common import CANPackerSafety
 from opendbc.safety.tests.hyundai_common import Buttons, HyundaiAolLkasOnEngageBase, HyundaiAolLkasOnEngageStockBase, HyundaiButtonBase, \
                                                   HyundaiLongitudinalBase
 
@@ -295,37 +295,43 @@ class TestHyundaiCanfdAngleSteering(HyundaiButtonBase, common.CarSafetyTest):
           self.assertEqual(controls_allowed, self._tx(self._angle_cmd_msg(angle_cmd, True)))
           self.assertEqual(angle_cmd == angle_meas, self._tx(self._angle_cmd_msg(angle_cmd, False)))
 
+  def _set_physical_angle_test_speed(self, speed_mps):
+    # _speed_msg and common safety tests use raw 1/32 km/h ticks.
+    self._reset_speed_measurement(round(speed_mps * 3.6 / 0.03125))
+    measured = self.safety.get_vehicle_speed_min()
+    self.assertAlmostEqual(measured, speed_mps, delta=0.02)
+    return max(measured - 1.0, 1.0)
+
   def test_lateral_accel_limit(self):
     limits = self._baseline_limits()
     vm = self._get_vm(self.BASELINE_CAR)
-
-    for speed in np.linspace(0, 40, 40):
-      speed = round_speed(away_round(speed / 0.03125 * 3.6) * 0.03125 / 3.6)
-      speed = max(speed, 1)
-      self.safety.set_controls_allowed(True)
-      self._reset_speed_measurement(max(speed + 1, self.STANDSTILL_THRESHOLD + 1))
-
-      max_angle = round(get_max_angle_vm(speed, vm, limits), 1)
-      max_angle = float(np.clip(max_angle, -self.STEER_ANGLE_MAX, self.STEER_ANGLE_MAX))
-      self.safety.set_desired_angle_last(round(max_angle * self.DEG_TO_CAN))
-      self.assertTrue(self._tx(self._angle_cmd_msg(max_angle, True)))
+    for physical_speed in np.linspace(2, 41, 40):
+      speed = self._set_physical_angle_test_speed(physical_speed)
+      max_ticks = int(get_max_angle_vm(speed, vm, limits) * self.DEG_TO_CAN + 1)
+      for sign in (-1, 1):
+        self.safety.set_controls_allowed(True)
+        allowed = min(max_ticks, int(self.STEER_ANGLE_MAX * self.DEG_TO_CAN)) * sign
+        self.safety.set_desired_angle_last(allowed)
+        self.assertTrue(self._tx(self._angle_cmd_msg(allowed / self.DEG_TO_CAN, True)))
+        if max_ticks < self.STEER_ANGLE_MAX * self.DEG_TO_CAN:
+          rejected = (max_ticks + 1) * sign
+          self.safety.set_desired_angle_last(rejected)
+          self.assertFalse(self._tx(self._angle_cmd_msg(rejected / self.DEG_TO_CAN, True)))
 
   def test_lateral_jerk_limit(self):
     limits = self._baseline_limits()
     vm = self._get_vm(self.BASELINE_CAR)
-
-    for speed in np.linspace(0, 40, 40):
-      speed = round_speed(away_round(speed / 0.03125 * 3.6) * 0.03125 / 3.6)
-      speed = max(speed, 1)
-      self.safety.set_controls_allowed(True)
-      self._reset_speed_measurement(max(speed + 1, self.STANDSTILL_THRESHOLD + 1))
-      self.assertTrue(self._tx(self._angle_cmd_msg(0, True)))
-
-      max_delta = round(get_max_angle_delta_vm(speed, vm, limits), 1)
-      self.assertTrue(self._tx(self._angle_cmd_msg(max_delta, True)))
-      self.safety.set_desired_angle_last(round(max_delta * self.DEG_TO_CAN))
-      self.assertTrue(self._tx(self._angle_cmd_msg(max_delta, True)))
-      self.assertTrue(self._tx(self._angle_cmd_msg(0, True)))
+    for physical_speed in np.linspace(2, 41, 40):
+      speed = self._set_physical_angle_test_speed(physical_speed)
+      max_ticks = int(get_max_angle_delta_vm(speed, vm, limits) * self.DEG_TO_CAN + 1)
+      for sign in (-1, 1):
+        self.safety.set_controls_allowed(True)
+        self.safety.set_desired_angle_last(0)
+        self.assertTrue(self._tx(self._angle_cmd_msg(max_ticks * sign / self.DEG_TO_CAN, True)))
+        self.safety.set_desired_angle_last(0)
+        self.assertFalse(self._tx(self._angle_cmd_msg((max_ticks + 1) * sign / self.DEG_TO_CAN, True)))
+        self.safety.set_desired_angle_last(max_ticks * sign)
+        self.assertTrue(self._tx(self._angle_cmd_msg(0, True)))
 
   def test_rt_limits(self):
     self._reset_speed_measurement(self.STANDSTILL_THRESHOLD + 1)
