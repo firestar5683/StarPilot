@@ -15,6 +15,8 @@ HOST_LOCK_PID_FILE=""
 HOST_LOCK_CMD_FILE=""
 HOST_LOCK_HELD=0
 HOST_BUCKETS=(shared cabana)
+GALAXY_REL_DIR="starpilot/system/the_galaxy"
+GALAXY_LIVE_PID_FILE="${HOST_PLATFORM_ROOT}/galaxy_live.pid"
 
 usage() {
   cat <<'EOF'
@@ -27,6 +29,7 @@ Commands:
   c3           Launch the large raylib UI from the isolated host cache.
   c4           Launch the small raylib UI from the isolated host cache.
   galaxy       Launch the local Galaxy web UI from the isolated host cache.
+               Add --live to serve your working tree with reload. See ./dev galaxy --help.
   onroad       Launch replay plus desktop UI(s) from the isolated host cache.
   replay       Build and run replay from the isolated host cache.
   cabana       Build and run cabana from the isolated host cache.
@@ -46,6 +49,8 @@ Notes:
   - For c3/c4, pass the jobs count first to preserve existing shorthand:
       ./dev c3 8
   - `./onroad --c3 f08912a233c1584f/2022-08-11--18-02-41/1` launches replay plus the selected desktop UI.
+  - `./dev galaxy --live` builds the host runtime if needed, then serves Galaxy with
+    live reload on http://127.0.0.1:8083/ without holding the shared host lock.
   - `./dev sync` refreshes all host buckets. Use `./dev sync cabana` to sync one.
 EOF
 }
@@ -303,11 +308,41 @@ sync_host_generated_headers() {
   )
 }
 
+galaxy_live_pid() {
+  local pid=""
+
+  if [[ ! -f "${GALAXY_LIVE_PID_FILE}" ]]; then
+    return 1
+  fi
+
+  pid="$(<"${GALAXY_LIVE_PID_FILE}")"
+  if [[ ! "${pid}" =~ ^[0-9]+$ ]]; then
+    return 1
+  fi
+
+  kill -0 "${pid}" 2>/dev/null || return 1
+  printf '%s\n' "${pid}"
+}
+
+galaxy_live_is_active() {
+  galaxy_live_pid >/dev/null
+}
+
 sync_worktree() {
   ensure_venv
 
   mkdir -p "${HOST_ROOT}"
   rm -rf "${WORK_DIR}/starpilot/system/the_pond"
+
+  # `galaxy_live.sh` points this path at the working tree so edits are served live.
+  # rsync --delete would replace that symlink with a real directory and silently end
+  # the live session, so remember it here and restore it once the sync is done. Only do
+  # this while a live server is actually running (its pidfile is alive); otherwise the
+  # link is leftover state and we want rsync to turn it back into a real directory.
+  local galaxy_live_link=0
+  if [[ -L "${WORK_DIR}/${GALAXY_REL_DIR}" ]] && galaxy_live_is_active; then
+    galaxy_live_link=1
+  fi
 
   local excludes=(
     ".git/"
@@ -388,6 +423,10 @@ sync_worktree() {
   rm -f "${WORK_DIR}/third_party/libjson11.a" "${WORK_DIR}/third_party/libkaitai.a"
   sync_host_generated_headers
   ensure_host_python_tools
+  if (( galaxy_live_link )); then
+    rm -rf "${WORK_DIR}/${GALAXY_REL_DIR}"
+    ln -s "${ROOT_DIR}/${GALAXY_REL_DIR}" "${WORK_DIR}/${GALAXY_REL_DIR}"
+  fi
   rm -rf "${WORK_DIR}/.venv"
   ln -s "${HOST_VENV}" "${WORK_DIR}/.venv"
 }
@@ -507,9 +546,113 @@ raise SystemExit("Unable to find a free local Galaxy port.")
 PY
 }
 
-launch_galaxy() {
+prepare_galaxy_runtime() {
   sync_worktree
   ensure_host_python_extensions
+}
+
+galaxy_usage() {
+  cat <<'EOF'
+Usage:
+  ./dev galaxy                 Serve Galaxy from the isolated host cache (snapshot, no reload).
+  ./dev galaxy --live [port]   Serve Galaxy with live reload on your working tree (default 8083).
+  ./dev galaxy --prepare       Build the host runtime only, then exit.
+
+Notes:
+  - `--live` symlinks starpilot/system/the_galaxy into the host cache, so backend edits
+    restart in place and frontend edits need only a hard refresh.
+  - `--live` releases the shared host-runtime lock before serving, so ./c3, ./c4 and
+    ./onroad still work in another terminal while Galaxy is up.
+  - Only one live session runs at a time, and the snapshot `./dev galaxy` refuses to
+    start while one is active, since it would otherwise serve the live working tree.
+EOF
+}
+
+launch_galaxy() {
+  case "${1:-}" in
+    --live)
+      shift || true
+      local want_sync=0
+      local port_arg=""
+      local arg=""
+      for arg in "$@"; do
+        case "${arg}" in
+          --sync)
+            want_sync=1
+            ;;
+          *)
+            if [[ "${arg}" =~ ^[0-9]+$ ]]; then
+              if [[ -z "${port_arg}" ]]; then
+                port_arg="${arg}"
+              else
+                echo "Ignoring extra galaxy port argument: ${arg}" >&2
+              fi
+            else
+              echo "Ignoring unrecognized argument for galaxy --live: ${arg}" >&2
+            fi
+            ;;
+        esac
+      done
+      # Check the live marker before the expensive sync/build so an already-running
+      # session refuses immediately instead of doing minutes of work under the lock.
+      local live_pid=""
+      live_pid="$(galaxy_live_pid || true)"
+      if [[ -n "${live_pid}" ]]; then
+        if (( want_sync )); then
+          prepare_galaxy_runtime
+          release_host_lock
+          echo "Live Galaxy already running (pid ${live_pid}); sync complete."
+          return 0
+        fi
+        echo "Live Galaxy already running (pid ${live_pid}). Stop it before starting another." >&2
+        exit 1
+      fi
+      prepare_galaxy_runtime
+      # `exec` replaces this shell, so the EXIT trap that would release the shared
+      # bucket lock never runs. Drop it here or a long-lived dev server blocks
+      # ./c3, ./c4, ./onroad and ./dev replay for its entire lifetime.
+      release_host_lock
+      # prepare_galaxy_runtime already synced and rebuilt, so never forward --sync;
+      # galaxy_live.sh would then sync the runtime a second time.
+      if [[ -n "${port_arg}" ]]; then
+        exec "${ROOT_DIR}/scripts/galaxy_live.sh" "${port_arg}"
+      else
+        exec "${ROOT_DIR}/scripts/galaxy_live.sh"
+      fi
+      ;;
+    --prepare)
+      prepare_galaxy_runtime
+      echo "Host runtime ready. Start Galaxy with: ./dev galaxy --live"
+      return 0
+      ;;
+    -h|--help)
+      galaxy_usage
+      return 0
+      ;;
+    "")
+      ;;
+    *)
+      # Positional args are ignored for muscle memory (./dev c3 8, ./c4 8, ./onroad 8).
+      # A jobs count is accepted silently; anything else warns but still launches, so a
+      # stray argument never turns a working invocation into a hard failure.
+      if [[ ! "${1}" =~ ^[0-9]+$ ]]; then
+        echo "Ignoring unrecognized argument for galaxy: ${1}" >&2
+        echo "Run './dev galaxy --help' for the supported flags." >&2
+      fi
+      ;;
+  esac
+
+  # A running live session owns the symlinked worktree, so a "snapshot" would silently
+  # serve the live tree. Refuse instead of contradicting what snapshot mode promises.
+  local snapshot_live_pid=""
+  snapshot_live_pid="$(galaxy_live_pid || true)"
+  if [[ -n "${snapshot_live_pid}" ]]; then
+    echo "A live Galaxy session is already running (pid ${snapshot_live_pid})." >&2
+    echo "Stop it before running a snapshot." >&2
+    exit 1
+  fi
+
+  prepare_galaxy_runtime
 
   local port
   port="$(pick_free_galaxy_port)"
@@ -627,6 +770,12 @@ main() {
   local bucket=""
   if [[ $# -gt 0 ]]; then
     shift || true
+  fi
+
+  # Subcommand help should never wait on a bucket lock.
+  if [[ "${command}" == "galaxy" && ( "${1:-}" == "-h" || "${1:-}" == "--help" ) ]]; then
+    galaxy_usage
+    exit 0
   fi
 
   case "${command}" in

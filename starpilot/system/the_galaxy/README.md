@@ -107,15 +107,82 @@ To add a new page:
 
 # Running The Galaxy
 
-### Using Docker
+## On your desktop
+
+Galaxy is a Flask app, so previewing it means opening a browser on your own machine.
+Nothing needs to be pushed to a device.
 
 ```bash
-docker build -t the_galaxy .
-docker run -v $(pwd):/app --rm -ti -p 8084:8084 the_galaxy
+./dev galaxy --live
 ```
 
-### Run and debug on comma device (or computer with python)
+That builds the isolated host runtime under `.host_runtime/<platform>/` on first run
+(several minutes -- it compiles `params_pyx`, `transformations`, and the msgq/visionipc
+extensions), then serves <http://127.0.0.1:8083/> with reload enabled. Later runs start
+immediately. `scripts/galaxy_live.sh [--sync] [port]` is the same thing and is fine to
+call directly.
+
+While it is up:
+
+- Backend edits (`the_galaxy.py`, `utilities.py`, ...) restart the server in place, and
+  tracebacks print in the terminal you launched from.
+- Frontend edits (`assets/components/`, `assets/mobile/`, `templates/index.html`) are
+  served straight off disk, but `assets/service-worker.js` will hand you a stale bundle
+  on a plain refresh. Use a hard reload, or keep DevTools open with "Disable cache" on.
+- Only `starpilot/system/the_galaxy/` is live -- it is symlinked into the host runtime.
+  Changes anywhere else (`starpilot/common/`, `system/hardware/`, cereal schemas) need
+  `scripts/galaxy_live.sh --sync` to be copied across.
+- The mobile Vue app under `assets/mobile/` is served from the same port. Use your
+  browser's device emulation rather than a second launcher.
+- Only one live session runs at a time. A second `./dev galaxy --live` (or a direct
+  `scripts/galaxy_live.sh`) refuses to start until the first is stopped, and snapshot
+  `./dev galaxy` also refuses while live is up, since it would otherwise serve the live
+  working tree. When a live session ends, the next host sync drops the symlink, so
+  `./dev galaxy` is a true snapshot again.
+
+### Snapshot instead of live
 
 ```bash
-./start.sh
+./dev galaxy
 ```
+
+Runs the code as of when you started it, with the reloader off, on a free port picked
+from 4600-8022 (`pick_free_galaxy_port()` keeps Galaxy below the range desktop ZMQ
+hashes replay service names into). Use it when you want a stable server that ignores
+whatever you are editing. It refuses to start while a `--live` session is running, so
+stop that first.
+
+### With replayed data
+
+```bash
+./onroad --replay-only --galaxy --demo     # Galaxy only
+./onroad --galaxy <route>                  # Galaxy plus a desktop raylib UI
+```
+
+Starts replay alongside Galaxy so panels that read live streams have something to show.
+It blocks replay's logged `customReserved9` stream so Galaxy owns the Testing Grounds
+publisher, waits on `/api/galaxy/status`, then prints the URL.
+
+`--galaxy` does not replace the UI selection: unless you pass `--replay-only`, a desktop
+raylib UI launches as well, picked from the route's logged device type. Use
+`--replay-only` when you only want the browser.
+
+### Environment variables
+
+| Variable | Default | Notes |
+| --- | --- | --- |
+| `SP_GALAXY_PORT` | `8082` on device, `8083` off | On-device must stay 8082 to match Galaxy FRP routing |
+| `SP_GALAXY_HOST` | `0.0.0.0` | |
+| `SP_GALAXY_DEBUG` | `0` on device, `1` off | Flask debug mode |
+| `SP_GALAXY_RELOAD` | follows `SP_GALAXY_DEBUG` off device, always off on device | The Flask auto-reloader. `./dev galaxy` pins it to `0` for a stable snapshot; `galaxy_live.sh` pins it to `1` |
+| `SP_GALAXY_DIR` | `/data/galaxy` on device, `~/.comma/starpilot/data/galaxy` off | Galaxy's state directory |
+
+### What does not work off-device
+
+These degrade rather than crash, so they are expected, not bugs:
+
+- The driver-camera preview needs `camerad`; without it the endpoint returns nothing.
+- Endpoints backed by `SubMaster`/`sub_sock` (plots, CAN, car state) time out with no
+  publisher. Use `./onroad --galaxy` if you need them populated.
+- `/data/...` paths resolve under `~/.comma/starpilot/` via `Paths.comma_home()`.
+- Car make/model falls back to a mock when no car is fingerprinted.
