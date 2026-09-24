@@ -4407,6 +4407,16 @@ def _build_vehicle_fault_status():
       "items": unavailable_items,
     }
 
+def _get_battery_voltage_text():
+  try:
+    sm = messaging.SubMaster(["peripheralState"], poll="peripheralState")
+    sm.update(600)
+    if not sm.seen["peripheralState"] or not sm.alive["peripheralState"] or not sm.valid["peripheralState"]:
+      return "Unavailable"
+    return f"{sm['peripheralState'].voltage / 1000:.2f} V"
+  except Exception:
+    return "Unavailable"
+
 def _get_starpilot_toggles_snapshot():
   raw_toggles = _safe_params_get_live_raw("StarPilotToggles")
   if not raw_toggles:
@@ -4642,6 +4652,12 @@ def _build_troubleshoot_payload():
       "id": "lan_ip",
       "label": "LAN IP",
       "value": utilities.get_current_lan_ip() or "Unavailable",
+      "resettable": False,
+    },
+    {
+      "id": "battery_voltage",
+      "label": "12V Battery Voltage",
+      "value": _get_battery_voltage_text(),
       "resettable": False,
     },
     *_get_hardware_snapshot_items(),

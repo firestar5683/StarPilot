@@ -14,6 +14,7 @@ def test_registry_sections_are_loggable_supported_and_read_only(monkeypatch):
   monkeypatch.setattr(s, "_build_vehicle_fault_status", lambda: {"summary": "preserved"})
   monkeypatch.setattr(s, "_get_safety_snapshot_text", lambda: "stock safety")
   monkeypatch.setattr(s, "_get_fingerprint_snapshot_text", lambda: "fixture")
+  monkeypatch.setattr(s, "_get_battery_voltage_text", lambda: "12.34 V")
   monkeypatch.setattr(s.utilities, "get_current_lan_ip", lambda: "127.0.0.1")
   monkeypatch.setattr(s, "_safe_params_get", lambda *args, **kwargs: "")
   keys = ["NewSetting", "Secret", "RivianAngle", "TeslaWakeOnCAN", "ControllerActionSlots"]
@@ -29,6 +30,7 @@ def test_registry_sections_are_loggable_supported_and_read_only(monkeypatch):
   result = s._build_troubleshoot_payload()
   assert result["vehicleStatus"]["summary"] == "preserved"
   assert result["snapshot"][0]["value"] == "stock safety"
+  assert {"id": "battery_voltage", "label": "12V Battery Voltage", "value": "12.34 V", "resettable": False} in result["snapshot"]
   sections = result["sections"]
   assert [k for section in sections for k in section["keys"]] == ["ControllerActionSlots", "NewSetting"]
   assert sections[1]["title"] == "Category › Parent menu"
