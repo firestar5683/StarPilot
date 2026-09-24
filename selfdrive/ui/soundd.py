@@ -144,6 +144,7 @@ class Soundd:
     self.bluetooth_params = Params() if self.bluetooth_supported else None
     self.bluetooth_enabled = False
     self.bluetooth_last_check = 0.0
+    self.bluetooth_local_muted = False
 
     self.previous_sound_pack = None
     self.previous_sound_source_signature = None
@@ -257,7 +258,19 @@ class Soundd:
       self.pending_stream_status = status
     samples = self.get_sound_data(frames)
     bluetooth_healthy = self.bluetooth_audio.submit(samples) if self.bluetooth_audio is not None else False
+    self._record_bluetooth_local_mute(bluetooth_healthy)
     data_out[:frames, 0] = 0.0 if bluetooth_healthy else samples
+
+  def _record_bluetooth_local_mute(self, muted: bool) -> None:
+    if muted == self.bluetooth_local_muted:
+      return
+    self.bluetooth_local_muted = muted
+    if muted:
+      cloudlog.warning("soundd: muting local speaker; bluetooth sink healthy")
+    else:
+      cloudlog.warning("soundd: restoring local speaker; bluetooth sink not healthy")
+    if self.bluetooth_params is not None:
+      self.bluetooth_params.put_bool("BluetoothAudioLocalMuted", muted)
 
   def update_bluetooth_audio(self) -> None:
     if not self.bluetooth_supported or time.monotonic() - self.bluetooth_last_check < 1.0:
