@@ -133,6 +133,7 @@ class Label(Widget):
     self._line_scale = line_scale
 
     self._text = text
+    self._cached_text_key: tuple | None = None
     self.set_text(text)
 
   def set_text(self, text):
@@ -147,9 +148,14 @@ class Label(Widget):
     self._update_text(self._text)
 
   def _update_text(self, text):
+    text = _resolve_value(text)
+    cache_key = (text, self._rect.width, self._font_size, self._text_padding)
+    if cache_key == self._cached_text_key:
+      return
+    self._cached_text_key = cache_key
+
     self._emojis = []
     self._text_size = []
-    text = _resolve_value(text)
 
     if self._elide_right:
       display_text = text
@@ -182,7 +188,6 @@ class Label(Widget):
 
   def _render(self, _):
     # Text can be a callable
-    # TODO: cache until text changed
     self._update_text(self._text)
 
     text_size = self._text_size[0] if self._text_size else rl.Vector2(0.0, 0.0)

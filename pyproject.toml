@@ -178,6 +178,7 @@ testpaths = [
   "system/loggerd",
   "system/tests",
   "system/ubloxd",
+  "system/ui",
   "system/webrtc",
   "tools/lib/tests",
   "tools/replay",
