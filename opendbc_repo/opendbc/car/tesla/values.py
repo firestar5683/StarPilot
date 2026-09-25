@@ -3,7 +3,7 @@ from enum import Enum, IntFlag
 from opendbc.car import Bus, CarSpecs, DbcDict, PlatformConfig, Platforms
 from opendbc.car.lateral import AngleSteeringLimitsVM
 from opendbc.car.structs import CarParams, CarState
-from opendbc.car.docs_definitions import CarDocs, CarFootnote, CarHarness, CarParts, Column
+from opendbc.car.docs_definitions import CarDocs, CarFootnote, CarHarness, CarParts, Column, SupportType
 from opendbc.car.fw_query_definitions import FwQueryConfig, Request, StdQueries
 
 Ecu = CarParams.Ecu
@@ -64,9 +64,29 @@ class CAR(Platforms):
     CarSpecs(mass=2495., wheelbase=2.960, steerRatio=12.0),
   )
 
+  TESLA_MODEL_S_PREAP = TeslaPlatformConfig(
+    [CarDocs("Tesla Model S (Pre-AP) 2012-14", "All", support_type=SupportType.COMMUNITY, support_link="#community")],
+    CarSpecs(mass=2100., wheelbase=2.960, steerRatio=15.0),
+    {
+      Bus.party: 'tesla_can',
+      Bus.pt: 'tesla_can',
+      Bus.chassis: 'tesla_can',
+    },
+  )
+
+  TESLA_MODEL_S_HW1 = TeslaPlatformConfig(
+    [CarDocs("Tesla Model S (with HW1) 2014-16", "All", support_type=SupportType.COMMUNITY, support_link="#community")],
+    CarSpecs(mass=2100., wheelbase=2.960, steerRatio=15.0),
+    {
+      Bus.chassis: 'tesla_can',
+      Bus.party: 'tesla_can',
+      Bus.pt: 'tesla_can',
+      Bus.radar: 'tesla_radar_bosch_generated',
+    },
+  )
 
 FW_QUERY_CONFIG = FwQueryConfig(
-  fw_version_regex=br".+,[EYX]\d?[A-Z]*\d{3}\.\d+(?:\.\d+)?",
+  fw_version_regex=br"(?:.+,[EYX]\d?[A-Z]*\d{3}\.\d+(?:\.\d+)?|1016704-00-HAA\x00{10}|\x10\x00A)",
   requests=[
     Request(
       [StdQueries.TESTER_PRESENT_REQUEST, StdQueries.SUPPLIER_SOFTWARE_VERSION_REQUEST],
@@ -110,6 +130,9 @@ class CarControllerParams:
 
 class TeslaSafetyFlags(IntFlag):
   LONG_CONTROL = 1
+  HW1 = 16
+  AOL_SCREEN_BUTTON = 512
+  AOL_SCREEN_DISENGAGE_ON_BRAKE = 1024
 
   # deprecated flags
   DAS_STEERING_3_BIT_DEPRECATED = 2
@@ -118,6 +141,8 @@ class TeslaSafetyFlags(IntFlag):
 class TeslaFlags(IntFlag):
   LONG_CONTROL = 1
   MISSING_DAS_SETTINGS = 4
+  HAS_VEHICLE_BUS = 8
+  AOL_SCREEN_BUTTON = 16
 
   # deprecated flags
   # old 2-bit FW is now dashcammed

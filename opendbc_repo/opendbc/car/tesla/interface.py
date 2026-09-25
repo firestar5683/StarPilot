@@ -2,6 +2,8 @@ from opendbc.car import Bus, get_safety_config, structs
 from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.car.tesla.carcontroller import CarController
 from opendbc.car.tesla.carstate import CarState
+from opendbc.car.tesla.preap.stock import get_stock_params
+from opendbc.car.tesla.hw1 import get_hw1_params
 from opendbc.car.tesla.values import TeslaSafetyFlags, TeslaFlags, CANBUS, CAR, DBC
 from opendbc.car.tesla.radar_interface import RadarInterface, RADAR_START_ADDR
 
@@ -14,8 +16,16 @@ class CarInterface(CarInterfaceBase):
   @staticmethod
   def _get_params(ret: structs.CarParams, candidate, fingerprint, car_fw, alpha_long, is_release, docs) -> structs.CarParams:
     ret.brand = "tesla"
+    if candidate == CAR.TESLA_MODEL_S_PREAP:
+      return get_stock_params(ret)
+    if candidate == CAR.TESLA_MODEL_S_HW1:
+      return get_hw1_params(ret, fingerprint, alpha_long)
 
+    ret.flags &= ~int(TeslaFlags.HAS_VEHICLE_BUS | TeslaFlags.AOL_SCREEN_BUTTON)
     ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.tesla)]
+
+    if candidate in (CAR.TESLA_MODEL_3, CAR.TESLA_MODEL_Y) and fingerprint[CANBUS.vehicle].get(0x3DF) == 8:
+      ret.flags |= TeslaFlags.HAS_VEHICLE_BUS.value
 
     ret.steerLimitTimer = 0.4
     ret.steerActuatorDelay = 0.1

@@ -4,7 +4,9 @@ from opendbc.car import Bus
 from opendbc.car.lateral import apply_steer_angle_limits_vm
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.tesla.teslacan import TeslaCAN
-from opendbc.car.tesla.values import CarControllerParams
+from opendbc.car.tesla.preap.stock import PreAPStockCarController
+from opendbc.car.tesla.hw1 import HW1CarController
+from opendbc.car.tesla.values import CAR, CarControllerParams
 from opendbc.car.vehicle_model import VehicleModel
 
 
@@ -18,6 +20,12 @@ def get_safety_CP():
 class CarController(CarControllerBase):
   def __init__(self, dbc_names, CP):
     super().__init__(dbc_names, CP)
+    if CP.carFingerprint == CAR.TESLA_MODEL_S_PREAP:
+      self.preap = PreAPStockCarController(dbc_names, CP)
+      return
+    if CP.carFingerprint == CAR.TESLA_MODEL_S_HW1:
+      self.hw1 = HW1CarController(dbc_names, CP)
+      return
     self.apply_angle_last = 0
     self.packer = CANPacker(dbc_names[Bus.party])
     self.tesla_can = TeslaCAN(CP, self.packer)
@@ -26,6 +34,12 @@ class CarController(CarControllerBase):
     self.VM = VehicleModel(get_safety_CP())
 
   def update(self, CC, CS, now_nanos):
+    if self.CP.carFingerprint == CAR.TESLA_MODEL_S_PREAP:
+      CS.preap.out = CS.out
+      CS.preap.preap_lateral_authorized = CS.preap_lateral_authorized
+      return self.preap.update(CC, CS.preap, now_nanos)
+    if self.CP.carFingerprint == CAR.TESLA_MODEL_S_HW1:
+      return self.hw1.update(CC, CS, now_nanos)
     actuators = CC.actuators
     can_sends = []
 
