@@ -1,11 +1,14 @@
 import copy
+import math
 
 from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, DT_CTRL, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.common.filter_simple import FirstOrderFilter
 from opendbc.car.interfaces import CarStateBase
-from opendbc.car.toyota.values import ToyotaFlags, CAR, DBC, STEER_THRESHOLD, EPS_SCALE
+from opendbc.car.dashboard_speed_limit import Tracker as LimitTracker, parser_expiry, toyota_sign
+from opendbc.can.dbc import DBC as CANDBC
+from opendbc.car.toyota.values import ToyotaFlags, CAR, DBC, STEER_THRESHOLD, EPS_SCALE, TOYOTA_AUTO_HOLD_AEB_CARS
 
 ButtonType = structs.CarState.ButtonEvent.Type
 SteerControlType = structs.CarParams.SteerControlType
@@ -40,6 +43,7 @@ class CarState(CarStateBase):
     # Need to apply an offset as soon as the steering angle measurements are both received
     self.accurate_steer_angle_seen = False
     self.angle_offset = FirstOrderFilter(None, 60.0, DT_CTRL, initialized=False)
+    self.dashboard_limit = LimitTracker()
 
     self.lkas_button = 0
     self.distance_button = 0
@@ -50,10 +54,14 @@ class CarState(CarStateBase):
     self.lkas_hud = {}
     self.gvc = 0.0
     self.secoc_synchronization = None
+    self.pre_collision_2 = {}
 
   def update(self, can_parsers) -> structs.CarState:
     cp = can_parsers[Bus.pt]
     cp_cam = can_parsers[Bus.cam]
+
+    if self.CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD and self.CP.carFingerprint in TOYOTA_AUTO_HOLD_AEB_CARS:
+      self.pre_collision_2 = copy.copy(cp_cam.vl["PRE_COLLISION_2"])
 
     ret = structs.CarState()
     cp_acc = cp_cam if (self.CP.flags & ToyotaFlags.TSS2) and not (self.CP.flags & ToyotaFlags.RADAR_ACC) else cp
@@ -181,7 +189,7 @@ class CarState(CarStateBase):
       self.pcm_follow_distance = cp.vl["PCM_CRUISE_2"]["PCM_FOLLOW_DISTANCE"]
 
     buttonEvents = []
-    if self.CP.flags & ToyotaFlags.TSS2:
+    if self.CP.flags & ToyotaFlags.TSS2 or self.CP.carFingerprint == CAR.TOYOTA_PRIUS_RETROFIT:
       # lkas button is wired to the camera
       prev_lkas_button = self.lkas_button
       self.lkas_button = cp_cam.vl["LKAS_HUD"]["LDA_ON_MESSAGE"]
@@ -191,23 +199,38 @@ class CarState(CarStateBase):
         buttonEvents.extend(create_button_events(1, 0, {1: ButtonType.lkas}) +
                             create_button_events(0, 1, {1: ButtonType.lkas}))
 
-      if not (self.CP.flags & (ToyotaFlags.RADAR_ACC | ToyotaFlags.SECOC)):
+      if self.CP.flags & ToyotaFlags.TSS2 and not (self.CP.flags & (ToyotaFlags.RADAR_ACC | ToyotaFlags.SECOC)):
         # distance button is wired to the ACC module (camera or radar)
         prev_distance_button = self.distance_button
         self.distance_button = cp_acc.vl["ACC_CONTROL"]["DISTANCE"]
 
         buttonEvents += create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
 
+    if self.CP.carFingerprint == CAR.TOYOTA_PRIUS_RETROFIT:
+      prev_distance_button = self.distance_button
+      self.distance_button = cp_acc.vl["ACC_CONTROL"]["DISTANCE"]
+      buttonEvents += create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
+
     ret.buttonEvents = buttonEvents
+    timestamp, expiry = parser_expiry(cp_cam, "RSA1", "TSGN1")
+    if timestamp > self.dashboard_limit.observation.observed_ns:
+      sign = int(cp_cam.vl["RSA1"]["TSGN1"])
+      speed = int(cp_cam.vl["RSA1"]["SPDVAL1"])
+      status, value_mps = toyota_sign(sign, speed)
+      self.dashboard_limit.update(timestamp, status, value_mps, valid_until_ns=expiry)
     return ret
 
   @staticmethod
   def get_can_parsers(CP):
+    dbc_name = DBC[CP.carFingerprint][Bus.pt]
+    cam_messages = [("RSA1", math.nan)] if "RSA1" in CANDBC(dbc_name).name_to_msg else []
+    if CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD and CP.carFingerprint in TOYOTA_AUTO_HOLD_AEB_CARS:
+      cam_messages.append(("PRE_COLLISION_2", 50))
     pt_messages = [
       ("BLINKERS_STATE", float('nan')),
     ]
 
     return {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, 0),
-      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], 2),
+      Bus.cam: CANParser(dbc_name, cam_messages, 2),
     }

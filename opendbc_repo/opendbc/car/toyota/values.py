@@ -74,6 +74,7 @@ class ToyotaFlags(IntFlag):
   # these cars can utilize 2.0 m/s^2
   RAISED_ACCEL_LIMIT = 1024
   SECOC = 2048
+  AUTO_BRAKE_HOLD = 4096
 
   # deprecated flags
   # these cars are speculated to allow stop and go when the DSU is unplugged
@@ -96,6 +97,12 @@ class Footnote(Enum):
 class ToyotaCarDocs(CarDocs):
   package: str = "All"
   car_parts: CarParts = field(default_factory=CarParts.common([CarHarness.toyota_a]))
+
+
+@dataclass
+class ToyotaCommunityCarDocs(ToyotaCarDocs):
+  support_type: SupportType = SupportType.COMMUNITY
+  support_link: str = "#community"
 
 
 @dataclass
@@ -197,6 +204,11 @@ class CAR(Platforms):
     CarSpecs(mass=2860. * CV.LB_TO_KG, wheelbase=2.7, steerRatio=18.27, tireStiffnessFactor=0.444),
     dbc_dict('toyota_new_mc_pt_generated', 'toyota_adas'),
   )
+  TOYOTA_MATRIX_RETROFIT = PlatformConfig(
+    [ToyotaCommunityCarDocs("Toyota Matrix Retrofit 2005", package="Custom retrofit; stock longitudinal")],
+    TOYOTA_COROLLA.specs,
+    dbc_dict("toyota_new_mc_pt_generated", "toyota_adas"),
+  )
   # LSS2 Lexus UX Hybrid is same as a TSS2 Corolla Hybrid
   TOYOTA_COROLLA_TSS2 = ToyotaTSS2PlatformConfig(
     [
@@ -234,6 +246,11 @@ class CAR(Platforms):
     ],
     CarSpecs(mass=3045. * CV.LB_TO_KG, wheelbase=2.7, steerRatio=15.74, tireStiffnessFactor=0.6371),
     dbc_dict('toyota_nodsu_pt_generated', 'toyota_adas'),
+  )
+  TOYOTA_PRIUS_RETROFIT = PlatformConfig(
+    [ToyotaCommunityCarDocs("Toyota Prius 2016-20 with TSS2 EPS retrofit", package="Custom retrofit; stock longitudinal")],
+    TOYOTA_PRIUS.specs,
+    dbc_dict("toyota_nodsu_pt_generated", "toyota_adas"),
   )
   TOYOTA_PRIUS_V = PlatformConfig(
     [ToyotaCarDocs("Toyota Prius v 2017", "Toyota Safety Sense P", min_enable_speed=MIN_ACC_SPEED)],
@@ -586,6 +603,13 @@ STEER_THRESHOLD = 100
 
 # These cars have non-standard EPS torque scale factors. All others are 73
 EPS_SCALE = defaultdict(lambda: 73,
-                        {CAR.TOYOTA_PRIUS: 66, CAR.TOYOTA_COROLLA: 88, CAR.LEXUS_IS: 77, CAR.LEXUS_RC: 77, CAR.LEXUS_CTH: 100, CAR.TOYOTA_PRIUS_V: 100})
+                        {CAR.TOYOTA_PRIUS: 66, CAR.TOYOTA_COROLLA: 88, CAR.TOYOTA_MATRIX_RETROFIT: 88,
+                         CAR.LEXUS_IS: 77, CAR.LEXUS_RC: 77, CAR.LEXUS_CTH: 100, CAR.TOYOTA_PRIUS_V: 100})
 
 DBC = CAR.create_dbc_map()
+
+TOYOTA_AUTO_HOLD_CARS = {car for car in CAR if car.config.flags & ToyotaFlags.TSS2 and
+                         not car.config.flags & (ToyotaFlags.RADAR_ACC | ToyotaFlags.SECOC)} | {
+  CAR.TOYOTA_RAV4, CAR.TOYOTA_RAV4H,
+}
+TOYOTA_AUTO_HOLD_AEB_CARS = {CAR.TOYOTA_CAMRY_TSS2}

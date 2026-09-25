@@ -8,8 +8,9 @@ from opendbc.car.common.pid import PIDController
 from opendbc.car.secoc import add_mac, build_sync_mac
 from opendbc.car.interfaces import CarControllerBase
 from opendbc.car.toyota import toyotacan
-from opendbc.car.toyota.values import CAR, CarControllerParams, ToyotaFlags
+from opendbc.car.toyota.values import CAR, CarControllerParams, ToyotaFlags, TOYOTA_AUTO_HOLD_CARS, TOYOTA_AUTO_HOLD_AEB_CARS
 from opendbc.can import CANPacker
+from opendbc.safety import ALTERNATIVE_EXPERIENCE
 
 Ecu = structs.CarParams.Ecu
 LongCtrlState = structs.CarControl.Actuators.LongControlState
@@ -33,6 +34,18 @@ MAX_STEER_RATE_FRAMES = 17  # tx control frames needed before torque can be cut
 MAX_USER_TORQUE = 500
 
 
+TOYOTA_AUTO_HOLD_ACCEL = -1.0
+TOYOTA_AUTO_HOLD_ACTIVATION_FRAMES = 100
+
+
+def supports_toyota_auto_hold(CP):
+  return (CP.carFingerprint in TOYOTA_AUTO_HOLD_CARS and CP.openpilotLongitudinalControl and
+          not CP.flags & ToyotaFlags.SECOC and bool(CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD) and
+          (CP.alternativeExperience & (ALTERNATIVE_EXPERIENCE.TOYOTA_AUTO_HOLD | ALTERNATIVE_EXPERIENCE.TOYOTA_AEB_HOLD)) ==
+          (ALTERNATIVE_EXPERIENCE.TOYOTA_AEB_HOLD if CP.carFingerprint in TOYOTA_AUTO_HOLD_AEB_CARS else
+           ALTERNATIVE_EXPERIENCE.TOYOTA_AUTO_HOLD))
+
+
 def get_long_tune(CP, params):
   if CP.flags & ToyotaFlags.TSS2:
     kiBP = [2., 5.]
@@ -49,6 +62,7 @@ def get_long_tune(CP, params):
 class CarController(CarControllerBase):
   def __init__(self, dbc_names, CP):
     super().__init__(dbc_names, CP)
+    self.reverse_cruise_input = None
     self.params = CarControllerParams(self.CP)
     self.last_torque = 0
     self.last_angle = 0
@@ -74,6 +88,23 @@ class CarController(CarControllerBase):
     self.secoc_lta_message_counter = 0
     self.secoc_acc_message_counter = 0
     self.secoc_prev_reset_counter = 0
+    self.brake_hold_active = False
+    self._brake_hold_counter = 0
+
+  def update_auto_hold_state(self, CS, cancel_requested=False, activation_frames=TOYOTA_AUTO_HOLD_ACTIVATION_FRAMES):
+    allowed = (not cancel_requested and CS.out.standstill and CS.out.cruiseState.available and
+               not CS.out.gasPressed and not CS.out.cruiseState.enabled and
+               CS.out.gearShifter not in (structs.CarState.GearShifter.park, structs.CarState.GearShifter.reverse))
+    if allowed and not self.brake_hold_active and CS.out.brakePressed:
+      self._brake_hold_counter += 1
+      self.brake_hold_active = self._brake_hold_counter > activation_frames
+    elif not allowed:
+      self.reset_auto_hold_state()
+    return self.brake_hold_active
+
+  def reset_auto_hold_state(self):
+    self._brake_hold_counter = 0
+    self.brake_hold_active = False
 
   def update(self, CC, CS, now_nanos):
     actuators = CC.actuators
@@ -171,6 +202,13 @@ class CarController(CarControllerBase):
     lead = hud_control.leadVisible or CS.out.vEgo < 12.  # at low speed we always assume the lead is present so ACC can be engaged
 
     # *** gas and brake ***
+    if supports_toyota_auto_hold(self.CP):
+      self.update_auto_hold_state(CS, pcm_cancel_cmd if self.CP.carFingerprint not in TOYOTA_AUTO_HOLD_AEB_CARS else False)
+      if (self.CP.carFingerprint in TOYOTA_AUTO_HOLD_AEB_CARS and self.frame % 2 == 0 and
+          CS.out.standstill and CS.out.cruiseState.available and not CS.out.gasPressed):
+        can_sends.append(toyotacan.create_brake_hold_command(self.packer, self.frame, CS.pre_collision_2, self.brake_hold_active))
+    else:
+      self.reset_auto_hold_state()
     if self.CP.openpilotLongitudinalControl:
       # if user engages at a stop with foot on brake, PCM starts in a special cruise standstill mode. on resume press,
       # brakes can take a while to ramp up causing a lurch forward. prevent resume press until planner wants to move.
@@ -249,9 +287,16 @@ class CarController(CarControllerBase):
 
         pcm_accel_cmd = float(np.clip(pcm_accel_cmd, self.params.ACCEL_MIN, self.params.ACCEL_MAX))
 
+        if self.brake_hold_active and self.CP.carFingerprint not in TOYOTA_AUTO_HOLD_AEB_CARS:
+          pcm_accel_cmd = TOYOTA_AUTO_HOLD_ACCEL
+          self.permit_braking = True
+          self.standstill_req = True
+
         main_accel_cmd = 0. if self.CP.flags & ToyotaFlags.SECOC.value else pcm_accel_cmd
         can_sends.append(toyotacan.create_accel_command(self.packer, main_accel_cmd, pcm_cancel_cmd, self.permit_braking, self.standstill_req, lead,
-                                                        CS.acc_type, fcw_alert, self.distance_button))
+                                                        CS.acc_type, fcw_alert, self.distance_button,
+                                                        reverse_cruise=bool(self.CP.pcmCruise and self.reverse_cruise_input is not None and
+                                                                            self.reverse_cruise_input.update())))
         if self.CP.flags & ToyotaFlags.SECOC.value:
           acc_cmd_2 = toyotacan.create_accel_command_2(self.packer, pcm_accel_cmd)
           acc_cmd_2 = add_mac(self.secoc_key,

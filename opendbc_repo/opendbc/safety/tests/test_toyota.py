@@ -172,6 +172,26 @@ class TestToyotaSafetyAngle(TestToyotaSafetyBase, common.AngleSteeringSafetyTest
   def SAFETY_PARAM(self):
     return self.EPS_SCALE | ToyotaSafetyFlags.LTA
 
+  def _prepare_lta_near_zero_rate(self, previous_raw):
+    # At 5 m/s, the LTA windup and unwind limits round to 6 and 7 raw CAN
+    # units. Check the two sign transitions where choosing the wrong limit
+    # changes whether a packed, active steering command is accepted.
+    self.assertEqual(int(self.ANGLE_RATE_UP[0] * self.DEG_TO_CAN + 1), 6)
+    self.assertEqual(int(self.ANGLE_RATE_DOWN[0] * self.DEG_TO_CAN + 1), 7)
+    self._reset_speed_measurement(5.)
+    self._reset_angle_measurement(0.)
+    self.safety.set_controls_allowed(True)
+    self.assertTrue(self._tx(self._angle_cmd_msg(previous_raw / self.DEG_TO_CAN, True)))
+    self.assertEqual(self.safety.get_desired_angle_last(), previous_raw)
+
+  def test_lta_zero_angle_uses_unwind_rate(self):
+    self._prepare_lta_near_zero_rate(0)
+    self.assertTrue(self._tx(self._angle_cmd_msg(-7 / self.DEG_TO_CAN, True)))
+
+  def test_lta_positive_angle_uses_windup_rate(self):
+    self._prepare_lta_near_zero_rate(1)
+    self.assertFalse(self._tx(self._angle_cmd_msg(8 / self.DEG_TO_CAN, True)))
+
   # Only allow LKA msgs with no actuation
   def test_lka_steer_cmd(self):
     for engaged, steer_req, torque in itertools.product([True, False],
