@@ -10,13 +10,14 @@ import pyray as rl
 
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app, FontWeight
+from openpilot.system.ui.lib.text_measure import measure_text_cached
 
-WIDTH = 300
+WIDTH = 320
 HEIGHT = 150
 MARGIN = 30
 PADDING = 14
 TITLE_SIZE = 26
-ROW_SIZE = 32
+ROW_SIZE = 30
 
 _BG = rl.Color(0, 0, 0, 180)
 _LABEL = rl.Color(255, 255, 255, 140)
@@ -32,6 +33,9 @@ SAT_TIME_WARN = 25.0
 # fix; the desensed drives report 0 for every satellite, so any non-zero reading is progress).
 CNO_GOOD = 2000.0
 CNO_WARN = 800.0
+
+# Right edges already match mathematically; this is a small optical correction for "R"'s shape.
+SATS_OPTICAL_NUDGE = 3
 
 
 def _grade(value: float, good: float, warn: float) -> rl.Color:
@@ -104,25 +108,32 @@ class GnssHealth:
     rl.draw_rectangle_rounded(rect, 0.12, 10, _BG)
 
     tx = int(x + PADDING)
+    right = int(x + WIDTH - PADDING)
     ty = int(y + PADDING)
 
     rl.draw_text_ex(self._font, "GNSS", rl.Vector2(tx, ty), TITLE_SIZE, 0, _LABEL)
     fix_text = "FIX" if self._has_fix else "NO FIX"
     fix_color = _GOOD if self._has_fix else _BAD
-    rl.draw_text_ex(self._font, fix_text, rl.Vector2(int(x + WIDTH - PADDING - 90), ty),
-                    TITLE_SIZE, 0, fix_color)
+    fix_width = measure_text_cached(self._font, fix_text, TITLE_SIZE).x
+    rl.draw_text_ex(self._font, fix_text, rl.Vector2(right - fix_width, ty), TITLE_SIZE, 0, fix_color)
 
     ty += 34
-    rl.draw_text_ex(self._font, "time G", rl.Vector2(tx, ty), ROW_SIZE, 0, _LABEL)
-    rl.draw_text_ex(self._font, f"{self._sat_time_pct:.0f}%", rl.Vector2(tx + 120, ty),
-                    ROW_SIZE, 0, _grade(self._sat_time_pct, SAT_TIME_GOOD, SAT_TIME_WARN))
+    self._draw_row(tx, right, ty, "Decode %", f"{self._sat_time_pct:.0f}%",
+                   _grade(self._sat_time_pct, SAT_TIME_GOOD, SAT_TIME_WARN))
 
     ty += 36
-    rl.draw_text_ex(self._font, "C/No", rl.Vector2(tx, ty), ROW_SIZE, 0, _LABEL)
-    rl.draw_text_ex(self._font, f"{self._cno:.0f}", rl.Vector2(tx + 120, ty),
-                    ROW_SIZE, 0, _grade(self._cno, CNO_GOOD, CNO_WARN))
+    self._draw_row(tx, right, ty, "Radio Signal", f"{self._cno:.0f}",
+                   _grade(self._cno, CNO_GOOD, CNO_WARN))
 
     ty += 36
-    rl.draw_text_ex(self._font, "sats", rl.Vector2(tx, ty), ROW_SIZE, 0, _LABEL)
-    rl.draw_text_ex(self._font, f"{self._gps_sv}G {self._glonass_sv}R",
-                    rl.Vector2(tx + 120, ty), ROW_SIZE, 0, rl.WHITE)
+    # Measured right edges already line up exactly with the row above (both end at `right`), but
+    # "R"'s diagonal leg reads as sitting left of its actual advance-width edge next to a digit
+    # like "5" that fills its box more squarely - a small optical nudge fixes what the numbers say
+    # is already aligned.
+    self._draw_row(tx, right + SATS_OPTICAL_NUDGE, ty, "Tracked Sats",
+                   f"{self._gps_sv}G {self._glonass_sv}R", rl.WHITE)
+
+  def _draw_row(self, tx: int, right: int, ty: int, label: str, value: str, value_color: rl.Color) -> None:
+    rl.draw_text_ex(self._font, label, rl.Vector2(tx, ty), ROW_SIZE, 0, _LABEL)
+    value_width = measure_text_cached(self._font, value, ROW_SIZE).x
+    rl.draw_text_ex(self._font, value, rl.Vector2(right - value_width, ty), ROW_SIZE, 0, value_color)
