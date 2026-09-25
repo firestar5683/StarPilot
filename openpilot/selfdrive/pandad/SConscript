@@ -1,5 +1,10 @@
 Import('env', 'arch', 'common', 'messaging')
 
+if GetOption('extras'):
+  # Header-only AOL USB/status negotiation test also builds on Darwin hosts.
+  env.Program('tests/test_aol_protocol', ['tests/test_aol_protocol.cc'])
+  env.Program('tests/test_aol_wire', ['tests/test_aol_wire.cc'], LIBS=[messaging, 'capnp', 'kj'])
+
 if arch != "Darwin":
   libs = [common, messaging, 'pthread']
   panda = env.Library('panda', ['panda.cc', 'spi.cc'])
