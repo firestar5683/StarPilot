@@ -1,15 +1,28 @@
 from dataclasses import dataclass, field
 from enum import Enum, IntFlag
 
-from opendbc.car import Bus, CarSpecs, DbcDict, PlatformConfig, Platforms, uds
+from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, Bus, CarSpecs, DbcDict, PlatformConfig, Platforms, uds
 from opendbc.car.structs import CarParams
 from opendbc.car.docs_definitions import CarFootnote, CarHarness, CarDocs, CarParts, Column
 from opendbc.car.fw_query_definitions import FwQueryConfig, Request, StdQueries, p16
+from opendbc.car.lateral import AngleSteeringLimits, AngleSteeringLimitsVM, ISO_LATERAL_ACCEL
 
 Ecu = CarParams.Ecu
 
 
 class CarControllerParams:
+  ANGLE_LIMITS = AngleSteeringLimitsVM(
+    650,
+    MAX_LATERAL_ACCEL=ISO_LATERAL_ACCEL + ACCELERATION_DUE_TO_GRAVITY * 0.06,
+    MAX_LATERAL_JERK=3.0 + ACCELERATION_DUE_TO_GRAVITY * 0.06,
+    MAX_ANGLE_RATE=1,
+  )
+  FIXED_ANGLE_LIMITS = AngleSteeringLimits(
+    545, ([0., 5., 35.], [5., .8, .15]), ([0., 5., 35.], [5., .8, .15]),
+  )
+
+  LEGACY_2025_ANGLE_LIMITS = FIXED_ANGLE_LIMITS
+
   def __init__(self, CP):
     self.STEER_STEP = 2                # how often we update the steer cmd
     self.STEER_DELTA_UP = 50           # torque increase per refresh, 0.8s to max
@@ -57,6 +70,9 @@ class SubaruSafetyFlags(IntFlag):
   GEN2 = 1
   LONG = 2
   PREGLOBAL_REVERSED_DRIVER_TORQUE = 4
+  LKAS_ANGLE = 16
+  FIXED_ANGLE_LIMITS = 128
+  ANGLE_MAIN_BUS = 32
 
 
 class SubaruFlags(IntFlag):
@@ -210,6 +226,16 @@ class CAR(Platforms):
   SUBARU_ASCENT_2023 = SubaruGen2PlatformConfig(
     [SubaruCarDocs("Subaru Ascent 2023", "All", car_parts=CarParts.common([CarHarness.subaru_d]))],
     SUBARU_ASCENT.specs,
+    flags=SubaruFlags.LKAS_ANGLE,
+  )
+  SUBARU_LEGACY_2025 = SubaruGen2PlatformConfig(
+    [SubaruCarDocs("Subaru Legacy 2025", "All", car_parts=CarParts.common([CarHarness.subaru_d]))],
+    SUBARU_OUTBACK.specs,
+    flags=SubaruFlags.LKAS_ANGLE,
+  )
+  SUBARU_CROSSTREK_2025 = SubaruGen2PlatformConfig(
+    [SubaruCarDocs("Subaru Crosstrek 2025", "All", car_parts=CarParts.common([CarHarness.subaru_d]))],
+    CarSpecs(mass=1529, wheelbase=2.67, steerRatio=17),
     flags=SubaruFlags.LKAS_ANGLE,
   )
 

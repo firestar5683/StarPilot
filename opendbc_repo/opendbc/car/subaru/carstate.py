@@ -3,7 +3,7 @@ from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
-from opendbc.car.subaru.values import DBC, CanBus, SubaruFlags
+from opendbc.car.subaru.values import CAR, DBC, CanBus, SubaruFlags
 from opendbc.car import CanSignalRateCalculator
 
 
@@ -83,7 +83,10 @@ class CarState(CarStateBase):
     cp_cruise = cp_alt if self.CP.flags & SubaruFlags.GLOBAL_GEN2 else cp
     cp_es_brake = cp_alt if self.CP.flags & SubaruFlags.GLOBAL_GEN2 else cp_cam
 
-    if self.CP.flags & (SubaruFlags.HYBRID | SubaruFlags.LKAS_ANGLE):
+    if self.CP.carFingerprint in (CAR.SUBARU_CROSSTREK_2025, CAR.SUBARU_LEGACY_2025, CAR.SUBARU_ASCENT_2023):
+      ret.cruiseState.enabled = cp_es_brake.vl["ES_Status"]["Cruise_Activated"] != 0
+      ret.cruiseState.available = cp_cam.vl["ES_DashStatus"]["Cruise_On"] != 0
+    elif self.CP.flags & (SubaruFlags.HYBRID | SubaruFlags.LKAS_ANGLE):
       # ES_DashStatus->Cruise_Activated_Dash is likely intended for the dash display only, as it falls
       # during user gas override and at standstill. ES_Status is missing on hybrid, so we use ES_Brake instead
 
