@@ -17,15 +17,15 @@ class TestBoltAccPedalParams(unittest.TestCase):
             with self.subTest(candidate=candidate, alpha=alpha, setting=setting, observed=observed):
               cp = params(candidate, setting, observed, alpha_long=alpha)
               self.assertAlmostEqual(cp.stopAccel, -0.25)
-              expected_delay = 0.6 if setting and observed else 1.0
+              expected_delay = 0.6 if observed else 1.0
               self.assertAlmostEqual(cp.longitudinalActuatorDelay, expected_delay)
     for candidate in (CAR.CHEVROLET_BOLT_EUV, CAR.CHEVROLET_BOLT_ACC_2022_2023):
       for alpha in (False, True):
         with self.subTest(candidate=candidate, alpha=alpha):
           cp = params(candidate, True, True, alpha_long=alpha)
-          expected_stop = -0.25 if candidate == CAR.CHEVROLET_BOLT_ACC_2022_2023 or alpha else -2.0
-          self.assertAlmostEqual(cp.stopAccel, expected_stop)
-          self.assertAlmostEqual(cp.longitudinalActuatorDelay, 0.5)
+          self.assertEqual(cp.carFingerprint, CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL)
+          self.assertAlmostEqual(cp.stopAccel, -0.25)
+          self.assertAlmostEqual(cp.longitudinalActuatorDelay, 0.6)
 
   def test_final_stop_target_for_all_bolt_cc_camera_profiles(self):
     for candidate in (CAR.CHEVROLET_BOLT_CC_2017, CAR.CHEVROLET_BOLT_CC_2018_2021,
@@ -37,7 +37,7 @@ class TestBoltAccPedalParams(unittest.TestCase):
               with self.subTest(candidate=candidate, alpha=alpha, camera=camera, setting=setting, observed=observed):
                 cp = params(candidate, setting, observed, alpha_long=alpha, camera=camera)
                 self.assertEqual(cp.stopAccel, -0.25)
-                self.assertAlmostEqual(cp.longitudinalActuatorDelay, 0.6 if setting and observed else 1.0)
+                self.assertAlmostEqual(cp.longitudinalActuatorDelay, 0.6 if observed else 1.0)
                 self.assertTrue(cp.openpilotLongitudinalControl)
 
   def test_friction_braking_and_speed_shaped_launch_limits(self):

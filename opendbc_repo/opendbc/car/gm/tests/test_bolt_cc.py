@@ -1,4 +1,3 @@
-from unittest.mock import patch
 import unittest
 from opendbc.can import CANPacker
 from opendbc.car import Bus, gen_empty_fingerprint, structs
@@ -24,22 +23,20 @@ def native(direction, msg, us):
   return safety.safety_rx_hook(packet) if direction == "rx" else safety.safety_tx_hook(packet)
 
 
-class Settings:
-  def __init__(self, pedal=False, metric=False):
-    self.settings = {'GMPedalLongitudinal': pedal, 'IsMetric': metric}
-
-  def get_bool(self, key):
-    return self.settings.get(key, False)
-
-
 def params(identity, alpha=False, present=False, pedal=False, removed=False, metric=False):
   fp = gen_empty_fingerprint()
   if present:
     fp[0][0x201] = 6
+  if removed and present:
+    fp[0].update({0x184: 8, 0x34A: 5, 0x348: 5, 0xC9: 8, 0x1C4: 8, 0x1E1: 7,
+                  0x1F5: 8, 0xBD: 7, 0x232: 8, 0x3D1: 8, 0xBE: 6})
   if not removed:
+    fp[2][0x320] = 8
     fp[2][0x180] = 4
-  with patch('opendbc.car.gm.interface.Params', return_value=Settings(pedal, metric)):
-    return CarInterface.get_params(identity, fp, [], alpha, False, False)
+  cp = CarInterface.get_params(identity, fp, [], alpha, False, False)
+  if not removed:
+    assert not cp.flags & GMFlags.NO_CAMERA
+  return cp
 
 
 def fixture(identity, removed=False, metric=False, alpha=False, present=False):
@@ -49,7 +46,7 @@ def fixture(identity, removed=False, metric=False, alpha=False, present=False):
   return cp, ci, CANPacker(DBC[identity][Bus.pt])
 
 
-def feed(ci, packer, now, counter=0, gas=False, active=True, speed=20, stock=15, brake=False, regen=False):
+def feed(ci, packer, now, counter=0, gas=False, active=True, speed=20, stock=15, brake=False, regen=False, camera=True):
   vals = {
     'PSCMStatus': {},
     'ECMCruiseControl': {'CruiseActive': int(active), 'CruiseSetSpeed': stock * 3.6},
@@ -69,8 +66,9 @@ def feed(ci, packer, now, counter=0, gas=False, active=True, speed=20, stock=15,
   }
   msgs = [packer.make_can_msg(n, 0, v) for n, v in vals.items()]
   msgs.append((0x1E1, button_bytes(1, counter), 0))
-  msgs.append(packer.make_can_msg('ASCMLKASteeringCmd', 2, {}))
-  msgs.append(packer.make_can_msg('AEBCmd', 2, {}))
+  if camera:
+    msgs.append(packer.make_can_msg('ASCMLKASteeringCmd', 2, {}))
+    msgs.append(packer.make_can_msg('AEBCmd', 2, {}))
   # Prime lazy subscriptions, then prove actual CI's validity (no fabricated canValid).
   ci.update([(now - 1_000_000, msgs)])
   out = ci.update([(now, msgs)])
@@ -89,6 +87,27 @@ def control(long_active=True, enabled=True, gas=False):
 
 
 class Production(unittest.TestCase):
+  def test_removed_camera_never_becomes_lazy_required_source(self):
+    for identity in BOLT_CC_WORDS:
+      for removed in (False, True):
+        with self.subTest(identity=identity, removed=removed):
+          cp, ci, packer = fixture(identity, removed=removed)
+          for tick in range(40):
+            out, frames = feed(ci, packer, 1_000_000_000 + tick * 10_000_000,
+                               counter=tick % 4, camera=not removed)
+          self.assertTrue(out.canValid)
+          self.assertFalse(out.canTimeout)
+          if removed:
+            self.assertFalse(any(frame[2] == 2 for frame in frames))
+          for tick in range(40, 170):
+            out, _ = feed(ci, packer, 1_000_000_000 + tick * 10_000_000,
+                          counter=tick % 4, camera=False)
+          self.assertEqual(out.canValid, removed)
+          for tick in range(170, 210):
+            out, _ = feed(ci, packer, 1_000_000_000 + tick * 10_000_000,
+                          counter=tick % 4, camera=not removed)
+          self.assertTrue(out.canValid)
+
   def test_final_params_matrix_and_pedal_separation(self):
     for identity, words in BOLT_CC_WORDS.items():
       for alpha in (False, True):
@@ -96,7 +115,7 @@ class Production(unittest.TestCase):
           for setting in (False, True):
             for removed in (False, True):
               cp = params(identity, alpha=alpha, present=present, pedal=setting, removed=removed)
-              if present and setting:
+              if present:
                 self.assertFalse(is_bolt_cc_profile(cp))
                 self.assertTrue(cp.flags & GMFlags.PEDAL_LONG.value)
               else:
@@ -124,7 +143,7 @@ class Production(unittest.TestCase):
   def test_actual_parser_controller_native_all_generation_routes(self):
     for identity in BOLT_CC_WORDS:
       for removed in (False, True):
-        for alpha, present in ((False, False), (False, True), (True, False), (True, True)):
+        for alpha, present in ((False, False), (True, False)):
           cp, ci, packer = fixture(identity, removed, alpha=alpha, present=present)
           out, msgs = feed(ci, packer, 1_000_000_000)
           self.assertTrue(out.canValid)
@@ -254,7 +273,7 @@ class Production(unittest.TestCase):
         native('rx', msg, 1_000_000)
     self.assertTrue(libsafety_py.libsafety.get_controls_allowed())
     libsafety_py.libsafety.set_timer(3_000_000)
-    libsafety_py.libsafety.safety_tick_current_safety_config()
+    libsafety_py.libsafety.safety_tick()
     self.assertFalse(libsafety_py.libsafety.get_controls_allowed())
     _, msgs = feed(ci, packer, 3_001_000_000, counter=1)
     for msg in msgs:

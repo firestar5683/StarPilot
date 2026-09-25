@@ -1,13 +1,12 @@
 """Exact camera-present manual Volt owner; source conditioning is independent of SASCM."""
 import unittest
-from unittest.mock import patch
 
 from opendbc.can import CANPacker
 from opendbc.car import Bus, gen_empty_fingerprint, structs
 from opendbc.car.gm.interface import CarInterface
 from opendbc.car.gm.longitudinal import volt_policy_for
 from opendbc.car.gm.radar_interface import RadarInterface
-from opendbc.car.gm.tests.test_bolt_cc import Settings, feed, setup, native
+from opendbc.car.gm.tests.test_bolt_cc import feed, setup, native
 from opendbc.car.gm.values import (CAR, DBC, CarControllerParams, is_volt_camera_longitudinal,
                                   requires_camera_state_sources, uses_camera_stock_controls)
 from opendbc.safety.tests.libsafety import libsafety_py
@@ -23,8 +22,7 @@ def camera_params(alpha=True, release=False, camera_length=6, radar=False, sascm
     fingerprint[0][0x2FF] = 8
   if pedal:
     fingerprint[0][0x201] = 6
-  with patch("opendbc.car.gm.interface.Params", return_value=Settings(False)):
-    return CarInterface.get_params(CAR.CHEVROLET_VOLT_CAMERA, fingerprint, [], alpha, release, False)
+  return CarInterface.get_params(CAR.CHEVROLET_VOLT_CAMERA, fingerprint, [], alpha, release, False)
 
 
 def feed_camera(ci, packer, now, *, counter=0, speed=20., gas=False, brake=False, regen=False, low=False, active=True):
@@ -39,13 +37,25 @@ def feed_camera(ci, packer, now, *, counter=0, speed=20., gas=False, brake=False
 
 
 class TestVoltCameraControl(unittest.TestCase):
+  def test_incomplete_interceptor_graph_cannot_admit_active_owner(self):
+    from opendbc.car.gm.aol import qualified_gm
+    from opendbc.car.gm.values import camera_acc_pedal_profile
+    for length in (None, 5, 6):
+      for release in (False, True):
+        cp = camera_params(True, release, length, pedal=True)
+        self.assertTrue(cp.dashcamOnly)
+        self.assertFalse(cp.openpilotLongitudinalControl)
+        self.assertTrue(cp.pcmCruise)
+        self.assertIsNone(camera_acc_pedal_profile(cp))
+        self.assertFalse(qualified_gm(cp))
+
   def test_actual_startup_matrix_and_receive_only_radar(self):
     for alpha in (False, True):
       for release in (False, True):
         for radar in (False, True):
           for sascm in (False, True):
             for length in (None, 5, 6):
-              cp = camera_params(alpha, release, length, radar, sascm, pedal=True)
+              cp = camera_params(alpha, release, length, radar, sascm, pedal=False)
               present = length == 6
               active = present and alpha and not release
               self.assertEqual(cp.dashcamOnly, not present)
@@ -58,6 +68,16 @@ class TestVoltCameraControl(unittest.TestCase):
               self.assertEqual(cp.radarUnavailable, not radar if present else True)
               self.assertEqual(RadarInterface(cp).rcp is None, cp.radarUnavailable)
               if active:
+                from opendbc.car.gm.values import apply_gm_auto_hold, is_gm_auto_hold
+                from opendbc.car.gm.lateral import lane_centering_supported
+                from opendbc.car.gm.aol import qualified_gm
+                marked = cp.as_reader().as_builder()
+                apply_gm_auto_hold(marked, True)
+                self.assertTrue(is_gm_auto_hold(marked))
+                self.assertEqual(lane_centering_supported(marked), lane_centering_supported(cp))
+                self.assertEqual(qualified_gm(marked), qualified_gm(cp))
+                self.assertEqual(marked.lateralTuning.to_dict(), cp.lateralTuning.to_dict())
+                self.assertEqual(volt_policy_for(marked).stopping_decel_rate, volt_policy_for(cp).stopping_decel_rate)
                 self.assertEqual(list(cp.longitudinalTuning.kiV), [.5, .5])
                 self.assertEqual(cp.stopAccel, -.25)
                 self.assertEqual(volt_policy_for(cp).stopping_decel_rate, 1.)
@@ -132,7 +152,7 @@ class TestVoltCameraControl(unittest.TestCase):
           native("rx", source, now // 1000)
         if cp.openpilotLongitudinalControl:
           native("rx", packer.make_can_msg("ASCMSteeringButton", 0, {"ACCButtons": 2}), now // 1000)
-        safety.safety_tick_current_safety_config()
+        safety.safety_tick()
         self.assertTrue(safety.safety_config_valid())
         cc = structs.CarControl(enabled=True, latActive=True, longActive=cp.openpilotLongitudinalControl)
         cc.actuators.accel = -2. if tick % 2 else 1.
