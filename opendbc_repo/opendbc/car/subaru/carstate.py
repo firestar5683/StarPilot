@@ -3,7 +3,7 @@ from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
-from opendbc.car.subaru.values import DBC, CanBus, SubaruFlags
+from opendbc.car.subaru.values import CAR, DBC, CanBus, SubaruFlags
 from opendbc.car import CanSignalRateCalculator
 
 
@@ -13,6 +13,7 @@ class CarState(CarStateBase):
     can_define = CANDefine(DBC[CP.carFingerprint][Bus.pt])
     self.shifter_values = can_define.dv["Transmission"]["Gear"]
 
+    self.es_lkas_alert_dat = b""
     self.angle_rate_calulator = CanSignalRateCalculator(50)
 
   def update(self, can_parsers) -> structs.CarState:
@@ -83,7 +84,10 @@ class CarState(CarStateBase):
     cp_cruise = cp_alt if self.CP.flags & SubaruFlags.GLOBAL_GEN2 else cp
     cp_es_brake = cp_alt if self.CP.flags & SubaruFlags.GLOBAL_GEN2 else cp_cam
 
-    if self.CP.flags & (SubaruFlags.HYBRID | SubaruFlags.LKAS_ANGLE):
+    if self.CP.carFingerprint in (CAR.SUBARU_CROSSTREK_2025, CAR.SUBARU_LEGACY_2025, CAR.SUBARU_ASCENT_2023):
+      ret.cruiseState.enabled = cp_es_brake.vl["ES_Status"]["Cruise_Activated"] != 0
+      ret.cruiseState.available = cp_cam.vl["ES_DashStatus"]["Cruise_On"] != 0
+    elif self.CP.flags & (SubaruFlags.HYBRID | SubaruFlags.LKAS_ANGLE):
       # ES_DashStatus->Cruise_Activated_Dash is likely intended for the dash display only, as it falls
       # during user gas override and at standstill. ES_Status is missing on hybrid, so we use ES_Brake instead
 
@@ -134,6 +138,10 @@ class CarState(CarStateBase):
       self.es_distance_msg = copy.copy(cp_es_distance.vl["ES_Distance"])
 
     self.es_dashstatus_msg = copy.copy(cp_cam.vl["ES_DashStatus"])
+    if self.CP.flags & SubaruFlags.ASCENT_LKAS_ALERT:
+      alert = cp_cam.vl["ES_LKAS_Alert"]
+      self.es_lkas_alert_dat = (bytes((int(alert["CHECKSUM"]), int(alert["COUNTER"]) | (int(alert["Signal1"]) << 4))) +
+                                int(alert["Payload"]).to_bytes(6, "little"))
     if self.CP.flags & SubaruFlags.SEND_INFOTAINMENT:
       self.es_infotainment_msg = copy.copy(cp_cam.vl["ES_Infotainment"])
 
@@ -143,6 +151,6 @@ class CarState(CarStateBase):
   def get_can_parsers(CP):
     return {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus.main),
-      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus.camera),
+      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [("ES_LKAS_Alert", 0)] if CP.flags & SubaruFlags.ASCENT_LKAS_ALERT else [], CanBus.camera),
       Bus.alt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus.alt)
     }
