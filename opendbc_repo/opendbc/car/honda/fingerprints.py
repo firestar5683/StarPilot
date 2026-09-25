@@ -11,6 +11,29 @@ Ecu = CarParams.Ecu
 
 
 FW_VERSIONS = {
+  CAR.HONDA_CLARITY: {
+    (Ecu.shiftByWire, 0x18da0bf1, None): [
+      b'54008-TRW-A910\x00\x00',
+    ],
+    (Ecu.vsa, 0x18da28f1, None): [
+      b'57114-TRW-A010\x00\x00',
+      b'57114-TRW-A020\x00\x00',
+    ],
+    (Ecu.eps, 0x18da30f1, None): [
+      b'39990-TRW-A020\x00\x00',
+      b'39990-TRW,A020\x00\x00',
+    ],
+    (Ecu.srs, 0x18da53f1, None): [
+      b'77959-TRW-A210\x00\x00',
+      b'77959-TRW-A220\x00\x00',
+    ],
+    (Ecu.gateway, 0x18daeff1, None): [
+      b'38897-TRW-A010\x00\x00',
+    ],
+    (Ecu.fwdRadar, 0x18dab0f1, None): [
+      b'36161-TRW-A110\x00\x00',
+    ],
+  },
   CAR.HONDA_NBOX_2G: {
     (Ecu.vsa, 0x18da28f1, None): [
       b'57114-TTA-J030\x00\x00',
@@ -92,6 +115,7 @@ FW_VERSIONS = {
       b'39990-TVA-X040\x00\x00',
       b'39990-TVE-H130\x00\x00',
       b'39990-TWB-H120\x00\x00',
+      b'39990-TVA,A150\x00\x00',
     ],
     (Ecu.srs, 0x18da53f1, None): [
       b'77959-TBX-H230\x00\x00',
@@ -168,6 +192,7 @@ FW_VERSIONS = {
       b'39990-TBG-A030\x00\x00',
       b'39990-TEA-T020\x00\x00',
       b'39990-TEG-A010\x00\x00',
+      b'39990-TBA,A030\x00\x00',
     ],
     (Ecu.srs, 0x18da53f1, None): [
       b'77959-TBA-A030\x00\x00',
@@ -247,6 +272,8 @@ FW_VERSIONS = {
       b'39990-TGH-J530\x00\x00',
       b'39990-TGL-E130\x00\x00',
       b'39990-TGN-E120\x00\x00',
+      b'39990-TGG,A020\x00\x00',
+      b'39990-TGG,A120\x00\x00',
     ],
     (Ecu.srs, 0x18da53f1, None): [
       b'77959-TBA-A060\x00\x00',
@@ -385,6 +412,7 @@ FW_VERSIONS = {
       b'39990-TME-T030\x00\x00',
       b'39990-TME-T120\x00\x00',
       b'39990-TMT-T010\x00\x00',
+      b'39990-TLA,A040\x00\x00',
     ],
     (Ecu.electricBrakeBooster, 0x18da2bf1, None): [
       b'46114-TLA-A040\x00\x00',
@@ -1185,21 +1213,27 @@ FW_VERSIONS = {
   CAR.HONDA_CITY_7G: {
     (Ecu.eps, 0x18da30f1, None): [
       b'39990-T14-B030\x00\x00',
+      b'39990-T14-B510\x00\x00',
     ],
     (Ecu.gateway, 0x18daeff1, None): [
       b'38897-T14-M110\x00\x00',
+      b'38897-T14-M210\x00\x00',
     ],
     (Ecu.srs, 0x18da53f1, None): [
       b'77959-T00-B830\x00\x00',
+      b'77959-T14-B810\x00\x00',
     ],
     (Ecu.fwdRadar, 0x18dab0f1, None): [
       b'36161-T14-P050\x00\x00',
+      b'8S102-T14-P020\x00\x00',
     ],
     (Ecu.vsa, 0x18da28f1, None): [
       b'57114-T14-B030\x00\x00',
+      b'57114-T14-M510\x00\x00',
     ],
     (Ecu.transmission, 0x18da1ef1, None): [
       b'28101-63B-M420\x00\x00',
+      b'28101-63B-M510\x00\x00',
     ],
   },
   CAR.HONDA_PASSPORT_4G: {

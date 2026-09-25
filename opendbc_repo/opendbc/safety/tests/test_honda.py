@@ -572,5 +572,70 @@ class TestHondaBoschCANFDAltBrakeSafety(HondaPcmEnableBase, TestHondaBoschCANFDS
   SAFETY_PARAM = HondaSafetyFlags.BOSCH_CANFD | HondaSafetyFlags.ALT_BRAKE
 
 
+class TestHondaBoschAolAxisSafety(unittest.TestCase):
+  """Exact classic-CAN Bosch-long opt-in keeps native axes independent."""
+
+  def setUp(self):
+    self.fixture = TestHondaBoschLongSafety('test_diagnostics')
+    self.fixture.setUp()
+    self.safety = self.fixture.safety
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hondaBosch,
+                                 HondaSafetyFlags.BOSCH_LONG | HondaSafetyFlags.AOL_BOSCH_LONG)
+    self.safety.init_tests()
+    self.safety.set_timer(1_000_000)
+    self.fixture._rx(self.fixture._acc_state_msg(True))
+    self.safety.set_aol_test_heartbeat(True)
+
+  def _all_checked_rx(self):
+    self.fixture._rx(self.fixture._acc_state_msg(True))
+    self.fixture._rx(self.fixture._button_msg(Btn.NONE))
+    self.fixture._rx(self.fixture._speed_msg(20))
+    self.fixture._rx(self.fixture._powertrain_data_msg())
+
+  def test_request_and_native_ack_are_separate(self):
+    self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+    self.safety.aol_set_host_request(1)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 0)  # main alone is not complete RX health
+    self._all_checked_rx()
+    self.assertEqual(self.safety.aol_get_permission_mask(), 1)
+    self.assertTrue(self.fixture._tx(self.fixture._send_steer_msg(0x100)))
+    self.assertFalse(self.fixture._tx(self.fixture._send_gas_brake_msg(0, 1.0)))
+
+    self.safety.set_controls_allowed(True)
+    self.safety.aol_set_host_request(2)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 2)
+    self.assertFalse(self.fixture._tx(self.fixture._send_steer_msg(0x100)))
+    self.assertTrue(self.fixture._tx(self.fixture._send_gas_brake_msg(0, 1.0)))
+
+    self.safety.aol_set_host_request(3)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 3)
+    self.safety.aol_set_host_request(0)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+
+  def test_timeout_main_cancel_and_heartbeat_fail_closed(self):
+    self._all_checked_rx()
+    self.safety.aol_set_host_request(3)
+    self.safety.set_controls_allowed(True)
+    self.safety.set_timer(1_300_001)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+    self.safety.set_timer(1_400_000)
+    self._all_checked_rx()
+    self.safety.aol_set_host_request(3)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 3)
+    self.fixture._rx(self.fixture._button_msg(Btn.CANCEL))
+    self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+    self.safety.aol_set_host_request(1)
+    self.safety.set_aol_test_heartbeat(False)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+
+  def test_unsupported_honda_variants_never_get_aol_grant(self):
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hondaBosch,
+                                 HondaSafetyFlags.BOSCH_LONG | HondaSafetyFlags.RADARLESS | HondaSafetyFlags.AOL_BOSCH_LONG)
+    self.safety.init_tests()
+    self.safety.set_aol_test_heartbeat(True)
+    self.safety.aol_set_host_request(3)
+    self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+
+
 if __name__ == "__main__":
   unittest.main()

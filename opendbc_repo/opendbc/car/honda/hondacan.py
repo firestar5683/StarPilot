@@ -69,14 +69,18 @@ def create_brake_command(packer, CAN, apply_brake, pump_on, pcm_override, pcm_ca
   return packer.make_can_msg("BRAKE_COMMAND", CAN.pt, values)
 
 
-def create_acc_commands(packer, CAN, enabled, active, accel, gas, stopping_counter, CP):
+def create_acc_commands(packer, CAN, enabled, active, accel, gas, stopping_counter, CP, gas_force=None, braking=None):
   commands = []
   min_gas_accel = CarControllerParams.BOSCH_GAS_LOOKUP_BP[0]
 
   control_on = 5 if enabled else 0
-  gas_command = gas if active and accel > min_gas_accel else -30000
+  if gas_force is None:
+    gas_force = accel
+  if braking is None:
+    braking = gas_force < min_gas_accel
+  braking = int(active and braking)
+  gas_command = gas if active and gas_force > min_gas_accel and not braking else -30000
   accel_command = accel if active else 0
-  braking = 1 if active and accel < min_gas_accel else 0
   standstill = 1 if active and stopping_counter > 0 else 0
   standstill_release = 1 if active and stopping_counter == 0 else 0
 
@@ -216,13 +220,16 @@ def create_legacy_brake_command(packer, bus):
   return packer.make_can_msg("LEGACY_BRAKE_COMMAND", bus, {})
 
 
-def spam_buttons_command(packer, CAN, button_val, CP):
+def spam_buttons_command(packer, CAN, button_val, CP, *, cruise_setting=0, ambient_light=None, bus=None):
   values = {
     'CRUISE_BUTTONS': button_val,
-    'CRUISE_SETTING': 0,
+    'CRUISE_SETTING': cruise_setting,
   }
   # send buttons to camera on radarless (camera does ACC) cars
-  bus = CAN.camera if CP.flags & HondaFlags.BOSCH_RADARLESS else CAN.pt
+  if ambient_light is not None:
+    values["AMBIENT_LIGHT_MAYBE"] = ambient_light
+  if bus is None:
+    bus = CAN.camera if CP.flags & HondaFlags.BOSCH_RADARLESS else CAN.pt
   return packer.make_can_msg("SCM_BUTTONS", bus, values)
 
 

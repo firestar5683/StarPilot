@@ -3,6 +3,10 @@ import numpy as np
 from opendbc.can import CANPacker
 from opendbc.car import Bus, DT_CTRL, rate_limit, make_tester_present_msg, structs
 from opendbc.car.honda import hondacan
+from opendbc.car.honda.accord_mvl_stock import AccordMvlStock, qualified as mvl_stock_qualified
+from opendbc.car.honda.modified_civic_steering import ModifiedCivicSteering
+from opendbc.car.honda.nidec_interceptor import NidecInterceptor, create_command, qualified as interceptor_qualified
+from opendbc.car.honda.bosch_longitudinal import BoschLongitudinal, qualified as bosch_long_qualified
 from opendbc.car.honda.values import CAR, CruiseButtons, HondaFlags, CarControllerParams
 from opendbc.car.interfaces import CarControllerBase
 
@@ -93,7 +97,14 @@ class CarController(CarControllerBase):
     self.packer = CANPacker(dbc_names[Bus.pt])
     self.params = CarControllerParams(CP)
     self.CAN = hondacan.CanBus(CP)
+    self.bosch_longitudinal = BoschLongitudinal(CP, self.params) if bosch_long_qualified(CP) else None
+    self.bosch_learning_params = None
+    self.nidec_interceptor = NidecInterceptor(CP) if interceptor_qualified(CP) else None
+    self.interceptor_learning_params = None
+    self.accord_mvl_stock = AccordMvlStock() if mvl_stock_qualified(CP) else None
     self.tja_control = bool(CP.flags & HondaFlags.BOSCH_TJA_CONTROL)
+    self.modified_civic_steering = (ModifiedCivicSteering() if CP.carFingerprint == CAR.HONDA_CIVIC_BOSCH and
+                                    CP.flags & HondaFlags.EPS_MODIFIED and not CP.passive and not CP.dashcamOnly and not CP.notCar else None)
 
     self.braking = False
     self.brake_steady = 0.
@@ -113,6 +124,8 @@ class CarController(CarControllerBase):
     hud_control = CC.hudControl
     hud_v_cruise = hud_control.setSpeed / CS.v_cruise_factor if hud_control.speedVisible else 255
     pcm_cancel_cmd = CC.cruiseControl.cancel
+    if self.bosch_longitudinal is not None:
+      self.bosch_longitudinal.observe_orientation(CC.orientationNED)
 
     if CC.longActive:
       accel = actuators.accel
@@ -122,7 +135,8 @@ class CarController(CarControllerBase):
       gas, brake = 0.0, 0.0
 
     # *** rate limit steer ***
-    limited_torque = rate_limit(actuators.torque, self.last_torque, -self.params.STEER_DELTA_DOWN * DT_CTRL,
+    torque_cmd = self.modified_civic_steering.update(CC, CS) if self.modified_civic_steering is not None else actuators.torque
+    limited_torque = rate_limit(torque_cmd, self.last_torque, -self.params.STEER_DELTA_DOWN * DT_CTRL,
                                 self.params.STEER_DELTA_UP * DT_CTRL)
     self.last_torque = limited_torque
 
@@ -138,7 +152,9 @@ class CarController(CarControllerBase):
     # **** process the car messages ****
 
     # steer torque is converted back to CAN reference (positive when steering right)
-    apply_torque = int(np.clip(-limited_torque, -1.0, 1.0) * self.params.STEER_MAX)
+    # Preserve integer CAN rounding while steering limits are owned by the platform.
+    apply_torque = int(np.interp(-limited_torque * self.params.STEER_MAX,
+                                 self.params.STEER_LOOKUP, self.params.STEER_LOOKUP_V))
 
     # Send CAN commands
     can_sends = []
@@ -162,7 +178,7 @@ class CarController(CarControllerBase):
                     0.5]
     # The Honda ODYSSEY seems to have different PCM_ACCEL
     # msgs, is it other cars too?
-    if not CC.longActive:
+    if self.nidec_interceptor is not None or not CC.longActive:
       pcm_speed = 0.0
       pcm_accel = int(0.0)
     elif self.CP.flags & HondaFlags.NIDEC_ALT_PCM_ACCEL:
@@ -195,13 +211,17 @@ class CarController(CarControllerBase):
         ts = self.frame * DT_CTRL
 
         if self.CP.flags & HondaFlags.BOSCH:
-          self.accel = float(np.clip(accel, self.params.BOSCH_ACCEL_MIN, self.params.BOSCH_ACCEL_MAX))
-          self.gas = float(np.interp(accel, self.params.BOSCH_GAS_LOOKUP_BP, self.params.BOSCH_GAS_LOOKUP_V))
+          gas_force = braking = None
+          if self.bosch_longitudinal is not None:
+            self.accel, self.gas, gas_force, braking = self.bosch_longitudinal.update(CC, CS, accel)
+          else:
+            self.accel = float(np.clip(accel, self.params.BOSCH_ACCEL_MIN, self.params.BOSCH_ACCEL_MAX))
+            self.gas = float(np.interp(accel, self.params.BOSCH_GAS_LOOKUP_BP, self.params.BOSCH_GAS_LOOKUP_V))
 
           stopping = actuators.longControlState == LongCtrlState.stopping
           self.stopping_counter = self.stopping_counter + 1 if stopping else 0
           can_sends.extend(hondacan.create_acc_commands(self.packer, self.CAN, CC.enabled, CC.longActive, self.accel, self.gas,
-                                                        self.stopping_counter, self.CP))
+                                                        self.stopping_counter, self.CP, gas_force=gas_force, braking=braking))
         else:
           apply_brake = np.clip(self.brake_last - wind_brake, 0.0, 1.0)
           apply_brake = int(np.clip(apply_brake * self.params.NIDEC_BRAKE_MAX, 0, self.params.NIDEC_BRAKE_MAX - 1))
@@ -212,6 +232,9 @@ class CarController(CarControllerBase):
                                                          pcm_override, pcm_cancel_cmd, alert_fcw, CS.stock_brake))
           self.apply_brake_last = apply_brake
           self.brake = apply_brake / self.params.NIDEC_BRAKE_MAX
+          if self.nidec_interceptor is not None:
+            command = self.nidec_interceptor.update(CC, CS, gas, brake, wind_brake)
+            can_sends.append(create_command(self.packer, command, (self.frame // 2) % 16))
 
     # Send dashboard UI commands.
     if self.frame % 10 == 0:
@@ -232,7 +255,16 @@ class CarController(CarControllerBase):
           can_sends.append(hondacan.create_legacy_brake_command(self.packer, self.CAN.pt))
         if not (self.CP.flags & HondaFlags.BOSCH):
           self.speed = pcm_speed
-          self.gas = pcm_accel / self.params.NIDEC_GAS_MAX
+          self.gas = (self.nidec_interceptor.command if self.nidec_interceptor is not None else
+                      pcm_accel / self.params.NIDEC_GAS_MAX)
+
+    if self.accord_mvl_stock is not None:
+      can_sends.extend(self.accord_mvl_stock.update(self.packer, self.CAN, self.CP, CC, CS, self.frame))
+
+    if self.interceptor_learning_params is not None:
+      self.interceptor_learning_params.persist(self.frame)
+    if self.bosch_learning_params is not None:
+      self.bosch_learning_params.persist(self.frame)
 
     new_actuators = actuators.as_builder()
     new_actuators.speed = self.speed
