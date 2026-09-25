@@ -58,4 +58,10 @@ BO_ {a} RADAR_TRACK_{a:x}: 8 RADAR
  SG_ STATE_2 : 55|2@0+ (1,0) [0|3] "" XXX
     """)
 
-  return {"hyundai_kia_mando_front_radar.dbc": "".join(parts)}
+  ordinary = "".join(parts)
+  extended_parts = list(parts)
+  template = parts[1]
+  for address in range(0x520, 0x540):
+    extended_parts.append(template.replace("BO_ 1280 RADAR_TRACK_500:", f"BO_ {address} RADAR_TRACK_{address:x}:"))
+  return {"hyundai_kia_mando_front_radar.dbc": ordinary,
+          "hyundai_genesis_g90_radar.dbc": "".join(extended_parts)}

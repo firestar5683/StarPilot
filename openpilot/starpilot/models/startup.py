@@ -2,6 +2,9 @@
 
 from dataclasses import dataclass
 import time
+import sys
+import traceback
+from threading import Thread
 
 from openpilot.cereal import messaging
 from openpilot.common.swaglog import cloudlog
@@ -88,3 +91,9 @@ def wait_for_chestnut_power(CP, timeout: float = 30.) -> None:
       cloudlog.info("Chestnut power stable; starting GPU load")
       return
   raise TimeoutError("Chestnut power or vehicle READY did not stabilize")
+
+
+def report_load_timeout(loader: Thread, timeout: float) -> None:
+  frame = sys._current_frames().get(loader.ident) if loader.ident is not None else None
+  stack = "".join(traceback.format_stack(frame, limit=24)) if frame is not None else "Loader already exited"
+  cloudlog.event("chestnut.load_timeout", timeout_s=timeout, loader_stack=stack, error=True)
