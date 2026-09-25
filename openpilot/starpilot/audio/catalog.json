@@ -1,0 +1,40 @@
+{
+  "version": 1,
+  "packs": [
+    {
+      "id": "duck",
+      "name": "Duck",
+      "path": "theme/Themes/duck/sounds.zip",
+      "size": 75095,
+      "sha256": "c37c1f0f177a08a79b4eae723392bedb39b2b99d49a4226b0ca5141a00d523f8"
+    },
+    {
+      "id": "old_engage_sounds",
+      "name": "Old Engage Sounds",
+      "path": "theme/Themes/old_engage_sounds/sounds.zip",
+      "size": 376387,
+      "sha256": "2fff703ee69452789ec7884e6447c146a0f45c6fa39c70455fd9db88e15ebb54"
+    },
+    {
+      "id": "stalin",
+      "name": "Stalin",
+      "path": "theme/Themes/stalin/sounds.zip",
+      "size": 1443422,
+      "sha256": "52f07cf7456a3eed2435a6a5ec46b6a0a99fa9714b0ddb3a1d46bf940117ee59"
+    },
+    {
+      "id": "tesla",
+      "name": "Tesla",
+      "path": "theme/Themes/tesla/sounds.zip",
+      "size": 237831,
+      "sha256": "98a13264d9c5c61f0f9f2a8c5e073aa32b3c3679c671c3cb520f9c2c443c79eb"
+    },
+    {
+      "id": "weeb",
+      "name": "Weeb",
+      "path": "theme/Themes/weeb/sounds.zip",
+      "size": 1139378,
+      "sha256": "e367fdfc0d3d6604183e779180b281471f2135a2be5e75b9766a52c03696ba36"
+    }
+  ]
+}
