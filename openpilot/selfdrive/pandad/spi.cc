@@ -41,8 +41,8 @@ const std::string SPI_DEVICE = "/dev/spidev0.0";
 class LockEx {
 public:
   LockEx(int fd_, std::recursive_mutex &m_) : fd(fd_), m(m_) {
-    m.lock();
-    flock(fd, LOCK_EX);
+    { m.lock(); }
+    { flock(fd, LOCK_EX); }
   }
 
   ~LockEx() {
@@ -283,7 +283,8 @@ int PandaSpiHandle::lltransfer(spi_ioc_transfer &t) {
     corrupt(t.tx_buf);
   }
 
-  int ret = util::safe_ioctl(spi_fd, SPI_IOC_MESSAGE(1), &t);
+  int ret;
+  { ret = util::safe_ioctl(spi_fd, SPI_IOC_MESSAGE(1), &t); }
   if (err_prob > 0 && chance(err_prob)) {
     printf("ioctl error\n");
     ret = -1;
@@ -300,13 +301,14 @@ int PandaSpiHandle::lltransfer(spi_ioc_transfer &t) {
 // or the deadline. Every transfer either sees all of what the panda queued from its first byte, or
 // nothing it can mistake for a response. Returns the response length, or a negative SpiError
 int PandaSpiHandle::spi_transfer(uint8_t endpoint, uint32_t id, uint8_t *tx_data, uint16_t tx_len, uint8_t *rx_data, uint16_t max_rx_len, double deadline) {
+
   static const auto poll = [] {
     std::array<uint8_t, SPI_BUF_SIZE> p;
     p.fill(SPI_POLL);
     return p;
   }();
-
   LockEx lock(spi_fd, hw_lock);
+
 
   // the response is always read in one transfer of rx_len
   const uint32_t rx_len = sizeof(spi_resp_header) + max_rx_len + SPI_CRC_SIZE;
@@ -346,7 +348,9 @@ int PandaSpiHandle::spi_transfer(uint8_t endpoint, uint32_t id, uint8_t *tx_data
       alive = millis_since_boot();
       // read until the response. if the panda is ready again, it never got the request
       do {
-        if (xfer(poll.data(), rx_len) < 0) {
+        int poll_ret;
+        { poll_ret = xfer(poll.data(), rx_len); }
+        if (poll_ret < 0) {
           break;
         }
         if (rx_buf[0] == SPI_SLAVE_READY) {

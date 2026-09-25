@@ -49,7 +49,7 @@ void set_gpio_output_type(GPIO_TypeDef *GPIO, unsigned int pin, unsigned int out
 void set_gpio_alternate(GPIO_TypeDef *GPIO, unsigned int pin, unsigned int mode) {
   ENTER_CRITICAL();
   uint32_t tmp = GPIO->AFR[pin >> 3U];
-  tmp &= ~(0xFU << ((pin & 7U) * 4U));
+  tmp &= ~((uint32_t)0xFU << ((pin & 7U) * 4U));
   tmp |= mode << ((pin & 7U) * 4U);
   register_set(&(GPIO->AFR[pin >> 3]), tmp, 0xFFFFFFFFU);
   set_gpio_mode(GPIO, pin, MODE_ALTERNATE);

@@ -8,7 +8,7 @@
 // Low power state "stop mode" is only entered from SAFETY_SILENT when no safety function is active and exited via reset which is a safe state.
 
 bool power_save_enabled = false;
-#ifdef ALLOW_DEBUG
+#if defined(ALLOW_DEBUG) && defined(STM32H7)
 volatile bool stop_mode_requested = false;
 #endif
 
@@ -16,7 +16,12 @@ void enable_can_transceivers(bool enabled) {
   // Leave main CAN always on for CAN-based ignition detection
   uint8_t main_bus = (harness.status == HARNESS_STATUS_FLIPPED) ? 3U : 1U;
   for(uint8_t i=1U; i<=4U; i++){
-    current_board->enable_can_transceiver(i, (i == main_bus) || enabled);
+    bool transceiver_enabled = (i == main_bus) || enabled;
+    #ifdef PANDA_HKG_REMOTE_START
+    uint8_t hkg_bus = (harness.status == HARNESS_STATUS_FLIPPED) ? 4U : 2U;
+    transceiver_enabled = transceiver_enabled || (i == hkg_bus);
+    #endif
+    current_board->enable_can_transceiver(i, transceiver_enabled);
   }
 }
 
@@ -31,7 +36,9 @@ void set_power_save_state(bool enable) {
       } else {
         llcan_irq_disable(cans[2]);
       }
+      #ifndef PANDA_HKG_REMOTE_START
       llcan_irq_disable(cans[1]);
+      #endif
     } else {
       print("disable power savings\n");
 
@@ -54,6 +61,7 @@ void set_power_save_state(bool enable) {
   }
 }
 
+#ifdef STM32H7
 static void enter_stop_mode(void) {
   // the SPI CS interrupt shares an IRQ with the FDCAN3 RX wakeup line, and doesn't clear its pending bit
   NVIC_DisableIRQ(EXTI15_10_IRQn);
@@ -161,3 +169,4 @@ static void enter_stop_mode(void) {
 
   NVIC_SystemReset();
 }
+#endif
