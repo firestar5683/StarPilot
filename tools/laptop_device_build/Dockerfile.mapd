@@ -1,0 +1,7 @@
+# Explicit setup only. ./build --mapd never builds or pulls this image.
+# Pinned official Go 1.25.1 multi-platform manifest; build with --platform linux/arm64.
+FROM golang:1.25.1@sha256:d7098379b7da665ab25b99795465ec320b1ca9d4addb9f77409c4827dc904211
+
+RUN apt-get update && apt-get install -y --no-install-recommends \
+    pkg-config zlib1g-dev python3 \
+  && rm -rf /var/lib/apt/lists/*

@@ -1,0 +1,15 @@
+mapd
+**/*.DS_Store
+**/*._.DS_Store
+/offline
+scripts/offline
+scripts/mapd
+tmp
+filtered.osm.pbf
+planet-latest.osm.pbf
+box.osm.pbf
+map.osm.pbf
+.git
+/build
+/nation_bounding_boxes.json
+/us_states_bounding_boxes.json

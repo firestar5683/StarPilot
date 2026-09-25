@@ -1,0 +1,74 @@
+from contextlib import contextmanager
+from types import SimpleNamespace
+
+import pytest
+
+from openpilot.starpilot.navigation.owner import NavigationOwner, ValidationError
+
+PNG = b'\x89PNG\r\n\x1a\n' + b'\x00\x00\x00\x0dIHDR' + b'\x00\x00\x02\x00' * 2 + b'fixture'
+
+
+class Provider:
+  def __init__(self, mutate=None, chunks=None):
+    self.calls = []
+    self.mutate = mutate
+    self.chunks = chunks or [PNG]
+
+  @contextmanager
+  def get(self, url, **kwargs):
+    self.calls.append((url, kwargs))
+    if self.mutate:
+      self.mutate()
+    yield SimpleNamespace(status_code=200, headers={'Content-Type': 'image/png'}, iter_content=lambda size: iter(self.chunks))
+
+
+def tile_owner(tmp_path, provider, token='pk.fixture'):
+  owner = NavigationOwner(tmp_path, runtime_source=lambda: None, session=provider)
+  owner.read = lambda: {'token': token}
+  return owner
+
+
+@pytest.mark.parametrize('coordinates', [(19, 0, 0), (-1, 0, 0), (1, 2, 0), (1, 0, -1), (True, 0, 0)])
+def test_invalid_tiles_never_request_provider(tmp_path, coordinates):
+  provider = Provider()
+  with pytest.raises(ValidationError):
+    tile_owner(tmp_path, provider).map_tile(*coordinates)
+  assert not provider.calls
+
+
+def test_missing_key_and_busy_fail_without_network(tmp_path):
+  provider = Provider()
+  owner = tile_owner(tmp_path, provider, '')
+  with pytest.raises(ValidationError):
+    owner.map_tile(0, 0, 0)
+  owner = tile_owner(tmp_path, provider)
+  for _ in range(4):
+    assert owner._tile_slots.acquire(False)
+  with pytest.raises(ValidationError):
+    owner.map_tile(0, 0, 0)
+  assert not provider.calls
+
+
+def test_fixed_provider_and_server_only_key(tmp_path):
+  provider = Provider()
+  assert tile_owner(tmp_path, provider).map_tile(2, 3, 1) == PNG
+  url, arguments = provider.calls[0]
+  assert url == 'https://api.mapbox.com/styles/v1/mapbox/streets-v12/tiles/512/2/3/1.png'
+  assert arguments['params'] == {'access_token': 'pk.fixture'}
+  assert arguments['allow_redirects'] is False
+
+
+def test_key_revoked_during_fetch_discards_bytes(tmp_path):
+  provider = Provider()
+  owner = tile_owner(tmp_path, provider)
+  provider.mutate = lambda: setattr(owner, 'read', lambda: {'token': ''})
+  with pytest.raises(ValidationError, match='key changed'):
+    owner.map_tile(0, 0, 0)
+  assert owner._tile_slots.acquire(False)
+
+
+def test_oversize_response_releases_slot(tmp_path):
+  owner = tile_owner(tmp_path, Provider(chunks=[b'x' * (2 * 1024 * 1024 + 1)]))
+  with pytest.raises(ValidationError, match='request limit'):
+    owner.map_tile(0, 0, 0)
+  assert owner._tile_slots.acquire(False)

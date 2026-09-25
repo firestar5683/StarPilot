@@ -1,0 +1,506 @@
+{
+  "AL": {
+    "full_name": "Alabama",
+    "bounding_box": {
+      "min_lon": -88.4745951503515,
+      "min_lat": 30.222501133601334,
+      "max_lon": -84.89247974539745,
+      "max_lat": 35.008322669916694
+    }
+  },
+  "AK": {
+    "full_name": "Alaska",
+    "bounding_box": {
+      "min_lon": -179.13657211802118,
+      "min_lat": 51.229087747767466,
+      "max_lon": 179.77488070600702,
+      "max_lat": 71.352561
+    }
+  },
+  "AZ": {
+    "full_name": "Arizona",
+    "bounding_box": {
+      "min_lon": -114.8128344705447,
+      "min_lat": 31.332406253852533,
+      "max_lon": -109.04483902389023,
+      "max_lat": 37.0039183311733
+    }
+  },
+  "AR": {
+    "full_name": "Arkansas",
+    "bounding_box": {
+      "min_lon": -94.61946646626465,
+      "min_lat": 33.00413641175411,
+      "max_lon": -89.65547287402873,
+      "max_lat": 36.49965029279292
+    }
+  },
+  "CA": {
+    "full_name": "California",
+    "bounding_box": {
+      "min_lon": -124.41060660766607,
+      "min_lat": 32.5342307609976,
+      "max_lon": -114.13445790587905,
+      "max_lat": 42.00965914828148
+    }
+  },
+  "CO": {
+    "full_name": "Colorado",
+    "bounding_box": {
+      "min_lon": -109.05919619986199,
+      "min_lat": 36.99275055519555,
+      "max_lon": -102.04212644366443,
+      "max_lat": 41.00198213121131
+    }
+  },
+  "CT": {
+    "full_name": "Connecticut",
+    "bounding_box": {
+      "min_lon": -73.72618613336134,
+      "min_lat": 40.98480093739937,
+      "max_lon": -71.78796737717377,
+      "max_lat": 42.050894013430124
+    }
+  },
+  "DE": {
+    "full_name": "Delaware",
+    "bounding_box": {
+      "min_lon": -75.7900301793018,
+      "min_lat": 38.45143390982909,
+      "max_lon": -75.05063561675617,
+      "max_lat": 39.8388153101431
+    }
+  },
+  "DC": {
+    "full_name": "District of Columbia",
+    "bounding_box": {
+      "min_lon": -77.11806895668957,
+      "min_lat": 38.79162154730547,
+      "max_lon": -76.90988990509905,
+      "max_lat": 38.99435963428633
+    }
+  },
+  "FL": {
+    "full_name": "Florida",
+    "bounding_box": {
+      "min_lon": -87.63470035600356,
+      "min_lat": 24.51490854927549,
+      "max_lon": -80.03257567895679,
+      "max_lat": 31.000809213282125
+    }
+  },
+  "GA": {
+    "full_name": "Georgia",
+    "bounding_box": {
+      "min_lon": -85.60674924999249,
+      "min_lat": 30.35909162440624,
+      "max_lon": -80.84375612136121,
+      "max_lat": 35.000591132701324
+    }
+  },
+  "HI": {
+    "full_name": "Hawaii",
+    "bounding_box": {
+      "min_lon": -160.24970712717126,
+      "min_lat": 18.91727560534605,
+      "max_lon": -154.80833743387433,
+      "max_lat": 22.23238695135951
+    }
+  },
+  "ID": {
+    "full_name": "Idaho",
+    "bounding_box": {
+      "min_lon": -117.24278650376503,
+      "min_lat": 41.988182656016555,
+      "max_lon": -111.04407577795777,
+      "max_lat": 49.00068691035909
+    }
+  },
+  "IL": {
+    "full_name": "Illinois",
+    "bounding_box": {
+      "min_lon": -91.51472716237161,
+      "min_lat": 36.97041500324003,
+      "max_lon": -87.4947178902789,
+      "max_lat": 42.508772828518275
+    }
+  },
+  "IN": {
+    "full_name": "Indiana",
+    "bounding_box": {
+      "min_lon": -88.09771928109281,
+      "min_lat": 37.77191769456694,
+      "max_lon": -84.78480092560925,
+      "max_lat": 41.760531838008376
+    }
+  },
+  "IA": {
+    "full_name": "Iowa",
+    "bounding_box": {
+      "min_lon": -96.63306039630396,
+      "min_lat": 40.37830479583795,
+      "max_lon": -90.14002756307562,
+      "max_lat": 43.50012771146711
+    }
+  },
+  "KS": {
+    "full_name": "Kansas",
+    "bounding_box": {
+      "min_lon": -102.05289432564325,
+      "min_lat": 36.99275055519555,
+      "max_lon": -94.59075211432113,
+      "max_lat": 40.0028957110471
+    }
+  },
+  "KY": {
+    "full_name": "Kentucky",
+    "bounding_box": {
+      "min_lon": -89.57291911219112,
+      "min_lat": 36.49707311372113,
+      "max_lon": -81.96720514115141,
+      "max_lat": 39.14641319952199
+    }
+  },
+  "LA": {
+    "full_name": "Louisiana",
+    "bounding_box": {
+      "min_lon": -94.04159013340133,
+      "min_lat": 28.929616299252984,
+      "max_lon": -88.81557807968079,
+      "max_lat": 33.01959948618486
+    }
+  },
+  "ME": {
+    "full_name": "Maine",
+    "bounding_box": {
+      "min_lon": -71.08446575455754,
+      "min_lat": 43.059430090190894,
+      "max_lon": -66.9819027206272,
+      "max_lat": 47.459533825428245
+    }
+  },
+  "MD": {
+    "full_name": "Maryland",
+    "bounding_box": {
+      "min_lon": -79.48700299202991,
+      "min_lat": 37.91709878227782,
+      "max_lon": -75.05063561675617,
+      "max_lat": 39.72284225191251
+    }
+  },
+  "MA": {
+    "full_name": "Massachusetts",
+    "bounding_box": {
+      "min_lon": -73.507239199792,
+      "min_lat": 41.23908260581605,
+      "max_lon": -69.92871308883089,
+      "max_lat": 42.88675909238091
+    }
+  },
+  "MI": {
+    "full_name": "Michigan",
+    "bounding_box": {
+      "min_lon": -90.416403200532,
+      "min_lat": 41.696102361213605,
+      "max_lon": -82.4158668902689,
+      "max_lat": 48.190593622126215
+    }
+  },
+  "MN": {
+    "full_name": "Minnesota",
+    "bounding_box": {
+      "min_lon": -97.23965108111081,
+      "min_lat": 43.49926865177651,
+      "max_lon": -89.4903653503535,
+      "max_lat": 49.384686592055914
+    }
+  },
+  "MS": {
+    "full_name": "Mississippi",
+    "bounding_box": {
+      "min_lon": -91.64394174611746,
+      "min_lat": 30.180407208762084,
+      "max_lon": -88.09771928109281,
+      "max_lat": 34.99543677455774
+    }
+  },
+  "MO": {
+    "full_name": "Missouri",
+    "bounding_box": {
+      "min_lon": -95.76804054400543,
+      "min_lat": 35.99538225441254,
+      "max_lon": -89.09913230512305,
+      "max_lat": 40.613687151061505
+    }
+  },
+  "MT": {
+    "full_name": "Montana",
+    "bounding_box": {
+      "min_lon": -116.05114089810897,
+      "min_lat": 44.35832834237342,
+      "max_lon": -104.04136319773197,
+      "max_lat": 49.00154597004969
+    }
+  },
+  "NE": {
+    "full_name": "Nebraska",
+    "bounding_box": {
+      "min_lon": -104.05213107971079,
+      "min_lat": 40.00031853197531,
+      "max_lon": -95.30861091290913,
+      "max_lat": 43.001014031230305
+    }
+  },
+  "NV": {
+    "full_name": "Nevada",
+    "bounding_box": {
+      "min_lon": -120.00654287832877,
+      "min_lat": 35.00145019239192,
+      "max_lon": -114.04113626206261,
+      "max_lat": 42.0019276110661
+    }
+  },
+  "NH": {
+    "full_name": "New Hampshire",
+    "bounding_box": {
+      "min_lon": -72.55607629166292,
+      "min_lat": 42.696906900759004,
+      "max_lon": -70.70400059130591,
+      "max_lat": 45.30587118110181
+    }
+  },
+  "NJ": {
+    "full_name": "New Jersey",
+    "bounding_box": {
+      "min_lon": -75.56031536375363,
+      "min_lat": 38.928212038110374,
+      "max_lon": -73.8948829510295,
+      "max_lat": 41.357632843118424
+    }
+  },
+  "NM": {
+    "full_name": "New Mexico",
+    "bounding_box": {
+      "min_lon": -109.04842831788318,
+      "min_lat": 31.332406253852533,
+      "max_lon": -103.0004679397794,
+      "max_lat": 37.00048209241092
+    }
+  },
+  "NY": {
+    "full_name": "New York",
+    "bounding_box": {
+      "min_lon": -79.7633786294863,
+      "min_lat": 40.502009391283906,
+      "max_lon": -71.85616396303963,
+      "max_lat": 45.01550900568005
+    }
+  },
+  "NC": {
+    "full_name": "North Carolina",
+    "bounding_box": {
+      "min_lon": -84.32178200052,
+      "min_lat": 33.85116926668266,
+      "max_lon": -75.45981513195132,
+      "max_lat": 36.5881334409244
+    }
+  },
+  "ND": {
+    "full_name": "North Dakota",
+    "bounding_box": {
+      "min_lon": -104.04854178571784,
+      "min_lat": 45.934702874618736,
+      "max_lon": -96.55768522245222,
+      "max_lat": 49.00068691035909
+    }
+  },
+  "OH": {
+    "full_name": "Ohio",
+    "bounding_box": {
+      "min_lon": -84.82069386553866,
+      "min_lat": 38.40504468653686,
+      "max_lon": -80.52071966199662,
+      "max_lat": 41.97787393972939
+    }
+  },
+  "OK": {
+    "full_name": "Oklahoma",
+    "bounding_box": {
+      "min_lon": -103.00405723377233,
+      "min_lat": 33.61664597114971,
+      "max_lon": -94.43282317863178,
+      "max_lat": 37.002200211792115
+    }
+  },
+  "OR": {
+    "full_name": "Oregon",
+    "bounding_box": {
+      "min_lon": -124.55417836738366,
+      "min_lat": 41.99161889477894,
+      "max_lon": -116.46390970729706,
+      "max_lat": 46.26801803457034
+    }
+  },
+  "PA": {
+    "full_name": "Pennsylvania",
+    "bounding_box": {
+      "min_lon": -80.52071966199662,
+      "min_lat": 39.720265072840725,
+      "max_lon": -74.69529551145511,
+      "max_lat": 42.269954234532335
+    }
+  },
+  "PR": {
+    "full_name": "Puerto Rico",
+    "bounding_box": {
+      "min_lon": -67.94024421674217,
+      "min_lat": 17.91217576734767,
+      "max_lon": -65.22314866408664,
+      "max_lat": 18.51609472983729
+    }
+  },
+  "RI": {
+    "full_name": "Rhode Island",
+    "bounding_box": {
+      "min_lon": -71.85975325703257,
+      "min_lat": 41.15145851737517,
+      "max_lon": -71.12035869448694,
+      "max_lat": 42.019108804878044
+    }
+  },
+  "SC": {
+    "full_name": "South Carolina",
+    "bounding_box": {
+      "min_lon": -83.34908332843328,
+      "min_lat": 32.03425802107021,
+      "max_lon": -78.53942937789378,
+      "max_lat": 35.21535605535055
+    }
+  },
+  "SD": {
+    "full_name": "South Dakota",
+    "bounding_box": {
+      "min_lon": -104.05930966769667,
+      "min_lat": 42.484719157181566,
+      "max_lon": -96.43564922669226,
+      "max_lat": 45.9450115909059
+    }
+  },
+  "TN": {
+    "full_name": "Tennessee",
+    "bounding_box": {
+      "min_lon": -90.3087243807438,
+      "min_lat": 34.98255087919878,
+      "max_lon": -81.64775797577975,
+      "max_lat": 36.67833470843708
+    }
+  },
+  "TX": {
+    "full_name": "Texas",
+    "bounding_box": {
+      "min_lon": -106.64719063660635,
+      "min_lat": 25.840437651866516,
+      "max_lon": -93.5175532104321,
+      "max_lat": 36.50050935248352
+    }
+  },
+  "UT": {
+    "full_name": "Utah",
+    "bounding_box": {
+      "min_lon": -114.05190414404143,
+      "min_lat": 36.99790491333913,
+      "max_lon": -109.04124972989729,
+      "max_lat": 42.0019276110661
+    }
+  },
+  "VT": {
+    "full_name": "Vermont",
+    "bounding_box": {
+      "min_lon": -73.43904261392613,
+      "min_lat": 42.726973989929895,
+      "max_lon": -71.49364526975269,
+      "max_lat": 45.01550900568005
+    }
+  },
+  "VI": {
+    "full_name": "Virgin Islands",
+    "bounding_box": {
+      "min_lon": -65.08316619836198,
+      "min_lat": 17.679370591195905,
+      "max_lon": -64.57707574535745,
+      "max_lat": 18.38465859717597
+    }
+  },
+  "VA": {
+    "full_name": "Virginia",
+    "bounding_box": {
+      "min_lon": -83.67570908179081,
+      "min_lat": 36.540885157941574,
+      "max_lon": -75.24086819838197,
+      "max_lat": 39.46598340442404
+    }
+  },
+  "WA": {
+    "full_name": "Washington",
+    "bounding_box": {
+      "min_lon": -124.73364306703067,
+      "min_lat": 45.54383071539715,
+      "max_lon": -116.9161607504075,
+      "max_lat": 49.00240502974029
+    }
+  },
+  "WV": {
+    "full_name": "West Virginia",
+    "bounding_box": {
+      "min_lon": -82.63840311783117,
+      "min_lat": 37.2015020600106,
+      "max_lon": -77.72107034750347,
+      "max_lat": 40.63859988208881
+    }
+  },
+  "WI": {
+    "full_name": "Wisconsin",
+    "bounding_box": {
+      "min_lon": -92.88942676166761,
+      "min_lat": 42.49159163470634,
+      "max_lon": -86.82351991359913,
+      "max_lat": 47.07725226311263
+    }
+  },
+  "WY": {
+    "full_name": "Wyoming",
+    "bounding_box": {
+      "min_lon": -111.05843295392954,
+      "min_lat": 40.995109653686534,
+      "max_lon": -104.05213107971079,
+      "max_lat": 45.006059349083486
+    }
+  },
+  "MP": {
+    "full_name": "Northern Mariana Islands",
+    "bounding_box": {
+      "min_lon": 145.12024720417202,
+      "min_lat": 14.110836636456362,
+      "max_lon": 146.0821779942799,
+      "max_lat": 18.81247032309323
+    }
+  },
+  "GM": {
+    "full_name": "Guam",
+    "bounding_box": {
+      "min_lon": 144.62133533915335,
+      "min_lat": 13.245763528025279,
+      "max_lon": 144.9587289744897,
+      "max_lat": 13.652098761677614
+    }
+  },
+  "AS": {
+    "full_name": "American Samoa",
+    "bounding_box": {
+      "min_lon": -170.84530299432993,
+      "min_lat": -14.373864584355843,
+      "max_lon": -169.42394257312571,
+      "max_lat": -14.157381542325423
+    }
+  }
+}

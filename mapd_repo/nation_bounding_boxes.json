@@ -1,0 +1,1559 @@
+{
+  "AF": {
+    "full_name": "Afghanistan",
+    "bounding_box": {
+      "min_lon": 60.53,
+      "min_lat": 29.32,
+      "max_lon": 75.16,
+      "max_lat": 38.49
+    }
+  },
+  "AO": {
+    "full_name": "Angola",
+    "bounding_box": {
+      "min_lon": 11.64,
+      "min_lat": -17.93,
+      "max_lon": 24.08,
+      "max_lat": -4.44
+    }
+  },
+  "AL": {
+    "full_name": "Albania",
+    "bounding_box": {
+      "min_lon": 19.3,
+      "min_lat": 39.62,
+      "max_lon": 21.02,
+      "max_lat": 42.69
+    }
+  },
+  "AE": {
+    "full_name": "United Arab Emirates",
+    "bounding_box": {
+      "min_lon": 51.58,
+      "min_lat": 22.5,
+      "max_lon": 56.4,
+      "max_lat": 26.06
+    }
+  },
+  "AR": {
+    "full_name": "Argentina",
+    "bounding_box": {
+      "min_lon": -73.42,
+      "min_lat": -55.25,
+      "max_lon": -53.63,
+      "max_lat": -21.83
+    }
+  },
+  "AM": {
+    "full_name": "Armenia",
+    "bounding_box": {
+      "min_lon": 43.58,
+      "min_lat": 38.74,
+      "max_lon": 46.51,
+      "max_lat": 41.25
+    }
+  },
+  "AQ": {
+    "full_name": "Antarctica",
+    "bounding_box": {
+      "min_lon": -180,
+      "min_lat": -90,
+      "max_lon": 180,
+      "max_lat": -63.27
+    }
+  },
+  "TF": {
+    "full_name": "French Southern Territories",
+    "bounding_box": {
+      "min_lon": 68.72,
+      "min_lat": -49.78,
+      "max_lon": 70.56,
+      "max_lat": -48.63
+    }
+  },
+  "AU": {
+    "full_name": "Australia",
+    "bounding_box": {
+      "min_lon": 113.34,
+      "min_lat": -43.63,
+      "max_lon": 153.57,
+      "max_lat": -10.67
+    }
+  },
+  "AT": {
+    "full_name": "Austria",
+    "bounding_box": {
+      "min_lon": 9.48,
+      "min_lat": 46.43,
+      "max_lon": 16.98,
+      "max_lat": 49.04
+    }
+  },
+  "AZ": {
+    "full_name": "Azerbaijan",
+    "bounding_box": {
+      "min_lon": 44.79,
+      "min_lat": 38.27,
+      "max_lon": 50.39,
+      "max_lat": 41.86
+    }
+  },
+  "BI": {
+    "full_name": "Burundi",
+    "bounding_box": {
+      "min_lon": 29.02,
+      "min_lat": -4.5,
+      "max_lon": 30.75,
+      "max_lat": -2.35
+    }
+  },
+  "BE": {
+    "full_name": "Belgium",
+    "bounding_box": {
+      "min_lon": 2.51,
+      "min_lat": 49.53,
+      "max_lon": 6.16,
+      "max_lat": 51.48
+    }
+  },
+  "BJ": {
+    "full_name": "Benin",
+    "bounding_box": {
+      "min_lon": 0.77,
+      "min_lat": 6.14,
+      "max_lon": 3.8,
+      "max_lat": 12.24
+    }
+  },
+  "BF": {
+    "full_name": "Burkina Faso",
+    "bounding_box": {
+      "min_lon": -5.47,
+      "min_lat": 9.61,
+      "max_lon": 2.18,
+      "max_lat": 15.12
+    }
+  },
+  "BD": {
+    "full_name": "Bangladesh",
+    "bounding_box": {
+      "min_lon": 88.08,
+      "min_lat": 20.67,
+      "max_lon": 92.67,
+      "max_lat": 26.45
+    }
+  },
+  "BG": {
+    "full_name": "Bulgaria",
+    "bounding_box": {
+      "min_lon": 22.38,
+      "min_lat": 41.23,
+      "max_lon": 28.56,
+      "max_lat": 44.23
+    }
+  },
+  "BS": {
+    "full_name": "Bahamas",
+    "bounding_box": {
+      "min_lon": -78.98,
+      "min_lat": 23.71,
+      "max_lon": -77,
+      "max_lat": 27.04
+    }
+  },
+  "BA": {
+    "full_name": "Bosnia and Herzegovina",
+    "bounding_box": {
+      "min_lon": 15.75,
+      "min_lat": 42.65,
+      "max_lon": 19.6,
+      "max_lat": 45.23
+    }
+  },
+  "BY": {
+    "full_name": "Belarus",
+    "bounding_box": {
+      "min_lon": 23.2,
+      "min_lat": 51.32,
+      "max_lon": 32.69,
+      "max_lat": 56.17
+    }
+  },
+  "BZ": {
+    "full_name": "Belize",
+    "bounding_box": {
+      "min_lon": -89.23,
+      "min_lat": 15.89,
+      "max_lon": -88.11,
+      "max_lat": 18.5
+    }
+  },
+  "BO": {
+    "full_name": "Bolivia",
+    "bounding_box": {
+      "min_lon": -69.59,
+      "min_lat": -22.87,
+      "max_lon": -57.5,
+      "max_lat": -9.76
+    }
+  },
+  "BR": {
+    "full_name": "Brazil",
+    "bounding_box": {
+      "min_lon": -73.99,
+      "min_lat": -33.77,
+      "max_lon": -34.73,
+      "max_lat": 5.24
+    }
+  },
+  "BN": {
+    "full_name": "Brunei",
+    "bounding_box": {
+      "min_lon": 114.2,
+      "min_lat": 4.01,
+      "max_lon": 115.45,
+      "max_lat": 5.45
+    }
+  },
+  "BT": {
+    "full_name": "Bhutan",
+    "bounding_box": {
+      "min_lon": 88.81,
+      "min_lat": 26.72,
+      "max_lon": 92.1,
+      "max_lat": 28.3
+    }
+  },
+  "BW": {
+    "full_name": "Botswana",
+    "bounding_box": {
+      "min_lon": 19.9,
+      "min_lat": -26.83,
+      "max_lon": 29.43,
+      "max_lat": -17.66
+    }
+  },
+  "CF": {
+    "full_name": "Central African Republic",
+    "bounding_box": {
+      "min_lon": 14.46,
+      "min_lat": 2.27,
+      "max_lon": 27.37,
+      "max_lat": 11.14
+    }
+  },
+  "CA": {
+    "full_name": "Canada",
+    "bounding_box": {
+      "min_lon": -141,
+      "min_lat": 41.68,
+      "max_lon": -52.65,
+      "max_lat": 73.23
+    }
+  },
+  "CH": {
+    "full_name": "Switzerland",
+    "bounding_box": {
+      "min_lon": 6.02,
+      "min_lat": 45.78,
+      "max_lon": 10.44,
+      "max_lat": 47.83
+    }
+  },
+  "CL": {
+    "full_name": "Chile",
+    "bounding_box": {
+      "min_lon": -75.64,
+      "min_lat": -55.61,
+      "max_lon": -66.96,
+      "max_lat": -17.58
+    }
+  },
+  "CN": {
+    "full_name": "China",
+    "bounding_box": {
+      "min_lon": 73.68,
+      "min_lat": 18.2,
+      "max_lon": 135.03,
+      "max_lat": 53.46
+    }
+  },
+  "CI": {
+    "full_name": "Ivory Coast",
+    "bounding_box": {
+      "min_lon": -8.6,
+      "min_lat": 4.34,
+      "max_lon": -2.56,
+      "max_lat": 10.52
+    }
+  },
+  "CM": {
+    "full_name": "Cameroon",
+    "bounding_box": {
+      "min_lon": 8.49,
+      "min_lat": 1.73,
+      "max_lon": 16.01,
+      "max_lat": 12.86
+    }
+  },
+  "CD": {
+    "full_name": "Congo (Kinshasa)",
+    "bounding_box": {
+      "min_lon": 12.18,
+      "min_lat": -13.26,
+      "max_lon": 31.17,
+      "max_lat": 5.26
+    }
+  },
+  "CG": {
+    "full_name": "Congo (Brazzaville)",
+    "bounding_box": {
+      "min_lon": 11.09,
+      "min_lat": -5.04,
+      "max_lon": 18.45,
+      "max_lat": 3.73
+    }
+  },
+  "CO": {
+    "full_name": "Colombia",
+    "bounding_box": {
+      "min_lon": -78.99,
+      "min_lat": -4.3,
+      "max_lon": -66.88,
+      "max_lat": 12.44
+    }
+  },
+  "CR": {
+    "full_name": "Costa Rica",
+    "bounding_box": {
+      "min_lon": -85.94,
+      "min_lat": 8.23,
+      "max_lon": -82.55,
+      "max_lat": 11.22
+    }
+  },
+  "CU": {
+    "full_name": "Cuba",
+    "bounding_box": {
+      "min_lon": -84.97,
+      "min_lat": 19.86,
+      "max_lon": -74.18,
+      "max_lat": 23.19
+    }
+  },
+  "CY": {
+    "full_name": "Cyprus",
+    "bounding_box": {
+      "min_lon": 32.26,
+      "min_lat": 34.57,
+      "max_lon": 34,
+      "max_lat": 35.17
+    }
+  },
+  "CZ": {
+    "full_name": "Czech Republic",
+    "bounding_box": {
+      "min_lon": 12.24,
+      "min_lat": 48.56,
+      "max_lon": 18.85,
+      "max_lat": 51.12
+    }
+  },
+  "DE": {
+    "full_name": "Germany",
+    "bounding_box": {
+      "min_lon": 5.99,
+      "min_lat": 47.3,
+      "max_lon": 15.02,
+      "max_lat": 54.98
+    }
+  },
+  "DJ": {
+    "full_name": "Djibouti",
+    "bounding_box": {
+      "min_lon": 41.66,
+      "min_lat": 10.93,
+      "max_lon": 43.32,
+      "max_lat": 12.7
+    }
+  },
+  "DK": {
+    "full_name": "Denmark",
+    "bounding_box": {
+      "min_lon": 8.09,
+      "min_lat": 54.8,
+      "max_lon": 12.69,
+      "max_lat": 57.73
+    }
+  },
+  "DO": {
+    "full_name": "Dominican Republic",
+    "bounding_box": {
+      "min_lon": -71.95,
+      "min_lat": 17.6,
+      "max_lon": -68.32,
+      "max_lat": 19.88
+    }
+  },
+  "DZ": {
+    "full_name": "Algeria",
+    "bounding_box": {
+      "min_lon": -8.68,
+      "min_lat": 19.06,
+      "max_lon": 12,
+      "max_lat": 37.12
+    }
+  },
+  "EC": {
+    "full_name": "Ecuador",
+    "bounding_box": {
+      "min_lon": -80.97,
+      "min_lat": -4.96,
+      "max_lon": -75.23,
+      "max_lat": 1.38
+    }
+  },
+  "EG": {
+    "full_name": "Egypt",
+    "bounding_box": {
+      "min_lon": 24.7,
+      "min_lat": 22,
+      "max_lon": 36.87,
+      "max_lat": 31.59
+    }
+  },
+  "ER": {
+    "full_name": "Eritrea",
+    "bounding_box": {
+      "min_lon": 36.32,
+      "min_lat": 12.46,
+      "max_lon": 43.08,
+      "max_lat": 18
+    }
+  },
+  "ES": {
+    "full_name": "Spain",
+    "bounding_box": {
+      "min_lon": -9.39,
+      "min_lat": 35.95,
+      "max_lon": 3.04,
+      "max_lat": 43.75
+    }
+  },
+  "EE": {
+    "full_name": "Estonia",
+    "bounding_box": {
+      "min_lon": 23.34,
+      "min_lat": 57.47,
+      "max_lon": 28.13,
+      "max_lat": 59.61
+    }
+  },
+  "ET": {
+    "full_name": "Ethiopia",
+    "bounding_box": {
+      "min_lon": 32.95,
+      "min_lat": 3.42,
+      "max_lon": 47.79,
+      "max_lat": 14.96
+    }
+  },
+  "FI": {
+    "full_name": "Finland",
+    "bounding_box": {
+      "min_lon": 20.65,
+      "min_lat": 59.85,
+      "max_lon": 31.52,
+      "max_lat": 70.16
+    }
+  },
+  "FJ": {
+    "full_name": "Fiji",
+    "bounding_box": {
+      "min_lon": -180,
+      "min_lat": -18.29,
+      "max_lon": 180,
+      "max_lat": -16.02
+    }
+  },
+  "FK": {
+    "full_name": "Falkland Islands",
+    "bounding_box": {
+      "min_lon": -61.2,
+      "min_lat": -52.3,
+      "max_lon": -57.75,
+      "max_lat": -51.1
+    }
+  },
+  "FR": {
+    "full_name": "France",
+    "bounding_box": {
+      "min_lon": -5,
+      "min_lat": 42.5,
+      "max_lon": 9.56,
+      "max_lat": 51.15
+    }
+  },
+  "GA": {
+    "full_name": "Gabon",
+    "bounding_box": {
+      "min_lon": 8.8,
+      "min_lat": -3.98,
+      "max_lon": 14.43,
+      "max_lat": 2.33
+    }
+  },
+  "GB": {
+    "full_name": "United Kingdom",
+    "bounding_box": {
+      "min_lon": -7.57,
+      "min_lat": 49.96,
+      "max_lon": 1.68,
+      "max_lat": 58.64
+    }
+  },
+  "GE": {
+    "full_name": "Georgia",
+    "bounding_box": {
+      "min_lon": 39.96,
+      "min_lat": 41.06,
+      "max_lon": 46.64,
+      "max_lat": 43.55
+    }
+  },
+  "GH": {
+    "full_name": "Ghana",
+    "bounding_box": {
+      "min_lon": -3.24,
+      "min_lat": 4.71,
+      "max_lon": 1.06,
+      "max_lat": 11.1
+    }
+  },
+  "GN": {
+    "full_name": "Guinea",
+    "bounding_box": {
+      "min_lon": -15.13,
+      "min_lat": 7.31,
+      "max_lon": -7.83,
+      "max_lat": 12.59
+    }
+  },
+  "GM": {
+    "full_name": "Gambia",
+    "bounding_box": {
+      "min_lon": -16.84,
+      "min_lat": 13.13,
+      "max_lon": -13.84,
+      "max_lat": 13.88
+    }
+  },
+  "GW": {
+    "full_name": "Guinea Bissau",
+    "bounding_box": {
+      "min_lon": -16.68,
+      "min_lat": 11.04,
+      "max_lon": -13.7,
+      "max_lat": 12.63
+    }
+  },
+  "GQ": {
+    "full_name": "Equatorial Guinea",
+    "bounding_box": {
+      "min_lon": 9.31,
+      "min_lat": 1.01,
+      "max_lon": 11.29,
+      "max_lat": 2.28
+    }
+  },
+  "GR": {
+    "full_name": "Greece",
+    "bounding_box": {
+      "min_lon": 20.15,
+      "min_lat": 34.92,
+      "max_lon": 26.6,
+      "max_lat": 41.83
+    }
+  },
+  "GL": {
+    "full_name": "Greenland",
+    "bounding_box": {
+      "min_lon": -73.3,
+      "min_lat": 60.04,
+      "max_lon": -12.21,
+      "max_lat": 83.65
+    }
+  },
+  "GT": {
+    "full_name": "Guatemala",
+    "bounding_box": {
+      "min_lon": -92.23,
+      "min_lat": 13.74,
+      "max_lon": -88.23,
+      "max_lat": 17.82
+    }
+  },
+  "GY": {
+    "full_name": "Guyana",
+    "bounding_box": {
+      "min_lon": -61.41,
+      "min_lat": 1.27,
+      "max_lon": -56.54,
+      "max_lat": 8.37
+    }
+  },
+  "HN": {
+    "full_name": "Honduras",
+    "bounding_box": {
+      "min_lon": -89.35,
+      "min_lat": 12.98,
+      "max_lon": -83.15,
+      "max_lat": 16.01
+    }
+  },
+  "HR": {
+    "full_name": "Croatia",
+    "bounding_box": {
+      "min_lon": 13.66,
+      "min_lat": 42.48,
+      "max_lon": 19.39,
+      "max_lat": 46.5
+    }
+  },
+  "HT": {
+    "full_name": "Haiti",
+    "bounding_box": {
+      "min_lon": -74.46,
+      "min_lat": 18.03,
+      "max_lon": -71.62,
+      "max_lat": 19.92
+    }
+  },
+  "HU": {
+    "full_name": "Hungary",
+    "bounding_box": {
+      "min_lon": 16.2,
+      "min_lat": 45.76,
+      "max_lon": 22.71,
+      "max_lat": 48.62
+    }
+  },
+  "ID": {
+    "full_name": "Indonesia",
+    "bounding_box": {
+      "min_lon": 95.29,
+      "min_lat": -10.36,
+      "max_lon": 141.03,
+      "max_lat": 5.48
+    }
+  },
+  "IN": {
+    "full_name": "India",
+    "bounding_box": {
+      "min_lon": 68.18,
+      "min_lat": 7.97,
+      "max_lon": 97.4,
+      "max_lat": 35.49
+    }
+  },
+  "IE": {
+    "full_name": "Ireland",
+    "bounding_box": {
+      "min_lon": -9.98,
+      "min_lat": 51.67,
+      "max_lon": -6.03,
+      "max_lat": 55.13
+    }
+  },
+  "IR": {
+    "full_name": "Iran",
+    "bounding_box": {
+      "min_lon": 44.11,
+      "min_lat": 25.08,
+      "max_lon": 63.32,
+      "max_lat": 39.71
+    }
+  },
+  "IQ": {
+    "full_name": "Iraq",
+    "bounding_box": {
+      "min_lon": 38.79,
+      "min_lat": 29.1,
+      "max_lon": 48.57,
+      "max_lat": 37.39
+    }
+  },
+  "IS": {
+    "full_name": "Iceland",
+    "bounding_box": {
+      "min_lon": -24.33,
+      "min_lat": 63.5,
+      "max_lon": -13.61,
+      "max_lat": 66.53
+    }
+  },
+  "IL": {
+    "full_name": "Israel",
+    "bounding_box": {
+      "min_lon": 34.27,
+      "min_lat": 29.5,
+      "max_lon": 35.84,
+      "max_lat": 33.28
+    }
+  },
+  "IT": {
+    "full_name": "Italy",
+    "bounding_box": {
+      "min_lon": 6.75,
+      "min_lat": 36.62,
+      "max_lon": 18.48,
+      "max_lat": 47.12
+    }
+  },
+  "JM": {
+    "full_name": "Jamaica",
+    "bounding_box": {
+      "min_lon": -78.34,
+      "min_lat": 17.7,
+      "max_lon": -76.2,
+      "max_lat": 18.52
+    }
+  },
+  "JO": {
+    "full_name": "Jordan",
+    "bounding_box": {
+      "min_lon": 34.92,
+      "min_lat": 29.2,
+      "max_lon": 39.2,
+      "max_lat": 33.38
+    }
+  },
+  "JP": {
+    "full_name": "Japan",
+    "bounding_box": {
+      "min_lon": 129.41,
+      "min_lat": 31.03,
+      "max_lon": 145.54,
+      "max_lat": 45.55
+    }
+  },
+  "KZ": {
+    "full_name": "Kazakhstan",
+    "bounding_box": {
+      "min_lon": 46.47,
+      "min_lat": 40.66,
+      "max_lon": 87.36,
+      "max_lat": 55.39
+    }
+  },
+  "KE": {
+    "full_name": "Kenya",
+    "bounding_box": {
+      "min_lon": 33.89,
+      "min_lat": -4.68,
+      "max_lon": 41.86,
+      "max_lat": 5.51
+    }
+  },
+  "KG": {
+    "full_name": "Kyrgyzstan",
+    "bounding_box": {
+      "min_lon": 69.46,
+      "min_lat": 39.28,
+      "max_lon": 80.26,
+      "max_lat": 43.3
+    }
+  },
+  "KH": {
+    "full_name": "Cambodia",
+    "bounding_box": {
+      "min_lon": 102.35,
+      "min_lat": 10.49,
+      "max_lon": 107.61,
+      "max_lat": 14.57
+    }
+  },
+  "KR": {
+    "full_name": "South Korea",
+    "bounding_box": {
+      "min_lon": 126.12,
+      "min_lat": 34.39,
+      "max_lon": 129.47,
+      "max_lat": 38.61
+    }
+  },
+  "KW": {
+    "full_name": "Kuwait",
+    "bounding_box": {
+      "min_lon": 46.57,
+      "min_lat": 28.53,
+      "max_lon": 48.42,
+      "max_lat": 30.06
+    }
+  },
+  "LA": {
+    "full_name": "Laos",
+    "bounding_box": {
+      "min_lon": 100.12,
+      "min_lat": 13.88,
+      "max_lon": 107.56,
+      "max_lat": 22.46
+    }
+  },
+  "LB": {
+    "full_name": "Lebanon",
+    "bounding_box": {
+      "min_lon": 35.13,
+      "min_lat": 33.09,
+      "max_lon": 36.61,
+      "max_lat": 34.64
+    }
+  },
+  "LR": {
+    "full_name": "Liberia",
+    "bounding_box": {
+      "min_lon": -11.44,
+      "min_lat": 4.36,
+      "max_lon": -7.54,
+      "max_lat": 8.54
+    }
+  },
+  "LY": {
+    "full_name": "Libya",
+    "bounding_box": {
+      "min_lon": 9.32,
+      "min_lat": 19.58,
+      "max_lon": 25.16,
+      "max_lat": 33.14
+    }
+  },
+  "LK": {
+    "full_name": "Sri Lanka",
+    "bounding_box": {
+      "min_lon": 79.7,
+      "min_lat": 5.97,
+      "max_lon": 81.79,
+      "max_lat": 9.82
+    }
+  },
+  "LS": {
+    "full_name": "Lesotho",
+    "bounding_box": {
+      "min_lon": 27,
+      "min_lat": -30.65,
+      "max_lon": 29.33,
+      "max_lat": -28.65
+    }
+  },
+  "LT": {
+    "full_name": "Lithuania",
+    "bounding_box": {
+      "min_lon": 21.06,
+      "min_lat": 53.91,
+      "max_lon": 26.59,
+      "max_lat": 56.37
+    }
+  },
+  "LU": {
+    "full_name": "Luxembourg",
+    "bounding_box": {
+      "min_lon": 5.67,
+      "min_lat": 49.44,
+      "max_lon": 6.24,
+      "max_lat": 50.13
+    }
+  },
+  "LV": {
+    "full_name": "Latvia",
+    "bounding_box": {
+      "min_lon": 21.06,
+      "min_lat": 55.62,
+      "max_lon": 28.18,
+      "max_lat": 57.97
+    }
+  },
+  "MA": {
+    "full_name": "Morocco",
+    "bounding_box": {
+      "min_lon": -17.02,
+      "min_lat": 21.42,
+      "max_lon": -1.12,
+      "max_lat": 35.76
+    }
+  },
+  "MD": {
+    "full_name": "Moldova",
+    "bounding_box": {
+      "min_lon": 26.62,
+      "min_lat": 45.49,
+      "max_lon": 30.02,
+      "max_lat": 48.47
+    }
+  },
+  "MG": {
+    "full_name": "Madagascar",
+    "bounding_box": {
+      "min_lon": 43.25,
+      "min_lat": -25.6,
+      "max_lon": 50.48,
+      "max_lat": -12.04
+    }
+  },
+  "MX": {
+    "full_name": "Mexico",
+    "bounding_box": {
+      "min_lon": -117.13,
+      "min_lat": 14.54,
+      "max_lon": -86.81,
+      "max_lat": 32.72
+    }
+  },
+  "MK": {
+    "full_name": "Macedonia",
+    "bounding_box": {
+      "min_lon": 20.46,
+      "min_lat": 40.84,
+      "max_lon": 22.95,
+      "max_lat": 42.32
+    }
+  },
+  "ML": {
+    "full_name": "Mali",
+    "bounding_box": {
+      "min_lon": -12.17,
+      "min_lat": 10.1,
+      "max_lon": 4.27,
+      "max_lat": 24.97
+    }
+  },
+  "MM": {
+    "full_name": "Myanmar",
+    "bounding_box": {
+      "min_lon": 92.3,
+      "min_lat": 9.93,
+      "max_lon": 101.18,
+      "max_lat": 28.34
+    }
+  },
+  "ME": {
+    "full_name": "Montenegro",
+    "bounding_box": {
+      "min_lon": 18.45,
+      "min_lat": 41.88,
+      "max_lon": 20.34,
+      "max_lat": 43.52
+    }
+  },
+  "MN": {
+    "full_name": "Mongolia",
+    "bounding_box": {
+      "min_lon": 87.75,
+      "min_lat": 41.6,
+      "max_lon": 119.77,
+      "max_lat": 52.05
+    }
+  },
+  "MZ": {
+    "full_name": "Mozambique",
+    "bounding_box": {
+      "min_lon": 30.18,
+      "min_lat": -26.74,
+      "max_lon": 40.78,
+      "max_lat": -10.32
+    }
+  },
+  "MR": {
+    "full_name": "Mauritania",
+    "bounding_box": {
+      "min_lon": -17.06,
+      "min_lat": 14.62,
+      "max_lon": -4.92,
+      "max_lat": 27.4
+    }
+  },
+  "MW": {
+    "full_name": "Malawi",
+    "bounding_box": {
+      "min_lon": 32.69,
+      "min_lat": -16.8,
+      "max_lon": 35.77,
+      "max_lat": -9.23
+    }
+  },
+  "MY": {
+    "full_name": "Malaysia",
+    "bounding_box": {
+      "min_lon": 100.09,
+      "min_lat": 0.77,
+      "max_lon": 119.18,
+      "max_lat": 6.93
+    }
+  },
+  "NA": {
+    "full_name": "Namibia",
+    "bounding_box": {
+      "min_lon": 11.73,
+      "min_lat": -29.05,
+      "max_lon": 25.08,
+      "max_lat": -16.94
+    }
+  },
+  "NC": {
+    "full_name": "New Caledonia",
+    "bounding_box": {
+      "min_lon": 164.03,
+      "min_lat": -22.4,
+      "max_lon": 167.12,
+      "max_lat": -20.11
+    }
+  },
+  "NE": {
+    "full_name": "Niger",
+    "bounding_box": {
+      "min_lon": 0.3,
+      "min_lat": 11.66,
+      "max_lon": 15.9,
+      "max_lat": 23.47
+    }
+  },
+  "NG": {
+    "full_name": "Nigeria",
+    "bounding_box": {
+      "min_lon": 2.69,
+      "min_lat": 4.24,
+      "max_lon": 14.58,
+      "max_lat": 13.87
+    }
+  },
+  "NI": {
+    "full_name": "Nicaragua",
+    "bounding_box": {
+      "min_lon": -87.67,
+      "min_lat": 10.73,
+      "max_lon": -83.15,
+      "max_lat": 15.02
+    }
+  },
+  "NL": {
+    "full_name": "Netherlands",
+    "bounding_box": {
+      "min_lon": 3.31,
+      "min_lat": 50.8,
+      "max_lon": 7.09,
+      "max_lat": 53.51
+    }
+  },
+  "NO": {
+    "full_name": "Norway",
+    "bounding_box": {
+      "min_lon": 4.99,
+      "min_lat": 58.08,
+      "max_lon": 31.29,
+      "max_lat": 70.92
+    }
+  },
+  "NP": {
+    "full_name": "Nepal",
+    "bounding_box": {
+      "min_lon": 80.09,
+      "min_lat": 26.4,
+      "max_lon": 88.17,
+      "max_lat": 30.42
+    }
+  },
+  "NZ": {
+    "full_name": "New Zealand",
+    "bounding_box": {
+      "min_lon": 166.51,
+      "min_lat": -46.64,
+      "max_lon": 178.52,
+      "max_lat": -34.45
+    }
+  },
+  "OM": {
+    "full_name": "Oman",
+    "bounding_box": {
+      "min_lon": 52,
+      "min_lat": 16.65,
+      "max_lon": 59.81,
+      "max_lat": 26.4
+    }
+  },
+  "PK": {
+    "full_name": "Pakistan",
+    "bounding_box": {
+      "min_lon": 60.87,
+      "min_lat": 23.69,
+      "max_lon": 77.84,
+      "max_lat": 37.13
+    }
+  },
+  "PA": {
+    "full_name": "Panama",
+    "bounding_box": {
+      "min_lon": -82.97,
+      "min_lat": 7.22,
+      "max_lon": -77.24,
+      "max_lat": 9.61
+    }
+  },
+  "PE": {
+    "full_name": "Peru",
+    "bounding_box": {
+      "min_lon": -81.41,
+      "min_lat": -18.35,
+      "max_lon": -68.67,
+      "max_lat": -0.06
+    }
+  },
+  "PH": {
+    "full_name": "Philippines",
+    "bounding_box": {
+      "min_lon": 117.17,
+      "min_lat": 5.58,
+      "max_lon": 126.54,
+      "max_lat": 18.51
+    }
+  },
+  "PG": {
+    "full_name": "Papua New Guinea",
+    "bounding_box": {
+      "min_lon": 141,
+      "min_lat": -10.65,
+      "max_lon": 156.02,
+      "max_lat": -2.5
+    }
+  },
+  "PL": {
+    "full_name": "Poland",
+    "bounding_box": {
+      "min_lon": 14.07,
+      "min_lat": 49.03,
+      "max_lon": 24.03,
+      "max_lat": 54.85
+    }
+  },
+  "PR": {
+    "full_name": "Puerto Rico",
+    "bounding_box": {
+      "min_lon": -67.24,
+      "min_lat": 17.95,
+      "max_lon": -65.59,
+      "max_lat": 18.52
+    }
+  },
+  "KP": {
+    "full_name": "North Korea",
+    "bounding_box": {
+      "min_lon": 124.27,
+      "min_lat": 37.67,
+      "max_lon": 130.78,
+      "max_lat": 42.99
+    }
+  },
+  "PT": {
+    "full_name": "Portugal",
+    "bounding_box": {
+      "min_lon": -9.53,
+      "min_lat": 36.84,
+      "max_lon": -6.39,
+      "max_lat": 42.28
+    }
+  },
+  "PY": {
+    "full_name": "Paraguay",
+    "bounding_box": {
+      "min_lon": -62.69,
+      "min_lat": -27.55,
+      "max_lon": -54.29,
+      "max_lat": -19.34
+    }
+  },
+  "QA": {
+    "full_name": "Qatar",
+    "bounding_box": {
+      "min_lon": 50.74,
+      "min_lat": 24.56,
+      "max_lon": 51.61,
+      "max_lat": 26.11
+    }
+  },
+  "RO": {
+    "full_name": "Romania",
+    "bounding_box": {
+      "min_lon": 20.22,
+      "min_lat": 43.69,
+      "max_lon": 29.63,
+      "max_lat": 48.22
+    }
+  },
+  "RU": {
+    "full_name": "Russia",
+    "bounding_box": {
+      "min_lon": -180,
+      "min_lat": 41.15,
+      "max_lon": 180,
+      "max_lat": 81.25
+    }
+  },
+  "RW": {
+    "full_name": "Rwanda",
+    "bounding_box": {
+      "min_lon": 29.02,
+      "min_lat": -2.92,
+      "max_lon": 30.82,
+      "max_lat": -1.13
+    }
+  },
+  "SA": {
+    "full_name": "Saudi Arabia",
+    "bounding_box": {
+      "min_lon": 34.63,
+      "min_lat": 16.35,
+      "max_lon": 55.67,
+      "max_lat": 32.16
+    }
+  },
+  "SD": {
+    "full_name": "Sudan",
+    "bounding_box": {
+      "min_lon": 21.94,
+      "min_lat": 8.62,
+      "max_lon": 38.41,
+      "max_lat": 22
+    }
+  },
+  "SS": {
+    "full_name": "South Sudan",
+    "bounding_box": {
+      "min_lon": 23.89,
+      "min_lat": 3.51,
+      "max_lon": 35.3,
+      "max_lat": 12.25
+    }
+  },
+  "SN": {
+    "full_name": "Senegal",
+    "bounding_box": {
+      "min_lon": -17.63,
+      "min_lat": 12.33,
+      "max_lon": -11.47,
+      "max_lat": 16.6
+    }
+  },
+  "SB": {
+    "full_name": "Solomon Islands",
+    "bounding_box": {
+      "min_lon": 156.49,
+      "min_lat": -10.83,
+      "max_lon": 162.4,
+      "max_lat": -6.6
+    }
+  },
+  "SL": {
+    "full_name": "Sierra Leone",
+    "bounding_box": {
+      "min_lon": -13.25,
+      "min_lat": 6.79,
+      "max_lon": -10.23,
+      "max_lat": 10.05
+    }
+  },
+  "SV": {
+    "full_name": "El Salvador",
+    "bounding_box": {
+      "min_lon": -90.1,
+      "min_lat": 13.15,
+      "max_lon": -87.72,
+      "max_lat": 14.42
+    }
+  },
+  "SO": {
+    "full_name": "Somalia",
+    "bounding_box": {
+      "min_lon": 40.98,
+      "min_lat": -1.68,
+      "max_lon": 51.13,
+      "max_lat": 12.02
+    }
+  },
+  "RS": {
+    "full_name": "Serbia",
+    "bounding_box": {
+      "min_lon": 18.83,
+      "min_lat": 42.25,
+      "max_lon": 22.99,
+      "max_lat": 46.17
+    }
+  },
+  "SR": {
+    "full_name": "Suriname",
+    "bounding_box": {
+      "min_lon": -58.04,
+      "min_lat": 1.82,
+      "max_lon": -53.96,
+      "max_lat": 6.03
+    }
+  },
+  "SK": {
+    "full_name": "Slovakia",
+    "bounding_box": {
+      "min_lon": 16.88,
+      "min_lat": 47.76,
+      "max_lon": 22.56,
+      "max_lat": 49.57
+    }
+  },
+  "SI": {
+    "full_name": "Slovenia",
+    "bounding_box": {
+      "min_lon": 13.7,
+      "min_lat": 45.45,
+      "max_lon": 16.56,
+      "max_lat": 46.85
+    }
+  },
+  "SE": {
+    "full_name": "Sweden",
+    "bounding_box": {
+      "min_lon": 11.03,
+      "min_lat": 55.36,
+      "max_lon": 23.9,
+      "max_lat": 69.11
+    }
+  },
+  "SZ": {
+    "full_name": "Swaziland",
+    "bounding_box": {
+      "min_lon": 30.68,
+      "min_lat": -27.29,
+      "max_lon": 32.07,
+      "max_lat": -25.66
+    }
+  },
+  "SY": {
+    "full_name": "Syria",
+    "bounding_box": {
+      "min_lon": 35.7,
+      "min_lat": 32.31,
+      "max_lon": 42.35,
+      "max_lat": 37.23
+    }
+  },
+  "TD": {
+    "full_name": "Chad",
+    "bounding_box": {
+      "min_lon": 13.54,
+      "min_lat": 7.42,
+      "max_lon": 23.89,
+      "max_lat": 23.41
+    }
+  },
+  "TG": {
+    "full_name": "Togo",
+    "bounding_box": {
+      "min_lon": -0.05,
+      "min_lat": 5.93,
+      "max_lon": 1.87,
+      "max_lat": 11.02
+    }
+  },
+  "TH": {
+    "full_name": "Thailand",
+    "bounding_box": {
+      "min_lon": 97.38,
+      "min_lat": 5.69,
+      "max_lon": 105.59,
+      "max_lat": 20.42
+    }
+  },
+  "TJ": {
+    "full_name": "Tajikistan",
+    "bounding_box": {
+      "min_lon": 67.44,
+      "min_lat": 36.74,
+      "max_lon": 74.98,
+      "max_lat": 40.96
+    }
+  },
+  "TM": {
+    "full_name": "Turkmenistan",
+    "bounding_box": {
+      "min_lon": 52.5,
+      "min_lat": 35.27,
+      "max_lon": 66.55,
+      "max_lat": 42.75
+    }
+  },
+  "TL": {
+    "full_name": "East Timor",
+    "bounding_box": {
+      "min_lon": 124.97,
+      "min_lat": -9.39,
+      "max_lon": 127.34,
+      "max_lat": -8.27
+    }
+  },
+  "TT": {
+    "full_name": "Trinidad and Tobago",
+    "bounding_box": {
+      "min_lon": -61.95,
+      "min_lat": 10,
+      "max_lon": -60.9,
+      "max_lat": 10.89
+    }
+  },
+  "TN": {
+    "full_name": "Tunisia",
+    "bounding_box": {
+      "min_lon": 7.52,
+      "min_lat": 30.31,
+      "max_lon": 11.49,
+      "max_lat": 37.35
+    }
+  },
+  "TR": {
+    "full_name": "Turkey",
+    "bounding_box": {
+      "min_lon": 26.04,
+      "min_lat": 35.82,
+      "max_lon": 44.79,
+      "max_lat": 42.14
+    }
+  },
+  "TW": {
+    "full_name": "Taiwan",
+    "bounding_box": {
+      "min_lon": 120.11,
+      "min_lat": 21.97,
+      "max_lon": 121.95,
+      "max_lat": 25.3
+    }
+  },
+  "TZ": {
+    "full_name": "Tanzania",
+    "bounding_box": {
+      "min_lon": 29.34,
+      "min_lat": -11.72,
+      "max_lon": 40.32,
+      "max_lat": -0.95
+    }
+  },
+  "UG": {
+    "full_name": "Uganda",
+    "bounding_box": {
+      "min_lon": 29.58,
+      "min_lat": -1.44,
+      "max_lon": 35.04,
+      "max_lat": 4.25
+    }
+  },
+  "UA": {
+    "full_name": "Ukraine",
+    "bounding_box": {
+      "min_lon": 22.09,
+      "min_lat": 44.36,
+      "max_lon": 40.08,
+      "max_lat": 52.34
+    }
+  },
+  "UY": {
+    "full_name": "Uruguay",
+    "bounding_box": {
+      "min_lon": -58.43,
+      "min_lat": -34.95,
+      "max_lon": -53.21,
+      "max_lat": -30.11
+    }
+  },
+  "US": {
+    "full_name": "United States",
+    "bounding_box": {
+      "min_lon": -125,
+      "min_lat": 25,
+      "max_lon": -66.96,
+      "max_lat": 49.5
+    }
+  },
+  "UZ": {
+    "full_name": "Uzbekistan",
+    "bounding_box": {
+      "min_lon": 55.93,
+      "min_lat": 37.14,
+      "max_lon": 73.06,
+      "max_lat": 45.59
+    }
+  },
+  "VE": {
+    "full_name": "Venezuela",
+    "bounding_box": {
+      "min_lon": -73.3,
+      "min_lat": 0.72,
+      "max_lon": -59.76,
+      "max_lat": 12.16
+    }
+  },
+  "VN": {
+    "full_name": "Vietnam",
+    "bounding_box": {
+      "min_lon": 102.17,
+      "min_lat": 8.6,
+      "max_lon": 109.34,
+      "max_lat": 23.35
+    }
+  },
+  "VU": {
+    "full_name": "Vanuatu",
+    "bounding_box": {
+      "min_lon": 166.63,
+      "min_lat": -16.6,
+      "max_lon": 167.84,
+      "max_lat": -14.63
+    }
+  },
+  "PS": {
+    "full_name": "West Bank",
+    "bounding_box": {
+      "min_lon": 34.93,
+      "min_lat": 31.35,
+      "max_lon": 35.55,
+      "max_lat": 32.53
+    }
+  },
+  "YE": {
+    "full_name": "Yemen",
+    "bounding_box": {
+      "min_lon": 42.6,
+      "min_lat": 12.59,
+      "max_lon": 53.11,
+      "max_lat": 19
+    }
+  },
+  "ZA": {
+    "full_name": "South Africa",
+    "bounding_box": {
+      "min_lon": 16.34,
+      "min_lat": -34.82,
+      "max_lon": 32.83,
+      "max_lat": -22.09
+    }
+  },
+  "ZM": {
+    "full_name": "Zambia",
+    "bounding_box": {
+      "min_lon": 21.89,
+      "min_lat": -17.96,
+      "max_lon": 33.49,
+      "max_lat": -8.24
+    }
+  },
+  "ZW": {
+    "full_name": "Zimbabwe",
+    "bounding_box": {
+      "min_lon": 25.26,
+      "min_lat": -22.27,
+      "max_lon": 32.85,
+      "max_lat": -15.51
+    }
+  }
+}
