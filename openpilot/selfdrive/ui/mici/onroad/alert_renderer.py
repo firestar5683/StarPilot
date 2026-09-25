@@ -104,6 +104,7 @@ class AlertRenderer(Widget):
     # TODO: use 0.1 but with proper alert height calculation
     self._alert_y_filter = BounceFilter(0, 0.1, 1 / gui_app.target_fps)
     self._alpha_filter = FirstOrderFilter(0, 0.05, 1 / gui_app.target_fps)
+    self._fade_time: float | None = None
 
     self._turn_signal_timer = 0.0
     self._turn_signal_alpha_filter = FirstOrderFilter(0.0, 0.3, 1 / gui_app.target_fps)
@@ -153,7 +154,7 @@ class AlertRenderer(Widget):
     alert = self.get_alert(ui_state.sm)
     return alert or self._prev_alert, alert is None
 
-  def _icon_helper(self, alert: Alert) -> AlertLayout:
+  def _icon_helper(self, alert: Alert, signal_direction: int | None = None) -> AlertLayout:
     icon_side = None
     txt_icon = None
     icon_margin_x = 20
@@ -175,19 +176,16 @@ class AlertRenderer(Widget):
       icon_margin_y = 5
 
     elif event_name == 'laneChange':
-      icon_side = self._last_icon_side
-      txt_icon = self._txt_turn_signal_left if self._last_icon_side == 'left' else self._txt_turn_signal_right
+      icon_side = (IconSide.left if signal_direction < 0 else IconSide.right) if signal_direction else self._last_icon_side
+      txt_icon = self._txt_turn_signal_left if icon_side == 'left' else self._txt_turn_signal_right
       icon_margin_x = 2
       icon_margin_y = 5
 
     elif event_name == 'laneChangeBlocked':
-      CS = ui_state.sm['carState']
-      if CS.leftBlinker:
-        icon_side = IconSide.left
-      elif CS.rightBlinker:
-        icon_side = IconSide.right
-      else:
-        icon_side = self._last_icon_side
+      if signal_direction is None:
+        CS = ui_state.sm['carState']
+        signal_direction = -1 if CS.leftBlinker else 1 if CS.rightBlinker else 0
+      icon_side = (IconSide.left if signal_direction < 0 else IconSide.right) if signal_direction else self._last_icon_side
       txt_icon = self._txt_blind_spot_left if icon_side == 'left' else self._txt_blind_spot_right
       icon_margin_x = 8
       icon_margin_y = 0
@@ -217,11 +215,22 @@ class AlertRenderer(Widget):
     return AlertLayout(text_rect, icon_layout)
 
   def _render(self, rect: rl.Rectangle) -> bool:
-    alert = self.get_alert(ui_state.sm)
+    return self.render_alert(rect, self.get_alert(ui_state.sm))
+
+  def render_alert(self, rect: rl.Rectangle, alert: Alert | None, *, signal_direction: int | None = None) -> bool:
+    """Render an already selected alert through the normal text/icon lifecycle."""
+    self.set_rect(rect)
+    if alert is not None:
+      self._prev_alert = alert
 
     # Animate fade and slide in/out
     self._alert_y_filter.update(self._rect.y - 50 if alert is None else self._rect.y)
-    self._alpha_filter.update(0 if alert is None else 1)
+    now = time.monotonic()
+    fade = self._alpha_filter
+    elapsed = fade.dt if self._fade_time is None or now < self._fade_time else now - self._fade_time
+    self._fade_time = now
+    target = 0 if alert is None else 1
+    fade.x = target + (fade.x - target) * (1 - fade.alpha) ** (elapsed / fade.dt)
 
     if alert is None:
       # If still animating out, keep the previous alert
@@ -229,11 +238,12 @@ class AlertRenderer(Widget):
         alert = self._prev_alert
       else:
         self._prev_alert = None
+        self._fade_time = None
         return False
 
     self._draw_background(alert)
 
-    alert_layout = self._icon_helper(alert)
+    alert_layout = self._icon_helper(alert, signal_direction)
     self._draw_text(alert, alert_layout)
     self._draw_icons(alert_layout)
 
@@ -243,11 +253,13 @@ class AlertRenderer(Widget):
     if alert_layout.icon is None:
       return
 
-    if time.monotonic() - self._turn_signal_timer > TURN_SIGNAL_BLINK_PERIOD:
-      self._turn_signal_timer = time.monotonic()
-      self._turn_signal_alpha_filter.x = 255 * 2
-    else:
-      self._turn_signal_alpha_filter.update(255 * 0.2)
+    now = time.monotonic()
+    if now < self._turn_signal_timer or now - self._turn_signal_timer > TURN_SIGNAL_BLINK_PERIOD:
+      self._turn_signal_timer = now
+    # Preserve the original pulse at the target rate, including when frames drop.
+    pulse = self._turn_signal_alpha_filter
+    elapsed_frames = (now - self._turn_signal_timer) / pulse.dt
+    pulse.x = 255 * 0.2 + (255 * 2 - 255 * 0.2) * (1 - pulse.alpha) ** elapsed_frames
 
     if alert_layout.icon.side == 'left':
       pos_x = int(self._rect.x + alert_layout.icon.margin_x)

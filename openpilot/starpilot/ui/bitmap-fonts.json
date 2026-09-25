@@ -1,0 +1,56 @@
+{
+  "format": 1,
+  "purpose": "Preserve device UI bitmap glyph metrics and texture pixels",
+  "files": [
+    {
+      "file": "Inter-Regular.fnt",
+      "sha256": "5386eb90051c4d1a50592a49c20d987e4ec4cfc1772d131d917f8f50fb7241b9",
+      "bytes": 13982
+    },
+    {
+      "file": "Inter-Regular.png",
+      "sha256": "5bdd18a0dab40ca13409e8d5ca81cecafd3a2b404b6121e5faeadb1e05a24c26",
+      "bytes": 226180
+    },
+    {
+      "file": "Inter-Medium.fnt",
+      "sha256": "9126a3ce60109715319e83d5c5c7b6a9f02f743f0d3e3d523a5d030b392cb4f7",
+      "bytes": 13980
+    },
+    {
+      "file": "Inter-Medium.png",
+      "sha256": "527afa52b6969895bca20fa6877fa1335d3585da3deb7b0dec3f52eb3ebc912a",
+      "bytes": 225402
+    },
+    {
+      "file": "Inter-Bold.fnt",
+      "sha256": "6dc9a5310bfd421ca96a7144410033b9651cbfce031d892aa04d5934cdbb6659",
+      "bytes": 13976
+    },
+    {
+      "file": "Inter-Bold.png",
+      "sha256": "a6dff654ed9ed5b632bf516e846e88bd233b1bc5e0802f2c77fadb38b9a17586",
+      "bytes": 220630
+    },
+    {
+      "file": "Inter-SemiBold.fnt",
+      "sha256": "f0bfa7a8b100905c2ace29e0ba3cfc7c6713ea9f028c46442b84a121af84dce9",
+      "bytes": 13984
+    },
+    {
+      "file": "Inter-SemiBold.png",
+      "sha256": "65b69e60b4639b2ea6d249462a4a837fc1eafb6964e2ca1d2adf5ef0ad658872",
+      "bytes": 223243
+    },
+    {
+      "file": "unifont.fnt",
+      "sha256": "35cba59bd0e7f7c02ff3be31a0905e277d80c6b7cac2803d446d4e55908c9d3d",
+      "bytes": 17595
+    },
+    {
+      "file": "unifont.png",
+      "sha256": "b56cb7cd94b22a0da4f8ad966519bc44739fbbc6943fd643c2f41eaaf429ad4c",
+      "bytes": 6550
+    }
+  ]
+}

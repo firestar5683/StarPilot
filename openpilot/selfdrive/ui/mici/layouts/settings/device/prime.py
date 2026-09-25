@@ -2,6 +2,7 @@ import pyray as rl
 import time
 
 from openpilot.common.api import Api
+from openpilot.starpilot.connect.provider import active_provider
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.params import Params
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton, GreyBigButton
@@ -24,10 +25,12 @@ class PairingInfoLayout(InfoLayoutMici):
     self.subtext1.set_text(ui_state.prime_state.get_pairing_account())
     self.subtext2.set_text(self._get_prime_status())
     self._provider_icon = self._provider_icons.get(ui_state.prime_state.get_pairing_provider())
-    self._show_commacare = ui_state.prime_state.has_commacare()
+    self._show_commacare = active_provider().name == 'comma' and ui_state.prime_state.has_commacare()
 
   @staticmethod
   def _get_prime_status() -> str:
+    if active_provider().name != 'comma':
+      return active_provider().label
     if ui_state.prime_state.is_prime():
       return "prime" if ui_state.prime_state.is_full_prime() else "prime lite"
     return "not subscribed"
@@ -59,6 +62,10 @@ class PrimeManagementScroller(NavScroller):
     super().__init__()
     self._params = Params()
 
+    provider = active_provider()
+    if provider.name != 'comma':
+      self._scroller.add_widgets([GreyBigButton(provider.label, 'Cloud account and recordings'), QR(provider.web)])
+      return
     can_claim_trial = ui_state.prime_state.can_claim_prime_trial()
 
     self._prime_icon = gui_app.texture("icons_mici/settings/device/green_cell.png", 64, 64)
@@ -85,6 +92,9 @@ class PrimeManagementScroller(NavScroller):
     self._scroller.add_widgets(self._prime_management if ui_state.prime_state.is_prime() else self._prime_adverts)
 
   def _get_prime_url(self) -> str:
+    provider = active_provider()
+    if provider.name != 'comma':
+      return provider.web
     if dongle_id := self._params.get("DongleId"):
       return f"https://connect.comma.ai/{dongle_id}/prime"
     return "https://connect.comma.ai"
@@ -107,7 +117,9 @@ class PrimeScroller(NavScroller):
     self._last_pairing_qr_generation = float("-inf")
 
     self._manage_icon = gui_app.texture("icons_mici/settings/comma_icon.png", 33, 60)
-    if not ui_state.prime_state.is_prime():
+    if active_provider().name != 'comma':
+      self._manage_prime = BigButton(f'Open {active_provider().label}', 'Cloud account and recordings', icon=self._manage_icon)
+    elif not ui_state.prime_state.is_prime():
       title = "claim\nprime trial" if ui_state.prime_state.can_claim_prime_trial() else "upgrade\nto prime"
       self._manage_prime = BigButton(title, icon=self._manage_icon)
     else:
@@ -124,19 +136,22 @@ class PrimeScroller(NavScroller):
       self._scroller.scroll_indicator_start_after = self._qr
       self._scroller.add_widgets([
         self._qr,
-        GreyBigButton("finish setup", "scan QR code or visit connect.comma.ai",
+        GreyBigButton("finish setup", f"scan QR code or visit {active_provider().web}",
                       gui_app.texture("icons_mici/settings/device/green_settings.png", 64, 64)),
         GreyBigButton("", "connect lets you review recent driving footage and bookmark events."),
       ])
 
   def _get_pairing_url(self) -> str:
+    provider = active_provider()
+    if provider.name not in ('comma', 'konik'):
+      return ''
     try:
       dongle_id = self._params.get("DongleId") or ""
       token = Api(dongle_id).get_token({'pair': True})
     except Exception as e:
       cloudlog.warning(f"Failed to get pairing token: {e}")
       token = ""
-    return f"https://connect.comma.ai/?pair={token}"
+    return f"{provider.web}/?pair={token}"
 
   def _update_layout_rects(self):
     super()._update_layout_rects()

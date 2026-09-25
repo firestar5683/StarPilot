@@ -1,7 +1,6 @@
 import time
 
 from openpilot.common.hardware.usb import CHESTNUT_USB_PRODUCT, is_chestnut_usb_id
-from openpilot.common.version import RELEASE_BRANCHES
 
 
 CHESTNUT_RELEASE_BRANCHES = ("release-chestnut", "release-chestnut-staging", "nightly-chestnut", "nightly-chestnut-dev")
@@ -83,10 +82,12 @@ class ChestnutStatus:
       memory_limit = MEMORY_TEMP_LIMIT - (TEMP_HYSTERESIS if self.overheated else 0.)
       self.overheated = state.tempC >= gpu_limit or state.memoryTempC >= memory_limit
 
-    release = branch in CHESTNUT_RELEASE_BRANCHES
-    missing = self.usb_failed or (offroad and release and time.monotonic() - self.started > 10. and len(detected) != 1)
+    # modeld selects a present, compiled Chestnut independently of the Git
+    # branch. Compiled big-model artifacts do not imply installed hardware.
+    expected = branch in CHESTNUT_RELEASE_BRANCHES
+    missing = self.usb_failed or (offroad and expected and time.monotonic() - self.started > 10. and len(detected) != 1)
     slow_usb = offroad and len(devices) == 1 and devices[0]["speedMbps"] < 5000
-    set_alert("Offroad_ChestnutBranch", branch in RELEASE_BRANCHES and not release and len(devices) == 1)
+    set_alert("Offroad_ChestnutBranch", False)
     set_alert("Offroad_ChestnutNotDetected", missing)
     set_alert("Offroad_ChestnutOverheated", self.overheated)
     set_alert("Offroad_ChestnutUsbSlow", slow_usb, f"{devices[0]['speedMbps']} Mbps" if slow_usb else None)

@@ -1,6 +1,7 @@
 from enum import IntEnum
 from functools import partial
 from typing import cast
+from collections.abc import Callable
 
 import pyray as rl
 from openpilot.system.ui.lib.application import gui_app, TextAlignment
@@ -27,6 +28,15 @@ STRENGTH_ICONS = [
   "icons/wifi_strength_high.png",
   "icons/wifi_strength_full.png",
 ]
+
+
+def _action_allowed(guard: Callable[[], bool] | None) -> bool:
+  if guard is None:
+    return True
+  try:
+    return bool(guard())
+  except Exception:
+    return False
 
 
 class PanelType(IntEnum):
@@ -63,8 +73,17 @@ class NetworkUI(Widget):
     self._advanced_panel = self._child(AdvancedNetworkSettings(wifi_manager))
     self._nav_button = self._child(NavButton(tr("Advanced")))
     self._nav_button.set_click_callback(self._cycle_panel)
+    self._action_guard: Callable[[], bool] | None = None
+
+  def set_action_guard(self, guard: Callable[[], bool] | None) -> None:
+    """Optional host authority; ordinary native callers retain their existing policy."""
+    self._action_guard = guard
+    self._wifi_panel.set_action_guard(guard)
+    self._advanced_panel.set_action_guard(guard)
 
   def show_event(self):
+    if not _action_allowed(self._action_guard):
+      return
     super().show_event()
     self._set_current_panel(PanelType.WIFI)
 
@@ -100,6 +119,7 @@ class AdvancedNetworkSettings(Widget):
     from openpilot.selfdrive.ui.ui_state import ui_state
     from openpilot.selfdrive.ui.lib.prime_state import PrimeType
     super().__init__()
+    self._action_guard: Callable[[], bool] | None = None
     self._wifi_manager = wifi_manager
     self._wifi_manager.add_callbacks(networks_updated=self._on_network_updated)
     self._params = Params()
@@ -150,6 +170,12 @@ class AdvancedNetworkSettings(Widget):
 
     self._scroller = Scroller(items, line_separator=True, spacing=0)
 
+  def set_action_guard(self, guard: Callable[[], bool] | None) -> None:
+    self._action_guard = guard
+
+  def _allowed(self) -> bool:
+    return _action_allowed(self._action_guard)
+
   def _on_network_updated(self, networks: list[Network]):
     self._tethering_action.set_enabled(True)
     self._tethering_action.set_state(self._wifi_manager.is_tethering_active())
@@ -164,6 +190,8 @@ class AdvancedNetworkSettings(Widget):
       self._wifi_metered_action.selected_button = int(metered) if metered in (MeteredType.UNKNOWN, MeteredType.YES, MeteredType.NO) else 0
 
   def _toggle_tethering(self):
+    if not self._allowed():
+      return
     checked = self._tethering_action.get_state()
     self._tethering_action.set_enabled(False)
     if checked:
@@ -171,11 +199,16 @@ class AdvancedNetworkSettings(Widget):
     self._wifi_manager.set_tethering_active(checked)
 
   def _toggle_roaming(self):
+    if not self._allowed():
+      return
     self._params.put_bool("GsmRoaming", self._roaming_action.get_state(), block=True)
 
   def _edit_apn(self):
+    if not self._allowed():
+      return
+    dialog_guard = self._action_guard
     def update_apn(result: DialogResult):
-      if result != DialogResult.CONFIRM:
+      if result != DialogResult.CONFIRM or not _action_allowed(dialog_guard):
         return
 
       apn = self._keyboard.text.strip()
@@ -192,16 +225,23 @@ class AdvancedNetworkSettings(Widget):
     gui_app.push_widget(self._keyboard)
 
   def _toggle_cellular_metered(self):
+    if not self._allowed():
+      return
     self._params.put_bool("GsmMetered", self._cellular_metered_action.get_state(), block=True)
 
   def _toggle_wifi_metered(self, metered):
+    if not self._allowed():
+      return
     metered_type = {0: MeteredType.UNKNOWN, 1: MeteredType.YES, 2: MeteredType.NO}.get(metered, MeteredType.UNKNOWN)
     self._wifi_metered_action.set_enabled(False)
     self._wifi_manager.set_current_network_metered(metered_type)
 
   def _connect_to_hidden_network(self):
+    if not self._allowed():
+      return
+    dialog_guard = self._action_guard
     def connect_hidden(result: DialogResult):
-      if result != DialogResult.CONFIRM:
+      if result != DialogResult.CONFIRM or not _action_allowed(dialog_guard):
         return
 
       ssid = self._keyboard.text
@@ -209,7 +249,7 @@ class AdvancedNetworkSettings(Widget):
         return
 
       def enter_password(result: DialogResult):
-        if result != DialogResult.CONFIRM:
+        if result != DialogResult.CONFIRM or not _action_allowed(dialog_guard):
           return
 
         password = self._keyboard.text
@@ -231,8 +271,11 @@ class AdvancedNetworkSettings(Widget):
     gui_app.push_widget(self._keyboard)
 
   def _edit_tethering_password(self):
+    if not self._allowed():
+      return
+    dialog_guard = self._action_guard
     def update_password(result: DialogResult):
-      if result != DialogResult.CONFIRM:
+      if result != DialogResult.CONFIRM or not _action_allowed(dialog_guard):
         return
 
       password = self._keyboard.text
@@ -250,7 +293,8 @@ class AdvancedNetworkSettings(Widget):
 
     # If not using prime SIM, show GSM settings and enable IPv4 forwarding
     show_cell_settings = self._prime_state.get_type() in self._cell_prime_types
-    self._wifi_manager.set_ipv4_forward(show_cell_settings)
+    if self._allowed():
+      self._wifi_manager.set_ipv4_forward(show_cell_settings)
     self._roaming_btn.set_visible(show_cell_settings)
     self._apn_btn.set_visible(show_cell_settings)
     self._cellular_metered_btn.set_visible(show_cell_settings)
@@ -262,6 +306,7 @@ class AdvancedNetworkSettings(Widget):
 class WifiManagerUI(Widget):
   def __init__(self, wifi_manager: WifiManager):
     super().__init__()
+    self._action_guard: Callable[[], bool] | None = None
     self._wifi_manager = wifi_manager
     self.state: UIState = UIState.IDLE
     self._state_network: Network | None = None  # for CONNECTING / NEEDS_AUTH / SHOW_FORGET_CONFIRM / FORGETTING
@@ -281,7 +326,15 @@ class WifiManagerUI(Widget):
                                      networks_updated=self._on_network_updated,
                                      disconnected=self._on_disconnected)
 
+  def set_action_guard(self, guard: Callable[[], bool] | None) -> None:
+    self._action_guard = guard
+
+  def _allowed(self) -> bool:
+    return _action_allowed(self._action_guard)
+
   def show_event(self):
+    if not self._allowed():
+      return
     super().show_event()
     # start/stop scanning when widget is visible
     self._wifi_manager.set_active(True)
@@ -303,20 +356,26 @@ class WifiManagerUI(Widget):
       return
 
     if self.state == UIState.NEEDS_AUTH and self._state_network:
+      dialog_guard = self._action_guard
+      dialog_network = cast(Network, self._state_network)
       self.keyboard.set_title(tr("Wrong password") if self._password_retry else tr("Enter password"),
                               tr("for \"{}\"").format(normalize_ssid(self._state_network.ssid)))
       self.keyboard.reset(min_text_size=MIN_PASSWORD_LENGTH)
-      self.keyboard.set_callback(lambda result: self._on_password_entered(cast(Network, self._state_network), result))
+      self.keyboard.set_callback(lambda result: self._on_password_entered(dialog_network, result, dialog_guard))
       gui_app.push_widget(self.keyboard)
     elif self.state == UIState.SHOW_FORGET_CONFIRM and self._state_network:
-      confirm_dialog = ConfirmDialog("", tr("Forget"), tr("Cancel"), callback=lambda result: self.on_forgot_confirm_finished(self._state_network, result))
+      dialog_guard = self._action_guard
+      dialog_network = self._state_network
+      confirm_dialog = ConfirmDialog("", tr("Forget"), tr("Cancel"),
+                                     callback=lambda result: self.on_forgot_confirm_finished(dialog_network, result, dialog_guard))
       confirm_dialog.set_text(tr("Forget Wi-Fi Network \"{}\"?").format(normalize_ssid(self._state_network.ssid)))
       gui_app.push_widget(confirm_dialog)
     else:
       self._draw_network_list(rect)
 
-  def _on_password_entered(self, network: Network, result: DialogResult):
-    if result == DialogResult.CONFIRM:
+  def _on_password_entered(self, network: Network, result: DialogResult,
+                           dialog_guard: Callable[[], bool] | None = None):
+    if result == DialogResult.CONFIRM and _action_allowed(dialog_guard if dialog_guard is not None else self._action_guard):
       password = self.keyboard.text
       self.keyboard.clear()
 
@@ -325,8 +384,9 @@ class WifiManagerUI(Widget):
     elif result == DialogResult.CANCEL:
       self.state = UIState.IDLE
 
-  def on_forgot_confirm_finished(self, network, result: DialogResult):
-    if result == DialogResult.CONFIRM:
+  def on_forgot_confirm_finished(self, network, result: DialogResult,
+                                 dialog_guard: Callable[[], bool] | None = None):
+    if result == DialogResult.CONFIRM and _action_allowed(dialog_guard if dialog_guard is not None else self._action_guard):
       self.forget_network(network)
     elif result == DialogResult.CANCEL:
       self.state = UIState.IDLE
@@ -389,6 +449,8 @@ class WifiManagerUI(Widget):
     self._draw_signal_strength_icon(signal_icon_rect, network)
 
   def _networks_buttons_callback(self, network):
+    if not self._allowed():
+      return
     if not self._wifi_manager.is_connection_saved(network.ssid) and network.security_type != SecurityType.OPEN:
       self.state = UIState.NEEDS_AUTH
       self._state_network = network
@@ -397,6 +459,8 @@ class WifiManagerUI(Widget):
       self.connect_to_network(network)
 
   def _forget_networks_buttons_callback(self, network):
+    if not self._allowed():
+      return
     self.state = UIState.SHOW_FORGET_CONFIRM
     self._state_network = network
 
@@ -423,6 +487,8 @@ class WifiManagerUI(Widget):
     rl.draw_texture_v(gui_app.texture(STRENGTH_ICONS[strength_level], ICON_SIZE, ICON_SIZE), rl.Vector2(rect.x, rect.y), rl.WHITE)
 
   def connect_to_network(self, network: Network, password=''):
+    if not self._allowed():
+      return
     self.state = UIState.CONNECTING
     self._state_network = network
     if self._wifi_manager.is_connection_saved(network.ssid) and not password:
@@ -431,6 +497,8 @@ class WifiManagerUI(Widget):
       self._wifi_manager.connect_to_network(network.ssid, password)
 
   def forget_network(self, network: Network):
+    if not self._allowed():
+      return
     self.state = UIState.FORGETTING
     self._state_network = network
     self._wifi_manager.forget_connection(network.ssid)

@@ -30,6 +30,8 @@ class FontRole(StrEnum):
   BRAND = "brand"
   ROMAN = "roman"
   DISPLAY = "display"
+  SPEED = "speed"
+  SET_SPEED = "set_speed"
   FALLBACK = "fallback"
 
 
@@ -49,6 +51,8 @@ def font_filename(profile: Profile, role: FontRole) -> str:
     FontRole.BRAND: "Sora-800.fnt",
     FontRole.ROMAN: "Inter-Regular.fnt",
     FontRole.DISPLAY: "Inter-Bold.fnt",
+    FontRole.SET_SPEED: "DINish-Speed.fnt",
+    FontRole.SPEED: "DINish-Speed.fnt" if profile == Profile.LARGE else "Inter-Bold.fnt",
     FontRole.FALLBACK: "unifont.fnt",
   }[role]
 
@@ -60,7 +64,7 @@ def default_font_directory() -> Path:
 def font_path(directory: Path, filename: str) -> Path:
   # Keep the supplied Sora wordmark pinned to its bundled asset. The other
   # fonts use the bundled directory by default or a validated caller override.
-  return default_font_directory() / filename if filename == "Sora-800.fnt" else directory / filename
+  return default_font_directory() / filename if filename in ("Sora-800.fnt", "DINish-Speed.fnt") else directory / filename
 
 
 def validate_bitmap_font(path: Path) -> None:
@@ -70,7 +74,7 @@ def validate_bitmap_font(path: Path) -> None:
   requires an explicit asset review; accepting a partial descriptor grammar is
   insufficient to protect the native parser from malformed input.
   """
-  manifest_name = "sora-brand-font.json" if path.name == "Sora-800.fnt" else "bitmap-fonts.json"
+  manifest_name = {"Sora-800.fnt": "sora-brand-font.json", "DINish-Speed.fnt": "dinish-speed-font.json"}.get(path.name, "bitmap-fonts.json")
   manifest = json.loads(Path(__file__).with_name(manifest_name).read_text())
   expected = {entry["file"]: entry for entry in manifest["files"]}
   try:
@@ -102,6 +106,7 @@ class BitmapFonts:
     self.profile = Profile(profile)
     self._fonts: dict[str, rl.Font] = {}
     self._measurements: dict[tuple, TextSize] = {}
+    self._vertical_ink: dict[tuple, tuple[float, float]] = {}
     default_texture_id = rl.get_font_default().texture.id
     try:
       for filename in dict.fromkeys(font_filename(self.profile, role) for role in FontRole):
@@ -129,27 +134,65 @@ class BitmapFonts:
       role = FontRole.FALLBACK
     return self._fonts[font_filename(self.profile, role)]
 
+  def _optical_style(self, role: FontRole, fallback: bool = False) -> tuple[float, float]:
+    if fallback:
+      return 1., 0.
+    if self.profile == Profile.LARGE and role == FontRole.SPEED:
+      return 1.04, .85
+    if self.profile == Profile.COMPACT and role == FontRole.SET_SPEED:
+      return 1., .65
+    return 1., 0.
+
   def measure(self, text: str, role: FontRole, size: float, *, spacing: float = 0, fallback: bool = False) -> TextSize:
     font = self.font(role, fallback=fallback)
     spacing = round(spacing, 4)
-    key = font.texture.id, text, size, spacing
+    width_scale, weight = self._optical_style(role, fallback)
+    key = font.texture.id, text, size, spacing, width_scale, weight
     if key not in self._measurements:
       measured = rl.measure_text_ex(font, text, size * self.profile.font_scale, spacing)  # noqa: TID251
       if len(self._measurements) >= 1024:
         self._measurements.clear()
-      self._measurements[key] = TextSize(measured.x, measured.y)
+      self._measurements[key] = TextSize(measured.x * width_scale + (weight if text else 0), measured.y)
     return self._measurements[key]
+
+  def vertical_ink(self, text: str, role: FontRole, size: float) -> tuple[float, float]:
+    """Visible glyph top/bottom, independent of the font's padded line box."""
+    key = (text, role, size)
+    if key not in self._vertical_ink:
+      font = self.font(role)
+      glyphs = [rl.get_glyph_index(font, ord(char)) for char in text if not char.isspace()]
+      scale = size * self.profile.font_scale / font.baseSize
+      top = min((font.glyphs[index].offsetY for index in glyphs), default=0)
+      bottom = max((font.glyphs[index].offsetY + font.recs[index].height for index in glyphs), default=0)
+      if len(self._vertical_ink) >= 1024:
+        self._vertical_ink.clear()
+      self._vertical_ink[key] = (top * scale, bottom * scale)
+    return self._vertical_ink[key]
 
   def draw(self, text: str, role: FontRole, size: float, x: float, y: float, color: rl.Color = rl.WHITE,
            *, spacing: float = 0, fallback: bool = False) -> None:
     draw = getattr(rl, "_orig_draw_text_ex", rl.draw_text_ex)
-    draw(self.font(role, fallback=fallback), text, rl.Vector2(x, y), size * self.profile.font_scale, spacing, color)
+    width_scale, weight = self._optical_style(role, fallback)
+    if width_scale == 1. and weight == 0.:
+      draw(self.font(role, fallback=fallback), text, rl.Vector2(x, y), size * self.profile.font_scale, spacing, color)
+      return
+    rl.rl_push_matrix()
+    try:
+      rl.rl_translatef(x, y, 0)
+      rl.rl_scalef(width_scale, 1., 1.)
+      draw(self.font(role, fallback=fallback), text, rl.Vector2(0, 0), size * self.profile.font_scale, spacing, color)
+      if weight:
+        draw(self.font(role, fallback=fallback), text, rl.Vector2(weight / width_scale, 0),
+             size * self.profile.font_scale, spacing, color)
+    finally:
+      rl.rl_pop_matrix()
 
   def close(self) -> None:
     if rl.is_window_ready() or self._headless_context:
       for font in self._fonts.values():
         rl.unload_font(font)
     self._fonts.clear()
+    self._vertical_ink.clear()
     self._measurements.clear()
 
   def __enter__(self):

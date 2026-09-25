@@ -10,6 +10,7 @@ from opendbc.car.structs import car
 from openpilot.cereal.messaging import PubMaster
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params
+from openpilot.starpilot.schema_cache import put_cache
 from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
 from openpilot.selfdrive.ui.lib.prime_state import PrimeType
 from openpilot.selfdrive.ui.tests.diff.replay import FPS, LayoutVariant
@@ -148,22 +149,22 @@ def setup_calibration_params() -> None:
   calib = messaging.new_message('extrinsicsCalibration')
   calib.extrinsicsCalibration.calStatus = log.ExtrinsicsCalibration.Status.calibrated
   calib.extrinsicsCalibration.rpyCalib = [0.0, math.radians(2.5), math.radians(-1.2)]
-  params.put("CalibrationParams", calib.to_bytes(), block=True)
+  put_cache(params, "CalibrationParams", calib, block=True)
   # lateral delay
   delay = messaging.new_message('lateralDelay')
   delay.lateralDelay.calPerc = 75
-  params.put("LiveDelay", delay.to_bytes(), block=True)
+  put_cache(params, "LiveDelay", delay, block=True)
   # lateral torque parameters
   torque = messaging.new_message('lateralTorqueParameters')
   torque.lateralTorqueParameters.useParams = True
   torque.lateralTorqueParameters.calPerc = 60
-  params.put("LiveTorqueParameters", torque.to_bytes(), block=True)
+  put_cache(params, "LiveTorqueParameters", torque, block=True)
 
 
 def setup_developer_params() -> None:
   CP = car.CarParams()
   CP.alphaLongitudinalAvailable = True
-  Params().put("CarParamsPersistent", CP.to_bytes(), block=True)
+  put_cache(Params(), "CarParamsPersistent", CP, block=True)
 
 
 # --- Send functions ---

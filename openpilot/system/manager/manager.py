@@ -6,10 +6,11 @@ import sys
 import time
 import traceback
 
+from openpilot.starpilot.drive_state.owner import DriveStateOwner
 from openpilot.cereal import log
 import openpilot.cereal.messaging as messaging
 from openpilot.common.utils import atomic_write
-from openpilot.common.params import Params, ParamKeyFlag
+from openpilot.common.params import Params, ParamKeyFlag, UnknownKeyName
 from openpilot.common.text_window import TextWindow
 from openpilot.common.hardware import HARDWARE
 from openpilot.system.manager.helpers import unblock_stdout, save_bootlog
@@ -19,14 +20,34 @@ from openpilot.system.athena.registration import register, UNREGISTERED_DONGLE_I
 from openpilot.common.swaglog import cloudlog, add_file_handler
 from openpilot.common.version import get_build_metadata
 from openpilot.common.hardware.hw import Paths
+from openpilot.starpilot.state_migration import prepare_manager_start
+from openpilot.starpilot.storage import starpilot_storage_root
 
 
 def manager_init() -> None:
+  params = Params()
+  prepare_manager_start(params, starpilot_storage_root())
+  from openpilot.starpilot.settings_retirement import retire_settings
+  try:
+    for issue in retire_settings(params):
+      cloudlog.warning("Settings migration: %s", issue)
+  except (OSError, ValueError, KeyError, UnknownKeyName):
+    cloudlog.exception("Settings migration interrupted; retrying at next startup")
+  from openpilot.starpilot.audio.default_enrollment import enroll_default_sounds
+  try:
+    enroll_default_sounds(params, starpilot_storage_root())
+  except (OSError, ValueError):
+    cloudlog.warning('Sound default enrollment interrupted; retrying at next startup')
+  from openpilot.starpilot.connect.provider import activate_at_boot
+  try:
+    activate_at_boot(params)
+  except (OSError, KeyError, TypeError, ValueError):
+    os.environ['STARPILOT_CLOUD_DISABLED'] = '1'
+    cloudlog.warning('Cloud provider state needs repair; cloud services disabled for this session')
   save_bootlog()
 
   build_metadata = get_build_metadata()
 
-  params = Params()
   params.clear_all(ParamKeyFlag.CLEAR_ON_MANAGER_START)
   params.clear_all(ParamKeyFlag.CLEAR_ON_ONROAD_TRANSITION)
   params.clear_all(ParamKeyFlag.CLEAR_ON_OFFROAD_TRANSITION)
@@ -37,10 +58,17 @@ def manager_init() -> None:
   if params.get_bool("RecordFrontLock"):
     params.put_bool("RecordFront", True, block=True)
 
-  # set unset params to their default value
+  drive_state = DriveStateOwner(params, starpilot_storage_root() / "drive-state")
+  try:
+    drive_state.initialize_manager()
+  except (OSError, KeyError, TypeError, ValueError, UnknownKeyName):
+    cloudlog.warning("Force drive state is unavailable")
+
+  # Initialize absent settings only. Typed reads can return None for malformed
+  # saved data; replacing it here would bypass feature validation and recovery.
   for k in params.all_keys():
     default_value = params.get_default_value(k)
-    if default_value is not None and params.get(k) is None:
+    if default_value is not None and not os.path.lexists(params.get_param_path(k)):
       params.put(k, default_value, block=True)
 
   # Create folders needed for msgq
@@ -105,13 +133,16 @@ def manager_thread() -> None:
   params = Params()
 
   ignore: list[str] = []
-  if params.get("DongleId") in (None, UNREGISTERED_DONGLE_ID):
+  from openpilot.starpilot.connect.provider import active_provider
+  if os.getenv('STARPILOT_CLOUD_DISABLED') == '1' or (params.get("DongleId") in (None, UNREGISTERED_DONGLE_ID) and
+      active_provider().name != 'konik'):
     ignore += ["manage_athenad", "uploader"]
   if os.getenv("NOBOARD") is not None:
     ignore.append("pandad")
   ignore += [x for x in os.getenv("BLOCK", "").split(",") if len(x) > 0]
 
-  sm = messaging.SubMaster(['deviceState', 'carParams', 'pandaStates'], poll='deviceState')
+  sm = messaging.SubMaster(['deviceState', 'carParams', 'pandaStates', 'modelV2', 'drivingModelData',
+                               'narrowRoadCameraState', 'wideRoadCameraState'], poll='deviceState')
   pm = messaging.PubMaster(['managerState'])
 
   params.put_bool("IsOffroad", True, block=True)
@@ -141,6 +172,7 @@ def manager_thread() -> None:
     started_prev = started
     ignition_prev = ignition
 
+    managed_processes['modeld'].observe(sm, started)
     ensure_running(managed_processes.values(), started, params=params, CP=sm['carParams'], not_run=ignore)
 
     running = ' '.join("{}{}\u001b[0m".format("\u001b[32m" if p.proc.is_alive() else "\u001b[31m", p.name)

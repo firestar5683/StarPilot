@@ -3,6 +3,9 @@ import math
 import numpy as np
 from collections import deque
 from typing import Any
+import os
+import secrets
+import time
 
 import capnp
 from openpilot.cereal import messaging, log
@@ -12,6 +15,11 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import DT_MDL, Priority, config_realtime_process
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.simple_kalman import KF1D
+from openpilot.starpilot.conditional_mode.adjacent import (
+  CLOCK_PAIR_MAX_SKEW_NS, MODEL_EOF_MAX_AGE_NS, MODEL_MAX_AGE_NS, SOURCE_MAX_AGE_NS,
+  AdjacentFrame, AdjacentObservation, AdjacentTrack, MonoSource, UNKNOWN, evaluate,
+)
+from openpilot.starpilot.feature_runtime import enabled as feature_enabled
 
 
 # Default lead acceleration decay set to 50% at 1s
@@ -24,6 +32,20 @@ SPEED, ACCEL = 0, 1     # Kalman filter states enum
 V_EGO_STATIONARY = 4.   # no stationary object flag below this speed
 
 RADAR_TO_CAMERA = 1.52  # RADAR is ~ 1.5m ahead from center of mesh frame
+
+
+def _clock_pair() -> tuple[int, int, int] | None:
+  """Return a bounded MONOTONIC/BOOTTIME pair; missing BOOTTIME stays unknown."""
+  boot_clock = getattr(time, 'CLOCK_BOOTTIME', None)
+  if boot_clock is None:
+    return None
+  try:
+    before = time.monotonic_ns()
+    boot = time.clock_gettime_ns(boot_clock)
+    after = time.monotonic_ns()
+  except OSError:
+    return None
+  return (before + after) // 2, boot, after - before
 
 
 class KalmanParams:
@@ -177,7 +199,7 @@ def get_lead(v_ego: float, ready: bool, tracks: dict[int, Track], lead_msg: capn
 
 
 class RadarD:
-  def __init__(self, delay: float = 0.0):
+  def __init__(self, delay: float = 0.0, *, adjacent_enabled: bool = False, radar_available: bool = False, clock_pair_fn=None):
     self.tracks: dict[int, Track] = {}
     self.kalman_params = KalmanParams(DT_MDL)
     self.lead_prob_filters = [FirstOrderFilter(0.0, 0.2, DT_MDL) for _ in range(2)]
@@ -190,6 +212,83 @@ class RadarD:
     self.radar_state_valid = False
 
     self.ready = False
+    self.adjacent_enabled = adjacent_enabled
+    self.adjacent_radar_available = radar_available
+    self.adjacent_clock_pair_fn = clock_pair_fn or _clock_pair
+    self.adjacent_session = secrets.token_hex(16)
+    self.adjacent_sequence = 0
+    self.adjacent_offset_ns: int | None = None
+    self.adjacent_barrier_mono_ns = 0
+    self.adjacent_barrier_boot_ns = 0
+    self.adjacent_last_mono_ns = 0
+    self.adjacent_last_boot_ns = 0
+    self.adjacent_observation: AdjacentObservation = UNKNOWN
+    self.adjacent_sources: tuple[int, int, int, int] = (0, 0, 0, 0)
+    self.adjacent_valid_until_ns = 0
+
+  def _qualified_adjacent(self, sm: messaging.SubMaster, rr: car.RadarData) -> None:
+    pair = self.adjacent_clock_pair_fn()
+    self.adjacent_observation = UNKNOWN
+    self.adjacent_sources = (0, 0, 0, 0)
+    self.adjacent_valid_until_ns = 0
+    if pair is None or len(pair) != 3:
+      return
+    now_mono, now_boot, skew = pair
+    if not all(type(value) is int for value in pair) or not 0 <= skew <= CLOCK_PAIR_MAX_SKEW_NS:
+      return
+    offset = now_boot - now_mono
+    regressed = now_mono <= self.adjacent_last_mono_ns or now_boot <= self.adjacent_last_boot_ns
+    previous_mono, previous_boot = self.adjacent_last_mono_ns, self.adjacent_last_boot_ns
+    self.adjacent_last_mono_ns = max(now_mono, previous_mono)
+    self.adjacent_last_boot_ns = max(now_boot, previous_boot)
+    if (self.adjacent_offset_ns is None or regressed or
+        abs(offset - self.adjacent_offset_ns) > max(CLOCK_PAIR_MAX_SKEW_NS, skew * 2)):
+      self.adjacent_offset_ns = offset
+      self.adjacent_barrier_mono_ns = max(now_mono, previous_mono)
+      self.adjacent_barrier_boot_ns = max(now_boot, previous_boot)
+      return
+    radar_stamp = int(sm.logMonoTime['radarTracks'])
+    model_stamp = int(sm.logMonoTime['modelV2'])
+    car_stamp = int(sm.logMonoTime['carState'])
+    camera_eof = int(sm['modelV2'].timestampEof)
+    self.adjacent_sources = (radar_stamp, model_stamp, car_stamp, camera_eof)
+    primary_ids = frozenset(
+      int(getattr(lead, 'radarTrackId', -1)) for lead in (self.radar_state.leadOne, self.radar_state.leadTwo)
+      if bool(getattr(lead, 'present', False)) and bool(getattr(lead, 'radar', False)) and int(getattr(lead, 'radarTrackId', -1)) >= 0
+    )
+    frame = AdjacentFrame(
+      model=sm['modelV2'],
+      tracks=tuple(AdjacentTrack(track.identifier, track.dRel, track.yRel, track.vLead) for track in self.tracks.values()),
+      primary_track_ids=primary_ids,
+      radar_available=self.adjacent_radar_available,
+      radar_valid=bool(sm.valid['radarTracks'] and sm.updated['radarTracks']),
+      radar_error_free=not any(rr.errors.to_dict().values()),
+      model_valid=bool(sm.valid['modelV2']),
+      car_valid=bool(sm.valid['carState']),
+      standstill=bool(sm['carState'].standstill),
+      ego_speed_mps=self.v_ego,
+      radar=MonoSource(radar_stamp, int(sm.recv_time['radarTracks'] * 1e9)),
+      model_source=MonoSource(model_stamp, int(sm.recv_time['modelV2'] * 1e9)),
+      car=MonoSource(car_stamp, int(sm.recv_time['carState'] * 1e9)),
+      model_eof_boot_ns=camera_eof,
+      now_mono_ns=now_mono,
+      now_boot_ns=now_boot,
+      expected_boot_minus_mono_ns=self.adjacent_offset_ns,
+      barrier_mono_ns=self.adjacent_barrier_mono_ns,
+      barrier_boot_ns=self.adjacent_barrier_boot_ns,
+      sample_skew_ns=skew,
+    )
+    self.adjacent_observation = evaluate(frame)
+    if self.adjacent_observation.ambiguous is not None:
+      self.adjacent_valid_until_ns = min(
+        frame.radar.producer_ns + SOURCE_MAX_AGE_NS,
+        frame.radar.receipt_ns + SOURCE_MAX_AGE_NS,
+        frame.model_source.producer_ns + MODEL_MAX_AGE_NS,
+        frame.model_source.receipt_ns + MODEL_MAX_AGE_NS,
+        frame.car.producer_ns + SOURCE_MAX_AGE_NS,
+        frame.car.receipt_ns + SOURCE_MAX_AGE_NS,
+        frame.model_eof_boot_ns - frame.expected_boot_minus_mono_ns - frame.sample_skew_ns + MODEL_EOF_MAX_AGE_NS,
+      )
 
   def update(self, sm: messaging.SubMaster, rr: car.RadarData):
     self.ready = sm.seen['modelV2']
@@ -240,6 +339,8 @@ class RadarD:
 
       self.radar_state.leadOne = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0], model_v_ego, self.lead_prob_filters[0].x, low_speed_override=True)
       self.radar_state.leadTwo = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[1], model_v_ego, self.lead_prob_filters[1].x, low_speed_override=False)
+    if self.adjacent_enabled:
+      self._qualified_adjacent(sm, rr)
 
   def publish(self, pm: messaging.PubMaster):
     assert self.radar_state is not None
@@ -249,6 +350,33 @@ class RadarD:
     radar_msg.radarState = self.radar_state
     pm.send("radarState", radar_msg)
 
+    if not self.adjacent_enabled:
+      return
+
+    adjacent_msg = messaging.new_message('starpilotRadarState')
+    adjacent_msg.valid = self.adjacent_observation.ambiguous is not None
+    self.adjacent_sequence += 1
+    status = adjacent_msg.starpilotRadarState.qualifiedAdjacent
+    status.version = 1
+    status.status = ('unknown' if self.adjacent_observation.ambiguous is None else
+                     'ambiguous' if self.adjacent_observation.ambiguous else 'clear')
+    status.producerSessionId = self.adjacent_session
+    status.sequence = self.adjacent_sequence
+    status.radarTracksMonoTime, status.modelMonoTime, status.carStateMonoTime, status.cameraEofBootTime = self.adjacent_sources
+    observed = self.adjacent_observation.observed_mono_ns
+    if observed is not None:
+      status.observedMonoTime = observed
+      status.validUntilMonoTime = self.adjacent_valid_until_ns
+    for name, candidate in (('left', self.adjacent_observation.left), ('right', self.adjacent_observation.right)):
+      if candidate is not None:
+        wire = getattr(status, name)
+        wire.present = True
+        wire.trackId = candidate.track_id
+        wire.distanceM = candidate.distance_m
+        wire.lateralM = candidate.lateral_m
+        wire.speedMps = candidate.speed_mps
+    pm.send('starpilotRadarState', adjacent_msg)
+
 
 # fuses camera and radar data for best lead detection
 def main() -> None:
@@ -256,14 +384,16 @@ def main() -> None:
 
   # wait for stats about the car to come in from controls
   cloudlog.info("radard is waiting for CarParams")
-  CP = messaging.log_from_bytes(Params().get("CarParams", block=True), car.CarParams)
+  params = Params()
+  CP = messaging.log_from_bytes(params.get("CarParams", block=True), car.CarParams)
   cloudlog.info("radard got CarParams")
 
   # *** setup messaging
   sm = messaging.SubMaster(['modelV2', 'carState', 'radarTracks'], poll='modelV2')
-  pm = messaging.PubMaster(['radarState'])
+  adjacent_enabled = feature_enabled(params, CP, 'conditional', os.environ) and 'REPLAY' not in os.environ
+  pm = messaging.PubMaster(['radarState', 'starpilotRadarState'] if adjacent_enabled else ['radarState'])
 
-  RD = RadarD(CP.radarDelay)
+  RD = RadarD(CP.radarDelay, adjacent_enabled=adjacent_enabled, radar_available=not CP.radarUnavailable)
 
   while 1:
     sm.update()

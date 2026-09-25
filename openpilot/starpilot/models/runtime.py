@@ -6,7 +6,7 @@ import time
 from typing import Any
 
 from openpilot.cereal.services import SERVICE_LIST
-from openpilot.starpilot.models.catalog import CATALOG
+from openpilot.starpilot.models.catalog import model_entries
 from openpilot.starpilot.models.receipt import process_start_ticks, read_receipt
 from openpilot.starpilot.models.status import ModelLoad, ModelOutput, ModelProcess, ModelStatus, project_status
 
@@ -85,7 +85,7 @@ class ModelStatusSource:
   def json(self) -> dict[str, object]:
     status = self.snapshot()
     return {"schemaVersion": 1, "catalog": [{"id": entry.model_id, "name": entry.name,
-                                              "selectable": entry.selectable} for entry in CATALOG],
+                                              "selectable": entry.selectable} for entry in model_entries().values()],
             "requestedId": status.requested_id, "loadedId": status.loaded_id,
             "variant": status.variant.value if status.variant is not None else None,
             "health": status.health.value, "fallbackReason": status.fallback_reason,

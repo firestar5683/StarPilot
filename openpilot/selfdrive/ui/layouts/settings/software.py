@@ -1,13 +1,16 @@
 import subprocess
 import time
 import datetime
+from pathlib import Path
+from collections.abc import Callable
 from openpilot.common.time_helpers import system_time_valid
 from openpilot.selfdrive.ui.ui_state import ui_state
+from openpilot.starpilot.software.preferences import AUTOMATIC_DOWNLOADS, automatic_downloads
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.multilang import tr, trn
 from openpilot.system.ui.widgets import Widget, DialogResult
 from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
-from openpilot.system.ui.widgets.list_view import button_item, text_item, ListItem
+from openpilot.system.ui.widgets.list_view import button_item, text_item, toggle_item, ListItem
 from openpilot.system.ui.widgets.option_dialog import MultiOptionDialog
 from openpilot.system.ui.widgets.scroller_tici import Scroller
 
@@ -54,6 +57,16 @@ class SoftwareLayout(Widget):
 
     self._onroad_label = ListItem(lambda: tr("Updates are only downloaded while the car is off."))
     self._version_item = text_item(lambda: tr("Current Version"), ui_state.params.get("UpdaterCurrentDescription") or "")
+    self._auto_updates_toggle = toggle_item(
+      lambda: tr("Automatically Download Updates"),
+      lambda: tr("Automatically download updates while offroad. Manual checks and downloads remain available."),
+      initial_state=automatic_downloads(ui_state.params) is True, callback=self._on_auto_updates_toggle,
+      enabled=ui_state.is_offroad,
+    )
+    from openpilot.starpilot.ui.software_update import NativeSoftwareUpdate
+    self._direct_update = NativeSoftwareUpdate(ui_state.is_offroad)
+    self._fast_btn = button_item(lambda: tr("Fast Update"), lambda: tr("UPDATE"), callback=lambda: self._confirm_direct_update("fast"))
+    self._rollback_btn = button_item(lambda: tr("Previous Version"), lambda: tr("RESTORE"), callback=lambda: self._confirm_direct_update("rollback"))
     self._download_btn = button_item(lambda: tr("Download"), lambda: tr("CHECK"), callback=self._on_download_update)
 
     # Install button is initially hidden
@@ -69,24 +82,41 @@ class SoftwareLayout(Widget):
     self._branch_btn.set_visible(not ui_state.params.get_bool("IsTestedBranch"))
     self._branch_btn.action_item.set_value(ui_state.params.get("UpdaterTargetBranch") or "")
     self._branch_dialog: MultiOptionDialog | None = None
+    self._uninstall_btn = button_item(lambda: tr("Uninstall"), lambda: tr("UNINSTALL"),
+                                      callback=self._on_uninstall, enabled=ui_state.is_offroad)
 
-    self._scroller = Scroller([
+    self._scroller = self._child(Scroller([
       self._onroad_label,
       self._version_item,
-      self._download_btn,
+      self._auto_updates_toggle,
       self._install_btn,
+      self._download_btn,
+      self._fast_btn,
+      self._rollback_btn,
       self._branch_btn,
-      button_item(lambda: tr("Uninstall"), lambda: tr("UNINSTALL"), callback=self._on_uninstall),
-    ], line_separator=True, spacing=0)
-
-  def show_event(self):
-    super().show_event()
-    self._scroller.show_event()
+      self._uninstall_btn,
+      button_item(lambda: tr("Error Log"), lambda: tr("VIEW"), callback=self._on_error_log),
+    ], line_separator=True, spacing=0))
 
   def _render(self, rect):
     self._scroller.render(rect)
 
+  def _confirm_direct_update(self, action):
+    if not self._direct_update.available(action):
+      return
+    text = (tr("Restore the previous installed version and restart? Automatic downloads will be disabled.")
+            if action == "rollback" else tr("Download and install the selected branch, then restart?"))
+    gui_app.push_widget(ConfirmDialog(text, tr("RESTORE") if action == "rollback" else tr("UPDATE"),
+                                     callback=lambda result: self._direct_update.submit(action) if result == DialogResult.CONFIRM else None))
+
   def _update_state(self):
+    self._direct_update.refresh()
+    for action, button in (("fast", self._fast_btn), ("rollback", self._rollback_btn)):
+      button.set_visible(ui_state.is_offroad())
+      button.action_item.set_enabled(self._direct_update.available(action))
+    detail = self._direct_update.detail()
+    self._fast_btn.set_description(detail)
+    self._fast_btn.action_item.set_value(tr("Use Download for full update") if "use a full validated update" in detail else detail)
     # Show/hide onroad warning
     self._onroad_label.set_visible(ui_state.is_onroad())
 
@@ -95,6 +125,9 @@ class SoftwareLayout(Widget):
     current_release_notes = (ui_state.params.get("UpdaterCurrentReleaseNotes") or b"").decode("utf-8", "replace")
     self._version_item.action_item.set_text(current_desc)
     self._version_item.set_description(current_release_notes)
+    automatic = automatic_downloads(ui_state.params)
+    self._auto_updates_toggle.action_item.set_state(automatic is True)
+    self._auto_updates_toggle.action_item.set_enabled(ui_state.is_offroad() and automatic is not None)
 
     # Update download button visibility and state
     self._download_btn.set_visible(ui_state.is_offroad())
@@ -137,6 +170,8 @@ class SoftwareLayout(Widget):
     # Update target branch button value
     current_branch = ui_state.params.get("UpdaterTargetBranch") or ""
     self._branch_btn.action_item.set_value(current_branch)
+    self._branch_btn.set_visible(not ui_state.params.get_bool("IsTestedBranch"))
+    self._branch_btn.action_item.set_enabled(ui_state.is_offroad() and bool(ui_state.params.get("UpdaterAvailableBranches")))
 
     # Update install button
     self._install_btn.set_visible(ui_state.is_offroad() and update_available)
@@ -152,6 +187,8 @@ class SoftwareLayout(Widget):
       self._install_btn.set_visible(False)
 
   def _on_download_update(self):
+    if not ui_state.is_offroad() or self._waiting_for_updater or not self._download_btn.action_item.enabled:
+      return
     # Check if we should start checking or start downloading
     self._download_btn.action_item.set_enabled(False)
     if self._download_btn.action_item.text == tr("CHECK"):
@@ -165,24 +202,43 @@ class SoftwareLayout(Widget):
       self._waiting_start_ts = time.monotonic()
       subprocess.run("pkill -SIGHUP -f openpilot.system.updated.updated", shell=True)
 
-  def _on_uninstall(self):
+  def _on_uninstall(self, action_guard: Callable[[], bool] | None = None):
+    if not ui_state.is_offroad():
+      return
     def handle_uninstall_confirmation(result: DialogResult):
-      if result == DialogResult.CONFIRM:
+      if result == DialogResult.CONFIRM and ui_state.is_offroad() and (action_guard is None or action_guard()):
         ui_state.params.put_bool("DoUninstall", True, block=True)
 
     dialog = ConfirmDialog(tr("Are you sure you want to uninstall?"), tr("Uninstall"), callback=handle_uninstall_confirmation)
     gui_app.push_widget(dialog)
 
+  def _on_auto_updates_toggle(self, enabled: bool):
+    if ui_state.is_offroad():
+      ui_state.params.put_bool(AUTOMATIC_DOWNLOADS, enabled, block=True)
+
+  def _on_error_log(self):
+    try:
+      text = Path("/data/error_logs/error.txt").read_text(encoding="utf-8", errors="replace")
+    except OSError:
+      text = tr("No error log found.")
+    gui_app.push_widget(ConfirmDialog(text, tr("OK"), cancel_text="", rich=True))
+
   def _on_install_update(self):
+    if not ui_state.is_offroad() or not ui_state.params.get_bool("UpdateAvailable"):
+      return
     # Trigger reboot to install update
     self._install_btn.action_item.set_enabled(False)
     ui_state.params.put_bool("DoReboot", True, block=True)
 
-  def _on_select_branch(self):
+  def _on_select_branch(self, action_guard: Callable[[], bool] | None = None):
+    if not ui_state.is_offroad() or ui_state.params.get_bool("IsTestedBranch"):
+      return
     # Get available branches and order
     current_git_branch = ui_state.params.get("GitBranch") or ""
     branches_str = ui_state.params.get("UpdaterAvailableBranches") or ""
     branches = [b for b in branches_str.split(",") if b]
+    if not branches:
+      return
 
     for b in [current_git_branch, "devel-staging", "devel", "nightly", "nightly-dev", "master"]:
       if b in branches:
@@ -193,7 +249,10 @@ class SoftwareLayout(Widget):
 
     def handle_selection(result: DialogResult):
       # Confirmed selection
-      if result == DialogResult.CONFIRM and self._branch_dialog is not None and self._branch_dialog.selection:
+      if (result == DialogResult.CONFIRM and ui_state.is_offroad() and
+          not ui_state.params.get_bool("IsTestedBranch") and
+          self._branch_dialog is not None and self._branch_dialog.selection in branches and
+          (action_guard is None or action_guard())):
         selection = self._branch_dialog.selection
         ui_state.params.put("UpdaterTargetBranch", selection, block=True)
         self._branch_btn.action_item.set_value(selection)

@@ -19,7 +19,7 @@ def get_controller(car_name):
 
 class TestLatControlTorqueBuffer(OpenpilotTestCase):
 
-  @parameterized.expand([(TOYOTA.TOYOTA_COROLLA_TSS2,)])
+  @parameterized.expand([(TOYOTA.TOYOTA_RAV4_TSS2,)])
   def test_request_buffer_consistency(self, car_name):
     buffer_steps = int(LAT_ACCEL_REQUEST_BUFFER_SECONDS / DT_CTRL)
     controller, VM = get_controller(car_name)

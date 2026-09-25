@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from openpilot.starpilot.models.catalog import ARTIFACT_ABI, BUNDLED_CURRENT, CATALOG_PATH
+from openpilot.starpilot.models.catalog import ARTIFACT_ABI, BUNDLED_CURRENT, CATALOG_PATH, DEFAULT_SMALL
 from openpilot.starpilot.models.manager import (
   ModelError, ModelManager, atomic_json, catalog, preferences, randomize_next_start, resolve_runtime, validate_manifest,
 )
@@ -49,8 +49,20 @@ class ModelManagerTest(unittest.TestCase):
     self.temp = tempfile.TemporaryDirectory()
     self.addCleanup(self.temp.cleanup)
     self.root = Path(self.temp.name)
+    shipped = patch('openpilot.starpilot.models.manager.SHIPPED_MODELS', self.root / 'shipped')
+    shipped.start()
+    self.addCleanup(shipped.stop)
     self.parked = True
     self.data = b'a verified compiled artifact'
+    from openpilot.common.file_chunker import package_file
+    source = self.root / 'shipped-source.pkl'
+    source.write_bytes(self.data)
+    package_file(source, self.root / 'shipped/rdf43_driving_tinygrad.pkl')
+    source.unlink()
+    for attribute, value in (('DEFAULT_SMALL_SHA256', hashlib.sha256(self.data).hexdigest()), ('DEFAULT_SMALL_SIZE', len(self.data))):
+      identity = patch('openpilot.starpilot.models.manager.' + attribute, value)
+      identity.start()
+      self.addCleanup(identity.stop)
     self.manifest = json.loads(CATALOG_PATH.read_text())
     self.row = next(x for x in self.manifest['models'] if x['id'] == 'gwm8223')
     self.row.update(artifact_format=ARTIFACT_ABI, artifact_sha256=hashlib.sha256(self.data).hexdigest(),
@@ -89,10 +101,45 @@ class ModelManagerTest(unittest.TestCase):
       time.sleep(0.01)
     self.fail('Artifact verification did not finish')
 
+  def test_selected_gpu_status_verifies_download_without_bundled_model_or_job_writes(self):
+    from openpilot.starpilot.models.manager import artifact_path
+
+    mid = 'cinquev3'
+    entry = {'artifact_sha256': hashlib.sha256(self.data).hexdigest(), 'artifact_size': len(self.data)}
+    path = artifact_path(mid, self.root)
+    path.parent.mkdir(parents=True)
+    path.write_bytes(self.data)
+    atomic_json(self.root / 'preferences.json', {'big': mid})
+    with patch('openpilot.starpilot.models.manager.catalog', return_value={mid: entry}), \
+         patch.object(self.manager, '_job_status', side_effect=AssertionError('Read-only status must not change jobs')):
+      assert self.manager.selected_gpu_status() == (False, True)
+      deadline = time.monotonic() + 3
+      while time.monotonic() < deadline:
+        state = self.manager.selected_gpu_status()
+        if state != (False, True):
+          break
+        time.sleep(.01)
+      assert state == (True, False)
+      path.write_bytes(b'x' * len(self.data))
+      assert self.manager.selected_gpu_status() == (False, True)
+      deadline = time.monotonic() + 3
+      while time.monotonic() < deadline:
+        state = self.manager.selected_gpu_status()
+        if state != (False, True):
+          break
+        time.sleep(.01)
+      assert state == (False, False)
+      atomic_json(self.root / 'preferences.json', {'big': ''})
+      assert self.manager.selected_gpu_status() == (False, False)
+      atomic_json(self.root / 'preferences.json', {'big': mid})
+      path.unlink()
+      assert self.manager.selected_gpu_status() == (False, False)
+    assert not (self.root / '.download-job.json').exists()
+
   def test_chunk_download_verifies_and_selects_next_start(self):
     self.download()
     self.assertEqual(self.manager.progress, 'Downloaded!')
-    self.assertEqual(preferences(self.root)['small'], BUNDLED_CURRENT)
+    self.assertEqual(preferences(self.root)['small'], DEFAULT_SMALL)
     self.manager.action('active', {'profile': 'small', 'model': 'gwm8223'})
     selected = resolve_runtime(True, root=self.root)
     self.assertEqual(selected.small_id, 'gwm8223')
@@ -129,7 +176,7 @@ class ModelManagerTest(unittest.TestCase):
     self.manager.action('active', {'profile': 'small', 'model': 'gwm8223'})
     self.assertTrue(self.wait_for_check()['installed'])
     (self.root/'gwm8223/gwm8223_driving_tinygrad.pkl').write_bytes(b'x' * len(self.data))
-    self.assertEqual(resolve_runtime(True, root=self.root).small_id, BUNDLED_CURRENT)
+    self.assertEqual(resolve_runtime(True, root=self.root).small_id, DEFAULT_SMALL)
     self.assertFalse(self.model_status()['installed'])
     self.assertFalse(self.wait_for_check()['installed'])
 
@@ -183,7 +230,7 @@ class ModelManagerTest(unittest.TestCase):
     self.manager.parked = lambda: next(samples)
     with self.assertRaises(ModelError):
       self.manager.action('active', {'profile': 'small', 'model': 'gwm8223'})
-    self.assertEqual(preferences(self.root)['small'], BUNDLED_CURRENT)
+    self.assertEqual(preferences(self.root)['small'], DEFAULT_SMALL)
 
   def test_hardware_profiles_and_selected_delete(self):
     self.download()
@@ -217,7 +264,7 @@ class ModelManagerTest(unittest.TestCase):
     self.assertEqual(resolve_runtime(True, root=self.root).small_id, 'gwm8223')
     with patch('openpilot.starpilot.models.manager.MODEL_RUNNER_REVISION', 1):
       self.assertNotIn('artifact_sha256', validate_manifest(self.manifest)['gwm8223'])
-      self.assertEqual(resolve_runtime(True, root=self.root).small_id, BUNDLED_CURRENT)
+      self.assertEqual(resolve_runtime(True, root=self.root).small_id, DEFAULT_SMALL)
       self.assertFalse(self.model_status()['downloadAvailable'])
     self.assertEqual(resolve_runtime(True, root=self.root).small_id, 'gwm8223')
 
@@ -444,10 +491,11 @@ class ModelManagerTest(unittest.TestCase):
 
   def test_randomizer_off_is_read_only_and_opt_in(self):
     self.install_fixture('gwm8223')
-    self.assertEqual(resolve_runtime(False, root=self.root, randomize=True).small_id, BUNDLED_CURRENT)
+    self.assertEqual(resolve_runtime(False, root=self.root, randomize=True).small_id, DEFAULT_SMALL)
     self.assertFalse((self.root / 'preferences.json').exists())
+    self.manager.action('active', {'profile': 'small', 'model': BUNDLED_CURRENT})
     self.manager.action('preferences', {'randomizer': True})
-    self.assertEqual(resolve_runtime(False, root=self.root).small_id, BUNDLED_CURRENT)
+    self.assertEqual(resolve_runtime(False, root=self.root).small_id, DEFAULT_SMALL)
     self.assertEqual(resolve_runtime(False, root=self.root, randomize=True).small_id, 'gwm8223')
     self.assertEqual(preferences(self.root)['small'], 'gwm8223')
 
@@ -466,12 +514,12 @@ class ModelManagerTest(unittest.TestCase):
     randomize_next_start(False, root=self.root, chooser=choose)
     self.assertNotIn('rdf43', seen)
     self.assertIn('gwm8223', seen)
-    self.assertIn(BUNDLED_CURRENT, seen)
+    self.assertEqual(seen, ['gwm8223'])
 
   def test_randomizer_no_chestnut_changes_only_small(self):
     self.install_fixture('gwm8223')
     self.install_fixture('cinquev3')
-    atomic_json(self.root / 'preferences.json', {'randomizer': True, 'big': 'cinquev3'})
+    atomic_json(self.root / 'preferences.json', {'randomizer': True, 'big': 'cinquev3', 'small': BUNDLED_CURRENT})
     selected = resolve_runtime(False, root=self.root, randomize=True)
     self.assertEqual(selected.small_id, 'gwm8223')
     self.assertFalse(selected.allow_big)
@@ -487,12 +535,12 @@ class ModelManagerTest(unittest.TestCase):
     path.write_bytes(b'x' * len(self.data))
     atomic_json(self.root / 'preferences.json', {'randomizer': True, 'small': 'gwm8223',
                                                'blacklistedModels': [BUNDLED_CURRENT]})
-    self.assertEqual(resolve_runtime(False, root=self.root, randomize=True).small_id, BUNDLED_CURRENT)
+    self.assertEqual(resolve_runtime(False, root=self.root, randomize=True).small_id, DEFAULT_SMALL)
     self.manager.action('preferences', {'blacklistedModels': []})
     atomic_json(self.root / 'preferences.json', {'randomizer': True, 'big': 'cinquev3', 'small': 'gwm8223'})
     selected = resolve_runtime(True, root=self.root, randomize=True)
     self.assertFalse(selected.allow_big)
-    self.assertEqual(selected.small_id, BUNDLED_CURRENT)
+    self.assertEqual(selected.small_id, DEFAULT_SMALL)
     self.assertEqual(preferences(self.root)['big'], '')
 
   def test_selection_preferences_require_parked_and_strict_values(self):
@@ -514,9 +562,151 @@ class ModelManagerTest(unittest.TestCase):
       self.manager.action('preferences', {'randomizer': False})
     self.assertTrue(preferences(self.root)['randomizer'])
 
+  def test_remote_new_model_download_selection_restart_and_status(self):
+    from openpilot.starpilot.models.catalog import BY_ID, model_entries, resolve_selection
+    from openpilot.starpilot.models.receipt import read_receipt, write_receipt
+    from openpilot.starpilot.models.status import ModelHealth, ModelLoad, ModelOutput, ModelProcess, ModelVariant, project_status
+    from openpilot.starpilot.ui.models_state import home_model_label
+
+    row = dict(self.row, id="new_remote_model", name="Remote Model", version="v16", uses_external_gpu=True)
+    assert isinstance(row["id"], str) and isinstance(row["artifact_sha256"], str)
+    small_row = dict(row, id="new_remote_small", name="Remote Small", uses_external_gpu=False)
+    self.manifest["models"].extend((row, small_row))
+    self.manager.action("refresh_manifest", {})
+    self.manager.worker.join(3)
+    self.assertFalse(self.manager.worker.is_alive())
+    self.assertNotIn(row["id"], BY_ID)
+    self.manager.action("download", {"model": row["id"]})
+    self.manager.worker.join(3)
+    self.assertFalse(self.manager.worker.is_alive())
+    self.manager.action("download", {"model": small_row["id"]})
+    self.manager.worker.join(3)
+    self.assertFalse(self.manager.worker.is_alive())
+    self.manager.action("active", {"profile": "small", "model": small_row["id"]})
+    with self.assertRaises(ModelError):
+      self.manager.action("active", {"profile": "small", "model": row["id"]})
+    self.manager.action("active", {"profile": "big", "model": row["id"]})
+    self.manager.action("preferences", {"userFavorites": [row["id"]], "blacklistedModels": []})
+    restarted = self.other_manager()
+    self.assertEqual(preferences(self.root)["big"], row["id"])
+    self.assertEqual(preferences(self.root)["userFavorites"], [row["id"]])
+    selection = resolve_runtime(True, root=self.root)
+    self.assertTrue(selection.allow_big)
+    self.assertEqual((selection.small_id, selection.small_version), (small_row["id"], "v16"))
+    self.assertEqual((selection.big_id, selection.big_version, selection.big_sha256),
+                     (row["id"], "v16", row["artifact_sha256"]))
+    self.assertTrue(selection.big_path.is_file())
+    with patch("openpilot.starpilot.models.manager.ROOT", self.root):
+      self.assertEqual(resolve_selection(row["id"]).name, row["name"])
+      load = ModelLoad(421, 5000, 1_100_000_000, row["id"], ModelVariant.CHESTNUT, row["artifact_sha256"])
+      receipt = self.root / "receipt" / "load.json"
+      write_receipt(load, receipt)
+      self.assertEqual(read_receipt(receipt), load)
+      wrong_hardware = ModelLoad(421, 5000, 1_100_000_000, row["id"], ModelVariant.SMALL, row["artifact_sha256"])
+      with self.assertRaises(ValueError):
+        write_receipt(wrong_hardware, receipt)
+      output = ModelOutput(1_180_000_000, True, 1_185_000_000, True, True, True)
+      status = project_status(row["id"], ModelProcess(421, 5000, True), load, output, 1_200_000_000)
+      self.assertEqual(status.health, ModelHealth.ACTIVE)
+      self.assertEqual(home_model_label(status), row["name"])
+      self.assertIn(row["id"], model_entries())
+    restarted.opener = lambda *args, **kwargs: (_ for _ in ()).throw(OSError("offline"))
+    with self.assertRaises(OSError):
+      restarted._refresh()
+    self.assertEqual(preferences(self.root)["big"], row["id"])
+    self.assertIn(row["id"], catalog(self.root))
+    self.assertNotIn(row["id"], BY_ID)
+    self.manager.action("preferences", {"randomizer": True})
+    chosen = randomize_next_start(True, root=self.root, chooser=lambda choices: row["id"])
+    self.assertEqual(chosen["big"], row["id"])
+
+  def test_remote_metadata_rejects_invalid_identity_runtime_and_hardware(self):
+    import copy
+    row = dict(self.row, id="new_remote", name="New Remote", version="v16")
+    good = {**self.manifest, "models": [row]}
+    self.assertIn(row["id"], validate_manifest(good))
+    for invalid_document in (None, [], "catalog"):
+      with self.subTest(document=invalid_document), self.assertRaises(ModelError):
+        validate_manifest(invalid_document)
+    for changes in ({"id": "../escape"}, {"id": "/escape"}, {"id": "Uppercase"}, {"name": ""},
+                    {"name": "bad\nlabel"}, {"name": "x" * 129}, {"version": []}, {"version": "v17"}, {"uses_external_gpu": "false"},
+                    {"artifact_format": "other"}, {"artifact_size": True}, {"artifact_sha256": "x" * 64},
+                    {"artifact_chunk_count": -1}):
+      with self.subTest(changes=changes), self.assertRaises(ModelError):
+        validate_manifest({**good, "models": [row | changes]})
+    with self.assertRaises(ModelError):
+      validate_manifest({**good, "models": [row, row]})
+    unpublished = copy.deepcopy(row)
+    for key in ("artifact_format", "artifact_size", "artifact_sha256", "artifact_chunk_count"):
+      unpublished.pop(key)
+    with self.assertRaises(ModelError):
+      validate_manifest({**good, "models": [unpublished]})
+    future_only = unpublished | {"runtime_artifacts": [{
+      key: value for key, value in row.items() if key in {"artifact_format", "artifact_sha256", "artifact_size", "artifact_chunk_count"}
+    } | {"min_runner_revision": 3}]}
+    with self.assertRaises(ModelError):
+      validate_manifest({**good, "models": [future_only]})
+    for key in ("compiler_revision", "artifact_abi", "generation"):
+      with self.subTest(key=key), self.assertRaises(ModelError):
+        validate_manifest(good | {key: "other"})
+    known = dict(self.row, version="v16" if self.row["version"] != "v16" else "v15")
+    with self.assertRaises(ModelError):
+      validate_manifest({**good, "models": [known]})
+
+  def test_remote_metadata_cache_refresh_and_root_isolation(self):
+    from openpilot.starpilot.models.catalog import BY_ID, model_entries
+    row = dict(self.row, id="remote_cache", name="First name", version="v16")
+    atomic_json(self.root / "catalog.json", {**self.manifest, "models": [row]})
+    self.assertEqual(model_entries(self.root)[row["id"]].name, "First name")
+    with patch("openpilot.starpilot.models.manager.catalog", side_effect=AssertionError("cache reparsed")):
+      self.assertEqual(model_entries(self.root)[row["id"]].name, "First name")
+    atomic_json(self.root / "catalog.json", {**self.manifest, "models": [row | {"name": "Second name"}]})
+    self.assertEqual(model_entries(self.root)[row["id"]].name, "Second name")
+    with tempfile.TemporaryDirectory() as empty:
+      self.assertNotIn(row["id"], model_entries(Path(empty)))
+    self.assertEqual(model_entries(self.root)[DEFAULT_SMALL].source_sha256, BY_ID[DEFAULT_SMALL].source_sha256)
+
+  def test_catalog_page_refresh_is_async_bounded_and_parked_only(self):
+    entered, release = threading.Event(), threading.Event()
+    row = dict(self.row, id="page_remote", name="Page Remote", version="v16")
+    self.manifest["models"].append(row)
+    original = self.manager.opener
+    def blocked_manifest(url, timeout):
+      if "/manifests/" in url:
+        entered.set()
+        if not release.wait(3):
+          raise OSError("fixture stalled")
+      return original(url, timeout)
+    self.manager.opener = blocked_manifest
+    self.manager.refresh_catalog = True
+    self.parked = False
+    with patch("openpilot.starpilot.models.manager.time.monotonic", return_value=100):
+      self.manager.snapshot()
+      self.assertIsNone(self.manager.worker)
+      self.parked = True
+      self.manager.snapshot()
+      self.assertTrue(entered.wait(1))
+      self.assertTrue(self.manager.worker.is_alive())
+      self.assertFalse(any("/models/" in url for url in self.urls))
+      release.set()
+      self.manager.worker.join(3)
+      self.assertIn(row["id"], catalog(self.root))
+      previous = self.manager.worker
+      self.manager.snapshot()
+      self.assertIs(self.manager.worker, previous)
+    self.assertFalse(any("/models/" in url for url in self.urls))
+
   def test_unpublished_catalog_is_visible_but_not_selectable(self):
-    self.assertEqual(len(catalog(self.root)), 99)
+    manifest_ids = [row['id'] for row in json.loads(CATALOG_PATH.read_text())['models']]
+    self.assertEqual(len(manifest_ids), len(set(manifest_ids)))
+    self.assertCountEqual(catalog(self.root), manifest_ids)
+    self.manager.snapshot()
+    if self.manager.verify_worker is not None:
+      self.manager.verify_worker.join(2)
     models = self.manager.snapshot()['models']
+    visible_ids = [row['value'] for row in models]
+    self.assertEqual(len(visible_ids), len(set(visible_ids)))
+    self.assertCountEqual(visible_ids, manifest_ids)
     self.assertEqual(sum(row['selectable'] for row in models), 1)
     self.assertTrue(all(row.get('unavailableReason') for row in models if not row['selectable']))
 

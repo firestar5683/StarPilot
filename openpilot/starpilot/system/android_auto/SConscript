@@ -1,0 +1,8 @@
+Import('env', 'arch')
+
+# Hardware H.264 for Android Auto projection (Qualcomm V4L2). Loaded with ctypes by
+# hw_encoder.py; optional PyAV/libx264 is used only when separately installed.
+if arch == "comma_arm64":
+  env.SharedLibrary('hw/aa_encoder', ['hw/aa_encoder.cc'])
+  if GetOption('extras'):
+    env.Program('hw/test_rgba_to_nv12', ['hw/test_rgba_to_nv12.cc'])

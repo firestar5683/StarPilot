@@ -1,0 +1,86 @@
+{
+  "format": 1,
+  "purpose": "Reviewed external Settings image inputs before native decoding",
+  "files": [
+    {
+      "file": "icons/backspace.png",
+      "bytes": 6267,
+      "sha256": "576da562df8eb513e64ccb614ec727b257cbca8b5507974d01efc0f64c5382c2"
+    },
+    {
+      "file": "icons_mici/buttons/button_rectangle.png",
+      "bytes": 7982,
+      "sha256": "5dedb4139a7ddeafcdaf050144769e490643820db726201a15250e1042eb6d15"
+    },
+    {
+      "file": "icons_mici/settings.png",
+      "bytes": 2198,
+      "sha256": "14b457d2dc19d8658f525cc6989c9cfcf0edaf695b18767514242acbdbe2a6dd"
+    },
+    {
+      "file": "icons_mici/settings/network/wifi_strength_full.png",
+      "bytes": 2026,
+      "sha256": "73c76e5240bdff64c1d1ed0ac2bb9c3fadb2fd61fbf8dc710b812757af8bcf6c"
+    },
+    {
+      "file": "icons_mici/settings/horizontal_scroll_indicator.png",
+      "bytes": 2176,
+      "sha256": "af8d5ecb6468442361462aa838a2d234b1256b8139418be8ef2962e4350cfbef"
+    },
+    {
+      "file": "icons_mici/settings/device_icon.png",
+      "bytes": 1888,
+      "sha256": "2273629450aa870f0964dd285721c35d3d313fb8b4684122215a65844ae744d0"
+    },
+    {
+      "file": "icons_mici/settings/software.png",
+      "bytes": 3225,
+      "sha256": "190e196eba6feffec125ac66cf7e77620b759e346fa69b80e3a3884a5694cb15"
+    },
+    {
+      "file": "icons_mici/settings/firehose.png",
+      "bytes": 1364,
+      "sha256": "416656861380981acc114e5285b448d6e4dc42b98539d0ba16821cbc3db89208"
+    },
+    {
+      "file": "icons_mici/settings/developer_icon.png",
+      "bytes": 1759,
+      "sha256": "ebb4f7ad9fd2f9fb3c69a38fbc00cbe690809b0ff202ffd4768ae5b699acc035"
+    },
+    {
+      "file": "icons_mici/settings/galaxy.png",
+      "bytes": 10382,
+      "sha256": "817d30f1d18084ffa81567c70a1797982b7cdc404aa078a231484f50fc113dd6"
+    },
+    {
+      "file": "icons_mici/settings/bluetooth.png",
+      "bytes": 1060,
+      "sha256": "341185f3c7b853619f6e0919bc1b13183726137998ffd5f78dc4014bba0b9eab"
+    },
+    {
+      "file": "icons_mici/settings/vehicle.png",
+      "bytes": 1841,
+      "sha256": "90080cd7ab2093b218fc7d86f64a3de2af6836f34f82facc689d9e9646adf6f8"
+    },
+    {
+      "file": "icons_mici/settings/device/cameras.png",
+      "bytes": 3117,
+      "sha256": "5f47e636025e044977f278a35546e0fc971f48fd53c2eeafd3508e95c35f378f"
+    },
+    {
+      "file": "icons_mici/settings/device/update.png",
+      "bytes": 2409,
+      "sha256": "f28cdeaba9146521335bc11ad60a8e0368eb0ed1381e88b35a12a6138ba22ed6"
+    },
+    {
+      "file": "icons_mici/settings/device/lkas.png",
+      "bytes": 2028,
+      "sha256": "a05a41e66c7a24d461a4bbcdab0979031e5900e1db270af52ca363f0bed521f5"
+    },
+    {
+      "file": "icons_mici/settings/comma_icon.png",
+      "bytes": 1388,
+      "sha256": "7ad4ee47ec6470f788a026f95ed86bf344f64f9cf3186c9c78927233d2694a1d"
+    }
+  ]
+}

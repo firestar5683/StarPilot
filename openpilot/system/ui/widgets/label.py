@@ -4,7 +4,9 @@ from collections.abc import Callable
 from typing import Union
 import pyray as rl
 
-from openpilot.system.ui.lib.application import gui_app, FontWeight, DEFAULT_TEXT_SIZE, DEFAULT_TEXT_COLOR, FONT_SCALE, TextAlignment, TextAlignmentVertical
+from openpilot.system.ui.lib.application import (
+  gui_app, FontWeight, DEFAULT_TEXT_SIZE, DEFAULT_TEXT_COLOR, FONT_SCALE, TextAlignment, TextAlignmentVertical, font_fallback,
+)
 from openpilot.system.ui.widgets import Widget
 from openpilot.system.ui.lib.text_measure import measure_text_cached
 from openpilot.system.ui.lib.wrap_text import wrap_text
@@ -101,6 +103,7 @@ class Label(Widget):
     self._line_scale = line_scale
 
     self._text = text
+    self._cached_text_key = None
     self.set_text(text)
 
   def set_text(self, text):
@@ -115,8 +118,12 @@ class Label(Widget):
     self._update_text(self._text)
 
   def _update_text(self, text):
-    self._text_size = []
     text = _resolve_value(text)
+    key = (text, font_fallback(self._font).texture.id, self._rect.width, self._font_size, self._text_padding,
+           self._elide_right, self._icon.width if self._icon is not None else None)
+    if key == self._cached_text_key:
+      return
+    self._text_size = []
 
     if self._elide_right:
       display_text = text
@@ -145,10 +152,10 @@ class Label(Widget):
 
     for t in self._text_wrapped:
       self._text_size.append(measure_text_cached(self._font, t, self._font_size))
+    self._cached_text_key = key
 
   def _render(self, _):
     # Text can be a callable
-    # TODO: cache until text changed
     self._update_text(self._text)
 
     text_size = self._text_size[0] if self._text_size else rl.Vector2(0.0, 0.0)

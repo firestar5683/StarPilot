@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import abc
+import math
 import pyray as rl
 from collections.abc import Callable
 from openpilot.system.ui.widgets import Widget
@@ -17,6 +18,32 @@ NAV_BAR_HEIGHT = 8
 
 DISMISS_PUSH_OFFSET = NAV_BAR_MARGIN + NAV_BAR_HEIGHT + 50  # px extra to push down when dismissing
 DISMISS_ANIMATION_RC = 0.2  # slightly slower for non-user triggered dismiss animation
+
+
+def _frame_dt(default: float) -> float:
+  elapsed = rl.get_frame_time()
+  return min(elapsed if math.isfinite(elapsed) and elapsed > 0 else default, 0.1)
+
+
+def _update_filter(animation: FirstOrderFilter, target: float, elapsed: float) -> float:
+  alpha = 1 - (1 - animation.alpha) ** (elapsed / animation.dt)
+  animation.x += alpha * (target - animation.x)
+  return animation.x
+
+
+def _update_bounce(animation: BounceFilter, target: float, elapsed: float) -> float:
+  steps = max(1, math.ceil(elapsed / animation.dt))
+  for _ in range(steps):
+    step_dt = min(elapsed, animation.dt)
+    scale = step_dt / animation.dt
+    _update_filter(animation, target, step_dt)
+    animation.velocity.x += (target - animation.x) * animation.bounce * (animation.dt * 60) * step_dt
+    _update_filter(animation.velocity, 0.0, step_dt)
+    if abs(animation.velocity.x) < 1e-5:
+      animation.velocity.x = 0.0
+    animation.x += animation.velocity.x * scale
+    elapsed -= step_dt
+  return animation.x
 
 
 class NavBar(Widget):
@@ -42,7 +69,7 @@ class NavBar(Widget):
   def _render(self, _):
     if rl.get_time() - self._fade_time > self.FADE_AFTER_SECONDS:
       self._alpha = 0.0
-    alpha = self._alpha_filter.update(self._alpha)
+    alpha = _update_filter(self._alpha_filter, self._alpha, _frame_dt(self._alpha_filter.dt))
 
     # white bar with black border
     rl.draw_rectangle_rounded(self._rect, 1.0, 6, rl.Color(255, 255, 255, int(255 * 0.9 * alpha)))
@@ -71,6 +98,7 @@ class NavWidget(Widget, abc.ABC):
     # TODO: move this state into NavBar
     self._nav_bar = self._child(NavBar())
     self._nav_bar_show_time = 0.0
+    self._nav_bar_delay_pending = True
     self._nav_bar_y_filter = FirstOrderFilter(0.0, 0.1, 1 / gui_app.target_fps)
 
   def _back_enabled(self) -> bool:
@@ -148,7 +176,7 @@ class NavWidget(Widget, abc.ABC):
     if self._playing_dismiss_animation:
       new_y = self._rect.height + DISMISS_PUSH_OFFSET
 
-    new_y = self._y_pos_filter.update(new_y)
+    new_y = _update_bounce(self._y_pos_filter, new_y, _frame_dt(self._y_pos_filter.dt))
     if abs(new_y) < 1 and abs(self._y_pos_filter.velocity.x) < 0.5:
       new_y = self._y_pos_filter.x = 0.0
       self._y_pos_filter.velocity.x = 0.0
@@ -185,16 +213,17 @@ class NavWidget(Widget, abc.ABC):
     ret = super().render(rect)
 
     bar_x = self._rect.x + (self._rect.width - self._nav_bar.rect.width) / 2
-    nav_bar_delayed = rl.get_time() - self._nav_bar_show_time < 0.4
+    nav_bar_delayed = self._nav_bar_delay_pending and rl.get_time() - self._nav_bar_show_time < 0.4
     # User dragging or dismissing, nav bar follows NavWidget
     if self._drag_start_pos is not None or self._playing_dismiss_animation:
+      self._nav_bar_delay_pending = False
       self._nav_bar_y_filter.x = NAV_BAR_MARGIN + self._y_pos_filter.x
     # Waiting to show
     elif nav_bar_delayed:
       self._nav_bar_y_filter.x = -NAV_BAR_MARGIN - NAV_BAR_HEIGHT
     # Animate back to top
     else:
-      self._nav_bar_y_filter.update(NAV_BAR_MARGIN)
+      _update_filter(self._nav_bar_y_filter, NAV_BAR_MARGIN, _frame_dt(self._nav_bar_y_filter.dt))
 
     self._nav_bar.set_position(bar_x, self._nav_bar_y_filter.x)
     self._nav_bar.render()
@@ -227,3 +256,4 @@ class NavWidget(Widget, abc.ABC):
 
     self._nav_bar_y_filter.x = -NAV_BAR_MARGIN - NAV_BAR_HEIGHT
     self._nav_bar_show_time = rl.get_time()
+    self._nav_bar_delay_pending = True

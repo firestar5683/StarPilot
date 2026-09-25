@@ -1,0 +1,71 @@
+"""Keep readiness receipts intact while missing road data stays visually neutral."""
+from typing import Any
+from unittest.mock import Mock
+from dataclasses import replace
+
+import unittest
+
+from openpilot.cereal import log, messaging
+from openpilot.starpilot.conditional_mode.host import HostProposal
+from openpilot.starpilot.conditional_mode.projection import ProjectedScene
+from openpilot.starpilot.conditional_mode.policy import Authority, Decision, ModeChoice, Reason
+from openpilot.starpilot.conditional_mode.runtime_settings import SettingsSnapshot, DocumentState, SafeModeState
+from openpilot.starpilot.conditional_mode.status import StatusPublisher
+from openpilot.starpilot.ui.conditional_status import ConditionalPerceptionProjector
+from openpilot.starpilot.ui.onroad_conditional import status, stop_active
+from openpilot.starpilot.ui.onroad_state import OnroadState, SpeedLimitObservation
+
+
+def changed_arguments(arguments: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]:
+  return arguments | changes
+
+
+def check_fresh_validated_receipt_preserves_unavailable_reason(choice, policy_reason):
+  now = 100_000_000_000
+  drive_id = now - 1_000_000_000
+  authority = Authority(True, True, False, False, False, True)
+  decision = Decision(True, False, True, True, policy_reason, 0)
+  settings = SettingsSnapshot('test', 1, now, now, DocumentState.ABSENT, SafeModeState.ABSENT_FALSE, None, None, None)
+  # Controlled wire reasons isolate presentation; this is not policy/control admission.
+  proposal = HostProposal(choice, Mock(spec=ProjectedScene, authority=authority), decision, None, 'inactive_axis', settings.revision)
+  event = messaging.new_message('slcState')
+  event.valid = True
+  event.logMonoTime = now
+  StatusPublisher().attach(event, proposal, settings, now_ns=now, drive_id=drive_id,
+                           model_ns=now, car_state_ns=now)
+  args: dict[str, Any] = {'now_ns': now + 20_000_000, 'event_ns': now, 'drive_id': drive_id, 'choice': choice,
+              'lateral_active': True, 'selfdrive_enabled': False, 'car_valid': True, 'system_long': True}
+  with log.Event.from_bytes(event.to_bytes()) as received:
+    projector = ConditionalPerceptionProjector()
+    value = projector.project(received.slcState, **args)
+    assert value is not None and value.reason == policy_reason.value
+    assert not value.effective_experimental
+    assert not received.slcState.conditionalMode.hasOverride
+    ui = OnroadState(False, True, 0.0, 0.0, SpeedLimitObservation(), conditional_perception=value)
+    display = status(ui)
+    assert display is None
+    assert not stop_active(ui)
+    for changed in ({'now_ns': now + 200_000_001}, {'drive_id': drive_id + 1}, {'car_valid': False},
+                    {'system_long': False}, {'lateral_active': False}, {'choice': ModeChoice.STOCK}):
+      rejected = ConditionalPerceptionProjector().project(received.slcState, **changed_arguments(args, changed))
+      assert rejected is None
+      ui = replace(ui, conditional_perception=rejected)
+      assert status(ui) is None and not stop_active(ui)
+
+
+class TestConditionalReasonSemantics(unittest.TestCase):
+  def test_cem_missing_scene_is_neutral(self):
+    check_fresh_validated_receipt_preserves_unavailable_reason(ModeChoice.CEM, Reason.SCENE_UNAVAILABLE)
+
+  def test_cem_unavailable_is_neutral(self):
+    check_fresh_validated_receipt_preserves_unavailable_reason(ModeChoice.CEM, Reason.UNAVAILABLE)
+
+  def test_ccm_missing_scene_is_neutral(self):
+    check_fresh_validated_receipt_preserves_unavailable_reason(ModeChoice.CCM, Reason.SCENE_UNAVAILABLE)
+
+  def test_ccm_unavailable_is_neutral(self):
+    check_fresh_validated_receipt_preserves_unavailable_reason(ModeChoice.CCM, Reason.UNAVAILABLE)
+
+
+if __name__ == '__main__':
+  unittest.main()

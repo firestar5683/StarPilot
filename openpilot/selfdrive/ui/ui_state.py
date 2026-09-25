@@ -1,20 +1,27 @@
 import numpy as np
+import os
 import time
 import threading
+import capnp
 from collections.abc import Callable
 from enum import Enum
+from dataclasses import replace
 from openpilot.cereal import messaging, log
+from openpilot.cereal.services import SERVICE_LIST
 from opendbc.car.structs import car
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
+from openpilot.starpilot.schema_cache import get_cache, prewarm_cache_contracts
+from openpilot.starpilot.ui.display_preferences import AUTO, DisplayPreferences, read_preferences
 from openpilot.common.realtime import drop_realtime
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.lib.prime_state import PrimeState
+from openpilot.selfdrive.selfdrived.alertmanager import OFFROAD_ALERTS
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.common.hardware import HARDWARE, PC
 from openpilot.common.hardware.usb import cable_connected, get_usb_state, is_chestnut_usb_id
-from openpilot.selfdrive.modeld.helpers import chestnut_compiled
-from openpilot.selfdrive.selfdrived.alertmanager import OFFROAD_ALERTS
+from openpilot.starpilot.models.manager import ModelManager
+from openpilot.tools.replay.display_clock import BOOT_TIME_SERVICES, DisplayClockReader
 
 BACKLIGHT_OFFROAD = 65 if HARDWARE.get_device_type() == "mici" else 50
 PARAM_UPDATE_TIME = 1 / 5.0
@@ -35,6 +42,44 @@ class ChestnutState(Enum):
   FAILED = "failed"
 
 
+class ProjectionParams:
+  """Only the read interface needed by the projection display."""
+
+  def __init__(self, source: Params):
+    self._source = source
+
+  def get(self, *args, **kwargs):
+    return self._source.get(*args, **kwargs)
+
+  def get_bool(self, *args, **kwargs):
+    return self._source.get_bool(*args, **kwargs)
+
+  def get_int(self, *args, **kwargs):
+    return self._source.get_int(*args, **kwargs)
+
+  def get_float(self, *args, **kwargs):
+    return self._source.get_float(*args, **kwargs)
+
+  def get_param_path(self, *args, **kwargs):
+    return self._source.get_param_path(*args, **kwargs)
+
+
+class ProjectionPrimeState:
+  """Saved pairing label only; projection never starts the API or alert owner."""
+
+  def __init__(self, params: ProjectionParams | Params):
+    self.params = params
+
+  def is_paired(self) -> bool:
+    try:
+      return int(self.params.get("PrimeType") or -1) >= 0
+    except (TypeError, ValueError):
+      return False
+
+  def start(self) -> None:
+    pass
+
+
 class UIState:
   _instance: 'UIState | None' = None
 
@@ -45,11 +90,20 @@ class UIState:
     return cls._instance
 
   def _initialize(self):
-    self.params = Params()
+    prewarm_cache_contracts()
+    self.replay_clock = DisplayClockReader() if DisplayClockReader.enabled() else None
+    self.replay_sample = None
+    self._replay_state_epoch = None
+    self.replay_needs_reprime = False
+    self.projection_read_only = os.environ.get("STARPILOT_PROJECTION_READ_ONLY") == "1"
+    params = Params()
+    self.params = ProjectionParams(params) if self.projection_read_only else params
     self.sm = messaging.SubMaster(
       [
         "modelV2",
         "controlsState",
+        "lateralDelay",
+        "lateralTorqueParameters",
         "onroadEvents",
         "extrinsicsCalibration",
         "radarState",
@@ -63,17 +117,25 @@ class UIState:
         "wideRoadCameraState",
         "managerState",
         "selfdriveState",
+        "starpilotSelfdriveState",
+        "starpilotLateralState",
+        "starpilotNavigation",
         "longitudinalPlan",
         "gpsLocationExternal",
         "carOutput",
         "carControl",
+        "slcState",
         "vehicleParameters",
         "testJoystick",
         "rawAudioData",
-      ]
+        *(["customReserved6", "cabinCameraState", "narrowRoadEncodeIdx", "wideRoadEncodeIdx", "cabinEncodeIdx"]
+          if self.replay_clock is not None else []),
+      ],
+      ignore_alive=["starpilotSelfdriveState", "starpilotLateralState"], ignore_valid=["starpilotSelfdriveState", "starpilotLateralState"],
+      ignore_avg_freq=["starpilotSelfdriveState", "starpilotLateralState"],
     )
 
-    self.prime_state = PrimeState()
+    self.prime_state = ProjectionPrimeState(self.params) if self.replay_clock is not None or isinstance(self.params, ProjectionParams) else PrimeState()
 
     # UI Status tracking
     self.status: UIStatus = UIStatus.DISENGAGED
@@ -88,10 +150,14 @@ class UIState:
     self.always_on_dm: bool = self.params.get_bool("AlwaysOnDM")
     self.experimental_mode: bool = self.params.get_bool("ExperimentalMode")
     self.chestnut_present: bool = False
-    self.chestnut_compiled: bool = chestnut_compiled()
+    self._gpu_artifacts = None if self.replay_clock is not None else ModelManager()
+    self._gpu_artifacts_at: float | None = None
+    self.chestnut_compiled: bool = False
+    self.chestnut_checking: bool = False
     self.chestnut_active: bool | None = None
-    self.chestnut_loading: bool = False
+    self.chestnut_output_seen: bool = False
     self.chestnut_alert: bool = False
+    self.chestnut_loading: bool = False
     self.usb_connected: bool = False
     self.usb_connected_ts: float | None = None
     self.usb_disconnected_ts: float | None = None
@@ -108,6 +174,7 @@ class UIState:
     self.light_sensor: float = -1.0
 
     self._params_thread: threading.Thread | None = None
+    self._projection_params_at: float | None = None
 
     # Callbacks
     self._offroad_transition_callbacks: list[Callable[[], None]] = []
@@ -134,6 +201,41 @@ class UIState:
     return not self.started
 
   def update(self) -> None:
+    if getattr(self, "replay_clock", None) is not None:
+      before = self.replay_clock.sample()
+      cache_epoch = getattr(self, "_replay_state_epoch", self.replay_sample.epoch if self.replay_sample is not None else None)
+      if before.epoch is not None and before.epoch != cache_epoch:
+        self._reset_replay_state()
+        self._replay_state_epoch = before.epoch
+      self.sm.update(0)
+      sample = self.replay_clock.sample()
+      if sample.epoch is not None and sample.epoch != before.epoch:
+        # A seek straddled this receive. Keep only its eligible new primer, and
+        # withhold this mixed frame until the next coherent clock sample.
+        self._reset_replay_state(retain_sample=sample)
+        self.replay_needs_reprime = not sample.valid
+        self._replay_state_epoch = sample.epoch
+        sample = replace(sample, now_ns=None, boot_ns=None, valid=False)
+      self.replay_sample = sample
+      self.sm.replay_sample = sample
+      self._update_replay_alive(sample)
+      self._update_state()
+      self._update_status()
+      now = time.monotonic()
+      if self._projection_params_at is None or now - self._projection_params_at >= 1.0:
+        self.update_params()
+        self._projection_params_at = now
+      self._update_chestnut_state()
+      return
+    if self.projection_read_only:
+      self.sm.update(0)
+      self._update_state()
+      self._update_status()
+      now = time.monotonic()
+      if self._projection_params_at is None or now < self._projection_params_at or now - self._projection_params_at >= 1.0:
+        self.update_params()
+        self._projection_params_at = now
+      return
     self.prime_state.start()  # start thread after manager forks ui
     if self._params_thread is None:
       self._params_thread = threading.Thread(target=self._params_refresh_worker, daemon=True)
@@ -144,6 +246,50 @@ class UIState:
     self._update_status()
     self._update_chestnut_state()
     device.update()
+
+  def display_time_ns(self) -> int:
+    if getattr(self, "replay_clock", None) is not None:
+      sample = self.replay_sample
+      return sample.now_ns if sample is not None and sample.valid and sample.now_ns is not None else 0
+    return time.monotonic_ns()
+
+  def _update_replay_alive(self, sample) -> None:
+    # Receipt timestamps stay on the host clock. Logical freshness follows the
+    # recorded clock, including a paused primer and Panda's boot-time domain.
+    for service in self.sm.static_freq_services:
+      target = sample.boot_ns if service in BOOT_TIME_SERVICES else sample.now_ns
+      stamp = self.sm.logMonoTime[service]
+      self.sm.alive[service] = bool(sample.valid and self.sm.seen[service] and
+                                    type(target) is int and type(stamp) is int and
+                                    0 < stamp <= target and target - stamp < 10e9 / SERVICE_LIST[service].frequency)
+
+  def _reset_replay_state(self, retain_sample=None) -> None:
+    for service in self.sm.sock:
+      target = None if retain_sample is None else retain_sample.boot_ns if service in BOOT_TIME_SERVICES else retain_sample.now_ns
+      stamp = self.sm.logMonoTime[service]
+      if (retain_sample is not None and retain_sample.valid and self.sm.updated[service] and
+          type(target) is int and type(stamp) is int and 0 < stamp <= target):
+        continue
+      # Do not drain sockets: the new epoch's paused primer may already be queued.
+      for field in ("seen", "updated", "alive", "valid"):
+        getattr(self.sm, field)[service] = False
+      for field in ("recv_frame", "recv_time", "logMonoTime"):
+        getattr(self.sm, field)[service] = 0
+      try:
+        empty = messaging.new_message(service)
+      except capnp.lib.capnp.KjException:
+        empty = messaging.new_message(service, 0)
+      self.sm.data[service] = getattr(empty.as_reader(), service)
+    self.started = self._started_prev = self._engaged_prev = False
+    self.started_frame = max(0, self.sm.frame - 1)
+    self.CP = None
+    self.has_longitudinal_control = False
+    self.ignition = False
+    self.light_sensor = -1.0
+    self._projection_params_at = None
+    self.chestnut_output_seen = False
+    self.chestnut_present = False
+    self.status = UIStatus.DISENGAGED
 
   def _params_refresh_worker(self):
     drop_realtime()
@@ -172,8 +318,8 @@ class UIState:
     elif not self.sm.alive["wideRoadCameraState"] or not self.sm.valid["wideRoadCameraState"]:
       self.light_sensor = -1
 
-    # Update started state
-    self.started = self.sm["deviceState"].started and self.ignition
+    # hardwared owns the pipeline transition; raw ignition can arrive separately.
+    self.started = self.sm["deviceState"].started
 
     # Update body state
     if self.CP is not None and self.is_body != self.CP.notCar:
@@ -194,64 +340,99 @@ class UIState:
     # Check for engagement state changes
     if self.engaged != self._engaged_prev:
       for callback in self._engaged_transition_callbacks:
-        callback()
+        gui_app.measure_frame_phase("transition", callback)
       self._engaged_prev = self.engaged
 
     # Handle onroad/offroad transition
     if self.started != self._started_prev or self.sm.frame == 1:
       if self.started:
-        self.status = UIStatus.DISENGAGED
-        self.started_frame = self.sm.frame
+        replay = getattr(self, "replay_clock", None) is not None
+        if not replay:
+          self.status = UIStatus.DISENGAGED
+        self.chestnut_output_seen = False
+        # A paused replay publishes one atomic primer; its same-frame receipts
+        # are eligible. Live transitions retain their stricter receive boundary.
+        self.started_frame = max(0, self.sm.frame - 1) if replay else self.sm.frame
         self.started_time = time.monotonic()
         self.chestnut_present = self.sm["deviceState"].chestnutPresent or (self.chestnut_compiled and self.usb_connected)
 
       for callback in self._offroad_transition_callbacks:
-        callback()
+        gui_app.measure_frame_phase("transition", callback)
 
       self._started_prev = self.started
+
+    if (self.started and self.sm.updated["selfdriveState"] and self.sm.valid["selfdriveState"] and
+        self.sm.alive["selfdriveState"] and self.sm.recv_frame["selfdriveState"] > self.started_frame):
+      stamp = self.sm.logMonoTime["selfdriveState"]
+      if 0 < stamp <= UIState.display_time_ns(self) <= stamp + 250_000_000:
+        self.personality = log.LongitudinalPersonality.schema.enumerants[self.sm["selfdriveState"].personality]
 
   def _update_chestnut_state(self) -> None:
     detected = self.sm["deviceState"].chestnutPresent
     if not self.started:
       self.chestnut_present = detected
       self.chestnut_state = (ChestnutState.FAILED if self.chestnut_alert else
-                             ChestnutState.READY if detected and self.chestnut_compiled else
-                             ChestnutState.UNCOMPILED if detected else ChestnutState.DISCONNECTED)
+                             ChestnutState.DISCONNECTED if not detected else
+                             ChestnutState.LOADING if self.chestnut_checking else
+                             ChestnutState.READY if self.chestnut_compiled else ChestnutState.UNCOMPILED)
       return
 
     model_seen = self.sm.recv_frame["modelV2"] > self.started_frame
+    model_stamp = self.sm.logMonoTime["modelV2"]
+    model_fresh = (model_seen and self.sm.valid["modelV2"] and self.sm.alive["modelV2"] and
+                   0 < model_stamp <= UIState.display_time_ns(self) <= model_stamp + 250_000_000)
+    if getattr(self, "replay_clock", None) is not None:
+      self.chestnut_present = detected
+    if model_fresh and self.sm["modelV2"].big:
+      self.chestnut_output_seen = True
     if not self.chestnut_present:
       self.chestnut_state = ChestnutState.DISCONNECTED
-    elif not self.chestnut_compiled:
-      self.chestnut_state = ChestnutState.UNCOMPILED
-    elif self.chestnut_loading or not model_seen:
-      self.chestnut_state = ChestnutState.LOADING
-    elif self.chestnut_state == ChestnutState.FAILED or not detected or (model_seen and (not self.sm.alive["modelV2"] or not self.sm["modelV2"].big)):
-      self.chestnut_state = ChestnutState.FAILED
-    elif self.chestnut_active is False:
-      self.chestnut_state = ChestnutState.FAILED
-    else:
+    elif detected and model_fresh and self.sm["modelV2"].big:
       self.chestnut_state = ChestnutState.ACTIVE
+    elif model_fresh and not self.sm["modelV2"].big:
+      self.chestnut_state = ChestnutState.FAILED
+    elif not self.chestnut_output_seen and self.chestnut_loading:
+      self.chestnut_state = ChestnutState.LOADING
+    elif not detected:
+      self.chestnut_state = ChestnutState.FAILED
+    elif not self.chestnut_output_seen and (self.chestnut_loading or not model_seen or self.chestnut_active is not False):
+      self.chestnut_state = ChestnutState.LOADING
+    else:
+      self.chestnut_state = ChestnutState.FAILED
 
   def update_params(self) -> None:
     # For slower operations
     # Update longitudinal control state
-    CP_bytes = self.params.get("CarParamsPersistent")
-    if CP_bytes is not None:
+    CP_bytes = get_cache(self.params, "CarParamsPersistent")
+    if (getattr(self, "replay_clock", None) is not None and
+        self.sm.seen["carParams"] and self.sm.valid["carParams"]):
+      self.CP = self.sm["carParams"]
+      self.has_longitudinal_control = self.CP.openpilotLongitudinalControl
+    elif CP_bytes is not None:
       self.CP = messaging.log_from_bytes(CP_bytes, car.CarParams)
-      if self.CP.alphaLongitudinalAvailable:
-        self.has_longitudinal_control = self.params.get_bool("AlphaLongitudinalEnabled")
-      else:
-        self.has_longitudinal_control = self.CP.openpilotLongitudinalControl
+      # The saved Alpha Long choice can survive an unavailable configuration.
+      self.has_longitudinal_control = self.CP.openpilotLongitudinalControl
+    else:
+      self.CP = None
+      self.has_longitudinal_control = False
 
     self.recording_audio = self.params.get_bool("RecordAudio") and self.started
     self.is_metric = self.params.get_bool("IsMetric")
     self.always_on_dm = self.params.get_bool("AlwaysOnDM")
     self.experimental_mode = self.params.get_bool("ExperimentalMode")
-    self.chestnut_active = self.params.get("ChestnutActive")
+    raw_chestnut = self.params.get("ChestnutActive")
+    self.chestnut_active = raw_chestnut if type(raw_chestnut) is bool else (
+      True if raw_chestnut in (b"1", "1") else False if raw_chestnut in (b"0", "0") else None)
     self.chestnut_loading = self.params.get_bool("ChestnutLoading")
-    self.chestnut_alert = any(self.params.get(k) is not None for k, a in OFFROAD_ALERTS.items() if k.startswith("Offroad_Chestnut") and a["severity"] >= 0)
+    self.chestnut_alert = any(self.params.get(k) is not None for k, a in OFFROAD_ALERTS.items()
+                              if k.startswith("Offroad_Chestnut") and a["severity"] >= 0)
+    if getattr(self, "replay_clock", None) is not None:
+      self.chestnut_compiled = self.chestnut_active is True or self.chestnut_output_seen
+      return
     now = time.monotonic()
+    if not self.started and (self._gpu_artifacts_at is None or now < self._gpu_artifacts_at or now - self._gpu_artifacts_at >= 1.):
+      self.chestnut_compiled, self.chestnut_checking = self._gpu_artifacts.selected_gpu_status()
+      self._gpu_artifacts_at = now
     if cable_connected():
       self.usb_disconnected_ts = None
       if not self.usb_connected:
@@ -285,10 +466,38 @@ class Device:
     self._brightness_thread: threading.Thread | None = None
     self._brightness_event = threading.Event()
     self._brightness_target: int = 0
+    self._display_preferences = DisplayPreferences(driving_timeout=10 if gui_app.big_ui() else 5)
+    self._display_refresh_time: float | None = None
+    self._display_started = False
+    self._screen_off = False
+    self._screen_off_started = False
+    self._wake_touch_active = False
+
+  def invalidate_display_preferences(self) -> None:
+    self._display_refresh_time = None
+
+  def _refresh_display_preferences(self) -> None:
+    now = time.monotonic()
+    if self._display_refresh_time is not None and 0 <= now - self._display_refresh_time < 1.0:
+      return
+    previous = self._display_preferences
+    self._display_preferences = read_preferences(ui_state.params, large=gui_app.big_ui())
+    self._display_refresh_time = now
+    if previous != self._display_preferences and self._interaction_time > 0:
+      self._reset_interactive_timeout()
 
   @property
   def awake(self) -> bool:
     return self._awake
+
+  def toggle_screen_off(self) -> bool:
+    if ui_state.projection_read_only or not ui_state.started:
+      return False
+    self._screen_off = self._awake
+    self._screen_off_started = ui_state.started
+    self._reset_interactive_timeout()
+    self._set_awake(not self._screen_off)
+    return True
 
   def set_override_interactive_timeout(self, timeout: int | None) -> None:
     # Override the interactive timeout duration temporarily
@@ -300,8 +509,11 @@ class Device:
     if self._override_interactive_timeout is not None:
       return self._override_interactive_timeout
 
+    if self._display_preferences.enabled:
+      return self._display_preferences.driving_timeout if ui_state.started else self._display_preferences.parked_timeout
+
     ignition_timeout = 10 if gui_app.big_ui() else 5
-    return ignition_timeout if ui_state.ignition else 30
+    return ignition_timeout if ui_state.started else 30
 
   def _reset_interactive_timeout(self) -> None:
     self._interaction_time = time.monotonic() + self.interactive_timeout
@@ -310,14 +522,24 @@ class Device:
     self._interactive_timeout_callbacks.append(callback)
 
   def update(self):
+    if ui_state.projection_read_only:
+      return
     self._start_brightness_thread()  # start thread after manager forks ui
+    started_changed = self._display_started != bool(ui_state.started)
+    if started_changed:
+      self.invalidate_display_preferences()
+    self._refresh_display_preferences()
+
+    if started_changed:
+      self._reset_interactive_timeout()
+    self._display_started = bool(ui_state.started)
 
     # do initial reset
     if self._interaction_time <= 0:
       self._reset_interactive_timeout()
 
-    self._update_brightness()
     self._update_wakefulness()
+    self._update_brightness()
 
   def _start_brightness_thread(self):
     if self._brightness_thread is None or not self._brightness_thread.is_alive():
@@ -350,6 +572,11 @@ class Device:
 
       clipped_brightness = float(np.interp(clipped_brightness, [0, 1], [30, 100]))
 
+    if self._display_preferences.enabled:
+      saved = (self._display_preferences.driving_brightness if ui_state.started else
+               self._display_preferences.parked_brightness)
+      if saved != AUTO:
+        clipped_brightness = saved
     brightness = round(self._brightness_filter.update(clipped_brightness))
     if not self._awake:
       brightness = 0
@@ -362,18 +589,41 @@ class Device:
   def _update_wakefulness(self):
     # Handle interactive timeout
     ignition_just_turned_off = not ui_state.ignition and self._ignition
+    ignition_changed = self._ignition != ui_state.ignition
     self._ignition = ui_state.ignition
+    touched = any(ev.left_down for ev in gui_app.mouse_events)
+    if not self._awake and touched:
+      self._wake_touch_active = True
 
-    if ignition_just_turned_off or any(ev.left_down for ev in gui_app.mouse_events):
+    if (ignition_just_turned_off or (self._display_preferences.enabled and ignition_changed) or
+        touched):
       self._reset_interactive_timeout()
 
+    road_changed = ui_state.started != self._screen_off_started
+    self._screen_off_started = ui_state.started
+    critical = (ui_state.sm.valid.get('selfdriveState', False) and ui_state.sm.alive.get('selfdriveState', False) and
+                ui_state.sm['selfdriveState'].alertStatus == log.SelfdriveState.AlertStatus.critical)
+    if not ui_state.started or road_changed or touched or critical:
+      self._screen_off = False
+    if critical:
+      self._reset_interactive_timeout()
+    gpu_loading = (ui_state.started and self._display_preferences.keep_screen_on_gpu_loading and ui_state.chestnut_loading)
+    if gpu_loading:
+      self._reset_interactive_timeout()
     interaction_timeout = time.monotonic() > self._interaction_time
     if interaction_timeout and not self._prev_timed_out:
       for callback in self._interactive_timeout_callbacks:
         callback()
     self._prev_timed_out = interaction_timeout
 
-    self._set_awake(ui_state.ignition or not interaction_timeout or PC)
+    auto_screen_off = ui_state.started and self._display_preferences.turn_off_screen and interaction_timeout and not critical and not gpu_loading
+    self._set_awake(not self._screen_off and not auto_screen_off and (ui_state.started or not interaction_timeout or PC))
+    # The entire wake gesture belongs to the display, including its release.
+    # Widgets were not rendered while asleep, so their touch state can be stale.
+    if self._wake_touch_active:
+      if any(ev.left_released for ev in gui_app.mouse_events):
+        self._wake_touch_active = False
+      gui_app.mouse_events.clear()
 
   def _set_awake(self, on: bool):
     if on != self._awake:

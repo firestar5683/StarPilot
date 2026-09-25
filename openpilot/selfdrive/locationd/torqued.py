@@ -8,6 +8,9 @@ from openpilot.cereal import log
 from opendbc.car.structs import car
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.params import Params
+from openpilot.starpilot.schema_cache import get_cache, prewarm_cache_contracts, put_cache
+from openpilot.starpilot.lateral.torque_runtime import manual_overrides_present as torque_runtime_manual_override
+from openpilot.starpilot.lateral.controller_selection import learning_allowed
 from openpilot.common.realtime import config_realtime_process, DT_MDL
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.swaglog import cloudlog
@@ -52,7 +55,7 @@ class TorqueBuckets(PointBuckets):
 
 
 class TorqueEstimator(ParameterEstimator):
-  def __init__(self, CP, decimated=False, track_all_points=False):
+  def __init__(self, CP, decimated=False, track_all_points=False, *, allow_learning=True):
     self.hist_len = int(HISTORY / DT_MDL)
     self.lag = 0.0
     self.track_all_points = track_all_points  # for offline analysis, without max lateral accel or max steer torque filters
@@ -73,7 +76,11 @@ class TorqueEstimator(ParameterEstimator):
     self.offline_friction = 0.0
     self.offline_latAccelFactor = 0.0
     self.resets = 0.0
-    self.use_params = CP.brand in ALLOWED_CARS and CP.lateralTuning.which() == 'torque'
+    params = Params()
+    # The running process supplies its startup policy. Offline fitting retains
+    # its existing behavior regardless of this computer's saved preferences.
+    self.learning_allowed = allow_learning
+    self.use_params = self.learning_allowed and CP.brand in ALLOWED_CARS and CP.lateralTuning.which() == 'torque'
 
     if CP.lateralTuning.which() == 'torque':
       self.offline_friction = CP.lateralTuning.torque.friction
@@ -96,9 +103,11 @@ class TorqueEstimator(ParameterEstimator):
     self.max_friction = (1.0 + self.friction_sanity) * self.offline_friction
 
     # try to restore cached params
-    params = Params()
-    params_cache = params.get("CarParamsPrevRoute")
-    torque_cache = params.get("LiveTorqueParameters")
+    # The opt-in selector must learn from this session, never an inherited cache.
+    # Other vehicles and the ordinary runtime retain upstream cache behavior.
+    fresh_session = not self.learning_allowed or torque_runtime_manual_override(CP, params)
+    params_cache = None if fresh_session else get_cache(params, "CarParamsPrevRoute")
+    torque_cache = None if fresh_session else get_cache(params, "LiveTorqueParameters")
     if params_cache is not None and torque_cache is not None:
       try:
         with log.Event.from_bytes(torque_cache) as log_evt:
@@ -165,6 +174,8 @@ class TorqueEstimator(ParameterEstimator):
       self.filtered_params[param].update_alpha(self.decay)
 
   def handle_log(self, t, which, msg):
+    if not self.learning_allowed:
+      return
     if which == "carControl":
       self.raw_points["carControl_t"].append(t + self.lag)
       self.raw_points["lat_active"].append(msg.latActive)
@@ -214,7 +225,7 @@ class TorqueEstimator(ParameterEstimator):
     lateralTorqueParameters.useParams = self.use_params
 
     # Calculate raw estimates when possible, only update filters when enough points are gathered
-    if self.filtered_points.is_calculable():
+    if self.learning_allowed and self.filtered_points.is_calculable():
       latAccelFactor, latAccelOffset, frictionCoeff = self.estimate_params()
       lateralTorqueParameters.latAccelFactorRaw = float(latAccelFactor)
       lateralTorqueParameters.latAccelOffsetRaw = float(latAccelOffset)
@@ -245,6 +256,7 @@ class TorqueEstimator(ParameterEstimator):
 
 
 def main(demo=False):
+  prewarm_cache_contracts()
   config_realtime_process([0, 1, 2, 3], 5)
 
   DEBUG = bool(int(os.getenv("DEBUG", "0")))
@@ -253,7 +265,8 @@ def main(demo=False):
   sm = messaging.SubMaster(['carControl', 'carOutput', 'carState', 'extrinsicsCalibration', 'deviceMotion', 'lateralDelay'], poll='deviceMotion')
 
   params = Params()
-  estimator = TorqueEstimator(messaging.log_from_bytes(params.get("CarParams", block=True), car.CarParams))
+  CP = messaging.log_from_bytes(params.get("CarParams", block=True), car.CarParams)
+  estimator = TorqueEstimator(CP, allow_learning=learning_allowed(params, CP))
 
   while True:
     sm.update()
@@ -268,9 +281,9 @@ def main(demo=False):
       pm.send('lateralTorqueParameters', estimator.get_msg(valid=sm.all_checks(), with_points=DEBUG))
 
     # Cache points every 60 seconds while onroad
-    if sm.frame % 240 == 0:
+    if sm.frame % 240 == 0 and estimator.learning_allowed:
       msg = estimator.get_msg(valid=sm.all_checks(), with_points=True)
-      params.put("LiveTorqueParameters", msg.to_bytes())
+      put_cache(params, "LiveTorqueParameters", msg)
 
 
 if __name__ == "__main__":

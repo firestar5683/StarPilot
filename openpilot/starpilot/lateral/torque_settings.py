@@ -8,11 +8,13 @@ import json
 import math
 from typing import cast
 
-from openpilot.starpilot.lateral.torque_supported import BOLT_VEHICLES, SUPPORTED_VEHICLES
+from openpilot.starpilot.lateral.torque_supported import BOLT_VEHICLES, GAIN_VEHICLES, GM_VEHICLES, SUPPORTED_VEHICLES
 
 DOCUMENT_KEY = "TorqueOverrideDocument"
 LEGACY_KEYS = ("SteerLatAccel", "SteerFriction", "SteerLatAccelStock", "SteerFrictionStock")
 MAX_DOCUMENT_BYTES = 16_384
+
+from openpilot.starpilot.flm.torque_surface import GmFlmBinding
 
 
 @dataclass(frozen=True)
@@ -37,7 +39,6 @@ class GeometryProfile:
   learning: str = "source"
 
 
-
 @dataclass(frozen=True)
 class PlatformProfile:
   basis: tuple[float, float, float]
@@ -45,6 +46,8 @@ class PlatformProfile:
   friction: FieldChoice
   proportional_gain: FieldChoice = FieldChoice()
   gain_basis: GainBasis | None = None
+  geometry: GeometryProfile | None = None
+  flm: GmFlmBinding | None = None
 
 
 class LegacyMode(StrEnum):
@@ -63,11 +66,13 @@ class LegacyChoice:
   friction_saved: float | None
 
 
-def bounds(basis: tuple[float, float, float], field: str) -> tuple[float, float]:
+def bounds(basis: tuple[float, float, float], field: str, *, fingerprint: str | None = None) -> tuple[float, float]:
   factor, _, friction = basis
   if field == "factor":
     return 0.5 * factor, 1.5 * factor
   if field == "friction":
+    if fingerprint in GM_VEHICLES and fingerprint not in BOLT_VEHICLES:
+      return 0.0, 1.0
     return 0.0, min(1.0, max(0.1, 2.0 * friction))
   raise ValueError("Unknown torque field")
 
@@ -95,7 +100,7 @@ def _number(raw: bytes | None) -> float | None:
   return value
 
 
-def interpret_legacy(raw: dict[str, bytes | None], basis: tuple[float, float, float]) -> LegacyChoice:
+def interpret_legacy(raw: dict[str, bytes | None], basis: tuple[float, float, float], *, fingerprint: str | None = None) -> LegacyChoice:
   """Preserve the old stock-marker and two-decimal CP equality semantics."""
   if not valid_basis(basis):
     raise ValueError("Invalid torque basis")
@@ -114,7 +119,7 @@ def interpret_legacy(raw: dict[str, bytes | None], basis: tuple[float, float, fl
       result.append(None)
       modes.append(LegacyMode.STOCK)
     else:
-      low, high = bounds(basis, field)
+      low, high = bounds(basis, field, fingerprint=fingerprint)
       if not low <= value <= high:
         raise ValueError("Out-of-range torque setting")
       result.append(value)
@@ -157,14 +162,18 @@ def parse_document(raw: bytes) -> dict[str, PlatformProfile]:
   except (RecursionError, OverflowError) as exc:
     raise ValueError("Malformed torque document") from exc
   if not isinstance(document, dict) or set(document) != {"schemaVersion", "vehicles"} or \
-     type(document["schemaVersion"]) is not int or document["schemaVersion"] not in (1, 2) or \
+     type(document["schemaVersion"]) is not int or document["schemaVersion"] not in (1, 2, 3, 4) or \
      not isinstance(document["vehicles"], dict) or len(document["vehicles"]) > len(SUPPORTED_VEHICLES):
     raise ValueError("Malformed torque document")
   profiles: dict[str, PlatformProfile] = {}
   for fingerprint, value in document["vehicles"].items():
     expected = {"basis", "factor", "friction"}
-    if document["schemaVersion"] == 2 and isinstance(value, dict) and "proportionalGain" in value:
+    if document["schemaVersion"] >= 2 and isinstance(value, dict) and "proportionalGain" in value:
       expected |= {"proportionalGain", "gainBasis"}
+    if document["schemaVersion"] >= 3 and isinstance(value, dict) and "geometry" in value:
+      expected |= {"geometry"}
+    if document["schemaVersion"] == 4 and isinstance(value, dict) and "flm" in value:
+      expected |= {"flm"}
     if fingerprint not in SUPPORTED_VEHICLES or not isinstance(value, dict) or set(value) != expected:
       raise ValueError("Malformed torque profile")
     basis_obj = value["basis"]
@@ -176,19 +185,32 @@ def parse_document(raw: bytes) -> dict[str, PlatformProfile]:
     gain = FieldChoice()
     gain_basis = None
     if "proportionalGain" in value:
-      if fingerprint not in BOLT_VEHICLES:
+      if fingerprint not in GAIN_VEHICLES:
         raise ValueError("Unsupported gain profile")
       gain = _choice(value["proportionalGain"])
       gain_basis = parse_gain_basis(value["gainBasis"])
-      if gain.mode == "custom" and (gain.custom_value is None or not 0.3 <= gain.custom_value <= 0.9):
+      low, high = gain_bounds(fingerprint, gain_basis)
+      if gain.mode == "custom" and (gain.custom_value is None or not low <= gain.custom_value <= high):
         raise ValueError("Out-of-range proportional gain")
-    profiles[fingerprint] = PlatformProfile(basis, _choice(value["factor"]), _choice(value["friction"]), gain, gain_basis)
+    geometry = None
+    if "geometry" in value:
+      if fingerprint not in GM_VEHICLES:
+        raise ValueError("Unsupported geometry profile")
+      geometry = parse_geometry(value["geometry"])
+    flm = None
+    if "flm" in value:
+      if fingerprint not in GM_VEHICLES:
+        raise ValueError("Unsupported GM FLM profile")
+      flm = GmFlmBinding.from_document(value["flm"])
+      flm.validate_manual(fingerprint)
+    profiles[fingerprint] = PlatformProfile(basis, _choice(value["factor"]), _choice(value["friction"]), gain, gain_basis, geometry, flm)
   return profiles
 
 
 def serialize_document(profiles: dict[str, PlatformProfile]) -> bytes:
-  vehicles = {}
-  version = 2 if any(p.gain_basis is not None for p in profiles.values()) else 1
+  vehicles: dict[str, dict] = {}
+  version = (4 if any(p.flm is not None for p in profiles.values()) else 3 if any(p.geometry is not None for p in profiles.values())
+    else 2 if any(p.gain_basis is not None for p in profiles.values()) else 1)
   for fingerprint, profile in profiles.items():
     vehicles[fingerprint] = {
       "basis": dict(zip(("latAccelFactor", "latAccelOffset", "friction"), profile.basis, strict=True)),
@@ -202,6 +224,16 @@ def serialize_document(profiles: dict[str, PlatformProfile]) -> bytes:
       vehicles[fingerprint]["gainBasis"] = {"controller": profile.gain_basis.controller,
                                             "sourceTable": profile.gain_basis.source_table,
                                             "torqueBasis": profile.gain_basis.torque_basis}
+    if profile.geometry is not None:
+      geometry = profile.geometry
+      vehicles[fingerprint]["geometry"] = {
+        "basis": {"steerRatio": geometry.basis[0], "fullDelay": geometry.basis[1]},
+        "ratio": {"mode": geometry.ratio.mode, "customValue": geometry.ratio.custom_value},
+        "fullDelay": {"mode": geometry.full_delay.mode, "customValue": geometry.full_delay.custom_value},
+        "automaticDelay": geometry.automatic_delay, "learning": geometry.learning,
+      }
+    if profile.flm is not None:
+      vehicles[fingerprint]["flm"] = profile.flm.document()
   raw = json.dumps({"schemaVersion": version, "vehicles": vehicles}, sort_keys=True, separators=(",", ":"), allow_nan=False).encode()
   parse_document(raw)
   return raw
@@ -219,7 +251,7 @@ def resolve_document(profiles: dict[str, PlatformProfile], fingerprint: str,
   result = []
   for field, choice in (("factor", profile.factor), ("friction", profile.friction)):
     if choice.mode == "custom":
-      low, high = bounds(basis, field)
+      low, high = bounds(basis, field, fingerprint=fingerprint)
       if choice.custom_value is None or not low <= choice.custom_value <= high:
         raise ValueError("Out-of-range torque profile")
       result.append(None if round(choice.custom_value, 2) == round(basis[0 if field == "factor" else 2], 2) else choice.custom_value)
@@ -237,7 +269,7 @@ def replace_field(profiles: dict[str, PlatformProfile], fingerprint: str, basis:
   if value is not None and not _finite_number(value):
     raise ValueError("Invalid torque edit")
   if mode == "custom":
-    low, high = bounds(basis, field)
+    low, high = bounds(basis, field, fingerprint=fingerprint)
     if value is None or not low <= value <= high:
       raise ValueError("Out-of-range torque edit")
   profile = profiles.get(fingerprint, PlatformProfile(basis, FieldChoice(), FieldChoice()))
@@ -265,14 +297,25 @@ def parse_gain_basis(value: object) -> GainBasis:
       any(n <= 0 for n in table[1]) or
       not isinstance(basis, (list, tuple)) or not valid_basis(tuple(basis))):
     raise ValueError("Malformed gain basis")
-  return GainBasis(value["controller"], tuple(tuple(row) for row in table), tuple(basis))
+  return GainBasis(value["controller"], (tuple(table[0]), tuple(table[1])), tuple(basis))
+
+
+def gain_bounds(fingerprint: str, basis: GainBasis) -> tuple[float, float]:
+  # Keep the qualified five-Bolt range unchanged, including STANDARD.
+  if fingerprint in BOLT_VEHICLES:
+    return 0.3, 0.9
+  if fingerprint not in GAIN_VEHICLES:
+    raise ValueError("Unsupported gain profile")
+  source = basis.source_table[1][-1]
+  return 0.5 * source, 1.5 * source
 
 
 def replace_gain(profiles: dict[str, PlatformProfile], fingerprint: str, basis: GainBasis,
                  mode: str, value: float | None, *, review: bool = False) -> dict[str, PlatformProfile]:
-  if fingerprint not in BOLT_VEHICLES or mode not in ("source", "custom"):
+  if fingerprint not in GAIN_VEHICLES or mode not in ("source", "custom"):
     raise ValueError("Unsupported gain edit")
-  if value is not None and (not _finite_number(value) or not 0.3 <= value <= 0.9):
+  low, high = gain_bounds(fingerprint, basis)
+  if value is not None and (not _finite_number(value) or not low <= value <= high):
     raise ValueError("Out-of-range proportional gain")
   if mode == "custom" and value is None:
     raise ValueError("Missing proportional gain")
@@ -282,4 +325,43 @@ def replace_gain(profiles: dict[str, PlatformProfile], fingerprint: str, basis: 
   result = dict(profiles)
   result[fingerprint] = replace(prior, proportional_gain=FieldChoice(mode, value if mode == "custom" else prior.proportional_gain.custom_value),
                                 gain_basis=basis)
+  return result
+
+
+def parse_geometry(value: object) -> GeometryProfile:
+  if not isinstance(value, dict) or set(value) != {"basis", "ratio", "fullDelay", "automaticDelay", "learning"}:
+    raise ValueError("Malformed geometry profile")
+  basis = value["basis"]
+  if (not isinstance(basis, dict) or set(basis) != {"steerRatio", "fullDelay"} or
+      any(not _finite_number(n) or n <= 0 for n in basis.values()) or
+      type(value["automaticDelay"]) is not bool or value["learning"] not in ("source", "force_auto", "force_off")):
+    raise ValueError("Malformed geometry basis")
+  ratio, delay = _choice(value["ratio"]), _choice(value["fullDelay"])
+  for choice, low, high in ((ratio, .5*basis["steerRatio"], 1.5*basis["steerRatio"]), (delay, .01, 1.)):
+    if choice.custom_value is not None and not low <= choice.custom_value <= high:
+      raise ValueError("Out-of-range geometry value")
+  return GeometryProfile((basis["steerRatio"], basis["fullDelay"]), ratio, delay, value["automaticDelay"], value["learning"])
+
+
+def replace_geometry(profiles: dict[str, PlatformProfile], fingerprint: str, torque_basis: tuple[float, float, float],
+                     basis: tuple[float, float], field: str, value: object) -> dict[str, PlatformProfile]:
+  if fingerprint not in GM_VEHICLES or not valid_basis(torque_basis):
+    raise ValueError("Unsupported geometry edit")
+  prior = profiles.get(fingerprint, PlatformProfile(torque_basis, FieldChoice(), FieldChoice()))
+  geometry = prior.geometry or GeometryProfile(basis)
+  if prior.basis != torque_basis or geometry.basis != basis:
+    raise ValueError("Geometry basis needs review")
+  if field in ("ratio", "full_delay"):
+    if not isinstance(value, FieldChoice):
+      raise ValueError("Malformed geometry edit")
+    geometry = replace(geometry, **{field: value})
+  elif field == "automatic_delay" and type(value) is bool:
+    geometry = replace(geometry, automatic_delay=value)
+  elif field == "learning" and value in ("source", "force_auto", "force_off"):
+    geometry = replace(geometry, learning=value)
+  else:
+    raise ValueError("Unknown geometry edit")
+  result = dict(profiles)
+  result[fingerprint] = replace(prior, geometry=geometry)
+  serialize_document(result)
   return result

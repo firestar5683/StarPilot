@@ -1,28 +1,48 @@
 import ctypes.util
 import glob
 import os
+from pathlib import Path
 from SCons.Script import Action, Value
 from openpilot.common.transformations.camera import _ar_ox_fisheye, _os_fisheye
 from openpilot.common.transformations.model import MEDMODEL_INPUT_SIZE, DM_INPUT_SIZE
 from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
+from tools.laptop_device_build.qcom_artifact_contract import import_artifact
 
 
 Import('env', 'arch')
 
-# TODO: add GCC support to tinygrad?
-# tinygrad's CPU:LLVM backend requires libLLVM, skip the build on PC if it's not available
+# The CPU:LLVM compiler requires libLLVM; device and Metal builds do not.
 if arch not in ('comma_arm64', 'Darwin') and ctypes.util.find_library('LLVM') is None:
   print("\033[93mmodeld: LLVM not found, skipping tinygrad model compilation. Install LLVM to compile models.\033[0m")
   Return()
 
 lenv = env.Clone()
 lenv.PrependENVPath('PYTHONPATH', Dir('#tinygrad_repo').abspath)
+lenv.PrependENVPath('PYTHONPATH', Dir('#jetlink_repo').abspath)
 
 tinygrad_root = env.Dir("#").abspath
 tinygrad_files = ["#"+x for x in glob.glob(env.Dir("#tinygrad_repo").relpath + "/**", recursive=True, root_dir=tinygrad_root)
                   if 'pycache' not in x and os.path.isfile(os.path.join(tinygrad_root, x))]
 
 camera_configs = [(c.width, c.height) for c in (_ar_ox_fisheye, _os_fisheye)]
+laptop_qcom_import = arch == 'comma_arm64' and os.getenv('COMMA_LAPTOP_CROSS_BUILD') == '1'
+qcom_package = Dir('#.cache/qcom-artifact-package').abspath
+
+
+def model_action(command):
+  if not laptop_qcom_import:
+    return Action(command, "  [ONNX] $TARGET")
+
+  def do_import(target, source, env):
+    try:
+      import_artifact(Path(qcom_package), Path(Dir('#').abspath), Path(str(target[0])), command)
+    except (OSError, ValueError, KeyError) as error:
+      raise RuntimeError(f"Verified laptop QCOM package required in {qcom_package}: {error}") from error
+  return Action(do_import, "  [QCOM IMPORT] $TARGET")
+
+
+def warp_action(command):
+  return model_action(command) if laptop_qcom_import else command
 
 if arch == 'comma_arm64':
   tg_flags = 'DEV=QCOM IMAGE=1 FLOAT16=1 NOLOCALS=1 JIT_BATCH_SIZE=0 OPENPILOT_HACKS=1'
@@ -42,14 +62,15 @@ def compile_model(onnx_path, pkl_path):
   onnx_path, target_pkl_path = File(onnx_path).abspath, File(pkl_path).abspath
   cmd = (f'{tg_flags} {mac_brew_string} {taskset}python3 "{compiler}/compile_onnx.py" '
          f'"{onnx_path}" "{target_pkl_path}" --out-of-band --benchmark-runs 1')
-  lenv.Command(
+  node = lenv.Command(
     target_pkl_path,
     tinygrad_files + [onnx_path, Value(cmd)],
-    Action(cmd, "  [ONNX] $TARGET"),
+    model_action(cmd),
   )
+  if laptop_qcom_import:
+    lenv.AlwaysBuild(node)
 
 compile_model('models/dmonitoring_model.onnx', 'models/dmonitoring_model_tinygrad.pkl')
-compile_model('models/driving_supercombo.onnx', 'models/driving_tinygrad.pkl')
 
 model_w, model_h = MEDMODEL_INPUT_SIZE
 for cam_w, cam_h in camera_configs:
@@ -59,7 +80,31 @@ for cam_w, cam_h in camera_configs:
          f'--frame {cam_w},{cam_h},{stride},{y_height},{uv_height},{stride * (y_height + uv_height)} '
          f'--warp-to {model_w}x{model_h} --layout yuv420 --frames 2 '
          f'--output {warp_pkl_path}')
-  lenv.Command(warp_pkl_path, tinygrad_files + warp_deps + [Value(cmd)], cmd)
+  node = lenv.Command(warp_pkl_path, tinygrad_files + warp_deps + [Value(cmd)], warp_action(cmd))
+  if laptop_qcom_import:
+    lenv.AlwaysBuild(node)
+
+# External inference uses a paired current-frame warp, independently of the
+# historical ordinary driving capture. Keep its QCOM package separate.
+from tools.laptop_device_build.jetlink_artifacts import CAMERAS, MODEL_SIZES, import_artifact as import_jetlink_artifact
+jetlink_package = Path(Dir('#.cache/jetlink-qcom-artifact-package').abspath)
+jetlink_sources = [File('#' + path) for path in ('openpilot/starpilot/models/jetlink_warp.py',
+                   'jetlink_repo/jetlink/openpilot/warp.py', 'jetlink_repo/jetlink/openpilot/interface.py')]
+for cam_w, cam_h in CAMERAS:
+  for model_w, model_h in MODEL_SIZES:
+    jetlink_path = File(f'models/jetlink_warp_{cam_w}x{cam_h}_{model_w}x{model_h}.pkl').abspath
+    cmd = (f'{tg_flags} {mac_brew_string} {taskset}python3 -m jetlink.openpilot.warp '
+           f'--adapter openpilot.starpilot.models.jetlink_warp --camera {cam_w}x{cam_h} '
+           f'--model {model_w}x{model_h} --output {jetlink_path}')
+    if laptop_qcom_import:
+      def import_jetlink(target, source, env):
+        import_jetlink_artifact(jetlink_package, Path(Dir('#').abspath), Path(str(target[0])))
+      action = Action(import_jetlink, '  [JETLINK QCOM IMPORT] $TARGET')
+    else:
+      action = Action(cmd, '  [JETLINK WARP] $TARGET')
+    node = lenv.Command(jetlink_path, tinygrad_files + warp_deps + jetlink_sources + [Value(cmd)], action)
+    if laptop_qcom_import:
+      lenv.AlwaysBuild(node)
 
 dm_w, dm_h = DM_INPUT_SIZE
 for cam_w, cam_h in camera_configs:
@@ -68,4 +113,6 @@ for cam_w, cam_h in camera_configs:
   cmd = (f'{tg_flags} {mac_brew_string} python3 "{compiler}/compile_warp.py" '
          f'--frame {cam_w},{cam_h},{stride},{y_height},{uv_height},{frame_size} --warp-to {dm_w}x{dm_h} '
          f'--layout luma --border-fill 16 --transform-device NPY --output {dm_pkl_path}')
-  lenv.Command(dm_pkl_path, tinygrad_files + warp_deps + [Value(cmd)], cmd)
+  node = lenv.Command(dm_pkl_path, tinygrad_files + warp_deps + [Value(cmd)], warp_action(cmd))
+  if laptop_qcom_import:
+    lenv.AlwaysBuild(node)

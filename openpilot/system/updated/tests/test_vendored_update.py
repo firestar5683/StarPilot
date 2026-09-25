@@ -18,7 +18,8 @@ from types import ModuleType
 from unittest.mock import Mock, patch
 
 
-DEPENDENCIES = ("msgq_repo", "opendbc_repo", "panda", "rednose_repo", "teleoprtc_repo", "tinygrad_repo")
+from openpilot.common.vendor_manifest import DEPENDENCIES
+
 BRANCH = "test-vendored"
 
 
@@ -44,6 +45,7 @@ def load_updater():
     "openpilot.common.swaglog": {"cloudlog": Mock()},
     "openpilot.selfdrive.selfdrived.alertmanager": {"set_offroad_alert": Mock()},
     "openpilot.common.hardware": {"AGNOS": False, "HARDWARE": Mock()},
+    "openpilot.starpilot.drive_state.evidence": {"PhysicalSource": Mock()},
     "openpilot.common.version": {"get_build_metadata": Mock()},
   }
   modules = {}
@@ -106,7 +108,8 @@ class TestVendoredUpdate(unittest.TestCase):
     real_run = self.updated.run
 
     def bounded_run(command, cwd=None):
-      self.assertIsNotNone(cwd)
+      if cwd is None:
+        raise AssertionError("Every updater command must name its isolated working directory")
       self.assertTrue(Path(cwd).resolve().is_relative_to(self.root.resolve()))
       self.assertNotEqual(command[:2], ["git", "submodule"])
       self.commands.append(command)
@@ -145,6 +148,65 @@ class TestVendoredUpdate(unittest.TestCase):
     self.assertFalse((self.finalized / ".overlay_consistent").exists())
     self.updated.handle_agnos_update.assert_not_called()
     self.assertFalse(self.updater.params.values["UpdateAvailable"])
+
+  def test_automatic_update_uses_fast_path_and_only_falls_back_on_incompatibility(self):
+    fast_update = importlib.import_module("openpilot.starpilot.software.fast_update")
+    for error in (None, self.updated.FastUpdateIncompatible("AGNOS changed"), self.updated.FastUpdateError("Tracked edits")):
+      with self.subTest(error=error), patch.object(fast_update, "fast_update", side_effect=error, return_value="reboot-requested"), \
+           patch.object(self.updater, "normal_update", return_value="reboot-requested") as normal:
+        if error is not None and not isinstance(error, self.updated.FastUpdateIncompatible):
+          with self.assertRaises(self.updated.FastUpdateError):
+            self.updater.fast_update(BRANCH, self.initial_commit, automatic=True)
+        else:
+          self.assertEqual(self.updater.fast_update(BRANCH, self.initial_commit, automatic=True), "reboot-requested")
+        self.assertEqual(normal.call_count, int(isinstance(error, self.updated.FastUpdateIncompatible)))
+    with patch.object(fast_update, "fast_update", side_effect=self.updated.FastUpdateIncompatible("AGNOS changed")), \
+         patch.object(self.updater, "normal_update") as normal:
+      with self.assertRaises(self.updated.FastUpdateIncompatible):
+        self.updater.fast_update(BRANCH, self.initial_commit)
+      normal.assert_not_called()  # Explicit fast/rollback/version operations keep their contract.
+
+  def test_normal_fallback_stages_flashes_and_requests_reboot_with_fresh_parked_state(self):
+    installed = self.root / "installed"
+    self.git(self.root, "clone", "--no-local", str(self.merged), str(installed))
+    self.updated.BASEDIR = str(installed)
+    (self.source / "panda/README.md").write_text("New native revision")
+    target = self.commit_source("Full update")
+    self.updated.AGNOS = True
+    progress = Mock()
+    with patch.object(self.updated, "init_overlay"):
+      self.assertEqual(self.updater.normal_update(BRANCH, self.initial_commit, lambda: True, progress), "reboot-requested")
+    self.updated.handle_agnos_update.assert_called_once()
+    self.assertEqual(self.git(installed, "rev-parse", "HEAD"), self.initial_commit)
+    self.assertEqual(self.git(self.finalized, "rev-parse", "HEAD"), target)
+    self.assertTrue(self.updater.params.values["DoReboot"])
+    self.assertTrue(self.updater.params.values["UpdateAvailable"])
+    progress.assert_called_with("rebooting", "Update installed. Restarting device.")
+
+  def test_normal_fallback_never_reboots_after_parked_authority_is_lost(self):
+    installed = self.root / "installed"
+    self.git(self.root, "clone", "--no-local", str(self.merged), str(installed))
+    self.updated.BASEDIR = str(installed)
+    (self.source / "panda/README.md").write_text("New native revision")
+    self.commit_source("Full update")
+    parked = iter((True, False))
+    with patch.object(self.updated, "init_overlay"), self.assertRaises(self.updated.FastUpdateError):
+      self.updater.normal_update(BRANCH, self.initial_commit, lambda: next(parked), Mock())
+    self.assertNotIn("DoReboot", self.updater.params.values)
+
+  def test_check_reports_confirmed_os_requirement_without_changing_installed_files(self):
+    self.updated.AGNOS = True
+    self.updated.HARDWARE.get_os_version.return_value = "12"
+    for launch, required in (("export AGNOS_VERSION='12'\n", False), ("export AGNOS_VERSION='13'\n", True),
+                             ("# Unknown OS version\n", None)):
+      with self.subTest(launch=launch):
+        (self.source / "launch_env.sh").write_text(launch)
+        self.commit_source("Change target OS version")
+        self.updater.check_for_update()
+        expected = {} if required is None else {"branch": BRANCH, "required": required}
+        self.assertEqual(self.updater.params.values["UpdaterOSUpdate"], expected)
+        self.assertEqual(self.git(self.merged, "rev-parse", "HEAD"), self.initial_commit)
+        self.updated.handle_agnos_update.assert_not_called()
 
   def test_vendored_fetch_and_finalize(self):
     (self.source / "panda" / "README.md").write_text("Updated ordinary tracked source\n")

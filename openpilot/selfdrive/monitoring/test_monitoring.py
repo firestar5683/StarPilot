@@ -2,6 +2,8 @@ from openpilot.common.test import OpenpilotTestCase
 from openpilot.cereal import log
 from openpilot.common.realtime import DT_DMON
 from openpilot.selfdrive.monitoring.policy import DriverMonitoring, DRIVER_MONITOR_SETTINGS
+from opendbc.car.structs import car
+from types import SimpleNamespace
 
 EventName = log.OnroadEvent.EventName
 dm_settings = DRIVER_MONITOR_SETTINGS()
@@ -49,6 +51,22 @@ always_true = [True] * int(TEST_TIMESPAN / DT_DMON)
 always_false = [False] * int(TEST_TIMESPAN / DT_DMON)
 
 class TestMonitoring(OpenpilotTestCase):
+  def test_lateral_only_reuses_engaged_monitoring_without_always_on_dm(self):
+    DM = DriverMonitoring(always_on=False)
+    sm = {
+      'carState': car.CarState(vEgo=20.0, gearShifter=car.CarState.GearShifter.drive),
+      'selfdriveState': SimpleNamespace(enabled=False),
+      'modelV2': SimpleNamespace(meta=SimpleNamespace(disengagePredictions=SimpleNamespace(brakeDisengageProbs=[0.0]))),
+      'extrinsicsCalibration': SimpleNamespace(rpyCalib=[0.0, 0.0, 0.0]),
+      'driverStateV2': msg_DISTRACTED,
+    }
+    levels = []
+    for _ in range(int(TEST_TIMESPAN / DT_DMON)):
+      DM.run_step(sm, aol_lateral_engaged=True)
+      levels.append(DM.alert_level)
+    assert 1 in levels and 2 in levels and 3 in levels
+    assert DM.lockout_active
+
   def _run_seq(self, msgs, interaction, engaged, lowspeed):
     DM = DriverMonitoring()
     alert_lvls = []

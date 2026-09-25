@@ -6,6 +6,10 @@ from opendbc.car.structs import car
 from dataclasses import dataclass, field
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
+from openpilot.starpilot.ui.rainbow_path import RainbowPath
+from openpilot.starpilot.ui.road_colors import edge_gradient, lane_color, path_mode, solid_gradient
+from openpilot.starpilot.ui.onroad_customization import ROAD_COLORS
+from openpilot.starpilot.lateral.lane_feedback import BLUE, direction as lane_centering_direction
 from openpilot.selfdrive.locationd.calibrationd import HEIGHT_INIT
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app
@@ -49,13 +53,17 @@ class ModelRenderer(Widget):
     self._experimental_mode = False
     self._blend_filter = FirstOrderFilter(1.0, 0.25, 1 / gui_app.target_fps)
     self._prev_allow_throttle = True
+    self._default_path_gradient = None
+    self._default_path_blend_factor = None
     self._lane_line_probs = np.zeros(4, dtype=np.float32)
+    self._lane_centering_direction = 0
     self._road_edge_stds = np.zeros(2, dtype=np.float32)
     self._lead_vehicles = [LeadVehicle(), LeadVehicle()]
     self._path_offset_z = HEIGHT_INIT[0]
 
     # Initialize ModelPoints objects
     self._path = ModelPoints()
+    self._path_edges = []
     self._lane_lines = [ModelPoints() for _ in range(4)]
     self._road_edges = [ModelPoints() for _ in range(2)]
     self._acceleration_x = np.empty((0,), dtype=np.float32)
@@ -64,6 +72,7 @@ class ModelRenderer(Widget):
     self._car_space_transform = np.zeros((3, 3), dtype=np.float32)
     self._transform_dirty = True
     self._clip_region = None
+    self._lane_projection_clip = None
 
     self._exp_gradient = Gradient(
       start=(0.0, 1.0),  # Bottom of path
@@ -71,6 +80,8 @@ class ModelRenderer(Widget):
       colors=[],
       stops=[],
     )
+    self._rainbow_path = RainbowPath()
+    self.road_style = {}
 
     # Get longitudinal control setting from car parameters
     if car_params := Params().get("CarParams"):
@@ -78,11 +89,17 @@ class ModelRenderer(Widget):
       self._longitudinal_control = cp.openpilotLongitudinalControl
 
   def set_transform(self, transform: np.ndarray):
-    self._car_space_transform = transform.astype(np.float32)
-    self._transform_dirty = True
+    transform = transform.astype(np.float32)
+    if not np.array_equal(transform, self._car_space_transform):
+      self._car_space_transform = transform
+      self._transform_dirty = True
 
   def _render(self, rect: rl.Rectangle):
     sm = ui_state.sm
+    replay = getattr(ui_state, 'replay_clock', None) is not None
+    if replay and any(not sm.seen[service] or not sm.valid[service] or not sm.alive[service]
+                      for service in ('modelV2', 'extrinsicsCalibration')):
+      return
 
     # Check if data is up-to-date
     if (sm.recv_frame["extrinsicsCalibration"] < ui_state.started_frame or
@@ -118,7 +135,7 @@ class ModelRenderer(Widget):
       if path_x_array.size == 0:
         return
 
-      self._update_model(lead_one, path_x_array)
+      self._update_model(lead_one, path_x_array, update_lane_geometry=model_updated or self._transform_dirty)
       if render_lead_indicator:
         self._update_leads(radar_state, path_x_array)
       self._transform_dirty = False
@@ -134,8 +151,9 @@ class ModelRenderer(Widget):
     """Update raw 3D points from model data"""
     self._path.raw_points = np.array([model.position.x, model.position.y, model.position.z], dtype=np.float32).T
 
-    for i, lane_line in enumerate(model.laneLines):
-      self._lane_lines[i].raw_points = np.array([lane_line.x, lane_line.y, lane_line.z], dtype=np.float32).T
+    # Older logs may append lane centers after the four boundaries.
+    for points, lane_line in zip(self._lane_lines, model.laneLines, strict=False):
+      points.raw_points = np.array([lane_line.x, lane_line.y, lane_line.z], dtype=np.float32).T
 
     for i, road_edge in enumerate(model.roadEdges):
       self._road_edges[i].raw_points = np.array([road_edge.x, road_edge.y, road_edge.z], dtype=np.float32).T
@@ -160,20 +178,21 @@ class ModelRenderer(Widget):
         if point:
           self._lead_vehicles[i] = self._update_lead_vehicle(d_rel, v_rel, point, self._rect)
 
-  def _update_model(self, lead, path_x_array):
+  def _update_model(self, lead, path_x_array, *, update_lane_geometry: bool = True):
     """Update model visualization data based on model message"""
     max_distance = np.clip(path_x_array[-1], MIN_DRAW_DISTANCE, MAX_DRAW_DISTANCE)
-    max_idx = self._get_path_length_idx(self._lane_lines[0].raw_points[:, 0], max_distance)
+    clip = self._clip_region
+    clip_key = (clip.x, clip.y, clip.width, clip.height)
+    if update_lane_geometry or clip_key != getattr(self, "_lane_projection_clip", None):
+      max_idx = self._get_path_length_idx(self._lane_lines[0].raw_points[:, 0], max_distance)
 
-    # Update lane lines using raw points
-    for i, lane_line in enumerate(self._lane_lines):
-      lane_line.projected_points = self._map_line_to_polygon(
-        lane_line.raw_points, 0.025 * self._lane_line_probs[i], 0.0, max_idx, max_distance
-      )
-
-    # Update road edges using raw points
-    for road_edge in self._road_edges:
-      road_edge.projected_points = self._map_line_to_polygon(road_edge.raw_points, 0.025, 0.0, max_idx, max_distance)
+      # Radar changes the path's lead-distance clipping, not lane/edge geometry.
+      lines = [*self._lane_lines, *self._road_edges]
+      widths = [0.025 * float(prob) for prob in self._lane_line_probs] + [0.025] * len(self._road_edges)
+      polygons = self._map_lines_to_polygons([line.raw_points for line in lines], widths, 0.0, max_idx, max_distance)
+      for line, polygon in zip(lines, polygons, strict=True):
+        line.projected_points = polygon
+      self._lane_projection_clip = clip_key
 
     # Update path using raw points
     if lead and lead.present:
@@ -181,9 +200,18 @@ class ModelRenderer(Widget):
       max_distance = np.clip(lead_d - min(lead_d * 0.35, 10.0), 0.0, max_distance)
 
     max_idx = self._get_path_length_idx(path_x_array, max_distance)
-    self._path.projected_points = self._map_line_to_polygon(
-      self._path.raw_points, 0.9, self._path_offset_z, max_idx, max_distance, allow_invert=False
-    )
+    if "pathEdge" in getattr(self, "road_style", {}):
+      left, right = self._path.raw_points.copy(), self._path.raw_points.copy()
+      left[:, 1] -= 0.81
+      right[:, 1] += 0.81
+      polygons = self._map_lines_to_polygons([self._path.raw_points, left, right], [0.72, 0.09, 0.09],
+                                           self._path_offset_z, max_idx, max_distance, allow_invert=False)
+      self._path.projected_points, *self._path_edges = polygons
+    else:
+      self._path.projected_points = self._map_line_to_polygon(
+        self._path.raw_points, 0.9, self._path_offset_z, max_idx, max_distance, allow_invert=False
+      )
+      self._path_edges = []
 
     self._update_experimental_gradient()
 
@@ -258,12 +286,15 @@ class ModelRenderer(Widget):
 
   def _draw_lane_lines(self):
     """Draw lane lines and road edges"""
+    self._lane_centering_direction = lane_centering_direction(ui_state.sm, ui_state.display_time_ns(), ui_state.started_frame)
     for i, lane_line in enumerate(self._lane_lines):
       if lane_line.projected_points.size == 0:
         continue
 
       alpha = np.clip(self._lane_line_probs[i], 0.0, 0.7)
-      color = rl.Color(255, 255, 255, int(alpha * 255))
+      color = lane_color(getattr(self, "road_style", {}), False, rl.Color(255, 255, 255, int(alpha * 255)), alpha)
+      if (i == 1 and self._lane_centering_direction < 0) or (i == 2 and self._lane_centering_direction > 0):
+        color = rl.Color(*BLUE, int(alpha * 255))
       draw_polygon(self._rect, lane_line.projected_points, color)
 
     for i, road_edge in enumerate(self._road_edges):
@@ -279,8 +310,33 @@ class ModelRenderer(Widget):
     if not self._path.projected_points.size:
       return
 
-    allow_throttle = sm['longitudinalPlan'].allowThrottle or not self._longitudinal_control
-    self._blend_filter.update(int(allow_throttle))
+    replay = getattr(ui_state, 'replay_clock', None) is not None
+    plan_known = not replay or (sm.seen['longitudinalPlan'] and sm.valid['longitudinalPlan'] and sm.alive['longitudinalPlan'])
+    if plan_known:
+      allow_throttle = sm['longitudinalPlan'].allowThrottle or not self._longitudinal_control
+      self._blend_filter.update(int(allow_throttle))
+
+    now_ns = ui_state.display_time_ns()
+    style = getattr(self, "road_style", {})
+    if "pathEdge" in style:
+      for edge in getattr(self, "_path_edges", []):
+        if edge.size:
+          draw_polygon(self._rect, edge, gradient=edge_gradient(style["pathEdge"]))
+    mode = path_mode(style)
+    if mode == "rainbow":
+      car_fresh = bool(sm.valid.get('carState', False) and sm.alive.get('carState', False) and
+                       sm.recv_frame['carState'] >= ui_state.started_frame)
+      speed = float(sm['carState'].vEgo) if car_fresh and sm.updated['carState'] else None
+      self._rainbow_path.update(now_ns, speed, source_alive=car_fresh)
+      draw_polygon(self._rect, self._path.projected_points, gradient=self._rainbow_path.gradient())
+      return
+    if mode == "color":
+      draw_polygon(self._rect, self._path.projected_points, gradient=solid_gradient(style.get("path", ROAD_COLORS["path"])))
+      return
+
+    if not self._experimental_mode and not plan_known:
+      draw_polygon(self._rect, self._path.projected_points, rl.Color(255, 255, 255, 30))
+      return
 
     if self._experimental_mode:
       # Draw with acceleration coloring
@@ -291,13 +347,15 @@ class ModelRenderer(Widget):
     else:
       # Blend throttle/no throttle colors based on transition
       blend_factor = round(self._blend_filter.x * 100) / 100
-      blended_colors = self._blend_colors(NO_THROTTLE_COLORS, THROTTLE_COLORS, blend_factor)
-      gradient = Gradient(
-        start=(0.0, 1.0),  # Bottom of path
-        end=(0.0, 0.0),  # Top of path
-        colors=blended_colors,
-        stops=[0.0, 0.5, 1.0],
-      )
+      if blend_factor != getattr(self, "_default_path_blend_factor", None):
+        self._default_path_gradient = Gradient(
+          start=(0.0, 1.0),  # Bottom of path
+          end=(0.0, 0.0),  # Top of path
+          colors=self._blend_colors(NO_THROTTLE_COLORS, THROTTLE_COLORS, blend_factor),
+          stops=[0.0, 0.5, 1.0],
+        )
+        self._default_path_blend_factor = blend_factor
+      gradient = self._default_path_gradient
       draw_polygon(self._rect, self._path.projected_points, gradient=gradient)
 
   def _draw_lead_indicator(self):
@@ -333,82 +391,78 @@ class ModelRenderer(Widget):
 
     return (x, y)
 
-  def _map_line_to_polygon(self, line: np.ndarray, y_off: float, z_off: float, max_idx: int, max_distance: float, allow_invert: bool = True) -> np.ndarray:
-    """Convert 3D line to 2D polygon for rendering."""
-    if line.shape[0] == 0:
-      return np.empty((0, 2), dtype=np.float32)
+  def _map_lines_to_polygons(self, lines: list[np.ndarray], widths: list[float], z_off: float, max_idx: int,
+                             max_distance: float, allow_invert: bool = True) -> list[np.ndarray]:
+    if len(lines) != len(widths):
+      raise ValueError("line and width counts differ")
+    if not lines:
+      return []
 
-    # Slice points and filter non-negative x-coordinates
-    points = line[:max_idx + 1]
+    prepared = []
+    for line in lines:
+      if line.shape[0] == 0:
+        prepared.append(np.empty((0, 3), dtype=np.float32))
+        continue
+      points = line[:max_idx + 1]
+      if 0 < max_idx < line.shape[0] - 1:
+        p0, p1 = line[max_idx], line[max_idx + 1]
+        x0, x1 = float(p0[0]), float(p1[0])
+        if x1 > x0:
+          # Two increasing endpoints: plain arithmetic, the same result as np.interp without its temporaries.
+          t = min(1.0, max(0.0, (float(max_distance) - x0) / (x1 - x0)))
+          interp_y = float(p0[1]) + t * (float(p1[1]) - float(p0[1]))
+          interp_z = float(p0[2]) + t * (float(p1[2]) - float(p0[2]))
+        else:
+          interp_y = np.interp(max_distance, [p0[0], p1[0]], [p0[1], p1[1]])
+          interp_z = np.interp(max_distance, [p0[0], p1[0]], [p0[2], p1[2]])
+        interp_point = np.array([max_distance, interp_y, interp_z], dtype=points.dtype)
+        points = np.concatenate((points, interp_point[None, :]), axis=0)
+      prepared.append(points[points[:, 0] >= 0])
 
-    # Interpolate around max_idx so path end is smooth (max_distance is always >= p0.x)
-    if 0 < max_idx < line.shape[0] - 1:
-      p0 = line[max_idx]
-      p1 = line[max_idx + 1]
-      x0, x1 = p0[0], p1[0]
-      interp_y = np.interp(max_distance, [x0, x1], [p0[1], p1[1]])
-      interp_z = np.interp(max_distance, [x0, x1], [p0[2], p1[2]])
-      interp_point = np.array([max_distance, interp_y, interp_z], dtype=points.dtype)
-      points = np.concatenate((points, interp_point[None, :]), axis=0)
+    counts = [len(points) for points in prepared]
+    total = sum(counts)
+    if not total:
+      return [np.empty((0, 2), dtype=np.float32) for _ in lines]
 
-    points = points[points[:, 0] >= 0]
-    if points.shape[0] == 0:
-      return np.empty((0, 2), dtype=np.float32)
+    offsets = np.zeros((2, total, 3), dtype=np.float32)
+    offsets[0, :, 1] = -np.repeat(widths, counts)
+    offsets[1, :, 1] = -offsets[0, :, 1]
+    offsets[:, :, 2] = z_off
+    points_3d = np.concatenate(prepared)[None, :, :] + offsets
+    proj = (self._car_space_transform @ points_3d.reshape(2 * total, 3).T).reshape(3, 2, total)
+    valid = (np.abs(proj[2, 0]) >= 1e-6) & (np.abs(proj[2, 1]) >= 1e-6)
+    left = np.zeros((2, total), dtype=np.float32)
+    right = np.zeros((2, total), dtype=np.float32)
+    np.divide(proj[:2, 0], proj[2, 0], out=left, where=valid)
+    np.divide(proj[:2, 1], proj[2, 1], out=right, where=valid)
 
-    N = points.shape[0]
-    # Generate left and right 3D points in one array using broadcasting
-    offsets = np.array([[0, -y_off, z_off], [0, y_off, z_off]], dtype=np.float32)
-    points_3d = points[None, :, :] + offsets[:, None, :]  # Shape: 2xNx3
-    points_3d = points_3d.reshape(2 * N, 3)  # Shape: (2*N)x3
-
-    # Transform all points to projected space in one operation
-    proj = self._car_space_transform @ points_3d.T  # Shape: 3x(2*N)
-    proj = proj.reshape(3, 2, N)
-    left_proj = proj[:, 0, :]
-    right_proj = proj[:, 1, :]
-
-    # Filter points where z is sufficiently large
-    valid_proj = (np.abs(left_proj[2]) >= 1e-6) & (np.abs(right_proj[2]) >= 1e-6)
-    if not np.any(valid_proj):
-      return np.empty((0, 2), dtype=np.float32)
-
-    # Compute screen coordinates
-    left_screen = left_proj[:2, valid_proj] / left_proj[2, valid_proj][None, :]
-    right_screen = right_proj[:2, valid_proj] / right_proj[2, valid_proj][None, :]
-
-    # Define clip region bounds
     clip = self._clip_region
-    x_min, x_max = clip.x, clip.x + clip.width
-    y_min, y_max = clip.y, clip.y + clip.height
+    visible = (valid &
+               (left[0] >= clip.x) & (left[0] <= clip.x + clip.width) &
+               (left[1] >= clip.y) & (left[1] <= clip.y + clip.height) &
+               (right[0] >= clip.x) & (right[0] <= clip.x + clip.width) &
+               (right[1] >= clip.y) & (right[1] <= clip.y + clip.height))
+    polygons = []
+    start = 0
+    for count in counts:
+      end = start + count
+      mask = visible[start:end]
+      if not np.any(mask):
+        polygons.append(np.empty((0, 2), dtype=np.float32))
+      else:
+        left_line = left[:, start:end][:, mask]
+        right_line = right[:, start:end][:, mask]
+        if not allow_invert and left_line.shape[1] > 1:
+          keep = left_line[1] == np.minimum.accumulate(left_line[1])
+          left_line = left_line[:, keep]
+          right_line = right_line[:, keep]
+        polygons.append(np.vstack((left_line.T, right_line[:, ::-1].T)).astype(np.float32))
+      start = end
+    return polygons
 
-    # Filter points within clip region
-    left_in_clip = (
-      (left_screen[0] >= x_min) & (left_screen[0] <= x_max) &
-      (left_screen[1] >= y_min) & (left_screen[1] <= y_max)
-    )
-    right_in_clip = (
-      (right_screen[0] >= x_min) & (right_screen[0] <= x_max) &
-      (right_screen[1] >= y_min) & (right_screen[1] <= y_max)
-    )
-    both_in_clip = left_in_clip & right_in_clip
-
-    if not np.any(both_in_clip):
-      return np.empty((0, 2), dtype=np.float32)
-
-    # Select valid and clipped points
-    left_screen = left_screen[:, both_in_clip]
-    right_screen = right_screen[:, both_in_clip]
-
-    # Handle Y-coordinate inversion on hills
-    if not allow_invert and left_screen.shape[1] > 1:
-      y = left_screen[1, :]  # y-coordinates
-      keep = y == np.minimum.accumulate(y)
-      if not np.any(keep):
-        return np.empty((0, 2), dtype=np.float32)
-      left_screen = left_screen[:, keep]
-      right_screen = right_screen[:, keep]
-
-    return np.vstack((left_screen.T, right_screen[:, ::-1].T)).astype(np.float32)
+  def _map_line_to_polygon(self, line: np.ndarray, y_off: float, z_off: float, max_idx: int, max_distance: float, allow_invert: bool = True) -> np.ndarray:
+    """Convert one 3D line to a 2D polygon for rendering."""
+    return self._map_lines_to_polygons([line], [y_off], z_off, max_idx, max_distance, allow_invert)[0]
 
   @staticmethod
   def _hsla_to_color(h, s, l, a):

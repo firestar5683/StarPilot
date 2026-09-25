@@ -8,6 +8,7 @@ from functools import wraps
 
 import openpilot.cereal.messaging as messaging
 from openpilot.common.params import Params
+from openpilot.starpilot.schema_cache import put_cache
 from openpilot.system.manager.process_config import managed_processes
 from openpilot.common.version import training_version, terms_version
 
@@ -25,7 +26,7 @@ def set_params_enabled():
   msg = messaging.new_message('extrinsicsCalibration')
   msg.extrinsicsCalibration.validBlocks = 20
   msg.extrinsicsCalibration.rpyCalib = [0.0, 0.0, 0.0]
-  params.put("CalibrationParams", msg.to_bytes(), block=True)
+  put_cache(params, "CalibrationParams", msg, block=True)
 
 def release_only(f):
   @wraps(f)

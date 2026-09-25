@@ -1,8 +1,12 @@
 #!/usr/bin/env python3
+import os
+import time
 import openpilot.cereal.messaging as messaging
 from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process
 from openpilot.selfdrive.monitoring.policy import DriverMonitoring
+from openpilot.starpilot.aol.runtime import monitoring_lateral_engaged
+from openpilot.starpilot.feature_runtime import requested as feature_requested
 
 
 def dmonitoringd_thread():
@@ -10,7 +14,9 @@ def dmonitoringd_thread():
 
   params = Params()
   pm = messaging.PubMaster(['driverMonitoringState'])
-  sm = messaging.SubMaster(['driverStateV2', 'extrinsicsCalibration', 'carState', 'selfdriveState', 'modelV2'], poll='driverStateV2')
+  aol_replay = os.getenv('AOL_REPLAY_RUNTIME') == '1' or feature_requested(params, 'aol')
+  required = ['driverStateV2', 'extrinsicsCalibration', 'carState', 'selfdriveState', 'modelV2']
+  sm = messaging.SubMaster(required + (['aolAxisState', 'aolSafetyWire'] if aol_replay else []), poll='driverStateV2')
 
   DM = DriverMonitoring(rhd_saved=params.get_bool("IsRhdDetected"), always_on=params.get_bool("AlwaysOnDM"))
   demo_mode=False
@@ -22,11 +28,12 @@ def dmonitoringd_thread():
       # iterate when model has new output
       continue
 
-    valid = sm.all_checks()
+    valid = sm.all_checks(required)
+    aol_engaged = aol_replay and monitoring_lateral_engaged(sm, now_ns=time.monotonic_ns())
     if demo_mode and sm.valid['driverStateV2']:
       DM.run_step(sm, demo=True)
     elif valid:
-      DM.run_step(sm, demo=demo_mode)
+      DM.run_step(sm, demo=demo_mode, aol_lateral_engaged=aol_engaged)
 
     # publish
     dat = DM.get_state_packet(valid=valid)

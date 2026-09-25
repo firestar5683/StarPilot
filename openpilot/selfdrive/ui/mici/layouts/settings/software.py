@@ -244,6 +244,21 @@ class TargetBranchButton(BigButton):
     self._check_update_btn.check_for_update()
 
 
+class DirectUpdateButton(EngagedConfirmationButton):
+  def __init__(self, owner, action):
+    self.owner, self.action = owner, action
+    title = "restore previous version" if action == "rollback" else "fast update selected branch"
+    super().__init__(title, title, gui_app.texture("icons_mici/settings/device/update.png", 64, 75),
+                     lambda: owner.submit(action), exit_on_confirm=False)
+
+  def _update_state(self):
+    super()._update_state()
+    self.owner.refresh()
+    self.set_enabled(self.owner.available(self.action))
+    self.set_visible(ui_state.is_offroad())
+    self.set_value(self.owner.detail())
+
+
 class SoftwareLayoutMici(NavScroller):
   def __init__(self):
     super().__init__()
@@ -257,10 +272,14 @@ class SoftwareLayoutMici(NavScroller):
                                                         description="Remove openpilot from this device.",
                                                         description_icon=gui_app.texture("icons_mici/setup/factory_reset.png", 64, 64))
 
+    from openpilot.starpilot.ui.software_update import NativeSoftwareUpdate
+    direct_update = NativeSoftwareUpdate(ui_state.is_offroad)
     check_update_btn = CheckUpdateButton()
     self._scroller.add_widgets([
       SoftwareInfoLayoutMici(),
       check_update_btn,
+      DirectUpdateButton(direct_update, "fast"),
+      DirectUpdateButton(direct_update, "rollback"),
       InstallUpdateButton(),
       TargetBranchButton(check_update_btn),
       uninstall_openpilot_btn,

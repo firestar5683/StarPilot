@@ -1,0 +1,267 @@
+"""Native Device policy with saved display choices and no hardware calls."""
+
+from types import SimpleNamespace as NS
+import tempfile
+import unittest
+from unittest.mock import Mock, patch
+
+from openpilot.common.params import Params
+from openpilot.selfdrive.ui import ui_state as module
+from openpilot.system.ui.lib.application import MouseEvent, MousePos
+from openpilot.starpilot.ui.display_preferences import SCREEN_OFF, read_preferences
+
+
+class DisplayDeviceTests(unittest.TestCase):
+  def setUp(self):
+    temporary = tempfile.TemporaryDirectory()
+    self.addCleanup(temporary.cleanup)
+    self.params = Params(temporary.name)
+    self.state = NS(params=self.params, started=False, ignition=False, light_sensor=-1,
+                    projection_read_only=False, sm=NS(valid={}, alive={}))
+    self.patches = [patch.object(module, "ui_state", self.state),
+                    patch.object(module.gui_app, "big_ui", return_value=True),
+                    patch.object(module.HARDWARE, "set_display_power"),
+                    patch.object(module.HARDWARE, "set_screen_brightness")]
+    for guard in self.patches:
+      guard.start()
+      self.addCleanup(guard.stop)
+    filter_guard = patch.object(module.FirstOrderFilter, "update", autospec=True,
+                                side_effect=lambda _filter, value: value)
+    self.filter_update = filter_guard.start()
+    self.addCleanup(filter_guard.stop)
+    self.device = module.Device()
+
+  def test_absent_master_matches_existing_auto_and_timeout_policy(self):
+    self.device._refresh_display_preferences()
+    self.assertFalse(self.device._display_preferences.enabled)
+    self.assertEqual(self.device.interactive_timeout, 30)
+    self.device._update_brightness()
+    self.assertEqual(self.device._brightness_target, module.BACKLIGHT_OFFROAD)
+    self.state.started = self.state.ignition = True
+    self.state.light_sensor = 100
+    self.assertEqual(self.device.interactive_timeout, 10)
+    self.device._update_brightness()
+    self.assertEqual(self.device._brightness_target, 100)
+    self.device._awake = False
+    self.device._update_brightness()
+    self.assertEqual(self.device._brightness_target, 0)
+
+  def test_manual_target_uses_existing_filter_and_wake_zero(self):
+    self.params.put_bool("StarPilotDisplayPreferencesEnabled", True, block=True)
+    self.params.put("ScreenBrightness", 40, block=True)
+    self.params.put("ScreenBrightnessOnroad", 75, block=True)
+    self.params.put("ScreenTimeout", 45, block=True)
+    self.params.put("ScreenTimeoutOnroad", 20, block=True)
+    self.device._refresh_display_preferences()
+    self.assertEqual(self.device.interactive_timeout, 45)
+    self.device._update_brightness()
+    self.filter_update.assert_called_with(self.device._brightness_filter, 40)
+    self.state.started = self.state.ignition = True
+    self.assertEqual(self.device.interactive_timeout, 20)
+    self.device._update_brightness()
+    self.filter_update.assert_called_with(self.device._brightness_filter, 75)
+    self.device._awake = False
+    self.device._update_brightness()
+    self.assertEqual(self.device._brightness_target, 0)
+    self.device.set_override_interactive_timeout(7)
+    self.assertEqual(self.device.interactive_timeout, 7)
+
+  def test_bounded_reads_invalidation_and_ignition_transition(self):
+    with patch.object(module, "read_preferences", wraps=read_preferences) as reads, \
+         patch.object(module.time, "monotonic", side_effect=[10.0, 10.2, 11.1, 11.2]):
+      self.device._refresh_display_preferences()
+      self.device._refresh_display_preferences()
+      self.assertEqual(reads.call_count, 1)
+      self.device._refresh_display_preferences()
+      self.assertEqual(reads.call_count, 2)
+      self.device.invalidate_display_preferences()
+      self.device._refresh_display_preferences()
+      self.assertEqual(reads.call_count, 3)
+    self.params.put_bool("StarPilotDisplayPreferencesEnabled", True, block=True)
+    self.device.invalidate_display_preferences()
+    self.device._refresh_display_preferences()
+    self.device._interaction_time = 1
+    with patch.object(self.device, "_reset_interactive_timeout", wraps=self.device._reset_interactive_timeout) as reset, \
+         patch.object(module.time, "monotonic", return_value=100.):
+      self.state.ignition = True
+      self.device._update_wakefulness()
+      reset.assert_called_once()
+      self.assertEqual(self.device._interaction_time, 130.)
+    self.assertTrue(self.device.awake)
+
+  def test_forced_offroad_uses_parked_timeout_with_live_ignition(self):
+    for saved in (False, True):
+      with self.subTest(saved=saved):
+        self.params.put_bool("StarPilotDisplayPreferencesEnabled", saved, block=True)
+        self.params.put("ScreenTimeout", 5, block=True)
+        self.params.put("ScreenTimeoutOnroad", 20, block=True)
+        self.state.started = self.state.ignition = True
+        device = module.Device()
+        callback = Mock()
+        device.add_interactive_timeout_callback(callback)
+        with patch.object(device, "_start_brightness_thread"), \
+             patch.object(module, "PC", False), \
+             patch.object(module.gui_app, "_mouse_events", []), \
+             patch.object(module.gui_app, "set_should_render"), \
+             patch.object(module.time, "monotonic", return_value=100.) as clock:
+          device.update()
+          self.assertTrue(device.awake)
+          self.state.started = False  # hardwared force-offroad, physical ignition remains ON.
+          clock.return_value = 101.
+          device.update()
+          self.assertTrue(self.state.ignition)
+          self.assertEqual(device.interactive_timeout, 5 if saved else 30)
+          self.assertEqual(device._interaction_time, 106. if saved else 131.)
+          self.assertTrue(device.awake)
+          clock.return_value = 140.
+          device.update()
+          self.assertFalse(device.awake)
+          module.HARDWARE.set_display_power.assert_called_with(False)
+          callback.assert_called_once()
+          clock.return_value = 140.1
+          device.update()
+          self.assertFalse(device.awake)
+          self.assertEqual(device._brightness_target, 0)
+          callback.assert_called_once()
+          module.gui_app.mouse_events.append(MouseEvent(MousePos(0., 0.), 0, True, False, True, 141.))
+          clock.return_value = 141.
+          device.update()
+          self.assertTrue(device.awake)
+          module.HARDWARE.set_display_power.assert_called_with(True)
+          module.gui_app.mouse_events.clear()
+          self.state.started = True
+          clock.return_value = 142.
+          device.update()
+          self.assertTrue(device.awake)
+          self.assertEqual(device.interactive_timeout, 20 if saved else 10)
+          clock.return_value = 200.
+          device.update()
+          self.assertTrue(device.awake)  # Effective onroad remains awake after its UI timeout.
+
+  def test_invalid_saved_values_fail_to_existing_auto_policy(self):
+    self.params.put_bool("StarPilotDisplayPreferencesEnabled", True, block=True)
+    self.params.put("ScreenBrightnessOnroad", 0, block=True)
+    saved = read_preferences(self.params, large=True)
+    self.assertTrue(saved.enabled)
+    self.assertEqual(saved.driving_brightness, 101)
+    self.params.put("ScreenTimeoutOnroad", 999, block=True)
+    self.assertEqual(read_preferences(self.params, large=True).driving_timeout, 10)
+
+  def test_screen_off_timeout_single_tap_wake_and_critical_alerts(self):
+    for large in (True, False):
+      with self.subTest(large=large), patch.object(module.gui_app, "big_ui", return_value=large):
+        self.state.sm = NS(valid={}, alive={})
+        self.device = module.Device()
+        self._check_screen_off_timeout_single_tap_wake_and_critical_alerts(large)
+
+  def _check_screen_off_timeout_single_tap_wake_and_critical_alerts(self, large):
+    self.params.put_bool(SCREEN_OFF, True, block=True)
+    self.state.started = self.state.ignition = True
+    with patch.object(self.device, "_start_brightness_thread"), \
+         patch.object(module.gui_app, "_mouse_events", []), \
+         patch.object(module.gui_app, "set_should_render") as render, \
+         patch.object(module.time, "monotonic", return_value=100.) as clock:
+      self.device.update()
+      self.assertTrue(self.device.awake)
+      self.assertEqual(self.device.interactive_timeout, 10 if large else 5)
+      clock.return_value = 106.
+      self.device.update()
+      self.assertEqual(self.device.awake, large)
+      clock.return_value = 111.
+      self.device.update()
+      self.assertFalse(self.device.awake)
+      self.assertEqual(self.device._brightness_target, 0)
+      render.assert_called_with(False)
+      module.HARDWARE.set_display_power.assert_called_with(False)
+      gui_events = module.gui_app.mouse_events
+      gui_events.append(MouseEvent(MousePos(0., 0.), 0, True, False, True, 112.))
+      clock.return_value = 112.
+      self.device.update()
+      self.assertTrue(self.device.awake)
+      self.assertGreater(self.device._brightness_target, 0)
+      self.assertEqual(gui_events, [])  # Wake press cannot activate an underlying button.
+      render.assert_called_with(True)
+      gui_events.append(MouseEvent(MousePos(0., 0.), 0, False, True, False, 112.1))
+      clock.return_value = 112.1
+      self.device.update()
+      self.assertEqual(gui_events, [])  # Wake release is consumed too.
+      clock.return_value = 123.
+      self.device.update()
+      self.assertFalse(self.device.awake)
+      alert = NS(alertStatus=module.log.SelfdriveState.AlertStatus.critical)
+      class Messages(dict):
+        valid = {"selfdriveState": True}
+        alive = {"selfdriveState": True}
+      self.state.sm = Messages(selfdriveState=alert)
+      self.device.update()
+      self.assertTrue(self.device.awake)
+      alert.alertStatus = module.log.SelfdriveState.AlertStatus.normal
+      clock.return_value = 124.
+      self.device.update()
+      self.assertTrue(self.device.awake)
+      clock.return_value = 134.
+      self.device.update()
+      self.assertFalse(self.device.awake)
+      self.assertTrue(self.device.toggle_screen_off())  # Existing controller shortcut also wakes automatic sleep.
+      self.assertTrue(self.device.awake)
+      clock.return_value = 155.
+      self.device.update()
+      self.assertFalse(self.device.awake)
+      self.state.started = False
+      self.device.update()
+      self.assertTrue(self.device.awake)
+
+  def test_screen_off_setting_changes_wake_and_use_saved_driving_timeout(self):
+    self.params.put_bool("StarPilotDisplayPreferencesEnabled", True, block=True)
+    self.params.put("ScreenTimeoutOnroad", 20, block=True)
+    self.params.put_bool(SCREEN_OFF, True, block=True)
+    self.state.started = self.state.ignition = True
+    with patch.object(self.device, "_start_brightness_thread"), \
+         patch.object(module.gui_app, "_mouse_events", []), \
+         patch.object(module.gui_app, "set_should_render"), \
+         patch.object(module.time, "monotonic", return_value=100.) as clock:
+      self.device.update()
+      clock.return_value = 111.
+      self.device.update()
+      self.assertTrue(self.device.awake)
+      clock.return_value = 121.
+      self.device.update()
+      self.assertFalse(self.device.awake)
+      self.params.put_bool(SCREEN_OFF, False, block=True)
+      self.device.invalidate_display_preferences()
+      self.device.update()
+      self.assertTrue(self.device.awake)
+      clock.return_value = 200.
+      self.device.update()
+      self.assertTrue(self.device.awake)
+
+  def test_started_transition_refreshes_saved_profile_without_worker_restart(self):
+    self.params.put_bool("StarPilotDisplayPreferencesEnabled", True, block=True)
+    self.params.put("ScreenBrightnessOnroad", 80, block=True)
+    with patch.object(self.device, "_start_brightness_thread") as start, \
+         patch.object(module, "read_preferences", wraps=read_preferences) as reads:
+      self.device.update()
+      self.device.update()
+      self.assertEqual(reads.call_count, 1)
+      self.state.started = self.state.ignition = True
+      self.device.update()
+      self.assertEqual(reads.call_count, 2)
+      self.assertEqual(self.filter_update.call_args.args[-1], 80)
+      self.assertEqual(start.call_count, 3)
+
+  def test_parked_timeout_callback_and_ignition_wake(self):
+    self.params.put_bool("StarPilotDisplayPreferencesEnabled", True, block=True)
+    self.params.put("ScreenTimeout", 5, block=True)
+    self.device._refresh_display_preferences()
+    callback = Mock()
+    self.device.add_interactive_timeout_callback(callback)
+    self.device._interaction_time = 1
+    with patch.object(module, "PC", False), patch.object(module.gui_app, "set_should_render") as render:
+      self.device._update_wakefulness()
+      callback.assert_called_once()
+      self.assertFalse(self.device.awake)
+      render.assert_called_with(False)
+      self.state.ignition = True
+      self.device._update_wakefulness()
+      self.assertTrue(self.device.awake)
+      render.assert_called_with(True)

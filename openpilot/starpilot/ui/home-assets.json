@@ -1,0 +1,126 @@
+{
+  "format": 1,
+  "purpose": "Preserve reviewed Home image inputs before native decoding",
+  "files": [
+    {
+      "file": "icons/couch.png",
+      "bytes": 3311,
+      "sha256": "911f59f248015600da7ecc689398103d47dfc57f6be17ac8c8e543a726a6c64b"
+    },
+    {
+      "file": "icons/experimental_grey.png",
+      "bytes": 9466,
+      "sha256": "8f37a02dd914405c6f86f415700dd5985eb976b923e7abd6580d2da76533594e"
+    },
+    {
+      "file": "icons/microphone.png",
+      "bytes": 6324,
+      "sha256": "9fc1f7f31d41f26ea7d6f52b3096f7a91844a3b897bc233a8489253c46f0403b"
+    },
+    {
+      "file": "icons_mici/egpu.png",
+      "bytes": 10875,
+      "sha256": "ec3dcf64cbc34251d8423cb8b3b31d743e93d14002dec43c389a857cb7e8eb17"
+    },
+    {
+      "file": "icons_mici/egpu_gray.png",
+      "bytes": 7279,
+      "sha256": "7409c53d7c72681c24982fd83b56ce70f80797c9c0f936d9296a5c18557ac472"
+    },
+    {
+      "file": "icons_mici/experimental_mode.png",
+      "bytes": 16243,
+      "sha256": "01841b602632c66ab14a8e52b874a1623f09641dc2ef0620f4e2d00bb4a913f3"
+    },
+    {
+      "file": "icons_mici/microphone.png",
+      "bytes": 6817,
+      "sha256": "744dbaa68ee74e300cd46439bad79449c860e1c5c027304b0f382bd5383fba77"
+    },
+    {
+      "file": "icons_mici/settings.png",
+      "bytes": 2198,
+      "sha256": "14b457d2dc19d8658f525cc6989c9cfcf0edaf695b18767514242acbdbe2a6dd"
+    },
+    {
+      "file": "icons_mici/settings/bluetooth.png",
+      "bytes": 1060,
+      "sha256": "341185f3c7b853619f6e0919bc1b13183726137998ffd5f78dc4014bba0b9eab"
+    },
+    {
+      "file": "icons_mici/settings/network/cell_strength_full.png",
+      "bytes": 777,
+      "sha256": "fb7af523411c5ed75c6e1418dfc2a379486f6dbd7f2f1c281d3ff54e1ea7810e"
+    },
+    {
+      "file": "icons_mici/settings/network/cell_strength_high.png",
+      "bytes": 936,
+      "sha256": "db86e176e016458fcff00d40e37636a808977e0cc01bcc9c04b31a1001562de8"
+    },
+    {
+      "file": "icons_mici/settings/network/cell_strength_low.png",
+      "bytes": 945,
+      "sha256": "1cd0b3a00db36ee7eacf5887d07d40e5351fb441d98643a02df4c742cd1e935d"
+    },
+    {
+      "file": "icons_mici/settings/network/cell_strength_medium.png",
+      "bytes": 956,
+      "sha256": "25724acfe0c261070b103ef5933053d5dd8b726ece42d0e5f715f05c67be2294"
+    },
+    {
+      "file": "icons_mici/settings/network/cell_strength_none.png",
+      "bytes": 781,
+      "sha256": "cb0aeb6260bcd0642204f842112479f4b19b350db9addae5e14c9c5131bcf956"
+    },
+    {
+      "file": "icons_mici/settings/network/wifi_strength_full.png",
+      "bytes": 2026,
+      "sha256": "73c76e5240bdff64c1d1ed0ac2bb9c3fadb2fd61fbf8dc710b812757af8bcf6c"
+    },
+    {
+      "file": "icons_mici/settings/network/wifi_strength_low.png",
+      "bytes": 2196,
+      "sha256": "e66cc6174a54177793c42ef3525a9aa1592e05b0abb677442c7226269d1371a5"
+    },
+    {
+      "file": "icons_mici/settings/network/wifi_strength_medium.png",
+      "bytes": 2231,
+      "sha256": "7948a9234f2bc996aefb3a9e58a37c06ebbf54e8e4596e47800f78ef7e81961f"
+    },
+    {
+      "file": "icons_mici/settings/network/wifi_strength_none.png",
+      "bytes": 2195,
+      "sha256": "a57ea402448dacc2026631174e448b6254698fe92309221576400cbf28196936"
+    },
+    {
+      "file": "icons_mici/settings/network/wifi_strength_slash.png",
+      "bytes": 2318,
+      "sha256": "7e6d166bdbbcdc106e7cd4a44ba85848888f18a6ef34e86daac8e12a3f519443"
+    },
+    {
+      "file": "images/button_home.png",
+      "bytes": 1501,
+      "sha256": "3fca2a1f675cad4f454f3ba56d6e7f090a352321b61f241fc2ffcbede7a7593a"
+    },
+    {
+      "file": "images/button_settings.png",
+      "bytes": 957,
+      "sha256": "9ec603a5e8f08eb46512c8f0fbb684ff93533964b13a8a8ce45aec95b85e3800"
+    },
+    {
+      "file": "icons_mici/chestnut.png",
+      "bytes": 1914,
+      "sha256": "d05f85ba6e53417260335bb52e2f4c492311a1eb4136e7fa1fc49aa14095bcaf"
+    },
+    {
+      "file": "icons_mici/chestnut_green.png",
+      "bytes": 10911,
+      "sha256": "336230790162965fb0b1c88551c4715fe6adea0d7b39940205d7f7b871865ed7"
+    },
+    {
+      "file": "icons_mici/chestnut_orange.png",
+      "bytes": 13256,
+      "sha256": "bf97a6738b294ac0aed9b2d075916cee0b7d3215bcd23381760900ede6a92748"
+    }
+  ]
+}

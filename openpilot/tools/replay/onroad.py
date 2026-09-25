@@ -15,12 +15,13 @@ import sys
 import tempfile
 import time
 
-USAGE = """Usage: ./onroad [jobs] [--c3|--c4|--all|--replay-only] [--alert] [--cem] [--csc] [--prefix replay-NAME] <replay args>
+USAGE = """Usage: ./onroad [jobs] [--c3|--c4|--all|--replay-only] [--params /saved/params] [--alert] [--cem] [--csc] [--prefix replay-NAME] <replay args>
 Replay arguments include a route or --demo, --start, --cache, --playback, --data_dir and --no-loop.
 The native replay terminal provides playback controls. Route playback may read/download the route you request.
 --alert previews a synthetic visual critical alert; it does not publish car control.
 --cem and --csc preview synthetic onroad visuals in the selected native UI only.
 Old --nav, --offroad and --galaxy demos are not available in this port.
+--params supplements recorded settings with a read-only snapshot, including unlogged layout preferences.
 """
 UNAVAILABLE = frozenset(("--nav", "-nav", "--offroad", "--galaxy"))
 PREFIX_RE = re.compile(r"replay-[A-Za-z0-9_-]{1,48}\Z")
@@ -35,6 +36,7 @@ class OnroadPlan:
   replay_args: tuple[str, ...]
   alert: bool = False
   visual_preview: frozenset[str] = frozenset()
+  params_snapshot: str | None = None
 
 
 def _block_alert_service(args: tuple[str, ...]) -> list[str]:
@@ -65,6 +67,7 @@ def parse_onroad_args(args: list[str]) -> OnroadPlan:
   alert = False
   visual_preview: set[str] = set()
   prefix = None
+  params_snapshot = None
   replay_args: list[str] = []
   index = 0
   while index < len(args):
@@ -95,6 +98,16 @@ def parse_onroad_args(args: list[str]) -> OnroadPlan:
       else:
         targets.append(arg.removeprefix("--"))
         explicit = True
+    elif arg == "--params" or arg.startswith("--params="):
+      if arg == "--params":
+        if index + 1 >= len(args):
+          raise ValueError("missing --params directory")
+        params_snapshot = args[index + 1]
+        index += 1
+      else:
+        params_snapshot = arg.partition("=")[2]
+      if not params_snapshot or not Path(params_snapshot).is_absolute():
+        raise ValueError("--params must name an absolute directory")
     elif arg in ("--prefix", "-p"):
       if index + 1 >= len(args):
         raise ValueError("missing --prefix value")
@@ -136,7 +149,7 @@ def parse_onroad_args(args: list[str]) -> OnroadPlan:
   if (alert or visual_preview) and (replay_only or (explicit and not targets)):
     raise ValueError("Visual previews require a native UI")
   return OnroadPlan(tuple(name for name in ("c3", "c4") if name in targets), explicit, replay_only,
-                    prefix, tuple(replay_args), alert, frozenset(visual_preview))
+                    prefix, tuple(replay_args), alert, frozenset(visual_preview), params_snapshot)
 
 
 def _private_prefix(requested: str | None) -> str:
@@ -178,11 +191,11 @@ def _parent_prefix(prefix: str):
       os.environ["OPENPILOT_PREFIX"] = previous
 
 
-def seed_replay_params(init_data, params_root: str, prefix: str) -> int:
+def seed_replay_params(init_data, params_root: str, prefix: str, snapshot: str | None = None) -> int:
   from openpilot.common.params import Params
   from openpilot.tools.replay.onroad_config import seed_preview
   with _parent_prefix(prefix):
-    return seed_preview(init_data, Params(params_root))
+    return seed_preview(init_data, Params(params_root), snapshot)
 
 
 def _stop(children: list[subprocess.Popen]) -> None:
@@ -240,7 +253,7 @@ def supervise(replay_command: list[str], ui_commands: list[list[str]], env: dict
 
 
 def run(plan: OnroadPlan) -> int:
-  from openpilot.tools.replay.onroad_config import parse_replay_args, route_init_data, select_ui_target
+  from openpilot.tools.replay.onroad_config import parse_replay_args, route_init_data, select_ui_target, replay_device_type
   from openpilot.starpilot.ui.host_launch import launch_environment
   from openpilot.starpilot.ui.developer_preview import encode_flags
   from openpilot.starpilot.ui.presentation import Profile
@@ -278,15 +291,27 @@ def run(plan: OnroadPlan) -> int:
   host_params.parent.mkdir(parents=True, exist_ok=True)
   with tempfile.TemporaryDirectory(prefix="replay-params-", dir=host_params.parent) as params_root:
     env = {**source, "OPENPILOT_PREFIX": prefix, "PARAMS_ROOT": params_root,
-           "SP_ONROAD_VISUAL_PREVIEW": preview}
+           "SP_ONROAD_VISUAL_PREVIEW": preview, "SP_REPLAY_DEVICE_TYPE": replay_device_type(init_data)}
     env["COMMA_CACHE"] = str(host_params.parent / "download-cache")
-    seed_replay_params(init_data, params_root, prefix)
+    restored = seed_replay_params(init_data, params_root, prefix, plan.params_snapshot)
     marker.mkdir(mode=0o700)
     try:
       ui_commands = [[sys.executable, "-m", "openpilot.starpilot.ui.host_launch",
                       "large" if target == "c3" else "compact"] for target in targets]
       print(f"Replay prefix {prefix}; native UI: {', '.join(targets) if targets else 'none'}", flush=True)
-      with owned_ipc_namespace(prefix):
+      if targets:
+        print(f"Recorded device: {env['SP_REPLAY_DEVICE_TYPE']}; restored {restored} saved settings", flush=True)
+        if plan.params_snapshot is None:
+          print("Unlogged settings use defaults; --params /saved/params supplies an exact saved layout and preferences.", flush=True)
+      with owned_ipc_namespace(prefix) as ipc_root:
+        from openpilot.tools.replay.display_clock import RECORD
+        clock_path = ipc_root / "display-clock"
+        fd = os.open(clock_path, os.O_CREAT | os.O_EXCL | os.O_WRONLY, 0o600)
+        try:
+          os.ftruncate(fd, RECORD.size)
+        finally:
+          os.close(fd)
+        env["SP_REPLAY_CLOCK_PATH"] = str(clock_path)
         replay_command = [str(replay_binary), *(_block_alert_service(plan.replay_args) if plan.alert else plan.replay_args)]
         demos = [[sys.executable, "-m", "openpilot.tools.replay.alert_demo"]] if plan.alert else []
         return supervise(replay_command, ui_commands, env, demo_commands=demos)

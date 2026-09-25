@@ -39,7 +39,8 @@ def is_ioniq_6_2025_model(CP) -> bool:
   if getattr(CP, "carFingerprint", None) not in IONIQ_6_CARS:
     return False
   try:
-    versions = [fw.fwVersion.decode("ascii", errors="ignore") if isinstance(fw.fwVersion, bytes) else str(fw.fwVersion)
+    versions = [bytes(fw.fwVersion).decode("ascii", errors="ignore")
+                if isinstance(fw.fwVersion, (bytes, bytearray, memoryview)) else str(fw.fwVersion)
                 for fw in CP.carFw]
   except (AttributeError, TypeError, ValueError):
     return False
@@ -730,7 +731,6 @@ def get_ioniq_6_low_speed_angle_assist_torque(desired_angle_deg: float, actual_a
 from collections import deque
 
 from openpilot.cereal import log
-from opendbc.car.lateral import get_friction
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.pid import PIDController
@@ -758,14 +758,9 @@ class Ioniq6TorquePolicy:
     self.dt = parent.dt
     self.is_2025 = is_ioniq_6_2025_model(CP)
     self.vehicle_factor = float(CP.lateralTuning.torque.latAccelFactor)
-    # Startup limits use raw CP calibration before the 1.22 factor; using compensated
-    # parameters would widen them before the first live torque update.
-    startup_params = CP.lateralTuning.torque.as_builder()
-    startup_pos_limit = parent.lateral_accel_from_torque(parent.steer_max, startup_params)
-    startup_neg_limit = parent.lateral_accel_from_torque(-parent.steer_max, startup_params)
     parent.pid = PIDController([[0.0], [KP_INTERP[-1]]], KI, rate=1 / self.dt)
-    parent.pid.set_limits(startup_pos_limit, startup_neg_limit)
     parent.torque_params.latAccelFactor = self.vehicle_factor * IONIQ_6_BASE_LAT_ACCEL_FACTOR_MULT
+    parent.update_limits()
     self.request_buffer_len = int(LAT_ACCEL_REQUEST_BUFFER_SECONDS / self.dt)
     self.curvature_request_buffer = deque([0.0] * self.request_buffer_len, maxlen=self.request_buffer_len)
     self.jerk_filter = FirstOrderFilter(0.0, 1 / (2 * np.pi * LP_FILTER_CUTOFF_HZ), self.dt)
@@ -818,8 +813,8 @@ class Ioniq6TorquePolicy:
     desired_lateral_jerk = float(np.clip(self.jerk_filter.update(raw_lateral_jerk), -MAX_LAT_JERK_UP, MAX_LAT_JERK_UP))
     gravity_adjusted_future_lateral_accel = future_desired_lateral_accel - roll_compensation
     setpoint = expected_lateral_accel + desired_lateral_jerk * lat_delay
-    desired_lateral_accel_rate = (setpoint - self.prev_desired_lateral_accel) / self.dt
-    unwind_detected = desired_lateral_accel_rate < UNWIND_D_DES_THRESHOLD and abs(setpoint) < UNWIND_LAT_ACCEL_NEAR_ZERO
+    desired_lateral_accel_magnitude_rate = (abs(setpoint) - abs(self.prev_desired_lateral_accel)) / self.dt
+    unwind_detected = desired_lateral_accel_magnitude_rate < UNWIND_D_DES_THRESHOLD and abs(setpoint) < UNWIND_LAT_ACCEL_NEAR_ZERO
     self.prev_desired_lateral_accel = setpoint
     measurement_rate = self.measurement_rate_filter.update((measurement - self.previous_measurement) / self.dt)
     measurement_rate = float(np.clip(measurement_rate, -MAX_LAT_JERK_UP, MAX_LAT_JERK_UP))
@@ -849,6 +844,9 @@ class Ioniq6TorquePolicy:
       friction_threshold = get_ioniq_6_friction_threshold(CS.vEgo, setpoint, desired_lateral_jerk) / max(center_taper, 1e-3)
     else:
       friction_threshold = self.surface_math.friction_threshold(self.surface, CS.vEgo, setpoint, desired_lateral_jerk) / max(center_taper, 1e-3)
+    if self.surface is None and not self.is_2025 and not CS.steeringPressed and not self.prev_steering_pressed:
+      friction_threshold += get_ioniq_6_2023_center_friction_increment(
+        CS.vEgo, setpoint, measurement, desired_lateral_jerk, future_desired_lateral_accel) / max(center_taper, 1e-3)
     friction_scale = get_ioniq_6_friction_scale(CS.vEgo, setpoint, desired_lateral_jerk)
     friction_scale = 1.0 + ((friction_scale - 1.0) * center_taper)
     friction_scale *= get_ioniq_6_friction_center_fade_scale(setpoint, CS.vEgo)
@@ -858,8 +856,8 @@ class Ioniq6TorquePolicy:
     vehicle_jerk_deadzone = IONIQ_6_2025_FRICTION_JERK_DEADZONE if self.is_2025 else IONIQ_6_FRICTION_JERK_DEADZONE
     friction_jerk_deadzone = center_chatter_friction_jerk_deadzone(CS.vEgo, setpoint, vehicle_jerk_deadzone)
     friction_jerk = math.copysign(max(abs(desired_lateral_jerk) - friction_jerk_deadzone, 0.0), desired_lateral_jerk)
-    ff += friction_scale * get_friction(error_with_lsf + JERK_GAIN * friction_jerk, lateral_accel_deadzone,
-                                        friction_threshold, parent.torque_params)
+    ff += friction_scale * parent.friction(error_with_lsf + JERK_GAIN * friction_jerk, lateral_accel_deadzone,
+                                          friction_threshold, CS, setpoint)
     if CS.vEgo < self.low_speed_reset_threshold:
       parent.pid.reset()
     freeze_integrator = (steer_limited_by_safety or CS.steeringPressed or
@@ -895,3 +893,24 @@ class Ioniq6TorquePolicy:
                                                        CS, steer_limited_by_safety, curvature_limited))
     self.prev_steering_pressed = CS.steeringPressed
     return -output_torque, 0.0, pid_log
+
+
+IONIQ_6_2023_CENTER_FRICTION_INCREMENT = 0.24
+
+IONIQ_6_2023_CENTER_FRICTION_SPEED_BP = [3.5, 8.0]
+
+IONIQ_6_2023_CENTER_FRICTION_LAT_BP = [0.12, 0.35]
+
+IONIQ_6_2023_CENTER_FRICTION_ERROR_BP = [0.08, 0.18]
+
+IONIQ_6_2023_CENTER_FRICTION_JERK_BP = [0.20, 0.60]
+
+def get_ioniq_6_2023_center_friction_increment(v_ego: float, desired_lateral_accel: float, measured_lateral_accel: float,
+                                             desired_lateral_jerk: float, future_lateral_accel: float) -> float:
+  speed_weight = np.interp(v_ego, IONIQ_6_2023_CENTER_FRICTION_SPEED_BP, [0.0, 1.0])
+  center_weight = np.interp(max(abs(desired_lateral_accel), abs(measured_lateral_accel), abs(future_lateral_accel)),
+                            IONIQ_6_2023_CENTER_FRICTION_LAT_BP, [1.0, 0.0])
+  tracking_weight = np.interp(abs(desired_lateral_accel - measured_lateral_accel),
+                              IONIQ_6_2023_CENTER_FRICTION_ERROR_BP, [1.0, 0.0])
+  jerk_weight = np.interp(abs(desired_lateral_jerk), IONIQ_6_2023_CENTER_FRICTION_JERK_BP, [1.0, 0.0])
+  return float(IONIQ_6_2023_CENTER_FRICTION_INCREMENT * speed_weight * center_weight * tracking_weight * jerk_weight)

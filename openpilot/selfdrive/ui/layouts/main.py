@@ -46,9 +46,9 @@ class MainLayout(Widget):
     gui_app.push_widget(self)
 
     # Start onboarding if terms or training not completed, make sure to push after self
-    self._onboarding_window = OnboardingWindow()
-    if not self._onboarding_window.completed:
-      gui_app.push_widget(self._onboarding_window)
+    onboarding_window = OnboardingWindow()
+    if not onboarding_window.completed:
+      gui_app.push_widget(onboarding_window)
 
   def _render(self, _):
     self._handle_onroad_transition()

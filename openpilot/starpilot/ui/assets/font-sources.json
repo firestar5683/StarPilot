@@ -1,0 +1,314 @@
+{
+  "version": 1,
+  "files": [
+    {
+      "file": "assets/fonts/Inter-Regular.fnt",
+      "sha256": "5386eb90051c4d1a50592a49c20d987e4ec4cfc1772d131d917f8f50fb7241b9",
+      "bytes": 13982,
+      "source_font": {
+        "file": "Inter-Regular.ttf",
+        "sha256": "1041a8cf17dab7579acef0cc46b21f6497ec1ae01918ddc3495416efb81a4780",
+        "bytes": 287928,
+        "version": [
+          "Version 3.012;git-06b166889"
+        ],
+        "official_revision": "521db4c825d37eb5f29acf955daa88da003e4433",
+        "official_path": "openpilot/selfdrive/assets/fonts/Inter-Regular.ttf"
+      },
+      "retained_bitmap_source": {
+        "revision": "678af78347d9656bc2f5dacd4204b012db861fa7",
+        "path": "selfdrive/assets/fonts/Inter-Regular.fnt",
+        "git_blob": "89f52dfb9d91c06e430f1acd3be1791848d5663e"
+      },
+      "notice_files": [
+        "assets/fonts/notices/Inter-OFL-1.1.txt",
+        "assets/fonts/notices/Inter-Regular-copyright.txt"
+      ]
+    },
+    {
+      "file": "assets/fonts/Inter-Regular.png",
+      "sha256": "5bdd18a0dab40ca13409e8d5ca81cecafd3a2b404b6121e5faeadb1e05a24c26",
+      "bytes": 226180,
+      "source_font": {
+        "file": "Inter-Regular.ttf",
+        "sha256": "1041a8cf17dab7579acef0cc46b21f6497ec1ae01918ddc3495416efb81a4780",
+        "bytes": 287928,
+        "version": [
+          "Version 3.012;git-06b166889"
+        ],
+        "official_revision": "521db4c825d37eb5f29acf955daa88da003e4433",
+        "official_path": "openpilot/selfdrive/assets/fonts/Inter-Regular.ttf"
+      },
+      "retained_bitmap_source": {
+        "revision": "678af78347d9656bc2f5dacd4204b012db861fa7",
+        "path": "selfdrive/assets/fonts/Inter-Regular.png",
+        "git_blob": "35e31d7b6664d2ae039366fbd848a5646eb2c821"
+      },
+      "notice_files": [
+        "assets/fonts/notices/Inter-OFL-1.1.txt",
+        "assets/fonts/notices/Inter-Regular-copyright.txt"
+      ]
+    },
+    {
+      "file": "assets/fonts/Inter-Medium.fnt",
+      "sha256": "9126a3ce60109715319e83d5c5c7b6a9f02f743f0d3e3d523a5d030b392cb4f7",
+      "bytes": 13980,
+      "source_font": {
+        "file": "Inter-Medium.ttf",
+        "sha256": "5249ae5f8ddfded34c98c6e3cf09e08f178f234e1bfa28a68f98f6f957628418",
+        "bytes": 292140,
+        "version": [
+          "Version 3.012;git-06b166889"
+        ],
+        "official_revision": "521db4c825d37eb5f29acf955daa88da003e4433",
+        "official_path": "openpilot/selfdrive/assets/fonts/Inter-Medium.ttf"
+      },
+      "retained_bitmap_source": {
+        "revision": "678af78347d9656bc2f5dacd4204b012db861fa7",
+        "path": "selfdrive/assets/fonts/Inter-Medium.fnt",
+        "git_blob": "b029f0f5ddc50d2d8195f1bdf2fea1f74c895f42"
+      },
+      "notice_files": [
+        "assets/fonts/notices/Inter-OFL-1.1.txt",
+        "assets/fonts/notices/Inter-Medium-copyright.txt"
+      ]
+    },
+    {
+      "file": "assets/fonts/Inter-Medium.png",
+      "sha256": "527afa52b6969895bca20fa6877fa1335d3585da3deb7b0dec3f52eb3ebc912a",
+      "bytes": 225402,
+      "source_font": {
+        "file": "Inter-Medium.ttf",
+        "sha256": "5249ae5f8ddfded34c98c6e3cf09e08f178f234e1bfa28a68f98f6f957628418",
+        "bytes": 292140,
+        "version": [
+          "Version 3.012;git-06b166889"
+        ],
+        "official_revision": "521db4c825d37eb5f29acf955daa88da003e4433",
+        "official_path": "openpilot/selfdrive/assets/fonts/Inter-Medium.ttf"
+      },
+      "retained_bitmap_source": {
+        "revision": "678af78347d9656bc2f5dacd4204b012db861fa7",
+        "path": "selfdrive/assets/fonts/Inter-Medium.png",
+        "git_blob": "98e52b93a6fa116ebc7d43d78f57113ae185867e"
+      },
+      "notice_files": [
+        "assets/fonts/notices/Inter-OFL-1.1.txt",
+        "assets/fonts/notices/Inter-Medium-copyright.txt"
+      ]
+    },
+    {
+      "file": "assets/fonts/Inter-Bold.fnt",
+      "sha256": "6dc9a5310bfd421ca96a7144410033b9651cbfce031d892aa04d5934cdbb6659",
+      "bytes": 13976,
+      "source_font": {
+        "file": "Inter-Bold.ttf",
+        "sha256": "d597e753e78d8bf9db34c13343146545fb3be5a1c99a175bc381fe3f6f787f31",
+        "bytes": 293448,
+        "version": [
+          "Version 3.012;git-06b166889"
+        ],
+        "official_revision": "521db4c825d37eb5f29acf955daa88da003e4433",
+        "official_path": "openpilot/selfdrive/assets/fonts/Inter-Bold.ttf"
+      },
+      "retained_bitmap_source": {
+        "revision": "678af78347d9656bc2f5dacd4204b012db861fa7",
+        "path": "selfdrive/assets/fonts/Inter-Bold.fnt",
+        "git_blob": "43f50b0033110d3445ce5c246c2135fbca3fc273"
+      },
+      "notice_files": [
+        "assets/fonts/notices/Inter-OFL-1.1.txt",
+        "assets/fonts/notices/Inter-Bold-copyright.txt"
+      ]
+    },
+    {
+      "file": "assets/fonts/Inter-Bold.png",
+      "sha256": "a6dff654ed9ed5b632bf516e846e88bd233b1bc5e0802f2c77fadb38b9a17586",
+      "bytes": 220630,
+      "source_font": {
+        "file": "Inter-Bold.ttf",
+        "sha256": "d597e753e78d8bf9db34c13343146545fb3be5a1c99a175bc381fe3f6f787f31",
+        "bytes": 293448,
+        "version": [
+          "Version 3.012;git-06b166889"
+        ],
+        "official_revision": "521db4c825d37eb5f29acf955daa88da003e4433",
+        "official_path": "openpilot/selfdrive/assets/fonts/Inter-Bold.ttf"
+      },
+      "retained_bitmap_source": {
+        "revision": "678af78347d9656bc2f5dacd4204b012db861fa7",
+        "path": "selfdrive/assets/fonts/Inter-Bold.png",
+        "git_blob": "4e2acdc2550c867b53bc8a3aa8b8db2c616a871a"
+      },
+      "notice_files": [
+        "assets/fonts/notices/Inter-OFL-1.1.txt",
+        "assets/fonts/notices/Inter-Bold-copyright.txt"
+      ]
+    },
+    {
+      "file": "assets/fonts/Inter-SemiBold.fnt",
+      "sha256": "f0bfa7a8b100905c2ace29e0ba3cfc7c6713ea9f028c46442b84a121af84dce9",
+      "bytes": 13984,
+      "source_font": {
+        "file": "Inter-SemiBold.ttf",
+        "sha256": "98542636e6c900d04e987ca7a37e160a407df344be073fb041fd88f2cd90085a",
+        "bytes": 293028,
+        "version": [
+          "Version 3.012;git-06b166889"
+        ],
+        "official_revision": "521db4c825d37eb5f29acf955daa88da003e4433",
+        "official_path": "openpilot/selfdrive/assets/fonts/Inter-SemiBold.ttf"
+      },
+      "retained_bitmap_source": {
+        "revision": "678af78347d9656bc2f5dacd4204b012db861fa7",
+        "path": "selfdrive/assets/fonts/Inter-SemiBold.fnt",
+        "git_blob": "4f6cb536243d6d6ecb43d777c1fa013d1e8e27f0"
+      },
+      "notice_files": [
+        "assets/fonts/notices/Inter-OFL-1.1.txt",
+        "assets/fonts/notices/Inter-SemiBold-copyright.txt"
+      ]
+    },
+    {
+      "file": "assets/fonts/Inter-SemiBold.png",
+      "sha256": "65b69e60b4639b2ea6d249462a4a837fc1eafb6964e2ca1d2adf5ef0ad658872",
+      "bytes": 223243,
+      "source_font": {
+        "file": "Inter-SemiBold.ttf",
+        "sha256": "98542636e6c900d04e987ca7a37e160a407df344be073fb041fd88f2cd90085a",
+        "bytes": 293028,
+        "version": [
+          "Version 3.012;git-06b166889"
+        ],
+        "official_revision": "521db4c825d37eb5f29acf955daa88da003e4433",
+        "official_path": "openpilot/selfdrive/assets/fonts/Inter-SemiBold.ttf"
+      },
+      "retained_bitmap_source": {
+        "revision": "678af78347d9656bc2f5dacd4204b012db861fa7",
+        "path": "selfdrive/assets/fonts/Inter-SemiBold.png",
+        "git_blob": "77e0e8cf14bb288fa170504e43eb5cbeaeb436ea"
+      },
+      "notice_files": [
+        "assets/fonts/notices/Inter-OFL-1.1.txt",
+        "assets/fonts/notices/Inter-SemiBold-copyright.txt"
+      ]
+    },
+    {
+      "file": "assets/fonts/unifont.fnt",
+      "sha256": "35cba59bd0e7f7c02ff3be31a0905e277d80c6b7cac2803d446d4e55908c9d3d",
+      "bytes": 17595,
+      "source_font": {
+        "file": "unifont.otf",
+        "sha256": "9712a9bc089af7ddc06e0826aa84f2ee23ed2f1a1dddaf2a89c2483e753a8475",
+        "bytes": 5321484,
+        "version": [
+          "Version 17.0.02"
+        ],
+        "official_revision": "521db4c825d37eb5f29acf955daa88da003e4433",
+        "official_path": "openpilot/selfdrive/assets/fonts/unifont.otf"
+      },
+      "retained_bitmap_source": {
+        "revision": "678af78347d9656bc2f5dacd4204b012db861fa7",
+        "path": "selfdrive/assets/fonts/unifont.fnt",
+        "git_blob": "391e8dc3466bd15967912a0f5cc2509ac562818d"
+      },
+      "notice_files": [
+        "assets/fonts/notices/Unifont-OFL-1.1.txt",
+        "assets/fonts/notices/Unifont-COPYING.txt",
+        "assets/fonts/notices/unifont-copyright.txt"
+      ]
+    },
+    {
+      "file": "assets/fonts/unifont.png",
+      "sha256": "b56cb7cd94b22a0da4f8ad966519bc44739fbbc6943fd643c2f41eaaf429ad4c",
+      "bytes": 6550,
+      "source_font": {
+        "file": "unifont.otf",
+        "sha256": "9712a9bc089af7ddc06e0826aa84f2ee23ed2f1a1dddaf2a89c2483e753a8475",
+        "bytes": 5321484,
+        "version": [
+          "Version 17.0.02"
+        ],
+        "official_revision": "521db4c825d37eb5f29acf955daa88da003e4433",
+        "official_path": "openpilot/selfdrive/assets/fonts/unifont.otf"
+      },
+      "retained_bitmap_source": {
+        "revision": "678af78347d9656bc2f5dacd4204b012db861fa7",
+        "path": "selfdrive/assets/fonts/unifont.png",
+        "git_blob": "6f21e89893ea0f205f88ec3209204e31fec93a18"
+      },
+      "notice_files": [
+        "assets/fonts/notices/Unifont-OFL-1.1.txt",
+        "assets/fonts/notices/Unifont-COPYING.txt",
+        "assets/fonts/notices/unifont-copyright.txt"
+      ]
+    }
+  ],
+  "notices": [
+    {
+      "file": "assets/fonts/notices/Inter-OFL-1.1.txt",
+      "sha256": "e68284465dffb78145848f2c2e466add3a8f1025788497e95e090f06e5bc19a4",
+      "bytes": 4366
+    },
+    {
+      "file": "assets/fonts/notices/Unifont-OFL-1.1.txt",
+      "sha256": "869692af094c57fb7258c57fe26820c759319603321d0ffeb278de3651763ded",
+      "bytes": 4340
+    },
+    {
+      "file": "assets/fonts/notices/Unifont-COPYING.txt",
+      "sha256": "cd2785c2b8e0a01d203560265b2d2d47cdb1401d2707d25918ac5531bcdba947",
+      "bytes": 48441
+    },
+    {
+      "file": "assets/notices/Bootstrap-MIT.txt",
+      "sha256": "ae58b37f46d8c7eb680f0223a416a1d26f699a0968f537465256e9274e28da59",
+      "bytes": 1093
+    },
+    {
+      "file": "assets/notices/Material-Design-Apache-2.0.txt",
+      "sha256": "cfc7749b96f63bd31c3c42b5c471bf756814053e847c10f3eb003417bc523d30",
+      "bytes": 11358
+    },
+    {
+      "file": "assets/fonts/notices/Inter-Regular-copyright.txt",
+      "sha256": "5fc9a1666ffec3b7acfb74543de4338b2265e7d3cd06f91de146aff6df07f699",
+      "bytes": 73
+    },
+    {
+      "file": "assets/fonts/notices/Inter-Medium-copyright.txt",
+      "sha256": "5fc9a1666ffec3b7acfb74543de4338b2265e7d3cd06f91de146aff6df07f699",
+      "bytes": 73
+    },
+    {
+      "file": "assets/fonts/notices/Inter-Bold-copyright.txt",
+      "sha256": "5fc9a1666ffec3b7acfb74543de4338b2265e7d3cd06f91de146aff6df07f699",
+      "bytes": 73
+    },
+    {
+      "file": "assets/fonts/notices/Inter-SemiBold-copyright.txt",
+      "sha256": "5fc9a1666ffec3b7acfb74543de4338b2265e7d3cd06f91de146aff6df07f699",
+      "bytes": 73
+    },
+    {
+      "file": "assets/fonts/notices/unifont-copyright.txt",
+      "sha256": "d5c94f7372bf30c82a2734c77390bc54bc3dcf34e8eb896cdfca4aa2acd59eab",
+      "bytes": 174
+    }
+  ],
+  "font_license_sources": {
+    "Inter": "https://raw.githubusercontent.com/rsms/inter/06b166889e335a2454c0767734a05b27f6403098/LICENSE.txt",
+    "Unifont": "https://unifoundry.com/pub/unifont/unifont-17.0.02/unifont-17.0.02.tar.gz"
+  },
+  "image_notice_sources": {
+    "Bootstrap": "https://raw.githubusercontent.com/twbs/icons/d5aa187483a1b0b186f87adcfa8576350d970d98/LICENSE.md",
+    "Material_Design": "Preserved existing project attribution; no per-image origin mapping asserted"
+  },
+  "provenance_limits": [
+    "Existing atlas bytes are preserved, not regenerated or represented as newly authored fonts.",
+    "Inter source TTFs match the pinned official tree and embedded OFL declaration; publisher Windows-hinted release files differ.",
+    "Unifont source OTF matches the publisher's versioned archive exactly.",
+    "Exact original bitmap-generation environment is not established; current recipe glyph lists differ from stored atlases.",
+    "Como atlas and additional custom icons remain external; this package does not make the UI preview self-contained."
+  ]
+}
