@@ -8,6 +8,8 @@ from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
 from openpilot.common.pid import PIDController
+from openpilot.starpilot.lateral.controller_selection import ControllerMode, default_selection, policy_for
+from openpilot.starpilot.lateral.torque_extension import create_extension
 
 # At higher speeds (25+mph) we can assume:
 # Lateral acceleration achieved by a specific car correlates to
@@ -33,8 +35,12 @@ LAT_ACCEL_REQUEST_BUFFER_SECONDS = 1.0
 VERSION = 1
 
 class LatControlTorque(LatControl):
-  def __init__(self, CP, CI, dt):
+  def __init__(self, CP, CI, dt, *, controller_mode: ControllerMode | None = None, turn_assist: bool = False):
     super().__init__(CP, CI, dt)
+    self.controller_mode = default_selection(CP).mode if controller_mode is None else ControllerMode(controller_mode)
+    self.controller_policy = policy_for(CP)
+    if self.controller_mode == ControllerMode.STARPILOT and self.controller_policy is None:
+      raise ValueError('No StarPilot torque policy for CarParams')
     self.torque_params = CP.lateralTuning.torque.as_builder()
     self.torque_from_lateral_accel = CI.torque_from_lateral_accel()
     self.lateral_accel_from_torque = CI.lateral_accel_from_torque()
@@ -45,8 +51,11 @@ class LatControlTorque(LatControl):
     self.lat_accel_request_buffer = deque([0.] * self.lat_accel_request_buffer_len , maxlen=self.lat_accel_request_buffer_len)
     self.lookahead_frames = int(JERK_LOOKAHEAD_SECONDS / self.dt)
     self.jerk_filter = FirstOrderFilter(0.0, 1 / (2 * np.pi * LP_FILTER_CUTOFF_HZ), self.dt)
+    self.starpilot_extension = create_extension(self, CP, self.controller_mode, self.controller_policy, turn_assist=turn_assist)
 
   def update_torque_parameters(self, latAccelFactor, latAccelOffset, friction):
+    if self.starpilot_extension is not None:
+      latAccelFactor, latAccelOffset, friction = self.starpilot_extension.transform_torque_parameters(latAccelFactor, latAccelOffset, friction)
     self.torque_params.latAccelFactor = latAccelFactor
     self.torque_params.latAccelOffset = latAccelOffset
     self.torque_params.friction = friction
@@ -57,6 +66,9 @@ class LatControlTorque(LatControl):
                         self.lateral_accel_from_torque(-self.steer_max, self.torque_params))
 
   def update(self, active, CS, VM, params, steer_limited_by_safety, desired_curvature, curvature_limited, lat_delay):
+    if self.starpilot_extension is not None:
+      return self.starpilot_extension.update(active, CS, VM, params, steer_limited_by_safety,
+                                            desired_curvature, curvature_limited, lat_delay)
     pid_log = log.ControlsState.LateralTorqueState.new_message()
     pid_log.version = VERSION
     measured_curvature = -VM.calc_curvature(math.radians(CS.steeringAngleDeg - params.angleOffsetDeg), CS.vEgo, params.roll)

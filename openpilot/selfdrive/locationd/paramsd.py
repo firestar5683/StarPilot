@@ -258,6 +258,8 @@ def main():
 
   steer_ratio, stiffness_factor, angle_offset_deg, pInitial = retrieve_initial_vehicle_params(params, CP, REPLAY, DEBUG)
   learner = VehicleParamsLearner(CP, steer_ratio, stiffness_factor, np.radians(angle_offset_deg), pInitial)
+  from openpilot.starpilot.lateral.gm_geometry_runtime import GeometryPublicationOwner
+  geometry_owner = GeometryPublicationOwner(params, CP)
 
   while True:
     sm.update()
@@ -270,7 +272,7 @@ def main():
     if sm.updated['deviceMotion']:
       msg = learner.get_msg(sm.all_checks(), debug=DEBUG)
 
-      msg_dat = msg.to_bytes()
+      msg_dat = geometry_owner.parameters(msg).to_bytes()
       if sm.frame % 1200 == 0:  # once a minute
         put_cache(params, "LiveParametersV2", msg)
 

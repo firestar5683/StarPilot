@@ -1,0 +1,3198 @@
+{
+  "source_commit": "385428f6ea1c183de4ddcd8604f294abec02a9e8",
+  "scope": "default pure formulas; not physical or unrestricted original controller replay",
+  "vectors": [
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        0,
+        0,
+        0
+      ],
+      "expected": 0.39492426714720824
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        0,
+        0
+      ],
+      "expected": 0.016880903274337812
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        0,
+        0
+      ],
+      "expected": 0.999875600422747
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        0,
+        0,
+        0,
+        0
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        0,
+        0,
+        0
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        0,
+        0.8,
+        0,
+        0,
+        0,
+        0.01
+      ],
+      "expected": 0.0013849595493005762
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        0,
+        0.2,
+        -0.3
+      ],
+      "expected": 0.39228881092436996
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        0,
+        0.2
+      ],
+      "expected": 0.013430112432951327
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        0.2,
+        0
+      ],
+      "expected": 0.9999045288176868
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        0.2,
+        0.6,
+        -0.3,
+        0
+      ],
+      "expected": 0.9812819139455576
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        0.2,
+        0.6,
+        -0.3,
+        0
+      ],
+      "expected": 0.9997240142286171
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        0.2,
+        0.6,
+        -0.3,
+        0
+      ],
+      "expected": 0.9991076422047841
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        0.2,
+        0.6,
+        0
+      ],
+      "expected": 0.9991387641009151
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        0.2,
+        0.8,
+        0.2,
+        -0.3,
+        0,
+        0.01
+      ],
+      "expected": 0.20103807013837893
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        0,
+        -0.2,
+        0.3
+      ],
+      "expected": 0.39228881092436996
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        0,
+        -0.2
+      ],
+      "expected": 0.013430112432951327
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        -0.2,
+        0
+      ],
+      "expected": 0.9999045288176868
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        0.3,
+        0
+      ],
+      "expected": 0.9812819139455576
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        0.3,
+        0
+      ],
+      "expected": 0.9997240142286171
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        0.3,
+        0
+      ],
+      "expected": 0.9991076422047841
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        0
+      ],
+      "expected": 0.9991387641009151
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        -0.2,
+        -0.8,
+        -0.2,
+        0.3,
+        0,
+        0.01
+      ],
+      "expected": -0.20103807013837893
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        0,
+        0.8,
+        -0.5
+      ],
+      "expected": 0.3900131503689557
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        0,
+        0.8
+      ],
+      "expected": 3.328993667623615e-05
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        0.8,
+        0
+      ],
+      "expected": 0.9999991259600675
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        0.8,
+        2.4,
+        -0.5,
+        0
+      ],
+      "expected": 0.9739354485658368
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        0.8,
+        2.4,
+        -0.5,
+        0
+      ],
+      "expected": 0.9996220243143089
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        0.8,
+        2.4,
+        -0.5,
+        0
+      ],
+      "expected": 0.9982154060645869
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        0.8,
+        2.4,
+        0
+      ],
+      "expected": 0.9999988466965384
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        0.8,
+        0.8,
+        0.8,
+        -0.5,
+        0,
+        0.01
+      ],
+      "expected": 0.8
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        0,
+        -0.8,
+        0.5
+      ],
+      "expected": 0.3900131503689557
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        0,
+        -0.8
+      ],
+      "expected": 3.328993667623615e-05
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        -0.8,
+        0
+      ],
+      "expected": 0.9999991259600675
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        0.5,
+        0
+      ],
+      "expected": 0.9739354485658368
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        0.5,
+        0
+      ],
+      "expected": 0.9996220243143089
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        0.5,
+        0
+      ],
+      "expected": 0.9982154060645869
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        0
+      ],
+      "expected": 0.9999988466965384
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        -0.8,
+        -0.8,
+        -0.8,
+        0.5,
+        0,
+        0.01
+      ],
+      "expected": -0.8
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        0,
+        1.5,
+        -0.2
+      ],
+      "expected": 0.39000017484007354
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        0,
+        1.5
+      ],
+      "expected": 5.285349330813823e-09
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        1.5,
+        0
+      ],
+      "expected": 0.9999999991976134
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        1.5,
+        -0.8,
+        -0.2,
+        0
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        1.5,
+        -0.8,
+        -0.2,
+        0
+      ],
+      "expected": 0.9997092179690864
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        1.5,
+        -0.8,
+        -0.2,
+        0
+      ],
+      "expected": 0.9990630043624579
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        1.5,
+        -0.8,
+        0
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        1.5,
+        0.8,
+        1.5,
+        -0.2,
+        0,
+        0.01
+      ],
+      "expected": 1.4988055688737532
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        3,
+        0,
+        0
+      ],
+      "expected": 0.4073140243249034
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        3,
+        0
+      ],
+      "expected": 0.09713438645654514
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        0,
+        3
+      ],
+      "expected": 0.9988413762657682
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        0,
+        0,
+        0,
+        3
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        0,
+        0,
+        0,
+        3
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        0,
+        0,
+        0,
+        3
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        0,
+        0,
+        3
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        0,
+        0.8,
+        0,
+        0,
+        3,
+        0.01
+      ],
+      "expected": 0.0042227778008854825
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        3,
+        0.2,
+        -0.3
+      ],
+      "expected": 0.39804759913200743
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        3,
+        0.2
+      ],
+      "expected": 0.07727819477529223
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        0.2,
+        3
+      ],
+      "expected": 0.9991108074464085
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        0.2,
+        0.6,
+        -0.3,
+        3
+      ],
+      "expected": 0.9246727942693547
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        0.2,
+        0.6,
+        -0.3,
+        3
+      ],
+      "expected": 0.9993630619146152
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        0.2,
+        0.6,
+        -0.3,
+        3
+      ],
+      "expected": 0.9966480987601576
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        0.2,
+        0.6,
+        3
+      ],
+      "expected": 0.9943421440118672
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        0.2,
+        0.8,
+        0.2,
+        -0.3,
+        3,
+        0.01
+      ],
+      "expected": 0.2031651029362716
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        3,
+        -0.2,
+        0.3
+      ],
+      "expected": 0.39804759913200743
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        3,
+        -0.2
+      ],
+      "expected": 0.07727819477529223
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        -0.2,
+        3
+      ],
+      "expected": 0.9991108074464085
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        0.3,
+        3
+      ],
+      "expected": 0.9246727942693547
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        0.3,
+        3
+      ],
+      "expected": 0.9993630619146152
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        0.3,
+        3
+      ],
+      "expected": 0.9966480987601576
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        3
+      ],
+      "expected": 0.9943421440118672
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        -0.2,
+        -0.8,
+        -0.2,
+        0.3,
+        3,
+        0.01
+      ],
+      "expected": -0.2031651029362716
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        3,
+        0.8,
+        -0.5
+      ],
+      "expected": 0.39004623750116996
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        3,
+        0.8
+      ],
+      "expected": 0.00019155358701326855
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        0.8,
+        3
+      ],
+      "expected": 0.9999918594304504
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        0.8,
+        2.4,
+        -0.5,
+        3
+      ],
+      "expected": 0.895108408923452
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        0.8,
+        2.4,
+        -0.5,
+        3
+      ],
+      "expected": 0.9991276828933616
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        0.8,
+        2.4,
+        -0.5,
+        3
+      ],
+      "expected": 0.9932966544845625
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        0.8,
+        2.4,
+        3
+      ],
+      "expected": 0.9999924234174357
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        0.8,
+        0.8,
+        0.8,
+        -0.5,
+        3,
+        0.01
+      ],
+      "expected": 0.8
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        3,
+        -0.8,
+        0.5
+      ],
+      "expected": 0.39004623750116996
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        3,
+        -0.8
+      ],
+      "expected": 0.00019155358701326855
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        -0.8,
+        3
+      ],
+      "expected": 0.9999918594304504
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        0.5,
+        3
+      ],
+      "expected": 0.895108408923452
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        0.5,
+        3
+      ],
+      "expected": 0.9991276828933616
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        0.5,
+        3
+      ],
+      "expected": 0.9932966544845625
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        3
+      ],
+      "expected": 0.9999924234174357
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        -0.8,
+        -0.8,
+        -0.8,
+        0.5,
+        3,
+        0.01
+      ],
+      "expected": -0.8
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        3,
+        1.5,
+        -0.2
+      ],
+      "expected": 0.39000061474838704
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        3,
+        1.5
+      ],
+      "expected": 3.041242261233505e-08
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        1.5,
+        3
+      ],
+      "expected": 0.99999999252679
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        1.5,
+        -0.8,
+        -0.2,
+        3
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        1.5,
+        -0.8,
+        -0.2,
+        3
+      ],
+      "expected": 0.9993289141352965
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        1.5,
+        -0.8,
+        -0.2,
+        3
+      ],
+      "expected": 0.996480428751738
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        1.5,
+        -0.8,
+        3
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        1.5,
+        0.8,
+        1.5,
+        -0.2,
+        3,
+        0.01
+      ],
+      "expected": 1.4963581483320947
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        4.4704,
+        0,
+        0
+      ],
+      "expected": 0.4156049789924249
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        4.4704,
+        0
+      ],
+      "expected": 0.193938005436749
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        0,
+        4.4704
+      ],
+      "expected": 0.9965733603501031
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        0,
+        0,
+        0,
+        4.4704
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        0,
+        0,
+        0,
+        4.4704
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        0,
+        0,
+        0,
+        4.4704
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        0,
+        0,
+        4.4704
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        0,
+        0.8,
+        0,
+        0,
+        4.4704,
+        0.01
+      ],
+      "expected": 0.007277246069214021
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        4.4704,
+        0.2,
+        -0.3
+      ],
+      "expected": 0.40190125431544677
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        4.4704,
+        0.2
+      ],
+      "expected": 0.15429323749501997
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        0.2,
+        4.4704
+      ],
+      "expected": 0.9973702053820345
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        0.2,
+        0.6,
+        -0.3,
+        4.4704
+      ],
+      "expected": 0.876624471815693
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        0.2,
+        0.6,
+        -0.3,
+        4.4704
+      ],
+      "expected": 0.999041314997728
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        0.2,
+        0.6,
+        -0.3,
+        4.4704
+      ],
+      "expected": 0.9936767084604614
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        0.2,
+        0.6,
+        4.4704
+      ],
+      "expected": 0.9863678491850723
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        0.2,
+        0.8,
+        0.2,
+        -0.3,
+        4.4704,
+        0.01
+      ],
+      "expected": 0.20545452164137323
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        4.4704,
+        -0.2,
+        0.3
+      ],
+      "expected": 0.40190125431544677
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        4.4704,
+        -0.2
+      ],
+      "expected": 0.15429323749501997
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        -0.2,
+        4.4704
+      ],
+      "expected": 0.9973702053820345
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        0.3,
+        4.4704
+      ],
+      "expected": 0.876624471815693
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        0.3,
+        4.4704
+      ],
+      "expected": 0.999041314997728
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        0.3,
+        4.4704
+      ],
+      "expected": 0.9936767084604614
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        4.4704
+      ],
+      "expected": 0.9863678491850723
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        -0.2,
+        -0.8,
+        -0.2,
+        0.3,
+        4.4704,
+        0.01
+      ],
+      "expected": -0.20545452164137323
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        4.4704,
+        0.8,
+        -0.5
+      ],
+      "expected": 0.39006837868677446
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        4.4704,
+        0.8
+      ],
+      "expected": 0.00038245488497760336
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        0.8,
+        4.4704
+      ],
+      "expected": 0.9999759241956062
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        0.8,
+        2.4,
+        -0.5,
+        4.4704
+      ],
+      "expected": 0.8282021040653491
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        0.8,
+        2.4,
+        -0.5,
+        4.4704
+      ],
+      "expected": 0.9986870351348918
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        0.8,
+        2.4,
+        -0.5,
+        4.4704
+      ],
+      "expected": 0.987354278974412
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        0.8,
+        2.4,
+        4.4704
+      ],
+      "expected": 0.9999817448311878
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        0.8,
+        0.8,
+        0.8,
+        -0.5,
+        4.4704,
+        0.01
+      ],
+      "expected": 0.8
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        4.4704,
+        -0.8,
+        0.5
+      ],
+      "expected": 0.39006837868677446
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        4.4704,
+        -0.8
+      ],
+      "expected": 0.00038245488497760336
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        -0.8,
+        4.4704
+      ],
+      "expected": 0.9999759241956062
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        0.5,
+        4.4704
+      ],
+      "expected": 0.8282021040653491
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        0.5,
+        4.4704
+      ],
+      "expected": 0.9986870351348918
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        0.5,
+        4.4704
+      ],
+      "expected": 0.987354278974412
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        4.4704
+      ],
+      "expected": 0.9999817448311878
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        -0.8,
+        -0.8,
+        -0.8,
+        0.5,
+        4.4704,
+        0.01
+      ],
+      "expected": -0.8
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        4.4704,
+        1.5,
+        -0.2
+      ],
+      "expected": 0.39000090912541424
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        4.4704,
+        1.5
+      ],
+      "expected": 6.072128313256375e-08
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        1.5,
+        4.4704
+      ],
+      "expected": 0.9999999778979171
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        1.5,
+        -0.8,
+        -0.2,
+        4.4704
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        1.5,
+        -0.8,
+        -0.2,
+        4.4704
+      ],
+      "expected": 0.9989899175940478
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        1.5,
+        -0.8,
+        -0.2,
+        4.4704
+      ],
+      "expected": 0.9933604024986178
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        1.5,
+        -0.8,
+        4.4704
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        1.5,
+        0.8,
+        1.5,
+        -0.2,
+        4.4704,
+        0.01
+      ],
+      "expected": 1.4937238822442025
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        20,
+        0,
+        0
+      ],
+      "expected": 0.4240142300292847
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        20,
+        0
+      ],
+      "expected": 0.5373159015394275
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        0,
+        20
+      ],
+      "expected": 0.8095824357599336
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        0,
+        0,
+        0,
+        20
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        0,
+        0,
+        0,
+        20
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        0,
+        0,
+        0,
+        20
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        0,
+        0,
+        20
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        0,
+        0.8,
+        0,
+        0,
+        20,
+        0.01
+      ],
+      "expected": 0.5894369800517895
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        20,
+        0.2,
+        -0.3
+      ],
+      "expected": 0.4058098939289263
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        20,
+        0.2
+      ],
+      "expected": 0.42747789335758674
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        0.2,
+        20
+      ],
+      "expected": 0.8538629278921411
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        0.2,
+        0.6,
+        -0.3,
+        20
+      ],
+      "expected": 0.7532906763164031
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        0.2,
+        0.6,
+        -0.3,
+        20
+      ],
+      "expected": 0.9511170597790063
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        0.2,
+        0.6,
+        -0.3,
+        20
+      ],
+      "expected": 0.8691943127476092
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        0.2,
+        0.6,
+        20
+      ],
+      "expected": 0.987509389757693
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        0.2,
+        0.8,
+        0.2,
+        -0.3,
+        20,
+        0.01
+      ],
+      "expected": 0.641801298642277
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        20,
+        -0.2,
+        0.3
+      ],
+      "expected": 0.4058098939289263
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        20,
+        -0.2
+      ],
+      "expected": 0.42747789335758674
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        -0.2,
+        20
+      ],
+      "expected": 0.8538629278921411
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        0.3,
+        20
+      ],
+      "expected": 0.7532906763164031
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        0.3,
+        20
+      ],
+      "expected": 0.9511170597790063
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        0.3,
+        20
+      ],
+      "expected": 0.8691943127476092
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        20
+      ],
+      "expected": 0.987509389757693
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        -0.2,
+        -0.8,
+        -0.2,
+        0.3,
+        20,
+        0.01
+      ],
+      "expected": -0.641801298642277
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        20,
+        0.8,
+        -0.5
+      ],
+      "expected": 0.39009083578556086
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        20,
+        0.8
+      ],
+      "expected": 0.0010596122758771002
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        0.8,
+        20
+      ],
+      "expected": 0.9986621131784511
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        0.8,
+        2.4,
+        -0.5,
+        20
+      ],
+      "expected": 0.656462320039787
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        0.8,
+        2.4,
+        -0.5,
+        20
+      ],
+      "expected": 0.9330524803650377
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        0.8,
+        2.4,
+        -0.5,
+        20
+      ],
+      "expected": 0.7384064582170529
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        0.8,
+        2.4,
+        20
+      ],
+      "expected": 0.9999832734979509
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        0.8,
+        0.8,
+        0.8,
+        -0.5,
+        20,
+        0.01
+      ],
+      "expected": 0.8
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        20,
+        -0.8,
+        0.5
+      ],
+      "expected": 0.39009083578556086
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        20,
+        -0.8
+      ],
+      "expected": 0.0010596122758771002
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        -0.8,
+        20
+      ],
+      "expected": 0.9986621131784511
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        0.5,
+        20
+      ],
+      "expected": 0.656462320039787
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        0.5,
+        20
+      ],
+      "expected": 0.9330524803650377
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        0.5,
+        20
+      ],
+      "expected": 0.7384064582170529
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        20
+      ],
+      "expected": 0.9999832734979509
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        -0.8,
+        -0.8,
+        -0.8,
+        0.5,
+        20,
+        0.01
+      ],
+      "expected": -0.8
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        20,
+        1.5,
+        -0.2
+      ],
+      "expected": 0.3900012077026493
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        20,
+        1.5
+      ],
+      "expected": 1.6823165173597263e-07
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        1.5,
+        20
+      ],
+      "expected": 0.9999987717924211
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        1.5,
+        -0.8,
+        -0.2,
+        20
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        1.5,
+        -0.8,
+        -0.2,
+        20
+      ],
+      "expected": 0.9484963280416182
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        1.5,
+        -0.8,
+        -0.2,
+        20
+      ],
+      "expected": 0.8626511036511633
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        1.5,
+        -0.8,
+        20
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        1.5,
+        0.8,
+        1.5,
+        -0.2,
+        20,
+        0.01
+      ],
+      "expected": 0.9916516686062474
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        15.6464,
+        0,
+        0
+      ],
+      "expected": 0.4282261267501504
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        15.6464,
+        0
+      ],
+      "expected": 0.5366113000510188
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        0,
+        15.6464
+      ],
+      "expected": 0.811953051773843
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        0,
+        0,
+        0,
+        15.6464
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        0,
+        0,
+        0,
+        15.6464
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        0,
+        0,
+        0,
+        15.6464
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        0,
+        0,
+        15.6464
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        0,
+        0.8,
+        0,
+        0,
+        15.6464,
+        0.01
+      ],
+      "expected": 0.294919314931818
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        15.6464,
+        0.2,
+        -0.3
+      ],
+      "expected": 0.4077675934076195
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        15.6464,
+        0.2
+      ],
+      "expected": 0.42691732636327545
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        0.2,
+        15.6464
+      ],
+      "expected": 0.8556822710013092
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        0.2,
+        0.6,
+        -0.3,
+        15.6464
+      ],
+      "expected": 0.7537243674449042
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        0.2,
+        0.6,
+        -0.3,
+        15.6464
+      ],
+      "expected": 0.9809541816546917
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        0.2,
+        0.6,
+        -0.3,
+        15.6464
+      ],
+      "expected": 0.8825633280303556
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        0.2,
+        0.6,
+        15.6464
+      ],
+      "expected": 0.9345257931074067
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        0.2,
+        0.8,
+        0.2,
+        -0.3,
+        15.6464,
+        0.01
+      ],
+      "expected": 0.4210511738169528
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        15.6464,
+        -0.2,
+        0.3
+      ],
+      "expected": 0.4077675934076195
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        15.6464,
+        -0.2
+      ],
+      "expected": 0.42691732636327545
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        -0.2,
+        15.6464
+      ],
+      "expected": 0.8556822710013092
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        0.3,
+        15.6464
+      ],
+      "expected": 0.7537243674449042
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        0.3,
+        15.6464
+      ],
+      "expected": 0.9809541816546917
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        0.3,
+        15.6464
+      ],
+      "expected": 0.8825633280303556
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        15.6464
+      ],
+      "expected": 0.9345257931074067
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        -0.2,
+        -0.8,
+        -0.2,
+        0.3,
+        15.6464,
+        0.01
+      ],
+      "expected": -0.4210511738169528
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        15.6464,
+        0.8,
+        -0.5
+      ],
+      "expected": 0.3901020837528678
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        15.6464,
+        0.8
+      ],
+      "expected": 0.0010582227685415082
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        0.8,
+        15.6464
+      ],
+      "expected": 0.9986787692885983
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        0.8,
+        2.4,
+        -0.5,
+        15.6464
+      ],
+      "expected": 0.6570662260530663
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        0.8,
+        2.4,
+        -0.5,
+        15.6464
+      ],
+      "expected": 0.9739158427894882
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        0.8,
+        2.4,
+        -0.5,
+        15.6464
+      ],
+      "expected": 0.7651426661864817
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        0.8,
+        2.4,
+        15.6464
+      ],
+      "expected": 0.9999123217813614
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        0.8,
+        0.8,
+        0.8,
+        -0.5,
+        15.6464,
+        0.01
+      ],
+      "expected": 0.8
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        15.6464,
+        -0.8,
+        0.5
+      ],
+      "expected": 0.3901020837528678
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        15.6464,
+        -0.8
+      ],
+      "expected": 0.0010582227685415082
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        -0.8,
+        15.6464
+      ],
+      "expected": 0.9986787692885983
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        0.5,
+        15.6464
+      ],
+      "expected": 0.6570662260530663
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        0.5,
+        15.6464
+      ],
+      "expected": 0.9739158427894882
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        0.5,
+        15.6464
+      ],
+      "expected": 0.7651426661864817
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        15.6464
+      ],
+      "expected": 0.9999123217813614
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        -0.8,
+        -0.8,
+        -0.8,
+        0.5,
+        15.6464,
+        0.01
+      ],
+      "expected": -0.8
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        15.6464,
+        1.5,
+        -0.2
+      ],
+      "expected": 0.3900013572494368
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        15.6464,
+        1.5
+      ],
+      "expected": 1.6801104357628292e-07
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        1.5,
+        15.6464
+      ],
+      "expected": 0.9999987870830723
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        1.5,
+        -0.8,
+        -0.2,
+        15.6464
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        1.5,
+        -0.8,
+        -0.2,
+        15.6464
+      ],
+      "expected": 0.9799330896259303
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        1.5,
+        -0.8,
+        -0.2,
+        15.6464
+      ],
+      "expected": 0.8766888686209153
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        1.5,
+        -0.8,
+        15.6464
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        1.5,
+        0.8,
+        1.5,
+        -0.2,
+        15.6464,
+        0.01
+      ],
+      "expected": 1.2456526368124956
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        26.8224,
+        0,
+        0
+      ],
+      "expected": 0.41070612843773946
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        26.8224,
+        0
+      ],
+      "expected": 0.5373618519449428
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        0,
+        26.8224
+      ],
+      "expected": 0.8094857756209797
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        0,
+        0,
+        0,
+        26.8224
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        0,
+        0,
+        0,
+        26.8224
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        0,
+        0,
+        0,
+        26.8224
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        0,
+        0,
+        26.8224
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        0,
+        0.8,
+        0,
+        0,
+        26.8224,
+        0.01
+      ],
+      "expected": 0.7616891208447087
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        26.8224,
+        0.2,
+        -0.3
+      ],
+      "expected": 0.3996242570829192
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        26.8224,
+        0.2
+      ],
+      "expected": 0.42751445059047777
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        0.2,
+        26.8224
+      ],
+      "expected": 0.8537887455038061
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        0.2,
+        0.6,
+        -0.3,
+        26.8224
+      ],
+      "expected": 0.7532498631835662
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        0.2,
+        0.6,
+        -0.3,
+        26.8224
+      ],
+      "expected": 0.8886594475797394
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        0.2,
+        0.6,
+        -0.3,
+        26.8224
+      ],
+      "expected": 0.8667914732202072
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        0.2,
+        0.6,
+        26.8224
+      ],
+      "expected": 0.9995420784374567
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        0.2,
+        0.8,
+        0.2,
+        -0.3,
+        26.8224,
+        0.01
+      ],
+      "expected": 0.7709096207728932
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        26.8224,
+        -0.2,
+        0.3
+      ],
+      "expected": 0.3996242570829192
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        26.8224,
+        -0.2
+      ],
+      "expected": 0.42751445059047777
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        -0.2,
+        26.8224
+      ],
+      "expected": 0.8537887455038061
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        0.3,
+        26.8224
+      ],
+      "expected": 0.7532498631835662
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        0.3,
+        26.8224
+      ],
+      "expected": 0.8886594475797394
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        0.3,
+        26.8224
+      ],
+      "expected": 0.8667914732202072
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        26.8224
+      ],
+      "expected": 0.9995420784374567
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        -0.2,
+        -0.8,
+        -0.2,
+        0.3,
+        26.8224,
+        0.01
+      ],
+      "expected": -0.7709096207728932
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        26.8224,
+        0.8,
+        -0.5
+      ],
+      "expected": 0.3900552961934151
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        26.8224,
+        0.8
+      ],
+      "expected": 0.001059702892241935
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        0.8,
+        26.8224
+      ],
+      "expected": 0.998661434037708
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        0.8,
+        2.4,
+        -0.5,
+        26.8224
+      ],
+      "expected": 0.6564054885882742
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        0.8,
+        2.4,
+        -0.5,
+        26.8224
+      ],
+      "expected": 0.8475137995868405
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        0.8,
+        2.4,
+        -0.5,
+        26.8224
+      ],
+      "expected": 0.7336011067410401
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        0.8,
+        2.4,
+        26.8224
+      ],
+      "expected": 0.9999993867852887
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        0.8,
+        0.8,
+        0.8,
+        -0.5,
+        26.8224,
+        0.01
+      ],
+      "expected": 0.8
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        26.8224,
+        -0.8,
+        0.5
+      ],
+      "expected": 0.3900552961934151
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        26.8224,
+        -0.8
+      ],
+      "expected": 0.001059702892241935
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        -0.8,
+        26.8224
+      ],
+      "expected": 0.998661434037708
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        0.5,
+        26.8224
+      ],
+      "expected": 0.6564054885882742
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        0.5,
+        26.8224
+      ],
+      "expected": 0.8475137995868405
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        0.5,
+        26.8224
+      ],
+      "expected": 0.7336011067410401
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        26.8224
+      ],
+      "expected": 0.9999993867852887
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        -0.8,
+        -0.8,
+        -0.8,
+        0.5,
+        26.8224,
+        0.01
+      ],
+      "expected": -0.8
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        26.8224,
+        1.5,
+        -0.2
+      ],
+      "expected": 0.3900007351877773
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        26.8224,
+        1.5
+      ],
+      "expected": 1.6824603864057686e-07
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        1.5,
+        26.8224
+      ],
+      "expected": 0.999998771168956
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        1.5,
+        -0.8,
+        -0.2,
+        26.8224
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        1.5,
+        -0.8,
+        -0.2,
+        26.8224
+      ],
+      "expected": 0.8826902133629158
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        1.5,
+        -0.8,
+        -0.2,
+        26.8224
+      ],
+      "expected": 0.8601280684213936
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        1.5,
+        -0.8,
+        26.8224
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        1.5,
+        0.8,
+        1.5,
+        -0.2,
+        26.8224,
+        0.01
+      ],
+      "expected": 0.8430961973438427
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        40,
+        0,
+        0
+      ],
+      "expected": 0.3920641236281949
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        40,
+        0
+      ],
+      "expected": 0.5373624464187049
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        0,
+        40
+      ],
+      "expected": 0.8094851746679897
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        0,
+        0,
+        0,
+        40
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        0,
+        0,
+        0,
+        40
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        0,
+        0,
+        0,
+        40
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        0,
+        0,
+        40
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        0,
+        0.8,
+        0,
+        0,
+        40,
+        0.01
+      ],
+      "expected": 0.7810123066644695
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        40,
+        0.2,
+        -0.3
+      ],
+      "expected": 0.39095940950566443
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        40,
+        0.2
+      ],
+      "expected": 0.42751492354203335
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        0.2,
+        40
+      ],
+      "expected": 0.8537882842989232
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        0.2,
+        0.6,
+        -0.3,
+        40
+      ],
+      "expected": 0.753248944210954
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        0.2,
+        0.6,
+        -0.3,
+        40
+      ],
+      "expected": 0.8577827783970037
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        0.2,
+        0.6,
+        -0.3,
+        40
+      ],
+      "expected": 0.8666703373365854
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        0.2,
+        0.6,
+        40
+      ],
+      "expected": 0.9999993434486603
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        0.2,
+        0.8,
+        0.2,
+        -0.3,
+        40,
+        0.01
+      ],
+      "expected": 0.7853929478765409
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        40,
+        -0.2,
+        0.3
+      ],
+      "expected": 0.39095940950566443
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        40,
+        -0.2
+      ],
+      "expected": 0.42751492354203335
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        -0.2,
+        40
+      ],
+      "expected": 0.8537882842989232
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        0.3,
+        40
+      ],
+      "expected": 0.753248944210954
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        0.3,
+        40
+      ],
+      "expected": 0.8577827783970037
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        0.3,
+        40
+      ],
+      "expected": 0.8666703373365854
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        -0.2,
+        -0.6,
+        40
+      ],
+      "expected": 0.9999993434486603
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        -0.2,
+        -0.8,
+        -0.2,
+        0.3,
+        40,
+        0.01
+      ],
+      "expected": -0.7853929478765409
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        40,
+        0.8,
+        -0.5
+      ],
+      "expected": 0.3900055122897417
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        40,
+        0.8
+      ],
+      "expected": 0.0010597040645722053
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        0.8,
+        40
+      ],
+      "expected": 0.9986614298153712
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        0.8,
+        2.4,
+        -0.5,
+        40
+      ],
+      "expected": 0.6564042089377347
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        0.8,
+        2.4,
+        -0.5,
+        40
+      ],
+      "expected": 0.8052267275116287
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        0.8,
+        2.4,
+        -0.5,
+        40
+      ],
+      "expected": 0.733358851488235
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        0.8,
+        2.4,
+        40
+      ],
+      "expected": 0.999999999120795
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        0.8,
+        0.8,
+        0.8,
+        -0.5,
+        40,
+        0.01
+      ],
+      "expected": 0.8
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        40,
+        -0.8,
+        0.5
+      ],
+      "expected": 0.3900055122897417
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        40,
+        -0.8
+      ],
+      "expected": 0.0010597040645722053
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        -0.8,
+        40
+      ],
+      "expected": 0.9986614298153712
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        0.5,
+        40
+      ],
+      "expected": 0.6564042089377347
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        0.5,
+        40
+      ],
+      "expected": 0.8052267275116287
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        0.5,
+        40
+      ],
+      "expected": 0.733358851488235
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        -0.8,
+        -2.4,
+        40
+      ],
+      "expected": 0.999999999120795
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        -0.8,
+        -0.8,
+        -0.8,
+        0.5,
+        40,
+        0.01
+      ],
+      "expected": -0.8
+    },
+    {
+      "function": "get_genesis_gv70_friction_threshold",
+      "input": [
+        40,
+        1.5,
+        -0.2
+      ],
+      "expected": 0.39000007328837294
+    },
+    {
+      "function": "get_genesis_gv70_friction_jerk_deadzone",
+      "input": [
+        40,
+        1.5
+      ],
+      "expected": 1.6824622476814655e-07
+    },
+    {
+      "function": "get_genesis_gv70_center_output_scale",
+      "input": [
+        1.5,
+        40
+      ],
+      "expected": 0.9999987711650797
+    },
+    {
+      "function": "get_genesis_gv70_unwind_ff_scale",
+      "input": [
+        1.5,
+        -0.8,
+        -0.2,
+        40
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_high_speed_error_scale",
+      "input": [
+        1.5,
+        -0.8,
+        -0.2,
+        40
+      ],
+      "expected": 0.850158171845656
+    },
+    {
+      "function": "get_genesis_gv70_reversal_output_scale",
+      "input": [
+        1.5,
+        -0.8,
+        -0.2,
+        40
+      ],
+      "expected": 0.8600008730350676
+    },
+    {
+      "function": "get_genesis_gv70_low_speed_center_overshoot_scale",
+      "input": [
+        1.5,
+        -0.8,
+        40
+      ],
+      "expected": 1.0
+    },
+    {
+      "function": "get_genesis_gv70_stabilized_output",
+      "input": [
+        1.5,
+        0.8,
+        1.5,
+        -0.2,
+        40,
+        0.01
+      ],
+      "expected": 0.8264312957494029
+    }
+  ]
+}

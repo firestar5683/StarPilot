@@ -1,0 +1,138 @@
+import pytest
+
+from opendbc.car.car_helpers import interfaces
+from opendbc.car.hyundai.values import CAR
+from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
+from openpilot.starpilot.lateral.controller_selection import ControllerMode, default_selection, replace_mode, selection_from_bytes
+from openpilot.starpilot.lateral.hkg_vehicle_policy import HKGVehicleTorquePolicy, PROFILES, policy_for
+
+
+CASES = [(vehicle, profile, factor) for profile, (vehicles, factor) in PROFILES.items() for vehicle in sorted(vehicles, key=str)]
+
+
+@pytest.mark.parametrize('vehicle,profile,factor', CASES)
+def test_exact_profile_defaults_and_saved_controller_selection(vehicle, profile, factor):
+  cp = interfaces[vehicle].get_non_essential_params(vehicle)
+  assert policy_for(cp) == profile
+  expected = (ControllerMode.STARPILOT if vehicle in (CAR.KIA_FORTE_2019_NON_SCC, CAR.KIA_FORTE_2021_NON_SCC)
+              else ControllerMode.STANDARD)
+  assert default_selection(cp).mode == expected
+  for raw in (b'{', b'{"version":true,"vehicles":{}}', b'{"version":1,"vehicles":{},"vehicles":{}}', b'x' * 4097):
+    assert selection_from_bytes(cp, raw).mode == expected
+  unrelated = interfaces[CAR.HYUNDAI_IONIQ_6].get_non_essential_params(CAR.HYUNDAI_IONIQ_6)
+  assert selection_from_bytes(cp, replace_mode(None, unrelated, ControllerMode.STANDARD)).mode == expected
+  saved = replace_mode(None, cp, ControllerMode.STARPILOT)
+  choice = selection_from_bytes(cp, saved)
+  assert choice.mode == ControllerMode.STARPILOT
+  assert choice.policy == profile
+  ci = interfaces[vehicle](cp)
+  default = LatControlTorque(cp.as_reader(), ci, 0.01)
+  assert bool(default.starpilot_extension) == (expected == ControllerMode.STARPILOT)
+  standard_choice = selection_from_bytes(cp, replace_mode(saved, cp, ControllerMode.STANDARD))
+  standard = LatControlTorque(cp.as_reader(), ci, 0.01, controller_mode=standard_choice.mode)
+  assert standard.starpilot_extension is None
+  assert standard.torque_params.latAccelFactor == pytest.approx(cp.lateralTuning.torque.latAccelFactor)
+  controller = LatControlTorque(cp.as_reader(), ci, 0.01, controller_mode=choice.mode)
+  policy = controller.starpilot_extension.policy
+  assert isinstance(policy, HKGVehicleTorquePolicy)
+  assert policy.profile == profile
+  assert controller.torque_params.latAccelFactor == pytest.approx(cp.lateralTuning.torque.latAccelFactor * factor)
+  assert controller.pid.pos_limit == pytest.approx(controller.lateral_accel_from_torque(controller.steer_max, cp.lateralTuning.torque))
+  for _ in range(3):
+    controller.update_torque_parameters(3.0, 0.02, 0.12)
+    assert controller.torque_params.latAccelFactor == pytest.approx(3.0 * factor)
+    assert controller.torque_params.latAccelOffset == pytest.approx(0.02)
+    assert controller.torque_params.friction == pytest.approx(0.12)
+  assert selection_from_bytes(cp, replace_mode(saved, cp, ControllerMode.STANDARD)).mode == ControllerMode.STANDARD
+
+
+@pytest.mark.parametrize('vehicle,profile,factor', CASES)
+def test_unadmitted_and_cross_vehicle_choices_are_not_applied(vehicle, profile, factor):
+  cp = interfaces[vehicle].get_non_essential_params(vehicle)
+  for field in ('passive', 'dashcamOnly', 'notCar'):
+    other = cp.as_reader().as_builder()
+    setattr(other, field, True)
+    assert policy_for(other) is None
+  cp.brand = 'gm'
+  assert policy_for(cp) is None
+  cp.brand = 'hyundai'
+  saved = replace_mode(None, cp, ControllerMode.STARPILOT)
+  other = interfaces[CAR.HYUNDAI_IONIQ_5].get_non_essential_params(CAR.HYUNDAI_IONIQ_5)
+  if vehicle != CAR.HYUNDAI_IONIQ_5:
+    assert selection_from_bytes(other, saved).mode == ControllerMode.STANDARD
+
+
+@pytest.mark.parametrize('vehicle,profile,factor', CASES)
+def test_invalid_torque_contract_cannot_select_vehicle_policy(vehicle, profile, factor):
+  cp = interfaces[vehicle].get_non_essential_params(vehicle)
+  for field, value in (('latAccelFactor', 0.0), ('latAccelFactor', float('nan')), ('latAccelOffset', float('inf')), ('friction', -1.0)):
+    other = cp.as_reader().as_builder()
+    setattr(other.lateralTuning.torque, field, value)
+    assert policy_for(other) is None
+    assert selection_from_bytes(other, None).mode == ControllerMode.STANDARD
+  cp.lateralTuning.init('pid')
+  assert policy_for(cp) is None
+
+
+@pytest.mark.parametrize('kph,desired,increment', (
+  (60., 0., 0.), (100., .65, 0.), (110., .65, .30), (120., .65, .30),
+  (120., -.65, .30), (120., 1.6, .15), (120., -1.6, .15),
+  (120., 2.0, 0.), (140., 0., .30), (140., -2., 0.),
+))
+def test_kona_2022_high_speed_friction_boundaries(monkeypatch, kph, desired, increment):
+  from openpilot.starpilot.lateral import hkg_vehicle_shaping as shaping
+  threshold = shaping.get_kona_ev_2022_friction_threshold(kph / 3.6, desired)
+  monkeypatch.setattr(shaping, 'KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_GAIN', 0.)
+  baseline = shaping.get_kona_ev_2022_friction_threshold(kph / 3.6, desired)
+  assert threshold == pytest.approx(baseline + increment)
+  assert baseline <= threshold <= baseline + .30
+
+
+def test_kona_2022_high_speed_friction_reaches_selected_controller(monkeypatch):
+  from types import SimpleNamespace
+  from openpilot.cereal import log
+  from opendbc.car.vehicle_model import VehicleModel
+  from opendbc.car.lateral import get_friction
+  from openpilot.starpilot.lateral import hkg_vehicle_shaping as shaping
+
+  cp = interfaces[CAR.HYUNDAI_KONA_EV_2022].get_non_essential_params(CAR.HYUNDAI_KONA_EV_2022)
+  cs = SimpleNamespace(vEgo=120. / 3.6, steeringAngleDeg=0., steeringPressed=False)
+  params = log.VehicleParameters.new_message(angleOffsetDeg=0., roll=0.)
+
+  def run():
+    controller = LatControlTorque(cp.as_reader(), interfaces[cp.carFingerprint](cp), .01, controller_mode=ControllerMode.STARPILOT)
+    for _ in range(60):
+      output, _, state = controller.update(True, cs, VehicleModel(cp), params, False, .0001, False, .28)
+    return controller, output, state
+
+  controller, output, state = run()
+  threshold = shaping.get_kona_ev_2022_friction_threshold(cs.vEgo, .65)
+  standard = shaping.get_standard_friction_threshold(cs.vEgo)
+  for direction in (-1., 1.):
+    small = get_friction(direction * .1, 0., threshold, controller.torque_params)
+    assert abs(small) < abs(get_friction(direction * .1, 0., standard, controller.torque_params))
+    assert small * direction > 0.
+    assert get_friction(direction, 0., threshold, controller.torque_params) == pytest.approx(
+      get_friction(direction, 0., standard, controller.torque_params))
+  monkeypatch.setattr(shaping, 'KONA_EV_2022_HIGH_SPEED_FRICTION_THRESHOLD_GAIN', 0.)
+  baseline, base_output, base_state = run()
+  assert state.active and base_state.active
+  assert state.desiredLateralAccel == pytest.approx(base_state.desiredLateralAccel)
+  assert state.p == pytest.approx(base_state.p)
+  assert abs(state.f) < abs(base_state.f)
+  assert abs(output) < abs(base_output)
+  assert controller.steer_max == baseline.steer_max
+
+
+@pytest.mark.parametrize('vehicle', (CAR.HYUNDAI_IONIQ_5, CAR.HYUNDAI_KONA_NON_SCC))
+def test_kona_2022_friction_does_not_change_sibling_policies(monkeypatch, vehicle):
+  from openpilot.starpilot.lateral import hkg_vehicle_shaping as shaping
+
+  def unexpected(*_):
+    raise AssertionError('Kona 2022 friction used by sibling policy')
+
+  monkeypatch.setattr(shaping, 'get_kona_ev_2022_friction_threshold', unexpected)
+  cp = interfaces[vehicle].get_non_essential_params(vehicle)
+  controller = LatControlTorque(cp.as_reader(), interfaces[vehicle](cp), .01, controller_mode=ControllerMode.STARPILOT)
+  threshold, scale = controller.starpilot_extension.policy.friction_context(.1, 0., 0., 120. / 3.6)
+  assert threshold > 0. and scale > 0.
