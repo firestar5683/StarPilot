@@ -13,16 +13,41 @@ from opendbc.car.ford.values import CAR, FordFlags
 
 
 class ManualTurnInputs:
-  def __init__(self, params):
+  def __init__(self, params, *, track_assist_permission: bool = False):
     self.params = params
-    self.sm = messaging.SubMaster(["modelV2", "lateralDelay"])
+    self.track_assist_permission = track_assist_permission
+    self.sm = messaging.SubMaster(["modelV2", "lateralDelay"] + (["pandaStates"] if track_assist_permission else []))
     self.enabled = bool(self.params.get("FordHumanTurnDetection", return_default=True))
     self.frames = 0
+    self.blend_settings = self._read_blend_settings()
+    self._applied_blends = {}
+
+  def _read_blend_settings(self):
+    settings = []
+    for key, default, low, high in (("FordCurvatureBlendLow", 0.4, 0.0, 1.0),
+                                    ("FordCurvatureBlendHigh", 0.4, 0.0, 1.0),
+                                    ("FordCurvatureLaneChangeFactor", 0.85, 0.5, 1.25)):
+      try:
+        value = float(self.params.get(key, return_default=True))
+        if not math.isfinite(value):
+          value = default
+      except (TypeError, ValueError, OverflowError, RuntimeError):
+        value = default
+      settings.append(float(np.clip(value, low, high)))
+    return tuple(settings)
+
+  def apply_blend_settings(self, controller):
+    for name in ("mache_lateral", "classic_lateral", "new_port_curvature"):
+      owner = getattr(controller, name, None)
+      if owner is not None and self._applied_blends.get(owner) != self.blend_settings:
+        owner.set_blend_settings(*self.blend_settings)
+        self._applied_blends[owner] = self.blend_settings
 
   def update(self):
     self.sm.update(0)
     if self.frames % 100 == 0:
       self.enabled = bool(self.params.get("FordHumanTurnDetection", return_default=True))
+      self.blend_settings = self._read_blend_settings()
     self.frames += 1
     state = self.sm["modelV2"].meta.laneChangeState
     model_ready = self.sm.alive["modelV2"] and self.sm.valid["modelV2"]
@@ -63,20 +88,141 @@ class ManualTurnInputs:
         delay = float(np.clip(value, 0.2, 0.4))
     return self.sm["modelV2"], ModelConstants.T_IDXS, delay, self.enabled
 
+  def native_permission(self, cp, *, max_age_ns):
+    """Exact current public Panda acknowledgment for the optional angle owner."""
+    if not self.track_assist_permission:
+      return False
+    try:
+      # Drain happens in update(); capture one SM snapshot before sampling clocks.
+      pandas = self.sm["pandaStates"]
+      stamp = int(self.sm.logMonoTime["pandaStates"])
+      receipt = int(self.sm.recv_time["pandaStates"] * 1e9)
+      now, boot = time.monotonic_ns(), time.clock_gettime_ns(time.CLOCK_BOOTTIME)
+      if (not self.sm.seen["pandaStates"] or not self.sm.all_checks(["pandaStates"]) or
+          not 0 < stamp <= boot <= stamp + max_age_ns or
+          not 0 < receipt <= now <= receipt + max_age_ns):
+        return False
+      if len(pandas) != len(cp.safetyConfigs):
+        return False
+      for i, (panda, config) in enumerate(zip(pandas, cp.safetyConfigs, strict=True)):
+        if (panda.safetyModel != config.safetyModel or panda.safetyParam != config.safetyParam or
+            panda.alternativeExperience != cp.alternativeExperience or panda.safetyRxChecksInvalid or
+            panda.heartbeatLost or len(panda.faults) or str(panda.faultStatus) != "none"):
+          return False
+        if bool(panda.controlsAllowed) != (i == len(pandas) - 1):
+          return False
+      return True
+    except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
+      return False
+
+  def assist_permission(self):
+    if not self.track_assist_permission:
+      return (), False
+    return self.sm["pandaStates"], self.sm.all_checks(["pandaStates"])
+
+
+class ResumePlanInputs:
+  """Card-owned fresh plan evidence, independent of Controls' saved preference snapshot."""
+  def __init__(self, *, boottime=False):
+    self.boottime = boottime
+    from openpilot.starpilot.longitudinal.inputs import ResumeFreshness
+    self.sm = messaging.SubMaster(["deviceState", "carState", "longitudinalPlan"], frequency=25)
+    self.freshness = ResumeFreshness()
+
+  def update(self, now_ns):
+    self.sm.update(0)
+    clock_ns = time.clock_gettime_ns(time.CLOCK_BOOTTIME) if self.boottime else time.monotonic_ns()
+    return (type(now_ns) is int and abs(clock_ns - now_ns) <= 150_000_000 and
+            self.freshness.current(self.sm) and not self.sm['longitudinalPlan'].shouldStop)
+
 
 def configure_controller(CI, params):
   cp = CI.CP
   controller = CI.CC
+  if controller is not None and cp.brand == 'gm':
+    from opendbc.car.gm.values import (is_bolt_euv_longitudinal, is_volt_longitudinal,
+                                     camera_acc_pedal_profile, volt_cc_pedal_profile)
+    from opendbc.car.gm.suburban import stopping_decel_rate as suburban_stopping_decel_rate
+    pedal = camera_acc_pedal_profile(cp) or volt_cc_pedal_profile(cp)
+    if (is_bolt_euv_longitudinal(cp) or is_volt_longitudinal(cp) or suburban_stopping_decel_rate(cp) is not None or
+        pedal is not None and pedal.longitudinal):
+      from openpilot.starpilot.car.gm.tune_preferences import GradeCompensationPreference
+      controller.long_pitch_input = GradeCompensationPreference(params)
+  from opendbc.car.gm.truck_longitudinal import truck_tuning_supported
+  if controller is not None and truck_tuning_supported(cp):
+    from openpilot.starpilot.car.gm.tune_preferences import TruckTuningPreference
+    controller.truck_tuning_input = TruckTuningPreference(cp, params)
+  from opendbc.car.gm.long_tune import tune_options
+  if controller is not None and 1 in tune_options(cp):
+    from openpilot.starpilot.car.gm.tune_preferences import AccTunePreference
+    controller.gm_acc_tune_input = AccTunePreference(cp, params)
+  from opendbc.car.toyota.prius_longitudinal import enabled as prius_filter_enabled, prepare_stock as prepare_prius_stock
+  if prius_filter_enabled(cp):
+    from openpilot.starpilot.car.toyota.prius_preferences import PriusFilterPreference, filter_preference_enabled
+    if not filter_preference_enabled(params):
+      prepare_prius_stock(cp)
+      if controller is not None:
+        controller.prius_longitudinal = False
+    elif controller is not None:
+      controller.prius_filter_input = PriusFilterPreference(cp, params)
+  from opendbc.car.gm.values import is_gm_auto_hold, is_volt_one_pedal, is_bolt_pedal_profile, camera_acc_pedal_profile, volt_cc_pedal_profile
+  cc_pedal = volt_cc_pedal_profile(cp)
+  camera_pedal = camera_acc_pedal_profile(cp) or cc_pedal
+  if controller is not None and camera_pedal is not None and camera_pedal.longitudinal:
+    from openpilot.starpilot.car.gm.camera import CameraPedalPreference
+    controller.camera_pedal_input = CameraPedalPreference(cp, params)
+    if cc_pedal is not None or camera_pedal.volt:
+      controller.longitudinal_maneuver_input = CameraPedalPreference(cp, params, maneuver=True)
+  if controller is not None and is_bolt_pedal_profile(cp):
+    from openpilot.starpilot.car.gm.paddle import PADDLE_IDS, PaddlePreference
+    if cp.carFingerprint in PADDLE_IDS:
+      controller.maneuver_paddle_input = PaddlePreference(cp, params)
+  if controller is not None and is_gm_auto_hold(cp) and controller.gm_auto_hold:
+    from openpilot.starpilot.car.gm.auto_hold import AutoHoldPreference
+    controller.gm_auto_hold_input = AutoHoldPreference(cp, params)
+  if controller is not None and is_volt_one_pedal(cp) and controller.volt_one_pedal:
+    from openpilot.starpilot.car.gm.auto_hold import AutoHoldPreference
+    controller.volt_one_pedal_input = AutoHoldPreference(cp, params, "VoltOnePedalMode")
+  from opendbc.car.gm.values import is_volt_longitudinal
+  if controller is not None and is_volt_longitudinal(cp) and controller.volt_sng:
+    try:
+      from opendbc.car.gm.values import GMFlags, is_volt_ascm_longitudinal, is_volt_sdgm_profile
+      controller.volt_sng_plan_input = ResumePlanInputs(
+        boottime=(is_volt_sdgm_profile(cp, longitudinal=True) and cp.safetyConfigs[0].safetyParam == 0x5007 or
+                  cp.alternativeExperience == 32 and not cp.flags & GMFlags.PEDAL_LONG and is_volt_ascm_longitudinal(cp)))
+    except OSError:
+      controller.volt_sng_plan_input = None
+      cloudlog.exception('Optional Volt resume input transport unavailable')
   if controller is not None and toyota_cruise_capability(cp) is not None:
     controller.reverse_cruise_input = ToyotaCruisePreference(cp, params)
   if (controller is not None and cp.brand == "ford" and cp.carFingerprint == CAR.FORD_MUSTANG_MACH_E_MK1 and
       not cp.flags & FordFlags.LKA_STEERING and not cp.passive and not cp.dashcamOnly and not cp.notCar and
       getattr(controller, "manual_turn", None) is not None):
-    controller.manual_turn_inputs = ManualTurnInputs(params)
+    controller.manual_turn_inputs = ManualTurnInputs(params, track_assist_permission=bool(cp.flags & FordFlags.CANFD))
+
+  from opendbc.bluepilot_lateral.hosts.starpilot import qualified as angle_qualified
+  if controller is not None and angle_qualified(cp) and getattr(controller, "bp_lat", None) is not None:
+    controller.bp_lat.host.inputs = ManualTurnInputs(params, track_assist_permission=True)
 
   from opendbc.car.ford.classic_lateral import qualified as classic_qualified
-  if controller is not None and classic_qualified(cp) and getattr(controller, "classic_lateral", None) is not None:
+  from opendbc.car.ford.generic_canfd_lateral import qualified as generic_canfd_qualified
+  if controller is not None and (classic_qualified(cp) or generic_canfd_qualified(cp)) and getattr(controller, "classic_lateral", None) is not None:
     controller.manual_turn_inputs = ManualTurnInputs(params)
+
+  from opendbc.car.ford.new_port_curvature import qualified as new_port_curvature_qualified
+  if controller is not None and new_port_curvature_qualified(cp) and getattr(controller, "new_port_curvature", None) is not None:
+    controller.manual_turn_inputs = ManualTurnInputs(params)
+
+  if controller is not None and cp.brand == "ford" and getattr(controller, "manual_turn_inputs", None) is not None:
+    controller.manual_turn_inputs.apply_blend_settings(controller)
+
+  if controller is not None and cp.brand == "honda" and getattr(controller, "nidec_interceptor", None) is not None:
+    from openpilot.starpilot.car.honda.longitudinal import BoschLearningParams
+    controller.interceptor_learning_params = BoschLearningParams(params, controller.nidec_interceptor)
+
+  if controller is not None and cp.brand == "honda" and getattr(controller, "bosch_longitudinal", None) is not None:
+    from openpilot.starpilot.car.honda.longitudinal import BoschLearningParams
+    controller.bosch_learning_params = BoschLearningParams(params, controller.bosch_longitudinal)
 
   from opendbc.car.hyundai.g90_lead import eligible as g90_lead_eligible
   if controller is not None and g90_lead_eligible(cp):
@@ -104,3 +250,19 @@ def configure_controller(CI, params):
     except OSError:
       controller.ev9_lead_inputs = None
       cloudlog.exception('Optional EV9 lead input transport unavailable')
+
+  if controller is not None and getattr(controller, 'ioniq6_longitudinal', None) is not None:
+    from openpilot.starpilot.longitudinal.canfd_lead import CANFDLeadInputs
+    try:
+      controller.ioniq6_lead_inputs = CANFDLeadInputs()
+    except OSError:
+      controller.ioniq6_lead_inputs = None
+      cloudlog.exception('Optional Ioniq 6 lead input transport unavailable')
+
+  if controller is not None and getattr(controller, 'torque_ev_scc_enabled', False):
+    from openpilot.starpilot.longitudinal.canfd_lead import CANFDLeadInputs
+    try:
+      controller.torque_ev_lead_inputs = CANFDLeadInputs()
+    except OSError:
+      controller.torque_ev_lead_inputs = None
+      cloudlog.exception('Optional torque EV lead input transport unavailable')
