@@ -1808,3 +1808,34 @@ VAL_ 1720 KBI_Tankfuellstand_Prozent 126 "Init" 127 "Fehler" ;
 VAL_ 1720 KBI_Nachtanken_erkannt 0 "Geberbetrieb" 1 "Nachtankmodus" ;
 VAL_ 1720 KBI_Tankinhalt_hochaufl 16382 "Init" 16383 "Fehler" ;
 VAL_ 1720 KBI_Max_Tankinhalt 254 "Init" 255 "Fehler" ;
+
+BO_ 879 GNSS_01: 8 XXX
+ SG_ GNSS_Nachrichtenpaket_ID1 : 0|2@1+ (1,0) [0|3] "" XXX
+ SG_ GNSS_LatitudeMagnitude : 2|27@1+ (0.000001,0) [0|90] "deg" XXX
+ SG_ GNSS_LatitudeSouth : 29|1@1+ (1,0) [0|1] "" XXX
+ SG_ GNSS_LongitudeMagnitude : 30|28@1+ (0.000001,0) [0|180] "deg" XXX
+ SG_ GNSS_LongitudeWest : 58|1@1+ (1,0) [0|1] "" XXX
+ SG_ GNSS_PositionStatus : 59|2@1+ (1,0) [0|3] "" XXX
+
+BO_ 884 GNSS_02: 8 XXX
+ SG_ GNSS_Nachrichtenpaket_ID2 : 0|2@1+ (1,0) [0|3] "" XXX
+ SG_ GNSS_Bearing : 12|12@1+ (0.1,0) [0|359.9] "deg" XXX
+ SG_ GNSS_Speed : 24|9@1+ (0.25,0) [0|127.5] "m/s" XXX
+
+BO_ 888 GNSS_04: 8 XXX
+ SG_ GNSS_Nachrichtenpaket_ID4 : 0|2@1+ (1,0) [0|3] "" XXX
+ SG_ GNSS_Ortung_Zeit_in_GPSWoche : 2|30@1+ (1,0) [0|604800001] "ms" XXX
+ SG_ GNSS_Ortung_Hoehe : 32|12@1+ (2,-500) [-500|7686] "m" XXX
+
+BO_ 891 GNSS_05: 8 XXX
+ SG_ GNSS_UTC_Zeit : 0|32@1+ (1,0) [1|4294967295] "s" XXX
+ SG_ GNSS_Empfaenger_Status : 32|1@1+ (1,0) [0|1] "" XXX
+ SG_ GNSS_GPS_in_Nutzung : 33|1@1+ (1,0) [0|1] "" XXX
+ SG_ GNSS_GLONASS_in_Nutzung : 34|1@1+ (1,0) [0|1] "" XXX
+ SG_ GNSS_Empfangbare_Satelliten : 35|5@1+ (1,0) [0|31] "" XXX
+ SG_ GNSS_Sichtbare_Satelliten : 40|5@1+ (1,0) [0|31] "" XXX
+ SG_ GNSS_Genutzte_Satelliten : 45|5@1+ (1,0) [0|31] "" XXX
+ SG_ GNSS_Nachrichtenpaket_ID5 : 50|2@1+ (1,0) [0|3] "" XXX
+
+CM_ BO_ 879 "Taos coordinate layout decoded from CAN/GPS comparison. Only north/west coordinates and position status 3 have been validated.";
+CM_ BO_ 884 "Taos course and ground speed decoded from CAN/GPS comparison. Remaining fields are not decoded.";

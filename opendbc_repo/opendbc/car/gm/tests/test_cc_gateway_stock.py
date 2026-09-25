@@ -5,13 +5,16 @@ from opendbc.car import Bus, gen_empty_fingerprint
 from opendbc.car.gm.carstate import CarState
 from opendbc.car.gm.fingerprints import FINGERPRINTS, FW_VERSIONS
 from opendbc.car.gm.interface import CarInterface
-from opendbc.car.gm.values import CC_GATEWAY_STOCK_CAR, ORDINARY_CC_CAR, DBC, GMSafetyFlags
+from opendbc.car.gm.values import CAR, CC_GATEWAY_STOCK_CAR, ORDINARY_CC_CAR, DBC, GMSafetyFlags, is_silverado_cc_stock_profile
 from opendbc.car.fw_versions import match_fw_to_car
 from opendbc.car.structs import CarParams
 
 
 def params(car, *, alpha=False, release=False):
-  return CarInterface.get_params(car, gen_empty_fingerprint(), [], alpha, release, False)
+  fingerprint = gen_empty_fingerprint()
+  if car == CAR.CHEVROLET_MALIBU_CC:
+    fingerprint[0][0xBE] = 6
+  return CarInterface.get_params(car, fingerprint, [], alpha, release, False)
 
 
 def pt_frames(packer, *, cruise=True, main=True, brake=False, gas=False, counter=0, acc_cruise=0):
@@ -32,7 +35,85 @@ def pt_frames(packer, *, cruise=True, main=True, brake=False, gas=False, counter
   return [packer.make_can_msg(name, 0, val) for name, val in values.items()]
 
 
+def silverado_stock_params(*, alpha=False, release=False):
+  packer = CANPacker(DBC[CAR.CHEVROLET_SILVERADO_CC][Bus.pt])
+  fingerprint = gen_empty_fingerprint()
+  fingerprint[0] = {address: len(data) for address, data, _ in pt_frames(packer)}
+  return CarInterface.get_params(CAR.CHEVROLET_SILVERADO_CC, fingerprint, [], alpha, release, False)
+
+
 class TestCcGatewayStock(unittest.TestCase):
+  def test_stock_cancel_delay_restarts_after_main_withdrawal(self):
+    from opendbc.car import structs
+    cp = silverado_stock_params()
+    ci = CarInterface(cp)
+    packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+    control = structs.CarControl.new_message()
+    control.cruiseControl.cancel = True
+    before = after = False
+    for tick in range(90):
+      now = 1_000_000_000 + tick * 10_000_000
+      state = ci.update([(now, pt_frames(packer, main=not 40 <= tick < 56, counter=tick % 4))])
+      _, sent = ci.CC.update(control.as_reader(), ci.CS, now)
+      cancel = any(address == 0x1E1 for address, _, _ in sent)
+      if 40 <= tick < 66:
+        self.assertFalse(cancel, (tick, 'No inherited cancel delay across main withdrawal'))
+      if 20 <= tick < 40:
+        before |= cancel
+      if tick >= 66:
+        self.assertTrue(state.canValid)
+        after |= cancel
+    self.assertTrue(before)
+    self.assertTrue(after)
+
+  def test_silverado_observed_stock_factory_and_parser(self):
+    from opendbc.car.gm.aol import qualified_gm
+    for release in (False, True):
+      for alpha in (False, True):
+        cp = silverado_stock_params(alpha=alpha, release=release)
+        baseline = params(CAR.CHEVROLET_SILVERADO_CC, alpha=alpha, release=release)
+        self.assertEqual(cp.lateralTuning.to_dict(), baseline.lateralTuning.to_dict())
+        self.assertEqual(cp.steerActuatorDelay, baseline.steerActuatorDelay)
+        self.assertTrue(is_silverado_cc_stock_profile(cp))
+        self.assertTrue(qualified_gm(cp))
+        self.assertFalse(cp.dashcamOnly)
+        self.assertTrue(cp.pcmCruise)
+        self.assertFalse(cp.openpilotLongitudinalControl)
+        self.assertEqual(cp.safetyConfigs[0].safetyParam, 16)
+        packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+        for cruise, acc in ((False, 4), (True, 0)):
+          state = CarState(cp)
+          parsers = state.get_can_parsers(cp)
+          frames = pt_frames(packer, cruise=cruise, acc_cruise=acc)
+          parsers[Bus.pt].update([(1_000_000_000, frames)])
+          out = state.update(parsers)
+          self.assertTrue(parsers[Bus.pt].can_valid)
+          self.assertEqual(out.cruiseState.enabled, cruise)
+          self.assertFalse(out.cruiseState.nonAdaptive)
+          self.assertTrue(out.cruiseState.available)
+          self.assertFalse(out.accFaulted)
+          self.assertEqual(len(state.silverado_stock_sources), 8)
+
+    packer = CANPacker(DBC[CAR.CHEVROLET_SILVERADO_CC][Bus.pt])
+    observed = {address: len(data) for address, data, _ in pt_frames(packer)}
+    for missing in observed:
+      fingerprint = gen_empty_fingerprint()
+      fingerprint[0] = {address: length for address, length in observed.items() if address != missing}
+      cp = CarInterface.get_params(CAR.CHEVROLET_SILVERADO_CC, fingerprint, [], False, False, False)
+      self.assertTrue(cp.dashcamOnly, hex(missing))
+      self.assertFalse(qualified_gm(cp))
+    for address, bus, length in ((0x201, 0, 6), (0x320, 2, 6), (0x460, 1, 8)):
+      fingerprint = gen_empty_fingerprint()
+      fingerprint[0] = dict(observed)
+      fingerprint[bus][address] = length
+      cp = CarInterface.get_params(CAR.CHEVROLET_SILVERADO_CC, fingerprint, [], False, False, False)
+      self.assertFalse(is_silverado_cc_stock_profile(cp))
+    cp = silverado_stock_params()
+    for field in ('passive', 'dashcamOnly', 'notCar', 'openpilotLongitudinalControl'):
+      denied = cp.as_reader().as_builder()
+      setattr(denied, field, True)
+      self.assertFalse(qualified_gm(denied), field)
+
   def test_production_firmware_matcher_never_infers_manual_identity(self):
     # GM has no production firmware literals. Vary complete/partial/mixed
     # observations: no observation can identify a no-ACC installation.
@@ -49,8 +130,10 @@ class TestCcGatewayStock(unittest.TestCase):
   def test_manual_identity_and_stock_ownership(self):
     self.assertEqual(len(CC_GATEWAY_STOCK_CAR), 9)
     for car in CC_GATEWAY_STOCK_CAR:
-      self.assertEqual(car.config.car_docs, [])
-      self.assertNotIn(car, FINGERPRINTS)
+      self.assertEqual(car.config.car_docs[0].support_type.value, "Community")
+      automatic = {CAR.CADILLAC_CT6_CC, CAR.CADILLAC_XT5_CC, CAR.CHEVROLET_EQUINOX_CC,
+                   CAR.CHEVROLET_MALIBU_CC, CAR.CHEVROLET_SUBURBAN_CC, CAR.CHEVROLET_TRAILBLAZER_CC}
+      self.assertEqual(car in FINGERPRINTS, car in automatic)
       self.assertNotIn(car, FW_VERSIONS)
       for alpha, release in ((False, False), (True, False), (True, True)):
         with self.subTest(car=car, alpha=alpha, release=release):

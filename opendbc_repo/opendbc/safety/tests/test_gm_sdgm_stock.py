@@ -13,6 +13,7 @@ from opendbc.safety.tests.libsafety import libsafety_py
 class TestGmSdgmStock(unittest.TestCase):
   def setUp(self):
     self.safety = libsafety_py.libsafety
+    self.release = self.safety.set_safety_hooks(CarParams.SafetyModel.allOutput, 0) != 0
 
   @staticmethod
   def packet(msg):
@@ -172,7 +173,8 @@ class TestGmSdgmStock(unittest.TestCase):
         raw = cp.safetyConfigs[0].safetyParam | int(conflict)
         self.safety.set_safety_hooks(CarParams.SafetyModel.gm, raw)
         self.safety.init_tests()
-        self.assertFalse(self.safety.safety_tx_hook(self.packet((0x184, bytes(8), 2))))
+        self.assertEqual(self.safety.safety_tx_hook(self.packet((0x184, bytes(8), 2))),
+                         conflict == GMSafetyFlags.HW_CAM_LONG and raw in (0x1003, 0x1403) and not self.release)
         self.assertFalse(self.safety.safety_tx_hook(self.packet((0x1E1, bytes(7), 0))))
 
 

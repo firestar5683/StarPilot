@@ -1,3 +1,4 @@
+from opendbc.car.gps import CarGpsTracker, get_car_gps_config
 import math
 
 from opendbc.can import CANDefine, CANParser
@@ -18,6 +19,8 @@ TransmissionType = structs.CarParams.TransmissionType
 class CarState(CarStateBase):
   def __init__(self, CP):
     super().__init__(CP)
+    self.car_gps_tracker = CarGpsTracker(CP)
+    self.car_gps_supported = self.car_gps_tracker.config is not None
     can_define = CANDefine(DBC[CP.carFingerprint][Bus.pt])
     if CP.transmissionType == TransmissionType.automatic:
       if CP.carFingerprint == CAR.FORD_MONDEO_MK5:
@@ -36,6 +39,9 @@ class CarState(CarStateBase):
     self.lkas_available = False
     self.lkas_available_ts_nanos = 0
     self.lateral_motion_control = None
+
+  def get_car_gps(self):
+    return self.car_gps_tracker.get()
 
   def update(self, can_parsers) -> structs.CarState:
     cp = can_parsers[Bus.pt]
@@ -173,6 +179,7 @@ class CarState(CarStateBase):
       status, value_mps = ford_sign(speed, unit)
       self.dashboard_limit.update(timestamp, status, value_mps, valid_until_ns=expiry)
 
+    self.car_gps_tracker.update(cp)
     return ret
 
   @staticmethod
@@ -182,21 +189,31 @@ class CarState(CarStateBase):
     pt_messages = []
     if CP.flags & FordFlags.NEW_PORT:
       # Subscribe before the first update so the new ports cannot miss their first source frame.
-      pt_messages = [(name, math.nan) for name in (
-        "BrakeSysFeatures", "Yaw_Data_FD1", "DesiredTorqBrk", "EngVehicleSpThrottle",
-        "EngBrakeData", "EPAS_INFO", "Cluster_Info1_FD1", "Steering_Data_FD1",
-        "BodyInfo_3_FD1", "RCMStatusMessage2_FD1", "SteeringPinion_Data",
-      )]
-      if CP.flags & FordFlags.CANFD:
-        pt_messages += [("Gear_Shift_by_Wire_FD1", math.nan), ("Lane_Assist_Data3_FD1", 30)]
-      elif CP.flags & FordFlags.ALT_STEER_ANGLE:
-        pt_messages += [("ParkAid_Data", 50), ("SteeringPinion_Data_Alt", 100),
-                        ("TransGearData", math.nan), ("INSTRUMENT_PANEL", math.nan)]
+      pt_messages = [
+        ("BrakeSysFeatures", 50), ("Yaw_Data_FD1", 100), ("DesiredTorqBrk", 50),
+        ("EngVehicleSpThrottle", 100), ("EngBrakeData", 10), ("EPAS_INFO", 50),
+        ("Cluster_Info1_FD1", 10), ("Steering_Data_FD1", 10),
+        ("BodyInfo_3_FD1", 2), ("RCMStatusMessage2_FD1", 10),
+      ]
+      if CP.flags & FordFlags.ALT_STEER_ANGLE:
+        pt_messages += [("ParkAid_Data", 50), ("SteeringPinion_Data_Alt", 100)]
       else:
-        pt_messages += [(name, math.nan) for name in ("PowertrainData_10", "INSTRUMENT_PANEL")]
+        pt_messages.append(("SteeringPinion_Data", 100))
+      if CP.flags & FordFlags.CANFD:
+        pt_messages.append(("Lane_Assist_Data3_FD1", 30))
+      else:
+        pt_messages.append(("INSTRUMENT_PANEL", 1))
+      if CP.transmissionType == TransmissionType.automatic:
+        gear = ("Gear_Shift_by_Wire_FD1" if CP.flags & FordFlags.CANFD else
+                "TransGearData" if CP.flags & FordFlags.ALT_STEER_ANGLE else "PowertrainData_10")
+        pt_messages.append((gear, 10))
     if CP.flags & FordFlags.LKA_STEERING:
       pt_messages.append(("Lane_Assist_Data3_FD1", 30))
       cam_messages.append(("LateralMotionControl", 20))
+    gps = get_car_gps_config(CP)
+    if gps is not None:
+      pt_messages += [(name, float("nan")) for name in gps.messages]
+
     return {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, CanBus(CP).main),
       Bus.cam: CANParser(dbc_name, cam_messages, CanBus(CP).camera),

@@ -92,5 +92,5 @@ class TestGmBoltFactoryStock(unittest.TestCase):
         steer = next(m for m in commands if m[0] == 0x180)
         self.assertEqual(((steer[1][0] & 7) << 8) | steer[1][1], 0)
         self.safety.set_timer(2_100_000)
-        self.safety.safety_tick_current_safety_config()
+        self.safety.safety_tick()
         self.assertFalse(self.safety.safety_config_valid())
