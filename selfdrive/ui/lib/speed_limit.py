@@ -8,6 +8,13 @@ def speed_limit_override_mode(plan, gas_pressed: bool) -> str:
   return ""
 
 
+def speed_limit_confirmation_pending(plan) -> bool:
+  return bool(
+    getattr(plan, "speedLimitChanged", False) and
+    getattr(plan, "unconfirmedSlcSpeedLimit", 0.0) > 1.0
+  )
+
+
 def max_matches_speed_limit(plan, max_speed_kph: float, is_metric: bool, fallback_mode: int) -> bool:
   limit_ms = max(float(getattr(plan, "slcSpeedLimit", 0.0)), 0.0)
   target_ms = limit_ms + float(getattr(plan, "slcSpeedLimitOffset", 0.0)) if limit_ms > 0.0 else 0.0
@@ -15,8 +22,7 @@ def max_matches_speed_limit(plan, max_speed_kph: float, is_metric: bool, fallbac
     return False
 
   source = getattr(plan, "slcSpeedLimitSource", "None") or "None"
-  pending = getattr(plan, "speedLimitChanged", False) and getattr(plan, "unconfirmedSlcSpeedLimit", 0.0) > 1.0
-  if pending:
+  if speed_limit_confirmation_pending(plan):
     return False
 
   overridden = getattr(plan, "slcOverriddenSpeed", 0.0) > 0.0

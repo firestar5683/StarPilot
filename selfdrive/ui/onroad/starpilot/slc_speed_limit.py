@@ -19,7 +19,8 @@ from openpilot.selfdrive.ui.onroad.starpilot.source_bubble_layout import (
 from openpilot.selfdrive.ui.lib.starpilot_state import starpilot_state
 from openpilot.selfdrive.ui.lib.speed_limit_pulse import SpeedLimitPulse
 from openpilot.selfdrive.ui.lib.speed_limit import (
-  max_matches_speed_limit, pending_speed_limit_offset, speed_limit_override_mode,
+  max_matches_speed_limit, pending_speed_limit_offset, speed_limit_confirmation_pending,
+  speed_limit_override_mode,
 )
 
 _WHITE = rl.Color(255, 255, 255, 255)
@@ -105,13 +106,12 @@ def _get_slc_state():
     return None
 
   plan = sm["starpilotPlan"]
-  speed_limit_changed = plan.speedLimitChanged
 
   params = ui_state.ui_params
   show_slc = params.get_bool("ShowSpeedLimits")
-  unconfirmed_valid = plan.unconfirmedSlcSpeedLimit > 1
+  pending_confirmation = speed_limit_confirmation_pending(plan)
 
-  if not show_slc:
+  if not show_slc and not pending_confirmation:
     _pulse.clear()
     return None
 
@@ -129,7 +129,7 @@ def _get_slc_state():
 
   slc_overridden_speed = plan.slcOverriddenSpeed
   car_state = sm["carState"]
-  pending_limit = plan.unconfirmedSlcSpeedLimit if speed_limit_changed and unconfirmed_valid else 0.0
+  pending_limit = plan.unconfirmedSlcSpeedLimit if pending_confirmation else 0.0
   pending_offset = pending_speed_limit_offset(pending_limit, ui_state.is_metric, ui_state.starpilot_toggles)
   override_mode = speed_limit_override_mode(plan, getattr(car_state, "gasPressed", False))
   max_matches_limit = max_matches_speed_limit(
@@ -171,8 +171,7 @@ def _get_slc_state():
     'speed_limit_source': plan.slcSpeedLimitSource,
     'unconfirmed_speed_limit': pending_display_limit,
     'unconfirmed_offset_str': pending_offset_str,
-    'unconfirmed_valid': unconfirmed_valid,
-    'speed_limit_changed': speed_limit_changed,
+    'pending_confirmation': pending_confirmation,
     'show_offset': show_offset,
     'use_vienna': params.get_bool("UseVienna"),
     'offset_str': offset_str,
@@ -690,7 +689,7 @@ def _draw_sources_bubble(state: dict, sign_rect: rl.Rectangle):
 
 def render_speed_limit_at(state: dict, rect: rl.Rectangle, expanded: bool = False) -> Optional[rl.Rectangle]:
   """Render the SLC sign and optional source bubble at a layout rect."""
-  flashing_pending = state['speed_limit_changed'] and state['unconfirmed_valid']
+  flashing_pending = state['pending_confirmation']
 
   if flashing_pending:
     _draw_sign(state, rect, pending=True)
