@@ -1,0 +1,354 @@
+{
+  "reference_commit": "678af78347d9656bc2f5dacd4204b012db861fa7",
+  "reference_sha256": "e4bdec7cf573c7bdd0bdb84897274cb33a06a6e7c6b486c27734fde73ff38e4e",
+  "description": "Frozen learned comfort and 20 Hz curve-entry/exit target traces. No runtime or vehicle qualification.",
+  "cases": [
+    {
+      "name": "prior",
+      "data": {},
+      "weather_reduction": 0.0,
+      "ego_mps": 30.0,
+      "cruise_mps": 35.0,
+      "curvatures": [
+        0.0,
+        0.004,
+        0.018
+      ],
+      "distances": [
+        0.0,
+        40.0,
+        150.0
+      ],
+      "release_frame": 60,
+      "frames": 120,
+      "steps": [
+        {
+          "frame": 0,
+          "target": 31.875,
+          "distance": 150.0
+        },
+        {
+          "frame": 1,
+          "target": 31.75,
+          "distance": 150.0
+        },
+        {
+          "frame": 3,
+          "target": 31.5,
+          "distance": 150.0
+        },
+        {
+          "frame": 10,
+          "target": 30.625,
+          "distance": 150.0
+        },
+        {
+          "frame": 30,
+          "target": 28.125,
+          "distance": 150.0
+        },
+        {
+          "frame": 59,
+          "target": 24.5,
+          "distance": 150.0
+        },
+        {
+          "frame": 60,
+          "target": 24.65,
+          "distance": 0.0
+        },
+        {
+          "frame": 61,
+          "target": 24.799999999999997,
+          "distance": 0.0
+        },
+        {
+          "frame": 70,
+          "target": 30.89999999999999,
+          "distance": 0.0
+        },
+        {
+          "frame": 90,
+          "target": 33.89999999999996,
+          "distance": 0.0
+        },
+        {
+          "frame": 119,
+          "target": 34.982666233662535,
+          "distance": 0.0
+        }
+      ],
+      "comfort": [
+        1.5052272727272726,
+        1.9142857142857144,
+        2.4000000000000004
+      ]
+    },
+    {
+      "name": "learned",
+      "data": {
+        "0.003": {
+          "average": 2.8,
+          "count": 1500
+        },
+        "0.01": {
+          "average": 1.3,
+          "count": 50
+        }
+      },
+      "weather_reduction": 0.0,
+      "ego_mps": 25.0,
+      "cruise_mps": 35.0,
+      "curvatures": [
+        0.0,
+        0.004,
+        0.018
+      ],
+      "distances": [
+        0.0,
+        40.0,
+        150.0
+      ],
+      "release_frame": 60,
+      "frames": 120,
+      "steps": [
+        {
+          "frame": 0,
+          "target": 26.875,
+          "distance": 150.0
+        },
+        {
+          "frame": 1,
+          "target": 26.75,
+          "distance": 150.0
+        },
+        {
+          "frame": 3,
+          "target": 26.5,
+          "distance": 150.0
+        },
+        {
+          "frame": 10,
+          "target": 25.625,
+          "distance": 150.0
+        },
+        {
+          "frame": 30,
+          "target": 23.125,
+          "distance": 150.0
+        },
+        {
+          "frame": 59,
+          "target": 19.5,
+          "distance": 150.0
+        },
+        {
+          "frame": 60,
+          "target": 19.65,
+          "distance": 0.0
+        },
+        {
+          "frame": 61,
+          "target": 19.799999999999997,
+          "distance": 0.0
+        },
+        {
+          "frame": 70,
+          "target": 25.89999999999999,
+          "distance": 0.0
+        },
+        {
+          "frame": 90,
+          "target": 28.899999999999963,
+          "distance": 0.0
+        },
+        {
+          "frame": 119,
+          "target": 33.24999999999992,
+          "distance": 0.0
+        }
+      ],
+      "comfort": [
+        1.5052272727272726,
+        2.4442045614035086,
+        2.4442045614035086
+      ]
+    },
+    {
+      "name": "wet",
+      "data": {
+        "0.01": {
+          "average": 2.4,
+          "count": 500
+        }
+      },
+      "weather_reduction": 0.3,
+      "ego_mps": 25.0,
+      "cruise_mps": 35.0,
+      "curvatures": [
+        0.0,
+        0.004,
+        0.018
+      ],
+      "distances": [
+        0.0,
+        40.0,
+        150.0
+      ],
+      "release_frame": 60,
+      "frames": 120,
+      "steps": [
+        {
+          "frame": 0,
+          "target": 26.875,
+          "distance": 150.0
+        },
+        {
+          "frame": 1,
+          "target": 26.75,
+          "distance": 150.0
+        },
+        {
+          "frame": 3,
+          "target": 26.5,
+          "distance": 150.0
+        },
+        {
+          "frame": 10,
+          "target": 25.625,
+          "distance": 150.0
+        },
+        {
+          "frame": 30,
+          "target": 23.125,
+          "distance": 150.0
+        },
+        {
+          "frame": 59,
+          "target": 19.5,
+          "distance": 150.0
+        },
+        {
+          "frame": 60,
+          "target": 19.65,
+          "distance": 0.0
+        },
+        {
+          "frame": 61,
+          "target": 19.799999999999997,
+          "distance": 0.0
+        },
+        {
+          "frame": 70,
+          "target": 25.89999999999999,
+          "distance": 0.0
+        },
+        {
+          "frame": 90,
+          "target": 28.899999999999963,
+          "distance": 0.0
+        },
+        {
+          "frame": 119,
+          "target": 33.24999999999992,
+          "distance": 0.0
+        }
+      ],
+      "comfort": [
+        1.5052272727272726,
+        1.9142857142857144,
+        2.4000000000000004
+      ]
+    },
+    {
+      "name": "duplicate",
+      "data": {
+        "0.001": {
+          "average": 1.9,
+          "count": 80
+        },
+        "-0.001": {
+          "average": 2.5,
+          "count": 40
+        }
+      },
+      "weather_reduction": 0.0,
+      "ego_mps": 20.0,
+      "cruise_mps": 35.0,
+      "curvatures": [
+        0.0,
+        0.004,
+        0.018
+      ],
+      "distances": [
+        0.0,
+        40.0,
+        150.0
+      ],
+      "release_frame": 60,
+      "frames": 120,
+      "steps": [
+        {
+          "frame": 0,
+          "target": 21.875,
+          "distance": 150.0
+        },
+        {
+          "frame": 1,
+          "target": 21.75,
+          "distance": 150.0
+        },
+        {
+          "frame": 3,
+          "target": 21.5,
+          "distance": 150.0
+        },
+        {
+          "frame": 10,
+          "target": 20.625,
+          "distance": 150.0
+        },
+        {
+          "frame": 30,
+          "target": 18.125,
+          "distance": 150.0
+        },
+        {
+          "frame": 59,
+          "target": 14.665829374584089,
+          "distance": 150.0
+        },
+        {
+          "frame": 60,
+          "target": 14.815829374584089,
+          "distance": 0.0
+        },
+        {
+          "frame": 61,
+          "target": 14.96582937458409,
+          "distance": 0.0
+        },
+        {
+          "frame": 70,
+          "target": 20.89999999999999,
+          "distance": 0.0
+        },
+        {
+          "frame": 90,
+          "target": 23.899999999999963,
+          "distance": 0.0
+        },
+        {
+          "frame": 119,
+          "target": 28.249999999999922,
+          "distance": 0.0
+        }
+      ],
+      "comfort": [
+        1.6588306451612902,
+        1.9142857142857144,
+        2.4000000000000004
+      ]
+    }
+  ]
+}
