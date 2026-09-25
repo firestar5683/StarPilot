@@ -7,6 +7,9 @@ from pathlib import Path
 
 from datetime import datetime, timedelta, UTC
 from openpilot.common.api import api_get, get_key_pair
+from openpilot.starpilot.connect.provider import active_provider
+import os
+import re
 from openpilot.common.params import Params
 from openpilot.common.spinner import Spinner
 from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
@@ -33,6 +36,10 @@ def register(show_spinner=False) -> str | None:
   entirely.
   """
   params = Params()
+  if os.getenv('STARPILOT_CLOUD_DISABLED') == '1':
+    return UNREGISTERED_DONGLE_ID
+  if active_provider().name == 'konik':
+    return register_konik(params)
 
   dongle_id: str | None = params.get("DongleId")
   if dongle_id is None and Path(Paths.persist_root()+"/comma/dongle_id").is_file():
@@ -100,6 +107,28 @@ def register(show_spinner=False) -> str | None:
     params.put("DongleId", dongle_id, block=True)
     set_offroad_alert("Offroad_UnregisteredHardware", (dongle_id == UNREGISTERED_DONGLE_ID) and not PC)
   return dongle_id
+
+
+
+def register_konik(params):
+  known = params.get('DongleId')
+  if known and re.fullmatch(r'[a-f0-9]{16}', known):
+    return known
+  try:
+    algorithm, private, public = get_key_pair()
+    if private is None or public is None:
+      return UNREGISTERED_DONGLE_ID
+    token = jwt.encode({'register': True, 'exp': datetime.now(UTC) + timedelta(hours=1)}, private, algorithm=algorithm)
+    response = api_get('v2/pilotauth/', method='POST', timeout=10, imei=HARDWARE.get_imei() or '', imei2='',
+                       serial=HARDWARE.get_serial(), public_key=public, register_token=token)
+    identity = response.json().get('dongle_id') if response.status_code == 200 else None
+    if not isinstance(identity, str) or not re.fullmatch(r'[a-f0-9]{16}', identity):
+      return UNREGISTERED_DONGLE_ID
+    params.put('DongleId', identity, block=True)
+    return identity
+  except Exception:
+    cloudlog.warning('Konik registration unavailable; cloud services will retry')
+    return UNREGISTERED_DONGLE_ID
 
 
 if __name__ == "__main__":

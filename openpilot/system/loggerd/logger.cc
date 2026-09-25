@@ -183,6 +183,12 @@ bool LoggerState::next() {
   bool ret = util::create_directories(segment_path, 0775);
   assert(ret == true);
 
+  const std::string provider = Params().get("ConnectProvider");
+  const std::string cloud = provider.empty() ? "comma" : provider;
+  const std::string cloud_file = segment_path + "/.cloud-provider";
+  const bool tagged = logger_write_cloud_marker(cloud_file, cloud);
+  assert(tagged);
+
   lock_file = segment_path + "/rlog.lock";
   std::ofstream{lock_file};
 

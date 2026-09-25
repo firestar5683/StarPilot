@@ -37,6 +37,7 @@ from openpilot.common.api import Api, get_key_pair
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.utils import CallbackReader, get_upload_stream
 from openpilot.common.params import Params
+from openpilot.starpilot.schema_cache import get_cache
 from openpilot.common.realtime import set_core_affinity
 from openpilot.common.hardware import HARDWARE, PC
 from openpilot.system.loggerd.config import CAMERA_FPS, SEGMENT_LENGTH
@@ -48,11 +49,14 @@ from openpilot.common.hardware.hw import Paths
 from openpilot.system.athena.rpc import dispatcher, dumps_call, handle, is_call, is_response, loads
 
 
-ATHENA_HOST = os.getenv('ATHENA_HOST', 'wss://athena.comma.ai')
+from openpilot.starpilot.connect.provider import active_provider, owns_recording, cloudlog_root, mark_recording
+
+CLOUD_PROVIDER = active_provider()
+ATHENA_HOST = os.getenv('ATHENA_HOST', CLOUD_PROVIDER.athena) if CLOUD_PROVIDER.name == 'comma' else CLOUD_PROVIDER.athena
 HANDLER_THREADS = int(os.getenv('HANDLER_THREADS', "4"))
 LOCAL_PORT_WHITELIST = {22, }  # SSH
 
-LOG_ATTR_NAME = 'user.upload'
+LOG_ATTR_NAME = CLOUD_PROVIDER.upload_attribute
 LOG_ATTR_VALUE_MAX_UNIX_TIME = int.to_bytes(2147483647, 4, sys.byteorder)
 RECONNECT_TIMEOUT_S = 70
 
@@ -330,6 +334,8 @@ def upload_handler(end_event: threading.Event) -> None:
 
 def _do_upload(upload_item: UploadItem, callback: Callable | None = None) -> requests.Response:
   path = upload_item.path
+  if not owns_recording(path, Paths.log_root()):
+    raise ValueError('Recording belongs to another cloud provider')
   compress = False
 
   # If file does not exist, but does exist without the .zst extension we will compress on the fly
@@ -387,6 +393,8 @@ def scan_dir(path: str, prefix: str) -> list[str]:
   # (glob and friends traverse entire dir tree)
   with os.scandir(path) as i:
     for e in i:
+      if e.name.startswith(".") or (e.name != "boot" and not owns_recording(e.path, Paths.log_root())):
+        continue
       rel_path = os.path.relpath(e.path, Paths.log_root())
       if e.is_dir(follow_symlinks=False):
         # add trailing slash
@@ -418,7 +426,8 @@ class VideoClips:
     requested_at: float
 
   def __init__(self):
-    self.clip_path = os.path.join(Paths.log_root(), "clips")
+    self.clip_provider = CLOUD_PROVIDER.name
+    self.clip_path = os.path.join(Paths.log_root(), "clips" if self.clip_provider == "comma" else "clips-" + self.clip_provider)
     self.lock = threading.Condition()
     self.clips: dict[str, VideoClips.Clip] = {}
     self.transcode_proc: tuple[str, subprocess.Popen] | None = None
@@ -482,11 +491,10 @@ class VideoClips:
           if self.clips.get(clip.filename) is not clip:
             continue
         first_segment = math.floor(clip.source_start_time / SEGMENT_LENGTH)
-        inputs = (
-          os.path.join(Paths.log_root(), f"{clip.route}--{segment}", clip.camera)
-          for segment in range(first_segment, math.ceil(clip.source_end_time / SEGMENT_LENGTH))
-        )
+        inputs = self._source_inputs(clip.route, clip.camera, clip.source_start_time, clip.source_end_time)
         os.makedirs(self.clip_path, exist_ok=True)
+        if self.clip_provider != "comma":
+          mark_recording(self.clip_path, self.clip_provider)
         temporary_path = os.path.join(self.clip_path, f".{clip.filename}")
         output_path = os.path.join(self.clip_path, clip.filename)
         self._encode(clip, inputs, temporary_path, clip.source_start_time - first_segment * SEGMENT_LENGTH,
@@ -538,7 +546,8 @@ class VideoClips:
       with os.scandir(Paths.log_root()) as entries:
         for entry in entries:
           entry_route, _, segment = entry.name.rpartition("--")
-          if entry_route != route or not segment.isdigit() or not entry.is_dir():
+          if (entry_route != route or not segment.isdigit() or not entry.is_dir() or
+              not owns_recording(entry.path, Paths.log_root(), self.clip_provider)):
             continue
           with os.scandir(entry.path) as files:
             for camera in files:
@@ -558,6 +567,16 @@ class VideoClips:
       available[camera] = {"available_ranges": ranges}
     return available
 
+  def _source_inputs(self, route, camera, start, end):
+    if (self.clip_provider not in ("comma", "konik") or not math.isfinite(start) or not math.isfinite(end) or
+        start < 0 or end <= start):
+      raise ValueError("Invalid clip source range")
+    inputs = [os.path.join(Paths.log_root(), f"{route}--{segment}", camera)
+              for segment in range(math.floor(start / SEGMENT_LENGTH), math.ceil(end / SEGMENT_LENGTH))]
+    if not all(os.path.isfile(path) and owns_recording(path, Paths.log_root(), self.clip_provider) for path in inputs):
+      raise ValueError("Clip source belongs to another cloud provider or is unavailable")
+    return inputs
+
   def createClip(self, route: str, source_start_time: float, source_end_time: float, clip: dict):
     if not PC and not Params().get_bool("IsOffroad"):
       raise RuntimeError("video clips can only be created while offroad")
@@ -568,6 +587,7 @@ class VideoClips:
     filename = clip["filename"]
     assert camera == os.path.basename(camera) and camera.endswith("camera.hevc"), "invalid camera filename"
     assert filename == os.path.basename(filename), "invalid filename"
+    self._source_inputs(route_name, camera, source_start_time, source_end_time)
     with self.lock:
       self.clips[filename] = self.Clip(route_name, camera, source_start_time, source_end_time, clip["bitrate"], clip["speedup"],
                                         filename, datetime.now().timestamp())
@@ -601,6 +621,8 @@ class VideoClips:
     assert filename == os.path.basename(filename) and not filename.startswith("."), "invalid filename"
     assert isinstance(offset, int) and offset >= 0, "invalid offset"
     path = os.path.join(self.clip_path, filename)
+    if not owns_recording(path, Paths.log_root(), self.clip_provider):
+      raise ValueError("Clip belongs to another cloud provider")
     size = os.path.getsize(path)
     assert offset <= size, "offset past end of file"
     with open(path, "rb") as f:
@@ -639,7 +661,7 @@ def uploadFilesToUrls(files_data: list[UploadFileDict]) -> UploadFilesToUrlRespo
       continue
 
     path = os.path.join(Paths.log_root(), file.fn)
-    if not os.path.exists(path) and not os.path.exists(strip_zst_extension(path)):
+    if not owns_recording(path, Paths.log_root()) or (not os.path.exists(path) and not os.path.exists(strip_zst_extension(path))):
       failed.append(file.fn)
       continue
 
@@ -765,7 +787,7 @@ def getGithubUsername() -> str:
 
 @dispatcher.add_method
 def getNotCar() -> bool:
-  cp_bytes = Params().get("CarParamsPersistent")
+  cp_bytes = get_cache(Params(), "CarParamsPersistent")
   if cp_bytes is not None:
     with car.CarParams.from_bytes(cp_bytes) as CP:
       return CP.notCar
@@ -795,7 +817,7 @@ def startStream(sdp: str, enabled: bool) -> dict:
   bridge_services_in = []
 
   # stale car params case taken care of by webrtcd being shut off on ignition
-  cp_bytes = params.get("CarParamsPersistent")
+  cp_bytes = get_cache(params, "CarParamsPersistent")
   if cp_bytes is not None:
     with car.CarParams.from_bytes(cp_bytes) as CP:
       if CP.notCar:
@@ -819,8 +841,10 @@ def get_logs_to_send_sorted() -> list[str]:
   # TODO: scan once then use inotify to detect file creation/deletion
   curr_time = int(time.time())  # noqa: TID251
   logs = []
-  for log_entry in os.listdir(Paths.swaglog_root()):
-    log_path = os.path.join(Paths.swaglog_root(), log_entry)
+  for log_entry in os.listdir(cloudlog_root()):
+    if not log_entry.startswith("swaglog."):
+      continue
+    log_path = os.path.join(cloudlog_root(), log_entry)
     time_sent = 0
     try:
       value = getxattr(log_path, LOG_ATTR_NAME)
@@ -855,7 +879,7 @@ def log_handler(end_event: threading.Event) -> None:
         cloudlog.debug(f"athena.log_handler.forward_request {log_entry}")
         try:
           curr_time = int(time.time())  # noqa: TID251
-          log_path = os.path.join(Paths.swaglog_root(), log_entry)
+          log_path = os.path.join(cloudlog_root(), log_entry)
           setxattr(log_path, LOG_ATTR_NAME, int.to_bytes(curr_time, 4, sys.byteorder))
           with open(log_path) as f:
             send_queue_push(dumps_call("forwardLogs", {"logs": f.read()}, request_id=log_entry), SEND_PRIORITY_LOW)
@@ -874,7 +898,7 @@ def log_handler(end_event: threading.Event) -> None:
           log_success = "result" in log_resp and log_resp["result"].get("success")
           cloudlog.debug(f"athena.log_handler.forward_response {log_entry} {log_success}")
           if log_entry and log_success:
-            log_path = os.path.join(Paths.swaglog_root(), log_entry)
+            log_path = os.path.join(cloudlog_root(), log_entry)
             try:
               setxattr(log_path, LOG_ATTR_NAME, LOG_ATTR_VALUE_MAX_UNIX_TIME)
             except OSError:

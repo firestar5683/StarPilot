@@ -27,6 +27,12 @@ def main():
 
   try:
     while 1:
+      from openpilot.starpilot.connect.provider import active_provider
+      if active_provider().name == 'konik':
+        from openpilot.system.athena.registration import register, UNREGISTERED_DONGLE_ID
+        if register() == UNREGISTERED_DONGLE_ID:
+          time.sleep(15)
+          continue
       cloudlog.info("starting athena daemon")
       proc = Process(name='athenad', target=launcher, args=('openpilot.system.athena.athenad', 'athenad'))
       proc.start()

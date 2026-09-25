@@ -20,7 +20,9 @@ from openpilot.system.loggerd.xattr_cache import getxattr, setxattr
 from openpilot.common.swaglog import cloudlog
 
 NetworkType = log.DeviceState.NetworkType
-UPLOAD_ATTR_NAME = 'user.upload'
+from openpilot.starpilot.connect.provider import active_provider, owns_recording
+
+UPLOAD_ATTR_NAME = active_provider().upload_attribute
 UPLOAD_ATTR_VALUE = b'1'
 
 MAX_UPLOAD_SIZES = {
@@ -91,6 +93,8 @@ class Uploader:
 
     for logdir in listdir_by_creation(self.root):
       path = os.path.join(self.root, logdir)
+      if logdir != "boot" and not owns_recording(path, self.root):
+        continue
       try:
         names = os.listdir(path)
       except OSError:
@@ -100,8 +104,12 @@ class Uploader:
         continue
 
       for name in sorted(names, key=lambda n: self.immediate_priority.get(n, 1000)):
+        if name.startswith("."):
+          continue
         key = os.path.join(logdir, name)
         fn = os.path.join(path, name)
+        if not owns_recording(fn, self.root):
+          continue
         # skip files already uploaded
         try:
           ctime = os.path.getctime(fn)
@@ -238,6 +246,11 @@ def main(exit_event: threading.Event | None = None) -> None:
   params = Params()
   dongle_id = params.get("DongleId")
 
+  while active_provider().name == 'konik' and dongle_id in (None, 'UnregisteredDevice') and not exit_event.is_set():
+    exit_event.wait(10)
+    dongle_id = params.get('DongleId')
+  if exit_event.is_set():
+    return
   if dongle_id is None:
     cloudlog.info("uploader missing dongle_id")
     raise Exception("uploader can't start without dongle id")
@@ -248,6 +261,7 @@ def main(exit_event: threading.Event | None = None) -> None:
   backoff = 0.1
   while not exit_event.is_set():
     sm.update(0)
+    always_allow_uploads = params.get_bool("AlwaysAllowUploads")
     offroad = params.get_bool("IsOffroad")
     network_type = sm['deviceState'].networkType if not force_wifi else NetworkType.wifi
     if network_type == NetworkType.none:
@@ -255,7 +269,7 @@ def main(exit_event: threading.Event | None = None) -> None:
         time.sleep(60 if offroad else 5)
       continue
 
-    success = uploader.step(sm['deviceState'].networkType.raw, sm['deviceState'].networkMetered)
+    success = uploader.step(sm['deviceState'].networkType.raw, sm['deviceState'].networkMetered and not always_allow_uploads)
     if success is None:
       backoff = 60 if offroad else 5
     elif success:

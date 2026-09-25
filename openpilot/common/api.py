@@ -5,6 +5,8 @@ from datetime import datetime, timedelta, UTC
 from openpilot.common.hardware.hw import Paths
 from openpilot.common.version import get_version
 
+from openpilot.starpilot.connect.provider import active_provider, konik_key_pair
+
 API_HOST = os.getenv('API_HOST', 'https://api.commadotai.com')
 
 # name: jwt signature algorithm
@@ -45,6 +47,9 @@ class Api:
 
 
 def api_get(endpoint, method='GET', timeout=None, access_token=None, session=None, **params):
+  provider = active_provider()
+  if provider.name == 'offline' or os.getenv('STARPILOT_CLOUD_DISABLED') == '1':
+    raise RuntimeError('Cloud provider is unavailable')
   headers = {}
   if access_token is not None:
     headers['Authorization'] = "JWT " + access_token
@@ -53,10 +58,15 @@ def api_get(endpoint, method='GET', timeout=None, access_token=None, session=Non
 
   # TODO: add session to Api
   req = requests if session is None else session
-  return req.request(method, API_HOST + "/" + endpoint, timeout=timeout, headers=headers, params=params)
+  return req.request(method, (API_HOST if provider.name == "comma" else provider.api) + "/" + endpoint, timeout=timeout, headers=headers, params=params)
 
 
 def get_key_pair() -> tuple[str, str, str] | tuple[None, None, None]:
+  provider = active_provider()
+  if provider.name == 'offline' or os.getenv('STARPILOT_CLOUD_DISABLED') == '1':
+    return None, None, None
+  if provider.name == 'konik':
+    return konik_key_pair()
   for key in KEYS:
     if os.path.isfile(Paths.persist_root() + f'/comma/{key}') and os.path.isfile(Paths.persist_root() + f'/comma/{key}.pub'):
       with open(Paths.persist_root() + f'/comma/{key}') as private, open(Paths.persist_root() + f'/comma/{key}.pub') as public:

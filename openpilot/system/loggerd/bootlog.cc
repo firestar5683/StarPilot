@@ -55,6 +55,12 @@ int main(int argc, char** argv) {
   bool r = util::create_directories(Path::log_root() + "/boot/", 0775);
   assert(r);
 
+  const std::string provider = Params().get("ConnectProvider");
+  const std::string cloud = provider.empty() ? "comma" : provider;
+  const std::string marker = Path::log_root() + "/boot/.cloud-" + id + ".zst";
+  const bool tagged = logger_write_cloud_marker(marker, cloud);
+  assert(tagged);
+
   ZstdFileWriter file(path, LOG_COMPRESSION_LEVEL);
   // Write initdata
   file.write(logger_build_init_data().asBytes());

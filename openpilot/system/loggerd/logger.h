@@ -1,6 +1,9 @@
 #pragma once
 
 #include <cassert>
+#include <cerrno>
+#include <fcntl.h>
+#include <unistd.h>
 #include <memory>
 #include <string>
 
@@ -8,6 +11,36 @@
 #include "common/util.h"
 #include "common/hardware/hw.h"
 #include "system/loggerd/zstd_writer.h"
+
+// Persist ownership before any recording bytes can become visible.
+inline bool logger_write_cloud_marker(const std::string &path, const std::string &provider) {
+  if (provider != "comma" && provider != "konik" && provider != "offline") return false;
+  const size_t slash = path.find_last_of('/');
+  if (slash == std::string::npos) return false;
+  const int directory = open(path.substr(0, slash).c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (directory < 0) return false;
+  const int marker = open(path.c_str(), O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, 0644);
+  if (marker < 0) {
+    close(directory);
+    return false;
+  }
+  size_t offset = 0;
+  bool ok = true;
+  while (offset < provider.size()) {
+    const ssize_t written = write(marker, provider.data() + offset, provider.size() - offset);
+    if (written < 0 && errno == EINTR) continue;
+    if (written <= 0) {
+      ok = false;
+      break;
+    }
+    offset += static_cast<size_t>(written);
+  }
+  if (ok) ok = fsync(marker) == 0;
+  if (close(marker) != 0) ok = false;
+  if (ok) ok = fsync(directory) == 0;
+  if (close(directory) != 0) ok = false;
+  return ok;
+}
 
 constexpr int LOG_COMPRESSION_LEVEL = 10;
 
