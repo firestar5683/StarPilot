@@ -1,0 +1,74 @@
+{
+  "settings_version": 2,
+  "vision_curve_speed_control_enabled": true,
+  "map_curve_speed_control_enabled": true,
+  "speed_limit_control_enabled": true,
+  "external_speed_limit_control_enabled": true,
+  "conditional_speed_limit_control_enabled": false,
+  "vision_curve_use_enable_speed": false,
+  "speed_limit_use_enable_speed": true,
+  "map_curve_use_enable_speed": false,
+  "enable_speed": 35.76218,
+  "default_lane_width": 3.7,
+  "subscriber": {
+    "shadow_car_state": true,
+    "shadow_model_v2": false,
+    "shadow_gps_location": false,
+    "shadow_gps_location_external": false,
+    "shadow_selfdrive_state": false
+  },
+  "speed_limit": {
+    "press_gas_to_accept_speed_limit": false,
+    "press_gas_to_override_speed_limit": true,
+    "adjust_set_speed_to_accept_speed_limit": false,
+    "accept_speed_limit_timeout": 0,
+    "speed_limit_priority": "map",
+    "speed_limit_change_requires_accept": false,
+    "hold_last_seen_speed_limit": true,
+    "hold_speed_limit_while_changing_set_speed": true,
+    "speed_limit_offset": 2.2351363
+  },
+  "logger": {
+    "log_level": "error",
+    "log_json": true,
+    "log_source": true
+  },
+  "personalities": {
+    "relaxed": {
+      "target_speed_jerk": 0.5,
+      "target_speed_accel": 1.0,
+      "curve_target_speed_time_offset": 1.5,
+      "speed_limit_increase_target_speed_time_offset": 0.5,
+      "speed_limit_decrease_target_speed_time_offset": 1.5,
+      "map_curve_target_lat_a": 1.9,
+      "vision_curve_target_lat_a": 1.9,
+      "vision_curve_min_target_v": 4.4702725,
+      "slow_down_for_next_speed_limit": true,
+      "speed_up_for_next_speed_limit": false
+    },
+    "standard": {
+      "target_speed_jerk": 0.6,
+      "target_speed_accel": 1.2,
+      "curve_target_speed_time_offset": 1.5,
+      "speed_limit_increase_target_speed_time_offset": 1.5,
+      "speed_limit_decrease_target_speed_time_offset": 0.75,
+      "map_curve_target_lat_a": 2.2,
+      "vision_curve_target_lat_a": 2.1,
+      "vision_curve_min_target_v": 4.4702725,
+      "slow_down_for_next_speed_limit": true,
+      "speed_up_for_next_speed_limit": true
+    },
+    "aggressive": {
+      "target_speed_jerk": 0.7,
+      "target_speed_accel": 1.3,
+      "curve_target_speed_time_offset": 1.2,
+      "speed_limit_increase_target_speed_time_offset": 2.0,
+      "speed_limit_decrease_target_speed_time_offset": 0.25,
+      "map_curve_target_lat_a": 2.4,
+      "vision_curve_target_lat_a": 2.3,
+      "vision_curve_min_target_v": 4.4702725,
+      "slow_down_for_next_speed_limit": true,
+      "speed_up_for_next_speed_limit": true
+    }
+  }
+}

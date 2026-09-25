@@ -2,7 +2,7 @@
   "schema_version": 1,
   "upstream": {
     "url": "https://github.com/commaai/openpilot.git",
-    "commit": "ec95db3f1fa19f76940497fedfdb62e09ea19912"
+    "commit": "3f06ed3bc7a4cc9c320be1f7d03dcd8a885a8e6f"
   },
   "dependencies": [
     {
@@ -47,6 +47,50 @@
       "tree": "03f35edac84fbe516023911c1a135e5a577f5d95",
       "exclude": [
         "AGENTS.md"
+      ]
+    },
+    {
+      "path": "mapd_repo",
+      "url": "https://github.com/pfeiferj/mapd.git",
+      "commit": "7201c6b4b4ec1b0b9ea21daa8c05b80fdd7e01ee",
+      "tree": "c9072e54aec00579eb2f7ef381b2c0c8c3682fa0",
+      "exclude": [
+        "CLAUDE.md",
+        "Readme.md",
+        "Roadmap.md"
+      ]
+    }
+  ],
+  "vendored_extensions": [
+    {
+      "path": "jetlink_repo",
+      "url": "https://github.com/zoompilot/jetlink.git",
+      "commit": "c17cd5c52be0ee83b9a6265b7da69d24ad6c5d02",
+      "tree": "5199f58cb390fcaa4c798be82566cc87d9271da7",
+      "exclude": [
+        ".github",
+        ".gitignore",
+        "CHANGELOG.md",
+        "JetlinkKit",
+        "android",
+        "docs",
+        "install.sh",
+        "ios",
+        "macos",
+        "tests",
+        "scripts/99-jetlink-host.rules",
+        "scripts/99-jetlink-usb-wakeup.rules",
+        "scripts/bench_link.py",
+        "scripts/build-linux.sh",
+        "scripts/changelog.py",
+        "scripts/deploy_to_comma.sh",
+        "scripts/jetlink",
+        "scripts/jetlink-server.service",
+        "scripts/verify_parity.py",
+        "scripts/comma/jetlink_bench.py",
+        "scripts/comma/jetlink_hold.py",
+        "scripts/comma/jetlink_live_bench.sh",
+        "scripts/comma/jetlink_replay.py"
       ]
     }
   ]

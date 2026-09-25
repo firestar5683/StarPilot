@@ -1,0 +1,12 @@
+mapd
+**/*.DS_Store
+**/*._.DS_Store
+/offline
+scripts/offline
+scripts/mapd
+tmp
+filtered.osm.pbf
+planet-latest.osm.pbf
+box.osm.pbf
+map.osm.pbf
+/build
