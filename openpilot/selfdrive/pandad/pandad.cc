@@ -1,9 +1,15 @@
 #include "selfdrive/pandad/pandad.h"
+#include "selfdrive/pandad/aol_protocol.h"
+#include "selfdrive/pandad/aol_wire.h"
+#include "openpilot/starpilot/car/honda/aol_policy.h"
+#include "openpilot/starpilot/car/hyundai/aol_policy.h"
+#include "starpilot/car/gm/aol_policy.h"
 
 #include <array>
 #include <bitset>
 #include <cassert>
 #include <cerrno>
+#include <cstring>
 #include <memory>
 #include <thread>
 #include <utility>
@@ -363,16 +369,21 @@ void pandad_run(Panda *panda) {
   const bool no_fan_control = getenv("NO_FAN_CONTROL") != nullptr;
   const bool spoofing_started = getenv("STARTED") != nullptr;
   const bool fake_send = getenv("FAKESEND") != nullptr;
+  const char *aol_env = getenv("AOL_REPLAY_RUNTIME");
+  const bool aol_replay = aol_env != nullptr && strcmp(aol_env, "1") == 0;
 
   // Start helper thread for event-driven sendcan.
   std::thread send_thread(can_send_thread, panda, fake_send);
 
   RateKeeper rk("pandad", 100);
-  SubMaster sm({"selfdriveState", "deviceState"});
-  PubMaster pm({"can", "pandaStates", "peripheralState"});
+  SubMaster sm({"selfdriveState", "deviceState", "aolAxisState", "aolIntentWire"});
+  PubMaster pm({"can", "pandaStates", "peripheralState", "aolSafetyWire"});
   PandaSafety panda_safety(panda);
   bool engaged = false;
   bool is_onroad = false;
+  constexpr AolSafetyProfile aol_profiles[] = {HONDA_AOL_PROFILE, HYUNDAI_AOL_PROFILE, HYUNDAI_CLASSIC_AOL_PROFILE, GM_AOL_PROFILE};
+  const AolProfileRegistry aol_registry{aol_profiles, std::size(aol_profiles)};
+  AolAxisNegotiator aol_negotiator(aol_registry);
 
   // Main loop: receive CAN first, then process lower priority panda and peripheral state.
   while (!do_exit && check_connected(panda)) {
@@ -387,10 +398,64 @@ void pandad_run(Panda *panda) {
     if (rk.frame() % 10 == 0) {
       sm.update(0);
       engaged = sm.allAliveAndValid({"selfdriveState"}) && sm["selfdriveState"].getSelfdriveState().getEnabled();
+      // AOL axis and intent timestamps come from Python CLOCK_MONOTONIC.
+      // Keep the ordinary pandad/CAN BOOTTIME clock unchanged.
+      uint64_t now_ns = aol_monotonic_ns();
+      const bool axis_received = sm.allAliveAndValid({"aolAxisState"});
+      auto aol_status = (aol_replay || axis_received) ? panda->get_aol_safety_state() : std::nullopt;
+      const bool aol_runtime = aol_runtime_enabled(aol_replay, aol_status, aol_registry);
       if (sm.updated("deviceState")) {
         is_onroad = sm["deviceState"].getDeviceState().getStarted();
       }
+      AolAxisInput axis_input;
+      if (axis_received) {
+        auto axis_event = sm["aolAxisState"];
+        auto axis = axis_event.getAolAxisState();
+        axis_input = {true, axis.getQualified(), axis.getSessionId().cStr(), axis.getObservedMonoTime(),
+                      axis.getValidUntilMonoTime(), axis_event.getLogMonoTime(),
+                      axis.getDesiredLateral(), axis.getDesiredLongitudinal()};
+        if (is_onroad && sm.allAliveAndValid({"deviceState", "aolIntentWire"})) {
+          auto intent_event = sm["aolIntentWire"];
+          axis_input.retain_lateral_arm = aol_armed_intent(intent_event.getAolIntentWire(),
+              intent_event.getLogMonoTime(), axis.getSourceCarStateMonoTime(), now_ns);
+        }
+      }
+      const uint8_t aol_expected_mode = aol_status ? aol_status->safety_mode : 0U;
+      auto plan = aol_negotiator.prepare(aol_runtime ? aol_status : std::nullopt, axis_input, now_ns, aol_expected_mode);
+      bool aol_write_ok = plan.capable && panda->set_aol_axis_request(plan.request_mask);
+      if (aol_write_ok) {
+        engaged = engaged || plan.request_mask != 0U || plan.retain_lateral_arm;
+      }
       process_panda_state(panda, &pm, engaged, is_onroad, spoofing_started);
+      auto aol_after = aol_write_ok ? panda->get_aol_safety_state() : std::nullopt;
+      auto outcome = aol_negotiator.complete(plan, aol_write_ok, aol_after);
+      if (aol_runtime) {
+        MessageBuilder axis_status_msg;
+        auto axis_status_event = axis_status_msg.initEvent();
+        axis_status_event.setLogMonoTime(now_ns);
+        bool status_current = outcome.compatible;
+        auto reported_status = outcome.status;
+        const std::string serial = panda->hw_serial();
+        const AolSafetyWireFields fields = {
+          static_cast<uint16_t>(status_current ? AOL_SAFETY_PROTOCOL_VERSION : 0U), status_current,
+          now_ns, now_ns + 200000000ULL,
+          static_cast<uint16_t>(reported_status ? reported_status->safety_mode : 0U),
+          reported_status ? reported_status->safety_param : uint16_t{0},
+          status_current && reported_status && ((reported_status->permission_mask & 0x1U) != 0U),
+          status_current && reported_status && ((reported_status->permission_mask & 0x2U) != 0U),
+          status_current && reported_status && ((reported_status->request_mask & 0x1U) != 0U),
+          status_current && reported_status && ((reported_status->request_mask & 0x2U) != 0U), serial, outcome.session,
+        };
+        auto payload = encode_aol_safety_wire(fields);
+        const bool wire_valid = status_current && !payload.empty();
+        axis_status_event.setValid(wire_valid);
+        if (wire_valid) {
+          axis_status_event.setAolSafetyWire(kj::arrayPtr(payload.data(), payload.size()));
+        } else {
+          axis_status_event.initAolSafetyWire(0);
+        }
+        pm.send("aolSafetyWire", axis_status_msg);
+      }
       panda_safety.configureSafetyMode(is_onroad);
     }
 
