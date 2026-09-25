@@ -22,6 +22,7 @@ class Priority:
   # - modeld = 55
   # - camerad = 54
   CTRL_LOW = 51 # plannerd & radard
+  UI = 50
 
   # CORE 3
   # - pandad = 55
