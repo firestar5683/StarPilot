@@ -274,6 +274,8 @@ def get_checksum_state(dbc_name: str) -> ChecksumState | None:
 
 def set_signal_type(sig: Signal, chk: ChecksumState | None, dbc_name: str, line_num: int, address: int) -> None:
   sig.calc_checksum = None
+  if dbc_name == "hyundai_palisade_2023_generated" and address in (0x50, 0x51, 0x2A4):
+    chk = ChecksumState(SignalType.HKG_CAN_FD_CHECKSUM, hkg_can_fd_checksum)
   if chk:
     if chk.setup_signal:
       chk.setup_signal(sig, dbc_name, line_num)

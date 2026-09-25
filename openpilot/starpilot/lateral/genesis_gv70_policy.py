@@ -5,9 +5,9 @@ from collections import deque
 
 import numpy as np
 
+from openpilot.starpilot.lateral.torque_extension import apply_turn_assist
 from openpilot.cereal import log
 from opendbc.car import structs
-from opendbc.car.lateral import get_friction
 from opendbc.car.hyundai.values import CAR
 from openpilot.common.constants import ACCELERATION_DUE_TO_GRAVITY
 from openpilot.common.filter_simple import FirstOrderFilter
@@ -111,8 +111,8 @@ class GenesisGV70TorquePolicy:
     desired_lateral_jerk = float(np.clip(self.jerk_filter.update(raw_lateral_jerk), -MAX_LAT_JERK_UP, MAX_LAT_JERK_UP))
     gravity_adjusted_future_lateral_accel = future_desired_lateral_accel - roll_compensation
     setpoint = expected_lateral_accel + desired_lateral_jerk * lat_delay
-    desired_lateral_accel_rate = (setpoint - self.prev_desired_lateral_accel) / self.dt
-    unwind_detected = desired_lateral_accel_rate < UNWIND_D_DES_THRESHOLD and abs(setpoint) < UNWIND_LAT_ACCEL_NEAR_ZERO
+    desired_lateral_accel_magnitude_rate = (abs(setpoint) - abs(self.prev_desired_lateral_accel)) / self.dt
+    unwind_detected = desired_lateral_accel_magnitude_rate < UNWIND_D_DES_THRESHOLD and abs(setpoint) < UNWIND_LAT_ACCEL_NEAR_ZERO
     self.prev_desired_lateral_accel = setpoint
     measurement_rate = self.measurement_rate_filter.update((measurement - self.previous_measurement) / self.dt)
     measurement_rate = float(np.clip(measurement_rate, -MAX_LAT_JERK_UP, MAX_LAT_JERK_UP))
@@ -128,7 +128,7 @@ class GenesisGV70TorquePolicy:
     vehicle_deadzone = get_genesis_gv70_friction_jerk_deadzone(CS.vEgo, setpoint)
     friction_jerk_deadzone = center_chatter_friction_jerk_deadzone(CS.vEgo, setpoint, vehicle_deadzone)
     friction_jerk = math.copysign(max(abs(desired_lateral_jerk) - friction_jerk_deadzone, 0.0), desired_lateral_jerk)
-    ff += get_friction(error_with_lsf + JERK_GAIN * friction_jerk, lateral_accel_deadzone, friction_threshold, parent.torque_params)
+    ff += parent.friction(error_with_lsf + JERK_GAIN * friction_jerk, lateral_accel_deadzone, friction_threshold, CS, setpoint)
     if CS.vEgo < self.low_speed_reset_threshold:
       parent.pid.reset()
     # Filter feedforward before PID so feedback remains immediate.
@@ -144,6 +144,7 @@ class GenesisGV70TorquePolicy:
     freeze_integrator = steer_limited_by_safety or CS.steeringPressed or CS.vEgo < self.low_speed_reset_threshold or unwind_detected
     output_lataccel = parent.pid.update(pid_log.error, error_rate=error_rate, speed=CS.vEgo, feedforward=ff, freeze_integrator=freeze_integrator)
     output_torque = parent.torque_from_lateral_accel(output_lataccel, parent.torque_params)
+    output_torque = apply_turn_assist(parent, CS, VM, params, desired_curvature, output_torque)
     pid_log.active = True
     pid_log.p = float(parent.pid.p)
     pid_log.i = float(parent.pid.i)

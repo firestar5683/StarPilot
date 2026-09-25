@@ -3,11 +3,34 @@ from opendbc.car.toyota.carstate import CarState
 from opendbc.car.toyota.carcontroller import CarController
 from opendbc.car.toyota.radar_interface import RadarInterface
 from opendbc.car.toyota.values import Ecu, CAR, DBC, ToyotaFlags, CarControllerParams, MIN_ACC_SPEED, \
-                                                  EPS_SCALE, ToyotaSafetyFlags
+                                                  EPS_SCALE, ToyotaSafetyFlags, TOYOTA_AUTO_HOLD_CARS, uses_toyota_auto_hold_aeb
 from opendbc.car.disable_ecu import disable_ecu
 from opendbc.car.interfaces import CarInterfaceBase
+from opendbc.safety import ALTERNATIVE_EXPERIENCE
 
 SteerControlType = structs.CarParams.SteerControlType
+
+
+def toyota_auto_hold_supported(CP) -> bool:
+  return bool(CP.brand == "toyota" and CP.carFingerprint in TOYOTA_AUTO_HOLD_CARS and
+              CP.openpilotLongitudinalControl and not CP.flags & ToyotaFlags.SECOC and
+              not CP.notCar and not CP.dashcamOnly and not CP.passive and len(CP.safetyConfigs) == 1 and
+              CP.safetyConfigs[0].safetyModel == structs.CarParams.SafetyModel.toyota and
+              (CP.safetyConfigs[0].safetyParam & 0xFF) == EPS_SCALE[CP.carFingerprint] and
+              not CP.safetyConfigs[0].safetyParam & ~(0xFF | int(ToyotaSafetyFlags.ALT_BRAKE) | int(ToyotaSafetyFlags.LTA)))
+
+
+def apply_toyota_auto_hold(CP, enabled: bool) -> bool:
+  if CP.brand != "toyota":
+    return False
+  CP.flags &= ~int(ToyotaFlags.AUTO_BRAKE_HOLD)
+  CP.alternativeExperience &= ~(ALTERNATIVE_EXPERIENCE.TOYOTA_AUTO_HOLD | ALTERNATIVE_EXPERIENCE.TOYOTA_AEB_HOLD)
+  admitted = enabled and toyota_auto_hold_supported(CP)
+  if admitted:
+    CP.flags |= int(ToyotaFlags.AUTO_BRAKE_HOLD)
+    CP.alternativeExperience |= (ALTERNATIVE_EXPERIENCE.TOYOTA_AEB_HOLD if uses_toyota_auto_hold_aeb(CP)
+                                 else ALTERNATIVE_EXPERIENCE.TOYOTA_AUTO_HOLD)
+  return bool(admitted)
 
 
 class CarInterface(CarInterfaceBase):
@@ -49,6 +72,9 @@ class CarInterface(CarInterfaceBase):
       ret.steerActuatorDelay = 0.12  # Default delay, Prius has larger delay
       ret.steerLimitTimer = 0.4
 
+    smart_dsu = (candidate in (CAR.TOYOTA_PRIUS, CAR.TOYOTA_PRIUS_RETROFIT) and 0x2FF in fingerprint[0] and
+                 any(fw.ecu == Ecu.eps and bytes(fw.fwVersion) == b"8965B47070\x00\x00\x00\x00\x00\x00"
+                     for fw in car_fw))
     stop_and_go = bool(ret.flags & ToyotaFlags.TSS2)
 
     # In TSS2 cars, the camera does long control
@@ -57,15 +83,18 @@ class CarInterface(CarInterfaceBase):
     if Ecu.hybrid in found_ecus:
       ret.flags |= ToyotaFlags.HYBRID.value
 
-    if candidate == CAR.TOYOTA_PRIUS:
+    if candidate in (CAR.TOYOTA_PRIUS, CAR.TOYOTA_PRIUS_RETROFIT):
       stop_and_go = True
+      if candidate == CAR.TOYOTA_PRIUS_RETROFIT:
+        ret.flags |= ToyotaFlags.HYBRID.value
       # Only give steer angle deadzone to for bad angle sensor prius
       for fw in car_fw:
         if fw.ecu == "eps" and not fw.fwVersion == b'8965B47060\x00\x00\x00\x00\x00\x00':
-          ret.steerActuatorDelay = 0.25
-          CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning, steering_angle_deadzone_deg=0.2)
+          retrofit = candidate == CAR.TOYOTA_PRIUS_RETROFIT or smart_dsu
+          ret.steerActuatorDelay = 0.14 if retrofit else 0.25
+          CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning, steering_angle_deadzone_deg=0.3 if retrofit else 0.2)
         # 2021+ TSS2 steering rack swapped into a TSS-P car, not supported
-        if fw.ecu == "eps" and fw.fwVersion == b'8965B47070\x00\x00\x00\x00\x00\x00':
+        if candidate == CAR.TOYOTA_PRIUS and not smart_dsu and fw.ecu == "eps" and fw.fwVersion == b'8965B47070\x00\x00\x00\x00\x00\x00':
           ret.dashcamOnly = True
 
     elif candidate in (CAR.LEXUS_RX, CAR.LEXUS_RX_TSS2):
@@ -105,7 +134,33 @@ class CarInterface(CarInterfaceBase):
     ret.openpilotLongitudinalControl = ((bool(ret.flags & ToyotaFlags.TSS2) and not (ret.flags & ToyotaFlags.RADAR_ACC)) or
                                         bool(ret.flags & ToyotaFlags.DISABLE_RADAR.value))
 
-    ret.autoResumeSng = ret.openpilotLongitudinalControl
+    if candidate in (CAR.TOYOTA_MATRIX_RETROFIT, CAR.TOYOTA_PRIUS_RETROFIT):
+      # These manually selected retrofits currently own stock PCM longitudinal.
+      # Observed takeover hardware needs its paired controller/native port.
+      camera_fp = fingerprint.get(2, {})
+      late_camera = candidate == CAR.TOYOTA_PRIUS_RETROFIT and any(
+        fw.ecu == Ecu.fwdCamera and bytes(fw.fwVersion).startswith(b"8646F4705") for fw in car_fw)
+      bypass = 0x343 in camera_fp or 0x4CB in camera_fp
+      if late_camera:
+        bypass = ((0x343 in camera_fp and not any(0x343 in fingerprint.get(bus, {}) for bus in (0, 1))) or
+                  (0x4CB in camera_fp and 0x4CB not in fingerprint[0]))
+      smart_dsu = (candidate == CAR.TOYOTA_PRIUS_RETROFIT and 0x2FF in fingerprint[0] and
+                   any(fw.ecu == Ecu.eps and bytes(fw.fwVersion) == b"8965B47070\x00\x00\x00\x00\x00\x00"
+                       for fw in car_fw))
+      takeover = 0x2FF in fingerprint[0] or bypass
+      if smart_dsu:
+        ret.flags |= int(ToyotaFlags.LONG_FILTER)
+        ret.safetyConfigs[0].safetyParam |= int(ToyotaSafetyFlags.LONG_FILTER)
+      elif takeover:
+        ret.dashcamOnly = True
+      ret.openpilotLongitudinalControl = smart_dsu
+      ret.alphaLongitudinalAvailable = False
+
+    if smart_dsu:
+      ret.flags |= int(ToyotaFlags.HYBRID | ToyotaFlags.LONG_FILTER)
+      ret.safetyConfigs[0].safetyParam = 4169
+      ret.openpilotLongitudinalControl = True
+    ret.autoResumeSng = ret.openpilotLongitudinalControl and not ret.flags & ToyotaFlags.LONG_FILTER
 
     if not ret.openpilotLongitudinalControl:
       ret.safetyConfigs[0].safetyParam |= ToyotaSafetyFlags.STOCK_LONGITUDINAL.value
@@ -114,7 +169,7 @@ class CarInterface(CarInterfaceBase):
     # to a negative value, so it won't matter.
     ret.minEnableSpeed = -1. if stop_and_go else MIN_ACC_SPEED
 
-    if ret.flags & ToyotaFlags.TSS2:
+    if ret.flags & (ToyotaFlags.TSS2 | ToyotaFlags.LONG_FILTER):
       ret.flags |= ToyotaFlags.RAISED_ACCEL_LIMIT.value
 
       # Hybrids have much quicker longitudinal actuator response

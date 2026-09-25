@@ -1,11 +1,15 @@
 import copy
+import math
 
 from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, DT_CTRL, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.common.filter_simple import FirstOrderFilter
 from opendbc.car.interfaces import CarStateBase
-from opendbc.car.toyota.values import ToyotaFlags, CAR, DBC, STEER_THRESHOLD, EPS_SCALE
+from opendbc.car.dashboard_speed_limit import Tracker as LimitTracker, parser_expiry, toyota_sign
+from opendbc.can.dbc import DBC as CANDBC
+from opendbc.car.toyota.prius_longitudinal import configured as prius_filter_configured
+from opendbc.car.toyota.values import ToyotaFlags, CAR, DBC, STEER_THRESHOLD, EPS_SCALE, uses_toyota_auto_hold_aeb
 
 ButtonType = structs.CarState.ButtonEvent.Type
 SteerControlType = structs.CarParams.SteerControlType
@@ -26,7 +30,7 @@ class CarState(CarStateBase):
   def __init__(self, CP):
     super().__init__(CP)
     can_define = CANDefine(DBC[CP.carFingerprint][Bus.pt])
-    self.eps_torque_scale = EPS_SCALE[CP.carFingerprint] / 100.
+    self.eps_torque_scale = (.73 if prius_filter_configured(CP) else EPS_SCALE[CP.carFingerprint] / 100.)
     self.cluster_speed_hyst_gap = CV.KPH_TO_MS / 2.
     self.cluster_min_speed = CV.KPH_TO_MS / 2.
 
@@ -40,6 +44,7 @@ class CarState(CarStateBase):
     # Need to apply an offset as soon as the steering angle measurements are both received
     self.accurate_steer_angle_seen = False
     self.angle_offset = FirstOrderFilter(None, 60.0, DT_CTRL, initialized=False)
+    self.dashboard_limit = LimitTracker()
 
     self.lkas_button = 0
     self.distance_button = 0
@@ -47,13 +52,18 @@ class CarState(CarStateBase):
     self.pcm_follow_distance = 0
 
     self.acc_type = 1
+    self.pcm_acc_status = 0
     self.lkas_hud = {}
     self.gvc = 0.0
     self.secoc_synchronization = None
+    self.pre_collision_2 = {}
 
   def update(self, can_parsers) -> structs.CarState:
     cp = can_parsers[Bus.pt]
     cp_cam = can_parsers[Bus.cam]
+
+    if self.CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD and uses_toyota_auto_hold_aeb(self.CP):
+      self.pre_collision_2 = copy.copy(cp_cam.vl["PRE_COLLISION_2"])
 
     ret = structs.CarState()
     cp_acc = cp_cam if (self.CP.flags & ToyotaFlags.TSS2) and not (self.CP.flags & ToyotaFlags.RADAR_ACC) else cp
@@ -163,6 +173,7 @@ class CarState(CarStateBase):
         ret.accFaulted = ret.accFaulted or cp.vl["PCM_CRUISE_2"]["LOW_SPEED_LOCKOUT"] == 2
 
     pcm_acc_status = cp.vl["PCM_CRUISE"]["CRUISE_STATE"]
+    self.pcm_acc_status = pcm_acc_status
     ret.cruiseState.standstill = pcm_acc_status == 7
     ret.cruiseState.enabled = bool(cp.vl["PCM_CRUISE"]["CRUISE_ACTIVE"])
     ret.cruiseState.nonAdaptive = pcm_acc_status in (1, 2, 3, 4, 5, 6)
@@ -181,7 +192,7 @@ class CarState(CarStateBase):
       self.pcm_follow_distance = cp.vl["PCM_CRUISE_2"]["PCM_FOLLOW_DISTANCE"]
 
     buttonEvents = []
-    if self.CP.flags & ToyotaFlags.TSS2:
+    if self.CP.flags & (ToyotaFlags.TSS2 | ToyotaFlags.LONG_FILTER) or self.CP.carFingerprint == CAR.TOYOTA_PRIUS_RETROFIT:
       # lkas button is wired to the camera
       prev_lkas_button = self.lkas_button
       self.lkas_button = cp_cam.vl["LKAS_HUD"]["LDA_ON_MESSAGE"]
@@ -191,23 +202,50 @@ class CarState(CarStateBase):
         buttonEvents.extend(create_button_events(1, 0, {1: ButtonType.lkas}) +
                             create_button_events(0, 1, {1: ButtonType.lkas}))
 
-      if not (self.CP.flags & (ToyotaFlags.RADAR_ACC | ToyotaFlags.SECOC)):
+      if self.CP.flags & ToyotaFlags.TSS2 and not (self.CP.flags & (ToyotaFlags.RADAR_ACC | ToyotaFlags.SECOC)):
         # distance button is wired to the ACC module (camera or radar)
         prev_distance_button = self.distance_button
         self.distance_button = cp_acc.vl["ACC_CONTROL"]["DISTANCE"]
 
         buttonEvents += create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
 
+    if self.CP.carFingerprint in (CAR.TOYOTA_PRIUS, CAR.TOYOTA_PRIUS_RETROFIT) or self.CP.flags & ToyotaFlags.LONG_FILTER:
+      prev_distance_button = self.distance_button
+      self.distance_button = (cp.vl["SDSU"]["FD_BUTTON"] if self.CP.flags & ToyotaFlags.LONG_FILTER
+                              else cp_acc.vl["ACC_CONTROL"]["DISTANCE"])
+      buttonEvents += create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
+
+    if self.CP.carFingerprint == CAR.TOYOTA_SIENNA_4TH_GEN:
+      prev_distance_button = self.distance_button
+      self.distance_button = cp.vl["PCM_CRUISE_4"]["DISTANCE"]
+      buttonEvents += create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise})
+
     ret.buttonEvents = buttonEvents
+    timestamp, expiry = parser_expiry(cp_cam, "RSA1", "TSGN1")
+    if timestamp > self.dashboard_limit.observation.observed_ns:
+      sign = int(cp_cam.vl["RSA1"]["TSGN1"])
+      speed = int(cp_cam.vl["RSA1"]["SPDVAL1"])
+      status, value_mps = toyota_sign(sign, speed)
+      self.dashboard_limit.update(timestamp, status, value_mps, valid_until_ns=expiry)
     return ret
 
   @staticmethod
   def get_can_parsers(CP):
+    dbc_name = DBC[CP.carFingerprint][Bus.pt]
+    cam_messages = [("RSA1", math.nan)] if "RSA1" in CANDBC(dbc_name).name_to_msg else []
+    if CP.flags & ToyotaFlags.AUTO_BRAKE_HOLD and uses_toyota_auto_hold_aeb(CP):
+      cam_messages.append(("PRE_COLLISION_2", 50))
     pt_messages = [
       ("BLINKERS_STATE", float('nan')),
     ]
 
+    if CP.carFingerprint == CAR.TOYOTA_SIENNA_4TH_GEN:
+      pt_messages.append(("PCM_CRUISE_4", 1))
+
+    if CP.flags & ToyotaFlags.LONG_FILTER:
+      pt_messages.append(("SDSU", 50))
+
     return {
       Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, 0),
-      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], 2),
+      Bus.cam: CANParser(dbc_name, cam_messages, 2),
     }

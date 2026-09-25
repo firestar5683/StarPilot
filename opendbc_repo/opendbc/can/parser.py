@@ -204,8 +204,8 @@ class CANParser:
       strings = [strings]
 
     for addr in self.addresses:
-      for k in self.vl_all[addr]:
-        self.vl_all[addr][k].clear()
+      for values in self.vl_all[addr].values():
+        values.clear()
 
     updated_addrs: set[int] = set()
     for entry in strings:

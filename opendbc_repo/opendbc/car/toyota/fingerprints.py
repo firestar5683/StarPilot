@@ -4,6 +4,10 @@ from opendbc.car.toyota.values import CAR
 
 Ecu = CarParams.Ecu
 
+# Retrofit selection is explicit; no observed CAN fingerprint distinguishes
+# its changed EPS hardware. An empty dictionary is not an automatic identity.
+FINGERPRINTS = {}
+
 FW_VERSIONS = {
   CAR.TOYOTA_AVALON: {
     (Ecu.abs, 0x7b0, None): [

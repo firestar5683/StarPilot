@@ -5,14 +5,17 @@ import math
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
+from unittest import mock
 
 from opendbc.car import structs
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.hyundai.values import CAR as HYUNDAI
 from opendbc.car.toyota.values import CAR as TOYOTA
 from opendbc.car.vehicle_model import VehicleModel
+from opendbc.car.lateral import get_friction
 from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
+from openpilot.selfdrive.controls.lib import latcontrol_torque
 from openpilot.starpilot.lateral.torque_extension import selected_policy
 from openpilot.starpilot.lateral import ioniq6_policy as tune
 from openpilot.starpilot.lateral.torque_shaping import INTERP_SPEEDS
@@ -20,7 +23,12 @@ from openpilot.starpilot.lateral.torque_shaping import INTERP_SPEEDS
 TESTDATA = Path(__file__).parent / 'testdata'
 
 
-def _rows(car, sequence, *, profile='2023', matched_frozen_cp=False, passive=False, direct_original_controller=False):
+def _legacy_friction(controller, error, deadzone, threshold, _cs, _setpoint):
+  return latcontrol_torque.get_friction(error, deadzone, threshold, controller.torque_params)
+
+
+def _rows(car, sequence, *, profile='2023', matched_frozen_cp=False, passive=False, direct_original_controller=False, turn_assist=True,
+          roll=None):
   cp = interfaces[car].get_non_essential_params(car)
   cp.passive = passive
   if matched_frozen_cp:
@@ -36,7 +44,7 @@ def _rows(car, sequence, *, profile='2023', matched_frozen_cp=False, passive=Fal
       versions[0].fwVersion = b'IONIQ6-230915'
       versions[1].fwVersion = b'IONIQ6-240206'
   ci = interfaces[car](cp)
-  controller = LatControlTorque(cp.as_reader(), ci, DT_CTRL, turn_assist=True)
+  controller = LatControlTorque(cp.as_reader(), ci, DT_CTRL, turn_assist=turn_assist)
   if direct_original_controller:
     # The older frozen vectors called the controller directly, before the
     # original controlsd drive loop replaced the PID gain curve each tick.
@@ -44,7 +52,7 @@ def _rows(car, sequence, *, profile='2023', matched_frozen_cp=False, passive=Fal
   vm = VehicleModel(cp)
   cs = structs.CarState.new_message()
   cs.gearShifter = structs.CarState.GearShifter.drive
-  params = SimpleNamespace(angleOffsetDeg=0.0, roll=0.03 if matched_frozen_cp else 0.02)
+  params = SimpleNamespace(angleOffsetDeg=0.0, roll=(0.03 if matched_frozen_cp else 0.02) if roll is None else roll)
   rows = []
   for active, speed, angle, curvature, pressed in sequence:
     cs.vEgo = speed
@@ -125,6 +133,23 @@ class Ioniq6PolicyTests(unittest.TestCase):
           for value, reference in zip(row, expected, strict=True):
             self.assertAlmostEqual(value, reference, places=6)
 
+  def test_threshold_reaches_controller_without_changing_requests_or_pid(self):
+    for speed, curvature in ((20., .0002), (32., .001), (32., .0001)):
+      with self.subTest(speed=speed, curvature=curvature):
+        sequence = [(False, speed, 0., curvature, False)] * 100 + [(True, speed, 0., curvature, False)] * 100
+        with mock.patch.object(latcontrol_torque, 'get_friction', wraps=get_friction) as friction:
+          controller, actual = _rows(HYUNDAI.HYUNDAI_IONIQ_6, sequence, roll=0.)
+        with mock.patch.object(latcontrol_torque, 'get_friction', wraps=get_friction) as old_friction:
+          with mock.patch.object(LatControlTorque, 'friction', _legacy_friction):
+            baseline, original = _rows(HYUNDAI.HYUNDAI_IONIQ_6, sequence, roll=0.)
+        self.assertEqual(friction.call_args.args[:3], old_friction.call_args.args[:3])
+        self.assertEqual(controller.torque_params.to_dict(), baseline.torque_params.to_dict())
+        self.assertEqual((controller.pid.pos_limit, controller.pid.neg_limit),
+                         (baseline.pid.pos_limit, baseline.pid.neg_limit))
+        for row, old in zip(actual, original, strict=True):
+          self.assertEqual(row[1:5], old[1:5])
+        self.assertEqual(actual, original)
+
   def test_firmware_gate_and_live_factor_do_not_stack(self):
     cp = interfaces[HYUNDAI.HYUNDAI_IONIQ_6].get_non_essential_params(HYUNDAI.HYUNDAI_IONIQ_6)
     self.assertFalse(tune.is_ioniq_6_2025_model(cp))
@@ -143,7 +168,8 @@ class Ioniq6PolicyTests(unittest.TestCase):
       self.assertAlmostEqual(controller.torque_params.latAccelOffset, 0.02, places=6)
       self.assertAlmostEqual(controller.torque_params.friction, 0.10, places=6)
 
-  def test_other_cars_match_committed_parent_trace(self):
+  @mock.patch.object(LatControlTorque, 'friction', _legacy_friction)
+  def test_other_cars_without_assist_match_committed_parent_trace(self):
     sequence = ([(False, 2., 5., -.0005, False)] * 2 +
                 [(True, 2., 5., -.0005, False)] * 3 +
                 [(True, 15., -1., .0004, False)] * 3 +
@@ -152,7 +178,7 @@ class Ioniq6PolicyTests(unittest.TestCase):
     parent = json.loads((TESTDATA / 'non_ioniq_parent.json').read_text())
     for car in (TOYOTA.TOYOTA_COROLLA_TSS2, HYUNDAI.HYUNDAI_IONIQ_5):
       with self.subTest(car=str(car)):
-        controller, actual = _rows(car, sequence, passive=car == TOYOTA.TOYOTA_COROLLA_TSS2)
+        controller, actual = _rows(car, sequence, passive=car == TOYOTA.TOYOTA_COROLLA_TSS2, turn_assist=False)
         self.assertIsNone(selected_policy(controller))
         for row, expected in zip(actual, parent[str(car)], strict=True):
           for value, reference in zip(row, expected, strict=True):
