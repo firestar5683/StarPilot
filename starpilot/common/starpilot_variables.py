@@ -1611,7 +1611,9 @@ class StarPilotVariables:
 
     toyota_doors = self.get_value("ToyotaDoors", condition=toggle.car_make == "toyota")
     toggle.lock_doors = self.get_value("LockDoors", condition=toyota_doors)
+    toggle.lock_doors_speed = self.get_value("LockDoorsSpeed", cast=float, condition=toggle.lock_doors, conversion=speed_conversion)
     toggle.unlock_doors = self.get_value("UnlockDoors", condition=toyota_doors)
+    toggle.unlock_doors_trigger = self.get_value("UnlockDoorsTrigger", cast=int, condition=toggle.unlock_doors)
 
     toggle.gm_pedal_longitudinal = self.get_value(
       "GMPedalLongitudinal",

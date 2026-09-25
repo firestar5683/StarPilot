@@ -3655,6 +3655,20 @@
         "picker_description": "Locks Lexus/Toyota doors when shifting out of park.",
         "data_type": "bool",
         "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LockDoorsSpeed",
+        "label": "Lock at Speed",
+        "description": "Wait until the car reaches this speed before locking the doors. Set to 0 to lock as soon as you shift out of park.",
+        "data_type": "int",
+        "ui_type": "numeric",
+        "min": 0,
+        "max": 30,
+        "step": 1,
+        "unit_type": "vehicle_speed",
+        "parent_key": "LockDoors",
         "settings_tier": "simple"
       },
       {
@@ -3664,6 +3678,30 @@
         "picker_description": "Unlocks Lexus/Toyota doors when shifting into park.",
         "data_type": "bool",
         "ui_type": "toggle",
+        "is_parent_toggle": true,
+        "settings_tier": "simple"
+      },
+      {
+        "key": "UnlockDoorsTrigger",
+        "label": "Unlock When",
+        "description": "Choose when the doors unlock. Shifting into park always unlocks them. With \"When the car stops\" or \"When Auto Hold engages\", the doors unlock at every stop, even in traffic, and lock again once you drive off.",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "On shift into Park"
+          },
+          {
+            "value": 1,
+            "label": "When the car stops"
+          },
+          {
+            "value": 2,
+            "label": "When Auto Hold engages"
+          }
+        ],
+        "parent_key": "UnlockDoors",
         "settings_tier": "simple"
       },
       {
