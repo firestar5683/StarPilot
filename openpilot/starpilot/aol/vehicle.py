@@ -1,0 +1,69 @@
+"""Fail-closed dispatch to vehicle-owned AOL capabilities."""
+
+from openpilot.starpilot.aol.policy import AolVehiclePolicy
+from openpilot.starpilot.aol.intent import AolCardIntent
+from openpilot.starpilot.car.honda import aol as honda
+from openpilot.starpilot.car.hyundai import aol as hyundai
+from openpilot.starpilot.car.gm import aol as gm
+
+_PORTS = {'honda': honda, 'hyundai': hyundai, 'gm': gm}
+
+
+def policy_for(CP) -> AolVehiclePolicy:
+  try:
+    port = _PORTS.get(CP.brand)
+    return port.policy_for(CP) if port is not None else AolVehiclePolicy()
+  except (AttributeError, TypeError, ValueError, OverflowError, IndexError):
+    return AolVehiclePolicy()
+
+
+def native_profile_supported(model: int, param: int) -> bool:
+  return any(port.native_profile_supported(model, param) for port in _PORTS.values())
+
+
+def native_matches_cp(CP, model: int, param: int) -> bool:
+  try:
+    return bool(any(port.native_accepts_cp(CP, model, param) for port in _PORTS.values()) and
+                model == int(CP.safetyConfigs[0].safetyModel.raw) and
+                param == int(CP.safetyConfigs[-1].safetyParam))
+  except (AttributeError, TypeError, ValueError, OverflowError, IndexError):
+    return False
+
+
+def native_latch_rejected(CP, native) -> bool:
+  if native is None:
+    return False
+  try:
+    port = _PORTS.get(CP.brand)
+    rejected = getattr(port, 'native_latch_rejected', None)
+    return bool(rejected is not None and native_matches_cp(CP, native.safetyModel, native.safetyParam) and rejected(CP, native))
+  except (AttributeError, TypeError, ValueError, OverflowError, IndexError):
+    return False
+
+
+def create_intent(CP, settings, policy):
+  port = _PORTS.get(CP.brand)
+  factory = getattr(port, 'create_intent', None)
+  if factory is not None:
+    return factory(CP, settings)
+  return AolCardIntent(settings, explicit_latch=policy.explicit_latch)
+
+
+def ordinary_axis_request_allowed(CP, CS) -> bool:
+  """Required ordinary transport has no permission without its port owner."""
+  try:
+    port = _PORTS.get(CP.brand)
+    allowed = getattr(port, 'ordinary_axis_request_allowed', None)
+    return bool(allowed is not None and allowed(CP, CS))
+  except (AttributeError, TypeError, ValueError, OverflowError, IndexError):
+    return False
+
+
+def allow_lateral_onset(CP, *, requested, normal_enabled, steering_pressed, previous_active):
+  """Optional vehicle-owned onset restriction; never creates permission."""
+  port = _PORTS.get(CP.brand)
+  owner = getattr(port, 'allow_lateral_onset', None)
+  if owner is None:
+    return bool(requested)
+  return bool(requested and owner(CP, requested=requested, normal_enabled=normal_enabled,
+                                  steering_pressed=steering_pressed, previous_active=previous_active))
