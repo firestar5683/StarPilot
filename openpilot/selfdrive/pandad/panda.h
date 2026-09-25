@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <utility>
 
 #include "openpilot/cereal/gen/cpp/car.capnp.h"
 #include "openpilot/cereal/gen/cpp/log.capnp.h"
@@ -45,10 +46,11 @@ struct can_frame {
 
 class Panda {
 private:
-  std::unique_ptr<PandaSpiHandle> handle;
+  std::unique_ptr<PandaCommsHandle> handle;
 
 public:
-  Panda(std::string serial);
+  Panda(std::string serial, uint32_t bus_offset=0);
+  const uint32_t bus_offset;
 
   cereal::PandaState::PandaType hw_type = cereal::PandaState::PandaType::UNKNOWN;
 
@@ -69,6 +71,7 @@ public:
   uint16_t get_fan_speed();
   void set_ir_pwr(uint16_t ir_pwr);
   std::optional<health_t> get_state();
+  std::optional<aol_safety_health_t> get_aol_safety_state();
   std::optional<can_health_t> get_can_state(uint16_t can_number);
   void set_loopback(bool loopback);
   std::optional<std::vector<uint8_t>> get_firmware_version();
@@ -77,6 +80,7 @@ public:
   void set_power_saving(bool power_saving);
   void enable_deepsleep();
   void send_heartbeat(bool engaged);
+  bool set_aol_axis_request(uint8_t axis_mask);
   void set_can_speed_kbps(uint16_t bus, uint16_t speed);
   void set_can_fd_auto(uint16_t bus, bool enabled);
   void set_data_speed_kbps(uint16_t bus, uint16_t speed);
@@ -90,7 +94,9 @@ protected:
   uint8_t receive_buffer[RECV_SIZE + sizeof(can_header) + 64];
   uint32_t receive_buffer_size = 0;
 
-  Panda() {}
+  Panda(uint32_t bus_offset=0) : bus_offset(bus_offset) {}
+  Panda(std::unique_ptr<PandaCommsHandle> comms, cereal::PandaState::PandaType type, uint32_t offset=0)
+    : handle(std::move(comms)), bus_offset(offset), hw_type(type) {}
   void pack_can_buffer(const capnp::List<cereal::CanData>::Reader &can_data_list,
                          std::function<void(uint8_t *, size_t)> write_func);
   bool unpack_can_buffer(uint8_t *data, uint32_t &size, std::vector<can_frame> &out_vec);

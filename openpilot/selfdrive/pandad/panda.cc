@@ -1,4 +1,5 @@
 #include "selfdrive/pandad/panda.h"
+#include "selfdrive/pandad/aol_protocol.h"
 
 #include <unistd.h>
 
@@ -90,6 +91,12 @@ std::optional<health_t> Panda::get_state() {
   return err >= 0 ? std::make_optional(health) : std::nullopt;
 }
 
+std::optional<aol_safety_health_t> Panda::get_aol_safety_state() {
+  aol_safety_health_t status {0};
+  int count = handle->control_read(0xd5, 0, 0, (unsigned char*)&status, sizeof(status));
+  return parse_aol_status(reinterpret_cast<const unsigned char *>(&status), count);
+}
+
 std::optional<can_health_t> Panda::get_can_state(uint16_t can_number) {
   can_health_t can_health {0};
   int err = handle->control_read(0xc2, can_number, 0, (unsigned char*)&can_health, sizeof(can_health));
@@ -136,6 +143,10 @@ void Panda::enable_deepsleep() {
 
 void Panda::send_heartbeat(bool engaged) {
   handle->control_write(0xf3, engaged, 0);
+}
+
+bool Panda::set_aol_axis_request(uint8_t axis_mask) {
+  return handle->control_write(0xf5, axis_mask & 0x3U, 0) >= 0;
 }
 
 void Panda::set_can_speed_kbps(uint16_t bus, uint16_t speed) {
