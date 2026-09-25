@@ -1,0 +1,96 @@
+"""Native, inert capture of the protected large Software viewport."""
+
+import argparse
+from dataclasses import asdict
+import hashlib
+import json
+from pathlib import Path
+
+import pyray as rl
+import raylib
+
+from openpilot.starpilot.ui.presentation import BitmapFonts, Profile
+from openpilot.starpilot.ui.settings import SettingsView
+from openpilot.starpilot.ui.settings_state import Destination, SettingsState
+from openpilot.starpilot.ui.software import SoftwareView
+from openpilot.starpilot.ui.software_state import SoftwareState
+
+
+def digest(path: Path) -> str:
+  return hashlib.sha256(path.read_bytes()).hexdigest()
+
+
+def main() -> None:
+  parser = argparse.ArgumentParser(description=__doc__)
+  parser.add_argument("--font-directory", type=Path, required=True)
+  parser.add_argument("--asset-directory", type=Path, required=True)
+  parser.add_argument("--output", type=Path, required=True)
+  args = parser.parse_args()
+  if args.output.exists():
+    raise ValueError("Refusing to overwrite Software evidence")
+  args.output.mkdir(parents=True)
+  width, height = Profile.LARGE.size
+  rl.set_config_flags(rl.ConfigFlags.FLAG_MSAA_4X_HINT | rl.ConfigFlags.FLAG_WINDOW_HIGHDPI | rl.ConfigFlags.FLAG_WINDOW_HIDDEN)
+  rl.init_window(960, 480, "Development preview — Software panel")
+  if not rl.is_window_ready():
+    raise RuntimeError("Unable to create native Software graphics context")
+  target = rl.load_render_texture(width, height)
+  try:
+    if not target.id or not target.texture.id:
+      raise RuntimeError("Unable to create Software framebuffer")
+    with BitmapFonts(Profile.LARGE, args.font_directory) as fonts:
+      settings = SettingsView(fonts, args.asset_directory)
+      try:
+        software = SoftwareView(fonts)
+        state = SoftwareState()
+        for _ in range(18):
+          rl.begin_texture_mode(target)
+          try:
+            rl.clear_background(rl.BLACK)
+            software.render(state)
+            settings.render_rail(SettingsState(), selected=Destination.SOFTWARE)
+          finally:
+            rl.end_texture_mode()
+        pixels = rl.load_image_from_texture(target.texture)
+        try:
+          if pixels.data == rl.ffi.NULL:
+            raise RuntimeError("Unable to read Software framebuffer")
+          rl.image_format(pixels, rl.PixelFormat.PIXELFORMAT_UNCOMPRESSED_R8G8B8A8)
+          rl.image_flip_vertical(pixels)
+          if not rl.export_image(pixels, str(args.output / "large.png")):
+            raise RuntimeError("Unable to export Software framebuffer")
+          rgba_sha = hashlib.sha256(bytes(rl.ffi.buffer(pixels.data, width * height * 4))).hexdigest()
+        finally:
+          if pixels.data != rl.ffi.NULL:
+            rl.unload_image(pixels)
+        module = Path(__file__).parent
+        report = {
+          "profile": Profile.LARGE,
+          "dimensions": [width, height],
+          "development_only": True,
+          "state": asdict(state),
+          "rgba_sha256": rgba_sha,
+          "png_sha256": digest(args.output / "large.png"),
+          "native_raylib_sha256": digest(Path(raylib._cffi.__file__)),
+          "source_sha256": {name: digest(module / name) for name in (
+            "software.py", "software_state.py", "preview_software.py", "settings.py", "settings_assets.py", "presentation.py",
+            "settings-assets.json", "bitmap-fonts.json", "sora-brand-font.json")},
+          "asset_sha256": {"icons/backspace.png": digest(args.asset_directory / "icons/backspace.png")},
+          "font_sha256": {path.name: digest(path) for path in sorted(args.font_directory.glob("*"))
+                          if path.name in {"Inter-Regular.fnt", "Inter-Regular.png", "Inter-Medium.fnt", "Inter-Medium.png",
+                                           "Inter-Bold.fnt", "Inter-Bold.png", "Inter-SemiBold.fnt", "Inter-SemiBold.png",
+                                           "unifont.fnt", "unifont.png"}} |
+                         {name: digest(module / "assets/fonts" / name) for name in ("Sora-800.fnt", "Sora-800.png")},
+          "scope": "six-row large protected viewport only; no scrolling, dialogs, updater, configuration, or compact Software",
+        }
+        (args.output / "large.json").write_text(json.dumps(report, indent=2) + "\n")
+      finally:
+        settings.close()
+  finally:
+    if target.id:
+      rl.unload_render_texture(target)
+    rl.close_window()
+
+
+if __name__ == "__main__":
+  main()
