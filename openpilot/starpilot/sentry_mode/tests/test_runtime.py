@@ -1,0 +1,215 @@
+import os
+import signal
+from contextlib import ExitStack
+from pathlib import Path
+from types import SimpleNamespace as NS
+import tempfile
+import unittest
+from unittest.mock import Mock, patch
+
+from openpilot.cereal import log, messaging
+from openpilot.common.params import Params
+from openpilot.starpilot.sentry_mode.preferences import KEY, Preferences, encode
+from openpilot.starpilot.sentry_mode.runtime import SentryRuntime
+from openpilot.starpilot.sentry_mode import runtime as runtime_module
+
+
+class Clock:
+  def __init__(self):
+    self.mono = 1_000_000_000_000
+    self.offset = 50_000_000_000
+
+  def boot(self):
+    return self.mono + self.offset
+
+
+class Messages:
+  def __init__(self, clock):
+    self.clock = clock
+    self.messages = {}
+    names = ("deviceState", "pandaStates", "peripheralState", "accelerometer")
+    self.seen = dict.fromkeys(names, True)
+    self.alive = dict.fromkeys(names, True)
+    self.valid = dict.fromkeys(names, True)
+    self.updated = dict.fromkeys(names, True)
+    self.logMonoTime = dict.fromkeys(names, 0)
+    self.recv_time = dict.fromkeys(names, 0.0)
+    self.sock = {}
+
+  def __getitem__(self, name):
+    return self.messages[name]
+
+  def update(self, _timeout):
+    pass
+
+  def set_sources(self, *, sample_stamp=None, acceleration=(0.0, 0.0, 9.81)):
+    now = self.clock.mono
+    for name in self.logMonoTime:
+      self.recv_time[name] = (now - 10_000_000) / 1e9
+      self.logMonoTime[name] = now - 10_000_000 if name in ("deviceState", "accelerometer") else self.clock.boot() - 10_000_000
+      self.updated[name] = True
+    self.messages["deviceState"] = NS(started=False, carBatteryCapacityUwh=1_000_000)
+    self.messages["pandaStates"] = [NS(ignitionLine=False, ignitionCan=False, pandaType="uno")]
+    self.messages["peripheralState"] = NS(pandaType="uno", voltage=12_500)
+    # A real Cap'n Proto event is serialized and decoded before projection.
+    event = messaging.new_message("accelerometer", valid=True)
+    event.accelerometer.timestamp = sample_stamp if sample_stamp is not None else now - 20_000_000
+    event.accelerometer.acceleration.v = list(acceleration)
+    return event.to_bytes()
+
+
+class TestRuntime(unittest.TestCase):
+  def setUp(self):
+    self.directory = tempfile.TemporaryDirectory()
+    self.addCleanup(self.directory.cleanup)
+    self.environment = patch.dict(os.environ, PARAMS_ROOT=self.directory.name, OPENPILOT_PREFIX="sentryruntime",
+                                  STARPILOT_SENTRY_DEVELOPMENT="1")
+    self.environment.start()
+    self.addCleanup(self.environment.stop)
+    self.params = Params()
+    self.params.put_bool("IsOffroad", True, block=True)
+    Path(self.params.get_param_path(KEY)).write_bytes(encode(Preferences(True)))
+    self.clock = Clock()
+    self.messages = Messages(self.clock)
+    self.events = []
+    self.runtime = SentryRuntime(self.params, self.messages, mono_clock=lambda: self.clock.mono,
+                                 boot_clock=self.clock.boot,
+                                 record=lambda kind, stamp, permitted: self.events.append((kind, stamp, permitted())))
+
+  def tick(self, *, stamp=None, acceleration=(0.0, 0.0, 9.81)):
+    self.clock.mono += 100_000_000
+    raw = self.messages.set_sources(sample_stamp=stamp, acceleration=acceleration)
+    with log.Event.from_bytes(raw) as parsed:
+      self.messages.messages["accelerometer"] = parsed.accelerometer
+      return self.runtime.tick()
+
+  def test_status_reports_actual_policy_and_immediate_sensor_revocation(self):
+    status = Mock()
+    self.runtime.status = status
+    decision = self.tick()
+    status.publish.assert_called_once_with(decision, encode(Preferences(True)), "idle")
+    self.assertEqual(decision.state, "arming")
+    self.messages.updated["accelerometer"] = False
+    self.clock.mono += 100_000_000
+    decision = self.runtime.tick()
+    self.assertEqual(decision.state, "sensor_unavailable")
+    self.assertEqual(status.publish.call_args.args[0], decision)
+
+  def test_serialized_sensor_and_fresh_parked_evidence(self):
+    first = self.tick()
+    self.assertEqual(first.state, "arming")
+    self.assertIsNotNone(self.runtime.policy.last_sample_time)
+    self.messages.updated["accelerometer"] = False
+    self.clock.mono += 100_000_000
+    self.assertEqual(self.runtime.tick().state, "sensor_unavailable")
+    self.assertIsNone(self.runtime.policy.arm_started)
+    self.assertEqual(self.events, [])
+
+
+  def test_serialized_device_panda_peripheral_use_actual_clock_domains(self):
+    self.clock.mono += 100_000_000
+    sensor_raw = self.messages.set_sources()
+    device = messaging.new_message("deviceState", valid=True)
+    device.deviceState.started = False
+    device.deviceState.carBatteryCapacityUwh = 1_000_000
+    panda = messaging.new_message("pandaStates", 1, valid=True)
+    panda.pandaStates[0].pandaType = "uno"
+    peripheral = messaging.new_message("peripheralState", valid=True)
+    peripheral.peripheralState.pandaType = "uno"
+    peripheral.peripheralState.voltage = 12_500
+    with ExitStack() as stack:
+      readers = [stack.enter_context(log.Event.from_bytes(raw)) for raw in
+                 (sensor_raw, device.to_bytes(), panda.to_bytes(), peripheral.to_bytes())]
+      self.messages.messages.update(accelerometer=readers[0].accelerometer, deviceState=readers[1].deviceState,
+                                    pandaStates=readers[2].pandaStates, peripheralState=readers[3].peripheralState)
+      self.assertEqual(self.runtime.tick().state, "arming")
+      # A C++ pandad BOOTTIME stamp incorrectly supplied in MONOTONIC units is stale.
+      self.messages.logMonoTime["pandaStates"] = self.clock.mono - 10_000_000
+      self.assertNotEqual(self.runtime.tick().state, "armed")
+
+  def test_unknown_ignition_power_and_shutdown_disarm(self):
+    self.tick()
+    self.messages.messages["pandaStates"][0].ignitionCan = True
+    self.assertEqual(self.runtime.tick().state, "disabled_ignition")
+    self.messages.messages["pandaStates"][0].ignitionCan = False
+    self.messages.messages["peripheralState"].voltage = 11_700
+    self.assertEqual(self.runtime.tick().state, "low_voltage")
+    self.messages.messages["peripheralState"].voltage = 12_500
+    self.params.put_bool("DoShutdown", True, block=True)
+    self.assertNotEqual(self.runtime.tick().state, "armed")
+    self.assertEqual(self.events, [])
+
+  def test_resume_barrier_rejects_queued_pre_resume_sensor(self):
+    self.tick()
+    old_stamp = self.messages.messages["accelerometer"].timestamp
+    self.clock.offset += 100_000_000
+    self.clock.mono += 100_000_000
+    raw = self.messages.set_sources(sample_stamp=old_stamp)
+    with log.Event.from_bytes(raw) as parsed:
+      self.messages.messages["accelerometer"] = parsed.accelerometer
+      self.assertNotEqual(self.runtime.tick().state, "armed")
+    self.assertIsNone(self.runtime.policy.arm_started)
+    self.assertEqual(self.events, [])
+    self.assertEqual(self.tick().state, "arming")
+
+  def test_revoked_settings_and_source_preserved(self):
+    self.assertEqual(self.tick().state, "arming")
+    raw = b'{"version":1,"enabled":true,"sensitivity":NaN,"warningTimeSeconds":1}'
+    Path(self.params.get_param_path(KEY)).write_bytes(raw)
+    self.assertEqual(self.tick().state, "disabled")
+    self.assertEqual(Path(self.params.get_param_path(KEY)).read_bytes(), raw)
+    self.assertEqual(self.events, [])
+
+  def test_full_arming_to_warning_records_once_with_fresh_final_authority(self):
+    for _ in range(901):
+      self.tick()
+    self.assertIsNotNone(self.runtime.policy.arm_started)
+    for index in range(11):
+      value = 10.0 if index % 2 else 9.81
+      self.tick(acceleration=(0.0, 0.0, value))
+    self.assertEqual(len(self.events), 1)
+    self.assertEqual(self.events[0][0], "warning")
+    self.assertTrue(self.events[0][2])
+    self.assertEqual(self.runtime.recording_state, "durability_unknown")  # Stub supplies no durability receipt.
+    self.params.put_bool("DoShutdown", True, block=True)
+    self.assertNotEqual(self.tick().state, "armed")
+    self.assertEqual(len(self.events), 1)
+
+  def test_store_callback_rechecks_saved_revision_and_sample_age(self):
+    self.tick()
+    self.runtime.policy.arm_started = self.clock.mono / 1e9 - 90
+    self.runtime.policy.last_sample_time = self.clock.mono / 1e9 - 0.02
+    original = Path(self.params.get_param_path(KEY)).read_bytes()
+    self.assertTrue(self.runtime._permitted(original))
+    Path(self.params.get_param_path(KEY)).write_bytes(encode(Preferences(True, self.runtime.policy.settings.__class__(0.05, 1.0))))
+    self.assertFalse(self.runtime._permitted(original))
+    Path(self.params.get_param_path(KEY)).write_bytes(original)
+    self.clock.mono += 600_000_000
+    self.assertFalse(self.runtime._permitted(original))
+
+
+class TestMainShutdown(unittest.TestCase):
+  def test_both_signals_close_owned_subscription_and_restore_handlers(self):
+    from openpilot.starpilot.sentry_mode import storage
+    for requested in (signal.SIGINT, signal.SIGTERM):
+      with self.subTest(requested=requested):
+        installed = {}
+        prior = object()
+        close = Mock()
+        def install(number, handler, target=installed):
+          target[number] = handler
+        def tick(which=requested, target=installed):
+          target[which](which, None)
+        with patch.object(signal, "getsignal", return_value=prior), patch.object(signal, "signal", side_effect=install), \
+             patch.object(messaging, "SubMaster"), patch.object(runtime_module, "Params"), \
+             patch.object(storage, "EventStore"), patch.object(runtime_module, "SentryRuntime") as owner:
+          owner.return_value.tick.side_effect = tick
+          owner.return_value.close = close
+          runtime_module.main()
+        close.assert_called_once()
+        self.assertIs(installed[signal.SIGINT], prior)
+        self.assertIs(installed[signal.SIGTERM], prior)
+
+
+if __name__ == "__main__":
+  unittest.main()
