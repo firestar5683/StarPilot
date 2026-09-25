@@ -106,6 +106,23 @@ class TestGmSafetyBase(common.CarSafetyTest, common.DriverTorqueSteeringSafetyTe
     values = {"%sWheelSpd" % s: speed for s in ["RL", "RR"]}
     return self.packer.make_can_msg_safety("EBCMWheelSpdRear", 0, values)
 
+  def test_either_rear_wheel_independently_marks_vehicle_moving(self):
+    # A fault or very low-speed turn can leave one rear channel at zero.
+    # Each channel must independently satisfy the stock standstill rule.
+    for moving_side in ("RL", "RR"):
+      with self.subTest(moving_side=moving_side):
+        stopped = self.packer.make_can_msg_safety("EBCMWheelSpdRear", 0, {"RLWheelSpd": 0, "RRWheelSpd": 0})
+        moving = self.packer.make_can_msg_safety("EBCMWheelSpdRear", 0, {
+          "RLWheelSpd": 1.0 if moving_side == "RL" else 0,
+          "RRWheelSpd": 1.0 if moving_side == "RR" else 0,
+        })
+        self._rx(stopped)
+        self.assertFalse(self.safety.get_vehicle_moving())
+        self._rx(moving)
+        self.assertTrue(self.safety.get_vehicle_moving())
+        self._rx(stopped)
+        self.assertFalse(self.safety.get_vehicle_moving())
+
   def _user_brake_msg(self, brake):
     # GM safety has a brake threshold of 8
     values = {"BrakePedalPos": 8 if brake else 0}
@@ -215,7 +232,10 @@ class TestGmCameraLongitudinalSafety(GmLongitudinalBase, TestGmCameraSafetyBase)
 
 
 class TestGmCameraLongitudinalEVSafety(TestGmCameraLongitudinalSafety, TestGmEVSafetyBase):
-  pass
+  MAX_GAS = 2698
+  TX_MSGS = TestGmCameraLongitudinalSafety.TX_MSGS + [[0x2CD, 0]]
+  FWD_BLACKLISTED_ADDRS = {2: [0x180, 0x2CB, 0x370, 0x315, 0x2CD], 0: [0x184]}
+  RELAY_MALFUNCTION_ADDRS = {0: (0x180, 0x2CB, 0x370, 0x315, 0x2CD), 2: (0x184,)}
 
 
 class TestGmIgnition(common.SafetyTestBase):
