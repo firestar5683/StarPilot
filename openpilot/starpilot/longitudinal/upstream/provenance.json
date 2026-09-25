@@ -1,0 +1,26 @@
+{
+  "upstream_commit": "521db4c825d37eb5f29acf955daa88da003e4433",
+  "upstream_project": "commaai/openpilot",
+  "base_installed": "645a636a4576b9fba91f7ad4f4d2d9f4b59d34a2",
+  "solver_contract": "All upstream module assignments and generator functions AST-identical to installed native MPC; reused generated solver Cython import unchanged",
+  "files": {
+    "plannerd.py": {
+      "upstream_path": "openpilot/selfdrive/controls/plannerd.py",
+      "upstream_sha256": "9c1591c78522e0f89794eb7301113fc616ec6ac079e576a3c9f9ebec64bcbfde",
+      "adapted_sha256": "d337b242b0406330e51749c9b6ffb2bfa03d64142d45561e0d2451bd0dc1855c",
+      "adaptation": "Only planner/MPC import paths redirected; no arithmetic/state/publisher changes"
+    },
+    "planner.py": {
+      "upstream_path": "openpilot/selfdrive/controls/lib/longitudinal_planner.py",
+      "upstream_sha256": "d81425700cf7152ef4f617ec1517fb4137fc5af9188047f48b31aff62dc652f4",
+      "adapted_sha256": "7f79b61e095928100cb1d1d0b5e5e6ee66676d461c2274fc5a542cec2c841e8f",
+      "adaptation": "Only planner/MPC import paths redirected; no arithmetic/state/publisher changes"
+    },
+    "mpc.py": {
+      "upstream_path": "openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/long_mpc.py",
+      "upstream_sha256": "63b03a511d8e0a955f6abc3ef010e79e8304d5ee9fe13637741f9c13e0ca92d5",
+      "adapted_sha256": "63b03a511d8e0a955f6abc3ef010e79e8304d5ee9fe13637741f9c13e0ca92d5",
+      "adaptation": "Only planner/MPC import paths redirected; no arithmetic/state/publisher changes"
+    }
+  }
+}
