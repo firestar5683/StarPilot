@@ -735,7 +735,7 @@ class StarPilotVariables:
 
     msg_bytes = self.params.get("LiveTorqueParameters")
     if msg_bytes:
-      LTP = messaging.log_from_bytes(msg_bytes, log.LiveTorqueParametersData)
+      LTP = messaging.log_from_bytes(msg_bytes, log.Event).liveTorqueParameters
       has_auto_tune = LTP.useParams
       toggle.liveValid = LTP.liveValid
     else:
