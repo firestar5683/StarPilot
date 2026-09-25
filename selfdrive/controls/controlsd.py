@@ -25,7 +25,6 @@ from openpilot.selfdrive.controls.lib.drive_helpers import (
   get_lateral_active,
   update_lateral_fault_latch,
 )
-from openpilot.selfdrive.controls.lib.highway_curvature_smoother import HighwayCurvatureSmoother
 from openpilot.selfdrive.controls.lib.lane_centering import LaneCenteringController
 from openpilot.selfdrive.controls.lib.latcontrol import LatControl
 from openpilot.selfdrive.controls.lib.latcontrol_pid import LatControlPID
@@ -400,7 +399,6 @@ class Controls:
     self.desired_curvature = 0.0
     self.lc_smooth_release = 0.0
     self.lane_centering = LaneCenteringController()
-    self.highway_curvature_smoother = HighwayCurvatureSmoother(self.CP)
     self.lc_entry_sign = 0.0
     self.lc_arrest_jerk_factor = 1.0
     self.turn_hold_curvature = 0.0
@@ -564,7 +562,6 @@ class Controls:
     if not CC.latActive:
       self.LaC.reset()
       self.lane_centering.reset()
-      self.highway_curvature_smoother.reset()
     tesla_pedal_override = self.CP.brand == "tesla" and bool(CS.gasPressed)
     if not CC.longActive and not tesla_pedal_override:
       self.LoC.reset()
@@ -738,11 +735,6 @@ class Controls:
              lead_curvature * blinker_dir > abs(self.turn_hold_curvature):
             held_mag = min(lead_curvature * blinker_dir, abs(self.turn_hold_curvature) + CURVATURE_HOLD_RATCHET_RATE * DT_CTRL)
             self.turn_hold_curvature = math.copysign(held_mag, lead_curvature)
-
-    new_desired_curvature = self.highway_curvature_smoother.update(
-      new_desired_curvature, CS.vEgo, CC.latActive,
-      bypass=bool(CS.leftBlinker or CS.rightBlinker or CS.steeringPressed or self.turn_hold_curvature != 0.0 or
-                  model_v2.meta.laneChangeState != LaneChangeState.off or self.sm.valid['lateralManeuverPlan']))
 
     new_desired_curvature = self.lane_centering.update(
       new_desired_curvature, model_v2, CS.vEgo,
