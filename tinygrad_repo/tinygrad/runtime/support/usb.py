@@ -9,6 +9,7 @@ from tinygrad.device import Buffer, BufferSpec
 from tinygrad.runtime.support.hcq2 import HCQ_RUNTIME_DEV, HCQ_DEVS, ccall, cfield, patch, rt_addr, unwrap_view, all_devices_in
 from tinygrad.runtime.support.hcq import MMIOInterface
 from tinygrad.runtime.support import c
+from tinygrad.runtime.support.am.startup_trace import short_read
 
 def alloc_cbuffer(sz:int) -> tuple[ctypes.Array, memoryview]: return (buf:=(ctypes.c_ubyte * sz)()), to_mv(ctypes.addressof(buf), sz)
 def checked(fn, msg=None):
@@ -232,6 +233,7 @@ class USBMMIOInterface(MMIOInterface):
     if self.pcimem:
       assert sz % 4 == 0 and off % 4 == 0, f"pcie_mem_read requires 4-byte aligned access, got off={off}, sz={sz}"
       data = self.usb.pcie_mem_read(self.addr + off, sz)
+      if len(data) != sz: short_read(self.addr + off, sz, len(data))
     else: data = self.usb.scsi_read(sz) if self.addr == 0xf000 else self.usb.read(self.addr + off, sz)
     return data if isinstance(index, slice) else int.from_bytes(data, "little")
 

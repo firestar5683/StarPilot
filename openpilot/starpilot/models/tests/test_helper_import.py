@@ -38,6 +38,7 @@ with Context(DEV=""), patch.object(type(Device), "_select_device", property(unex
   def load_helper():
     path = Path(__file__).resolve().parents[4] / "tinygrad_repo/examples/openpilot/helpers.py"
     spec = importlib.util.spec_from_file_location("benchmark_import_regression", path)
+    assert spec is not None and spec.loader is not None
     helper = importlib.util.module_from_spec(spec)
     # Import under QCOM, then call under another device to catch settings that
     # were incorrectly captured by an import-time decorator.

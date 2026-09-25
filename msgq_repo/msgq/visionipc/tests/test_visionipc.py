@@ -1,5 +1,6 @@
 import struct
 import unittest
+import uuid
 from typing import Optional
 from msgq.visionipc import VisionIpcServer, VisionIpcClient
 
@@ -9,6 +10,8 @@ class TestVisionIpc(unittest.TestCase):
   client: Optional[VisionIpcClient]
 
   def setUp(self):
+    # Each test needs independent listener and publisher endpoints in parallel runs.
+    self.name = f"test_{uuid.uuid4().hex}"
     self.server = None
     self.client = None
 
@@ -16,14 +19,14 @@ class TestVisionIpc(unittest.TestCase):
     self.client = None
     self.server = None
 
-  def setup_vipc(self, name, *stream_types, num_buffers=1, width=100, height=100, conflate=False):
-    self.server = VisionIpcServer(name)
+  def setup_vipc(self, *stream_types, num_buffers=1, width=100, height=100, conflate=False):
+    self.server = VisionIpcServer(self.name)
     for stream_type in stream_types:
       self.server.create_buffers(stream_type, num_buffers, width, height)
     self.server.start_listener()
 
     if len(stream_types):
-      self.client = VisionIpcClient(name, stream_types[0], conflate)
+      self.client = VisionIpcClient(self.name, stream_types[0], conflate)
       assert self.client.connect(True)
     else:
       self.client = None
@@ -31,19 +34,19 @@ class TestVisionIpc(unittest.TestCase):
     return self.server, self.client
 
   def test_connect(self):
-    self.setup_vipc("camerad", 0)
+    self.setup_vipc(0)
     assert self.client is not None
     assert self.client.is_connected()
 
   def test_available_streams(self):
     stream_types = (0, 2)
-    self.setup_vipc("camerad", *stream_types)
-    available_streams = VisionIpcClient.available_streams("camerad", True)
+    self.setup_vipc(*stream_types)
+    available_streams = VisionIpcClient.available_streams(self.name, True)
     assert available_streams == set(stream_types)
 
   def test_buffers(self):
     width, height, num_buffers = 100, 200, 5
-    self.setup_vipc("camerad", 0, num_buffers=num_buffers, width=width, height=height)
+    self.setup_vipc(0, num_buffers=num_buffers, width=width, height=height)
     assert self.client is not None
     assert self.client.width == width
     assert self.client.height == height
@@ -51,7 +54,7 @@ class TestVisionIpc(unittest.TestCase):
     assert self.client.num_buffers == num_buffers
 
   def test_send_single_buffer(self):
-    self.setup_vipc("camerad", 0)
+    self.setup_vipc(0)
     assert self.server is not None
     assert self.client is not None
     assert self.client.buffer_len is not None
@@ -70,7 +73,7 @@ class TestVisionIpc(unittest.TestCase):
     assert recv_buf.frame_id == 1337
 
   def test_no_conflate(self):
-    self.setup_vipc("camerad", 0)
+    self.setup_vipc(0)
     assert self.server is not None
     assert self.client is not None
     assert self.client.buffer_len is not None
@@ -87,7 +90,7 @@ class TestVisionIpc(unittest.TestCase):
     assert self.client.frame_id == 2
 
   def test_conflate(self):
-    self.setup_vipc("camerad", 0, conflate=True)
+    self.setup_vipc(0, conflate=True)
     assert self.server is not None
     assert self.client is not None
     assert self.client.buffer_len is not None
