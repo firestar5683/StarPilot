@@ -1,0 +1,168 @@
+"""Phone identity and configuration locations, and identity validation.
+
+The identity (phone certificate, its key, and the Google Automotive Link root used
+to verify the head unit) is extracted from the user's own Android Auto app by
+``apk_identity`` into ``IDENTITY_DIR``. It is never
+committed, never logged, and the key must be readable only by its owner.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import ssl
+import stat
+import tempfile
+import time
+from dataclasses import dataclass
+from datetime import UTC, datetime
+from pathlib import Path
+
+DATA_DIR = Path(os.environ.get("ANDROID_AUTO_DIR", "/data/android_auto"))
+IDENTITY_DIR = DATA_DIR / "identity"
+CONFIG_PATH = DATA_DIR / "config.json"
+LOG_DIR = DATA_DIR / "logs"
+CERT_NAME, KEY_NAME, ROOT_NAME = "phone-cert.pem", "phone-key.pem", "root-cert.pem"
+EXPIRY_WARNING_DAYS = 14
+
+
+@dataclass(frozen=True)
+class Identity:
+  cert: str
+  key: str
+  root: str | None
+  expires: str
+  days_left: int
+
+
+class IdentityError(RuntimeError):
+  pass
+
+
+def _not_after(cert_path: Path) -> datetime | None:
+  try:
+    from cryptography import x509
+    certificate = x509.load_pem_x509_certificate(cert_path.read_bytes())
+    if hasattr(certificate, "not_valid_after_utc"):
+      return certificate.not_valid_after_utc
+    return certificate.not_valid_after.replace(tzinfo=UTC)  # cryptography < 42, as on device
+  except ImportError:
+    pass
+  try:
+    decoded = ssl._ssl._test_decode_cert(str(cert_path))  # type: ignore[attr-defined]
+    return datetime.fromtimestamp(ssl.cert_time_to_seconds(decoded["notAfter"]), UTC)
+  except Exception:
+    return None
+
+
+def load_identity(directory: Path | None = None, now: datetime | None = None) -> Identity:
+  directory = directory or IDENTITY_DIR
+  cert, key, root = directory / CERT_NAME, directory / KEY_NAME, directory / ROOT_NAME
+  missing = [path.name for path in (cert, key) if not path.is_file()]
+  if missing:
+    raise IdentityError(f"Android Auto identity missing ({', '.join(missing)} in {directory}); " +
+                        "add it in The Galaxy: Toggles → Android Auto → Android Auto Certificate")
+  if stat.S_IMODE(key.stat().st_mode) & 0o077:
+    raise IdentityError(f"{key} must not be readable by other users (chmod 600)")
+  try:
+    context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    context.load_cert_chain(str(cert), str(key))
+    if root.is_file():
+      context.load_verify_locations(cafile=str(root))
+  except (ssl.SSLError, OSError) as error:
+    raise IdentityError(f"Android Auto identity is unusable: {error}") from error
+  expires = _not_after(cert)
+  now = now or datetime.now(UTC)
+  if expires is not None and expires <= now:
+    raise IdentityError(f"Android Auto phone certificate expired on {expires.date()}; " +
+                        "renew it in The Galaxy: Toggles → Android Auto → Android Auto Certificate")
+  days_left = (expires - now).days if expires is not None else -1
+  return Identity(str(cert), str(key), str(root) if root.is_file() else None,
+                  expires.isoformat() if expires is not None else "unknown", days_left)
+
+
+CONFIG_VERSION = 2
+# Before config versions, every save wrote these defaults, which pinned projection
+# at 12 fps / 4000 kbps. Unversioned files holding exactly them get today's defaults.
+LEGACY_DEFAULTS = {"fps": 12, "bitrate_kbps": 4000}
+
+DEFAULT_CONFIG = {
+  "config_version": CONFIG_VERSION,
+  "receiver_address": "",      # Bluetooth address of the paired head unit
+  "receiver_name": "",
+  "companion_address": "",    # explicitly selected bonded car used before a separate wireless adapter
+  "companion_name": "",
+  "rfcomm_channel": 0,         # 0 = discover through SDP (normal); set only to work around a broken SDP record
+  "verify_head_unit": True,    # verify the car's certificate against root-cert.pem when present
+  "connection": "wireless",    # "wireless": Bluetooth + the car's Wi-Fi; "wired": USB cable from the car to the comma's USB-C port
+  "view": "car",               # Separate StarPilot road view; legacy mirror has no source
+  "encoder": "auto",           # comma always requires hardware; desktop tests may select software
+  "fps": 0,                    # 0 = automatic (30 with hardware, 15 with software); otherwise a cap, 5-30
+  "bitrate_kbps": 6000,
+  "rate_control": "cbr",       # hardware encoder: "cbr" holds the bitrate (easier on the car's Wi-Fi); "vbr" as before
+  "gpu_nv12": False,           # current car view publishes RGBA
+  "async_readback": False,     # current car view uses synchronous readback
+  "render_profile": False,     # current car view has no persistent profile writer
+  "render_profile_kb": 256,    # size cap per render_profile file
+  "wifi_interface": "wlan0",
+  "device_name": "StarPilot",
+  "version_status": 0,         # WifiVersionResponse status (0 = success) for receivers that negotiate a version
+  "phone_class": True,         # while pairing/connecting, present as a phone: HFP gateway + smartphone Class of Device
+  "auto_connect": True,        # start projection on its own when the chosen car is on (onroad, or it reaches the comma)
+  "rfcomm_cache": {},          # car address -> Android Auto RFCOMM channel learned over SDP, to skip discovery next time
+}
+
+
+def load_config(path: Path | None = None) -> dict:
+  path = path or CONFIG_PATH
+  config = dict(DEFAULT_CONFIG)
+  try:
+    stored = json.loads(path.read_text())
+    if isinstance(stored, dict):
+      version = stored.get("config_version")
+      if not isinstance(version, int) or version < 2:
+        stored = {key: value for key, value in stored.items() if LEGACY_DEFAULTS.get(key, object()) != value}
+      config.update({key: value for key, value in stored.items() if key in DEFAULT_CONFIG and isinstance(value, type(DEFAULT_CONFIG[key]))})
+  except (OSError, ValueError):
+    pass
+  config["config_version"] = CONFIG_VERSION
+  config["fps"] = 0 if int(config["fps"]) <= 0 else max(5, min(30, int(config["fps"])))
+  if config["view"] not in ("car", "mirror"):
+    config["view"] = "car"
+  if config["connection"] not in ("wireless", "wired"):
+    config["connection"] = "wireless"
+  config["bitrate_kbps"] = max(1000, min(12000, int(config["bitrate_kbps"])))
+  if config["rate_control"] not in ("cbr", "vbr"):
+    config["rate_control"] = "cbr"
+  config["render_profile_kb"] = max(16, min(4096, int(config["render_profile_kb"])))
+  config["rfcomm_cache"] = {str(address).upper(): channel for address, channel in config["rfcomm_cache"].items()
+                            if type(channel) is int and 1 <= channel <= 30}
+  return config
+
+
+def save_config(config: dict, path: Path | None = None) -> None:
+  path = path or CONFIG_PATH
+  path.parent.mkdir(mode=0o700, parents=True, exist_ok=True)
+  data = json.dumps({key: config[key] for key in DEFAULT_CONFIG if key in config}, indent=2) + "\n"
+  fd, temporary = tempfile.mkstemp(dir=path.parent, prefix=".config-")
+  try:
+    with os.fdopen(fd, "w") as handle:
+      handle.write(data)
+    os.chmod(temporary, 0o600)
+    os.replace(temporary, path)
+  except BaseException:
+    try:
+      os.unlink(temporary)
+    except FileNotFoundError:
+      pass
+    raise
+
+
+def expiry_warning(identity: Identity) -> str:
+  if 0 <= identity.days_left <= EXPIRY_WARNING_DAYS:
+    return f"Android Auto identity expires in {identity.days_left} days ({identity.expires[:10]}); renew it in The Galaxy"
+  return ""
+
+
+def timestamp() -> str:
+  return time.strftime("%Y%m%d-%H%M%S")
