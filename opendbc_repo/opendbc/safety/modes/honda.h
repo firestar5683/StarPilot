@@ -32,8 +32,36 @@ static bool honda_fwd_brake = false;
 static bool honda_bosch_long = false;
 static bool honda_bosch_radarless = false;
 static bool honda_bosch_canfd = false;
+static bool aol_honda_bosch_long = false;
+static uint32_t aol_honda_main_ts = 0U;
+#define AOL_HONDA_MAIN_TIMEOUT_US 300000U
 typedef enum {HONDA_NIDEC, HONDA_BOSCH} HondaHw;
 static HondaHw honda_hw = HONDA_NIDEC;
+
+static void aol_honda_reset(void) {
+  aol_honda_bosch_long = false;
+  aol_honda_main_ts = 0U;
+}
+
+static uint8_t aol_honda_request_mask(void) {
+  return (heartbeat_engaged && !relay_malfunction && !safety_rx_checks_invalid &&
+          (safety_get_ts_elapsed(microsecond_timer_get(), aol_host_request_ts) <= AOL_HOST_REQUEST_TIMEOUT_US)) ?
+         aol_host_axis_mask : 0U;
+}
+
+static uint8_t aol_honda_permission_mask(void) {
+  const bool main_current = acc_main_on &&
+    (safety_get_ts_elapsed(microsecond_timer_get(), aol_honda_main_ts) <= AOL_HONDA_MAIN_TIMEOUT_US);
+  uint8_t permission = 0U;
+  if (main_current && aol_rx_healthy()) {
+    const uint8_t request = aol_get_request_mask();
+    permission = request & 0x1U;
+    if (controls_allowed && ((request & 0x2U) != 0U)) {
+      permission |= 0x2U;
+    }
+  }
+  return permission;
+}
 
 static unsigned int honda_get_pt_bus(void) {
   return ((honda_hw == HONDA_BOSCH) && !honda_bosch_radarless && !honda_bosch_canfd) ? 1U : 0U;
@@ -79,8 +107,12 @@ static void honda_rx_hook(const CANPacket_t *msg) {
   // 0x326 for all Bosch and some Nidec, 0x1A6 for some Nidec
   if ((msg->addr == 0x326U) || (msg->addr == 0x1A6U)) {
     acc_main_on = GET_BIT(msg, ((msg->addr == 0x326U) ? 28U : 47U));
+    if (aol_honda_bosch_long && (msg->addr == 0x326U)) {
+      aol_honda_main_ts = microsecond_timer_get();
+    }
     if (!acc_main_on) {
       controls_allowed = false;
+      aol_set_host_request(0U);
     }
   }
 
@@ -115,6 +147,7 @@ static void honda_rx_hook(const CANPacket_t *msg) {
     // exit controls once main or cancel are pressed
     if ((button == HONDA_BTN_MAIN) || (button == HONDA_BTN_CANCEL)) {
       controls_allowed = false;
+      aol_set_host_request(0U);
     }
     cruise_button_prev = button;
   }
@@ -254,7 +287,7 @@ static bool honda_tx_hook(const CANPacket_t *msg) {
 
   // STEER: safety check
   if ((msg->addr == 0xE4U) || (msg->addr == 0x194U)) {
-    if (!controls_allowed) {
+    if (!lateral_controls_allowed()) {
       bool steer_applied = msg->data[0] | msg->data[1];
       if (steer_applied) {
         tx = false;
@@ -421,7 +454,20 @@ static safety_config honda_bosch_init(uint16_t param) {
 #ifdef ALLOW_DEBUG
   const uint16_t HONDA_PARAM_BOSCH_LONG = 2;
   honda_bosch_long = GET_FLAG(param, HONDA_PARAM_BOSCH_LONG);
+  const uint16_t HONDA_PARAM_AOL = 32;
+  aol_honda_bosch_long = honda_bosch_long && GET_FLAG(param, HONDA_PARAM_AOL) &&
+                         !honda_bosch_radarless && !honda_bosch_canfd;
 #endif
+  if (aol_honda_bosch_long) {
+    static const AolSafetyPolicy aol_honda_policy = {
+      .reset = aol_honda_reset,
+      .host_request = NULL,
+      .request_mask = aol_honda_request_mask,
+      .permission_mask = aol_honda_permission_mask,
+      .rx_invalid = NULL,
+    };
+    aol_policy = &aol_honda_policy;
+  }
 
   safety_config ret;
   if (honda_bosch_radarless || honda_bosch_canfd) {

@@ -41,17 +41,18 @@ class CarControllerParams:
   STEER_GLOBAL_MIN_SPEED = 3 * CV.MPH_TO_MS
 
   def __init__(self, CP):
-    if CP.carFingerprint in (CAR.HONDA_CRV, CAR.HONDA_CRV_EU, CAR.ACURA_RDX):
+    if CP.carFingerprint in (CAR.HONDA_CRV, CAR.HONDA_CRV_EU, CAR.HONDA_CRV_SA, CAR.ACURA_RDX):
       self.STEER_MAX = 1000  # TODO: determine if there is a dead zone at the top end
-    elif CP.carFingerprint in (CAR.ACURA_ILX, CAR.HONDA_CRV_5G, CAR.ACURA_RDX_3G, CAR.ACURA_TLX_2G_MMR, CAR.ACURA_MDX_4G,
-                               CAR.ACURA_ADX):
+    elif CP.carFingerprint in (CAR.ACURA_ILX, CAR.HONDA_CRV_5G, CAR.ACURA_RDX_3G, CAR.ACURA_TLX_2G_MMR, CAR.ACURA_MDX_4G):
       self.STEER_MAX = 3840  # TODO: determine if there is a dead zone at the top end (ACURA_ILX)
     elif CP.carFingerprint in (CAR.HONDA_CIVIC_BOSCH, CAR.HONDA_CIVIC_BOSCH_DIESEL, CAR.HONDA_CIVIC_2022, CAR.HONDA_ACCORD,
                                CAR.HONDA_CRV_HYBRID, CAR.HONDA_FIT, CAR.HONDA_FREED, CAR.HONDA_HRV, CAR.HONDA_HRV_3G,
                                CAR.HONDA_ODYSSEY, CAR.HONDA_PILOT, CAR.HONDA_RIDGELINE, CAR.HONDA_INSIGHT, CAR.HONDA_NBOX_2G,
-                               CAR.HONDA_E, CAR.HONDA_E_ADVANCE, CAR.HONDA_PRELUDE_6G):
+                               CAR.HONDA_E, CAR.HONDA_E_ADVANCE, CAR.HONDA_PRELUDE_6G, CAR.HONDA_FIT_4G, CAR.ACURA_INTEGRA):
       # TODO: determine if there is a dead zone at the top end (except HONDA_FREED, HONDA_HRV, HONDA_HRV_3G)
       self.STEER_MAX = 4096
+    elif CP.carFingerprint == CAR.ACURA_ADX:
+      self.STEER_MAX = 5000
     elif CP.carFingerprint == CAR.HONDA_ODYSSEY_TWN:
       self.STEER_MAX = 32767  # TODO: determine if there is a dead zone at the top end
     elif CP.carFingerprint == CAR.HONDA_PILOT_4G_MMR:
@@ -59,11 +60,13 @@ class CarControllerParams:
     else:
       # Odyssey MMR uses up to 2560 for LKA; higher RDM commands are nonlinear and also apply brake drag.
       self.STEER_MAX = 2560
+    self.STEER_LOOKUP = [-self.STEER_MAX, 0, self.STEER_MAX]
 
 
 class HondaSafetyFlags(IntFlag):
   ALT_BRAKE = 1
   BOSCH_LONG = 2
+  AOL_BOSCH_LONG = 32
   NIDEC_ALT = 4
   RADARLESS = 8
   BOSCH_CANFD = 16
@@ -325,11 +328,23 @@ class CAR(Platforms):
     [HondaCarDocs("Acura TLX 2025", "All")],
     CarSpecs(mass=3990 * CV.LB_TO_KG, wheelbase=2.87, centerToFrontRatio=0.43, steerRatio=13.7),
   )
+  HONDA_FIT_4G = HondaBoschPlatformConfig(
+    [HondaCarDocs("Honda Fit (Taiwan) 2021", "All"), HondaCarDocs("Honda Fit (Taiwan) 2024-25", "All")],
+    CarSpecs(mass=1229, wheelbase=2.53, steerRatio=19.7, centerToFrontRatio=0.39, minSteerSpeed=23. * CV.KPH_TO_MS),
+    {Bus.pt: 'honda_bosch_radarless_generated'},
+    flags=HondaFlags.BOSCH_RADARLESS,
+  )
+  ACURA_INTEGRA = HondaBoschPlatformConfig(
+    [HondaCarDocs("Acura Integra 2023-26", "All")],
+    CarSpecs(mass=3338.8 * CV.LB_TO_KG, wheelbase=2.5, centerToFrontRatio=0.5, steerRatio=16.71, tireStiffnessFactor=0.82),
+    {Bus.pt: 'honda_bosch_radarless_generated'},
+    flags=HondaFlags.BOSCH_RADARLESS,
+  )
   ACURA_ADX = HondaBoschPlatformConfig(
     [HondaCarDocs("Acura ADX 2025-26", "All")],
-    CarSpecs(mass=3578 * CV.LB_TO_KG, wheelbase=2.65, steerRatio=17.6, centerToFrontRatio=0.43),
+    CarSpecs(mass=3578 * CV.LB_TO_KG, wheelbase=2.65, steerRatio=16.6, centerToFrontRatio=0.43),
     {Bus.pt: 'honda_bosch_radarless_generated'},
-    flags=HondaFlags.BOSCH_RADARLESS
+    flags=HondaFlags.BOSCH_RADARLESS,
   )
 
   # Nidec Cars
@@ -354,6 +369,12 @@ class CAR(Platforms):
     radar_dbc_dict('honda_crv_touring_2016_can_generated'),
     flags=HondaFlags.NIDEC_ALT_SCM_MESSAGES | HondaFlags.HAS_ALL_DOOR_STATES,
   )
+  HONDA_CRV_SA = HondaNidecPlatformConfig(
+    [],  # South Africa version of CRV Touring, don't show in docs
+    HONDA_CRV.specs,
+    radar_dbc_dict('acura_rdx_2018_can_generated'),
+    flags=HondaFlags.NIDEC_ALT_SCM_MESSAGES | HondaFlags.HAS_ALL_DOOR_STATES,
+  )
   HONDA_FIT = HondaNidecPlatformConfig(
     [HondaCarDocs("Honda Fit 2018-20", min_steer_speed=12. * CV.MPH_TO_MS)],
     CarSpecs(mass=2644 * CV.LB_TO_KG, wheelbase=2.53, steerRatio=13.06, centerToFrontRatio=0.39, tireStiffnessFactor=0.75),
@@ -371,6 +392,12 @@ class CAR(Platforms):
     HONDA_HRV_3G.specs,
     radar_dbc_dict('acura_ilx_2016_can_generated'),
     flags=HondaFlags.NIDEC_ALT_SCM_MESSAGES,
+  )
+  HONDA_CLARITY = HondaNidecPlatformConfig(
+    [HondaCarDocs("Honda Clarity 2018-21", "All", min_steer_speed=3. * CV.MPH_TO_MS)],
+    CarSpecs(mass=1838, wheelbase=2.75, centerToFrontRatio=0.4, steerRatio=16.5),
+    radar_dbc_dict('honda_clarity_hybrid_2018_can_generated'),
+    flags=HondaFlags.HAS_ALL_DOOR_STATES,
   )
   HONDA_ODYSSEY = HondaNidecPlatformConfig(
     [HondaCarDocs("Honda Odyssey 2018-20")],
@@ -414,6 +441,31 @@ class CAR(Platforms):
     radar_dbc_dict('honda_civic_touring_2016_can_generated'),
     flags=HondaFlags.HAS_ALL_DOOR_STATES
   )
+  HONDA_ACCORD_9G = HondaNidecPlatformConfig(
+    [HondaCarDocs("Honda Accord 2016-17"), HondaCarDocs("Honda Accord Hybrid 2017", "All")],
+    CarSpecs(mass=3343 * CV.LB_TO_KG, wheelbase=2.78, steerRatio=17.5, centerToFrontRatio=0.37),
+    radar_dbc_dict('honda_accord_2017_can_ext_generated'),
+    flags=HondaFlags.NIDEC_ALT_SCM_MESSAGES | HondaFlags.HAS_ALL_DOOR_STATES,
+  )
+  ACURA_MDX_3G = HondaNidecPlatformConfig(
+    [HondaCarDocs("Acura MDX 2014-16", "Advance Package"), HondaCarDocs("Acura MDX 2017-19", "All"),
+     HondaCarDocs("Acura MDX Hybrid 2017-19", "All")],
+    CarSpecs(mass=4215 * CV.LB_TO_KG, wheelbase=2.82, steerRatio=16.8, centerToFrontRatio=0.428),
+    radar_dbc_dict('acura_mdx_2017_can_ext_generated'),
+    flags=HondaFlags.NIDEC_ALT_SCM_MESSAGES,
+  )
+  ACURA_MDX_3G_MMR = HondaNidecPlatformConfig(
+    [HondaCarDocs("Acura MDX 2020", "All"), HondaCarDocs("Acura MDX Hybrid 2020", "All")],
+    CarSpecs(mass=4215 * CV.LB_TO_KG, wheelbase=2.82, steerRatio=16.8, centerToFrontRatio=0.428),
+    radar_dbc_dict('acura_ilx_2016_can_generated'),
+    flags=HondaFlags.NIDEC_ALT_SCM_MESSAGES,
+  )
+  ACURA_TLX_1G = HondaNidecPlatformConfig(
+    [HondaCarDocs("Acura TLX 2015-17", "Advance Package"), HondaCarDocs("Acura TLX 2018-20", "All")],
+    CarSpecs(mass=3680 * CV.LB_TO_KG, wheelbase=2.78, steerRatio=17.0, centerToFrontRatio=0.40, tireStiffnessFactor=0.18),
+    radar_dbc_dict('acura_mdx_2017_can_ext_generated'),
+    flags=HondaFlags.NIDEC_ALT_SCM_MESSAGES | HondaFlags.HAS_ALL_DOOR_STATES,
+  )
 
 
 DBC = CAR.create_dbc_map()
@@ -423,6 +475,10 @@ STEER_THRESHOLD = {
   # default is 1200, overrides go here
   CAR.ACURA_RDX: 400,
   CAR.HONDA_CRV_EU: 400,
+  CAR.HONDA_ACCORD_9G: 30,
+  CAR.ACURA_MDX_3G: 30,
+  CAR.ACURA_MDX_3G_MMR: 30,
+  CAR.ACURA_TLX_1G: 30,
   CAR.HONDA_ACCORD_11G: 600,
   CAR.HONDA_PILOT_4G: 600,
   CAR.HONDA_PILOT_4G_MMR: 600,

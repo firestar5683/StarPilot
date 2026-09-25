@@ -1,4 +1,5 @@
 import numpy as np
+import math
 from collections import defaultdict
 
 from opendbc.can import CANDefine, CANParser
@@ -8,6 +9,8 @@ from opendbc.car.honda.hondacan import CanBus
 from opendbc.car.honda.values import CAR, DBC, STEER_THRESHOLD, HondaFlags, CruiseButtons, CruiseSettings, \
                                                  GearShifter, CarControllerParams
 from opendbc.car.interfaces import CarStateBase
+from opendbc.car.dashboard_speed_limit import Tracker as LimitTracker, honda_sign, parser_expiry
+from opendbc.can.dbc import DBC as CANDBC
 
 TransmissionType = structs.CarParams.TransmissionType
 ButtonType = structs.CarState.ButtonEvent.Type
@@ -43,6 +46,7 @@ class CarState(CarStateBase):
     self.dynamic_v_cruise_units = bool(self.CP.flags & (HondaFlags.BOSCH_RADARLESS | HondaFlags.BOSCH_ALT_RADAR | HondaFlags.BOSCH_CANFD))
     self.cruise_setting = 0
     self.v_cruise_pcm_prev = 0
+    self.dashboard_limit = LimitTracker()
 
     # When available we use cp.vl["CAR_SPEED"]["ROUGH_CAR_SPEED_2"] to populate vEgoCluster
     # However, on cars without a digital speedometer this is not always present (HRV, FIT, CRV 2016, ILX and RDX)
@@ -79,9 +83,10 @@ class CarState(CarStateBase):
     # STANDSTILL->WHEELS_MOVING bit can be noisy around zero, so use XMISSION_SPEED
     v_wheel = sum([cp.vl["WHEEL_SPEEDS"][f"WHEEL_SPEED_{s}"] for s in ("FL", "FR", "RL", "RR")]) / 4.0 * CV.KPH_TO_MS
     v_weight = float(np.interp(v_wheel, v_weight_bp, v_weight_v))
-    ret.vEgoRaw = (1. - v_weight) * cp.vl["ENGINE_DATA"]["XMISSION_SPEED"] * CV.KPH_TO_MS * self.CP.wheelSpeedFactor + v_weight * v_wheel
+    lowspeed_source = cp.vl["CAR_SPEED"]["CAR_SPEED"] if self.CP.carFingerprint == CAR.ACURA_INTEGRA else cp.vl["ENGINE_DATA"]["XMISSION_SPEED"]
+    ret.vEgoRaw = (1. - v_weight) * lowspeed_source * CV.KPH_TO_MS * self.CP.wheelSpeedFactor + v_weight * v_wheel
     ret.vEgo, ret.aEgo = self.update_speed_kf(ret.vEgoRaw)
-    ret.standstill = cp.vl["ENGINE_DATA"]["XMISSION_SPEED"] < 1e-5
+    ret.standstill = lowspeed_source < 1e-5
 
     # doorOpen is true if we can find any door open, but signal locations vary, and we may only see the driver's door
     # TODO: Test the eight Nidec cars without SCM signals for driver's door state, may be able to consolidate further
@@ -223,12 +228,24 @@ class CarState(CarStateBase):
       *create_button_events(self.cruise_setting, prev_cruise_setting, SETTINGS_BUTTONS_DICT),
     ]
 
+    # The TSR byte has explicit speed-sign codes 97..113 and 125 for unavailable.
+    # A parser's default zero has no timestamp and is never evidence of absence.
+    source = cp if self.CP.flags & HondaFlags.BOSCH and not self.CP.flags & (HondaFlags.BOSCH_RADARLESS | HondaFlags.BOSCH_CANFD) else cp_cam
+    timestamp, expiry = parser_expiry(source, "CAMERA_MESSAGES", "SPEED_LIMIT_SIGN")
+    if timestamp > self.dashboard_limit.observation.observed_ns:
+      raw = int(source.vl["CAMERA_MESSAGES"]["SPEED_LIMIT_SIGN"])
+      status, speed = honda_sign(raw)
+      self.dashboard_limit.update(timestamp, status, speed, valid_until_ns=expiry)
+
     return ret
 
   def get_can_parsers(self, CP):
+    dbc_name = DBC[CP.carFingerprint][Bus.pt]
+    has_tsr = "CAMERA_MESSAGES" in CANDBC(dbc_name).name_to_msg
+    on_pt = CP.flags & HondaFlags.BOSCH and not CP.flags & (HondaFlags.BOSCH_RADARLESS | HondaFlags.BOSCH_CANFD)
     parsers = {
-      Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).pt),
-      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).camera),
+      Bus.pt: CANParser(dbc_name, [("CAMERA_MESSAGES", math.nan)] if has_tsr and on_pt else [], CanBus(CP).pt),
+      Bus.cam: CANParser(dbc_name, [("CAMERA_MESSAGES", math.nan)] if has_tsr and not on_pt else [], CanBus(CP).camera),
     }
     if CP.flags & HondaFlags.HAS_BSM:
       parsers[Bus.body] = CANParser(DBC[CP.carFingerprint][Bus.body], [], CanBus(CP).radar)

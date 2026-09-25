@@ -11,6 +11,7 @@ from opendbc.car.honda.radar_interface import RadarInterface
 from opendbc.car.interfaces import CarInterfaceBase
 
 TransmissionType = structs.CarParams.TransmissionType
+RADARLESS_PORTS = frozenset((CAR.HONDA_FIT_4G, CAR.ACURA_INTEGRA, CAR.ACURA_ADX))
 
 
 class CarInterface(CarInterfaceBase):
@@ -48,8 +49,8 @@ class CarInterface(CarInterfaceBase):
       # WARNING: THIS DISABLES AEB!
       # If Bosch radarless, this blocks ACC messages from the camera
       # TODO: get radar disable working on Bosch CANFD
-      ret.alphaLongitudinalAvailable = not (ret.flags & HondaFlags.BOSCH_CANFD)
-      ret.openpilotLongitudinalControl = alpha_long and not (ret.flags & HondaFlags.BOSCH_CANFD)
+      ret.alphaLongitudinalAvailable = not (ret.flags & HondaFlags.BOSCH_CANFD) and not (candidate in RADARLESS_PORTS and is_release)
+      ret.openpilotLongitudinalControl = alpha_long and ret.alphaLongitudinalAvailable
       ret.pcmCruise = not ret.openpilotLongitudinalControl
     else:
       ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.hondaNidec)]
@@ -67,7 +68,7 @@ class CarInterface(CarInterfaceBase):
     if 0x184 in fingerprint[CAN.pt]:
       ret.flags |= HondaFlags.HYBRID.value
 
-    if all(msg not in fingerprint[CAN.pt] for msg in (0x191, 0x1A3)):
+    if candidate not in RADARLESS_PORTS and all(msg not in fingerprint[CAN.pt] for msg in (0x191, 0x1A3)):
       ret.transmissionType = TransmissionType.manual
     elif 0x191 in fingerprint[CAN.pt] and candidate != CAR.ACURA_RDX:
       # Traditional CVTs, gearshift position in GEARBOX_CVT
@@ -112,7 +113,7 @@ class CarInterface(CarInterfaceBase):
     elif candidate == CAR.ACURA_ILX:
       ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.8], [0.24]]
 
-    elif candidate in (CAR.HONDA_CRV, CAR.HONDA_CRV_EU):
+    elif candidate in (CAR.HONDA_CRV, CAR.HONDA_CRV_EU, CAR.HONDA_CRV_SA):
       ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.8], [0.24]]
       ret.wheelSpeedFactor = 1.025
 
@@ -136,6 +137,22 @@ class CarInterface(CarInterfaceBase):
         ret.wheelSpeedFactor = 1.025
       else:
         ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.8], [0.24]]  # TODO: can probably use some tuning
+
+    elif candidate == CAR.HONDA_FIT_4G:
+      ret.steerActuatorDelay = 0.15
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+
+    elif candidate == CAR.ACURA_INTEGRA:
+      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.8], [0.24]]
+
+    elif candidate == CAR.ACURA_ADX:
+      ret.steerActuatorDelay = 0.15
+      ret.lateralTuning.pid.kpBP, ret.lateralTuning.pid.kpV = [[0, 10], [0.05, 0.5]]
+      ret.lateralTuning.pid.kiBP, ret.lateralTuning.pid.kiV = [[0, 10], [0.0125, 0.125]]
+
+    elif candidate == CAR.HONDA_CLARITY:
+      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.8], [0.24]]
+      ret.stopAccel = 0.0
 
     elif candidate == CAR.ACURA_RDX:
       ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.8], [0.24]]
@@ -196,11 +213,14 @@ class CarInterface(CarInterfaceBase):
     # min speed to enable ACC. if car can do stop and go, then set enabling speed
     # to a negative value, so it won't matter. Otherwise, add 0.5 mph margin to not
     # conflict with PCM acc
-    ret.autoResumeSng = bool(ret.flags & HondaFlags.BOSCH) or candidate == CAR.HONDA_CIVIC
+    ret.autoResumeSng = (bool(ret.flags & HondaFlags.BOSCH) and not (candidate == CAR.HONDA_FIT_4G and not ret.openpilotLongitudinalControl)) or \
+      candidate in (CAR.HONDA_CIVIC, CAR.HONDA_CLARITY)
     if ret.autoResumeSng:
       ret.minEnableSpeed = -1.
     elif candidate == CAR.HONDA_ODYSSEY_TWN:
       ret.minEnableSpeed = 19. * CV.MPH_TO_MS
+    elif candidate == CAR.HONDA_FIT_4G:
+      ret.minEnableSpeed = 30. * CV.KPH_TO_MS
     else:
       ret.minEnableSpeed = 25.51 * CV.MPH_TO_MS
 
