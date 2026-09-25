@@ -1,0 +1,21 @@
+{
+  "mode": "synthetic-preview",
+  "schemaVersion": 1,
+  "source": "Illustrative Galaxy System Monitor sample; no device was read",
+  "sampledAt": 1789992000,
+  "cpuPercent": 27.4,
+  "cores": [{"name":"cpu0","percent":32.1},{"name":"cpu1","percent":22.7},{"name":"cpu2","percent":null},{"name":"cpu3","percent":28.3}],
+  "memory": {"totalMiB":7872,"usedMiB":3182.4,"availableMiB":4689.6,"percent":40.4},
+  "storage": {"usedGiB":38.7,"totalGiB":118.1},
+  "uptimeSeconds": 98432,
+  "processCount": 6,
+  "processes": [
+    {"pid":101,"name":"selfdrive.controls.controlsd","user":"comma","kernel":false,"state":"R","cpu":8.3,"memoryMiB":222.6},
+    {"pid":102,"name":"selfdrive.modeld.modeld","user":"comma","kernel":false,"state":"S","cpu":12.7,"memoryMiB":410.2},
+    {"pid":103,"name":"system.hardware.hardwared","user":"comma","kernel":false,"state":"S","cpu":null,"memoryMiB":91.1},
+    {"pid":104,"name":"system.loggerd.uploader","user":"comma","kernel":false,"state":"S","cpu":1.2,"memoryMiB":73.4},
+    {"pid":105,"name":"system.manager.manager","user":"root","kernel":false,"state":"R","cpu":2.4,"memoryMiB":54.5},
+    {"pid":2,"name":"kthreadd","user":"root","kernel":true,"state":"S","cpu":null,"memoryMiB":0}
+  ],
+  "vitals": {"cpuTempC":51.2,"gpuTempC":48.4,"hotspotTempC":null,"gpuEdgeTempC":null,"memoryUsedBytes":null,"memoryTotalBytes":null,"onboardMaxAgeMs":2500,"maxAgeMs":0,"memoryMaxAgeMs":0}
+}

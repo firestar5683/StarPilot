@@ -1,0 +1,97 @@
+{
+  "mode": "offline-preview",
+  "tools": [
+    {
+      "name": "Bluetooth",
+      "path": "/bluetooth",
+      "icon": "bi-bluetooth",
+      "description": "Adapter power, saved devices and connections",
+      "availability": "local-only"
+    },
+    {
+      "name": "Cameras & Monitoring",
+      "path": "/cameras",
+      "icon": "bi-camera-video",
+      "description": "Live cabin previews, Side Camera, Sentry motion, and V-ASM settings",
+      "availability": "local-only"
+    },
+    {
+      "name": "Force Drive State",
+      "path": "/device-preferences",
+      "icon": "bi-car-front",
+      "description": "Select a temporary drive state for this device",
+      "availability": "local-only"
+    },
+    {
+      "name": "Galaxy Access & Install",
+      "path": "/galaxy",
+      "icon": "bi-globe2",
+      "description": "Pair for remote access, install Galaxy, or set up a Wi-Fi hotspot",
+      "availability": "local-only"
+    },
+    {
+      "name": "Logs & Diagnostics",
+      "path": "/logs",
+      "icon": "bi-exclamation-triangle",
+      "description": "Live console, driving configuration, system activity and crash reports",
+      "availability": "partial-preview"
+    },
+    {
+      "name": "Model Manager",
+      "path": "/manage_models",
+      "icon": "bi-cpu",
+      "description": "Bundled model identity and runtime health",
+      "availability": "local-only"
+    },
+    {
+      "name": "Model Laboratory",
+      "path": "/model_laboratory",
+      "icon": "bi-bezier2",
+      "description": "Pair lateral and longitudinal eGPU variants",
+      "availability": "local-only"
+    },
+    {
+      "name": "Navigation & Maps",
+      "path": "/navigation",
+      "icon": "bi-map",
+      "description": "Destinations, directions, saved places and offline maps",
+      "availability": "local-only"
+    },
+    {
+      "name": "System Tools",
+      "path": "/system",
+      "icon": "bi-arrow-repeat",
+      "description": "Branch updates, automatic downloads and version history",
+      "availability": "local-only"
+    },
+    {
+      "name": "Colors & Layout",
+      "path": "/theme_maker",
+      "icon": "bi-palette-fill",
+      "description": "Widgets, colors, road and display options for Big and Small layouts",
+      "availability": "local-only"
+    },
+    {
+      "name": "Plots & Analysis",
+      "path": "/tuning",
+      "icon": "bi-sign-turn-right",
+      "description": "Live steering and acceleration plots, and recorded-drive analysis",
+      "availability": "local-only"
+    },
+    {
+      "name": "Vehicle Controls",
+      "path": "/vehicle",
+      "icon": "bi-car-front",
+      "description": "Parked Auto or manual next-start vehicle selection",
+      "availability": "local-only"
+    },
+    {
+      "name": "Android Auto",
+      "path": "/android-auto",
+      "icon": "bi-phone",
+      "description": "Phone projection and connection settings",
+      "availability": "local-only",
+      "visibility": "authenticated"
+    }
+  ]
+}

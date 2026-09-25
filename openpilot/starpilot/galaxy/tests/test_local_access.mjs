@@ -1,7 +1,7 @@
 import assert from "node:assert/strict"
 import { compile } from "../web/vendor/vue/vue.esm-browser.js"
 import { LocalAccess, LocalAccessFeed, validLocalAccess } from "../web/js/local-access.js"
-import { GalaxyPage } from "../web/js/galaxy.js"
+import { Home } from "../web/js/home.js"
 const snapshot = { available: true, addresses: [{ interface: 'wlan0', label: 'Wi-Fi', url: 'http://192.168.20.5:8082/' }], reason: '' }
 assert.equal(validLocalAccess(snapshot), true)
 assert.equal(validLocalAccess({ available: false, addresses: [], reason: 'No active addresses' }), true)
@@ -16,14 +16,14 @@ const feed = new LocalAccessFeed({ publish: value => updates.push(value), onUnau
 await feed.start('sample')
 await feed.refresh()
 assert.equal(requests.length, 0)
-assert.match(updates.at(-1).error, /sample mode/)
+assert.match(updates.at(-1).error, /preview/)
 await feed.start('local')
 assert.equal(requests.length, 1)
 assert.equal(requests[0].url, './api/local-access')
 assert.equal(requests[0].options.credentials, 'same-origin')
-assert.equal(timers[0].ms, 4000)
+assert.equal(timers.at(-1).ms, 4000)
 assert.deepEqual(updates.at(-2).data, snapshot)
-assert.equal(timers.length, 1) // One deadline only; no periodic polling timer.
+assert.equal(timers.length, 2) // Background synchronization plus a bounded request.
 await feed.refresh()
 assert.equal(requests.length, 2)
 feed.fetcher = async () => ({ status: 401 })
@@ -47,15 +47,17 @@ const boundedRead = bounded.start('local')
 assert.equal(await bounded.refresh(), undefined) // Duplicate refresh is suppressed.
 deadline()
 await boundedRead
-assert.match(timeoutUpdates.at(-2).error, /timed out/)
+assert.match(timeoutUpdates.at(-2).error, /Reconnecting/)
 assert.equal(timeoutUpdates.at(-1).loading, false)
 bounded.stop()
 compile(LocalAccess.template, { decodeEntities: value => value })
 const setup = LocalAccess.setup({ mode: 'sample', onUnauthorized() {} })
 await setup.feed.start('sample')
-assert.match(setup.state.error, /sample mode/)
+assert.match(setup.state.error, /preview/)
 setup.feed.stop()
-assert.equal(GalaxyPage.components.LocalAccess, LocalAccess)
-assert.ok(GalaxyPage.template.includes(':on-unauthorized="unauthorized"'))
-assert.ok(LocalAccess.template.includes('your browser must be able to reach its network'))
-console.log('Local access: actual Vue component/setup, bounded manual-only read, sample exclusion, authentication, safe links and unmount race passed')
+assert.equal(Home.components.LocalAccess, LocalAccess)
+assert.ok(Home.template.includes(':on-unauthorized="unauthorized"'))
+assert.ok(LocalAccess.template.includes('Connect your phone to the Galaxy hotspot'))
+assert.ok(LocalAccess.template.includes('full http:// address into a new browser tab'))
+assert.ok(LocalAccess.template.includes('public Galaxy link uses the Internet tunnel'))
+console.log('Local access: actual Vue component/setup, bounded automatically synchronized read, sample exclusion, authentication, safe links and unmount race passed')

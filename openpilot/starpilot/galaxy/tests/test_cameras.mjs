@@ -29,14 +29,15 @@ assert.equal(page.state.query, "")
 assert.match(CamerasPage.template, /Adjust the camera crop with a live cabin preview/)
 assert.doesNotMatch(CamerasPage.template, /live camera preview is unavailable/)
 assert.match(CamerasPage.template, /Sentry[\s\S]*View motion events/)
-assert.match(CamerasPage.template, /Saved motion settings/)
-assert.match(CamerasPage.template, /V-ASM[\s\S]*Open saved settings/)
-assert.match(CamerasPage.template, /live camera image and current warning status are unavailable/)
+assert.match(CamerasPage.template, /saved motion settings/)
+assert.doesNotMatch(CamerasPage.template, /go\('\/cameras\/sentry-settings'\)/)
+assert.match(CamerasPage.template, /MenuTile[^>]*title="V-ASM"/)
+assert.match(CamerasPage.template, /Preview the cabin camera/)
 assert.match(CamerasPage.template, /snapshots.capture\(camera\)/)
 assert.match(SettingsPage.template, /\{\{ title \}\}/)
 const app = readFileSync(new URL("../web/js/app.js", import.meta.url), "utf8")
 assert.match(app, /<PipPage v-else-if="route\.path === '\/cameras\/pip'"/)
-assert.match(app, /route\.path === '\/cameras\/sentry-settings'[\s\S]*initial-page="sentry"/)
+assert.match(app, /SentryEventsPage[^>]*\/cameras\/events[^>]*\/cameras\/sentry-settings/)
 assert.match(app, /CamerasPage v-else-if="route\.path === '\/cameras'"/)
 
 const captures = [], snapshots = [], revoked = []
@@ -64,3 +65,25 @@ timer()
 captures[2].resolve({ status: 401 })
 await timed
 assert.match(snapshots.at(-1).error, /timed out/)
+
+// Browsers throw "Illegal invocation" when setTimeout/clearTimeout run with a `this`
+// other than the global object; Node does not, so mimic the browser check here.
+// The default timers once ran as feed methods, which killed every PiP/VASM/Cameras
+// snapshot before its request with no visible error.
+const realSetTimeout = globalThis.setTimeout, realClearTimeout = globalThis.clearTimeout
+const strict = (real) => function (...args) {
+  if (this !== undefined && this !== globalThis) throw new TypeError("Illegal invocation")
+  return real(...args)
+}
+globalThis.setTimeout = strict(realSetTimeout)
+globalThis.clearTimeout = strict(realClearTimeout)
+try {
+  const defaults = new CameraSnapshotFeed({ publish: () => {}, unauthorized: () => {}, createURL: () => "blob:x", revokeURL: () => {},
+    fetcher: async () => ({ status: 200, ok: true, headers: { get: () => "image/jpeg" }, blob: async () => ({ size: 3 }) }) })
+  await defaults.capture("cabin")
+  assert.equal(defaults.url, "blob:x", "default timers must not throw before the request")
+  defaults.stop()
+} finally {
+  globalThis.setTimeout = realSetTimeout
+  globalThis.clearTimeout = realClearTimeout
+}
