@@ -1,6 +1,7 @@
 #pragma once
 
 #include "opendbc/safety/declarations.h"
+#include "opendbc/safety/modes/mazda_stock_aol.h"
 
 // CAN msgs we care about
 #define MAZDA_LKAS          0x243U
@@ -17,6 +18,7 @@
 
 // track msgs coming from OP so that we know what CAM msgs to drop and what to forward
 static void mazda_rx_hook(const CANPacket_t *msg) {
+  mazda_aol_rx(msg);
   if (msg_matches(msg, MAZDA_ENGINE_DATA, MAZDA_MAIN)) {
     // sample speed: scale by 0.01 to get kph
     int speed = (msg->data[2] << 8) | msg->data[3];
@@ -76,11 +78,12 @@ static bool mazda_tx_hook(const CANPacket_t *msg) {
     }
   }
 
+  mazda_aol_tx_commit(msg, tx && !relay_malfunction);
   return tx;
 }
 
 static safety_config mazda_init(uint16_t param) {
-  static const CanMsg MAZDA_TX_MSGS[] = {
+  static CanMsg MAZDA_TX_MSGS[] = {
     {MAZDA_LKAS, 0, 8, .check_relay = true},
     {MAZDA_CRZ_BTNS, 0, 8, .check_relay = false},
     {MAZDA_LKAS_HUD, 0, 8, .check_relay = true},
@@ -94,12 +97,32 @@ static safety_config mazda_init(uint16_t param) {
     {.msg = {{MAZDA_PEDALS,       0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, { 0 }, { 0 }}},
   };
 
-  SAFETY_UNUSED(param);
-  return BUILD_SAFETY_CFG(mazda_rx_checks, MAZDA_TX_MSGS);
+  mazda_aol_reset();
+  mazda_aol_enabled = (param == 0U) && ((unsigned int)alternative_experience == 32U);
+  MAZDA_TX_MSGS[0].check_relay = !mazda_aol_enabled;
+  MAZDA_TX_MSGS[2].check_relay = !mazda_aol_enabled;
+  if (mazda_aol_enabled) {
+    static const AolSafetyPolicy policy = {
+      .reset = mazda_aol_reset,
+      .host_request = mazda_aol_request,
+      .request_mask = mazda_aol_request_mask,
+      .permission_mask = mazda_aol_permission,
+      .rx_invalid = mazda_aol_clear,
+    };
+    aol_policy = &policy;
+  }
+  safety_config ret = BUILD_SAFETY_CFG(mazda_rx_checks, MAZDA_TX_MSGS);
+  if (((unsigned int)alternative_experience == 32U) && (param != 0U)) {
+    ret.tx_msgs = NULL;
+    ret.tx_msgs_len = 0;
+  }
+  return ret;
 }
 
 const safety_hooks mazda_hooks = {
   .init = mazda_init,
   .rx = mazda_rx_hook,
   .tx = mazda_tx_hook,
+  .optional_rx = mazda_aol_optional_rx,
+  .fwd = mazda_aol_fwd,
 };

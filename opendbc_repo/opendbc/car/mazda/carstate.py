@@ -3,6 +3,7 @@ from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
 from opendbc.car.mazda.values import DBC, LKAS_LIMITS
+from opendbc.car.mazda.stock_aol import qualified
 
 ButtonType = structs.CarState.ButtonEvent.Type
 
@@ -21,6 +22,7 @@ class CarState(CarStateBase):
     self.distance_button = 0
     self.accel_button = 0
     self.decel_button = 0
+    self.cancel_button = 0
 
   def update(self, can_parsers) -> structs.CarState:
     cp = can_parsers[Bus.pt]
@@ -110,6 +112,8 @@ class CarState(CarStateBase):
     ret.steerFaultPermanent = cp_cam.vl["CAM_LKAS"]["ERR_BIT_1"] == 1
 
     # cruise control button events: distance, inc, and dec
+    prev_cancel_button = self.cancel_button
+    self.cancel_button = cp.vl["CRZ_BTNS"]["CAN_OFF"]
     prev_distance_button = self.distance_button
     prev_accel_button = self.accel_button
     prev_decel_button = self.decel_button
@@ -118,6 +122,7 @@ class CarState(CarStateBase):
     self.decel_button = cp.vl["CRZ_BTNS"]["SET_M"]
 
     ret.buttonEvents = [
+      *(create_button_events(self.cancel_button, prev_cancel_button, {1: ButtonType.cancel}) if qualified(self.CP, marked_only=True) else []),
       *create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise}),
       *create_button_events(self.accel_button, prev_accel_button, {1: ButtonType.accelCruise}),
       *create_button_events(self.decel_button, prev_decel_button, {1: ButtonType.decelCruise}),
