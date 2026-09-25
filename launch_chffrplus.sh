@@ -5,6 +5,11 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 source "$DIR/launch_env.sh"
 
 function agnos_init {
+  if [ "${AGNOS_UPDATE_POLICY:-auto}" = "retain" ] && [ "$(< /VERSION)" != "$AGNOS_VERSION" ]; then
+    echo "This StarPilot build retains AGNOS $AGNOS_VERSION; installed OS does not match. No OS update was attempted."
+    return 1
+  fi
+
   # TODO: move this to agnos
   sudo rm -f /data/etc/NetworkManager/system-connections/*.nmmeta
   rm -f /data/scons_cache/config.lock
@@ -20,13 +25,35 @@ function agnos_init {
   # Check if AGNOS update is required
   if [ "$(< /VERSION)" != "$AGNOS_VERSION" ]; then
     AGNOS_PY="$DIR/openpilot/common/hardware/comma/agnos.py"
-    MANIFEST="$DIR/openpilot/system/hardware/comma/agnos.json"
+    MANIFEST="$DIR/openpilot/common/hardware/comma/agnos.json"
     if "$AGNOS_PY" --verify "$MANIFEST"; then
       sudo reboot
     fi
     while true; do
       "$DIR/openpilot/common/hardware/comma/updater" "$AGNOS_PY" "$MANIFEST"
     done
+  fi
+
+  # Add missing USB rules for C3's internal Panda; C3X/C4 use SPI.
+  if [ "$(tr -d '\0' 2>/dev/null < /sys/firmware/devicetree/base/model)" = "comma tici" ]; then
+    if ! sudo timeout -k 1s 5s sh -ec '
+      mkdir -p /run/udev/rules.d
+      cat > /run/udev/rules.d/99-starpilot-panda.rules <<EOF
+SUBSYSTEM=="usb", ATTRS{idVendor}=="3801", ATTRS{idProduct}=="ddcc", MODE="0666"
+SUBSYSTEM=="usb", ATTRS{idVendor}=="3801", ATTRS{idProduct}=="ddee", MODE="0666"
+EOF
+      # Batch AGNOS GPIO permissions so coldplug does not block Panda USB events.
+      if [ -f /etc/udev/rules.d/99-gpio.rules ] && ! mountpoint -q /etc/udev/rules.d/99-gpio.rules; then
+        sed "s/{} \\\\;/{} +/g" /etc/udev/rules.d/99-gpio.rules > /run/udev/rules.d/99-gpio.rules
+        mount --bind /run/udev/rules.d/99-gpio.rules /etc/udev/rules.d/99-gpio.rules
+      fi
+      udevadm control --reload-rules
+      for product in ddcc ddee; do
+        udevadm trigger --subsystem-match=usb --attr-match=idVendor=3801 --attr-match=idProduct="$product"
+      done
+    '; then
+      echo "Panda USB permission setup failed; continuing startup."
+    fi
   fi
 }
 
@@ -81,10 +108,14 @@ function launch {
   ln -sfn rednose_repo/rednose rednose
   ln -sfn teleoprtc_repo/teleoprtc teleoprtc
   ln -sfn tinygrad_repo/tinygrad tinygrad
+  ln -sfn jetlink_repo/jetlink jetlink
 
   # hardware specific init
   if [ -f /AGNOS ]; then
-    agnos_init
+    agnos_init || return $?
+    if ! "$DIR/scripts/install_boot_logo.sh"; then
+      echo "StarPilot boot image update failed; continuing startup."
+    fi
   fi
 
   # write tmux scrollback to a file
