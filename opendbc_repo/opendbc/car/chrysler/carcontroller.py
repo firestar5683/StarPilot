@@ -2,7 +2,8 @@ from opendbc.can import CANPacker
 from opendbc.car import Bus, DT_CTRL
 from opendbc.car.lateral import apply_meas_steer_torque_limits
 from opendbc.car.chrysler import chryslercan
-from opendbc.car.chrysler.values import CUSW_CARS, RAM_CARS, CarControllerParams, ChryslerFlags
+from opendbc.car.chrysler.values import CUSW_CARS, RAM_CARS, RAM_DT, CarControllerParams, ChryslerFlags
+from opendbc.car.structs import CarState
 from opendbc.car.interfaces import CarControllerBase
 
 
@@ -50,7 +51,15 @@ class CarController(CarControllerBase):
 
       # TODO: can we make this more sane? why is it different for all the cars?
       lkas_control_bit = self.lkas_control_bit_prev
-      if CS.out.vEgo > self.CP.minSteerSpeed:
+      if self.CP.flags & ChryslerFlags.STEERING_SPEED_BYPASS:
+        lkas_control_bit = CC.latActive
+      elif self.CP.carFingerprint in RAM_DT:
+        # Arm in the EPS speed window, then keep the request through lower speeds.
+        if self.CP.minEnableSpeed <= CS.out.vEgo <= self.CP.minEnableSpeed + 0.5:
+          lkas_control_bit = True
+        if self.CP.minEnableSpeed >= 14.5 and CS.out.gearShifter != CarState.GearShifter.drive:
+          lkas_control_bit = False
+      elif CS.out.vEgo > self.CP.minSteerSpeed:
         lkas_control_bit = True
       elif self.CP.flags & ChryslerFlags.HIGHER_MIN_STEERING_SPEED:
         if CS.out.vEgo < (self.CP.minSteerSpeed - 3.0):
