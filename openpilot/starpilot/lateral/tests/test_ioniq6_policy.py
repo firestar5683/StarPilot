@@ -1,0 +1,159 @@
+"""Frozen 678af783 Ioniq 6 traces and committed-parent non-Ioniq traces."""
+
+import json
+import math
+from pathlib import Path
+from types import SimpleNamespace
+import unittest
+
+from opendbc.car import structs
+from opendbc.car.car_helpers import interfaces
+from opendbc.car.hyundai.values import CAR as HYUNDAI
+from opendbc.car.toyota.values import CAR as TOYOTA
+from opendbc.car.vehicle_model import VehicleModel
+from openpilot.common.realtime import DT_CTRL
+from openpilot.selfdrive.controls.lib.latcontrol_torque import LatControlTorque
+from openpilot.starpilot.lateral.torque_extension import selected_policy
+from openpilot.starpilot.lateral import ioniq6_policy as tune
+from openpilot.starpilot.lateral.torque_shaping import INTERP_SPEEDS
+
+TESTDATA = Path(__file__).parent / 'testdata'
+
+
+def _rows(car, sequence, *, profile='2023', matched_frozen_cp=False, passive=False, direct_original_controller=False):
+  cp = interfaces[car].get_non_essential_params(car)
+  cp.passive = passive
+  if matched_frozen_cp:
+    for name, value in (('mass', 2084.0), ('wheelbase', 2.97), ('centerToFront', 1.188),
+                        ('steerRatio', 14.26), ('tireStiffnessFactor', 0.65)):
+      setattr(cp, name, value)
+    cp.lateralTuning.torque.latAccelFactor = 3.0
+    cp.lateralTuning.torque.latAccelOffset = 0.0
+    cp.lateralTuning.torque.friction = 0.09
+    cp.lateralTuning.torque.steeringAngleDeadzoneDeg = 0.0
+    if profile == '2025':
+      versions = cp.init('carFw', 2)
+      versions[0].fwVersion = b'IONIQ6-230915'
+      versions[1].fwVersion = b'IONIQ6-240206'
+  ci = interfaces[car](cp)
+  controller = LatControlTorque(cp.as_reader(), ci, DT_CTRL, turn_assist=True)
+  if direct_original_controller:
+    # The older frozen vectors called the controller directly, before the
+    # original controlsd drive loop replaced the PID gain curve each tick.
+    controller.pid._k_p = [INTERP_SPEEDS, tune.KP_INTERP]
+  vm = VehicleModel(cp)
+  cs = structs.CarState.new_message()
+  cs.gearShifter = structs.CarState.GearShifter.drive
+  params = SimpleNamespace(angleOffsetDeg=0.0, roll=0.03 if matched_frozen_cp else 0.02)
+  rows = []
+  for active, speed, angle, curvature, pressed in sequence:
+    cs.vEgo = speed
+    cs.steeringAngleDeg = angle
+    cs.steeringPressed = pressed
+    output, _, state = controller.update(active, cs, vm, params, False, curvature, False, 0.1)
+    rows.append([output, state.desiredLateralAccel, state.desiredLateralJerk, state.p, state.i, state.f])
+  return controller, rows
+
+
+class Ioniq6PolicyTests(unittest.TestCase):
+  def test_ioniq_drive_loop_uses_original_flat_proportional_gain(self):
+    cp = interfaces[HYUNDAI.HYUNDAI_IONIQ_6].get_non_essential_params(HYUNDAI.HYUNDAI_IONIQ_6)
+    cp.lateralTuning.torque.latAccelFactor = 3.0
+    cp.lateralTuning.torque.friction = 0.09
+    controller = LatControlTorque(cp.as_reader(), interfaces[HYUNDAI.HYUNDAI_IONIQ_6](cp), DT_CTRL)
+    self.assertEqual(controller.pid._k_p, [[0.0], [0.6]])
+    vm = VehicleModel(cp)
+    cs = structs.CarState.new_message()
+    params = SimpleNamespace(angleOffsetDeg=0.0, roll=0.0)
+    sequence = ((False, 2.0, 0.0002, False),
+                (True, 2.0, 0.0002, False),
+                (True, 8.0, -0.0003, False),
+                (True, 8.0, -0.0003, True),
+                (True, 20.0, 0.0004, True),
+                (True, 20.0, 0.0004, False),
+                (False, 0.0, 0.0, False),
+                (True, 2.0, -0.0002, False))
+    for active, speed, curvature, pressed in sequence:
+      cs.vEgo = speed
+      cs.steeringAngleDeg = 0.0
+      cs.steeringPressed = pressed
+      output, _, state = controller.update(active, cs, vm, params, False, curvature, False, 0.1)
+      self.assertTrue(math.isfinite(output))
+      self.assertEqual(state.active, active)
+      if active:
+        self.assertAlmostEqual(state.p, 0.6 * state.error, places=6)
+        self.assertAlmostEqual(output, state.output, places=6)
+      else:
+        self.assertEqual(output, 0.0)
+      self.assertEqual(controller.pid._k_p, [[0.0], [0.6]])
+    controller.update_torque_parameters(3.2, 0.01, 0.10)
+    self.assertEqual(controller.pid._k_p, [[0.0], [0.6]])
+
+  def test_actual_frozen_controller_sequences_and_pure_calibration(self):
+    sequence = ([(False, 0.3, 10.0, -0.001, False)] * 2 +
+                [(True, 0.3, 10.0, -0.001, False)] * 4 +
+                [(True, 2.0, 5.0, -0.001, False)] * 4 +
+                [(True, 20.0, 2.0, 0.0003, False)] * 4 +
+                [(True, 20.0, 2.0, -0.0003, True)] * 2 +
+                [(False, 0.0, 8.0, -0.001, False)] * 2 +
+                [(True, 3.0, 8.0, -0.001, False)] * 4)
+    samples = ((0.3, .1, .2, 8., 3., -.2),
+               (12., -.5, -1.3, -6., -10., .2),
+               (27., .02, .8, 1., 0., -.1))
+    helpers = []
+    for speed, accel, jerk, angle, actual, torque in samples:
+      helpers.append([
+        tune.get_ioniq_6_ff_scale(accel, jerk, speed),
+        tune.get_ioniq_6_directional_taper_scale(accel, jerk, speed),
+        tune.get_ioniq_6_friction_threshold(speed, accel, jerk),
+        tune.get_ioniq_6_center_taper_scale(accel, speed),
+        tune.get_ioniq_6_low_speed_angle_assist_torque(angle, actual, torque, speed),
+        tune.get_ioniq_6_2025_center_output_scale(accel, speed),
+      ])
+    for profile in ('2023', '2025'):
+      with self.subTest(profile=profile):
+        frozen = json.loads((TESTDATA / f'ioniq6_frozen_{profile}.json').read_text())
+        controller, actual = _rows(HYUNDAI.HYUNDAI_IONIQ_6, sequence, profile=profile,
+                                   matched_frozen_cp=True, direct_original_controller=True)
+        self.assertIsNotNone(selected_policy(controller))
+        self.assertEqual(selected_policy(controller).is_2025, profile == '2025')
+        self.assertAlmostEqual(controller.torque_params.latAccelFactor, frozen['factor'], places=6)
+        for row, expected in zip(actual, frozen['rows'], strict=True):
+          for value, reference in zip(row, expected, strict=True):
+            self.assertAlmostEqual(value, reference, places=6)
+        for row, expected in zip(helpers, frozen['helpers'], strict=True):
+          for value, reference in zip(row, expected, strict=True):
+            self.assertAlmostEqual(value, reference, places=6)
+
+  def test_firmware_gate_and_live_factor_do_not_stack(self):
+    cp = interfaces[HYUNDAI.HYUNDAI_IONIQ_6].get_non_essential_params(HYUNDAI.HYUNDAI_IONIQ_6)
+    self.assertFalse(tune.is_ioniq_6_2025_model(cp))
+    single = cp.init('carFw', 1)
+    single[0].fwVersion = b'IONIQ6-230915'
+    self.assertFalse(tune.is_ioniq_6_2025_model(cp))
+    both = cp.init('carFw', 2)
+    both[0].fwVersion = b'IONIQ6-230915'
+    both[1].fwVersion = b'IONIQ6-240206'
+    self.assertTrue(tune.is_ioniq_6_2025_model(cp))
+    controller = LatControlTorque(cp.as_reader(), interfaces[HYUNDAI.HYUNDAI_IONIQ_6](cp), DT_CTRL)
+    raw = cp.lateralTuning.torque.latAccelFactor
+    for _ in range(3):
+      controller.update_torque_parameters(raw, 0.02, 0.10)
+      self.assertAlmostEqual(controller.torque_params.latAccelFactor, raw * 1.22, places=6)
+      self.assertAlmostEqual(controller.torque_params.latAccelOffset, 0.02, places=6)
+      self.assertAlmostEqual(controller.torque_params.friction, 0.10, places=6)
+
+  def test_other_cars_match_committed_parent_trace(self):
+    sequence = ([(False, 2., 5., -.0005, False)] * 2 +
+                [(True, 2., 5., -.0005, False)] * 3 +
+                [(True, 15., -1., .0004, False)] * 3 +
+                [(True, 25., -2., .0001, True)] * 2 +
+                [(False, 0., 5., -.001, False)] * 2)
+    parent = json.loads((TESTDATA / 'non_ioniq_parent.json').read_text())
+    for car in (TOYOTA.TOYOTA_COROLLA_TSS2, HYUNDAI.HYUNDAI_IONIQ_5):
+      with self.subTest(car=str(car)):
+        controller, actual = _rows(car, sequence, passive=car == TOYOTA.TOYOTA_COROLLA_TSS2)
+        self.assertIsNone(selected_policy(controller))
+        for row, expected in zip(actual, parent[str(car)], strict=True):
+          for value, reference in zip(row, expected, strict=True):
+            self.assertAlmostEqual(value, reference, places=7)

@@ -1,0 +1,83 @@
+from types import SimpleNamespace
+from unittest.mock import patch
+import unittest
+
+import numpy as np
+import pyray as rl
+
+from openpilot.cereal import messaging
+from openpilot.starpilot.lateral.lane_centering import LaneCenteringResult
+from openpilot.starpilot.lateral.lane_feedback import BLUE, MAX_AGE_NS, SERVICE, direction, feedback_message
+
+
+class TestLaneFeedback(unittest.TestCase):
+  def reader(self, *, applied=.0003, requested=.0005):
+    now = 1_000_000_000
+    event = feedback_message(LaneCenteringResult(.001, requested, 1, 'qualified'), applied, True,
+                             model_mono_time=now, car_control_mono_time=now, valid=True)
+    event.logMonoTime = now
+    control = messaging.new_message('carControl', valid=True, logMonoTime=now)
+    control.carControl.latActive = True
+    model = messaging.new_message('modelV2', valid=True, logMonoTime=now)
+    sm = messaging.SubMaster([SERVICE, 'carControl', 'modelV2'], frequency=20)
+    sm.update_msgs(now / 1e9 - .01, [])
+    sm.update_msgs(now / 1e9, [event.as_reader(), control.as_reader(), model.as_reader()])
+    return sm, now
+
+  def test_real_messages_show_applied_sign_and_keep_legacy_fields_inactive(self):
+    for correction, expected in ((.0003, 1), (-.0003, -1), (0., 0), (.0000005, 0)):
+      sm, now = self.reader(applied=correction, requested=.0005 if correction >= 0 else -.0005)
+      self.assertEqual(direction(sm, now, 0), expected)
+      self.assertFalse(sm[SERVICE].active)
+      self.assertEqual(sm[SERVICE].frictionScale, 0.)
+
+  def test_stale_invalid_old_drive_disabled_and_inconsistent_inputs_clear_blue(self):
+    for service in (SERVICE, 'carControl', 'modelV2'):
+      for flag in ('alive', 'valid'):
+        sm, now = self.reader()
+        getattr(sm, flag)[service] = False
+        self.assertEqual(direction(sm, now, 0), 0)
+    sm, now = self.reader()
+    self.assertEqual(direction(sm, now + MAX_AGE_NS + 1, 0), 0)
+    self.assertEqual(direction(sm, now - 1, 0), 0)
+    self.assertEqual(direction(sm, now, sm.frame), 0)
+    for applied, requested in ((.0013, .0013), (.0006, .0005), (-.0003, .0005), (float('nan'), .0005)):
+      sm, now = self.reader(applied=applied, requested=requested)
+      self.assertEqual(direction(sm, now, 0), 0)
+    for field, value in (('version', 0), ('lateralActive', False), ('modelMonoTime', 1), ('carControlMonoTime', 1)):
+      sm, now = self.reader()
+      event = messaging.new_message(SERVICE, valid=True, logMonoTime=now)
+      event.starpilotLateralState = sm[SERVICE]
+      setattr(event.starpilotLateralState.laneCentering, field, value)
+      sm.update_msgs(now / 1e9 + .01, [event.as_reader()])
+      self.assertEqual(direction(sm, now, 0), 0)
+    sm, now = self.reader()
+    control = messaging.new_message('carControl', valid=True, logMonoTime=now)
+    control.carControl.latActive = False
+    sm.update_msgs(now / 1e9 + .01, [control.as_reader()])
+    self.assertEqual(direction(sm, now, 0), 0)
+
+  def test_model_renderer_blue_retains_alpha_and_overrides_torque_color(self):
+    from openpilot.selfdrive.ui.onroad import model_renderer as large
+    from openpilot.selfdrive.ui.mici.onroad import model_renderer as compact
+    from openpilot.selfdrive.ui.ui_state import UIStatus
+
+    for module in (large, compact):
+      for sign in (-1, 0, 1):
+        renderer = module.ModelRenderer.__new__(module.ModelRenderer)
+        renderer._rect = rl.Rectangle(0, 0, 536, 240)
+        renderer._lane_lines = [SimpleNamespace(projected_points=np.array([[0., 0.], [5., 0.], [0., 5.]])) for _ in range(4)]
+        renderer._road_edges = []
+        renderer._lane_line_probs = [.3, .6, .7, .4]
+        if module is compact:
+          renderer._visual_status = lambda: UIStatus.ENGAGED
+          renderer._torque_filter = SimpleNamespace(x=.9)
+        with patch.object(module, 'lane_centering_direction', return_value=sign), patch.object(module, 'draw_polygon') as draw:
+          renderer._draw_lane_lines()
+        colors = [(c.r, c.g, c.b, c.a) for call in draw.call_args_list for c in [call.args[2]]]
+        self.assertEqual([i for i, color in enumerate(colors) if color[:3] == BLUE], [1 if sign < 0 else 2] if sign else [])
+        if sign:
+          index = 1 if sign < 0 else 2
+          self.assertEqual(colors[index][3], int(renderer._lane_line_probs[index] * 255))
+        for index in (0, 3):
+          self.assertEqual(colors[index][3], int(renderer._lane_line_probs[index] * 255))
