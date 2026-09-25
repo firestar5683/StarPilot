@@ -2,6 +2,7 @@
 import numpy as np
 
 from cereal import log
+from opendbc.car.gm.values import CAR as GM_CAR
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
 from openpilot.selfdrive.controls.lib.lead_behavior import should_disable_far_lead_throttle
@@ -21,6 +22,8 @@ LaneChangeDirection = log.LaneChangeDirection
 # through the maneuver instead of braking behind a lead it is about to leave.
 # Ramps in gradually, snaps back to the normal gap when the safety gate trips.
 LANE_CHANGE_MIN_T_FOLLOW = 0.25            # hard floor on the reduced gap (s)
+BOLT_CC_EXTRA_T_FOLLOW = 0.4               # extra headway for cruise-button Bolts (s)
+BOLT_CC_CARS = {GM_CAR.CHEVROLET_BOLT_CC_2017, GM_CAR.CHEVROLET_BOLT_CC_2018_2021, GM_CAR.CHEVROLET_BOLT_CC_2022_2023}
 LANE_CHANGE_GAP_RAMP_IN_RATE = 0.6         # seconds of headway per second, toward the shorter gap
 LANE_CHANGE_GAP_RAMP_OUT_RATE = 4.0        # seconds of headway per second, back to the normal gap
 LANE_CHANGE_ABORT_LEAD_BRAKE = 0.8         # lead decel that aborts the reduction (m/s^2)
@@ -125,6 +128,12 @@ class StarPilotFollowing:
 
     if self.starpilot_planner.starpilot_weather.weather_id != 0:
       self.t_follow = min(self.t_follow + self.starpilot_planner.starpilot_weather.increase_following_distance, MAX_T_FOLLOW)
+
+    if (long_control_active and getattr(starpilot_toggles, "has_cc_long", False) and
+        getattr(starpilot_toggles, "car_model", None) in BOLT_CC_CARS):
+      # Cruise-button Bolts can only slow by lowering the stock set speed, which coasts and
+      # regens at the stock cruise's own pace. Leave more room for that lag.
+      self.t_follow = min(self.t_follow + BOLT_CC_EXTRA_T_FOLLOW, MAX_T_FOLLOW)
 
     self.update_lane_change_gap(long_control_active, v_ego, sm, starpilot_toggles)
 

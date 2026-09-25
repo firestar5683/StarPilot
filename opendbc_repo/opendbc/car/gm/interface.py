@@ -678,6 +678,13 @@ class CarInterface(CarInterfaceBase):
         ret.longitudinalActuatorDelay = 1.
         if candidate == CAR.CHEVROLET_MALIBU_CC:
           ret.longitudinalTuning.kpV = [0., 20., 20.]
+        elif candidate in (CAR.CHEVROLET_BOLT_CC_2017, CAR.CHEVROLET_BOLT_CC_2018_2021, CAR.CHEVROLET_BOLT_CC_2022_2023):
+          # LongControl runs a PID on acceleration error with the planner accel as feedforward.
+          # The kp=5 / 0.9 deadzone tune above was written for the retired speed-error loop; on
+          # the accel loop the deadzone never applies and kp=5 amplified aEgo noise five-fold
+          # into the Bolt's cruise button taps. Keep the command close to the planner accel so
+          # the set speed logic in gmcan sees a clean signal.
+          ret.longitudinalTuning.kpV = [0., 0.5, 0.5]
         ret.longitudinalTuning.kiBP = [0.]
         ret.longitudinalTuning.kiV = [0.1]
         ret.stoppingDecelRate = 11.18  # == 25 mph/s (.04 rate)
