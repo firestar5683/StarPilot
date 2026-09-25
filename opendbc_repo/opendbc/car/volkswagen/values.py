@@ -256,6 +256,7 @@ class VolkswagenMEBPlatformConfig(PlatformConfig):
   dbc_dict: DbcDict = field(default_factory=lambda: {Bus.pt: 'vw_meb_generated', Bus.radar: 'vw_meb_generated'})
   chassis_codes: set[str] = field(default_factory=set)
   wmis: set[WMI] = field(default_factory=set)
+  model_years: set[str] = field(default_factory=set)
 
   def init(self):
     self.flags |= VolkswagenFlags.MEB
@@ -384,6 +385,21 @@ class CAR(Platforms):
     VolkswagenCarSpecs(mass=1397, wheelbase=2.62),
     chassis_codes={"5G", "AU", "BA", "BE"},
     wmis={WMI.VOLKSWAGEN_MEXICO_CAR, WMI.VOLKSWAGEN_EUROPE_CAR},
+  )
+  VOLKSWAGEN_ID3_MK1 = VolkswagenMEBPlatformConfig(
+    [VWCarDocs("Volkswagen ID.3 2020-23", car_parts=CarParts.common([CarHarness.vw_meb]), footnotes=[])],
+    VolkswagenCarSpecs(mass=1935, wheelbase=2.77),
+    chassis_codes={"E1"},
+    wmis={WMI.VOLKSWAGEN_EUROPE_CAR},
+    model_years={"L", "M", "N", "P"},
+  )
+  VOLKSWAGEN_ID3_MK2 = VolkswagenMEBPlatformConfig(
+    [VWCarDocs("Volkswagen ID.3 2024-25", car_parts=CarParts.common([CarHarness.vw_meb]), footnotes=[])],
+    VolkswagenCarSpecs(mass=1935, wheelbase=2.77),
+    chassis_codes={"E1"},
+    wmis={WMI.VOLKSWAGEN_EUROPE_CAR},
+    model_years={"R", "S"},
+    flags=VolkswagenFlags.MEB_GEN2,
   )
   VOLKSWAGEN_ID4_MK1 = VolkswagenMEBPlatformConfig(
     [
@@ -520,6 +536,21 @@ class CAR(Platforms):
     chassis_codes={"8R"},
     wmis={WMI.AUDI_EUROPE_MPV, WMI.AUDI_GERMANY_CAR},
   )
+  AUDI_Q4_MK1 = VolkswagenMEBPlatformConfig(
+    [VWCarDocs("Audi Q4 e-tron 2021-23", car_parts=CarParts.common([CarHarness.vw_meb]), footnotes=[])],
+    VolkswagenCarSpecs(mass=1965, wheelbase=2.764),
+    chassis_codes={"FZ"},
+    wmis={WMI.AUDI_EUROPE_MPV},
+    model_years={"M", "N", "P"},
+  )
+  AUDI_Q4_MK2 = VolkswagenMEBPlatformConfig(
+    [VWCarDocs("Audi Q4 e-tron 2024-25", car_parts=CarParts.common([CarHarness.vw_meb]), footnotes=[])],
+    VolkswagenCarSpecs(mass=1965, wheelbase=2.764),
+    chassis_codes={"FZ"},
+    wmis={WMI.AUDI_EUROPE_MPV},
+    model_years={"R", "S"},
+    flags=VolkswagenFlags.MEB_GEN2,
+  )
   PORSCHE_MACAN_MK1 = VolkswagenMLBPlatformConfig(
     [VWCarDocs("Porsche Macan 2017-24")],
     VolkswagenCarSpecs(mass=1895, wheelbase=2.81, steerRatio=16.2),
@@ -541,6 +572,21 @@ class CAR(Platforms):
     VolkswagenCarSpecs(mass=1956, wheelbase=2.766),
     chassis_codes={"K1"},
     wmis={WMI.SEAT},
+  )
+  SKODA_ENYAQ_MK1 = VolkswagenMEBPlatformConfig(
+    [VWCarDocs("Škoda Enyaq 2021-23", car_parts=CarParts.common([CarHarness.vw_meb]), footnotes=[])],
+    VolkswagenCarSpecs(mass=1965, wheelbase=2.77),
+    chassis_codes={"NY"},
+    model_years={"M", "N", "P"},
+    wmis={WMI.SKODA},
+  )
+  SKODA_ENYAQ_MK2 = VolkswagenMEBPlatformConfig(
+    [VWCarDocs("Škoda Enyaq 2024-25", car_parts=CarParts.common([CarHarness.vw_meb]), footnotes=[])],
+    VolkswagenCarSpecs(mass=1965, wheelbase=2.77),
+    chassis_codes={"NY"},
+    model_years={"R", "S"},
+    wmis={WMI.SKODA},
+    flags=VolkswagenFlags.MEB_GEN2,
   )
   SKODA_FABIA_MK4 = VolkswagenMQBPlatformConfig(
     [VWCarDocs("Škoda Fabia 2022-23", footnotes=[Footnote.VW_MQB_A0])],
@@ -600,6 +646,7 @@ def match_fw_to_car_fuzzy(live_fw_versions, vin, offline_fw_versions) -> set[str
   # https://www.clubvw.org.au/vwreference/vwvin
   vin_obj = Vin(vin)
   chassis_code = vin_obj.vds[3:5]
+  model_year = vin_obj.vis[0] if vin_obj.vis else ""
 
   for platform in CAR:
     valid_ecus = set()
@@ -620,6 +667,8 @@ def match_fw_to_car_fuzzy(live_fw_versions, vin, offline_fw_versions) -> set[str
       continue
 
     if vin_obj.wmi in platform.config.wmis and chassis_code in platform.config.chassis_codes:
+      if platform.config.flags & VolkswagenFlags.MEB and platform.config.model_years and model_year not in platform.config.model_years:
+        continue
       candidates.add(platform)
 
   return {str(c) for c in candidates}
