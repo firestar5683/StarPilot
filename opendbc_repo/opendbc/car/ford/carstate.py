@@ -1,9 +1,14 @@
+import math
+
 from opendbc.can import CANDefine, CANParser
+from opendbc.can.dbc import DBC as CANDBC
 from opendbc.car import Bus, create_button_events, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.ford.fordcan import CanBus
-from opendbc.car.ford.values import DBC, CarControllerParams, FordFlags
+from opendbc.car.ford.stock_cruise import FordStockCruiseButton
+from opendbc.car.ford.values import CAR, DBC, CarControllerParams, FordFlags
 from opendbc.car.interfaces import CarStateBase
+from opendbc.car.dashboard_speed_limit import Tracker as LimitTracker, ford_sign, parser_expiry
 
 ButtonType = structs.CarState.ButtonEvent.Type
 GearShifter = structs.CarState.GearShifter
@@ -15,10 +20,22 @@ class CarState(CarStateBase):
     super().__init__(CP)
     can_define = CANDefine(DBC[CP.carFingerprint][Bus.pt])
     if CP.transmissionType == TransmissionType.automatic:
-      self.shifter_values = can_define.dv["PowertrainData_10"]["TrnRng_D_Rq"]
+      if CP.carFingerprint == CAR.FORD_MONDEO_MK5:
+        self.shifter_values = can_define.dv["Gear_Shift_by_Wire_FD1"]["TrnRng_D_RqGsm"]
+      elif CP.flags & FordFlags.ALT_STEER_ANGLE:
+        self.shifter_values = can_define.dv["TransGearData"]["GearLvrPos_D_Actl"]
+      else:
+        self.shifter_values = can_define.dv["PowertrainData_10"]["TrnRng_D_Rq"]
 
     self.distance_button = 0
+    self.dashboard_limit = LimitTracker()
     self.lc_button = 0
+    self.cancel_button = False
+    self.cancel_resume_button = FordStockCruiseButton()
+    self.steering_angle_offset_deg = 0.0
+    self.lkas_available = False
+    self.lkas_available_ts_nanos = 0
+    self.lateral_motion_control = None
 
   def update(self, can_parsers) -> structs.CarState:
     cp = can_parsers[Bus.pt]
@@ -28,7 +45,14 @@ class CarState(CarStateBase):
 
     # Occasionally on startup, the ABS module recalibrates the steering pinion offset, so we need to block engagement
     # The vehicle usually recovers out of this state within a minute of normal driving
-    ret.vehicleSensorsInvalid = cp.vl["SteeringPinion_Data"]["StePinCompAnEst_D_Qf"] != 3
+    if self.CP.flags & FordFlags.ALT_STEER_ANGLE:
+      park_aid = cp.vl["ParkAid_Data"]
+      ret.vehicleSensorsInvalid = (cp.ts_nanos["ParkAid_Data"]["ExtSteeringAngleReq2"] == 0 or
+                                   cp.ts_nanos["SteeringPinion_Data_Alt"]["StePinRelInit_An_Sns"] == 0 or
+                                   int((park_aid["ExtSteeringAngleReq2"] + 1000) * 10) in (32766, 32767) or
+                                   park_aid["EPASExtAngleStatReq"] != 0 or park_aid["ApaSys_D_Stat"] not in (0, 1))
+    else:
+      ret.vehicleSensorsInvalid = cp.vl["SteeringPinion_Data"]["StePinCompAnEst_D_Qf"] != 3
 
     # car speed
     ret.vEgoRaw = cp.vl["BrakeSysFeatures"]["Veh_V_ActlBrk"] * CV.KPH_TO_MS
@@ -44,7 +68,13 @@ class CarState(CarStateBase):
     ret.parkingBrake = cp.vl["DesiredTorqBrk"]["PrkBrkStatus"] in (1, 2)
 
     # steering wheel
-    ret.steeringAngleDeg = cp.vl["SteeringPinion_Data"]["StePinComp_An_Est"]
+    if self.CP.flags & FordFlags.ALT_STEER_ANGLE:
+      initial_angle = cp.vl["SteeringPinion_Data_Alt"]["StePinRelInit_An_Sns"]
+      if not ret.vehicleSensorsInvalid:
+        self.steering_angle_offset_deg = cp.vl["ParkAid_Data"]["ExtSteeringAngleReq2"] - initial_angle
+      ret.steeringAngleDeg = initial_angle + self.steering_angle_offset_deg
+    else:
+      ret.steeringAngleDeg = cp.vl["SteeringPinion_Data"]["StePinComp_An_Est"]
     ret.steeringTorque = cp.vl["EPAS_INFO"]["SteeringColumnTorque"]
     ret.steeringPressed = self.update_steering_pressed(abs(ret.steeringTorque) > CarControllerParams.STEER_DRIVER_ALLOWANCE, 5)
     ret.steerFaultTemporary = cp.vl["EPAS_INFO"]["EPAS_Failure"] == 1
@@ -54,6 +84,13 @@ class CarState(CarStateBase):
     if self.CP.flags & FordFlags.CANFD:
       # this signal is always 0 on non-CAN FD cars
       ret.steerFaultTemporary |= cp.vl["Lane_Assist_Data3_FD1"]["LatCtlSte_D_Stat"] not in (1, 2, 3)
+    if self.CP.flags & FordFlags.LKA_STEERING:
+      self.lkas_available_ts_nanos = cp.ts_nanos["Lane_Assist_Data3_FD1"]["LaActAvail_D_Actl"]
+      self.lkas_available = (self.lkas_available_ts_nanos > 0 and
+                             cp.vl["Lane_Assist_Data3_FD1"]["LaActAvail_D_Actl"] == 3 and
+                             cp.vl["Lane_Assist_Data3_FD1"]["LaActDeny_B_Actl"] == 0)
+      self.lateral_motion_control = cp_cam.vl["LateralMotionControl"]
+      ret.steerFaultTemporary |= not self.lkas_available
 
     # cruise state
     is_metric = cp.vl["INSTRUMENT_PANEL"]["METRIC_UNITS"] == 1 if not self.CP.flags & FordFlags.CANFD else False
@@ -68,7 +105,14 @@ class CarState(CarStateBase):
 
     # gear
     if self.CP.transmissionType == TransmissionType.automatic:
-      gear = self.shifter_values.get(cp.vl["PowertrainData_10"]["TrnRng_D_Rq"])
+      if self.CP.carFingerprint == CAR.FORD_MONDEO_MK5:
+        gear = self.shifter_values.get(cp.vl["Gear_Shift_by_Wire_FD1"]["TrnRng_D_RqGsm"])
+      elif self.CP.flags & FordFlags.ALT_STEER_ANGLE:
+        gear = self.shifter_values.get(cp.vl["TransGearData"]["GearLvrPos_D_Actl"])
+      else:
+        gear = self.shifter_values.get(cp.vl["PowertrainData_10"]["TrnRng_D_Rq"])
+      if self.CP.carFingerprint in (CAR.FORD_EDGE_MK2, CAR.FORD_MONDEO_MK5) and gear == "SPORT_DRIVESPORT":
+        gear = "SPORT"
       ret.gearShifter = self.parse_gear_shifter(gear)
     elif self.CP.transmissionType == TransmissionType.manual:
       if bool(cp.vl["BCM_Lamp_Stat_FD1"]["RvrseLghtOn_B_Stat"]):
@@ -89,6 +133,11 @@ class CarState(CarStateBase):
     prev_lc_button = self.lc_button
     self.distance_button = cp.vl["Steering_Data_FD1"]["AccButtnGapTogglePress"]
     self.lc_button = bool(cp.vl["Steering_Data_FD1"]["TjaButtnOnOffPress"])
+    prev_cancel_button = self.cancel_button
+    cancel, _ = self.cancel_resume_button.update(
+      bool(cp.vl["Steering_Data_FD1"]["CcAslButtnCnclResPress"]),
+      ret.cruiseState.available, ret.cruiseState.enabled)
+    self.cancel_button = bool(cp.vl["Steering_Data_FD1"]["CcAslButtnCnclPress"]) or cancel
 
     # lock info
     ret.doorOpen = any([cp.vl["BodyInfo_3_FD1"]["DrStatDrv_B_Actl"], cp.vl["BodyInfo_3_FD1"]["DrStatPsngr_B_Actl"],
@@ -107,16 +156,48 @@ class CarState(CarStateBase):
     self.acc_tja_status_stock_values = cp_cam.vl["ACCDATA_3"]
     self.lkas_status_stock_values = cp_cam.vl["IPMA_Data"]
 
-    ret.buttonEvents = [
+    button_events = [
       *create_button_events(self.distance_button, prev_distance_button, {1: ButtonType.gapAdjustCruise}),
       *create_button_events(self.lc_button, prev_lc_button, {1: ButtonType.lkas}),
     ]
+
+    if self.CP.openpilotLongitudinalControl:
+      button_events += create_button_events(self.cancel_button, prev_cancel_button, {1: ButtonType.cancel})
+
+    ret.buttonEvents = button_events
+
+    timestamp, expiry = parser_expiry(cp_cam, "Traffic_RecognitnData", "TsrVLim1MsgTxt_D_Rq")
+    if timestamp > self.dashboard_limit.observation.observed_ns:
+      speed = int(cp_cam.vl["Traffic_RecognitnData"]["TsrVLim1MsgTxt_D_Rq"])
+      unit = int(cp_cam.vl["Traffic_RecognitnData"]["TsrVlUnitMsgTxt_D_Rq"])
+      status, value_mps = ford_sign(speed, unit)
+      self.dashboard_limit.update(timestamp, status, value_mps, valid_until_ns=expiry)
 
     return ret
 
   @staticmethod
   def get_can_parsers(CP):
+    dbc_name = DBC[CP.carFingerprint][Bus.pt]
+    cam_messages = [("Traffic_RecognitnData", math.nan)] if "Traffic_RecognitnData" in CANDBC(dbc_name).name_to_msg else []
+    pt_messages = []
+    if CP.flags & FordFlags.NEW_PORT:
+      # Subscribe before the first update so the new ports cannot miss their first source frame.
+      pt_messages = [(name, math.nan) for name in (
+        "BrakeSysFeatures", "Yaw_Data_FD1", "DesiredTorqBrk", "EngVehicleSpThrottle",
+        "EngBrakeData", "EPAS_INFO", "Cluster_Info1_FD1", "Steering_Data_FD1",
+        "BodyInfo_3_FD1", "RCMStatusMessage2_FD1", "SteeringPinion_Data",
+      )]
+      if CP.flags & FordFlags.CANFD:
+        pt_messages += [("Gear_Shift_by_Wire_FD1", math.nan), ("Lane_Assist_Data3_FD1", 30)]
+      elif CP.flags & FordFlags.ALT_STEER_ANGLE:
+        pt_messages += [("ParkAid_Data", 50), ("SteeringPinion_Data_Alt", 100),
+                        ("TransGearData", math.nan), ("INSTRUMENT_PANEL", math.nan)]
+      else:
+        pt_messages += [(name, math.nan) for name in ("PowertrainData_10", "INSTRUMENT_PANEL")]
+    if CP.flags & FordFlags.LKA_STEERING:
+      pt_messages.append(("Lane_Assist_Data3_FD1", 30))
+      cam_messages.append(("LateralMotionControl", 20))
     return {
-      Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).main),
-      Bus.cam: CANParser(DBC[CP.carFingerprint][Bus.pt], [], CanBus(CP).camera),
+      Bus.pt: CANParser(DBC[CP.carFingerprint][Bus.pt], pt_messages, CanBus(CP).main),
+      Bus.cam: CANParser(dbc_name, cam_messages, CanBus(CP).camera),
     }

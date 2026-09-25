@@ -1,3 +1,4 @@
+import math
 from opendbc.car import CanBusBase
 
 
@@ -18,7 +19,7 @@ class CanBus(CanBusBase):
     return self.offset + 2
 
 
-def create_lka_msg(packer, CAN: CanBus):
+def create_lka_msg(packer, CAN: CanBus, active=False, apply_angle=0., direction=0, curvature=0., transit=False):
   """
   Creates an empty CAN message for the Ford LKA Command.
 
@@ -27,11 +28,24 @@ def create_lka_msg(packer, CAN: CanBus):
   Frequency is 33Hz.
   """
 
-  return packer.make_can_msg("Lane_Assist_Data1", CAN.main, {})
+  values = {}
+  if transit:
+    values = {"LaRefAng_No_Req": 0., "LaCurvature_No_Calc": 0., "LdwActvIntns_D_Req": 3}
+  if active:
+    values = {
+      "LkaDrvOvrrd_D_Rq": 0,
+      "LkaActvStats_D2_Req": direction,
+      "LaRefAng_No_Req": math.radians(max(-5.8, min(5.8, apply_angle))) * 1000.,
+      "LaRampType_B_Req": int(abs(apply_angle) >= 5.),
+      "LaCurvature_No_Calc": max(-0.01023, min(0.01023, curvature)),
+      "LdwActvStats_D_Req": 0,
+      "LdwActvIntns_D_Req": 3,
+    }
+  return packer.make_can_msg("Lane_Assist_Data1", CAN.main, values)
 
 
 def create_lat_ctl_msg(packer, CAN: CanBus, lat_active: bool, path_offset: float, path_angle: float, curvature: float,
-                       curvature_rate: float):
+                       curvature_rate: float, stock_lmc=None):
   """
   Creates a CAN message for the Ford TJA/LCA Command.
 
@@ -67,6 +81,11 @@ def create_lat_ctl_msg(packer, CAN: CanBus, lat_active: bool, path_offset: float
     "LatCtlCurv_NoRate_Actl": curvature_rate,   # Curvature rate [-0.001024|0.00102375] 1/meter^2
     "LatCtlCurv_No_Actl": curvature,            # Curvature [-0.02|0.02094] 1/meter
   }
+  if stock_lmc is not None:
+    values = {key: stock_lmc[key] for key in values}
+    values.update({"LatCtl_D_Rq": 0, "HandsOffCnfm_B_Rq": 0,
+                   "LatCtlPathOffst_L_Actl": 0., "LatCtlPath_An_Actl": 0.,
+                   "LatCtlCurv_NoRate_Actl": 0., "LatCtlCurv_No_Actl": 0.})
   return packer.make_can_msg("LateralMotionControl", CAN.main, values)
 
 

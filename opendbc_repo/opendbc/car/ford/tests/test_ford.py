@@ -53,7 +53,8 @@ class TestFordFW(unittest.TestCase):
       assert subaddr is None, "Unexpected ECU subaddress"
 
       for fw in fws:
-        assert len(fw) == 24, "Expected ECU response to be 24 bytes"
+        expected_len = 23 if car_model == CAR.FORD_TRANSIT_MK5 and ecu == Ecu.fwdCamera else 24
+        assert len(fw) == expected_len, "Unexpected ECU response length"
 
         match = FW_PATTERN.match(fw)
         assert match is not None, f"Unable to parse FW: {fw!r}"

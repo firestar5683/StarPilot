@@ -229,4 +229,23 @@ FW_VERSIONS = {
       b'RJ6T-14H102-BBB\x00\x00\x00\x00\x00\x00\x00\x00\x00',
     ],
   },
+  CAR.FORD_EDGE_MK2: {
+    (Ecu.eps, 0x730, None): [b'M2GC-14D003-AA\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'],
+    (Ecu.abs, 0x760, None): [b'M2GC-2D053-CB\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00',
+                              b'M2GC-2D053-EA\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'],
+    (Ecu.fwdRadar, 0x764, None): [b'JX7T-14D049-AD\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'],
+    (Ecu.fwdCamera, 0x706, None): [b'KT4T-14F397-AF\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'],
+  },
+  CAR.FORD_MONDEO_MK5: {
+    (Ecu.fwdCamera, 0x706, None): [b'KT4T-14F397-AE\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'],
+    (Ecu.abs, 0x760, None): [b'KG9C-2D053-DF\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'],
+    (Ecu.eps, 0x730, None): [b'K2GC-14D003-AJ\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'],
+    (Ecu.fwdRadar, 0x764, None): [b'JX7T-14D049-AD\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'],
+  },
+  CAR.FORD_TRANSIT_MK5: {
+    (Ecu.eps, 0x730, None): [b'KK21-14D003-AM\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'],
+    (Ecu.abs, 0x760, None): [b'NK41-2D053-DF\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'],
+    (Ecu.fwdRadar, 0x764, None): [b'PC4T-14D049-AA\x00\x00\x00\x00\x00\x00\x00\x00\x00\x00'],
+    (Ecu.fwdCamera, 0x706, None): [b'NK3T-14F397-AB\x00\x00\x00\x00\x00\x00\x00\x00\x00'],
+  },
 }
