@@ -2704,6 +2704,16 @@
         "settings_tier": "simple"
       },
       {
+        "key": "BlindSpotMetrics",
+        "label": "Blind Spot Borders",
+        "description": "Show red borders on the screen when a vehicle is in the blind spot.",
+        "picker_description": "Shows red screen borders when a blind spot is detected.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "parent_key": "CustomUI",
+        "settings_tier": "simple"
+      },
+      {
         "key": "PIPPreviewEnabled",
         "label": "Enable PiP Side Preview",
         "description": "Show a temporary Picture-in-Picture bubble of the side window while the turn signal is on or a blind spot is detected.",
@@ -3634,6 +3644,24 @@
         "label": "Stop-and-Go Hack",
         "description": "Force stop-and-go on Lexus/Toyota vehicles without stock stop-and-go functionality.",
         "picker_description": "Adds stop-and-go to Lexus/Toyota vehicles without it.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "LockDoors",
+        "label": "Auto Lock Doors",
+        "description": "Automatically lock the doors when shifting out of park on Lexus/Toyota vehicles.",
+        "picker_description": "Locks Lexus/Toyota doors when shifting out of park.",
+        "data_type": "bool",
+        "ui_type": "toggle",
+        "settings_tier": "simple"
+      },
+      {
+        "key": "UnlockDoors",
+        "label": "Auto Unlock Doors",
+        "description": "Automatically unlock the doors when shifting into park on Lexus/Toyota vehicles.",
+        "picker_description": "Unlocks Lexus/Toyota doors when shifting into park.",
         "data_type": "bool",
         "ui_type": "toggle",
         "settings_tier": "simple"
