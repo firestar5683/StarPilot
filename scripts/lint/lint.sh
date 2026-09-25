@@ -116,9 +116,12 @@ while IFS= read -r -d '' f; do
   fi
 done < <(git ls-files -z openpilot)
 
-# Include tooling, launchers, and the extensionless Git hook.
+# Keep inherited pinned dependency scripts outside the first-party shell check.
 SHELL_FILES=()
 while IFS= read -r -d '' f; do
+  case $f in
+    msgq_repo/*|opendbc_repo/*|panda/*|rednose_repo/*|teleoprtc_repo/*|tinygrad_repo/*) continue ;;
+  esac
   if [[ -f $f ]]; then
     SHELL_FILES+=("$f")
   fi

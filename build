@@ -1,0 +1,132 @@
+#!/usr/bin/env bash
+# Project build shortcuts. AGNOS builds natively; laptops use the ARM64 container.
+set -euo pipefail
+
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+if [[ "${1:-}" == -h || "${1:-}" == --help ]]; then
+  cat <<'EOF'
+Usage: ./build [jobs] [scons options]
+       ./build [--params] [--cereal] [--panda] [jobs] [scons options]
+       ./build --mapd
+       ./build --check-startup <Params root or namespace> <recovery storage>
+
+On AGNOS/aarch64, builds run natively. On laptops, builds use a Linux/ARM64 container.
+--params builds libparams_c.so; --cereal builds cereal outputs; --panda
+builds signed panda_h7 and body_h7 firmware only. Numeric jobs become -jN.
+RELEASE and CERT are environment variables, not trailing SCons arguments:
+  RELEASE=1 CERT=/path/to/certificate ./build --panda 4
+CERT must name a readable certificate file. Omit RELEASE for DEBUG firmware.
+--mapd explicitly packages the pinned offline Linux/ARM64 Go provider; it
+does not fetch map regions or participate in the default build.
+Run scripts/laptop_device_build.sh doctor to check local prerequisites.
+Full laptop builds require a source-matched QCOM artifact package in
+.cache/qcom-artifact-package; device builds still compile models natively.
+--check-startup checks retained settings admission read-only using the local
+native developer runtime. Supply a matching Params namespace and recovery
+storage. A relocated copy can fail its path-bound profile marker.
+EOF
+  exit 0
+fi
+if [[ "${1:-}" == --check-startup ]]; then
+  if [[ $# -ne 3 ]]; then
+    echo "Usage: ./build --check-startup <Params root or namespace> <recovery storage>" >&2
+    exit 2
+  fi
+  exec "${ROOT_DIR}/dev" python "${ROOT_DIR}/tools/check_startup.py" "$2" "$3"
+fi
+for arg in "$@"; do
+  case "${arg}" in
+    RELEASE=*|CERT=*)
+      echo "ERROR: RELEASE and CERT must be environment variables, not SCons arguments." >&2
+      echo "Use: RELEASE=1 CERT=/path/to/certificate ./build --panda 4" >&2
+      exit 2
+      ;;
+  esac
+done
+
+original_args=("$@")
+build_helper="${ROOT_DIR}/scripts/laptop_device_build.sh"
+if [[ -f /AGNOS && "$(uname -s)" == Linux && "$(uname -m)" == aarch64 ]]; then
+  build_helper="${ROOT_DIR}/scripts/native_device_build.sh"
+fi
+if [[ $# -eq 1 && "$1" == --mapd ]]; then
+  exec "${ROOT_DIR}/scripts/build_mapd_provider.sh"
+fi
+if [[ $# -gt 0 ]]; then
+  for arg in "$@"; do
+    if [[ "$arg" == --mapd ]]; then
+      echo "ERROR: --mapd is a standalone package operation; use ./build --mapd" >&2
+      exit 2
+    fi
+  done
+fi
+shortcut_targets=()
+passthrough_args=()
+shortcut_includes_panda=0
+panda_generated_files=(panda/board/obj/gitversion.h panda/board/obj/version)
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --params|-params|-param)
+      shortcut_targets+=(openpilot/common/libparams_c.so)
+      ;;
+    --panda|-panda)
+      shortcut_includes_panda=1
+      shortcut_targets+=(panda/board/obj/panda_h7.bin.signed panda/board/obj/body_h7.bin.signed)
+      ;;
+    --cereal|-cereal)
+      shortcut_targets+=(openpilot/cereal/libcereal.a openpilot/cereal/libsocketmaster.a
+                         openpilot/cereal/messaging/bridge openpilot/cereal/services.h)
+      ;;
+    *)
+      if [[ "$1" =~ ^[0-9]+$ ]]; then
+        passthrough_args+=("-j$1")
+      else
+        passthrough_args+=("$1")
+      fi
+      ;;
+  esac
+  shift
+done
+
+if [[ "${#shortcut_targets[@]}" -gt 0 ]]; then
+  scons_args=(--no-scrub "${shortcut_targets[@]}")
+  if [[ ${passthrough_args[0]+present} ]]; then
+    scons_args+=("${passthrough_args[@]}")
+  fi
+  if [[ "$shortcut_includes_panda" -eq 1 ]]; then
+    exec "${build_helper}" scons "${scons_args[@]}"
+  fi
+
+  # Panda/SConscript updates these even for unrelated targets. Restore their
+  # prior bytes for the non-firmware shortcuts, including on build failure.
+  tmpdir="$(mktemp -d)"
+  restore_panda_metadata() {
+    local path safe
+    for path in "${panda_generated_files[@]}"; do
+      safe="${path//\//__}"
+      if [[ -e "${tmpdir}/${safe}.missing" ]]; then
+        rm -f "${ROOT_DIR}/${path}"
+      else
+        cp -p "${tmpdir}/${safe}" "${ROOT_DIR}/${path}"
+      fi
+    done
+    rm -rf "${tmpdir}"
+  }
+  trap restore_panda_metadata EXIT
+  for path in "${panda_generated_files[@]}"; do
+    safe="${path//\//__}"
+    if [[ -e "${ROOT_DIR}/${path}" ]]; then
+      cp -p "${ROOT_DIR}/${path}" "${tmpdir}/${safe}"
+    else
+      touch "${tmpdir}/${safe}.missing"
+    fi
+  done
+  "${build_helper}" scons "${scons_args[@]}"
+  exit $?
+fi
+
+if [[ "${#original_args[@]}" -gt 0 ]]; then
+  exec "${build_helper}" build "${original_args[@]}"
+fi
+exec "${build_helper}" build

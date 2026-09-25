@@ -1,5 +1,8 @@
 # openpilot tools
 
+For StarPilot's `./build`, `./dev`, `./onroad`, `./c3`, and `./c4` workflows,
+see [StarPilot developer commands](STARPILOT_DEVELOPMENT.md).
+
 ## System Requirements
 
 openpilot is developed and tested on **Ubuntu 24.04**, which is the primary development target aside from the [supported embedded hardware](https://github.com/commaai/openpilot#running-on-a-dedicated-device-in-a-car).

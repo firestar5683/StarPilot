@@ -2,6 +2,7 @@
 
 #include <capnp/dynamic.h>
 #include <csignal>
+#include <cstdlib>
 #include <iomanip>
 #include <sstream>
 #include "openpilot/cereal/services.h"
@@ -211,8 +212,15 @@ void Replay::startStream(const std::shared_ptr<Segment> segment) {
     builder.setRoot(event.getCarParams());
     auto words = capnp::messageToFlatArray(builder);
     auto bytes = words.asBytes();
-    Params().put("CarParams", (const char *)bytes.begin(), bytes.size());
-    Params().put("CarParamsPersistent", (const char *)bytes.begin(), bytes.size());
+    const char *prefix = std::getenv("OPENPILOT_PREFIX");
+    const std::string replay_prefix = prefix != nullptr ? prefix : "";
+    if (replay_prefix.rfind("replay-", 0) == 0 && replay_prefix.size() > 7 &&
+        replay_prefix.find_first_not_of("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_-") == std::string::npos) {
+      Params().put("CarParams", (const char *)bytes.begin(), bytes.size());
+    } else {
+      rWarning("refusing live CarParams seeding outside a dedicated replay- namespace; use --prefix replay-<name>");
+    }
+    rWarning("refusing persistent CarParams seeding from unqualified logs; source schema provenance and explicit conversion are required");
   } else {
     rWarning("failed to read CarParams from current segment");
   }

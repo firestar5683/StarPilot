@@ -2,6 +2,13 @@
 
 `replay` allows you to simulate a driving session by replaying all messages logged during the use of openpilot. This provides a way to analyze and visualize system behavior as if it were live.
 
+Logged CarParams are not written to persistent caches: doing that requires source
+schema provenance and explicit conversion. Raw live `CarParams` seeding is allowed
+only with a dedicated `--prefix replay-<name>` namespace; run consumers under the
+same prefix. Other namespaces receive a diagnostic and no Params seeding. Playback
+remains available, but isolation does not establish compatibility of logged schemas
+or qualify a replay for vehicle validation.
+
 ## Setup
 
 Before starting a replay, you need to authenticate with your comma account using `auth.py`. This will allow you to access your routes from the server.
@@ -140,3 +147,25 @@ positional arguments:
 optional arguments:
   -h, --help            show this help message and exit
 ```
+
+## Isolated StarPilot desktop replay
+
+`./onroad [jobs] [--c3|--c4|--all|--replay-only] [--prefix replay-NAME]
+<route-or-replay-options>` starts the current replay binary and selected native
+UI in one private host session. Without a UI choice, logged `initData.deviceType`
+chooses compact for mici/C4 and large otherwise. `--replay-only` starts no UI
+and does not load `initData` for display selection. The wrapper preserves replay
+arguments after its own options, and `--help` needs no host build. It uses a
+separate `replay-*` message namespace and disposable Params directory, copies
+only validated logged display booleans, and stops its owned children on normal
+exit or SIGINT/SIGTERM/SIGHUP. It creates and removes only its own native
+message-queue directory; an existing explicit replay prefix is rejected.
+Route playback may need the usual route access
+and can download data requested by the route argument.
+
+This port has no fake nav, CEM, CSC, alert, or Galaxy demo publishers. Their old
+flags fail clearly. The current replay binary exposes its ncurses playback
+controls, not the old state-file control bar. `--auto` alone is rejected because
+the current replay binary still requires a route. A native UI preview also
+requires the complete reviewed bitmap font bundle described in the StarPilot UI
+README; this is an open zero-configuration host dependency.

@@ -9,7 +9,7 @@ from pathlib import Path, PurePosixPath
 from urllib.parse import urlsplit
 
 MANIFEST = "upstream-sync.json"
-DEPENDENCIES = frozenset({"msgq_repo", "opendbc_repo", "panda", "rednose_repo", "teleoprtc_repo", "tinygrad_repo"})
+DEPENDENCIES = frozenset({"msgq_repo", "opendbc_repo", "panda", "rednose_repo", "teleoprtc_repo", "tinygrad_repo", "mapd_repo"})
 SHA = re.compile(r"[0-9a-f]{40}\Z")
 
 

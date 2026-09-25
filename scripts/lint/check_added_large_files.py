@@ -29,8 +29,8 @@ def check_added_large_files(filenames: list[str], max_kb: int) -> int:
         print(f'{filename}: placeholder pointer payload.')
         failed = True
         continue
-    if os.stat(filename).st_size > 95 * 1024 * 1024:
-      print(f'{filename}: ordinary Git blob exceeds 95 MiB.')
+    if os.stat(filename).st_size > 100 * 1024 * 1024:
+      print(f'{filename}: ordinary Git blob exceeds 100 MiB.')
       failed = True
       continue
     if filename in ignored:

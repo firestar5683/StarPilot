@@ -1,3 +1,10 @@
+# Release builds
+
+Run `./build --mapd` in the source checkout before assembling a release. Both
+release scripts validate and include the generated Mapd executable and manifest;
+missing or stale packages stop assembly. Regenerate the package when Mapd source
+or its upstream pin changes. The generated files stay out of the source branch.
+
 # openpilot releases
 
 ```

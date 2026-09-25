@@ -17,6 +17,8 @@ if [ -z "$RELEASE_BRANCH" ]; then
   exit 1
 fi
 
+python3 "$SOURCE_DIR/tools/release/stage_mapd_provider.py" --source "$SOURCE_DIR"
+
 BUILD_BRANCH=release-mici-staging
 
 
@@ -38,6 +40,7 @@ git read-tree --empty
 echo "[-] copying files T=$SECONDS"
 cd "$SOURCE_DIR"
 ./tools/release/release_files.py | xargs -0 cp -pR --parents -t "$BUILD_DIR" --
+python3 "$SOURCE_DIR/tools/release/stage_mapd_provider.py" --source "$SOURCE_DIR" --destination "$BUILD_DIR"
 
 # in the directory
 cd "$BUILD_DIR"
@@ -60,11 +63,7 @@ else
   scons panda/
 fi
 
-if [ -n "$INCLUDE_BIG_MODEL" ]; then
-  test -f openpilot/selfdrive/modeld/models/big_driving_tinygrad.pkl
-  test -f openpilot/selfdrive/modeld/models/big_driving_warp_1344x760_tinygrad.pkl
-  test -f openpilot/selfdrive/modeld/models/big_driving_warp_1928x1208_tinygrad.pkl
-fi
+# Big models are selected and verified through the external model catalog.
 
 # Cleanup
 find . -name '*.a' -delete
