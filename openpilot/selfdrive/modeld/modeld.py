@@ -11,7 +11,7 @@ from tinygrad.device import Buffer, Device
 from tinygrad.dtype import DType, dtypes
 from tinygrad.engine.realize import lower_and_compile
 from tinygrad.tensor import Tensor
-from tinygrad.helpers import round_up
+from tinygrad.helpers import all_int, round_up
 from tinygrad.uop.ops import UOp
 import math
 import pickle
@@ -35,6 +35,18 @@ from openpilot.common.transformations.camera import DEVICE_CAMERAS
 from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
 from openpilot.common.transformations.model import get_warp_matrix
 from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
+from openpilot.starpilot.lateral.lane_change_preferences import effective as effective_lane_change, read_saved as read_lane_change
+from openpilot.starpilot.lateral.auto_lane_change import ClockEpochGuard, auto_evidence, paired_clocks_ns, session_policy
+from openpilot.starpilot.lateral.lane_change_status_wire import (
+  Direction as StatusDirection, LaneChangeStatus, Phase as StatusPhase, encode_optional as encode_lane_status,
+)
+from openpilot.starpilot.models.receipt import ModelReceiptOwner
+from openpilot.starpilot.models.status import ModelVariant
+from openpilot.starpilot.models.startup import wait_for_chestnut_power
+from openpilot.starpilot.navigation.intent import TurnIntent, matching_turn_signal
+from openpilot.starpilot.models.catalog import BUNDLED_CURRENT
+from openpilot.starpilot.models.runner import CatalogModelState, action_from_outputs, load_verified_model
+import uuid
 from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, should_stop, smooth_value, get_curvature_from_plan
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
 from openpilot.selfdrive.modeld.fill_model_msg import fill_model_msg, fill_driving_model_data, fill_pose_msg, PublishState
@@ -151,6 +163,7 @@ class ModelState:
 
     self.prev_desire = np.zeros(ModelConstants.DESIRE_LEN, dtype=np.float32)
     self.chestnut = chestnut
+    self.model_id = BUNDLED_CURRENT
 
     stride, y_height, uv_height, _ = get_nv12_info(cam_w, cam_h)
     self.frame_copy_size = stride * (y_height + uv_height)
@@ -163,6 +176,7 @@ class ModelState:
     self.outputs = {name: Tensor(np.zeros(shape, dtype=dtype), device=device).realize() for name, (shape, dtype, device) in jits['output_specs'].items()}
     for name, next_name in self.state_pairs.items():
       state = self.input_queues[name]
+      assert all_int(state.shape)
       self.outputs[next_name] = input_view(state._buffer(), state.shape, state.dtype, 0)
     self.parser = Parser()
 
@@ -229,8 +243,19 @@ class ModelState:
 def main(demo=False):
   cloudlog.warning("modeld init")
 
-  CHESTNUT = chestnut_compiled() and (chestnut_present() or cable_connected())
+  receipt_owner = ModelReceiptOwner(report=lambda reason: cloudlog.warning("modeld load identity unavailable: %s", reason))
+  receipt_owner.start()
+
+  from openpilot.starpilot.models.manager import resolve_runtime, requested_runtime_id
+  chestnut_available = chestnut_present() or cable_connected()
+  recovery_small_only = os.getenv("STARPILOT_MODELD_RECOVERY_SMALL_ONLY") == "1"
+  selection = resolve_runtime(chestnut_available=chestnut_available and not recovery_small_only, randomize=not recovery_small_only)
+  requested_model_id = requested_runtime_id(chestnut_available)
+  CHESTNUT = selection.allow_big and (selection.big_path is not None or chestnut_compiled())
   if CHESTNUT:
+    from tinygrad.runtime.support.am import startup_trace
+    startup_trace.ENABLED = True
+    startup_trace.REPORT = lambda packet: cloudlog.event("chestnut.startup", **packet)
     from tinygrad.runtime.ops_amd import AMDDevice
     AMDDevice.wait_timeout_ms = 3000
   params = Params()
@@ -262,17 +287,55 @@ def main(demo=False):
   if use_extra_client:
     cloudlog.warning(f"connected extra cam with buffer size: {vipc_client_extra.buffer_len} ({vipc_client_extra.width} x {vipc_client_extra.height})")
 
+  if demo:
+    CP = get_demo_car_params()
+  else:
+    CP = messaging.log_from_bytes(params.get("CarParams", block=True), car.CarParams)
+  cloudlog.info("modeld got CarParams: %s", CP.brand)
+
   st = time.monotonic()
   cloudlog.warning("loading model")
   model = None
+  big_prepared = None
+
+  def load_small():
+    if selection.small_path is not None:
+      try:
+        selected, prepared = load_verified_model(vipc_client_main.width, vipc_client_main.height,
+                                                 selection.small_path, selection.small_version, False,
+                                                 selection.small_id, selection.small_sha256)
+        return selected, prepared, False
+      except Exception:
+        cloudlog.exception("selected small model load failed, using bundled model")
+    path = modeld_pkl_path(False)
+    identity = receipt_owner.capture(path)
+    bundled = ModelState(vipc_client_main.width, vipc_client_main.height, False)
+    return bundled, receipt_owner.prepare(path, identity), selection.small_path is not None
+
+  # Preload a custom fallback before the GPU worker takes the catalog lock.
+  # A timed-out GPU worker must never hold up access to the small runner.
+  small_model = small_prepared = None
+  selected_small_failed = False
+  if selection.big_path is not None and selection.small_path is not None:
+    small_model, small_prepared, selected_small_failed = load_small()
   if CHESTNUT:
+    big_path = selection.big_path or modeld_pkl_path(True)
+    big_artifact_identity = receipt_owner.capture(big_path)
     big_model = None
     def load_big():
-      nonlocal big_model
+      nonlocal big_model, big_prepared
       try:
         wait_for_chestnut()
-        m = ModelState(vipc_client_main.width, vipc_client_main.height, True)
-        m.warmup()
+        if not demo:
+          wait_for_chestnut_power(CP, timeout=BIG_MODEL_TIMEOUT / 2)
+        if selection.big_path is not None:
+          m, prepared = load_verified_model(vipc_client_main.width, vipc_client_main.height,
+                                            big_path, selection.big_version, True, selection.big_id, selection.big_sha256)
+        else:
+          m = ModelState(vipc_client_main.width, vipc_client_main.height, True)
+          m.warmup()
+          prepared = receipt_owner.prepare(big_path, big_artifact_identity)
+        big_prepared = prepared
         big_model = m
       except Exception:
         cloudlog.exception("big model load failed")
@@ -282,18 +345,27 @@ def main(demo=False):
     model = big_model
     params.put_bool("ChestnutActive", model is not None)
 
-  small_model = ModelState(vipc_client_main.width, vipc_client_main.height, False) if model is None or CHESTNUT else None
+  if small_model is None:
+    small_model, small_prepared, selected_small_failed = load_small()
+  initial_chestnut_fallback = CHESTNUT and model is None
   if model is None:
     model = small_model
+  receipt_owner.loaded(big_prepared if model.chestnut else small_prepared,
+                       ModelVariant.CHESTNUT if model.chestnut else ModelVariant.SMALL,
+                       "chestnut-run-stalled" if recovery_small_only else
+                       "chestnut-load-failed" if initial_chestnut_fallback else
+                       "selected-load-failed" if (selected_small_failed and not model.chestnut) or requested_model_id != model.model_id else None,
+                       model_id=model.model_id)
   params.put_bool("ChestnutLoading", False)
   cloudlog.warning(f"models loaded in {time.monotonic() - st:.1f}s, modeld starting")
 
   config_realtime_process(7, 54)
 
   # messaging
-  pub_socks = ["modelV2", "drivingModelData", "cameraOdometry"] + (["chestnutGpuState"] if CHESTNUT else [])
+  pub_socks = ["modelIdentity", "modelV2", "drivingModelData", "cameraOdometry", "laneChangeAssistWire"] + (["chestnutGpuState"] if CHESTNUT else [])
   pm = PubMaster(pub_socks)
-  sm = SubMaster(["deviceState", "carState", "narrowRoadCameraState", "extrinsicsCalibration", "driverMonitoringState", "carControl", "lateralDelay"])
+  sm = SubMaster(["deviceState", "carState", "narrowRoadCameraState", "extrinsicsCalibration", "driverMonitoringState",
+                  "carControl", "lateralDelay", "starpilotNavigation", "longitudinalPlan"])
 
   publish_state = PublishState()
   params = Params()
@@ -312,18 +384,21 @@ def main(demo=False):
   meta_main = FrameMeta()
   meta_extra = FrameMeta()
 
-  if demo:
-    CP = get_demo_car_params()
-  else:
-    CP = messaging.log_from_bytes(params.get("CarParams", block=True), car.CarParams)
-  cloudlog.info("modeld got CarParams: %s", CP.brand)
-
   # TODO this needs more thought, use .2s extra for now to estimate other delays
   # TODO Move smooth seconds to action function
   long_delay = CP.longitudinalActuatorDelay + LONG_SMOOTH_SECONDS
   prev_action = log.ModelDataV2.Action()
 
-  DH = DesireHelper()
+  saved_lane_policy = effective_lane_change(read_lane_change(params))
+  auto_development_enabled = os.getenv("STARPILOT_AUTO_LANE_CHANGE_DEV") == "1"
+  runtime_lane_policy = session_policy(saved_lane_policy, auto_development_enabled)
+  auto_vehicle_capable = not (CP.notCar or CP.passive or CP.dashcamOnly)
+  initial_mono_ns, initial_boot_ns, initial_skew_ns = paired_clocks_ns()
+  lane_clock_guard = ClockEpochGuard(initial_mono_ns, initial_boot_ns, initial_skew_ns)
+  DH = DesireHelper(runtime_lane_policy)
+  navigation_turn = TurnIntent()
+  lane_status_session = uuid.uuid4().hex
+  lane_status_sequence = 0
 
   while True:
     # Keep receiving frames until we are at least 1 frame ahead of previous extra frame
@@ -359,7 +434,9 @@ def main(demo=False):
       meta_extra = meta_main
 
     sm.update(0)
-    desire = DH.desire
+    turn_supported = bool(model.npy.get('desire') is not None and model.npy['desire'].shape[-1] == 8)
+    desire = navigation_turn.select(sm, time.monotonic_ns(), DH.desire,
+                                     supported=turn_supported, model_stop=bool(prev_action.shouldStop))
     is_rhd = sm["driverMonitoringState"].isRHD
     frame_id = sm["narrowRoadCameraState"].frameId
     v_ego = max(sm["carState"].vEgo, 0.)
@@ -403,6 +480,11 @@ def main(demo=False):
       'action_t': np.array([lat_action_t, long_action_t], dtype=np.float32),
     }
 
+    if isinstance(model, CatalogModelState):
+      inputs['prev_action'] = np.array([prev_action.desiredCurvature * max(1.0, v_ego) ** 2,
+                                        prev_action.desiredAcceleration], dtype=np.float32)
+      inputs['lateral_control_params'] = np.array([v_ego, lat_delay], dtype=np.float32)
+
     mt1 = time.perf_counter()
     try:
       send_chestnut = (chestnut_state is not None and
@@ -415,6 +497,7 @@ def main(demo=False):
       cloudlog.exception("big model failed, fall back to small")
       params.put_bool("ChestnutActive", False)
       model = small_model
+      receipt_owner.loaded(small_prepared, ModelVariant.SMALL, "chestnut-load-failed", model_id=model.model_id)
       if chestnut_state is not None:
         chestnut_state.big = False
       run_count = 0
@@ -427,7 +510,9 @@ def main(demo=False):
       drivingdata_send = messaging.new_message('drivingModelData')
       posenet_send = messaging.new_message('cameraOdometry')
 
-      action = get_action_from_model(model_output, prev_action, lat_action_t, long_action_t, v_ego)
+      action = (action_from_outputs(model_output, model.behavior_version, prev_action, lat_action_t, long_action_t, v_ego,
+                                    LAT_SMOOTH_SECONDS, LONG_SMOOTH_SECONDS) if isinstance(model, CatalogModelState) else
+                get_action_from_model(model_output, prev_action, lat_action_t, long_action_t, v_ego))
       prev_action = action
       fill_model_msg(modelv2_send, model_output, action,
                      publish_state, meta_main.frame_id, meta_extra.frame_id, frame_id,
@@ -438,13 +523,43 @@ def main(demo=False):
       l_lane_change_prob = desire_state[log.Desire.laneChangeLeft]
       r_lane_change_prob = desire_state[log.Desire.laneChangeRight]
       lane_change_prob = l_lane_change_prob + r_lane_change_prob
-      DH.update(sm['carState'], sm['carControl'].latActive, lane_change_prob)
+      car_state = sm['carState']
+      direction = -1 if car_state.leftBlinker and not car_state.rightBlinker else (1 if car_state.rightBlinker and not car_state.leftBlinker else 0)
+      mono_now_ns, boot_now_ns, clock_skew_ns = paired_clocks_ns()
+      auto_ready = (runtime_lane_policy.auto_lane_change and direction != 0 and
+                    lane_clock_guard.ready(sm, mono_now_ns, boot_now_ns, clock_skew_ns) and
+                    auto_evidence(sm, modelv2_send.modelV2, direction, runtime_lane_policy.minimum_lane_width_m,
+                                  now_mono_ns=mono_now_ns, now_boot_ns=boot_now_ns,
+                                  model_valid=bool(modelv2_send.valid), vehicle_capable=auto_vehicle_capable))
+      engaged = bool(sm['carControl'].enabled and sm['carControl'].latActive)
+      DH.update(car_state, sm['carControl'].latActive, lane_change_prob,
+                auto_evidence=auto_ready, engaged=engaged,
+                navigation_turn=matching_turn_signal(sm, mono_now_ns, supported=turn_supported))
       modelv2_send.modelV2.meta.laneChangeState = DH.lane_change_state
       modelv2_send.modelV2.meta.laneChangeDirection = DH.lane_change_direction
 
+      phase = {"manualRequired": StatusPhase.MANUAL_REQUIRED, "waitingForDelay": StatusPhase.WAITING_FOR_DELAY,
+               "laneUnavailable": StatusPhase.LANE_UNAVAILABLE, "blindspotBlocked": StatusPhase.BLINDSPOT_BLOCKED}[DH.auto_status]
+      status_direction = (StatusDirection.LEFT if DH.lane_change_direction == log.LaneChangeDirection.left else
+                          StatusDirection.RIGHT if DH.lane_change_direction == log.LaneChangeDirection.right else StatusDirection.NONE)
+      lane_status = LaneChangeStatus(lane_status_session, lane_status_sequence,
+                                     int(modelv2_send.modelV2.frameId), int(modelv2_send.modelV2.timestampEof),
+                                     mono_now_ns, mono_now_ns + 150_000_000, phase, status_direction,
+                                     runtime_lane_policy.auto_lane_change, engaged)
+      lane_status_sequence += 1
+      lane_status_msg = None
+      status_bytes = encode_lane_status(lane_status)
+      if status_bytes is not None:
+        lane_status_msg = messaging.new_message('laneChangeAssistWire', 0)
+        lane_status_msg.valid = True
+        lane_status_msg.laneChangeAssistWire = status_bytes
+
       fill_driving_model_data(drivingdata_send, modelv2_send)
       fill_pose_msg(posenet_send, model_output, meta_main.frame_id, vipc_dropped_frames, meta_main.timestamp_eof, extrinsics_calibration_seen)
+      receipt_owner.publish(pm, time.monotonic_ns())
       pm.send('modelV2', modelv2_send)
+      if lane_status_msg is not None:
+        pm.send('laneChangeAssistWire', lane_status_msg)
       pm.send('drivingModelData', drivingdata_send)
       pm.send('cameraOdometry', posenet_send)
     last_vipc_frame_id = meta_main.frame_id

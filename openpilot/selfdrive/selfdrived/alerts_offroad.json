@@ -29,6 +29,10 @@
     "text": "Chestnut not detected. Check USB and 12V connections.",
     "severity": 0
   },
+  "Offroad_ChestnutModelError": {
+    "text": "Chestnut model error. Restart the car to retry.",
+    "severity": 0
+  },
   "Offroad_ChestnutOverheated": {
     "text": "Chestnut overheated. Ensure good airflow. Current GPU temperature is %1.",
     "severity": 0

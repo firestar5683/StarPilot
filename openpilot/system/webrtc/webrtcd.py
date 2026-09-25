@@ -125,7 +125,7 @@ class CerealIncomingMessageProxy:
   def __init__(self, pm: messaging.PubMaster):
     self.pm = pm
 
-  def send(self, message: bytes):
+  def send(self, message: bytes | str):
     msg_json = json.loads(message)
     msg_type, msg_data = msg_json["type"], msg_json["data"]
     size = None
@@ -278,7 +278,7 @@ class StreamSession:
   async def get_answer(self):
     return await self.stream.start()
 
-  def message_handler(self, message: bytes):
+  def message_handler(self, message: bytes | str):
     try:
       payload = json.loads(message) if isinstance(message, (bytes, str)) else None
       if isinstance(payload, dict):

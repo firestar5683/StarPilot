@@ -4,6 +4,7 @@ import threading
 from openpilot.common.params import Params
 from openpilot.common.hardware import HARDWARE
 from openpilot.common.swaglog import cloudlog
+from openpilot.starpilot.power.offroad_preferences import PowerPolicy, effective, read_saved
 
 CAR_VOLTAGE_LOW_PASS_K = 0.011 # LPF gain for 45s tau (dt/tau / (dt/tau + 1))
 
@@ -27,6 +28,8 @@ class PowerMonitoring:
     self.car_voltage_mV = 12e3                  # Low-passed version of peripheralState voltage
     self.car_voltage_instant_mV = 12e3          # Last value of peripheralState voltage
     self.integration_lock = threading.Lock()
+    self._saved_power_policy = PowerPolicy()
+    self._power_policy_read_at = float("-inf")
 
     car_battery_capacity_uWh = self.params.get("CarBatteryCapacity") or 0
 
@@ -102,17 +105,26 @@ class PowerMonitoring:
   def get_car_battery_capacity(self) -> int:
     return int(self.car_battery_capacity_uWh)
 
+  def _power_policy(self, now: float) -> PowerPolicy:
+    if now - self._power_policy_read_at >= 1.0 or now < self._power_policy_read_at:
+      self._saved_power_policy = effective(read_saved(self.params))
+      self._power_policy_read_at = now
+    return self._saved_power_policy
+
   # See if we need to shutdown
   def should_shutdown(self, ignition: bool, in_car: bool, offroad_timestamp: float | None, started_seen: bool):
     if offroad_timestamp is None:
       return False
 
     now = time.monotonic()
+    policy = self._power_policy(now)
     should_shutdown = False
     offroad_time = (now - offroad_timestamp)
-    low_voltage_shutdown = (self.car_voltage_mV < (VBATT_PAUSE_CHARGING * 1e3) and
+    voltage_cutoff = policy.cutoff_tenths * 100 if policy.enabled else VBATT_PAUSE_CHARGING * 1e3
+    timeout_s = policy.delay_hours * 3600 if policy.enabled else MAX_TIME_OFFROAD_S
+    low_voltage_shutdown = (self.car_voltage_mV < voltage_cutoff and
                             offroad_time > VOLTAGE_SHUTDOWN_MIN_OFFROAD_TIME_S)
-    should_shutdown |= offroad_time > MAX_TIME_OFFROAD_S
+    should_shutdown |= offroad_time > timeout_s
     should_shutdown |= low_voltage_shutdown
     should_shutdown |= (self.car_battery_capacity_uWh <= 0)
     should_shutdown &= not ignition

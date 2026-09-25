@@ -6,6 +6,11 @@ from opendbc.car.structs import car
 from openpilot.common.params import Params
 from openpilot.common.hardware import PC, COMMA_HARDWARE
 from openpilot.system.manager.process import PythonProcess, NativeProcess, DaemonProcess
+from openpilot.starpilot.maps.shadow_lifecycle import MapdShadowProcess
+from openpilot.starpilot.models.recovery_process import ModeldProcess
+from openpilot.starpilot.sentry_mode.preferences import enabled as sentry_enabled
+from openpilot.starpilot.galaxy.camera_request import requested as camera_requested
+from openpilot.starpilot.spot_monitor.preferences import enabled as vasm_enabled
 
 WEBCAM = os.getenv("USE_WEBCAM") is not None
 
@@ -55,8 +60,36 @@ def always_run(started: bool, params: Params, CP: car.CarParams) -> bool:
 def only_onroad(started: bool, params: Params, CP: car.CarParams) -> bool:
   return started
 
+def vision_slc_development(started: bool, params: Params, CP: car.CarParams) -> bool:
+  from openpilot.starpilot.feature_runtime import enabled as feature_enabled
+  return started and feature_enabled(params, CP, 'slc', os.environ) and feature_enabled(params, CP, 'vision', os.environ)
+
+def galaxy_local(started: bool, params: Params, CP: car.CarParams) -> bool:
+  # Keep the authenticated local service reachable across ignition changes.
+  return os.getenv("STARPILOT_GALAXY_DISABLE") != "1"
+
+def android_auto_enabled(started: bool, params: Params, CP: car.CarParams) -> bool:
+  # A missing key is typed false. The manager does not start or recover a phone
+  # role until the user enables projection on supported hardware.
+  return COMMA_HARDWARE and platform.system() == "Linux" and params.get_bool("AndroidAutoEnabled")
+
 def only_offroad(started: bool, params: Params, CP: car.CarParams) -> bool:
   return not started
+
+def sentry_motion(started: bool, params: Params, CP: car.CarParams) -> bool:
+  return not started and sentry_enabled(params)
+
+def vasm_monitor(started: bool, params: Params, CP: car.CarParams) -> bool:
+  model_path = os.getenv("STARPILOT_VASM_MODEL_PATH", "")
+  return (started and bool(model_path) and os.path.isabs(model_path) and
+          vasm_enabled(params, development=os.getenv("STARPILOT_VASM_DEVELOPMENT") == "1"))
+
+def sensord_run(started: bool, params: Params, CP: car.CarParams) -> bool:
+  return started or sentry_motion(started, params, CP)
+
+def parked_camera(started: bool, params: Params, CP: car.CarParams) -> bool:
+  return not started and camera_requested()
+
 
 def livestream(started: bool, params: Params, CP: car.CarParams) -> bool:
   return params.get_bool("IsLiveStreaming")
@@ -75,20 +108,28 @@ procs = [
   NativeProcess("stream_encoderd", "openpilot/system/loggerd", ["./encoderd", "--stream"], or_(livestream, notcar)),
   PythonProcess("logmessaged", "openpilot.system.logmessaged", always_run),
 
-  NativeProcess("camerad", "openpilot/system/camerad", ["./camerad"], or_(driverview, livestream), enabled=not WEBCAM),
-  PythonProcess("webcamerad", "openpilot.system.camerad.webcam.camerad", driverview, enabled=WEBCAM),
+  NativeProcess("camerad", "openpilot/system/camerad", ["./camerad"], or_(or_(driverview, livestream), parked_camera), enabled=not WEBCAM),
+  PythonProcess("webcamerad", "openpilot.system.camerad.webcam.camerad", or_(driverview, parked_camera), enabled=WEBCAM),
   PythonProcess("proclogd", "openpilot.system.proclogd", only_onroad, enabled=platform.system() != "Darwin"),
   PythonProcess("journald", "openpilot.system.journald", only_onroad, platform.system() != "Darwin"),
   PythonProcess("micd", "openpilot.system.micd", iscar),
   PythonProcess("timed", "openpilot.system.timed", always_run, enabled=not PC),
 
-  PythonProcess("modeld", "openpilot.selfdrive.modeld.modeld", only_onroad),
+  ModeldProcess("modeld", "openpilot.selfdrive.modeld.modeld", only_onroad),
+  PythonProcess("vision_slc", "openpilot.starpilot.speed_limits.vision.producer", vision_slc_development),
   PythonProcess("dmonitoringmodeld", "openpilot.selfdrive.modeld.dmonitoringmodeld", driverview, enabled=(WEBCAM or not PC)),
 
-  PythonProcess("sensord", "openpilot.system.sensord.sensord", only_onroad, enabled=not PC),
+  PythonProcess("sensord", "openpilot.system.sensord.sensord", sensord_run, enabled=not PC),
+  PythonProcess("sentry_motion", "openpilot.starpilot.sentry_mode.runtime", sentry_motion, enabled=not PC),
+  PythonProcess("vasm_monitor", "openpilot.starpilot.spot_monitor.runtime", vasm_monitor, enabled=not PC),
   PythonProcess("ui", "openpilot.selfdrive.ui.ui", always_run),
+  PythonProcess("navigationd", "openpilot.starpilot.navigation.runtime", always_run),
+  PythonProcess("galaxy", "openpilot.starpilot.galaxy.managed", galaxy_local),
+  PythonProcess("android_autod", "openpilot.starpilot.system.android_auto.daemon", android_auto_enabled, enabled=COMMA_HARDWARE),
   PythonProcess("soundd", "openpilot.selfdrive.ui.soundd", driverview),
   PythonProcess("locationd", "openpilot.selfdrive.locationd.locationd", only_onroad),
+  MapdShadowProcess(),
+  PythonProcess("map_snapshot_operations", "openpilot.starpilot.maps.operation_owner", only_offroad, enabled=platform.system() == "Linux"),
   NativeProcess("_pandad", "openpilot/selfdrive/pandad", ["./pandad"], always_run, enabled=False),
   PythonProcess("calibrationd", "openpilot.selfdrive.locationd.calibrationd", only_onroad),
   PythonProcess("torqued", "openpilot.selfdrive.locationd.torqued", only_onroad),

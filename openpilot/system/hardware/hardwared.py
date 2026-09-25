@@ -7,6 +7,9 @@ import subprocess
 import sys
 import threading
 import time
+from openpilot.starpilot.drive_state.owner import DriveStateOwner
+from openpilot.starpilot.drive_state.resolver import Mode, effective_onroad, should_start as resolve_start
+from openpilot.starpilot.storage import starpilot_storage_root
 from collections import OrderedDict, namedtuple
 
 import openpilot.cereal.messaging as messaging
@@ -210,6 +213,8 @@ def hardware_thread(end_event, hw_queue) -> None:
   startup_conditions_prev: dict[str, bool] = {}
 
   off_ts: float | None = None
+  physical_off_ts: float | None = None
+  forced_power_episode = False
   started_ts: float | None = None
   started_seen = False
   startup_blocked_ts: float | None = None
@@ -234,6 +239,10 @@ def hardware_thread(end_event, hw_queue) -> None:
   offroad_cycle_count = 0
 
   params = Params()
+  drive_state = DriveStateOwner(params, starpilot_storage_root() / "drive-state")
+  drive_mode = Mode.AUTO
+  physical_ignition_prev = None
+  requested_onroad_prev = None
   power_monitor = PowerMonitoring()
 
   uptime_offroad: float = params.get("UptimeOffroad", return_default=True)
@@ -274,8 +283,19 @@ def hardware_thread(end_event, hw_queue) -> None:
         onroad_conditions["ignition"] = False
         cloudlog.error("panda timed out onroad")
 
-    # Run at 2Hz, plus either edge of ignition
-    ign_edge = (started_ts is not None) != all(onroad_conditions.values())
+    # Run at 2Hz, plus effective or observed physical ignition edges.
+    physical_ignition = onroad_conditions["ignition"]
+    physical_edge = physical_ignition_prev is not None and physical_ignition != physical_ignition_prev
+    if physical_ignition_prev is not None or (sm.updated["pandaStates"] and len(pandaStates) > 0):
+      physical_ignition_prev = physical_ignition
+    if sm.frame % round(SERVICE_LIST['pandaStates'].frequency * DT_HW) == 0:
+      drive_mode = drive_state.snapshot().mode
+    requested_onroad = effective_onroad(drive_mode, onroad_conditions)
+    request_edge = requested_onroad_prev is not None and requested_onroad != requested_onroad_prev
+    requested_onroad_prev = requested_onroad
+    # Preserve Auto's startup retries without treating a blocked forced request as a new edge.
+    ign_edge = ((started_ts is not None) != requested_onroad if drive_mode == Mode.AUTO else
+                request_edge or physical_edge)
     if (sm.frame % round(SERVICE_LIST['pandaStates'].frequency * DT_HW) != 0) and not ign_edge:
       continue
 
@@ -378,9 +398,7 @@ def hardware_thread(end_event, hw_queue) -> None:
       startup_conditions["registered_device"] = PC or (params.get("DongleId") != UNREGISTERED_DONGLE_ID)
 
     # Handle offroad/onroad transition
-    should_start = all(onroad_conditions.values())
-    if started_ts is None:
-      should_start = should_start and all(startup_conditions.values())
+    should_start = resolve_start(drive_mode, onroad_conditions, startup_conditions, already_started=started_ts is not None)
 
     if should_start != should_start_prev or (count == 0):
       params.put_bool("IsEngaged", False, block=True)
@@ -398,10 +416,18 @@ def hardware_thread(end_event, hw_queue) -> None:
       except Exception:
         pass
 
-    should_pwrsave = not onroad_conditions["ignition"] and msg.deviceState.screenBrightnessPercent < 1e-3
+    should_pwrsave = not (onroad_conditions["ignition"] or should_start) and msg.deviceState.screenBrightnessPercent < 1e-3
     if should_pwrsave != pwrsave or (count == 0):
       HARDWARE.set_power_save(should_pwrsave)
     pwrsave = should_pwrsave
+
+    if onroad_conditions["ignition"]:
+      physical_off_ts = None
+      forced_power_episode = False
+    elif drive_mode != Mode.AUTO or forced_power_episode:
+      if physical_off_ts is None:
+        physical_off_ts = off_ts if not physical_edge and off_ts is not None else time.monotonic()
+      forced_power_episode |= drive_mode != Mode.AUTO
 
     if should_start:
       off_ts = None
@@ -435,8 +461,9 @@ def hardware_thread(end_event, hw_queue) -> None:
     msg.deviceState.somPowerDrawW = som_power_draw
 
     # Check if we need to shut down
-    if power_monitor.should_shutdown(onroad_conditions["ignition"], in_car, off_ts, started_seen):
-      cloudlog.warning(f"shutting device down, offroad since {off_ts}")
+    shutdown_off_ts = physical_off_ts if forced_power_episode else off_ts
+    if power_monitor.should_shutdown(onroad_conditions["ignition"], in_car, shutdown_off_ts, started_seen):
+      cloudlog.warning(f"shutting device down, offroad since {shutdown_off_ts}")
       params.put_bool("DoShutdown", True, block=True)
 
     msg.deviceState.started = started_ts is not None

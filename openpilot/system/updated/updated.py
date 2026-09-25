@@ -8,7 +8,7 @@ import signal
 import fcntl
 import time
 import threading
-from collections import defaultdict
+import atexit
 from pathlib import Path
 
 from openpilot.common.basedir import BASEDIR
@@ -20,6 +20,8 @@ from openpilot.selfdrive.selfdrived.alertmanager import set_offroad_alert
 from openpilot.common.hardware import AGNOS, HARDWARE
 from openpilot.common.version import get_build_metadata
 from openpilot.common.vendor_manifest import validate_revision
+from openpilot.starpilot.software.update_control import UpdaterControlError, UpdaterControlServer
+from openpilot.starpilot.software.preferences import download_permitted
 
 LOCK_FILE = os.getenv("UPDATER_LOCK_FILE", "/tmp/safe_staging_overlay.lock")
 STAGING_ROOT = os.getenv("UPDATER_STAGING_ROOT", "/data/safe_staging")
@@ -50,6 +52,22 @@ class WaitTimeHelper:
     self.user_request = UserRequest.NONE
     signal.signal(signal.SIGHUP, self.update_now)
     signal.signal(signal.SIGUSR1, self.check_now)
+    self.control = UpdaterControlServer(self._control_request)
+    try:
+      self.control.start()
+    except UpdaterControlError:
+      cloudlog.warning('updater local control is unavailable; signal handlers remain active')
+    else:
+      atexit.register(self.control.close)
+
+  def _control_request(self, action: str) -> None:
+    if action == 'check':
+      self.user_request = UserRequest.CHECK
+    elif action == 'download':
+      self.user_request = UserRequest.FETCH
+    else:
+      return
+    self.ready_event.set()
 
   def update_now(self, signum: int, frame) -> None:
     cloudlog.info("caught SIGHUP, attempting to downloading update")
@@ -207,22 +225,27 @@ def finalize_update() -> None:
 
 
 def handle_agnos_update() -> None:
-  from openpilot.common.hardware.comma.agnos import flash_agnos_update, get_target_slot_number
-
   cur_version = HARDWARE.get_os_version()
-  updated_version = run(["bash", "-c", r"unset AGNOS_VERSION && source launch_env.sh && \
-                          echo -n $AGNOS_VERSION"], OVERLAY_MERGED).strip()
+  config = run(["bash", "-c", r"unset AGNOS_VERSION AGNOS_UPDATE_POLICY; source launch_env.sh && " +
+                "printf '%s\\n%s\\n' \"$AGNOS_VERSION\" \"${AGNOS_UPDATE_POLICY:-auto}\""], OVERLAY_MERGED).splitlines()
+  if len(config) != 2 or not config[0] or config[1] not in ("auto", "retain"):
+    set_consistent_flag(False)
+    raise ValueError("Invalid AGNOS installation policy")
+  updated_version, policy = config
 
-  cloudlog.info(f"AGNOS version check: {cur_version} vs {updated_version}")
+  cloudlog.info(f"AGNOS version check: {cur_version} vs {updated_version} ({policy})")
   if cur_version == updated_version:
     return
 
-  # prevent an openpilot getting swapped in with a mismatched or partially downloaded agnos
+  # A mismatched retained OS must not finalize an update or trigger flashing.
   set_consistent_flag(False)
+  if policy == "retain":
+    raise RuntimeError(f"This StarPilot build requires existing AGNOS {updated_version}; installed {cur_version}. " +
+                       "No OS update was attempted.")
 
+  from openpilot.common.hardware.comma.agnos import flash_agnos_update, get_target_slot_number
   cloudlog.info(f"Beginning background installation for AGNOS {updated_version}")
-
-  manifest_path = os.path.join(OVERLAY_MERGED, "openpilot/system/hardware/comma/agnos.json")
+  manifest_path = os.path.join(OVERLAY_MERGED, "openpilot/common/hardware/comma/agnos.json")
   target_slot_number = get_target_slot_number()
   flash_agnos_update(manifest_path, target_slot_number, cloudlog)
 
@@ -230,7 +253,8 @@ def handle_agnos_update() -> None:
 class Updater:
   def __init__(self):
     self.params = Params()
-    self.branches = defaultdict(str)
+    self.branches: dict[str, str] = {}
+    self._branches_checked = False
     self._has_internet: bool = False
 
   @property
@@ -253,16 +277,17 @@ class Updater:
   @property
   def update_ready(self) -> bool:
     consistent_file = Path(os.path.join(FINALIZED, ".overlay_consistent"))
-    if consistent_file.is_file():
+    if self._branches_checked and consistent_file.is_file() and self.target_branch in self.branches:
       hash_mismatch = self.get_commit_hash(BASEDIR) != self.branches[self.target_branch]
       branch_mismatch = self.get_branch(BASEDIR) != self.target_branch
       on_target_branch = self.get_branch(FINALIZED) == self.target_branch
-      return ((hash_mismatch or branch_mismatch) and on_target_branch)
+      finalized_at_remote_head = self.get_commit_hash(FINALIZED) == self.branches[self.target_branch]
+      return ((hash_mismatch or branch_mismatch) and on_target_branch and finalized_at_remote_head)
     return False
 
   @property
   def update_available(self) -> bool:
-    if os.path.isdir(OVERLAY_MERGED) and len(self.branches) > 0:
+    if self._branches_checked and os.path.isdir(OVERLAY_MERGED) and self.target_branch in self.branches:
       hash_mismatch = self.get_commit_hash(OVERLAY_MERGED) != self.branches[self.target_branch]
       branch_mismatch = self.get_branch(OVERLAY_MERGED) != self.target_branch
       return hash_mismatch or branch_mismatch
@@ -355,6 +380,7 @@ class Updater:
     except subprocess.CalledProcessError:
       self._has_internet = False
 
+    self._branches_checked = False
     setup_git_options(OVERLAY_MERGED)
     output = run(["git", "ls-remote", "--heads"], OVERLAY_MERGED)
 
@@ -364,17 +390,26 @@ class Updater:
       x = re.fullmatch(ls_remotes_re, line.strip())
       if x is not None and x.group('branch_name') not in excluded_branches:
         self.branches[x.group('branch_name')] = x.group('commit_sha')
-
     cur_branch = self.get_branch(OVERLAY_MERGED)
     cur_commit = self.get_commit_hash(OVERLAY_MERGED)
+    self._branches_checked = True
     new_branch = self.target_branch
-    new_commit = self.branches[new_branch]
+    new_commit = self.branches.get(new_branch)
+    if new_commit is None:
+      cloudlog.info("target branch %s is not published on origin; no update available", new_branch)
+      return
     if (cur_branch, cur_commit) != (new_branch, new_commit):
       cloudlog.info(f"update available, {cur_branch} ({str(cur_commit)[:7]}) -> {new_branch} ({str(new_commit)[:7]})")
     else:
       cloudlog.info(f"up to date on {cur_branch} ({str(cur_commit)[:7]})")
 
-  def fetch_update(self) -> None:
+  def fetch_update(self) -> bool:
+    if not self._branches_checked:
+      self.check_for_update()
+    if self.target_branch not in self.branches:
+      cloudlog.info("skipping fetch of unpublished target branch %s", self.target_branch)
+      return False
+
     cloudlog.info("attempting git fetch inside staging overlay")
 
     self.params.put("UpdaterState", "downloading...", block=True)
@@ -415,6 +450,7 @@ class Updater:
     self.params.put("UpdaterState", "finalizing update...", block=True)
     finalize_update()
     cloudlog.info("finalize success!")
+    return True
 
 
 def main() -> None:
@@ -479,11 +515,11 @@ def main() -> None:
         user_requested_fetch = wait_helper.user_request == UserRequest.FETCH
         if params.get_bool("NetworkMetered") and not timed_out and not user_requested_fetch:
           cloudlog.info("skipping fetch, connection metered")
-        elif wait_helper.user_request == UserRequest.CHECK:
-          cloudlog.info("skipping fetch, only checking")
+        elif not download_permitted(params, manual=user_requested_fetch, check_only=wait_helper.user_request == UserRequest.CHECK):
+          cloudlog.info("skipping fetch, check-only request or automatic downloads disabled")
         else:
-          updater.fetch_update()
-          write_time_to_param(params, "UpdaterLastFetchTime")
+          if updater.fetch_update():
+            write_time_to_param(params, "UpdaterLastFetchTime")
         update_failed_count = 0
       except subprocess.CalledProcessError as e:
         cloudlog.event(

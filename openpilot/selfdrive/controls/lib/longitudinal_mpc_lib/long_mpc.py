@@ -1,6 +1,7 @@
 #!/usr/bin/env python3
 import os
 import time
+import math
 import numpy as np
 from openpilot.cereal import log
 from opendbc.car.interfaces import ACCEL_MIN, ACCEL_MAX
@@ -219,6 +220,7 @@ class LongitudinalMpc:
     self.source = LongitudinalPlanSource.cruise
 
   def reset(self):
+    self._cached_cost_weights = None
     self.solver.reset()
 
     self.x_sol = np.zeros((N+1, X_DIM))
@@ -246,6 +248,10 @@ class LongitudinalMpc:
     self.set_weights()
 
   def set_cost_weights(self, cost_weights, constraint_cost_weights):
+    key = (tuple(cost_weights), tuple(constraint_cost_weights))
+    if self._cached_cost_weights == key:
+      return
+    self._cached_cost_weights = None
     W = np.asfortranarray(np.diag(cost_weights))
     for i in range(N):
       # TODO don't hardcode A_CHANGE_COST idx
@@ -260,12 +266,32 @@ class LongitudinalMpc:
     Zl = np.array(constraint_cost_weights)
     for i in range(N):
       self.solver.cost_set(i, 'Zl', Zl)
+    self._cached_cost_weights = key
 
-  def set_weights(self, prev_accel_constraint=True, personality=log.LongitudinalPersonality.standard):
+  def set_weights(self, prev_accel_constraint=True, personality=log.LongitudinalPersonality.standard,
+                  *, acceleration_jerk: float | None = None, speed_jerk: float | None = None,
+                  danger_jerk: float | None = None, stop_jerk_scale: float = 1.0,
+                  acceleration_change_scale: float = 1.0):
     jerk_factor = get_jerk_factor(personality)
+    if acceleration_jerk is not None and math.isfinite(acceleration_jerk) and 0.25 <= acceleration_jerk <= 2.0:
+      a_change_factor = acceleration_jerk
+    else:
+      a_change_factor = jerk_factor
+    if speed_jerk is not None and math.isfinite(speed_jerk) and 0.25 <= speed_jerk <= 2.0:
+      speed_factor = speed_jerk
+    else:
+      speed_factor = jerk_factor
+    if danger_jerk is not None and math.isfinite(danger_jerk) and 0.25 <= danger_jerk <= 2.0:
+      danger_factor = danger_jerk
+    else:
+      danger_factor = 1.0
+    a_change_factor *= acceleration_change_scale if (type(acceleration_change_scale) in (int, float) and
+                                                    math.isfinite(acceleration_change_scale) and
+                                                    1.0 <= acceleration_change_scale <= 2.0) else 1.0
+    a_change_factor *= stop_jerk_scale if stop_jerk_scale in (0.32, 0.8) else 1.0
     a_change_cost = A_CHANGE_COST if prev_accel_constraint else 0
-    cost_weights = [X_EGO_OBSTACLE_COST, X_EGO_COST, V_EGO_COST, A_EGO_COST, jerk_factor * a_change_cost, jerk_factor * J_EGO_COST]
-    constraint_cost_weights = [LIMIT_COST, LIMIT_COST, LIMIT_COST, DANGER_ZONE_COST]
+    cost_weights = [X_EGO_OBSTACLE_COST, X_EGO_COST, V_EGO_COST, A_EGO_COST, a_change_factor * a_change_cost, speed_factor * J_EGO_COST]
+    constraint_cost_weights = [LIMIT_COST, LIMIT_COST, LIMIT_COST, danger_factor * DANGER_ZONE_COST]
     self.set_cost_weights(cost_weights, constraint_cost_weights)
 
   def set_cur_state(self, v, a):
@@ -307,8 +333,11 @@ class LongitudinalMpc:
     lead_xv = self.extrapolate_lead(x_lead, v_lead, a_lead, a_lead_tau)
     return lead_xv
 
-  def update(self, radarstate, personality=log.LongitudinalPersonality.standard):
+  def update(self, radarstate, personality=log.LongitudinalPersonality.standard,
+             *, follow_seconds: float | None = None, acceleration_max: float | None = None, stop_line_m: float | None = None):
     t_follow = get_T_FOLLOW(personality)
+    if follow_seconds is not None and math.isfinite(follow_seconds) and 0.75 <= follow_seconds <= 3.0:
+      t_follow = follow_seconds
 
     lead_xv_0 = self.process_lead(radarstate.leadOne)
     lead_xv_1 = self.process_lead(radarstate.leadTwo)
@@ -321,6 +350,11 @@ class LongitudinalMpc:
 
     x_obstacles = np.column_stack([lead_0_obstacle, lead_1_obstacle])
     self.source = MPC_SOURCES[np.argmin(x_obstacles[0])]
+    if stop_line_m is not None and math.isfinite(stop_line_m) and 0.0 <= stop_line_m <= 500.0:
+      stop_obstacle = stop_line_m + STOP_DISTANCE
+      if stop_obstacle < np.min(x_obstacles[0]):
+        self.source = LongitudinalPlanSource.cruise
+      x_obstacles = np.column_stack((x_obstacles, np.full(N + 1, stop_obstacle)))
 
     self.yref[:,:] = 0.0
     for i in range(N):
@@ -328,7 +362,9 @@ class LongitudinalMpc:
     self.solver.set(N, "yref", self.yref[N][:COST_E_DIM])
 
     self.params[:,0] = ACCEL_MIN
-    self.params[:,1] = ACCEL_MAX
+    bounded_accel = (acceleration_max is not None and math.isfinite(acceleration_max) and
+                     0.0 <= acceleration_max <= ACCEL_MAX)
+    self.params[:,1] = min(ACCEL_MAX, acceleration_max) if bounded_accel else ACCEL_MAX
     self.params[:,2] = np.min(x_obstacles, axis=1)
     self.params[:,3] = np.copy(self.a_prev)
     self.params[:,4] = t_follow
