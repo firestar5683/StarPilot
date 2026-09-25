@@ -13,7 +13,7 @@ namespace PyTools {
 std::string download(const std::string &url, bool use_cache = true, std::atomic<bool> *abort = nullptr);
 
 // Decompresses a local log file and returns the temporary output path.
-std::string decompress(const std::string &path, std::atomic<bool> *abort = nullptr);
+std::string decompress(const std::string &path, std::atomic<bool> *abort = nullptr, size_t max_bytes = 0);
 
 // Returns JSON string of route files (same format as /v1/route/.../files API)
 std::string getRouteFiles(const std::string &route);
@@ -30,7 +30,7 @@ std::string getDevices();
 // Returns JSON string of device routes
 std::string getDeviceRoutes(const std::string &dongle_id, int64_t start_ms = 0, int64_t end_ms = 0, bool preserved = false);
 
-// Migrates a log segment through the Python migration CLI. Returns the migrated bytes (empty on failure).
+// Migrated bytes retain binary stdout exactly; empty on failure.
 std::string migrateLog(const std::string &log_path);
 
 }  // namespace PyTools

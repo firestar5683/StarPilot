@@ -25,14 +25,14 @@ void reportProgress(const char *line) {
 
 // Run a Python module, report download progress from PROGRESS lines on stderr,
 // and notify the progress handler on failure.
-std::string runModuleWithProgress(const std::string &module, const std::vector<std::string> &args, std::atomic<bool> *abort = nullptr) {
+std::string runModuleWithProgress(const std::string &module, const std::vector<std::string> &args, std::atomic<bool> *abort = nullptr, int source_fd = -1) {
   std::string result = PyProcess::runModule(module, args, abort, true, [](const char *line) {
     if (strncmp(line, "PROGRESS:", 9) == 0) {
       reportProgress(line);
     } else {
       fputs(line, stderr);
     }
-  });
+  }, source_fd);
   if (result.empty()) {
     std::lock_guard<std::mutex> lk(handler_mutex);
     if (progress_handler) progress_handler(0, 0, false);
@@ -57,8 +57,12 @@ std::string download(const std::string &url, bool use_cache, std::atomic<bool> *
   return runModuleWithProgress(DOWNLOADER_MODULE, args, abort);
 }
 
-std::string decompress(const std::string &path, std::atomic<bool> *abort) {
-  return runModuleWithProgress(DOWNLOADER_MODULE, {"decompress", path}, abort);
+std::string decompress(const std::string &path, std::atomic<bool> *abort, size_t max_bytes) {
+  int source_fd = -1;
+  if (path.rfind("/proc/self/fd/", 0) == 0) source_fd = std::stoi(path.substr(14));
+  std::vector<std::string> args = {"decompress", path};
+  if (max_bytes) args.insert(args.end(), {"--max-bytes", std::to_string(max_bytes)});
+  return runModuleWithProgress(DOWNLOADER_MODULE, args, abort, source_fd);
 }
 
 std::string getRouteFiles(const std::string &route) {
@@ -67,7 +71,7 @@ std::string getRouteFiles(const std::string &route) {
 
 std::string resolveRouteFiles(const std::string &route, int begin, int end, const std::string &selector) {
   return runModuleWithProgress(DOWNLOADER_MODULE, {"resolve-route-files", route, "--begin", std::to_string(begin),
-                                                  "--end", std::to_string(end), "--selector", selector});
+                                     "--end", std::to_string(end), "--selector", selector});
 }
 
 std::string authenticate(const std::string &provider, std::atomic<bool> *abort) {

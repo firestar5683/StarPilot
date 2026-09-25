@@ -16,6 +16,6 @@ using StderrLineCallback = std::function<void(const char *line)>;
 // Returns empty string on failure. If abort is signaled, kills the child process.
 std::string runModule(const std::string &module, const std::vector<std::string> &args,
                       std::atomic<bool> *abort = nullptr, bool trim = true,
-                      const StderrLineCallback &stderr_line_cb = nullptr);
+                      const StderrLineCallback &stderr_line_cb = nullptr, int source_fd = -1);
 
 }  // namespace PyProcess

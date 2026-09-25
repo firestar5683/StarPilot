@@ -1,0 +1,38 @@
+{
+  "schema_version": 1,
+  "fixtures": [
+    {
+      "id": "model_y_stock",
+      "platform": "TESLA_MODEL_Y",
+      "route": "aebd8f1d4ea16066/000002d8--5850d3ea5c",
+      "segment": 0,
+      "bytes": 11258243,
+      "sha256": "fc80930cf9df4c5ff912b255c728f358344647decb88437daef95ffb559c974f",
+      "longitudinal": false,
+      "pcm_cruise": true,
+      "safety_model": "tesla",
+      "safety_param": 0,
+      "variants": [
+        "debug",
+        "release"
+      ],
+      "recorded_longitudinal": true
+    },
+    {
+      "id": "model_y_alpha_long",
+      "platform": "TESLA_MODEL_Y",
+      "route": "aebd8f1d4ea16066/000002d8--5850d3ea5c",
+      "segment": 0,
+      "bytes": 11258243,
+      "sha256": "fc80930cf9df4c5ff912b255c728f358344647decb88437daef95ffb559c974f",
+      "longitudinal": true,
+      "pcm_cruise": true,
+      "safety_model": "tesla",
+      "safety_param": 1,
+      "variants": [
+        "debug"
+      ],
+      "recorded_longitudinal": true
+    }
+  ]
+}

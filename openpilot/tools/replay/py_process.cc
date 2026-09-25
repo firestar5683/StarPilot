@@ -1,9 +1,10 @@
 #include "tools/replay/py_process.h"
 
 #include <csignal>
+#include <fcntl.h>
 #include <cstdio>
 #include <cstring>
-#include <fcntl.h>
+#include <mutex>
 #include <spawn.h>
 #ifdef __APPLE__
 #include <crt_externs.h>
@@ -12,13 +13,16 @@
 #include <thread>
 #include <unistd.h>
 #include <vector>
+#include <chrono>
+#include <poll.h>
 
 #include "tools/replay/util.h"
 
 namespace PyProcess {
 
-std::string runModule(const std::string &module, const std::vector<std::string> &args,
-                      std::atomic<bool> *abort, bool trim, const StderrLineCallback &stderr_line_cb) {
+// Run a Python command and capture stdout. Stderr is scanned for PROGRESS lines and otherwise passed
+// through to the parent's stderr. Returns stdout content. If abort is signaled, kills the child process.
+std::string runModule(const std::string &module, const std::vector<std::string> &args, std::atomic<bool> *abort, bool trim, const StderrLineCallback &stderr_line_cb, int source_fd) {
   // Build argv for the Python module
   std::vector<const char *> argv;
   argv.push_back("python3");
@@ -51,7 +55,7 @@ std::string runModule(const std::string &module, const std::vector<std::string> 
   }
 
   // Avoid copying the large replay address space and running atfork handlers on
-  // every spawn: both can stall rendering even from a worker thread.
+  // every segment download: both can stall rendering even from a worker thread.
   std::vector<std::string> environment;
 #ifdef __APPLE__
   char **parent_environment = *_NSGetEnviron();
@@ -59,8 +63,9 @@ std::string runModule(const std::string &module, const std::vector<std::string> 
   char **parent_environment = environ;
 #endif
   for (char **entry = parent_environment; *entry; ++entry) {
-    if (strncmp(*entry, "OPENPILOT_PREFIX=", 17) != 0) environment.emplace_back(*entry);
+    if (strncmp(*entry, "OPENPILOT_PREFIX=", 17) != 0 && strncmp(*entry, "SP_REPLAY_HELPER_PARENT=", 24) != 0) environment.emplace_back(*entry);
   }
+  if (source_fd >= 0 || getenv("SP_REPLAY_CONTEXT")) environment.emplace_back("SP_REPLAY_HELPER_PARENT=" + std::to_string(getpid()));
   std::vector<char *> envp;
   for (auto &entry : environment) envp.push_back(entry.data());
   envp.push_back(nullptr);
@@ -74,6 +79,7 @@ std::string runModule(const std::string &module, const std::vector<std::string> 
   if (!error) error = posix_spawn_file_actions_addopen(&actions, STDIN_FILENO, "/dev/null", O_RDONLY, 0);
   if (!error) error = posix_spawn_file_actions_adddup2(&actions, stdout_pipe[1], STDOUT_FILENO);
   if (!error) error = posix_spawn_file_actions_adddup2(&actions, stderr_pipe[1], STDERR_FILENO);
+  if (!error && source_fd >= 0) error = posix_spawn_file_actions_adddup2(&actions, source_fd, source_fd);
   for (int fd : {stdout_pipe[0], stdout_pipe[1], stderr_pipe[0], stderr_pipe[1]}) {
     if (!error) error = posix_spawn_file_actions_addclose(&actions, fd);
   }
@@ -98,7 +104,7 @@ std::string runModule(const std::string &module, const std::vector<std::string> 
   close(stdout_pipe[1]);
   close(stderr_pipe[1]);
 
-  // stderr is read in a thread so it can be inspected while the loop below waits on stdout
+  // stderr carries the progress lines, so a thread reads it while the loop below waits on stdout
   std::thread stderr_thread([fd = stderr_pipe[0], cb = stderr_line_cb]() {
     FILE *f = fdopen(fd, "r");
     if (!f) {
@@ -128,6 +134,8 @@ std::string runModule(const std::string &module, const std::vector<std::string> 
   while (stdout_open) {
     if (abort && *abort) {
       kill(pid, SIGTERM);
+      poll(nullptr, 0, 250);
+      kill(pid, SIGKILL);
       break;
     }
 
@@ -167,11 +175,12 @@ std::string runModule(const std::string &module, const std::vector<std::string> 
                 WIFSIGNALED(status);
   if (failed) {
     if (expected_sigterm) {
-      // Caller signaled abort; expected shutdown path.
+      // Route/camera teardown cancels outstanding downloader subprocesses.
+      // Keep that expected shutdown path quiet.
     } else if (WIFEXITED(status) && WEXITSTATUS(status) != 0) {
-      rWarning("py_process: %s exited with code %d", module.c_str(), WEXITSTATUS(status));
+      rWarning("py_process: process exited with code %d", WEXITSTATUS(status));
     } else if (WIFSIGNALED(status)) {
-      rWarning("py_process: %s killed by signal %d", module.c_str(), WTERMSIG(status));
+      rWarning("py_process: process killed by signal %d", WTERMSIG(status));
     }
     return {};
   }
@@ -185,5 +194,6 @@ std::string runModule(const std::string &module, const std::vector<std::string> 
 
   return stdout_data;
 }
+
 
 }  // namespace PyProcess

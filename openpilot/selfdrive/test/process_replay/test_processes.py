@@ -12,11 +12,15 @@ from openpilot.common.git import get_commit
 from openpilot.tools.lib.openpilotci import get_url
 from openpilot.selfdrive.test.process_replay.compare_logs import compare_logs, format_diff
 from openpilot.selfdrive.test.process_replay.diff_report import diff_process, diff_report
+from tools.ci.replay_fixture_cache import ARTIFACT_COMMIT, OPENPILOT_COMMIT, FIXTURES, verified_fixture_params
 from openpilot.selfdrive.test.process_replay.process_replay import CONFIGS, PROC_REPLAY_DIR, FAKEDATA, replay_process, \
                                                                    check_most_messages_valid
 from openpilot.tools.lib.filereader import FileReader
 from openpilot.tools.lib.logreader import LogReader, save_log
 from openpilot.tools.lib.url_file import URLFile
+from tools.ci.process_replay_coverage import replay_coverage, write_coverage
+from tools.ci.run_vehicle_tests import targets_for
+from tools.ci.replay_references import reviewed_reference
 
 source_segments = [
   ("HYUNDAI", "02c45f73a2e5c6e9|2021-01-01--19-08-22--1"),     # HYUNDAI.HYUNDAI_SONATA
@@ -67,13 +71,13 @@ segments = [
 excluded_interfaces = {brand for brand, platforms in interface_names.items()
                        if all(interfaces[platform].get_non_essential_params(platform).dashcamOnly for platform in platforms)} | {"body"}
 
-BASE_URL = "https://raw.githubusercontent.com/commaai/ci-artifacts/refs/heads/process-replay/"
+BASE_URL = f"https://raw.githubusercontent.com/commaai/ci-artifacts/{ARTIFACT_COMMIT}/"
 REF_COMMIT_FN = os.path.join(PROC_REPLAY_DIR, "ref_commit")
 EXCLUDED_PROCS = {"modeld", "dmonitoringmodeld"}
 
 
 def run_test_process(data):
-  segment, cfg, args, cur_log_fn, ref_log_path, lr_dat = data
+  segment, cfg, args, cur_log_fn, ref_log_path, lr_dat, custom_params = data
   ref_error = None
   try:
     ref_log_msgs = list(LogReader(ref_log_path))
@@ -82,7 +86,7 @@ def run_test_process(data):
     ref_log_msgs = []
     ref_error = f"Failed to load reference {ref_log_path}:\n{traceback.format_exc()}"
   lr = LogReader.from_bytes(lr_dat)
-  res, log_msgs = test_process(cfg, lr, segment, ref_log_msgs, cur_log_fn, args.ignore_fields, args.ignore_msgs)
+  res, log_msgs = test_process(cfg, lr, segment, ref_log_msgs, cur_log_fn, args.ignore_fields, args.ignore_msgs, custom_params)
   # save logs so we can update refs
   save_log(cur_log_fn, log_msgs)
   if ref_error is not None:
@@ -97,17 +101,19 @@ def run_test_process(data):
 def get_log_data(segment):
   r, n = segment.rsplit("--", 1)
   with FileReader(get_url(r, n, "rlog.zst")) as f:
-    return (segment, f.read())
+    raw = f.read()
+  custom_params = verified_fixture_params(segment, raw) if segment in FIXTURES else None
+  return (segment, raw, custom_params)
 
 
-def test_process(cfg, lr, segment, ref_log_msgs, new_log_path, ignore_fields=None, ignore_msgs=None):
+def test_process(cfg, lr, segment, ref_log_msgs, new_log_path, ignore_fields=None, ignore_msgs=None, custom_params=None):
   if ignore_fields is None:
     ignore_fields = []
   if ignore_msgs is None:
     ignore_msgs = []
 
   try:
-    log_msgs = replay_process(cfg, lr, disable_progress=True)
+    log_msgs = replay_process(cfg, lr, custom_params=custom_params, disable_progress=True)
   except Exception as e:
     raise Exception("failed on segment: " + segment) from e
 
@@ -134,6 +140,7 @@ if __name__ == "__main__":
   cpu_count = os.cpu_count() or 1
 
   parser = argparse.ArgumentParser(description="Regression test to identify changes in a process's output")
+  parser.add_argument("--output", type=str, help="Directory for coverage, replay outputs and diff reports")
   parser.add_argument("--whitelist-procs", type=str, nargs="*", default=all_procs,
                       help="Whitelist given processes from the test (e.g. controlsd)")
   parser.add_argument("--whitelist-cars", type=str, nargs="*", default=all_cars,
@@ -152,6 +159,12 @@ if __name__ == "__main__":
                       help="Max amount of parallel jobs")
   args = parser.parse_args()
 
+  if args.output:
+    PROC_REPLAY_DIR = os.path.abspath(args.output)
+    FAKEDATA = os.path.join(PROC_REPLAY_DIR, "new") + os.sep
+    REF_COMMIT_FN = os.path.join(PROC_REPLAY_DIR, "ref_commit")
+    os.makedirs(FAKEDATA, exist_ok=True)
+
   tested_procs = set(args.whitelist_procs) - set(args.blacklist_procs)
   tested_cars = set(args.whitelist_cars) - set(args.blacklist_cars)
   tested_cars = {c.upper() for c in tested_cars}
@@ -161,6 +174,16 @@ if __name__ == "__main__":
 
   if args.update_refs:
     assert full_test, "Need to run full test when updating refs"
+
+  active_platforms = {brand: sorted(str(platform) for platform in platforms
+                                  if not interfaces[platform].get_non_essential_params(platform).dashcamOnly)
+                      for brand, platforms in interface_names.items() if brand not in excluded_interfaces}
+  coverage = replay_coverage(active_platforms, tested_cars,
+                             {suite: targets_for(suite) for suite in ("interfaces", "safety-debug", "safety-release")},
+                             full_test=full_test)
+  write_coverage(coverage, os.path.join(PROC_REPLAY_DIR, "coverage.json"), os.environ.get("GITHUB_STEP_SUMMARY"))
+  if coverage["errors"]:
+    raise RuntimeError("; ".join(coverage["errors"]))
 
   try:
     with open(REF_COMMIT_FN) as f:
@@ -174,18 +197,15 @@ if __name__ == "__main__":
 
   print(f"***** testing against commit {ref_commit} *****")
 
-  # check to make sure all car brands are tested
-  if full_test:
-    untested = (set(interface_names) - set(excluded_interfaces)) - {c.lower() for c in tested_cars}
-    assert len(untested) == 0, f"Cars missing routes: {str(untested)}"
-
   log_paths: defaultdict[str, dict[str, dict[str, str]]] = defaultdict(lambda: defaultdict(dict))
   with concurrent.futures.ProcessPoolExecutor(max_workers=args.jobs) as pool:
     download_segments = [seg for car, seg in segments if car in tested_cars]
-    log_data: dict[str, LogReader] = {}
+    log_data: dict[str, bytes] = {}
+    fixture_params: dict[str, dict[str, bytes] | None] = {}
     p1 = pool.map(get_log_data, download_segments)
-    for segment, lr in tqdm(p1, desc="Getting Logs", total=len(download_segments)):
+    for segment, lr, custom_params in tqdm(p1, desc="Getting Logs", total=len(download_segments)):
       log_data[segment] = lr
+      fixture_params[segment] = custom_params
 
     pool_args: Any = []
     for car_brand, segment in segments:
@@ -206,9 +226,13 @@ if __name__ == "__main__":
           ref_log_path = get_url(route, seg_num, "rlog.zst")
         else:
           ref_log_fn = os.path.join(FAKEDATA, f"{segment}_{cfg.proc_name}_{ref_commit}.zst".replace("|", "_"))
-          ref_log_path = ref_log_fn if os.path.exists(ref_log_fn) else BASE_URL + os.path.basename(ref_log_fn)
+          if ref_commit == OPENPILOT_COMMIT:
+            ref_log_path = reviewed_reference(segment, cfg, log_data[segment], official_commit=OPENPILOT_COMMIT,
+                                             artifact_commit=ARTIFACT_COMMIT) or BASE_URL + os.path.basename(ref_log_fn)
+          else:
+            ref_log_path = ref_log_fn if os.path.exists(ref_log_fn) else BASE_URL + os.path.basename(ref_log_fn)
 
-        pool_args.append((segment, cfg, args, cur_log_fn, ref_log_path, log_data[segment]))
+        pool_args.append((segment, cfg, args, cur_log_fn, ref_log_path, log_data[segment], fixture_params[segment]))
 
         log_paths[segment][cfg.proc_name]['ref'] = ref_log_path
         log_paths[segment][cfg.proc_name]['new'] = cur_log_fn
@@ -227,7 +251,7 @@ if __name__ == "__main__":
     print(diff_short)
 
     try:
-      diff_report(diffs, segments)
+      diff_report(diffs, segments, output_dir=PROC_REPLAY_DIR)
     except Exception:
       print(f"failed to generate diff report:\n{traceback.format_exc()}")
 

@@ -53,7 +53,7 @@ def diff_format(diffs, ref, new, field) -> list[str]:
   return format_diff(diffs, ref_ts, new_wrapped, field)
 
 
-def diff_report(replay_diffs, segments) -> None:
+def diff_report(replay_diffs, segments, output_dir=PROC_REPLAY_DIR) -> None:
   seg_to_plat = {seg: plat for plat, seg in segments}
 
   with_diffs, errors, n_passed = [], [], 0
@@ -69,7 +69,7 @@ def diff_report(replay_diffs, segments) -> None:
   icon = "⚠️" if with_diffs else "✅"
   lines = [
     "## Process replay diff report",
-    "Replays driving segments through this PR and compares the behavior to master.",
+    "Replays driving segments through this PR and compares the behavior to reviewed reference outputs.",
     "Please review any changes carefully to ensure they are expected.\n",
     f"{icon}  {len(with_diffs)} changed, {n_passed} passed, {len(errors)} errors",
   ]
@@ -89,5 +89,5 @@ def diff_report(replay_diffs, segments) -> None:
         lines.extend(diff_format(fd, ref, new, field))
     lines.append("```\n</details>")
 
-  with open(os.path.join(PROC_REPLAY_DIR, "diff_report.txt"), "w") as f:
+  with open(os.path.join(output_dir, "diff_report.txt"), "w") as f:
     f.write("\n".join(lines))

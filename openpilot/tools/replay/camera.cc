@@ -7,9 +7,7 @@
 #include "system/camerad/cameras/nv12_info.h"
 #include "tools/replay/util.h"
 
-const int BUFFER_COUNT = 40;
-
-CameraServer::CameraServer(std::pair<int, int> camera_size[MAX_CAMERAS]) {
+CameraServer::CameraServer(std::pair<int, int> camera_size[MAX_CAMERAS], int buffer_count) : buffer_count_(buffer_count) {
   for (int i = 0; i < MAX_CAMERAS; ++i) {
     std::tie(cameras_[i].width, cameras_[i].height) = camera_size[i];
   }
@@ -42,7 +40,7 @@ void CameraServer::startVipcServer() {
       rInfo("camera[%d] frame size %dx%d", cam.type, cam.width, cam.height);
       auto [stride, y_height, uv_height_, buffer_size] = get_nv12_info(cam.width, cam.height);
       (void)uv_height_;  // unused in replay
-      vipc_server_->create_buffers_with_sizes(cam.stream_type, BUFFER_COUNT, cam.width, cam.height,
+      vipc_server_->create_buffers_with_sizes(cam.stream_type, buffer_count_, cam.width, cam.height,
                                               buffer_size, stride, stride * y_height);
       if (!cam.thread.joinable()) {
         cam.thread = std::thread(&CameraServer::cameraThread, this, std::ref(cam));
@@ -71,6 +69,7 @@ void CameraServer::cameraThread(Camera &cam) {
       };
       vipc_server_->send(yuv, &extra);
     } else {
+      failed_ = true;
       rError("camera[%d] failed to get frame: %lu", cam.type, segment_id);
     }
 
@@ -78,6 +77,7 @@ void CameraServer::cameraThread(Camera &cam) {
     getFrame(cam, fr, segment_id + 1, frame_id + 1);
 
     --publishing_;
+    sent_cv_.notify_all();
   }
 }
 
@@ -105,12 +105,14 @@ void CameraServer::pushFrame(CameraType type, FrameReader *fr, const Event *even
     startVipcServer();
   }
 
+  if (buffer_count_ < 40 && publishing_ >= 2 && !waitForSent()) { failed_ = true; return; }
   ++publishing_;
   cam.queue.push({fr, event});
 }
 
-void CameraServer::waitForSent() {
-  while (publishing_ > 0) {
-    std::this_thread::yield();
-  }
+bool CameraServer::waitForSent() {
+  std::unique_lock lock(sent_mutex_);
+  const bool ready = sent_cv_.wait_for(lock, std::chrono::seconds(3), [this]() { return publishing_ == 0; });
+  if (!ready) failed_ = true;
+  return ready;
 }

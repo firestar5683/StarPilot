@@ -2,6 +2,8 @@
 
 #include <string>
 #include <vector>
+#include <memory>
+#include <mutex>
 
 #include "msgq/visionipc/visionbuf.h"
 #include "tools/replay/util.h"
@@ -28,10 +30,11 @@ public:
 
   int width = 0, height = 0;
 
-  VideoDecoder *decoder_ = nullptr;
+  std::shared_ptr<VideoDecoder> decoder_;
   AVFormatContext *input_ctx = nullptr;
   int video_stream_idx_ = -1;
   int prev_idx = -1;
+  std::atomic<bool> *abort_ = nullptr;
   struct PacketInfo {
     int flags;
     int64_t pos;
@@ -46,6 +49,8 @@ public:
   virtual bool open(AVCodecParameters *codecpar, bool hw_decoder) = 0;
   virtual bool decode(FrameReader *reader, int idx, VisionBuf *buf) = 0;
   int width = 0, height = 0;
+  std::mutex lock_;
+  FrameReader *active_reader_ = nullptr;
 };
 
 class FFmpegVideoDecoder : public VideoDecoder {
@@ -75,6 +80,7 @@ public:
   bool decode(FrameReader *reader, int idx, VisionBuf *buf) override;
 
 private:
-  V4LDecoder v4l_decoder;
+  std::unique_ptr<V4LDecoder> v4l_decoder;
+  bool decoded_ = false;
 };
 #endif
