@@ -81,27 +81,54 @@ class Uploader:
 
     self.params = Params()
 
+    try:
+      os.nice(10)  # uploads are never urgent; stay out of the way of the cores AA and logging share
+    except OSError:
+      pass
+
     # stats for last successfully uploaded file
     self.last_filename = ""
 
     self.immediate_folders = ["crash/", "boot/"]
     self.immediate_priority = {"qlog": 0, "qlog.zst": 0, "qcamera.ts": 1}
 
+    # Routes whose uploadable files are all uploaded, keyed by name -> directory mtime. Rescanning
+    # hundreds of finished routes (stat + getxattr per file) every few seconds cost ~40% of a core.
+    self.settled: dict[str, float] = {}
+    # Seconds to yield after scanning each unsettled route (set by main() while driving).
+    self.scan_pause = 0.0
+
   def list_upload_files(self, metered: bool) -> Iterator[tuple[str, str, str]]:
     r = self.params.get("AthenadRecentlyViewedRoutes")
     requested_routes = [] if r is None else [route for route in r.split(",") if route]
 
-    for logdir in listdir_by_creation(self.root):
+    logdirs = listdir_by_creation(self.root)
+    recent = set(logdirs[-3:])  # the routes still being written are always rescanned
+    for logdir in logdirs:
       path = os.path.join(self.root, logdir)
+      settled_mtime = self.settled.get(logdir)
+      if settled_mtime is not None and logdir not in recent:
+        try:
+          if os.stat(path).st_mtime == settled_mtime:
+            continue
+        except OSError:
+          pass
+        self.settled.pop(logdir, None)
       if logdir != "boot" and not owns_recording(path, self.root):
         continue
       try:
+        dir_mtime = os.stat(path).st_mtime
         names = os.listdir(path)
       except OSError:
         continue
 
       if any(name.endswith(".lock") for name in names):
         continue
+
+      if self.scan_pause:
+        time.sleep(self.scan_pause)
+      priority_files = 0
+      priority_pending = 0
 
       for name in sorted(names, key=lambda n: self.immediate_priority.get(n, 1000)):
         if name.startswith("."):
@@ -118,6 +145,9 @@ class Uploader:
           cloudlog.event("uploader_getxattr_failed", key=key, fn=fn)
           # deleter could have deleted, so skip
           continue
+        if name in self.immediate_priority:
+          priority_files += 1
+          priority_pending += not is_uploaded
         if is_uploaded:
           continue
 
@@ -131,6 +161,9 @@ class Uploader:
             continue
 
         yield name, key, fn
+
+      if priority_files and not priority_pending and logdir not in self.immediate_folders and logdir != "boot":
+        self.settled[logdir] = dir_mtime
 
   def next_file_to_upload(self, metered: bool) -> tuple[str, str, str] | None:
     upload_files = list(self.list_upload_files(metered))
@@ -269,9 +302,12 @@ def main(exit_event: threading.Event | None = None) -> None:
         time.sleep(60 if offroad else 5)
       continue
 
+    # Android Auto shares the little cores with this process: while it is on and driving, scan gently.
+    quiet = not offroad and params.get_bool("AndroidAutoEnabled")
+    uploader.scan_pause = 0.01 if quiet else 0.0
     success = uploader.step(sm['deviceState'].networkType.raw, sm['deviceState'].networkMetered and not always_allow_uploads)
     if success is None:
-      backoff = 60 if offroad else 5
+      backoff = 60 if offroad or quiet else 5  # nothing to send
     elif success:
       backoff = 0.1
     else:
