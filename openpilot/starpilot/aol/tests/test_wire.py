@@ -5,11 +5,45 @@ import struct
 from unittest.mock import Mock, patch
 
 from openpilot.cereal import custom, messaging
+from openpilot.starpilot.aol.runtime import current_native
 from openpilot.starpilot.aol.wire import (IntentState, SafetyState, MAX_WIRE_BYTES, decode_intent,
                                           decode_safety, encode_intent, encode_safety)
 
 
 class AolWireTests(unittest.TestCase):
+  @patch('openpilot.starpilot.aol.runtime.native_matches_cp', return_value=True)
+  def test_native_safety_event_uses_python_monotonic_clock(self, _profile):
+    cp = None
+    mono_ns = 1_000_000_000
+
+    def event(event_ns: int, payload_ns: int):
+      msg = messaging.new_message('aolSafetyWire', 0)
+      msg.logMonoTime = event_ns
+      msg.valid = True
+      msg.aolSafetyWire = encode_safety(SafetyState(1, True, payload_ns, payload_ns + 200_000_000,
+                                                    5, 34,
+                                                    True, False, True, False, 'panda', 'session'))
+      class SafetySM:
+        valid = {'aolSafetyWire': True}
+        alive = {'aolSafetyWire': True}
+        seen = {'aolSafetyWire': True}
+
+        def __init__(self):
+          self.logMonoTime = {'aolSafetyWire': msg.logMonoTime}
+
+        def __getitem__(self, _key):
+          return msg.aolSafetyWire
+
+      return SafetySM()
+
+    self.assertIsNotNone(current_native(event(mono_ns, mono_ns), cp, now_ns=mono_ns + 1_000_000,
+                                         axis_session_id='session'))
+    boot_ns = mono_ns + 9_000_000_000
+    self.assertIsNone(current_native(event(boot_ns, boot_ns), cp, now_ns=mono_ns + 1_000_000,
+                                     axis_session_id='session'))
+    self.assertIsNone(current_native(event(mono_ns, boot_ns), cp, now_ns=mono_ns + 1_000_000,
+                                     axis_session_id='session'))
+
   def test_native_cpp_flat_fixture_decodes(self):
     # Exact output of test_aol_wire.cc (the native encoder test asserts it too).
     raw = bytes.fromhex('00000000090000000000000004000200010b0100010005006400000000000000' +
