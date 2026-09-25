@@ -1,0 +1,1744 @@
+{
+  "opendbc_base_revision": "a3d3b7c6ca76ed4c97f606e9b2a0e371e8fa52af",
+  "platforms": [
+    {
+      "family": "honda",
+      "id": "ACURA_ADX",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "honda",
+      "id": "ACURA_ILX",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "honda",
+      "id": "ACURA_INTEGRA",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "honda",
+      "id": "ACURA_MDX_3G",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "honda",
+      "id": "ACURA_MDX_3G_MMR",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "honda",
+      "id": "ACURA_MDX_4G",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "honda",
+      "id": "ACURA_MDX_4G_MMR",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "honda",
+      "id": "ACURA_RDX",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "honda",
+      "id": "ACURA_RDX_3G",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "honda",
+      "id": "ACURA_RDX_3G_MMR",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "honda",
+      "id": "ACURA_TLX_1G",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "honda",
+      "id": "ACURA_TLX_2G",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "honda",
+      "id": "ACURA_TLX_2G_MMR",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "volkswagen",
+      "id": "AUDI_A3_MK3",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "volkswagen",
+      "id": "AUDI_Q2_MK1",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "volkswagen",
+      "id": "AUDI_Q3_MK2",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "volkswagen",
+      "id": "AUDI_Q4_MK1",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "volkswagen",
+      "id": "AUDI_Q4_MK2",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "BUICK_BABYENCLAVE",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "BUICK_LACROSSE",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "gm",
+      "id": "BUICK_LACROSSE_ASCM",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "BUICK_LACROSSE_ASCM_19US",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "BUICK_REGAL",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "gm",
+      "id": "CADILLAC_ATS",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "gm",
+      "id": "CADILLAC_CT6_CC",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CADILLAC_ESCALADE",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "gm",
+      "id": "CADILLAC_ESCALADE_ASCM",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CADILLAC_ESCALADE_ESV",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "gm",
+      "id": "CADILLAC_ESCALADE_ESV_2019",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "gm",
+      "id": "CADILLAC_ESCALADE_ESV_2019_ASCM",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CADILLAC_XT4",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "gm",
+      "id": "CADILLAC_XT4_CC",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CADILLAC_XT5",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CADILLAC_XT5_CC",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CADILLAC_XT6",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_BLAZER",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_BOLT_ACC_2022_2023",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_BOLT_ACC_2022_2023_PEDAL",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_BOLT_CC_2017",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_BOLT_CC_2018_2021",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_BOLT_CC_2022_2023",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_EQUINOX",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_EQUINOX_CC",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_MALIBU",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_MALIBU_ASCM",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_MALIBU_CC",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_MALIBU_HYBRID_CC",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_MALIBU_SDGM",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_SILVERADO",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_SILVERADO_CC",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_SUBURBAN",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_SUBURBAN_ASCM",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_SUBURBAN_CAMERA",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_SUBURBAN_CC",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_TRAILBLAZER",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_TRAILBLAZER_CC",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_TRAVERSE",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_TRAX",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_VOLT",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_VOLT_2019",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_VOLT_ASCM",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_VOLT_CAMERA",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "CHEVROLET_VOLT_CC",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "chrysler",
+      "id": "CHRYSLER_PACIFICA_2018",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "chrysler",
+      "id": "CHRYSLER_PACIFICA_2018_HYBRID",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "chrysler",
+      "id": "CHRYSLER_PACIFICA_2019_HYBRID",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "chrysler",
+      "id": "CHRYSLER_PACIFICA_2020",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "body",
+      "id": "COMMA_BODY",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volkswagen",
+      "id": "CUPRA_BORN_MK1",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "chrysler",
+      "id": "DODGE_DURANGO",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "ford",
+      "id": "FORD_BRONCO_SPORT_MK1",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "ford",
+      "id": "FORD_EDGE_MK2",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "ford",
+      "id": "FORD_ESCAPE_MK4",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "ford",
+      "id": "FORD_ESCAPE_MK4_5",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "ford",
+      "id": "FORD_EXPEDITION_MK4",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "ford",
+      "id": "FORD_EXPLORER_MK6",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "ford",
+      "id": "FORD_FOCUS_MK4",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "ford",
+      "id": "FORD_F_150_LIGHTNING_MK1",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "ford",
+      "id": "FORD_F_150_MK14",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "ford",
+      "id": "FORD_MAVERICK_MK1",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "ford",
+      "id": "FORD_MONDEO_MK5",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "ford",
+      "id": "FORD_MUSTANG_MACH_E_MK1",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "ford",
+      "id": "FORD_RANGER_MK2",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "ford",
+      "id": "FORD_TRANSIT_MK5",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "GENESIS_G70",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "GENESIS_G70_2020",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "GENESIS_G70_2021_NON_SCC",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "GENESIS_G80",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "GENESIS_G80_2ND_GEN_FL",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "GENESIS_G90",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "hyundai",
+      "id": "GENESIS_GV60_EV_1ST_GEN",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "hyundai",
+      "id": "GENESIS_GV70_1ST_GEN",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "hyundai",
+      "id": "GENESIS_GV70_2026",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "GENESIS_GV70_ELECTRIFIED_1ST_GEN",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "GENESIS_GV70_ELECTRIFIED_2ND_GEN",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "GENESIS_GV80",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "hyundai",
+      "id": "GENESIS_GV80_2025",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "GMC_ACADIA",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "gm",
+      "id": "GMC_ACADIA_ASCM",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "GMC_YUKON",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "gm",
+      "id": "GMC_YUKON_CC",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "gm",
+      "id": "HOLDEN_ASTRA",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_ACCORD",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_ACCORD_11G",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_ACCORD_9G",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_CITY_7G",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_CIVIC",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_CIVIC_2022",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_CIVIC_BOSCH",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_CIVIC_BOSCH_DIESEL",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_CLARITY",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_CRV",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_CRV_5G",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_CRV_6G",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_CRV_EU",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_CRV_HYBRID",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_CRV_SA",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_E",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_E_ADVANCE",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_FIT",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_FIT_4G",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_FREED",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_HRV",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_HRV_3G",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_INSIGHT",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_NBOX_2G",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_ODYSSEY",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_ODYSSEY_5G_MMR",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_ODYSSEY_TWN",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_PASSPORT_4G",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_PILOT",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_PILOT_4G",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "honda",
+      "id": "HONDA_RIDGELINE",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_AZERA_6TH_GEN",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_AZERA_HEV_6TH_GEN",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_AZERA_HEV_7TH_GEN",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_BAYON_1ST_GEN_NON_SCC",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_CUSTIN_1ST_GEN",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_ELANTRA",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_ELANTRA_2021",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_ELANTRA_2022_NON_SCC",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_ELANTRA_2024",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_ELANTRA_GT_I30",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_ELANTRA_HEV_2021",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_ELANTRA_HEV_2022_NON_SCC",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_ELANTRA_HEV_2024",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_GENESIS",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_IONIQ",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_IONIQ_5",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_IONIQ_5_N",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_IONIQ_5_PE",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_IONIQ_6",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_IONIQ_9",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_IONIQ_EV_2020",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_IONIQ_EV_LTD",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_IONIQ_HEV_2022",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_IONIQ_PHEV",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_IONIQ_PHEV_2019",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_KONA",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_KONA_2022",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_KONA_2ND_GEN",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_KONA_EV",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_KONA_EV_2022",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_KONA_EV_2ND_GEN",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_KONA_EV_NON_SCC",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_KONA_HEV",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_KONA_HEV_2ND_GEN",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_KONA_NON_SCC",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_NEXO_1ST_GEN",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_PALISADE",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_PALISADE_2023",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_SANTA_CRUZ_1ST_GEN",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_SANTA_CRUZ_2025",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_SANTA_FE",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_SANTA_FE_2022",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_SANTA_FE_HEV_2022",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_SANTA_FE_HEV_5TH_GEN",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_SANTA_FE_PHEV_2022",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_SONATA",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_SONATA_2024",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_SONATA_HEV_2024",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_SONATA_HYBRID",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_SONATA_LF",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_STARIA_4TH_GEN",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_TUCSON",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_TUCSON_2025",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_TUCSON_4TH_GEN",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_TUCSON_HEV_2025",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_TUCSON_PHEV_2025",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "HYUNDAI_VELOSTER",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "chrysler",
+      "id": "JEEP_GRAND_CHEROKEE",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "chrysler",
+      "id": "JEEP_GRAND_CHEROKEE_2019",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_CARNIVAL_2025",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_CARNIVAL_4TH_GEN",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_CARNIVAL_HEV_4TH_GEN",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_CEED",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_CEED_PHEV_2022_NON_SCC",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_EV6",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_EV6_2025",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_EV9",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_FORTE",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_FORTE_2019_NON_SCC",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_FORTE_2021_NON_SCC",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_K4_2025",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_K5_2021",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_K5_2025",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_K5_HEV_2020",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_K8_HEV_1ST_GEN",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_NIRO_EV",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_NIRO_EV_2ND_GEN",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_NIRO_HEV_2021",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_NIRO_HEV_2ND_GEN",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_NIRO_PHEV",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_NIRO_PHEV_2022",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_OPTIMA_G4",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_OPTIMA_G4_FL",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_OPTIMA_H",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_OPTIMA_H_G4_FL",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_RAY_EV",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_SELTOS",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_SELTOS_2023_NON_SCC",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_SORENTO",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_SORENTO_2024",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_SORENTO_4TH_GEN",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_SORENTO_HEV_4TH_GEN",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_SORENTO_HEV_4TH_GEN_LFA2",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_SPORTAGE_2026",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_SPORTAGE_5TH_GEN",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_SPORTAGE_HEV_2026",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_STINGER",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_STINGER_2022",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "hyundai",
+      "id": "KIA_XCEED_PHEV",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "toyota",
+      "id": "LEXUS_CTH",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "LEXUS_ES",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "LEXUS_ES_TSS2",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "LEXUS_GS_F",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "LEXUS_IS",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "LEXUS_IS_TSS2",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "LEXUS_LC_TSS2",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "LEXUS_NX",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "LEXUS_NX_TSS2",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "LEXUS_RC",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "LEXUS_RC_TSS2",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "LEXUS_RX",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "LEXUS_RX_TSS2",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "mazda",
+      "id": "MAZDA_3",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "mazda",
+      "id": "MAZDA_6",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "mazda",
+      "id": "MAZDA_CX5",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "mazda",
+      "id": "MAZDA_CX5_2022",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "mazda",
+      "id": "MAZDA_CX9",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "mazda",
+      "id": "MAZDA_CX9_2021",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "mock",
+      "id": "MOCK",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "nissan",
+      "id": "NISSAN_ALTIMA",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "nissan",
+      "id": "NISSAN_LEAF",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "nissan",
+      "id": "NISSAN_LEAF_IC",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "nissan",
+      "id": "NISSAN_ROGUE",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "nissan",
+      "id": "NISSAN_XTRAIL",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volvo",
+      "id": "POLESTAR_2",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "volkswagen",
+      "id": "PORSCHE_MACAN_MK1",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "psa",
+      "id": "PSA_PEUGEOT_208",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "chrysler",
+      "id": "RAM_1500_5TH_GEN",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "chrysler",
+      "id": "RAM_HD_5TH_GEN",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "rivian",
+      "id": "RIVIAN_R1_GEN1",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "volkswagen",
+      "id": "SEAT_ATECA_MK1",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volkswagen",
+      "id": "SKODA_ENYAQ_MK1",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "volkswagen",
+      "id": "SKODA_ENYAQ_MK2",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "volkswagen",
+      "id": "SKODA_FABIA_MK4",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volkswagen",
+      "id": "SKODA_KAMIQ_MK1",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volkswagen",
+      "id": "SKODA_KAROQ_MK1",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volkswagen",
+      "id": "SKODA_KODIAQ_MK1",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volkswagen",
+      "id": "SKODA_OCTAVIA_MK3",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volkswagen",
+      "id": "SKODA_SUPERB_MK3",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "subaru",
+      "id": "SUBARU_ASCENT",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "subaru",
+      "id": "SUBARU_ASCENT_2023",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "subaru",
+      "id": "SUBARU_CROSSTREK_2025",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "subaru",
+      "id": "SUBARU_CROSSTREK_HYBRID",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "subaru",
+      "id": "SUBARU_FORESTER",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "subaru",
+      "id": "SUBARU_FORESTER_2022",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "subaru",
+      "id": "SUBARU_FORESTER_HYBRID",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "subaru",
+      "id": "SUBARU_FORESTER_PREGLOBAL",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "subaru",
+      "id": "SUBARU_IMPREZA",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "subaru",
+      "id": "SUBARU_IMPREZA_2020",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "subaru",
+      "id": "SUBARU_LEGACY",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "subaru",
+      "id": "SUBARU_LEGACY_2025",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "subaru",
+      "id": "SUBARU_LEGACY_PREGLOBAL",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "subaru",
+      "id": "SUBARU_OUTBACK",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "subaru",
+      "id": "SUBARU_OUTBACK_2023",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "subaru",
+      "id": "SUBARU_OUTBACK_PREGLOBAL",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "subaru",
+      "id": "SUBARU_OUTBACK_PREGLOBAL_2018",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "tesla",
+      "id": "TESLA_MODEL_3",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "tesla",
+      "id": "TESLA_MODEL_S_HW1",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "tesla",
+      "id": "TESLA_MODEL_S_PREAP",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "tesla",
+      "id": "TESLA_MODEL_X",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "tesla",
+      "id": "TESLA_MODEL_Y",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_ALPHARD_TSS2",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_AVALON",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_AVALON_2019",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_AVALON_TSS2",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_CAMRY",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_CAMRY_TSS2",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_CHR",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_CHR_TSS2",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_COROLLA",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_COROLLA_TSS2",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_HIGHLANDER",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_HIGHLANDER_TSS2",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_MATRIX_RETROFIT",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_MIRAI",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_PRIUS",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_PRIUS_RETROFIT",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_PRIUS_TSS2",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_PRIUS_V",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_RAV4",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_RAV4H",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_RAV4_PRIME",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_RAV4_TSS2",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_RAV4_TSS2_2022",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_RAV4_TSS2_2023",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_SIENNA",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_SIENNA_4TH_GEN",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "toyota",
+      "id": "TOYOTA_YARIS",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "volkswagen",
+      "id": "VOLKSWAGEN_ARTEON_MK1",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volkswagen",
+      "id": "VOLKSWAGEN_ATLAS_MK1",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volkswagen",
+      "id": "VOLKSWAGEN_CADDY_MK3",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volkswagen",
+      "id": "VOLKSWAGEN_CRAFTER_MK2",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volkswagen",
+      "id": "VOLKSWAGEN_GOLF_MK7",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volkswagen",
+      "id": "VOLKSWAGEN_ID3_MK1",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "volkswagen",
+      "id": "VOLKSWAGEN_ID3_MK2",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "volkswagen",
+      "id": "VOLKSWAGEN_ID4_MK1",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "volkswagen",
+      "id": "VOLKSWAGEN_ID4_MK2",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "volkswagen",
+      "id": "VOLKSWAGEN_JETTA_MK6",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volkswagen",
+      "id": "VOLKSWAGEN_JETTA_MK7",
+      "source_declaration": "declaration_changed"
+    },
+    {
+      "family": "volkswagen",
+      "id": "VOLKSWAGEN_PASSAT_MK8",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volkswagen",
+      "id": "VOLKSWAGEN_PASSAT_NMS",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volkswagen",
+      "id": "VOLKSWAGEN_POLO_MK6",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volkswagen",
+      "id": "VOLKSWAGEN_SHARAN_MK2",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volkswagen",
+      "id": "VOLKSWAGEN_TAOS_MK1",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volkswagen",
+      "id": "VOLKSWAGEN_TCROSS_MK1",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volkswagen",
+      "id": "VOLKSWAGEN_TIGUAN_MK2",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volkswagen",
+      "id": "VOLKSWAGEN_TOURAN_MK2",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volkswagen",
+      "id": "VOLKSWAGEN_TRANSPORTER_T61",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volkswagen",
+      "id": "VOLKSWAGEN_TROC_MK1",
+      "source_declaration": "same_declaration"
+    },
+    {
+      "family": "volvo",
+      "id": "VOLVO_S60_RECHARGE",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "volvo",
+      "id": "VOLVO_V40",
+      "source_declaration": "source_only"
+    },
+    {
+      "family": "volvo",
+      "id": "VOLVO_XC40_RECHARGE",
+      "source_declaration": "source_only"
+    }
+  ],
+  "schema_version": 1,
+  "scope": "exact_source_platform_migration_obligations",
+  "source_inventory_sha256": "5cdb0fe01dd25bf87f0aeda7e5f71a10164d4d9bddf1c8b54e1ba6dec5140146",
+  "source_revision": "678af78347d9656bc2f5dacd4204b012db861fa7",
+  "upstream_additions": [
+    "AUDI_Q5_MK1",
+    "CHEVROLET_BOLT_EUV",
+    "JEEP_CHEROKEE_5TH_GEN",
+    "KIA_K7_2017",
+    "LEXUS_LS",
+    "MG_5_EV",
+    "RIVIAN_R1"
+  ],
+  "upstream_base_revision": "521db4c825d37eb5f29acf955daa88da003e4433"
+}

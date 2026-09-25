@@ -3,6 +3,7 @@ import argparse
 from collections import Counter
 from concurrent.futures import as_completed, ProcessPoolExecutor
 from itertools import batched
+import json
 import math
 import os
 from pathlib import Path
@@ -108,7 +109,7 @@ class Result(unittest.TestResult):
     self.mark(test, "error", self._exc_info_to_string(err, test))
 
   def addSkip(self, test, reason):
-    self.mark(test, "skipped")
+    self.mark(test, "skipped", reason or "No skip reason provided")
 
   def addExpectedFailure(self, test, err):
     self.mark(test, "xfailed")
@@ -185,7 +186,8 @@ def make_batches(tests, workers):
     module = sys.modules[cls.__module__]
     if hasattr(module, "setUpModule") or hasattr(module, "tearDownModule"):
       key = cls.__module__
-    elif "setUpClass" in cls.__dict__ or "tearDownClass" in cls.__dict__:
+    elif any(method in base.__dict__ for base in cls.__mro__ if base is not unittest.TestCase
+             for method in ("setUpClass", "tearDownClass")):
       key = f"{cls.__module__}.{cls.__qualname__}"
     else:
       parallel.append(test.id())
@@ -197,15 +199,71 @@ def make_batches(tests, workers):
   return sorted(batches, key=len, reverse=True)
 
 
+def account_for_tests(test_ids, records, tests=()):
+  """Return one outcome per selected test, expanding unittest fixture events."""
+  selected = set(test_ids)
+  fixtures = {}
+  for test in tests:
+    if test.id() not in selected:
+      continue
+    cls = type(test)
+    scopes = (("Class", f"{cls.__module__}.{cls.__qualname__}"), ("Module", cls.__module__))
+    for scope, name in scopes:
+      for phase in ("setUp", "tearDown"):
+        fixtures.setdefault(f"{phase}{scope} ({name})", []).append(test.id())
+
+  accounted = {}
+  events = []
+  for record in records:
+    if record["id"] not in selected:
+      events.append(record)
+    elif record["id"] in accounted:
+      accounted[record["id"]] = make_record(record["id"], "error", "Runner received duplicate outcomes for this selected test")
+    else:
+      accounted[record["id"]] = record.copy()
+
+  for event in events:
+    affected = fixtures.get(event["id"])
+    status = event["status"]
+    detail = f"{event['id']}: {event['detail']}"
+    if affected is None:
+      affected = [test_id for test_id in test_ids if test_id not in accounted] or test_ids
+      status = "error"
+      detail = f"Unexpected runner event {detail}"
+    for test_id in affected:
+      if test_id not in accounted:
+        accounted[test_id] = make_record(test_id, status, detail)
+      else:
+        record = accounted[test_id]
+        if record["status"] not in FAILURES or status == "error":
+          record["status"] = status
+        record["detail"] += ("\n\n" if record["detail"] else "") + detail
+
+  for test_id in test_ids:
+    if test_id not in accounted:
+      accounted[test_id] = make_record(test_id, "error", "Runner did not receive an outcome for this selected test")
+  return [accounted[test_id] for test_id in test_ids]
+
+
 def run_batch(test_ids, capture_output):
   result = Result(capture_output)
   outside = Capture(capture_output)
+  tests = []
   os.chdir(ROOT)
   outside.start()
   try:
-    unittest.TestLoader().loadTestsFromNames(test_ids).run(result)
+    suite = unittest.TestLoader().loadTestsFromNames(test_ids)
+    tests = list(flatten(suite))
+    suite.run(result)
+  except Exception:
+    detail = traceback.format_exc()
+    if result.current is not None:
+      result.current.update(status="error", detail=detail)
+      result.stopTest(None)
+    result.records.append(make_record("batch execution", "error", detail))
   finally:
     stdout, stderr = outside.stop()
+  result.records = account_for_tests(test_ids, result.records, tests)
   failures = [item for item in result.records if item["status"] in FAILURES]
   if failures:  # attach class/module fixture output to the first related failure
     failures[0]["stdout"] = stdout + failures[0]["stdout"]
@@ -220,7 +278,8 @@ def run_parallel(batches, workers, warning_action, capture_output):
       try:
         yield future.result()
       except Exception:
-        yield [make_record(futures[future][0], "error", traceback.format_exc())]
+        detail = traceback.format_exc()
+        yield [make_record(test_id, "error", detail) for test_id in futures[future]]
 
 
 def report(records, errors, duration_count, elapsed):
@@ -237,6 +296,11 @@ def report(records, errors, duration_count, elapsed):
       if item[stream]:
         print(paint(f"\n--- captured {stream} ---", 33))
         print(item[stream].rstrip())
+  skipped = Counter(r["detail"] or "No skip reason provided" for r in records if r["status"] == "skipped")
+  if skipped:
+    print(paint("\nskipped tests", 33))
+    for reason, count in sorted(skipped.items()):
+      print(f"{count:8d}  {reason}")
   timed = sorted((r for r in records if r["time"]), key=lambda r: r["time"], reverse=True)
   if duration_count:
     timed = timed[:duration_count]
@@ -257,6 +321,29 @@ def report(records, errors, duration_count, elapsed):
   return 5
 
 
+def write_json_report(path, test_ids, records, errors, elapsed, exit_code):
+  payload = {
+    "schema_version": 1,
+    "collected": len(test_ids),
+    "selected_test_ids": test_ids,
+    "collection_errors": errors,
+    "results": records,
+    "duration_seconds": elapsed,
+    "exit_code": exit_code,
+  }
+  path.parent.mkdir(parents=True, exist_ok=True)
+  temporary = None
+  try:
+    with tempfile.NamedTemporaryFile(mode="w", encoding="utf-8", dir=path.parent, delete=False) as output:
+      temporary = Path(output.name)
+      json.dump(payload, output, indent=2)
+      output.write("\n")
+    os.replace(temporary, path)
+  finally:
+    if temporary is not None:
+      temporary.unlink(missing_ok=True)
+
+
 def main():
   parser = argparse.ArgumentParser(description=__doc__)
   parser.add_argument("targets", nargs="*", help="files, directories, dotted IDs, or path.py::Class::test")
@@ -266,6 +353,7 @@ def main():
   parser.add_argument("-v", "--verbose", action="store_true", help="show every test")
   parser.add_argument("--durations", type=int, default=10, metavar="N", help="show N slowest tests; 0 shows all")
   parser.add_argument("-W", "--warnings", choices=("error", "default", "always", "ignore"), default="error")
+  parser.add_argument("--json-output", type=Path, help="write every selected test's outcome and the exit status to JSON")
   args = parser.parse_args()
 
   capture_output = not args.no_capture
@@ -280,6 +368,7 @@ def main():
   print(summary)
   records = []
   column = 0
+  interrupted = False
   try:
     if workers < 2:
       streams = (run_batch(batch, capture_output) for batch in batches)
@@ -299,10 +388,21 @@ def main():
             column = 0
   except KeyboardInterrupt:
     print(paint("\ninterrupted", 31))
-    return 2
+    interrupted = True
   if column:
     print()
-  return report(records, errors, args.durations, time.monotonic() - started)
+  records = account_for_tests([test.id() for test in tests], records)
+  elapsed = time.monotonic() - started
+  exit_code = report(records, errors, args.durations, elapsed)
+  if interrupted:
+    exit_code = 2
+  if args.json_output:
+    try:
+      write_json_report(args.json_output, [test.id() for test in tests], records, errors, elapsed, exit_code)
+    except OSError as e:
+      print(f"Unable to write JSON report: {e}", file=sys.stderr)
+      return 1
+  return exit_code
 
 
 if __name__ == "__main__":

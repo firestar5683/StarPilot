@@ -1,0 +1,32 @@
+name: safety qualification
+
+on:
+  push:
+    branches: [master, Domathon, SecretGoodStarPilot]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host_gates:
+    name: ${{ matrix.gate }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 100
+    strategy:
+      fail-fast: false
+      matrix:
+        gate: [coverage, opendbc-misra, panda-misra, panda-host]
+    steps:
+    - uses: actions/checkout@v7
+    - run: ./tools/op.sh setup
+    - name: Run isolated source-pinned gate
+      run: .venv/bin/python tools/ci/run_safety_qualification.py --gate "${{ matrix.gate }}" --output "ci-results/safety-${{ matrix.gate }}"
+    - name: Save full gate evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: safety-${{ matrix.gate }}
+        path: ci-results/safety-${{ matrix.gate }}/
+        if-no-files-found: error

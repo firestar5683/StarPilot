@@ -125,6 +125,7 @@ function install_python_deps() {
   echo "installing python packages..."
   uv sync --frozen --all-extras
   source .venv/bin/activate
+  python3 scripts/lint/check_workflows.py --install
 }
 
 # --- Main ---

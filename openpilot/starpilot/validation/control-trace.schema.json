@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "Recorded control-axis evidence, version 1",
+  "description": "Unknown observations are null or absent. A valid document or passing trace does not qualify a vehicle.",
+  "type": "object",
+  "required": ["schema_version", "scenario", "evidence_kind", "requirements", "frames"],
+  "properties": {
+    "schema_version": {"const": 1},
+    "case_id": {"type": ["string", "null"]},
+    "scenario": {"enum": ["mode_off", "mode_lateral_only", "mode_longitudinal_only", "mode_combined", "brake", "gas", "standstill", "gear_change", "steering_override", "lateral_fault", "longitudinal_fault", "input_stale", "permission_revoked", "cancel", "policy_recovery", "restart", "stock_acc_handoff"]},
+    "evidence_kind": {"enum": ["synthetic", "replay", "bench", "vehicle_recording"]},
+    "recording_sha256": {"$ref": "#/$defs/hash"},
+    "configuration": {"$ref": "#/$defs/configuration"},
+    "requirements": {
+      "type": "object",
+      "required": ["minimum_frames", "max_frame_gap_ns", "required_events"],
+      "properties": {
+        "minimum_frames": {"type": "integer", "minimum": 2},
+        "max_frame_gap_ns": {"type": "integer", "minimum": 1},
+        "required_events": {"type": "array", "items": {"type": "string", "minLength": 1}}
+      }
+    },
+    "frames": {"type": "array", "items": {"$ref": "#/$defs/frame"}}
+  },
+  "$defs": {
+    "hash": {"type": ["string", "null"], "pattern": "^[0-9a-f]{64}$"},
+    "boolean": {"type": ["boolean", "null"]},
+    "axes": {
+      "type": ["object", "null"],
+      "properties": {"lateral": {"$ref": "#/$defs/boolean"}, "longitudinal": {"$ref": "#/$defs/boolean"}}
+    },
+    "mode": {"enum": ["off", "lateral_only", "longitudinal_only", "combined"]},
+    "configuration": {
+      "type": ["object", "null"],
+      "properties": {
+        "platform": {"type": ["string", "null"]},
+        "device": {"type": ["string", "null"]},
+        "harness": {"type": ["string", "null"]},
+        "policy_id": {"type": ["string", "null"]},
+        "source_commit": {"type": ["string", "null"], "pattern": "^[0-9a-f]{40}$"},
+        "car_params_sha256": {"$ref": "#/$defs/hash"},
+        "schema_sha256": {"$ref": "#/$defs/hash"},
+        "settings_sha256": {"$ref": "#/$defs/hash"},
+        "safety_binary_sha256": {"$ref": "#/$defs/hash"},
+        "firmware_manifest_sha256": {"$ref": "#/$defs/hash"},
+        "policy_sha256": {"$ref": "#/$defs/hash"},
+        "adapter_sha256": {"$ref": "#/$defs/hash"},
+        "longitudinal_owner": {"enum": ["system", "stock", "none", null]},
+        "supported_modes": {"type": ["array", "null"], "uniqueItems": true, "items": {"$ref": "#/$defs/mode"}}
+      }
+    },
+    "observed": {
+      "type": ["object", "null"],
+      "properties": {
+        "request": {"$ref": "#/$defs/axes"},
+        "permission": {"$ref": "#/$defs/axes"},
+        "effective": {"$ref": "#/$defs/axes"},
+        "command_active": {"$ref": "#/$defs/axes"},
+        "blocking_fault": {"$ref": "#/$defs/axes"},
+        "input_fresh": {"$ref": "#/$defs/axes"},
+        "displayed_active": {"$ref": "#/$defs/axes"},
+        "control_can_observed": {"$ref": "#/$defs/boolean"},
+        "safety_feedback_fresh": {"$ref": "#/$defs/boolean"},
+        "stock_acc_active": {"$ref": "#/$defs/boolean"}
+      }
+    },
+    "expected": {
+      "type": ["object", "null"],
+      "properties": {
+        "effective": {"$ref": "#/$defs/axes"},
+        "command_active": {"$ref": "#/$defs/axes"},
+        "displayed_active": {"$ref": "#/$defs/axes"},
+        "stock_acc_active": {"$ref": "#/$defs/boolean"}
+      }
+    },
+    "frame": {
+      "type": "object",
+      "required": ["time_ns", "mode"],
+      "properties": {
+        "time_ns": {"type": "integer", "minimum": 0},
+        "mode": {"$ref": "#/$defs/mode"},
+        "event": {"type": ["string", "null"], "minLength": 1},
+        "observed": {"$ref": "#/$defs/observed"},
+        "expected": {"$ref": "#/$defs/expected"}
+      }
+    }
+  }
+}

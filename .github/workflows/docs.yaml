@@ -4,12 +4,14 @@ on:
   push:
     branches:
       - master
+      - Domathon
+      - SecretGoodStarPilot
   pull_request:
   workflow_call:
     inputs:
       run_number:
         default: '1'
-        required: true
+        required: false
         type: string
 concurrency:
   group: docs-tests-ci-run-${{ inputs.run_number }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/master' && github.run_id || github.head_ref || github.ref }}-${{ github.workflow }}-${{ github.event_name }}

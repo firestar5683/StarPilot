@@ -5,18 +5,22 @@ on:
     branches:
       - master
       - Domathon
+      - SecretGoodStarPilot
   pull_request:
   workflow_dispatch:
   workflow_call:
     inputs:
       run_number:
         default: '1'
-        required: true
+        required: false
         type: string
 
 concurrency:
   group: tests-ci-run-${{ inputs.run_number }}-${{ github.event_name == 'push' && github.ref == 'refs/heads/master' && github.run_id || github.head_ref || github.ref }}-${{ github.workflow }}-${{ github.event_name }}
   cancel-in-progress: true
+
+permissions:
+  contents: read
 
 env:
   CI: 1
@@ -32,12 +36,25 @@ jobs:
     - uses: actions/checkout@v7
     - name: Validate tracked dependencies
       run: python3 tools/vendor/check.py --revision HEAD
-    - name: Test dependency and packaging tools
-      run: |
-        python3 -m unittest discover -s tools/vendor/tests -v
-        python3 -m unittest discover -s tools/release/tests -v
-        python3 -m unittest discover -s openpilot/system/updated/tests -v
+    - run: ./tools/op.sh setup
+      id: setup
+    - name: Build native dependencies for packaging tests
+      id: build
+      run: scons -j2 openpilot/common/libparams_c.so msgq_repo/msgq/ipc_pyx.so
+    - name: Test dependency tools
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      run: python3 -m unittest discover -s tools/vendor/tests -v
+    - name: Test release packaging
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      run: python3 -m pytest -q tools/release/tests
+    - name: Test CI tools
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      run: python3 -m unittest discover -s tools/ci/tests -v
+    - name: Test updater
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      run: python3 -m unittest discover -s openpilot/system/updated/tests -v
     - name: Check setup and release shell syntax
+      if: ${{ !cancelled() && steps.setup.outcome == 'success' }}
       run: |
         for script in tools/op.sh tools/release/*.sh openpilot/selfdrive/test/setup_device_ci.sh; do
           bash -n "$script"
@@ -45,17 +62,24 @@ jobs:
 
   build_release:
     name: build release
-    runs-on: ${{
-      (github.repository == 'commaai/openpilot') &&
-      ((github.event_name != 'pull_request') ||
-      (github.event.pull_request.head.repo.full_name == 'commaai/openpilot'))
-      && fromJSON('["namespace-profile-amd64-8x16"]')
-      || fromJSON('["ubuntu-24.04"]') }}
+    runs-on: ubuntu-24.04-arm
     env:
       STRIPPED_DIR: /tmp/releasepilot
       PYTHONPATH: /tmp/releasepilot
+      STARPILOT_CI_BUILD_MANIFEST: /tmp/starpilot-release-build-${{ github.run_id }}-${{ github.run_attempt }}.json
     steps:
     - uses: actions/checkout@v7
+    - uses: actions/setup-go@v7
+      with:
+        go-version: '1.25.1'
+        cache-dependency-path: mapd_repo/go.sum
+    - name: Build the pinned release map provider
+      env:
+        GOTOOLCHAIN: local
+      run: |
+        sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config zlib1g-dev
+        (cd mapd_repo && go mod download)
+        PYTHONPATH="$GITHUB_WORKSPACE" python3 -m openpilot.starpilot.maps.package_shadow
     - name: Build devel
       timeout-minutes: 1
       run: TARGET_DIR=$STRIPPED_DIR tools/release/build_stripped.sh
@@ -71,6 +95,38 @@ jobs:
     - name: Check tracked dependencies
       timeout-minutes: 3
       run: python3 tools/vendor/check.py --revision HEAD
+
+  developer_commands:
+    name: developer commands (${{ matrix.os }})
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-24.04, macos-latest]
+    runs-on: ${{ matrix.os }}
+    permissions:
+      contents: read
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install developer prerequisites
+      run: tools/setup_dependencies.sh
+    - name: Check launchers without starting tools
+      run: |
+        ./build --help
+        ./dev help
+        ./test --help
+        ./tool help
+        ./tools/host help
+        ./c3 --help
+        ./c4 --help
+        ./onroad --help
+    - name: Test commands through the isolated host environment
+      run: |
+        ./dev pytest -q tools/ci/tests/test_dev_runtime.py tools/ci/tests/test_dev_runtime_review.py tools/ci/tests/test_build_entry.py openpilot/starpilot/ui/tests/test_host_launch.py openpilot/tools/replay/tests/test_onroad_host.py openpilot/starpilot/ui/tests/test_host_window_failure.py
+    - name: Build both desktop UI entrypoints without a display
+      run: |
+        SP_C3_COMPILE_ONLY=1 ./c3
+        SP_C4_COMPILE_ONLY=1 ./c4
 
   build_mac:
     name: build macOS
@@ -110,14 +166,196 @@ jobs:
       || fromJSON('["ubuntu-24.04"]') }}
     steps:
     - uses: actions/checkout@v7
+    - name: Provide JavaScript runtime for Galaxy contract tests
+      uses: actions/setup-node@v7
+      with:
+        node-version: '24'
+        package-manager-cache: false
+    - name: Provide pinned map provider toolchain
+      uses: actions/setup-go@v7
+      with:
+        go-version: '1.25.1'
+        cache-dependency-path: mapd_repo/go.sum
+    - name: Fetch pinned map provider dependencies
+      working-directory: mapd_repo
+      env:
+        GOTOOLCHAIN: local
+      run: go mod download
     - run: ./tools/op.sh setup
+      id: setup
     - name: Build openpilot
+      id: build
       run: scons
     - name: Run unit tests
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
       timeout-minutes: ${{ contains(runner.name, 'nsc') && 2 || 20 }}
       env:
         RAYLIB_BACKEND: headless
-      run: tools/op.sh test
+      run: tools/op.sh test --json-output unit-test-results.json
+    - name: Test custom module-level pytest cases
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      timeout-minutes: 10
+      env:
+        RAYLIB_BACKEND: headless
+      run: python3 tools/ci/run_host_tests.py --pytest
+    - name: Test GM vehicle configurations and CAN behavior
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      timeout-minutes: 5
+      run: tools/op.sh test opendbc_repo/opendbc/car/gm/tests --json-output gm-test-results.json
+    - name: Test native independent-axis protocol
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      run: |
+        openpilot/selfdrive/pandad/tests/test_panda_usb
+        openpilot/selfdrive/pandad/tests/test_pandad_canprotocol
+        openpilot/selfdrive/pandad/tests/test_aol_protocol
+        openpilot/selfdrive/pandad/tests/test_aol_wire
+        openpilot/selfdrive/pandad/tests/test_producer_timing
+        openpilot/selfdrive/pandad/tests/test_producer_sink
+    - name: Test map provider to host messaging
+      if: ${{ !cancelled() && steps.build.outcome == 'success' }}
+      working-directory: mapd_repo
+      timeout-minutes: 5
+      env:
+        GOTOOLCHAIN: local
+        STARPILOT_SHADOW_IPC_REQUIRED: '1'
+        STARPILOT_SHADOW_EXEC_REQUIRED: '1'
+        STARPILOT_PYTHON: ${{ github.workspace }}/.venv/bin/python
+      run: go test -mod=readonly -race -run '^Test(MsgqNativeLayout|Shadow(GoPythonIPC|ExecutableHostGpsIPC))$' -count=1 -v
+    - name: Save complete unit test results
+      if: ${{ always() && (hashFiles('unit-test-results.json') != '' || hashFiles('gm-test-results.json') != '') }}
+      uses: actions/upload-artifact@v4
+      with:
+        name: unit-test-results
+        path: |
+          unit-test-results.json
+          gm-test-results.json
+        if-no-files-found: error
+
+  map_provider:
+    name: map provider
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    permissions:
+      contents: read
+    steps:
+    - uses: actions/checkout@v7
+    - uses: actions/setup-go@v7
+      with:
+        go-version: '1.25.1'
+        cache-dependency-path: mapd_repo/go.sum
+    - name: Install native build dependencies
+      run: sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config zlib1g-dev
+    - name: Test and build pinned map provider
+      run: python3 tools/ci/run_map_tests.py --output ci-results/map-provider
+    - name: Save test and build evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: map-provider
+        path: ci-results/map-provider/
+        if-no-files-found: error
+
+  vehicle_contracts:
+    name: vehicle contracts (${{ matrix.suite }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        suite: [interfaces, safety-debug, safety-release]
+    env:
+      FUZZ_SEED: '0'
+    steps:
+    - uses: actions/checkout@v7
+    - run: ./tools/op.sh setup
+    - name: Build native host dependencies
+      run: scons
+    - name: Run explicit vehicle suite and record every result
+      timeout-minutes: 20
+      run: python3 tools/ci/run_vehicle_tests.py --suite "${{ matrix.suite }}" --output "ci-results/${{ matrix.suite }}"
+    - name: Require current complete interface regression coverage
+      if: ${{ always() && matrix.suite == 'interfaces' }}
+      run: |
+        python3 tools/ci/fleet_coverage.py --require interfaces \
+          --interface-coverage ci-results/interfaces/coverage.json \
+          --interface-results ci-results/interfaces/results.json \
+          --output ci-results/interfaces/fleet-coverage.json
+    - name: Save collection, outcomes, and native build evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: vehicle-contracts-${{ matrix.suite }}
+        path: ci-results/${{ matrix.suite }}/
+        if-no-files-found: error
+
+  recorded_vehicles:
+    name: recorded vehicles (${{ matrix.variant }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [debug, release]
+    env:
+      FUZZ_SEED: '0'
+    steps:
+    - uses: actions/checkout@v7
+    - name: Install host prerequisites
+      run: tools/setup_dependencies.sh
+    - name: Replay pinned public CAN recordings
+      timeout-minutes: 20
+      run: |
+        ./dev python tools/ci/run_recorded_vehicle_tests.py \
+          --variant "${{ matrix.variant }}" \
+          --cache "${{ runner.temp }}/recorded-fixtures" \
+          --output "$GITHUB_WORKSPACE/ci-results/recorded-${{ matrix.variant }}" \
+          --download
+    - name: Save recorded results and native build evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: recorded-vehicles-${{ matrix.variant }}
+        path: ci-results/recorded-${{ matrix.variant }}/
+        if-no-files-found: error
+
+  panda_build_variants:
+    name: Panda compile (${{ matrix.variant }})
+    runs-on: ubuntu-24.04
+    timeout-minutes: 35
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false
+      matrix:
+        variant: [debug, release]
+    steps:
+    - uses: actions/checkout@v7
+    - run: ./tools/op.sh setup
+    - name: Compile firmware with the checked-in development certificate
+      timeout-minutes: 15
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p ci-results/firmware
+        if [[ "${{ matrix.variant }}" == release ]]; then
+          export RELEASE=1
+          export CERT="$PWD/panda/board/crypto/certs/debug"
+        else
+          unset RELEASE
+        fi
+        scons --verbose panda/board/obj/version panda/board/obj/panda.bin.signed panda/board/obj/bootstub.panda.bin panda/board/obj/panda_h7.bin.signed panda/board/obj/bootstub.panda_h7.bin 2>&1 | tee ci-results/firmware/build.log
+        python3 tools/ci/record_firmware.py --variant "${{ matrix.variant }}" --build-log ci-results/firmware/build.log --output ci-results/firmware/provenance.json
+    - name: Save compile evidence
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: panda-compile-${{ matrix.variant }}
+        path: ci-results/firmware/
+        if-no-files-found: error
 
   process_replay:
     name: process replay
@@ -137,10 +375,17 @@ jobs:
       run: openpilot/selfdrive/test/process_replay/test_processes.py -j$(nproc)
     - name: Print diff
       id: print-diff
-      if: always()
+      if: ${{ always() && hashFiles('openpilot/selfdrive/test/process_replay/diff.txt') != '' }}
       run: cat openpilot/selfdrive/test/process_replay/diff.txt
-    - name: Print diff report
+    - name: Save process replay input coverage
       if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: process-replay-coverage
+        path: openpilot/selfdrive/test/process_replay/coverage.json
+        if-no-files-found: error
+    - name: Print diff report
+      if: ${{ always() && hashFiles('openpilot/selfdrive/test/process_replay/diff_report.txt') != '' }}
       run: cat openpilot/selfdrive/test/process_replay/diff_report.txt
     - uses: actions/upload-artifact@v7
       if: always()
@@ -181,27 +426,6 @@ jobs:
         timeout_minutes: 2
         max_attempts: 3
         command: cd ${{ github.workspace }}/ci-artifacts && git push origin process-replay --force
-
-  simulator_driving:
-    name: simulator driving
-    runs-on: ${{
-      (github.repository == 'commaai/openpilot') &&
-      ((github.event_name != 'pull_request') ||
-      (github.event.pull_request.head.repo.full_name == 'commaai/openpilot'))
-      && fromJSON('["namespace-profile-amd64-8x16"]')
-      || fromJSON('["ubuntu-24.04"]') }}
-    if: false  # FIXME: Started to timeout recently
-    steps:
-    - uses: actions/checkout@v7
-    - run: ./tools/op.sh setup
-    - name: Build openpilot
-      run: scons
-    - name: Driving test
-      timeout-minutes: 2
-      env:
-        # MetaDrive renders offscreen through panda3d's EGL pipe on llvmpipe
-        EGL_PLATFORM: surfaceless
-      run: python openpilot/tools/sim/tests/test_metadrive_bridge.py
 
   create_ui_report:
     name: Create UI Report
