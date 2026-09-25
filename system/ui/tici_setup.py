@@ -408,7 +408,10 @@ class Setup(Widget):
 
 def main():
   try:
-    gui_app.init_window("Setup", 20)
+    if HARDWARE.get_device_type() in ("tici", "tizi"):
+      gui_app.init_window("Setup")
+    else:
+      gui_app.init_window("Setup", 20)
     setup = Setup()
     gui_app.push_widget(setup)
     for _ in gui_app.render():
