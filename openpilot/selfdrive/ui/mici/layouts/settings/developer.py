@@ -6,6 +6,7 @@ from openpilot.selfdrive.ui.mici.widgets.dialog import BigDialog, BigInputDialog
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.selfdrive.ui.layouts.settings.common import restart_needed_callback
 from openpilot.selfdrive.ui.ui_state import ui_state
+from openpilot.starpilot.car.hyundai.aol import ioniq6_settings_capable
 from openpilot.selfdrive.ui.widgets.ssh_key import SshKeyFetcher
 
 
@@ -22,7 +23,7 @@ class AlphaLongConfirmPage(NavScroller):
                     gui_app.texture("icons_mici/setup/warning.png", 64, 64)),
       GreyBigButton("", "WARNING: alpha longitudinal control may disable Automatic Emergency Braking (AEB)"),
       GreyBigButton("", "On this car, openpilot defaults to the stock system's built-in ACC."),
-      GreyBigButton("", "Enabling this will switch to openpilot longitudinal control."),
+      GreyBigButton("", "This requests openpilot longitudinal control after a verified vehicle takeover at startup."),
       accept,
     ])
 
@@ -65,7 +66,28 @@ class DeveloperLayoutMici(NavScroller):
                                    description="Grant SSH access to all public keys in your GitHub settings. Only enter your own username.")
     self._ssh_keys_btn.set_click_callback(ssh_keys_callback)
 
-    # adb, ssh, ssh keys, debug mode, joystick debug mode, longitudinal maneuver mode, ip address
+    from openpilot.starpilot.connect.settings import CloudProviderConfirmation
+    from openpilot.starpilot.connect.provider import PROVIDERS, status
+    self._cloud_provider_btn = BigButton('Cloud Provider', 'Changes apply after the next reboot')
+    def refresh_cloud():
+      try:
+        current = status()
+        self._cloud_provider_btn.set_value(PROVIDERS[current['selected']].label)
+      except (OSError, ValueError, TypeError):
+        self._cloud_provider_btn.set_value('Unavailable')
+    def choose_cloud():
+      try:
+        current = status()
+        target = next(name for name in PROVIDERS if name != current['selected'])
+      except (OSError, ValueError, TypeError, StopIteration):
+        gui_app.push_widget(BigDialog('', 'Cloud Provider is unavailable. Refresh and try again.'))
+        return
+      gui_app.push_widget(CloudProviderConfirmation(target, current['revision'], refresh_cloud))
+    self._cloud_provider_btn.set_click_callback(choose_cloud)
+    self._cloud_provider_btn.set_enabled(ui_state.is_offroad)
+    refresh_cloud()
+
+    # adb, ssh, ssh keys, debug mode, joystick debug mode, ip address
     # ******** Main Scroller ********
     self._adb_toggle = BigCircleParamControl(gui_app.texture("icons_mici/adb_short.png", 82, 82), "AdbEnabled", icon_offset=(0, 12),
                                              description="Use Android Debug Bridge (ADB) over USB or the network.", title="enable ADB")
@@ -73,12 +95,6 @@ class DeveloperLayoutMici(NavScroller):
                                              description="Access the device remotely using your SSH keys.", title="enable SSH")
     self._joystick_toggle = BigToggle("joystick debug\nmode", initial_state=ui_state.params.get_bool("JoystickDebugMode"),
                                       toggle_callback=self._on_joystick_debug_mode, description="Control the car with a joystick for debugging.")
-    self._long_maneuver_toggle = BigToggle("longitudinal maneuver mode", initial_state=ui_state.params.get_bool("LongitudinalManeuverMode"),
-                                           toggle_callback=self._on_long_maneuver_mode,
-                                           description="Run longitudinal maneuvers for testing gas and brake control.")
-    self._lat_maneuver_toggle = BigToggle("lateral maneuver mode", initial_state=ui_state.params.get_bool("LateralManeuverMode"),
-                                          toggle_callback=self._on_lat_maneuver_mode,
-                                          description="Run lateral maneuvers for testing steering control.")
     self._alpha_long_toggle = BigToggle("alpha longitudinal", initial_state=ui_state.params.get_bool("AlphaLongitudinalEnabled"),
                                         toggle_callback=self._on_alpha_long_enabled,
                                         description="Use alpha openpilot longitudinal control instead of stock ACC. This may disable Automatic Emergency " +
@@ -91,9 +107,8 @@ class DeveloperLayoutMici(NavScroller):
       self._adb_toggle,
       self._ssh_toggle,
       self._ssh_keys_btn,
+      self._cloud_provider_btn,
       self._joystick_toggle,
-      self._long_maneuver_toggle,
-      self._lat_maneuver_toggle,
       self._alpha_long_toggle,
       self._debug_mode_toggle,
     ])
@@ -103,14 +118,11 @@ class DeveloperLayoutMici(NavScroller):
       ("AdbEnabled", self._adb_toggle),
       ("SshEnabled", self._ssh_toggle),
       ("JoystickDebugMode", self._joystick_toggle),
-      ("LongitudinalManeuverMode", self._long_maneuver_toggle),
-      ("LateralManeuverMode", self._lat_maneuver_toggle),
       ("AlphaLongitudinalEnabled", self._alpha_long_toggle),
       ("ShowDebugInfo", self._debug_mode_toggle),
     )
     onroad_blocked_toggles = (self._adb_toggle, self._joystick_toggle)
-    release_blocked_toggles = (self._joystick_toggle, self._long_maneuver_toggle, self._lat_maneuver_toggle, self._alpha_long_toggle)
-    engaged_blocked_toggles = (self._long_maneuver_toggle, self._lat_maneuver_toggle, self._alpha_long_toggle)
+    release_blocked_toggles = (self._joystick_toggle, self._alpha_long_toggle)
 
     # Hide non-release toggles on release builds
     for item in release_blocked_toggles:
@@ -120,9 +132,7 @@ class DeveloperLayoutMici(NavScroller):
     for item in onroad_blocked_toggles:
       item.set_enabled(lambda: ui_state.is_offroad())
 
-    # Disable toggles that require not engaged
-    for item in engaged_blocked_toggles:
-      item.set_enabled(lambda: not ui_state.engaged)
+    self._alpha_long_toggle.set_enabled(lambda: ui_state.is_offroad())
 
     # Set initial state
     if ui_state.params.get_bool("ShowDebugInfo"):
@@ -144,19 +154,13 @@ class DeveloperLayoutMici(NavScroller):
 
     # CP gating
     if ui_state.CP is not None:
-      alpha_avail = ui_state.CP.alphaLongitudinalAvailable
+      alpha_avail = ui_state.CP.alphaLongitudinalAvailable or ioniq6_settings_capable(ui_state.CP)
       if not alpha_avail or ui_state.is_release:
         self._alpha_long_toggle.set_visible(False)
-        ui_state.params.remove("AlphaLongitudinalEnabled")
       else:
         self._alpha_long_toggle.set_visible(True)
 
-      long_man_enabled = ui_state.has_longitudinal_control and ui_state.is_offroad()
-      self._long_maneuver_toggle.set_enabled(long_man_enabled)
-      self._lat_maneuver_toggle.set_enabled(ui_state.is_offroad())
     else:
-      self._long_maneuver_toggle.set_enabled(False)
-      self._lat_maneuver_toggle.set_enabled(False)
       self._alpha_long_toggle.set_visible(False)
 
     # Refresh toggles from params to mirror external changes
@@ -166,29 +170,14 @@ class DeveloperLayoutMici(NavScroller):
   def _on_joystick_debug_mode(self, state: bool):
     ui_state.params.put_bool("JoystickDebugMode", state, block=True)
     ui_state.params.put_bool("LongitudinalManeuverMode", False, block=True)
-    self._long_maneuver_toggle.set_checked(False)
     ui_state.params.put_bool("LateralManeuverMode", False, block=True)
-    self._lat_maneuver_toggle.set_checked(False)
-
-  def _on_long_maneuver_mode(self, state: bool):
-    ui_state.params.put_bool("LongitudinalManeuverMode", state, block=True)
-    ui_state.params.put_bool("JoystickDebugMode", False, block=True)
-    self._joystick_toggle.set_checked(False)
-    ui_state.params.put_bool("LateralManeuverMode", False, block=True)
-    self._lat_maneuver_toggle.set_checked(False)
-    restart_needed_callback()
-
-  def _on_lat_maneuver_mode(self, state: bool):
-    ui_state.params.put_bool("LateralManeuverMode", state, block=True)
-    ui_state.params.put_bool("ExperimentalMode", False, block=True)
-    ui_state.params.put_bool("JoystickDebugMode", False, block=True)
-    self._joystick_toggle.set_checked(False)
-    ui_state.params.put_bool("LongitudinalManeuverMode", False, block=True)
-    self._long_maneuver_toggle.set_checked(False)
-    restart_needed_callback()
 
   def _on_alpha_long_enabled(self, state: bool):
     def do_toggle(_state: bool):
+      if (not ui_state.is_offroad() or (_state and (ui_state.CP is None or
+              not (ui_state.CP.alphaLongitudinalAvailable or ioniq6_settings_capable(ui_state.CP))))):
+        self._update_toggles()
+        return
       ui_state.params.put_bool("AlphaLongitudinalEnabled", _state, block=True)
       restart_needed_callback()
       self._update_toggles()

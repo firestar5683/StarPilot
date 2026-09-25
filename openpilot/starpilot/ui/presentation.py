@@ -102,6 +102,7 @@ class BitmapFonts:
     self.profile = Profile(profile)
     self._fonts: dict[str, rl.Font] = {}
     self._measurements: dict[tuple, TextSize] = {}
+    self._vertical_ink: dict[tuple, tuple[float, float]] = {}
     default_texture_id = rl.get_font_default().texture.id
     try:
       for filename in dict.fromkeys(font_filename(self.profile, role) for role in FontRole):
@@ -140,6 +141,20 @@ class BitmapFonts:
       self._measurements[key] = TextSize(measured.x, measured.y)
     return self._measurements[key]
 
+  def vertical_ink(self, text: str, role: FontRole, size: float) -> tuple[float, float]:
+    """Visible glyph top/bottom, independent of the font's padded line box."""
+    key = (text, role, size)
+    if key not in self._vertical_ink:
+      font = self.font(role)
+      glyphs = [rl.get_glyph_index(font, ord(char)) for char in text if not char.isspace()]
+      scale = size * self.profile.font_scale / font.baseSize
+      top = min((font.glyphs[index].offsetY for index in glyphs), default=0)
+      bottom = max((font.glyphs[index].offsetY + font.recs[index].height for index in glyphs), default=0)
+      if len(self._vertical_ink) >= 1024:
+        self._vertical_ink.clear()
+      self._vertical_ink[key] = (top * scale, bottom * scale)
+    return self._vertical_ink[key]
+
   def draw(self, text: str, role: FontRole, size: float, x: float, y: float, color: rl.Color = rl.WHITE,
            *, spacing: float = 0, fallback: bool = False) -> None:
     draw = getattr(rl, "_orig_draw_text_ex", rl.draw_text_ex)
@@ -150,6 +165,7 @@ class BitmapFonts:
       for font in self._fonts.values():
         rl.unload_font(font)
     self._fonts.clear()
+    self._vertical_ink.clear()
     self._measurements.clear()
 
   def __enter__(self):

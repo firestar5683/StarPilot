@@ -26,16 +26,27 @@ class ConfidenceBall(Widget):
     super().__init__()
     self._demo = demo
     self._confidence_filter = FirstOrderFilter(-0.5, 0.5, 1 / gui_app.target_fps)
+    self._render_lateral_active = False
 
   def update_filter(self, value: float):
     self._confidence_filter.update(value)
+
+  def reset(self) -> None:
+    self._confidence_filter.x = -0.5
+
+  def render_with_lateral(self, rect: rl.Rectangle, lateral_active: bool) -> bool | int | None:
+    self._render_lateral_active = lateral_active
+    try:
+      return self.render(rect)
+    finally:
+      self._render_lateral_active = False
 
   def _update_state(self):
     if self._demo:
       return
 
     # animate status dot in from bottom
-    if ui_state.status == UIStatus.DISENGAGED:
+    if ui_state.status == UIStatus.DISENGAGED and not self._render_lateral_active:
       self._confidence_filter.update(-0.5)
     else:
       self._confidence_filter.update((1 - max(ui_state.sm['modelV2'].meta.disengagePredictions.brakeDisengageProbs or [1])) *
@@ -54,7 +65,8 @@ class ConfidenceBall(Widget):
     dot_height = self._rect.y + dot_height
 
     # confidence zones
-    if ui_state.status == UIStatus.ENGAGED or self._demo:
+    if ui_state.status == UIStatus.ENGAGED or self._demo or \
+       (ui_state.status == UIStatus.DISENGAGED and self._render_lateral_active):
       if self._confidence_filter.x > 0.5:
         top_dot_color = rl.Color(0, 255, 204, 255)
         bottom_dot_color = rl.Color(0, 255, 38, 255)

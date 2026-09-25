@@ -70,7 +70,7 @@ class Keyboard(Widget):
 
     self._max_text_size = max_text_size
     self._min_text_size = min_text_size
-    self._input_box = InputBox(max_text_size)
+    self._input_box = InputBox(max_text_size, password_mode=password_mode)
     self._password_mode = password_mode
     self._show_password_toggle = show_password_toggle
     self._callback = callback

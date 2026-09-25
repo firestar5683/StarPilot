@@ -24,6 +24,9 @@ from openpilot.common.realtime import Ratekeeper
 
 _DEFAULT_FPS = int(os.getenv("FPS", {'tizi': 20}.get(HARDWARE.get_device_type(), 60)))
 FPS_LOG_INTERVAL = 5  # Seconds between logging FPS drops
+AUTO_TIMING_DURATION = 6.0
+AUTO_TIMING_COOLDOWN = 60.0
+AUTO_TIMING_MAX_SAMPLES = 360
 FPS_DROP_THRESHOLD = 0.9  # FPS drop threshold for triggering a warning
 FPS_CRITICAL_THRESHOLD = 0.5  # Critical threshold for triggering strict actions
 MOUSE_THREAD_RATE = 140  # touch controller runs at 140Hz
@@ -37,6 +40,7 @@ SHOW_TOUCHES = os.getenv("SHOW_TOUCHES") == "1"
 STRICT_MODE = os.getenv("STRICT_MODE") == "1"
 SCALE = float(os.getenv("SCALE", "1.0"))
 GRID_SIZE = int(os.getenv("GRID", "0"))
+UI_FRAME_TIMING = os.getenv("UI_FRAME_TIMING") == "1"
 PROFILE_RENDER = int(os.getenv("PROFILE_RENDER", "0"))
 PROFILE_STATS = int(os.getenv("PROFILE_STATS", "100"))  # Number of functions to show in profile output
 RECORD = os.getenv("RECORD") == "1"
@@ -213,6 +217,18 @@ class MouseState:
         self._prev_mouse_event[slot] = ev
 
 
+class FrameTiming(NamedTuple):
+  draw_wall_ms: float
+  draw_cpu_ms: float
+  update_wall_ms: float
+  update_cpu_ms: float
+  present_wall_ms: float
+  present_cpu_ms: float
+
+
+FRAME_PHASES = ("camera", "model", "ui_state", "transition", "controllers")
+
+
 class GuiApplication:
   def __init__(self, width: int | None = None, height: int | None = None):
     self._set_log_callback()
@@ -233,6 +249,7 @@ class GuiApplication:
     self._scaled_width += self._scaled_width % 2
     self._scaled_height += self._scaled_height % 2
 
+    self._render_prepare = {}
     self._render_texture: rl.RenderTexture | None = None
     self._burn_in_shader: rl.Shader | None = None
     self._ffmpeg_proc: subprocess.Popen | None = None
@@ -259,6 +276,13 @@ class GuiApplication:
     self._show_touches = SHOW_TOUCHES
     self._show_fps = SHOW_FPS
     self._grid_size = GRID_SIZE
+    self._frame_timing_enabled = UI_FRAME_TIMING
+    self._collect_frame_timing: bool | None = None
+    self._auto_timing_end = 0.0
+    self._auto_timing_next = 0.0
+    self._auto_timing_samples: deque[dict[str, tuple[float, float]]] = deque(maxlen=AUTO_TIMING_MAX_SAMPLES)
+    self.frame_timing: FrameTiming | None = None
+    self._frame_phases: dict[str, tuple[float, float]] = {}
     self._profile_render_frames = PROFILE_RENDER
     self._render_profiler = None
     self._render_profile_start_time = None
@@ -272,6 +296,22 @@ class GuiApplication:
 
   def set_show_fps(self, show: bool):
     self._show_fps = show
+    self._frame_timing_enabled = UI_FRAME_TIMING or show
+
+  def measure_frame_phase(self, name: str, callback: Callable, *args, **kwargs):
+    enabled = self._frame_timing_enabled if self._collect_frame_timing is None else self._collect_frame_timing
+    if not enabled:
+      return callback(*args, **kwargs)
+    if name not in FRAME_PHASES:
+      raise ValueError(name)
+    wall_start, cpu_start = time.monotonic(), time.thread_time()
+    try:
+      return callback(*args, **kwargs)
+    finally:
+      wall_ms = (time.monotonic() - wall_start) * 1000
+      cpu_ms = (time.thread_time() - cpu_start) * 1000
+      previous_wall, previous_cpu = self._frame_phases.get(name, (0.0, 0.0))
+      self._frame_phases[name] = previous_wall + wall_ms, previous_cpu + cpu_ms
 
   @property
   def show_touches(self) -> bool:
@@ -280,6 +320,12 @@ class GuiApplication:
   @property
   def target_fps(self):
     return self._target_fps
+
+  def add_render_prepare(self, callback, cleanup):
+    self._render_prepare[callback] = cleanup
+
+  def remove_render_prepare(self, callback):
+    self._render_prepare.pop(callback, None)
 
   def request_close(self):
     self._window_close_requested = True
@@ -298,6 +344,8 @@ class GuiApplication:
       rl.set_config_flags(flags)
 
       rl.init_window(self._scaled_width, self._scaled_height, title)
+      if PC and not rl.is_window_ready():
+        raise RuntimeError("Desktop UI window could not open; check the active monitor/display session")
 
       needs_render_texture = self._scale != 1.0 or BURN_IN_MODE or RECORD
       if self._scale != 1.0:
@@ -566,6 +614,10 @@ class GuiApplication:
     if not rl.is_window_ready():
       return
 
+    for cleanup in tuple(self._render_prepare.values()):
+      cleanup()
+    self._render_prepare.clear()
+
     for texture in self._textures.values():
       rl.unload_texture(texture)
     self._textures = {}
@@ -600,7 +652,7 @@ class GuiApplication:
   def last_mouse_event(self) -> MouseEvent:
     return self._last_mouse_event
 
-  def render(self):
+  def render(self, before_frame: Callable[[], None] | None = None):
     try:
       if self._profile_render_frames > 0:
         import cProfile
@@ -610,6 +662,14 @@ class GuiApplication:
 
       while not (self._window_close_requested or rl.window_should_close()):
         frame_start = time.monotonic()
+        collect_timing = self._frame_timing_enabled or frame_start < self._auto_timing_end
+        self._collect_frame_timing = collect_timing
+        if not collect_timing:
+          self.frame_timing = None
+          self._frame_phases.clear()
+        if collect_timing:
+          self._frame_phases.clear()
+          cpu_start = time.thread_time()
 
         if PC:
           # Thread is not used on PC, need to manually add mouse events
@@ -620,13 +680,24 @@ class GuiApplication:
         if len(self._mouse_events) > 0:
           self._last_mouse_event = self._mouse_events[-1]
 
+        if before_frame is not None:
+          before_frame()
+
         # Skip rendering when screen is off
         if not self._should_render:
+          self.frame_timing = None
+          self._frame_phases.clear()
+          self._auto_timing_end = 0.0
+          self._auto_timing_samples.clear()
+          self._collect_frame_timing = None
           if PC:
             rl.poll_input_events()
           time.sleep(1 / self._target_fps)
           yield False, 0.0, 0.0
           continue
+
+        for prepare in tuple(self._render_prepare):
+          prepare()
 
         if self._render_texture:
           rl.begin_texture_mode(self._render_texture)
@@ -649,7 +720,14 @@ class GuiApplication:
 
         frame_time = rl.get_frame_time()
         cpu_time = time.monotonic() - frame_start
+        if collect_timing:
+          draw_end = time.monotonic()
+          draw_cpu_end = time.thread_time()
         yield True, frame_time, cpu_time
+        # Allow the caller to publish telemetry before presenting the frame.
+        if collect_timing:
+          update_end = time.monotonic()
+          update_cpu_end = time.thread_time()
 
         if self._scale != 1.0:
           rl.rl_pop_matrix()
@@ -679,6 +757,14 @@ class GuiApplication:
           self._draw_grid()
 
         rl.end_drawing()
+        if collect_timing:
+          present_end = time.monotonic()
+          present_cpu_end = time.thread_time()
+          self.frame_timing = FrameTiming(
+            (draw_end - frame_start) * 1000, (draw_cpu_end - cpu_start) * 1000,
+            (update_end - draw_end) * 1000, (update_cpu_end - draw_cpu_end) * 1000,
+            (present_end - update_end) * 1000, (present_cpu_end - update_cpu_end) * 1000,
+          )
 
         if RECORD:
           image = rl.load_image_from_texture(self._render_texture.texture)
@@ -688,12 +774,15 @@ class GuiApplication:
           rl.unload_image(image)
 
         self._monitor_fps()
+        self._collect_frame_timing = None
         self._frame += 1
 
         if self._profile_render_frames > 0 and self._frame >= self._profile_render_frames:
           self._output_render_profile()
     except KeyboardInterrupt:
       pass
+    finally:
+      self._collect_frame_timing = None
 
   def font(self, font_weight: FontWeight = FontWeight.NORMAL) -> rl.Font:
     return self._fonts[font_weight]
@@ -813,13 +902,52 @@ class GuiApplication:
 
   def _monitor_fps(self):
     fps = rl.get_fps()
+    current_time = time.monotonic()
+    slow = fps < self._target_fps * FPS_DROP_THRESHOLD
+    if self._auto_timing_end:
+      if slow and self.frame_timing is not None:
+        timing = self.frame_timing
+        sample = {
+          "draw": (timing.draw_wall_ms, timing.draw_cpu_ms),
+          "update": (timing.update_wall_ms, timing.update_cpu_ms),
+          "present": (timing.present_wall_ms, timing.present_cpu_ms),
+        }
+        sample.update({name: self._frame_phases[name] for name in FRAME_PHASES if name in self._frame_phases})
+        self._auto_timing_samples.append(sample)
+      if current_time >= self._auto_timing_end:
+        if self._auto_timing_samples:
+          import statistics
+          detail = []
+          for name in ("draw", "update", "present", *FRAME_PHASES):
+            values = [sample[name] for sample in self._auto_timing_samples if name in sample]
+            if values:
+              wall, cpu = zip(*values, strict=True)
+              detail.append(f"{name} wall/cpu median {statistics.median(wall):.1f}/{statistics.median(cpu):.1f}ms"
+                            + f" max {max(wall):.1f}/{max(cpu):.1f}ms")
+          cloudlog.warning(f"Slow UI frame diagnostic: {len(self._auto_timing_samples)} slow samples; "
+                           + "; ".join(detail) + "; nested phases are not additive")
+        self._auto_timing_end = 0.0
+        self._auto_timing_samples.clear()
 
     # Log FPS drop below threshold at regular intervals
     if fps < self._target_fps * FPS_DROP_THRESHOLD:
       current_time = time.monotonic()
       if current_time - self._last_fps_log_time >= FPS_LOG_INTERVAL:
-        cloudlog.warning(f"FPS dropped below {self._target_fps}: {fps}")
+        detail = ""
+        if self.frame_timing is not None:
+          timing = self.frame_timing
+          detail = (f"; draw wall/cpu {timing.draw_wall_ms:.1f}/{timing.draw_cpu_ms:.1f}ms"
+                    + f", update wall/cpu {timing.update_wall_ms:.1f}/{timing.update_cpu_ms:.1f}ms"
+                    + f", present wall/cpu {timing.present_wall_ms:.1f}/{timing.present_cpu_ms:.1f}ms")
+          for name in FRAME_PHASES:
+            if phase := self._frame_phases.get(name):
+              detail += f", {name} wall/cpu {phase[0]:.1f}/{phase[1]:.1f}ms"
+        cloudlog.warning(f"FPS dropped below {self._target_fps}: {fps}{detail}")
         self._last_fps_log_time = current_time
+        if not self._auto_timing_end and current_time >= self._auto_timing_next:
+          self._auto_timing_end = current_time + AUTO_TIMING_DURATION
+          self._auto_timing_next = self._auto_timing_end + AUTO_TIMING_COOLDOWN
+          self._auto_timing_samples.clear()
 
     # Strict mode: terminate UI if FPS drops too much
     if STRICT_MODE and fps < self._target_fps * FPS_CRITICAL_THRESHOLD:
@@ -883,6 +1011,8 @@ class GuiApplication:
   def _calculate_auto_scale(self) -> float:
      # Create temporary window to query monitor info
     rl.init_window(1, 1, "")
+    if not rl.is_window_ready():
+      raise RuntimeError("Desktop UI window could not open; check the active monitor/display session")
     w, h = rl.get_monitor_width(0), rl.get_monitor_height(0)
     rl.close_window()
 

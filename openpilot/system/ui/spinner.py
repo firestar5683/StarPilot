@@ -1,5 +1,7 @@
 #!/usr/bin/env python3
 import pyray as rl
+import hashlib
+from importlib.resources import as_file, files
 import select
 import sys
 
@@ -35,6 +37,14 @@ def clamp(value, min_value, max_value):
 class Spinner(Widget):
   def __init__(self):
     super().__init__()
+    self._hero_texture = None
+    try:
+      with as_file(files("openpilot.selfdrive").joinpath("assets/images/starpilot_boot.png")) as hero:
+        expected = "f7da71fa91c961e8118d54756dae0324ecf74488cdd83d001b2c49a625f6a9de"
+        if hero.stat().st_size == 493583 and hashlib.sha256(hero.read_bytes()).hexdigest() == expected:
+          self._hero_texture = gui_app.texture("images/starpilot_boot.png", gui_app.width, gui_app.height)
+    except (OSError, RuntimeError):
+      pass
     self._comma_texture = gui_app.texture("images/spinner_comma.png", TEXTURE_SIZE, TEXTURE_SIZE)
     self._spinner_texture = gui_app.texture("images/spinner_track.png", TEXTURE_SIZE, TEXTURE_SIZE, alpha_premultiply=True)
     self._rotation = 0.0
@@ -47,9 +57,34 @@ class Spinner(Widget):
       self._wrapped_lines = []
     else:
       self._progress = None
-      self._wrapped_lines = wrap_text(text, FONT_SIZE, gui_app.width - MARGIN_H)
+      font_size = (50 if gui_app.big_ui() else 22) if self._hero_texture is not None else FONT_SIZE
+      self._wrapped_lines = wrap_text(text, font_size, gui_app.width - MARGIN_H)
 
   def _render(self, rect: rl.Rectangle):
+    if self._hero_texture is not None:
+      hero = self._hero_texture
+      hero_region_height = rect.height * (0.72 if gui_app.big_ui() else 0.67)
+      scale = min(rect.width / hero.width, hero_region_height / hero.height)
+      width, height = hero.width * scale, hero.height * scale
+      rl.draw_texture_pro(hero, rl.Rectangle(0, 0, hero.width, hero.height),
+                          rl.Rectangle((rect.width - width) / 2, (hero_region_height - height) / 2, width, height),
+                          rl.Vector2(0, 0), 0, rl.WHITE)
+      if self._progress is not None:
+        bar = rl.Rectangle(rect.width * 0.2, rect.height - (50 if gui_app.big_ui() else 18), rect.width * 0.6,
+                           PROGRESS_BAR_HEIGHT)
+        rl.draw_rectangle_rounded(bar, 1, 10, DARKGRAY)
+        bar.width *= self._progress / 100.0
+        rl.draw_rectangle_rounded(bar, 1, 10, rl.WHITE)
+      elif self._wrapped_lines:
+        font_size = 50 if gui_app.big_ui() else 22
+        line_height = font_size * 1.1
+        start_y = hero_region_height + (rect.height - hero_region_height - len(self._wrapped_lines) * line_height) / 2
+        for i, line in enumerate(self._wrapped_lines):
+          text_size = measure_text_cached(gui_app.font(), line, font_size)
+          rl.draw_text_ex(gui_app.font(), line,
+                          rl.Vector2((rect.width - text_size.x) / 2, start_y + i * line_height),
+                          font_size, 0.0, rl.WHITE)
+      return
     if self._wrapped_lines:
       # Calculate total height required for spinner and text
       spacing = WRAPPED_SPACING

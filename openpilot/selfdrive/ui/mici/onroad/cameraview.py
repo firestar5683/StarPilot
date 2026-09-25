@@ -151,12 +151,18 @@ class CameraView(Widget):
     ui_state.add_offroad_transition_callback(self._offroad_transition)
 
   def _offroad_transition(self):
-    # Drain queued SubSocket messages to prevent old frames from showing when going
-    # onroad. Qt had a separate thread which drains the VisionIpcClient SubSocket for us.
-    if self.client and self.client.is_connected():
-      while self.client.recv(timeout_ms=0) is not None:
-        pass
+    if self.client is None:
+      return
+    # Retire the old buffer generation instead of draining it on the UI thread.
+    self._clear_textures()
     self.frame = None
+    self.available_streams.clear()
+    self._target_client = None
+    self._target_stream_type = None
+    self._switching = False
+    self.client = VisionIpcClient(self._name, self._stream_type, conflate=True)
+    self._texture_needs_update = True
+    self.last_connection_attempt = 0.0
 
   def _set_placeholder_color(self, color: rl.Color):
     """Set a placeholder color to be drawn when no frame is available."""
@@ -220,12 +226,13 @@ class CameraView(Widget):
       [0.0, 0.0, 1.0]
     ])
 
-  def _render(self, rect: rl.Rectangle, /):
+  def _render(self, rect: rl.Rectangle, /, *, paint: bool = True):
     if self._switching:
       self._handle_switch()
 
     if not self._ensure_connection():
-      self._draw_placeholder(rect)
+      if paint:
+        self._draw_placeholder(rect)
       return
 
     # Try to get a new buffer without blocking
@@ -238,7 +245,11 @@ class CameraView(Widget):
       self.frame = None
 
     if not self.frame:
-      self._draw_placeholder(rect)
+      if paint:
+        self._draw_placeholder(rect)
+      return
+
+    if not paint:
       return
 
     transform = self._calc_frame_matrix(rect)
@@ -322,6 +333,7 @@ class CameraView(Widget):
 
   def _update_texture_color_filtering(self):
     self._engaged_val[0] = 1 if ui_state.status != UIStatus.DISENGAGED else 0
+    self._enhance_driver_val[0] = int(self._stream_type == VisionStreamType.VISION_STREAM_CABIN)
     rl.set_shader_value(self.shader, self._engaged_loc, self._engaged_val, rl.ShaderUniformDataType.SHADER_UNIFORM_INT)
     rl.set_shader_value(self.shader, self._enhance_driver_loc, self._enhance_driver_val, rl.ShaderUniformDataType.SHADER_UNIFORM_INT)
 

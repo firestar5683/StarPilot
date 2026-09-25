@@ -186,21 +186,18 @@ def _configure_shader_color(state: ShaderState, color: Optional[rl.Color],  # no
     rl.set_shader_value(state.shader, state.locations['fillColor'], state.fill_color_ptr, UNIFORM_VEC4)
 
 
-def triangulate(pts: np.ndarray) -> list[tuple[float, float]]:
+def triangulate(pts: np.ndarray) -> np.ndarray:
   """Only supports simple polygons with two chains (ribbon)."""
 
-  # TODO: consider deduping close screenspace points
   # interleave points to produce a triangle strip
-  # assert len(pts) % 2 == 0, "Interleaving expects even number of points"
   if len(pts) % 2 != 0:
     pts = pts[:-1]
 
-  tri_strip = []
-  for i in range(len(pts) // 2):
-    tri_strip.append(pts[i])
-    tri_strip.append(pts[-i - 1])
-
-  return cast(list, np.array(tri_strip).tolist())
+  half = len(pts) // 2
+  tri_strip = np.empty(pts.shape, dtype=np.float32)
+  tri_strip[0::2] = pts[:half]
+  tri_strip[1::2] = pts[half:][::-1]
+  return tri_strip
 
 
 def draw_polygon(origin_rect: rl.Rectangle, points: np.ndarray,
@@ -213,23 +210,25 @@ def draw_polygon(origin_rect: rl.Rectangle, points: np.ndarray,
   if len(points) < 3:
     return
 
-  # Initialize shader on-demand
-  state = ShaderState.get_instance()
-  state.initialize()
-
-  # Ensure (N,2) float32 contiguous array
-  pts = np.ascontiguousarray(points, dtype=np.float32)
+  assert (color is not None) != (gradient is not None), "Either color or gradient must be provided"
+  pts = np.asarray(points)
   assert pts.ndim == 2 and pts.shape[1] == 2, "points must be (N,2)"
-
-  # Configure gradient shader
-  _configure_shader_color(state, color, gradient, origin_rect)
 
   # Triangulate via interleaving
   tri_strip = triangulate(pts)
+  vertices = rl.ffi.from_buffer("Vector2 *", tri_strip)
+
+  if gradient is None:
+    rl.draw_triangle_strip(vertices, len(tri_strip), color)
+    return
+
+  state = ShaderState.get_instance()
+  state.initialize()
+  _configure_shader_color(state, color, gradient, origin_rect)
 
   # Draw strip, color here doesn't matter
   rl.begin_shader_mode(state.shader)
-  rl.draw_triangle_strip(tri_strip, len(tri_strip), rl.WHITE)
+  rl.draw_triangle_strip(vertices, len(tri_strip), rl.WHITE)
   rl.end_shader_mode()
 
 

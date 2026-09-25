@@ -1,11 +1,10 @@
 import math
 import numpy as np
 import time
-import wave
+from pathlib import Path
 
 
 from openpilot.cereal import log, messaging
-from openpilot.common.basedir import BASEDIR
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.realtime import Ratekeeper
 from openpilot.common.utils import retry
@@ -13,11 +12,17 @@ from openpilot.common.swaglog import cloudlog
 
 from openpilot.system import micd
 from openpilot.common.hardware import HARDWARE
+from openpilot.common.params import Params
+from openpilot.starpilot.aol.wire import INTENT_SERVICE
+from openpilot.starpilot.audio.alert_volume import AUTO, VOLUMES, effective_volume, read_volume
+from openpilot.starpilot.audio.axis_alerts import AxisAlerts
+from openpilot.starpilot.audio.sound_pack import PACK_ROOT, SoundPackLoader, migrate_removed_selection
 
 SAMPLE_RATE = 48000
 SAMPLE_BUFFER = 4096 # (approx 100ms)
 MAX_VOLUME = 1.0
 MIN_VOLUME = 0.1
+STARPILOT_AUTO_MIN = 0.50
 ALERT_RAMP_TIME = 4 # seconds to ramp critical alerts to max volume
 ALERT_MAX_TIME = 8 # seconds before critical alerts switch to the max sound
 SELFDRIVE_STATE_TIMEOUT = 5 # 5 seconds
@@ -52,6 +57,18 @@ sound_list: dict[int, tuple[str, int | None, float]] = {
   CRITICAL_MAX: ("dm_critical_max.wav", None, MAX_VOLUME),
 }
 
+ALERT_VOLUME_KEYS = {
+  AudibleAlert.engage: "EngageVolume",
+  AudibleAlert.disengage: "DisengageVolume",
+  AudibleAlert.refuse: "RefuseVolume",
+  AudibleAlert.prompt: "PromptVolume",
+  AudibleAlert.promptRepeat: "PromptVolume",
+  AudibleAlert.preAlert: "PromptDistractedVolume",
+  AudibleAlert.promptDistracted: "PromptDistractedVolume",
+  AudibleAlert.warningSoft: "WarningSoftVolume",
+  AudibleAlert.warningImmediate: "WarningImmediateVolume",
+}
+
 def check_selfdrive_timeout_alert(sm):
   ss_missing = time.monotonic() - sm.recv_time['selfdriveState']
 
@@ -63,8 +80,13 @@ def check_selfdrive_timeout_alert(sm):
 
 
 class Soundd:
-  def __init__(self):
+  def __init__(self, params=None, pack_root=PACK_ROOT):
+    self.volume_params = params if params is not None else Params()
+    migrate_removed_selection(self.volume_params, pack_root)
+    self.pack_loader = SoundPackLoader(self.volume_params, Path(__file__).resolve().parents[1] / "assets/sounds", pack_root)
     self.load_sounds()
+    self.saved_volumes = {key: AUTO for key, _, _ in VOLUMES}
+    self.volume_read_at = 0.0
 
     self.current_alert = AudibleAlert.none
     self.current_sound = AudibleAlert.none
@@ -76,31 +98,28 @@ class Soundd:
 
     self.selfdrive_timeout_alert = False
     self.pending_stop = False
+    self.pending_stream_status = None
+    self.stream_status_count = 0
+    self.output_underflow_count = 0
+    self.axis_alerts = AxisAlerts()
 
     self.spl_filter_weighted = FirstOrderFilter(0, 2.5, FILTER_DT, initialized=False)
 
   def load_sounds(self):
-    self.loaded_sounds: dict[int, np.ndarray] = {}
-
-    # Load all sounds
-    for sound in sound_list:
-      filename, play_count, volume = sound_list[sound]
-
-      with wave.open(BASEDIR + "/openpilot/selfdrive/assets/sounds/" + filename, 'r') as wavefile:
-        assert wavefile.getnchannels() == 1
-        assert wavefile.getsampwidth() == 2
-        assert wavefile.getframerate() == SAMPLE_RATE
-
-        length = wavefile.getnframes()
-        self.loaded_sounds[sound] = np.frombuffer(wavefile.readframes(length), dtype=np.int16).astype(np.float32) / (2**16/2)
+    loaded = self.pack_loader.refresh(tuple(dict.fromkeys(spec[0] for spec in sound_list.values())), time.monotonic())
+    if loaded is not None:
+      self.loaded_sounds = {sound: loaded[spec[0]] for sound, spec in sound_list.items()}
 
   def get_sound_data(self, frames): # get "frames" worth of data from the current alert sound, looping when required
 
     ret = np.zeros(frames, dtype=np.float32)
+    producing_alert = self.current_alert
+    loaded_sounds = self.loaded_sounds
+    sound_data = None
 
     if self.current_alert != AudibleAlert.none:
       num_loops = sound_list[self.current_alert][1]
-      sound_data = self.loaded_sounds[self.current_sound]
+      sound_data = loaded_sounds[self.current_sound]
       written_frames = 0
 
       current_sound_frame = self.current_sound_frame % len(sound_data)
@@ -119,22 +138,53 @@ class Soundd:
           self.pending_stop = False
           break
 
-    return ret * self.current_volume
+    key = ALERT_VOLUME_KEYS.get(producing_alert)
+    ambient = self.current_volume
+    if sound_data is not None and self.pack_loader.is_builtin(sound_data):
+      ambient = max(ambient, STARPILOT_AUTO_MIN)
+    gain = ambient if key is None else effective_volume(
+      key, self.saved_volumes.get(key), ambient,
+      immediate_ramp=self.current_volume if producing_alert in (AudibleAlert.warningSoft, AudibleAlert.warningImmediate) else None)
+    return ret * gain
+
+  def refresh_saved_volumes(self, now: float) -> None:
+    """Read slow Params state from the service loop, never the audio callback."""
+    if now - self.volume_read_at < 0.25:
+      return
+    self.volume_read_at = now
+    self.saved_volumes = {key: read_volume(self.volume_params, key).value for key, _, _ in VOLUMES}
 
   def callback(self, data_out: np.ndarray, frames: int, time, status) -> None:
     if status:
-      cloudlog.warning(f"soundd stream over/underflow: {status}")
+      self.pending_stream_status = status
+      self.stream_status_count += 1
+      self.output_underflow_count += int(bool(getattr(status, "output_underflow", False)))
     data_out[:frames, 0] = self.get_sound_data(frames)
+
+  def log_pending_stream_status(self, stream=None) -> None:
+    status = self.pending_stream_status
+    if status is not None:
+      self.pending_stream_status = None
+      cloudlog.warning(f"soundd stream over/underflow: {status}")
+      if stream is not None:
+        cloudlog.info(f"soundd stream diagnostics: status_callbacks={self.stream_status_count} "
+                      f"output_underflows={self.output_underflow_count} "
+                      f"latency={stream.latency} cpu_load={stream.cpu_load}")
 
   def update_alert(self, new_alert):
     current_alert_played_once = self.current_alert == AudibleAlert.none or self.current_sound_frame >= len(self.loaded_sounds[self.current_sound])
     # let looping sounds finish the current loop instead of cutting off mid tone
     if new_alert == AudibleAlert.none and self.current_alert != AudibleAlert.none and sound_list[self.current_alert][1] is None:
-      if current_alert_played_once:
-        self.pending_stop = True
-      else:
+      # Complete the current loop even when dismissal arrives during the first
+      # pass. Cutting that pass early creates a step from its current sample to
+      # silence. get_sound_data stops at the next loop endpoint; repeated None
+      # updates leave that endpoint pending rather than restarting playback.
+      completed_boundary = self.current_sound_frame % len(self.loaded_sounds[self.current_sound]) == 0
+      if completed_boundary:
         self.current_alert = AudibleAlert.none
-        self.current_sound_frame = 0
+        self.pending_stop = False
+      else:
+        self.pending_stop = True
       return
     self.pending_stop = False
     if self.current_alert != new_alert and (new_alert != AudibleAlert.none or current_alert_played_once):
@@ -148,6 +198,8 @@ class Soundd:
   def get_audible_alert(self, sm):
     if sm.updated['selfdriveState']:
       new_alert = sm['selfdriveState'].alertSound.raw
+      now_ns = time.monotonic_ns()
+      new_alert = self.axis_alerts.update(sm, new_alert, now_ns)
       self.update_alert(new_alert)
     elif check_selfdrive_timeout_alert(sm):
       self.update_alert(AudibleAlert.warningImmediate)
@@ -155,6 +207,17 @@ class Soundd:
     elif self.selfdrive_timeout_alert:
       self.update_alert(AudibleAlert.none)
       self.selfdrive_timeout_alert = False
+
+  def update_critical_sound(self, now: float) -> None:
+    if self.current_alert in (AudibleAlert.warningSoft, AudibleAlert.warningImmediate):
+      elapsed = now - self.ramp_start_time
+      ramp_vol = float(np.interp(elapsed, [0, ALERT_RAMP_TIME], [self.ramp_start_volume, MAX_VOLUME]))
+      self.current_volume = max(self.current_volume, ramp_vol)
+      # Dismissal owns the current waveform's remaining tail. Escalating here
+      # would reset its cursor and start an additional critical-max loop.
+      if elapsed >= ALERT_MAX_TIME and self.current_sound != CRITICAL_MAX and not self.pending_stop:
+        self.current_sound = CRITICAL_MAX
+        self.current_sound_frame = 0
 
   def calculate_volume(self, weighted_db):
     volume = ((weighted_db - AMBIENT_DB) / DB_SCALE) * (MAX_VOLUME - MIN_VOLUME) + MIN_VOLUME
@@ -172,14 +235,17 @@ class Soundd:
     import sounddevice as sd
     micd.patch_sounddevice(sd)
 
-    sm = messaging.SubMaster(['selfdriveState', 'soundPressure'])
+    sm = messaging.SubMaster(['selfdriveState', 'soundPressure', 'aolAxisState', INTENT_SERVICE])
 
     with self.get_stream(sd) as stream:
       rk = Ratekeeper(20)
 
-      cloudlog.info(f"soundd stream started: {stream.samplerate=} {stream.channels=} {stream.dtype=} {stream.device=}, {stream.blocksize=}")
+      cloudlog.info(f"soundd stream started: {stream.samplerate=} {stream.channels=} {stream.dtype=} {stream.device=}, {stream.blocksize=}, {stream.latency=}")
       while True:
         sm.update(0)
+        self.log_pending_stream_status(stream)
+        self.refresh_saved_volumes(time.monotonic())
+        self.load_sounds()
 
         # freeze volume during alerts to avoid mic feedback increasing volume
         if sm.updated['soundPressure']:
@@ -189,13 +255,7 @@ class Soundd:
 
         self.get_audible_alert(sm)
 
-        if self.current_alert in (AudibleAlert.warningSoft, AudibleAlert.warningImmediate):
-          elapsed = time.monotonic() - self.ramp_start_time
-          ramp_vol = float(np.interp(elapsed, [0, ALERT_RAMP_TIME], [self.ramp_start_volume, MAX_VOLUME]))
-          self.current_volume = max(self.current_volume, ramp_vol)
-          if elapsed >= ALERT_MAX_TIME and self.current_sound != CRITICAL_MAX:
-            self.current_sound = CRITICAL_MAX
-            self.current_sound_frame = 0
+        self.update_critical_sound(time.monotonic())
 
         rk.keep_time()
 

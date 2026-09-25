@@ -1,4 +1,5 @@
 import numpy as np
+import os
 import time
 import threading
 from collections.abc import Callable
@@ -7,6 +8,8 @@ from openpilot.cereal import messaging, log
 from opendbc.car.structs import car
 from openpilot.common.filter_simple import FirstOrderFilter
 from openpilot.common.params import Params
+from openpilot.starpilot.schema_cache import get_cache, prewarm_cache_contracts
+from openpilot.starpilot.ui.display_preferences import AUTO, DisplayPreferences, read_preferences
 from openpilot.common.realtime import drop_realtime
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.lib.prime_state import PrimeState
@@ -34,6 +37,44 @@ class ChestnutState(Enum):
   FAILED = "failed"
 
 
+class ProjectionParams:
+  """Only the read interface needed by the projection display."""
+
+  def __init__(self, source: Params):
+    self._source = source
+
+  def get(self, *args, **kwargs):
+    return self._source.get(*args, **kwargs)
+
+  def get_bool(self, *args, **kwargs):
+    return self._source.get_bool(*args, **kwargs)
+
+  def get_int(self, *args, **kwargs):
+    return self._source.get_int(*args, **kwargs)
+
+  def get_float(self, *args, **kwargs):
+    return self._source.get_float(*args, **kwargs)
+
+  def get_param_path(self, *args, **kwargs):
+    return self._source.get_param_path(*args, **kwargs)
+
+
+class ProjectionPrimeState:
+  """Saved pairing label only; projection never starts the API or alert owner."""
+
+  def __init__(self, params: ProjectionParams):
+    self.params = params
+
+  def is_paired(self) -> bool:
+    try:
+      return int(self.params.get("PrimeType") or -1) >= 0
+    except (TypeError, ValueError):
+      return False
+
+  def start(self) -> None:
+    pass
+
+
 class UIState:
   _instance: 'UIState | None' = None
 
@@ -44,7 +85,10 @@ class UIState:
     return cls._instance
 
   def _initialize(self):
-    self.params = Params()
+    prewarm_cache_contracts()
+    self.projection_read_only = os.environ.get("STARPILOT_PROJECTION_READ_ONLY") == "1"
+    params = Params()
+    self.params = ProjectionParams(params) if self.projection_read_only else params
     self.sm = messaging.SubMaster(
       [
         "modelV2",
@@ -62,17 +106,23 @@ class UIState:
         "wideRoadCameraState",
         "managerState",
         "selfdriveState",
+        "starpilotSelfdriveState",
+        "starpilotLateralState",
+        "starpilotNavigation",
         "longitudinalPlan",
         "gpsLocationExternal",
         "carOutput",
         "carControl",
+        "slcState",
         "vehicleParameters",
         "testJoystick",
         "rawAudioData",
-      ]
+      ],
+      ignore_alive=["starpilotSelfdriveState", "starpilotLateralState"], ignore_valid=["starpilotSelfdriveState", "starpilotLateralState"],
+      ignore_avg_freq=["starpilotSelfdriveState", "starpilotLateralState"],
     )
 
-    self.prime_state = PrimeState()
+    self.prime_state = ProjectionPrimeState(self.params) if self.projection_read_only else PrimeState()
 
     # UI Status tracking
     self.status: UIStatus = UIStatus.DISENGAGED
@@ -107,6 +157,7 @@ class UIState:
     self.light_sensor: float = -1.0
 
     self._params_thread: threading.Thread | None = None
+    self._projection_params_at: float | None = None
 
     # Callbacks
     self._offroad_transition_callbacks: list[Callable[[], None]] = []
@@ -133,6 +184,15 @@ class UIState:
     return not self.started
 
   def update(self) -> None:
+    if self.projection_read_only:
+      self.sm.update(0)
+      self._update_state()
+      self._update_status()
+      now = time.monotonic()
+      if self._projection_params_at is None or now < self._projection_params_at or now - self._projection_params_at >= 1.0:
+        self.update_params()
+        self._projection_params_at = now
+      return
     self.prime_state.start()  # start thread after manager forks ui
     if self._params_thread is None:
       self._params_thread = threading.Thread(target=self._params_refresh_worker, daemon=True)
@@ -171,8 +231,8 @@ class UIState:
     elif not self.sm.alive["wideRoadCameraState"] or not self.sm.valid["wideRoadCameraState"]:
       self.light_sensor = -1
 
-    # Update started state
-    self.started = self.sm["deviceState"].started and self.ignition
+    # hardwared owns the pipeline transition; raw ignition can arrive separately.
+    self.started = self.sm["deviceState"].started
 
     # Update body state
     if self.CP is not None and self.is_body != self.CP.notCar:
@@ -193,7 +253,7 @@ class UIState:
     # Check for engagement state changes
     if self.engaged != self._engaged_prev:
       for callback in self._engaged_transition_callbacks:
-        callback()
+        gui_app.measure_frame_phase("transition", callback)
       self._engaged_prev = self.engaged
 
     # Handle onroad/offroad transition
@@ -205,7 +265,7 @@ class UIState:
         self.chestnut_present = self.sm["deviceState"].chestnutPresent or (self.chestnut_compiled and self.usb_connected)
 
       for callback in self._offroad_transition_callbacks:
-        callback()
+        gui_app.measure_frame_phase("transition", callback)
 
       self._started_prev = self.started
 
@@ -234,20 +294,23 @@ class UIState:
   def update_params(self) -> None:
     # For slower operations
     # Update longitudinal control state
-    CP_bytes = self.params.get("CarParamsPersistent")
+    CP_bytes = get_cache(self.params, "CarParamsPersistent")
     if CP_bytes is not None:
       self.CP = messaging.log_from_bytes(CP_bytes, car.CarParams)
-      if self.CP.alphaLongitudinalAvailable:
-        self.has_longitudinal_control = self.params.get_bool("AlphaLongitudinalEnabled")
-      else:
-        self.has_longitudinal_control = self.CP.openpilotLongitudinalControl
+      # The saved Alpha Long choice can survive an unavailable configuration.
+      self.has_longitudinal_control = self.CP.openpilotLongitudinalControl
+    else:
+      self.CP = None
+      self.has_longitudinal_control = False
 
     self.recording_audio = self.params.get_bool("RecordAudio") and self.started
     self.is_metric = self.params.get_bool("IsMetric")
     self.always_on_dm = self.params.get_bool("AlwaysOnDM")
     self.experimental_mode = self.params.get_bool("ExperimentalMode")
     self.experimental_mode_confirmed = self.params.get_bool("ExperimentalModeConfirmed")
-    self.chestnut_active = self.params.get("ChestnutActive")
+    raw_chestnut = self.params.get("ChestnutActive")
+    self.chestnut_active = raw_chestnut if type(raw_chestnut) is bool else (
+      True if raw_chestnut in (b"1", "1") else False if raw_chestnut in (b"0", "0") else None)
     self.chestnut_loading = self.params.get_bool("ChestnutLoading")
     now = time.monotonic()
     if cable_connected():
@@ -283,10 +346,37 @@ class Device:
     self._brightness_thread: threading.Thread | None = None
     self._brightness_event = threading.Event()
     self._brightness_target: int = 0
+    self._display_preferences = DisplayPreferences(driving_timeout=10 if gui_app.big_ui() else 5)
+    self._display_refresh_time: float | None = None
+    self._display_started = False
+    self._screen_off = False
+    self._screen_off_started = False
+
+  def invalidate_display_preferences(self) -> None:
+    self._display_refresh_time = None
+
+  def _refresh_display_preferences(self) -> None:
+    now = time.monotonic()
+    if self._display_refresh_time is not None and 0 <= now - self._display_refresh_time < 1.0:
+      return
+    previous = self._display_preferences
+    self._display_preferences = read_preferences(ui_state.params, large=gui_app.big_ui())
+    self._display_refresh_time = now
+    if previous != self._display_preferences and self._interaction_time > 0:
+      self._reset_interactive_timeout()
 
   @property
   def awake(self) -> bool:
     return self._awake
+
+  def toggle_screen_off(self) -> bool:
+    if ui_state.projection_read_only or not ui_state.started:
+      return False
+    self._screen_off = not self._screen_off
+    self._screen_off_started = ui_state.started
+    self._reset_interactive_timeout()
+    self._set_awake(not self._screen_off)
+    return True
 
   def set_override_interactive_timeout(self, timeout: int | None) -> None:
     # Override the interactive timeout duration temporarily
@@ -298,6 +388,9 @@ class Device:
     if self._override_interactive_timeout is not None:
       return self._override_interactive_timeout
 
+    if self._display_preferences.enabled:
+      return self._display_preferences.driving_timeout if ui_state.ignition else self._display_preferences.parked_timeout
+
     ignition_timeout = 10 if gui_app.big_ui() else 5
     return ignition_timeout if ui_state.ignition else 30
 
@@ -308,7 +401,17 @@ class Device:
     self._interactive_timeout_callbacks.append(callback)
 
   def update(self):
+    if ui_state.projection_read_only:
+      return
     self._start_brightness_thread()  # start thread after manager forks ui
+    started_changed = self._display_started != bool(ui_state.started)
+    if started_changed:
+      self.invalidate_display_preferences()
+    self._refresh_display_preferences()
+
+    if self._display_preferences.enabled and started_changed:
+      self._reset_interactive_timeout()
+    self._display_started = bool(ui_state.started)
 
     # do initial reset
     if self._interaction_time <= 0:
@@ -348,6 +451,11 @@ class Device:
 
       clipped_brightness = float(np.interp(clipped_brightness, [0, 1], [30, 100]))
 
+    if self._display_preferences.enabled:
+      saved = (self._display_preferences.driving_brightness if ui_state.started else
+               self._display_preferences.parked_brightness)
+      if saved != AUTO:
+        clipped_brightness = saved
     brightness = round(self._brightness_filter.update(clipped_brightness))
     if not self._awake:
       brightness = 0
@@ -360,18 +468,26 @@ class Device:
   def _update_wakefulness(self):
     # Handle interactive timeout
     ignition_just_turned_off = not ui_state.ignition and self._ignition
+    ignition_changed = self._ignition != ui_state.ignition
     self._ignition = ui_state.ignition
 
-    if ignition_just_turned_off or any(ev.left_down for ev in gui_app.mouse_events):
+    if (ignition_just_turned_off or (self._display_preferences.enabled and ignition_changed) or
+        any(ev.left_down for ev in gui_app.mouse_events)):
       self._reset_interactive_timeout()
 
+    road_changed = ui_state.started != self._screen_off_started
+    self._screen_off_started = ui_state.started
+    critical = (ui_state.sm.valid.get('selfdriveState', False) and ui_state.sm.alive.get('selfdriveState', False) and
+                ui_state.sm['selfdriveState'].alertStatus == log.SelfdriveState.AlertStatus.critical)
+    if not ui_state.started or road_changed or any(ev.left_down for ev in gui_app.mouse_events) or critical:
+      self._screen_off = False
     interaction_timeout = time.monotonic() > self._interaction_time
     if interaction_timeout and not self._prev_timed_out:
       for callback in self._interactive_timeout_callbacks:
         callback()
     self._prev_timed_out = interaction_timeout
 
-    self._set_awake(ui_state.ignition or not interaction_timeout or PC)
+    self._set_awake(not self._screen_off and (ui_state.ignition or not interaction_timeout or PC))
 
   def _set_awake(self, on: bool):
     if on != self._awake:

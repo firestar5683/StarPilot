@@ -1,4 +1,5 @@
 from openpilot.common.params import Params
+from openpilot.starpilot.car.hyundai.aol import ioniq6_settings_capable
 from openpilot.selfdrive.ui.widgets.ssh_key import ssh_key_item
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.widgets import Widget
@@ -22,7 +23,8 @@ DESCRIPTIONS = {
   'alpha_longitudinal': tr_noop(
     "<b>WARNING: openpilot longitudinal control is in alpha for this car and may disable Automatic Emergency Braking (AEB).</b><br><br>" +
     "On this car, openpilot defaults to the car's built-in ACC instead of openpilot's longitudinal control. " +
-    "Enable this to switch to openpilot longitudinal control. Enabling Experimental mode is recommended when enabling openpilot longitudinal control alpha. " +
+    "This saves a request for openpilot longitudinal control; an exact vehicle check and verified takeover are required at startup. " +
+    "Enabling Experimental mode is recommended when enabling openpilot longitudinal control alpha. " +
     "Changing this setting will restart openpilot if the car is powered on."
   ),
 }
@@ -79,7 +81,7 @@ class DeveloperLayout(Widget):
       description=lambda: tr(DESCRIPTIONS["alpha_longitudinal"]),
       initial_state=self._params.get_bool("AlphaLongitudinalEnabled"),
       callback=self._on_alpha_long_enabled,
-      enabled=lambda: not ui_state.engaged,
+      enabled=lambda: ui_state.is_offroad(),
     )
 
     self._ui_debug_toggle = toggle_item(
@@ -122,10 +124,9 @@ class DeveloperLayout(Widget):
 
     # CP gating
     if ui_state.CP is not None:
-      alpha_avail = ui_state.CP.alphaLongitudinalAvailable
+      alpha_avail = ui_state.CP.alphaLongitudinalAvailable or ioniq6_settings_capable(ui_state.CP)
       if not alpha_avail or self._is_release:
         self._alpha_long_toggle.set_visible(False)
-        self._params.remove("AlphaLongitudinalEnabled")
       else:
         self._alpha_long_toggle.set_visible(True)
 
@@ -187,6 +188,10 @@ class DeveloperLayout(Widget):
     if state:
       def confirm_callback(result: DialogResult):
         if result == DialogResult.CONFIRM:
+          if (not ui_state.is_offroad() or ui_state.CP is None or
+              not (ui_state.CP.alphaLongitudinalAvailable or ioniq6_settings_capable(ui_state.CP))):
+            self._alpha_long_toggle.action_item.set_state(False)
+            return
           self._params.put_bool("AlphaLongitudinalEnabled", True, block=True)
           self._params.put_bool("OnroadCycleRequested", True, block=True)
           self._update_toggles()
@@ -201,6 +206,9 @@ class DeveloperLayout(Widget):
       gui_app.push_widget(dlg)
 
     else:
+      if not ui_state.is_offroad():
+        self._alpha_long_toggle.action_item.set_state(True)
+        return
       self._params.put_bool("AlphaLongitudinalEnabled", False, block=True)
       self._params.put_bool("OnroadCycleRequested", True, block=True)
       self._update_toggles()

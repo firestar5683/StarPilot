@@ -1,0 +1,21 @@
+{
+  "format": 1,
+  "purpose": "Reviewed native onroad image input before decoding",
+  "files": [
+    {
+      "file": "icons/chffr_wheel.png",
+      "bytes": 16884,
+      "sha256": "ed3225588c896efa7105778a5652962b18b2bc2d18e839b38a1753456671860d"
+    },
+    {
+      "file": "icons_mici/wheel.png",
+      "bytes": 2720,
+      "sha256": "8cf9c6361ed82551eb99e028e0a75ff56b72ca856ccf7c9a76afe6745434980a"
+    },
+    {
+      "file": "icons_mici/onroad/onroad_fade.png",
+      "bytes": 38317,
+      "sha256": "2aa6d04ba038f15a92868de6e6c7b04f624b4fe89d03bc3e9c4cd44cb729b24e"
+    }
+  ]
+}

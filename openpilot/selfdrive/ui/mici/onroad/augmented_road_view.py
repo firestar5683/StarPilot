@@ -11,6 +11,7 @@ from openpilot.selfdrive.ui.mici.onroad.hud_renderer import HudRenderer
 from openpilot.selfdrive.ui.mici.onroad.model_renderer import ModelRenderer
 from openpilot.selfdrive.ui.mici.onroad.confidence_ball import ConfidenceBall
 from openpilot.selfdrive.ui.mici.onroad.cameraview import CameraView
+from openpilot.system.ui.widgets.label import gui_label
 from openpilot.system.ui.lib.application import FontWeight, gui_app, MousePos, MouseEvent, TextAlignment, TextAlignmentVertical
 from openpilot.system.ui.widgets.label import UnifiedLabel
 from openpilot.system.ui.widgets import Widget
@@ -23,6 +24,8 @@ OpState = log.SelfdriveState.OpenpilotState
 CALIBRATED = log.ExtrinsicsCalibration.Status.calibrated
 NARROW_ROAD_CAM = VisionStreamType.VISION_STREAM_NARROW_ROAD
 WIDE_CAM = VisionStreamType.VISION_STREAM_WIDE_ROAD
+DRIVER_CAM = VisionStreamType.VISION_STREAM_CABIN
+CAMERA_VIEW_AUTO, CAMERA_VIEW_DRIVER, CAMERA_VIEW_STANDARD, CAMERA_VIEW_WIDE, CAMERA_VIEW_NONE = range(5)
 DEFAULT_DEVICE_CAMERA = DEVICE_CAMERAS["tici", "ar0231"]
 
 
@@ -52,6 +55,9 @@ class BookmarkIcon(Widget):
     self._interacting = False
     self._state = BookmarkState.HIDDEN
     self._swipe_start_x = 0.0
+    self._swipe_start_y = 0.0
+    self._gesture_frame = -1
+    self._claimed_frame = -1
     self._swipe_current_x = 0.0
     self._is_swiping = False
     self._is_swiping_left: bool = False
@@ -59,11 +65,43 @@ class BookmarkIcon(Widget):
 
   def is_swiping_left(self) -> bool:
     """Check if currently swiping left (for scroller to disable)."""
-    return self._is_swiping_left
+    return self._is_swiping_left or self._claimed_frame == gui_app.frame
 
   def interacting(self):
     interacting, self._interacting = self._interacting, False
     return interacting
+
+  def cancel_gesture(self):
+    self._is_swiping = self._is_swiping_left = self._interacting = False
+    if self._state == BookmarkState.DRAGGING:
+      self._state = BookmarkState.HIDDEN
+
+  def process_gesture(self, *, can_start: bool) -> None:
+    # The page scroller must give a settled onroad press first refusal. Once
+    # owned, its own scroll rejection must not cancel the bookmark gesture.
+    if self._gesture_frame == gui_app.frame:
+      return
+    self._gesture_frame = gui_app.frame
+    if not ui_state.started or not self.enabled:
+      self.cancel_gesture()
+      return
+    for event in gui_app.mouse_events:
+      if event.slot != 0:
+        continue
+      if event.left_pressed:
+        self.cancel_gesture()
+        if not can_start or not rl.check_collision_point_rec(event.pos, self._hit_rect):
+          continue
+      elif not self._is_swiping:
+        continue
+      self._handle_mouse_event(event)
+
+  def _process_mouse_events(self):
+    self.process_gesture(can_start=self._touch_valid())
+
+  def hide_event(self):
+    self.cancel_gesture()
+    super().hide_event()
 
   def _update_state(self):
     if self._state == BookmarkState.DRAGGING:
@@ -92,19 +130,25 @@ class BookmarkIcon(Widget):
     if mouse_event.left_pressed:
       # Store relative position within widget
       self._swipe_start_x = mouse_event.pos.x
+      self._swipe_start_y = mouse_event.pos.y
       self._swipe_current_x = mouse_event.pos.x
       self._is_swiping = True
       self._is_swiping_left = False
       self._state = BookmarkState.DRAGGING
 
-    elif mouse_event.left_down and self._is_swiping:
+    elif (mouse_event.left_down or mouse_event.left_released) and self._is_swiping:
       self._swipe_current_x = mouse_event.pos.x
       swipe_offset = self._swipe_start_x - self._swipe_current_x
-      self._is_swiping_left = swipe_offset > 0
+      vertical = abs(mouse_event.pos.y - self._swipe_start_y)
+      if swipe_offset < -12 or (vertical > 12 and vertical > abs(swipe_offset)):
+        self.cancel_gesture()
+        return
+      self._is_swiping_left = swipe_offset > 12
       if self._is_swiping_left:
         self._interacting = True
+        self._claimed_frame = gui_app.frame
 
-    elif mouse_event.left_released:
+    if mouse_event.left_released:
       if self._is_swiping:
         swipe_distance = self._swipe_start_x - self._swipe_current_x
 
@@ -158,6 +202,49 @@ class AugmentedRoadView(CameraView):
                                        alignment_vertical=TextAlignmentVertical.MIDDLE)
 
     self._fade_texture = gui_app.texture("icons_mici/onroad/onroad_fade.png")
+
+  def render_camera_model_layer(self, rect: rl.Rectangle, *, camera_view: int = CAMERA_VIEW_AUTO,
+                                reverse_driver: bool = False, lead_indicator: bool = False,
+                                lead_info_mode: int = 0, lead_info_metric: bool | None = None,
+                                lateral_active: bool = False, road_style: dict | None = None, paint: bool = True) -> None:
+    """Draw the existing calibrated camera/model without stock HUD or alert."""
+    if not ui_state.started:
+      return
+    if camera_view == CAMERA_VIEW_DRIVER or reverse_driver:
+      self._ensure_connection()
+    target = self._switch_stream_if_needed(ui_state.sm, camera_view, reverse_driver)
+    if target is None:
+      if paint:
+        rl.draw_rectangle_rec(rect, rl.BLACK)
+      return
+    driver_transition = DRIVER_CAM in (self.stream_type, target, self._target_stream_type)
+    if self._switching and driver_transition:
+      self._handle_switch()
+    if (target == DRIVER_CAM and DRIVER_CAM not in self.available_streams) or \
+       (driver_transition and self.stream_type != target):
+      if paint:
+        rl.draw_rectangle_rec(rect, rl.BLACK)
+        gui_label(rect, "driver camera unavailable" if target == DRIVER_CAM and DRIVER_CAM not in self.available_streams else
+                  "camera switching", font_size=28, font_weight=FontWeight.MEDIUM,
+                  alignment=TextAlignment.CENTER)
+      return
+    self._update_calibration()
+    self._content_rect = rect
+    self._model_renderer.road_style = road_style or {}
+    gui_app.measure_frame_phase("camera", CameraView._render, self, rect, paint=paint)
+    if target != DRIVER_CAM and self.frame is not None:
+      gui_app.measure_frame_phase("model", self._model_renderer.render_with_lead, rect, lead_indicator,
+                                  lead_info_mode, lead_info_metric, lateral_active=lateral_active, paint=paint)
+
+  def render_model_source_layer(self, rect: rl.Rectangle) -> None:
+    self._hud_renderer._update_state()
+    self._hud_renderer._draw_model_source(rect)
+
+  def render_stock_confidence_layer(self, rect: rl.Rectangle, *, lateral_active: bool = False) -> None:
+    self._confidence_ball.render_with_lateral(rect, lateral_active)
+
+  def reset_stock_confidence_layer(self) -> None:
+    self._confidence_ball.reset()
 
   def is_swiping_left(self) -> bool:
     """Check if currently swiping left (for scroller to disable)."""
@@ -244,21 +331,40 @@ class AugmentedRoadView(CameraView):
 
     self._bookmark_icon.render(self.rect)
 
-  def _switch_stream_if_needed(self, sm):
-    if sm['selfdriveState'].experimentalMode and WIDE_CAM in self.available_streams:
+  def _cancel_pending_switch(self) -> None:
+    self._target_client = None
+    self._target_stream_type = None
+    self._switching = False
+
+  def _switch_stream_if_needed(self, sm, camera_view: int = CAMERA_VIEW_AUTO,
+                               reverse_driver: bool = False) -> VisionStreamType | None:
+    if camera_view == CAMERA_VIEW_NONE:
+      self._cancel_pending_switch()
+      return None
+    if reverse_driver or camera_view == CAMERA_VIEW_DRIVER:
+      target = DRIVER_CAM
+    elif camera_view == CAMERA_VIEW_STANDARD:
+      target = NARROW_ROAD_CAM
+    elif camera_view == CAMERA_VIEW_WIDE:
+      target = WIDE_CAM if WIDE_CAM in self.available_streams else NARROW_ROAD_CAM
+    elif sm['selfdriveState'].experimentalMode and WIDE_CAM in self.available_streams:
       v_ego = sm['carState'].vEgo
       if v_ego < WIDE_CAM_MAX_SPEED:
         target = WIDE_CAM
       elif v_ego > ROAD_CAM_MIN_SPEED:
         target = NARROW_ROAD_CAM
       else:
-        # Hysteresis zone - keep current stream
-        target = self.stream_type
+        target = self.stream_type if self.stream_type in (NARROW_ROAD_CAM, WIDE_CAM) else NARROW_ROAD_CAM
     else:
       target = NARROW_ROAD_CAM
-
-    if self.stream_type != target:
+    if target == DRIVER_CAM and DRIVER_CAM not in self.available_streams:
+      self._cancel_pending_switch()
+      return target
+    if self.stream_type == target and self._switching and self._target_stream_type != target:
+      self._cancel_pending_switch()
+    elif self.stream_type != target or (self._switching and self._target_stream_type != target):
       self.switch_stream(target)
+    return target
 
   def _update_calibration(self):
     # Update device camera if not already set
@@ -284,6 +390,11 @@ class AugmentedRoadView(CameraView):
       self.view_from_wide_calib = view_frame_from_device_frame @ wide_from_device @ device_from_calib
 
   def _calc_frame_matrix(self, rect: rl.Rectangle) -> np.ndarray:
+    if self.stream_type == DRIVER_CAM:
+      base = CameraView._calc_frame_matrix(self, rect)
+      base[0, 0] *= 1.5
+      base[1, 1] *= 1.5
+      return base
     cache_key = (
       ui_state.sm.recv_frame['extrinsicsCalibration'],
       int(self._content_rect.width),

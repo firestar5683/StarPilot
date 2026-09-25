@@ -34,6 +34,10 @@ class ExpButton(Widget):
 
   def _handle_mouse_release(self, _):
     super()._handle_mouse_release(_)
+    self.request_toggle()
+
+  def request_toggle(self) -> bool:
+    self._update_state()
     if self._is_toggle_allowed():
       new_mode = not self._experimental_mode
       self._params.put_bool("ExperimentalMode", new_mode)
@@ -41,6 +45,8 @@ class ExpButton(Widget):
       # Hold new state temporarily
       self._held_mode = new_mode
       self._hold_end_time = time.monotonic() + self._hold_duration
+      return True
+    return False
 
   def _render(self, rect: rl.Rectangle) -> None:
     center_x = int(self._rect.x + self._rect.width // 2)

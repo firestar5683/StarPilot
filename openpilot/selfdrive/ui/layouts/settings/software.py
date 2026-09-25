@@ -1,6 +1,7 @@
 import subprocess
 import time
 import datetime
+from collections.abc import Callable
 from openpilot.common.time_helpers import system_time_valid
 from openpilot.selfdrive.ui.ui_state import ui_state
 from openpilot.system.ui.lib.application import gui_app
@@ -165,9 +166,9 @@ class SoftwareLayout(Widget):
       self._waiting_start_ts = time.monotonic()
       subprocess.run("pkill -SIGHUP -f openpilot.system.updated.updated", shell=True)
 
-  def _on_uninstall(self):
+  def _on_uninstall(self, action_guard: Callable[[], bool] | None = None):
     def handle_uninstall_confirmation(result: DialogResult):
-      if result == DialogResult.CONFIRM:
+      if result == DialogResult.CONFIRM and (action_guard is None or action_guard()):
         ui_state.params.put_bool("DoUninstall", True, block=True)
 
     dialog = ConfirmDialog(tr("Are you sure you want to uninstall?"), tr("Uninstall"), callback=handle_uninstall_confirmation)
@@ -178,7 +179,7 @@ class SoftwareLayout(Widget):
     self._install_btn.action_item.set_enabled(False)
     ui_state.params.put_bool("DoReboot", True, block=True)
 
-  def _on_select_branch(self):
+  def _on_select_branch(self, action_guard: Callable[[], bool] | None = None):
     # Get available branches and order
     current_git_branch = ui_state.params.get("GitBranch") or ""
     branches_str = ui_state.params.get("UpdaterAvailableBranches") or ""
@@ -193,7 +194,8 @@ class SoftwareLayout(Widget):
 
     def handle_selection(result: DialogResult):
       # Confirmed selection
-      if result == DialogResult.CONFIRM and self._branch_dialog is not None and self._branch_dialog.selection:
+      if (result == DialogResult.CONFIRM and self._branch_dialog is not None and self._branch_dialog.selection and
+          (action_guard is None or action_guard())):
         selection = self._branch_dialog.selection
         ui_state.params.put("UpdaterTargetBranch", selection, block=True)
         self._branch_btn.action_item.set_value(selection)

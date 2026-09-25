@@ -2,6 +2,7 @@ import pyray as rl
 import time
 
 from openpilot.common.api import Api
+from openpilot.starpilot.connect.provider import active_provider
 from openpilot.common.qrcode import make_texture
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.params import Params
@@ -28,13 +29,16 @@ class PairingDialog(Widget):
     self._close_btn.set_click_callback(gui_app.pop_widget)
 
   def _get_pairing_url(self) -> str:
+    provider = active_provider()
+    if provider.name not in ('comma', 'konik'):
+      raise RuntimeError('Cloud provider is unavailable')
     try:
       dongle_id = self.params.get("DongleId") or ""
       token = Api(dongle_id).get_token({'pair': True})
     except Exception:
       cloudlog.exception("Failed to get pairing token")
       token = ""
-    return f"https://connect.comma.ai/?pair={token}"
+    return f"{provider.web}/?pair={token}"
 
   def _generate_qr_code(self) -> None:
     try:
@@ -73,7 +77,7 @@ class PairingDialog(Widget):
     y += close_size + 40
 
     # Title
-    title = tr("Pair your device to your comma account")
+    title = f"Pair your device with {active_provider().label}"
     title_font = gui_app.font(FontWeight.NORMAL)
     left_width = int(content_rect.width * 0.5 - 15)
 
@@ -98,9 +102,9 @@ class PairingDialog(Widget):
 
   def _render_instructions(self, rect: rl.Rectangle) -> None:
     instructions = [
-      tr("Go to https://connect.comma.ai on your phone"),
+      f"Go to {active_provider().web} on your phone",
       tr("Click \"add new device\" and scan the QR code on the right"),
-      tr("Bookmark connect.comma.ai to your home screen to use it like an app"),
+      f"Bookmark {active_provider().web} to your home screen to use it like an app",
     ]
 
     font = gui_app.font(FontWeight.BOLD)

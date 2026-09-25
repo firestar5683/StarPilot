@@ -1,9 +1,11 @@
 import os
 import math
+from collections.abc import Callable
 
 from openpilot.cereal import messaging, log
 from openpilot.common.basedir import BASEDIR
 from openpilot.common.params import Params
+from openpilot.starpilot.schema_cache import get_cache
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.ui.onroad.cabin_camera_dialog import CabinCameraDialog
 from openpilot.selfdrive.ui.ui_state import ui_state
@@ -90,14 +92,14 @@ class DeviceLayout(Widget):
                                                      option_font_weight=FontWeight.UNIFONT, callback=handle_language_selection)
     gui_app.push_widget(self._select_language_dialog)
 
-  def _reset_calibration_prompt(self):
+  def _reset_calibration_prompt(self, action_guard: Callable[[], bool] | None = None):
     if ui_state.engaged:
       gui_app.push_widget(alert_dialog(tr("Disengage to Reset Calibration")))
       return
 
     def reset_calibration(result: DialogResult):
       # Check engaged again in case it changed while the dialog was open
-      if ui_state.engaged or result != DialogResult.CONFIRM:
+      if ui_state.engaged or result != DialogResult.CONFIRM or (action_guard is not None and not action_guard()):
         return
 
       self._params.remove("CalibrationParams")
@@ -113,7 +115,7 @@ class DeviceLayout(Widget):
   def _update_calib_description(self):
     desc = tr(DESCRIPTIONS['reset_calibration'])
 
-    calib_bytes = self._params.get("CalibrationParams")
+    calib_bytes = get_cache(self._params, "CalibrationParams")
     if calib_bytes:
       try:
         calib = messaging.log_from_bytes(calib_bytes, log.Event).extrinsicsCalibration
@@ -127,7 +129,7 @@ class DeviceLayout(Widget):
         cloudlog.exception("invalid CalibrationParams")
 
     lag_perc = 0
-    lag_bytes = self._params.get("LiveDelay")
+    lag_bytes = get_cache(self._params, "LiveDelay")
     if lag_bytes:
       try:
         lag_perc = messaging.log_from_bytes(lag_bytes, log.Event).lateralDelay.calPerc
@@ -138,7 +140,7 @@ class DeviceLayout(Widget):
     else:
       desc += tr("<br><br>Steering lag calibration is complete.")
 
-    torque_bytes = self._params.get("LiveTorqueParameters")
+    torque_bytes = get_cache(self._params, "LiveTorqueParameters")
     if torque_bytes:
       try:
         torque = messaging.log_from_bytes(torque_bytes, log.Event).lateralTorqueParameters

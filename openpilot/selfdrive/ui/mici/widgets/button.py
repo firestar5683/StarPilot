@@ -408,7 +408,14 @@ class BigMultiParamToggle(BigMultiToggle):
   def _handle_mouse_release(self, mouse_pos: MousePos):
     super()._handle_mouse_release(mouse_pos)
     new_idx = self._options.index(self.value)
-    self._params.put(self._param, new_idx)
+    self.request_index(new_idx)
+
+  def request_index(self, index: int) -> bool:
+    if type(index) is not int or not 0 <= index < len(self._options) or not self.enabled:
+      return False
+    self.set_value(self._options[index])
+    self._params.put(self._param, index)
+    return True
 
 
 class BigParamControl(BigToggle):

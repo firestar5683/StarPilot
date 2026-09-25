@@ -8,6 +8,7 @@ from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.lib.multilang import tr, tr_noop
 from openpilot.system.ui.widgets import DialogResult
 from openpilot.selfdrive.ui.ui_state import ui_state
+from openpilot.starpilot.ui.slc_offset_feature import SlcOffsetOwner, native_parked
 
 PERSONALITY_TO_INT = log.LongitudinalPersonality.schema.enumerants
 
@@ -38,6 +39,8 @@ class TogglesLayout(Widget):
   def __init__(self):
     super().__init__()
     self._params = Params()
+    self._slc_offsets = SlcOffsetOwner(self._params, lambda: native_parked(ui_state), lambda: ui_state.CP)
+    self._metric_source = self._slc_offsets._raw("IsMetric")
     self._is_release = self._params.get_bool("IsReleaseBranch")
 
     # param, title, desc, icon, needs_restart
@@ -199,6 +202,7 @@ class TogglesLayout(Widget):
     # refresh toggles from params to mirror external changes
     for param in self._toggle_defs:
       self._toggles[param].action_item.set_state(self._params.get_bool(param))
+    self._metric_source = self._slc_offsets._raw("IsMetric")
 
     # these toggles need restart, block while engaged
     for toggle_def in self._toggle_defs:
@@ -233,13 +237,40 @@ class TogglesLayout(Widget):
       self._params.put_bool("ExperimentalMode", state, block=True)
 
   def _toggle_callback(self, state: bool, param: str):
+    if param == "IsMetric":
+      ok = self._slc_offsets.change_units(state, self._metric_source)
+      self._toggles[param].action_item.set_state(self._params.get_bool(param))
+      self._metric_source = self._slc_offsets._raw("IsMetric")
+      return ok
     if param == "ExperimentalMode":
       self._handle_experimental_mode_toggle(state)
-      return
+      return True
 
     self._params.put_bool(param, state, block=True)
     if self._toggle_defs[param][3]:
       self._params.put_bool("OnroadCycleRequested", True, block=True)
+    return True
+
+  def request_toggle(self, param: str, desired: bool) -> bool:
+    """Apply a typed shell request through the existing toggle guards."""
+    if param not in self._toggle_defs:
+      return False
+    self._update_toggles()
+    if not self._toggles[param].action_item.enabled:
+      return False
+    if self._params.get_bool(param) != desired or param == "IsMetric" and self._metric_source not in (b"0", b"1"):
+      return bool(self._toggle_callback(desired, param))
+    return True
+
+  def request_personality(self, index: int) -> bool:
+    if index not in (0, 1, 2):
+      return False
+    self._update_toggles()
+    if not self._long_personality_setting.action_item.enabled:
+      return False
+    if self._params.get("LongitudinalPersonality", return_default=True) != index:
+      self._set_longitudinal_personality(index)
+    return True
 
   def _set_longitudinal_personality(self, button_index: int):
     self._params.put("LongitudinalPersonality", button_index, block=True)

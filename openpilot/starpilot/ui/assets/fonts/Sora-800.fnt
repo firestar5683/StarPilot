@@ -1,0 +1,14 @@
+info face="Sora-800" size=-200 bold=1 italic=0 charset="" unicode=1 stretchH=100 smooth=1 aa=1 padding=0,0,0,0 spacing=0,0 outline=0
+common lineHeight=200 base=200 scaleW=1024 scaleH=512 pages=1 packed=0 alphaChnl=0 redChnl=4 greenChnl=4 blueChnl=4
+page id=0 file="Sora-800.png"
+chars count=10
+char id=32 x=6 y=6 width=41 height=1 xoffset=0 yoffset=194 xadvance=41 page=0 chnl=15
+char id=63 x=59 y=6 width=113 height=151 xoffset=0 yoffset=43 xadvance=113 page=0 chnl=15
+char id=80 x=184 y=6 width=135 height=148 xoffset=0 yoffset=46 xadvance=135 page=0 chnl=15
+char id=83 x=331 y=6 width=131 height=155 xoffset=0 yoffset=43 xadvance=131 page=0 chnl=15
+char id=97 x=474 y=6 width=120 height=117 xoffset=0 yoffset=80 xadvance=120 page=0 chnl=15
+char id=105 x=606 y=6 width=69 height=157 xoffset=0 yoffset=38 xadvance=69 page=0 chnl=15
+char id=108 x=687 y=6 width=65 height=147 xoffset=0 yoffset=47 xadvance=65 page=0 chnl=15
+char id=111 x=764 y=6 width=137 height=119 xoffset=0 yoffset=79 xadvance=137 page=0 chnl=15
+char id=114 x=913 y=6 width=85 height=112 xoffset=0 yoffset=82 xadvance=85 page=0 chnl=15
+char id=116 x=6 y=175 width=87 height=142 xoffset=0 yoffset=54 xadvance=87 page=0 chnl=15

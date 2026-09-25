@@ -1,0 +1,7 @@
+# Preserve the exact bytes of retained third-party notices.
+fonts/notices/** -text
+notices/** -text
+
+# These source notices contain intentional trailing whitespace/blank lines.
+fonts/notices/Unifont-COPYING.txt -whitespace
+fonts/notices/Unifont-OFL-1.1.txt -whitespace
