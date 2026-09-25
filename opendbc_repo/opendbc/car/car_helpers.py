@@ -149,8 +149,18 @@ def fingerprint(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_mu
 
 
 def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multiplexing: ObdCallback, alpha_long_allowed: bool,
-            is_release: bool, cached_params: CarParamsT | None = None):
+            is_release: bool, cached_params: CarParamsT | None = None, pre_create_hook=None,
+            forced_candidate: str | None = None):
+  if forced_candidate is not None and cached_params is not None and cached_params.carFingerprint != forced_candidate:
+    cached_params = None
   candidate, fingerprints, vin, car_fw, source, exact_match = fingerprint(can_recv, can_send, set_obd_multiplexing, cached_params)
+
+  if forced_candidate is not None:
+    if forced_candidate not in interfaces:
+      raise ValueError('forced vehicle is not registered')
+    candidate = forced_candidate
+    source = CarParams.FingerprintSource.fixed
+    exact_match = True
 
   if candidate is None:
     carlog.error({"event": "car doesn't match any fingerprints", "fingerprints": repr(fingerprints)})
@@ -162,6 +172,9 @@ def get_car(can_recv: CanRecvCallable, can_send: CanSendCallable, set_obd_multip
   CP.carFw = car_fw
   CP.fingerprintSource = source
   CP.fuzzyFingerprint = not exact_match
+
+  if pre_create_hook is not None:
+    CP = pre_create_hook(CP, candidate, fingerprints, car_fw)
 
   return interfaces[CP.carFingerprint](CP)
 

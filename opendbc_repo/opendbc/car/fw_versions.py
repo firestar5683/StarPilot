@@ -10,12 +10,15 @@ from opendbc.car.carlog import carlog
 from opendbc.car.structs import CarParams
 from opendbc.car.ecu_addrs import get_ecu_addrs
 from opendbc.car.fingerprints import FW_VERSIONS
+from opendbc.car.ford.values import CAR as FORD
 from opendbc.car.fw_query_definitions import ESSENTIAL_ECUS, AddrType, EcuAddrBusType, FwQueryConfig, LiveFwVersions, OfflineFwVersions
 from opendbc.car.interfaces import get_interface_attr
 from opendbc.car.isotp_parallel_query import IsoTpParallelQuery
+from opendbc.car.vin import is_valid_vin
 
 Ecu = CarParams.Ecu
 FUZZY_EXCLUDE_ECUS = [Ecu.fwdCamera, Ecu.fwdRadar, Ecu.eps, Ecu.debug]
+STRICT_FORD_FUZZY_CANDIDATES = frozenset((FORD.FORD_EDGE_MK2, FORD.FORD_MONDEO_MK5, FORD.FORD_TRANSIT_MK5))
 
 FW_QUERY_CONFIGS: dict[str, FwQueryConfig] = get_interface_attr('FW_QUERY_CONFIG', ignore_none=True)
 VERSIONS = get_interface_attr('FW_VERSIONS', ignore_none=True)
@@ -93,6 +96,10 @@ def match_fw_to_car_fuzzy(live_fw_versions: LiveFwVersions, match_brand: str | N
 
   # Note that it is possible to match to a candidate without all its ECUs being present
   # if there are enough matches. FIXME: parameterize this or require all ECUs to exist like exact matching
+  # These ports require Ford's four-ECU platform matcher. Keep their firmware in
+  # the lookup above so shared versions cannot make another model appear unique.
+  if match in STRICT_FORD_FUZZY_CANDIDATES:
+    return set()
   if match and len(matched_ecus) >= 2:
     if log:
       carlog.error(f"Fingerprinted {match} using fuzzy match. {len(matched_ecus)} matching ECUs")
@@ -163,6 +170,19 @@ def match_fw_to_car(fw_versions: list[CarParams.CarFw], vin: str, allow_exact: b
       config = FW_QUERY_CONFIGS[brand]
       if not exact_match and not len(matches) and config.match_fw_to_car_fuzzy is not None:
         matches |= config.match_fw_to_car_fuzzy(fw_versions_dict, vin, VERSIONS[brand])
+
+    if exact_match and allow_fuzzy and len(matches) > 1 and is_valid_vin(vin):
+      # A shared ECU firmware version may identify a family but not a chassis.
+      # Refine only within one brand's exact candidates; a VIN can narrow an
+      # ambiguous match, never add a new candidate or decide between brands.
+      brands = {MODEL_TO_BRAND[candidate] for candidate in matches}
+      if len(brands) == 1:
+        brand = next(iter(brands))
+        custom_match = FW_QUERY_CONFIGS[brand].match_fw_to_car_fuzzy
+        if custom_match is not None:
+          vin_matches = custom_match(build_fw_dict(fw_versions, filter_brand=brand), vin, VERSIONS[brand]) & matches
+          if len(vin_matches) == 1:
+            return False, vin_matches
 
     if len(matches):
       return exact_match, matches

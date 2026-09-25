@@ -4,6 +4,7 @@ import random
 import re
 import time
 from collections import defaultdict
+from types import SimpleNamespace
 
 from opendbc.car.can_definitions import CanData
 from opendbc.car.car_helpers import interfaces
@@ -12,6 +13,7 @@ from opendbc.car.fingerprints import FW_VERSIONS
 from opendbc.car.fw_versions import FW_QUERY_CONFIGS, FUZZY_EXCLUDE_ECUS, VERSIONS, build_fw_dict, \
                                     match_fw_to_car, get_brand_ecu_matches, get_fw_versions, get_present_ecus
 from opendbc.car.vin import get_vin
+from opendbc.car.volkswagen.values import CAR as VOLKSWAGEN, VolkswagenFlags
 from opendbc.testing import parameterized
 
 CarFw = CarParams.CarFw
@@ -25,6 +27,28 @@ class TestFwFingerprint(unittest.TestCase):
     candidates = list(candidates)
     assert len(candidates) == 1, f"got more than one candidate: {candidates}"
     assert candidates[0] == expected
+
+  def test_ambiguous_exact_refinement_preserves_matching_boundaries(self):
+    # Exercise shared dispatch independently of any one brand's VIN algorithm.
+    cases = (
+      ({'A', 'B'}, {'A'}, {'A': 'first', 'B': 'first'}, True, (False, {'A'}), True),
+      ({'A', 'B'}, {'A'}, {'A': 'first', 'B': 'first'}, False, (True, {'A', 'B'}), False),
+      ({'A'}, {'B'}, {'A': 'first'}, True, (True, {'A'}), False),
+      ({'A', 'B'}, {'C'}, {'A': 'first', 'B': 'first'}, True, (True, {'A', 'B'}), True),
+      ({'A', 'B'}, {'A', 'B'}, {'A': 'first', 'B': 'first'}, True, (True, {'A', 'B'}), True),
+      ({'A', 'B'}, {'A'}, {'A': 'first', 'B': 'second'}, True, (True, {'A', 'B'}), False),
+    )
+    for exact, refined, brands, allow_fuzzy, expected, called in cases:
+      with self.subTest(exact=exact, refined=refined, brands=brands, allow_fuzzy=allow_fuzzy):
+        with patch('opendbc.car.fw_versions.match_fw_to_car_exact', return_value=exact), \
+             patch('opendbc.car.fw_versions.VERSIONS', {'first': {}}), \
+             patch('opendbc.car.fw_versions.MODEL_TO_BRAND', brands), \
+             patch('opendbc.car.fw_versions.FW_QUERY_CONFIGS') as configs, \
+             patch('opendbc.car.fw_versions.build_fw_dict', return_value={}):
+          custom = unittest.mock.Mock(return_value=refined)
+          configs.__getitem__.return_value = SimpleNamespace(match_fw_to_car_fuzzy=custom)
+          self.assertEqual(match_fw_to_car([], 'WVW000E1000000000', allow_fuzzy=allow_fuzzy, log=False), expected)
+          self.assertEqual(custom.called, called)
 
   @parameterized("brand, car_model, ecus, test_non_essential",
                  [(b, c, e[c], n) for b, e in VERSIONS.items() for c in e for n in (True, False)])
@@ -44,12 +68,19 @@ class TestFwFingerprint(unittest.TestCase):
                         address=addr, subAddress=0 if sub_addr is None else sub_addr))
       CP.carFw = fw
       _, matches = match_fw_to_car(CP.carFw, CP.carVin, allow_fuzzy=False)
-      if not test_non_essential:
-        self.assertFingerprints(matches, car_model)
+      # Some MEB bodies share frozen radar FW; without a VIN exact FW alone
+      # establishes only their generation. Production requires VIN refinement.
+      meb_overlap = brand == "volkswagen" and bool(VOLKSWAGEN(car_model).config.flags & VolkswagenFlags.MEB)
+      if test_non_essential and not matches:
+        continue  # removing non-essential ECUs can lose a match
+      if meb_overlap and len(matches) > 1:
+        self.assertIn(car_model, matches)
+        generation = bool(VOLKSWAGEN(car_model).config.flags & VolkswagenFlags.MEB_GEN2)
+        self.assertTrue(all(VOLKSWAGEN(candidate).config.flags & VolkswagenFlags.MEB for candidate in matches))
+        self.assertTrue(all(bool(VOLKSWAGEN(candidate).config.flags & VolkswagenFlags.MEB_GEN2) == generation
+                            for candidate in matches))
       else:
-        # if we're removing ECUs we expect some match loss, but it shouldn't mismatch
-        if len(matches) != 0:
-          self.assertFingerprints(matches, car_model)
+        self.assertFingerprints(matches, car_model)
 
   @parameterized("brand, car_model, ecus", [(b, c, e[c]) for b, e in VERSIONS.items() for c in e])
   def test_custom_fuzzy_match(self, brand, car_model, ecus):

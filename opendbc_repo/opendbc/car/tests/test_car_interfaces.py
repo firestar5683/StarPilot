@@ -1,7 +1,7 @@
 import math
 import unittest
 
-from opendbc.car import DT_CTRL, CanData, structs
+from opendbc.car import DT_CTRL, CanData, gen_empty_fingerprint, structs
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.fingerprints import FW_VERSIONS
 from opendbc.car.fw_versions import FW_QUERY_CONFIGS
@@ -100,6 +100,24 @@ def _make_car_test(car_name):
   return test
 
 
+def _make_optional_hardware_test(car_name):
+  def test(self):
+    # Identification can succeed before optional ECUs or messages are available.
+    for alpha_long in (False, True):
+      for is_release in (False, True):
+        with self.subTest(alpha_long=alpha_long, is_release=is_release):
+          fingerprint = gen_empty_fingerprint()
+          interface_type = interfaces[car_name]
+          params = interface_type.get_params(car_name, fingerprint, [], alpha_long, is_release, docs=False)
+          self.assertEqual(params.carFingerprint, car_name)
+          self.assertEqual(fingerprint, gen_empty_fingerprint())
+          interface = interface_type(params)
+          self.assertIsInstance(interface.CS, interface_type.CarState)
+          self.assertIsInstance(interface.CC, interface_type.CarController)
+
+  return test
+
+
 class TestCarInterfaces(unittest.TestCase):
   def test_interface_attrs(self):
     """Asserts basic behavior of interface attribute getter"""
@@ -129,3 +147,4 @@ class TestCarInterfaces(unittest.TestCase):
 
 for car_name in sorted(PLATFORMS):
   setattr(TestCarInterfaces, f'test_car_interfaces_{car_name}', _make_car_test(car_name))
+  setattr(TestCarInterfaces, f'test_optional_hardware_absent_{car_name}', _make_optional_hardware_test(car_name))
