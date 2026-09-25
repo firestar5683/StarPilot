@@ -50,15 +50,16 @@ def load_pickle(path, *, out_of_band=False):
   u.persistent_load = persistent_load
   return u.load()
 
-@Context(OPENPILOT_HACKS=1, **{'AMD': {'TC_OPT': 2, 'TC_MIN_GLOBALS': 32}}.get(Device.DEFAULT, {}))
 def benchmark(fxn:Callable, cb=None, **kwargs):
-  Device.default.synchronize()
-  start = time.perf_counter()
-  if (output := fxn(**kwargs)) is not None: output.realize()
-  Device.default.synchronize()
-  end = time.perf_counter()
-  if cb: cb(end-start)
-  return [t.numpy().copy() for t in get_parameters(kwargs.get('output_buffers', output))]
+  # Select benchmark options when called, without probing devices on import.
+  with Context(OPENPILOT_HACKS=1, **{'AMD': {'TC_OPT': 2, 'TC_MIN_GLOBALS': 32}}.get(Device.DEFAULT, {})):
+    Device.default.synchronize()
+    start = time.perf_counter()
+    if (output := fxn(**kwargs)) is not None: output.realize()
+    Device.default.synchronize()
+    end = time.perf_counter()
+    if cb: cb(end-start)
+    return [t.numpy().copy() for t in get_parameters(kwargs.get('output_buffers', output))]
 
 pm_retargetable = PatternMatcher([
   (UPat(Ops.PROGRAM, src=(UPat(), UPat(), UPat(), UPat()), name="p"), lambda p: p.replace(src=p.src[:-1]) if p.arg.target.device == "CPU" else None)

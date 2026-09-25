@@ -5,6 +5,8 @@ from tinygrad.runtime.autogen.am import am, pm4_soc15 as pm4
 from tinygrad.runtime.support.amd import import_soc
 from tinygrad.runtime.support.memory import AddrSpace
 
+from tinygrad.runtime.support.am.startup_trace import value, wait_tlb
+
 class AM_IP:
   def __init__(self, adev): self.adev = adev
   def init_sw(self): pass # Prepare sw/allocations for this IP
@@ -118,7 +120,7 @@ class AM_GMC(AM_IP):
 
       self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_REQ").write(req, inst=inst)
 
-      wait_cond(lambda: self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_ACK").read(inst=inst) & (1 << vmid), value=(1 << vmid), msg="flush_tlb timeout")
+      wait_tlb(self.adev, ip, inst, req, vmid, wait_cond, lambda: self.adev.reg(f"reg{ip}VM_INVALIDATE_ENG17_ACK").read(inst=inst))
 
       if ip == "MM": self.adev.regMMVM_INVALIDATE_ENG17_SEM.write(0x0, inst=inst)
       if self.adev.ip_ver[am.GC_HWIP] >= (11,0,0) and ip == "MM":
@@ -275,7 +277,7 @@ class AM_GFX(AM_IP):
 
   def init_hw(self):
     # Wait for RLC autoload to complete
-    wait_cond(lambda: self.adev.regCP_STAT.read() == 0 or self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read_bitfields()['bootload_complete'] == 0,
+    wait_cond(lambda: value(self.adev, "cp_stat", self.adev.regCP_STAT.read()) == 0 or value(self.adev, "bootload_complete", self.adev.regRLC_RLCS_BOOTLOAD_STATUS.read_bitfields()['bootload_complete']) == 0,
               value=True, msg="RLC autoload timeout")
 
     self.adev.gmc.init_hub("GC", insts=range(self.xccs))

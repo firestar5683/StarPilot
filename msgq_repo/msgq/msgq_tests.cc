@@ -1,3 +1,5 @@
+#include <array>
+#include <unistd.h>
 #include "msgq/test_runner.h"
 #include "msgq/msgq.h"
 
@@ -423,4 +425,58 @@ TEST_CASE("1 publisher, 2 subscribers")
     msgq_msg_close(&msg1);
     msgq_msg_close(&msg2);
   }
+}
+
+TEST_CASE("32 active subscribers retain every message across publisher restart")
+{
+  REQUIRE(NUM_READERS >= 32);
+  const std::string name = "capacity_acceptance_" + std::to_string(getpid());
+#ifdef __APPLE__
+  std::string file = "/tmp/msgq_";
+#else
+  std::string file = "/dev/shm/msgq_";
+#endif
+  const char *prefix = std::getenv("OPENPILOT_PREFIX");
+  if (prefix != nullptr) file += std::string(prefix) + "/";
+  file += name;
+  std::remove(file.c_str());
+  msgq_queue_t pub{};
+  REQUIRE(msgq_new_queue(&pub, name.c_str(), 4096) == 0);
+  msgq_init_publisher(&pub);
+  std::array<msgq_queue_t, 32> readers{};
+  for (auto &reader : readers) {
+    REQUIRE(msgq_new_queue(&reader, name.c_str(), 4096) == 0);
+    msgq_init_subscriber(&reader);
+  }
+  for (unsigned epoch = 0; epoch < 2; ++epoch) {
+    if (epoch) {
+      msgq_init_publisher(&pub);
+      for (auto &reader : readers) {
+        msgq_msg_t empty{};
+        REQUIRE(msgq_msg_recv(&empty, &reader) == 0);
+      }
+      REQUIRE(*pub.num_readers == readers.size());
+    }
+    for (uint64_t tick = 1; tick <= 200; ++tick) {
+      uint64_t sequence = epoch * 1000 + tick;
+      msgq_msg_t outgoing{};
+      msgq_msg_init_data(&outgoing, reinterpret_cast<char *>(&sequence), sizeof(sequence));
+      REQUIRE(msgq_msg_send(&outgoing, &pub) == sizeof(sequence));
+      msgq_msg_close(&outgoing);
+      for (auto &reader : readers) {
+        msgq_msg_t incoming{};
+        REQUIRE(msgq_msg_recv(&incoming, &reader) == sizeof(sequence));
+        uint64_t observed = 0;
+        std::memcpy(&observed, incoming.data, sizeof(observed));
+        REQUIRE(observed == sequence);
+        msgq_msg_close(&incoming);
+        REQUIRE(*reader.read_valids[reader.reader_id]);
+        REQUIRE(*reader.read_uids[reader.reader_id] == reader.read_uid_local);
+      }
+      REQUIRE(*pub.num_readers == readers.size());
+    }
+  }
+  for (auto &reader : readers) msgq_close_queue(&reader);
+  msgq_close_queue(&pub);
+  std::remove(file.c_str());
 }

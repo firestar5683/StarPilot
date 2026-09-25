@@ -281,10 +281,13 @@ class QCOMProgramData:
     reg_desc_off = _read_lib(lib, 0x34)
     self.fregs, self.hregs = _read_lib(lib, reg_desc_off + 0x14), _read_lib(lib, reg_desc_off + 0x18)
 
-_qcom_program_cache:dict[tuple[bytes, tuple[str, ...]], tuple[QCOMProgramData, UOp]] = {}
+_qcom_program_cache:dict[tuple[Any, ...], tuple[QCOMProgramData, UOp]] = {}
 def qcom_build_program(dev:QCOMDevice, prg:UOp, devs:tuple[str, ...]) -> tuple[QCOMProgramData, UOp]:
-  if (cached:=_qcom_program_cache.get(key:=(prg.src[3].arg, devs))) is None:
-    data = QCOMProgramData(dev, prg.to_elf())
+  elf = prg.to_elf()
+  # The same binary can be called with different argument signatures. Keep
+  # each descriptor layout separate while reusing identical programs.
+  if (cached:=_qcom_program_cache.get(key:=(elf.lib, devs, elf.name, elf.target, elf.signature))) is None:
+    data = QCOMProgramData(dev, elf)
     image = bytes(data.image).ljust(round_up(len(data.image), 4), b"\x00")
     buf = UOp.placeholder((len(image),), dtypes.uint8, next(UOp.unique_num), device=devs).rtag("program")
     cached = _qcom_program_cache[key] = (data, patch(buf, [], image))

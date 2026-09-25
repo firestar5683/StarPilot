@@ -7,6 +7,7 @@ from tinygrad.runtime.support.amd import AMDReg, import_module, import_asic_regs
 from tinygrad.runtime.support.memory import MemoryManager, AddrSpace
 from tinygrad.runtime.support.system import PCIDevice
 from tinygrad.runtime.support.am.ip import AM_IP, AM_SOC, AM_GMC, AM_IH, AM_PSP, AM_SMU, AM_GFX, AM_SDMA
+from tinygrad.runtime.support.am.startup_trace import initialization, note, value
 
 AM_DEBUG = getenv("AM_DEBUG", 0)
 
@@ -153,6 +154,7 @@ class AMDev:
       cap = self.pci_dev.read_config(cap + 1, 1) & 0xfc
     if cap and cap not in seen: self.pci_dev.write_config_flush(cap + 0x10, self.pci_dev.read_config(cap + 0x10, 2) & ~3, 2) # PCIe cap lnkctl
 
+  @initialization
   def __init__(self, pci_dev:PCIDevice, reset_mode=False):
     self.pci_dev, self.devfmt = pci_dev, pci_dev.pcibus
     self._disable_aspm()
@@ -166,6 +168,7 @@ class AMDev:
 
     self._run_discovery()
     self._build_regs()
+    note(self, "discovery", gc=self.ip_ver[am.GC_HWIP], mp0=self.ip_ver[am.MP0_HWIP], mp1=self.ip_ver[am.MP1_HWIP], is_vf=self.is_vf)
 
     # AM boot Process:
     # The GPU being passed can be in one of several states: 1. Not initialized. 2. Initialized by amdgpu. 3. Initialized by AM.
@@ -180,25 +183,33 @@ class AMDev:
     self.is_booting = True # During boot only boot memory can be allocated. This flag is to validate this.
     self.init_sw(smi_dev=False)
 
-    self.partial_boot = (self.reg("regSCRATCH_REG7").read() == AMDev.Version) and (getenv("AM_RESET", 0) != 1)
-    if self.partial_boot and (self.reg("regSCRATCH_REG6").read() != 0 or self.reg(self.gmc.pf_status_reg("GC")).read() != 0):
+    self.partial_boot = (value(self, "scratch7", self.reg("regSCRATCH_REG7").read()) == AMDev.Version) and (getenv("AM_RESET", 0) != 1)
+    if self.partial_boot and (value(self, "scratch6", self.reg("regSCRATCH_REG6").read()) != 0 or
+                              value(self, "gc_fault", self.reg(self.gmc.pf_status_reg("GC")).read()) != 0):
       if DEBUG >= 2: print(f"am {self.devfmt}: Malformed state. Issuing a full reset.")
       self.partial_boot = False
 
     # aqua (gc 9.5.0): full boot over live state can kill the fabric (power cycle recovers); partial boot+reset_mec is the deepest safe reset
-    if self.ip_ver[am.GC_HWIP] == (9,5,0) and self.reg("regSCRATCH_REG7").read() == AMDev.Version: self.partial_boot = True
+    if self.ip_ver[am.GC_HWIP] == (9,5,0) and value(self, "scratch7", self.reg("regSCRATCH_REG7").read()) == AMDev.Version: self.partial_boot = True
 
+    note(self, "boot_choice", partial_boot=self.partial_boot)
     # Init hw for IP blocks where it is needed
     if not self.partial_boot:
-      if not self.is_vf and self.psp.is_sos_alive() and self.smu.is_smu_alive(): # skip in vf mode, these are pf funcs.
+      if (not self.is_vf and value(self, "psp_alive", self.psp.is_sos_alive()) and
+          value(self, "smu_alive", self.smu.is_smu_alive())): # skip in vf mode, these are pf funcs.
         self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) & ~pci.PCI_COMMAND_MASTER, 2)
         if self.is_hive():
           if reset_mode: return # in reset mode, do not raise
           raise RuntimeError("Malformed state. Use extra/amdpci/hive_reset.py to reset the hive")
+        note(self, "mode1_reset_enter")
         self.smu.mode1_reset()
+        note(self, "mode1_reset_exit")
       self.pci_dev.write_config_flush(pci.PCI_COMMAND, self.pci_dev.read_config(pci.PCI_COMMAND, 2) | pci.PCI_COMMAND_MASTER, 2)
       self.init_hw(self.soc, self.gmc, self.ih, *(() if self.is_vf else (self.psp, self.smu)))
-    elif not self.is_vf: self.psp._tmr_init()
+    elif not self.is_vf:
+      note(self, "partial_tmr_enter")
+      self.psp._tmr_init()
+      note(self, "partial_tmr_exit")
 
     # Booting done
     self.is_booting = False
@@ -241,7 +252,9 @@ class AMDev:
 
   def init_hw(self, *blocks:AM_IP):
     for ip in blocks:
+      note(self, "ip_enter", block=ip.__class__.__name__)
       ip.init_hw()
+      note(self, "ip_exit", block=ip.__class__.__name__)
       if DEBUG >= 2: print(f"am {self.devfmt}: {ip.__class__.__name__} initialized")
 
   def fini(self):
