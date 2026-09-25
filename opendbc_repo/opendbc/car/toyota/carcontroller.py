@@ -58,6 +58,7 @@ REVERSE = structs.CarState.GearShifter.reverse
 # Lock / unlock door commands - Credit goes to AlexandreSato!
 LOCK_CMD = b"\x40\x05\x30\x11\x00\x80\x00\x00"
 UNLOCK_CMD = b"\x40\x05\x30\x11\x00\x40\x00\x00"
+DOORS_RELOCK_SPEED = 2.0  # m/s
 
 
 def is_camry_hybrid(CP) -> bool:
@@ -274,6 +275,7 @@ class CarController(CarControllerBase):
     self.secoc_prev_reset_counter = 0
 
     self.doors_locked = False
+    self.doors_moved = False
     self.brake_hold_active = False
     self._brake_hold_counter = 0
 
@@ -630,13 +632,28 @@ class CarController(CarControllerBase):
 
     self.frame += 1
 
-    if not self.doors_locked and CS.out.gearShifter != PARK:
-      if starpilot_toggles.lock_doors:
-        can_sends.append(CanData(0x750, LOCK_CMD, 0))
-      self.doors_locked = True
-    elif self.doors_locked and CS.out.gearShifter == PARK:
-      if starpilot_toggles.unlock_doors:
-        can_sends.append(CanData(0x750, UNLOCK_CMD, 0))
-      self.doors_locked = False
+    can_sends.extend(self._update_door_locks(CS, starpilot_toggles))
 
     return new_actuators, can_sends
+
+  def _update_door_locks(self, CS, starpilot_toggles):
+    in_park = CS.out.gearShifter == PARK
+    if in_park:
+      self.doors_moved = False
+    elif CS.out.vEgo >= DOORS_RELOCK_SPEED:
+      self.doors_moved = True
+
+    trigger = starpilot_toggles.unlock_doors_trigger
+    stopped = (trigger == 1 and CS.out.standstill) or (trigger == 2 and (CS.out.brakeHoldActive or self.brake_hold_active))
+    # Once the car has moved, re-locking needs real speed so creeping in traffic can't flip the locks back and forth
+    lock_speed = max(starpilot_toggles.lock_doors_speed, DOORS_RELOCK_SPEED) if self.doors_moved else starpilot_toggles.lock_doors_speed
+
+    if not self.doors_locked and not in_park and CS.out.vEgo >= lock_speed:
+      self.doors_locked = True
+      if starpilot_toggles.lock_doors:
+        return [CanData(0x750, LOCK_CMD, 0)]
+    elif self.doors_locked and (in_park or (self.doors_moved and stopped)):
+      self.doors_locked = False
+      if starpilot_toggles.unlock_doors:
+        return [CanData(0x750, UNLOCK_CMD, 0)]
+    return []
