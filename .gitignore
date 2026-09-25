@@ -13,7 +13,11 @@ venv/
 a.out
 .hypothesis
 .cache/
+.host_runtime/
+.comma_sysroot/
+.venv-linux-arm64/
 bin/
+!openpilot/starpilot/galaxy/bin/
 
 # created at launch for comma hardware PYTHONPATH (PC uses editable installs via pyproject.toml)
 /msgq
@@ -21,6 +25,7 @@ bin/
 /rednose
 /teleoprtc
 /tinygrad
+/jetlink
 
 *.mp4
 *.dylib
@@ -38,6 +43,7 @@ bin/
 *.os
 *.os-*
 *.so
+!openpilot/tools/replay/libmedia_mux.so
 *.a
 st[0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z]
 *.unchunked
@@ -50,7 +56,6 @@ st[0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z][0-9A-Za-z]
 *.stats
 *.pkl
 *.pkl*
-!openpilot/selfdrive/modeld/models/big_*_tinygrad.pkl
 config.json
 compile_commands.json
 compare_runtime*.html
@@ -59,6 +64,9 @@ openpilot/selfdrive/modeld/models/tg_input_devices.json
 # build artifacts
 docs/_site/
 openpilot/selfdrive/pandad/pandad
+openpilot/selfdrive/pandad/tests/test_aol_protocol
+openpilot/selfdrive/pandad/tests/test_aol_wire
+openpilot/selfdrive/pandad/tests/test_panda_usb
 openpilot/cereal/services.h
 openpilot/cereal/gen
 openpilot/cereal/messaging/bridge
@@ -98,3 +106,35 @@ build/
 .context/
 PLAN.md
 TASK.md
+
+# Disk-backed model cache reconstructed from published numbered parts.
+openpilot/selfdrive/modeld/models/*.unchunked
+
+# Publish only small compiled model packages, never raw pickles or caches.
+!openpilot/selfdrive/modeld/models/dmonitoring_model_tinygrad.pkl.chunk[0-9][0-9]of[0-9][0-9]
+!openpilot/selfdrive/modeld/models/dmonitoring_model_tinygrad.pkl.chunk[0-9][0-9]of[0-9][0-9][0-9]
+!openpilot/selfdrive/modeld/models/dmonitoring_model_tinygrad.pkl.chunk[0-9][0-9]of[0-9][0-9][0-9][0-9]
+!openpilot/selfdrive/modeld/models/dmonitoring_model_tinygrad.pkl.chunk[0-9][0-9][0-9]of[0-9][0-9]
+!openpilot/selfdrive/modeld/models/dmonitoring_model_tinygrad.pkl.chunk[0-9][0-9][0-9]of[0-9][0-9][0-9]
+!openpilot/selfdrive/modeld/models/dmonitoring_model_tinygrad.pkl.chunk[0-9][0-9][0-9]of[0-9][0-9][0-9][0-9]
+!openpilot/selfdrive/modeld/models/dmonitoring_model_tinygrad.pkl.chunk[0-9][0-9][0-9][0-9]of[0-9][0-9]
+!openpilot/selfdrive/modeld/models/dmonitoring_model_tinygrad.pkl.chunk[0-9][0-9][0-9][0-9]of[0-9][0-9][0-9]
+!openpilot/selfdrive/modeld/models/dmonitoring_model_tinygrad.pkl.chunk[0-9][0-9][0-9][0-9]of[0-9][0-9][0-9][0-9]
+!openpilot/selfdrive/modeld/models/dmonitoring_model_tinygrad.pkl.chunkmanifest
+!openpilot/selfdrive/modeld/models/dmonitoring_model_tinygrad.pkl.chunksha256
+!openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunk[0-9][0-9]of[0-9][0-9]
+!openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunk[0-9][0-9]of[0-9][0-9][0-9]
+!openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunk[0-9][0-9]of[0-9][0-9][0-9][0-9]
+!openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunk[0-9][0-9][0-9]of[0-9][0-9]
+!openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunk[0-9][0-9][0-9]of[0-9][0-9][0-9]
+!openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunk[0-9][0-9][0-9]of[0-9][0-9][0-9][0-9]
+!openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunk[0-9][0-9][0-9][0-9]of[0-9][0-9]
+!openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunk[0-9][0-9][0-9][0-9]of[0-9][0-9][0-9]
+!openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunk[0-9][0-9][0-9][0-9]of[0-9][0-9][0-9][0-9]
+!openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunkmanifest
+!openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunksha256
+
+# Jetlink editable-install metadata.
+/jetlink_repo/jetlink.egg-info/
+
+# Local Google Play resolver build output (source and lockfile are versioned).

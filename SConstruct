@@ -5,6 +5,8 @@ import sysconfig
 import platform
 import shlex
 import importlib
+import re
+import stat
 import numpy as np
 
 import SCons.Errors
@@ -56,9 +58,15 @@ assert arch in [
 ]
 
 pkg_names = ['acados', 'capnproto', 'ffmpeg', 'json11', 'ncurses', 'zeromq', 'zstd']
+if arch != 'Darwin':
+  pkg_names.append('libusb')
 pkgs = [importlib.import_module(name) for name in pkg_names]
 acados = pkgs[pkg_names.index('acados')]
 ffmpeg = pkgs[pkg_names.index('ffmpeg')]
+from tools.laptop_device_build.runtime_paths import runtime_library_path
+
+build_sysroot = os.environ.get("COMMA_BUILD_SYSROOT") if arch == "comma_arm64" else None
+ffmpeg_runtime_dir = runtime_library_path(ffmpeg.LIB_DIR, sys.prefix, "/usr/local/venv" if build_sysroot else None)
 # Shared package ships .so/.dylib; older device venvs still have static .a only.
 # Keep static link deps (x264/z/va/drm) when the installed package is static so
 # COMMA_HARDWARE CI works without upgrading the device venv yet.
@@ -159,7 +167,7 @@ env = Environment(
     "#rednose_repo/rednose/helpers",
     [x.LIB_DIR for x in pkgs],
   ],
-  RPATH=[ffmpeg.LIB_DIR] if ffmpeg_shared else [],
+  RPATH=[ffmpeg_runtime_dir] if ffmpeg_shared else [],
   CYTHONCFILESUFFIX=".cpp",
   COMPILATIONDB_USE_ABSPATH=True,
   REDNOSE_ROOT="#rednose_repo",
@@ -184,6 +192,15 @@ if arch == "comma_arm64":
   arch_flags = ["-D__COMMA_HARDWARE__", "-mcpu=cortex-a57"]
   env.Append(CCFLAGS=arch_flags)
   env.Append(CXXFLAGS=arch_flags)
+  if build_sysroot:
+    if not all(os.path.isdir(os.path.join(build_sysroot, part)) for part in ("usr/include", "usr/lib/aarch64-linux-gnu", "lib/aarch64-linux-gnu")):
+      raise SCons.Errors.UserError(f"Incomplete COMMA_BUILD_SYSROOT: {build_sysroot}")
+    # Clang's --sysroot controls the standard headers and linker startup/libs;
+    # explicit SCons paths make device libraries win over container libraries.
+    env.Prepend(CPPPATH=[os.path.join(build_sysroot, part) for part in ("usr/local/include", "usr/include")])
+    env.Prepend(LIBPATH=[os.path.join(build_sysroot, part) for part in ("usr/local/lib", "usr/lib/aarch64-linux-gnu", "lib/aarch64-linux-gnu")])
+    env.Append(CCFLAGS=[f"--sysroot={build_sysroot}"])
+    env.Append(LINKFLAGS=[f"--sysroot={build_sysroot}"])
 elif arch == "Darwin":
   env.Append(LIBPATH=[
     "/System/Library/Frameworks/OpenGL.framework/Libraries",
@@ -226,6 +243,8 @@ if arch == "Darwin":
   envCython["LINKFLAGS"] = env["LINKFLAGS"] + ["-bundle", "-undefined", "dynamic_lookup"]
 else:
   envCython["LINKFLAGS"] = ["-pthread", "-shared"]
+  if build_sysroot:
+    envCython.Append(LINKFLAGS=[f"--sysroot={build_sysroot}"])
 
 np_version = SCons.Script.Value(np.__version__)
 Export('envCython', 'np_version')
@@ -233,19 +252,38 @@ Export('envCython', 'np_version')
 Export('env', 'arch', 'acados', 'ffmpeg_libs')
 
 # Setup cache dir
-cache_dir = '/data/scons_cache' if arch == "comma_arm64" else '/tmp/scons_cache'
+cache_dir = os.environ.get('SCONS_CACHE', '/data/scons_cache' if arch == "comma_arm64" else '/tmp/scons_cache')
 cache_size_limit = 4e9 if "CI" in os.environ else 2e9
 CacheDir(cache_dir)
 Clean(["."], cache_dir)
 
 def prune_cache_dir(target=None, source=None, env=None):
-  cache_files = sorted((os.path.join(root, f) for root, _, files in os.walk(cache_dir) for f in files), key=os.path.getmtime)
-  cache_size = sum(os.path.getsize(f) for f in cache_files)
-  for f in cache_files:
+  cache_files = []
+  cache_root = os.path.normpath(cache_dir)
+  for root, _, files in os.walk(cache_root):
+    shard = os.path.basename(root)
+    if os.path.dirname(root) != cache_root or re.fullmatch(r'[0-9A-Fa-f]{2}', shard) is None:
+      continue
+    for name in files:
+      if re.fullmatch(r'(?:[0-9a-f]{32}|[0-9a-f]{64})', name) is None or name[:2].lower() != shard.lower():
+        continue
+      path = os.path.join(root, name)
+      try:
+        info = os.stat(path, follow_symlinks=False)
+      except FileNotFoundError:
+        continue
+      if stat.S_ISREG(info.st_mode):
+        cache_files.append((info.st_mtime, info.st_size, path))
+  cache_files.sort()
+  cache_size = sum(size for _, size, _ in cache_files)
+  for _, size, path in cache_files:
     if cache_size < cache_size_limit:
       break
-    cache_size -= os.path.getsize(f)
-    os.unlink(f)
+    try:
+      os.unlink(path)
+    except FileNotFoundError:
+      pass
+    cache_size -= size
 
 # ********** start building stuff **********
 
@@ -281,6 +319,7 @@ SConscript([
 
 if arch == "comma_arm64":
   SConscript(['openpilot/system/camerad/SConscript'])
+  SConscript(['openpilot/starpilot/system/android_auto/SConscript'])
 
 # Build selfdrive
 SConscript([
@@ -289,12 +328,16 @@ SConscript([
   'openpilot/selfdrive/locationd/SConscript',
   'openpilot/selfdrive/modeld/SConscript',
   'openpilot/selfdrive/ui/SConscript',
+  'openpilot/starpilot/audio/native/SConscript',
 ])
+
+# Replay is also the isolated on-device viewer engine.
+if GetOption('extras') or arch == "comma_arm64":
+  SConscript(['openpilot/tools/replay/SConscript'])
 
 # Build desktop-only tools
 if GetOption('extras') and arch != "comma_arm64":
   SConscript([
-    'openpilot/tools/replay/SConscript',
     'openpilot/tools/cabana/SConscript',
     'openpilot/tools/jotpluggler/SConscript',
   ])
@@ -335,3 +378,28 @@ def progress_function(node):
 
 Progress(progress_function, interval=progress_interval)
 AddPostAction(BUILD_TARGETS or [Dir('.')], prune_cache_dir)
+
+# Release CI rebuilds tracked device outputs for the host architecture.
+if manifest_path := os.environ.get("STARPILOT_CI_BUILD_MANIFEST"):
+  from tools.release.build_manifest import capture
+  manifest_nodes = env.arg2nodes(BUILD_TARGETS or [Dir('.')], env.fs.Entry)
+  manifest_seen = set()
+  manifest_outputs = set()
+  while manifest_nodes:
+    manifest_node = manifest_nodes.pop().disambiguate()
+    if manifest_node in manifest_seen:
+      continue
+    manifest_seen.add(manifest_node)
+    manifest_executor = manifest_node.get_executor()
+    if manifest_executor is not None:
+      manifest_nodes += manifest_executor.get_all_prerequisites() + manifest_executor.get_all_children()
+      for target in manifest_executor.get_all_targets():
+        if target.is_derived() and hasattr(target, 'abspath'):
+          relative = os.path.relpath(target.abspath, Dir('#').abspath)
+          if not relative.startswith('../'):
+            manifest_outputs.add(relative)
+  capture(Dir('#').abspath, manifest_path, manifest_outputs,
+          {'arch': arch, 'targets': list(BUILD_TARGETS), 'extras': GetOption('extras'),
+           'ccflags': GetOption('ccflags'), 'release': release, 'arguments': dict(ARGUMENTS),
+           'toolchain': {key: str(env.get(key, '')) for key in
+                         ('CC', 'CXX', 'CCFLAGS', 'CFLAGS', 'CXXFLAGS', 'LINKFLAGS')}})

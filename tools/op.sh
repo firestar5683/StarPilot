@@ -119,13 +119,8 @@ function op_check_git() {
     echo -e " ↳ [${GREEN}✔${NC}] git found."
   fi
 
-  echo "Checking checked-in model resources..."
-  if [[ $(file -b "$OPENPILOT_ROOT/openpilot/selfdrive/modeld/models/dmonitoring_model.onnx") == "data" ]]; then
-    echo -e " ↳ [${GREEN}✔${NC}] model resources found."
-  else
-    echo -e " ↳ [${RED}✗${NC}] model resources missing or invalid; restore the ordinary checkout"
-    return 1
-  fi
+  echo "Checking ordinary checkout resources..."
+  python3 "$OPENPILOT_ROOT/tools/resources/check.py" || return 1
 
   echo "Checking tracked dependency sources..."
   op_check_dependencies
@@ -202,7 +197,7 @@ EOF
 
   # Local Python package sources are shipped in the checkout. Bootstrap Python
   # before running the full manifest validator on machines without Python yet.
-  for path in upstream-sync.json panda/pyproject.toml opendbc_repo/pyproject.toml msgq_repo/pyproject.toml rednose_repo/pyproject.toml teleoprtc_repo/pyproject.toml tinygrad_repo/pyproject.toml; do
+  for path in upstream-sync.json panda/pyproject.toml opendbc_repo/pyproject.toml msgq_repo/pyproject.toml rednose_repo/pyproject.toml teleoprtc_repo/pyproject.toml tinygrad_repo/pyproject.toml jetlink_repo/pyproject.toml; do
     if [[ ! -f "$OPENPILOT_ROOT/$path" ]]; then
       echo "Missing tracked dependency source: $path. Restore the complete checkout."
       return 1
@@ -318,7 +313,7 @@ function op_lint() {
 
 function op_test() {
   op_before_cmd
-  op_run_command tools/test_runner.py "$@"
+  op_run_command python3 tools/ci/run_host_tests.py "$@"
 }
 
 function op_replay() {
@@ -352,12 +347,23 @@ function op_check_agnos_update() {
     return 0
   fi
 
-  local choice current_version target_version
+  local choice current_version target_version update_policy target_config
   current_version="$(< /VERSION)"
-  target_version="$(unset AGNOS_VERSION; source "$OPENPILOT_ROOT/launch_env.sh"; echo "$AGNOS_VERSION")"
+  target_config="$(unset AGNOS_VERSION AGNOS_UPDATE_POLICY; source "$OPENPILOT_ROOT/launch_env.sh"; printf '%s\n%s\n' "$AGNOS_VERSION" "${AGNOS_UPDATE_POLICY:-auto}")"
+  target_version="${target_config%%$'\n'*}"
+  update_policy="${target_config#*$'\n'}"
+  if [[ -z "$target_version" || ( "$update_policy" != "auto" && "$update_policy" != "retain" ) ]]; then
+    echo "Invalid AGNOS installation policy. No OS update was attempted."
+    return 1
+  fi
 
   if [[ "$current_version" == "$target_version" ]]; then
     return 0
+  fi
+
+  if [[ "$update_policy" == "retain" ]]; then
+    echo "This StarPilot build retains AGNOS $target_version; installed $current_version. No OS update was attempted."
+    return 1
   fi
 
   echo -e "${BOLD}AGNOS update available:${NC} $current_version → $target_version"

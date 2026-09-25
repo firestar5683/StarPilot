@@ -6,6 +6,7 @@ DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" >/dev/null && pwd)"
 
 SOURCE_DIR="$(git -C "$DIR" rev-parse --show-toplevel)"
 python3 "$SOURCE_DIR/tools/vendor/check.py"
+python3 "$SOURCE_DIR/tools/release/stage_mapd_provider.py" --source "$SOURCE_DIR"
 if [ -z "$TARGET_DIR" ]; then
   TARGET_DIR="$(mktemp -d)"
 fi
@@ -31,6 +32,7 @@ fi
 echo "[-] copying files T=$SECONDS"
 cd "$SOURCE_DIR"
 ./tools/release/release_files.py | xargs -0 cp -pR --parents -t "$TARGET_DIR" --
+python3 "$SOURCE_DIR/tools/release/stage_mapd_provider.py" --source "$SOURCE_DIR" --destination "$TARGET_DIR"
 
 # in the directory
 cd "$TARGET_DIR"
@@ -55,8 +57,9 @@ date: $DATETIME
 master commit: $GIT_HASH
 "
 
-# Check the packaged dependency layout and ordinary checkout assets.
+# Check packaged dependency layout and reject pointer payloads.
 python3 tools/vendor/check.py --revision HEAD
+python3 tools/resources/check.py --revision HEAD
 
 source "$SOURCE_DIR/tools/release/check_file_sizes.sh"
 

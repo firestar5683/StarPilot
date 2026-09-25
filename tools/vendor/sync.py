@@ -12,7 +12,7 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
-from openpilot.common.vendor_manifest import MANIFEST, SHA, git, validate_worktree
+from openpilot.common.vendor_manifest import MANIFEST, SHA, dependency_entries, git, validate_worktree
 
 
 def run(repo: Path, *args: str, data: bytes | None = None) -> bytes:
@@ -60,7 +60,7 @@ def sync(repo: Path, dependency: str, target: str, source_repo: Path | None = No
   manifest = validate_worktree(repo)
   if git(repo, "status", "--porcelain=v1", "--untracked-files=all").strip():
     raise ValueError("Commit or preserve all working tree changes before syncing")
-  entry = next((item for item in manifest["dependencies"] if item["path"] == dependency), None)
+  entry = next((item for item in dependency_entries(manifest) if item["path"] == dependency), None)
   if entry is None:
     raise ValueError(f"Unknown dependency: {dependency}")
   source = source_repo.resolve() if source_repo is not None else upstream_cache(entry, target)

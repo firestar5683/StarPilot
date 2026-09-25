@@ -24,6 +24,14 @@ def make_manifest():
   }
 
 
+def extension_manifest():
+  manifest = make_manifest()
+  entry = next(item for item in manifest['dependencies'] if item['path'] == 'jetlink_repo')
+  manifest['dependencies'].remove(entry)
+  manifest['vendored_extensions'] = [entry]
+  return manifest
+
+
 class TestManifestSchema(unittest.TestCase):
   def assert_invalid(self, manifest):
     with self.assertRaises(ValueError):
@@ -33,6 +41,31 @@ class TestManifestSchema(unittest.TestCase):
     manifest = make_manifest()
     manifest["dependencies"][-1]["exclude"] = ["AGENTS.md", "docs/generated"]
     self.assertEqual(parse_manifest(json.dumps(manifest)), manifest)
+
+  def test_extension_and_legacy_manifest_forms(self):
+    for manifest in (make_manifest(), extension_manifest()):
+      self.assertEqual(parse_manifest(json.dumps(manifest)), manifest)
+    legacy = extension_manifest()
+    del legacy['vendored_extensions']
+    self.assertEqual(parse_manifest(json.dumps(legacy)), legacy)
+
+  def test_extensions_are_known_unique_and_fully_validated(self):
+    for field, value in (('path', 'unknown_repo'), ('path', 'panda'), ('commit', 'short'),
+                         ('tree', 'short'), ('url', 'http://example.com'), ('exclude', ['../escape'])):
+      with self.subTest(field=field, value=value):
+        manifest = extension_manifest()
+        manifest['vendored_extensions'][0][field] = value
+        self.assert_invalid(manifest)
+    for entries in (None, {}, 'jetlink_repo'):
+      manifest = extension_manifest()
+      manifest['vendored_extensions'] = entries
+      self.assert_invalid(manifest)
+    manifest = extension_manifest()
+    manifest['vendored_extensions'] *= 2
+    self.assert_invalid(manifest)
+    manifest = extension_manifest()
+    manifest['dependencies'].append(copy.deepcopy(manifest['vendored_extensions'][0]))
+    self.assert_invalid(manifest)
 
   def test_malformed_json_and_non_objects(self):
     for raw in ("", "{", b"\xff", "null", "true", "[]", '"manifest"', "1"):
@@ -138,6 +171,46 @@ class TestManifestSourceTrees(unittest.TestCase):
       validate_revision(self.repo, "HEAD")
     with self.assertRaises(ValueError):
       validate_worktree(self.repo)
+
+  def use_extension(self):
+    self.manifest = extension_manifest()
+    self.write_manifest()
+    self.commit()
+
+  def test_extension_tree_and_missing_provenance(self):
+    self.use_extension()
+    self.assertEqual(validate_revision(self.repo, 'HEAD'), self.manifest)
+    self.assertEqual(validate_worktree(self.repo), self.manifest)
+    del self.manifest['vendored_extensions']
+    self.write_manifest()
+    self.commit()
+    self.assert_invalid_revision_and_worktree()
+    shutil.rmtree(self.repo / 'jetlink_repo')
+    self.commit()
+    self.assertEqual(validate_revision(self.repo, 'HEAD'), self.manifest)
+    self.assertEqual(validate_worktree(self.repo), self.manifest)
+
+  def test_extension_missing_folder_and_symlink_rejected(self):
+    self.use_extension()
+    folder = self.repo / 'jetlink_repo'
+    external = self.root / 'external-jetlink'
+    folder.rename(external)
+    self.commit()
+    self.assert_invalid_revision_and_worktree()
+    folder.symlink_to(external, target_is_directory=True)
+    self.commit()
+    self.assert_invalid_revision_and_worktree()
+
+  def test_extension_excluded_metadata_and_nested_git_rejected(self):
+    self.use_extension()
+    folder = self.repo / 'jetlink_repo'
+    (folder / '.git').mkdir()
+    with self.assertRaises(ValueError):
+      validate_worktree(self.repo)
+    (folder / '.git').rmdir()
+    (folder / 'AGENTS.md').write_text('Excluded metadata')
+    self.commit()
+    self.assert_invalid_revision_and_worktree()
 
   def test_valid_tree_permits_local_source_edits(self):
     self.assertEqual(validate_revision(self.repo, "HEAD"), self.manifest)
