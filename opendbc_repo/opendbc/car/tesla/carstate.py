@@ -3,11 +3,17 @@ from opendbc.can import CANDefine, CANParser
 from opendbc.car import Bus, structs
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.interfaces import CarStateBase
-from opendbc.car.tesla.values import DBC, CANBUS, GEAR_MAP, STEER_THRESHOLD, TeslaFlags
+from opendbc.car.tesla.hw1 import HW1CarState, get_hw1_can_parsers
+from opendbc.car.tesla.values import CAR, DBC, CANBUS, GEAR_MAP, STEER_THRESHOLD, TeslaFlags
 
 class CarState(CarStateBase):
   def __init__(self, CP):
     super().__init__(CP)
+    if CP.carFingerprint == CAR.TESLA_MODEL_S_HW1:
+      self.hw1 = HW1CarState(CP)
+      self.hands_on_level = 0
+      self.das_control = {}
+      return
     self.can_define = CANDefine(DBC[CP.carFingerprint][Bus.party])
     self.shifter_values = self.can_define.dv["DI_systemStatus"]["DI_gear"]
 
@@ -28,6 +34,11 @@ class CarState(CarStateBase):
     self.cruise_enabled_prev = cruise_enabled
 
   def update(self, can_parsers) -> structs.CarState:
+    if self.CP.carFingerprint == CAR.TESLA_MODEL_S_HW1:
+      ret = self.hw1.update(can_parsers)
+      self.hands_on_level = self.hw1.hands_on_level
+      self.das_control = self.hw1.das_control
+      return ret
     cp_party = can_parsers[Bus.party]
     cp_ap_party = can_parsers[Bus.ap_party]
     ret = structs.CarState()
@@ -117,6 +128,8 @@ class CarState(CarStateBase):
 
   @staticmethod
   def get_can_parsers(CP):
+    if CP.carFingerprint == CAR.TESLA_MODEL_S_HW1:
+      return get_hw1_can_parsers(CP)
     return {
       Bus.party: CANParser(DBC[CP.carFingerprint][Bus.party], [], CANBUS.party),
       Bus.ap_party: CANParser(DBC[CP.carFingerprint][Bus.party], [], CANBUS.autopilot_party)

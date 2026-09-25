@@ -11,6 +11,7 @@
 #include "opendbc/safety/modes/honda.h"
 #include "opendbc/safety/modes/toyota.h"
 #include "opendbc/safety/modes/tesla.h"
+#include "opendbc/safety/modes/tesla_hw1.h"
 #include "opendbc/safety/modes/gm.h"
 #include "opendbc/safety/modes/ford.h"
 #include "opendbc/safety/modes/hyundai.h"
@@ -541,13 +542,14 @@ int set_safety_hooks(uint16_t mode, uint16_t param) {
   int hook_config_count = sizeof(safety_hook_registry) / sizeof(safety_hook_config);
   for (int i = 0; i < hook_config_count; i++) {
     if (safety_hook_registry[i].id == mode) {
-      if ((mode == SAFETY_TESLA) && ((param & ~1U) != 0U)) {
+      if ((mode == SAFETY_TESLA) && ((param & ~(TESLA_HW1_FLAG | 1U)) != 0U)) {
         current_hooks = &nooutput_hooks;
         current_safety_mode = SAFETY_NOOUTPUT;
         current_safety_param = 0;
         continue;
       }
-      current_hooks = safety_hook_registry[i].hooks;
+      current_hooks = ((mode == SAFETY_TESLA) && GET_FLAG(param, TESLA_HW1_FLAG)) ?
+                      &tesla_hw1_hooks : safety_hook_registry[i].hooks;
       current_safety_mode = mode;
       current_safety_param = param;
       set_status = 0;  // set

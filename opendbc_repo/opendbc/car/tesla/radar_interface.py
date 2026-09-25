@@ -1,7 +1,8 @@
 from opendbc.can import CANParser
 from opendbc.car import Bus, structs
 from opendbc.car.interfaces import RadarInterfaceBase
-from opendbc.car.tesla.values import DBC
+from opendbc.car.tesla.radar_hw1 import HW1RadarInterface
+from opendbc.car.tesla.values import CAR, DBC
 
 RADAR_START_ADDR = 0x410
 RADAR_MSG_COUNT = 80  # 40 points * 2 messages each
@@ -24,6 +25,9 @@ def get_radar_can_parser(CP):
 class RadarInterface(RadarInterfaceBase):
   def __init__(self, CP):
     super().__init__(CP)
+    if CP.carFingerprint == CAR.TESLA_MODEL_S_HW1:
+      self.hw1 = HW1RadarInterface(CP)
+      return
     self.updated_messages = set()
     self.trigger_msg = RADAR_START_ADDR + RADAR_MSG_COUNT - 1
 
@@ -31,6 +35,8 @@ class RadarInterface(RadarInterfaceBase):
     self.rcp = get_radar_can_parser(CP)
 
   def update(self, can_strings):
+    if self.CP.carFingerprint == CAR.TESLA_MODEL_S_HW1:
+      return self.hw1.update(can_strings)
     if self.radar_off_can or self.rcp is None:
       return super().update(None)
 

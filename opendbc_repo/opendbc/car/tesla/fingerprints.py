@@ -5,6 +5,9 @@ from opendbc.car.tesla.values import CAR
 Ecu = CarParams.Ecu
 
 FW_VERSIONS = {
+  CAR.TESLA_MODEL_S_HW1: {
+    (Ecu.eps, 0x730, None): [b'1016704-00-HAA' + b'\x00' * 10, b'\x10\x00A'],
+  },
   CAR.TESLA_MODEL_3: {
     (Ecu.eps, 0x730, None): [
       b'TeM3_E014p10_0.0.0 (16),E014.17.00',

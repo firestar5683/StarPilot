@@ -259,6 +259,8 @@ BO_ 872 DI_state: 8 DI
  SG_ DI_aebState : 41|3@1+ (1,0) [0|0] ""  NEO
  SG_ DI_stateCounter : 44|4@1+ (1,0) [0|0] ""  NEO
  SG_ DI_digitalSpeed : 48|8@1+ (1,0) [0|250] ""  NEO
+ SG_ DI_hw1DigitalSpeed : 32|8@1+ (1,0) [0|250] "speed" NEO
+ SG_ DI_hw1CruiseSet : 48|8@1+ (1,0) [0|250] "speed" NEO
  SG_ DI_stateChecksum : 56|8@1+ (1,0) [0|0] ""  NEO
 
 BO_ 109 SBW_RQ_SCCM: 4 STW
@@ -898,4 +900,8 @@ VAL_ 1160 DAS_steeringAngleRequest 16384 "ZERO_ANGLE" ;
 VAL_ 1160 DAS_steeringControlType 1 "ANGLE_CONTROL" 3 "DISABLED" 0 "NONE" 2 "RESERVED" ;
 VAL_ 1160 DAS_steeringHapticRequest 1 "ACTIVE" 0 "IDLE" ;
 
+
+
+BO_ 529 RCM_status: 8 RCM
+ SG_ RCM_buckleDriverStatus : 15|2@0+ (1,0) [0|3] "" GTW,OCS,DAS
 
