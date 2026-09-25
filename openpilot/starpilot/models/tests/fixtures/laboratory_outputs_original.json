@@ -1,0 +1,111 @@
+{
+  "original_source_sha256": "f0210b2ca26a1b9c4adbcf5825d0d01851254dbfbdbc54595c16d9d77d71731f",
+  "generator": "Original AST-selected pure composition; explicit longitudinal current-frame source; normalized float32 plan (1,33,15), action decoded separately.",
+  "cases": [
+    {
+      "versions": [
+        "v8",
+        "v9"
+      ],
+      "lateral_offset": 10,
+      "longitudinal_offset": 20,
+      "expected": {
+        "desired_curvature": "c2600e1170a6c8870bfa1db230512017ce5569d52a67906d2bd8c70edf57d4ed",
+        "desired_curvature_stds": "00c86d4ebf27bafc31acbbcd4aacae39e1642e5726d1b27858cfe6b127a65022",
+        "lat_planner_solution": "9d10c66e47cb0fc52a36e7e0be9497177f8df9d82fc6605a00fe73e147434dec",
+        "lat_planner_solution_stds": "d2046121607eb00f881f35e99e14a5d3164e550160b3f9eae5ef74d4d184cc48",
+        "lane_lines": "b1fa5fcbd1577014f692d8e633d7fb70f1dcd8ec95b3c4a6b734bd6e17f90d5c",
+        "lane_lines_stds": "4c0dcf842694d757c8200ba201d437506e54c4643cfa32f2511f0d9dfa3960ef",
+        "lane_lines_prob": "0374f5e2a29b996ebdb7fe2bd452ccd3b55290dc71fb5b3843d577f44655f9f3",
+        "road_edges": "a1177c7c6de49027ff21ad2fd78edbeef618a3000e1fff4c231074853b50180f",
+        "road_edges_stds": "d41173b5c2be5672a0abca35f34e0aac8cf2a6ff8ccdc472c88e00b45d271230",
+        "desire_state": "54a684f78cccd3f5bf7cdcfba9a25d2e1e979edf2a900f9064371bbe7ff12eaf",
+        "desire_pred": "93253864fb1cc58f3670d912c108b2c75165dd41f71deeead539c22b5bbafca9",
+        "pose": "db3ee5a345d0834277ff12d708791943e1ab9b33f829c6491789db5dd176fc9e",
+        "pose_stds": "e72a0a1259c6dfaa33587bbbb131a9ed8a5b1d8a7892a35973dfb6aa50dc341c",
+        "wide_from_device_euler": "e369af615af989f296ef62a9582e7c4bbb80e4a568d0b69ed93dfee0b7fb03b9",
+        "wide_from_device_euler_stds": "9dd8a25b398d69f4a2f5a14d16f2224918ab1a329d0c0b7fae3355a26247dd9e",
+        "road_transform": "45af797502186a93eb4632248488571f4c7d8e9d3a09febb4d96deee39a1e65e",
+        "road_transform_stds": "39d3270cfe99fb33d907c7a37451cdde0e2fa3f38683ceecd1a46ff1f447cd1b",
+        "lead": "66bfc2d5b98423fe06d351f687bef88be82f7119c409db82da3c87105c465fc6",
+        "lead_prob": "e45bb2ec3e63950b3e464a45bb8171c1209393c458e4991028ea42620f88b607",
+        "meta": "2befc666fccb379e084e3feed7c461eb095c2277b91733ae62333052a0be7196",
+        "planplus": "26d4b5717d6a9ed1a987c23e9cf779cfffee11e996be50688d90de9de49bace7",
+        "raw_pred": "51127f644b8fcf6b45f756098619960e20674e6dc726856e4c20da834253575a",
+        "unknown_extra": "19b7e0870c270281002ac440b752780a1ceba740b30bb62effca8d01b7b7ecbb",
+        "plan": "ca530c67c1613fe1cf9224ea8ed125fcdfe180da62341a181f84547ec17c3862",
+        "plan_stds": "f55f9fca10f6f0223c16d207242748ee3ac8bee75900f6703dae824e3387186b"
+      }
+    },
+    {
+      "versions": [
+        "v14",
+        "v15"
+      ],
+      "lateral_offset": 1000,
+      "longitudinal_offset": 2000,
+      "expected": {
+        "desired_curvature": "48270c20e131431ad33afbf76bae7286fbf4f0ad55373a4624f6957c0a7e5bd3",
+        "desired_curvature_stds": "7f54928b9e681540bf154d5e9c14f57da0d3e5b9654d5c3d573243d5ab168ac0",
+        "lat_planner_solution": "40b20dd85498461a7eb26e813eafc09ef8b784dd26f485f7a481e304d7f0614f",
+        "lat_planner_solution_stds": "acf086207faa6273da611964f94906db6696d2fd463a0bcfa4c650f9d80d2c6d",
+        "lane_lines": "a4eb06d857b4da55875b9f3455244d443abff2262da5bff5fb89ae056ba42214",
+        "lane_lines_stds": "41e3303c4a9f97ec24c23921c01adab75b0ad7ad3b71ba8d1412c289a87d5b75",
+        "lane_lines_prob": "6f8db4b04211c6c31bca3665e64193083078f673a0e3cbe6c3a8c473a2afe7a6",
+        "road_edges": "e43108080f9f9fab9d7729b018a50b0a60d1d1aff6a68d69320a91c30d29ac7a",
+        "road_edges_stds": "afa058f368a910c1a0124182a74f757ae28e55ef1ec1c3deffd6cba058070283",
+        "desire_state": "255106e4dfc96b87fe4f9f4738785df0d7ace598f89ee235222cf425f46cddd6",
+        "desire_pred": "30d67c7cc4f201e7b297b17f5f5d40ac9d538fc86003c1ef9939f2da43cad756",
+        "pose": "44478d7cfb3996843e47d12865b343435dceea321e4de85127c03e80143434c0",
+        "pose_stds": "9603324367b63793a975a24ab3db4356d339a0b47baea3544b3c4d760e2afcf3",
+        "wide_from_device_euler": "374258046cf62cce54400b1d0b2fc7fc4b454d54edb75a6767d31ee791981788",
+        "wide_from_device_euler_stds": "0e90893b1e358b79b82cb35ac987603190272e19a556ae84d56f4856f1744219",
+        "road_transform": "5bb150e05e927f66f67c1a45674521f9fb835e87f51a81c3367ef77820d337ce",
+        "road_transform_stds": "1f5a36d32fc56a69d52b66b3d341351c9786b61eda6002eb7a5f0cd049f99ee0",
+        "lead": "41ef548226148429978482c46219c6ead8b7f64eec5b4e0f26ab99cb79a7c524",
+        "lead_prob": "91ac1f3d1d11cc5e9a0cd33fcad703d177dd539cdfb2ba649241e1c2496d5ce0",
+        "meta": "fac9d42caf83ae32a0091f914b7b7cfa9be839f96675b64c5dd916698c5a6c19",
+        "planplus": "35eb89634463c1d99b1f6deaae2cb67b33512fe2798145c52e834c3c7932f51f",
+        "raw_pred": "6725fcf159c53c6e7896eeaa2a8cf1cb04d5e09e01438338678cbae35ddcfb6a",
+        "unknown_extra": "55f8e7ccecf5c95d544a093099e53cbd8e409942b6b73470d196beafd1f7b9a5",
+        "plan": "6d71aaf15c9646d847ddb04b2fb2718455ff998107ec111c54bc5575735a1ec3",
+        "plan_stds": "fa7d0ef0cad07421cb47b3d4c470238bda21673a59f3ed4653ab5e2ddd224118"
+      }
+    },
+    {
+      "versions": [
+        "v15",
+        "v16"
+      ],
+      "lateral_offset": -1000,
+      "longitudinal_offset": 1000,
+      "expected": {
+        "desired_curvature": "8e296dfc73dec27c9ae57442a6ef354b212d45a924187b11468316dae3984967",
+        "desired_curvature_stds": "d4c04057be63e1a687d71501cc123f7250e26cbbc7005dc181c05230c9cd089a",
+        "lat_planner_solution": "494e83454e5201015d521620cde3ff32e1d684963ae210ee995e4ea1d7ade207",
+        "lat_planner_solution_stds": "76ddcd6935a84860444f86c0e581153ed943f7b604791876ceee12fed6d43c3f",
+        "lane_lines": "316774c6fd093921c6862f6c0ca17ee1e97d2d061c061f9a424c7d72742bf4d7",
+        "lane_lines_stds": "cf2d8052f3a6fc55c9adc939b34207d1fab0a9b4906bb61dbeb74a2dcd22cb85",
+        "lane_lines_prob": "50f3cf87d50de3015734b51878f1c2e3025716fc5f763dc6ff9c06e028cee335",
+        "road_edges": "085b0e6d88f419906362cd94347b8d7c410d1af45a3b833a3860b299616c44df",
+        "road_edges_stds": "7df3713221372e1b5c4608b259e4127ee96d221d1aea7611e82b823ce0b11e8d",
+        "desire_state": "4ca63b15b26aedeafdd39ec2c2c00a3b8ff0a56b139ea7a8d07c7cd75544ff4a",
+        "desire_pred": "fa02d18f4158f326c6621437a79b95b7db666fedcaf7bbdca0ad8327ee57cdeb",
+        "pose": "45a99de0255b714a798c4d63f607c4d562a273d2a6587414a97c5fa3ed127b8c",
+        "pose_stds": "ddbc8c0795480fab91d495a81558ddcf9ce5852e9911edfeaa2fbd1a6cc0395f",
+        "wide_from_device_euler": "7e4a1fc996517d862e43dab9d5b38b32283726bc5cf1b88263fc6afd79cce0ba",
+        "wide_from_device_euler_stds": "c40c85d37bb3c50b863a25ad66e2342fbaab420e83a004ca1477f1052fec7d30",
+        "road_transform": "e234d71da99b30e8c1ca0c8ef8d4887785ecc8cffdd54aa13863de2051305799",
+        "road_transform_stds": "e5aecc961bf2b500458cae3023aa5d59aecefac735fc72b1ea98fae332383ff8",
+        "lead": "3db9b14a5f25b121c02137faff7b00d8263b99a267e017a4e35da2a8e9a728cb",
+        "lead_prob": "f9ee34aa05c8ee301ab80eb5303717023e4e1727992df63a81510d6e8e9b9a20",
+        "meta": "8e2bcca09d503d7472c56bf9f0c5345a40cbe055edde30db17f6eb705e245cd6",
+        "planplus": "24dcdc5ff3867ed237ad56915c7e9d1cf56db727a5787af327b0d7742d4629dd",
+        "raw_pred": "7bb224457c483a72c156f4b2705fabdaa305da839428baa00900a1f2df911388",
+        "unknown_extra": "9c9f0ed46eb94c2c6f896f0838eee44891aa4c8a938df4c544c80de400921ce2",
+        "plan": "efe95619a7b0efc4ab4e8975c49cf9cf883b8ee1994219f3e30b1d2d3b844b8f",
+        "plan_stds": "159b92b6f0d62985827f59be459a8c4a32fc828b705cade66fe14180fe4e633e"
+      }
+    }
+  ]
+}
