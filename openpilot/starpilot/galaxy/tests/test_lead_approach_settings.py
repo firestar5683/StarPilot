@@ -1,0 +1,84 @@
+"""Galaxy uses the shared approaching-lead setting and its fresh authority."""
+
+from pathlib import Path
+from types import SimpleNamespace
+
+import pytest
+
+from opendbc.car.honda.interface import CarInterface
+from opendbc.car.honda.values import CAR
+from openpilot.common.params import Params
+from openpilot.starpilot.galaxy.settings import AuthorityContext, SettingsChanged, SettingsGateway
+
+
+@pytest.fixture
+def setup(tmp_path):
+  params = Params(str(tmp_path))
+  cp = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
+  assert cp.openpilotLongitudinalControl and cp.pcmCruise
+  current = SimpleNamespace(parked=True, cp=cp, raw=b"current-honda-cp")
+  context = SimpleNamespace(sample=lambda: AuthorityContext(current.parked, current.cp, current.raw))
+  return params, current, SettingsGateway(params, context, clock=lambda: 10.0)
+
+
+def page_row(gateway):
+  page = gateway.page("profiles", "session", b"generation")
+  index = next(index for index, row in enumerate(page["rows"]) if row["label"] == "Approaching lead buffer")
+  return page, index, page["rows"][index]
+
+
+def test_galaxy_get_select_apply_without_cp_or_profile_health(setup):
+  params, current, gateway = setup
+  current.cp = None
+  current.raw = None
+  Path(params.get_param_path("LongitudinalPersonalityProfiles")).write_bytes(b"{invalid")
+  Path(params.get_param_path("CustomPersonalities")).write_bytes(b"invalid")
+  page, index, row = page_row(gateway)
+  assert row["value"] == "Off" and row["available"] and row["choices"] == ["Off", "On"]
+  intent = gateway.preview(page["view"], index, 0, "session", b"generation", value="On")
+  assert intent["proposed"] == "On"
+  assert gateway.confirm(intent["intent"], "session", b"generation")
+  assert Path(params.get_param_path("LeadApproachBuffer")).read_bytes() == b"1"
+  page, index, row = page_row(gateway)
+  assert row["value"] == "On"
+  intent = gateway.preview(page["view"], index, 0, "session", b"generation", value="Off")
+  assert gateway.confirm(intent["intent"], "session", b"generation")
+  assert Path(params.get_param_path("LeadApproachBuffer")).read_bytes() == b"0"
+
+
+@pytest.mark.parametrize("field,value", [("openpilotLongitudinalControl", False), ("passive", True),
+                                          ("dashcamOnly", True), ("notCar", True), ("carFingerprint", "")])
+def test_galaxy_saved_preference_remains_editable_with_unqualified_cp(setup, field, value):
+  params, current, gateway = setup
+  setattr(current.cp, field, value)
+  page, index, row = page_row(gateway)
+  assert row["available"]
+  intent = gateway.preview(page["view"], index, 0, "session", b"generation", value="On")
+  assert gateway.confirm(intent["intent"], "session", b"generation")
+  assert Path(params.get_param_path("LeadApproachBuffer")).read_bytes() == b"1"
+
+
+def test_galaxy_intent_rechecks_parked_context_session_and_exact_saved_source(setup):
+  params, current, gateway = setup
+  path = Path(params.get_param_path("LeadApproachBuffer"))
+  for revocation in ("parked", "context", "session", "source"):
+    page, index, _ = page_row(gateway)
+    intent = gateway.preview(page["view"], index, 0, "session", b"generation", value="On")
+    if revocation == "parked":
+      current.parked = False
+      with pytest.raises(SettingsChanged):
+        gateway.confirm(intent["intent"], "session", b"generation")
+      current.parked = True
+    elif revocation == "context":
+      current.raw = b"different-car-source"
+      with pytest.raises(SettingsChanged):
+        gateway.confirm(intent["intent"], "session", b"generation")
+      current.raw = b"current-honda-cp"
+    elif revocation == "session":
+      with pytest.raises(SettingsChanged):
+        gateway.confirm(intent["intent"], "session", b"generation", session_valid=lambda: False)
+    else:
+      path.write_bytes(b"0")
+      assert not gateway.confirm(intent["intent"], "session", b"generation")
+      path.unlink()
+    assert not path.exists()
