@@ -13,6 +13,41 @@ uint32_t microsecond_timer_get(void) {
 #include "opendbc/safety/safety.h"
 #include "opendbc/safety/ignition.h"
 
+// Capture checked internally scheduled CAN frames for native safety tests.
+#define RECORDED_CAN_CAPACITY 32
+static CANPacket_t recorded_can[RECORDED_CAN_CAPACITY];
+static unsigned int recorded_can_count = 0U;
+
+void reset_recorded_can(void) {
+  recorded_can_count = 0U;
+}
+
+unsigned int get_recorded_can_count(void) {
+  return recorded_can_count;
+}
+
+bool get_recorded_can(unsigned int index, CANPacket_t *out) {
+  if (index >= recorded_can_count || out == NULL) {
+    return false;
+  }
+  *out = recorded_can[index];
+  return true;
+}
+
+void can_set_checksum(CANPacket_t *packet) {
+  // This test harness inspects the CAN payload and exercises the TX hook;
+  // Panda packet framing checksums are added by the device transport.
+  packet->checksum = 0U;
+}
+
+void can_send(CANPacket_t *to_push, uint8_t bus_number, bool skip_tx_hook) {
+  CANPacket_t packet = *to_push;
+  packet.bus = bus_number;
+  if ((skip_tx_hook || safety_tx_hook(&packet)) && recorded_can_count < RECORDED_CAN_CAPACITY) {
+    recorded_can[recorded_can_count++] = packet;
+  }
+}
+
 bool safety_config_valid() {
   if (current_safety_config.rx_checks_len <= 0) {
     printf("missing RX checks\n");
@@ -30,8 +65,33 @@ bool safety_config_valid() {
   return true;
 }
 
+// Exercise defensive AOL RX guards with configs that production safety init
+// cannot construct. Restore the active mode's config before returning.
+bool safety_test_rx_health_fixture(unsigned int variant, bool canfd) {
+  const uint32_t now = microsecond_timer_get();
+  RxCheck check = {
+    .msg = {{.addr = 0x123, .bus = 0U, .len = 8,
+             .frequency = (variant == 2U) ? 9U : 100U,
+             .ignore_checksum = false, .ignore_counter = false,
+             .max_counter = 0U, .ignore_quality_flag = false}, {0}, {0}},
+    .status = {.msg_seen = true, .index = 0, .valid_checksum = true,
+               .valid_quality_flag = true, .last_timestamp = (variant == 3U) ? now - 100001U : now},
+  };
+  const safety_config original = current_safety_config;
+  current_safety_config.rx_checks = (variant == 1U) ? NULL : &check;
+  current_safety_config.rx_checks_len = (variant == 0U) ? 0 : 1;
+  (void)canfd;
+  const bool healthy = aol_rx_healthy();
+  current_safety_config = original;
+  return healthy;
+}
+
 void set_controls_allowed(bool c){
   controls_allowed = c;
+}
+
+void set_aol_test_heartbeat(bool engaged) {
+  heartbeat_engaged = engaged;
 }
 
 void set_alternative_experience(int mode){
@@ -142,6 +202,10 @@ void set_rt_torque_last(int t){
 
 void set_desired_torque_last(int t){
   desired_torque_last = t;
+}
+
+int get_desired_angle_last(void){
+  return desired_angle_last;
 }
 
 void set_desired_angle_last(int t){

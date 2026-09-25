@@ -58,5 +58,8 @@ void fault_recovered(uint32_t fault);
 // ******************** power_saving ********************
 
 extern bool power_save_enabled;
+#if defined(ALLOW_DEBUG) && defined(STM32H7)
+extern volatile bool stop_mode_requested;
+#endif
 
 void set_power_save_state(bool enable);

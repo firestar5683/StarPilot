@@ -55,6 +55,67 @@ const int MAX_WRONG_COUNTERS = 5;
 
 // This can be set by the safety hooks
 bool controls_allowed = false;
+const AolSafetyPolicy *aol_policy = NULL;
+bool aol_optional_release_capable = false;
+uint8_t aol_host_axis_mask = 0U;
+uint32_t aol_host_request_ts = 0U;
+void aol_set_host_request(uint8_t axis_mask) {
+  if (aol_policy != NULL) {
+    aol_host_axis_mask = axis_mask & 0x3U;
+    aol_host_request_ts = microsecond_timer_get();
+    if (aol_policy->host_request != NULL) {
+      aol_policy->host_request(aol_host_axis_mask | (aol_optional_release_capable ? (axis_mask & 0x4U) : 0U));
+    }
+  } else {
+    aol_host_axis_mask = 0U;
+  }
+}
+
+uint8_t aol_get_request_mask(void) {
+  return ((aol_policy != NULL) && (aol_policy->request_mask != NULL)) ? aol_policy->request_mask() : 0U;
+}
+
+bool aol_rx_healthy(void) {
+  const uint32_t now = microsecond_timer_get();
+  bool healthy = (current_safety_config.rx_checks_len > 0) && (current_safety_config.rx_checks != NULL);
+  for (int i = 0; healthy && (i < current_safety_config.rx_checks_len); i++) {
+    const RxCheck *check = &current_safety_config.rx_checks[i];
+    if (!check->status.msg_seen || check->status.lagging || !check->status.valid_checksum ||
+        !check->status.valid_quality_flag || (check->status.wrong_counters >= MAX_WRONG_COUNTERS)) {
+      healthy = false;
+    } else {
+      const uint32_t frequency = check->msg[check->status.index].frequency;
+      if (frequency < 10U) {
+        healthy = false;
+      } else {
+        const uint32_t expected_age = 10000000U / frequency;
+        const uint32_t max_age = (expected_age > 100000U) ? expected_age : 100000U;
+        healthy = safety_get_ts_elapsed(now, check->status.last_timestamp) <= max_age;
+      }
+    }
+  }
+  return healthy;
+}
+
+uint8_t aol_get_permission_mask(void) {
+  return ((aol_policy != NULL) && (aol_policy->permission_mask != NULL)) ? aol_policy->permission_mask() : 0U;
+}
+
+bool lateral_controls_allowed(void) {
+  bool allowed = controls_allowed;
+  if (aol_policy != NULL) {
+    allowed = (aol_get_permission_mask() & 0x1U) != 0U;
+  }
+  return allowed;
+}
+
+bool longitudinal_controls_allowed(void) {
+  bool allowed = controls_allowed;
+  if (aol_policy != NULL) {
+    allowed = (aol_get_permission_mask() & 0x2U) != 0U;
+  }
+  return allowed;
+}
 bool relay_malfunction = false;
 bool gas_pressed = false;
 bool gas_pressed_prev = false;
@@ -107,7 +168,7 @@ static const safety_hooks *current_hooks = &nooutput_hooks;
 safety_config current_safety_config;
 
 static void generic_rx_checks(void);
-static void stock_ecu_check(bool stock_ecu_detected);
+static void stock_ecu_check(bool stock_ecu_detected, bool immediate);
 
 static bool is_msg_valid(RxCheck addr_list[], int index) {
   bool valid = true;
@@ -115,6 +176,10 @@ static bool is_msg_valid(RxCheck addr_list[], int index) {
     if (!addr_list[index].status.valid_checksum || !addr_list[index].status.valid_quality_flag || (addr_list[index].status.wrong_counters >= MAX_WRONG_COUNTERS)) {
       valid = false;
       controls_allowed = false;
+      aol_host_axis_mask = 0U;
+      if ((aol_policy != NULL) && (aol_policy->rx_invalid != NULL)) {
+        aol_policy->rx_invalid();
+      }
     }
   }
   return valid;
@@ -204,6 +269,11 @@ bool safety_rx_hook(const CANPacket_t *msg) {
   if (valid && whitelisted) {
     current_hooks->rx(msg);
   }
+  if (!whitelisted && (current_hooks->optional_rx != NULL)) {
+    // Optional ingress is interpreted by the exact mode-owned callback. It
+    // cannot satisfy or weaken the required control RX health checks above.
+    current_hooks->optional_rx(msg);
+  }
 
   // Handles gas, brake, and regen paddle
   generic_rx_checks();
@@ -215,7 +285,7 @@ bool safety_rx_hook(const CANPacket_t *msg) {
   for (int i = 0; i < current_safety_config.tx_msgs_len; i++) {
     const CanMsg *m = &current_safety_config.tx_msgs[i];
     if (m->check_relay) {
-      stock_ecu_check((m->addr == addr) && (m->bus == msg->bus));
+      stock_ecu_check((m->addr == addr) && (m->bus == msg->bus), m->check_relay_immediately);
     }
   }
 
@@ -337,6 +407,7 @@ void safety_tick(void) {
     if (lagging || frequency_invalid || !is_msg_valid(current_safety_config.rx_checks, i)) {
       rx_checks_invalid = true;
       controls_allowed = false;
+      aol_host_axis_mask = 0U;
     }
   }
 
@@ -369,12 +440,12 @@ static void generic_rx_checks(void) {
   steering_disengage_prev = steering_disengage;
 }
 
-static void stock_ecu_check(bool stock_ecu_detected) {
+static void stock_ecu_check(bool stock_ecu_detected, bool immediate) {
   // allow 1s of transition timeout after relay changes state before assessing malfunctioning
   const uint32_t RELAY_TRNS_TIMEOUT = 1U;
 
   // check if stock ECU is on bus broken by car harness
-  if ((safety_mode_cnt > RELAY_TRNS_TIMEOUT) && stock_ecu_detected) {
+  if ((immediate || (safety_mode_cnt > RELAY_TRNS_TIMEOUT)) && stock_ecu_detected) {
     relay_malfunction_set();
   }
 }
@@ -456,6 +527,13 @@ int set_safety_hooks(uint16_t mode, uint16_t param) {
   reset_sample(&angle_meas);
 
   controls_allowed = false;
+  if ((aol_policy != NULL) && (aol_policy->reset != NULL)) {
+    aol_policy->reset();
+  }
+  aol_policy = NULL;
+  aol_optional_release_capable = false;
+  aol_host_axis_mask = 0U;
+  aol_host_request_ts = 0U;
   relay_malfunction_reset();
   safety_rx_checks_invalid = false;
 
@@ -465,6 +543,12 @@ int set_safety_hooks(uint16_t mode, uint16_t param) {
   int hook_config_count = sizeof(safety_hook_registry) / sizeof(safety_hook_config);
   for (int i = 0; i < hook_config_count; i++) {
     if (safety_hook_registry[i].id == mode) {
+      if ((mode == SAFETY_TESLA) && ((param & ~1U) != 0U)) {
+        current_hooks = &nooutput_hooks;
+        current_safety_mode = SAFETY_NOOUTPUT;
+        current_safety_param = 0;
+        continue;
+      }
       current_hooks = safety_hook_registry[i].hooks;
       current_safety_mode = mode;
       current_safety_param = param;

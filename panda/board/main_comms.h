@@ -1,5 +1,14 @@
 #pragma once
 
+static bool panda_ignition_line(void) {
+  #ifdef PANDA_IGNORE_IGNITION_LINE
+  return false;
+  #else
+  return harness_check_ignition();
+  #endif
+}
+
+
 extern int _app_start[0xc000]; // Only first 3 sectors of size 0x4000 are used
 
 // Prototypes
@@ -15,7 +24,7 @@ static int get_health_pkt(void *dat) {
   health->current_pkt = (uint16_t)MIN(current_board->read_current_mA(), 0xFFFFU);
 
   health->flags_pkt = 0U;
-  health->flags_pkt |= harness_check_ignition() ? HEALTH_FLAG_IGNITION_LINE : 0U;
+  health->flags_pkt |= panda_ignition_line() ? HEALTH_FLAG_IGNITION_LINE : 0U;
   health->flags_pkt |= ignition_can ? HEALTH_FLAG_IGNITION_CAN : 0U;
   health->flags_pkt |= controls_allowed ? HEALTH_FLAG_CONTROLS_ALLOWED : 0U;
   health->flags_pkt |= power_save_enabled ? HEALTH_FLAG_POWER_SAVE_ENABLED : 0U;
@@ -48,8 +57,12 @@ static int get_health_pkt(void *dat) {
 
   health->sound_output_level_pkt = sound_output_level;
 
+#ifdef STM32H7
   float temperature_encoded = (CLAMP(dts_get_temperature(), -40.0f, 214.5f) + 40.0f) + 0.5f;
   health->temperature_pkt = (uint8_t)temperature_encoded;
+#else
+  health->temperature_pkt = 0U;
+#endif
 
   return sizeof(*health);
 }
@@ -65,6 +78,25 @@ int comms_control_handler(ControlPacket_t *req, uint8_t *resp) {
   uint32_t time;
 
   switch (req->request) {
+    // Fork-local read-only AOL capability and actual native permissions.
+    // Older firmware returns no matching packet, so the host fails closed.
+    case 0xd5:
+      {
+        aol_safety_health_t status = {
+          .magic = AOL_SAFETY_PROTOCOL_MAGIC,
+          .version = AOL_SAFETY_PROTOCOL_VERSION,
+          .request_mask = aol_get_request_mask(),
+          .permission_mask = aol_get_permission_mask(),
+          .safety_mode = (uint8_t)current_safety_mode,
+          .safety_param = current_safety_param,
+          .capability_flags = (aol_policy != NULL) ? (0x1U | (aol_optional_release_capable ? 0x2U : 0U)) : 0U,
+        };
+        for (unsigned int i = 0U; i < sizeof(status); i++) {
+          resp[i] = ((uint8_t *)&status)[i];
+        }
+        resp_len = sizeof(status);
+      }
+      break;
     // **** 0xa8: get microsecond timer
     case 0xa8:
       time = microsecond_timer_get();
@@ -89,7 +121,7 @@ int comms_control_handler(ControlPacket_t *req, uint8_t *resp) {
       resp_len = 2;
       break;
     // **** 0xb5: request deep sleep, wakes on CAN or SBU
-    #ifdef ALLOW_DEBUG
+    #if defined(ALLOW_DEBUG) && defined(STM32H7)
     case 0xb5:
       set_safety_mode(SAFETY_SILENT, 0U);
       set_power_save_state(true);
@@ -292,6 +324,11 @@ int comms_control_handler(ControlPacket_t *req, uint8_t *resp) {
       if (!is_car_safety_mode(current_safety_mode)) {
         heartbeat_disabled = true;
       }
+      break;
+    // A separate short-lived axis request leaves the legacy heartbeat protocol
+    // unchanged for every car without the exact Honda AOL safety parameter.
+    case 0xf5:
+      aol_set_host_request((uint8_t)req->param1);
       break;
     // **** 0xf9: set CAN FD data bitrate
     case 0xf9:

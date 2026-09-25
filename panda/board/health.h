@@ -10,6 +10,18 @@
 #define HEALTH_FLAG_NMI_RESET                (1U << 7)
 #define HEALTH_FLAG_HARDFAULT_RESET          ((uint16_t)1U << 8)
 
+#define AOL_SAFETY_PROTOCOL_MAGIC 0x314C4F41U  // "AOL1", little endian
+#define AOL_SAFETY_PROTOCOL_VERSION 1U
+typedef struct __attribute__((packed)) {
+  uint32_t magic;
+  uint8_t version;
+  uint8_t request_mask;
+  uint8_t permission_mask;
+  uint8_t safety_mode;
+  uint16_t safety_param;
+  uint8_t capability_flags;
+} aol_safety_health_t;
+
 struct __attribute__((packed)) health_t {
   uint32_t uptime_pkt;
   uint16_t voltage_pkt;

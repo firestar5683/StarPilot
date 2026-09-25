@@ -3,7 +3,11 @@
 #include "board/can.h"
 #include "board/health.h"
 #include "board/crc.h"
-#ifdef STM32H7
+#include "opendbc/safety/can_tx.h"
+#ifdef STM32F4
+#include "board/stm32f4/lladc_declarations.h"
+#include "board/drivers/bxcan_declarations.h"
+#elif defined(STM32H7)
 #include "board/stm32h7/lladc_declarations.h"
 #endif
 
@@ -11,7 +15,7 @@
 
 extern bool bootkick_reset_triggered;
 
-void bootkick_tick(bool ignition, bool recent_heartbeat);
+void bootkick_tick(bool ignition, bool recent_heartbeat, bool wake);
 
 // ******************** can_common ********************
 
@@ -43,6 +47,12 @@ extern can_health_t can_health[PANDA_CAN_CNT];
 // Ignition detected from CAN messages
 extern bool ignition_can;
 extern uint32_t ignition_can_cnt;
+extern bool wake_on_can;
+extern uint32_t wake_on_can_cnt;
+#ifdef PANDA_HKG_REMOTE_START
+extern bool hkg_remote_climate_wake;
+extern uint32_t hkg_remote_climate_wake_cnt;
+#endif
 
 extern bool can_silent;
 extern bool can_loopback;
@@ -71,9 +81,7 @@ extern bus_config_t bus_config[PANDA_CAN_CNT];
 void can_init_all(void);
 void can_set_orientation(bool flipped);
 bool can_tx_check_min_slots_free(uint32_t min);
-void can_set_checksum(CANPacket_t *packet);
 bool can_check_checksum(CANPacket_t *packet);
-void can_send(CANPacket_t *to_push, uint8_t bus_number, bool skip_tx_hook);
 bool is_speed_valid(uint32_t speed, const uint32_t *all_speeds, uint8_t len);
 
 // ******************** clock_source ********************
@@ -112,6 +120,7 @@ extern FDCAN_GlobalTypeDef *cans[PANDA_CAN_CNT];
 void can_clear_send(FDCAN_GlobalTypeDef *FDCANx, uint8_t can_number);
 void update_can_health_pkt(uint8_t can_number, uint32_t ir_reg);
 
+#endif
 
 // ******************** harness ********************
 
@@ -176,7 +185,6 @@ void handle_interrupt(IRQn_Type irq_type);
 void interrupt_timer_handler(void);
 void init_interrupts(bool check_rate_limit);
 
-#endif // STM32H7
 
 // ******************** registers ********************
 

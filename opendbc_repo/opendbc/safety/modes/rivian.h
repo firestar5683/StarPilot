@@ -165,7 +165,7 @@ static safety_config rivian_init(uint16_t param) {
 
   SAFETY_UNUSED(param);
   #ifdef ALLOW_DEBUG
-    const int FLAG_RIVIAN_LONG_CONTROL = 1;
+    const uint16_t FLAG_RIVIAN_LONG_CONTROL = 1U;
     rivian_longitudinal = GET_FLAG(param, FLAG_RIVIAN_LONG_CONTROL);
   #endif
 
