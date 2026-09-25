@@ -1,0 +1,6 @@
+Import('env', 'arch')
+
+if arch == "comma_arm64":
+  native_audio = env.Clone()
+  native_audio.Append(CFLAGS=['-std=c11'])
+  native_audio.SharedLibrary('audio_mixer', ['audio_mixer.c'])
