@@ -25,6 +25,15 @@ GM_TRUCK_TARGET_FILTER_UP_TAU = 0.20
 GM_TRUCK_TARGET_FILTER_DOWN_TAU = 0.14
 GM_TRUCK_TARGET_FILTER_BRAKE_BYPASS = -0.65
 GM_TRUCK_TARGET_FILTER_DROP_BYPASS = 0.45
+# Max rise of a positive target at highway speed (m/s^3); fast tip-ins kick 10-speeds down.
+GM_TRUCK_HIGHWAY_RISE_BP = [24.6, 27.0, 29.1]
+GM_TRUCK_HIGHWAY_RISE_V = [10.0, 0.5, 0.15]
+GM_TRUCK_A_EGO_FILTER_TAU = 0.5
+GM_TRUCK_POSITIVE_HOLD_OVERSHOOT = 0.08
+GM_TRUCK_POSITIVE_HOLD_BLEED_TAU = 1.0
+GM_TRUCK_POSITIVE_HOLD_DECEL = -0.10
+GM_TRUCK_POSITIVE_HOLD_DECEL_TAU_BP = [-0.30, -0.10]
+GM_TRUCK_POSITIVE_HOLD_DECEL_TAU_V = [0.25, 0.60]
 TOYOTA_SIENNA_TARGET_FILTER_MIN_SPEED = 12.0
 TOYOTA_SIENNA_TARGET_FILTER_UP_TAU = 0.32
 TOYOTA_SIENNA_TARGET_FILTER_DOWN_TAU = 0.24
@@ -176,6 +185,7 @@ class LongControlVehicleTuning:
     self.integrator_hold_frames = 0
     self.gm_truck_filtered_a_target = 0.0
     self.gm_truck_target_filter_initialized = False
+    self.gm_truck_a_ego_filtered = None
     self.toyota_sienna_filtered_a_target = 0.0
     self.toyota_sienna_target_filter_initialized = False
     self.toyota_corolla_filtered_a_target = 0.0
@@ -322,10 +332,16 @@ class LongControlVehicleTuning:
       self.gm_truck_target_filter_initialized = True
       return float(a_target)
 
-    tau = GM_TRUCK_TARGET_FILTER_DOWN_TAU if a_target < self.gm_truck_filtered_a_target else GM_TRUCK_TARGET_FILTER_UP_TAU
+    previous = self.gm_truck_filtered_a_target
+    tau = GM_TRUCK_TARGET_FILTER_DOWN_TAU if a_target < previous else GM_TRUCK_TARGET_FILTER_UP_TAU
     alpha = DT_CTRL / (tau + DT_CTRL)
-    self.gm_truck_filtered_a_target += alpha * (float(a_target) - self.gm_truck_filtered_a_target)
-    return self.gm_truck_filtered_a_target
+    filtered = previous + alpha * (float(a_target) - previous)
+    rise_floor = max(previous, 0.0)
+    if filtered > rise_floor:
+      max_rise = float(interp(v_ego, GM_TRUCK_HIGHWAY_RISE_BP, GM_TRUCK_HIGHWAY_RISE_V)) * DT_CTRL
+      filtered = min(filtered, rise_floor + max_rise)
+    self.gm_truck_filtered_a_target = filtered
+    return filtered
 
   def shape_toyota_sienna_accel_target(self, a_target, v_ego, should_stop, leads=None):
     """Smooth Sienna lead braking only while there is still comfortable stopping room."""
@@ -503,9 +519,15 @@ class LongControlVehicleTuning:
       pid.i *= VOLT_CRUISE_INTEGRATOR_LEAK
 
   def trim_gm_truck_positive_hold_integrator(self, pid, last_output_accel, a_target, error, CS):
-    if not self.is_gm_stock_truck or pid.i <= 0.0:
+    if not self.is_gm_stock_truck:
       return
-    if last_output_accel <= 0.10:
+    if self.gm_truck_a_ego_filtered is None:
+      self.gm_truck_a_ego_filtered = float(CS.aEgo)
+    else:
+      alpha = DT_CTRL / (GM_TRUCK_A_EGO_FILTER_TAU + DT_CTRL)
+      self.gm_truck_a_ego_filtered += alpha * (float(CS.aEgo) - self.gm_truck_a_ego_filtered)
+
+    if pid.i <= 0.0 or last_output_accel <= 0.10:
       return
     light_accel_threshold = float(interp(CS.vEgo, [8.0, 15.0, 25.0], [0.03, 0.06, 0.10]))
     if a_target > light_accel_threshold:
@@ -513,14 +535,14 @@ class LongControlVehicleTuning:
     if CS.vEgo <= NEGATIVE_TARGET_CREEP_GUARD_SPEED and a_target > -NEGATIVE_TARGET_CREEP_GUARD_DECEL:
       return
 
-    authority_mismatch = last_output_accel - max(a_target, 0.0)
-    if authority_mismatch <= 0.08 and error > -0.08:
+    if a_target <= GM_TRUCK_POSITIVE_HOLD_DECEL:
+      tau = float(interp(a_target, GM_TRUCK_POSITIVE_HOLD_DECEL_TAU_BP, GM_TRUCK_POSITIVE_HOLD_DECEL_TAU_V))
+    elif self.gm_truck_a_ego_filtered - max(a_target, 0.0) > GM_TRUCK_POSITIVE_HOLD_OVERSHOOT:
+      tau = GM_TRUCK_POSITIVE_HOLD_BLEED_TAU
+    else:
+      # Positive I that only holds speed against road load or grade is not stale.
       return
-
-    target_factor = float(interp(a_target, [-0.30, -0.10, -0.02, light_accel_threshold], [0.20, 0.35, 0.60, 0.98]))
-    if error < -0.20:
-      target_factor *= 0.75
-    pid.i *= target_factor
+    pid.i *= float(np.exp(-DT_CTRL / tau))
 
   def trim_gm_truck_negative_hold_integrator(self, pid, last_output_accel, a_target, error, CS):
     if not self.is_gm_stock_truck or pid.i >= -0.02:
