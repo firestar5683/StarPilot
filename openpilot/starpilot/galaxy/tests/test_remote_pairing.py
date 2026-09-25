@@ -1,0 +1,347 @@
+"""Disposable socket coverage for Galaxy pairing and tunnel auth boundaries."""
+
+import base64
+import hashlib
+import http.client
+import json
+from pathlib import Path
+import tempfile
+import threading
+import unittest
+from unittest import mock
+
+from openpilot.starpilot.galaxy.access import GalaxyAccessOwner
+from openpilot.starpilot.galaxy.remote import RemotePairing, gateway_cookie_valid, make_gateway_auth_server
+from openpilot.starpilot.galaxy.server import make_remote_server, make_server
+
+
+class RemotePairingTest(unittest.TestCase):
+  def setUp(self):
+    temporary = tempfile.TemporaryDirectory()
+    self.addCleanup(temporary.cleanup)
+    root = Path(temporary.name)
+    self.owner = GalaxyAccessOwner(root / 'credentials')
+    self.pairing = RemotePairing(root / 'pairing')
+    class Monitor:
+      def sample(self):
+        return {'schemaVersion': 1, 'mode': 'disposable'}
+    self.local = make_server(port=0, owner=self.owner, remote_pairing=self.pairing, parked=lambda: True, monitor=Monitor())
+    self.remote = make_remote_server(self.local, port=0)
+    self.workers = []
+    for server in (self.local, self.remote):
+      worker = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': .01}, daemon=True)
+      worker.start()
+      self.workers.append(worker)
+    self.addCleanup(self.close_servers)
+
+  def close_servers(self):
+    for server, worker in zip((self.remote, self.local), reversed(self.workers), strict=True):
+      server.shutdown()
+      worker.join(timeout=2)
+      server.server_close()
+
+  def request(self, server, path, *, method='GET', payload=None, host=None, origin=None, cookie=None):
+    connection = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=2)
+    headers = {'Host': host or f'127.0.0.1:{server.server_port}'}
+    if payload is not None:
+      headers['Content-Type'] = 'application/json'
+    if origin is not None:
+      headers['Origin'] = origin
+    if cookie is not None:
+      headers['Cookie'] = cookie
+    connection.request(method, path, body=json.dumps(payload) if payload is not None else None, headers=headers)
+    response = connection.getresponse()
+    result = response.status, response.read(), dict(response.getheaders())
+    connection.close()
+    return result
+
+  def test_local_pair_and_remote_uses_gateway_auth_even_over_loopback(self):
+    local_origin = f'http://127.0.0.1:{self.local.server_port}'
+    local_cookie = self.request(self.local, '/api/auth/session')[2]['Set-Cookie'].split(';', 1)[0]
+    status, body, _ = self.request(self.local, '/api/galaxy/pair', method='POST', payload={'password': '  password123  '},
+                                   origin=local_origin, cookie=local_cookie)
+    self.assertEqual(status, 200)
+    url = json.loads(body)['url']
+    slug = url.rsplit('/', 1)[1]
+    self.assertEqual(self.pairing.read()['slug'], slug)
+    self.assertEqual(self.pairing.read()['authHash'], hashlib.sha256(b'password123').hexdigest())
+    qr_status, qr_body, qr_headers = self.request(self.local, '/api/galaxy/qr.svg', cookie=local_cookie)
+    self.assertEqual(qr_status, 200)
+    self.assertEqual(qr_headers['Content-Type'], 'image/svg+xml')
+    self.assertIn(b'<svg', qr_body)
+    self.assertEqual(self.request(self.remote, '/api/auth/session', host=f'{slug}.devices.local')[0], 200)
+    remote_session = json.loads(self.request(self.remote, '/api/auth/session', host=f'{slug}.devices.local')[1])
+    self.assertFalse(remote_session['authenticated'])
+    self.assertFalse(remote_session['localAccess'])
+    self.assertEqual(self.request(self.remote, '/api/system/monitor', host=f'{slug}.devices.local', cookie=local_cookie)[0], 401)
+    gateway_cookie = f"galaxy_session={slug}%3A{self.pairing.read()['session']}"
+    self.assertEqual(self.request(self.remote, f'/{slug}', host=f'{slug}.devices.local')[0], 308)
+    self.assertEqual(self.request(self.remote, f'/{slug}/api/system/monitor',
+                                  host=f'{slug}.devices.local', cookie=gateway_cookie)[0], 200)
+    remote_origin = 'https://galaxy.firestar.link'
+    remote_cookie = 'galaxy_session=' + base64.urlsafe_b64encode(json.dumps({slug: self.pairing.read()['session'],
+                         'OtherComma123456': 'd' * 64}).encode()).decode().rstrip('=')
+    for cookie in (gateway_cookie, remote_cookie):
+      for path in ('/api/auth/session', f'/{slug}/api/auth/session'):
+        status, body, headers = self.request(self.remote, path, host=f'{slug}.devices.local', cookie=cookie)
+        self.assertEqual(status, 200)
+        self.assertTrue(json.loads(body)['authenticated'])
+        self.assertTrue(json.loads(body)['gatewayAccess'])
+        self.assertNotIn('Set-Cookie', headers)
+      self.assertEqual(self.request(self.remote, '/api/system/monitor', host=f'{slug}.devices.local', cookie=cookie)[0], 200)
+    for endpoint in ('login', 'logout'):
+      payload = {'password': 'password123'} if endpoint == 'login' else {}
+      status, body, headers = self.request(self.remote, f'/api/auth/{endpoint}', method='POST', payload=payload,
+                                           host=f'{slug}.devices.local', origin=remote_origin, cookie=remote_cookie)
+      self.assertEqual(status, 409)
+      self.assertEqual(json.loads(body)['code'], 'gateway_auth_required')
+      self.assertNotIn('Set-Cookie', headers)
+    self.assertEqual(self.request(self.remote, '/api/galaxy/unpair', method='POST', payload={},
+                                  host=f'{slug}.devices.local', origin=remote_origin, cookie=remote_cookie)[0], 403)
+    self.assertEqual(self.request(self.local, '/api/galaxy/unpair', method='POST', payload={},
+                                  origin=local_origin, cookie=local_cookie)[0], 200)
+    self.assertEqual(self.request(self.remote, '/api/system/monitor', host=f'{slug}.devices.local', cookie=remote_cookie)[0], 403)
+    status, body, _ = self.request(self.local, '/api/galaxy/pair', method='POST', payload={'password': 'password123'},
+                                   origin=local_origin, cookie=local_cookie)
+    self.assertEqual(status, 200)
+    new_slug = json.loads(body)['url'].rsplit('/', 1)[1]
+    self.assertEqual(self.request(self.remote, '/api/system/monitor', host=f'{new_slug}.devices.local', cookie=remote_cookie)[0], 401)
+    self.assertEqual(self.request(self.remote, '/api/system/monitor', host=f'{new_slug}.devices.local', cookie=gateway_cookie)[0], 401)
+
+  def test_device_name_is_authenticated_persistent_and_independent_of_pairing(self):
+    self.assertTrue(self.owner.configure('password123', lambda: True))
+    slug = self.pairing.pair(hashlib.sha256(b'password123').hexdigest())
+    record = self.pairing.read()
+    pairing_bytes = (self.pairing.root / self.pairing.FILE).read_bytes()
+    cookie = 'galaxy_session=' + base64.urlsafe_b64encode(json.dumps({slug: record['session']}).encode()).decode().rstrip('=')
+    host = f'{slug}.devices.local'
+    path = '/api/galaxy/device-name'
+    self.assertEqual(self.request(self.remote, path, host=host)[0], 401)
+    self.assertEqual(self.request(self.remote, path, method='POST', host=host, cookie=cookie,
+                                  payload={'name': 'Road comma'})[0], 403)
+    result = self.request(self.remote, path, method='POST', host=host, cookie=cookie,
+                          origin='https://galaxy.firestar.link', payload={'name': 'Road comma'})
+    self.assertEqual(result[0], 200)
+    self.assertEqual(json.loads(result[1]), {'name': 'Road comma'})
+    self.assertEqual(json.loads(self.request(self.remote, path, host=host, cookie=cookie)[1]), {'name': 'Road comma'})
+    from openpilot.starpilot.galaxy.device_name import DeviceName
+    self.assertEqual(DeviceName(self.pairing.root).read(), 'Road comma')
+    self.assertEqual((self.pairing.root / self.pairing.FILE).read_bytes(), pairing_bytes)
+    for payload in ({'name': 'x' * 41}, {'name': 'bad\nname'}, {'name': []}, {'key': 'OtherParam', 'value': 'bad'}):
+      self.assertEqual(self.request(self.remote, path, method='POST', host=host, cookie=cookie,
+                                    origin='https://galaxy.firestar.link', payload=payload)[0], 400)
+    other_cookie = 'galaxy_session=' + base64.urlsafe_b64encode(json.dumps({'OtherComma123456': record['session']}).encode()).decode().rstrip('=')
+    self.assertEqual(self.request(self.remote, path, method='POST', host=host, cookie=other_cookie,
+                                  origin='https://galaxy.firestar.link', payload={'name': 'Wrong comma'})[0], 401)
+    self.assertEqual(DeviceName(self.pairing.root).read(), 'Road comma')
+    self.assertEqual(self.request(self.remote, '/api/params', method='PUT', host=host, cookie=cookie,
+                                  origin='https://galaxy.firestar.link', payload={'key': 'GalaxyDeviceName', 'value': 'Wrong'})[0], 405)
+    self.assertTrue(self.pairing.unpair())
+    self.assertEqual(DeviceName(self.pairing.root).read(), 'Road comma')
+
+  def test_gateway_cookie_checks_this_comma_token_not_header_or_other_device(self):
+    record = {'slug': 'CurrentComma1234', 'session': 'a' * 64}
+    def encode(value):
+      return base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip('=')
+    self.assertTrue(gateway_cookie_valid(encode({record['slug']: record['session']}), record))
+    self.assertTrue(gateway_cookie_valid(f"{record['slug']}%3A{record['session']}", record))
+    for value in (None, '', 'x' * 4097, 'not+base64', encode([]), encode({'OtherComma123456': record['session']}),
+                  encode({record['slug']: 'b' * 64}), encode({record['slug']: 123}), encode({record['slug']: 'a' * 63}),
+                  'OtherComma123456:' + record['session'], '%ff'):
+      with self.subTest(value=str(value)[:20]):
+        self.assertFalse(gateway_cookie_valid(value, record))
+
+  def test_first_pairing_sets_new_remote_password_when_local_verifier_already_exists(self):
+    self.assertTrue(self.owner.configure('previous-local-password', lambda: True))
+    previous_generation = self.owner.current_generation()
+    origin = f'http://127.0.0.1:{self.local.server_port}'
+    local_cookie = self.request(self.local, '/api/auth/session')[2]['Set-Cookie'].split(';', 1)[0]
+    status, body, _ = self.request(self.local, '/api/galaxy/pair', method='POST', payload={'password': 'new-remote-password'},
+                                   origin=origin, cookie=local_cookie)
+    self.assertEqual(status, 200)
+    self.assertNotEqual(self.owner.current_generation(), previous_generation)
+    self.assertFalse(self.owner.verify('previous-local-password'))
+    self.assertTrue(self.owner.verify('new-remote-password'))
+    slug = json.loads(body)['url'].rsplit('/', 1)[1]
+    record = self.pairing.read()
+    self.assertEqual(record['authHash'], hashlib.sha256(b'new-remote-password').hexdigest())
+    remote_cookie = 'galaxy_session=' + base64.urlsafe_b64encode(json.dumps({slug: record['session']}).encode()).decode().rstrip('=')
+    result = self.request(self.remote, '/api/auth/session', host=f'{slug}.devices.local', cookie=remote_cookie)
+    self.assertTrue(json.loads(result[1])['authenticated'])
+    self.assertEqual(self.request(self.local, '/api/galaxy/pair', method='POST', payload={'password': 'another-password'},
+                                  origin=origin, cookie=local_cookie)[0], 409)
+    self.assertTrue(self.owner.verify('new-remote-password'))
+
+  def test_failed_pairing_persistence_restores_previous_password_state(self):
+    origin = f'http://127.0.0.1:{self.local.server_port}'
+    cookie = self.request(self.local, '/api/auth/session')[2]['Set-Cookie'].split(';', 1)[0]
+    self.assertTrue(self.owner.configure('previous-local-password', lambda: True))
+    previous_generation = self.owner.current_generation()
+    with mock.patch.object(self.pairing, 'pair', return_value=None):
+      status, _, _ = self.request(self.local, '/api/galaxy/pair', method='POST', payload={'password': 'new-remote-password'},
+                                  origin=origin, cookie=cookie)
+    self.assertEqual(status, 409)
+    self.assertIsNone(self.pairing.read())
+    self.assertEqual(self.owner.current_generation(), previous_generation)
+    self.assertTrue(self.owner.verify('previous-local-password'))
+    self.assertFalse(self.owner.verify('new-remote-password'))
+
+  def test_failed_first_pair_leaves_no_remote_verifier(self):
+    origin = f'http://127.0.0.1:{self.local.server_port}'
+    cookie = self.request(self.local, '/api/auth/session')[2]['Set-Cookie'].split(';', 1)[0]
+    with mock.patch.object(self.pairing, 'pair', return_value=None):
+      status, _, _ = self.request(self.local, '/api/galaxy/pair', method='POST', payload={'password': 'new-remote-password'},
+                                  origin=origin, cookie=cookie)
+    self.assertEqual(status, 409)
+    self.assertIsNone(self.owner.current_generation())
+    self.assertIsNone(self.pairing.read())
+
+  def test_pairing_storage_exception_and_late_park_loss_restore_verifier(self):
+    origin = f'http://127.0.0.1:{self.local.server_port}'
+    cookie = self.request(self.local, '/api/auth/session')[2]['Set-Cookie'].split(';', 1)[0]
+    self.assertTrue(self.owner.configure('previous-local-password', lambda: True))
+    previous_generation = self.owner.current_generation()
+    with mock.patch.object(self.pairing, 'pair', side_effect=OSError('disposable storage failure')):
+      status, _, _ = self.request(self.local, '/api/galaxy/pair', method='POST', payload={'password': 'new-remote-password'},
+                                  origin=origin, cookie=cookie)
+    self.assertEqual(status, 409)
+    self.assertEqual(self.owner.current_generation(), previous_generation)
+
+    parked = [True]
+    with tempfile.TemporaryDirectory() as directory:
+      owner = GalaxyAccessOwner(Path(directory) / 'access')
+      pairing = RemotePairing(Path(directory) / 'pairing')
+      self.assertTrue(owner.configure('previous-local-password', lambda: True))
+      generation = owner.current_generation()
+      server = make_server(port=0, owner=owner, remote_pairing=pairing, parked=lambda: parked[0])
+      worker = threading.Thread(target=server.serve_forever, daemon=True)
+      worker.start()
+      try:
+        local_origin = f'http://127.0.0.1:{server.server_port}'
+        local_cookie = self.request(server, '/api/auth/session')[2]['Set-Cookie'].split(';', 1)[0]
+        replace = owner.replace_for_pairing
+        def lose_parked(password, authority):
+          result = replace(password, authority)
+          parked[0] = False
+          return result
+        with mock.patch.object(owner, 'replace_for_pairing', side_effect=lose_parked):
+          status, _, _ = self.request(server, '/api/galaxy/pair', method='POST', payload={'password': 'new-remote-password'},
+                                      origin=local_origin, cookie=local_cookie)
+        self.assertEqual(status, 409)
+        self.assertEqual(owner.current_generation(), generation)
+        self.assertIsNone(pairing.read())
+      finally:
+        server.shutdown()
+        worker.join(timeout=2)
+        server.server_close()
+
+  def test_gateway_auth_protocol_and_private_storage(self):
+    self.assertIsNone(self.pairing.pair('wrong'))
+    self.assertTrue(self.owner.configure('password123', lambda: True))
+    slug = self.pairing.pair(hashlib.sha256(b'password123').hexdigest())
+    self.assertRegex(slug, r'^[A-Za-z0-9]{16}$')
+    self.assertEqual((self.pairing.root / self.pairing.FILE).stat().st_mode & 0o777, 0o600)
+    self.assertEqual(self.pairing.root.stat().st_mode & 0o777, 0o700)
+    server = make_gateway_auth_server(self.pairing, 'disposable-dongle', port=0)
+    worker = threading.Thread(target=server.serve_forever, daemon=True)
+    worker.start()
+    try:
+      auth_hash = hashlib.sha256(b'password123').hexdigest()
+      conn = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=2)
+      conn.request('POST', '/glxylogin', body=auth_hash)
+      response = conn.getresponse()
+      self.assertEqual(response.status, 200)
+      token = json.loads(response.read())['token']
+      conn.close()
+      conn = http.client.HTTPConnection('127.0.0.1', server.server_port, timeout=2)
+      conn.request('POST', '/glxyverify', body=token)
+      response = conn.getresponse()
+      self.assertEqual(response.status, 200)
+      response.read()
+      conn.close()
+    finally:
+      server.shutdown()
+      worker.join(timeout=2)
+      server.server_close()
+
+  def test_verified_legacy_pairing_keeps_existing_link_and_session(self):
+    with tempfile.TemporaryDirectory() as directory:
+      root = Path(directory)
+      legacy = root / 'old'
+      legacy.mkdir()
+      password = 'oldpw6'
+      slug = 'ExistingGalaxy01'
+      session = 'b' * 64
+      (legacy / 'glxyauth').write_text(hashlib.sha256(password.encode()).hexdigest())
+      (legacy / 'glxysession').write_text(session)
+      (legacy / 'glxyslug').write_text(slug)
+      owner = GalaxyAccessOwner(root / 'new', legacy_root=legacy)
+      pairing = RemotePairing(root / 'pairing')
+      server = make_server(port=0, owner=owner, remote_pairing=pairing, parked=lambda: True)
+      worker = threading.Thread(target=server.serve_forever, daemon=True)
+      worker.start()
+      try:
+        origin = f'http://127.0.0.1:{server.server_port}'
+        cookie = self.request(server, '/api/auth/session')[2]['Set-Cookie'].split(';', 1)[0]
+        status, body, _ = self.request(server, '/api/galaxy/pair', method='POST', payload={'password': password},
+                                       origin=origin, cookie=cookie)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)['url'], f'https://galaxy.firestar.link/{slug}')
+        self.assertEqual(pairing.read()['session'], session)
+        self.assertTrue(owner.verify(password))
+        login_status, _, _ = self.request(server, '/api/auth/login', method='POST', payload={'password': password}, origin=origin)
+        self.assertEqual(login_status, 200)
+      finally:
+        server.shutdown()
+        worker.join(timeout=2)
+        server.server_close()
+
+  def test_existing_local_verifier_does_not_hide_matching_legacy_link(self):
+    with tempfile.TemporaryDirectory() as directory:
+      root = Path(directory)
+      legacy = root / 'old'
+      legacy.mkdir()
+      owner = GalaxyAccessOwner(root / 'new', legacy_root=legacy)
+      self.assertTrue(owner.configure('separate-local-password', lambda: True))
+      password = 'oldpw6'
+      slug = 'ExistingGalaxy01'
+      session = 'b' * 64
+      (legacy / 'glxyauth').write_text(hashlib.sha256(password.encode()).hexdigest())
+      (legacy / 'glxysession').write_text(session)
+      (legacy / 'glxyslug').write_text(slug)
+      pairing = RemotePairing(root / 'pairing')
+      server = make_server(port=0, owner=owner, remote_pairing=pairing, parked=lambda: True)
+      worker = threading.Thread(target=server.serve_forever, daemon=True)
+      worker.start()
+      try:
+        origin = f'http://127.0.0.1:{server.server_port}'
+        cookie = self.request(server, '/api/auth/session')[2]['Set-Cookie'].split(';', 1)[0]
+        status, body, _ = self.request(server, '/api/galaxy/pair', method='POST', payload={'password': password},
+                                       origin=origin, cookie=cookie)
+        self.assertEqual(status, 200)
+        self.assertEqual(json.loads(body)['url'], f'https://galaxy.firestar.link/{slug}')
+        self.assertEqual(pairing.read()['session'], session)
+        self.assertTrue(owner.verify(password))
+      finally:
+        server.shutdown()
+        worker.join(timeout=2)
+        server.server_close()
+
+  def test_pairing_authority_closes_with_server(self):
+    with mock.patch('openpilot.starpilot.galaxy.settings.LiveContextSource') as authority:
+      server = make_server(port=0, owner=self.owner, remote_pairing=self.pairing)
+      self.assertIs(server.pairing_authority, authority.return_value)
+      authority.return_value.parked.assert_called_once_with()
+      worker = threading.Thread(target=server.serve_forever, daemon=True)
+      worker.start()
+      cookie = self.request(server, '/api/auth/session')[2]['Set-Cookie'].split(';', 1)[0]
+      self.assertEqual(self.request(server, '/api/galaxy/status', cookie=cookie)[0], 200)
+      self.assertEqual(authority.return_value.parked.call_count, 2)
+      server.shutdown()
+      worker.join(timeout=2)
+      server.server_close()
+      authority.return_value.close.assert_called_once_with()
+
+
+if __name__ == '__main__':
+  unittest.main()
