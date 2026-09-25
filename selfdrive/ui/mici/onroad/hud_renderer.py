@@ -7,7 +7,8 @@ from openpilot.selfdrive.ui.onroad.starpilot.torque_bar import TorqueBar
 from openpilot.selfdrive.ui.onroad.starpilot.rivian_lateral_mode import rivian_lateral_mode
 from openpilot.selfdrive.ui.mici.onroad.speed_limit_utils import resolve_display_speed_limit_ms
 from openpilot.selfdrive.ui.lib.speed_limit import (
-  max_matches_speed_limit, pending_speed_limit_offset, speed_limit_override_mode,
+  max_matches_speed_limit, pending_speed_limit_offset, speed_limit_confirmation_pending,
+  speed_limit_override_mode,
 )
 from openpilot.selfdrive.ui.lib.speed_limit_pulse import SpeedLimitPulse
 from openpilot.selfdrive.ui.onroad.starpilot.navigation_card import NavigationCardRenderer
@@ -231,7 +232,8 @@ class HudRenderer(Widget):
     if sm.recv_frame["starpilotPlan"] >= ui_state.started_frame:
       starpilot_plan = sm["starpilotPlan"]
       self._show_speed_limit = ui_state.ui_params.get_bool("ShowSpeedLimits")
-      if self._show_speed_limit:
+      pending_confirmation = speed_limit_confirmation_pending(starpilot_plan)
+      if self._show_speed_limit or pending_confirmation:
         dashboard_speed_limit = sm["starpilotCarState"].dashboardSpeedLimit if sm.valid.get("starpilotCarState", False) else 0.0
         vision_speed_limit = ui_state.params_memory.get_float("VisionSpeedLimit") if ui_state.ui_params.get_bool("VisionSpeedLimitDetection") else 0.0
         self._show_speed_limit_offset = ui_state.ui_params.get_bool("ShowSLCOffset")
@@ -266,7 +268,7 @@ class HudRenderer(Widget):
         if self._speed_limit > 0 and not self._show_speed_limit_offset:
           self._speed_limit += self._speed_limit_offset
         pending_limit = starpilot_plan.unconfirmedSlcSpeedLimit
-        self._pending_speed_limit_confirmation = starpilot_plan.speedLimitChanged and pending_limit > 1
+        self._pending_speed_limit_confirmation = pending_confirmation
         if not self._pending_speed_limit_confirmation:
           pending_limit = 0.0
         pending_offset = pending_speed_limit_offset(pending_limit, ui_state.is_metric, ui_state.starpilot_toggles)
@@ -542,7 +544,7 @@ class HudRenderer(Widget):
     )
 
   def _draw_speed_limit(self, rect: rl.Rectangle) -> None:
-    if not self._show_speed_limit:
+    if not self._show_speed_limit and not self._pending_speed_limit_confirmation:
       return
 
     pending = self._pending_speed_limit_confirmation

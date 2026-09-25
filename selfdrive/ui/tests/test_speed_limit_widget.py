@@ -9,23 +9,21 @@ from openpilot.selfdrive.ui.onroad.starpilot.widgets import speed_limit as speed
 @pytest.mark.parametrize(
   ("state", "memory_write", "sources_enabled"),
   [
-    ({"speed_limit_changed": True, "unconfirmed_valid": True, "override_mode": "manual"},
+    ({"pending_confirmation": True, "override_mode": "manual"},
      ("SpeedLimitAccepted", True), True),
     ({
-      "speed_limit_changed": False,
-      "unconfirmed_valid": False,
+      "pending_confirmation": False,
       "override_mode": "manual",
       "slc_overridden_speed": 1.0,
     },
      ("SLCAdoptSpeedLimit", True), True),
     ({
-      "speed_limit_changed": False,
-      "unconfirmed_valid": False,
+      "pending_confirmation": False,
       "override_mode": "pedal",
       "slc_overridden_speed": 1.0,
     },
      ("SLCAdoptSpeedLimit", True), True),
-    ({"speed_limit_changed": False, "unconfirmed_valid": False, "override_mode": ""},
+    ({"pending_confirmation": False, "override_mode": ""},
      None, False),
   ],
 )

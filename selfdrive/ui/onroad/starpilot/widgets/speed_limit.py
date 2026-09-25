@@ -58,7 +58,7 @@ class SpeedLimitWidget(LayoutWidget):
     if state is None or not rl.check_collision_point_rec(mouse_pos, self._hit_rect):
       return
 
-    if state['speed_limit_changed'] and state['unconfirmed_valid']:
+    if state['pending_confirmation']:
       Params(memory=True).put_bool("SpeedLimitAccepted", True)
       return
 
