@@ -8730,7 +8730,8 @@ def setup(app):
   def get_fast_update_status():
     state_data = _get_fast_update_state()
     repo_path = str(_get_openpilot_root())
-    git_data = _collect_fast_update_info(include_remote=not state_data.get("running", False))
+    local_only = str(request.args.get("local", "")).strip().lower() in ("1", "true", "yes", "on")
+    git_data = _collect_fast_update_info(include_remote=not local_only and not state_data.get("running", False))
     return jsonify({
       **state_data,
       **git_data,
