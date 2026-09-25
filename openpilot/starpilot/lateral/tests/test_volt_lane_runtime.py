@@ -51,9 +51,9 @@ class TestVoltLaneRuntime(unittest.TestCase):
           setattr(denied, field, True)
           self.assertFalse(runtime_supported(denied))
         settings = Params()
-        settings.put('CarParams', cp.to_bytes(), block=True)
+        settings.put('CarParams', cp.as_reader().as_builder().to_bytes(), block=True)
         selected, reference = Controls(), Controls()
-        self.assertIsNotNone(selected.lane_centering_host)
+        assert selected.lane_centering_host is not None
         reference.lane_centering_host = None
         for tick in range(20):
           now = 1_000_000_000 + tick * 10_000_000
@@ -61,7 +61,7 @@ class TestVoltLaneRuntime(unittest.TestCase):
           feed(reference, now, tick)
           actual, _ = selected.state_control()
           expected, _ = reference.state_control()
-          self.assertEqual(actual.to_bytes(), expected.to_bytes())
+          self.assertEqual(actual.to_dict(), expected.to_dict())
 
   def test_enabled_actual_controls_response_and_authority_gates(self):
     gates = ({'signal': True}, {'override': True}, {'fault': True}, {'can_valid': False},
@@ -71,7 +71,7 @@ class TestVoltLaneRuntime(unittest.TestCase):
         with self.subTest(identity=cp.carFingerprint, gate=gate), OpenpilotPrefix(), patch.dict(os.environ,
             {'SIMULATION': '1', 'REPLAY': '1', 'LANE_CENTERING_REPLAY_RUNTIME': '0', 'AOL_REPLAY_RUNTIME': '0'}):
           settings = Params()
-          settings.put('CarParams', cp.to_bytes(), block=True)
+          settings.put('CarParams', cp.as_reader().as_builder().to_bytes(), block=True)
           settings.put_bool('LaneCentering', True, block=True)
           settings.put('LaneCenterOffset', .2, block=True)
           settings.put('LaneCenteringE2EAuthority', 0., block=True)
@@ -101,7 +101,7 @@ class TestVoltLaneRuntime(unittest.TestCase):
       owner = FeatureSettingsOwner(Params(), lambda _: True, vehicle_fingerprint=lambda: None,
                                    vehicle_params=lambda: None)
       state = owner.snapshot('lane', parked=True, system_long=False, lateral_context=False, metric=False)
-      self.assertIsNotNone(state)
+      assert state is not None
 
 
 class TestVolt2019LaneRuntime(unittest.TestCase):
@@ -114,8 +114,8 @@ class TestVolt2019LaneRuntime(unittest.TestCase):
 
   def test_default_off_actual_controls_and_exact_configuration(self):
     with patch(__name__ + ".configurations", side_effect=self.configurations):
-      TestVoltLaneRuntime.test_exact_admission_and_default_off_actual_controls_equality(self)
+      TestVoltLaneRuntime.test_exact_admission_and_default_off_actual_controls_equality(TestVoltLaneRuntime())
 
   def test_enabled_actual_controls_and_existing_authority_gates(self):
     with patch(__name__ + ".configurations", side_effect=self.configurations):
-      TestVoltLaneRuntime.test_enabled_actual_controls_response_and_authority_gates(self)
+      TestVoltLaneRuntime.test_enabled_actual_controls_response_and_authority_gates(TestVoltLaneRuntime())

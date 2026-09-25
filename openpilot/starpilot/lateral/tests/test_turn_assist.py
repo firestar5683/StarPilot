@@ -1,4 +1,5 @@
 import math
+import struct
 from pathlib import Path
 from types import SimpleNamespace
 import tempfile
@@ -91,9 +92,9 @@ def test_startup_saved_exact_on_defaults_and_safe_mode():
       if raw is not None:
         path.write_bytes(raw)
       snapshot = VehicleStartupPreferences.read(source, enabled=True)
-      assert snapshot.turn_assist == (raw == b'1')
+      assert snapshot.turn_assist == (raw in (None, b'1'))
       path.write_bytes(b'0')
-      assert snapshot.turn_assist == (raw == b'1')
+      assert snapshot.turn_assist == (raw in (None, b'1'))
     path.write_bytes(b'1')
     assert not VehicleStartupPreferences.read(source, enabled=False).turn_assist
     (Path(root) / 'SafeMode').write_bytes(b'1')
@@ -111,3 +112,117 @@ def test_nonfinite_minimum_does_not_admit_assist():
   for minimum in (float('nan'), float('inf')):
     _, lac, cs = controller(True, minimum=minimum)
     assert not selected_policy(lac).turn_assist_active(cs)
+
+
+def test_stock_assist_is_independent_of_tune_and_explicit_off():
+  cp, off, cs = controller(False, ControllerMode.STANDARD)
+  _, on, _ = controller(True, ControllerMode.STANDARD)
+  vm = VehicleModel(cp)
+  params = SimpleNamespace(angleOffsetDeg=0., roll=0.)
+  assert selected_policy(on) is None
+  assert on.pid._k_p == off.pid._k_p
+  assert on.torque_params.to_dict() == off.torque_params.to_dict()
+  off_output, _, _ = off.update(True, cs, vm, params, False, -.001, False, .1)
+  on_output, _, _ = on.update(True, cs, vm, params, False, -.001, False, .1)
+  assert off_output != on_output
+  assert abs(on_output) <= on.steer_max
+
+
+def test_explicit_off_survives_repeated_startup_reads():
+  with tempfile.TemporaryDirectory() as root:
+    source = SimpleNamespace(get_param_path=lambda key: str(Path(root) / key))
+    path = Path(root) / 'TurnAssist'
+    assert VehicleStartupPreferences.read(source, enabled=True).turn_assist
+    assert not path.exists()
+    path.write_bytes(b'0')
+    for _ in range(3):
+      assert not VehicleStartupPreferences.read(source, enabled=True).turn_assist
+      assert path.read_bytes() == b'0'
+
+
+@pytest.mark.parametrize('brand,candidate', [('toyota', 'TOYOTA_COROLLA_TSS2'), ('honda', 'HONDA_FIT_4G'), ('mazda', 'MAZDA_CX5_2022'),
+                                               ('gm', 'CHEVROLET_BOLT_CC_2018_2021')])
+def test_shared_assist_actual_torque_factories(brand, candidate):
+  from importlib import import_module
+  from openpilot.starpilot.lateral.controller_selection import model_turn_assist_supported
+  car = getattr(import_module(f'opendbc.car.{brand}.values').CAR, candidate)
+  if brand == 'gm':
+    from openpilot.starpilot.longitudinal.tests.test_bolt_mode_transition import params as bolt_params
+    cp = bolt_params(car, pedal=True)
+  else:
+    cp = interfaces[car].get_non_essential_params(car)
+  assert cp.lateralTuning.which() == 'torque'
+  assert turn_assist_supported(cp)
+  assert not model_turn_assist_supported(cp)
+  cs = structs.CarState.new_message()
+  cs.gearShifter = structs.CarState.GearShifter.drive
+  cs.vEgo = max(1., cp.minSteerSpeed)
+  vm = VehicleModel(cp)
+  lp = SimpleNamespace(angleOffsetDeg=0., roll=0.)
+  on = LatControlTorque(cp.as_reader(), interfaces[car](cp), DT_CTRL, controller_mode=ControllerMode.STANDARD, turn_assist=True)
+  off = LatControlTorque(cp.as_reader(), interfaces[car](cp), DT_CTRL, controller_mode=ControllerMode.STANDARD, turn_assist=False)
+  with patch.object(on.turn_assist, 'apply', wraps=on.turn_assist.apply) as assist:
+    output, _, log = on.update(True, cs, vm, lp, False, -.01, False, .1)
+  assist.assert_called_once()
+  baseline, _, _ = off.update(True, cs, vm, lp, False, -.01, False, .1)
+  assert struct.unpack("f", struct.pack("f", output))[0] == log.output
+  assert abs(output) <= on.steer_max
+  assert output != baseline
+  for denied in ('passive', 'dashcamOnly', 'notCar'):
+    setattr(cp, denied, True)
+    assert not turn_assist_supported(cp)
+    setattr(cp, denied, False)
+  cp.safetyConfigs[0].safetyModel = structs.CarParams.SafetyModel.noOutput
+  assert not turn_assist_supported(cp)
+
+
+def test_g70_assist_preserves_vehicle_output_cap():
+  from openpilot.starpilot.lateral.genesis_g70_policy import get_genesis_g70_low_speed_output_limit
+  cp = interfaces[CAR.GENESIS_G70_2020].get_non_essential_params(CAR.GENESIS_G70_2020)
+  lac = LatControlTorque(cp.as_reader(), interfaces[CAR.GENESIS_G70_2020](cp), DT_CTRL, turn_assist=True)
+  cs = structs.CarState.new_message()
+  cs.vEgo = 1.
+  cs.gearShifter = structs.CarState.GearShifter.drive
+  with patch.object(lac.turn_assist, 'apply', wraps=lac.turn_assist.apply) as assist:
+    output, _, state = lac.update(True, cs, VehicleModel(cp), SimpleNamespace(angleOffsetDeg=0., roll=0.),
+                                  False, -.01, False, .1)
+  assist.assert_called_once()
+  limit = get_genesis_g70_low_speed_output_limit(state.desiredLateralAccel, cs.vEgo)
+  assert limit < lac.steer_max
+  assert abs(output) <= limit
+
+
+@pytest.mark.parametrize('gear', [structs.CarState.GearShifter.drive, structs.CarState.GearShifter.low])
+def test_generic_assist_minimum_and_driver_pause(gear):
+  from openpilot.starpilot.lateral.torque_turn_assist import TorqueTurnAssist
+  cp, _, cs = controller(True, ControllerMode.STANDARD, minimum=2.)
+  assist = TorqueTurnAssist(cp)
+  cs.gearShifter = gear
+  cs.vEgo = 2.
+  vm = VehicleModel(cp)
+  params = SimpleNamespace(angleOffsetDeg=0., roll=0.)
+  assert assist.apply(cs, vm, params, -.01, 0., .2) != 0.
+  cs.vEgo = 1.999
+  assert assist.apply(cs, vm, params, -.01, .1, .2) == .1
+  cs.vEgo = 2.
+  for field in ('standstill', 'steeringPressed', 'steerFaultTemporary', 'steerFaultPermanent'):
+    setattr(cs, field, True)
+    assert assist.apply(cs, vm, params, -.01, .1, .2) == .1
+    setattr(cs, field, False)
+
+
+def test_bolt_assist_preserves_custom_output_cap_and_single_saturation():
+  from opendbc.car.gm.values import CAR as GM_CAR
+  from openpilot.starpilot.longitudinal.tests.test_bolt_mode_transition import params as bolt_params
+  from openpilot.starpilot.lateral.bolt_shaping import get_bolt_2022_2023_low_speed_center_output_limit
+  cp = bolt_params(GM_CAR.CHEVROLET_BOLT_CC_2022_2023, pedal=True)
+  lac = LatControlTorque(cp.as_reader(), interfaces[cp.carFingerprint](cp), DT_CTRL, turn_assist=True)
+  cs = structs.CarState.new_message()
+  cs.gearShifter, cs.vEgo = 'low', 1.
+  with patch.object(lac.turn_assist, 'apply', return_value=lac.steer_max) as assist:
+    output, _, state = lac.update(True, cs, VehicleModel(cp), SimpleNamespace(angleOffsetDeg=0., roll=0.),
+                                  False, -.01, False, .1)
+  assist.assert_called_once()
+  limit = get_bolt_2022_2023_low_speed_center_output_limit(state.desiredLateralAccel, cs.vEgo)
+  assert limit < lac.steer_max and abs(output) <= limit
+  assert lac.sat_time == 0.

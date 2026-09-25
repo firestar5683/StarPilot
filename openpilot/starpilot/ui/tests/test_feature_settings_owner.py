@@ -1,6 +1,7 @@
 """Native saved-feature actions use real Params bytes and strict profile helpers."""
 
 from pathlib import Path
+from dataclasses import replace
 from types import SimpleNamespace
 import os
 import tempfile
@@ -10,7 +11,7 @@ from unittest.mock import patch
 from openpilot.common.params import Params
 from openpilot.starpilot.longitudinal.profile_document import migrate_profile_document
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
-from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsRequest, row_change
+from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsRequest, row_change, row_default
 from openpilot.starpilot import saved_document
 from openpilot.starpilot.ui import feature_settings_owner
 
@@ -30,6 +31,146 @@ def required_document(raw: object) -> dict:
 
 
 class FeatureSettingsOwnerTests(unittest.TestCase):
+  def test_bolt_wheel_menu_exposes_only_received_buttons(self):
+    from opendbc.car.gm.tests.test_bolt_pedal import params
+    from opendbc.car.gm.values import CAR
+    cp = params(CAR.CHEVROLET_BOLT_CC_2018_2021, pedal=True, camera=True)
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    self.params.put('LKASButtonControl', 9, block=True)
+    rows = self.owner.snapshot('wheel', parked=True, system_long=True, lateral_context=True, metric=False).rows
+    self.assertFalse(any(row.key == 'wheel:LKASButtonControl' for row in rows))
+    self.assertTrue(any(row.key == 'wheel:MainCruiseButtonControl' and row.available for row in rows))
+    self.assertTrue(any(row.key == 'wheel:DistanceButtonControl' and row.available for row in rows))
+    self.assertEqual(self.params.get('LKASButtonControl'), 9)
+
+  def test_hybrid_manual_settings_and_automatic_pedal_owner(self):
+    from opendbc.car import gen_empty_fingerprint
+    from opendbc.car.gm.interface import CarInterface
+    from opendbc.car.gm.values import CAR
+    from opendbc.car.gm.aol import qualified_gm
+    from opendbc.car.gm.tests.test_ordinary_cc import malibu_hybrid_params
+    from opendbc.car.gm.startup_preferences import prepare_disable_longitudinal
+    cp = CarInterface.get_params(CAR.CHEVROLET_MALIBU_HYBRID_CC, gen_empty_fingerprint(), [], False, False, False)
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    self.owner.configuration_vehicle = lambda: True
+    original = cp.as_reader().as_builder().to_bytes()
+    row = self._row('aol', 'AlwaysOnLateral')
+    self.assertTrue(row.available)
+    self.assertTrue(self.owner.apply(required_change(row)))
+    self.assertFalse(qualified_gm(cp))
+    self.assertEqual(cp.as_reader().as_builder().to_bytes(), original)
+    self.owner.configuration_vehicle = lambda: False
+    cp = malibu_hybrid_params(pedal=True, removed=True)
+    row = self._row('vehicle', 'GMPedalLongitudinal')
+    self.assertEqual(row.value, 'Automatic')
+    self.assertFalse(row.available)
+    self.assertIn('Activates automatically', row.reason)
+    prepare_disable_longitudinal(cp, True)
+    self.assertFalse(cp.openpilotLongitudinalControl)
+    self.assertEqual(self._row('vehicle', 'GMPedalLongitudinal').value, 'Detected, inactive')
+
+  def test_prius_retrofit_manual_settings_do_not_grant_runtime(self):
+    from opendbc.car import gen_empty_fingerprint, structs
+    from opendbc.car.toyota.interface import CarInterface
+    from opendbc.car.toyota.values import CAR
+    from openpilot.starpilot.aol.vehicle import policy_for
+    self.params.put_bool('AlwaysOnLateral', False, block=True)
+    cp = CarInterface.get_params(CAR.TOYOTA_PRIUS_RETROFIT, gen_empty_fingerprint(), [], False, False, False)
+    original = cp.as_reader().as_builder().to_bytes()
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    self.owner.configuration_vehicle = lambda: True
+    row = self._row('aol', 'AlwaysOnLateral')
+    self.assertTrue(row.available)
+    self.assertIn('next startup', row.reason)
+    self.assertTrue(self.owner.apply(required_change(row)))
+    self.assertTrue(self.params.get_bool('AlwaysOnLateral'))
+    self.assertEqual(cp.as_reader().as_builder().to_bytes(), original)
+    self.assertFalse(policy_for(cp).runtime_supported)
+    self.assertFalse(policy_for(cp).intent_supported)
+    self.owner.configuration_vehicle = lambda: False
+    self.assertTrue(self.owner.apply(required_change(self._row('aol', 'AlwaysOnLateral'))))
+    self.assertFalse(self.params.get_bool('AlwaysOnLateral'))
+    self.assertFalse(self._row('aol', 'AlwaysOnLateral').available)
+    ordinary = CarInterface.get_params(CAR.TOYOTA_PRIUS, gen_empty_fingerprint(), [], False, False, False)
+    self.owner.vehicle_params = lambda: ordinary
+    self.fingerprint = ordinary.carFingerprint
+    self.owner.configuration_vehicle = lambda: True
+    self.assertFalse(self._row('aol', 'AlwaysOnLateral').available)
+    fw = [structs.CarParams.CarFw(ecu=structs.CarParams.Ecu.eps,
+          fwVersion=b'8965B47070\x00\x00\x00\x00\x00\x00')]
+    actual = CarInterface.get_params(CAR.TOYOTA_PRIUS, {0: {0x2FF: 4}, 1: {}, 2: {}}, fw, False, False, False)
+    self.owner.vehicle_params = lambda: actual
+    self.fingerprint = actual.carFingerprint
+    self.owner.configuration_vehicle = lambda: False
+    self.assertTrue(self._row('aol', 'AlwaysOnLateral').available)
+    self.assertTrue(policy_for(actual).runtime_supported)
+
+  def test_toyota_hold_is_reachable_from_hub_with_correct_stop_description(self):
+    from opendbc.car import structs
+    from opendbc.car.toyota.interface import CarInterface
+    from opendbc.car.toyota.values import CAR
+    for hybrid in (True, False):
+      fw = [structs.CarParams.CarFw(ecu=structs.CarParams.Ecu.hybrid)] if hybrid else []
+      cp = CarInterface.get_params(CAR.TOYOTA_RAV4_TSS2, {0: {0x3F6: 8}, 1: {}, 2: {}}, fw, False, False, False)
+      self.fingerprint = cp.carFingerprint
+      self.owner.vehicle_params = lambda cp=cp: cp
+      hub = self.owner.snapshot("hub", parked=True, system_long=True, lateral_context=True, metric=False)
+      self.assertTrue(any(row.label == "Vehicle Settings" and row.available for row in hub.rows))
+      row = self._row("vehicle", "ToyotaAutoHold")
+      self.assertTrue(row.available)
+      self.assertIn("cruise disengaged", row.reason)
+      self.assertIn("over one second", row.reason)
+      self.assertIn("normal cruise stop-and-go is unchanged", row.reason)
+      request = replace(required_change(row), confirmation=True)
+      self.assertTrue(self.owner.apply(request))
+      self.params.put_bool("ToyotaAutoHold", False, block=True)
+
+  def test_gm_tune_configured_choice_preserves_intent_and_guards_commit(self):
+    from opendbc.car.gm.tests.test_volt_transitions import volt_camera_pedal_params
+    cp = volt_camera_pedal_params(release=True)
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    self.owner.configuration_vehicle = lambda: True
+    row = self._row("vehicle", "GMLongitudinalTune")
+    self.assertEqual(row.choices, ("Vehicle Default", "Volt Tune"))
+    request = required_change(row)
+    self.assertEqual(request.value, "Volt Tune")
+    self.assertTrue(self.owner.apply(request))
+    self.assertFalse(self.owner.apply(request))
+    self.assertEqual(Path(self.params.get_param_path("GMLongitudinalTune")).read_bytes(), b"2")
+    self.owner.configuration_vehicle = lambda: False
+    self.assertNotIn("GMLongitudinalTune", [r.key for r in self.owner.snapshot(
+      "vehicle", parked=True, system_long=False, lateral_context=True, metric=False).rows])
+    self.assertEqual(Path(self.params.get_param_path("GMLongitudinalTune")).read_bytes(), b"2")
+    self.owner.configuration_vehicle = lambda: True
+    row = self._row("vehicle", "GMLongitudinalTune")
+    reset = row_default(row)
+    assert reset is not None
+    self.allowed = False
+    self.assertFalse(self.owner.apply(reset))
+    self.allowed = True
+    self.assertTrue(self.owner.apply(reset))
+    self.assertEqual(Path(self.params.get_param_path("GMLongitudinalTune")).read_bytes(), b"0")
+
+  def test_gm_tune_invalid_saved_choice_repairs_only_vehicle_default(self):
+    from opendbc.car.gm.tests.test_volt_transitions import volt_camera_pedal_params
+    cp = volt_camera_pedal_params()
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    path = Path(self.params.get_param_path("GMLongitudinalTune"))
+    path.write_bytes(b"2\n")
+    row = self._row("vehicle", "GMLongitudinalTune")
+    self.assertEqual(row.value, "Invalid saved choice")
+    reset = row_default(row)
+    assert reset is not None
+    self.assertFalse(self.owner.apply(replace(reset, value="Volt Tune")))
+    self.assertEqual(path.read_bytes(), b"2\n")
+    self.assertTrue(self.owner.apply(reset))
+    self.assertEqual(path.read_bytes(), b"0")
+
   def setUp(self):
     self.temp = tempfile.TemporaryDirectory()
     self.addCleanup(self.temp.cleanup)
@@ -47,6 +188,62 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     state = self.owner.snapshot(page, parked=True, system_long=True, lateral_context=True, metric=False)
     return next(row for row in state.rows if row.key == key)
 
+  def test_camera_interceptor_setup_reports_actual_owner_and_preserves_preferences(self):
+    from opendbc.car.gm.tests.test_camera_acc_pedal import params
+    from opendbc.car.gm.startup_preferences import prepare_disable_longitudinal
+    cp = params()
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    self.params.put_bool('GMPedalLongitudinal', False, block=True)
+    pedal = self._row('vehicle', 'GMPedalLongitudinal')
+    self.assertEqual(pedal.value, 'Automatic')
+    self.assertFalse(pedal.available)
+    pitch = self._row('vehicle', 'LongPitch')
+    self.assertTrue(pitch.available)
+    request = replace(required_change(pitch), confirmation=True)
+    self.assertTrue(self.owner.apply(request))
+    self.assertFalse(self.params.get_bool('LongPitch'))
+    prepare_disable_longitudinal(cp, True)
+    self.assertEqual(self._row('vehicle', 'GMPedalLongitudinal').value, 'Detected, inactive')
+    self.assertFalse(self.owner.apply(request))
+    self.assertFalse(self.params.get_bool('GMPedalLongitudinal'))
+    self.assertNotIn('LongPitch', [row.key for row in self.owner.snapshot(
+      'vehicle', parked=True, system_long=False, lateral_context=True, metric=False).rows])
+
+  def test_malformed_numeric_default_has_no_reset_target(self):
+    self.params.put("StandardFollow", 2.8, block=True)
+    with patch.object(self.owner, "_default", return_value="not a number"):
+      row = self.owner._number_row("StandardFollow", "Follow", True)
+    self.assertIsNone(row.default_value)
+    self.assertIsNone(row_default(row))
+
+  def test_volt_cc_pedal_setup_and_grade_compensation_follow_actual_owner(self):
+    from opendbc.car.gm.tests.test_volt_transitions import volt_cc_pedal_params
+    from opendbc.car.gm.startup_preferences import prepare_disable_longitudinal
+    cp = volt_cc_pedal_params()
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    self.assertEqual(self._row('vehicle', 'GMPedalLongitudinal').value, 'Automatic')
+    pitch = self._row('vehicle', 'LongPitch')
+    self.assertTrue(pitch.available)
+    request = replace(required_change(pitch), confirmation=True)
+    self.assertTrue(self.owner.apply(request))
+    prepare_disable_longitudinal(cp, True)
+    self.assertEqual(self._row('vehicle', 'GMPedalLongitudinal').value, 'Detected, inactive')
+    self.assertFalse(self.owner.apply(request))
+
+  def test_source_profile_defaults_and_single_numeric_reset(self):
+    self.params.put("StandardFollow", 2.8, block=True)
+    row = self._row("standard", "StandardFollow")
+    self.assertEqual(float(row.default_value), float(self.params.get_default_value("StandardFollow")))
+    request = row_default(row)
+    assert request is not None
+    self.assertTrue(self.owner.apply(request))
+    self.assertFalse(self.owner.apply(request))
+    preset = self._row("standard/acceleration", "profile:standard:acceleration")
+    self.assertEqual(preset.default_value, "Selected Profile")
+    self.assertEqual(self._row("profiles", "profile:global_braking").default_value, "Comfort")
+
   def test_strength_has_actual_runtime_admission_percent_range_and_source_guard(self):
     from openpilot.starpilot.lateral.tests.test_lane_runtime import ioniq_candidate
     _, tagged = ioniq_candidate()
@@ -56,7 +253,7 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
       def get_param_path(self, key):
         return str(root / key)
       def get_default_value(self, key):
-        return 1.0 if key == "LaneCenteringStrength" else registered.get_default_value(key)
+        return 1.5 if key == "LaneCenteringStrength" else registered.get_default_value(key)
       def put(self, key, value, block=True):
         (root / key).write_bytes(str(value).encode())
     self.owner.params = Files()
@@ -67,14 +264,29 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     self.owner.vehicle_params = lambda: tagged
     self.fingerprint = tagged.carFingerprint
     row = self._row("lane", "LaneCenteringStrength")
-    self.assertEqual((row.value, row.minimum, row.maximum, row.step), ("100.0", 50, 150, 5))
+    self.assertEqual((row.value, row.minimum, row.maximum, row.step), ("100", 33, 200, 1))
     self.assertTrue(row.available)
-    request = FeatureSettingsRequest(row.key, row.source, "150", vehicle_fingerprint=row.vehicle_fingerprint)
+    request = FeatureSettingsRequest(row.key, row.source, "200", vehicle_fingerprint=row.vehicle_fingerprint)
     self.assertTrue(self.owner.apply(request))
-    self.assertEqual((root / row.key).read_bytes(), b"1.5")
+    self.assertEqual((root / row.key).read_bytes(), b"3.0")
     self.assertFalse(self.owner.apply(request))
+    reset_row = self._row("lane", "LaneCenteringStrength")
+    self.assertEqual(reset_row.default_value, "100")
+    self.assertTrue(self.owner.apply(FeatureSettingsRequest(reset_row.key, reset_row.source, reset_row.default_value,
+                                                          vehicle_fingerprint=reset_row.vehicle_fingerprint)))
+    self.assertEqual((root / row.key).read_bytes(), b"1.5")
+    self.assertEqual(registered.get_default_value("LaneCenteringStrength"), 1.5)
+    for percent, expected in ((33, b"0.5"), (67, b"1.005"), (100, b"1.5"), (105, b"1.575"), (150, b"2.25"), (200, b"3.0")):
+      current = self._row("lane", "LaneCenteringStrength")
+      self.assertTrue(self.owner.apply(FeatureSettingsRequest(current.key, current.source, str(percent),
+                                                            vehicle_fingerprint=current.vehicle_fingerprint)))
+      self.assertEqual((root / row.key).read_bytes(), expected)
+    (root / row.key).write_bytes(b"1.0")
+    preserved = self._row("lane", "LaneCenteringStrength")
+    self.assertEqual(preserved.value, "67")
+    self.assertEqual((root / row.key).read_bytes(), b"1.0")
     row = self._row("lane", "LaneCenteringStrength")
-    for invalid in ("49", "151", "nan"):
+    for invalid in ("32", "201", "nan"):
       self.assertFalse(self.owner.apply(FeatureSettingsRequest(row.key, row.source, invalid,
                                                              vehicle_fingerprint=row.vehicle_fingerprint)))
     self.owner.vehicle_params = lambda: None
@@ -82,45 +294,57 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
                                                            vehicle_fingerprint=row.vehicle_fingerprint)))
     self.assertIsNone(registered.get("LaneCenteringE2EAuthority"))
 
-  def test_turn_assist_is_parked_selected_and_exact_source_guarded(self):
+  def test_turn_assist_defaults_on_independent_of_tune_and_exact_source_guarded(self):
     from openpilot.starpilot.lateral.tests.test_lane_runtime import ioniq_candidate
     from openpilot.starpilot.lateral.controller_selection import DOCUMENT_KEY, ControllerMode, replace_mode
     _, cp = ioniq_candidate()
-    root = Path(self.params.get_param_path("LaneCentering")).parent
-    registered = self.params
-    class Files:
-      def get_param_path(self, key):
-        return str(root / key)
-      def get_default_value(self, key):
-        return registered.get_default_value(key)
-    self.owner.params = Files()
-    self.owner.controller.params = self.owner.params
     self.owner.vehicle_params = lambda: cp
     self.owner.controller.vehicle_params = self.owner.vehicle_params
     self.fingerprint = cp.carFingerprint
     row = self._row("torque", "TurnAssist")
-    self.assertEqual(row.value, "Off")
+    self.assertEqual(row.value, "On")
     self.assertTrue(row.available)
+    self.assertEqual(row.dependencies, ())
     request = required_change(row)
     self.assertTrue(self.owner.apply(request))
-    self.assertEqual((root / "TurnAssist").read_bytes(), b"1")
+    self.assertFalse(self.params.get_bool("TurnAssist"))
     self.assertFalse(self.owner.apply(request))
+    import json
+    self.params.put(DOCUMENT_KEY, json.loads(replace_mode(None, cp, ControllerMode.STANDARD)), block=True)
     row = self._row("torque", "TurnAssist")
-    request = required_change(row)
-    (root / DOCUMENT_KEY).write_bytes(replace_mode(None, cp, ControllerMode.STANDARD))
-    self.assertFalse(self.owner.apply(request))
-    self.assertFalse(self._row("torque", "TurnAssist").available)
-    (root / DOCUMENT_KEY).unlink()
-    self.owner.authority = lambda group: group != "parked_preferences"
-    self.assertFalse(self.owner.apply(required_change(self._row("torque", "TurnAssist"))))
+    self.assertTrue(row.available)
+    self.assertEqual(row.value, "Off")
+    self.assertFalse(self.params.get_bool("TurnAssist"))
     view = self.owner.snapshot("torque", parked=False, system_long=True, lateral_context=True, metric=False)
     self.assertFalse(next(row for row in view.rows if row.key == "TurnAssist").available)
-    self.owner.authority = lambda group: True
     self.owner.vehicle_params = lambda: None
     view = self.owner.snapshot("torque", parked=True, system_long=True, lateral_context=True, metric=False)
     self.assertFalse(any(row.key == "TurnAssist" for row in view.rows))
-    self.assertFalse(self.owner.apply(request))
-    self.assertEqual((root / "TurnAssist").read_bytes(), b"1")
+    self.assertFalse(self.owner.apply(required_change(row)))
+    self.assertFalse(self.params.get_bool("TurnAssist"))
+
+  def test_turn_assist_nonpolicy_owner_saved_off_survives_restart(self):
+    from opendbc.car.car_helpers import interfaces
+    from opendbc.car.mazda.values import CAR
+    from openpilot.starpilot.lateral.controller_selection import policy_for
+    from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
+    cp = interfaces[CAR.MAZDA_CX5_2022].get_non_essential_params(CAR.MAZDA_CX5_2022)
+    self.assertIsNone(policy_for(cp))
+    self.owner.vehicle_params = lambda: cp
+    self.owner.controller.vehicle_params = self.owner.vehicle_params
+    self.fingerprint = cp.carFingerprint
+    row = self._row("torque", "TurnAssist")
+    self.assertTrue(row.available)
+    self.assertEqual(row.value, "On")
+    self.assertTrue(self.owner.apply(required_change(row)))
+    self.assertFalse(VehicleStartupPreferences.read(self.params, enabled=True).turn_assist)
+    row = self._row("torque", "TurnAssist")
+    self.assertEqual(row.value, "Off")
+    cp.minSteerSpeed += 1.
+    self.assertFalse(self.owner.apply(required_change(row)))
+    cp.minSteerSpeed -= 1.
+    self.assertTrue(self.owner.apply(required_change(self._row("torque", "TurnAssist"))))
+    self.assertTrue(VehicleStartupPreferences.read(self.params, enabled=True).turn_assist)
 
   def test_live_lane_owner_maps_only_explicit_keys(self):
     self.owner.authority = lambda group: group == "lane_live"
@@ -155,7 +379,7 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     self.assertIsNone(self.params.get("QOLLongitudinal"))
 
   def test_force_stop_preserves_cruise_master_and_offset_bounds(self):
-    self.assertFalse(self._row("profiles", "ForceStops").available)
+    self.assertTrue(self._row("profiles", "ForceStops").available)
     self.params.put_bool("QOLLongitudinal", True, block=True)
     force = self._row("profiles", "ForceStops")
     self.assertTrue(force.available)
@@ -188,14 +412,16 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
 
   def test_readable_presets_keep_saved_tokens_and_numeric_help(self):
     preset = self._row("aggressive/acceleration", "profile:aggressive:acceleration")
-    self.assertEqual(preset.value, "StarPilot Default")
-    self.assertEqual(preset.choices, ("StarPilot Default", "Standard", "Eco", "Sport", "Sport+", "Custom"))
+    self.assertEqual(preset.value, "Selected Profile")
+    self.assertEqual(preset.choices, ("Selected Profile", "StarPilot Default", "Normal", "Comfort", "Sport", "Sport+"))
     self.assertTrue(self.owner.apply(FeatureSettingsRequest(preset.key, preset.source, "Sport+",
                                                           vehicle_fingerprint=preset.vehicle_fingerprint)))
     document = required_document(Path(self.params.get_param_path("LongitudinalPersonalityProfiles")).read_bytes())
     self.assertEqual(document["profiles"]["aggressive"]["acceleration"]["preset"], "sport_plus")
     self.assertIn("Higher values", self._row("aggressive", "AggressiveJerkAcceleration").reason)
-    self.assertIn("curves", self._row("aggressive", "AggressivePersonalityProfile").label)
+    self.assertFalse(any(row.key == "AggressivePersonalityProfile" for row in self.owner.snapshot(
+      "aggressive", parked=True, system_long=True, lateral_context=True, metric=False).rows))
+    self.assertIn("Sport+", self._row("aggressive/acceleration", "profile:aggressive:acceleration").value)
     self.assertIsNone(self.params.get("CustomPersonalities"))
 
   def test_release_rechecks_parked_authority_and_source(self):
@@ -261,6 +487,11 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     self.owner = FeatureSettingsOwner(self.params, lambda group: self.allowed and group == "preferences",
                                       vehicle_fingerprint=lambda: self.fingerprint)
     page = self.owner.snapshot("slc", parked=True, system_long=False, lateral_context=False, metric=False)
+    fresh_sign = next(row for row in page.rows if row.key == "ShowSpeedLimits")
+    self.assertEqual((fresh_sign.value, fresh_sign.default_value), ('On', 'On'))
+    self.params.put_bool('ShowSpeedLimits', False, block=True)
+    self.params.put('SLCPriority1', 'Dashboard', block=True)
+    page = self.owner.snapshot("slc", parked=True, system_long=False, lateral_context=False, metric=False)
     sign = next(row for row in page.rows if row.key == "ShowSpeedLimits")
     self.assertTrue(sign.available)
     self.assertIsNone(sign.vehicle_fingerprint)
@@ -317,53 +548,35 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     self.fingerprint = "OTHER CAR"
     self.assertFalse(self.owner.apply(required_change(fresh)))
 
-  def test_curve_learning_adopt_reset_and_saved_readout(self):
+  def test_curve_learning_automatic_readout_and_confirmed_reset(self):
     legacy = Path(self.params.get_param_path("CurvatureData"))
     legacy_raw = b'{"0.001":{"average":2.4,"count":2}}'
     legacy.write_bytes(legacy_raw)
-    progress = self._row("curve", "")
-    self.assertEqual(progress.label, "Saved learning")
-    saved_progress = next(row for row in self.owner.snapshot("curve", parked=True, system_long=True,
-                              lateral_context=True, metric=False).rows if row.label == "Saved progress")
-    self.assertNotEqual(saved_progress.value, "Unavailable")
-    comfort = next(row for row in self.owner.snapshot("curve", parked=True, system_long=True,
-                         lateral_context=True, metric=False).rows if row.label == "Saved cornering comfort")
+    state = self.owner.snapshot("curve", parked=True, system_long=True, lateral_context=True, metric=False)
+    self.assertFalse(any(row.key == "curve_adopt" for row in state.rows))
+    progress = next(row for row in state.rows if row.label == "Learning progress")
+    self.assertNotEqual(progress.value, "Unavailable")
+    comfort = next(row for row in state.rows if row.label == "Saved cornering comfort")
     self.assertIn("m/s²", comfort.value)
-    adopt = self._row("curve", "curve_adopt")
-    self.assertTrue(adopt.available)
-    request = FeatureSettingsRequest(adopt.key, adopt.source, "confirm", confirmation=True,
-                                     vehicle_fingerprint=adopt.vehicle_fingerprint, dependencies=adopt.dependencies)
-    self.assertFalse(self.owner.apply(FeatureSettingsRequest(adopt.key, adopt.source, "confirm",
-                                                              vehicle_fingerprint=adopt.vehicle_fingerprint,
-                                                              dependencies=adopt.dependencies)))
-    self.assertTrue(self.owner.apply(request))
-    self.assertEqual(legacy.read_bytes(), legacy_raw)
     canonical = Path(self.params.get_param_path("CurveComfortData"))
-    self.assertIn(b'"version":1', canonical.read_bytes())
-    self.assertFalse(self.owner.apply(request))
-    self.assertFalse(self._row("curve", "curve_adopt").available)
-    self.params.put_bool("CurveSpeedController", True, block=True)
-    self.assertFalse(self._row("curve", "curve_reset").available)
-    self.params.put_bool("CurveSpeedController", False, block=True)
-    reset = self._row("curve", "curve_reset")
-    self.assertTrue(reset.available)
-    stale = FeatureSettingsRequest(reset.key, reset.source, "confirm", confirmation=True,
-                                   vehicle_fingerprint=reset.vehicle_fingerprint, dependencies=reset.dependencies)
-    canonical.write_bytes(b'{invalid')
-    self.assertFalse(self.owner.apply(stale))
-    reset = self._row("curve", "curve_reset")
-    self.assertTrue(reset.available)
-    confirmed = FeatureSettingsRequest(reset.key, reset.source, "confirm", confirmation=True,
-                                       vehicle_fingerprint=reset.vehicle_fingerprint, dependencies=reset.dependencies)
-    self.assertTrue(self.owner.apply(confirmed))
+    self.assertFalse(canonical.exists())
     self.assertEqual(legacy.read_bytes(), legacy_raw)
+    reset = self._row("curve", "curve_reset")
+    request = FeatureSettingsRequest(reset.key, reset.source, "confirm", confirmation=True,
+      vehicle_fingerprint=reset.vehicle_fingerprint, dependencies=reset.dependencies)
+    self.assertFalse(self.owner.apply(replace(request, confirmation=False)))
+    legacy.write_bytes(b'{"0.001":{"average":2.0,"count":2}}')
+    self.assertFalse(self.owner.apply(request))
+    reset = self._row("curve", "curve_reset")
+    request = FeatureSettingsRequest(reset.key, reset.source, "confirm", confirmation=True,
+      vehicle_fingerprint=reset.vehicle_fingerprint, dependencies=reset.dependencies)
+    self.assertTrue(self.owner.apply(request))
     self.assertEqual(canonical.read_bytes(), b'{"version":1,"buckets":{}}')
-    self.assertFalse(self.params.get_bool("CurveSpeedController"))
-    self.assertEqual(self._row("curve", "curve_reset").available, True)
+    self.assertEqual(legacy.read_bytes(), b'{"0.001":{"average":2.0,"count":2}}')
 
   def test_curve_learning_action_rechecks_parked_vehicle(self):
-    Path(self.params.get_param_path("CurvatureData")).write_bytes(b'{}')
-    adopt = self._row("curve", "curve_adopt")
+    Path(self.params.get_param_path("CurvatureData")).write_bytes(b'{"0.001":{"average":2.0,"count":2}}')
+    adopt = self._row("curve", "curve_reset")
     request = FeatureSettingsRequest(adopt.key, adopt.source, "confirm", confirmation=True,
                                      vehicle_fingerprint=adopt.vehicle_fingerprint, dependencies=adopt.dependencies)
     self.allowed = False
@@ -482,7 +695,7 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
 
   def test_global_braking_saved_choice_is_parked_source_bound_and_preserved_by_profile_edit(self):
     row = self._row("profiles", "profile:global_braking")
-    self.assertEqual((row.value, row.choices), ("Standard", ("Standard", "Eco", "Sport")))
+    self.assertEqual((row.value, row.choices), ("Comfort", ("StarPilot Default", "Normal", "Comfort", "Sport")))
     self.assertFalse(self.params.get_bool("CustomPersonalities"))
     change = required_change(row)
     assert change is not None
@@ -491,15 +704,131 @@ class FeatureSettingsOwnerTests(unittest.TestCase):
     self.allowed = True
     self.assertTrue(self.owner.apply(change))
     saved = required_document(self.params.get("LongitudinalPersonalityProfiles"))
-    self.assertEqual(saved["globalBrakingResponse"], "eco")
+    self.assertEqual(saved["selectedDecelerationProfile"], "sport")
     self.assertFalse(saved["enabled"])
     self.assertFalse(self.owner.apply(change))
     category = self._row("standard/braking", "profile:standard:braking")
     self.assertTrue(self.owner.apply(required_change(category)))
-    self.assertEqual(required_document(self.params.get("LongitudinalPersonalityProfiles"))["globalBrakingResponse"], "eco")
+    self.assertEqual(required_document(self.params.get("LongitudinalPersonalityProfiles"))["selectedDecelerationProfile"], "sport")
     unparked = self.owner.snapshot("profiles", parked=False, system_long=True, lateral_context=True, metric=False)
     self.assertFalse(next(row for row in unparked.rows if row.key == "profile:global_braking").available)
 
 
 if __name__ == "__main__":
   unittest.main()
+
+
+class TruckTuningFeatureTests(unittest.TestCase):
+  setUp = FeatureSettingsOwnerTests.setUp
+  _authority = FeatureSettingsOwnerTests._authority
+  _row = FeatureSettingsOwnerTests._row
+
+  def test_truck_saved_choice_exact_owner_and_stale_request(self):
+    from opendbc.car.gm.tests.test_ordinary_camera import params
+    from opendbc.car.gm.values import CAR
+    cp = params(CAR.CHEVROLET_SILVERADO, alpha=True)
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    row = self._row('vehicle', 'TruckTuning')
+    self.assertEqual((row.value, row.default_value), ('Off', 'Off'))
+    request = required_change(row)
+    self.assertTrue(self.owner.apply(request))
+    self.assertEqual(Path(self.params.get_param_path('TruckTuning')).read_bytes(), b'1')
+    self.assertFalse(self.owner.apply(request))
+    stale = required_change(self._row('vehicle', 'TruckTuning'))
+    cp = params(CAR.CHEVROLET_SILVERADO, alpha=True, release=True)
+    self.assertFalse(self.owner.apply(stale))
+    self.assertFalse(any(row.key == 'TruckTuning' for row in self.owner.snapshot(
+      'vehicle', parked=True, system_long=False, lateral_context=True, metric=False).rows))
+    self.assertEqual(Path(self.params.get_param_path('TruckTuning')).read_bytes(), b'1')
+
+  def test_truck_invalid_choice_repairs_only_off_and_respects_authority(self):
+    from opendbc.car.gm.tests.test_ordinary_camera import params
+    from opendbc.car.gm.values import CAR
+    cp = params(CAR.CHEVROLET_SILVERADO, alpha=True, camera=False)
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    path = Path(self.params.get_param_path('TruckTuning'))
+    path.write_bytes(b'1\n')
+    row = self._row('vehicle', 'TruckTuning')
+    request = row_default(row)
+    assert request is not None
+    self.assertFalse(self.owner.apply(replace(request, value='On')))
+    self.allowed = False
+    self.assertFalse(self.owner.apply(request))
+    self.allowed = True
+    self.assertTrue(self.owner.apply(request))
+    self.assertEqual(path.read_bytes(), b'0')
+
+
+class EvPresetFeatureTests(unittest.TestCase):
+  setUp = FeatureSettingsOwnerTests.setUp
+  _authority = FeatureSettingsOwnerTests._authority
+  _row = FeatureSettingsOwnerTests._row
+
+  def test_saved_ev_choice_is_atomic_and_stock_owner_cannot_change_it(self):
+    from opendbc.car.gm.tests.test_ordinary_camera import params
+    from opendbc.car.gm.values import CAR
+    cp = params(CAR.CHEVROLET_SILVERADO, alpha=True)
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    row = self._row('vehicle', 'EVTuning')
+    self.assertEqual(row.value, 'Off')
+    self.assertIsNone(row.source)
+    request = required_change(row)
+    self.assertTrue(self.owner.apply(request))
+    self.assertTrue(self.params.get_bool('EVTuning'))
+    self.assertFalse(self.owner.apply(request))
+    stale = required_change(self._row('vehicle', 'EVTuning'))
+    cp = params(CAR.CHEVROLET_SILVERADO, alpha=True, release=True)
+    self.assertFalse(self.owner.apply(stale))
+    self.assertFalse(any(r.key == 'EVTuning' for r in self.owner.snapshot('vehicle', parked=True, system_long=False, lateral_context=True, metric=False).rows))
+    self.assertTrue(self.params.get_bool('EVTuning'))
+
+  def test_invalid_ev_choice_repairs_only_current_powertrain_default(self):
+    from opendbc.car.gm.tests.test_ordinary_camera import params
+    from opendbc.car.gm.values import CAR
+    cp = params(CAR.CHEVROLET_SILVERADO, alpha=True)
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    path = Path(self.params.get_param_path('EVTuning'))
+    path.write_bytes(b'1\n')
+    request = row_default(self._row('vehicle','EVTuning'))
+    assert request is not None
+    self.assertFalse(self.owner.apply(replace(request,value='On')))
+    self.allowed = False
+    self.assertFalse(self.owner.apply(request))
+    self.allowed = True
+    self.assertTrue(self.owner.apply(request))
+    self.assertEqual(path.read_bytes(),b'0')
+
+
+  def test_ev_default_row_follows_final_direct_powertrain_without_saving(self):
+    from opendbc.car.gm.tests.test_bolt_pedal import params
+    from opendbc.car.gm.values import CAR
+    cp = params(CAR.CHEVROLET_BOLT_CC_2022_2023,pedal=True,camera=True)
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    row = self._row('vehicle','EVTuning')
+    self.assertEqual((row.value,row.default_value),('On','On'))
+    self.assertIsNone(row.source)
+    self.assertFalse(Path(self.params.get_param_path('EVTuning')).exists())
+
+
+  def test_current_vehicle_loss_during_ev_commit_denies_without_saving(self):
+    from opendbc.car.gm.tests.test_ordinary_camera import params
+    from opendbc.car.gm.values import CAR
+    cp = params(CAR.CHEVROLET_SILVERADO, alpha=True)
+    self.fingerprint = cp.carFingerprint
+    self.owner.vehicle_params = lambda: cp
+    request = required_change(self._row('vehicle', 'EVTuning'))
+    reads = []
+
+    def current_vehicle():
+      reads.append(len(reads))
+      return cp if len(reads) == 1 else None
+
+    self.owner.vehicle_params = current_vehicle
+    self.assertFalse(self.owner.apply(request))
+    self.assertEqual(len(reads), 2)
+    self.assertFalse(Path(self.params.get_param_path('EVTuning')).exists())

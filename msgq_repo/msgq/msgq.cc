@@ -443,6 +443,8 @@ int msgq_poll(msgq_pollitem_t * items, size_t nitems, int timeout){
     if (items[i].revents) num++;
   }
 
+  if (timeout == 0) return num;
+
   int ms = (timeout == -1) ? 100 : timeout;
 
 #ifdef __APPLE__

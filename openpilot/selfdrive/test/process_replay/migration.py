@@ -539,4 +539,4 @@ if __name__ == '__main__':
 
   mlr = migrate_all(LogReader(args.input_path))
   print(f"Saving migrated log to {args.output_path}", file=sys.stderr)
-  save_log(args.output_path , mlr)
+  save_log(args.output_path, mlr)

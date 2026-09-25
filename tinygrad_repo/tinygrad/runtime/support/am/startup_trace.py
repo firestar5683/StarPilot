@@ -1,7 +1,8 @@
 import functools, json, os, time
+from collections.abc import Callable
 
 ENABLED = os.environ.get("STARPILOT_GPU_STARTUP_TRACE") == "1"
-REPORT = None
+REPORT: Callable[[dict], None] | None = None
 
 def report(packet):
   if REPORT is not None: REPORT(packet)

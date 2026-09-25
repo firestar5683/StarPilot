@@ -12,7 +12,7 @@ import openpilot.cereal.messaging as messaging
 from openpilot.common.utils import atomic_write
 from openpilot.common.params import Params, ParamKeyFlag, UnknownKeyName
 from openpilot.common.text_window import TextWindow
-from openpilot.common.hardware import HARDWARE
+from openpilot.common.hardware import HARDWARE, PC
 from openpilot.system.manager.helpers import unblock_stdout, save_bootlog
 from openpilot.system.manager.process import ensure_running
 from openpilot.system.manager.process_config import managed_processes
@@ -20,13 +20,19 @@ from openpilot.system.athena.registration import register, UNREGISTERED_DONGLE_I
 from openpilot.common.swaglog import cloudlog, add_file_handler
 from openpilot.common.version import get_build_metadata
 from openpilot.common.hardware.hw import Paths
+from openpilot.system import sentry
 from openpilot.starpilot.state_migration import prepare_manager_start
 from openpilot.starpilot.storage import starpilot_storage_root
 
 
 def manager_init() -> None:
   params = Params()
-  prepare_manager_start(params, starpilot_storage_root())
+  prepare_manager_start(params, starpilot_storage_root(), auto_migrate=True)
+  if not PC:
+    from openpilot.starpilot.external_preferences_reset import reset_external_preferences
+    from openpilot.starpilot.models.manager import ROOT as model_preferences_root
+    for issue in reset_external_preferences(starpilot_storage_root(), model_preferences_root):
+      cloudlog.warning('Fresh software preferences: %s', issue)
   from openpilot.starpilot.settings_retirement import retire_settings
   try:
     for issue in retire_settings(params):
@@ -67,6 +73,8 @@ def manager_init() -> None:
   # Initialize absent settings only. Typed reads can return None for malformed
   # saved data; replacing it here would bypass feature validation and recovery.
   for k in params.all_keys():
+    if k == b"LKASButtonControl":
+      continue  # Card enrolls the vehicle-specific default after identification.
     default_value = params.get_default_value(k)
     if default_value is not None and not os.path.lexists(params.get_param_path(k)):
       params.put(k, default_value, block=True)
@@ -206,19 +214,46 @@ def manager_thread() -> None:
 
 
 def main() -> None:
-  manager_init()
+  sentry.init()
+  sentry.set_tag("daemon", "manager")
+  try:
+    manager_init()
+  except Exception:
+    sentry.capture_exception()
+    sentry.flush()
+    raise
+  sentry.init()
   if os.getenv("PREPAREONLY") is not None:
     return
 
   # SystemExit on sigterm
   signal.signal(signal.SIGTERM, lambda signum, frame: sys.exit(1))
 
+  analytics = None
+  try:
+    from openpilot.starpilot.analytics.runtime import start_optional_worker
+    analytics = start_optional_worker()
+  except Exception:
+    cloudlog.warning("Usage statistics worker unavailable")
+
   try:
     manager_thread()
   except Exception:
     traceback.print_exc()
     cloudlog.exception("crash")
+    sentry.capture_exception()
+    sentry.flush()
   finally:
+    if analytics is not None:
+      try:
+        analytics.close()
+      except Exception:
+        cloudlog.warning("Usage statistics shutdown failed")
+    try:
+      from openpilot.starpilot.system.jetlink.lifecycle import shutdown as shutdown_jetlink
+      shutdown_jetlink(Params())
+    except Exception:
+      cloudlog.exception("Jetlink shutdown handoff failed")
     manager_cleanup()
 
   params = Params()

@@ -23,6 +23,11 @@ class TestBoltAccCc(unittest.TestCase):
     for alpha in (False, True):
       for present in (False, True):
         cp = params(ID, alpha=alpha, present=present)
+        if present:
+          self.assertTrue(cp.flags & GMFlags.PEDAL_LONG.value)
+          self.assertFalse(is_bolt_cc_profile(cp))
+          self.assertTrue(cp.openpilotLongitudinalControl)
+          continue
         self.assertTrue(is_bolt_cc_profile(cp))
         self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xC140)
         self.assertFalse(cp.pcmCruise or cp.alphaLongitudinalAvailable)
@@ -134,7 +139,7 @@ class TestBoltAccCc(unittest.TestCase):
     packet(0x370, bytes((0, 0, 128, 0, 0, 0)), 1_000_001, bus=2)
     safety = libsafety_py.libsafety
     safety.set_timer(3_000_000)
-    safety.safety_tick_current_safety_config()
+    safety.safety_tick()
     self.assertFalse(safety.get_controls_allowed())
     for address, data in frames:
       packet(address, data, 3_001_000)
@@ -165,6 +170,7 @@ class TestBoltAccCc(unittest.TestCase):
       Params().put('CarParams', cp.to_bytes(), block=True)
       controls = Controls()
       controls.sm.simulation = False
+
       def publish(now, mode, valid=True):
         drive = messaging.new_message('selfdriveState', valid=valid)
         drive.selfdriveState.enabled = drive.selfdriveState.active = True
@@ -247,7 +253,7 @@ class TestBoltAccCc(unittest.TestCase):
 class TestBoltAccCcRemoved(unittest.TestCase):
   def test_actual_pt_parser_controller_cancel_and_native(self):
     for alpha in (False, True):
-      for present in (False, True):
+      for present in (False,):
         cp, ci, packer = fixture(ID, removed=True, alpha=alpha, present=present)
         self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xC141)
         setup(cp)

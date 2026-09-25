@@ -50,8 +50,28 @@ class Frame:
     return self.state
 
 
+def publish_corolla_params(params):
+  """Use Card's real startup admission and serialized full-axis configuration."""
+  from openpilot.selfdrive.car.card import Car
+  params.put_bool('OpenpilotEnabledToggle', True, block=True)
+  params.put_bool('SafeMode', False, block=True)
+  cp = interfaces[CAR.TOYOTA_COROLLA_TSS2].get_non_essential_params(CAR.TOYOTA_COROLLA_TSS2)
+
+  def discover(*args, pre_create_hook, **kwargs):
+    return interfaces[cp.carFingerprint](pre_create_hook(cp.as_reader().as_builder(), cp.carFingerprint, {}, []))
+
+  with mock.patch.dict(os.environ, {'SIMULATION': '1'}), \
+       mock.patch('openpilot.selfdrive.car.card.messaging.recv_one_retry', return_value=SimpleNamespace(can=[1])), \
+       mock.patch('openpilot.selfdrive.car.card.get_car', side_effect=discover):
+    selected = Car()
+  final = selected.CP.as_reader().as_builder()
+  assert final.alternativeExperience == 32
+  return final
+
+
 def feed(controls, timestamp, tick, *, active=True, enabled=True, fault=False, override=False, signal=False, model_age=0,
-         can_valid=True, can_timeout=False, aol_lat_only=False, native_session='lane-aol-session'):
+         can_valid=True, can_timeout=False, aol_lat_only=False, native_session='lane-aol-session', speed=20.,
+         drive_id=500_000_000, native_allowed=True, independent=False):
   events = []
 
   def msg(service, size=None):
@@ -59,8 +79,11 @@ def feed(controls, timestamp, tick, *, active=True, enabled=True, fault=False, o
     events.append(event)
     return getattr(event, service)
 
+  device = msg('deviceState')
+  device.started = True
+  device.startedMonoTime = drive_id
   cs = msg('carState')
-  cs.vEgo = cs.vEgoRaw = 20.0
+  cs.vEgo = cs.vEgoRaw = speed
   cs.vCruise = cs.vCruiseCluster = 100.0
   cs.canValid = can_valid
   cs.canTimeout = can_timeout
@@ -93,26 +116,178 @@ def feed(controls, timestamp, tick, *, active=True, enabled=True, fault=False, o
       1, True, timestamp, timestamp + 200_000_000, int(car.CarParams.SafetyModel.hondaBosch),
       controls.CP.safetyConfigs[-1].safetyParam, True, False, True, False,
       'lane-test-panda', native_session))
+  elif controls.aol_replay and controls.CP.brand == 'toyota':
+    from openpilot.starpilot.car.toyota.aol import qualified
+    assert qualified(controls.CP, marked_only=True)
+    axis = msg('aolAxisState')
+    axis.qualified = axis.nativeAcknowledged = True
+    axis.desiredLateral = axis.lateralActive = independent or active and enabled
+    axis.desiredLongitudinal = axis.longitudinalActive = enabled
+    axis.sessionId = native_session
+    axis.observedMonoTime = timestamp
+    axis.validUntilMonoTime = timestamp + 30_000_000
+    msg('aolSafetyWire', 0)
+    events[-1].aolSafetyWire = encode_safety(SafetyState(
+      1, True, timestamp, timestamp + 200_000_000, int(controls.CP.safetyConfigs[0].safetyModel.raw),
+      controls.CP.safetyConfigs[0].safetyParam, native_allowed and can_valid and not can_timeout and not fault, can_valid and not can_timeout,
+      independent or active and enabled, enabled, 'lane-test-panda', native_session))
   controls.sm.update_msgs(timestamp / 1e9, [event.as_reader() for event in events])
 
 
 class LaneRuntimeTests(unittest.TestCase):
+  def test_steering_pause_original_timing_source_loss_and_units(self):
+    from openpilot.starpilot.lateral.pause import LateralPause, PauseSettings, read_settings as read_pause
+    state = SimpleNamespace(vEgo=0., leftBlinker=True, rightBlinker=False, canValid=True, canTimeout=False)
+    pause = LateralPause(PauseSettings(10., True, .2))
+    now = 1_000_000_000
+    self.assertFalse(pause.allowed(state, now_ns=now, source_ns=now))
+    state.leftBlinker = False
+    self.assertFalse(pause.allowed(state, now_ns=now + 10_000_000, source_ns=now + 10_000_000))
+    self.assertFalse(pause.allowed(state, now_ns=now + 209_000_000, source_ns=now + 209_000_000))
+    self.assertTrue(pause.allowed(state, now_ns=now + 210_000_000, source_ns=now + 210_000_000))
+    # A short source/drive-observation gap cannot erase a committed delay.
+    pause = LateralPause(PauseSettings(10., True, .2))
+    state.leftBlinker = True
+    self.assertFalse(pause.allowed(state, now_ns=now, source_ns=now, drive_id=1))
+    state.leftBlinker = False
+    self.assertFalse(pause.allowed(state, now_ns=now + 10_000_000, source_ns=now + 10_000_000, drive_id=1))
+    self.assertFalse(pause.allowed(state, now_ns=now + 50_000_000, source_ns=0, drive_id=1))
+    self.assertFalse(pause.allowed(state, now_ns=now + 60_000_000, source_ns=now + 60_000_000, drive_id=0))
+    self.assertFalse(pause.allowed(state, now_ns=now + 100_000_000, source_ns=now + 100_000_000, drive_id=1))
+    self.assertTrue(pause.allowed(state, now_ns=now + 210_000_000, source_ns=now + 210_000_000, drive_id=1))
+    # If signal-off was hidden by the gap, begin the delay on its first fresh observation.
+    pause = LateralPause(PauseSettings(10., True, .2))
+    state.leftBlinker = True
+    pause.allowed(state, now_ns=now, source_ns=now, drive_id=1)
+    state.leftBlinker = False
+    self.assertFalse(pause.allowed(state, now_ns=now + 50_000_000, source_ns=0, drive_id=1))
+    self.assertFalse(pause.allowed(state, now_ns=now + 100_000_000, source_ns=now + 100_000_000, drive_id=1))
+    self.assertFalse(pause.allowed(state, now_ns=now + 299_000_000, source_ns=now + 299_000_000, drive_id=1))
+    self.assertTrue(pause.allowed(state, now_ns=now + 300_000_000, source_ns=now + 300_000_000, drive_id=1))
+    # The half-threshold condition is strict; equality never starts a delay.
+    state.leftBlinker, state.vEgo = True, 5.
+    pause.allowed(state, now_ns=now + 300_000_000, source_ns=now + 300_000_000)
+    state.leftBlinker = False
+    self.assertTrue(pause.allowed(state, now_ns=now + 310_000_000, source_ns=now + 310_000_000))
+    self.assertFalse(pause.allowed(state, now_ns=now + 700_000_000, source_ns=now + 310_000_000))
+    self.assertTrue(pause.allowed(state, now_ns=now + 710_000_000, source_ns=now + 710_000_000))
+    self.assertFalse(pause.allowed(state, now_ns=now, source_ns=now))
+    with OpenpilotPrefix():
+      params = Params()
+      params.put('PauseLateralSpeed', 20., block=True)
+      params.put_bool('IsMetric', False, block=True)
+      settings = read_pause(params)
+      assert settings is not None
+      self.assertAlmostEqual(settings.speed_mps, 20. * .44704)
+      params.put_bool('IsMetric', True, block=True)
+      settings = read_pause(params)
+      assert settings is not None
+      self.assertAlmostEqual(settings.speed_mps, 20. / 3.6)
+      Path(params.get_param_path('PauseLateralSpeed')).write_bytes(b'nan')
+      self.assertIsNone(read_pause(params))
+
+  def test_invalid_saved_pause_settings_preserve_committed_delay(self):
+    from openpilot.starpilot.lateral.pause import LateralPause, PauseSettings, read_settings as read_pause
+    with OpenpilotPrefix():
+      params = Params()
+      self.assertEqual(read_pause(params), PauseSettings())
+      params.put('PauseLateralSpeed', 20., block=True)
+      params.put_bool('PauseLateralOnSignal', True, block=True)
+      params.put('LateralResumeDelay', 5., block=True)
+      pause = LateralPause(read_pause(params), params)
+      expected = pause.settings
+      state = SimpleNamespace(vEgo=0., leftBlinker=True, rightBlinker=False, canValid=True, canTimeout=False)
+      now = 1_000_000_000
+      self.assertFalse(pause.allowed(state, now_ns=now, source_ns=now))
+      state.leftBlinker = False
+      self.assertFalse(pause.allowed(state, now_ns=now + 10_000_000, source_ns=now + 10_000_000))
+      path = Path(params.get_param_path('PauseLateralSpeed'))
+      for tick, raw in ((2, b'nan'), (3, b'')):
+        path.write_bytes(raw)
+        self.assertIsNone(read_pause(params))
+        self.assertFalse(pause.allowed(state, now_ns=tick * now, source_ns=tick * now))
+        self.assertEqual(pause.settings, expected)
+      path.unlink()
+      path.mkdir()  # A nonregular Params object is unreadable, not an explicit zero.
+      self.assertIsNone(read_pause(params))
+      self.assertFalse(pause.allowed(state, now_ns=4 * now, source_ns=4 * now))
+      self.assertEqual(pause.settings, expected)
+      path.rmdir()
+      params.put('PauseLateralSpeed', 20., block=True)
+      self.assertFalse(pause.allowed(state, now_ns=5 * now, source_ns=5 * now))
+      self.assertTrue(pause.allowed(state, now_ns=6_010_000_000, source_ns=6_010_000_000))
+      # Only a valid explicit opt-out (or canonical absence) disables the policy.
+      state.leftBlinker = True
+      self.assertFalse(pause.allowed(state, now_ns=7 * now, source_ns=7 * now))
+      params.put('PauseLateralSpeed', 0., block=True)
+      self.assertTrue(pause.allowed(state, now_ns=8 * now, source_ns=8 * now))
+      self.assertEqual(pause.settings.speed_mps, 0.)
+      path.write_bytes(b'nan')
+      self.assertEqual(LateralPause(read_pause(params)).settings, PauseSettings())
+
+  def test_actual_controls_steering_pause_angle_standard_and_torque_aol(self):
+    from opendbc.car.ford.values import CAR as FORD
+    with OpenpilotPrefix(), mock.patch.dict(os.environ, {'REPLAY': '1', 'LANE_CENTERING_REPLAY_RUNTIME': '0'}), \
+         mock.patch('openpilot.selfdrive.controls.controlsd.messaging.PubMaster'):
+      params = Params()
+      params.put('PauseLateralSpeed', 10., block=True)
+      params.put_bool('PauseLateralOnSignal', True, block=True)
+      params.put('LateralResumeDelay', .1, block=True)
+      params.put_bool('IsMetric', False, block=True)
+      for marked in (False, True):
+        with self.subTest(marked=marked):
+          if marked:
+            cp = publish_corolla_params(params)
+          else:
+            cp = interfaces[FORD.FORD_ESCAPE_MK4].get_non_essential_params(FORD.FORD_ESCAPE_MK4)
+          params.put('CarParams', cp.to_bytes(), block=True)
+          controls = Controls()
+          self.assertEqual(controls.CP.lateralTuning.which(), 'torque' if marked else 'pid')
+          for tick in range(25):
+            now = 2_000_000_000 + tick * 10_000_000
+            feed(controls, now, tick, signal=1 <= tick <= 5, speed=2., fault=tick == 20,
+                 native_allowed=tick != 21, independent=marked, active=not marked, enabled=not marked)
+            if tick == 22:
+              controls.sm.valid['carState'] = False
+            command, _ = controls.state_control()
+            expected = tick == 0 or tick >= 16 and tick not in (20, 22) and (not marked or tick != 21)
+            self.assertEqual(command.latActive, expected, (marked, tick))
+            self.assertEqual(command.enabled, not marked)
+          # A new drive discards the prior low-speed turn's delay.
+          feed(controls, 2_250_000_000, 25, signal=True, speed=0.)
+          self.assertFalse(controls.state_control()[0].latActive)
+          feed(controls, 2_260_000_000, 26, speed=2., drive_id=2_255_000_000)
+          self.assertTrue(controls.state_control()[0].latActive)
+          # Live explicit opt-out refreshes without changing intent or the saved choice.
+          params.put('PauseLateralSpeed', 0., block=True)
+          feed(controls, 3_300_000_000, 30, signal=True, speed=2.)
+          self.assertTrue(controls.state_control()[0].latActive)
+          self.assertEqual(params.get('PauseLateralSpeed'), 0.)
+          params.put('PauseLateralSpeed', 10., block=True)
+
   def test_strength_saved_values_and_live_refresh_keep_existing_admission(self):
     with tempfile.TemporaryDirectory() as temporary:
       root = Path(temporary)
       params = SimpleNamespace(get_param_path=lambda key: str(root / key))
       (root / 'LaneCentering').write_bytes(b'1')
+      self.assertEqual(read_settings(params).strength, 1.5)
+      (root / 'LaneCenteringStrength').write_bytes(b'1.0')
       self.assertEqual(read_settings(params).strength, 1.0)
+      self.assertEqual((root / 'LaneCenteringStrength').read_bytes(), b'1.0')
+      (root / 'LaneCenteringStrength').unlink()
       host = LaneCenteringHost(params)
       now = 10_000_000_000
       first = host.sample(Frame(now), now_ns=now, lateral_active=True, longitudinal_active=False)
-      self.assertEqual(first.settings.strength, 1.0)
-      (root / 'LaneCenteringStrength').write_bytes(b'1.5')
+      self.assertEqual(first.settings.strength, 1.5)
+      (root / 'LaneCenteringStrength').write_bytes(b'3.0')
       now += host.REFRESH_NS
       updated = host.sample(Frame(now), now_ns=now, lateral_active=True, longitudinal_active=False)
-      self.assertEqual(updated.settings.strength, 1.5)
+      self.assertEqual(updated.settings.strength, 3.0)
+      restarted = LaneCenteringHost(params).sample(Frame(now), now_ns=now, lateral_active=True, longitudinal_active=False)
+      self.assertEqual(restarted.settings.strength, 3.0)
+      self.assertEqual((root / 'LaneCenteringStrength').read_bytes(), b'3.0')
       self.assertTrue(updated.time_discontinuity)
-      for invalid in (b'nan', b'0.49', b'1.51', b'true'):
+      for invalid in (b'nan', b'0.49', b'3.001', b'true'):
         (root / 'LaneCenteringStrength').write_bytes(invalid)
         self.assertFalse(read_settings(params).enabled)
         now += host.REFRESH_NS
@@ -306,8 +481,7 @@ class LaneRuntimeTests(unittest.TestCase):
     with OpenpilotPrefix(), mock.patch.dict(os.environ, {'AOL_REPLAY_RUNTIME': '0', 'REPLAY': '1'}), \
          mock.patch('openpilot.selfdrive.controls.controlsd.messaging.PubMaster'):
       params = Params()
-      cp = interfaces[CAR.TOYOTA_COROLLA_TSS2].get_non_essential_params(CAR.TOYOTA_COROLLA_TSS2)
-      params.put('CarParams', cp.to_bytes(), block=True)
+      publish_corolla_params(params)
       for scenario in scenarios:
         with self.subTest(scenario=scenario):
           params.put_bool('LaneCentering', scenario != 'disabled_setting', block=True)

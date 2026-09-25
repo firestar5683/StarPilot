@@ -156,6 +156,7 @@ class TestGmVisionSource(unittest.TestCase):
   def test_stock_ui_can_select_display_source_with_stale_request_guard(self):
     with OpenpilotPrefix():
       params = Params()
+      params.put('SLCPriority1', 'Dashboard', block=True)
       cp = configured(params, CAR.CHEVROLET_VOLT_CC, disable=True)
       owner = FeatureSettingsOwner(params, authority=lambda group: group == 'preferences',
                                    vehicle_fingerprint=lambda: cp.carFingerprint, vehicle_params=lambda: cp,
@@ -163,8 +164,9 @@ class TestGmVisionSource(unittest.TestCase):
       state = owner.snapshot('slc', parked=True, system_long=False, lateral_context=True, metric=False)
       row = next(row for row in state.rows if row.key == 'SLCPriority1')
       self.assertTrue(row.available)
-      self.assertIn('factory cruise', row.reason)
+      self.assertEqual(row.reason, 'Use this source first; try the secondary source when it is unavailable')
       request = row_change(row)
+      assert request is not None
       self.assertTrue(owner.apply(request))
       self.assertEqual(params.get('SLCPriority1'), 'Vision')
       self.assertFalse(owner.apply(request))

@@ -37,13 +37,14 @@ def long_control_state_trans(active, long_control_state, should_stop, brake_pres
   return long_control_state
 
 class LongControl:
-  def __init__(self, CP):
+  def __init__(self, CP, startup_preferences=None):
     self.CP = CP
     self.long_control_state = LongCtrlState.off
-    self.extension = create_extension(CP)
+    self.extension = create_extension(CP, startup_preferences)
     self.stopping_decel_rate = self.extension.stopping_decel_rate if self.extension is not None else 1.0
     self.pid = PIDController(self.extension.kp if self.extension is not None else 0.0,
-                             (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV),
+                             (self.extension.ki if self.extension is not None and self.extension.ki is not None
+                              else (CP.longitudinalTuning.kiBP, CP.longitudinalTuning.kiV)),
                              rate=1 / DT_CTRL)
     self.last_output_accel = 0.0
 
@@ -60,7 +61,8 @@ class LongControl:
 
     previous_state = self.long_control_state
     native_state = long_control_state_trans(active, previous_state, should_stop,
-                                           CS.brakePressed, CS.cruiseState.standstill)
+                                           CS.brakePressed, CS.cruiseState.standstill and
+                                           not (self.extension is not None and self.extension.ignore_cruise_standstill))
     self.long_control_state = native_state
     if self.extension is not None:
       self.long_control_state = self.extension.transition(

@@ -45,7 +45,10 @@ class TestManager(OpenpilotTestCase):
     manager.main()
     for k in params.all_keys():
       default_value = params.get_default_value(k)
-      if default_value is not None:
+      if k == b"LKASButtonControl":
+        assert params.get(k) is None
+        assert params.get(k, return_default=True) == 0
+      elif default_value is not None:
         assert params.get(k) == default_value
     assert params.get("OpenpilotEnabledToggle")
     assert params.get("RouteCount") == 0

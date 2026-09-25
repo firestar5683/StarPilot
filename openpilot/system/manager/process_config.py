@@ -8,6 +8,7 @@ from openpilot.common.hardware import PC, COMMA_HARDWARE
 from openpilot.system.manager.process import PythonProcess, NativeProcess, DaemonProcess
 from openpilot.starpilot.maps.shadow_lifecycle import MapdShadowProcess
 from openpilot.starpilot.models.recovery_process import ModeldProcess
+from openpilot.starpilot.system.jetlink.process import JetlinkProcess
 from openpilot.starpilot.sentry_mode.preferences import enabled as sentry_enabled
 from openpilot.starpilot.galaxy.camera_request import requested as camera_requested
 from openpilot.starpilot.spot_monitor.preferences import enabled as vasm_enabled
@@ -73,6 +74,12 @@ def android_auto_enabled(started: bool, params: Params, CP: car.CarParams) -> bo
   # role until the user enables projection on supported hardware.
   return COMMA_HARDWARE and platform.system() == "Linux" and params.get_bool("AndroidAutoEnabled")
 
+def jetlink_enabled(started: bool, params: Params, CP: car.CarParams) -> bool:
+  if not COMMA_HARDWARE or platform.system() != 'Linux':
+    return False
+  from openpilot.starpilot.system.jetlink.lifecycle import enabled
+  return enabled(params)
+
 def only_offroad(started: bool, params: Params, CP: car.CarParams) -> bool:
   return not started
 
@@ -119,14 +126,22 @@ procs = [
   PythonProcess("vision_slc", "openpilot.starpilot.speed_limits.vision.producer", vision_slc_development),
   PythonProcess("dmonitoringmodeld", "openpilot.selfdrive.modeld.dmonitoringmodeld", driverview, enabled=(WEBCAM or not PC)),
 
-  PythonProcess("sensord", "openpilot.system.sensord.sensord", sensord_run, enabled=not PC),
+  PythonProcess("sensord", "openpilot.system.sensord.sensord", sensord_run, enabled=not PC, restart_on_exit=True),
   PythonProcess("sentry_motion", "openpilot.starpilot.sentry_mode.runtime", sentry_motion, enabled=not PC),
   PythonProcess("vasm_monitor", "openpilot.starpilot.spot_monitor.runtime", vasm_monitor, enabled=not PC),
-  PythonProcess("ui", "openpilot.selfdrive.ui.ui", always_run),
+  PythonProcess("ui", "openpilot.selfdrive.ui.ui", always_run, restart_on_exit=True),
   PythonProcess("navigationd", "openpilot.starpilot.navigation.runtime", always_run),
+  PythonProcess("navtilesd", "openpilot.starpilot.navigation.navtilesd", always_run, enabled=platform.system() == "Linux"),
   PythonProcess("galaxy", "openpilot.starpilot.galaxy.managed", galaxy_local),
-  PythonProcess("android_autod", "openpilot.starpilot.system.android_auto.daemon", android_auto_enabled, enabled=COMMA_HARDWARE),
-  PythonProcess("soundd", "openpilot.selfdrive.ui.soundd", driverview),
+  PythonProcess("replay_owner", "openpilot.starpilot.replay.owner", only_offroad,
+                enabled=platform.system() == "Linux", restart_on_exit=True),
+  PythonProcess("galaxy_hotspot", "openpilot.starpilot.galaxy.hotspot_daemon", galaxy_local,
+                enabled=COMMA_HARDWARE and not os.environ.get('OPENPILOT_PREFIX'), restart_on_exit=True),
+  JetlinkProcess("jetlinkd", "openpilot.starpilot.system.jetlink.daemon", jetlink_enabled, enabled=COMMA_HARDWARE),
+  PythonProcess("android_autod", "openpilot.starpilot.system.android_auto.daemon", android_auto_enabled, enabled=COMMA_HARDWARE,
+                restart_on_exit=True),  # boot can race bluetoothd (NoSuchUnit)
+  # Boot can race the audio device; selfdrived blocks engagement while soundd is down.
+  PythonProcess("soundd", "openpilot.selfdrive.ui.soundd", driverview, restart_on_exit=True),
   PythonProcess("locationd", "openpilot.selfdrive.locationd.locationd", only_onroad),
   MapdShadowProcess(),
   PythonProcess("map_snapshot_operations", "openpilot.starpilot.maps.operation_owner", only_offroad, enabled=platform.system() == "Linux"),

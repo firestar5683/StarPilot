@@ -161,7 +161,6 @@ cdef class Poller:
 cdef class SubSocket:
   cdef cppSubSocket * socket
   cdef bool is_owner
-
   def __cinit__(self):
     with nogil:
       self.socket = cppSubSocket.create()
@@ -202,7 +201,6 @@ cdef class SubSocket:
     cdef cppMessage *msg
     with nogil:
       msg = self.socket.receive(non_blocking)
-
     if msg == NULL:
       return None
     else:
@@ -210,9 +208,7 @@ cdef class SubSocket:
       m = msg.getData()[:sz]
       with nogil:
         del msg
-
       return m
-
 
 cdef class PubSocket:
   cdef cppPubSocket * socket

@@ -33,6 +33,10 @@ CLOCK_PAIR_MAX_SKEW_NS = 1_000_000
 KPH_TO_MPS = 1 / 3.6
 V_CRUISE_UNSET_KPH = 255.0
 FROZEN_CURVE_ACCEL_MPS2 = 1.3
+STANDSTILL_SPEED_NOISE_MPS = 0.01
+STANDSTILL_MODEL_PREFIX_NOISE_M = 0.01
+# Recorded standstill paths dip up to 0.46 m below their running max and 0.15 m below zero.
+STANDSTILL_PATH_JITTER_M = 0.5
 FROZEN_RAW_STOP_DISTANCE_M = 5.0 * ModelConstants.T_IDXS[-1]
 
 
@@ -143,6 +147,18 @@ def _field(source, field: str):
     return None
 
 
+def _ego_speed(car) -> float | None:
+  speed = _number(_field(car, 'vEgo'), low=-STANDSTILL_SPEED_NOISE_MPS, high=80.0)
+  if speed is None or speed >= 0.0:
+    return speed
+  # The wheel-speed Kalman estimate can undershoot zero while physically stopped.
+  # Require both standstill and exactly zero raw wheel speed; moving or materially
+  # negative estimates remain unavailable rather than gaining scene authority.
+  if _field(car, 'standstill') is True and _number(_field(car, 'vEgoRaw'), high=80.0) == 0.0:
+    return 0.0
+  return None
+
+
 def _fresh(sm, service: str, now_mono_ns: int, barrier_ns: int) -> bool:
   try:
     stamp = sm.logMonoTime[service]
@@ -203,6 +219,77 @@ def _horizon(model) -> float | None:
     return None
 
 
+def _standstill_path_extent(model) -> float | None:
+  """Uncommitted standstill hold only; too lenient for stop acquisition or release."""
+  try:
+    distances = normalized_origin(tuple(model.position.x))
+    if len(distances) != ModelConstants.IDX_N:
+      return None
+    parsed = tuple(_number(value, low=-STANDSTILL_PATH_JITTER_M, high=500.0) for value in distances)
+    if any(value is None for value in parsed):
+      return None
+    finite = tuple(value for value in parsed if value is not None)
+    peak = 0.0
+    for value in finite:
+      peak = max(peak, value)
+      if peak - value > STANDSTILL_PATH_JITTER_M:
+        return None
+    return peak
+  except (AttributeError, TypeError, ValueError, OverflowError):
+    return None
+
+
+def _standstill_clear_horizon(model) -> float | None:
+  """Stop-release endpoint only; this never qualifies full spatial geometry."""
+  try:
+    distances = normalized_origin(tuple(model.position.x))
+    if len(distances) != ModelConstants.IDX_N or distances[0] != 0.0:
+      return None
+    parsed = tuple(_number(value, low=-STANDSTILL_MODEL_PREFIX_NOISE_M, high=500.0) for value in distances)
+    if any(value is None for value in parsed):
+      return None
+    finite = tuple(value for value in parsed if value is not None)
+    forward_tail = False
+    backtrack = 0.0
+    for previous, current in zip(finite, finite[1:], strict=False):
+      if current < previous:
+        if forward_tail or max(abs(previous), abs(current)) > STANDSTILL_MODEL_PREFIX_NOISE_M:
+          return None
+        backtrack += previous - current
+        if backtrack > STANDSTILL_MODEL_PREFIX_NOISE_M:
+          return None
+      if current > STANDSTILL_MODEL_PREFIX_NOISE_M:
+        forward_tail = True
+    return finite[-1] if forward_tail else None
+  except (AttributeError, TypeError, ValueError, OverflowError):
+    return None
+
+
+def _stationary_launch_clear(model, car, lead: RawLead | None, horizon: float | None) -> bool:
+  """Model launch proof for a stopped car; no confidence/color inference."""
+  speed = _ego_speed(car)
+  if (horizon is None or speed is None or speed > STANDSTILL_SPEED_NOISE_MPS or
+      _field(car, 'standstill') is not True or _number(_field(car, 'vEgoRaw'), high=80.0) != 0.0 or
+      lead is None or lead.present or _boolean(_field(_field(model, 'action'), 'shouldStop')) is not False):
+    return False
+  acceleration = _number(_field(_field(model, 'action'), 'desiredAcceleration'), low=-10.0, high=10.0)
+  if acceleration is None or acceleration < 0.3:
+    return False
+  try:
+    velocities = tuple(model.velocity.x)
+    if len(velocities) != ModelConstants.IDX_N:
+      return False
+    parsed = tuple(_number(value, low=-0.05, high=100.0) for value in velocities)
+    if any(value is None for value in parsed):
+      return False
+    finite = tuple(value for value in parsed if value is not None)
+    tail = tuple(value for value, timestamp in zip(finite, ModelConstants.T_IDXS, strict=True) if timestamp >= 2.0)
+    return (bool(tail) and all(value >= 0.3 for value in tail) and
+            all(b >= a for a, b in zip(tail, tail[1:], strict=False)) and tail[-1] >= 5.0)
+  except (AttributeError, TypeError, ValueError, OverflowError):
+    return False
+
+
 def _lead(radar) -> RawLead | None:
   lead = _field(radar, 'leadOne')
   present = _boolean(_field(lead, 'present'))
@@ -249,7 +336,7 @@ class SceneProjector:
   def _empty(self) -> ProjectedScene:
     self.curve_detector.reset()
     self.lead_detector.reset()
-    self.stop_detector.reset()
+    self.stop_detector.invalidate()
     self.slower_lead_detector.reset()
     self.chill_detector.reset()
     self.signal_lane_tracker.reset()
@@ -371,18 +458,30 @@ class SceneProjector:
       longitudinal_plan = sm['longitudinalPlan'] if 'longitudinalPlan' in fresh else None
     except (KeyError, TypeError, ValueError, OverflowError):
       return self._empty()
-    speed = _number(_field(car, 'vEgo'), high=80.0) if car is not None and _field(car, 'canValid') is True and _field(car, 'canTimeout') is False else None
+    speed = _ego_speed(car) if car is not None and _field(car, 'canValid') is True and _field(car, 'canTimeout') is False else None
     cruise_kph = _number(_field(car, 'vCruise'), high=V_CRUISE_UNSET_KPH) if speed is not None else None
     cruise = cruise_kph * KPH_TO_MPS if cruise_kph is not None and 0 < cruise_kph < V_CRUISE_UNSET_KPH else None
     curvature = _number(_field(controls, 'curvature'), low=-1.0, high=1.0) if controls is not None else None
     raw_curve = abs(speed * speed * curvature) >= FROZEN_CURVE_ACCEL_MPS2 if speed is not None and curvature is not None else None
     horizon = None
+    stop_horizon = None
     current_stop = None
+    model_transport_current = False
     if model is not None:
       eof = _field(model, 'timestampEof')
       if type(eof) is int and 0 < eof <= now_boot_ns and now_boot_ns - eof <= MODEL_EOF_MAX_AGE_NS:
+        model_transport_current = True
         horizon = _horizon(model)
-        current_stop = _boolean(_field(_field(model, 'action'), 'shouldStop')) if horizon is not None else None
+        stop_horizon = horizon
+        model_should_stop = _boolean(_field(_field(model, 'action'), 'shouldStop'))
+        if (horizon is None and self.stop_detector.committed and model_should_stop is False and
+            speed is not None and speed <= STANDSTILL_SPEED_NOISE_MPS and
+            _field(car, 'standstill') is True and _number(_field(car, 'vEgoRaw'), high=80.0) == 0.0):
+          # A stationary model can backstep millimeters near its origin before
+          # projecting forward. Use that endpoint only to clear an existing stop;
+          # curve/lead geometry and cold stop acquisition retain strict validation.
+          stop_horizon = _standstill_clear_horizon(model)
+        current_stop = model_should_stop if stop_horizon is not None else None
     lead = _lead(radar) if radar is not None else None
     car_valid = speed is not None
     headway_fresh = (
@@ -460,7 +559,7 @@ class SceneProjector:
     slc_experimental, _ = owner_bool(context.slc_experimental)
     plan_should_stop, plan_should_stop_stamp = owner_bool(context.plan_should_stop)
     plan_allow_throttle, plan_allow_throttle_stamp = owner_bool(context.plan_allow_throttle)
-    model_stamp = _source_stamp(sm, 'modelV2') if model is not None and horizon is not None else None
+    model_stamp = _source_stamp(sm, 'modelV2') if model_transport_current else None
     repeated_model = model_stamp is not None and model_stamp == self.last_model_stamp_ns
     car_stamp = _source_stamp(sm, 'carState') if car_valid else None
     radar_stamp = _source_stamp(sm, 'radarState') if radar is not None else None
@@ -520,11 +619,18 @@ class SceneProjector:
     stop_lead = None
     if lead is not None:
       stop_lead = StopLead(lead.present, lead.distance_m, lead.speed_mps, lead.radar, lead.model_probability, lead_observation.tracked)
+    launch_horizon = stop_horizon if stop_horizon is not None else (
+      _standstill_clear_horizon(model) if model_transport_current else None)
+    stationary_launch_clear = _stationary_launch_clear(model, car, lead, launch_horizon)
+    if stationary_launch_clear:
+      # Continue a proven stationary launch after its stop commitment clears.
+      # This bounded geometry cannot acquire a stop or qualify curve/lead data.
+      stop_horizon, current_stop = launch_horizon, False
     stop_frame = StopFrame(
       observed_mono_s=stop_stamp if stop_stamp is not None else 0.0,
       now_mono_s=now_mono_ns / 1e9,
       speed_mps=speed,
-      model_horizon_m=horizon,
+      model_horizon_m=stop_horizon,
       model_stop_time_s=model_time,
       traffic_mode=traffic,
       stop_sign_confirmed=sign,
@@ -539,12 +645,19 @@ class SceneProjector:
       dashboard_stop_sign=dashboard_sign,
       pedal_override=pedal,
       model_tick_mono_s=model_stamp / 1e9 if model_stamp is not None else None,
+      model_should_stop=current_stop,
+      stationary_launch_clear=stationary_launch_clear,
+      standstill_path_extent_m=(_standstill_path_extent(model) if model_transport_current and car_valid and
+                                _field(car, 'standstill') is True else None),
     )
     if repeated_model:
+      self.stop_detector.commit_clear_since_s = None
       stop_frame = replace(stop_frame, observed_mono_s=self.last_stop_stamp_s or 0.0)
     missing_transport = car is None or radar is None or model is None
     last_tick = self.stop_detector.last_model_tick_mono_s
-    if missing_transport and last_tick is not None and 0 <= now_mono_ns - round(last_tick * 1e9) <= SOURCE_MAX_AGE_NS:
+    transport_alive = all(sm.alive.get(name, False) and sm.valid.get(name, False) for name in ('carState', 'modelV2', 'radarState'))
+    if missing_transport and transport_alive and last_tick is not None and 0 <= now_mono_ns - round(last_tick * 1e9) <= SOURCE_MAX_AGE_NS:
+      self.stop_detector.commit_clear_since_s = None
       # Withhold an observation while a source is absent; a brief scheduling
       # gap must not erase the detector's multi-second stop hysteresis.
       stop_observation = StopObservation(None, None, None, None)
@@ -655,6 +768,7 @@ class SceneProjector:
       standstill_stop_hold=stop_observation.standstill_hold,
       traffic_mode=curve_mode,
       stop_sign_confirmed=sign,
+      committed_stop=self.stop_detector.committed if stop_observation.light_detected is not None else None,
       forcing_stop=forcing,
       slc_experimental=slc_experimental,
       low_speed_stop_scene=chill_observation.low_speed_stop_scene,

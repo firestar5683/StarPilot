@@ -3,19 +3,28 @@
 
 #include <unistd.h>
 
+#include <algorithm>
 #include <cassert>
 #include <stdexcept>
 #include <vector>
 
 #include "openpilot/cereal/messaging/messaging.h"
+#include "common/hardware/hw.h"
 #include "common/swaglog.h"
 #include "common/util.h"
 
 const bool PANDAD_MAXOUT = getenv("PANDAD_MAXOUT") != nullptr;
 
-Panda::Panda(std::string serial) {
-  handle = std::make_unique<PandaSpiHandle>(serial);
-  LOGW("connected to %s over SPI", serial.c_str());
+Panda::Panda(std::string serial, uint32_t bus_offset) : bus_offset(bus_offset) {
+  handle = open_panda_handle(serial, [](const std::string &requested) {
+    auto spi = std::make_unique<PandaSpiHandle>(requested);
+    LOGW("connected to %s over SPI", requested.c_str());
+    return spi;
+  }, [](const std::string &requested) {
+    auto usb = std::make_unique<PandaUsbHandle>(requested);
+    LOGW("connected to %s over USB", requested.c_str());
+    return usb;
+  });
 
   hw_type = get_hw_type();
   can_reset_communications();
@@ -34,7 +43,13 @@ std::string Panda::hw_serial() {
 }
 
 std::vector<std::string> Panda::list() {
-  return PandaSpiHandle::list();
+  auto serials = PandaUsbHandle::list();
+  // C3's internal Panda uses USB; its SPI device node has no Panda.
+  if (Hardware::get_device_type() == cereal::InitData::DeviceType::TICI) return serials;
+  for (const auto &serial : PandaSpiHandle::list()) {
+    if (std::find(serials.begin(), serials.end(), serial) == serials.end()) serials.push_back(serial);
+  }
+  return serials;
 }
 
 void Panda::set_safety_model(cereal::CarParams::SafetyModel safety_model, uint16_t safety_param) {
@@ -88,7 +103,7 @@ void Panda::set_ir_pwr(uint16_t ir_pwr) {
 std::optional<health_t> Panda::get_state() {
   health_t health {0};
   int err = handle->control_read(0xd2, 0, 0, (unsigned char*)&health, sizeof(health));
-  return err >= 0 ? std::make_optional(health) : std::nullopt;
+  return err == static_cast<int>(sizeof(health)) ? std::make_optional(health) : std::nullopt;
 }
 
 std::optional<aol_safety_health_t> Panda::get_aol_safety_state() {
@@ -100,7 +115,7 @@ std::optional<aol_safety_health_t> Panda::get_aol_safety_state() {
 std::optional<can_health_t> Panda::get_can_state(uint16_t can_number) {
   can_health_t can_health {0};
   int err = handle->control_read(0xc2, can_number, 0, (unsigned char*)&can_health, sizeof(can_health));
-  return err >= 0 ? std::make_optional(can_health) : std::nullopt;
+  return err == static_cast<int>(sizeof(can_health)) ? std::make_optional(can_health) : std::nullopt;
 }
 
 void Panda::set_loopback(bool loopback) {
@@ -121,14 +136,46 @@ std::optional<std::string> Panda::get_serial() {
 }
 
 bool Panda::up_to_date() {
-  if (auto fw_sig = get_firmware_version()) {
-    for (auto fn : { "panda.bin.signed", "panda_h7.bin.signed" }) {
-      auto content = util::read_file(std::string("../../../panda/board/obj/") + fn);
-      if (content.size() >= fw_sig->size() &&
-          memcmp(content.data() + content.size() - fw_sig->size(), fw_sig->data(), fw_sig->size()) == 0) {
-        return true;
+  const char *filename = nullptr;
+  switch (hw_type) {
+    case cereal::PandaState::PandaType::DOS:
+      filename = "panda.bin.signed";
+      break;
+    case cereal::PandaState::PandaType::RED_PANDA:
+    case cereal::PandaState::PandaType::RED_PANDA_V2:
+    case cereal::PandaState::PandaType::TRES:
+    case cereal::PandaState::PandaType::CUATRO:
+      filename = "panda_h7.bin.signed";
+      break;
+    default:
+      return false;
+  }
+  // The wrapper's selection is per hardware serial; mixed MCUs cannot share an image name.
+  if (getenv("STARPILOT_PANDA_FIRMWARE_NAME")) return false;
+  if (const char *managed = getenv("STARPILOT_PANDA_FIRMWARE_MAP")) {
+    if (std::string(managed) != "1") return false;
+    const std::string serial = hw_serial();
+    if (serial.size() != 24 || serial.find_first_not_of("0123456789abcdefABCDEF") != std::string::npos) return false;
+    const std::string key = "STARPILOT_PANDA_FIRMWARE_" + serial;
+    const char *selected = getenv(key.c_str());
+    if (!selected) return false;
+    bool allowed = std::string(selected) == filename;
+    // Match the wrapper's existing alternate-image hardware eligibility exactly.
+    if (hw_type == cereal::PandaState::PandaType::DOS || hw_type == cereal::PandaState::PandaType::TRES ||
+        hw_type == cereal::PandaState::PandaType::RED_PANDA) {
+      const std::string prefix = std::string(filename).substr(0, std::string(filename).find(".bin.signed"));
+      for (const char *suffix : {"_remote", "_hkg_remote", "_tesla_wake", "_can_ignition_only",
+                                 "_remote_can_ignition_only", "_hkg_remote_can_ignition_only", "_tesla_wake_can_ignition_only"}) {
+        allowed |= std::string(selected) == prefix + suffix + ".bin.signed";
       }
     }
+    if (!allowed) return false;
+    filename = selected;
+  }
+  if (auto fw_sig = get_firmware_version()) {
+    auto content = util::read_file(std::string("../../../panda/board/obj/") + filename);
+    return content.size() >= fw_sig->size() &&
+      memcmp(content.data() + content.size() - fw_sig->size(), fw_sig->data(), fw_sig->size()) == 0;
   }
   return false;
 }
@@ -146,7 +193,7 @@ void Panda::send_heartbeat(bool engaged) {
 }
 
 bool Panda::set_aol_axis_request(uint8_t axis_mask) {
-  return handle->control_write(0xf5, axis_mask & 0x3U, 0) >= 0;
+  return handle->control_write(0xf5, axis_mask & 0x7U, 0) >= 0;
 }
 
 void Panda::set_can_speed_kbps(uint16_t bus, uint16_t speed) {
@@ -184,7 +231,7 @@ void Panda::pack_can_buffer(const capnp::List<cereal::CanData>::Reader &can_data
   for (const auto &cmsg : can_data_list) {
     // check if the message is intended for this panda
     uint8_t bus = cmsg.getSrc();
-    if (bus >= PANDA_BUS_OFFSET) {
+    if (bus < bus_offset || bus >= bus_offset + PANDA_BUS_OFFSET) {
       continue;
     }
     auto can_data = cmsg.getDat();
@@ -196,7 +243,7 @@ void Panda::pack_can_buffer(const capnp::List<cereal::CanData>::Reader &can_data
     header.addr = cmsg.getAddress();
     header.extended = (cmsg.getAddress() >= 0x800) ? 1 : 0;
     header.data_len_code = data_len_code;
-    header.bus = bus;
+    header.bus = bus - bus_offset;
     header.checksum = 0;
 
     memcpy(&send_buf[pos], (uint8_t *)&header, sizeof(can_header));
@@ -272,7 +319,7 @@ bool Panda::unpack_can_buffer(uint8_t *data, uint32_t &size, std::vector<can_fra
 
     can_frame &canData = out_vec.emplace_back();
     canData.address = header.addr;
-    canData.src = header.bus;
+    canData.src = header.bus + bus_offset;
     if (header.rejected) {
       canData.src += CAN_REJECTED_BUS_OFFSET;
     }

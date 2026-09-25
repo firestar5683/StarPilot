@@ -1,7 +1,8 @@
 """G90 forecast stop intent; current acceleration and stop arbitration remain intact."""
+from unittest.mock import patch
+
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
 
 import numpy as np
 from opendbc.car import gen_empty_fingerprint
@@ -48,7 +49,7 @@ class TestG90ForecastStop(unittest.TestCase):
       planner.mpc.v_solution[:] = speed
       planner.mpc.a_solution[:] = 0.
       planner.mpc.j_solution[:] = 0.
-    planner.mpc.update = trajectory
+    self.enterContext(patch.object(planner.mpc, 'update', trajectory, create=True))
     return planner
 
   def test_actual_planner_forecast_changes_only_stop_intent(self):

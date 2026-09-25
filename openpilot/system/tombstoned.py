@@ -2,18 +2,19 @@
 import datetime
 import os
 import re
-import shutil
 import signal
 import subprocess
 import time
 import glob
+from pathlib import Path
 from typing import NoReturn
 
 from openpilot.common.hardware import PC
 from openpilot.common.hardware.hw import Paths
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.version import get_build_metadata
-from openpilot.system.athena.registration import is_registered_device
+from openpilot.system import sentry
+from openpilot.system.crash_storage import writer, copy_report
 
 MAX_SIZE = 1_000_000 * 100  # allow up to 100M
 MAX_TOMBSTONE_FN_LEN = 62  # 85 - 23 ("<dongle id>/crash/")
@@ -67,12 +68,14 @@ def report_tombstone_apport(fn):
 
   message = ""  # One line description of the crash
   path = ""  # File path relative to openpilot directory
+  contents = ""
 
   with open(fn) as f:
     for line in f:
       if "CoreDump" in line:
         break
 
+      contents += line
       if "ExecutablePath" in line:
         path = line.strip().split(': ')[-1]
         path = path.replace('/data/openpilot/', '')
@@ -110,6 +113,8 @@ def report_tombstone_apport(fn):
   message = message + " - " + crash_function
   cloudlog.error({'tombstone': message})
 
+  contents += "\n" + stacktrace
+
   # Copy crashlog to upload folder
   clean_path = path.replace('/', '_')
   date = datetime.datetime.now().strftime("%Y-%m-%d--%H-%M-%S")
@@ -119,10 +124,9 @@ def report_tombstone_apport(fn):
   new_fn = f"{date}_{(build_metadata.openpilot.git_commit or 'nocommit')[:8]}_{safe_fn(clean_path)}"[:MAX_TOMBSTONE_FN_LEN]
 
   crashlog_dir = os.path.join(Paths.log_root(), "crash")
-  os.makedirs(crashlog_dir, exist_ok=True)
-
-  # Files could be on different filesystems, copy, then delete
-  shutil.copy(fn, os.path.join(crashlog_dir, new_fn))
+  with writer(Path(crashlog_dir)) as directory:
+    copy_report(directory, new_fn, fn)
+  sentry.report_tombstone(fn, message, contents)
 
   try:
     os.remove(fn)
@@ -131,9 +135,9 @@ def report_tombstone_apport(fn):
 
 
 def main() -> NoReturn:
-  build_metadata = get_build_metadata()
-  comma_remote = build_metadata.openpilot.comma_remote and "commaai" in build_metadata.openpilot.git_origin
-  should_report = comma_remote and is_registered_device() and not PC
+  sentry.init(sentry.SentryProject.SELFDRIVE_NATIVE)
+  # Preserve the local native report even when the SDK or network is unavailable.
+  should_report = not PC
 
   # Clear apport folder on start, otherwise duplicate crashes won't register
   clear_apport_folder()

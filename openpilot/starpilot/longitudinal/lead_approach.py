@@ -142,7 +142,7 @@ class LeadApproach:
   def step(self, key: LeadApproachKey | None, frame: ApproachFrame | None, base_follow: float,
            blocked: bool = False) -> float | None:
     if (not _valid_key(key) or key is None or type(frame) is not ApproachFrame or blocked is not False or
-        type(base_follow) not in (float, int) or not math.isfinite(base_follow) or not 0.75 <= base_follow <= 3.0 or
+        type(base_follow) not in (float, int) or not math.isfinite(base_follow) or not 0.5 <= base_follow <= 3.0 or
         type(frame.now_ns) is not int or type(frame.model_ns) is not int or
         not key.drive_id < frame.model_ns <= frame.now_ns or frame.now_ns - frame.model_ns > MAX_SOURCE_AGE_NS or
         type(frame.speed) not in (float, int) or not math.isfinite(frame.speed) or frame.speed < 0 or

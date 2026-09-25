@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import dataclass
 from pathlib import Path
 
 from opendbc.car.structs import car
 from openpilot.cereal import log
 from openpilot.selfdrive.car.cruise import CRUISE_LONG_PRESS
+from openpilot.system.manager.process_health import driving_process_failures
+from openpilot.starpilot.conditional_mode.manual import Button, ButtonTracker, Press
 
 ButtonType = car.CarState.ButtonEvent.Type
 GearShifter = car.CarState.GearShifter
@@ -22,6 +25,8 @@ class AolSettings:
   main_action: int
   distance_actions: tuple[int, int, int]
   cancel_actions: tuple[int, int, int]
+  mode_actions: tuple[int, int, int] = (0, 0, 0)
+  custom_actions: tuple[int, int, int] = (0, 0, 0)
 
 
 def _button_action(params, key: str) -> int:
@@ -52,27 +57,77 @@ def read_settings(params) -> AolSettings:
     distance_actions=(_button_action(params, 'DistanceButtonControl'),
                       _button_action(params, 'LongDistanceButtonControl'),
                       _button_action(params, 'VeryLongDistanceButtonControl')),
+    mode_actions=(_button_action(params, 'ModeButtonControl'), _button_action(params, 'LongModeButtonControl'),
+                         _button_action(params, 'VeryLongModeButtonControl')),
+    custom_actions=(_button_action(params, 'StarButtonControl'), _button_action(params, 'LongStarButtonControl'),
+                         _button_action(params, 'VeryLongStarButtonControl')),
     cancel_actions=(_button_action(params, 'CancelButtonControl'),
                     _button_action(params, 'LongCancelButtonControl'),
                     _button_action(params, 'VeryLongCancelButtonControl')),
   )
 
 
-def independent_axis_requested(settings: AolSettings) -> bool:
+def independent_axis_requested(settings: AolSettings, *, include_auxiliary: bool = False) -> bool:
   pause = (PAUSE_LATERAL, PAUSE_LONGITUDINAL)
-  return settings.enabled or any(action in pause for action in
-                                 (settings.lkas_action, settings.main_action, *settings.distance_actions))
+  actions = (settings.lkas_action, settings.main_action, *settings.distance_actions)
+  if include_auxiliary:
+    actions += (*settings.cancel_actions, *settings.mode_actions, *settings.custom_actions)
+  return settings.enabled or any(action in pause for action in actions)
 
 
-def disarming_fault(events, CS) -> bool:
+PROCESS_FAULT_MAX_AGE_NS = 1_500_000_000
+
+
+class AolProcessFaultContext:
+  def __init__(self):
+    self.history = deque(maxlen=4)
+
+  def observe(self, sm, now_ns: int) -> None:
+    stamp = int(sm.logMonoTime.get('managerState', 0))
+    if not (getattr(sm, 'seen', {}).get('managerState', False) and
+            sm.valid.get('managerState', False) and sm.alive.get('managerState', False) and
+            0 < stamp <= now_ns and now_ns - stamp <= PROCESS_FAULT_MAX_AGE_NS):
+      self.history.clear()
+      return
+    processes = sm['managerState'].processes
+    ui_requested = any(p.name == 'ui' and p.shouldBeRunning for p in processes)
+    if not ui_requested or (self.history and stamp < self.history[-1][0]):
+      self.history.clear()
+      return
+    if not self.history or stamp > self.history[-1][0]:
+      self.history.append((stamp, frozenset(driving_process_failures(processes))))
+
+  def temporary_ui_failure(self, event_ns: int, now_ns: int) -> bool:
+    if not self.history or not 0 < event_ns <= now_ns:
+      return False
+    latest_stamp, latest_failures = self.history[-1]
+    if not (latest_stamp <= now_ns and now_ns - latest_stamp <= PROCESS_FAULT_MAX_AGE_NS and
+            latest_failures <= {'ui'}):
+      return False
+    # Recovery may arrive before the corresponding onroadEvents update. Use
+    # the manager observation that produced this fault, never later UI health.
+    for stamp, failures in reversed(self.history):
+      if stamp <= event_ns:
+        return now_ns - stamp <= PROCESS_FAULT_MAX_AGE_NS and failures == {'ui'}
+    return False
+
+
+def disarming_fault(events, CS, *, temporary_ui_process_failure: bool = False,
+                    temporary_selfdrive_lagging: bool = False, temporary_source_pause: bool = False) -> bool:
   """Temporary steering/known non-driving gears pause output, not driver intent."""
   if CS.steerFaultPermanent:
     return True
   for event in events:
     if event.immediateDisable:
+      if event.name == log.OnroadEvent.EventName.controlsMismatch and temporary_source_pause:
+        continue
       return True
     if event.softDisable:
-      if event.name == log.OnroadEvent.EventName.steerTempUnavailable:
+      if event.name == log.OnroadEvent.EventName.selfdrivedLagging and temporary_selfdrive_lagging:
+        continue
+      if event.name == log.OnroadEvent.EventName.processNotRunning and temporary_ui_process_failure:
+        continue
+      if event.name in (log.OnroadEvent.EventName.steerTempUnavailable, log.OnroadEvent.EventName.seatbeltNotLatched):
         continue
       if event.name == log.OnroadEvent.EventName.wrongGear and CS.gearShifter != GearShifter.unknown:
         continue
@@ -81,10 +136,14 @@ def disarming_fault(events, CS) -> bool:
 
 
 class AolCardIntent:
-  def __init__(self, settings: AolSettings, *, explicit_latch: bool = False):
+  def __init__(self, settings: AolSettings, *, explicit_latch: bool = False, lkas_button_supported: bool = True):
     self.settings = settings
     self.explicit_latch = explicit_latch
+    self.lkas_button_supported = lkas_button_supported
     self.allowed_latch = False
+    # Observational only: records the exact branch that changed True to False.
+    self.latch_clear_count = 0
+    self.latch_clear_reason = ''
     self.pause_lateral = False
     self.pause_longitudinal = False
     self._gesture_neutral_seen = False
@@ -94,11 +153,28 @@ class AolCardIntent:
     self._fault_inhibit = False
     self._last_latch_edge_ns = 0
     self._native_rejection_ns = 0
+    self._calibration_inhibit = False
+    self._calibration_fault = False
+    self._calibration_rearm_required = False
+    self._calibration_main = False
+    self._calibration_engaged = False
     self._timers = {int(ButtonType.gapAdjustCruise): 0}
     self._held = {int(ButtonType.gapAdjustCruise): False}
+    self._aux_cancel_tracker = ButtonTracker()
+    self._aux_media_tracker = ButtonTracker()
+
+  @property
+  def lkas_action(self) -> int:
+    return self.settings.lkas_action if self.lkas_button_supported else 0
+
+  def _record_latch_clear(self, reason: str) -> None:
+    if self.allowed_latch:
+      self.latch_clear_count += 1
+      self.latch_clear_reason = reason
 
   def _perform(self, action: int) -> None:
     if action == AOL_TOGGLE and self.settings.enabled and not self.explicit_latch:
+      self._record_latch_clear('configured_toggle')
       self.allowed_latch = not self.allowed_latch
       if self.allowed_latch:
         self.pause_lateral = False
@@ -114,13 +190,16 @@ class AolCardIntent:
       if self._last_latch_edge_ns < native_rejection_ns <= now_ns:
         # Native authorization was revoked. Keep neutral/held-button history so
         # the next fresh physical press arms once, without replaying a held one.
+        self._record_latch_clear('native_rejection')
         self.allowed_latch = False
     if self.explicit_latch and (fault_active is not None or CS.steerFaultPermanent):
       self._fault_inhibit = bool(fault_active or CS.steerFaultPermanent)
       if self._fault_inhibit:
+        self._record_latch_clear('disarming_fault')
         self.allowed_latch = False
         self._gesture_neutral_seen = False
     if not CS.canValid or CS.canTimeout:
+      self._record_latch_clear('can_invalid_or_timeout')
       self.allowed_latch = False
       self._gesture_neutral_seen = False
       self._distance_neutral_seen = False
@@ -132,21 +211,26 @@ class AolCardIntent:
       return
 
     if not self.settings.enabled:
+      self._record_latch_clear('settings_disabled')
       self.allowed_latch = False
       if self.explicit_latch:
         self._gesture_neutral_seen = False
-      if not independent_axis_requested(self.settings):
+      if not independent_axis_requested(self.settings, include_auxiliary=self.auxiliary_supported()):
         self.pause_lateral = False
         self.pause_longitudinal = False
 
-    lkas_managed = self.settings.lkas_action == AOL_TOGGLE
+    lkas_managed = self.lkas_action == AOL_TOGGLE
     main_managed = self.settings.main_action == AOL_TOGGLE
     if self.explicit_latch and CS.accFaulted:
+      self._record_latch_clear('acc_fault')
       self.allowed_latch = False
       self._gesture_neutral_seen = False
     elif self.settings.enabled and not self.explicit_latch and not lkas_managed and not main_managed:
+      if not CS.cruiseState.available:
+        self._record_latch_clear('cruise_unavailable')
       self.allowed_latch = bool(CS.cruiseState.available)
     elif not self.explicit_latch and not CS.cruiseState.available:
+      self._record_latch_clear('cruise_unavailable')
       self.allowed_latch = False
 
     for button in consumed_buttons:
@@ -173,6 +257,7 @@ class AolCardIntent:
       if not previously_held and gesture_held:
         self._last_latch_edge_ns = now_ns
       if cancel_pressed:
+        self._record_latch_clear('cancel_press')
         self.allowed_latch = False
       elif not self._gesture_neutral_seen:
         self._gesture_neutral_seen = not gesture_held
@@ -180,6 +265,8 @@ class AolCardIntent:
         # The physical gesture owns lateral intent even while ordinary cruise
         # is engaged. Dropping only the AOL latch leaves standard steering on.
         lateral_engaged = not self.pause_lateral and (self.allowed_latch or standard_enabled)
+        if lateral_engaged:
+          self._record_latch_clear('physical_toggle')
         self.allowed_latch = not lateral_engaged
         self.pause_lateral = lateral_engaged
 
@@ -192,7 +279,7 @@ class AolCardIntent:
       if button == int(ButtonType.gapAdjustCruise) and not self._distance_neutral_seen:
         continue
       if button == int(ButtonType.lkas) and event.pressed:
-        self._perform(self.settings.lkas_action)
+        self._perform(self.lkas_action)
       elif button == int(ButtonType.mainCruise) and event.pressed:
         self._perform(self.settings.main_action)
       elif button in self._held:
@@ -214,6 +301,59 @@ class AolCardIntent:
           self._perform(actions[1])
         elif self._timers[button] == CRUISE_LONG_PRESS * 5:
           self._perform(actions[2])
+
+  def observe_calibration(self, CS, *, events=None, standard_enabled: bool = False) -> None:
+    if self.explicit_latch:
+      return
+    if events is not None:
+      self._calibration_fault = disarming_fault(events, CS)
+      self._calibration_inhibit = any(event.name in (
+        log.OnroadEvent.EventName.calibrationInvalid,
+        log.OnroadEvent.EventName.calibrationIncomplete,
+        log.OnroadEvent.EventName.calibrationRecalibrating) for event in events)
+    main = bool(CS.cruiseState.available)
+    engaged = bool(CS.cruiseState.enabled or standard_enabled)
+    main_derived = not self.explicit_latch and self.lkas_action != AOL_TOGGLE and self.settings.main_action != AOL_TOGGLE
+    if not main_derived:
+      self._calibration_rearm_required = False
+    fresh_edge = ((main and not self._calibration_main) or (engaged and not self._calibration_engaged))
+    rearm_safe = (CS.canValid and not CS.canTimeout and not self._calibration_fault and
+                  not CS.steerFaultPermanent and not CS.steerFaultTemporary and
+                  CS.gearShifter not in (GearShifter.park, GearShifter.neutral, GearShifter.reverse, GearShifter.unknown))
+    if self._calibration_inhibit and main_derived:
+      self._calibration_rearm_required = True
+    elif self._calibration_rearm_required and fresh_edge and rearm_safe and self.settings.enabled:
+      self._calibration_rearm_required = False
+    if self._calibration_inhibit or self._calibration_rearm_required:
+      self._record_latch_clear('calibration_inhibit')
+      self.allowed_latch = False
+    self._calibration_main = main
+    self._calibration_engaged = engaged
+
+  def auxiliary_supported(self) -> bool:
+    return not self.explicit_latch
+
+  def update_auxiliary(self, CS, *, media=None, media_eligible: bool = False, fault_active: bool | None = None) -> None:
+    if (not self.auxiliary_supported() or not CS.canValid or CS.canTimeout or CS.steerFaultPermanent or
+        fault_active is True or getattr(self, "_main_cycle_required", False)):
+      self._aux_cancel_tracker = ButtonTracker()
+      self._aux_media_tracker = ButtonTracker()
+      return
+    cancel = car.CarState(canValid=CS.canValid, canTimeout=CS.canTimeout, buttonEvents=[
+      car.CarState.ButtonEvent(type=ButtonType.gapAdjustCruise, pressed=event.pressed)
+      for event in CS.buttonEvents if event.type == ButtonType.cancel])
+    for gesture in self._aux_cancel_tracker.observe(cancel.as_reader()):
+      slot = (Press.SHORT, Press.LONG, Press.VERY_LONG).index(gesture.press)
+      self._perform(self.settings.cancel_actions[slot])
+    if not media_eligible:
+      self._aux_media_tracker.invalidate_media()
+      return
+    for gesture in self._aux_media_tracker.observe(CS, media):
+      if gesture.button not in (Button.MODE, Button.CUSTOM):
+        continue
+      slot = (Press.SHORT, Press.LONG, Press.VERY_LONG).index(gesture.press)
+      actions = self.settings.mode_actions if gesture.button is Button.MODE else self.settings.custom_actions
+      self._perform(actions[slot])
 
   def output(self, CS) -> tuple[bool, bool, bool]:
     driving = CS.gearShifter not in (GearShifter.neutral, GearShifter.park, GearShifter.reverse, GearShifter.unknown)

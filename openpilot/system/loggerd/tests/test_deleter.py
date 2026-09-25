@@ -1,3 +1,4 @@
+import os
 from collections import namedtuple
 from pathlib import Path
 from collections.abc import Sequence
@@ -55,13 +56,30 @@ class TestDeleter(UploaderTestCase):
     ])
 
   def test_delete_last(self):
+    preserved = self.make_file_with_data(self.seg_format.format(0), self.f_type, preserve_xattr=deleter.PRESERVE_ATTR_VALUE)
     self.assertDeleteOrder([
       self.make_file_with_data(self.seg_format.format(1), self.f_type),
       self.make_file_with_data(self.seg_format2.format(0), self.f_type),
-      self.make_file_with_data(self.seg_format.format(0), self.f_type, preserve_xattr=deleter.PRESERVE_ATTR_VALUE),
+      preserved,
       self.make_file_with_data("boot", self.seg_format[:-4]),
       self.make_file_with_data("crash", self.seg_format2[:-4]),
     ])
+
+  def test_delete_order_after_route_count_reset(self):
+    old = [self.make_file_with_data(f"000000e8--dcc621904d--{i}", "qlog.zst") for i in range(2)]
+    new = [self.make_file_with_data(f"00000007--29d39f1644--{i}", "qlog.zst") for i in range(2)]
+    for n, f in enumerate(old + new):
+      os.utime(f, (1_700_000_000 + n, 1_700_000_000 + n))
+    self.assertDeleteOrder(old + new)
+
+  def test_delete_order_ignores_video_deletion_and_unsynced_clock(self):
+    old = self.make_file_with_data("000000e8--dcc621904d--0", "qlog.zst")
+    unsynced = self.make_file_with_data("00000007--29d39f1644--0", "qlog.zst")
+    synced = self.make_file_with_data("00000007--29d39f1644--1", "qlog.zst")
+    for f, t in ((old, 1_700_000_000), (unsynced, 1_600_000_000), (synced, 1_800_000_000)):
+      os.utime(f, (t, t))
+    os.utime(old.parent, (1_900_000_000, 1_900_000_000))
+    self.assertDeleteOrder([old, unsynced, synced])
 
   def test_no_delete_when_available_space(self):
     f_path = self.make_file_with_data(self.seg_dir, self.f_type)

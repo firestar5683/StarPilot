@@ -34,8 +34,8 @@ class TrafficAccelerationPlannerTests(unittest.TestCase):
       profiles = default_personality_profiles(False)
       for category, value in (('acceleration', acceleration), ('braking', braking)):
         if value is not None:
-          profiles['traffic'][category] = {'preset': 'custom', 'curve': [value] * 10}
-      self.params.put('LongitudinalPersonalityProfiles', profile_document(profiles, enabled=True), block=True)
+          profiles['traffic'][category] = {'preset': 'custom', 'curve': [value] * 10, 'legacyActivation': True}
+      self.params.put('LongitudinalPersonalityProfiles', profile_document(profiles, enabled=True, global_braking_response='standard'), block=True)
     target = resolve(read_traffic_settings(self.params), log.LongitudinalPersonality.standard,
                      V_EGO, self.cp, traffic_mode=True)
     self.assertIsNotNone(target)
@@ -61,9 +61,9 @@ class TrafficAccelerationPlannerTests(unittest.TestCase):
     self.assertLess(traffic.a_cruise, baseline.a_cruise)
 
   def test_soft_saved_traffic_keeps_slc_and_force_decel_braking(self):
-    target = self.tuning(acceleration=0.6, braking=0.5)
+    target = self.tuning(acceleration=0.6, braking=0.35)
     self.assertAlmostEqual(target.acceleration_max, 0.6)
-    self.assertAlmostEqual(target.cruise_brake_magnitude, 0.5)
+    self.assertAlmostEqual(target.cruise_brake_magnitude, 0.35)
     for force in (False, True):
       with self.subTest(force=force):
         baseline = LongitudinalPlanner(self.cp, init_v=V_EGO)
@@ -77,7 +77,9 @@ class TrafficAccelerationPlannerTests(unittest.TestCase):
           self.assertEqual(traffic.mpc.solution_status, 0)
           self.assertLessEqual(traffic.a_cruise, baseline.a_cruise + 1e-8)
         self.assertEqual(traffic.last_cruise_ceiling_status, 'force_decel' if force else 'applied')
-        self.assertLessEqual(traffic.a_cruise, -1.2 + 1e-8)
+        self.assertIsNotNone(traffic.last_profile)
+        self.assertAlmostEqual(traffic.last_profile.cruise_brake_magnitude, 0.35)
+        self.assertLessEqual(traffic.a_cruise, -0.5 + 1e-8)
 
   def test_soft_saved_traffic_preserves_lead_and_model_stop_candidates(self):
     target = self.tuning(acceleration=0.6, braking=0.5)
@@ -214,9 +216,9 @@ class TrafficAccelerationPlannerTests(unittest.TestCase):
           self.assertEqual(planner.mpc.solution_status, 0)
         self.assertAlmostEqual(planner.output_a_target, baseline.output_a_target, places=5)
         if case in ('slc', 'curve'):
-          self.assertLessEqual(planner.a_cruise, -1.2 + 1e-8)
+          self.assertLessEqual(planner.a_cruise, -0.5 + 1e-8)
         elif case == 'force_decel':
-          self.assertLessEqual(planner.a_cruise, -1.2 + 1e-8)
+          self.assertLessEqual(planner.a_cruise, -0.5 + 1e-8)
         elif case == 'model_stop':
           self.assertEqual(str(planner.mpc.source), '4')
           self.assertTrue(planner.output_should_stop)

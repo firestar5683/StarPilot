@@ -4,6 +4,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from openpilot.starpilot.vehicle_startup import VehicleStartupOwner
+
 from opendbc.car import gen_empty_fingerprint
 from opendbc.car.can_definitions import CanData
 from opendbc.car.car_helpers import get_car
@@ -550,7 +552,10 @@ class TestIoniq6PrepublicationHandoff(unittest.TestCase):
     class FakeSM:
       def __init__(self):
         self.valid = {'carControl': False, 'pandaStates': True}
-        self.alive = {'pandaStates': True}
+        self.alive = {'pandaStates': True, 'carControl': True}
+        self.seen = {'carControl': True}
+        self.logMonoTime = {'carControl': 1}
+        self.recv_time = {'carControl': 1e-9}
         self.panda = [SimpleNamespace(safetyModel=3, safetyParam=1, controlsAllowed=False)]
 
       def all_alive(self, services):
@@ -574,10 +579,12 @@ class TestIoniq6PrepublicationHandoff(unittest.TestCase):
     card.ioniq6_handoff_result = None
     card.can_callbacks = (lambda wait_for_one=False: [], lambda messages: None)
     card.params = SimpleNamespace(put_bool=Mock())
-    card.CP = SimpleNamespace(safetyConfigs=[object()])
-    card.CI = SimpleNamespace(init=Mock(), apply=Mock(return_value=(object(), [])))
+    card.CP = SimpleNamespace(brand='hyundai', safetyConfigs=[object()])
+    card.CI = SimpleNamespace(CC=SimpleNamespace(), CS=SimpleNamespace(), init=Mock(), apply=Mock(return_value=(object(), [])))
+    card.vehicle_startup = VehicleStartupOwner()
     card.sm = FakeSM()
     card.publish_sendcan = Mock()
+    card.learning_send_committed_mono_ns = 0
     card.ioniq6_panda_matches = Mock(return_value=False)
     return card
 
@@ -778,7 +785,10 @@ class TestIoniq6PrepublicationHandoff(unittest.TestCase):
     cp = car.CarParams(openpilotLongitudinalControl=True, pcmCruise=False, passive=False)
     cp.init('safetyConfigs', 1)
     card_owner.CP = cp
+    card_owner.vehicle_startup = VehicleStartupOwner()
     card_owner.ci_initialized = False
+    from openpilot.starpilot.gps.publisher import CarGpsPublisher
+    card_owner.car_gps_publisher = CarGpsPublisher()
     card_owner.initialized_prev = False
     card_owner.ioniq6_long_selected = True
     card_owner.ioniq6_long_pending = True
@@ -795,15 +805,20 @@ class TestIoniq6PrepublicationHandoff(unittest.TestCase):
     card_owner.can_callbacks = (lambda wait_for_one=False: [], lambda frames: None)
     card_owner.params = SimpleNamespace(put_bool=Mock())
     card_owner.slc_replay = card_owner.curve_replay = card_owner.conditional_replay = card_owner.aol_replay = False
+    card_owner.slc_command_sock = None
     card_owner.aol_card_intent = None
+    card_owner.wheel_publisher = SimpleNamespace(observe=Mock(return_value=()), publish=Mock(), suppress_distance_release=False)
+    card_owner.wheel_commands = ()
     card_owner.ioniq6_media = None
+    card_owner.switchback_button_tracker = None
+    card_owner.switchback_settings_owner = None
     card_owner.CC_prev = car.CarControl()
     card_owner.CS_prev = car.CarState()
     card_owner.last_actuators_output = structs.CarControl.Actuators()
     card_owner.rk = SimpleNamespace(remaining=0.0)
     card_owner.is_metric = True
     card_owner.experimental_mode = False
-    card_owner.v_cruise_helper = SimpleNamespace(update_v_cruise=lambda *_: None, initialize_v_cruise=lambda *_: None,
+    card_owner.v_cruise_helper = SimpleNamespace(update_v_cruise=lambda *_: None, initialize_v_cruise=lambda *_, **kwargs: None,
                                                  slc_consumed_button=None,
                                                  slc_cruise_change=None, v_cruise_kph=60.0, v_cruise_cluster_kph=60.0)
     card_owner.RI = SimpleNamespace(update=lambda _: None)
@@ -811,15 +826,18 @@ class TestIoniq6PrepublicationHandoff(unittest.TestCase):
 
     class SM:
       frame = 1
-      seen = {'onroadEvents': True}
+      seen = {'onroadEvents': True, 'carControl': True}
       valid = {'carControl': True}
       alive = {'carControl': True}
-      logMonoTime = {'carControl': 1}
+      logMonoTime = {'carControl': 1, 'onroadEvents': 0}
+      recv_time = {'carControl': 1e-9}
 
       def update(self, _timeout):
         pass
 
       def __getitem__(self, name):
+        if name == 'deviceState':
+          return SimpleNamespace(startedMonoTime=1)
         return [] if name == 'onroadEvents' else control
 
       def all_alive(self, names):
@@ -831,7 +849,7 @@ class TestIoniq6PrepublicationHandoff(unittest.TestCase):
     card_owner.sm = SM()
     sent = []
     card_owner.pm = SimpleNamespace(send=lambda service, packet: sent.append((service, packet)))
-    card_owner.CI = SimpleNamespace(CS=SimpleNamespace(),
+    card_owner.CI = SimpleNamespace(CC=SimpleNamespace(), CS=SimpleNamespace(),
                                     update=Mock(side_effect=lambda packets: car.CarState(canValid=True, canTimeout=False)),
                                     apply=Mock(return_value=(structs.CarControl.Actuators(), [CanData(0x1A0, b'\0' * 8, 1)])),
                                     init=Mock())
@@ -859,13 +877,18 @@ class TestIoniq6PrepublicationHandoff(unittest.TestCase):
     published = [packet for service, packet in sent if service == 'carState']
     self.assertEqual([message.valid for message in published], [True, True, False])
     self.assertTrue(card_owner.ioniq6_long_lost)
+    original_car = card_module.Car
+    original_new = original_car.__dict__.get('__new__')
+    constructor = SimpleNamespace(__new__=lambda _cls: card_owner, __init__=lambda _owner: None)
     with (patch.object(card_module, 'config_realtime_process'),
-          patch.object(card_module.Car, '__new__', return_value=card_owner),
-          patch.object(card_module.Car, '__init__', return_value=None),
-          patch.object(card_module.Car, 'card_thread', return_value=None),
+          patch.object(card_module, 'Car', constructor),
+          patch.object(card_owner, 'card_thread', return_value=None),
           patch.object(card_module, 'restore_ioniq6_adas', return_value=True) as restore):
       card_module.main()
     restore.assert_called_once_with(*card_owner.can_callbacks)
+    self.assertIs(card_module.Car, original_car)
+    self.assertIs(original_car.__dict__.get("__new__"), original_new)
+    self.assertIsInstance(object.__new__(original_car), original_car)
 
   def test_card_requires_fresh_matching_panda_mode(self):
     from openpilot.selfdrive.car.card import Car

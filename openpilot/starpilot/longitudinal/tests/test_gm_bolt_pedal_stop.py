@@ -10,7 +10,7 @@ from opendbc.car.gm.interface import CarInterface
 from opendbc.car.gm.tests.test_bolt_pedal import params
 from opendbc.car.gm.tests import test_bolt_pedal as pedal_fixtures
 from opendbc.car.gm.tests.test_bolt_pedal_slew import linear, pedal_step, pedal_wire
-from opendbc.car.gm.values import CAR, DBC, PEDAL_BOLT_CAR
+from opendbc.car.gm.values import CAR, DBC, NO_ACC_BOLT_CAR, PEDAL_BOLT_CAR
 from opendbc.car.vehicle_model import VehicleModel
 from openpilot.cereal import messaging
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
@@ -40,7 +40,7 @@ class TestBoltPedalMovingStop(unittest.TestCase):
             self.assertEqual(long.long_control_state, structs.CarControl.Actuators.LongControlState.stopping)
           self.assertEqual(long.update(False, cs, 0., False, (-4., 2.)), 0.)
           self.assertEqual(long.long_control_state, structs.CarControl.Actuators.LongControlState.off)
-          neighbor = LongControl(params(candidate, False, True, alpha))
+          neighbor = LongControl(params(candidate, False, False, alpha))
           self.assertFalse(hasattr(extension_state(neighbor, 'vehicle_policy'), 'stopping_output'))
 
   def test_target_gap_and_clipping_boundary_through_longcontrol(self):
@@ -104,10 +104,16 @@ class TestBoltPedalMovingStop(unittest.TestCase):
               mapping['carControl'] = True
             controls.sm.logMonoTime['carControl'] = now - 2_000_000
             controls.sm.recv_time['carControl'] = (now - 1_000_000) / 1e9
+            calc_fields = ("pedal_steady", "pedal_active_last", "regen_press_count", "regen_release_count",
+                           "regen_min_on_frames", "regen_min_off_frames", "regen_paddle_pressed")
+            calc_before = tuple(getattr(ci.CC, name) for name in calc_fields)
             card.controls_update(out, cc.as_reader())
           cancel_seen |= any(m[0] == 0x1e1 and m[2] == 2 for m in sent[-1][0])
           self.assertEqual(cc.actuators.longControlState, controls.LoC.long_control_state if controls.longitudinal_inputs.gm_start_enabled else prior)
           prior = controls.LoC.long_control_state
+          # Stock ACC releases at tick 6; the stopped hold releases with the plan at tick 12.
+          stop_hold = candidate == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and speed == 0. and 6 <= tick < 12
+          self.assertEqual(ci.CC.bolt_acc_pedal_stop_hold, stop_hold)
           if tick < 12:
             expected = stopping_step(expected, -2., out.vEgo)
             self.assertAlmostEqual(cc.actuators.accel, expected, places=6)
@@ -131,7 +137,20 @@ class TestBoltPedalMovingStop(unittest.TestCase):
               continue
             if candidate == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL:
               self.assertTrue(any(m[0] == 0x315 for m in sent[-1][0]))
-            steady = target if steady is None else pedal_step(target, steady, accel, out.vEgo)
+            if (candidate in NO_ACC_BOLT_CAR and out.vEgo < .25 and
+                cc.actuators.longControlState == structs.CarControl.Actuators.LongControlState.stopping and
+                not cc.cruiseControl.resume):
+              self.assertEqual(next(m[1] for m in sent[-1][0] if m[0] == 0x200), pedal_wire(0., tick // 4))
+              self.assertEqual(tuple(getattr(ci.CC, name) for name in calc_fields), calc_before)
+              self.assertFalse(any(m[0] == 0x315 for m in sent[-1][0]))
+              continue
+            if stop_hold:
+              steady = 0.
+              self.assertEqual(ci.CC.pedal_steady, 0.)
+            else:
+              steady = target if steady is None else pedal_step(target, steady, accel, out.vEgo)
+            if candidate == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and speed == 0. and tick == 12:
+              self.assertGreater(steady, 0.)
             self.assertFalse(ci.CC.regen_paddle_pressed)
             self.assertEqual(next(m[1] for m in sent[-1][0] if m[0] == 0x200), pedal_wire(steady, tick // 4))
           if tick == 20:

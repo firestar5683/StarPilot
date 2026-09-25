@@ -1,8 +1,9 @@
-"""Onroad PiP GPU owner: current cabin VisionIPC frame, frozen C3/C4 shape."""
+"""Onroad PiP GPU owner: current cabin frame and independent side-camera placement."""
 
 from __future__ import annotations
 
 import time
+from typing import TYPE_CHECKING
 
 import pyray as rl
 
@@ -11,6 +12,9 @@ from openpilot.starpilot.ui.camera_availability import CameraAvailability
 from openpilot.starpilot.ui.pip_shaders import PIP_CURVED_FRAGMENT_SHADER, PIP_FRAGMENT_SHADER, PIP_VERTEX_SHADER
 from openpilot.starpilot.ui.pip_sidecam import Mask, PiPStream, Rect, Signals, bubble_rect, selected_sides
 from openpilot.system.ui.lib.egl import EGLImage, bind_egl_image_to_texture, create_egl_image, destroy_egl_image, init_egl
+
+if TYPE_CHECKING:
+  from openpilot.starpilot.replay.render import ReplayCameraStream
 
 
 def _external_shader(fragment: str) -> str:
@@ -29,7 +33,7 @@ def _external_shader(fragment: str) -> str:
 class PiPRenderer:
   """One renderer; close it on onroad exit or when the owning shell closes."""
 
-  def __init__(self, shape: str, stream: PiPStream | None = None, *, frame_availability=None):
+  def __init__(self, shape: str, stream: PiPStream | ReplayCameraStream | None = None, *, frame_availability=None):
     if shape not in ("bubble", "curved"):
       raise ValueError("unknown PiP shape")
     self.frame_availability = frame_availability if frame_availability is not None else CameraAvailability()
@@ -134,22 +138,30 @@ class PiPRenderer:
 
   def render(self, content: rl.Rectangle, mask: Mask | None, signals: Signals, *, enabled: bool,
              on_blinker: bool, on_bsm: bool, invert: bool,
-             now: float | None = None) -> str:
-    sides = selected_sides(mask, signals, started=True, enabled=enabled,
-                           on_blinker=on_blinker, on_bsm=on_bsm)
-    if not sides or mask is None:
+             now: float | None = None, placements: dict[str, Rect] | None = None, submit=None) -> str:
+    if not enabled or mask is None or (placements is not None and not placements):
       self.deactivate()
       return "inactive"
+    sides = selected_sides(mask, signals, started=True, enabled=enabled,
+                           on_blinker=on_blinker, on_bsm=on_bsm)
+    if placements is not None:
+      sides = tuple(side for side in sides if side in placements)
     observed_now = time.monotonic() if now is None else now
-    for side in set(sides) - self._active_sides:
-      self._activated_at[side] = observed_now
-    self._active_sides = set(sides)
+    # While a bubble can still appear, keep the cabin stream connected and current even
+    # when none is shown, so a blinker or blind-spot warning draws on the very next frame.
     self.stream.set_active(True)
     frame = self.stream.poll(observed_now)
     if self._stream_generation != self.stream.generation:
       self._clear_images()
       self._stream_generation = self.stream.generation
       self.stream.release_retired()
+    if not sides:
+      self._active_sides.clear()
+      self._activated_at.clear()
+      return "inactive"
+    for side in set(sides) - self._active_sides:
+      self._activated_at[side] = observed_now
+    self._active_sides = set(sides)
     if frame is None:
       self._clear_images()
       return "no_frame"
@@ -173,11 +185,19 @@ class PiPRenderer:
         continue
       rect = bubble_rect(Rect(content.x, content.y, content.width, content.height), side) if self.shape == "bubble" else \
         Rect(content.x, content.y, content.width, content.height)
-      self._draw(shader, texture, frame, rect, crop.x, crop.y, crop.size, invert)
+      if placements is not None:
+        rect = placements[side]
+      warning = (signals.vasm_left or signals.left_blindspot) if side == "left" else (signals.vasm_right or signals.right_blindspot)
+      def draw(rect=rect, crop=crop, warning=warning):
+        self._draw(shader, texture, frame, rect, crop.x, crop.y, crop.size, invert, warning=warning)
+      if submit is None:
+        draw()
+      else:
+        submit(f"pip_{side}", draw)
     return "rendered"
 
   def _draw(self, shader: rl.Shader, texture: rl.Texture, frame, rect: Rect,
-            crop_x: float, crop_y: float, crop_size: float, invert: bool) -> None:
+            crop_x: float, crop_y: float, crop_size: float, invert: bool, *, warning: bool = False) -> None:
     texture_width = frame.width if COMMA_HARDWARE else frame.stride
     crop_min = rl.Vector2(crop_x / texture_width, crop_y / frame.height)
     crop_extent = rl.Vector2(crop_size / texture_width, crop_size / frame.height)
@@ -203,3 +223,7 @@ class PiPRenderer:
       rl.draw_texture_pro(texture, source, target, rl.Vector2(0, 0), 0.0, rl.WHITE)
     finally:
       rl.end_shader_mode()
+    if self.shape == "bubble":
+      radius = rect.width / 2
+      rl.draw_ring(rl.Vector2(rect.x + radius, rect.y + radius), max(0, radius - 3), radius,
+                   0, 360, 64, rl.Color(255, 60, 60, 255) if warning else rl.Color(94, 229, 238, 255))

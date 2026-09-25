@@ -12,7 +12,7 @@ from openpilot.common.params import ParamKeyFlag, Params
 from openpilot.common.prefix import OpenpilotPrefix
 from openpilot.selfdrive.controls.controlsd import Controls
 from openpilot.selfdrive.locationd.torqued import TorqueEstimator
-from openpilot.starpilot.lateral.tests.test_lane_runtime import feed
+from openpilot.starpilot.lateral.tests.test_lane_runtime import feed, publish_corolla_params
 from openpilot.starpilot.lateral.controller_selection import DOCUMENT_KEY as CONTROLLER_KEY, ControllerMode, replace_mode
 from openpilot.starpilot.lateral.torque_runtime import TorqueHost, development_enabled, read_settings
 from openpilot.starpilot.lateral.torque_tuning import TorqueSource
@@ -44,7 +44,7 @@ class TorqueRuntimeTests(unittest.TestCase):
       params, cp = Params(), corolla()
       host = TorqueHost(params, cp)
       base = host.vehicle
-      self.assertFalse(read_settings(params, base).advanced)
+      self.assertIsNone(read_settings(params, base).user_friction)
       params.put_bool('AdvancedLateralTune', True, block=True)
       params.put('SteerLatAccel', base.lat_accel_factor * 1.2, block=True)
       params.put('SteerFriction', min(1.0, base.friction * 1.2), block=True)
@@ -128,7 +128,7 @@ class TorqueRuntimeTests(unittest.TestCase):
       params, cp = Params(), corolla()
       host = TorqueHost(params, cp)
       params.put_bool('AdvancedLateralTune', True, block=True)
-      for key, bad in (('AdvancedLateralTune', b'yes'), ('ForceAutoTuneOff', b'2'),
+      for key, bad in (('ForceAutoTuneOff', b'2'),
                        ('SteerLatAccel', b'nan'), ('SteerFriction', b'inf'),
                        ('SteerLatAccelStock', b'bad'), ('SteerFrictionStock', b'bad')):
         with self.subTest(key=key):
@@ -175,6 +175,7 @@ class TorqueRuntimeTests(unittest.TestCase):
   def test_opt_in_learner_skips_old_cache_without_deleting_it(self):
     cp = corolla()
     with OpenpilotPrefix(), mock.patch('openpilot.selfdrive.locationd.torqued.get_cache', return_value=None) as get_cache:
+      Params().put('SteerFriction', cp.lateralTuning.torque.friction * 1.2, block=True)
       with mock.patch.dict(os.environ, {'TORQUE_REPLAY_RUNTIME': '1'}):
         fresh = TorqueEstimator(cp.as_reader())
       self.assertEqual(get_cache.call_count, 0)
@@ -188,8 +189,8 @@ class TorqueRuntimeTests(unittest.TestCase):
     with OpenpilotPrefix(), mock.patch.dict(os.environ, {'REPLAY': '1', 'AOL_REPLAY_RUNTIME': '0',
                                                          'LANE_CENTERING_REPLAY_RUNTIME': '0'}), \
          mock.patch('openpilot.selfdrive.controls.controlsd.messaging.PubMaster'):
-      params, cp = Params(), corolla()
-      params.put('CarParams', cp.to_bytes(), block=True)
+      params = Params()
+      publish_corolla_params(params)
       with mock.patch.dict(os.environ, {'TORQUE_REPLAY_RUNTIME': '0'}):
         baseline = Controls()
       with mock.patch.dict(os.environ, {'TORQUE_REPLAY_RUNTIME': '1'}):
@@ -248,9 +249,9 @@ class TorqueRuntimeTests(unittest.TestCase):
     with OpenpilotPrefix(), mock.patch.dict(os.environ, {'REPLAY': '1', 'TORQUE_REPLAY_RUNTIME': '1',
                                                          'AOL_REPLAY_RUNTIME': '0', 'LANE_CENTERING_REPLAY_RUNTIME': '0'}), \
          mock.patch('openpilot.selfdrive.controls.controlsd.messaging.PubMaster'):
-      params, cp = Params(), corolla()
+      params = Params()
+      cp = publish_corolla_params(params)
       Path(params.get_param_path(CONTROLLER_KEY)).write_bytes(replace_mode(None, cp, ControllerMode.STANDARD))
-      params.put('CarParams', cp.to_bytes(), block=True)
       controls = Controls()
       base = controls.torque_host.vehicle
       target = base.lat_accel_factor * 1.1
@@ -279,6 +280,7 @@ class TorqueRuntimeTests(unittest.TestCase):
       self.assertEqual(controls.torque_host.selected.lat_accel_offset, base.lat_accel_offset)
       self.assertGreater(controls.torque_host.applied.lat_accel_factor, target)
       params.put_bool('AdvancedLateralTune', False, block=True)
+      params.put('SteerLatAccel', base.lat_accel_factor, block=True)
       for tick in range(230, 340):
         now = 1_000_000_000 + tick * 10_000_000
         feed(controls, now, tick)

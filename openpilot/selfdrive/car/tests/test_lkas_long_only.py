@@ -42,7 +42,7 @@ def test_full_lkas_long_only_actual_owners_output_and_presentation(alt, prearmed
         return cs
 
     class Radar(RadarInterfaceBase):
-      def update(self, _can):
+      def update(self, can_packets):
         return None
 
     card = Car(Interface(), Radar(cp))
@@ -58,9 +58,10 @@ def test_full_lkas_long_only_actual_owners_output_and_presentation(alt, prearmed
     def send(service, message):
       captured[service] = messaging.log_from_bytes(message.to_bytes())
 
-    card.pm, sd.pm = SimpleNamespace(send=send), SimpleNamespace(send=send)
+    vars(card)['pm'] = SimpleNamespace(send=send)
+    vars(sd)['pm'] = SimpleNamespace(send=send)
     card.CC_prev = car.CarControl(enabled=True, latActive=True, longActive=True)
-    card.aol_card_intent.allowed_latch = prearmed
+    vars(card.aol_card_intent)['allowed_latch'] = prearmed
 
     def tick(pressed, expected_lateral, *, native_lateral=True):
       nonlocal now
@@ -80,7 +81,6 @@ def test_full_lkas_long_only_actual_owners_output_and_presentation(alt, prearmed
       intent = decode_intent(captured['aolIntentWire'].aolIntentWire)
       assert intent.pauseLateral is not expected_lateral
       assert not intent.pauseLongitudinal
-      sd.aol_car_state_log_ns = now
       safety = messaging.new_message('aolSafetyWire', 0, valid=True)
       safety.logMonoTime = now
       safety.aolSafetyWire = encode_safety(SafetyState(
@@ -89,7 +89,17 @@ def test_full_lkas_long_only_actual_owners_output_and_presentation(alt, prearmed
       calibration = messaging.new_message('extrinsicsCalibration', valid=True)
       calibration.extrinsicsCalibration.calStatus = log.ExtrinsicsCalibration.Status.calibrated
       sd.sm.update_msgs(now / 1e9, [captured['aolIntentWire'], safety.as_reader(), calibration.as_reader()])
-      with (patch.object(sd, 'data_sample', return_value=parsed),
+      def sampled_car_state():
+        event = captured['carState']
+        # This mock replaces the socket sampler, so carry the exact published
+        # envelope validity and original source stamp into its admission flags.
+        assert event.valid and event.carState.canValid and not event.carState.canTimeout
+        assert event.logMonoTime == intent.carStateLogMonoTime == now
+        sd.aol_car_state_log_ns = int(event.logMonoTime)
+        sd.conditional_car_state_valid = bool(event.valid)
+        return event.carState
+
+      with (patch.object(sd, 'data_sample', side_effect=sampled_car_state),
             patch.object(sd, 'update_events', side_effect=lambda _: sd.events.clear()),
             patch.object(sd.sm, 'all_checks', return_value=True),
             patch('openpilot.cereal.messaging.time.monotonic', return_value=now / 1e9),

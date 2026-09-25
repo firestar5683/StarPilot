@@ -1,7 +1,7 @@
 from openpilot.cereal import log
 from openpilot.common.constants import CV
 from openpilot.common.realtime import DT_MDL
-from openpilot.starpilot.lateral.lane_change_preferences import LaneChangePolicy
+from openpilot.starpilot.lateral.lane_change_preferences import LaneChangePolicy, MINIMUM_SPEED_MPS
 
 LaneChangeState = log.LaneChangeState
 LaneChangeDirection = log.LaneChangeDirection
@@ -41,9 +41,9 @@ class DesireHelper:
       self.auto_signal_blocked = True
     self.last_signal_direction = signal_direction
     self.auto_status = "manualRequired"
-    below_lane_change_speed = v_ego < self.policy.minimum_speed_mps
+    below_lane_change_speed = v_ego < max(MINIMUM_SPEED_MPS, self.policy.minimum_speed_mps)
 
-    if not self.policy.enabled or not lateral_active or self.lane_change_timer > LANE_CHANGE_TIME_MAX:
+    if not self.policy.enabled or not lateral_active or below_lane_change_speed or self.lane_change_timer > LANE_CHANGE_TIME_MAX:
       self.lane_change_state = LaneChangeState.off
       self.lane_change_direction = LaneChangeDirection.none
       self.lane_change_timer = 0.0

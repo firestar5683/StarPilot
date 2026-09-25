@@ -78,6 +78,95 @@ class TestStateMigration(unittest.TestCase):
         prepare_manager_start(self.params, self.storage, dry_run=True)
       self.assertEqual(self.tree_bytes(), before)
 
+  def test_initialized_unknown_keys_retire_without_changing_known_state(self):
+    from openpilot.cereal import messaging
+    prepare_manager_start(self.params, self.storage)
+    known = {'AlwaysOnLateral': b'1', 'IsMetric': b'0', 'OpenpilotEnabledToggle': b'1',
+             'DongleId': b'retained-identity', 'BluetoothEnabled': b'1', 'SecOCKey': bytes(range(16))}
+    for key, raw in known.items():
+      self.raw(key, raw)
+    put_cache(self.params, 'CalibrationParams', messaging.new_message('extrinsicsCalibration'), block=True)
+    put_cache(self.params, 'CarParamsPersistent', car.CarParams.new_message(), block=True)
+    known.update({key: (self.namespace / key).read_bytes() for key in ('CalibrationParams', 'CarParamsPersistent')})
+    identities = {key: ((self.namespace / key).stat().st_ino, (self.namespace / key).stat().st_mtime_ns) for key in known}
+    retired = {'ShareUsageStats': b'1', 'RetiredUnknownSetting': b'\xff\x00not a bool or JSON'}
+    registered = {key.decode() if isinstance(key, bytes) else key for key in self.params.all_keys()}
+    self.assertFalse(registered & retired.keys())
+    for key, raw in retired.items():
+      self.raw(key, raw)
+    marker, = (self.storage / 'profiles').iterdir()
+    marker_bytes = marker.read_bytes()
+    before = dict(known, **retired)
+    prepare_manager_start(self.params, self.storage, auto_migrate=True)
+    snapshots = tuple((self.storage / 'snapshots').iterdir())
+    self.assertEqual(len(snapshots), 2)
+    after_retired = {key: raw for key, raw in before.items() if key != 'ShareUsageStats'}
+    self.assertCountEqual([load_snapshot(snapshot) for snapshot in snapshots], [before, after_retired])
+    self.assertEqual({entry.name: entry.read_bytes() for entry in self.namespace.iterdir()}, known)
+    self.assertEqual({key: ((self.namespace / key).stat().st_ino, (self.namespace / key).stat().st_mtime_ns) for key in known}, identities)
+    self.assertEqual(marker.read_bytes(), marker_bytes)
+    for snapshot in snapshots:
+      receipt = json.loads((snapshot / 'migration.json').read_bytes())
+      expected_actions = {'ShareUsageStats'} if 'ShareUsageStats' in load_snapshot(snapshot) else {'RetiredUnknownSetting'}
+      self.assertEqual(set(receipt['actions']), expected_actions)
+      self.assertEqual(receipt['status'], 'migrated')
+    prepare_manager_start(self.params, self.storage, dry_run=True)
+    prepare_manager_start(self.params, self.storage, auto_migrate=True)
+    self.assertEqual(set((self.storage / 'snapshots').iterdir()), set(snapshots))
+
+  def test_initialized_unknown_retirement_fails_before_deletion(self):
+    prepare_manager_start(self.params, self.storage)
+    self.params.put('AlwaysOnLateral', True, block=True)
+    self.raw('ShareUsageStats', b'1')
+    before = self.tree_bytes()
+    with patch('openpilot.starpilot.state_migration._write', side_effect=OSError('disk full')):
+      with self.assertRaises(OSError):
+        prepare_manager_start(self.params, self.storage, auto_migrate=True)
+    self.assertEqual((self.namespace / 'ShareUsageStats').read_bytes(), b'1')
+    self.assertEqual((self.namespace / 'AlwaysOnLateral').read_bytes(), b'1')
+    self.assertEqual({key: value for key, value in self.tree_bytes().items() if value[0] or value[1] is not None},
+                     {key: value for key, value in before.items() if value[0] or value[1] is not None})
+    self.assertEqual(list((self.storage / 'snapshots').iterdir()), [])
+
+  def test_initialized_unknown_keys_do_not_admit_invalid_known_state(self):
+    prepare_manager_start(self.params, self.storage)
+    self.raw('UnportedFeature', b'1')
+    for key, raw in (('AlwaysOnLateral', b'true'), ('CalibrationParams', b'invalid retained calibration')):
+      with self.subTest(key=key):
+        self.raw(key, raw)
+        before = {entry.name: entry.read_bytes() for entry in self.namespace.iterdir()}
+        with self.assertRaises(MigrationRequired):
+          prepare_manager_start(self.params, self.storage, auto_migrate=True)
+        self.assertEqual({entry.name: entry.read_bytes() for entry in self.namespace.iterdir()}, before)
+        (self.namespace / key).unlink()
+
+  def test_retired_key_archival_does_not_admit_invalid_known_state(self):
+    prepare_manager_start(self.params, self.storage)
+    for key, raw in (('AlwaysOnLateral', b'true'), ('CalibrationParams', b'invalid retained calibration')):
+      with self.subTest(key=key):
+        self.raw('ShareUsageStats', b'1')
+        self.raw(key, raw)
+        before = {entry.name: entry.read_bytes() for entry in self.namespace.iterdir()}
+        before_tree = self.tree_bytes()
+        with self.assertRaises(MigrationRequired):
+          prepare_manager_start(self.params, self.storage, dry_run=True, auto_migrate=True)
+        self.assertEqual(self.tree_bytes(), before_tree)
+        snapshots_before = set((self.storage / 'snapshots').iterdir()) if (self.storage / 'snapshots').exists() else set()
+        identity = ((self.namespace / key).stat().st_ino, (self.namespace / key).stat().st_mtime_ns)
+        with self.assertRaises(MigrationRequired):
+          prepare_manager_start(self.params, self.storage, auto_migrate=True)
+        retained = {name: value for name, value in before.items() if name != 'ShareUsageStats'}
+        self.assertEqual({entry.name: entry.read_bytes() for entry in self.namespace.iterdir()}, retained)
+        self.assertEqual(((self.namespace / key).stat().st_ino, (self.namespace / key).stat().st_mtime_ns), identity)
+        snapshots = set((self.storage / 'snapshots').iterdir()) - snapshots_before
+        self.assertEqual(len(snapshots), 2)
+        self.assertCountEqual([load_snapshot(snapshot) for snapshot in snapshots], [before, retained])
+        archived = next(snapshot for snapshot in snapshots if 'ShareUsageStats' in load_snapshot(snapshot))
+        receipt = json.loads((archived / 'migration.json').read_bytes())
+        self.assertEqual(set(receipt['actions']), {'ShareUsageStats'})
+        self.assertEqual(receipt['status'], 'migrated')
+        (self.namespace / key).unlink()
+
   def raw(self, key, value):
     (self.namespace / key).write_bytes(value)
 
@@ -230,8 +319,8 @@ class TestStateMigration(unittest.TestCase):
     marker, = (self.storage / 'profiles').iterdir()
     valid = marker.read_bytes()
     put_cache(self.params, 'CarParamsPersistent', car.CarParams.new_message(), block=True)
-    for replacement in (b'"version":true', b'"version":1,"version":1'):
-      marker.write_bytes(valid.replace(b'"version":1', replacement))
+    for replacement in (b'"version":true', b'"version":2,"version":2'):
+      marker.write_bytes(valid.replace(b'"version":2', replacement))
       with self.assertRaises(MigrationRequired):
         prepare_manager_start(self.params, self.storage)
 
@@ -294,6 +383,7 @@ class TestStateMigration(unittest.TestCase):
          patch.object(manager, 'starpilot_storage_root', return_value=self.storage), \
          patch.object(manager, 'save_bootlog') as bootlog, \
          patch.object(manager, 'register') as register, \
+         patch.object(manager, 'prepare_manager_start', side_effect=MigrationRequired('fixture incompatible state')), \
          patch.object(self.params, 'clear_all') as clear:
       with self.assertRaises(MigrationRequired):
         manager.manager_init()
@@ -309,6 +399,7 @@ class TestStateMigration(unittest.TestCase):
       openpilot=SimpleNamespace(version='test', git_commit='a' * 40, git_commit_date='test',
                                git_origin='local', git_normalized_origin='local', is_dirty=True),
     )
+    prepare_manager_start(self.params, self.storage)  # Current epoch before newly saved driver choice.
     self.params.put_bool('OpenpilotEnabledToggle', False, block=True)
     with patch.dict(os.environ), \
          patch.object(manager, 'Params', return_value=self.params), \

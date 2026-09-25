@@ -4,7 +4,9 @@ No message default, missing drive history, or old onroad message is presented as
 an observed value. This module has no transport construction or write path.
 """
 
-from openpilot.starpilot.ui.onroad_customization import default_document, read_customization
+from openpilot.starpilot.ui.onroad_customization import STOPPED_TIMER_WIDGET, default_document, placement, read_customization
+# Temporary old-route replay compatibility; remove with the marked hook below.
+from openpilot.starpilot.ui.old_starpilot_route_shim import speed_limit_fallback
 
 from collections.abc import Callable
 from dataclasses import replace
@@ -22,19 +24,23 @@ from openpilot.starpilot.conditional_mode.projection import paired_clocks_ns
 from openpilot.starpilot.conditional_mode.runtime_settings import ConditionalSettingsOwner
 from openpilot.starpilot.conditional_mode.status import settings_fingerprint
 from openpilot.starpilot.longitudinal.profile_runtime import read_traffic_settings
-from openpilot.starpilot.parked_evidence import ParkedEvidence, RESUME_SKEW_NS, fresh_offroad, fresh_parked
+from openpilot.starpilot.parked_evidence import ParkedEvidence, RESUME_SKEW_NS, fresh_offroad
 from openpilot.starpilot.ui.conditional_status import ConditionalDisplayProjector, ConditionalPerceptionProjector, configured_choice
 from openpilot.starpilot.ui.traffic_status import TrafficDisplayProjector
 from openpilot.starpilot.controllers.mode_actions import SwitchbackStatusOwner
 from openpilot.starpilot.ui.wheel_feedback import observe_wheel_feedback
 from openpilot.starpilot.ui.torque_feedback import observe_torque_feedback
+from openpilot.starpilot.ui.live_developer_sidebar import DeveloperMetrics
 
+from openpilot.cereal import log
 from openpilot.cereal.services import SERVICE_LIST
+from openpilot.tools.replay.display_clock import BOOT_TIME_SERVICES
 from opendbc.car.structs import car as car_schema
 from openpilot.starpilot.ui.device_state import DeviceRequest, DeviceState
 from openpilot.starpilot.ui.home_state import HomeMode, HomeState
+from openpilot.starpilot.ui.onroad_state import conditional_lead_from_message
 from openpilot.starpilot.ui.onroad_state import (AlertSize, BorderSignals, ObservationKind, OnroadAlert,
-                                                OnroadState, SpeedLimitObservation, speed_limit_from_message)
+                                                OnroadState, SpeedLimitObservation, is_personality_notice, speed_limit_from_message)
 from openpilot.starpilot.ui.onroad_stopped_timer import StoppedTimer
 from openpilot.starpilot.ui.onroad_lane_alerts import lateral_lane_alert
 from openpilot.starpilot.ui.onroad_camera import ReverseDriverCamera
@@ -65,12 +71,20 @@ def _clock_pair(mono_clock: Callable[[], int], boot_clock: Callable[[], int]) ->
 def _message_at_age(sm: Any, service: str, now_ns: int, after_frame: int, max_age_ns: int,
                     *, recv_now_ns: int | None = None) -> Any | None:
   try:
+    replay = getattr(sm, "replay_sample", None)
+    if replay is not None:
+      if not replay.valid:
+        return None
+      if service in BOOT_TIME_SERVICES:
+        if type(replay.boot_ns) is not int or replay.boot_ns <= 0:
+          return None
+        now_ns = replay.boot_ns
     stamp = int(sm.logMonoTime[service])
     if (not sm.valid[service] or not sm.alive[service] or stamp <= 0 or stamp > now_ns or
         now_ns - stamp > max_age_ns or int(sm.recv_frame[service]) <= after_frame):
       return None
-    if recv_now_ns is not None:
-      receipt_age = recv_now_ns - int(sm.recv_time[service] * 1e9)
+    if recv_now_ns is not None and not (replay is not None and replay.paused):
+      receipt_age = (replay.host_ns if replay is not None else recv_now_ns) - int(sm.recv_time[service] * 1e9)
       if not 0 <= receipt_age <= max_age_ns:
         return None
     return sm[service]
@@ -85,6 +99,11 @@ def current_message(sm: Any, service: str, now_ns: int, *, after_frame: int = 0,
   max_age_ns = int(2e9 / frequency) if frequency else 1_000_000_000
   if service == "pandaStates":
     if boot_now_ns is None:
+      replay = getattr(sm, "replay_sample", None)
+      if replay is not None:
+        if not replay.valid or replay.boot_ns is None:
+          return None
+        return _message_at_age(sm, service, replay.boot_ns, after_frame, max_age_ns, recv_now_ns=replay.host_ns)
       pair = _clock_pair(time.monotonic_ns, _boot_time_ns)
       if pair is None:
         return None
@@ -95,12 +114,21 @@ def current_message(sm: Any, service: str, now_ns: int, *, after_frame: int = 0,
 
 def display_message(sm: Any, service: str, now_ns: int, *, after_frame: int = 0) -> Any | None:
   """Allow a bounded UI frame gap without extending control-action freshness."""
-  return _message_at_age(sm, service, now_ns, after_frame, 200_000_000)
+  max_age_ns = 200_000_000
+  if getattr(sm, 'replay_sample', None) is not None:
+    spec = SERVICE_LIST[service]
+    if spec.frequency and spec.decimation:
+      # Account for qlog decimation during replay.
+      max_age_ns = max(max_age_ns, min(1_000_000_000, int(2e9 * spec.decimation / spec.frequency)))
+  return _message_at_age(sm, service, now_ns, after_frame, max_age_ns)
 
 
 def current_curve_message(sm: Any, now_ns: int, *, after_frame: int = 0) -> Any | None:
   """Read the nested Curve payload without treating SLC's Event.valid as its validity."""
   try:
+    replay = getattr(sm, "replay_sample", None)
+    if replay is not None and not replay.valid:
+      return None
     stamp = int(sm.logMonoTime["slcState"])
     frequency = SERVICE_LIST["slcState"].frequency
     max_age_ns = int(2e9 / frequency) if frequency else 1_000_000_000
@@ -120,6 +148,14 @@ def _finite(value: Any, *, positive: bool = False) -> float | None:
   if not math.isfinite(number) or (positive and number <= 0) or (not positive and number < 0):
     return None
   return number
+
+
+def _display_speed(value: Any) -> float | None:
+  try:
+    speed = float(value)
+  except (TypeError, ValueError, OverflowError):
+    return None
+  return max(0.0, speed) if math.isfinite(speed) else None
 
 
 def _model_confidence(model: Any | None) -> float | None:
@@ -180,10 +216,14 @@ def current_alert(sm: Any, now_ns: int, *, after_frame: int) -> OnroadAlert:
     service = 'selfdriveState'
     stamp = int(sm.logMonoTime[service])
     receipt = int(sm.recv_time[service] * 1e9)
-    if (not sm.valid[service] or int(sm.recv_frame[service]) <= after_frame or
-        stamp <= 0 or stamp > now_ns or receipt <= 0 or receipt > now_ns):
+    replay = getattr(sm, "replay_sample", None)
+    if replay is not None and not replay.valid:
       return OnroadAlert()
-    missing_ns = now_ns - receipt
+    receipt_now = replay.host_ns if replay is not None else now_ns
+    if (not sm.valid[service] or int(sm.recv_frame[service]) <= after_frame or
+        stamp <= 0 or stamp > now_ns or receipt <= 0 or receipt > receipt_now):
+      return OnroadAlert()
+    missing_ns = 0 if replay is not None and replay.paused else receipt_now - receipt
     if missing_ns > _ALERT_TRANSPORT_TIMEOUT_NS:
       previous = sm[service]
       if bool(previous.enabled) and missing_ns < _ALERT_TRANSPORT_TIMEOUT_NS + _ALERT_CRITICAL_TIMEOUT_NS:
@@ -211,7 +251,9 @@ class PersonalityNotice:
     self._label = ""
 
   def update(self, source: Any | None, *, drive_frame: int, event_ns: int, now_ns: int,
-             native_alert: OnroadAlert) -> OnroadAlert:
+             native_alert: OnroadAlert, hide: bool = False) -> OnroadAlert:
+    if hide and is_personality_notice(native_alert):
+      native_alert = OnroadAlert()
     try:
       personality = int(getattr(source.personality, "raw", source.personality))
       if personality not in (0, 1, 2) or event_ns <= 0 or event_ns > now_ns:
@@ -229,10 +271,13 @@ class PersonalityNotice:
       self._last = personality
       self._label = ("Aggressive", "Standard", "Relaxed")[personality]
       self._until_ns = event_ns + 1_500_000_000
+    if hide:
+      self._until_ns = 0
+      return native_alert
     if native_alert.size != AlertSize.NONE:
       return native_alert
     if now_ns < self._until_ns:
-      return OnroadAlert(AlertSize.MID, self._label, "Driving Personality")
+      return OnroadAlert(AlertSize.MID, self._label, "Driving Personality", alert_type="personalityChanged/warning")
     return native_alert
 
 
@@ -249,6 +294,8 @@ class RuntimeSnapshotAdapter:
     self._customization_value = default_document()
     self._appearance_value = OnroadAppearance()
     self._appearance_read_ns: int | None = None
+    # A second screen (Android Auto) swaps in its own display choices before anything uses them.
+    self.appearance_override: Callable[[OnroadAppearance], OnroadAppearance] | None = None
     self._last_mode: ShellMode | None = None
     self._onroad_ancillary: tuple[int, tuple[bool, int, bool], ShellSnapshot] | None = None
     self._conditional = ConditionalDisplayProjector()
@@ -264,6 +311,8 @@ class RuntimeSnapshotAdapter:
     self._traffic_profile_valid = False
     self._personality_notice = PersonalityNotice()
     self._stopped_timer = StoppedTimer()
+    self._replay_stopped_history = False
+    self._developer_metrics = DeveloperMetrics()
     self._reverse_driver_camera = ReverseDriverCamera()
     self._slc_sign_cache: tuple[int, tuple[int, int], str, SpeedLimitObservation] | None = None
     self._mono_clock, self._boot_clock = mono_clock, boot_clock
@@ -271,8 +320,9 @@ class RuntimeSnapshotAdapter:
     self._device_offset_ns: int | None = None
     self._last_pair_offset_ns: int | None = None
     self._pair_failed = False
+    self._replay_epoch: int | None = None
 
-  def _parked(self, ui: Any, pair: tuple[int, int, int] | None, *, connectivity: bool = False) -> bool:
+  def _parked(self, ui: Any, pair: tuple[int, int, int] | None) -> bool:
     if pair is None:
       self._device_offset_ns = None
       self._pair_failed = True
@@ -299,8 +349,7 @@ class RuntimeSnapshotAdapter:
         int(sm.logMonoTime["pandaStates"]), int(sm.recv_time["pandaStates"] * 1e9),
         tuple(bool(p.ignitionLine or p.ignitionCan) for p in pandas),
       )
-      check = fresh_offroad if connectivity else fresh_parked
-      return check(evidence, now_mono_ns=mono_now, now_boot_ns=boot_now)
+      return fresh_offroad(evidence, now_mono_ns=mono_now, now_boot_ns=boot_now)
     except (AttributeError, KeyError, TypeError, ValueError, OverflowError, OSError, RuntimeError):
       return False
 
@@ -309,16 +358,26 @@ class RuntimeSnapshotAdapter:
 
   def confirmed_offroad(self) -> bool:
     """Recheck transport evidence without changing presentation state."""
+    if getattr(self.ui_state, "replay_clock", None) is not None:
+      return False
     return self._parked(self.ui_state, _clock_pair(self._mono_clock, self._boot_clock))
 
   def connectivity_allowed(self) -> bool:
     """Fresh effective offroad admission for connectivity setup, regardless of ignition."""
-    return self._parked(self.ui_state, _clock_pair(self._mono_clock, self._boot_clock), connectivity=True)
+    return self.confirmed_offroad()
 
   def build(self, mode: ShellMode, selected: Destination = Destination.STAR, *, compact_y: float = 0,
             compact_scroll_x: float = 0, sidebar_expanded: bool = True, now_ns: int | None = None,
-            menu_only: bool = False) -> ShellSnapshot:
-    now_ns = time.monotonic_ns() if now_ns is None else now_ns
+            menu_only: bool = False, stopped_timer_enabled: bool | None = None) -> ShellSnapshot:
+    replay = getattr(self.ui_state, "replay_sample", None)
+    if getattr(self.ui_state, "replay_clock", None) is not None:
+      if replay is not None and replay.epoch != self._replay_epoch:
+        self.__init__(self.ui_state, self.galaxy_access, self.bluetooth_powered,
+                      mono_clock=self._mono_clock, boot_clock=self._boot_clock)
+        self._replay_epoch = replay.epoch
+      now_ns = replay.now_ns if replay is not None and replay.valid else 0
+    else:
+      now_ns = time.monotonic_ns() if now_ns is None else now_ns
     if mode != ShellMode.ONROAD or self._last_mode != ShellMode.ONROAD:
       self._onroad_ancillary = None
     if mode == ShellMode.ONROAD and self._last_mode == ShellMode.SETTINGS:
@@ -329,6 +388,8 @@ class RuntimeSnapshotAdapter:
         now_ns - self._appearance_read_ns >= 1_000_000_000):
       self._customization_value = read_customization(self.ui_state.params)
       self._appearance_value = onroad_appearance(self.ui_state.params)
+      if self.appearance_override is not None:
+        self._appearance_value = self.appearance_override(self._appearance_value)
       self._appearance_read_ns = now_ns
     ui, params = self.ui_state, self.ui_state.params
     if (self._conditional_read_ns is None or now_ns < self._conditional_read_ns or
@@ -337,14 +398,17 @@ class RuntimeSnapshotAdapter:
       self._conditional_read_ns = now_ns
     sm = ui.sm
     device = current_message(sm, "deviceState", now_ns)
-    pair = _clock_pair(self._mono_clock, self._boot_clock)
+    if getattr(ui, "replay_clock", None) is not None:
+      pair = ((replay.now_ns, replay.boot_ns, replay.boot_ns - replay.now_ns)
+              if replay is not None and replay.valid and replay.boot_ns is not None else None)
+    else:
+      pair = _clock_pair(self._mono_clock, self._boot_clock)
     pandas = current_message(sm, "pandaStates", now_ns, boot_now_ns=now_ns + pair[2]) if pair is not None else None
-    ignition = bool(pandas is not None and any(p.ignitionLine or p.ignitionCan for p in pandas))
+    panda_connected = bool(pandas and any(p.pandaType != log.PandaState.PandaType.unknown for p in pandas))
     # UIState owns drive transitions. Health-message freshness governs actions,
     # not the lifetime of the camera, widget filters, and engagement animations.
     started = bool(ui.started)
-    confirmed_offroad = self._parked(ui, pair)
-    connectivity_allowed = self._parked(ui, pair, connectivity=True)
+    confirmed_offroad = self._parked(ui, pair) if getattr(ui, "replay_clock", None) is None else False
     after = ui.started_frame if ui.started else 0
     drive_id = int(getattr(sm["deviceState"], "startedMonoTime", 0)) if started else 0
     car = current_message(sm, "carState", now_ns, after_frame=after) if started else None
@@ -362,22 +426,23 @@ class RuntimeSnapshotAdapter:
                                       model=display_model, selfdrive=display_selfdrive)
     alert = self._personality_notice.update(
       display_selfdrive, drive_frame=after, event_ns=int(sm.logMonoTime['selfdriveState']) if display_selfdrive is not None else 0,
-      now_ns=now_ns, native_alert=native_alert)
+      now_ns=now_ns, native_alert=native_alert, hide=self._appearance_value.hide_personality_alerts)
     slc = display_message(sm, "slcState", now_ns, after_frame=after) if started else None
     curve_envelope = current_curve_message(sm, now_ns, after_frame=after) if started else None
     curve = curve_observation(curve_envelope, now_ns) if curve_envelope is not None else None
     conditional_envelope = display_message(sm, 'starpilotSelfdriveState', now_ns, after_frame=after) if started else None
 
-    navigation = _message_at_age(sm, "starpilotNavigation", now_ns, after, 3_000_000_000) if started else None
+    from openpilot.starpilot.navigation.wire import navigation_state
+    navigation = navigation_state(_message_at_age(sm, "starpilotNavigation", now_ns, after, 3_000_000_000)) if started else None
 
     long_active = bool(control.longActive) if control is not None else False
     system_long = bool(long_active and controls is not None and str(controls.longControlState) != "off" and
                        selfdrive is not None and selfdrive.enabled and car is not None and
                        bool(getattr(car, "canValid", False)) and not getattr(car, "canTimeout", True) and ui.CP is not None and
-                       ui.CP.openpilotLongitudinalControl and not ui.CP.pcmCruise)
-    raw_speed = None if display_car is None else _finite(display_car.vEgoCluster)
+                       ui.CP.openpilotLongitudinalControl)
+    raw_speed = None if display_car is None else _display_speed(display_car.vEgoCluster)
     if raw_speed is None or raw_speed == 0:
-      raw_speed = None if display_car is None else _finite(display_car.vEgo)
+      raw_speed = None if display_car is None else _display_speed(display_car.vEgo)
     display_car_valid = bool(display_car is not None and getattr(display_car, "canValid", False) and
                              not getattr(display_car, "canTimeout", True))
     timer_car_fresh = False
@@ -402,11 +467,18 @@ class RuntimeSnapshotAdapter:
       enabled=self._appearance_value.driver_camera_on_reverse and self._appearance_value.camera_view != CameraViewChoice.NONE,
       car_fresh=reverse_source_fresh, reverse=timer_reverse,
     )
+    if getattr(ui, "replay_clock", None) is not None:
+      if not timer_car_fresh:
+        self._replay_stopped_history = False
+      elif not timer_standstill or timer_reverse:
+        self._replay_stopped_history = True
+    timer_enabled = (placement(self._customization_value, "compact", STOPPED_TIMER_WIDGET)["enabled"]
+                     if stopped_timer_enabled is None else stopped_timer_enabled)
     stopped_duration = self._stopped_timer.step(
       now_ns=now_ns,
       drive_key=drive_key,
       car_fresh=timer_car_fresh, standstill=timer_standstill, reverse=timer_reverse,
-      enabled=self._appearance_value.show_stopped_timer,
+      enabled=timer_enabled and (getattr(ui, "replay_clock", None) is None or self._replay_stopped_history),
     )
     border_signals = (BorderSignals(bool(getattr(display_car, 'leftBlinker', False)),
                                     bool(getattr(display_car, 'rightBlinker', False)),
@@ -435,7 +507,10 @@ class RuntimeSnapshotAdapter:
         except (AttributeError, OSError, TypeError, ValueError):
           self._traffic_profile_valid = False
         self._traffic_context_ns = now_ns
-      pair = paired_clocks_ns()
+      if getattr(ui, "replay_clock", None) is not None:
+        pair = (replay.now_ns, replay.boot_ns) if replay is not None and replay.valid and replay.boot_ns is not None else None
+      else:
+        pair = paired_clocks_ns()
       if pair is not None and abs(pair[0] - now_ns) <= 10_000_000:
         fingerprint = settings_fingerprint(self._traffic_settings.refresh(now_ns))
         traffic = self._traffic.project(
@@ -504,9 +579,19 @@ class RuntimeSnapshotAdapter:
         self._slc_sign_cache = None
     else:
       self._slc_sign_cache = None
+    # Temporary old StarPilot route replay shim. Retire by deleting this call
+    # and its import; remaining cleanup is documented in
+    # openpilot/starpilot/ui/old_starpilot_route_shim.py.
+    observation = speed_limit_fallback(ui, observation, now_ns, cruise_kph=cruise,
+                                      car=display_car if display_car_valid else None, read_message=display_message)
     experimental = bool(display_selfdrive.experimentalMode) if display_selfdrive is not None else _flag(params, "ExperimentalMode")
     observed_experimental = bool(display_selfdrive.experimentalMode) if display_selfdrive is not None else False
     persona = _personality(_text(params, "LongitudinalPersonality", "1"))
+    if display_selfdrive is not None:
+      try:
+        persona = _personality(log.LongitudinalPersonality.schema.enumerants[str(display_selfdrive.personality)])
+      except (AttributeError, KeyError, TypeError, ValueError):
+        pass
     torque = observe_torque_feedback(
       display_car, display_control, display_controls,
       display_message(sm, "carOutput", now_ns, after_frame=after) if started else None,
@@ -519,7 +604,14 @@ class RuntimeSnapshotAdapter:
       display_selfdrive is not None and getattr(display_selfdrive, 'enabled', False) and
       str(getattr(display_selfdrive, 'state', '')) == 'overriding' and
       cp is not None and cp.openpilotLongitudinalControl)
-    onroad = OnroadState(engaged=display_lat_active or display_long_active or longitudinal_overridden, camera_available=started,
+    developer_metrics = self._developer_metrics.observe(
+      drive=after if started else None, car=display_car if display_car_valid else None,
+      delay=current_message(sm, 'lateralDelay', now_ns, after_frame=after) if started else None,
+      torque=current_message(sm, 'lateralTorqueParameters', now_ns, after_frame=after) if started else None,
+      parameters=display_message(sm, 'vehicleParameters', now_ns, after_frame=after) if started else None,
+      metric=bool(ui.is_metric), cp=cp)
+    onroad = OnroadState(developer_metrics=developer_metrics,
+                         engaged=display_lat_active or display_long_active or longitudinal_overridden, camera_available=started,
                          speed_mps=raw_speed, cruise_kph=cruise, speed_limit=observation,
                          appearance=self._appearance_value, customization=self._customization_value,
                          alert=alert, metric=bool(ui.is_metric),
@@ -542,6 +634,7 @@ class RuntimeSnapshotAdapter:
                          curve=curve, show_curve_status=_flag(params, "ShowCSCStatus"),
                          conditional_configured=self._conditional_choice, conditional_effective=conditional,
                          conditional_perception=perception,
+                         conditional_lead=conditional_lead_from_message(display_radar) if display_car_valid else None,
                          navigation=navigation_display(navigation, now_ns=now_ns, drive_id=drive_id),
                          border_signals=border_signals, stopped_duration_s=stopped_duration,
                          reverse_driver_camera=reverse_driver_camera,
@@ -584,18 +677,16 @@ class RuntimeSnapshotAdapter:
                            HomeMode.EXPERIMENTAL if experimental else HomeMode.CHILL),
                      experimental_enabled=experimental, experimental_available=bool(ui.has_longitudinal_control),
                      stats=None, paired=bool(ui.prime_state.is_paired()), network=network, network_strength=strength,
-                     vehicle_online=ignition, connection=connection,
+                     vehicle_online=panda_connected, connection=connection,
                      recording_audio=bool(ui.recording_audio), bluetooth=bluetooth,
                      gpu_present=gpu_present, gpu_active=gpu_active, branch=_text(params, "GitBranch"),
                      gpu_state=getattr(getattr(ui, "chestnut_state", None), "value", "disconnected"))
 
-    settings_pages = (Destination.STAR, Destination.DEVICE, Destination.SOFTWARE, Destination.TOGGLES,
+    settings_pages = (Destination.STAR, Destination.DEVICE, Destination.NETWORK, Destination.SOFTWARE, Destination.TOGGLES,
                       Destination.DRIVING_CONTROLS, Destination.SOUNDS, Destination.APPEARANCE,
-                      Destination.SYSTEM, Destination.DRIVING_MODEL, Destination.BLUETOOTH)
-    availability = tuple(DestinationAvailability(item, item in settings_pages or
-                          item == Destination.NETWORK and connectivity_allowed,
-                          ("Available in Offroad mode" if connectivity_allowed else "Offroad state is unavailable")
-                          if item == Destination.NETWORK else
+                      Destination.SYSTEM, Destination.DRIVING_MODEL, Destination.BLUETOOTH, Destination.DEVELOPER, Destination.VEHICLE)
+    availability = tuple(DestinationAvailability(item, item in settings_pages,
+                          "Manage network connections" if item == Destination.NETWORK else
                           "Manage Bluetooth devices" if item == Destination.BLUETOOTH else
                           ("Available With the Vehicle Off" if confirmed_offroad else "Offroad state is unavailable")) for item in Destination)
     settings = SettingsState(sidebar_expanded=sidebar_expanded, compact_y=compact_y,
@@ -603,8 +694,7 @@ class RuntimeSnapshotAdapter:
                              availability=availability)
     if mode != ShellMode.SETTINGS:
       selected = Destination.STAR
-    if selected not in (Destination.STAR, Destination.DEVICE, Destination.NETWORK, Destination.SOFTWARE, Destination.TOGGLES,
-                        Destination.DRIVING_CONTROLS, Destination.SOUNDS, Destination.APPEARANCE, Destination.SYSTEM):
+    if selected not in settings_pages:
       selected = Destination.STAR
     # Home and the compact menu consume no leaf-panel state. Keep temporal,
     # pairing and parked evidence current without reading unused preferences.
@@ -630,6 +720,7 @@ class RuntimeSnapshotAdapter:
     if confirmed_offroad:
       software_actions.add(SoftwareRequest.OPEN_UNINSTALL_CONFIRMATION)
       if updater_state == "idle":
+        software_actions.update((SoftwareRequest.FAST_UPDATE, SoftwareRequest.ROLLBACK))
         software_actions.add(SoftwareRequest.DOWNLOAD_UPDATE if available else SoftwareRequest.CHECK_FOR_UPDATES)
       if not _flag(params, "IsTestedBranch") and _text(params, "UpdaterAvailableBranches"):
         software_actions.add(SoftwareRequest.OPEN_BRANCH_CHOOSER)

@@ -19,7 +19,7 @@ class TestSuburbanStop(unittest.TestCase):
     cp = params()
     state = structs.CarState(vEgo=0.1)
     owner = LongControl(cp)
-    self.assertEqual(owner.stopping_decel_rate, 0.8)
+    self.assertAlmostEqual(owner.stopping_decel_rate, 0.8)
     for tick in range(1, 51):
       accel = owner.update(True, state, 0.0, True, (-4.0, 2.0))
       self.assertAlmostEqual(accel, -0.008 * tick)

@@ -1,9 +1,12 @@
 import unittest
 import tempfile
 import json
+from pathlib import Path
 from openpilot.starpilot.lateral.tests.test_inferred_torque_overrides import SavedParams
 from openpilot.starpilot.settings_retirement import retire_settings, PROFILE_FLAGS
 from openpilot.starpilot.longitudinal.profile_document import default_personality_profiles, profile_document, migrate_profile_document
+from openpilot.starpilot.ui.appearance_preferences import RETIRED_DISPLAY_KEYS
+from openpilot.starpilot.ui.onroad_customization import PARAM_KEY as LAYOUT_KEY, default_document, read_customization
 
 
 class TestSettingsRetirement(unittest.TestCase):
@@ -46,7 +49,8 @@ class TestSettingsRetirement(unittest.TestCase):
     self.params.put_bool('RelaxedPersonalityProfile', True)
     retire_settings(self.params)
     result = migrate_profile_document(self.params.get('LongitudinalPersonalityProfiles'))
-    self.assertIsNotNone(result)
+    assert result is not None
+    assert result is not None
     self.assertEqual(result['profiles']['standard']['following']['preset'], 'dom_default')
     self.assertEqual(result['profiles']['standard']['acceleration']['preset'], 'selected_profile')
     self.assertEqual(result['profiles']['relaxed']['following']['curve'], [2.5]*10)
@@ -83,6 +87,7 @@ class TestSettingsRetirement(unittest.TestCase):
     self.assertEqual(self.params.get('ForceStops'), b'0')
     self.assertEqual(self.params.get('ReverseCruise'), b'0')
     result = migrate_profile_document(self.params.get('LongitudinalPersonalityProfiles'))
+    assert result is not None
     self.assertEqual(result['profiles']['standard']['following']['preset'], 'dom_default')
     self.params.put_bool('ForceStops', True)
     self.params.put_bool('ReverseCruise', True)
@@ -91,15 +96,75 @@ class TestSettingsRetirement(unittest.TestCase):
     self.assertEqual(self.params.get('ForceStops'), b'1')
     self.assertEqual(self.params.get('ReverseCruise'), b'1')
     result = migrate_profile_document(self.params.get('LongitudinalPersonalityProfiles'))
+    assert result is not None
     self.assertEqual(result['profiles']['standard']['following']['curve'], [2.0]*10)
 
   def test_fresh_namespace_completes_and_preserves_later_choice(self):
     retire_settings(self.params)
     state = json.loads(self.params.get('SettingsRetirementState'))
-    self.assertEqual(set(state['completed']), {'cruise', 'profiles'})
+    self.assertEqual(set(state['completed']), {'cruise', 'profiles', 'display'})
     self.params.put_bool('ForceStops', True)
     retire_settings(self.params)
     self.assertEqual(self.params.get('ForceStops'), b'1')
+
+
+  def write(self, key, raw):
+    Path(self.params.get_param_path(key)).write_bytes(raw)
+
+  def test_display_switches_fold_into_layout_once(self):
+    for key, raw in (("HideSpeed", b"1"), ("HideMaxSpeed", b"1"), ("HideSteeringWheel", b"1"), ("HideDMIcon", b"1"),
+                     ("EnableTorqueBarWidget", b"0"), ("StoppedTimer", b"1"), ("RainbowPath", b"1")):
+      self.write(key, raw)
+    custom = default_document()
+    custom["roadColors"]["compact"]["pathMode"] = "color"
+    self.params.put(LAYOUT_KEY, custom)
+    retire_settings(self.params)
+    document = read_customization(self.params)
+    large, compact = document["layouts"]["large"], document["layouts"]["compact"]
+    self.assertEqual([large[key]["enabled"] for key in ("current_speed", "steering_wheel", "driver_monitor", "torque_bar")],
+                     [False, False, False, False])
+    # The small UI never honored the speed and wheel switches.
+    self.assertEqual([compact[key]["enabled"] for key in ("steering_wheel", "driver_monitor", "torque_bar", "stopped_timer")],
+                     [True, False, False, True])
+    self.assertIs(document["showMaxSpeed"], False)
+    self.assertEqual((document["roadColors"]["large"]["pathMode"], document["roadColors"]["compact"]["pathMode"]), ("rainbow", "color"))
+    for key in RETIRED_DISPLAY_KEYS:
+      self.assertIsNone(self.params.get(key))
+    # Completed: a later layout edit survives even if a default switch file reappears.
+    document["layouts"]["large"]["current_speed"]["enabled"] = True
+    self.params.put(LAYOUT_KEY, document)
+    self.write("HideSpeed", b"1")
+    retire_settings(self.params)
+    self.assertTrue(read_customization(self.params)["layouts"]["large"]["current_speed"]["enabled"])
+
+  def test_default_and_corrupt_switches_leave_layout_bytes_alone(self):
+    self.write("HideSpeed", b"0")
+    self.write("EnableTorqueBarWidget", b"bad")
+    retire_settings(self.params)
+    self.assertIsNone(self.params.get(LAYOUT_KEY))
+    self.assertIsNone(self.params.get("EnableTorqueBarWidget"))
+
+  def test_invalid_layout_is_kept_and_unreadable_layout_retries(self):
+    self.write(LAYOUT_KEY, b'{"version": 99}')
+    self.write("HideSpeed", b"1")
+    issues = retire_settings(self.params)
+    self.assertEqual(self.params.get(LAYOUT_KEY), b'{"version": 99}')
+    self.assertEqual(self.params.get("HideSpeed"), b"1")
+    self.assertNotIn("display", json.loads(self.params.get("SettingsRetirementState"))["completed"])
+    self.assertIn("Invalid onroad layout kept; display switches were not carried over", issues)
+    self.params.put(LAYOUT_KEY, default_document())
+    retire_settings(self.params)
+    self.assertFalse(read_customization(self.params)["layouts"]["large"]["current_speed"]["enabled"])
+    self.assertIsNone(self.params.get("HideSpeed"))
+
+    other = tempfile.TemporaryDirectory()
+    self.addCleanup(other.cleanup)
+    self.params = SavedParams(other.name)
+    Path(self.params.get_param_path(LAYOUT_KEY)).mkdir()
+    self.write("HideSpeed", b"1")
+    retire_settings(self.params)
+    self.assertNotIn("display", json.loads(self.params.get("SettingsRetirementState"))["completed"])
+    self.assertEqual(self.params.get("HideSpeed"), b"1")
 
 
 if __name__ == '__main__':

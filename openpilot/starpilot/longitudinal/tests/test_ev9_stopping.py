@@ -1,7 +1,10 @@
 """Reached EV9 start/release behavior through actual shared LongControl."""
+
+from typing import Any
+from unittest.mock import patch
+
 import unittest
 from types import SimpleNamespace
-from unittest.mock import patch
 
 from opendbc.car import structs
 from opendbc.car.hyundai.ev9_longitudinal import candidate
@@ -24,14 +27,14 @@ def state(speed=0., *, standstill=True, brake=False):
 
 
 def context(**fields):
-  values = dict(has_lead=False, traffic_mode=False, custom_acceleration=False, profile_max_accel=0.)
+  values: dict[str, Any] = {'has_lead': False, 'traffic_mode': False, 'custom_acceleration': False, 'profile_max_accel': 0.}
   values.update(fields)
   return LongitudinalContext(**values)
 
 
 class TestEV9Stopping(unittest.TestCase):
   def test_only_exact_long_profile_gets_policy_and_stock_siblings_stay_unmodified(self):
-    self.assertIsNotNone(policy_for(cp(), .01))
+    assert policy_for(cp(), .01) is not None
     for identity in (CAR.KIA_EV9, CAR.HYUNDAI_IONIQ_5_PE, CAR.HYUNDAI_IONIQ_6):
       self.assertIsNone(policy_for(params(candidate=identity), .01))
     malformed = cp()
@@ -105,10 +108,10 @@ class TestEV9Stopping(unittest.TestCase):
     inputs.messages = lambda: messages
     inputs.ev9_source_floor_ns = 1
     inputs.ev9_boot_offset_ns = 0
-    inputs.ev9_traffic = SimpleNamespace(sample=lambda *args, **kwargs: False)
-    inputs.ev9_profile = SimpleNamespace(selected_success_ns=now, disabled=True, selected_document=None,
+    self.enterContext(patch.object(inputs, 'ev9_traffic', SimpleNamespace(sample=lambda *args, **kwargs: False), create=True))
+    self.enterContext(patch.object(inputs, 'ev9_profile', SimpleNamespace(selected_success_ns=now, disabled=True, selected_document=None,
                                          sample=lambda *args, **kwargs: None,
-                                         sample_selected=lambda *args, **kwargs: SimpleNamespace(acceleration_max=.12))
+                                         sample_selected=lambda *args, **kwargs: SimpleNamespace(acceleration_max=.12)), create=True))
     with patch('openpilot.starpilot.longitudinal.inputs.clock_pair_ns', return_value=(now, now)):
       value = inputs._ev9_context(True)
     self.assertFalse(value.experimental_mode)

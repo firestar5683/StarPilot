@@ -189,3 +189,82 @@ class NativePlannerCeilingTests(unittest.TestCase):
 
 if __name__ == "__main__":
   unittest.main()
+
+
+class GasOverrideBoostTests(unittest.TestCase):
+  def setUp(self):
+    self.cp = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
+
+  def overridden_plan(self):
+    planner = LongitudinalPlanner(self.cp, init_v=V_EGO, init_a=1.)
+    payloads, _ = messages(e2e=True)
+    class Frame(dict):
+      logMonoTime = dict.fromkeys(payloads, 1_000_000_000)
+      valid = dict.fromkeys(payloads, True)
+      alive = dict.fromkeys(payloads, True)
+    sm = Frame(payloads)
+    sm['modelV2'].action.shouldStop = False
+    sm['modelV2'].action.desiredAcceleration = -.4
+    sm['carControl'].longActive = True
+    planner.update(sm)
+    self.assertTrue(planner.accel_boost.boost_eligible)
+    sm['carState'].gasPressed = True
+    for _ in range(80):
+      planner.update(sm)
+    self.assertAlmostEqual(planner.accel_boost.total_boost, .05)
+    self.assertAlmostEqual(float(planner.output_a_target), -.35, places=6)
+    return planner, sm
+
+  def test_real_gas_override_budget_release_and_disable(self):
+    planner, sm = self.overridden_plan()
+    # Holding one press cannot accumulate more than the original .05 override budget.
+    for _ in range(80):
+      planner.update(sm)
+    self.assertAlmostEqual(planner.accel_boost.total_boost, .05)
+    sm['carState'].gasPressed = False
+    planner.update(sm)
+    sm['carState'].gasPressed = True
+    for _ in range(80):
+      planner.update(sm)
+    self.assertAlmostEqual(planner.accel_boost.total_boost, .1)
+    sm['selfdriveState'].enabled = False
+    planner.update(sm)
+    self.assertEqual(planner.accel_boost.total_boost, 0.)
+
+  def test_boost_cannot_replace_lower_lead_or_cruise_candidates(self):
+    planner, sm = self.overridden_plan()
+    sm['carState'].gasPressed = False
+    sm['carState'].vCruise = 0.
+    for _ in range(80):
+      planner.update(sm)
+    self.assertLess(float(planner.output_a_target), -.35)
+    self.assertEqual(planner.mpc.source, log.LongitudinalPlan.LongitudinalPlanSource.cruise)
+    lead, _ = messages(lead=True, e2e=True)
+    lead['modelV2'].action.shouldStop = False
+    lead['modelV2'].action.desiredAcceleration = -.4
+    for _ in range(80):
+      planner.update(lead)
+    self.assertLess(float(planner.output_a_target), -.35)
+    self.assertIn(planner.mpc.source, (1, 2))
+
+  def test_boost_retains_model_stop_and_committed_force_stop(self):
+    from openpilot.starpilot.longitudinal.force_stop import StopPlan
+    planner, sm = self.overridden_plan()
+    sm['carState'].gasPressed = False
+    sm['modelV2'].action.shouldStop = True
+    planner.update(sm)
+    self.assertTrue(planner.output_should_stop)
+    from openpilot.selfdrive.controls.lib.longcontrol import LongControl
+    receiver = LongControl(self.cp)
+    actual = receiver.update(True, sm['carState'], planner.output_a_target,
+                             planner.output_should_stop, (-3.5, 2.))
+    self.assertEqual(receiver.long_control_state, LongCtrlState.stopping)
+    self.assertLessEqual(actual, 0.)
+    sm['modelV2'].action.shouldStop = False
+    hold = StopPlan(model_ns=1_000_000_000, forcing=True, should_stop=True, manual_hold=True,
+                    speed_ceiling_mps=0., obstacle_m=6.)
+    for _ in range(10):
+      planner.update(sm, force_stop_provider=lambda _: hold)
+    self.assertTrue(planner.output_should_stop)
+    self.assertTrue(planner.force_stop_plan.manual_hold)
+    self.assertLessEqual(float(planner.output_a_target), 0.)

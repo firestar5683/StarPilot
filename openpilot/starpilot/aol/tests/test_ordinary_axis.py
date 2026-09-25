@@ -56,14 +56,14 @@ class TestOrdinaryAxis(unittest.TestCase):
     sd.events, sd.state_machine = Events(), StateMachine()
     cs = SimpleNamespace(vEgo=20., standstill=False, steerFaultTemporary=False, steerFaultPermanent=False,
                          canValid=True, canTimeout=False)
-    sd.data_sample = lambda: cs
-    sd.update_events = lambda _cs: (sd.events.clear(), sd.events.add(log.OnroadEvent.EventName.buttonEnable))
+    vars(sd)['data_sample'] = lambda: cs
+    vars(sd)['update_events'] = lambda _cs: (sd.events.clear(), sd.events.add(log.OnroadEvent.EventName.buttonEnable))
     sd.update_alerts = Mock()
     sd.update_conditional_mode = Mock()
     from openpilot.selfdrive.selfdrived.alertmanager import AlertManager
     sd.AM = AlertManager()
     sd.pm = Mock()
-    sd.sm = SimpleNamespace(frame=1)
+    vars(sd)['sm'] = SimpleNamespace(frame=1)
     sd.experimental_mode = False
     sd.personality = 1
     sd.conditional_replay = False

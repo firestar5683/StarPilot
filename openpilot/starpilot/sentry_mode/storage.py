@@ -13,6 +13,7 @@ import time
 import uuid
 
 from openpilot.starpilot.storage import starpilot_storage_root
+from openpilot.starpilot.stored_artifacts import DeletionLimit, remove_entry, usage
 
 
 MAX_EVENTS = 512
@@ -54,7 +55,7 @@ def _valid(value: object, event_id: str) -> bool:
   return (type(version) is int and version == 1 and
           fields["eventId"] == event_id and
           type(session_id) is str and ID.fullmatch(session_id) is not None and
-          fields["kind"] in ("warning", "alarm") and
+          fields["kind"] in ("warning", "alarm", "selfie") and
           type(mono_time) is int and 0 <= mono_time < 2**63 and
           type(wall_time) is int and 0 <= wall_time < 2**63)
 
@@ -152,7 +153,8 @@ class EventStore:
                 if count >= MAX_EVENTS:
                   raise StorageUnavailable("Event storage is full")
           for camera, body in (images or {}).items():
-            if camera not in ("wide", "cabin") or not isinstance(body, bytes) or not 4 <= len(body) <= 1_000_000 or not body.startswith(b"\xff\xd8") or not body.endswith(b"\xff\xd9"):
+            if (camera not in ("wide", "cabin") or not isinstance(body, bytes) or not 4 <= len(body) <= 1_000_000 or
+                not body.startswith(b"\xff\xd8") or not body.endswith(b"\xff\xd9")):
               raise ValueError("Invalid event image")
           if images:
             os.mkdir(event_id, mode=0o700, dir_fd=directory)
@@ -191,8 +193,47 @@ class EventStore:
       raise StorageUnavailable(str(error)) from error
     return RecordReceipt(event_id, durable=True)
 
+  def delete(self, event_id=None, *, permitted=lambda: True):
+    if event_id is not None and (type(event_id) is not str or ID.fullmatch(event_id) is None):
+      raise ValueError('Invalid event selection')
+    if not permitted():
+      raise PermissionError('Galaxy session expired')
+    more = False
+    try:
+      with self._directory() as directory:
+        lock = os.open('.lock', os.O_CREAT | os.O_RDWR | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600, dir_fd=directory)
+        try:
+          if not _private(os.fstat(lock)):
+            raise StorageUnavailable('Event lock is unavailable')
+          fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+          if not permitted():
+            raise PermissionError('Galaxy session expired')
+          budget = [4096]
+          if event_id is None:
+            with os.scandir(directory) as entries:
+              for entry in entries:
+                if entry.name != '.lock':
+                  try:
+                    remove_entry(directory, entry.name, budget)
+                  except DeletionLimit:
+                    more = True
+                    break
+          else:
+            for name in (event_id, '.' + event_id + '.tmp', event_id + '.json'):
+              remove_entry(directory, name, budget)
+          if not self._same_directory(directory):
+            raise StorageUnavailable('Event directory changed')
+          os.fsync(directory)
+        finally:
+          os.close(lock)
+    except FileNotFoundError:
+      pass
+    except (OSError, DeletionLimit) as error:
+      raise StorageUnavailable('Event cleanup could not be completed') from error
+    return {'more': more}
+
   def snapshot(self) -> dict:
-    result: dict = {"version": 1, "events": [], "incomplete": False, "capacity": MAX_EVENTS}
+    result: dict = {"version": 1, "events": [], "incomplete": False, "capacity": MAX_EVENTS, "storageBytes": 0, "storageIncomplete": False}
     try:
       with self._directory() as directory:
         with os.scandir(directory) as entries:
@@ -224,6 +265,7 @@ class EventStore:
               result["events"].append(value)
             except (OSError, ValueError, TypeError, RecursionError):
               result["incomplete"] = True
+        result["storageBytes"], result["storageIncomplete"] = usage(directory)
         if not self._same_directory(directory):
           raise StorageUnavailable("Event directory changed")
     except FileNotFoundError:

@@ -18,8 +18,9 @@ from openpilot.system.sensord.sensors.lsm6ds3_gyro import LSM6DS3_Gyro
 from openpilot.system.sensord.sensors.lsm6ds3_temp import LSM6DS3_Temp
 
 I2C_BUS_IMU = 1
+IMU_PUBLICATION_TIMEOUT = 2.0
 
-def interrupt_loop(sensors: list[tuple[Sensor, str, bool]], event) -> None:
+def interrupt_loop(sensors: list[tuple[Sensor, str, bool]], event, last_publish: dict[str, float]) -> None:
   pm = messaging.PubMaster([service for sensor, service, interrupt in sensors if interrupt])
 
   # NOTE: the gyro and accelerometer share an IRQ due to the comma three
@@ -70,6 +71,7 @@ def interrupt_loop(sensors: list[tuple[Sensor, str, bool]], event) -> None:
           msg = messaging.new_message(service, valid=True)
           setattr(msg, service, evt)
           pm.send(service, msg)
+          last_publish[service] = time.monotonic()
         except Sensor.DataNotReady:
           pass
         except Exception:
@@ -109,8 +111,9 @@ def main() -> None:
 
   # Initialize sensors
   exit_event = threading.Event()
+  last_publish = {service: 0.0 for _, service, interrupt in sensors_cfg if interrupt}
   threads = [
-    threading.Thread(target=interrupt_loop, args=(sensors_cfg, exit_event), daemon=True)
+    threading.Thread(target=interrupt_loop, args=(sensors_cfg, exit_event, last_publish), daemon=True)
   ]
   for sensor, service, interrupt in sensors_cfg:
     try:
@@ -126,10 +129,18 @@ def main() -> None:
       cloudlog.exception(f"Error initializing {service} sensor")
 
   try:
+    last_publish.update(dict.fromkeys(last_publish, time.monotonic()))
     for t in threads:
       t.start()
-    while any(t.is_alive() for t in threads):
+    while all(t.is_alive() for t in threads):
+      now = time.monotonic()
+      stalled = [service for service, stamp in last_publish.items() if now - stamp >= IMU_PUBLICATION_TIMEOUT]
+      if stalled:
+        cloudlog.error("Sensor publication stalled: %s", ",".join(stalled))
+        break
       time.sleep(1)
+    else:
+      cloudlog.error("Sensor worker exited; stopping sensord for recovery")
   except KeyboardInterrupt:
     pass
   finally:

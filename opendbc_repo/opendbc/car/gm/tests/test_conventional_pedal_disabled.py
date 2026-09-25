@@ -122,7 +122,7 @@ class TestConventionalPedalDisabled(unittest.TestCase):
             if bus != 128:
               safety.safety_rx_hook(libsafety_py.make_CANPacket(address, bus, data))
         safety.set_timer(now // 1000)
-        safety.safety_tick_current_safety_config()
+        safety.safety_tick()
         if not missing:
           self.assertTrue(safety.safety_config_valid())
         cc = structs.CarControl(enabled=False, latActive=False, longActive=False)

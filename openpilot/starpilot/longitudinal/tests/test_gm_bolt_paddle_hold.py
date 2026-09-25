@@ -106,7 +106,8 @@ class TestBoltPaddleHold(unittest.TestCase):
         for name, values in (('AcceleratorPedal2', {'CruiseState': int(stock)}),
                              ('ECMEngineStatus', {'CruiseMainOn': 1, 'BrakePressed': int(brake)}),
                              ('EBCMRegenPaddle', {'RegenPaddle': 2 if regen else 0})):
-          msg = packer.make_can_msg(name, 0, values)
+          payload: dict[str, float] = {key: float(value) for key, value in values.items()}
+          msg = packer.make_can_msg(name, 0, payload)
           frames = [m for m in frames if m[0] != msg[0]] + [msg]
         if not 188 <= tick < 200:
           frames.append(pedal_fixtures.TestBoltPedalMessages.sensor(packer, 30. if gas else 0., tick % 16))

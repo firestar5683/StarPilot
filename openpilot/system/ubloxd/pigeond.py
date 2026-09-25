@@ -198,6 +198,8 @@ def send_position(pigeon: TTYPigeon) -> None:
   if not (position := Params().get("LastGPSPosition")):
     return
 
+  if not isinstance(position, bytes):
+    return  # Older STRING cache is not a serialized GPS Event.
   with log.Event.from_bytes(position) as evt:
     gps = evt.gpsLocationExternal
     if datetime.now(UTC).timestamp() - gps.unixTimestampMillis / 1000 > 7 * 24 * 3600:

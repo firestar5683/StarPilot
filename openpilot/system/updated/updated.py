@@ -21,7 +21,8 @@ from openpilot.common.hardware import AGNOS, HARDWARE
 from openpilot.common.version import get_build_metadata
 from openpilot.common.vendor_manifest import validate_revision
 from openpilot.starpilot.software.update_control import UpdaterControlError, UpdaterControlServer
-from openpilot.starpilot.software.preferences import download_permitted
+from openpilot.starpilot.software.preferences import AUTOMATIC_DOWNLOADS, download_permitted
+from openpilot.starpilot.software.fast_update import FastUpdateError, FastUpdateIncompatible, required_os_version, run as run_git
 
 LOCK_FILE = os.getenv("UPDATER_LOCK_FILE", "/tmp/safe_staging_overlay.lock")
 STAGING_ROOT = os.getenv("UPDATER_STAGING_ROOT", "/data/safe_staging")
@@ -45,11 +46,19 @@ class UserRequest:
   NONE = 0
   CHECK = 1
   FETCH = 2
+  FAST = 3
+  ROLLBACK = 4
+  VERSIONS = 5
+  VERSION = 6
+  UPDATE = 7
 
 class WaitTimeHelper:
   def __init__(self):
     self.ready_event = threading.Event()
     self.user_request = UserRequest.NONE
+    self.request_lock = threading.RLock()
+    self.request_generation = 0
+    self.fast_target: tuple[str, str] | tuple[str, str, str] | None = None
     signal.signal(signal.SIGHUP, self.update_now)
     signal.signal(signal.SIGUSR1, self.check_now)
     self.control = UpdaterControlServer(self._control_request)
@@ -60,24 +69,51 @@ class WaitTimeHelper:
     else:
       atexit.register(self.control.close)
 
-  def _control_request(self, action: str) -> None:
-    if action == 'check':
-      self.user_request = UserRequest.CHECK
-    elif action == 'download':
-      self.user_request = UserRequest.FETCH
-    else:
-      return
-    self.ready_event.set()
+  def _request(self, request: int, *, branch=None, commit=None, selected_commit=None) -> None:
+    with self.request_lock:
+      self.user_request = request
+      if request in (UserRequest.UPDATE, UserRequest.FAST, UserRequest.ROLLBACK, UserRequest.VERSIONS, UserRequest.VERSION):
+        if not isinstance(branch, str) or not isinstance(commit, str):
+          raise ValueError("Update source identity is required")
+        if request == UserRequest.VERSION:
+          if not isinstance(selected_commit, str):
+            raise ValueError("Selected version is required")
+          self.fast_target = (branch, commit, selected_commit)
+        else:
+          self.fast_target = (branch, commit)
+      else:
+        self.fast_target = None
+      self.request_generation += 1
+      self.ready_event.set()
+
+  def _control_request(self, action: str, *, branch=None, commit=None, selected_commit=None) -> None:
+    request = {'update': UserRequest.UPDATE, 'check': UserRequest.CHECK, 'download': UserRequest.FETCH,
+               'fast': UserRequest.FAST, 'rollback': UserRequest.ROLLBACK,
+               'versions': UserRequest.VERSIONS, 'version': UserRequest.VERSION}.get(action)
+    if request is not None:
+      self._request(request, branch=branch, commit=commit, selected_commit=selected_commit)
 
   def update_now(self, signum: int, frame) -> None:
     cloudlog.info("caught SIGHUP, attempting to downloading update")
-    self.user_request = UserRequest.FETCH
-    self.ready_event.set()
+    self._request(UserRequest.FETCH)
 
   def check_now(self, signum: int, frame) -> None:
     cloudlog.info("caught SIGUSR1, checking for updates")
-    self.user_request = UserRequest.CHECK
-    self.ready_event.set()
+    self._request(UserRequest.CHECK)
+
+  def current_request(self) -> tuple[int, int, tuple[str, str] | tuple[str, str, str] | None]:
+    with self.request_lock:
+      self.ready_event.clear()
+      return self.user_request, self.request_generation, self.fast_target
+
+  def finish_request(self, generation: int) -> bool:
+    with self.request_lock:
+      if self.request_generation != generation:
+        return False
+      self.user_request = UserRequest.NONE
+      self.fast_target = None
+      self.ready_event.clear()
+      return True
 
   def sleep(self, t: float) -> None:
     self.ready_event.wait(timeout=t)
@@ -87,6 +123,8 @@ def write_time_to_param(params, param) -> None:
   params.put(param, t, block=True)
 
 def run(cmd: list[str], cwd: str | None = None) -> str:
+  if cmd and cmd[0] == 'git':
+    return run_git(cmd, cwd, timeout=300 if 'fetch' in cmd or 'gc' in cmd else 120)
   return subprocess.check_output(cmd, cwd=cwd, stderr=subprocess.STDOUT, encoding='utf8')
 
 
@@ -215,7 +253,6 @@ def finalize_update() -> None:
   t = time.monotonic()
   try:
     run(["git", "gc"], FINALIZED)
-    run(["git", "lfs", "prune"], FINALIZED)
     cloudlog.event("Done git cleanup", duration=time.monotonic() - t)
   except subprocess.CalledProcessError:
     cloudlog.exception(f"Failed git cleanup, took {time.monotonic() - t:.3f} s")
@@ -376,15 +413,15 @@ class Updater:
 
     excluded_branches = ('release2', 'release2-staging')
 
+    self._branches_checked = False
+    self.params.put("UpdaterOSUpdate", {}, block=True)
+    setup_git_options(OVERLAY_MERGED)
     try:
-      run(["git", "ls-remote", "origin", "HEAD"], OVERLAY_MERGED)
-      self._has_internet = True
+      output = run(["git", "ls-remote", "--heads", "origin"], OVERLAY_MERGED)
     except subprocess.CalledProcessError:
       self._has_internet = False
-
-    self._branches_checked = False
-    setup_git_options(OVERLAY_MERGED)
-    output = run(["git", "ls-remote", "--heads"], OVERLAY_MERGED)
+      raise
+    self._has_internet = True
 
     self.branches.clear()
     for line in output.split('\n'):
@@ -395,15 +432,82 @@ class Updater:
     cur_branch = self.get_branch(OVERLAY_MERGED)
     cur_commit = self.get_commit_hash(OVERLAY_MERGED)
     self._branches_checked = True
+    write_time_to_param(self.params, "UpdaterLastCheckTime")
     new_branch = self.target_branch
     new_commit = self.branches.get(new_branch)
     if new_commit is None:
       cloudlog.info("target branch %s is not published on origin; no update available", new_branch)
       return
+    if AGNOS:
+      try:
+        if cur_commit != new_commit:
+          run(["git", "fetch", "--depth=1", "--filter=blob:none", "--no-tags", "--no-recurse-submodules", "origin", new_commit], OVERLAY_MERGED)
+        version = required_os_version(run(["git", "show", f"{new_commit}:launch_env.sh"], OVERLAY_MERGED))
+        current_os = HARDWARE.get_os_version()
+        if version and current_os:
+          self.params.put("UpdaterOSUpdate", {"branch": new_branch, "required": version != current_os}, block=True)
+      except (OSError, subprocess.SubprocessError):
+        cloudlog.exception("Unable to check target operating system version")
     if (cur_branch, cur_commit) != (new_branch, new_commit):
       cloudlog.info(f"update available, {cur_branch} ({str(cur_commit)[:7]}) -> {new_branch} ({str(new_commit)[:7]})")
     else:
       cloudlog.info(f"up to date on {cur_branch} ({str(cur_commit)[:7]})")
+
+  def fast_update(self, branch: str, commit: str, selected_commit=None, *, rollback=False, versions_only=False, automatic=False) -> str:
+    from openpilot.starpilot.drive_state.evidence import PhysicalSource
+    from openpilot.starpilot.software.fast_update import fast_update
+
+    source = PhysicalSource()
+
+    def parked():
+      deadline = time.monotonic() + 0.75
+      while True:
+        if source.update_ready(self.params.get_bool("IsOffroad")):
+          return True
+        if time.monotonic() >= deadline:
+          return False
+        time.sleep(0.02)
+
+    def invalidate():
+      Path(FINALIZED, ".overlay_consistent").unlink(missing_ok=True)
+      OVERLAY_INIT.unlink(missing_ok=True)
+      dismount_overlay()
+      self.params.put_bool("UpdateAvailable", False, block=True)
+      self._branches_checked = False
+
+    def progress(stage, detail):
+      self.params.put("UpdaterFastState", {"version": 1, "stage": stage, "detail": detail[:512], "branch": branch}, block=True)
+
+    try:
+      return fast_update(Path(BASEDIR), branch, expected_commit=commit, params=self.params, parked=parked,
+                         current_os=HARDWARE.get_os_version(), invalidate=invalidate, rollback=rollback, progress=progress,
+                         selected_commit=selected_commit, versions_only=versions_only)
+    except FastUpdateIncompatible:
+      if not automatic:
+        raise
+      return self.normal_update(branch, commit, parked, progress)
+    finally:
+      source.close()
+
+  def normal_update(self, branch: str, commit: str, parked, progress) -> str:
+    def admitted():
+      if not parked() or self.get_commit_hash(BASEDIR) != commit:
+        raise FastUpdateError("Update source or parked state changed")
+
+    admitted()
+    progress("preparing", "Preparing full software update")
+    self.params.put("UpdaterTargetBranch", branch, block=True)
+    init_overlay()
+    self._branches_checked = False
+    self.params.put("UpdaterState", "checking...", block=True)
+    if not self.fetch_update():
+      raise FastUpdateError("Target branch is no longer available")
+    admitted()
+    self.params.put_bool("UpdateAvailable", True, block=True)
+    self.params.put("UpdaterState", "updating...", block=True)
+    progress("rebooting", "Update installed. Restarting device.")
+    self.params.put_bool("DoReboot", True, block=True)
+    return "reboot-requested"
 
   def fetch_update(self) -> bool:
     if not self._branches_checked:
@@ -455,6 +559,15 @@ class Updater:
     return True
 
 
+def recover_fast_state(params):
+  previous = params.get("UpdaterFastState")
+  if isinstance(previous, dict) and previous.get("stage") not in ("complete", "error"):
+    params.put("UpdaterFastState", {
+      "version": 1, "stage": "error",
+      "detail": "Update process restarted before completion; check the installed version and retry.",
+    }, block=True)
+
+
 def main() -> None:
   params = Params()
 
@@ -477,51 +590,70 @@ def main() -> None:
       params.put("InstallDate", t, block=True)
 
     updater = Updater()
-    update_failed_count = 0 # TODO: Load from param?
+    update_failed_count = max(0, params.get("UpdateFailedCount") or 0)
     wait_helper = WaitTimeHelper()
 
     # invalidate old finalized update
     set_consistent_flag(False)
 
+    recover_fast_state(params)
     # set initial state
     params.put("UpdaterState", "idle", block=True)
 
     # Run the update loop
     first_run = True
     while True:
-      wait_helper.ready_event.clear()
+      requested, request_generation, fast_target = wait_helper.current_request()
 
       # Attempt an update
       exception = None
+      fast_requested = requested in (UserRequest.UPDATE, UserRequest.FAST, UserRequest.ROLLBACK, UserRequest.VERSIONS, UserRequest.VERSION)
       try:
-        # TODO: reuse overlay from previous updated instance if it looks clean
-        init_overlay()
-
-        # ensure we have some params written soon after startup
-        updater.set_params(False, update_failed_count, exception)
-
-        if not system_time_valid() or first_run:
-          first_run = False
-          wait_helper.sleep(60)
-          continue
-
-        update_failed_count += 1
-
-        # check for update
-        params.put("UpdaterState", "checking...", block=True)
-        updater.check_for_update()
-
-        # download update
-        last_fetch = params.get("UpdaterLastFetchTime")
-        timed_out = last_fetch is None or (datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - last_fetch > datetime.timedelta(days=3))
-        user_requested_fetch = wait_helper.user_request == UserRequest.FETCH
-        if params.get_bool("NetworkMetered") and not timed_out and not user_requested_fetch:
-          cloudlog.info("skipping fetch, connection metered")
-        elif not download_permitted(params, manual=user_requested_fetch, check_only=wait_helper.user_request == UserRequest.CHECK):
-          cloudlog.info("skipping fetch, check-only request or automatic downloads disabled")
+        if fast_requested:
+          update_failed_count += 1
+          params.put("UpdaterState", "updating...", block=True)
+          if fast_target is None:
+            raise ValueError("Update source identity is required")
+          if requested == UserRequest.VERSIONS:
+            updater.fast_update(*fast_target, versions_only=True)
+          elif requested == UserRequest.UPDATE:
+            updater.fast_update(*fast_target, automatic=True)
+          else:
+            updater.fast_update(*fast_target, rollback=requested == UserRequest.ROLLBACK)
+          if requested == UserRequest.ROLLBACK:
+            params.put_bool(AUTOMATIC_DOWNLOADS, False, block=True)
+          write_time_to_param(params, "UpdaterLastFetchTime")
+          if requested != UserRequest.VERSIONS:
+            write_time_to_param(params, "LastUpdateTime")
         else:
-          if updater.fetch_update():
-            write_time_to_param(params, "UpdaterLastFetchTime")
+          # TODO: reuse overlay from previous updated instance if it looks clean
+          init_overlay()
+
+          # ensure we have some params written soon after startup
+          updater.set_params(False, update_failed_count, exception)
+
+          if not system_time_valid() or first_run:
+            first_run = False
+            wait_helper.sleep(60)
+            continue
+
+          update_failed_count += 1
+
+          # check for update
+          params.put("UpdaterState", "checking...", block=True)
+          updater.check_for_update()
+
+          # download update
+          last_fetch = params.get("UpdaterLastFetchTime")
+          timed_out = last_fetch is None or (datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - last_fetch > datetime.timedelta(days=3))
+          user_requested_fetch = requested == UserRequest.FETCH
+          if params.get_bool("NetworkMetered") and not timed_out and not user_requested_fetch:
+            cloudlog.info("skipping fetch, connection metered")
+          elif not download_permitted(params, manual=user_requested_fetch, check_only=requested == UserRequest.CHECK):
+            cloudlog.info("skipping fetch, check-only request or automatic downloads disabled")
+          else:
+            if updater.fetch_update():
+              write_time_to_param(params, "UpdaterLastFetchTime")
         update_failed_count = 0
       except subprocess.CalledProcessError as e:
         cloudlog.event(
@@ -531,21 +663,34 @@ def main() -> None:
           returncode=e.returncode
         )
         exception = f"command failed: {e.cmd}\n{e.output}"
-        OVERLAY_INIT.unlink(missing_ok=True)
+        if requested != UserRequest.VERSIONS:
+          OVERLAY_INIT.unlink(missing_ok=True)
       except Exception as e:
         cloudlog.exception("uncaught updated exception, shouldn't happen")
         exception = str(e)
-        OVERLAY_INIT.unlink(missing_ok=True)
+        if requested != UserRequest.VERSIONS:
+          OVERLAY_INIT.unlink(missing_ok=True)
 
       try:
-        params.put("UpdaterState", "idle", block=True)
         update_successful = (update_failed_count == 0)
-        updater.set_params(update_successful, update_failed_count, exception)
+        if fast_requested:
+          if exception is not None:
+            params.put("UpdaterFastState", {"version": 1, "stage": "error", "detail": exception[:512]}, block=True)
+          params.put("UpdateFailedCount", update_failed_count, block=True)
+          if exception is None:
+            params.remove("LastUpdateException")
+          else:
+            params.put("LastUpdateException", exception.encode("utf-8")[:4096].decode("utf-8", errors="ignore"), block=True)
+          params.put("UpdaterState", "updating..." if params.get_bool("DoReboot") else "idle", block=True)
+        else:
+          params.put("UpdaterState", "idle", block=True)
+          updater.set_params(update_successful, update_failed_count, exception)
       except Exception:
         cloudlog.exception("uncaught updated exception while setting params, shouldn't happen")
 
       # infrequent attempts if we successfully updated recently
-      wait_helper.user_request = UserRequest.NONE
+      if not wait_helper.finish_request(request_generation):
+        continue
       wait_helper.sleep(5*60 if update_failed_count > 0 else 1.5*60*60)
 
 

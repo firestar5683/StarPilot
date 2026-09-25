@@ -7,6 +7,7 @@ from opendbc.car.structs import car
 from openpilot.cereal import messaging
 from openpilot.common.prefix import OpenpilotPrefix
 from openpilot.selfdrive.car.card import Car
+from openpilot.selfdrive.car.tests.publication_fixture import initialize_publication_sources
 from openpilot.selfdrive.ui.soundd import Soundd
 from openpilot.starpilot.aol.intent import AOL_TOGGLE, AolCardIntent, AolSettings
 from openpilot.starpilot.aol.runtime import decide_axes
@@ -79,6 +80,7 @@ def test_park_lkas_producer_wire_and_sound(audio):
                          slc_producer_session='card', aol_card_intent=owner, v_cruise_helper=SimpleNamespace(slc_cruise_change=None))
   card = Car.__new__(Car)
   card.__dict__.update(vars(fields))
+  initialize_publication_sources(card)
   cs = car.CarState.new_message(canValid=True, gearShifter=car.CarState.GearShifter.park, standstill=True)
   for pressed, gear, expected in ((None, 'park', AudibleAlert.none), (True, 'park', AudibleAlert.engage),
                                   (True, 'park', AudibleAlert.none), (False, 'park', AudibleAlert.none),

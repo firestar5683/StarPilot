@@ -14,6 +14,7 @@ from opendbc.car.fw_versions import FW_QUERY_CONFIGS, FUZZY_EXCLUDE_ECUS, VERSIO
                                     match_fw_to_car, get_brand_ecu_matches, get_fw_versions, get_present_ecus
 from opendbc.car.vin import get_vin
 from opendbc.car.volkswagen.values import CAR as VOLKSWAGEN, VolkswagenFlags
+from opendbc.car.hyundai.values import CAR as HYUNDAI
 from opendbc.testing import parameterized
 
 CarFw = CarParams.CarFw
@@ -46,9 +47,31 @@ class TestFwFingerprint(unittest.TestCase):
              patch('opendbc.car.fw_versions.FW_QUERY_CONFIGS') as configs, \
              patch('opendbc.car.fw_versions.build_fw_dict', return_value={}):
           custom = unittest.mock.Mock(return_value=refined)
-          configs.__getitem__.return_value = SimpleNamespace(match_fw_to_car_fuzzy=custom)
+          configs.__getitem__.return_value = SimpleNamespace(match_fw_to_car_fuzzy=custom, validate_fw_match=None)
           self.assertEqual(match_fw_to_car([], 'WVW000E1000000000', allow_fuzzy=allow_fuzzy, log=False), expected)
           self.assertEqual(custom.called, called)
+
+  def test_candidate_validator_is_brand_scoped_and_cannot_create_matches(self):
+    for allow_exact in (True, False):
+      with self.subTest(allow_exact=allow_exact):
+        first = unittest.mock.Mock(return_value=False)
+        second = unittest.mock.Mock(return_value=True)
+        configs = {
+          'first': SimpleNamespace(match_fw_to_car_fuzzy=None, validate_fw_match=first),
+          'second': SimpleNamespace(match_fw_to_car_fuzzy=None, validate_fw_match=second),
+        }
+
+        def match(_fw, match_brand, log):
+          return {'A'} if match_brand == 'first' else {'B'}
+        with patch('opendbc.car.fw_versions.match_fw_to_car_exact', side_effect=match), \
+             patch('opendbc.car.fw_versions.match_fw_to_car_fuzzy', side_effect=match), \
+             patch('opendbc.car.fw_versions.VERSIONS', {'first': {}, 'second': {}}), \
+             patch('opendbc.car.fw_versions.MODEL_TO_BRAND', {'A': 'first', 'B': 'second'}), \
+             patch('opendbc.car.fw_versions.FW_QUERY_CONFIGS', configs), \
+             patch('opendbc.car.fw_versions.build_fw_dict', return_value={}):
+          self.assertEqual(match_fw_to_car([], '', allow_exact=allow_exact, log=False), (allow_exact, {'B'}))
+        first.assert_called_once_with('A', {}, {})
+        second.assert_called_once_with('B', {}, {})
 
   @parameterized("brand, car_model, ecus, test_non_essential",
                  [(b, c, e[c], n) for b, e in VERSIONS.items() for c in e for n in (True, False)])
@@ -73,7 +96,9 @@ class TestFwFingerprint(unittest.TestCase):
       meb_overlap = brand == "volkswagen" and bool(VOLKSWAGEN(car_model).config.flags & VolkswagenFlags.MEB)
       if test_non_essential and not matches:
         continue  # removing non-essential ECUs can lose a match
-      if meb_overlap and len(matches) > 1:
+      if brand == 'hyundai' and car_model in (HYUNDAI.KIA_XCEED_PHEV, HYUNDAI.KIA_CEED_PHEV) and len(matches) > 1:
+        self.assertEqual(matches, {HYUNDAI.KIA_XCEED_PHEV, HYUNDAI.KIA_CEED_PHEV})
+      elif meb_overlap and len(matches) > 1:
         self.assertIn(car_model, matches)
         generation = bool(VOLKSWAGEN(car_model).config.flags & VolkswagenFlags.MEB_GEN2)
         self.assertTrue(all(VOLKSWAGEN(candidate).config.flags & VolkswagenFlags.MEB for candidate in matches))
@@ -320,6 +345,7 @@ class TestFwFingerprintTiming(unittest.TestCase):
       'rivian': 0.3,
       'psa': 0.1,
       'mg': 0.1,
+      'volvo': 0.0,  # Current Volvo FwQueryConfig has no requests.
     }
 
     total_times = 0.0

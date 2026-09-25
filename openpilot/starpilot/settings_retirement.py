@@ -8,6 +8,10 @@ from openpilot.starpilot.saved_source import read_saved
 from openpilot.starpilot.longitudinal.profile_document import (
   PERSONALITY_PROFILES_PARAM, migrate_profile_document, is_unconfigured_profile_document,
 )
+from openpilot.starpilot.ui.appearance_preferences import RETIRED_DISPLAY_KEYS, read_visibility
+from openpilot.starpilot.ui.onroad_customization import (
+  MAX_BYTES as LAYOUT_MAX_BYTES, PARAM_KEY as LAYOUT_KEY, STOPPED_TIMER_WIDGET, decode_document, default_document, validate_document,
+)
 
 STATE_KEY = "SettingsRetirementState"
 EVIDENCE_KEY = "RetiredSettingsEvidence"
@@ -63,14 +67,16 @@ def retire_settings(params):
   try:
     state = json.loads(state_raw) if state_readable and state_raw is not None else {"version": 1, "completed": []}
     state_valid = (isinstance(state, dict) and set(state) == {"version", "completed"} and state["version"] == 1 and
-                   isinstance(state["completed"], list) and len(state["completed"]) <= 2 and
-                   all(group in ("cruise", "profiles") for group in state["completed"]))
+                   isinstance(state["completed"], list) and len(state["completed"]) <= 3 and
+                   all(group in ("cruise", "profiles", "display") for group in state["completed"]))
   except (ValueError, UnicodeError):
     state, state_valid = {"version": 1, "completed": []}, False
   if not state_readable or not state_valid:
     issues.append("Invalid settings retirement completion state; safe first-migration reconciliation used")
     state = {"version": 1, "completed": []}
-  completed = set(state["completed"])
+  completed_raw = state["completed"]
+  assert isinstance(completed_raw, list)
+  completed = set(completed_raw)
   def finish(group):
     completed.add(group)
     # Separate from raw evidence, so corrupt older evidence cannot prevent a
@@ -119,5 +125,59 @@ def retire_settings(params):
     for key in PROFILE_FLAGS:
       params.remove(key)
     finish("profiles")
+
+  if "display" not in completed:
+    if _retire_display_switches(params, issues):
+      finish("display")
   params.remove("AdvancedLateralTune")
   return tuple(issues)
+
+
+def _retire_display_switches(params, issues):
+  """Fold widget visibility switches into the onroad layout; the layout becomes their only switch.
+
+  Unreadable or corrupt switches keep the visible baseline, matching how the renderer treated them.
+  Returns False, leaving every switch in place, when the saved layout file cannot be read.
+  """
+  raw, readable = read_saved(params, LAYOUT_KEY, LAYOUT_MAX_BYTES)
+  if not readable:
+    issues.append("Unreadable onroad layout; display switches retained until the next startup")
+    return False
+  try:
+    document = decode_document(raw) if raw is not None else default_document()
+  except (ValueError, TypeError, UnicodeError, RecursionError):
+    # Possibly a newer branch's document; never overwrite it.
+    issues.append("Invalid onroad layout kept; display switches were not carried over")
+    document = None
+  if document is None:
+    return False
+  saved = {key: read_visibility(params, key) for key in RETIRED_DISPLAY_KEYS}
+  def chosen(key, value):
+    return saved[key].readable and saved[key].value is value
+  before = json.dumps(document, sort_keys=True)
+  layouts = document["layouts"]
+  # Speed and wheel switches only ever applied to the large UI.
+  if chosen("HideSpeed", True):
+    layouts["large"]["current_speed"]["enabled"] = False
+  if chosen("HideSteeringWheel", True):
+    layouts["large"]["steering_wheel"]["enabled"] = False
+  if chosen("HideDMIcon", True):
+    for profile in layouts:
+      layouts[profile]["driver_monitor"]["enabled"] = False
+  if chosen("EnableTorqueBarWidget", False):
+    for profile in layouts:
+      layouts[profile]["torque_bar"]["enabled"] = False
+  # Only the large cruise card ever hid its MAX line.
+  if chosen("HideMaxSpeed", True):
+    document["showMaxSpeed"] = False
+  if chosen("StoppedTimer", True):
+    layouts["compact"][STOPPED_TIMER_WIDGET]["enabled"] = True
+  if chosen("RainbowPath", True):
+    for colors in document["roadColors"].values():
+      if colors.get("pathMode", "default") == "default":
+        colors["pathMode"] = "rainbow"
+  if json.dumps(document, sort_keys=True) != before:
+    params.put(LAYOUT_KEY, validate_document(document), block=True)
+  for key in RETIRED_DISPLAY_KEYS:
+    params.remove(key)
+  return True

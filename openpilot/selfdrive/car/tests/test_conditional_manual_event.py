@@ -5,7 +5,7 @@ import time
 import unittest
 import json
 from pathlib import Path
-from types import SimpleNamespace as NS
+from types import MethodType, SimpleNamespace as NS
 from typing import cast
 from unittest.mock import patch
 
@@ -17,6 +17,7 @@ from opendbc.car.hyundai.values import CAR as HYUNDAI_CAR, HyundaiFlags
 from openpilot.cereal import messaging
 from openpilot.common.params import Params
 from openpilot.selfdrive.car.card import Car, conditional_manual_candidate, conditional_traffic_candidate
+from openpilot.selfdrive.car.tests.publication_fixture import initialize_publication_sources
 from openpilot.selfdrive.car.cruise import VCruiseHelper
 from openpilot.starpilot.conditional_mode.manual import Button, ButtonTracker, Gesture, Press
 from openpilot.starpilot.conditional_mode.policy import ModeChoice
@@ -138,6 +139,9 @@ class CardManualEventTests(unittest.TestCase):
               manual_event_sequence=0, slc_cruise_event_id=0, slc_producer_session='a' * 32,
               last_actuators_output=car.CarControl.Actuators(), can_rcv_cum_timeout_counter=0,
               rk=NS(remaining=0.0), v_cruise_helper=VCruiseHelper(self.cp), slc_receipts=[])
+    initialize_publication_sources(fake)
+    fake.radar_publish = MethodType(Car.radar_publish, fake)
+    fake.publish_traffic_receipt = lambda event: Car.publish_traffic_receipt(cast(Car, fake), event)
     Car.state_publish(cast(Car, fake), state(), None)
     records = [messaging.log_from_bytes(payload).slcCruiseEvent for service, payload in publisher.events
                if service == 'slcCruiseEvent']
@@ -237,6 +241,9 @@ class CardManualEventTests(unittest.TestCase):
               manual_event_sequence=0, slc_cruise_event_id=0, slc_producer_session='a' * 32,
               last_actuators_output=car.CarControl.Actuators(), can_rcv_cum_timeout_counter=0,
               rk=NS(remaining=0.0), v_cruise_helper=VCruiseHelper(self.cp), slc_receipts=[])
+    initialize_publication_sources(fake)
+    fake.radar_publish = MethodType(Car.radar_publish, fake)
+    fake.publish_traffic_receipt = lambda event: Car.publish_traffic_receipt(cast(Car, fake), event)
     Car.state_publish(cast(Car, fake), state(), None)
     published = [messaging.log_from_bytes(payload) for service, payload in publisher.events
                  if service == 'slcCruiseEvent']
@@ -262,8 +269,11 @@ class CardManualEventTests(unittest.TestCase):
               last_actuators_output=car.CarControl.Actuators(), can_rcv_cum_timeout_counter=0,
               rk=NS(remaining=0.0), v_cruise_helper=VCruiseHelper(self.cp), slc_receipts=[],
               can_log_mono_time=self.now + 2_000_000)
+    initialize_publication_sources(fake)
+    fake.radar_publish = MethodType(Car.radar_publish, fake)
     invalid = car.CarState(canValid=False)
     with patch('openpilot.selfdrive.car.card.REPLAY', True):
+      fake.publish_traffic_receipt = lambda event: Car.publish_traffic_receipt(cast(Car, fake), event)
       Car.state_publish(cast(Car, fake), invalid, None)
     published = [messaging.log_from_bytes(payload) for service, payload in publisher.events
                  if service == 'slcCruiseEvent']
@@ -288,6 +298,9 @@ class CardManualEventTests(unittest.TestCase):
               slc_producer_session='a' * 32, last_actuators_output=car.CarControl.Actuators(),
               can_rcv_cum_timeout_counter=0, rk=NS(remaining=0.0),
               v_cruise_helper=VCruiseHelper(self.cp), slc_receipts=[])
+    initialize_publication_sources(fake)
+    fake.radar_publish = MethodType(Car.radar_publish, fake)
+    fake.publish_traffic_receipt = lambda event: Car.publish_traffic_receipt(cast(Car, fake), event)
     Car.state_publish(cast(Car, fake), release, None)
     car_events = [messaging.log_from_bytes(payload).carState for service, payload in publisher.events if service == 'carState']
     self.assertEqual(len(car_events), 1)

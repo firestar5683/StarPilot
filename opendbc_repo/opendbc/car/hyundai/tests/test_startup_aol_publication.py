@@ -23,7 +23,7 @@ from openpilot.starpilot.car.hyundai.aol import policy_for
 
 def card_publication_sequence(context):
   # Run the reached production statements, retaining their actual source order.
-  from openpilot.selfdrive.car.card import Car
+  from openpilot.selfdrive.car.card import Car, hyundai_aol_safety_config
   source=textwrap.dedent(inspect.getsource(Car.__init__))
   tree=ast.parse(source)
   statements=[]
@@ -40,7 +40,7 @@ def card_publication_sequence(context):
   calls=[statement.value.func.attr for statement in statements if isinstance(statement,ast.Expr)]
   assert calls==['configure','finalize_aol_configuration','seal_publication']
   exec(compile(ast.Module(body=statements,type_ignores=[]),'actual-card-publication-order','exec'),
-       {'self':context,'aol_policy':policy_for(context.CP)})
+       {'self':context,'aol_policy':policy_for(context.CP), 'hyundai_aol_safety_config':hyundai_aol_safety_config})
 
 
 @pytest.fixture(params=[(CAR.KIA_EV6,EV6Startup),(CAR.GENESIS_GV70_ELECTRIFIED_1ST_GEN,GV70Startup)])

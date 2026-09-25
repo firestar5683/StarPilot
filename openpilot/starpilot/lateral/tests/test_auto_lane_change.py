@@ -1,12 +1,16 @@
 """Live Auto evidence and optional typed status contract."""
 
+import copy
+import json
+from pathlib import Path
 from types import SimpleNamespace
 import time
 import unittest
 
 from openpilot.cereal import log
 import openpilot.cereal.messaging as messaging
-from openpilot.starpilot.lateral.auto_lane_change import ClockEpochGuard, auto_evidence, session_policy
+from openpilot.starpilot.lateral.adjacent_lane_evidence import adjacent_lane_available
+from openpilot.starpilot.lateral.auto_lane_change import ClockEpochGuard, auto_evidence, session_policy, steering_capable
 from openpilot.starpilot.lateral.lane_change_preferences import LaneChangePolicy, decode as decode_policy
 from openpilot.selfdrive.modeld.constants import ModelConstants
 from openpilot.starpilot.lateral.lane_change_status_wire import (
@@ -46,6 +50,42 @@ class TestAutoLaneChange(unittest.TestCase):
     self.assertIsNotNone(old)
     assert old is not None
     self.assertFalse(session_policy(old, True).auto_lane_change)
+    from opendbc.car.car_helpers import interfaces
+    from opendbc.car.hyundai.values import CAR as HYUNDAI
+    from opendbc.car.toyota.values import CAR as TOYOTA
+    from opendbc.car import structs
+    for car in (HYUNDAI.HYUNDAI_IONIQ_6, TOYOTA.TOYOTA_RAV4_TSS2_2023):
+      cp = interfaces[car].get_non_essential_params(car)
+      self.assertTrue(steering_capable(cp))
+      for field in ('notCar', 'passive', 'dashcamOnly'):
+        bad = cp.as_reader().as_builder()
+        setattr(bad, field, True)
+        self.assertFalse(steering_capable(bad))
+      for config in cp.safetyConfigs:
+        config.safetyModel = structs.CarParams.SafetyModel.noOutput
+      self.assertFalse(steering_capable(cp))
+    from opendbc.car.ford.values import CAR as FORD
+    for car in (TOYOTA.TOYOTA_RAV4_TSS2_2023, FORD.FORD_ESCAPE_MK4):
+      self.assertTrue(steering_capable(interfaces[car].get_non_essential_params(car)))
+    cp = interfaces[HYUNDAI.HYUNDAI_IONIQ_6].get_non_essential_params(HYUNDAI.HYUNDAI_IONIQ_6)
+    actual = cp.as_reader().as_builder().safetyConfigs[-1]
+    placeholder = structs.CarParams.SafetyConfig()
+    placeholder.safetyModel = structs.CarParams.SafetyModel.silent
+    cp.safetyConfigs = [placeholder, actual]
+    self.assertTrue(steering_capable(cp))
+    placeholder.safetyModel = structs.CarParams.SafetyModel.noOutput
+    cp.safetyConfigs = [placeholder, actual]
+    self.assertTrue(steering_capable(cp))
+    cp.safetyConfigs = [placeholder]
+    self.assertFalse(steering_capable(cp))
+    placeholder.safetyModel = structs.CarParams.SafetyModel.silent
+    cp.safetyConfigs = [placeholder]
+    self.assertFalse(steering_capable(cp))
+    placeholder.safetyModel = structs.CarParams.SafetyModel.allOutput
+    cp.safetyConfigs = [placeholder, actual]
+    self.assertFalse(steering_capable(cp))
+    self.assertFalse(steering_capable(None))
+    self.assertFalse(steering_capable(SimpleNamespace()))
     requested = LaneChangePolicy(auto_lane_change=True)
     self.assertFalse(session_policy(requested, False).auto_lane_change)
     self.assertTrue(session_policy(requested, True).auto_lane_change)
@@ -95,10 +135,25 @@ class TestAutoLaneChange(unittest.TestCase):
     sm, frame = submaster(now), model()
     self.assertTrue(auto_evidence(sm, frame, 1, 3.0, now_mono_ns=now, now_boot_ns=10_050_000_000, model_valid=True, vehicle_capable=True))
     frame.laneLineProbs[3] = 0.2
-    self.assertFalse(auto_evidence(sm, frame, 1, 3.0, now_mono_ns=now, now_boot_ns=10_050_000_000, model_valid=True, vehicle_capable=True))
+    self.assertTrue(auto_evidence(sm, frame, 1, 3.0, now_mono_ns=now, now_boot_ns=10_050_000_000, model_valid=True, vehicle_capable=True))
     frame.laneLineProbs[3] = 0.95
     sm.values["carControl"].enabled = False
+    self.assertTrue(auto_evidence(sm, frame, 1, 3.0, now_mono_ns=now, now_boot_ns=10_050_000_000, model_valid=True, vehicle_capable=True))
+    from openpilot.selfdrive.controls.lib.desire_helper import DesireHelper
+    car = sm.values["carState"]
+    car.vEgo, car.leftBlinker, car.rightBlinker = 15., False, False
+    car.steeringPressed, car.steeringTorque = False, 0.
+    car.leftBlindspot = car.rightBlindspot = False
+    helper = DesireHelper(LaneChangePolicy(auto_lane_change=True, auto_delay_s=0.))
+    evidence = auto_evidence(sm, frame, 1, 3.0, now_mono_ns=now, now_boot_ns=10_050_000_000, model_valid=True, vehicle_capable=True)
+    helper.update(car, True, 1., engaged=sm.values["carControl"].latActive, auto_evidence=evidence)
+    car.rightBlinker = True
+    helper.update(car, True, 1., engaged=sm.values["carControl"].latActive, auto_evidence=evidence)
+    helper.update(car, True, 1., engaged=sm.values["carControl"].latActive, auto_evidence=evidence)
+    self.assertEqual(helper.lane_change_state, log.LaneChangeState.laneChangeStarting)
+    sm.values["carControl"].latActive = False
     self.assertFalse(auto_evidence(sm, frame, 1, 3.0, now_mono_ns=now, now_boot_ns=10_050_000_000, model_valid=True, vehicle_capable=True))
+    sm.values["carControl"].latActive = True
     sm.values["carControl"].enabled = True
     sm.values["carState"].canTimeout = True
     self.assertFalse(auto_evidence(sm, frame, 1, 3.0, now_mono_ns=now, now_boot_ns=10_050_000_000, model_valid=True, vehicle_capable=True))
@@ -111,6 +166,70 @@ class TestAutoLaneChange(unittest.TestCase):
     frame.frameAge = 0
     self.assertFalse(auto_evidence(sm, frame, 1, 3.0, now_mono_ns=now, now_boot_ns=10_050_000_000, model_valid=False, vehicle_capable=True))
     self.assertFalse(auto_evidence(sm, frame, 1, 3.0, now_mono_ns=now, now_boot_ns=10_050_000_000, model_valid=True, vehicle_capable=False))
+
+  def test_recorded_geometry_with_uncertain_road_edge(self):
+    saved = json.loads((Path(__file__).parent / "fixtures" / "adjacent_lane_geometry.json").read_text())
+    values = saved["model"]
+    frame = SimpleNamespace(**{key: value for key, value in values.items() if key not in ("laneLines", "roadEdges")},
+                            laneLines=[SimpleNamespace(**value) for value in values["laneLines"]],
+                            roadEdges=[SimpleNamespace(**value) for value in values["roadEdges"]])
+    self.assertTrue(saved["model_valid"])
+    self.assertGreater(frame.roadEdgeStds[0], 0.5)
+    self.assertGreaterEqual(min(frame.laneLineProbs[:2]), 0.8)
+    now = 1_000_000_000
+    sm = submaster(now)
+    self.assertTrue(auto_evidence(sm, frame, -1, 2.9, now_mono_ns=now,
+                                  now_boot_ns=frame.timestampEof + 50_000_000, model_valid=True, vehicle_capable=True))
+    self.assertFalse(adjacent_lane_available(frame, -1, 3.5))
+
+  def test_nearer_road_edge_and_zero_width_configuration(self):
+    frame = model()
+    for direction, edge, y in ((-1, 0, -3.0), (1, 1, 3.0)):
+      with self.subTest(direction=direction):
+        frame.roadEdges[edge] = line(y)
+        self.assertFalse(adjacent_lane_available(frame, direction, 3.0))
+        self.assertTrue(adjacent_lane_available(frame, direction, 0.0))
+    self.assertFalse(adjacent_lane_available(frame, 0, 0.0))
+    self.assertFalse(adjacent_lane_available(frame, -1, -0.1))
+    self.assertFalse(adjacent_lane_available(frame, -1, 4.573))
+
+  def test_width_geometry_rejects_malformed_coordinates_and_metadata(self):
+    for defect in ("nan", "infinite", "short", "reversed_x", "missing_edge", "bad_probability", "negative_std"):
+      with self.subTest(defect=defect):
+        frame = copy.deepcopy(model())
+        frame.laneLines[0].x = list(frame.laneLines[0].x)
+        if defect == "nan":
+          frame.laneLines[0].y[0] = float("nan")
+        elif defect == "infinite":
+          frame.roadEdges[0].y[0] = float("inf")
+        elif defect == "short":
+          frame.laneLines[0].y.pop()
+        elif defect == "reversed_x":
+          frame.laneLines[0].x.reverse()
+        elif defect == "missing_edge":
+          frame.roadEdges.pop()
+        elif defect == "bad_probability":
+          frame.laneLineProbs[0] = 1.1
+        else:
+          frame.roadEdgeStds[0] = -1.0
+        self.assertFalse(adjacent_lane_available(frame, -1, 0.0))
+
+  def test_width_restoration_keeps_fresh_input_and_permission_gates(self):
+    now = 1_000_000_000
+    frame = model()
+    frame.roadEdgeStds = [1.5, 1.5]
+    for service in ("carState", "carControl", "extrinsicsCalibration"):
+      with self.subTest(service=service):
+        sm = submaster(now)
+        self.assertTrue(auto_evidence(sm, frame, -1, 3.0, now_mono_ns=now,
+                                      now_boot_ns=10_050_000_000, model_valid=True, vehicle_capable=True))
+        sm.logMonoTime[service] = now - 800_000_000
+        self.assertFalse(auto_evidence(sm, frame, -1, 3.0, now_mono_ns=now,
+                                       now_boot_ns=10_050_000_000, model_valid=True, vehicle_capable=True))
+    sm = submaster(now)
+    sm.values["carControl"].latActive = False
+    self.assertFalse(auto_evidence(sm, frame, -1, 3.0, now_mono_ns=now,
+                                   now_boot_ns=10_050_000_000, model_valid=True, vehicle_capable=True))
 
   def test_typed_wire_arrival_order_and_neutral_fallback(self):
     frame = model()

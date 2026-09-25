@@ -1,7 +1,8 @@
 import math
+import time
 from enum import StrEnum, auto
 
-from openpilot.cereal import messaging
+from openpilot.cereal import log, messaging
 from opendbc.car.structs import car
 from openpilot.common.realtime import DT_CTRL
 from openpilot.selfdrive.locationd.helpers import Pose
@@ -53,3 +54,29 @@ class ExcessiveActuationCheck:
         excessive_type = ExcessiveActuationType.LATERAL
 
     return excessive_type
+
+
+def update_big_model_status(owner) -> bool:
+  big_active = owner.params.get("ChestnutActive")
+  fresh = owner.sm.seen['modelV2'] and owner.sm.alive['modelV2'] and owner.sm.valid['modelV2']
+  published_big = fresh and owner.sm['modelV2'].big
+  if published_big and (big_active is True or owner.sm['deviceState'].chestnutPresent):
+    owner.big_model_chestnut = True
+  model_unavailable = owner.big_model_active and owner.sm.seen['modelV2'] and not fresh
+  demoted = owner.big_model_active and fresh and not published_big
+  chestnut_lost = owner.big_model_active and owner.big_model_chestnut and not owner.sm['deviceState'].chestnutPresent
+  load_mismatch = big_active is True and fresh and not published_big
+  big_failed = (big_active is False and not published_big) or load_mismatch or model_unavailable or demoted or chestnut_lost
+  if big_failed and not owner.big_model_failed:
+    owner.events.add(log.OnroadEvent.EventName.bigModelFailed)
+    owner.big_model_ready_t = time.monotonic()
+  owner.big_model_failed = big_failed
+  # A successful load is not yet an executed frame; warmup output can be invalid.
+  if published_big:
+    owner.big_model_active = True
+  control_current = owner.sm.seen['carControl'] and owner.sm.alive['carControl'] and owner.sm.valid['carControl']
+  axis_active = control_current and (owner.sm['carControl'].latActive or owner.sm['carControl'].longActive)
+  if not owner.enabled and not axis_active and not model_unavailable:
+    owner.big_model_active = False
+    owner.big_model_chestnut = False
+  return big_failed

@@ -1,4 +1,4 @@
-"""Read-only large onroad composition for a separate projection frame."""
+"""Large onroad projection with navigation and drive-bookmark actions."""
 
 from contextlib import ExitStack
 from dataclasses import replace
@@ -6,7 +6,22 @@ from pathlib import Path
 from types import SimpleNamespace
 import time
 
+from openpilot.starpilot.system.android_auto.identity import EXPIRY_WARNING_DAYS
+from openpilot.starpilot.system.android_auto.projection_exit import ProjectionExit
 from openpilot.starpilot.system.android_auto.projection_geometry import FALLBACK_VIEWPORT
+
+CERTIFICATE_NOTICE_NS = 10_000_000_000  # how long the expiry heads-up stays at the start of a drive
+DRIVER_MONITOR_HOLD_NS = 350_000_000
+BUBBLE_REDUNDANT_ALERTS = frozenset(('preLaneChangeLeft', 'preLaneChangeRight', 'laneChange',
+                                     'laneChangeBlocked', 'laneChangeBlockedLoud'))
+
+
+def certificate_notice(days_left: int | None) -> str:
+  """The car-screen heads-up for a certificate in its last two weeks; empty otherwise."""
+  if days_left is None or not 0 <= days_left <= EXPIRY_WARNING_DAYS:
+    return ""
+  when = "Within a Day" if days_left == 0 else f"in {days_left} Day{'' if days_left == 1 else 's'}"
+  return f"Heads Up: AA Certificate Expires {when}"
 
 
 def native_dependencies():
@@ -18,10 +33,17 @@ def native_dependencies():
   from openpilot.selfdrive.ui.onroad.model_renderer import ModelRenderer
   from openpilot.selfdrive.ui.ui_state import ui_state, UIStatus
   from openpilot.starpilot.ui.onroad import OnroadView
+  from openpilot.starpilot.ui.onroad_customization import CAMERA_WIDGETS, placement, widget_size
   from openpilot.starpilot.ui.onroad_dm import DriverMonitorLayer
+  from openpilot.starpilot.ui.onroad_map import MapFeed, MapOverlay
+  from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadAlert
+  from openpilot.starpilot.ui.pip_preferences import read_pip
+  from openpilot.starpilot.ui.pip_render import PiPRenderer
+  from openpilot.starpilot.ui.pip_sidecam import Rect, Signals
   from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile, default_font_directory
-  from openpilot.starpilot.ui.runtime_snapshot import RuntimeSnapshotAdapter, current_message
+  from openpilot.starpilot.ui.runtime_snapshot import RuntimeSnapshotAdapter, current_message, display_message
   from openpilot.starpilot.ui.shell import ShellMode
+  from openpilot.starpilot.system.android_auto.projection_favorites import ProjectionFavorites
 
   class ProjectionRoadCamera(AugmentedRoadView):
     """Current native calibrated camera/model without stock action widgets."""
@@ -48,22 +70,44 @@ def native_dependencies():
           pass
         raise
 
+    def _update_texture_color_filtering(self):
+      if getattr(self, 'large_ui_gamma_trial', False):
+        return super()._update_texture_color_filtering()
+      # The comma UI fades the engaged road camera to 20% color (30477f3cef). On the car
+      # screen that reads as black and white, so keep the plain look: non-road shader path.
+      self._engaged_val[0] = 0
+      self._road_camera_val[0] = 0
+      rl.set_shader_value(self.shader, self._engaged_loc, self._engaged_val, rl.ShaderUniformDataType.SHADER_UNIFORM_INT)
+      rl.set_shader_value(self.shader, self._road_camera_loc, self._road_camera_val, rl.ShaderUniformDataType.SHADER_UNIFORM_INT)
+
   return SimpleNamespace(rl=rl, ui_state=ui_state, camera=ProjectionRoadCamera,
                          onroad=OnroadView, monitor=DriverMonitorLayer, fonts=BitmapFonts,
                          font_role=FontRole, profile=Profile, font_directory=default_font_directory,
-                         adapter=RuntimeSnapshotAdapter, current_message=current_message,
-                         shell_mode=ShellMode)
+                         adapter=RuntimeSnapshotAdapter, current_message=current_message, display_message=display_message,
+                         shell_mode=ShellMode, pip_renderer=PiPRenderer, read_pip=read_pip, pip_signals=Signals,
+                         pip_rect=Rect, pip_widgets=CAMERA_WIDGETS, placement=placement, widget_size=widget_size,
+                         alert=OnroadAlert, alert_size=AlertSize, map_overlay=MapOverlay, map_feed=MapFeed,
+                         favorites=ProjectionFavorites)
 
 
 class ProjectionOnroad:
-  """Display-only renderer: no shell, settings, network, pairing, or action owner."""
+  """Separate renderer with projected actions; native UIState stays read-only."""
 
-  def __init__(self, *, dependencies=None, viewport=None, customization=None):
+  def __init__(self, *, dependencies=None, viewport=None, customization=None, certificate_days=None, native_focus=None,
+               layout_watcher=None):
     viewport = FALLBACK_VIEWPORT if viewport is None else viewport
     self.width, self.height = viewport
     self.customization = customization
+    self._certificate_notice = certificate_notice(certificate_days)
+    self._certificate_notice_until_ns: int | None = None
     self._base_customization = None
     self._projection_customization = None
+    self._base_appearance = None
+    self._projection_appearance = None
+    self.layout_watcher = layout_watcher
+    self.native_focus = native_focus or (lambda: None)
+    self.bookmark = lambda: False
+    self.camera_stream = None  # the camera stream the last frame drew, or None
     self.native = dependencies or native_dependencies()
     native = self.native
     if native.ui_state.projection_read_only is not True:
@@ -73,12 +117,36 @@ class ProjectionOnroad:
       self.fonts = native.fonts(native.profile.LARGE, native.font_directory(), headless_context=True)
       self._resources.callback(self.fonts.close)
       self.camera = native.camera()
+      self.camera.large_ui_gamma_trial = bool((customization or {}).get('largeUiGammaTrial', False))
       self._resources.callback(self._close_camera)
       self.onroad = self.create_view(native.onroad, self.fonts, camera_layer=self._camera_layer, viewport=viewport)
       self._resources.callback(self._close_onroad)
+      self.exit = ProjectionExit(native.rl, lambda: self.native_focus())
+      self.onroad.projection_exit_layer = self.exit.render
       self.monitor = native.monitor(native.profile.LARGE)
+      self._monitor_pair = None
+      self._monitor_pair_ns = None
       self.onroad.driver_monitor_layer = self._driver_monitor_layer
+      self.pip = None
+      self._pip_saved = None
+      self._pip_read_ns = None
+      if getattr(native, 'pip_renderer', None) is not None:
+        self.pip = native.pip_renderer("bubble")
+        self._resources.callback(self.pip.close)
+        self.onroad.pip_layer = self._pip_layer
+      self.map = None
+      self.map_feed = None
+      self._ensure_map()
       self.adapter = native.adapter(native.ui_state)
+      # Personality notices and the reverse camera are decided inside the adapter, so it needs AA's choices too.
+      self.adapter.appearance_override = self._own_appearance
+      self._state = None
+      self.favorites = None
+      if getattr(native, 'favorites', None) is not None:
+        self.favorites = native.favorites(lambda: native.ui_state.started)
+        self.favorites.bookmark = lambda: self.bookmark()
+        self.favorites.card_bounds = getattr(getattr(self.onroad, 'navigation', None), 'bounds', None)
+        self._resources.callback(self.favorites.close)
     except BaseException:
       self._resources.close()
       raise
@@ -110,12 +178,27 @@ class ProjectionOnroad:
 
   def _camera_layer(self, rect, state):
     self.camera.render_camera_model_layer(rect, road_style=state.customization['roadColors']['large'])
+    # The camera can switch narrow/wide while rendering. Pace the stream actually
+    # drawn, not the previous selection (whose next frame may arrive later).
+    self.camera_stream = self.camera.stream_type
 
   def _driver_monitor_layer(self, rect, state):
     ui = self.native.ui_state
     now_ns = time.monotonic_ns()
-    monitor = self.native.current_message(ui.sm, 'driverMonitoringState', now_ns, after_frame=ui.started_frame)
-    driver = self.native.current_message(ui.sm, 'driverStateV2', now_ns, after_frame=ui.started_frame)
+    # The two services are published independently. Requiring both to land in
+    # the same narrow control-freshness window made the AA graphic fade in and
+    # out. Keep the last jointly valid display observation across a brief gap.
+    monitor = self.native.display_message(ui.sm, 'driverMonitoringState', now_ns, after_frame=ui.started_frame)
+    driver = self.native.display_message(ui.sm, 'driverStateV2', now_ns, after_frame=ui.started_frame)
+    if monitor is not None and driver is not None:
+      self._monitor_pair = monitor, driver
+      self._monitor_pair_ns = now_ns
+    elif (self._monitor_pair is not None and self._monitor_pair_ns is not None and
+          0 <= now_ns - self._monitor_pair_ns <= DRIVER_MONITOR_HOLD_NS):
+      monitor, driver = self._monitor_pair
+    else:
+      self._monitor_pair = None
+      self._monitor_pair_ns = None
     self.native.rl.rl_push_matrix()
     self.native.rl.rl_translatef(0, self.height - 1080, 0)
     try:
@@ -124,6 +207,117 @@ class ProjectionOnroad:
                           onroad=ui.is_onroad())
     finally:
       self.native.rl.rl_pop_matrix()
+
+  def _ensure_map(self):
+    """Build the map overlay the first time a layout turns it on; it stays for the connection."""
+    native = self.native
+    if self.map is None and self._map_placement() is not None and getattr(native, 'map_overlay', None) is not None:
+      self.map = native.map_overlay(fonts=self.fonts)
+      self._resources.callback(self.map.close)
+      self.map_feed = native.map_feed()
+      self.onroad.map_layer = self._map_layer
+
+  def apply_layout(self, customization):
+    """Switch to a newly saved Android Auto layout without reconnecting."""
+    self.customization = customization
+    self._base_customization = self._projection_customization = None
+    self._base_appearance = self._projection_appearance = None
+    self.camera.large_ui_gamma_trial = bool((customization or {}).get('largeUiGammaTrial', False))
+    invalidate = getattr(self.adapter, 'invalidate_appearance', None)
+    if invalidate is not None:
+      invalidate()
+    self._ensure_map()
+
+  def _own_appearance(self, appearance):
+    if self.customization is None:
+      return appearance
+    from openpilot.starpilot.system.android_auto.projection_layout import projection_appearance
+    return projection_appearance(appearance, self.customization)
+
+  def _check_layout(self):
+    # The watcher's own thread does all file work; this only takes a finished layout.
+    changed = self.layout_watcher.take() if self.layout_watcher is not None else None
+    if changed is not None:
+      self.apply_layout(changed)
+
+  def _map_placement(self):
+    """The enabled map overlay's placement from this connection's layout, or None."""
+    if self.customization is None:
+      return None
+    placed = self.customization['widgets'].get('nav_map')
+    return placed if placed is not None and placed['enabled'] else None
+
+  def prepare(self):
+    """Before the frame's render target is bound: offscreen map work happens here."""
+    self._check_layout()
+    if self.favorites is not None:
+      self.favorites.refresh()
+      self.onroad.navigation_favorites.document = self.favorites.document
+      self.onroad.navigation_favorites.error = self.favorites.error
+    placed = self._map_placement()
+    if self.map is None or placed is None or not self.native.ui_state.started:
+      return
+    document = self.favorites.document if self.favorites is not None else None
+    requested = bool(document['destination']) if document is not None else None
+    data = self.map_feed.read(self.native.ui_state.sm, navigation_requested=requested)
+    self.map.prepare(data, placed['width'], placed['height'])
+
+  def _map_layer(self, rect, state):
+    placed = self._map_placement()
+    if placed is not None and self.map is not None:
+      self.map.draw(self.native.rl.Rectangle(placed['x'], placed['y'], placed['width'], placed['height']),
+                    placed['opacity'] / 100.0)
+
+  def _pip_layer(self, rect, state, *, submit=None):
+    """Shared camera crops, with Android Auto's own blind-spot trigger and placements."""
+    native = self.native
+    now_ns = time.monotonic_ns()
+    if self._pip_read_ns is None or not 0 <= now_ns - self._pip_read_ns < 1_000_000_000:
+      self._pip_saved = native.read_pip(native.ui_state.params)
+      self._pip_read_ns = now_ns
+    saved = self._pip_saved
+    # AA can show warnings with the comma preview off; only crops and mirroring are shared.
+    on_bsm = (self.customization or {}).get('blindSpotCamera', False) is True
+    on_blinker = saved is not None and saved.enabled is True and saved.on_blinker is True
+    if saved is None or saved.mask is None or saved.invert is None or not (on_bsm or on_blinker):
+      self.pip.deactivate()
+      self._set_pip_showing(False)
+      return
+    ui = native.ui_state
+    # Display freshness: carState is 100 Hz, so the 20 ms control window often lapses within one drawn frame.
+    car = native.display_message(ui.sm, 'carState', now_ns, after_frame=ui.started_frame)
+    signals = native.pip_signals(car is not None,
+                                 bool(car.leftBlinker) if car is not None else False,
+                                 bool(car.rightBlinker) if car is not None else False,
+                                 bool(car.leftBlindspot) if car is not None else False,
+                                 bool(car.rightBlindspot) if car is not None else False)
+    placements = {}
+    for side, key in zip(('left', 'right'), native.pip_widgets, strict=True):
+      position = native.placement(state.customization, 'large', key)
+      if position['enabled']:
+        width, height = native.widget_size(state.customization, 'large', key)
+        placements[side] = native.pip_rect(position['x'], position['y'], width, height)
+    result = self.pip.render(rect, saved.mask, signals, enabled=True, on_blinker=on_blinker,
+                             on_bsm=on_bsm, invert=saved.invert, placements=placements,
+                             **({"submit": submit} if submit is not None else {}))
+    self._set_pip_showing(result == 'rendered')
+
+  def _set_pip_showing(self, showing):
+    alert = getattr(self.onroad, 'alert', None)
+    if alert is not None:
+      alert.text_only_alert_names = BUBBLE_REDUNDANT_ALERTS if showing else frozenset()
+
+  def _with_certificate_notice(self, state, now_ns):
+    """Show the certificate heads-up for the first seconds of each drive; a real alert always wins."""
+    if not self._certificate_notice:
+      return state
+    if self._certificate_notice_until_ns is None:
+      self._certificate_notice_until_ns = now_ns + CERTIFICATE_NOTICE_NS
+    sizes = self.native.alert_size
+    if now_ns >= self._certificate_notice_until_ns or state.alert.size != sizes.NONE:
+      return state
+    return replace(state, alert=self.native.alert(size=sizes.SMALL, text1=self._certificate_notice,
+                                                  alert_type='androidAutoCertificate/warning'))
 
   def _standby(self):
     rl = self.native.rl
@@ -135,18 +329,57 @@ class ProjectionOnroad:
 
   def render(self):
     ui = self.native.ui_state
+    self.camera_stream = None
     if ui.started:
-      state = self.adapter.build(self.native.shell_mode.ONROAD, now_ns=time.monotonic_ns()).onroad
+      now_ns = time.monotonic_ns()
+      timer_enabled = bool((self.customization or {}).get('widgets', {}).get('stopped_timer', {}).get('enabled', False))
+      state = self.adapter.build(self.native.shell_mode.ONROAD, now_ns=now_ns, stopped_timer_enabled=timer_enabled).onroad
       if self.customization is not None:
         from openpilot.starpilot.system.android_auto.projection_layout import projection_customization
         if state.customization is not self._base_customization:
           self._projection_customization = projection_customization(self.customization, state.customization)
           self._base_customization = state.customization
-        state = replace(state, customization=self._projection_customization)
-      self.onroad.render(state)
+        if state.appearance is not self._base_appearance:
+          # The car screen's display options live in the AA layout, not the comma's settings.
+          self._projection_appearance = self._own_appearance(state.appearance)
+          self._base_appearance = state.appearance
+        state = replace(state, customization=self._projection_customization, appearance=self._projection_appearance,
+                        reverse_driver_camera=False)
+      self._state = self._with_certificate_notice(state, now_ns)
+      self.onroad.render(self._state)
       self.fonts.draw('StarPilot', self.native.font_role.BRAND, 30, self.width - 210, self.height - 90)
     else:
+      self._state = None
+      if self.favorites is not None:
+        self.favorites.cancel()
+      self._certificate_notice_until_ns = None  # the next drive shows the heads-up again
+      self._monitor_pair = None
+      self._monitor_pair_ns = None
+      if self.pip is not None:
+        self.pip.deactivate()
+        self._set_pip_showing(False)
       self._standby()
+      self.exit.draw(self.exit.document_placement(self.customization))
+
+  def handle_touches(self, events):
+    placed = self.exit.document_placement(self.customization)
+    for event in events:
+      x, y = event.x * self.width, event.y * self.height
+      if self.exit.touch(event.kind, x, y, placed):
+        if self.favorites is not None:
+          self.favorites.cancel()
+        continue
+      if self.favorites is None:
+        continue
+      if self._state is None or not self.native.ui_state.started:
+        self.favorites.cancel()
+        continue
+      self.favorites.touch(event.kind, x, y, self._state, self.native.ui_state.started_frame)
+
+  def cancel_touch(self):
+    self.exit.cancel()
+    if self.favorites is not None:
+      self.favorites.cancel()
 
   def close(self):
     self._resources.close()

@@ -109,7 +109,7 @@ class HardwareComma(HardwareBase):
       return int(f.read())
 
   def set_ir_power(self, percent: int):
-    if self.get_device_type() == "tizi":
+    if self.get_device_type() in ("tici", "tizi"):
       return
 
     value = int((percent / 100) * 300)
@@ -307,7 +307,7 @@ class HardwareComma(HardwareBase):
     if self.amplifier is not None:
       self.amplifier.set_global_shutdown(amp_disabled=powersave_enabled)
       if not powersave_enabled:
-        self.amplifier.initialize_configuration()
+        self.amplifier.initialize_configuration(self.get_device_type())
 
     # *** CPU config ***
 
@@ -345,7 +345,7 @@ class HardwareComma(HardwareBase):
 
   def initialize_hardware(self):
     if self.amplifier is not None:
-      self.amplifier.initialize_configuration()
+      self.amplifier.initialize_configuration(self.get_device_type())
 
     # Allow hardwared to write engagement status to kmsg
     subprocess.run("sudo chmod a+w /dev/kmsg", shell=True)
@@ -387,11 +387,19 @@ class HardwareComma(HardwareBase):
 
     # pandad core
     affine_irq(3, "spi_geni")         # SPI
+    if self.get_device_type() == "tici":
+      affine_irq(3, "xhci-hcd:usb3")
+      affine_irq(3, "xhci-hcd:usb1")
     try:
-      pid = subprocess.check_output(["pgrep", "-f", "spi0"], encoding='utf8').strip()
-      subprocess.call(["sudo", "chrt", "-f", "-p", "1", pid])
-      subprocess.call(["sudo", "taskset", "-pc", "3", pid])
-    except subprocess.CalledProcessError as e:
+      pid = subprocess.check_output(["pgrep", "-x", "spi0"], encoding='utf8').strip()
+      if not pid.isdecimal():
+        raise ValueError("Expected one SPI worker")
+      status = dict(line.split(':', 1) for line in Path(f"/proc/{pid}/status").read_text().splitlines())
+      if status.get("Name", "").strip() != "spi0" or status.get("PPid", "").strip() != "2":
+        raise ValueError("Expected a kernel SPI worker")
+      subprocess.check_call(["sudo", "taskset", "-pc", "3", pid])
+      subprocess.check_call(["sudo", "chrt", "-f", "-p", "1", pid])
+    except (subprocess.CalledProcessError, OSError, ValueError) as e:
       print(str(e))
 
   def get_modem_data_usage(self):
@@ -404,7 +412,7 @@ class HardwareComma(HardwareBase):
 
     gpio_set(GPIO.STM_RST_N, True)
     gpio_set(GPIO.STM_BOOT0, False)
-    time.sleep(0.01)
+    time.sleep(1 if self.get_device_type() == "tici" else 0.01)
     gpio_set(GPIO.STM_RST_N, False)
 
   def recover_internal_panda(self):
@@ -413,9 +421,9 @@ class HardwareComma(HardwareBase):
 
     gpio_set(GPIO.STM_RST_N, True)
     gpio_set(GPIO.STM_BOOT0, True)
-    time.sleep(0.01)
+    time.sleep(0.5 if self.get_device_type() == "tici" else 0.01)
     gpio_set(GPIO.STM_RST_N, False)
-    time.sleep(0.01)
+    time.sleep(0.5 if self.get_device_type() == "tici" else 0.01)
     gpio_set(GPIO.STM_BOOT0, False)
 
   def booted(self):

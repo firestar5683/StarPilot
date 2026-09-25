@@ -6,6 +6,7 @@ from opendbc.car.interfaces import MAX_CTRL_SPEED
 from opendbc.car.toyota.values import ToyotaFlags
 
 from openpilot.selfdrive.selfdrived.events import Events
+from openpilot.starpilot.car.events import event_rules, unsupported_gear
 
 ButtonType = structs.CarState.ButtonEvent.Type
 GearShifter = structs.CarState.GearShifter
@@ -16,6 +17,7 @@ NetworkLocation = structs.CarParams.NetworkLocation
 class CarEvents:
   def __init__(self, CP: structs.CarParams):
     self.CP = CP
+    self.event_rules = event_rules(CP)
 
     self.steering_unpressed = 0
     self.low_speed_alert = False
@@ -24,7 +26,7 @@ class CarEvents:
 
   def update(self, CS: car.CarState, CS_prev: car.CarState, CC: car.CarControl):
     if self.CP.brand in ('body', 'mock'):
-      return Events()
+      return Events(self.event_rules)
 
     events = self.create_common_events(CS, CS_prev)
 
@@ -94,7 +96,7 @@ class CarEvents:
     return events
 
   def create_common_events(self, CS: structs.CarState, CS_prev: car.CarState):
-    events = Events()
+    events = Events(self.event_rules)
 
     CI = interfaces[self.CP.carFingerprint]
     # TODO: cleanup the honda-specific logic
@@ -107,7 +109,8 @@ class CarEvents:
       events.add(EventName.doorOpen)
     if CS.seatbeltUnlatched:
       events.add(EventName.seatbeltNotLatched)
-    if CS.gearShifter != GearShifter.drive and CS.gearShifter not in CI.DRIVABLE_GEARS:
+    if ((CS.gearShifter != GearShifter.drive and CS.gearShifter not in CI.DRIVABLE_GEARS) or
+        unsupported_gear(self.CP, CS.gearShifter)):
       events.add(EventName.wrongGear)
     if CS.gearShifter == GearShifter.reverse:
       events.add(EventName.reverseGear)

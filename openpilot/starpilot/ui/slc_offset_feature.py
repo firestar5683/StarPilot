@@ -5,7 +5,6 @@ from __future__ import annotations
 from dataclasses import dataclass
 import math
 import threading
-import time
 
 from openpilot.starpilot.speed_limits import offset_document as od
 from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsRequest
@@ -17,13 +16,12 @@ _LOCK = threading.RLock()
 
 
 def native_parked(ui) -> bool:
-  """Use fresh device and panda evidence, not only UIState.started."""
-  from openpilot.starpilot.ui.runtime_snapshot import current_message
-  now_ns = time.monotonic_ns()
-  device = current_message(ui.sm, "deviceState", now_ns)
-  pandas = current_message(ui.sm, "pandaStates", now_ns)
-  return bool(not ui.started and device is not None and not device.started and pandas is not None and
-              not any(p.ignitionLine or p.ignitionCan for p in pandas))
+  from openpilot.starpilot.ui.runtime_snapshot import RuntimeSnapshotAdapter
+  adapter = getattr(ui, '_slc_offroad_adapter', None)
+  if adapter is None:
+    adapter = RuntimeSnapshotAdapter(ui)
+    ui._slc_offroad_adapter = adapter
+  return adapter.confirmed_offroad()
 
 
 @dataclass(frozen=True)
@@ -63,26 +61,27 @@ def _display(value: float) -> str:
   return f"{value:.2f}".rstrip("0").rstrip(".")
 
 
-def _capability(cp) -> tuple | None:
+def _capability(cp, configuration_longitudinal=False) -> tuple | None:
   try:
-    if cp is None or not cp.carFingerprint or not cp.openpilotLongitudinalControl or cp.pcmCruise or \
+    if cp is None or not cp.carFingerprint or not (cp.openpilotLongitudinalControl or configuration_longitudinal) or \
        cp.notCar or cp.dashcamOnly or cp.passive:
       return None
-    return (str(cp.carFingerprint), bool(cp.openpilotLongitudinalControl), bool(cp.pcmCruise),
+    return (str(cp.carFingerprint), bool(cp.openpilotLongitudinalControl or configuration_longitudinal), bool(cp.pcmCruise and not configuration_longitudinal),
             bool(cp.notCar), bool(cp.dashcamOnly), bool(cp.passive))
   except (AttributeError, TypeError, ValueError):
     return None
 
 
 class SlcOffsetOwner:
-  def __init__(self, params, parked, vehicle_params, repair_parked=None):
+  def __init__(self, params, parked, vehicle_params, repair_parked=None, *, configuration_longitudinal=lambda: False):
     self.params = params
     self.parked = parked
     self.repair_parked = repair_parked or parked
     self.vehicle_params = vehicle_params
+    self.configuration_longitudinal = configuration_longitudinal
 
   def capability(self) -> tuple | None:
-    return _capability(self.vehicle_params())
+    return _capability(self.vehicle_params(), self.configuration_longitudinal())
 
   def _raw(self, key: str) -> bytes | None:
     return read_saved(self.params, key, od.MAX_DOCUMENT_BYTES)[0]
@@ -112,7 +111,7 @@ class SlcOffsetOwner:
 
   def ready_to_enable(self) -> bool:
     snap = self.snapshot()
-    return snap.raw_document is not None and isinstance(snap.document, od.OffsetDocument)
+    return snap.valid and isinstance(snap.document, od.OffsetDocument)
 
   def rows(self, allowed: bool, *, repair_allowed: bool | None = None) -> tuple[bool, tuple[FeatureRow, ...]]:
     snap = self.snapshot()
@@ -156,7 +155,7 @@ class SlcOffsetOwner:
                                reason="Legacy value; adopt to edit" if snap.raw_document is None else
                                       "Speed ranges are rounded for display; saved limits keep their exact values",
                                related_source=snap.raw_unit, capability=capable, dependencies=deps,
-                               display_unit=unit))
+                               display_unit=unit, default_value="0"))
       rows.append(FeatureRow("", "Above final band", "Zero offset"))
     else:
       for index, key in enumerate(OFFSET_KEYS, start=1):
@@ -173,7 +172,7 @@ class SlcOffsetOwner:
       rows.append(FeatureRow("slc_reset", "Reset saved offsets", reset_ranges, snap.raw_document,
                              available=reset_available, related_source=snap.raw_unit, capability=capable,
                              dependencies=deps))
-    return snap.raw_document is not None and isinstance(snap.document, od.OffsetDocument), tuple(rows)
+    return snap.valid and isinstance(snap.document, od.OffsetDocument), tuple(rows)
 
   def _same(self, request: FeatureSettingsRequest, snap: OffsetSnapshot, *, require_capability: bool) -> bool:
     expected_deps = (("IsMetric", snap.raw_unit), ("SpeedLimitController", snap.raw_control))

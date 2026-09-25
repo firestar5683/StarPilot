@@ -13,6 +13,7 @@ from opendbc.car.hyundai.ioniq6_handoff import build_ioniq6_hda2_long_candidate
 from opendbc.car.hyundai.ioniq6_longitudinal import Ioniq6LongitudinalPolicy, Ioniq6LongitudinalState, LongState, update_calibration
 from opendbc.car.hyundai.values import CAR, DBC
 from openpilot.selfdrive.controls.lib.longcontrol import LongControl
+from openpilot.starpilot.longitudinal.extension import LongitudinalContext
 from openpilot.starpilot.longitudinal.ioniq6_start import StartEvidence
 
 DATA = Path(__file__).parent / 'testdata'
@@ -37,7 +38,7 @@ def controller_fixture(alternate=False, *, aol=False):
     ('WHEEL_SPEEDS', {}), ('MDPS', {}), ('CRUISE_BUTTONS', {'COUNTER': 1}),
     ('DOORS_SEATBELTS', {'DRIVER_SEATBELT': 1}), ('STEERING_SENSORS', {}))]
   inputs.append(packer.make_can_msg('CAM_0x362' if alternate else 'CAM_0x2a4', bus.CAM, {}))
-  ci.update((1_000_000_000, inputs))
+  ci.update([(1_000_000_000, inputs)])
   return cp, ci.CS, CarController(DBC[cp.carFingerprint], cp)
 
 
@@ -143,7 +144,7 @@ class TestIoniq6Longitudinal(unittest.TestCase):
             parser = CANParser(DBC[cp.carFingerprint][Bus.pt], [('SCC_CONTROL', 0)], 1)
             parser.update((1_000_000_000, [scc]))
             values = parser.vl['SCC_CONTROL']
-            self.assertEqual(values['ACCMode'], 2 if control.enabled and override else 1 if longitudinal else 0)
+            self.assertEqual(values['ACCMode'], 2 if control.enabled and override else 1 if control.enabled else 0)
             if not longitudinal or override:
               self.assertEqual((values['aReqRaw'], values['aReqValue'], output.accel), (0., 0., 0.))
               self.assertEqual(values['StopReq'], 0)
@@ -166,8 +167,8 @@ class TestIoniq6Longitudinal(unittest.TestCase):
     for enabled, long_active, override, gas_pressed, brake_pressed, expected_mode in (
       (True, True, False, False, False, 1),
       (True, False, True, True, False, 2),
-      (True, False, True, False, False, 0),
-      (True, False, True, True, True, 0),
+      (True, False, True, False, False, 2),
+      (True, False, True, True, True, 2),
       (True, True, False, False, False, 1),
       (False, False, False, False, False, 0),
     ):
@@ -246,7 +247,8 @@ class TestIoniq6Longitudinal(unittest.TestCase):
       with self.subTest(alternate=alternate):
         cp, cs, controller = controller_fixture(alternate)
         host = LongControl(cp)
-        self.assertIsNotNone(host.ioniq6_start)
+        self.assertIsNotNone(host.extension)
+        self.assertIsNotNone(host.extension.ioniq6_start)
         parser = CANParser(DBC[cp.carFingerprint][Bus.pt], [('SCC_CONTROL', 0)], 1)
         cs.out.canValid = True
         cs.out.canTimeout = False
@@ -260,7 +262,7 @@ class TestIoniq6Longitudinal(unittest.TestCase):
                     host=host, cs=cs, control=control, controller=controller, parser=parser):
           control.cruiseControl.override = override
           evidence = StartEvidence(True, True, True, 1, 1_000_000_000 + frame * 10_000_000)
-          output = host.update(not override, cs.out, target, False, (-3.5, 2.0), start_evidence=evidence)
+          output = host.update(not override, cs.out, target, False, (-3.5, 2.0), context=LongitudinalContext(start_evidence=evidence))
           # Match Controls' tagged-Ioniq order: publish state after LoC.update.
           control.actuators.longControlState = host.long_control_state
           control.actuators.accel = float(output)

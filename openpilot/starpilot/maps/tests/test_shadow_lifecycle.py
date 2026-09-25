@@ -35,8 +35,8 @@ class FakeParams(Params):
     self.path = path
 
   def get_param_path(self, key: str = '') -> str:
-    assert key == shadow.OPT_IN_KEY
-    return str(self.path)
+    assert key in (shadow.OPT_IN_KEY, 'SLCPriority1', 'SLCPriority2')
+    return str(self.path if key == shadow.OPT_IN_KEY else self.path.parent / key)
 
 
 class FakeCar:

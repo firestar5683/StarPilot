@@ -30,6 +30,43 @@ class HondaFamilyQualificationTests(unittest.TestCase):
     # Some upstream interfaces set this shared table while constructing CP.
     self.addCleanup(setattr, CarControllerParams, 'BOSCH_GAS_LOOKUP_V', list(CarControllerParams.BOSCH_GAS_LOOKUP_V))
 
+  def test_stock_cruise_off_disables_standard_state_without_disarming_aol(self):
+    from openpilot.selfdrive.car.car_events import CarEvents
+    from openpilot.selfdrive.selfdrived.events import ET
+    from openpilot.selfdrive.selfdrived.state import StateMachine, State
+    from openpilot.starpilot.aol.intent import disarming_fault
+    from opendbc.car.honda.stock_aol import qualified
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[1][0x1A3] = 8
+    cp = CarInterface.get_params(CAR.HONDA_ACCORD, fingerprint, [], False, False, False)
+    cp.alternativeExperience = 32
+    self.assertTrue(qualified(cp, marked_only=True))
+    for speed, name in ((20., log.OnroadEvent.EventName.cruiseDisabled),
+                        (0., log.OnroadEvent.EventName.speedTooLow)):
+      with self.subTest(speed=speed):
+        state = car_state()
+        state.vEgo = speed
+        state.cruiseState.available = True
+        events = CarEvents(cp).update(state, state, car.CarControl())
+        event = next(event for event in events.to_msg() if event.name == name)
+        self.assertTrue(event.userDisable)
+        self.assertFalse(event.immediateDisable)
+        self.assertFalse(disarming_fault([event], state))
+        machine = StateMachine()
+        machine.state = State.enabled
+        machine.update(events)
+        self.assertEqual(machine.state, State.disabled)
+        for fault in (log.OnroadEvent.EventName.accFaulted, log.OnroadEvent.EventName.canError,
+                      log.OnroadEvent.EventName.steerUnavailable):
+          guarded = CarEvents(cp).update(state, state, car.CarControl())
+          guarded.add(fault)
+          self.assertTrue(disarming_fault(guarded.to_msg(), state))
+        cp.alternativeExperience = 0
+        ordinary = CarEvents(cp).update(state, state, car.CarControl())
+        self.assertTrue(ordinary.contains(ET.IMMEDIATE_DISABLE))
+        self.assertTrue(disarming_fault(ordinary.to_msg(), state))
+        cp.alternativeExperience = 32
+
   def test_exact_classic_bosch_cp_family_and_rejections(self):
     self.assertEqual(len(CLASSIC_BOSCH_AOL_CARS), 10)
     all_honda = tuple(candidate for candidate in CAR if candidate.config.flags & HondaFlags.BOSCH)
@@ -42,7 +79,7 @@ class HondaFamilyQualificationTests(unittest.TestCase):
           self.assertTrue(cp.openpilotLongitudinalControl)
           self.assertFalse(cp.pcmCruise)
           self.assertEqual(len(cp.safetyConfigs), 1)
-          self.assertIn(cp.safetyConfigs[0].safetyParam, (2, 3))
+          self.assertIn(cp.safetyConfigs[0].safetyParam, (2, 3, 131))
           cp.safetyConfigs[0].safetyParam |= 32
           self.assertTrue(qualified_honda(cp))
           cp.safetyConfigs[0].safetyParam |= 4
@@ -101,10 +138,14 @@ class HondaFamilyQualificationTests(unittest.TestCase):
           params.put_bool('AlwaysOnLateral', True, block=True)
           honda = FakeHonda(candidate, alpha_long)
           card = Car(honda, FakeRadar(honda.CP))
-          self.assertEqual(card.aol_qualified, alpha_long)
+          expected = alpha_long or candidate != CAR.HONDA_ACCORD
+          self.assertEqual(card.aol_qualified, expected)
           self.assertEqual(bool(card.CP.safetyConfigs[0].safetyParam & 32), alpha_long)
+          experience = 32 if expected and not alpha_long else 0
+          self.assertEqual(card.CP.alternativeExperience, experience)
           with car.CarParams.from_bytes(params.get('CarParams')) as published:
             self.assertEqual(bool(published.safetyConfigs[0].safetyParam & 32), alpha_long)
+            self.assertEqual(published.alternativeExperience, experience)
 
 
 class HondaHostTests(unittest.TestCase):
@@ -131,7 +172,8 @@ class HondaHostTests(unittest.TestCase):
       def update(self, can_packets):
         return None
 
-    with OpenpilotPrefix(), mock.patch.dict('os.environ', {'AOL_REPLAY_RUNTIME': '1', 'SIMULATION': '1'}):
+    with (OpenpilotPrefix(), mock.patch.dict('os.environ', {'AOL_REPLAY_RUNTIME': '1', 'SIMULATION': '1'}),
+          mock.patch('openpilot.selfdrive.selfdrived.selfdrived.SIMULATION', False)):
       messaging.reset_context()
       params = Params()
       params.put_bool('OpenpilotEnabledToggle', True, block=True)
@@ -152,6 +194,7 @@ class HondaHostTests(unittest.TestCase):
       self.assertTrue(intent.seen['aolIntentWire'])
       self.assertTrue(decode_intent(intent['aolIntentWire']).allowedLatch)
       selfdrive.step()
+      self.assertFalse(selfdrive.initialized)  # Native acknowledgment must precede bootstrap.
       controls.sm.update(100)
       cc, _ = controls.state_control()
       self.assertFalse(cc.latActive or cc.longActive)  # no native capability/ack
@@ -247,3 +290,16 @@ class HondaHostTests(unittest.TestCase):
       cc, _ = controls.state_control()
       self.assertFalse(cc.latActive or cc.longActive)
       self.assertTrue(card.aol_qualified)
+
+
+class CardAxisSessionTests(unittest.TestCase):
+  def test_native_lookup_uses_selfdrived_axis_session(self):
+    # pandad stamps aolSafetyWire with aolAxisState's session; card's own producer session never matches it.
+    card = Car.__new__(Car)
+    card.slc_producer_session = 'card'
+    card.sm = messaging.SubMaster(['aolAxisState'])
+    self.assertEqual(card.aol_axis_session(), 'card')
+    axis = messaging.new_message('aolAxisState')
+    axis.aolAxisState.sessionId = 'selfdrived'
+    card.sm.update_msgs(1.0, [axis.as_reader()])
+    self.assertEqual(card.aol_axis_session(), 'selfdrived')

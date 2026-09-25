@@ -12,7 +12,7 @@ from openpilot.selfdrive.controls.controlsd import Controls
 from openpilot.selfdrive.locationd.torqued import TorqueEstimator
 from openpilot.starpilot.lateral.bolt_policy import BOLT_GENERATIONS
 from openpilot.starpilot.lateral.controller_selection import ControllerMode, replace_mode
-from openpilot.starpilot.lateral.torque_runtime import runtime_enabled
+from openpilot.starpilot.lateral.torque_runtime import runtime_enabled, manual_overrides_present
 from openpilot.starpilot.lateral.torque_settings import (DOCUMENT_KEY, FieldChoice, PlatformProfile, bounds,
                                                        replace_field, resolve_document, serialize_document)
 from openpilot.starpilot.lateral.tests.test_torque_runtime import LearnedFrame
@@ -31,6 +31,24 @@ def profile(cp, *, factor=False):
 
 
 class TestBoltManualFriction(unittest.TestCase):
+  def test_explicit_document_admits_actual_controls_without_retired_master(self):
+    for master in (None, False):
+      with self.subTest(master=master), OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'TORQUE_REPLAY_RUNTIME': '0'}):
+        cp = params(next(iter(BOLT_GENERATIONS)), alpha=True)
+        saved = Params()
+        saved.put('CarParams', cp.to_bytes(), block=True)
+        if master is not None:
+          saved.put_bool('AdvancedLateralTune', master, block=True)
+        assert Controls().torque_host is None
+        saved.put(DOCUMENT_KEY, json.loads(profile(cp)[2]), block=True)
+        assert Controls().torque_host is not None
+        basis = profile(cp)[0]
+        saved.put(DOCUMENT_KEY, json.loads(serialize_document({str(cp.carFingerprint):
+                  PlatformProfile(basis, FieldChoice(), FieldChoice())})), block=True)
+        assert Controls().torque_host is None
+        Path(saved.get_param_path(DOCUMENT_KEY)).write_bytes(b'{invalid')
+        assert Controls().torque_host is None
+
   def test_actual_controls_ff_and_invalid_car_gate(self):
     for mode in ControllerMode:
       with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'REPLAY': '1'}):
@@ -67,6 +85,8 @@ class TestBoltManualFriction(unittest.TestCase):
         self.assertFalse(baseline.use_params)
       settings.put_bool('AdvancedLateralTune', True, block=True)
       settings.put(DOCUMENT_KEY, json.loads(profile(cp)[2]), block=True)
+      with patch.dict(os.environ, {'TORQUE_REPLAY_RUNTIME': '0'}):
+        self.assertTrue(manual_overrides_present(cp, settings))
       with patch('openpilot.selfdrive.locationd.torqued.get_cache', return_value=None) as cache:
         opted = TorqueEstimator(cp, allow_learning=True)
         self.assertEqual(cache.call_count, 0)
@@ -151,6 +171,9 @@ class TestBoltManualFriction(unittest.TestCase):
                              controls.LaC.torque_from_lateral_accel(1., cp.lateralTuning.torque))
           # Removing the preference after opt-in follows the existing latched host contract.
           settings.put_bool('AdvancedLateralTune', False, block=True)
+          settings.put(DOCUMENT_KEY, json.loads(serialize_document({str(cp.carFingerprint):
+                       PlatformProfile(basis, FieldChoice(), FieldChoice())})), block=True)
+          assert host is not None
           host.last_refresh_ns = None
           for tick in range(300, 600):
             stamp = now + tick * 10_000_000

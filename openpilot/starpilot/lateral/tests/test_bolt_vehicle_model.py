@@ -1,8 +1,9 @@
+
+from unittest.mock import patch
 import math
 import os
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
 
 from opendbc.car.gm.values import CAR
 from openpilot.common.params import Params
@@ -38,8 +39,8 @@ class TestBoltVehicleModel(unittest.TestCase):
                                                       (25., 16.8), (5., 17.2), (35., 17.2), (0., 16.8))):
             if index == 4:
               controls.LaC.reset()
-            controls.sm = {'carState': SimpleNamespace(vEgo=speed),
-                           'vehicleParameters': SimpleNamespace(stiffnessFactor=1.1, steerRatio=live_ratio)}
+            self.enterContext(patch.object(controls, 'sm', {'carState': SimpleNamespace(vEgo=speed),
+                           'vehicleParameters': SimpleNamespace(stiffnessFactor=1.1, steerRatio=live_ratio)}, create=True))
             observed = []
 
             def capture(stiffness, ratio, real_update=real_update, observed=observed):

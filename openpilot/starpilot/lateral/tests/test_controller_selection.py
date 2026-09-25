@@ -35,23 +35,38 @@ def document(**choices):
 
 
 class TestControllerSelection(unittest.TestCase):
+  def test_hybrid_existing_policy_saved_standard_roundtrip(self):
+    from opendbc.car.gm.tests.test_ordinary_cc import malibu_hybrid_params
+    from openpilot.starpilot.lateral.controller_selection import parse_document, replace_mode
+    cp = malibu_hybrid_params()
+    before = default_selection(cp)
+    self.assertEqual(before.policy, 'ordinary_cc')
+    self.assertEqual(before.mode, ControllerMode.STARPILOT)
+    raw = replace_mode(None, cp, ControllerMode.STANDARD)
+    self.assertEqual(parse_document(raw)['vehicles'][str(cp.carFingerprint)]['mode'], 'standard')
+    self.assertEqual(selection_from_bytes(cp, raw).mode, ControllerMode.STANDARD)
+    self.assertEqual(default_selection(cp), before)
+    for bad in (raw.replace(b'CHEVROLET_MALIBU_HYBRID_CC', b'UNKNOWN_GM'), raw.replace(b'standard', b'unknown')):
+      self.assertEqual(selection_from_bytes(cp, bad).source, 'invalid')
+
   def test_missing_choice_exact_policy_and_untuned_matrix(self):
     expected = ((HYUNDAI.HYUNDAI_IONIQ_6, 'ioniq6'),
                 (HYUNDAI.GENESIS_G70_2020, 'genesis_g70_2020'),
                 (TOYOTA.TOYOTA_COROLLA_TSS2, 'corolla_tss2'),
-                (HYUNDAI.KIA_EV6, None),
-                (HYUNDAI.HYUNDAI_SONATA, None),
-                (TOYOTA.TOYOTA_RAV4_TSS2, None))
+                (HYUNDAI.KIA_EV6, 'kia_ev6'),
+                (HYUNDAI.HYUNDAI_SONATA, 'sonata'),
+                (TOYOTA.TOYOTA_RAV4_TSS2, 'rav4_tss2'))
     for vehicle, policy in expected:
       with self.subTest(vehicle=vehicle):
         cp = cp_for(vehicle)
         self.assertEqual(policy_for(cp), policy)
         selected = selection_from_bytes(cp, None)
-        self.assertEqual(selected.mode, ControllerMode.STARPILOT if policy else ControllerMode.STANDARD)
+        mode = ControllerMode.STANDARD if vehicle in (HYUNDAI.KIA_EV6, HYUNDAI.HYUNDAI_SONATA) or policy is None else ControllerMode.STARPILOT
+        self.assertEqual(selected.mode, mode)
         lateral = LatControlTorque(cp.as_reader(), interfaces[vehicle](cp), DT_CTRL)
         self.assertEqual(lateral.controller_mode, selected.mode)
         self.assertEqual(lateral.controller_policy, policy)
-        self.assertEqual(bool(selected_policy(lateral)), bool(policy))
+        self.assertEqual(bool(selected_policy(lateral)), mode == ControllerMode.STARPILOT)
 
   def test_saved_standard_is_per_vehicle_and_invalid_cannot_enable_policy(self):
     ioniq = cp_for(HYUNDAI.HYUNDAI_IONIQ_6)
@@ -81,7 +96,8 @@ class TestControllerSelection(unittest.TestCase):
     wrong.notCar = True
     self.assertIsNone(policy_for(wrong))
     with self.assertRaises(ValueError):
-      LatControlTorque(ev6.as_reader(), interfaces[HYUNDAI.KIA_EV6](ev6), DT_CTRL,
+      unsupported = cp_for(TOYOTA.TOYOTA_RAV4_TSS2_2022)
+      LatControlTorque(unsupported.as_reader(), interfaces[TOYOTA.TOYOTA_RAV4_TSS2_2022](unsupported), DT_CTRL,
                        controller_mode=ControllerMode.STARPILOT)
 
   def test_standard_skips_policy_constructor_and_ioniq_factor_multiplier(self):
@@ -98,13 +114,28 @@ class TestControllerSelection(unittest.TestCase):
         self.assertAlmostEqual(standard.torque_params.latAccelFactor, cp.lateralTuning.torque.latAccelFactor)
         if vehicle == HYUNDAI.HYUNDAI_IONIQ_6:
           self.assertEqual(standard.pid.pos_limit, cp.lateralTuning.torque.latAccelFactor)
-          self.assertEqual(policy.pid.pos_limit, cp.lateralTuning.torque.latAccelFactor)
+          self.assertEqual(policy.pid.pos_limit, policy.torque_params.latAccelFactor)
+          self.assertEqual(policy.pid.neg_limit, -policy.torque_params.latAccelFactor)
           self.assertEqual(policy.torque_params.latAccelFactor,
                            struct.unpack('f', struct.pack('f', cp.lateralTuning.torque.latAccelFactor * 1.22))[0])
           for controller, multiplier in ((standard, 1.0), (policy, 1.22)):
             controller.update_torque_parameters(3.3, 0.0, 0.12)
             expected = struct.unpack('f', struct.pack('f', 3.3 * multiplier))[0]
             self.assertEqual(controller.torque_params.latAccelFactor, expected)
+
+  def test_ioniq_startup_saturation_and_first_live_update_are_continuous(self):
+    cp = cp_for(HYUNDAI.HYUNDAI_IONIQ_6)
+    controller = LatControlTorque(cp.as_reader(), interfaces[HYUNDAI.HYUNDAI_IONIQ_6](cp), DT_CTRL,
+                                  controller_mode=ControllerMode.STARPILOT)
+    before = (controller.pid.pos_limit, controller.pid.neg_limit)
+    for sign in (-1, 1):
+      controller.pid.reset()
+      accel = controller.pid.update(0., feedforward=sign * 100., freeze_integrator=True)
+      self.assertEqual(accel, sign * controller.torque_params.latAccelFactor)
+      self.assertAlmostEqual(controller.torque_from_lateral_accel(accel, controller.torque_params), sign)
+    controller.update_torque_parameters(cp.lateralTuning.torque.latAccelFactor,
+                                        cp.lateralTuning.torque.latAccelOffset, cp.lateralTuning.torque.friction)
+    self.assertEqual((controller.pid.pos_limit, controller.pid.neg_limit), before)
 
   def test_explicit_policy_preserves_legacy_output_through_reset(self):
     sequence = ((False, 2.0, 4.0, -0.0005, False),
@@ -145,7 +176,14 @@ class TestControllerSelection(unittest.TestCase):
       legacy = Controls()
       self.assertEqual(legacy.lateral_controller_selection, default_selection(cp))
       self.assertIsNotNone(selected_policy(legacy.LaC))
-      self.assertEqual(legacy.LaC.pid.pos_limit, cp.lateralTuning.torque.latAccelFactor)
+      self.assertEqual(legacy.LaC.pid.pos_limit, legacy.LaC.torque_params.latAccelFactor)
+      self.assertEqual(legacy.LaC.pid.neg_limit, -legacy.LaC.torque_params.latAccelFactor)
+      self.assertIsNone(legacy.torque_host)
+      from openpilot.starpilot.lateral.torque_settings import DOCUMENT_KEY as TORQUE_DOCUMENT_KEY, replace_field, serialize_document
+      tune = cp.lateralTuning.torque
+      basis = (float(tune.latAccelFactor), float(tune.latAccelOffset), float(tune.friction))
+      override = replace_field({}, str(cp.carFingerprint), basis, 'factor', 'custom', basis[0] * 1.1)
+      params.put(TORQUE_DOCUMENT_KEY, json.loads(serialize_document(override)), block=True)
       params.put(DOCUMENT_KEY, json.loads(document(HYUNDAI_IONIQ_6='standard')), block=True)
       self.assertEqual(read_selection(params, cp).mode, ControllerMode.STANDARD)
       first = Controls()

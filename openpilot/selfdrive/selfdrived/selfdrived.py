@@ -5,11 +5,14 @@ import time
 import threading
 import uuid
 from copy import copy
+from dataclasses import replace
 
 import openpilot.cereal.messaging as messaging
 
 from openpilot.cereal import log
 from opendbc.car.structs import car
+from opendbc.car.hyundai.ev6_aol import qualified as ev6_aol_qualified
+from opendbc.car.honda.stock_aol import qualified as honda_aol_qualified, temporary_restriction as honda_temporary_restriction
 from openpilot.cereal.visionipc import VisionStreamType
 from msgq.visionipc import VisionIpcClient
 
@@ -18,26 +21,40 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper, DT_CTRL
 from openpilot.common.swaglog import cloudlog
 from openpilot.common.gps import get_gps_location_service
+from openpilot.starpilot.gps.source import observation as gps_observation
 
 from openpilot.selfdrive.car.car_events import CarEvents
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose
 from openpilot.selfdrive.selfdrived.events import Events, ET, Alert, Priority as AlertPriority
 from openpilot.starpilot.longitudinal.force_stop_alert import HoldAlertState, EVENT_TYPE as FORCE_STOP_HOLD
-from openpilot.selfdrive.selfdrived.helpers import ExcessiveActuationCheck
+from openpilot.selfdrive.selfdrived.helpers import ExcessiveActuationCheck, update_big_model_status
+from openpilot.system.manager.process_health import driving_process_failures
 from openpilot.selfdrive.selfdrived.state import StateMachine
+from opendbc.car.gm.aol import native_bootstrap_supported
+from opendbc.car.gm.steering_authority import monitored_profile
+from openpilot.starpilot.car.gm.steering_companion import SteeringCompanion
+from openpilot.starpilot.car.hyundai.aol import qualified_ioniq6
+from opendbc.car.gm.values import GMFlags, is_volt_ascm_longitudinal
 from openpilot.starpilot.aol.intent import read_settings
-from openpilot.starpilot.aol.runtime import INTENT_MAX_AGE_NS, AxisDecision, current_intent, current_native, decide_axes, ordinary_lateral_requested, decide_ordinary_axis
+from openpilot.starpilot.aol.intent_companion import IntentCompanion
+from openpilot.starpilot.aol.transport_pause import AvailabilityPause, TransportPause, availability_only, cp_identity, healthy_transport
+from openpilot.starpilot.aol.source_availability import (
+  ordinary_source_availability, fresh_ordinary_lag_continuation, stock_lateral_role, stock_lateral_fault_proof,
+)
+from openpilot.starpilot.aol.runtime import (INTENT_MAX_AGE_NS, SAFETY_MAX_AGE_NS, AxisDecision, current_intent, current_native, decide_axes,
+                                            ordinary_lateral_requested, decide_ordinary_axis)
 from openpilot.starpilot.aol.vehicle import policy_for as axis_policy_for, ordinary_axis_request_allowed
 from openpilot.starpilot.conditional_mode.consumer import ConsumerResult, ModeConsumer
 from openpilot.starpilot.conditional_mode.effective_status import publish_ack
 from openpilot.starpilot.conditional_mode.policy import ModeChoice
 from openpilot.starpilot.conditional_mode.manual import ioniq6_media_eligible
-from openpilot.starpilot.controllers.mode_actions import SwitchbackStatusOwner, SwitchbackCooldown
+from openpilot.starpilot.controllers.mode_actions import SwitchbackStatusOwner, SwitchbackCooldown, ModeActionOwner
 from openpilot.starpilot.conditional_mode.projection import paired_clocks_ns
-from openpilot.starpilot.conditional_mode.runtime_settings import ConditionalSettingsOwner
+from openpilot.starpilot.conditional_mode.runtime_settings import (ConditionalSettingsOwner, experimental_requested, read_mode_sources)
 from openpilot.starpilot.conditional_mode.status import settings_fingerprint
 from openpilot.starpilot.feature_runtime import enabled as feature_enabled
 from openpilot.starpilot.nostalgia import aol_no_entry, paddle_cancel, physical_cancel, saved_enabled as nostalgia_saved_enabled
+from openpilot.starpilot.lateral.low_speed_advisory import LowSpeedAdvisory
 from openpilot.starpilot.lateral.lane_change_status_wire import alert_wording, decode as decode_lane_status, fresh_for_model
 from openpilot.selfdrive.selfdrived.alertmanager import AlertManager, set_offroad_alert
 
@@ -80,6 +97,7 @@ class SelfdriveD:
 
     self.aol_replay = feature_enabled(self.params, self.CP, 'aol', os.environ)
     self.ordinary_axis_ack_required = axis_policy_for(self.CP).ordinary_axis_ack_required
+    self.aol_cruise_main_required = axis_policy_for(self.CP).cruise_main_required
     self.axis_transport_required = self.aol_replay or self.ordinary_axis_ack_required
     self.nostalgia_enabled = nostalgia_saved_enabled(self.params)
     self.nostalgia_paddle_cancel = False
@@ -87,18 +105,29 @@ class SelfdriveD:
     self.aol_sequence = 0
     self.aol_axis_decision = AxisDecision()
     self.aol_dm_lateral_inhibit = False
+    self.aol_authority_lost = False
+    self.aol_transport_pause = TransportPause(self.CP, self.aol_session_id)
+    self.aol_fault_reason = 'none'
+    self.steering_authority_unavailable = False
+    self.steering_companion = (SteeringCompanion(messaging.sub_sock('starpilotCarState', conflate=False))
+                               if monitored_profile(self.CP) else None)
     self.force_stop_hold_alert = HoldAlertState()
     self.aol_car_state_log_ns = 0
     self.aol_last_intent = None
+    self.aol_intent_companion = (IntentCompanion(messaging.sub_sock('aolIntentWire', conflate=False))
+                                 if self.aol_replay else None)
     self.lane_status_session = ""
     self.lane_status_sequence = -1
     self.conditional_replay = feature_enabled(self.params, self.CP, 'conditional', os.environ)
     self.conditional_settings = ConditionalSettingsOwner(self.params) if self.conditional_replay else None
     self.conditional_consumer = ModeConsumer() if self.conditional_replay else None
     self.conditional_status = 'disabled'
+    self.controller_action_sock = messaging.sub_sock('slcAction', conflate=False)
+    self.controller_action_owner = ModeActionOwner()
     self.switchback_capable = ioniq6_media_eligible(self.CP) and not self.CP.passive and not self.CP.dashcamOnly and not self.CP.notCar
     self.switchback_status = SwitchbackStatusOwner()
     self.switchback_cooldown = SwitchbackCooldown()
+    self.low_speed_advisory = LowSpeedAdvisory()
     self.switchback_setting_ns = 0
     self.switchback_cooldown_ns = 300_000_000_000
     self.conditional_car_state_valid = False
@@ -107,6 +136,9 @@ class SelfdriveD:
     self.conditional_result = ConsumerResult(False, False, 'disabled')
 
     self.car_events = CarEvents(self.CP)
+    from openpilot.starpilot.car.tesla.stock_events import StockCruiseConsumer
+    self.tesla_stock_consumer = StockCruiseConsumer(self.CP)
+    self.tesla_stock_alerts = []
 
     self.pose_calibrator = PoseCalibrator()
     self.calibrated_pose: Pose | None = None
@@ -114,6 +146,7 @@ class SelfdriveD:
     self.excessive_actuation = self.params.get("Offroad_ExcessiveActuation") is not None
     self.big_model_loading = False
     self.big_model_active = False
+    self.big_model_chestnut = False
     self.big_model_failed = False
     self.big_model_ready_t = 0.
 
@@ -123,14 +156,15 @@ class SelfdriveD:
                                   (['starpilotSelfdriveState'] if self.conditional_replay else []))
 
     self.gps_location_service = get_gps_location_service(self.params)
-    self.gps_packets = [self.gps_location_service]
+    self.gps_packets = [self.gps_location_service, 'starpilotCarState']
     self.sensor_packets = ["accelerometer", "gyroscope"]
     self.camera_packets = ["narrowRoadCameraState", "cabinCameraState", "wideRoadCameraState"]
 
     # TODO: de-couple selfdrived with card/conflate on carState without introducing controls mismatches
-    self.car_state_sock = messaging.sub_sock('carState', timeout=20)
+    self.car_state_poller = messaging.Poller() if self.aol_replay and self.axis_transport_required else None
+    self.car_state_sock = messaging.sub_sock('carState', poller=self.car_state_poller, timeout=20)
 
-    ignore = self.sensor_packets + self.gps_packets + ['alertDebug', 'lateralManeuverPlan', 'laneChangeAssistWire']
+    ignore = self.sensor_packets + self.gps_packets + ['alertDebug', 'lateralManeuverPlan', 'laneChangeAssistWire', 'starpilotLongitudinalPlan']
     if self.aol_replay:
       ignore += ['aolIntentWire']
     if self.axis_transport_required:
@@ -143,14 +177,18 @@ class SelfdriveD:
     if REPLAY:
       # no vipc in replay will make them ignored anyways
       ignore += ['narrowRoadCameraState', 'wideRoadCameraState']
+    from openpilot.starpilot.car.gm.radar_recovery import capability as radar_recovery_capability
+    radar_notifications = ['radarTracks'] if radar_recovery_capability(self.CP) is not None else []
+    ignore += radar_notifications
     self.sm = messaging.SubMaster(['deviceState', 'pandaStates', 'peripheralState', 'modelV2', 'extrinsicsCalibration',
                                    'carOutput', 'driverMonitoringState', 'longitudinalPlan', 'deviceMotion', 'lateralDelay',
                                    'managerState', 'vehicleParameters', 'radarState', 'lateralTorqueParameters',
                                    'controlsState', 'carControl', 'driverAssistance', 'alertDebug', 'userBookmark',
-                                   'lateralManeuverPlan', 'laneChangeAssistWire'] + (['aolIntentWire'] if self.aol_replay else []) +
-                                   (['aolSafetyWire'] if self.axis_transport_required else []) + \
+                                   'lateralManeuverPlan', 'laneChangeAssistWire', 'starpilotLongitudinalPlan'] +
+                                  (['aolIntentWire'] if self.aol_replay else []) +
+                                   (['aolSafetyWire'] if self.axis_transport_required else []) +
                                    (['slcState'] if self.conditional_replay or self.switchback_capable else []) + \
-                                   self.camera_packets + self.sensor_packets + self.gps_packets,
+                                   self.camera_packets + self.sensor_packets + self.gps_packets + radar_notifications,
                                   ignore_alive=ignore, ignore_avg_freq=ignore,
                                   ignore_valid=ignore, frequency=int(1/DT_CTRL))
 
@@ -159,6 +197,7 @@ class SelfdriveD:
     self.aol_settings = read_settings(self.params) if self.aol_replay else None
     self.is_ldw_enabled = self.params.get_bool("IsLdwEnabled")
     self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
+    self.radar_recovery_enabled = self.params.get_bool("RadarRecoveryAlert")
 
     car_recognized = self.CP.brand != 'mock'
 
@@ -168,7 +207,8 @@ class SelfdriveD:
 
     self.CS_prev = car.CarState.new_message()
     self.AM = AlertManager()
-    self.events = Events()
+    from openpilot.starpilot.car.events import event_rules
+    self.events = Events(event_rules(self.CP))
 
     self.initialized = False
     self.enabled = False
@@ -189,6 +229,7 @@ class SelfdriveD:
     self.dm_uncertain_alerted = False
     self.state_machine = StateMachine()
     self.rk = Ratekeeper(100, print_delay_threshold=None)
+    # Observational only. Do not cache this qualification for authority decisions.
 
     # Determine startup event
     self.startup_event = EventName.startup if build_metadata.openpilot.comma_remote and build_metadata.tested_channel else EventName.startupMaster
@@ -207,11 +248,95 @@ class SelfdriveD:
     elif self.CP.passive:
       self.events.add(EventName.dashcamMode, static=True)
 
+  def update_process_health(self) -> bool:
+    not_running = driving_process_failures(self.sm['managerState'].processes)
+    if self.sm.recv_frame['managerState'] and not_running:
+      if not_running != self.not_running_prev:
+        cloudlog.event("process_not_running", not_running=not_running, error=True)
+      self.not_running_prev = not_running
+      self.events.add(EventName.processNotRunning)
+      return True
+    return False
+
+  def update_big_model_status(self) -> bool:
+    return update_big_model_status(self)
+
+  def _update_steering_authority(self, CS):
+    if not monitored_profile(self.CP):
+      self.steering_authority_unavailable = False
+      return
+    now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
+    source_ns = self.aol_car_state_log_ns
+    source_current = bool(getattr(self, 'conditional_car_state_valid', False) and CS.canValid and not CS.canTimeout and
+                          0 < source_ns <= now_ns and now_ns - source_ns <= INTENT_MAX_AGE_NS)
+    companion = getattr(self, 'steering_companion', None)
+    if companion is None:
+      companion = self.steering_companion = SteeringCompanion()
+    pair = companion.current(self.sm, source_ns=source_ns, now_ns=now_ns)
+    if not source_current:
+      pair = None
+    previous_axes = self.aol_axis_decision
+    expected_active = self.active or previous_axes.lateral_active or previous_axes.longitudinal_active
+    if pair is not None:
+      self.steering_authority_unavailable = pair
+    elif expected_active:
+      self.steering_authority_unavailable = True
+    if getattr(self, 'steering_authority_unavailable', False):
+      self.events.add(EventName.controlsMismatch)
+
+  def _update_car_event_sample(self, CS, previous):
+    # Block resume if cruise never previously enabled
+    resume_pressed = any(be.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be in CS.buttonEvents)
+    if not self.CP.pcmCruise and CS.vCruise > 250 and resume_pressed:
+      self.events.add(EventName.resumeBlocked)
+
+    # Add car events, ignore if CAN isn't valid
+    if CS.canValid:
+      car_events = self.car_events.update(CS, previous, self.sm['carControl']).to_msg()
+      device = self.sm['deviceState']
+      drive_id = (int(device.startedMonoTime) if self.sm.seen['deviceState'] and self.sm.alive['deviceState'] and
+                  self.sm.valid['deviceState'] and device.started else 0)
+      show_low_speed = self.low_speed_advisory.update(float(CS.vEgo), float(self.CP.minSteerSpeed), drive_id=drive_id)
+      self.events.add_from_msg([event for event in car_events if event.name != EventName.belowSteerSpeed])
+      if show_low_speed:
+        self.events.add(EventName.belowSteerSpeed)
+      paddle_pressed = paddle_cancel(self.CP, CS, enabled=self.enabled, saved=self.nostalgia_enabled)
+      self.nostalgia_paddle_cancel |= bool(paddle_pressed and EventName.buttonCancel not in self.events.names and
+                                         not physical_cancel(CS))
+      if paddle_pressed:
+        self.events.add(EventName.buttonCancel)
+
+      if self.CP.notCar:
+        # wait for everything to init first
+        if self.sm.frame > int(2. / DT_CTRL) and self.initialized:
+          # body always wants to enable
+          self.events.add(EventName.pcmEnable)
+
+      # Disable on rising edge of accelerator or brake. Also disable on brake when speed > 0
+      if (CS.gasPressed and not previous.gasPressed and self.disengage_on_accelerator) or \
+        (CS.brakePressed and (not previous.brakePressed or not CS.standstill)) or \
+        (CS.regenBraking and (not previous.regenBraking or not CS.standstill)):
+        self.events.add(EventName.pedalPressed)
+
+
   def update_events(self, CS):
     """Compute onroadEvents from carState"""
 
     self.events.clear()
+    self.car_event_sample_count = 0
+    self.aol_reconciled_sources = ()
+    self.tesla_stock_alerts = []
     self.nostalgia_paddle_cancel = False
+    action_owner = getattr(self, 'controller_action_owner', None)
+    action_sock = getattr(self, 'controller_action_sock', None)
+    if action_owner is not None and action_sock is not None:
+      for _ in range(8):
+        request = messaging.recv_one_or_none(action_sock)
+        if request is None:
+          break
+        if (str(request.slcAction.kind) == 'disengageRequest' and self.enabled and
+            action_owner.update(request, self.sm, self.CP, now_ns=time.monotonic_ns())):
+          self.events.add(EventName.buttonCancel)
 
     if self.sm['controlsState'].lateralControlState.which() == 'debugState':
       self.events.add(EventName.joystickDebug)
@@ -224,20 +349,7 @@ class SelfdriveD:
     if self.big_model_loading:
       self.events.add(EventName.bigModelLoading)
 
-    big_active = self.params.get("ChestnutActive")
-    chestnut_present = self.sm['deviceState'].chestnutPresent
-    model_unavailable = big_active is True and self.sm.seen['modelV2'] and not self.sm.alive['modelV2']
-    big_failed = big_active is False or model_unavailable or (self.big_model_active and not chestnut_present)
-    if big_failed and not self.big_model_failed:
-      self.events.add(EventName.bigModelFailed)
-      self.big_model_ready_t = time.monotonic()
-    self.big_model_failed = big_failed
-
-    # soft disable if the big model fails
-    if big_active:
-      self.big_model_active = True
-    if not self.enabled and not model_unavailable:
-      self.big_model_active = False
+    big_failed = self.update_big_model_status()
 
     if self.sm.recv_frame['lateralManeuverPlan'] > 0:
       self.events.add(EventName.lateralManeuver)
@@ -253,6 +365,7 @@ class SelfdriveD:
 
     # Don't add any more events if not initialized
     if not self.initialized:
+      self._update_steering_authority(CS)
       self.events.add(EventName.selfdriveInitializing)
       return
 
@@ -264,12 +377,8 @@ class SelfdriveD:
 
     # Don't add any more events while in dashcam mode
     if self.CP.passive:
+      self._update_steering_authority(CS)
       return
-
-    # Block resume if cruise never previously enabled
-    resume_pressed = any(be.type in (ButtonType.accelCruise, ButtonType.resumeCruise) for be in CS.buttonEvents)
-    if not self.CP.pcmCruise and CS.vCruise > 250 and resume_pressed:
-      self.events.add(EventName.resumeBlocked)
 
     # Handle DM
     if not self.CP.notCar:
@@ -295,29 +404,6 @@ class SelfdriveD:
       if self.sm['driverMonitoringState'].visionPolicyState.uncertainOffroadAlertPercent >= 100 and not self.dm_uncertain_alerted:
         set_offroad_alert("Offroad_DriverMonitoringUncertain", True)
         self.dm_uncertain_alerted = True
-
-    # Add car events, ignore if CAN isn't valid
-    if CS.canValid:
-      car_events = self.car_events.update(CS, self.CS_prev, self.sm['carControl']).to_msg()
-      self.events.add_from_msg(car_events)
-
-      paddle_pressed = paddle_cancel(self.CP, CS, enabled=self.enabled, saved=self.nostalgia_enabled)
-      self.nostalgia_paddle_cancel = bool(paddle_pressed and EventName.buttonCancel not in self.events.names and
-                                         not physical_cancel(CS))
-      if paddle_pressed:
-        self.events.add(EventName.buttonCancel)
-
-      if self.CP.notCar:
-        # wait for everything to init first
-        if self.sm.frame > int(2. / DT_CTRL) and self.initialized:
-          # body always wants to enable
-          self.events.add(EventName.pcmEnable)
-
-      # Disable on rising edge of accelerator or brake. Also disable on brake when speed > 0
-      if (CS.gasPressed and not self.CS_prev.gasPressed and self.disengage_on_accelerator) or \
-        (CS.brakePressed and (not self.CS_prev.brakePressed or not CS.standstill)) or \
-        (CS.regenBraking and (not self.CS_prev.regenBraking or not CS.standstill)):
-        self.events.add(EventName.pedalPressed)
 
     # Create events for temperature, disk space, and memory
     if self.sm['deviceState'].thermalStatus >= ThermalStatus.overheated:
@@ -364,6 +450,116 @@ class SelfdriveD:
       device_motion = Pose.from_device_motion(self.sm['deviceMotion'])
       self.calibrated_pose = self.pose_calibrator.build_calibrated_pose(device_motion)
 
+    for i, pandaState in enumerate(self.sm['pandaStates']):
+      # All pandas must match the list of safetyConfigs, and if outside this list, must be silent or noOutput
+      if i < len(self.CP.safetyConfigs):
+        safety_mismatch = pandaState.safetyModel != self.CP.safetyConfigs[i].safetyModel or \
+                          pandaState.safetyParam != self.CP.safetyConfigs[i].safetyParam or \
+                          pandaState.alternativeExperience != self.CP.alternativeExperience
+      else:
+        safety_mismatch = pandaState.safetyModel not in IGNORED_SAFETY_MODES
+
+      # safety mismatch allows some time for pandad to set the safety mode and publish it back from panda
+      if (safety_mismatch and self.sm.frame*DT_CTRL > 10.) or pandaState.safetyRxChecksInvalid or self.mismatch_counter >= 200:
+        self.events.add(EventName.controlsMismatch)
+
+      if log.PandaState.FaultType.relayMalfunction in pandaState.faults:
+        self.events.add(EventName.relayMalfunction)
+
+    # Handle HW and system malfunctions
+    # Order is very intentional here. Be careful when modifying this.
+    # All events here should at least have NO_ENTRY and SOFT_DISABLE.
+    num_events = len(self.events)
+
+    if self.big_model_active and big_failed:
+      self.events.add(EventName.bigModelFailed)
+
+    if not self.update_process_health():
+      if not SIMULATION and not self.rk.lagging:
+        if not self.sm.all_alive(self.camera_packets):
+          self.events.add(EventName.cameraMalfunction)
+        elif not self.sm.all_freq_ok(self.camera_packets):
+          self.events.add(EventName.cameraFrameRate)
+    if not REPLAY and self.rk.lagging:
+      self.events.add(EventName.selfdrivedLagging)
+    if self.CP.openpilotLongitudinalControl:
+      if self.sm['radarState'].radarErrors.canError:
+        self.events.add(EventName.canError)
+      elif self.sm['radarState'].radarErrors.radarUnavailableTemporary:
+        self.events.add(EventName.radarTempUnavailable)
+      elif any(self.sm['radarState'].radarErrors.to_dict().values()):
+        self.events.add(EventName.radarFault)
+    hardware_events_added = len(self.events) - num_events
+
+    input_proof = getattr(self, 'aol_step_input_proof', None)
+    reconcile_input = bool(input_proof is not None and not REPLAY and self.aol_replay and self.axis_transport_required and
+                           self.CP.openpilotLongitudinalControl and qualified_ioniq6(self.CP) and
+                           input_proof[0] == self.aol_session_id and
+                           (input_proof[8] or input_proof[9]))
+    self.aol_event_input_reconcile = reconcile_input
+    CS = self.refresh_event_car_state(CS)
+    if not reconcile_input:
+      # Other vehicle owners retain their original ordering. In particular,
+      # GM's exact steering companion must not lose an earlier source's fault
+      # when a newer carState arrives during car-event processing.
+      self._update_steering_authority(CS)
+    previous = self.CS_prev
+    retained_source = (getattr(self, 'car_state_retained_source_ns', 0)
+                       if not getattr(self, 'car_state_samples', ()) else 0)
+    consumed = 0
+    envelope_errors = []
+    while True:
+      received = getattr(self, 'car_state_samples', ())
+      samples = received[consumed:] if received else ((CS, getattr(self, 'conditional_car_state_valid', False)),)
+      for sample, envelope_valid in samples:
+        self._update_car_event_sample(sample, previous)
+        self.car_event_sample_count += 1
+        if sample.canTimeout:
+          envelope_errors.append(EventName.canBusMissing)
+        elif (received and not envelope_valid) or not sample.canValid:
+          envelope_errors.append(EventName.canError)
+        previous = sample
+      consumed = len(received)
+      if not reconcile_input:
+        break
+      # Input can arrive while car-event owners run. Reconcile it before the
+      # selected-source owners and authority/state-machine decisions. The drain
+      # retains one total 32-envelope bound; only a blocking wait depends on
+      # the original output deadline. A fresh pair may renew accepted engagement
+      # after that deadline. The cursor processes each physical sample once.
+      # Interleave the two raw inputs before selected-source owners. Intent
+      # can arrive just before its carState; never select that state without
+      # processing every newly consumed physical sample through this cursor.
+      # The cursor only repeats for new carStates (32 total); all of these
+      # intent drains share one 32-message step budget, including earlier waits.
+      companion = getattr(self, 'aol_intent_companion', None)
+      remaining = max(0, 32 - self.aol_step_intent_drain_count)
+      drained = companion is not None and self.drain_axis_intent(companion, max_messages=remaining)
+      self.aol_event_intent_drained = bool(drained and self.aol_step_intent_drain_ok and self.aol_event_intent_drained is not False)
+      CS = self.refresh_event_car_state(CS, allow_wait=not self.aol_event_input_wait_attempted)
+      if len(getattr(self, 'car_state_samples', ())) <= consumed:
+        break
+      self.aol_reconciled_sources = ((retained_source,) if retained_source else ()) + tuple(
+        int(sample.logMonoTime) for sample in self.car_state_envelopes)
+    samples = getattr(self, 'car_state_samples', ()) or ((CS, getattr(self, 'conditional_car_state_valid', False)),)
+    if self.car_event_sample_count > 1:
+      for event in envelope_errors:
+        self.events.add(event)
+    self.event_car_state = CS
+    if reconcile_input:
+      self._update_steering_authority(CS)
+    if any(physical_cancel(sample) for sample, _ in samples):
+      self.nostalgia_paddle_cancel = False
+    if CS.canValid:
+      if self.tesla_stock_consumer.binding is not None:
+        intent_companion = getattr(self, 'aol_intent_companion', None)
+        drained = intent_companion is None or self.drain_axis_intent(intent_companion)
+        now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
+        companion = current_intent(self.sm, car_state_ns=int(self.sm.logMonoTime['carState']), now_ns=now_ns,
+                                   previous=self.aol_last_intent, companion=intent_companion, drain=False) if drained else None
+        session = companion.producerSessionId if companion is not None else None
+        self.tesla_stock_alerts = self.tesla_stock_consumer.poll(self.sm, now_ns=now_ns, session=session)
+
     if self.calibrated_pose is not None and not self.CP.notCar:
       excessive_actuation = self.excessive_actuation_check.update(self.sm, CS, self.calibrated_pose)
       if not self.excessive_actuation and excessive_actuation is not None:
@@ -389,52 +585,7 @@ class SelfdriveD:
                                                     LaneChangeState.laneChangeFinishing):
       self.events.add(EventName.laneChange)
 
-    for i, pandaState in enumerate(self.sm['pandaStates']):
-      # All pandas must match the list of safetyConfigs, and if outside this list, must be silent or noOutput
-      if i < len(self.CP.safetyConfigs):
-        safety_mismatch = pandaState.safetyModel != self.CP.safetyConfigs[i].safetyModel or \
-                          pandaState.safetyParam != self.CP.safetyConfigs[i].safetyParam or \
-                          pandaState.alternativeExperience != self.CP.alternativeExperience
-      else:
-        safety_mismatch = pandaState.safetyModel not in IGNORED_SAFETY_MODES
-
-      # safety mismatch allows some time for pandad to set the safety mode and publish it back from panda
-      if (safety_mismatch and self.sm.frame*DT_CTRL > 10.) or pandaState.safetyRxChecksInvalid or self.mismatch_counter >= 200:
-        self.events.add(EventName.controlsMismatch)
-
-      if log.PandaState.FaultType.relayMalfunction in pandaState.faults:
-        self.events.add(EventName.relayMalfunction)
-
-    # Handle HW and system malfunctions
-    # Order is very intentional here. Be careful when modifying this.
-    # All events here should at least have NO_ENTRY and SOFT_DISABLE.
-    num_events = len(self.events)
-
-    if self.big_model_active and big_failed:
-      self.events.add(EventName.bigModelFailed)
-
-    not_running = {p.name for p in self.sm['managerState'].processes if not p.running and p.shouldBeRunning}
-    if self.sm.recv_frame['managerState'] and len(not_running):
-      if not_running != self.not_running_prev:
-        cloudlog.event("process_not_running", not_running=not_running, error=True)
-      self.not_running_prev = not_running
-    if self.sm.recv_frame['managerState'] and not_running:
-      self.events.add(EventName.processNotRunning)
-    else:
-      if not SIMULATION and not self.rk.lagging:
-        if not self.sm.all_alive(self.camera_packets):
-          self.events.add(EventName.cameraMalfunction)
-        elif not self.sm.all_freq_ok(self.camera_packets):
-          self.events.add(EventName.cameraFrameRate)
-    if not REPLAY and self.rk.lagging:
-      self.events.add(EventName.selfdrivedLagging)
-    if self.CP.openpilotLongitudinalControl:
-      if self.sm['radarState'].radarErrors.canError:
-        self.events.add(EventName.canError)
-      elif self.sm['radarState'].radarErrors.radarUnavailableTemporary:
-        self.events.add(EventName.radarTempUnavailable)
-      elif any(self.sm['radarState'].radarErrors.to_dict().values()):
-        self.events.add(EventName.radarFault)
+    num_can_events = len(self.events)
     if CS.canTimeout:
       self.events.add(EventName.canBusMissing)
     elif not CS.canValid:
@@ -442,7 +593,7 @@ class SelfdriveD:
 
     # generic catch-all. ideally, a more specific event should be added above instead
     has_disable_events = self.events.contains(ET.NO_ENTRY) and (self.events.contains(ET.SOFT_DISABLE) or self.events.contains(ET.IMMEDIATE_DISABLE))
-    no_system_errors = (not has_disable_events) or (len(self.events) == num_events)
+    no_system_errors = (not has_disable_events) or (hardware_events_added == 0 and len(self.events) == num_can_events)
     warmup_sec = 5.
     big_model_settling = self.big_model_loading or time.monotonic() < self.big_model_ready_t + warmup_sec
     if not self.sm.all_checks() and no_system_errors and not big_model_settling:  # the load holds modelV2 and friends back on purpose
@@ -510,6 +661,7 @@ class SelfdriveD:
 
     # GPS checks
     gps_ok = self.sm.recv_frame[self.gps_location_service] > 0 and (self.sm.frame - self.sm.recv_frame[self.gps_location_service]) * DT_CTRL < 2.0
+    gps_ok = gps_ok or gps_observation(self.sm, 'starpilotCarState', time.monotonic_ns()) is not None
     if not gps_ok and self.sm['deviceMotion'].inputsOK and (self.distance_traveled > 1500):
       self.events.add(EventName.noGps)
     if gps_ok:
@@ -523,31 +675,83 @@ class SelfdriveD:
 
     # Decrement personality on distance button press
     if self.CP.openpilotLongitudinalControl:
-      if any(not be.pressed and be.type == ButtonType.gapAdjustCruise for be in CS.buttonEvents):
-        self.personality = (self.personality - 1) % 3
-        self.params.put('LongitudinalPersonality', self.personality)
-        self.events.add(EventName.personalityChanged)
+      for sample, _ in samples:
+        if any(not be.pressed and be.type == ButtonType.gapAdjustCruise for be in sample.buttonEvents):
+          self.personality = (self.personality - 1) % 3
+          self.params.put('LongitudinalPersonality', self.personality)
+          self.events.add(EventName.personalityChanged)
+
 
   def data_sample(self):
+    self.car_state_retained_source_ns = self.aol_car_state_log_ns
+    self.car_state_retained_valid = getattr(self, 'conditional_car_state_valid', False)
     _car_state = messaging.recv_one(self.car_state_sock)
+    samples = []
+    queue_invalid = False
+    if _car_state is not None:
+      samples.append(_car_state)
+      if (getattr(self, 'aol_replay', False) and getattr(self, 'axis_transport_required', False) and
+          not REPLAY):
+        # Preserve every consumed transition; only the authority source advances.
+        for _ in range(31):
+          following = messaging.recv_one_or_none(self.car_state_sock)
+          if following is None:
+            break
+          queue_invalid |= int(following.logMonoTime) <= int(samples[-1].logMonoTime)
+          samples.append(following)
+        else:
+          # A full bounded batch cannot establish that the receiver caught up.
+          queue_invalid = True
+        _car_state = samples[-1]
+    self.sm.update(0)
+
+    if (getattr(self, 'aol_replay', False) and getattr(self, 'axis_transport_required', False) and
+        not REPLAY):
+      # A carState may arrive during SubMaster work after the blocking wait/drain.
+      # Catch up without a second wait, preserving every transition and the total bound.
+      for _ in range(32 - len(samples)):
+        following = messaging.recv_one_or_none(self.car_state_sock)
+        if following is None:
+          break
+        previous_stamp = int(samples[-1].logMonoTime) if samples else self.aol_car_state_log_ns
+        queue_invalid |= int(following.logMonoTime) <= previous_stamp or not following.valid
+        samples.append(following)
+      else:
+        queue_invalid = True
+      if samples:
+        _car_state = samples[-1]
+      queue_invalid |= any(not sample.valid for sample in samples)
+
+    self.car_state_envelopes = tuple(samples)
+    self.car_state_queue_invalid = queue_invalid
+    if samples:
+      self.car_state_last_received_ns = max(int(sample.logMonoTime) for sample in samples)
+    self.car_state_samples = tuple((sample.carState, bool(sample.valid)) for sample in samples)
     CS = _car_state.carState if _car_state else self.CS_prev
+    self.aol_expired_healthy_source = False
     if _car_state is not None:
       self.aol_car_state_log_ns = int(_car_state.logMonoTime)
-      self.conditional_car_state_valid = bool(_car_state.valid)
+      self.conditional_car_state_valid = bool(_car_state.valid) and not queue_invalid
+      if queue_invalid:
+        self.aol_car_state_log_ns = 0
     else:
       # The 20 ms socket wait can expire between healthy CAN frames. Reusing
       # CS_prev must also keep its original timestamp, never create a new one.
       age_ns = time.monotonic_ns() - self.aol_car_state_log_ns
       retained = (self.conditional_car_state_valid and self.aol_car_state_log_ns > 0 and
                   0 <= age_ns <= INTENT_MAX_AGE_NS and CS.canValid and not CS.canTimeout)
+      self.aol_expired_healthy_source = bool(self.conditional_car_state_valid and
+        self.aol_car_state_log_ns > 0 and age_ns > INTENT_MAX_AGE_NS and CS.canValid and not CS.canTimeout)
       if not retained:
         self.aol_car_state_log_ns = 0
         self.conditional_car_state_valid = False
 
-    self.sm.update(0)
-
     if not self.initialized:
       all_valid = CS.canValid and self.sm.all_checks()
+      if self.axis_transport_required and native_bootstrap_supported(self.CP):
+        now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
+        all_valid = all_valid and current_native(self.sm, self.CP, now_ns=now_ns,
+                                                axis_session_id=self.aol_session_id) is not None
       timed_out = self.sm.frame * DT_CTRL > 6.
       if all_valid or timed_out or (SIMULATION and not REPLAY):
         available_streams = VisionIpcClient.available_streams("camerad", block=False)
@@ -587,6 +791,227 @@ class SelfdriveD:
 
     return CS
 
+  def held_axis_override_wait(self, CS, proof, now_ns):
+    """Recognize an already applied override; never admit a new physical edge."""
+    if (proof is None or not qualified_ioniq6(self.CP) or not self.sm.seen['carControl'] or
+        not self.sm.valid['carControl'] or self.sm['carControl'].longActive or
+        not 0 < int(self.sm.logMonoTime['carControl']) <= now_ns or
+        now_ns - int(self.sm.logMonoTime['carControl']) > INTENT_MAX_AGE_NS):
+      return False, False
+    previous = self.CS_prev
+    samples = getattr(self, 'car_state_samples', ()) or ((CS, self.conditional_car_state_valid),)
+    held_brake = bool(proof[8] and not proof[9] and not self.enabled and not self.active and
+      (previous.brakePressed or previous.regenBraking) and
+      all(valid and sample.brakePressed == previous.brakePressed and sample.regenBraking == previous.regenBraking
+          and not sample.gasPressed and not sample.buttonEvents for sample, valid in samples))
+    held_gas = bool(proof[9] and self.enabled and self.active and previous.gasPressed and
+      self.events.contains(ET.OVERRIDE_LONGITUDINAL) and
+      all(valid and sample.gasPressed and not sample.brakePressed and not sample.regenBraking
+          and not sample.buttonEvents for sample, valid in samples))
+    return held_brake, held_gas
+
+  def drain_axis_intent(self, companion, *, max_messages=None):
+    if getattr(self, 'aol_event_input_reconcile', False):
+      remaining = max(0, 32 - getattr(self, 'aol_step_intent_drain_count', 0))
+      max_messages = remaining if max_messages is None else min(max_messages, remaining)
+    drained = companion.drain() if max_messages is None else companion.drain(max_messages=max_messages)
+    # Empty later drains must not erase earlier restrictive burst evidence.
+    self.aol_step_intent_drain_count = (getattr(self, 'aol_step_intent_drain_count', 0) +
+                                       getattr(companion, 'last_drain_count', 0))
+    # A later empty/fresh drain cannot erase a failed earlier burst. Only the
+    # qualified interleaved reconciliation consumes this cumulative verdict;
+    # legacy callers still receive this call's original result.
+    self.aol_step_intent_drain_ok = bool(getattr(self, 'aol_step_intent_drain_ok', True) and drained)
+    return drained
+
+  def event_input_wait_ns(self, CS, now_ns, *, final_held_override=False):
+    """Bound an input wait by an original published lease; grant no new output."""
+    proof = getattr(self, 'aol_published_input_proof', None)
+    companion = getattr(self, 'aol_intent_companion', None)
+    intent = getattr(self, 'aol_last_intent', None)
+    previous_native = getattr(self, 'aol_published_input_native', None)
+    held_brake, held_gas = self.held_axis_override_wait(CS, proof, now_ns) if final_held_override else (False, False)
+    user_disable = (any(event.userDisable and event.name != EventName.pedalPressed for event in self.events.to_msg())
+                    if held_brake else self.events.contains(ET.USER_DISABLE))
+    if (proof is None or companion is None or intent is None or previous_native is None or
+        self.aol_authority_lost or
+        user_disable or any(self.events.contains(kind) for kind in (ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE)) or
+        not self.sm.all_checks() or self.rk.lagging or
+        self.sm['extrinsicsCalibration'].calStatus != log.ExtrinsicsCalibration.Status.calibrated or
+        self.sm['deviceState'].thermalStatus >= ThermalStatus.overheated or
+        self.sm['deviceState'].freeSpacePercent < 7 or self.sm['deviceState'].memoryUsagePercent > 90 or
+        self.sm['deviceMotion'].inputsOK is False or self.sm['deviceMotion'].posenetOK is False or
+        self.sm.seen['vehicleParameters'] and not self.sm['vehicleParameters'].valid or
+        any(self.sm['radarState'].radarErrors.to_dict().values()) or
+        driving_process_failures(self.sm['managerState'].processes)):
+      return 0
+    session, source, published, deadline, producer, epoch, lateral, longitudinal, active_lateral, active_longitudinal = proof
+    ordinary = bool(active_longitudinal and self.enabled and self.active)
+    lateral_only = bool(active_lateral and not active_longitudinal and intent.allowedLatch and intent.lateralArmed)
+    if not (ordinary or lateral_only):
+      return 0
+    if (session != self.aol_session_id or not 0 < source <= published <= now_ns < deadline or
+        published - source > INTENT_MAX_AGE_NS or deadline != published + INTENT_MAX_AGE_NS or
+        intent.producerSessionId != producer or intent.carStateLogMonoTime != source or companion.integrity_epoch != epoch):
+      return 0
+    wait_origin_ns = now_ns
+    wait_deadline_ns = min(deadline, wait_origin_ns + int(DT_CTRL * 1e9))
+    if not self.drain_axis_intent(companion) or companion.integrity_epoch != epoch:
+      return 0
+    # Transport may deliver intent published after the caller's clock sample.
+    # Validate it against a post-drain clock without renewing the original wait.
+    now_ns = time.monotonic_ns()
+    if not wait_origin_ns <= now_ns < wait_deadline_ns:
+      return 0
+    latest = companion.latest
+    if final_held_override and getattr(self, 'aol_step_intent_drain_count', 0) > 1:
+      # A burst could contain an intermediate restriction. Do not infer an
+      # unchanged permission from just its final sample during this hold.
+      return 0
+    # An unchanged pause on an unrequested, inactive axis does not revoke the
+    # other axis's existing lease. New pauses and requested-axis pauses still veto.
+    if (latest is None or not latest[1] or latest[2] is None or
+        latest[2].producerSessionId != producer or not latest[2].settingsQualified or
+        latest[2].pauseLateral and (lateral or active_lateral or not intent.pauseLateral) or
+        latest[2].pauseLongitudinal and (longitudinal or active_longitudinal or not intent.pauseLongitudinal) or
+        latest[2].allowedLatch != intent.allowedLatch or latest[2].lateralArmed != intent.lateralArmed or
+        latest[0] != latest[2].carStateLogMonoTime or not 0 < latest[0] <= now_ns or
+        not 0 < latest[2].observedMonoTime <= now_ns <= latest[2].validUntilMonoTime or
+        not 0 < latest[2].validUntilMonoTime - latest[2].observedMonoTime <= SAFETY_MAX_AGE_NS):
+      return 0
+    samples = getattr(self, 'car_state_samples', ()) or ((CS, getattr(self, 'car_state_retained_valid', False)),)
+    if any(not valid or not sample.canValid or sample.canTimeout or sample.steerFaultTemporary or
+           sample.steerFaultPermanent or (sample.brakePressed or sample.regenBraking) and not held_brake or
+           active_longitudinal and sample.gasPressed and not held_gas or
+           sample.seatbeltUnlatched or sample.accFaulted or sample.doorOpen or physical_cancel(sample) or
+           sample.gearShifter not in (car.CarState.GearShifter.drive, car.CarState.GearShifter.sport,
+                                     car.CarState.GearShifter.low, car.CarState.GearShifter.brake)
+           for sample, valid in samples):
+      return 0
+    native = current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=session)
+    if (native is None or not healthy_transport(self.sm, self.CP, CS, session, now_ns, native) or
+        native.pandaSerial != previous_native.pandaSerial or native.pandaInventory != previous_native.pandaInventory or
+        native.observedMonoTime < previous_native.observedMonoTime or
+        bool(native.requestedLateral) != lateral or bool(native.requestedLongitudinal) != longitudinal):
+      return 0
+    return wait_deadline_ns - wait_origin_ns
+
+  def refresh_event_car_state(self, CS, *, allow_wait=True):
+    if not getattr(self, 'event_input_refresh_pending', False) or REPLAY or not self.aol_replay or not self.axis_transport_required:
+      return CS
+    samples = list(getattr(self, 'car_state_envelopes', ()))
+    invalid = getattr(self, 'car_state_queue_invalid', False)
+    previous_stamp = int(samples[-1].logMonoTime) if samples else getattr(self, 'car_state_last_received_ns', 0)
+    initial_count = len(samples)
+    for _ in range(32 - len(samples)):
+      following = messaging.recv_one_or_none(self.car_state_sock)
+      if following is None:
+        break
+      invalid |= int(following.logMonoTime) <= previous_stamp or not following.valid
+      previous_stamp = max(previous_stamp, int(following.logMonoTime))
+      samples.append(following)
+    else:
+      invalid = True
+    # If a real producer gap straddles the source cutoff, only wait while the
+    # original published proof can independently remain valid at consumers.
+    now_ns = time.monotonic_ns()
+    selected_stamp = int(samples[-1].logMonoTime) if samples else getattr(self, 'car_state_retained_source_ns', 0)
+    if (allow_wait and not invalid and len(samples) == initial_count and selected_stamp > 0 and
+        now_ns - selected_stamp > INTENT_MAX_AGE_NS and
+        not (getattr(self, 'aol_event_input_reconcile', False) and getattr(self, 'aol_event_input_wait_attempted', False))):
+      self.aol_event_input_wait_attempted = True
+      wait_until_ns = now_ns + self.event_input_wait_ns(CS, now_ns)
+      poller = getattr(self, 'car_state_poller', None)
+      # Validation itself can consume the remaining lease. Never poll from its
+      # earlier clock; the original absolute deadline still bounds this wait.
+      wait_ns = max(0, wait_until_ns - time.monotonic_ns())
+      polled = False
+      if poller is not None and wait_ns >= 1_000_000:
+        polled = poller.poll(wait_ns // 1_000_000)
+      if polled:
+        for _ in range(32 - len(samples)):
+          following = messaging.recv_one_or_none(self.car_state_sock)
+          if following is None:
+            break
+          invalid |= int(following.logMonoTime) <= previous_stamp or not following.valid
+          previous_stamp = max(previous_stamp, int(following.logMonoTime))
+          samples.append(following)
+        else:
+          invalid = True
+    self.car_state_envelopes = tuple(samples)
+    self.car_state_queue_invalid = invalid
+    self.car_state_last_received_ns = previous_stamp
+    self.car_state_samples = tuple((sample.carState, bool(sample.valid)) for sample in samples)
+    if samples:
+      latest = samples[-1]
+      self.aol_car_state_log_ns = 0 if invalid else int(latest.logMonoTime)
+      self.conditional_car_state_valid = bool(latest.valid) and not invalid
+      self.aol_expired_healthy_source = False
+      CS = latest.carState
+    return CS
+
+  def defer_expired_axis_publication(self, CS, initial_state, *, now_ns=None):
+    """Keep an existing unexpired proof for one normal tick; issue no new lease."""
+    if REPLAY or not self.aol_replay or not self.axis_transport_required or not qualified_ioniq6(self.CP):
+      return False
+    proof = getattr(self, 'aol_step_input_proof', None)
+    if now_ns is None:
+      now_ns = time.monotonic_ns()
+    source = self.aol_car_state_log_ns
+    if (getattr(self, 'aol_step_deferral_checked', False) or proof is None or proof != getattr(self, 'aol_published_input_proof', None) or
+        not self.conditional_car_state_valid or not 0 < source <= now_ns or
+        now_ns - source <= INTENT_MAX_AGE_NS or source != proof[1] or
+        now_ns >= proof[3] or self.aol_authority_lost or
+        getattr(self, 'aol_fault_reason', 'none') != 'none' or
+        getattr(self, 'aol_published_fault_reason', 'none') != 'none' or
+        initial_state != (self.state_machine.state, self.state_machine.soft_disable_timer, self.enabled, self.active) or
+        (self.state_machine.soft_disable_timer != 0 and not (
+          self.state_machine.state == log.SelfdriveState.OpenpilotState.disabled and
+          not self.enabled and not self.active and getattr(self, 'aol_availability_long_inhibit', False) and
+          proof[6] and not proof[7] and proof[8] and not proof[9])) or self.events.names != self.events_prev or
+        CS.buttonEvents or any(sample.buttonEvents for sample, _ in getattr(self, 'car_state_samples', ())) or
+        any(self.events.contains(kind) for kind in (ET.ENABLE, ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE)) or
+        (self.aol_axis_decision.lateral_active, self.aol_axis_decision.longitudinal_active) != (proof[8], proof[9])):
+      return False
+    # This eligibility check uses the same native/intent/health checks as an
+    # existing bounded input wait. It never changes the source or publishes an
+    # active decision. The next ordinary loop iteration consumes the next input.
+    self.aol_step_deferral_checked = True
+    allowed = self.event_input_wait_ns(CS, now_ns, final_held_override=True) > 0
+    return bool(allowed and now_ns <= time.monotonic_ns() < proof[3])
+
+  def reconciled_intent(self, intent, previous, pairs, epoch, now_ns):
+    sources = getattr(self, 'aol_reconciled_sources', ())
+    if not sources or intent is None:
+      return intent
+    companion = self.aol_intent_companion
+    proof = getattr(self, 'aol_step_input_proof', None)
+    if (proof is None or proof[0] != self.aol_session_id or companion is None or
+        epoch != proof[5] or companion.integrity_epoch != epoch or
+        intent.producerSessionId != proof[4]):
+      return None
+    for source_ns in sources:
+      pair = pairs.get(source_ns)
+      if (pair is None and previous is not None and source_ns == proof[1] and
+          previous.carStateLogMonoTime == source_ns and previous.producerSessionId == proof[4]):
+        pair = (source_ns, True, previous)
+      if pair is None or not pair[1] or pair[2] is None:
+        return None
+      restriction = pair[2]
+      if (pair[0] != source_ns or restriction.carStateLogMonoTime != source_ns or
+          not restriction.settingsQualified or restriction.producerSessionId != intent.producerSessionId or
+          not 0 < source_ns <= now_ns or not 0 < restriction.observedMonoTime <= now_ns <= restriction.validUntilMonoTime or
+          not 0 < restriction.validUntilMonoTime - restriction.observedMonoTime <= SAFETY_MAX_AGE_NS):
+        return None
+      # Earlier exact companions only veto the normally validated fresh pair.
+      # Their clocks never renew a source or supply an output lease.
+      intent = replace(intent, allowedLatch=intent.allowedLatch and restriction.allowedLatch,
+        lateralArmed=intent.lateralArmed and restriction.lateralArmed,
+        pauseLateral=intent.pauseLateral or restriction.pauseLateral,
+        pauseLongitudinal=intent.pauseLongitudinal or restriction.pauseLongitudinal,
+        optionalSetRelease=intent.optionalSetRelease and restriction.optionalSetRelease)
+    return intent
+
   def update_alerts(self, CS):
     clear_event_types = set()
     if ET.WARNING not in self.state_machine.current_alert_types:
@@ -597,6 +1022,8 @@ class SelfdriveD:
     pers = LONGITUDINAL_PERSONALITY_MAP[self.personality]
     alerts = self.events.create_alerts(self.state_machine.current_alert_types, [self.CP, CS, self.sm, self.is_metric,
                                                                                 self.state_machine.soft_disable_timer, pers])
+    alerts.extend(alert for alert in getattr(self, 'tesla_stock_alerts', [])
+                  if alert.event_type in self.state_machine.current_alert_types)
     now_ns = time.monotonic_ns()
     drive = int(self.sm['deviceState'].startedMonoTime) if self.sm['deviceState'].started else 0
     switchback = bool(self.switchback_capable and self.sm.seen['slcState'] and self.sm.alive['slcState'] and
@@ -649,10 +1076,358 @@ class SelfdriveD:
       alerts.append(alert)
     else:
       clear_event_types.add(FORCE_STOP_HOLD)
+    from openpilot.starpilot.car.gm.radar_recovery import EVENT_TYPE as RADAR_RECOVERY_EVENT, RecoveryNotification
+    if not hasattr(self, 'radar_recovery_notification'):
+      self.radar_recovery_notification = RecoveryNotification()
+    recovery = self.radar_recovery_notification
+    notification = recovery.update(self.CP, self.sm, enabled=getattr(self, 'radar_recovery_enabled', False), now_ns=now_ns)
+    if notification is not None:
+      alerts.append(notification)
+    if not recovery.monitor.visible(now_ns):
+      clear_event_types.add(RADAR_RECOVERY_EVENT)
+    if getattr(self, 'aol_fault_reason', 'none') == 'availabilityPause':
+      warning = Alert("Steering Paused", "Communication Issue", log.SelfdriveState.AlertStatus.normal,
+        log.SelfdriveState.AlertSize.small, AlertPriority.LOW, car.CarControl.HUDControl.VisualAlert.none,
+        (log.SelfdriveState.AudibleAlert.prompt if
+         now_ns <= getattr(self, 'aol_availability_chime_until_ns', 0) else log.SelfdriveState.AudibleAlert.none), 0.)
+      warning.alert_type, warning.event_type = 'aolAvailability/warning', ET.WARNING
+      alerts.append(warning)
     self.AM.add_many(self.sm.frame, alerts)
     self.AM.process_alerts(self.sm.frame, clear_event_types)
+    from openpilot.starpilot.audio.availability_warning import AvailabilityWarningDelivery
+    if not hasattr(self, 'availability_warning_delivery'):
+      self.availability_warning_delivery = AvailabilityWarningDelivery()
+    selected = self.AM.current_alert
+    self.availability_warning_delivery.observe(session=getattr(self, 'aol_session_id', None), drive=drive,
+      now_ns=now_ns, selected=bool(selected.alert_type == 'aolAvailability/warning' and
+        selected.audible_alert == log.SelfdriveState.AudibleAlert.prompt),
+      requested_until_ns=getattr(self, 'aol_availability_chime_until_ns', 0))
+    recovery.selected(self.AM.current_alert)
 
-  def publish_selfdriveState(self, CS):
+  def ordinary_source_availability(self, CS, now_ns, native=None):
+    """Classify lost host source; never renew a command or change engagement."""
+    return ordinary_source_availability(self, CS, now_ns, native, replay=REPLAY, native_provider=current_native)
+
+  def observe_ordinary_source_metadata(self, CS, intent, healthy_native, now_ns):
+    """Reuse this call's exact transport validation; retain the original proof."""
+    native = healthy_native
+    anchor = getattr(self, 'aol_ordinary_source_anchor', None)
+    companion = getattr(self, 'aol_intent_companion', None)
+    if (anchor is None or not (anchor[0][8] or anchor[0][9]) or
+        anchor[0][9] and (not self.enabled or not self.active) or intent is None or
+        not 0 < intent.carStateLogMonoTime <= now_ns or now_ns - intent.carStateLogMonoTime > INTENT_MAX_AGE_NS or
+        intent.carStateLogMonoTime <= anchor[2].carStateLogMonoTime or
+        intent.producerSessionId != anchor[0][4] or companion is None or companion.integrity_epoch != anchor[0][5] or
+        (self.events.contains(ET.USER_DISABLE) and not stock_lateral_role(self, CS, native, intent)) or
+        self.events.contains(ET.IMMEDIATE_DISABLE) or
+        native is None or native is not getattr(self.aol_transport_pause, 'observed_native', None) or
+        native.pandaSerial != anchor[1].pandaSerial or native.observedMonoTime < anchor[1].observedMonoTime or
+        tuple(p.hardwareSerial for p in native.pandaInventory) != tuple(p.hardwareSerial for p in anchor[1].pandaInventory)):
+      return
+    # The originally published command proof, deadline and CP identity remain
+    # unchanged. Only an input already admitted by normal runtime is remembered.
+    self.aol_ordinary_source_anchor = (anchor[0], native, intent, anchor[3], CS)
+
+  def ordinary_source_withdrawal(self):
+    accepted = self.aol_ordinary_source_anchor[2]
+    native = self.aol_ordinary_source_native
+    lateral_grant = bool(accepted.allowedLatch and accepted.lateralArmed and not accepted.pauseLateral and
+                         not getattr(self, 'aol_dm_lateral_inhibit', False) and
+                         native.requestedLateral and native.lateralAllowed)
+    # Both commands remain inactive. This ACK describes only an actual native
+    # lateral grant supporting separately retained armed intent; none is invented.
+    return AxisDecision(desired_lateral=lateral_grant, native_acknowledged=lateral_grant)
+
+  def retain_ordinary_source_state(self, CS, now_ns):
+    """Publication-time expiry withdraws commands; StateMachine owns countdown."""
+    if not self.ordinary_source_availability(CS, now_ns):
+      return False
+    self.aol_ordinary_source_pause = True
+    self.aol_publication_retained_intent = self.aol_ordinary_source_anchor[2]
+    self.events.add(EventName.commIssue)
+    self.aol_axis_decision = self.ordinary_source_withdrawal()
+    self.aol_fault_reason = 'availabilityPause'
+    self.aol_car_state_log_ns = 0
+    self.conditional_car_state_valid = False
+    # If publication crosses the cutoff after StateMachine ran, emit the fault
+    # now; its existing next-cycle transition owns the timer and driver state.
+    if self.enabled and ET.SOFT_DISABLE not in self.state_machine.current_alert_types:
+      self.state_machine.current_alert_types.append(ET.SOFT_DISABLE)
+    return True
+
+  def _expire_axis_source(self, CS, now_ns):
+    if REPLAY or not self.aol_replay or not self.axis_transport_required:
+      return
+    source_ns = self.aol_car_state_log_ns
+    if 0 < source_ns <= now_ns and now_ns - source_ns <= INTENT_MAX_AGE_NS:
+      self.aol_publication_retained_intent = None
+      return
+    if self.retain_ordinary_source_state(CS, now_ns):
+      return
+    pause = getattr(self, 'aol_transport_pause', None)
+    if (getattr(self, 'aol_fault_reason', 'none') == 'transportPause' and pause is not None and
+        pause.active and pause.observed_native is not None and not self.aol_authority_lost and
+        not getattr(self, 'aol_selected_pair_future', False) and
+        not self.aol_axis_decision.lateral_active and not self.aol_axis_decision.longitudinal_active):
+      # This step already validated the typed pause; its expired source grants no output.
+      self.aol_car_state_log_ns = 0
+      self.conditional_car_state_valid = False
+      self.aol_publication_retained_intent = None
+      self.aol_axis_decision = AxisDecision()
+      self.state_machine.state = log.SelfdriveState.OpenpilotState.disabled
+      self.enabled = self.active = False
+      if ET.ENABLE in self.state_machine.current_alert_types:
+        self.state_machine.current_alert_types.remove(ET.ENABLE)
+      return
+    intent = getattr(self, 'aol_last_intent', None) or getattr(self, 'aol_publication_retained_intent', None)
+    if not source_ns and intent is not None:
+      source_ns = int(intent.carStateLogMonoTime)
+    healthy_expiry = bool(not getattr(self, 'aol_selected_pair_future', False) and source_ns > 0 and source_ns <= now_ns and
+      now_ns - source_ns <= SAFETY_MAX_AGE_NS and CS.canValid and not CS.canTimeout and
+      (getattr(self, 'conditional_car_state_valid', False) or
+       getattr(self, 'aol_publication_retained_intent', None) is intent))
+    self.aol_car_state_log_ns = 0
+    self.conditional_car_state_valid = False
+    self.aol_expired_healthy_source = healthy_expiry
+    previous = self.aol_axis_decision
+    was_enabled = self.enabled
+    self.aol_axis_decision = AxisDecision()
+    pause = getattr(self, 'aol_availability_pause', None)
+    if (healthy_expiry and pause is not None and intent is not None and
+        getattr(self, 'aol_fault_reason', 'none') in ('none', 'availabilityPause') and
+        not self.aol_authority_lost and not self.events.contains(ET.IMMEDIATE_DISABLE) and
+        (not self.events.contains(ET.SOFT_DISABLE) or availability_only(self.events.to_msg())) and
+        not self.events.contains(ET.USER_DISABLE)):
+      self.events.add(EventName.commIssue)
+      native = current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_session_id)
+      from openpilot.starpilot.aol.transport_pause import _healthy_transport_native
+      healthy = _healthy_transport_native(self.sm, self.CP, CS, self.aol_session_id, now_ns, native)
+      retained = pause.observe(cp=self.CP, session=self.aol_session_id, sm=self.sm, cs=CS,
+        native=native, now_ns=now_ns, companion=getattr(self, 'aol_intent_companion', None),
+        intent=intent, events=self.events.to_msg(),
+        model_ready=bool(self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) and
+          self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
+        source_current=False, source_expired=True, prior_lateral_active=previous.lateral_active,
+        hard_fault=False, healthy_native=healthy)
+      if retained:
+        self.aol_publication_retained_intent = intent
+        self.aol_fault_reason = 'availabilityPause'
+        self.aol_availability_long_inhibit = True
+        self.aol_availability_ordinary_warning = bool(was_enabled or (
+          getattr(self, 'aol_published_fault_reason', 'none') == 'availabilityPause' and
+          getattr(self, 'aol_availability_ordinary_warning', False)))
+        if getattr(self, 'aol_published_fault_reason', 'none') != 'availabilityPause':
+          self.aol_availability_chime_until_ns = now_ns + 400_000_000
+        self.state_machine.state = log.SelfdriveState.OpenpilotState.disabled
+        self.enabled = self.active = False
+        if ET.ENABLE in self.state_machine.current_alert_types:
+          self.state_machine.current_alert_types.remove(ET.ENABLE)
+        if self.aol_availability_ordinary_warning and ET.SOFT_DISABLE not in self.state_machine.current_alert_types:
+          self.state_machine.current_alert_types.append(ET.SOFT_DISABLE)
+        self.aol_axis_decision = AxisDecision(desired_lateral=True, native_acknowledged=True)
+        if ET.WARNING not in self.state_machine.current_alert_types:
+          self.state_machine.current_alert_types.append(ET.WARNING)
+        return
+    self.aol_publication_retained_intent = None
+    self.state_machine.state = log.SelfdriveState.OpenpilotState.disabled
+    self.enabled = self.active = False
+    if ET.ENABLE in self.state_machine.current_alert_types:
+      self.state_machine.current_alert_types.remove(ET.ENABLE)
+    if was_enabled or previous.lateral_active or previous.longitudinal_active or intent is not None and intent.allowedLatch:
+      self.aol_fault_reason = 'critical'
+      self.aol_authority_lost = True
+      self.events.add(EventName.controlsMismatch)
+      if ET.IMMEDIATE_DISABLE not in self.state_machine.current_alert_types:
+        self.state_machine.current_alert_types.append(ET.IMMEDIATE_DISABLE)
+
+  def _expire_axis_continuity(self, CS, now_ns):
+    proof = getattr(self, 'aol_step_input_proof', getattr(self, 'aol_published_input_proof', None))
+    decision = self.aol_axis_decision
+    if (proof is None or proof[0] != self.aol_session_id or now_ns <= proof[3] or
+        not (decision.lateral_active or decision.longitudinal_active)):
+      return False
+    source_ns = self.aol_car_state_log_ns
+    intent = getattr(self, 'aol_last_intent', None)
+    companion = getattr(self, 'aol_intent_companion', None)
+    user_disable = self.events.contains(ET.USER_DISABLE)
+    if user_disable and self.held_axis_override_wait(CS, proof, now_ns)[0]:
+      # A moving held brake repeats pedalPressed while ordinary control is
+      # already disabled. Its existing lateral-only override is not a new edge.
+      user_disable = any(event.userDisable and event.name != EventName.pedalPressed for event in self.events.to_msg())
+    if (proof[1] < source_ns <= now_ns and now_ns - source_ns <= INTENT_MAX_AGE_NS and
+        self.conditional_car_state_valid and CS.canValid and not CS.canTimeout and
+        intent is not None and intent.carStateLogMonoTime == source_ns and
+        intent.producerSessionId == proof[4] and intent.settingsQualified and
+        0 < intent.observedMonoTime <= now_ns <= intent.validUntilMonoTime and
+        now_ns - intent.observedMonoTime <= INTENT_MAX_AGE_NS and
+        companion is not None and companion.integrity_epoch == proof[5] and
+        decision.native_acknowledged and not self.aol_authority_lost and
+        getattr(self, 'aol_fault_reason', 'none') == 'none' and
+        not user_disable and not self.events.contains(ET.IMMEDIATE_DISABLE) and
+        (not decision.longitudinal_active or self.enabled and self.active)):
+      native = current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_session_id)
+      prior_native = getattr(self, 'aol_published_input_native', None)
+      if (native is not None and prior_native is not None and native.pandaSerial == prior_native.pandaSerial and
+          native.observedMonoTime >= prior_native.observedMonoTime and
+          tuple(slot.hardwareSerial for slot in native.pandaInventory) ==
+          tuple(slot.hardwareSerial for slot in prior_native.pandaInventory) and
+          (not decision.lateral_active or native.requestedLateral and native.lateralAllowed) and
+          (not decision.longitudinal_active or native.requestedLongitudinal and native.longitudinalAllowed) and
+          (not self.events.contains(ET.SOFT_DISABLE) or
+           fresh_ordinary_lag_continuation(self, CS, intent, native, now_ns))):
+        # The old lease still expires at consumers. A newly validated source
+        # supplies its own permission without restoring a disengaged state.
+        return False
+    # The expired command still withdraws; host loss need not revoke a healthy
+    # driver's ordinary engagement before the existing soft-disable countdown.
+    if self.retain_ordinary_source_state(CS, now_ns):
+      return True
+    # A retained source cannot renew an expired output lease.
+    self.aol_axis_decision = AxisDecision()
+    was_enabled = self.enabled
+    self.state_machine.state = log.SelfdriveState.OpenpilotState.disabled
+    self.enabled = self.active = False
+    self.aol_availability_long_inhibit = True
+    if ET.ENABLE in self.state_machine.current_alert_types:
+      self.state_machine.current_alert_types.remove(ET.ENABLE)
+    intent = getattr(self, 'aol_last_intent', None)
+    pause = getattr(self, 'aol_availability_pause', None)
+    retained = False
+    if (intent is not None and pause is not None and not self.aol_authority_lost and
+        getattr(self, 'aol_fault_reason', 'none') == 'none' and
+        not any(self.events.contains(kind) for kind in (ET.USER_DISABLE, ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE))):
+      self.events.add(EventName.commIssue)
+      native = current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_session_id)
+      from openpilot.starpilot.aol.transport_pause import _healthy_transport_native
+      healthy = _healthy_transport_native(self.sm, self.CP, CS, self.aol_session_id, now_ns, native)
+      retained = pause.observe(cp=self.CP, session=self.aol_session_id, sm=self.sm, cs=CS,
+        native=native, now_ns=now_ns, companion=getattr(self, 'aol_intent_companion', None),
+        intent=intent, events=self.events.to_msg(),
+        model_ready=bool(self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) and
+          self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
+        source_current=bool(self.conditional_car_state_valid and 0 < self.aol_car_state_log_ns <= now_ns and
+          now_ns - self.aol_car_state_log_ns <= INTENT_MAX_AGE_NS and CS.canValid and not CS.canTimeout),
+        source_expired=False, prior_lateral_active=bool(proof[8]), hard_fault=False, healthy_native=healthy)
+    if retained:
+      self.aol_fault_reason = 'availabilityPause'
+      self.aol_axis_decision = AxisDecision(desired_lateral=True, native_acknowledged=True)
+      self.aol_availability_ordinary_warning = was_enabled
+      if getattr(self, 'aol_published_fault_reason', 'none') != 'availabilityPause':
+        self.aol_availability_chime_until_ns = now_ns + 400_000_000
+      if ET.WARNING not in self.state_machine.current_alert_types:
+        self.state_machine.current_alert_types.append(ET.WARNING)
+      if was_enabled and ET.SOFT_DISABLE not in self.state_machine.current_alert_types:
+        self.state_machine.current_alert_types.append(ET.SOFT_DISABLE)
+    else:
+      self.aol_fault_reason = 'critical'
+      self.aol_authority_lost = True
+      self.events.add(EventName.controlsMismatch)
+      if ET.IMMEDIATE_DISABLE not in self.state_machine.current_alert_types:
+        self.state_machine.current_alert_types.append(ET.IMMEDIATE_DISABLE)
+    return True
+
+  def publish_axis_proof(self, CS, *, defer_events=False, source_context=None):
+    now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
+    source_clock_scoped = bool(not REPLAY and self.aol_replay and self.axis_transport_required)
+    if source_clock_scoped:
+      self._expire_axis_source(CS, now_ns)
+      self._expire_axis_continuity(CS, now_ns)
+    reason = getattr(self, 'aol_fault_reason', 'none')
+    event_now_ns = now_ns
+    ce_send = None
+    if ((self.sm.frame % int(1. / DT_CTRL) == 0) or self.events.names != self.events_prev or
+        reason != getattr(self, 'aol_published_fault_reason', 'unknown')):
+      ce_send = messaging.new_message('onroadEvents', len(self.events))
+      ce_send.logMonoTime = event_now_ns
+      ce_send.valid = True
+      ce_send.onroadEvents = self.events.to_msg()
+    fault_event_ns = int(ce_send.logMonoTime) if ce_send is not None else getattr(self, 'aol_fault_event_ns', 0)
+    if self.aol_replay or getattr(self, 'ordinary_axis_ack_required', False):
+      if not source_clock_scoped:
+        now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
+      next_sequence = self.aol_sequence + 1
+      axis_msg = messaging.new_message('aolAxisState')
+      axis_msg.logMonoTime = now_ns
+      axis_msg.valid = bool(self.aol_car_state_log_ns > 0 or reason == 'transportPause' or
+                            source_clock_scoped and reason == 'availabilityPause')
+      axis = axis_msg.aolAxisState
+      axis.sessionId = self.aol_session_id
+      axis.faultReason = reason
+      axis.faultSessionId = self.aol_session_id
+      accepted_intent = getattr(self, 'aol_last_intent', None)
+      if accepted_intent is None and reason == 'availabilityPause' and not self.aol_car_state_log_ns:
+        accepted_intent = getattr(self, 'aol_publication_retained_intent', None)
+      accepted_companion = getattr(self, 'aol_intent_companion', None)
+      axis.intentProducerSessionId = accepted_intent.producerSessionId if accepted_intent is not None else ''
+      axis.intentIntegrityEpoch = accepted_companion.integrity_epoch if accepted_companion is not None else 0
+      axis.faultEventMonoTime = fault_event_ns
+      axis.sequence = next_sequence
+      axis.sourceCarStateMonoTime = self.aol_car_state_log_ns
+      axis.observedMonoTime = now_ns
+      axis.validUntilMonoTime = now_ns + 30_000_000
+      axis.mode = self.aol_axis_decision.mode
+      axis.lateralActive = self.aol_axis_decision.lateral_active
+      axis.longitudinalActive = self.aol_axis_decision.longitudinal_active
+      axis.desiredLateral = self.aol_axis_decision.desired_lateral
+      axis.desiredLongitudinal = self.aol_axis_decision.desired_longitudinal
+      axis.optionalSetRelease = bool(self.aol_replay and self.aol_last_intent is not None
+                                     and self.aol_last_intent.optionalSetRelease)
+      axis.nativeAcknowledged = self.aol_axis_decision.native_acknowledged
+      axis.qualified = bool((self.aol_replay or getattr(self, 'ordinary_axis_ack_required', False)) and
+        (not source_clock_scoped or self.aol_car_state_log_ns > 0 or
+         reason in ('transportPause', 'availabilityPause', 'critical')))
+      axis_deferred = False
+      if source_clock_scoped:
+        final_ns = time.monotonic_ns()
+        if ((axis.lateralActive or axis.longitudinalActive) and
+            (not 0 < self.aol_car_state_log_ns <= final_ns or final_ns - self.aol_car_state_log_ns > INTENT_MAX_AGE_NS) and
+            qualified_ioniq6(self.CP)):
+          if (source_context is not None and source_context[1] and
+              self.defer_expired_axis_publication(CS, source_context[0])):
+            # Serialization crossed the same source boundary. Retain only the
+            # original proof; staged message metadata grants no new authority.
+            self.aol_axis_publication_deferred = axis_deferred = True
+          else:
+            self._expire_axis_source(CS, time.monotonic_ns())
+            return self.publish_axis_proof(CS, defer_events=defer_events, source_context=source_context)
+        if not axis_deferred and self._expire_axis_continuity(CS, final_ns):
+          return self.publish_axis_proof(CS, defer_events=defer_events, source_context=source_context)
+      if not axis_deferred:
+        self.aol_sequence = next_sequence
+        self.pm.send('aolAxisState', axis_msg)
+        # Bind critical history to the actual completed axis publication. The
+        # working decision can change again during later source-expiry checks.
+        self.aol_published_fault_proof = ((str(axis.sessionId), str(axis.faultReason),
+          int(axis.faultEventMonoTime), tuple(self.events.names), bool(axis.desiredLateral),
+          bool(axis.desiredLongitudinal), bool(axis.lateralActive), bool(axis.longitudinalActive),
+          bool(axis.nativeAcknowledged)) if reason == 'critical' else None)
+        self.aol_published_stock_lateral_proof = (
+          stock_lateral_fault_proof(self, CS, axis_msg, time.monotonic_ns()) if source_clock_scoped and reason == 'critical' else None)
+        self.aol_published_input_proof = None
+        self.aol_published_input_native = None
+        if (source_clock_scoped and reason == 'none' and axis_msg.valid and axis.qualified and
+            axis.nativeAcknowledged and (axis.lateralActive or axis.longitudinalActive) and
+            0 < axis.sourceCarStateMonoTime <= now_ns and
+            now_ns - axis.sourceCarStateMonoTime <= INTENT_MAX_AGE_NS):
+          self.aol_published_input_proof = (str(axis.sessionId), int(axis.sourceCarStateMonoTime),
+            now_ns, int(axis.validUntilMonoTime), str(axis.intentProducerSessionId),
+            int(axis.intentIntegrityEpoch), bool(axis.desiredLateral), bool(axis.desiredLongitudinal),
+            bool(axis.lateralActive), bool(axis.longitudinalActive))
+          self.aol_published_input_native = getattr(self, 'aol_decision_native', None)
+          if axis.lateralActive or axis.longitudinalActive and self.enabled and self.active:
+            previous_anchor = getattr(self, 'aol_ordinary_source_anchor', None)
+            identity = previous_anchor[3] if previous_anchor is not None else cp_identity(self.CP)
+            self.aol_ordinary_source_anchor = (self.aol_published_input_proof,
+              self.aol_published_input_native, accepted_intent, identity, CS)
+    if not defer_events:
+      if ce_send is not None:
+        self.aol_fault_event_ns = int(ce_send.logMonoTime)
+        self.pm.send('onroadEvents', ce_send)
+      self.aol_published_fault_reason = reason
+      self.events_prev = self.events.names.copy()
+    return ce_send, reason
+
+  def publish_selfdriveState(self, CS, *, axis_published=False):
     # selfdriveState
     ss_msg = messaging.new_message('selfdriveState')
     ss_msg.valid = True
@@ -670,28 +1445,16 @@ class SelfdriveD:
     ss.alertStatus = self.AM.current_alert.alert_status
     ss.alertType = self.AM.current_alert.alert_type
     ss.alertSound = self.AM.current_alert.audible_alert
+    delivery = getattr(self, 'availability_warning_delivery', None)
+    if delivery is not None and delivery.pending(session=getattr(self, 'aol_session_id', None),
+        drive=int(self.sm['deviceState'].startedMonoTime) if self.sm['deviceState'].started else 0,
+        now_ns=time.monotonic_ns(),
+        audible_none=ss.alertSound == log.SelfdriveState.AudibleAlert.none,
+        priority=self.AM.current_alert.priority, low_priority=AlertPriority.LOW):
+      ss.alertSound = log.SelfdriveState.AudibleAlert.prompt
     ss.alertHudVisual = self.AM.current_alert.visual_alert
 
-    if self.aol_replay or getattr(self, 'ordinary_axis_ack_required', False):
-      now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
-      self.aol_sequence += 1
-      axis_msg = messaging.new_message('aolAxisState')
-      axis_msg.logMonoTime = now_ns
-      axis_msg.valid = self.aol_car_state_log_ns > 0
-      axis = axis_msg.aolAxisState
-      axis.sessionId = self.aol_session_id
-      axis.sequence = self.aol_sequence
-      axis.sourceCarStateMonoTime = self.aol_car_state_log_ns
-      axis.observedMonoTime = now_ns
-      axis.validUntilMonoTime = now_ns + 30_000_000
-      axis.mode = self.aol_axis_decision.mode
-      axis.lateralActive = self.aol_axis_decision.lateral_active
-      axis.longitudinalActive = self.aol_axis_decision.longitudinal_active
-      axis.desiredLateral = self.aol_axis_decision.desired_lateral
-      axis.desiredLongitudinal = self.aol_axis_decision.desired_longitudinal
-      axis.nativeAcknowledged = self.aol_axis_decision.native_acknowledged
-      axis.qualified = self.aol_replay or getattr(self, 'ordinary_axis_ack_required', False)
-      self.pm.send('aolAxisState', axis_msg)
+    ce_send, reason = (None, None) if axis_published else self.publish_axis_proof(CS, defer_events=True)
     self.pm.send('selfdriveState', ss_msg)
     if self.conditional_replay:
       self.conditional_ack_sequence += 1
@@ -713,90 +1476,353 @@ class SelfdriveD:
       historic.vEgo = CS.vEgo
       self.pm.send('starpilotSelfdriveState', ack)
 
-    # onroadEvents - logged every second or on change
-    if (self.sm.frame % int(1. / DT_CTRL) == 0) or (self.events.names != self.events_prev):
-      ce_send = messaging.new_message('onroadEvents', len(self.events))
-      ce_send.valid = True
-      ce_send.onroadEvents = self.events.to_msg()
-      self.pm.send('onroadEvents', ce_send)
-    self.events_prev = self.events.names.copy()
+
+    if not axis_published:
+      if ce_send is not None:
+        self.aol_fault_event_ns = int(ce_send.logMonoTime)
+        self.pm.send('onroadEvents', ce_send)
+      self.aol_published_fault_reason = reason
+      self.events_prev = self.events.names.copy()
 
   def update_conditional_mode(self, CS):
-    # The Params thread owns the stock request; only this thread publishes the
-    # effective choice. Conditional proposals cannot race a Params assignment.
-    self.experimental_mode = self.requested_experimental_mode
+    # Conditional document and baseline come from one accepted owner snapshot;
+    # only this thread publishes their effective choice.
+    self.experimental_mode = self.requested_experimental_mode if not self.conditional_replay else False
     self.conditional_result = ConsumerResult(self.experimental_mode, False, 'unavailable')
     if not self.conditional_replay:
       return
     assert self.conditional_settings is not None and self.conditional_consumer is not None
+    snapshot = self.conditional_settings.current
     clocks = paired_clocks_ns() if not REPLAY else None
     if clocks is None:
       self.conditional_consumer.invalidate(time.monotonic_ns())
       self.conditional_status = 'clock_unavailable'
       return
     now_ns, boot_ns, skew_ns = clocks
-    snapshot = self.conditional_settings.current
     drive_id = int(self.sm['deviceState'].startedMonoTime)
     verdict = self.conditional_settings.verdict(snapshot, now_mono_ns=now_ns, drive_id=drive_id)
     configured = (verdict.status == 'ready' and verdict.selection is not None and
                   snapshot is not None and verdict.revision == snapshot.revision)
+    baseline = bool(configured and experimental_requested(snapshot.experimental_raw, snapshot.experimental_readable,
+                                                         snapshot.safe_mode_raw, True, self.CP))
+    self.requested_experimental_mode = baseline
+    self.experimental_mode = baseline
     required = ('deviceState', 'modelV2', 'carControl')
-    fresh = all(self.sm.seen[service] and self.sm.valid[service] and self.sm.alive[service] and
-                0 < self.sm.logMonoTime[service] <= now_ns and
-                now_ns - self.sm.logMonoTime[service] <= (2_000_000_000 if service == 'deviceState' else 150_000_000)
-                for service in required)
+    def service_fresh(service):
+      return bool(self.sm.seen[service] and self.sm.valid[service] and self.sm.alive[service] and
+                  0 < self.sm.logMonoTime[service] <= now_ns and
+                  now_ns - self.sm.logMonoTime[service] <= (2_000_000_000 if service == 'deviceState' else 150_000_000))
+    fresh = all(service_fresh(service) for service in required)
     axis_active = self.aol_axis_decision.longitudinal_active if self.aol_replay else self.enabled
     authority = bool(configured and fresh and self.initialized and axis_active and
+                     not getattr(self, 'aol_axis_publication_deferred', False) and
                      self.CP.openpilotLongitudinalControl and not self.CP.passive and
                      self.conditional_car_state_valid and CS.canValid and not CS.canTimeout and self.sm['deviceState'].started and
                      self.sm['carControl'].longActive and self.sm.seen['slcState'] and self.sm.alive['slcState'])
+    message_ns = int(self.sm.logMonoTime['slcState'])
+    receipt_ns = int(self.sm.recv_time['slcState'] * 1e9)
+    model_ns = int(self.sm.logMonoTime['modelV2'])
+    car_state_ns = self.aol_car_state_log_ns
     result = self.conditional_consumer.sample(
       self.sm['slcState'], now_ns=now_ns, now_boot_ns=boot_ns, sample_skew_ns=skew_ns,
-      message_ns=int(self.sm.logMonoTime['slcState']), receipt_ns=int(self.sm.recv_time['slcState'] * 1e9),
-      drive_id=drive_id, model_ns=int(self.sm.logMonoTime['modelV2']), car_state_ns=self.aol_car_state_log_ns,
-      authority=authority, stock_experimental=self.requested_experimental_mode,
+      message_ns=message_ns, receipt_ns=receipt_ns,
+      drive_id=drive_id, model_ns=model_ns, car_state_ns=car_state_ns,
+      authority=authority, stock_experimental=baseline,
       choice=verdict.selection.choice if configured else ModeChoice.STOCK,
       settings_fingerprint=settings_fingerprint(snapshot) if configured else None)
     self.experimental_mode = result.experimental
     self.conditional_status = result.status
     self.conditional_result = result
 
+
+  def _decide_aol_axes(self, CS, intent, native, *, now_ns=0, ordinary_lag=False):
+    from openpilot.starpilot.car.gm.aol import physical_cancel_lateral_allowed
+    from openpilot.starpilot.aol.dm import lateral_event_context
+    retained_dm_lateral, lateral_events = lateral_event_context(self, CS, intent, native, now_ns, ordinary_lag)
+    return decide_axes(
+      standard_lateral=self.active, standard_longitudinal=bool(self.enabled and self.CP.openpilotLongitudinalControl and
+        not any(sample.seatbeltUnlatched for sample, _ in getattr(self, 'car_state_samples', ()))),
+      intent=intent, native=native, car_state=CS, initialized=self.initialized,
+      model_ready=bool(self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) and
+                       self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
+      no_entry=aol_no_entry(lateral_events, CS, paddle_only_cancel=self.nostalgia_paddle_cancel,
+                           allow_lateral_cancel=bool(intent is not None and intent.allowedLatch and intent.optionalSetRelease
+                                                     and ev6_aol_qualified(self.CP, marked_only=True)) or
+                             physical_cancel_lateral_allowed(self.CP, CS, intent, native,
+                               source_ns=getattr(self, 'aol_car_state_log_ns', 0), now_ns=now_ns),
+                           cruise_main_required=getattr(self, 'aol_cruise_main_required', True),
+                           allow_below_engage_speed=bool(is_volt_ascm_longitudinal(self.CP) and
+                                                       not self.CP.flags & GMFlags.PEDAL_LONG)),
+      immediate_disable=self.events.contains(ET.IMMEDIATE_DISABLE),
+      dm_lockout=bool(not self.sm.all_checks(['driverMonitoringState']) or
+                      not retained_dm_lateral and (self.sm['driverMonitoringState'].lockout or
+                        self.sm['driverMonitoringState'].alwaysOnLockout or
+                        self.sm['driverMonitoringState'].alertLevel == AlertLevel.three)),
+      pause_brake_mps=self.aol_settings.pause_brake_mps if self.aol_settings is not None else 0.0,
+      lateral_inhibit=self.aol_dm_lateral_inhibit or any(
+        sample.steerFaultTemporary or sample.brakePressed and not sample.standstill and
+        sample.vEgo < (self.aol_settings.pause_brake_mps if self.aol_settings is not None else 0.0)
+        for sample, _ in getattr(self, 'car_state_samples', ())))
+
+  def honda_native_lateral_grant_lost(self, CS, native, previous, requested, *, source_current, previous_intent, intent, now_ns):
+    """An established host LAT request lost its native grant, not a cold wait."""
+    pause = getattr(self, 'aol_transport_pause', None)
+    prior = getattr(pause, 'observed_native', None)
+    if (not honda_aol_qualified(self.CP, marked_only=True) or not source_current or
+        not self.initialized or not previous.lateral_active or not requested.desired_lateral or
+        native is None or previous_intent is None or intent is None or not previous_intent.producerSessionId or
+        previous_intent.producerSessionId != intent.producerSessionId or
+        not 0 < previous_intent.carStateLogMonoTime <= native.observedMonoTime <= now_ns or
+        now_ns - previous_intent.carStateLogMonoTime > INTENT_MAX_AGE_NS or
+        native.requestedLateral or native.lateralAllowed or
+        prior is None or not prior.requestedLateral or not prior.lateralAllowed or
+        getattr(self, 'aol_fault_reason', 'none') != 'none' or
+        pause.active or getattr(getattr(self, 'aol_availability_pause', None), 'active', False) or
+        CS.brakePressed or CS.regenBraking or CS.gasPressed or CS.steeringPressed or
+        honda_temporary_restriction(self.CP, CS) or
+        any(self.events.contains(event) for event in
+            (ET.USER_DISABLE, ET.OVERRIDE_LATERAL, ET.OVERRIDE_LONGITUDINAL, ET.IMMEDIATE_DISABLE, ET.SOFT_DISABLE)) or
+        not self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) or
+        self.sm['extrinsicsCalibration'].calStatus != log.ExtrinsicsCalibration.Status.calibrated):
+      return False
+    def identity(state):
+      return (state.axisSessionId, state.pandaSerial, state.safetyModel, state.safetyParam,
+              tuple((p.slotIndex, p.hardwareSerial, p.safetyModel, p.safetyParam,
+                     p.alternativeExperience) for p in state.pandaInventory))
+    return bool(pause.cp == cp_identity(self.CP) and pause.session == self.aol_session_id and
+                identity(prior) == identity(native) and
+                0 < prior.observedMonoTime <= native.observedMonoTime <= now_ns <= prior.validUntilMonoTime and
+                now_ns - prior.observedMonoTime <= SAFETY_MAX_AGE_NS and
+                current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_session_id) == native and
+                healthy_transport(self.sm, self.CP, CS, self.aol_session_id, now_ns, native))
+
+
   def step(self):
+    initial_state = (self.state_machine.state, self.state_machine.soft_disable_timer, self.enabled, self.active)
+    previous_deferred = getattr(self, 'aol_axis_publication_deferred', False)
+    self.aol_axis_publication_deferred = False
+    self.aol_step_deferral_checked = False
+    self.aol_step_intent_drain_count = 0
+    self.aol_step_intent_drain_ok = True
+    self.aol_event_intent_drained = None
+    self.aol_event_input_reconcile = False
+    self.aol_event_input_wait_attempted = False
+    previous_fault_reason = getattr(self, 'aol_fault_reason', 'none')
+    self.aol_ordinary_source_pause = False
+    self.aol_step_input_proof = getattr(self, 'aol_published_input_proof', None)
     CS = self.data_sample()
-    self.update_events(CS)
+    self.car_event_sample_count = 0
+    self.aol_reconciled_sources = ()
+    self.event_car_state = CS
+    self.event_input_refresh_pending = True
+    try:
+      self.update_events(CS)
+    finally:
+      self.event_input_refresh_pending = False
+    CS = self.event_car_state
+    if max(self.car_event_sample_count, len(getattr(self, 'car_state_samples', ()))) > 1 and any(self.events.contains(kind) for kind in (
+        ET.USER_DISABLE, ET.SOFT_DISABLE, ET.IMMEDIATE_DISABLE)):
+      # A queued enable cannot override a cancellation or pedal edge in this batch.
+      self.events.events = [event for event in self.events.names if ET.ENABLE not in self.events.event_rules.get(event, {})]
     native = None
-    lost_active_aol = False
+    lost_active_aol = bool(self.aol_replay and getattr(self, 'steering_authority_unavailable', False) and
+                           (self.aol_axis_decision.lateral_active or self.aol_axis_decision.longitudinal_active))
+    intent_companion = getattr(self, 'aol_intent_companion', None)
+    intent_drained = (self.aol_event_intent_drained and self.aol_step_intent_drain_ok if self.aol_event_intent_drained is not None else
+                      not self.aol_replay or intent_companion is None or self.drain_axis_intent(intent_companion))
     if self.aol_replay or getattr(self, 'ordinary_axis_ack_required', False):
       now_ns = self.aol_car_state_log_ns if REPLAY and self.aol_car_state_log_ns else time.monotonic_ns()
+      # Intent draining can cross the source cutoff. Check the original proof
+      # against the same post-drain clock used by admission, before authority
+      # state changes. This retains no new input, proof, deadline, or enable.
+      if not previous_deferred and self.defer_expired_axis_publication(CS, initial_state, now_ns=now_ns):
+        self.aol_axis_publication_deferred = True
+        self.update_alerts(CS)
+        self.update_conditional_mode(CS)
+        self.publish_selfdriveState(CS, axis_published=True)
+        self.CS_prev = CS
+        del self.aol_step_input_proof
+        return
       native = current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.aol_session_id)
-      if native is None:
+      if native is None and self.initialized:
         lost_active_aol = self.aol_axis_decision.lateral_active or self.aol_axis_decision.longitudinal_active
         self.events.add(EventName.controlsMismatch)
+    self.aol_decision_native = native
+    if self.aol_replay:
+      previous_intent = getattr(self, 'aol_last_intent', None)
+      reconciled_pairs = dict(intent_companion.samples) if intent_companion is not None and self.aol_reconciled_sources else {}
+      reconciled_epoch = intent_companion.integrity_epoch if intent_companion is not None else -1
+      source_pair = intent_companion.samples.get(self.aol_car_state_log_ns) if intent_companion is not None else None
+      verified = intent_companion.verified_sm_projection if intent_companion is not None else None
+      if (intent_companion is not None and source_pair is None and verified is not None and
+          verified[0] == self.aol_car_state_log_ns and
+          verified[2] == intent_companion.integrity_epoch and verified[3] == intent_companion.session):
+        source_pair = (verified[0], True, verified[1])
+      self.aol_selected_pair_future = bool(source_pair is not None and source_pair[2] is not None and
+        source_pair[2].observedMonoTime > now_ns)
+      known_intent = previous_intent or getattr(self, 'aol_publication_retained_intent', None)
+      if self.aol_car_state_log_ns > 0:
+        self.aol_expired_healthy_source = bool(not REPLAY and self.conditional_car_state_valid and
+          CS.canValid and not CS.canTimeout and now_ns - self.aol_car_state_log_ns > INTENT_MAX_AGE_NS and
+          source_pair is not None and source_pair[1] and source_pair[2] is not None and
+          source_pair[2].carStateLogMonoTime == self.aol_car_state_log_ns and source_pair[2].observedMonoTime <= now_ns and
+          source_pair[2].settingsQualified and source_pair[2].allowedLatch and source_pair[2].lateralArmed and
+          known_intent is not None and source_pair[2].producerSessionId == known_intent.producerSessionId)
+      intent = current_intent(self.sm, car_state_ns=self.aol_car_state_log_ns, now_ns=now_ns,
+                              previous=getattr(self, 'aol_last_intent', None),
+                              companion=intent_companion, drain=False) if intent_drained else None
+      intent = self.reconciled_intent(intent, previous_intent, reconciled_pairs, reconciled_epoch, now_ns)
+      self.aol_last_intent = intent
+      from openpilot.starpilot.aol.dm import dm_clear, observe_owner
+      observe_owner(self, intent, previous_intent)
+      previous = self.aol_axis_decision
+      requested = self._decide_aol_axes(CS, intent, native, now_ns=now_ns)
+      source_current = bool(intent is not None and getattr(self, 'conditional_car_state_valid', False) and
+                            CS.canValid and not CS.canTimeout)
+      driver_override = bool(CS.brakePressed or CS.regenBraking or CS.gasPressed or
+                             self.events.contains(ET.USER_DISABLE))
+      lost_companion = bool((previous.lateral_active or previous.longitudinal_active) and
+                            not source_current and not self.events.contains(ET.USER_DISABLE))
+      lost_honda_lateral_grant = self.honda_native_lateral_grant_lost(
+        CS, native, previous, requested, source_current=source_current,
+        previous_intent=previous_intent, intent=intent, now_ns=now_ns)
+      lost_permission = bool(lost_honda_lateral_grant or native is not None and not driver_override and (
+        previous.lateral_active and requested.desired_lateral and native.requestedLateral and
+        not native.lateralAllowed and not CS.steeringPressed and not self.events.contains(ET.OVERRIDE_LATERAL) or
+        previous.longitudinal_active and requested.desired_longitudinal and native.requestedLongitudinal and
+        not native.longitudinalAllowed and not self.events.contains(ET.OVERRIDE_LONGITUDINAL)))
+      if not hasattr(self, 'aol_transport_pause'):
+        self.aol_transport_pause = TransportPause(self.CP, self.aol_session_id)
+      pause, upgraded = self.aol_transport_pause.observe(
+        cp=self.CP, session=self.aol_session_id, sm=self.sm, cs=CS, native=native, now_ns=now_ns,
+        companion=getattr(self, 'aol_intent_companion', None), previous_intent=previous_intent, intent=intent,
+        expired_healthy_source=getattr(self, 'aol_expired_healthy_source', False),
+        previously_active=previous.lateral_active, hard_fault=bool(
+          self.aol_selected_pair_future or self.aol_authority_lost or lost_active_aol or lost_permission or self.events.contains(ET.IMMEDIATE_DISABLE) or
+          self.events.contains(ET.SOFT_DISABLE)),
+        model_ready=bool(self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) and
+          self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
+        user_disable=self.events.contains(ET.USER_DISABLE))
+      if source_current:
+        self.observe_ordinary_source_metadata(CS, intent, self.aol_transport_pause.observed_native, now_ns)
+      if not hasattr(self, 'aol_availability_pause'):
+        self.aol_availability_pause = AvailabilityPause(self.CP, self.aol_session_id)
+      retained_intent = getattr(self, 'aol_publication_retained_intent', None)
+      if retained_intent is None and getattr(self, 'aol_expired_healthy_source', False):
+        retained_intent = previous_intent
+      healthy_native = self.aol_transport_pause.observed_native
+      publication_expiry = bool(not self.aol_selected_pair_future and healthy_native is not None and
+        healthy_native.pandaInventory and retained_intent is not None and not source_current and
+        0 < retained_intent.carStateLogMonoTime <= now_ns and
+        now_ns - retained_intent.carStateLogMonoTime <= SAFETY_MAX_AGE_NS)
+      availability_events = self.events.to_msg()
+      if publication_expiry and EventName.commIssue not in self.events.names:
+        source_expiry_events = Events()
+        source_expiry_events.add(EventName.commIssue)
+        availability_events += source_expiry_events.to_msg()
+      availability = self.aol_availability_pause.observe(
+        cp=self.CP, session=self.aol_session_id, sm=self.sm, cs=CS, native=native, now_ns=now_ns,
+        companion=intent_companion, intent=intent if intent is not None else retained_intent, events=availability_events,
+        model_ready=bool(self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) and
+          self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
+        source_current=source_current, source_expired=publication_expiry, prior_lateral_active=previous.lateral_active,
+        hard_fault=bool(self.aol_selected_pair_future or self.aol_authority_lost or lost_active_aol or
+          lost_companion and not publication_expiry or lost_permission or upgraded),
+        healthy_native=self.aol_transport_pause.observed_native)
+      ordinary_availability = bool(not source_current and not lost_active_aol and not lost_permission and not upgraded and
+        self.ordinary_source_availability(CS, now_ns, native))
+      if ordinary_availability:
+        self.aol_ordinary_source_pause = True
+        self.aol_publication_retained_intent = self.aol_ordinary_source_anchor[2]
+        self.events.add(EventName.commIssue)
+        lost_companion = False
+        self.aol_transport_pause.active = pause = False
+        # Preserve the normal state machine and SOFT_DISABLE countdown. The
+        # independent armed-LAT retention must not disable ordinary engagement.
+        availability = False
+      if publication_expiry and (availability or not pause) and EventName.commIssue not in self.events.names:
+        self.events.add(EventName.commIssue)
+      if availability:
+        if publication_expiry:
+          self.aol_publication_retained_intent = retained_intent
+        lost_companion = False
+        self.aol_transport_pause.active = pause = False
+        if previous_fault_reason != 'availabilityPause':
+          self.aol_availability_ordinary_warning = self.enabled
+          self.aol_availability_chime_until_ns = time.monotonic_ns() + 400_000_000
+        self.aol_availability_long_inhibit = True
+      if pause and source_current and requested.lateral_active:
+        # Ordinary controls were disabled at the first pause. Fresh normal AOL
+        # gates and exact native acknowledgment recover only its lateral axis.
+        self.aol_transport_pause.active = pause = False
+      if pause:
+        lost_companion = False
+      if self.initialized and (upgraded or lost_active_aol or lost_companion or lost_permission):
+        lost_active_aol = True
+        self.aol_authority_lost = True
+      elif source_current and not intent.allowedLatch:
+        self.aol_authority_lost = False
+      # Temporary EPS withdraws steering commands without revoking the armed
+      # latch. Keep the event and ordinary soft-disable behavior unchanged.
+      from openpilot.starpilot.aol.seatbelt import seatbelt_lateral_soft_event_allowed
+      aol_hard_soft_fault = any(event.softDisable and not (
+        event.name == EventName.steerTempUnavailable and CS.steerFaultTemporary and not CS.steerFaultPermanent or
+        seatbelt_lateral_soft_event_allowed(self.CP, CS, intent, native, event,
+          source_ns=self.aol_car_state_log_ns, now_ns=now_ns, axis_session_id=self.aol_session_id,
+          pending_lateral_request=not previous.lateral_active and not self.aol_authority_lost))
+        for event in self.events.to_msg())
+      self.aol_fault_reason = ('availabilityPause' if ordinary_availability else
+                               'critical' if self.aol_authority_lost or self.events.contains(ET.IMMEDIATE_DISABLE) or
+                               aol_hard_soft_fault and not availability else
+                               'availabilityPause' if availability else 'transportPause' if pause else 'none')
+      if self.aol_authority_lost or pause:
+        self.events.add(EventName.controlsMismatch)
+        lost_active_aol |= pause
+    was_enabled = self.enabled
     if not self.CP.passive and self.initialized:
       self.enabled, self.active = self.state_machine.update(self.events)
+    if not was_enabled and self.enabled and self.events.contains(ET.ENABLE):
+      self.aol_step_input_proof = None
     if lost_active_aol and ET.IMMEDIATE_DISABLE not in self.state_machine.current_alert_types:
       self.state_machine.current_alert_types.append(ET.IMMEDIATE_DISABLE)
     if self.aol_replay:
-      intent = current_intent(self.sm, car_state_ns=self.aol_car_state_log_ns, now_ns=now_ns,
-                              previous=getattr(self, 'aol_last_intent', None))
-      self.aol_last_intent = intent
-      if self.sm['driverMonitoringState'].alertLevel == AlertLevel.three or self.sm['driverMonitoringState'].lockout:
-        self.aol_dm_lateral_inhibit = True
-      elif intent is not None and not intent.allowedLatch:
-        self.aol_dm_lateral_inhibit = False
-      self.aol_axis_decision = decide_axes(
-        standard_lateral=self.active, standard_longitudinal=self.enabled and self.CP.openpilotLongitudinalControl,
-        intent=intent, native=native, car_state=CS, initialized=self.initialized,
-        model_ready=bool(self.sm.all_checks(['modelV2', 'extrinsicsCalibration']) and
-                         self.sm['extrinsicsCalibration'].calStatus == log.ExtrinsicsCalibration.Status.calibrated),
-        no_entry=aol_no_entry(self.events.names, CS, paddle_only_cancel=self.nostalgia_paddle_cancel),
-        immediate_disable=self.events.contains(ET.IMMEDIATE_DISABLE),
-        dm_lockout=bool(not self.sm.all_checks(['driverMonitoringState']) or
-                        self.sm['driverMonitoringState'].lockout or self.sm['driverMonitoringState'].alwaysOnLockout or
-                        self.sm['driverMonitoringState'].alertLevel == AlertLevel.three),
-        pause_brake_mps=self.aol_settings.pause_brake_mps if self.aol_settings is not None else 0.0,
-        lateral_inhibit=self.aol_dm_lateral_inhibit)
-    if getattr(self, 'ordinary_axis_ack_required', False):
+      if (not availability and source_current and self.enabled and self.events.contains(ET.ENABLE) and
+          dm_clear(self) and
+          not self.events.contains(ET.NO_ENTRY) and not self.events.contains(ET.IMMEDIATE_DISABLE) and
+          not self.events.contains(ET.SOFT_DISABLE)):
+        self.aol_availability_long_inhibit = False
+      if getattr(self, 'aol_availability_long_inhibit', False):
+        # Keep ordinary state truthful until a fresh accepted ENABLE. AOL's
+        # separately acknowledged lateral recovery does not reengage LONG.
+        self.state_machine.state = log.SelfdriveState.OpenpilotState.disabled
+        self.enabled = self.active = False
+        if ET.ENABLE in self.state_machine.current_alert_types:
+          self.state_machine.current_alert_types.remove(ET.ENABLE)
+        if (availability and getattr(self, 'aol_availability_ordinary_warning', False) and
+            self.state_machine.soft_disable_timer > 0 and
+            ET.SOFT_DISABLE not in self.state_machine.current_alert_types):
+          self.state_machine.current_alert_types.append(ET.SOFT_DISABLE)
+      ordinary_lag = bool(not availability and not pause and not self.aol_ordinary_source_pause and
+        fresh_ordinary_lag_continuation(self, CS, intent, native, now_ns))
+      self.aol_axis_decision = (self._decide_aol_axes(CS, intent, native, now_ns=now_ns, ordinary_lag=True)
+        if ordinary_lag else self._decide_aol_axes(CS, intent, native, now_ns=now_ns))
+      if ordinary_lag:
+        # Preserve the exact current SOFT event and normal countdown. A live
+        # standard-axis proof describes healthy current authority, not critical.
+        self.aol_fault_reason = 'none'
+      if self.aol_ordinary_source_pause:
+        self.aol_axis_decision = self.ordinary_source_withdrawal()
+      elif availability:
+        self.aol_axis_decision = AxisDecision(desired_lateral=True, native_acknowledged=True)
+      elif getattr(self, 'aol_availability_long_inhibit', False):
+        decision = self.aol_axis_decision
+        self.aol_axis_decision = AxisDecision(desired_lateral=decision.desired_lateral,
+          lateral_active=decision.lateral_active, native_acknowledged=decision.native_acknowledged)
+      if pause:
+        # Negotiate the fresh lateral request while output and ordinary LONG
+        # remain off; requiring an active ack before requesting would deadlock.
+        self.aol_axis_decision = AxisDecision(desired_lateral=bool(source_current and requested.desired_lateral))
+    elif getattr(self, 'ordinary_axis_ack_required', False):
       self.aol_axis_decision = decide_ordinary_axis(
         requested=bool(self.initialized and self.conditional_car_state_valid and
                        CS.canValid and not CS.canTimeout and
@@ -810,12 +1836,30 @@ class SelfdriveD:
         self.events.add(EventName.steerTempUnavailableSilent)
       if ET.WARNING not in self.state_machine.current_alert_types:
         self.state_machine.current_alert_types.append(ET.WARNING)
+    if (getattr(self, 'aol_fault_reason', 'none') == 'availabilityPause' and
+        ET.WARNING not in self.state_machine.current_alert_types):
+      self.state_machine.current_alert_types.append(ET.WARNING)
+    axis_published = bool(not REPLAY and self.aol_replay and self.axis_transport_required)
+    if axis_published:
+      self.aol_axis_publication_deferred = bool(not previous_deferred and self.defer_expired_axis_publication(CS, initial_state))
+      if not self.aol_axis_publication_deferred:
+        self.publish_axis_proof(CS, source_context=(initial_state, not previous_deferred))
     self.update_alerts(CS)
     self.update_conditional_mode(CS)
 
-    self.publish_selfdriveState(CS)
+    self.publish_selfdriveState(CS, axis_published=axis_published)
 
     self.CS_prev = CS
+    # Preserve an explicit None during a new engagement; retire it after publication.
+    del self.aol_step_input_proof
+
+  def refresh_saved_driving_mode(self, now_ns: int):
+    if self.conditional_replay:
+      assert self.conditional_settings is not None
+      self.conditional_settings.refresh(now_ns, force=True, wait=True)
+    else:
+      _, (baseline, readable), (safe, safe_readable) = read_mode_sources(self.params, wait=True)
+      self.requested_experimental_mode = experimental_requested(baseline, readable, safe, safe_readable, self.CP)
 
   def params_thread(self, evt):
     while not evt.is_set():
@@ -824,10 +1868,9 @@ class SelfdriveD:
         self.aol_settings = read_settings(self.params)
       self.is_ldw_enabled = self.params.get_bool("IsLdwEnabled")
       self.disengage_on_accelerator = self.params.get_bool("DisengageOnAccelerator")
+      self.radar_recovery_enabled = self.params.get_bool("RadarRecoveryAlert")
       self.nostalgia_enabled = nostalgia_saved_enabled(self.params)
-      self.requested_experimental_mode = self.params.get_bool("ExperimentalMode") and self.CP.openpilotLongitudinalControl
-      if self.conditional_settings is not None:
-        self.conditional_settings.refresh(time.monotonic_ns())
+      self.refresh_saved_driving_mode(time.monotonic_ns())
       self.personality = self.params.get("LongitudinalPersonality", return_default=True)
       time.sleep(0.1)
 
@@ -851,3 +1894,4 @@ def main():
 
 if __name__ == "__main__":
   main()
+

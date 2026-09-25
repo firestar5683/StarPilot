@@ -3,8 +3,8 @@ import os
 import sys
 
 from openpilot.cereal import messaging
-from openpilot.common.hardware import COMMA_HARDWARE
-from openpilot.common.realtime import Priority, config_realtime_process, set_core_affinity
+from openpilot.common.hardware import COMMA_HARDWARE, HARDWARE
+from openpilot.common.realtime import Priority, config_realtime_process, drop_realtime, set_core_affinity
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.selfdrive.ui.layouts.main import MainLayout
 from openpilot.selfdrive.ui.mici.layouts.main import MiciMainLayout
@@ -24,7 +24,9 @@ def update_frame(preview=None, controllers=None):
 
 
 def main():
-  cores = {5, }
+  camera_core_ui = COMMA_HARDWARE and HARDWARE.get_device_type() in ("mici", "tici", "tizi")
+  cores = {6} if camera_core_ui else {5}
+  main_thread_configured = False
   config_realtime_process(0, Priority.UI)
 
   selection = select_ui(Profile.LARGE if BIG_UI else Profile.COMPACT, os.environ)
@@ -42,10 +44,10 @@ def main():
                                              borrowed_messages=True, evidence_wait_ms=0)
     preview_authority = LiveContextSource(ui_state.params, messages=ui_state.sm,
                                           borrowed_messages=True, evidence_wait_ms=0)
-    controllers = ControllerRuntime(ui_state.params, actions=layout.star._favorite_actions,
+    controllers = None if ui_state.replay_clock is not None else ControllerRuntime(ui_state.params, actions=layout.star._favorite_actions,
                                     favorites=layout.star.favorites_owner.snapshot,
                                     invoke_favorite=layout.star.favorites_owner.invoke, authority=controller_authority)
-    preview = LayoutPreviewRuntime(ui_state.params, (Profile.LARGE if BIG_UI else Profile.COMPACT).value,
+    preview = None if ui_state.replay_clock is not None else LayoutPreviewRuntime(ui_state.params, (Profile.LARGE if BIG_UI else Profile.COMPACT).value,
                                    offroad_hint=ui_state.is_offroad, authority=preview_authority)
   else:
     layout = MainLayout() if BIG_UI else MiciMainLayout()
@@ -56,6 +58,14 @@ def main():
   try:
     for should_render, frame_time, cpu_time in gui_app.render(before_frame=lambda: update_frame(preview, controllers)):
       if should_render:
+        if camera_core_ui and not main_thread_configured:
+          # Share the camera core with normal scheduling, without FIFO display
+          # work preempting camera work or waiting on the driving core.
+          drop_realtime()
+          os.setpriority(os.PRIO_PROCESS, 0, 0)
+          if os.sched_getscheduler(0) != os.SCHED_OTHER or os.getpriority(os.PRIO_PROCESS, 0) != 0:
+            raise RuntimeError("Could not configure display scheduling")
+          main_thread_configured = True
         # reaffine after power save offlines our core
         if COMMA_HARDWARE and os.sched_getaffinity(0) != cores:
           try:
@@ -74,7 +84,8 @@ def main():
           preview.close()
       finally:
         try:
-          controllers.close()
+          if controllers is not None:
+            controllers.close()
         finally:
           layout.close()
 

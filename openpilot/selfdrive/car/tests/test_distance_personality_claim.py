@@ -9,12 +9,14 @@ from opendbc.car.structs import car
 from openpilot.cereal import messaging
 from openpilot.common.params import Params
 from openpilot.selfdrive.car.card import Car
+from openpilot.selfdrive.car.tests.publication_fixture import initialize_publication_sources
 from openpilot.selfdrive.car.cruise import VCruiseHelper, CRUISE_LONG_PRESS
 from openpilot.selfdrive.selfdrived.events import EventName, Events
 from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
 from openpilot.starpilot.aol.intent import AolCardIntent, read_settings as read_aol_settings
 from openpilot.selfdrive.car.tests.test_hyundai_aol import candidate as ioniq6_candidate
 from openpilot.starpilot.conditional_mode.manual import ButtonTracker
+from openpilot.starpilot.lateral.low_speed_advisory import LowSpeedAdvisory
 
 
 ButtonType = car.CarState.ButtonEvent.Type
@@ -48,6 +50,7 @@ class TestDistancePersonalityClaim(unittest.TestCase):
                                     slc_replay=False, curve_replay=False, conditional_replay=False, aol_replay=False,
                                     last_actuators_output=car.CarControl.Actuators(), can_rcv_cum_timeout_counter=0,
                                     rk=NS(remaining=0.0), v_cruise_helper=VCruiseHelper(self.cp), slc_receipts=[]))
+    initialize_publication_sources(self.card)
     Car.observe_distance_personality(self.card, state(), 1)
 
   def observe(self, physical, tick):
@@ -188,6 +191,9 @@ class TestDistancePersonalityClaim(unittest.TestCase):
     self.assertEqual((len(short.buttonEvents), len(claimed.buttonEvents)), (1, 0))
     drive = SelfdriveD.__new__(SelfdriveD)
     drive.CP = car.CarParams(openpilotLongitudinalControl=True, notCar=True)
+    from openpilot.starpilot.car.tesla.stock_events import StockCruiseConsumer
+    drive.tesla_stock_consumer = StockCruiseConsumer(drive.CP)
+    drive.low_speed_advisory = LowSpeedAdvisory()
     drive.params = MagicMock()
     drive.events = Events()
     drive.personality = 1

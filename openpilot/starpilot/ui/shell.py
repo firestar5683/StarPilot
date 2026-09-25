@@ -84,7 +84,7 @@ class ShellView:
       self.settings.prepare()
       acquired.pop_all()
 
-  def render(self, snapshot: ShellSnapshot) -> None:
+  def render(self, snapshot: ShellSnapshot, drag_x: float = 0.0) -> None:
     if snapshot.mode != ShellMode.ONROAD and self.profile == Profile.LARGE:
       self.onroad.unified_speed.collapse_sources()
     if snapshot.mode == ShellMode.HOME:
@@ -101,19 +101,19 @@ class ShellView:
       self.toggles.render(snapshot.toggles)
       self.settings.render_rail(snapshot.settings, selected=Destination.TOGGLES)
     elif self.profile == Profile.LARGE and snapshot.selected == Destination.DRIVING_CONTROLS:
-      self.features.render(snapshot.features)
+      self.features.render(snapshot.features, drag_x)
       self.settings.render_rail(snapshot.settings, selected=Destination.STAR)
     elif self.profile == Profile.LARGE and snapshot.selected == Destination.SOUNDS:
-      self.sounds.render(snapshot.sounds)
+      self.sounds.render(snapshot.sounds, drag_x)
       self.settings.render_rail(snapshot.settings, selected=Destination.STAR)
     elif self.profile == Profile.LARGE and snapshot.selected == Destination.APPEARANCE:
-      self.appearance.render(snapshot.appearance)
+      self.appearance.render(snapshot.appearance, drag_x)
       self.settings.render_rail(snapshot.settings, selected=Destination.STAR)
     elif self.profile == Profile.LARGE and snapshot.selected == Destination.SYSTEM:
-      self.display.render(snapshot.display)
+      self.display.render(snapshot.display, drag_x)
       self.settings.render_rail(snapshot.settings, selected=Destination.STAR)
     elif self.profile == Profile.LARGE and snapshot.selected == Destination.DRIVING_MODEL:
-      self.models.render(snapshot.models)
+      self.models.render(snapshot.models, drag_x)
       self.settings.render_rail(snapshot.settings, selected=Destination.STAR)
     elif self.profile == Profile.LARGE and snapshot.selected == Destination.NETWORK:
       rail_width = 500 if snapshot.settings.sidebar_expanded else 0
@@ -134,9 +134,10 @@ class ShellView:
 class ShellInput:
   """One pointer, one pane: transitions cancel pending presses before reuse."""
 
-  def __init__(self, profile: Profile, emit: Callable[[ShellRequest], None]):
+  def __init__(self, profile: Profile, emit: Callable[[ShellRequest], None], *, native_panels: tuple[Destination, ...] = ()):
     self.profile = profile
     self.emit = emit
+    self.native_panels = native_panels
     self._pane: tuple[ShellMode, Destination] | None = None
     self._selected = Destination.STAR
     self._settings_emitted = False
@@ -186,6 +187,8 @@ class ShellInput:
       self.onroad.press(x, y, snapshot.onroad)
     else:
       self.settings.press(x, y, snapshot.settings)
+      if snapshot.selected in self.native_panels:
+        return
       if self.profile == Profile.LARGE and snapshot.selected == Destination.DEVICE:
         self.device.press(x, y, snapshot.device)
       elif self.profile == Profile.LARGE and snapshot.selected == Destination.SOFTWARE:
@@ -203,17 +206,22 @@ class ShellInput:
       elif self.profile == Profile.LARGE and snapshot.selected == Destination.DRIVING_MODEL:
         self.models.press(x, y, snapshot.models)
 
-  def move(self, x: float, y: float, now: float, snapshot: ShellSnapshot) -> None:
+  def move(self, x: float, y: float, now: float | None, snapshot: ShellSnapshot) -> None:
     self._sync(snapshot)
     if self._pane is None:
       return
     if snapshot.mode == ShellMode.HOME:
+      if now is None:
+        self.home.cancel()
+        return
       self.home.move(x, y, now)
       self.home.tick(now, snapshot.home)
     elif snapshot.mode == ShellMode.ONROAD:
       self.onroad.move(x, y, snapshot.onroad)
     else:
       self.settings.move(x, y, snapshot.settings)
+      if snapshot.selected in self.native_panels:
+        return
       if self.profile == Profile.LARGE and snapshot.selected == Destination.DEVICE:
         self.device.move(x, y, snapshot.device)
       elif self.profile == Profile.LARGE and snapshot.selected == Destination.SOFTWARE:
@@ -221,21 +229,24 @@ class ShellInput:
       elif self.profile == Profile.LARGE and snapshot.selected == Destination.TOGGLES:
         self.toggles.move(x, y, snapshot.toggles)
       elif self.profile == Profile.LARGE and snapshot.selected == Destination.DRIVING_CONTROLS:
-        self.features.move(x, y, snapshot.features)
+        self.features.move(x, y, snapshot.features, now)
       elif self.profile == Profile.LARGE and snapshot.selected == Destination.SOUNDS:
-        self.sounds.move(x, y, snapshot.sounds)
+        self.sounds.move(x, y, snapshot.sounds, now)
       elif self.profile == Profile.LARGE and snapshot.selected == Destination.APPEARANCE:
-        self.appearance.move(x, y, snapshot.appearance)
+        self.appearance.move(x, y, snapshot.appearance, now)
       elif self.profile == Profile.LARGE and snapshot.selected == Destination.SYSTEM:
-        self.display.move(x, y, snapshot.display)
+        self.display.move(x, y, snapshot.display, now)
       elif self.profile == Profile.LARGE and snapshot.selected == Destination.DRIVING_MODEL:
-        self.models.move(x, y, snapshot.models)
+        self.models.move(x, y, snapshot.models, now)
 
-  def release(self, x: float, y: float, now: float, snapshot: ShellSnapshot) -> None:
+  def release(self, x: float, y: float, now: float | None, snapshot: ShellSnapshot) -> None:
     self._sync(snapshot)
     if self._pane is None:
       return
     if snapshot.mode == ShellMode.HOME:
+      if now is None:
+        self.home.cancel()
+        return
       self.home.release(x, y, now, snapshot.home)
     elif snapshot.mode == ShellMode.ONROAD:
       self.onroad.release(x, y, snapshot.onroad)
@@ -244,7 +255,8 @@ class ShellInput:
       # the press that caused it must never also activate a leaf control.
       self._settings_emitted = False
       self.settings.release(x, y, snapshot.settings)
-      if not self._settings_emitted and self._pane == (snapshot.mode, snapshot.selected):
+      if (not self._settings_emitted and self._pane == (snapshot.mode, snapshot.selected) and
+          snapshot.selected not in self.native_panels):
         if self.profile == Profile.LARGE and snapshot.selected == Destination.DEVICE:
           self.device.release(x, y, snapshot.device)
         elif self.profile == Profile.LARGE and snapshot.selected == Destination.SOFTWARE:
@@ -252,13 +264,13 @@ class ShellInput:
         elif self.profile == Profile.LARGE and snapshot.selected == Destination.TOGGLES:
           self.toggles.release(x, y, snapshot.toggles)
         elif self.profile == Profile.LARGE and snapshot.selected == Destination.DRIVING_CONTROLS:
-          self.features.release(x, y, snapshot.features)
+          self.features.release(x, y, snapshot.features, now)
         elif self.profile == Profile.LARGE and snapshot.selected == Destination.SOUNDS:
-          self.sounds.release(x, y, snapshot.sounds)
+          self.sounds.release(x, y, snapshot.sounds, now)
         elif self.profile == Profile.LARGE and snapshot.selected == Destination.APPEARANCE:
-          self.appearance.release(x, y, snapshot.appearance)
+          self.appearance.release(x, y, snapshot.appearance, now)
         elif self.profile == Profile.LARGE and snapshot.selected == Destination.SYSTEM:
-          self.display.release(x, y, snapshot.display)
+          self.display.release(x, y, snapshot.display, now)
         elif self.profile == Profile.LARGE and snapshot.selected == Destination.DRIVING_MODEL:
-          self.models.release(x, y, snapshot.models)
+          self.models.release(x, y, snapshot.models, now)
     self.cancel()
