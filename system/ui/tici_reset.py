@@ -113,7 +113,10 @@ def main():
     if sys.argv[1] == '--recover':
       mode = ResetMode.RECOVER
 
-  gui_app.init_window("System Reset", 20)
+  if HARDWARE.get_device_type() in ("tici", "tizi"):
+    gui_app.init_window("System Reset")
+  else:
+    gui_app.init_window("System Reset", 20)
   reset = Reset(mode)
 
   gui_app.push_widget(reset)

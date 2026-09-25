@@ -1,9 +1,38 @@
+import os
 from importlib.resources import as_file
 from types import SimpleNamespace
 
 import pytest
 
 from openpilot.system.ui.lib import application
+
+
+def test_default_fps_uses_shared_target_or_fps_override():
+  assert application._DEFAULT_FPS == int(os.getenv("FPS", "60"))
+
+
+def test_big_ui_adaptive_fps_uses_60_active_15_idle(monkeypatch):
+  monkeypatch.setattr(application, "OFFSCREEN", False)
+  monkeypatch.setattr(application, "RECORD", False)
+  now = [100.0]
+  monkeypatch.setattr(application.time, "monotonic", lambda: now[0])
+
+  app = object.__new__(application.GuiApplication)
+  app._full_target_fps = 60
+  app._target_fps = 60
+  applied_targets = []
+  app._set_target_fps = applied_targets.append
+
+  app.configure_adaptive_rendering(True)
+  assert app._idle_target_fps == 15
+  assert applied_targets[-1] == 60
+
+  now[0] += application.UI_INTERACTION_FPS_DURATION + 0.01
+  app._apply_render_mode()
+  assert applied_targets[-1] == 15
+
+  app.set_render_mode(True)
+  assert applied_targets[-1] == 60
 
 
 def test_raylib_target_fps_uses_mici_display_refresh(monkeypatch):
