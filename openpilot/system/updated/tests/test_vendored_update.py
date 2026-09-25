@@ -18,7 +18,8 @@ from types import ModuleType
 from unittest.mock import Mock, patch
 
 
-DEPENDENCIES = ("msgq_repo", "opendbc_repo", "panda", "rednose_repo", "teleoprtc_repo", "tinygrad_repo")
+from openpilot.common.vendor_manifest import DEPENDENCIES
+
 BRANCH = "test-vendored"
 
 
@@ -106,7 +107,8 @@ class TestVendoredUpdate(unittest.TestCase):
     real_run = self.updated.run
 
     def bounded_run(command, cwd=None):
-      self.assertIsNotNone(cwd)
+      if cwd is None:
+        raise AssertionError("Every updater command must name its isolated working directory")
       self.assertTrue(Path(cwd).resolve().is_relative_to(self.root.resolve()))
       self.assertNotEqual(command[:2], ["git", "submodule"])
       self.commands.append(command)

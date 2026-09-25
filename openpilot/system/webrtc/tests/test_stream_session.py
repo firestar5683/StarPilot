@@ -23,13 +23,13 @@ class TestStreamSession(OpenpilotTestCase):
     test_msg = log.Event.new_message()
     test_msg.logMonoTime = 123
     test_msg.valid = True
-    test_msg.customReservedRawData0 = b"test"
-    expected_dict = {"type": "customReservedRawData0", "logMonoTime": 123, "valid": True, "data": "test"}
+    test_msg.aolSafetyWire = b"test"
+    expected_dict = {"type": "aolSafetyWire", "logMonoTime": 123, "valid": True, "data": "test"}
     expected_json = json.dumps(expected_dict).encode()
 
     channel = mocker.Mock()
     channel.is_open.return_value = True
-    proxy = CerealOutgoingMessageProxy(["customReservedRawData0"])
+    proxy = CerealOutgoingMessageProxy(["aolSafetyWire"])
     def mocked_update(t):
       proxy.sm.update_msgs(0, [test_msg])
 
@@ -42,7 +42,7 @@ class TestStreamSession(OpenpilotTestCase):
 
   def test_incoming_proxy(self, mocker):
     tested_msgs = [
-      {"type": "customReservedRawData0", "data": "test"}, # primitive
+      {"type": "aolSafetyWire", "data": "test"}, # primitive
       {"type": "can", "data": [{"address": 0, "dat": "", "src": 0}]}, # list
       {"type": "testJoystick", "data": {"axes": [0, 0], "buttons": [False]}}, # dict
     ]
@@ -52,17 +52,18 @@ class TestStreamSession(OpenpilotTestCase):
     proxy = CerealIncomingMessageProxy(mocked_pubmaster)
 
     for msg in tested_msgs:
-      proxy.send(json.dumps(msg).encode())
+      for encoded in (json.dumps(msg), json.dumps(msg).encode()):
+        proxy.send(encoded)
 
-      mocked_pubmaster.send.assert_called_once()
-      mt, md = mocked_pubmaster.send.call_args.args
-      msg_type = msg["type"]
-      assert isinstance(msg_type, str)
-      assert mt == msg_type
-      assert isinstance(md, capnp._DynamicStructBuilder)
-      assert hasattr(md, msg_type)
+        mocked_pubmaster.send.assert_called_once()
+        mt, md = mocked_pubmaster.send.call_args.args
+        msg_type = msg["type"]
+        assert isinstance(msg_type, str)
+        assert mt == msg_type
+        assert isinstance(md, capnp._DynamicStructBuilder)
+        assert hasattr(md, msg_type)
 
-      mocked_pubmaster.reset_mock()
+        mocked_pubmaster.reset_mock()
 
   def test_livestream_track(self, mocker):
     fake_msg = messaging.new_message("livestreamCabinEncodeData")
