@@ -1,0 +1,106 @@
+import math
+import time
+
+import numpy as np
+
+import openpilot.cereal.messaging as messaging
+from openpilot.selfdrive.modeld.constants import ModelConstants
+from openpilot.common.swaglog import cloudlog
+
+from openpilot.starpilot.controllers.toyota_cruise import ToyotaCruisePreference, capability as toyota_cruise_capability
+
+from opendbc.car.ford.values import CAR, FordFlags
+
+
+class ManualTurnInputs:
+  def __init__(self, params):
+    self.params = params
+    self.sm = messaging.SubMaster(["modelV2", "lateralDelay"])
+    self.enabled = bool(self.params.get("FordHumanTurnDetection", return_default=True))
+    self.frames = 0
+
+  def update(self):
+    self.sm.update(0)
+    if self.frames % 100 == 0:
+      self.enabled = bool(self.params.get("FordHumanTurnDetection", return_default=True))
+    self.frames += 1
+    state = self.sm["modelV2"].meta.laneChangeState
+    model_ready = self.sm.alive["modelV2"] and self.sm.valid["modelV2"]
+    return self.enabled, int(getattr(state, "raw", state)) in (1, 2, 3), model_ready
+
+
+  def preview_curvature(self, speed: float) -> float | None:
+    try:
+      now = time.monotonic_ns()
+      stamp = self.sm.logMonoTime["modelV2"]
+      if (not self.sm.alive["modelV2"] or not self.sm.valid["modelV2"] or
+          not 0 < stamp <= now <= stamp + 100_000_000 or not math.isfinite(speed) or speed < 0.1):
+        return None
+      yaw = tuple(self.sm["modelV2"].orientationRate.z)
+      if len(yaw) != len(ModelConstants.T_IDXS) or not all(math.isfinite(value) for value in yaw):
+        return None
+      delay = 0.2
+      delay_stamp = self.sm.logMonoTime["lateralDelay"]
+      if (self.sm.alive["lateralDelay"] and self.sm.valid["lateralDelay"] and
+          0 < delay_stamp <= now <= delay_stamp + 1_000_000_000):
+        measured_delay = float(self.sm["lateralDelay"].lateralDelay)
+        if math.isfinite(measured_delay):
+          delay = float(np.clip(measured_delay, 0.2, 0.4))
+      return float(np.interp(delay, ModelConstants.T_IDXS, yaw)) / speed
+    except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
+      return None
+
+  def lateral_snapshot(self, speed: float):
+    if self.preview_curvature(speed) is None:
+      return None
+    delay = 0.2
+    now = time.monotonic_ns()
+    stamp = self.sm.logMonoTime["lateralDelay"]
+    if (self.sm.alive["lateralDelay"] and self.sm.valid["lateralDelay"] and
+        0 < stamp <= now <= stamp + 1_000_000_000):
+      value = float(self.sm["lateralDelay"].lateralDelay)
+      if math.isfinite(value):
+        delay = float(np.clip(value, 0.2, 0.4))
+    return self.sm["modelV2"], ModelConstants.T_IDXS, delay, self.enabled
+
+
+def configure_controller(CI, params):
+  cp = CI.CP
+  controller = CI.CC
+  if controller is not None and toyota_cruise_capability(cp) is not None:
+    controller.reverse_cruise_input = ToyotaCruisePreference(cp, params)
+  if (controller is not None and cp.brand == "ford" and cp.carFingerprint == CAR.FORD_MUSTANG_MACH_E_MK1 and
+      not cp.flags & FordFlags.LKA_STEERING and not cp.passive and not cp.dashcamOnly and not cp.notCar and
+      getattr(controller, "manual_turn", None) is not None):
+    controller.manual_turn_inputs = ManualTurnInputs(params)
+
+  from opendbc.car.ford.classic_lateral import qualified as classic_qualified
+  if controller is not None and classic_qualified(cp) and getattr(controller, "classic_lateral", None) is not None:
+    controller.manual_turn_inputs = ManualTurnInputs(params)
+
+  from opendbc.car.hyundai.g90_lead import eligible as g90_lead_eligible
+  if controller is not None and g90_lead_eligible(cp):
+    from openpilot.starpilot.longitudinal.g90_lead import G90LeadInputs
+    try:
+      controller.g90_lead_inputs = G90LeadInputs()
+    except OSError:
+      controller.g90_lead_inputs = None
+      cloudlog.exception('Optional G90 lead input transport unavailable')
+
+  from opendbc.car.hyundai.gv70_camera_lead import eligible as gv70_lead_eligible
+  if controller is not None and gv70_lead_eligible(cp):
+    from openpilot.starpilot.longitudinal.gv70_lead import GV70LeadInputs
+    try:
+      controller.gv70_lead_inputs = GV70LeadInputs()
+    except OSError:
+      controller.gv70_lead_inputs = None
+      cloudlog.exception('Optional GV70 lead input transport unavailable')
+
+  from opendbc.car.hyundai.ev9_longitudinal import qualified as ev9_long_qualified
+  if controller is not None and ev9_long_qualified(cp):
+    from openpilot.starpilot.longitudinal.canfd_lead import CANFDLeadInputs
+    try:
+      controller.ev9_lead_inputs = CANFDLeadInputs()
+    except OSError:
+      controller.ev9_lead_inputs = None
+      cloudlog.exception('Optional EV9 lead input transport unavailable')
