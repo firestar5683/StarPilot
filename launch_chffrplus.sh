@@ -5,6 +5,11 @@ DIR="$( cd "$( dirname "${BASH_SOURCE[0]}" )" >/dev/null && pwd )"
 source "$DIR/launch_env.sh"
 
 function agnos_init {
+  if [ "${AGNOS_UPDATE_POLICY:-auto}" = "retain" ] && [ "$(< /VERSION)" != "$AGNOS_VERSION" ]; then
+    echo "This StarPilot build retains AGNOS $AGNOS_VERSION; installed OS does not match. No OS update was attempted."
+    return 1
+  fi
+
   # TODO: move this to agnos
   sudo rm -f /data/etc/NetworkManager/system-connections/*.nmmeta
   rm -f /data/scons_cache/config.lock
@@ -20,7 +25,7 @@ function agnos_init {
   # Check if AGNOS update is required
   if [ "$(< /VERSION)" != "$AGNOS_VERSION" ]; then
     AGNOS_PY="$DIR/openpilot/common/hardware/comma/agnos.py"
-    MANIFEST="$DIR/openpilot/system/hardware/comma/agnos.json"
+    MANIFEST="$DIR/openpilot/common/hardware/comma/agnos.json"
     if "$AGNOS_PY" --verify "$MANIFEST"; then
       sudo reboot
     fi
@@ -82,7 +87,10 @@ function launch {
 
   # hardware specific init
   if [ -f /AGNOS ]; then
-    agnos_init
+    agnos_init || return $?
+    if ! "$DIR/scripts/install_boot_logo.sh"; then
+      echo "StarPilot boot image update failed; continuing startup."
+    fi
   fi
 
   # write tmux scrollback to a file

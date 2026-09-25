@@ -6,6 +6,11 @@ export NUMEXPR_NUM_THREADS=1
 export OPENBLAS_NUM_THREADS=1
 export VECLIB_MAXIMUM_THREADS=1
 
+# Use the dependency environment supplied by the retained custom image.
+if [ -x /usr/local/venv/bin/python3 ]; then
+  export PATH="/usr/local/venv/bin:$PATH"
+fi
+
 # models get lower priority than ui
 # - ui is ~5ms
 # - modeld is 20ms
@@ -16,7 +21,9 @@ export VECLIB_MAXIMUM_THREADS=1
 export QCOM_PRIORITY=12
 
 if [ -z "$AGNOS_VERSION" ]; then
-  export AGNOS_VERSION="19.9"
+  export AGNOS_VERSION="19.8.2"
 fi
+
+export AGNOS_UPDATE_POLICY="auto"
 
 export STAGING_ROOT="/data/safe_staging"

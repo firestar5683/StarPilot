@@ -1,0 +1,142 @@
+"""Same-user, process-bound local control for the running updater."""
+
+from __future__ import annotations
+
+import os
+import socket
+import struct
+import threading
+from collections.abc import Callable
+from pathlib import Path
+
+
+TIMEOUT = 0.5
+MAX_COMMAND = 16
+_CREDENTIALS = struct.Struct('3i')
+
+
+class UpdaterControlError(RuntimeError):
+  pass
+
+
+def process_start(pid: int) -> int:
+  try:
+    raw = (Path('/proc') / str(pid) / 'stat').read_text()
+    fields = raw[raw.rindex(')') + 2:].split()
+    start = int(fields[19])
+    if start <= 0:
+      raise ValueError
+    return start
+  except (OSError, ValueError, IndexError):
+    raise UpdaterControlError('Updater process identity is unavailable') from None
+
+
+def _address(pid: int, start: int, uid: int) -> str:
+  if type(pid) is not int or type(start) is not int or pid <= 1 or start <= 0:
+    raise UpdaterControlError('Invalid updater identity')
+  return f'\0starpilot-updater-v1-{uid}-{pid}-{start}'
+
+
+def _peer(connection: socket.socket) -> tuple[int, int]:
+  if not hasattr(socket, 'SO_PEERCRED'):
+    raise UpdaterControlError('Peer credentials are unavailable')
+  pid, uid, _ = _CREDENTIALS.unpack(connection.getsockopt(socket.SOL_SOCKET, socket.SO_PEERCRED, _CREDENTIALS.size))
+  return pid, uid
+
+
+def _line(connection: socket.socket) -> bytes:
+  data = bytearray()
+  while len(data) < MAX_COMMAND:
+    chunk = connection.recv(1)
+    if not chunk:
+      break
+    data.extend(chunk)
+    if chunk == b'\n':
+      return bytes(data)
+  raise UpdaterControlError('Invalid updater control message')
+
+
+def _exchange(pid: int, start: int, command: bytes) -> None:
+  try:
+    with socket.socket(socket.AF_UNIX, socket.SOCK_STREAM) as connection:
+      connection.settimeout(TIMEOUT)
+      connection.connect(_address(pid, start, os.geteuid()))
+      if _peer(connection) != (pid, os.geteuid()) or process_start(pid) != start:
+        raise UpdaterControlError('Updater process changed')
+      connection.sendall(command + b'\n')
+      if _line(connection) != b'ok\n':
+        raise UpdaterControlError('Updater declined control request')
+  except (OSError, TimeoutError):
+    raise UpdaterControlError('Updater control is unavailable') from None
+
+
+def available(pid: int, start: int) -> bool:
+  try:
+    _exchange(pid, start, b'status')
+    return True
+  except UpdaterControlError:
+    return False
+
+
+def send(pid: int, start: int, action: str) -> None:
+  if action not in ('check', 'download'):
+    raise UpdaterControlError('Invalid updater control action')
+  _exchange(pid, start, action.encode('ascii'))
+
+
+class UpdaterControlServer:
+  def __init__(self, request: Callable[[str], None]):
+    self.request = request
+    self.socket: socket.socket | None = None
+    self.thread: threading.Thread | None = None
+    self.stopped = threading.Event()
+
+  def start(self) -> None:
+    if self.socket is not None:
+      raise UpdaterControlError('Updater control already started')
+    pid = os.getpid()
+    address = _address(pid, process_start(pid), os.geteuid())
+    listener = None
+    try:
+      listener = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+      listener.settimeout(TIMEOUT)
+      listener.bind(address)
+      listener.listen(4)
+    except OSError:
+      if listener is not None:
+        listener.close()
+      raise UpdaterControlError('Updater control cannot listen') from None
+    self.socket = listener
+    self.thread = threading.Thread(target=self._run, args=(listener,), name='updater-control', daemon=True)
+    self.thread.start()
+
+  def _run(self, listener: socket.socket) -> None:
+    while not self.stopped.is_set():
+      try:
+        connection, _ = listener.accept()
+      except TimeoutError:
+        continue
+      except OSError:
+        break
+      with connection:
+        connection.settimeout(TIMEOUT)
+        try:
+          _, uid = _peer(connection)
+          command = _line(connection)
+          if uid != os.geteuid() or command not in (b'status\n', b'check\n', b'download\n'):
+            connection.sendall(b'error\n')
+          else:
+            if command != b'status\n':
+              self.request(command[:-1].decode('ascii'))
+            connection.sendall(b'ok\n')
+        except (OSError, RuntimeError, ValueError):
+          pass
+
+  def close(self) -> None:
+    self.stopped.set()
+    if self.socket is not None:
+      self.socket.close()
+      self.socket = None
+    if self.thread is not None:
+      self.thread.join(timeout=TIMEOUT * 2)
+      self.thread = None
