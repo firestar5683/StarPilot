@@ -1,0 +1,28 @@
+#pragma once
+
+#include "selfdrive/pandad/aol_protocol.h"
+
+inline bool gm_aol_param(uint16_t param) {
+  switch (param) {
+    case 0x201U: case 0x601U: case 0xA01U: case 0xE01U:
+    case 0x203U: case 0x603U: case 0xA03U: case 0xE03U:
+    case 0xC172U: case 0xC173U: case 0xC171U: case 5U: case 7U: case 20U:
+    case 0xBDU: case 0x9DU: case 0x19DU: case 0x1CDU:
+    case 0x205U: case 0x605U: case 0xA05U: case 0xE05U:
+    case 0x4207U: case 0x4607U: case 0x4A07U: case 0x4E07U:
+    case 0x4004U: case 0xC004U: case 0x4007U:
+    case 0xC160U: case 0xC180U: case 0xC181U:
+    case 0xC182U: case 0xC183U: case 0xC184U: case 0xC185U: case 0xC186U: case 0xC187U: case 0xC170U:
+    case 0x1001U: case 0x1401U: case 0x3001U: case 0x3401U:
+    case 0x1003U: case 0x1403U:
+    case 0x1005U: case 0x1405U: case 0x5007U: case 0x5407U:
+    case 0xC110U: case 0xC111U: case 0xC120U: case 0xC121U:
+    case 0xC130U: case 0xC131U: case 0xC140U: case 0xC141U:
+    case 0xC150U: case 0xC151U:
+      return true;
+    default:
+      return false;
+  }
+}
+
+inline constexpr AolSafetyProfile GM_AOL_PROFILE{4U, gm_aol_param, true};
