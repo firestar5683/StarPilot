@@ -1,0 +1,45 @@
+const { chromium } = require(process.env.PLAYWRIGHT_MODULE || 'playwright')
+const assert = require('node:assert/strict')
+;(async () => {
+  const browser = await chromium.launch({headless:true})
+  const page = await browser.newPage()
+  const errors = []
+  page.on('pageerror', e => errors.push(e.message))
+  await page.goto(process.env.GALAXY_URL || 'http://127.0.0.1:8765/')
+  await page.evaluate(async () => {
+    const {createApp, reactive} = await import('./vendor/vue/vue.esm-browser.js')
+    const {ControllersPage} = await import('./js/controllers.js')
+    const {CloudProviderPage} = await import('./js/cloud-provider.js')
+    const {CamerasPage} = await import('./js/cameras.js')
+    const {GxNotice} = await import('./js/notice.js')
+    document.querySelector('#galaxy-app').remove()
+    const root = document.createElement('div');root.id='status-test';root.className='gx-content';document.body.append(root)
+    window.fixture=reactive({controllers:{status:null,busy:true,error:''},provider:{status:null,busy:false,error:''}})
+    createApp({components:{Controllers:{...ControllersPage,setup:()=>({state:window.fixture.controllers,feed:{refresh(){}}}),mounted(){},beforeUnmount(){}},
+      Provider:{...CloudProviderPage,data:()=>window.fixture.provider,mounted(){},beforeUnmount(){}},CamerasPage,GxNotice},
+      template:`<div class="gx-settings"><Controllers mode="local" :unauthorized="()=>{}"/><Provider mode="local" :unauthorized="()=>{}"/><CamerasPage mode="sample" :go="()=>{}" :unauthorized="()=>{}"/></div>`}).mount(root)
+  })
+  for (const width of [320,390,1280,3440]) {
+    await page.setViewportSize({width,height:1000})
+    assert.equal(await page.evaluate(()=>document.documentElement.scrollWidth>innerWidth),false)
+    const tiles=await page.locator('.gx-grid').boundingBox(), snapshot=await page.locator('.gx-settings > .gx-card').last().boundingBox()
+    assert.ok(snapshot.y-tiles.y-tiles.height >= 15,'tiles have shared section spacing before snapshot')
+  }
+  assert.equal(await page.locator('.gx-controllers .gx-alert').count(),1)
+  assert.ok(await page.locator('.gx-controllers .gx-alert--info .gx-spinner').count())
+  await page.evaluate(()=>Object.assign(window.fixture.controllers,{busy:false,error:'Controller Buttons are unavailable. Reload before trying again.'}))
+  assert.equal(await page.locator('.gx-controllers .gx-alert').count(),1)
+  assert.equal(await page.locator('.gx-controllers .gx-alert--danger').count(),1)
+  assert.equal(await page.getByText('Checking attached controllers…',{exact:true}).count(),0)
+  assert.equal(await page.getByRole('button',{name:'Refresh',exact:true}).isEnabled(),true)
+  const provider={active:'comma',selected:'comma',restartRequired:false,canSelect:true,providers:[{id:'comma',label:'comma'},{id:'konik',label:'Konik'}]}
+  await page.evaluate(value=>{window.fixture.provider.status=value},provider)
+  assert.equal(await page.locator('.gx-settings__developer-body .gx-alert').count(),0,'active provider needs no banner')
+  await page.evaluate(()=>{window.fixture.provider.status.canSelect=false})
+  assert.equal(await page.locator('.gx-settings__developer-body .gx-alert--warn').count(),1)
+  await page.evaluate(()=>Object.assign(window.fixture.provider.status,{restartRequired:true,selected:'konik'}))
+  assert.equal(await page.locator('.gx-settings__developer-body .gx-alert').count(),1,'restart and parked messages do not duplicate')
+  assert.deepEqual(errors,[])
+  await browser.close()
+  console.log('Status consistency: single loading/error banner, refresh, developer state and responsive camera spacing passed.')
+})().catch(e=>{console.error(e);process.exit(1)})
