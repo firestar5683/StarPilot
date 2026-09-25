@@ -1,4 +1,4 @@
-"""One parked, source-bound vehicle choice; Auto retains native fingerprinting."""
+"""One source-bound vehicle choice; Auto retains native fingerprinting."""
 
 from collections.abc import Callable
 from dataclasses import dataclass
@@ -88,9 +88,9 @@ def startup_candidate(params, *, developer_fingerprint: bool = False) -> str | N
 
 
 class VehicleSelectionOwner:
-  def __init__(self, params, parked: Callable[[], bool]):
+  def __init__(self, params, authorized: Callable[[], bool]):
     self.params = params
-    self.parked = parked
+    self.authorized = authorized
 
   def snapshot(self) -> SelectionSnapshot:
     return read_selection(self.params)
@@ -104,5 +104,5 @@ class VehicleSelectionOwner:
     except ValueError:
       return WriteResult(False, False)
     return commit_exact(self.params, key=KEY, max_bytes=MAX_BYTES, raw=desired,
-                        expected=expected_raw, authorized=self.parked,
+                        expected=expected_raw, authorized=self.authorized,
                         temp_prefix='.vehicle-selection-')

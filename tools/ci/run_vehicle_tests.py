@@ -19,9 +19,43 @@ ROOT = Path(__file__).resolve().parents[2]
 sys.path.insert(0, str(ROOT))
 
 from tools import test_runner
+from tools.ci import vehicle_pytest
 
 RELEASE_TARGETS = (
+  "opendbc_repo/opendbc/safety/tests/test_tesla_preap_stock.py",
+  "opendbc_repo/opendbc/car/tesla/tests/test_preap_startup.py",
+  "opendbc_repo/opendbc/car/tesla/tests/test_preap_stock.py",
+  "openpilot/starpilot/car/tesla/tests/test_preap_intent.py",
+  "openpilot/starpilot/car/tesla/tests/test_stock_events.py",
+  "opendbc_repo/opendbc/car/ford/tests/test_aol_startup.py",
+  "openpilot/starpilot/tests/test_ford_aol_intent.py",
+  "opendbc_repo/opendbc/safety/tests/test_ford_aol.py",
+  "opendbc_repo/opendbc/safety/tests/test_ford_mach_e_extended.py",
+  "opendbc_repo/opendbc/car/ford/tests/test_added_firmware_identity.py",
+  "opendbc_repo/opendbc/car/ford/tests/test_required_source_health.py",
+  "opendbc_repo/opendbc/car/ford/tests/test_blend_settings.py",
+  "opendbc_repo/opendbc/car/ford/tests/test_blend_settings_startup.py",
+  "opendbc_repo/opendbc/car/ford/tests/test_production_extensions.py",
+  "opendbc_repo/opendbc/car/ford/tests/test_generic_canfd.py",
+  "opendbc_repo/opendbc/safety/tests/test_ford_generic_canfd_extended.py",
+  "opendbc_repo/opendbc/car/hyundai/tests/test_blended_stock_aol.py",
+  "openpilot/starpilot/aol/tests/test_nexo_stock_aol.py",
+  "opendbc_repo/opendbc/safety/tests/test_nexo_stock_aol.py",
+  "opendbc_repo/opendbc/safety/tests/test_hyundai_stock_angle_aol.py",
+  "opendbc_repo/opendbc/car/hyundai/tests/test_stock_angle_aol.py",
+  "opendbc_repo/opendbc/car/hyundai/tests/test_g90_startup.py",
+  "opendbc_repo/opendbc/safety/tests/test_hyundai_classic_long_aol.py",
+  "openpilot/starpilot/aol/tests/test_classic_long_profiles.py",
+  "opendbc_repo/opendbc/safety/tests/test_hyundai_shared_canfd_stock_aol.py",
+  "opendbc_repo/opendbc/safety/tests/test_hyundai_hda2_long_aol.py",
+  "opendbc_repo/opendbc/safety/tests/test_prepared_torque_ev_native.py",
+  "opendbc_repo/opendbc/car/hyundai/tests/test_shared_canfd_stock_aol.py",
+  "opendbc_repo/opendbc/safety/tests/test_hyundai_classic_scc_aol.py",
+  "openpilot/starpilot/aol/tests/test_classic_scc_profiles.py",
   "opendbc_repo/opendbc/safety/tests/test_hyundai_blended.py",
+  "opendbc_repo/opendbc/safety/tests/test_hyundai_blended_alpha.py::TestHyundaiBlendedAlphaAol",
+  "opendbc_repo/opendbc/safety/tests/test_hyundai_blended_alpha.py::TestHyundaiBlendedHda2Integrity",
+  "opendbc_repo/opendbc/safety/tests/test_hyundai_ev9_long.py::TestEv9LongReleaseDenied",
   "opendbc_repo/opendbc/car/hyundai/tests/test_palisade_2023.py",
   "openpilot/starpilot/longitudinal/tests/test_output_max.py",
   "openpilot/starpilot/ui/tests/test_output_max_feature.py",
@@ -40,7 +74,6 @@ RELEASE_TARGETS = (
   "opendbc_repo/opendbc/safety/tests/test_tesla.py::TestTeslaStockSafety",
   "opendbc_repo/opendbc/safety/tests/test_tesla_hw1.py",
   "opendbc_repo/opendbc/safety/tests/test_volvo_c1.py",
-  "opendbc_repo/opendbc/safety/tests/test_tesla.py::TestTeslaFSD14StockSafety",
   "opendbc_repo/opendbc/safety/tests/test_mazda.py::TestMazdaSafety",
   "opendbc_repo/opendbc/safety/tests/test_toyota.py::TestToyotaStockLongitudinalTorque",
   "opendbc_repo/opendbc/safety/tests/test_toyota_auto_hold.py",
@@ -48,6 +81,10 @@ RELEASE_TARGETS = (
   "opendbc_repo/opendbc/safety/tests/test_gm.py::TestGmCameraEVSafety",
   "opendbc_repo/opendbc/safety/tests/test_gm_bolt_pedal.py",
   "opendbc_repo/opendbc/safety/tests/test_gm_bolt_cc.py",
+  "opendbc_repo/opendbc/car/gm/tests/test_bolt_cc_low.py",
+  "openpilot/starpilot/tests/test_bolt_cc_controls_low.py",
+  "openpilot/starpilot/tests/test_bolt_cc_controls_manual.py",
+  "openpilot/starpilot/car/gm/tests/test_gear_events.py",
   "openpilot/starpilot/tests/test_bolt_disable_active_pedal.py::TestBoltDisableActivePedal",
   "opendbc_repo/opendbc/car/gm/tests/test_bolt_acc_cc.py",
   "opendbc_repo/opendbc/car/gm/tests/test_bolt_factory_acc.py",
@@ -59,6 +96,8 @@ RELEASE_TARGETS = (
   "opendbc_repo/opendbc/safety/tests/test_gm_ascm_intercept.py",
   "opendbc_repo/opendbc/safety/tests/test_gm_sdgm_stock.py",
   "opendbc_repo/opendbc/safety/tests/test_gm_cc_gateway_stock.py",
+  "opendbc_repo/opendbc/safety/tests/test_gm_stock_cancel_delay.py",
+  "openpilot/starpilot/tests/test_gm_stock_caller.py",
   "opendbc_repo/opendbc/safety/tests/test_gm_camera_stock_four.py",
   "opendbc_repo/opendbc/safety/tests/test_gm_volt_gateway_mapping.py",
   "opendbc_repo/opendbc/safety/tests/test_gm_volt_alternate_brake.py",
@@ -66,6 +105,7 @@ RELEASE_TARGETS = (
   "opendbc_repo/opendbc/safety/tests/test_gm_ordinary_ascm.py",
   "opendbc_repo/opendbc/safety/tests/test_gm_ordinary_sdgm.py",
   "opendbc_repo/opendbc/safety/tests/test_gm_ordinary_cc.py",
+  "opendbc_repo/opendbc/safety/tests/test_gm_hybrid_cc.py",
   "opendbc_repo/opendbc/car/gm/tests/test_ordinary_cc.py",
   "opendbc_repo/opendbc/safety/tests/test_gm_ordinary_camera.py",
   "opendbc_repo/opendbc/car/gm/tests/test_ordinary_camera.py",
@@ -87,9 +127,16 @@ RELEASE_TARGETS = (
   "opendbc_repo/opendbc/safety/tests/test_hyundai_ccnc_angle_two.py",
   "opendbc_repo/opendbc/safety/tests/test_hyundai_ioniq6_long.py",
   "opendbc_repo/opendbc/safety/tests/test_hyundai_ray_pedal.py",
+  "opendbc_repo/opendbc/safety/tests/test_honda_mvl_stock.py",
+  "opendbc_repo/opendbc/safety/tests/test_honda_stock_aol.py",
+  "opendbc_repo/opendbc/safety/tests/test_mazda_stock_aol.py",
+  "opendbc_repo/opendbc/car/mazda/tests/test_stock_aol_pause.py",
+  "opendbc_repo/opendbc/safety/tests/test_honda_rdx_gas_cap.py",
+  "opendbc_repo/opendbc/safety/tests/test_honda_aol_source.py",
   "opendbc_repo/opendbc/safety/tests/test_honda_aol_family.py",
   "opendbc_repo/opendbc/safety/tests/test_aol_defensive_config.py",
   "opendbc_repo/opendbc/safety/tests/test_honda_nidec_six.py",
+  "opendbc_repo/opendbc/safety/tests/test_honda_interceptor.py",
   "opendbc_repo/opendbc/safety/tests/test_honda_bosch_radarless_three.py",
   "opendbc_repo/opendbc/safety/tests/test_subaru_gen2_angle_pair.py",
   "opendbc_repo/opendbc/safety/tests/test_subaru_ascent_angle.py",
@@ -159,12 +206,14 @@ def audit_interface_modules(targets, test_ids):
         for method in node.body:
           if isinstance(method, (ast.FunctionDef, ast.AsyncFunctionDef)) and method.name.startswith("test_"):
             expected = f"{module}.{node.name}.{method.name}"
-            if not any(test_id == expected or test_id.startswith(expected + "_") for test_id in selected):
+            if not any(test_id == expected or test_id.startswith((expected + "_", expected + "[")) for test_id in selected):
               missing_methods.append(f"{node.name}.{method.name}")
     if not selected:
       errors.append(f"Interface test module collected zero tests: {target}")
-    if functions:
-      errors.append(f"Unsupported module-level tests require an explicit runner: {target}: {functions}")
+    for function in functions:
+      expected = f"{module}.{function}"
+      if not any(test_id == expected or test_id.startswith(expected + "[") for test_id in selected):
+        errors.append(f"Declared module-level test was not collected: {target}: {function}")
     if missing_methods:
       errors.append(f"Declared interface tests were not collected: {target}: {missing_methods}")
     modules.append({"path": target, "source_sha256": sha256(path), "collected_count": len(selected),
@@ -204,7 +253,8 @@ def source_provenance():
   return {"revision": git("rev-parse", "HEAD"), "status": git("status", "--porcelain"),
           "inputs": source_input_snapshot(),
           "manifest_sha256": sha256(manifest), "dependencies": json.loads(manifest.read_text())["dependencies"],
-          "runner_sha256": sha256(ROOT / "tools/test_runner.py"), "suite_runner_sha256": sha256(__file__)}
+          "runner_sha256": sha256(ROOT / "tools/test_runner.py"), "suite_runner_sha256": sha256(__file__),
+          "pytest_runner_sha256": sha256(ROOT / "tools/ci/vehicle_pytest.py")}
 
 
 def native_provenance():
@@ -255,6 +305,7 @@ def run(suite, output, collect_only=False):
   output.mkdir(parents=True, exist_ok=True)
   started = time.monotonic()
   tests, errors = [], []
+  pytest_nodeids = []
   records, platform_tests, gate_errors = [], {}, []
   phase = "initialization"
   plan = {"schema_version": 1, "suite": suite, "status": "initializing", "workers": 1,
@@ -274,8 +325,14 @@ def run(suite, output, collect_only=False):
     if suite != "interfaces" and not collect_only:
       plan["native"]["safety"] = build_safety_library(suite == "safety-release", output)
     phase = "collection"
-    tests, errors = test_runner.collect(plan["targets"], None)
-    ids = [test.id() for test in tests]
+    unittest_targets, pytest_targets = vehicle_pytest.split_targets(ROOT, plan["targets"])
+    plan["runners"] = {"unittest": unittest_targets, "pytest": pytest_targets}
+    tests, errors = test_runner.collect(unittest_targets, None) if unittest_targets else ([], [])
+    pytest_nodeids, pytest_errors = vehicle_pytest.collect(pytest_targets)
+    errors.extend(pytest_errors)
+    ids = [test.id() for test in tests] + [vehicle_pytest.test_id(nodeid) for nodeid in pytest_nodeids]
+    if len(set(ids)) != len(ids):
+      errors.append("Vehicle runners selected duplicate test IDs")
     if suite == "interfaces":
       plan["module_collection"], module_errors = audit_interface_modules(plan["targets"], ids)
       errors.extend(module_errors)
@@ -290,7 +347,10 @@ def run(suite, output, collect_only=False):
       return 0
     if not errors:
       phase = "execution"
-      records = test_runner.run_batch(ids, capture_output=True)
+      records = test_runner.run_batch([test.id() for test in tests], capture_output=True) if tests else []
+      pytest_records, pytest_errors = vehicle_pytest.run(pytest_nodeids)
+      records.extend(pytest_records)
+      errors.extend(pytest_errors)
       phase = "source verification"
       plan["source_after"] = source_provenance()
       if plan["source"].get("inputs") != plan["source_after"].get("inputs"):
@@ -298,7 +358,7 @@ def run(suite, output, collect_only=False):
   except Exception:
     errors.append(f"{phase} error:\n{traceback.format_exc()}")
     plan["error_phase"] = phase
-  ids = [test.id() for test in tests]
+  ids = [test.id() for test in tests] + [vehicle_pytest.test_id(nodeid) for nodeid in pytest_nodeids]
   records = test_runner.account_for_tests(ids, records, tests)
   if not errors and suite == "interfaces":
     gate_errors.extend(interface_execution_errors(platform_tests, records))
