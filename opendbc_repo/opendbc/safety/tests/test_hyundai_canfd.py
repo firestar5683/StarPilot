@@ -256,5 +256,75 @@ class TestHyundaiCanfdLFASteeringLongAltButtons(TestHyundaiCanfdLFASteeringLongB
     pass
 
 
+class TestHyundaiCanfdCCNC(TestHyundaiCanfdLFASteeringBase):
+  """Ordinary non-LKA CCNC replaces 0x160/0x1e0 with paired camera display frames."""
+
+  TX_MSGS = [[0x12A, 0], [0x1A0, 0], [0x1CF, 2], [0x161, 0], [0x162, 0]]
+  RELAY_MALFUNCTION_ADDRS = {0: (0x12A, 0x161, 0x162, 0x1E0)}
+  FWD_BLACKLISTED_ADDRS = {2: [0x12A, 0x161, 0x162, 0x1E0]}
+  STEER_MSG = "LFA"
+  GAS_MSG = ("ACCELERATOR_BRAKE_ALT", "ACCELERATOR_PEDAL_PRESSED")
+  SAFETY_PARAM = HyundaiSafetyFlags.CAMERA_SCC | HyundaiSafetyFlags.CCNC
+
+  def test_only_paired_ccnc_display_ids_have_permission(self):
+    for addr, name in ((0x161, "CCNC_0x161"), (0x162, "CCNC_0x162")):
+      with self.subTest(addr=hex(addr)):
+        self.assertTrue(self._tx(self.packer.make_can_msg_safety(name, 0, {})))
+        for bus in (1, 2):
+          self.assertFalse(self._tx(self.packer.make_can_msg_safety(name, bus, {})))
+        self.assertFalse(self._tx(common.make_msg(0, addr, 8)))
+    for addr, size, bus in ((0x160, 16, 0), (0x7C4, 8, 2), (0xEA, 24, 2)):
+      self.assertFalse(self._tx(common.make_msg(bus, addr, size)))
+
+  def test_ccnc_flag_without_non_lka_camera_topology_grants_no_display_tx(self):
+    for param in (HyundaiSafetyFlags.CCNC,
+                  HyundaiSafetyFlags.CCNC | HyundaiSafetyFlags.CAMERA_SCC | HyundaiSafetyFlags.CANFD_LKA_STEER_MSG):
+      with self.subTest(param=param):
+        self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiCanfd, param)
+        self.safety.init_tests()
+        for name in ("CCNC_0x161", "CCNC_0x162"):
+          self.assertFalse(self._tx(self.packer.make_can_msg_safety(name, 0, {})))
+
+
+class TestHyundaiCanfdCCNCLong(TestHyundaiCanfdLFASteeringLongBase):
+  TX_MSGS = TestHyundaiCanfdCCNC.TX_MSGS
+  RELAY_MALFUNCTION_ADDRS = {0: (0x12A, 0x1A0, 0x161, 0x162, 0x1E0)}
+  FWD_BLACKLISTED_ADDRS = {2: [0x12A, 0x1A0, 0x161, 0x162, 0x1E0]}
+  STEER_MSG = "LFA"
+  GAS_MSG = ("ACCELERATOR_BRAKE_ALT", "ACCELERATOR_PEDAL_PRESSED")
+  SAFETY_PARAM = HyundaiSafetyFlags.CAMERA_SCC | HyundaiSafetyFlags.CCNC
+
+  def test_tester_present_allowed(self, ecu_disable=False):
+    super().test_tester_present_allowed(ecu_disable=False)
+
+  def test_only_paired_ccnc_display_ids_have_permission(self):
+    TestHyundaiCanfdCCNC.test_only_paired_ccnc_display_ids_have_permission(self)
+
+
+class TestHyundaiCanfdCCNCAltButtons(TestHyundaiCanfdCCNC):
+  def setUp(self):
+    self.packer = CANPackerSafety("hyundai_canfd_generated")
+    self.safety = libsafety_py.libsafety
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiCanfd, self.SAFETY_PARAM | HyundaiSafetyFlags.CANFD_ALT_BUTTONS)
+    self.safety.init_tests()
+
+  _button_msg = TestHyundaiCanfdLFASteeringAltButtonsBase._button_msg
+  _acc_cancel_msg = TestHyundaiCanfdLFASteeringAltButtonsBase._acc_cancel_msg
+  test_button_sends = TestHyundaiCanfdLFASteeringAltButtonsBase.test_button_sends
+  test_acc_cancel = TestHyundaiCanfdLFASteeringAltButtonsBase.test_acc_cancel
+
+
+class TestHyundaiCanfdCCNCLongAltButtons(TestHyundaiCanfdCCNCLong):
+  def setUp(self):
+    self.packer = CANPackerSafety("hyundai_canfd_generated")
+    self.safety = libsafety_py.libsafety
+    self.safety.set_safety_hooks(CarParams.SafetyModel.hyundaiCanfd,
+                                 self.SAFETY_PARAM | HyundaiSafetyFlags.CANFD_ALT_BUTTONS | HyundaiSafetyFlags.LONG)
+    self.safety.init_tests()
+
+  _button_msg = TestHyundaiCanfdLFASteeringAltButtonsBase._button_msg
+  test_button_sends = TestHyundaiCanfdLFASteeringAltButtonsBase.test_button_sends
+
+
 if __name__ == "__main__":
   unittest.main()

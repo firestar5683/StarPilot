@@ -80,8 +80,7 @@ bool safety_test_rx_health_fixture(unsigned int variant, bool canfd) {
   const safety_config original = current_safety_config;
   current_safety_config.rx_checks = (variant == 1U) ? NULL : &check;
   current_safety_config.rx_checks_len = (variant == 0U) ? 0 : 1;
-  (void)canfd;
-  const bool healthy = aol_rx_healthy();
+  const bool healthy = canfd ? hyundai_canfd_ioniq6_rx_healthy() : aol_rx_healthy();
   current_safety_config = original;
   return healthy;
 }

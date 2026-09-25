@@ -1,0 +1,101 @@
+{
+  "source": "678af78347d9656bc2f5dacd4204b012db861fa7",
+  "cases": [
+    {
+      "counter": 0,
+      "brake": false,
+      "gas": false,
+      "payload": "342400020000fcff000000000020000055ff000068000000"
+    },
+    {
+      "counter": 0,
+      "brake": true,
+      "gas": false,
+      "payload": "ec4900020100fcff000000000020000055ff000068000000"
+    },
+    {
+      "counter": 0,
+      "brake": false,
+      "gas": true,
+      "payload": "805200020000fcff000000000020000055ff000068000100"
+    },
+    {
+      "counter": 0,
+      "brake": true,
+      "gas": true,
+      "payload": "583f00020100fcff000000000020000055ff000068000100"
+    },
+    {
+      "counter": 1,
+      "brake": false,
+      "gas": false,
+      "payload": "371301020000fcff000000000020000055ff000068000000"
+    },
+    {
+      "counter": 1,
+      "brake": true,
+      "gas": false,
+      "payload": "ef7e01020100fcff000000000020000055ff000068000000"
+    },
+    {
+      "counter": 1,
+      "brake": false,
+      "gas": true,
+      "payload": "836501020000fcff000000000020000055ff000068000100"
+    },
+    {
+      "counter": 1,
+      "brake": true,
+      "gas": true,
+      "payload": "5b0801020100fcff000000000020000055ff000068000100"
+    },
+    {
+      "counter": 255,
+      "brake": false,
+      "gas": false,
+      "payload": "46faff020000fcff000000000020000055ff000068000000"
+    },
+    {
+      "counter": 255,
+      "brake": true,
+      "gas": false,
+      "payload": "9e97ff020100fcff000000000020000055ff000068000000"
+    },
+    {
+      "counter": 255,
+      "brake": false,
+      "gas": true,
+      "payload": "f28cff020000fcff000000000020000055ff000068000100"
+    },
+    {
+      "counter": 255,
+      "brake": true,
+      "gas": true,
+      "payload": "2ae1ff020100fcff000000000020000055ff000068000100"
+    },
+    {
+      "counter": 256,
+      "brake": false,
+      "gas": false,
+      "payload": "342400020000fcff000000000020000055ff000068000000"
+    },
+    {
+      "counter": 256,
+      "brake": true,
+      "gas": false,
+      "payload": "ec4900020100fcff000000000020000055ff000068000000"
+    },
+    {
+      "counter": 256,
+      "brake": false,
+      "gas": true,
+      "payload": "805200020000fcff000000000020000055ff000068000100"
+    },
+    {
+      "counter": 256,
+      "brake": true,
+      "gas": true,
+      "payload": "583f00020100fcff000000000020000055ff000068000100"
+    }
+  ]
+}

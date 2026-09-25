@@ -1,0 +1,149 @@
+{
+  "frozenSourceCommit": "678af78347d9656bc2f5dacd4204b012db861fa7",
+  "cases": [
+    {
+      "left": false,
+      "right": false,
+      "leftBlinker": false,
+      "rightBlinker": false,
+      "counter": 0,
+      "rear": "b3f200000000008000000000000000000000000000000000",
+      "front": "1a430000000000000000000100000000"
+    },
+    {
+      "left": false,
+      "right": false,
+      "leftBlinker": false,
+      "rightBlinker": true,
+      "counter": 1,
+      "rear": "b0c501000000008000000000000000000000000000000000",
+      "front": "3eeb0100000000000000000100000000"
+    },
+    {
+      "left": false,
+      "right": false,
+      "leftBlinker": true,
+      "rightBlinker": false,
+      "counter": 2,
+      "rear": "b59c02000000008000000000000000000000000000000000",
+      "front": "73030200000000000000000100000000"
+    },
+    {
+      "left": false,
+      "right": false,
+      "leftBlinker": true,
+      "rightBlinker": true,
+      "counter": 3,
+      "rear": "b6ab03000000008000000000000000000000000000000000",
+      "front": "57ab0300000000000000000100000000"
+    },
+    {
+      "left": false,
+      "right": true,
+      "leftBlinker": false,
+      "rightBlinker": false,
+      "counter": 4,
+      "rear": "c1cd04010100208800000000000000000400000000000000",
+      "front": "c8c30400000000000000000100000000"
+    },
+    {
+      "left": false,
+      "right": true,
+      "leftBlinker": false,
+      "rightBlinker": true,
+      "counter": 5,
+      "rear": "7c6005010200409000000000000000000800000000000000",
+      "front": "ec6b0500000000000000000100000000"
+    },
+    {
+      "left": false,
+      "right": true,
+      "leftBlinker": true,
+      "rightBlinker": false,
+      "counter": 6,
+      "rear": "c7a306010100208800000000000000000400000000000000",
+      "front": "a1830600000000000000000100000000"
+    },
+    {
+      "left": false,
+      "right": true,
+      "leftBlinker": true,
+      "rightBlinker": true,
+      "counter": 7,
+      "rear": "7a0e07010200409000000000000000000800000000000000",
+      "front": "852b0700000000000000000100000000"
+    },
+    {
+      "left": true,
+      "right": false,
+      "leftBlinker": false,
+      "rightBlinker": false,
+      "counter": 8,
+      "rear": "efba08410002008800000000000000000100000000000000",
+      "front": "9f520800000000000000000100000000"
+    },
+    {
+      "left": true,
+      "right": false,
+      "leftBlinker": false,
+      "rightBlinker": true,
+      "counter": 9,
+      "rear": "ec8d09410002008800000000000000000100000000000000",
+      "front": "bbfa0900000000000000000100000000"
+    },
+    {
+      "left": true,
+      "right": false,
+      "leftBlinker": true,
+      "rightBlinker": false,
+      "counter": 10,
+      "rear": "7a4b0a810004009000000000000000000200000000000000",
+      "front": "f6120a00000000000000000100000000"
+    },
+    {
+      "left": true,
+      "right": false,
+      "leftBlinker": true,
+      "rightBlinker": true,
+      "counter": 11,
+      "rear": "797c0b810004009000000000000000000200000000000000",
+      "front": "d2ba0b00000000000000000100000000"
+    },
+    {
+      "left": true,
+      "right": true,
+      "leftBlinker": false,
+      "rightBlinker": false,
+      "counter": 12,
+      "rear": "a8700c410102208800000000000000000500000000000000",
+      "front": "4dd20c00000000000000000100000000"
+    },
+    {
+      "left": true,
+      "right": true,
+      "leftBlinker": false,
+      "rightBlinker": true,
+      "counter": 13,
+      "rear": "15dd0d410202409000000000000000000900000000000000",
+      "front": "697a0d00000000000000000100000000"
+    },
+    {
+      "left": true,
+      "right": true,
+      "leftBlinker": true,
+      "rightBlinker": false,
+      "counter": 14,
+      "rear": "3d810e810104209000000000000000000600000000000000",
+      "front": "24920e00000000000000000100000000"
+    },
+    {
+      "left": true,
+      "right": true,
+      "leftBlinker": true,
+      "rightBlinker": true,
+      "counter": 15,
+      "rear": "e38c0f810204409000000000000000000a00000000000000",
+      "front": "003a0f00000000000000000100000000"
+    }
+  ]
+}

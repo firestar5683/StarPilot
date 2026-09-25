@@ -1,7 +1,10 @@
 from opendbc.car import Bus, get_safety_config, structs, uds
 from opendbc.car.hyundai.hyundaicanfd import CanBus
-from opendbc.car.hyundai.values import HyundaiFlags, CAR, DBC, HyundaiSafetyFlags
-from opendbc.car.hyundai.radar_interface import RADAR_START_ADDR
+from opendbc.car.hyundai.non_scc_aol import NON_SCC_IDS
+from opendbc.car.hyundai.values import (is_blended, is_blended_alpha, HyundaiFlags, CAR, DBC, HyundaiSafetyFlags, CANFD_ANGLE_MODEL_BITS,
+                                        CANFD_ANGLE_OBSERVED_ADAS_BIT, HYUNDAI_MRR35_RADAR_DBC, HYUNDAI_MRR30_RADAR_DBC,
+                                        HYUNDAI_GV70_RADAR_DBC, HYUNDAI_G90_RADAR_DBC)
+from opendbc.car.hyundai.radar_interface import RADAR_START_ADDR, MRR35_RADAR_START_ADDR, MRR30_RADAR_START_ADDR, radar_bus
 from opendbc.car.interfaces import CarInterfaceBase
 from opendbc.car.disable_ecu import disable_ecu
 from opendbc.car.hyundai.carcontroller import CarController
@@ -13,6 +16,13 @@ Ecu = structs.CarParams.Ecu
 
 # Cancel button can sometimes be ACC pause/resume button, main button can also enable on some cars
 ENABLE_BUTTONS = (ButtonType.accelCruise, ButtonType.decelCruise, ButtonType.cancel, ButtonType.mainCruise)
+KONA_NON_SCC_FCA_RADAR_ADDR = 0x602
+
+
+def detect_kona_non_scc_radar_fca(candidate, fingerprint, car_fw) -> bool:
+  return candidate == CAR.HYUNDAI_KONA_NON_SCC and (
+    any(fw.ecu == Ecu.fwdRadar for fw in car_fw) or KONA_NON_SCC_FCA_RADAR_ADDR in fingerprint[1]
+  )
 
 
 class CarInterface(CarInterfaceBase):
@@ -20,11 +30,53 @@ class CarInterface(CarInterfaceBase):
   CarController = CarController
   RadarInterface = RadarInterface
 
+  @staticmethod
+  def startup_required(cp):
+    from opendbc.car.hyundai.g90_startup import required
+    from opendbc.car.hyundai.ev6_startup import required as ev6_required
+    from opendbc.car.hyundai.gv70_startup import required as gv70_required
+    from opendbc.car.hyundai.ev9_startup import required as ev9_required
+    return required(cp) or ev6_required(cp) or gv70_required(cp) or ev9_required(cp)
+
+  @staticmethod
+  def startup_owner(cp, callbacks, *, requested):
+    from opendbc.car.hyundai.g90_startup import G90Startup, required
+    if required(cp):
+      return G90Startup(cp, callbacks) if requested else None
+    from opendbc.car.hyundai.ev6_startup import EV6Startup, required as ev6_required
+    if ev6_required(cp):
+      return EV6Startup(cp, callbacks) if requested else None
+    from opendbc.car.hyundai.gv70_startup import GV70Startup, required as gv70_required
+    if gv70_required(cp):
+      return GV70Startup(cp, callbacks) if requested else None
+    from opendbc.car.hyundai.ev9_longitudinal import candidate as ev9_candidate, qualified as ev9_qualified
+    from opendbc.car.hyundai.ev9_startup import EV9Startup
+    ev9_cp = ev9_candidate(cp, enabled=requested, is_release=False)
+    if ev9_qualified(ev9_cp):
+      return EV9Startup(ev9_cp, callbacks, stock_cp=cp) if requested else None
+    from opendbc.car.hyundai.blended_longitudinal import startup_owner
+    return startup_owner(cp, callbacks, requested=requested)
+
   DRIVABLE_GEARS = (structs.CarState.GearShifter.sport, structs.CarState.GearShifter.manumatic)
+
+  @staticmethod
+  def get_pid_accel_limits(CP, current_speed, cruise_speed):
+    from opendbc.car.hyundai.ev9_longitudinal import qualified as ev9_long_qualified
+    if ev9_long_qualified(CP):
+      return -3.5, 2.2
+    if is_blended_alpha(CP):
+      return -3.5, 3.5
+    return CarInterfaceBase.get_pid_accel_limits(CP, current_speed, cruise_speed)
 
   @staticmethod
   def _get_params(ret: structs.CarParams, candidate, fingerprint, car_fw, alpha_long, is_release, docs) -> structs.CarParams:
     ret.brand = "hyundai"
+
+    if is_blended(ret):
+      cam_can = CanBus(None, fingerprint).CAM
+      lka_steering = any(fw.ecu == Ecu.adas for fw in car_fw) or 0x50 in fingerprint[cam_can]
+      if lka_steering:
+        ret.flags |= HyundaiFlags.CANFD_LKA_STEER_MSG.value
 
     if ret.flags & HyundaiFlags.CANFD:
       # Shared configuration for CAN-FD cars
@@ -38,15 +90,20 @@ class CarInterface(CarInterfaceBase):
       CAN = CanBus(None, fingerprint, lka_steering)
 
       ret.alphaLongitudinalAvailable = not (ret.flags & HyundaiFlags.CANFD_NO_RADAR_DISABLE)
+      if ret.flags & HyundaiFlags.CANFD_ANGLE_STEERING:
+        # These manual angle profiles retain stock SCC in both builds.
+        ret.alphaLongitudinalAvailable = False
       if lka_steering and Ecu.adas not in [fw.ecu for fw in car_fw]:
         # this needs to be figured out for cars without an ADAS ECU
         ret.alphaLongitudinalAvailable = False
 
-      if 0x1ba in fingerprint[CAN.ECAN]:
-        ret.flags |= HyundaiFlags.HAS_BSM.value
+      ret.deprecated.enableBsm = 0x1ba in fingerprint[CAN.ECAN] or candidate == CAR.KIA_EV9
+      if candidate == CAR.HYUNDAI_IONIQ_6:
+        ret.deprecated.enableBsm = fingerprint[CAN.ECAN].get(0x1ba) == 24
+        ret.steerAtStandstill = True
 
       # Check if the car is hybrid. Only HEV/PHEV cars have 0xFA on E-CAN.
-      if 0xFA in fingerprint[CAN.ECAN]:
+      if 0xFA in fingerprint[CAN.ECAN] or candidate == CAR.KIA_CARNIVAL_HEV_4TH_GEN:
         ret.flags |= HyundaiFlags.HYBRID.value
 
       if lka_steering:
@@ -54,12 +111,22 @@ class CarInterface(CarInterfaceBase):
         ret.flags |= HyundaiFlags.CANFD_LKA_STEER_MSG.value
         if 0x110 in fingerprint[CAN.CAM]:
           ret.flags |= HyundaiFlags.CANFD_LKA_STEER_MSG_ALT.value
+        if (candidate in (CAR.KIA_CARNIVAL_2025, CAR.KIA_CARNIVAL_HEV_4TH_GEN) and
+            0x1aa in fingerprint[CAN.ECAN] and 0x1cf not in fingerprint[CAN.ECAN]):
+          ret.flags |= HyundaiFlags.CANFD_ALT_BUTTONS.value
       else:
         # no LKA steering
         if 0x1cf not in fingerprint[CAN.ECAN]:
           ret.flags |= HyundaiFlags.CANFD_ALT_BUTTONS.value
         if not ret.flags & HyundaiFlags.CANFD_RADAR_SCC:
           ret.flags |= HyundaiFlags.CANFD_CAMERA_SCC.value
+        if ret.flags & HyundaiFlags.CANFD_ANGLE_STEERING and candidate != CAR.KIA_EV6_2025 and 0xCB in fingerprint[CAN.CAM]:
+          ret.flags |= HyundaiFlags.SEND_LFA.value
+
+      # The Sportage 2026 identity is documented only without HDA II. A
+      # hybrid fuel source belongs to its separate HEV identity.
+      if candidate == CAR.KIA_SPORTAGE_2026 and (lka_steering or 0xFA in fingerprint[CAN.ECAN]):
+        ret.dashcamOnly = True
 
       # Some LKA steering cars have alternative messages for gear checks
       # ICE cars do not have 0x130; GEARS message on 0x40 or 0x70 instead
@@ -82,20 +149,32 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.CANFD_ALT_BUTTONS.value
       if ret.flags & HyundaiFlags.CANFD_CAMERA_SCC:
         ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.CAMERA_SCC.value
-
+      if ret.flags & HyundaiFlags.CCNC and not lka_steering and not ret.flags & HyundaiFlags.CANFD_ANGLE_STEERING:
+        ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.CCNC.value
+      if ret.flags & HyundaiFlags.CANFD_ANGLE_STEERING:
+        ret.steerControlType = structs.CarParams.SteerControlType.angle
+        ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.CANFD_ANGLE_STEERING.value
+        ret.safetyConfigs[-1].safetyParam |= CANFD_ANGLE_MODEL_BITS[str(candidate)]
+        if ret.flags & HyundaiFlags.SEND_LFA:
+          ret.safetyConfigs[-1].safetyParam |= CANFD_ANGLE_OBSERVED_ADAS_BIT
     else:
       # Shared configuration for non CAN-FD cars
-      ret.alphaLongitudinalAvailable = not (ret.flags & (HyundaiFlags.LEGACY | HyundaiFlags.UNSUPPORTED_LONGITUDINAL))
-      if 0x58b in fingerprint[0]:
-        ret.flags |= HyundaiFlags.HAS_BSM.value
+      ret.alphaLongitudinalAvailable = not (ret.flags & (HyundaiFlags.LEGACY | HyundaiFlags.UNSUPPORTED_LONGITUDINAL | HyundaiFlags.NON_SCC))
+      if is_blended(ret):
+        # A prepublication owner alone may promote this exact stock CP.
+        ret.alphaLongitudinalAvailable = False
+      pt_bus = CanBus(None, fingerprint, bool(ret.flags & HyundaiFlags.CANFD_LKA_STEER_MSG)).ECAN if is_blended(ret) else 0
+      ret.deprecated.enableBsm = 0x58b in fingerprint[pt_bus]
 
       # Send LFA message on cars with HDA
       if 0x485 in fingerprint[2]:
         ret.flags |= HyundaiFlags.SEND_LFA.value
 
       # These cars use the FCA11 message for the AEB and FCW signals, all others use SCC12
-      if 0x38d in fingerprint[0] or 0x38d in fingerprint[2]:
+      if 0x38d in fingerprint[pt_bus] or 0x38d in fingerprint[2]:
         ret.flags |= HyundaiFlags.USE_FCA.value
+      if detect_kona_non_scc_radar_fca(candidate, fingerprint, car_fw):
+        ret.flags |= HyundaiFlags.NON_SCC_RADAR_FCA.value
 
       if ret.flags & HyundaiFlags.LEGACY:
         # these cars require a special panda safety mode due to missing counters and checksums in the messages
@@ -103,19 +182,43 @@ class CarInterface(CarInterfaceBase):
       else:
         ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.hyundai, 0)]
 
+      if is_blended(ret):
+        ret.safetyConfigs[0].safetyParam |= HyundaiSafetyFlags.CAN_CANFD_BLENDED.value
+        if lka_steering:
+          ret.safetyConfigs[0].safetyParam |= HyundaiSafetyFlags.CANFD_LKA_STEER_MSG.value
+
       if ret.flags & HyundaiFlags.CAMERA_SCC:
         ret.safetyConfigs[0].safetyParam |= HyundaiSafetyFlags.CAMERA_SCC.value
+      if candidate in (CAR.HYUNDAI_ELANTRA_2024, CAR.HYUNDAI_ELANTRA_HEV_2024):
+        ret.safetyConfigs[0].safetyParam |= HyundaiSafetyFlags.CAN_REFRESH_MSGS.value
 
       # These cars have the LFA button on the steering wheel
-      if 0x391 in fingerprint[0]:
+      if 0x391 in fingerprint[0] or (candidate in NON_SCC_IDS and
+                                     0x50c in fingerprint[0]):
         ret.flags |= HyundaiFlags.HAS_LDA_BUTTON.value
+      if ret.flags & HyundaiFlags.NON_SCC:
+        ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.NON_SCC.value
+        if ret.flags & HyundaiFlags.HAS_LDA_BUTTON and (candidate not in NON_SCC_IDS or
+                                                        0x391 in fingerprint[0]):
+          # Ordinary safety still requires its existing BCM source. The AOL
+          # profile alone may select the observed alternative CLU source.
+          ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.HAS_LDA_BUTTON.value
+
+    if candidate == CAR.KIA_RAY_EV and fingerprint[2].get(0x485) == 8:
+      ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.CAN_REFRESH_MSGS.value
+
+    if is_blended(ret) and 0x2AA in fingerprint[0]:
+      ret.minSteerSpeed = 0.0
+      ret.flags &= ~HyundaiFlags.MIN_STEER_32_MPH.value
+      ret.steerAtStandstill = True
 
     # Common lateral control setup
 
     ret.centerToFront = ret.wheelbase * 0.4
     ret.steerActuatorDelay = 0.1
     ret.steerLimitTimer = 0.4
-    CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
+    if not (ret.flags & HyundaiFlags.CANFD_ANGLE_STEERING):
+      CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
     if ret.flags & HyundaiFlags.ALT_LIMITS:
       ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.ALT_LIMITS.value
@@ -128,10 +231,34 @@ class CarInterface(CarInterfaceBase):
 
     # Common longitudinal control setup
 
-    ret.radarUnavailable = RADAR_START_ADDR not in fingerprint[1] or Bus.radar not in DBC[ret.carFingerprint]
+    radar_start = KONA_NON_SCC_FCA_RADAR_ADDR if candidate == CAR.HYUNDAI_KONA_NON_SCC else RADAR_START_ADDR
+    if DBC[ret.carFingerprint].get(Bus.radar) == HYUNDAI_G90_RADAR_DBC:
+      ret.radarUnavailable = not all(fingerprint[1].get(addr) == 8 for addr in range(0x500, 0x520))
+    elif DBC[ret.carFingerprint].get(Bus.radar) == HYUNDAI_GV70_RADAR_DBC:
+      ret.radarUnavailable = not all(fingerprint[0].get(addr) == 32 for addr in range(0x210, 0x220))
+    elif DBC[ret.carFingerprint].get(Bus.radar) == HYUNDAI_MRR30_RADAR_DBC:
+      ret.radarUnavailable = fingerprint[radar_bus(ret)].get(MRR30_RADAR_START_ADDR) != 32
+    elif DBC[ret.carFingerprint].get(Bus.radar) == HYUNDAI_MRR35_RADAR_DBC:
+      ret.radarUnavailable = fingerprint[radar_bus(ret)].get(MRR35_RADAR_START_ADDR) != 24
+    else:
+      ret.radarUnavailable = radar_start not in fingerprint[1] or Bus.radar not in DBC[ret.carFingerprint]
     ret.openpilotLongitudinalControl = alpha_long and ret.alphaLongitudinalAvailable
+    if (candidate in (CAR.KIA_CARNIVAL_2025, CAR.KIA_CARNIVAL_HEV_4TH_GEN) and
+        ret.flags & HyundaiFlags.CANFD_ALT_BUTTONS and 0x1aa in fingerprint[CAN.ECAN] and
+        not ret.openpilotLongitudinalControl):
+      ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.CARNIVAL_ALT_RESUME.value
     ret.pcmCruise = not ret.openpilotLongitudinalControl
     ret.longitudinalActuatorDelay = 0.5
+    if candidate in (CAR.HYUNDAI_IONIQ_5_PE, CAR.KIA_EV9):
+      if candidate == CAR.HYUNDAI_IONIQ_5_PE:
+        ret.longitudinalActuatorDelay = 0.35
+        ret.steerAtStandstill = True
+      # Only the source-derived stock-SCC LKA_ALT topology is admitted.
+      if (CAN.ECAN != 1 or CAN.ACAN != 0 or CAN.CAM != 2 or fingerprint[CAN.CAM].get(0x110) != 32 or
+          fingerprint[CAN.CAM].get(0x362) != 32 or fingerprint[CAN.ECAN].get(0x1cf) != 8 or
+          fingerprint[CAN.ECAN].get(0x35) != 32 or fingerprint[CAN.ECAN].get(0x1a0) != 32 or
+          ret.flags & (HyundaiFlags.HYBRID | HyundaiFlags.CANFD_ALT_BUTTONS | HyundaiFlags.CANFD_CAMERA_SCC | HyundaiFlags.SEND_LFA)):
+        ret.dashcamOnly = True
 
     if ret.openpilotLongitudinalControl:
       ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.LONG.value
@@ -142,7 +269,30 @@ class CarInterface(CarInterfaceBase):
     elif ret.flags & HyundaiFlags.FCEV:
       ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.FCEV_GAS.value
 
+    if (candidate == CAR.KIA_RAY_EV and fingerprint[0].get(0x201) == 6 and
+        ret.safetyConfigs[-1].safetyParam == int(HyundaiSafetyFlags.NON_SCC | HyundaiSafetyFlags.EV_GAS |
+                                               HyundaiSafetyFlags.HAS_LDA_BUTTON | HyundaiSafetyFlags.CAN_REFRESH_MSGS)):
+      ret.alphaLongitudinalAvailable = True
+      ret.openpilotLongitudinalControl = True
+      ret.pcmCruise = False
+      ret.radarUnavailable = True
+      ret.autoResumeSng = False
+      ret.minEnableSpeed = -1.0
+      ret.safetyConfigs[-1].safetyParam |= HyundaiSafetyFlags.LONG.value
+
+    if candidate == CAR.KIA_RAY_EV and not ret.openpilotLongitudinalControl:
+      ret.dashcamOnly = True
+
     # Car specific configuration overrides
+
+    if candidate == CAR.HYUNDAI_ELANTRA_HEV_2024:
+      ret.longitudinalActuatorDelay = 0.22
+
+    if is_blended(ret):
+      ret.alphaLongitudinalAvailable = False
+      ret.openpilotLongitudinalControl = False
+      ret.pcmCruise = True
+      ret.stopAccel = -0.85
 
     if candidate == CAR.KIA_OPTIMA_G4_FL:
       ret.steerActuatorDelay = 0.2
@@ -152,6 +302,30 @@ class CarInterface(CarInterfaceBase):
     if candidate in (CAR.KIA_OPTIMA_H,):
       ret.dashcamOnly = True
 
+    if candidate == CAR.KIA_EV6_2025 and ret.flags & (HyundaiFlags.CANFD_LKA_STEER_MSG | HyundaiFlags.HYBRID):
+      ret.dashcamOnly = True
+      ret.safetyConfigs = [get_safety_config(structs.CarParams.SafetyModel.noOutput)]
+
+    # Advertise only the exact developer stock profile. Startup still owns the
+    # saved-choice promotion, so availability never selects LONG during fingerprinting.
+    if candidate == CAR.KIA_EV9:
+      from opendbc.car.hyundai.ccnc_ev_stock import qualified as ev9_stock_qualified
+      ret.alphaLongitudinalAvailable = not is_release and ev9_stock_qualified(ret)
+
+    return ret
+
+  def update(self, can_packets):
+    if self.CS.gv70_camera_lead is not None or self.CS.ev9_camera_lead is not None or self.CS.forte_lkas_sources is not None:
+      # This isolated optional parser must never join required controls health.
+      can_packets = list(can_packets)
+      if self.CS.gv70_camera_lead is not None:
+        self.CS.gv70_camera_lead.update(can_packets)
+      if self.CS.ev9_camera_lead is not None:
+        self.CS.ev9_camera_lead.update(can_packets)
+      if self.CS.forte_lkas_sources is not None:
+        self.CS.forte_lkas_sources.update(can_packets)
+    ret = super().update(can_packets)
+    self.CS.finalize_blended_cancel(ret)
     return ret
 
   @staticmethod
@@ -160,7 +334,7 @@ class CarInterface(CarInterfaceBase):
     if communication_control is None:
       communication_control = bytes([uds.SERVICE_TYPE.COMMUNICATION_CONTROL, 0x80 | uds.CONTROL_TYPE.DISABLE_RX_DISABLE_TX, uds.MESSAGE_TYPE.NORMAL])
 
-    if CP.openpilotLongitudinalControl and not (CP.flags & (HyundaiFlags.CANFD_CAMERA_SCC | HyundaiFlags.CAMERA_SCC)):
+    if CP.openpilotLongitudinalControl and CP.carFingerprint != CAR.KIA_RAY_EV and not (CP.flags & (HyundaiFlags.CANFD_CAMERA_SCC | HyundaiFlags.CAMERA_SCC)):
       addr, bus = 0x7d0, CanBus(CP).ECAN if CP.flags & HyundaiFlags.CANFD else 0
       if CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG.value:
         addr, bus = 0x730, CanBus(CP).ECAN

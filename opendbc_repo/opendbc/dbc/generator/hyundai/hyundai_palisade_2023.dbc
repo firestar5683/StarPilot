@@ -1,4 +1,4 @@
-CM_ "IMPORT _hyundai_canfd_common.dbc";
+CM_ "IMPORT _hyundai_palisade_2023_canfd_common.dbc";
 
 BO_ 67 DATC13: 8 XXX
  SG_ CF_Datc_AcDisp : 22|2@1+ (1,0) [0|0] "" XXX
@@ -188,6 +188,50 @@ BO_ 640 EMS13: 8 XXX
  SG_ TCO : 24|8@1+ (0.75,-48) [0|0] "" XXX
  SG_ TIA : 48|8@1+ (0.75,-48) [0|0] "" XXX
 
+BO_ 683 ESCC: 8 XXX
+ SG_ FCA_CmdAct : 0|1@1+ (1,0) [0|1] "" ESC
+ SG_ CF_VSM_Warn_FCA11 : 1|2@1+ (1,0) [0|3] "" ACU,CLU,ESC
+ SG_ AEB_CmdAct : 3|1@1+ (1,0) [0|1] "" ESC
+ SG_ CF_VSM_Warn_SCC12 : 4|2@1+ (1,0) [0|3] "" CLU,ESC,IAP
+ SG_ CF_VSM_DecCmdAct_SCC12 : 6|1@1+ (1,0) [0|1] "" ESC
+ SG_ CF_VSM_DecCmdAct_FCA11 : 7|1@1+ (1,0) [0|1] "" ESC
+ SG_ CR_VSM_DecCmd_SCC12 : 8|8@1+ (0.01,0) [0|2.55] "g" ESC
+ SG_ ObjValid : 16|1@1+ (1,0) [0|1] "" CLU,ESC,TCU
+ SG_ ACC_ObjStatus : 17|2@1+ (1,0) [0|3] "" ABS,ESC
+ SG_ ACC_ObjRelSpd : 40|9@1+ (0.1,-16.4) [0|0] "m/s" ABS,ESC
+ SG_ ACC_ObjDist : 24|11@1+ (0.1,0) [0|204.7] "m" ABS,ESC
+ SG_ CR_VSM_DecCmd_FCA11 : 56|8@1+ (0.01,0) [0|2.55] "g" ESC
+
+BO_ 2016 ESCC_DEBUG: 8 XXX
+ SG_ safety_mode : 0|8@1+ (1,0) [0|255] "" XXX
+ SG_ watchdog_fails : 8|8@1+ (1,0) [0|255] "" XXX
+ SG_ fwd_hook_count : 16|16@1+ (1,0) [0|255] "" XXX
+ SG_ fifo_overrun : 32|8@1+ (1,0) [0|255] "" XXX
+ SG_ fifo_overrun_count : 40|8@1+ (1,0) [0|255] "" XXX
+ SG_ can3_queue : 48|16@1+ (1,0) [0|255] "" XXX
+
+BO_ 2017 ESCC_DEBUG2: 8 XXX
+ SG_ CAN1_TME0 : 26|1@1+ (1,0) [0|1] "" XXX
+ SG_ CAN1_TME1 : 27|1@1+ (1,0) [0|1] "" XXX
+ SG_ CAN1_TME2 : 28|1@1+ (1,0) [0|1] "" XXX
+ SG_ CAN1_ALST0 : 2|1@1+ (1,0) [0|1] "" XXX
+ SG_ CAN1_ALST1 : 10|1@1+ (1,0) [0|1] "" XXX
+ SG_ CAN1_ALST2 : 18|1@1+ (1,0) [0|1] "" XXX
+ SG_ CAN1_TERR0 : 1|1@1+ (1,0) [0|1] "" XXX
+ SG_ CAN1_TERR1 : 9|1@1+ (1,0) [0|1] "" XXX
+ SG_ CAN1_TERR2 : 17|1@1+ (1,0) [0|1] "" XXX
+ SG_ CAN1_RQCP0 : 0|1@1+ (1,0) [0|1] "" XXX
+ SG_ CAN1_RQCP1 : 8|1@1+ (1,0) [0|1] "" XXX
+ SG_ CAN1_RQCP2 : 16|1@1+ (1,0) [0|1] "" XXX
+ SG_ CAN1_TX_ERR_CNT : 32|8@1+ (1,0) [0|255] "" XXX
+ SG_ CAN1_RX_ERR_CNT : 40|8@1+ (1,0) [0|255] "" XXX
+ SG_ CAN1_EWGF : 48|1@1+ (1,0) [0|1] "" XXX
+ SG_ CAN1_EPVF : 49|1@1+ (1,0) [0|1] "" XXX
+ SG_ CAN1_BOFF : 50|1@1+ (1,0) [0|1] "" XXX
+ SG_ CAN1_LEC : 56|3@1+ (1,0) [0|7] "" XXX
+
+VAL_ 2017 CAN1_LEC 0 "No Error" 1 "Stuff Error" 2 "Form Error" 3 "Ack Error" 4 "Bit Recessive Error" 5 "Bit Dominant Error" 6 "CRC Error" 7 "Set by Software" ;
+
 BO_ 688 SAS11: 5 XXX
  SG_ CheckSum : 36|4@1+ (1,0) [0|0] "" XXX
  SG_ MsgCount : 32|4@1+ (1,0) [0|0] "" XXX
@@ -256,7 +300,7 @@ BO_ 854 M_356: 8 XXX
  SG_ PAINT4 : 38|1@0+ (1,0) [0|0] "" XXX
 
 BO_ 867 RADAR_0x363: 8 XXX
- SG_ _CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
+ SG_ CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
  SG_ COUNTER : 12|4@1+ (1,0) [0|0] "" XXX
  SG_ FCA_ESA : 8|2@1+ (1,0) [0|3] "" XXX
  SG_ BYTE2 : 16|8@1+ (1,0) [0|0] "" XXX
@@ -265,6 +309,17 @@ BO_ 867 RADAR_0x363: 8 XXX
  SG_ BYTE5 : 40|8@1+ (1,0) [0|0] "" XXX
  SG_ BYTE6 : 48|8@1+ (1,0) [0|0] "" XXX
  SG_ BYTE7 : 56|8@1+ (1,0) [0|0] "" XXX
+
+BO_ 868 ALERTS_364: 8 XXX
+ SG_ CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
+ SG_ COUNTER : 12|4@1+ (1,0) [0|0] "" XXX
+ SG_ BYTE2 : 16|8@1+ (1,0) [0|255] "" XXX
+ SG_ BYTE3 : 24|8@1+ (1,0) [0|255] "" XXX
+ SG_ DAW_Status : 35|3@1+ (1,0) [0|0] "" XXX
+ SG_ DAW_Warning : 39|1@1+ (1,0) [0|7] "" XXX
+ SG_ BYTE5 : 40|8@1+ (1,0) [0|255] "" XXX
+ SG_ BYTE6 : 48|8@1+ (1,0) [0|255] "" XXX
+ SG_ BYTE7 : 56|8@1+ (1,0) [0|255] "" XXX
 
 BO_ 870 EMS_366: 8 XXX
  SG_ N : 8|16@1+ (0.25,0) [0|0] "" XXX
@@ -275,6 +330,7 @@ BO_ 870 EMS_366: 8 XXX
 
 BO_ 871 LVR12: 8 XXX
  SG_ CF_Lvr_CruiseSet : 0|8@1+ (1,0) [0|0] "" XXX
+ SG_ AUTO_START_STOP_STATUS : 8|2@1+ (1,0) [0|3] "" XXX
  SG_ CF_Lvr_Gear : 32|4@1+ (1,0) [0|0] "" XXX
 
 BO_ 872 LVR11: 8 XXX
@@ -329,26 +385,29 @@ BO_ 903 WHL_PUL11: 6 XXX
  SG_ WHL_PUL_RR : 24|8@1+ (0.5,0) [0|0] "" XXX
 
 BO_ 905 SCC14: 8 XXX
- SG_ ACC_ObjLatPos : 16|9@1+ (0.1,-20) [-20|31.1] "m" ABS,ESC
- SG_ _CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
+ SG_ ACC_ObjRelSpd : 16|9@1+ (0.1,-20) [-20|31.1] "m/s" ABS,ESC
+ SG_ CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
  SG_ COUNTER : 12|4@1+ (1,0) [0|0] "" XXX
- SG_ ObjGap : 51|3@1+ (1,0) [0|255] "" CLU,HUD,ESC
+ SG_ ObjValid : 27|1@1+ (1,0) [0|1] "" CLU,ESC,TCU
+ SG_ ObjStatus : 51|3@1+ (1,0) [0|7] "" CLU,HUD,ESC
 
 BO_ 909 FCA11: 8 XXX
- SG_ CR_FCA_ChkSum : 0|8@1+ (1,0) [0|0] "" XXX
- SG_ NEW_SIGNAL_1 : 8|4@1+ (1,0) [0|0] "" XXX
- SG_ CR_FCA_Alive : 12|4@1+ (1,0) [0|0] "" XXX
- SG_ BYTE2 : 16|8@1+ (1,0) [0|0] "" XXX
- SG_ BYTE3 : 24|8@1+ (1,0) [0|0] "" XXX
- SG_ BYTE4 : 32|8@1+ (1,0) [0|0] "" XXX
- SG_ BYTE5 : 40|8@1+ (1,0) [0|0] "" XXX
- SG_ BYTE6 : 48|8@1+ (1,0) [0|0] "" XXX
- SG_ BYTE7 : 56|8@1+ (1,0) [0|0] "" XXX
+ SG_ CHECKSUM : 0|8@1+ (1,0) [0|255] "" XXX
+ SG_ COUNTER : 12|4@1+ (1,0) [0|0] "" XXX
+ SG_ aeb_cmd_act : 16|1@1+ (1,0) [0|1] "" XXX
+ SG_ fca_cmd_act : 19|1@1+ (1,0) [0|1] "" XXX
+ SG_ fca_fault : 32|2@1+ (1,0) [0|3] "" XXX
+ SG_ cr_vsm_deccmd : 38|8@1+ (1,0) [0|255] "" XXX
+ SG_ NEW_SIGNAL_2 : 47|1@1+ (1,0) [0|1] "" XXX
+ SG_ cf_vsm_deccmdact : 48|7@1+ (1,-127) [0|15] "" XXX
+ SG_ cf_vsm_warn_1 : 55|1@1+ (1,0) [0|0] "" XXX
+ SG_ cf_vsm_warn_2 : 57|1@1+ (1,0) [0|1] "" XXX
+ SG_ cf_vsm_warn_3 : 62|1@1+ (1,0) [0|0] "" XXX
 
 BO_ 913 BCM_PO_11: 8 XXX
  SG_ BCM_Door_Dri_Status : 5|1@0+ (1,0) [0|0] "" XXX
  SG_ BCM_Shift_R_MT_SW_Status : 39|2@0+ (1,0) [0|0] "" XXX
- SG_ LFA_Pressed : 4|1@0+ (1,0) [0|0] "" XXX
+ SG_ LDA_BTN : 4|1@0+ (1,0) [0|0] "" XXX
 
 BO_ 916 TCS13: 8 XXX
  SG_ ACCEL_REF_ACC : 32|11@1+ (0.01,-10.23) [0|0] "" XXX
@@ -359,7 +418,7 @@ BO_ 916 TCS13: 8 XXX
  SG_ AliveCounterTCS : 13|3@1+ (1,0) [0|0] "" XXX
  SG_ BrakeLight : 11|1@1+ (1,0) [0|0] "" XXX
  SG_ CF_DriBkeStat : 60|1@1+ (1,0) [0|0] "" XXX
- SG_ CF_VSM_Avail : 57|2@1+ (1,0) [0|0] "" XXX
+ SG_ CF_FCW_AEB_Status : 57|2@1+ (1,0) [0|0] "" XXX
  SG_ CF_VSM_Coded : 56|1@1+ (1,0) [0|0] "" XXX
  SG_ CF_VSM_ConfSwi : 61|2@1+ (1,0) [0|0] "" XXX
  SG_ CF_VSM_Handshake : 59|1@1+ (1,0) [0|0] "" XXX
@@ -378,7 +437,7 @@ BO_ 916 TCS13: 8 XXX
  SG_ aBasis : 0|11@1+ (0.01,-10.23) [0|0] "" XXX
 
 BO_ 920 RADAR_0x398: 8 XXX
- SG_ _CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
+ SG_ CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
  SG_ NEW_SIGNAL_1 : 8|4@1+ (1,0) [0|0] "" XXX
  SG_ COUNTER : 12|4@1+ (1,0) [0|0] "" XXX
  SG_ BYTE2 : 16|8@1+ (1,0) [0|0] "" XXX
@@ -389,7 +448,7 @@ BO_ 920 RADAR_0x398: 8 XXX
  SG_ BYTE7 : 56|8@1+ (1,0) [0|0] "" XXX
 
 BO_ 921 RADAR_0x399: 8 XXX
- SG_ _CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
+ SG_ CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
  SG_ NEW_SIGNAL_1 : 8|4@1+ (1,0) [0|0] "" XXX
  SG_ COUNTER : 12|4@1+ (1,0) [0|0] "" XXX
  SG_ BYTE2 : 16|8@1+ (1,0) [0|0] "" XXX
@@ -400,7 +459,7 @@ BO_ 921 RADAR_0x399: 8 XXX
  SG_ BYTE7 : 56|8@1+ (1,0) [0|0] "" XXX
 
 BO_ 922 RADAR_0x39a: 8 XXX
- SG_ _CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
+ SG_ CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
  SG_ NEW_SIGNAL_1 : 8|4@1+ (1,0) [0|0] "" XXX
  SG_ COUNTER : 12|4@1+ (1,0) [0|0] "" XXX
  SG_ BYTE2 : 16|8@1+ (1,0) [0|0] "" XXX
@@ -411,7 +470,7 @@ BO_ 922 RADAR_0x39a: 8 XXX
  SG_ BYTE7 : 56|8@1+ (1,0) [0|0] "" XXX
 
 BO_ 923 RADAR_0x39b: 8 XXX
- SG_ _CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
+ SG_ CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
  SG_ NEW_SIGNAL_1 : 8|4@1+ (1,0) [0|0] "" XXX
  SG_ COUNTER : 12|4@1+ (1,0) [0|0] "" XXX
  SG_ BYTE2 : 16|8@1+ (1,0) [0|0] "" XXX
@@ -422,7 +481,7 @@ BO_ 923 RADAR_0x39b: 8 XXX
  SG_ BYTE7 : 56|8@1+ (1,0) [0|0] "" XXX
 
 BO_ 924 RADAR_0x39c: 8 XXX
- SG_ _CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
+ SG_ CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
  SG_ NEW_SIGNAL_1 : 8|4@1+ (1,0) [0|0] "" XXX
  SG_ COUNTER : 12|4@1+ (1,0) [0|0] "" XXX
  SG_ BYTE2 : 16|8@1+ (1,0) [0|0] "" XXX
@@ -470,25 +529,27 @@ BO_ 1042 ICM_412h: 8 XXX
  SG_ WarningSoundOutput_3Group : 7|1@0+ (1,0) [0|0] "" XXX
 
 BO_ 1056 SCC11: 8 XXX
- SG_ _CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
- SG_ AliveCounterACC : 12|4@1+ (1,0) [0|15] "" CLU,EMS,ESC,TCU
- SG_ JerkLowerLimit : 50|7@1+ (0.1,0) [0|12.7] "m/s^3" ESC
- SG_ JerkUpperLimit : 43|7@1+ (0.1,0) [0|12.7] "m/s^3" ESC
- SG_ ObjValid : 59|1@1+ (1,0) [0|1] "" CLU,ESC,TCU
- SG_ aReqRaw : 27|11@1+ (0.01,-10.23) [-10.23|10.24] "m/s^2" Vector__XXX
+ SG_ CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
+ SG_ COUNTER : 12|4@1+ (1,0) [0|15] "" CLU,EMS,ESC,TCU
  SG_ aReqValue : 16|11@1+ (0.01,-10.23) [-10.23|10.24] "m/s^2" Vector__XXX
+ SG_ aReqRaw : 27|11@1+ (0.01,-10.23) [-10.23|10.24] "m/s^2" Vector__XXX
+ SG_ JerkUpperLimit : 38|7@1+ (0.1,0) [0|12.7] "m/s^3" ESC
+ SG_ JerkLowerLimit : 45|7@1+ (0.1,0) [0|12.7] "m/s^3" ESC
+ SG_ ComfortBandUpper : 52|6@1+ (0.02,0) [0|1.26] "m/s^2" ESC
+ SG_ ComfortBandLower : 58|6@1+ (0.02,0) [0|1.26] "m/s^2" ESC
 
 BO_ 1057 SCC12: 8 XXX
  SG_ ACCMode : 28|2@1+ (1,0) [0|3] "" CLU,HUD,LDWS_LKAS,ESC
  SG_ ACCMode_Inactive : 30|1@1+ (1,0) [0|1] "" CLU,HUD,LDWS_LKAS,ESC
  SG_ ACC_ObjDist : 16|11@1+ (0.1,0) [0|204.7] "m" ABS,ESC
- SG_ CR_VSM_ChkSum : 0|8@1+ (1,0) [0|0] "" XXX
- SG_ CR_VSM_Alive : 12|4@1+ (1,0) [0|15] "" ESC,PSB
+ SG_ CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
+ SG_ COUNTER : 12|4@1+ (1,0) [0|15] "" ESC,PSB
  SG_ MainMode_ACC : 27|1@1+ (1,0) [0|1] "" CLU,EMS,ESC
  SG_ SCCInfoDisplay : 32|3@1+ (1,0) [0|7] "" CLU,ESC
  SG_ TauGapSet : 37|3@1+ (1,0) [0|7] "" CLU,ESC,TCU
  SG_ VSetDis : 41|8@1+ (1,0) [0|255] "km/h or MPH" CLU,ESC,TCU
  SG_ StopReq : 49|1@1+ (1,0) [0|1] "" EPB,ESC
+ SG_ ACC_ObjDist_Ref : 50|11@1+ (0.1,0) [0|204.7] "" CLU,HUD,LDWS_LKAS,ESC
 
 BO_ 1064 _4WD11: 8 XXX
  SG_ AUTO_ACT : 43|1@1+ (1,0) [0|0] "" XXX
@@ -519,7 +580,7 @@ BO_ 1078 PAS11: 4 XXX
  SG_ CF_Gway_PASSystemOn : 24|2@1+ (1,0) [0|0] "" XXX
 
 BO_ 1082 RADAR_0x43a: 8 XXX
- SG_ _CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
+ SG_ CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
  SG_ NEW_SIGNAL_1 : 8|4@1+ (1,0) [0|0] "" XXX
  SG_ COUNTER : 12|4@1+ (1,0) [0|0] "" XXX
  SG_ BYTE2 : 16|8@1+ (1,0) [0|0] "" XXX
@@ -528,6 +589,11 @@ BO_ 1082 RADAR_0x43a: 8 XXX
  SG_ BYTE5 : 40|8@1+ (1,0) [0|0] "" XXX
  SG_ BYTE6 : 48|8@1+ (1,0) [0|0] "" XXX
  SG_ BYTE7 : 56|8@1+ (1,0) [0|0] "" XXX
+
+BO_ 1123 MSG_463: 8 XXX
+ SG_ DRV_MODE_PRIMARY_STATUS : 0|8@1+ (1,0) [0|255] "" XXX
+ SG_ DRV_MODE_SECONDARY_STATUS : 8|8@1+ (1,0) [0|255] "" XXX
+ SG_ DRV_MODE_EXT_IND : 16|8@1+ (1,0) [0|255] "" XXX
 
 BO_ 1136 P_STS: 8 XXX
  SG_ Checksum : 62|2@1+ (1,0) [0|0] "" XXX
@@ -549,7 +615,7 @@ BO_ 1151 ESP11: 6 XXX
  SG_ _4WD_TQC_LIM : 16|16@1+ (1,0) [0|0] "" XXX
 
 BO_ 1157 LFAHDA_MFC: 8 XXX
- SG_ _CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
+ SG_ CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
  SG_ NEW_SIGNAL_1 : 8|4@1+ (1,0) [0|0] "" XXX
  SG_ COUNTER : 12|4@1+ (1,0) [0|0] "" XXX
  SG_ NEW_SIGNAL_2 : 16|1@0+ (1,0) [0|0] "" XXX
@@ -602,15 +668,15 @@ BO_ 1170 EMS19: 8 XXX
 BO_ 1173 YRS13: 8 XXX
  SG_ YRS_SeralNo : 16|48@1+ (1,0) [0|0] "" XXX
 
-BO_ 1186 FRT_RADAR11: 2 XXX
- SG_ BYTE0 : 0|8@1+ (1,0) [0|0] "" XXX
- SG_ BYTE1 : 8|8@1+ (1,0) [0|0] "" XXX
- SG_ BYTE2 : 16|8@1+ (1,0) [0|0] "" XXX
- SG_ BYTE3 : 24|8@1+ (1,0) [0|0] "" XXX
- SG_ BYTE4 : 32|8@1+ (1,0) [0|0] "" XXX
- SG_ BYTE5 : 40|8@1+ (1,0) [0|0] "" XXX
- SG_ BYTE6 : 48|8@1+ (1,0) [0|0] "" XXX
- SG_ BYTE7 : 56|8@1+ (1,0) [0|0] "" XXX
+BO_ 1186 FRT_RADAR11: 8 FCA
+ SG_ BYTE0 : 0|8@1+ (1,0) [0|7] "" LDWS_LKAS,LDW_LKA,ESC
+ SG_ BYTE1 : 8|8@1+ (1,0) [0|255] "" XXX
+ SG_ BYTE2 : 16|8@1+ (1,0) [0|255] "" XXX
+ SG_ BYTE3 : 24|8@1+ (1,0) [0|255] "" XXX
+ SG_ BYTE4 : 32|8@1+ (1,0) [0|255] "" XXX
+ SG_ BYTE5 : 40|8@1+ (1,0) [0|255] "" XXX
+ SG_ BYTE6 : 48|8@1+ (1,0) [0|255] "" XXX
+ SG_ BYTE7 : 56|8@1+ (1,0) [0|255] "" XXX
 
 BO_ 1265 CLU11: 4 XXX
  SG_ CF_Clu_AliveCnt1 : 28|4@1+ (1,0) [0|0] "" XXX
@@ -686,13 +752,15 @@ BO_ 1322 CLU15: 8 XXX
 
 BO_ 1342 LKAS12: 8 XXX
  SG_ CF_LkasDawStatus : 40|3@1+ (1,0) [0|0] "" XXX
- SG_ CF_LkasTsrSpeed_Display_Navi : 24|8@1+ (1,0) [0|0] "" XXX
- SG_ CF_Lkas_Daw_USM : 37|3@1+ (1,0) [0|0] "" XXX
- SG_ CF_Lkas_TsrAddinfo_Display : 32|2@1+ (1,0) [0|0] "" XXX
+ SG_ CF_LkasTsrSpeed_Display_Navi : 32|8@1+ (1,0) [0|0] "" XXX
+ SG_ CF_Lkas_TsrSpeed_Display_Clu : 24|8@1+ (1,0) [0|0] "" XXX
  SG_ CF_Lkas_TsrSlifOpt : 10|2@1+ (1,0) [0|0] "" XXX
- SG_ CF_Lkas_TsrSpeed_Display_Clu : 16|8@1+ (1,0) [0|0] "" XXX
- SG_ _CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
+ SG_ CHECKSUM : 0|8@1+ (1,0) [0|0] "" XXX
  SG_ COUNTER : 12|4@1+ (1,0) [0|0] "" XXX
+ SG_ CF_SLA_Avail : 48|2@1+ (1,0) [0|3] "" XXX
+ SG_ CF_SLA_AdjDisp : 51|2@1+ (1,0) [0|3] "" XXX
+ SG_ Sign_detected : 56|5@1+ (1,0) [0|255] "" XXX
+ SG_ CF_SLA_ACT : 61|1@0+ (1,0) [0|1] "" XXX
 
 BO_ 1345 CGW1: 8 XXX
  SG_ CF_Gway_ALightStat : 37|1@1+ (1,0) [0|0] "" XXX
@@ -852,14 +920,26 @@ BO_ 1456 CLU12: 4 XXX
  SG_ CF_Clu_Odometer : 0|24@1+ (0.1,0) [0|0] "" XXX
 
 
+CM_ SG_ 1123 DRV_MODE_PRIMARY_STATUS "Indicates the current drive mode selected by the driver (Smart, Sport, Comfort, ECO, Snow). This is a status-only signal, not writable.";
+CM_ SG_ 1123 DRV_MODE_SECONDARY_STATUS "Indicates a secondary status modifier, often used in combination with PRIMARY to disambiguate ECO vs Snow. Status-only.";
+CM_ SG_ 1123 DRV_MODE_EXT_IND "Drive mode extension indicator (e.g. Snow Mode flag). Status-only signal.";
 CM_ SG_ 1348 SpeedLim_Nav_Clu "Speed limit displayed on Nav, Cluster and HUD";
+CM_ SG_ 1342 CF_SLA_ACT "Speed limit assist active flag";
+CM_ SG_ 1342 CF_SLA_AdjDisp "Display of the automatically adjusting speed message";
+CM_ SG_ 1342 CF_SLA_Avail "Up or Down arrow showing speed limit assist available";
 
 VAL_ 871 CF_Lvr_Gear 12 "T" 5 "D" 8 "S" 6 "N" 7 "R" 0 "P";
+VAL_ 871 AUTO_START_STOP_STATUS 3 "Off" 1 "On";
 VAL_ 909 CF_VSM_Warn 2 "FCW" 3 "AEB";
 VAL_ 916 ACCEnable 0 "SCC ready" 1 "SCC temp fault" 2 "SCC permanent fault" 3 "SCC permanent fault, communication issue";
+VAL_ 916 CF_FCW_AEB_Status 0 "Normal" 3 "Fault";
 VAL_ 1057 ACCMode 0 "off" 1 "enabled" 2 "driver_override" 3 "off_maybe_fault" 4 "cancelled";
+VAL_ 1123 DRV_MODE_PRIMARY_STATUS 49 "Smart" 33 "Sport" 1 "Comfort" 17 "ECO_or_Snow";
+VAL_ 1123 DRV_MODE_SECONDARY_STATUS 1 "Normal" 17 "Snow";
+VAL_ 1123 DRV_MODE_EXT_IND 0 "Standard" 16 "SnowFlag";
 VAL_ 1157 HDA_Icon_State 0 "no_hda" 1 "white_hda" 2 "green_hda";
 VAL_ 1157 LFA_SysWarning 0 "no_message" 1 "switching_to_hda" 2 "switching_to_scc" 3 "lfa_error" 4 "check_hda" 5 "keep_hands_on_wheel_orange" 6 "keep_hands_on_wheel_red";
 VAL_ 1157 LFA_Icon_State 0 "no_wheel" 1 "white_wheel" 2 "green_wheel" 3 "green_wheel_blink";
 VAL_ 1157 HDA_SysWarning 0 "no_message" 1 "driving_convenience_systems_cancelled" 2 "highway_drive_assist_system_cancelled";
 VAL_ 1322 CF_Clu_Gear 1 "P" 2 "R" 4 "N" 8 "D";
+VAL_ 1342 Sign_detected 1 "Slow/Caution" 8 "Stop" 9 "Yield"
