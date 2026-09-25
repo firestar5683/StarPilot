@@ -20,6 +20,10 @@
 #include "system/camerad/cameras/bps_blobs.h"
 
 
+static bool uses_legacy_bps_config(const SensorInfo *sensor) {
+  return sensor->image_sensor == cereal::FrameData::ImageSensor::AR0231;
+}
+
 // ************** low level camera helpers ****************
 
 int do_cam_control(int fd, int op_code, void *handle, int size) {
@@ -465,9 +469,10 @@ void SpectraCamera::config_bps(int idx, int request_id) {
     * BPS = Bayer Processing Segment
   */
 
-  bool needs_downscale = sensor->out_scale > 1;
+  const bool legacy_bps = uses_legacy_bps_config(sensor.get());
+  bool needs_downscale = !legacy_bps && sensor->out_scale > 1;
   int num_io_cfgs = needs_downscale ? 3 : 2;
-  int num_patches = needs_downscale ? 14 : 12;
+  int num_patches = legacy_bps ? 9 : (needs_downscale ? 14 : 12);
   int size = sizeof(struct cam_packet) + sizeof(struct cam_cmd_buf_desc)*2 + sizeof(struct cam_buf_io_cfg)*num_io_cfgs;
   size += sizeof(struct cam_patch_desc)*num_patches;
 
@@ -547,15 +552,21 @@ void SpectraCamera::config_bps(int idx, int request_id) {
     int cdm_len = 0;
 
     if (bps_lin_reg.size() == 0) {
-      // set first knee pt to do BLC
-      uint32_t new_knee[8];
-      new_knee[0] = sensor->black_level << (14 - sensor->bits_per_pixel);
-      for (int i = 0; i < 7; i++) {
-        uint32_t pts = sensor->linearization_pts[i / 2];
-        new_knee[i + 1] = (i % 2 == 0) ? (pts >> 16) : (pts & 0xffff);
-      }
-      for (int i = 0; i < 4; i++) {
-        bps_lin_reg.push_back((new_knee[2*i + 1] << 16) | new_knee[2*i]);
+      if (legacy_bps) {
+        for (int i = 0; i < 4; i++) {
+          bps_lin_reg.push_back((sensor->linearization_pts[i] << 16) | (sensor->linearization_pts[i] >> 16));
+        }
+      } else {
+        // set first knee pt to do BLC
+        uint32_t new_knee[8];
+        new_knee[0] = sensor->black_level << (14 - sensor->bits_per_pixel);
+        for (int i = 0; i < 7; i++) {
+          uint32_t pts = sensor->linearization_pts[i / 2];
+          new_knee[i + 1] = (i % 2 == 0) ? (pts >> 16) : (pts & 0xffff);
+        }
+        for (int i = 0; i < 4; i++) {
+          bps_lin_reg.push_back((new_knee[2*i + 1] << 16) | new_knee[2*i]);
+        }
       }
     }
 
@@ -584,16 +595,20 @@ void SpectraCamera::config_bps(int idx, int request_id) {
     cdm_len += write_cont((unsigned char *)bps_cdm_program_array.ptr + cdm_len, 0x1888, bps_lin_reg);
     cdm_len += write_cont((unsigned char *)bps_cdm_program_array.ptr + cdm_len, 0x1898, bps_lin_reg);
     uint64_t addr;
-    cdm_len += write_dmi((unsigned char *)bps_cdm_program_array.ptr + cdm_len, &addr, sensor->linearization_lut.size()*sizeof(uint32_t), 0x1808, 1, CAM_CDM_CMD_DMI);
-    patches.push_back(addr - (uint64_t)bps_cdm_program_array.ptr);
+    if (!legacy_bps) {
+      cdm_len += write_dmi((unsigned char *)bps_cdm_program_array.ptr + cdm_len, &addr, sensor->linearization_lut.size()*sizeof(uint32_t), 0x1808, 1, CAM_CDM_CMD_DMI);
+      patches.push_back(addr - (uint64_t)bps_cdm_program_array.ptr);
+    }
 
     // color correction
     cdm_len += write_cont((unsigned char *)bps_cdm_program_array.ptr + cdm_len, 0x2e68, bps_ccm_reg);
 
     // gamma
-    for (uint8_t ch = 1; ch <= 3; ch++) {
-      cdm_len += write_dmi((unsigned char *)bps_cdm_program_array.ptr + cdm_len, &addr, sensor->gamma_lut_rgb.size()*sizeof(uint32_t), 0x3208, ch, CAM_CDM_CMD_DMI);
-      patches.push_back(addr - (uint64_t)bps_cdm_program_array.ptr);
+    if (!legacy_bps) {
+      for (uint8_t ch = 1; ch <= 3; ch++) {
+        cdm_len += write_dmi((unsigned char *)bps_cdm_program_array.ptr + cdm_len, &addr, sensor->gamma_lut_rgb.size()*sizeof(uint32_t), 0x3208, ch, CAM_CDM_CMD_DMI);
+        patches.push_back(addr - (uint64_t)bps_cdm_program_array.ptr);
+      }
     }
 
     cdm_len += build_common_ife_bps((unsigned char *)bps_cdm_program_array.ptr + cdm_len, cc, sensor.get(), patches, false);
@@ -609,7 +624,7 @@ void SpectraCamera::config_bps(int idx, int request_id) {
     tmp.header = CAM_ICP_CMD_GENERIC_BLOB_CLK;
     tmp.header |= (sizeof(cam_icp_clk_bw_request)) << 8;
     tmp.clk.budget_ns = 0x1fca058;
-    tmp.clk.frame_cycles = 20000000; // force max BPS clock (600 MHz)
+    tmp.clk.frame_cycles = legacy_bps ? 2329024 : 20000000; // modern BPS keeps its 600 MHz clock
     tmp.clk.rt_flag = 0x0;
     tmp.clk.uncompressed_bw = 0x38512180;
     tmp.clk.compressed_bw = 0x38512180;
@@ -705,7 +720,7 @@ void SpectraCamera::config_bps(int idx, int request_id) {
 
   // *** patches ***
   {
-    assert(patches.size() == 0 || patches.size() == 4);
+    assert(legacy_bps ? patches.empty() : (patches.size() == 0 || patches.size() == 4));
     pkt->patch_offset = sizeof(struct cam_cmd_buf_desc)*pkt->num_cmd_buf + sizeof(struct cam_buf_io_cfg)*pkt->num_io_configs;
 
     if (patches.size() > 0) {
@@ -1047,7 +1062,8 @@ bool SpectraCamera::openSensor() {
 
   // Figure out which sensor we have
   if (!init_sensor_lambda(new OS04C10) &&
-      !init_sensor_lambda(new OX03C10)) {
+      !init_sensor_lambda(new OX03C10) &&
+      !init_sensor_lambda(new AR0231)) {
     LOGE("** sensor %d FAILED bringup, disabling", cc.camera_num);
     enabled = false;
     return false;
@@ -1166,6 +1182,7 @@ void SpectraCamera::configICP() {
   */
 
   int cfg_handle;
+  const bool legacy_bps = uses_legacy_bps_config(sensor.get());
 
   uint32_t cfg_size = sizeof(bps_cfg[0]) / sizeof(bps_cfg[0][0]);
   void *cfg = alloc_w_mmu_hdl(m->video0_fd, cfg_size, (uint32_t*)&cfg_handle, 0x1,
@@ -1212,19 +1229,22 @@ void SpectraCamera::configICP() {
   bps_cdm_program_array.init(m, 0x1000, 0x20, true, m->icp_device_iommu);
 
   // striping lib output
-  uint32_t striping_size = sizeof(bps_striping_output[0]) / sizeof(bps_striping_output[0][0]);
+  uint32_t striping_size = legacy_bps ? 0x9a0 : sizeof(bps_striping_output[0]) / sizeof(bps_striping_output[0][0]);
   bps_striping.init(m, striping_size, 0x20, true, m->icp_device_iommu);
   memcpy(bps_striping.ptr, bps_striping_output[sensor->num()], striping_size);
 
   // used internally by the BPS, we just allocate it.
   // size comes from the BPSStripingLib
-  bps_cdm_striping_bl.init(m, 0xcfe0, 0x20, true, m->icp_device_iommu);
+  bps_cdm_striping_bl.init(m, legacy_bps ? 0xa100 : 0xcfe0, 0x20, true, m->icp_device_iommu);
 
-  if (sensor->out_scale > 1) {
+  if (!legacy_bps && sensor->out_scale > 1) {
     uint32_t full_stride, full_y_h, full_uv_h, full_yuv_size;
     std::tie(full_stride, full_y_h, full_uv_h, full_yuv_size) = get_nv12_info(sensor->frame_width, sensor->frame_height);
     bps_fullres_dummy.init(m, full_yuv_size, 0x1000, true, m->icp_device_iommu);
   }
+
+  // Legacy BPS tables contain the complete processing configuration.
+  if (legacy_bps) return;
 
   // LUTs
   assert(sensor->linearization_lut.size() == 36);
