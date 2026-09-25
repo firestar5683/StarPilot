@@ -9,10 +9,8 @@ from openpilot.cereal import messaging, log
 from opendbc.car.structs import car
 from openpilot.selfdrive.locationd.lagd import LateralLagEstimator, retrieve_initial_lag, masked_normalized_cross_correlation, \
                                                BLOCK_NUM_NEEDED, BLOCK_SIZE, MIN_OKAY_WINDOW_SEC, VERSION, MIN_LAG, MAX_LAG
-from openpilot.selfdrive.test.process_replay.migration import migrate, migrate_carParams
-from openpilot.selfdrive.locationd.test.test_locationd_scenarios import TEST_ROUTE
 from openpilot.common.params import Params
-from openpilot.tools.lib.logreader import LogReader
+from openpilot.starpilot.schema_cache import put_cache
 from openpilot.common.hardware import PC
 
 MAX_ERR_FRAMES = 1
@@ -22,8 +20,7 @@ LAGD_MIN_LAG_FRAMES, LAGD_MAX_LAG_FRAMES = int(round(MIN_LAG / DT)), int(round(M
 
 @cache
 def get_test_car_params():
-  lr = migrate(LogReader(TEST_ROUTE), [migrate_carParams])
-  return next(m for m in lr if m.which() == "carParams").carParams
+  return car.CarParams.new_message(carFingerprint="cache-test-car", steerRatio=15.0)
 
 
 def process_messages(estimator, lag_frames, n_frames, vego=25.0, rejection_threshold=0.0):
@@ -54,6 +51,20 @@ def process_messages(estimator, lag_frames, n_frames, vego=25.0, rejection_thres
 
 
 class TestLagd(OpenpilotTestCase):
+  def test_unqualified_saved_params_are_not_loaded(self):
+    params = Params()
+    CP = get_test_car_params()
+    msg = messaging.new_message('lateralDelay')
+    msg.lateralDelay.lateralDelayEstimate = 0.15
+    msg.lateralDelay.validBlocks = 5
+    msg.lateralDelay.version = VERSION
+    raw = msg.to_bytes()
+    params.put("LiveDelay", raw, block=True)
+    put_cache(params, "CarParamsPrevRoute", CP, block=True)
+
+    self.assertIsNone(retrieve_initial_lag(params, CP))
+    self.assertEqual(params.get("LiveDelay"), raw)
+
   def test_read_saved_params(self):
     params = Params()
 
@@ -63,8 +74,8 @@ class TestLagd(OpenpilotTestCase):
     msg.lateralDelay.lateralDelayEstimate = random.random()
     msg.lateralDelay.validBlocks = random.randint(1, 10)
     msg.lateralDelay.version = VERSION
-    params.put("LiveDelay", msg.to_bytes(), block=True)
-    params.put("CarParamsPrevRoute", CP.as_builder().to_bytes(), block=True)
+    put_cache(params, "LiveDelay", msg, block=True)
+    put_cache(params, "CarParamsPrevRoute", CP, block=True)
 
     saved_lag_params = retrieve_initial_lag(params, CP)
     assert saved_lag_params is not None
@@ -82,8 +93,8 @@ class TestLagd(OpenpilotTestCase):
       with subtests.test(msg=f"lateralDelay={msg_dict}"):
         msg = messaging.new_message('lateralDelay')
         msg.lateralDelay = msg_dict
-        params.put("LiveDelay", msg.to_bytes(), block=True)
-        params.put("CarParamsPrevRoute", CP.as_builder().to_bytes(), block=True)
+        put_cache(params, "LiveDelay", msg, block=True)
+        put_cache(params, "CarParamsPrevRoute", CP, block=True)
         assert retrieve_initial_lag(params, CP) is None
 
   def test_ncc(self):

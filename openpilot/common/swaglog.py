@@ -12,8 +12,10 @@ from openpilot.common.hardware.hw import Paths
 
 
 def get_file_handler():
-  Path(Paths.swaglog_root()).mkdir(parents=True, exist_ok=True)
-  base_filename = os.path.join(Paths.swaglog_root(), "swaglog")
+  from openpilot.starpilot.connect.provider import cloudlog_root
+  directory = cloudlog_root()
+  Path(directory).mkdir(parents=True, exist_ok=True)
+  base_filename = os.path.join(directory, "swaglog")
   handler = SwaglogRotatingFileHandler(base_filename)
   return handler
 

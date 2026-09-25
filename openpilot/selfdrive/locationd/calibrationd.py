@@ -20,6 +20,7 @@ from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process
 from openpilot.common.transformations.orientation import rot_from_euler, euler_from_rot
 from openpilot.common.swaglog import cloudlog
+from openpilot.starpilot.schema_cache import get_cache, prewarm_cache_contracts, put_cache
 
 MIN_SPEED_FILTER = 15 * CV.MPH_TO_MS
 MAX_VEL_ANGLE_STD = np.radians(0.25)
@@ -63,13 +64,14 @@ def moving_avg_with_linear_decay(prev_mean: np.ndarray, new_val: np.ndarray, idx
 
 class Calibrator:
   def __init__(self, param_put: bool = False):
+    prewarm_cache_contracts(("CalibrationParams",))
     self.param_put = param_put
 
     self.not_car = False
 
     # Read saved calibration
     self.params = Params()
-    calibration_params = self.params.get("CalibrationParams")
+    calibration_params = get_cache(self.params, "CalibrationParams")
     rpy_init = RPY_INIT
     wide_from_device_euler = WIDE_FROM_DEVICE_EULER_INIT
     height = HEIGHT_INIT
@@ -168,7 +170,7 @@ class Calibrator:
 
     write_this_cycle = (self.idx == 0) and (self.block_idx % (INPUTS_WANTED//5) == 5)
     if self.param_put and write_this_cycle:
-      self.params.put("CalibrationParams", self.get_msg(True).to_bytes())
+      put_cache(self.params, "CalibrationParams", self.get_msg(True))
 
   def handle_v_ego(self, v_ego: float) -> None:
     self.v_ego = v_ego

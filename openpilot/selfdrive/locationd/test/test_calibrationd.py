@@ -6,6 +6,7 @@ from openpilot.common.test import OpenpilotTestCase
 import openpilot.cereal.messaging as messaging
 from openpilot.cereal import log
 from openpilot.common.params import Params
+from openpilot.starpilot.schema_cache import put_cache
 from openpilot.selfdrive.locationd.calibrationd import Calibrator, INPUTS_NEEDED, INPUTS_WANTED, BLOCK_SIZE, MIN_SPEED_FILTER, \
                                                          MAX_YAW_RATE_FILTER, SMOOTH_CYCLES, HEIGHT_INIT, MAX_ALLOWED_PITCH_SPREAD, MAX_ALLOWED_YAW_SPREAD
 
@@ -31,13 +32,25 @@ def process_messages(c, cam_odo_calib, cycles,
                         [cam_odo_height_std, cam_odo_height_std, cam_odo_height_std])
 
 class TestCalibrationd(OpenpilotTestCase):
+  def test_unqualified_saved_params_are_not_loaded(self):
+    msg = messaging.new_message('extrinsicsCalibration')
+    msg.extrinsicsCalibration.validBlocks = 10
+    msg.extrinsicsCalibration.rpyCalib = [0.0, 0.02, 0.01]
+    raw = msg.to_bytes()
+    params = Params()
+    params.put("CalibrationParams", raw, block=True)
+    c = Calibrator(param_put=True)
+
+    self.assertEqual(c.valid_blocks, 0)
+    np.testing.assert_allclose(c.rpy, np.zeros(3))
+    self.assertEqual(params.get("CalibrationParams"), raw)
 
   def test_read_saved_params(self):
     msg = messaging.new_message('extrinsicsCalibration')
     msg.extrinsicsCalibration.validBlocks = random.randint(1, 10)
     msg.extrinsicsCalibration.rpyCalib = [random.random() for _ in range(3)]
     msg.extrinsicsCalibration.height = [random.random() for _ in range(1)]
-    Params().put("CalibrationParams", msg.to_bytes(), block=True)
+    put_cache(Params(), "CalibrationParams", msg, block=True)
     c = Calibrator(param_put=True)
 
     np.testing.assert_allclose(msg.extrinsicsCalibration.rpyCalib, c.rpy)

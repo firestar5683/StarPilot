@@ -7,6 +7,7 @@ import openpilot.cereal.messaging as messaging
 from openpilot.cereal import log
 from opendbc.car.structs import car
 from openpilot.common.params import Params
+from openpilot.starpilot.schema_cache import get_cache, prewarm_cache_contracts, put_cache
 from openpilot.common.realtime import config_realtime_process, DT_MDL
 from openpilot.selfdrive.locationd.models.car_kf import CarKalman, ObservationKind, States
 from openpilot.selfdrive.locationd.models.constants import GENERATED_DIR
@@ -201,8 +202,8 @@ def check_valid_with_hysteresis(current_valid: bool, val: float, threshold: floa
 
 
 def retrieve_initial_vehicle_params(params: Params, CP: car.CarParams, replay: bool, debug: bool):
-  last_parameters_data = params.get("LiveParametersV2")
-  last_carparams_data = params.get("CarParamsPrevRoute")
+  last_parameters_data = get_cache(params, "LiveParametersV2")
+  last_carparams_data = get_cache(params, "CarParamsPrevRoute")
 
   steer_ratio, stiffness_factor, angle_offset_deg, p_initial = CP.steerRatio, 1.0, 0.0, None
 
@@ -243,6 +244,7 @@ def retrieve_initial_vehicle_params(params: Params, CP: car.CarParams, replay: b
 
 
 def main():
+  prewarm_cache_contracts()
   config_realtime_process([0, 1, 2, 3], 5)
 
   DEBUG = bool(int(os.getenv("DEBUG", "0")))
@@ -270,7 +272,7 @@ def main():
 
       msg_dat = msg.to_bytes()
       if sm.frame % 1200 == 0:  # once a minute
-        params.put("LiveParametersV2", msg_dat)
+        put_cache(params, "LiveParametersV2", msg)
 
       pm.send('vehicleParameters', msg_dat)
 

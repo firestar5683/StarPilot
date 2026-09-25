@@ -1,0 +1,200 @@
+{
+  "schema_version": 2,
+  "upstream_commit": "3f06ed3bc7a4cc9c320be1f7d03dcd8a885a8e6f",
+  "opendbc_commit": "35f7e0813462607ef1d703e52313e7571e31405d",
+  "unchanged_schemas": {
+    "openpilot/cereal/deprecated.capnp": "b3aa5c13de40001ed7376cef858500fb003f7698f96131cd0db18d878fa1af0d",
+    "openpilot/cereal/include/c++.capnp": "fb306076cd38c27af1aed20fac6395e9a46fbe5b5df6a248b5f1b6845a079c44",
+    "opendbc_repo/opendbc/car/car.capnp": "098a19d69e8d233ac653503b53761a94824f31812757a11a7ded1589fe1e0788",
+    "opendbc_repo/opendbc/car/include/c++.capnp": "fb306076cd38c27af1aed20fac6395e9a46fbe5b5df6a248b5f1b6845a079c44",
+    "opendbc_repo/opendbc/car/rlog.capnp": "76331a09f36764d08228ba1ed6c03419cc8cdfcc797db98c4d56fab52a6ac050"
+  },
+  "log_sha256": "bf39b822e577afdd6caacabde77261ac5c0929767c2f0e4ff7d5e5429e3d4c14",
+  "custom_header": "using Cxx = import \"/include/c++.capnp\";\n$Cxx.namespace(\"cereal\");\nusing Car = import \"/car.capnp\";\n\n@0xb526ba661d550a59;\n\n# custom.capnp: a home for empty structs reserved for custom forks\n# These structs are guaranteed to remain reserved and empty in mainline\n# cereal, so use these if you want custom events in your fork.\n\n# DO rename the structs\n# DON'T change the identifier (e.g. @0x81c2f05a394cf4af)\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n\n",
+  "historical_empty_slots": [
+    5
+  ],
+  "historical_restored": {
+    "10": {
+      "type_id": "0xcb9fd56c7057593a",
+      "ordinal": 136,
+      "field": "desiredCurvature @0 :Float32;"
+    },
+    "11": {
+      "type_id": "0xc2243c65e0340384",
+      "ordinal": 137,
+      "field": "active @0 :Bool;"
+    }
+  },
+  "reserved": [
+    {
+      "struct": "CustomReserved0",
+      "type_id": "0x81c2f05a394cf4af",
+      "field": "customReserved0",
+      "ordinal": 107
+    },
+    {
+      "struct": "CustomReserved1",
+      "type_id": "0xaedffd8f31e7b55d",
+      "field": "customReserved1",
+      "ordinal": 108
+    },
+    {
+      "struct": "CustomReserved2",
+      "type_id": "0xf35cc4560bbf6ec2",
+      "field": "customReserved2",
+      "ordinal": 109
+    },
+    {
+      "struct": "CustomReserved3",
+      "type_id": "0xda96579883444c35",
+      "field": "customReserved3",
+      "ordinal": 110
+    },
+    {
+      "struct": "CustomReserved4",
+      "type_id": "0x80ae746ee2596b11",
+      "field": "customReserved4",
+      "ordinal": 111
+    },
+    {
+      "struct": "CustomReserved5",
+      "type_id": "0xa5cd762cd951a455",
+      "field": "customReserved5",
+      "ordinal": 112
+    },
+    {
+      "struct": "CustomReserved6",
+      "type_id": "0xf98d843bfd7004a3",
+      "field": "customReserved6",
+      "ordinal": 113
+    },
+    {
+      "struct": "CustomReserved7",
+      "type_id": "0xb86e6369214c01c8",
+      "field": "customReserved7",
+      "ordinal": 114
+    },
+    {
+      "struct": "CustomReserved8",
+      "type_id": "0xf416ec09499d9d19",
+      "field": "customReserved8",
+      "ordinal": 115
+    },
+    {
+      "struct": "CustomReserved9",
+      "type_id": "0xa1680744031fdb2d",
+      "field": "customReserved9",
+      "ordinal": 116
+    },
+    {
+      "struct": "CustomReserved10",
+      "type_id": "0xcb9fd56c7057593a",
+      "field": "customReserved10",
+      "ordinal": 136
+    },
+    {
+      "struct": "CustomReserved11",
+      "type_id": "0xc2243c65e0340384",
+      "field": "customReserved11",
+      "ordinal": 137
+    },
+    {
+      "struct": "CustomReserved12",
+      "type_id": "0x9ccdc8676701b412",
+      "field": "customReserved12",
+      "ordinal": 138
+    },
+    {
+      "struct": "CustomReserved13",
+      "type_id": "0xcd96dafb67a082d0",
+      "field": "customReserved13",
+      "ordinal": 139
+    },
+    {
+      "struct": "CustomReserved14",
+      "type_id": "0xb057204d7deadf3f",
+      "field": "customReserved14",
+      "ordinal": 140
+    },
+    {
+      "struct": "CustomReserved15",
+      "type_id": "0xbd443b539493bc68",
+      "field": "customReserved15",
+      "ordinal": 141
+    },
+    {
+      "struct": "CustomReserved16",
+      "type_id": "0xfc6241ed8877b611",
+      "field": "customReserved16",
+      "ordinal": 142
+    },
+    {
+      "struct": "CustomReserved17",
+      "type_id": "0xa30662f84033036c",
+      "field": "customReserved17",
+      "ordinal": 143
+    },
+    {
+      "struct": "CustomReserved18",
+      "type_id": "0xc86a3d38d13eb3ef",
+      "field": "customReserved18",
+      "ordinal": 144
+    },
+    {
+      "struct": "CustomReserved19",
+      "type_id": "0xa4f1eb3323f5f582",
+      "field": "customReserved19",
+      "ordinal": 145
+    }
+  ],
+  "raw_reserved": {
+    "124": "customReservedRawData0",
+    "125": "customReservedRawData1",
+    "126": "customReservedRawData2"
+  },
+  "historical_prefixes": {
+    "0": {
+      "type_id": "0x81c2f05a394cf4af",
+      "name": "StarPilotCarControl",
+      "body": "\n  hudControl @0 :HUDControl;\n  steeringLimitInfo @1 :SteeringLimitInfo;\n\n  struct HUDControl {\n    audibleAlert @0 :AudibleAlert;\n\n    enum AudibleAlert {\n      none @0;\n\n      engage @1;\n      disengage @2;\n      refuse @3;\n\n      warningSoft @4;\n      warningImmediate @5;\n\n      prompt @6;\n      promptRepeat @7;\n      promptDistracted @8;\n\n      # Random Events\n      angry @9;\n      continued @10;\n      dejaVu @11;\n      doc @12;\n      fart @13;\n      firefox @14;\n      goat @15;\n      hal9000 @16;\n      mail @17;\n      nessie @18;\n      noice @19;\n      startup @20;\n      thisIsFine @21;\n      uwu @22;\n    }\n  }\n\n  struct SteeringLimitInfo {\n    valid @0 :Bool;\n    modelLimitErrorDeg @1 :Float32;\n    resumeLimitErrorDeg @2 :Float32;\n    cooperativeLimitErrorDeg @3 :Float32;\n    cooperativeOffsetDeg @4 :Float32;\n    monoTime @5 :UInt64;\n    combinedLimitErrorDeg @6 :Float32;\n  }\n",
+      "source_commit": "c2109496a72e85ca702ecef7aff53ff45adcfb8c",
+      "source_path": "cereal/custom.capnp"
+    },
+    "3": {
+      "type_id": "0xda96579883444c35",
+      "name": "StarPilotLongitudinalPlan",
+      "body": "\n  version @0 :UInt16;\n  sourcePlanMonoTime @1 :UInt64;\n  modelMonoTime @2 :UInt64;\n  driveStartMonoTime @3 :UInt64;\n  forceStopHolding @4 :Bool;\n"
+    },
+    "2": {
+      "type_id": "0xf35cc4560bbf6ec2",
+      "name": "StarPilotCarState",
+      "body": "\n  accelPressed @0 :Bool;\n  alwaysOnLateralEnabled @1 :Bool;\n  brakeLights @2 :Bool;\n  dashboardSpeedLimit @3 :Float32;\n  decelPressed @4 :Bool;\n  distancePressed @5 :Bool;\n  distanceLongPressed @6 :Bool;\n  distanceVeryLongPressed @7 :Bool;\n  ecoGear @8 :Bool;\n  forceCoast @9 :Bool;\n  isParked @10 :Bool;\n  pauseLateral @11 :Bool;\n  pauseLongitudinal @12 :Bool;\n  sportGear @13 :Bool;\n  trafficModeEnabled @14 :Bool;\n  gasStack @15 :Bool;  # Compatibility with older StarPilot payloads\n  modePressed @16 :Bool;\n  customPressed @17 :Bool;\n  alwaysOnLateralAllowed @18 :Bool;\n  dashboardStopSign @19 :UInt8;  # 0 = no signal / platform doesn't publish\n  cancelPressed @20 :Bool;\n  cancelLongPressed @21 :Bool;\n  cancelVeryLongPressed @22 :Bool;\n  pedalMaxRegen @23 :Bool;  # pedal at max regen, driver should use brake for more decel\n  pedalLongActive @24 :Bool;  # Pre-AP pedal longitudinal mode is active (enableLongControl)\n  teslaCCEngaged @25 :Bool;  # rising edge of stock Tesla CC engaging (no-pedal mode)\n  teslaCCDisengaged @26 :Bool;  # falling edge of stock Tesla CC\n  teslaCCNotArmed @27 :Bool;  # lateral engaged but DI_cruiseState != STANDBY/ENABLED\n  accelHardCruise @28 :Bool;  # current/releasing accel cruise button came from GM hard-press signal\n  decelHardCruise @29 :Bool;  # current/releasing decel cruise button came from GM hard-press signal\n  pulseAndGlide @30 :Bool;  # developer-only wheel-button pulse-and-glide mode is enabled",
+      "source_commit": "6de77049b3c3dc77c7275e9ff724a96f9e72a19d",
+      "source_path": "cereal/custom.capnp"
+    },
+    "6": {
+      "type_id": "0xf98d843bfd7004a3",
+      "name": "CustomReserved6",
+      "body": "\naccelerationJerk @0 :Float32; cscControllingSpeed @1 :Bool; cscSpeed @2 :Float32;\ncscTraining @3 :Bool; dangerFactor @4 :Float32; dangerJerk @5 :Float32;\ndesiredFollowDistance @6 :Int64; experimentalMode @7 :Bool; forcingStop @8 :Bool;\nforcingStopLength @9 :Float32; starpilotEvents @10 :AnyPointer; starpilotToggles @11 :Text;\nincreasedStoppedDistance @12 :Float32; lateralCheck @13 :Bool; laneWidthLeft @14 :Float32;\nlaneWidthRight @15 :Float32; maxAcceleration @16 :Float32; minAcceleration @17 :Float32;\nredLight @18 :Bool; roadCurvature @19 :Float32;\nslcMapSpeedLimit @20 :Float32;\nslcMapboxSpeedLimit @21 :Float32; slcNextSpeedLimit @22 :Float32; slcOverriddenSpeed @23 :Float32;\nslcSpeedLimit @24 :Float32; slcSpeedLimitOffset @25 :Float32; slcSpeedLimitSource @26 :Text;\n",
+      "source_commit": "77b44257a0a2a6e574d8e375ab61004be21b7a6e",
+      "source_path": "openpilot/cereal/custom.capnp"
+    },
+    "1": {
+      "type_id": "0xaedffd8f31e7b55d",
+      "name": "StarPilotCarParams",
+      "body": "\n  alternativeExperience @0 :Int16;\n  canUsePedal @1 :Bool;\n  canUseSDSU @2 :Bool;\n  flags @3 :UInt32;\n  isHDA2 @4 :Bool;\n  openpilotLongitudinalControlDisabled @5 :Bool;\n  safetyConfigs @6 :List(SafetyConfig);\n  pcmCruiseSpeed @7 :Bool = true;\n  redneckCruiseAvailable @8 :Bool;\n\n  struct SafetyConfig {\n    safetyParam @0 :UInt16;\n  }\n\n  learning @9 :AutoSteeringLearning;\n\n  struct AutoSteeringLearning {\n    version @0 :UInt16;\n    status @1 :Status;\n    reason @2 :Text;\n    identity @3 :Identity;\n    session @4 :Text;\n    sequence @5 :UInt64;\n    observedMonoTime @6 :UInt64;  # MONOTONIC, separate from Event BOOTTIME.\n    validUntilMonoTime @7 :UInt64;\n    sourceWindowStartMonoTime @8 :UInt64;\n    sourceWindowEndMonoTime @9 :UInt64;\n    family @10 :Family;\n    latAccelFactor @11 :Float64;\n    acceptancePolicyId @12 :Text;\n    trainWindows @13 :UInt32;\n    heldoutWindows @14 :UInt32;\n    trainBaselineLoss @15 :Float64;\n    trainCandidateLoss @16 :Float64;\n    heldoutBaselineLoss @17 :Float64;\n    heldoutCandidateLoss @18 :Float64;\n\n    enum Status { unavailable @0; collecting @1; candidate @2; rejected @3; qualifiedFit @4; }\n    enum Family { none @0; linearFactor @1; }\n    struct Identity {\n      vehicle @0 :Text;\n      brand @1 :Text;\n      controller @2 :Text;\n      policy @3 :Text;\n      profile @4 :Text;\n      conversionVersion @5 :Text;\n      firmwareSha256 @6 :Text;\n      basis @7 :List(Float64);\n      baselineSha256 @8 :Text;\n      preferenceSha256 @9 :Text;\n      resetGeneration @10 :Text;\n      controllerRevision @11 :Text;\n    }\n  }\n",
+      "historical_source_commit": "61fd19556f985ef462bda9c103396108ea69ad14",
+      "historical_source_path": "cereal/custom.capnp",
+      "historical_body_sha256": "d95c3b15a6e51608a8157bc3adc965d3914d4ae94364f9ea605c757cc7924ec8",
+      "learning_source_commit": "c204f0b165db7769bd795768e4e25019748ee12c",
+      "learning_source_path": "openpilot/cereal/custom.capnp"
+    }
+  },
+  "reviewed_enum_additions": {
+    "opendbc_repo/opendbc/car/car.capnp": {
+      "enum": "SafetyModel",
+      "field": "teslaPreap @39;"
+    }
+  }
+}

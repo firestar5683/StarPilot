@@ -21,6 +21,7 @@ from msgq.visionipc import VisionIpcClient, VisionIpcServer, get_endpoint_name a
 from opendbc.car.can_definitions import CanData
 from opendbc.car.car_helpers import get_car, interfaces
 from openpilot.common.params import Params
+from openpilot.starpilot.schema_cache import CACHE_KEYS, get_cache, inspect_cache
 from openpilot.common.prefix import OpenpilotPrefix
 from openpilot.common.timeout import Timeout
 from openpilot.common.realtime import DT_CTRL
@@ -175,6 +176,7 @@ class ProcessContainer:
         del os.environ[k]
 
   def _setup_env(self, params_config: dict[str, Any], environ_config: dict[str, Any]):
+    validate_cache_config(params_config)
     for k, v in environ_config.items():
       if len(v) != 0:
         os.environ[k] = v
@@ -356,10 +358,10 @@ def get_car_params_callback(rc, pm, msgs, fingerprint):
     CP = CarInterface.get_non_essential_params(fingerprint)
   else:
     can_msgs = ([CanData(can.address, can.dat, can.src) for can in m.can] for m in msgs if m.which() == "can")
-    cached_params_raw = params.get("CarParamsCache")
+    cached_params_raw = get_cache(params, "CarParamsCache")
     assert next(can_msgs, None), "CAN messages are required for fingerprinting"
     assert os.environ.get("SKIP_FW_QUERY", False) or cached_params_raw is not None, \
-            "CarParamsCache is required for fingerprinting. Make sure to keep carParams msgs in the logs."
+            "Fingerprinting requires a verified CarParamsCache; convert source schemas or provide an explicit current vehicle fingerprint."
 
     def can_recv(wait_for_one: bool = False) -> list[list[CanData]]:
       return [next(can_msgs, [])]
@@ -584,35 +586,9 @@ def get_process_config(name: str) -> ProcessConfig:
 
 
 def get_custom_params_from_lr(lr: LogIterable, initial_state: str = "first") -> dict[str, Any]:
-  """
-  Use this to get custom params dict based on provided logs.
-  Useful when replaying following processes: calibrationd, paramsd, torqued
-  The params may be based on first or last message of given type (carParams, extrinsicsCalibration, vehicleParameters, lateralTorqueParameters) in the logs.
-  """
-
-  car_params = [m for m in lr if m.which() == "carParams"]
-  extrinsics_calibration = [m for m in lr if m.which() == "extrinsicsCalibration"]
-  vehicle_parameters = [m for m in lr if m.which() == "vehicleParameters"]
-  torque_parameters = [m for m in lr if m.which() == "lateralTorqueParameters"]
-
-  assert initial_state in ["first", "last"]
-  msg_index = 0 if initial_state == "first" else -1
-
-  assert len(car_params) > 0, "carParams required for initial state of vehicleParameters and CarParamsPrevRoute"
-  CP = car_params[msg_index].carParams
-
-  custom_params = {
-    "CarParamsPrevRoute": CP.as_builder().to_bytes()
-  }
-
-  if len(extrinsics_calibration) > 0:
-    custom_params["CalibrationParams"] = extrinsics_calibration[msg_index].as_builder().to_bytes()
-  if len(vehicle_parameters) > 0:
-    custom_params["LiveParametersV2"] = vehicle_parameters[msg_index].as_builder().to_bytes()
-  if len(torque_parameters) > 0:
-    custom_params["LiveTorqueParameters"] = torque_parameters[msg_index].as_builder().to_bytes()
-
-  return custom_params
+  """Historical log bytes need explicit schema conversion before cache seeding."""
+  raise ValueError("Log-derived cache seeding requires source schema provenance and a schema-specific conversion; " +
+                   "decoding a log with the current schema does not qualify its saved state")
 
 
 def replay_process_with_name(name: str | Iterable[str], lr: LogIterable, *args, **kwargs) -> list[capnp._DynamicStructReader]:
@@ -731,6 +707,14 @@ def _replay_multi_process(
   return log_msgs
 
 
+def validate_cache_config(params_config: dict[str, Any]) -> None:
+  for key in CACHE_KEYS:
+    if key in params_config:
+      raw = params_config[key]
+      if not isinstance(raw, bytes) or inspect_cache(key, raw).status != "valid":
+        raise ValueError(f"{key} requires a verified cache envelope; log-derived values need source schema provenance and conversion")
+
+
 def generate_params_config(lr=None, CP=None, fingerprint=None, custom_params=None) -> dict[str, Any]:
   params_dict = {
     "OpenpilotEnabledToggle": True,
@@ -739,6 +723,7 @@ def generate_params_config(lr=None, CP=None, fingerprint=None, custom_params=Non
   }
 
   if custom_params is not None:
+    validate_cache_config(custom_params)
     params_dict.update(custom_params)
   if lr is not None:
     has_ublox = any(msg.which() == "ubloxGnss" for msg in lr)
@@ -749,7 +734,9 @@ def generate_params_config(lr=None, CP=None, fingerprint=None, custom_params=Non
   if CP is not None:
     if fingerprint is None:
       if CP.fingerprintSource == "fw":
-        params_dict["CarParamsCache"] = CP.as_builder().to_bytes()
+        if "CarParamsCache" not in params_dict:
+          raise ValueError("Automatic CarParamsCache seeding from logs is unqualified; provide an explicitly converted " +
+                           "cache envelope or replay with an explicit current vehicle fingerprint")
 
     if CP.openpilotLongitudinalControl:
       params_dict["AlphaLongitudinalEnabled"] = True

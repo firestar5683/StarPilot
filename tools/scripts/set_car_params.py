@@ -3,20 +3,20 @@ import sys
 
 from opendbc.car.structs import car
 from openpilot.common.params import Params
-from openpilot.tools.lib.route import Route
-from openpilot.tools.lib.logreader import LogReader
+from openpilot.starpilot.schema_cache import put_cache
+
+
+def main(args: list[str]) -> None:
+  if args:
+    raise SystemExit("Route-derived CarParams require source schema provenance and explicit conversion before cache seeding")
+  CP = car.CarParams.new_message()
+  CP.openpilotLongitudinalControl = True
+  CP.alphaLongitudinalAvailable = False
+  params = Params()
+  params.put("CarParams", CP.to_bytes(), block=True)
+  for key in ("CarParamsCache", "CarParamsPersistent"):
+    put_cache(params, key, CP, block=True)
+
 
 if __name__ == "__main__":
-  CP = None
-  if len(sys.argv) > 1:
-    r = Route(sys.argv[1])
-    cps = [m for m in LogReader(r.qlog_paths()[0]) if m.which() == 'carParams']
-    CP = cps[0].carParams.as_builder()
-  else:
-    CP = car.CarParams.new_message()
-    CP.openpilotLongitudinalControl = True
-    CP.alphaLongitudinalAvailable = False
-
-  cp_bytes = CP.to_bytes()
-  for p in ("CarParams", "CarParamsCache", "CarParamsPersistent"):
-    Params().put(p, cp_bytes, block=True)
+  main(sys.argv[1:])

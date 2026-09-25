@@ -109,6 +109,9 @@ class FwQueryConfig:
   # returns set of candidates. Only will match if one candidate is returned
   match_fw_to_car_fuzzy: Callable[[LiveFwVersions, str, OfflineFwVersions], set[str]] | None = None
 
+  # Reject contradictory firmware evidence after either exact or fuzzy matching.
+  validate_fw_match: Callable[[str, LiveFwVersions, OfflineFwVersions], bool] | None = None
+
   def __post_init__(self):
     # Asserts that a request exists if extra ecus are used
     if len(self.extra_ecus):

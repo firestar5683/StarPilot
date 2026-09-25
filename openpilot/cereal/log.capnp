@@ -2631,33 +2631,36 @@ struct Event {
 
     # DO change the name of the field
     # DON'T change anything after the "@"
-    customReservedRawData0 @124 :Data;
-    customReservedRawData1 @125 :Data;
-    customReservedRawData2 @126 :Data;
+    aolSafetyWire @124 :Data;
+    aolIntentWire @125 :Data;
+    laneChangeAssistWire @126 :Data;
 
     # DO change the name of the field and struct
     # DON'T change the ID (e.g. @107)
     # DON'T change which struct it points to
-    customReserved0 @107 :Custom.CustomReserved0;
-    customReserved1 @108 :Custom.CustomReserved1;
-    customReserved2 @109 :Custom.CustomReserved2;
-    customReserved3 @110 :Custom.CustomReserved3;
-    customReserved4 @111 :Custom.CustomReserved4;
+    starpilotNavigation @107 :Custom.StarPilotCarControl;
+    autoSteeringLearning @108 :Custom.StarPilotCarParams;
+    starpilotCarState @109 :Custom.StarPilotCarState;
+    starpilotLongitudinalPlan @110 :Custom.StarPilotLongitudinalPlan;
+    slcVisionObservation @111 :Custom.StarPilotModelDataV2;
     customReserved5 @112 :Custom.CustomReserved5;
+    # Temporary historical starpilotPlan replay transport.
+    # When old-route replay support is removed, retain reserved slot @113.
+    # Adapter: openpilot/starpilot/ui/old_starpilot_route_shim.py.
     customReserved6 @113 :Custom.CustomReserved6;
-    customReserved7 @114 :Custom.CustomReserved7;
-    customReserved8 @115 :Custom.CustomReserved8;
-    customReserved9 @116 :Custom.CustomReserved9;
-    customReserved10 @136 :Custom.CustomReserved10;
-    customReserved11 @137 :Custom.CustomReserved11;
-    customReserved12 @138 :Custom.CustomReserved12;
-    customReserved13 @139 :Custom.CustomReserved13;
-    customReserved14 @140 :Custom.CustomReserved14;
-    customReserved15 @141 :Custom.CustomReserved15;
-    customReserved16 @142 :Custom.CustomReserved16;
-    customReserved17 @143 :Custom.CustomReserved17;
-    customReserved18 @144 :Custom.CustomReserved18;
-    customReserved19 @145 :Custom.CustomReserved19;
+    starpilotRadarState @114 :Custom.StarPilotRadarState;
+    starpilotSelfdriveState @115 :Custom.StarPilotSelfdriveState;
+    slcState @116 :Custom.SlcState;
+    spotMonitorState @136 :Custom.SpotMonitorState;
+    starpilotLateralState @137 :Custom.StarPilotLateralState;
+    slcAction @138 :Custom.SlcAction;
+    slcCruiseEvent @139 :Custom.SlcCruiseEvent;
+    slcDashboardObservation @140 :Custom.SlcDashboardObservation;
+    slcCruiseCommand @141 :Custom.SlcCruiseCommand;
+    aolAxisState @142 :Custom.AolAxisState;
+    mapdExtendedOut @143 :Custom.MapdExtendedOut;
+    mapdIn @144 :Custom.MapdIn;
+    mapdOut @145 :Custom.MapdOut;
 
     # *********** legacy + deprecated ***********
     model @9 :Deprecated.ModelData; # TODO: rename modelV2 and mark this as deprecated

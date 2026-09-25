@@ -3,12 +3,11 @@ import numpy as np
 
 from openpilot.common.test import OpenpilotTestCase
 from openpilot.cereal import messaging
+from opendbc.car.structs import car
 from openpilot.selfdrive.locationd.paramsd import retrieve_initial_vehicle_params
 from openpilot.selfdrive.locationd.models.car_kf import CarKalman
-from openpilot.selfdrive.locationd.test.test_locationd_scenarios import TEST_ROUTE
-from openpilot.selfdrive.test.process_replay.migration import migrate, migrate_carParams
 from openpilot.common.params import Params
-from openpilot.tools.lib.logreader import LogReader
+from openpilot.starpilot.schema_cache import put_cache
 
 
 def get_random_vehicle_parameters(CP):
@@ -21,15 +20,25 @@ def get_random_vehicle_parameters(CP):
 
 
 class TestParamsd(OpenpilotTestCase):
+  def test_unqualified_saved_params_are_not_loaded(self):
+    params = Params()
+    CP = car.CarParams.new_message(carFingerprint="cache-test-car", steerRatio=15.0)
+    msg = get_random_vehicle_parameters(CP)
+    raw = msg.to_bytes()
+    params.put("LiveParametersV2", raw, block=True)
+    put_cache(params, "CarParamsPrevRoute", CP, block=True)
+
+    self.assertEqual(retrieve_initial_vehicle_params(params, CP, replay=True, debug=True), (CP.steerRatio, 1.0, 0.0, None))
+    self.assertEqual(params.get("LiveParametersV2"), raw)
+
   def test_read_saved_params(self):
     params = Params()
 
-    lr = migrate(LogReader(TEST_ROUTE), [migrate_carParams])
-    CP = next(m for m in lr if m.which() == "carParams").carParams
+    CP = car.CarParams.new_message(carFingerprint="cache-test-car", steerRatio=15.0)
 
     msg = get_random_vehicle_parameters(CP)
-    params.put("LiveParametersV2", msg.to_bytes(), block=True)
-    params.put("CarParamsPrevRoute", CP.as_builder().to_bytes(), block=True)
+    put_cache(params, "LiveParametersV2", msg, block=True)
+    put_cache(params, "CarParamsPrevRoute", CP, block=True)
 
     sr, sf, offset, p_init = retrieve_initial_vehicle_params(params, CP, replay=True, debug=True)
     np.testing.assert_allclose(sr, msg.vehicleParameters.steerRatio)

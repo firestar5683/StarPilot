@@ -19,6 +19,7 @@ class Service:
 
 
 _services: dict[str, tuple] = {
+  "starpilotNavigation": (True, 1., 1),
   # service: (should_log, frequency, qlog decimation (optional))
   # note: the "EncodeIdx" packets will still be in the log
   "gyroscope": (True, 104., 104),
@@ -30,27 +31,52 @@ _services: dict[str, tuple] = {
   "touch": (True, 20., 1),
   "can": (True, 100., 2053, QueueSize.BIG),  # decimation gives ~3 msgs in a full segment
   "controlsState": (True, 100., 10, QueueSize.MEDIUM),
+  "starpilotLateralState": (True, 100., 10),
   "selfdriveState": (True, 100., 10),
+  "starpilotSelfdriveState": (True, 100., 10),
   "pandaStates": (True, 10., 1),
   "peripheralState": (True, 2., 1),
   "radarState": (True, 20., 5),
+  "starpilotRadarState": (True, 20., 5),
+  # Sparse, gated camera observations; freshness is qualified from payload
+  # clocks, never inferred from a nominal service frequency.
+  "spotMonitorState": (True, 0., 1),
   "narrowRoadEncodeIdx": (False, 20., 1),
   "radarTracks": (True, 20.),
   "sendcan": (True, 100., 139, QueueSize.MEDIUM),
   "logMessage": (True, 0., None, QueueSize.BIG),
+  # Recorder-only transport carrying Event.logMessage, retained in qlog.
+  "modelIdentity": (True, 0.2, 1),
   "errorLogMessage": (True, 0., 1, QueueSize.BIG),
   "extrinsicsCalibration": (True, 4., 4),
   "lateralTorqueParameters": (True, 4., 1),
+  "autoSteeringLearning": (True, 4., 1),
   "lateralDelay": (True, 4., 1),
   "operatingSystemLog": (True, 0.),
   "carState": (True, 100., 10),
   "carControl": (True, 100., 10),
   "carOutput": (True, 100., 10),
   "longitudinalPlan": (True, 20., 10),
+  "starpilotLongitudinalPlan": (True, 20., 10),
+  "slcState": (True, 20., 10),
+  "customReserved6": (False, 20., 10),  # Historical starpilotPlan, replay only.
+  "slcAction": (True, 0., 1),
+  "slcCruiseEvent": (True, 0., 1),
+  "slcDashboardObservation": (True, 100., 10),
+  "slcVisionObservation": (True, 6., 6),
+  "slcCruiseCommand": (True, 20., 1),
+  "aolAxisState": (True, 100., 10),
+  "aolSafetyWire": (True, 10., 10),
+  "aolIntentWire": (True, 100., 10),
+  "laneChangeAssistWire": (True, 20., 10),
+  "mapdOut": (True, 20., 10),
+  "mapdExtendedOut": (True, 1., 1),
+  "mapdIn": (True, 1., 1),
   "lateralManeuverPlan": (True, 20.),
   "driverAssistance": (True, 20., 20),
   "procLog": (True, 0.5, 15, QueueSize.BIG),
   "gpsLocationExternal": (True, 10., 10),
+  "starpilotCarState": (True, 0., 1),
   "gpsLocation": (True, 1., 1),
   "ubloxGnss": (True, 10.),
   "qcomGnss": (True, 2.),
@@ -92,7 +118,6 @@ _services: dict[str, tuple] = {
   "livestreamWideRoadEncodeData": (False, 20., None, QueueSize.MEDIUM),
   "livestreamNarrowRoadEncodeData": (False, 20., None, QueueSize.MEDIUM),
   "livestreamCabinEncodeData": (False, 20., None, QueueSize.MEDIUM),
-  "customReservedRawData0": (True, 0.),
 }
 SERVICE_LIST = {name: Service(*vals) for
                 idx, (name, vals) in enumerate(_services.items())}

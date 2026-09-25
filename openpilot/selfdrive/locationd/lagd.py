@@ -11,6 +11,7 @@ from opendbc.car.structs import car
 from openpilot.cereal.services import SERVICE_LIST
 from openpilot.common.constants import CV
 from openpilot.common.params import Params
+from openpilot.starpilot.schema_cache import get_cache, prewarm_cache_contracts, put_cache
 from openpilot.common.realtime import config_realtime_process
 from openpilot.common.swaglog import cloudlog
 from openpilot.selfdrive.locationd.helpers import PoseCalibrator, Pose, fft_next_good_size, parabolic_peak_interp
@@ -362,10 +363,10 @@ class LateralLagEstimator:
 
 
 def retrieve_initial_lag(params: Params, CP: car.CarParams):
-  last_lag_data = params.get("LiveDelay")
-  last_carparams_data = params.get("CarParamsPrevRoute")
+  last_lag_data = get_cache(params, "LiveDelay")
+  last_carparams_data = get_cache(params, "CarParamsPrevRoute")
 
-  if last_lag_data is not None:
+  if last_lag_data is not None and last_carparams_data is not None:
     try:
       with log.Event.from_bytes(last_lag_data) as last_lag_msg, car.CarParams.from_bytes(last_carparams_data) as last_CP:
         ld = last_lag_msg.lateralDelay
@@ -385,6 +386,7 @@ def retrieve_initial_lag(params: Params, CP: car.CarParams):
 
 
 def main():
+  prewarm_cache_contracts()
   config_realtime_process([0, 1, 2, 3], 5)
 
   DEBUG = bool(int(os.getenv("DEBUG", "0")))
@@ -417,4 +419,4 @@ def main():
       pm.send('lateralDelay', lag_msg_dat)
 
       if sm.frame % 1200 == 0: # cache every 60 seconds
-        params.put("LiveDelay", lag_msg_dat)
+        put_cache(params, "LiveDelay", lag_msg)

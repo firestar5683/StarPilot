@@ -1,6 +1,8 @@
 # Process replay
 
-Process replay is a regression test designed to identify any changes in the output of a process. This test replays a segment through individual processes and compares the output to a known good replay. Each make is represented in the test with a segment.
+Process replay is a regression test designed to identify any changes in the output of a process. This test replays available segments through individual processes and compares the output to a known good replay.
+
+All 16 currently selected recording inputs remain required in a full run. Volvo C1/V40 has no available recording. This exact platform is reported as an unrecorded gap in `coverage.json` and the GitHub job summary; it is not a passing replay. The interfaces job requires its existing host tests, and both native safety jobs require its existing C1 safety tests. New unrecorded brands, changed active Volvo platform scope, missing required test suites, and a newly available Volvo recording require coverage review and fail input accounting. Source/native tests and recorded replay outcomes remain separate evidence; neither this inventory nor the missing-input classification qualifies the fleet.
 
 If the test fails, make sure that you didn't unintentionally change anything. If there are intentional changes, the reference logs will be updated.
 
@@ -43,7 +45,7 @@ To generate new logs:
 
 `./test_processes.py`
 
-Then, check in the new logs using git-lfs. Make sure to also update the `ref_commit` file to the current commit.
+Then, check in the new logs through the external test-data catalog. Make sure to also update the `ref_commit` file to the current commit.
 
 ## API
 
@@ -85,18 +87,49 @@ Supported processes:
 * modeld
 * dmonitoringmodeld
 
-Certain processes may require an initial state, which is usually supplied within `Params` and persists from segment to segment (for example `CalibrationParams` or the learner cache keys like `LiveParametersV2`). The `custom_params` is a dictionary used to prepopulate `Params` with arbitrary values. The `get_custom_params_from_lr` helper is provided to fetch meaningful values from log files.
+Certain processes require saved initial state in `Params`, such as `CalibrationParams`
+or `LiveParametersV2`. Managed schema caches in `custom_params` must contain verified
+envelopes created by `openpilot.starpilot.schema_cache.put_cache` from current-schema
+messages whose origin is known. Synthetic current-schema fixtures can use this path.
 
-```py
-from openpilot.selfdrive.test.process_replay import get_custom_params_from_lr
+Historical logs require source schema provenance and an explicit schema-specific
+conversion before their values can seed these caches. Reading old bytes through the
+current schema does not establish compatibility. `get_custom_params_from_lr` now
+refuses this operation, and automatic firmware `CarParamsCache` seeding also refuses
+unless a verified envelope was supplied. Configuration is checked before Params
+writes. An explicit current vehicle fingerprint can avoid firmware-cache seeding,
+but does not qualify the remaining logged messages.
 
-previous_segment_lr = LogReader(...)
-current_segment_lr = LogReader(...)
+The checked-in replay recording catalog supplies a separate, reviewed firmware
+cache adapter. It pins each input and its independently published card reference,
+decodes the reference with its producing source schemas, checks firmware/VIN
+identity against the recording, and converts the reference CarParams into a
+verified current envelope. The current vehicle factory still recomputes control
+and safety settings. This adapter does not alter expected outputs or authorize
+implicit cache conversion for other historical recordings. Input, reference or
+schema changes require a new review; do not regenerate expected outputs to hide
+differences.
 
-custom_params = get_custom_params_from_lr(previous_segment_lr, 'last')
+Default `ref_commit` and unlisted expected logs use the immutable official artifact
+revision. Fourteen exact segment/process pairs use reviewed StarPilot references in
+`refs/starpilot`, preserving intentional controller and capability changes. Their
+manifest pins inputs, comparison configurations, producing source snapshots and
+both official and reviewed output hashes. Every original comparison remains active;
+an arbitrary local output cannot override a default expectation. Deliberate alternate
+`ref_commit` and `--update-refs` retain their local reference behavior.
 
-output_logs = replay_process_with_name('calibrationd', lr, custom_params=custom_params)
-```
+The EV6 and Bolt EUV control references include the default Turn Assist behavior;
+explicit `TurnAssist=False` independently restores every prior compared field.
+The legacy Corolla recording contains no native axis or safety acknowledgement,
+so its control reference requires both axes disabled and zero torque and acceleration
+even when stock enable is true. Actual Controls and native Toyota safety regressions
+verify fresh grants and missing acknowledgement denial. The four reference updates
+record the prior output hash, exact difference fields and counts, regression source
+hashes, and committed producing sources in the manifest. These records document the
+reviewed changes; they do not exclude any field from replay comparison.
+
+Use `--output DIRECTORY` to place coverage, new logs and both diff reports outside
+the source tree. The predeploy runner supplies its results directory automatically.
 
 Replaying processes that use VisionIPC (e.g. modeld, dmonitoringmodeld) require additional `frs` dictionary with camera states as keys and `FrameReader` objects as values.
 
