@@ -33,6 +33,7 @@ from typing import Any
 from urllib.parse import parse_qs, urlencode, urlsplit
 
 from openpilot.tools.lib.api import CommaApi, UnauthorizedError
+from openpilot.starpilot.connect.provider import active_provider
 from openpilot.tools.lib.auth_config import set_token, get_token
 
 class ClientRedirectServer(ThreadingHTTPServer):
@@ -72,6 +73,8 @@ class ClientRedirectHandler(BaseHTTPRequestHandler):
 
 
 def auth_redirect_link(method, port):
+  if active_provider().name != 'comma':
+    raise ValueError('Browser OAuth client IDs belong to comma only')
   provider_id = {
     'google': 'g',
     'apple': 'a',
@@ -112,6 +115,12 @@ def auth_redirect_link(method, port):
 
 def login(method, timeout=180):
   """Sign in through a browser and save the token, returning a success/error status."""
+  selected = active_provider()
+  if selected.name == 'konik':
+    return {'error': 'Sign in at https://stable.konik.ai, open https://api.konik.ai/v2/user/token while signed in, ' +
+                     'then use auth.py jwt with your Konik token. comma OAuth credentials are not used.'}
+  if selected.name != 'comma':
+    return {'error': 'Cloud provider is unavailable. Repair its configuration before signing in.'}
   try:
     with ClientRedirectServer(('localhost', 0), ClientRedirectHandler) as server:
       url = auth_redirect_link(method, server.server_port)
@@ -129,12 +138,12 @@ def login(method, timeout=180):
           provider = {'google': 'g', 'apple': 'a', 'github': 'h'}[method]
           if len(params['code']) != 1 or not params['code'][0].strip() or params.get('provider') != [provider]:
             return {"error": "Invalid sign-in response. Please try again."}
-          response = CommaApi().post('v2/auth/', data={'code': params['code'], 'provider': params['provider']}, timeout=30)
+          response = CommaApi(provider_name=selected.name).post('v2/auth/', data={'code': params['code'], 'provider': params['provider']}, timeout=30)
           token = response.get('access_token')
           if not isinstance(token, str) or not token.strip():
             return {"error": "Sign-in did not return an access token. Please try again."}
-          CommaApi(token).get('v1/me', timeout=30)
-          set_token(token)
+          CommaApi(token, provider_name=selected.name).get('v1/me', timeout=30)
+          set_token(token, selected.name)
           return {"success": True}
         if browser.poll() not in (None, 0):
           return {"error": "Could not open your browser. Check your default browser and try again."}
@@ -144,7 +153,7 @@ def login(method, timeout=180):
 
 
 if __name__ == '__main__':
-  parser = argparse.ArgumentParser(description='Login to your comma account')
+  parser = argparse.ArgumentParser(description='Login to the active cloud provider')
   parser.add_argument('method', default='google', const='google', nargs='?', choices=['google', 'apple', 'github', 'jwt'])
   parser.add_argument('jwt', nargs='?')
   parser.add_argument('--json', action='store_true', help='Return browser sign-in status as JSON')
@@ -161,7 +170,13 @@ if __name__ == '__main__':
       print("method JWT selected, but no JWT was provided")
       exit(1)
 
-    set_token(args.jwt)
+    selected = active_provider()
+    try:
+      CommaApi(args.jwt, provider_name=selected.name).get('v1/me', timeout=30)
+      set_token(args.jwt, selected.name)
+    except Exception:
+      print('The token was not accepted by the active provider; saved credentials were unchanged.', file=sys.stderr)
+      sys.exit(1)
   else:
     result = login(args.method)
     if "error" in result:

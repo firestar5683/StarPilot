@@ -1,73 +1,33 @@
-# How to contribute
+# Contributing to StarPilot
 
-Our software is open source so you can solve your own problems without needing help from others. And if you solve a problem and are so kind, you can upstream it for the rest of the world to use. Check out our [post about externalization](https://blog.comma.ai/a-2020-theme-externalization/).
+Start with the [project overview](../README.md), [build guide](how-to/laptop-device-build.md), and [developer commands](../tools/STARPILOT_DEVELOPMENT.md).
 
-Development is coordinated through [Discord](https://discord.comma.ai) and GitHub.
+## Scope and behavior
 
-### Getting Started
+Keep each change focused on one feature or defect. Describe the behavior before and after the change, the affected vehicle configurations or interfaces, and how it was verified. Preserve intentional StarPilot behavior and familiar controls unless the change explicitly proposes a different experience.
 
-* Set up your [development environment](/tools/)
-* Join our [Discord](https://discord.comma.ai)
-* Docs are at https://docs.comma.ai and https://blog.comma.ai
+Prefer small integration points around upstream interfaces. Keep feature settings, state, and side effects with their owning feature. Shared code should express a real common contract, with regression coverage for the features that use it. Comments should explain an invariant, protocol requirement, or non-obvious decision.
 
-## What contributions are we looking for?
+## Interfaces and dependencies
 
-**openpilot's priorities are [safety](SAFETY.md), stability, quality, and features, in that order.**
-openpilot is part of comma's mission to *solve self-driving cars while delivering shippable intermediaries*, and all development is towards that goal.
+Follow cereal's [custom-fork guidance](../openpilot/cereal/README.md#custom-forks). Preserve upstream message definitions and field meanings; put fork-specific messaging in the custom schema. Vehicle support outside an upstream platform's contract needs a distinct platform identity and corresponding interface and safety evidence.
 
-### What gets merged?
+Dependencies are tracked source folders. Use the [vendoring workflow](../tools/vendor/README.md), retain provenance and licenses, and review local changes when updating an upstream revision.
 
-The probability of a pull request being merged is a function of its value to the project and the effort it will take us to get it merged.
-If a PR offers *some* value but will take lots of time to get merged, it will be closed.
-Simple, well-tested bug fixes are the easiest to merge, and new features are the hardest to get merged.
+## Verification
 
-All of these are examples of good PRs:
-* typo fix: https://github.com/commaai/openpilot/pull/30678
-* removing unused code: https://github.com/commaai/openpilot/pull/30573
-* simple car model port: https://github.com/commaai/openpilot/pull/30245
-* car brand port: https://github.com/commaai/openpilot/pull/23331
+Run checks appropriate to the change and describe the result in the pull request:
 
-### What doesn't get merged?
+- For a bug fix, demonstrate the failure and the corrected behavior.
+- For driving behavior, compare against the intended source behavior or recorded evidence and cover engagement, override, reset, and relevant limits.
+- For vehicle or safety changes, identify the exact configuration and run the affected interface and native safety checks.
+- For UI changes, inspect the affected interface at its actual size and preserve the intended interactions.
+- For performance changes, provide a reproducible comparison and distinguish a component benchmark from whole-system performance.
 
-* **style changes**: code is art, and it's up to the author to make it beautiful
-* **500+ line PRs**: clean it up, break it up into smaller PRs, or both
-* **PRs without a clear goal**: every PR must have a singular and clear goal
-* **UI design**: we do not have a good review process for this yet
-* **New features**: We believe openpilot is mostly feature-complete, and the rest is a matter of refinement and fixing bugs. As a result of this, most feature PRs will be immediately closed, however the beauty of open source is that forks can and do offer features that upstream openpilot doesn't.
-* **Negative expected value**: This is a class of PRs that makes an improvement, but the risk or validation costs more than the improvement. The risk can be mitigated by first getting a failing test merged.
+Keep automated tests, bench observations, and driving results separate. State what remains unverified rather than broadening a narrow result into a fleet-wide claim.
 
-### First contribution
+## Commit history
 
-[Projects / openpilot bounties](https://github.com/orgs/commaai/projects/26/views/1?pane=info) is the best place to get started and goes in-depth on what's expected when working on a bounty.
-There are a lot of bounties that don't require a comma four or a car.
+Use concise feature or behavior names. Keep related changes together, including their tests and documentation. Preserve ordinary follow-up commits so contributors can follow changes.
 
-## Pull Requests
-
-Pull requests should be against the master branch.
-
-A good pull request has all of the following:
-* a clearly stated purpose
-* every line changed directly contributes to the stated purpose
-* verification, i.e. how did you test your PR?
-* justification
-  * if you've optimized something, post benchmarks to prove it's better
-  * if you've improved your car's tuning, post before and after plots
-* passes the CI tests
-
-## Contributing without Code
-
-* Report bugs in GitHub issues.
-* Report driving issues in the `#driving-feedback` Discord channel.
-* Consider opting into cabin camera uploads to improve the driver monitoring model.
-* Connect your device to Wi-Fi regularly, so that we can pull data for training better driving models.
-* Run the `nightly` branch and report issues. This branch is like `master` but it's built just like a release.
-* Annotate images in the [comma10k dataset](https://github.com/commaai/comma10k).
-
-## Contributing Training Data
-
-### A guide for forks
-
-In order for your fork's data to be eligible for the training set:
-* **Your cereal messaging structs must be [compatible](../openpilot/cereal#custom-forks)**
-* **The definitions of all the stock messaging structs must not change**: Do not change how any of the fields are set, including everything from `selfdriveState.enabled` to `carState.steeringAngleDeg`. Instead, create your own structs and set them however you'd like.
-* **Do not include cars that are not supported in upstream platforms**: Instead, create new opendbc platforms for cars that you'd like to support outside of upstream, even if it's just a trim-level difference.
+The original [openpilot contribution guide](https://github.com/commaai/openpilot/blob/521db4c825d37eb5f29acf955daa88da003e4433/docs/CONTRIBUTING.md) documents upstream's process. Changes intended for comma's openpilot should follow that project's contribution requirements.

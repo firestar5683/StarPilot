@@ -1,120 +1,42 @@
-<div align="center" style="text-align: center;">
+# StarPilot
 
-<h1>openpilot</h1>
+StarPilot is an independent fork of [openpilot](https://github.com/commaai/openpilot), with custom driving controls, vehicle integrations, raylib interfaces for comma 3 and comma four, and the Galaxy companion interface.
 
-<p>
-  <b>openpilot is an operating system for robotics.</b>
-  <br>
-  Currently, it upgrades the driver assistance system in 300+ supported cars.
-</p>
+**Domathon is the development branch for StarPilot 7.0.** It rebuilds StarPilot on a current openpilot foundation. Feature migration and vehicle qualification are still in progress; this branch is not a completed replacement for the existing Dom release.
 
-<h3>
-  <a href="https://docs.comma.ai">Docs</a>
-  <span> · </span>
-  <a href="https://docs.comma.ai/contributing/roadmap/">Roadmap</a>
-  <span> · </span>
-  <a href="https://github.com/commaai/openpilot/blob/master/docs/CONTRIBUTING.md">Contribute</a>
-  <span> · </span>
-  <a href="https://discord.comma.ai">Community</a>
-  <span> · </span>
-  <a href="https://comma.ai/shop">Try it on a comma four</a>
-</h3>
+## Explore the project
 
-Quick start: `bash <(curl -fsSL openpilot.comma.ai)`
+- [Developer commands](tools/STARPILOT_DEVELOPMENT.md): host tools, replay, and device builds.
+- [Driving interfaces](openpilot/starpilot/ui/README.md) and [Galaxy](openpilot/starpilot/galaxy/README.md): native and companion controls.
+- [Driving models](openpilot/starpilot/models/README.md): model management, artifact compatibility, and Model Laboratory status.
+- [Builds and developer tools](docs/how-to/laptop-device-build.md): local development and device builds.
+- [Dependency maintenance](tools/vendor/README.md): tracked source folders and upstream sync records.
 
-[![openpilot tests](https://github.com/commaai/openpilot/actions/workflows/tests.yaml/badge.svg)](https://github.com/commaai/openpilot/actions/workflows/tests.yaml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
-[![X Follow](https://img.shields.io/twitter/follow/comma_ai)](https://x.com/comma_ai)
-[![Discord](https://img.shields.io/discord/469524606043160576)](https://discord.comma.ai)
+## Development
 
-</div>
+Dependencies are included as ordinary source folders. No recursive submodule checkout is needed. [upstream-sync.json](upstream-sync.json) records the openpilot baseline and the source revisions used for vendored dependencies.
 
-<table>
-  <tr>
-    <td><a href="https://youtu.be/NmBfgOanCyk" title="Video By Greer Viau"><img src="https://github.com/commaai/openpilot/assets/8762862/2f7112ae-f748-4f39-b617-fabd689c3772"></a></td>
-    <td><a href="https://youtu.be/VHKyqZ7t8Gw" title="Video By Logan LeGrand"><img src="https://github.com/commaai/openpilot/assets/8762862/92351544-2833-40d7-9e0b-7ef7ae37ec4c"></a></td>
-    <td><a href="https://youtu.be/SUIZYzxtMQs" title="A drive to Taco Bell"><img src="https://github.com/commaai/openpilot/assets/8762862/05ceefc5-2628-439c-a9b2-89ce77dc6f63"></a></td>
-  </tr>
-</table>
+The familiar development entry points are retained:
 
+| Command | Purpose |
+| --- | --- |
+| `./build` | Build the device software using the matching AGNOS environment |
+| `./build --panda` | Build the supported Panda firmware targets |
+| `./c3` | Open the comma 3 interface on a development host |
+| `./c4` | Open the comma four interface on a development host |
+| `./onroad` | Open the onroad development view |
+| `./dev` | Use the isolated host development environment |
 
-Using openpilot in a car
-------
+See the [build guide](docs/how-to/laptop-device-build.md) for setup, prerequisites, and target-specific behavior. The [UI guide](openpilot/starpilot/ui/README.md) describes desktop previews and their limits.
 
-To use openpilot in a car, you need four things:
-1. **Supported Device:** a comma four, available at [comma.ai/shop/comma-four](https://www.comma.ai/shop/comma-four).
-2. **Software:** The setup procedure for the comma four allows users to enter a URL for custom software. Use the URL `openpilot.comma.ai` to install the release version.
-3. **Supported Car:** Ensure that you have one of [the 300+ supported cars](docs/CARS.md).
-4. **Car Harness:** You will also need a [car harness](https://comma.ai/shop/car-harness) to connect your comma four to your car.
+## Testing and vehicle support
 
-We have detailed instructions for [how to install the harness and device in a car](https://comma.ai/setup). Note that it's possible to run openpilot on [other hardware](https://blog.comma.ai/self-driving-car-for-free/), although it's not plug-and-play.
+StarPilot retains upstream vehicle and Panda safety interfaces and adds regression coverage for its custom behavior. The [safety workflow](.github/workflows/safety.yaml) and feature tests cover distinct parts of the system. A passing interface test, model comparison, or bench run does not establish driving support for every configuration.
 
+Support depends on the vehicle configuration and enabled feature. An existing vehicle identifier or settings page does not by itself establish driving support. Model Laboratory currently exposes management controls, but paired driving inference remains unavailable pending integration and Chestnut validation.
 
-### Branches
+## Upstream and attribution
 
-Running `master` and other branches directly is supported, but it's recommended to run one of the following prebuilt branches:
+The current openpilot baseline is [`78dccf0b482ea1298fd1f6fa59b0554187b02ce6`](https://github.com/commaai/openpilot/commit/78dccf0b482ea1298fd1f6fa59b0554187b02ce6). Its history remains intact, followed by the StarPilot foundation and feature commits. Upstream development continues independently; the baseline changes only after an update has been integrated and checked.
 
-| comma four branch      | comma 3X branch        | URL                                    | description                                                                         |
-|------------------------|------------------------|----------------------------------------|-------------------------------------------------------------------------------------|
-| `release-mici`         | `release-tizi`         | openpilot.comma.ai                     | This is openpilot's release branch.                                                 |
-| `release-mici-staging` | `release-tizi-staging` | openpilot-test.comma.ai                | This is the staging branch for releases. Use it to get new releases slightly early. |
-| `nightly`              | `nightly`              | openpilot-nightly.comma.ai             | This is the bleeding edge development branch. Do not expect this to be stable.      |
-| `nightly-dev`          | `nightly-dev`          | installer.comma.ai/commaai/nightly-dev | Same as nightly, but includes experimental development features for some cars.      |
-
-For [chestnut](https://comma.ai/shop/chestnut), use the following installer URLs:
-
-| branch                       | URL                                                        | description                                                                         |
-|------------------------------|------------------------------------------------------------|-------------------------------------------------------------------------------------|
-| `release-chestnut`           | installer.comma.ai/commaai/release-chestnut                | This is openpilot's release branch.                                                 |
-| `release-chestnut-staging`   | installer.comma.ai/commaai/release-chestnut-staging        | This is the staging branch for releases. Use it to get new releases slightly early. |
-| `nightly-chestnut`           | installer.comma.ai/commaai/nightly-chestnut                | This is the bleeding edge development branch. Do not expect this to be stable.      |
-| `nightly-chestnut-dev`       | installer.comma.ai/commaai/nightly-chestnut-dev            | Same as nightly, but includes experimental development features for some cars.      |
-
-To start developing openpilot
-------
-
-openpilot is developed by [comma](https://comma.ai/) and by users like you. We welcome both pull requests and issues on [GitHub](http://github.com/commaai/openpilot).
-
-* Join the [community Discord](https://discord.comma.ai)
-* Check out [the contributing docs](docs/CONTRIBUTING.md)
-* Check out the [openpilot tools](openpilot/tools/)
-* Code documentation lives at https://docs.comma.ai
-* Information about running openpilot lives on the [community wiki](https://github.com/commaai/openpilot/wiki)
-
-Want to get paid to work on openpilot? [comma is hiring](https://comma.ai/jobs#open-positions) and offers lots of [bounties](https://comma.ai/bounties) for external contributors.
-
-Safety and Testing
-----
-
-* openpilot observes [ISO26262](https://en.wikipedia.org/wiki/ISO_26262) guidelines, see [SAFETY.md](docs/SAFETY.md) for more details.
-* openpilot has software-in-the-loop [tests](.github/workflows/tests.yaml) that run on every commit.
-* The code enforcing the safety model lives in panda and is written in C, see [code rigor](https://github.com/commaai/panda#code-rigor) for more details.
-* panda has software-in-the-loop [safety tests](https://github.com/commaai/panda/tree/master/tests/safety).
-* Internally, we have a hardware-in-the-loop Jenkins test suite that builds and unit tests the various processes.
-* panda has additional hardware-in-the-loop [tests](https://github.com/commaai/panda/blob/master/Jenkinsfile).
-* We run the latest openpilot in a testing closet containing 10 comma devices continuously replaying routes.
-
-<details>
-<summary>MIT Licensed</summary>
-
-openpilot is released under the MIT license. Some parts of the software are released under other licenses as specified.
-
-Any user of this software shall indemnify and hold harmless Comma.ai, Inc. and its directors, officers, employees, agents, stockholders, affiliates, subcontractors and customers from and against all allegations, claims, actions, suits, demands, damages, liabilities, obligations, losses, settlements, judgments, costs and expenses (including without limitation attorneys’ fees and costs) which arise out of, relate to or result from any use of this software by user.
-
-**THIS IS ALPHA QUALITY SOFTWARE FOR RESEARCH PURPOSES ONLY. THIS IS NOT A PRODUCT.
-YOU ARE RESPONSIBLE FOR COMPLYING WITH LOCAL LAWS AND REGULATIONS.
-NO WARRANTY EXPRESSED OR IMPLIED.**
-</details>
-
-<details>
-<summary>User Data and comma Account</summary>
-
-By default, openpilot uploads driving data to our servers. You can also access your data through [comma connect](https://connect.comma.ai/). We use your data to train better models and improve openpilot for everyone.
-
-openpilot is open source software, and users can disable data collection if they wish.
-
-openpilot logs the road-facing cameras, CAN, GPS, IMU, magnetometer, thermal sensors, crashes, and operating system logs.
-The driver-facing camera and microphone are only logged if you explicitly opt-in in settings.
-
-By using openpilot, you agree to [our Privacy Policy](https://comma.ai/privacy). You understand that use of this software or its related services will generate certain types of user data, which may be logged and stored at the sole discretion of comma. By accepting this agreement, you grant an irrevocable, perpetual, worldwide right to comma for the use of this data.
-</details>
+See [LICENSE](LICENSE), [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md), and [CREDITS.md](CREDITS.md) for licensing and source attribution. Component licenses remain with their source folders. StarPilot is maintained independently of comma.

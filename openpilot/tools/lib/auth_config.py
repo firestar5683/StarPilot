@@ -1,30 +1,55 @@
+"""Tools credentials are isolated by the active cloud provider."""
 import json
 import os
+
 from openpilot.common.hardware.hw import Paths
 from openpilot.common.utils import atomic_write
+from openpilot.starpilot.connect.provider import active_provider, PROVIDERS
 
 
 class MissingAuthConfigError(Exception):
   pass
 
 
-def get_token():
+def _provider(provider_name=None):
+  name = active_provider().name
+  if name not in PROVIDERS or provider_name not in (None, name):
+    raise MissingAuthConfigError('Cloud provider is unavailable or changed')
+  return name
+
+
+def auth_path(provider_name=None):
+  name = _provider(provider_name)
+  return os.path.join(Paths.config_root(), 'auth.json' if name == 'comma' else 'auth-konik.json')
+
+
+def get_token(provider_name=None):
   try:
-    with open(os.path.join(Paths.config_root(), 'auth.json')) as f:
-      auth = json.load(f)
-      return auth['access_token']
-  except Exception:
+    name = _provider(provider_name)
+    with open(auth_path(name)) as stream:
+      auth = json.load(stream)
+    # Historical untagged credentials belong only to comma.
+    if not isinstance(auth, dict) or auth.get('provider', 'comma') != name:
+      return None
+    token = auth.get('access_token')
+    return token if isinstance(token, str) and token.strip() else None
+  except (OSError, ValueError, TypeError, MissingAuthConfigError):
     return None
 
 
-def set_token(token):
+def set_token(token, provider_name=None):
+  name = _provider(provider_name)
+  if not isinstance(token, str) or not token.strip():
+    raise ValueError('A nonempty provider token is required')
   os.makedirs(Paths.config_root(), exist_ok=True)
-  with atomic_write(os.path.join(Paths.config_root(), 'auth.json'), overwrite=True) as f:
-    json.dump({'access_token': token}, f)
+  with atomic_write(auth_path(name), overwrite=True) as stream:
+    if _provider(name) != name:
+      raise MissingAuthConfigError('Cloud provider changed')
+    json.dump({'provider': name, 'access_token': token}, stream)
 
 
-def clear_token():
+def clear_token(provider_name=None):
   try:
-    os.unlink(os.path.join(Paths.config_root(), 'auth.json'))
+    os.unlink(auth_path(provider_name))
   except FileNotFoundError:
     pass
