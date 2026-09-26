@@ -147,6 +147,12 @@ class CarState(CarStateBase):
 
     fp_ret = custom.StarPilotCarState.new_message()
 
+    # With the gateway harness, the camera-side bus carries the radar's own ACC messages untouched
+    # (openpilot longitudinal replaces ACC_02/ACC_07 on the gateway side only)
+    if self.CP.networkLocation == NetworkLocation.gateway:
+      fp_ret.stockAccLeadIndex = int(cam_cp.vl["ACC_02"]["ACC_Abstandsindex"])
+      fp_ret.stockAccFollowAccel = cam_cp.vl["ACC_07"]["ACC_Folgebeschl"]
+
     return ret, fp_ret
 
   def update_meb(self, pt_cp, cam_cp, ext_cp) -> structs.CarState:
@@ -435,6 +441,10 @@ class CarState(CarStateBase):
     if CP.flags & VolkswagenFlags.STOCK_HCA_PRESENT:
       cam_messages += [
         ("HCA_01", 1),  # From R242 Driver assistance camera, 50Hz if steering/1Hz if not
+      ]
+    if not CP.flags & VolkswagenFlags.MLB and CP.networkLocation == NetworkLocation.gateway:
+      cam_messages += [
+        ("ACC_07", 0),  # From J428 ACC radar, logging only: optional so it can never cause a CAN error
       ]
 
     return {

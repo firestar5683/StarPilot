@@ -110,6 +110,8 @@ struct StarPilotCarState @0xf35cc4560bbf6ec2 {
   accelHardCruise @28 :Bool;  # current/releasing accel cruise button came from GM hard-press signal
   decelHardCruise @29 :Bool;  # current/releasing decel cruise button came from GM hard-press signal
   pulseAndGlide @30 :Bool;  # developer-only wheel-button pulse-and-glide mode is enabled
+  stockAccLeadIndex @31 :UInt16;  # VW MQB gateway: radar's own ACC_02.ACC_Abstandsindex, 0 = no radar target
+  stockAccFollowAccel @32 :Float32;  # VW MQB gateway: radar's own ACC_07.ACC_Folgebeschl (m/s^2, 3.02 = inactive)
 }
 
 struct StarPilotDeviceState @0xda96579883444c35 {
