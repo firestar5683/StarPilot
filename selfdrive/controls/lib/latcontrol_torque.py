@@ -272,8 +272,8 @@ class LatControlTorque(LatControl):
       desired_lateral_jerk = np.clip(self.jerk_filter.update(raw_lateral_jerk), -lateral_jerk_limit, lateral_jerk_limit)
       gravity_adjusted_future_lateral_accel = future_desired_lateral_accel - roll_compensation
       setpoint = expected_lateral_accel + desired_lateral_jerk * lat_delay
-      desired_lateral_accel_rate = (setpoint - self.prev_desired_lateral_accel) / self.dt
-      unwind_detected = (desired_lateral_accel_rate < UNWIND_D_DES_THRESHOLD and
+      desired_lateral_accel_magnitude_rate = (abs(setpoint) - abs(self.prev_desired_lateral_accel)) / self.dt
+      unwind_detected = (desired_lateral_accel_magnitude_rate < UNWIND_D_DES_THRESHOLD and
                          abs(setpoint) < UNWIND_LAT_ACCEL_NEAR_ZERO)
       self.prev_desired_lateral_accel = setpoint
 
