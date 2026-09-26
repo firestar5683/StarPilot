@@ -101,7 +101,7 @@ def test_ui_language_selector_uses_shared_device_language_setting():
   selector = _read("js/components/LanguageSelector.js")
   settings = _read("js/views/Settings.js")
 
-  for code in ["en", "es", "fr", "ko", "zh-CHS"]:
+  for code in ["en", "es", "fr", "ko", "zh-CHS", "vi"]:
     assert f'value: "{code}"' in i18n
   assert "localStorage" in i18n
   assert "LanguageSetting" in selector

@@ -8,6 +8,7 @@ export const LANGUAGE_OPTIONS = [
   { value: "fr", label: "French" },
   { value: "ko", label: "Korean" },
   { value: "zh-CHS", label: "Chinese" },
+  { value: "vi", label: "Vietnamese" },
 ]
 
 const SUPPORTED_CODES = new Set(LANGUAGE_OPTIONS.map((option) => option.value))
@@ -16,7 +17,7 @@ const SUPPORTED_CODES = new Set(LANGUAGE_OPTIONS.map((option) => option.value))
 // labels ship safely before they have been added to every translation below.
 const TRANSLATIONS = {
   es: {
-    English: "Inglés", Spanish: "Español", French: "Francés", Korean: "Coreano", Chinese: "Chino",
+    English: "Inglés", Spanish: "Español", French: "Francés", Korean: "Coreano", Chinese: "Chino", Vietnamese: "Vietnamita",
     Home: "Inicio", Toggles: "Interruptores", Tools: "Herramientas", Recordings: "Grabaciones",
     Bluetooth: "Bluetooth", "Cameras & Monitoring": "Cámaras y monitoreo", Galaxy: "Galaxy",
     "Logs & Diagnostics": "Registros y diagnósticos", "Model Manager": "Administrador de modelos",
@@ -38,7 +39,7 @@ const TRANSLATIONS = {
     "Working...": "Procesando...", Run: "Ejecutar", Manage: "Administrar", Close: "Cerrar", Stock: "Original",
   },
   fr: {
-    English: "Anglais", Spanish: "Espagnol", French: "Français", Korean: "Coréen", Chinese: "Chinois",
+    English: "Anglais", Spanish: "Espagnol", French: "Français", Korean: "Coréen", Chinese: "Chinois", Vietnamese: "Vietnamien",
     Home: "Accueil", Toggles: "Options", Tools: "Outils", Recordings: "Enregistrements",
     Bluetooth: "Bluetooth", "Cameras & Monitoring": "Caméras et surveillance", Galaxy: "Galaxy",
     "Logs & Diagnostics": "Journaux et diagnostics", "Model Manager": "Gestionnaire de modèles",
@@ -60,7 +61,7 @@ const TRANSLATIONS = {
     "Working...": "En cours...", Run: "Exécuter", Manage: "Gérer", Close: "Fermer", Stock: "Origine",
   },
   ko: {
-    English: "영어", Spanish: "스페인어", French: "프랑스어", Korean: "한국어", Chinese: "중국어",
+    English: "영어", Spanish: "스페인어", French: "프랑스어", Korean: "한국어", Chinese: "중국어", Vietnamese: "베트남어",
     Home: "홈", Toggles: "토글", Tools: "도구", Recordings: "녹화",
     Bluetooth: "블루투스", "Cameras & Monitoring": "카메라 및 모니터링", Galaxy: "Galaxy",
     "Logs & Diagnostics": "로그 및 진단", "Model Manager": "모델 관리자",
@@ -82,7 +83,7 @@ const TRANSLATIONS = {
     "Working...": "처리 중...", Run: "실행", Manage: "관리", Close: "닫기", Stock: "기본",
   },
   "zh-CHS": {
-    English: "英语", Spanish: "西班牙语", French: "法语", Korean: "韩语", Chinese: "中文",
+    English: "英语", Spanish: "西班牙语", French: "法语", Korean: "韩语", Chinese: "中文", Vietnamese: "越南语",
     Home: "主页", Toggles: "开关", Tools: "工具", Recordings: "录制内容",
     Bluetooth: "蓝牙", "Cameras & Monitoring": "摄像头和监控", Galaxy: "Galaxy",
     "Logs & Diagnostics": "日志和诊断", "Model Manager": "模型管理器",
@@ -102,6 +103,28 @@ const TRANSLATIONS = {
     "This setting can only be changed while parked.": "此设置只能在车辆停放时更改。",
     Default: "默认值", "Loading...": "加载中...", "No options available": "没有可用选项",
     "Working...": "处理中...", Run: "运行", Manage: "管理", Close: "关闭", Stock: "原厂",
+  },
+  vi: {
+    English: "Tiếng Anh", Spanish: "Tiếng Tây Ban Nha", French: "Tiếng Pháp", Korean: "Tiếng Hàn", Chinese: "Tiếng Trung", Vietnamese: "Tiếng Việt",
+    Home: "Trang chủ", Toggles: "Tùy chọn", Tools: "Công cụ", Recordings: "Bản ghi",
+    Bluetooth: "Bluetooth", "Cameras & Monitoring": "Camera & giám sát", Galaxy: "Galaxy",
+    "Logs & Diagnostics": "Nhật ký & chẩn đoán", "Model Manager": "Quản lý mô hình",
+    "Navigation & Maps": "Điều hướng & bản đồ", "System Tools": "Công cụ hệ thống",
+    "Model Laboratory": "Phòng thử nghiệm mô hình", Plots: "Biểu đồ", "Testing Ground": "Khu vực thử nghiệm",
+    "Theme Maker": "Tạo giao diện", "Tuning, Plots & Testing": "Tinh chỉnh, biểu đồ & thử nghiệm",
+    "Vehicle Controls": "Điều khiển xe", Main: "Chính", Offline: "Ngoại tuyến", Parked: "Đang đỗ",
+    Back: "Quay lại", Menu: "Menu", "Galaxy home": "Trang chủ Galaxy", "Search toggles...": "Tìm tùy chọn...",
+    "Search toggles": "Tìm tùy chọn", "Clear search": "Xóa tìm kiếm", "Dark mode": "Chế độ tối",
+    "Light mode": "Chế độ sáng", "Switch to dark mode": "Chuyển sang chế độ tối", "Switch to light mode": "Chuyển sang chế độ sáng",
+    Settings: "Cài đặt", Language: "Ngôn ngữ", "Select language": "Chọn ngôn ngữ", Advanced: "Nâng cao",
+    "result(s)": "kết quả",
+    "Galaxy uses English when no language is selected.": "Galaxy sẽ dùng tiếng Anh nếu chưa chọn ngôn ngữ.",
+    "Language updated.": "Đã cập nhật ngôn ngữ.", "Unable to save language.": "Không thể lưu ngôn ngữ.",
+    "Loading configuration...": "Đang tải cấu hình...", "No settings available.": "Không có cài đặt nào.",
+    "No settings in this section.": "Không có cài đặt nào trong mục này.", "Locked:": "Đã khóa:", "Step:": "Bước:",
+    "This setting can only be changed while parked.": "Chỉ có thể thay đổi cài đặt này khi xe đang đỗ.",
+    Default: "Mặc định", "Loading...": "Đang tải...", "No options available": "Không có tùy chọn nào",
+    "Working...": "Đang xử lý...", Run: "Chạy", Manage: "Quản lý", Close: "Đóng", Stock: "Theo xe",
   },
 }
 
@@ -164,6 +187,20 @@ const MORE_TRANSLATIONS = {
     "Enable V-ASM": "启用 V-ASM",
     Routes: "路线", Route: "路线", Selected: "已选择", Recommended: "推荐", Alternative: "备选", Select: "选择", "Choose a route": "选择路线",
   },
+  vi: {
+    Favorites: "Yêu thích", "Lateral (Steering)": "Điều khiển ngang (đánh lái)",
+    "Longitudinal (Speed & Following)": "Điều khiển dọc (tốc độ & khoảng cách)",
+    "Vision Speed Limits": "Nhận diện giới hạn tốc độ bằng camera", "Visual (Display & UI)": "Hiển thị & giao diện",
+    "Sounds & Alerts": "Âm thanh & cảnh báo", Vehicle: "Xe", "Wheel Controls": "Nút điều khiển trên vô lăng",
+    "Device & Data": "Thiết bị & dữ liệu", Developer: "Nhà phát triển", "Advanced Lateral Tuning": "Tinh chỉnh điều khiển ngang nâng cao",
+    "Advanced steering control changes to fine-tune how openpilot drives.": "Các tùy chỉnh nâng cao về điều khiển lái giúp tinh chỉnh cách openpilot vận hành xe.",
+    "Always On Lateral": "Điều khiển ngang luôn bật", "openpilot's steering remains active even when the accelerator or brake pedals are pressed.": "Điều khiển lái của openpilot vẫn hoạt động ngay cả khi đạp ga hoặc phanh.",
+    "Lane Changes": "Chuyển làn", "Allow openpilot to change lanes.": "Cho phép openpilot chuyển làn.",
+    "Lateral Tuning": "Tinh chỉnh điều khiển ngang", "Miscellaneous steering control changes to fine-tune how openpilot drives.": "Các tùy chỉnh khác về điều khiển lái giúp tinh chỉnh cách openpilot vận hành xe.",
+    "Quality of Life": "Tiện ích", "Steering control changes to fine-tune how openpilot drives.": "Các tùy chỉnh điều khiển lái giúp tinh chỉnh cách openpilot vận hành xe.",
+    "Enable V-ASM": "Bật V-ASM",
+    Routes: "Tuyến đường", Route: "Tuyến đường", Selected: "Đã chọn", Recommended: "Đề xuất", Alternative: "Tuyến khác", Select: "Chọn", "Choose a route": "Chọn tuyến đường",
+  },
 }
 
 Object.keys(MORE_TRANSLATIONS).forEach((code) => Object.assign(TRANSLATIONS[code], MORE_TRANSLATIONS[code]))
@@ -184,12 +221,16 @@ const TERM_TRANSLATIONS = {
   "zh-CHS": {
     "Advanced": "高级", "Always On": "始终启用", "Lateral": "横向", "Steering": "转向", "Longitudinal": "纵向", "Speed": "速度", "Following": "跟车", "Vision": "视觉", "Limits": "限制", "Visual": "视觉", "Display": "显示", "Sounds": "声音", "Alerts": "提醒", "Vehicle": "车辆", "Wheel": "方向盘", "Controls": "控制", "Device": "设备", "Data": "数据", "Developer": "开发者", "Favorites": "收藏", "Main": "主菜单", "Tools": "工具", "Recordings": "录制", "Cameras": "摄像头", "Monitoring": "监控", "Logs": "日志", "Diagnostics": "诊断", "Model": "模型", "Manager": "管理器", "Navigation": "导航", "Maps": "地图", "System": "系统", "Laboratory": "实验室", "Plots": "图表", "Testing": "测试", "Ground": "区域", "Theme": "主题", "Maker": "制作器", "Home": "主页", "Toggles": "开关", "Install": "安装", "Update": "更新", "Available": "可用", "Loading": "加载中", "Error": "错误", "Retry": "重试", "Save": "保存", "Cancel": "取消", "Close": "关闭", "Delete": "删除", "All": "全部", "Search": "搜索", "Clear": "清除", "Manage": "管理", "Connected": "已连接", "Disconnect": "断开连接", "Connect": "连接", "Pair": "配对", "Refresh": "刷新", "Status": "状态", "Samples": "样本", "Duration": "时长", "Distance": "距离", "drives": "驾驶次数", "hours": "小时", "engaged": "已启用", "Onroad": "行驶中", "Offroad": "非行驶", "Enabled": "已启用", "Disabled": "已停用", "Default": "默认", "Working": "处理中", "Run": "运行", "Reset": "重置", "Download": "下载", "Network": "网络", "Current": "当前", "Change": "更改", "Changes": "更改内容", "Allow": "允许", "Use": "使用", "Show": "显示", "Hide": "隐藏", "Enable": "启用", "Disable": "停用", "Automatic": "自动", "Settings": "设置", "Language": "语言", "Routes": "路线", "Selected": "已选择", "Recommended": "推荐", "Alternative": "备选",
   },
+  vi: {
+    "Advanced": "Nâng cao", "Always On": "Luôn bật", "Lateral": "Điều khiển ngang", "Steering": "Đánh lái", "Longitudinal": "Điều khiển dọc", "Speed": "Tốc độ", "Following": "Khoảng cách", "Vision": "Thị giác", "Limits": "Giới hạn", "Visual": "Hình ảnh", "Display": "Màn hình", "Sounds": "Âm thanh", "Alerts": "Cảnh báo", "Vehicle": "Xe", "Wheel": "Vô lăng", "Controls": "Điều khiển", "Device": "Thiết bị", "Data": "Dữ liệu", "Developer": "Nhà phát triển", "Favorites": "Yêu thích", "Main": "Chính", "Tools": "Công cụ", "Recordings": "Bản ghi", "Cameras": "Camera", "Monitoring": "giám sát", "Logs": "Nhật ký", "Diagnostics": "chẩn đoán", "Model": "Mô hình", "Manager": "quản lý", "Navigation": "Điều hướng", "Maps": "bản đồ", "System": "Hệ thống", "Laboratory": "Phòng thí nghiệm", "Plots": "Biểu đồ", "Testing": "Thử nghiệm", "Ground": "Khu vực", "Theme": "Giao diện", "Maker": "tạo", "Home": "Trang chủ", "Toggles": "Tùy chọn", "Install": "Cài đặt", "Update": "Cập nhật", "Available": "có sẵn", "Loading": "Đang tải", "Error": "Lỗi", "Retry": "Thử lại", "Save": "Lưu", "Cancel": "Hủy", "Close": "Đóng", "Delete": "Xóa", "All": "tất cả", "Search": "Tìm kiếm", "Clear": "Xóa", "Manage": "Quản lý", "Connected": "Đã kết nối", "Disconnect": "Ngắt kết nối", "Connect": "Kết nối", "Pair": "Ghép nối", "Refresh": "Làm mới", "Status": "Trạng thái", "Samples": "Mẫu", "Duration": "Thời lượng", "Distance": "Khoảng cách", "drives": "chuyến đi", "hours": "giờ", "engaged": "đang hoạt động", "Onroad": "Đang chạy", "Offroad": "Đang đỗ", "Enabled": "Đã bật", "Disabled": "Đã tắt", "Default": "Mặc định", "Working": "Đang xử lý", "Run": "Chạy", "Reset": "Đặt lại", "Download": "Tải xuống", "Network": "Mạng", "Current": "Hiện tại", "Change": "Thay đổi", "Changes": "Thay đổi", "Allow": "Cho phép", "Use": "Dùng", "Show": "Hiện", "Hide": "Ẩn", "Enable": "Bật", "Disable": "Tắt", "Automatic": "Tự động", "Settings": "Cài đặt", "Language": "Ngôn ngữ", "Routes": "Tuyến đường", "Selected": "Đã chọn", "Recommended": "Đề xuất", "Alternative": "Tuyến khác",
+  },
 }
 
 Object.assign(TERM_TRANSLATIONS.es, { Route: "Ruta", Select: "Seleccionar" })
 Object.assign(TERM_TRANSLATIONS.fr, { Route: "Itinéraire", Select: "Sélectionner" })
 Object.assign(TERM_TRANSLATIONS.ko, { Route: "경로", Select: "선택" })
 Object.assign(TERM_TRANSLATIONS["zh-CHS"], { Route: "路线", Select: "选择" })
+Object.assign(TERM_TRANSLATIONS.vi, { Route: "Tuyến đường", Select: "Chọn" })
 
 function escapeRegExp(value) {
   return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
