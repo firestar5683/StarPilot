@@ -160,3 +160,43 @@ def test_replay_genuine_limiter_error_remains_visible(monkeypatch):
   controls = run_publish(monkeypatch, True, FRESH_TIME_NANOS, real_limit_error=3.0)
 
   assert controls.steer_limited_by_safety
+
+
+@pytest.mark.parametrize("steer_control_type", ("angle", "torque"))
+def test_feedback_follows_lateral_activity(monkeypatch, steer_control_type):
+  monkeypatch.setattr(controlsd, "REPLAY", True)
+  controls = make_controls(make_car_output(), make_starpilot_car_control(), FRESH_TIME_NANOS)
+  cp = controls.CP.as_builder()
+  cp.steerControlType = steer_control_type
+  if steer_control_type == "torque":
+    cp.lateralTuning.init("torque")
+  controls.CP = cp.as_reader()
+
+  cc = car.CarControl.new_message()
+  cc.actuators.steeringAngleDeg = REQUESTED_ANGLE
+  cc.actuators.torque = 0.5
+  lac_log = (log.ControlsState.LateralAngleState if steer_control_type == "angle" else log.ControlsState.LateralTorqueState).new_message()
+
+  # AOL must track both a new limit and its removal without normal engagement.
+  # Stopping lateral control must clear feedback even if normal engagement remains active.
+  for active, lat_active, limited in (
+    (False, True, True),
+    (False, True, False),
+    (True, True, True),
+    (False, False, True),
+    (True, True, True),
+    (True, False, True),
+    (True, True, False),
+  ):
+    controls.sm.messages["selfdriveState"] = log.SelfdriveState.new_message(active=active).as_reader()
+    output = make_car_output()
+    output.actuatorsOutput.steeringAngleDeg = OUTPUT_ANGLE if limited else REQUESTED_ANGLE
+    output.actuatorsOutput.torque = 0.0 if limited else cc.actuators.torque
+    controls.sm.messages["carOutput"] = output.as_reader()
+    controls.sm.messages["starpilotCarControl"] = make_starpilot_car_control(real_limit_error=3.0 if limited else 0.0).as_reader()
+    cc.enabled = active
+    cc.latActive = lat_active
+
+    controls.publish(cc, lac_log)
+
+    assert controls.steer_limited_by_safety is (lat_active and limited), (active, lat_active, limited)
