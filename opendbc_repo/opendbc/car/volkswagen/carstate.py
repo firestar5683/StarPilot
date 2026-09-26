@@ -8,6 +8,9 @@ from opendbc.car.volkswagen.values import DBC, CanBus, NetworkLocation, Transmis
 
 ButtonType = structs.CarState.ButtonEvent.Type
 
+# carState updates at 100Hz; cover the observed ~1.2s pre-fault and ~2.5s post-restart HCA lag around auto Start/Stop
+HCA_AUTOSTOP_GRACE_FRAMES = 300
+
 
 class CarState(CarStateBase):
   def __init__(self, CP, FPCP):
@@ -15,6 +18,7 @@ class CarState(CarStateBase):
     self.frame = 0
     self.eps_init_complete = False
     self.tsk_recovery_timer = 0
+    self.hca_autostop_timer = 0
     self.CCP = CarControllerParams(CP)
     self.button_states = {button.event_type: False for button in self.CCP.BUTTONS}
     self.esp_hold_confirmation = False
@@ -91,6 +95,7 @@ class CarState(CarStateBase):
       brake_pressure_detected = bool(pt_cp.vl["ESP_05"]["ESP_Fahrer_bremst"])
       ret.brakePressed = brake_pedal_pressed or brake_pressure_detected
       ret.parkingBrake = bool(pt_cp.vl["Kombi_01"]["KBI_Handbremse"])  # FIXME: need to include an EPB check as well
+      engine_autostop = bool(pt_cp.vl["Motor_14"]["MO_StartStopp_Motorstopp"])
 
       ret.doorOpen = any([pt_cp.vl["Gateway_72"]["ZV_FT_offen"],
                           pt_cp.vl["Gateway_72"]["ZV_BT_offen"],
@@ -122,7 +127,7 @@ class CarState(CarStateBase):
     # Shared logic
     ret.vEgoCluster = pt_cp.vl["Kombi_01"]["KBI_angez_Geschw"] * CV.KPH_TO_MS
 
-    self.parse_mlb_mqb_steering_state(ret, pt_cp)
+    self.parse_mlb_mqb_steering_state(ret, pt_cp, engine_autostop=engine_autostop)
 
     ret.gasPressed = pt_cp.vl["Motor_20"]["MO_Fahrpedalrohwert_01"] > 0
     ret.espActive = bool(pt_cp.vl["ESP_21"]["ESP_Eingriff"])
@@ -393,21 +398,29 @@ class CarState(CarStateBase):
       self.low_speed_alert = False
     return self.low_speed_alert
 
-  def parse_mlb_mqb_steering_state(self, ret, pt_cp, drive_mode=True):
+  def parse_mlb_mqb_steering_state(self, ret, pt_cp, drive_mode=True, engine_autostop=False):
     ret.steeringAngleDeg = pt_cp.vl["LWI_01"]["LWI_Lenkradwinkel"] * (1, -1)[int(pt_cp.vl["LWI_01"]["LWI_VZ_Lenkradwinkel"])]
     ret.steeringRateDeg = pt_cp.vl["LWI_01"]["LWI_Lenkradw_Geschw"] * (1, -1)[int(pt_cp.vl["LWI_01"]["LWI_VZ_Lenkradw_Geschw"])]
     ret.steeringTorque = pt_cp.vl["LH_EPS_03"]["EPS_Lenkmoment"] * (1, -1)[int(pt_cp.vl["LH_EPS_03"]["EPS_VZ_Lenkmoment"])]
     ret.steeringPressed = abs(ret.steeringTorque) > self.CCP.STEER_DRIVER_ALLOWANCE
 
     hca_status = self.CCP.hca_status_values.get(pt_cp.vl["LH_EPS_03"]["EPS_HCA_Status"])
-    ret.steerFaultTemporary, ret.steerFaultPermanent = self.update_hca_state(hca_status, drive_mode)
+    ret.steerFaultTemporary, ret.steerFaultPermanent = self.update_hca_state(hca_status, drive_mode, engine_autostop)
     return
 
-  def update_hca_state(self, hca_status, drive_mode=True):
+  def update_hca_state(self, hca_status, drive_mode=True, engine_autostop=False):
     # Treat FAULT as temporary for worst likely EPS recovery time, for cars without factory Lane Assist
     # DISABLED means the EPS hasn't been configured to support Lane Assist
     self.eps_init_complete = self.eps_init_complete or (hca_status in ("DISABLED", "READY", "ACTIVE") or self.frame > 600)
-    perm_fault = drive_mode and hca_status == "DISABLED" or (self.eps_init_complete and hca_status == "FAULT")
+
+    # Engine auto Start/Stop (e.g. idling at a red light) makes the EPS module briefly report a
+    # real HCA fault while the engine is off, and for ~2-3s after it restarts. Ignore HCA faults
+    # in a window around an auto-stop event rather than treating it as a genuine permanent fault.
+    if engine_autostop:
+      self.hca_autostop_timer = self.frame
+    in_autostop_grace = self.frame - self.hca_autostop_timer < HCA_AUTOSTOP_GRACE_FRAMES
+
+    perm_fault = drive_mode and hca_status == "DISABLED" or (self.eps_init_complete and hca_status == "FAULT" and not in_autostop_grace)
     temp_fault = drive_mode and hca_status in ("REJECTED", "PREEMPTED") or not self.eps_init_complete
     return temp_fault, perm_fault
 
