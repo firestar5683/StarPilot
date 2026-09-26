@@ -42,6 +42,7 @@ class SignalType:
   RIVIAN_CHECKSUM = 15
   FORD_CHECKSUM = 16
   MG_CHECKSUM = 17
+  RAY_PEDAL_CHECKSUM = 18
 
 
 @dataclass
@@ -216,8 +217,23 @@ class ChecksumState:
   checksum_fields: dict[int, tuple[str, ...]] | None = None
 
 
+def ray_pedal_setup_signal(sig, dbc_name, line_num):
+  if sig.name == "CHECKSUM_PEDAL":
+    if sig.size != 8:
+      raise RuntimeError("Ray pedal checksum must be 8 bits")
+    sig.type = SignalType.RAY_PEDAL_CHECKSUM
+    from opendbc.car.hyundai.ray_pedal import pedal_checksum
+    sig.calc_checksum = pedal_checksum
+  elif sig.name == "COUNTER_PEDAL":
+    if sig.size != 4:
+      raise RuntimeError("Ray pedal counter must be 4 bits")
+    sig.type = SignalType.COUNTER
+
+
 def get_checksum_state(dbc_name: str) -> ChecksumState | None:
-  if dbc_name.startswith(("honda_", "acura_")):
+  if dbc_name == "hyundai_kia_ray_pedal":
+    return ChecksumState(SignalType.RAY_PEDAL_CHECKSUM, None, ray_pedal_setup_signal)
+  elif dbc_name.startswith(("honda_", "acura_")):
     return ChecksumState(SignalType.HONDA_CHECKSUM, honda_checksum)
   elif dbc_name.startswith(("toyota_", "lexus_")):
     return ChecksumState(SignalType.TOYOTA_CHECKSUM, toyota_checksum)

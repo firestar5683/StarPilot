@@ -33,5 +33,5 @@ replacements explicitly, and update the main manifest revision only after
 integration. Never accept a gitlink in place of a source folder. Updater and CI
 checks reject that layout.
 
-This branch is a migration foundation. Vehicle, settings, control-mode, UI,
-firmware and device qualification must be completed before deployment.
+Dependency provenance checks do not replace runtime, firmware, or vehicle
+qualification for an update.

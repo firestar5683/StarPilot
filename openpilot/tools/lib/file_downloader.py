@@ -68,14 +68,22 @@ def make_decompressor(compression):
   raise ValueError(f"Unsupported compression type: {compression}")
 
 
-def decompress_file(source, destination, compression=None):
+def decompress_file(source, destination, compression=None, max_bytes=0):
   with open(source, 'rb') as src, open(destination, 'wb') as dst:
     header = src.read(4)
     compression = compression or compression_type(header)
     decompressor = make_decompressor(compression)
-    dst.write(decompressor.decompress(header))
-    while data := src.read(1024 * 1024):
-      dst.write(decompressor.decompress(data))
+    written = 0
+    def write(data):
+      nonlocal written
+      written += len(data)
+      if max_bytes and written > max_bytes:
+        raise ValueError("Decompressed log exceeds replay memory limit")
+      dst.write(data)
+    write(decompressor.decompress(header))
+    # Bound a single decoder allocation as well as the completed output.
+    while data := src.read(256 if max_bytes else 1024 * 1024):
+      write(decompressor.decompress(data))
   if not decompressor.eof:
     raise EOFError(f"Compressed {compression} file ended before the end-of-stream marker")
 
@@ -291,7 +299,7 @@ def cmd_decompress(args):
   output_fd, output_path = tempfile.mkstemp(dir=Paths.download_cache_root())
   os.close(output_fd)
   try:
-    decompress_file(args.path, output_path)
+    decompress_file(args.path, output_path, max_bytes=getattr(args, 'max_bytes', 0))
   except Exception as e:
     try:
       os.unlink(output_path)
@@ -322,6 +330,12 @@ def cmd_device_routes(args):
 
 
 def main():
+  parent = os.environ.get('SP_REPLAY_HELPER_PARENT')
+  if parent is not None:
+    import ctypes
+    import signal
+    if sys.platform != 'linux' or ctypes.CDLL(None).prctl(1, signal.SIGKILL, 0, 0, 0) != 0 or os.getppid() != int(parent):
+      raise RuntimeError('Replay source owner exited')
   parser = argparse.ArgumentParser(description="File downloader CLI for openpilot tools")
   subparsers = parser.add_subparsers(dest="command", required=True)
 
@@ -343,6 +357,7 @@ def main():
 
   p_dc = subparsers.add_parser("decompress")
   p_dc.add_argument("path")
+  p_dc.add_argument("--max-bytes", type=int, default=0)
   p_dc.set_defaults(func=cmd_decompress)
 
   p_dev = subparsers.add_parser("devices")

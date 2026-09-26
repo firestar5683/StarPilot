@@ -1,3 +1,13 @@
+# StarPilot 7.0 — Domathon development
+
+The openpilot rebase is in progress. Domathon is not yet a completed StarPilot release, and feature or vehicle presence alone does not establish full parity with Dom.
+
+See the [project overview](README.md) for the current development entry points and the [history guide](docs/DEVELOPMENT_HISTORY.md) for the upstream boundary and feature organization. Release-specific support and validation will be recorded when a release is prepared.
+
+# Upstream openpilot release history
+
+The entries below are retained upstream release notes. They describe openpilot releases, not completed StarPilot 7.0 milestones.
+
 Version 0.11.2 (2026-08-12)
 =======================
 * New driving model
@@ -779,7 +789,7 @@ Version 0.5.10 (2019-03-19)
  * New Driver Monitoring Model
  * Support QR codes for login using comma connect
  * Refactor comma pedal FW and use CRC-8 checksum algorithm for safety. Reflashing pedal is required.
-   Please see `#hw-pedal` on [discord](discord.comma.ai) for assistance updating comma pedal.
+   Please see `#hw-pedal` on [discord](https://discord.comma.ai) for assistance updating comma pedal.
  * Additional speed limit rules for Germany thanks to arne182
  * Allow negative speed limit offsets
 
