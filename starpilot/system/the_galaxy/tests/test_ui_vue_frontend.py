@@ -589,8 +589,28 @@ def test_ui_cameras_hub_vasm_and_pip_native_no_embed():
 def test_ui_mobile_polish_regressions():
   system = _read("js/views/SystemTools.js")
   css = _read("css/material.css")
-  assert 'button v-if="updateAvailable"' in system
-  assert "checkedForUpdates && !!this.fastStatus?.updateAvailable" in system
+  assert "checkedForUpdates" not in system
+  assert "updateCheckFailed" in system
+  # The offline fallback only appears after a status attempt, so it can't flash
+  # before the first update check resolves.
+  assert "statusChecked" in system
+  assert "Checking update status…" in system
+  # A single status-card button performs update/switch/version from the selection.
+  assert "runPendingAction" in system
+  assert "pendingButtonClass" in system
+  assert "pendingDisabled" in system
+  assert "Applies to your current branch" not in system
+  assert "gx-btn--switch" in system and "gx-btn--switch" in css
+  assert "gx-btn--version" in system and "gx-btn--version" in css
+  # It names the destination (Switch to X / Update X) including branch + commit.
+  assert 'Switch to ${this.targetBranch}' in system
+  assert "Select a version" in system
+  assert "pauses automatic updates" in system
+  # Refresh is always available and shows progress while checking.
+  assert "Check again" in system
+  assert "Checking…" in system
+  # Recover/Rollback sit beside the primary update action with descriptions below.
+  assert 'Recover:' in system and 'Rollback:' in system and "runUpdate('recover')" in system
   assert "gx-update-progress__fill" in system
   assert "linear-gradient(90deg, #5ec8c8 0%, #8b6cc5 100%)" in css
   assert "Automatically Install Updates" in system

@@ -403,6 +403,19 @@ def _install_server_import_stubs():
   sys.modules["openpilot.starpilot.system.the_galaxy.flm_workspace"] = _simple_module(
     "openpilot.starpilot.system.the_galaxy.flm_workspace",
   )
+  # Use this checkout's backup modules, not a stale runtime copy.
+  services = {
+    "openpilot.starpilot.system.the_galaxy.device_backup": MODULE_DIR / "device_backup.py",
+    "openpilot.starpilot.system.the_galaxy.restore_models": MODULE_DIR / "restore_models.py",
+    "openpilot.starpilot.system.the_galaxy.version_history": MODULE_DIR / "version_history.py",
+    "openpilot.starpilot.system.the_galaxy.version_install": MODULE_DIR / "version_install.py",
+    "openpilot.starpilot.assets.model_sizes": MODULE_DIR.parents[1] / "assets/model_sizes.py",
+  }
+  for module_name, source in services.items():
+    spec = importlib.util.spec_from_file_location(module_name, source)
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    sys.modules[module_name] = module
   sys.modules["openpilot.starpilot.system.the_galaxy.utilities"] = utilities
   sys.modules["openpilot.starpilot.system.wheel_controls"] = _simple_module(
     "openpilot.starpilot.system.wheel_controls",
