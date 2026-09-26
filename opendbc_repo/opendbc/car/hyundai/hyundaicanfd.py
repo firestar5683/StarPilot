@@ -7,6 +7,28 @@ from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.crc import CRC16_XMODEM
 from opendbc.car.hyundai.values import HyundaiFlags, CAR, CANFD_ALT_BUTTONS_RESUME_CAR
 
+# Ioniq 6 EPS damping, matched to the car's own LFA. With the stock ADAS driving, the Ioniq 6 steers
+# through LFA (0x12A) and sends ONLY a damping value in LKAS_ALT (0x110 byte 8, Hyundai name
+# Damping_Gain); both are scheduled purely on speed (drive 00000b41: no dependence on angle, torque or
+# hands). openpilot sent a fixed 100 in LFA and never set LKAS_ALT's, so the EPS got 0 there. The
+# breakpoints are the stock medians per 5 mph band (centers) while the stock system is steering,
+# rising steadily to 163 (LFA) / 154 (LKAS_ALT) at 85-90 mph. openpilot's highway weave matched the
+# stock system at 45-60 mph and grew past it above 60 mph, exactly where the stock damping pulls away.
+# Below ~35 mph the previous values are kept (LFA floor 100, LKAS_ALT 0) so low-speed turn tuning
+# is untouched. The panda only checks torque/steer_req on these messages, not the damping byte.
+_DAMP_MPH = [37.5, 42.5, 47.5, 52.5, 57.5, 62.5, 67.5, 72.5, 77.5, 82.5, 87.5]
+IONIQ_6_LFA_DAMP_BP = [mph * CV.MPH_TO_MS for mph in _DAMP_MPH]
+IONIQ_6_LFA_DAMP_V = [100., 105., 107., 112., 116., 119., 133., 145., 151., 157., 163.]
+IONIQ_6_LKAS_ALT_DAMP_BP = [mph * CV.MPH_TO_MS for mph in [35.0] + _DAMP_MPH[1:]]
+IONIQ_6_LKAS_ALT_DAMP_V = [0., 125., 127., 132., 136., 139., 142., 144., 146., 150., 154.]
+
+
+def get_ioniq_6_damp_factors(v_ego: float) -> tuple[int, int]:
+  """(LFA DAMP_FACTOR, LKAS_ALT DAMP_FACTOR) for the Ioniq 6 at this speed."""
+  lfa = float(np.interp(v_ego, IONIQ_6_LFA_DAMP_BP, IONIQ_6_LFA_DAMP_V))
+  lkas_alt = float(np.interp(v_ego, IONIQ_6_LKAS_ALT_DAMP_BP, IONIQ_6_LKAS_ALT_DAMP_V))
+  return int(round(lfa)), int(round(lkas_alt))
+
 
 def _set_value(msg: bytearray, sig, ival: int) -> None:
   i = sig.lsb // 8
@@ -100,7 +122,7 @@ def create_angle_adas_cmd(packer, CAN, apply_angle: float, lat_active: bool, tor
 
 def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_torque, apply_angle,
                              lfa_base_values=None, lkas_base_values=None, lka_icon=None,
-                             longitudinal_active=None):
+                             longitudinal_active=None, v_ego=None):
   if lka_icon is None:
     lka_icon = 2 if enabled else 1
   if longitudinal_active is None:
@@ -141,6 +163,10 @@ def create_steering_messages(packer, CP, CAN, enabled, lat_active, apply_torque,
     lfa_values["NEW_SIGNAL_1"] = 0
     lfa_values["NEW_SIGNAL_2"] = 0
     lfa_values["DAMP_FACTOR"] = 100  # can potentially tuned for better perf [3, 200]
+
+  if CP.carFingerprint == CAR.HYUNDAI_IONIQ_6 and v_ego is not None and \
+     not CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING:
+    lfa_values["DAMP_FACTOR"], lkas_values["DAMP_FACTOR"] = get_ioniq_6_damp_factors(v_ego)
 
   if CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING and CP.flags & HyundaiFlags.CANFD_LKA_STEERING_ALT:
     lkas_values["ADAS_StrAnglReqVal"] = apply_angle

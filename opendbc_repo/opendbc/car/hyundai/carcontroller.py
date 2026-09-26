@@ -938,7 +938,8 @@ class CarController(CarControllerBase):
                                                              CS.stock_lfa_msg if preserve_stock_lfa_status else None,
                                                              CS.stock_lkas_msg if preserve_stock_lkas else None,
                                                              lka_icon=lka_icon,
-                                                             longitudinal_active=lfa_longitudinal_active))
+                                                             longitudinal_active=lfa_longitudinal_active,
+                                                             v_ego=getattr(getattr(CS, "out", None), "vEgo", None)))
     direct_steering_active = ccnc_angle_long and drive_gear and CC.latActive and self.direct_angle_request_allowed and not CS.angle_steering_fault
     inactive_steering_angle = float(np.clip(CS.angle_steering_angle,
                                             -self.params.ANGLE_LIMITS.STEER_ANGLE_MAX,
