@@ -147,6 +147,7 @@
         "min": 0.0,
         "max": 99.0,
         "step": 1.0,
+        "unit": " mph",
         "parent_key": "AlwaysOnLateral",
         "settings_tier": "simple"
       },

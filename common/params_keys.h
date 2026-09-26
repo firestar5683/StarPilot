@@ -573,7 +573,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"PathEdgesColor", {PERSISTENT, STRING, "", "", 2, SETTINGS_SIMPLE}},
     {"PathEdgeWidth", {PERSISTENT, FLOAT, "20.0", "0.0", 2, SETTINGS_SIMPLE}},
     {"PathWidth", {PERSISTENT, FLOAT, "6.1", "5.9", 2, SETTINGS_SIMPLE}},
-    {"PauseAOLOnBrake", {PERSISTENT, BOOL, "0", "0", 1, SETTINGS_SIMPLE}},
+    {"PauseAOLOnBrake", {PERSISTENT, INT, "0", "0", 1, SETTINGS_SIMPLE}},
     {"PauseLateralOnSignal", {PERSISTENT, BOOL, "0", "0", 1, SETTINGS_SIMPLE}},
     {"PauseLateralSpeed", {PERSISTENT, FLOAT, "0.0", "0.0", 1, SETTINGS_SIMPLE}},
     {"LateralResumeDelay", {PERSISTENT, FLOAT, "0.0", "0.0", 1, SETTINGS_SIMPLE}},
