@@ -48,7 +48,7 @@ export const GalaxyModal = {
   `,
 }
 
-export function GalaxyConfirm({ title, message, confirmLabel = "Confirm", danger = false } = {}) {
+export function GalaxyConfirm({ title, message, confirmLabel = "Confirm", cancelLabel = "Cancel", danger = false } = {}) {
   return new Promise((resolve) => {
     const host = document.createElement("div")
     document.body.appendChild(host)
@@ -69,6 +69,7 @@ export function GalaxyConfirm({ title, message, confirmLabel = "Confirm", danger
           title,
           message,
           confirmLabel,
+          cancelLabel,
           danger,
           "onUpdate:modelValue": (v) => { if (!v) finish(false) },
           onConfirm: () => finish(true),
