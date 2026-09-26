@@ -1373,6 +1373,38 @@ BO_ 919 LDW_02: 8 XXX
  SG_ LDW_Status_LED_gruen : 62|1@1+ (1,0) [0|1] ""  XXX
  SG_ LDW_KD_Fehler : 63|1@1+ (1,0) [0|1] ""  XXX
 
+BO_ 806 Kamera_LaneLine_EgoLeft: 8 XXX
+ SG_ Offset : 0|12@1+ (0.00390625,-8) [-8|7.99609375] "m"  XXX
+ SG_ Unknown_12 : 12|9@1+ (1,0) [0|511] ""  XXX
+ SG_ Heading : 21|12@1+ (0.00048828125,-1) [-1|0.99951171875] "rad"  XXX
+ SG_ Unknown_33 : 33|12@1+ (1,0) [0|4095] ""  XXX
+ SG_ Curvature : 45|12@1+ (0.00002,-0.04096) [-0.04096|0.04094] "1/m"  XXX
+ SG_ Unknown_57 : 57|7@1+ (1,0) [0|127] ""  XXX
+
+BO_ 807 Kamera_LaneLine_EgoRight: 8 XXX
+ SG_ Offset : 0|12@1+ (0.00390625,-8) [-8|7.99609375] "m"  XXX
+ SG_ Unknown_12 : 12|9@1+ (1,0) [0|511] ""  XXX
+ SG_ Heading : 21|12@1+ (0.00048828125,-1) [-1|0.99951171875] "rad"  XXX
+ SG_ Unknown_33 : 33|12@1+ (1,0) [0|4095] ""  XXX
+ SG_ Curvature : 45|12@1+ (0.00002,-0.04096) [-0.04096|0.04094] "1/m"  XXX
+ SG_ Unknown_57 : 57|7@1+ (1,0) [0|127] ""  XXX
+
+BO_ 808 Kamera_LaneLine_NextLeft: 8 XXX
+ SG_ Offset : 0|12@1+ (0.00390625,-8) [-8|7.99609375] "m"  XXX
+ SG_ Unknown_12 : 12|9@1+ (1,0) [0|511] ""  XXX
+ SG_ Heading : 21|12@1+ (0.00048828125,-1) [-1|0.99951171875] "rad"  XXX
+ SG_ Unknown_33 : 33|12@1+ (1,0) [0|4095] ""  XXX
+ SG_ Curvature : 45|12@1+ (0.00002,-0.04096) [-0.04096|0.04094] "1/m"  XXX
+ SG_ Unknown_57 : 57|7@1+ (1,0) [0|127] ""  XXX
+
+BO_ 809 Kamera_LaneLine_NextRight: 8 XXX
+ SG_ Offset : 0|12@1+ (0.00390625,-8) [-8|7.99609375] "m"  XXX
+ SG_ Unknown_12 : 12|9@1+ (1,0) [0|511] ""  XXX
+ SG_ Heading : 21|12@1+ (0.00048828125,-1) [-1|0.99951171875] "rad"  XXX
+ SG_ Unknown_33 : 33|12@1+ (1,0) [0|4095] ""  XXX
+ SG_ Curvature : 45|12@1+ (0.00002,-0.04096) [-0.04096|0.04094] "1/m"  XXX
+ SG_ Unknown_57 : 57|7@1+ (1,0) [0|127] ""  XXX
+
 BO_ 780 ACC_02: 8 XXX
  SG_ CHECKSUM : 0|8@1+ (1,0) [0|255] ""  XXX
  SG_ COUNTER : 8|4@1+ (1,0) [0|15] ""  XXX
@@ -1641,6 +1673,34 @@ CM_ SG_ 870 Right_Turn_Exterior_Bulb_1 "Probably front";
 CM_ SG_ 870 Left_Turn_Exterior_Bulb_2 "Probably rear";
 CM_ SG_ 870 Right_Turn_Exterior_Bulb_2 "Probably rear";
 CM_ SG_ 870 Fast_Send_Rate_Active "CAN message send rate";
+CM_ BO_ 806 "Front camera lane line model, own lane, left line. Undocumented (name is not from the VW matrix); decoded from a 2016 Golf Mk7 and checked against openpilot modelV2 lane lines. 12.5 Hz, no checksum/counter. An empty slot reads Offset/Heading/Curvature raw 2048/2048/2047 with Unknown_12 = 0.";
+CM_ SG_ 806 Offset "Lateral distance to the line, positive = left. r=0.95 vs model (own-lane lines).";
+CM_ SG_ 806 Heading "Line angle relative to the car, positive = pointing left. r=0.76 vs model (own-lane lines).";
+CM_ SG_ 806 Curvature "Line curvature, positive = bending left. r=0.85 vs model (own-lane lines); scale approximate.";
+CM_ SG_ 806 Unknown_12 "0 when no line; 51-315 when a line is tracked. Does not track line probability or speed.";
+CM_ SG_ 806 Unknown_33 "Centred on 2047; small variation, not matched to model geometry (possibly curvature rate).";
+CM_ SG_ 806 Unknown_57 "0 when no line; roughly 10-47 when a line is tracked. Meaning unknown.";
+CM_ BO_ 807 "Front camera lane line model, own lane, right line. Undocumented (name is not from the VW matrix); decoded from a 2016 Golf Mk7 and checked against openpilot modelV2 lane lines. 12.5 Hz, no checksum/counter. An empty slot reads Offset/Heading/Curvature raw 2048/2048/2047 with Unknown_12 = 0.";
+CM_ SG_ 807 Offset "Lateral distance to the line, positive = left. r=0.95 vs model (own-lane lines).";
+CM_ SG_ 807 Heading "Line angle relative to the car, positive = pointing left. r=0.76 vs model (own-lane lines).";
+CM_ SG_ 807 Curvature "Line curvature, positive = bending left. r=0.85 vs model (own-lane lines); scale approximate.";
+CM_ SG_ 807 Unknown_12 "0 when no line; 51-315 when a line is tracked. Does not track line probability or speed.";
+CM_ SG_ 807 Unknown_33 "Centred on 2047; small variation, not matched to model geometry (possibly curvature rate).";
+CM_ SG_ 807 Unknown_57 "0 when no line; roughly 10-47 when a line is tracked. Meaning unknown.";
+CM_ BO_ 808 "Front camera lane line model, next line out to the left. Undocumented (name is not from the VW matrix); decoded from a 2016 Golf Mk7 and checked against openpilot modelV2 lane lines. 12.5 Hz, no checksum/counter. An empty slot reads Offset/Heading/Curvature raw 2048/2048/2047 with Unknown_12 = 0.";
+CM_ SG_ 808 Offset "Lateral distance to the line, positive = left. r=0.95 vs model (own-lane lines).";
+CM_ SG_ 808 Heading "Line angle relative to the car, positive = pointing left. r=0.76 vs model (own-lane lines).";
+CM_ SG_ 808 Curvature "Line curvature, positive = bending left. r=0.85 vs model (own-lane lines); scale approximate.";
+CM_ SG_ 808 Unknown_12 "0 when no line; 51-315 when a line is tracked. Does not track line probability or speed.";
+CM_ SG_ 808 Unknown_33 "Centred on 2047; small variation, not matched to model geometry (possibly curvature rate).";
+CM_ SG_ 808 Unknown_57 "0 when no line; roughly 10-47 when a line is tracked. Meaning unknown.";
+CM_ BO_ 809 "Front camera lane line model, next line out to the right. Undocumented (name is not from the VW matrix); decoded from a 2016 Golf Mk7 and checked against openpilot modelV2 lane lines. 12.5 Hz, no checksum/counter. An empty slot reads Offset/Heading/Curvature raw 2048/2048/2047 with Unknown_12 = 0.";
+CM_ SG_ 809 Offset "Lateral distance to the line, positive = left. r=0.95 vs model (own-lane lines).";
+CM_ SG_ 809 Heading "Line angle relative to the car, positive = pointing left. r=0.76 vs model (own-lane lines).";
+CM_ SG_ 809 Curvature "Line curvature, positive = bending left. r=0.85 vs model (own-lane lines); scale approximate.";
+CM_ SG_ 809 Unknown_12 "0 when no line; 51-315 when a line is tracked. Does not track line probability or speed.";
+CM_ SG_ 809 Unknown_33 "Centred on 2047; small variation, not matched to model geometry (possibly curvature rate).";
+CM_ SG_ 809 Unknown_57 "0 when no line; roughly 10-47 when a line is tracked. Meaning unknown.";
 CM_ SG_ 919 LDW_DLC "Probable DLC (distance to line crossing)";
 CM_ SG_ 919 LDW_TLC "Probable TLC (time to line crossing)";
 CM_ SG_ 919 LDW_Unknown "Might be a steering pressed / driver active flag";
