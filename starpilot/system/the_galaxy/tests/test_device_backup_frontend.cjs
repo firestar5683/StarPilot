@@ -16,6 +16,7 @@ let discardFails = false;
 let restoreFails = false;
 let finishFails = false;
 let status = {stage:'idle'};
+let statusFails = false;
 let confirmNoDownload = [];
 const finishes = [];
 const prompts = [];
@@ -41,7 +42,10 @@ const ctx = {
       if (finishFails) throw new Error('Network unavailable');
       return {success:true, stage:download ? 'downloading' : 'rebooting', message:'Finishing restore'};
     },
-    deviceRestoreStatus: async () => status,
+    deviceRestoreStatus: async () => {
+      if (statusFails) throw new Error('Failed to fetch');
+      return status;
+    },
     prepareDeviceBackup: async () => {
       backups++;
       if (spaceShortage) {
@@ -98,6 +102,20 @@ vm.runInContext(source + '\nthis.view = SystemTools;', ctx);
   await view.onDeviceRestoreFile(event());
   assert.deepEqual(finishes, [false, false, true]);
   assert.equal(view.deviceBackupBusy, 'models', 'poll until model downloads finish');
+  // The device often reboots before a poll sees "rebooting"; a dropped poll then is the reboot, not an error.
+  statusFails = true;
+  await view.loadDeviceRestoreStatus();
+  statusFails = false;
+  assert.equal(view.deviceBackupBusy, '');
+  assert.equal(view.rebootPending, true, 'a dropped poll during downloads shows the restore reboot');
+  assert.equal(view.rebootReason, 'restore');
+  assert.doesNotMatch(view.deviceBackupMessage, /Connection lost/);
+  // If downloads are still running when it reconnects, it was only a blip.
+  status = {stage:'downloading', message:'Downloading 1/1: a'};
+  await view.loadDeviceRestoreStatus();
+  assert.equal(view.rebootPending, false, 'a blip must not keep the reboot indicator');
+  assert.equal(view.deviceReconnected, false, 'a blip is not a reboot reconnect');
+  assert.equal(view.deviceBackupBusy, 'models');
   status = {stage:'error', message:'Model unavailable', models:[{key:'a'}]};
   await view.loadDeviceRestoreStatus();
   assert.equal(view.deviceRestoreReady, true);

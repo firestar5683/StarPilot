@@ -611,10 +611,19 @@ export const SystemTools = {
         this.deviceBackupBusy = result.stage === "downloading" ? "models" : ""
         // The shared update-status poll detects the reconnect; this just arms it for a restore reboot.
         if (result.stage === "rebooting") this.markRebootPending("restore")
+        // These stages only live in the running server, so the device never rebooted; it was a connection blip.
+        if (["downloading", "awaiting_choice", "error"].includes(result.stage)) {
+          if (this.rebootPending && this.rebootReason === "restore") this.clearRebootPending(false)
+          this.deviceReconnected = false
+        }
         if (prompt && this.deviceRestoreReady) await this.rebootAfterRestore()
       } catch (error) {
         if (this.deviceBackupBusy === "models") {
-          this.deviceBackupMessage = "Connection lost while checking downloads. Reconnecting; the device will reboot after successful downloads."
+          // The server reboots the moment the last download finishes, usually before a poll sees "rebooting",
+          // so a dropped connection here almost always means the reboot started.
+          this.deviceBackupBusy = ""
+          this.deviceBackupMessage = "Waiting for Galaxy to reconnect after the downloads."
+          this.markRebootPending("restore")
         }
       }
     },
