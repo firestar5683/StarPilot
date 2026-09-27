@@ -1,3 +1,4 @@
+import math
 import pytest
 from parameterized import parameterized
 from types import SimpleNamespace
@@ -1597,17 +1598,17 @@ class TestLatControl:
 
   def test_kia_ev6_base_ff_scale_curve(self):
     assert get_kia_ev6_ff_scale(0.0, 0.0, 20.0) == 1.0
-    assert get_kia_ev6_ff_scale(-0.3, 0.0, 20.0) > get_kia_ev6_ff_scale(0.3, 0.0, 20.0)
+    assert get_kia_ev6_ff_scale(0.3, 0.0, 20.0) > get_kia_ev6_ff_scale(-0.3, 0.0, 20.0)
     assert get_kia_ev6_ff_scale(-0.4, -0.7, 8.0) > get_kia_ev6_ff_scale(-0.4, 0.0, 8.0) > get_kia_ev6_ff_scale(-0.4, 0.7, 8.0)
     assert get_kia_ev6_ff_scale(0.4, 0.7, 8.0) > get_kia_ev6_ff_scale(0.4, 0.0, 8.0) > get_kia_ev6_ff_scale(0.4, -0.7, 8.0)
     assert get_kia_ev6_ff_scale(1.2, 0.0, 20.0) < get_kia_ev6_ff_scale(0.4, 0.0, 20.0)
 
   def test_kia_ev6_friction_threshold_curve(self):
     base = get_hkg_canfd_base_friction_threshold(6.0)
-    left_turn_in = get_kia_ev6_friction_threshold(6.0, 0.5, 0.8)
-    right_turn_in = get_kia_ev6_friction_threshold(6.0, -0.5, -0.8)
-    left_unwind = get_kia_ev6_friction_threshold(6.0, 0.5, -0.8)
-    right_unwind = get_kia_ev6_friction_threshold(6.0, -0.5, 0.8)
+    left_turn_in = get_kia_ev6_friction_threshold(6.0, -0.5, -0.8)
+    right_turn_in = get_kia_ev6_friction_threshold(6.0, 0.5, 0.8)
+    left_unwind = get_kia_ev6_friction_threshold(6.0, -0.5, 0.8)
+    right_unwind = get_kia_ev6_friction_threshold(6.0, 0.5, -0.8)
     assert right_turn_in == left_turn_in < base < right_unwind == left_unwind
     assert get_kia_ev6_friction_threshold(25.0, 0.0, 0.0) >= get_hkg_canfd_base_friction_threshold(25.0)
 
@@ -1621,11 +1622,11 @@ class TestLatControl:
     assert high_speed_curve < high_speed_center
 
   def test_kia_ev6_friction_scale_curve(self):
-    base = get_kia_ev6_friction_scale(25.0, 0.5, 0.8)
-    left_turn_in = get_kia_ev6_friction_scale(6.0, 0.5, 0.8)
-    right_turn_in = get_kia_ev6_friction_scale(6.0, -0.5, -0.8)
-    left_unwind = get_kia_ev6_friction_scale(6.0, 0.5, -0.8)
-    right_unwind = get_kia_ev6_friction_scale(6.0, -0.5, 0.8)
+    base = get_kia_ev6_friction_scale(25.0, -0.5, -0.8)
+    left_turn_in = get_kia_ev6_friction_scale(6.0, -0.5, -0.8)
+    right_turn_in = get_kia_ev6_friction_scale(6.0, 0.5, 0.8)
+    left_unwind = get_kia_ev6_friction_scale(6.0, -0.5, 0.8)
+    right_unwind = get_kia_ev6_friction_scale(6.0, 0.5, -0.8)
     assert right_turn_in == left_turn_in > base
     assert base > left_unwind == right_unwind
 
@@ -2304,6 +2305,37 @@ class TestLatControl:
     assert lac_log.active
     assert calls == 1
 
+  @pytest.mark.parametrize("gain_side", ["LEFT", "RIGHT"])
+  @pytest.mark.parametrize("turn_side,steering_sign", [("LEFT", 1), ("RIGHT", -1)])
+  @pytest.mark.parametrize("speed", [6.0, 10.0, 25.0])
+  def test_kia_ev6_ff_gain_matches_physical_turn(self, monkeypatch, gain_side, turn_side, steering_sign, speed):
+    monkeypatch.setattr(latcontrol_vehicle_tunes, "kia_ev6_lateral_testing_ground_active", lambda: False)
+
+    def steady_output():
+      controller, VM, CS, params, toggles = self._build_torque_controller(HYUNDAI.KIA_EV6)
+      CS.vEgo = speed
+      # Positive steering wheel angle is a physical left turn. The torque controller
+      # measures the negative of VehicleModel curvature and negates its output.
+      physical_curvature = steering_sign * 0.45 / speed ** 2
+      CS.steeringAngleDeg = math.degrees(VM.get_steer_from_curvature(physical_curvature, speed, 0.0))
+      desired_curvature = -physical_curvature
+      # Prime through the inactive path so request, measurement and jerk agree.
+      for _ in range(controller.request_buffer_len):
+        controller.update(False, CS, VM, params, False, desired_curvature, False, 0.2, None, None, toggles)
+      output, _, lac_log = controller.update(True, CS, VM, params, False, desired_curvature, False, 0.2, None, None, toggles)
+      assert lac_log.error == pytest.approx(0.0, abs=1e-6)
+      assert 0.0 < steering_sign * output < 1.0
+      return output
+
+    original = steady_output()
+    gain_name = f"KIA_EV6_FF_GAIN_{gain_side}"
+    monkeypatch.setattr(latcontrol_vehicle_tunes, gain_name, getattr(latcontrol_vehicle_tunes, gain_name) + 0.30)
+    increased = steady_output()
+    if turn_side == gain_side:
+      assert abs(increased) > abs(original)
+    else:
+      assert increased == pytest.approx(original, abs=1e-12)
+
   def test_lexus_is_update_path(self, monkeypatch):
     controller, VM, CS, params, starpilot_toggles = self._build_torque_controller(TOYOTA.LEXUS_IS)
     calls = 0
@@ -2323,12 +2355,12 @@ class TestLatControl:
   def test_kia_ev6_ff_scale_curve(self):
     clear_flm_runtime_overrides()
     assert get_kia_ev6_ff_scale(0.0, 0.0, 20.0) == 1.0
-    steady_left = get_kia_ev6_ff_scale(0.45, 0.0, 25.0)
-    steady_right = get_kia_ev6_ff_scale(-0.45, 0.0, 25.0)
-    turn_in_left = get_kia_ev6_ff_scale(0.45, 0.7, 10.0)
-    turn_in_right = get_kia_ev6_ff_scale(-0.45, -0.7, 10.0)
-    unwind_left = get_kia_ev6_ff_scale(0.45, -0.7, 10.0)
-    unwind_right = get_kia_ev6_ff_scale(-0.45, 0.7, 10.0)
+    steady_left = get_kia_ev6_ff_scale(-0.45, 0.0, 25.0)
+    steady_right = get_kia_ev6_ff_scale(0.45, 0.0, 25.0)
+    turn_in_left = get_kia_ev6_ff_scale(-0.45, -0.7, 10.0)
+    turn_in_right = get_kia_ev6_ff_scale(0.45, 0.7, 10.0)
+    unwind_left = get_kia_ev6_ff_scale(-0.45, 0.7, 10.0)
+    unwind_right = get_kia_ev6_ff_scale(0.45, -0.7, 10.0)
     assert steady_left > 1.0
     assert steady_right > steady_left
     assert turn_in_left > steady_left
@@ -2341,18 +2373,18 @@ class TestLatControl:
   def test_kia_ev6_jwarm_testing_ground_phase_correction(self, monkeypatch):
     clear_flm_runtime_overrides()
     monkeypatch.setattr(latcontrol_vehicle_tunes, "kia_ev6_lateral_testing_ground_active", lambda: False)
-    normal_steady = get_kia_ev6_ff_scale(0.45, 0.0, 10.0)
-    normal_turn_in_left = get_kia_ev6_ff_scale(0.45, 0.7, 10.0)
-    normal_turn_in_right = get_kia_ev6_ff_scale(-0.45, -0.7, 10.0)
-    normal_unwind_left = get_kia_ev6_ff_scale(0.45, -0.7, 10.0)
-    normal_unwind_right = get_kia_ev6_ff_scale(-0.45, 0.7, 10.0)
+    normal_steady = get_kia_ev6_ff_scale(-0.45, 0.0, 10.0)
+    normal_turn_in_left = get_kia_ev6_ff_scale(-0.45, -0.7, 10.0)
+    normal_turn_in_right = get_kia_ev6_ff_scale(0.45, 0.7, 10.0)
+    normal_unwind_left = get_kia_ev6_ff_scale(-0.45, 0.7, 10.0)
+    normal_unwind_right = get_kia_ev6_ff_scale(0.45, -0.7, 10.0)
 
     monkeypatch.setattr(latcontrol_vehicle_tunes, "kia_ev6_lateral_testing_ground_active", lambda: True)
-    assert get_kia_ev6_ff_scale(0.45, 0.0, 10.0) == pytest.approx(normal_steady)
-    assert get_kia_ev6_ff_scale(0.45, 0.7, 10.0) > normal_turn_in_left + 0.08
-    assert get_kia_ev6_ff_scale(-0.45, -0.7, 10.0) > normal_turn_in_right + 0.10
-    assert get_kia_ev6_ff_scale(0.45, -0.7, 10.0) < normal_unwind_left - 0.04
-    assert get_kia_ev6_ff_scale(-0.45, 0.7, 10.0) < normal_unwind_right - 0.02
+    assert get_kia_ev6_ff_scale(-0.45, 0.0, 10.0) == pytest.approx(normal_steady)
+    assert get_kia_ev6_ff_scale(-0.45, -0.7, 10.0) > normal_turn_in_left + 0.08
+    assert get_kia_ev6_ff_scale(0.45, 0.7, 10.0) > normal_turn_in_right + 0.10
+    assert get_kia_ev6_ff_scale(-0.45, 0.7, 10.0) < normal_unwind_left - 0.04
+    assert get_kia_ev6_ff_scale(0.45, -0.7, 10.0) < normal_unwind_right - 0.02
 
   def test_kia_ev6_jwarm_abrupt_low_speed_phase_correction_is_bounded(self):
     calm_low_speed = get_kia_ev6_jwarm_phase_confidence(6.0, 0.25)

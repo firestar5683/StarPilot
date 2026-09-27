@@ -4009,7 +4009,8 @@ def _kia_ev6_transition_phase(desired_lateral_accel: float, desired_lateral_jerk
 
 
 def _kia_ev6_side_value(desired_lateral_accel: float, left_value: float, right_value: float) -> float:
-  return left_value if desired_lateral_accel >= 0.0 else right_value
+  # LatControlTorque uses negative lateral acceleration for physical left turns.
+  return left_value if desired_lateral_accel <= 0.0 else right_value
 
 
 def _kia_ev6_transition_envelope(v_ego: float, desired_lateral_accel: float, desired_lateral_jerk: float) -> float:
