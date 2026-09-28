@@ -215,6 +215,24 @@ class TestVolkswagenMqbLongSafety(TestVolkswagenMqbSafetyBase):
         # ensure the optional secondary accel field remains inactive for now
         self.assertEqual(is_inactive_accel, self._tx(self._acc_07_msg(accel, secondary_accel=accel)), (controls_allowed, accel))
 
+  def test_accel_safety_check_gas_override(self):
+    # While the driver presses the gas, longitudinal actuation stays blocked: only the inactive value and a zero
+    # request (the ACC_OVERRIDE frame the drivetrain coordinator expects) are allowed, and zero only while engaged
+    self._rx(self._user_gas_msg(self.GAS_PRESSED_THRESHOLD + 1))
+    for controls_allowed in [True, False]:
+      self.safety.set_controls_allowed(controls_allowed)
+      self.assertFalse(self.safety.get_longitudinal_allowed())
+      for accel in np.concatenate((np.arange(MIN_ACCEL - 2, MAX_ACCEL + 2, 0.03), [0, self.INACTIVE_ACCEL])):
+        accel = round(accel, 2)  # floats might not hit exact boundary conditions without rounding
+        send = accel == self.INACTIVE_ACCEL or (controls_allowed and accel == 0)
+        self.assertEqual(send, self._tx(self._acc_06_msg(accel)), (controls_allowed, accel))
+        self.assertEqual(send, self._tx(self._acc_07_msg(accel)), (controls_allowed, accel))
+
+    # Releasing the gas restores the full actuation range
+    self._rx(self._user_gas_msg(0))
+    self.safety.set_controls_allowed(True)
+    self.assertTrue(self._tx(self._acc_06_msg(-1.0)))
+
 
 if __name__ == "__main__":
   unittest.main()
