@@ -171,7 +171,10 @@ class CarController(CarControllerBase):
       else:
         lead_distance = 0
         if hud_control.leadVisible and self.frame * DT_CTRL > 1.0:  # Don't display lead until we know the scaling factor
-          lead_distance = 512 if CS.upscale_lead_car_signal else 8
+          if CS.upscale_lead_car_signal and hud_control.leadDistanceRatio > 0:
+            lead_distance = mqbcan.lead_icon_position(hud_control.leadDistanceRatio, CS.out.standstill)
+          else:
+            lead_distance = 512 if CS.upscale_lead_car_signal else 8
         acc_hud_status = self.CCS.acc_hud_status_value(CS.out.cruiseState.available, CS.out.accFaulted, CC.longActive)
         # FIXME: PQ may need to use the on-the-wire mph/kmh toggle to fix rounding errors
         # FIXME: Detect clusters with vEgoCluster offsets and apply an identical vCruiseCluster offset

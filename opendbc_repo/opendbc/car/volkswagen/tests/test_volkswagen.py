@@ -1,11 +1,14 @@
 import random
 import re
+from types import SimpleNamespace
 
 import pytest
 
 from opendbc.can.packer import CANPacker
 from opendbc.car import Bus
-from opendbc.car.structs import CarParams
+from opendbc.car.structs import CarControl, CarParams
+from opendbc.car.volkswagen import mqbcan
+from opendbc.car.volkswagen.carcontroller import CarController
 from opendbc.car.volkswagen.interface import CarInterface
 from opendbc.car.volkswagen.fingerprints import FW_VERSIONS
 from opendbc.car.volkswagen.mqbcan import volkswagen_meb_alt_crc_checksum, volkswagen_mqb_meb_checksum
@@ -166,3 +169,36 @@ class TestVolkswagenPlatformConfigs:
 
                 expected_matches = {platform} if should_match else set()
                 assert expected_matches == matches, "Bad match"
+
+
+class TestVolkswagenMqbLeadIcon:
+  def test_position_scale(self):
+    assert mqbcan.lead_icon_position(1.0, False) == 100
+    assert mqbcan.lead_icon_position(0.5, False) == 34  # closer than the set gap: floor
+    assert mqbcan.lead_icon_position(20.0, False) == 1021
+    assert 100 < mqbcan.lead_icon_position(1.3, False) < mqbcan.lead_icon_position(1.8, False) < 1021
+
+  def test_standstill_not_shown_as_too_close(self):
+    assert mqbcan.lead_icon_position(0.85, True) == 101
+    assert mqbcan.lead_icon_position(1.5, True) == mqbcan.lead_icon_position(1.5, False)
+
+  @staticmethod
+  def _sent_lead_distance(lead_visible, ratio, upscale=True):
+    CP = CarInterface.get_params(CAR.VOLKSWAGEN_GOLF_MK7, {bus: {} for bus in range(8)}, [], True, False, False, None)
+    controller = CarController(DBC[CP.carFingerprint], CP)
+    controller.frame = controller.CCP.ACC_HUD_STEP * 200  # a frame that sends ACC_02, after the 1 s display delay
+    CS = SimpleNamespace(out=SimpleNamespace(gasPressed=False, standstill=False, cruiseState=SimpleNamespace(available=True),
+                                             accFaulted=False, steeringPressed=False, vEgoRaw=10.0),
+                         upscale_lead_car_signal=upscale, ldw_stock_values={}, gra_stock_values={"COUNTER": 0},
+                         acc_type=0, esp_hold_confirmation=False, eps_stock_values={})
+    CC = CarControl(enabled=True, longActive=True)
+    CC.hudControl.leadVisible = lead_visible
+    CC.hudControl.leadDistanceRatio = ratio
+    sent = [d for addr, d, bus in controller.update(CC.as_reader(), CS, 0, SimpleNamespace(vEgoStopping=0.5))[1] if addr == 0x30C]
+    return (int.from_bytes(bytes(sent[0]), 'little') >> 24) & 0x3FF
+
+  def test_hud_uses_openpilot_lead(self):
+    assert self._sent_lead_distance(True, 1.0) == 100
+    assert self._sent_lead_distance(True, 0.0) == 512  # no ratio: fixed position as before
+    assert self._sent_lead_distance(False, 1.0) == 0
+    assert self._sent_lead_distance(True, 1.0, upscale=False) == 8  # analogue cluster scale unknown: unchanged

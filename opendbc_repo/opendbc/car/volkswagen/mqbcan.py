@@ -1,3 +1,5 @@
+import math
+
 from opendbc.car.crc import CRC8H2F
 
 
@@ -126,6 +128,16 @@ def create_acc_accel_control(packer, bus, acc_type, acc_enabled, accel, acc_cont
   commands.append(packer.make_can_msg("ACC_07", bus, acc_07_values))
 
   return commands
+
+
+def lead_icon_position(distance_ratio, standstill):
+  # ACC_02.ACC_Abstandsindex on digital clusters, on the stock radar's scale (2016 Golf Mk7 fit):
+  # ~100 = lead at the set gap, log scale above it, floor of 34 when closer than the set gap.
+  # Stopped behind a car, the stock radar reports at least ~101.
+  position = 100 + 607 * math.log(distance_ratio)
+  if standstill:
+    position = max(position, 101)
+  return int(min(max(position, 34), 1021))
 
 
 def create_acc_hud_control(packer, bus, acc_hud_status, set_speed, lead_distance, distance):
