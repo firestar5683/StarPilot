@@ -41,11 +41,12 @@ class MainLayout(Widget):
 
     gui_app.push_widget(self)
 
-    self._onboarding_window = None
+    # Only retained by the nav stack while onboarding is active, so its
+    # training textures can be released as soon as it is popped
     if not PC:
-      self._onboarding_window = OnboardingWindow()
-      if not self._onboarding_window.completed:
-        gui_app.push_widget(self._onboarding_window)
+      onboarding_window = OnboardingWindow()
+      if not onboarding_window.completed:
+        gui_app.push_widget(onboarding_window)
 
     # TICI/TIZI offroad views are mostly static. Keep onroad and interaction
     # at the normal rate, but avoid spending GPU/CPU budget redrawing idle UI.

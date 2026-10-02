@@ -43,9 +43,13 @@ class TrainingGuide(Widget):
     self._step = 0
     self._load_image_paths()
 
-    # Load first image now so we show something immediately
-    self._textures = [gui_app.texture(self._image_paths[0])]
+    # Load first image now so we show something immediately. This texture is owned by the
+    # guide (not gui_app's cache), so release() can safely unload it.
+    self._textures = [gui_app.texture(self._image_paths[0], cache=False)]
     self._image_objs = []
+
+    self._released = False
+    self._lock = threading.Lock()
 
     threading.Thread(target=self._preload_thread, daemon=True).start()
 
@@ -58,7 +62,33 @@ class TrainingGuide(Widget):
     # PNG loading is slow in raylib, so we preload in a thread and upload to GPU in main thread
     # We've already loaded the first image on init
     for path in self._image_paths[1:]:
-      self._image_objs.append(gui_app._load_image_from_path(path))
+      image = gui_app._load_image_from_path(path)
+      with self._lock:
+        if self._released:
+          rl.unload_image(image)
+          return
+        self._image_objs.append(image)
+
+  def release(self):
+    """Unload all GPU textures and any pending CPU images held by this guide.
+
+    Idempotent and one-way: once released the guide no longer renders. Both nav-stack call
+    sites (onboarding and the settings "Review Training Guide") rely on hide_event to release
+    the textures, so the guide must not be cached and re-pushed after being released.
+    """
+    with self._lock:
+      self._released = True
+      textures, self._textures = self._textures, []
+      images, self._image_objs = self._image_objs, []
+
+    for texture in textures:
+      rl.unload_texture(texture)
+    for image in images:
+      rl.unload_image(image)
+
+  def hide_event(self):
+    self.release()
+    super().hide_event()
 
   def _handle_mouse_release(self, mouse_pos):
     if rl.check_collision_point_rec(mouse_pos, STEP_RECTS[self._step]):
@@ -82,10 +112,17 @@ class TrainingGuide(Widget):
           self._completed_callback()
 
   def _update_state(self):
+    # Main-thread only. _lock guards the lists against the preload thread; _released is read
+    # here without it, which is safe only because release() also runs on the main thread.
+    if self._released:
+      return
     if len(self._image_objs):
       self._textures.append(gui_app._load_texture_from_image(self._image_objs.pop(0)))
 
   def _render(self, _):
+    if not self._textures:
+      return -1
+
     # Safeguard against fast tapping
     step = min(self._step, len(self._textures) - 1)
     rl.draw_texture(self._textures[step], 0, 0, rl.WHITE)
@@ -201,12 +238,12 @@ class OnboardingWindow(Widget):
     gui_app.pop_widget()
 
   def _render(self, _):
-    if self._training_guide is None:
-      self._training_guide = TrainingGuide(completed_callback=self._on_completed_training)
-
     if self._state == OnboardingState.TERMS:
       self._terms.render(self._rect)
-    if self._state == OnboardingState.ONBOARDING:
+    elif self._state == OnboardingState.ONBOARDING:
+      # Rendered inline, so register as a child: hide_event propagation releases the textures.
+      if self._training_guide is None:
+        self._training_guide = self._child(TrainingGuide(completed_callback=self._on_completed_training))
       self._training_guide.render(self._rect)
     elif self._state == OnboardingState.DECLINE:
       self._decline_page.render(self._rect)
