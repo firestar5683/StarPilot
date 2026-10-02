@@ -8,6 +8,7 @@ import cereal.messaging as messaging
 
 from cereal import car, custom, log
 
+from openpilot.common.gps import use_car_gps
 from openpilot.common.params import Params
 from openpilot.common.realtime import config_realtime_process, Priority, Ratekeeper
 from openpilot.common.swaglog import cloudlog, ForwardingHandler
@@ -157,7 +158,7 @@ class Car:
       self.CI, self.CP, self.FPCP = CI, CI.CP, CI.FPCP
       self.RI = RI
 
-    car_gps_supported = bool(getattr(self.CI.CS, 'car_gps_supported', False))
+    car_gps_supported = bool(getattr(self.CI.CS, 'car_gps_supported', False)) and use_car_gps(self.params, self.CP)
     self.params.put_bool("CarGpsAvailable", car_gps_supported)
     if car_gps_supported:
       self.gps_pm = messaging.PubMaster(['gpsLocationExternal'])
@@ -377,7 +378,7 @@ class Car:
     """carState and carParams publish loop"""
 
     get_car_gps = getattr(self.CI.CS, 'get_car_gps', None)
-    car_gps = get_car_gps() if get_car_gps is not None else None
+    car_gps = get_car_gps() if get_car_gps is not None and self.gps_pm is not None else None
     now = time.monotonic()
     if car_gps is not None and car_gps['timestamp_nanos'] > self._last_car_gps_timestamp_nanos:
       self._last_car_gps_timestamp_nanos = car_gps['timestamp_nanos']

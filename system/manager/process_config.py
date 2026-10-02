@@ -7,7 +7,7 @@ from types import SimpleNamespace
 
 from cereal import car
 from openpilot.common.params import Params
-from opendbc.car.gps import car_gps_available
+from openpilot.common.gps import use_car_gps
 from openpilot.system.hardware import HARDWARE, PC, TICI
 from openpilot.system.manager.process import PythonProcess, NativeProcess, DaemonProcess
 
@@ -38,7 +38,7 @@ def update_car_gps_param(params: Params) -> bool | None:
     return None
 
   with car.CarParams.from_bytes(car_params) as CP:
-    available = car_gps_available(CP)
+    available = use_car_gps(params, CP)
   if available != params.get_bool("CarGpsAvailable"):
     params.put_bool("CarGpsAvailable", available)
   return available
