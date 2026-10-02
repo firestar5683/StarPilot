@@ -19,6 +19,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"BluetoothAudioAddress", {PERSISTENT, STRING}},
     {"BluetoothAudioTestActive", {CLEAR_ON_MANAGER_START | DONT_LOG, BOOL}},
     {"BluetoothDisconnectControllersOffroad", {PERSISTENT, BOOL, "0"}},
+    {"BluetoothConnected", {CLEAR_ON_MANAGER_START | DONT_LOG, BOOL}},
     {"BluetoothEnabled", {PERSISTENT, BOOL, "0"}},
     {"CalibrationParams", {PERSISTENT, BYTES}},
     {"CameraDebugExpGain", {CLEAR_ON_MANAGER_START, STRING}},
