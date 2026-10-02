@@ -39,6 +39,10 @@ SPEED_LIMIT_PROMPT_CENTER_OFFSET_X = -26
 VISION_SPEED_LIMIT_PULSE_SECONDS = 1.0
 VISION_SPEED_LIMIT_PULSE_COLOR = rl.Color(188, 132, 255, 255)
 
+# Vienna sign blend style (param "EuSignBlendStyle")
+EU_SIGN_STYLE_SIMPLE = 0
+EU_SIGN_STYLE_FULL = 1
+
 
 @dataclass(frozen=True)
 class FontSizes:
@@ -545,13 +549,23 @@ class HudRenderer(Widget):
     widget_color = self._speed_limit_pulse_color(rl.Color(255, 255, 255, 255), sign_alpha)
 
     if use_vienna_speed_limit:
+      eu_sign_style = ui_state.ui_params.get_int("EuSignBlendStyle", return_default=True, default=EU_SIGN_STYLE_SIMPLE)
+      if eu_sign_style == EU_SIGN_STYLE_FULL:
+        disk_alpha = int(sign_alpha * 0.45)
+        ring_alpha = int(sign_alpha * 0.85)
+        text_alpha = int(sign_alpha * 0.92)
+      else:
+        disk_alpha = int(sign_alpha * 0.75)
+        ring_alpha = sign_alpha
+        text_alpha = sign_alpha
+
       center_x = sign_x + sign_width / 2
       center_y = sign_y + sign_height / 2
       radius = sign_width / 2
-      ring_color = self._speed_limit_pulse_color(rl.Color(201, 34, 49, 255), sign_alpha)
-      text_color = self._speed_limit_pulse_color(rl.Color(0, 0, 0, 255), sign_alpha)
+      ring_color = self._speed_limit_pulse_color(rl.Color(201, 34, 49, 255), ring_alpha)
+      text_color = self._speed_limit_pulse_color(rl.Color(0, 0, 0, 255), text_alpha)
 
-      rl.draw_circle(int(center_x), int(center_y), radius, rl.Color(255, 255, 255, sign_alpha))
+      rl.draw_circle(int(center_x), int(center_y), radius, rl.Color(255, 255, 255, disk_alpha))
       rl.draw_ring(
         rl.Vector2(center_x, center_y),
         radius - 12,
