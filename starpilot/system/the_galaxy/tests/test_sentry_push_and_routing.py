@@ -5,6 +5,8 @@ import pytest
 
 from test_dashboard_stats import FakeParams, MODULE_DIR, _install_server_import_stubs
 
+from openpilot.starpilot.system.the_galaxy import sentry_backend
+
 
 def _load_server_module():
   import importlib.util
@@ -145,7 +147,7 @@ def test_sentry_push_subscribe_lifecycle(client):
 
 def test_sentry_vapid_corrupt_file_self_healing(tmp_path, monkeypatch):
   monkeypatch.setattr(the_galaxy, "_get_galaxy_dir", lambda: tmp_path)
-  key_path, _ = the_galaxy._sentry_push_paths()
+  key_path, _ = sentry_backend._sentry_push_paths()
   key_path.parent.mkdir(parents=True, exist_ok=True)
 
   # Write 0-byte corrupted file
@@ -153,8 +155,8 @@ def test_sentry_vapid_corrupt_file_self_healing(tmp_path, monkeypatch):
   assert key_path.stat().st_size == 0
 
   # Should self-heal and generate valid key
-  vapid = the_galaxy._get_sentry_vapid()
+  vapid = sentry_backend._get_sentry_vapid()
   assert vapid is not None
   assert key_path.stat().st_size > 0
-  pub_key = the_galaxy._sentry_vapid_public_key(vapid)
+  pub_key = sentry_backend._sentry_vapid_public_key(vapid)
   assert len(pub_key) > 20
