@@ -7,6 +7,7 @@ export const GalaxyModal = {
     confirmLabel: { type: String, default: "Confirm" },
     cancelLabel: { type: String, default: "Cancel" },
     danger: { type: Boolean, default: false },
+    dismissible: { type: Boolean, default: true },
     sheet: { type: Boolean, default: true },
     input: { type: Boolean, default: false },
     inputValue: { type: String, default: "" },
@@ -30,7 +31,7 @@ export const GalaxyModal = {
   },
   template: `
     <transition name="gx-fade">
-      <div v-if="modelValue" class="gx-scrim" @click.self="cancel">
+      <div v-if="modelValue" class="gx-scrim" @click.self="dismissible && cancel()">
         <transition name="gx-slide" appear>
           <div class="gx-sheet" role="dialog" :aria-label="title">
             <h3 class="gx-sheet__title">{{ title }}</h3>
@@ -48,7 +49,7 @@ export const GalaxyModal = {
   `,
 }
 
-export function GalaxyConfirm({ title, message, confirmLabel = "Confirm", danger = false } = {}) {
+export function GalaxyConfirm({ title, message, confirmLabel = "Confirm", cancelLabel = "Cancel", danger = false, dismissible = true } = {}) {
   return new Promise((resolve) => {
     const host = document.createElement("div")
     document.body.appendChild(host)
@@ -69,7 +70,9 @@ export function GalaxyConfirm({ title, message, confirmLabel = "Confirm", danger
           title,
           message,
           confirmLabel,
+          cancelLabel,
           danger,
+          dismissible,
           "onUpdate:modelValue": (v) => { if (!v) finish(false) },
           onConfirm: () => finish(true),
           onCancel: () => finish(false),

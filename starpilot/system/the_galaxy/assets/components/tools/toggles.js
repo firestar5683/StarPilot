@@ -305,6 +305,7 @@ export function ToggleControl() {
     <div class="toggle-control-wrapper">
       <section class="toggle-control-widget">
         <div class="toggle-control-title">Backup/Restore Toggles</div>
+        <p><a class="toggle-control-button" href="/mobile#/system">Full Device Backup and Restore</a></p>
         <p class="toggle-control-text">
           Use the buttons below to backup or restore your toggles.
         </p>

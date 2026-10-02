@@ -222,6 +222,13 @@ export const api = {
     if (!response.ok) throw new Error("System monitor unavailable")
     return response.json()
   },
+  // Builds the ZIP on disk and returns a URL to stream it, so the browser never buffers it in memory.
+  prepareDeviceBackup() { return request("/api/device_backup/download", { method: "POST" }) },
+  deviceRestoreStatus() { return request("/api/device_backup/status", { cache: "no-store" }) },
+  rebootAfterDeviceRestore(downloadModels) { return request("/api/device_backup/reboot", { method: "POST", data: { downloadModels } }) },
+  discardDeviceRecovery() { return request("/api/device_backup/recovery", { method: "DELETE", data: { confirm: true } }) },
+  // Raw body, not multipart, so the server can stream it to /data.
+  restoreDevice(file) { return request("/api/device_backup/restore", { method: "POST", form: file, headers: { "Content-Type": "application/zip" } }) },
   async backupToggles() {
     const res = await fetch("/api/toggles/backup", { method: "POST" })
     if (!res.ok) {
@@ -248,8 +255,8 @@ export const api = {
   },
   installUpdateVersion(branch, commit) { return request("/api/update/version", { method: "POST", data: { branch, commit, confirmed: true } }) },
   updateFast() { return request("/api/update/fast", { method: "POST" }) },
-  getUpdateFastStatus() {
-    return request("/api/update/fast/status", { cache: "no-store" }).then((data) => {
+  getUpdateFastStatus({ local = false } = {}) {
+    return request("/api/update/fast/status" + (local ? "?local=1" : ""), { cache: "no-store" }).then((data) => {
       if (!data || typeof data !== "object" || typeof data.running !== "boolean") throw new Error(data?.error || "Update status unavailable.")
       return data
     })
@@ -405,6 +412,27 @@ export const api = {
     const src = URL.createObjectURL(await res.blob())
     return { src, cleanup: () => URL.revokeObjectURL(src) }
   },
+}
+
+// Navigates to a same-origin download URL so the browser streams it to disk.
+export function downloadUrl(url, filename = "") {
+  const link = document.createElement("a")
+  link.href = url
+  link.download = filename
+  document.body.appendChild(link)
+  link.click()
+  link.remove()
+}
+
+export function downloadBlob(blob, filename) {
+  const url = URL.createObjectURL(blob)
+  const a = document.createElement("a")
+  a.href = url
+  a.download = filename
+  document.body.appendChild(a)
+  a.click()
+  a.remove()
+  setTimeout(() => URL.revokeObjectURL(url), 60000)
 }
 
 export function showSnackbar(message, level = "info") {

@@ -126,6 +126,17 @@ def _record_quota_backoff(retry_at, raw=False):
       _api_backoff_until, _api_retry_at = deadline, retry_at
 
 
+def parse_display_version(source):
+  """Read only the numeric display-version literal; never import or execute the code."""
+  assignments = re.findall(r'^STARPILOT_DISPLAY_VERSION\b[^\r\n]*', source, re.MULTILINE)
+  if len(assignments) != 1:
+    raise ValueError()
+  match = re.fullmatch(r"""STARPILOT_DISPLAY_VERSION[ \t]*=[ \t]*(['"])((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))\1[ \t]*(?:#[^\r\n]*)?""", assignments[0])
+  if match is None:
+    raise ValueError()
+  return match.group(2)
+
+
 def _get_display_version(url):
   """Read only the numeric version literal; never import or execute remote code."""
   with _cache_lock:
@@ -137,14 +148,7 @@ def _get_display_version(url):
       raw = response.read(MAX_VERSION_BYTES + 1)
     if len(raw) > MAX_VERSION_BYTES:
       raise VersionHistoryError('GitHub version metadata is too large; retry later.')
-    source = raw.decode('utf-8')
-    assignments = re.findall(r'^STARPILOT_DISPLAY_VERSION\b[^\r\n]*', source, re.MULTILINE)
-    if len(assignments) != 1:
-      raise ValueError()
-    match = re.fullmatch(r"""STARPILOT_DISPLAY_VERSION[ \t]*=[ \t]*(['"])((?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*)\.(?:0|[1-9][0-9]*))\1[ \t]*(?:#[^\r\n]*)?""", assignments[0])
-    if match is None:
-      raise ValueError()
-    return match.group(2)
+    return parse_display_version(raw.decode('utf-8'))
   except HTTPError as error:
     error.close()
     if error.code == 404:
