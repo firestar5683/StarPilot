@@ -173,7 +173,9 @@ from openpilot.starpilot.common.testing_grounds import (
 from openpilot.starpilot.navigation.destination_store import normalize_destination_payload, routing_configured, update_recent_destinations
 from openpilot.starpilot.system.the_galaxy.factory_reset import remove_path as _run_factory_reset_delete
 from openpilot.starpilot.system.the_galaxy import flm_workspace, utilities
-from openpilot.starpilot.system.the_galaxy.update_recovery import inspect_interrupted_update, public_recovery_status, recover_interrupted_update
+from openpilot.starpilot.system.the_galaxy.update_recovery import (
+  SHALLOW_LOCK_NAME, inspect_interrupted_update, public_recovery_status, recover_interrupted_update,
+)
 from openpilot.starpilot.system.bluetooth import BluetoothClient
 from openpilot.starpilot.system.wheel_controls import (
   CONTROLLER_ACTION_OPTIONS,
@@ -1764,6 +1766,7 @@ _FAST_UPDATE_REBOOT_NOTICE_SECONDS = 6.0
 _FAST_UPDATE_FETCH_TIMEOUT_S = 60
 _FAST_BRANCH_SWITCH_FETCH_TIMEOUT_S = 60
 _FAST_ROLLBACK_FETCH_TIMEOUT_S = 60
+_GIT_TERMINATE_GRACE_S = 5.0
 _AGNOS_MANIFEST_PATH = "system/hardware/tici/agnos.json"
 _AGNOS_REMOTE_MANIFEST_TIMEOUT_S = 8
 _AGNOS_UPDATE_ESTIMATED_DOWNLOAD_MB = 900
@@ -2533,6 +2536,25 @@ def _build_shallow_fetch_commit_args(commit):
     commit,
   ]
 
+def _stop_git_process(process, grace=None):
+  """SIGTERM lets git remove its lock files; SIGKILL leaves them behind, so it is only the fallback."""
+  grace = _GIT_TERMINATE_GRACE_S if grace is None else grace
+  if process.poll() is not None:
+    return
+  try:
+    process.terminate()
+    process.wait(timeout=grace)
+    return
+  except subprocess.TimeoutExpired:
+    pass
+  except OSError:
+    return
+  try:
+    process.kill()
+    process.wait(timeout=grace)
+  except (OSError, subprocess.TimeoutExpired):
+    pass
+
 def _run_git_with_progress(repo_path, args, timeout, step, label):
   cmd = [*_git_base_cmd(), *args]
 
@@ -2614,10 +2636,7 @@ def _run_git_with_progress(repo_path, args, timeout, step, label):
     while True:
       now = time.monotonic()
       if timeout and (now - last_activity_at) > timeout:
-        try:
-          process.kill()
-        except Exception:
-          pass
+        _stop_git_process(process)
         tail = output_tail[-1] if output_tail else ""
         suffix = f" (last output: {tail})" if tail else ""
         raise TimeoutError(f"git {' '.join(args)} stalled for {int(timeout)}s without output{suffix}")
@@ -2690,15 +2709,17 @@ def _run_git_with_progress(repo_path, args, timeout, step, label):
   return return_code, "\n".join(output_tail[-40:])
 
 def _run_git(repo_path, args, timeout=30):
-  return subprocess.run(
-    [*_git_base_cmd(), *args],
-    cwd=repo_path,
-    capture_output=True,
-    text=True,
-    timeout=timeout,
-    check=False,
-    env=_git_command_env(),
-  )
+  cmd = [*_git_base_cmd(), *args]
+  with subprocess.Popen(cmd, cwd=repo_path, stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True,
+                        env=_git_command_env()) as process:
+    try:
+      stdout, stderr = process.communicate(timeout=timeout)
+    except subprocess.TimeoutExpired:
+      # subprocess.run would SIGKILL here, leaving index.lock behind after reset/checkout.
+      # Don't drain the pipes afterwards: a hook or filter git started can hold them open long after git exits.
+      _stop_git_process(process)
+      raise
+  return subprocess.CompletedProcess(cmd, process.returncode, stdout, stderr)
 
 def _git_stdout(repo_path, args, timeout=15):
   result = _run_git(repo_path, args, timeout=timeout)
@@ -2893,6 +2914,9 @@ def _finish_update_and_reboot(message):
 
 def _set_fast_update_error_state(message, exception):
   error_text = str(exception).strip() or "Unknown error"
+  if f"{SHALLOW_LOCK_NAME}': File exists" in error_text:
+    # Recover clears this lock once no git process is using it.
+    message = f"{message} An interrupted update left a Git lock behind. Tap Recover."
   _set_fast_update_state(
     running=False,
     stage="error",
