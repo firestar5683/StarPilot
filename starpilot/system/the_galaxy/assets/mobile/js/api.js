@@ -248,8 +248,8 @@ export const api = {
   },
   installUpdateVersion(branch, commit) { return request("/api/update/version", { method: "POST", data: { branch, commit, confirmed: true } }) },
   updateFast() { return request("/api/update/fast", { method: "POST" }) },
-  getUpdateFastStatus() {
-    return request("/api/update/fast/status", { cache: "no-store" }).then((data) => {
+  getUpdateFastStatus({ local = false } = {}) {
+    return request("/api/update/fast/status" + (local ? "?local=1" : ""), { cache: "no-store" }).then((data) => {
       if (!data || typeof data !== "object" || typeof data.running !== "boolean") throw new Error(data?.error || "Update status unavailable.")
       return data
     })
