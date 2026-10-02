@@ -21,6 +21,9 @@ class CarGpsConfig:
   brand: str
   messages: tuple[str, ...]
   decoder: CanGpsDecoder
+  # True when the CAN messages carry real UTC time. False when the decoder has to fill the
+  # timestamp from the device clock, in which case this source can't correct a stale clock.
+  provides_time: bool = True
 
 
 def _dop_accuracy(dop: float, default: float = 500.0) -> float:
@@ -151,6 +154,7 @@ CAR_GPS_CONFIGS: dict[str, CarGpsConfig] = {
       brand="gm",
       messages=CHEVROLET_BOLT_GPS_MESSAGES,
       decoder=parse_chevrolet_bolt_can_gps,
+      provides_time=False,  # TCICOnStarGPSPosition has no time fields
     )
     for car in CHEVROLET_BOLT_GPS_CARS
   },
@@ -164,3 +168,8 @@ def get_car_gps_config(CP) -> CarGpsConfig | None:
 
 def car_gps_available(CP) -> bool:
   return get_car_gps_config(CP) is not None
+
+
+def car_gps_provides_time(CP) -> bool:
+  config = get_car_gps_config(CP)
+  return config is not None and config.provides_time
