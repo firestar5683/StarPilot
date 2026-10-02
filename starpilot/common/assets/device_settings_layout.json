@@ -2646,6 +2646,34 @@
         "settings_tier": "simple"
       },
       {
+        "key": "SpeedometerSource",
+        "label": "Speedometer Source",
+        "description": "comma4 only. Choose what the driving screen's current-speed readout is derived from: CAN (the car's own speed signal), GPS (satellite-derived speed, useful if your car's speedometer over-reports), or Both (shows GPS with a small badge noting the CAN difference). Off hides the speedometer.",
+        "picker_description": "comma4 only. Chooses the speedometer's speed source (Off/CAN/GPS/Both).",
+        "data_type": "int",
+        "ui_type": "dropdown",
+        "options": [
+          {
+            "value": 0,
+            "label": "Off"
+          },
+          {
+            "value": 1,
+            "label": "CAN"
+          },
+          {
+            "value": 2,
+            "label": "GPS"
+          },
+          {
+            "value": 3,
+            "label": "Both"
+          }
+        ],
+        "parent_key": "AdvancedCustomUI",
+        "settings_tier": "simple"
+      },
+      {
         "key": "HolidayThemes",
         "label": "Holiday Themes",
         "description": "Automatically apply seasonal theme assets during holiday windows. Turn this off to keep your normal theme year-round.",

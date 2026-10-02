@@ -651,6 +651,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"ShowSLCOffset", {PERSISTENT, BOOL, "1", "0", 0}},
     {"ShowSpeedLimits", {PERSISTENT, BOOL, "1", "0", 1, SETTINGS_SIMPLE}},
     {"ShowSteering", {PERSISTENT, BOOL, "0", "0", 3}},
+    {"SpeedometerSource", {PERSISTENT, INT, "1", "1", 1, SETTINGS_SIMPLE}},
     {"ShowStoppingPoint", {PERSISTENT, BOOL, "1", "0", 3}},
     {"ShowStoppingPointMetrics", {PERSISTENT, BOOL, "1", "0", 3}},
     {"ShowStorageLeft", {PERSISTENT, BOOL, "0", "0", 3}},
