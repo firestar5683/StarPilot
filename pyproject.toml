@@ -150,6 +150,7 @@ build-backend = "hatchling.build"
 
 [tool.hatch.build.targets.wheel]
 packages = [ "." ]
+dev-mode-dirs = [ "." ]
 
 [tool.hatch.metadata]
 allow-direct-references = true
