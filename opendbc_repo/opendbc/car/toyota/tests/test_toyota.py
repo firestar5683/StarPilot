@@ -12,7 +12,7 @@ from opendbc.car.toyota import toyotacan
 from opendbc.car.toyota.carcontroller import CarController, get_camry_hybrid_feedforward, get_long_tune, get_prius_feedforward, \
                                              get_prius_positive_feedforward_scale, \
                                              get_rav4_interceptor_pedal_scale, \
-                                             get_toyota_lat_active, get_toyota_steer_rate_limit, \
+                                             get_toyota_lat_active, get_toyota_steer_rate_limit, LOCK_CMD, UNLOCK_CMD, \
                                              MAX_STEER_RATE, MAX_STEER_RATE_FRAMES, MAX_USER_TORQUE, \
                                              limit_interceptor_pcm_accel, \
                                              limit_interceptor_stopping_accel, limit_no_lead_cruise_sign_flip, \
@@ -877,6 +877,45 @@ class TestToyotaCarController:
     cs.out.gasPressed = True
     controller.update_auto_hold_state(cs, activation_frames=0)
     assert not controller.brake_hold_active
+
+  @pytest.mark.parametrize("trigger", [1, 2])
+  def test_doors_unlock_at_stop_and_relock_once_moving(self, trigger):
+    controller = self._make_controller()
+    controller.doors_locked = False
+    controller.doors_moved = False
+    toggles = SimpleNamespace(lock_doors=True, lock_doors_speed=0.0, unlock_doors=True, unlock_doors_trigger=trigger)
+    gear = structs.CarState.GearShifter
+    park, drive = gear.park, gear.drive
+
+    def step(gear_shifter, v_ego):
+      stopped = v_ego == 0.0
+      cs = SimpleNamespace(out=SimpleNamespace(gearShifter=gear_shifter, vEgo=v_ego, standstill=stopped, brakeHoldActive=stopped))
+      return [msg.dat for msg in controller._update_door_locks(cs, toggles)]
+
+    assert step(park, 0.0) == []
+    assert step(drive, 0.0) == [LOCK_CMD]
+    assert step(drive, 0.0) == []
+    assert step(drive, 1.0) == []
+    assert step(drive, 5.0) == []
+    assert step(drive, 0.0) == [UNLOCK_CMD]
+    assert step(drive, 0.0) == []
+    assert step(drive, 1.0) == []
+    assert step(drive, 0.0) == []
+    assert step(drive, 3.0) == [LOCK_CMD]
+    assert step(drive, 0.0) == [UNLOCK_CMD]
+    assert step(park, 0.0) == []
+
+  def test_doors_only_unlock_in_park_by_default(self):
+    controller = self._make_controller()
+    controller.doors_locked = True
+    controller.doors_moved = True
+    toggles = SimpleNamespace(lock_doors=True, lock_doors_speed=0.0, unlock_doors=True, unlock_doors_trigger=0)
+    gear = structs.CarState.GearShifter
+
+    cs = SimpleNamespace(out=SimpleNamespace(gearShifter=gear.drive, vEgo=0.0, standstill=True, brakeHoldActive=True))
+    assert controller._update_door_locks(cs, toggles) == []
+    cs.out.gearShifter = gear.park
+    assert [msg.dat for msg in controller._update_door_locks(cs, toggles)] == [UNLOCK_CMD]
 
   def test_toyota_auto_hold_does_not_trigger_without_brake_press(self):
     controller = self._make_controller()
