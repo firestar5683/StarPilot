@@ -767,6 +767,7 @@ class StarPilotVariables:
     toggle.use_wheel_speed = self.get_value("WheelSpeed", condition=advanced_custom_ui)
 
     advanced_lateral_tuning = self.get_value("AdvancedLateralTune")
+    toggle.camera_offset = self.get_value("CameraOffset", cast=float)
     toggle.lane_centering = self.get_value("LaneCentering")
     toggle.lane_centering_pause_on_signal = self.get_value(
       "LaneCenteringPauseOnSignal", condition=toggle.lane_centering, default=True,
