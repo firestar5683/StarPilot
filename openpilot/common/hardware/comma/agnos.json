@@ -56,9 +56,9 @@
   },
   {
     "name": "boot",
-    "url": "https://files.firestar.link/x/0hw6wkwrteap/boot31.img.xz",
+    "url": "https://files.firestar.link/x/31f0wvnkr4vh/boot31.img.xz",
     "fallback_urls": [
-      "https://files-east.firestar.link/x/jva5zvfzjtf0/boot31.img.xz"
+      "https://files-east.firestar.link/x/191w2n28bgbb/boot31.img.xz"
     ],
     "hash": "ac3863c3834a94986647eb61d21796e7550095a18e0119c9102cab06ce390417",
     "hash_raw": "ac3863c3834a94986647eb61d21796e7550095a18e0119c9102cab06ce390417",
@@ -70,16 +70,16 @@
   },
   {
     "name": "system",
-    "url": "https://files.firestar.link/x/vdoh0gaahxwo/system32.img.xz",
+    "url": "https://files.firestar.link/x/ffkgctpyunid/system30.img.xz",
     "fallback_urls": [
-      "https://files-east.firestar.link/x/mrug9vtrb88u/system32.img.xz"
+      "https://files-east.firestar.link/x/9ft817s9f5no/system30.img.xz"
     ],
-    "hash": "81247378e8c1624e83edcd36f4af7a645769094ab646ed89c68e43c2ea6841e0",
-    "hash_raw": "b807e12ec78c224518be926b706201394056fe5d5f0e98d4414d6f3c77cabe35",
+    "hash": "9c753bdd90e6079b2cf525659d7523d0ebc0a375bd61e61cca628f1db3832cfd",
+    "hash_raw": "98e15de07c39a19b5fa17c96a67e66d4362f9ebaf7827b640f4127e3b6417da8",
     "size": 4718592000,
     "sparse": true,
     "full_check": false,
     "has_ab": true,
-    "ondevice_hash": "0cbb663906721216bcb73f3ef3df154475b27a1b78f627023faaffb6bddc027c"
+    "ondevice_hash": "9625ec32df735b26ea6b0b62834addc8b522108d5f5c4a2aebcb98fc2b94f4e9"
   }
 ]
