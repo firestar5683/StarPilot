@@ -1373,6 +1373,46 @@ BO_ 919 LDW_02: 8 XXX
  SG_ LDW_Status_LED_gruen : 62|1@1+ (1,0) [0|1] ""  XXX
  SG_ LDW_KD_Fehler : 63|1@1+ (1,0) [0|1] ""  XXX
 
+BO_ 806 BV_Linie_01: 8 XXX
+ SG_ BV_Linie_01_dy : 0|12@1+ (0.00390625,-8) [-8.00000000|7.99609375] "Unit_Meter" XXX
+ SG_ BV_Linie_01_Existenzmass : 12|6@1+ (0.015625,0) [0.000000|0.984375] "Unit_Meter" XXX
+ SG_ BV_Linie_01_Farbe : 18|3@1+ (1.0,0.0) [0.0|7] "" XXX
+ SG_ BV_Linie_01_Gierw_diff : 21|12@1+ (0.00048828125,-1) [-1.00000000000|0.99951171875] "Unit_Radia" XXX
+ SG_ BV_Linie_01_hor_Kruemm_Aend : 33|12@1+ (1,-2047) [-2047|2048] "" XXX
+ SG_ BV_Linie_01_hor_Kruemmung : 45|12@1+ (1,-2047) [-2047|2048] "" XXX
+ SG_ BV_Linie_01_Liniennummer : 57|4@1+ (1,0) [1|15] "" XXX
+ SG_ BV_Linie_01_Typ : 61|3@1+ (1.0,0.0) [0.0|7] "" XXX
+
+BO_ 807 BV_Linie_02: 8 XXX
+ SG_ BV_Linie_02_dy : 0|12@1+ (0.00390625,-8) [-8.00000000|7.99609375] "Unit_Meter" XXX
+ SG_ BV_Linie_02_Existenzmass : 12|6@1+ (0.015625,0) [0.000000|0.984375] "Unit_Meter" XXX
+ SG_ BV_Linie_02_Farbe : 18|3@1+ (1.0,0.0) [0.0|7] "" XXX
+ SG_ BV_Linie_02_Gierw_diff : 21|12@1+ (0.00048828125,-1) [-1.00000000000|0.99951171875] "Unit_Radia" XXX
+ SG_ BV_Linie_02_hor_Kruemm_Aend : 33|12@1+ (1,-2047) [-2047|2048] "" XXX
+ SG_ BV_Linie_02_hor_Kruemmung : 45|12@1+ (1,-2047) [-2047|2048] "" XXX
+ SG_ BV_Linie_02_Liniennummer : 57|4@1+ (1,0) [1|15] "" XXX
+ SG_ BV_Linie_02_Typ : 61|3@1+ (1.0,0.0) [0.0|7] "" XXX
+
+BO_ 808 BV_Linie_03: 8 XXX
+ SG_ BV_Linie_03_dy : 0|12@1+ (0.00390625,-8) [-8.00000000|7.99609375] "Unit_Meter" XXX
+ SG_ BV_Linie_03_Existenzmass : 12|6@1+ (0.015625,0) [0.000000|0.984375] "Unit_Meter" XXX
+ SG_ BV_Linie_03_Farbe : 18|3@1+ (1.0,0.0) [0.0|7] "" XXX
+ SG_ BV_Linie_03_Gierw_diff : 21|12@1+ (0.00048828125,-1) [-1.00000000000|0.99951171875] "Unit_Radia" XXX
+ SG_ BV_Linie_03_hor_Kruemm_Aend : 33|12@1+ (1,-2047) [-2047|2048] "" XXX
+ SG_ BV_Linie_03_hor_Kruemmung : 45|12@1+ (1,-2047) [-2047|2048] "" XXX
+ SG_ BV_Linie_03_Liniennummer : 57|4@1+ (1,0) [1|15] "" XXX
+ SG_ BV_Linie_03_Typ : 61|3@1+ (1.0,0.0) [0.0|7] "" XXX
+
+BO_ 809 BV_Linie_04: 8 XXX
+ SG_ BV_Linie_04_dy : 0|12@1+ (0.00390625,-8) [-8.00000000|7.99609375] "Unit_Meter" XXX
+ SG_ BV_Linie_04_Existenzmass : 12|6@1+ (0.015625,0) [0.000000|0.984375] "Unit_Meter" XXX
+ SG_ BV_Linie_04_Farbe : 18|3@1+ (1.0,0.0) [0.0|7] "" XXX
+ SG_ BV_Linie_04_Gierw_diff : 21|12@1+ (0.00048828125,-1) [-1.00000000000|0.99951171875] "Unit_Radia" XXX
+ SG_ BV_Linie_04_hor_Kruemm_Aend : 33|12@1+ (1,-2047) [-2047|2048] "" XXX
+ SG_ BV_Linie_04_hor_Kruemmung : 45|12@1+ (1,-2047) [-2047|2048] "" XXX
+ SG_ BV_Linie_04_Liniennummer : 57|4@1+ (1,0) [1|15] "" XXX
+ SG_ BV_Linie_04_Typ : 61|3@1+ (1.0,0.0) [0.0|7] "" XXX
+
 BO_ 780 ACC_02: 8 XXX
  SG_ CHECKSUM : 0|8@1+ (1,0) [0|255] ""  XXX
  SG_ COUNTER : 8|4@1+ (1,0) [0|15] ""  XXX
@@ -1610,6 +1650,12 @@ BO_ 391 Motor_EV_01: 8 Motor_MQB_BEV
  SG_ MO_HVEM_Eskalation : 54|1@1+ (1.0,0.0) [0.0|1] ""  XXX
  SG_ MO_HVEM_MaxLeistung : 55|9@1+ (50,0) [0|25450] "Unit_Watt"  XXX
 
+BO_ 1162 BV_Linien: 8 XXX
+ SG_ BV_Linie_01_dx_Vorausschau : 28|9@1+ (0.25,0) [0.00|127.75] "Unit_Meter" XXX
+ SG_ BV_Linie_02_dx_Vorausschau : 37|9@1+ (0.25,0) [0.00|127.75] "Unit_Meter" XXX
+ SG_ BV_Linie_03_dx_Vorausschau : 46|9@1+ (0.25,0) [0.00|127.75] "Unit_Meter" XXX
+ SG_ BV_Linie_04_dx_Vorausschau : 55|9@1+ (0.25,0) [0.00|127.75] "Unit_Meter" XXX
+
 CM_ SG_ 134 LWI_Lenkradwinkel "Steering angle WITH variable ratio effect included";
 CM_ SG_ 159 EPS_HCA_Status "Status of Heading Control Assist feature";
 CM_ SG_ 159 EPS_Lenkmoment "Steering input by driver, torque";
@@ -1672,8 +1718,45 @@ CM_ SG_ 1720 KBI_Tankfuellstand_Prozent "Tankfüllstand in %";
 CM_ SG_ 1720 KBI_Tankinhalt_hochaufl "angezeigter Tankinhalt hochauflösend zur Restreichweitenberechnung";
 CM_ SG_ 1720 KBI_Variante "Zeigt an ob es sich um ein konventionelles Zeiger-Kombiinstrument handelt oder um eine Volldisplay-Kombiinstrument";
 CM_ SG_ 1720 KBI_Variante_USA "In diesem Signal wird die HW-Variante des Kombis ausgegeben, ACC plausibilisiert auf dieses Signal hin seine US-Codierung";
+CM_ BO_ 806 "Front camera lane line model: own lane, left line. 12.5 Hz, no checksum/counter. Checked against openpilot modelV2 lane lines on a 2016 Golf Mk7. Lookahead distance for this line is BV_Linien.BV_Linie_01_dx_Vorausschau.";
+CM_ SG_ 806 BV_Linie_01_dy "Lateral distance to the line, positive = left. r=0.95 vs model (own-lane lines).";
+CM_ SG_ 806 BV_Linie_01_Gierw_diff "Line angle relative to the car, positive = pointing left. r=0.76 vs model (own-lane lines).";
+CM_ SG_ 806 BV_Linie_01_hor_Kruemmung "Line curvature, positive = bending left. r=0.85 vs model; roughly 2e-5 1/m per step.";
+CM_ SG_ 806 BV_Linie_01_hor_Kruemm_Aend "Curvature change along the line.";
+CM_ SG_ 806 BV_Linie_01_Existenzmass "Line existence confidence, 0 when there is no line.";
+CM_ BO_ 807 "Front camera lane line model: own lane, right line. 12.5 Hz, no checksum/counter. Checked against openpilot modelV2 lane lines on a 2016 Golf Mk7. Lookahead distance for this line is BV_Linien.BV_Linie_02_dx_Vorausschau.";
+CM_ SG_ 807 BV_Linie_02_dy "Lateral distance to the line, positive = left. r=0.95 vs model (own-lane lines).";
+CM_ SG_ 807 BV_Linie_02_Gierw_diff "Line angle relative to the car, positive = pointing left. r=0.76 vs model (own-lane lines).";
+CM_ SG_ 807 BV_Linie_02_hor_Kruemmung "Line curvature, positive = bending left. r=0.85 vs model; roughly 2e-5 1/m per step.";
+CM_ SG_ 807 BV_Linie_02_hor_Kruemm_Aend "Curvature change along the line.";
+CM_ SG_ 807 BV_Linie_02_Existenzmass "Line existence confidence, 0 when there is no line.";
+CM_ BO_ 808 "Front camera lane line model: next line out to the left. 12.5 Hz, no checksum/counter. Checked against openpilot modelV2 lane lines on a 2016 Golf Mk7. Lookahead distance for this line is BV_Linien.BV_Linie_03_dx_Vorausschau.";
+CM_ SG_ 808 BV_Linie_03_dy "Lateral distance to the line, positive = left. r=0.95 vs model (own-lane lines).";
+CM_ SG_ 808 BV_Linie_03_Gierw_diff "Line angle relative to the car, positive = pointing left. r=0.76 vs model (own-lane lines).";
+CM_ SG_ 808 BV_Linie_03_hor_Kruemmung "Line curvature, positive = bending left. r=0.85 vs model; roughly 2e-5 1/m per step.";
+CM_ SG_ 808 BV_Linie_03_hor_Kruemm_Aend "Curvature change along the line.";
+CM_ SG_ 808 BV_Linie_03_Existenzmass "Line existence confidence, 0 when there is no line.";
+CM_ BO_ 809 "Front camera lane line model: next line out to the right. 12.5 Hz, no checksum/counter. Checked against openpilot modelV2 lane lines on a 2016 Golf Mk7. Lookahead distance for this line is BV_Linien.BV_Linie_04_dx_Vorausschau.";
+CM_ SG_ 809 BV_Linie_04_dy "Lateral distance to the line, positive = left. r=0.95 vs model (own-lane lines).";
+CM_ SG_ 809 BV_Linie_04_Gierw_diff "Line angle relative to the car, positive = pointing left. r=0.76 vs model (own-lane lines).";
+CM_ SG_ 809 BV_Linie_04_hor_Kruemmung "Line curvature, positive = bending left. r=0.85 vs model; roughly 2e-5 1/m per step.";
+CM_ SG_ 809 BV_Linie_04_hor_Kruemm_Aend "Curvature change along the line.";
+CM_ SG_ 809 BV_Linie_04_Existenzmass "Line existence confidence, 0 when there is no line.";
+CM_ BO_ 1162 "How far ahead the camera sees each lane line (BV_Linie_01..04 = own lane left, own lane right, next line out left, next line out right). 0 when the line is not seen; up to 100 m on a 2016 Golf Mk7 (AU).";
 
 
+VAL_ 806 BV_Linie_01_Farbe 0 "no_line" 1 "white" 2 "red" 3 "yellow" 4 "other" 5 "not_defined" 6 "not_defined" 7 "not_defined" ;
+VAL_ 806 BV_Linie_01_Liniennummer 0 "no_line" ;
+VAL_ 806 BV_Linie_01_Typ 0 "no_line" 1 "solid" 2 "dashed" 3 "kerb" 4 "grass" 5 "Botts_dots" 6 "other" 7 "not_defined" ;
+VAL_ 807 BV_Linie_02_Farbe 0 "no_line" 1 "white" 2 "red" 3 "yellow" 4 "other" 5 "not_defined" 6 "not_defined" 7 "not_defined" ;
+VAL_ 807 BV_Linie_02_Liniennummer 0 "no_line" ;
+VAL_ 807 BV_Linie_02_Typ 0 "no_line" 1 "solid" 2 "dashed" 3 "kerb" 4 "grass" 5 "Botts_dots" 6 "other" 7 "not_defined" ;
+VAL_ 808 BV_Linie_03_Farbe 0 "no_line" 1 "white" 2 "red" 3 "yellow" 4 "other" 5 "not_defined" 6 "not_defined" 7 "not_defined" ;
+VAL_ 808 BV_Linie_03_Liniennummer 0 "no_line" ;
+VAL_ 808 BV_Linie_03_Typ 0 "no_line" 1 "solid" 2 "dashed" 3 "kerb" 4 "grass" 5 "Botts_dots" 6 "other" 7 "not_defined" ;
+VAL_ 809 BV_Linie_04_Farbe 0 "no_line" 1 "white" 2 "red" 3 "yellow" 4 "other" 5 "not_defined" 6 "not_defined" 7 "not_defined" ;
+VAL_ 809 BV_Linie_04_Liniennummer 0 "no_line" ;
+VAL_ 809 BV_Linie_04_Typ 0 "no_line" 1 "solid" 2 "dashed" 3 "kerb" 4 "grass" 5 "Botts_dots" 6 "other" 7 "not_defined" ;
 VAL_ 159 EPS_HCA_Status 0 "disabled" 1 "initializing" 2 "fault" 3 "ready" 4 "rejected" 5 "active" 8 "preempted" ;
 VAL_ 159 EPS_AWA_Status 0 "AWA_deaktiviert" 1 "AWA_Anf_nicht_ausfuehrbar" 2 "Kom_AWA_gestoert" 3 "EPS_bzgl_AWA_funktionsbereit" 4 "AWA_Anf_abgewiesen" 5 "AWA_Momeingriff_1_aktiv" 7 "AWA_Momeingriff_2_aktiv" 8 "AWA_abgewiesen_Momentenpriorisierung" 9 "Anf_abgewiesen_Bedienueblich" 14 "Init" ;
 VAL_ 173 GE_Fahrstufe 5 "P" 6 "R" 7 "N" 8 "D" 9 "S" 10 "E" 13 "T" 14 "T" ;
