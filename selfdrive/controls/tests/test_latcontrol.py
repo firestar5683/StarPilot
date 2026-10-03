@@ -2037,6 +2037,51 @@ class TestLatControl:
     assert controller.pid._k_p[1][-1] == pytest.approx(HONDA_ACCORD_TORQUE_KP)
     assert controller.pid._k_i[1] == pytest.approx([HONDA_ACCORD_TORQUE_KI] * len(controller.pid._k_i[1]))
 
+  @pytest.mark.parametrize("model", sorted(interfaces))
+  def test_torque_kp_defaults_match_model_table(self, model):
+    CP = interfaces[model].get_non_essential_params(model)
+    if CP.steerControlType != car.CarParams.SteerControlType.torque:
+      pytest.skip("Standard torque control is not used")
+
+    controller, _, _, _, _ = self._build_torque_controller(model, force_torque=True)
+    expected_kp = latcontrol_torque.TORQUE_KP_BY_CAR.get(model, latcontrol_torque.KP)
+    assert controller.pid._k_p[1][-1] == pytest.approx(expected_kp), "Add model-specific Kp defaults to TORQUE_KP_BY_CAR"
+
+  def test_model_torque_kp_default_survives_settings_and_controls(self, monkeypatch, tmp_path):
+    from openpilot.common.params import Params
+    from openpilot.selfdrive.controls import controlsd
+    from openpilot.starpilot.common import starpilot_variables as spv
+
+    model, model_kp = HONDA.HONDA_CIVIC_BOSCH, 0.75
+    monkeypatch.setitem(latcontrol_torque.TORQUE_KP_BY_CAR, model, model_kp)
+    controller, _, _, _, _ = self._build_torque_controller(model, force_torque=True)
+    assert controller.pid._k_p[1][-1] == pytest.approx(model_kp)
+
+    CP = interfaces[model].get_non_essential_params(model)
+    CarInterfaceBase.configure_torque_tune(model, CP.lateralTuning)
+    params = Params()
+    params.put("CarParamsPersistent", CP.to_bytes())
+    params.put("StarPilotCarParamsPersistent", custom.StarPilotCarParams.new_message().to_bytes())
+    params.put_bool("LateralTune", False)
+    params.put_bool("AdvancedLateralTune", False)
+    params.put_float("SteerKP", latcontrol_torque.KP)
+    params.put_float("SteerKPStock", latcontrol_torque.KP)
+
+    monkeypatch.setattr(spv, "HD_PATH", tmp_path / "use_HD")
+    monkeypatch.setattr(spv, "KONIK_PATH", tmp_path / "use_konik")
+    variables = spv.StarPilotVariables()
+    assert params.get_float("SteerKPStock") == pytest.approx(model_kp)
+    assert variables.starpilot_toggles.steerKp == [[0], [model_kp]]
+
+    controls = SimpleNamespace(
+      LaC=controller, CP=CP, starpilot_toggles=variables.starpilot_toggles,
+      sm=SimpleNamespace(update=lambda _timeout: None, updated=dict(liveCalibration=False, livePose=False, liveDelay=False)),
+    )
+    monkeypatch.setattr(controlsd, "get_starpilot_toggles", lambda _sm: variables.starpilot_toggles)
+    for _ in range(3):
+      controlsd.Controls.update(controls)
+      assert controller.pid.k_p == pytest.approx(model_kp)
+
   def test_honda_accord_steer_ratio_calibration(self):
     expected_scale = 14.0 / 16.33
     assert get_honda_accord_steer_ratio_scale(0.0) == pytest.approx(expected_scale)
