@@ -26,7 +26,7 @@ from openpilot.starpilot.storage import starpilot_storage_root
 
 def manager_init() -> None:
   params = Params()
-  prepare_manager_start(params, starpilot_storage_root())
+  prepare_manager_start(params, starpilot_storage_root(), auto_migrate=True)
   from openpilot.starpilot.settings_retirement import retire_settings
   try:
     for issue in retire_settings(params):

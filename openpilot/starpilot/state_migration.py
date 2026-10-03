@@ -285,14 +285,69 @@ def stage_settings(bundle, storage, namespace):
   return destination
 
 
-def prepare_manager_start(params, storage, *, dry_run=False):
-  """Refuse first boot over unqualified state before Params cleanup can erase it.
+def _migrate_first_start(params, namespace, storage, values, known, cache_keys, inspect_cache):
+  from openpilot.starpilot.legacy_cache_migration import migrate_legacy_cache
 
-  A fresh namespace, or only the reviewed canonical preferences, can initialize
-  this development runtime. Staging a bundle does NOT qualify a migrated profile.
-  Dry-run checks admission without creating recovery storage or qualifying state.
-  It is a read-only point-in-time check, not a cutover guarantee.
-  """
+  actual = namespace.resolve(strict=True)
+  snapshot = _save_snapshot(values, storage / 'snapshots')
+  if load_snapshot(snapshot) != values:
+    raise MigrationRequired('Raw recovery snapshot readback failed')
+  prepared = dict(values)
+  actions = {}
+  for key, raw in values.items():
+    if key not in known or key == 'LocationFilterInitialState':
+      prepared.pop(key)
+      actions[key] = 'archive obsolete or unknown key'
+    elif key in cache_keys:
+      if inspect_cache(key, raw).status == 'valid':
+        continue
+      converted = migrate_legacy_cache(key, raw)
+      if converted is None:
+        prepared.pop(key)
+        actions[key] = 'archive incompatible reconstructible cache'
+      else:
+        if not isinstance(converted, bytes) or inspect_cache(key, converted).status != 'valid':
+          raise MigrationRequired(f'{key}: migration did not produce a qualified cache')
+        prepared[key] = converted
+        actions[key] = 'convert compatible legacy cache'
+    elif getattr(params.get_type(key), 'name', None) == 'BOOL' and raw not in (b'0', b'1'):
+      if key == 'OpenpilotEnabledToggle':
+        prepared[key] = b'0'
+        actions[key] = 'archive invalid engagement consent; disable engagement'
+      else:
+        prepared.pop(key)
+        actions[key] = 'archive invalid boolean; initialize registry default'
+  report = {'format': 'starpilot-first-start-migration', 'version': 1,
+            'namespace': str(namespace), 'target': str(actual), 'snapshot': str(snapshot),
+            'status': 'prepared', 'actions': actions, 'attempted': [], 'written': []}
+  receipt = snapshot / 'migration.json'
+  _atomic_write(receipt, canonical_json(report))
+  try:
+    if namespace.resolve(strict=True) != actual or _read_namespace(namespace) != values:
+      raise MigrationRequired('Settings source changed before migration')
+    for key in sorted(actions):
+      if namespace.resolve(strict=True) != actual:
+        raise MigrationRequired('Settings namespace changed during migration')
+      report['attempted'].append(key)
+      _atomic_write(receipt, canonical_json(report))
+      if key in prepared:
+        _atomic_write(actual / key, prepared[key])
+      else:
+        (actual / key).unlink()
+        _fsync_dir(actual)
+      report['written'].append(key)
+    if namespace.resolve(strict=True) != actual or _read_namespace(namespace) != prepared:
+      raise MigrationRequired('Migrated settings readback differs from prepared batch')
+    report['status'] = 'migrated'
+    _atomic_write(receipt, canonical_json(report))
+  except Exception as error:
+    report.update(status='failed', error=type(error).__name__)
+    _atomic_write(receipt, canonical_json(report))
+    raise MigrationRequired(f'Settings migration interrupted; raw recovery snapshot: {snapshot}') from error
+  return prepared
+
+
+def prepare_manager_start(params, storage, *, dry_run=False, auto_migrate=False):
   from openpilot.starpilot.schema_cache import CACHE_KEYS, inspect_cache
 
   namespace, storage = Path(params.get_param_path()).absolute(), Path(storage).absolute()
@@ -313,12 +368,17 @@ def prepare_manager_start(params, storage, *, dry_run=False):
     except (OSError, ValueError):
       initialized = False
     known = {key.decode() if isinstance(key, bytes) else key for key in params.all_keys()}
+    if auto_migrate and not dry_run and not initialized and values:
+      values = _migrate_first_start(params, namespace, storage, values, known, CACHE_KEYS, inspect_cache)
+      migrated = True
+    else:
+      migrated = False
     unknown = set(values) - known
     invalid_preferences = any(key in values and values[key] not in (b'0', b'1') for key in PREFERENCES)
     incompatible_cache = any(inspect_cache(key, values[key]).status != 'valid' for key in CACHE_KEYS if key in values)
     # This retired cache has no compatible producer or conversion.
     incompatible_cache |= 'LocationFilterInitialState' in values
-    unqualified = unknown or invalid_preferences or incompatible_cache or (not initialized and bool(set(values) - PREFERENCES))
+    unqualified = unknown or invalid_preferences or incompatible_cache or (not initialized and not migrated and bool(set(values) - PREFERENCES))
     if unqualified:
       if dry_run:
         reasons = []
