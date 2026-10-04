@@ -20,6 +20,10 @@ def policy_for(cp):
 
 
 def stopping_decel_rate(cp, policy):
+  from opendbc.car.honda.parameter_profiles import stopping_decel_rate as honda_stopping_decel_rate
+  rate = honda_stopping_decel_rate(cp)
+  if rate is not None:
+    return rate
   rate = hyundai_stopping_decel_rate(cp)
   if rate is not None:
     return rate
@@ -36,6 +40,10 @@ def stopping_policy_for(cp, dt):
 
 
 def forecast_should_stop(cp, speeds, time_indices, action_t, fallback):
+  from opendbc.car.honda.parameter_profiles import forecast_should_stop as honda_forecast_should_stop
+  decision = honda_forecast_should_stop(cp, speeds, time_indices, action_t)
+  if decision is not None:
+    return decision
   decision = hyundai_forecast_should_stop(cp, speeds, time_indices, action_t)
   return fallback if decision is None else decision
 

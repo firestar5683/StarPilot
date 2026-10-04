@@ -21,7 +21,7 @@ constexpr AolSafetyProfile TEST_PROFILES[] = {
   {TEST_MODE, test_param, false}, {TEST_ALT_MODE, test_alt_param, false},
 };
 const AolProfileRegistry TEST_REGISTRY{TEST_PROFILES, std::size(TEST_PROFILES)};
-constexpr AolSafetyProfile VEHICLE_PROFILES[] = {HONDA_AOL_PROFILE, HYUNDAI_AOL_PROFILE, HYUNDAI_CLASSIC_AOL_PROFILE, HYUNDAI_LEGACY_AOL_PROFILE, GM_AOL_PROFILE, FORD_AOL_PROFILE};
+constexpr AolSafetyProfile VEHICLE_PROFILES[] = {HONDA_AOL_PROFILE, HONDA_STOCK_AOL_PROFILE, HONDA_NIDEC_AOL_PROFILE, HYUNDAI_AOL_PROFILE, HYUNDAI_CLASSIC_AOL_PROFILE, HYUNDAI_LEGACY_AOL_PROFILE, GM_AOL_PROFILE, FORD_AOL_PROFILE};
 const AolProfileRegistry VEHICLE_REGISTRY{VEHICLE_PROFILES, std::size(VEHICLE_PROFILES)};
 
 aol_safety_health_t status(uint8_t request = 0U, uint8_t permission = 0U) {
@@ -267,6 +267,22 @@ int main() {
   unsupported = status();
   unsupported.safety_param ^= 0x1U;
   assert(!aol_capable(unsupported, TEST_MODE, TEST_REGISTRY));
+
+  for (uint16_t word = 0U; word < 1024U; ++word) {
+    auto stock_honda = status();
+    stock_honda.safety_mode = 20U;
+    stock_honda.safety_param = word;
+    const bool classic = word == 34U || word == 35U || word == 163U;
+    const bool stock = word == 0U || word == 1U || word == 8U || word == 9U || word == 10U || word == 11U;
+    assert(aol_capable(stock_honda, 20U, VEHICLE_REGISTRY) == (classic || stock));
+    assert(aol_runtime_enabled(false, stock_honda, VEHICLE_REGISTRY) == stock);
+    stock_honda.safety_mode = 1U;
+    const bool nidec = word == 0U || word == 4U || word == 260U;
+    assert(aol_capable(stock_honda, 1U, VEHICLE_REGISTRY) == nidec);
+    assert(aol_runtime_enabled(false, stock_honda, VEHICLE_REGISTRY) == nidec);
+    stock_honda.capability_flags = 0U;
+    assert(!aol_capable(stock_honda, 1U, VEHICLE_REGISTRY));
+  }
 
   auto honda = status();
   honda.safety_mode = HONDA_AOL_PROFILE.mode;

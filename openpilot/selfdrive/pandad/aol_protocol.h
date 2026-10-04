@@ -33,6 +33,14 @@ struct AolProfileRegistry {
     }
     return nullptr;
   }
+
+  const AolSafetyProfile *find(uint8_t mode, uint16_t param) const {
+    if (profiles == nullptr) return nullptr;
+    for (size_t i = 0; i < count; ++i) {
+      if (profiles[i].mode == mode && profiles[i].accepts_param != nullptr && profiles[i].accepts_param(param)) return &profiles[i];
+    }
+    return nullptr;
+  }
 };
 
 // Python messaging.new_message and the AOL host use time.monotonic_ns().
@@ -62,7 +70,7 @@ inline std::optional<aol_safety_health_t> parse_aol_status(const unsigned char *
 
 inline bool aol_capable(const std::optional<aol_safety_health_t> &status, uint8_t expected_mode,
                         const AolProfileRegistry &registry) {
-  const AolSafetyProfile *profile = registry.find(expected_mode);
+  const AolSafetyProfile *profile = registry.find(expected_mode, status ? status->safety_param : 0U);
   return status && profile && profile->accepts_param && (status->capability_flags & 0x1U) != 0U &&
          status->safety_mode == expected_mode && profile->accepts_param(status->safety_param);
 }
@@ -71,7 +79,7 @@ inline bool aol_runtime_enabled(bool replay, const std::optional<aol_safety_heal
                                 const AolProfileRegistry &registry) {
   if (replay) return true;
   if (!status) return false;
-  const AolSafetyProfile *profile = registry.find(status->safety_mode);
+  const AolSafetyProfile *profile = registry.find(status->safety_mode, status->safety_param);
   return profile && profile->normal_runtime && aol_capable(status, profile->mode, registry);
 }
 

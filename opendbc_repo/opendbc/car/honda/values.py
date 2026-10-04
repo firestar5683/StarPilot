@@ -44,7 +44,7 @@ class CarControllerParams:
   def __init__(self, CP):
     self.BOSCH_GAS_LOOKUP_BP = list(type(self).BOSCH_GAS_LOOKUP_BP)
     gas_max = {CAR.HONDA_CIVIC_BOSCH: 750, CAR.HONDA_ODYSSEY_5G_MMR: 2000,
-               CAR.ACURA_RDX_3G_MMR: 2000}.get(CP.carFingerprint, 1600)
+               CAR.ACURA_RDX_3G_MMR: 2000, CAR.ACURA_RDX_3G: 2200}.get(CP.carFingerprint, 1600)
     self.BOSCH_GAS_LOOKUP_V = [0, gas_max]
     if CP.carFingerprint in (CAR.HONDA_CRV, CAR.HONDA_CRV_EU, CAR.HONDA_CRV_SA, CAR.ACURA_RDX):
       self.STEER_MAX = 1000  # TODO: determine if there is a dead zone at the top end
@@ -67,6 +67,8 @@ class CarControllerParams:
       self.STEER_MAX = 2560
     self.STEER_LOOKUP = [-self.STEER_MAX, 0, self.STEER_MAX]
     self.STEER_LOOKUP_V = list(self.STEER_LOOKUP)
+    from opendbc.car.honda.parameter_profiles import apply_steering_profile
+    apply_steering_profile(self, CP)
     if CP.flags & HondaFlags.EPS_MODIFIED:
       if CP.carFingerprint == CAR.HONDA_CIVIC:
         self.STEER_MAX = 8000
@@ -82,6 +84,8 @@ class HondaSafetyFlags(IntFlag):
   ALT_BRAKE = 1
   BOSCH_LONG = 2
   AOL_BOSCH_LONG = 32
+  RDX_HIGH_GAS = 128
+  GAS_INTERCEPTOR = 32
   NIDEC_ALT = 4
   RADARLESS = 8
   BOSCH_CANFD = 16
@@ -109,6 +113,7 @@ class HondaFlags(IntFlag):
   HYBRID = 2048
   BOSCH_TJA_CONTROL = 4096
   EPS_MODIFIED = 8192
+  GAS_INTERCEPTOR = 16384
 
 
 # Car button codes
@@ -320,7 +325,7 @@ class CAR(Platforms):
     [HondaCarDocs("Acura MDX 2022-24", "All", min_steer_speed=70. * CV.KPH_TO_MS)],
     CarSpecs(mass=4788 * CV.LB_TO_KG, wheelbase=2.89, steerRatio=15.8, centerToFrontRatio=0.428),  # as spec
     {Bus.pt: 'honda_common_canfd_generated'}, # not CANFD car but shares same dbc
-    flags=HondaFlags.BOSCH_ALT_RADAR,
+    flags=HondaFlags.BOSCH_ALT_RADAR | HondaFlags.BOSCH_TJA_CONTROL,
   )
   # mid-model refresh
   ACURA_MDX_4G_MMR = HondaBoschCANFDPlatformConfig(
