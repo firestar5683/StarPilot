@@ -92,6 +92,7 @@ FW_VERSIONS = {
       b'39990-TVA-X040\x00\x00',
       b'39990-TVE-H130\x00\x00',
       b'39990-TWB-H120\x00\x00',
+      b'39990-TVA,A150\x00\x00',
     ],
     (Ecu.srs, 0x18da53f1, None): [
       b'77959-TBX-H230\x00\x00',
@@ -168,6 +169,7 @@ FW_VERSIONS = {
       b'39990-TBG-A030\x00\x00',
       b'39990-TEA-T020\x00\x00',
       b'39990-TEG-A010\x00\x00',
+      b'39990-TBA,A030\x00\x00',
     ],
     (Ecu.srs, 0x18da53f1, None): [
       b'77959-TBA-A030\x00\x00',
@@ -247,6 +249,8 @@ FW_VERSIONS = {
       b'39990-TGH-J530\x00\x00',
       b'39990-TGL-E130\x00\x00',
       b'39990-TGN-E120\x00\x00',
+      b'39990-TGG,A020\x00\x00',
+      b'39990-TGG,A120\x00\x00',
     ],
     (Ecu.srs, 0x18da53f1, None): [
       b'77959-TBA-A060\x00\x00',
@@ -385,6 +389,7 @@ FW_VERSIONS = {
       b'39990-TME-T030\x00\x00',
       b'39990-TME-T120\x00\x00',
       b'39990-TMT-T010\x00\x00',
+      b'39990-TLA,A040\x00\x00',
     ],
     (Ecu.electricBrakeBooster, 0x18da2bf1, None): [
       b'46114-TLA-A040\x00\x00',

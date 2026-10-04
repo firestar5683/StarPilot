@@ -3,6 +3,7 @@ import numpy as np
 from opendbc.can import CANPacker
 from opendbc.car import Bus, DT_CTRL, rate_limit, make_tester_present_msg, structs
 from opendbc.car.honda import hondacan
+from opendbc.car.honda.modified_civic_steering import ModifiedCivicSteering
 from opendbc.car.honda.bosch_longitudinal import BoschLongitudinal, qualified as bosch_long_qualified
 from opendbc.car.honda.values import CAR, CruiseButtons, HondaFlags, CarControllerParams
 from opendbc.car.interfaces import CarControllerBase
@@ -97,6 +98,8 @@ class CarController(CarControllerBase):
     self.bosch_longitudinal = BoschLongitudinal(CP, self.params) if bosch_long_qualified(CP) else None
     self.bosch_learning_params = None
     self.tja_control = bool(CP.flags & HondaFlags.BOSCH_TJA_CONTROL)
+    self.modified_civic_steering = (ModifiedCivicSteering() if CP.carFingerprint == CAR.HONDA_CIVIC_BOSCH and
+                                    CP.flags & HondaFlags.EPS_MODIFIED and not CP.passive and not CP.dashcamOnly and not CP.notCar else None)
 
     self.braking = False
     self.brake_steady = 0.
@@ -127,7 +130,8 @@ class CarController(CarControllerBase):
       gas, brake = 0.0, 0.0
 
     # *** rate limit steer ***
-    limited_torque = rate_limit(actuators.torque, self.last_torque, -self.params.STEER_DELTA_DOWN * DT_CTRL,
+    torque_cmd = self.modified_civic_steering.update(CC, CS) if self.modified_civic_steering is not None else actuators.torque
+    limited_torque = rate_limit(torque_cmd, self.last_torque, -self.params.STEER_DELTA_DOWN * DT_CTRL,
                                 self.params.STEER_DELTA_UP * DT_CTRL)
     self.last_torque = limited_torque
 
@@ -145,7 +149,7 @@ class CarController(CarControllerBase):
     # steer torque is converted back to CAN reference (positive when steering right)
     # Preserve integer CAN rounding while steering limits are owned by the platform.
     apply_torque = int(np.interp(-limited_torque * self.params.STEER_MAX,
-                                 self.params.STEER_LOOKUP, self.params.STEER_LOOKUP))
+                                 self.params.STEER_LOOKUP, self.params.STEER_LOOKUP_V))
 
     # Send CAN commands
     can_sends = []

@@ -65,6 +65,16 @@ class CarControllerParams:
       # Odyssey MMR uses up to 2560 for LKA; higher RDM commands are nonlinear and also apply brake drag.
       self.STEER_MAX = 2560
     self.STEER_LOOKUP = [-self.STEER_MAX, 0, self.STEER_MAX]
+    self.STEER_LOOKUP_V = list(self.STEER_LOOKUP)
+    if CP.flags & HondaFlags.EPS_MODIFIED:
+      if CP.carFingerprint == CAR.HONDA_CIVIC:
+        self.STEER_MAX = 8000
+        self.STEER_LOOKUP = [-8000, -2560, 0, 2560, 8000]
+        self.STEER_LOOKUP_V = [-3840, -2560, 0, 2560, 3840]
+      elif CP.carFingerprint == CAR.HONDA_CRV_5G:
+        self.STEER_MAX = 10000
+        self.STEER_LOOKUP = [-10000, -2560, 0, 2560, 10000]
+        self.STEER_LOOKUP_V = [-3840, -2560, 0, 2560, 3840]
 
 
 class HondaSafetyFlags(IntFlag):
@@ -97,6 +107,7 @@ class HondaFlags(IntFlag):
   HAS_BSM = 1024  # blind spot monitoring
   HYBRID = 2048
   BOSCH_TJA_CONTROL = 4096
+  EPS_MODIFIED = 8192
 
 
 # Car button codes
@@ -471,6 +482,13 @@ class CAR(Platforms):
     flags=HondaFlags.NIDEC_ALT_SCM_MESSAGES | HondaFlags.HAS_ALL_DOOR_STATES,
   )
 
+
+MODIFIED_EPS_FW = {
+  CAR.HONDA_CIVIC: (b'39990-TBA,A030\x00\x00',),
+  CAR.HONDA_ACCORD: (b'39990-TVA,A150\x00\x00',),
+  CAR.HONDA_CIVIC_BOSCH: (b'39990-TGG,A020\x00\x00', b'39990-TGG,A120\x00\x00'),
+  CAR.HONDA_CRV_5G: (b'39990-TLA,A040\x00\x00',),
+}
 
 MANUAL_TRANS_CARS = frozenset((CAR.HONDA_ACCORD, CAR.HONDA_CIVIC_2022))
 
