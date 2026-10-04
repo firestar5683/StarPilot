@@ -75,7 +75,7 @@ class TestHyundaiSharedCanfdStockAol(unittest.TestCase):
         self.assertEqual(self.safety.aol_get_permission_mask(), 1)
         pt = 1 if word & 0x10 else 0
         self.assertFalse(self.safety.safety_tx_hook(self.packet(self.packer.make_can_msg('SCC_CONTROL', pt, {}))))
-    for word in (0x803, 0x804, 0x815, 0x895, 0x830, 0x880, 0xC00):
+    for word in (0x803, 0x804, 0x830, 0x880, 0xC00):
       self.mode(word)
       self.safety.set_aol_test_heartbeat(True)
       self.safety.aol_set_host_request(3)

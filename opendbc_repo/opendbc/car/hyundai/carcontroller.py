@@ -19,12 +19,13 @@ from opendbc.car.hyundai import hyundaicanfd, hyundaican
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.ray_pedal import create_ray_pedal_command, ray_pedal_gas, ray_pedal_enabled
 from opendbc.car.hyundai.ioniq6_longitudinal import Ioniq6LongitudinalPolicy
-from opendbc.car.hyundai.ioniq6_dash_icons import Ioniq6DashIcons
+from opendbc.car.hyundai.canfd_dash_icons import CanFDDashIcons
 from opendbc.car.hyundai.g90_longitudinal import G90LongitudinalPolicy
 from opendbc.car.hyundai.gv70_longitudinal import is_gv70, scc_request, suppress_stock_cancel
 from opendbc.car.hyundai.g90_lead import G90LeadState, eligible as g90_lead_eligible
 from opendbc.car.hyundai.gv70_camera_lead import eligible as gv70_lead_eligible
 from opendbc.car.hyundai.canfd_lead import select_lead, ABSENT
+from opendbc.car.hyundai.torque_ev_scc import eligible as torque_ev_scc_eligible, options as torque_ev_scc_options, clock_boot_ns, fallback_lead
 from opendbc.car.hyundai.ccnc_ev_stock import replacement_requested
 from opendbc.car.hyundai.values import is_blended, HyundaiFlags, HyundaiSafetyFlags, Buttons, CarControllerParams, CAR
 from opendbc.car.interfaces import CarControllerBase
@@ -118,6 +119,9 @@ class CarController(CarControllerBase):
     self.ev9_angle_filter = FirstOrderFilter(0.0, 0.2, DT_CTRL) if self.ev9_longitudinal is not None else None
     self.ioniq6_accel_request = None
     self.ioniq6_lead_inputs = None
+    self.torque_ev_scc_enabled = torque_ev_scc_eligible(CP)
+    self.torque_ev_lead_inputs = None
+    self.torque_ev_floor_boot_ns = clock_boot_ns() if self.torque_ev_scc_enabled else 0
     self.adrv_template = None
     self.gv70_stock_fallback = False
     self.gv70_lead_inputs = None
@@ -129,7 +133,7 @@ class CarController(CarControllerBase):
     ioniq6_status = (self.ioniq6_longitudinal is not None and
                      int(CP.safetyConfigs[-1].safetyParam) in (0x8015, 0x8095, 0x8815, 0x8895))
     self.ioniq6_bsm_enabled = ioniq6_status
-    self.ioniq6_dash_icons = Ioniq6DashIcons() if ioniq6_status else None
+    self.canfd_dash_icons = CanFDDashIcons() if ioniq6_status or self.torque_ev_scc_enabled else None
     self.ioniq6_bsm_counter = 0
     self.ioniq6_bsm_last_can_ns = 0
     self._ray_pedal = ray_pedal_enabled(CP)
@@ -337,8 +341,8 @@ class CarController(CarControllerBase):
 
   def create_canfd_msgs(self, apply_steer_req, apply_torque, set_speed_in_units, accel, stopping, hud_control, CS, CC, now_nanos):
     can_sends = []
-    ioniq6_lfa_icon = (self.ioniq6_dash_icons.update(self.frame, CC.enabled, CC.latActive)
-                       if self.ioniq6_dash_icons is not None else None)
+    canfd_lfa_icon = (self.canfd_dash_icons.update(self.frame, CC.enabled, CC.latActive)
+                       if self.canfd_dash_icons is not None else None)
 
     lka_steering = self.CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG
     lka_steering_long = lka_steering and self.CP.openpilotLongitudinalControl
@@ -467,7 +471,7 @@ class CarController(CarControllerBase):
           self.last_ccnc_161_ts_ns = CS.ccnc_161_ts_ns
           self.last_ccnc_162_ts_ns = CS.ccnc_162_ts_ns
       else:
-        can_sends.append(hyundaicanfd.create_lfahda_cluster(self.packer, self.CAN, CC.enabled, lfa_icon=ioniq6_lfa_icon))
+        can_sends.append(hyundaicanfd.create_lfahda_cluster(self.packer, self.CAN, CC.enabled, lfa_icon=canfd_lfa_icon))
 
     # blinkers
     if lka_steering and self.CP.flags & HyundaiFlags.CANFD_ENABLE_BLINKERS:
@@ -509,7 +513,12 @@ class CarController(CarControllerBase):
       if self.frame % 2 == 0:
         acc_enabled = CC.enabled
         acc_options = {}
-        if is_gv70(self.CP):
+        if self.torque_ev_scc_enabled:
+          lead = (self.torque_ev_lead_inputs.update(CS.torque_ev_camera_lead, hud_control.leadVisible, now_nanos)
+                  if self.torque_ev_lead_inputs is not None else
+                  fallback_lead(CS.torque_ev_camera_lead, hud_control.leadVisible, self.torque_ev_floor_boot_ns))
+          acc_options = torque_ev_scc_options(CS.out.cruiseState.available, CC.actuators.longControlState, lead)
+        elif is_gv70(self.CP):
           request = scc_request(CC.enabled, CC.cruiseControl.override, stopping, accel, self.accel_last)
           accel = request.accel
           acc_options = {"direct_accel": True, "raw_accel": request.raw_accel,

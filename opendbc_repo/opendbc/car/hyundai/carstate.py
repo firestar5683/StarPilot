@@ -3,6 +3,7 @@ from opendbc.car.hyundai.classic_long_aol import qualified as qualified_classic_
 from opendbc.car.hyundai.classic_scc_aol import qualified as qualified_classic_scc, ClassicSccLkasSources
 from opendbc.car.hyundai.ev9_camera_lead import EV9CameraLead
 from opendbc.car.hyundai.canfd_camera_lead import CANFDCameraLead
+from opendbc.car.hyundai.torque_ev_scc import eligible as torque_ev_scc_eligible
 from opendbc.car.hyundai.ev9_longitudinal import qualified as ev9_long_qualified
 from collections import deque
 import copy
@@ -65,6 +66,7 @@ class CarState(CarStateBase):
     self.ev9_camera_lead = EV9CameraLead(CP) if self.ev9_long else None
     self.ioniq6_camera_lead = (CANFDCameraLead(CP, CanBus(CP).ECAN)
                                if CP.carFingerprint == CAR.HYUNDAI_IONIQ_6 and CP.openpilotLongitudinalControl else None)
+    self.torque_ev_camera_lead = CANFDCameraLead(CP, CanBus(CP).ECAN) if torque_ev_scc_eligible(CP) else None
     self.angle_steering_angle = 0.0
     self.angle_steering_fault = False
     self.hba_icon = 0
@@ -570,6 +572,13 @@ class CarState(CarStateBase):
         msgs.append(("CRUISE_BUTTONS_ALT", math.nan))
       if not ev9_long_qualified(CP):
         (cam_msgs if CP.flags & HyundaiFlags.CANFD_CAMERA_SCC else msgs).append(("SCC_CONTROL", 50))
+    elif torque_ev_scc_eligible(CP):
+      msgs.extend((("ACCELERATOR", 100), ("TCS", 50), ("WHEEL_SPEEDS", 100), ("MDPS", 100)))
+      msgs.extend((("CRUISE_BUTTONS_ALT", math.nan), ("DOORS_SEATBELTS", math.nan),
+                   ("STEERING_SENSORS", math.nan), ("BLINKERS", math.nan)))
+      if self.gear_msg_canfd != "ACCELERATOR":
+        msgs.append((self.gear_msg_canfd, 100))
+      cam_msgs.append(("CAM_0x362" if CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG_ALT else "CAM_0x2a4", 20))
     elif CP.carFingerprint == CAR.HYUNDAI_IONIQ_6 and CP.openpilotLongitudinalControl:
       # The acknowledged ADAS takeover removes stock SCC from E-CAN. Require
       # every independent native input and the matching camera source instead.

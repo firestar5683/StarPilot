@@ -178,6 +178,7 @@ static bool hyundai_canfd_angle_steering = false;
 static bool hyundai_canfd_angle_observed_adas = false;
 static bool hyundai_canfd_ioniq6_long = false;
 static bool aol_ioniq6_long = false;
+static bool hyundai_canfd_torque_ev_long = false;
 static bool aol_ioniq6_lateral_latch = false;
 static bool aol_ioniq6_buttons_seen = false;
 static bool aol_ioniq6_button_prev = false;
@@ -211,6 +212,7 @@ static uint8_t hyundai_canfd_carnival_source[16] = {0};
 
 static void aol_ioniq6_reset(void) {
   aol_ioniq6_long = false;
+  hyundai_canfd_torque_ev_long = false;
   aol_ioniq6_lateral_latch = false;
   aol_ioniq6_buttons_seen = false;
   aol_ioniq6_button_prev = false;
@@ -578,7 +580,7 @@ static bool hyundai_canfd_tx_hook_valid(const CANPacket_t *msg) {
   // steering
   const unsigned int steer_addr = (hyundai_canfd_lka_steer_msg && !hyundai_longitudinal) ? hyundai_canfd_get_lka_addr() : 0x12aU;
   if (msg->addr == steer_addr) {
-    if (hyundai_canfd_ioniq6_long) {
+    if (hyundai_canfd_ioniq6_long || hyundai_canfd_torque_ev_long) {
       // Even a rejected replacement invalidates an older unpaired command.
       hyundai_canfd_ioniq6_lfa_unpaired = false;
     }
@@ -619,7 +621,7 @@ static bool hyundai_canfd_tx_hook_valid(const CANPacket_t *msg) {
       if (steer_torque_cmd_checks(desired_torque, steer_req, HYUNDAI_CANFD_STEERING_LIMITS)) {
         tx = false;
       }
-      if (hyundai_canfd_ioniq6_long) {
+      if (hyundai_canfd_ioniq6_long || hyundai_canfd_torque_ev_long) {
         // This E-CAN command is the sole limited steering authority. Other
         // angle/enable fields in the same payload remain the host's fixed
         // neutral status, and CRC must cover the exact wire bytes.
@@ -628,7 +630,7 @@ static bool hyundai_canfd_tx_hook_valid(const CANPacket_t *msg) {
         }
         tx &= hyundai_canfd_get_checksum(msg) == (hyundai_common_canfd_compute_checksum(msg) ^ 0x041DU);
       }
-      if (hyundai_canfd_ioniq6_long && tx) {
+      if ((hyundai_canfd_ioniq6_long || hyundai_canfd_torque_ev_long) && tx) {
         for (int i = 0; i < 4; i++) {
           hyundai_canfd_ioniq6_lfa_mirror[i] = msg->data[i + 3];
         }
@@ -642,7 +644,7 @@ static bool hyundai_canfd_tx_hook_valid(const CANPacket_t *msg) {
   // by the identical steering/status request on A-CAN. The second channel may
   // mirror only that single fresh, accepted command; it must not run the global
   // torque limiter a second time or create independent steering authority.
-  if (hyundai_canfd_ioniq6_long && (msg->addr == hyundai_canfd_get_lka_addr())) {
+  if ((hyundai_canfd_ioniq6_long || hyundai_canfd_torque_ev_long) && (msg->addr == hyundai_canfd_get_lka_addr())) {
     bool mirror = hyundai_canfd_ioniq6_lfa_unpaired &&
                   safety_get_ts_elapsed(microsecond_timer_get(), hyundai_canfd_ioniq6_lfa_ts) <= 10000U;
     const int mirror_torque = (((msg->data[6] & 0xFU) << 7U) | (msg->data[5] >> 1U)) - 1024U;
@@ -979,6 +981,7 @@ static bool hyundai_canfd_tx_hook(const CANPacket_t *msg) {
 static void hyundai_canfd_reset_ioniq6_state(void) {
   hyundai_canfd_ioniq6_long = false;
   aol_ioniq6_long = false;
+  hyundai_canfd_torque_ev_long = false;
   hyundai_canfd_ioniq6_lfa_unpaired = false;
   hyundai_canfd_ioniq6_lfa_ts = 0U;
   hyundai_canfd_ioniq6_heartbeat_seen = false;
@@ -1014,6 +1017,11 @@ static safety_config hyundai_canfd_init_validated(uint16_t param) {
   const uint16_t HYUNDAI_PARAM_ANGLE_TOPOLOGY_MASK = 8U | 16U | 32U | 128U;
   const bool angle_requested = GET_FLAG(param, HYUNDAI_PARAM_CANFD_ANGLE);
   const bool ioniq6_stock_aol_requested = hyundai_canfd_stock_torque_aol_param(param);
+#ifdef ALLOW_DEBUG
+  const bool torque_long_aol_requested = hyundai_canfd_torque_long_aol_param(param) && ((unsigned int)alternative_experience == 32U);
+#else
+  const bool torque_long_aol_requested = false;
+#endif
   const bool angle_aol_requested = hyundai_canfd_angle_aol_param(param) && ((unsigned int)alternative_experience == 32U);
   const bool pe_requested = (param == HYUNDAI_IONIQ5_PE_STOCK_PARAM) && (((unsigned int)alternative_experience == 0U) || angle_aol_requested);
   const bool ev9_requested = (param == HYUNDAI_EV9_STOCK_PARAM) && (((unsigned int)alternative_experience == 0U) || angle_aol_requested);
@@ -1031,7 +1039,7 @@ static safety_config hyundai_canfd_init_validated(uint16_t param) {
   // Model selector bits are shared with ordinary-mode metadata, but never passed
   // to common init as those meanings when the angle discriminator is present.
 #ifdef ALLOW_DEBUG
-  uint16_t common_param = ioniq6_stock_aol_requested ? (param & (uint16_t)~2048U) : param;
+  uint16_t common_param = (ioniq6_stock_aol_requested || torque_long_aol_requested) ? (param & (uint16_t)~2048U) : param;
   if (angle_requested) {
     common_param = param & (uint16_t)~angle_strip_mask;
   } else if (ioniq6_long_requested) {
@@ -1127,6 +1135,18 @@ static safety_config hyundai_canfd_init_validated(uint16_t param) {
     {0x345, 1,  8, .check_relay = false},  // ADRV_0x345
     {0x1DA, 1, 32, .check_relay = false},  // ADRV_0x1da
   };
+  static const CanMsg HYUNDAI_CANFD_LKA_STEER_MSG_ALT_LONG_TX_MSGS[] = {
+    HYUNDAI_CANFD_LKA_STEER_MSG_ALT_COMMON_TX_MSGS(0, 1)
+    HYUNDAI_CANFD_LFA_STEERING_COMMON_TX_MSGS(1)
+    HYUNDAI_CANFD_SCC_CONTROL_COMMON_TX_MSGS(1, true)
+    {0x51,  0, 32, .check_relay = false},  // ADRV_0x51
+    {0x730, 1,  8, .check_relay = false},  // tester present for ADAS ECU disable
+    {0x160, 1, 16, .check_relay = false},  // ADRV_0x160
+    {0x1EA, 1, 32, .check_relay = false},  // ADRV_0x1ea
+    {0x200, 1,  8, .check_relay = false},  // ADRV_0x200
+    {0x345, 1,  8, .check_relay = false},  // ADRV_0x345
+    {0x1DA, 1, 32, .check_relay = false},  // ADRV_0x1da
+  };
 
   static const CanMsg HYUNDAI_CANFD_LFA_STEERING_TX_MSGS[] = {
     HYUNDAI_CANFD_CRUISE_BUTTON_TX_MSGS(2)
@@ -1175,8 +1195,9 @@ static safety_config hyundai_canfd_init_validated(uint16_t param) {
   hyundai_canfd_angle_model = 0U;
 #ifdef ALLOW_DEBUG
   hyundai_canfd_ioniq6_long = ioniq6_long_requested;
+  hyundai_canfd_torque_ev_long = (param == 0x0015U) || (param == 0x0095U) || torque_long_aol_requested;
 #endif
-  aol_ioniq6_long = ioniq6_stock_aol_requested || (param == 0x8815U) || (param == 0x8895U);
+  aol_ioniq6_long = ioniq6_stock_aol_requested || torque_long_aol_requested || (param == 0x8815U) || (param == 0x8895U);
   if (aol_ioniq6_long) {
     static const AolSafetyPolicy aol_ioniq6_policy = {
       .reset = aol_ioniq6_reset,
@@ -1400,6 +1421,9 @@ static safety_config hyundai_canfd_init_validated(uint16_t param) {
       };
 
       ret = BUILD_SAFETY_CFG(hyundai_canfd_lka_steer_msg_long_rx_checks, HYUNDAI_CANFD_LKA_STEER_MSG_LONG_TX_MSGS);
+      if ((param == 0x0095U) || (param == 0x0895U)) {
+        SET_TX_MSGS(HYUNDAI_CANFD_LKA_STEER_MSG_ALT_LONG_TX_MSGS, ret);
+      }
     } else {
       // Longitudinal checks for LFA steering
       static RxCheck hyundai_canfd_long_rx_checks[] = {
@@ -1753,6 +1777,9 @@ static safety_config hyundai_canfd_init(uint16_t param) {
   safety_config ret = {0};
   const bool marker_valid = GET_FLAG(param, 16384U) || !GET_FLAG(param, 2048U) ||
                             hyundai_canfd_stock_torque_aol_param(param) ||
+#ifdef ALLOW_DEBUG
+                            (hyundai_canfd_torque_long_aol_param(param) && ((unsigned int)alternative_experience == 32U)) ||
+#endif
                             (param == 0x8815U) || (param == 0x8895U);
   if (valid && marker_valid) {
     ret = hyundai_canfd_init_validated(param);

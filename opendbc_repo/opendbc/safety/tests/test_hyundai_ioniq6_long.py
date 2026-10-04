@@ -6,7 +6,7 @@ from opendbc.car.hyundai.carcontroller import CarController
 from opendbc.car.hyundai.hyundaicanfd import (CanBus, create_adrv_messages, create_ioniq6_radar_heartbeat,
                                               create_ioniq6_blindspot_status, create_steering_messages, create_lfahda_cluster, hkg_can_fd_checksum)
 from opendbc.car.hyundai.ioniq6_bsm import BlindspotStatus
-from opendbc.car.hyundai.ioniq6_dash_icons import Ioniq6DashIcons
+from opendbc.car.hyundai.canfd_dash_icons import CanFDDashIcons
 from opendbc.car.hyundai.ioniq6_handoff import build_ioniq6_hda2_long_candidate
 from opendbc.car.hyundai.interface import CarInterface
 from opendbc.car.hyundai.values import CAR, DBC
@@ -453,7 +453,7 @@ class TestHyundaiIoniq6Long(unittest.TestCase):
         with self.subTest(topology=topology, raw=raw):
           self.mode(raw)
           admitted = not self.release
-          icons = Ioniq6DashIcons()
+          icons = CanFDDashIcons()
           frames = []
           for tick, enabled, lateral_active, expected in ((0, False, False, 0), (1, False, True, 2),
                                                          (2, False, False, 3), (102, False, False, 0)):

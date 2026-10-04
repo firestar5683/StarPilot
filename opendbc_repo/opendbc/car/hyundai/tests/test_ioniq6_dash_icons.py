@@ -2,15 +2,15 @@ import unittest
 
 from opendbc.can import CANPacker, CANParser
 from opendbc.car import Bus, gen_empty_fingerprint, structs
-from opendbc.car.hyundai.ioniq6_dash_icons import Ioniq6DashIcons
+from opendbc.car.hyundai.canfd_dash_icons import CanFDDashIcons
 from opendbc.car.hyundai.tests.test_ioniq6_longitudinal import controller_fixture
 from opendbc.car.hyundai.interface import CarInterface
 from opendbc.car.hyundai.values import CAR, DBC
 
 
-class TestIoniq6DashIcons(unittest.TestCase):
+class TestCanFDDashIcons(unittest.TestCase):
   def test_lateral_and_cruise_activity_disengage_blink_and_reengage(self):
-    icons = Ioniq6DashIcons()
+    icons = CanFDDashIcons()
     for frame, enabled, lateral, expected in ((0, False, False, 0), (1, False, True, 2),
                                              (2, False, False, 3), (100, False, False, 3),
                                              (101, False, False, 0), (102, True, False, 2),
@@ -47,7 +47,7 @@ class TestIoniq6DashIcons(unittest.TestCase):
         self.assertFalse(cp.openpilotLongitudinalControl)
         self.assertTrue(cp.pcmCruise)
         ci = CarInterface(cp)
-        self.assertIsNone(ci.CC.ioniq6_dash_icons)
+        self.assertIsNone(ci.CC.canfd_dash_icons)
         ci.update([])  # Register the actual lazy parser reads.
         packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
         control = structs.CarControl()
