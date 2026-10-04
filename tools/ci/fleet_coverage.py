@@ -74,7 +74,8 @@ def _ids(values, label, errors):
   return values
 
 
-def evaluate(manifest, coverage, results, mode_evidence=None, *, expected_revision=None, hashes=None, dirty_relevant=None, current_snapshot=None):
+def evaluate(manifest, coverage, results, mode_evidence=None, *, expected_revision=None, hashes=None, dirty_relevant=None,
+             current_snapshot=None, expected_registry=None):
   """Check independent registration, test execution and per-config mode evidence.
 
   All input documents are caller supplied; their physical origin is not asserted.
@@ -249,8 +250,21 @@ def evaluate(manifest, coverage, results, mode_evidence=None, *, expected_revisi
       if status not in (None, "skipped"):
         failures.append(f"upstream addition {p}: concrete interface test {status}")
 
-  interface_gate = {"status": "error" if errors else "failed" if failures else "uncovered" if uncovered else "pass",
-                    "errors": list(errors), "failures": list(failures), "uncovered": list(uncovered)}
+  if expected_registry is None:
+    from opendbc.car.values import PLATFORMS
+    expected_registry = set(PLATFORMS)
+  registry_gaps = sorted(set(expected_registry) ^ registered_set)
+  interface_gaps = [issue for issue in uncovered if issue.startswith("interface report ")]
+  if registry_gaps:
+    interface_gaps.append(f"current production registry differs from reported registry: {registry_gaps}")
+  for platform in sorted(registered_set):
+    test_id = mapped.get(platform)
+    if not isinstance(test_id, str) or by_test.get(test_id, {}).get("status") != "passed":
+      interface_gaps.append(f"{platform}: registered concrete interface test not passed")
+  interface_gate = {"scope": "current_registered_interface_regression",
+                    "status": "error" if errors else "failed" if failures else "uncovered" if interface_gaps else "pass",
+                    "errors": list(errors), "failures": list(failures), "uncovered": interface_gaps}
+
 
   mode_summary = {"input": "absent", "required_scenarios": list(SCENARIOS), "configuration_count": 0, "recorded_trace_count": 0}
   if mode_evidence is None:
@@ -335,7 +349,7 @@ def main():
   parser.add_argument("--interface-coverage", type=Path, required=True)
   parser.add_argument("--interface-results", type=Path, required=True)
   parser.add_argument("--require", choices=("complete", "interfaces"), default="complete",
-                      help="Exit gate; interfaces still reports uncovered independent mode evidence")
+                      help="Exit gate; interfaces checks the current registry, not full Dom parity or mode readiness")
   parser.add_argument("--mode-evidence", type=Path)
   parser.add_argument("--expected-revision", help="40-character checkout revision; defaults to current HEAD")
   parser.add_argument("--output", type=Path, required=True)
