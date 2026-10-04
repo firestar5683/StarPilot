@@ -18,7 +18,7 @@
     {
       "name": "Force Drive State",
       "path": "/device-preferences",
-      "icon": "bi-volume-up",
+      "icon": "bi-car-front",
       "description": "Select a temporary drive state for this device",
       "availability": "local-only"
     },
