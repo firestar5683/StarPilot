@@ -9,6 +9,7 @@ from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.ford.fordcan import CanBus
 from opendbc.car.ford.values import DBC, RADAR
 from opendbc.car.ford.generic_canfd_lateral import qualified as generic_canfd_qualified
+from opendbc.car.ford.mache_lateral import qualified as mache_qualified
 from opendbc.car.interfaces import RadarInterfaceBase
 
 DELPHI_ESR_RADAR_MSGS = list(range(0x500, 0x540))
@@ -101,7 +102,7 @@ class RadarInterface(RadarInterfaceBase):
 
     self.points: list[list[float]] = []
     self.clusters: list[Cluster] = []
-    self.generic_canfd_lead = generic_canfd_qualified(CP)
+    self.generic_canfd_lead = generic_canfd_qualified(CP) or mache_qualified(CP)
     self.v_rel_history = deque(maxlen=20)
 
     self.updated_messages = set()
@@ -168,8 +169,7 @@ class RadarInterface(RadarInterfaceBase):
     self.pts[0].vRel = msg["CmbbObjRelLong_V_Actl"]
 
   def _update_generic_steer_assist(self):
-    # Source-derived five-family camera lead owner. Retain current parser health
-    # and positive-distance gates; no change to Mach-E/Mondeo lead behavior.
+    # Preserve source-owned camera leads with current health and distance gates.
     msg = self.rcp.vl["Steer_Assist_Data"]
     if not self.rcp.can_valid or msg["CmbbObjConfdnc_D_Stat"] <= 0 or msg["CmbbObjDistLong_L_Actl"] <= 0:
       self.pts.pop(0, None)
