@@ -10,6 +10,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -95,7 +96,7 @@ source.close()
 	if err != nil {
 		t.Fatal(err)
 	}
-	var stderr strings.Builder
+	var stderr lockedIPCOutput
 	cmd.Stderr = &stderr
 	if err := cmd.Start(); err != nil {
 		t.Fatal(err)
@@ -256,4 +257,20 @@ func publishIgnoredService(t *testing.T, service string) {
 	publisher.Init(queue)
 	publisher.Send(raw)
 	queue.Close()
+}
+
+type lockedIPCOutput struct {
+	mu    sync.Mutex
+	value strings.Builder
+}
+
+func (b *lockedIPCOutput) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.value.Write(p)
+}
+func (b *lockedIPCOutput) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.value.String()
 }
