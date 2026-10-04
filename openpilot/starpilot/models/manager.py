@@ -19,13 +19,17 @@ import uuid
 from collections.abc import Callable
 from urllib.request import urlopen
 
-from openpilot.starpilot.models.catalog import ARTIFACT_ABI, BUNDLED_CURRENT, BY_ID, CATALOG_PATH, COMPILER_REVISION, GENERATION
+from openpilot.starpilot.models.catalog import (
+  ARTIFACT_ABI, BUNDLED_CURRENT, BY_ID, CATALOG_PATH, COMPILER_REVISION, DEFAULT_SMALL, DEFAULT_SMALL_SHA256,
+  DEFAULT_SMALL_SIZE, GENERATION,
+)
 
 RESOURCE_URL = "https://huggingface.co/buckets/StarPilot-Driving/StarPilot-Resources/resolve"
 ROOT = Path("/data/models") / GENERATION
 MAX_MANIFEST = 2 * 1024 * 1024
 MAX_ARTIFACT = 2 * 1024 * 1024 * 1024
 SHA = re.compile(r"[0-9a-f]{64}\Z")
+SHIPPED_MODELS = Path(__file__).resolve().parents[2] / "selfdrive/modeld/models"
 MODEL_RUNNER_REVISION = 2
 RUNTIME_ARTIFACT_KEYS = {"min_runner_revision", "artifact_format", "artifact_sha256", "artifact_size",
                          "artifact_chunk_count", "conversion_provenance", "validation"}
@@ -128,7 +132,7 @@ def catalog(root: Path = ROOT) -> dict[str, dict]:
 
 
 def preferences(root: Path = ROOT) -> dict:
-  default = {"small": BUNDLED_CURRENT, "big": BUNDLED_CURRENT, "userFavorites": [], "sortMode": "name",
+  default = {"small": DEFAULT_SMALL, "big": "", "userFavorites": [], "sortMode": "name",
              "randomizer": False, "blacklistedModels": []}
   try:
     saved = read_json(root / "preferences.json", 16384)
@@ -136,7 +140,7 @@ def preferences(root: Path = ROOT) -> dict:
       mid = saved.get(profile)
       if isinstance(mid, str) and (mid == BUNDLED_CURRENT or (profile == "big" and mid == "") or (
           mid in BY_ID and BY_ID[mid].uses_external_gpu == (profile == "big"))):
-        default[profile] = mid
+        default[profile] = (DEFAULT_SMALL if profile == "small" else "") if mid == BUNDLED_CURRENT else mid
     for key in ("userFavorites", "blacklistedModels"):
       if isinstance(saved.get(key), list):
         default[key] = list(dict.fromkeys(x for x in saved[key] if isinstance(x, str) and x in BY_ID))
@@ -182,6 +186,17 @@ def verified_artifact(model_id: str, entries: dict[str, dict], root: Path = ROOT
     return None
 
 
+def shipped_default() -> Path | None:
+  from openpilot.common.file_chunker import materialize_file_chunked
+
+  try:
+    path = materialize_file_chunked(SHIPPED_MODELS / f"{DEFAULT_SMALL}_driving_tinygrad.pkl",
+                                    expected_sha256=DEFAULT_SMALL_SHA256)
+    return path if path.stat().st_size == DEFAULT_SMALL_SIZE else None
+  except (OSError, ValueError, TypeError, KeyError):
+    return None
+
+
 @dataclass(frozen=True)
 class RuntimeSelection:
   small_id: str = BUNDLED_CURRENT
@@ -210,10 +225,10 @@ def randomize_next_start(chestnut_available: bool, *, root: Path = ROOT, chooser
     blocked = set(prefs["blacklistedModels"])
     choices = [mid for mid in entries if mid not in blocked and
                BY_ID[mid].uses_external_gpu == (profile == "big") and verified_artifact(mid, entries, root) is not None]
-    if profile == "small" and BUNDLED_CURRENT not in blocked:
-      choices.append(BUNDLED_CURRENT)
+    if profile == "small" and DEFAULT_SMALL not in blocked and DEFAULT_SMALL not in choices and shipped_default() is not None:
+      choices.append(DEFAULT_SMALL)
     alternatives = [mid for mid in choices if mid != prefs[profile]]
-    prefs[profile] = chooser(alternatives or choices) if choices else ("" if profile == "big" else BUNDLED_CURRENT)
+    prefs[profile] = chooser(alternatives or choices) if choices else ("" if profile == "big" else DEFAULT_SMALL)
     atomic_json(root / "preferences.json", prefs)
     return prefs
 
@@ -222,14 +237,21 @@ def resolve_runtime(chestnut_available: bool, *, root: Path = ROOT, randomize: b
   prefs = randomize_next_start(chestnut_available, root=root) if randomize else preferences(root)
   entries = catalog(root)
   small, big = prefs["small"], prefs["big"]
-  small_path = verified_artifact(small, entries, root) if small != BUNDLED_CURRENT else None
+  small_path = verified_artifact(small, entries, root)
+  shipped = small == DEFAULT_SMALL and small_path is None
+  if shipped:
+    small_path = shipped_default()
   if small_path is None:
-    small = BUNDLED_CURRENT
+    small = DEFAULT_SMALL
+    shipped = True
+    small_path = shipped_default()
+  if small_path is None:
+    raise ModelError("Shipped RDFv4 is missing or corrupt; reinstall the validated model package")
   big_path = verified_artifact(big, entries, root) if big not in ("", BUNDLED_CURRENT) and chestnut_available else None
-  allow_big = chestnut_available and (big == BUNDLED_CURRENT or big_path is not None)
-  return RuntimeSelection(small, small_path, BY_ID[small].version, big or BUNDLED_CURRENT, big_path,
+  allow_big = chestnut_available and big_path is not None
+  return RuntimeSelection(small, small_path, BY_ID[small].version, big, big_path,
                           BY_ID[big].version if big in BY_ID else "current", allow_big,
-                          entries[small]["artifact_sha256"] if small_path is not None else None,
+                          (DEFAULT_SMALL_SHA256 if shipped else entries[small]["artifact_sha256"]) if small_path is not None else None,
                           entries[big]["artifact_sha256"] if big_path is not None else None)
 
 
@@ -324,14 +346,26 @@ class ModelManager:
   def _signature(self, mid: str, row: dict, variant: str = "standard") -> tuple | None:
     path = artifact_path(mid, self.root, variant)
     try:
+      if row.get("shipped"):
+        from openpilot.common.file_chunker import get_existing_chunks
+        parts = get_existing_chunks(SHIPPED_MODELS / f"{DEFAULT_SMALL}_driving_tinygrad.pkl")
+        sidecar = Path(f"{SHIPPED_MODELS / f'{DEFAULT_SMALL}_driving_tinygrad.pkl'}.chunksha256")
+        if sidecar.exists():
+          parts.append(sidecar)
+        identity = tuple((str(part), part.stat().st_ino, part.stat().st_size,
+                          part.stat().st_mtime_ns, part.stat().st_ctime_ns) for part in parts)
+        return (0, 0, DEFAULT_SMALL_SIZE, 0, 0, DEFAULT_SMALL_SHA256, DEFAULT_SMALL_SIZE,
+                any(part.is_symlink() for part in parts), identity)
       st = path.stat()
       return (st.st_dev, st.st_ino, st.st_size, st.st_mtime_ns, st.st_ctime_ns,
               row["artifact_sha256"], row["artifact_size"], path.is_symlink())
-    except OSError:
+    except (OSError, ValueError, KeyError):
       return None
 
   def _installed(self, mid: str, entries: dict, variant: str = "standard") -> bool:
     if mid == BUNDLED_CURRENT:
+      return shipped_default() is not None
+    if mid == DEFAULT_SMALL and variant == "standard" and shipped_default() is not None:
       return True
     row = artifact_entry(mid, entries, variant)
     if "artifact_sha256" not in row:
@@ -345,11 +379,13 @@ class ModelManager:
     return self.checked[key][1]
 
   def _snapshot_installed(self, mid: str, row: dict, variant: str = "standard") -> tuple[bool, bool]:
+    if mid == DEFAULT_SMALL and variant == "standard" and self._signature(mid, row, variant) is None:
+      row = {**row, "shipped": True, "artifact_sha256": DEFAULT_SMALL_SHA256, "artifact_size": DEFAULT_SMALL_SIZE}
     artifact = artifact_entry(mid, {mid: row}, variant)
     if "artifact_sha256" not in artifact:
       return False, False
     signature = self._signature(mid, artifact, variant)
-    if signature is None or signature[-1] or signature[2] != artifact["artifact_size"]:
+    if signature is None or signature[7] or signature[2] != artifact["artifact_size"]:
       return False, False
     key = f"{mid}:{variant}"
     checked = self.checked.get(key)
@@ -373,7 +409,7 @@ class ModelManager:
         key = f"{mid}:{variant}"
         if self.verifying.get(key) != signature:
           continue
-      valid = verified_artifact(mid, {mid: row}, self.root, variant) is not None
+      valid = (shipped_default() if row.get("shipped") else verified_artifact(mid, {mid: row}, self.root, variant)) is not None
       with self.lock:
         if self.verifying.get(key) == signature:
           self.verifying.pop(key)
@@ -385,14 +421,7 @@ class ModelManager:
       entries, prefs = catalog(self.root), preferences(self.root)
       parked, gpu = self.parked(), self.gpu_present()
       job = self._job_status()
-      bundled_dir = Path(__file__).resolve().parents[2] / "selfdrive/modeld/models"
-      bundled_big = all((bundled_dir / name).is_file() for name in
-                        ("big_driving_tinygrad.pkl", "big_driving_warp_1344x760_tinygrad.pkl", "big_driving_warp_1928x1208_tinygrad.pkl"))
-      models = [{"value": BUNDLED_CURRENT, "label": "Bundled driving model", "series": "openpilot", "version": "current",
-                 "installed": True, "builtin": True, "selectable": True, "requiresGpu": False, "gpuAvailable": True,
-                 "profiles": ["small", "big"] if bundled_big else ["small"], "bundledBigAvailable": bundled_big,
-                 "communityFavorite": False, "userFavorite": BUNDLED_CURRENT in prefs["userFavorites"],
-                 "blacklisted": BUNDLED_CURRENT in prefs["blacklistedModels"], "unavailableReason": ""}]
+      models = []
       for mid, row in entries.items():
         installed, checking = self._snapshot_installed(mid, row)
         requires_gpu = bool(row.get("uses_external_gpu"))
@@ -401,7 +430,7 @@ class ModelManager:
                        "released": row.get("released", ""), "communityFavorite": bool(row.get("community_favorite")),
                        "userFavorite": mid in prefs["userFavorites"], "blacklisted": mid in prefs["blacklistedModels"],
                        "installed": installed, "checking": checking,
-                       "builtin": False,
+                       "builtin": mid == DEFAULT_SMALL,
                        "requiresGpu": requires_gpu, "gpuAvailable": gpu or not requires_gpu, "small": not requires_gpu,
                        "selectable": installed, "downloadAvailable": published, "artifactSize": row.get("artifact_size", 0),
                        "unavailableReason": "" if installed else "Checking artifact" if checking else
@@ -528,7 +557,7 @@ class ModelManager:
         if mid != BUNDLED_CURRENT and not (profile == "big" and mid == ""):
           if mid not in BY_ID or BY_ID[mid].uses_external_gpu != (profile == "big"):
             raise ModelError("Model does not match the selected hardware profile")
-          if verified_artifact(mid, catalog(self.root), self.root) is None:
+          if not self._installed(mid, catalog(self.root)):
             raise ModelError("Download and verify this model first")
         with state_lock(self.root):
           self._require_parked()

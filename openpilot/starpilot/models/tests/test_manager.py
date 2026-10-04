@@ -10,7 +10,7 @@ from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
-from openpilot.starpilot.models.catalog import ARTIFACT_ABI, BUNDLED_CURRENT, CATALOG_PATH
+from openpilot.starpilot.models.catalog import ARTIFACT_ABI, BUNDLED_CURRENT, CATALOG_PATH, DEFAULT_SMALL
 from openpilot.starpilot.models.manager import (
   ModelError, ModelManager, atomic_json, catalog, preferences, randomize_next_start, resolve_runtime, validate_manifest,
 )
@@ -49,8 +49,20 @@ class ModelManagerTest(unittest.TestCase):
     self.temp = tempfile.TemporaryDirectory()
     self.addCleanup(self.temp.cleanup)
     self.root = Path(self.temp.name)
+    shipped = patch('openpilot.starpilot.models.manager.SHIPPED_MODELS', self.root / 'shipped')
+    shipped.start()
+    self.addCleanup(shipped.stop)
     self.parked = True
     self.data = b'a verified compiled artifact'
+    from openpilot.common.file_chunker import package_file
+    source = self.root / 'shipped-source.pkl'
+    source.write_bytes(self.data)
+    package_file(source, self.root / 'shipped/rdf43_driving_tinygrad.pkl')
+    source.unlink()
+    for attribute, value in (('DEFAULT_SMALL_SHA256', hashlib.sha256(self.data).hexdigest()), ('DEFAULT_SMALL_SIZE', len(self.data))):
+      identity = patch('openpilot.starpilot.models.manager.' + attribute, value)
+      identity.start()
+      self.addCleanup(identity.stop)
     self.manifest = json.loads(CATALOG_PATH.read_text())
     self.row = next(x for x in self.manifest['models'] if x['id'] == 'gwm8223')
     self.row.update(artifact_format=ARTIFACT_ABI, artifact_sha256=hashlib.sha256(self.data).hexdigest(),
@@ -92,7 +104,7 @@ class ModelManagerTest(unittest.TestCase):
   def test_chunk_download_verifies_and_selects_next_start(self):
     self.download()
     self.assertEqual(self.manager.progress, 'Downloaded!')
-    self.assertEqual(preferences(self.root)['small'], BUNDLED_CURRENT)
+    self.assertEqual(preferences(self.root)['small'], DEFAULT_SMALL)
     self.manager.action('active', {'profile': 'small', 'model': 'gwm8223'})
     selected = resolve_runtime(True, root=self.root)
     self.assertEqual(selected.small_id, 'gwm8223')
@@ -129,7 +141,7 @@ class ModelManagerTest(unittest.TestCase):
     self.manager.action('active', {'profile': 'small', 'model': 'gwm8223'})
     self.assertTrue(self.wait_for_check()['installed'])
     (self.root/'gwm8223/gwm8223_driving_tinygrad.pkl').write_bytes(b'x' * len(self.data))
-    self.assertEqual(resolve_runtime(True, root=self.root).small_id, BUNDLED_CURRENT)
+    self.assertEqual(resolve_runtime(True, root=self.root).small_id, DEFAULT_SMALL)
     self.assertFalse(self.model_status()['installed'])
     self.assertFalse(self.wait_for_check()['installed'])
 
@@ -183,7 +195,7 @@ class ModelManagerTest(unittest.TestCase):
     self.manager.parked = lambda: next(samples)
     with self.assertRaises(ModelError):
       self.manager.action('active', {'profile': 'small', 'model': 'gwm8223'})
-    self.assertEqual(preferences(self.root)['small'], BUNDLED_CURRENT)
+    self.assertEqual(preferences(self.root)['small'], DEFAULT_SMALL)
 
   def test_hardware_profiles_and_selected_delete(self):
     self.download()
@@ -217,7 +229,7 @@ class ModelManagerTest(unittest.TestCase):
     self.assertEqual(resolve_runtime(True, root=self.root).small_id, 'gwm8223')
     with patch('openpilot.starpilot.models.manager.MODEL_RUNNER_REVISION', 1):
       self.assertNotIn('artifact_sha256', validate_manifest(self.manifest)['gwm8223'])
-      self.assertEqual(resolve_runtime(True, root=self.root).small_id, BUNDLED_CURRENT)
+      self.assertEqual(resolve_runtime(True, root=self.root).small_id, DEFAULT_SMALL)
       self.assertFalse(self.model_status()['downloadAvailable'])
     self.assertEqual(resolve_runtime(True, root=self.root).small_id, 'gwm8223')
 
@@ -444,10 +456,11 @@ class ModelManagerTest(unittest.TestCase):
 
   def test_randomizer_off_is_read_only_and_opt_in(self):
     self.install_fixture('gwm8223')
-    self.assertEqual(resolve_runtime(False, root=self.root, randomize=True).small_id, BUNDLED_CURRENT)
+    self.assertEqual(resolve_runtime(False, root=self.root, randomize=True).small_id, DEFAULT_SMALL)
     self.assertFalse((self.root / 'preferences.json').exists())
+    self.manager.action('active', {'profile': 'small', 'model': BUNDLED_CURRENT})
     self.manager.action('preferences', {'randomizer': True})
-    self.assertEqual(resolve_runtime(False, root=self.root).small_id, BUNDLED_CURRENT)
+    self.assertEqual(resolve_runtime(False, root=self.root).small_id, DEFAULT_SMALL)
     self.assertEqual(resolve_runtime(False, root=self.root, randomize=True).small_id, 'gwm8223')
     self.assertEqual(preferences(self.root)['small'], 'gwm8223')
 
@@ -466,12 +479,12 @@ class ModelManagerTest(unittest.TestCase):
     randomize_next_start(False, root=self.root, chooser=choose)
     self.assertNotIn('rdf43', seen)
     self.assertIn('gwm8223', seen)
-    self.assertIn(BUNDLED_CURRENT, seen)
+    self.assertEqual(seen, ['gwm8223'])
 
   def test_randomizer_no_chestnut_changes_only_small(self):
     self.install_fixture('gwm8223')
     self.install_fixture('cinquev3')
-    atomic_json(self.root / 'preferences.json', {'randomizer': True, 'big': 'cinquev3'})
+    atomic_json(self.root / 'preferences.json', {'randomizer': True, 'big': 'cinquev3', 'small': BUNDLED_CURRENT})
     selected = resolve_runtime(False, root=self.root, randomize=True)
     self.assertEqual(selected.small_id, 'gwm8223')
     self.assertFalse(selected.allow_big)
@@ -487,12 +500,12 @@ class ModelManagerTest(unittest.TestCase):
     path.write_bytes(b'x' * len(self.data))
     atomic_json(self.root / 'preferences.json', {'randomizer': True, 'small': 'gwm8223',
                                                'blacklistedModels': [BUNDLED_CURRENT]})
-    self.assertEqual(resolve_runtime(False, root=self.root, randomize=True).small_id, BUNDLED_CURRENT)
+    self.assertEqual(resolve_runtime(False, root=self.root, randomize=True).small_id, DEFAULT_SMALL)
     self.manager.action('preferences', {'blacklistedModels': []})
     atomic_json(self.root / 'preferences.json', {'randomizer': True, 'big': 'cinquev3', 'small': 'gwm8223'})
     selected = resolve_runtime(True, root=self.root, randomize=True)
     self.assertFalse(selected.allow_big)
-    self.assertEqual(selected.small_id, BUNDLED_CURRENT)
+    self.assertEqual(selected.small_id, DEFAULT_SMALL)
     self.assertEqual(preferences(self.root)['big'], '')
 
   def test_selection_preferences_require_parked_and_strict_values(self):
@@ -516,6 +529,9 @@ class ModelManagerTest(unittest.TestCase):
 
   def test_unpublished_catalog_is_visible_but_not_selectable(self):
     self.assertEqual(len(catalog(self.root)), 99)
+    self.manager.snapshot()
+    if self.manager.verify_worker is not None:
+      self.manager.verify_worker.join(2)
     models = self.manager.snapshot()['models']
     self.assertEqual(sum(row['selectable'] for row in models), 1)
     self.assertTrue(all(row.get('unavailableReason') for row in models if not row['selectable']))

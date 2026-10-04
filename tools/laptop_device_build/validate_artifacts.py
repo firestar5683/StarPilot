@@ -14,6 +14,10 @@ _spec.loader.exec_module(_chunk_owner)
 materialize_file_chunked = _chunk_owner.materialize_file_chunked
 import pickletools
 import struct
+import sys
+
+sys.path.insert(0, str(Path(__file__).resolve().parents[2]))
+from openpilot.starpilot.models.catalog import DEFAULT_SMALL, DEFAULT_SMALL_SHA256, DEFAULT_SMALL_SIZE
 
 
 EM_AARCH64 = 183
@@ -30,7 +34,7 @@ ARCHIVES = ("openpilot/cereal/libcereal.a", "openpilot/cereal/libsocketmaster.a"
 MODEL_DIR = Path("openpilot/selfdrive/modeld/models")
 # Both current fisheye camera configs in transformations/camera.py.
 WARP_SIZES = ("1344x760", "1928x1208")
-MODELS = ("driving_tinygrad.pkl", "dmonitoring_model_tinygrad.pkl")
+MODELS = ("dmonitoring_model_tinygrad.pkl",)
 WARPS = tuple(f"{kind}_warp_{size}_tinygrad.pkl" for kind in ("driving", "dm") for size in WARP_SIZES)
 
 
@@ -199,6 +203,9 @@ def validate(root: Path) -> None:
     raise ValueError(f"camera warp set differs from current camera configs: {sorted(actual_warps)}")
   for name in (*MODELS, *WARPS):
     require_qcom_pickle(model_dir / name)
+  shipped = materialize_file_chunked(model_dir / f"{DEFAULT_SMALL}_driving_tinygrad.pkl", DEFAULT_SMALL_SHA256)
+  if shipped.stat().st_size != DEFAULT_SMALL_SIZE:
+    raise ValueError("Shipped default model size differs from the published artifact")
 
 
 def main() -> None:

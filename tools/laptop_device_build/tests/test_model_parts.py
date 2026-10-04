@@ -42,6 +42,27 @@ class TestModelParts(unittest.TestCase):
       f.seek(1017)
       self.assertEqual(f.read(), self.data[1017:])
 
+  def test_release_package_contains_only_rdf_and_fresh_driver_monitoring(self):
+    from tools.laptop_device_build import package_model_chunks
+
+    source, destination = self.root / 'source', self.root / 'release'
+    source.mkdir()
+    dm = source / 'dmonitoring_model_tinygrad.pkl'
+    dm.write_bytes(b'old dm')
+    parts.package_file(dm, dm)
+    dm.write_bytes(b'new dm')
+    rdf = source / 'rdf43_driving_tinygrad.pkl'
+    rdf.write_bytes(b'verified rdf')
+    parts.package_file(rdf, rdf)
+    rdf.unlink()
+    (source / 'driving_tinygrad.pkl').write_bytes(b'obsolete stock')
+    with patch.object(sys, 'argv', ['package-models', '--source', str(source), '--destination', str(destination)]):
+      package_model_chunks.main()
+    self.assertEqual(parts.materialize_file_chunked(destination / dm.name).read_bytes(), b'new dm')
+    self.assertEqual(parts.materialize_file_chunked(destination / rdf.name).read_bytes(), b'verified rdf')
+    self.assertEqual({path.name for path in destination.glob('*.chunkmanifest')},
+                     {dm.name + '.chunkmanifest', rdf.name + '.chunkmanifest'})
+
   def test_numbered_parts_reconstruct_exact_bytes_without_removing_compiled_output(self):
     sha = self.package()
     self.assertEqual(Path(f'{self.target}.chunkmanifest').read_text(), '5')

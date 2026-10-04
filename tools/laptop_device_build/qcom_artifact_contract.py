@@ -1,4 +1,4 @@
-"""Exact source and artifact contract for laptop-only stock QCOM imports."""
+"""Exact source and artifact contract for laptop-only DM and warp QCOM imports."""
 
 import argparse
 import hashlib
@@ -17,6 +17,10 @@ MODEL_DIR = Path("openpilot/selfdrive/modeld/models")
 COMPATIBILITY_SOURCE = "tinygrad_repo/tinygrad/runtime/ops_qcom.py"
 MAX_COMPATIBILITY_FILES = 8
 MAX_COMPATIBILITY_FILE_BYTES = 131072
+RETIRED_TARGET = "driving_tinygrad.pkl"
+RETIRED_SOURCE = "openpilot/selfdrive/modeld/models/driving_supercombo.onnx"
+RETIRED_SOURCE_SHA256 = "65a08adc31d5c456219687d99b7bf5e44d61dae2d49ea67850e76105c7248cce"
+RETIRED_ARTIFACT_SHA256 = "a1a0e77fae061c6ac62dc3527c6d567c8456b6c314691a7622bf4c46cb625601"
 COMPATIBILITY_OUTPUTS = {
   "dm_warp_1344x760_tinygrad.pkl": ([1, 1382400], "uint8"),
   "dm_warp_1928x1208_tinygrad.pkl": ([1, 1382400], "uint8"),
@@ -29,7 +33,6 @@ STATIC_SOURCES = (
   "openpilot/common/transformations/camera.py",
   "openpilot/common/transformations/model.py",
   "openpilot/system/camerad/cameras/nv12_info.py",
-  "openpilot/selfdrive/modeld/models/driving_supercombo.onnx",
   "openpilot/selfdrive/modeld/models/dmonitoring_model.onnx",
 )
 TINYGRAD_SOURCE_ROOTS = ("tinygrad", "extra", "examples/openpilot")
@@ -52,8 +55,7 @@ def commands(root: Path) -> dict[str, str]:
 
   compiler = root / "tinygrad_repo/examples/openpilot"
   commands = {}
-  for source, target in (("dmonitoring_model.onnx", "dmonitoring_model_tinygrad.pkl"),
-                         ("driving_supercombo.onnx", "driving_tinygrad.pkl")):
+  for source, target in (("dmonitoring_model.onnx", "dmonitoring_model_tinygrad.pkl"),):
     commands[target] = " ".join((f'{FLAGS} taskset -c 0-7 python3 "{compiler}/compile_onnx.py"',
                                  f'"{root / MODEL_DIR / source}" "{root / MODEL_DIR / target}"',
                                  "--out-of-band --benchmark-runs 1"))
@@ -96,6 +98,24 @@ def source_signature(root: Path) -> str:
 
 def _inventory_signature(inventory: dict) -> str:
   return hashlib.sha256(json.dumps(inventory, sort_keys=True, separators=(",", ":")).encode()).hexdigest()
+
+
+def _historical_inventory(manifest: dict, current: dict, expected: dict, root: Path) -> tuple[dict, dict]:
+  if set(manifest.get("artifacts", {})) != set(expected) | {RETIRED_TARGET}:
+    return current, expected
+  saved = manifest.get("source")
+  command = " ".join((f'{FLAGS} taskset -c 0-7 python3 "{root}/tinygrad_repo/examples/openpilot/compile_onnx.py"',
+                      f'"{root / RETIRED_SOURCE}" "{root / MODEL_DIR / RETIRED_TARGET}" --out-of-band --benchmark-runs 1'))
+  retired = manifest["artifacts"][RETIRED_TARGET]
+  if (type(saved) is not dict or type(saved.get("sources")) is not dict or type(saved.get("commands")) is not dict or
+      saved["sources"].get(RETIRED_SOURCE) != RETIRED_SOURCE_SHA256 or
+      saved["commands"].get(RETIRED_TARGET) != _tokens(command, root) or
+      type(retired) is not dict or retired.get("sha256") != RETIRED_ARTIFACT_SHA256 or
+      type(retired.get("size")) is not int or retired["size"] != 70473368):
+    raise ValueError("Unreviewed retired QCOM driving model provenance")
+  # Retain the complete historical signatures and evidence; only live imports shrink.
+  return {"sources": {**current["sources"], RETIRED_SOURCE: RETIRED_SOURCE_SHA256},
+          "commands": {**current["commands"], RETIRED_TARGET: _tokens(command, root)}}, {**expected, RETIRED_TARGET: command}
 
 
 def record(root: Path, artifacts: Path) -> dict:
@@ -200,7 +220,7 @@ def _verify_runtime_compatibility(package: Path, manifest_path: Path, manifest: 
       "changed_source", "artifact_sha256", "paired_outputs", "evidence_files"}:
     raise ValueError("Invalid QCOM runtime compatibility evidence")
   files = evidence["evidence_files"]
-  if (set(expected) != set(COMPATIBILITY_OUTPUTS) or type(files) is not dict or
+  if (set(expected) not in (set(COMPATIBILITY_OUTPUTS), set(COMPATIBILITY_OUTPUTS) - {RETIRED_TARGET}) or type(files) is not dict or
       not 1 <= len(files) <= MAX_COMPATIBILITY_FILES):
     raise ValueError("Incomplete QCOM compatibility evidence files")
   evidence_dir = package / "compatibility"
@@ -248,7 +268,10 @@ def verify(package: Path, root: Path, target_name: str, actual_command: str) -> 
   manifest = json.loads(manifest_path.read_text(), object_pairs_hook=_unique_pairs)
   if type(manifest) is not dict:
     raise ValueError("Invalid QCOM manifest")
+  if type(manifest.get("artifacts")) is not dict:
+    raise ValueError("Invalid QCOM artifact set")
   current_source = source_inventory(root)
+  current_source, provenance_expected = _historical_inventory(manifest, current_source, expected, root.resolve())
   if manifest.get("source") != current_source and not (package / "compatibility.json").exists():
     saved = manifest.get("source", {})
     for section in ("sources", "commands"):
@@ -261,14 +284,15 @@ def verify(package: Path, root: Path, target_name: str, actual_command: str) -> 
           raise ValueError(f"QCOM {section} changed: {path}")
   if (type(manifest.get("version")) is not int or manifest["version"] != VERSION or
       type(manifest.get("artifacts")) is not dict or
-      set(manifest["artifacts"]) != set(expected)):
+      set(manifest["artifacts"]) != set(provenance_expected)):
     raise ValueError("QCOM package source or artifact set does not match this checkout")
   if manifest.get("source") == current_source:
     if manifest.get("source_sha256") != _inventory_signature(current_source):
       raise ValueError("QCOM package source signature mismatch")
   else:
-    _verify_runtime_compatibility(package, manifest_path, manifest, current_source, expected)
-  for name, entry in manifest["artifacts"].items():
+    _verify_runtime_compatibility(package, manifest_path, manifest, current_source, provenance_expected)
+  for name in expected:
+    entry = manifest["artifacts"][name]
     path = package / "artifacts" / name
     if (type(entry) is not dict or not path.is_file() or path.is_symlink() or
         type(entry.get("size")) is not int or path.stat().st_size != entry["size"] or

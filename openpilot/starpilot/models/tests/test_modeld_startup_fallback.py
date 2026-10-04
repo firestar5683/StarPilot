@@ -73,7 +73,7 @@ def execute(statements, env):
 @pytest.mark.parametrize("present,cable,allow_big,big_path,compiled,expected", [
   (True, False, True, "verified-big", False, True),
   (False, True, True, "verified-big", False, True),
-  (False, True, True, None, True, True),
+  (False, True, True, None, True, False),
   (False, False, False, None, True, False),
   (True, False, False, "verified-big", True, False),
   (False, True, True, None, False, False),
@@ -146,7 +146,9 @@ def test_big_worker_waits_before_load_and_timeout_preserves_small_fallback(custo
   selection = SimpleNamespace(big_path="selected-big" if custom else None, small_path="selected-small" if custom else None,
                               small_version=1, small_id="small", small_sha256="small-hash",
                               big_version=1, big_id="big", big_sha256="hash")
-  env = {"time": SimpleNamespace(monotonic=lambda: 0), "cloudlog": Mock(), "selection": selection,
+  from openpilot.starpilot.models.catalog import BY_ID, DEFAULT_SMALL, DEFAULT_SMALL_SHA256
+  env = {"BY_ID": BY_ID, "DEFAULT_SMALL": DEFAULT_SMALL, "DEFAULT_SMALL_SHA256": DEFAULT_SMALL_SHA256,
+         "time": SimpleNamespace(monotonic=lambda: 0), "cloudlog": Mock(), "selection": selection,
          "CHESTNUT": True, "vipc_client_main": SimpleNamespace(width=1928, height=1208), "wait_for_chestnut": wait,
          "ModelState": state, "load_verified_model": verified, "modeld_pkl_path": lambda big: "bundled-big" if big else "bundled-small",
          "receipt_owner": receipt, "threading": SimpleNamespace(Thread=Thread), "BIG_MODEL_TIMEOUT": 30,
@@ -256,3 +258,29 @@ def test_recovery_small_receipt_reports_runtime_stall_not_load_failure():
   execute([statement], env)
   assert receipt.loaded.call_args.args[1:3] == (ModelVariant.SMALL, 'chestnut-run-stalled')
   assert receipt.loaded.call_args.kwargs['model_id'] == 'bundled-current'
+
+
+@pytest.mark.parametrize('fallback_failure', [None, 'missing', 'load'])
+def test_failed_selected_small_uses_only_verified_rdf_or_refuses_startup(monkeypatch, fallback_failure):
+  from openpilot.starpilot.models import manager
+  from openpilot.starpilot.models.catalog import BY_ID, DEFAULT_SMALL, DEFAULT_SMALL_SHA256
+
+  function = next(node for node in main_body() if isinstance(node, ast.FunctionDef) and node.name == 'load_small')
+  rdf = SimpleNamespace(chestnut=False, model_id=DEFAULT_SMALL)
+  shipped = Path('shipped-rdf.pkl')
+  monkeypatch.setattr(manager, 'shipped_default', lambda: None if fallback_failure == 'missing' else shipped)
+  loader = Mock(side_effect=[RuntimeError('selected failed'), RuntimeError('RDF failed') if fallback_failure == 'load' else (rdf, 'rdf-prepared')])
+  stock = Mock(side_effect=AssertionError('stock model must not load'))
+  env = {'selection': SimpleNamespace(small_path=Path('custom.pkl'), small_version='v15', small_id='gwm8223', small_sha256='custom'),
+         'vipc_client_main': SimpleNamespace(width=1928, height=1208), 'load_verified_model': loader,
+         'ModelState': stock, 'modeld_pkl_path': stock, 'cloudlog': Mock(), 'BY_ID': BY_ID,
+         'DEFAULT_SMALL': DEFAULT_SMALL, 'DEFAULT_SMALL_SHA256': DEFAULT_SMALL_SHA256}
+  execute([function], env)
+  if fallback_failure is None:
+    assert env['load_small']() == (rdf, 'rdf-prepared', True)
+  else:
+    with pytest.raises(RuntimeError, match='Shipped RDFv4' if fallback_failure == 'missing' else 'RDF failed'):
+      env['load_small']()
+  stock.assert_not_called()
+  if fallback_failure != 'missing':
+    assert loader.call_args.args == (1928, 1208, shipped, 'v15', False, DEFAULT_SMALL, DEFAULT_SMALL_SHA256)

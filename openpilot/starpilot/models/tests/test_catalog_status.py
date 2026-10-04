@@ -2,7 +2,7 @@ import hashlib
 from pathlib import Path
 import unittest
 
-from openpilot.starpilot.models.catalog import BUNDLED_CURRENT, CATALOG, resolve_selection
+from openpilot.starpilot.models.catalog import BUNDLED_CURRENT, CATALOG, DEFAULT_SMALL, resolve_selection
 from openpilot.starpilot.models.status import (ModelHealth, ModelLoad, ModelOutput, ModelProcess,
                                               ModelVariant, project_status)
 
@@ -11,9 +11,15 @@ class TestModelCatalogStatus(unittest.TestCase):
   def test_catalog_pins_current_source_and_lists_model_metadata(self):
     self.assertEqual(len(CATALOG), 100)
     entry = resolve_selection(None)
-    self.assertEqual(entry.model_id, BUNDLED_CURRENT)
+    self.assertEqual(entry.model_id, DEFAULT_SMALL)
     source = Path(__file__).resolve().parents[4] / entry.source_path
-    self.assertEqual(hashlib.sha256(source.read_bytes()).hexdigest(), entry.source_sha256)
+    from openpilot.common.file_chunker import get_existing_chunks
+    digest = hashlib.sha256()
+    for part in get_existing_chunks(source)[1:]:
+      with part.open('rb') as stream:
+        while block := stream.read(1024 * 1024):
+          digest.update(block)
+    self.assertEqual(digest.hexdigest(), entry.source_sha256)
     self.assertEqual(resolve_selection("rdf43").version, "v15")
     with self.assertRaises(ValueError):
       resolve_selection("unknown-model")

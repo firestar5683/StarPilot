@@ -16,8 +16,10 @@ def main():
   parser.add_argument('--source', type=Path, required=True)
   parser.add_argument('--destination', type=Path, required=True)
   args = parser.parse_args()
-  for name in ('driving_tinygrad.pkl', 'dmonitoring_model_tinygrad.pkl'):
-    package_file(args.source / name, args.destination / name)
+  for name in ('dmonitoring_model_tinygrad.pkl', 'rdf43_driving_tinygrad.pkl'):
+    source = (_chunk_owner.materialize_file_chunked(args.source / name)
+              if name == 'rdf43_driving_tinygrad.pkl' else args.source / name)
+    package_file(source, args.destination / name)
 
 if __name__ == '__main__':
   main()

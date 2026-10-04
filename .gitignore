@@ -107,18 +107,7 @@ TASK.md
 # Disk-backed model cache reconstructed from published numbered parts.
 openpilot/selfdrive/modeld/models/*.unchunked
 
-# Publish only the two small compiled model packages, never raw pickles or caches.
-!openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunk[0-9][0-9]of[0-9][0-9]
-!openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunk[0-9][0-9]of[0-9][0-9][0-9]
-!openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunk[0-9][0-9]of[0-9][0-9][0-9][0-9]
-!openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunk[0-9][0-9][0-9]of[0-9][0-9]
-!openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunk[0-9][0-9][0-9]of[0-9][0-9][0-9]
-!openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunk[0-9][0-9][0-9]of[0-9][0-9][0-9][0-9]
-!openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunk[0-9][0-9][0-9][0-9]of[0-9][0-9]
-!openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunk[0-9][0-9][0-9][0-9]of[0-9][0-9][0-9]
-!openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunk[0-9][0-9][0-9][0-9]of[0-9][0-9][0-9][0-9]
-!openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunkmanifest
-!openpilot/selfdrive/modeld/models/driving_tinygrad.pkl.chunksha256
+# Publish only small compiled model packages, never raw pickles or caches.
 !openpilot/selfdrive/modeld/models/dmonitoring_model_tinygrad.pkl.chunk[0-9][0-9]of[0-9][0-9]
 !openpilot/selfdrive/modeld/models/dmonitoring_model_tinygrad.pkl.chunk[0-9][0-9]of[0-9][0-9][0-9]
 !openpilot/selfdrive/modeld/models/dmonitoring_model_tinygrad.pkl.chunk[0-9][0-9]of[0-9][0-9][0-9][0-9]
@@ -130,3 +119,14 @@ openpilot/selfdrive/modeld/models/*.unchunked
 !openpilot/selfdrive/modeld/models/dmonitoring_model_tinygrad.pkl.chunk[0-9][0-9][0-9][0-9]of[0-9][0-9][0-9][0-9]
 !openpilot/selfdrive/modeld/models/dmonitoring_model_tinygrad.pkl.chunkmanifest
 !openpilot/selfdrive/modeld/models/dmonitoring_model_tinygrad.pkl.chunksha256
+!openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunk[0-9][0-9]of[0-9][0-9]
+!openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunk[0-9][0-9]of[0-9][0-9][0-9]
+!openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunk[0-9][0-9]of[0-9][0-9][0-9][0-9]
+!openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunk[0-9][0-9][0-9]of[0-9][0-9]
+!openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunk[0-9][0-9][0-9]of[0-9][0-9][0-9]
+!openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunk[0-9][0-9][0-9]of[0-9][0-9][0-9][0-9]
+!openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunk[0-9][0-9][0-9][0-9]of[0-9][0-9]
+!openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunk[0-9][0-9][0-9][0-9]of[0-9][0-9][0-9]
+!openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunk[0-9][0-9][0-9][0-9]of[0-9][0-9][0-9][0-9]
+!openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunkmanifest
+!openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl.chunksha256

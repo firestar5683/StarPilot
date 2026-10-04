@@ -1,6 +1,7 @@
 """The build wrapper's CLI contract, without a container or device."""
 
 import os
+import hashlib
 from pathlib import Path
 import pickle
 import shutil
@@ -363,6 +364,14 @@ class ArtifactCheckTest(unittest.TestCase):
     validator = self.root / "tools/laptop_device_build/validate_artifacts.py"
     validator.parent.mkdir(parents=True)
     shutil.copy2(VALIDATOR, validator)
+    chunks = self.root / "openpilot/common/file_chunker.py"
+    chunks.parent.mkdir(parents=True)
+    shutil.copy2(SOURCE.parent / "openpilot/common/file_chunker.py", chunks)
+    shipped = b"verified RDF artifact fixture"
+    self.write("openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl", shipped)
+    self.write("openpilot/starpilot/models/catalog.py",
+               (f"DEFAULT_SMALL='rdf43'\nDEFAULT_SMALL_SHA256='{hashlib.sha256(shipped).hexdigest()}'\n"
+                f"DEFAULT_SMALL_SIZE={len(shipped)}\n").encode())
 
     elf = bytearray(128)
     elf[:6] = b"\x7fELF\x02\x01"
@@ -399,7 +408,7 @@ class ArtifactCheckTest(unittest.TestCase):
       self.write(name, self.elf)
     for name in ("openpilot/cereal/libcereal.a", "openpilot/cereal/libsocketmaster.a"):
       self.write(name, archive)
-    for name in ("driving_tinygrad.pkl", "dmonitoring_model_tinygrad.pkl"):
+    for name in ("dmonitoring_model_tinygrad.pkl",):
       code = captured_pickle("QCOM", host_backend="CPU")
       self.write(f"openpilot/selfdrive/modeld/models/{name}", struct.pack("<q", len(code)) + code + b"buffer")
     for kind in ("driving", "dm"):
@@ -419,6 +428,13 @@ class ArtifactCheckTest(unittest.TestCase):
   def test_complete_models_required_before_prebuilt(self):
     self.assertEqual(self.verify().returncode, 0)
     (self.root / "openpilot/selfdrive/modeld/models/dmonitoring_model_tinygrad.pkl").unlink()
+    self.assertNotEqual(self.verify().returncode, 0)
+
+  def test_shipped_driving_model_required_and_pinned(self):
+    path = self.root / "openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl"
+    path.write_bytes(b"x" * path.stat().st_size)
+    self.assertNotEqual(self.verify().returncode, 0)
+    path.unlink()
     self.assertNotEqual(self.verify().returncode, 0)
 
   def test_foreign_elf_rejected(self):
@@ -493,7 +509,7 @@ class ArtifactCheckTest(unittest.TestCase):
     source_only.write_text(script)
     command = " ".join([
       'source "$1";',
-      'run_larch64_scons() { :; }; verify_device_artifacts() { :; };',
+      'run_larch64_scons() { :; }; verify_device_artifacts() { :; }; python3() { :; };',
       'run_larch64_build 4 -n; [[ ! -e "$ROOT_DIR/prebuilt" ]] || exit 21;',
       'run_larch64_build 4 openpilot/common/libparams_c.so; [[ ! -e "$ROOT_DIR/prebuilt" ]] || exit 22;',
       'run_larch64_build 4; [[ -e "$ROOT_DIR/prebuilt" ]] || exit 23',

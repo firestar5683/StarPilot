@@ -1,3 +1,4 @@
+import ast
 import copy
 import json
 import tempfile
@@ -57,12 +58,75 @@ class TestQcomArtifactContract(unittest.TestCase):
     return evidence, current
 
   def test_exact_source_and_artifacts_select_expected_target(self):
-    name = "driving_tinygrad.pkl"
+    name = "dmonitoring_model_tinygrad.pkl"
     self.assertEqual(self.verify(name)[0], self.artifacts / name)
     self.assertEqual(set(json.loads((self.package / "manifest.json").read_text())["artifacts"]), set(self.commands))
 
+  def historical_package(self, compatible=False):
+    if compatible:
+      evidence, current = self.compatible_package()
+    manifest = json.loads((self.package / "manifest.json").read_text())
+    command = " ".join((f'{contract.FLAGS} taskset -c 0-7 python3 "{ROOT}/tinygrad_repo/examples/openpilot/compile_onnx.py"',
+                        f'"{ROOT / contract.RETIRED_SOURCE}" "{ROOT / contract.MODEL_DIR / contract.RETIRED_TARGET}"',
+                        '--out-of-band --benchmark-runs 1'))
+    manifest['source']['sources'][contract.RETIRED_SOURCE] = contract.RETIRED_SOURCE_SHA256
+    manifest['source']['commands'][contract.RETIRED_TARGET] = contract._tokens(command, ROOT)
+    manifest['artifacts'][contract.RETIRED_TARGET] = {'sha256': contract.RETIRED_ARTIFACT_SHA256, 'size': 70473368}
+    manifest['source_sha256'] = contract._inventory_signature(manifest['source'])
+    (self.package / 'manifest.json').write_text(json.dumps(manifest))
+    if compatible:
+      current, _ = contract._historical_inventory(manifest, current, self.commands, ROOT)
+      evidence['compatible_source_sha256'] = contract._inventory_signature(current)
+      evidence['build_manifest_sha256'] = contract._sha(self.package / 'manifest.json')
+      evidence['artifact_sha256'][contract.RETIRED_TARGET] = contract.RETIRED_ARTIFACT_SHA256
+      shape, dtype = contract.COMPATIBILITY_OUTPUTS[contract.RETIRED_TARGET]
+      evidence['paired_outputs'][contract.RETIRED_TARGET] = [
+        {'input': label, 'shape': shape, 'dtype': dtype, 'build_sha256': 'a' * 64, 'runtime_sha256': 'a' * 64}
+        for label in ('A', 'B', 'A')]
+      (self.package / 'compatibility.json').write_text(json.dumps(evidence))
+
+  def test_only_dm_and_warps_are_current_build_inputs(self):
+    self.assertEqual(len(self.commands), 5)
+    self.assertNotIn(contract.RETIRED_TARGET, self.commands)
+    self.assertNotIn(contract.RETIRED_SOURCE, contract.STATIC_SOURCES)
+    tree = ast.parse((ROOT / 'openpilot/selfdrive/modeld/SConscript').read_text())
+    models = [tuple(arg.value for arg in node.args) for node in ast.walk(tree)
+              if isinstance(node, ast.Call) and isinstance(node.func, ast.Name) and node.func.id == 'compile_model']
+    self.assertEqual(models, [('models/dmonitoring_model.onnx', 'models/dmonitoring_model_tinygrad.pkl')])
+    with self.assertRaisesRegex(ValueError, 'command recipe changed'):
+      contract.verify(self.package, ROOT, contract.RETIRED_TARGET, 'ignored')
+
+  def test_historical_package_uses_verified_five_subset_without_retired_bytes(self):
+    for compatible in (False, True):
+      with self.subTest(compatible=compatible):
+        self.historical_package(compatible)
+        before = (self.package / 'manifest.json').read_bytes()
+        for name in self.commands:
+          self.assertEqual(self.verify(name)[0], self.artifacts / name)
+        self.assertEqual((self.package / 'manifest.json').read_bytes(), before)
+        self.assertFalse((self.artifacts / contract.RETIRED_TARGET).exists())
+
+  def test_historical_subset_does_not_hide_unreviewed_source_or_artifact(self):
+    self.historical_package(True)
+    current = contract.source_inventory(ROOT)
+    current['sources']['unreviewed.py'] = 'f' * 64
+    with patch.object(contract, 'source_inventory', return_value=current), self.assertRaisesRegex(ValueError, 'outside reviewed'):
+      self.verify('dmonitoring_model_tinygrad.pkl')
+    (self.artifacts / 'dm_warp_1344x760_tinygrad.pkl').write_bytes(b'changed')
+    with self.assertRaisesRegex(ValueError, 'artifact mismatch'):
+      self.verify('dmonitoring_model_tinygrad.pkl')
+
+  def test_historical_retirement_requires_exact_reviewed_provenance(self):
+    self.historical_package()
+    manifest = json.loads((self.package / 'manifest.json').read_text())
+    manifest['source']['sources'][contract.RETIRED_SOURCE] = 'f' * 64
+    manifest['source_sha256'] = contract._inventory_signature(manifest['source'])
+    (self.package / 'manifest.json').write_text(json.dumps(manifest))
+    with self.assertRaisesRegex(ValueError, 'Unreviewed retired'):
+      self.verify('dmonitoring_model_tinygrad.pkl')
+
   def test_source_and_command_changes_reject(self):
-    name = "driving_tinygrad.pkl"
+    name = "dmonitoring_model_tinygrad.pkl"
     with patch.object(contract, "_sources", return_value={"changed.py": "0" * 64}), \
          self.assertRaisesRegex(ValueError, "sources changed"):
       self.verify(name)
@@ -72,16 +136,16 @@ class TestQcomArtifactContract(unittest.TestCase):
   def test_one_artifact_change_or_missing_member_rejects_whole_package(self):
     (self.artifacts / "dm_warp_1344x760_tinygrad.pkl").write_bytes(b"changed")
     with self.assertRaisesRegex(ValueError, "artifact mismatch"):
-      self.verify("driving_tinygrad.pkl")
+      self.verify("dmonitoring_model_tinygrad.pkl")
     manifest = json.loads((self.package / "manifest.json").read_text())
     del manifest["artifacts"]["dm_warp_1344x760_tinygrad.pkl"]
     (self.package / "manifest.json").write_text(json.dumps(manifest))
     with self.assertRaisesRegex(ValueError, "source or artifact set"):
-      self.verify("driving_tinygrad.pkl")
+      self.verify("dmonitoring_model_tinygrad.pkl")
 
   def test_wrong_backend_pickle_rejects_even_with_matching_hash(self):
     with self.assertRaises(ValueError):
-      contract.verify(self.package, ROOT, "driving_tinygrad.pkl", self.commands["driving_tinygrad.pkl"])
+      contract.verify(self.package, ROOT, "dmonitoring_model_tinygrad.pkl", self.commands["dmonitoring_model_tinygrad.pkl"])
 
   def test_malformed_manifest_artifacts_reject_cleanly(self):
     manifest = json.loads((self.package / "manifest.json").read_text())
@@ -89,10 +153,10 @@ class TestQcomArtifactContract(unittest.TestCase):
       manifest["artifacts"] = malformed
       (self.package / "manifest.json").write_text(json.dumps(manifest))
       with self.subTest(malformed=malformed), self.assertRaisesRegex(ValueError, "artifact set"):
-        self.verify("driving_tinygrad.pkl")
+        self.verify("dmonitoring_model_tinygrad.pkl")
 
   def test_changed_bytes_during_copy_leave_existing_target(self):
-    name = "driving_tinygrad.pkl"
+    name = "dmonitoring_model_tinygrad.pkl"
     target = self.package / name
     target.write_bytes(b"previous")
     with patch("tools.laptop_device_build.validate_artifacts.require_qcom_pickle"), \
@@ -102,7 +166,7 @@ class TestQcomArtifactContract(unittest.TestCase):
     self.assertEqual(target.read_bytes(), b"previous")
     self.assertFalse(list(self.package.glob(".qcom-import-*")))
 
-  def test_exact_compatible_source_and_all_six_artifacts_verify(self):
+  def test_exact_compatible_source_and_all_five_artifacts_verify(self):
     self.compatible_package()
     for name in self.commands:
       with self.subTest(name=name):
@@ -114,19 +178,19 @@ class TestQcomArtifactContract(unittest.TestCase):
     changed["sources"]["unrelated.py"] = "1" * 64
     with patch.object(contract, "source_inventory", return_value=changed), \
          self.assertRaisesRegex(ValueError, "outside reviewed"):
-      self.verify("driving_tinygrad.pkl")
+      self.verify("dmonitoring_model_tinygrad.pkl")
     changed = copy.deepcopy(current)
-    changed["commands"]["driving_tinygrad.pkl"].append("--new-option")
+    changed["commands"]["dmonitoring_model_tinygrad.pkl"].append("--new-option")
     with patch.object(contract, "source_inventory", return_value=changed), \
          self.assertRaisesRegex(ValueError, "outside reviewed"):
-      self.verify("driving_tinygrad.pkl")
+      self.verify("dmonitoring_model_tinygrad.pkl")
 
   def test_compatible_source_rejects_artifact_or_paired_output_change(self):
     evidence, _ = self.compatible_package()
     del evidence["paired_outputs"]["dmonitoring_model_tinygrad.pkl"]
     (self.package / "compatibility.json").write_text(json.dumps(evidence))
     with self.assertRaisesRegex(ValueError, "lacks a stock target"):
-      self.verify("driving_tinygrad.pkl")
+      self.verify("dmonitoring_model_tinygrad.pkl")
     evidence["paired_outputs"]["dmonitoring_model_tinygrad.pkl"] = [
       {"input": label, "shape": contract.COMPATIBILITY_OUTPUTS["dmonitoring_model_tinygrad.pkl"][0],
        "dtype": "float32", "build_sha256": str(index + 4) * 64,
@@ -135,19 +199,19 @@ class TestQcomArtifactContract(unittest.TestCase):
     (self.package / "compatibility.json").write_text(json.dumps(evidence))
     (self.artifacts / "dmonitoring_model_tinygrad.pkl").write_bytes(b"changed")
     with self.assertRaisesRegex(ValueError, "artifact mismatch"):
-      self.verify("driving_tinygrad.pkl")
+      self.verify("dmonitoring_model_tinygrad.pkl")
 
   def test_compatible_source_rejects_changed_or_unsafe_evidence(self):
     evidence, _ = self.compatible_package()
     evidence_file = self.package / "compatibility" / "qualification.txt"
     evidence_file.write_text("changed evidence\n")
     with self.assertRaisesRegex(ValueError, "evidence file mismatch"):
-      self.verify("driving_tinygrad.pkl")
+      self.verify("dmonitoring_model_tinygrad.pkl")
     evidence_file.write_text("reviewed paired output evidence\n")
     evidence["evidence_files"] = {"../qualification.txt": contract._sha(evidence_file)}
     (self.package / "compatibility.json").write_text(json.dumps(evidence))
     with self.assertRaisesRegex(ValueError, "evidence filename"):
-      self.verify("driving_tinygrad.pkl")
+      self.verify("dmonitoring_model_tinygrad.pkl")
     evidence["evidence_files"] = {"qualification.txt": contract._sha(evidence_file)}
     (self.package / "compatibility.json").write_text(json.dumps(evidence))
     outside = self.package / "outside.txt"
@@ -155,41 +219,41 @@ class TestQcomArtifactContract(unittest.TestCase):
     evidence_file.unlink()
     evidence_file.symlink_to(outside)
     with self.assertRaisesRegex(ValueError, "evidence file mismatch"):
-      self.verify("driving_tinygrad.pkl")
+      self.verify("dmonitoring_model_tinygrad.pkl")
     evidence_file.unlink()
     evidence_file.write_text("reviewed paired output evidence\n")
     evidence_dir = self.package / "compatibility"
     evidence_dir.rename(self.package / "actual_evidence")
     evidence_dir.symlink_to(self.package / "actual_evidence", target_is_directory=True)
     with self.assertRaisesRegex(ValueError, "evidence directory"):
-      self.verify("driving_tinygrad.pkl")
+      self.verify("dmonitoring_model_tinygrad.pkl")
 
   def test_compatible_source_rejects_unequal_outputs_and_stale_source_binding(self):
     evidence, _ = self.compatible_package()
     original = copy.deepcopy(evidence)
-    evidence["paired_outputs"]["driving_tinygrad.pkl"][1]["runtime_sha256"] = "a" * 64
+    evidence["paired_outputs"]["dmonitoring_model_tinygrad.pkl"][1]["runtime_sha256"] = "a" * 64
     (self.package / "compatibility.json").write_text(json.dumps(evidence))
     with self.assertRaisesRegex(ValueError, "Invalid QCOM paired outputs"):
-      self.verify("driving_tinygrad.pkl")
+      self.verify("dmonitoring_model_tinygrad.pkl")
     original["compatible_source_sha256"] = "b" * 64
     (self.package / "compatibility.json").write_text(json.dumps(original))
     with self.assertRaisesRegex(ValueError, "not bound"):
-      self.verify("driving_tinygrad.pkl")
+      self.verify("dmonitoring_model_tinygrad.pkl")
 
   def test_compatible_source_rejects_bool_versions_and_duplicate_json_fields(self):
     evidence, _ = self.compatible_package()
     evidence["version"] = True
     (self.package / "compatibility.json").write_text(json.dumps(evidence))
     with self.assertRaisesRegex(ValueError, "not bound"):
-      self.verify("driving_tinygrad.pkl")
+      self.verify("dmonitoring_model_tinygrad.pkl")
     (self.package / "compatibility.json").write_text('{"version":1,"version":1}')
     with self.assertRaisesRegex(ValueError, "Duplicate QCOM manifest field"):
-      self.verify("driving_tinygrad.pkl")
+      self.verify("dmonitoring_model_tinygrad.pkl")
     manifest = json.loads((self.package / "manifest.json").read_text())
     manifest["version"] = True
     (self.package / "manifest.json").write_text(json.dumps(manifest))
     with self.assertRaisesRegex(ValueError, "source or artifact set"):
-      self.verify("driving_tinygrad.pkl")
+      self.verify("dmonitoring_model_tinygrad.pkl")
 
 
 class TestQcomSupplementalRuntimeCompatibility(unittest.TestCase):

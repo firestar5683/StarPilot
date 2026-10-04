@@ -44,14 +44,14 @@ from openpilot.starpilot.models.receipt import ModelReceiptOwner
 from openpilot.starpilot.models.status import ModelVariant
 from openpilot.starpilot.models.startup import wait_for_chestnut_power
 from openpilot.starpilot.navigation.intent import TurnIntent, matching_turn_signal
-from openpilot.starpilot.models.catalog import BUNDLED_CURRENT
+from openpilot.starpilot.models.catalog import BUNDLED_CURRENT, BY_ID, DEFAULT_SMALL, DEFAULT_SMALL_SHA256
 from openpilot.starpilot.models.runner import CatalogModelState, action_from_outputs, load_verified_model
 import uuid
 from openpilot.selfdrive.controls.lib.drive_helpers import get_accel_from_plan, should_stop, smooth_value, get_curvature_from_plan
 from openpilot.selfdrive.modeld.parse_model_outputs import Parser
 from openpilot.selfdrive.modeld.fill_model_msg import fill_model_msg, fill_driving_model_data, fill_pose_msg, PublishState
 from openpilot.selfdrive.modeld.constants import ModelConstants, Plan
-from openpilot.selfdrive.modeld.helpers import MODELS_DIR, chestnut_present, chestnut_compiled, modeld_pkl_path, load_oob, wait_for_chestnut
+from openpilot.selfdrive.modeld.helpers import MODELS_DIR, chestnut_present, modeld_pkl_path, load_oob, wait_for_chestnut
 
 SEND_RAW_PRED = os.getenv('SEND_RAW_PRED')
 
@@ -154,6 +154,8 @@ class ModelState:
   prev_desire: np.ndarray  # for tracking the rising edge of the pulse
 
   def __init__(self, cam_w: int, cam_h: int, chestnut: bool):
+    if not chestnut:
+      raise ValueError("Small models require the verified catalog loader")
     jits = load_oob(modeld_pkl_path(chestnut), chestnut)
     self.model_device = jits['input_specs']['new_img'][2]
     self.input_shapes = {name: (shape, np.dtype(dtype)) for name, (shape, dtype, _) in jits['input_specs'].items()}
@@ -251,7 +253,7 @@ def main(demo=False):
   recovery_small_only = os.getenv("STARPILOT_MODELD_RECOVERY_SMALL_ONLY") == "1"
   selection = resolve_runtime(chestnut_available=chestnut_available and not recovery_small_only, randomize=not recovery_small_only)
   requested_model_id = requested_runtime_id(chestnut_available)
-  CHESTNUT = selection.allow_big and (selection.big_path is not None or chestnut_compiled())
+  CHESTNUT = selection.allow_big and selection.big_path is not None
   if CHESTNUT:
     from tinygrad.runtime.support.am import startup_trace
     startup_trace.ENABLED = True
@@ -306,11 +308,15 @@ def main(demo=False):
                                                  selection.small_id, selection.small_sha256)
         return selected, prepared, False
       except Exception:
-        cloudlog.exception("selected small model load failed, using bundled model")
-    path = modeld_pkl_path(False)
-    identity = receipt_owner.capture(path)
-    bundled = ModelState(vipc_client_main.width, vipc_client_main.height, False)
-    return bundled, receipt_owner.prepare(path, identity), selection.small_path is not None
+        cloudlog.exception("selected small model load failed, using shipped RDFv4")
+    from openpilot.starpilot.models.manager import shipped_default
+    path = shipped_default()
+    if path is None:
+      raise RuntimeError("Shipped RDFv4 is missing or corrupt")
+    fallback, prepared = load_verified_model(vipc_client_main.width, vipc_client_main.height,
+                                             path, BY_ID[DEFAULT_SMALL].version, False,
+                                             DEFAULT_SMALL, DEFAULT_SMALL_SHA256)
+    return fallback, prepared, selection.small_id != DEFAULT_SMALL
 
   # Preload a custom fallback before the GPU worker takes the catalog lock.
   # A timed-out GPU worker must never hold up access to the small runner.
