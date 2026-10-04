@@ -3,6 +3,7 @@ import numpy as np
 from opendbc.can import CANPacker
 from opendbc.car import Bus, DT_CTRL, rate_limit, make_tester_present_msg, structs
 from opendbc.car.honda import hondacan
+from opendbc.car.honda.bosch_longitudinal import BoschLongitudinal, qualified as bosch_long_qualified
 from opendbc.car.honda.values import CAR, CruiseButtons, HondaFlags, CarControllerParams
 from opendbc.car.interfaces import CarControllerBase
 
@@ -93,6 +94,8 @@ class CarController(CarControllerBase):
     self.packer = CANPacker(dbc_names[Bus.pt])
     self.params = CarControllerParams(CP)
     self.CAN = hondacan.CanBus(CP)
+    self.bosch_longitudinal = BoschLongitudinal(CP, self.params) if bosch_long_qualified(CP) else None
+    self.bosch_learning_params = None
     self.tja_control = bool(CP.flags & HondaFlags.BOSCH_TJA_CONTROL)
 
     self.braking = False
@@ -113,6 +116,8 @@ class CarController(CarControllerBase):
     hud_control = CC.hudControl
     hud_v_cruise = hud_control.setSpeed / CS.v_cruise_factor if hud_control.speedVisible else 255
     pcm_cancel_cmd = CC.cruiseControl.cancel
+    if self.bosch_longitudinal is not None:
+      self.bosch_longitudinal.observe_orientation(CC.orientationNED)
 
     if CC.longActive:
       accel = actuators.accel
@@ -197,13 +202,17 @@ class CarController(CarControllerBase):
         ts = self.frame * DT_CTRL
 
         if self.CP.flags & HondaFlags.BOSCH:
-          self.accel = float(np.clip(accel, self.params.BOSCH_ACCEL_MIN, self.params.BOSCH_ACCEL_MAX))
-          self.gas = float(np.interp(accel, self.params.BOSCH_GAS_LOOKUP_BP, self.params.BOSCH_GAS_LOOKUP_V))
+          gas_force = braking = None
+          if self.bosch_longitudinal is not None:
+            self.accel, self.gas, gas_force, braking = self.bosch_longitudinal.update(CC, CS, accel)
+          else:
+            self.accel = float(np.clip(accel, self.params.BOSCH_ACCEL_MIN, self.params.BOSCH_ACCEL_MAX))
+            self.gas = float(np.interp(accel, self.params.BOSCH_GAS_LOOKUP_BP, self.params.BOSCH_GAS_LOOKUP_V))
 
           stopping = actuators.longControlState == LongCtrlState.stopping
           self.stopping_counter = self.stopping_counter + 1 if stopping else 0
           can_sends.extend(hondacan.create_acc_commands(self.packer, self.CAN, CC.enabled, CC.longActive, self.accel, self.gas,
-                                                        self.stopping_counter, self.CP))
+                                                        self.stopping_counter, self.CP, gas_force=gas_force, braking=braking))
         else:
           apply_brake = np.clip(self.brake_last - wind_brake, 0.0, 1.0)
           apply_brake = int(np.clip(apply_brake * self.params.NIDEC_BRAKE_MAX, 0, self.params.NIDEC_BRAKE_MAX - 1))
@@ -235,6 +244,9 @@ class CarController(CarControllerBase):
         if not (self.CP.flags & HondaFlags.BOSCH):
           self.speed = pcm_speed
           self.gas = pcm_accel / self.params.NIDEC_GAS_MAX
+
+    if self.bosch_learning_params is not None:
+      self.bosch_learning_params.persist(self.frame)
 
     new_actuators = actuators.as_builder()
     new_actuators.speed = self.speed
