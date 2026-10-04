@@ -33,9 +33,9 @@ export const DriveStatePanel = {
     },
     async change(mode) {
       if (this.busy || !this.state?.available) return
-      if (mode !== "auto" && !this.state.overrideAllowed) { this.error = "Park and disengage, then retry. The device can stay on-road."; return }
+      if (mode === "onroad" && !this.state.overrideAllowed) { this.error = "Park and disengage, then retry. The device can stay on-road."; return }
       if (mode === "offroad" && this.state.effective === "onroad" &&
-          !window.confirm("Switch to Offroad and stop driving services? Stay parked until you return to Auto.")) return
+          !window.confirm("Switch to Offroad and stop driving services? Disengage and stop safely first. Stay stopped until you return to Auto.")) return
       const revision = this.state.revision
       this.busy = true
       this.loading = false
@@ -57,11 +57,11 @@ export const DriveStatePanel = {
   template: `<section class="gx-card gx-force-drive" aria-label="Force Drive State"><h3>Force Drive State</h3>
     <p>Device: {{ state?.effective === "onroad" ? "Onroad" : state?.effective === "offroad" ? "Offroad" : "Checking…" }}</p>
     <p v-if="pending" role="status">Waiting for the device to switch {{ state.mode }}…</p>
-    <p>Auto follows the car. Force Offroad stops driving services even when the device is on-road. Park and disengage before switching; Return to Auto restores normal operation.</p>
-    <p v-if="state?.available && !state.overrideAllowed" role="status">Waiting for a fresh parked, disengaged state. You do not need to turn the vehicle off.</p>
+    <p>Auto follows the car. Force Offroad stops driving services even when the device is on-road. Disengage and stop safely before forcing Offroad; Force Onroad requires Park and valid vehicle data. Return to Auto restores normal operation.</p>
+    <p v-if="state?.available && !state.overrideAllowed" role="status">Force Onroad needs fresh parked, disengaged vehicle data. Force Offroad remains available to stop driving services.</p>
     <p v-if="state && !state.available" role="alert">The drive-state manager is unavailable. Reconnect to check again.</p>
     <div><button v-for="mode in ['offroad', 'onroad', 'auto']" :key="mode" type="button"
-      :disabled="busy || !state?.available || (mode !== 'auto' && !state.overrideAllowed)"
+      :disabled="busy || !state?.available || (mode === 'onroad' && !state.overrideAllowed)"
       :aria-pressed="state?.mode === mode" @click="change(mode)">{{ mode === 'auto' ? 'Return to Auto' : mode === 'onroad' ? 'Onroad' : 'Offroad' }}</button></div>
     <p v-if="error" role="alert">{{ error }}</p></section>`,
 }

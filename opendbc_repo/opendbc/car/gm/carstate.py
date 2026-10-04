@@ -310,18 +310,19 @@ class CarState(CarStateBase):
     if self.CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and self.CP.flags & GMFlags.PEDAL_LONG.value:
       self.stock_acc_status_ts_nanos = pt_cp.ts_nanos["AcceleratorPedal2"]["CruiseState"]
     if self.CP.carFingerprint in NO_ACC_BOLT_CAR and not self.bolt_cc_profile:
+      ret.accFaulted = False
       ret.cruiseState.enabled = pt_cp.vl["ECMCruiseControl"]["CruiseActive"] != 0 if pedal_stock_no_acc else False
       ret.cruiseState.standstill = False
     if (self.CP.networkLocation == NetworkLocation.fwdCamera and not is_volt_camera_removed(self.CP)
         and not is_conventional_cc_pedal_profile(self.CP) and not is_ordinary_camera_removed(self.CP)):
       if (self.CP.carFingerprint not in ALT_ACCS or is_ordinary_camera_profile(self.CP) or
-          is_ordinary_camera_profile(self.CP, longitudinal=True)) and not self.bolt_cc_profile and not pedal_stock_no_acc:
+          is_ordinary_camera_profile(self.CP, longitudinal=True)) and not self.bolt_cc_profile and self.CP.carFingerprint not in NO_ACC_BOLT_CAR:
         ret.cruiseState.speed = cam_cp.vl["ASCMActiveCruiseControlStatus"]["ACCSpeedSetpoint"] * CV.KPH_TO_MS
         # This FCW signal only works for SDGM cars. CAM cars send FCW on GMLAN but this bit is always 0 for them
         ret.stockFcw = cam_cp.vl["ASCMActiveCruiseControlStatus"]["FCWAlert"] != 0
       else:
         ret.cruiseState.speed = pt_cp.vl["ECMCruiseControl"]["CruiseSetSpeed"] * CV.KPH_TO_MS
-      if (self.CP.pcmCruise and not pedal_stock_no_acc and self.CP.carFingerprint not in ASCM_INTERCEPT_CAR and
+      if (self.CP.pcmCruise and self.CP.carFingerprint not in NO_ACC_BOLT_CAR and self.CP.carFingerprint not in ASCM_INTERCEPT_CAR and
           (self.CP.carFingerprint not in ALT_ACCS or is_ordinary_camera_profile(self.CP) or
                self.CP.carFingerprint == CAR.CHEVROLET_SUBURBAN_CAMERA)):
         # The alternate set-speed source still uses camera ACC state.
@@ -377,6 +378,7 @@ class CarState(CarStateBase):
 
   @staticmethod
   def get_can_parsers(CP):
+    bolt_pedal_profile = is_bolt_pedal_profile(CP) or is_bolt_pedal_profile(CP, stock_only=True)
     pt_messages = []
     if is_volt_gateway_profile(CP) and not CP.openpilotLongitudinalControl:
       pt_messages += [("PSCMStatus", 10), ("EBCMWheelSpdRear", 10), ("ASCMSteeringButton", 10),
@@ -389,7 +391,7 @@ class CarState(CarStateBase):
       pt_messages.append(("BCMBlindSpotMonitor", float('nan')))
     if CP.flags & GMFlags.PEDAL_LONG.value:
       pt_messages.append(("GAS_SENSOR", 50))
-      if CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and not is_bolt_pedal_profile(CP, stock_only=True):
+      if CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and not bolt_pedal_profile:
         pt_messages.append(("AcceleratorPedal2", 10))
     if CP.networkLocation == NetworkLocation.fwdCamera and (not is_conventional_cc_pedal_profile(CP) or is_silverado_cc_pedal_profile(CP)):
       pt_messages += [
@@ -421,7 +423,7 @@ class CarState(CarStateBase):
         ("ASCMSteeringButton", 33), ("ECMAcceleratorPos", 80),
         ("ECMCruiseControl", 10),
       ]
-    if (requires_camera_state_sources(CP) or is_volt_camera_removed(CP)) and CP.carFingerprint not in ORDINARY_SDGM_CAR:
+    if (requires_camera_state_sources(CP) or is_volt_camera_removed(CP) or bolt_pedal_profile) and CP.carFingerprint not in ORDINARY_SDGM_CAR:
       # Required stock signals are checked on their observed PT bus; the
       # camera command on PT is only a counter source and remains optional.
       pt_messages += [
@@ -435,7 +437,7 @@ class CarState(CarStateBase):
       ]
       if CP.transmissionType == TransmissionType.direct:
         pt_messages.append(("EBCMRegenPaddle", 50 if CP.carFingerprint == CAR.CHEVROLET_VOLT_CAMERA else 40))
-      if CP.carFingerprint in ALT_ACCS:
+      if CP.carFingerprint in ALT_ACCS or bolt_pedal_profile:
         pt_messages.append(("ECMCruiseControl", 10))
 
     if is_ordinary_camera_profile(CP, longitudinal=CP.openpilotLongitudinalControl):
@@ -494,9 +496,10 @@ class CarState(CarStateBase):
       if CP.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL and not removed:
         cam_messages.append(("ASCMActiveCruiseControlStatus", 25))
 
-    if is_bolt_pedal_profile(CP, stock_only=True) and CP.carFingerprint in NO_ACC_BOLT_CAR:
-      pt_messages.append(("ECMCruiseControl", 10))
-      cam_messages = [(name, frequency) for name, frequency in cam_messages if name != "ASCMActiveCruiseControlStatus"]
+    if bolt_pedal_profile:
+      cam_messages = [("ASCMLKASteeringCmd", 10), ("AEBCmd", 10)]
+      if CP.carFingerprint not in NO_ACC_BOLT_CAR:
+        cam_messages.append(("ASCMActiveCruiseControlStatus", 25))
 
     if is_conventional_cc_pedal_profile(CP):
       cam_messages = [] if CP.flags & GMFlags.NO_CAMERA else [("ASCMLKASteeringCmd", 10), ("AEBCmd", 10)]

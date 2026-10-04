@@ -519,7 +519,7 @@ class StarShellSession:
     drive_row = FeatureRow("drive_state", "Force Drive State", LABELS[drive["mode"]],
                            source=drive["revision"].encode() if drive["revision"] else None,
                            choices=("Auto", "Offroad", "Onroad"), available=drive["available"],
-                           reason=f"Device: {drive["effective"] or 'unavailable'}. Park and disengage for overrides; Auto follows ignition.")
+                           reason=f"Device: {drive["effective"] or 'unavailable'}. Offroad stops services; Onroad requires Park and disengagement. Auto follows ignition.")
     return replace(display, title="System", subtitle="Display, parked power, and offline map status.",
                    rows=display.rows + power.rows + maps.rows + (drive_row,))
 
@@ -632,7 +632,21 @@ class StarShellSession:
           self.display_request(request)
     self._snapshot_cache = None
 
-  def _drive_change(self, mode, revision):
+  def _drive_change(self, mode, revision, *, confirmation=False):
+    if mode == "offroad" and not confirmation and (ui_state.started or self.drive_state.snapshot()["effective"] == "onroad"):
+      from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
+      from openpilot.system.ui.widgets import DialogResult
+      destination = self.selected
+      epoch = getattr(self, "_power_request_epoch", 0)
+      pipeline = (bool(ui_state.started), ui_state.started_frame)
+      def confirmed(result: DialogResult) -> None:
+        if (result == DialogResult.CONFIRM and self._mode == ShellMode.SETTINGS and
+            self.selected == destination and epoch == getattr(self, "_power_request_epoch", 0) and
+            pipeline == (bool(ui_state.started), ui_state.started_frame)):
+          self._drive_change(mode, revision, confirmation=True)
+      gui_app.push_widget(ConfirmDialog("Switch to Offroad and stop driving services? Park and disengage first. "
+                                       "Stay parked until you return to Auto.", "Force Offroad", callback=confirmed))
+      return
     try:
       self.drive_state.change(mode, revision, lambda: self._mode == ShellMode.SETTINGS)
     except DriveStateRejected as error:

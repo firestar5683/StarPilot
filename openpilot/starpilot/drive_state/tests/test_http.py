@@ -71,12 +71,19 @@ class ForceHttpTest(unittest.TestCase):
     self.assertEqual(self.params.writes, before)
 
   def test_authenticated_force_offroad_from_live_onroad_state(self):
+    self._force_offroad_from_live_onroad_state(True)
+
+  def test_authenticated_force_offroad_with_invalid_can_from_onroad(self):
+    self._force_offroad_from_live_onroad_state(False)
+
+  def _force_offroad_from_live_onroad_state(self, can_valid):
     from openpilot.starpilot.drive_state.evidence import PhysicalSource
     from openpilot.starpilot.drive_state.tests.test_evidence import Messages
     from openpilot.starpilot.drive_state.resolver import should_start
     messages = Messages()
     messages.after_mono_ns = 1_000_000_000
     messages.values['deviceState'] = NS(started=True)
+    messages.values['carState'].canValid = can_valid
     messages.values['pandaStates'][0].ignitionLine = True
     messages.values['pandaStates'][0].safetyModel = 'hyundai'
     physical = PhysicalSource(messages, mono=lambda: 2_100_000_000, boot=lambda: 12_100_000_000)
@@ -85,7 +92,7 @@ class ForceHttpTest(unittest.TestCase):
     self.control.effective = lambda: messages.values['deviceState'].started
     status = self.request('/api/drive-state/status', remote=True, cookie=self.remote_cookie)
     self.assertEqual(status[1]['effective'], 'onroad')
-    self.assertTrue(status[1]['overrideAllowed'])
+    self.assertEqual(status[1]['overrideAllowed'], can_valid)
     result = self.drive_action('offroad', remote=True)
     self.assertEqual(result[0], 200)
     self.assertEqual(result[1]['mode'], 'offroad')

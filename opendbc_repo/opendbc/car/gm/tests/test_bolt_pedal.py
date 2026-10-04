@@ -206,3 +206,94 @@ class TestBoltPedalMessages(unittest.TestCase):
         cs.out = state.as_reader()
         _, commands = controller.update(control.as_reader(), cs, 1_000_000_000)
         self.assertEqual([msg[0] for msg in commands if msg[0] in (0x200, 0x1F5, 0xBD)], [0x200, 0x1F5, 0xBD])
+
+
+class TestBoltPedalStartupParser(unittest.TestCase):
+  PT_MESSAGES = {
+    'PSCMStatus': 10, 'ESPStatus': 10, 'EBCMWheelSpdFront': 20, 'EBCMWheelSpdRear': 20,
+    'EBCMFrictionBrakeStatus': 20, 'PSCMSteeringAngle': 100, 'ECMAcceleratorPos': 80,
+    'ECMPRDNL2': 40, 'AcceleratorPedal2': 33, 'ECMEngineStatus': 100, 'BCMTurnSignals': 1,
+    'BCMDoorBeltStatus': 10, 'BCMGeneralPlatformStatus': 10, 'ASCMSteeringButton': 33,
+    'EBCMRegenPaddle': 40, 'ECMCruiseControl': 10, 'GAS_SENSOR': 50,
+  }
+
+  def stream(self, cp, missing=None):
+    ci = CarInterface(cp)
+    packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+    camera = ['ASCMLKASteeringCmd', 'AEBCmd']
+    if cp.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL:
+      camera.append('ASCMActiveCruiseControlStatus')
+    sensor_counter = 0
+    for index in range(250):
+      frames = []
+      for bus, names in ((0, self.PT_MESSAGES), (2, camera), (128, ['ASCMLKASteeringCmd'])):
+        for name in names:
+          if (bus, name) == missing:
+            continue
+          rate = self.PT_MESSAGES[name] if bus == 0 else 25 if name == 'ASCMActiveCruiseControlStatus' else 10
+          if index and index * rate // 100 == (index - 1) * rate // 100:
+            continue
+          if name == 'GAS_SENSOR':
+            frame = TestBoltPedalMessages.sensor(packer, 0, sensor_counter % 16)
+            sensor_counter += 1
+          else:
+            values = {'ECMCruiseControl': {'CruiseSetSpeed': 60, 'CruiseActive': 1},
+                      'ASCMActiveCruiseControlStatus': {'ACCSpeedSetpoint': 60, 'ACCCmdActive': 1},
+                      'ECMPRDNL2': {'PRNDL2': 4}, 'BCMDoorBeltStatus': {'LeftSeatBelt': 1},
+                      'ECMEngineStatus': {'CruiseMainOn': 1}}.get(name, {})
+            frame = packer.make_can_msg(name, bus, values)
+          frames.append(frame)
+      result = ci.update([(1_000_000_000 + index * 10_000_000, frames)])
+    return ci, result
+
+  def test_identification_to_no_acc_pedal_parser(self):
+    from opendbc.car.fingerprints import all_legacy_fingerprint_cars, eliminate_incompatible_cars
+    from opendbc.car.gm.fingerprints import FINGERPRINTS
+    candidate = CAR.CHEVROLET_BOLT_CC_2018_2021
+    candidates = all_legacy_fingerprint_cars()
+    for address, length in FINGERPRINTS[candidate][0].items():
+      candidates = eliminate_incompatible_cars(SimpleNamespace(address=address, dat=bytes(length)), candidates)
+    self.assertEqual(candidates, [candidate])
+    cp = params(candidates[0], True, True, camera=True)
+    ci, state = self.stream(cp)
+    self.assertTrue(state.canValid)
+    self.assertTrue(ci.CS.pedal_sensor_healthy)
+    self.assertEqual(state.gearShifter, structs.CarState.GearShifter.drive)
+    self.assertFalse(state.seatbeltUnlatched)
+    self.assertFalse(state.doorOpen)
+    self.assertAlmostEqual(state.cruiseState.speed, 60 / 3.6, places=5)
+    self.assertNotIn('ASCMActiveCruiseControlStatus', ci.can_parsers[Bus.cam].vl)
+    by_name = {message.name: message.frequency for message in ci.can_parsers[Bus.pt].message_states.values()}
+    self.assertEqual({name: rate for name, rate in by_name.items() if name != 'ASCMLKASteeringCmd'}, self.PT_MESSAGES)
+    steering_counter = next(message for message in ci.can_parsers[Bus.pt].message_states.values()
+                            if message.name == 'ASCMLKASteeringCmd')
+    self.assertTrue(steering_counter.ignore_alive)
+
+  def test_active_and_saved_disabled_pedal_profiles(self):
+    from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
+    for candidate in (CAR.CHEVROLET_BOLT_CC_2018_2021, CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL):
+      for alpha in (False, True):
+        for disabled in (False, True):
+          with self.subTest(candidate=candidate, alpha=alpha, disabled=disabled):
+            cp = params(candidate, True, True, alpha_long=alpha, camera=True)
+            if disabled:
+              VehicleStartupPreferences(disable_bolt_long=True).prepare(cp, fingerprints={2: {0x180: 4}})
+            ci, state = self.stream(cp)
+            self.assertTrue(state.canValid)
+            self.assertTrue(ci.CS.pedal_sensor_healthy)
+            self.assertEqual(state.gearShifter, structs.CarState.GearShifter.drive)
+            self.assertEqual('ASCMActiveCruiseControlStatus' in ci.can_parsers[Bus.cam].vl,
+                             candidate == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL)
+
+  def test_missing_required_sources_stay_invalid(self):
+    for candidate in (CAR.CHEVROLET_BOLT_CC_2018_2021, CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL):
+      missing_sources = [(0, 'GAS_SENSOR'), (0, 'ECMPRDNL2'), (2, 'ASCMLKASteeringCmd')]
+      if candidate == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL:
+        missing_sources.append((2, 'ASCMActiveCruiseControlStatus'))
+      for missing in missing_sources:
+        with self.subTest(candidate=candidate, missing=missing):
+          cp = params(candidate, True, True, camera=True)
+          ci, state = self.stream(cp, missing)
+          self.assertFalse(state.canValid)
+          if missing == (0, 'GAS_SENSOR'):
+            self.assertFalse(ci.CS.pedal_sensor_healthy)

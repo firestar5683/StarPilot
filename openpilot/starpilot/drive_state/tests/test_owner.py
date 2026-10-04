@@ -274,3 +274,13 @@ def test_empty_real_native_registry_resolves_auto_and_unsupported_key_is_explici
     def get(self, key):
       raise UnknownKeyName(key)
   assert DriveStateOwner(Unsupported(), tmp_path / 'unsupported').snapshot() == State()
+
+
+def test_force_offroad_withdraws_authority_without_healthy_can(fixture):
+  f = fixture
+  assert request(f, 'offroad', override_allowed=lambda: False).mode == Mode.OFFROAD
+  with pytest.raises(Rejected):
+    request(f, 'onroad', override_allowed=lambda: False)
+  with pytest.raises(Rejected):
+    request(f, 'auto', authorized=lambda: False, override_allowed=lambda: False)
+  assert f.owner.snapshot().mode == Mode.OFFROAD

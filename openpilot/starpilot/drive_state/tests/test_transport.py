@@ -56,7 +56,7 @@ def test_displayed_admission_is_not_reused_for_action_and_auth_revocation(fixtur
   status = f.control.snapshot()
   f.physical.allowed.return_value = False
   with pytest.raises(Rejected):
-    f.control.cycle(status, lambda: True)
+    f.control.change('onroad', status['revision'], lambda: True)
   assert f.owner.snapshot().mode == Mode.AUTO
   f.physical.allowed.return_value = True
   with pytest.raises(Rejected):
@@ -214,3 +214,34 @@ def test_concurrent_old_snapshot_cannot_repopulate_cache_after_acknowledged_chan
   assert not reader.is_alive() and not writer.is_alive()
   assert results[0]['mode'] == 'auto'
   assert f.control.snapshot()['mode'] == 'onroad'
+
+
+def test_native_offroad_confirmation_preserves_revision_without_requiring_healthy_can(fixture):
+  from unittest.mock import patch
+  from openpilot.starpilot.ui.runtime_app import StarShellSession
+  from openpilot.starpilot.ui.shell import ShellMode
+  from openpilot.starpilot.ui.settings_state import Destination
+  from openpilot.system.ui.widgets import DialogResult
+
+  f = fixture
+  native = object.__new__(StarShellSession)
+  native.drive_state = f.control
+  native._mode = ShellMode.SETTINGS
+  native.selected = Destination.SYSTEM
+  native._snapshot_cache = None
+  fake = NS(started=True, started_frame=10)
+  revision = f.owner.snapshot().revision
+  with patch('openpilot.starpilot.ui.runtime_app.ui_state', fake), \
+       patch('openpilot.starpilot.ui.runtime_app.gui_app.push_widget') as push:
+    native._drive_change('offroad', revision)
+    assert f.owner.snapshot().mode == Mode.AUTO
+    dialog = push.call_args.args[0]
+    dialog._callback(DialogResult.CANCEL)
+    assert f.owner.snapshot().mode == Mode.AUTO
+    fake.started_frame = 11
+    dialog._callback(DialogResult.CONFIRM)
+    assert f.owner.snapshot().mode == Mode.AUTO
+    native._drive_change('offroad', revision)
+    f.physical.allowed.return_value = False
+    push.call_args.args[0]._callback(DialogResult.CONFIRM)
+    assert f.owner.snapshot().mode == Mode.OFFROAD

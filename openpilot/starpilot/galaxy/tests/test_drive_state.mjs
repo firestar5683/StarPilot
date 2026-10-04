@@ -29,7 +29,7 @@ assert.equal(denied.state,null)
 assert.equal(denied.error,'Drive state unavailable')
 console.log('PASS: strict status; captured revision; aborted/out-of-order status; requested versus effective; unmount; unauthorized state')
 
-const onroad=panel();onroad.state={...snapshot(),effective:'onroad'}
+const onroad=panel();onroad.state={...snapshot(),effective:'onroad',overrideAllowed:false}
 globalThis.window={confirm:()=>false}
 const before=requests.length
 await onroad.change('offroad');assert.equal(requests.length,before)
