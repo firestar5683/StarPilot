@@ -87,6 +87,7 @@ RELEASE_TARGETS = (
   "opendbc_repo/opendbc/safety/tests/test_gm_sdgm_stock.py",
   "opendbc_repo/opendbc/safety/tests/test_gm_cc_gateway_stock.py",
   "opendbc_repo/opendbc/safety/tests/test_gm_stock_cancel_delay.py",
+  "openpilot/starpilot/tests/test_gm_stock_caller.py",
   "opendbc_repo/opendbc/safety/tests/test_gm_camera_stock_four.py",
   "opendbc_repo/opendbc/safety/tests/test_gm_volt_gateway_mapping.py",
   "opendbc_repo/opendbc/safety/tests/test_gm_volt_alternate_brake.py",
