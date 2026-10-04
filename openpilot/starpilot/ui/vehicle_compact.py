@@ -5,7 +5,6 @@ from collections import defaultdict
 from openpilot.selfdrive.ui.mici.widgets.button import BigButton, GreyBigButton
 from openpilot.selfdrive.ui.mici.widgets.dialog import BigDialog
 from openpilot.selfdrive.ui.ui_state import ui_state
-from openpilot.starpilot.ui.slc_offset_feature import native_parked
 from openpilot.starpilot.vehicle_selection import SelectionSnapshot, VehicleChoice, VehicleSelectionOwner
 from openpilot.system.ui.lib.application import gui_app
 from openpilot.system.ui.widgets.scroller import NavScroller
@@ -35,7 +34,7 @@ class VehicleCompact(NavScroller):
   def __init__(self, feature_session=None):
     super().__init__()
     self.feature_session = feature_session
-    self.owner = VehicleSelectionOwner(ui_state.params, lambda: native_parked(ui_state))
+    self.owner = VehicleSelectionOwner(ui_state.params, ui_state.is_offroad)
     self.choices = self.owner.choices()
     self.selection = self.owner.snapshot()
     self._populate()
@@ -53,7 +52,7 @@ class VehicleCompact(NavScroller):
     if self.selection.readable:
       button = BigButton("change vehicle", "auto or manual")
       button.set_click_callback(self._open_makes)
-      button.set_enabled(self.owner.parked)
+      button.set_enabled(self.owner.authorized)
       cards.append(button)
     if self.feature_session is not None:
       from openpilot.starpilot.ui.feature_settings_compact import FeatureSettingsCompact
@@ -75,7 +74,7 @@ class VehicleCompact(NavScroller):
     page = NavScroller()
     auto = BigButton("auto detection", "detect car")
     auto.set_click_callback(lambda: self._choose(None))
-    auto.set_enabled(self.owner.parked)
+    auto.set_enabled(self.owner.authorized)
     cards = [auto]
     for make, models in groups.items():
       button = BigButton(make, f"{len(models)} models")
@@ -90,7 +89,7 @@ class VehicleCompact(NavScroller):
     for model in models:
       button = BigButton(model.label.lower(), scroll=True)
       button.set_click_callback(lambda platform=model.platform: self._choose(platform))
-      button.set_enabled(self.owner.parked)
+      button.set_enabled(self.owner.authorized)
       cards.append(button)
     page._scroller.add_widgets(cards)
     gui_app.push_widget(page)
@@ -102,4 +101,4 @@ class VehicleCompact(NavScroller):
     if result.verified:
       gui_app.pop_widgets_to(self)
     else:
-      gui_app.push_widget(BigDialog("selection not saved", "Park and reopen vehicle settings, then try again."))
+      gui_app.push_widget(BigDialog("selection not verified", "Reopen vehicle settings while offroad, then try again."))

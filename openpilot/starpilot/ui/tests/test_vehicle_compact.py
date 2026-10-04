@@ -10,6 +10,26 @@ from openpilot.starpilot.vehicle_selection import SelectionSnapshot, VehicleChoi
 
 
 class TestVehicleCompact(unittest.TestCase):
+  def test_vehicle_selection_uses_native_offroad_without_telemetry(self):
+    import tempfile
+    from openpilot.common.params import Params
+    from opendbc.car.hyundai.values import CAR
+    with tempfile.TemporaryDirectory() as directory:
+      ui = NS(params=Params(directory), started=False, sm=None)
+      ui.is_offroad = lambda: not ui.started
+      with patch("openpilot.starpilot.ui.vehicle_compact.ui_state", ui), \
+           patch("openpilot.starpilot.ui.vehicle_compact.NavScroller.__init__", return_value=None), \
+           patch.object(VehicleCompact, "_populate"):
+        page = VehicleCompact()
+      self.assertTrue(page.owner.choose(None, str(CAR.KIA_XCEED_PHEV)).verified)
+      saved = page.owner.snapshot()
+      ui.started = True
+      self.assertFalse(page.owner.choose(saved.raw, None).committed)
+      self.assertEqual(page.owner.snapshot(), saved)
+      ui.started = False
+      self.assertTrue(page.owner.choose(saved.raw, None).verified)
+      self.assertIsNone(page.owner.snapshot().platform)
+
   def test_reported_car_identity_does_not_claim_live_control_availability(self):
     self.assertEqual(vehicle_identity(None), "not reported")
     self.assertEqual(vehicle_identity(NS(carFingerprint="MOCK", brand="mock")), "not reported")
@@ -54,8 +74,9 @@ class TestVehicleCompact(unittest.TestCase):
     from openpilot.starpilot.ui import runtime_app
     from openpilot.starpilot.ui.settings_state import Destination
     layout = runtime_app.StarMiciMainLayout.__new__(runtime_app.StarMiciMainLayout)
+    layout.star = Mock()
     with patch("openpilot.starpilot.ui.vehicle_compact.VehicleCompact", return_value="vehicle page") as page, \
          patch.object(runtime_app.gui_app, "push_widget") as push:
       layout._open_compact_destination(Destination.VEHICLE)
-    page.assert_called_once_with()
+    page.assert_called_once_with(layout.star)
     push.assert_called_once_with("vehicle page")

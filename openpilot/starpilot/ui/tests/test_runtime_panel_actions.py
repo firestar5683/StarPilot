@@ -103,6 +103,46 @@ class TestRuntimePanelActions(unittest.TestCase):
       self.assertIsNone(startup_candidate(self.ui.params))
       self.assertEqual(session.snapshot(ShellMode.SETTINGS).features.rows[1].value, "Auto detection")
 
+  def test_large_vehicle_selection_offroad_without_parked_telemetry(self):
+    from opendbc.car.hyundai.values import CAR
+    from openpilot.starpilot.vehicle_selection import choices, startup_candidate
+    from openpilot.system.ui.widgets import DialogResult
+    choice = next(choice for choice in choices() if choice.platform == CAR.KIA_XCEED_PHEV)
+    for evidence in ("missing", "stale", "ignition"):
+      with self.subTest(evidence=evidence):
+        self.ui.sm = ui_fake().sm
+        self.ui.sm["deviceState"].started = False
+        self.ui.sm["pandaStates"][0].ignitionLine = False
+        session = self._vehicle_session()
+        self.ui.CP = None
+        if evidence == "missing":
+          self.ui.sm.messages["pandaStates"] = []
+          self.ui.sm.valid["deviceState"] = self.ui.sm.valid["pandaStates"] = False
+        elif evidence == "stale":
+          self.ui.sm.logMonoTime["deviceState"] -= 2_000_000_000
+          self.ui.sm.logMonoTime["pandaStates"] -= 2_000_000_000
+        else:
+          self.ui.sm["pandaStates"][0].ignitionLine = True
+        self.assertTrue(self.ui.is_offroad())
+        self.assertFalse(session.confirmed_offroad())
+        with patch("openpilot.system.ui.widgets.option_dialog.MultiOptionDialog", side_effect=self._option_dialog), \
+             patch.object(runtime_app.gui_app, "push_widget") as pushed, patch.object(session, "_unavailable") as alert:
+          make = self._open_vehicle_picker(session, pushed)
+          make.selection = choice.make
+          make.callback(DialogResult.CONFIRM)
+          model = pushed.call_args.args[0]
+          model.selection = choice.label
+          model.callback(DialogResult.CONFIRM)
+          alert.assert_not_called()
+          self.assertEqual(startup_candidate(self.ui.params), choice.platform)
+          self.assertIsNone(self.ui.CP)
+          self._settings_tap(session, 2000, FEATURE_ROW_TOP + FEATURE_ROW_HEIGHT * 1.5)
+          auto = pushed.call_args.args[0]
+          auto.selection = "Auto detection"
+          auto.callback(DialogResult.CONFIRM)
+          alert.assert_not_called()
+          self.assertIsNone(startup_candidate(self.ui.params))
+
   def test_large_vehicle_picker_uses_real_dialog_stack_and_returns_to_same_panel(self):
     from opendbc.car.hyundai.values import CAR
     from openpilot.starpilot.vehicle_selection import choices, startup_candidate
@@ -132,19 +172,18 @@ class TestRuntimePanelActions(unittest.TestCase):
       self.assertEqual(session.snapshot(ShellMode.SETTINGS).features.page, FeaturePage.VEHICLE)
       hidden.assert_not_called()
 
-  def test_large_vehicle_picker_rejects_cancel_stale_source_lost_parked_state_and_old_page(self):
+  def test_large_vehicle_picker_rejects_cancel_stale_source_onroad_and_old_page(self):
     from opendbc.car.hyundai.values import CAR
     from openpilot.starpilot.vehicle_selection import VehicleSelectionOwner, choices, read_selection
     from openpilot.system.ui.widgets import DialogResult
     choice = next(choice for choice in choices() if choice.platform == CAR.KIA_XCEED_PHEV)
-    for failure in ("cancel", "source", "parked", "stale", "page", "missing"):
+    for failure in ("cancel", "source", "onroad", "page"):
       with self.subTest(failure=failure):
         session = self._vehicle_session()
         self.ui.CP = None
         self.ui.started = False
         self.ui.sm["deviceState"].started = False
-        if failure == "missing":
-          self.ui.sm.valid["deviceState"] = self.ui.sm.valid["pandaStates"] = False
+        self.ui.is_offroad = lambda: not self.ui.started
         with patch("openpilot.system.ui.widgets.option_dialog.MultiOptionDialog", side_effect=self._option_dialog), \
              patch.object(runtime_app.gui_app, "push_widget") as pushed:
           make = self._open_vehicle_picker(session, pushed)
@@ -155,10 +194,8 @@ class TestRuntimePanelActions(unittest.TestCase):
           if failure == "source":
             owner = VehicleSelectionOwner(self.ui.params, lambda: True)
             self.assertTrue(owner.choose(None, str(CAR.KIA_CEED)).verified)
-          elif failure == "parked":
-            self.ui.started = self.ui.sm["deviceState"].started = True
-          elif failure == "stale":
-            self.ui.sm.logMonoTime["deviceState"] -= 2_000_000_000
+          elif failure == "onroad":
+            self.ui.started = True
           elif failure == "page":
             self._settings_tap(session, 570, 50)
             self._settings_tap(session, 1800, 800)
