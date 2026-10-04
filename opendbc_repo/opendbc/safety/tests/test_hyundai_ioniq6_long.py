@@ -4,8 +4,9 @@ from opendbc.can import CANPacker, CANParser
 from opendbc.car import Bus, gen_empty_fingerprint, structs
 from opendbc.car.hyundai.carcontroller import CarController
 from opendbc.car.hyundai.hyundaicanfd import (CanBus, create_adrv_messages, create_ioniq6_radar_heartbeat,
-                                              create_ioniq6_blindspot_status, create_steering_messages, hkg_can_fd_checksum)
+                                              create_ioniq6_blindspot_status, create_steering_messages, create_lfahda_cluster, hkg_can_fd_checksum)
 from opendbc.car.hyundai.ioniq6_bsm import BlindspotStatus
+from opendbc.car.hyundai.ioniq6_dash_icons import Ioniq6DashIcons
 from opendbc.car.hyundai.ioniq6_handoff import build_ioniq6_hda2_long_candidate
 from opendbc.car.hyundai.interface import CarInterface
 from opendbc.car.hyundai.values import CAR, DBC
@@ -442,6 +443,44 @@ class TestHyundaiIoniq6Long(unittest.TestCase):
         self.assertFalse(self.safety.safety_tx_hook(TESTER_PRESENT))
         for frame in sent:
           self.assertFalse(self.safety.safety_tx_hook(self.packet(frame)))
+
+  def test_dash_icons_keep_exact_native_profile_and_fresh_health_contract(self):
+    for topology in RAW_LONG:
+      _, cp = params(topology)
+      packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
+      bus = CanBus(cp)
+      for raw in (RAW_LONG[topology], RAW_AOL[topology]):
+        with self.subTest(topology=topology, raw=raw):
+          self.mode(raw)
+          admitted = not self.release
+          icons = Ioniq6DashIcons()
+          frames = []
+          for tick, enabled, lateral_active, expected in ((0, False, False, 0), (1, False, True, 2),
+                                                         (2, False, False, 3), (102, False, False, 0)):
+            icon = icons.update(tick, enabled, lateral_active)
+            self.assertEqual(icon, expected)
+            frame = create_lfahda_cluster(packer, bus, enabled, lfa_icon=icon)
+            self.assertEqual((frame[0], frame[2], len(frame[1])), (0x1E0, 1, 16))
+            frames.append(frame)
+          if admitted:
+            self.refresh_required_rx(packer, 1, 1_000_000)
+          for frame in frames:
+            self.assertEqual(bool(self.safety.safety_tx_hook(self.packet(frame))), admitted)
+            self.assertFalse(self.safety.safety_tx_hook(self.packet((frame[0], frame[1], 0))))
+            self.assertFalse(self.safety.safety_tx_hook(self.packet((frame[0], frame[1][:8], frame[2]))))
+          if admitted:
+            self.safety.set_timer(2_200_001)
+            self.safety.safety_tick()
+            for frame in frames:
+              self.assertFalse(self.safety.safety_tx_hook(self.packet(frame)))
+            self.refresh_required_rx(packer, 2, 2_200_001)
+            self.safety.safety_tick()
+            self.assertTrue(self.safety.safety_tx_hook(self.packet(frames[2])))
+            stock_scc = packer.make_can_msg("SCC_CONTROL", 1, {"COUNTER": 4, "ACCMode": 1})
+            self.assertTrue(self.safety.safety_rx_hook(self.packet(stock_scc)))
+            self.assertTrue(self.safety.get_relay_malfunction())
+            for frame in frames:
+              self.assertFalse(self.safety.safety_tx_hook(self.packet(frame)))
 
   def test_wrong_bus_length_and_withheld_status_frames(self):
     if self.release:
