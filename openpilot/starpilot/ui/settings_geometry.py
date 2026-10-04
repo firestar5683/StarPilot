@@ -4,10 +4,25 @@ from __future__ import annotations
 
 import math
 import random
+from functools import lru_cache
 import pyray as rl
 from openpilot.starpilot.ui.home_geometry import outside_rounded_border
 
 TILE_RADIUS_PX = 18.0
+
+ACCENT = rl.Color(139, 92, 246, 255)
+PANEL_BG = rl.Color(8, 8, 10, 255)
+PANEL_BORDER = rl.Color(255, 255, 255, 22)
+PANEL_INNER_BORDER = rl.Color(92, 116, 151, 14)
+TEXT_PRIMARY = rl.Color(236, 242, 250, 255)
+TEXT_SECONDARY = rl.Color(200, 210, 225, 255)
+TEXT_MUTED = rl.Color(160, 170, 185, 255)
+ROW_SEPARATOR = rl.Color(255, 255, 255, 16)
+ACTIVE_ROW_BG = rl.Color(139, 92, 246, 18)
+ACTIVE_ROW_BORDER = rl.Color(139, 92, 246, 44)
+CONTROL_BG = rl.Color(255, 255, 255, 10)
+CONTROL_BORDER = rl.Color(255, 255, 255, 22)
+DANGER = rl.Color(173, 78, 90, 255)
 
 _HUD_BG_ON = rl.Color(12, 10, 18, 230)
 
@@ -161,3 +176,37 @@ def constellation(title, rect):
   rng = random.Random(f"{title}:{int(rect.x)}:{int(rect.y)}")
   return _build_constellation_nodes(rng, 3 + rng.randint(0, 2), _CONST_REGIONS_TILE,
                                     r_min=0.05, r_max=0.11, min_sep=0.07, x_margin=0.04, y_margin=0.04)
+
+
+@lru_cache(maxsize=128)
+def _toggle_constellation(seed_id: str) -> tuple[list[dict], list[tuple[int, int]]]:
+  rng = random.Random(seed_id)
+  regions = [(0.15, 0.30, 0.22, 0.42), (0.70, 0.85, 0.22, 0.42),
+             (0.15, 0.30, 0.58, 0.78), (0.70, 0.85, 0.58, 0.78),
+             (0.38, 0.62, 0.20, 0.35), (0.38, 0.62, 0.65, 0.80),
+             (0.20, 0.35, 0.38, 0.62), (0.65, 0.80, 0.38, 0.62)]
+  nodes, edges = _build_constellation_nodes(rng, rng.randint(2, 4), regions,
+                                           r_min=0.06, r_max=0.22, min_sep=0.12, x_margin=0.10, y_margin=0.18)
+  # Keep stars in the exposed track, rather than underneath the opaque On thumb.
+  for node in nodes:
+    node['x'] = 0.10 + 0.50 * (node['x'] - 0.10)
+  return nodes, edges  # Drawing reads these CPU-only cached nodes without modifying them.
+
+
+def draw_aether_toggle(rect: rl.Rectangle, value: bool, *, available: bool, seed_id: str) -> None:
+  """Paint a saved boolean; interaction and confirmation stay with FeatureInput."""
+  if available:
+    draw_hud_background(rect, ACCENT, float(value), radius_px=TILE_RADIUS_PX)
+    if value:
+      nodes, edges = _toggle_constellation(seed_id)
+      draw_constellation_nodes(nodes, edges, rect, ACCENT, 1.0, scale=0.45)
+  else:
+    # The HUD and star renderers compute their own alpha, so mute geometry explicitly.
+    draw_rounded_fill(rect, _HUD_BG_ON)
+    draw_rounded_stroke(rect, _HUD_BORDER_OFF)
+  center_x = rect.x + 29 + (rect.width - 58 if value else 0)
+  knob = snap_rect(rl.Rectangle(center_x - 22, rect.y + 4, 44, rect.height - 8))
+  rl.draw_rectangle_rounded(knob, 0.65, 8, rl.Color(255, 255, 255, 255 if available else 132))
+  highlight = rl.Rectangle(knob.x + 2, knob.y + 2, knob.width - 4, knob.height * 0.40)
+  rl.draw_rectangle_rounded(highlight, 0.65, 8, rl.Color(255, 255, 255, 38))
+  outside_rounded_border(knob, 0.65, 8, 1, rl.Color(255, 255, 255, 50))

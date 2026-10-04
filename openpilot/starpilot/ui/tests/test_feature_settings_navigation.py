@@ -1,6 +1,7 @@
 """Protected Settings root coordinates and guarded large child actions."""
 
 import unittest
+from dataclasses import replace
 from unittest.mock import patch
 from pathlib import Path
 import tempfile
@@ -67,6 +68,30 @@ class FeatureNavigationTests(unittest.TestCase):
     controller.press(1990, 160, state)
     controller.release(1990, 160, state)
     self.assertEqual(row_change(actions[0].row).expected, b"0")
+
+  def test_boolean_both_action_halves_preserve_requests_and_source_evidence(self):
+    for value, source, desired in (("Off", b"0", "On"), ("On", b"1", "Off"),
+                                   ("Off (saved mode 0 or 1)", b"1", "On")):
+      for x in (1800, 1990):
+        with self.subTest(value=value, x=x):
+          row = FeatureRow("SLCFallback" if value.startswith("Off (") else "LaneCentering", "Switch", value,
+                           source, ("Off", "On"), available=True, dependencies=(("master", b"1"),))
+          state = FeatureSettingsState(page="lane", rows=(row,))
+          actions = []
+          controller = FeatureInput(actions.append)
+          controller.press(x, 160, state)
+          controller.release(x, 160, state)
+          self.assertEqual(len(actions), 1)
+          request = row_change(actions[0].row, actions[0].direction)
+          self.assertIsNotNone(request)
+          self.assertEqual((request.value, request.expected, request.dependencies), (desired, source, row.dependencies))
+          actions.clear()
+          unavailable = replace(row, available=False)
+          state = replace(state, rows=(unavailable,))
+          controller.press(x, 160, state)
+          controller.release(x, 160, state)
+          self.assertFalse(actions)
+          self.assertIsNone(row_change(unavailable))
 
   def test_curve_page_uses_shared_large_input_rows(self):
     with tempfile.TemporaryDirectory() as directory:
