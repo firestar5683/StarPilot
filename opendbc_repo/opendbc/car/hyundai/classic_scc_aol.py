@@ -12,12 +12,17 @@ from opendbc.car.hyundai.values import CAR, HyundaiFlags, HyundaiSafetyFlags, is
 AOL_MARKER = 0x0400
 AOL_EXPERIENCE = 32
 _EXCLUDED = int(HyundaiFlags.CANFD | HyundaiFlags.NON_SCC | HyundaiFlags.FCEV)
-CLASSIC_SCC_IDS = frozenset(identity for identity in CAR if not int(identity.config.flags) & _EXCLUDED and identity != CAR.HYUNDAI_PALISADE_2023)
+CLASSIC_SCC_IDS = frozenset(identity for identity in CAR if not int(identity.config.flags) & _EXCLUDED and identity != CAR.HYUNDAI_PALISADE_2023) | frozenset(
+  (CAR.HYUNDAI_NEXO_1ST_GEN,)
+)
 _MODELS = (structs.CarParams.SafetyModel.hyundai, structs.CarParams.SafetyModel.hyundaiLegacy)
-NORMAL_AOL_WORDS = frozenset(
-  AOL_MARKER | gas | limit | camera | lda for gas in (0, 1, 2) for limit in (0, 64, 512) for camera in (0, 8) for lda in (0, 2048)
-) | frozenset((0x8408, 0x840A, 0x8C08, 0x8C0A))
-LEGACY_AOL_WORDS = frozenset(word for word in NORMAL_AOL_WORDS if not word & (8 | 32768))
+FCEV_AOL_WORDS = frozenset((0x0500, 0x0D00))
+NORMAL_AOL_WORDS = (
+  FCEV_AOL_WORDS
+  | frozenset(AOL_MARKER | gas | limit | camera | lda for gas in (0, 1, 2) for limit in (0, 64, 512) for camera in (0, 8) for lda in (0, 2048))
+  | frozenset((0x8408, 0x840A, 0x8C08, 0x8C0A))
+)
+LEGACY_AOL_WORDS = frozenset(word for word in NORMAL_AOL_WORDS if not word & (8 | 256 | 32768))
 
 
 def native_profile_supported(model, param):
@@ -27,6 +32,7 @@ def native_profile_supported(model, param):
 def stock_word(cp):
   word = int(HyundaiSafetyFlags.CAN_REFRESH_MSGS) if cp.carFingerprint in (CAR.HYUNDAI_ELANTRA_2024, CAR.HYUNDAI_ELANTRA_HEV_2024) else 0
   for flag, safety in (
+    (HyundaiFlags.FCEV, HyundaiSafetyFlags.FCEV_GAS),
     (HyundaiFlags.EV, HyundaiSafetyFlags.EV_GAS),
     (HyundaiFlags.HYBRID, HyundaiSafetyFlags.HYBRID_GAS),
     (HyundaiFlags.ALT_LIMITS, HyundaiSafetyFlags.ALT_LIMITS),

@@ -32,6 +32,7 @@ from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
 from openpilot.selfdrive.car.cruise import VCruiseHelper, SlcPendingConfirmation
 from openpilot.starpilot.speed_limits import physical_actions as slc_physical
 from openpilot.starpilot.aol.intent import disarming_fault, independent_axis_requested, read_settings
+from opendbc.car.hyundai.canfd_angle_aol import native_observation, temporary_restriction, qualified as qualified_angle_aol
 from openpilot.starpilot.aol.runtime import current_native
 from openpilot.starpilot.aol.vehicle import create_intent as create_aol_intent, native_latch_rejected, policy_for as aol_policy_for
 from openpilot.starpilot.aol.wire import IntentState, encode_intent
@@ -424,9 +425,28 @@ class Car:
           self.sm.updated['onroadEvents'] and
           self.sm.valid['onroadEvents'] and 0 < event_ns <= now_ns and now_ns - event_ns <= 1_500_000_000):
         fault_active = disarming_fault(self.sm['onroadEvents'], CS)
-      native = (current_native(self.sm, self.CP, now_ns=now_ns)
-                if self.aol_card_intent.explicit_latch and self.sm.updated['aolSafetyWire'] else None)
-      rejection_ns = int(native.observedMonoTime) if native_latch_rejected(self.CP, native) else 0
+      angle_aol = qualified_angle_aol(self.CP, marked_only=True)
+      angle_panda_ready = not angle_aol or self.startup_panda_configured()
+      native = (
+        current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.slc_producer_session if angle_aol else None)
+        if self.aol_card_intent.explicit_latch and (angle_aol or self.sm.updated['aolSafetyWire'])
+        else None
+      )
+      native_reset = False
+      if angle_aol:
+        pending_since, lost, native_reset = native_observation(
+          native,
+          latched=self.aol_card_intent.allowed_latch,
+          panda_ready=angle_panda_ready,
+          restricted=temporary_restriction(self.CP, CS),
+          now_ns=now_ns,
+          pending_since_ns=getattr(self, '_angle_aol_pending_since_ns', 0),
+        )
+        self._angle_aol_pending_since_ns = pending_since
+        if lost:
+          fault_active = True
+      rejected = native_reset or native_latch_rejected(self.CP, native, state=CS if angle_panda_ready else None)
+      rejection_ns = now_ns if native_reset else int(native.observedMonoTime) if rejected else 0
       self.aol_card_intent.update(CS, fault_active=fault_active, now_ns=now_ns, native_rejection_ns=rejection_ns,
                                   standard_enabled=(host_enabled if getattr(self.aol_card_intent, 'observe_stock_engagement', False)
                                                     else host_control_enabled))

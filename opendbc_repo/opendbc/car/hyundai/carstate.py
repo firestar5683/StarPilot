@@ -1,3 +1,4 @@
+from opendbc.car.hyundai.blended_stock_aol import qualified as qualified_blended_stock, MixedStockLkasSources
 from opendbc.car.hyundai.classic_long_aol import qualified as qualified_classic_long
 from opendbc.car.hyundai.classic_scc_aol import qualified as qualified_classic_scc, ClassicSccLkasSources
 from opendbc.car.hyundai.ev9_camera_lead import EV9CameraLead
@@ -57,6 +58,8 @@ class CarState(CarStateBase):
     self.forte_lkas_sources = NonSccLkasSources() if qualified_non_scc(CP) and CP.flags & HyundaiFlags.HAS_LDA_BUTTON else None
     if (qualified_classic_scc(CP) or qualified_classic_long(CP)) and CP.flags & HyundaiFlags.HAS_LDA_BUTTON:
       self.forte_lkas_sources = ClassicSccLkasSources(CP.carFingerprint)
+    if qualified_blended_stock(CP):
+      self.forte_lkas_sources = MixedStockLkasSources(CP)
     self.ev9_long = ev9_long_qualified(CP)
     self.ev9_camera_lead = EV9CameraLead(CP) if self.ev9_long else None
     self.angle_steering_angle = 0.0
@@ -312,7 +315,7 @@ class CarState(CarStateBase):
     prev_lda_button = self.lda_button
     self.cruise_buttons.extend(cp.vl_all["CLU11"]["CF_Clu_CruiseSwState"])
     self.main_buttons.extend(cp.vl_all["CLU11"]["CF_Clu_CruiseSwMain"])
-    if self.forte_lkas_sources is not None:
+    if self.forte_lkas_sources is not None and getattr(self.forte_lkas_sources, 'active', True):
       self.lda_button = int(self.forte_lkas_sources.held)
     elif self.CP.carFingerprint == CAR.HYUNDAI_ELANTRA_HEV_2024:
       # Both signals can pulse within one parser update; preserve a short press.
@@ -331,7 +334,7 @@ class CarState(CarStateBase):
                         *create_button_events(self.main_buttons[-1], prev_main_buttons, {1: ButtonType.mainCruise}),
                         *create_button_events(self.lda_button, prev_lda_button, {1: ButtonType.lkas})]
 
-    if self.forte_lkas_sources is not None:
+    if self.forte_lkas_sources is not None and getattr(self.forte_lkas_sources, 'active', True):
       button_events = [event for event in button_events if event.type != ButtonType.lkas]
       button_events.extend(structs.CarState.ButtonEvent(type=ButtonType.lkas, pressed=pressed)
                               for pressed in self.forte_lkas_sources.edges)

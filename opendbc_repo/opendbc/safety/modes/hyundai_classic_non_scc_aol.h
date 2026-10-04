@@ -25,7 +25,7 @@ static bool classic_long_aol_param(uint16_t param) {
 
 static bool classic_scc_aol_param(uint16_t param) {
   // Stock SCC gas, torque limits and camera routing only. No LONG or NON_SCC.
-  return (param == 0x8408U) || (param == 0x840AU) || (param == 0x8C08U) || (param == 0x8C0AU) ||
+  return (param == 0x0500U) || (param == 0x0D00U) || (param == 0x8408U) || (param == 0x840AU) || (param == 0x8C08U) || (param == 0x8C0AU) ||
     (((param & 0x0400U) != 0U) && ((param & 0xF1B4U) == 0U) &&
     ((param & 3U) != 3U) && ((param & 0x0240U) != 0x0240U));
 }
@@ -225,7 +225,7 @@ static void classic_non_scc_aol_rx(const CANPacket_t *msg) {
 
 static void classic_non_scc_aol_configure(uint16_t param, bool legacy) {
   classic_non_scc_aol_reset();
-  classic_scc_aol_enabled = classic_scc_aol_param(param) && (!legacy || ((param & 8U) == 0U)) &&
+  classic_scc_aol_enabled = classic_scc_aol_param(param) && (!legacy || ((param & (8U | 256U)) == 0U)) &&
     ((unsigned int)alternative_experience == 32U);
 #ifdef ALLOW_DEBUG
   classic_long_aol_enabled = !legacy && classic_long_aol_param(param) && ((unsigned int)alternative_experience == 32U);
