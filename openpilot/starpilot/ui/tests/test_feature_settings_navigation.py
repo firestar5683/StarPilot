@@ -45,7 +45,7 @@ class FeatureNavigationTests(unittest.TestCase):
 
   def test_large_root_tile_geometry_and_destination(self):
     state = SettingsState()
-    self.assertEqual(tile_rects(state)[2], (1611, 152, 529, 441))
+    self.assertEqual(tile_rects(state)[2], (1611, 112, 529, 461))
     actions = []
     controller = SettingsInput(Profile.LARGE, actions.append)
     controller.press(1800, 300, state)

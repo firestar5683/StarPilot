@@ -4,6 +4,8 @@ from dataclasses import dataclass
 from enum import StrEnum
 from collections.abc import Callable
 
+FEATURE_HEADER_HEIGHT = 88
+FEATURE_BACK_WIDTH = 190
 FEATURE_ROW_TOP = 208
 FEATURE_ROW_HEIGHT = 154
 FEATURE_VISIBLE_ROWS = 5
@@ -146,9 +148,9 @@ class FeatureInput:
     left = 520 if state.sidebar_expanded else 20
     if not left <= x <= 2140:
       return None
-    if 12 <= y <= 140:
-      return FeatureUiAction("back" if x < left + 250 else "details")
-    if 140 < y < FEATURE_ROW_TOP:
+    if 12 <= y <= 12 + FEATURE_HEADER_HEIGHT:
+      return FeatureUiAction("back" if x < left + FEATURE_BACK_WIDTH else "details")
+    if 12 + FEATURE_HEADER_HEIGHT < y < FEATURE_ROW_TOP:
       return FeatureUiAction("details") if state.subtitle else None
     if 980 <= y <= 1050:
       return FeatureUiAction("scroll", direction=-1 if x < 1320 else 1)
