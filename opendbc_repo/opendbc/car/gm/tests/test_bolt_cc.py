@@ -49,7 +49,7 @@ def fixture(identity, removed=False, metric=False, alpha=False, present=False):
   return cp, ci, CANPacker(DBC[identity][Bus.pt])
 
 
-def feed(ci, packer, now, counter=0, gas=False, active=True, speed=20, stock=15, brake=False, regen=False):
+def feed(ci, packer, now, counter=0, gas=False, active=True, speed=20, stock=15, brake=False, regen=False, camera=True):
   vals = {
     'PSCMStatus': {},
     'ECMCruiseControl': {'CruiseActive': int(active), 'CruiseSetSpeed': stock * 3.6},
@@ -69,8 +69,9 @@ def feed(ci, packer, now, counter=0, gas=False, active=True, speed=20, stock=15,
   }
   msgs = [packer.make_can_msg(n, 0, v) for n, v in vals.items()]
   msgs.append((0x1E1, button_bytes(1, counter), 0))
-  msgs.append(packer.make_can_msg('ASCMLKASteeringCmd', 2, {}))
-  msgs.append(packer.make_can_msg('AEBCmd', 2, {}))
+  if camera:
+    msgs.append(packer.make_can_msg('ASCMLKASteeringCmd', 2, {}))
+    msgs.append(packer.make_can_msg('AEBCmd', 2, {}))
   # Prime lazy subscriptions, then prove actual CI's validity (no fabricated canValid).
   ci.update([(now - 1_000_000, msgs)])
   out = ci.update([(now, msgs)])
@@ -89,6 +90,27 @@ def control(long_active=True, enabled=True, gas=False):
 
 
 class Production(unittest.TestCase):
+  def test_removed_camera_never_becomes_lazy_required_source(self):
+    for identity in BOLT_CC_WORDS:
+      for removed in (False, True):
+        with self.subTest(identity=identity, removed=removed):
+          cp, ci, packer = fixture(identity, removed=removed)
+          for tick in range(40):
+            out, frames = feed(ci, packer, 1_000_000_000 + tick * 10_000_000,
+                               counter=tick % 4, camera=not removed)
+          self.assertTrue(out.canValid)
+          self.assertFalse(out.canTimeout)
+          if removed:
+            self.assertFalse(any(frame[2] == 2 for frame in frames))
+          for tick in range(40, 170):
+            out, _ = feed(ci, packer, 1_000_000_000 + tick * 10_000_000,
+                          counter=tick % 4, camera=False)
+          self.assertEqual(out.canValid, removed)
+          for tick in range(170, 210):
+            out, _ = feed(ci, packer, 1_000_000_000 + tick * 10_000_000,
+                          counter=tick % 4, camera=not removed)
+          self.assertTrue(out.canValid)
+
   def test_final_params_matrix_and_pedal_separation(self):
     for identity, words in BOLT_CC_WORDS.items():
       for alpha in (False, True):

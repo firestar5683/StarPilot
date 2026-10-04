@@ -194,7 +194,7 @@ class CarState(CarStateBase):
     if self.CP.networkLocation == NetworkLocation.fwdCamera and not (is_conventional_cc_pedal_profile(self.CP) and self.CP.flags & GMFlags.NO_CAMERA):
       if not is_conventional_cc_pedal_profile(self.CP):
         self.pt_lka_steering_cmd_counter = pt_cp.vl["ASCMLKASteeringCmd"]["RollingCounter"]
-      if not is_volt_camera_removed(self.CP) and not is_ordinary_camera_removed(self.CP):
+      if not self.bolt_cc_removed and not is_volt_camera_removed(self.CP) and not is_ordinary_camera_removed(self.CP):
         self.cam_lka_steering_cmd_counter = cam_cp.vl["ASCMLKASteeringCmd"]["RollingCounter"]
 
     # This is to avoid a fault where you engage while still moving backwards after shifting to D.
