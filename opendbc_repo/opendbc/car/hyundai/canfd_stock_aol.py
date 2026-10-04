@@ -28,7 +28,7 @@ STOCK_AOL_WORDS = frozenset(
 )
 
 
-def _base_word(cp):
+def _base_word(cp, *, experiences=(0,)):
   allowed = (
     HyundaiFlags.CANFD
     | HyundaiFlags.EV
@@ -55,7 +55,7 @@ def _base_word(cp):
     or cp.passive
     or cp.dashcamOnly
     or cp.notCar
-    or cp.alternativeExperience != 0
+    or cp.alternativeExperience not in experiences
     or cp.steerControlType != CarParams.SteerControlType.torque
     or not cp.flags & HyundaiFlags.CANFD
     or int(cp.flags) & ~int(allowed)
@@ -90,3 +90,19 @@ def qualified(cp, *, marked_only=False):
   if word is None or cp.openpilotLongitudinalControl or not cp.pcmCruise:
     return False
   return cp.safetyConfigs[0].safetyParam in ((word | STOCK_AOL_MARKER,) if marked_only else (word, word | STOCK_AOL_MARKER))
+
+
+LONG_AOL_WORDS = frozenset((0x0815, 0x0895))
+LONG_EV_CARS = frozenset((CAR.HYUNDAI_IONIQ_5, CAR.HYUNDAI_KONA_EV_2ND_GEN))
+
+
+def qualified_long(cp, *, marked_only=False):
+  if cp.carFingerprint not in LONG_EV_CARS or not cp.openpilotLongitudinalControl or cp.pcmCruise:
+    return False
+  word = _base_word(cp, experiences=(0, 32))
+  if word not in (0x11, 0x91):
+    return False
+  raw = int(cp.safetyConfigs[0].safetyParam)
+  return (raw == (word | 0x804) and cp.alternativeExperience == 32) or (
+    not marked_only and raw == (word | 4) and cp.alternativeExperience == 0
+  )

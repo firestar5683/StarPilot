@@ -234,7 +234,7 @@ int main() {
     0x7090U, 0x7092U, 0x7208U, 0x720AU, 0x7228U, 0x722AU, 0x7809U, 0x7829U,
   };
   for (uint32_t word = 0U; word <= 0xFFFFU; ++word) {
-    bool expected = word == 0x8815U || word == 0x8895U || word == 0x5491U || word == 0x5C91U;
+    bool expected = word == 0x0815U || word == 0x0895U || word == 0x8815U || word == 0x8895U || word == 0x5491U || word == 0x5C91U;
     for (uint16_t stock_word : stock_canfd_words) {
       expected = expected || word == stock_word;
     }
@@ -331,7 +331,7 @@ int main() {
                        HYUNDAI_AOL_PROFILE.mode);
     assert(stock_transport.last_write == 0U && stock_result.outcome.compatible);
   }
-  for (uint16_t raw : {0x0011U, 0x0091U, 0x0815U, 0x0895U,
+  for (uint16_t raw : {0x0011U, 0x0091U,
                        0x0813U, 0x0831U, 0x0911U, 0x8015U, 0x8095U, 0x8814U, 0x8894U, 0x8817U}) {
     ioniq.safety_param = raw;
     assert(!aol_capable(ioniq, HYUNDAI_AOL_PROFILE.mode, VEHICLE_REGISTRY));

@@ -46,6 +46,8 @@ RELEASE_TARGETS = (
   "opendbc_repo/opendbc/safety/tests/test_hyundai_classic_long_aol.py",
   "openpilot/starpilot/aol/tests/test_classic_long_profiles.py",
   "opendbc_repo/opendbc/safety/tests/test_hyundai_shared_canfd_stock_aol.py",
+  "opendbc_repo/opendbc/safety/tests/test_hyundai_hda2_long_aol.py",
+  "opendbc_repo/opendbc/safety/tests/test_prepared_torque_ev_native.py",
   "opendbc_repo/opendbc/car/hyundai/tests/test_shared_canfd_stock_aol.py",
   "opendbc_repo/opendbc/safety/tests/test_hyundai_classic_scc_aol.py",
   "openpilot/starpilot/aol/tests/test_classic_scc_profiles.py",

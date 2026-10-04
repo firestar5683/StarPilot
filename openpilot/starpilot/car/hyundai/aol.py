@@ -12,7 +12,10 @@ from opendbc.car.hyundai.classic_scc_aol import (
   native_accepts as classic_native_accepts,
   native_profile_supported as classic_native_profile_supported,
 )
-from opendbc.car.hyundai.canfd_stock_aol import qualified as qualified_canfd_stock, STOCK_AOL_MARKER, STOCK_AOL_WORDS
+from opendbc.car.hyundai.canfd_stock_aol import (
+  qualified as qualified_canfd_stock, qualified_long as qualified_canfd_long,
+  LONG_AOL_WORDS as CANFD_LONG_AOL_WORDS, STOCK_AOL_MARKER, STOCK_AOL_WORDS,
+)
 from opendbc.car.hyundai.non_scc_aol import qualified as qualified_non_scc, aol_word, AOL_MARKER, AOL_EXPERIENCE, AOL_WORDS
 from opendbc.car.hyundai.kona_aol import allow_lateral_onset as kona_lateral_onset
 from opendbc.car.structs import car
@@ -103,6 +106,10 @@ def policy_for(CP) -> AolVehiclePolicy:
       safety_param_addition=classic_aol_word(CP) ^ int(CP.safetyConfigs[0].safetyParam),
       alternative_experience_addition=AOL_EXPERIENCE,
     )
+  if qualified_canfd_long(CP):
+    return AolVehiclePolicy(intent_supported=True, settings_supported=True, runtime_supported=True,
+                            normal_runtime_supported=True, explicit_latch=True, safety_param_addition=0x0800,
+                            alternative_experience_addition=32)
   if qualified_canfd_stock(CP):
     return AolVehiclePolicy(
       intent_supported=True,
@@ -148,7 +155,7 @@ def native_profile_supported(model: int, param: int) -> bool:
     or classic_native_profile_supported(model, param)
     or (
       model == int(car.CarParams.SafetyModel.hyundaiCanfd)
-      and param in IONIQ6_AOL_SAFETY_PARAMS | ANGLE_AOL_WORDS | STOCK_AOL_WORDS | set(STOCK_SAFETY_PARAMS.values())
+      and param in IONIQ6_AOL_SAFETY_PARAMS | CANFD_LONG_AOL_WORDS | ANGLE_AOL_WORDS | STOCK_AOL_WORDS | set(STOCK_SAFETY_PARAMS.values())
     )
     or (model == int(car.CarParams.SafetyModel.hyundai) and param in AOL_WORDS)
   )
@@ -163,6 +170,8 @@ def native_accepts_cp(CP, model: int, param: int) -> bool:
     return classic_long_accepts(CP, model, param)
   if qualified_classic_scc(CP, marked_only=True):
     return classic_native_accepts(CP, model, param)
+  if qualified_canfd_long(CP, marked_only=True):
+    return model == int(car.CarParams.SafetyModel.hyundaiCanfd) and param == CP.safetyConfigs[0].safetyParam
   if qualified_canfd_stock(CP, marked_only=True):
     return model == int(car.CarParams.SafetyModel.hyundaiCanfd) and param == CP.safetyConfigs[0].safetyParam
   if qualified_non_scc(CP):
@@ -182,6 +191,7 @@ def native_latch_rejected(CP, native) -> bool:
       or qualified_classic_long(CP, marked_only=True)
       or qualified_ioniq6(CP)
       or qualified_non_scc(CP)
+      or qualified_canfd_long(CP, marked_only=True)
       or qualified_canfd_stock(CP, marked_only=True)
       or qualified_classic_scc(CP, marked_only=True)
     )

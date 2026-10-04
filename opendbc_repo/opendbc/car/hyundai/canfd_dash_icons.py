@@ -1,7 +1,7 @@
 from opendbc.car import DT_CTRL
 
 
-class Ioniq6DashIcons:
+class CanFDDashIcons:
   def __init__(self):
     self.disengage_frame = 0
     self.disengaging = False

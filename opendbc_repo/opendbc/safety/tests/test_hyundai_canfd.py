@@ -199,12 +199,27 @@ class TestHyundaiCanfdLKASteeringLongEV(HyundaiLongitudinalBase, TestHyundaiCanf
   GAS_MSG = ("ACCELERATOR", "ACCELERATOR_PEDAL")
   STEER_BUS = 1
 
+  def _torque_cmd_msg(self, torque, steer_req=1):
+    # Match the reached HDA2 LONG sender's neutral status/damping fields.
+    values = {"LKA_OptUsmSta": 2, "LKA_SysIndReq": 2, "StrTqReqVal": torque,
+              "LKA_SysWrn": 0, "ActToiSta": steer_req, "LKA_UsmMod": 0,
+              "LKA_RcgSta": 0, "Damping_Gain": 100}
+    return self.packer.make_can_msg_safety(self.STEER_MSG, self.STEER_BUS, values)
+
   def _accel_msg(self, accel, aeb_req=False, aeb_decel=0):
     values = {
       "aReqRaw": accel,
       "aReqValue": accel,
     }
     return self.packer.make_can_msg_safety("SCC_CONTROL", 1, values)
+
+
+class TestHyundaiCanfdLKASteeringAltLongEV(TestHyundaiCanfdLKASteeringLongEV):
+  SAFETY_PARAM = TestHyundaiCanfdLKASteeringLongEV.SAFETY_PARAM | HyundaiSafetyFlags.CANFD_LKA_STEER_MSG_ALT
+  TX_MSGS = [[0x110, 0], [0x1CF, 1], [0x362, 0], [0x51, 0], [0x730, 1], [0x12a, 1], [0x160, 1],
+             [0x1e0, 1], [0x1a0, 1], [0x1ea, 1], [0x200, 1], [0x345, 1], [0x1da, 1]]
+  RELAY_MALFUNCTION_ADDRS = {0: (0x110, 0x362), 1: (0x1a0,)}
+  FWD_BLACKLISTED_ADDRS = {2: [0x110, 0x362]}
 
 
 # Tests longitudinal for ICE, hybrid, EV cars with LFA steering

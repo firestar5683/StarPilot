@@ -38,7 +38,8 @@ class CarInterface(CarInterfaceBase):
     from opendbc.car.hyundai.ev6_startup import required as ev6_required
     from opendbc.car.hyundai.gv70_startup import required as gv70_required
     from opendbc.car.hyundai.ev9_startup import required as ev9_required
-    return required(cp) or ev6_required(cp) or gv70_required(cp) or ev9_required(cp)
+    from opendbc.car.hyundai.torque_ev_startup import required as torque_ev_required
+    return required(cp) or ev6_required(cp) or gv70_required(cp) or ev9_required(cp) or torque_ev_required(cp)
 
   @staticmethod
   def startup_owner(cp, callbacks, *, requested):
@@ -56,6 +57,10 @@ class CarInterface(CarInterfaceBase):
     ev9_cp = ev9_candidate(cp, enabled=requested, is_release=False)
     if ev9_qualified(ev9_cp):
       return EV9Startup(ev9_cp, callbacks, stock_cp=cp) if requested else None
+    from opendbc.car.hyundai.torque_ev_startup import candidate as torque_ev_candidate, TorqueEVStartup
+    torque_cp = torque_ev_candidate(cp, requested=requested, is_release=False)
+    if torque_cp is not None:
+      return TorqueEVStartup(torque_cp, callbacks, stock_cp=cp)
     from opendbc.car.hyundai.blended_longitudinal import startup_owner
     return startup_owner(cp, callbacks, requested=requested)
 
@@ -244,6 +249,11 @@ class CarInterface(CarInterfaceBase):
       ret.radarUnavailable = fingerprint[radar_bus(ret)].get(MRR35_RADAR_START_ADDR) != 24
     else:
       ret.radarUnavailable = radar_start not in fingerprint[1] or Bus.radar not in DBC[ret.carFingerprint]
+    from opendbc.car.hyundai.torque_ev_startup import topology_owned as torque_ev_topology
+    if torque_ev_topology(ret):
+      # The prepared owner alone promotes the saved developer choice before CI construction.
+      ret.alphaLongitudinalAvailable = not is_release
+      alpha_long = False
     ret.openpilotLongitudinalControl = alpha_long and ret.alphaLongitudinalAvailable
     if (candidate in (CAR.KIA_CARNIVAL_2025, CAR.KIA_CARNIVAL_HEV_4TH_GEN) and
         ret.flags & HyundaiFlags.CANFD_ALT_BUTTONS and 0x1aa in fingerprint[CAN.ECAN] and
@@ -318,7 +328,7 @@ class CarInterface(CarInterfaceBase):
 
   def update(self, can_packets):
     if (self.CS.gv70_camera_lead is not None or self.CS.ev9_camera_lead is not None or
-        self.CS.ioniq6_camera_lead is not None or self.CS.forte_lkas_sources is not None):
+        self.CS.ioniq6_camera_lead is not None or self.CS.torque_ev_camera_lead is not None or self.CS.forte_lkas_sources is not None):
       # This isolated optional parser must never join required controls health.
       can_packets = list(can_packets)
       if self.CS.gv70_camera_lead is not None:
@@ -327,6 +337,8 @@ class CarInterface(CarInterfaceBase):
         self.CS.ev9_camera_lead.update(can_packets)
       if self.CS.ioniq6_camera_lead is not None:
         self.CS.ioniq6_camera_lead.update(can_packets)
+      if self.CS.torque_ev_camera_lead is not None:
+        self.CS.torque_ev_camera_lead.update(can_packets)
       if self.CS.forte_lkas_sources is not None:
         self.CS.forte_lkas_sources.update(can_packets)
     ret = super().update(can_packets)
