@@ -210,7 +210,7 @@ class LongProfileFeatureTests(unittest.TestCase):
     state = self.owner.snapshot("aggressive", parked=True, system_long=True, lateral_context=True, metric=False)
     index = next(i for i, row in enumerate(state.rows) if row.key == "long_repair:AggressiveFollow")
     state = replace(state, scroll=index)
-    self.assertEqual(FeatureInput.target(1900, 160, state).kind, "reset")
+    self.assertEqual(FeatureInput.target(1900, 285, state).kind, "reset")
 
   def test_compact_native_confirmation_routes_captured_request(self):
     self.path("AggressiveFollow").write_bytes(b"broken")

@@ -56,7 +56,7 @@ class TestModelPage(unittest.TestCase):
     self.assertEqual(page.rows[1].value, "Active")
     self.assertEqual(page.rows[2].value, "Small")
     self.assertTrue(all(not row.available and not row.page for row in page.rows))
-    self.assertIsNone(FeatureInput.target(1980, 150, page))
+    self.assertIsNone(FeatureInput.target(1980, 300, page))
     self.assertEqual(FeatureInput.target(600, 60, page).kind, "back")
 
   def test_missing_receipt_does_not_look_active(self):
@@ -149,7 +149,7 @@ class TestModelManager(unittest.TestCase):
     state = model_page(ModelStatus(BUNDLED_CURRENT, None, None, ModelHealth.UNAVAILABLE, False, None, None), self.data)
     self.assertEqual(state.rows[1].value, "Small")
     self.assertEqual(state.rows[1].source, b"small")
-    action = FeatureInput.target(1000, 240, state)
+    action = FeatureInput.target(1000, 496, state)
     self.assertEqual((action.kind, action.row.page), ("open", "models:small"))
     self.assertTrue(all(not row.available for row in state.rows[3:]))
 

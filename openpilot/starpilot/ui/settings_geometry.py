@@ -7,6 +7,7 @@ import random
 from functools import lru_cache
 import pyray as rl
 from openpilot.starpilot.ui.home_geometry import outside_rounded_border
+from openpilot.starpilot.ui.presentation import FontRole
 
 TILE_RADIUS_PX = 18.0
 
@@ -22,7 +23,7 @@ ACTIVE_ROW_BG = rl.Color(139, 92, 246, 18)
 ACTIVE_ROW_BORDER = rl.Color(139, 92, 246, 44)
 CONTROL_BG = rl.Color(255, 255, 255, 10)
 CONTROL_BORDER = rl.Color(255, 255, 255, 22)
-DANGER = rl.Color(173, 78, 90, 255)
+DANGER = rl.Color(220, 125, 138, 255)
 
 _HUD_BG_ON = rl.Color(12, 10, 18, 230)
 
@@ -101,6 +102,50 @@ def draw_hud_background(rect: rl.Rectangle, accent: rl.Color, glow: float = 1.0,
   draw_rounded_stroke(face, bc, radius_px=radius_px)
 
   return face, accent
+
+
+def elide_text(fonts, text: str, role: FontRole, size: float, width: float) -> str:
+  if fonts.measure(text, role, size).width <= width:
+    return text
+  suffix = "..."
+  low, high = 0, len(text)
+  while low < high:
+    middle = (low + high + 1) // 2
+    if fonts.measure(text[:middle] + suffix, role, size).width <= width:
+      low = middle
+    else:
+      high = middle - 1
+  return text[:low] + suffix
+
+
+def draw_settings_header(fonts, sidebar_expanded: bool, title: str, parent: str = "", *, back: bool = False) -> None:
+  left = 520 if sidebar_expanded else 20
+  rect = rl.Rectangle(left, 12, 2140 - left, 128)
+  draw_hud_background(rect, ACCENT, 0.5, radius_px=34)
+  x = left + 34
+  if back:
+    top, bottom = fonts.vertical_ink("< Back", FontRole.MEDIUM, 50)
+    fonts.draw("< Back", FontRole.MEDIUM, 50, left + 28, 76 - (top + bottom) / 2, TEXT_PRIMARY)
+    rl.draw_line(left + 250, 36, left + 250, 116, CONTROL_BORDER)
+    x = left + 284
+  available = 2110 - x
+  title = elide_text(fonts, title, FontRole.SEMI_BOLD, 50, available)
+  segments = []
+  separator = " > "
+  parent_width = available - fonts.measure(title, FontRole.SEMI_BOLD, 50).width - fonts.measure(separator, FontRole.MEDIUM, 35).width
+  if parent and parent_width >= 120:
+    segments.extend(((elide_text(fonts, parent, FontRole.MEDIUM, 35, parent_width), FontRole.MEDIUM, 35, TEXT_SECONDARY),
+                     (separator, FontRole.MEDIUM, 35, TEXT_MUTED)))
+  segments.append((title, FontRole.SEMI_BOLD, 50, TEXT_PRIMARY))
+  # Share a cap-height baseline, then center the combined visible ink, including descenders.
+  bounds = [(fonts.vertical_ink(text, role, size), fonts.vertical_ink("H", role, size)[1])
+            for text, role, size, _ in segments]
+  top = min(ink[0] - baseline for ink, baseline in bounds)
+  bottom = max(ink[1] - baseline for ink, baseline in bounds)
+  baseline_y = 76 - (top + bottom) / 2
+  for (text, role, size, color), (_, baseline) in zip(segments, bounds, strict=True):
+    fonts.draw(text, role, size, x, baseline_y - baseline, color)
+    x += fonts.measure(text, role, size).width
 
 def _build_constellation_nodes(
   rng: random.Random,

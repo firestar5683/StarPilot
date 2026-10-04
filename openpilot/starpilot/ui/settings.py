@@ -9,7 +9,7 @@ from openpilot.starpilot.ui import clip
 from openpilot.starpilot.ui.home_geometry import outside_rounded_border
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile
 from openpilot.starpilot.ui.settings_assets import SettingsAssets
-from openpilot.starpilot.ui.settings_geometry import ACCENT, TEXT_PRIMARY, constellation, draw_constellation_nodes, draw_hud_background
+from openpilot.starpilot.ui.settings_geometry import ACCENT, constellation, draw_constellation_nodes, draw_hud_background, draw_settings_header
 from openpilot.starpilot.ui.settings_state import compact_menu, Destination, RAIL, TILES, SettingsState, tile_rects
 
 ICON_COLOR = rl.Color(246, 242, 254, 255)
@@ -34,12 +34,7 @@ class SettingsView:
       self._compact(state)
 
   def _large(self, state: SettingsState):
-    rail_width = 500 if state.sidebar_expanded else 0
-    header = rl.Rectangle(rail_width + 20, 12, 2120 - rail_width, 68)
-    draw_hud_background(header, ACCENT, radius_px=34)
-    label = self.fonts.measure("StarPilot", FontRole.SEMI_BOLD, 34)
-    self.fonts.draw("StarPilot", FontRole.SEMI_BOLD, 34, header.x + 34, header.y + (header.height - label.height) / 2,
-                    TEXT_PRIMARY)
+    draw_settings_header(self.fonts, state.sidebar_expanded, "StarPilot")
     for (_, title, icon), bounds in zip(TILES, tile_rects(state), strict=True):
       rect = rl.Rectangle(*bounds)
       draw_hud_background(rect, ACCENT)
