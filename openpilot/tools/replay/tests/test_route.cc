@@ -32,6 +32,14 @@ void test_route_ranges() {
   }
 }
 
+void test_replay_recorder_only_service() {
+  Replay all_services(DEMO_ROUTE, {}, {});
+  Replay recorder_service(DEMO_ROUTE, {"modelIdentity", "logMessage"}, {});
+}
+
 int main() {
-  return run_native_test(test_route_ranges);
+  return run_native_test([]() {
+    test_route_ranges();
+    test_replay_recorder_only_service();
+  });
 }
