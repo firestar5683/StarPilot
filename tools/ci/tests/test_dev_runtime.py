@@ -68,9 +68,9 @@ class TestDeveloperRuntime(unittest.TestCase):
     self.runtime.sync()
     self.assertEqual(native.read_bytes(), b'host binary')
 
-  def test_ui_build_prepares_mpc_import_dependency(self):
+  def test_command_build_prepares_mpc_import_dependency(self):
     solver = 'openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so'
-    for command in ('c3', 'c4', 'onroad'):
+    for command in ('c3', 'c4', 'onroad', 'galaxy', 'python', 'pytest', 'shell'):
       with self.subTest(command=command), patch('tools.host_runtime.run') as build:
         self.runtime.build(command, 4)
         self.assertIn(solver, build.call_args.args[0])
