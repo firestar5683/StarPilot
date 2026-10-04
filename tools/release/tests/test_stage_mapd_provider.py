@@ -2,12 +2,14 @@ import hashlib
 import json
 from pathlib import Path
 import stat
+import shutil
 import struct
 import subprocess
 import tempfile
 import unittest
 
 from openpilot.starpilot.maps.artifact import source_digest
+from tools.release.release_files import release_files
 from tools.release.stage_mapd_provider import PROVIDER, stage_provider, validate_provider
 
 
@@ -59,6 +61,52 @@ class TestStageMapdProvider(unittest.TestCase):
                 'sourceDigest': digest, 'binarySha256': hashlib.sha256(binary).hexdigest()}
     (self.source / PROVIDER / 'manifest.json').write_text(json.dumps(manifest))
     return manifest
+
+  def test_stripped_selection_preserves_complete_mapd_source_digest(self):
+    inputs = {
+      'mapd_repo/.github/workflows/build.yml': 'name: build\n',
+      'mapd_repo/.github/workflows/release.yml': 'name: release\n',
+      'mapd_repo/go.mod': 'module fixture\nreplace example/module => ./third_party/module\n',
+      'mapd_repo/third_party/module/go.mod': 'module example/module\n',
+      'mapd_repo/third_party/module/header.go': 'package module\nconst Readers = 64\n',
+      'mapd_repo/third_party/module/LICENSE': 'fixture license\n',
+      '.github/workflows/tests.yaml': 'name: root CI\n',
+    }
+    for name, content in inputs.items():
+      path = self.source / name
+      path.parent.mkdir(parents=True, exist_ok=True)
+      path.write_text(content)
+    self.git('add', *inputs)
+    self.git('-c', 'user.name=Test', '-c', 'user.email=test@example.invalid',
+             'commit', '--quiet', '-m', 'dependency fixture')
+    self.revision = self.git('rev-parse', 'HEAD').strip()
+    manifest = self.make_package()
+    selected = release_files(str(self.source))
+    self.assertNotIn(b'.github/workflows/tests.yaml', selected)
+    for name in inputs:
+      if name.startswith('mapd_repo/'):
+        self.assertIn(name.encode(), selected)
+    for raw in selected:
+      name = raw.decode()
+      target = self.destination / name
+      target.parent.mkdir(parents=True, exist_ok=True)
+      shutil.copy2(self.source / name, target)
+    self.assertEqual(source_digest(self.destination / 'mapd_repo'), manifest['sourceDigest'])
+    self.assertEqual(stage_provider(self.source, self.destination), manifest)
+    (self.destination / 'mapd_repo/third_party/module/header.go').write_text('package changed\n')
+    with self.assertRaisesRegex(ValueError, 'release Mapd source differs'):
+      stage_provider(self.source, self.destination)
+
+  def test_finder_metadata_does_not_change_source_attestation(self):
+    manifest = self.make_package()
+    metadata = self.source / 'mapd_repo/.DS_Store'
+    metadata.write_bytes(b'finder metadata')
+    self.assertEqual(source_digest(self.source / 'mapd_repo'), manifest['sourceDigest'])
+    metadata.write_bytes(b'updated finder metadata')
+    self.assertEqual(validate_provider(self.source), manifest)
+    (self.source / 'mapd_repo/main.go').write_text('package changed\n')
+    with self.assertRaisesRegex(ValueError, 'source'):
+      validate_provider(self.source)
 
   def test_validated_package_stages_both_files(self):
     manifest = self.make_package()

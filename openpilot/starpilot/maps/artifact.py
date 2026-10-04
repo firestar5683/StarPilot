@@ -9,7 +9,7 @@ from typing import BinaryIO
 
 def source_digest(source: Path) -> str:
   files = {path.relative_to(source).as_posix(): hashlib.sha256(path.read_bytes()).hexdigest()
-           for path in source.rglob('*') if path.is_file() and
+           for path in source.rglob('*') if path.is_file() and path.name != '.DS_Store' and
            path.relative_to(source).parts[0] not in ('.git', 'build', 'media', 'offline')}
   return hashlib.sha256(json.dumps(files, sort_keys=True).encode()).hexdigest()
 
