@@ -46,6 +46,8 @@ class CarControllerParams:
     gas_max = {CAR.HONDA_CIVIC_BOSCH: 750, CAR.HONDA_ODYSSEY_5G_MMR: 2000,
                CAR.ACURA_RDX_3G_MMR: 2000, CAR.ACURA_RDX_3G: 2200}.get(CP.carFingerprint, 1600)
     self.BOSCH_GAS_LOOKUP_V = [0, gas_max]
+    if CP.carFingerprint == CAR.HONDA_ACCORD_11G:
+      self.BOSCH_GAS_LOOKUP_BP = [0.0, 2.0]
     if CP.carFingerprint in (CAR.HONDA_CRV, CAR.HONDA_CRV_EU, CAR.HONDA_CRV_SA, CAR.ACURA_RDX):
       self.STEER_MAX = 1000  # TODO: determine if there is a dead zone at the top end
     elif CP.carFingerprint in (CAR.ACURA_ILX, CAR.HONDA_CRV_5G, CAR.ACURA_RDX_3G, CAR.ACURA_TLX_2G_MMR, CAR.ACURA_MDX_4G):
@@ -89,6 +91,7 @@ class HondaSafetyFlags(IntFlag):
   NIDEC_ALT = 4
   RADARLESS = 8
   BOSCH_CANFD = 16
+  BOSCH_CANFD_MVL = 64
 
 
 class HondaFlags(IntFlag):
@@ -213,7 +216,7 @@ class CAR(Platforms):
       HondaCarDocs("Honda Accord 2023-25", "All"),
       HondaCarDocs("Honda Accord Hybrid 2023-26", "All"),
   ],
-    CarSpecs(mass=3477 * CV.LB_TO_KG, wheelbase=2.83, steerRatio=16.0, centerToFrontRatio=0.39),
+    CarSpecs(mass=3477 * CV.LB_TO_KG, wheelbase=2.83, steerRatio=16.7, centerToFrontRatio=0.39),
   )
   HONDA_CIVIC_BOSCH = HondaBoschPlatformConfig(
     [

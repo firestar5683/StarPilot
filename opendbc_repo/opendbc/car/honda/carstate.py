@@ -45,6 +45,7 @@ class CarState(CarStateBase):
 
     self.dynamic_v_cruise_units = bool(self.CP.flags & (HondaFlags.BOSCH_RADARLESS | HondaFlags.BOSCH_ALT_RADAR | HondaFlags.BOSCH_CANFD))
     self.cruise_setting = 0
+    self.scm_ambient_light = 0
     self.v_cruise_pcm_prev = 0
     self.dashboard_limit = LimitTracker()
 
@@ -71,6 +72,8 @@ class CarState(CarStateBase):
     prev_cruise_setting = self.cruise_setting
     self.cruise_setting = cp.vl["SCM_BUTTONS"]["CRUISE_SETTING"]
     self.cruise_buttons = cp.vl["SCM_BUTTONS"]["CRUISE_BUTTONS"]
+    if self.CP.carFingerprint == CAR.HONDA_ACCORD_11G:
+      self.scm_ambient_light = cp.vl["SCM_BUTTONS"]["AMBIENT_LIGHT_MAYBE"]
 
     # used for car hud message
     # TODO: find CAR_SPEED for HONDA_ODYSSEY_TWN or use ACC_HUD w/ detection
@@ -219,7 +222,7 @@ class CarState(CarStateBase):
       ret.stockFcw = cp_cam.vl["BRAKE_COMMAND"]["FCW"] != 0
       self.acc_hud = cp_cam.vl["ACC_HUD"]
       self.stock_brake = cp_cam.vl["BRAKE_COMMAND"]
-    if self.CP.flags & HondaFlags.BOSCH_RADARLESS:
+    if self.CP.flags & HondaFlags.BOSCH_RADARLESS or self.CP.carFingerprint == CAR.HONDA_ACCORD_11G:
       self.lkas_hud = cp_cam.vl["LKAS_HUD"]
 
     if self.CP.flags & HondaFlags.HAS_BSM:

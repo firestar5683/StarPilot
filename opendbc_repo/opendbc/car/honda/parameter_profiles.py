@@ -4,6 +4,7 @@ from opendbc.car.common.conversions import Conversions as CV
 
 
 STEERING_MAPS = {
+  "HONDA_ACCORD_11G": ([0, 12789], [0, 12789]),
   "ACURA_RDX_3G": ([0, 4095], [0, 4095]),
   "ACURA_RDX_3G_MMR": ([0, 3840], [0, 3840]),
   "HONDA_PILOT_4G": ([0, 4096], [0, 4096]),
