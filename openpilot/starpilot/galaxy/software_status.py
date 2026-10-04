@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import json
+
 from datetime import UTC, datetime
 import os
 from pathlib import Path
@@ -17,7 +19,21 @@ from openpilot.starpilot.ui.brand import DISPLAY_VERSION
 MAX_FIELD_BYTES = 256
 PARAMS_TARGET = re.compile(r"(?:\.tmp_[A-Za-z0-9]{1,128}|[A-Za-z0-9][A-Za-z0-9._-]{0,127})\Z")
 FIELDS = ("Version", "GitBranch", "GitCommit", "UpdaterState", "UpdaterTargetBranch",
-          "LastUpdateTime", "UpdaterLastFetchTime", "UpdaterFetchAvailable", "UpdateAvailable", "UpdateFailedCount")
+          "LastUpdateTime", "UpdaterLastFetchTime", "UpdaterFetchAvailable", "UpdateAvailable", "UpdateFailedCount", "UpdaterFastState")
+
+
+def _fast_state(raw):
+  try:
+    value = json.loads(raw) if raw is not None else None
+    if not isinstance(value, dict) or value.get("version") != 1 or value.get("stage") not in (
+        "preparing", "fetching", "validating", "applying", "submodules", "rebooting", "complete", "error"):
+      return None
+    detail = value.get("detail")
+    if not isinstance(detail, str) or len(detail) > 512:
+      return None
+    return {"stage": value["stage"], "detail": detail}
+  except (TypeError, ValueError):
+    return None
 
 
 class SoftwareUnavailable(Exception):
@@ -150,5 +166,5 @@ class SoftwareStatus:
                   "lastSuccessAt": _time(data["LastUpdateTime"]), "lastFetchAt": _time(data["UpdaterLastFetchTime"]),
                   "targetChangeFound": _flag(data["UpdaterFetchAvailable"]),
                   "finalizedUpdateReady": _flag(data["UpdateAvailable"]),
-                  "failedCount": _count(data["UpdateFailedCount"])},
+                  "failedCount": _count(data["UpdateFailedCount"]), "fast": _fast_state(data["UpdaterFastState"])},
     }

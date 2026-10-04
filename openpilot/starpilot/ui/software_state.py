@@ -14,6 +14,8 @@ class SoftwareRequest(StrEnum):
   SET_AUTOMATIC_UPDATES = "set_automatic_updates"
   CHECK_FOR_UPDATES = "check_for_updates"
   DOWNLOAD_UPDATE = "download_update"
+  FAST_UPDATE = "fast_update"
+  ROLLBACK = "rollback"
   OPEN_BRANCH_CHOOSER = "open_branch_chooser"
   OPEN_UNINSTALL_CONFIRMATION = "open_uninstall_confirmation"
   OPEN_ERROR_LOG = "open_error_log"
@@ -47,6 +49,10 @@ def button_rect(row: int) -> tuple[int, int, int, int]:
   return 1860, 50 + row * 171 + 35, 250, 100
 
 
+DIRECT_BUTTONS = ((SoftwareRequest.FAST_UPDATE, (1540, 427, 250, 100)),
+                  (SoftwareRequest.ROLLBACK, (1260, 427, 250, 100)))
+
+
 TOGGLE_RECT = (1950, 266, 160, 80)
 
 
@@ -64,6 +70,9 @@ class SoftwareInput:
     tx, ty, tw, th = TOGGLE_RECT
     if tx <= x < tx + tw and ty <= y < ty + th:
       return SoftwareRequest.SET_AUTOMATIC_UPDATES if SoftwareRequest.SET_AUTOMATIC_UPDATES in state.available_actions else None
+    for request, (bx, by, bw, bh) in DIRECT_BUTTONS:
+      if bx <= x < bx + bw and by <= y < by + bh:
+        return request if request in state.available_actions else None
     for request, row in BUTTON_ROWS:
       bx, by, bw, bh = button_rect(row)
       if bx <= x < bx + bw and by <= y < by + bh:

@@ -63,6 +63,10 @@ class SoftwareLayout(Widget):
       initial_state=automatic_downloads(ui_state.params) is True, callback=self._on_auto_updates_toggle,
       enabled=ui_state.is_offroad,
     )
+    from openpilot.starpilot.ui.software_update import NativeSoftwareUpdate
+    self._direct_update = NativeSoftwareUpdate(ui_state.is_offroad)
+    self._fast_btn = button_item(lambda: tr("Fast Update"), lambda: tr("UPDATE"), callback=lambda: self._confirm_direct_update("fast"))
+    self._rollback_btn = button_item(lambda: tr("Previous Version"), lambda: tr("RESTORE"), callback=lambda: self._confirm_direct_update("rollback"))
     self._download_btn = button_item(lambda: tr("Download"), lambda: tr("CHECK"), callback=self._on_download_update)
 
     # Install button is initially hidden
@@ -86,6 +90,8 @@ class SoftwareLayout(Widget):
       self._version_item,
       self._auto_updates_toggle,
       self._download_btn,
+      self._fast_btn,
+      self._rollback_btn,
       self._install_btn,
       self._branch_btn,
       self._uninstall_btn,
@@ -95,7 +101,20 @@ class SoftwareLayout(Widget):
   def _render(self, rect):
     self._scroller.render(rect)
 
+  def _confirm_direct_update(self, action):
+    if not self._direct_update.available(action):
+      return
+    text = (tr("Restore the previous installed version and restart? Automatic downloads will be disabled.")
+            if action == "rollback" else tr("Download and install the selected branch, then restart?"))
+    gui_app.push_widget(ConfirmDialog(text, tr("RESTORE") if action == "rollback" else tr("UPDATE"),
+                                     callback=lambda result: self._direct_update.submit(action) if result == DialogResult.CONFIRM else None))
+
   def _update_state(self):
+    self._direct_update.refresh()
+    for action, button in (("fast", self._fast_btn), ("rollback", self._rollback_btn)):
+      button.set_visible(ui_state.is_offroad())
+      button.action_item.set_enabled(self._direct_update.available(action))
+    self._fast_btn.action_item.set_value(self._direct_update.detail())
     # Show/hide onroad warning
     self._onroad_label.set_visible(ui_state.is_onroad())
 

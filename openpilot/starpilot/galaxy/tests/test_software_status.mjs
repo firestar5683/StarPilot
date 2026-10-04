@@ -299,7 +299,9 @@ assert.match(SoftwarePage.template, /Check for updates/)
 assert.match(SoftwarePage.template, /Download update/)
 assert.match(SoftwarePage.template, /Restart &amp; install/)
 assert.match(SoftwarePage.template, /displayVersion \?\? data\.installed\.version/)
-assert.doesNotMatch(SoftwarePage.template, /Rollback|historical version|status only/i)
+assert.match(SoftwarePage.template, /@click="askRollback">Previous version/ )
+assert.match(SoftwarePage.template, /operations\.canRollback !== true/)
+assert.doesNotMatch(SoftwarePage.template, /historical version|status only/i)
 
 const preferences = fixture()
 preferences.feed.start()
@@ -358,6 +360,17 @@ fastLost.feed.stop()
 
 const fastPage = { actionDisabled: false, operations: { canFastUpdate: true, selectedTarget: "beta" }, data: { installed }, dialog: null }
 SoftwarePage.methods.askFastUpdate.call(fastPage)
-assert.deepEqual(fastPage.dialog, { action: "fast", branch: "Dom", title: "Fast Update", message: "Download latest version of Dom and restart?", label: "Fast Update" })
+assert.deepEqual(fastPage.dialog, { action: "fast", branch: "beta", title: "Fast Update", message: "Download latest version of beta and restart?", label: "Fast Update" })
 assert.equal(validSoftwareSnapshot(snapshot({ operations: { ...operations, canFastUpdate: "yes" } })), false)
 assert.equal(validSoftwareSnapshot(snapshot({ operations: { ...operations, request: { ...request("fast"), outcome: "invented" } } })), false)
+
+const rollbackPage = { actionDisabled: false, operations: { canRollback: true }, data: { installed }, dialog: null }
+SoftwarePage.methods.askRollback.call(rollbackPage)
+assert.equal(rollbackPage.dialog.action, "rollback")
+assert.equal(rollbackPage.dialog.branch, installed.branch)
+assert.equal(rollbackPage.dialog.title, "Previous version")
+assert.match(rollbackPage.dialog.message, /Automatic downloads will be turned off/)
+const unavailableRollback = { ...rollbackPage, operations: { canRollback: false }, dialog: null }
+SoftwarePage.methods.askRollback.call(unavailableRollback)
+assert.equal(unavailableRollback.dialog, null)
+assert.equal(validSoftwareSnapshot(snapshot({ operations: { ...operations, canRollback: "yes" } })), false)

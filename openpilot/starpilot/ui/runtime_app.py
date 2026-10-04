@@ -11,6 +11,7 @@ import math
 from pathlib import Path
 import time
 from typing import Any
+from collections.abc import Callable
 
 import pyray as rl
 import openpilot.cereal.messaging as messaging
@@ -219,7 +220,7 @@ class StarShellSession:
           PREFIX_RE.fullmatch(os.environ.get("OPENPILOT_PREFIX", "")) is not None):
         self._visual_preview_flags = parse_flags(raw_preview)
     self._visual_preview_start_ns = time.monotonic_ns()
-    self._native_favorite_actions = dict
+    self._native_favorite_actions: Callable[[], dict] = dict
     self._wheel_sock = messaging.sub_sock("slcCruiseEvent", conflate=False)
     self._wheel_pending = deque(maxlen=32)
     self._wheel_consumer = WheelConsumer()
@@ -1010,7 +1011,7 @@ class StarShellSession:
         except (OSError, RuntimeError, ValueError):
           label = "Driving model unavailable"
         self._home_model = (now, label)
-      snapshot = replace(snapshot, home=replace(snapshot.home, model_label=self._home_model[1]))
+      snapshot = replace(snapshot, home=replace(snapshot.home, model_label=label if previous is None or not 0 <= now - previous[0] < 1.0 else previous[1]))
     preview_flags = getattr(self, "_visual_preview_flags", frozenset())
     if mode == ShellMode.ONROAD and preview_flags:
       visual = preview_at(preview_flags,
@@ -1426,7 +1427,7 @@ class StarCompactSettings(NavWidget):
     self.session.compact_scroll_x = self._panel.update(self.rect, 20 + len(compact_menu(SettingsState(paired=paired))) * 422,
                                                         snap_target=target)
 
-  def _render(self, rect: rl.Rectangle) -> None:
+  def _render(self, rect) -> None:
     self.session.render(self.mode, rect)
 
   def _handle_mouse_event(self, mouse_event: MouseEvent) -> None:
@@ -1589,6 +1590,9 @@ class StarMainLayout(MainLayout):
       if owner._download_btn.action_item.text != tr(expected.value):
         return False
       owner._on_download_update()
+    elif request.request in (SoftwareRequest.FAST_UPDATE, SoftwareRequest.ROLLBACK):
+      owner._update_state()
+      owner._confirm_direct_update("rollback" if request.request == SoftwareRequest.ROLLBACK else "fast")
     elif request.request == SoftwareRequest.OPEN_BRANCH_CHOOSER:
       owner._on_select_branch(self._confirmed_offroad)
     elif request.request == SoftwareRequest.OPEN_UNINSTALL_CONFIRMATION:
@@ -1680,7 +1684,8 @@ class StarMiciMainLayout(MiciMainLayout):
     self._on_body_changed()
     self.star._native_favorite_actions = self._native_favorites
 
-  def _render(self, rect: rl.Rectangle) -> None:
+  def _render(self, _) -> None:
+    rect = _
     page = self._car_onroad_layout
     bookmark = self._native_onroad._bookmark_icon
     bookmark.set_rect(page.rect)

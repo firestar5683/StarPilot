@@ -13,6 +13,7 @@ ROOT = Path(__file__).resolve().parents[3]
 
 def load(name, path):
   spec = importlib.util.spec_from_file_location(name, path)
+  assert spec is not None and spec.loader is not None
   module = importlib.util.module_from_spec(spec)
   sys.modules[name] = module
   spec.loader.exec_module(module)
@@ -49,8 +50,8 @@ class TestFastUpdate(unittest.TestCase):
     for name in sorted(vendor.DEPENDENCIES):
       (self.remote / name).mkdir()
       (self.remote / name / 'source').write_text('vendored')
-      dependencies.append(dict(path=name, commit='1' * 40, tree='2' * 40, url='https://example.invalid/source', exclude=[]))
-    manifest = dict(schema_version=1, upstream=dict(commit='3' * 40, url='https://example.invalid/upstream'), dependencies=dependencies)
+      dependencies.append({'path': name, 'commit': '1' * 40, 'tree': '2' * 40, 'url': 'https://example.invalid/source', 'exclude': []})
+    manifest = {'schema_version': 1, 'upstream': {'commit': '3' * 40, 'url': 'https://example.invalid/upstream'}, 'dependencies': dependencies}
     (self.remote / 'upstream-sync.json').write_text(json.dumps(manifest))
     (self.remote / 'launch_env.sh').write_text('export AGNOS_VERSION="19.8.1"\n')
     (self.remote / 'prebuilt').write_text('')
@@ -67,8 +68,14 @@ class TestFastUpdate(unittest.TestCase):
     self.invalidations = []
 
   def update(self, **kwargs):
-    arguments = dict(params=self.params, parked=lambda: True, expected_commit=self.git(self.repo, 'rev-parse', 'HEAD'), current_os='19.8.1',
-                     invalidate=lambda: self.invalidations.append(True))
+    arguments = {
+      'params': self.params,
+      'parked': lambda: True,
+      'expected_commit': self.git(self.repo, 'rev-parse', 'HEAD'),
+      'current_os': '19.8.1',
+      'invalidate': lambda: self.invalidations.append(True),
+      'sleep': lambda _: None,
+    }
     arguments.update(kwargs)
     return owner.fast_update(self.repo, 'Dom', **arguments)
 
@@ -76,9 +83,11 @@ class TestFastUpdate(unittest.TestCase):
     (self.repo / 'models').mkdir()
     (self.repo / 'models' / 'download').write_bytes(b'model')
     commands = []
+
     def traced(command, cwd):
       commands.append(command)
       return owner.run(command, cwd)
+
     self.assertEqual(self.update(run=traced), 'reboot-requested')
     fetch = next(command for command in commands if 'fetch' in command)
     self.assertIn('gc.auto=0', fetch)
@@ -88,15 +97,60 @@ class TestFastUpdate(unittest.TestCase):
     self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.target)
     self.assertEqual(self.git(self.repo, 'rev-parse', 'refs/starpilot/previous'), self.previous)
     self.assertEqual((self.repo / 'models' / 'download').read_bytes(), b'model')
-    self.assertEqual(self.params.calls, [(('DoReboot', True), dict(block=True))])
+    self.assertEqual(self.params.calls, [(('DoReboot', True), {'block': True})])
     self.assertEqual(self.update(), 'up-to-date')
     self.assertEqual(len(self.invalidations), 1)
 
+  def test_actual_updater_owned_transaction_and_durable_restart_state(self):
+    from openpilot.system.updated import updated
+    from openpilot.starpilot.drive_state import evidence
+    from openpilot.starpilot.software import fast_update as production
+
+    from openpilot.common.params import Params as NativeParams
+    params = NativeParams(str(Path(self.temp.name) / 'params'))
+    params.put_bool('IsOffroad', True, block=True)
+    source = type('Physical', (), {'allowed': lambda self: True, 'effective': lambda self: False, 'close': lambda self: None})()
+    updater = updated.Updater.__new__(updated.Updater)
+    updater.params = params
+    finalized = Path(self.temp.name) / 'finalized'
+    finalized.mkdir()
+    marker = finalized / '.overlay_consistent'
+    marker.touch()
+    overlay = self.repo / '.overlay_init'
+    overlay.touch()
+    with (
+      patch.object(updated, 'BASEDIR', str(self.repo)),
+      patch.object(updated, 'FINALIZED', str(finalized)),
+      patch.object(updated, 'OVERLAY_INIT', overlay),
+      patch.object(updated, 'dismount_overlay'),
+      patch.object(updated.HARDWARE, 'get_os_version', return_value='19.8.1'),
+      patch.object(evidence, 'PhysicalSource', return_value=source),
+      patch.object(production.time, 'sleep'),
+    ):
+      result = updater.fast_update('Dom', self.previous)
+    self.assertEqual(result, 'reboot-requested')
+    self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.target)
+    self.assertFalse(marker.exists())
+    self.assertFalse(overlay.exists())
+    self.assertEqual(params.get('UpdaterFastState')['stage'], 'complete')
+    self.assertTrue(params.get_bool('DoReboot'))
+    updated.recover_fast_state(params)
+    self.assertEqual(params.get('UpdaterFastState')['stage'], 'complete')
+    params.put('UpdaterFastState', {'version': 1, 'stage': 'applying', 'detail': 'Applying fetched commit...'}, block=True)
+    updated.recover_fast_state(params)
+    self.assertEqual(params.get('UpdaterFastState')['stage'], 'error')
+    self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.target)
+    params.put('UpdaterFastState', {'version': 1, 'stage': 'complete', 'detail': 'Already up to date.'}, block=True)
+    updated.recover_fast_state(params)
+    self.assertEqual(params.get('UpdaterFastState')['stage'], 'complete')
+
   def test_expected_commit_changed_rejected_before_fetch(self):
     commands = []
+
     def traced(command, cwd):
       commands.append(command)
       return owner.run(command, cwd)
+
     with self.assertRaises(owner.FastUpdateError):
       self.update(expected_commit='1' * 40, run=traced)
     self.assertFalse(any('fetch' in command for command in commands))
@@ -160,7 +214,10 @@ class TestFastUpdate(unittest.TestCase):
     prebuilt.write_receipt(self.remote)
     self.git(self.remote, 'add', '.')
     self.git(self.remote, 'commit', '-m', 'receipt content and modes')
-    git = lambda *args: subprocess.check_output(['git', '-C', str(self.remote), *args]).decode()
+
+    def git(*args):
+      return subprocess.check_output(['git', '-C', str(self.remote), *args]).decode()
+
     self.assertTrue(prebuilt.valid_receipt(git, 'HEAD'))
 
   def test_missing_prebuilt_rejected_without_removing_local_marker(self):
@@ -194,8 +251,8 @@ class TestFastUpdate(unittest.TestCase):
   def test_reboot_write_failure_rolls_back(self):
     def failing(*args, **kwargs):
       raise RuntimeError('params write failed')
-    self.params.put_bool = failing
-    with self.assertRaisesRegex(RuntimeError, 'params write failed'):
+
+    with patch.object(self.params, "put_bool", side_effect=failing), self.assertRaisesRegex(RuntimeError, 'params write failed'):
       self.update()
     self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.previous)
 
@@ -204,6 +261,7 @@ class TestFastUpdate(unittest.TestCase):
       if 'fetch' in command:
         raise RuntimeError('fetch failed')
       return owner.run(command, cwd)
+
     with self.assertRaisesRegex(RuntimeError, 'fetch failed'):
       self.update(run=failing)
     self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.previous)
@@ -211,6 +269,7 @@ class TestFastUpdate(unittest.TestCase):
 
   def test_apply_failure_rolls_back(self):
     failed = False
+
     def failing(command, cwd):
       nonlocal failed
       if 'reset' in command and command[-1] == self.target and not failed:
@@ -218,6 +277,7 @@ class TestFastUpdate(unittest.TestCase):
         owner.run(command, cwd)
         raise RuntimeError('apply failed after reset')
       return owner.run(command, cwd)
+
     with self.assertRaisesRegex(RuntimeError, 'apply failed'):
       self.update(run=failing)
     self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.previous)
@@ -246,11 +306,79 @@ class TestFastUpdate(unittest.TestCase):
     self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.previous)
     self.assertFalse(self.invalidations)
 
-  def test_other_branch_rejected(self):
-    self.git(self.repo, 'checkout', '-b', 'Other')
-    with self.assertRaises(owner.FastUpdateError):
-      self.update()
+  def test_selected_branch_applies_and_rollback_restores_exact_branch_and_commit(self):
+    self.git(self.remote, 'checkout', '-b', 'Other')
+    (self.remote / 'openpilot/starpilot/ui/source.py').write_text('other')
+    self.git(self.remote, 'commit', '-am', 'other branch')
+    other = self.git(self.remote, 'rev-parse', 'HEAD')
+    stages = []
+    arguments = {
+      'params': self.params,
+      'parked': lambda: True,
+      'expected_commit': self.previous,
+      'current_os': '19.8.1',
+      'invalidate': lambda: None,
+      'sleep': lambda seconds: stages.append(('sleep', seconds)),
+      'progress': lambda stage, detail: stages.append((stage, detail)),
+    }
+    self.assertEqual(owner.fast_update(self.repo, 'Other', **arguments), 'reboot-requested')
+    self.assertEqual(self.git(self.repo, 'symbolic-ref', '--short', 'HEAD'), 'Other')
+    self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), other)
+    self.assertEqual(self.git(self.repo, 'config', '--get', 'starpilot.previousVersion'), f'{self.previous} Dom')
+    self.assertIn(('sleep', 6.0), stages)
+    arguments['expected_commit'] = other
+    self.assertEqual(owner.fast_update(self.repo, 'Other', rollback=True, **arguments), 'reboot-requested')
+    self.assertEqual(self.git(self.repo, 'symbolic-ref', '--short', 'HEAD'), 'Dom')
     self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.previous)
+
+  def test_failed_branch_apply_restores_source_and_previous_version_receipt(self):
+    self.git(self.remote, 'branch', 'Other')
+    self.git(self.repo, 'update-ref', 'refs/starpilot/previous', self.previous)
+    self.git(self.repo, 'config', 'starpilot.previousVersion', f'{self.previous} Retained')
+
+    def failed(command, cwd):
+      if 'checkout' in command and 'Other' in command:
+        raise subprocess.CalledProcessError(1, command)
+      return owner.run(command, cwd)
+
+    with self.assertRaises(subprocess.CalledProcessError):
+      owner.fast_update(
+        self.repo,
+        'Other',
+        params=self.params,
+        parked=lambda: True,
+        expected_commit=self.previous,
+        current_os='19.8.1',
+        invalidate=lambda: None,
+        run=failed,
+        sleep=lambda _: None,
+      )
+    self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.previous)
+    self.assertEqual(self.git(self.repo, 'config', '--get', 'starpilot.previousVersion'), f'{self.previous} Retained')
+    self.assertFalse(self.params.calls)
+
+  def test_incomplete_previous_version_receipt_rejected_without_source_mutation(self):
+    self.git(self.repo, 'update-ref', 'refs/starpilot/previous', self.previous)
+    self.git(self.repo, 'config', 'starpilot.previousVersion', f"{'1' * 40} Dom")
+    with self.assertRaisesRegex(owner.FastUpdateError, 'receipt is incomplete'):
+      self.update(rollback=True)
+    self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.previous)
+    self.assertFalse(self.invalidations)
+    self.assertFalse(self.params.calls)
+
+  def test_restart_notice_rechecks_parked_and_rolls_back(self):
+    waits = []
+    parked = [True]
+
+    def notice(seconds):
+      waits.append(seconds)
+      parked[0] = False
+
+    with self.assertRaises(owner.FastUpdateError):
+      self.update(parked=lambda: parked[0], sleep=notice)
+    self.assertEqual(waits, [6.0])
+    self.assertEqual(self.git(self.repo, 'rev-parse', 'HEAD'), self.previous)
+    self.assertFalse(self.params.calls)
 
   def test_untracked_collision_rejected(self):
     (self.repo / 'new-model').write_bytes(b'model')
@@ -264,10 +392,12 @@ class TestFastUpdate(unittest.TestCase):
 
   def test_post_apply_validation_failure_rolls_back(self):
     original = owner.validate_revision
+
     def validate(repo, revision):
       if revision == 'HEAD':
         raise ValueError('post-check failed')
       return original(repo, revision)
+
     with patch.object(owner, 'validate_revision', validate):
       with self.assertRaisesRegex(ValueError, 'post-check failed'):
         self.update()
