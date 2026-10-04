@@ -612,42 +612,60 @@ static safety_config ford_init(uint16_t param) {
   }
   ford_aol_configure(param);
   if (ford_aol_enabled) {
-    static RxCheck ford_aol_default_rx[] = {
+    static const RxCheck ford_aol_default_rx[] = {
       FORD_COMMON_RX_CHECKS
       {.msg = {{0x83, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
       {.msg = {{0x82, 0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
       {.msg = {{0x176, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
     };
-    static RxCheck ford_aol_edge_rx[] = {
+    static const RxCheck ford_aol_edge_rx[] = {
       FORD_COMMON_RX_CHECKS
       {.msg = {{0x83, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
       {.msg = {{0x82, 0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
       {.msg = {{0x230, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
     };
-    static RxCheck ford_aol_mondeo_rx[] = {
+    static const RxCheck ford_aol_mondeo_rx[] = {
       FORD_COMMON_RX_CHECKS
       {.msg = {{FORD_Lane_Assist_Data3, 0, 8, 30U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
       {.msg = {{0x83, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
       {.msg = {{0x82, 0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
       {.msg = {{0x5A, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
     };
-    static RxCheck ford_aol_transit_rx[] = {
+    static const RxCheck ford_aol_transit_rx[] = {
       FORD_COMMON_RX_CHECKS
       {.msg = {{0x83, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
       {.msg = {{0x82, 0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
       {.msg = {{0x176, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
       {.msg = {{FORD_Lane_Assist_Data3, 0, 8, 30U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
     };
+    static RxCheck ford_aol_rx_workspace[10];
+    _Static_assert(sizeof(ford_aol_default_rx) == (9U * sizeof(RxCheck)), "Ford default RX count");
+    _Static_assert(sizeof(ford_aol_edge_rx) == (9U * sizeof(RxCheck)), "Ford Edge RX count");
+    _Static_assert(sizeof(ford_aol_mondeo_rx) == (10U * sizeof(RxCheck)), "Ford Mondeo RX count");
+    _Static_assert(sizeof(ford_aol_transit_rx) == (10U * sizeof(RxCheck)), "Ford Transit RX count");
     const uint16_t base = param & 0xFFFEU;
+    const RxCheck *selected_rx = ford_aol_default_rx;
+    int selected_len = 9;
     if (base == 8U) {
-      SET_RX_CHECKS(ford_aol_edge_rx, ret);
+      selected_rx = ford_aol_edge_rx;
     } else if (base == 10U) {
-      SET_RX_CHECKS(ford_aol_mondeo_rx, ret);
+      selected_rx = ford_aol_mondeo_rx;
+      selected_len = 10;
     } else if ((base == 12U) || (base == 18U) || (base == 66U)) {
-      SET_RX_CHECKS(ford_aol_transit_rx, ret);
+      selected_rx = ford_aol_transit_rx;
+      selected_len = 10;
     } else {
-      SET_RX_CHECKS(ford_aol_default_rx, ret);
     }
+    for (int i = 0; i < 10; i++) {
+      if (i < selected_len) {
+        ford_aol_rx_workspace[i] = selected_rx[i];
+      } else {
+        ford_aol_rx_workspace[i] = (RxCheck){0};
+      }
+    }
+    ret.rx_checks = ford_aol_rx_workspace;
+    ret.rx_checks_len = selected_len;
+    ret.disable_forwarding = false;
     static CanMsg ford_aol_tx_msgs[16];
     const bool bounded = (ret.tx_msgs_len > 0) && (ret.tx_msgs_len <= 16);
     if (bounded) {

@@ -177,14 +177,14 @@ typedef struct {
 } LongitudinalLimits;
 
 typedef struct {
-  const int addr;
-  const unsigned int bus;
-  const int len;
-  const uint32_t frequency;          // expected frequency of the message [Hz]
-  const bool ignore_checksum;        // checksum check is not performed when set to true
-  const bool ignore_counter;         // counter check is not performed when set to true
-  const uint8_t max_counter;         // maximum value of the counter. 0 means that the counter check is skipped
-  const bool ignore_quality_flag;    // true if quality flag check is skipped
+  int addr;
+  unsigned int bus;
+  int len;
+  uint32_t frequency;          // expected frequency of the message [Hz]
+  bool ignore_checksum;        // checksum check is not performed when set to true
+  bool ignore_counter;         // counter check is not performed when set to true
+  uint8_t max_counter;         // maximum value of the counter. 0 means that the counter check is skipped
+  bool ignore_quality_flag;    // true if quality flag check is skipped
 } CanMsgCheck;
 
 typedef struct {
@@ -201,7 +201,7 @@ typedef struct {
 
 // params and flags about checksum, counter and frequency checks for each monitored address
 typedef struct {
-  const CanMsgCheck msg[MAX_ADDR_CHECK_MSGS];  // check either messages (e.g. honda steer)
+  CanMsgCheck msg[MAX_ADDR_CHECK_MSGS];  // check either messages (e.g. honda steer)
   RxStatus status;
 } RxCheck;
 
