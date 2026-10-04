@@ -8,11 +8,13 @@ under an explicit output directory and are not runtime UI assets.
 import argparse
 import hashlib
 import json
+from dataclasses import replace
 from pathlib import Path
 
 import pyray as rl
 
 from openpilot.starpilot.ui.device_state import DeviceState
+from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsState
 from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadAlert, OnroadState, SpeedLimitObservation
 from openpilot.starpilot.ui.presentation import BitmapFonts, Profile
 from openpilot.starpilot.ui.preview_home import reference_state
@@ -23,11 +25,78 @@ from openpilot.starpilot.ui.toggles_state import TogglesState
 from openpilot.starpilot.ui.shell import ShellMode, ShellSnapshot, ShellView
 
 
+FEATURE_SCENES = ("settings_driving_controls", "settings_sounds", "settings_appearance", "settings_system",
+                  "settings_models", "settings_vehicle_features", "settings_pip", "settings_feature_states",
+                  "settings_feature_states_scrolled", "settings_long_text")
 LARGE_SCENES = ("home", "settings_starpilot", "settings_device", "settings_toggles", "settings_software",
                 "onroad_engaged_no_camera", "onroad_disengaged_no_camera", "onroad_alert_small",
-                "onroad_alert_mid", "onroad_alert_full")
+                "onroad_alert_mid", "onroad_alert_full", "settings_starpilot_collapsed", *FEATURE_SCENES)
 COMPACT_SCENES = ("home", "settings", "onroad_engaged_no_camera", "onroad_disengaged_no_camera",
                   "onroad_alert_small", "onroad_alert_mid", "onroad_alert_full")
+
+
+def reference_feature_scene(scene: str) -> tuple[Destination, str, FeatureSettingsState]:
+  """Supplied offline rows, not owner snapshots or new runtime destinations."""
+  def boolean(key: str, value: str, *, available: bool = True) -> FeatureRow:
+    return FeatureRow(key, key.replace("_", " ").title(), value, b"1" if value == "On" else b"0",
+                      ("Off", "On"), available=available, reason="" if available else "Unavailable while driving")
+
+  number = FeatureRow("brightness", "Brightness", "75", b"75", step=5, minimum=0, maximum=100,
+                      unit="%", available=True)
+  reset = FeatureRow("pip:reset", "Restore default camera crop", "Reset to Default", available=True,
+                     reason="Requires confirmation")
+  if scene == "settings_driving_controls":
+    rows = tuple(FeatureRow("", label, "Saved settings", page=page, available=True) for page, label in (
+      ("slc", "Speed Limit Controller"), ("lane", "Lane Centering"), ("lane_change", "Lane Changes"),
+      ("profiles", "Long Planner"), ("conditional", "Conditional Driving Modes"), ("curve", "Curve Speed Controller"),
+      ("torque", "Steering and Torque"), ("aol", "Always On Lateral"), ("wheel", "Wheel Controls")))
+    destination, field, page, title = Destination.DRIVING_CONTROLS, "features", "hub", "Driving Controls"
+  elif scene == "settings_sounds":
+    rows = (FeatureRow("soundpack", "Sound Pack", "Standard", choices=("Standard", "Classic"), available=True),
+            FeatureRow("volume", "Alert Volume", "Auto", choices=("Auto",), step=5, maximum=100, available=True), number)
+    destination, field, page, title = Destination.SOUNDS, "sounds", "sounds", "Sounds & Alerts"
+  elif scene == "settings_system":
+    rows = (number, boolean("display", "On"),
+            FeatureRow("power", "Parked Power", "Stock", choices=("Stock", "On"), available=True),
+            FeatureRow("drive_state", "Force Drive State", "Auto", choices=("Auto", "Offroad", "Onroad"), available=True),
+            FeatureRow("", "Map manager", "Unavailable", reason="Open Galaxy to manage parked downloads"))
+    destination, field, page, title = Destination.SYSTEM, "display", "display", "System"
+  elif scene == "settings_models":
+    rows = (FeatureRow("", "Active Small", "Bundled driving model", page="models:small", available=True),
+            FeatureRow("", "Active Big", "Bundled driving model", page="models:big", available=True),
+            FeatureRow("", "Runtime", "Healthy", reason="Updates while driving"),
+            FeatureRow("", "Compiled artifact", "0123456789abcdef"))
+    destination, field, page, title = Destination.DRIVING_MODEL, "models", "models", "Driving Model"
+  elif scene == "settings_vehicle_features":
+    rows = (boolean("ToyotaAutoHold", "On"), boolean("LongPitch", "Off", available=False))
+    destination, field, page, title = Destination.DRIVING_CONTROLS, "features", "vehicle", "Vehicle Settings"
+  elif scene == "settings_pip":
+    rows = (boolean("pip:enabled", "On"), boolean("pip:blinker", "Off"), number, reset,
+            FeatureRow("", "Camera availability", "No fresh cabin frame", reason="Check the live crop preview while parked"))
+    destination, field, page, title = Destination.APPEARANCE, "appearance", "pip", "Blind Spot Camera"
+  else:
+    rows = (boolean("enabled_off", "Off"), boolean("enabled_on", "On"),
+            boolean("disabled_off", "Off", available=False), boolean("disabled_on", "On", available=False),
+            FeatureRow("repair", "Repair saved preference", "Invalid saved choice", choices=("Off", "On"),
+                       available=True, reason="Choose Off to repair", repair_value="Off"),
+            FeatureRow("unreadable", "Saved preference", "Unreadable", reason="Saved source cannot be read"),
+            FeatureRow("SLCFallback", "Previous accepted limit", "Off (saved mode 0 or 1)", b"1",
+                       ("Off", "On"), available=True), FeatureRow("", "Following", ""), number, reset,
+            FeatureRow("", "Child settings", "Saved settings", page="lane", available=True),
+            FeatureRow("stock", "Parked Power", "Stock", choices=("Stock", "On"), available=True),
+            boolean("last_off", "Off"), boolean("last_on", "On"))
+    destination, field, page, title = Destination.DRIVING_CONTROLS, "features", "lane", "Feature States"
+    if scene == "settings_appearance":
+      destination, field, page, title = Destination.APPEARANCE, "appearance", "appearance", "Onroad HUD"
+    elif scene == "settings_long_text":
+      title = "Long settings title with descenders and enough text to exercise measured title overflow " * 2
+      rows = tuple(replace(row, label=row.label + " with a very long explanatory label " * 4,
+                           reason="Long explanatory reason with descenders, units, and saved source information. " * 3)
+                   for row in rows)
+  state = FeatureSettingsState(page=page, title=title,
+                               subtitle="Saved display preferences; changes remain governed by existing settings owners.",
+                               rows=rows, parked=True, scroll=6 if scene.endswith("_scrolled") else 0)
+  return destination, field, state
 
 
 def reference_onroad(scene: str) -> OnroadState:
@@ -59,9 +128,16 @@ class ShellViews:
                   "settings_toggles": Destination.TOGGLES}.get(scene, Destination.STAR)
     else:
       mode, selected = ShellMode.HOME, Destination.STAR
-    self.view.render(ShellSnapshot(mode=mode, home=reference_state(), settings=reference_settings_state(),
+    settings = reference_settings_state()
+    features = {}
+    if scene in FEATURE_SCENES:
+      selected, field, state = reference_feature_scene(scene)
+      features[field] = state
+    elif scene == "settings_starpilot_collapsed":
+      settings = replace(settings, sidebar_expanded=False)
+    self.view.render(ShellSnapshot(mode=mode, home=reference_state(), settings=settings,
                                    onroad=reference_onroad(scene), device=DeviceState(), software=SoftwareState(),
-                                   toggles=TogglesState(), selected=selected))
+                                   toggles=TogglesState(), selected=selected, **features))
 
   def close(self) -> None:
     self.view.close()
