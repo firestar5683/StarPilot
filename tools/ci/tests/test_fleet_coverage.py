@@ -46,7 +46,7 @@ class FleetCoverageTest(unittest.TestCase):
   def check(self, modes=None, *, dirty_relevant=None):
     return evaluate(self.manifest, self.coverage, self.results, modes,
                     expected_revision=self.revision, hashes={"results": self.result_hash}, dirty_relevant=dirty_relevant or [],
-                    current_snapshot=self.current_snapshot)
+                    current_snapshot=self.current_snapshot, expected_registry=set(self.ids))
 
   def test_checked_in_manifest_keeps_exact_source_and_addition_counts(self):
     manifest = json.loads(DEFAULT_MANIFEST.read_text())
@@ -96,7 +96,7 @@ class FleetCoverageTest(unittest.TestCase):
     self.assertTrue(any("results hash" in issue for issue in report["errors"]))
     self.coverage["result_sha256"] = self.result_hash
     report = evaluate(self.manifest, self.coverage, self.results, expected_revision="f" * 40,
-                      hashes={"results": self.result_hash}, dirty_relevant=[], current_snapshot=self.current_snapshot)
+                      hashes={"results": self.result_hash}, dirty_relevant=[], current_snapshot=self.current_snapshot, expected_registry=set(self.ids))
     self.assertIn("interface report source revision differs from requested checkout", report["uncovered"])
 
   def test_empty_required_manifest_and_malformed_ids_are_errors(self):
@@ -122,7 +122,7 @@ class FleetCoverageTest(unittest.TestCase):
     self.coverage.pop("source_after")
     report = evaluate(self.manifest, self.coverage, self.results, expected_revision=self.revision,
                       hashes={"results": self.result_hash}, dirty_relevant=[" M opendbc_repo/opendbc/car/example.py"],
-                      current_snapshot=self.current_snapshot)
+                      current_snapshot=self.current_snapshot, expected_registry=set(self.ids))
     self.assertEqual(0, report["current_interface_counts"].get("passed", 0))
     self.assertIn("relevant vehicle/runner source differs from committed checkout", report["uncovered"])
     self.coverage["native"] = {"can_sources": {}, "pycapnp": {"path": __file__, "sha256": sha256(__file__)}}
@@ -205,12 +205,28 @@ class FleetCoverageTest(unittest.TestCase):
       self.records[0]["status"] = outcome
       self.assertNotEqual("pass", self.check()["interface_gate"]["status"])
     self.records[0]["status"] = "passed"
+    ancillary = {"id": "test.Inapplicable", "status": "skipped"}
+    self.results["results"].append(ancillary)
+    self.results["selected_test_ids"].append(ancillary["id"])
+    self.coverage["selected_test_ids"] = list(self.results["selected_test_ids"])
+    self.assertEqual("pass", self.check()["interface_gate"]["status"])
+    self.assertTrue(any("test.Inapplicable" in issue for issue in self.check()["uncovered"]))
+    self.results["results"].pop()
+    self.results["selected_test_ids"].pop()
+    self.coverage["selected_test_ids"] = list(self.results["selected_test_ids"])
     snapshot = copy.deepcopy(self.current_snapshot)
     self.current_snapshot["tracked_patch_sha256"] = "e" * 64
     self.assertNotEqual("pass", self.check()["interface_gate"]["status"])
     self.current_snapshot = snapshot
     self.manifest["platforms"].append({"id": "ABSENT", "family": "test", "source_declaration": "source_only"})
-    self.assertNotEqual("pass", self.check()["interface_gate"]["status"])
+    self.assertEqual("pass", self.check()["interface_gate"]["status"])
+    self.assertIn("ABSENT: interface missing_port", self.check()["uncovered"])
+    self.assertEqual("uncovered", self.check()["status"])
+    missing_registry = evaluate(self.manifest, self.coverage, self.results,
+                                expected_revision=self.revision, hashes={"results": self.result_hash},
+                                dirty_relevant=[], current_snapshot=self.current_snapshot,
+                                expected_registry={"PRESENT", "REGISTERED_BUT_OMITTED"})
+    self.assertNotEqual("pass", missing_registry["interface_gate"]["status"])
     self.manifest["platforms"].pop()
     self.coverage["source"]["status"] = " M opendbc_repo/opendbc/car/example.py\n M opendbc_repo/opendbc/can/parser.so"
     dirty = self.coverage["source"]["status"].splitlines()

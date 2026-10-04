@@ -72,3 +72,10 @@ supplied by a caller do not authenticate a trace adapter or physical origin. Eve
 output says `vehicle_qualification: not_established`, including a passing coverage
 contract. Recorded replay, adapter review, hardware, bus, firmware and release
 qualification remain separate work.
+
+`--require interfaces` specifically gates the exact current production registry,
+all concrete mapped interface tests, execution failures and current source/native
+provenance. Inapplicable ancillary skips remain reported but do not count as skipped
+concrete interfaces. Missing Dom ports, changed addition inventory and independent
+mode gaps still keep full readiness uncovered. A green interface regression gate
+does not mean complete Dom parity, complete fleet readiness or vehicle qualification.
