@@ -141,14 +141,14 @@ class TestBlendedSender(unittest.TestCase):
           stock = CarInterface.get_params(CAR.HYUNDAI_PALISADE_2023, fingerprint, [], False, False, False)
           expected_fca = observation_bus in (int(hdaii), 2)
           self.assertEqual(bool(stock.flags & HyundaiFlags.USE_FCA), expected_fca)
-          self.assertEqual(stock.enableBsm, observation_bus == int(hdaii))
+          self.assertEqual(stock.deprecated.enableBsm, observation_bus == int(hdaii))
           candidate = candidate_from_stock(stock, alpha_requested=True, native_qualified=True)
           if not hdaii and expected_fca:
             self.assertIsNone(candidate)
           else:
             self.assertIsNotNone(candidate)
             self.assertEqual(bool(candidate.flags & HyundaiFlags.USE_FCA), expected_fca)
-            self.assertEqual(candidate.enableBsm, stock.enableBsm)
+            self.assertEqual(candidate.deprecated.enableBsm, stock.deprecated.enableBsm)
 
   def test_mixed_standstill_metadata_retains_original_bus_zero(self):
     for hdaii in (False, True):
