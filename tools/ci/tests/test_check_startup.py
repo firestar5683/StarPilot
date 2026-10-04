@@ -4,9 +4,10 @@ import struct
 import unittest
 from pathlib import Path
 
+from opendbc.car import structs
 from openpilot.common.params import Params
 from openpilot.starpilot import schema_cache as cache
-from openpilot.starpilot.state_migration import MigrationRequired, prepare_manager_start
+from openpilot.starpilot.state_migration import MigrationRequired, load_snapshot, prepare_manager_start
 from openpilot.cereal import messaging
 from tools.check_startup import check_startup
 
@@ -44,6 +45,61 @@ class TestCheckStartup(unittest.TestCase):
     with self.assertRaisesRegex(MigrationRequired, "incompatible retained cache"):
       check_startup(Path(self.params.get_param_path()), self.storage)
     self.assertEqual(self.tree(), before)
+
+  def stale_cache(self, key):
+    contract = cache.CONTRACTS[key]
+    message = contract.root.new_message() if contract.service is None else messaging.new_message(contract.service)
+    payload = message.to_bytes()
+    header = cache._header(contract, key, payload)
+    header.update(producer_contract="prior-runtime-contract", schema_sha256="0" * 64)
+    encoded = json.dumps(header, separators=(",", ":")).encode()
+    raw = cache.MAGIC + struct.pack(">I", len(encoded)) + encoded + payload
+    self.assertEqual(cache.inspect_cache(key, raw).status, "incompatible")
+    self.params.put(key, raw, block=True)
+    return raw
+
+  def test_initialized_actual_registry_archives_all_vehicle_contracts_only(self):
+    prepare_manager_start(self.params, self.storage, auto_migrate=True)
+    vehicle_keys = {key for key, contract in cache.CONTRACTS.items() if contract.root is structs.CarParams}
+    self.assertTrue(vehicle_keys)
+    stale = {key: self.stale_cache(key) for key in vehicle_keys}
+    cache.put_cache(self.params, "CalibrationParams", messaging.new_message("extrinsicsCalibration"), block=True)
+    cache.put_cache(self.params, "LiveDelay", messaging.new_message("lateralDelay"), block=True)
+    self.params.put_bool("IsMetric", True, block=True)
+    self.params.put_bool("AlwaysOnLateral", True, block=True)
+    self.params.put("DongleId", "preserved-operational-identity", block=True)
+    namespace = Path(self.params.get_param_path())
+    original = {path.name: path.read_bytes() for path in namespace.iterdir()}
+    before = self.tree()
+    with self.assertRaisesRegex(MigrationRequired, "incompatible retained cache"):
+      check_startup(namespace, self.storage)
+    self.assertEqual(self.tree(), before)
+    prepare_manager_start(self.params, self.storage, auto_migrate=True)
+    expected = {key: raw for key, raw in original.items() if key not in vehicle_keys}
+    self.assertEqual({path.name: path.read_bytes() for path in namespace.iterdir()}, expected)
+    snapshot, = (self.storage / "snapshots").iterdir()
+    self.assertEqual(load_snapshot(snapshot), original)
+    receipt = json.loads((snapshot / "migration.json").read_bytes())
+    self.assertEqual(set(receipt["actions"]), set(stale))
+    self.assertEqual(receipt["status"], "migrated")
+    after = self.tree()
+    prepare_manager_start(self.params, self.storage, auto_migrate=True)
+    check_startup(namespace, self.storage)
+    self.assertEqual(self.tree(), after)
+
+  def test_initialized_vehicle_upgrade_does_not_admit_invalid_other_cache(self):
+    prepare_manager_start(self.params, self.storage, auto_migrate=True)
+    vehicle_keys = {key for key, contract in cache.CONTRACTS.items() if contract.root is structs.CarParams}
+    for key in vehicle_keys:
+      self.stale_cache(key)
+    self.stale_cache("LiveDelay")
+    namespace = Path(self.params.get_param_path())
+    original = {path.name: path.read_bytes() for path in namespace.iterdir()}
+    with self.assertRaises(MigrationRequired):
+      prepare_manager_start(self.params, self.storage, auto_migrate=True)
+    self.assertEqual({path.name: path.read_bytes() for path in namespace.iterdir()}, original)
+    snapshot, = (self.storage / "snapshots").iterdir()
+    self.assertEqual(load_snapshot(snapshot), original)
 
   def test_missing_input_rejected_without_creating_namespace(self):
     missing = self.root / "missing"

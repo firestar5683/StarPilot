@@ -411,7 +411,7 @@ def prepare_manager_start(params, storage, *, dry_run=False, auto_migrate=False)
     invalid_booleans = any(getattr(params.get_type(key), 'name', None) == 'BOOL' and raw not in (b'0', b'1')
                            for key, raw in values.items() if key in known)
     if (auto_migrate and not dry_run and initialized and incompatible_keys and
-        incompatible_keys <= {'CarParamsPersistent', 'CarParamsPrevRoute'} and
+        incompatible_keys <= {'CarParamsCache', 'CarParamsPersistent', 'CarParamsPrevRoute'} and
         not unknown and not invalid_preferences and not invalid_booleans and 'LocationFilterInitialState' not in values):
       values = _migrate_first_start(params, namespace, storage, values, known, CACHE_KEYS, inspect_cache,
                                     retire_keys=incompatible_keys)

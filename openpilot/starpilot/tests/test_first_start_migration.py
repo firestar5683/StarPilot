@@ -22,12 +22,14 @@ class TestFirstStartMigration(unittest.TestCase):
     self.namespace.mkdir(parents=True)
     self.storage = self.root / 'recovery'
     self.types = {'IsMetric': 'BOOL', 'ForceStops': 'BOOL', 'OpenpilotEnabledToggle': 'BOOL', 'SteerFriction': 'FLOAT',
-                  'CalibrationParams': 'BYTES', 'CarParamsPersistent': 'BYTES', 'CarParamsPrevRoute': 'BYTES',
+                  'CalibrationParams': 'BYTES', 'CarParamsCache': 'BYTES', 'CarParamsPersistent': 'BYTES', 'CarParamsPrevRoute': 'BYTES',
+                  'LiveParametersV2': 'BYTES', 'LiveDelay': 'BYTES',
                   'LiveTorqueParameters': 'BYTES', 'SecOCKey': 'BYTES', 'DongleId': 'STRING',
                   'BluetoothEnabled': 'BOOL', 'GsmMetered': 'BOOL', 'HasAcceptedTerms': 'STRING'}
     self.params = SimpleNamespace(get_param_path=lambda: str(self.namespace), all_keys=lambda: list(self.types),
                                   get_type=lambda key: SimpleNamespace(name=self.types[key]))
-    self.cache = SimpleNamespace(CACHE_KEYS={'CalibrationParams', 'CarParamsPersistent', 'CarParamsPrevRoute', 'LiveTorqueParameters'},
+    self.cache = SimpleNamespace(CACHE_KEYS={'CalibrationParams', 'CarParamsCache', 'CarParamsPersistent', 'CarParamsPrevRoute',
+                                            'LiveParametersV2', 'LiveDelay', 'LiveTorqueParameters'},
                                  inspect_cache=lambda key, raw: SimpleNamespace(status='valid' if raw.startswith(b'envelope:') else 'legacy'))
     self.converter = SimpleNamespace(migrate_legacy_cache=lambda key, raw: b'envelope:' + raw if key == 'CalibrationParams' else None)
     self.addCleanup(patch.stopall)
@@ -139,6 +141,71 @@ class TestFirstStartMigration(unittest.TestCase):
                      {'CarParamsPersistent', 'CarParamsPrevRoute'})
     self.start()
     self.assertEqual(self.values(), expected)
+
+  def test_initialized_three_stale_car_caches_preserve_valid_state_and_restart(self):
+    self.start()
+    original = {'CarParamsCache': b'incompatible schema cache', 'CarParamsPersistent': b'incompatible persistent',
+                'CarParamsPrevRoute': b'incompatible previous route', 'CalibrationParams': b'envelope:calibration',
+                'LiveParametersV2': b'envelope:vehicle learner', 'LiveDelay': b'envelope:delay',
+                'IsMetric': b'1', 'ForceStops': b'1', 'SteerFriction': b'0.123', 'DongleId': b'identity'}
+    self.write(original)
+    marker = next((self.storage / 'profiles').iterdir())
+    marker_bytes = marker.read_bytes()
+    self.start()
+    retired = {'CarParamsCache', 'CarParamsPersistent', 'CarParamsPrevRoute'}
+    expected = {key: value for key, value in original.items() if key not in retired}
+    self.assertEqual(self.values(), expected)
+    self.assertEqual(marker.read_bytes(), marker_bytes)
+    snapshot = next((self.storage / 'snapshots').iterdir())
+    self.assertEqual(migration.load_snapshot(snapshot), original)
+    self.assertEqual(set(json.loads((snapshot / 'migration.json').read_bytes())['actions']), retired)
+    before = {str(path): path.read_bytes() for path in self.storage.rglob('*') if path.is_file()}
+    self.start()
+    self.assertEqual(self.values(), expected)
+    self.assertEqual({str(path): path.read_bytes() for path in self.storage.rglob('*') if path.is_file()}, before)
+
+  def test_initialized_isolated_stale_car_params_cache_is_reconstructible(self):
+    self.start()
+    original = {'CarParamsCache': b'incompatible cache', 'CalibrationParams': b'envelope:calibration',
+                'IsMetric': b'1', 'ForceStops': b'0'}
+    self.write(original)
+    with self.assertRaises(migration.MigrationRequired):
+      self.start(dry_run=True)
+    self.assertEqual(self.values(), original)
+    self.start()
+    self.assertEqual(self.values(), {key: value for key, value in original.items() if key != 'CarParamsCache'})
+    self.assertEqual(migration.load_snapshot(next((self.storage / 'snapshots').iterdir())), original)
+
+  def test_initialized_valid_car_caches_are_retained_without_archive(self):
+    self.start()
+    original = {key: b'envelope:' + key.encode() for key in self.cache.CACHE_KEYS}
+    original.update(IsMetric=b'1', ForceStops=b'1', SteerFriction=b'0.321')
+    self.write(original)
+    self.start()
+    self.start()
+    self.assertEqual(self.values(), original)
+    self.assertFalse((self.storage / 'snapshots').exists())
+
+  def test_initialized_cache_retirement_receipt_failure_preserves_raw_snapshot_and_all_state(self):
+    self.start()
+    original = {'CarParamsCache': b'incompatible cache', 'CarParamsPersistent': b'incompatible persistent',
+                'CarParamsPrevRoute': b'incompatible route', 'CalibrationParams': b'envelope:calibration',
+                'LiveParametersV2': b'envelope:learner', 'LiveDelay': b'envelope:delay', 'ForceStops': b'1'}
+    self.write(original)
+    marker = next((self.storage / 'profiles').iterdir())
+    marker_bytes = marker.read_bytes()
+    actual_write = migration._atomic_write
+    def fail_receipt(path, raw):
+      if path.name == 'migration.json':
+        raise OSError('receipt storage failure')
+      return actual_write(path, raw)
+    with patch.object(migration, '_atomic_write', side_effect=fail_receipt):
+      with self.assertRaises(OSError):
+        self.start()
+    self.assertEqual(self.values(), original)
+    self.assertEqual(marker.read_bytes(), marker_bytes)
+    snapshot = next((self.storage / 'snapshots').iterdir())
+    self.assertEqual(migration.load_snapshot(snapshot), original)
 
   def test_initialized_critical_cache_corruption_still_rejected(self):
     self.start()
