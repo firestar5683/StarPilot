@@ -472,6 +472,8 @@ class CAR(Platforms):
   )
 
 
+MANUAL_TRANS_CARS = frozenset((CAR.HONDA_ACCORD, CAR.HONDA_CIVIC_2022))
+
 DBC = CAR.create_dbc_map()
 
 

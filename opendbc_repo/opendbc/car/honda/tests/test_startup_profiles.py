@@ -1,0 +1,102 @@
+import gc
+import time
+
+import pytest
+
+from opendbc.car import gen_empty_fingerprint, structs
+from opendbc.car.honda.interface import CarInterface
+from opendbc.car.honda.values import CAR, HondaFlags
+
+
+STARTUP_CASES = (
+  CAR.HONDA_CRV_SA,
+  CAR.HONDA_CLARITY,
+  CAR.HONDA_ACCORD_9G,
+  CAR.ACURA_MDX_3G,
+  CAR.ACURA_MDX_3G_MMR,
+  CAR.ACURA_TLX_1G,
+  CAR.HONDA_FIT_4G,
+  CAR.ACURA_INTEGRA,
+  CAR.ACURA_ADX,
+  CAR.HONDA_NBOX_2G,
+  CAR.HONDA_ACCORD,
+  CAR.HONDA_CIVIC_BOSCH,
+  CAR.HONDA_CIVIC_BOSCH_DIESEL,
+  CAR.HONDA_CRV_5G,
+  CAR.HONDA_CRV_HYBRID,
+  CAR.ACURA_RDX_3G,
+  CAR.HONDA_INSIGHT,
+  CAR.HONDA_E,
+  CAR.HONDA_E_ADVANCE,
+  CAR.HONDA_CIVIC,
+  CAR.HONDA_CITY_7G,
+  CAR.HONDA_ACCORD_11G,
+)
+
+
+@pytest.mark.parametrize("identity", STARTUP_CASES)
+def test_final_cp_publication_and_disabled_startup(identity, monkeypatch):
+  from opendbc.car import car_helpers
+  from openpilot.cereal import messaging
+  from openpilot.common.params import Params
+  from openpilot.common.prefix import OpenpilotPrefix
+  from openpilot.selfdrive.car import card as card_module
+  from openpilot.selfdrive.car.card import Car
+  from openpilot.selfdrive.controls.controlsd import Controls
+  from openpilot.starpilot.lateral.tests.test_lane_runtime import feed
+
+  monkeypatch.setenv("SIMULATION", "1")
+  monkeypatch.setenv("REPLAY", "1")
+  flags = identity.config.flags
+  classic_bosch = flags & HondaFlags.BOSCH and not flags & (HondaFlags.BOSCH_RADARLESS | HondaFlags.BOSCH_CANFD)
+  pt_bus = 1 if classic_bosch else 0
+  fingerprint = gen_empty_fingerprint()
+  from opendbc.can.dbc import DBC as CANDBC
+  from opendbc.car import Bus
+  from opendbc.car.honda.values import DBC
+  messages = CANDBC(DBC[identity][Bus.pt]).name_to_msg
+  selected_gear = messages.get("GEARBOX_AUTO") or messages.get("GEARBOX_CVT")
+  assert selected_gear is not None
+  fingerprint[pt_bus][selected_gear.address] = selected_gear.size
+  initial = CarInterface.get_params(identity, fingerprint, [], False, False, False)
+  initial.carVin = "0" * 17
+  initial.carFw = []
+  expected = initial.to_dict()
+  with OpenpilotPrefix():
+    saved = Params()
+    for key, value in (("OpenpilotEnabledToggle", True), ("AlwaysOnLateral", False), ("AlphaLongitudinalEnabled", False), ("IsReleaseBranch", False)):
+      saved.put_bool(key, value, block=True)
+    subscriber = messaging.sub_sock("carParams", timeout=100, conflate=True)
+    card = ci = controls = None
+    try:
+      observed = (identity, fingerprint, initial.carVin, [], initial.fingerprintSource, True)
+      with monkeypatch.context() as discovery:
+        discovery.setattr(car_helpers, "fingerprint", lambda *args: observed)
+        discovery.setattr(card_module, "can_comm_callbacks", lambda *args: (lambda *args: [], lambda frames: None))
+        initial_can = messaging.new_message("can", 1)
+        discovery.setattr(card_module.messaging, "recv_one_retry", lambda socket: initial_can)
+        card = Car()
+      ci = card.CI
+      assert card.CP.to_dict() == expected
+      assert ci.CP is card.CP and ci.CC is not None
+      with structs.CarParams.from_bytes(saved.get("CarParams")) as published:
+        assert published.to_dict() == expected
+      event = None
+      for _ in range(10):
+        card.car_params_published = False
+        card.state_publish(ci.update([]), None)
+        event = messaging.recv_one(subscriber)
+        if event is not None:
+          break
+        time.sleep(0.01)
+      assert event is not None and event.valid and event.carParams.to_dict() == expected
+      controls = Controls()
+      assert controls.CP.to_dict() == expected
+      feed(controls, 1_000_000_000, 0, active=False, enabled=False, can_valid=False, can_timeout=True)
+      command, lateral_log = controls.state_control()
+      assert not command.enabled and not command.latActive and not command.longActive
+      controls.publish(command, lateral_log)
+      ci.apply(command.as_reader(), 1_000_000_000)
+    finally:
+      del controls, card, ci, subscriber
+      gc.collect()
