@@ -9,6 +9,84 @@ Ecu = CarParams.Ecu
 
 
 FW_VERSIONS = {
+  CAR.HYUNDAI_AZERA_HEV_7TH_GEN: {
+    (Ecu.fwdCamera, 0x7c4, None): [
+      b'\xf1\x00GN7HMFC  AT KOR LHD 1.00 1.01 99211-N1110 240423',
+    ],
+    (Ecu.fwdRadar, 0x7d0, None): [
+      b'\xf1\x00GN7_ RDR -----      1.00 1.00 99110-N1100         ',
+    ],
+  },
+  CAR.KIA_SPORTAGE_HEV_2026: {
+    (Ecu.fwdCamera, 0x7c4, None): [
+      b'\xf1\x00NQ51.011.021.012551000HKP_NQ524_50509099211P1110',
+    ],
+    (Ecu.fwdRadar, 0x7d0, None): [
+      b'\xf1\x00NQ5__               1.00 1.04 99110CH100          ',
+    ],
+  },
+  CAR.HYUNDAI_SANTA_FE_HEV_5TH_GEN: {
+    (Ecu.fwdCamera, 0x7c4, None): [
+      b'\xf1\x00MX5HMFC  AT CAN LHD 1.00 1.07 99211-P6000 231218',
+      b'\xf1\x00MX5HMFC  AT KOR LHD 1.00 1.07 99211-P6000 231218',
+      b'\xf1\x00MX5HMFC  AT USA LHD 1.00 1.06 99211-R6000 231218',
+      b'\xf1\x00MX5HMFC  AT USA LHD 1.00 1.09 99211-R6200 250519',
+    ],
+    (Ecu.fwdRadar, 0x7d0, None): [
+      b'\xf1\x00MX5_ RDR -----      1.00 1.01 99110-P6000         ',
+      b'\xf1\x00MX5_ RDR -----      1.00 1.01 99110-R6000         ',
+    ],
+  },
+  CAR.HYUNDAI_IONIQ_9: {
+    (Ecu.fwdRadar, 0x7d0, None): [
+      b'\xf1\x00MEev RDR -----      1.00 1.00 99110-GO000         ',
+    ],
+    (Ecu.fwdCamera, 0x7c4, None): [
+      b'\xf1\x00ME  MFC  AT KOR LHD 1.00 1.00 99211-GO000 241007',
+      b'\xf1\x00ME  MFC  AT KOR LHD 1.00 1.01 99211-GO000 250103',
+    ],
+  },
+  CAR.KIA_SPORTAGE_2026: {
+    (Ecu.fwdCamera, 0x7c4, None): [
+      b'\xf1\x00NQ51.011.021.012551000HKP_NQ524_50509099211P1110',
+    ],
+    (Ecu.fwdRadar, 0x7d0, None): [
+      b'\xf1\x00NQ5__               1.00 1.04 99110P1100          ',
+    ],
+  },
+  CAR.KIA_SORENTO_HEV_4TH_GEN_LFA2: {
+    (Ecu.fwdCamera, 0x7c4, None): [
+      b'\xf1\x00MQ4HMFC  AT USA LHD 1.00 1.00 99210-P2600 250617',
+    ],
+    (Ecu.fwdRadar, 0x7d0, None): [
+      b'\xf1\x00MQ4_ RDR -----      1.00 1.01 99110-P2500         ',
+    ],
+  },
+  CAR.GENESIS_GV70_ELECTRIFIED_2ND_GEN: {
+    (Ecu.fwdCamera, 0x7c4, None): [
+      b'\xf1\x00JK  MFC  AT USA LHD 1.00 1.03 99211-DS600 241125',
+    ],
+    (Ecu.fwdRadar, 0x7d0, None): [
+      b'\xf1\x00JK__ RDR -----      1.00 1.01 99110-DS500         ',
+    ],
+  },
+  CAR.GENESIS_GV70_2026: {
+    (Ecu.fwdCamera, 0x7c4, None): [
+      b'\xf1\x00JK  MFC  AT USA LHD 1.00 1.11 99211-IY600 241125',
+    ],
+    (Ecu.fwdRadar, 0x7d0, None): [
+      b'\xf1\x00JK__ RDR -----      1.00 1.01 99110-AR600         ',
+    ],
+  },
+  CAR.GENESIS_GV80_2025: {
+    (Ecu.fwdRadar, 0x7d0, None): [
+      b'\xf1\x00JX__ RDR -----      1.00 1.03 99110-T6500         ',
+    ],
+    (Ecu.fwdCamera, 0x7c4, None): [
+      b'\xf1\x00JX  MFC  AT USA LHD 1.00 1.03 99211-T6510 240124',
+    ],
+  },
+
   CAR.HYUNDAI_PALISADE_2023: {
       (Ecu.eps, 0x7d4, None): [
         b'\xf1\x00ON  MDPS C 1.00 1.01 56300-S9500 2922',
