@@ -85,6 +85,8 @@ def draw_hud_background(rect: rl.Rectangle, accent: rl.Color, glow: float = 1.0,
     else:
       off = i * 2.5 * glow
       a = int(25 * (1.0 - i / 5) * glow)
+    if a <= 0:
+      continue
     gr = rl.Rectangle(rx - off, ry - off, rw + off * 2, rh + off * 2)
     draw_rounded_fill(gr, rl.Color(accent.r, accent.g, accent.b, max(0, min(255, a))), radius_px=radius_px)
 

@@ -114,8 +114,11 @@ class FeatureSettingsView:
           draw_rounded_stroke(button, CONTROL_BORDER)
           if not row.repair_value:
             self.fonts.draw("-", FontRole.MEDIUM, 39, 1815, y + 25, TEXT_PRIMARY)
-          text = self._elide(f"Set {row.repair_value}", FontRole.MEDIUM, 29, 125) if row.repair_value else "+"
-          self.fonts.draw(text, FontRole.MEDIUM, 29 if row.repair_value else 39, 1960, y + 25, TEXT_PRIMARY)
+          text = f"Set {row.repair_value}" if row.repair_value else "+"
+          size = 29 if row.repair_value else 39
+          if row.repair_value:
+            size *= min(1, 125 / self.fonts.measure(text, FontRole.MEDIUM, size).width)
+          self.fonts.draw(text, FontRole.MEDIUM, size, 1960, y + 25, TEXT_PRIMARY)
     finally:
       clip.end_scissor_mode()
     self.fonts.draw("Previous", FontRole.MEDIUM, 30, 1000, 993,

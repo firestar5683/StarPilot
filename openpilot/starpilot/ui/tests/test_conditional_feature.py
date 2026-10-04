@@ -22,7 +22,7 @@ from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
 from openpilot.starpilot.ui.feature_settings_state import FeatureInput, FeaturePage, FeatureRow, FeatureSettingsRequest, row_change
 from openpilot.starpilot.ui import feature_settings_compact as compact
 from openpilot.starpilot.ui import feature_settings as large
-from openpilot.starpilot.ui.presentation import BitmapFonts, Profile
+from openpilot.starpilot.ui.presentation import Profile
 
 
 def required_change(row: FeatureRow, direction: int = 1) -> FeatureSettingsRequest:
@@ -521,12 +521,15 @@ class ConditionalFeatureTests(unittest.TestCase):
 
   def test_large_pane_renders_mode_and_child_labels_in_existing_geometry(self):
     labels = []
-    fonts = BitmapFonts.__new__(BitmapFonts)
-    fonts.profile = Profile.LARGE
+    fonts = SimpleNamespace(profile=Profile.LARGE,
+                            draw=lambda value, *_args: labels.append(value),
+                            measure=lambda value, _role, size: SimpleNamespace(width=len(value) * size * .5),
+                            vertical_ink=lambda _value, _role, size: (size * .2, size * .8))
     state = self.owner.snapshot(FeaturePage.CONDITIONAL, parked=True, system_long=False,
                                 lateral_context=False, metric=False)
-    with patch.object(fonts, "draw", side_effect=lambda value, *_args, **_kwargs: labels.append(value)), \
-         patch.object(large.rl, "draw_rectangle_rounded"), patch.object(large.clip, "begin_scissor_mode"), \
+    with patch.object(large.rl, "draw_rectangle_rounded"), patch.object(large.rl, "draw_rectangle_rounded_lines_ex"), \
+         patch.object(large.rl, "draw_line"), patch.object(large.rl, "draw_line_ex"), patch.object(large.rl, "draw_circle"), \
+         patch.object(large.clip, "begin_scissor_mode"), \
          patch.object(large.clip, "end_scissor_mode"):
       large.FeatureSettingsView(fonts).render(state)
     self.assertIn("Conditional Driving Modes", labels)
