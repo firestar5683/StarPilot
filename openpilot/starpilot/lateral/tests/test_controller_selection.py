@@ -39,19 +39,20 @@ class TestControllerSelection(unittest.TestCase):
     expected = ((HYUNDAI.HYUNDAI_IONIQ_6, 'ioniq6'),
                 (HYUNDAI.GENESIS_G70_2020, 'genesis_g70_2020'),
                 (TOYOTA.TOYOTA_COROLLA_TSS2, 'corolla_tss2'),
-                (HYUNDAI.KIA_EV6, None),
-                (HYUNDAI.HYUNDAI_SONATA, None),
+                (HYUNDAI.KIA_EV6, 'kia_ev6'),
+                (HYUNDAI.HYUNDAI_SONATA, 'sonata'),
                 (TOYOTA.TOYOTA_RAV4_TSS2, None))
     for vehicle, policy in expected:
       with self.subTest(vehicle=vehicle):
         cp = cp_for(vehicle)
         self.assertEqual(policy_for(cp), policy)
         selected = selection_from_bytes(cp, None)
-        self.assertEqual(selected.mode, ControllerMode.STARPILOT if policy else ControllerMode.STANDARD)
+        mode = ControllerMode.STANDARD if vehicle in (HYUNDAI.KIA_EV6, HYUNDAI.HYUNDAI_SONATA) or policy is None else ControllerMode.STARPILOT
+        self.assertEqual(selected.mode, mode)
         lateral = LatControlTorque(cp.as_reader(), interfaces[vehicle](cp), DT_CTRL)
         self.assertEqual(lateral.controller_mode, selected.mode)
         self.assertEqual(lateral.controller_policy, policy)
-        self.assertEqual(bool(selected_policy(lateral)), bool(policy))
+        self.assertEqual(bool(selected_policy(lateral)), mode == ControllerMode.STARPILOT)
 
   def test_saved_standard_is_per_vehicle_and_invalid_cannot_enable_policy(self):
     ioniq = cp_for(HYUNDAI.HYUNDAI_IONIQ_6)
@@ -81,7 +82,8 @@ class TestControllerSelection(unittest.TestCase):
     wrong.notCar = True
     self.assertIsNone(policy_for(wrong))
     with self.assertRaises(ValueError):
-      LatControlTorque(ev6.as_reader(), interfaces[HYUNDAI.KIA_EV6](ev6), DT_CTRL,
+      unsupported = cp_for(TOYOTA.TOYOTA_RAV4_TSS2)
+      LatControlTorque(unsupported.as_reader(), interfaces[TOYOTA.TOYOTA_RAV4_TSS2](unsupported), DT_CTRL,
                        controller_mode=ControllerMode.STARPILOT)
 
   def test_standard_skips_policy_constructor_and_ioniq_factor_multiplier(self):
@@ -146,6 +148,12 @@ class TestControllerSelection(unittest.TestCase):
       self.assertEqual(legacy.lateral_controller_selection, default_selection(cp))
       self.assertIsNotNone(selected_policy(legacy.LaC))
       self.assertEqual(legacy.LaC.pid.pos_limit, cp.lateralTuning.torque.latAccelFactor)
+      self.assertIsNone(legacy.torque_host)
+      from openpilot.starpilot.lateral.torque_settings import DOCUMENT_KEY as TORQUE_DOCUMENT_KEY, replace_field, serialize_document
+      tune = cp.lateralTuning.torque
+      basis = (float(tune.latAccelFactor), float(tune.latAccelOffset), float(tune.friction))
+      override = replace_field({}, str(cp.carFingerprint), basis, 'factor', 'custom', basis[0] * 1.1)
+      params.put(TORQUE_DOCUMENT_KEY, json.loads(serialize_document(override)), block=True)
       params.put(DOCUMENT_KEY, json.loads(document(HYUNDAI_IONIQ_6='standard')), block=True)
       self.assertEqual(read_selection(params, cp).mode, ControllerMode.STANDARD)
       first = Controls()

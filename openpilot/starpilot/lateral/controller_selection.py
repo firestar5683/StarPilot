@@ -47,6 +47,22 @@ KNOWN_POLICIES.update(dict.fromkeys((
   'GMC_YUKON', 'CHEVROLET_SUBURBAN_CAMERA', 'CHEVROLET_SILVERADO_CC', 'CHEVROLET_SUBURBAN',
 ), 'gm'))
 
+KNOWN_POLICIES.update(dict.fromkeys((
+  'HYUNDAI_IONIQ_5',
+  'HYUNDAI_IONIQ_EV_LTD', 'HYUNDAI_IONIQ_EV_2020',
+  'HYUNDAI_SONATA',
+  'HYUNDAI_ELANTRA_2022_NON_SCC', 'HYUNDAI_ELANTRA_HEV_2022_NON_SCC',
+  'KIA_XCEED_PHEV',
+  'KIA_NIRO_PHEV_2022',
+  'KIA_STINGER_2022',
+  'KIA_FORTE', 'KIA_FORTE_2019_NON_SCC', 'KIA_FORTE_2021_NON_SCC',
+  'KIA_EV6',
+  'KIA_CARNIVAL_2025', 'KIA_CARNIVAL_HEV_4TH_GEN',
+  'HYUNDAI_TUCSON_4TH_GEN',
+  'HYUNDAI_KONA_NON_SCC',
+  'HYUNDAI_KONA_EV_2022',
+), 'hyundai'))
+
 class ControllerMode(StrEnum):
   STANDARD = 'standard'
   STARPILOT = 'starpilot'
@@ -63,6 +79,10 @@ def policy_for(CP) -> str | None:
   """Return only an already-implemented, exact torque policy identity."""
   if CP.notCar:
     return None
+  from openpilot.starpilot.lateral.hkg_vehicle_policy import policy_for as hkg_vehicle_policy
+  profile = hkg_vehicle_policy(CP)
+  if profile is not None:
+    return profile
   from openpilot.starpilot.lateral.corolla_tss2_policy import supported_cp as corolla_supported
   from openpilot.starpilot.lateral.genesis_g70_policy import supported_cp as g70_supported
   from openpilot.starpilot.lateral.genesis_gv70_policy import supported_cp as gv70_supported
@@ -120,7 +140,9 @@ def turn_assist_supported(CP) -> bool:
 
 def default_selection(CP) -> ControllerSelection:
   policy = policy_for(CP)
-  return ControllerSelection(ControllerMode.STARPILOT if policy else ControllerMode.STANDARD, policy, 'default')
+  from openpilot.starpilot.lateral.hkg_vehicle_policy import PROFILES
+  mode = ControllerMode.STARPILOT if policy and policy not in PROFILES else ControllerMode.STANDARD
+  return ControllerSelection(mode, policy, 'default')
 
 
 def _unique_pairs(pairs):
