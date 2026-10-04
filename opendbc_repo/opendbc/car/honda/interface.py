@@ -44,7 +44,7 @@ class CarInterface(CarInterfaceBase):
         cfgs.insert(0, get_safety_config(structs.CarParams.SafetyModel.noOutput))
       ret.safetyConfigs = cfgs
 
-      ret.radarUnavailable = True
+      ret.radarUnavailable = docs or candidate not in (CAR.HONDA_CIVIC_BOSCH, CAR.HONDA_CRV_5G)
       # Disable the radar and let openpilot control longitudinal
       # WARNING: THIS DISABLES AEB!
       # If Bosch radarless, this blocks ACC messages from the camera

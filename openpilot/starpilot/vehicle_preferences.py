@@ -20,9 +20,15 @@ class VehicleStartupPreferences:
   turn_assist: bool = False
   gm_long_pitch: bool = True
   disable_bolt_long: bool = False
+  honda_bosch_a_radar: bool = True
 
   @classmethod
   def read(cls, params, *, enabled: bool):
+    try:
+      raw_radar, radar_readable = read_saved(params, "HondaBoschARadar", 8)
+      honda_radar = radar_readable and raw_radar in (None, b"1")
+    except (OSError, TypeError, ValueError):
+      honda_radar = False
     try:
       raw, readable = read_saved(params, "DisableOpenpilotLongitudinal", 8)
       disable_bolt = not readable or raw not in (None, b"0")
@@ -33,7 +39,7 @@ class VehicleStartupPreferences:
       safe, readable = read_saved(params, "SafeMode", 8)
       toyota = bool(enabled and requested and readable and safe in (None, b"0"))
     except (OSError, TypeError, ValueError):
-      return cls(disable_bolt_long=disable_bolt)
+      return cls(disable_bolt_long=disable_bolt, honda_bosch_a_radar=honda_radar)
     try:
       pitch, pitch_readable = read_saved(params, "LongPitch", 8)
       pitch_enabled = not (enabled and pitch_readable and pitch == b"0" and readable and safe in (None, b"0"))
@@ -44,7 +50,16 @@ class VehicleStartupPreferences:
     except (OSError, TypeError, ValueError):
       assist = False
     return cls(toyota_auto_hold=toyota, turn_assist=bool(enabled and assist and readable and safe in (None, b"0")),
-               gm_long_pitch=pitch_enabled, disable_bolt_long=disable_bolt)
+               gm_long_pitch=pitch_enabled, disable_bolt_long=disable_bolt, honda_bosch_a_radar=honda_radar)
+
+  def _prepare_honda_radar(self, cp) -> None:
+    if cp.brand != "honda":
+      return
+    from opendbc.car.honda.bosch_a_radar import VERIFIED_BOSCH_A_CARS
+    from opendbc.car.honda.values import HondaFlags
+    if (cp.brand == "honda" and cp.carFingerprint in VERIFIED_BOSCH_A_CARS and cp.flags & HondaFlags.BOSCH and
+        not cp.flags & (HondaFlags.BOSCH_RADARLESS | HondaFlags.BOSCH_CANFD | HondaFlags.BOSCH_ALT_RADAR)):
+      cp.radarUnavailable = not self.honda_bosch_a_radar
 
   def _prepare_bolt(self, cp, fingerprints=None) -> None:
     if self.disable_bolt_long and bolt_disable_supported(cp):
@@ -71,6 +86,7 @@ class VehicleStartupPreferences:
             cp.dashcamOnly = True
 
   def prepare(self, cp, *, fingerprints=None):
+    self._prepare_honda_radar(cp)
     self._prepare_bolt(cp, fingerprints)
     prepare_disable_longitudinal(cp, self.disable_bolt_long)
     if cp.brand == "toyota":
@@ -78,6 +94,7 @@ class VehicleStartupPreferences:
     return cp
 
   def finalize(self, cp) -> None:
+    self._prepare_honda_radar(cp)
     self._prepare_bolt(cp)
     prepare_disable_longitudinal(cp, self.disable_bolt_long)
     if cp.brand == "toyota":
