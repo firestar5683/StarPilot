@@ -11,6 +11,22 @@ from openpilot.selfdrive.ui import soundd
 from openpilot.starpilot.audio.sound_pack import DEFAULT_PACK, SoundPackLoader, read_wav
 
 
+@pytest.mark.parametrize("device,ambient,base", [("tici", 30, 10), ("tizi", 30, 10), ("mici", 26, 20)])
+def test_device_ambient_volume_curve(device, ambient, base):
+  import importlib
+
+  try:
+    with patch.object(soundd.HARDWARE, "get_device_type", return_value=device):
+      importlib.reload(soundd)
+      daemon = soundd.Soundd.__new__(soundd.Soundd)
+      for db in (0, ambient, ambient + 15, ambient + 30, 100):
+        fraction = max(0., min(1., (db - ambient) / 30))
+        expected = base ** (0.1 + fraction * 0.9 - 1)
+        assert daemon.calculate_volume(db) == pytest.approx(expected)
+  finally:
+    importlib.reload(soundd)
+
+
 @pytest.mark.parametrize("raw", [None, b"", b"default", b"Frog", b"frogpilot", b"missing", b"\xff"])
 def test_default_repair_persists_and_flows_through_actual_stream(tmp_path, raw):
   params = Params(str(tmp_path / "params"))
