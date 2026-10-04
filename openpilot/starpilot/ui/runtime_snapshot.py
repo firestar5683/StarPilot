@@ -344,7 +344,6 @@ class RuntimeSnapshotAdapter:
     # not the lifetime of the camera, widget filters, and engagement animations.
     started = bool(ui.started)
     confirmed_offroad = self._parked(ui, pair)
-    connectivity_allowed = self._parked(ui, pair, connectivity=True)
     after = ui.started_frame if ui.started else 0
     drive_id = int(getattr(sm["deviceState"], "startedMonoTime", 0)) if started else 0
     car = current_message(sm, "carState", now_ns, after_frame=after) if started else None
@@ -589,13 +588,11 @@ class RuntimeSnapshotAdapter:
                      gpu_present=gpu_present, gpu_active=gpu_active, branch=_text(params, "GitBranch"),
                      gpu_state=getattr(getattr(ui, "chestnut_state", None), "value", "disconnected"))
 
-    settings_pages = (Destination.STAR, Destination.DEVICE, Destination.SOFTWARE, Destination.TOGGLES,
+    settings_pages = (Destination.STAR, Destination.DEVICE, Destination.NETWORK, Destination.SOFTWARE, Destination.TOGGLES,
                       Destination.DRIVING_CONTROLS, Destination.SOUNDS, Destination.APPEARANCE,
                       Destination.SYSTEM, Destination.DRIVING_MODEL, Destination.BLUETOOTH, Destination.DEVELOPER)
-    availability = tuple(DestinationAvailability(item, item in settings_pages and item != Destination.BLUETOOTH or
-                          item in (Destination.NETWORK, Destination.BLUETOOTH) and connectivity_allowed,
-                          ("Available in Offroad mode" if connectivity_allowed else "Offroad state is unavailable")
-                          if item == Destination.NETWORK else
+    availability = tuple(DestinationAvailability(item, item in settings_pages,
+                          "Manage network connections" if item == Destination.NETWORK else
                           "Manage Bluetooth devices" if item == Destination.BLUETOOTH else
                           ("Available With the Vehicle Off" if confirmed_offroad else "Offroad state is unavailable")) for item in Destination)
     settings = SettingsState(sidebar_expanded=sidebar_expanded, compact_y=compact_y,
@@ -603,7 +600,7 @@ class RuntimeSnapshotAdapter:
                              availability=availability)
     if mode != ShellMode.SETTINGS:
       selected = Destination.STAR
-    if selected not in (*settings_pages, Destination.NETWORK):
+    if selected not in settings_pages:
       selected = Destination.STAR
     # Home and the compact menu consume no leaf-panel state. Keep temporal,
     # pairing and parked evidence current without reading unused preferences.

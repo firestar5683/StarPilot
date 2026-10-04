@@ -51,7 +51,7 @@ class NetworkPanelTests(unittest.TestCase):
     self.selected = True
     self.bridge = NetworkPanelBridge(self.panel, lambda: self.parked and self.selected)
 
-  def test_forced_offroad_native_network_uses_connectivity_owner_and_revokes(self):
+  def test_large_network_stays_open_onroad_and_revokes_on_navigation(self):
     from openpilot.selfdrive.ui.layouts.main import MainState
     from openpilot.starpilot.ui.tests.test_runtime_snapshot import TestParkedClockDomains
     fixture = TestParkedClockDomains()
@@ -67,8 +67,14 @@ class NetworkPanelTests(unittest.TestCase):
     self.wifi.forget_network(NETWORK)
     self.manager.forget_connection.assert_called_once_with('fixture')
     fixture.ui.sm['deviceState'].started = True
+    fixture.ui.started = True
     self.wifi.forget_network(NETWORK)
-    self.assertEqual(self.manager.forget_connection.call_count, 1)
+    self.assertEqual(self.manager.forget_connection.call_count, 2)
+    with patch.object(self.panel, 'render'):
+      self.assertTrue(bridge.render(rl.Rectangle(550, 25, 1560, 1030)))
+    layout.star.selected = Destination.STAR
+    self.wifi.forget_network(NETWORK)
+    self.assertEqual(self.manager.forget_connection.call_count, 2)
     self.assertFalse(bridge.render(rl.Rectangle(550, 25, 1560, 1030)))
     self.manager.set_active.assert_called_with(False)
 
@@ -211,7 +217,7 @@ class NetworkPanelTests(unittest.TestCase):
     panel.hide_event()
     manager.forget_connection.assert_called_once_with("fixture")
 
-  def test_parked_snapshot_exposes_large_network_without_changing_compact_route(self):
+  def test_connectivity_panels_are_available_offroad_onroad_and_without_fresh_telemetry(self):
     ui = ui_fake()
     ui.started = False
     ui.sm.messages["deviceState"].started = False
@@ -222,11 +228,40 @@ class NetworkPanelTests(unittest.TestCase):
     ui.started = True
     ui.sm.messages["deviceState"].started = True
     state = RuntimeSnapshotAdapter(ui).build(ShellMode.SETTINGS, Destination.NETWORK, now_ns=NOW)
-    self.assertFalse(state.settings.destination(Destination.NETWORK).available)
+    self.assertTrue(state.settings.destination(Destination.NETWORK).available)
+    for service in ('deviceState', 'pandaStates'):
+      ui.sm.valid[service] = False
+    for destination in (Destination.NETWORK, Destination.BLUETOOTH):
+      with self.subTest(destination=destination):
+        state = RuntimeSnapshotAdapter(ui).build(ShellMode.SETTINGS, destination, now_ns=NOW)
+        self.assertEqual(state.selected, destination)
+        self.assertTrue(state.settings.destination(destination).available)
+
+  def test_large_bluetooth_opens_and_stays_open_without_connectivity_authority(self):
+    layout = runtime_app.StarMainLayout.__new__(runtime_app.StarMainLayout)
+    Widget.__init__(layout)
+    layout._current_mode = runtime_app.MainState.SETTINGS
+    layout._network_bridge = Mock()
+    layout._large_panels = {}
+    layout._large_destination = None
+    object.__setattr__(layout, 'star', NS(selected=Destination.BLUETOOTH, connectivity_allowed=Mock(return_value=False)))
+    object.__setattr__(layout, 'page', NS(render=Mock()))
+    with patch('openpilot.starpilot.ui.bluetooth_large.BluetoothLarge') as factory:
+      layout._network_destination(Destination.BLUETOOTH)
+    factory.assert_called_once_with(layout.star.connectivity_allowed)
+    panel = factory.return_value
+    panel.show_event.assert_called_once()
+    layout._render_main_content()
+    self.assertEqual(layout.star.selected, Destination.BLUETOOTH)
+    self.assertEqual(layout._large_destination, Destination.BLUETOOTH)
+    panel.hide_event.assert_not_called()
+    layout._network_destination(Destination.STAR)
+    panel.hide_event.assert_called_once()
 
   def test_shell_selection_cancels_press_and_renders_native_pane_in_screen_coordinates(self):
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
     session.pip_warning = Mock()
+    session.favorites = Mock()
     session.selected = Destination.STAR
     session._mode = ShellMode.SETTINGS
     session.profile = runtime_app.Profile.LARGE
@@ -255,6 +290,7 @@ class NetworkPanelTests(unittest.TestCase):
   def test_shell_render_failure_returns_to_star_without_retrying_deactivated_bridge(self):
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
     session.pip_warning = Mock()
+    session.favorites = Mock()
     session.selected = Destination.NETWORK
     session._mode = ShellMode.SETTINGS
     session.profile = runtime_app.Profile.LARGE
@@ -292,6 +328,8 @@ class NetworkPanelTests(unittest.TestCase):
     from openpilot.selfdrive.ui.layouts.settings.settings import PanelType
     layout = runtime_app.StarMainLayout.__new__(runtime_app.StarMainLayout)
     layout._network_bridge = Mock()
+    layout._large_destination = None
+    layout._large_panels = {}
     layout._current_mode = runtime_app.MainState.HOME
     object.__setattr__(layout, "star", NS(selected=Destination.STAR, cancel=Mock(), _snapshot_cache="old"))
     object.__setattr__(layout, "page", NS(hide_event=Mock(), show_event=Mock()))
@@ -311,6 +349,7 @@ class NetworkPanelTests(unittest.TestCase):
   def test_body_transition_releases_network_before_native_layout_change(self):
     layout = runtime_app.StarMainLayout.__new__(runtime_app.StarMainLayout)
     layout._network_bridge = Mock()
+    layout._large_destination = None
     layout._current_mode = runtime_app.MainState.SETTINGS
     object.__setattr__(layout, "star", NS(selected=Destination.NETWORK, cancel=Mock(), _snapshot_cache="old"))
     object.__setattr__(layout, "page", NS(hide_event=Mock(), show_event=Mock()))

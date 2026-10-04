@@ -1335,8 +1335,7 @@ class StarMainLayout(MainLayout):
       gui_app.push_widget(PairingDialog())
 
   def _network_authority(self) -> bool:
-    return bool(self._current_mode == MainState.SETTINGS and self.star.selected == Destination.NETWORK and
-                self.star.connectivity_allowed())
+    return self._current_mode == MainState.SETTINGS and self.star.selected == Destination.NETWORK
 
   def _render_large_panel(self, destination: Destination, rect) -> None:
     self._network_destination(destination)
@@ -1352,17 +1351,17 @@ class StarMainLayout(MainLayout):
   def _network_destination(self, destination: Destination) -> None:
     if destination != self._large_destination:
       self._leave_large_panel()
-      if destination == Destination.BLUETOOTH and self.star.connectivity_allowed():
+      if destination == Destination.BLUETOOTH:
         if destination not in self._large_panels:
           from openpilot.starpilot.ui.bluetooth_large import BluetoothLarge
           self._large_panels[destination] = BluetoothLarge(self.star.connectivity_allowed)
-      if destination in self._large_panels and (destination != Destination.BLUETOOTH or self.star.connectivity_allowed()):
+      if destination in self._large_panels:
         self._large_destination = destination
         self._large_panels[destination].show_event()
     if destination == Destination.NETWORK:
       if not self._network_bridge.enter():
         self.star.selected = Destination.STAR
-        self.star._unavailable("Use Offroad mode before changing network settings")
+        self.star._unavailable("network panel is unavailable")
     else:
       self._network_bridge.leave()
 
@@ -1437,17 +1436,6 @@ class StarMainLayout(MainLayout):
     return True
 
   def _render_main_content(self) -> None:
-    if self._large_destination == Destination.BLUETOOTH and not self.star.connectivity_allowed():
-      self._leave_large_panel()
-      self.star.selected = Destination.STAR
-      self.star.cancel()
-      self.star._snapshot_cache = None
-    if (self._current_mode == MainState.SETTINGS and self.star.selected == Destination.NETWORK and
-        not self._network_authority()):
-      self._network_bridge.leave()
-      self.star.selected = Destination.STAR
-      self.star.cancel()
-      self.star._snapshot_cache = None
     if self._current_mode == MainState.HOME and ui_state.is_body:
       super()._render_main_content()
       return
