@@ -5,7 +5,7 @@ import pyray as rl
 from openpilot.starpilot.ui import clip
 
 from openpilot.starpilot.ui.presentation import BitmapFonts, FontRole, Profile
-from openpilot.starpilot.ui.software_state import DownloadLabel, SoftwareRequest, SoftwareState, button_rect
+from openpilot.starpilot.ui.software_state import DownloadLabel, SoftwareRequest, SoftwareState, DIRECT_BUTTONS, button_rect
 
 
 TITLES = ("Current Version", "Automatically Install Updates", "Download", "Target Branch", "Uninstall", "Error Log")
@@ -59,7 +59,13 @@ class SoftwareView:
         elif row == 1:
           self._toggle(state.automatic_updates, SoftwareRequest.SET_AUTOMATIC_UPDATES in state.available_actions)
         elif row == 2:
-          self._value(state.download_status, row, 1840)
+          for request, (x, y, width, height) in DIRECT_BUTTONS:
+            enabled = request in state.available_actions
+            rl.draw_rectangle_rounded(rl.Rectangle(x, y, width, height), 1, 10, BUTTON_COLOR if enabled else BUTTON_DISABLED)
+            text = "FAST" if request == SoftwareRequest.FAST_UPDATE else "PREVIOUS"
+            measured = self.fonts.measure(text, FontRole.MEDIUM, 30)
+            self.fonts.draw(text, FontRole.MEDIUM, 30, x + (width - measured.width) // 2,
+                            y + (height - measured.height) // 2, BUTTON_TEXT_COLOR if enabled else VALUE_COLOR)
           request = SoftwareRequest.DOWNLOAD_UPDATE if state.download_label == DownloadLabel.DOWNLOAD else SoftwareRequest.CHECK_FOR_UPDATES
           self._button(state.download_label.value, row, request in state.available_actions)
         elif row == 3:
@@ -69,6 +75,8 @@ class SoftwareView:
           self._button("UNINSTALL", row, SoftwareRequest.OPEN_UNINSTALL_CONFIRMATION in state.available_actions)
         else:
           self._button("VIEW", row, SoftwareRequest.OPEN_ERROR_LOG in state.available_actions)
+        if row == 2 and state.download_status:
+          self.fonts.draw(state.download_status[:100], FontRole.NORMAL, 25, 570, top + 140, VALUE_COLOR)
         if row < len(TITLES) - 1:
           rl.draw_line(590, top + 170, 2070, top + 170, rl.GRAY)
     finally:

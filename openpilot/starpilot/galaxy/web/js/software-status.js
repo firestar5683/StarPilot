@@ -1,11 +1,11 @@
 import { decodeLayoutBackup, encodeLayoutBackup, MAX_LAYOUT_BACKUP_BYTES } from "./layout-backup.js"
 
-const ACTIONS = new Set(["check", "download", "select", "install", "preferences", "fast"])
+const ACTIONS = new Set(["check", "download", "select", "install", "preferences", "fast", "rollback"])
 const REQUEST_STATES = new Set(["pending", "complete", "failed"])
 const UPDATER_ACTIVE = new Set(["checking...", "downloading...", "finalizing update...", "updating..."])
 const PRIMARY_BRANCHES = ["StarPilot", "Dom"]
 const unavailableOperations = () => ({ parked: false, availableBranches: [], selectedTarget: null,
-  canCheck: false, canFastUpdate: false, canDownload: false, canSelect: false, canInstall: false,
+  canCheck: false, canFastUpdate: false, canRollback: false, canDownload: false, canSelect: false, canInstall: false,
   reason: "Update controls are unavailable", request: null })
 
 export function validSoftwareSnapshot(data) {
@@ -23,6 +23,7 @@ export function validSoftwareSnapshot(data) {
       typeof branch === "string" && branch.length > 0 && branch.length <= 128) &&
     text(operations.selectedTarget) && text(operations.reason) &&
     (operations.canFastUpdate === undefined || typeof operations.canFastUpdate === "boolean") &&
+    (operations.canRollback === undefined || typeof operations.canRollback === "boolean") &&
     (operations.automaticDownloads === undefined || flag(operations.automaticDownloads)) &&
     (operations.canConfigure === undefined || typeof operations.canConfigure === "boolean") &&
     (operations.history === undefined || validHistory(operations.history)) &&
@@ -149,7 +150,7 @@ export class SoftwareStatusFeed {
         this.uncertain = false
         this.uncertainAction = null
         this.actionPriorRequestId = null
-        if (body.action === "fast") {
+        if (["fast", "rollback"].includes(body.action)) {
           this.notice = `Updating ${body.branch}. Waiting for completion or reconnect.`
         } else if (body.action === "install") {
           this.installBaseline = this.installBaseline || { commit: payload.installed.commit, branch: payload.installed.branch, target: body.branch }
@@ -197,7 +198,7 @@ export class SoftwareStatusFeed {
         if (body !== null) {
           this.uncertain = !error?.rejected
           this.uncertainAction = this.uncertain ? body : null
-          if (error?.rejected && ["install", "fast"].includes(body.action)) this.installBaseline = null
+          if (error?.rejected && ["install", "fast", "rollback"].includes(body.action)) this.installBaseline = null
         }
         this.error = error?.message || "Software request failed. Refresh to try again."
         this.emit(this.data ? "ready" : this.attempted ? "unavailable" : "loading")
@@ -225,16 +226,17 @@ export class SoftwareStatusFeed {
 
   action(action, branch = null) {
     const operations = this.data?.operations
-    const capability = { check: "canCheck", download: "canDownload", select: "canSelect", install: "canInstall", fast: "canFastUpdate" }[action]
+    const capability = { check: "canCheck", download: "canDownload", select: "canSelect", install: "canInstall", fast: "canFastUpdate", rollback: "canRollback" }[action]
     if (!this.active || !capability || this.mutating || this.blocked || this.uncertain || !operations?.parked ||
         operations[capability] !== true || operations.request?.state === "pending") return null
     if (action === "select" && (branch === "other:" || !operations.availableBranches.includes(branch) || branch === operations.selectedTarget)) return null
     if (["download", "install"].includes(action) && (!branch || branch !== operations.selectedTarget)) return null
-    if (action === "fast" && (!branch || branch !== this.data.installed.branch)) return null
+    if (action === "fast" && (!branch || branch !== this.data.installed.branch && !operations.availableBranches.includes(branch))) return null
+    if (action === "rollback" && branch !== this.data.installed.branch) return null
     this.actionPriorRequestId = operations.request?.id ?? null
     if (action === "install") this.installBaseline = { commit: this.data.installed.commit,
       branch: this.data.installed.branch, target: branch }
-    if (action === "fast") this.installBaseline = { commit: this.data.installed.commit, branch: this.data.installed.branch, target: branch, action }
+    if (["fast", "rollback"].includes(action)) this.installBaseline = { commit: this.data.installed.commit, branch: this.data.installed.branch, target: branch, action }
     return this.run(action === "check" ? { action } : { action, branch })
   }
 }
@@ -358,7 +360,7 @@ export const SoftwarePage = {
     requestMessage(request) {
       if (!request) return ""
       if (request.state === "failed") return request.error || "Update request failed. Refresh and try again."
-      if (request.action === "fast") return request.state === "pending" ? `Updating ${request.target}…` :
+      if (["fast", "rollback"].includes(request.action)) return request.state === "pending" ? `Updating ${request.target}…` :
         request.outcome === "up_to_date" ? "Installed branch is already up to date. No restart needed." :
         "Update installed. Waiting to reconnect and verify the installed build."
       if (request.action === "install") return "Restart requested. Waiting to reconnect and verify the installed build."
@@ -371,10 +373,16 @@ export const SoftwarePage = {
         message: `Set ${this.draftBranch} as the target branch? This only stages the choice. Check for updates and download separately.`, label: "Set target branch" }
     },
     askFastUpdate() {
-      const branch = this.data?.installed?.branch
+      const branch = this.operations?.selectedTarget || this.data?.installed?.branch
       if (this.actionDisabled || this.operations?.canFastUpdate !== true || !branch) return
       this.dialog = { action: "fast", branch, title: "Fast Update",
         message: `Download latest version of ${branch} and restart?`, label: "Fast Update" }
+    },
+    askRollback() {
+      const branch = this.data?.installed?.branch
+      if (this.actionDisabled || this.operations?.canRollback !== true || !branch) return
+      this.dialog = { action: "rollback", branch, title: "Previous version",
+        message: "Restore the previous installed version and restart? Automatic downloads will be turned off.", label: "Restore previous version" }
     },
     askInstall() {
       if (this.actionDisabled || !this.operations?.canInstall || !this.operations.selectedTarget) return
@@ -434,7 +442,7 @@ export const SoftwarePage = {
             <p v-else-if="data.updater.state">{{ data.updater.state }}</p>
             <p v-if="data.updater.targetChangeFound === true">An update was found for the target branch.</p>
             <p v-else-if="data.updater.targetChangeFound === false">No target change reported by the last check.</p>
-            <div class="gx-software-actions"><button type="button" class="gx-btn" :disabled="actionDisabled || operations.canFastUpdate !== true || !data.installed.branch" @click="askFastUpdate">Fast Update</button>
+            <div class="gx-software-actions"><button type="button" class="gx-btn" :disabled="actionDisabled || operations.canFastUpdate !== true || !data.installed.branch" @click="askFastUpdate">Fast Update</button><button type="button" class="gx-btn" :disabled="actionDisabled || operations.canRollback !== true" @click="askRollback">Previous version</button>
               <button type="button" class="gx-btn" :disabled="actionDisabled || !operations.canDownload || !operations.selectedTarget" @click="feed.action('download', operations.selectedTarget)">Download update</button>
               <button type="button" class="gx-btn" :disabled="actionDisabled || !operations.canInstall || !operations.selectedTarget" @click="askInstall">Restart &amp; install</button></div>
             <dl><dt>Last checked</dt><dd>{{ reported(data.updater.lastSuccessAt) }}</dd><dt>Last download</dt><dd>{{ reported(data.updater.lastFetchAt) }}</dd></dl></section>
@@ -443,6 +451,7 @@ export const SoftwarePage = {
             <label class="gx-toggle-row"><input type="checkbox" :checked="operations.automaticDownloads === true"
               :disabled="busy || uncertain || !!error || !operations.canConfigure"
               @change="feed.configureAutomaticDownloads($event.target.checked)"> Download updates automatically</label>
+            <p v-if="data.updater.fast" class="gx-note">{{ data.updater.fast.stage }}: {{ data.updater.fast.detail }}</p>
             <p class="gx-note">Keep the selected branch ready to install. Turn this off to download updates yourself; checking for updates and manual downloads still work.</p>
             <p v-if="operations.automaticDownloads === null" class="gx-note">The saved download preference could not be read. Turn off the vehicle, then choose a setting to repair it.</p>
           </section>

@@ -56,6 +56,17 @@ class UpdaterControlTests(unittest.TestCase):
           connection.close()
 
   @unittest.skipUnless(sys.platform.startswith('linux') and hasattr(socket, 'SO_PEERCRED'), 'Linux peer credentials required')
+  def test_rollback_wire_and_wait_helper_preserve_approved_identity(self):
+    from openpilot.system.updated import updated
+    command = update_control._command('rollback', branch='Dom', commit='a' * 40)
+    self.assertEqual(update_control._parse(command + b'\n'), ('rollback', 'Dom', 'a' * 40))
+    with mock.patch.object(updated.signal, 'signal'), mock.patch.object(updated, 'UpdaterControlServer'), mock.patch.object(updated.atexit, 'register'):
+      helper = updated.WaitTimeHelper()
+    helper._control_request('rollback', branch='Dom', commit='a' * 40)
+    request, _, target = helper.current_request()
+    self.assertEqual(request, updated.UserRequest.ROLLBACK)
+    self.assertEqual(target, ('Dom', 'a' * 40))
+
   def test_same_process_control_and_stale_identity(self):
     actions = []
     accepted = threading.Event()

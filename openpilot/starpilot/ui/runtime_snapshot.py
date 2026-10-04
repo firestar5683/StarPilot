@@ -368,7 +368,8 @@ class RuntimeSnapshotAdapter:
     curve = curve_observation(curve_envelope, now_ns) if curve_envelope is not None else None
     conditional_envelope = display_message(sm, 'starpilotSelfdriveState', now_ns, after_frame=after) if started else None
 
-    navigation = _message_at_age(sm, "starpilotNavigation", now_ns, after, 3_000_000_000) if started else None
+    from openpilot.starpilot.navigation.wire import navigation_state
+    navigation = navigation_state(_message_at_age(sm, "starpilotNavigation", now_ns, after, 3_000_000_000)) if started else None
 
     long_active = bool(control.longActive) if control is not None else False
     system_long = bool(long_active and controls is not None and str(controls.longControlState) != "off" and
@@ -627,6 +628,7 @@ class RuntimeSnapshotAdapter:
     if confirmed_offroad:
       software_actions.add(SoftwareRequest.OPEN_UNINSTALL_CONFIRMATION)
       if updater_state == "idle":
+        software_actions.update((SoftwareRequest.FAST_UPDATE, SoftwareRequest.ROLLBACK))
         software_actions.add(SoftwareRequest.DOWNLOAD_UPDATE if available else SoftwareRequest.CHECK_FOR_UPDATES)
       if not _flag(params, "IsTestedBranch") and _text(params, "UpdaterAvailableBranches"):
         software_actions.add(SoftwareRequest.OPEN_BRANCH_CHOOSER)

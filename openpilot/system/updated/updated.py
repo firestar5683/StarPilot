@@ -21,7 +21,7 @@ from openpilot.common.hardware import AGNOS, HARDWARE
 from openpilot.common.version import get_build_metadata
 from openpilot.common.vendor_manifest import validate_revision
 from openpilot.starpilot.software.update_control import UpdaterControlError, UpdaterControlServer
-from openpilot.starpilot.software.preferences import download_permitted
+from openpilot.starpilot.software.preferences import AUTOMATIC_DOWNLOADS, download_permitted
 
 LOCK_FILE = os.getenv("UPDATER_LOCK_FILE", "/tmp/safe_staging_overlay.lock")
 STAGING_ROOT = os.getenv("UPDATER_STAGING_ROOT", "/data/safe_staging")
@@ -46,6 +46,7 @@ class UserRequest:
   CHECK = 1
   FETCH = 2
   FAST = 3
+  ROLLBACK = 4
 
 class WaitTimeHelper:
   def __init__(self):
@@ -53,7 +54,7 @@ class WaitTimeHelper:
     self.user_request = UserRequest.NONE
     self.request_lock = threading.RLock()
     self.request_generation = 0
-    self.fast_target = None
+    self.fast_target: tuple[str, str] | None = None
     signal.signal(signal.SIGHUP, self.update_now)
     signal.signal(signal.SIGUSR1, self.check_now)
     self.control = UpdaterControlServer(self._control_request)
@@ -67,12 +68,17 @@ class WaitTimeHelper:
   def _request(self, request: int, *, branch=None, commit=None) -> None:
     with self.request_lock:
       self.user_request = request
-      self.fast_target = (branch, commit) if request == UserRequest.FAST else None
+      if request in (UserRequest.FAST, UserRequest.ROLLBACK):
+        if not isinstance(branch, str) or not isinstance(commit, str):
+          raise ValueError("Update source identity is required")
+        self.fast_target = (branch, commit)
+      else:
+        self.fast_target = None
       self.request_generation += 1
       self.ready_event.set()
 
   def _control_request(self, action: str, *, branch=None, commit=None) -> None:
-    request = {'check': UserRequest.CHECK, 'download': UserRequest.FETCH, 'fast': UserRequest.FAST}.get(action)
+    request = {'check': UserRequest.CHECK, 'download': UserRequest.FETCH, 'fast': UserRequest.FAST, 'rollback': UserRequest.ROLLBACK}.get(action)
     if request is not None:
       self._request(request, branch=branch, commit=commit)
 
@@ -421,7 +427,7 @@ class Updater:
     else:
       cloudlog.info(f"up to date on {cur_branch} ({str(cur_commit)[:7]})")
 
-  def fast_update(self, branch: str, commit: str) -> str:
+  def fast_update(self, branch: str, commit: str, *, rollback=False) -> str:
     from openpilot.starpilot.drive_state.evidence import PhysicalSource
     from openpilot.starpilot.software.fast_update import fast_update
 
@@ -444,9 +450,12 @@ class Updater:
       self.params.put_bool("UpdateAvailable", False, block=True)
       self._branches_checked = False
 
+    def progress(stage, detail):
+      self.params.put("UpdaterFastState", {"version": 1, "stage": stage, "detail": detail[:512], "branch": branch}, block=True)
+
     try:
       return fast_update(Path(BASEDIR), branch, expected_commit=commit, params=self.params, parked=parked,
-                         current_os=HARDWARE.get_os_version(), invalidate=invalidate)
+                         current_os=HARDWARE.get_os_version(), invalidate=invalidate, rollback=rollback, progress=progress)
     finally:
       source.close()
 
@@ -500,6 +509,15 @@ class Updater:
     return True
 
 
+def recover_fast_state(params):
+  previous = params.get("UpdaterFastState")
+  if isinstance(previous, dict) and previous.get("stage") not in ("complete", "error"):
+    params.put("UpdaterFastState", {
+      "version": 1, "stage": "error",
+      "detail": "Update process restarted before completion; check the installed version and retry.",
+    }, block=True)
+
+
 def main() -> None:
   params = Params()
 
@@ -528,6 +546,7 @@ def main() -> None:
     # invalidate old finalized update
     set_consistent_flag(False)
 
+    recover_fast_state(params)
     # set initial state
     params.put("UpdaterState", "idle", block=True)
 
@@ -538,12 +557,16 @@ def main() -> None:
 
       # Attempt an update
       exception = None
-      fast_requested = requested == UserRequest.FAST
+      fast_requested = requested in (UserRequest.FAST, UserRequest.ROLLBACK)
       try:
         if fast_requested:
           update_failed_count += 1
           params.put("UpdaterState", "updating...", block=True)
-          updater.fast_update(*fast_target)
+          if fast_target is None:
+            raise ValueError("Update source identity is required")
+          updater.fast_update(*fast_target, rollback=requested == UserRequest.ROLLBACK)
+          if requested == UserRequest.ROLLBACK:
+            params.put_bool(AUTOMATIC_DOWNLOADS, False, block=True)
           write_time_to_param(params, "UpdaterLastFetchTime")
           write_time_to_param(params, "LastUpdateTime")
         else:
@@ -593,6 +616,8 @@ def main() -> None:
       try:
         update_successful = (update_failed_count == 0)
         if fast_requested:
+          if exception is not None:
+            params.put("UpdaterFastState", {"version": 1, "stage": "error", "detail": exception[:512]}, block=True)
           params.put("UpdateFailedCount", update_failed_count, block=True)
           if exception is None:
             params.remove("LastUpdateException")
