@@ -1464,101 +1464,101 @@ static safety_config hyundai_canfd_init_validated(uint16_t param) {
   }
 
   if (ioniq6_stock_aol_requested && (param != 0x0811U) && (param != 0x0891U)) {
-    static RxCheck torque_hda2_ev_std[] = {
-      HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(1, 0x35)
-      HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
-    };
-    static RxCheck torque_hda2_ev_alt[] = {
-      HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(1, 0x35)
-      HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
-    };
-    static RxCheck torque_hda2_ice_std[] = {
-      HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(1, 0x100)
-      HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
-    };
-    static RxCheck torque_hda2_ice_alt[] = {
-      HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(1, 0x100)
-      HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
-    };
-    static RxCheck torque_hda2_hybrid_std[] = {
-      HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(1, 0x105)
-      HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
-    };
-    static RxCheck torque_hda2_hybrid_alt[] = {
-      HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(1, 0x105)
-      HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
-    };
-    static RxCheck torque_radar_ev_std[] = {
-      HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x35)
-      HYUNDAI_CANFD_SCC_ADDR_CHECK(0)
-    };
-    static RxCheck torque_radar_ev_alt[] = {
-      HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x35)
-      HYUNDAI_CANFD_SCC_ADDR_CHECK(0)
-    };
-    static RxCheck torque_radar_ice_std[] = {
-      HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x100)
-      HYUNDAI_CANFD_SCC_ADDR_CHECK(0)
-    };
-    static RxCheck torque_radar_ice_alt[] = {
-      HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x100)
-      HYUNDAI_CANFD_SCC_ADDR_CHECK(0)
-    };
-    static RxCheck torque_radar_hybrid_std[] = {
-      HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x105)
-      HYUNDAI_CANFD_SCC_ADDR_CHECK(0)
-    };
-    static RxCheck torque_radar_hybrid_alt[] = {
-      HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x105)
-      HYUNDAI_CANFD_SCC_ADDR_CHECK(0)
-    };
-    static RxCheck torque_camera_ev_std[] = {
-      HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x35)
-      HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
-    };
-    static RxCheck torque_camera_ev_alt[] = {
-      HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x35)
-      HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
-    };
-    static RxCheck torque_camera_ice_std[] = {
-      HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x100)
-      HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
-    };
-    static RxCheck torque_camera_ice_alt[] = {
-      HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x100)
-      HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
-    };
-    static RxCheck torque_camera_hybrid_std[] = {
-      HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x105)
-      HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
-    };
-    static RxCheck torque_camera_hybrid_alt[] = {
-      HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x105)
-      HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
-    };
     RxCheck *selected = NULL;
     if (hyundai_canfd_lka_steer_msg) {
       if (hyundai_ev_gas_signal) {
+        static RxCheck torque_hda2_ev_alt[] = {
+          HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(1, 0x35)
+          HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
+        };
+        static RxCheck torque_hda2_ev_std[] = {
+          HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(1, 0x35)
+          HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
+        };
         selected = hyundai_canfd_alt_buttons ? torque_hda2_ev_alt : torque_hda2_ev_std;
       } else if (hyundai_hybrid_gas_signal) {
+        static RxCheck torque_hda2_hybrid_alt[] = {
+          HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(1, 0x105)
+          HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
+        };
+        static RxCheck torque_hda2_hybrid_std[] = {
+          HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(1, 0x105)
+          HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
+        };
         selected = hyundai_canfd_alt_buttons ? torque_hda2_hybrid_alt : torque_hda2_hybrid_std;
       } else {
+        static RxCheck torque_hda2_ice_alt[] = {
+          HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(1, 0x100)
+          HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
+        };
+        static RxCheck torque_hda2_ice_std[] = {
+          HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(1, 0x100)
+          HYUNDAI_CANFD_SCC_ADDR_CHECK(1)
+        };
         selected = hyundai_canfd_alt_buttons ? torque_hda2_ice_alt : torque_hda2_ice_std;
       }
     } else if (hyundai_camera_scc) {
       if (hyundai_ev_gas_signal) {
+        static RxCheck torque_camera_ev_alt[] = {
+          HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x35)
+          HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
+        };
+        static RxCheck torque_camera_ev_std[] = {
+          HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x35)
+          HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
+        };
         selected = hyundai_canfd_alt_buttons ? torque_camera_ev_alt : torque_camera_ev_std;
       } else if (hyundai_hybrid_gas_signal) {
+        static RxCheck torque_camera_hybrid_alt[] = {
+          HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x105)
+          HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
+        };
+        static RxCheck torque_camera_hybrid_std[] = {
+          HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x105)
+          HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
+        };
         selected = hyundai_canfd_alt_buttons ? torque_camera_hybrid_alt : torque_camera_hybrid_std;
       } else {
+        static RxCheck torque_camera_ice_alt[] = {
+          HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x100)
+          HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
+        };
+        static RxCheck torque_camera_ice_std[] = {
+          HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x100)
+          HYUNDAI_CANFD_SCC_ADDR_CHECK(2)
+        };
         selected = hyundai_canfd_alt_buttons ? torque_camera_ice_alt : torque_camera_ice_std;
       }
     } else {
       if (hyundai_ev_gas_signal) {
+        static RxCheck torque_radar_ev_alt[] = {
+          HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x35)
+          HYUNDAI_CANFD_SCC_ADDR_CHECK(0)
+        };
+        static RxCheck torque_radar_ev_std[] = {
+          HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x35)
+          HYUNDAI_CANFD_SCC_ADDR_CHECK(0)
+        };
         selected = hyundai_canfd_alt_buttons ? torque_radar_ev_alt : torque_radar_ev_std;
       } else if (hyundai_hybrid_gas_signal) {
+        static RxCheck torque_radar_hybrid_alt[] = {
+          HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x105)
+          HYUNDAI_CANFD_SCC_ADDR_CHECK(0)
+        };
+        static RxCheck torque_radar_hybrid_std[] = {
+          HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x105)
+          HYUNDAI_CANFD_SCC_ADDR_CHECK(0)
+        };
         selected = hyundai_canfd_alt_buttons ? torque_radar_hybrid_alt : torque_radar_hybrid_std;
       } else {
+        static RxCheck torque_radar_ice_alt[] = {
+          HYUNDAI_CANFD_BANKED_ANGLE_ALT_RX_CHECKS(0, 0x100)
+          HYUNDAI_CANFD_SCC_ADDR_CHECK(0)
+        };
+        static RxCheck torque_radar_ice_std[] = {
+          HYUNDAI_CANFD_BANKED_ANGLE_STD_RX_CHECKS(0, 0x100)
+          HYUNDAI_CANFD_SCC_ADDR_CHECK(0)
+        };
         selected = hyundai_canfd_alt_buttons ? torque_radar_ice_alt : torque_radar_ice_std;
       }
     }

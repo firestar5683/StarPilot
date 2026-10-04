@@ -584,10 +584,6 @@ static safety_config hyundai_init(uint16_t param) {
 
   hyundai_common_init(param);
   classic_non_scc_aol_configure(param, false);
-  if (classic_long_aol_param(param) && !classic_long_aol_enabled) {
-    const safety_config denied = {0};
-    return denied;
-  }
   hyundai_blended_alpha = false;
 #ifdef ALLOW_DEBUG
   hyundai_blended_alpha = (param == 0x2004U) || (param == 0x2014U);
@@ -822,6 +818,10 @@ static safety_config hyundai_init(uint16_t param) {
     }
   }
   hyundai_classic_scc_aol_rx_config(&ret, false);
+  if (classic_long_aol_param(param) && !classic_long_aol_enabled) {
+    const safety_config denied = {0};
+    ret = denied;
+  }
   return ret;
 }
 
