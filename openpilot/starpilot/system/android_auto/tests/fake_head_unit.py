@@ -104,10 +104,10 @@ class FakeHeadUnit:
   def _send(self, channel: int, kind: int, body: bytes = b"", encrypted: bool = True, control: bool = False) -> None:
     data = struct.pack(">H", kind) + body
     flags = 3 | (8 if encrypted else 0) | (4 if control else 0)
-    if encrypted:
-      self.tls.write(data)
-      data = self.outgoing.read()
     with self._send_lock:
+      if encrypted:
+        self.tls.write(data)
+        data = self.outgoing.read()
       self.sock.sendall(struct.pack(">BBH", channel, flags, len(data)) + data)
 
   def _read_exact(self, size: int) -> bytes:

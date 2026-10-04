@@ -309,6 +309,59 @@ def pump_until(session, predicate, timeout=5.0):
     session.pump(0.05)
 
 
+def test_head_unit_tls_encode_drain_and_frame_share_send_lock():
+  hu = FakeHeadUnit.__new__(FakeHeadUnit)
+  hu._send_lock = threading.Lock()
+  pending = bytearray()
+  packets = []
+
+  def write(data):
+    assert hu._send_lock.locked()
+    assert not pending
+    pending.extend(data)
+    return len(data)
+
+  def read():
+    assert hu._send_lock.locked()
+    data = bytes(pending)
+    pending.clear()
+    return data
+
+  def sendall(data):
+    assert hu._send_lock.locked()
+    packets.append(data)
+
+  hu.tls = Mock(write=Mock(side_effect=write))
+  hu.outgoing = Mock(read=Mock(side_effect=read))
+  hu.sock = Mock(sendall=Mock(side_effect=sendall))
+  start = threading.Barrier(3)
+  failures = []
+
+  def send(kind, body):
+    try:
+      start.wait(timeout=5)
+      hu._send(3, kind, body)
+    except BaseException as error:
+      failures.append(error)
+
+  messages = ((0x8004, field(1, 1) + field(2, 1)), (0x8008, field(1, 2) + field(2, 1)))
+  threads = [threading.Thread(target=send, args=message) for message in messages]
+  for thread in threads:
+    thread.start()
+  start.wait(timeout=5)
+  for thread in threads:
+    thread.join(timeout=5)
+    assert not thread.is_alive()
+  assert not failures
+  decoded = []
+  for packet in packets:
+    channel, flags, size = struct.unpack(">BBH", packet[:4])
+    assert channel == 3 and flags == 11 and size == len(packet) - 4 and size > 2
+    decoded.append((struct.unpack(">H", packet[4:6])[0], packet[6:]))
+  assert sorted(decoded) == sorted(messages)
+  assert not pending
+
+
 def test_session_end_to_end_with_focus_epochs(identity):
   hu = FakeHeadUnit(identity)
   session = connect(hu, identity)
