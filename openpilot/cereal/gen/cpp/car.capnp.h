@@ -290,6 +290,7 @@ enum class SafetyModel_95551e5b1edaf451: uint16_t {
   VOLVO,
   BMW,
   MG,
+  TESLA_PREAP,
 };
 CAPNP_DECLARE_ENUM(SafetyModel, 95551e5b1edaf451);
 CAPNP_DECLARE_SCHEMA(d661512be2def77f);
@@ -1183,6 +1184,10 @@ public:
 
   inline bool getCarNotReady() const;
 
+  inline bool getTeslaStockCruiseNotArmed() const;
+
+  inline bool getTeslaStockCruiseEngaged() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -1381,6 +1386,12 @@ public:
 
   inline bool getCarNotReady();
   inline void setCarNotReady(bool value);
+
+  inline bool getTeslaStockCruiseNotArmed();
+  inline void setTeslaStockCruiseNotArmed(bool value);
+
+  inline bool getTeslaStockCruiseEngaged();
+  inline void setTeslaStockCruiseEngaged(bool value);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -6166,6 +6177,34 @@ inline bool CarState::Builder::getCarNotReady() {
 inline void CarState::Builder::setCarNotReady(bool value) {
   _builder.setDataField<bool>(
       ::capnp::bounded<372>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool CarState::Reader::getTeslaStockCruiseNotArmed() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<373>() * ::capnp::ELEMENTS);
+}
+
+inline bool CarState::Builder::getTeslaStockCruiseNotArmed() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<373>() * ::capnp::ELEMENTS);
+}
+inline void CarState::Builder::setTeslaStockCruiseNotArmed(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<373>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool CarState::Reader::getTeslaStockCruiseEngaged() const {
+  return _reader.getDataField<bool>(
+      ::capnp::bounded<374>() * ::capnp::ELEMENTS);
+}
+
+inline bool CarState::Builder::getTeslaStockCruiseEngaged() {
+  return _builder.getDataField<bool>(
+      ::capnp::bounded<374>() * ::capnp::ELEMENTS);
+}
+inline void CarState::Builder::setTeslaStockCruiseEngaged(bool value) {
+  _builder.setDataField<bool>(
+      ::capnp::bounded<374>() * ::capnp::ELEMENTS, value);
 }
 
 inline float CarState::WheelSpeeds::Reader::getFl() const {

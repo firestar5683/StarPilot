@@ -39,6 +39,10 @@ from opendbc.car.honda.stock_aol import (
 from opendbc.car.mazda.stock_aol import (qualified as qualified_mazda_aol,
                                         native_observation as mazda_native_observation,
                                         temporary_restriction as mazda_temporary_restriction)
+from opendbc.car.tesla.preap.aol import (
+  qualified as qualified_tesla_preap, native_observation as preap_native_observation,
+  temporary_restriction as preap_temporary_restriction,
+)
 from opendbc.car.ford.aol import (
   qualified as qualified_ford_aol, native_observation as ford_native_observation,
   temporary_restriction as ford_temporary_restriction,
@@ -316,8 +320,8 @@ class Car:
     aol_policy = aol_policy_for(self.CP)
     self.aol_settings = read_settings(self.params) if self.aol_replay else None
     self.aol_qualified = bool(self.aol_settings is not None and
-                              independent_axis_requested(self.aol_settings,
-                                include_auxiliary=aol_policy.intent_supported and not aol_policy.explicit_latch) and
+                              (aol_policy.physical_stalk_owner or independent_axis_requested(self.aol_settings,
+                                include_auxiliary=aol_policy.intent_supported and not aol_policy.explicit_latch)) and
                               aol_policy.intent_supported and not self.CP.passive)
     self.aol_card_intent = (create_aol_intent(self.CP, self.aol_settings, aol_policy)
                             if self.aol_qualified and self.aol_settings is not None else None)
@@ -445,7 +449,8 @@ class Car:
       ford_aol = qualified_ford_aol(self.CP, marked_only=True)
       honda_aol = qualified_honda_stock_aol(self.CP, marked_only=True)
       mazda_aol = qualified_mazda_aol(self.CP, marked_only=True)
-      permission_owner = angle_aol or ford_aol or honda_aol or mazda_aol
+      preap_aol = qualified_tesla_preap(self.CP, marked_only=True)
+      permission_owner = angle_aol or ford_aol or honda_aol or mazda_aol or preap_aol
       angle_panda_ready = not permission_owner or self.startup_panda_configured()
       native = (
         current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.slc_producer_session if permission_owner else None)
@@ -454,18 +459,29 @@ class Car:
       )
       native_reset = False
       if permission_owner:
-        observe = (mazda_native_observation if mazda_aol else honda_native_observation if honda_aol else
+        observe = (preap_native_observation if preap_aol else mazda_native_observation if mazda_aol else honda_native_observation if honda_aol else
                    ford_native_observation if ford_aol else native_observation)
-        restrict = (mazda_temporary_restriction if mazda_aol else honda_temporary_restriction if honda_aol else
+        restrict = (preap_temporary_restriction if preap_aol else mazda_temporary_restriction if mazda_aol else honda_temporary_restriction if honda_aol else
                     ford_temporary_restriction if ford_aol else temporary_restriction)
+        preap_observation = {}
+        if preap_aol:
+          cancel_stamp = int(self.CI.CS.preap.cancel_echo_stamp_ns)
+          if cancel_stamp > getattr(self, '_preap_cancel_echo_stamp_ns', 0):
+            self._preap_cancel_echo_stamp_ns = cancel_stamp
+            self._preap_cancel_echo_pending_ns = now_ns
+          preap_observation['pending_cancel_ns'] = getattr(self, '_preap_cancel_echo_pending_ns', 0)
         pending_since, lost, native_reset = observe(
           native,
           latched=self.aol_card_intent.allowed_latch,
           panda_ready=angle_panda_ready,
-          restricted=restrict(self.CP, CS) or (mazda_aol and self.aol_card_intent.pause_lateral),
+          restricted=restrict(self.CP, CS) or ((mazda_aol or preap_aol) and self.aol_card_intent.pause_lateral),
           now_ns=now_ns,
           pending_since_ns=getattr(self, '_angle_aol_pending_since_ns', 0),
+          **preap_observation,
         )
+        if (preap_aol and native is not None and preap_observation['pending_cancel_ns'] and
+            native.observedMonoTime >= preap_observation['pending_cancel_ns']):
+          self._preap_cancel_echo_pending_ns = 0
         self._angle_aol_pending_since_ns = pending_since
         if lost:
           fault_active = True
@@ -474,6 +490,12 @@ class Car:
       self.aol_card_intent.update(CS, fault_active=fault_active, now_ns=now_ns, native_rejection_ns=rejection_ns,
                                   standard_enabled=(host_enabled if getattr(self.aol_card_intent, 'observe_stock_engagement', False)
                                                     else host_control_enabled))
+    if self.aol_card_intent is not None and preap_aol:
+      self.CI.CS.preap_lateral_authorized = bool(
+        native is not None and native.lateralAllowed and self.aol_card_intent.allowed_latch and
+        not self.aol_card_intent.pause_lateral and CS.canValid and not CS.canTimeout and
+        CS.gearShifter == structs.CarState.GearShifter.drive and not CS.doorOpen and
+        not CS.seatbeltUnlatched and not CS.steerFaultPermanent and not CS.steeringDisengage)
     if self.aol_card_intent is not None:
       self.aol_card_intent.update_auxiliary(CS, media=media_observation,
         media_eligible=ioniq6_media_eligible(self.CP), fault_active=fault_active)

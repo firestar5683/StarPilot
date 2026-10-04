@@ -64,6 +64,16 @@ class CAR(Platforms):
     CarSpecs(mass=2495., wheelbase=2.960, steerRatio=12.0),
   )
 
+  TESLA_MODEL_S_PREAP = TeslaPlatformConfig(
+    [CarDocs("Tesla Model S (Pre-AP) 2012-14", "All", support_type=SupportType.COMMUNITY, support_link="#community")],
+    CarSpecs(mass=2100., wheelbase=2.960, steerRatio=15.0),
+    {
+      Bus.party: 'tesla_can',
+      Bus.pt: 'tesla_can',
+      Bus.chassis: 'tesla_can',
+    },
+  )
+
   TESLA_MODEL_S_HW1 = TeslaPlatformConfig(
     [CarDocs("Tesla Model S (with HW1) 2014-16", "All", support_type=SupportType.COMMUNITY, support_link="#community")],
     CarSpecs(mass=2100., wheelbase=2.960, steerRatio=15.0),

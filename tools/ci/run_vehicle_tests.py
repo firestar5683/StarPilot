@@ -22,6 +22,11 @@ from tools import test_runner
 from tools.ci import vehicle_pytest
 
 RELEASE_TARGETS = (
+  "opendbc_repo/opendbc/safety/tests/test_tesla_preap_stock.py",
+  "opendbc_repo/opendbc/car/tesla/tests/test_preap_startup.py",
+  "opendbc_repo/opendbc/car/tesla/tests/test_preap_stock.py",
+  "openpilot/starpilot/car/tesla/tests/test_preap_intent.py",
+  "openpilot/starpilot/car/tesla/tests/test_stock_events.py",
   "opendbc_repo/opendbc/car/ford/tests/test_aol_startup.py",
   "openpilot/starpilot/tests/test_ford_aol_intent.py",
   "opendbc_repo/opendbc/safety/tests/test_ford_aol.py",

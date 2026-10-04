@@ -72,8 +72,8 @@ def enabled(params, cp, feature: str, environment: Mapping[str, str]) -> bool:
     policy = aol_policy_for(cp)
     return bool(policy.runtime_supported and
                 (environment.get(flags[feature]) == '1' or
-                 (policy.normal_runtime_supported and requested(params, feature,
-                    include_auxiliary=policy.intent_supported and not policy.explicit_latch))))
+                 (policy.normal_runtime_supported and (policy.physical_stalk_owner or requested(params, feature,
+                    include_auxiliary=policy.intent_supported and not policy.explicit_latch)))))
   if feature == 'vision' and environment.get('SLC_REPLAY_RUNTIME') == '1' and environment.get(flags[feature]) == '1':
     return True
   if feature != 'vision' and environment.get(flags[feature]) == '1':
