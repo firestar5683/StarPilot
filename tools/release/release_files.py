@@ -10,7 +10,7 @@ ROOT = os.path.abspath(os.path.join(HERE, "../.."))
 blacklist = [
   ".git/",
   ".venv/",
-  ".github/workflows/",
+  r"^\.github/workflows/",
 
   "matlab.*.md",
 
