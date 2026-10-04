@@ -601,7 +601,7 @@ class CarState(CarStateBase):
         msgs.extend((("SCC11", 50), ("SCC12", 50)))
       elif CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG:
         msgs.append(("SCC12", math.nan))
-      if CP.enableBsm:
+      if CP.deprecated.enableBsm:
         msgs.append(("LCA11", 20))
       cam_msgs = [("CAM_0x2a4", 20)] if CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG else [
         ("LKAS11", 100), ("ALERTS_364", math.nan)]
@@ -612,7 +612,7 @@ class CarState(CarStateBase):
     cam_msgs = []
     if CP.flags & HyundaiFlags.NON_SCC:
       available_msg, _, enabled_msg, _, speed_msg, _ = get_non_scc_cruise_signals(CP.flags, CP.carFingerprint)
-      msgs.extend((name, math.nan) for name in {available_msg, enabled_msg, speed_msg})
+      msgs.extend((name, 0) for name in {available_msg, enabled_msg, speed_msg})
       if not CP.flags & HyundaiFlags.NON_SCC_NO_FCA:
         (msgs if CP.flags & HyundaiFlags.NON_SCC_RADAR_FCA else cam_msgs).append(("FCA11", math.nan))
     parsers = {

@@ -187,7 +187,7 @@ class TestPalisade2023(unittest.TestCase):
           stock = CarInterface.get_params(CAR.HYUNDAI_PALISADE_2023, fingerprint, [], False, False, False)
           expected_fca = observation_bus in (int(hdaii), 2)
           self.assertEqual(bool(stock.flags & HyundaiFlags.USE_FCA), expected_fca)
-          self.assertEqual(stock.enableBsm, observation_bus == int(hdaii))
+          self.assertEqual(stock.deprecated.enableBsm, observation_bus == int(hdaii))
 
   def test_mixed_standstill_metadata_retains_original_bus_zero(self):
     for hdaii in (False, True):
