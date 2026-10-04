@@ -638,7 +638,6 @@ class StarShellSession:
 
   def _drive_change(self, mode, revision, *, confirmation=False):
     if mode == "offroad" and not confirmation and (ui_state.started or self.drive_state.snapshot()["effective"] == "onroad"):
-      from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
       from openpilot.system.ui.widgets import DialogResult
       destination = self.selected
       epoch = getattr(self, "_power_request_epoch", 0)
@@ -648,8 +647,15 @@ class StarShellSession:
             self.selected == destination and epoch == getattr(self, "_power_request_epoch", 0) and
             pipeline == (bool(ui_state.started), ui_state.started_frame)):
           self._drive_change(mode, revision, confirmation=True)
-      gui_app.push_widget(ConfirmDialog("Switch to Offroad and stop driving services? Park and disengage first. "
-                                       "Stay parked until you return to Auto.", "Force Offroad", callback=confirmed))
+      if self.profile == Profile.COMPACT:
+        from openpilot.selfdrive.ui.mici.widgets.dialog import BigConfirmationDialog
+        gui_app.push_widget(BigConfirmationDialog("park, disengage\nslide offroad",
+          gui_app.texture("icons_mici/settings/device/reboot.png", 64, 64),
+          lambda: confirmed(DialogResult.CONFIRM), red=True))
+      else:
+        from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
+        gui_app.push_widget(ConfirmDialog("Switch to Offroad and stop driving services? Park and disengage first. "
+                                         "Stay parked until you return to Auto.", "Force Offroad", callback=confirmed))
       return
     try:
       self.drive_state.change(mode, revision, lambda: self._mode == ShellMode.SETTINGS)

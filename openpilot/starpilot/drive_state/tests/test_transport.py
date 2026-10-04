@@ -226,6 +226,8 @@ def test_native_offroad_confirmation_preserves_revision_without_requiring_health
   f = fixture
   native = object.__new__(StarShellSession)
   native.drive_state = f.control
+  from openpilot.starpilot.ui.presentation import Profile
+  native.profile = Profile.LARGE
   native._mode = ShellMode.SETTINGS
   native.selected = Destination.SYSTEM
   native._snapshot_cache = None
