@@ -5,6 +5,7 @@ from opendbc.car import Bus, CarSpecs, DbcDict, PlatformConfig, Platforms, struc
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.docs_definitions import CarFootnote, CarHarness, CarDocs, CarParts, Column
 from opendbc.car.fw_query_definitions import FwQueryConfig, Request, StdQueries, p16
+from opendbc.car.honda.firmware_validation import validate_fw_match
 
 Ecu = structs.CarParams.Ecu
 VisualAlert = structs.CarControl.HUDControl.VisualAlert
@@ -484,6 +485,7 @@ class CAR(Platforms):
 
 
 MODIFIED_EPS_FW = {
+  CAR.HONDA_CLARITY: (b'39990-TRW,A020\x00\x00',),
   CAR.HONDA_CIVIC: (b'39990-TBA,A030\x00\x00',),
   CAR.HONDA_ACCORD: (b'39990-TVA,A150\x00\x00',),
   CAR.HONDA_CIVIC_BOSCH: (b'39990-TGG,A020\x00\x00', b'39990-TGG,A120\x00\x00'),
@@ -521,6 +523,7 @@ HONDA_ALT_VERSION_RESPONSE = bytes([uds.SERVICE_TYPE.READ_DATA_BY_IDENTIFIER + 0
 
 
 FW_QUERY_CONFIG = FwQueryConfig(
+  validate_fw_match=validate_fw_match,
   fw_version_regex=br"[A-Z0-9]{5}-[A-Z0-9]{3}(-|,)[A-Z0-9]{4}(\x00){2}$",
   requests=[
     # Currently used to fingerprint

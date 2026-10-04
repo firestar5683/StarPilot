@@ -171,6 +171,10 @@ def match_fw_to_car(fw_versions: list[CarParams.CarFw], vin: str, allow_exact: b
       if not exact_match and not len(matches) and config.match_fw_to_car_fuzzy is not None:
         matches |= config.match_fw_to_car_fuzzy(fw_versions_dict, vin, VERSIONS[brand])
 
+      if config.validate_fw_match is not None:
+        matches = {candidate for candidate in matches if MODEL_TO_BRAND[candidate] != brand or
+                   config.validate_fw_match(candidate, fw_versions_dict, VERSIONS[brand])}
+
     if exact_match and allow_fuzzy and len(matches) > 1 and is_valid_vin(vin):
       # A shared ECU firmware version may identify a family but not a chassis.
       # Refine only within one brand's exact candidates; a VIN can narrow an

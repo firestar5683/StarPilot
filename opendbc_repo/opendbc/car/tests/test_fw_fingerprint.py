@@ -46,9 +46,31 @@ class TestFwFingerprint(unittest.TestCase):
              patch('opendbc.car.fw_versions.FW_QUERY_CONFIGS') as configs, \
              patch('opendbc.car.fw_versions.build_fw_dict', return_value={}):
           custom = unittest.mock.Mock(return_value=refined)
-          configs.__getitem__.return_value = SimpleNamespace(match_fw_to_car_fuzzy=custom)
+          configs.__getitem__.return_value = SimpleNamespace(match_fw_to_car_fuzzy=custom, validate_fw_match=None)
           self.assertEqual(match_fw_to_car([], 'WVW000E1000000000', allow_fuzzy=allow_fuzzy, log=False), expected)
           self.assertEqual(custom.called, called)
+
+  def test_candidate_validator_is_brand_scoped_and_cannot_create_matches(self):
+    for allow_exact in (True, False):
+      with self.subTest(allow_exact=allow_exact):
+        first = unittest.mock.Mock(return_value=False)
+        second = unittest.mock.Mock(return_value=True)
+        configs = {
+          'first': SimpleNamespace(match_fw_to_car_fuzzy=None, validate_fw_match=first),
+          'second': SimpleNamespace(match_fw_to_car_fuzzy=None, validate_fw_match=second),
+        }
+
+        def match(_fw, match_brand, log):
+          return {'A'} if match_brand == 'first' else {'B'}
+        with patch('opendbc.car.fw_versions.match_fw_to_car_exact', side_effect=match), \
+             patch('opendbc.car.fw_versions.match_fw_to_car_fuzzy', side_effect=match), \
+             patch('opendbc.car.fw_versions.VERSIONS', {'first': {}, 'second': {}}), \
+             patch('opendbc.car.fw_versions.MODEL_TO_BRAND', {'A': 'first', 'B': 'second'}), \
+             patch('opendbc.car.fw_versions.FW_QUERY_CONFIGS', configs), \
+             patch('opendbc.car.fw_versions.build_fw_dict', return_value={}):
+          self.assertEqual(match_fw_to_car([], '', allow_exact=allow_exact, log=False), (allow_exact, {'B'}))
+        first.assert_called_once_with('A', {}, {})
+        second.assert_called_once_with('B', {}, {})
 
   @parameterized("brand, car_model, ecus, test_non_essential",
                  [(b, c, e[c], n) for b, e in VERSIONS.items() for c in e for n in (True, False)])
