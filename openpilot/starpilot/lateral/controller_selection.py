@@ -16,6 +16,7 @@ DOCUMENT_VERSION = 1
 LEARNING_OFF_KEY = 'ForceAutoTuneOff'
 MAX_DOCUMENT_BYTES = 4096
 KNOWN_POLICIES = {'HYUNDAI_IONIQ_6': 'hyundai', 'GENESIS_G70_2020': 'hyundai', 'GENESIS_GV70_ELECTRIFIED_1ST_GEN': 'hyundai', 'TOYOTA_COROLLA_TSS2': 'toyota'}
+KNOWN_POLICIES.update({'HYUNDAI_SONATA_HYBRID': 'hyundai'})
 KNOWN_POLICIES.update(dict.fromkeys(('HYUNDAI_PALISADE', 'HYUNDAI_PALISADE_2023'), 'hyundai'))
 KNOWN_POLICIES.update(dict.fromkeys((
   'CHEVROLET_BOLT_CC_2017', 'CHEVROLET_BOLT_CC_2018_2021', 'CHEVROLET_BOLT_CC_2022_2023',
@@ -96,6 +97,9 @@ def policy_for(CP) -> str | None:
   if corolla_supported(CP):
     return 'corolla_tss2'
   from openpilot.starpilot.lateral.palisade_policy import supported_cp as palisade_supported
+  from openpilot.starpilot.lateral.sonata_hybrid_policy import supported_cp as sonata_hybrid_supported
+  if sonata_hybrid_supported(CP):
+    return 'sonata_hybrid'
   if palisade_supported(CP):
     return 'palisade'
   if gv70_supported(CP):

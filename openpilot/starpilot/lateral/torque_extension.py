@@ -55,6 +55,10 @@ def create_extension(parent, cp, mode, selected, *, turn_assist=False):
   if selected == 'ordinary_ascm':
     from openpilot.starpilot.lateral.ascm_policy import AscmTorquePolicy
     return TorqueExtension(AscmTorquePolicy(parent, cp))
+  if selected == 'sonata_hybrid':
+    from openpilot.starpilot.lateral.sonata_hybrid_policy import SonataHybridTorquePolicy
+    policy = SonataHybridTorquePolicy(parent, cp)
+    return TorqueExtension(policy, parameter_factor=policy.FACTOR_MULT)
   if selected == 'palisade':
     from openpilot.starpilot.lateral.palisade_policy import PalisadeTorquePolicy
     policy = PalisadeTorquePolicy(parent, cp)
