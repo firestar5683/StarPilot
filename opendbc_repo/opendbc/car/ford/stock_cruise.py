@@ -27,8 +27,10 @@ class FordStockCruiseButton:
 
 
 def qualified(CP) -> bool:
+  if CP.alternativeExperience == 32 and len(CP.safetyConfigs) != 1:
+    return False
   """Existing stock profiles with the paired physical-driver button contract."""
-  if (CP.brand != "ford" or CP.carFingerprint not in tuple(CAR) or CP.openpilotLongitudinalControl or CP.alternativeExperience != 0 or
+  if (CP.brand != "ford" or CP.carFingerprint not in tuple(CAR) or CP.openpilotLongitudinalControl or CP.alternativeExperience not in (0, 32) or
       CP.passive or CP.dashcamOnly or CP.notCar or len(CP.safetyConfigs) not in (1, 2) or
       CP.flags & ~int(FordFlags.CANFD | FordFlags.HAS_BSM | FordFlags.ALT_STEER_ANGLE | FordFlags.NEW_PORT | FordFlags.LKA_STEERING)):
     return False

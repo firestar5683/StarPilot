@@ -33,9 +33,11 @@ class ExplorerLateralController(FordLateralController):
 
 
 def qualified(CP) -> bool:
+  if CP.alternativeExperience == 32 and len(CP.safetyConfigs) != 1:
+    return False
   if (CP.brand != "ford" or CP.carFingerprint != CAR.FORD_EXPLORER_MK6 or
       CP.flags & ~int(FordFlags.HAS_BSM) or CP.passive or CP.dashcamOnly or CP.notCar or
-      CP.alternativeExperience != 0 or len(CP.safetyConfigs) not in (1, 2)):
+      CP.alternativeExperience not in (0, 32) or len(CP.safetyConfigs) not in (1, 2)):
     return False
   if len(CP.safetyConfigs) == 2 and (CP.safetyConfigs[0].safetyModel != structs.CarParams.SafetyModel.noOutput or
                                   CP.safetyConfigs[0].safetyParam != 0):

@@ -14,9 +14,11 @@ SOURCE_ACCEL_CAP = 3.0 - 9.81 * .06
 
 
 def qualified(cp):
+  if cp.alternativeExperience == 32 and len(cp.safetyConfigs) != 1:
+    return False
   if (cp.brand != "ford" or cp.carFingerprint not in GENERIC_CANFD_CARS or
       not cp.flags & FordFlags.CANFD or cp.flags & ~int(FordFlags.CANFD | FordFlags.HAS_BSM) or
-      cp.passive or cp.dashcamOnly or cp.notCar or cp.alternativeExperience != 0 or
+      cp.passive or cp.dashcamOnly or cp.notCar or cp.alternativeExperience not in (0, 32) or
       len(cp.safetyConfigs) not in (1, 2)):
     return False
   if len(cp.safetyConfigs) == 2 and (cp.safetyConfigs[0].safetyModel != structs.CarParams.SafetyModel.noOutput or

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "opendbc/safety/declarations.h"
+#include "opendbc/safety/modes/ford_aol.h"
 
 // StarPilot's extended Ford curvature enforcement below is substantially adapted from
 // BluePilot bp-7.0 panda work, principally Alan Polk's 8f8d6d15f0a590f42b78de964ffb0d0af7f5d63d
@@ -149,6 +150,7 @@ static bool ford_lka_curvature_checks(int desired_curvature, bool active) {
 }
 
 static void ford_rx_hook(const CANPacket_t *msg) {
+  ford_aol_rx(msg);
   // Update in motion state from standstill signal
   if (msg_matches(msg, FORD_DesiredTorqBrk, FORD_MAIN_BUS)) {
     // Signal: VehStop_D_Stat
@@ -296,7 +298,7 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
       const int curvature = (msg->data[1] << 4) | (msg->data[2] >> 4);
       const uint32_t now = microsecond_timer_get();
       const bool source_current = ford_lka_available && ford_lka_speed_seen && ford_lka_speed2_seen && ford_lka_yaw_seen &&
-                                  cruise_engaged_prev &&
+                                  (cruise_engaged_prev || (ford_aol_enabled && (ford_aol_permission_mask() != 0U))) &&
                                   safety_get_ts_elapsed(now, ford_lka_last_us) <= 100000U &&
                                   safety_get_ts_elapsed(now, ford_lka_speed_last_us) <= 100000U &&
                                   safety_get_ts_elapsed(now, ford_lka_speed2_last_us) <= 100000U &&
@@ -307,7 +309,7 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
                                  (SAFETY_ABS(angle - ford_lka_angle_last) <= 350) &&
                                  ((msg->data[4] & 0x60U) == 0U) && ((msg->data[0] & 0x1FU) == 3U);
       if (active) {
-        if (!controls_allowed || !source_current || !direction_valid || !payload_valid) {
+        if (!lateral_controls_allowed() || !source_current || !direction_valid || !payload_valid) {
           tx = false;
         } else if (ford_lka_curvature_checks(curvature - 2048, true)) {
           tx = false;
@@ -428,7 +430,7 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
         const float curvature = SAFETY_ABS(desired_curvature) / 50000.0F;
         const float path_angle = SAFETY_ABS(desired_path_angle) / 2000.0F;
         const float combined_accel = (curvature + (path_angle / SAFETY_MAX(speed, 1.0F))) * speed * speed;
-        violation |= !steer_control_enabled || !controls_allowed;
+        violation |= !steer_control_enabled || !lateral_controls_allowed();
         violation |= (speed < 3.0F) || (speed >= 8.8F);
         violation |= (SAFETY_ABS(desired_curvature) < 975) || (SAFETY_ABS(desired_path_angle) > 320);
         violation |= ((desired_curvature * desired_path_angle) <= 0) || (combined_accel > 2.5F);
@@ -470,6 +472,7 @@ static bool ford_tx_hook(const CANPacket_t *msg) {
     }
   }
 
+  ford_aol_tx(msg, tx);
   return tx;
 }
 
@@ -536,21 +539,21 @@ static safety_config ford_init(uint16_t param) {
   const uint16_t FORD_PARAM_EXPLORER_EXTENDED = 32U;
   const uint16_t FORD_PARAM_GENERIC_CANFD_EXTENDED = 64U;
   const bool generic_canfd_namespace = GET_FLAG(param, FORD_PARAM_GENERIC_CANFD_EXTENDED);
-  ford_generic_canfd_extended = (param == 66U) && ((unsigned int)alternative_experience == 0U);
+  ford_generic_canfd_extended = (param == 66U) && (((unsigned int)alternative_experience == 0U) || (((unsigned int)alternative_experience == 32U) && ford_aol_param_valid(param)));
 #ifdef ALLOW_DEBUG
-  ford_generic_canfd_extended |= (param == 67U) && ((unsigned int)alternative_experience == 0U);
+  ford_generic_canfd_extended |= (param == 67U) && (((unsigned int)alternative_experience == 0U) || (((unsigned int)alternative_experience == 32U) && ford_aol_param_valid(param)));
 #endif
   ford_generic_canfd_announced = false;
   const bool explorer_namespace = GET_FLAG(param, FORD_PARAM_EXPLORER_EXTENDED);
   ford_explorer_extended = ((param == 32U) || (param == 33U)) &&
-                           ((unsigned int)alternative_experience == 0U);
+                           (((unsigned int)alternative_experience == 0U) || (((unsigned int)alternative_experience == 32U) && ford_aol_param_valid(param)));
   ford_explorer_announced = false;
   const bool mach_e_namespace = GET_FLAG(param, FORD_PARAM_MACH_E_EXTENDED);
-  ford_mach_e_extended = (param == 18U) && ((unsigned int)alternative_experience == 0U);
+  ford_mach_e_extended = (param == 18U) && (((unsigned int)alternative_experience == 0U) || (((unsigned int)alternative_experience == 32U) && ford_aol_param_valid(param)));
 #ifdef ALLOW_DEBUG
-  ford_mach_e_extended |= (param == 19U) && ((unsigned int)alternative_experience == 0U);
+  ford_mach_e_extended |= (param == 19U) && (((unsigned int)alternative_experience == 0U) || (((unsigned int)alternative_experience == 32U) && ford_aol_param_valid(param)));
 #endif
-  ford_stock_switch = ((unsigned int)alternative_experience == 0U) &&
+  ford_stock_switch = (((unsigned int)alternative_experience == 0U) || (((unsigned int)alternative_experience == 32U) && ford_aol_param_valid(param))) &&
                       ((param == 2U) || (param == 8U) || (param == 10U) || (param == 12U) ||
                        ((param == 18U) && ford_mach_e_extended) ||
                        ((param == 32U) && ford_explorer_extended) ||
@@ -607,10 +610,66 @@ static safety_config ford_init(uint16_t param) {
     ret.tx_msgs = NULL;
     ret.tx_msgs_len = 0;
   }
+  ford_aol_configure(param);
+  if (ford_aol_enabled) {
+    static RxCheck ford_aol_default_rx[] = {
+      FORD_COMMON_RX_CHECKS
+      {.msg = {{0x83, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+      {.msg = {{0x82, 0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+      {.msg = {{0x176, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+    };
+    static RxCheck ford_aol_edge_rx[] = {
+      FORD_COMMON_RX_CHECKS
+      {.msg = {{0x83, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+      {.msg = {{0x82, 0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+      {.msg = {{0x230, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+    };
+    static RxCheck ford_aol_mondeo_rx[] = {
+      FORD_COMMON_RX_CHECKS
+      {.msg = {{FORD_Lane_Assist_Data3, 0, 8, 30U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+      {.msg = {{0x83, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+      {.msg = {{0x82, 0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+      {.msg = {{0x5A, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+    };
+    static RxCheck ford_aol_transit_rx[] = {
+      FORD_COMMON_RX_CHECKS
+      {.msg = {{0x83, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+      {.msg = {{0x82, 0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+      {.msg = {{0x176, 0, 8, 10U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+      {.msg = {{FORD_Lane_Assist_Data3, 0, 8, 30U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+    };
+    const uint16_t base = param & 0xFFFEU;
+    if (base == 8U) {
+      SET_RX_CHECKS(ford_aol_edge_rx, ret);
+    } else if (base == 10U) {
+      SET_RX_CHECKS(ford_aol_mondeo_rx, ret);
+    } else if ((base == 12U) || (base == 18U) || (base == 66U)) {
+      SET_RX_CHECKS(ford_aol_transit_rx, ret);
+    } else {
+      SET_RX_CHECKS(ford_aol_default_rx, ret);
+    }
+    static CanMsg ford_aol_tx_msgs[16];
+    const bool bounded = (ret.tx_msgs_len > 0) && (ret.tx_msgs_len <= 16);
+    if (bounded) {
+      for (int i = 0; i < ret.tx_msgs_len; i++) {
+        ford_aol_tx_msgs[i] = ret.tx_msgs[i];
+        const unsigned int addr = ford_aol_tx_msgs[i].addr;
+        if ((addr == ford_aol_replacement()) || (addr == 0x3D8U) || (addr == 0x18AU)) {
+          ford_aol_tx_msgs[i].disable_static_blocking = true;
+        }
+      }
+      ret.tx_msgs = ford_aol_tx_msgs;
+    } else {
+      ret.tx_msgs = NULL;
+      ret.tx_msgs_len = 0;
+      ford_aol_reset();
+    }
+  }
   return ret;
 }
 
 const safety_hooks ford_hooks = {
+  .fwd = ford_aol_fwd,
   .init = ford_init,
   .rx = ford_rx_hook,
   .tx = ford_tx_hook,

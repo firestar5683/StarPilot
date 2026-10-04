@@ -6,7 +6,6 @@ from opendbc.car.ford.fordcan import CanBus, create_acc_msg, create_lat_ctl_msg,
 from opendbc.car.ford.values import FordSafetyFlags
 from opendbc.car.structs import CarParams
 from opendbc.safety.tests.libsafety import libsafety_py
-from opendbc.safety.tests.test_ford import checksum
 
 
 class TestFordThreeSafety(unittest.TestCase):
@@ -46,8 +45,6 @@ class TestFordThreeSafety(unittest.TestCase):
         if name == omit:
           continue
         msg = self.packer.make_can_msg(name, 0, values)
-        if name in ("BrakeSysFeatures", "Yaw_Data_FD1"):
-          msg = checksum(msg)
         self.assertTrue(self.safety.safety_rx_hook(self.packet(msg)), name)
     self.assertTrue(self.safety.safety_rx_hook(self.source(True)))
 
@@ -135,3 +132,28 @@ class TestFordThreeSafety(unittest.TestCase):
     self.healthy_inputs()
     self.safety.safety_rx_hook(active)
     self.assertFalse(self.safety.safety_tx_hook(active))
+
+  def test_transit_independent_native_permission_keeps_ae0_stock_requirement(self):
+    try:
+      for experience in (0, 32):
+        with self.subTest(experience=experience):
+          self.safety.set_alternative_experience(experience)
+          self.init_mode(FordSafetyFlags.NEW_PORT | FordSafetyFlags.LKA_STEERING)
+          self.healthy_inputs(cruise=False)
+          for name, values in (
+            ("EPAS_INFO", {"EPAS_Failure": 0}),
+            ("Steering_Data_FD1", {"TjaButtnOnOffPress": 0}),
+            ("PowertrainData_10", {"TrnRng_D_Rq": 3}),
+          ):
+            self.assertTrue(self.safety.safety_rx_hook(self.packet(self.packer.make_can_msg(name, 0, values))))
+          self.safety.set_aol_test_heartbeat(True)
+          self.assertTrue(self.safety.safety_rx_hook(self.packet(self.packer.make_can_msg(
+            "EngBrakeData", 0, {"BpedDrvAppl_D_Actl": 1, "CcStat_D_Actl": 3}))))
+          self.safety.aol_set_host_request(1)
+          self.assertFalse(self.safety.get_controls_allowed())
+          self.assertEqual(self.safety.aol_get_permission_mask(), 1 if experience == 32 else 0)
+          active = self.packet(create_lka_msg(self.packer, self.bus, True, 1., 2, .0001, transit=True))
+          self.assertEqual(bool(self.safety.safety_tx_hook(active)), experience == 32)
+    finally:
+      self.safety.set_alternative_experience(0)
+      self.safety.set_safety_hooks(CarParams.SafetyModel.noOutput, 0)

@@ -99,9 +99,11 @@ class MachELateralController(FordLateralController):
 
 
 def qualified(CP) -> bool:
+  if CP.alternativeExperience == 32 and len(CP.safetyConfigs) != 1:
+    return False
   if (CP.brand != "ford" or CP.carFingerprint != CAR.FORD_MUSTANG_MACH_E_MK1 or
       not CP.flags & FordFlags.CANFD or CP.flags & ~int(FordFlags.CANFD | FordFlags.HAS_BSM) or
-      CP.passive or CP.dashcamOnly or CP.notCar or CP.alternativeExperience != 0 or
+      CP.passive or CP.dashcamOnly or CP.notCar or CP.alternativeExperience not in (0, 32) or
       len(CP.safetyConfigs) not in (1, 2)):
     return False
   if len(CP.safetyConfigs) == 2 and (CP.safetyConfigs[0].safetyModel != structs.CarParams.SafetyModel.noOutput or

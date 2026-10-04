@@ -4,6 +4,7 @@ from opendbc.can import CANPacker
 from opendbc.car import ACCELERATION_DUE_TO_GRAVITY, Bus, DT_CTRL, apply_hysteresis, structs
 from opendbc.car.ford import fordcan
 from opendbc.car.ford.manual_turn import ManualTurnLatch
+from opendbc.car.ford.aol import qualified as qualified_aol
 from opendbc.car.ford.stock_cruise import FordStockCruiseButton, qualified as stock_switch_qualified
 from opendbc.car.ford.curvature_preview import blend_curvature
 from opendbc.car.ford import mache_can
@@ -206,7 +207,7 @@ class CarController(CarControllerBase):
       if self.CP.flags & FordFlags.LKA_STEERING:
         source_age_ns = now_nanos - CS.lkas_available_ts_nanos
         lka_active = (CC.latActive and CS.lkas_available and 0 <= source_age_ns <= 100_000_000 and
-                      CS.out.cruiseState.enabled and
+                      (CS.out.cruiseState.enabled or qualified_aol(self.CP, marked_only=True)) and
                       not CS.out.steerFaultTemporary and
                       not CS.out.vehicleSensorsInvalid)
         if lka_active:
