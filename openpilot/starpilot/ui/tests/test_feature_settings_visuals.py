@@ -159,6 +159,21 @@ class FeatureVisualTests(unittest.TestCase):
           scroll = feature_scroll(scroll, -1, count)
         self.assertEqual(scroll, 0)
 
+  def test_header_uses_tile_border_strength_and_keeps_outline_inside_clip(self):
+    self.drawing()
+    for expanded in (True, False):
+      def background(rect, accent):
+        self.assertIs(accent, geometry.ACCENT)
+        x, y, width, height = rl.begin_scissor_mode.call_args.args
+        self.assertLessEqual(x, rect.x - 10)
+        self.assertLessEqual(y, rect.y - 10)
+        self.assertGreaterEqual(x + width, rect.x + rect.width + 10)
+        self.assertGreaterEqual(y + height, rect.y + rect.height + 10)
+
+      with patch.object(geometry, "draw_hud_background", side_effect=background) as header:
+        view.FeatureSettingsView(fake_fonts()).render(FeatureSettingsState(sidebar_expanded=expanded))
+      header.assert_called_once()
+
   def test_numeric_value_is_read_only_and_buttons_keep_source_binding(self):
     row = FeatureRow("number", "Number", "75", b"75", step=5, available=True)
     state = FeatureSettingsState(rows=(row,))

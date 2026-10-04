@@ -122,7 +122,7 @@ def elide_text(fonts, text: str, role: FontRole, size: float, width: float) -> s
 def draw_settings_header(fonts, sidebar_expanded: bool, title: str, parent: str = "", *, back: bool = False) -> None:
   left = 520 if sidebar_expanded else 20
   rect = rl.Rectangle(left, 12, 2140 - left, FEATURE_HEADER_HEIGHT)
-  draw_hud_background(rect, ACCENT, 0.5, radius_px=24)
+  draw_hud_background(rect, ACCENT)
   role, size = FontRole.MEDIUM, 35
   x = left + 34
   segments = []

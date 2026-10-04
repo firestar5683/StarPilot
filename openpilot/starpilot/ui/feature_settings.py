@@ -35,7 +35,7 @@ class FeatureSettingsView:
     draw_rounded_fill(shell, PANEL_BG, radius_px=32)
     draw_rounded_stroke(shell, PANEL_BORDER, radius_px=32)
     draw_rounded_stroke(rl.Rectangle(shell.x + 2, 12, shell.width - 4, 1056), PANEL_INNER_BORDER, radius_px=29)
-    clip.begin_scissor_mode(left, 12, 2140 - left, FEATURE_HEADER_HEIGHT)
+    clip.begin_scissor_mode(left - 10, 2, 2160 - left, FEATURE_HEADER_HEIGHT + 20)
     try:
       draw_settings_header(self.fonts, state.sidebar_expanded, state.title, state.parent_title, back=True)
     finally:
