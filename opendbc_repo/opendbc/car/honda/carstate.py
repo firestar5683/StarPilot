@@ -161,7 +161,11 @@ class CarState(CarStateBase):
       gear_position = self.shifter_values.get(cp.vl[self.gearbox_msg]["GEAR_SHIFTER"], None)
       ret.gearShifter = self.parse_gear_shifter(gear_position)
 
-    ret.gasPressed = cp.vl["POWERTRAIN_DATA"]["PEDAL_GAS"] > 1e-5
+    if self.CP.flags & HondaFlags.GAS_INTERCEPTOR:
+      sensor = cp.vl["GAS_SENSOR"]
+      ret.gasPressed = sensor["STATE"] != 0 or (sensor["INTERCEPTOR_GAS"] + sensor["INTERCEPTOR_GAS2"]) / 2.0 > 492
+    else:
+      ret.gasPressed = cp.vl["POWERTRAIN_DATA"]["PEDAL_GAS"] > 1e-5
 
     ret.steeringTorque = cp.vl["STEER_STATUS"]["STEER_TORQUE_SENSOR"]
     ret.steeringPressed = abs(ret.steeringTorque) > STEER_THRESHOLD.get(self.CP.carFingerprint, 1200)
@@ -186,17 +190,18 @@ class CarState(CarStateBase):
     if self.CP.flags & HondaFlags.BOSCH_ALT_BRAKE:
       ret.brakePressed = cp.vl["BRAKE_MODULE"]["BRAKE_PRESSED"] != 0
     else:
+      powertrain_data = cp.vl["POWERTRAIN_DATA"]
       # brake switch has shown some single time step noise, so only considered when
       # switch is on for at least 2 consecutive CAN samples
       # brake switch rises earlier than brake pressed but is never 1 when in park
       brake_switch_vals = cp.vl_all["POWERTRAIN_DATA"]["BRAKE_SWITCH"]
       if len(brake_switch_vals):
-        brake_switch = cp.vl["POWERTRAIN_DATA"]["BRAKE_SWITCH"] != 0
+        brake_switch = powertrain_data["BRAKE_SWITCH"] != 0
         if len(brake_switch_vals) > 1:
           self.brake_switch_prev = brake_switch_vals[-2] != 0
         self.brake_switch_active = brake_switch and self.brake_switch_prev
         self.brake_switch_prev = brake_switch
-      ret.brakePressed = (cp.vl["POWERTRAIN_DATA"]["BRAKE_PRESSED"] != 0) or self.brake_switch_active
+      ret.brakePressed = (powertrain_data["BRAKE_PRESSED"] != 0) or self.brake_switch_active
 
     ret.cruiseState.enabled = cp.vl["POWERTRAIN_DATA"]["ACC_STATUS"] != 0
     ret.cruiseState.available = bool(cp.vl[self.car_state_scm_msg]["MAIN_ON"])
@@ -243,10 +248,16 @@ class CarState(CarStateBase):
     dbc_name = DBC[CP.carFingerprint][Bus.pt]
     has_tsr = "CAMERA_MESSAGES" in CANDBC(dbc_name).name_to_msg
     on_pt = CP.flags & HondaFlags.BOSCH and not CP.flags & (HondaFlags.BOSCH_RADARLESS | HondaFlags.BOSCH_CANFD)
+    pt_messages = [("CAMERA_MESSAGES", math.nan)] if has_tsr and on_pt else []
+    if CP.flags & HondaFlags.GAS_INTERCEPTOR:
+      pt_messages.append(("GAS_SENSOR", 50))
     parsers = {
-      Bus.pt: CANParser(dbc_name, [("CAMERA_MESSAGES", math.nan)] if has_tsr and on_pt else [], CanBus(CP).pt),
+      Bus.pt: CANParser(dbc_name, pt_messages, CanBus(CP).pt),
       Bus.cam: CANParser(dbc_name, [("CAMERA_MESSAGES", math.nan)] if has_tsr and not on_pt else [], CanBus(CP).camera),
     }
+    if CP.flags & HondaFlags.GAS_INTERCEPTOR:
+      parsers[Bus.pt].message_states[0x201].ignore_checksum = True
+      parsers[Bus.pt].message_states[0x201].ignore_counter = True
     if CP.flags & HondaFlags.HAS_BSM:
       parsers[Bus.body] = CANParser(DBC[CP.carFingerprint][Bus.body], [], CanBus(CP).radar)
 

@@ -4,6 +4,7 @@ from opendbc.can import CANPacker
 from opendbc.car import Bus, DT_CTRL, rate_limit, make_tester_present_msg, structs
 from opendbc.car.honda import hondacan
 from opendbc.car.honda.modified_civic_steering import ModifiedCivicSteering
+from opendbc.car.honda.nidec_interceptor import NidecInterceptor, create_command, qualified as interceptor_qualified
 from opendbc.car.honda.bosch_longitudinal import BoschLongitudinal, qualified as bosch_long_qualified
 from opendbc.car.honda.values import CAR, CruiseButtons, HondaFlags, CarControllerParams
 from opendbc.car.interfaces import CarControllerBase
@@ -97,6 +98,8 @@ class CarController(CarControllerBase):
     self.CAN = hondacan.CanBus(CP)
     self.bosch_longitudinal = BoschLongitudinal(CP, self.params) if bosch_long_qualified(CP) else None
     self.bosch_learning_params = None
+    self.nidec_interceptor = NidecInterceptor(CP) if interceptor_qualified(CP) else None
+    self.interceptor_learning_params = None
     self.tja_control = bool(CP.flags & HondaFlags.BOSCH_TJA_CONTROL)
     self.modified_civic_steering = (ModifiedCivicSteering() if CP.carFingerprint == CAR.HONDA_CIVIC_BOSCH and
                                     CP.flags & HondaFlags.EPS_MODIFIED and not CP.passive and not CP.dashcamOnly and not CP.notCar else None)
@@ -173,7 +176,7 @@ class CarController(CarControllerBase):
                     0.5]
     # The Honda ODYSSEY seems to have different PCM_ACCEL
     # msgs, is it other cars too?
-    if not CC.longActive:
+    if self.nidec_interceptor is not None or not CC.longActive:
       pcm_speed = 0.0
       pcm_accel = int(0.0)
     elif self.CP.flags & HondaFlags.NIDEC_ALT_PCM_ACCEL:
@@ -227,6 +230,9 @@ class CarController(CarControllerBase):
                                                          pcm_override, pcm_cancel_cmd, alert_fcw, CS.stock_brake))
           self.apply_brake_last = apply_brake
           self.brake = apply_brake / self.params.NIDEC_BRAKE_MAX
+          if self.nidec_interceptor is not None:
+            command = self.nidec_interceptor.update(CC, CS, gas, brake, wind_brake)
+            can_sends.append(create_command(self.packer, command, (self.frame // 2) % 16))
 
     # Send dashboard UI commands.
     if self.frame % 10 == 0:
@@ -247,8 +253,11 @@ class CarController(CarControllerBase):
           can_sends.append(hondacan.create_legacy_brake_command(self.packer, self.CAN.pt))
         if not (self.CP.flags & HondaFlags.BOSCH):
           self.speed = pcm_speed
-          self.gas = pcm_accel / self.params.NIDEC_GAS_MAX
+          self.gas = (self.nidec_interceptor.command if self.nidec_interceptor is not None else
+                      pcm_accel / self.params.NIDEC_GAS_MAX)
 
+    if self.interceptor_learning_params is not None:
+      self.interceptor_learning_params.persist(self.frame)
     if self.bosch_learning_params is not None:
       self.bosch_learning_params.persist(self.frame)
 

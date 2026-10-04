@@ -25,6 +25,8 @@ class CarInterface(CarInterfaceBase):
   def get_pid_accel_limits(CP, current_speed, cruise_speed):
     if CP.flags & HondaFlags.BOSCH:
       return CarControllerParams.BOSCH_ACCEL_MIN, CarControllerParams.BOSCH_ACCEL_MAX
+    elif CP.flags & HondaFlags.GAS_INTERCEPTOR:
+      return CarControllerParams.NIDEC_ACCEL_MIN, CarControllerParams.NIDEC_ACCEL_MAX
     else:
       # NIDECs don't allow acceleration near cruise_speed,
       # so limit limits of pid to prevent windup
@@ -57,6 +59,10 @@ class CarInterface(CarInterfaceBase):
       ret.openpilotLongitudinalControl = True
 
       ret.pcmCruise = True
+      if CAN.pt == 0 and fingerprint[CAN.pt].get(0x201) == 6:
+        ret.flags |= HondaFlags.GAS_INTERCEPTOR.value
+        ret.safetyConfigs[-1].safetyParam |= HondaSafetyFlags.GAS_INTERCEPTOR.value
+        ret.pcmCruise = False
 
     if candidate == CAR.HONDA_CRV_5G and 0x12f8bfa7 in fingerprint[CAN.radar]:
       ret.flags |= HondaFlags.HAS_BSM.value
@@ -192,6 +198,9 @@ class CarInterface(CarInterfaceBase):
       ret.steerActuatorDelay = 0.15
       CarInterfaceBase.configure_torque_tune(candidate, ret.lateralTuning)
 
+    from opendbc.car.honda.parameter_profiles import apply_factory_profile
+    apply_factory_profile(ret, candidate)
+
     if candidate == CAR.ACURA_RDX_3G_MMR:
       ret.dashcamOnly = is_release  # TODO: release from dashcam when there's enough driving data for torqued/paramsd to converge
 
@@ -206,6 +215,8 @@ class CarInterface(CarInterfaceBase):
       ret.safetyConfigs[-1].safetyParam |= HondaSafetyFlags.NIDEC_ALT.value
     if ret.openpilotLongitudinalControl and ret.flags & HondaFlags.BOSCH:
       ret.safetyConfigs[-1].safetyParam |= HondaSafetyFlags.BOSCH_LONG.value
+      if candidate == CAR.ACURA_RDX_3G:
+        ret.safetyConfigs[-1].safetyParam |= HondaSafetyFlags.RDX_HIGH_GAS.value
     if ret.flags & HondaFlags.BOSCH_RADARLESS:
       ret.safetyConfigs[-1].safetyParam |= HondaSafetyFlags.RADARLESS.value
     if ret.flags & HondaFlags.BOSCH_CANFD:
@@ -215,7 +226,7 @@ class CarInterface(CarInterfaceBase):
     # to a negative value, so it won't matter. Otherwise, add 0.5 mph margin to not
     # conflict with PCM acc
     ret.autoResumeSng = (bool(ret.flags & HondaFlags.BOSCH) and not (candidate == CAR.HONDA_FIT_4G and not ret.openpilotLongitudinalControl)) or \
-      candidate in (CAR.HONDA_CIVIC, CAR.HONDA_CLARITY)
+      candidate in (CAR.HONDA_CIVIC, CAR.HONDA_CLARITY) or bool(ret.flags & HondaFlags.GAS_INTERCEPTOR)
     if ret.autoResumeSng:
       ret.minEnableSpeed = -1.
     elif candidate == CAR.HONDA_ODYSSEY_TWN:

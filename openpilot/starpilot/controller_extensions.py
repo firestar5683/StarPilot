@@ -106,6 +106,10 @@ def configure_controller(CI, params):
   if controller is not None and cp.brand == "ford" and getattr(controller, "manual_turn_inputs", None) is not None:
     controller.manual_turn_inputs.apply_blend_settings(controller)
 
+  if controller is not None and cp.brand == "honda" and getattr(controller, "nidec_interceptor", None) is not None:
+    from openpilot.starpilot.car.honda.longitudinal import BoschLearningParams
+    controller.interceptor_learning_params = BoschLearningParams(params, controller.nidec_interceptor)
+
   if controller is not None and cp.brand == "honda" and getattr(controller, "bosch_longitudinal", None) is not None:
     from openpilot.starpilot.car.honda.longitudinal import BoschLearningParams
     controller.bosch_learning_params = BoschLearningParams(params, controller.bosch_longitudinal)

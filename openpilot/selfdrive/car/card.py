@@ -32,7 +32,14 @@ from openpilot.selfdrive.pandad import can_capnp_to_list, can_list_to_can_capnp
 from openpilot.selfdrive.car.cruise import VCruiseHelper, SlcPendingConfirmation
 from openpilot.starpilot.speed_limits import physical_actions as slc_physical
 from openpilot.starpilot.aol.intent import disarming_fault, independent_axis_requested, read_settings
-from opendbc.car.ford.aol import qualified as qualified_ford_aol, native_observation as ford_native_observation, temporary_restriction as ford_temporary_restriction
+from opendbc.car.honda.stock_aol import (
+  qualified as qualified_honda_stock_aol, native_observation as honda_native_observation,
+  temporary_restriction as honda_temporary_restriction,
+)
+from opendbc.car.ford.aol import (
+  qualified as qualified_ford_aol, native_observation as ford_native_observation,
+  temporary_restriction as ford_temporary_restriction,
+)
 from opendbc.car.hyundai.canfd_angle_aol import native_observation, temporary_restriction, qualified as qualified_angle_aol
 from openpilot.starpilot.aol.runtime import current_native
 from openpilot.starpilot.aol.vehicle import create_intent as create_aol_intent, native_latch_rejected, policy_for as aol_policy_for
@@ -428,7 +435,8 @@ class Car:
         fault_active = disarming_fault(self.sm['onroadEvents'], CS)
       angle_aol = qualified_angle_aol(self.CP, marked_only=True)
       ford_aol = qualified_ford_aol(self.CP, marked_only=True)
-      permission_owner = angle_aol or ford_aol
+      honda_aol = qualified_honda_stock_aol(self.CP, marked_only=True)
+      permission_owner = angle_aol or ford_aol or honda_aol
       angle_panda_ready = not permission_owner or self.startup_panda_configured()
       native = (
         current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.slc_producer_session if permission_owner else None)
@@ -437,8 +445,8 @@ class Car:
       )
       native_reset = False
       if permission_owner:
-        observe = ford_native_observation if ford_aol else native_observation
-        restrict = ford_temporary_restriction if ford_aol else temporary_restriction
+        observe = honda_native_observation if honda_aol else ford_native_observation if ford_aol else native_observation
+        restrict = honda_temporary_restriction if honda_aol else ford_temporary_restriction if ford_aol else temporary_restriction
         pending_since, lost, native_reset = observe(
           native,
           latched=self.aol_card_intent.allowed_latch,

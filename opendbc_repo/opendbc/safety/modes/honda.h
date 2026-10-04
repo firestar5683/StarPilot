@@ -1,6 +1,8 @@
 #pragma once
 
 #include "opendbc/safety/declarations.h"
+#include "opendbc/safety/modes/honda_interceptor.h"
+#include "opendbc/safety/modes/honda_stock_aol.h"
 
 // All common address checks except SCM_BUTTONS which isn't on one Nidec safety configuration
 #define HONDA_COMMON_NO_SCM_FEEDBACK_RX_CHECKS(pt_bus)                                                                                      \
@@ -32,6 +34,7 @@ static bool honda_fwd_brake = false;
 static bool honda_bosch_long = false;
 static bool honda_bosch_radarless = false;
 static bool honda_bosch_canfd = false;
+static bool honda_rdx_high_gas = false;
 static bool aol_honda_bosch_long = false;
 static uint32_t aol_honda_main_ts = 0U;
 #define AOL_HONDA_MAIN_TIMEOUT_US 300000U
@@ -95,7 +98,7 @@ static uint8_t honda_get_counter(const CANPacket_t *msg) {
 }
 
 static void honda_rx_hook(const CANPacket_t *msg) {
-  const bool pcm_cruise = ((honda_hw == HONDA_BOSCH) && !honda_bosch_long) || (honda_hw == HONDA_NIDEC);
+  const bool pcm_cruise = ((honda_hw == HONDA_BOSCH) && !honda_bosch_long) || ((honda_hw == HONDA_NIDEC) && !honda_interceptor);
   unsigned int pt_bus = honda_get_pt_bus();
 
   // sample speed
@@ -173,7 +176,8 @@ static void honda_rx_hook(const CANPacket_t *msg) {
     }
   }
 
-  if (msg->addr == 0x17CU) {
+  honda_interceptor_rx(msg);
+  if (!honda_interceptor && (msg->addr == 0x17CU)) {
     gas_pressed = msg->data[0] != 0U;
   }
 
@@ -194,6 +198,7 @@ static void honda_rx_hook(const CANPacket_t *msg) {
       }
     }
   }
+  honda_stock_aol_rx(msg, pt_bus);
 }
 
 static bool honda_tx_hook(const CANPacket_t *msg) {
@@ -201,7 +206,7 @@ static bool honda_tx_hook(const CANPacket_t *msg) {
     .max_accel = 200,   // accel is used for brakes
     .min_accel = -350,
 
-    .max_gas = 2000,
+    .max_gas = honda_rdx_high_gas ? 2200 : 2000,
     .inactive_gas = -30000,
   };
 
@@ -320,6 +325,10 @@ static bool honda_tx_hook(const CANPacket_t *msg) {
     }
   }
 
+  if (msg->addr == 0x200U) {
+    tx = tx && honda_interceptor_tx(msg);
+  }
+
   return tx;
 }
 
@@ -335,6 +344,19 @@ static safety_config honda_nidec_init(uint16_t param) {
     {0x33D, 0, 5, .check_relay = true},
   };
 
+  static const CanMsg HONDA_N_INTERCEPTOR_TX_MSGS[] = {
+    {0xE4, 0, 5, .check_relay = true},
+    {0x194, 0, 4, .check_relay = true},
+    {0x1FA, 0, 8, .check_relay = false},
+    {0x30C, 0, 8, .check_relay = true},
+    {0x33D, 0, 5, .check_relay = true},
+    {0x200, 0, 6, .check_relay = false},
+  };
+  static const RxCheck interceptor_source = {
+    .msg = {{0x201, 0, 6, 50U, .ignore_checksum = true,
+             .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}},
+  };
+  honda_interceptor_reset((param == 32U) || (param == 36U));
   const uint16_t HONDA_PARAM_NIDEC_ALT = 4;
 
   honda_hw = HONDA_NIDEC;
@@ -345,35 +367,46 @@ static safety_config honda_nidec_init(uint16_t param) {
   honda_bosch_long = false;
   honda_bosch_radarless = false;
   honda_bosch_canfd = false;
+  honda_rdx_high_gas = false;
 
-  safety_config ret;
+  safety_config ret = {0};
 
   bool enable_nidec_alt = GET_FLAG(param, HONDA_PARAM_NIDEC_ALT);
 
   if (enable_nidec_alt) {
     // For Nidecs with main on signal on an alternate msg (missing 0x326)
-    static RxCheck honda_nidec_alt_rx_checks[] = {
+    static const RxCheck honda_nidec_alt_rx_checks[] = {
       HONDA_COMMON_NO_SCM_FEEDBACK_RX_CHECKS(0)
       {.msg = {{0x1FA, 2, 8, 50U, .max_counter = 3U, .ignore_quality_flag = true}, { 0 }, { 0 }}},  // BRAKE_COMMAND
     };
 
-    SET_RX_CHECKS(honda_nidec_alt_rx_checks, ret);
+    _Static_assert((sizeof(honda_nidec_alt_rx_checks) / sizeof(honda_nidec_alt_rx_checks[0])) <= 5U, "Honda baseline RX capacity");
+    ret = honda_copy_rx(honda_nidec_alt_rx_checks, sizeof(honda_nidec_alt_rx_checks) / sizeof(honda_nidec_alt_rx_checks[0]), ret);
   } else {
     // Nidec includes BRAKE_COMMAND
-    static RxCheck honda_nidec_common_rx_checks[] = {
+    static const RxCheck honda_nidec_common_rx_checks[] = {
       HONDA_COMMON_RX_CHECKS(0)
       {.msg = {{0x1FA, 2, 8, 50U, .max_counter = 3U, .ignore_quality_flag = true}, { 0 }, { 0 }}},  // BRAKE_COMMAND
     };
 
-    SET_RX_CHECKS(honda_nidec_common_rx_checks, ret);
+    _Static_assert((sizeof(honda_nidec_common_rx_checks) / sizeof(honda_nidec_common_rx_checks[0])) <= 5U, "Honda baseline RX capacity");
+    ret = honda_copy_rx(honda_nidec_common_rx_checks, sizeof(honda_nidec_common_rx_checks) / sizeof(honda_nidec_common_rx_checks[0]), ret);
   }
 
-  SET_TX_MSGS(HONDA_N_TX_MSGS, ret);
+  if (honda_interceptor && (ret.rx_checks_len < 7)) {
+    honda_rx_workspace[ret.rx_checks_len] = interceptor_source;
+    ret.rx_checks_len++;
+    SET_TX_MSGS(HONDA_N_INTERCEPTOR_TX_MSGS, ret);
+  } else {
+    SET_TX_MSGS(HONDA_N_TX_MSGS, ret);
+  }
+  ret = honda_stock_aol_configure(param, true, enable_nidec_alt, 0U, ret);
 
   return ret;
 }
 
 static safety_config honda_bosch_init(uint16_t param) {
+  honda_interceptor_reset(false);
   // Bosch
   static CanMsg HONDA_BOSCH_TX_MSGS[] = {
     {0xE4, 0, 5, .check_relay = true},
@@ -426,21 +459,21 @@ static safety_config honda_bosch_init(uint16_t param) {
   const uint16_t HONDA_PARAM_BOSCH_CANFD = 16;
 
   // Bosch radarless has the powertrain bus on bus 0
-  static RxCheck honda_bosch_pt0_rx_checks[] = {
+  static const RxCheck honda_bosch_pt0_rx_checks[] = {
     HONDA_COMMON_RX_CHECKS(0)
   };
 
-  static RxCheck honda_bosch_pt0_alt_brake_rx_checks[] = {
+  static const RxCheck honda_bosch_pt0_alt_brake_rx_checks[] = {
     HONDA_COMMON_RX_CHECKS(0)
     HONDA_ALT_BRAKE_ADDR_CHECK(0)
   };
 
   // Bosch has powertrain on bus 1, verified 0x1A6 does not exist
-  static RxCheck honda_bosch_pt1_rx_checks[] = {
+  static const RxCheck honda_bosch_pt1_rx_checks[] = {
     HONDA_COMMON_RX_CHECKS(1)
   };
 
-  static RxCheck honda_bosch_pt1_alt_brake_rx_checks[] = {
+  static const RxCheck honda_bosch_pt1_alt_brake_rx_checks[] = {
     HONDA_COMMON_RX_CHECKS(1)
     HONDA_ALT_BRAKE_ADDR_CHECK(1)
   };
@@ -451,12 +484,14 @@ static safety_config honda_bosch_init(uint16_t param) {
   honda_bosch_canfd = GET_FLAG(param, HONDA_PARAM_BOSCH_CANFD);
   // Checking for alternate brake override from safety parameter
   honda_alt_brake_msg = GET_FLAG(param, HONDA_PARAM_ALT_BRAKE);
+  honda_rdx_high_gas = false;
 
   // radar disabled so allow gas/brakes
 #ifdef ALLOW_DEBUG
   const uint16_t HONDA_PARAM_BOSCH_LONG = 2;
   honda_bosch_long = GET_FLAG(param, HONDA_PARAM_BOSCH_LONG);
-  aol_honda_bosch_long = honda_bosch_long && ((param == 34U) || (param == 35U));
+  honda_rdx_high_gas = (param == 131U) || (param == 163U);
+  aol_honda_bosch_long = honda_bosch_long && ((param == 34U) || (param == 35U) || (param == 163U));
 #endif
   if (aol_honda_bosch_long) {
     static const AolSafetyPolicy aol_honda_policy = {
@@ -469,18 +504,22 @@ static safety_config honda_bosch_init(uint16_t param) {
     aol_policy = &aol_honda_policy;
   }
 
-  safety_config ret;
+  safety_config ret = {0};
   if (honda_bosch_radarless || honda_bosch_canfd) {
     if (honda_alt_brake_msg) {
-      SET_RX_CHECKS(honda_bosch_pt0_alt_brake_rx_checks, ret);
+      _Static_assert((sizeof(honda_bosch_pt0_alt_brake_rx_checks) / sizeof(honda_bosch_pt0_alt_brake_rx_checks[0])) <= 5U, "Honda baseline RX capacity");
+    ret = honda_copy_rx(honda_bosch_pt0_alt_brake_rx_checks, sizeof(honda_bosch_pt0_alt_brake_rx_checks) / sizeof(honda_bosch_pt0_alt_brake_rx_checks[0]), ret);
     } else {
-      SET_RX_CHECKS(honda_bosch_pt0_rx_checks, ret);
+      _Static_assert((sizeof(honda_bosch_pt0_rx_checks) / sizeof(honda_bosch_pt0_rx_checks[0])) <= 5U, "Honda baseline RX capacity");
+    ret = honda_copy_rx(honda_bosch_pt0_rx_checks, sizeof(honda_bosch_pt0_rx_checks) / sizeof(honda_bosch_pt0_rx_checks[0]), ret);
     }
   } else {
    if (honda_alt_brake_msg) {
-     SET_RX_CHECKS(honda_bosch_pt1_alt_brake_rx_checks, ret);
+     _Static_assert((sizeof(honda_bosch_pt1_alt_brake_rx_checks) / sizeof(honda_bosch_pt1_alt_brake_rx_checks[0])) <= 5U, "Honda baseline RX capacity");
+    ret = honda_copy_rx(honda_bosch_pt1_alt_brake_rx_checks, sizeof(honda_bosch_pt1_alt_brake_rx_checks) / sizeof(honda_bosch_pt1_alt_brake_rx_checks[0]), ret);
    } else {
-     SET_RX_CHECKS(honda_bosch_pt1_rx_checks, ret);
+     _Static_assert((sizeof(honda_bosch_pt1_rx_checks) / sizeof(honda_bosch_pt1_rx_checks[0])) <= 5U, "Honda baseline RX capacity");
+    ret = honda_copy_rx(honda_bosch_pt1_rx_checks, sizeof(honda_bosch_pt1_rx_checks) / sizeof(honda_bosch_pt1_rx_checks[0]), ret);
    }
   }
 
@@ -499,6 +538,7 @@ static safety_config honda_bosch_init(uint16_t param) {
       SET_TX_MSGS(HONDA_BOSCH_TX_MSGS, ret);
     }
   }
+  ret = honda_stock_aol_configure(param, false, false, honda_get_pt_bus(), ret);
   return ret;
 }
 
