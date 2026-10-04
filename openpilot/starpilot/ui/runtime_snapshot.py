@@ -29,6 +29,7 @@ from openpilot.starpilot.controllers.mode_actions import SwitchbackStatusOwner
 from openpilot.starpilot.ui.wheel_feedback import observe_wheel_feedback
 from openpilot.starpilot.ui.torque_feedback import observe_torque_feedback
 
+from openpilot.cereal import log
 from openpilot.cereal.services import SERVICE_LIST
 from opendbc.car.structs import car as car_schema
 from openpilot.starpilot.ui.device_state import DeviceRequest, DeviceState
@@ -339,7 +340,7 @@ class RuntimeSnapshotAdapter:
     device = current_message(sm, "deviceState", now_ns)
     pair = _clock_pair(self._mono_clock, self._boot_clock)
     pandas = current_message(sm, "pandaStates", now_ns, boot_now_ns=now_ns + pair[2]) if pair is not None else None
-    ignition = bool(pandas is not None and any(p.ignitionLine or p.ignitionCan for p in pandas))
+    panda_connected = bool(pandas and any(p.pandaType != log.PandaState.PandaType.unknown for p in pandas))
     # UIState owns drive transitions. Health-message freshness governs actions,
     # not the lifetime of the camera, widget filters, and engagement animations.
     started = bool(ui.started)
@@ -583,7 +584,7 @@ class RuntimeSnapshotAdapter:
                            HomeMode.EXPERIMENTAL if experimental else HomeMode.CHILL),
                      experimental_enabled=experimental, experimental_available=bool(ui.has_longitudinal_control),
                      stats=None, paired=bool(ui.prime_state.is_paired()), network=network, network_strength=strength,
-                     vehicle_online=ignition, connection=connection,
+                     vehicle_online=panda_connected, connection=connection,
                      recording_audio=bool(ui.recording_audio), bluetooth=bluetooth,
                      gpu_present=gpu_present, gpu_active=gpu_active, branch=_text(params, "GitBranch"),
                      gpu_state=getattr(getattr(ui, "chestnut_state", None), "value", "disconnected"))

@@ -5,7 +5,7 @@ import time
 import unittest
 from unittest.mock import patch
 
-from openpilot.cereal import messaging
+from openpilot.cereal import log, messaging
 from openpilot.starpilot.ui.onroad_state import AlertSize, ObservationKind
 from openpilot.starpilot.ui.runtime_snapshot import RuntimeSnapshotAdapter as NativeRuntimeSnapshotAdapter, current_alert, current_message
 from openpilot.starpilot.ui.settings_state import Destination
@@ -80,7 +80,7 @@ class SubMasterFake:
 def ui_fake():
   sm = SubMasterFake()
   sm.put("deviceState", NS(started=True, networkType=NS(raw=1), networkStrength=NS(raw=2), lastAthenaPingTime=NOW))
-  sm.put("pandaStates", [NS(ignitionLine=True, ignitionCan=False)])
+  sm.put("pandaStates", [NS(pandaType=log.PandaState.PandaType.tres, ignitionLine=True, ignitionCan=False)])
   sm.put("carState", NS(vEgoCluster=15.0, vEgo=16.0, vCruiseCluster=80.0))
   sm.put("carControl", NS(latActive=True, longActive=False, actuators=NS(torque=0.3)))
   sm.put("selfdriveState", NS(experimentalMode=False, alertSize=NS(raw=0), alertStatus=NS(raw=0),
@@ -94,6 +94,39 @@ def ui_fake():
 
 
 class TestRuntimeSnapshot(unittest.TestCase):
+  def test_home_panda_presence_is_independent_of_ignition(self):
+    for panda_type in (log.PandaState.PandaType.dos, log.PandaState.PandaType.tres, log.PandaState.PandaType.cuatro):
+      for ignition in (False, True):
+        with self.subTest(panda_type=panda_type, ignition=ignition):
+          ui = ui_fake()
+          ui.started = False
+          ui.sm['deviceState'].started = False
+          panda = messaging.new_message('pandaStates', 1).pandaStates[0]
+          panda.pandaType = panda_type
+          panda.ignitionLine = ignition
+          ui.sm.put('pandaStates', [panda])
+          self.assertTrue(RuntimeSnapshotAdapter(ui).build(ShellMode.HOME, now_ns=NOW).home.vehicle_online)
+
+  def test_home_does_not_report_missing_or_unhealthy_panda_online(self):
+    for failure in ('empty', 'unknown', 'invalid', 'dead', 'old', 'future', 'old_receipt'):
+      with self.subTest(failure=failure):
+        ui = ui_fake()
+        if failure == 'empty':
+          ui.sm.messages['pandaStates'] = []
+        elif failure == 'unknown':
+          ui.sm['pandaStates'][0].pandaType = log.PandaState.PandaType.unknown
+        elif failure == 'invalid':
+          ui.sm.valid['pandaStates'] = False
+        elif failure == 'dead':
+          ui.sm.alive['pandaStates'] = False
+        elif failure == 'old':
+          ui.sm.logMonoTime['pandaStates'] -= 1_000_000_000
+        elif failure == 'future':
+          ui.sm.logMonoTime['pandaStates'] += 1_000_000_000
+        else:
+          ui.sm.recv_time['pandaStates'] -= 1
+        self.assertFalse(RuntimeSnapshotAdapter(ui).build(ShellMode.HOME, now_ns=NOW).home.vehicle_online)
+
   def test_every_registered_settings_destination_stays_selected(self):
     adapter = RuntimeSnapshotAdapter(ui_fake())
     state = adapter.build(ShellMode.SETTINGS)
@@ -328,7 +361,7 @@ class TestRuntimeSnapshot(unittest.TestCase):
 
   def test_display_survives_ui_frame_gap_without_extending_control_authority(self):
     ui = ui_fake()
-    ui.CP = NS(openpilotLongitudinalControl=True, pcmCruise=False)
+    ui.CP = NS(carFingerprint="", openpilotLongitudinalControl=True, pcmCruise=False)
     ui.sm.messages['carState'].canValid = True
     ui.sm.messages['carState'].canTimeout = False
     ui.sm.messages['carState'].vCruiseCluster = 86.0
@@ -422,7 +455,7 @@ class TestRuntimeSnapshot(unittest.TestCase):
   def test_nested_curve_independent_of_outer_slc_validity(self):
     ui = ui_fake()
     ui.params.values["ShowCSCStatus"] = "1"
-    ui.CP = NS(openpilotLongitudinalControl=True, pcmCruise=False)
+    ui.CP = NS(carFingerprint="", openpilotLongitudinalControl=True, pcmCruise=False)
     ui.sm.messages["carState"].canValid = True
     ui.sm.messages["carState"].canTimeout = False
     ui.sm.messages["carControl"].longActive = True
@@ -586,7 +619,7 @@ class TestRuntimeSnapshot(unittest.TestCase):
 
   def test_angle_torque_feedback_uses_current_vehicle_parameters(self):
     ui = ui_fake()
-    ui.CP = NS(maxLateralAccel=3.0, openpilotLongitudinalControl=False, pcmCruise=True)
+    ui.CP = NS(carFingerprint="", maxLateralAccel=3.0, openpilotLongitudinalControl=False, pcmCruise=True)
     ui.sm.messages["carState"].canValid = True
     ui.sm.messages["carState"].canTimeout = False
     ui.sm.put("controlsState", NS(lateralControlState=NS(which=lambda: "angleState"),
@@ -601,7 +634,7 @@ class TestRuntimeSnapshot(unittest.TestCase):
 
   def test_slc_controls_require_fresh_system_long_non_pcm_authority(self):
     ui = ui_fake()
-    ui.CP = NS(openpilotLongitudinalControl=True, pcmCruise=False)
+    ui.CP = NS(carFingerprint="", openpilotLongitudinalControl=True, pcmCruise=False)
     ui.sm.messages["carState"].canTimeout = False
     ui.sm.messages["carState"].canValid = True
     ui.sm.messages["carControl"].longActive = True
