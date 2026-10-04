@@ -20,7 +20,7 @@ constexpr AolSafetyProfile TEST_PROFILES[] = {
   {TEST_MODE, test_param, false}, {TEST_ALT_MODE, test_alt_param, false},
 };
 const AolProfileRegistry TEST_REGISTRY{TEST_PROFILES, std::size(TEST_PROFILES)};
-constexpr AolSafetyProfile VEHICLE_PROFILES[] = {HONDA_AOL_PROFILE, HYUNDAI_AOL_PROFILE, HYUNDAI_CLASSIC_AOL_PROFILE, GM_AOL_PROFILE};
+constexpr AolSafetyProfile VEHICLE_PROFILES[] = {HONDA_AOL_PROFILE, HYUNDAI_AOL_PROFILE, HYUNDAI_CLASSIC_AOL_PROFILE, HYUNDAI_LEGACY_AOL_PROFILE, GM_AOL_PROFILE};
 const AolProfileRegistry VEHICLE_REGISTRY{VEHICLE_PROFILES, std::size(VEHICLE_PROFILES)};
 
 aol_safety_health_t status(uint8_t request = 0U, uint8_t permission = 0U) {
@@ -88,7 +88,22 @@ int main() {
     auto forte = status();
     forte.safety_mode = HYUNDAI_CLASSIC_AOL_PROFILE.mode;
     forte.safety_param = static_cast<uint16_t>(word);
-    const bool expected = word == 0x1400U || word == 0x1C00U || word == 0x1440U || word == 0x1C40U ||
+    bool scc_expected = false;
+    for (const uint16_t gas : {0U, 1U, 2U}) {
+      for (const uint16_t limits : {0U, 64U, 512U}) {
+        for (const uint16_t bus : {0U, 8U}) {
+          for (const uint16_t lda : {0U, 2048U}) {
+            scc_expected |= word == (0x0400U | gas | limits | bus | lda);
+          }
+        }
+      }
+    }
+    scc_expected |= word == 0x8408U || word == 0x840AU || word == 0x8C08U || word == 0x8C0AU;
+    auto legacy = forte;
+    legacy.safety_mode = HYUNDAI_LEGACY_AOL_PROFILE.mode;
+    assert(aol_capable(legacy, HYUNDAI_LEGACY_AOL_PROFILE.mode, VEHICLE_REGISTRY) ==
+           (scc_expected && ((word & 8U) == 0U)));
+    const bool expected = scc_expected || word == 0x1400U || word == 0x1C00U || word == 0x1440U || word == 0x1C40U ||
                           word == 0x1402U || word == 0x1C02U || word == 0x1441U || word == 0x1C41U;
     assert(aol_capable(forte, HYUNDAI_CLASSIC_AOL_PROFILE.mode, VEHICLE_REGISTRY) == expected);
     assert(aol_runtime_enabled(false, forte, VEHICLE_REGISTRY) == expected);

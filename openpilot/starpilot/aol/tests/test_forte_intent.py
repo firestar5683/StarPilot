@@ -59,7 +59,8 @@ class TestForteIntent(unittest.TestCase):
           bad = cp.as_reader().as_builder()
           setattr(bad, field, True)
           self.assertFalse(policy_for(bad).intent_supported)
-    self.assertFalse(policy_for(params(CAR.KIA_FORTE)).intent_supported)
+    from opendbc.car.hyundai.non_scc_aol import qualified
+    self.assertFalse(qualified(params(CAR.KIA_FORTE)))
     self.assertFalse(native_profile_supported(int(structs.CarParams.SafetyModel.hyundai), 0x1000))
 
   def test_main_boot_and_assignment_defaults_and_symmetric_combined_pause(self):

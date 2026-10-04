@@ -9,8 +9,20 @@ inline bool hyundai_aol_param(uint16_t param) {
 
 inline constexpr AolSafetyProfile HYUNDAI_AOL_PROFILE{28U, hyundai_aol_param, true};
 
+inline bool hyundai_classic_scc_aol_param(uint16_t param) {
+  return param == 0x8408U || param == 0x840AU || param == 0x8C08U || param == 0x8C0AU ||
+         (((param & 0x0400U) != 0U) && ((param & 0xF1B4U) == 0U) &&
+          ((param & 3U) != 3U) && ((param & 0x0240U) != 0x0240U));
+}
+
+inline bool hyundai_legacy_aol_param(uint16_t param) {
+  return hyundai_classic_scc_aol_param(param) && ((param & 8U) == 0U);
+}
+
+inline constexpr AolSafetyProfile HYUNDAI_LEGACY_AOL_PROFILE{23U, hyundai_legacy_aol_param, true};
+
 inline bool hyundai_classic_aol_param(uint16_t param) {
-  return param == 0x1400U || param == 0x1C00U || param == 0x1440U || param == 0x1C40U ||
+  return hyundai_classic_scc_aol_param(param) || param == 0x1400U || param == 0x1C00U || param == 0x1440U || param == 0x1C40U ||
          param == 0x1402U || param == 0x1C02U || param == 0x1441U || param == 0x1C41U;
 }
 

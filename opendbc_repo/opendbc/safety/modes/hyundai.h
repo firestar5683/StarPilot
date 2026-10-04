@@ -521,6 +521,33 @@ static bool hyundai_tx_hook(const CANPacket_t *msg) {
   return tx;
 }
 
+static void hyundai_classic_scc_aol_rx_config(safety_config *config, bool legacy) {
+  static RxCheck normal[] = {
+    HYUNDAI_COMMON_RX_CHECKS(false)
+    HYUNDAI_SCC12_ADDR_CHECK(0)
+    {.msg = {{0x420, 0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+  };
+  static RxCheck camera[] = {
+    HYUNDAI_COMMON_RX_CHECKS(false)
+    HYUNDAI_SCC12_ADDR_CHECK(2)
+    {.msg = {{0x420, 2, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+  };
+  static RxCheck older[] = {
+    HYUNDAI_COMMON_RX_CHECKS(true)
+    HYUNDAI_SCC12_ADDR_CHECK(0)
+    {.msg = {{0x420, 0, 8, 50U, .ignore_checksum = true, .ignore_counter = true, .ignore_quality_flag = true}, {0}, {0}}},
+  };
+  if (classic_scc_aol_enabled) {
+    if (legacy) {
+      SET_RX_CHECKS(older, (*config));
+    } else if (classic_scc_aol_camera) {
+      SET_RX_CHECKS(camera, (*config));
+    } else {
+      SET_RX_CHECKS(normal, (*config));
+    }
+  }
+}
+
 static safety_config hyundai_init(uint16_t param) {
   static const CanMsg HYUNDAI_REFRESH_TX_MSGS[] = {
     HYUNDAI_COMMON_TX_MSGS(0, true)
@@ -556,7 +583,7 @@ static safety_config hyundai_init(uint16_t param) {
   };
 
   hyundai_common_init(param);
-  classic_non_scc_aol_configure(param);
+  classic_non_scc_aol_configure(param, false);
   hyundai_blended_alpha = false;
 #ifdef ALLOW_DEBUG
   hyundai_blended_alpha = (param == 0x2004U) || (param == 0x2014U);
@@ -790,6 +817,7 @@ static safety_config hyundai_init(uint16_t param) {
       SET_RX_CHECKS(hyundai_rx_checks, ret);
     }
   }
+  hyundai_classic_scc_aol_rx_config(&ret, false);
   return ret;
 }
 
@@ -801,6 +829,7 @@ static safety_config hyundai_legacy_init(uint16_t param) {
   };
 
   hyundai_common_init(param);
+  classic_non_scc_aol_configure(param, true);
   hyundai_legacy = true;
   hyundai_blended_stock = false;
   hyundai_blended_hda2 = false;
@@ -812,7 +841,9 @@ static safety_config hyundai_legacy_init(uint16_t param) {
   hyundai_ray_pedal_healthy = false;
   hyundai_longitudinal = false;
   hyundai_camera_scc = false;
-  return BUILD_SAFETY_CFG(hyundai_legacy_rx_checks, HYUNDAI_TX_MSGS);
+  safety_config ret = BUILD_SAFETY_CFG(hyundai_legacy_rx_checks, HYUNDAI_TX_MSGS);
+  hyundai_classic_scc_aol_rx_config(&ret, true);
+  return ret;
 }
 
 static void hyundai_optional_rx_hook(const CANPacket_t *msg) {
@@ -836,6 +867,7 @@ const safety_hooks hyundai_hooks = {
 
 const safety_hooks hyundai_legacy_hooks = {
   .init = hyundai_legacy_init,
+  .optional_rx = hyundai_optional_rx_hook,
   .rx = hyundai_rx_hook,
   .tx = hyundai_tx_hook,
   .get_counter = hyundai_get_counter,

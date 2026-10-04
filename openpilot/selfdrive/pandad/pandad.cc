@@ -381,7 +381,7 @@ void pandad_run(Panda *panda) {
   PandaSafety panda_safety(panda);
   bool engaged = false;
   bool is_onroad = false;
-  constexpr AolSafetyProfile aol_profiles[] = {HONDA_AOL_PROFILE, HYUNDAI_AOL_PROFILE, HYUNDAI_CLASSIC_AOL_PROFILE, GM_AOL_PROFILE};
+  constexpr AolSafetyProfile aol_profiles[] = {HONDA_AOL_PROFILE, HYUNDAI_AOL_PROFILE, HYUNDAI_CLASSIC_AOL_PROFILE, HYUNDAI_LEGACY_AOL_PROFILE, GM_AOL_PROFILE};
   const AolProfileRegistry aol_registry{aol_profiles, std::size(aol_profiles)};
   AolAxisNegotiator aol_negotiator(aol_registry);
 

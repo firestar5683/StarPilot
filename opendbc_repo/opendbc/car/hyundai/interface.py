@@ -1,3 +1,4 @@
+from opendbc.car.hyundai.classic_scc_aol import CLASSIC_SCC_IDS
 from opendbc.car import Bus, get_safety_config, structs, uds
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.non_scc_aol import NON_SCC_IDS
@@ -193,7 +194,7 @@ class CarInterface(CarInterfaceBase):
         ret.safetyConfigs[0].safetyParam |= HyundaiSafetyFlags.CAN_REFRESH_MSGS.value
 
       # These cars have the LFA button on the steering wheel
-      if 0x391 in fingerprint[0] or (candidate in NON_SCC_IDS and
+      if 0x391 in fingerprint[0] or (candidate in NON_SCC_IDS | CLASSIC_SCC_IDS and
                                      0x50c in fingerprint[0]):
         ret.flags |= HyundaiFlags.HAS_LDA_BUTTON.value
       if ret.flags & HyundaiFlags.NON_SCC:

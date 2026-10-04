@@ -389,12 +389,13 @@ class Car:
     evidence = getattr(self.CI.CS, 'dashboard_limit', None) if self.slc_replay else None
     observation = evidence.observation if evidence is not None else None
     control_log_ns = int(self.sm.logMonoTime['carControl'])
-    host_control_enabled = bool(
-      self.CP.openpilotLongitudinalControl and not self.CP.pcmCruise and CS.canValid and not CS.canTimeout and
+    host_enabled = bool(
+      CS.canValid and not CS.canTimeout and
       self.CC_prev.enabled and
       self.sm.valid['carControl'] and self.sm.alive['carControl'] and
       0 < control_log_ns <= now_ns and now_ns - control_log_ns <= slc_physical.STATE_MAX_AGE_NS and
       self.sm['carControl'].enabled)
+    host_control_enabled = bool(self.CP.openpilotLongitudinalControl and not self.CP.pcmCruise and host_enabled)
     host_long_active = host_control_enabled and self.sm['carControl'].longActive
     slc_long_active = self.slc_replay and host_long_active
     pending = None
@@ -427,7 +428,8 @@ class Car:
                 if self.aol_card_intent.explicit_latch and self.sm.updated['aolSafetyWire'] else None)
       rejection_ns = int(native.observedMonoTime) if native_latch_rejected(self.CP, native) else 0
       self.aol_card_intent.update(CS, fault_active=fault_active, now_ns=now_ns, native_rejection_ns=rejection_ns,
-                                  standard_enabled=host_control_enabled)
+                                  standard_enabled=(host_enabled if getattr(self.aol_card_intent, 'observe_stock_engagement', False)
+                                                    else host_control_enabled))
     self.observe_distance_personality(CS, now_ns)
     gm_claim = getattr(self, 'gm_distance_claim_tracker', None)
     if gm_claim is not None:

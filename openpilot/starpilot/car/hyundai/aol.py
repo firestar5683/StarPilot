@@ -1,3 +1,9 @@
+from opendbc.car.hyundai.classic_scc_aol import (
+  qualified as qualified_classic_scc,
+  aol_word as classic_aol_word,
+  native_accepts as classic_native_accepts,
+  native_profile_supported as classic_native_profile_supported,
+)
 from opendbc.car.hyundai.canfd_stock_aol import qualified as qualified_canfd_stock, STOCK_AOL_MARKER
 from opendbc.car.hyundai.non_scc_aol import qualified as qualified_non_scc, aol_word, AOL_MARKER, AOL_EXPERIENCE, AOL_WORDS
 from opendbc.car.hyundai.kona_aol import allow_lateral_onset as kona_lateral_onset
@@ -17,9 +23,16 @@ _FORBIDDEN_FLAGS = int(HyundaiFlags.CANFD_ALT_BUTTONS | HyundaiFlags.CANFD_ANGLE
 
 
 def _ioniq6_hda2_base(CP) -> bool:
-  if (str(CP.carFingerprint) != str(HyundaiCAR.HYUNDAI_IONIQ_6) or CP.brand != 'hyundai' or
-      CP.radarUnavailable or CP.notCar or CP.passive or CP.dashcamOnly or len(CP.safetyConfigs) != 1 or
-      CP.safetyConfigs[0].safetyModel != car.CarParams.SafetyModel.hyundaiCanfd):
+  if (
+    str(CP.carFingerprint) != str(HyundaiCAR.HYUNDAI_IONIQ_6)
+    or CP.brand != 'hyundai'
+    or CP.radarUnavailable
+    or CP.notCar
+    or CP.passive
+    or CP.dashcamOnly
+    or len(CP.safetyConfigs) != 1
+    or CP.safetyConfigs[0].safetyModel != car.CarParams.SafetyModel.hyundaiCanfd
+  ):
     return False
   flags = int(CP.flags)
   return flags & _REQUIRED_FLAGS == _REQUIRED_FLAGS and not flags & _FORBIDDEN_FLAGS
@@ -49,13 +62,35 @@ def ioniq6_settings_capable(CP) -> bool:
 
 
 def policy_for(CP) -> AolVehiclePolicy:
+  if qualified_classic_scc(CP):
+    return AolVehiclePolicy(
+      intent_supported=True,
+      settings_supported=True,
+      runtime_supported=True,
+      normal_runtime_supported=True,
+      explicit_latch=True,
+      safety_param_addition=classic_aol_word(CP) ^ int(CP.safetyConfigs[0].safetyParam),
+      alternative_experience_addition=AOL_EXPERIENCE,
+    )
   if qualified_canfd_stock(CP):
-    return AolVehiclePolicy(intent_supported=True, settings_supported=True, runtime_supported=True,
-                            normal_runtime_supported=True, explicit_latch=True, safety_param_addition=STOCK_AOL_MARKER)
+    return AolVehiclePolicy(
+      intent_supported=True,
+      settings_supported=True,
+      runtime_supported=True,
+      normal_runtime_supported=True,
+      explicit_latch=True,
+      safety_param_addition=STOCK_AOL_MARKER,
+    )
   if qualified_non_scc(CP):
-    return AolVehiclePolicy(intent_supported=True, settings_supported=True, runtime_supported=True,
-                            normal_runtime_supported=True, explicit_latch=True,
-                            safety_param_addition=AOL_MARKER | (aol_word(CP) & 0x0800), alternative_experience_addition=AOL_EXPERIENCE)
+    return AolVehiclePolicy(
+      intent_supported=True,
+      settings_supported=True,
+      runtime_supported=True,
+      normal_runtime_supported=True,
+      explicit_latch=True,
+      safety_param_addition=AOL_MARKER | (aol_word(CP) & 0x0800),
+      alternative_experience_addition=AOL_EXPERIENCE,
+    )
   if qualified_ccnc_ev_stock(CP):
     return AolVehiclePolicy(ordinary_axis_ack_required=True)
   stock = _stock_ioniq6(CP)
@@ -63,40 +98,60 @@ def policy_for(CP) -> AolVehiclePolicy:
   settings = ioniq6_settings_capable(CP) or qualified
   distance_personality = ioniq6_long_eligible(CP)
   return AolVehiclePolicy(
-    intent_supported=qualified, settings_supported=settings,
-    runtime_supported=qualified, normal_runtime_supported=qualified and (stock or distance_personality),
-    explicit_latch=qualified, distance_personality=distance_personality,
+    intent_supported=qualified,
+    settings_supported=settings,
+    runtime_supported=qualified,
+    normal_runtime_supported=qualified and (stock or distance_personality),
+    explicit_latch=qualified,
+    distance_personality=distance_personality,
     safety_param_addition=0x0800 if stock else 0,
-    fixed_cruise_buttons=settings, distance_pause_only=settings, paddle_pause=settings,
+    fixed_cruise_buttons=settings,
+    distance_pause_only=settings,
+    paddle_pause=settings,
   )
 
 
 def native_profile_supported(model: int, param: int) -> bool:
-  return ((model == int(car.CarParams.SafetyModel.hyundaiCanfd) and param in IONIQ6_AOL_SAFETY_PARAMS | set(STOCK_SAFETY_PARAMS.values())) or
-          (model == int(car.CarParams.SafetyModel.hyundai) and param in AOL_WORDS))
+  return (
+    classic_native_profile_supported(model, param)
+    or (model == int(car.CarParams.SafetyModel.hyundaiCanfd) and param in IONIQ6_AOL_SAFETY_PARAMS | set(STOCK_SAFETY_PARAMS.values()))
+    or (model == int(car.CarParams.SafetyModel.hyundai) and param in AOL_WORDS)
+  )
 
 
 def native_accepts_cp(CP, model: int, param: int) -> bool:
+  if qualified_classic_scc(CP, marked_only=True):
+    return classic_native_accepts(CP, model, param)
   if qualified_canfd_stock(CP, marked_only=True):
     return model == int(car.CarParams.SafetyModel.hyundaiCanfd) and param == CP.safetyConfigs[0].safetyParam
   if qualified_non_scc(CP):
-    return (CP.alternativeExperience == AOL_EXPERIENCE and
-            model == int(car.CarParams.SafetyModel.hyundai) and param == aol_word(CP))
-  return ((qualified_ccnc_ev_stock(CP) and model == int(car.CarParams.SafetyModel.hyundaiCanfd) and param == STOCK_SAFETY_PARAMS[CP.carFingerprint]) or
-          qualified_ioniq6(CP))
+    return CP.alternativeExperience == AOL_EXPERIENCE and model == int(car.CarParams.SafetyModel.hyundai) and param == aol_word(CP)
+  return (
+    qualified_ccnc_ev_stock(CP) and model == int(car.CarParams.SafetyModel.hyundaiCanfd) and param == STOCK_SAFETY_PARAMS[CP.carFingerprint]
+  ) or qualified_ioniq6(CP)
 
 
 def native_latch_rejected(CP, native) -> bool:
   # In this exact native policy a requested lateral axis remains permitted
   # through pedal override; denial means the physical authorization was lost.
-  return (qualified_ioniq6(CP) or qualified_non_scc(CP) or qualified_canfd_stock(CP, marked_only=True)) and native.requestedLateral and not native.lateralAllowed
+  return (
+    (qualified_ioniq6(CP) or qualified_non_scc(CP) or qualified_canfd_stock(CP, marked_only=True) or qualified_classic_scc(CP, marked_only=True))
+    and native.requestedLateral
+    and not native.lateralAllowed
+  )
 
 
 def create_intent(CP, settings):
+  if qualified_classic_scc(CP):
+    from openpilot.starpilot.car.hyundai.classic_scc_intent import ClassicSccCardIntent
+
+    return ClassicSccCardIntent(CP, settings)
   if qualified_non_scc(CP):
     from openpilot.starpilot.car.hyundai.forte_intent import ForteCardIntent
+
     return ForteCardIntent(CP, settings)
   from openpilot.starpilot.aol.intent import AolCardIntent
+
   return AolCardIntent(settings, explicit_latch=policy_for(CP).explicit_latch)
 
 
@@ -107,5 +162,4 @@ def ordinary_axis_request_allowed(CP, CS) -> bool:
 def allow_lateral_onset(CP, *, requested, normal_enabled, steering_pressed, previous_active):
   if not (qualified_non_scc(CP) and CP.carFingerprint == HyundaiCAR.HYUNDAI_KONA_NON_SCC):
     return bool(requested)
-  return kona_lateral_onset(permitted=requested, normal_enabled=normal_enabled,
-                            steering_pressed=steering_pressed, previous_active=previous_active)
+  return kona_lateral_onset(permitted=requested, normal_enabled=normal_enabled, steering_pressed=steering_pressed, previous_active=previous_active)
