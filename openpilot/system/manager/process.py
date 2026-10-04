@@ -155,13 +155,41 @@ class NativeProcess(ManagerProcess):
 
 
 class PythonProcess(ManagerProcess):
-  def __init__(self, name, module, should_run, enabled=True, sigkill=False):
+  def __init__(self, name, module, should_run, enabled=True, sigkill=False, restart_on_exit=False):
     self.name = name
     self.module = module
     self.should_run = should_run
     self.enabled = enabled
     self.sigkill = sigkill
     self.launcher = launcher
+    self.restart_on_exit = restart_on_exit
+    self.restart_failures = 0
+    self.restart_at = 0.0
+    self.started_at = 0.0
+
+  def recover(self) -> bool:
+    if not self.restart_on_exit or self.proc is None or self.shutting_down:
+      return True
+    now = time.monotonic()
+    if self.proc.exitcode is None:
+      if now - self.started_at >= 60.0:
+        self.restart_failures = 0
+      return True
+    if self.restart_at == 0.0:
+      self.restart_failures = min(self.restart_failures + 1, 6)
+      self.restart_at = now + min(2 ** (self.restart_failures - 1), 30)
+      cloudlog.warning(f"{self.name} exited with {self.proc.exitcode}; restarting in {self.restart_at - now:.0f}s")
+    if now < self.restart_at:
+      return False
+    self.proc.join()
+    self.proc = None
+    self.restart_at = 0.0
+    return True
+
+  def stop(self, retry=True, block=True, sig=None):
+    self.restart_failures = 0
+    self.restart_at = 0.0
+    return super().stop(retry=retry, block=block, sig=sig)
 
   def start(self) -> None:
     # In case we only tried a non blocking stop we need to stop it before restarting
@@ -174,6 +202,7 @@ class PythonProcess(ManagerProcess):
     cloudlog.info(f"starting python {self.module}")
     self.proc = Process(name=self.name, target=self.launcher, args=(self.module, self.name))
     self.proc.start()
+    self.started_at = time.monotonic()
     self.shutting_down = False
 
 
@@ -233,6 +262,8 @@ def ensure_running(procs: ValuesView[ManagerProcess], started: bool, params: Par
       p.stop(block=False)
 
   for p in running:
+    if isinstance(p, PythonProcess) and not p.recover():
+      continue
     p.start()
 
   return running
