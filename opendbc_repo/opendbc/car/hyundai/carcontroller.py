@@ -19,6 +19,7 @@ from opendbc.car.hyundai import hyundaicanfd, hyundaican
 from opendbc.car.hyundai.hyundaicanfd import CanBus
 from opendbc.car.hyundai.ray_pedal import create_ray_pedal_command, ray_pedal_gas, ray_pedal_enabled
 from opendbc.car.hyundai.ioniq6_longitudinal import Ioniq6LongitudinalPolicy
+from opendbc.car.hyundai.ioniq6_dash_icons import Ioniq6DashIcons
 from opendbc.car.hyundai.g90_longitudinal import G90LongitudinalPolicy
 from opendbc.car.hyundai.gv70_longitudinal import is_gv70, scc_request, suppress_stock_cancel
 from opendbc.car.hyundai.g90_lead import G90LeadState, eligible as g90_lead_eligible
@@ -125,8 +126,10 @@ class CarController(CarControllerBase):
     self.g90_lead_state = G90LeadState() if g90_lead_eligible(CP) else None
     self.g90_longitudinal = (G90LongitudinalPolicy()
                               if CP.carFingerprint == CAR.GENESIS_G90 and CP.openpilotLongitudinalControl else None)
-    self.ioniq6_bsm_enabled = (self.ioniq6_longitudinal is not None and
-                               int(CP.safetyConfigs[-1].safetyParam) in (0x8015, 0x8095, 0x8815, 0x8895))
+    ioniq6_status = (self.ioniq6_longitudinal is not None and
+                     int(CP.safetyConfigs[-1].safetyParam) in (0x8015, 0x8095, 0x8815, 0x8895))
+    self.ioniq6_bsm_enabled = ioniq6_status
+    self.ioniq6_dash_icons = Ioniq6DashIcons() if ioniq6_status else None
     self.ioniq6_bsm_counter = 0
     self.ioniq6_bsm_last_can_ns = 0
     self._ray_pedal = ray_pedal_enabled(CP)
@@ -334,6 +337,8 @@ class CarController(CarControllerBase):
 
   def create_canfd_msgs(self, apply_steer_req, apply_torque, set_speed_in_units, accel, stopping, hud_control, CS, CC, now_nanos):
     can_sends = []
+    ioniq6_lfa_icon = (self.ioniq6_dash_icons.update(self.frame, CC.enabled, CC.latActive)
+                       if self.ioniq6_dash_icons is not None else None)
 
     lka_steering = self.CP.flags & HyundaiFlags.CANFD_LKA_STEER_MSG
     lka_steering_long = lka_steering and self.CP.openpilotLongitudinalControl
@@ -462,7 +467,7 @@ class CarController(CarControllerBase):
           self.last_ccnc_161_ts_ns = CS.ccnc_161_ts_ns
           self.last_ccnc_162_ts_ns = CS.ccnc_162_ts_ns
       else:
-        can_sends.append(hyundaicanfd.create_lfahda_cluster(self.packer, self.CAN, CC.enabled))
+        can_sends.append(hyundaicanfd.create_lfahda_cluster(self.packer, self.CAN, CC.enabled, lfa_icon=ioniq6_lfa_icon))
 
     # blinkers
     if lka_steering and self.CP.flags & HyundaiFlags.CANFD_ENABLE_BLINKERS:
