@@ -113,9 +113,9 @@ defaulted to Eco when Longitudinal Tune was on; the migrated selector defaults
 to Standard to preserve current driving output. Frozen weather, Traffic
 hazard-context braking and other vehicle-special-case policies remain outside
 this slice. The current
-effective follow floor remains 0.75 s; a historical saved TrafficFollow of
-0.5–<0.75 s is reported as unsupported and must be repaired before use, never
-silently raised or rewritten. Offline native tests compare the committed planner and MPC outputs
+effective StarPilot follow floor is 0.5 s, matching saved profile admission.
+Stock planner following remains independent of StarPilot preferences. The
+6 m stopping distance and braking-distance guard remain unchanged. Offline native tests compare the committed planner and MPC outputs
 with the new default path, then verify a selected profile changes real solver
 parameters and plan outputs. No device or physical-timing qualification is
 claimed.
@@ -140,7 +140,7 @@ ordinary lane-state exit. An occupied target-side blindspot, standstill,
 strong braking by either lead, stop intent, force deceleration, driver pedal,
 invalid source or lost authority restores the ordinary follow time immediately.
 The MPC still arbitrates lead and stop targets and enforces its acceleration
-limits. Current MPC input admission supports follow time at or above 0.75 s;
+limits. Current StarPilot MPC input admission supports follow time at or above 0.5 s;
 the frozen StarPilot default was 0.6 s and could accept 0.25 s. Those smaller
 saved requests are rejected, not clamped or silently rewritten. The restored
 behavior and this protective hard-veto reset require vehicle evaluation.

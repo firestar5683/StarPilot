@@ -54,7 +54,7 @@ def _valid(value: object, event_id: str) -> bool:
   return (type(version) is int and version == 1 and
           fields["eventId"] == event_id and
           type(session_id) is str and ID.fullmatch(session_id) is not None and
-          fields["kind"] in ("warning", "alarm") and
+          fields["kind"] in ("warning", "alarm", "selfie") and
           type(mono_time) is int and 0 <= mono_time < 2**63 and
           type(wall_time) is int and 0 <= wall_time < 2**63)
 
@@ -152,7 +152,8 @@ class EventStore:
                 if count >= MAX_EVENTS:
                   raise StorageUnavailable("Event storage is full")
           for camera, body in (images or {}).items():
-            if camera not in ("wide", "cabin") or not isinstance(body, bytes) or not 4 <= len(body) <= 1_000_000 or not body.startswith(b"\xff\xd8") or not body.endswith(b"\xff\xd9"):
+            if (camera not in ("wide", "cabin") or not isinstance(body, bytes) or not 4 <= len(body) <= 1_000_000 or
+                not body.startswith(b"\xff\xd8") or not body.endswith(b"\xff\xd9")):
               raise ValueError("Invalid event image")
           if images:
             os.mkdir(event_id, mode=0o700, dir_fd=directory)

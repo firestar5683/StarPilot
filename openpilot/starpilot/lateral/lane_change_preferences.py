@@ -1,6 +1,6 @@
 """Optional, session-scoped preferences for driver-nudged lane changes."""
 
-from dataclasses import dataclass
+from dataclasses import dataclass, replace
 import json
 import math
 import os
@@ -13,7 +13,8 @@ from openpilot.common.constants import CV
 KEY = "LaneChangePreferences"
 MAX_BYTES = 512
 MAX_SPEED_MPS = 100 * CV.MPH_TO_MS
-DEFAULT_SPEED_MPS = 0.0
+MINIMUM_SPEED_MPS = 5 * CV.MPH_TO_MS
+DEFAULT_SPEED_MPS = MINIMUM_SPEED_MPS
 
 
 @dataclass(frozen=True)
@@ -161,4 +162,5 @@ def read_saved(params: Any) -> SavedLaneChange:
 
 
 def effective(saved: SavedLaneChange) -> LaneChangePolicy:
-  return saved.policy if saved.readable and saved.valid else LaneChangePolicy()
+  policy = saved.policy if saved.readable and saved.valid else LaneChangePolicy()
+  return replace(policy, minimum_speed_mps=max(MINIMUM_SPEED_MPS, policy.minimum_speed_mps))

@@ -14,7 +14,7 @@ from openpilot.starpilot.longitudinal.profile_document import default_personalit
 from openpilot.starpilot.longitudinal.profile_runtime import read_traffic_settings
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
 from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsRequest, row_change
-from openpilot.starpilot.ui.traffic_feature import FOLLOW, REPAIR_FOLLOW, SWITCH
+from openpilot.starpilot.ui.traffic_feature import FOLLOW
 
 
 def required_change(row: FeatureRow, direction: int = 1) -> FeatureSettingsRequest:
@@ -42,13 +42,10 @@ class TrafficFeatureTests(unittest.TestCase):
   def test_saved_scalar_rows_and_category_editor_are_real_while_master_off(self):
     traffic = self.owner.snapshot("traffic", parked=True, system_long=True, lateral_context=False, metric=False)
     self.assertEqual(traffic.title, "Traffic Profile")
-    self.assertEqual((self.row(SWITCH).value, self.row(FOLLOW).value), ("On", "0.75"))
+    self.assertEqual(self.row(FOLLOW).value, "0.75")
     self.assertTrue(self.row(FOLLOW).available)
     self.assertIn("inactive while Custom Driving Profiles is Off", self.row(FOLLOW).reason)
-    self.assertEqual([row.page for row in traffic.rows if row.page],
-                     ["traffic/acceleration", "traffic/braking", "traffic/following"])
-    self.assertTrue(self.owner.apply(required_change(self.row(SWITCH), -1)))
-    self.assertEqual(self.params.get_bool(SWITCH), False)
+    self.assertNotIn("TrafficPersonalityProfile", [row.key for row in traffic.rows])
     self.assertTrue(self.owner.apply(required_change(self.row(FOLLOW))))
     self.assertEqual(self.params.get(FOLLOW), 0.8)
     jerk = self.row("TrafficJerkAcceleration")
@@ -59,54 +56,51 @@ class TrafficFeatureTests(unittest.TestCase):
     category = self.owner.snapshot("traffic/braking", parked=True, system_long=True, lateral_context=False, metric=False)
     preset = category.rows[0]
     self.assertEqual(preset.key, "profile:traffic:braking")
-    self.assertTrue(self.owner.apply(required_change(preset)))
+    self.assertTrue(self.owner.apply(FeatureSettingsRequest(
+      preset.key, preset.source, "standard", vehicle_fingerprint=preset.vehicle_fingerprint,
+      capability=preset.capability, dependencies=preset.dependencies)))
     document = migrate_profile_document(Path(self.params.get_param_path("LongitudinalPersonalityProfiles")).read_bytes())
     assert document is not None
     self.assertEqual(document["profiles"]["traffic"]["braking"]["preset"], "standard")
     self.assertFalse(document["enabled"])
     self.params.put_bool("CustomPersonalities", True, block=True)
     self.assertIn("apply when Traffic mode is selected", self.row(FOLLOW).reason)
-    self.params.put_bool(SWITCH, True, block=True)
-    self.assertIn("apply when Traffic mode is selected", self.row(FOLLOW).reason)
 
-  def test_below_floor_saved_follow_requires_explicit_confirmed_repair(self):
+  def test_half_second_saved_follow_remains_editable_without_repair(self):
     path = Path(self.params.get_param_path(FOLLOW))
     path.write_bytes(b"0.5")
-    self.assertEqual(self.row(FOLLOW).value, "0.5")
-    self.assertFalse(self.row(FOLLOW).available)
+    row = self.row(FOLLOW)
+    self.assertEqual((row.value, row.minimum, row.maximum), ("0.5", 0.5, 3.0))
+    self.assertTrue(row.available)
     self.assertEqual(path.read_bytes(), b"0.5")
-    repair = self.row(REPAIR_FOLLOW)
-    self.assertTrue(repair.available)
-    request = FeatureSettingsRequest(repair.key, repair.source, "confirm", confirmation=True,
-                                     vehicle_fingerprint=repair.vehicle_fingerprint,
-                                     capability=repair.capability, dependencies=repair.dependencies)
-    self.assertFalse(self.owner.apply(FeatureSettingsRequest(repair.key, repair.source, "confirm",
-                                                              vehicle_fingerprint=repair.vehicle_fingerprint,
-                                                              capability=repair.capability, dependencies=repair.dependencies)))
-    self.assertEqual(path.read_bytes(), b"0.5")
-    self.assertTrue(self.owner.apply(request))
-    self.assertEqual(path.read_bytes(), b"0.75")
-    self.assertFalse(self.owner.apply(request))
+    self.assertTrue(self.owner.apply(required_change(row)))
+    self.assertEqual(path.read_bytes(), b"0.55")
+    self.assertFalse(self.owner.apply(required_change(row)))
 
-  def test_invalid_saved_switch_is_not_displayed_as_off(self):
-    Path(self.params.get_param_path(SWITCH)).write_bytes(b"invalid")
-    row = self.row(SWITCH)
-    self.assertEqual(row.value, "Invalid saved value")
-    self.assertFalse(row.available)
+  def test_invalid_saved_follow_remains_unavailable_and_unchanged(self):
+    path = Path(self.params.get_param_path(FOLLOW))
+    for raw in (b"invalid", b"0.49", b"3.01"):
+      path.write_bytes(raw)
+      row = self.row(FOLLOW)
+      self.assertEqual(row.value, "Invalid saved value")
+      self.assertFalse(row.available)
+      self.assertEqual(path.read_bytes(), raw)
 
-  def test_repair_row_and_commit_require_parked_repair_authority(self):
+  def test_half_second_edit_uses_long_authority_without_parked_repair(self):
     path = Path(self.params.get_param_path(FOLLOW))
     path.write_bytes(b"0.5")
+    self.parked = False
     self.owner.authority = lambda group: group == "long"
-    row = self.row(REPAIR_FOLLOW)
-    self.assertFalse(row.available)
-    request = FeatureSettingsRequest(row.key, row.source, "confirm", confirmation=True,
-                                     vehicle_fingerprint=row.vehicle_fingerprint,
-                                     capability=row.capability, dependencies=row.dependencies)
+    row = self.row(FOLLOW)
+    self.assertTrue(row.available)
+    self.assertTrue(self.owner.apply(required_change(row)))
+    self.assertEqual(path.read_bytes(), b"0.55")
+    request = required_change(self.row(FOLLOW))
+    self.owner.authority = lambda group: False
     self.assertFalse(self.owner.apply(request))
-    self.assertEqual(path.read_bytes(), b"0.5")
+    self.assertEqual(path.read_bytes(), b"0.55")
 
-  def test_below_floor_traffic_curve_must_select_supported_preset(self):
+  def test_half_second_traffic_curve_can_edit_without_replacing_preset(self):
     profiles = default_personality_profiles(False)
     profiles["traffic"]["following"] = {"preset": "custom", "curve": [0.5] * 10}
     raw = serialize_personality_profiles(profiles, False, False, enabled=False)
@@ -114,19 +108,17 @@ class TrafficFeatureTests(unittest.TestCase):
     path.write_bytes(raw.encode())
     page = self.owner.snapshot("traffic/following", parked=True, system_long=True, lateral_context=False, metric=False)
     self.assertEqual(page.rows[0].value, "Custom")
-    self.assertFalse(page.rows[1].available)
-    self.assertIn("supported following preset", page.rows[1].reason)
-    preset = page.rows[0]
-    invalid = FeatureSettingsRequest(preset.key, preset.source, "custom", vehicle_fingerprint=preset.vehicle_fingerprint,
-                                     capability=preset.capability, dependencies=preset.dependencies)
-    self.assertFalse(self.owner.apply(invalid))
+    point = page.rows[1]
+    self.assertTrue(point.available)
+    self.assertEqual(point.minimum, 0.5)
     self.assertEqual(path.read_bytes(), raw.encode())
-    supported = FeatureSettingsRequest(preset.key, preset.source, "dom_default", vehicle_fingerprint=preset.vehicle_fingerprint,
-                                       capability=preset.capability, dependencies=preset.dependencies)
-    self.assertTrue(self.owner.apply(supported))
+    invalid = FeatureSettingsRequest(point.key, point.source, "0.49", vehicle_fingerprint=point.vehicle_fingerprint,
+                                     capability=point.capability, dependencies=point.dependencies)
+    self.assertFalse(self.owner.apply(invalid))
+    self.assertTrue(self.owner.apply(required_change(point)))
     document = migrate_profile_document(path.read_bytes())
     assert document is not None
-    self.assertEqual(document["profiles"]["traffic"]["following"]["preset"], "dom_default")
+    self.assertEqual(document["profiles"]["traffic"]["following"], {"preset": "custom", "curve": [0.55] + [0.5] * 9})
 
   def test_category_edit_rechecks_system_long_capability_under_lock(self):
     row = self.owner.snapshot("traffic/braking", parked=True, system_long=True, lateral_context=False, metric=False).rows[0]
@@ -159,7 +151,7 @@ class TrafficFeatureTests(unittest.TestCase):
     acceleration = select("acceleration", "custom")
     self.assertEqual((acceleration["curve"][0], acceleration["curve"][-1]), (1.1, 0.23))
     braking = select("braking", "custom")
-    self.assertEqual(braking["curve"], [0.42] * 10)
+    self.assertEqual(braking["curve"], [0.6] * 10)
     self.assertEqual(self.owner.snapshot("traffic/braking", parked=True, system_long=True,
                                         lateral_context=False, metric=False).rows[1].minimum, 0.35)
 

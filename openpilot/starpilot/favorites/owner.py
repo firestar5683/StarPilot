@@ -86,7 +86,7 @@ class FavoritesOwner:
     for index, slot in enumerate(saved):
       action = options.get(slot["key"])
       assigned = slot["enabled"] and slot["key"] is not None
-      available = bool(readable and valid and assigned and action and action.available and action.invoke is not None)
+      available = bool(readable and valid and assigned and action and action.available and (action.invoke is not None or action.invoke_value is not None))
       label = slot["label"] or (action.label if action else slot["key"]) or ""
       reason = ("Saved Quick Select are unavailable" if not readable or not valid else
                 "Choose a control" if not slot["key"] else "Quick Select is disabled" if not slot["enabled"] else
@@ -153,7 +153,7 @@ class FavoritesOwner:
     action = self.actions().get(request.key)
     if action is None:
       return FavoriteResult(False, "This saved control is not available in this build")
-    if not action.available or action.invoke is None:
+    if not action.available or action.invoke is None and action.invoke_value is None:
       return FavoriteResult(False, action.reason or "Quick Select is unavailable")
     if action.token != request.action_token:
       return FavoriteResult(False, "Control state changed. Try again.")
@@ -161,7 +161,8 @@ class FavoritesOwner:
     if not fresh or current != raw:
       return FavoriteResult(False, "Quick Select changed. Try again.")
     try:
-      if not action.invoke():
+      applied = action.invoke_value(slot.get("value") if slot.get("value") is not None else 30) if action.invoke_value is not None else action.invoke()
+      if not applied:
         return FavoriteResult(False, "Control is unavailable or changed. Try again.")
       updated = self.actions().get(request.key)
       return FavoriteResult(True, action.label, updated.state_label if updated else "Done")

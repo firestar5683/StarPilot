@@ -2,10 +2,12 @@
 
 from __future__ import annotations
 
+from collections import deque
 from dataclasses import asdict, replace
 from functools import lru_cache
 from html import escape, unescape
 import os
+import math
 from pathlib import Path
 import time
 from typing import Any
@@ -63,9 +65,12 @@ from openpilot.starpilot.ui.onroad_favorites import OnroadFavorites
 from openpilot.starpilot.ui.onroad_dm import DriverMonitorLayer
 from openpilot.starpilot.favorites.owner import FavoritesOwner
 from openpilot.starpilot.controllers.cruise_action import CruiseActionPublisher, ui_authority as cruise_action_authority
+from openpilot.starpilot.controllers.wheel_actions import WheelConsumer
 from openpilot.starpilot.controllers.mode_actions import ModeActionPublisher, producer_available, authority as mode_action_authority
-from openpilot.starpilot.favorites.actions import BOOKMARK, CYCLE_PERSONALITY, EXPERIMENTAL, INCREASE_SPEED, DECREASE_SPEED, TRAFFIC, SWITCHBACK, SCREEN_OFF, mapped_actions
+from openpilot.starpilot.favorites.actions import (BOOKMARK, CYCLE_PERSONALITY, EXPERIMENTAL, INCREASE_SPEED, DECREASE_SPEED, SET_SPEED,
+                                                  FORCE_COAST, PULSE_GLIDE, DISENGAGE, TRAFFIC, SWITCHBACK, SCREEN_OFF, mapped_actions)
 from openpilot.starpilot.favorites.state import FavoriteAction
+from openpilot.starpilot.saved_source import read_saved
 from openpilot.starpilot.feature_runtime import enabled as feature_enabled
 from openpilot.starpilot.conditional_mode.preferences import PreferenceError, SavedPreferences, decode_preferences
 from openpilot.starpilot.conditional_mode.policy import ModeChoice
@@ -213,6 +218,10 @@ class StarShellSession:
         self._visual_preview_flags = parse_flags(raw_preview)
     self._visual_preview_start_ns = time.monotonic_ns()
     self._native_favorite_actions = dict
+    self._wheel_sock = messaging.sub_sock("slcCruiseEvent", conflate=False)
+    self._wheel_pending = deque(maxlen=32)
+    self._wheel_consumer = WheelConsumer()
+    self._wheel_personality = None
     self.conditional_actions: ConditionalUiActionOwner | None = None
     self.cruise_actions = CruiseActionPublisher()
     self.favorites_owner = FavoritesOwner(ui_state.params, self._favorite_actions, self._favorite_authority)
@@ -280,6 +289,7 @@ class StarShellSession:
           context, ui_state.sm, ui_state.CP, _slc_action_publisher(), now_ns=time.monotonic_ns())))
       return guarded_long(experimental)
 
+    self._wheel_personality = lambda: guarded_long(lambda: personality((int(ui_state.personality) - 1) % 3))
     actions = {
       BOOKMARK: FavoriteAction(BOOKMARK, "Bookmark", available=available, reason="" if available else "Onroad only",
                                token=repr((drive, available)), invoke=lambda: guarded(bookmark)),
@@ -289,15 +299,34 @@ class StarShellSession:
                                       token=repr((drive, current_personality, long_available)),
                                       invoke=lambda: guarded_long(lambda: personality((int(ui_state.personality) + 1) % 3))),
       EXPERIMENTAL: FavoriteAction(EXPERIMENTAL, "Experimental Mode", kind="toggle",
-                                  state_label=("Overridden Chill" if state.conditional_effective is not None and state.conditional_effective.reason == 'manual_chill' else
-                                               "Forced Experimental" if state.conditional_effective is not None and state.conditional_effective.reason == 'manual_experimental' else
-                                               "Automatic Experimental" if state.conditional_effective is not None and state.conditional_effective.effective_experimental else
+                                  state_label=("Overridden Chill" if (state.conditional_effective is not None and
+                                                                   state.conditional_effective.reason == 'manual_chill') else
+                                               "Forced Experimental" if (state.conditional_effective is not None and
+                                                                          state.conditional_effective.reason == 'manual_experimental') else
+                                               "Automatic Experimental" if (state.conditional_effective is not None and
+                                                                             state.conditional_effective.effective_experimental) else
                                                "On" if state.experimental_enabled else "Off"), available=exp_available,
                                   reason=("Active longitudinal control and current conditional status required" if conditional else
                                           "Confirmation and longitudinal control required"),
                                   token=repr((drive, state.experimental_enabled, exp_available, conditional,
                                               context.token if context is not None else None)), invoke=toggle_experimental),
     }
+
+    from openpilot.starpilot.controllers.selfie import SelfieCapture, authority as selfie_authority
+    from openpilot.starpilot.controllers.wheel_actions import cp_fingerprint, eligible
+    from openpilot.starpilot.favorites.actions import SELFIE
+    if not hasattr(self, 'selfie_capture'):
+      self.selfie_capture = SelfieCapture()
+    selfie_drive = int(getattr(ui_state.sm['deviceState'], 'startedMonoTime', 0))
+    selfie_fingerprint = cp_fingerprint(ui_state.CP) if eligible(ui_state.CP) else ''
+    def selfie_permitted():
+      return getattr(self, "_mode", None) == ShellMode.ONROAD and selfie_authority(ui_state.sm, ui_state.CP,
+        drive_id=selfie_drive, fingerprint=selfie_fingerprint, now_ns=time.monotonic_ns())
+    selfie_allowed = available and selfie_permitted() and not self.selfie_capture.busy
+    actions[SELFIE] = FavoriteAction(SELFIE, "Selfie", available=selfie_allowed,
+      reason="Current cabin camera and drive required" if not selfie_allowed else "",
+      token=repr((selfie_drive, selfie_fingerprint, selfie_allowed)),
+      invoke=lambda: self._favorite_authority() and self.selfie_capture.submit(selfie_permitted))
 
     from openpilot.selfdrive.ui.ui_state import device
     actions[SCREEN_OFF] = FavoriteAction(SCREEN_OFF, "Toggle Screen Off", kind="toggle",
@@ -319,8 +348,18 @@ class StarShellSession:
         available=allowed, reason="Current qualified control required" if not allowed else "",
         token=repr((drive, mode, requested, allowed)), invoke=toggle_mode)
 
+    for key, label, mode in ((FORCE_COAST, "Force Coasting", "coast"), (PULSE_GLIDE, "Pulse and Glide", "pulse"),
+                             (DISENGAGE, "Disengage Openpilot", "disengage")):
+      now_ns = time.monotonic_ns()
+      allowed = (self._favorite_authority() and mode_action_authority(ui_state.sm, ui_state.CP, now_ns, mode) and
+                 (mode == "disengage" or not ui_state.params.get_bool("SafeMode") and producer_available(ui_state.sm, now_ns=now_ns)))
+      def apply_mode(mode=mode):
+        return bool(self._favorite_authority() and (mode == "disengage" or not ui_state.params.get_bool("SafeMode")) and
+                    self.mode_actions.dispatch(mode, ui_state.sm, ui_state.CP, _slc_action_publisher(), now_ns=time.monotonic_ns()))
+      actions[key] = FavoriteAction(key, label, available=allowed, token=repr((drive, mode, allowed)),
+                                   reason="Fresh onroad control required", invoke=apply_mode)
     if ui_state.CP is not None and not ui_state.CP.pcmCruise:
-      current = cruise_action_authority(ui_state.sm, ui_state.CP, time.monotonic_ns())
+      current = self._favorite_authority() and cruise_action_authority(ui_state.sm, ui_state.CP, time.monotonic_ns())
       def change_speed(increase):
         return bool(not ui_state.params.get_bool("SafeMode") and self.cruise_actions.dispatch(
           increase, ui_state.sm, ui_state.CP, _slc_action_publisher(), now_ns=time.monotonic_ns()))
@@ -328,7 +367,61 @@ class StarShellSession:
         actions[key] = FavoriteAction(key, label, available=current and not ui_state.params.get_bool("SafeMode"),
                                      reason="Active software cruise control required", token=repr((drive, current)),
                                      invoke=lambda increase=increase: change_speed(increase))
+      def set_speed(value):
+        if not self._favorite_authority() or type(value) not in (int, float) or not math.isfinite(value):
+          return False
+        metric_raw, readable = read_saved(ui_state.params, "IsMetric", 8)
+        if not readable or metric_raw not in (None, b"0", b"1"):
+          return False
+        metric = metric_raw == b"1"
+        if not (8 <= value <= 145 if metric else 5 <= value <= 90):
+          return False
+        return bool(not ui_state.params.get_bool("SafeMode") and self.cruise_actions.dispatch(
+          True, ui_state.sm, ui_state.CP, _slc_action_publisher(), now_ns=time.monotonic_ns(),
+          target_mps=float(value) * (1 / 3.6 if metric else 0.44704)))
+      actions[SET_SPEED] = FavoriteAction(SET_SPEED, "Set Speed To", available=current and not ui_state.params.get_bool("SafeMode"),
+        reason="Active software cruise required; speed uses device units", token=repr((drive, current)), invoke_value=set_speed)
     return actions
+
+  def _poll_wheel(self, now_ns):
+    for _ in range(32):
+      event = messaging.recv_one_or_none(self._wheel_sock)
+      if event is None:
+        break
+      if event.valid and str(event.slcCruiseEvent.kind) == "wheelAction":
+        self._wheel_pending.append(event)
+    for _ in range(len(self._wheel_pending)):
+      event = self._wheel_pending.popleft()
+      wire = event.slcCruiseEvent.wheelAction
+      if (int(wire.sourceCarStateMonoTime) > int(ui_state.sm.logMonoTime["carState"]) or
+          int(wire.sourceCarControlMonoTime) > int(ui_state.sm.logMonoTime["carControl"])) and now_ns <= int(wire.validUntilMonoTime):
+        self._wheel_pending.append(event)
+        continue
+      command = self._wheel_consumer.accept(event, ui_state.params, ui_state.CP, ui_state.sm, now_ns=now_ns)
+      if command is None or command.action == 0 or not self._favorite_authority():
+        continue
+      actions = self._native_favorite_actions()
+      try:
+        if command.action == 1:
+          if self._wheel_personality is not None:
+            self._wheel_personality()
+        elif command.action in (5, 7, 8):
+          key = {5: EXPERIMENTAL, 6: TRAFFIC, 7: SWITCHBACK, 8: BOOKMARK}[command.action]
+          action = actions.get(key)
+          if action is not None and action.available and action.invoke is not None:
+            action.invoke()
+        elif command.action == 10 and self.slc_actions is not None:
+          from openpilot.starpilot.ui.onroad_state import SlcActionKind
+          state = self._live_slc_message(now_ns)
+          if state is not None and not state.hasPending:
+            self.slc_actions.dispatch(SlcUiRequest(SlcActionKind.ADOPT, str(state.sessionId), int(state.decisionId),
+                                                  int(state.presentationId), float(state.speedLimit)))
+        elif command.action in (11, 12, 13):
+          slot = self.favorites_owner.snapshot().slots[command.action - 11]
+          if slot.available and slot.request is not None:
+            self.favorites_owner.invoke(slot.request)
+      except (OSError, RuntimeError, ValueError, TypeError):
+        pass
 
   def _conditional_action_owner(self):
     if self.conditional_actions is None:
@@ -412,7 +505,8 @@ class StarShellSession:
     cp = ui_state.CP
     if cp is None or not getattr(cp, "carFingerprint", ""):
       return False
-    if group in ("lane_change", "conditional", "conditional_wheel", "switchback_wheel", "aol_wheel", "lane", "long", "long_output", "slc", "torque", "aol", "vehicle"):
+    if group in ("lane_change", "conditional", "conditional_wheel", "switchback_wheel", "aol_wheel",
+                 "lane", "long", "long_output", "slc", "torque", "aol", "vehicle"):
       if not preference_authority:
         return False
       if group == "vehicle":
@@ -528,7 +622,8 @@ class StarShellSession:
     drive_row = FeatureRow("drive_state", "Force Drive State", LABELS[drive["mode"]],
                            source=drive["revision"].encode() if drive["revision"] else None,
                            choices=("Auto", "Offroad", "Onroad"), available=drive["available"],
-                           reason=f"Device: {drive["effective"] or 'unavailable'}. Offroad stops services; Onroad requires Park and disengagement. Auto follows ignition.")
+                           reason=f"Device: {drive["effective"] or 'unavailable'}. " +
+                                  "Offroad stops services; Onroad requires Park and disengagement. Auto follows ignition.")
     return replace(display, title="System", subtitle="Display, parked power, and offline map status.",
                    rows=display.rows + power.rows + maps.rows + (drive_row,))
 
@@ -659,7 +754,7 @@ class StarShellSession:
           lambda: confirmed(DialogResult.CONFIRM), red=True))
       else:
         from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
-        gui_app.push_widget(ConfirmDialog("Switch to Offroad and stop driving services? Park and disengage first. "
+        gui_app.push_widget(ConfirmDialog("Switch to Offroad and stop driving services? Park and disengage first. " +
                                          "Stay parked until you return to Auto.", "Force Offroad", callback=confirmed))
       return
     try:
@@ -709,7 +804,8 @@ class StarShellSession:
       subject = ("Restore the default left and right camera crops?" if row.key == PIP_RESET else
                  f"Use the {size} camera format with proportional starting crops? " +
                  "Check alignment on the device.")
-      question = subject + " The saved preview switch will not change. If it is On, the preview may resume on the next drive when a fresh camera frame is available."
+      question = (subject + " The saved preview switch will not change. If it is On, " +
+                  "the preview may resume on the next drive when a fresh camera frame is available.")
       gui_app.push_widget(ConfirmDialog(question,
                                         "Restore", callback=confirmed))
     self._snapshot_cache = None
@@ -949,6 +1045,7 @@ class StarShellSession:
     self._rendered_settings_pipeline = (bool(ui_state.started), ui_state.started_frame) if mode == ShellMode.SETTINGS else None
     if mode == ShellMode.ONROAD:
       self._update_favorites(snapshot.onroad, time.monotonic())
+      self._poll_wheel(time.monotonic_ns())
     else:
       self.favorites.cancel()
     if mode != ShellMode.ONROAD or not snapshot.onroad.camera_available:

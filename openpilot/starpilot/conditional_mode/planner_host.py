@@ -30,7 +30,7 @@ def selected_follow_time(planner) -> float | None:
     value = float(planner.mpc.params[0, 4])
   except (AttributeError, IndexError, TypeError, ValueError, OverflowError):
     return None
-  return value if math.isfinite(value) and 0.75 <= value <= 3.0 else None
+  return value if math.isfinite(value) and 0.5 <= value <= 3.0 else None
 
 
 class ConditionalPlannerHost:

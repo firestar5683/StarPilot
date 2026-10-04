@@ -45,14 +45,14 @@ def axis_status_color(state: OnroadState) -> rl.Color:
     return rl.Color(145, 155, 149, 255)
   if state.lateral_active and state.switchback_mode:
     return rl.Color(139, 108, 197, 255)
+  if stop_active(state):
+    return rl.Color(218, 111, 37, 255)
   if state.longitudinal_active and state.traffic_mode:
     return rl.Color(201, 34, 49, 255)
   mode = state.conditional_effective if state.longitudinal_active else None
   if mode is not None and mode.reason == 'manual_chill':
     return rl.Color(255, 214, 0, 255)
   if mode is not None and mode.effective_experimental:
-    return rl.Color(218, 111, 37, 255)
-  if stop_active(state):
     return rl.Color(218, 111, 37, 255)
   if state.lateral_active and state.longitudinal_active:
     if state.experimental_enabled and state.conditional_configured in (None, ModeChoice.STOCK):
@@ -168,7 +168,8 @@ class OnroadView:
     traffic_color = (rl.Color(200, 32, 48, 255) if state.traffic_display.state == 'active' else
                      rl.Color(255, 155, 63, 255) if state.traffic_display.state in ('paused', 'unavailable_profile', 'unavailable_source') else
                      rl.Color(165, 175, 180, 255))
-    self.fonts.draw(state.traffic_display.label, FontRole.SEMI_BOLD, 25, 1390 + (self.projection_viewport[0] - 1860 if self.projection_viewport else 0), y, traffic_color)
+    x = 1390 + (self.projection_viewport[0] - 1860 if self.projection_viewport else 0)
+    self.fonts.draw(state.traffic_display.label, FontRole.SEMI_BOLD, 25, x, y, traffic_color)
 
   def _large(self, state: OnroadState) -> None:
     width, height = self.projection_viewport or (1860, 1080)

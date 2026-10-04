@@ -11,11 +11,8 @@ import threading
 import time
 from typing import Protocol
 
-from openpilot.starpilot.ui.feature_settings_owner import AOL_BUTTONS, LANE_LIVE_KEYS, FeatureSettingsOwner
+from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
 from openpilot.starpilot.ui.controller_feature import SETUP_ACTION, SETUP_QUESTION
-from openpilot.starpilot.ui.lane_change_feature import KEYS as LANE_CHANGE_KEYS
-from openpilot.starpilot.conditional_mode.button_actions import BUTTON_PREFIX
-from openpilot.starpilot.longitudinal.lead_approach_runtime import KEY as LEAD_APPROACH_KEY
 from openpilot.starpilot.ui.vehicle_bool import VEHICLE_BOOL_KEYS, confirmation_question as vehicle_question
 from openpilot.starpilot.ui.conditional_feature import confirmation_question as conditional_question
 from openpilot.starpilot.ui.appearance_owner import AppearanceOwner, LABELS as APPEARANCE_LABELS
@@ -373,8 +370,6 @@ def _question(row: FeatureRow, request: FeatureSettingsRequest) -> str:
     return conditional_question(request, row.label, row.unit)
   if key == "reset_profiles":
     return "Reset invalid saved profiles and turn their saved switch off?"
-  if key == "long_repair:TrafficFollow":
-    return "Replace the unsupported saved Traffic follow time with 0.75 s? Other saved Traffic values stay unchanged."
   if key in ("profile:global_acceleration", "profile:global_braking"):
     return (f"Save {row.label.lower()} as {request.value}? Personalities set to Selected Profile follow this choice; " +
             "explicit personality overrides stay unchanged.")

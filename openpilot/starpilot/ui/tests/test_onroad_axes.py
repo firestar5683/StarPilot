@@ -11,7 +11,7 @@ import pyray as rl
 from openpilot.starpilot.ui import onroad
 from openpilot.starpilot.ui.onroad import axis_status_color
 from openpilot.starpilot.ui.onroad_compact_widgets import CompactHudRenderer
-from openpilot.starpilot.ui.onroad_large_widgets import DISENGAGED, ENGAGED, SetSpeedWidget, SpeedLimitWidget
+from openpilot.starpilot.ui.onroad_large_widgets import DISENGAGED, UnifiedSpeedWidget
 from openpilot.starpilot.ui.onroad_state import OnroadInput
 from openpilot.starpilot.ui.onroad_torque import TorqueBarWidget
 from openpilot.starpilot.ui.presentation import Profile
@@ -28,7 +28,7 @@ def rgba(color: rl.Color) -> tuple[int, int, int, int]:
 class TestOnroadAxes(unittest.TestCase):
   def setUp(self):
     self.ui = ui_fake()
-    self.ui.CP = NS(openpilotLongitudinalControl=True, pcmCruise=False)
+    self.ui.CP = NS(carFingerprint='', openpilotLongitudinalControl=True, pcmCruise=False)
     car = self.ui.sm["carState"]
     car.canValid = True
     car.canTimeout = False
@@ -53,16 +53,11 @@ class TestOnroadAxes(unittest.TestCase):
         self.assertEqual(rgba(axis_status_color(state)), expected)
         fonts = Mock()
         fonts.measure.return_value = NS(width=20, height=10)
+        fonts.vertical_ink.return_value = (0, 10)
         with patch("openpilot.starpilot.ui.onroad_large_widgets.draw_control_card"):
-          SetSpeedWidget(fonts).render(rl.Rectangle(30, 30, 1800, 1020), state)
+          UnifiedSpeedWidget(fonts).render(rl.Rectangle(30, 30, 1800, 1020), state)
         label_color = fonts.draw.call_args_list[0].args[-1]
-        self.assertEqual(rgba(label_color), rgba(ENGAGED if longitudinal else DISENGAGED))
-        fonts.reset_mock()
-        with patch("openpilot.starpilot.ui.onroad_large_widgets.draw_control_card"), \
-             patch("openpilot.starpilot.ui.onroad_large_widgets.rl.draw_rectangle_rounded"), \
-             patch("openpilot.starpilot.ui.onroad_large_widgets.rl.draw_rectangle_rounded_lines_ex"):
-          SpeedLimitWidget(fonts).render(rl.Rectangle(88, 75, 176, 196), state)
-        self.assertEqual(rgba(fonts.draw.call_args_list[0].args[-1]), rgba(ENGAGED if longitudinal else DISENGAGED))
+        self.assertEqual(rgba(label_color), rgba(rl.Color(188, 132, 255, 255) if longitudinal else DISENGAGED))
         compact = CompactHudRenderer(fonts, Path("/unused"))
         with patch.object(compact, "prepare"), patch("openpilot.starpilot.ui.onroad_compact_widgets.rl.draw_texture_pro"), \
              patch("openpilot.starpilot.ui.onroad_compact_widgets.rl.draw_circle_gradient"):
@@ -88,6 +83,20 @@ class TestOnroadAxes(unittest.TestCase):
     self.ui.sm.logMonoTime['selfdriveState'] = NOW - 300_000_000
     self.assertFalse(self.state(True, False).longitudinal_overridden)
 
+  def test_traffic_returns_after_conditional_stop_without_changing_intent(self):
+    from openpilot.starpilot.conditional_mode.policy import ModeChoice
+    from openpilot.starpilot.ui.conditional_status import ConditionalDisplay
+
+    traffic = replace(self.state(True, True), traffic_mode=True)
+    stopping = replace(traffic, conditional_effective=ConditionalDisplay(ModeChoice.CEM, True, 'cem_stop', 8, 'test', 1))
+    self.assertEqual(rgba(axis_status_color(traffic)), (201, 34, 49, 255))
+    for _ in range(3):
+      self.assertEqual(rgba(axis_status_color(stopping)), (218, 111, 37, 255))
+      self.assertTrue(stopping.traffic_mode)
+      self.assertEqual(rgba(axis_status_color(traffic)), (201, 34, 49, 255))
+      self.assertTrue(traffic.traffic_mode)
+    self.assertEqual(rgba(axis_status_color(replace(stopping, longitudinal_overridden=True))), (145, 155, 149, 255))
+
   def test_experimental_border_requires_active_combined_axes(self):
     combined = replace(self.state(True, True), experimental_enabled=True)
     self.assertEqual(rgba(axis_status_color(combined)), (218, 111, 37, 255))
@@ -110,8 +119,11 @@ class TestOnroadAxes(unittest.TestCase):
           view.extra_overlays = None
           view.alert = Mock()
           view.torque_bar = Mock()
-          view.set_speed = Mock()
-          view.speed_limit = Mock()
+          view.unified_speed = Mock()
+          view.navigation = Mock()
+          view.background_layer = None
+          view.projection_viewport = None
+          view._corner_cache = Mock()
           view.current_speed = Mock()
           view.steering_wheel = Mock()
           view.compact_hud = Mock()
@@ -127,7 +139,7 @@ class TestOnroadAxes(unittest.TestCase):
           self.assertEqual(rgba(border.call_args.args[-1]), rgba(axis_status_color(state)))
 
   def test_stock_cruise_is_distinct_from_system_long_and_lateral(self):
-    self.ui.CP = NS(openpilotLongitudinalControl=False, pcmCruise=True)
+    self.ui.CP = NS(carFingerprint='', openpilotLongitudinalControl=False, pcmCruise=True)
     self.ui.sm["carState"].cruiseState.enabled = True
     state = self.state(False, False)
     self.assertTrue(state.stock_cruise_active)
@@ -136,9 +148,10 @@ class TestOnroadAxes(unittest.TestCase):
     self.assertEqual(rgba(axis_status_color(state)), (18, 40, 57, 255))
     fonts = Mock()
     fonts.measure.return_value = NS(width=20, height=10)
+    fonts.vertical_ink.return_value = (0, 10)
     with patch("openpilot.starpilot.ui.onroad_large_widgets.draw_control_card"):
-      SetSpeedWidget(fonts).render(rl.Rectangle(30, 30, 1800, 1020), state)
-    self.assertEqual(rgba(fonts.draw.call_args_list[0].args[-1]), rgba(ENGAGED))
+      UnifiedSpeedWidget(fonts).render(rl.Rectangle(30, 30, 1800, 1020), state)
+    self.assertEqual(rgba(fonts.draw.call_args_list[0].args[-1]), rgba(rl.Color(188, 132, 255, 255)))
     compact = CompactHudRenderer(fonts, Path("/unused"))
     with patch("openpilot.starpilot.ui.onroad_compact_widgets.rl.draw_circle_gradient"):
       compact.render(state)
@@ -176,6 +189,8 @@ class TestOnroadAxes(unittest.TestCase):
       self.assertGreater(compact._set_speed_alpha.x, 0)
       compact.render(stale)
     self.assertEqual(compact._wheel_alpha.x, 0)
+    self.assertEqual(compact._set_speed_opacity(stale, compact._last_cruise_ns + 1), 0)
+    self.assertEqual(compact._set_speed_opacity(stale, compact._last_cruise_ns + 150_000_001), 0)
     self.assertEqual(compact._set_speed_alpha.x, 0)
     torque = TorqueBarWidget()
     with patch("openpilot.starpilot.ui.onroad_torque.draw_polygon") as draw, \

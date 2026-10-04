@@ -378,9 +378,11 @@ class SceneProjector:
     raw_curve = abs(speed * speed * curvature) >= FROZEN_CURVE_ACCEL_MPS2 if speed is not None and curvature is not None else None
     horizon = None
     current_stop = None
+    model_transport_current = False
     if model is not None:
       eof = _field(model, 'timestampEof')
       if type(eof) is int and 0 < eof <= now_boot_ns and now_boot_ns - eof <= MODEL_EOF_MAX_AGE_NS:
+        model_transport_current = True
         horizon = _horizon(model)
         current_stop = _boolean(_field(_field(model, 'action'), 'shouldStop')) if horizon is not None else None
     lead = _lead(radar) if radar is not None else None
@@ -460,7 +462,7 @@ class SceneProjector:
     slc_experimental, _ = owner_bool(context.slc_experimental)
     plan_should_stop, plan_should_stop_stamp = owner_bool(context.plan_should_stop)
     plan_allow_throttle, plan_allow_throttle_stamp = owner_bool(context.plan_allow_throttle)
-    model_stamp = _source_stamp(sm, 'modelV2') if model is not None and horizon is not None else None
+    model_stamp = _source_stamp(sm, 'modelV2') if model_transport_current else None
     repeated_model = model_stamp is not None and model_stamp == self.last_model_stamp_ns
     car_stamp = _source_stamp(sm, 'carState') if car_valid else None
     radar_stamp = _source_stamp(sm, 'radarState') if radar is not None else None
@@ -544,7 +546,8 @@ class SceneProjector:
       stop_frame = replace(stop_frame, observed_mono_s=self.last_stop_stamp_s or 0.0)
     missing_transport = car is None or radar is None or model is None
     last_tick = self.stop_detector.last_model_tick_mono_s
-    if missing_transport and last_tick is not None and 0 <= now_mono_ns - round(last_tick * 1e9) <= SOURCE_MAX_AGE_NS:
+    transport_alive = all(sm.alive.get(name, False) and sm.valid.get(name, False) for name in ('carState', 'modelV2', 'radarState'))
+    if missing_transport and transport_alive and last_tick is not None and 0 <= now_mono_ns - round(last_tick * 1e9) <= SOURCE_MAX_AGE_NS:
       # Withhold an observation while a source is absent; a brief scheduling
       # gap must not erase the detector's multi-second stop hysteresis.
       stop_observation = StopObservation(None, None, None, None)
@@ -655,6 +658,7 @@ class SceneProjector:
       standstill_stop_hold=stop_observation.standstill_hold,
       traffic_mode=curve_mode,
       stop_sign_confirmed=sign,
+      committed_stop=self.stop_detector.committed if stop_observation.light_detected is not None else None,
       forcing_stop=forcing,
       slc_experimental=slc_experimental,
       low_speed_stop_scene=chill_observation.low_speed_stop_scene,

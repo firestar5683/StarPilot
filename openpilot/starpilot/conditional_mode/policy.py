@@ -103,6 +103,7 @@ class SceneEvidence:
   traffic_mode: bool | None = None
   stop_sign_confirmed: bool | None = None
   forcing_stop: bool | None = None
+  committed_stop: bool | None = None
   adjacent_lead_ambiguous: bool | None = None
   low_speed_stop_scene: bool | None = None
   launch_candidate: bool | None = None
@@ -326,11 +327,14 @@ class ConditionalModePolicy:
     )
     qualified = bool(authority_valid and authority.fresh and authority.system_long_capable and not authority.safe_mode)
     warm = bool(authority_valid and authority.fresh and (authority.driving_enabled or authority.lat_active))
-    if choice is ModeChoice.STOCK:
+    if choice is ModeChoice.STOCK and scene.committed_stop is not True:
       return self._decision(bool(stock_experimental) if type(stock_experimental) is bool else False, authority, qualified, warm, Reason.STOCK, 0)
-    if choice not in (ModeChoice.CEM, ModeChoice.CCM) or not qualified or not _valid_settings(settings):
+    if choice not in (ModeChoice.CEM, ModeChoice.CCM, ModeChoice.STOCK) or not qualified or not _valid_settings(settings):
       self.reset()
       return self._decision(False, authority, False, False, Reason.UNAVAILABLE, 0)
+    if (warm and authority.driving_enabled and authority.long_active and
+        _scene_current(now_s, scene) and scene.committed_stop is True):
+      return self._decision(True, authority, True, warm, Reason.CEM_STOP, 8)
     if not isinstance(manual, ManualIntent):
       manual = ManualIntent.NONE
     if manual is not ManualIntent.NONE:

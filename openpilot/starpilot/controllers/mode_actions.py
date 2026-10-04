@@ -8,22 +8,30 @@ from openpilot.starpilot.conditional_mode.manual import ioniq6_media_eligible
 from openpilot.starpilot.conditional_mode.ui_action import current_authority, fresh_service
 
 LIFETIME_NS = 250_000_000
-KINDS = {'trafficModeToggle': 'traffic', 'switchbackModeToggle': 'switchback'}
+KINDS = {'trafficModeToggle': 'traffic', 'switchbackModeToggle': 'switchback', 'forceCoastToggle': 'coast',
+         'pulseGlideToggle': 'pulse', 'disengageRequest': 'disengage'}
 SESSION = re.compile(r'[0-9a-f]{32}\Z')
 
 
 def authority(sm, cp, now_ns: int, mode: str) -> bool:
   try:
-    if mode not in ('traffic', 'switchback') or not ioniq6_media_eligible(cp):
+    if mode not in ('traffic', 'switchback', 'coast', 'pulse', 'disengage') or cp is None:
       return False
     drive = int(sm['deviceState'].startedMonoTime)
-    if mode == 'traffic':
+    if mode in ('traffic', 'pulse'):
       return current_authority(sm, cp, drive, now_ns)
+    if mode == 'switchback' and not ioniq6_media_eligible(cp):
+      return False
+    if mode == 'disengage' and not fresh_service(sm, 'selfdriveState', drive, now_ns):
+      return False
+    if mode == 'coast' and not cp.openpilotLongitudinalControl:
+      return False
     return bool(not cp.passive and not cp.dashcamOnly and not cp.notCar and
                 0 < drive < now_ns and sm['deviceState'].started and
                 fresh_service(sm, 'deviceState', drive, now_ns, 1_000_000_000) and
                 all(fresh_service(sm, name, drive, now_ns) for name in ('carState', 'carControl')) and
-                sm['carState'].canValid and not sm['carState'].canTimeout and sm['carControl'].latActive)
+                sm['carState'].canValid and not sm['carState'].canTimeout and
+                (mode == 'coast' or mode == 'disengage' and sm['selfdriveState'].enabled or sm['carControl'].latActive))
   except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
     return False
 
@@ -36,7 +44,7 @@ class ModeActionPublisher:
 
   def dispatch(self, mode: str, sm, cp, publisher, *, now_ns: int) -> bool:
     if (now_ns - self.last_ns < 100_000_000 or not authority(sm, cp, now_ns, mode) or
-        not producer_available(sm, now_ns=now_ns)):
+        mode != 'disengage' and not producer_available(sm, now_ns=now_ns)):
       return False
     self.sequence += 1
     event = messaging.new_message('slcAction', valid=True)
@@ -64,13 +72,13 @@ class ModeActionOwner:
   def __init__(self):
     self.drive = 0
     self.sequences = {}
-    self.requested = {'traffic': False, 'switchback': False}
+    self.requested = {'traffic': False, 'switchback': False, 'coast': False, 'pulse': False, 'disengage': False}
     self.last_apply_ns = 0
 
   def reset(self, drive: int = 0) -> None:
     self.drive = drive
     self.sequences.clear()
-    self.requested = {'traffic': False, 'switchback': False}
+    self.requested = {'traffic': False, 'switchback': False, 'coast': False, 'pulse': False, 'disengage': False}
     self.last_apply_ns = 0
 
   def update(self, event, sm, cp, *, now_ns: int) -> bool:

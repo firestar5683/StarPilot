@@ -125,7 +125,7 @@ class CurveHost:
                             self.previous_active_headway is not None else 0.0)
         headway_fresh = (not frame.long_active or
                          (detector_headway is not None and type(detector_headway) in (int, float) and math.isfinite(detector_headway) and
-                          0.75 <= detector_headway <= 3.0))
+                          0.5 <= detector_headway <= 3.0))
         observed = self.leads.step(sm['radarState'].leadOne, sm['modelV2'], speed_mps=frame.ego_mps,
                                    t_follow_s=detector_headway, standstill=bool(sm['carState'].standstill),
                                    observed_mono_s=frame.model_ns / 1e9, now_mono_s=now_ns / 1e9,

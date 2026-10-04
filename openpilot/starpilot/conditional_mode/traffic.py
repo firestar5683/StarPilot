@@ -87,7 +87,8 @@ class TrafficOwner:
       return False
 
   def sample(self, event, *, params, settings, sm, cp, drive_id: int,
-             now_mono_ns: int, now_boot_ns: int, controller_toggle: bool = False) -> TrafficVerdict:
+             now_mono_ns: int, now_boot_ns: int, controller_toggle: bool = False,
+             controller_requested: bool | None = None) -> TrafficVerdict:
     if type(drive_id) is not int or drive_id <= 0:
       prior = self.requested
       self.reset()
@@ -95,7 +96,8 @@ class TrafficOwner:
     if self.drive_id and drive_id != self.drive_id:
       self.reset()
     gm_distance = gm_profiles_supported(cp)
-    if not (ioniq6_media_eligible(cp) or gm_distance) or not cp.openpilotLongitudinalControl or cp.passive or cp.dashcamOnly or cp.notCar:
+    if (not (ioniq6_media_eligible(cp) or gm_distance or controller_toggle or self.controller_source) or
+        not cp.openpilotLongitudinalControl or cp.passive or cp.dashcamOnly or cp.notCar):
       self.reset()
       return TrafficVerdict(False, None, 'unsupported_car', -1, 0, 0, '', '', False)
     if (not self._fresh(sm, 'deviceState', drive_id, now_mono_ns, 1_000_000_000) or
@@ -113,10 +115,8 @@ class TrafficOwner:
       prior = self.requested
       self.reset()
       return TrafficVerdict(False, None, 'settings_unavailable', -1, 0, 0, '', '', None if prior else False)
-    if self.settings_fingerprint and self.settings_fingerprint != fingerprint:
-      self.reset()
     if controller_toggle:
-      self.requested = not self.requested
+      self.requested = controller_requested if type(controller_requested) is bool else not self.requested
       self.controller_source = True
     if self.controller_source:
       self.drive_id = drive_id
@@ -194,9 +194,6 @@ class TrafficOwner:
         if valid:
           if self.card_session is not None and self.card_session != session:
             self.reset(retire=True)
-          if self.source_epoch >= 0 and self.source_epoch != epoch:
-            self.requested = False
-            self.controller_source = False
           self.card_session = session
           self.card_sequence = sequence
           self.drive_id = drive_id
@@ -215,16 +212,21 @@ class TrafficOwner:
         # Invalid/reordered packets never refresh the source clock or toggle.
       except (AttributeError, KeyError, TypeError, ValueError, OverflowError):
         pass
-    if self.source_boot_ns <= 0 or now_boot_ns < self.source_boot_ns or now_boot_ns - self.source_boot_ns > SOURCE_MAX_AGE_NS:
+    if self.source_boot_ns > now_boot_ns:
       prior = self.requested
       self.reset(preserve_map=True)
       return TrafficVerdict(False, None, 'media_unavailable', -1, 0, 0, fingerprint, '', None if prior else False)
+    source_current = self.source_boot_ns > 0 and now_boot_ns - self.source_boot_ns <= SOURCE_MAX_AGE_NS
+    if not source_current and self.card_session is None:
+      return TrafficVerdict(False, None, 'media_unavailable', -1, 0, 0, fingerprint, self.map_fingerprint, False)
+    if not source_current and not self.requested:
+      return TrafficVerdict(False, False, 'off', max(0, self.source_epoch), 0, 0, fingerprint, self.map_fingerprint, False)
     authority = (self._fresh(sm, 'carControl', drive_id, now_mono_ns) and
                  self._fresh(sm, 'selfdriveState', drive_id, now_mono_ns) and
                  sm['carControl'].enabled and sm['carControl'].longActive and sm['selfdriveState'].enabled)
     return TrafficVerdict(self.requested, self.requested if authority else None,
                           'active' if authority and self.requested else 'off' if authority else 'authority_unavailable',
-                          self.source_epoch, self.source_boot_ns, self.source_mono_ns,
+                          self.source_epoch, self.source_boot_ns if source_current else 0, self.source_mono_ns,
                           fingerprint, self.map_fingerprint,
                           self.requested if authority else None if self.requested else False)
 

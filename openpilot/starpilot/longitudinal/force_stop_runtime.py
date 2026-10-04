@@ -50,9 +50,9 @@ class ForceStopRuntime:
     keys = (KEY, OFFSET_KEY, 'SafeMode', 'ConditionalModeConfig')
     try:
       values = tuple(read_saved(self.params, key, 4096 if key == 'ConditionalModeConfig' else 16) for key in keys)
-      if values != self.sources:
+      if self.sources is not None and values[:3] != self.sources[:3]:
         self.reset()
-        self.sources = values
+      self.sources = values
       if not all(readable for _, readable in values):
         raise ValueError('unreadable Force Stop settings')
       master, offset, safe, conditional = (raw for raw, _ in values)
@@ -90,9 +90,10 @@ class ForceStopRuntime:
                     drive_id < int(sm.recv_time[name] * 1e9) <= now_ns and
                     0 <= now_ns - int(sm.recv_time[name] * 1e9) <= SOURCE_AGE_NS for name in services)
       car, control, state, model = (sm[name] for name in ('carState', 'carControl', 'selfdriveState', 'modelV2'))
-      if ((not self.enabled and not takeoff_enabled) or (takeoff_enabled and not self.takeoff_preferences_valid) or not identity[1] or any(identity[2:]) or drive_id <= 0 or not current or
+      if ((not self.enabled and not takeoff_enabled) or (takeoff_enabled and not self.takeoff_preferences_valid) or
+          not identity[1] or any(identity[2:]) or drive_id <= 0 or not current or
           not car.canValid or car.canTimeout or not (control.longActive or control.latActive) or
-          sm['controlsState'].forceDecel or traffic_mode is not False or
+          sm['controlsState'].forceDecel or (traffic_mode is not False and not self.policy.forcing) or
           not 0 < model.timestampEof <= now_boot_ns or now_boot_ns - model.timestampEof > SOURCE_AGE_NS):
         self.reset()
         return self.plan

@@ -61,6 +61,20 @@ class ForceStopRuntimeTests(unittest.TestCase):
     self.assertTrue(output.forcing)
     return output
 
+  def test_committed_stop_survives_valid_mode_settings_and_traffic_changes(self):
+    import json
+    from openpilot.starpilot.conditional_mode.policy import ModeChoice
+    from openpilot.starpilot.conditional_mode.preferences import SavedPreferences, encode_preferences
+    self.prime()
+    self.params.put('ConditionalModeConfig', json.loads(encode_preferences(SavedPreferences(mode=ModeChoice.CCM))), block=True)
+    for tick in range(40, 80):
+      plan = self.sample(Frame(tick), traffic_mode=True)
+      self.assertTrue(plan.forcing)
+      self.assertIsNotNone(plan.obstacle_m)
+    self.owner = ForceStopRuntime(self.params)
+    for tick in range(80, 120):
+      self.assertFalse(self.sample(Frame(tick), traffic_mode=True).forcing)
+
   def test_default_off_and_saved_choices_are_not_overwritten(self):
     path = Path(self.params.get_param_path('ForceStops'))
     for raw, expected in ((None, False), (b'0', False), (b'1', True)):
@@ -155,7 +169,7 @@ class ForceStopRuntimeTests(unittest.TestCase):
     self.assertFalse(self.sample(Frame(80)).forcing)
 
   def test_bad_sources_and_driver_brake_never_hold_a_stop(self):
-    for defect in ('gas', 'brake', 'can', 'off', 'stock', 'old_drive', 'stale', 'dead', 'eof', 'traffic', 'suspend'):
+    for defect in ('gas', 'brake', 'can', 'off', 'stock', 'old_drive', 'stale', 'dead', 'eof', 'suspend'):
       with self.subTest(defect=defect):
         self.owner = ForceStopRuntime(self.params)
         self.prime()

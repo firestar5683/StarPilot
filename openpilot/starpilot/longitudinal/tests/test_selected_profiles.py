@@ -36,6 +36,52 @@ class SelectedProfilesTests(unittest.TestCase):
     return profile_document(default_personality_profiles(False), enabled=enabled,
                             selected_acceleration_profile=acceleration, selected_deceleration_profile=braking)
 
+  def test_fresh_comfort_default_and_existing_choices_are_independent(self):
+    fresh = profile_document(default_personality_profiles(False), enabled=False)
+    self.assertEqual(fresh['selectedDecelerationProfile'], 'eco')
+    self.assertEqual(ProfileHost(self.params).sample_global_braking(1_000_000_000), 'eco')
+    self.assertIsNone(self.params.get('LongitudinalPersonalityProfiles'))
+    for personality in range(3):
+      for traffic in (False, True):
+        selected = resolve_selected_profiles(fresh, personality, 10.0, self.cp, traffic_mode=traffic)
+        self.assertEqual(selected.cruise_brake_magnitude, 0.6)
+    for choice in ('dom_default', 'standard', 'eco', 'sport'):
+      document = self.document(braking=choice)
+      raw = json.dumps(document).encode()
+      Path(self.params.get_param_path('LongitudinalPersonalityProfiles')).write_bytes(raw)
+      self.assertEqual(migrate_profile_document(raw)['selectedDecelerationProfile'], choice)
+      self.assertEqual(ProfileHost(self.params).sample_global_braking(1_000_000_000), choice)
+      self.assertEqual(Path(self.params.get_param_path('LongitudinalPersonalityProfiles')).read_bytes(), raw)
+
+  def test_missing_document_production_admission_host_and_native_mpc(self):
+    from openpilot.starpilot.feature_runtime import requested
+    self.assertTrue(requested(self.params, 'profile'))
+    selected = ProfileHost(self.params).sample_selected(1_000_000_000, 1, V_EGO, self.cp)
+    self.assertEqual(selected.cruise_brake_magnitude, 0.6)
+    self.assertEqual(selected.braking_style, 'eco')
+    self.assertIsNone(selected.acceleration_max)
+    ordinary, _ = self.run_planner()
+    comfort, coast = self.run_planner(selected)
+    self.assertGreater(comfort.a_cruise, ordinary.a_cruise)
+    self.assertEqual(coast['full_brake_floor'], -0.6)
+    self.assertIsNone(comfort.last_profile)
+    self.assertEqual(comfort.mpc.params[0, 4], ordinary.mpc.params[0, 4])
+    self.assertIsNone(self.params.get('LongitudinalPersonalityProfiles'))
+
+  def test_saved_and_invalid_document_do_not_receive_fresh_comfort_default(self):
+    from openpilot.starpilot.feature_runtime import requested
+    for choice, magnitude in (('dom_default', None), ('standard', 1.2), ('sport', 2.4)):
+      with self.subTest(choice=choice):
+        raw = json.dumps(self.document('dom_default', choice)).encode()
+        path = Path(self.params.get_param_path('LongitudinalPersonalityProfiles'))
+        path.write_bytes(raw)
+        selected = ProfileHost(self.params).sample_selected(1_000_000_000, 1, V_EGO, self.cp)
+        self.assertEqual(selected.cruise_brake_magnitude, magnitude)
+        self.assertEqual(path.read_bytes(), raw)
+    path.write_bytes(b'not-json')
+    self.assertFalse(requested(self.params, 'profile'))
+    self.assertIsNone(ProfileHost(self.params).sample_selected(1_000_000_000, 1, V_EGO, self.cp))
+
   def test_inheritance_tracks_globals_without_master_or_jerk_activation(self):
     document = self.document()
     document['profiles']['aggressive']['acceleration'] = {'preset': 'sport', 'curve': []}
@@ -69,10 +115,10 @@ class SelectedProfilesTests(unittest.TestCase):
     migrated = migrate_profile_document(document)
     self.assertEqual(document, original)
     self.assertEqual(migrated['profiles']['standard']['acceleration']['curve'], [0.9] * 10)
-    follow = {name: (1.45, 1.45) for name in ('aggressive', 'standard', 'relaxed')}
-    jerk = {name: (1.0,) * 5 for name in follow}
+    follow = dict.fromkeys(('aggressive', 'standard', 'relaxed'), (1.45, 1.45))
+    jerk = dict.fromkeys(follow, (1.0,) * 5)
     for enabled in (False, True):
-      settings = ProfileSettings(migrated, {name: enabled for name in follow}, follow, jerk)
+      settings = ProfileSettings(migrated, dict.fromkeys(follow, enabled), follow, jerk)
       legacy = resolve(settings, log.LongitudinalPersonality.standard, 10.0, self.cp)
       selected = resolve_selected_profiles(migrated, log.LongitudinalPersonality.standard, 10.0, self.cp, legacy=legacy)
       if enabled:
@@ -163,7 +209,8 @@ class SelectedProfilesTests(unittest.TestCase):
 
   def run_planner(self, selected=None, *, lead=False, force=False, traffic=False):
     planner = LongitudinalPlanner(self.cp, init_v=V_EGO)
-    with patch.object(planner_module, 'slc_coast_floor', wraps=planner_module.slc_coast_floor) as coast, patch.object(planner_module, 'get_cruise_accel', wraps=planner_module.get_cruise_accel) as cruise:
+    with patch.object(planner_module, 'slc_coast_floor', wraps=planner_module.slc_coast_floor) as coast, \
+         patch.object(planner_module, 'get_cruise_accel', wraps=planner_module.get_cruise_accel) as cruise:
       for _ in range(65):
         sm, _ = messages(lead=lead, force=force)
         sm['carState'].vCruise = 50.0

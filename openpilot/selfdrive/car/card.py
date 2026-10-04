@@ -59,6 +59,7 @@ from openpilot.starpilot.vehicle_selection import startup_candidate
 from openpilot.starpilot.vehicle_preferences import VehicleStartupPreferences
 from openpilot.starpilot.controller_extensions import configure_controller
 from openpilot.starpilot.vehicle_startup import VehicleStartupOwner
+from openpilot.starpilot.controllers.wheel_actions import WheelPublisher, key_for
 from openpilot.starpilot.controllers.cruise_action import CruiseActionConsumer, eligible as cruise_action_eligible
 from openpilot.starpilot.schema_cache import get_cache, prewarm_cache_contracts, put_cache
 
@@ -161,6 +162,8 @@ class Car:
     publish_services = ['sendcan', 'carState', 'carParams', 'carOutput', 'radarTracks']
     # One existing event channel also carries source-qualified Switchback gestures.
     publish_services.append('slcCruiseEvent')
+    self.wheel_publisher = WheelPublisher(self.params)
+    self.wheel_commands = ()
     if self.slc_replay:
       publish_services.append('slcDashboardObservation')
     if self.aol_replay:
@@ -309,7 +312,9 @@ class Car:
     self.is_metric = self.params.get_bool("IsMetric")
     aol_policy = aol_policy_for(self.CP)
     self.aol_settings = read_settings(self.params) if self.aol_replay else None
-    self.aol_qualified = bool(self.aol_settings is not None and independent_axis_requested(self.aol_settings) and
+    self.aol_qualified = bool(self.aol_settings is not None and
+                              independent_axis_requested(self.aol_settings,
+                                include_auxiliary=aol_policy.intent_supported and not aol_policy.explicit_latch) and
                               aol_policy.intent_supported and not self.CP.passive)
     self.aol_card_intent = (create_aol_intent(self.CP, self.aol_settings, aol_policy)
                             if self.aol_qualified and self.aol_settings is not None else None)
@@ -463,6 +468,9 @@ class Car:
       self.aol_card_intent.update(CS, fault_active=fault_active, now_ns=now_ns, native_rejection_ns=rejection_ns,
                                   standard_enabled=(host_enabled if getattr(self.aol_card_intent, 'observe_stock_engagement', False)
                                                     else host_control_enabled))
+    if self.aol_card_intent is not None:
+      self.aol_card_intent.update_auxiliary(CS, media=media_observation,
+        media_eligible=ioniq6_media_eligible(self.CP), fault_active=fault_active)
     self.observe_distance_personality(CS, now_ns)
     gm_claim = getattr(self, 'gm_distance_claim_tracker', None)
     if gm_claim is not None:
@@ -555,6 +563,15 @@ class Car:
           self.v_cruise_helper.apply_slc_target(float(command.targetMps), self.is_metric)
         self.slc_receipts.append(('commandApplied' if applicable else 'commandRejected', command,
                                   previous_mps, float(self.v_cruise_helper.v_cruise_kph / 3.6), now_ns))
+    blocked_keys = set()
+    if self.manual_receipt is not None:
+      blocked_keys.add(key_for(self.manual_receipt[0]))
+    for receipt in (self.traffic_receipt, self.switchback_receipt):
+      if receipt is not None and receipt[0] and receipt[1] is not None:
+        blocked_keys.add(key_for(receipt[1]))
+    self.wheel_commands = self.wheel_publisher.observe(
+      self.params, self.CP, CS, now_ns=now_ns, drive_id=int(self.sm['deviceState'].startedMonoTime),
+      media=media_observation, blocked_keys=blocked_keys)
     # TODO: mirror the carState.cruiseState struct?
     CS.vCruise = float(self.v_cruise_helper.v_cruise_kph)
     CS.vCruiseCluster = float(self.v_cruise_helper.v_cruise_cluster_kph)
@@ -589,7 +606,8 @@ class Car:
     gm_claim = getattr(self, 'gm_distance_claim_tracker', None)
     if ((getattr(self, 'conditional_replay', False) and manual_tracker is not None and manual_tracker.suppress_distance_release) or
         (personality_tracker is not None and personality_tracker.suppress_distance_release) or
-        (gm_claim is not None and gm_claim.suppress_distance_release)):
+        (gm_claim is not None and gm_claim.suppress_distance_release) or
+        (getattr(self, 'wheel_publisher', None) is not None and self.wheel_publisher.suppress_distance_release)):
       # This is the serialized carState copy. Keep the original parsed state
       # and raw CAN intact for the controller and diagnostics.
       cs_send.carState.buttonEvents = [event for event in CS.buttonEvents if not
@@ -614,6 +632,11 @@ class Car:
     # carState wakes selfdrived. Commit its companion intent first, so a
     # consumer scheduled at the wakeup cannot sample the preceding intent.
     self.pm.send('carState', cs_send)
+    wheel = getattr(self, 'wheel_publisher', None)
+    if wheel is not None:
+      wheel.publish(self.wheel_commands, self.CP, self.pm, now_ns=int(cs_send.logMonoTime),
+                    drive_id=int(self.sm['deviceState'].startedMonoTime), source_car_ns=int(cs_send.logMonoTime),
+                    source_control_ns=int(self.sm.logMonoTime['carControl']))
 
     if self.slc_replay:
       source = messaging.new_message('slcDashboardObservation')

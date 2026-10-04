@@ -6,7 +6,8 @@ from dataclasses import dataclass
 import math
 
 from openpilot.starpilot.longitudinal.profile_document import (
-  PERSONALITY_PROFILES_PARAM, is_unconfigured_profile_document, migrate_profile_document,
+  PERSONALITY_PROFILES_PARAM, default_personality_profiles, profile_document,
+  is_unconfigured_profile_document, migrate_profile_document,
 )
 from openpilot.starpilot.saved_source import read_saved
 
@@ -22,7 +23,7 @@ SCALARS = {name: tuple(name.title() + suffix for suffix in SUFFIXES) for name in
 FLAGS = ()
 KEYS = ("CustomPersonalities", PERSONALITY_PROFILES_PARAM, *FLAGS,
         *(key for name in NAMES for key in SCALARS[name]))
-FOLLOW_MIN_SECONDS = 0.75
+FOLLOW_MIN_SECONDS = 0.5
 TRAFFIC_SAVED_MIN_SECONDS = 0.5
 FOLLOW_MAX_SECONDS = 3.0
 JERK_MIN_PERCENT = 25.0
@@ -114,7 +115,9 @@ def read_document_value(params) -> SavedValue:
     return SavedValue(raw, None, False, False)
   if raw is None:
     default = params.get_default_value(PERSONALITY_PROFILES_PARAM)
-    return SavedValue(None, None, default in (None, {}), True)
+    valid = default in (None, {})
+    document = profile_document(default_personality_profiles(False), enabled=False) if valid else None
+    return SavedValue(None, document, valid, True)
   try:
     document = migrate_profile_document(raw)
     valid = document is not None or is_unconfigured_profile_document(raw)
@@ -180,7 +183,4 @@ def read_traffic_health(params) -> TrafficHealth:
   if bad is not None:
     return TrafficHealth(values, f"invalid_{bad}")
   health = TrafficHealth(values, "valid")
-  if health.number("TrafficFollow") < FOLLOW_MIN_SECONDS:
-    # Preserve saved values down to .5 s; MPC/CEM still enforce a .75 s floor.
-    return TrafficHealth(values, "unsupported_traffic_follow_below_effective_floor")
   return health

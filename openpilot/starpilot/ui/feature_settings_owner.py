@@ -23,8 +23,8 @@ from openpilot.starpilot.longitudinal.planner_selection import KEY as PLANNER_SE
 
 from openpilot.starpilot.longitudinal.profile_document import (
   ACCELERATION_PRESETS, ACCELERATION_SPEEDS_MPH, BRAKING_PRESETS, FOLLOWING_PRESETS, CURVE_BOUNDS,
-  GLOBAL_BRAKING_RESPONSES, PERSONALITY_PROFILES_PARAM, default_personality_profiles, initial_custom_curve,
-  FOLLOWING_SPEEDS_MPH, interpolate_category_curve, is_truck_fingerprint,
+  DEFAULT_DECELERATION_PROFILE, PERSONALITY_PROFILES_PARAM, default_personality_profiles, initial_custom_curve,
+  FOLLOWING_SPEEDS_MPH, is_truck_fingerprint,
   personality_reference_curves, serialize_personality_profiles,
   update_personality_profile,
   synchronise_profile_document_enabled,
@@ -36,7 +36,6 @@ from openpilot.starpilot.speed_limits.runtime_settings import MPH_TO_MPS
 from openpilot.starpilot.aol.vehicle import policy_for as aol_policy_for
 from openpilot.starpilot.longitudinal.ioniq6_start import eligible as ioniq6_long_eligible
 from opendbc.car.gm.feature_capabilities import longitudinal_supported as gm_longitudinal_supported
-from openpilot.starpilot.lateral.torque_runtime import supported_cp
 from openpilot.starpilot.lateral.torque_settings import DOCUMENT_KEY, LEGACY_KEYS
 from openpilot.starpilot.ui.torque_feature import TorqueFeature
 from openpilot.starpilot.ui.controller_feature import ControllerFeature, SETUP_ACTION
@@ -44,10 +43,11 @@ from openpilot.starpilot.ui.slc_offset_feature import SlcOffsetOwner
 from openpilot.starpilot.longitudinal.profile_preferences import read_document_value, read_profile_health
 from openpilot.starpilot.ui.long_profile_feature import (LongProfileFeature, is_long_confirm_action, VALUE_HELP, CATEGORY_HELP,
                                                        preset_label, preset_value)
-from openpilot.starpilot.ui.traffic_feature import TrafficFeature, EDIT_KEYS as TRAFFIC_EDIT_KEYS, REPAIR_FOLLOW
+from openpilot.starpilot.ui.traffic_feature import TrafficFeature, EDIT_KEYS as TRAFFIC_EDIT_KEYS
 from openpilot.starpilot.ui.lane_change_feature import LaneChangeFeature, KEYS as LANE_CHANGE_KEYS
 from openpilot.starpilot.ui.conditional_feature import BUTTON_PREFIX, ConditionalFeature
 from openpilot.starpilot.saved_source import read_saved
+from openpilot.starpilot.ui.wheel_feature import WheelFeature, PREFIX as WHEEL_PREFIX
 from openpilot.starpilot.longitudinal.output_max import KEY as OUTPUT_MAX_KEY
 from openpilot.starpilot.ui.output_max_feature import OutputMaximumFeature
 from openpilot.starpilot.saved_document import commit_exact
@@ -80,7 +80,7 @@ FLOAT_SPECS = {
   "LaneCenterOffset": (-0.3, 0.3, 0.01, "m"),
   "LaneCenteringE2EAuthority": (0.0, 1.0, 0.05, "fraction"),
   "LaneCenteringStrength": (0.5, 1.5, 0.05, "fraction"),
-  **{f"{name}{suffix}": (0.75, 3.0, 0.05, "s")
+  **{f"{name}{suffix}": (0.5, 3.0, 0.05, "s")
      for name in ("Aggressive", "Standard", "Relaxed") for suffix in ("Follow", "FollowHigh")},
   **{f"{name}{suffix}": (25.0, 200.0, 5.0, "%")
      for name in ("Aggressive", "Standard", "Relaxed")
@@ -130,6 +130,7 @@ class FeatureSettingsOwner:
     self.traffic_profiles = TrafficFeature(self)
     self.lane_changes = LaneChangeFeature(params, authority, vehicle_fingerprint, self.vehicle_params)
     self.conditional = ConditionalFeature(self)
+    self.wheel = WheelFeature(self)
 
   def _capability(self, group: str) -> tuple | None:
     cp = self.vehicle_params()
@@ -648,40 +649,7 @@ class FeatureSettingsOwner:
                              repair_value="0" if not threshold_valid and unit_valid else ""))
     elif page == FeaturePage.WHEEL:
       title = "Wheel Controls"
-      capability = self._capability("aol")
-      policy = aol_policy_for(self.vehicle_params())
-      allowed = self.authority("aol_wheel") and capability is not None
-      rows.extend(self.conditional.wheel_rows())
-      for key, label in zip(AOL_BUTTONS, ("LKAS press", "Main cruise press", "Distance short press",
-                                            "Distance long press", "Distance very long press"), strict=True):
-        if capability is None:
-          continue
-        if policy.fixed_cruise_buttons and key not in AOL_DISTANCE_BUTTONS:
-          rows.append(FeatureRow(key, label, "Toggle Always On Lateral",
-                                 reason="Factory button mapping while Always On Lateral is enabled; cannot be reassigned. Cancel turns steering off."))
-          continue
-        raw_value, raw, valid = self._value(key)
-        try:
-          current = int(raw_value)
-        except ValueError:
-          current = -1
-        pause_only = policy.distance_pause_only and key in AOL_DISTANCE_BUTTONS
-        choices = AOL_PAUSE_ACTIONS if pause_only else AOL_ACTIONS
-        canonical = not pause_only or raw is None or raw in (b"0", b"3", b"4")
-        action = next((name for name, number in choices.items() if number == current), None) if valid and canonical else None
-        conditional = pause_only and raw == b"5" and valid
-        display = action or ("Conditional mode assignment" if conditional else "Unsupported saved action")
-        rows.append(FeatureRow(key, label, display, raw, tuple(choices) if action else (),
-                               available=allowed and (pause_only or not policy.fixed_cruise_buttons) and self._readable(key),
-                               reason="This vehicle uses fixed main and lane-assist button actions" if
-                                      policy.fixed_cruise_buttons and not pause_only else
-                                      "Set Off explicitly before assigning a pause action" if conditional else
-                                      "Saved distance press can pause either control axis" if pause_only and action else
-                                      "Choose the action for this button" if action and capability is not None else
-                                      "Connect a supported vehicle to configure button actions" if action else "Set Off explicitly to repair",
-                               capability=capability, dependencies=self._dependents("AlwaysOnLateral", AOL_THRESHOLD,
-                                                                                   AOL_LEGACY_THRESHOLD),
-                               repair_value="Off" if action is None else ""))
+      rows.extend(self.wheel.rows())
     elif page == FeaturePage.SLC:
       allowed = configurable and system_long
       offsets_ready, offset_rows = self.slc_offsets.rows(allowed, repair_allowed=parked and allowed)
@@ -774,7 +742,7 @@ class FeatureSettingsOwner:
         ('braking', 'selectedDecelerationProfile', 'Selected Deceleration Profile',
          ('dom_default', 'standard', 'eco', 'sport')),
       ):
-        selected = document[field] if document is not None else ('dom_default' if category == 'acceleration' else 'standard')
+        selected = document[field] if document is not None else ('dom_default' if category == 'acceleration' else DEFAULT_DECELERATION_PROFILE)
         rows.append(FeatureRow('profile:global_' + category, label,
                                preset_label(selected) if valid else 'Invalid document', raw,
                                tuple(preset_label(choice) for choice in choices) if valid else (),
@@ -802,11 +770,10 @@ class FeatureSettingsOwner:
     elif page == FeaturePage.TRAFFIC:
       title = "Traffic Profile"
       rows.extend(self.traffic_profiles.rows(configurable, system_long, repair_allowed=parked))
-      document, _, valid = self._document()
       for category in PRESETS:
-        current = document["profiles"]["traffic"][category]["preset"] if document is not None else ("dom_default" if category == "following" else "selected_profile")
         rows.append(FeatureRow("", category.title(), ""))
-        rows.extend(self.snapshot(f"traffic/{category}", parked=parked, system_long=system_long, lateral_context=lateral_context, metric=False, configure_while_driving=configure_while_driving).rows)
+        rows.extend(self.snapshot(f"traffic/{category}", parked=parked, system_long=system_long, lateral_context=lateral_context, metric=False,
+                                  configure_while_driving=configure_while_driving).rows)
     elif page in PROFILE_NAMES:
       allowed = configurable and system_long
       name = page.title()
@@ -822,11 +789,10 @@ class FeatureSettingsOwner:
                     FeatureRow(key, label, "Invalid saved value", health.values[key].raw,
                                reason="Saved source unreadable or too large"))
       rows.extend(self.long_profiles.rows(page, health, allowed, repair_allowed=parked and allowed))
-      document, raw, valid = self._document()
       for category in PRESETS:
-        current = document["profiles"][page][category]["preset"] if document is not None else ("dom_default" if category == "following" else "selected_profile")
         rows.append(FeatureRow("", category.title(), ""))
-        rows.extend(self.snapshot(f"{page}/{category}", parked=parked, system_long=system_long, lateral_context=lateral_context, metric=False, configure_while_driving=configure_while_driving).rows)
+        rows.extend(self.snapshot(f"{page}/{category}", parked=parked, system_long=system_long, lateral_context=lateral_context, metric=False,
+                                  configure_while_driving=configure_while_driving).rows)
     elif "/" in page:
       name, category = page.split("/", 1)
       if name in DOCUMENT_PROFILE_NAMES and category in PRESETS:
@@ -857,15 +823,14 @@ class FeatureSettingsOwner:
             unit = "s" if category == "following" else "m/s²"
             rows.append(FeatureRow(f"{LONG_PREFIX}{name}:{category}:{index}", f"{speed} mph point", str(point), raw,
                                    step=0.05, minimum=low, maximum=high, unit=unit,
-                                   available=allowed and not (name == "traffic" and category == "following" and point < 0.75),
-                                   reason="Choose a supported following preset before editing" if
-                                          name == "traffic" and category == "following" and point < 0.75 else
-                                          "Following time; higher values leave more space" if category == "following" else
+                                   available=allowed,
+                                   reason="Following time; higher values leave more space" if category == "following" else
                                           "Acceleration limit; higher values allow stronger acceleration" if category == "acceleration" else
                                           "Braking magnitude; higher values allow stronger braking",
                                    capability=capability, dependencies=traffic_dependencies))
     fingerprint = self.vehicle_fingerprint()
-    rows = [replace(row, vehicle_fingerprint=None if row.key in (PLANNER_SELECTION_KEY, LEAD_APPROACH_KEY, LEAD_TAKEOFF_KEY, "ShowSpeedLimits", "AlwaysAllowUploads") or
+    rows = [replace(row, vehicle_fingerprint=None if row.key in (PLANNER_SELECTION_KEY, LEAD_APPROACH_KEY, LEAD_TAKEOFF_KEY,
+                                                              "ShowSpeedLimits", "AlwaysAllowUploads") or
                     row.key == OUTPUT_MAX_KEY and row.capability is None and row.vehicle_fingerprint is None or
                     row.key.startswith('conditional:') and not row.key.startswith(BUTTON_PREFIX) else fingerprint)
             for row in rows]
@@ -887,6 +852,8 @@ class FeatureSettingsOwner:
 
   def _apply(self, request: FeatureSettingsRequest) -> bool:
     key = request.key
+    if key.startswith(WHEEL_PREFIX):
+      return self.wheel.apply(request)
     if key == OUTPUT_MAX_KEY:
       return self.output_maximum.apply(request)
     if key == "ReverseCruise":
@@ -935,7 +902,7 @@ class FeatureSettingsOwner:
       return result.committed and result.reason == "saved"
     if key in LANE_CHANGE_KEYS:
       return self.lane_changes.apply(request)
-    if key in TRAFFIC_EDIT_KEYS or key == REPAIR_FOLLOW:
+    if key in TRAFFIC_EDIT_KEYS:
       return self.traffic_profiles.apply(request)
     if key in TORQUE_CONFIRM_ACTIONS or key.startswith("torque:"):
       return self.torque.apply(request)
@@ -1259,7 +1226,7 @@ class FeatureSettingsOwner:
       truck = is_truck_fingerprint(fingerprint)
       profiles = document['profiles'] if document is not None else default_personality_profiles(False, truck)
       acceleration = document['selectedAccelerationProfile'] if document is not None else 'dom_default'
-      braking = document['selectedDecelerationProfile'] if document is not None else 'standard'
+      braking = document['selectedDecelerationProfile'] if document is not None else DEFAULT_DECELERATION_PROFILE
       return serialize_personality_profiles(profiles, False, truck, enabled=document['enabled'] if document is not None else False,
                                             selected_acceleration_profile=selected if category == 'acceleration' else acceleration,
                                             selected_deceleration_profile=selected if category == 'braking' else braking)
@@ -1282,7 +1249,7 @@ class FeatureSettingsOwner:
     seed_config = config
     if config['preset'] == 'selected_profile':
       selected = (document['selectedAccelerationProfile' if category == 'acceleration' else 'selectedDecelerationProfile']
-                  if document is not None else ('dom_default' if category == 'acceleration' else 'standard'))
+                  if document is not None else ('dom_default' if category == 'acceleration' else DEFAULT_DECELERATION_PROFILE))
       seed_config = {'preset': selected, 'curve': config['curve']}
     if len(parts) == 3:
       value = preset_value(value)
@@ -1323,14 +1290,8 @@ class FeatureSettingsOwner:
       curve = list(config["curve"])
       curve[index] = float(value)
       updated = update_personality_profile(profiles, name, category, "custom", curve, ev, truck)
-    if name == "traffic" and category == "following":
-      config = updated["traffic"]["following"]
-      if config["preset"] != "dom_default" and any(
-        interpolate_category_curve("following", speed * MPH_TO_MPS, config, ev, truck) < 0.75
-        for speed in FOLLOWING_SPEEDS_MPH
-      ):
-        return None
     enabled, _, _ = self._value("CustomPersonalities")
     return serialize_personality_profiles(updated, ev, truck, enabled=enabled == "1",
                                           selected_acceleration_profile=document["selectedAccelerationProfile"] if document is not None else "dom_default",
-                                          selected_deceleration_profile=document["selectedDecelerationProfile"] if document is not None else "standard")
+                                          selected_deceleration_profile=(document["selectedDecelerationProfile"] if document is not None
+                                                                         else DEFAULT_DECELERATION_PROFILE))

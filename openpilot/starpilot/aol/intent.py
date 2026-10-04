@@ -6,6 +6,7 @@ from pathlib import Path
 from opendbc.car.structs import car
 from openpilot.cereal import log
 from openpilot.selfdrive.car.cruise import CRUISE_LONG_PRESS
+from openpilot.starpilot.conditional_mode.manual import Button, ButtonTracker, Press
 
 ButtonType = car.CarState.ButtonEvent.Type
 GearShifter = car.CarState.GearShifter
@@ -22,6 +23,8 @@ class AolSettings:
   main_action: int
   distance_actions: tuple[int, int, int]
   cancel_actions: tuple[int, int, int]
+  mode_actions: tuple[int, int, int] = (0, 0, 0)
+  custom_actions: tuple[int, int, int] = (0, 0, 0)
 
 
 def _button_action(params, key: str) -> int:
@@ -52,16 +55,20 @@ def read_settings(params) -> AolSettings:
     distance_actions=(_button_action(params, 'DistanceButtonControl'),
                       _button_action(params, 'LongDistanceButtonControl'),
                       _button_action(params, 'VeryLongDistanceButtonControl')),
+    mode_actions=tuple(_button_action(params, key) for key in ("ModeButtonControl", "LongModeButtonControl", "VeryLongModeButtonControl")),
+    custom_actions=tuple(_button_action(params, key) for key in ("StarButtonControl", "LongStarButtonControl", "VeryLongStarButtonControl")),
     cancel_actions=(_button_action(params, 'CancelButtonControl'),
                     _button_action(params, 'LongCancelButtonControl'),
                     _button_action(params, 'VeryLongCancelButtonControl')),
   )
 
 
-def independent_axis_requested(settings: AolSettings) -> bool:
+def independent_axis_requested(settings: AolSettings, *, include_auxiliary: bool = False) -> bool:
   pause = (PAUSE_LATERAL, PAUSE_LONGITUDINAL)
-  return settings.enabled or any(action in pause for action in
-                                 (settings.lkas_action, settings.main_action, *settings.distance_actions))
+  actions = (settings.lkas_action, settings.main_action, *settings.distance_actions)
+  if include_auxiliary:
+    actions += (*settings.cancel_actions, *settings.mode_actions, *settings.custom_actions)
+  return settings.enabled or any(action in pause for action in actions)
 
 
 def disarming_fault(events, CS) -> bool:
@@ -96,6 +103,8 @@ class AolCardIntent:
     self._native_rejection_ns = 0
     self._timers = {int(ButtonType.gapAdjustCruise): 0}
     self._held = {int(ButtonType.gapAdjustCruise): False}
+    self._aux_cancel_tracker = ButtonTracker()
+    self._aux_media_tracker = ButtonTracker()
 
   def _perform(self, action: int) -> None:
     if action == AOL_TOGGLE and self.settings.enabled and not self.explicit_latch:
@@ -135,7 +144,7 @@ class AolCardIntent:
       self.allowed_latch = False
       if self.explicit_latch:
         self._gesture_neutral_seen = False
-      if not independent_axis_requested(self.settings):
+      if not independent_axis_requested(self.settings, include_auxiliary=self.auxiliary_supported()):
         self.pause_lateral = False
         self.pause_longitudinal = False
 
@@ -214,6 +223,31 @@ class AolCardIntent:
           self._perform(actions[1])
         elif self._timers[button] == CRUISE_LONG_PRESS * 5:
           self._perform(actions[2])
+
+  def auxiliary_supported(self) -> bool:
+    return not self.explicit_latch
+
+  def update_auxiliary(self, CS, *, media=None, media_eligible: bool = False, fault_active: bool | None = None) -> None:
+    if (not self.auxiliary_supported() or not CS.canValid or CS.canTimeout or CS.steerFaultPermanent or
+        fault_active is True or getattr(self, "_main_cycle_required", False)):
+      self._aux_cancel_tracker = ButtonTracker()
+      self._aux_media_tracker = ButtonTracker()
+      return
+    cancel = car.CarState(**CS.to_dict())
+    cancel.buttonEvents = [car.CarState.ButtonEvent(type=ButtonType.gapAdjustCruise, pressed=event.pressed)
+                          for event in CS.buttonEvents if event.type == ButtonType.cancel]
+    for gesture in self._aux_cancel_tracker.observe(cancel.as_reader()):
+      slot = (Press.SHORT, Press.LONG, Press.VERY_LONG).index(gesture.press)
+      self._perform(self.settings.cancel_actions[slot])
+    if not media_eligible:
+      self._aux_media_tracker.invalidate_media()
+      return
+    for gesture in self._aux_media_tracker.observe(CS, media):
+      if gesture.button not in (Button.MODE, Button.CUSTOM):
+        continue
+      slot = (Press.SHORT, Press.LONG, Press.VERY_LONG).index(gesture.press)
+      actions = self.settings.mode_actions if gesture.button is Button.MODE else self.settings.custom_actions
+      self._perform(actions[slot])
 
   def output(self, CS) -> tuple[bool, bool, bool]:
     driving = CS.gearShifter not in (GearShifter.neutral, GearShifter.park, GearShifter.reverse, GearShifter.unknown)

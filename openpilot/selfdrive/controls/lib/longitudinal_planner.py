@@ -125,7 +125,7 @@ class LongitudinalPlanner:
              lead_approach_key: LeadApproachKey | None = None,
              force_stop_provider: Callable[[float], StopPlan] | None = None,
              faster_lead_takeoff: bool = False, takeoff_drive_id: int = 0,
-             now_ns: int | None = None, drive_id: int = 0):
+             now_ns: int | None = None, drive_id: int = 0, wheel_coast=None):
     if curve_ceiling is not None and curve_provider is not None:
       raise ValueError('choose explicit Curve ceiling or same-cycle provider')
     sample_now_ns = self.clock_ns() if now_ns is None else now_ns
@@ -247,7 +247,7 @@ class LongitudinalPlanner:
     if curve_provider is not None:
       try:
         selected_follow = float(self.mpc.params[0, 4])
-        if not math.isfinite(selected_follow) or not 0.75 <= selected_follow <= 3.0:
+        if not math.isfinite(selected_follow) or not 0.5 <= selected_follow <= 3.0:
           selected_follow = None
       except (AttributeError, IndexError, TypeError, ValueError, OverflowError):
         selected_follow = None
@@ -267,7 +267,18 @@ class LongitudinalPlanner:
     navigation_target = navigation_ceiling(sm, self.CP, sample_now_ns, v_cruise) if profile_eligible else None
     if navigation_target is not None:
       v_cruise = min(v_cruise, navigation_target)
-    if sm['controlsState'].forceDecel:
+    coast_plan = None
+    if wheel_coast is not None:
+      owner, wheel_params = wheel_coast
+      pulse_lead = any(lead.present and (v_ego - lead.vLead > 0.5 or lead.aLeadK < -0.4 or
+                                        lead.dRel < max(18.0, 2.0 * v_ego))
+                       for lead in (sm['radarState'].leadOne, sm['radarState'].leadTwo))
+      coast_plan = owner.sample(wheel_params, self.CP, sm, now_ns=sample_now_ns, target_mps=v_cruise,
+        lead_relevant=bool(pulse_lead), stop_context=bool(sm['carState'].standstill or sm['controlsState'].forceDecel or
+        self.force_stop_plan.forcing or sm['modelV2'].action.shouldStop or not self.allow_throttle))
+      if coast_plan.speed_ceiling_mps is not None:
+        v_cruise = min(v_cruise, coast_plan.speed_ceiling_mps)
+    if sm['controlsState'].forceDecel or coast_plan is not None and coast_plan.force_decel:
       v_cruise = 0.0
 
     self.v_desired_trajectory = np.interp(CONTROL_N_T_IDX, T_IDXS_MPC, self.mpc.v_solution)
@@ -342,6 +353,10 @@ class LongitudinalPlanner:
     if selected_acceleration is not None and cruise_profile is not None:
       # The selected curve owns acceleration; following/jerks retain their owner.
       cruise_profile = replace(cruise_profile, acceleration_max=selected_acceleration)
+    if coast_plan is not None and coast_plan.brake_floor is not None:
+      global_floor = coast_plan.brake_floor
+      cruise_profile = None
+      slc_floor = None
     self.a_cruise = get_cruise_accel(sm['selfdriveState'].experimentalMode, v_cruise, v_ego,
                                      self.a_cruise, steer_angle_without_offset, self.CP, self.dt,
                                      accel_coast, self.allow_throttle, cruise_profile, slc_floor,

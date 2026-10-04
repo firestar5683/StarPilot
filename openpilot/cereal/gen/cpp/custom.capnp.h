@@ -52,6 +52,10 @@ enum class Kind_b8cbd9e666181b95: uint16_t {
   CRUISE_DECREASE,
   TRAFFIC_MODE_TOGGLE,
   SWITCHBACK_MODE_TOGGLE,
+  CRUISE_SET,
+  FORCE_COAST_TOGGLE,
+  PULSE_GLIDE_TOGGLE,
+  DISENGAGE_REQUEST,
 };
 CAPNP_DECLARE_ENUM(Kind, b8cbd9e666181b95);
 CAPNP_DECLARE_SCHEMA(cd96dafb67a082d0);
@@ -67,6 +71,7 @@ enum class Kind_9099c88083a9a9ff: uint16_t {
   CONDITIONAL_MODE,
   TRAFFIC_MODE,
   SWITCHBACK_MODE,
+  WHEEL_ACTION,
 };
 CAPNP_DECLARE_ENUM(Kind, 9099c88083a9a9ff);
 CAPNP_DECLARE_SCHEMA(c193365b5b96171a);
@@ -560,7 +565,7 @@ struct SlcAction::ControllerCruiseAction {
   class Pipeline;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(b539e7c0aa8c1e69, 6, 2)
+    CAPNP_DECLARE_STRUCT_HEADER(b539e7c0aa8c1e69, 7, 4)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -596,7 +601,7 @@ struct SlcCruiseEvent {
   struct ManualModeGesture;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(cd96dafb67a082d0, 7, 4)
+    CAPNP_DECLARE_STRUCT_HEADER(cd96dafb67a082d0, 7, 5)
     #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() { return &schema->defaultBrand; }
     #endif  // !CAPNP_LITE
@@ -3044,6 +3049,18 @@ public:
 
   inline  ::uint64_t getSourceCarControlMonoTime() const;
 
+  inline  ::uint8_t getActionCode() const;
+
+  inline bool hasButtonKey() const;
+  inline  ::capnp::Text::Reader getButtonKey() const;
+
+  inline  ::uint64_t getSourceCarStateMonoTime() const;
+
+  inline bool hasCarParamsFingerprint() const;
+  inline  ::capnp::Text::Reader getCarParamsFingerprint() const;
+
+  inline float getTargetSpeedMps() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -3103,6 +3120,29 @@ public:
 
   inline  ::uint64_t getSourceCarControlMonoTime();
   inline void setSourceCarControlMonoTime( ::uint64_t value);
+
+  inline  ::uint8_t getActionCode();
+  inline void setActionCode( ::uint8_t value);
+
+  inline bool hasButtonKey();
+  inline  ::capnp::Text::Builder getButtonKey();
+  inline void setButtonKey( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initButtonKey(unsigned int size);
+  inline void adoptButtonKey(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownButtonKey();
+
+  inline  ::uint64_t getSourceCarStateMonoTime();
+  inline void setSourceCarStateMonoTime( ::uint64_t value);
+
+  inline bool hasCarParamsFingerprint();
+  inline  ::capnp::Text::Builder getCarParamsFingerprint();
+  inline void setCarParamsFingerprint( ::capnp::Text::Reader value);
+  inline  ::capnp::Text::Builder initCarParamsFingerprint(unsigned int size);
+  inline void adoptCarParamsFingerprint(::capnp::Orphan< ::capnp::Text>&& value);
+  inline ::capnp::Orphan< ::capnp::Text> disownCarParamsFingerprint();
+
+  inline float getTargetSpeedMps();
+  inline void setTargetSpeedMps(float value);
 
 private:
   ::capnp::_::StructBuilder _builder;
@@ -3330,6 +3370,9 @@ public:
   inline bool hasTrafficMode() const;
   inline  ::cereal::SlcCruiseEvent::TrafficModeGesture::Reader getTrafficMode() const;
 
+  inline bool hasWheelAction() const;
+  inline  ::cereal::SlcAction::ControllerCruiseAction::Reader getWheelAction() const;
+
 private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -3416,6 +3459,13 @@ public:
   inline void adoptTrafficMode(::capnp::Orphan< ::cereal::SlcCruiseEvent::TrafficModeGesture>&& value);
   inline ::capnp::Orphan< ::cereal::SlcCruiseEvent::TrafficModeGesture> disownTrafficMode();
 
+  inline bool hasWheelAction();
+  inline  ::cereal::SlcAction::ControllerCruiseAction::Builder getWheelAction();
+  inline void setWheelAction( ::cereal::SlcAction::ControllerCruiseAction::Reader value);
+  inline  ::cereal::SlcAction::ControllerCruiseAction::Builder initWheelAction();
+  inline void adoptWheelAction(::capnp::Orphan< ::cereal::SlcAction::ControllerCruiseAction>&& value);
+  inline ::capnp::Orphan< ::cereal::SlcAction::ControllerCruiseAction> disownWheelAction();
+
 private:
   ::capnp::_::StructBuilder _builder;
   template <typename, ::capnp::Kind>
@@ -3436,6 +3486,7 @@ public:
 
   inline  ::cereal::SlcCruiseEvent::ManualModeGesture::Pipeline getManualMode();
   inline  ::cereal::SlcCruiseEvent::TrafficModeGesture::Pipeline getTrafficMode();
+  inline  ::cereal::SlcAction::ControllerCruiseAction::Pipeline getWheelAction();
 private:
   ::capnp::AnyPointer::Pipeline _typeless;
   friend class ::capnp::PipelineHook;
@@ -10434,6 +10485,116 @@ inline void SlcAction::ControllerCruiseAction::Builder::setSourceCarControlMonoT
       ::capnp::bounded<5>() * ::capnp::ELEMENTS, value);
 }
 
+inline  ::uint8_t SlcAction::ControllerCruiseAction::Reader::getActionCode() const {
+  return _reader.getDataField< ::uint8_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint8_t SlcAction::ControllerCruiseAction::Builder::getActionCode() {
+  return _builder.getDataField< ::uint8_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+inline void SlcAction::ControllerCruiseAction::Builder::setActionCode( ::uint8_t value) {
+  _builder.setDataField< ::uint8_t>(
+      ::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool SlcAction::ControllerCruiseAction::Reader::hasButtonKey() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline bool SlcAction::ControllerCruiseAction::Builder::hasButtonKey() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader SlcAction::ControllerCruiseAction::Reader::getButtonKey() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder SlcAction::ControllerCruiseAction::Builder::getButtonKey() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+inline void SlcAction::ControllerCruiseAction::Builder::setButtonKey( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder SlcAction::ControllerCruiseAction::Builder::initButtonKey(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), size);
+}
+inline void SlcAction::ControllerCruiseAction::Builder::adoptButtonKey(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> SlcAction::ControllerCruiseAction::Builder::disownButtonKey() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<2>() * ::capnp::POINTERS));
+}
+
+inline  ::uint64_t SlcAction::ControllerCruiseAction::Reader::getSourceCarStateMonoTime() const {
+  return _reader.getDataField< ::uint64_t>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+
+inline  ::uint64_t SlcAction::ControllerCruiseAction::Builder::getSourceCarStateMonoTime() {
+  return _builder.getDataField< ::uint64_t>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS);
+}
+inline void SlcAction::ControllerCruiseAction::Builder::setSourceCarStateMonoTime( ::uint64_t value) {
+  _builder.setDataField< ::uint64_t>(
+      ::capnp::bounded<6>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool SlcAction::ControllerCruiseAction::Reader::hasCarParamsFingerprint() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline bool SlcAction::ControllerCruiseAction::Builder::hasCarParamsFingerprint() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS).isNull();
+}
+inline  ::capnp::Text::Reader SlcAction::ControllerCruiseAction::Reader::getCarParamsFingerprint() const {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_reader.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline  ::capnp::Text::Builder SlcAction::ControllerCruiseAction::Builder::getCarParamsFingerprint() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::get(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+inline void SlcAction::ControllerCruiseAction::Builder::setCarParamsFingerprint( ::capnp::Text::Reader value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::set(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), value);
+}
+inline  ::capnp::Text::Builder SlcAction::ControllerCruiseAction::Builder::initCarParamsFingerprint(unsigned int size) {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::init(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), size);
+}
+inline void SlcAction::ControllerCruiseAction::Builder::adoptCarParamsFingerprint(
+    ::capnp::Orphan< ::capnp::Text>&& value) {
+  ::capnp::_::PointerHelpers< ::capnp::Text>::adopt(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::capnp::Text> SlcAction::ControllerCruiseAction::Builder::disownCarParamsFingerprint() {
+  return ::capnp::_::PointerHelpers< ::capnp::Text>::disown(_builder.getPointerField(
+      ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+
+inline float SlcAction::ControllerCruiseAction::Reader::getTargetSpeedMps() const {
+  return _reader.getDataField<float>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline float SlcAction::ControllerCruiseAction::Builder::getTargetSpeedMps() {
+  return _builder.getDataField<float>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void SlcAction::ControllerCruiseAction::Builder::setTargetSpeedMps(float value) {
+  _builder.setDataField<float>(
+      ::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+}
+
 inline  ::uint16_t SlcAction::ConditionalManualAction::Reader::getVersion() const {
   return _reader.getDataField< ::uint16_t>(
       ::capnp::bounded<0>() * ::capnp::ELEMENTS);
@@ -10960,6 +11121,45 @@ inline void SlcCruiseEvent::Builder::adoptTrafficMode(
 inline ::capnp::Orphan< ::cereal::SlcCruiseEvent::TrafficModeGesture> SlcCruiseEvent::Builder::disownTrafficMode() {
   return ::capnp::_::PointerHelpers< ::cereal::SlcCruiseEvent::TrafficModeGesture>::disown(_builder.getPointerField(
       ::capnp::bounded<3>() * ::capnp::POINTERS));
+}
+
+inline bool SlcCruiseEvent::Reader::hasWheelAction() const {
+  return !_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline bool SlcCruiseEvent::Builder::hasWheelAction() {
+  return !_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS).isNull();
+}
+inline  ::cereal::SlcAction::ControllerCruiseAction::Reader SlcCruiseEvent::Reader::getWheelAction() const {
+  return ::capnp::_::PointerHelpers< ::cereal::SlcAction::ControllerCruiseAction>::get(_reader.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline  ::cereal::SlcAction::ControllerCruiseAction::Builder SlcCruiseEvent::Builder::getWheelAction() {
+  return ::capnp::_::PointerHelpers< ::cereal::SlcAction::ControllerCruiseAction>::get(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+#if !CAPNP_LITE
+inline  ::cereal::SlcAction::ControllerCruiseAction::Pipeline SlcCruiseEvent::Pipeline::getWheelAction() {
+  return  ::cereal::SlcAction::ControllerCruiseAction::Pipeline(_typeless.getPointerField(4));
+}
+#endif  // !CAPNP_LITE
+inline void SlcCruiseEvent::Builder::setWheelAction( ::cereal::SlcAction::ControllerCruiseAction::Reader value) {
+  ::capnp::_::PointerHelpers< ::cereal::SlcAction::ControllerCruiseAction>::set(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), value);
+}
+inline  ::cereal::SlcAction::ControllerCruiseAction::Builder SlcCruiseEvent::Builder::initWheelAction() {
+  return ::capnp::_::PointerHelpers< ::cereal::SlcAction::ControllerCruiseAction>::init(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
+}
+inline void SlcCruiseEvent::Builder::adoptWheelAction(
+    ::capnp::Orphan< ::cereal::SlcAction::ControllerCruiseAction>&& value) {
+  ::capnp::_::PointerHelpers< ::cereal::SlcAction::ControllerCruiseAction>::adopt(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS), kj::mv(value));
+}
+inline ::capnp::Orphan< ::cereal::SlcAction::ControllerCruiseAction> SlcCruiseEvent::Builder::disownWheelAction() {
+  return ::capnp::_::PointerHelpers< ::cereal::SlcAction::ControllerCruiseAction>::disown(_builder.getPointerField(
+      ::capnp::bounded<4>() * ::capnp::POINTERS));
 }
 
 inline  ::uint16_t SlcCruiseEvent::TrafficModeGesture::Reader::getVersion() const {

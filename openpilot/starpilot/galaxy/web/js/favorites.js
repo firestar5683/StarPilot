@@ -100,6 +100,11 @@ export const FavoritesPage = {
       event.target.checked = this.state.data.slots[index][field]
       return this.feed.update(index, { [field]: checked })
     },
+    speed(index, event) {
+      const value = Number(event.target.value)
+      if (!Number.isFinite(value) || value < 5 || value > 145) return false
+      return this.feed.update(index, { value })
+    },
     label(index, event) {
       const value = event.target.value.trim().slice(0, 32)
       event.target.value = this.state.data.slots[index].label
@@ -109,7 +114,7 @@ export const FavoritesPage = {
   template: `
     <section class="gx-settings gx-favorites" aria-label="Quick Select">
       <div class="gx-settings__header"><div><h2>Quick Select</h2><p>Choose your three driving-screen shortcuts.</p></div>
-        <button class="gx-btn gx-btn--tonal" type="button" :disabled="busy" @click="$emit('close')">Back</button></div>
+        </div>
       <p class="gx-note">Small UI: tap the invisible left, middle or right third. Big UI: tap or swipe the lower-left corner to open Quick Select.</p>
       <p class="gx-note">Assigning a shortcut does not activate it. Each control keeps its usual availability; some settings can only change while parked.</p>
       <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Connect to local Galaxy to configure Quick Select.</div>
@@ -127,6 +132,7 @@ export const FavoritesPage = {
               <option v-if="slot.key && !byKey.has(slot.key)" :value="slot.key">{{ slot.label || slot.key }} · Unavailable in this build</option>
               <optgroup v-for="group in groups" :key="group" :label="group"><option v-for="option in state.data.options.filter(item => (item.section || 'Controls') === group)" :key="option.key" :value="option.key">{{ option.label }}</option></optgroup>
             </GalaxySelect></label>
+            <label v-if="slot.key === '__starpilot_controller_action__:set_speed'">Set speed (device units)<input class="gx-field" type="number" min="5" max="145" step="1" :value="slot.value ?? 30" :disabled="disabled" @change="speed(index, $event)"></label>
             <label>Label<input class="gx-field" type="text" maxlength="32" :aria-label="'Quick Select ' + (index + 1) + ' label'" :value="slot.label" :disabled="disabled || !slot.key" @change="label(index, $event)"></label>
             <div class="gx-favorites__show"><span>Show onroad · Big and Small UI</span><label class="gx-switch"><input type="checkbox" :aria-label="'Show favorite ' + (index + 1) + ' onroad'" :checked="slot.show_onroad" :disabled="disabled || !slot.enabled || !slot.key" @change="toggle(index, 'show_onroad', $event)"><span class="gx-switch__track"></span><span class="gx-switch__thumb"></span></label></div>
             <p v-if="slot.key" class="gx-note">{{ state.data.states[index].stateLabel }}<template v-if="state.data.states[index].reason"> · {{ state.data.states[index].reason }}</template></p>

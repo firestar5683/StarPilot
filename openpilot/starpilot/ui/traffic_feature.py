@@ -16,7 +16,6 @@ RELAXED = ("RelaxedFollow", "RelaxedJerkAcceleration", "RelaxedJerkDeceleration"
            "RelaxedJerkSpeedDecrease", "RelaxedJerkDanger")
 SOURCES = ("CustomPersonalities", PERSONALITY_PROFILES_PARAM, FOLLOW, *JERKS, *RELAXED)
 EDIT_KEYS = frozenset((FOLLOW, *JERKS))
-REPAIR_FOLLOW = "long_repair:TrafficFollow"
 LABELS = {FOLLOW: "Low-speed follow", "TrafficJerkAcceleration": "Acceleration jerk",
           "TrafficJerkDeceleration": "Deceleration jerk", "TrafficJerkSpeed": "Speed jerk",
           "TrafficJerkSpeedDecrease": "Speed decrease jerk", "TrafficJerkDanger": "Danger jerk"}
@@ -54,7 +53,7 @@ class TrafficFeature:
     return number, math.isfinite(number) and low <= number <= high
 
   def rows(self, parked: bool, system_long: bool, *, repair_allowed: bool | None = None) -> list[FeatureRow]:
-    repair_allowed = (parked if repair_allowed is None else repair_allowed) and self.owner.authority("parked_preferences")
+    del parked, repair_allowed
     dependencies, readable = self._sources()
     source = dict(dependencies)
     capability = self.capability()
@@ -67,34 +66,25 @@ class TrafficFeature:
     rows = []
     for key in (FOLLOW, *JERKS):
       value, valid = self._value(key, source[key])
-      unsupported = key == FOLLOW and valid and isinstance(value, float) and value < 0.75
       unit = "s" if key == FOLLOW else "%"
       shown = str(value) if valid else "Invalid saved value"
       rows.append(FeatureRow(key, LABELS[key], shown, source[key],
                              step=0.05 if key == FOLLOW else 5.0,
-                             minimum=0.75 if key == FOLLOW else 25.0,
+                             minimum=0.5 if key == FOLLOW else 25.0,
                              maximum=3.0 if key == FOLLOW else 200.0, unit=unit,
-                             available=allowed and valid and not unsupported,
-                             reason=("Saved follow is below the supported 0.75 s minimum; restore explicitly" if unsupported else
-                                     active_note + ". " + ("Following time at low speeds; blends toward Relaxed as speed rises." if key == FOLLOW else
+                             available=allowed and valid,
+                             reason=(active_note + ". " + ("Following time at low speeds; blends toward Relaxed as speed rises." if key == FOLLOW else
                                                           VALUE_HELP[key.removeprefix("Traffic")]) if valid else
                                      "Invalid saved value; original bytes remain unchanged"),
                              vehicle_fingerprint=fingerprint, capability=capability, dependencies=dependencies))
-      if unsupported:
-        rows.append(FeatureRow(REPAIR_FOLLOW, "Restore supported Traffic follow", "Set to 0.75 s",
-                               source[key], available=allowed and repair_allowed,
-                               reason="Requires confirmation; other saved Traffic values stay unchanged",
-                               vehicle_fingerprint=fingerprint, capability=capability, dependencies=dependencies))
     rows.append(FeatureRow("", "Higher-speed values", "Inherited from Relaxed follow and jerk settings",
                            reason="With Custom Driving Profiles On, blends toward saved Relaxed values; otherwise defaults apply"))
     return rows
 
   def apply(self, request: FeatureSettingsRequest) -> bool:
-    if request.key == REPAIR_FOLLOW and not self.owner.authority("parked_preferences"):
+    if request.key not in EDIT_KEYS:
       return False
-    if request.key not in EDIT_KEYS and request.key != REPAIR_FOLLOW:
-      return False
-    key = FOLLOW if request.key == REPAIR_FOLLOW else request.key
+    key = request.key
     if tuple(name for name, _ in request.dependencies) != SOURCES:
       return False
     expected = dict(request.dependencies)
@@ -104,30 +94,23 @@ class TrafficFeature:
     def authorized() -> bool:
       if (not request.vehicle_fingerprint or self.owner.vehicle_fingerprint() != request.vehicle_fingerprint or
           request.capability is None or self.capability() != request.capability or
-          not self.owner.authority("long") or
-          request.key == REPAIR_FOLLOW and not self.owner.authority("parked_preferences")):
+          not self.owner.authority("long")):
         return False
       fresh, readable = self._sources()
       return readable and fresh == request.dependencies
 
     if not authorized():
       return False
-    current, valid = self._value(key, request.expected)
+    _, valid = self._value(key, request.expected)
     if not valid:
       return False
-    if request.key == REPAIR_FOLLOW:
-      if not request.confirmation or request.value != "confirm" or not isinstance(current, float) or not 0.5 <= current < 0.75:
-        return False
-      raw = b"0.75"
-    else:
-      try:
-        number = float(request.value)
-      except (TypeError, ValueError, OverflowError):
-        return False
-      low, high = (0.75, 3.0) if key == FOLLOW else (25.0, 200.0)
-      if not math.isfinite(number) or not low <= number <= high or (key == FOLLOW and
-          (not isinstance(current, float) or current < 0.75)):
-        return False
-      raw = str(round(number, 4)).encode()
+    try:
+      number = float(request.value)
+    except (TypeError, ValueError, OverflowError):
+      return False
+    low, high = (0.5, 3.0) if key == FOLLOW else (25.0, 200.0)
+    if not math.isfinite(number) or not low <= number <= high:
+      return False
+    raw = str(round(number, 4)).encode()
     return commit_exact(self.params, key=key, max_bytes=128, raw=raw, expected=request.expected,
                         authorized=authorized, temp_prefix=".traffic-profile-").verified

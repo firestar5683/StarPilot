@@ -176,7 +176,7 @@ class TestCEMTransportContinuity(unittest.TestCase):
       selected_t_follow_observed_mono_ns=event,
     )
 
-  def test_one_missing_control_frame_withholds_override_then_uses_original_hold(self):
+  def test_unseen_control_cannot_revive_original_hold(self):
     self.sm.seen['carControl'] = False
     unavailable = self.sample(MONO + 60_000_000)
     self.assertEqual(unavailable.status, 'authority_unavailable')
@@ -184,6 +184,12 @@ class TestCEMTransportContinuity(unittest.TestCase):
     self.sm.seen['carControl'] = True
     recovered = self.sample(MONO + 110_000_000)
     self.assertEqual(recovered.status, 'proposed')
+    self.assertFalse(recovered.override_experimental)
+    self.assertEqual(recovered.decision.reason, Reason.NO_TRIGGER)
+
+  def test_fresh_control_without_update_retains_original_hold(self):
+    self.sm.updated = {'carControl': False}
+    recovered = self.sample(MONO + 60_000_000)
     self.assertTrue(recovered.override_experimental)
     self.assertEqual(recovered.decision.reason, Reason.CEM_HOLD)
     self.assertEqual(recovered.decision.status_code, 8)
