@@ -119,3 +119,43 @@ class TestFordAolDriverIntent(unittest.TestCase):
         self.pump(20, mask=1)
         self.assertEqual(self.safety.aol_get_permission_mask(), 0)
         self.rearm()
+
+  def test_profile_switches_require_fresh_complete_selected_rx_inventory(self):
+    from opendbc.can import CANPacker
+
+    packer = CANPacker("ford_lincoln_base_pt")
+    self.safety.init_tests()
+    self.safety.set_alternative_experience(32)
+    profiles = ((32, "PowertrainData_10", "TrnRng_D_Rq", False),
+                (8, "TransGearData", "GearLvrPos_D_Actl", False),
+                (10, "Gear_Shift_by_Wire_FD1", "TrnRng_D_RqGsm", True),
+                (12, "PowertrainData_10", "TrnRng_D_Rq", True),
+                (18, "PowertrainData_10", "TrnRng_D_Rq", True),
+                (66, "PowertrainData_10", "TrnRng_D_Rq", True),
+                (8, "TransGearData", "GearLvrPos_D_Actl", False),
+                (32, "PowertrainData_10", "TrnRng_D_Rq", False))
+    for epoch, (word, gear_name, gear_signal, needs_lka) in enumerate(profiles):
+      with self.subTest(word=word, epoch=epoch):
+        self.assertEqual(self.safety.set_safety_hooks(structs.CarParams.SafetyModel.ford, word), 0)
+        self.assertFalse(self.safety.safety_config_valid())
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)
+        for count in range(6):
+          self.safety.set_timer(1_000_000 + epoch * 100_000 + count * 10_000)
+          sources = (
+            ("BrakeSysFeatures", {"Veh_V_ActlBrk": 36, "VehVActlBrk_D_Qf": 3, "VehVActlBrk_No_Cnt": count}),
+            ("EngVehicleSpThrottle2", {"Veh_V_ActlEng": 36, "VehVActlEng_D_Qf": 3}),
+            ("Yaw_Data_FD1", {"VehYaw_W_Actl": 0, "VehYawWActl_D_Qf": 3, "VehRollYaw_No_Cnt": count}),
+            ("EngBrakeData", {"BpedDrvAppl_D_Actl": 1, "CcStat_D_Actl": 3}),
+            ("EngVehicleSpThrottle", {"ApedPos_Pc_ActlArb": 0}),
+            ("DesiredTorqBrk", {"VehStop_D_Stat": 0}),
+            ("Steering_Data_FD1", {"TjaButtnOnOffPress": 0}),
+            ("EPAS_INFO", {"SteeringColumnTorque": 0, "EPAS_Failure": 0}),
+            (gear_name, {gear_signal: 3}),
+          )
+          if needs_lka:
+            sources += (("Lane_Assist_Data3_FD1", {"LaActAvail_D_Actl": 3, "LaActDeny_B_Actl": 0, "LatCtlSte_D_Stat": 1}),)
+          for name, values in sources:
+            frame = packer.make_can_msg(name, 0, values)
+            self.assertTrue(self.safety.safety_rx_hook(libsafety_py.make_CANPacket(frame[0], frame[2], frame[1])), name)
+        self.assertTrue(self.safety.safety_config_valid())
+        self.assertEqual(self.safety.aol_get_permission_mask(), 0)
