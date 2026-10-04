@@ -96,8 +96,8 @@ class UpdaterProcess:
       except (SoftwareOperationError, UpdaterControlError, OSError, RuntimeError, ValueError):
         return False
 
-  def send(self, action: str) -> None:
-    if action not in ("check", "download"):
+  def send(self, action: str, *, branch=None, commit=None) -> None:
+    if action not in ("check", "download", "fast"):
       raise SoftwareOperationError("Invalid updater command", 400)
     with self.lock:
       pid = self._manager_pid()
@@ -105,7 +105,10 @@ class UpdaterProcess:
       if self._manager_pid() != pid or self._proc_identity(pid) != start:
         raise SoftwareOperationError("Updater process changed", 503)
       try:
-        self.control.send(pid, start, action)
+        if action == "fast":
+          self.control.send(pid, start, action, branch=branch, commit=commit)
+        else:
+          self.control.send(pid, start, action)
       except (UpdaterControlError, OSError, RuntimeError, ValueError):
         raise SoftwareOperationError("Updater control is unavailable", 503) from None
 
@@ -158,6 +161,7 @@ class SoftwareOperations:
     self.request: dict | None = None
     self._baseline: tuple | None = None
     self._started = 0.0
+    self._fast_commit = None
 
   def _param(self, key: str, limit: int = 256) -> str | None:
     try:
@@ -236,15 +240,25 @@ class SoftwareOperations:
     if request is None or request["state"] != "pending" or request["action"] == "install":
       return
     state = status["updater"]["state"]
-    if request["target"] is not None and status["updater"]["targetBranch"] != request["target"]:
+    if request["action"] != "fast" and request["target"] is not None and status["updater"]["targetBranch"] != request["target"]:
       request.update(state="failed", error="Updater target changed")
     elif state == "idle" and status["updater"]["failedCount"] is not None and self._baseline[2] is not None and \
          status["updater"]["failedCount"] > self._baseline[2]:
-      request.update(state="failed", error="Updater reported a failure")
+      error = "Updater reported a failure"
+      if request["action"] == "fast":
+        try:
+          error = self._param("LastUpdateException", 4096) or error
+        except SoftwareOperationError:
+          pass
+      request.update(state="failed", error=error)
     elif state == "idle" and status["updater"]["failedCount"] == 0 and \
          status["updater"]["lastSuccessAt"] is not None and \
          status["updater"]["lastSuccessAt"] != self._baseline[0]:
-      if request["action"] == "check" or status["updater"]["lastFetchAt"] != self._baseline[1]:
+      if request["action"] == "fast":
+        if status["updater"]["lastFetchAt"] != self._baseline[1]:
+          restarting = self._flag("DoReboot") is True or status["installed"]["commit"] != self._fast_commit
+          request.update(state="complete", error=None, outcome="restarting" if restarting else "up_to_date")
+      elif request["action"] == "check" or status["updater"]["lastFetchAt"] != self._baseline[1]:
         request.update(state="complete", error=None)
       elif self._ready(status, request["target"]):
         request.update(state="complete", error=None)
@@ -284,7 +298,7 @@ class SoftwareOperations:
         reason = "Updater is not running"
       return {
         "parked": parked, "availableBranches": branches, "selectedTarget": target,
-        "canCheck": usable, "canSelect": usable and bool(branches),
+        "canCheck": usable, "canFastUpdate": usable and self._valid_branch(status["installed"]["branch"]), "canSelect": usable and bool(branches),
         "canDownload": usable and selected, "canInstall": usable and selected and self._ready(status, target),
         "reason": reason, "request": dict(self.request) if self.request is not None else None,
         "automaticDownloads": automatic_downloads(self.params), "canConfigure": parked and not reboot,
@@ -334,7 +348,7 @@ class SoftwareOperations:
       return self.snapshot()
 
   def action(self, action: str, payload: object, *, authorized: Callable[[], bool]) -> dict:
-    if type(payload) is not dict or type(action) is not str or action not in ("check", "download", "select", "install", "preferences"):
+    if type(payload) is not dict or type(action) is not str or action not in ("check", "download", "select", "install", "preferences", "fast"):
       raise SoftwareOperationError("Invalid software action", 400)
     if payload.get("action") != action or any(type(key) is not str for key in payload):
       raise SoftwareOperationError("Invalid software action", 400)
@@ -357,10 +371,15 @@ class SoftwareOperations:
         raise SoftwareOperationError("Vehicle is not safely parked", 409)
       if view["reason"] is not None:
         raise SoftwareOperationError(view["reason"], 503 if view["reason"] == "Updater is not running" else 409)
-      if branch is not None and branch not in view["availableBranches"]:
+      if action != "fast" and branch is not None and branch not in view["availableBranches"]:
         raise SoftwareOperationError("Branch is not in the current updater list", 409)
-      if action != "check" and action != "select" and (branch != view["selectedTarget"] or not view["canDownload"]):
+      if action not in ("check", "select", "fast") and (branch != view["selectedTarget"] or not view["canDownload"]):
         raise SoftwareOperationError("Selected updater target changed", 409)
+      if action == "fast":
+        installed = self.status.snapshot()["installed"]
+        identity = self.git_identity(self.installed)
+        if not view["canFastUpdate"] or branch != installed["branch"] or identity is None or identity != (branch, installed["commit"]):
+          raise SoftwareOperationError("Installed branch changed; refresh before updating", 409)
       if action == "install" and not view["canInstall"]:
         raise SoftwareOperationError("Finalized update does not match selected branch", 409)
       if not authorized() or not self._parked() or self._flag("IsOnroad") is not False:
@@ -368,7 +387,8 @@ class SoftwareOperations:
       current = self.status.snapshot()
       if (current["updater"]["state"] != "idle" or self._flag("DisableUpdates") is not False or
           self._flag("DoReboot") is not False or not self.process.available() or
-          (branch is not None and branch not in self._branches())):
+          (action != "fast" and branch is not None and branch not in self._branches()) or
+          (action == "fast" and current["installed"]["branch"] != branch)):
         raise SoftwareOperationError("Updater state changed", 409)
       if action == "select":
         self.params.put("UpdaterTargetBranch", branch, block=True)
@@ -387,7 +407,15 @@ class SoftwareOperations:
                     status["updater"]["failedCount"])
         if not authorized() or not self._parked() or self._flag("IsOnroad") is not False:
           raise SoftwareOperationError("Session or parked state changed", 403)
-        self.process.send(action)
+        if action == "fast":
+          identity = self.git_identity(self.installed)
+          if identity is None or identity != (branch, status["installed"]["commit"]) or status["installed"]["branch"] != branch:
+            raise SoftwareOperationError("Installed branch changed; refresh before updating", 409)
+          self._fast_commit = status["installed"]["commit"]
+        if action == "fast":
+          self.process.send(action, branch=identity[0], commit=identity[1])
+        else:
+          self.process.send(action)
       self.request = {"id": secrets.token_hex(8), "action": action,
                       "target": branch if branch is not None else status["updater"]["targetBranch"],
                       "state": "pending", "error": None}

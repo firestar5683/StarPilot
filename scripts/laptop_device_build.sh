@@ -616,6 +616,7 @@ run_larch64_build() {
   # QCOM-compiled driving/DM models and both camera warp families.
   python3 -m tools.laptop_device_build.package_model_chunks --source "${ROOT_DIR}/openpilot/selfdrive/modeld/models" --destination "${ROOT_DIR}/openpilot/selfdrive/modeld/models"
   verify_device_artifacts
+  python3 "${ROOT_DIR}/openpilot/common/prebuilt_manifest.py" "${ROOT_DIR}"
   touch "${ROOT_DIR}/prebuilt"
 }
 

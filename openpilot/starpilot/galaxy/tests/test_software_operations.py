@@ -16,14 +16,17 @@ class FakeProcess:
   def __init__(self):
     self.running = True
     self.sent = []
+    self.fast_requests = []
 
   def available(self):
     return self.running
 
-  def send(self, sig):
+  def send(self, sig, **identity):
     if not self.running:
       raise SoftwareOperationError("Updater stopped", 503)
     self.sent.append(sig)
+    if sig == "fast":
+      self.fast_requests.append(identity)
 
   def close(self):
     pass
@@ -263,6 +266,46 @@ class SoftwareOperationsTest(unittest.TestCase):
     self.params.put('UpdaterNewDescription', 'new description', block=True)
     self.owner.snapshot()
     self.assertEqual(reader.call_count, 4)
+
+
+  def test_fast_current_branch_without_branch_list_or_selected_target(self):
+    self.params.remove("UpdaterAvailableBranches")
+    self.params.put("UpdaterTargetBranch", "release", block=True)
+    self.assertTrue(self.owner.snapshot()["canFastUpdate"])
+    result = self.act("fast", "main")
+    self.assertEqual(result["request"]["target"], "main")
+    self.assertEqual(self.process.sent, ["fast"])
+    self.assertEqual(self.process.fast_requests, [{"branch": "main", "commit": "a" * 40}])
+    self.assertEqual(self.params.get("UpdaterTargetBranch"), "release")
+    self.assertFalse(self.params.get_bool("DoReboot"))
+    self.params.put("LastUpdateTime", datetime(2026, 10, 3, 12), block=True)
+    self.params.put("UpdaterLastFetchTime", datetime(2026, 10, 3, 12), block=True)
+    result = self.owner.snapshot()["request"]
+    self.assertEqual(result["state"], "complete")
+    self.assertEqual(result["outcome"], "up_to_date")
+
+  def test_fast_rejects_other_or_stale_installed_branch(self):
+    self.denied("fast", 409, "release")
+    self.git[self.installed] = ("main", "b" * 40)
+    self.denied("fast", 409, "main")
+    self.git[self.installed] = ("release", "a" * 40)
+    self.denied("fast", 409, "main")
+    self.assertEqual(self.process.sent, [])
+    self.assertFalse(self.params.get_bool("DoReboot"))
+
+  def test_fast_keeps_existing_admission_and_observes_failure(self):
+    for key in ("DisableUpdates", "IsOnroad", "DoReboot"):
+      self.params.put_bool(key, True, block=True)
+      self.denied("fast", 409, "main")
+      self.params.put_bool(key, False, block=True)
+    self.authorized = False
+    self.denied("fast", 403, "main")
+    self.authorized = True
+    self.act("fast", "main")
+    self.denied("fast", 409, "main")
+    self.params.put("UpdateFailedCount", 1, block=True)
+    self.assertEqual(self.owner.snapshot()["request"]["state"], "failed")
+    self.assertEqual(self.process.sent, ["fast"])
 
 
 class UpdaterIdentityTest(unittest.TestCase):

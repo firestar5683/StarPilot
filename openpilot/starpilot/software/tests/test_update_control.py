@@ -14,6 +14,47 @@ class UpdaterControlTests(unittest.TestCase):
     with self.assertRaises(update_control.UpdaterControlError):
       update_control.send(0, 0, 'install')
 
+  def test_fast_wire_pins_branch_and_commit_without_changing_legacy_commands(self):
+    commit = 'a' * 40
+    with mock.patch.object(update_control, '_exchange') as exchange:
+      update_control.send(123, 456, 'fast', branch='SecretGoodStarPilot', commit=commit)
+      exchange.assert_called_once_with(123, 456, b'fast SecretGoodStarPilot ' + commit.encode())
+    self.assertEqual(update_control._parse(b'fast SecretGoodStarPilot ' + commit.encode() + b'\n'),
+                     ('fast', 'SecretGoodStarPilot', commit))
+    for action in ('check', 'download'):
+      self.assertEqual(update_control._command(action), action.encode())
+      self.assertEqual(update_control._parse(action.encode() + b'\n'), (action, None, None))
+    self.assertLessEqual(len(update_control._command('fast', 'x' * 128, commit)) + 1, update_control.MAX_COMMAND)
+    for raw in (b'fast\n', b'fast Dom bad\n', b'fast Dom ' + commit.encode(),
+                b'fast Dom ' + commit.encode() + b' extra\n', b'fast Dom\ncheck ' + commit.encode() + b'\n'):
+      with self.subTest(raw=raw), self.assertRaises(update_control.UpdaterControlError):
+        update_control._parse(raw)
+    for branch, revision in ((None, commit), ('Dom', None), ('Dom\ncheck', commit), ('x' * 129, commit), ('Dom', 'A' * 40)):
+      with self.subTest(branch=branch), self.assertRaises(update_control.UpdaterControlError):
+        update_control.send(123, 456, 'fast', branch=branch, commit=revision)
+    with self.assertRaises(update_control.UpdaterControlError):
+      update_control.send(123, 456, 'check', branch='Dom', commit=commit)
+
+  def test_server_delivers_fast_identity_and_legacy_callback_shape(self):
+    for raw, expected in ((b'fast Dom ' + b'a' * 40 + b'\n', mock.call('fast', branch='Dom', commit='a' * 40)),
+                          (b'check\n', mock.call('check')), (b'download\n', mock.call('download'))):
+      with self.subTest(raw=raw):
+        client, connection = socket.socketpair()
+        try:
+          client.settimeout(1)
+          client.sendall(raw)
+          callback = mock.Mock()
+          listener = mock.Mock()
+          listener.accept.side_effect = [(connection, None), OSError()]
+          server = update_control.UpdaterControlServer(callback)
+          with mock.patch.object(update_control, '_peer', return_value=(os.getpid(), os.geteuid())):
+            server._run(listener)
+          self.assertEqual(client.recv(16), b'ok\n')
+          self.assertEqual(callback.call_args, expected)
+        finally:
+          client.close()
+          connection.close()
+
   @unittest.skipUnless(sys.platform.startswith('linux') and hasattr(socket, 'SO_PEERCRED'), 'Linux peer credentials required')
   def test_same_process_control_and_stale_identity(self):
     actions = []

@@ -45,11 +45,15 @@ class UserRequest:
   NONE = 0
   CHECK = 1
   FETCH = 2
+  FAST = 3
 
 class WaitTimeHelper:
   def __init__(self):
     self.ready_event = threading.Event()
     self.user_request = UserRequest.NONE
+    self.request_lock = threading.RLock()
+    self.request_generation = 0
+    self.fast_target = None
     signal.signal(signal.SIGHUP, self.update_now)
     signal.signal(signal.SIGUSR1, self.check_now)
     self.control = UpdaterControlServer(self._control_request)
@@ -60,24 +64,39 @@ class WaitTimeHelper:
     else:
       atexit.register(self.control.close)
 
-  def _control_request(self, action: str) -> None:
-    if action == 'check':
-      self.user_request = UserRequest.CHECK
-    elif action == 'download':
-      self.user_request = UserRequest.FETCH
-    else:
-      return
-    self.ready_event.set()
+  def _request(self, request: int, *, branch=None, commit=None) -> None:
+    with self.request_lock:
+      self.user_request = request
+      self.fast_target = (branch, commit) if request == UserRequest.FAST else None
+      self.request_generation += 1
+      self.ready_event.set()
+
+  def _control_request(self, action: str, *, branch=None, commit=None) -> None:
+    request = {'check': UserRequest.CHECK, 'download': UserRequest.FETCH, 'fast': UserRequest.FAST}.get(action)
+    if request is not None:
+      self._request(request, branch=branch, commit=commit)
 
   def update_now(self, signum: int, frame) -> None:
     cloudlog.info("caught SIGHUP, attempting to downloading update")
-    self.user_request = UserRequest.FETCH
-    self.ready_event.set()
+    self._request(UserRequest.FETCH)
 
   def check_now(self, signum: int, frame) -> None:
     cloudlog.info("caught SIGUSR1, checking for updates")
-    self.user_request = UserRequest.CHECK
-    self.ready_event.set()
+    self._request(UserRequest.CHECK)
+
+  def current_request(self) -> tuple[int, int, tuple[str, str] | None]:
+    with self.request_lock:
+      self.ready_event.clear()
+      return self.user_request, self.request_generation, self.fast_target
+
+  def finish_request(self, generation: int) -> bool:
+    with self.request_lock:
+      if self.request_generation != generation:
+        return False
+      self.user_request = UserRequest.NONE
+      self.fast_target = None
+      self.ready_event.clear()
+      return True
 
   def sleep(self, t: float) -> None:
     self.ready_event.wait(timeout=t)
@@ -374,15 +393,14 @@ class Updater:
 
     excluded_branches = ('release2', 'release2-staging')
 
-    try:
-      run(["git", "ls-remote", "origin", "HEAD"], OVERLAY_MERGED)
-      self._has_internet = True
-    except subprocess.CalledProcessError:
-      self._has_internet = False
-
     self._branches_checked = False
     setup_git_options(OVERLAY_MERGED)
-    output = run(["git", "ls-remote", "--heads"], OVERLAY_MERGED)
+    try:
+      output = run(["git", "ls-remote", "--heads", "origin"], OVERLAY_MERGED)
+    except subprocess.CalledProcessError:
+      self._has_internet = False
+      raise
+    self._has_internet = True
 
     self.branches.clear()
     for line in output.split('\n'):
@@ -402,6 +420,35 @@ class Updater:
       cloudlog.info(f"update available, {cur_branch} ({str(cur_commit)[:7]}) -> {new_branch} ({str(new_commit)[:7]})")
     else:
       cloudlog.info(f"up to date on {cur_branch} ({str(cur_commit)[:7]})")
+
+  def fast_update(self, branch: str, commit: str) -> str:
+    from openpilot.starpilot.drive_state.evidence import PhysicalSource
+    from openpilot.starpilot.software.fast_update import fast_update
+
+    source = PhysicalSource()
+
+    def parked():
+      deadline = time.monotonic() + 0.75
+      while True:
+        if (self.params.get_bool("IsOffroad") and not self.params.get_bool("IsOnroad") and
+            source.allowed() and source.effective() is False):
+          return True
+        if time.monotonic() >= deadline:
+          return False
+        time.sleep(0.02)
+
+    def invalidate():
+      Path(FINALIZED, ".overlay_consistent").unlink(missing_ok=True)
+      OVERLAY_INIT.unlink(missing_ok=True)
+      dismount_overlay()
+      self.params.put_bool("UpdateAvailable", False, block=True)
+      self._branches_checked = False
+
+    try:
+      return fast_update(Path(BASEDIR), branch, expected_commit=commit, params=self.params, parked=parked,
+                         current_os=HARDWARE.get_os_version(), invalidate=invalidate)
+    finally:
+      source.close()
 
   def fetch_update(self) -> bool:
     if not self._branches_checked:
@@ -475,7 +522,7 @@ def main() -> None:
       params.put("InstallDate", t, block=True)
 
     updater = Updater()
-    update_failed_count = 0 # TODO: Load from param?
+    update_failed_count = max(0, params.get("UpdateFailedCount") or 0)
     wait_helper = WaitTimeHelper()
 
     # invalidate old finalized update
@@ -487,39 +534,47 @@ def main() -> None:
     # Run the update loop
     first_run = True
     while True:
-      wait_helper.ready_event.clear()
+      requested, request_generation, fast_target = wait_helper.current_request()
 
       # Attempt an update
       exception = None
+      fast_requested = requested == UserRequest.FAST
       try:
-        # TODO: reuse overlay from previous updated instance if it looks clean
-        init_overlay()
-
-        # ensure we have some params written soon after startup
-        updater.set_params(False, update_failed_count, exception)
-
-        if not system_time_valid() or first_run:
-          first_run = False
-          wait_helper.sleep(60)
-          continue
-
-        update_failed_count += 1
-
-        # check for update
-        params.put("UpdaterState", "checking...", block=True)
-        updater.check_for_update()
-
-        # download update
-        last_fetch = params.get("UpdaterLastFetchTime")
-        timed_out = last_fetch is None or (datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - last_fetch > datetime.timedelta(days=3))
-        user_requested_fetch = wait_helper.user_request == UserRequest.FETCH
-        if params.get_bool("NetworkMetered") and not timed_out and not user_requested_fetch:
-          cloudlog.info("skipping fetch, connection metered")
-        elif not download_permitted(params, manual=user_requested_fetch, check_only=wait_helper.user_request == UserRequest.CHECK):
-          cloudlog.info("skipping fetch, check-only request or automatic downloads disabled")
+        if fast_requested:
+          update_failed_count += 1
+          params.put("UpdaterState", "updating...", block=True)
+          updater.fast_update(*fast_target)
+          write_time_to_param(params, "UpdaterLastFetchTime")
+          write_time_to_param(params, "LastUpdateTime")
         else:
-          if updater.fetch_update():
-            write_time_to_param(params, "UpdaterLastFetchTime")
+          # TODO: reuse overlay from previous updated instance if it looks clean
+          init_overlay()
+
+          # ensure we have some params written soon after startup
+          updater.set_params(False, update_failed_count, exception)
+
+          if not system_time_valid() or first_run:
+            first_run = False
+            wait_helper.sleep(60)
+            continue
+
+          update_failed_count += 1
+
+          # check for update
+          params.put("UpdaterState", "checking...", block=True)
+          updater.check_for_update()
+
+          # download update
+          last_fetch = params.get("UpdaterLastFetchTime")
+          timed_out = last_fetch is None or (datetime.datetime.now(datetime.UTC).replace(tzinfo=None) - last_fetch > datetime.timedelta(days=3))
+          user_requested_fetch = requested == UserRequest.FETCH
+          if params.get_bool("NetworkMetered") and not timed_out and not user_requested_fetch:
+            cloudlog.info("skipping fetch, connection metered")
+          elif not download_permitted(params, manual=user_requested_fetch, check_only=requested == UserRequest.CHECK):
+            cloudlog.info("skipping fetch, check-only request or automatic downloads disabled")
+          else:
+            if updater.fetch_update():
+              write_time_to_param(params, "UpdaterLastFetchTime")
         update_failed_count = 0
       except subprocess.CalledProcessError as e:
         cloudlog.event(
@@ -536,14 +591,23 @@ def main() -> None:
         OVERLAY_INIT.unlink(missing_ok=True)
 
       try:
-        params.put("UpdaterState", "idle", block=True)
         update_successful = (update_failed_count == 0)
-        updater.set_params(update_successful, update_failed_count, exception)
+        if fast_requested:
+          params.put("UpdateFailedCount", update_failed_count, block=True)
+          if exception is None:
+            params.remove("LastUpdateException")
+          else:
+            params.put("LastUpdateException", exception.encode("utf-8")[:4096].decode("utf-8", errors="ignore"), block=True)
+          params.put("UpdaterState", "updating..." if params.get_bool("DoReboot") else "idle", block=True)
+        else:
+          params.put("UpdaterState", "idle", block=True)
+          updater.set_params(update_successful, update_failed_count, exception)
       except Exception:
         cloudlog.exception("uncaught updated exception while setting params, shouldn't happen")
 
       # infrequent attempts if we successfully updated recently
-      wait_helper.user_request = UserRequest.NONE
+      if not wait_helper.finish_request(request_generation):
+        continue
       wait_helper.sleep(5*60 if update_failed_count > 0 else 1.5*60*60)
 
 

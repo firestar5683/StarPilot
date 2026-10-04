@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import os
+import re
 import socket
 import struct
 import threading
@@ -11,7 +12,9 @@ from pathlib import Path
 
 
 TIMEOUT = 0.5
-MAX_COMMAND = 16
+MAX_COMMAND = 256
+_BRANCH = re.compile(r"[A-Za-z0-9_][A-Za-z0-9._/+@-]{0,127}\Z")
+_COMMIT = re.compile(r"[0-9a-f]{40}\Z")
 _CREDENTIALS = struct.Struct('3i')
 
 
@@ -78,14 +81,32 @@ def available(pid: int, start: int) -> bool:
     return False
 
 
-def send(pid: int, start: int, action: str) -> None:
-  if action not in ('check', 'download'):
-    raise UpdaterControlError('Invalid updater control action')
-  _exchange(pid, start, action.encode('ascii'))
+def _command(action: str, branch=None, commit=None) -> bytes:
+  if action in ('check', 'download') and branch is None and commit is None:
+    return action.encode('ascii')
+  if action == 'fast' and type(branch) is str and type(commit) is str and _BRANCH.fullmatch(branch) and _COMMIT.fullmatch(commit):
+    return f'fast {branch} {commit}'.encode('ascii')
+  raise UpdaterControlError('Invalid updater control action')
+
+
+def _parse(command: bytes):
+  if command in (b'status\n', b'check\n', b'download\n'):
+    return command[:-1].decode('ascii'), None, None
+  try:
+    action, branch, commit = command[:-1].decode('ascii').split(' ')
+  except (UnicodeError, ValueError):
+    raise UpdaterControlError('Invalid updater control message') from None
+  if not command.endswith(b'\n') or action != 'fast' or _command(action, branch, commit) + b'\n' != command:
+    raise UpdaterControlError('Invalid updater control message')
+  return action, branch, commit
+
+
+def send(pid: int, start: int, action: str, *, branch=None, commit=None) -> None:
+  _exchange(pid, start, _command(action, branch, commit))
 
 
 class UpdaterControlServer:
-  def __init__(self, request: Callable[[str], None]):
+  def __init__(self, request: Callable[..., None]):
     self.request = request
     self.socket: socket.socket | None = None
     self.thread: threading.Thread | None = None
@@ -123,13 +144,21 @@ class UpdaterControlServer:
         try:
           _, uid = _peer(connection)
           command = _line(connection)
-          if uid != os.geteuid() or command not in (b'status\n', b'check\n', b'download\n'):
+          if uid != os.geteuid():
             connection.sendall(b'error\n')
           else:
-            if command != b'status\n':
-              self.request(command[:-1].decode('ascii'))
+            action, branch, commit = _parse(command)
+            if action == 'fast':
+              self.request(action, branch=branch, commit=commit)
+            elif action != 'status':
+              self.request(action)
             connection.sendall(b'ok\n')
-        except (OSError, RuntimeError, ValueError):
+        except (RuntimeError, ValueError):
+          try:
+            connection.sendall(b'error\n')
+          except OSError:
+            pass
+        except OSError:
           pass
 
   def close(self) -> None:

@@ -1,11 +1,11 @@
 import { decodeLayoutBackup, encodeLayoutBackup, MAX_LAYOUT_BACKUP_BYTES } from "./layout-backup.js"
 
-const ACTIONS = new Set(["check", "download", "select", "install", "preferences"])
+const ACTIONS = new Set(["check", "download", "select", "install", "preferences", "fast"])
 const REQUEST_STATES = new Set(["pending", "complete", "failed"])
-const UPDATER_ACTIVE = new Set(["checking...", "downloading...", "finalizing update..."])
+const UPDATER_ACTIVE = new Set(["checking...", "downloading...", "finalizing update...", "updating..."])
 const PRIMARY_BRANCHES = ["StarPilot", "Dom"]
 const unavailableOperations = () => ({ parked: false, availableBranches: [], selectedTarget: null,
-  canCheck: false, canDownload: false, canSelect: false, canInstall: false,
+  canCheck: false, canFastUpdate: false, canDownload: false, canSelect: false, canInstall: false,
   reason: "Update controls are unavailable", request: null })
 
 export function validSoftwareSnapshot(data) {
@@ -22,12 +22,14 @@ export function validSoftwareSnapshot(data) {
     operations.availableBranches.length <= 256 && operations.availableBranches.every((branch) =>
       typeof branch === "string" && branch.length > 0 && branch.length <= 128) &&
     text(operations.selectedTarget) && text(operations.reason) &&
+    (operations.canFastUpdate === undefined || typeof operations.canFastUpdate === "boolean") &&
     (operations.automaticDownloads === undefined || flag(operations.automaticDownloads)) &&
     (operations.canConfigure === undefined || typeof operations.canConfigure === "boolean") &&
     (operations.history === undefined || validHistory(operations.history)) &&
     [operations.canCheck, operations.canDownload, operations.canSelect, operations.canInstall].every((value) => typeof value === "boolean") &&
     (request === null || !!request && typeof request.id === "string" && request.id.length <= 100 &&
-      ACTIONS.has(request.action) && text(request.target) && REQUEST_STATES.has(request.state) && text(request.error)))
+      ACTIONS.has(request.action) && text(request.target) && REQUEST_STATES.has(request.state) && text(request.error) &&
+      (request.outcome === undefined || ["up_to_date", "restarting"].includes(request.outcome))))
 }
 
 export function validHistory(value) {
@@ -147,7 +149,9 @@ export class SoftwareStatusFeed {
         this.uncertain = false
         this.uncertainAction = null
         this.actionPriorRequestId = null
-        if (body.action === "install") {
+        if (body.action === "fast") {
+          this.notice = `Updating ${body.branch}. Waiting for completion or reconnect.`
+        } else if (body.action === "install") {
           this.installBaseline = this.installBaseline || { commit: payload.installed.commit, branch: payload.installed.branch, target: body.branch }
           this.notice = "Restart requested. Waiting to reconnect and verify the installed build."
         } else this.notice = body.action === "select" ? `Target branch set to ${body.branch}. Check and download the update when ready.` :
@@ -165,6 +169,13 @@ export class SoftwareStatusFeed {
           this.uncertain = false
           this.uncertainAction = null
           this.actionPriorRequestId = null
+        }
+        if (this.installBaseline?.action === "fast" && observed?.action === "fast" && observed.target === this.installBaseline.target &&
+            ["complete", "failed"].includes(observed.state)) {
+          if (observed.state === "failed" || observed.outcome === "up_to_date") {
+            this.installBaseline = null
+            this.notice = observed.state === "failed" ? "" : "Installed branch is already up to date. No restart needed."
+          } else this.notice = "Update installed. Waiting to reconnect and verify the installed build."
         }
         if (this.installBaseline && payload.installed.branch === this.installBaseline.target &&
             (payload.installed.commit && payload.installed.commit !== this.installBaseline.commit ||
@@ -186,7 +197,7 @@ export class SoftwareStatusFeed {
         if (body !== null) {
           this.uncertain = !error?.rejected
           this.uncertainAction = this.uncertain ? body : null
-          if (error?.rejected && body.action === "install") this.installBaseline = null
+          if (error?.rejected && ["install", "fast"].includes(body.action)) this.installBaseline = null
         }
         this.error = error?.message || "Software request failed. Refresh to try again."
         this.emit(this.data ? "ready" : this.attempted ? "unavailable" : "loading")
@@ -214,14 +225,16 @@ export class SoftwareStatusFeed {
 
   action(action, branch = null) {
     const operations = this.data?.operations
-    const capability = { check: "canCheck", download: "canDownload", select: "canSelect", install: "canInstall" }[action]
+    const capability = { check: "canCheck", download: "canDownload", select: "canSelect", install: "canInstall", fast: "canFastUpdate" }[action]
     if (!this.active || !capability || this.mutating || this.blocked || this.uncertain || !operations?.parked ||
         operations[capability] !== true || operations.request?.state === "pending") return null
     if (action === "select" && (branch === "other:" || !operations.availableBranches.includes(branch) || branch === operations.selectedTarget)) return null
     if (["download", "install"].includes(action) && (!branch || branch !== operations.selectedTarget)) return null
+    if (action === "fast" && (!branch || branch !== this.data.installed.branch)) return null
     this.actionPriorRequestId = operations.request?.id ?? null
     if (action === "install") this.installBaseline = { commit: this.data.installed.commit,
       branch: this.data.installed.branch, target: branch }
+    if (action === "fast") this.installBaseline = { commit: this.data.installed.commit, branch: this.data.installed.branch, target: branch, action }
     return this.run(action === "check" ? { action } : { action, branch })
   }
 }
@@ -345,6 +358,9 @@ export const SoftwarePage = {
     requestMessage(request) {
       if (!request) return ""
       if (request.state === "failed") return request.error || "Update request failed. Refresh and try again."
+      if (request.action === "fast") return request.state === "pending" ? `Updating ${request.target}…` :
+        request.outcome === "up_to_date" ? "Installed branch is already up to date. No restart needed." :
+        "Update installed. Waiting to reconnect and verify the installed build."
       if (request.action === "install") return "Restart requested. Waiting to reconnect and verify the installed build."
       if (request.state === "pending") return request.action === "check" ? "Checking for updates…" : "Downloading and preparing update…"
       return request.action === "check" ? "Update check finished." : request.action === "download" ? "Download finished." : "Target branch saved."
@@ -353,6 +369,12 @@ export const SoftwarePage = {
       if (!this.operations?.canSelect || this.actionDisabled || !this.canStageBranch) return
       this.dialog = { action: "select", branch: this.draftBranch, title: "Change target branch",
         message: `Set ${this.draftBranch} as the target branch? This only stages the choice. Check for updates and download separately.`, label: "Set target branch" }
+    },
+    askFastUpdate() {
+      const branch = this.data?.installed?.branch
+      if (this.actionDisabled || this.operations?.canFastUpdate !== true || !branch) return
+      this.dialog = { action: "fast", branch, title: "Fast Update",
+        message: `Download latest version of ${branch} and restart?`, label: "Fast Update" }
     },
     askInstall() {
       if (this.actionDisabled || !this.operations?.canInstall || !this.operations.selectedTarget) return
@@ -412,7 +434,8 @@ export const SoftwarePage = {
             <p v-else-if="data.updater.state">{{ data.updater.state }}</p>
             <p v-if="data.updater.targetChangeFound === true">An update was found for the target branch.</p>
             <p v-else-if="data.updater.targetChangeFound === false">No target change reported by the last check.</p>
-            <div class="gx-software-actions"><button type="button" class="gx-btn" :disabled="actionDisabled || !operations.canDownload || !operations.selectedTarget" @click="feed.action('download', operations.selectedTarget)">Download update</button>
+            <div class="gx-software-actions"><button type="button" class="gx-btn" :disabled="actionDisabled || operations.canFastUpdate !== true || !data.installed.branch" @click="askFastUpdate">Fast Update</button>
+              <button type="button" class="gx-btn" :disabled="actionDisabled || !operations.canDownload || !operations.selectedTarget" @click="feed.action('download', operations.selectedTarget)">Download update</button>
               <button type="button" class="gx-btn" :disabled="actionDisabled || !operations.canInstall || !operations.selectedTarget" @click="askInstall">Restart &amp; install</button></div>
             <dl><dt>Last checked</dt><dd>{{ reported(data.updater.lastSuccessAt) }}</dd><dt>Last download</dt><dd>{{ reported(data.updater.lastFetchAt) }}</dd></dl></section>
           <section v-if="operations.automaticDownloads !== undefined" class="gx-card gx-software-card">

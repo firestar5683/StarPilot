@@ -38,7 +38,7 @@ class TestUnpublishedBranch(unittest.TestCase):
     def run(command, cwd):
       self.assertEqual(cwd, str(self.merged))
       self.commands.append(command)
-      if command == ["git", "ls-remote", "--heads"]:
+      if command == ["git", "ls-remote", "--heads", "origin"]:
         return self.remote_heads
       if command == ["git", "ls-remote", "origin", "HEAD"]:
         return f"{REMOTE}\tHEAD\n"
@@ -55,7 +55,7 @@ class TestUnpublishedBranch(unittest.TestCase):
     self.assertFalse(self.updater.update_ready)
     self.assertFalse(self.updater.fetch_update())
     self.assertNotIn(TARGET, self.updater.branches)
-    self.assertEqual(self.commands.count(["git", "ls-remote", "--heads"]), 1)
+    self.assertEqual(self.commands.count(["git", "ls-remote", "--heads", "origin"]), 1)
     self.updated.set_consistent_flag.assert_not_called()
     self.assertNotIn("UpdaterState", self.updater.params.values)
 
@@ -94,7 +94,7 @@ class TestUnpublishedBranch(unittest.TestCase):
     self.assertTrue(self.updater.update_available)
 
     def failed_run(command, cwd):
-      if command == ["git", "ls-remote", "--heads"]:
+      if command == ["git", "ls-remote", "--heads", "origin"]:
         raise subprocess.CalledProcessError(128, command, output="network failed")
       return f"{REMOTE}\tHEAD\n"
 
