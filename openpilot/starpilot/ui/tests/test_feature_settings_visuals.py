@@ -15,7 +15,7 @@ from openpilot.starpilot.ui.presentation import FontRole, Profile
 
 def fake_fonts():
   return SimpleNamespace(profile=Profile.LARGE, draw=Mock(),
-                         measure=lambda text, *_args: SimpleNamespace(width=len(text) * 10),
+                         measure=lambda text, _role, size: SimpleNamespace(width=len(text) * size * .5),
                          vertical_ink=lambda *_args: (6, 33))
 
 
@@ -53,6 +53,7 @@ class FeatureVisualTests(unittest.TestCase):
           stars.reset_mock()
           geometry.draw_aether_toggle(rect, value, available=available, seed_id="lane:switch")
           self.assertEqual(stars.call_count, int(available and value))
+          self.assertTrue(all(call.args[-1].a > 0 for call in rl.draw_rectangle_rounded.call_args_list))
           knob = next(call.args[0] for call in rl.draw_rectangle_rounded.call_args_list
                       if call.args[0].width == 44)
           centers[available, value] = knob.x + knob.width / 2
@@ -87,6 +88,23 @@ class FeatureVisualTests(unittest.TestCase):
       self.assertIn(text, texts)
     healthy = next(call for call in fonts.draw.call_args_list if call.args[0] == "Healthy")
     self.assertEqual(healthy.args[-1], geometry.TEXT_SECONDARY)
+    plus = next(call for call in fonts.draw.call_args_list if call.args[0] == "+")
+    self.assertEqual(plus.args[2], 39)
+
+  def test_repair_targets_stay_complete_and_fit_the_button(self):
+    self.drawing()
+    fonts = fake_fonts()
+    renderer = view.FeatureSettingsView(fonts)
+    for target in ("0", "Off", "On", "Stock", "Reset", "Auto", "30 s", "10 s", "4.0", "starpilot"):
+      with self.subTest(target=target):
+        fonts.draw.reset_mock()
+        row = FeatureRow("repair", "Repair", "Invalid", available=True, repair_value=target)
+        renderer.render(FeatureSettingsState(rows=(row,)))
+        label = next(call for call in fonts.draw.call_args_list if call.args[0] == f"Set {target}")
+        self.assertLessEqual(fonts.measure(*label.args[:3]).width, 125)
+        self.assertTrue(0 < label.args[2] <= 29)
+        if target == "Off":
+          self.assertEqual(label.args[2], 29)
 
   def test_long_text_fits_and_subtitle_ink_clears_rows(self):
     self.drawing()
@@ -98,9 +116,9 @@ class FeatureVisualTests(unittest.TestCase):
       renderer.render(state)
     decoration.assert_not_called()
     title = next(call for call in fonts.draw.call_args_list if call.args[1] == FontRole.SEMI_BOLD)
-    self.assertLessEqual(fonts.measure(title.args[0]).width, 1305)
+    self.assertLessEqual(fonts.measure(*title.args[:3]).width, 1305)
     label = next(call for call in fonts.draw.call_args_list if call.args[0].startswith("Long label"))
-    self.assertLessEqual(fonts.measure(label.args[0]).width, 1149)
+    self.assertLessEqual(fonts.measure(*label.args[:3]).width, 1149)
     subtitle = next(call for call in fonts.draw.call_args_list if call.args[0] == state.subtitle)
     self.assertLess(subtitle.args[4] + 33, 130)
     self.assertEqual(renderer._elide("Fits", FontRole.NORMAL, 27, 100), "Fits")

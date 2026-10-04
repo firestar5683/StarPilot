@@ -26,7 +26,7 @@ from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
 from openpilot.starpilot.ui.feature_settings_state import FeatureInput, FeatureRow, FeatureSettingsRequest, FeatureSettingsState, row_change
 from openpilot.starpilot.ui import feature_settings_compact as compact
 from openpilot.starpilot.ui import feature_settings as large
-from openpilot.starpilot.ui.presentation import BitmapFonts, Profile
+from openpilot.starpilot.ui.presentation import Profile
 
 
 def required_change(row: FeatureRow, direction: int = 1) -> FeatureSettingsRequest:
@@ -609,25 +609,22 @@ class LateralFeatureSettingsTests(unittest.TestCase):
       self.assertTrue(any(item.text == "lkas press set off" for item in pushed[-1].items))
 
   def test_large_repair_labels_match_requested_values(self):
-    class Fonts(BitmapFonts):
-      profile = Profile.LARGE
-
-      def __init__(self):
-        self.text = []
-
-      def draw(self, value, *args, **kwargs):
-        self.text.append(value)
-
-    fonts = Fonts()
+    text = []
+    fonts = SimpleNamespace(profile=Profile.LARGE,
+                            draw=lambda value, *_args: text.append(value),
+                            measure=lambda value, _role, size: SimpleNamespace(width=len(value) * size * .5),
+                            vertical_ink=lambda _value, _role, size: (size * .2, size * .8))
     state = FeatureSettingsState(rows=(
       FeatureRow("AolBrakePauseSpeedMps", "Brake pause below", "Invalid", available=True, repair_value="0"),
       FeatureRow("LKASButtonControl", "LKAS press", "Unsupported", available=True, repair_value="Off"),
     ))
-    with patch.object(large.rl, "draw_rectangle_rounded"), patch.object(large.clip, "begin_scissor_mode"), \
+    with patch.object(large.rl, "draw_rectangle_rounded"), patch.object(large.rl, "draw_rectangle_rounded_lines_ex"), \
+         patch.object(large.rl, "draw_line"), patch.object(large.rl, "draw_line_ex"), patch.object(large.rl, "draw_circle"), \
+         patch.object(large.clip, "begin_scissor_mode"), \
          patch.object(large.clip, "end_scissor_mode"):
       large.FeatureSettingsView(fonts).render(state)
-    self.assertIn("Set 0", fonts.text)
-    self.assertIn("Set Off", fonts.text)
+    self.assertIn("Set 0", text)
+    self.assertIn("Set Off", text)
 
   def test_starpilot_tuning_help_is_visible_in_large_native_settings(self):
     class Fonts:
