@@ -274,7 +274,7 @@ class SoftwareOperations:
       except SoftwareUnavailable:
         raise SoftwareOperationError("Updater status is unavailable", 503) from None
       self._refresh_request(status)
-      parked = self._parked() and self._flag("IsOnroad") is False
+      parked = self._parked()
       branches = self._branches()
       updater_idle = status["updater"]["state"] == "idle"
       pending = self.request is not None and self.request["state"] == "pending"
@@ -334,11 +334,11 @@ class SoftwareOperations:
     with self.lock:
       if not authorized():
         raise SoftwareOperationError('Session expired', 403)
-      if not self._parked() or self._flag('IsOnroad') is not False or self._flag('DoReboot') is not False:
+      if not self._parked() or self._flag('DoReboot') is not False:
         raise SoftwareOperationError('Park the vehicle to change update preferences', 409)
       if automatic_downloads(self.params) is not expected:
         raise SoftwareOperationError('Update preference changed; refresh before saving', 409)
-      if not authorized() or not self._parked() or self._flag('IsOnroad') is not False or self._flag('DoReboot') is not False:
+      if not authorized() or not self._parked() or self._flag('DoReboot') is not False:
         raise SoftwareOperationError('Session or parked state changed', 403)
       if automatic_downloads(self.params) is not expected:
         raise SoftwareOperationError('Update preference changed; refresh before saving', 409)
@@ -382,7 +382,7 @@ class SoftwareOperations:
           raise SoftwareOperationError("Installed branch changed; refresh before updating", 409)
       if action == "install" and not view["canInstall"]:
         raise SoftwareOperationError("Finalized update does not match selected branch", 409)
-      if not authorized() or not self._parked() or self._flag("IsOnroad") is not False:
+      if not authorized() or not self._parked():
         raise SoftwareOperationError("Session or parked state changed", 403)
       current = self.status.snapshot()
       if (current["updater"]["state"] != "idle" or self._flag("DisableUpdates") is not False or
@@ -398,14 +398,14 @@ class SoftwareOperations:
         status = self.status.snapshot()
         if not self._ready(status, branch) or self._flag("DoReboot") is not False:
           raise SoftwareOperationError("Update is no longer ready", 409)
-        if not authorized() or not self._parked() or self._flag("IsOnroad") is not False:
+        if not authorized() or not self._parked():
           raise SoftwareOperationError("Session or parked state changed", 403)
         self.params.put_bool("DoReboot", True, block=True)
       else:
         status = self.status.snapshot()
         baseline = (status["updater"]["lastSuccessAt"], status["updater"]["lastFetchAt"],
                     status["updater"]["failedCount"])
-        if not authorized() or not self._parked() or self._flag("IsOnroad") is not False:
+        if not authorized() or not self._parked():
           raise SoftwareOperationError("Session or parked state changed", 403)
         if action == "fast":
           identity = self.git_identity(self.installed)

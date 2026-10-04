@@ -125,11 +125,6 @@ class SoftwareOperationsTest(unittest.TestCase):
         self.authorized = authorized
         self.denied("check", 403 if not authorized else 409)
     self.assertEqual(self.process.sent, [])
-    Path(self.params.get_param_path("IsOnroad")).write_bytes(b"1")
-    self.params.put_bool("IsOffroad", True, block=True)
-    self.parked = self.authorized = True
-    self.denied("check", 409)
-    Path(self.params.get_param_path("IsOnroad")).unlink()
     self.params.put_bool("IsOffroad", True, block=True)
     self.parked = self.authorized = True
     checks = iter((True, False))
@@ -284,6 +279,16 @@ class SoftwareOperationsTest(unittest.TestCase):
     self.assertEqual(result["state"], "complete")
     self.assertEqual(result["outcome"], "up_to_date")
 
+  def test_fast_uses_registered_offroad_and_live_parked_authority(self):
+    Path(self.params.get_param_path("IsOnroad")).write_bytes(b"1")
+    self.assertTrue(self.owner.snapshot()["canFastUpdate"])
+    self.parked = False
+    self.assertFalse(self.owner.snapshot()["canFastUpdate"])
+    self.denied("fast", 409, "main")
+    self.parked = True
+    self.act("fast", "main")
+    self.assertEqual(self.process.sent, ["fast"])
+
   def test_fast_rejects_other_or_stale_installed_branch(self):
     self.denied("fast", 409, "release")
     self.git[self.installed] = ("main", "b" * 40)
@@ -294,7 +299,7 @@ class SoftwareOperationsTest(unittest.TestCase):
     self.assertFalse(self.params.get_bool("DoReboot"))
 
   def test_fast_keeps_existing_admission_and_observes_failure(self):
-    for key in ("DisableUpdates", "IsOnroad", "DoReboot"):
+    for key in ("DisableUpdates", "DoReboot"):
       self.params.put_bool(key, True, block=True)
       self.denied("fast", 409, "main")
       self.params.put_bool(key, False, block=True)

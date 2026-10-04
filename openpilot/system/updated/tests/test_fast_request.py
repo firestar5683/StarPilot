@@ -124,7 +124,11 @@ class TestFastAdapter(unittest.TestCase):
       updated.HARDWARE.get_os_version.return_value = '19.8.1'
       updater = updated.Updater()
       updater.params = Mock()
-      updater.params.get_bool.side_effect = lambda key: key == 'IsOffroad'
+      def registered_flag(key):
+        if key != 'IsOffroad':
+          raise KeyError(key.encode())
+        return True
+      updater.params.get_bool.side_effect = registered_flag
       source = Mock()
       source.allowed.return_value = True
       source.effective.return_value = False
@@ -145,7 +149,35 @@ class TestFastAdapter(unittest.TestCase):
       with patch.dict(sys.modules, {physical.__name__: physical, owner.__name__: owner}):
         self.assertEqual(updater.fast_update('SecretGoodStarPilot', 'b' * 40), 'reboot-requested')
       source.close.assert_called_once()
+      self.assertEqual(updater.params.get_bool.call_args_list, [unittest.mock.call('IsOffroad')])
       updater.params.put_bool.assert_called_once_with('UpdateAvailable', False, block=True)
+
+
+  def test_live_onroad_invalid_physical_or_offroad_false_deny_fast_admission(self):
+    for offroad, allowed, effective in ((False, True, False), (True, False, False), (True, True, True), (True, True, None)):
+      with self.subTest(offroad=offroad, allowed=allowed, effective=effective):
+        updated = load_updater()
+        updater = updated.Updater()
+        updater.params = Mock()
+        def registered_flag(key):
+          if key != "IsOffroad":
+            raise KeyError(key.encode())
+          return offroad
+        updater.params.get_bool.side_effect = registered_flag
+        source = Mock()
+        source.allowed.return_value = allowed
+        source.effective.return_value = effective
+        physical = ModuleType('openpilot.starpilot.drive_state.evidence')
+        physical.PhysicalSource = Mock(return_value=source)
+        owner = ModuleType('openpilot.starpilot.software.fast_update')
+        def admit(*args, **kwargs):
+          self.assertFalse(kwargs['parked']())
+          return 'denied'
+        owner.fast_update = admit
+        with patch.dict(sys.modules, {physical.__name__: physical, owner.__name__: owner}), \
+             patch.object(updated.time, 'monotonic', side_effect=(0, 1)):
+          self.assertEqual(updater.fast_update('SecretGoodStarPilot', 'b' * 40), 'denied')
+        source.close.assert_called_once()
 
 
 if __name__ == '__main__':
