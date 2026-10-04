@@ -79,8 +79,8 @@ class SoftwareInput:
 
   def move(self, x: float, y: float, state: SoftwareState) -> None:
     if self._pressed is not None:
-      px, py, target, displayed_toggle = self._pressed
-      if (abs(x - px) > 5 or abs(y - py) > 5 or self._target(x, y, state) != target or
+      _, _, target, displayed_toggle = self._pressed
+      if (self._target(x, y, state) != target or
           (target == SoftwareRequest.SET_AUTOMATIC_UPDATES and state.automatic_updates != displayed_toggle)):
         self.cancel()
 

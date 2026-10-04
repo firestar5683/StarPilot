@@ -209,12 +209,19 @@ class MouseState:
         rl.is_mouse_button_down(slot),
         time.monotonic(),
       )
-      # Only add changes
-      prev = self._prev_mouse_event[slot]
-      if prev is None or ev[:-1] != prev[:-1]:
-        with self._lock:
-          self._events.append(ev)
-        self._prev_mouse_event[slot] = ev
+      self._append_mouse_event(ev)
+
+  def _append_mouse_event(self, ev: MouseEvent):
+    if ev.left_pressed and ev.left_released:
+      self._append_mouse_event(MouseEvent(ev.pos, ev.slot, True, False, True, ev.t))
+      self._append_mouse_event(MouseEvent(ev.pos, ev.slot, False, True, False, ev.t))
+      return
+
+    prev = self._prev_mouse_event[ev.slot]
+    if prev is None or ev[:-1] != prev[:-1]:
+      with self._lock:
+        self._events.append(ev)
+      self._prev_mouse_event[ev.slot] = ev
 
 
 class FrameTiming(NamedTuple):

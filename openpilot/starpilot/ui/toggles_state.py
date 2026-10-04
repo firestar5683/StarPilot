@@ -55,7 +55,7 @@ class ToggleRequest:
 class TogglesInput:
   def __init__(self, emit: Callable[[ToggleRequest], None]):
     self.emit = emit
-    self._pressed: tuple[float, float, ToggleRequest] | None = None
+    self._pressed: tuple[float, float, ToggleRequest, float] | None = None
 
   def _target(self, x: float, y: float, state: TogglesState) -> ToggleRequest | None:
     if not 500 <= x < 2160 or not 50 <= y < 1030:
@@ -77,12 +77,12 @@ class TogglesInput:
 
   def press(self, x: float, y: float, state: TogglesState) -> None:
     target = self._target(x, y, state)
-    self._pressed = (x, y, target) if target else None
+    self._pressed = (x, y, target, state.scroll_y) if target else None
 
   def move(self, x: float, y: float, state: TogglesState) -> None:
     if self._pressed:
-      px, py, target = self._pressed
-      if abs(x - px) > 5 or abs(y - py) > 5 or self._target(x, y, state) != target:
+      _, _, target, scroll_y = self._pressed
+      if state.scroll_y != scroll_y or self._target(x, y, state) != target:
         self.cancel()
 
   def release(self, x: float, y: float, state: TogglesState) -> None:

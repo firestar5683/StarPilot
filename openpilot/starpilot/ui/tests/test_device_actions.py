@@ -38,7 +38,7 @@ class TestDeviceActions(unittest.TestCase):
     handler.press(*camera, replace(DeviceState(), offroad=False))
     handler.release(*camera, replace(DeviceState(), offroad=False))
     handler.press(*camera, DeviceState())
-    handler.move(2000, 650, DeviceState())
+    handler.move(1800, 650, DeviceState())
     handler.release(*camera, DeviceState())
     handler.press(*camera, DeviceState())
     handler.release(*camera, replace(DeviceState(), offroad=False))

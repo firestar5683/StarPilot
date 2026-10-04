@@ -96,7 +96,7 @@ class FeatureInput:
 
   def __init__(self, emit: Callable[[FeatureUiAction], None]):
     self.emit = emit
-    self.held: tuple[float, float, FeatureUiAction] | None = None
+    self.held: tuple[float, float, FeatureUiAction, int, str] | None = None
 
   @staticmethod
   def target(x: float, y: float, state: FeatureSettingsState) -> FeatureUiAction | None:
@@ -124,12 +124,12 @@ class FeatureInput:
 
   def press(self, x: float, y: float, state: FeatureSettingsState) -> None:
     target = self.target(x, y, state)
-    self.held = (x, y, target) if target is not None else None
+    self.held = (x, y, target, state.scroll, state.page) if target is not None else None
 
   def move(self, x: float, y: float, state: FeatureSettingsState) -> None:
     if self.held is not None:
-      px, py, action = self.held
-      if abs(x - px) > 6 or abs(y - py) > 6 or self.target(x, y, state) != action:
+      _, _, action, scroll, page = self.held
+      if state.scroll != scroll or state.page != page or self.target(x, y, state) != action:
         self.cancel()
 
   def release(self, x: float, y: float, state: FeatureSettingsState) -> None:

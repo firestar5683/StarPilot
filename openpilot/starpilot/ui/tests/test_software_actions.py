@@ -46,7 +46,7 @@ class TestSoftwareActions(unittest.TestCase):
     handler = SoftwareInput(actions.append)
     state = SoftwareState()
     handler.press(1980, 475, state)
-    handler.move(1990, 475, state)
+    handler.move(1800, 475, state)
     handler.release(1980, 475, state)
     handler.press(1980, 475, state)
     handler.release(1980, 475, replace(state, download_label=DownloadLabel.DOWNLOAD))

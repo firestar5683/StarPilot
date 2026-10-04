@@ -149,7 +149,8 @@ class SettingsInput:
   def move(self, x: float, y: float, state: SettingsState) -> None:
     if self._pressed is not None:
       px, py, target = self._pressed
-      if abs(x - px) > 5 or abs(y - py) > 5 or self._target(x, y, state) != target:
+      if ((self.profile == Profile.COMPACT and (abs(x - px) > 5 or abs(y - py) > 5)) or
+          self._target(x, y, state) != target):
         self.cancel()
 
   def release(self, x: float, y: float, state: SettingsState) -> None:

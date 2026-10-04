@@ -193,7 +193,7 @@ class TestSettingsActions(unittest.TestCase):
         state = SettingsState()
         handler = SettingsInput(profile, requests.append)
         handler.press(*point, state)
-        handler.move(point[0] + 50, point[1], state)
+        handler.move(-1 if profile == Profile.LARGE else point[0] + 50, point[1], state)
         handler.release(*point, state)
         handler.press(*point, state)
         handler.release(-1, -1, state)
