@@ -55,7 +55,7 @@ class AppearanceSettingsTests(unittest.TestCase):
                       self.row("StockConfidenceBallWidget", Profile.COMPACT).value),
                      ("Use StarPilot Widgets", "On"))
     self.assertEqual(self.row("HideLeadMarker", Profile.COMPACT).value, "Off")
-    self.assertEqual(self.row("CameraView", Profile.COMPACT).value, "Auto")
+    self.assertEqual(self.row("CameraView", Profile.COMPACT).value, "Standard")
     self.assertEqual(self.row("DriverCamera", Profile.COMPACT).value, "Off")
     self.assertIn("border highlights apply to C4 only", self.owner.snapshot(Profile.LARGE).subtitle)
 

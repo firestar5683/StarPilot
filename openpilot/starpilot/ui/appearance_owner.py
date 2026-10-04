@@ -45,8 +45,8 @@ class AppearanceOwner:
       rows.append(FeatureRow("CameraView", "Camera View",
                              CAMERA_LABELS[saved_camera.value] if camera_valid else "Invalid saved choice",
                              source=saved_camera.raw, choices=CAMERA_LABELS, available=parked and saved_camera.readable,
-                             reason="" if camera_valid else "Saved choice cannot be read" if not saved_camera.readable else "Choose Auto to repair",
-                             repair_value="Auto" if saved_camera.readable and not camera_valid else ""))
+                             reason="" if camera_valid else "Saved choice cannot be read" if not saved_camera.readable else "Choose Standard to repair",
+                             repair_value="Standard" if saved_camera.readable and not camera_valid else ""))
     for key in keys:
       if key == "ShowBrakeStatus":
         saved, pedals = read_visibility(self.params, key), read_visibility(self.params, "PedalsOnUI")

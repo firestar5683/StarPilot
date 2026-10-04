@@ -34,14 +34,14 @@ class CameraViewWithoutResources(native_camera.CameraView):
 
 
 class CameraDisplayTests(unittest.TestCase):
-  def test_saved_choice_defaults_to_current_auto_and_is_parked_source_bound(self):
+  def test_saved_choice_defaults_to_standard_and_is_parked_source_bound(self):
     with tempfile.TemporaryDirectory() as directory:
       params = Params(directory)
       parked = True
       owner = AppearanceOwner(params, lambda: parked)
       row = next(row for row in owner.snapshot(Profile.COMPACT).rows if row.key == "CameraView")
-      self.assertEqual((row.value, row.source), ("Auto", None))
-      self.assertEqual(onroad_appearance(params).camera_view, CameraViewChoice.AUTO)
+      self.assertEqual((row.value, row.source), ("Standard", None))
+      self.assertEqual(onroad_appearance(params).camera_view, CameraViewChoice.STANDARD)
       request = FeatureSettingsRequest(row.key, row.source, "Wide")
       parked = False
       self.assertFalse(owner.apply(request))
@@ -52,13 +52,15 @@ class CameraDisplayTests(unittest.TestCase):
       self.assertFalse(owner.apply(request))
       source = Path(params.get_param_path("CameraView"))
       source.write_bytes(b"bad")
-      self.assertEqual(onroad_appearance(params).camera_view, CameraViewChoice.AUTO)
+      self.assertEqual(onroad_appearance(params).camera_view, CameraViewChoice.STANDARD)
       repair_row = next(row for row in owner.snapshot(Profile.COMPACT).rows if row.key == "CameraView")
-      self.assertEqual(repair_row.repair_value, "Auto")
+      self.assertEqual(repair_row.repair_value, "Standard")
       repair = row_change(repair_row)
       assert repair is not None
       self.assertTrue(owner.apply(repair))
-      self.assertEqual(source.read_bytes(), b"0")
+      self.assertEqual(source.read_bytes(), b"2")
+      source.write_bytes(b"0")
+      self.assertEqual(onroad_appearance(params).camera_view, CameraViewChoice.AUTO)
       reverse = next(row for row in owner.snapshot(Profile.COMPACT).rows if row.key == "DriverCamera")
       toggle = row_change(reverse)
       assert toggle is not None

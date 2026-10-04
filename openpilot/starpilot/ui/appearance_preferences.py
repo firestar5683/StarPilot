@@ -44,7 +44,7 @@ def read_camera_view(params: Any) -> SavedCameraView:
   if not readable:
     return SavedCameraView(raw, None, False)
   if raw is None:
-    return SavedCameraView(None, CameraViewChoice.AUTO, True)
+    return SavedCameraView(None, CameraViewChoice.STANDARD, True)
   try:
     if raw not in (b"0", b"1", b"2", b"3", b"4"):
       raise ValueError("Invalid camera choice")
@@ -147,7 +147,7 @@ class OnroadAppearance:
   show_lead_indicator: bool = False
   lead_info_mode: LeadInfoMode = LeadInfoMode.OFF
   lead_info_metric: bool | None = False
-  camera_view: CameraViewChoice = CameraViewChoice.AUTO
+  camera_view: CameraViewChoice = CameraViewChoice.STANDARD
   driver_camera_on_reverse: bool = False
   hide_dm_icon: bool = False
   wheel_pedal_feedback: bool = False
@@ -157,6 +157,7 @@ def onroad_appearance(params: Any) -> OnroadAppearance:
   """Bad saved bytes keep the visible baseline; no view writes during refresh."""
   values = {key: read_visibility(params, key).value for key in DEFAULTS}
   saved_lead_info = read_lead_info(params)
+  camera_view = read_camera_view(params).value
   try:
     metric_raw, metric_readable = read_saved(params, "IsMetric", 8)
   except (AttributeError, OSError, TypeError, ValueError):
@@ -178,6 +179,6 @@ def onroad_appearance(params: Any) -> OnroadAppearance:
     show_lead_indicator=values["HideLeadMarker"] is False,
     lead_info_mode=saved_lead_info.mode if values["HideLeadMarker"] is False and saved_lead_info.mode is not None else LeadInfoMode.OFF,
     lead_info_metric=metric,
-    camera_view=read_camera_view(params).value or CameraViewChoice.AUTO,
+    camera_view=camera_view if camera_view is not None else CameraViewChoice.STANDARD,
     driver_camera_on_reverse=values["DriverCamera"] is True,
   )

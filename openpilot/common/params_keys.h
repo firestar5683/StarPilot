@@ -91,7 +91,7 @@ inline static std::unordered_map<std::string, ParamKeyAttributes> keys = {
     {"HideSpeed", {PERSISTENT, BOOL, "0"}},
     {"HideMaxSpeed", {PERSISTENT, BOOL, "0"}},
     {"HideSteeringWheel", {PERSISTENT, BOOL, "0"}},
-    {"CameraView", {PERSISTENT, INT, "0"}},
+    {"CameraView", {PERSISTENT, INT, "2"}},
     {"DriverCamera", {PERSISTENT, BOOL, "0"}},
     {"StoppedTimer", {PERSISTENT, BOOL, "0"}},
     {"StockConfidenceBallWidget", {PERSISTENT, BOOL, "0"}},
