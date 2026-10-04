@@ -1,0 +1,17 @@
+#pragma once
+
+// Bit 11 selects the shared axis lease only for these ordinary torque layouts.
+// Angle model selectors and the separate Ioniq 6 actuator profile stay separate.
+static inline bool hyundai_canfd_stock_torque_aol_param(uint16_t param) {
+  const uint16_t base = param & (uint16_t)~0x0800U;
+  const uint16_t gas = base & 3U;
+  const uint16_t topology = base & 0x00B8U;
+  const bool carnival = (base & 0x2000U) != 0U;
+  const bool ccnc = (base & 0x0400U) != 0U;
+  const bool standard = (topology == 0U) || (topology == 8U) || (topology == 16U) || (topology == 144U);
+  const bool alternate = (topology == 32U) || (topology == 40U) ||
+                         (carnival && ((topology == 48U) || (topology == 176U)));
+  return ((param & 0x0800U) != 0U) && ((base & (uint16_t)~0x24BBU) == 0U) && (gas != 3U) &&
+         (standard || alternate) && (!ccnc || ((topology == 8U) || (topology == 40U))) &&
+         (!carnival || (alternate && (gas != 1U)));
+}

@@ -1,10 +1,16 @@
+from opendbc.car.hyundai.classic_long_aol import (
+  qualified as qualified_classic_long,
+  aol_word as classic_long_word,
+  native_accepts as classic_long_accepts,
+  LONG_AOL_WORDS,
+)
 from opendbc.car.hyundai.classic_scc_aol import (
   qualified as qualified_classic_scc,
   aol_word as classic_aol_word,
   native_accepts as classic_native_accepts,
   native_profile_supported as classic_native_profile_supported,
 )
-from opendbc.car.hyundai.canfd_stock_aol import qualified as qualified_canfd_stock, STOCK_AOL_MARKER
+from opendbc.car.hyundai.canfd_stock_aol import qualified as qualified_canfd_stock, STOCK_AOL_MARKER, STOCK_AOL_WORDS
 from opendbc.car.hyundai.non_scc_aol import qualified as qualified_non_scc, aol_word, AOL_MARKER, AOL_EXPERIENCE, AOL_WORDS
 from opendbc.car.hyundai.kona_aol import allow_lateral_onset as kona_lateral_onset
 from opendbc.car.structs import car
@@ -62,6 +68,16 @@ def ioniq6_settings_capable(CP) -> bool:
 
 
 def policy_for(CP) -> AolVehiclePolicy:
+  if qualified_classic_long(CP):
+    return AolVehiclePolicy(
+      intent_supported=True,
+      settings_supported=True,
+      runtime_supported=True,
+      normal_runtime_supported=True,
+      explicit_latch=True,
+      safety_param_addition=classic_long_word(CP) ^ int(CP.safetyConfigs[0].safetyParam),
+      alternative_experience_addition=AOL_EXPERIENCE,
+    )
   if qualified_classic_scc(CP):
     return AolVehiclePolicy(
       intent_supported=True,
@@ -113,13 +129,16 @@ def policy_for(CP) -> AolVehiclePolicy:
 
 def native_profile_supported(model: int, param: int) -> bool:
   return (
-    classic_native_profile_supported(model, param)
-    or (model == int(car.CarParams.SafetyModel.hyundaiCanfd) and param in IONIQ6_AOL_SAFETY_PARAMS | set(STOCK_SAFETY_PARAMS.values()))
+    (model == int(car.CarParams.SafetyModel.hyundai) and param in LONG_AOL_WORDS)
+    or classic_native_profile_supported(model, param)
+    or (model == int(car.CarParams.SafetyModel.hyundaiCanfd) and param in IONIQ6_AOL_SAFETY_PARAMS | STOCK_AOL_WORDS | set(STOCK_SAFETY_PARAMS.values()))
     or (model == int(car.CarParams.SafetyModel.hyundai) and param in AOL_WORDS)
   )
 
 
 def native_accepts_cp(CP, model: int, param: int) -> bool:
+  if qualified_classic_long(CP, marked_only=True):
+    return classic_long_accepts(CP, model, param)
   if qualified_classic_scc(CP, marked_only=True):
     return classic_native_accepts(CP, model, param)
   if qualified_canfd_stock(CP, marked_only=True):
@@ -135,13 +154,23 @@ def native_latch_rejected(CP, native) -> bool:
   # In this exact native policy a requested lateral axis remains permitted
   # through pedal override; denial means the physical authorization was lost.
   return (
-    (qualified_ioniq6(CP) or qualified_non_scc(CP) or qualified_canfd_stock(CP, marked_only=True) or qualified_classic_scc(CP, marked_only=True))
+    (
+      qualified_classic_long(CP, marked_only=True)
+      or qualified_ioniq6(CP)
+      or qualified_non_scc(CP)
+      or qualified_canfd_stock(CP, marked_only=True)
+      or qualified_classic_scc(CP, marked_only=True)
+    )
     and native.requestedLateral
     and not native.lateralAllowed
   )
 
 
 def create_intent(CP, settings):
+  if qualified_classic_long(CP):
+    from openpilot.starpilot.car.hyundai.classic_long_intent import ClassicLongCardIntent
+
+    return ClassicLongCardIntent(CP, settings)
   if qualified_classic_scc(CP):
     from openpilot.starpilot.car.hyundai.classic_scc_intent import ClassicSccCardIntent
 

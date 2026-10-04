@@ -103,7 +103,15 @@ int main() {
     legacy.safety_mode = HYUNDAI_LEGACY_AOL_PROFILE.mode;
     assert(aol_capable(legacy, HYUNDAI_LEGACY_AOL_PROFILE.mode, VEHICLE_REGISTRY) ==
            (scc_expected && ((word & 8U) == 0U)));
-    const bool expected = scc_expected || word == 0x1400U || word == 0x1C00U || word == 0x1440U || word == 0x1C40U ||
+    bool long_expected = false;
+    for (const uint16_t gas : {0U, 1U, 2U}) {
+      for (const uint16_t limits : {0U, 64U}) {
+        for (const uint16_t lda : {0U, 2048U}) {
+          long_expected |= word == (0x0404U | gas | limits | lda);
+        }
+      }
+    }
+    const bool expected = long_expected || scc_expected || word == 0x1400U || word == 0x1C00U || word == 0x1440U || word == 0x1C40U ||
                           word == 0x1402U || word == 0x1C02U || word == 0x1441U || word == 0x1C41U;
     assert(aol_capable(forte, HYUNDAI_CLASSIC_AOL_PROFILE.mode, VEHICLE_REGISTRY) == expected);
     assert(aol_runtime_enabled(false, forte, VEHICLE_REGISTRY) == expected);
@@ -164,10 +172,19 @@ int main() {
     assert(!aol_capable(ev9, HYUNDAI_AOL_PROFILE.mode, VEHICLE_REGISTRY));
   }
 
-  // Transport namespace is exactly the retained siblings plus PE and EV9. No other
-  // model2/3 or LONG word gets access through this mode28 registry predicate.
+  constexpr uint16_t stock_canfd_words[] = {
+    0x0800U, 0x0801U, 0x0802U, 0x0808U, 0x0809U, 0x080AU,
+    0x0810U, 0x0811U, 0x0812U, 0x0820U, 0x0821U, 0x0822U,
+    0x0828U, 0x0829U, 0x082AU, 0x0890U, 0x0891U, 0x0892U,
+    0x0C08U, 0x0C09U, 0x0C0AU, 0x0C28U, 0x0C29U, 0x0C2AU,
+    0x2820U, 0x2822U, 0x2828U, 0x282AU, 0x2830U, 0x2832U,
+    0x28B0U, 0x28B2U, 0x2C28U, 0x2C2AU,
+  };
   for (uint32_t word = 0U; word <= 0xFFFFU; ++word) {
-    const bool expected = word == 0x0811U || word == 0x0891U || word == 0x8815U || word == 0x8895U || word == 0x5491U || word == 0x5C91U;
+    bool expected = word == 0x8815U || word == 0x8895U || word == 0x5491U || word == 0x5C91U;
+    for (uint16_t stock_word : stock_canfd_words) {
+      expected = expected || word == stock_word;
+    }
     assert(hyundai_aol_param(static_cast<uint16_t>(word)) == expected);
   }
 
@@ -242,7 +259,7 @@ int main() {
                        HYUNDAI_AOL_PROFILE.mode);
     assert(stock_transport.last_write == 0U && stock_result.outcome.compatible);
   }
-  for (uint16_t raw : {0x0011U, 0x0091U, 0x0810U, 0x0890U, 0x0815U, 0x0895U,
+  for (uint16_t raw : {0x0011U, 0x0091U, 0x0815U, 0x0895U,
                        0x0813U, 0x0831U, 0x0911U, 0x8015U, 0x8095U, 0x8814U, 0x8894U, 0x8817U}) {
     ioniq.safety_param = raw;
     assert(!aol_capable(ioniq, HYUNDAI_AOL_PROFILE.mode, VEHICLE_REGISTRY));
