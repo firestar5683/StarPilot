@@ -53,7 +53,7 @@ export const GalaxyPage = {
     },
   },
   template: `
-    <div><h2 style="margin-top:0">Galaxy Tunnel</h2><p>Pair this comma for remote Galaxy access. Installing the Galaxy app is a separate option in the app menu.</p>
+    <div><h2 style="margin-top:0">Galaxy Tunnel</h2><p>Pair this comma for remote Galaxy access. Galaxy is installed as a Progressive Web App: open the paired link, then use <strong>Install app</strong> or <strong>Add to Home Screen</strong> for a full-screen, app-like experience with no app store download, its own window, instant launch from your home screen, and automatic updates. It needs an active connection, just like the browser version.</p>
       <section v-if="mode !== 'local'" class="gx-card gx-message">Pairing is available on your comma.</section>
       <section v-else-if="loading" class="gx-card gx-message">Checking pairing status…</section>
       <section v-else class="gx-card" style="padding:var(--sp-4)">

@@ -1,13 +1,13 @@
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
 import { SettingsFeed } from "./settings.js"
 import { GalaxySettingRow } from "./galaxy-setting-row.js"
+import { CameraSnapshotFeed } from "./cameras.js"
+import { GxNotice } from "./notice.js"
 import { FORMATS, annotationDraft, displaySide, sourcePoint } from "./vasm-geometry.js"
-
-const MAX_STILL_BYTES = 8 * 1024 * 1024
 
 export const VasmPage = {
   name: "VasmPage",
-  components: { GalaxySettingRow },
+  components: { GalaxySettingRow, GxNotice },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     go: { type: Function, required: true } },
   setup(props) {
@@ -31,24 +31,46 @@ export const VasmPage = {
   },
   mounted() {
     this._image = null
-    this._imageUrl = null
-    this._imageView = null
     this._imageGeneration = 0
     this._dragIndex = -1
     this._dragSide = null
+    this._stopped = false
     if (this.mode === "local") this.feed.start("vasm")
+    this.snapshots = new CameraSnapshotFeed({ unauthorized: this.unauthorized, publish: (update) => {
+      if (update.error) { this.state.localNote = update.error; this._image = null }
+      if (!update.image) return
+      const generation = ++this._imageGeneration
+      const image = new Image()
+      image.onload = () => {
+        if (this._stopped || generation !== this._imageGeneration) return
+        this._image = image
+        this.state.imageName = "Live cabin camera"
+        this.state.localNote = ""
+        this.redraw()
+      }
+      image.onerror = () => { this.state.localNote = "Camera frame could not be displayed."; this._image = null }
+      image.src = update.image
+    } })
+    const refresh = async () => {
+      if (this._stopped) return
+      if (this.mode === "local" && !document.hidden) await this.snapshots.capture("cabin")
+      if (!this._stopped) this._liveTimer = setTimeout(refresh, 1500)
+    }
+    this.visibility = () => { if (document.hidden) { this.snapshots.stop(); this._image = null; this.state.imageName = "" } }
+    document.addEventListener("visibilitychange", this.visibility)
+    refresh()
     this.$nextTick(() => this.redraw())
   },
-  updated() {
-    if (this._imageView && this._imageView !== this.state.data?.view) this.dropImage()
-    this.$nextTick(() => this.redraw())
-  },
+  updated() { this.$nextTick(() => this.redraw()) },
   beforeUnmount() {
+    this._stopped = true
+    clearTimeout(this._liveTimer)
+    document.removeEventListener("visibilitychange", this.visibility)
+    this.snapshots?.stop()
     this.feed.stop()
     this._imageGeneration++
     if (this._image) this._image.src = ""
-    if (this._imageUrl) URL.revokeObjectURL(this._imageUrl)
-    this._image = this._imageUrl = null
+    this._image = null
   },
   computed: {
     controls() { return (this.state.data?.rows || []).map((row, index) => ({ row, index }))
@@ -56,71 +78,10 @@ export const VasmPage = {
     canEdit() { return this.mode === "local" && !!this.state.data?.parked && this.state.data?.editorRow >= 0 &&
       !!this.state.data.rows[this.state.data.editorRow]?.available && this.state.status === "ready" &&
       !this.state.pending && !this.state.reviewing },
-    format() { return `${this.state.width}x${this.state.height}` },
     supportedFormat() { return FORMATS.some(([w, h]) => w === this.state.width && h === this.state.height) },
     canDraw() { return this.canEdit && this.supportedFormat },
   },
   methods: {
-    changeFormat(event) {
-      const [width, height] = String(event.target.value).split("x").map(Number)
-      if (!FORMATS.some(([w, h]) => w === width && h === height)) return
-      if (width === this.state.width && height === this.state.height) return
-      this.state.width = width
-      this.state.height = height
-      this.state.cameraLeft = []
-      this.state.cameraRight = []
-      this.state.localNote = "Format changed in this draft. Draw at least one region; nothing is saved until confirmation."
-      this.dropImage()
-      this.redraw()
-    },
-    dropImage() {
-      this._imageGeneration++
-      if (this._image) this._image.src = ""
-      if (this._imageUrl) URL.revokeObjectURL(this._imageUrl)
-      this._image = this._imageUrl = null
-      this._imageView = null
-      this.state.imageName = ""
-    },
-    selectImage(event) {
-      const file = event.target.files?.[0]
-      event.target.value = ""
-      if (!file) return
-      if (!["image/jpeg", "image/png"].includes(file.type) || file.size > MAX_STILL_BYTES || file.size === 0) {
-        this.state.localNote = "Choose a PNG or JPEG still under 8 MB."
-        return
-      }
-      this.dropImage()
-      const generation = this._imageGeneration
-      const selectedWidth = this.state.width, selectedHeight = this.state.height
-      const selectedView = this.state.data?.view
-      const url = URL.createObjectURL(file)
-      const image = new Image()
-      this._imageUrl = url
-      image.onload = () => {
-        if (generation !== this._imageGeneration) return
-        if (selectedView !== this.state.data?.view || selectedWidth !== this.state.width ||
-            selectedHeight !== this.state.height) {
-          this.dropImage()
-          return
-        }
-        if (image.naturalWidth !== selectedWidth || image.naturalHeight !== selectedHeight) {
-          this.state.localNote = `Still image must match ${selectedWidth} × ${selectedHeight}.`
-          this.dropImage()
-          return
-        }
-        this._image = image
-        this._imageView = selectedView
-        this.state.imageName = file.name
-        this.state.localNote = "This still stays in browser memory and is never uploaded."
-        this.redraw()
-      }
-      image.onerror = () => {
-        if (generation !== this._imageGeneration) return
-        this.state.localNote = "Still image could not be decoded."
-        this.dropImage()
-      }
-      image.src = url
-    },
     point(event) {
       const canvas = this.$refs.canvas
       return canvas ? sourcePoint(event.clientX, event.clientY, canvas.getBoundingClientRect(),
@@ -224,9 +185,9 @@ export const VasmPage = {
   },
   template: `
     <section class="gx-settings gx-vasm" aria-label="V-ASM saved settings">
-      <header class="gx-card gx-settings__header"><div><p class="gx-eyebrow">Saved preferences</p><h2>V-ASM Spot Monitoring</h2>
-        <p>Draw camera window regions for a saved visual warning preference. Camera capture, model qualification, and current warnings are unavailable here.</p></div>
-        </header>
+      <header class="gx-card gx-settings__header"><div><h2>V-ASM Spot Monitoring</h2></div></header>
+      <GxNotice v-if="mode === 'local' && state.data && !state.data.parked" tone="warn">Turn the vehicle off to change these settings.</GxNotice>
+      <GxNotice tone="info">Saved visual settings only; live camera and current warning status are shown when parked with a camera available.</GxNotice>
       <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Local saved settings are unavailable in preview.</div>
       <template v-else>
         <div v-if="state.status === 'loading'" class="gx-card gx-message" role="status">Loading saved settings…</div>
@@ -234,7 +195,7 @@ export const VasmPage = {
         <div v-if="state.error" class="gx-card gx-message" role="alert">{{ state.error }}
           <button type="button" class="gx-btn gx-btn--tonal" @click="feed.load()">Refresh</button></div>
         <div v-if="state.data" class="gx-settings__body">
-          <div class="gx-settings__subhead"><p>{{ state.data.subtitle }} <span v-if="!state.data.parked">Turn the vehicle off to change these settings.</span></p>
+          <div class="gx-settings__subhead"><span></span>
             <button type="button" class="gx-btn gx-btn--tonal" :disabled="state.status === 'saving'" @click="feed.load()">Refresh</button></div>
           <section class="gx-card gx-settings__section" aria-label="Saved settings">
             <GalaxySettingRow v-for="{ row, index } in controls" :key="state.data.view + ':' + index" :row="row" :index="index"
@@ -245,13 +206,7 @@ export const VasmPage = {
           <section class="gx-card gx-vasm__editor" aria-label="Camera window region editor">
             <h3>Camera Window Regions</h3>
             <p>The display is mirrored: vehicle left is camera right; vehicle right is camera left. Trace visible side glass, leaving pillars and interior out.</p>
-            <label>Camera frame size <select class="gx-field" :value="format" :disabled="!canEdit" @change="changeFormat">
-              <option v-if="!supportedFormat" :value="format" disabled>Saved {{ state.width }} × {{ state.height }} — choose a supported size</option>
-              <option v-for="[w,h] in FORMATS" :key="w" :value="w + 'x' + h">{{ w }} × {{ h }}</option></select></label>
-            <label>Optional local still (PNG/JPEG, exact selected size, under 8 MB)
-              <input type="file" accept="image/png,image/jpeg" :disabled="!canDraw" @change="selectImage"></label>
-            <button v-if="state.imageName" type="button" class="gx-btn gx-btn--tonal" @click="dropImage(); redraw()">Remove local still</button>
-            <p class="gx-note">{{ state.imageName ? 'Local still: ' + state.imageName : 'Empty dimension-matched canvas; no camera image is requested.' }}</p>
+            <p v-if="!state.imageName" class="gx-note" role="status">Waiting for a live cabin frame. Turn off the vehicle to preview and edit the regions.</p>
             <div class="gx-vasm__sides"><div v-for="side in ['cameraRight', 'cameraLeft']" :key="side" class="gx-vasm__side">
               <button type="button" class="gx-btn" :class="{'gx-btn--tonal':state.activeSide !== side}" :disabled="!canDraw" @click="state.activeSide=side">{{ displaySide(side) }}</button>
               <span>{{ state[side].length }} vertices</span>
@@ -262,7 +217,7 @@ export const VasmPage = {
               @pointerdown="pointerDown" @pointermove="pointerMove" @pointerup="pointerUp" @pointercancel="pointerUp"></canvas>
             <p v-if="state.localNote" class="gx-note" role="status">{{ state.localNote }}</p>
             <button type="button" class="gx-btn" :disabled="!canDraw" @click="saveRegions">Review saved regions…</button>
-            <p class="gx-note">A saved choice alone does not activate monitoring. The selected image never leaves this browser.</p>
+            <p class="gx-note">A saved choice alone does not activate monitoring.</p>
           </section>
         </div>
         <Teleport to="body"><div v-if="state.pending" class="gx-settings__modal" role="dialog" aria-modal="true" aria-label="Confirm V-ASM preference">

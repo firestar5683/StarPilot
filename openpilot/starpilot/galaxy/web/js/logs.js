@@ -2,10 +2,11 @@ import { TroubleshootPage, TmuxPage } from "./diagnostic-tools.js"
 import { navigate } from "./router.js"
 import { SystemMonitor } from "./system-monitor.js"
 import { CrashReportsFeed } from "./crash-reports.js"
+import { MenuTile } from "./menu-tile.js"
 
 export const Logs = {
   name: "Logs",
-  components: { SystemMonitor, TroubleshootPage, TmuxPage },
+  components: { SystemMonitor, TroubleshootPage, TmuxPage, MenuTile },
   props: { path: { type: String, required: true }, mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ crashes: { reports: [], scanIncomplete: false, listLimited: false, status: "idle", error: "", selected: null, preview: null, previewStatus: "idle" }, search: "" }),
   computed: {
@@ -39,12 +40,13 @@ export const Logs = {
   template: `
     <div class="gx-view">
       <h2 v-if="path === '/logs'">Logs & Diagnostics</h2>
-      <div v-if="path === '/logs'" class="gx-logs-tiles">
-        <button type="button" class="gx-card gx-logs-entry" @click="openMonitor"><i class="bi bi-cpu"></i><strong>System Monitor</strong><span>{{ mode === 'sample' ? 'Inspect a synthetic activity sample' : 'Inspect local system activity' }}</span></button>
-        <button v-if="mode === 'local'" type="button" class="gx-card gx-logs-entry" @click="openCrashes"><i class="bi bi-file-text"></i><strong>Crash Reports</strong><span>Read local reports</span></button>
-        <div v-else class="gx-card gx-logs-entry gx-logs-entry--unavailable"><i class="bi bi-file-text"></i><strong>Crash Reports</strong><span>Unavailable in preview</span></div>
-        <button type="button" class="gx-card gx-logs-entry" @click="openTmux"><i class="bi bi-terminal"></i><strong>tmux Live View</strong><span>Read the launcher console tail</span></button>
-        <button type="button" class="gx-card gx-logs-entry" @click="openTroubleshoot"><i class="bi bi-wrench"></i><strong>Troubleshoot</strong><span>Read device and vehicle diagnostics</span></button>
+      <p v-if="path === '/logs'" class="gx-note">Live console, driving configuration, system activity and crash reports.</p>
+      <div v-if="path === '/logs'" class="gx-grid">
+        <MenuTile icon="bi-cpu" title="System Monitor" :description="mode === 'sample' ? 'Inspect a synthetic activity sample' : 'Inspect local system activity'" @select="openMonitor" />
+        <MenuTile icon="bi-file-text" title="Crash Reports" :description="mode === 'local' ? 'Read local reports' : ''"
+          :availability="mode === 'local' ? '' : 'Unavailable in preview'" :disabled="mode !== 'local'" @select="openCrashes" />
+        <MenuTile icon="bi-terminal" title="tmux Live View" description="Read the launcher console tail" @select="openTmux" />
+        <MenuTile icon="bi-wrench" title="Troubleshoot" description="Read device and vehicle diagnostics" @select="openTroubleshoot" />
       </div>
       <TroubleshootPage v-else-if="path === '/logs/troubleshoot'" :mode="mode" :unauthorized="unauthorized" @navigate="go" />
       <TmuxPage v-else-if="path === '/logs/tmux'" :mode="mode" :unauthorized="unauthorized" @navigate="go" />

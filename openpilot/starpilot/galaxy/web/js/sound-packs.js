@@ -144,13 +144,13 @@ export const SoundPacks = {
     <section class="gx-card gx-settings__section" aria-label="Sound pack catalog">
       <div class="gx-section__header"><i class="bi bi-music-note-list" aria-hidden="true"></i>
         <span class="gx-section__title">Sound pack catalog</span>
+        <span v-if="state.snapshot && !state.snapshot.parked" class="gx-note gx-settings__hint">Park the vehicle to download sound packs.</span>
         <button type="button" class="gx-icon-btn" aria-label="Refresh sound packs" :disabled="state.busy" @click="feed.refresh()"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i></button>
       </div>
       <div class="gx-settings__grid" style="padding: 16px">
         <p v-if="state.status === 'loading'" role="status">Loading sound packs…</p>
         <p v-else-if="state.status === 'unavailable'" role="alert">Sound packs are unavailable.</p>
         <p v-if="state.error" role="alert">{{ state.error }}</p>
-        <p v-if="state.snapshot && !state.snapshot.parked" class="gx-note">Park the vehicle to download sound packs.</p>
         <p v-if="state.snapshot && !state.snapshot.packs.length" class="gx-note">No sound packs are available.</p>
         <div v-for="pack in state.snapshot?.packs || []" :key="pack.id" class="gx-card gx-settings__row">
           <strong>{{ pack.name }}</strong>

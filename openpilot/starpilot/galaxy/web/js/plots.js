@@ -221,7 +221,7 @@ export const PlotsPage = {
   },
   template: `
     <div class="gx-view gx-plots">
-      <h2>Plots</h2><p class="gx-note">Live local control observations. Graphs and match scores are diagnostic, not driving-control checks.</p>
+      <div class="gx-settings__header"><div><h2>Plots</h2><p>Live local control observations. Graphs and match scores are diagnostic, not driving-control checks.</p></div></div>
       <a class="gx-btn gx-btn--tonal" href="#/tuning/flm">Offline tracking analysis</a>
       <div v-if="mode !== 'local'" class="gx-card gx-message">Live plots require the authenticated local Galaxy service.</div>
       <template v-else>

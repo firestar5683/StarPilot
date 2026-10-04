@@ -56,7 +56,7 @@ export const LongitudinalCurvesPage = {
   },
   template: `
     <section class="gx-long-curves" aria-label="Longitudinal curves">
-      <div class="gx-card gx-long-curves__header"><div><p class="gx-eyebrow">Saved driving preferences</p><h2>Longitudinal Curves</h2>
+      <div class="gx-card gx-long-curves__header"><div><h2>Longitudinal Curves</h2>
         <p>Review acceleration, braking, and following curves for the next drive.</p></div>
         </div>
       <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Local saved curves are unavailable in preview.</div>

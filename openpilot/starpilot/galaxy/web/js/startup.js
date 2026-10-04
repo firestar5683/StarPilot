@@ -24,7 +24,7 @@ export async function loadCatalog(options) {
     requestJson("./data/catalog.json", options), requestJson("./data/runtime.json", options),
   ])
   if (runtime?.schemaVersion !== 1 || !["sample", "local"].includes(runtime.monitor)) throw new Error("Invalid Galaxy runtime")
-  const available = ["/system", "/navigation", "/manage_models", "/model_laboratory", "/cameras", "/appearance",
+  const available = ["/system", "/navigation", "/manage_models", "/model_laboratory", "/cameras",
     "/developer/connect", "/device-preferences", "/driving", "/tuning", "/bluetooth", "/vehicle", "/theme_maker", "/galaxy", "/android-auto"]
   if (catalog?.mode !== "offline-preview" || !Array.isArray(catalog.tools) || catalog.tools.some(tool =>
     typeof tool?.path !== "string" || !tool.path.startsWith("/") || typeof tool.name !== "string" ||

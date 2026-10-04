@@ -64,7 +64,8 @@ export class LocalAccessFeed {
 }
 
 export const LocalAccess = {
-  props: { mode: { type: String, required: true }, onUnauthorized: { type: Function, default: () => {} } },
+  props: { mode: { type: String, required: true }, onUnauthorized: { type: Function, default: () => {} },
+    showRefresh: { type: Boolean, default: true } },
   setup(props) {
     const state = reactive({ loading: false, data: null, error: "" })
     const feed = new LocalAccessFeed({ publish: update => Object.assign(state, update), onUnauthorized: props.onUnauthorized })
@@ -74,7 +75,7 @@ export const LocalAccess = {
   watch: { mode(value) { this.feed.start(value) } },
   beforeUnmount() { this.feed.stop() },
   template: `<section class="gx-card gx-local-access" style="padding:var(--sp-4)" aria-label="Local comma access">
-    <div class="gx-settings__subhead"><h3>Local Comma Access</h3><button class="gx-btn gx-btn--tonal" type="button" :disabled="mode !== 'local' || state.loading" @click="feed.refresh()">{{ state.loading ? 'Checking…' : 'Refresh' }}</button></div>
+    <div class="gx-settings__subhead"><h3>Local Comma Access</h3><button v-if="showRefresh" class="gx-btn gx-btn--tonal" type="button" :disabled="mode !== 'local' || state.loading" @click="feed.refresh()">{{ state.loading ? 'Checking…' : 'Refresh' }}</button></div>
     <p v-if="state.error" class="gx-note" role="status">{{ state.error }}</p>
     <template v-else-if="state.data?.available">
       <p>On the same network, open one of these comma addresses:</p>

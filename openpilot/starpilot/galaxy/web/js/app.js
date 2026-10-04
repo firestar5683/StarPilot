@@ -13,6 +13,7 @@ const PlotsPage = page(() => import("./plots.js").then((module) => module.PlotsP
 const FlmPage = page(() => import("./flm.js").then((module) => module.FlmPage))
 import { LocalAuth } from "./auth-client.js"
 import { Home } from "./home.js"
+import { MenuTile } from "./menu-tile.js"
 const LocalRecordingsPage = page(() => import("./record-history.js").then((module) => module.LocalRecordingsPage))
 const CamerasPage = page(() => import("./cameras.js").then((module) => module.CamerasPage))
 const SentryEventsPage = page(() => import("./sentry.js").then((module) => module.SentryEventsPage))
@@ -69,7 +70,7 @@ const NAV = [
 ]
 
 createApp({
-  components: { Home, Tools, Logs, SoftwarePage, NavigationPage, ModelsPage, LaboratoryPage, SettingsPage, ToggleSearch, PlotsPage, FlmPage, LocalRecordingsPage, CamerasPage, SentryEventsPage, VasmPage, PipPage, DrivingPage, DevicePreferencesPage, BluetoothPage, AndroidAutoPage, LongitudinalCurvesPage, VehicleControlsPage, OnroadLayoutPage, GalaxyPage, DevicePicker, DeviceState, InstallApp },
+  components: { Home, Tools, Logs, SoftwarePage, NavigationPage, ModelsPage, LaboratoryPage, SettingsPage, ToggleSearch, PlotsPage, FlmPage, LocalRecordingsPage, CamerasPage, SentryEventsPage, VasmPage, PipPage, DrivingPage, DevicePreferencesPage, BluetoothPage, AndroidAutoPage, LongitudinalCurvesPage, VehicleControlsPage, OnroadLayoutPage, GalaxyPage, DevicePicker, DeviceState, InstallApp, MenuTile },
   data: () => ({ state, authState, authForm, route, NAV }),
   computed: {
     currentTool() { return state.tools.find((tool) => route.path === tool.path || route.path.startsWith(tool.path + "/")) },
@@ -131,8 +132,8 @@ createApp({
     })
   },
   template: `
-    <div class="gx-app" :class="{'gx-nav-pinned':state.navPinned}">
-      <header class="gx-appbar">
+    <div class="gx-app" :class="{'gx-nav-pinned':state.navPinned, 'gx-nav-hidden': route.path === '/navigation'}">
+      <header v-if="route.path !== '/navigation'" class="gx-appbar">
         <button type="button" class="gx-icon-btn gx-appbar__back gx-back-btn" aria-label="Back" @click="back"><i class="bi bi-arrow-left"></i></button>
         <div class="gx-appbar__pill">
           <button type="button" class="gx-appbar__home" aria-label="Galaxy Home" @click="go('/')"><span class="gx-brand" aria-hidden="true"></span><span class="gx-appbar__title">Galaxy</span></button>
@@ -185,7 +186,7 @@ createApp({
         <OnroadLayoutPage ref="activeLayout" v-else-if="['/theme_maker', '/theme_maker/android_auto'].includes(route.path)" :key="route.path" :projection="route.path === '/theme_maker/android_auto'" :mode="state.monitorMode" :unauthorized="sessionExpired" @target="go($event === 'projection' ? '/theme_maker/android_auto' : '/theme_maker')" @close="routeBack" />
         <Logs v-else-if="route.path === '/logs' || route.path.startsWith('/logs/') || ['/troubleshoot', '/manage_tmux'].includes(route.path)" :path="route.path === '/troubleshoot' ? '/logs/troubleshoot' : route.path === '/manage_tmux' ? '/logs/tmux' : route.path" :mode="state.monitorMode" :unauthorized="sessionExpired" />
         <SoftwarePage v-else-if="route.path === '/system'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
-        <NavigationPage v-else-if="route.path === '/navigation'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
+        <NavigationPage v-else-if="route.path === '/navigation'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
         <ModelsPage v-else-if="route.path === '/manage_models'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
         <LaboratoryPage v-else-if="route.path === '/model_laboratory'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
         <BluetoothPage v-else-if="route.path === '/bluetooth'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
@@ -198,17 +199,20 @@ createApp({
         <SettingsPage ref="activeSettings" v-else-if="drivingSettingsPage" :key="drivingSettingsPage" :mode="state.monitorMode" :unauthorized="sessionExpired" :initial-page="drivingSettingsPage" :title="'Driving settings · ' + drivingSettingsPage.replaceAll('_', ' ')" :return-to="returnToDriving" />
         <SettingsPage ref="activeSettings" v-else-if="route.path === '/settings'" :key="state.searchPage || 'hub'" :mode="state.monitorMode" :unauthorized="sessionExpired"
           :initial-page="state.searchPage || 'hub'" :return-to="state.searchPage ? returnFromSearch : null" />
-        <SettingsPage ref="activeSettings" v-else-if="route.path === '/appearance'" :mode="state.monitorMode" :unauthorized="sessionExpired" initial-page="appearance" title="Onroad Appearance" />
-        <section v-else-if="route.path === '/tuning'" class="gx-driving">
+        <SettingsPage ref="activeSettings" v-else-if="route.path === '/appearance'" :mode="state.monitorMode" :unauthorized="sessionExpired" initial-page="appearance" title="Driving Screen Widgets" />
+        <div v-else-if="route.path === '/tuning'" class="gx-view">
           <h2>Plots &amp; Analysis</h2>
-          <button type="button" class="gx-card gx-driving__link" @click="go('/tuning/plots')"><span><strong>Live plots</strong><small>Compare steering and acceleration targets with measured response</small></span></button>
-          <button type="button" class="gx-card gx-driving__link" @click="go('/tuning/flm')"><span><strong>Recorded-drive analysis</strong><small>Review lateral tracking from saved drives</small></span></button>
-        </section>
+          <p class="gx-note">Live control observations and recorded-drive analysis.</p>
+          <div class="gx-grid">
+            <MenuTile icon="bi-graph-up" title="Live plots" description="Compare steering and acceleration targets with measured response" @select="go('/tuning/plots')" />
+            <MenuTile icon="bi-file-earmark-bar-graph" title="Recorded-drive analysis" description="Review lateral tracking from saved drives" @select="go('/tuning/flm')" />
+          </div>
+        </div>
         <PlotsPage v-else-if="route.path === '/tuning/plots'" :mode="state.monitorMode" :unauthorized="sessionExpired" />
         <FlmPage v-else-if="route.path === '/tuning/flm'" :mode="state.monitorMode" :unauthorized="sessionExpired" :go="go" />
         <div v-else class="gx-card gx-message" role="status"><h2>{{ pageName }}</h2><p>This capability is unavailable in this build. No operation was attempted.</p></div>
       </main>
-      <nav class="blur-nav" aria-label="Primary navigation"><button v-for="item in NAV" :key="item.path" type="button" class="nav-item" :class="{active:isActive(item.path)}" @click="go(item.path)"><i class="bi" :class="item.icon"></i><span>{{ item.name }}</span></button></nav>
+      <nav v-if="route.path !== '/navigation'" class="blur-nav" aria-label="Primary navigation"><button v-for="item in NAV" :key="item.path" type="button" class="nav-item" :class="{active:isActive(item.path)}" @click="go(item.path)"><i class="bi" :class="item.icon"></i><span>{{ item.name }}</span></button></nav>
     </div>
   `,
 }).mount("#galaxy-app")
