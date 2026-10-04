@@ -21,10 +21,12 @@ class TestFirstStartMigration(unittest.TestCase):
     self.namespace.mkdir(parents=True)
     self.storage = self.root / 'recovery'
     self.types = {'IsMetric': 'BOOL', 'ForceStops': 'BOOL', 'OpenpilotEnabledToggle': 'BOOL', 'SteerFriction': 'FLOAT',
-                  'CalibrationParams': 'BYTES', 'CarParamsPersistent': 'BYTES', 'SecOCKey': 'BYTES'}
+                  'CalibrationParams': 'BYTES', 'CarParamsPersistent': 'BYTES', 'CarParamsPrevRoute': 'BYTES',
+                  'LiveTorqueParameters': 'BYTES', 'SecOCKey': 'BYTES', 'DongleId': 'STRING',
+                  'BluetoothEnabled': 'BOOL', 'GsmMetered': 'BOOL', 'HasAcceptedTerms': 'STRING'}
     self.params = SimpleNamespace(get_param_path=lambda: str(self.namespace), all_keys=lambda: list(self.types),
                                   get_type=lambda key: SimpleNamespace(name=self.types[key]))
-    self.cache = SimpleNamespace(CACHE_KEYS={'CalibrationParams', 'CarParamsPersistent'},
+    self.cache = SimpleNamespace(CACHE_KEYS={'CalibrationParams', 'CarParamsPersistent', 'CarParamsPrevRoute', 'LiveTorqueParameters'},
                                  inspect_cache=lambda key, raw: SimpleNamespace(status='valid' if raw.startswith(b'envelope:') else 'legacy'))
     self.converter = SimpleNamespace(migrate_legacy_cache=lambda key, raw: b'envelope:' + raw if key == 'CalibrationParams' else None)
     self.addCleanup(patch.stopall)
@@ -41,14 +43,14 @@ class TestFirstStartMigration(unittest.TestCase):
   def start(self, **kwargs):
     migration.prepare_manager_start(self.params, self.storage, auto_migrate=True, **kwargs)
 
-  def test_migrate_preserves_known_bytes_and_calibration_before_qualifying(self):
+  def test_epoch_two_archives_settings_and_calibration_retains_only_operational_state(self):
     original = {'IsMetric': b'1', 'ForceStops': b'0', 'SteerFriction': b'0.123',
                 'SecOCKey': b'private\x00bytes', 'CalibrationParams': b'legacy calibration',
-                'CarParamsPersistent': b'old identity', 'OldDomSetting': b'9'}
+                'CarParamsPersistent': b'old identity', 'OldDomSetting': b'9',
+                'BluetoothEnabled': b'1', 'DongleId': b'operational-identity', 'HasAcceptedTerms': b'accepted'}
     self.write(original)
     self.start()
-    expected = {key: value for key, value in original.items() if key not in ('OldDomSetting', 'CarParamsPersistent')}
-    expected['CalibrationParams'] = b'envelope:legacy calibration'
+    expected = {key: value for key, value in original.items() if key in migration.OPERATIONAL_KEYS}
     self.assertEqual(self.values(), expected)
     snapshots = list((self.storage / 'snapshots').iterdir())
     self.assertEqual(len(snapshots), 1)
@@ -59,11 +61,12 @@ class TestFirstStartMigration(unittest.TestCase):
     self.start()
     self.assertEqual({str(path): path.read_bytes() for path in self.storage.rglob('*') if path.is_file()}, before)
 
-  def test_invalid_bool_archived_valid_child_preserved(self):
-    original = {'IsMetric': b'True', 'ForceStops': b'1', 'OpenpilotEnabledToggle': b'true'}
+  def test_invalid_operational_bool_archived_all_old_preferences_removed(self):
+    original = {'IsMetric': b'True', 'ForceStops': b'1', 'OpenpilotEnabledToggle': b'true',
+                'BluetoothEnabled': b'true', 'GsmMetered': b'1'}
     self.write(original)
     self.start()
-    self.assertEqual(self.values(), {'ForceStops': b'1', 'OpenpilotEnabledToggle': b'0'})
+    self.assertEqual(self.values(), {'GsmMetered': b'1'})
     self.assertEqual(migration.load_snapshot(next((self.storage / 'snapshots').iterdir())), original)
 
   def test_default_and_dry_run_remain_strict_without_mutation(self):
@@ -75,11 +78,11 @@ class TestFirstStartMigration(unittest.TestCase):
       migration.prepare_manager_start(self.params, self.storage)
     self.assertEqual(self.values(), {'SteerFriction': b'0.2'})
 
-  def test_conversion_failure_preserves_all_bytes_and_does_not_qualify(self):
+  def test_archive_readback_failure_preserves_all_bytes_and_does_not_qualify(self):
     original = {'CalibrationParams': b'bad calibration', 'OldDomSetting': b'1'}
     self.write(original)
-    with patch.object(self.converter, 'migrate_legacy_cache', side_effect=ValueError('invalid calibration')):
-      with self.assertRaises(ValueError):
+    with patch.object(migration, 'load_snapshot', return_value={}):
+      with self.assertRaises(migration.MigrationRequired):
         self.start()
     self.assertEqual(self.values(), original)
     self.assertEqual(list((self.storage / 'profiles').iterdir()), [])
@@ -102,12 +105,48 @@ class TestFirstStartMigration(unittest.TestCase):
     self.assertEqual(self.values(), {'SecOCKey': b'credential'})
     self.assertIn(original, [migration.load_snapshot(path) for path in (self.storage / 'snapshots').iterdir()])
 
-  def test_initialized_profile_corruption_still_rejected(self):
+  def test_initialized_vehicle_cache_contract_upgrade_preserves_every_other_byte(self):
     self.start()
-    self.write({'CarParamsPersistent': b'legacy corruption'})
+    original = {'CarParamsPersistent': b'legacy car', 'CarParamsPrevRoute': b'legacy route',
+                'CalibrationParams': b'envelope:calibration', 'LiveTorqueParameters': b'envelope:learner',
+                'IsMetric': b'1', 'ForceStops': b'1', 'SecOCKey': b'private\x00bytes'}
+    self.write(original)
+    marker = next((self.storage / 'profiles').iterdir())
+    marker_bytes = marker.read_bytes()
+    with self.assertRaises(migration.MigrationRequired):
+      self.start(dry_run=True)
+    self.assertEqual(self.values(), original)
+    self.start()
+    expected = {key: raw for key, raw in original.items() if key not in ('CarParamsPersistent', 'CarParamsPrevRoute')}
+    self.assertEqual(self.values(), expected)
+    self.assertEqual(marker.read_bytes(), marker_bytes)
+    snapshot = next((self.storage / 'snapshots').iterdir())
+    self.assertEqual(migration.load_snapshot(snapshot), original)
+    self.assertEqual(set(json.loads((snapshot / 'migration.json').read_bytes())['actions']),
+                     {'CarParamsPersistent', 'CarParamsPrevRoute'})
+    self.start()
+    self.assertEqual(self.values(), expected)
+
+  def test_initialized_critical_cache_corruption_still_rejected(self):
+    self.start()
+    original = {'CarParamsPersistent': b'legacy car', 'CalibrationParams': b'bad calibration'}
+    self.write(original)
     with self.assertRaises(migration.MigrationRequired):
       self.start()
-    self.assertEqual(self.values(), {'CarParamsPersistent': b'legacy corruption'})
+    self.assertEqual(self.values(), original)
+
+  def test_initialized_vehicle_cache_upgrade_does_not_admit_other_invalid_state(self):
+    self.start()
+    for key, raw in (('OldDomSetting', b'1'), ('IsMetric', b'true'), ('ForceStops', b'true'),
+                     ('LiveTorqueParameters', b'bad learner')):
+      with self.subTest(key=key):
+        original = {'CarParamsPersistent': b'legacy car', key: raw}
+        self.write(original)
+        with self.assertRaises(migration.MigrationRequired):
+          self.start()
+        self.assertEqual(self.values(), original)
+        for entry in self.namespace.iterdir():
+          entry.unlink()
 
   def test_snapshot_failure_prevents_every_mutation(self):
     original = {'OldDomSetting': b'2', 'IsMetric': b'1'}
@@ -118,14 +157,36 @@ class TestFirstStartMigration(unittest.TestCase):
     self.assertEqual(self.values(), original)
     self.assertEqual(list((self.storage / 'profiles').iterdir()), [])
 
-  def test_unqualified_converter_output_does_not_mutate(self):
-    original = {'CalibrationParams': b'legacy calibration', 'OldDomSetting': b'2'}
+  def test_old_epoch_resets_once_then_new_choices_survive(self):
+    self.start()
+    marker = next((self.storage / 'profiles').iterdir())
+    old = json.loads(marker.read_bytes())
+    old.update(version=1, schema_epoch=1)
+    marker.write_bytes(migration.canonical_json(old))
+    self.write({'CalibrationParams': b'envelope:old calibration', 'ForceStops': b'1', 'SecOCKey': b'auth'})
+    self.start()
+    self.assertEqual(self.values(), {'SecOCKey': b'auth'})
+    self.assertEqual(json.loads(marker.read_bytes())['schema_epoch'], 2)
+    self.write({'ForceStops': b'1', 'IsMetric': b'1'})
+    self.start()
+    self.assertEqual(self.values(), {'SecOCKey': b'auth', 'ForceStops': b'1', 'IsMetric': b'1'})
+
+  def test_marker_failure_happens_only_after_verified_archive_and_reset(self):
+    original = {'CalibrationParams': b'legacy calibration', 'DongleId': b'identity'}
     self.write(original)
-    with patch.object(self.converter, 'migrate_legacy_cache', return_value=b'opaque'):
-      with self.assertRaises(migration.MigrationRequired):
+    actual_write = migration._atomic_write
+    def fail_marker(path, raw):
+      if path.parent.name == 'profiles':
+        raise OSError('marker failed')
+      return actual_write(path, raw)
+    with patch.object(migration, '_atomic_write', side_effect=fail_marker):
+      with self.assertRaises(OSError):
         self.start()
-    self.assertEqual(self.values(), original)
+    self.assertEqual(self.values(), {'DongleId': b'identity'})
     self.assertEqual(list((self.storage / 'profiles').iterdir()), [])
+    self.assertEqual(migration.load_snapshot(next((self.storage / 'snapshots').iterdir())), original)
+    self.start()
+    self.assertEqual(self.values(), {'DongleId': b'identity'})
 
 
 if __name__ == '__main__':

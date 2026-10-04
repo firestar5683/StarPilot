@@ -12,7 +12,7 @@ import openpilot.cereal.messaging as messaging
 from openpilot.common.utils import atomic_write
 from openpilot.common.params import Params, ParamKeyFlag, UnknownKeyName
 from openpilot.common.text_window import TextWindow
-from openpilot.common.hardware import HARDWARE
+from openpilot.common.hardware import HARDWARE, PC
 from openpilot.system.manager.helpers import unblock_stdout, save_bootlog
 from openpilot.system.manager.process import ensure_running
 from openpilot.system.manager.process_config import managed_processes
@@ -27,6 +27,11 @@ from openpilot.starpilot.storage import starpilot_storage_root
 def manager_init() -> None:
   params = Params()
   prepare_manager_start(params, starpilot_storage_root(), auto_migrate=True)
+  if not PC:
+    from openpilot.starpilot.external_preferences_reset import reset_external_preferences
+    from openpilot.starpilot.models.manager import ROOT as model_preferences_root
+    for issue in reset_external_preferences(starpilot_storage_root(), model_preferences_root):
+      cloudlog.warning('Fresh software preferences: %s', issue)
   from openpilot.starpilot.settings_retirement import retire_settings
   try:
     for issue in retire_settings(params):

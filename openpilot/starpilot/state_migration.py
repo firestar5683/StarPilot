@@ -20,6 +20,11 @@ PREFERENCES = frozenset({
 MAX_VALUE_BYTES = 32 * 1024 * 1024
 MAX_SNAPSHOT_BYTES = 256 * 1024 * 1024
 MAX_KEYS = 4096
+OPERATIONAL_KEYS = frozenset({
+  'DongleId', 'HardwareSerial', 'GithubSshKeys', 'GithubUsername', 'SshEnabled',
+  'GsmApn', 'GsmMetered', 'GsmRoaming', 'NetworkMetered', 'BluetoothEnabled',
+  'ConnectProvider', 'PairingProvider', 'PairingEmail', 'PrimeType', 'AssistNowToken', 'SecOCKey',
+})
 
 
 class MigrationRequired(RuntimeError):
@@ -285,9 +290,7 @@ def stage_settings(bundle, storage, namespace):
   return destination
 
 
-def _migrate_first_start(params, namespace, storage, values, known, cache_keys, inspect_cache):
-  from openpilot.starpilot.legacy_cache_migration import migrate_legacy_cache
-
+def _migrate_first_start(params, namespace, storage, values, known, cache_keys, inspect_cache, *, retire_keys=None):
   actual = namespace.resolve(strict=True)
   snapshot = _save_snapshot(values, storage / 'snapshots')
   if load_snapshot(snapshot) != values:
@@ -295,29 +298,18 @@ def _migrate_first_start(params, namespace, storage, values, known, cache_keys, 
   prepared = dict(values)
   actions = {}
   for key, raw in values.items():
-    if key not in known or key == 'LocationFilterInitialState':
+    if retire_keys is not None:
+      if key in retire_keys:
+        prepared.pop(key)
+        actions[key] = 'archive incompatible reconstructible vehicle cache'
+      continue
+    if key not in known or key not in OPERATIONAL_KEYS:
       prepared.pop(key)
-      actions[key] = 'archive obsolete or unknown key'
-    elif key in cache_keys:
-      if inspect_cache(key, raw).status == 'valid':
-        continue
-      converted = migrate_legacy_cache(key, raw)
-      if converted is None:
-        prepared.pop(key)
-        actions[key] = 'archive incompatible reconstructible cache'
-      else:
-        if not isinstance(converted, bytes) or inspect_cache(key, converted).status != 'valid':
-          raise MigrationRequired(f'{key}: migration did not produce a qualified cache')
-        prepared[key] = converted
-        actions[key] = 'convert compatible legacy cache'
+      actions[key] = 'archive prior software state; initialize fresh defaults'
     elif getattr(params.get_type(key), 'name', None) == 'BOOL' and raw not in (b'0', b'1'):
-      if key == 'OpenpilotEnabledToggle':
-        prepared[key] = b'0'
-        actions[key] = 'archive invalid engagement consent; disable engagement'
-      else:
-        prepared.pop(key)
-        actions[key] = 'archive invalid boolean; initialize registry default'
-  report = {'format': 'starpilot-first-start-migration', 'version': 1,
+      prepared.pop(key)
+      actions[key] = 'archive invalid operational flag; initialize registry default'
+  report = {'format': 'starpilot-first-start-migration', 'version': 2,
             'namespace': str(namespace), 'target': str(actual), 'snapshot': str(snapshot),
             'status': 'prepared', 'actions': actions, 'attempted': [], 'written': []}
   receipt = snapshot / 'migration.json'
@@ -360,7 +352,7 @@ def prepare_manager_start(params, storage, *, dry_run=False, auto_migrate=False)
   marker = marker_dir / f'{digest(str(namespace).encode())}.json'
   with _params_lock(namespace, read_only=dry_run):
     values = _read_namespace(namespace)
-    identity = {'version': 1, 'schema_epoch': 1, 'namespace': str(namespace), 'target': str(namespace.resolve())}
+    identity = {'version': 2, 'schema_epoch': 2, 'namespace': str(namespace), 'target': str(namespace.resolve())}
     try:
       # This marker has one canonical encoding. Truncation, duplicate fields or
       # wrong JSON types cannot qualify a profile or bypass its recovery archive.
@@ -375,7 +367,16 @@ def prepare_manager_start(params, storage, *, dry_run=False, auto_migrate=False)
       migrated = False
     unknown = set(values) - known
     invalid_preferences = any(key in values and values[key] not in (b'0', b'1') for key in PREFERENCES)
-    incompatible_cache = any(inspect_cache(key, values[key]).status != 'valid' for key in CACHE_KEYS if key in values)
+    incompatible_keys = {key for key in CACHE_KEYS if key in values and inspect_cache(key, values[key]).status != 'valid'}
+    invalid_booleans = any(getattr(params.get_type(key), 'name', None) == 'BOOL' and raw not in (b'0', b'1')
+                           for key, raw in values.items() if key in known)
+    if (auto_migrate and not dry_run and initialized and incompatible_keys and
+        incompatible_keys <= {'CarParamsPersistent', 'CarParamsPrevRoute'} and
+        not unknown and not invalid_preferences and not invalid_booleans and 'LocationFilterInitialState' not in values):
+      values = _migrate_first_start(params, namespace, storage, values, known, CACHE_KEYS, inspect_cache,
+                                    retire_keys=incompatible_keys)
+      incompatible_keys = set()
+    incompatible_cache = bool(incompatible_keys)
     # This retired cache has no compatible producer or conversion.
     incompatible_cache |= 'LocationFilterInitialState' in values
     unqualified = unknown or invalid_preferences or incompatible_cache or (not initialized and not migrated and bool(set(values) - PREFERENCES))
