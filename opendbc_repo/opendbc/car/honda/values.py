@@ -41,6 +41,10 @@ class CarControllerParams:
   STEER_GLOBAL_MIN_SPEED = 3 * CV.MPH_TO_MS
 
   def __init__(self, CP):
+    self.BOSCH_GAS_LOOKUP_BP = list(type(self).BOSCH_GAS_LOOKUP_BP)
+    gas_max = {CAR.HONDA_CIVIC_BOSCH: 750, CAR.HONDA_ODYSSEY_5G_MMR: 2000,
+               CAR.ACURA_RDX_3G_MMR: 2000}.get(CP.carFingerprint, 1600)
+    self.BOSCH_GAS_LOOKUP_V = [0, gas_max]
     if CP.carFingerprint in (CAR.HONDA_CRV, CAR.HONDA_CRV_EU, CAR.HONDA_CRV_SA, CAR.ACURA_RDX):
       self.STEER_MAX = 1000  # TODO: determine if there is a dead zone at the top end
     elif CP.carFingerprint in (CAR.ACURA_ILX, CAR.HONDA_CRV_5G, CAR.ACURA_RDX_3G, CAR.ACURA_TLX_2G_MMR, CAR.ACURA_MDX_4G):
