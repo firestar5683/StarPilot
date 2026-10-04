@@ -60,7 +60,8 @@ export const DriveStatePanel = {
     <p>Auto follows the car. Force Offroad stops driving services even when the device is on-road. Disengage and stop safely before forcing Offroad; Force Onroad requires Park and valid vehicle data. Return to Auto restores normal operation.</p>
     <p v-if="state?.available && !state.overrideAllowed" role="status">Force Onroad needs fresh parked, disengaged vehicle data. Force Offroad remains available to stop driving services.</p>
     <p v-if="state && !state.available" role="alert">The drive-state manager is unavailable. Reconnect to check again.</p>
-    <div><button v-for="mode in ['offroad', 'onroad', 'auto']" :key="mode" type="button"
+    <div class="gx-force-drive__actions"><button v-for="mode in ['offroad', 'onroad', 'auto']" :key="mode" type="button"
+      class="gx-btn" :class="state?.mode === mode ? '' : 'gx-btn--tonal'"
       :disabled="busy || !state?.available || (mode === 'onroad' && !state.overrideAllowed)"
       :aria-pressed="state?.mode === mode" @click="change(mode)">{{ mode === 'auto' ? 'Return to Auto' : mode === 'onroad' ? 'Onroad' : 'Offroad' }}</button></div>
     <p v-if="error" role="alert">{{ error }}</p></section>`,

@@ -115,12 +115,14 @@ export const FavoritesPage = {
     <section class="gx-settings gx-favorites" aria-label="Quick Select">
       <div class="gx-settings__header"><div><h2>Quick Select</h2><p>Choose your three driving-screen shortcuts.</p></div>
         </div>
-      <p class="gx-note">Small UI: tap the invisible left, middle or right third. Big UI: tap or swipe the lower-left corner to open Quick Select.</p>
-      <p class="gx-note">Assigning a shortcut does not activate it. Each control keeps its usual availability; some settings can only change while parked.</p>
+      <div class="gx-favorites__intro">
+        <p class="gx-note">Small UI: tap the invisible left, middle or right third. Big UI: tap or swipe the lower-left corner to open Quick Select.</p>
+        <p class="gx-note">Assigning a shortcut does not activate it. Each control keeps its usual availability; some settings can only change while parked.</p>
+      </div>
       <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Connect to local Galaxy to configure Quick Select.</div>
       <template v-else>
         <div class="gx-favorites__status"><span role="status">{{ state.status === 'saving' ? 'Saving Quick Select…' : state.status === 'loading' ? 'Loading Quick Select…' : state.notice }}</span>
-          <button class="gx-btn gx-btn--tonal" type="button" :disabled="busy" @click="feed.load()">Reload saved</button></div>
+          <button class="gx-btn gx-btn--tonal" type="button" :disabled="busy" @click="feed.load()"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i> Reload saved</button></div>
         <p v-if="state.error" class="gx-card gx-message" role="alert">{{ state.error }}</p>
         <p v-if="state.data && !state.data.valid" class="gx-note" role="status">Saved Quick Select could not be read. Empty slots are shown. Choosing a control will replace the invalid saved configuration.</p>
         <div v-if="state.data" class="gx-favorites__slots">

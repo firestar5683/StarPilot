@@ -36,7 +36,7 @@ export const DrivingPage = {
   data: () => ({ groups: DRIVING_GROUPS }),
   template: `
     <section class="gx-driving" aria-label="Driving features">
-      <div class="gx-card gx-driving__intro"><p class="gx-eyebrow">Driving features</p><h2>Driving Settings</h2>
+      <div class="gx-card gx-driving__intro"><h2>Driving Settings</h2>
         <p>Choose how StarPilot steers and controls speed.</p></div>
       <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Local driving settings are unavailable in preview.</div>
       <template v-else>

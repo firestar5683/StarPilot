@@ -241,7 +241,7 @@ export const FlmPage = {
     exclusions(items) { return items.map(([reason, count]) => `${reason.replaceAll('_', ' ')}: ${count}`).join(' · ') || 'None recorded' },
   },
   template: `<div class="gx-view gx-flm">
-    <h2>Offline Tracking</h2><p class="gx-note">Local recording diagnostics for Ioniq 6 steering torque tracking. Reports do not qualify a vehicle or recommend a tune.</p>
+    <div class="gx-settings__header"><div><h2>Offline Tracking</h2><p>Local recording diagnostics for Ioniq 6 steering torque tracking. Reports do not qualify a vehicle or recommend a tune.</p></div></div>
     <p v-if="mode !== 'local'" class="gx-card gx-message">Offline analysis requires authenticated local Galaxy access.</p>
     <template v-else>
       <button type="button" class="gx-btn gx-btn--tonal" :disabled="inventoryStatus === 'loading'" @click="inventoryFeed.load()">Refresh local recordings</button>

@@ -4,6 +4,7 @@ import { OnroadLayoutPage } from "./onroad-layout.js"
 import { FavoritesPage } from "./favorites.js"
 import { SoundPacks } from "./sound-packs.js"
 import { CloudProviderPage } from "./cloud-provider.js"
+import { GxNotice } from "./notice.js"
 
 const post = (fetcher, path, body, signal) => fetcher(path, {
   method: "POST", credentials: "same-origin", cache: "no-store", signal,
@@ -20,9 +21,14 @@ export const SETTINGS_SECTIONS = Object.freeze([
   { id: "developer", label: "Developer", icon: "bi-code-slash", pages: ["developer"] },
 ])
 
+// Crop numeric rows and the inline editor row are controlled from the dedicated
+// Blind Spot Camera page; they stay writable through the settings API for the
+// widget/VASM editor but must not surface in the generic toggles list.
+export const isPipCropRow = (row) => row.label === "Visual camera crop editor" || /^Vehicle (left|right) crop/.test(row.label || "")
+
 const SECTION_LINKS = {
   device: [{ label: "Display", page: "display" }, { label: "Data Uploads", page: "data" }],
-  visual: [{ label: "Driving Screen Widgets", page: "appearance" }, { label: "Colors & Layout", page: "ui_layout" }, { label: "Quick Select", page: "favorites" }, { label: "Blind Spot Camera", page: "pip" }],
+  visual: [{ label: "Driving Screen Widgets", page: "appearance" }, { label: "Colors & Layout", page: "ui_layout" }, { label: "Quick Select", page: "favorites" }, { label: "Blind Spot Camera and Preview", page: "pip" }],
 }
 
 export class SettingsFeed {
@@ -205,12 +211,12 @@ export class SettingsFeed {
 }
 
 export const SettingsPage = {
-  components: { GalaxySettingRow, OnroadLayoutPage, FavoritesPage, SoundPacks, CloudProviderPage },
+  components: { GalaxySettingRow, OnroadLayoutPage, FavoritesPage, SoundPacks, CloudProviderPage, GxNotice },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
     initialPage: { type: String, default: "hub" }, title: { type: String, default: "Toggles" },
     initialSection: { type: String, default: null }, returnTo: { type: Function, default: null } },
   setup(props) {
-    const state = reactive({ status: "idle", data: null, pending: null, error: "", query: "", section: "lateral", layoutOpen: false, favoritesOpen: false, soundChoicesDirty: false, developerOpen: props.initialSection === "developer" })
+    const state = reactive({ status: "idle", data: null, pending: null, error: "", query: "", searchOpen: false, section: "lateral", layoutOpen: false, favoritesOpen: false, soundChoicesDirty: false, developerOpen: props.initialSection === "developer" })
     const feed = new SettingsFeed({ publish: (update) => Object.assign(state, update), unauthorized: props.unauthorized })
     return { state, feed, sections: SETTINGS_SECTIONS }
   },
@@ -234,7 +240,7 @@ export const SettingsPage = {
       const entries = inHub && SECTION_LINKS[section.id]
         ? SECTION_LINKS[section.id].map((row, index) => ({ row: { ...row, available: true, action: false, value: "" }, index }))
         : rows.map((row, index) => ({ row, index })).filter(({ row }) => !inHub || section.pages.includes(row.page))
-      return entries.filter(({ row, index }) => {
+      return entries.filter(({ row }) => !isPipCropRow(row)).filter(({ row, index }) => {
         const previous = rows[index - 1]
         return !(["sounds", "display"].includes(this.state.data?.page) && row.repairValue === "Auto" &&
           previous?.choices?.includes("Auto") && settingControl(previous) === "slider" && row.label === `Use Auto ${previous.label}`)
@@ -258,6 +264,12 @@ export const SettingsPage = {
       else if (page === "favorites") { this.feed.stop(); this.state.favoritesOpen = true }
       else this.feed.load(page)
     },
+    togglePageSearch() {
+      this.state.searchOpen = !this.state.searchOpen
+      if (this.state.searchOpen) this.$nextTick(() => this.$refs.pageSearch?.focus())
+      else this.state.query = ""
+    },
+    async openCropEditor() { (await import("./router.js")).navigate("/cameras/pip") },
     rowKey(row, index) { return JSON.stringify([this.state.data.page, index, row.revision ?? this.state.data.view, row]) },
     closeLayout() { this.state.layoutOpen = false; this.state.section = "visual"; this.feed.start(this.initialPage) },
     closeFavorites() { this.state.favoritesOpen = false; this.state.section = "visual"; this.feed.start("hub") },
@@ -269,7 +281,7 @@ export const SettingsPage = {
       if (!this.feed.active) { this.feed.start(section.pages.length === 1 ? section.pages[0] : "hub"); return }
       this.state.query = ""
       const page = section.pages.length === 1 ? section.pages[0] : "hub"
-      if (this.state.data?.page !== page) this.feed.load(page)
+      if (this.state.data?.page !== page) this.feed.load(page, { keepData: true, quiet: true })
     },
     requestRouteLeave(proceed) {
       if (this.busy) return
@@ -311,27 +323,33 @@ export const SettingsPage = {
     <OnroadLayoutPage ref="layoutEditor" v-if="state.layoutOpen" :mode="mode" :unauthorized="unauthorized" @close="closeLayout" />
     <FavoritesPage ref="favoritesEditor" v-else-if="state.favoritesOpen" :mode="mode" :unauthorized="unauthorized" @close="closeFavorites" />
     <section v-else class="gx-settings" :aria-label="title">
-      <div class="gx-settings__header"><div><h2>{{ title }}</h2>
-        <p v-if="initialPage === 'pip'">Change the saved camera settings. Live camera preview is unavailable here.</p>
-        <p v-else-if="(state.data?.page || initialPage) === 'sounds'">Adjust alert and chime volumes. Immediate warnings keep their safety volume ramp.</p>
-        <p v-else-if="(state.data?.page || initialPage) === 'display'">Adjust brightness and screen timing when custom display settings are on.</p>
-        <p v-else-if="initialPage === 'appearance'">Choose which driving information to show. Use Theme Maker to arrange widgets and change colors.</p>
-        <p v-else-if="initialPage === 'lane_change'">Close gap adjusts following distance during a lane change when StarPilot controls acceleration and braking. It is Off by default.</p>
-        <p v-else-if="state.data?.page === 'conditional' || state.data?.page.startsWith('conditional/')">Choose when to switch between Chill and Experimental. Applies on supported vehicles when StarPilot controls acceleration and braking.</p>
-        <p v-else-if="state.data?.page === 'profiles'">Braking response works without saved personality curves. A selected personality braking preset or Traffic takes priority.</p>
-        <p v-else-if="state.data?.page === 'traffic'">Traffic follow and jerk blend toward saved Relaxed values at higher speeds. Saved curves require Use saved profiles and the Traffic profile switch.</p>
-        <p v-else-if="initialPage === 'sentry'" role="status">{{ state.data?.subtitle || "Checking motion monitor…" }}</p>
-        </div>
-      </div>
+      <div class="gx-settings__header"><div><h2>{{ title }}</h2></div></div>
+      <GxNotice v-if="state.data && state.data.page !== 'hub' && !state.data.parked && state.data.rows.some(row => !row.available)" tone="warn">Turn the vehicle off to change these settings.</GxNotice>
+      <GxNotice v-if="initialPage === 'pip'" tone="info">Choose when to show the camera and adjust its saved crop. Use the crop editor for a live preview.</GxNotice>
+      <GxNotice v-else-if="(state.data?.page || initialPage) === 'sounds'" tone="info">Adjust alert and chime volumes. Immediate warnings keep their safety volume ramp.</GxNotice>
+      <GxNotice v-else-if="(state.data?.page || initialPage) === 'display'" tone="info">Adjust brightness and screen timing when custom display settings are on.</GxNotice>
+      <GxNotice v-else-if="initialPage === 'appearance'" tone="info">Choose which driving information to show. Use Colors &amp; Layout to arrange widgets and change colors.</GxNotice>
+      <GxNotice v-else-if="initialPage === 'lane_change'" tone="info">Close gap adjusts following distance during a lane change when StarPilot controls acceleration and braking. It is Off by default.</GxNotice>
+      <GxNotice v-else-if="state.data?.page === 'conditional' || state.data?.page.startsWith('conditional/')" tone="info">Choose when to switch between Chill and Experimental. Applies on supported vehicles when StarPilot controls acceleration and braking.</GxNotice>
+      <GxNotice v-else-if="state.data?.page === 'profiles'" tone="info">Braking response works without saved personality curves. A selected personality braking preset or Traffic takes priority.</GxNotice>
+      <GxNotice v-else-if="state.data?.page === 'traffic'" tone="info">Traffic follow and jerk blend toward saved Relaxed values at higher speeds. Saved curves require Use saved profiles and the Traffic profile switch.</GxNotice>
+      <GxNotice v-else-if="state.data?.page === 'aol'" tone="info">Keep StarPilot lateral control active without holding the steering wheel.</GxNotice>
+      <GxNotice v-else-if="state.data?.page === 'torque'" tone="info">Tune how StarPilot applies steering torque.</GxNotice>
+      <GxNotice v-else-if="state.data?.page === 'lane'" tone="info">Choose lane-centering behavior and alerts.</GxNotice>
+      <GxNotice v-else-if="state.data?.page === 'curve'" tone="info">Set how the vehicle slows for curves ahead.</GxNotice>
+      <GxNotice v-else-if="state.data?.page === 'slc'" tone="info">Control how speed limits change your set speed.</GxNotice>
+      <GxNotice v-else-if="state.data?.page === 'wheel'" tone="info">Assign what the steering-wheel controls do.</GxNotice>
+      <GxNotice v-else-if="state.data?.page === 'data'" tone="info">Choose what uploads when the vehicle uses mobile data.</GxNotice>
+      <GxNotice v-else-if="['aggressive','standard','relaxed'].includes(state.data?.page)" tone="info">Saved personality curve for this driving style.</GxNotice>
+      <GxNotice v-else-if="initialPage === 'sentry'" tone="info">{{ state.data?.subtitle || "Checking motion monitor…" }}</GxNotice>
       <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Local settings are unavailable in preview.</div>
       <template v-else>
         <div v-if="initialPage === 'hub'" class="gx-settings-tabs" aria-label="Settings sections">
           <button v-for="section in sections" :key="section.id" type="button" class="gx-chip" :aria-pressed="section.id === activeSection.id" :disabled="busy" @click="selectSection(section)">{{ section.label }}</button>
         </div>
-        <section v-if="state.developerOpen" class="gx-card gx-settings__section" aria-label="Developer">
-          <h3>Developer</h3>
-          <CloudProviderPage :mode="mode" :unauthorized="unauthorized" />
-
+        <section v-if="state.developerOpen" class="gx-card gx-settings__section gx-settings__developer" aria-label="Developer">
+          <div class="gx-section__header"><i class="bi bi-code-slash" aria-hidden="true"></i><span class="gx-section__title">Developer</span></div>
+          <div class="gx-settings__developer-body"><CloudProviderPage :mode="mode" :unauthorized="unauthorized" /></div>
         </section>
         <p v-if="state.status === 'saving' || state.status === 'updating'" class="gx-settings__save-status" role="status">Saving preference…</p>
         <div v-if="state.status === 'loading'" class="gx-card gx-message" role="status">Loading saved settings…</div>
@@ -339,12 +357,15 @@ export const SettingsPage = {
         <div v-if="state.error" class="gx-card gx-message" role="alert">{{ state.error }}
           <button type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="feed.load()">Refresh</button></div>
         <div v-if="state.data" class="gx-settings__body">
-          <button v-if="state.data.page === 'appearance'" type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="open('ui_layout')">Open Theme Maker</button>
-          <p v-if="!state.data.parked && !state.data.rows.some(row => row.key && row.available)" class="gx-note">Turn the vehicle off to change these settings.</p>
-          <input v-model="state.query" class="gx-field" type="search" aria-label="Filter this settings page" placeholder="Search this page…">
+          <div v-if="state.data.page === 'appearance' || state.data.page === 'pip'" class="gx-settings__actions">
+            <button v-if="state.data.page === 'appearance'" type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="open('ui_layout')"><i class="bi bi-palette" aria-hidden="true"></i> Open Colors &amp; Layout</button>
+            <button v-if="state.data.page === 'pip'" type="button" class="gx-btn gx-btn--tonal" :disabled="busy" @click="openCropEditor"><i class="bi bi-crop" aria-hidden="true"></i> Open crop editor</button>
+          </div>
           <section class="gx-card gx-settings__section">
             <div class="gx-section__header"><i class="bi" :class="activeSection.icon" aria-hidden="true"></i><span class="gx-section__title">{{ state.data.page === 'hub' ? activeSection.label : state.data.title }}</span>
-              <button type="button" class="gx-icon-btn" aria-label="Refresh settings" :disabled="busy" @click="feed.load()"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i></button></div>
+              <button v-if="state.data.page !== 'hub' && state.data.rows.length" type="button" class="gx-icon-btn" :aria-label="state.searchOpen ? 'Close page search' : 'Search within this page'" :aria-pressed="state.searchOpen" @click="togglePageSearch"><i class="bi" :class="state.searchOpen ? 'bi-x-lg' : 'bi-search'" aria-hidden="true"></i></button>
+              <button v-if="state.data.page === 'hub'" type="button" class="gx-icon-btn" aria-label="Refresh settings" :disabled="busy" @click="feed.load()"><i class="bi bi-arrow-clockwise" aria-hidden="true"></i></button></div>
+            <div v-if="state.searchOpen" class="gx-settings__search"><input ref="pageSearch" v-model="state.query" class="gx-field" type="search" aria-label="Search within this page" placeholder="Search within…"></div>
             <GalaxySettingRow v-for="{ row, index } in visibleRows" :key="rowKey(row, index)" :row="row" :index="index"
               :disabled="busy || !row.available" :save-value="(index, value) => feed.previewValue(index, value)"
               @open="open" @review="(index, direction) => feed.preview(index, direction)" />

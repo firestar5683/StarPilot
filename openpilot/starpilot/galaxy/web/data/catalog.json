@@ -51,13 +51,6 @@
       "availability": "local-only"
     },
     {
-      "name": "Onroad Appearance",
-      "path": "/appearance",
-      "icon": "bi-display",
-      "description": "Saved compact border and onroad visibility choices",
-      "availability": "local-only"
-    },
-    {
       "name": "Navigation & Maps",
       "path": "/navigation",
       "icon": "bi-map",
@@ -72,10 +65,10 @@
       "availability": "local-only"
     },
     {
-      "name": "Theme Maker",
+      "name": "Colors & Layout",
       "path": "/theme_maker",
       "icon": "bi-palette-fill",
-      "description": "Parked colors and Big or Small driving layouts",
+      "description": "Parked widget arrangement, colors and Big or Small driving layouts",
       "availability": "local-only"
     },
     {

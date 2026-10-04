@@ -1,6 +1,6 @@
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
 import { CameraSnapshotFeed } from "./cameras.js"
-import { SettingsFeed } from "./settings.js"
+import { SettingsFeed, isPipCropRow } from "./settings.js"
 import { GalaxySettingRow } from "./galaxy-setting-row.js"
 import { displayPoint, FORMATS, maskDraft, sourcePoint } from "./pip-geometry.js"
 
@@ -83,7 +83,7 @@ export const PipPage = {
   },
   computed: {
     controls() { return (this.state.data?.rows || []).map((row, index) => ({ row, index }))
-      .filter(({ row }) => row.label !== "Visual camera crop editor" && !row.key?.startsWith("pip:mask:")) },
+      .filter(({ row }) => !isPipCropRow(row)) },
     canEdit() { return !!this.state.imageName && this.mode === "local" && !!this.state.data?.parked && this.state.data?.editorRow >= 0 &&
       !!this.state.data.rows[this.state.data.editorRow]?.available && this.state.status === "ready" &&
       !this.state.pending && !this.state.reviewing && typeof this.state.invert === "boolean" &&
@@ -193,8 +193,8 @@ export const PipPage = {
     },
   },
   template: `
-    <section class="gx-settings gx-pip" aria-label="Blind Spot Camera saved settings">
-      <header class="gx-card gx-settings__header"><div><p class="gx-eyebrow">Saved preferences</p><h2>Blind Spot Camera</h2>
+    <section class="gx-settings gx-pip" aria-label="Blind Spot Camera and Preview saved settings">
+      <header class="gx-card gx-settings__header"><div><h2>Blind Spot Camera and Preview</h2>
         <p>Adjust the native Blind Spot Camera crop using a live cabin preview.</p></div>
         </header>
       <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Local saved settings are unavailable in preview.</div>

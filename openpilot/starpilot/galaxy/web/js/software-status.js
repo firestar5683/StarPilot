@@ -1,4 +1,5 @@
 import { decodeLayoutBackup, encodeLayoutBackup, MAX_LAYOUT_BACKUP_BYTES } from "./layout-backup.js"
+import { GalaxySelect } from "./galaxy-select.js"
 
 const ACTIONS = new Set(["check", "download", "select", "install", "preferences", "fast", "rollback"])
 const REQUEST_STATES = new Set(["pending", "complete", "failed"])
@@ -242,6 +243,7 @@ export class SoftwareStatusFeed {
 }
 
 export const SoftwarePage = {
+  components: { GalaxySelect },
   name: "SoftwarePage",
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ status: "idle", data: null, busy: false, uncertain: false, notice: "", error: "",
@@ -297,7 +299,7 @@ export const SoftwarePage = {
       this.layoutNotice = this.layoutError = ""
       try {
         const snapshot = await this.layoutRequest()
-        if (snapshot.valid !== true) throw new Error("Saved visual layout is invalid. Repair it in Theme Maker before exporting.")
+        if (snapshot.valid !== true) throw new Error("Saved visual layout is invalid. Repair it in Colors & Layout before exporting.")
         const contents = await encodeLayoutBackup(snapshot.document)
         const url = URL.createObjectURL(new Blob([contents], { type: "application/json" }))
         try {
@@ -420,18 +422,18 @@ export const SoftwarePage = {
               <dt>Commit</dt><dd>{{ shortCommit(data.installed.commit) }}</dd></dl></section>
           <section class="gx-card gx-software-card"><h3>Target Branch</h3>
             <p class="gx-note">Current target: {{ shown(operations.selectedTarget) }}</p>
-            <div class="gx-software-branch"><select v-model="primaryChoice" class="gx-field" aria-label="Target branch" :disabled="actionDisabled || !operations.canSelect" @change="onPrimaryBranchChange">
+            <div class="gx-software-branch"><GalaxySelect v-model="primaryChoice" class="gx-field gx-field--full" aria-label="Target branch" :disabled="actionDisabled || !operations.canSelect" @change="onPrimaryBranchChange">
                 <option value="" disabled>Choose a branch</option>
                 <option value="StarPilot">StarPilot — Release</option><option value="Dom">Dom — Development</option>
-                <option value="other:">Other branches…</option></select>
+                <option value="other:">Other branches…</option></GalaxySelect>
               <button type="button" class="gx-btn gx-btn--tonal" :disabled="actionDisabled || !operations.canSelect || !canStageBranch" @click="chooseBranch">Set target branch</button></div>
             <p v-if="primaryBranchHelp" class="gx-note">{{ primaryBranchHelp }}</p>
             <div v-if="primaryChoice === 'other:'" class="gx-software-other-branches">
               <label for="gx-other-branch" class="gx-row__label">Other branches</label>
               <p class="gx-note">Additional branches from this installation's repository.</p>
-              <select id="gx-other-branch" v-model="draftBranch" class="gx-field" aria-label="Other branches" :disabled="actionDisabled || !operations.canSelect" @change="onOtherBranchChange">
+              <GalaxySelect id="gx-other-branch" v-model="draftBranch" class="gx-field gx-field--full" aria-label="Other branches" :disabled="actionDisabled || !operations.canSelect" @change="onOtherBranchChange">
                 <option value="" disabled>{{ otherBranches.length ? 'Select another branch' : 'No other branches available' }}</option>
-                <option v-for="branch in otherBranches" :key="branch.name" :value="branch.name" :disabled="!branch.listed">{{ branch.name }}{{ branch.current ? ' (current)' : '' }}{{ !branch.listed && !branch.current ? ' (unavailable)' : '' }}</option></select>
+                <option v-for="branch in otherBranches" :key="branch.name" :value="branch.name" :disabled="!branch.listed">{{ branch.name }}{{ branch.current ? ' (current)' : '' }}{{ !branch.listed && !branch.current ? ' (unavailable)' : '' }}</option></GalaxySelect>
             </div>
             <p v-if="draftBranch && !operations.availableBranches.includes(draftBranch)" class="gx-note">This branch is not in the updater's available list and cannot be selected yet.</p>
             <p v-if="!operations.availableBranches.length" class="gx-note">No branch list is available yet. Check for updates to refresh it.</p></section>

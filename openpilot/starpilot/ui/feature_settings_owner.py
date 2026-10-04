@@ -842,11 +842,19 @@ class FeatureSettingsOwner:
                     row.key == OUTPUT_MAX_KEY and row.capability is None and row.vehicle_fingerprint is None or
                     row.key.startswith('conditional:') and not row.key.startswith(BUTTON_PREFIX) else fingerprint)
             for row in rows]
-    subtitle = ("Saved for the next startup." if page == FeaturePage.VEHICLE else
-                "Configure automatic Chill and Experimental switching." if page in
-                (FeaturePage.CONDITIONAL, FeaturePage.CONDITIONAL_CEM, FeaturePage.CONDITIONAL_CCM) else
-                "Saved for the next drive. Lane and blindspot checks remain required." if page == FeaturePage.LANE_CHANGE else
-                "Saved preferences; some changes need the next startup.")
+    subtitle = (
+        "Saved. Changes take effect after the next restart."
+        if page == FeaturePage.VEHICLE else
+        "Configure automatic Chill and Experimental switching."
+        if page in (
+            FeaturePage.CONDITIONAL,
+            FeaturePage.CONDITIONAL_CEM,
+            FeaturePage.CONDITIONAL_CCM,
+        ) else
+        "Saved. Changes take effect after the next restart. Lane and blindspot checks remain required."
+        if page == FeaturePage.LANE_CHANGE else
+        "Saved preferences. Some changes take effect after the next restart."
+    )
     return FeatureSettingsState(page, title, subtitle, tuple(rows), parked)
 
   def apply(self, request: FeatureSettingsRequest) -> bool:

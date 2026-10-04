@@ -1,5 +1,5 @@
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
-import { SETTINGS_SECTIONS } from "./settings.js"
+import { SETTINGS_SECTIONS, isPipCropRow } from "./settings.js"
 
 const SPECIAL_PAGES = new Set(["ui_layout", "favorites"])
 const PAGE_SECTIONS = new Map(SETTINGS_SECTIONS.flatMap((section) =>
@@ -87,11 +87,10 @@ export class SettingsSearchIndex {
                 seen.add(row.page)
                 queue.push(row.page)
               }
-              if (row.page) continue
+              if (row.page || isPipCropRow(row)) continue
               this.entries.push({ page, label: row.label, title: data.title, section,
                 search: searchable(row, data.title, section) })
             }
-            this.publish({ status: "loading", entries: [...this.entries], failed })
           } catch {
             if (this.generation === generation) failed++
           } finally {
@@ -112,22 +111,61 @@ export const ToggleSearch = {
   props: { enabled: { type: Boolean, required: true }, unauthorized: { type: Function, required: true },
     openPage: { type: Function, required: true } },
   setup(props) {
-    const state = reactive({ query: "", open: false, active: 0, status: "idle", entries: [], failed: 0 })
+    const state = reactive({ query: "", open: false, active: 0, status: "idle", entries: [], failed: 0, rect: null })
     const index = new SettingsSearchIndex({ publish: (update) => Object.assign(state, update), unauthorized: props.unauthorized })
     return { state, index }
   },
   computed: {
     results() { return searchSettings(this.state.entries, this.state.query) },
     showResults() { return this.enabled && this.state.open && !!this.state.query.trim() },
+    resultsStyle() {
+      const rect = this.state.rect
+      return rect ? { top: `${rect.top}px`, left: `${rect.left}px`, width: `${rect.width}px` } : {}
+    },
   },
   watch: {
-    enabled(value) { if (!value) { this.index.stop(); this.state.query = ""; this.state.open = false } },
+    enabled(value) { if (!value) { this.index.stop(); this.close() } },
   },
-  beforeUnmount() { this.index.stop() },
+  mounted() {
+    this.onViewportChange = () => { if (this.state.open) this.measure() }
+    window.addEventListener("resize", this.onViewportChange)
+    window.addEventListener("scroll", this.onViewportChange, true)
+    document.addEventListener("pointerdown", this.onOutsidePointer, true)
+  },
+  beforeUnmount() {
+    this.index.stop()
+    window.removeEventListener("resize", this.onViewportChange)
+    window.removeEventListener("scroll", this.onViewportChange, true)
+    document.removeEventListener("pointerdown", this.onOutsidePointer, true)
+  },
   methods: {
-    onInput() { this.state.open = true; this.state.active = 0; if (this.enabled) this.index.load() },
-    onFocus() { if (this.state.query.trim()) { this.state.open = true; this.index.load() } },
-    onBlur(event) { if (!event.currentTarget.contains(event.relatedTarget)) this.state.open = false },
+    close() { this.state.query = ""; this.state.open = false; this.state.active = 0; this.state.rect = null },
+    openSearch() {
+      this.state.open = true
+      this.$nextTick(() => { this.$refs.input?.focus(); this.measure() })
+    },
+    measure() {
+      const input = this.$refs.input
+      if (!input) return
+      const rect = input.getBoundingClientRect()
+      const gap = 8, margin = 12
+      const viewport = document.documentElement.clientWidth
+      const next = viewport < 768
+        ? { top: Math.round(rect.bottom + gap), left: margin, width: viewport - margin * 2 }
+        : { top: Math.round(rect.bottom + gap),
+            left: Math.round(Math.max(gap, Math.min(rect.left, viewport - margin - Math.max(340, rect.width)))),
+            width: Math.round(Math.max(340, rect.width)) }
+      const current = this.state.rect
+      if (!current || current.top !== next.top || current.left !== next.left || current.width !== next.width) this.state.rect = next
+    },
+    toggle() { this.state.open ? this.close() : this.openSearch() },
+    onOutsidePointer(event) {
+      if (!this.state.open) return
+      if (this.$el?.contains(event.target) || this.$refs.results?.contains(event.target)) return
+      this.close()
+    },
+    onInput() { this.state.open = true; this.state.active = 0; if (this.enabled) this.index.load(); this.$nextTick(() => this.measure()) },
+    onFocus() { this.openSearch() },
     onKey(event) {
       if (event.key === "Escape") { this.state.query = ""; this.state.open = false; event.preventDefault(); return }
       if (!this.showResults) return
@@ -136,24 +174,30 @@ export const ToggleSearch = {
         this.state.active = (this.state.active + (event.key === "ArrowDown" ? 1 : -1) + this.results.length) % Math.max(1, this.results.length)
       } else if (event.key === "Enter" && this.results.length) { event.preventDefault(); this.choose(this.results[this.state.active] || this.results[0]) }
     },
-    choose(hit) { this.state.query = ""; this.state.open = false; this.openPage(hit) },
+    choose(hit) { this.state.query = ""; this.state.open = false; this.state.rect = null; this.openPage(hit) },
   },
   template: `
-    <div class="gx-searchwrap" @focusout="onBlur">
-      <input v-model="state.query" class="gx-search gx-appbar__search" type="search" placeholder="Search toggles…"
+    <div class="gx-searchbox" :class="{ open: state.open }">
+      <button type="button" class="gx-icon-btn gx-search-toggle" aria-label="Search toggles" :aria-expanded="state.open"
+        :disabled="!enabled" @click="toggle"><i class="bi" :class="state.open ? 'bi-x-lg' : 'bi-search'"></i></button>
+      <div class="gx-searchwrap">
+      <input ref="input" v-model="state.query" class="gx-search gx-appbar__search" type="search" placeholder="Search toggles…"
         aria-label="Search toggles" :disabled="!enabled" role="combobox" aria-autocomplete="list"
         :aria-expanded="showResults" aria-controls="gx-toggle-search-results"
         :aria-activedescendant="showResults && results.length ? 'gx-toggle-result-' + state.active : undefined"
         @input="onInput" @focus="onFocus" @keydown="onKey">
-      <div v-if="showResults" id="gx-toggle-search-results" class="gx-search-results" role="listbox" aria-label="Toggle search results">
-        <p v-if="state.status === 'loading'" class="gx-search-results__status" role="status">Searching saved settings…</p>
-        <button v-for="(hit, index) in results" :key="hit.page + ':' + hit.label" type="button" role="option"
-          :id="'gx-toggle-result-' + index" class="gx-search-results__item" :class="{active:index === state.active}"
-          :aria-selected="index === state.active" @click="choose(hit)">
-          <strong>{{ hit.label }}</strong><span>{{ hit.section }} · {{ hit.title }}</span>
-        </button>
-        <p v-if="state.status === 'partial'" class="gx-search-results__status" role="status">Some settings could not be searched. Try again.</p>
-        <p v-if="state.status === 'ready' && !results.length" class="gx-search-results__status">No matching saved settings.</p>
       </div>
+      <Teleport to="body">
+        <div v-if="showResults && state.rect" id="gx-toggle-search-results" ref="results" class="gx-search-results" :style="resultsStyle" role="listbox" aria-label="Toggle search results">
+          <p v-if="state.status === 'loading' && !results.length" class="gx-search-results__status" role="status">Searching…</p>
+          <button v-for="(hit, index) in results" :key="hit.page + ':' + hit.label" type="button" role="option"
+            :id="'gx-toggle-result-' + index" class="gx-search-results__item" :class="{active:index === state.active}"
+            :aria-selected="index === state.active" @click="choose(hit)">
+            <strong>{{ hit.label }}</strong><span>{{ hit.section }} · {{ hit.title }}</span>
+          </button>
+          <p v-if="state.status === 'partial' && !state.entries.length" class="gx-search-results__status" role="status">Some settings couldn't be searched. Try again.</p>
+          <p v-if="state.status === 'ready' && !results.length" class="gx-search-results__status">No matching settings.</p>
+        </div>
+      </Teleport>
     </div>`,
 }

@@ -1,6 +1,8 @@
 import { reactive, watch } from "../vendor/vue/vue.esm-browser.js"
 import { LayoutPreviewFeed, PREVIEW_SCENES } from "./layout-preview.js"
 import { editorSnapshot, projectionPayload } from "./projection-layout.js"
+import { GalaxySelect } from "./galaxy-select.js"
+import { GxNotice } from "./notice.js"
 
 const PROFILES = ["large", "compact"]
 const COLORS = ["cardFill", "cardBorder", "text"]
@@ -330,7 +332,7 @@ export const LayoutWidgetPreview = {
 }
 
 export const OnroadLayoutPage = {
-  components: { LayoutWidgetPreview },
+  components: { LayoutWidgetPreview, GalaxySelect, GxNotice },
   props: { projection: { type: Boolean, default: false }, mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   emits: ["close", "target"],
   setup(props) {
@@ -701,6 +703,7 @@ export const OnroadLayoutPage = {
         <p v-if="!projection">Choose a widget to move it or change its colors. Edit the layout available on this comma.</p><p v-else>Move widgets for the last connected Android Auto screen. The comma layout stays separate. Colors follow the comma theme. Changes apply on the next connection.</p></div>
 
       </div>
+      <GxNotice v-if="mode === 'local' && state.data && !state.data.editable && !(projection && state.data.reason)" tone="warn">Park the vehicle and reload to edit. If it stays unavailable, reload saved settings.</GxNotice>
       <nav  class="gx-layout__tabs" aria-label="Layout target">
         <button class="gx-btn gx-btn--tonal" :aria-pressed="!projection" :disabled="busy || !!state.drag" @click="$emit('target', 'device')">Comma</button>
         <button class="gx-btn gx-btn--tonal" :aria-pressed="projection" :disabled="busy || !!state.drag" @click="$emit('target', 'projection')">Android Auto</button>
@@ -723,7 +726,6 @@ export const OnroadLayoutPage = {
             <button class="gx-btn" type="button" @click="leave(state.discard)">{{ (typeof state.discard === 'function' || ['back', 'device', 'projection'].includes(state.discard)) ? 'Discard and leave' : 'Discard and reload' }}</button></div>
         </div>
         <template v-if="state.data && state.draft">
-          <p v-if="!state.data.editable && !(projection && state.data.reason)" class="gx-note" role="status">Park the vehicle and reload to edit. If it stays unavailable, reload saved settings.</p>
           <p v-if="!state.data.valid" class="gx-note" role="status">{{ projection ? 'Default Android Auto positions are shown. Save to keep your separate layout.' : 'The saved customization is invalid. Default colors and positions are shown; save your edits to replace it.' }}</p>
           <div class="gx-layout__tabs" aria-label="Layout size">
             <button v-if="!projection" v-for="tab in [{id:'large',label:'Big'}, {id:'compact',label:'Small'}].filter(tab => availableProfiles.includes(tab.id))" :key="tab.id" class="gx-btn gx-btn--tonal" type="button"
@@ -839,10 +841,10 @@ export const OnroadLayoutPage = {
               <button class="gx-btn gx-btn--tonal gx-layout__reset" type="button" :disabled="!editable || !!state.drag" @click="resetLayout">Reset this layout</button>
               <section v-if="!projection" class="gx-layout__colors" aria-label="Path and lane colors">
                 <div class="gx-layout__subhead"><h4>Path &amp; Lane Colors</h4><button class="gx-btn gx-btn--tonal" type="button" :disabled="!editable || !!state.drag" @click="resetRoad">Reset road colors</button></div>
-                <label>Path style<select class="gx-field" :value="roadMode" :disabled="!editable || !!state.drag" @change="setRoadMode($event.target.value)">
+                <label>Path style<GalaxySelect class="gx-field gx-field--full" :value="roadMode" :disabled="!editable || !!state.drag" @change="setRoadMode($event.target.value)">
                   <option value="default">Follow Appearance Settings</option><option value="acceleration">Acceleration colors</option>
                   <option value="color">Custom color</option><option value="rainbow">Rainbow Road</option>
-                </select></label>
+                </GalaxySelect></label>
                 <p class="gx-note">Choose how the path is colored. Follow Appearance Settings uses your existing Rainbow Road preference. Acceleration colors change with acceleration and braking. Custom color stays one color. Rainbow Road shows a moving rainbow.</p>
                 <p class="gx-note">{{ state.profile === 'large' ? 'Path border colors the strips along the path. Lane lines keep their own color.' : 'Lane marking colors apply to the lines beside your lane and the outer lines separately.' }} Blue lane-centering and orange steering-effort indicators stay blue and orange.</p>
                 <div class="gx-layout__palette"><div v-for="field in state.data.metadata.roadColorFields" :key="field.id" class="gx-layout__color">

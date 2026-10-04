@@ -1,5 +1,6 @@
 import { reactive } from "../vendor/vue/vue.esm-browser.js"
 import { SettingsPage } from "./settings.js"
+import { GalaxySelect } from "./galaxy-select.js"
 
 export function validVehiclePage(data) {
   return data?.version === 1 && typeof data.parked === "boolean" && typeof data.readable === "boolean" &&
@@ -146,7 +147,7 @@ export class VehicleSelectionFeed {
 }
 
 export const VehicleControlsPage = {
-  components: { SettingsPage },
+  components: { SettingsPage, GalaxySelect },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   setup(props) {
     const state = reactive({ status: "idle", data: null, pending: null, busy: false, error: "", query: "", make: "" })
@@ -166,7 +167,7 @@ export const VehicleControlsPage = {
   methods: { choose(platform) { this.feed.preview(platform) } },
   template: `
     <section class="gx-vehicle" aria-label="Vehicle Controls">
-      <div class="gx-card gx-vehicle__header"><p class="gx-eyebrow">Vehicle Controls</p><h2>Vehicle Selection</h2>
+      <div class="gx-card gx-vehicle__header"><h2>Vehicle Selection</h2>
         <p>Auto detects your car. A manual choice is saved for the next start; it does not change the car reported now.</p></div>
       <div v-if="mode !== 'local'" class="gx-card gx-message" role="status">Local vehicle selection is unavailable in preview.</div>
       <template v-else>
@@ -183,8 +184,8 @@ export const VehicleControlsPage = {
             <button type="button" class="gx-btn" :disabled="state.busy || !state.data.parked || !state.data.readable" @click="choose(null)">Choose Auto detection</button></div>
           <template v-if="state.data.valid">
             <h3>Choose a Vehicle</h3>
-            <div class="gx-vehicle__filters"><select v-model="state.make" class="gx-field" aria-label="Vehicle make">
-                <option value="">All makes</option><option v-for="make in makes" :key="make" :value="make">{{ make }}</option></select>
+            <div class="gx-vehicle__filters"><GalaxySelect v-model="state.make" class="gx-field gx-field--full" aria-label="Vehicle make">
+                <option value="">All makes</option><option v-for="make in makes" :key="make" :value="make">{{ make }}</option></GalaxySelect>
               <input v-model="state.query" class="gx-field" type="search" aria-label="Search vehicle models" placeholder="Search models"></div>
             <div class="gx-vehicle__models"><button v-for="item in models" :key="item.platform" type="button" class="gx-btn gx-btn--tonal"
                 :aria-pressed="state.data.selected === item.platform" :disabled="state.busy || !state.data.parked || !state.data.readable" @click="choose(item.platform)">

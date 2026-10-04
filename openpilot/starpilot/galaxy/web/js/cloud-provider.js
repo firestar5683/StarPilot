@@ -1,3 +1,6 @@
+import { GalaxySelect } from "./galaxy-select.js"
+import { GxNotice } from "./notice.js"
+
 export const validProviderStatus = value => value && ["comma", "konik"].includes(value.active) &&
   ["comma", "konik"].includes(value.selected) && /^[a-f0-9]{64}$/.test(value.revision) &&
   typeof value.restartRequired === "boolean" && typeof value.canSelect === "boolean" &&
@@ -8,6 +11,7 @@ export const validProviderStatus = value => value && ["comma", "konik"].includes
 
 export const CloudProviderPage = {
   name: "CloudProviderPage",
+  components: { GalaxySelect, GxNotice },
   props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
   data: () => ({ status: null, busy: false, error: "", request: null }),
   mounted() { this.load() },
@@ -50,16 +54,22 @@ export const CloudProviderPage = {
       finally { this.busy = false }
     },
   },
-  template: `<div><h3>Cloud Provider</h3>
+  template: `<div class="gx-settings__developer-body">
     <section v-if="mode !== 'local'" class="gx-card gx-message">Open this Developer page on your device to choose a cloud provider.</section>
-    <section v-else class="gx-card" style="padding:var(--sp-4)">
-      <p v-if="active">Active: <a :href="active.url" target="_blank" rel="noopener">{{ active.label }}</a></p>
-      <p v-if="selected">Next Boot: {{ selected.label }}</p>
-      <p v-if="status?.restartRequired">Restart required. No automatic reboot will occur.</p>
+    <template v-else>
       <p>Cloud accounts and uploads stay separate. Your older comma recordings keep their comma links.</p>
+      <label class="gx-settings__developer-provider">Cloud provider
+        <GalaxySelect class="gx-field gx-field--full" aria-label="Cloud provider" :value="status?.selected || ''"
+          :disabled="busy || !status?.canSelect" @change="select($event.target.value)">
+          <option v-for="provider in status?.providers || []" :key="provider.id" :value="provider.id">{{ provider.label }}</option>
+        </GalaxySelect>
+      </label>
+      <GxNotice v-if="selected" :tone="active && selected.id === active.id ? 'info' : 'warn'">
+        {{ selected.label }}{{ active && selected.id === active.id ? ' is currently active.' : ' applies after the next reboot.' }}
+      </GxNotice>
+      <p v-if="status?.restartRequired">Restart required. No automatic reboot will occur.</p>
       <p v-if="status && !status.canSelect">Turn off the vehicle to change this Developer setting.</p>
-      <button v-for="provider in status?.providers || []" :key="provider.id" class="gx-btn" :disabled="busy || !status.canSelect || status.selected === provider.id" @click="select(provider.id)">Use {{ provider.label }}</button>
-      <button class="gx-btn" @click="load" :disabled="busy">Refresh</button>
+      <button class="gx-btn gx-btn--tonal" @click="load" :disabled="busy">Refresh</button>
       <p v-if="error" class="gx-note gx-note--danger" role="alert">{{ error }}</p>
-    </section></div>`,
+    </template></div>`,
 }

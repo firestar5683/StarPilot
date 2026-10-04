@@ -165,6 +165,7 @@ export const Home = {
       this.modelFeed.load()
       this.softwareFeed.load()
       this.driveFeed.load()
+      this.$refs.localAccess?.feed?.refresh()
     },
     ignoreDrive(drive) {
       if (this.mode !== "local" || document.hidden || this.drives.busy) return
@@ -238,7 +239,7 @@ export const Home = {
           </section>
         </template>
         <div class="gx-home__section-title"><span></span>Your device</div>
-        <LocalAccess :mode="mode" :on-unauthorized="unauthorized" />
+        <LocalAccess ref="localAccess" :mode="mode" :on-unauthorized="unauthorized" :show-refresh="false" />
         <div class="gx-home__grid">
           <section class="gx-card gx-home__card">
             <h2><i class="bi bi-activity"></i> System</h2>

@@ -1,3 +1,5 @@
+import { GalaxySelect } from "./galaxy-select.js"
+
 export class CameraSnapshotFeed {
   constructor({ publish, unauthorized, fetcher = (...args) => fetch(...args),
                 createURL = (blob) => URL.createObjectURL(blob), revokeURL = (url) => URL.revokeObjectURL(url),
@@ -54,10 +56,14 @@ export class CameraSnapshotFeed {
 
 export const CamerasPage = {
   name: "CamerasPage",
+  components: { GalaxySelect },
   props: { mode: { type: String, required: true }, go: { type: Function, required: true },
     unauthorized: { type: Function, required: true } },
   data: () => ({ camera: "cabin", image: "", capturing: false, error: "" }),
   created() { this.snapshots = new CameraSnapshotFeed({ publish: (state) => Object.assign(this.$data, state), unauthorized: this.unauthorized }) },
+  methods: {
+    chooseCamera(event) { this.camera = event.target.value; this.snapshots.stop() },
+  },
   mounted() {
     this.visibility = () => { if (document.hidden) this.snapshots.stop() }
     document.addEventListener("visibilitychange", this.visibility)
@@ -69,7 +75,7 @@ export const CamerasPage = {
       <div class="gx-home__hero"><div><h1>Cameras &amp; Monitoring</h1>
         <p class="gx-note">Camera preferences and availability</p></div></div>
       <div class="gx-home__grid">
-        <section class="gx-card gx-home__card"><h2><i class="bi bi-camera-video"></i> Blind Spot Camera</h2>
+        <section class="gx-card gx-home__card"><h2><i class="bi bi-camera-video"></i> Blind Spot Camera and Preview</h2>
           <p>Adjust the camera crop with a live cabin preview.</p>
           <button v-if="mode === 'local'" type="button" class="gx-home__link" @click="go('/cameras/pip')">Open saved preferences <i class="bi bi-arrow-right"></i></button>
           <small v-else>Saved preferences are unavailable in preview.</small></section>
@@ -86,9 +92,10 @@ export const CamerasPage = {
       <section class="gx-card gx-home__card"><h2>Camera Snapshot</h2>
         <p>Turn off the vehicle, choose a camera, then take a snapshot.</p>
         <template v-if="mode === 'local'">
-          <label>Camera <select class="gx-field" v-model="camera" :disabled="capturing" @change="snapshots.stop()">
-            <option value="cabin">Cabin</option><option value="wide">Wide road</option><option value="narrow">Road</option>
-          </select></label>
+          <label>Camera
+            <GalaxySelect class="gx-field gx-field--full" aria-label="Camera" :value="camera" :disabled="capturing" @change="chooseCamera">
+              <option value="cabin">Cabin</option><option value="wide">Wide road</option><option value="narrow">Road</option>
+            </GalaxySelect></label>
           <button class="gx-btn" type="button" :disabled="capturing" @click="snapshots.capture(camera)">{{ capturing ? 'Capturing…' : 'Take snapshot' }}</button>
           <button v-if="image || capturing" class="gx-btn gx-btn--tonal" type="button" @click="snapshots.stop()">{{ capturing ? 'Cancel' : 'Clear snapshot' }}</button>
           <p v-if="error" role="alert">{{ error }}</p>

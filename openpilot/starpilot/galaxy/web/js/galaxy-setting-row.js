@@ -49,6 +49,7 @@ export const GalaxySettingRow = {
       return { ...bounds, numericMax, max: Number((numericMax + bounds.step).toFixed(8)), auto: true }
     },
     locked() { return this.disabled || this.updating || !this.row.available || (!this.row.action && !this.row.page) },
+    dimmed() { return this.updating || !this.row.available || (!this.row.action && !this.row.page) },
     currentValue() { return this.preview !== undefined ? this.preview : this.row.value },
     sliderValue() { return this.currentValue === "Auto" && this.bounds?.auto ? this.bounds.max : this.currentValue },
     displayValue() {
@@ -154,7 +155,7 @@ export const GalaxySettingRow = {
   },
   beforeUnmount() { this.clearHoldTimer() },
   template: `
-    <div class="gx-row" :class="{ disabled: locked, 'gx-row--stack': control === 'slider' || control === 'select' }">
+    <div class="gx-row" :class="{ disabled: dimmed, 'gx-row--stack': control === 'slider' || control === 'select' }">
       <div class="gx-row__info">
         <span class="gx-row__label">{{ row.label }}</span>
         <span v-if="row.reason" class="gx-row__desc">{{ row.reason.replace('https://firestar.link/discord', '') }}<a v-if="row.reason.includes('https://firestar.link/discord')" href="https://firestar.link/discord" target="_blank" rel="noopener">StarPilot Discord</a></span>

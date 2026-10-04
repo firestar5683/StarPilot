@@ -169,7 +169,8 @@ export class NavigationClient {
 export const NavigationPage = {
   name: "NavigationPage",
   components: { MapOperationsPanel, NavigationMap },
-  props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true } },
+  props: { mode: { type: String, required: true }, unauthorized: { type: Function, required: true },
+    go: { type: Function, default: null } },
   data: () => ({ data: null, results: [], busy: false, error: "", stale: false, tab: "route", favoritesOpen: false, query: "", token: "", searched: false }),
   computed: {
     available() { return this.mode === "local" && !!this.data && !this.stale && !this.busy },
@@ -288,5 +289,6 @@ export const NavigationPage = {
           </div>
         </template>
       </template>
+      <button v-if="go" type="button" class="gx-navigation__exit" aria-label="Exit navigation" @click="go('/tools')"><i class="bi bi-x-lg"></i><span>Exit</span></button>
     </div>`,
 }
