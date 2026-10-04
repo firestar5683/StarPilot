@@ -33,7 +33,7 @@ class TestGMPitchPreferences(unittest.TestCase):
         cp = params(candidate, alpha=alpha, radar=candidate == CAR.CHEVROLET_VOLT)
         controller = SimpleNamespace(long_pitch=True)
         preference.configure_controller(SimpleNamespace(CP=cp, CC=controller))
-        admitted = candidate == CAR.CHEVROLET_VOLT or (alpha and candidate == CAR.CHEVROLET_BOLT_EUV)
+        admitted = candidate == CAR.CHEVROLET_VOLT or (alpha and candidate in (CAR.CHEVROLET_BOLT_EUV, CAR.CHEVROLET_BOLT_ACC_2022_2023))
         self.assertEqual(controller.long_pitch, not admitted)
 
   def test_controller_off_matches_flat_on_all_counters(self):
@@ -92,6 +92,12 @@ class TestGMPitchStartupAndSettings(unittest.TestCase):
     return next(row for row in owner.snapshot(FeaturePage.VEHICLE, parked=parked, system_long=True,
                 lateral_context=True, metric=False).rows if row.key == 'LongPitch')
 
+  def change(self, row):
+    from openpilot.starpilot.ui.feature_settings_state import row_change
+    change = row_change(row)
+    assert change is not None
+    return change
+
   def settings(self, cp=None):
     from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
     from openpilot.starpilot.galaxy.settings import AuthorityContext, SettingsGateway
@@ -99,7 +105,11 @@ class TestGMPitchStartupAndSettings(unittest.TestCase):
     owner = FeatureSettingsOwner(self.saved, lambda group: current.parked and group == 'parked_preferences',
       vehicle_fingerprint=lambda: current.cp.carFingerprint if current.cp is not None else None,
       vehicle_params=lambda: current.cp)
-    gateway = SettingsGateway(self.saved, SimpleNamespace(sample=lambda: AuthorityContext(current.parked, current.cp, current.raw)),
+    class TestContext:
+      def sample(self):
+        return AuthorityContext(current.parked, current.cp, current.raw)
+
+    gateway = SettingsGateway(self.saved, TestContext(),
                               clock=lambda: 10.)
     return current, owner, gateway
 
@@ -128,32 +138,31 @@ class TestGMPitchStartupAndSettings(unittest.TestCase):
 
   def test_native_owner_missing_default_and_exact_guarded_on_off(self):
     from dataclasses import replace
-    from openpilot.starpilot.ui.feature_settings_state import row_change, FeaturePage
+    from openpilot.starpilot.ui.feature_settings_state import FeaturePage
     current, owner, _ = self.settings()
     toggle = self.row(owner)
     self.assertEqual((toggle.value, toggle.source, toggle.available), ('On', None, True))
     self.assertIn('next startup', toggle.reason)
     self.assertTrue(any(row.page == FeaturePage.VEHICLE for row in owner.snapshot(
       FeaturePage.HUB, parked=True, system_long=True, lateral_context=True, metric=False).rows))
-    request = replace(row_change(toggle), confirmation=True)
+    request = replace(self.change(toggle), confirmation=True)
     self.assertTrue(owner.apply(request))
     self.assertEqual(self.path.read_bytes(), b'0')
     self.assertFalse(owner.apply(request))
-    self.assertTrue(owner.apply(replace(row_change(self.row(owner)), confirmation=True)))
+    self.assertTrue(owner.apply(replace(self.change(self.row(owner)), confirmation=True)))
     self.assertEqual(self.path.read_bytes(), b'1')
-    request = replace(row_change(self.row(owner)), confirmation=True)
+    request = replace(self.change(self.row(owner)), confirmation=True)
     current.parked = False
     self.assertFalse(self.row(owner, parked=False).available)
     self.assertFalse(owner.apply(request))
 
   def test_exact_vehicle_and_saved_sources_guard_native_owner(self):
     from dataclasses import replace
-    from openpilot.starpilot.ui.feature_settings_state import row_change
     for change in ('vin', 'native', 'owner', 'bytes'):
       with self.subTest(change=change):
         self.path.unlink(missing_ok=True)
         current, owner, _ = self.settings()
-        request = replace(row_change(self.row(owner)), confirmation=True)
+        request = replace(self.change(self.row(owner)), confirmation=True)
         if change == 'vin':
           current.cp.carVin = 'different-car'
         elif change == 'native':
@@ -192,7 +201,12 @@ class TestGMPitchStartupAndSettings(unittest.TestCase):
           current.raw = b'other-car'
         if revoke == 'bytes':
           self.path.write_bytes(b'1')
-        if revoke in ('parked', 'cp', 'session'):
+        if revoke == 'parked':
+          # The saved preference can be previewed onroad, but final owner still
+          # refuses a write after parked authority is withdrawn.
+          self.assertFalse(gateway.confirm(intent['intent'], 'session', b'generation'))
+          self.assertFalse(self.path.exists())
+        elif revoke in ('cp', 'session'):
           with self.assertRaises(SettingsChanged):
             gateway.confirm(intent['intent'], 'session', b'generation', session_valid=lambda revoke=revoke: revoke != 'session')
         else:
@@ -203,7 +217,6 @@ class TestGMPitchStartupAndSettings(unittest.TestCase):
   def test_suburban_gateway_setting_reaches_controller_and_rechecks_permission(self):
     from dataclasses import replace
     from opendbc.car.gm.interface import CarInterface
-    from openpilot.starpilot.ui.feature_settings_state import row_change
 
     cp = params(CAR.CHEVROLET_SUBURBAN, radar=True)
     current, owner, gateway = self.settings(cp)
@@ -216,7 +229,7 @@ class TestGMPitchStartupAndSettings(unittest.TestCase):
     ci = CarInterface(cp)
     VehicleStartupPreferences.read(self.saved, enabled=True).configure_controller(ci)
     self.assertFalse(ci.CC.long_pitch)
-    request = replace(row_change(self.row(owner)), confirmation=True)
+    request = replace(self.change(self.row(owner)), confirmation=True)
     for attribute in ('passive', 'dashcamOnly', 'notCar'):
       setattr(current.cp, attribute, True)
       self.assertIsNone(owner._long_pitch_capability())

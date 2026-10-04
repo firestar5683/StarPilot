@@ -189,6 +189,7 @@ class TestOnroadAxes(unittest.TestCase):
       self.assertGreater(compact._set_speed_alpha.x, 0)
       compact.render(stale)
     self.assertEqual(compact._wheel_alpha.x, 0)
+    assert compact._last_cruise_ns is not None
     self.assertEqual(compact._set_speed_opacity(stale, compact._last_cruise_ns + 1), 0)
     self.assertEqual(compact._set_speed_opacity(stale, compact._last_cruise_ns + 150_000_001), 0)
     self.assertEqual(compact._set_speed_alpha.x, 0)

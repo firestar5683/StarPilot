@@ -42,7 +42,7 @@ class HondaFamilyQualificationTests(unittest.TestCase):
           self.assertTrue(cp.openpilotLongitudinalControl)
           self.assertFalse(cp.pcmCruise)
           self.assertEqual(len(cp.safetyConfigs), 1)
-          self.assertIn(cp.safetyConfigs[0].safetyParam, (2, 3))
+          self.assertIn(cp.safetyConfigs[0].safetyParam, (2, 3, 131))
           cp.safetyConfigs[0].safetyParam |= 32
           self.assertTrue(qualified_honda(cp))
           cp.safetyConfigs[0].safetyParam |= 4
@@ -101,10 +101,14 @@ class HondaFamilyQualificationTests(unittest.TestCase):
           params.put_bool('AlwaysOnLateral', True, block=True)
           honda = FakeHonda(candidate, alpha_long)
           card = Car(honda, FakeRadar(honda.CP))
-          self.assertEqual(card.aol_qualified, alpha_long)
+          expected = alpha_long or candidate != CAR.HONDA_ACCORD
+          self.assertEqual(card.aol_qualified, expected)
           self.assertEqual(bool(card.CP.safetyConfigs[0].safetyParam & 32), alpha_long)
+          experience = 32 if expected and not alpha_long else 0
+          self.assertEqual(card.CP.alternativeExperience, experience)
           with car.CarParams.from_bytes(params.get('CarParams')) as published:
             self.assertEqual(bool(published.safetyConfigs[0].safetyParam & 32), alpha_long)
+            self.assertEqual(published.alternativeExperience, experience)
 
 
 class HondaHostTests(unittest.TestCase):

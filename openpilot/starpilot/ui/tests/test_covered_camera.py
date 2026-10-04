@@ -104,8 +104,9 @@ def test_covered_model_keeps_filters_geometry_leads_and_reveal_pixels(monkeypatc
              roadEdges=[line(-6), line(6)], laneLineProbs=[.6, .9, .8, .5], roadEdgeStds=[.2, .3],
              acceleration=NS(x=[.2] * 33))
   sm = Messages(modelV2=model, extrinsicsCalibration=NS(height=[1.2]), carParams=NS(openpilotLongitudinalControl=True),
-                carOutput=NS(actuatorsOutput=NS(torque=.7)), carState=NS(vEgo=20.),
-                selfdriveState=NS(experimentalMode=False), longitudinalPlan=NS(allowThrottle=False),
+                carOutput=NS(actuatorsOutput=NS(torque=.7)), carState=NS(vEgo=20., brakePressed=False),
+                selfdriveState=NS(experimentalMode=False, enabled=True, engageable=True),
+                longitudinalPlan=NS(allowThrottle=False, longitudinalPlanSource="lead0"),
                 radarState=NS(leadOne=NS(present=True, dRel=25., yRel=0., vRel=-1., vLead=19.), leadTwo=NS(present=False)))
   clock = [1_000_000_000]
   ui = NS(sm=sm, started_frame=1, status=module.UIStatus.ENGAGED, params=Mock())
@@ -139,7 +140,11 @@ def test_covered_model_keeps_filters_geometry_leads_and_reveal_pixels(monkeypatc
       assert getattr(visible, field).x == getattr(covered, field).x
     assert visible._lane_centering_direction == covered._lane_centering_direction
     assert vars(visible._rainbow_path) == vars(covered._rainbow_path) | {'refresh_enabled': visible._rainbow_path.refresh_enabled}
-    assert visible._lead_vehicles == covered._lead_vehicles
+    for a, b in zip(visible._lead_vehicles, covered._lead_vehicles, strict=True):
+      assert a.info == b.info
+      np.testing.assert_array_equal(a.bar, b.bar)
+      for name in ("d_filter", "y_filter", "fade_filter"):
+        assert vars(getattr(a, name)) == vars(getattr(b, name))
     for a, b in zip([visible._path, *visible._lane_lines, *visible._road_edges],
                     [covered._path, *covered._lane_lines, *covered._road_edges], strict=True):
       np.testing.assert_array_equal(a.projected_points, b.projected_points)
@@ -162,7 +167,7 @@ def test_model_paint_flag_cannot_leak_after_render_exception(monkeypatch):
   def fail(_):
     assert renderer._paint is False
     raise RuntimeError('render failed')
-  renderer.render = fail
+  monkeypatch.setattr(renderer, 'render', fail, raising=False)
   with pytest.raises(RuntimeError, match='render failed'):
     renderer.render_with_lead(rl.Rectangle(0, 0, 476, 240), True, paint=False)
   assert renderer._paint is True
@@ -172,14 +177,14 @@ def test_model_paint_flag_cannot_leak_after_render_exception(monkeypatch):
 def make_session(monkeypatch, profile, camera):
   for name in ('BitmapFonts', 'PiPRenderer', 'PiPWarningSource', 'BluetoothStatusSource', 'RuntimeSnapshotAdapter',
                'GalaxyAccessFlow', 'FeatureSettingsOwner', 'SoundsOwner', 'AppearanceOwner', 'PiPOwner',
-               'DisplayOwner', 'PowerOwner', 'ShellInput', 'FavoritesOwner', 'OnroadFavorites'):
+               'DisplayOwner', 'PowerOwner', 'ShellInput', 'FavoritesOwner', 'OnroadFavorites', 'DriveStateOwner', 'PhysicalSource'):
     monkeypatch.setattr(runtime_app, name, Mock())
   monkeypatch.setattr(runtime_app, '_galaxy_access_owner', Mock())
   monkeypatch.setattr(runtime_app, 'slc_action_transport_enabled', lambda *_: False)
-  monkeypatch.setattr(runtime_app, 'ui_state', NS(params=object(), CP=None))
+  monkeypatch.setattr(runtime_app, 'ui_state', NS(params=object(), CP=None, sm={}))
   monkeypatch.delenv('SP_ONROAD_VISUAL_PREVIEW', raising=False)
   def view(*_, camera_layer, **__):
-    return NS(camera_layer=camera_layer, onroad=NS())
+    return NS(camera_layer=camera_layer, onroad=NS(unified_speed=NS(source_bounds=Mock())))
   monkeypatch.setattr(runtime_app, 'ShellView', view)
   return runtime_app.StarShellSession(profile, camera)
 
@@ -211,9 +216,9 @@ def test_compact_layout_propagates_paint_and_resets_after_first_touch_and_except
   layout._rect = rl.Rectangle(0, 0, 536, 240)
   layout.star = session
   layout._settings_layout = settings
-  layout._native_onroad = NS(_bookmark_icon=Mock())
-  layout._car_onroad_layout = NS(rect=layout.rect, enabled=True, is_visible=True, _touch_valid=lambda: True)
-  layout._scroller = NS(is_auto_scrolling=False)
+  monkeypatch.setattr(layout, '_native_onroad', NS(_bookmark_icon=Mock()), raising=False)
+  monkeypatch.setattr(layout, '_car_onroad_layout', NS(rect=layout.rect, enabled=True, is_visible=True, _touch_valid=lambda: True), raising=False)
+  monkeypatch.setattr(layout, '_scroller', NS(is_auto_scrolling=False), raising=False)
   state = OnroadState(True, True, 20, 80, SpeedLimitObservation(), lateral_active=True)
   should_raise = [False]
   def normal_render(_, rect):

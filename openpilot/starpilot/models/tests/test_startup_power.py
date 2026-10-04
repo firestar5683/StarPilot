@@ -59,6 +59,7 @@ def test_vehicle_ready_uses_exact_vehicle_bus_and_payload(lka, offset):
   # Bus offset is derived from the installed safety configuration.
   cp.init("safetyConfigs", 2 if offset else 1)
   bus = model_power_ready_bus(cp)
+  assert bus is not None
   assert bus == CanBus(cp).ECAN
   data = bytearray(32)
   data[3] = 0x40
@@ -75,13 +76,14 @@ def test_vehicle_ready_uses_exact_vehicle_bus_and_payload(lka, offset):
 def test_wait_is_bounded_and_never_opens_gpu_without_power(monkeypatch):
   from openpilot.starpilot.models import startup
   clock = SimpleNamespace(now=0.)
-  class Messages(dict):
+  class Messages:
     def __init__(self, services):
-      super().__init__({"pandaStates": [], "deviceState": SimpleNamespace(started=True)})
+      self.data = {"pandaStates": [], "deviceState": SimpleNamespace(started=True)}
       self.seen = dict.fromkeys(services, False)
       self.valid = dict.fromkeys(services, False)
       self.updated = dict.fromkeys(services, False)
       self.logMonoTime = dict.fromkeys(services, 0)
+    def __getitem__(self, key): return self.data[key]
     def update(self, timeout): clock.now += .1
   monkeypatch.setattr(startup.messaging, "SubMaster", Messages)
   monkeypatch.setattr(startup.HARDWARE, "get_device_type", lambda: "mici")

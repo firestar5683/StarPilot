@@ -212,13 +212,17 @@ class FakeHeadUnit:
           self._send(3, 0x8008, field(1, 1) + field(2, 0))
       elif channel == 3 and kind == 0x8001:
         session_id = one(fields, 1)
+        assert isinstance(session_id, int)
         self.start_indications.append(session_id)
       elif channel == 3 and kind == 1:
+        assert isinstance(session_id, int)
         self.codec_configs.append((session_id, data, len(self.frames)))
         if self.ack_codec_config is not False:  # True: current session; an int: that session id (the DHU uses 0)
           ack_session = session_id if self.ack_codec_config is True else self.ack_codec_config
+          assert isinstance(ack_session, int)
           self._send(3, 0x8004, field(1, ack_session) + field(2, 1))
       elif channel == 3 and kind == 0:
+        assert isinstance(session_id, int)
         self.frames.append((session_id, data[8:]))
         unacked += 1
         self.streaming.set()

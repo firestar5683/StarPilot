@@ -111,7 +111,7 @@ def test_failed_write_preserves_live_status_cache_and_previous_durable_fix(tmp_p
   import os
   monkeypatch.setattr(os, 'replace', lambda *args: (_ for _ in ()).throw(OSError('disk full')))
   owner.position_store.last_attempt = None
-  owner.runtime_source.map_position = lambda: {'longitude': -87., 'latitude': 43., 'validForMs': 1800}
+  monkeypatch.setattr(owner.runtime_source, 'map_position', lambda: {'longitude': -87., 'latitude': 43., 'validForMs': 1800})
   snapshot = owner.snapshot()
   assert snapshot['location']['latitude'] == 43 and snapshot['location']['validForMs'] == 1800
   assert snapshot['location']['bearing'] == 90

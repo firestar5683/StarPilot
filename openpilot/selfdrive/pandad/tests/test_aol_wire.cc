@@ -5,6 +5,8 @@
 #include <cstdio>
 #include <string>
 
+static constexpr uint64_t now = 1000000000ULL;
+
 int main() {
   const AolSafetyWireFields fields = {1, true, 100, 200, 5, 34, true, false, true, false, "panda", "axis"};
   auto bytes = encode_aol_safety_wire(fields);
@@ -30,7 +32,6 @@ int main() {
   bad = fields;
   bad.valid_until_mono_time = 99;
   assert(encode_aol_safety_wire(bad).empty());
-  constexpr uint64_t now = 1000000000ULL;
   capnp::MallocMessageBuilder intent_builder;
   auto intent = intent_builder.initRoot<cereal::AolAxisState::IntentWire>();
   intent.setKind(2);

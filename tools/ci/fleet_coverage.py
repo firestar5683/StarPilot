@@ -43,6 +43,27 @@ def _relevant_status_lines(status):
     line[3:] == path or line[3:].startswith(path + "/") for path in RELEVANT_SOURCE_PATHS)]
 
 
+def source_snapshot_matches(source, source_after, current):
+  from tools.ci.run_vehicle_tests import SOURCE_INPUT_PATHS
+
+  if not all(isinstance(value, dict) for value in (source, source_after, current)):
+    return False
+  before = source.get("inputs")
+  after = source_after.get("inputs")
+  if not isinstance(before, dict) or before != after or before != current:
+    return False
+  if set(before) != {"revision", "paths", "tracked_patch_sha256", "untracked_sha256"}:
+    return False
+  if (not REVISION.fullmatch(str(before["revision"])) or before["paths"] != list(SOURCE_INPUT_PATHS) or
+      not SHA256.fullmatch(str(before["tracked_patch_sha256"])) or
+      not isinstance(before["untracked_sha256"], dict)):
+    return False
+  if any(not isinstance(path, str) or not path or not SHA256.fullmatch(str(digest))
+         for path, digest in before["untracked_sha256"].items()):
+    return False
+  return source.get("revision") == source_after.get("revision") == before["revision"]
+
+
 def _ids(values, label, errors):
   if not isinstance(values, list) or any(not isinstance(v, str) or not v for v in values):
     errors.append(f"{label}: expected nonempty string IDs")
@@ -53,7 +74,7 @@ def _ids(values, label, errors):
   return values
 
 
-def evaluate(manifest, coverage, results, mode_evidence=None, *, expected_revision=None, hashes=None, dirty_relevant=None):
+def evaluate(manifest, coverage, results, mode_evidence=None, *, expected_revision=None, hashes=None, dirty_relevant=None, current_snapshot=None):
   """Check independent registration, test execution and per-config mode evidence.
 
   All input documents are caller supplied; their physical origin is not asserted.
@@ -73,8 +94,6 @@ def evaluate(manifest, coverage, results, mode_evidence=None, *, expected_revisi
     mode_evidence = {}
   if dirty_relevant is None:
     dirty_relevant = relevant_dirty_paths()
-  if dirty_relevant:
-    uncovered.append("relevant vehicle/runner source differs from committed checkout")
   platforms = manifest.get("platforms")
   if manifest.get("schema_version") != 1 or not isinstance(platforms, list):
     errors.append("required-platform manifest: expected schema v1 and platforms list")
@@ -149,8 +168,16 @@ def evaluate(manifest, coverage, results, mode_evidence=None, *, expected_revisi
   if not isinstance(source.get("status"), str):
     uncovered.append("interface report working-tree status missing or malformed")
   reported_dirty = _relevant_status_lines(source.get("status"))
-  if reported_dirty:
-    uncovered.append("interface report recorded relevant dirty vehicle/runner source")
+  if current_snapshot is None:
+    from tools.ci.run_vehicle_tests import source_input_snapshot
+    current_snapshot = source_input_snapshot()
+  stable_snapshot = source_snapshot_matches(source, coverage.get("source_after"), current_snapshot)
+  if not stable_snapshot:
+    uncovered.append("interface report source inputs missing, changed during execution, or differ from current checkout")
+    if dirty_relevant:
+      uncovered.append("relevant vehicle/runner source differs from committed checkout")
+    if reported_dirty:
+      uncovered.append("interface report recorded relevant dirty vehicle/runner source")
   revision = source.get("revision")
   dependencies = source.get("dependencies")
   opendbc = [d for d in dependencies if isinstance(d, dict) and d.get("path") == "opendbc_repo"] if isinstance(dependencies, list) else []
@@ -186,7 +213,7 @@ def evaluate(manifest, coverage, results, mode_evidence=None, *, expected_revisi
       uncovered.append("interface report pycapnp binary unavailable or changed")
   if results.get("selected_test_ids") != selected:
     errors.append("selected test order differs between coverage and results")
-  current_execution_compatible = not errors and not failures and not dirty_relevant and not reported_dirty
+  current_execution_compatible = not errors and not failures and stable_snapshot
   current_execution_compatible &= not any(issue.startswith("interface report ") for issue in uncovered)
 
   platform_rows = []
@@ -221,6 +248,9 @@ def evaluate(manifest, coverage, results, mode_evidence=None, *, expected_revisi
       uncovered.append(f"upstream addition {p}: concrete interface test {status or 'missing'}")
       if status not in (None, "skipped"):
         failures.append(f"upstream addition {p}: concrete interface test {status}")
+
+  interface_gate = {"status": "error" if errors else "failed" if failures else "uncovered" if uncovered else "pass",
+                    "errors": list(errors), "failures": list(failures), "uncovered": list(uncovered)}
 
   mode_summary = {"input": "absent", "required_scenarios": list(SCENARIOS), "configuration_count": 0, "recorded_trace_count": 0}
   if mode_evidence is None:
@@ -284,7 +314,7 @@ def evaluate(manifest, coverage, results, mode_evidence=None, *, expected_revisi
       if row["current_interface"] == "passed":
         row["current_interface"] = "historical_pass_only"
   return {"schema_version": 1, "scope": "exact_source_platform_and_recorded_configuration_coverage",
-          "vehicle_qualification": "not_established", "status": status,
+          "vehicle_qualification": "not_established", "status": status, "interface_gate": interface_gate,
           "source_revision": manifest.get("source_revision"), "interface_report_revision": revision,
           "hashes": hashes or {}, "required_platform_count": len(required_set),
           "upstream_addition_count": len(addition_set), "registered_platform_count": len(registered_set),
@@ -304,6 +334,8 @@ def main():
   parser.add_argument("--manifest", type=Path, default=DEFAULT_MANIFEST)
   parser.add_argument("--interface-coverage", type=Path, required=True)
   parser.add_argument("--interface-results", type=Path, required=True)
+  parser.add_argument("--require", choices=("complete", "interfaces"), default="complete",
+                      help="Exit gate; interfaces still reports uncovered independent mode evidence")
   parser.add_argument("--mode-evidence", type=Path)
   parser.add_argument("--expected-revision", help="40-character checkout revision; defaults to current HEAD")
   parser.add_argument("--output", type=Path, required=True)
@@ -322,15 +354,17 @@ def main():
                     json.loads(args.interface_results.read_text()),
                     json.loads(args.mode_evidence.read_text()) if args.mode_evidence else None,
                     expected_revision=expected, hashes=hashes, dirty_relevant=relevant_dirty_paths())
+  report["required_gate"] = args.require
+  report["required_gate_status"] = report["interface_gate"]["status"] if args.require == "interfaces" else report["status"]
   args.output.parent.mkdir(parents=True, exist_ok=True)
   with args.output.open("x") as stream:
     stream.write(json.dumps(report, indent=2, sort_keys=True) + "\n")
-  summary = (f"fleet coverage: {report['status']}; required={report['required_platform_count']}; " +
+  summary = (f"fleet coverage: {report['status']}; {args.require} gate={report['required_gate_status']}; required={report['required_platform_count']}; " +
              f"registered={report['registered_platform_count']}; missing={report['reported_interface_counts'].get('missing_port', 0)}; " +
              f"current passes={report['current_interface_counts'].get('passed', 0)}; " +
              f"mode configurations={report['mode_evidence']['configuration_count']}; report={args.output}")
   print(summary)
-  return 0 if report["status"] == "pass" else 1
+  return 0 if report["required_gate_status"] == "pass" else 1
 
 
 if __name__ == "__main__":

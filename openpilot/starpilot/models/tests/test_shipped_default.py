@@ -48,7 +48,9 @@ def test_verified_download_precedes_shipped_default(tmp_path, monkeypatch):
   path = tmp_path / "download.pkl"
   monkeypatch.setattr(manager, "catalog", lambda _: {DEFAULT_SMALL: {"artifact_sha256": "download-hash"}})
   monkeypatch.setattr(manager, "verified_artifact", lambda *args: path)
-  monkeypatch.setattr(manager, "shipped_default", lambda: pytest.fail("download replaced"))
+  def unexpected_shipped_default():
+    raise AssertionError("download replaced")
+  monkeypatch.setattr(manager, "shipped_default", unexpected_shipped_default)
   selected = manager.resolve_runtime(False, root=tmp_path)
   assert selected.small_path == path
   assert selected.small_sha256 == "download-hash"

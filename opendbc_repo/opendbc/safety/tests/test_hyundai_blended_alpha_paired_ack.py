@@ -151,7 +151,7 @@ class AcknowledgedCancelStream:
     self.safety.set_timer(self.tick * 10000)
     rx = [bool(self.safety.safety_rx_hook(lp.make_CANPacket(address, bus, data)))
           for address, data, bus in frames]
-    self.safety.safety_tick_current_safety_config()
+    self.safety.safety_tick()
     previous = self.ci.CS.out
     state = self.ci.update([(can_stamp, frames)])
     # Nominal pandaStates cadence is 10Hz. Its producer timestamp is stamped

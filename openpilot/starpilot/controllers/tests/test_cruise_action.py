@@ -24,7 +24,7 @@ class State(dict):
     self.recv_time = dict.fromkeys(self, (now - 5000000) / 1000000000.0)
     self.seen = self.alive = self.valid = dict.fromkeys(self, True)
 
-  def update(self, timeout):
+  def update(self, *args, **kwargs):
     pass
 
 
@@ -101,11 +101,12 @@ class TestControllerCruise(unittest.TestCase):
     from openpilot.selfdrive.car import card
     request = self.request()
     instance = card.Car.__new__(card.Car)
-    instance.CP, instance.sm = self.cp, self.sm
+    instance.CP = self.cp
+    vars(instance)['sm'] = self.sm
     instance.CC_prev = car.CarControl(enabled=True)
     instance.CS_prev = self.cs
-    instance.CI = SimpleNamespace(CS=SimpleNamespace(), update=lambda packets:self.cs)
-    instance.RI = SimpleNamespace(update=lambda packets:None)
+    vars(instance)['CI'] = SimpleNamespace(CS=SimpleNamespace(), update=lambda packets:self.cs)
+    vars(instance)['RI'] = SimpleNamespace(update=lambda packets:None)
     directory = tempfile.TemporaryDirectory()
     self.addCleanup(directory.cleanup)
     instance.params = Params(directory.name)
@@ -128,6 +129,7 @@ class TestControllerCruise(unittest.TestCase):
     self.assertEqual(selected.vCruise,81)
     self.assertEqual(selected.vCruiseCluster,81)
     self.assertEqual(list(selected.buttonEvents),[])
+    assert instance.v_cruise_helper.slc_cruise_change is not None
     self.assertEqual(instance.v_cruise_helper.slc_cruise_change[2],'accel')
 
   def test_toyota_original_signal_and_default_packet(self):
@@ -154,6 +156,7 @@ class TestControllerCruise(unittest.TestCase):
       self.assertNotIn('CustomCruise',rows())
       self.assertNotIn('QOLLongitudinal', rows())
       change=row_change(rows()['ReverseCruise'])
+      assert change is not None
       self.assertTrue(owner.apply(change))
       self.assertEqual(params.get_bool('ReverseCruise'),True)
       source=ToyotaCruisePreference(vehicle,params)

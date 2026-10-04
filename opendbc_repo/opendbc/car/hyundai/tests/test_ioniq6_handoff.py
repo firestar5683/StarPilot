@@ -803,6 +803,8 @@ class TestIoniq6PrepublicationHandoff(unittest.TestCase):
     card_owner.params = SimpleNamespace(put_bool=Mock())
     card_owner.slc_replay = card_owner.curve_replay = card_owner.conditional_replay = card_owner.aol_replay = False
     card_owner.aol_card_intent = None
+    card_owner.wheel_publisher = SimpleNamespace(observe=Mock(return_value=()), publish=Mock(), suppress_distance_release=False)
+    card_owner.wheel_commands = ()
     card_owner.ioniq6_media = None
     card_owner.switchback_button_tracker = None
     card_owner.switchback_settings_owner = None
@@ -830,6 +832,8 @@ class TestIoniq6PrepublicationHandoff(unittest.TestCase):
         pass
 
       def __getitem__(self, name):
+        if name == 'deviceState':
+          return SimpleNamespace(startedMonoTime=1)
         return [] if name == 'onroadEvents' else control
 
       def all_alive(self, names):
@@ -869,13 +873,18 @@ class TestIoniq6PrepublicationHandoff(unittest.TestCase):
     published = [packet for service, packet in sent if service == 'carState']
     self.assertEqual([message.valid for message in published], [True, True, False])
     self.assertTrue(card_owner.ioniq6_long_lost)
+    original_car = card_module.Car
+    original_new = original_car.__dict__.get('__new__')
+    constructor = SimpleNamespace(__new__=lambda _cls: card_owner, __init__=lambda _owner: None)
     with (patch.object(card_module, 'config_realtime_process'),
-          patch.object(card_module.Car, '__new__', return_value=card_owner),
-          patch.object(card_module.Car, '__init__', return_value=None),
-          patch.object(card_module.Car, 'card_thread', return_value=None),
+          patch.object(card_module, 'Car', constructor),
+          patch.object(card_owner, 'card_thread', return_value=None),
           patch.object(card_module, 'restore_ioniq6_adas', return_value=True) as restore):
       card_module.main()
     restore.assert_called_once_with(*card_owner.can_callbacks)
+    self.assertIs(card_module.Car, original_car)
+    self.assertIs(original_car.__dict__.get("__new__"), original_new)
+    self.assertIsInstance(object.__new__(original_car), original_car)
 
   def test_card_requires_fresh_matching_panda_mode(self):
     from openpilot.selfdrive.car.card import Car

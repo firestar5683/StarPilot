@@ -32,7 +32,7 @@ def test_distance_loss_and_held_start_require_new_neutral():
   assert observe(1_150_000_000, False) == (Gesture(Button.DISTANCE, Press.SHORT),)
 
 
-def test_card_distance_packet_to_traffic_owner_and_launch_revocation(tmp_path):
+def test_card_distance_packet_to_traffic_owner_and_launch_revocation(tmp_path, monkeypatch):
   from types import SimpleNamespace
   from openpilot.common.params import Params
   from openpilot.cereal import messaging
@@ -58,7 +58,7 @@ def test_card_distance_packet_to_traffic_owner_and_launch_revocation(tmp_path):
   card.conditional_replay = True
   card.slc_cruise_event_id = card.traffic_event_sequence = 0
   card.slc_producer_session = 'a' * 32
-  card.pm = SimpleNamespace(send=lambda service, event: sent.append(event))
+  monkeypatch.setattr(card, 'pm', SimpleNamespace(send=lambda service, event: sent.append(event)), raising=False)
   packer = CANPacker('gm_global_a_powertrain_generated')
   for tick, held in enumerate((False, True, False)):
     now = NOW + tick * 30_000_000
@@ -95,9 +95,14 @@ def test_card_distance_packet_to_traffic_owner_and_launch_revocation(tmp_path):
   sm.advance(now + 301_000_000)
   lost = owner.sample(None, params=params, settings=settings, sm=sm, cp=cp,
                       drive_id=DRIVE, now_mono_ns=now + 301_000_000, now_boot_ns=boot + 301_000_000)
-  assert lost.effective is None
-  assert not lost.requested
-  # A saved assignment cannot create a toggle after a source loss.
+  assert lost.effective is True
+  assert lost.requested
+  assert lost.source_boot_ns == 0
+  sm.valid['carControl'] = False
+  denied = owner.sample(None, params=params, settings=settings, sm=sm, cp=cp,
+                        drive_id=DRIVE, now_mono_ns=now + 301_000_000, now_boot_ns=boot + 301_000_000)
+  assert denied.effective is None
+  # A saved assignment cannot create a new toggle after a source loss.
   assert conditional_traffic_candidate(cs, tracker, params, settings, cp, sm,
                                        now_ns=now + 301_000_000, distance=source.update([])) is None
 

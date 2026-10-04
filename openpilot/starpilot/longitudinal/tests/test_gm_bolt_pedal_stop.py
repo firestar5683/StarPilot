@@ -40,7 +40,7 @@ class TestBoltPedalMovingStop(unittest.TestCase):
             self.assertEqual(long.long_control_state, structs.CarControl.Actuators.LongControlState.stopping)
           self.assertEqual(long.update(False, cs, 0., False, (-4., 2.)), 0.)
           self.assertEqual(long.long_control_state, structs.CarControl.Actuators.LongControlState.off)
-          neighbor = LongControl(params(candidate, False, True, alpha))
+          neighbor = LongControl(params(candidate, False, False, alpha))
           self.assertFalse(hasattr(extension_state(neighbor, 'vehicle_policy'), 'stopping_output'))
 
   def test_target_gap_and_clipping_boundary_through_longcontrol(self):

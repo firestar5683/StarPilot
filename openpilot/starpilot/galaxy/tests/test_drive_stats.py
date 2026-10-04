@@ -1,3 +1,4 @@
+from unittest.mock import Mock
 """Durable local-drive statistics and background analysis contract."""
 
 from datetime import UTC, datetime
@@ -52,7 +53,7 @@ class DriveStatsTest(unittest.TestCase):
     self.owners = []
 
   def owner(self, analyzer=analyzed, permitted=lambda: True, monotonic=None, metric=None):
-    owner = DriveStatsOwner(root=self.root, store=self.store, history=self.history,
+    owner = DriveStatsOwner(root=self.root, store=self.store, history=Mock(wraps=self.history),
                             analyzer=analyzer, permitted=permitted, clock=lambda: self.now[0],
                             monotonic=monotonic if monotonic is not None else lambda: self.now[0], metric=metric)
     self.owners.append(owner)

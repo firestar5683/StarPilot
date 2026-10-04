@@ -169,9 +169,17 @@ class HyundaiOrdinaryAngleOwnershipChecks:
       self.assertEqual(self.safety.safety_fwd_hook(2, 0x110), 0)
     self.assertTrue(self.safety.safety_tx_hook(good))
 
-  def test_new_transport_namespace_is_exact_and_alternative_experience_denied(self):
-    # Existing Ioniq6 ordinary/LONG selectors remain independently owned.
-    supported = {0x0811, 0x0891, 0x8815, 0x8895, 0x5491, 0x5C91}
+  def test_angle_and_shared_stock_namespaces_are_exact_and_invalid_experience_denied(self):
+    # Shared torque-stock words and Ioniq6 ordinary/LONG selectors have separate owners.
+    supported = {
+      0x0800, 0x0801, 0x0802, 0x0808, 0x0809, 0x080A,
+      0x0810, 0x0811, 0x0812, 0x0820, 0x0821, 0x0822,
+      0x0828, 0x0829, 0x082A, 0x0890, 0x0891, 0x0892,
+      0x0C08, 0x0C09, 0x0C0A, 0x0C28, 0x0C29, 0x0C2A,
+      0x2820, 0x2822, 0x2828, 0x282A, 0x2830, 0x2832,
+      0x28B0, 0x28B2, 0x2C28, 0x2C2A,
+      0x8815, 0x8895, 0x5491, 0x5C91,
+    }
     for word in range(0x10000):
       if word in supported:
         continue

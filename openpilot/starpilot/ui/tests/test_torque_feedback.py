@@ -22,8 +22,8 @@ class Messages(dict):
 
 
 def observe(sm, cp=DEFAULT_CP):
-  return observe_torque_feedback(*(sm.get(key) for key in (
-    "carState", "carControl", "controlsState", "carOutput", "vehicleParameters")), cp)
+  return observe_torque_feedback(sm.get("carState"), sm.get("carControl"), sm.get("controlsState"),
+                                 sm.get("carOutput"), sm.get("vehicleParameters"), cp)
 
 
 class TorqueFeedbackTests(unittest.TestCase):

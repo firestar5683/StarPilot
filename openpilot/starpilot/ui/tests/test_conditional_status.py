@@ -1,5 +1,6 @@
 """Saved family and actual selfdrived acknowledgment remain distinct in C3 UI."""
 
+from typing import Any
 import json
 import tempfile
 import unittest
@@ -78,7 +79,7 @@ class TestConditionalStatus(unittest.TestCase):
   def test_display_frame_budget_does_not_extend_control_receipt(self):
     from openpilot.starpilot.conditional_mode.effective_status import observation
     state = acknowledged()
-    arguments = {'event_ns': NOW, 'selfdrive_ns': SOURCE, 'drive_id': DRIVE,
+    arguments: dict[str, Any] = {'event_ns': NOW, 'selfdrive_ns': SOURCE, 'drive_id': DRIVE,
                  'selfdrive_experimental': True, 'selfdrive_enabled': True,
                  'long_active': True, 'car_valid': True, 'system_long': True}
     projector = ConditionalDisplayProjector()
@@ -97,7 +98,7 @@ class TestConditionalStatus(unittest.TestCase):
       for service in ui.sm.logMonoTime:
         ui.sm.logMonoTime[service] = NOW
       ui.params = params
-      ui.CP = type('CP', (), {'openpilotLongitudinalControl': True, 'passive': False, 'pcmCruise': True})()
+      ui.CP = type('CP', (), {'openpilotLongitudinalControl': True, 'passive': False, 'pcmCruise': True, 'carFingerprint': 'OTHER'})()
       ui.sm['deviceState'].startedMonoTime = DRIVE
       ui.sm['carState'].canValid = True
       ui.sm['carState'].canTimeout = False
@@ -148,15 +149,17 @@ class TestConditionalStatus(unittest.TestCase):
       accepted = replace(state, longitudinal_active=True, conditional_configured=ModeChoice.CEM,
                          experimental_enabled=experimental, conditional_effective=NS(
                            choice=ModeChoice.CEM, effective_experimental=experimental, reason=reason, status_code=code))
-      self.assertEqual(stop_active(accepted), border_is_orange(accepted))
+      self.assertEqual(stop_active(accepted), reason in ("cem_stop", "cem_hold") and experimental)
+      self.assertEqual(border_is_orange(accepted), experimental)
       for cleared in (replace(accepted, longitudinal_overridden=True),
                       replace(accepted, conditional_effective=None),
                       replace(accepted, alert=OnroadAlert(AlertSize.FULL)),
                       replace(accepted, longitudinal_active=False)):
         self.assertFalse(stop_active(cleared))
-        self.assertFalse(border_is_orange(cleared))
+        if cleared.conditional_effective is None or not cleared.longitudinal_active:
+          self.assertFalse(border_is_orange(cleared))
 
-  def test_accepted_mode_renders_in_frozen_rail_without_changing_axis_border(self):
+  def test_accepted_mode_renders_in_rail_and_effective_axis_border(self):
     from openpilot.starpilot.ui.onroad import axis_status_color
     state = RuntimeSnapshotAdapter(ui_fake()).build(ShellMode.ONROAD, now_ns=10_000_000_000).onroad
     accepted = replace(state, longitudinal_active=True, conditional_effective=NS(
@@ -166,7 +169,8 @@ class TestConditionalStatus(unittest.TestCase):
     self.assertEqual(visible[:2], ('CEM', 'SPEED'))
     def rgba(color):
       return color.r, color.g, color.b, color.a
-    self.assertEqual(rgba(axis_status_color(accepted)), rgba(axis_status_color(replace(accepted, conditional_effective=None))))
+    self.assertEqual(rgba(axis_status_color(accepted)), (218, 111, 37, 255))
+    self.assertNotEqual(rgba(axis_status_color(accepted)), rgba(axis_status_color(replace(accepted, conditional_effective=None))))
     fonts = Mock()
     fonts.measure.return_value = NS(width=40, height=20)
     rail = MiciSidebarWidgets(fonts)

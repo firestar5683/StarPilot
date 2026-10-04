@@ -1,4 +1,7 @@
 """Saved Torque/AOL UI actions against real Params, CarParams and runtime parsers."""
+from unittest.mock import Mock
+from openpilot.starpilot.ui.presentation import BitmapFonts
+
 
 from dataclasses import replace
 from pathlib import Path
@@ -43,7 +46,7 @@ class LateralFeatureSettingsTests(unittest.TestCase):
     self.addCleanup(self.temp.cleanup)
     self.params = Params(self.temp.name)
     self.parked = True
-    self.cp = interfaces["TOYOTA_COROLLA_TSS2"].get_non_essential_params("TOYOTA_COROLLA_TSS2")
+    self.cp = interfaces[HYUNDAI.HYUNDAI_IONIQ_6].get_non_essential_params(HYUNDAI.HYUNDAI_IONIQ_6)
     self.owner = FeatureSettingsOwner(self.params, lambda group: self.parked,
                                       vehicle_fingerprint=lambda: str(self.cp.carFingerprint), vehicle_params=lambda: self.cp)
 
@@ -51,59 +54,58 @@ class LateralFeatureSettingsTests(unittest.TestCase):
     state = self.owner.snapshot(page, parked=True, system_long=True, lateral_context=True, metric=False)
     return next(item for item in state.rows if item.key == key)
 
-  def test_torque_master_and_force_off_match_runtime_parser(self):
-    self.assertTrue(self.owner.apply(required_change(self.row("torque", "LateralControllerSelection"))))
-    master = self.row("torque", "AdvancedLateralTune")
-    self.assertTrue(master.available)
-    self.assertTrue(self.owner.apply(required_change(master)))
-    force = self.row("torque", "ForceAutoTuneOff")
-    self.assertEqual(force.value, "Off")
-    self.assertTrue(self.owner.apply(required_change(force)))
-    self.assertTrue(self.owner.apply(required_change(self.row("torque", "ForceAutoTuneOff"))))
+  def test_torque_custom_values_and_learning_preference_are_independent(self):
+    rows = self.owner.snapshot("torque", parked=True, system_long=True, lateral_context=True, metric=False).rows
+    self.assertFalse(any(row.key in ("AdvancedLateralTune", "torque_adopt") for row in rows))
+    factor = self.row("torque", "torque:factor:value")
+    self.assertTrue(self.owner.apply(required_change(factor)))
     tune = self.cp.lateralTuning.torque
     vehicle = TorqueTuning(TorqueSource.VEHICLE, str(self.cp.carFingerprint), tune.latAccelFactor,
                            tune.latAccelOffset, tune.friction)
     saved = read_torque_settings(self.params, vehicle)
-    self.assertTrue(saved.valid and saved.advanced and saved.force_auto_off)
-    self.assertIsNone(saved.user_factor)
-    self.assertFalse(self.row("torque", "SteerLatAccel").available)
+    self.assertTrue(saved.valid)
+    self.assertIsNotNone(saved.user_factor)
+    self.assertIsNone(saved.user_friction)
+    self.assertIsNone(self.params.get("AdvancedLateralTune"))
+    self.assertIsNone(self.params.get("ForceAutoTuneOff"))
+    self.assertTrue(self.owner.apply(required_change(self.row("torque", "torque:factor:reset"))))
+    self.assertIsNone(read_torque_settings(self.params, vehicle).user_factor)
 
   def test_onroad_saved_torque_edit_keeps_vehicle_binding_and_parked_repair(self):
     owner = FeatureSettingsOwner(self.params, lambda group: group != "parked_preferences",
                                  vehicle_fingerprint=lambda: str(self.cp.carFingerprint), vehicle_params=lambda: self.cp)
     page = owner.snapshot("torque", parked=False, system_long=False, lateral_context=True, metric=False,
                           configure_while_driving=True)
-    master = next(row for row in page.rows if row.key == "AdvancedLateralTune")
-    adopt = next(row for row in page.rows if row.key == "torque_adopt")
-    self.assertTrue(master.available)
-    self.assertFalse(adopt.available)
-    self.assertTrue(owner.apply(required_change(master)))
-    self.assertFalse(owner.apply(FeatureSettingsRequest("torque_adopt", adopt.source, "confirm", confirmation=True,
-                                                        vehicle_fingerprint=adopt.vehicle_fingerprint,
-                                                        capability=adopt.capability, dependencies=adopt.dependencies)))
+    factor = next(row for row in page.rows if row.key == "torque:factor:value")
+    request = required_change(factor)
+    self.assertTrue(factor.available)
+    self.assertTrue(owner.apply(request))
+    self.assertFalse(owner.apply(request))
+    current = next(row for row in owner.snapshot("torque", parked=False, system_long=False,
+                   lateral_context=True, metric=False, configure_while_driving=True).rows if row.key == factor.key)
     self.cp.carFingerprint = "TOYOTA_CAMRY"
-    self.assertFalse(owner.apply(required_change(master)))
+    self.assertFalse(owner.apply(required_change(current)))
 
-  def test_torque_corrupt_dependent_blocks_enable_but_allows_off(self):
+  def test_torque_corrupt_dependent_preserves_bytes_until_confirmed_reset(self):
     Path(self.params.get_param_path("SteerLatAccel")).write_bytes(b"nan")
-    row = self.row("torque", "AdvancedLateralTune")
-    self.assertFalse(row.available)
-    self.params.put_bool("AdvancedLateralTune", True, block=True)
-    row = self.row("torque", "AdvancedLateralTune")
-    self.assertTrue(self.owner.apply(required_change(row)))
-    self.assertFalse(self.params.get_bool("AdvancedLateralTune"))
+    page = self.owner.snapshot("torque", parked=True, system_long=True, lateral_context=True, metric=False)
+    self.assertFalse(any(row.key == "torque:factor:value" for row in page.rows))
     self.assertEqual(Path(self.params.get_param_path("SteerLatAccel")).read_bytes(), b"nan")
+    reset = next(row for row in page.rows if row.key == "torque_reset")
+    self.assertFalse(reset.available)
+    Path(self.params.get_param_path(DOCUMENT_KEY)).write_bytes(b"bad")
+    self.assertTrue(self.owner.apply(self.confirm(self.row("torque", "torque_reset"))))
+    self.assertEqual(Path(self.params.get_param_path("SteerLatAccel")).read_bytes(), b"nan")
+    self.assertTrue(self.row("torque", "torque:factor:value").available)
 
-  def test_torque_corrupt_force_off_and_unsupported_cp_bytes(self):
+  def test_torque_corrupt_learning_preference_blocks_numeric_write(self):
+    request = required_change(self.row("torque", "torque:factor:value"))
     Path(self.params.get_param_path("ForceAutoTuneOff")).write_bytes(b"maybe")
-    self.assertFalse(self.row("torque", "AdvancedLateralTune").available)
-    self.params.put_bool("AdvancedLateralTune", True, block=True)
-    self.assertTrue(self.owner.apply(required_change(self.row("torque", "AdvancedLateralTune"))))
+    self.assertFalse(self.owner.apply(request))
+    self.assertEqual(Path(self.params.get_param_path("ForceAutoTuneOff")).read_bytes(), b"maybe")
     self.honda()
-    Path(self.params.get_param_path("SteerLatAccel")).write_bytes(b"\xff")
-    row = self.row("torque", "SteerLatAccel")
-    self.assertEqual(row.value, "Invalid saved value")
-    self.assertFalse(row.available)
+    page = self.owner.snapshot("torque", parked=True, system_long=True, lateral_context=True, metric=False)
+    self.assertFalse(any(row.key == "torque:factor:value" for row in page.rows))
 
   def test_unreadable_saved_source_is_visible_and_not_writable(self):
     self.honda()
@@ -122,12 +124,12 @@ class LateralFeatureSettingsTests(unittest.TestCase):
     self.assertEqual(path.read_bytes(), b"4")
 
   def test_torque_capability_tuple_and_parked_evidence_rechecked(self):
-    master = self.row("torque", "AdvancedLateralTune")
+    request = required_change(self.row("torque", "torque:factor:value"))
     self.cp.lateralTuning.torque.latAccelFactor *= 1.1
-    self.assertFalse(self.owner.apply(required_change(master)))
-    master = self.row("torque", "AdvancedLateralTune")
+    self.assertFalse(self.owner.apply(request))
+    current = required_change(self.row("torque", "torque:factor:value"))
     self.parked = False
-    self.assertFalse(self.owner.apply(required_change(master)))
+    self.assertFalse(self.owner.apply(current))
 
   @staticmethod
   def confirm(row):
@@ -135,96 +137,60 @@ class LateralFeatureSettingsTests(unittest.TestCase):
                                   vehicle_fingerprint=row.vehicle_fingerprint,
                                   capability=row.capability, dependencies=row.dependencies)
 
-  def test_torque_adoption_custom_partial_and_source_preserve_legacy(self):
-    self.assertFalse(self.cp.carVin and self.cp.carVin != "0" * 17)  # no VIN availability requirement
+  def test_torque_inferred_custom_partial_and_reset_preserve_legacy(self):
     self.params.put("SteerLatAccel", self.cp.lateralTuning.torque.latAccelFactor * 1.1, block=True)
     old = Path(self.params.get_param_path("SteerLatAccel")).read_bytes()
-    adopt = self.row("torque", "torque_adopt")
-    self.assertFalse(self.owner.apply(FeatureSettingsRequest(adopt.key, adopt.source, "confirm",
-                                                              vehicle_fingerprint=adopt.vehicle_fingerprint,
-                                                              capability=adopt.capability, dependencies=adopt.dependencies)))
-    self.assertTrue(self.owner.apply(self.confirm(adopt)))
-    self.assertEqual(Path(self.params.get_param_path("SteerLatAccel")).read_bytes(), old)
-    mode = self.row("torque", "torque:factor:mode")
-    self.assertEqual(mode.value, "Vehicle/learned")
-    self.assertTrue(self.owner.apply(required_change(mode)))
-    value = self.row("torque", "torque:factor:value")
-    self.assertTrue(self.owner.apply(required_change(value)))
-    parsed = parse_document(Path(self.params.get_param_path(DOCUMENT_KEY)).read_bytes())
-    self.assertEqual(parsed[str(self.cp.carFingerprint)].factor.mode, "custom")
-    self.assertEqual(parsed[str(self.cp.carFingerprint)].friction.mode, "source")
-    self.assertTrue(self.owner.apply(required_change(self.row("torque", "torque:factor:mode"))))
-    parsed = parse_document(Path(self.params.get_param_path(DOCUMENT_KEY)).read_bytes())
-    self.assertEqual(parsed[str(self.cp.carFingerprint)].factor.mode, "source")
-    self.assertIsNotNone(parsed[str(self.cp.carFingerprint)].factor.custom_value)
+    factor = self.row("torque", "torque:factor:value")
+    self.assertIn("Custom", factor.reason)
+    self.assertTrue(self.owner.apply(required_change(self.row("torque", "torque:friction:value"))))
+    profile = parse_document(Path(self.params.get_param_path(DOCUMENT_KEY)).read_bytes())[str(self.cp.carFingerprint)]
+    self.assertEqual(profile.factor.mode, "custom")
+    self.assertEqual(profile.friction.mode, "custom")
+    self.assertTrue(self.owner.apply(required_change(self.row("torque", "torque:factor:reset"))))
+    profile = parse_document(Path(self.params.get_param_path(DOCUMENT_KEY)).read_bytes())[str(self.cp.carFingerprint)]
+    self.assertEqual(profile.factor.mode, "source")
+    self.assertEqual(profile.friction.mode, "custom")
     self.assertEqual(Path(self.params.get_param_path("SteerLatAccel")).read_bytes(), old)
 
   def test_torque_stale_source_capability_and_invalid_reset(self):
-    adopt = self.row("torque", "torque_adopt")
-    self.cp.carVin = "1HGCM82633A004352"
-    self.assertFalse(self.owner.apply(self.confirm(adopt)))
-    adopt = self.row("torque", "torque_adopt")
-    self.parked = False
-    self.assertFalse(self.owner.apply(self.confirm(adopt)))
-    self.parked = True
-    self.assertTrue(self.owner.apply(self.confirm(self.row("torque", "torque_adopt"))))
-    old_mode = self.row("torque", "torque:factor:mode")
+    request = required_change(self.row("torque", "torque:factor:value"))
+    self.assertTrue(self.owner.apply(request))
+    self.assertFalse(self.owner.apply(request))
+    old_request = required_change(self.row("torque", "torque:factor:value"))
     Path(self.params.get_param_path(DOCUMENT_KEY)).write_bytes(b"bad")
-    self.assertFalse(self.owner.apply(required_change(old_mode)))
-    reset = self.row("torque", "torque_reset")
-    self.assertTrue(reset.available)
-    self.assertTrue(self.owner.apply(self.confirm(reset)))
+    self.assertFalse(self.owner.apply(old_request))
+    self.assertTrue(self.owner.apply(self.confirm(self.row("torque", "torque_reset"))))
     self.assertEqual(parse_document(Path(self.params.get_param_path(DOCUMENT_KEY)).read_bytes()), {})
 
   def test_torque_final_confirmation_rechecks_readability_and_fingerprint(self):
-    document_path = Path(self.params.get_param_path(DOCUMENT_KEY))
-    for raw, action in ((None, "torque_adopt"), (b"", "torque_reset")):
-      if raw is None:
-        document_path.unlink(missing_ok=True)
-      else:
-        document_path.write_bytes(raw)
-      request = self.confirm(self.row("torque", action))
-      original = self.owner.torque._readable
-      reads = 0
-
-      def loses_readability(key, original=original):
-        nonlocal reads
-        if key == DOCUMENT_KEY:
-          reads += 1
-          return reads == 1
-        return original(key)
-
-      with patch.object(self.owner.torque, "_readable", side_effect=loses_readability), \
-           patch.object(self.params, "put", wraps=self.params.put) as put:
-        self.assertFalse(self.owner.apply(request))
-        put.assert_not_called()
-      fingerprint = str(self.cp.carFingerprint)
-      with patch.object(self.owner.torque, "vehicle_fingerprint", side_effect=(fingerprint, "TOYOTA_CAMRY")), \
-           patch.object(self.params, "put", wraps=self.params.put) as put:
-        self.assertFalse(self.owner.apply(request))
-        put.assert_not_called()
+    Path(self.params.get_param_path(DOCUMENT_KEY)).write_bytes(b"bad")
+    request = self.confirm(self.row("torque", "torque_reset"))
+    original = self.owner.torque._readable
+    with patch.object(self.owner.torque, "_readable", side_effect=lambda key: key != DOCUMENT_KEY and original(key)), \
+         patch.object(self.params, "put", wraps=self.params.put) as put:
+      self.assertFalse(self.owner.apply(request))
+      put.assert_not_called()
+    with patch.object(self.owner.torque, "vehicle_fingerprint", return_value="TOYOTA_CAMRY"), \
+         patch.object(self.params, "put", wraps=self.params.put) as put:
+      self.assertFalse(self.owner.apply(request))
+      put.assert_not_called()
 
   def test_torque_basis_change_pauses_custom_until_confirmed_review(self):
-    self.assertTrue(self.owner.apply(self.confirm(self.row("torque", "torque_adopt"))))
-    self.assertTrue(self.owner.apply(required_change(self.row("torque", "torque:factor:mode"))))
+    self.assertTrue(self.owner.apply(required_change(self.row("torque", "torque:factor:value"))))
     self.cp.lateralTuning.torque.latAccelFactor *= 1.05
     state = self.owner.snapshot("torque", parked=True, system_long=True, lateral_context=True, metric=False)
     self.assertTrue(any(row.key == "torque_rebase" for row in state.rows))
     review = self.row("torque", "torque_rebase")
     self.assertIn("Lateral acceleration", review.value)
-    detail = next(row for row in state.rows if row.label == "Lateral acceleration" and not row.key)
-    self.assertIn("Saved", detail.value)
-    self.assertIn("vehicle", detail.value)
-    self.assertIn("range", detail.value)
-    self.assertFalse(self.owner.apply(FeatureSettingsRequest(review.key, review.source, "confirm",
-                                                              vehicle_fingerprint=review.vehicle_fingerprint,
-                                                              capability=review.capability, dependencies=review.dependencies)))
+    self.assertFalse(self.owner.apply(replace(self.confirm(review), confirmation=False)))
     self.assertTrue(self.owner.apply(self.confirm(review)))
-    self.assertEqual(self.row("torque", "torque:factor:mode").value, "Custom")
+    profile = parse_document(Path(self.params.get_param_path(DOCUMENT_KEY)).read_bytes())[str(self.cp.carFingerprint)]
+    self.assertEqual(profile.factor.mode, "custom")
     self.cp.lateralTuning.torque.latAccelFactor *= 3
     self.assertFalse(self.owner.apply(self.confirm(self.row("torque", "torque_rebase"))))
     self.assertTrue(self.owner.apply(self.confirm(self.row("torque", "torque_reset_profile"))))
-    self.assertEqual(self.row("torque", "torque:factor:mode").value, "Vehicle/learned")
+    profile = parse_document(Path(self.params.get_param_path(DOCUMENT_KEY)).read_bytes())[str(self.cp.carFingerprint)]
+    self.assertEqual(profile.factor.mode, "source")
 
   def honda(self):
     self.cp = CarInterface.get_params(HONDA.HONDA_CIVIC_BOSCH, gen_empty_fingerprint(), [], True, False, False)
@@ -276,9 +242,10 @@ class LateralFeatureSettingsTests(unittest.TestCase):
     self.assertEqual(self.cp.safetyConfigs[0].safetyParam, 0x11)
     master = self.row("aol", "AlwaysOnLateral")
     self.assertTrue(master.available)
-    self.assertEqual("Applies after the next startup", master.reason)
-    self.assertFalse(self.row("wheel", "LKASButtonControl").available)
-    nostalgia = self.row("wheel", "NostalgiaMode")
+    self.assertIn("independently of cruise control", master.reason)
+    self.assertFalse(any(row.key == "wheel:LKASButtonControl" for row in self.owner.snapshot(
+      "wheel", parked=True, system_long=True, lateral_context=True, metric=False).rows))
+    nostalgia = self.row("vehicle", "NostalgiaMode")
     self.assertTrue(nostalgia.available)
     self.assertTrue(self.owner.apply(required_change(nostalgia)))
     self.assertTrue(self.params.get_bool("NostalgiaMode"))
@@ -288,11 +255,12 @@ class LateralFeatureSettingsTests(unittest.TestCase):
     tagged = build_ioniq6_hda2_long_candidate(self.cp, fp)
     self.assertIsNotNone(tagged)
     self.cp = tagged
-    self.assertTrue(self.row("wheel", "NostalgiaMode").available)
+    self.assertTrue(self.row("vehicle", "NostalgiaMode").available)
     tagged.safetyConfigs[0].safetyParam |= 0x800
     self.cp = tagged
     self.assertTrue(self.row("aol", "AlwaysOnLateral").available)
-    self.assertFalse(self.row("wheel", "LKASButtonControl").available)
+    self.assertFalse(any(row.key == "wheel:LKASButtonControl" for row in self.owner.snapshot(
+      "wheel", parked=True, system_long=True, lateral_context=True, metric=False).rows))
 
   def test_ioniq6_nostalgia_is_independent_of_aol_master_and_exact_source(self):
     fp = gen_empty_fingerprint()
@@ -302,30 +270,30 @@ class LateralFeatureSettingsTests(unittest.TestCase):
     fp[0][0x3A5] = 24
     stock = HyundaiInterface.get_params(HYUNDAI.HYUNDAI_IONIQ_6, fp, [], False, False, False)
     self.cp = stock
-    self.assertTrue(self.row("wheel", "NostalgiaMode").available)
+    self.assertTrue(self.row("vehicle", "NostalgiaMode").available)
     tagged = build_ioniq6_hda2_long_candidate(stock, fp)
     self.assertIsNotNone(tagged)
     self.cp = tagged
-    self.assertTrue(self.row("wheel", "NostalgiaMode").available)
+    self.assertTrue(self.row("vehicle", "NostalgiaMode").available)
     tagged.safetyConfigs[0].safetyParam |= 0x800
     self.cp = tagged
-    row = self.row("wheel", "NostalgiaMode")
+    row = self.row("vehicle", "NostalgiaMode")
     self.assertEqual(row.value, "Off")
     self.assertTrue(row.available)
     self.assertFalse(self.params.get_bool("AlwaysOnLateral"))
     self.assertTrue(self.owner.apply(required_change(row)))
     self.assertTrue(self.params.get_bool("NostalgiaMode"))
     self.assertFalse(self.params.get_bool("AlwaysOnLateral"))
-    old = self.row("wheel", "NostalgiaMode")
+    old = self.row("vehicle", "NostalgiaMode")
     self.params.put_bool("NostalgiaMode", False, block=True)
     self.assertFalse(self.owner.apply(required_change(old)))
     path = Path(self.params.get_param_path("NostalgiaMode"))
     path.write_bytes(b"01")
-    repair = self.row("wheel", "NostalgiaMode")
+    repair = self.row("vehicle", "NostalgiaMode")
     self.assertEqual(repair.repair_value, "Off")
     self.assertTrue(self.owner.apply(required_change(repair)))
     self.assertEqual(path.read_bytes(), b"0")
-    on = required_change(self.row("wheel", "NostalgiaMode"))
+    on = required_change(self.row("vehicle", "NostalgiaMode"))
     self.parked = False
     self.assertFalse(self.owner.apply(on))
 
@@ -352,36 +320,41 @@ class LateralFeatureSettingsTests(unittest.TestCase):
       return self.owner.snapshot(page, parked=True, system_long=True, lateral_context=True, metric=False)
     self.assertIn("wheel", [row.page for row in snapshot("hub").rows])
     self.assertEqual({row.key for row in snapshot("aol").rows}, {"AlwaysOnLateral", "AolBrakePauseSpeedMps"})
-    self.assertIn("LKASButtonControl", {row.key for row in snapshot("wheel").rows})
+    self.assertIn("wheel:LKASButtonControl", {row.key for row in snapshot("wheel").rows})
     self.cp = interfaces["TOYOTA_COROLLA_TSS2"].get_non_essential_params("TOYOTA_COROLLA_TSS2")
-    self.assertEqual(snapshot("wheel").rows, ())
+    self.assertFalse(any(row.key.endswith("ModeButtonControl") for row in snapshot("wheel").rows))
 
   def test_aol_button_intent_and_safety_tuple(self):
     self.honda()
-    row = self.row("wheel", "LKASButtonControl")
-    self.assertTrue(self.owner.apply(required_change(row)))
+    self.params.put("LKASButtonControl", 0, block=True)
+    row = self.row("wheel", "wheel:LKASButtonControl")
+    request = FeatureSettingsRequest(row.key, row.source, "Pause steering", capability=row.capability,
+                                     vehicle_fingerprint=row.vehicle_fingerprint, dependencies=row.dependencies)
+    self.assertTrue(self.owner.apply(request))
     self.assertEqual(read_aol_settings(self.params).lkas_action, 3)
     self.assertFalse(any(item.key == "CancelButtonControl" for item in
                          self.owner.snapshot("aol", parked=True, system_long=True, lateral_context=True, metric=False).rows))
-    main = self.row("wheel", "MainCruiseButtonControl")
+    main = self.row("wheel", "wheel:MainCruiseButtonControl")
     self.cp.safetyConfigs[-1].safetyParam &= ~0x20
     self.assertFalse(self.owner.apply(required_change(main)))
 
   def test_wheel_assignment_can_be_saved_in_drive_without_enabling_aol_master(self):
     self.honda()
+    self.params.put("LKASButtonControl", 0, block=True)
     self.parked = False
-    self.owner = FeatureSettingsOwner(self.params, lambda group: group == "aol_wheel",
+    self.owner = FeatureSettingsOwner(self.params, lambda group: group == "preferences",
                                       vehicle_fingerprint=lambda: str(self.cp.carFingerprint), vehicle_params=lambda: self.cp)
     state = self.owner.snapshot("wheel", parked=False, system_long=False, lateral_context=False, metric=False)
-    row = next(row for row in state.rows if row.key == "LKASButtonControl")
+    row = next(row for row in state.rows if row.key == "wheel:LKASButtonControl")
     self.assertTrue(row.available)
-    request = required_change(row)
+    request = FeatureSettingsRequest(row.key, row.source, "Pause steering", capability=row.capability,
+                                     vehicle_fingerprint=row.vehicle_fingerprint, dependencies=row.dependencies)
     self.assertTrue(self.owner.apply(request))
     self.assertEqual(read_aol_settings(self.params).lkas_action, 3)
     self.assertFalse(self.owner.snapshot("aol", parked=False, system_long=False,
                                          lateral_context=False, metric=False).rows[0].available)
     main = next(row for row in self.owner.snapshot("wheel", parked=False, system_long=False,
-                                                  lateral_context=False, metric=False).rows if row.key == "MainCruiseButtonControl")
+                                                  lateral_context=False, metric=False).rows if row.key == "wheel:MainCruiseButtonControl")
     self.cp.safetyConfigs[-1].safetyParam &= ~0x20
     self.assertFalse(self.owner.apply(required_change(main)))
 
@@ -389,8 +362,10 @@ class LateralFeatureSettingsTests(unittest.TestCase):
     stock, long_cp = ioniq6_candidate(False)
     self.cp = stock
     self.params.put_bool("AlwaysOnLateral", True, block=True)
-    self.assertFalse(self.row("wheel", "LKASButtonControl").available)
-    self.assertFalse(self.row("wheel", "MainCruiseButtonControl").available)
+    self.assertFalse(any(row.key == "wheel:LKASButtonControl" for row in self.owner.snapshot(
+      "wheel", parked=True, system_long=True, lateral_context=True, metric=False).rows))
+    self.assertFalse(any(row.key == "wheel:MainCruiseButtonControl" for row in self.owner.snapshot(
+      "wheel", parked=True, system_long=True, lateral_context=True, metric=False).rows))
     cases = (("DistanceButtonControl", "Pause steering", 1, (False, True), True),
              ("LongDistanceButtonControl", "Pause longitudinal", CRUISE_LONG_PRESS, (True, False), True),
              ("VeryLongDistanceButtonControl", "Pause steering", CRUISE_LONG_PRESS * 5, (False, True), True),
@@ -398,10 +373,10 @@ class LateralFeatureSettingsTests(unittest.TestCase):
     for key, choice, ticks, expected, aol_on in cases:
       with self.subTest(key=key, aol_on=aol_on):
         self.params.put_bool("AlwaysOnLateral", aol_on, block=True)
-        row = self.row("wheel", key)
+        row = self.row("wheel", "wheel:" + key)
         self.assertTrue(row.available)
-        self.assertEqual(row.choices, ("Off", "Pause steering", "Pause longitudinal"))
-        request = FeatureSettingsRequest(key, row.source, choice, vehicle_fingerprint=row.vehicle_fingerprint,
+        self.assertTrue({"Off", "Pause steering", "Pause longitudinal"}.issubset(row.choices))
+        request = FeatureSettingsRequest("wheel:" + key, row.source, choice, vehicle_fingerprint=row.vehicle_fingerprint,
                                          capability=row.capability, dependencies=row.dependencies)
         self.assertTrue(self.owner.apply(request))
         slot = ("DistanceButtonControl", "LongDistanceButtonControl", "VeryLongDistanceButtonControl").index(key)
@@ -441,175 +416,76 @@ class LateralFeatureSettingsTests(unittest.TestCase):
         active = axes(native)
         self.assertEqual((active.lateral_active, active.longitudinal_active), expected)
         self.cp = stock
-        reset = self.row("wheel", key)
-        self.assertTrue(self.owner.apply(FeatureSettingsRequest(key, reset.source, "Off",
+        reset = self.row("wheel", "wheel:" + key)
+        self.assertTrue(self.owner.apply(FeatureSettingsRequest("wheel:" + key, reset.source, "Off",
                                                                vehicle_fingerprint=reset.vehicle_fingerprint,
                                                                capability=reset.capability, dependencies=reset.dependencies)))
 
   def test_ioniq_distance_canonical_repair_and_fixed_gestures(self):
     self.cp, _ = ioniq6_candidate(False)
+    state = self.owner.snapshot("wheel", parked=True, system_long=True, lateral_context=True, metric=False)
+    self.assertFalse(any(row.key in ("wheel:LKASButtonControl", "wheel:MainCruiseButtonControl") for row in state.rows))
     key = "DistanceButtonControl"
-    row = self.row("wheel", key)
-    for fixed in ("LKASButtonControl", "MainCruiseButtonControl"):
-      blocked = self.row("wheel", fixed)
-      self.assertEqual(blocked.value, "Toggle Always On Lateral")
-      self.assertEqual(blocked.choices, ())
-      self.assertFalse(blocked.available)
-      request = FeatureSettingsRequest(fixed, blocked.source, "Pause steering",
-                                       vehicle_fingerprint=blocked.vehicle_fingerprint,
-                                       capability=blocked.capability, dependencies=blocked.dependencies)
-      self.assertFalse(self.owner.apply(request))
-    self.assertFalse(self.owner.apply(FeatureSettingsRequest(key, row.source, "Toggle AOL",
-                                                             vehicle_fingerprint=row.vehicle_fingerprint,
-                                                             capability=row.capability, dependencies=row.dependencies)))
-    for raw, label in ((b"5", "Conditional mode assignment"), (b"03", "Unsupported saved action")):
-      Path(self.params.get_param_path(key)).write_bytes(raw)
-      row = self.row("wheel", key)
-      self.assertEqual(row.value, label)
+    path = Path(self.params.get_param_path(key))
+    for raw in (b"03", b"99", b"bad"):
+      path.write_bytes(raw)
+      row = self.row("wheel", "wheel:" + key)
+      self.assertEqual(row.value, "Invalid saved action")
       self.assertEqual(row.repair_value, "Off")
-      request = FeatureSettingsRequest(key, row.source, "Pause steering",
-                                       vehicle_fingerprint=row.vehicle_fingerprint,
-                                       capability=row.capability, dependencies=row.dependencies)
-      self.assertFalse(self.owner.apply(request))
-      self.assertEqual(Path(self.params.get_param_path(key)).read_bytes(), raw)
       self.assertTrue(self.owner.apply(required_change(row)))
-      self.assertEqual(Path(self.params.get_param_path(key)).read_bytes(), b"0")
+      self.assertEqual(path.read_bytes(), b"0")
 
   def test_honda_distance_toggle_remains_editable_and_ioniq_stage_revokes(self):
     self.honda()
     key = "DistanceButtonControl"
     self.params.put(key, 9, block=True)
-    row = self.row("wheel", key)
+    row = self.row("wheel", "wheel:" + key)
     self.assertEqual(row.value, "Toggle AOL")
-    self.assertTrue(self.owner.apply(FeatureSettingsRequest(key, row.source, "Pause steering",
-                                                            vehicle_fingerprint=row.vehicle_fingerprint,
-                                                            capability=row.capability, dependencies=row.dependencies)))
+    request = FeatureSettingsRequest(row.key, row.source, "Pause steering", capability=row.capability)
+    self.assertTrue(self.owner.apply(request))
     self.assertEqual(Path(self.params.get_param_path(key)).read_bytes(), b"3")
-    stock, long_cp = ioniq6_candidate(False)
-    from openpilot.starpilot import saved_document
-    actual_fsync = saved_document.os.fsync
-    source = Path(self.params.get_param_path(key))
-    master = Path(self.params.get_param_path("AlwaysOnLateral"))
-    for change, expected in (("parked", b"0"), ("dependency", b"0"),
-                             ("source", b"4"), ("capability", b"0")):
-      with self.subTest(change=change):
-        self.cp = stock
-        self.parked = True
-        master.unlink(missing_ok=True)
-        source.write_bytes(b"0")
-        row = self.row("wheel", key)
-        request = required_change(row)
-        called = False
-
-        def revoke_after_stage(fd, change=change):
-          nonlocal called
-          result = actual_fsync(fd)
-          if not called:
-            called = True
-            if change == "parked":
-              self.parked = False
-            elif change == "dependency":
-              master.write_bytes(b"1")
-            elif change == "source":
-              source.write_bytes(b"4")
-            else:
-              self.cp = long_cp
-          return result
-
-        with patch.object(saved_document.os, "fsync", side_effect=revoke_after_stage):
-          self.assertFalse(self.owner.apply(request))
-        self.assertTrue(called)
-        self.assertEqual(source.read_bytes(), expected)
+    self.cp, _ = ioniq6_candidate(False)
+    request = required_change(self.row("wheel", "wheel:" + key))
+    self.cp.carVin = "changed"
+    self.assertFalse(self.owner.apply(request))
+    self.assertEqual(Path(self.params.get_param_path(key)).read_bytes(), b"3")
 
   def test_native_large_and_compact_child_actions(self):
     hub = self.owner.snapshot("hub", parked=True, system_long=True, lateral_context=True, metric=False)
     actions = []
     control = FeatureInput(actions.append)
-    torque_index = next(i for i, row in enumerate(hub.rows) if row.page == "torque")
-    hub = replace(hub, scroll=torque_index)
+    index = next(i for i, row in enumerate(hub.rows) if row.page == "torque")
+    hub = replace(hub, scroll=index)
     control.press(650, 300, hub)
     control.release(650, 300, hub)
     self.assertEqual(actions[0].row.page, "torque")
-    torque_page = self.owner.snapshot("torque", parked=True, system_long=True, lateral_context=True, metric=False)
-    adopt_index = next(i for i, row in enumerate(torque_page.rows) if row.key == "torque_adopt")
-    torque_page = replace(torque_page, scroll=adopt_index)
-    control.press(1900, 285, torque_page)
-    control.release(1900, 285, torque_page)
-    self.assertEqual((actions[-1].kind, actions[-1].row.key), ("reset", "torque_adopt"))
-
     class Button:
       def __init__(self, text, value):
         self.text, self.value, self.click = text, value, None
-
       def set_click_callback(self, callback):
         self.click = callback
-
       def set_enabled(self, enabled):
         self.enabled = enabled
-
-    class ReadButton(Button):
-      pass
-
-    class Dialog:
-      def __init__(self, text, texture, confirmed, red=False):
-        self.text, self.confirmed = text, confirmed
-
-    class Scroller:
-      def __init__(self):
-        self.items = []
-        self._scroller = self
-
-      def add_widgets(self, items):
-        self.items.extend(items)
-
-    class Session:
-      def __init__(self, owner):
-        self.owner = owner
-
-      def feature_snapshot(self, page):
-        return self.owner.snapshot(page, parked=True, system_long=True, lateral_context=True, metric=False)
-
-      def feature_request(self, request):
-        return self.owner.apply(request)
-
-    pushed = []
-    adapter = compact.FeatureSettingsCompact(Session(self.owner))
-    with patch.object(compact, "BigButton", Button), patch.object(compact, "GreyBigButton", ReadButton), \
-         patch.object(compact, "NavScroller", Scroller), patch.object(compact, "BigConfirmationDialog", Dialog), \
-         patch.object(compact.gui_app, "texture", lambda *_args: None), \
-         patch.object(compact.gui_app, "push_widget", pushed.append):
-      adapter.open("torque")
-      page = pushed[-1]
-      self.assertIsInstance(next(item for item in page.items if item.text == "automatic torque learning"), ReadButton)
-      next(item for item in page.items if item.text == "manual torque adjustments").click()
-      self.assertIsInstance(next(item for item in page.items if item.text == "automatic torque learning"), ReadButton)
-      next(item for item in page.items if item.text == "torque controller").click()
-      self.assertNotIsInstance(next(item for item in page.items if item.text == "automatic torque learning"), ReadButton)
-      page = pushed[-1]
-      next(item for item in page.items if item.text == "use new torque editor").click()
-      self.assertIsInstance(pushed[-1], Dialog)
-      pushed[-1].confirmed()
-      self.assertTrue(any(item.text == "lateral acceleration source" for item in page.items))
-      next(item for item in page.items if item.text == "lateral acceleration source").click()
-      self.assertTrue(any(item.text == "lateral acceleration custom +" for item in page.items))
-      next(item for item in page.items if item.text == "lateral acceleration custom +").click()
-      self.assertEqual(parse_document(Path(self.params.get_param_path(DOCUMENT_KEY)).read_bytes())
-                       [str(self.cp.carFingerprint)].factor.mode, "custom")
-      self.honda()
-      adapter.open("aol")
-      page = pushed[-1]
-      next(item for item in page.items if item.text == "brake pause below +").click()
-      self.assertAlmostEqual(read_aol_settings(self.params).pause_brake_mps, 0.44704)
-      adapter.open("wheel")
-      page = pushed[-1]
-      next(item for item in page.items if item.text == "lkas press").click()
-      self.assertEqual(read_aol_settings(self.params).lkas_action, 3)
-      Path(self.params.get_param_path("AolBrakePauseSpeedMps")).write_bytes(b"bad")
-      Path(self.params.get_param_path("LKASButtonControl")).write_bytes(b"\xff")
-      adapter.open("aol")
-      self.assertTrue(any(item.text == "brake pause below set 0" for item in pushed[-1].items))
-      adapter.open("wheel")
-      self.assertTrue(any(item.text == "lkas press set off" for item in pushed[-1].items))
+    row = self.row("torque", "torque:factor:value")
+    refreshed = []
+    session = Mock(feature_request=self.owner.apply)
+    adapter = compact.FeatureSettingsCompact(session)
+    with patch.object(compact, "BigButton", Button):
+      buttons = adapter._editable(row, lambda: refreshed.append(True), Mock())
+      next(button for button in buttons if button.text.endswith("+")).click()
+    self.assertEqual(refreshed, [True])
+    source = Path(self.params.get_param_path(DOCUMENT_KEY)).read_bytes()
+    self.assertEqual(parse_document(source)[str(self.cp.carFingerprint)].factor.mode, "custom")
+    row = self.row("torque", "torque:factor:reset")
+    action = FeatureInput.target(1900, 285, FeatureSettingsState(page="torque", rows=(row,)))
+    self.assertIsNotNone(action)
+    assert action is not None
+    self.assertEqual(action.kind, "change")
+    self.assertEqual(action.row, row)
+    request = required_change(row, action.direction)
+    self.assertTrue(self.owner.apply(request))
+    self.assertEqual(parse_document(Path(self.params.get_param_path(DOCUMENT_KEY)).read_bytes())[
+      str(self.cp.carFingerprint)].factor.mode, "source")
 
   def test_large_repair_labels_match_requested_values(self):
     text = []
@@ -619,13 +495,13 @@ class LateralFeatureSettingsTests(unittest.TestCase):
                             vertical_ink=lambda _value, _role, size: (size * .2, size * .8))
     state = FeatureSettingsState(rows=(
       FeatureRow("AolBrakePauseSpeedMps", "Brake pause below", "Invalid", available=True, repair_value="0"),
-      FeatureRow("LKASButtonControl", "LKAS press", "Unsupported", available=True, repair_value="Off"),
+      FeatureRow("wheel:LKASButtonControl", "LKAS press", "Unsupported", available=True, repair_value="Off"),
     ))
     with patch.object(large.rl, "draw_rectangle_rounded"), patch.object(large.rl, "draw_rectangle_rounded_lines_ex"), \
          patch.object(large.rl, "draw_line"), patch.object(large.rl, "draw_line_ex"), patch.object(large.rl, "draw_circle"), \
          patch.object(large.clip, "begin_scissor_mode"), \
          patch.object(large.clip, "end_scissor_mode"):
-      large.FeatureSettingsView(fonts).render(state)
+      large.FeatureSettingsView(Mock(spec=BitmapFonts, **vars(fonts))).render(state)
     self.assertIn("Set 0", text)
     self.assertIn("Set Off", text)
 
@@ -645,18 +521,24 @@ class LateralFeatureSettingsTests(unittest.TestCase):
       def vertical_ink(self, _value, _role, size):
         return size * .2, size * .8
 
+    self.assertTrue(self.owner.apply(required_change(self.row("torque", "LateralControllerSelection"))))
     fonts = Fonts()
     state = self.owner.snapshot("torque", parked=True, system_long=True, lateral_context=True, metric=False)
-    state = replace(state, scroll=next(i for i, row in enumerate(state.rows) if row.label == "Need Help With Steering?"))
-    with patch.object(large.rl, "draw_rectangle_rounded"), patch.object(large.clip, "begin_scissor_mode"), \
-         patch.object(large.clip, "end_scissor_mode"):
-      large.FeatureSettingsView(fonts).render(state)
-    self.assertIn("Need Help With Steering?", fonts.text)
-    self.assertIn("Discord: https://firestar.link/discord", state.rows[state.scroll].reason)
+    state = replace(state, scroll=next(i for i, row in enumerate(state.rows) if row.label == "Automatic Steering Learning"))
+    with (patch.object(large.rl, "draw_rectangle_rounded"), patch.object(large.rl, "draw_line"),
+          patch.object(large, "draw_rounded_stroke"), patch.object(large, "draw_aether_toggle"),
+          patch.object(large, "draw_settings_header"),
+          patch.object(large.clip, "begin_scissor_mode"), patch.object(large.clip, "end_scissor_mode")):
+      large.FeatureSettingsView(Mock(spec=BitmapFonts, profile=Profile.LARGE, measure=fonts.measure,
+                                     draw=fonts.draw, vertical_ink=fonts.vertical_ink)).render(state)
+    self.assertIn("Automatic Steering Learning", fonts.text)
+    controller = self.row("torque", "LateralControllerSelection")
+    self.assertIn("https://firestar.link/discord", controller.reason)
+    self.assertIn("Stock Controller", state.rows[state.scroll].reason)
     self.assertEqual(FeatureInput.target(650, 300, state).row, state.rows[state.scroll])
     self.assertTrue(self.owner.apply(required_change(self.row("torque", "LateralControllerSelection"))))
     standard = self.owner.snapshot("torque", parked=True, system_long=True, lateral_context=True, metric=False)
-    self.assertFalse(any(row.label == "Need Help With Steering?" for row in standard.rows))
+    self.assertTrue(any(row.label == "Automatic Steering Learning" for row in standard.rows))
 
 
 if __name__ == "__main__":

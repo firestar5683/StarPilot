@@ -89,7 +89,7 @@ def test_real_http_contracts_and_independent_channels(tmp_path):
       self.send_header('Content-Length', '100000000')
       self.end_headers()
       self.wfile.write(b'x')  # Sender must read status only, not this unbounded/incomplete body.
-    def log_message(self, *args):
+    def log_message(self, *args, **kwargs):
       pass
   server = ThreadingHTTPServer(('127.0.0.1', 0), Handler)
   thread = threading.Thread(target=server.serve_forever, daemon=True)

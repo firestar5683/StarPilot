@@ -1,7 +1,6 @@
 from openpilot.starpilot.longitudinal.extension import LongitudinalContext
 from openpilot.starpilot.longitudinal.tests.extension_helpers import extension_state
 import os
-from types import SimpleNamespace
 import unittest
 from unittest.mock import patch
 
@@ -19,9 +18,7 @@ def params(identity, pedal=False, alpha=False):
   fingerprint[2][0x180] = 4
   if pedal:
     fingerprint[0][0x201] = 6
-  settings = SimpleNamespace(get_bool=lambda key: key == 'GMPedalLongitudinal' and pedal)
-  with patch('opendbc.car.gm.interface.Params', return_value=settings):
-    return CarInterface.get_params(identity, fingerprint, [], alpha, False, False)
+  return CarInterface.get_params(identity, fingerprint, [], alpha, False, False)
 
 
 def state():

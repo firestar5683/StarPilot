@@ -21,7 +21,7 @@ class NotificationHTTPTests(unittest.TestCase):
       release.set()
 
       class PausedOwner(NotificationOwner):
-        def action(self, payload, *, permitted):
+        def action(self, payload, *, permitted=lambda: True):
           entered.set()
           release.wait(2)
           return super().action(payload, permitted=permitted)

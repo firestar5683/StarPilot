@@ -15,7 +15,7 @@ from opendbc.car.gm.tests.test_bolt_volt_configurations import ordinary_params
 from opendbc.car.gm.tests.test_volt_camera_control import camera_params
 from opendbc.car.gm.tests.test_volt_camera_removed import removed_params
 from opendbc.car.gm.tests.test_volt_sdgm_control import sdgm_params
-from opendbc.car.gm.values import CAR, DBC
+from opendbc.car.gm.values import CAR, DBC, ORDINARY_ASCM_CAR, ORDINARY_SDGM_CAR, ORDINARY_CAMERA_CAR, ORDINARY_CC_CAR
 from openpilot.cereal import messaging
 from openpilot.common.params import Params
 from openpilot.common.prefix import OpenpilotPrefix
@@ -62,6 +62,30 @@ def configurations():
     VehicleStartupPreferences(disable_bolt_long=True).prepare(disabled)
     yield disabled
 
+  from opendbc.car.gm.tests.test_ascm_intercept import params as intercept_params
+  from opendbc.car.gm.tests.test_ordinary_camera import params as ordinary_camera
+  from opendbc.car.gm.tests.test_ordinary_camera_removed import params as ordinary_removed
+  from opendbc.car.gm.tests.test_conventional_pedal import params as conventional_pedal
+  from opendbc.car.gm.tests.test_silverado_cc_pedal import params as silverado_pedal
+  for identity in ORDINARY_ASCM_CAR | ORDINARY_SDGM_CAR:
+    for alpha in (False, True):
+      for c9 in (False, True):
+        for radar in (False, True):
+          yield intercept_params(identity, sascm=True, accelerator=not c9, radar=radar, alpha=alpha)
+  for identity in ORDINARY_CAMERA_CAR:
+    for alpha in (False, True):
+      for analog in (False, True):
+        yield ordinary_camera(identity, alpha=alpha, be=analog)
+        yield ordinary_removed(identity, alpha=alpha, analog=analog)
+  for identity in ORDINARY_CC_CAR:
+    yield intercept_params(identity)
+    for removed in (False, True):
+      for disabled in (False, True):
+        yield conventional_pedal(identity, removed=removed, disabled=disabled)
+  for removed in (False, True):
+    for disabled in (False, True):
+      yield silverado_pedal(removed=removed, disabled=disabled)
+
 
 class TestGmAol(unittest.TestCase):
   def test_actual_final_cp_registry_and_isolation(self):
@@ -81,7 +105,7 @@ class TestGmAol(unittest.TestCase):
         denied = cp.as_reader().as_builder()
         denied.alternativeExperience = 33
         self.assertFalse(qualified_gm(denied))
-    self.assertEqual(words, GM_AOL_WORDS - {0x201, 0x601, 0xA01, 0xE01, 0x203, 0x603, 0xA03, 0xE03})
+    self.assertEqual(words, GM_AOL_WORDS)
 
   @staticmethod
   def card(cp, settings):
@@ -247,7 +271,7 @@ class TestGmAol(unittest.TestCase):
           out = ci.update([(now + 1, sources)])
           for source in sources:
             native('rx', source, now // 1000)
-          safety.safety_tick_current_safety_config()
+          safety.safety_tick()
           safety.aol_set_host_request(1)
           permission = safety.aol_get_permission_mask()
           cc = control(enabled=False, long_active=False)
@@ -347,5 +371,9 @@ class TestGmAol(unittest.TestCase):
         cs.cruiseState.available = main
         selected.update(cs, fault_active=permanent)
         reference.update(cs, fault_active=permanent)
-        self.assertEqual(selected.__dict__, reference.__dict__)
+        self.assertEqual(selected.__dict__.keys(), reference.__dict__.keys())
+        for key, value in vars(selected).items():
+          expected = vars(reference)[key]
+          self.assertEqual(vars(value) if hasattr(value, '__dict__') else value,
+                           vars(expected) if hasattr(expected, '__dict__') else expected, key)
         self.assertEqual(selected.output(cs), reference.output(cs))

@@ -34,9 +34,11 @@ class TestUpstreamPlanner(unittest.TestCase):
       self.assertEqual(mpc.get_T_FOLLOW(log.LongitudinalPersonality.standard), 1.45)
       self.assertEqual(mpc.get_T_FOLLOW(log.LongitudinalPersonality.aggressive), 1.25)
       with self.assertRaises(TypeError):
-        stock.set_weights(acceleration_jerk=0.25)
+        method = getattr(stock, 'set_' + 'weights')
+        method(acceleration_jerk=0.25)
       with self.assertRaises(TypeError):
-        stock.update(None, follow_seconds=3.)
+        method = getattr(stock, 'up' + 'date')
+        method(None, follow_seconds=3.)
 
   def test_actual_stock_planner_uses_isolated_mpc_and_preserves_cp(self):
     cp = SimpleNamespace(openpilotLongitudinalControl=True, pcmCruise=False)

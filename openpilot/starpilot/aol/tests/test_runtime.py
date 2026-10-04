@@ -432,6 +432,8 @@ class IpcAxisContractTests(unittest.TestCase):
       frame = 0
 
       def __getitem__(self, service):
+        if service == 'deviceState':
+          return SimpleNamespace(started=True, startedMonoTime=1)
         if service == 'driverMonitoringState':
           return SimpleNamespace(alertLevel=0, lockout=False, alwaysOnLockout=False)
         if service == 'extrinsicsCalibration':
@@ -447,6 +449,11 @@ class IpcAxisContractTests(unittest.TestCase):
     sd.events = Events()
     sd.state_machine = StateMachine()
     sd.AM = AlertManager()
+    from openpilot.starpilot.controllers.mode_actions import SwitchbackCooldown
+    sd.switchback_capable = False
+    sd.switchback_cooldown = SwitchbackCooldown()
+    sd.switchback_setting_ns = time.monotonic_ns()
+    sd.switchback_cooldown_ns = 300_000_000_000
     sd.personality = 1
     sd.is_metric = False
     sd.enabled = sd.active = False
@@ -501,6 +508,8 @@ class IpcAxisContractTests(unittest.TestCase):
       frame = 1
 
       def __getitem__(self, service):
+        if service == 'deviceState':
+          return SimpleNamespace(started=True, startedMonoTime=1)
         if service == 'driverMonitoringState':
           return SimpleNamespace(alertLevel=0, lockout=False, alwaysOnLockout=False)
         if service == 'extrinsicsCalibration':
@@ -514,6 +523,11 @@ class IpcAxisContractTests(unittest.TestCase):
     sd.CP = SimpleNamespace(passive=False, openpilotLongitudinalControl=True)
     self.enterContext(mock.patch.object(sd, 'sm', SM(), create=True))
     sd.events, sd.state_machine, sd.AM = Events(), StateMachine(), AlertManager()
+    from openpilot.starpilot.controllers.mode_actions import SwitchbackCooldown
+    sd.switchback_capable = False
+    sd.switchback_cooldown = SwitchbackCooldown()
+    sd.switchback_setting_ns = time.monotonic_ns()
+    sd.switchback_cooldown_ns = 300_000_000_000
     sd.personality, sd.is_metric = 1, False
     sd.enabled = sd.active = False
     sd.initialized = sd.aol_replay = True
@@ -551,6 +565,8 @@ class IpcAxisContractTests(unittest.TestCase):
   def test_native_receipt_gates_engagement_and_disables_on_loss(self):
     class SM:
       def __getitem__(self, service):
+        if service == 'deviceState':
+          return SimpleNamespace(started=True, startedMonoTime=1)
         if service == 'driverMonitoringState':
           return SimpleNamespace(alertLevel=0, lockout=False, alwaysOnLockout=False)
         if service == 'extrinsicsCalibration':
@@ -642,8 +658,15 @@ class IpcAxisContractTests(unittest.TestCase):
       pm = messaging.PubMaster(['carState', 'aolIntentWire', 'aolAxisState', 'aolSafetyWire'])
       sm = messaging.SubMaster(['carState', 'aolIntentWire', 'aolAxisState', 'aolSafetyWire'])
       base = time.monotonic_ns() - 50_000_000
-      CP = car.CarParams()
-      CP.safetyConfigs = [car.CarParams.SafetyConfig(safetyModel=car.CarParams.SafetyModel.hondaBosch, safetyParam=34)]
+      from opendbc.car import gen_empty_fingerprint
+      from opendbc.car.honda.interface import CarInterface
+      from opendbc.car.honda.values import CAR
+      from openpilot.starpilot.aol.vehicle import policy_for
+      CP = CarInterface.get_params(CAR.HONDA_ACCORD, gen_empty_fingerprint(), [], True, False, False)
+      policy = policy_for(CP)
+      CP.alternativeExperience |= policy.alternative_experience_addition
+      CP.safetyConfigs[-1].safetyParam |= policy.safety_param_addition
+      self.assertEqual(CP.safetyConfigs[-1].safetyParam, 34)
 
       def publish_intent(stamp, *, pause_lat=False, pause_long=False):
         message = messaging.new_message('aolIntentWire', 0)

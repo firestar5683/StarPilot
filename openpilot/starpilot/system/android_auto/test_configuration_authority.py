@@ -75,7 +75,7 @@ def test_daemon_uses_configuration_authority_and_cleans_up_after_bind_failure(bi
       resource.close.assert_called_once()
 
 
-def test_force_offroad_uses_live_park_authority_and_rejects_movement(tmp_path):
+def test_force_offroad_accepts_onroad_but_force_onroad_rejects_movement(tmp_path):
   from openpilot.starpilot.drive_state.evidence import PhysicalSource
   from openpilot.starpilot.drive_state.owner import DriveStateOwner, Mode, Rejected
   from openpilot.starpilot.drive_state.tests.test_owner import Params, BOOT
@@ -88,12 +88,21 @@ def test_force_offroad_uses_live_park_authority_and_rejects_movement(tmp_path):
   physical = PhysicalSource(messages, mono=lambda: 2_100_000_000, boot=lambda: 12_100_000_000)
   owner = DriveStateOwner(Params(), tmp_path / 'owner', alive=lambda _: True)
   owner.initialize(pid=1, birth=2, boot=BOOT)
-  state = owner.request('offroad', expected_revision=owner.snapshot().revision,
+  initial_revision = owner.snapshot().revision
+  assert initial_revision is not None
+  state = owner.request('offroad', expected_revision=initial_revision,
                         authorized=lambda: True, override_allowed=physical.allowed)
   assert state.mode == Mode.OFFROAD
+  assert state.revision is not None
   owner.request('auto', expected_revision=state.revision, authorized=lambda: True, override_allowed=physical.allowed)
   messages.values['carState'].standstill = False
+  revision = owner.snapshot().revision
+  assert revision is not None
+  state = owner.request('offroad', expected_revision=revision,
+                        authorized=lambda: True, override_allowed=physical.allowed)
+  assert state.mode == Mode.OFFROAD
+  assert state.revision is not None
   with pytest.raises(Rejected):
-    owner.request('offroad', expected_revision=owner.snapshot().revision,
+    owner.request('onroad', expected_revision=state.revision,
                   authorized=lambda: True, override_allowed=physical.allowed)
   physical.close()

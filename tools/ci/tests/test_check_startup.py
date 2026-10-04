@@ -52,9 +52,12 @@ class TestCheckStartup(unittest.TestCase):
     self.assertFalse(missing.exists())
 
   def test_root_with_named_link_or_empty_directory_is_rejected(self):
+    named = self.root / "named"
+    named.mkdir()
+    (named / "other").symlink_to(Path(self.params.get_param_path()), target_is_directory=True)
     before = self.tree()
     with self.assertRaisesRegex(ValueError, "named-link roots are ambiguous"):
-      check_startup(self.root / "params", self.storage)
+      check_startup(named, self.storage)
     empty = self.root / "empty"
     empty.mkdir()
     with self.assertRaisesRegex(ValueError, "empty or named-link roots are ambiguous"):

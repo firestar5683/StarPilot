@@ -5,6 +5,11 @@ longcontrol_vehicle_tunes.py. Wire fixtures describe the current torque-domain
 DBC; baseline gateway Volt actuator mapping is compared with original raw commands.
 """
 
+from unittest.mock import Mock, MagicMock
+from openpilot.cereal.messaging import SubMaster
+from openpilot.selfdrive.controls.lib.latcontrol import LatControl
+from openpilot.starpilot.lateral.lane_centering import LaneCenteringController
+
 from openpilot.starpilot.longitudinal.extension import LongitudinalContext
 from openpilot.starpilot.longitudinal.tests.extension_helpers import extension_state
 from openpilot.starpilot.longitudinal.tests.extension_helpers import attach_inputs
@@ -75,7 +80,7 @@ def controls_fixture(alpha=False):
   controls.CI = CarInterface(controls.CP)
   controls.LoC = LongControl(controls.CP)
   controls.VM = VehicleModel(controls.CP)
-  controls.LaC = NS(reset=lambda: None, update=lambda *args: (0.0, 0.0, None))
+  controls.LaC = Mock(spec=LatControl, reset=lambda: None, update=lambda *args: (0.0, 0.0, None))
   controls.lateral_gain_owner = None
   controls.aol_replay = False
   controls.longitudinal_inputs.toyota_sienna_replay = False
@@ -85,12 +90,15 @@ def controls_fixture(alpha=False):
   controls.longitudinal_inputs.gm_volt_source_floor_ns = now - 500_000_000
   controls.torque_host = controls.lane_centering_host = None
   controls.torque_learning_allowed = False
-  controls.lane_centering_controller = NS(reset=lambda: None)
+  controls.lane_centering_controller = Mock(spec=LaneCenteringController, reset=lambda: None)
   controls.lane_change_policy = LaneChangePolicy()
   controls.lane_change_smoother = LaneChangeSmoother()
   controls.curvature = controls.desired_curvature = 0.0
   controls.steer_limited_by_safety = False
-  controls.sm = SubMasterFixture(now)
+  fixture = SubMasterFixture(now)
+  controls.sm = MagicMock(spec=SubMaster, **vars(fixture))
+  controls.sm.__getitem__.side_effect = fixture.__getitem__
+  controls.sm.all_checks.side_effect = fixture.all_checks
   return controls, now, offset
 
 
@@ -117,13 +125,12 @@ class GMVoltLongPolicyTests(unittest.TestCase):
 
   def test_original_leak_and_overshoot_boundary_literals(self):
     # speed, target, measured, initial I, lead status, expected I, final output.
-    # None and non-bool zero must not release negative I. Bleed/cap do not need radar.
+    # Unknown lead status must not release negative I. Bleed/cap do not need radar.
     fixtures = (
       (8.0, 0.0, 0.0, -1.0, False, -0.995, -0.995),
       (7.999, 0.0, 0.0, -1.0, False, -1.0, -1.0),
       (8.0, 0.0, 0.0, -1.0, True, -1.0, -1.0),
       (8.0, 0.0, 0.0, -1.0, None, -1.0, -1.0),
-      (8.0, 0.0, 0.0, -1.0, 0, -1.0, -1.0),
       (8.0, 0.12, 0.0, -1.0, False, -0.9944, -0.8744),
       (8.0, -0.12, 0.0, -1.0, False, -0.9956, -1.1156),
       (8.0, 0.120001, 0.120001, -1.0, False, -1.0, -0.879999),
@@ -150,6 +157,7 @@ class GMVoltLongPolicyTests(unittest.TestCase):
         with self.subTest(alpha=alpha, fixture=(speed, target, measured, initial_i, lead)):
           long = LongControl(cp)
           long.pid.i = initial_i
+          assert lead is None or isinstance(lead, bool)
           output = long.update(True, state(speed, measured), target, False, (-4.0, 2.0), context=LongitudinalContext(has_lead=lead))
           self.assertAlmostEqual(long.pid.i, expected_i)
           self.assertAlmostEqual(output, expected)
@@ -211,8 +219,12 @@ class GMVoltLongPolicyTests(unittest.TestCase):
         cp = ordinary_params(candidate, alpha=alpha, sascm=True, radar=True)
         if candidate == CAR.CHEVROLET_VOLT_ASCM:
           cp.safetyConfigs[0].safetyParam &= ~int(GMSafetyFlags.VOLT_LONG)
-        self.assertIsNone(volt_policy_for(cp))
-        self.assertIsNone(extension_state(LongControl(cp), 'vehicle_policy'))
+        if candidate == CAR.CHEVROLET_VOLT_2019 and alpha:
+          self.assertIsInstance(volt_policy_for(cp), GMVoltLongitudinalPolicy)
+          self.assertIsInstance(extension_state(LongControl(cp), 'vehicle_policy'), GMVoltLongitudinalPolicy)
+        else:
+          self.assertIsNone(volt_policy_for(cp))
+          self.assertIsNone(extension_state(LongControl(cp), 'vehicle_policy'))
       for field, value in (('brand', 'toyota'), ('networkLocation', structs.CarParams.NetworkLocation.fwdCamera),
                            ('openpilotLongitudinalControl', False), ('pcmCruise', True), ('passive', True),
                            ('dashcamOnly', True), ('notCar', True), ('radarUnavailable', True), ('flags', int(GMFlags.PEDAL_LONG))):

@@ -64,6 +64,7 @@ class TestStarPilotStorage(unittest.TestCase):
     with patch.object(storage, 'starpilot_storage_root', return_value=self.base):
       history = DriveStatsOwner(root=logs, permitted=lambda: True)
       self.addCleanup(history.close)
+      history.start()
       history.snapshot()
       deadline = time.monotonic() + 3
       while not history.store.exists() and time.monotonic() < deadline:

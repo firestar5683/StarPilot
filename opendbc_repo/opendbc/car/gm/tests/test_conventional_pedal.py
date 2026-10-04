@@ -1,6 +1,5 @@
 """Explicit conventional-cruise interceptor startup and physical command owner."""
 import unittest
-from unittest.mock import patch
 
 from opendbc.can import CANPacker
 from opendbc.car import Bus, gen_empty_fingerprint, structs
@@ -11,12 +10,6 @@ from opendbc.car.gm.startup_preferences import prepare_disable_longitudinal
 from opendbc.car.gm.tests.test_cc_gateway_stock import pt_frames
 
 
-class Settings:
-  def __init__(self, enabled):
-    self.enabled = enabled
-
-  def get_bool(self, key):
-    return self.enabled if key == 'GMPedalLongitudinal' else False
 
 
 def params(identity, *, disabled=False, removed=False, release=False, enabled=True, sensor=True, analog=True):
@@ -28,8 +21,7 @@ def params(identity, *, disabled=False, removed=False, release=False, enabled=Tr
     fp[0][0x201] = 6
   if not removed:
     fp[2][0x320] = 6
-  with patch('opendbc.car.gm.interface.Params', return_value=Settings(enabled)):
-    cp = CarInterface.get_params(identity, fp, [], False, release, False)
+  cp = CarInterface.get_params(identity, fp, [], False, release, False)
   prepare_disable_longitudinal(cp, disabled)
   return cp
 
@@ -67,7 +59,7 @@ class TestConventionalPedal(unittest.TestCase):
             if not disabled:
               self.assertEqual(policy_for(cp).starting_speed, .75 if identity == CAR.CHEVROLET_MALIBU_CC else .5)
             self.assertEqual(cp.stopAccel, -1.5 if identity == CAR.CHEVROLET_MALIBU_CC else -2.)
-        self.assertFalse(is_conventional_cc_pedal_profile(params(identity, removed=removed, enabled=False)))
+        self.assertTrue(is_conventional_cc_pedal_profile(params(identity, removed=removed, enabled=False)))
         self.assertFalse(is_conventional_cc_pedal_profile(params(identity, removed=removed, sensor=False)))
 
   def test_actual_sensor_threshold_and_stock_source_are_independent(self):
@@ -168,7 +160,7 @@ class TestConventionalPedal(unittest.TestCase):
           native('rx', create_buttons(packer, 0, tick % 4, 2), now // 1000)
         if tick == 2:
           native('rx', create_buttons(packer, 0, tick % 4, 1), now // 1000)
-        safety.safety_tick_current_safety_config()
+        safety.safety_tick()
         self.assertTrue(safety.safety_config_valid())
         cc = structs.CarControl(enabled=True, latActive=True, longActive=tick >= 3)
         cc.actuators.accel = 1.

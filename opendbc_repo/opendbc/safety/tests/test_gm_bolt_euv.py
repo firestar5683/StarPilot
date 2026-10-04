@@ -38,11 +38,13 @@ class TestGmBoltEuv(unittest.TestCase):
         frame = gmcan.create_gas_regen_command(self.packer, 0, value, 0, True, False)
         if exact:
           self.assertEqual(self.safety.safety_tx_hook(self.packet(frame)), -540 <= value <= 2698)
+        elif word == 0x4007 and not self.release:
+          self.assertEqual(self.safety.safety_tx_hook(self.packet(frame)), -540 <= value <= 2698)
         elif value > 1346:
           self.assertFalse(self.safety.safety_tx_hook(self.packet(frame)))
       for idx in range(4):
         frame = gmcan.create_acc_2cd_command(0, idx)
-        self.assertEqual(self.safety.safety_tx_hook(self.packet(frame)), exact)
+        self.assertEqual(self.safety.safety_tx_hook(self.packet(frame)), exact or (word == 0x4007 and not self.release))
         self.assertFalse(self.safety.safety_tx_hook(self.packet((frame[0], frame[1], 2))))
         for byte in range(5):
           bad = bytearray(frame[1])
@@ -60,7 +62,7 @@ class TestGmBoltEuv(unittest.TestCase):
     sources.append(self.packer.make_can_msg("ECMEngineStatus", 0, {}))
     for frame in sources:
       self.assertTrue(self.safety.safety_rx_hook(self.packet(frame)))
-    self.safety.safety_tick_current_safety_config()
+    self.safety.safety_tick()
     self.assertTrue(self.safety.safety_config_valid())
     self.safety.set_controls_allowed(True)
     for idx in range(4):
@@ -75,7 +77,7 @@ class TestGmBoltEuv(unittest.TestCase):
                                (0, 0x2cd, 2), (2, 0x123, 0), (0, 0x123, 2), (1, 0x2cd, -1)):
       self.assertEqual(self.safety.safety_fwd_hook(bus, addr), expected)
     self.safety.set_timer(2_100_000)
-    self.safety.safety_tick_current_safety_config()
+    self.safety.safety_tick()
     self.assertFalse(self.safety.safety_config_valid())
     self.mode(7)
     self.safety.safety_rx_hook(self.packet((0x2cd, bytes(5), 0)))

@@ -120,6 +120,7 @@ class TestModelRecovery(unittest.TestCase):
                               'import signal,time; signal.signal(signal.SIGINT,signal.SIG_IGN); print("ready",flush=True); time.sleep(30)'],
                              stdout=subprocess.PIPE, text=True)
     try:
+      assert child.stdout is not None
       self.assertTrue(select.select([child.stdout], [], [], 2)[0])
       self.assertEqual(child.stdout.readline().strip(), "ready")
       owner = ModelRecoveryOwner()
@@ -131,7 +132,7 @@ class TestModelRecovery(unittest.TestCase):
       self.assertEqual(owner.step(evidence(4.5, output=False)), "kill")
       child.send_signal(signal.SIGKILL)
       child.wait(timeout=2)
-      self.assertIsNotNone(child.poll())
+      assert child.poll() is not None
       self.assertEqual(owner.step(evidence(4.6, output=False, alive=False)), 'small')
     finally:
       if child.poll() is None:

@@ -144,15 +144,15 @@ class TestBoltVoltConfigurations(unittest.TestCase):
 
   def test_gateway_volt_stop_tune_does_not_change_other_volt_owners(self):
     for candidate, stop_accel in ((CAR.CHEVROLET_VOLT_ASCM, -0.25),
-                                 (CAR.CHEVROLET_VOLT_CAMERA, -2.0), (CAR.CHEVROLET_VOLT_2019, -2.0)):
+                                 (CAR.CHEVROLET_VOLT_CAMERA, -2.0), (CAR.CHEVROLET_VOLT_2019, -0.25)):
       for alpha in (False, True):
         for sascm in (False, True):
           with self.subTest(candidate=candidate, alpha=alpha, sascm=sascm):
             cp = ordinary_params(candidate, alpha=alpha, sascm=sascm, radar=True)
             self.assertEqual(cp.stopAccel, stop_accel)
-            self.assertEqual(list(cp.longitudinalTuning.kiV), [2.0, 1.5] if candidate == CAR.CHEVROLET_VOLT_2019 else [0.5, 0.5])
+            self.assertEqual(list(cp.longitudinalTuning.kiV), [0.5, 0.5])
             self.assertEqual(cp.longitudinalActuatorDelay, 0.5)
-            system_long = candidate == CAR.CHEVROLET_VOLT_ASCM and alpha and sascm
+            system_long = candidate in (CAR.CHEVROLET_VOLT_ASCM, CAR.CHEVROLET_VOLT_2019) and alpha and sascm
             self.assertEqual(cp.openpilotLongitudinalControl, system_long)
             self.assertEqual(cp.pcmCruise, not system_long)
             if not system_long:
@@ -181,14 +181,14 @@ class TestBoltVoltConfigurations(unittest.TestCase):
           controller, _ = controller_messages(cp, 12, controller, stock_acc_enabled=False)
           self.assertGreater(controller.pedal_steady, 0.0)
 
-  def test_four_pedal_identities_require_two_independent_opt_ins_not_alpha(self):
+  def test_four_pedal_identities_require_detected_hardware_independent_of_saved_opt_in_and_alpha(self):
     self.assertEqual(len(PEDAL_BOLT_CAR), 4)
     for candidate in PEDAL_BOLT_CAR:
       for alpha in (False, True):
         for saved, observed in ((False, False), (False, True), (True, False), (True, True)):
           with self.subTest(candidate=candidate, alpha=alpha, saved=saved, observed=observed):
             cp = pedal_params(candidate, setting=saved, pedal=observed, alpha_long=alpha)
-            active = saved and observed
+            active = observed
             flags = GMSafetyFlags.HW_CAM | GMSafetyFlags.EV
             if candidate != CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL:
               flags |= GMSafetyFlags.NO_ACC

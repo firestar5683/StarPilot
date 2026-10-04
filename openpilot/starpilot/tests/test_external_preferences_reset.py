@@ -15,6 +15,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 def load(name, path):
   spec = importlib.util.spec_from_file_location(name, path)
+  assert spec is not None
   module = importlib.util.module_from_spec(spec)
   spec.loader.exec_module(module)
   return module
@@ -22,10 +23,11 @@ def load(name, path):
 
 migration = load('external_reset_state_helpers', ROOT / 'state_migration.py')
 owner_ast = ast.parse((ROOT / 'navigation' / 'owner.py').read_text())
-selected = [node for node in owner_ast.body if isinstance(node, (ast.FunctionDef, ast.ClassDef)) and node.name in ('ValidationError', 'destination')]
+selected: list[ast.stmt] = [node for node in owner_ast.body if isinstance(node, (ast.FunctionDef, ast.ClassDef))
+                 and node.name in ('ValidationError', 'destination')]
 owner_class = next(node for node in owner_ast.body if isinstance(node, ast.ClassDef) and node.name == 'NavigationOwner')
 selected.append(next(node for node in owner_class.body if isinstance(node, ast.FunctionDef) and node.name == 'read'))
-namespace = {'json': json, 'math': math, 'hashlib': hashlib, 'MAX_DOCUMENT': 256 * 1024}
+namespace: dict = {'json': json, 'math': math, 'hashlib': hashlib, 'MAX_DOCUMENT': 256 * 1024}
 exec(compile(ast.Module(body=selected, type_ignores=[]), str(ROOT / 'navigation' / 'owner.py'), 'exec'), namespace)
 NavigationOwner = type('NavigationOwner', (), {'read': namespace['read']})
 with patch.dict(sys.modules, {'openpilot.starpilot.state_migration': migration}):
@@ -44,7 +46,7 @@ class TestExternalPreferencesReset(unittest.TestCase):
     self.navigation.mkdir(parents=True)
     self.model_file = self.models / 'preferences.json'
     self.nav_file = self.navigation / 'settings.json'
-    self.original = {'model_preferences': b'{"small":"old","randomizer":true}',
+    self.original: dict = {'model_preferences': b'{"small":"old","randomizer":true}',
                      'navigation_settings': json.dumps({'version': 1, 'revision': 'old', 'enabled': True,
                        'token': 'credential', 'destination': {'name': 'Home', 'latitude': 1, 'longitude': 2},
                        'favorites': [], 'routeChoice': 2}).encode()}
@@ -87,7 +89,7 @@ class TestExternalPreferencesReset(unittest.TestCase):
   def test_fresh_profile_keeps_existing_galaxy_pairing_bytes(self):
     galaxy = self.storage / 'galaxy'
     galaxy.mkdir(mode=0o700)
-    values = {'remote-v1.json': b'{"version":1,"slug":"ExistingGalaxy01","authHash":"' + b'a' * 64 +
+    values: dict = {'remote-v1.json': b'{"version":1,"slug":"ExistingGalaxy01","authHash":"' + b'a' * 64 +
               b'","session":"' + b'b' * 64 + b'"}', 'access-v1.json': b'existing password verifier',
               'remote-unpaired-v1': b''}
     for name, raw in values.items():

@@ -83,7 +83,7 @@ class TestVoltAscmControl(unittest.TestCase):
             legacy = cp.as_reader().as_builder()
             legacy.safetyConfigs[0].safetyParam &= ~int(GMSafetyFlags.VOLT_LONG)
             self.assertIsNone(volt_policy_for(legacy))
-            self.assertTrue(profiles_supported(legacy))
+            self.assertFalse(profiles_supported(legacy))
             self.assertEqual(CarController(DBC[legacy.carFingerprint], legacy).params.MAX_GAS, 1346.)
     for sascm, release in ((False, False), (True, True)):
       cp = params(CAR.CHEVROLET_VOLT_ASCM, sascm=sascm, alpha=True, release=release)
@@ -114,9 +114,8 @@ class TestVoltAscmControl(unittest.TestCase):
                 cs = SimpleNamespace(out=car.as_reader(), cam_lka_steering_cmd_counter=0,
                                      loopback_lka_steering_cmd_updated=False, loopback_lka_steering_cmd_ts_nanos=now,
                                      pt_lka_steering_cmd_counter=0, buttons_counter=0,
-                                     pscm_status={key: 0 for key in ('HandsOffSWDetectionMode', 'HandsOffSWlDetectionStatus',
-                                       'LKATorqueDeliveredStatus', 'LKADriverAppldTrq', 'LKATorqueDelivered',
-                                       'LKATotalTorqueDelivered', 'RollingCounter', 'PSCMStatusChecksum')})
+                                     pscm_status=dict.fromkeys(('HandsOffSWDetectionMode', 'HandsOffSWlDetectionStatus', 'LKATorqueDeliveredStatus',
+                                        'LKADriverAppldTrq', 'LKATorqueDelivered', 'LKATotalTorqueDelivered', 'RollingCounter', 'PSCMStatusChecksum'), 0))
                 _, frames = controller.update(control.as_reader(), cs, now)
                 actual = [tuple(msg) for msg in frames if msg[0] in (0x2cb, 0x315)]
                 self.assertFalse(any(msg[2] == 1 for msg in frames))

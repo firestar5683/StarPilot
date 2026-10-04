@@ -1,11 +1,12 @@
 from types import SimpleNamespace as NS
 import pytest
+from typing import Any
 from openpilot.starpilot.drive_state.evidence import PhysicalSource
 
 
 class Messages:
   def __init__(self):
-    self.values = {
+    self.values: dict[str, Any] = {
       'pandaStates': [NS(pandaType='uno', controlsAllowed=False, ignitionLine=False, ignitionCan=False, safetyModel='noOutput')],
       'carState': NS(canValid=True, canTimeout=False, standstill=True, gearShifter='park'),
       'selfdriveState': NS(enabled=False, active=False),

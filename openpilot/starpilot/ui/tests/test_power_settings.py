@@ -1,4 +1,6 @@
 """Parked-power document, source-bound UI and stock hardware-policy regressions."""
+from unittest.mock import patch
+
 
 import os
 from dataclasses import replace
@@ -6,7 +8,7 @@ from pathlib import Path
 import tempfile
 import unittest
 from types import SimpleNamespace as NS
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 from openpilot.common.params import Params
 from openpilot.starpilot.power.offroad_preferences import KEY, PowerPolicy, decode, effective, encode, read_saved
@@ -197,8 +199,8 @@ class PowerSettingsTests(unittest.TestCase):
 
   def test_large_system_confirm_uses_displayed_source_and_recovers_from_stale_dialog(self):
     session = StarShellSession.__new__(StarShellSession)
-    session.drive_state = NS(snapshot=lambda: {"mode": "auto", "revision": None, "available": False,
-                                                    "effective": None, "overrideAllowed": False})
+    self.enterContext(patch.object(session, 'drive_state', NS(snapshot=lambda: {"mode": "auto", "revision": None, "available": False,
+                                                    "effective": None, "overrideAllowed": False}), create=True))
     session.profile = Profile.LARGE
     session._mode = ShellMode.SETTINGS
     session.selected = Destination.SYSTEM
@@ -209,13 +211,15 @@ class PowerSettingsTests(unittest.TestCase):
     object.__setattr__(session, "input", NS(cancel=Mock()))
     session.favorites = Mock()
     session.view = Mock()
-    displayed = replace(session.system_snapshot(), scroll=len(session.display_snapshot().rows))
+    system = session.system_snapshot()
+    power_index = next(index for index, row in enumerate(system.rows) if row.key == ENABLED)
+    displayed = replace(system, scroll=power_index)
     actions = []
     native_input = FeatureInput(actions.append)
-    native_input.press(1980, 165, displayed)
-    native_input.release(1980, 165, displayed)
+    native_input.press(1980, 245, displayed)
+    native_input.release(1980, 245, displayed)
     self.assertEqual(actions[0].row.key, ENABLED)
-    native_input.press(1980, 165, displayed)
+    native_input.press(1980, 245, displayed)
     native_input.cancel()
     native_input.release(1980, 165, displayed)
     self.assertEqual(len(actions), 1)

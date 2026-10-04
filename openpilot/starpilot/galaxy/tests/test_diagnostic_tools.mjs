@@ -65,10 +65,17 @@ assert.ok(TmuxPage.template.includes('No commands or keyboard input'))
 assert.ok(TmuxPage.template.includes('state.data.text'))
 console.log('Diagnostic tools: actual Vue templates/setup; read-only report, bounded console, pause/resume/visibility/unmount/auth and stable error content passed')
 
-globalThis.location = { hash: '#/logs' }
-globalThis.window = { scrollTo() {} }
+globalThis.location = { hash: '#/logs', pathname: '/', search: '' }
+globalThis.window = { scrollTo() {}, addEventListener() {} }
+globalThis.history = {
+  state: null,
+  replaceState(state, _title, url) { this.state = state; location.hash = url.slice(url.indexOf('#')) },
+  pushState(state, _title, url) { this.state = state; location.hash = url.slice(url.indexOf('#')) },
+  go() { throw new Error('Unexpected history traversal') },
+}
 const { Logs } = await import('../web/js/logs.js')
-const { route } = await import('../web/js/router.js')
+const { route, startRouter } = await import('../web/js/router.js')
+startRouter()
 Logs.methods.openTroubleshoot()
 assert.equal(route.path, '/logs/troubleshoot')
 Logs.methods.openTmux()

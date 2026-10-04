@@ -28,6 +28,7 @@ class TestPairingMigration(unittest.TestCase):
          patch('openpilot.starpilot.galaxy.access.legacy_galaxy_root', return_value=self.legacy):
       pairing = default_remote_pairing()
       record = pairing.read()
+      assert record is not None
       self.assertEqual(record, {'version': 1, 'slug': self.values['glxyslug'], 'authHash': self.values['glxyauth'],
                                 'session': self.values['glxysession']})
       self.assertEqual(pairing.url(record['slug']), 'https://galaxy.firestar.link/ExistingGalaxy01')
@@ -42,18 +43,20 @@ class TestPairingMigration(unittest.TestCase):
   def test_unpair_survives_restart_and_manual_repair_rotates_identity(self):
     self.assertTrue(self.pairing.migrate_legacy(self.legacy))
     old = self.pairing.read()
+    assert old is not None
     self.assertTrue(self.pairing.unpair())
     restarted = RemotePairing(self.pairing.root)
     self.assertFalse(restarted.migrate_legacy(self.legacy))
     self.assertIsNone(restarted.read())
-    self.assertIsNotNone(restarted.pair(old['authHash'], legacy_root=self.legacy))
+    assert restarted.pair(old['authHash'], legacy_root=self.legacy) is not None
     new = restarted.read()
+    assert new is not None
     self.assertNotEqual(new['slug'], old['slug'])
     self.assertNotEqual(new['session'], old['session'])
     self.assertFalse(gateway_cookie_valid(old['slug'] + ':' + old['session'], new))
 
   def test_existing_and_malformed_destination_are_never_replaced(self):
-    self.assertIsNotNone(self.pairing.pair('b' * 64))
+    assert self.pairing.pair('b' * 64) is not None
     path = self.pairing.root / self.pairing.FILE
     before = path.read_bytes()
     self.assertFalse(self.pairing.migrate_legacy(self.legacy))
@@ -83,7 +86,7 @@ class TestPairingMigration(unittest.TestCase):
     self.assertFalse(self.pairing.migrate_legacy(self.legacy))
     self.assertIsNone(self.pairing.read())
     self.assertTrue(owner.verify('new-password'))
-    self.assertIsNotNone(self.pairing.pair(self.values['glxyauth'], legacy_root=self.legacy))
+    assert self.pairing.pair(self.values['glxyauth'], legacy_root=self.legacy) is not None
 
   def test_unsafe_legacy_and_destination_paths_are_not_followed(self):
     path = self.legacy / 'glxyslug'

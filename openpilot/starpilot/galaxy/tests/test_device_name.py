@@ -1,3 +1,4 @@
+from unittest.mock import Mock
 import os
 from pathlib import Path
 import tempfile
@@ -29,7 +30,7 @@ class DeviceNameTest(unittest.TestCase):
     self.store.save('Desk')
     for value in ('x' * 41, 'new\nname', 'name\x00', 'name\x85', '\ud800', None, 4, {}):
       with self.subTest(value=repr(value)), self.assertRaises(ValueError):
-        self.store.save(value)
+        Mock(wraps=self.store.save)(value)
       self.assertEqual(self.store.read(), 'Desk')
 
   def test_failed_replace_preserves_previous_name(self):

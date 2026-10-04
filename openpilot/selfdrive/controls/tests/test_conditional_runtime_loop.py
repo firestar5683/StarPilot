@@ -5,7 +5,7 @@ import os
 import tempfile
 import unittest
 from collections import deque
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, call, patch
 
 from opendbc.car.honda.interface import CarInterface
 from opendbc.car.honda.values import CAR
@@ -25,7 +25,7 @@ from openpilot.starpilot.conditional_mode.tests.test_projection import BOOT, MON
 
 
 class TestConditionalRuntimeLoop(unittest.TestCase):
-  def test_conditional_only_startup_receives_wheel_events(self):
+  def test_starpilot_loop_subscriptions_follow_conditional_selection(self):
     class EndLoop(Exception):
       pass
 
@@ -34,6 +34,7 @@ class TestConditionalRuntimeLoop(unittest.TestCase):
       params = Params(directory)
       params.put('CarParams', cp.to_bytes(), block=True)
       for enabled in (False, True):
+        params.put_bool('UseStarPilotLongitudinalPlanner', enabled, block=True)
         with self.subTest(enabled=enabled):
           sm = Mock()
           sm.update.side_effect = EndLoop
@@ -41,16 +42,20 @@ class TestConditionalRuntimeLoop(unittest.TestCase):
                       'SLC_REPLAY_RUNTIME': '0', 'CURVE_REPLAY_RUNTIME': '0', 'LONG_PLANNER_REPLAY_RUNTIME': '0'}
           with patch.dict(os.environ, settings), patch.object(plannerd, 'Params', return_value=params), \
                patch.object(plannerd, 'config_realtime_process'), \
+               patch.object(plannerd, 'ConditionalPlannerHost', wraps=ConditionalPlannerHost) as conditional_ctor, \
                patch.object(messaging, 'PubMaster') as publisher, \
                patch.object(messaging, 'SubMaster', return_value=sm), patch.object(messaging, 'sub_sock') as subscribe:
             with self.assertRaises(EndLoop):
-              plannerd.main()
+              plannerd.starpilot_main()
+          self.assertEqual(subscribe.call_args_list, [
+            call('carState', conflate=False),
+            call('slcAction', conflate=False),
+            call('slcCruiseEvent', conflate=False)])
+          # The typed manual-mode owner publishes status even without CEM.
+          self.assertEqual(publisher.call_args.args[0], ['longitudinalPlan', 'driverAssistance', 'slcState'])
+          self.assertEqual(conditional_ctor.call_count, int(enabled))
           if enabled:
-            subscribe.assert_called_once_with('slcCruiseEvent', conflate=False)
-            self.assertIn('slcState', publisher.call_args.args[0])
-          else:
-            subscribe.assert_not_called()
-            self.assertEqual(publisher.call_args.args[0], ['longitudinalPlan', 'driverAssistance'])
+            self.assertIs(conditional_ctor.call_args.args[0], params)
 
   def test_automatic_chill_joins_native_mpc_radar_and_disabled_slc(self):
     cp = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)

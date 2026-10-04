@@ -114,7 +114,7 @@ class TestGmOrdinarySdgm(unittest.TestCase):
         self.rx('EBCMRegenPaddle', {'RegenPaddle': 2})
         self.assertTrue(self.safety.get_controls_allowed())
         self.safety.set_timer(2_100_000)
-        self.safety.safety_tick_current_safety_config()
+        self.safety.safety_tick()
         self.assertFalse(self.safety.safety_config_valid())
         self.assertFalse(self.safety.get_controls_allowed())
 
@@ -129,7 +129,7 @@ class TestGmOrdinarySdgm(unittest.TestCase):
             self.rx(name)
           self.rx('ECMAcceleratorPos')
           self.rx('ECMEngineStatus', {'CruiseMainOn': 1})
-          self.safety.safety_tick_current_safety_config()
+          self.safety.safety_tick()
           supported = alternative == 32 and not (self.release and word in (0x1003, 0x1403))
           self.safety.aol_set_host_request(3)
           self.assertEqual(self.safety.aol_get_permission_mask(), 1 if supported else 0)

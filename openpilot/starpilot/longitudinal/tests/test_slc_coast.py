@@ -120,7 +120,7 @@ class SlcCoastTests(unittest.TestCase):
     results = {}
     for style in ('eco', 'sport'):
       profiles = default_personality_profiles(False)
-      profiles['standard']['braking'] = {'preset': style, 'curve': []}
+      profiles['standard']['braking'] = {'preset': style, 'curve': [], 'legacyActivation': True}
       params.put('LongitudinalPersonalityProfiles', profile_document(profiles, enabled=True), block=True)
       tuning = resolve(read_settings(params), log.LongitudinalPersonality.standard, V_EGO, cp)
       self.assertEqual(tuning.slc_braking_style, style)

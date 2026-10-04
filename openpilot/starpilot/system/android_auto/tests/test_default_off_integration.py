@@ -17,7 +17,7 @@ def test_manager_keeps_missing_or_false_feature_off():
   source = (ROOT / 'openpilot/system/manager/process_config.py').read_text()
   tree = ast.parse(source)
   predicate = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'android_auto_enabled')
-  scope = {'COMMA_HARDWARE': True, 'platform': SimpleNamespace(system=lambda: 'Linux'),
+  scope: dict = {'COMMA_HARDWARE': True, 'platform': SimpleNamespace(system=lambda: 'Linux'),
            'Params': object, 'car': SimpleNamespace(CarParams=object)}
   exec(compile(ast.Module(body=[predicate], type_ignores=[]), '<manager admission>', 'exec'), scope)
   class Params:

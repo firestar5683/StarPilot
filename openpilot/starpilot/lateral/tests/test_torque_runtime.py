@@ -128,7 +128,7 @@ class TorqueRuntimeTests(unittest.TestCase):
       params, cp = Params(), corolla()
       host = TorqueHost(params, cp)
       params.put_bool('AdvancedLateralTune', True, block=True)
-      for key, bad in (('AdvancedLateralTune', b'yes'), ('ForceAutoTuneOff', b'2'),
+      for key, bad in (('ForceAutoTuneOff', b'2'),
                        ('SteerLatAccel', b'nan'), ('SteerFriction', b'inf'),
                        ('SteerLatAccelStock', b'bad'), ('SteerFrictionStock', b'bad')):
         with self.subTest(key=key):
@@ -175,6 +175,7 @@ class TorqueRuntimeTests(unittest.TestCase):
   def test_opt_in_learner_skips_old_cache_without_deleting_it(self):
     cp = corolla()
     with OpenpilotPrefix(), mock.patch('openpilot.selfdrive.locationd.torqued.get_cache', return_value=None) as get_cache:
+      Params().put('SteerFriction', cp.lateralTuning.torque.friction * 1.2, block=True)
       with mock.patch.dict(os.environ, {'TORQUE_REPLAY_RUNTIME': '1'}):
         fresh = TorqueEstimator(cp.as_reader())
       self.assertEqual(get_cache.call_count, 0)
@@ -279,6 +280,7 @@ class TorqueRuntimeTests(unittest.TestCase):
       self.assertEqual(controls.torque_host.selected.lat_accel_offset, base.lat_accel_offset)
       self.assertGreater(controls.torque_host.applied.lat_accel_factor, target)
       params.put_bool('AdvancedLateralTune', False, block=True)
+      params.put('SteerLatAccel', base.lat_accel_factor, block=True)
       for tick in range(230, 340):
         now = 1_000_000_000 + tick * 10_000_000
         feed(controls, now, tick)

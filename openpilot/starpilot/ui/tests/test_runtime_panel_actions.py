@@ -1,10 +1,12 @@
 """Route live large-panel requests into native owners with effects isolated."""
+from unittest.mock import patch
+
 
 import atexit
 import tempfile
 from types import SimpleNamespace as NS
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 from openpilot.common.params import Params
 
@@ -574,8 +576,8 @@ class TestRuntimePanelActions(unittest.TestCase):
 
   def test_held_device_press_cancels_when_offroad_evidence_changes(self):
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
-    session.drive_state = NS(snapshot=lambda: {"mode": "auto", "revision": None, "available": False,
-                                                    "effective": None, "overrideAllowed": False})
+    self.enterContext(patch.object(session, 'drive_state', NS(snapshot=lambda: {"mode": "auto", "revision": None, "available": False,
+                                                    "effective": None, "overrideAllowed": False}), create=True))
     session.profile = runtime_app.Profile.LARGE
     session.selected = Destination.DEVICE
     session.adapter = self.layout.star.adapter
@@ -596,14 +598,14 @@ class TestRuntimePanelActions(unittest.TestCase):
 
   def test_onroad_settings_touch_uses_displayed_snapshot_without_rebuilding(self):
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
-    session.drive_state = NS(snapshot=lambda: {"mode": "auto", "revision": None, "available": False,
-                                                    "effective": None, "overrideAllowed": False})
+    self.enterContext(patch.object(session, 'drive_state', NS(snapshot=lambda: {"mode": "auto", "revision": None, "available": False,
+                                                    "effective": None, "overrideAllowed": False}), create=True))
     session.selected = Destination.DEVICE
     session._mode = ShellMode.SETTINGS
     session._request_emitted = False
     session.input = Mock()
     displayed = NS(selected=Destination.DEVICE, device=NS(offroad=False))
-    session._rendered_settings = (NOW, displayed)
+    self.enterContext(patch.object(session, '_rendered_settings', (NOW, displayed), create=True))
     session._rendered_settings_pipeline = (bool(self.ui.started), self.ui.started_frame)
     session._settings_touch = None
     with patch.object(self.ui, "is_offroad", return_value=False), \
@@ -620,8 +622,8 @@ class TestRuntimePanelActions(unittest.TestCase):
 
   def test_settings_touch_cancels_if_parked_evidence_is_lost(self):
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
-    session.drive_state = NS(snapshot=lambda: {"mode": "auto", "revision": None, "available": False,
-                                                    "effective": None, "overrideAllowed": False})
+    self.enterContext(patch.object(session, 'drive_state', NS(snapshot=lambda: {"mode": "auto", "revision": None, "available": False,
+                                                    "effective": None, "overrideAllowed": False}), create=True))
     session.selected = Destination.DEVICE
     session._mode = ShellMode.SETTINGS
     session._request_emitted = False
@@ -629,7 +631,7 @@ class TestRuntimePanelActions(unittest.TestCase):
     session.favorites = Mock()
     session.view = Mock()
     session._favorite_claimed = False
-    session._rendered_settings = (NOW, NS(selected=Destination.DEVICE, device=NS(offroad=True)))
+    self.enterContext(patch.object(session, '_rendered_settings', (NOW, NS(selected=Destination.DEVICE, device=NS(offroad=True))), create=True))
     session._rendered_settings_pipeline = (bool(self.ui.started), self.ui.started_frame)
     session._settings_touch = None
     with patch.object(session, "confirmed_offroad", side_effect=(True, False)), \
@@ -642,8 +644,8 @@ class TestRuntimePanelActions(unittest.TestCase):
 
   def test_compact_normal_pages_remain_readable_in_drive(self):
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
-    session.drive_state = NS(snapshot=lambda: {"mode": "auto", "revision": None, "available": False,
-                                                    "effective": None, "overrideAllowed": False})
+    self.enterContext(patch.object(session, 'drive_state', NS(snapshot=lambda: {"mode": "auto", "revision": None, "available": False,
+                                                    "effective": None, "overrideAllowed": False}), create=True))
     session.profile = runtime_app.Profile.COMPACT
     session.adapter = self.layout.star.adapter
     session.selected = Destination.STAR
@@ -659,8 +661,8 @@ class TestRuntimePanelActions(unittest.TestCase):
 
   def test_compact_network_in_drive_shows_status_without_native_network_owner(self):
     layout = runtime_app.StarMiciMainLayout.__new__(runtime_app.StarMiciMainLayout)
-    layout.star = NS(connectivity_allowed=Mock(return_value=False),
-                     snapshot=Mock(return_value=NS(home=NS(network="wifi"))))
+    self.enterContext(patch.object(layout, 'star', NS(connectivity_allowed=Mock(return_value=False),
+                     snapshot=Mock(return_value=NS(home=NS(network="wifi")))), create=True))
     page = NS(_scroller=NS(add_widgets=Mock()))
     with patch("openpilot.system.ui.widgets.scroller.NavScroller", return_value=page), \
          patch("openpilot.selfdrive.ui.mici.widgets.button.GreyBigButton", side_effect=lambda *args: args), \
@@ -729,10 +731,10 @@ if __name__ == "__main__":
   unittest.main()
 
 
-def test_compact_developer_fps_is_live_onroad_but_physical_controls_keep_native_gates():
+def test_compact_developer_fps_is_live_onroad_but_physical_controls_keep_native_gates(tmp_path):
   from openpilot.selfdrive.ui.mici.layouts.settings import developer
 
-  ui = NS(params=NS(get=lambda _: None, get_bool=lambda _: False), CP=None, is_release=False, engaged=True,
+  ui = NS(params=Params(str(tmp_path)), CP=None, is_release=False, engaged=True,
            is_offroad=lambda: False, add_offroad_transition_callback=Mock())
   with patch.object(developer, 'ui_state', ui), patch.object(developer, 'SshKeyFetcher'), \
        patch.object(developer.gui_app, 'texture', return_value=NS(width=64, height=64)), \

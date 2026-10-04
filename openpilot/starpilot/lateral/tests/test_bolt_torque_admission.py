@@ -42,18 +42,18 @@ class TestBoltTorqueAdmission(unittest.TestCase):
           file.unlink()
         self.assertFalse(runtime_enabled(cp, self.params))
         self.document(cp)
-        self.assertFalse(runtime_enabled(cp, self.params))
+        self.assertTrue(runtime_enabled(cp, self.params))
         (self.root / 'AdvancedLateralTune').write_bytes(b'0')
-        self.assertFalse(runtime_enabled(cp, self.params))
+        self.assertTrue(runtime_enabled(cp, self.params))
         (self.root / 'AdvancedLateralTune').write_bytes(b'1')
         self.assertTrue(runtime_enabled(cp, self.params))
 
-  def test_malformed_flag_and_read_failure_deny(self):
+  def test_retired_flag_is_irrelevant_and_document_read_failure_denies(self):
     cp = self.cp(next(iter(BOLT_GENERATIONS)))
     self.document(cp)
     for raw in (b'true', b'2', b'', b'1\n'):
       (self.root / 'AdvancedLateralTune').write_bytes(raw)
-      self.assertFalse(runtime_enabled(cp, self.params))
+      self.assertTrue(runtime_enabled(cp, self.params))
     with patch('openpilot.starpilot.lateral.torque_runtime._raw', side_effect=PermissionError):
       self.assertFalse(runtime_enabled(cp, self.params))
 

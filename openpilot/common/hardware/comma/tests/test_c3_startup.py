@@ -31,8 +31,8 @@ def test_amplifier_profile_registers_and_shutdown_order(model, right_volume, eq_
 
   path = SOURCE.with_name('amplifier.py')
   tree = ast.parse(path.read_text())
-  selected = [node for node in tree.body if isinstance(node, (ast.Assign, ast.FunctionDef, ast.ClassDef))]
-  namespace = {'namedtuple': namedtuple}
+  selected: list[ast.stmt] = [node for node in tree.body if isinstance(node, (ast.Assign, ast.FunctionDef, ast.ClassDef))]
+  namespace: dict = {'namedtuple': namedtuple}
   exec(compile(ast.fix_missing_locations(ast.Module(body=selected, type_ignores=[])), str(path), 'exec'), namespace)
   amp = namespace['Amplifier'].__new__(namespace['Amplifier'])
   amp.set_configs = Mock(return_value=True)
@@ -86,8 +86,8 @@ def test_startup_and_wake_write_model_registers(model, path_name):
 
   amp_path = SOURCE.with_name('amplifier.py')
   tree = ast.parse(amp_path.read_text())
-  selected = [node for node in tree.body if isinstance(node, (ast.Assign, ast.FunctionDef, ast.ClassDef))]
-  namespace = {'namedtuple': namedtuple, 'SMBus': Bus}
+  selected: list[ast.stmt] = [node for node in tree.body if isinstance(node, (ast.Assign, ast.FunctionDef, ast.ClassDef))]
+  namespace: dict = {'namedtuple': namedtuple, 'SMBus': Bus}
   exec(compile(ast.fix_missing_locations(ast.Module(body=selected, type_ignores=[])), str(amp_path), 'exec'), namespace)
   amp = namespace['Amplifier']()
   tree = ast.parse(SOURCE.read_text())

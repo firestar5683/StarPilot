@@ -23,7 +23,7 @@ class TestGmAscmAol(unittest.TestCase):
     for frame in frames:
       if frame[0] != missing:
         self.safety.safety_rx_hook(self.packet(frame))
-    self.safety.safety_tick_current_safety_config()
+    self.safety.safety_tick()
 
   def test_all_ordinary_words_main_source_and_axis_ownership(self):
     for word in self.WORDS:

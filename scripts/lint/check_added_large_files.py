@@ -5,6 +5,22 @@ import os
 import subprocess
 
 
+LARGE_TEXT_FILES = frozenset((
+  'openpilot/cereal/gen/cpp/car.capnp.c++',
+  'openpilot/cereal/gen/cpp/car.capnp.h',
+  'openpilot/cereal/gen/cpp/custom.capnp.c++',
+  'openpilot/cereal/gen/cpp/custom.capnp.h',
+  'openpilot/cereal/gen/cpp/deprecated.capnp.c++',
+  'openpilot/cereal/gen/cpp/deprecated.capnp.h',
+  'openpilot/cereal/gen/cpp/log.capnp.c++',
+  'openpilot/cereal/gen/cpp/log.capnp.h',
+  'openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.c',
+  'openpilot/starpilot/lateral/tests/fixtures/corolla_tss2_ba901b5f.json',
+  'openpilot/starpilot/lateral/tests/fixtures/genesis_g70_ba901b5f.json',
+  'openpilot/starpilot/lateral/tests/fixtures/oct2_turns.json',
+))
+
+
 def binary_files(filenames: list[str]) -> set[str]:
   if not filenames:
     return set()
@@ -33,7 +49,7 @@ def check_added_large_files(filenames: list[str], max_kb: int) -> int:
       print(f'{filename}: ordinary Git blob exceeds 100 MiB.')
       failed = True
       continue
-    if filename in ignored:
+    if filename in ignored or filename in LARGE_TEXT_FILES:
       continue
 
     size_kb = math.ceil(os.stat(filename).st_size / 1024)

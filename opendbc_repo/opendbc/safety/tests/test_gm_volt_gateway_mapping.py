@@ -42,7 +42,8 @@ class TestGmVoltGatewayMapping(unittest.TestCase):
     release = self.safety.set_safety_hooks(CarParams.SafetyModel.allOutput, 0) != 0
     expected = [EXACT, EXACT | int(GMSafetyFlags.VOLT_GATEWAY_ALT_BRAKE)]
     if not release:
-      expected += [16903, 17927, 18951, 19975]
+      expected += [7, 515, 1539, 2563, 3587, 4099, 5123, 16391, 16903, 17927, 18951, 19975,
+                   20487, 21511, 49489, 49520, 49523]
     self.assertEqual(accepted, sorted(expected))
 
   def test_new_ceiling_boundaries_disabled_wrong_bus_and_actual_controller_frames(self):
@@ -78,7 +79,9 @@ class TestGmVoltGatewayMapping(unittest.TestCase):
     self.assertFalse(self.safety.safety_tx_hook(self.gas(1018.125)))
     self.mode(int(GMSafetyFlags.EV | GMSafetyFlags.HW_CAM | GMSafetyFlags.HW_CAM_LONG))
     self.assertEqual(self.safety.safety_tx_hook(self.gas(1346)), not release)
-    self.assertFalse(self.safety.safety_tx_hook(self.gas(1346.125)))
+    self.assertEqual(self.safety.safety_tx_hook(self.gas(1346.125)), not release)
+    self.assertEqual(self.safety.safety_tx_hook(self.gas(2698)), not release)
+    self.assertFalse(self.safety.safety_tx_hook(self.gas(2698.125)))
 
   def test_malformed_selector_has_no_transmit_permission(self):
     for other in (0, GMSafetyFlags.HW_CAM, GMSafetyFlags.NO_ACC, GMSafetyFlags.PEDAL_LONG,

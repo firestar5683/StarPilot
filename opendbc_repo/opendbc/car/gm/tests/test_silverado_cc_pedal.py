@@ -42,9 +42,7 @@ def fingerprint(*, removed=False, alternate=False):
 
 def params(*, disabled=False, removed=False, alternate=False, enabled=True, fp=None, release=False, alpha=False):
   fp = fingerprint(removed=removed, alternate=alternate) if fp is None else fp
-  settings = type('Settings', (), {'get_bool': lambda self, key: enabled and key == 'GMPedalLongitudinal'})()
-  with patch('opendbc.car.gm.interface.Params', return_value=settings):
-    cp = CarInterface.get_params(IDENTITY, fp, [], alpha, release, False)
+  cp = CarInterface.get_params(IDENTITY, fp, [], alpha, release, False)
   prepare_disable_longitudinal(cp, disabled)
   return cp
 
@@ -102,9 +100,9 @@ class TestSilveradoCcPedal(unittest.TestCase):
       self.assertFalse(is_silverado_cc_pedal_profile(cp))
       self.assertIsNone(lateral_policy_for(cp))
       self.assertIsNone(longitudinal_policy_for(cp))
-    self.assertFalse(is_silverado_cc_pedal_profile(params(enabled=False)))
+    self.assertTrue(is_silverado_cc_pedal_profile(params(enabled=False)))
 
-  def test_actual_card_saved_disable_and_default_off_setup(self):
+  def test_actual_card_saved_disable_and_automatic_setup(self):
     for removed in (False, True):
       for disabled in (False, True):
         with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1', 'AOL_REPLAY_RUNTIME': '0'}):
@@ -113,18 +111,19 @@ class TestSilveradoCcPedal(unittest.TestCase):
           store.put_bool('DisableOpenpilotLongitudinal', disabled, block=True)
           fp = fingerprint(removed=removed)
           cp = CarInterface.get_params(IDENTITY, fp, [], False, False, False)
-          self.assertTrue(cp.dashcamOnly)
+          self.assertFalse(cp.dashcamOnly)
           self.assertIsNone(store.get('GMPedalLongitudinal'))
           owner = FeatureSettingsOwner(store, lambda group: True,
                                        vehicle_fingerprint=lambda: IDENTITY, vehicle_params=lambda cp=cp: cp)
           row = next(r for r in owner.snapshot('vehicle', parked=True, system_long=False,
                                                lateral_context=False, metric=False).rows if r.key == 'GMPedalLongitudinal')
-          self.assertEqual(row.value, 'Off')
-          self.assertTrue(row.available)
-          request = row_change(row, 1)
+          self.assertEqual(row.value, 'Automatic')
+          self.assertFalse(row.available)
+          self.assertIsNone(row_change(row, 1))
+          from openpilot.starpilot.ui.feature_settings_state import FeatureSettingsRequest
+          request = FeatureSettingsRequest('GMPedalLongitudinal', None, 'Off', confirmation=True)
           self.assertFalse(owner.apply(request))
-          self.assertTrue(owner.apply(replace(request, confirmation=True)))
-          self.assertTrue(cp.dashcamOnly)
+          self.assertFalse(cp.dashcamOnly)
           cp = CarInterface.get_params(IDENTITY, fp, [], False, False, False)
           card = Car(CI=CarInterface(cp), RI=RadarInterface(cp))
           self.assertFalse(card.CP.passive)

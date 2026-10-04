@@ -27,6 +27,7 @@ def test_complete_production_alerts_preserve_stock_critical_max(tmp_path, select
   filenames = production_filenames()
   assert 'dm_critical_max.wav' in filenames
   loaded = loader.refresh(filenames, 0)
+  assert loaded is not None
   assert set(loaded) == set(filenames)
   for filename in filenames:
     path = stock.parent / 'sounds_starpilot' / BUILTIN_FILES[filename] if selection != 'stock' and filename in BUILTIN_FILES else stock / filename

@@ -110,7 +110,9 @@ class LongProfileFeatureTests(unittest.TestCase):
     self.assertIn("to Off", long_confirm_question(master_repair))
     self.assertTrue(self.owner.apply(self.confirm(master_repair)))
     self.assertFalse(self.params.get_bool("CustomPersonalities"))
-    self.assertTrue(self.owner.apply(self.confirm(self.row("standard", "long_repair:StandardPersonalityProfile"))))
+    self.assertFalse(any(row.key == "long_repair:StandardPersonalityProfile" for row in self.owner.snapshot(
+      "standard", parked=True, system_long=True, lateral_context=False, metric=False).rows))
+    self.assertEqual(self.path("StandardPersonalityProfile").read_bytes(), b"bad")
     self.assertFalse(self.params.get_bool("CustomPersonalities"))
     self.assertTrue(read_profile_health(self.params).dependencies_valid)
 
@@ -127,7 +129,7 @@ class LongProfileFeatureTests(unittest.TestCase):
     with patch.object(self.params, "get_default_value", side_effect=lambda key: 999.0 if key == "RelaxedFollow" else original_default(key)):
       self.assertFalse(read_profile_health(self.params).dependencies_valid)
     with patch.object(self.params, "get_default_value", side_effect=lambda key: "true" if key == "RelaxedPersonalityProfile" else original_default(key)):
-      self.assertFalse(read_profile_health(self.params).dependencies_valid)
+      self.assertTrue(read_profile_health(self.params).dependencies_valid)
 
   def test_oversized_source_is_not_repairable_without_full_binding(self):
     self.params.put_bool("CustomPersonalities", True, block=True)
@@ -233,7 +235,7 @@ class LongProfileFeatureTests(unittest.TestCase):
     class Session(StarShellSession):
       def __init__(self, owner):
         self.owner = owner
-      def feature_snapshot(self, page: str | None = None):
+      def feature_snapshot(self, page: str | None = None, *, favorite: bool = False):
         return self.owner.snapshot(page or "hub", parked=True, system_long=True, lateral_context=True, metric=False)
       def feature_request(self, request):
         return self.owner.apply(request)

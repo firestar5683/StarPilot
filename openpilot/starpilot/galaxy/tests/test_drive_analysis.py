@@ -32,7 +32,7 @@ def write(root, number, events, *, lock=False, kind='rlog'):
   name = f'{ROUTE}--{number}'
   segment = root / name
   segment.mkdir()
-  (segment / f'{kind}.zst').write_bytes(zstd.compress(b''.join(item.to_bytes() for item in events)))
+  (segment / f'{kind}.zst').write_bytes(zstd.compress(b''.join(item.as_reader().as_builder().to_bytes() for item in events)))
   if lock:
     (segment / 'rlog.lock').touch()
   return {'number': number, 'segmentName': name, 'files': {kind: True}}
@@ -152,7 +152,7 @@ class DriveAnalysisTest(unittest.TestCase):
     events = self.model_events()
     segment = write(self.root, 0, events, kind='qlog')
     rlog = self.root / segment['segmentName'] / 'rlog.zst'
-    rlog.write_bytes(zstd.compress(b''.join(item.to_bytes() for item in [self.load_event(), *events])))
+    rlog.write_bytes(zstd.compress(b''.join(item.as_reader().as_builder().to_bytes() for item in [self.load_event(), *events])))
     segment['files']['rlog'] = True
     result = analyze_route(self.root, selection(segment), permitted=lambda: True)
     self.assertTrue(result['complete'], result)
@@ -174,7 +174,7 @@ class DriveAnalysisTest(unittest.TestCase):
     restart.logMonoTime = BASE + 150_000_000
     restart.logMessage = json.dumps({'msg': 'modeld init', 'module': 'modeld', 'process': 124})
     events.insert(6, restart)
-    (self.root / segment['segmentName'] / 'rlog.zst').write_bytes(zstd.compress(b''.join(item.to_bytes() for item in events)))
+    (self.root / segment['segmentName'] / 'rlog.zst').write_bytes(zstd.compress(b''.join(item.as_reader().as_builder().to_bytes() for item in events)))
     result = analyze_route(self.root, selection(segment), permitted=lambda: True)
     self.assertIn('Small model (identity not recorded)', result['model'])
     self.assertNotIn(f'{drive_analysis.BY_ID["sc23"].name} (Small)', result['model'])
@@ -207,7 +207,7 @@ class DriveAnalysisTest(unittest.TestCase):
     no_date['segments'][0]['segmentName'] = '00000231--8c5f1c4f8b--0'
     (self.root / old_name).rename(self.root / no_date['segments'][0]['segmentName'])
     (self.root / no_date['segments'][0]['segmentName'] / 'qlog.zst').write_bytes(zstd.compress(b''.join(
-      item.to_bytes() for item in [event('carState', BASE, vEgo=10), event('selfdriveState', BASE, enabled=True),
+      item.as_reader().as_builder().to_bytes() for item in [event('carState', BASE, vEgo=10), event('selfdriveState', BASE, enabled=True),
                                     event('carState', BASE + 500_000_000, vEgo=10),
                                     event('selfdriveState', BASE + 500_000_000, enabled=False),
                                     event('sentinel', BASE + 500_000_000, type='endOfRoute')])))

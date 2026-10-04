@@ -12,6 +12,7 @@ UI_STATE = ROOT.parents[2] / 'selfdrive/ui/ui_state.py'
 PRESENTATION = ROOT.parents[1] / 'ui/presentation.py'
 
 spec = importlib.util.spec_from_file_location('private_projection_onroad', ROOT / 'projection_onroad.py')
+assert spec is not None and spec.loader is not None
 projection = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(projection)
 
@@ -141,7 +142,7 @@ class TestProjectionOnroad(unittest.TestCase):
     tree = ast.parse(UI_STATE.read_text())
     cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'UIState')
     method = next(node for node in cls.body if isinstance(node, ast.FunctionDef) and node.name == 'update')
-    namespace = {'time': SimpleNamespace(monotonic=lambda: 42.0),
+    namespace: dict = {'time': SimpleNamespace(monotonic=lambda: 42.0),
                  'device': SimpleNamespace(update=lambda: self.fail('device power invoked'))}
     exec(compile(ast.Module(body=[method], type_ignores=[]), str(UI_STATE), 'exec'), namespace)
     events = []
@@ -159,7 +160,7 @@ class TestProjectionOnroad(unittest.TestCase):
   def test_projection_params_exposes_reads_without_write_methods(self):
     tree = ast.parse(UI_STATE.read_text())
     cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'ProjectionParams')
-    namespace = {'Params': object}
+    namespace: dict = {'Params': object}
     exec(compile(ast.Module(body=[cls], type_ignores=[]), str(UI_STATE), 'exec'), namespace)
     source = SimpleNamespace(get=lambda key: b'value', get_bool=lambda key: True,
                              get_int=lambda key: 2, get_float=lambda key: 0.5,

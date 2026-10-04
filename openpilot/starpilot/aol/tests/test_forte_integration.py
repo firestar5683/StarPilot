@@ -57,7 +57,7 @@ class ForteStream:
     self.count += 1
     gears = self.ci.CS.shifter_values
     gear_code = next(code for code, name in gears.items() if name == gear)
-    values = {
+    values: dict[str, dict[str, float]] = {
       'EMS16': {'CRUISE_LAMP_M': int(main), 'CRUISE_LAMP_S': int(cruise), 'AliveCounter': n % 4},
       'WHL_SPD11': {'WHL_SPD_FL': 72, 'WHL_SPD_FR': 72, 'WHL_SPD_RL': 72, 'WHL_SPD_RR': 72,
                     'WHL_SPD_AliveCounter_LSB': n % 4, 'WHL_SPD_AliveCounter_MSB': (n // 4) % 4},
@@ -79,8 +79,8 @@ class ForteStream:
     for address, data, bus in frames:
       self.safety.safety_rx_hook(make_msg(bus, address, len(data), data))
     self.safety.safety_tick()
-    with patch('opendbc.car.hyundai.forte_aol.time.CLOCK_BOOTTIME', 7, create=True), \
-         patch('opendbc.car.hyundai.forte_aol.time.clock_gettime_ns', return_value=self.now):
+    with patch('opendbc.car.hyundai.non_scc_aol.time.CLOCK_BOOTTIME', 7, create=True), \
+         patch('opendbc.car.hyundai.non_scc_aol.time.clock_gettime_ns', return_value=self.now):
       self.cs = self.ci.update([(self.now, frames)])
     self.intent.update(self.cs, now_ns=self.now, fault_active=fatal, native_rejection_ns=rejection)
     return self.axis()
@@ -88,7 +88,7 @@ class ForteStream:
   def axis(self, receipt=None):
     intent = SimpleNamespace(allowedLatch=self.intent.allowed_latch, pauseLateral=self.intent.pause_lateral,
                              pauseLongitudinal=self.intent.pause_longitudinal)
-    kwargs = {'standard_lateral': False, 'standard_longitudinal': False, 'intent': intent,
+    kwargs: dict = {'standard_lateral': False, 'standard_longitudinal': False, 'intent': intent,
               'car_state': self.cs, 'initialized': True, 'model_ready': True, 'no_entry': False,
               'immediate_disable': False, 'dm_lockout': False, 'pause_brake_mps': 0.}
     desired = decide_axes(native=None, **kwargs)

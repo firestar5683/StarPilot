@@ -78,7 +78,13 @@ def test_namespace_and_topology_fail_closed(car):
     assert not qualified(cp)
   cp.safetyConfigs[-1].safetyParam = 32
   cp.alternativeExperience = 32
+  assert qualified(cp)
+  cp.safetyConfigs = [cp.safetyConfigs[0], cp.safetyConfigs[0]]
   assert not qualified(cp)
+  cp.safetyConfigs = [cp.safetyConfigs[0]]
+  for experience in (1, 64, 96):
+    cp.alternativeExperience = experience
+    assert not qualified(cp)
   cp.alternativeExperience = 0
   for flag in (FordFlags.CANFD, FordFlags.NEW_PORT, FordFlags.LKA_STEERING, FordFlags.ALT_STEER_ANGLE):
     cp.flags = int(flag)

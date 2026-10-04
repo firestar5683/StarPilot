@@ -71,11 +71,12 @@ def test_supported_backend_retains_models_and_camera_warp_graph(graph, monkeypat
   monkeypatch.setattr(ctypes.util, "find_library", library)
   evaluate(arch)
   assert library.call_count == (1 if arch == "aarch64" else 0)
-  present.assert_called_once_with()
+  present.assert_not_called()
   calls = env.Command.call_args_list
-  assert len(calls) == 6
+  assert len(calls) == 5
   targets = [Path(call.args[0]).name for call in calls]
-  assert targets[:2] == ["dmonitoring_model_tinygrad.pkl", "driving_tinygrad.pkl"]
+  assert targets[0] == "dmonitoring_model_tinygrad.pkl"
+  assert "driving_tinygrad.pkl" not in targets
   assert sum(name.startswith("driving_warp_") for name in targets) == 2
   assert sum(name.startswith("dm_warp_") for name in targets) == 2
   assert all(backend in call.args[2] for call in calls)
@@ -91,15 +92,15 @@ def test_llvm_probe_error_does_not_schedule_compilation(graph, monkeypatch):
   present.assert_not_called()
 
 
-def test_chestnut_warp_graph_keeps_existing_serialization_without_compilation(graph, monkeypatch):
+def test_build_does_not_probe_chestnut_or_regenerate_shipped_big_artifacts(graph, monkeypatch):
   evaluate, env, present = graph
   present.return_value = True
   library = Mock()
   monkeypatch.setattr(ctypes.util, "find_library", library)
   evaluate("Darwin")
   library.assert_not_called()
-  assert env.Command.call_count == 8
-  assert sum(Path(call.args[0]).name.startswith("big_driving_warp_") for call in env.Command.call_args_list) == 2
-  assert env.SideEffect.call_count == 2
-  assert all(Path(call.args[0]).name == ".chestnut.lock" for call in env.SideEffect.call_args_list)
+  present.assert_not_called()
+  assert env.Command.call_count == 5
+  assert not any(Path(call.args[0]).name.startswith("big_driving_") for call in env.Command.call_args_list)
+  env.SideEffect.assert_not_called()
   env.Execute.assert_not_called()

@@ -61,7 +61,7 @@ class TestFavoritesHttp(unittest.TestCase):
     self.assertTrue(data["editable"])
     self.assertEqual(data["slots"], default_slots())
     self.assertIn(BOOKMARK, {option["key"] for option in data["options"]})
-    self.assertFalse(any(option["available"] for option in data["options"]))
+    self.assertFalse(next(option["available"] for option in data["options"] if option["key"] == BOOKMARK))
     slots = data["slots"]
     slots[0] = {"enabled": True, "show_onroad": True, "key": BOOKMARK, "label": "Mark"}
     payload = {"revision": data["revision"], "slots": slots}
@@ -84,7 +84,7 @@ class TestFavoritesHttp(unittest.TestCase):
     self.assertEqual(self.request(payload=payload, cookie=cookie)[0], 400)
     self.assertFalse(Path(self.params.get_param_path(FAVORITE_SLOTS_PARAM)).exists())
 
-  def test_unsupported_original_set_speed_preserved_without_advertising_execution(self):
+  def test_set_speed_preserved_for_device_execution_without_http_invocation(self):
     slots = default_slots()
     slots[1] = {"enabled": True, "show_onroad": True, "key": SET_SPEED, "label": "45 mph", "value": 45}
     Path(self.params.get_param_path(FAVORITE_SLOTS_PARAM)).write_text(json.dumps(slots))
@@ -93,7 +93,7 @@ class TestFavoritesHttp(unittest.TestCase):
     self.assertEqual(code, 200)
     self.assertEqual(data["slots"], slots)
     self.assertFalse(data["states"][1]["available"])
-    self.assertIn("not available in this build", data["states"][1]["reason"])
+    self.assertIn("Use the qualified control on the device", data["states"][1]["reason"])
     data["slots"][0] = {"enabled": True, "show_onroad": True, "key": BOOKMARK, "label": "Bookmark"}
     self.assertEqual(self.request(payload={"revision": data["revision"], "slots": data["slots"]}, cookie=cookie)[0], 200)
     self.assertEqual(json.loads(Path(self.params.get_param_path(FAVORITE_SLOTS_PARAM)).read_text())[1], slots[1])

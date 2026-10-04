@@ -128,11 +128,11 @@ class TestHyundaiBlendedStock(unittest.TestCase):
         if omitted != 'SCC12':
           self.assertTrue(self.safety.safety_rx_hook(self.scc(0)))
         self.safety.set_timer(1000)
-        self.safety.safety_tick_current_safety_config()
+        self.safety.safety_tick()
         self.assertEqual(self.safety.safety_config_valid(), omitted is None)
         self.safety.set_controls_allowed(True)
         self.safety.set_timer(2_000_000)
-        self.safety.safety_tick_current_safety_config()
+        self.safety.safety_tick()
         self.assertFalse(self.safety.safety_config_valid())
         self.assertFalse(self.safety.get_controls_allowed())
 

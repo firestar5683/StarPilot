@@ -11,7 +11,14 @@ from openpilot.common.params import Params
 from openpilot.starpilot.galaxy.settings import AuthorityContext, SettingsChanged, SettingsGateway
 from openpilot.starpilot.longitudinal.output_max import KEY
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
-from openpilot.starpilot.ui.feature_settings_state import row_change
+from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsRequest, row_change
+
+
+
+def required_change(row: FeatureRow, direction: int = 1) -> FeatureSettingsRequest:
+  request = row_change(row, direction)
+  assert request is not None
+  return request
 
 
 class Context:
@@ -49,7 +56,7 @@ class OutputMaximumFeatureTests(unittest.TestCase):
     row = next(row for row in self.owner.snapshot("profiles", parked=False, system_long=False,
                                                 lateral_context=False, metric=False).rows if row.key == KEY)
     self.assertEqual(float(row.value), .6)
-    request = row_change(row, -1)
+    request = required_change(row, -1)
     self.assertTrue(self.owner.apply(request))
     self.assertEqual(float(Path(self.params.get_param_path(KEY)).read_bytes()), .5)
     self.assertFalse(self.params.get_bool("CustomPersonalities"))
@@ -58,7 +65,7 @@ class OutputMaximumFeatureTests(unittest.TestCase):
   def test_source_cp_session_revocation_and_invalid_value_repair(self):
     path = Path(self.params.get_param_path(KEY))
     row = self.owner.output_maximum.row()
-    request = row_change(row, -1)
+    request = required_change(row, -1)
     for field, value in (("passive", True), ("dashcamOnly", True), ("notCar", True), ("openpilotLongitudinalControl", False)):
       previous = getattr(self.cp, field)
       setattr(self.cp, field, value)
@@ -67,7 +74,9 @@ class OutputMaximumFeatureTests(unittest.TestCase):
     path.write_bytes(b"1.0")
     self.assertFalse(self.owner.apply(request))
     for value in ("nan", "inf", "0.01", "4.1"):
-      self.assertFalse(self.owner.apply(replace(row_change(self.owner.output_maximum.row()), value=value)))
+      request = required_change(self.owner.output_maximum.row())
+      assert request is not None
+      self.assertFalse(self.owner.apply(replace(request, value=value)))
     page, index = self.page()
     intent = self.gateway.preview(page['view'], index, 0, "session", b"generation", value=.7)
     with self.assertRaises(SettingsChanged):
@@ -78,7 +87,7 @@ class OutputMaximumFeatureTests(unittest.TestCase):
     with self.assertRaises(SettingsChanged):
       self.gateway.confirm(intent['intent'], "session", b"generation")
     path.write_bytes(b"broken")
-    repair = row_change(self.owner.output_maximum.row())
+    repair = required_change(self.owner.output_maximum.row())
     self.assertEqual(repair.value, "4.0")
     self.assertTrue(self.owner.apply(repair))
     self.assertEqual(float(path.read_bytes()), 4.0)
@@ -97,12 +106,12 @@ class OutputMaximumFeatureTests(unittest.TestCase):
       self.assertTrue(row.available)
       self.assertIsNone(row.capability)
       self.assertIsNone(row.vehicle_fingerprint)
-      self.assertTrue(desk.apply(row_change(row, -1)))
+      self.assertTrue(desk.apply(required_change(row, -1)))
       page, index = self.page()
       self.assertTrue(page['rows'][index]['available'])
       intent = self.gateway.preview(page['view'], index, 0, "session", b"generation", value=.8)
       self.assertTrue(self.gateway.confirm(intent['intent'], "session", b"generation"))
-    parked_request = row_change(desk.output_maximum.row(), 1)
+    parked_request = required_change(desk.output_maximum.row(), 1)
     page, index = self.page()
     pending = self.gateway.preview(page['view'], index, 0, "session", b"generation", value=.9)
     self.cp.passive = False
@@ -113,4 +122,4 @@ class OutputMaximumFeatureTests(unittest.TestCase):
     self.assertEqual(path.read_bytes(), before)
     onroad = desk.output_maximum.row()
     self.assertIsNotNone(onroad.capability)
-    self.assertTrue(desk.apply(row_change(onroad, 1)))
+    self.assertTrue(desk.apply(required_change(onroad, 1)))

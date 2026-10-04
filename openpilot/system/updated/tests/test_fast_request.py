@@ -4,6 +4,7 @@ import threading
 import sys
 from types import ModuleType
 import unittest
+from unittest import mock
 from unittest.mock import Mock, patch
 
 from openpilot.system.updated.tests.test_vendored_update import load_updater
@@ -57,7 +58,7 @@ class TestFastRequest(unittest.TestCase):
     self.updater.fetch_update.assert_not_called()
     self.updater.set_params.assert_not_called()
     self.updated.system_time_valid.assert_not_called()
-    self.updater.fast_update.assert_called_once_with('SecretGoodStarPilot', 'a' * 40)
+    self.updater.fast_update.assert_called_once_with('SecretGoodStarPilot', 'a' * 40, rollback=False)
 
   def test_fast_request_skips_staging_and_startup_delay(self):
     self.run_cycle()
@@ -86,7 +87,8 @@ class TestFastRequest(unittest.TestCase):
     self.assertEqual(self.values['UpdaterState'], 'idle')
 
   def test_success_waits_for_manager_restart(self):
-    def apply(branch, commit):
+    def apply(branch, commit, *, rollback=False):
+      self.assertFalse(rollback)
       self.params.put_bool('DoReboot', True, block=True)
       return 'reboot-requested'
     self.updater.fast_update.side_effect = apply
@@ -149,7 +151,7 @@ class TestFastAdapter(unittest.TestCase):
       with patch.dict(sys.modules, {physical.__name__: physical, owner.__name__: owner}):
         self.assertEqual(updater.fast_update('SecretGoodStarPilot', 'b' * 40), 'reboot-requested')
       source.close.assert_called_once()
-      self.assertEqual(updater.params.get_bool.call_args_list, [unittest.mock.call('IsOffroad')])
+      self.assertEqual(updater.params.get_bool.call_args_list, [mock.call('IsOffroad')])
       updater.params.put_bool.assert_called_once_with('UpdateAvailable', False, block=True)
 
 
@@ -159,7 +161,7 @@ class TestFastAdapter(unittest.TestCase):
         updated = load_updater()
         updater = updated.Updater()
         updater.params = Mock()
-        def registered_flag(key):
+        def registered_flag(key, offroad=offroad):
           if key != "IsOffroad":
             raise KeyError(key.encode())
           return offroad

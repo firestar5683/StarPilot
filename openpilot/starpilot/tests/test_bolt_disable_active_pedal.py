@@ -270,10 +270,21 @@ class TestBoltDisableActivePedal(unittest.TestCase):
     VehicleStartupPreferences(disable_bolt_long=True).prepare(cp)
     for expired in (None, object()):
       with OpenpilotPrefix():
-        samples = iter((None, cp, expired, expired))
+        samples = iter((cp, expired))
+        reads = []
+        def provider(reads=reads, samples=samples):
+          reads.append(True)
+          return next(samples)
         owner = FeatureSettingsOwner(Params(), lambda _: True, vehicle_fingerprint=lambda: cp.carFingerprint,
-                                     vehicle_params=lambda samples=samples: next(samples))
+                                     vehicle_params=provider)
         view = owner.snapshot('vehicle', parked=True, system_long=True, lateral_context=True, metric=False)
+        self.assertEqual(len(reads), 1)
         row = next(row for row in view.rows if row.key == 'DisableOpenpilotLongitudinal')
         self.assertTrue(row.available)
         self.assertIn('Factory camera not detected', row.reason)
+        # A displayed recovery row is not retained commit authority.
+        self.assertIsNone(owner._bolt_disable_capability())
+        self.assertEqual(len(reads), 2)
+        owner.vehicle_params = lambda: cp
+        refreshed = owner.snapshot('vehicle', parked=True, system_long=True, lateral_context=True, metric=False)
+        self.assertTrue(next(row for row in refreshed.rows if row.key == 'DisableOpenpilotLongitudinal').available)

@@ -43,8 +43,20 @@ def helper():
     with patch.object(run_host_tests, 'pytest_files', return_value=selected), \
          patch.object(run_host_tests.subprocess, 'run', side_effect=invoke):
       self.assertEqual(run_host_tests.main(['--pytest']), 0)
-    self.assertEqual(calls[0][0], [run_host_tests.sys.executable, '-m', 'pytest', '-q', *selected])
+    self.assertEqual(calls[0][0], [run_host_tests.sys.executable, '-m', 'pytest', '-q', '--import-mode=importlib', *selected])
     self.assertFalse(Path(calls[0][2]['PARAMS_ROOT']).exists())
+
+  def test_duplicate_module_names_are_both_collected(self):
+    with tempfile.TemporaryDirectory() as temporary:
+      root = Path(temporary)
+      for package in ('first', 'second'):
+        folder = root / 'openpilot/starpilot' / package / 'tests'
+        folder.mkdir(parents=True)
+        (folder / 'test_owner.py').write_text('def test_valid(): assert True\n')
+      selected = run_host_tests.pytest_files(root)
+      self.assertEqual(len(selected), 2)
+      with patch.object(run_host_tests, 'ROOT', root), patch.object(run_host_tests, 'pytest_files', return_value=selected):
+        self.assertEqual(run_host_tests.main(['--pytest']), 0)
 
   def test_pytest_mode_fails_closed_when_nothing_is_discovered(self):
     with patch.object(run_host_tests, 'pytest_files', return_value=[]), \

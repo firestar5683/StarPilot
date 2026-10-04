@@ -38,9 +38,9 @@ class TestControllerExtensions(unittest.TestCase):
       self.assertEqual(inputs.update(), (True, True, True))
       for _ in range(99):
         inputs.update()
-      self.assertEqual(read.call_count, 2)
+      self.assertEqual(read.call_count, 8)
       inputs.update()
-      self.assertEqual(read.call_count, 3)
+      self.assertEqual(read.call_count, 12)
       sm.alive['modelV2'] = False
       self.assertEqual(inputs.update(), (True, True, False))
 
@@ -59,11 +59,15 @@ class TestControllerExtensions(unittest.TestCase):
       def __getitem__(self, key):
         return model.modelV2 if key == 'modelV2' else delay.lateralDelay
     inputs = ManualTurnInputs.__new__(ManualTurnInputs)
-    inputs.sm = Reader()
+    vars(inputs)['sm'] = Reader()
     with patch('openpilot.starpilot.controller_extensions.time.monotonic_ns', return_value=now):
-      self.assertAlmostEqual(inputs.preview_curvature(20.), .003)
+      curvature = inputs.preview_curvature(20.)
+      assert curvature is not None
+      self.assertAlmostEqual(curvature, .003)
       inputs.sm.logMonoTime['lateralDelay'] = now - 1_000_000_001
-      self.assertAlmostEqual(inputs.preview_curvature(20.), .002)
+      curvature = inputs.preview_curvature(20.)
+      assert curvature is not None
+      self.assertAlmostEqual(curvature, .002)
       for stamp in (0, now + 1, now - 100_000_001):
         inputs.sm.logMonoTime['modelV2'] = stamp
         self.assertIsNone(inputs.preview_curvature(20.))

@@ -1,3 +1,4 @@
+from unittest.mock import Mock
 import http.client
 import json
 import threading
@@ -29,7 +30,7 @@ def api(tmp_path):
   state = {'parked': True, 'identity_installed': True, 'bluetooth_enabled': True, 'enabled': True}
   job = FakeImport(tmp_path / 'imports')
   setup = AndroidAutoSetup(parked=lambda: state['parked'], enabled=lambda: state['enabled'], session_valid=lambda _identity: True,
-                           import_job=job, identity_status=lambda: {'installed': state['identity_installed'],
+                           import_job=Mock(wraps=job, work_dir=job.work_dir), identity_status=lambda: {'installed': state['identity_installed'],
                                                                      'message': 'Package status'},
                            bluetooth_enabled=lambda: state['bluetooth_enabled'], install_ready=lambda: True,
                            service_ready=lambda: True, set_enabled=lambda value: state.update(enabled=value))

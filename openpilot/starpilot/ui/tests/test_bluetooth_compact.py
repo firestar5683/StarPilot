@@ -1,11 +1,13 @@
 """C4 Bluetooth delegates mutations to the parked owner off the render thread."""
+from unittest.mock import patch
+
 
 from concurrent.futures import Future, ThreadPoolExecutor
 from dataclasses import replace
 from types import SimpleNamespace as NS
 import time
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 from openpilot.starpilot.ui.bluetooth_compact import BluetoothCompact, device_label
 from openpilot.starpilot.ui.presentation import Profile
@@ -42,8 +44,8 @@ class TestBluetoothCompact(unittest.TestCase):
     page.icon = object()
     page.pair_dialog = None
     page.pair_dialog_id = None
-    page.executor = NS(submit=Mock(return_value=Future()))
-    page.owner = NS(request=Mock())
+    self.enterContext(patch.object(page, 'executor', NS(submit=Mock(return_value=Future())), create=True))
+    self.enterContext(patch.object(page, 'owner', NS(request=Mock()), create=True))
     self.enterContext(patch('openpilot.starpilot.ui.bluetooth_compact.BigButton', Button))
     self.enterContext(patch('openpilot.starpilot.ui.bluetooth_compact.GreyBigButton', Button))
     self.enterContext(patch.object(BluetoothCompact, '_rebuild'))
@@ -169,7 +171,8 @@ class TestBluetoothCompact(unittest.TestCase):
     page.status = {"available": True, "parked": False}
     page.pending = None
     page.queued = None
-    page._request("scan")
+    with patch.object(page, "_rebuild"):
+      page._request("power", enabled=True)
     executor.submit.assert_not_called()
     with patch("openpilot.starpilot.ui.bluetooth_compact.gui_app.remove_nav_stack_tick"), \
          patch("openpilot.starpilot.ui.bluetooth_compact.NavScroller.hide_event"):

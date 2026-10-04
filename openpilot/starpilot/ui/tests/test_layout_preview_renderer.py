@@ -1,8 +1,10 @@
+
+from unittest.mock import patch
 import io
 import struct
 from types import SimpleNamespace as NS
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 import zlib
 
 from openpilot.starpilot.ui.layout_preview_renderer import LayoutPreviewRenderer, _Canvas, _DriverMonitorArt, _png_rgba, sample_state
@@ -95,9 +97,10 @@ class LayoutPreviewRendererTests(unittest.TestCase):
   def test_compact_sample_seeds_settled_native_widget_filters(self):
     canvas = _Canvas.__new__(_Canvas)
     canvas.profile = Profile.COMPACT
-    canvas.view = NS(compact_hud=NS(_was_cruise_active=False, _set_speed_alpha=NS(x=0.0),
+    canvas.viewport = None
+    self.enterContext(patch.object(canvas, 'view', NS(compact_hud=NS(_was_cruise_active=False, _set_speed_alpha=NS(x=0.0),
                                    _wheel_alpha=NS(x=0.0), _wheel_y=NS(x=25.0)),
-                     torque_bar=NS(_torque_filter=NS(x=0.0), _alpha_filter=NS(x=0.0)))
+                     torque_bar=NS(_torque_filter=NS(x=0.0), _alpha_filter=NS(x=0.0))), create=True))
     braking = sample_state("braking", default_document())
     canvas._settle(braking)
     self.assertTrue(canvas.view.compact_hud._was_cruise_active)
@@ -110,7 +113,8 @@ class LayoutPreviewRendererTests(unittest.TestCase):
   def test_preview_uses_runtime_monitor_occlusion_for_default_and_moved_widgets(self):
     canvas = _Canvas.__new__(_Canvas)
     canvas.profile = Profile.COMPACT
-    canvas.view = NS(compact_hud=NS(_set_speed_alpha=NS(x=1.0)))
+    canvas.viewport = None
+    self.enterContext(patch.object(canvas, 'view', NS(compact_hud=NS(_set_speed_alpha=NS(x=1.0))), create=True))
     canvas.monitor = _DriverMonitorArt.__new__(_DriverMonitorArt)
     canvas.monitor.profile = Profile.COMPACT
     canvas.monitor.renderer = Mock()

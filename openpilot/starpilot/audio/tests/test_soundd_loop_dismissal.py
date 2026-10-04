@@ -1,5 +1,5 @@
 """Dismissal preserves the current loop's tail; urgent alert changes interrupt it."""
-from types import SimpleNamespace
+from unittest.mock import Mock
 
 import numpy as np
 import pytest
@@ -16,7 +16,7 @@ def daemon_for(samples, *, builtin):
   daemon.pending_stop = False
   daemon.loaded_sounds = {soundd.AudibleAlert.warningSoft: samples,
                           soundd.AudibleAlert.warningImmediate: -samples}
-  daemon.pack_loader = SimpleNamespace(is_builtin=lambda _: builtin)
+  daemon.pack_loader = Mock(is_builtin=Mock(return_value=builtin))
   daemon.saved_volumes = {"WarningSoftVolume": 100, "WarningImmediateVolume": 100}
   return daemon
 

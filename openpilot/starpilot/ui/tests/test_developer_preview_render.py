@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 import pyray as rl
 
 from openpilot.starpilot.ui.developer_preview import OnroadVisualPreview
-from openpilot.starpilot.ui.onroad import OnroadView
+from openpilot.starpilot.ui.onroad import CornerHintCache, OnroadView
 from openpilot.starpilot.ui.onroad_compact_widgets import MiciSidebarWidgets
 from openpilot.starpilot.ui.onroad_conditional import status as conditional_status
 from openpilot.starpilot.ui.onroad_curve import controlling, glowing, render_glow, status_label
@@ -80,8 +80,9 @@ class DeveloperPreviewRenderTests(unittest.TestCase):
         view.extra_overlays = None
         view.alert = Mock()
         view.navigation = Mock()
-        view.set_speed = Mock()
-        view.speed_limit = Mock()
+        view.projection_viewport = None
+        view._corner_cache = CornerHintCache()
+        view.unified_speed = Mock()
         view.current_speed = Mock()
         view.steering_wheel = Mock()
         view.compact_hud = Mock()
@@ -116,8 +117,9 @@ class DeveloperPreviewRenderTests(unittest.TestCase):
     view.extra_overlays = None
     view.alert = Mock()
     view.navigation = Mock()
-    view.set_speed = Mock()
-    view.speed_limit = Mock()
+    view.projection_viewport = None
+    view._corner_cache = CornerHintCache()
+    view.unified_speed = Mock()
     view.current_speed = Mock()
     view.steering_wheel = Mock()
     view.torque_bar = Mock()

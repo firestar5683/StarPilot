@@ -22,8 +22,8 @@ def lifecycle(monkeypatch):
   adapter = RuntimeSnapshotAdapter(ui)
   adapter.build = Mock(wraps=adapter.build)
   session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
-  session.drive_state = SimpleNamespace(snapshot=lambda: {"mode": "auto", "revision": None, "available": False,
-                                                  "effective": None, "overrideAllowed": False})
+  monkeypatch.setattr(session, 'drive_state', SimpleNamespace(snapshot=lambda: {"mode": "auto", "revision": None, "available": False,
+                                                  "effective": None, "overrideAllowed": False}), raising=False)
   session.adapter = adapter
   session.profile = runtime_app.Profile.COMPACT
   session.selected = runtime_app.Destination.STAR

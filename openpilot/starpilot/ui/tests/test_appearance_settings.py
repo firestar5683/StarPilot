@@ -18,7 +18,7 @@ from openpilot.starpilot.ui.appearance_preferences import OnroadAppearance, onro
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
 from openpilot.starpilot.ui.feature_settings_state import FeatureInput, FeatureSettingsRequest, FeatureSettingsState, row_change
 from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadAlert, OnroadInput, OnroadState, SpeedLimitObservation
-from openpilot.starpilot.ui.onroad_large_widgets import SetSpeedWidget
+from openpilot.starpilot.ui.onroad_large_widgets import UnifiedSpeedWidget
 from openpilot.starpilot.ui.presentation import BitmapFonts, Profile
 from openpilot.starpilot.ui.settings_state import Destination, SettingsInput, SettingsState, tile_rects
 from openpilot.starpilot.ui.shell import ShellInput, ShellMode
@@ -30,6 +30,9 @@ class AppearanceSettingsTests(unittest.TestCase):
     temporary = tempfile.TemporaryDirectory()
     self.addCleanup(temporary.cleanup)
     self.params = Params(temporary.name)
+    storage = tempfile.TemporaryDirectory()
+    self.addCleanup(storage.cleanup)
+    self.storage = Path(storage.name)
     self.parked = True
     self.owner = AppearanceOwner(self.params, lambda: self.parked)
 
@@ -38,11 +41,11 @@ class AppearanceSettingsTests(unittest.TestCase):
 
   def test_absent_defaults_are_read_only_and_match_both_views(self):
     self.assertEqual(onroad_appearance(self.params), OnroadAppearance())
-    self.assertEqual(len(self.owner.snapshot(Profile.LARGE).rows), 10)
+    self.assertEqual(len(self.owner.snapshot(Profile.LARGE).rows), 9)
     self.assertEqual(tuple(row.key for row in self.owner.snapshot(Profile.COMPACT).rows),
                      ("CameraView", "DriverCamera", "StoppedTimer", "StockConfidenceBallWidget", "EnableTorqueBarWidget",
                       "RainbowPath", "HideDMIcon", "ShowBrakeStatus", "HideLeadMarker", "LeadInfo",
-                      "SignalMetrics", "BlindSpotMetrics", ""))
+                      "SignalMetrics", "BlindSpotMetrics"))
     for key in ("HideSpeed", "HideMaxSpeed", "HideSteeringWheel", "DriverCamera", "StoppedTimer",
                 "StockConfidenceBallWidget", "EnableTorqueBarWidget", "RainbowPath", "HideLeadMarker", "SignalMetrics", "BlindSpotMetrics"):
       self.assertIsNone(read_visibility(self.params, key).raw)
@@ -200,7 +203,7 @@ class AppearanceSettingsTests(unittest.TestCase):
 
     def initialize_defaults():
       with patch.object(manager, "Params", return_value=self.params), \
-           patch.object(manager, "prepare_manager_start"), patch.object(manager, "starpilot_storage_root"), \
+           patch.object(manager, "prepare_manager_start"), patch.object(manager, "starpilot_storage_root", return_value=self.storage), \
            patch.object(manager, "save_bootlog"), \
            patch.object(manager, "get_build_metadata", return_value=NS(release_channel=False)), \
            patch.object(manager.Paths, "shm_path", side_effect=AfterDefaults):
@@ -221,6 +224,9 @@ class AppearanceSettingsTests(unittest.TestCase):
   def test_stock_confidence_rail_requires_fresh_source_and_road_camera(self):
     from openpilot.starpilot.ui.appearance_preferences import CameraViewChoice
     view = onroad.OnroadView.__new__(onroad.OnroadView)
+    view.navigation = Mock()
+    view.background_layer = None
+    view.projection_viewport = None
     class Fonts(BitmapFonts):
       def __init__(self):
         self.profile = Profile.COMPACT
@@ -501,21 +507,30 @@ class AppearanceSettingsTests(unittest.TestCase):
     self.assertEqual(session.selected, Destination.STAR)
 
   def test_onroad_widget_visibility_and_wheel_request_cancel(self):
-    anchor = SetSpeedWidget.bounds(rl.Rectangle(30, 30, 1800, 1020))
-    self.assertEqual((anchor.x, anchor.y, anchor.width, anchor.height), (88, 75, 176, 196))
     base = OnroadState(engaged=True, camera_available=False, speed_mps=12, cruise_kph=60,
                        speed_limit=SpeedLimitObservation(), experimental_enabled=False,
                        experimental_available=True)
+    fonts = Mock(spec=BitmapFonts)
+    fonts.measure.return_value = NS(width=10, height=20)
+    fonts.vertical_ink.side_effect = lambda text, role, size: (0., size * .7)
+    with patch("openpilot.starpilot.ui.onroad_large_widgets.draw_control_card") as card:
+      UnifiedSpeedWidget(fonts).render(rl.Rectangle(30, 30, 1800, 1020), base)
+      anchor = card.call_args.args[0]
+      self.assertEqual((anchor.x, anchor.y, anchor.width, anchor.height), (88, 75, 176, 196))
     for profile in (Profile.LARGE, Profile.COMPACT):
       view = onroad.OnroadView.__new__(onroad.OnroadView)
+      view.navigation = Mock()
+      view.background_layer = None
+      view.projection_viewport = None
       object.__setattr__(view, "fonts", type("Fonts", (), {"profile": profile})())
       view.camera_layer = None
       view.extra_overlays = None
       view.alert = Mock()
       view.torque_bar = Mock()
-      view.set_speed = Mock()
-      view.set_speed.bounds.return_value = rl.Rectangle(88, 75, 176, 196)
-      view.speed_limit = Mock()
+      view.unified_speed = Mock()
+      view.projection_viewport = None
+      view.background_layer = None
+      view._corner_cache = Mock()
       view.current_speed = Mock()
       view.steering_wheel = Mock()
       view.compact_hud = Mock()
@@ -530,8 +545,7 @@ class AppearanceSettingsTests(unittest.TestCase):
         view.render(base)
         view.torque_bar.render.assert_called_once()
         if profile == Profile.LARGE:
-          view.set_speed.render.assert_called_once()
-          view.speed_limit.render.assert_called_once()
+          view.unified_speed.render.assert_called_once()
           view.current_speed.render.assert_called_once()
           view.steering_wheel.render.assert_called_once()
         view.torque_bar.reset_mock()
@@ -541,8 +555,7 @@ class AppearanceSettingsTests(unittest.TestCase):
         view.torque_bar.render.assert_not_called()
         view.alert.render.assert_called()
         if profile == Profile.LARGE:
-          view.set_speed.render.assert_called_once()
-          self.assertEqual(view.speed_limit.render.call_count, 2)
+          self.assertEqual(view.unified_speed.render.call_count, 2)
           self.assertEqual(slc.call_count, 2)
           view.current_speed.render.assert_called_once()
           view.steering_wheel.render.assert_called_once()

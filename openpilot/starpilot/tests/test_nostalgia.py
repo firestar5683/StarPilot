@@ -68,7 +68,7 @@ def test_normal_aol_owner_needs_saved_request_and_exact_tagged_ioniq_cp():
     assert not feature_enabled(params, stock, 'aol', {})
     Path(params.get_param_path('AlwaysOnLateral')).write_bytes(b'1')
     assert feature_requested(params, 'aol')
-    assert not feature_enabled(params, stock, 'aol', {})
+    assert feature_enabled(params, stock, 'aol', {})
     tagged = build_ioniq6_hda2_long_candidate(stock, fp)
     assert tagged is not None
     assert not feature_enabled(params, tagged, 'aol', {})  # Card has not requested native AOL bit.

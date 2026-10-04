@@ -47,7 +47,7 @@ class TestKiaEv62025Angle(unittest.TestCase):
       self.assertFalse(safety.safety_tx_hook(self.helper.packet(active_frames[0])))
       cp, _, safety, _, _, active_frames, _ = self.helper.joined(CAR.KIA_EV6_2025, topology)
       safety.set_timer(2_100_000)
-      safety.safety_tick_current_safety_config()
+      safety.safety_tick()
       self.assertFalse(safety.safety_config_valid())
       self.assertFalse(safety.safety_tx_hook(self.helper.packet(active_frames[0])))
       safety.set_relay_malfunction(True)

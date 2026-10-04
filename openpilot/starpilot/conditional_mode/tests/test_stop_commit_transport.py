@@ -1,3 +1,4 @@
+
 from dataclasses import replace
 import json
 import tempfile
@@ -54,9 +55,16 @@ class TestStopCommitTransport(unittest.TestCase):
     sm.alive['modelV2'] = alive
     if unavailable is not None:
       sm.alive[unavailable] = False
-    context = ConditionalOwnerContext(**{field: ObservedBool(False, now-2_000_000) for field in
-      ('traffic_mode', 'stop_sign_confirmed', 'forcing_stop', 'dashboard_stop_sign', 'slc_experimental',
-       'previous_experimental', 'red_light', 'plan_forcing_stop', 'plan_should_stop')},
+    context = ConditionalOwnerContext(
+      traffic_mode=ObservedBool(False, now-2_000_000),
+      stop_sign_confirmed=ObservedBool(False, now-2_000_000),
+      forcing_stop=ObservedBool(False, now-2_000_000),
+      dashboard_stop_sign=ObservedBool(False, now-2_000_000),
+      slc_experimental=ObservedBool(False, now-2_000_000),
+      previous_experimental=ObservedBool(False, now-2_000_000),
+      red_light=ObservedBool(False, now-2_000_000),
+      plan_forcing_stop=ObservedBool(False, now-2_000_000),
+      plan_should_stop=ObservedBool(False, now-2_000_000),
       pedal_override=ObservedBool(gas, now-2_000_000), plan_allow_throttle=ObservedBool(True, now-2_000_000))
     if traffic_owner_present is not None:
       context = replace(context, traffic_mode=traffic_observation(traffic_verdict,

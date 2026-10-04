@@ -1,4 +1,7 @@
 """Disposable Params and real shared-owner conditional editor requests."""
+from unittest.mock import Mock
+from openpilot.starpilot.ui.presentation import BitmapFonts
+
 
 from pathlib import Path
 from dataclasses import replace
@@ -8,12 +11,13 @@ import sys
 import os
 import tempfile
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import patch
 
 from openpilot.common.params import Params
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.hyundai.values import CAR, HyundaiFlags
-from openpilot.starpilot.conditional_mode.button_actions import BUTTON_PREFIX, MEDIA_KEYS
+from openpilot.starpilot.conditional_mode.button_actions import MEDIA_KEYS
+from openpilot.starpilot.ui.wheel_feature import PREFIX as BUTTON_PREFIX
 from openpilot.starpilot.conditional_mode.preferences import MPH_TO_MPS, SavedPreferences, decode_preferences, encode_preferences
 from openpilot.starpilot.conditional_mode.actions import commit, commit_manual, stock_document
 from openpilot.starpilot.conditional_mode.policy import ModeChoice
@@ -37,10 +41,12 @@ class ConditionalFeatureTests(unittest.TestCase):
     self.addCleanup(temporary.cleanup)
     self.params = Params(temporary.name)
     self.parked = True
-    self.cp = SimpleNamespace(carFingerprint="HONDA TEST", carVin="VIN1", openpilotLongitudinalControl=True,
-                              pcmCruise=True, notCar=False, dashcamOnly=False, passive=False)
+    from opendbc.car.honda.values import CAR as HONDA
+    self.cp = interfaces[HONDA.HONDA_CIVIC_BOSCH].get_non_essential_params(HONDA.HONDA_CIVIC_BOSCH)
+    self.cp.openpilotLongitudinalControl = True
+    self.cp.carVin = "VIN1"
     self.owner = FeatureSettingsOwner(self.params, lambda group: self.parked and group in
-                                      ("conditional", "conditional_wheel", "preferences", "parked_preferences"),
+                                      ("conditional", "preferences", "parked_preferences"),
                                       vehicle_fingerprint=lambda: getattr(self.cp, "carFingerprint", None),
                                       vehicle_params=lambda: self.cp)
 
@@ -77,7 +83,7 @@ class ConditionalFeatureTests(unittest.TestCase):
     cp.openpilotLongitudinalControl = True
     self.cp = cp
     self.parked = False
-    self.owner.authority = lambda group: group == "conditional_wheel"
+    self.owner.authority = lambda group: group == "preferences"
     row = self.row(BUTTON_PREFIX + MEDIA_KEYS[0])
     self.assertTrue(row.available)
     request = required_change(row)
@@ -116,7 +122,7 @@ class ConditionalFeatureTests(unittest.TestCase):
     self.assertFalse(any(row.key.endswith((":signal_lane_detection", ":signal_lane_width_m"))
                          for row in self.rows(FeaturePage.CONDITIONAL_CEM)))
     row = self.row("conditional:cem:signal_lane_detection", FeaturePage.LANE_CHANGE)
-    self.assertIn("Conditional Experimental", row.reason)
+    self.assertIn("requests Experimental", row.reason)
     self.assertTrue(self.owner.apply(required_change(row)))
     saved = decode_preferences(path.read_bytes())
     self.assertEqual(saved.mode, ModeChoice.STOCK)
@@ -146,27 +152,20 @@ class ConditionalFeatureTests(unittest.TestCase):
     cp.flags = int(cp.flags | HyundaiFlags.CANFD_LKA_STEER_MSG)
     cp.openpilotLongitudinalControl = True
     self.cp = cp
-    rows = [row for row in self.rows(FeaturePage.WHEEL) if row.key.startswith(BUTTON_PREFIX)]
-    self.assertEqual([row.key for row in rows], [BUTTON_PREFIX + key for key in MEDIA_KEYS])
+    rows = [self.row(BUTTON_PREFIX + key) for key in MEDIA_KEYS]
     self.assertTrue(all(row.available and row.value == "Off" for row in rows))
-    self.assertFalse(any(row.key.startswith(BUTTON_PREFIX) for row in self.rows()))
-    self.assertFalse(any(row.label == "Button assignments" for row in self.rows(FeaturePage.WHEEL)))
-    self.assertFalse(any(row.label == "Remembered manual choices" for row in self.rows()))
     first = rows[0]
     request = required_change(first)
-    self.assertIsNotNone(request)
     self.parked = False
     self.assertFalse(self.owner.apply(request))
     self.parked = True
-    Path(self.params.get_param_path("LongStarButtonControl")).write_bytes(b"5")
+    self.params.put(MEDIA_KEYS[0], 5, block=True)
     self.assertFalse(self.owner.apply(request))
-    self.assertFalse(Path(self.params.get_param_path(MEDIA_KEYS[0])).exists())
-    self.assertTrue(self.owner.apply(required_change(self.row(first.key))))
-    self.assertEqual(Path(self.params.get_param_path(MEDIA_KEYS[0])).read_bytes(), b"5")
-    Path(self.params.get_param_path("CancelButtonControl")).write_bytes(b"5")
-    self.assertEqual(next(row for row in self.rows(FeaturePage.WHEEL) if row.label == "Button assignments").value,
-                     "Review saved actions")
-    cp.flags = int(cp.flags & ~HyundaiFlags.CANFD_LKA_STEER_MSG)
+    row = self.row(first.key)
+    self.assertEqual(row.value, "Experimental override")
+    self.assertTrue(self.owner.apply(required_change(row)))
+    self.assertEqual(self.params.get(MEDIA_KEYS[0]), 6)
+    self.cp = None
     self.assertFalse(any(row.key.startswith(BUTTON_PREFIX) for row in self.rows(FeaturePage.WHEEL)))
 
   def test_captured_wheel_request_stays_vehicle_bound_with_generic_preferences(self):
@@ -176,8 +175,7 @@ class ConditionalFeatureTests(unittest.TestCase):
     self.cp = cp
     request = required_change(self.row(BUTTON_PREFIX + MEDIA_KEYS[0]))
     destination = Path(self.params.get_param_path(MEDIA_KEYS[0]))
-    for replacement in (None, SimpleNamespace(carFingerprint="UNSUPPORTED", openpilotLongitudinalControl=False,
-                                              notCar=False, passive=False, dashcamOnly=False)):
+    for replacement in (None, interfaces["HONDA_CIVIC_BOSCH"].get_non_essential_params("HONDA_CIVIC_BOSCH")):
       self.cp = replacement
       self.assertTrue(self.parked)
       self.assertFalse(self.owner.apply(request))
@@ -191,6 +189,7 @@ class ConditionalFeatureTests(unittest.TestCase):
          patch.object(runtime_app.ui_state, "CP", self.cp):
       self.assertTrue(shell._feature_authority("conditional"))
       self.assertFalse(shell._feature_authority("long"))
+      assert self.cp is not None
       self.cp.openpilotLongitudinalControl = False
       self.assertFalse(shell._feature_authority("conditional"))
       self.assertTrue(shell._feature_authority("preferences"))
@@ -203,7 +202,7 @@ class ConditionalFeatureTests(unittest.TestCase):
          patch.object(runtime_app.ui_state, "CP", self.cp):
       self.assertTrue(shell._feature_authority("lane_change"))
       self.assertTrue(shell._feature_authority("conditional_wheel"))
-      self.assertFalse(shell._feature_authority("conditional"))
+      self.assertTrue(shell._feature_authority("conditional"))
       self.assertTrue(shell._feature_authority("aol"))
       shell._mode = runtime_app.ShellMode.ONROAD
       self.assertFalse(shell._feature_authority("lane_change"))
@@ -406,6 +405,7 @@ class ConditionalFeatureTests(unittest.TestCase):
 
   def test_core_configuration_survives_car_change_and_params_lock_contention(self):
     request = required_change(self.row("conditional:mode"))
+    assert self.cp is not None
     self.cp.carVin = "VIN2"
     self.assertTrue(self.owner.apply(request))
     self.cp.carVin = "VIN1"
@@ -465,7 +465,7 @@ class ConditionalFeatureTests(unittest.TestCase):
     from openpilot.system.ui.widgets import DialogResult
     state = self.owner.snapshot(FeaturePage.CONDITIONAL, parked=True, system_long=False,
                                 lateral_context=False, metric=False)
-    hit = FeatureInput.target(2000, 150, state)
+    hit = FeatureInput.target(2000, 285, state)
     assert hit is not None and hit.row is not None
     self.assertEqual(hit.row.key, "conditional:mode")
     class Button:
@@ -531,7 +531,7 @@ class ConditionalFeatureTests(unittest.TestCase):
          patch.object(large.rl, "draw_line"), patch.object(large.rl, "draw_line_ex"), patch.object(large.rl, "draw_circle"), \
          patch.object(large.clip, "begin_scissor_mode"), \
          patch.object(large.clip, "end_scissor_mode"):
-      large.FeatureSettingsView(fonts).render(state)
+      large.FeatureSettingsView(Mock(spec=BitmapFonts, **vars(fonts))).render(state)
     self.assertIn("Conditional Driving Modes", labels)
     self.assertIn("Saved driving mode", labels)
     self.assertIn("Experimental conditions", labels)

@@ -53,10 +53,21 @@ class TestTeslaFingerprint(unittest.TestCase):
     # Every EPS FW must parse and its platform letter must match the car it's filed under.
     for car_model, ecus in FW_VERSIONS.items():
       for fw in ecus.get((Ecu.eps, 0x730, None), []):
+        if car_model == CAR.TESLA_MODEL_S_HW1:
+          self.assertIn(fw, (b'1016704-00-HAA' + b'\x00' * 10, b'\x10\x00A'))
+          continue
         m = FW_RE.match(fw)
 
         assert m is not None, f"Unparsable FW: {fw}"
         assert PLATFORM_TO_CAR[m['platform']] == car_model, f"Platform letter {m['platform']!r} != {car_model.value}: {fw}"
+
+  def test_legacy_firmware_format_is_exact(self):
+    from opendbc.car.tesla.values import FW_QUERY_CONFIG
+
+    for fw in (b'1016704-00-HAA' + b'\x00' * 10, b'\x10\x00A'):
+      self.assertIsNotNone(re.fullmatch(FW_QUERY_CONFIG.fw_version_regex, fw))
+    for fw in (b'1016704-00-HAA', b'1016704-00-HAA' + b'\x00' * 9, b'\x10\x00B'):
+      self.assertIsNone(re.fullmatch(FW_QUERY_CONFIG.fw_version_regex, fw))
 
   def test_radar_detection(self):
     # Test radar availability detection for cars with radar DBC defined

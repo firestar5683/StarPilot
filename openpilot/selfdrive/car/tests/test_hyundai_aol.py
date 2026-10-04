@@ -87,7 +87,7 @@ class Ioniq6HostTests(unittest.TestCase):
         self.assertTrue(owner.allowed_latch)
         # Brake/gas override affect neither the physical AOL token nor its host latch.
         for name, values in (('TCS', {'DriverBraking': 1}), ('ACCELERATOR', {'ACCELERATOR_PEDAL': 100})):
-          self.assertTrue(safety.safety_rx_hook(native_test.packet(packer.make_can_msg(name, 1, values))))
+          self.assertTrue(safety.safety_rx_hook(native_test.packet(packer.make_can_msg(name, 1, {key: float(value) for key, value in values.items()}))))
           self.assertEqual(safety.aol_get_permission_mask(), 1)
         native = receipt(1_040_000_000)
         self.assertFalse(native_latch_rejected(cp, native))
@@ -284,7 +284,7 @@ class Ioniq6HostTests(unittest.TestCase):
 
         sm = SafetySM(wire)
         native = current_native(sm, cp, now_ns=stamp + 1_000_000, axis_session_id='drive-session')
-        self.assertIsNotNone(native)
+        assert native is not None
         intent = SimpleNamespace(allowedLatch=lateral_latch, pauseLateral=False, pauseLongitudinal=False)
         decision = decide_axes(standard_lateral=False, standard_longitudinal=standard_long,
                                intent=intent, native=native, car_state=state(), initialized=True,

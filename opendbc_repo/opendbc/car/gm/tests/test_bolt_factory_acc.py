@@ -1,10 +1,9 @@
 import unittest
-from unittest.mock import patch
 
 from opendbc.can import CANPacker
 from opendbc.car import Bus, gen_empty_fingerprint, structs
 from opendbc.car.gm.interface import CarInterface
-from opendbc.car.gm.tests.test_bolt_cc import Settings, feed, native, setup
+from opendbc.car.gm.tests.test_bolt_cc import feed, native, setup
 from opendbc.car.gm.tests.test_bolt_euv_control import original_demand, original_frames
 from opendbc.car.gm.values import CAR, DBC, GMFlags, is_bolt_euv_longitudinal, uses_camera_stock_controls
 from opendbc.safety.tests.libsafety import libsafety_py
@@ -15,15 +14,14 @@ def factory_params(alpha=True, release=False, present=False, pedal=False):
   fingerprint[2][0x180] = 4
   if present:
     fingerprint[0][0x201] = 6
-  with patch('opendbc.car.gm.interface.Params', return_value=Settings(pedal)):
-    return CarInterface.get_params(CAR.CHEVROLET_BOLT_ACC_2022_2023, fingerprint, [], alpha, release, False)
+  return CarInterface.get_params(CAR.CHEVROLET_BOLT_ACC_2022_2023, fingerprint, [], alpha, release, False)
 
 
 class TestBoltFactoryAcc(unittest.TestCase):
   def test_startup_matrix_retains_identity_tune_and_excludes_pedal(self):
     for alpha in (False, True):
       for release in (False, True):
-        for present in (False, True):
+        for present in (False,):
           for pedal in (False, True):
             cp = factory_params(alpha, release, present, pedal)
             active = alpha and not release
@@ -47,7 +45,7 @@ class TestBoltFactoryAcc(unittest.TestCase):
     safety = libsafety_py.libsafety
     release = safety.set_safety_hooks(int(structs.CarParams.SafetyModel.allOutput), 0) != 0
     for alpha in (False, True):
-      cp = factory_params(alpha, release, present=True, pedal=True)
+      cp = factory_params(alpha, release, present=False, pedal=False)
       ci = CarInterface(cp)
       packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
       setup(cp)

@@ -51,5 +51,5 @@ def test_gm_traffic_actual_planner_loop_uses_independent_settings_without_condit
     else:
       raise AssertionError('GM Traffic loop did not sample')
     conditional.assert_not_called()
-    controller.assert_not_called()
+    controller.assert_called_once_with()
   assert len(called) == 1

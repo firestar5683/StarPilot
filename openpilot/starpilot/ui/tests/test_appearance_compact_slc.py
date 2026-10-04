@@ -1,5 +1,6 @@
 """Original compact Visuals speed-limit controls use the shared saved owner."""
 
+from unittest.mock import Mock
 import tempfile
 import unittest
 from unittest.mock import patch
@@ -33,8 +34,7 @@ class CompactVisualsSlcTests(unittest.TestCase):
     with tempfile.TemporaryDirectory() as path:
       params = Params(path)
       appearance = AppearanceOwner(params, lambda: True)
-      feature = FeatureSettingsOwner(params, lambda group: group == "preferences",
-                                     vehicle_fingerprint=lambda: None)
+      feature = FeatureSettingsOwner(params, lambda group: group == "preferences", vehicle_fingerprint=lambda: None)
 
       class Session:
         def appearance_snapshot(self):
@@ -47,11 +47,20 @@ class CompactVisualsSlcTests(unittest.TestCase):
           return feature.apply(request)
 
       shown = []
-      with patch.object(appearance_compact, "BigButton", Button), \
-           patch.object(appearance_compact, "GreyBigButton", Button), \
-           patch.object(appearance_compact, "NavScroller", Scroller), \
-           patch.object(appearance_compact.gui_app, "push_widget", shown.append):
-        appearance_compact.AppearanceCompact(Session()).open()
+      with (
+        patch.object(appearance_compact, "BigButton", Button),
+        patch.object(appearance_compact, "GreyBigButton", Button),
+        patch.object(appearance_compact, "NavScroller", Scroller),
+        patch.object(appearance_compact.gui_app, "push_widget", shown.append),
+      ):
+        appearance_compact.AppearanceCompact(
+          Mock(
+            spec=appearance_compact.AppearanceSession,
+            appearance_snapshot=Session().appearance_snapshot,
+            feature_snapshot=Session().feature_snapshot,
+            feature_request=Session().feature_request,
+          )
+        ).open()
         sign = next(item for item in shown[0].items if item.label == "show speed limits")
         self.assertIsNotNone(sign.click)
         sign.click()
@@ -82,11 +91,20 @@ class CompactVisualsSlcTests(unittest.TestCase):
           return feature.apply(request)
 
       shown = []
-      with patch.object(appearance_compact, "BigButton", Button), \
-           patch.object(appearance_compact, "GreyBigButton", Button), \
-           patch.object(appearance_compact, "NavScroller", Scroller), \
-           patch.object(appearance_compact.gui_app, "push_widget", shown.append):
-        appearance_compact.AppearanceCompact(Session()).open()
+      with (
+        patch.object(appearance_compact, "BigButton", Button),
+        patch.object(appearance_compact, "GreyBigButton", Button),
+        patch.object(appearance_compact, "NavScroller", Scroller),
+        patch.object(appearance_compact.gui_app, "push_widget", shown.append),
+      ):
+        appearance_compact.AppearanceCompact(
+          Mock(
+            spec=appearance_compact.AppearanceSession,
+            appearance_snapshot=Session().appearance_snapshot,
+            feature_snapshot=Session().feature_snapshot,
+            feature_request=Session().feature_request,
+          )
+        ).open()
         page = shown[0]
 
         def controls():

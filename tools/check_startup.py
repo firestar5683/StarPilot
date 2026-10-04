@@ -9,15 +9,18 @@ from openpilot.starpilot.state_migration import MigrationRequired, prepare_manag
 
 
 class ExistingParams:
-  def __init__(self, namespace: Path, keys):
+  def __init__(self, namespace: Path, key_types):
     self.namespace = namespace
-    self.keys = keys
+    self.key_types = key_types
 
   def get_param_path(self):
     return str(self.namespace)
 
   def all_keys(self):
-    return self.keys
+    return list(self.key_types)
+
+  def get_type(self, key):
+    return self.key_types[key.encode() if isinstance(key, str) else key]
 
 
 def check_startup(params_root: Path, storage: Path) -> None:
@@ -34,8 +37,9 @@ def check_startup(params_root: Path, storage: Path) -> None:
   if not storage.is_dir():
     raise ValueError("Existing recovery storage directory required")
   with TemporaryDirectory(prefix="startup-preflight-") as temporary:
-    keys = Params(temporary).all_keys()
-  prepare_manager_start(ExistingParams(namespace, keys), storage, dry_run=True)
+    registry = Params(temporary)
+    key_types = {key: registry.get_type(key) for key in registry.all_keys()}
+  prepare_manager_start(ExistingParams(namespace, key_types), storage, dry_run=True)
 
 
 def main() -> int:

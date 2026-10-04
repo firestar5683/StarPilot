@@ -14,6 +14,7 @@ from opendbc.car.fw_versions import FW_QUERY_CONFIGS, FUZZY_EXCLUDE_ECUS, VERSIO
                                     match_fw_to_car, get_brand_ecu_matches, get_fw_versions, get_present_ecus
 from opendbc.car.vin import get_vin
 from opendbc.car.volkswagen.values import CAR as VOLKSWAGEN, VolkswagenFlags
+from opendbc.car.hyundai.values import CAR as HYUNDAI
 from opendbc.testing import parameterized
 
 CarFw = CarParams.CarFw
@@ -95,7 +96,9 @@ class TestFwFingerprint(unittest.TestCase):
       meb_overlap = brand == "volkswagen" and bool(VOLKSWAGEN(car_model).config.flags & VolkswagenFlags.MEB)
       if test_non_essential and not matches:
         continue  # removing non-essential ECUs can lose a match
-      if meb_overlap and len(matches) > 1:
+      if brand == 'hyundai' and car_model in (HYUNDAI.KIA_XCEED_PHEV, HYUNDAI.KIA_CEED_PHEV) and len(matches) > 1:
+        self.assertEqual(matches, {HYUNDAI.KIA_XCEED_PHEV, HYUNDAI.KIA_CEED_PHEV})
+      elif meb_overlap and len(matches) > 1:
         self.assertIn(car_model, matches)
         generation = bool(VOLKSWAGEN(car_model).config.flags & VolkswagenFlags.MEB_GEN2)
         self.assertTrue(all(VOLKSWAGEN(candidate).config.flags & VolkswagenFlags.MEB for candidate in matches))
@@ -342,6 +345,7 @@ class TestFwFingerprintTiming(unittest.TestCase):
       'rivian': 0.3,
       'psa': 0.1,
       'mg': 0.1,
+      'volvo': 0.0,  # Current Volvo FwQueryConfig has no requests.
     }
 
     total_times = 0.0

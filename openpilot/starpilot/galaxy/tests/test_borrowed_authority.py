@@ -9,7 +9,7 @@ from openpilot.starpilot.galaxy.settings import LiveContextSource
 class Messages:
   def __init__(self):
     self.frame = 7
-    self.data = {
+    self.data: dict = {
       'deviceState': SimpleNamespace(started=False),
       'pandaStates': [SimpleNamespace(pandaType='uno', ignitionLine=False, ignitionCan=False,
                                      safetyModel='noOutput', controlsAllowed=False)],
@@ -42,7 +42,7 @@ class Params:
 def test_borrowed_ui_authorities_preserve_fresh_gates_and_collector_lifecycle(tmp_path):
   from openpilot.common.params import Params as NativeParams
   messages, params = Messages(), NativeParams(str(tmp_path))
-  params.put_bool("IsOffroad", True)
+  params.put_bool("IsOffroad", True, block=True)
   now = [1_000_000_000]
   authorities = [LiveContextSource(params, messages=messages, borrowed_messages=True, evidence_wait_ms=0,
                                   mono_clock=lambda: now[0], boot_clock=lambda: now[0] + 10_000_000_000)
@@ -52,7 +52,7 @@ def test_borrowed_ui_authorities_preserve_fresh_gates_and_collector_lifecycle(tm
     for authority in authorities:
       assert authority.parked()
     authority = authorities[0]
-    params.put_bool("IsOffroad", False)
+    params.put_bool("IsOffroad", False, block=True)
     messages.data['pandaStates'][0].ignitionLine = True
     messages.data['pandaStates'][0].safetyModel = 'hyundai'
     messages.data['deviceState'].started = True
@@ -79,7 +79,7 @@ def test_borrowed_ui_authorities_preserve_fresh_gates_and_collector_lifecycle(tm
     now[0] = fresh_now
     authority.close()
     assert not authority.configuration_allowed()
-    params.put_bool("IsOffroad", True)
+    params.put_bool("IsOffroad", True, block=True)
     messages.data['pandaStates'][0].ignitionLine = False
     messages.data['pandaStates'][0].safetyModel = 'noOutput'
     messages.data['deviceState'].started = False
@@ -125,7 +125,7 @@ def test_actual_ui_constructor_borrows_one_collector_for_both_runtimes():
     'openpilot.starpilot.controllers.runtime': SimpleNamespace(ControllerRuntime=runtime),
     'openpilot.starpilot.ui.layout_preview_runtime': SimpleNamespace(LayoutPreviewRuntime=runtime),
   }
-  scope = {
+  scope: dict = {
     'config_realtime_process': Mock(),
     'Priority': SimpleNamespace(UI=0),
     'select_ui': lambda *args: SimpleNamespace(custom=True, reason='test'),

@@ -11,7 +11,7 @@ import unittest
 from unittest import mock
 
 from openpilot.starpilot.galaxy.access import GalaxyAccessOwner
-from openpilot.starpilot.galaxy.remote import RemotePairing, gateway_cookie_valid, make_gateway_auth_server
+from openpilot.starpilot.galaxy.remote import RemotePairing, RemoteTokens, gateway_cookie_valid, make_gateway_auth_server
 from openpilot.starpilot.galaxy.server import make_remote_server, make_server
 
 
@@ -63,8 +63,11 @@ class RemotePairingTest(unittest.TestCase):
     self.assertEqual(status, 200)
     url = json.loads(body)['url']
     slug = url.rsplit('/', 1)[1]
-    self.assertEqual(self.pairing.read()['slug'], slug)
-    self.assertEqual(self.pairing.read()['authHash'], hashlib.sha256(b'password123').hexdigest())
+    record = self.pairing.read()
+    assert record is not None
+    assert record is not None
+    self.assertEqual(record['slug'], slug)
+    self.assertEqual(record['authHash'], hashlib.sha256(b'password123').hexdigest())
     qr_status, qr_body, qr_headers = self.request(self.local, '/api/galaxy/qr.svg', cookie=local_cookie)
     self.assertEqual(qr_status, 200)
     self.assertEqual(qr_headers['Content-Type'], 'image/svg+xml')
@@ -74,12 +77,12 @@ class RemotePairingTest(unittest.TestCase):
     self.assertFalse(remote_session['authenticated'])
     self.assertFalse(remote_session['localAccess'])
     self.assertEqual(self.request(self.remote, '/api/system/monitor', host=f'{slug}.devices.local', cookie=local_cookie)[0], 401)
-    gateway_cookie = f"galaxy_session={slug}%3A{self.pairing.read()['session']}"
+    gateway_cookie = f"galaxy_session={slug}%3A{record['session']}"
     self.assertEqual(self.request(self.remote, f'/{slug}', host=f'{slug}.devices.local')[0], 308)
     self.assertEqual(self.request(self.remote, f'/{slug}/api/system/monitor',
                                   host=f'{slug}.devices.local', cookie=gateway_cookie)[0], 200)
     remote_origin = 'https://galaxy.firestar.link'
-    remote_cookie = 'galaxy_session=' + base64.urlsafe_b64encode(json.dumps({slug: self.pairing.read()['session'],
+    remote_cookie = 'galaxy_session=' + base64.urlsafe_b64encode(json.dumps({slug: record['session'],
                          'OtherComma123456': 'd' * 64}).encode()).decode().rstrip('=')
     for cookie in (gateway_cookie, remote_cookie):
       for path in ('/api/auth/session', f'/{slug}/api/auth/session'):
@@ -112,9 +115,11 @@ class RemotePairingTest(unittest.TestCase):
     from openpilot.starpilot.galaxy.remote import default_remote_pairing
     legacy = self.pairing.root.parent / 'legacy'
     legacy.mkdir()
-    record = dict(version=1, slug='ExistingGalaxy01', authHash=hashlib.sha256(b'oldpw6').hexdigest(), session='b' * 64)
+    record = {'version': 1, 'slug': 'ExistingGalaxy01', 'authHash': hashlib.sha256(b'oldpw6').hexdigest(), 'session': 'b' * 64}
     for filename, key in (('glxyauth', 'authHash'), ('glxysession', 'session'), ('glxyslug', 'slug')):
-      (legacy / filename).write_text(record[key])
+      value = record[key]
+      assert isinstance(value, str)
+      (legacy / filename).write_text(value)
     with mock.patch('openpilot.starpilot.galaxy.access.legacy_galaxy_root', return_value=legacy), \
          mock.patch('openpilot.starpilot.storage.galaxy_storage_root', return_value=self.pairing.root):
       imported = default_remote_pairing()
@@ -177,7 +182,9 @@ class RemotePairingTest(unittest.TestCase):
   def test_device_name_is_authenticated_persistent_and_independent_of_pairing(self):
     self.assertTrue(self.owner.configure('password123', lambda: True))
     slug = self.pairing.pair(hashlib.sha256(b'password123').hexdigest())
+    assert slug is not None
     record = self.pairing.read()
+    assert record is not None
     pairing_bytes = (self.pairing.root / self.pairing.FILE).read_bytes()
     cookie = 'galaxy_session=' + base64.urlsafe_b64encode(json.dumps({slug: record['session']}).encode()).decode().rstrip('=')
     host = f'{slug}.devices.local'
@@ -206,7 +213,7 @@ class RemotePairingTest(unittest.TestCase):
     self.assertEqual(DeviceName(self.pairing.root).read(), 'Road comma')
 
   def test_gateway_cookie_checks_this_comma_token_not_header_or_other_device(self):
-    record = {'slug': 'CurrentComma1234', 'session': 'a' * 64}
+    record: RemoteTokens = {'slug': 'CurrentComma1234', 'session': 'a' * 64}
     def encode(value):
       return base64.urlsafe_b64encode(json.dumps(value).encode()).decode().rstrip('=')
     self.assertTrue(gateway_cookie_valid(encode({record['slug']: record['session']}), record))
@@ -230,6 +237,7 @@ class RemotePairingTest(unittest.TestCase):
     self.assertTrue(self.owner.verify('new-remote-password'))
     slug = json.loads(body)['url'].rsplit('/', 1)[1]
     record = self.pairing.read()
+    assert record is not None
     self.assertEqual(record['authHash'], hashlib.sha256(b'new-remote-password').hexdigest())
     remote_cookie = 'galaxy_session=' + base64.urlsafe_b64encode(json.dumps({slug: record['session']}).encode()).decode().rstrip('=')
     result = self.request(self.remote, '/api/auth/session', host=f'{slug}.devices.local', cookie=remote_cookie)
@@ -305,6 +313,7 @@ class RemotePairingTest(unittest.TestCase):
     self.assertIsNone(self.pairing.pair('wrong'))
     self.assertTrue(self.owner.configure('password123', lambda: True))
     slug = self.pairing.pair(hashlib.sha256(b'password123').hexdigest())
+    assert slug is not None
     self.assertRegex(slug, r'^[A-Za-z0-9]{16}$')
     self.assertEqual((self.pairing.root / self.pairing.FILE).stat().st_mode & 0o777, 0o600)
     self.assertEqual(self.pairing.root.stat().st_mode & 0o777, 0o700)
@@ -353,7 +362,10 @@ class RemotePairingTest(unittest.TestCase):
                                        origin=origin, cookie=cookie)
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)['url'], f'https://galaxy.firestar.link/{slug}')
-        self.assertEqual(pairing.read()['session'], session)
+        record = pairing.read()
+        assert record is not None
+        assert record is not None
+        self.assertEqual(record['session'], session)
         self.assertTrue(owner.verify(password))
         login_status, _, _ = self.request(server, '/api/auth/login', method='POST', payload={'password': password}, origin=origin)
         self.assertEqual(login_status, 200)
@@ -386,7 +398,10 @@ class RemotePairingTest(unittest.TestCase):
                                        origin=origin, cookie=cookie)
         self.assertEqual(status, 200)
         self.assertEqual(json.loads(body)['url'], f'https://galaxy.firestar.link/{slug}')
-        self.assertEqual(pairing.read()['session'], session)
+        record = pairing.read()
+        assert record is not None
+        assert record is not None
+        self.assertEqual(record['session'], session)
         self.assertTrue(owner.verify(password))
       finally:
         server.shutdown()

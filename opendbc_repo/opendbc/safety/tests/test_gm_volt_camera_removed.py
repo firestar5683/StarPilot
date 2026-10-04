@@ -75,7 +75,7 @@ class TestGmVoltCameraRemoved(unittest.TestCase):
       self.mode(word)
       for name in ('PSCMStatus', 'EBCMWheelSpdRear', 'ECMEngineStatus', 'AcceleratorPedal2', 'ASCMSteeringButton', 'EBCMRegenPaddle'):
         self.rx(name)
-      self.safety.safety_tick_current_safety_config()
+      self.safety.safety_tick()
       if word == 0xC151 and self.release:
         self.assertFalse(self.safety.safety_tx_hook(self.packet(gmcan.create_steering_control(self.packer, 0, 1, 0, True))))
         continue
@@ -89,7 +89,7 @@ class TestGmVoltCameraRemoved(unittest.TestCase):
       self.rx('EBCMRegenPaddle', {'RegenPaddle': 1})
       self.assertFalse(self.safety.get_controls_allowed())
       self.safety.set_timer(3_000_000)
-      self.safety.safety_tick_current_safety_config()
+      self.safety.safety_tick()
       self.assertFalse(self.safety.safety_config_valid())
 
   def test_forwarding_and_reinitialization_clear_cancel_credit(self):

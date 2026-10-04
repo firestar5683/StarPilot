@@ -13,7 +13,7 @@ class TestEV9OrdinaryAxis(unittest.TestCase):
     ev9 = params(candidate=CAR.KIA_EV9)
     self.assertEqual(ev9.safetyConfigs[0].safetyParam, 0x5c91)
     with patch('opendbc.car.hyundai.tests.test_ioniq5pe_stock.params', return_value=ev9):
-      ordinary_axis_fixture.TestOrdinaryAxis.test_actual_controls_intersects_baseline_without_changing_enabled_or_long(self)
+      ordinary_axis_fixture.TestOrdinaryAxis().test_actual_controls_intersects_baseline_without_changing_enabled_or_long()
 
   def test_current_ev9_session_rejects_pe_native_word_and_independent_long(self):
     from openpilot.cereal import messaging
@@ -25,7 +25,8 @@ class TestEV9OrdinaryAxis(unittest.TestCase):
     cp = params(candidate=CAR.KIA_EV9)
     policy = policy_for(cp)
     self.assertTrue(policy.ordinary_axis_ack_required)
-    self.assertFalse(policy.explicit_latch or policy.runtime_supported or policy.settings_supported)
+    self.assertTrue(policy.explicit_latch and policy.runtime_supported and policy.settings_supported)
+    self.assertEqual(cp.alternativeExperience, 0)
     with OpenpilotPrefix():
       sm = messaging.SubMaster([SAFETY_SERVICE])
       for tick, (word, session, long_request, expected) in enumerate((
@@ -40,7 +41,7 @@ class TestEV9OrdinaryAxis(unittest.TestCase):
             lateralAllowed=True, longitudinalAllowed=False, requestedLateral=True,
             requestedLongitudinal=long_request, pandaSerial='synthetic-transport-only', axisSessionId=session))
           decoded = decode_safety(message.aolSafetyWire)
-          self.assertIsNotNone(decoded)
+          assert decoded is not None
           self.assertEqual(decoded.requestedLongitudinal, long_request)
           sm.update_msgs(now / 1e9, [message.as_reader()])
           native = current_native(sm, cp, now_ns=now, axis_session_id='ev9-current')

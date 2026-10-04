@@ -24,6 +24,8 @@ Ecu = CarParams.Ecu
 NO_DATES_PLATFORMS = {
   # CAN FD
   CAR.KIA_SPORTAGE_5TH_GEN,
+  CAR.KIA_SPORTAGE_2026,
+  CAR.KIA_SPORTAGE_HEV_2026,
   CAR.HYUNDAI_SANTA_CRUZ_1ST_GEN,
   CAR.HYUNDAI_SANTA_CRUZ_2025,
   CAR.HYUNDAI_TUCSON_4TH_GEN,
@@ -420,7 +422,7 @@ class TestHyundaiFingerprint(unittest.TestCase):
 
           # Third and fourth character are usually EV/hybrid identifiers
           codes = {code.split(b"-")[0][:2] for code, _ in get_platform_codes(fws)}
-          if car_model == CAR.HYUNDAI_PALISADE:
+          if car_model in (CAR.HYUNDAI_PALISADE, CAR.HYUNDAI_PALISADE_2023):
             assert codes == {b"LX", b"ON"}, f"Car has unexpected platform codes: {car_model} {codes}"
           elif car_model == CAR.HYUNDAI_KONA_EV and ecu[0] == Ecu.fwdCamera:
             assert codes == {b"OE", b"OS"}, f"Car has unexpected platform codes: {car_model} {codes}"
@@ -467,6 +469,15 @@ class TestHyundaiFingerprint(unittest.TestCase):
             result = get_platform_codes([fw])
             assert 1 == len(result), f"Unable to parse FW: {fw}"
             codes |= result
+            # Exact historical camera record has no embedded ECU part number.
+            # Keep every other record, including these platforms' radars, strict.
+            historical_no_part = (
+              car_model in (CAR.KIA_SPORTAGE_2026, CAR.KIA_SPORTAGE_HEV_2026) and
+              ecu == (Ecu.fwdCamera, 0x7c4, None) and
+              fw == b'\xf1\x00NQ51.011.021.012551000HKP_NQ524_50509099211P1110'
+            )
+            if car_model != CAR.HYUNDAI_GENESIS and not historical_no_part:
+              assert all(b"-" in code for code, _ in result), f"FW does not have part number: {fw}"
 
           if ecu[0] not in DATE_FW_ECUS or car_model in NO_DATES_PLATFORMS:
             assert all(date is None for _, date in codes)
@@ -478,8 +489,6 @@ class TestHyundaiFingerprint(unittest.TestCase):
 
           # Hyundai places the ECU part number in their FW versions, assert all parsable
           # Some examples of valid formats: b"56310-L0010", b"56310L0010", b"56310/M6300"
-          assert all(b"-" in code for code, _ in codes), \
-                          f"FW does not have part number: {fw}"
 
   def test_platform_codes_spot_check(self):
     # Asserts basic platform code parsing behavior for a few cases

@@ -1,4 +1,7 @@
 """Original ordinary factory-ACC Bolt default law through actual Controls and CAN."""
+
+from unittest.mock import Mock
+from openpilot.cereal.messaging import PubMaster
 from openpilot.starpilot.longitudinal.extension import LongitudinalContext
 from openpilot.starpilot.longitudinal.tests.extension_helpers import extension_state
 import os
@@ -254,7 +257,7 @@ class TestEuvLongitudinal(unittest.TestCase):
         controls.sm['longitudinalPlan'].hasLead = controls.sm['radarState'].leadOne.present = True
         with patch.dict(os.environ, {'REPLAY': '0'}), \
              patch('openpilot.starpilot.longitudinal.inputs.clock_pair_ns', return_value=(now, now + offset)):
-          self.assertIsNotNone(controls.longitudinal_inputs._gm_euv_evidence())
+          assert controls.longitudinal_inputs._gm_euv_evidence() is not None
           if failure == 'valid':
             controls.sm.valid[source] = False
           elif failure == 'age':
@@ -271,7 +274,7 @@ class TestEuvLongitudinal(unittest.TestCase):
     with patch.dict(os.environ, {'REPLAY': '0'}), \
          patch('openpilot.starpilot.longitudinal.inputs.clock_pair_ns', return_value=(now, now + offset)):
       previous = controls.longitudinal_inputs._gm_euv_evidence()
-      self.assertIsNotNone(previous)
+      assert previous is not None
       new_drive = now - 15_000_000
       controls.sm['deviceState'].startedMonoTime = new_drive
       controls.sm.logMonoTime['deviceState'] = now - 10_000_000
@@ -280,7 +283,7 @@ class TestEuvLongitudinal(unittest.TestCase):
         controls.sm.logMonoTime[name] = now - 5_000_000
         controls.sm.recv_time[name] = (now - 1_000_000) / 1e9
       fresh = controls.longitudinal_inputs._gm_euv_evidence()
-      self.assertIsNotNone(fresh)
+      assert fresh is not None
       self.assertEqual(fresh.drive_id, new_drive)
       self.assertNotEqual(fresh.drive_id, previous.drive_id)
 
@@ -347,7 +350,7 @@ class TestEuvLongitudinal(unittest.TestCase):
     for _ in range(4):
       self.assertIsNone(interface.update([]))
     raw = interface.update([])
-    self.assertIsNotNone(raw)
+    assert raw is not None
     self.assertFalse(raw.errors.canError or raw.errors.radarFault or raw.errors.radarUnavailableTemporary)
     for present in (False, True):
       source = Sources(now - 20_000_000)
@@ -357,7 +360,7 @@ class TestEuvLongitudinal(unittest.TestCase):
       radar = RadarD(controls.CP.radarDelay, radar_available=not controls.CP.radarUnavailable)
       radar.update(source, raw)
       published = {}
-      radar.publish(NS(send=lambda name, event, output=published: output.__setitem__(name, event)))
+      radar.publish(Mock(spec=PubMaster, send=lambda name, event, output=published: output.__setitem__(name, event)))
       event = published['radarState']
       self.assertTrue(event.valid)
       self.assertEqual(event.radarState.leadOne.present, present)
@@ -368,7 +371,7 @@ class TestEuvLongitudinal(unittest.TestCase):
       with patch.dict(os.environ, {'REPLAY': '0'}), \
            patch('openpilot.starpilot.longitudinal.inputs.clock_pair_ns', return_value=(now, now + offset)):
         evidence = controls.longitudinal_inputs._gm_euv_evidence()
-        self.assertIsNotNone(evidence)
+        assert evidence is not None
         self.assertEqual(evidence.has_lead, present)
         controls.sm.logMonoTime['radarState'] = now - 200_000_000
         self.assertIsNone(controls.longitudinal_inputs._gm_euv_evidence())

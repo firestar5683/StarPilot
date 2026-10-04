@@ -76,7 +76,10 @@ class TestVehicleStateContext(unittest.TestCase):
     self.assertEqual(calls[0]['now_ns'], 0)
 
   def test_no_holder_or_owner_performs_no_clock_or_envelope_work(self):
-    for instance in (SimpleNamespace(), SimpleNamespace(vehicle_startup=VehicleStartupOwner())):
+    empty = card.Car.__new__(card.Car)
+    owned = card.Car.__new__(card.Car)
+    owned.vehicle_startup = VehicleStartupOwner()
+    for instance in (empty, owned):
       with patch.object(card, 'clock_pair_ns', side_effect=AssertionError('unexpected clock read')):
         card.Car.update_vehicle_state_context(instance, object())
     VehicleStartupOwner().after_state(unused=object())

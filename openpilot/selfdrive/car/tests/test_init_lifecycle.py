@@ -9,21 +9,21 @@ from opendbc.car.gm.values import CAR as GMCar, GMFlags
 from openpilot.cereal import messaging
 from openpilot.selfdrive.car.card import Car, EventName
 from openpilot.selfdrive.pandad import can_capnp_to_list
+from openpilot.starpilot.vehicle_startup import VehicleStartupOwner
 
 
 class CardInitLifecycleTest(unittest.TestCase):
   def test_bolt_pedal_waits_for_control_then_initializes_once_before_output(self):
     fingerprint = gen_empty_fingerprint()
     fingerprint[0][0x201] = 6
-    with patch('opendbc.car.gm.interface.Params') as saved:
-      saved.return_value.get_bool.return_value = True
-      cp = GMInterface.get_params(GMCar.CHEVROLET_BOLT_ACC_2022_2023_PEDAL,
-                                  fingerprint, [], False, False, False)
+    cp = GMInterface.get_params(GMCar.CHEVROLET_BOLT_ACC_2022_2023_PEDAL,
+                                fingerprint, [], False, False, False)
     self.assertTrue(cp.flags & GMFlags.PEDAL_LONG.value)
 
     order = []
     card = Car.__new__(Car)
     card.CP = cp
+    card.vehicle_startup = VehicleStartupOwner()
     card.ci_initialized = False
     card.initialized_prev = False
     card.ioniq6_long_prearmed = False
@@ -35,6 +35,7 @@ class CardInitLifecycleTest(unittest.TestCase):
       return object(), [CanData(0x200, b'\x00' * 8, 0)]
 
     fake_ci = SimpleNamespace(
+      CC=SimpleNamespace(),
       init=Mock(side_effect=lambda *_: order.append('init')),
       apply=Mock(side_effect=apply),
     )
@@ -57,7 +58,9 @@ class CardInitLifecycleTest(unittest.TestCase):
     class SubMaster:
       valid = {'carControl': False}
       alive = {'carControl': False}
-      seen = {'onroadEvents': False}
+      seen = {'onroadEvents': False, 'carControl': True}
+      logMonoTime = {}
+      recv_time = {}
       events = []
 
       def __getitem__(self, key):
@@ -81,6 +84,9 @@ class CardInitLifecycleTest(unittest.TestCase):
     self.assertNotIn('init', order)
     sm.valid['carControl'] = True
     sm.alive['carControl'] = True
+    import time
+    sm.logMonoTime['carControl'] = time.monotonic_ns()
+    sm.recv_time['carControl'] = time.monotonic()
     cs.canValid = False
     card.step()  # A live controller cannot initialize against invalid CAN.
     self.assertNotIn('init', order)

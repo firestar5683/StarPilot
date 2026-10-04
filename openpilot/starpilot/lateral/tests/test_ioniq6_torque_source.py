@@ -65,12 +65,14 @@ class Ioniq6TorqueSourceTests(unittest.TestCase):
           self.assertFalse(runtime_enabled(stock, params))
           self.assertFalse(runtime_enabled(tagged, params))
           params.put_bool('AdvancedLateralTune', True, block=True)
+          params.put('SteerFriction', float(tagged.lateralTuning.torque.friction) * 1.1, block=True)
           self.assertTrue(runtime_enabled(tagged, params))
           self.assertTrue(runtime_enabled(stock, params))
           self.assertFalse(runtime_enabled(cp_for(TOYOTA.TOYOTA_COROLLA_TSS2), params))
           stock.brand = 'toyota'
           self.assertFalse(runtime_enabled(stock, params))
           params.put_bool('AdvancedLateralTune', False, block=True)
+          params.remove('SteerFriction')
       _, tagged = ioniq_long_candidate()
       params.put_bool('AdvancedLateralTune', True, block=True)
       Path(params.get_param_path('SteerFriction')).write_bytes(b'nan')
@@ -90,7 +92,7 @@ class Ioniq6TorqueSourceTests(unittest.TestCase):
       params.put('TorqueOverrideDocument', json.loads(serialize_document({str(stock.carFingerprint): profile})), block=True)
       for cp in (stock, tagged):
         with self.subTest(long=cp.openpilotLongitudinalControl):
-          params.put('CarParams', cp.to_bytes(), block=True)
+          params.put('CarParams', cp.as_reader().as_builder().to_bytes(), block=True)
           selected = Controls()
           self.assertIsNotNone(selected.torque_host)
           learner = LearnedFrame(1_000_000_000, factor=3.15, offset=0.03, friction=0.10)
@@ -103,7 +105,8 @@ class Ioniq6TorqueSourceTests(unittest.TestCase):
           TorqueEstimator(cp.as_reader())
           self.assertEqual(get_cache.call_count, 0)
       params.put_bool('AdvancedLateralTune', False, block=True)
-      params.put('CarParams', stock.to_bytes(), block=True)
+      params.remove('TorqueOverrideDocument')
+      params.put('CarParams', stock.as_reader().as_builder().to_bytes(), block=True)
       baseline = Controls()
       self.assertIsNone(baseline.torque_host)
       TorqueEstimator(stock.as_reader())
@@ -182,17 +185,18 @@ class Ioniq6TorqueSourceTests(unittest.TestCase):
       owner = FeatureSettingsOwner(params, lambda _: True, vehicle_fingerprint=lambda: str(cp.carFingerprint),
                                    vehicle_params=lambda: cp)
       page = owner.snapshot('torque', parked=True, system_long=False, lateral_context=True, metric=False)
-      master = next(row for row in page.rows if row.key == 'AdvancedLateralTune')
-      self.assertTrue(master.available)
-      request = row_change(master)
+      friction = next(row for row in page.rows if row.key == 'torque:friction:value')
+      self.assertTrue(friction.available)
+      request = row_change(friction)
       if request is None:
-        self.fail('Ioniq 6 torque master did not produce an action')
+        self.fail('Ioniq 6 friction row did not produce an action')
       cp.carFingerprint = HYUNDAI.HYUNDAI_IONIQ_5
       self.assertFalse(owner.apply(request))
-      self.assertFalse(params.get_bool('AdvancedLateralTune'))
+      self.assertIsNone(params.get('TorqueOverrideDocument'))
       cp.carFingerprint = HYUNDAI.HYUNDAI_IONIQ_6
       self.assertTrue(owner.apply(request))
-      self.assertTrue(params.get_bool('AdvancedLateralTune'))
+      self.assertTrue(read_settings(params, TorqueHost(params, cp).vehicle).valid)
+      self.assertIsNotNone(params.get('TorqueOverrideDocument'))
 
 
 if __name__ == '__main__':

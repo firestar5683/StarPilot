@@ -28,8 +28,7 @@ from openpilot.selfdrive.ui.ui_state import ui_state
 
 params = Params()
 cp = car.CarParams.new_message(openpilotLongitudinalControl=True, alphaLongitudinalAvailable=False)
-with patch('openpilot.selfdrive.ui.ui_state.read_int', return_value=0), \
-     patch('openpilot.selfdrive.ui.ui_state.chestnut_compiled', return_value=True):
+with patch.object(ui_state, 'chestnut_compiled', True):
   put_cache(params, 'CarParamsPersistent', cp, block=True)
   ui_state.update_params()
   assert ui_state.CP is not None and ui_state.has_longitudinal_control

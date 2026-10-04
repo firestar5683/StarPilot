@@ -25,13 +25,13 @@ class RuntimeStatusTest(unittest.TestCase):
     self.addCleanup(self.environment.stop)
 
   def test_saved_enable_is_not_armed_and_fresh_countdown_is_observed(self):
-    self.assertEqual(self.status.snapshot(self.saved)[0], "Waiting for monitor")
+    self.assertEqual(self.status.runtime_snapshot(self.saved)[0], "Waiting for monitor")
     self.status.publish(Decision("arming", seconds_remaining=82), self.saved.raw, "idle")
-    self.assertEqual(self.status.snapshot(self.saved)[0], "Arming · 82s")
+    self.assertEqual(self.status.runtime_snapshot(self.saved)[0], "Arming · 82s")
     self.status.publish(Decision("armed"), self.saved.raw, "stored")
-    self.assertEqual(self.status.snapshot(self.saved)[0], "Monitoring motion")
+    self.assertEqual(self.status.runtime_snapshot(self.saved)[0], "Monitoring motion")
     self.status.publish(Decision("disabled_ignition"), self.saved.raw, "stored")
-    self.assertEqual(self.status.snapshot(self.saved)[0], "Not armed")
+    self.assertEqual(self.status.runtime_snapshot(self.saved)[0], "Not armed")
 
   def test_expired_future_reboot_resume_or_changed_settings_never_show_armed(self):
     for failure in ("expired", "future", "reboot", "resume", "settings"):
@@ -52,17 +52,18 @@ class RuntimeStatusTest(unittest.TestCase):
         elif failure == "resume":
           self.boot_now += 300_000_000
         else:
+          assert self.saved.raw is not None
           self.saved = SavedPreferences(self.saved.raw + b" ", True, True, self.saved.preferences)
-        self.assertEqual(self.status.snapshot(self.saved)[0], "Waiting for monitor")
+        self.assertEqual(self.status.runtime_snapshot(self.saved)[0], "Waiting for monitor")
 
   def test_legacy_development_flag_does_not_gate_real_monitor_and_unsafe_status_is_rejected(self):
     self.status.publish(Decision("armed"), self.saved.raw, "idle")
     with patch.dict(os.environ, STARPILOT_SENTRY_DEVELOPMENT="0"):
-      self.assertEqual(self.status.snapshot(self.saved)[0], "Monitoring motion")
+      self.assertEqual(self.status.runtime_snapshot(self.saved)[0], "Monitoring motion")
     destination = Path(self.directory.name) / "status.json"
     original = destination.read_bytes()
     destination.unlink()
     target = Path(self.directory.name) / "other"
     target.write_bytes(original)
     destination.symlink_to(target)
-    self.assertEqual(self.status.snapshot(self.saved)[0], "Waiting for monitor")
+    self.assertEqual(self.status.runtime_snapshot(self.saved)[0], "Waiting for monitor")

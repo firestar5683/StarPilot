@@ -63,7 +63,7 @@ class TestSuburbanGateway(unittest.TestCase):
       for name, values in required:
         addr, data, bus = packer.make_can_msg(name, 0, values)
         self.assertTrue(safety.safety_rx_hook(libsafety_py.make_CANPacket(addr, bus, data)))
-      safety.safety_tick_current_safety_config()
+      safety.safety_tick()
     self.assertTrue(safety.safety_config_valid())
     addr, data, bus = packer.make_can_msg('ASCMSteeringButton', 0, {'ACCButtons': 2})
     safety.safety_rx_hook(libsafety_py.make_CANPacket(addr, bus, data))

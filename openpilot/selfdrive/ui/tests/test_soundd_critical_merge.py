@@ -1,5 +1,6 @@
-"""Combined critical escalation/road dismissal; synthetic samples, no audio output."""
 from types import SimpleNamespace
+"""Combined critical escalation/road dismissal; synthetic samples, no audio output."""
+from unittest.mock import Mock
 from unittest import TestCase
 from unittest.mock import patch
 
@@ -22,8 +23,8 @@ def soundd(alert, *, builtin=False, saved=AUTO):
   owner.pending_stop = False
   owner.loaded_sounds = {key: np.array([.2, .4, .2, 0.], dtype=np.float32) for key in sound_list}
   owner.loaded_sounds[CRITICAL_MAX] = np.array([.1, .2, .3, .2, 0., 0.], dtype=np.float32)
-  owner.pack_loader = SimpleNamespace(is_builtin=lambda _samples: builtin)
-  owner.saved_volumes = {key: saved for key in ALERT_VOLUME_KEYS.values()}
+  owner.pack_loader = Mock(is_builtin=Mock(return_value=builtin))
+  owner.saved_volumes = dict.fromkeys(ALERT_VOLUME_KEYS.values(), saved)
   return owner
 
 

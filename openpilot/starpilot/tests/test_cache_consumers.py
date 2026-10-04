@@ -3,9 +3,10 @@ import tempfile
 import unittest
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from opendbc.car.structs import car
+from openpilot.cereal import messaging
 from openpilot.common.params import Params
 from openpilot.selfdrive.test.process_replay import process_replay
 from openpilot.starpilot.schema_cache import get_cache, put_cache
@@ -56,6 +57,33 @@ class TestCacheConsumers(unittest.TestCase):
     factory.assert_not_called()
     self.assertEqual(dict(os.environ), before)
     self.assertEqual(list(self.namespace.iterdir()), [])
+
+  def test_locationd_replay_ignores_vehicle_cache_without_fingerprinting(self):
+    event = messaging.new_message("carParams")
+    event.carParams = car.CarParams.new_message(fingerprintSource="fw", openpilotLongitudinalControl=True, notCar=True)
+    config = next(cfg for cfg in process_replay.CONFIGS if cfg.proc_name == "locationd")
+    container = Mock()
+    container.start.side_effect = RuntimeError("captured replay startup")
+    with patch.object(process_replay, "ProcessContainer", return_value=container), \
+         self.assertRaisesRegex(RuntimeError, "captured replay startup"):
+      process_replay._replay_multi_process([config], [event.as_reader()], None, None, None, None, True)
+    params, environment = container.start.call_args.args[:2]
+    self.assertNotIn("CarParamsCache", params)
+    self.assertNotIn("AlphaLongitudinalEnabled", params)
+    self.assertNotIn("JoystickDebugMode", params)
+    self.assertEqual(environment["FINGERPRINT"], "")
+    container.stop.assert_called_once_with()
+
+  def test_vehicle_replay_still_requires_qualified_firmware_cache(self):
+    event = messaging.new_message("carParams")
+    event.carParams = car.CarParams.new_message(fingerprintSource="fw")
+    location = next(cfg for cfg in process_replay.CONFIGS if cfg.proc_name == "locationd")
+    for name in ("card", "controlsd", "selfdrived", "radard", "plannerd"):
+      vehicle = next(cfg for cfg in process_replay.CONFIGS if cfg.proc_name == name)
+      with self.subTest(process=name), patch.object(process_replay, "ProcessContainer") as factory, \
+           self.assertRaisesRegex(ValueError, "Automatic CarParamsCache"):
+        process_replay._replay_multi_process([location, vehicle], [event.as_reader()], None, None, None, None, True)
+      factory.assert_not_called()
 
   def test_replay_accepts_current_synthetic_envelopes(self):
     cp = car.CarParams.new_message(carFingerprint="cache-test-car", fingerprintSource="fw")

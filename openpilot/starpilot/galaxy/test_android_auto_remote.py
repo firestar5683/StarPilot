@@ -1,3 +1,4 @@
+from unittest.mock import Mock
 import base64
 import hashlib
 import http.client
@@ -17,11 +18,14 @@ def test_remote_binary_upload_and_pairing_use_existing_gateway_session(tmp_path)
   pairing = RemotePairing(tmp_path / 'pairing')
   assert access.configure('password123', lambda: True)
   slug = pairing.pair(hashlib.sha256(b'password123').hexdigest())
-  cookie = 'galaxy_session=' + base64.urlsafe_b64encode(json.dumps({slug: pairing.read()['session']}).encode()).decode().rstrip('=')
+  assert slug is not None
+  record = pairing.read()
+  assert record is not None
+  cookie = 'galaxy_session=' + base64.urlsafe_b64encode(json.dumps({slug: record['session']}).encode()).decode().rstrip('=')
   state = {'parked': True}
   job = FakeImport(tmp_path / 'imports')
   setup = AndroidAutoSetup(parked=lambda: state['parked'], enabled=lambda: True,
-    session_valid=lambda _identity: True, import_job=job, identity_status=lambda: {'installed': True},
+    session_valid=lambda _identity: True, import_job=Mock(wraps=job, work_dir=job.work_dir), identity_status=lambda: {'installed': True},
     bluetooth_enabled=lambda: True, install_ready=lambda: True, service_ready=lambda: True)
   class Client:
     source = None

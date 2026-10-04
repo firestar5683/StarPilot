@@ -165,6 +165,7 @@ class TestGmVisionSource(unittest.TestCase):
       self.assertTrue(row.available)
       self.assertIn('factory cruise', row.reason)
       request = row_change(row)
+      assert request is not None
       self.assertTrue(owner.apply(request))
       self.assertEqual(params.get('SLCPriority1'), 'Vision')
       self.assertFalse(owner.apply(request))

@@ -1,12 +1,11 @@
 """Manual Volt PT-state camera fallback, with explicit cancellation ownership."""
 import unittest
-from unittest.mock import patch
 from types import SimpleNamespace
 
 from opendbc.can import CANPacker
 from opendbc.car import Bus, gen_empty_fingerprint, structs
 from opendbc.car.gm.interface import CarInterface
-from opendbc.car.gm.tests.test_bolt_cc import Settings, feed, setup, native
+from opendbc.car.gm.tests.test_bolt_cc import feed, setup, native
 from opendbc.car.gm.values import CAR, DBC, GMFlags, is_volt_camera_removed
 from opendbc.safety.tests.libsafety import libsafety_py
 
@@ -16,8 +15,7 @@ def removed_params(alpha=True, release=False, alternate=False, sascm=False):
   fingerprint[0] = {0x184: 8, 0x34A: 5, 0x1C4: 8, 0xC9: 8, 0x1E1: 7, 0xF1 if alternate else 0xBE: 6}
   if sascm:
     fingerprint[0][0x2FF] = 8
-  with patch("opendbc.car.gm.interface.Params", return_value=Settings(False)):
-    return CarInterface.get_params(CAR.CHEVROLET_VOLT_CAMERA, fingerprint, [], alpha, release, False)
+  return CarInterface.get_params(CAR.CHEVROLET_VOLT_CAMERA, fingerprint, [], alpha, release, False)
 
 
 def feed_removed(ci, packer, now, *, counter=0, gas=False, brake=False, low=False, active=True, speed=20.):
@@ -57,8 +55,7 @@ class TestVoltCameraRemoved(unittest.TestCase):
       fingerprint = gen_empty_fingerprint()
       fingerprint[0] = {0x184: 8, 0x34A: 5, 0x1C4: 8, 0xC9: 8, 0x1E1: 7, 0xBE: 6}
       fingerprint[0][address] -= 1
-      with patch("opendbc.car.gm.interface.Params", return_value=Settings(False)):
-        cp = CarInterface.get_params(CAR.CHEVROLET_VOLT_CAMERA, fingerprint, [], True, False, False)
+      cp = CarInterface.get_params(CAR.CHEVROLET_VOLT_CAMERA, fingerprint, [], True, False, False)
       self.assertTrue(cp.dashcamOnly)
       self.assertFalse(is_volt_camera_removed(cp))
 

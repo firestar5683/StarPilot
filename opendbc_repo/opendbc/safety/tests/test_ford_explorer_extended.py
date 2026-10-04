@@ -46,7 +46,11 @@ class TestFordExplorerExtended(unittest.TestCase):
       self.prepare()
       self.assertTrue(self._tx(self._lat_ctl_msg(True, 0, 0, 0, 0.0002)))
       self.assertEqual(word == 33, self._tx(self._acc_command_msg(self.INACTIVE_GAS, self.INACTIVE_ACCEL, False)))
-    for word, ae in ((34, 0), (36, 0), (40, 0), (48, 0), (96, 0), (32, 32), (33, 32)):
+    for word in (32, 33):
+      self.select(word, 32)
+      self.assertTrue(self.announce())
+      self.assertTrue(self._tx(self._lat_ctl_msg(False, 0, 0, 0, 0)))
+    for word, ae in ((34, 0), (36, 0), (40, 0), (48, 0), (96, 0), (32, 1), (33, 1)):
       self.select(word, ae)
       self.assertFalse(self.announce())
       self.assertFalse(self._tx(self._lat_ctl_msg(False, 0, 0, 0, 0)))

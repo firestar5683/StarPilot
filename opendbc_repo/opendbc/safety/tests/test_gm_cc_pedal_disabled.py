@@ -160,10 +160,10 @@ class TestGmCcPedalDisabled(unittest.TestCase):
       self.assertFalse(self.safety.safety_tx_hook(self.cancel(0)))
       self.safety.set_relay_malfunction(False)
       self.safety.set_timer(2000000)
-      self.safety.safety_tick_current_safety_config()
+      self.safety.safety_tick()
       self.sources(counter=1)
       self.assertFalse(self.safety.safety_tx_hook(self.cancel(1)))
-      self.safety.safety_tick_current_safety_config()
+      self.safety.safety_tick()
       self.safety.safety_rx_hook(self.buttons(2))
       self.assertTrue(self.safety.safety_tx_hook(self.cancel(2)))
 

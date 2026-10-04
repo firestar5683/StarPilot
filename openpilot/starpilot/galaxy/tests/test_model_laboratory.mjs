@@ -58,8 +58,8 @@ const download=fixture();download.feed.start();await download.reply(0,{...p,mode
 const downloading=download.feed.action('download',missing)
 assert.equal(download.requests[1].url,'./api/models/laboratory/download');assert.deepEqual(JSON.parse(download.requests[1].options.body),{model:'c'})
 await download.reply(1,{message:'Starting download'});await download.reply(2,{...p,download:{downloading:true,jobId:'job',progress:'40%'}});await downloading
-const cancelling=download.feed.action('cancel');assert.equal(download.requests[3].url,'./api/models/cancel');assert.deepEqual(JSON.parse(download.requests[3].options.body),{jobId:'job'})
-await download.reply(3,{message:'Cancelling'});await download.reply(4,p);await cancelling;download.feed.stop()
+const canceling=download.feed.action('cancel');assert.equal(download.requests[3].url,'./api/models/cancel');assert.deepEqual(JSON.parse(download.requests[3].options.body),{jobId:'job'})
+await download.reply(3,{message:'Cancelling'});await download.reply(4,p);await canceling;download.feed.stop()
 assert.ok(LaboratoryPage.template.indexOf('Available models')<LaboratoryPage.template.indexOf('Compose a pair'))
 assert.match(LaboratoryPage.template,/GalaxySelect/)
 assert.match(LaboratoryPage.template,/catalog models/)

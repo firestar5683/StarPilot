@@ -188,6 +188,8 @@ class TestDistancePersonalityClaim(unittest.TestCase):
     self.assertEqual((len(short.buttonEvents), len(claimed.buttonEvents)), (1, 0))
     drive = SelfdriveD.__new__(SelfdriveD)
     drive.CP = car.CarParams(openpilotLongitudinalControl=True, notCar=True)
+    from openpilot.starpilot.car.tesla.stock_events import StockCruiseConsumer
+    drive.tesla_stock_consumer = StockCruiseConsumer(drive.CP)
     drive.params = MagicMock()
     drive.events = Events()
     drive.personality = 1

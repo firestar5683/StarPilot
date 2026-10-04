@@ -31,7 +31,7 @@ class TestGmOrdinaryAscm(unittest.TestCase):
     for frame in ascm.TestGmAscmIntercept.stock_frames(self.packer, brake_c9, ev=False):
       if frame[0] != omit:
         self.assertTrue(self.safety.safety_rx_hook(self.packet(frame)))
-    self.safety.safety_tick_current_safety_config()
+    self.safety.safety_tick()
 
   def test_exact_limits_inactive_and_radar_exclusion(self):
     for brake_c9 in (False, True):
@@ -83,7 +83,7 @@ class TestGmOrdinaryAscm(unittest.TestCase):
       self.safety.safety_rx_hook(self.packet(pressed))
       self.assertFalse(self.safety.get_controls_allowed())
       self.safety.set_timer(2_100_000)
-      self.safety.safety_tick_current_safety_config()
+      self.safety.safety_tick()
       self.assertFalse(self.safety.safety_config_valid())
 
   def test_existing_selector_neighbors_and_relay_behavior(self):

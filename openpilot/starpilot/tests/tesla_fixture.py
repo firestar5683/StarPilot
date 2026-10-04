@@ -12,7 +12,7 @@ from opendbc.can import CANPacker, CANParser
 from opendbc.car import Bus, gen_empty_fingerprint, structs
 from opendbc.car.tesla.fingerprints import FW_VERSIONS
 from opendbc.car.tesla.interface import CarInterface
-from opendbc.car.tesla.values import CAR, FSD_14_FW
+from opendbc.car.tesla.values import CAR
 from opendbc.safety.tests.libsafety import libsafety_py
 
 ROOT = Path(__file__).resolve().parents[3]
@@ -25,14 +25,17 @@ def sha256(path):
   return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def car_params(platform, profile="old", longitudinal=True, settings_present=True, firmware=None):
+def car_params(platform, profile="marker489", longitudinal=True, settings_present=True, firmware=None):
   if firmware is None:
     if profile == "unknown":
       firmware = b"synthetic-unknown-EPS-response"
     else:
-      firmware = next(fw for fw in FW_VERSIONS[platform][EPS] if (fw in FSD_14_FW[platform]) == (profile == "fsd14"))
+      firmware = FW_VERSIONS[platform][EPS][0]
   fw = structs.CarParams.CarFw(ecu=EPS[0], address=EPS[1], brand="tesla", fwVersion=firmware)
   fingerprint = gen_empty_fingerprint()
+  if profile != "two_bit":
+    bus, address = (0, 0x054) if profile == "marker054" else (2, 0x489)
+    fingerprint[bus][address] = 8
   if settings_present:
     fingerprint[2][0x293] = 8
   return CarInterface.get_params(platform, fingerprint, [fw], longitudinal, False, False)
@@ -110,7 +113,7 @@ class TeslaFixture:
     (2, "DAS_steeringControl", 2, {"DAS_steeringControlType": 0, "DAS_steeringAngleRequest": 0}),
   )
 
-  def __init__(self, safety, platform=CAR.TESLA_MODEL_Y, profile="old", longitudinal=True, settings_present=True):
+  def __init__(self, safety, platform=CAR.TESLA_MODEL_Y, profile="marker489", longitudinal=True, settings_present=True):
     self.cp = car_params(platform, profile, longitudinal, settings_present)
     self.interface = CarInterface(self.cp)
     self.safety = safety
@@ -138,7 +141,7 @@ class TeslaFixture:
         raise ValueError(f"Unknown fixture signals for {name}: {unknown}")
       incoming.append(packer.make_can_msg(name, bus, values))
     rx_accepted = [self.safety.rx(message) for message in incoming]
-    self.safety.lib.safety_tick_current_safety_config()
+    self.safety.lib.safety_tick()
     state = self.interface.update([(nanos, incoming)])
     if control_callback is None:
       cc = structs.CarControl.new_message()

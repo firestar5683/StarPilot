@@ -9,7 +9,7 @@ from unittest.mock import patch
 from unittest.mock import Mock
 
 from openpilot.common.params import Params
-from openpilot.starpilot.ui.feature_settings_state import FeatureSettingsRequest, row_change
+from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsRequest, row_change
 from openpilot.starpilot.ui.feature_settings_state import FeatureUiAction
 from openpilot.starpilot.ui.feature_settings_owner import FeatureSettingsOwner
 from openpilot.starpilot.ui.appearance_owner import AppearanceOwner
@@ -81,7 +81,9 @@ class PiPSettingsTests(unittest.TestCase):
     self.assertEqual(page.title, 'Blind Spot Camera')
     self.assertFalse(any(row.key.startswith(FORMAT_PREFIX) for row in page.rows))
     self.assertEqual(path.read_bytes(), original)
-    self.assertEqual(self.owner.editor_with_source()[0]['width'], 1344)
+    editor, source = self.owner.editor_with_source()
+    assert editor is not None
+    self.assertEqual(editor['width'], 1344)
 
   def test_visual_editor_uses_integer_source_pixels_and_one_crop_write(self):
     import json
@@ -202,9 +204,10 @@ class PiPSettingsTests(unittest.TestCase):
     session._pip_request_epoch = 0
     session.input = Mock()
     session._unavailable = Mock()
-    link = next(row for row in session.appearance_snapshot().rows if row.page == "pip")
+    link = FeatureRow("", "Blind Spot Camera", "", page="pip", available=True)
     session._appearance_ui(FeatureUiAction("open", link))
-    self.assertEqual(session.appearance_page, "pip")
+    self.assertEqual(session.appearance_page, "appearance")
+    session.appearance_page = "pip"
     row = next(row for row in session.appearance_snapshot().rows if row.key == BLINKER)
     session._appearance_ui(FeatureUiAction("change", row))
     self.assertEqual(read_pip(self.params).on_blinker, True)
@@ -219,7 +222,7 @@ class PiPSettingsTests(unittest.TestCase):
       self.assertEqual(len(dialogs), 1)
       self.assertIn("may resume on the next drive", dialogs[0][0])
       session._appearance_ui(FeatureUiAction("back"))
-      session._appearance_ui(FeatureUiAction("open", link))
+      session.appearance_page = "pip"
       dialogs[0][1](DialogResult.CONFIRM)
     self.assertIsNone(read_pip(self.params).source(MASK)[0])
     self.assertFalse(any(row.key.startswith(FORMAT_PREFIX) for row in session.appearance_snapshot().rows))
@@ -276,7 +279,8 @@ class PiPSettingsTests(unittest.TestCase):
          patch.object(appearance_compact.gui_app, "texture", return_value=None):
       appearance_compact.AppearanceCompact(Session()).entry_button().click()
       parent = shown[-1]
-      next(item for item in parent.items if item.label == "blind spot camera").click()
+      self.assertFalse(any(item.label == "blind spot camera" for item in parent.items))
+      appearance_compact.AppearanceCompact(Session()).open("pip")
       child = shown[-1]
       next(item for item in child.items if item.label == "show on turn signal").click()
       self.assertEqual(read_pip(self.params).on_blinker, True)

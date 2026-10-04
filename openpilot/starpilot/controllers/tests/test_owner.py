@@ -36,7 +36,7 @@ class TestControllerOwner(unittest.TestCase):
     self.token = "original"
     self.calls = 0
     self.favorite_calls = []
-    self.device = {"id": "stable-device", "name": "Test pad", "bus": 3}
+    self.device: dict = {"id": "stable-device", "name": "Test pad", "bus": 3}
     self.owner = ControllerOwner(self.params, parked=lambda: self.parked, actions=self.actions,
                                  favorites=self.favorites, invoke_favorite=self.invoke_favorite, clock=lambda: self.now)
     self.owner.set_devices([self.device])

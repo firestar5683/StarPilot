@@ -53,7 +53,7 @@ class TestCompactSettingsNavigation(unittest.TestCase):
     self.assertEqual(emitted, [])
 
   def test_compact_main_menu_matches_original_order(self):
-    self.assertEqual([label for _, label, _, _, _ in COMPACT_MENU],
+    self.assertEqual([label.lower() for _, label, _, _, _ in COMPACT_MENU],
                      ["toggles", "network", "bluetooth", "force drive state", "vehicle", "device", "software",
                       "driving model", "visuals", "galaxy", "pair to connect", "developer"])
 
@@ -104,15 +104,15 @@ class TestNativeCameraComposition(unittest.TestCase):
           module.AugmentedRoadView.render_camera_model_layer(view, rect)
         view._switch_stream_if_needed.assert_called_once()
         view._update_calibration.assert_called_once_with()
-        camera.assert_called_once_with(view, rect)
+        camera.assert_called_once_with(view, rect, **({"paint": True} if module is compact else {}))
         if model_field == "_model_renderer":
-          model.render_with_lead.assert_called_once_with(rect, False, 0, None, lateral_active=False)
+          model.render_with_lead.assert_called_once_with(rect, False, 0, None, lateral_active=False, paint=True)
           model.render_with_lead.reset_mock()
           with patch.object(module, "ui_state", NS(started=True, sm=object())), \
                patch.object(module.CameraView, "_render"):
             compact.AugmentedRoadView.render_camera_model_layer(view, rect, lead_indicator=True,
                                                                 lead_info_mode=1, lead_info_metric=True)
-          model.render_with_lead.assert_called_once_with(rect, True, 1, True, lateral_active=False)
+          model.render_with_lead.assert_called_once_with(rect, True, 1, True, lateral_active=False, paint=True)
         else:
           model.render.assert_called_once_with(rect)
 

@@ -44,47 +44,32 @@ class CruiseIntervalFeatureTests(unittest.TestCase):
     assert request is not None
     return replace(request, confirmation=True)
 
-  def test_galaxy_toggle_and_child_readback(self):
-    native = FeatureSettingsOwner(self.params, lambda group: self.context.value.parked and group == "long",
-                                  vehicle_fingerprint=lambda: self.cp.carFingerprint, vehicle_params=lambda: self.cp)
-    native_rows = native.snapshot(FeaturePage.PROFILES, parked=True, system_long=True,
-                                  lateral_context=False, metric=False).rows
-    self.assertFalse(any(row.key in ("QOLLongitudinal", "CustomCruise", "CustomCruiseLong") for row in native_rows))
+  def test_galaxy_direct_intervals_without_retired_master(self):
     self.params.put("CustomCruise", 5.0, block=True)
     self.params.put("CustomCruiseLong", 1.0, block=True)
     page = self.gateway.page("profiles", "session", b"generation")
     rows = {row["label"]: (index, row) for index, row in enumerate(page["rows"])}
-    self.assertEqual(rows["Custom cruise intervals"][1]["value"], "Off")
-    self.assertFalse(rows["Short press"][1]["available"])
-    self.assertFalse(rows["Hold"][1]["available"])
-    intent = self.gateway.preview(page["view"], rows["Custom cruise intervals"][0], 1, "session", b"generation")
-    self.assertIn("next drive when StarPilot controls cruise speed", intent["question"])
+    self.assertNotIn("Custom cruise intervals", rows)
+    self.assertTrue(rows["Short press"][1]["available"])
+    self.assertTrue(rows["Hold"][1]["available"])
+    intent = self.gateway.preview(page["view"], rows["Short press"][0], 1, "session", b"generation")
     self.assertTrue(self.gateway.confirm(intent["intent"], "session", b"generation"))
-    self.assertEqual(read_cruise_intervals(self.params, pcm_cruise=False), CruiseIntervals(5, 1))
+    self.assertEqual(read_cruise_intervals(self.params, pcm_cruise=False), CruiseIntervals(6, 1))
+    self.assertIsNone(self.params.get("QOLLongitudinal"))
     with self.assertRaises(SettingsChanged):
       self.gateway.preview(page["view"], rows["Short press"][0], 1, "session", b"generation")
-    fresh = self.gateway.page("profiles", "session", b"generation")
-    fresh_rows = {row["label"]: (index, row) for index, row in enumerate(fresh["rows"])}
-    self.assertTrue(fresh_rows["Short press"][1]["available"])
-    self.assertEqual(fresh_rows["Hold"][1]["value"], "1")
-    edit = self.gateway.preview(fresh["view"], fresh_rows["Short press"][0], 1, "session", b"generation")
-    self.assertTrue(self.gateway.confirm(edit["intent"], "session", b"generation"))
-    self.assertEqual(read_cruise_intervals(self.params, pcm_cruise=False), CruiseIntervals(6, 1))
 
-  def test_pcm_and_changed_vehicle_block_both_parent_and_children(self):
-    master = self.change(self.rows()["QOLLongitudinal"])
-    self.cp.pcmCruise = True
-    self.assertFalse(self.owner.apply(master))
-    self.assertFalse(any(row.available for row in self.rows().values()))
-    self.cp.pcmCruise = False
-    self.assertTrue(self.owner.apply(self.change(self.rows()["QOLLongitudinal"])))
+  def test_pcm_and_changed_vehicle_block_direct_intervals(self):
     child = self.change(self.rows()["CustomCruise"])
     self.cp.pcmCruise = True
     self.assertFalse(self.owner.apply(child))
+    self.assertFalse(any(row.available for row in self.rows().values()))
+    self.cp.pcmCruise = False
+    self.cp.carFingerprint = "changed"
+    self.assertFalse(self.owner.apply(child))
     self.assertEqual(read_cruise_intervals(self.params, pcm_cruise=True), CruiseIntervals())
 
-  def test_stale_parent_units_source_and_parked_rejected(self):
-    self.assertTrue(self.owner.apply(self.change(self.rows()["QOLLongitudinal"])))
+  def test_stale_units_source_and_parked_rejected(self):
     short = self.change(self.rows()["CustomCruise"])
     self.params.put_bool("IsMetric", True, block=True)
     self.assertFalse(self.owner.apply(short))
@@ -92,14 +77,13 @@ class CruiseIntervalFeatureTests(unittest.TestCase):
     self.assertEqual(metric.unit, "km/h")
     self.assertTrue(self.owner.apply(self.change(metric)))
     stale = self.change(self.rows()["CustomCruise"])
-    self.params.put_bool("QOLLongitudinal", False, block=True)
+    self.params.put("CustomCruise", 4.0, block=True)
     self.assertFalse(self.owner.apply(stale))
-    master = self.change(self.rows()["QOLLongitudinal"])
+    request = self.change(self.rows()["CustomCruise"])
     self.context.value = AuthorityContext(False, self.cp, b"cp-source")
-    self.assertFalse(self.owner.apply(master))
+    self.assertFalse(self.owner.apply(request))
 
   def test_numeric_bounds_rejected(self):
-    self.assertTrue(self.owner.apply(self.change(self.rows()["QOLLongitudinal"])))
     short = self.change(self.rows()["CustomCruise"])
     self.assertFalse(self.owner.apply(replace(short, value="151")))
     self.assertFalse(self.owner.apply(replace(short, value="nan")))

@@ -1,6 +1,5 @@
 """BSM observation cannot impersonate or disqualify a GM control profile."""
 import unittest
-from unittest.mock import patch
 
 from opendbc.car import Bus, gen_empty_fingerprint
 from opendbc.can import CANPacker
@@ -10,9 +9,6 @@ from opendbc.car.gm.aol import qualified_gm
 from opendbc.car.gm.feature_capabilities import display_supported, longitudinal_supported
 
 
-class Settings:
-  def get_bool(self, key):
-    return False
 
 
 def params(identity, bsm):
@@ -20,8 +16,7 @@ def params(identity, bsm):
   fingerprint[2][0x180] = 4
   if bsm:
     fingerprint[0][0x142] = 8
-  with patch('opendbc.car.gm.interface.Params', return_value=Settings()):
-    return CarInterface.get_params(identity, fingerprint, [], False, False, False)
+  return CarInterface.get_params(identity, fingerprint, [], False, False, False)
 
 
 class TestBSMControlFlags(unittest.TestCase):

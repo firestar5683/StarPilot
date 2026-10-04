@@ -189,6 +189,7 @@ class NativeDeviceBuildTest(unittest.TestCase):
     validator.parent.mkdir(parents=True)
     validator.write_text('import os, sys\nsys.exit(int(os.getenv("VALIDATOR_EXIT", "0")))\n')
     (validator.parent / 'package_model_chunks.py').write_text('')
+    (validator.parent / 'validate_params_registry.py').write_text('')
     manifest = self.root / 'openpilot/common/prebuilt_manifest.py'
     manifest.parent.mkdir(parents=True)
     manifest.write_text('')
@@ -207,7 +208,8 @@ class NativeDeviceBuildTest(unittest.TestCase):
     self.assertEqual((self.root / "scons-pythonpath").read_text().split(":"),
                      [str(self.root / name) for name in ("", "msgq_repo", "opendbc_repo", "rednose_repo",
                                                           "teleoprtc_repo", "tinygrad_repo")])
-    self.assertEqual(self.run_helper("build", "2").returncode, 0)
+    result = self.run_helper("build", "2")
+    self.assertEqual(result.returncode, 0, result.stderr)
     self.assertTrue((self.root / "prebuilt").exists())
     self.assertEqual(self.run_helper("build", "2", "--dry-run").returncode, 0)
     self.assertFalse((self.root / "prebuilt").exists())
@@ -370,6 +372,7 @@ class ArtifactCheckTest(unittest.TestCase):
     shutil.copy2(VALIDATOR, validator)
     chunks = self.root / "openpilot/common/file_chunker.py"
     chunks.parent.mkdir(parents=True)
+    (self.root / "openpilot/__init__.py").touch()
     shutil.copy2(SOURCE.parent / "openpilot/common/file_chunker.py", chunks)
     shipped = b"verified RDF artifact fixture"
     self.write("openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl", shipped)
@@ -430,7 +433,8 @@ class ArtifactCheckTest(unittest.TestCase):
                           cwd=self.root, env=env, check=False, capture_output=True, text=True)
 
   def test_complete_models_required_before_prebuilt(self):
-    self.assertEqual(self.verify().returncode, 0)
+    result = self.verify()
+    self.assertEqual(result.returncode, 0, result.stderr)
     (self.root / "openpilot/selfdrive/modeld/models/dmonitoring_model_tinygrad.pkl").unlink()
     self.assertNotEqual(self.verify().returncode, 0)
 
@@ -513,7 +517,7 @@ class ArtifactCheckTest(unittest.TestCase):
     source_only.write_text(script)
     command = " ".join([
       'source "$1";',
-      'run_larch64_scons() { :; }; verify_device_artifacts() { :; }; python3() { :; };',
+      'run_larch64_scons() { :; }; verify_device_artifacts() { :; }; python3() { :; }; detect_engine() { echo true; };',
       'run_larch64_build 4 -n; [[ ! -e "$ROOT_DIR/prebuilt" ]] || exit 21;',
       'run_larch64_build 4 openpilot/common/libparams_c.so; [[ ! -e "$ROOT_DIR/prebuilt" ]] || exit 22;',
       'run_larch64_build 4; [[ -e "$ROOT_DIR/prebuilt" ]] || exit 23',

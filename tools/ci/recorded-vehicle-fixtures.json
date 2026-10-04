@@ -4,28 +4,35 @@
     {
       "id": "model_y_stock",
       "platform": "TESLA_MODEL_Y",
-      "route": "c8a98e58647765ad/00000002--84e4746136",
-      "segment": 2,
-      "bytes": 10039312,
-      "sha256": "f26e6b7cc4ac6bc77a3cd30924b0e5c2f77c6de1c47cbcc205da020913aec9e7",
+      "route": "aebd8f1d4ea16066/000002d8--5850d3ea5c",
+      "segment": 0,
+      "bytes": 11258243,
+      "sha256": "fc80930cf9df4c5ff912b255c728f358344647decb88437daef95ffb559c974f",
       "longitudinal": false,
       "pcm_cruise": true,
       "safety_model": "tesla",
       "safety_param": 0,
-      "variants": ["debug", "release"]
+      "variants": [
+        "debug",
+        "release"
+      ],
+      "recorded_longitudinal": true
     },
     {
       "id": "model_y_alpha_long",
       "platform": "TESLA_MODEL_Y",
-      "route": "2c912ca5de3b1ee9/0000025d--6eb6bcbca4",
-      "segment": 4,
-      "bytes": 8287366,
-      "sha256": "ca3bfc37b118f0e1987c2177b77b7446d44fbc7806cc5fae71c2ed79d4776fff",
+      "route": "aebd8f1d4ea16066/000002d8--5850d3ea5c",
+      "segment": 0,
+      "bytes": 11258243,
+      "sha256": "fc80930cf9df4c5ff912b255c728f358344647decb88437daef95ffb559c974f",
       "longitudinal": true,
       "pcm_cruise": true,
       "safety_model": "tesla",
       "safety_param": 1,
-      "variants": ["debug"]
+      "variants": [
+        "debug"
+      ],
+      "recorded_longitudinal": true
     }
   ]
 }

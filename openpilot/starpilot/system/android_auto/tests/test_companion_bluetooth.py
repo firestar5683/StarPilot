@@ -3,7 +3,7 @@ import threading
 from types import SimpleNamespace
 import unittest
 
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 from openpilot.starpilot.bluetooth.owner import BluetoothRejected as Rejected
 from openpilot.starpilot.system.android_auto.bluetooth_bridge import SharedBluetoothOwner as OwnerMethods
 from openpilot.starpilot.system.android_auto import daemon
@@ -15,7 +15,7 @@ SESSION = ('galaxy', 'live-proof')
 
 class CompanionTests(unittest.TestCase):
   def setUp(self):
-    self.state = {'parked': True, 'valid': True, 'enabled': True, 'selected': ADAPTER}
+    self.state: dict = {'parked': True, 'valid': True, 'enabled': True, 'selected': ADAPTER}
     self.devices = {CAR: {'address': CAR, 'path': '/org/bluez/hci0/dev_00_92_A5_2F_68_32',
       'paired': True, 'connected': False, 'uuids': [HFP]},
       ADAPTER: {'address': ADAPTER, 'path': '/org/bluez/hci0/dev_50_5A_65_8B_8B_82',
@@ -29,25 +29,26 @@ class CompanionTests(unittest.TestCase):
     self.owner.companion_devices = {}
     self.client = SimpleNamespace(adapter_identity=lambda: ('/org/bluez/hci0', {'Powered': True}, ':1.5'),
       _objects=dict, _devices=lambda objects: list(self.devices.values()))
-    self.owner._client = lambda: self.client
+    self.owner._client = Mock(side_effect=lambda: self.client)
     def call(*args, **kwargs):
       self.calls.append((args, kwargs))
       self.hook()
       self.devices[CAR]['connected'] = args[2] == 'ConnectProfile'
     self.phone = SimpleNamespace(device=lambda address: self.devices.get(address), _call=call)
-    self.lease = SimpleNamespace(phone=self.phone, receiver=ADAPTER, session=None, released=False,
+    self.lease = Mock(phone=self.phone, receiver=ADAPTER, session=None, released=False,
       adapter_path='/org/bluez/hci0', bluez_sender=':1.5', device_path=self.devices[ADAPTER]['path'], enabled=lambda: self.state['enabled'],
       selected_receiver=lambda: self.state['selected'])
     self.owner.phone_lease = self.lease
-    self.owner.snapshot = lambda session: {'version': 1, 'available': True, 'parked': self.state['parked'],
+    self.owner.snapshot = Mock(side_effect=lambda session: {'version': 1, 'available': True, 'parked': self.state['parked'],
       'powered': True, 'discovering': False, 'errorCode': None, 'pairing': None,
-      'devices': [{'address': address, 'connected': device['connected']} for address, device in self.devices.items()]}
+      'devices': [{'address': address, 'connected': device['connected']} for address, device in self.devices.items()]})
 
   def test_explicit_car_hfp_admission_and_disconnect_preserve_adapter_and_lease(self):
     self.assertFalse(self.owner.companion_accepts(CAR))
     def callback(): self.assertTrue(self.owner.companion_accepts(CAR))
     self.hook = callback
     result = self.owner.companion_action('connect', CAR, SESSION)
+    assert result is not None
     self.assertEqual(self.calls[0], ((self.devices[CAR]['path'], 'org.bluez.Device1', 'ConnectProfile', 's', (HFP,)), {'timeout': 12.0}))
     self.assertTrue(result['devices'][0]['connected'])
     self.assertIs(self.owner.phone_lease, self.lease)
@@ -68,8 +69,8 @@ class CompanionTests(unittest.TestCase):
     self.assertEqual(self.calls, [])
     self.assertEqual(self.owner.companion_devices, {})
 
-  def test_park_session_pairing_and_changed_owner_are_fail_closed(self):
-    alterations = [('parked', False), ('valid', False), ('enabled', False), ('selected', CAR)]
+  def test_session_pairing_and_changed_owner_are_fail_closed(self):
+    alterations = [('valid', False), ('enabled', False), ('selected', CAR)]
     for key, value in alterations:
       before = self.state[key]
       self.state[key] = value
@@ -101,8 +102,8 @@ class CompanionTests(unittest.TestCase):
     self.assertIs(self.owner.phone_lease, self.lease)
     self.assertTrue(self.devices[ADAPTER]['connected'])
 
-  def test_park_or_source_change_during_operation_does_not_claim_success(self):
-    for key in ('parked', 'valid'):
+  def test_source_change_during_operation_does_not_claim_success(self):
+    for key in ('valid',):
       self.state[key] = True
       self.hook = lambda key=key: self.state.update({key: False})
       with self.assertRaises(Rejected):
@@ -170,8 +171,8 @@ class CompanionTests(unittest.TestCase):
     host._thread, host._bluez = None, None
     host.config = {'receiver_address': ADAPTER, 'companion_address': '', 'companion_name': ''}
     host._shared_bluetooth_owner = self.owner
-    host._phone = lambda: self.phone
-    host._unselect_car_audio = lambda address: None
+    host._phone = Mock(side_effect=lambda: self.phone)
+    host._unselect_car_audio = Mock(side_effect=lambda address: None)
     self.phone.acquire = lambda: None
     self.phone.set_trusted = lambda address: None
     self.devices[CAR]['name'] = 'My car'
@@ -207,7 +208,7 @@ class CompanionTests(unittest.TestCase):
     host._lock = threading.RLock()
     host.config = {'receiver_address': ADAPTER, 'companion_address': '', 'companion_name': ''}
     host._shared_bluetooth_owner = self.owner
-    host._phone = lambda: self.phone
+    host._phone = Mock(side_effect=lambda: self.phone)
     self.devices[CAR]['name'] = 'My car'
     # Simulate revocation immediately after the owner's connection returned.
     action = self.owner.companion_action
@@ -229,7 +230,7 @@ class CompanionTests(unittest.TestCase):
     request = {'command': 'bluetooth_action', 'source': SESSION[1], 'operation': operation, 'address': address}
     with patch('openpilot.common.params.Params') as params:
       params.return_value.get_bool.return_value = True
-      return daemon.handle(supervisor, request, verifier, parked=lambda: parked)
+      return daemon.handle(Mock(wraps=supervisor), request, Mock(wraps=verifier), parked=lambda: parked)
 
   def test_daemon_returns_snapshot_or_unhandled_only_without_owner(self):
     result = self.daemon_call()
@@ -253,6 +254,15 @@ class CompanionTests(unittest.TestCase):
       self.daemon_call(valid=False)
     self.assertEqual(self.daemon_call(parked=False), {'handled': True, 'error_code': 'park_required'})
     self.assertEqual(self.calls, [])
+
+  def test_existing_companion_connection_remains_available_onroad(self):
+    self.state["parked"] = False
+    self.hook = lambda: self.state.update(parked=False)
+    result = self.owner.companion_action("connect", CAR, SESSION)
+    assert result is not None
+    self.assertFalse(result["parked"])
+    self.assertTrue(self.owner.companion_accepts(CAR))
+    self.assertFalse(self.lease.released)
 
 if __name__ == '__main__':
   unittest.main()

@@ -65,7 +65,7 @@ class ButtonActionsTests(unittest.TestCase):
         self.assertEqual(read_saved(self.params, key, 8), (b"0", True))
         self.assertTrue(self.write(key, "Toggle traffic mode").verified)
         self.assertEqual(read_saved(self.params, key, 8), (b"6", True))
-        self.assertEqual(display_action(b"6")[:2], ("Toggle traffic mode", ("Off", "Cycle conditional mode", "Toggle traffic mode")))
+        self.assertEqual(display_action(b"6")[:2], ("Toggle traffic mode", ("Off", "Cycle conditional mode", "Toggle traffic mode", "Switchback Mode")))
         self.assertTrue(self.write(key, "Off").verified)
 
   def test_corrupt_or_unsupported_saved_value_requires_explicit_repair(self):
@@ -175,13 +175,13 @@ def test_gm_distance_configuration_is_exact_and_preserves_other_actions(tmp_path
     assert distance_capability(cp) is not None
     owner = FeatureSettingsOwner(params, lambda group: True, vehicle_fingerprint=lambda cp=cp: cp.carFingerprint, vehicle_params=lambda cp=cp: cp)
     rows = owner.snapshot(FeaturePage.WHEEL, parked=True, system_long=True, lateral_context=False, metric=False).rows
-    rows = [row for row in rows if row.key.startswith('conditional:button:')]
+    rows = [row for row in rows if row.key.startswith('wheel:') and 'Distance' in row.key]
     assert len(rows) == 3
-    assert all(row.available and row.choices == ('Off', 'Toggle traffic mode') for row in rows)
+    assert all(row.available and 'Traffic mode' in row.choices and 'Quick Select 1' in row.choices for row in rows)
   for car in (CAR.CHEVROLET_BOLT_EUV, CAR.CHEVROLET_VOLT_CAMERA, CAR.CHEVROLET_VOLT_2019):
     assert distance_capability(ascm_params(car)) is None
   params.put('DistanceButtonControl', 3, block=True)
   rows = owner.snapshot(FeaturePage.WHEEL, parked=True, system_long=True, lateral_context=False, metric=False).rows
-  row = next(row for row in rows if row.key == 'conditional:button:DistanceButtonControl')
-  assert row.source == b'3' and not row.choices and row.repair_value == 'Off'
+  row = next(row for row in rows if row.key == 'wheel:DistanceButtonControl')
+  assert row.source == b'3' and row.value == 'Pause steering' and 'Traffic mode' in row.choices
   assert params.get('DistanceButtonControl') == 3

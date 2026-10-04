@@ -1,11 +1,13 @@
 """Replay large-panel input through real widgets with graphics and effects isolated."""
+from unittest.mock import patch
+
 
 from dataclasses import replace
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace as NS
 import unittest
-from unittest.mock import Mock, patch
+from unittest.mock import Mock
 
 import pyray as rl
 
@@ -79,7 +81,8 @@ class NativeSettingsTests(unittest.TestCase):
   def test_desk_buttons_and_scrolling_use_native_widgets(self):
     with patch.object(software.subprocess, 'run') as signal:
       self.click(self.software, self.software._download_btn)
-      signal.assert_called_once()
+      signal.assert_any_call("pkill -SIGUSR1 -f openpilot.system.updated.updated", shell=True)
+    self.assertEqual(sum(call.args == ("pkill -SIGUSR1 -f openpilot.system.updated.updated",) for call in signal.call_args_list), 1)
     self.software._waiting_for_updater = False
     with patch.object(software, 'MultiOptionDialog', return_value='branch chooser'):
       self.click(self.software, self.software._branch_btn)
@@ -135,7 +138,7 @@ class NativeSettingsTests(unittest.TestCase):
     with patch.object(software, 'MultiOptionDialog') as dialog:
       self.software._on_select_branch()
     branch = dialog.call_args.kwargs['callback']
-    self.software._branch_dialog.selection = 'Dom'
+    self.enterContext(patch.object(self.software._branch_dialog, 'selection', 'Dom', create=True))
     self.params.put_bool('UpdateAvailable', True, block=True)
     self.offroad = False
     with patch.object(software.subprocess, 'run') as signal:
@@ -196,7 +199,8 @@ class NativeSettingsTests(unittest.TestCase):
             page.render(rl.Rectangle(0, 0, 2160, 1080))
           gui_app._mouse_events = []
           emitted.assert_not_called()
-    signal.assert_called_once()
+    signal.assert_any_call("pkill -SIGUSR1 -f openpilot.system.updated.updated", shell=True)
+    self.assertEqual(sum(call.args == ("pkill -SIGUSR1 -f openpilot.system.updated.updated",) for call in signal.call_args_list), 1)
     self.pushed.assert_called_once_with('camera')
 
   def test_layout_reuses_native_panels_and_preserves_galaxy_entry(self):

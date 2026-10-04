@@ -5,7 +5,7 @@ import pyray as rl
 import pytest
 
 from openpilot.starpilot.ui.onroad_compact_widgets import CompactHudRenderer
-from openpilot.starpilot.ui.onroad_large_widgets import SpeedLimitWidget
+from openpilot.starpilot.ui.onroad_large_widgets import UnifiedSpeedWidget
 from openpilot.starpilot.ui.onroad_state import ObservationKind, OnroadState, SpeedLimitObservation
 from openpilot.starpilot.ui.speed_limit_pulse import SpeedLimitPulse
 
@@ -55,13 +55,15 @@ def test_source_reacquisition_missing_hidden_and_units_do_not_retrigger_same_num
 def test_both_native_signs_render_original_purple_color(compact):
   fonts = Mock()
   fonts.measure.return_value = Mock(width=20, height=20)
+  fonts.vertical_ink.side_effect = lambda text, role, size: (0., size * .7)
   shown = state()
   shown = replace(shown, appearance=replace(shown.appearance, show_speed_limit_sign=True))
-  renderer = CompactHudRenderer(fonts, Mock()) if compact else SpeedLimitWidget(fonts)
+  renderer = CompactHudRenderer(fonts, Mock()) if compact else UnifiedSpeedWidget(fonts)
   with patch("time.monotonic", return_value=10.) as clock, \
-       patch.object(rl, "draw_rectangle_rounded_lines_ex"), patch.object(rl, "draw_rectangle_rounded"):
+       patch.object(rl, "draw_rectangle_rounded_lines_ex"), patch.object(rl, "draw_rectangle_rounded"), \
+       patch("openpilot.starpilot.ui.onroad_large_widgets.draw_control_card") as card:
     def render():
-      if compact:
+      if isinstance(renderer, CompactHudRenderer):
         renderer._speed_limit_sign(shown)
       else:
         renderer.render(rl.Rectangle(0, 0, 176, 196), shown)
@@ -70,7 +72,11 @@ def test_both_native_signs_render_original_purple_color(compact):
     fonts.draw.reset_mock()
     render()
     numeric = next(call for call in fonts.draw.call_args_list if call.args[0] == "35")
-    assert rgba(numeric.args[-1]) == (188, 132, 255, 255)
+    if compact:
+      assert rgba(numeric.args[-1]) == (188, 132, 255, 255)
+    else:
+      assert rgba(card.call_args.kwargs["border"]) == (188, 132, 255, 180)
+      assert rgba(numeric.args[-1]) == rgba(rl.WHITE)
 
 
 def test_transient_missing_sample_keeps_changed_sign_pulse_and_map_changes_pulse():

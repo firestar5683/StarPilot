@@ -47,11 +47,12 @@ class TestUploadPreferences(unittest.TestCase):
         state.calls.append((network, metered))
         return None
 
-    namespace = {'threading': NS(Event=object), 'Params': Saved, 'Uploader': InertUploader,
+    namespace: dict = {'threading': NS(Event=object), 'Params': Saved, 'Uploader': InertUploader,
                  'Paths': NS(log_root=lambda: '/unused'), 'clear_locks': lambda _: None,
                  'set_core_affinity': lambda _: None, 'messaging': NS(SubMaster=lambda _: Master()),
                  'NetworkType': Network, 'force_wifi': force_wifi, 'allow_sleep': False,
-                 'cloudlog': NS(info=lambda *_: None, exception=lambda *_: None)}
+                 'cloudlog': NS(info=lambda *_: None, exception=lambda *_: None),
+                 'active_provider': lambda: NS(name='comma')}
     exec(compile(ast.Module(body=[main], type_ignores=[]), 'uploader.py', 'exec'), namespace)
     namespace['main'](NS(is_set=lambda: state.index + 1 >= len(observations)))
     return state

@@ -342,7 +342,7 @@ class TestHyundaiIoniq6Long(unittest.TestCase):
             ("BLINKERS", {"LEFT_LAMP": 1}),
           )]
           inputs.append(packer.make_can_msg("CAM_0x362" if topology == "lkas_alt" else "CAM_0x2a4", bus.CAM, {}))
-          ci.update((1_000_000_000, inputs))
+          ci.update([(1_000_000_000, inputs)])
           self.mode(raw)
           for frame in inputs:
             if frame[2] == bus.ECAN:
@@ -413,7 +413,7 @@ class TestHyundaiIoniq6Long(unittest.TestCase):
           packer.make_can_msg("CRUISE_BUTTONS", can_bus.ECAN, {"COUNTER": 1, "CRUISE_BUTTONS": 2}),
           packer.make_can_msg(cam_name, can_bus.CAM, {}),
         ]
-        ci.update((1_000_000_000, inputs))
+        ci.update([(1_000_000_000, inputs)])
         self.assertTrue(ci.CS.out.canValid)
         self.mode(raw)
         for frame in inputs:
@@ -685,7 +685,7 @@ class TestHyundaiIoniq6Long(unittest.TestCase):
             packer.make_can_msg("CRUISE_BUTTONS", bus.ECAN, {"CRUISE_BUTTONS": 2}),
             packer.make_can_msg("CAM_0x362" if topology == "lkas_alt" else "CAM_0x2a4", bus.CAM, {}),
           ]
-          ci.update((1_000_000_000 + tick * 10_000_000, inputs))
+          ci.update([(1_000_000_000 + tick * 10_000_000, inputs)])
           self.assertTrue(ci.CS.out.canValid)
           for frame in inputs:
             if frame[2] == bus.ECAN and frame[0] in (0x35, 0x175, 0xA0, 0xEA, 0x1CF):

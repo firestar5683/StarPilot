@@ -41,7 +41,11 @@ def main(arguments=None):
     # subscribers at import time; SCALE avoids querying a desktop monitor.
     environment = dict(os.environ, PARAMS_ROOT=params, SCALE='1',
                        OPENPILOT_PREFIX=Path(messaging).name.removeprefix('msgq_'))
-    command = ([sys.executable, '-m', 'pytest', '-q', *arguments[1:], *files] if pytest_mode
+    if pytest_mode:
+      environment.pop('PYTEST_ADDOPTS', None)
+      environment.pop('PYTEST_PLUGINS', None)
+      environment['PYTEST_DISABLE_PLUGIN_AUTOLOAD'] = '1'
+    command = ([sys.executable, '-m', 'pytest', '-q', '--import-mode=importlib', *arguments[1:], *files] if pytest_mode
                else [sys.executable, str(RUNNER), *arguments])
     result = subprocess.run(command, cwd=ROOT, env=environment, check=False)
     return result.returncode if result.returncode >= 0 else 128 - result.returncode

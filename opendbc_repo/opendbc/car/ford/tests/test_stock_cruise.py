@@ -85,7 +85,13 @@ def test_unknown_ae_longitudinal_and_unpaired_profiles_deny_translation():
   cp = params(CAR.FORD_MUSTANG_MACH_E_MK1, alpha=False)
   assert qualified(cp)
   cp.alternativeExperience = 32
+  assert qualified(cp)
+  cp.safetyConfigs = [cp.safetyConfigs[0], cp.safetyConfigs[0]]
   assert not qualified(cp)
+  cp.safetyConfigs = [cp.safetyConfigs[0]]
+  for experience in (1, 64, 96):
+    cp.alternativeExperience = experience
+    assert not qualified(cp)
   cp.alternativeExperience = 0
   cp.openpilotLongitudinalControl = True
   assert not qualified(cp)

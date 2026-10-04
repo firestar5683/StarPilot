@@ -53,6 +53,7 @@ class SoftwareHttpTest(unittest.TestCase):
     self.access.configure('password123', lambda: True)
     self.slug = self.pairing.pair(hashlib.sha256(b'password123').hexdigest())
     record = self.pairing.read()
+    assert record is not None
     token = base64.urlsafe_b64encode(json.dumps({self.slug: record['session']}).encode()).decode().rstrip('=')
     self.remote_cookie = 'galaxy_session=' + token
 

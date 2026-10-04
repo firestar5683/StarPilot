@@ -281,8 +281,8 @@ class TestHyundaiAngleHybridsThree(unittest.TestCase):
         safety.set_relay_malfunction(True)
         self.assertFalse(safety.safety_tx_hook(self.packet(primary)))
 
-  def test_no_automatic_identification(self):
-    self.assertFalse(set(CARS) & FW_VERSIONS.keys())
+  def test_joint_firmware_discovery_rejects_partial_and_mixed_cohorts(self):
+    self.assertTrue(set(CARS).issubset(FW_VERSIONS))
     self.assertFalse(set(CARS) & set(all_legacy_fingerprint_cars()))
     frozen = {
       CAR.HYUNDAI_AZERA_HEV_7TH_GEN: (
@@ -306,5 +306,8 @@ class TestHyundaiAngleHybridsThree(unittest.TestCase):
           ecu=structs.CarParams.Ecu.fwdRadar, address=0x7D0, subAddress=0,
           fwVersion=frozen[CAR.KIA_SPORTAGE_HEV_2026 if car != CAR.KIA_SPORTAGE_HEV_2026 else
                            CAR.HYUNDAI_AZERA_HEV_7TH_GEN][1], brand="hyundai")]):
-        _, matched = match_fw_to_car(observed, "", log=False)
-        self.assertFalse(set(CARS) & matched, (car, matched))
+        _, matched = match_fw_to_car(observed, "", allow_fuzzy=False, log=False)
+        expected = {car} if observed == fw else set()
+        self.assertEqual(set(CARS) & matched, expected, (car, matched))
+        _, production_matches = match_fw_to_car(observed, "", log=False)
+        self.assertEqual(set(CARS) & production_matches, expected, (car, production_matches))

@@ -89,10 +89,22 @@ class SchemaPolicyTest(unittest.TestCase):
           schemas[path] = schemas[path].replace(original, replacement)
           self.assertTrue(any(f'historical slot {index}' in error for error in validate(schemas, self.policy, self.sync)))
 
+  def test_reviewed_log_additions_are_exact_and_required(self):
+    path = 'openpilot/cereal/log.capnp'
+    for reviewed in self.policy['reviewed_log_additions']:
+      for field in reviewed['fields']:
+        original = field.encode()
+        self.assertEqual(self.schemas[path].count(original), 1)
+        for changed in (b'', original.replace(b'@', b'@9', 1), original.replace(b';', b' :UInt32;', 1)):
+          with self.subTest(field=field, changed=changed):
+            schemas = self.schemas.copy()
+            schemas[path] = schemas[path].replace(original, changed)
+            self.assertTrue(validate(schemas, self.policy, self.sync))
+
   def test_historical_slot_comments_do_not_count_as_fields(self):
     path = 'openpilot/cereal/custom.capnp'
     schemas = self.schemas.copy()
-    original = b'struct CustomReserved0 @0x81c2f05a394cf4af {'
+    original = b'struct CustomReserved1 @0xaedffd8f31e7b55d {'
     self.assertIn(original, schemas[path])
     schemas[path] = schemas[path].replace(
       original, original + b'\n  # Past wire use is reserved.\n')
@@ -126,3 +138,24 @@ class SchemaPolicyTest(unittest.TestCase):
   def test_new_upstream_pin_requires_schema_contract_review(self):
     self.sync['upstream']['commit'] = '0' * 40
     self.assertTrue(validate(self.schemas, self.policy, self.sync))
+
+  def test_reviewed_native_enum_is_only_permitted_core_extension(self):
+    path = 'opendbc_repo/opendbc/car/car.capnp'
+    self.assertEqual(self.policy['reviewed_enum_additions'], {path: {'enum': 'SafetyModel', 'field': 'teslaPreap @39;'}})
+    for before, after in ((b'teslaPreap @39;', b'teslaPreap @40;'),
+                          (b'teslaPreap @39;', b'teslaPreap @39;\n    extraFork @40;'),
+                          (b'teslaPreap @39;', b'teslaPreap @39;\n    extraBool @62 :Bool;')):
+      changed = copy.copy(self.schemas)
+      self.assertIn(before, changed[path])
+      changed[path] = changed[path].replace(before, after)
+      self.assertTrue(validate(changed, self.policy, self.sync))
+
+  def test_navigation_keeps_full_historical_control_prefix(self):
+    path = 'openpilot/cereal/custom.capnp'
+    for before, after in ((b'hudControl @0 :HUDControl;', b'hudControl @0 :Text;'),
+                          (b'cooperativeOffsetDeg @4 :Float32;', b'cooperativeOffsetDeg @4 :Bool;'),
+                          (b'uwu @22;', b'uwu @23;')):
+      changed = copy.copy(self.schemas)
+      self.assertIn(before, changed[path])
+      changed[path] = changed[path].replace(before, after)
+      self.assertTrue(validate(changed, self.policy, self.sync))

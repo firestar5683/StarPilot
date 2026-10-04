@@ -28,7 +28,7 @@ class TestXceedPhevPort(unittest.TestCase):
                 for (ecu, addr, _), values in versions.items()]
     exact, matches = match_fw_to_car(observed, '', allow_exact=True, allow_fuzzy=False, log=False)
     self.assertTrue(exact)
-    self.assertEqual(matches, {CAR.KIA_XCEED_PHEV})
+    self.assertEqual(matches, {CAR.KIA_XCEED_PHEV, CAR.KIA_CEED_PHEV})
     for alpha_long in (False, True):
       cp = self.params(alpha_long)
       self.assertTrue(cp.flags & HyundaiFlags.LEGACY)

@@ -26,16 +26,19 @@ class PreviewContractTest(unittest.TestCase):
   def test_static_preview_and_read_only_runtime_are_explicit(self):
     scripts = "\n".join(path.read_text() for path in (WEB / "js").glob("*.js"))
     self.assertEqual(sorted(re.findall(r"\bfetch\s*\(\s*[\"']([^\"']+)", scripts)),
-                     ["./api/auth/session", "./data/catalog.json", "./data/runtime.json", "/_gateway/devices"])
+                     ['./api/auth/session', './api/connect/provider', './api/drive-state/action', './api/drive-state/status',
+                      './api/ui/layout', '/_gateway/devices'])
     config = json.loads((WEB / 'data/runtime.json').read_text())
     self.assertEqual(config, {'schemaVersion': 1, 'monitor': 'sample'})
     self.assertIn('./api/system/monitor', scripts)
     self.assertIn('./data/system-monitor.sample.json', scripts)
     self.assertIn('./api/software/status', scripts)
-    self.assertIn('./api/maps/status', scripts)
+    self.assertIn('./api/maps/setup', scripts)
     self.assertIn('./api/models/status', scripts)
     self.assertIn('./api/plots/live', scripts)
-    self.assertFalse(re.search(r"\b(XMLHttpRequest|WebSocket)\b", scripts))
+    self.assertFalse(re.search(r"\bWebSocket\b", scripts))
+    xhr_sources = [path.name for path in (WEB / "js").glob("*.js") if re.search(r"\bXMLHttpRequest\b", path.read_text())]
+    self.assertEqual(xhr_sources, ["android-auto.js"])
     self.assertFalse(re.search(r"[\"']/embed", scripts))
     self.assertFalse(re.search(r"<iframe|createElement\s*\(\s*[\"']iframe", scripts))
     self.assertIn("No operation was attempted.", scripts)

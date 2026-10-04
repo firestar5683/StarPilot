@@ -103,9 +103,10 @@ def test_invalid_geometry_and_color_contract_fail_without_draw():
   points = np.zeros((4, 2))
   gradient = polygon.Gradient((0, 0), (0, 1), [rl.WHITE], [])
   with patch.object(rl, 'draw_triangle_strip') as draw:
-    for kwargs in ({}, {'color': rl.WHITE, 'gradient': gradient}):
-      with pytest.raises(AssertionError, match='Either color or gradient'):
-        polygon.draw_polygon(rect, points, **kwargs)
+    with pytest.raises(AssertionError, match='Either color or gradient'):
+      polygon.draw_polygon(rect, points)
+    with pytest.raises(AssertionError, match='Either color or gradient'):
+      polygon.draw_polygon(rect, points, color=rl.WHITE, gradient=gradient)
     for malformed in (np.zeros(4), np.zeros((4, 3))):
       with pytest.raises(AssertionError, match='points must be'):
         polygon.draw_polygon(rect, malformed, rl.WHITE)

@@ -40,7 +40,6 @@ def probe(profile, output):
   from openpilot.common.params import Params
   from openpilot.selfdrive.controls.controlsd import Controls
   from openpilot.starpilot.tests.tesla_fixture import EPS, FW_VERSIONS, NativeSafety, TeslaFixture, sha256, sha256_bytes
-  from opendbc.car.tesla.values import FSD_14_FW
 
   native = {}
   for name in ("capnp.lib.capnp", "msgq.ipc_pyx", "_cffi_backend"):
@@ -121,7 +120,7 @@ def probe(profile, output):
         record = fixture.step(control_callback=published_control)
         observations.append({"host": host_observation, "vehicle": record})
     platform = fixture.cp.carFingerprint
-    firmware = next(fw for fw in FW_VERSIONS[platform][EPS] if (fw in FSD_14_FW[platform]) == (profile == "fsd14"))
+    firmware = FW_VERSIONS[platform][EPS][0]
     paths = ("openpilot/selfdrive/controls/controlsd.py", "openpilot/selfdrive/controls/lib/longcontrol.py",
              "openpilot/starpilot/tests/tesla_fixture.py", "openpilot/starpilot/tests/test_tesla_host_integration.py",
              "opendbc_repo/opendbc/car/tesla/interface.py", "opendbc_repo/opendbc/car/tesla/carcontroller.py",
@@ -202,7 +201,7 @@ class TestTeslaHostIntegration(unittest.TestCase):
             self.assertTrue(emitted["safety_tx_accepted"])
             if emitted["address"] == 0x488:
               steering.append(emitted)
-              self.assertEqual(emitted["signals"]["DAS_steeringControlType"], (2 if profile == "fsd14" else 1) if enabled else 0)
+              self.assertEqual(emitted["signals"]["DAS_steeringControlType"], 1 if enabled else 0)
             elif emitted["address"] == 0x2B9:
               longitudinal.append(emitted)
               signals = emitted["signals"]
@@ -221,18 +220,18 @@ class TestTeslaHostIntegration(unittest.TestCase):
                   if message["address"] == address]
       self.assertEqual(counters[1:], [(value + 1) % modulus for value in counters[:-1]])
 
-  def test_old_firmware_host_command_reaches_can_unchanged(self):
-    self.check_profile("old")
+  def test_marker489_host_command_reaches_can_unchanged(self):
+    self.check_profile("marker489")
 
-  def test_fsd14_firmware_host_command_reaches_can_unchanged(self):
-    self.check_profile("fsd14")
+  def test_marker054_host_command_reaches_can_unchanged(self):
+    self.check_profile("marker054")
 
 
 if __name__ == "__main__":
   if "--probe" in sys.argv:
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--probe", action="store_true")
-    parser.add_argument("--profile", choices=("old", "fsd14"), required=True)
+    parser.add_argument("--profile", choices=("marker489", "marker054"), required=True)
     parser.add_argument("--output", type=Path, required=True)
     arguments = parser.parse_args()
     probe(arguments.profile, arguments.output)

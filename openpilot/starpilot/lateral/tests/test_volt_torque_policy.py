@@ -1,16 +1,16 @@
+
+from unittest.mock import patch
 import json
 import os
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
 
 import numpy as np
 
 from opendbc.car import gen_empty_fingerprint
 from opendbc.car.gm.interface import CarInterface
-from opendbc.car.gm.tests.test_bolt_cc import Settings
 from opendbc.car.gm.values import CAR
 from opendbc.car.vehicle_model import VehicleModel
 from openpilot.common.params import Params
@@ -29,8 +29,7 @@ def params(identity, alpha=True, release=False):
   fp[2][0x320] = 6
   fp[1][0x460] = 8
   fp[0].update({0xbe: 6, 0x3d1: 8, 0xc9: 8, 0x1e1: 7, 0x1f5: 8, 0x34a: 5, 0x1c4: 8, 0xbd: 7})
-  with patch('opendbc.car.gm.interface.Params', return_value=Settings()):
-    return CarInterface.get_params(identity, fp, [], alpha, release, False)
+  return CarInterface.get_params(identity, fp, [], alpha, release, False)
 
 
 class TestVoltTorquePolicy(unittest.TestCase):
@@ -60,15 +59,19 @@ class TestVoltTorquePolicy(unittest.TestCase):
       def row():
         state = owner.snapshot('torque', parked=False, system_long=False, lateral_context=False, metric=False)
         return next(item for item in state.rows if item.key == DOCUMENT_KEY)
-      self.assertEqual(row().value, 'StarPilot vehicle tune')
-      self.assertTrue(owner.apply(row_change(row())))
+      self.assertEqual(row().value, 'StarPilot Controller')
+      request = row_change(row())
+      assert request is not None
+      self.assertTrue(owner.apply(request))
       self.assertEqual(read_selection(storage, cp).mode, ControllerMode.STANDARD)
       choices = parse_document(Path(storage.get_param_path(DOCUMENT_KEY)).read_bytes())['vehicles']
       self.assertEqual(choices[str(other.carFingerprint)]['mode'], 'standard')
       standard = LatControlTorque(cp.as_reader(), CarInterface(cp), .01, controller_mode=read_selection(storage, cp).mode)
       self.assertIsNone(selected_policy(standard))
       self.assertEqual(standard.pid._k_i[1], [.15])
-      self.assertTrue(owner.apply(row_change(row())))
+      request = row_change(row())
+      assert request is not None
+      self.assertTrue(owner.apply(request))
       self.assertEqual(read_selection(storage, cp).mode, ControllerMode.STARPILOT)
       self.assertFalse(storage.get_bool('AdvancedLateralTune'))
 
@@ -114,8 +117,8 @@ class TestVoltTorquePolicy(unittest.TestCase):
           self.assertEqual(controls.torque_learning_allowed, mode == ControllerMode.STANDARD)
           real_update = controls.VM.update_params
           for speed, live_ratio in ((0., 15.7), (20., 15.7), (20., 15.7), (35., 16.2)):
-            controls.sm = {'carState': SimpleNamespace(vEgo=speed),
-                           'vehicleParameters': SimpleNamespace(stiffnessFactor=1.1, steerRatio=live_ratio)}
+            self.enterContext(patch.object(controls, 'sm', {'carState': SimpleNamespace(vEgo=speed),
+                           'vehicleParameters': SimpleNamespace(stiffnessFactor=1.1, steerRatio=live_ratio)}, create=True))
             observed = []
             def capture(stiffness, ratio, real_update=real_update, observed=observed):
               real_update(stiffness, ratio)

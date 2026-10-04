@@ -7,6 +7,9 @@ from unittest.mock import patch
 import pytest
 
 from opendbc.car.structs import car
+from opendbc.car import gen_empty_fingerprint
+from opendbc.car.honda.interface import CarInterface as HondaInterface
+from opendbc.car.honda.values import CAR as HONDA
 from openpilot.cereal import messaging
 from openpilot.common.prefix import OpenpilotPrefix
 from openpilot.selfdrive.car.card import Car
@@ -37,8 +40,9 @@ def test_card_companion_is_available_when_car_state_wakes_selfdrive(pause_latera
     sd.sm.update(100)
     assert sd.sm.seen['aolIntentWire']
     # Native permission is current and unchanged throughout the race.
-    cp = car.CarParams.new_message()
-    cp.safetyConfigs = [car.CarParams.SafetyConfig(safetyModel=car.CarParams.SafetyModel.hondaBosch, safetyParam=34)]
+    cp = HondaInterface.get_params(HONDA.HONDA_CIVIC_BOSCH, gen_empty_fingerprint(), [], True, False, False)
+    cp.safetyConfigs[-1].safetyParam |= 32
+    cp.alternativeExperience = 1
     native = messaging.new_message('aolSafetyWire', 0, valid=True)
     native.logMonoTime = stamp
     native.aolSafetyWire = encode_safety(SafetyState(1, True, stamp, stamp + 200_000_000,

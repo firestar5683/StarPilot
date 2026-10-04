@@ -1,6 +1,6 @@
 """Capture transport fault frequency without doing logging in PortAudio's callback."""
 from types import SimpleNamespace
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 
@@ -13,7 +13,7 @@ def test_underflow_counters_preserve_signal_and_log_on_service_thread():
   daemon.stream_status_count = 0
   daemon.output_underflow_count = 0
   samples = np.array([0.5, -0.5, 0., 0.25], dtype=np.float32)
-  daemon.get_sound_data = lambda frames: samples[:frames]
+  daemon.get_sound_data = Mock(side_effect=lambda frames: samples[:frames])
   output = np.empty((4, 1), dtype=np.float32)
   underflow = SimpleNamespace(output_underflow=True)
   other = SimpleNamespace(output_underflow=False)
