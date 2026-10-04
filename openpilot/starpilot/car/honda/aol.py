@@ -41,7 +41,7 @@ def policy_for(CP) -> AolVehiclePolicy:
 
 def native_profile_supported(model: int, param: int) -> bool:
   return (model == int(car.CarParams.SafetyModel.hondaBosch) and
-          param & 0x22 == 0x22 and not param & 0x18)
+          param in (34, 35))
 
 
 def native_accepts_cp(CP, model: int, param: int) -> bool:
