@@ -100,7 +100,7 @@ def test_wire_rate_endpoint_does_not_wrap_sign():
     assert data[1] == 255-((mode+counter+sum(v+(v >> 8) for v in fields)) & 255)
 
 
-@pytest.mark.parametrize("car", sorted(GENERIC_CANFD_CARS))
+@pytest.mark.parametrize("car", sorted(GENERIC_CANFD_CARS) + [CAR.FORD_MUSTANG_MACH_E_MK1])
 def test_actual_camera_lead_parser_and_source_window(car):
   from opendbc.can import CANPacker
   from opendbc.car import Bus
@@ -173,10 +173,10 @@ def test_actual_camera_lead_parser_and_source_window(car):
   assert not radar.rcp.can_valid and not radar.pts and not radar.v_rel_history
 
 
-def test_camera_mapping_does_not_silently_change_mache():
+def test_camera_mapping_is_explicit_for_mache():
   from opendbc.car import Bus
   from opendbc.car.ford.values import DBC
-  assert Bus.radar not in DBC[CAR.FORD_MUSTANG_MACH_E_MK1]
+  assert DBC[CAR.FORD_MUSTANG_MACH_E_MK1][Bus.radar] == "ford_lincoln_base_pt"
 
 
 def test_f150_original_wheelbase_changes_real_plant_and_turn_gate():
@@ -200,3 +200,20 @@ def test_f150_original_wheelbase_changes_real_plant_and_turn_gate():
   upstream = get_cruise_accel(False, 35., 25., 0., 12.4, prior, 1., 0., True)
   assert upstream == pytest.approx(0.)
   assert 0. < restored <= .8
+
+
+@pytest.mark.parametrize("alpha,release", ((False, False), (True, False), (False, True), (True, True)))
+@pytest.mark.parametrize("bsm", (False, True))
+def test_mache_camera_source_preserves_exact_factory_words(alpha, release, bsm):
+  from opendbc.car.ford.radar_interface import RadarInterface
+  fp = gen_empty_fingerprint()
+  fp[0][0x5A] = 8
+  fp[2].update({0x3D6: 8, 0x186: 8})
+  if bsm:
+    fp[0].update({0x3A6: 8, 0x3A7: 8})
+  cp = CarInterface.get_params(CAR.FORD_MUSTANG_MACH_E_MK1, fp, [], alpha, release, False)
+  assert cp.safetyConfigs[-1].safetyParam == (19 if alpha and not release else 18)
+  assert cp.openpilotLongitudinalControl == (alpha and not release)
+  assert not cp.radarUnavailable
+  radar = RadarInterface(cp)
+  assert radar.rcp.bus == 2 and radar.generic_canfd_lead

@@ -58,6 +58,9 @@ class CarInterface(CarInterfaceBase):
       ret.alphaLongitudinalAvailable = not is_release
       ret.steerActuatorDelay = 0.22
       longitudinal_requested = bool(alpha_long and not is_release)
+    elif candidate == CAR.FORD_MUSTANG_MACH_E_MK1:
+      ret.alphaLongitudinalAvailable = not is_release
+      longitudinal_requested = bool(alpha_long and not is_release)
     elif candidate in CLASSIC_EXTENDED_CARS:
       # Original shared classic ownership is explicit stock/OP-long selection.
       # Actuator delay is live; modern LongControl already supplies the original P=0.
