@@ -21,6 +21,19 @@ def function(text, name):
 
 
 class TestAR0231(unittest.TestCase):
+  def test_disabled_sensor_releases_session_after_configuration(self):
+    source = (CAMERA / 'cameras/spectra.cc').read_text()
+    camera_open = function(source, 'void SpectraCamera::camera_open(')
+    disabled = function(camera_open, 'if (!enabled)')
+    self.assertEqual(re.findall(r'\b(camera_close|return)\b', disabled), ['camera_close', 'return'])
+    self.assertLess(camera_open.index('openSensor()'), camera_open.index('if (!enabled)'))
+    self.assertLess(camera_open.index('if (!enabled)'), camera_open.index('buf.init('))
+    close = function(source, 'void SpectraCamera::camera_close()')
+    enabled = function(close, 'if (enabled)')
+    self.assertNotIn('CAM_RELEASE_DEV, session_handle, sensor_dev_handle', enabled)
+    self.assertIn('CAM_RELEASE_DEV, session_handle, sensor_dev_handle', close)
+    self.assertIn('CAM_REQ_MGR_DESTROY_SESSION', close)
+
   def test_build_and_probe_preserve_modern_priority(self):
     source = (CAMERA / 'cameras/spectra.cc').read_text()
     probe = function(source, 'bool SpectraCamera::openSensor()')

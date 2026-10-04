@@ -282,7 +282,10 @@ void SpectraCamera::camera_open(VisionIpcServer *v) {
     return;
   }
 
-  if (!enabled) return;
+  if (!enabled) {
+    camera_close();
+    return;
+  }
 
   buf.out_img_width = sensor->frame_width / sensor->out_scale;
   buf.out_img_height = (sensor->hdr_offset > 0 ? (sensor->frame_height - sensor->hdr_offset) / 2 : sensor->frame_height) / sensor->out_scale;
