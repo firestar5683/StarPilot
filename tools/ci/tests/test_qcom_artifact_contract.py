@@ -308,6 +308,19 @@ class TestQcomSupplementalRuntimeCompatibility(unittest.TestCase):
     self.verify()
     self.assertEqual(before, (self.manifest_path.read_bytes(), self.parent_path.read_bytes()))
 
+  def test_exact_typing_only_helper_preserves_parent_and_artifact_attestation(self):
+    before = self.manifest_path.read_bytes(), self.parent_path.read_bytes(), copy.deepcopy(self.manifest["artifacts"])
+    for name, source_hash in contract.RUNTIME_EXTENSION_TYPED_ADDITIONS.items():
+      self.current["sources"][name] = source_hash
+    self.bind_extension()
+    self.verify()
+    self.assertEqual(before, (self.manifest_path.read_bytes(), self.parent_path.read_bytes(), self.manifest["artifacts"]))
+    name = next(iter(contract.RUNTIME_EXTENSION_TYPED_ADDITIONS))
+    self.current["sources"][name] = "f" * 64
+    self.bind_extension()
+    with self.assertRaisesRegex(ValueError, "Unreviewed QCOM runtime addition"):
+      self.verify()
+
   def test_each_reviewed_source_and_added_helper_requires_exact_bytes(self):
     original = copy.deepcopy(self.current)
     for name in (*contract.RUNTIME_EXTENSION_CHANGES, *contract.RUNTIME_EXTENSION_ADDITIONS):

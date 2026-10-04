@@ -170,6 +170,11 @@ RUNTIME_EXTENSION_ADDITIONS = {
     '321e1fd0513f8f8ee98cb7c1dc637b609350eeb77ca4d84c3821e88e1f2da8ad',
 }
 
+RUNTIME_EXTENSION_TYPED_ADDITIONS = {
+  'tinygrad_repo/tinygrad/runtime/support/am/startup_trace.py':
+    '93eb3813e692f9ca84e7ef51eed7dedc95a7beafe746dbff73e2acb7600f9a42',
+}
+
 def _runtime_parent_source(package: Path, current_source: dict) -> dict:
   """Bind supplemental runtime changes to the existing paired-output attestation."""
   path = package / "runtime-compatibility.json"
@@ -193,7 +198,7 @@ def _runtime_parent_source(package: Path, current_source: dict) -> dict:
       raise ValueError(f"Unreviewed QCOM runtime source: {name}")
     sources[name] = before
   for name, expected_sha in RUNTIME_EXTENSION_ADDITIONS.items():
-    if sources.pop(name, None) != expected_sha:
+    if sources.pop(name, None) not in (expected_sha, RUNTIME_EXTENSION_TYPED_ADDITIONS.get(name, expected_sha)):
       raise ValueError(f"Unreviewed QCOM runtime addition: {name}")
   return {"sources": sources, "commands": current_source["commands"]}
 
