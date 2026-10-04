@@ -1,6 +1,7 @@
 #pragma once
 
-// Exact classic NON_SCC independent owners. Never used by CANFD mode.
+// Shared classic physical authorization. SCC and NON_SCC profiles remain distinct.
+// Never used by CANFD mode.
 #define HYUNDAI_FORTE_AOL_MARKER 0x0400U
 #define HYUNDAI_FORTE_AOL_MAIN (0x1000U | HYUNDAI_FORTE_AOL_MARKER)
 #define HYUNDAI_FORTE_AOL_LDA (0x1800U | HYUNDAI_FORTE_AOL_MARKER)
@@ -11,6 +12,16 @@
 #define HYUNDAI_NON_SCC_EV_ALT_AOL_MAIN 0x1441U
 #define HYUNDAI_NON_SCC_EV_ALT_AOL_LDA 0x1C41U
 #define HYUNDAI_CLASSIC_SOURCE_MAX_AGE_US 300000U
+
+static bool classic_scc_aol_enabled = false;
+static bool classic_scc_aol_camera = false;
+
+static bool classic_scc_aol_param(uint16_t param) {
+  // Stock SCC gas, torque limits and camera routing only. No LONG or NON_SCC.
+  return (param == 0x8408U) || (param == 0x840AU) || (param == 0x8C08U) || (param == 0x8C0AU) ||
+    (((param & 0x0400U) != 0U) && ((param & 0xF1B4U) == 0U) &&
+    ((param & 3U) != 3U) && ((param & 0x0240U) != 0x0240U));
+}
 
 static bool classic_non_scc_aol_enabled = false;
 static bool classic_non_scc_aol_ev = false;
@@ -51,6 +62,8 @@ static void classic_non_scc_aol_clear_authorization(void) {
 static void classic_non_scc_aol_reset(void) {
   classic_non_scc_aol_clear_authorization();
   classic_non_scc_aol_enabled = false;
+  classic_scc_aol_enabled = false;
+  classic_scc_aol_camera = false;
   classic_non_scc_aol_ev = false;
   classic_non_scc_aol_hev = false;
   classic_non_scc_aol_lda = false;
@@ -81,6 +94,12 @@ static uint8_t classic_non_scc_aol_request_mask(void) {
     classic_non_scc_aol_clear_authorization();
   } else if (heartbeat_engaged) {
     classic_non_scc_aol_session = true;
+    if (classic_scc_aol_enabled && classic_non_scc_aol_lda && controls_allowed &&
+        classic_non_scc_aol_main_seen && aol_rx_healthy() && ((aol_host_axis_mask & 1U) != 0U)) {
+      // Actual stock ACC activation can seed the host's LKAS-on-engage latch.
+      classic_non_scc_aol_token = true;
+      classic_non_scc_aol_token_ts = now;
+    }
     if (((aol_host_axis_mask & 1U) != 0U) && classic_non_scc_aol_token) {
       classic_non_scc_aol_claimed = true;
     }
@@ -97,8 +116,10 @@ static uint8_t classic_non_scc_aol_permission_mask(void) {
     classic_non_scc_aol_clear_authorization();
   } else {
     const uint8_t request = classic_non_scc_aol_request_mask();
-    result = (((request & 1U) != 0U) && classic_non_scc_aol_main_seen &&
-              (classic_non_scc_aol_main || classic_non_scc_aol_token || controls_allowed)) ? 1U : 0U;
+    const bool physical_authorized = (classic_scc_aol_enabled && classic_non_scc_aol_lda) ?
+      (classic_non_scc_aol_token || controls_allowed) :
+      (classic_non_scc_aol_main || classic_non_scc_aol_token || controls_allowed);
+    result = (((request & 1U) != 0U) && classic_non_scc_aol_main_seen && physical_authorized) ? 1U : 0U;
   }
   return result;
 }
@@ -113,9 +134,14 @@ static bool classic_non_scc_aol_combined_pressed(uint32_t now) {
 }
 
 static void classic_non_scc_aol_rx(const CANPacket_t *msg) {
-  if (classic_non_scc_aol_enabled && (msg->bus == 0U)) {
+  if (classic_non_scc_aol_enabled && ((msg->bus == 0U) || (classic_scc_aol_enabled && classic_scc_aol_camera && (msg->bus == 2U)))) {
     const uint32_t now = microsecond_timer_get();
-    if ((GET_LEN(msg) == 8U) &&
+    const uint8_t scc_bus = classic_scc_aol_camera ? 2U : 0U;
+    if (classic_scc_aol_enabled && (msg->bus == scc_bus) && (msg->addr == 0x420U) && (GET_LEN(msg) == 8U)) {
+      classic_non_scc_aol_main = GET_BIT(msg, 0U);
+      classic_non_scc_aol_main_seen = true;
+    }
+    if (!classic_scc_aol_enabled && (GET_LEN(msg) == 8U) &&
         ((!classic_non_scc_aol_ev && !classic_non_scc_aol_hev && (msg->addr == 0x260U)) ||
          (classic_non_scc_aol_ev && (msg->addr == 0x592U)) ||
          (classic_non_scc_aol_hev && (msg->addr == 0x595U)))) {
@@ -123,7 +149,7 @@ static void classic_non_scc_aol_rx(const CANPacket_t *msg) {
         (classic_non_scc_aol_hev ? GET_BIT(msg, 50U) : GET_BIT(msg, 25U));
       classic_non_scc_aol_main_seen = true;
     }
-    if (classic_non_scc_aol_lda && (GET_LEN(msg) == 8U) && ((msg->addr == 0x391U) || (msg->addr == 0x50CU))) {
+    if (classic_non_scc_aol_lda && (msg->bus == 0U) && (GET_LEN(msg) == 8U) && ((msg->addr == 0x391U) || (msg->addr == 0x50CU))) {
       // Source loss clears neutral evidence without manufacturing a release.
       for (unsigned int i = 0U; i < 2U; i++) {
         if (classic_non_scc_aol_source_seen[i] &&
@@ -162,14 +188,17 @@ static void classic_non_scc_aol_rx(const CANPacket_t *msg) {
   }
 }
 
-static void classic_non_scc_aol_configure(uint16_t param) {
+static void classic_non_scc_aol_configure(uint16_t param, bool legacy) {
   classic_non_scc_aol_reset();
-  classic_non_scc_aol_enabled = ((param == HYUNDAI_FORTE_AOL_MAIN) || (param == HYUNDAI_FORTE_AOL_LDA) ||
+  classic_scc_aol_enabled = classic_scc_aol_param(param) && (!legacy || ((param & 8U) == 0U)) &&
+    ((unsigned int)alternative_experience == 32U);
+  classic_scc_aol_camera = classic_scc_aol_enabled && ((param & 8U) != 0U);
+  classic_non_scc_aol_enabled = ((!legacy && ((param == HYUNDAI_FORTE_AOL_MAIN) || (param == HYUNDAI_FORTE_AOL_LDA) ||
                                (param == HYUNDAI_KONA_AOL_MAIN) || (param == HYUNDAI_KONA_AOL_LDA) ||
                                (param == HYUNDAI_NON_SCC_HEV_AOL_MAIN) || (param == HYUNDAI_NON_SCC_HEV_AOL_LDA) ||
-                               (param == HYUNDAI_NON_SCC_EV_ALT_AOL_MAIN) || (param == HYUNDAI_NON_SCC_EV_ALT_AOL_LDA)) &&
+                               (param == HYUNDAI_NON_SCC_EV_ALT_AOL_MAIN) || (param == HYUNDAI_NON_SCC_EV_ALT_AOL_LDA))) || classic_scc_aol_enabled) &&
     ((unsigned int)alternative_experience == 32U);
-  classic_non_scc_aol_lda = classic_non_scc_aol_enabled && ((param == HYUNDAI_FORTE_AOL_LDA) || (param == HYUNDAI_KONA_AOL_LDA) ||
+  classic_non_scc_aol_lda = classic_non_scc_aol_enabled && ((classic_scc_aol_enabled && ((param & 0x0800U) != 0U)) || (param == HYUNDAI_FORTE_AOL_LDA) || (param == HYUNDAI_KONA_AOL_LDA) ||
                                                           (param == HYUNDAI_NON_SCC_HEV_AOL_LDA) ||
                                                           (param == HYUNDAI_NON_SCC_EV_ALT_AOL_LDA));
   classic_non_scc_aol_ev = classic_non_scc_aol_enabled && ((param == HYUNDAI_NON_SCC_EV_ALT_AOL_MAIN) || (param == HYUNDAI_NON_SCC_EV_ALT_AOL_LDA));

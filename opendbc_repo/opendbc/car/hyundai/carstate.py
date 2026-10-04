@@ -1,3 +1,4 @@
+from opendbc.car.hyundai.classic_scc_aol import qualified as qualified_classic_scc, ClassicSccLkasSources
 from opendbc.car.hyundai.ev9_camera_lead import EV9CameraLead
 from opendbc.car.hyundai.ev9_longitudinal import qualified as ev9_long_qualified
 from collections import deque
@@ -53,6 +54,8 @@ class CarState(CarStateBase):
   def __init__(self, CP):
     super().__init__(CP)
     self.forte_lkas_sources = NonSccLkasSources() if qualified_non_scc(CP) and CP.flags & HyundaiFlags.HAS_LDA_BUTTON else None
+    if qualified_classic_scc(CP) and CP.flags & HyundaiFlags.HAS_LDA_BUTTON:
+      self.forte_lkas_sources = ClassicSccLkasSources(CP.carFingerprint)
     self.ev9_long = ev9_long_qualified(CP)
     self.ev9_camera_lead = EV9CameraLead(CP) if self.ev9_long else None
     self.angle_steering_angle = 0.0

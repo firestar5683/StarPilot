@@ -21,6 +21,8 @@ sys.path.insert(0, str(ROOT))
 from tools import test_runner
 
 RELEASE_TARGETS = (
+  "opendbc_repo/opendbc/safety/tests/test_hyundai_classic_scc_aol.py",
+  "openpilot/starpilot/aol/tests/test_classic_scc_profiles.py",
   "opendbc_repo/opendbc/safety/tests/test_hyundai_blended.py",
   "opendbc_repo/opendbc/car/hyundai/tests/test_palisade_2023.py",
   "openpilot/starpilot/longitudinal/tests/test_output_max.py",
