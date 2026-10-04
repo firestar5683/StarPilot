@@ -50,7 +50,7 @@ class TestFordThreePorts(unittest.TestCase):
     self.assertEqual(match_fw_to_car(self.firmware(CAR.FORD_FOCUS_MK4), "", allow_exact=False, log=False)[1],
                      {CAR.FORD_FOCUS_MK4})
 
-  def test_new_platform_ownership_and_existing_ford_unchanged(self):
+  def test_new_platform_ownership_and_classic_long_selection(self):
     for candidate in PORTS:
       with self.subTest(candidate=candidate):
         stock = params(candidate)
@@ -62,7 +62,8 @@ class TestFordThreePorts(unittest.TestCase):
         self.assertTrue(requested.safetyConfigs[-1].safetyParam & FordSafetyFlags.LONG_CONTROL)
         if candidate == CAR.FORD_MONDEO_MK5:
           self.assertFalse(params(candidate, alpha=True, release=True).openpilotLongitudinalControl)
-    self.assertTrue(params(CAR.FORD_BRONCO_SPORT_MK1).openpilotLongitudinalControl)
+    self.assertFalse(params(CAR.FORD_BRONCO_SPORT_MK1).openpilotLongitudinalControl)
+    self.assertTrue(params(CAR.FORD_BRONCO_SPORT_MK1, alpha=True).openpilotLongitudinalControl)
 
   def test_real_edge_angle_and_mondeo_gear_parsers(self):
     for candidate, source_name, source_values in (
