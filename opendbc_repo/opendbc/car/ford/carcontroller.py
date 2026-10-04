@@ -78,6 +78,7 @@ class CarController(CarControllerBase):
     can_sends = []
     if (self.mache_lateral is not None or self.classic_lateral is not None) and self.manual_turn_inputs is not None:
       self.manual_turn_inputs.update()
+      self.manual_turn_inputs.apply_blend_settings(self)
 
     actuators = CC.actuators
     hud_control = CC.hudControl

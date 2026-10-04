@@ -21,6 +21,10 @@ sys.path.insert(0, str(ROOT))
 from tools import test_runner
 
 RELEASE_TARGETS = (
+  "opendbc_repo/opendbc/car/ford/tests/test_added_firmware_identity.py",
+  "opendbc_repo/opendbc/car/ford/tests/test_required_source_health.py",
+  "opendbc_repo/opendbc/car/ford/tests/test_blend_settings.py",
+  "opendbc_repo/opendbc/car/ford/tests/test_blend_settings_startup.py",
   "opendbc_repo/opendbc/car/ford/tests/test_production_extensions.py",
   "opendbc_repo/opendbc/car/ford/tests/test_generic_canfd.py",
   "opendbc_repo/opendbc/safety/tests/test_ford_generic_canfd_extended.py",

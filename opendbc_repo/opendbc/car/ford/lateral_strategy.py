@@ -171,6 +171,11 @@ class FordLateralController:
     self.path_angle_driver_cooldown = 0.0
     self.desired_curvature_last = 0.0
 
+  def set_blend_settings(self, low: float, high: float, lane_change: float):
+    self.curvature_blend_low = float(np.clip(low if np.isfinite(low) else 0.4, 0.0, 1.0))
+    self.curvature_blend_high = float(np.clip(high if np.isfinite(high) else 0.4, 0.0, 1.0))
+    self.curvature_lane_change_factor = float(np.clip(lane_change if np.isfinite(lane_change) else 0.85, 0.5, 1.25))
+
   def set_inputs(self, model, time_indices, lookahead: float, human_turn_enabled: bool):
     self.model = model
     self.time_indices = time_indices
