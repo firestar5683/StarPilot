@@ -339,6 +339,33 @@ def _migrate_first_start(params, namespace, storage, values, known, cache_keys, 
   return prepared
 
 
+def _dom_handoff(namespace):
+  path = namespace.parent / f'.starpilot-dom-handoff-{digest(str(namespace).encode())}.json'
+  try:
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
+  except FileNotFoundError:
+    return None
+  except OSError as error:
+    raise MigrationRequired('Invalid Dom handoff marker') from error
+  try:
+    with os.fdopen(fd, 'rb') as source:
+      info = os.fstat(source.fileno())
+      if not stat.S_ISREG(info.st_mode) or info.st_uid != os.getuid() or info.st_mode & 0o077 or info.st_size > 4096:
+        raise ValueError('Invalid Dom handoff file')
+      raw = source.read(4097)
+    record = json.loads(raw)
+    if type(record) is not dict or set(record) != {'format', 'version', 'namespace', 'target', 'token'}:
+      raise ValueError('Invalid Dom handoff fields')
+    _hash(record['token'], 32)
+    expected = {'format': 'starpilot-dom-handoff', 'version': 1, 'namespace': str(namespace),
+                'target': str(namespace.resolve(strict=True)), 'token': record['token']}
+    if type(record['version']) is not int or raw != canonical_json(expected):
+      raise ValueError('Dom handoff does not bind this namespace')
+    return record['token']
+  except (OSError, ValueError, TypeError, KeyError) as error:
+    raise MigrationRequired('Invalid Dom handoff marker') from error
+
+
 def prepare_manager_start(params, storage, *, dry_run=False, auto_migrate=False):
   from openpilot.starpilot.schema_cache import CACHE_KEYS, inspect_cache
 
@@ -353,16 +380,29 @@ def prepare_manager_start(params, storage, *, dry_run=False, auto_migrate=False)
   with _params_lock(namespace, read_only=dry_run):
     values = _read_namespace(namespace)
     identity = {'version': 2, 'schema_epoch': 2, 'namespace': str(namespace), 'target': str(namespace.resolve())}
+    handoff = _dom_handoff(namespace)
+    consumed = None
     try:
-      # This marker has one canonical encoding. Truncation, duplicate fields or
-      # wrong JSON types cannot qualify a profile or bypass its recovery archive.
-      initialized = _read_value(marker) == canonical_json(identity)
-    except (OSError, ValueError):
+      raw_identity = _read_value(marker)
+      saved_identity = json.loads(raw_identity)
+      candidate_identity = dict(identity)
+      if type(saved_identity) is dict and 'consumed_dom_token' in saved_identity:
+        _hash(saved_identity['consumed_dom_token'], 32)
+        candidate_identity['consumed_dom_token'] = saved_identity['consumed_dom_token']
+      initialized = raw_identity == canonical_json(candidate_identity)
+      if initialized:
+        consumed = candidate_identity.get('consumed_dom_token')
+    except (OSError, ValueError, TypeError):
       initialized = False
+    foreign_handoff = handoff is not None and handoff != consumed
+    if consumed is not None:
+      identity['consumed_dom_token'] = consumed
     known = {key.decode() if isinstance(key, bytes) else key for key in params.all_keys()}
-    if auto_migrate and not dry_run and not initialized and values:
+    if auto_migrate and not dry_run and (foreign_handoff or not initialized and values):
       values = _migrate_first_start(params, namespace, storage, values, known, CACHE_KEYS, inspect_cache)
       migrated = True
+      if foreign_handoff:
+        identity["consumed_dom_token"] = handoff
     else:
       migrated = False
     unknown = set(values) - known
@@ -379,10 +419,13 @@ def prepare_manager_start(params, storage, *, dry_run=False, auto_migrate=False)
     incompatible_cache = bool(incompatible_keys)
     # This retired cache has no compatible producer or conversion.
     incompatible_cache |= 'LocationFilterInitialState' in values
-    unqualified = unknown or invalid_preferences or incompatible_cache or (not initialized and not migrated and bool(set(values) - PREFERENCES))
+    unqualified = (foreign_handoff and not migrated or unknown or invalid_preferences or incompatible_cache or
+                   (not initialized and not migrated and bool(set(values) - PREFERENCES)))
     if unqualified:
       if dry_run:
         reasons = []
+        if foreign_handoff:
+          reasons.append('unconsumed Dom handoff')
         if unknown:
           reasons.append('unknown saved keys')
         if invalid_preferences:
@@ -394,5 +437,5 @@ def prepare_manager_start(params, storage, *, dry_run=False, auto_migrate=False)
         raise MigrationRequired('Settings require migration before startup: ' + ', '.join(reasons))
       snapshot = _save_snapshot(values, storage / 'snapshots')
       raise MigrationRequired(f"Settings require migration before startup; raw recovery snapshot: {snapshot}")
-    if not initialized and not dry_run:
+    if (not initialized or foreign_handoff) and not dry_run:
       _atomic_write(marker, canonical_json(identity))
