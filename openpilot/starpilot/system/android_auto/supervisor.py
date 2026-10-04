@@ -69,7 +69,9 @@ STATE_LABELS = {
 def _is_onroad() -> bool:
   try:
     from openpilot.common.params import Params
-    return Params().get_bool("IsOnroad")
+    from openpilot.starpilot.saved_source import read_saved
+    raw, readable = read_saved(Params(), "IsOffroad", 1)
+    return readable and raw == b"0"
   except Exception:
     return False
 
