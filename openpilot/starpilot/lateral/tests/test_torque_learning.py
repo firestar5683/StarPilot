@@ -217,7 +217,9 @@ class TestTorqueLearning(unittest.TestCase):
       params.put_bool('AdvancedLateralTune', False, block=True)
       params.put_bool(LEARNING_OFF_KEY, True, block=True)
       host.settings = read_settings(params, base)
-      self.assertFalse(host.settings.advanced)
+      self.assertTrue(host.settings.valid)
+      self.assertAlmostEqual(host.settings.user_friction, base.friction * 1.2)
+      self.assertEqual(host._select(learned, now).source, TorqueSource.USER)
       self.assertFalse(TorqueHost(params, cp, allow_learning=learning_allowed(params, cp)).allow_learning)
 
   def test_running_manual_host_latches_both_learning_directions_and_keeps_manual_edits(self):
@@ -262,13 +264,25 @@ class TestTorqueLearning(unittest.TestCase):
     with OpenpilotPrefix():
       params, cp = Params(), cp_for(TOYOTA.TOYOTA_RAV4_TSS2)
       host = TorqueHost(params, cp)
-      for raw in (b'1', b'invalid'):
-        Path(params.get_param_path(LEARNING_OFF_KEY)).write_bytes(raw)
-        settings = read_settings(params, host.vehicle)
-        self.assertTrue(settings.valid)
-        self.assertFalse(settings.advanced)
-        self.assertFalse(settings.force_auto_off)
-        self.assertIsNone(TorqueHost(params, cp).allow_learning)
+      now = 1_000_000_000
+      learned = LearnedFrame(now, factor=host.vehicle.lat_accel_factor * 1.1,
+                             offset=host.vehicle.lat_accel_offset, friction=host.vehicle.friction * 1.1)
+      for raw, valid, force_off, source in (
+        (b'0', True, False, TorqueSource.LEARNED),
+        (b'1', True, True, TorqueSource.VEHICLE),
+        (b'invalid', False, False, TorqueSource.VEHICLE),
+      ):
+        with self.subTest(raw=raw):
+          Path(params.get_param_path(LEARNING_OFF_KEY)).write_bytes(raw)
+          settings = read_settings(params, host.vehicle)
+          self.assertEqual(settings.valid, valid)
+          self.assertIsNone(settings.user_factor)
+          self.assertIsNone(settings.user_friction)
+          self.assertEqual(settings.force_auto_off, force_off)
+          self.assertIsNone(host.allow_learning)
+          host.settings = settings
+          self.assertEqual(host._select(learned, now).source, source)
+
 
 
 if __name__ == '__main__':

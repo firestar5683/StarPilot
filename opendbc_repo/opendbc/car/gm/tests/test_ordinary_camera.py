@@ -18,7 +18,7 @@ def params(identity, *, alpha=False, release=False, camera=True, be=True):
   return CarInterface.get_params(identity, fp, [], alpha, release, False)
 
 
-def feed(ci, packer, now, *, cruise=True, gas=False, brake=False, fcw=0, counter=0):
+def feed(ci, packer, now, *, cruise=True, gas=False, brake=False, fcw=0, counter=0, camera=True):
   from opendbc.car.gm.tests.test_cc_gateway_stock import pt_frames
   frames = pt_frames(packer, gas=gas, counter=counter, acc_cruise=2 if cruise else 0)
   frames = [frame for frame in frames if frame[0] != 0xC9]
@@ -28,10 +28,47 @@ def feed(ci, packer, now, *, cruise=True, gas=False, brake=False, fcw=0, counter
              packer.make_can_msg('AEBCmd', 2, {}),
              packer.make_can_msg('ASCMActiveCruiseControlStatus', 2,
                                  {'ACCCruiseState': 2, 'ACCSpeedSetpoint': 80, 'FCWAlert': fcw})]
+  if not camera:
+    frames = [frame for frame in frames if frame[2] != 2]
   return ci.update([(now, frames)]), frames
 
 
 class TestOrdinaryCamera(unittest.TestCase):
+  def test_final_modes_do_not_require_removed_camera_after_lazy_reads(self):
+    from opendbc.car.gm.startup_preferences import prepare_disable_longitudinal
+    for identity in ORDINARY_CAMERA_CAR:
+      for alpha in (False, True):
+        for release in (False, True):
+          for camera in (False, True):
+            for disable_long in (False, True):
+              with self.subTest(identity=identity, alpha=alpha, release=release,
+                                camera=camera, disable_long=disable_long):
+                cp = params(identity, alpha=alpha, release=release, camera=camera)
+                before = (cp.openpilotLongitudinalControl, cp.pcmCruise, cp.safetyConfigs[0].safetyParam)
+                prepare_disable_longitudinal(cp, disable_long)
+                self.assertEqual((cp.openpilotLongitudinalControl, cp.pcmCruise,
+                                  cp.safetyConfigs[0].safetyParam), before)
+                ci = CarInterface(cp)
+                packer = CANPacker(DBC[identity][Bus.pt])
+                for tick in range(40):
+                  out, frames = feed(ci, packer, 1_000_000_000 + tick * 10_000_000,
+                                     camera=camera, counter=tick % 4)
+                self.assertTrue(out.canValid)
+                self.assertFalse(out.canTimeout)
+                if not camera:
+                  self.assertFalse(any(frame[2] == 2 for frame in frames))
+                steering_address = packer.make_can_msg('PSCMSteeringAngle', 0, {})[0]
+                self.assertTrue(any(frame[0] == steering_address and frame[2] == 0 for frame in frames))
+                for tick in range(40, 140):
+                  now = 1_000_000_000 + tick * 10_000_000
+                  retained = [frame for frame in frames if not (frame[0] == steering_address and frame[2] == 0)]
+                  out = ci.update([(now, retained)])
+                self.assertFalse(out.canValid)
+                for tick in range(140, 180):
+                  out, _ = feed(ci, packer, 1_000_000_000 + tick * 10_000_000,
+                                camera=camera, counter=tick % 4)
+                self.assertTrue(out.canValid)
+
   def test_final_cp_and_default_policy_modes(self):
     from opendbc.car.gm.camera import policy_for
     from opendbc.car.gm.feature_capabilities import longitudinal_supported, display_supported
