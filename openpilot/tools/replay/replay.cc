@@ -47,6 +47,8 @@ void Replay::setupServices(const std::vector<std::string> &allow, const std::vec
     bool is_blocked = std::find(block.begin(), block.end(), name) != block.end();
     bool is_allowed = allow.empty() || std::find(allow.begin(), allow.end(), name) != allow.end();
     if (is_allowed && !is_blocked) {
+      // Recorder-only transports such as modelIdentity carry an existing Event field.
+      if (event_schema.findFieldByName(name) == nullptr) continue;
       uint16_t which = event_schema.getFieldByName(name).getProto().getDiscriminantValue();
       sockets_[which] = name.c_str();
       active_services.push_back(name.c_str());

@@ -55,6 +55,26 @@ class TestDeveloperRuntime(unittest.TestCase):
     self.assertFalse(source.exists())
     self.assertEqual(native.read_bytes(), b'host binary')
 
+  def test_sync_skips_tracked_native_outputs_and_preserves_host_builds(self):
+    artifacts = ('native.a', 'native.so', 'native.so.1', 'native.dylib', 'native.o', 'native.os')
+    for name in artifacts:
+      (self.root / name).write_bytes(b'device binary')
+    self.git('add', '-f', *artifacts)
+    self.runtime.sync()
+    for name in artifacts:
+      self.assertFalse((self.runtime.work / name).exists(), name)
+    native = self.runtime.work / 'native.a'
+    native.write_bytes(b'host binary')
+    self.runtime.sync()
+    self.assertEqual(native.read_bytes(), b'host binary')
+
+  def test_ui_build_prepares_mpc_import_dependency(self):
+    solver = 'openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so'
+    for command in ('c3', 'c4', 'onroad'):
+      with self.subTest(command=command), patch('tools.host_runtime.run') as build:
+        self.runtime.build(command, 4)
+        self.assertIn(solver, build.call_args.args[0])
+
   def test_cache_environment_ignores_external_imports_and_settings(self):
     with patch.dict(os.environ, PYTHONPATH='/elsewhere', PARAMS_ROOT='/real/params', OPENPILOT_PREFIX='real', CC='cross-compiler'):
       env = self.runtime.environment()

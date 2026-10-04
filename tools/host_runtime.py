@@ -137,6 +137,7 @@ class HostRuntime:
     # Include uncommitted development, exclude ignored native/device outputs.
     listed = git(self.root, 'ls-files', '--cached', '--others', '--exclude-standard', '-z').split('\0')
     paths = {name for name in listed if name and not (set(Path(name).parts) & EXCLUDE_DIRS)
+             and not (set(Path(name).suffixes) & {'.a', '.so', '.dylib', '.o', '.os'})
              and (self.root / name).is_file()}
     manifest = inside(self.cache / 'source-files.json', self.cache)
     previous = set(json.loads(manifest.read_text())) if manifest.exists() else set()
@@ -239,7 +240,7 @@ class HostRuntime:
   def build(self, command, jobs):
     params = 'openpilot/common/libparams_c' + ('.dylib' if self.system == 'Darwin' else '.so')
     targets = [params, 'msgq_repo/msgq/ipc_pyx.so', 'msgq_repo/msgq/visionipc/visionipc_pyx.so']
-    if command in ('python', 'pytest', 'shell'):
+    if command in ('c3', 'c4', 'onroad', 'python', 'pytest', 'shell'):
       targets += ['rednose_repo/rednose/helpers/ekf_sym_pyx.so', 'openpilot/selfdrive/locationd',
                   'openpilot/selfdrive/controls/lib/longitudinal_mpc_lib/c_generated_code/acados_ocp_solver_pyx.so']
     if command in ('onroad', 'replay', 'cabana'):
