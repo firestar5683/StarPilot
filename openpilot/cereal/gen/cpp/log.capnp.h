@@ -23206,7 +23206,7 @@ public:
 
   inline bool isStarpilotNavigation() const;
   inline bool hasStarpilotNavigation() const;
-  inline  ::cereal::StarPilotNavigation::Reader getStarpilotNavigation() const;
+  inline  ::cereal::StarPilotCarControl::Reader getStarpilotNavigation() const;
 
   inline bool isCustomReserved1() const;
   inline bool hasCustomReserved1() const;
@@ -24269,11 +24269,11 @@ public:
 
   inline bool isStarpilotNavigation();
   inline bool hasStarpilotNavigation();
-  inline  ::cereal::StarPilotNavigation::Builder getStarpilotNavigation();
-  inline void setStarpilotNavigation( ::cereal::StarPilotNavigation::Reader value);
-  inline  ::cereal::StarPilotNavigation::Builder initStarpilotNavigation();
-  inline void adoptStarpilotNavigation(::capnp::Orphan< ::cereal::StarPilotNavigation>&& value);
-  inline ::capnp::Orphan< ::cereal::StarPilotNavigation> disownStarpilotNavigation();
+  inline  ::cereal::StarPilotCarControl::Builder getStarpilotNavigation();
+  inline void setStarpilotNavigation( ::cereal::StarPilotCarControl::Reader value);
+  inline  ::cereal::StarPilotCarControl::Builder initStarpilotNavigation();
+  inline void adoptStarpilotNavigation(::capnp::Orphan< ::cereal::StarPilotCarControl>&& value);
+  inline ::capnp::Orphan< ::cereal::StarPilotCarControl> disownStarpilotNavigation();
 
   inline bool isCustomReserved1();
   inline bool hasCustomReserved1();
@@ -57473,41 +57473,41 @@ inline bool Event::Builder::hasStarpilotNavigation() {
   return !_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS).isNull();
 }
-inline  ::cereal::StarPilotNavigation::Reader Event::Reader::getStarpilotNavigation() const {
+inline  ::cereal::StarPilotCarControl::Reader Event::Reader::getStarpilotNavigation() const {
   KJ_IREQUIRE((which() == Event::STARPILOT_NAVIGATION),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::cereal::StarPilotNavigation>::get(_reader.getPointerField(
+  return ::capnp::_::PointerHelpers< ::cereal::StarPilotCarControl>::get(_reader.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline  ::cereal::StarPilotNavigation::Builder Event::Builder::getStarpilotNavigation() {
+inline  ::cereal::StarPilotCarControl::Builder Event::Builder::getStarpilotNavigation() {
   KJ_IREQUIRE((which() == Event::STARPILOT_NAVIGATION),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::cereal::StarPilotNavigation>::get(_builder.getPointerField(
+  return ::capnp::_::PointerHelpers< ::cereal::StarPilotCarControl>::get(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
-inline void Event::Builder::setStarpilotNavigation( ::cereal::StarPilotNavigation::Reader value) {
+inline void Event::Builder::setStarpilotNavigation( ::cereal::StarPilotCarControl::Reader value) {
   _builder.setDataField<Event::Which>(
       ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::STARPILOT_NAVIGATION);
-  ::capnp::_::PointerHelpers< ::cereal::StarPilotNavigation>::set(_builder.getPointerField(
+  ::capnp::_::PointerHelpers< ::cereal::StarPilotCarControl>::set(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS), value);
 }
-inline  ::cereal::StarPilotNavigation::Builder Event::Builder::initStarpilotNavigation() {
+inline  ::cereal::StarPilotCarControl::Builder Event::Builder::initStarpilotNavigation() {
   _builder.setDataField<Event::Which>(
       ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::STARPILOT_NAVIGATION);
-  return ::capnp::_::PointerHelpers< ::cereal::StarPilotNavigation>::init(_builder.getPointerField(
+  return ::capnp::_::PointerHelpers< ::cereal::StarPilotCarControl>::init(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
 inline void Event::Builder::adoptStarpilotNavigation(
-    ::capnp::Orphan< ::cereal::StarPilotNavigation>&& value) {
+    ::capnp::Orphan< ::cereal::StarPilotCarControl>&& value) {
   _builder.setDataField<Event::Which>(
       ::capnp::bounded<4>() * ::capnp::ELEMENTS, Event::STARPILOT_NAVIGATION);
-  ::capnp::_::PointerHelpers< ::cereal::StarPilotNavigation>::adopt(_builder.getPointerField(
+  ::capnp::_::PointerHelpers< ::cereal::StarPilotCarControl>::adopt(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS), kj::mv(value));
 }
-inline ::capnp::Orphan< ::cereal::StarPilotNavigation> Event::Builder::disownStarpilotNavigation() {
+inline ::capnp::Orphan< ::cereal::StarPilotCarControl> Event::Builder::disownStarpilotNavigation() {
   KJ_IREQUIRE((which() == Event::STARPILOT_NAVIGATION),
               "Must check which() before get()ing a union member.");
-  return ::capnp::_::PointerHelpers< ::cereal::StarPilotNavigation>::disown(_builder.getPointerField(
+  return ::capnp::_::PointerHelpers< ::cereal::StarPilotCarControl>::disown(_builder.getPointerField(
       ::capnp::bounded<0>() * ::capnp::POINTERS));
 }
 
