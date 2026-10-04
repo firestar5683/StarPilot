@@ -12,7 +12,7 @@ import unittest
 from opendbc.can import CANPacker
 from opendbc.car import structs
 from opendbc.car.fw_versions import match_fw_to_car
-from opendbc.car.tesla.values import FSD_14_FW, TeslaFlags, TeslaSafetyFlags
+from opendbc.car.tesla.values import TeslaSafetyFlags
 from openpilot.starpilot.tests.tesla_fixture import (
   DBC, EPS, FW_VERSIONS, MODERN_PLATFORMS, NativeSafety, TeslaFixture, car_params, messages,
 )
@@ -49,9 +49,12 @@ class TestTeslaContract(unittest.TestCase):
           self.assertTrue(exact)
           self.assertEqual(matches, {platform})
           cp = car_params(platform, firmware=version)
-          fsd14 = version in FSD_14_FW[platform]
-          self.assertEqual(bool(cp.flags & TeslaFlags.FSD_14), fsd14)
-          self.assertEqual(bool(cp.safetyConfigs[0].safetyParam & TeslaSafetyFlags.FSD_14), fsd14)
+          self.assertFalse(cp.dashcamOnly)
+          self.assertEqual(cp.safetyConfigs[0].safetyParam, int(TeslaSafetyFlags.LONG_CONTROL))
+          for profile in ("marker489", "marker054"):
+            marked = car_params(platform, profile=profile, firmware=version)
+            self.assertFalse(marked.dashcamOnly)
+          self.assertTrue(car_params(platform, profile="two_bit", firmware=version).dashcamOnly)
           self.assertTrue(cp.safetyConfigs[0].safetyParam & TeslaSafetyFlags.LONG_CONTROL)
 
   def test_unknown_firmware_identifies_no_candidate(self):
@@ -63,7 +66,7 @@ class TestTeslaContract(unittest.TestCase):
   def check_axis_inputs(self, lateral, longitudinal):
     # All inactive-long cases satisfy the caller's neutralization prerequisite.
     for platform in MODERN_PLATFORMS:
-      for profile, active_type in (("old", 1), ("fsd14", 2)):
+      for profile, active_type in (("marker489", 1), ("marker054", 1)):
         with self.subTest(platform=platform, profile=profile, latActive=lateral, longActive=longitudinal):
           fixture = self.fixture(platform=platform, profile=profile)
           records = fixture.run(lateral=lateral, longitudinal=longitudinal, accel=1.0 if longitudinal else 0.0, angle=1.0)
@@ -103,7 +106,7 @@ class TestTeslaContract(unittest.TestCase):
     self.check_axis_inputs(True, True)
 
   def test_safety_rejects_other_firmware_active_steering_type(self):
-    for profile, wrong_type in (("old", 2), ("fsd14", 1)):
+    for profile, wrong_type in (("marker489", 2), ("marker054", 2)):
       with self.subTest(profile=profile):
         self.fixture(profile=profile)
         command = CANPacker(DBC).make_can_msg("DAS_steeringControl", 0,
@@ -113,8 +116,8 @@ class TestTeslaContract(unittest.TestCase):
   def test_unknown_firmware_guard_latches_and_settings_branches_are_preserved(self):
     # Candidate is explicitly supplied to reach the downstream guard, not fingerprinted from unknown firmware.
     for profile, settings_present, autosteer, expected in (
-      ("unknown", True, 0, True), ("old", True, 0, True), ("fsd14", True, 0, False),
-      ("fsd14", True, 1, True), ("unknown", False, 0, False),
+      ("unknown", True, 0, False), ("marker489", True, 0, False), ("marker054", True, 0, False),
+      ("marker054", True, 1, True), ("unknown", False, 0, False),
     ):
       with self.subTest(profile=profile, settings_present=settings_present, autosteer=autosteer):
         fixture = self.fixture(profile=profile, settings_present=settings_present)
@@ -126,7 +129,7 @@ class TestTeslaContract(unittest.TestCase):
         self.assertEqual(cleared[-1]["invalid_lkas_setting"], expected and not autosteer)
 
   def test_stock_lkas_parser_uses_firmware_specific_control_type(self):
-    for profile, stock_type in (("old", 2), ("fsd14", 1)):
+    for profile, stock_type in (("marker489", 2), ("marker054", 2)):
       with self.subTest(profile=profile):
         fixture = self.fixture(profile=profile)
         records = fixture.run(overrides={"DAS_steeringControl": {"DAS_steeringControlType": stock_type}})
@@ -135,7 +138,7 @@ class TestTeslaContract(unittest.TestCase):
         self.assertFalse(fixture.run()[-1]["stock_lkas"])
 
   def test_driver_steering_override_disables_command_and_revokes_permission(self):
-    for profile in ("old", "fsd14"):
+    for profile in ("marker489", "marker054"):
       with self.subTest(profile=profile):
         fixture = self.fixture(profile=profile)
         fixture.run(lateral=True, angle=1)
@@ -170,7 +173,7 @@ class TestTeslaContract(unittest.TestCase):
           self.assertTrue(all(not m["safety_tx_accepted"] for m in braking_messages))
 
   def test_stock_longitudinal_single_cancel_edge_emits_neutral_command(self):
-    for profile in ("old", "fsd14"):
+    for profile in ("marker489", "marker054"):
       with self.subTest(profile=profile):
         fixture = self.fixture(profile=profile, longitudinal=False)
         records = fixture.run(longitudinal=True, accel=1)

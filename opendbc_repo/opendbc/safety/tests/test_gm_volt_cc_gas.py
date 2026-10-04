@@ -26,7 +26,7 @@ class TestGmVoltCcGas(unittest.TestCase):
     ordered = [frame for frame in frames if frame[0] not in addresses] + replacements
     for frame in sorted(ordered, key=lambda frame: frame[0] == 0x3D1):
       self.assertTrue(self.safety.safety_rx_hook(self.packet(frame)))
-    self.safety.safety_tick_current_safety_config()
+    self.safety.safety_tick()
 
   def test_set_only_under_gas_retains_lateral_and_consumes_credit(self):
     self.reset()

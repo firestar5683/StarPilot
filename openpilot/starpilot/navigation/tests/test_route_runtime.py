@@ -150,7 +150,7 @@ def test_published_navigation_reaches_status_and_control_consumers(tmp_path, rou
       publish_status(publisher, value)
       received = messaging.recv_one(receiver)
       assert received is not None and received.valid
-      assert received.starpilotNavigation.controlValid is bool(active_drive)
+      assert received.starpilotNavigation.navigation.controlValid is bool(active_drive)
 
       device = messaging.new_message('deviceState', valid=True)
       device.deviceState.started, device.deviceState.startedMonoTime = bool(active_drive), active_drive
@@ -158,6 +158,7 @@ def test_published_navigation_reaches_status_and_control_consumers(tmp_path, rou
       cs.carState.canValid, cs.carState.gearShifter = True, 'drive'
       cc = messaging.new_message('carControl', valid=True)
       sm.update_msgs(time.monotonic(), [received, device, cs, cc])
-      assert status.snapshot()['status'] == 'guiding'
+      snapshot = status.snapshot()
+      assert snapshot is not None and snapshot['status'] == 'guiding'
       instruction = current_instruction(sm, time.monotonic_ns())
       assert (instruction is not None) is bool(active_drive)

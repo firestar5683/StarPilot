@@ -22,7 +22,7 @@ class TestRetrofit(unittest.TestCase):
         self.assertFalse(cp.alphaLongitudinalAvailable)
         self.assertAlmostEqual(cp.lateralTuning.torque.latAccelFactor, factor, places=5)
         self.assertAlmostEqual(cp.lateralTuning.torque.friction, friction, places=5)
-        self.assertEqual(FINGERPRINTS[car], [{}])
+        self.assertNotIn(car, FINGERPRINTS)  # Explicit rack choice is not an observed automatic fingerprint.
     cp = params(CAR.TOYOTA_PRIUS_RETROFIT)
     self.assertTrue(cp.flags & ToyotaFlags.HYBRID)
     self.assertEqual(cp.minEnableSpeed, -1)

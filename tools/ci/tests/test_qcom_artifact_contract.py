@@ -283,7 +283,7 @@ class TestQcomSupplementalRuntimeCompatibility(unittest.TestCase):
                      "build_manifest_sha256": contract._sha(self.manifest_path),
                      "compatible_source_sha256": contract._inventory_signature(parent),
                      "changed_source": {"path": contract.COMPATIBILITY_SOURCE, "build_sha256": "c" * 64, "runtime_sha256": "a" * 64},
-                     "artifact_sha256": {name: "d" * 64 for name in contract.COMPATIBILITY_OUTPUTS},
+                     "artifact_sha256": dict.fromkeys(contract.COMPATIBILITY_OUTPUTS, "d" * 64),
                      "paired_outputs": {name: [{"input": label, "shape": shape, "dtype": dtype,
                                                 "build_sha256": "e" * 64, "runtime_sha256": "e" * 64}
                                                for label in ("A", "B", "A")]
@@ -323,9 +323,12 @@ class TestQcomSupplementalRuntimeCompatibility(unittest.TestCase):
     for kind in ("extra", "missing", "model"):
       with self.subTest(kind=kind):
         self.current = copy.deepcopy(original)
-        if kind == "extra": self.current["sources"]["unexpected.py"] = "f" * 64
-        elif kind == "missing": del self.current["sources"]["model.onnx"]
-        else: self.current["sources"]["model.onnx"] = "f" * 64
+        if kind == "extra":
+          self.current["sources"]["unexpected.py"] = "f" * 64
+        elif kind == "missing":
+          del self.current["sources"]["model.onnx"]
+        else:
+          self.current["sources"]["model.onnx"] = "f" * 64
         self.bind_extension()
         with self.assertRaisesRegex(ValueError, "outside reviewed"):
           self.verify()
@@ -351,8 +354,10 @@ class TestQcomSupplementalRuntimeCompatibility(unittest.TestCase):
     for kind in ("artifact", "output"):
       with self.subTest(kind=kind):
         self.evidence = copy.deepcopy(original)
-        if kind == "artifact": self.evidence["artifact_sha256"]["driving_tinygrad.pkl"] = "f" * 64
-        else: self.evidence["paired_outputs"]["driving_tinygrad.pkl"][0]["runtime_sha256"] = "f" * 64
+        if kind == "artifact":
+          self.evidence["artifact_sha256"]["driving_tinygrad.pkl"] = "f" * 64
+        else:
+          self.evidence["paired_outputs"]["driving_tinygrad.pkl"][0]["runtime_sha256"] = "f" * 64
         self.parent_path.write_text(json.dumps(self.evidence))
         self.bind_extension()
         with self.assertRaises(ValueError):

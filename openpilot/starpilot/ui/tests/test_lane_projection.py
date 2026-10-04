@@ -1,4 +1,5 @@
 """Native-free contract for Small lane/edge projection; no renderer lifecycle is bypassed."""
+from typing import Any
 import ast
 from pathlib import Path
 from types import SimpleNamespace as NS
@@ -12,7 +13,7 @@ def current():
   source = Path(__file__).parents[3] / "selfdrive/ui/mici/onroad/model_renderer.py"
   node = next(n for n in ast.walk(ast.parse(source.read_text()))
               if isinstance(n, ast.FunctionDef) and n.name == "_map_lines_to_polygons")
-  namespace = {"np": np}
+  namespace: dict[str, Any] = {"np": np}
   exec(compile(ast.Module(body=[node], type_ignores=[]), str(source), "exec"), namespace)
   return namespace[node.name]
 

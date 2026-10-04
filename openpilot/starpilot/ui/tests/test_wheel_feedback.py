@@ -33,6 +33,12 @@ def control(**changes):
   return NS(longActive=True, actuators=NS(**{"accel": 0.0, "gas": 0.0, **changes}))
 
 
+def required_change(row):
+  request = row_change(row)
+  assert request is not None
+  return request
+
+
 class WheelFeedbackTests(unittest.TestCase):
   def test_original_thresholds_and_braking_priority(self):
     cases = (
@@ -104,10 +110,10 @@ class WheelFeedbackTests(unittest.TestCase):
     state.customization["layouts"]["large"]["steering_wheel"].update(x=900, y=200)
     large = SteeringWheelWidget.__new__(SteeringWheelWidget)
     large._texture = Mock()
-    with patch.object(rl, "draw_circle"), patch.object(rl, "draw_texture_ex") as draw:
+    with patch.object(rl, "draw_circle"), patch.object(rl, "draw_texture_pro") as draw:
       large.render(rl.Rectangle(30, 30, 1800, 1020), state)
       args = draw.call_args.args
-      self.assertEqual((args[1].x, args[1].y), (924, 224))
+      self.assertEqual((args[2].x, args[2].y), (924, 224))
       self.assertEqual((args[-1].r, args[-1].g, args[-1].b, args[-1].a), (*BRAKE_RGB, 255))
       large.render(rl.Rectangle(30, 30, 1800, 1020), replace(state, appearance=OnroadAppearance()))
       self.assertEqual(draw.call_args.args[-1], rl.WHITE)
@@ -147,30 +153,30 @@ class WheelPreferenceTests(unittest.TestCase):
       self.assertEqual(self.row(profile=profile).value, "Off")
     self.path("PedalsOnUI").write_bytes(b"1")
     self.assertTrue(onroad_appearance(self.params).wheel_pedal_feedback)
-    request = row_change(self.row())
+    request = required_change(self.row())
     self.assertEqual(request.value, "Off")
     self.assertTrue(self.owner.apply(request))
     self.assertFalse(onroad_appearance(self.params).wheel_pedal_feedback)
     self.assertEqual(self.path("PedalsOnUI").read_bytes(), b"0")
     self.assertEqual(self.path("ShowBrakeStatus").read_bytes(), b"0")
-    self.assertTrue(self.owner.apply(row_change(self.row())))
+    self.assertTrue(self.owner.apply(required_change(self.row())))
     self.assertTrue(onroad_appearance(self.params).wheel_pedal_feedback)
     self.assertEqual(self.path("PedalsOnUI").read_bytes(), b"0")
 
   def test_source_repair_and_parked_compound_guards(self):
-    request = row_change(self.row())
+    request = required_change(self.row())
     self.path("PedalsOnUI").write_bytes(b"1")
     self.assertFalse(self.owner.apply(request))
     self.assertFalse(self.path("ShowBrakeStatus").exists())
     self.path("PedalsOnUI").write_bytes(b"broken")
-    request = row_change(self.row())
+    request = required_change(self.row())
     self.assertEqual(request.value, "Off")
     self.parked = False
     self.assertFalse(self.owner.apply(request))
     self.assertEqual(self.path("PedalsOnUI").read_bytes(), b"broken")
     self.parked = True
     self.assertTrue(self.owner.apply(request))
-    request = row_change(self.row())
+    request = required_change(self.row())
     actual = saved_document.os.fsync
 
     def revoke(fd):
@@ -184,7 +190,7 @@ class WheelPreferenceTests(unittest.TestCase):
   def test_compound_failure_does_not_claim_atomic_success(self):
     self.path("PedalsOnUI").write_bytes(b"1")
     self.path("ShowBrakeStatus").write_bytes(b"1")
-    request = row_change(self.row())
+    request = required_change(self.row())
     original = saved_document.commit_exact
 
     def commit(params, **kwargs):
@@ -196,11 +202,11 @@ class WheelPreferenceTests(unittest.TestCase):
       self.assertFalse(self.owner.apply(request))
     self.assertEqual(self.row().value, "On")
     self.assertTrue(onroad_appearance(self.params).wheel_pedal_feedback)
-    self.assertTrue(self.owner.apply(row_change(self.row())))
+    self.assertTrue(self.owner.apply(required_change(self.row())))
     self.assertFalse(onroad_appearance(self.params).wheel_pedal_feedback)
 
   def test_dm_visibility_is_parked_and_source_bound(self):
-    request = row_change(self.row("HideDMIcon", Profile.COMPACT))
+    request = required_change(self.row("HideDMIcon", Profile.COMPACT))
     self.parked = False
     self.assertFalse(self.owner.apply(request))
     self.parked = True

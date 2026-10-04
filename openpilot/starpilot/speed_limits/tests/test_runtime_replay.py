@@ -531,6 +531,13 @@ class RuntimeReplayTests(unittest.TestCase):
     command.slcCruiseCommand.targetMps = 30.0
     fake = card.Car.__new__(card.Car)
     fake.conditional_replay = False
+    fake.switchback_button_tracker = None
+    fake.switchback_settings_owner = None
+    from openpilot.starpilot.controllers.wheel_actions import WheelPublisher
+    fake.params = Params()
+    from openpilot.starpilot.vehicle_startup import VehicleStartupOwner
+    fake.vehicle_startup = VehicleStartupOwner()
+    fake.wheel_publisher = WheelPublisher(fake.params)
     fake.ioniq6_long_prearmed = False
     fake.slc_replay = True
     fake.aol_card_intent = None
@@ -548,7 +555,8 @@ class RuntimeReplayTests(unittest.TestCase):
     fake.v_cruise_helper = VCruiseHelper(fake.CP)
     fake.v_cruise_helper.v_cruise_kph = 60.0
     fake.sm = cast(messaging.SubMaster, ReplaySM(
-      {'carControl': car.CarControl(enabled=True, longActive=True), 'slcState': state.slcState}, now_ns - 10_000_000))
+      {'carControl': car.CarControl(enabled=True, longActive=True), 'slcState': state.slcState,
+       'deviceState': SimpleNamespace(startedMonoTime=1)}, now_ns - 10_000_000))
     self.enterContext(mock.patch.object(fake, 'CI', SimpleNamespace(
       CS=SimpleNamespace(dashboard_limit=SimpleNamespace(observation=observation)),
       update=lambda packets: car.CarState(canValid=True, cruiseState={'available': True})), create=True))
@@ -618,6 +626,13 @@ class RuntimeReplayTests(unittest.TestCase):
                                   valid_until_ns=source.validUntilMonoTime, episode=1)
     fake = card.Car.__new__(card.Car)
     fake.conditional_replay = False
+    fake.switchback_button_tracker = None
+    fake.switchback_settings_owner = None
+    from openpilot.starpilot.controllers.wheel_actions import WheelPublisher
+    fake.params = Params()
+    from openpilot.starpilot.vehicle_startup import VehicleStartupOwner
+    fake.vehicle_startup = VehicleStartupOwner()
+    fake.wheel_publisher = WheelPublisher(fake.params)
     fake.ioniq6_long_prearmed = False
     fake.slc_replay = True
     fake.aol_card_intent = None
@@ -635,7 +650,7 @@ class RuntimeReplayTests(unittest.TestCase):
     fake.v_cruise_helper = VCruiseHelper(fake.CP)
     fake.v_cruise_helper.v_cruise_kph = 60.0
     fake.sm = cast(card.messaging.SubMaster, ReplaySM(
-      {'carControl': car.CarControl(enabled=True, longActive=True), 'slcState': pending}, now_ns))
+      {'carControl': car.CarControl(enabled=True, longActive=True), 'slcState': pending, 'deviceState': SimpleNamespace(startedMonoTime=1)}, now_ns))
     current_cs = [car.CarState(canValid=True, cruiseState={'available': True},
                                buttonEvents=[car.CarState.ButtonEvent(type='accelCruise', pressed=True)])]
     self.enterContext(mock.patch.object(fake, 'CI', SimpleNamespace(

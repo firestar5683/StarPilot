@@ -1,3 +1,5 @@
+from typing import cast
+from unittest.mock import Mock
 import io
 
 import pytest
@@ -21,7 +23,7 @@ class FakeImport:
 def setup(tmp_path, state):
   job = FakeImport(tmp_path / 'imports')
   service = AndroidAutoSetup(parked=lambda: state['parked'], enabled=lambda: state['enabled'],
-                             session_valid=lambda token: token == state['session'], import_job=job,
+                             session_valid=lambda token: token == state['session'], import_job=Mock(wraps=job, work_dir=job.work_dir),
                              identity_status=lambda: {'installed': False, 'message': 'No identity', 'key': 'SECRET'},
                              bluetooth_enabled=lambda: True)
   return service, job
@@ -94,7 +96,7 @@ def test_forced_offroad_with_powered_car_admits_setup_and_rechecks_authority(tmp
   from openpilot.starpilot.galaxy.tests.test_borrowed_authority import Messages
 
   messages = Messages()
-  setattr(messages.data['pandaStates'][0], ignition_field, True)
+  setattr(cast(dict, messages.data)['pandaStates'][0], ignition_field, True)
   # Forced offroad stops card/controlsd; connectivity does not require them.
   for service in ('carState', 'selfdriveState'):
     messages.seen[service] = messages.alive[service] = messages.valid[service] = False
@@ -104,10 +106,10 @@ def test_forced_offroad_with_powered_car_admits_setup_and_rechecks_authority(tmp
   authority = LiveContextSource(params, messages=messages, borrowed_messages=True, evidence_wait_ms=0,
                                mono_clock=lambda: now[0], boot_clock=lambda: now[0] + 10_000_000_000)
   now[0] = 2_100_000_000
-  state = {'enabled': False, 'session': ('galaxy', '1')}
+  state: dict = {'enabled': False, 'session': ('galaxy', '1')}
   job = FakeImport(tmp_path / 'imports')
   service = AndroidAutoSetup(parked=authority.configuration_allowed, enabled=lambda: state['enabled'],
-                            session_valid=lambda token: token == state['session'], import_job=job,
+                            session_valid=lambda token: token == state['session'], import_job=Mock(wraps=job, work_dir=job.work_dir),
                             identity_status=lambda: {'installed': True}, install_ready=lambda: True,
                             service_ready=lambda: True, bluetooth_enabled=lambda: True,
                             set_enabled=lambda enabled: state.update(enabled=enabled))

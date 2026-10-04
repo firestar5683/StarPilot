@@ -90,7 +90,7 @@ class TestVolvoC1Safety(unittest.TestCase):
           ]:
             if index <= 20 or name != missing:
               assert rx(name, bus, values)
-          lib.safety_tick_current_safety_config()
+          lib.safety_tick()
           if index == 20:
             assert lib.safety_config_valid() and lib.get_controls_allowed()
         assert not lib.safety_config_valid() and (not lib.get_controls_allowed())

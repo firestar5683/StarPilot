@@ -41,6 +41,7 @@ class TestCacheNormalization(unittest.TestCase):
     for index, key in enumerate(normalize.EVENT_KEYS):
       contract = cache.CONTRACTS[key]
       message = contract.root.new_message(logMonoTime=1234567890 + index, valid=bool(index % 2))
+      assert contract.service is not None
       message.init(contract.service)
       setattr(message, contract.service, values[key])
       payload = message.to_bytes()

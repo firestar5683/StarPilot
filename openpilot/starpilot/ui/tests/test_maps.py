@@ -27,7 +27,11 @@ class TestMaps(unittest.TestCase):
     self.assertIn("does not prove", page.rows[1].reason)
     self.assertEqual(page.rows[2].value, "3 / 12 groups")
     self.assertTrue(all(not row.available and not row.page for row in page.rows))
-    self.assertIsNone(FeatureInput.target(1980, 150, page))
+    hit = FeatureInput.target(1980, 150, page)
+    self.assertIsNotNone(hit)
+    assert hit is not None
+    self.assertEqual(hit.kind, "details")
+    self.assertIsNone(hit.row)
     self.assertEqual(map_page({**STATUS, "state": "unknown"}).rows[0].value, "Unavailable")
     self.assertEqual(map_page({**STATUS, "selectedGeneration": "x"}).rows[0].value, "Unavailable")
     self.assertEqual(map_page({**STATUS, "state": "idle", "selectedGeneration": ""}).rows[1].value, "None")
@@ -77,6 +81,8 @@ class TestMaps(unittest.TestCase):
     from openpilot.starpilot.ui.runtime_app import StarShellSession
     from openpilot.starpilot.ui.presentation import Profile
     session = StarShellSession.__new__(StarShellSession)
+    session.drive_state = mock.Mock(snapshot=lambda: {"mode": "auto", "revision": None, "available": False,
+                                               "effective": None, "overrideAllowed": False})
     session.profile = Profile.LARGE
     session.display_owner = mock.Mock(snapshot=mock.Mock(return_value=map_page(None)))
     session.power_owner = mock.Mock(snapshot=mock.Mock(return_value=map_page(None)))

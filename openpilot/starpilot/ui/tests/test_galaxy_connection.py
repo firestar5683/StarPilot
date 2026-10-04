@@ -34,10 +34,12 @@ class TestGalaxyConnection(unittest.TestCase):
           paired = galaxy_access._remote_operation("pair", "  password123  ")
           self.assertTrue(paired.paired)
           self.assertTrue(galaxy_access.REMOTE_URL.fullmatch(paired.url))
-          self.assertEqual(pairing.read()["slug"], paired.url.rsplit("/", 1)[1])
+          record = pairing.read()
+          assert record is not None
+          self.assertEqual(record["slug"], paired.url.rsplit("/", 1)[1])
           self.assertTrue(galaxy_access._remote_operation("status").paired)
           parked[0] = False
-          self.assertIn("Park", galaxy_access._remote_operation("unpair").error)
+          self.assertIn("Turn off the vehicle", galaxy_access._remote_operation("unpair").error)
           self.assertIsNotNone(pairing.read())
           parked[0] = True
           self.assertFalse(galaxy_access._remote_operation("unpair").paired)

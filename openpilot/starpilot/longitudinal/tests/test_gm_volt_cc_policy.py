@@ -1,10 +1,13 @@
 """Exact manual Volt CC, actual parsed producer/Controls/Card/controller path."""
+
+from unittest.mock import Mock
+from unittest.mock import patch
+
 from openpilot.starpilot.longitudinal.extension import LongitudinalContext
 from openpilot.starpilot.longitudinal.tests.extension_helpers import extension_state
 import os
 from types import SimpleNamespace as NS
 import unittest
-from unittest.mock import patch
 
 from opendbc.car import Bus, gen_empty_fingerprint, structs
 from opendbc.can import CANPacker
@@ -88,11 +91,14 @@ def fixture(alpha=False):
   controls.calibrated_pose = controls.last_lane_centering_result = None
   controls.lane_centering_applied = 0.
   controls.pm = NS(send=lambda *args: None)
-  lateral_log = messaging.new_message('controlsState').controlsState.lateralControlState.init('pidState')
+  lateral_log = messaging.new_message('controlsState').controlsState.lateralControlState.init(
+    'torqueState' if controls.CP.lateralTuning.which() == 'torque' else 'pidState')
   controls.LaC = NS(reset=lambda: None, update=lambda *args: (0., 0., lateral_log))
   ci = controls.CI
   packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
   card = Car.__new__(Car)
+  from openpilot.starpilot.vehicle_startup import VehicleStartupOwner
+  card.vehicle_startup = VehicleStartupOwner()
   card.CP, card.CI, card.sm = cp, ci, controls.sm
   card.ci_initialized = card.volt_cc_selected = True
   card.volt_cc_boot_offset_ns, card.volt_cc_source_floor_ns = offset, base - 500_000_000
@@ -100,7 +106,7 @@ def fixture(alpha=False):
   card.ioniq6_keepalive = None
   card.is_metric = False
   sent = []
-  card.publish_sendcan = lambda frames, valid: sent.append((frames, valid))
+  card.publish_sendcan = Mock(side_effect=lambda frames, valid: sent.append((frames, valid)))
   controls.sm.all_alive = lambda names: all(controls.sm.alive[name] for name in names)
   return controls, card, ci, packer, sent, base, offset
 
@@ -240,9 +246,7 @@ class TestVoltCc(unittest.TestCase):
     captured = []
     def register(services, **options):
       captured.append(list(services))
-      if len(captured) == 2:
-        raise Registered
-      return NS()
+      raise Registered
 
     ci = CarInterface(params())
     with patch('openpilot.selfdrive.car.card.prewarm_cache_contracts'), \
@@ -254,9 +258,8 @@ class TestVoltCc(unittest.TestCase):
       saved.return_value.get.return_value = None
       with self.assertRaises(Registered):
         Car(CI=ci, RI=RadarInterface(ci.CP))
-    self.assertNotIn('deviceState', captured[0])
-    self.assertIn('deviceState', captured[1])
-    self.assertIn('carControl', captured[1])
+    self.assertEqual(len(captured), 1)
+    self.assertEqual(set(captured[0]), {'pandaStates', 'carControl', 'onroadEvents', 'deviceState'})
 
   def test_actual_card_transport_epoch_and_individual_source_loss(self):
     controls, card, ci, packer, sent, base, offset = fixture()
@@ -449,11 +452,13 @@ class TestVoltCc(unittest.TestCase):
 
   def test_actual_sendcan_uses_parser_boot_clock_only_for_selected_profile(self):
     card = Car.__new__(Car)
+    from openpilot.starpilot.vehicle_startup import VehicleStartupOwner
+    card.vehicle_startup = VehicleStartupOwner()
     card.ioniq6_long_prearmed = False
     card.ioniq6_keepalive = None
     card.volt_cc_now_boot_ns = 9_000_000_000
     packets = []
-    card.pm = NS(send=lambda service, packet: packets.append(packet))
+    self.enterContext(patch.object(card, 'pm', NS(send=lambda service, packet: packets.append(packet)), create=True))
     frame = (0x1e1, original_bytes(1, 6), 0)
     for selected, expected in ((True, 9_000_000_000), (False, 5_000_000_000)):
       card.volt_cc_selected = selected
@@ -494,7 +499,8 @@ class TestVoltCc(unittest.TestCase):
   def test_actual_enable_disable_cancel_and_driver_override(self):
     for override in ('none', 'gas', 'brake'):
       controls, card, ci, packer, sent, base, offset = fixture()
-      lateral_log = messaging.new_message('controlsState').controlsState.lateralControlState.init('pidState')
+      lateral_log = messaging.new_message('controlsState').controlsState.lateralControlState.init(
+        'torqueState' if controls.CP.lateralTuning.which() == 'torque' else 'pidState')
       controls.LaC.update = lambda *args, log=lateral_log: (.1, 0., log)
       gas_steering = []
       for tick in range(44):

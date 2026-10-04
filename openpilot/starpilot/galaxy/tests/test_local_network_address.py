@@ -6,7 +6,7 @@ from openpilot.starpilot.galaxy.local_access import LocalAccess
 
 def test_network_changes_expire_and_virtual_addresses_never_appear():
   def iface(name, ip, **extra):
-    return dict(ifname=name, flags=['UP'], addr_info=[dict(family='inet', scope='global', local=ip)], **extra)
+    return dict(ifname=name, flags=['UP'], addr_info=[{'family': 'inet', 'scope': 'global', 'local': ip}], **extra)
   now = [0.0]
   inventory = [iface('wlan0', '192.168.3.110'), iface('tun0', '10.0.0.1'),
                iface('customVPN', '10.1.0.1', linkinfo={'info_kind': 'wireguard'}),

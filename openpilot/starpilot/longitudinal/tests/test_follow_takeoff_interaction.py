@@ -52,7 +52,8 @@ def test_curve_gateway_preserves_both_drive_owners_and_selected_takeoff_cap():
         lead.dRel, lead.vLead, lead.vLeadK, lead.vRel, lead.aLeadK = 7., 1., 1., 1., .3
         lead.yRel, lead.modelProb = 0., .99
         sm['radarState'].leadTwo.present = False
-        stop = lambda _: StopPlan(model_ns=sm.logMonoTime['modelV2'], takeoff_light_observed=True)
+        def stop(_, source=sm):
+          return StopPlan(model_ns=source.logMonoTime['modelV2'], takeoff_light_observed=True)
         update_curve_frame(planner, sm, cp, now, host=curve, drive_id=DRIVE,
                            selected_profiles=SelectedProfileTuning(acceleration_max=.2),
                            faster_lead_takeoff=True, force_stop_provider=stop)
@@ -75,7 +76,7 @@ def test_takeoff_off_keeps_follow_cost_and_native_trajectory_exact():
     sm.logMonoTime = dict.fromkeys(sm, now - 5_000_000)
     sm.recv_time = dict.fromkeys(sm, (now - 5_000_000) / 1e9)
     for planner in (implicit, explicit):
-      planner.follow_jerk.clock_pair = lambda: (now, now + 2_000_000_000)
+      planner.follow_jerk.clock_pair = lambda now=now: (now, now + 2_000_000_000)
     selected = SelectedProfileTuning(acceleration_max=.2)
     implicit.update(sm, now_ns=now, drive_id=DRIVE, selected_profiles=selected)
     explicit.update(sm, now_ns=now, drive_id=DRIVE, selected_profiles=selected,

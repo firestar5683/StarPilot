@@ -1,5 +1,7 @@
 """Exercise the actual UI owner with separately delivered hardware/Panda state."""
 
+from unittest.mock import MagicMock
+from openpilot.cereal.messaging import SubMaster
 from types import SimpleNamespace as NS
 from unittest.mock import patch
 
@@ -15,7 +17,8 @@ def owner():
   messages = {'deviceState': NS(started=False, chestnutPresent=False),
               'pandaStates': [NS(pandaType=log.PandaState.PandaType.uno, ignitionLine=False, ignitionCan=False)],
               'selfdriveState': NS(enabled=True)}
-  ui.sm = type('SubMaster', (), {'__getitem__': lambda self, key: messages[key]})()
+  ui.sm = MagicMock(spec=SubMaster)
+  ui.sm.__getitem__.side_effect = messages.__getitem__
   ui.sm.frame = 10
   ui.sm.updated = {'pandaStates': True, 'wideRoadCameraState': False, 'selfdriveState': False}
   ui.sm.alive = {'pandaStates': True, 'wideRoadCameraState': False}

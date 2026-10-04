@@ -26,7 +26,7 @@ def make_pair(versions=("v14", "v15")):
       "action": np.array([[4., .5 if mid == "longitudinal" else 1.]]),
     })
   prepared = PreparedArtifact((0, 0, 1, 0, 0), "a" * 64)
-  return LaboratoryPair(*models, prepared, prepared)
+  return LaboratoryPair(models[0], models[1], prepared, prepared)
 
 
 class TestLaboratoryFrame(unittest.TestCase):

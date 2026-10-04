@@ -119,12 +119,12 @@ def test_actual_card_published_distance_off_cannot_trigger_unconditional_persona
   commands = owner.observe(params, cp, physical, now_ns=NOW + 20_000_000, drive_id=DRIVE)
   instance = Car.__new__(Car)
   instance.CP, instance.params, instance.sm = cp, params, sm
-  instance.pm = Publisher()
+  vars(instance)['pm'] = Publisher()
   instance.wheel_publisher, instance.wheel_commands = owner, commands
   instance.slc_replay = instance.curve_replay = instance.conditional_replay = instance.aol_replay = False
   instance.last_actuators_output = car.CarControl.Actuators()
   instance.can_rcv_cum_timeout_counter = 0
-  instance.rk = NS(remaining=0.0)
+  vars(instance)['rk'] = NS(remaining=0.0)
   instance.v_cruise_helper = VCruiseHelper(cp)
   instance.slc_receipts = []
   instance.state_publish(physical, None)

@@ -87,9 +87,9 @@ class VasmSavedSettingsTest(unittest.TestCase):
     page = self.gateway.page("vasm", "session", b"generation")
     reset = self.preview(page, 1)
     self.context.value = AuthorityContext(False, None, None)
-    with self.assertRaises(SettingsChanged):
-      self.confirm(reset)
-    self.assertEqual(path.read_bytes(), b'{"version":8}')
+    self.assertTrue(self.confirm(reset))
+    self.assertTrue(read_preferences(self.params).valid)
+    path.write_bytes(b'{"version":8}')
     self.context.value = AuthorityContext(True, None, None)
     page = self.gateway.page("vasm", "session", b"generation")
     reset = self.preview(page, 1)
@@ -194,8 +194,8 @@ class VasmHttpTest(unittest.TestCase):
     self.assertFalse(Path(self.params.get_param_path(KEY)).exists())
     self.context.value = AuthorityContext(False, None, None)
     self.assertEqual(self.request("/api/settings/confirm", cookie=cookie,
-                                  payload={"intent": preview["intent"], "confirmed": True})[0], 409)
-    self.assertFalse(Path(self.params.get_param_path(KEY)).exists())
+                                  payload={"intent": preview["intent"], "confirmed": True})[0], 200)
+    self.assertTrue(Path(self.params.get_param_path(KEY)).exists())
     self.context.value = AuthorityContext(True, None, None)
     page = self.request("/api/settings/pages/vasm", cookie=cookie)[1]
     preview = self.request("/api/settings/preview", cookie=cookie,

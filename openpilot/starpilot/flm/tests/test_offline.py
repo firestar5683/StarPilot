@@ -36,7 +36,7 @@ def event(kind, ns, *, valid=True, **fields):
 def serialized(builders):
   with ExitStack() as stack:
     for builder in builders:
-      yield stack.enter_context(log.Event.from_bytes(builder.to_bytes()))
+      yield stack.enter_context(log.Event.from_bytes(builder.as_reader().as_builder().to_bytes()))
 
 
 def segment(*, number=0, count=25, pressed=(), fingerprint=CAR.HYUNDAI_IONIQ_6, gap_at=None,

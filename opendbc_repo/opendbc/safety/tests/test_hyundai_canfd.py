@@ -4,6 +4,8 @@ import unittest
 
 from opendbc.car.hyundai.values import HyundaiSafetyFlags
 from opendbc.car.structs import CarParams
+from opendbc.safety.tests.common import CANPackerSafety
+from opendbc.safety.tests.libsafety import libsafety_py
 import opendbc.safety.tests.common as common
 from opendbc.safety.tests.hyundai_common import HyundaiButtonBase, HyundaiLongitudinalBase
 
@@ -292,7 +294,8 @@ class TestHyundaiCanfdCCNCLong(TestHyundaiCanfdLFASteeringLongBase):
   FWD_BLACKLISTED_ADDRS = {2: [0x12A, 0x1A0, 0x161, 0x162, 0x1E0]}
   STEER_MSG = "LFA"
   GAS_MSG = ("ACCELERATOR_BRAKE_ALT", "ACCELERATOR_PEDAL_PRESSED")
-  SAFETY_PARAM = HyundaiSafetyFlags.CAMERA_SCC | HyundaiSafetyFlags.CCNC
+  EXTRA_SAFETY_PARAM = HyundaiSafetyFlags.CAMERA_SCC | HyundaiSafetyFlags.CCNC
+  SAFETY_PARAM = HyundaiSafetyFlags.LONG | EXTRA_SAFETY_PARAM
 
   def test_tester_present_allowed(self, ecu_disable=False):
     super().test_tester_present_allowed(ecu_disable=False)

@@ -1,3 +1,4 @@
+from typing import cast
 from collections import Counter
 from contextlib import ExitStack
 from dataclasses import replace
@@ -35,15 +36,15 @@ class TestCurveStatus(unittest.TestCase):
       plannerd.confirm_curve_frame(host, planner, stamp)
     if numpy_applied is not None:
       planner.last_curve_ceiling_applied = np.bool_(numpy_applied)
-      host.runtime.enabled = np.bool_(host.runtime.enabled)
-      host.runtime.document_valid = np.bool_(host.runtime.document_valid)
-      host.runtime.was_controlling = np.bool_(host.runtime.was_controlling and numpy_applied)
-      host.runtime.glow = np.bool_(host.runtime.glow)
+      vars(host.runtime)['enabled'] = np.bool_(host.runtime.enabled)
+      vars(host.runtime)['document_valid'] = np.bool_(host.runtime.document_valid)
+      vars(host.runtime)['was_controlling'] = np.bool_(host.runtime.was_controlling and numpy_applied)
+      vars(host.runtime)['glow'] = np.bool_(host.runtime.glow)
       result = replace(result, candidate_mps=np.float32(result.candidate_mps),
                        ceiling_mps=np.float32(result.ceiling_mps), training=np.bool_(result.training),
                        progress=np.float32(result.progress), binding_distance_m=np.float32(result.binding_distance_m))
     packet = StatusPublisher().attach(outer, host, result, planner, now_ns=stamp, model_ns=stamp,
-                                      persistence_status='idle', road_curvature=np.float32(0.01) if numpy_applied is not None else None)
+                                      persistence_status='idle', road_curvature=cast(float, np.float32(0.01)) if numpy_applied is not None else None)
     return packet, stamp
 
   def test_planner_attach_serializes_numpy_scalars_without_crashing(self):
@@ -52,16 +53,17 @@ class TestCurveStatus(unittest.TestCase):
         packet, stamp = self.packet(numpy_applied=applied)
         decoded = messaging.log_from_bytes(packet.to_bytes())
         status = observation(decoded.slcState, stamp)
-        self.assertIsNotNone(status)
+        assert status is not None
         self.assertEqual(status.applied, applied)
         self.assertEqual(status.controlling, applied)
+        assert status.road_curvature is not None
         self.assertAlmostEqual(status.road_curvature, 0.01, places=6)
 
   def test_status_reports_actual_composition_and_has_independent_expiry(self):
     packet, stamp = self.packet()
     decoded = messaging.log_from_bytes(packet.to_bytes())
     status = observation(decoded.slcState, stamp)
-    self.assertIsNotNone(status)
+    assert status is not None
     self.assertTrue(status.applied and status.controlling and status.curve_only)
     self.assertFalse(decoded.slcState.enabled or decoded.slcState.hasPending or decoded.slcState.hasAccepted)
     self.assertIsNone(observation(decoded.slcState, stamp + 100_000_001))
@@ -159,8 +161,8 @@ class TestCurveStatus(unittest.TestCase):
           plannerd.main()
         counts = Counter(name for name, _raw in sent)
         self.assertEqual(counts['longitudinalPlan'], 2)
-        self.assertEqual(counts['slcState'], 2 if slc_on or curve_on else 0)
-        self.assertEqual(sum(name == 'slcCruiseEvent' for name, _kw in subscriptions), int(slc_on or curve_on))
+        self.assertEqual(counts['slcState'], 2)  # Display-only signs still publish with both controllers off.
+        self.assertEqual(sum(name == 'slcCruiseEvent' for name, _kw in subscriptions), 1)
         self.assertTrue(all(not kw['conflate'] for _name, kw in subscriptions))
         for name, raw in sent:
           if name == 'slcState':

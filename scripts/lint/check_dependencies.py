@@ -38,6 +38,15 @@ def installed_dependencies_within_limits(packages: set[str], tooling_names: froz
   return baseline <= BASELINE_INSTALLED_LIMIT and tooling <= TOOLING_INSTALLED_LIMIT
 
 
+
+def installed_payload_bytes(prefix: Path) -> int:
+  # Imports generate bytecode caches; the dependency budget measures installed
+  # payload consistently before and after running tests.
+  return sum(path.stat().st_size for path in prefix.rglob("*")
+             if not path.is_symlink() and path.is_file() and
+             not (path.suffix == ".pyc" and path.parent.name == "__pycache__"))
+
+
 def main() -> int:
   if sys.prefix == sys.base_prefix:
     print("Dependency checks require a virtual environment. Run tools/op.sh setup first.")
@@ -49,7 +58,7 @@ def main() -> int:
   packages = {dist.metadata["Name"].lower().replace("_", "-") for dist in importlib.metadata.distributions()}
   installed_baseline, installed_tooling = installed_dependency_counts(packages)
   # Logical file sizes avoid filesystem block-size differences. Don't follow links to the interpreter or source tree.
-  size = sum(path.stat().st_size for path in Path(sys.prefix).rglob("*") if not path.is_symlink() and path.is_file())
+  size = installed_payload_bytes(Path(sys.prefix))
 
   """
     This test prevents our depency footprint from growing.
@@ -62,7 +71,7 @@ def main() -> int:
   print(f"Installed dependencies (baseline): {installed_baseline} (limit: {BASELINE_INSTALLED_LIMIT})")
   print(f"Installed dependencies (CI tooling): {installed_tooling} (limit: {TOOLING_INSTALLED_LIMIT})")
   for name, value, limit in (
-    ("Venv size (MiB)", size / 1024**2, 550),
+    ("Venv installed payload (MiB)", size / 1024**2, 550),
   ):
     print(f"{name}: {value:g} (limit: {limit})")
     failed |= value > limit

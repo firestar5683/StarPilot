@@ -206,7 +206,7 @@ class TestCcncSix(unittest.TestCase):
       self.assertTrue(safety.safety_rx_hook(libsafety_py.make_CANPacket(addr, bus, data)))
       idle_resume = create_carnival_alt_resume(packer, cp, can, {**source, "CRUISE_BUTTONS": 0})
       safety.set_timer(2_000_000)
-      safety.safety_tick_current_safety_config()
+      safety.safety_tick()
       self.assertFalse(safety.safety_tx_hook(libsafety_py.make_CANPacket(idle_resume[0], idle_resume[2], idle_resume[1])))
 
       safety.set_safety_hooks(CarParams.SafetyModel.hyundaiCanfd,

@@ -2,7 +2,7 @@ import unittest
 
 from opendbc.car import structs
 from opendbc.safety.tests.libsafety import libsafety_py
-from opendbc.safety.tests.test_honda import TestHondaBoschLongSafety, Btn
+from opendbc.safety.tests import test_honda
 
 
 class TestHondaAolSourceBinding(unittest.TestCase):
@@ -10,7 +10,7 @@ class TestHondaAolSourceBinding(unittest.TestCase):
     for param in (34, 35):
       for kind in ("wrong_bus", "short"):
         with self.subTest(param=param, kind=kind):
-          fixture = TestHondaBoschLongSafety("test_diagnostics")
+          fixture = test_honda.TestHondaBoschLongSafety("test_diagnostics")
           fixture.setUp()
           safety = fixture.safety
           if safety.set_safety_hooks(structs.CarParams.SafetyModel.allOutput, 0) != 0:
@@ -20,7 +20,7 @@ class TestHondaAolSourceBinding(unittest.TestCase):
           safety.set_timer(1_000_000)
           safety.set_aol_test_heartbeat(True)
           fixture._rx(fixture._acc_state_msg(True))
-          fixture._rx(fixture._button_msg(Btn.NONE))
+          fixture._rx(fixture._button_msg(test_honda.Btn.NONE))
           fixture._rx(fixture._speed_msg(20))
           fixture._rx(fixture._powertrain_data_msg())
           if param == 35:
@@ -35,7 +35,7 @@ class TestHondaAolSourceBinding(unittest.TestCase):
             message = libsafety_py.make_CANPacket(0x326, 1, bytes(message[0].data[0:7]))
           safety.safety_rx_hook(message)
           safety.set_timer(1_300_001)
-          fixture._rx(fixture._button_msg(Btn.NONE))
+          fixture._rx(fixture._button_msg(test_honda.Btn.NONE))
           fixture._rx(fixture._speed_msg(20))
           fixture._rx(fixture._powertrain_data_msg())
           if param == 35:
@@ -44,7 +44,7 @@ class TestHondaAolSourceBinding(unittest.TestCase):
           self.assertEqual(safety.aol_get_permission_mask(), 0)
 
   def test_unselected_main_source_cannot_clear_actual_main(self):
-    fixture = TestHondaBoschLongSafety("test_diagnostics")
+    fixture = test_honda.TestHondaBoschLongSafety("test_diagnostics")
     fixture.setUp()
     safety = fixture.safety
     if safety.set_safety_hooks(structs.CarParams.SafetyModel.allOutput, 0) != 0:
@@ -54,7 +54,7 @@ class TestHondaAolSourceBinding(unittest.TestCase):
     safety.set_timer(1_000_000)
     safety.set_aol_test_heartbeat(True)
     fixture._rx(fixture._acc_state_msg(True))
-    fixture._rx(fixture._button_msg(Btn.NONE))
+    fixture._rx(fixture._button_msg(test_honda.Btn.NONE))
     fixture._rx(fixture._speed_msg(20))
     fixture._rx(fixture._powertrain_data_msg())
     safety.aol_set_host_request(1)

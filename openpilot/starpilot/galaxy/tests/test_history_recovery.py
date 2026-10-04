@@ -1,3 +1,4 @@
+from unittest.mock import Mock
 import tempfile
 import unittest
 from pathlib import Path
@@ -28,7 +29,8 @@ class HistoryRecoveryTest(unittest.TestCase):
 
       def owner():
         return DriveStatsOwner(
-          root=root, store=store, history=History(root, [selected]), analyzer=analyzer, permitted=lambda: True, clock=lambda: now[0], monotonic=lambda: now[0]
+          root=root, store=store, history=Mock(wraps=History(root, [selected])), analyzer=analyzer, permitted=lambda: True,
+          clock=lambda: now[0], monotonic=lambda: now[0]
         )
 
       for _ in range(MAX_RETRY_ATTEMPTS):
@@ -59,7 +61,7 @@ class HistoryRecoveryTest(unittest.TestCase):
       current = DriveStatsOwner(
         root=Path(directory),
         store=Path(directory) / 'cache.json',
-        history=History(Path(directory), [route('abc')]),
+        history=Mock(wraps=History(Path(directory), [route('abc')])),
         analyzer=analyzer,
         permitted=lambda: active[0],
         monotonic=lambda: NOW if active[0] else NOW + 1,
@@ -76,7 +78,7 @@ class RlogRecoveryTest(unittest.TestCase):
     with tempfile.TemporaryDirectory() as directory:
       root = Path(directory).resolve()
       def sample(stamp):
-        return DriveAnalysisTest.sample(self, stamp, 5, True)
+        return DriveAnalysisTest.sample(Mock(wraps=self), stamp, 5, True)
       qlog = [*sample(BASE), *sample(BASE + 2_000_000_000), event('sentinel', BASE + 2_000_000_000, type='endOfRoute')]
       segment = write(root, 0, qlog, kind='qlog')
       rlog = [*sample(BASE), *sample(BASE + 500_000_000), *sample(BASE + 1_000_000_000),

@@ -7,7 +7,7 @@ import tempfile
 import threading
 import unittest
 import uuid
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from openpilot.starpilot.galaxy.access import GalaxyAccessOwner
 from openpilot.starpilot.galaxy.remote import RemotePairing
@@ -40,6 +40,7 @@ class NavigationHttpTest(unittest.TestCase):
     self.access.configure('password123', lambda: True)
     self.slug = self.pairing.pair(hashlib.sha256(b'password123').hexdigest())
     record = self.pairing.read()
+    assert record is not None
     self.remote_cookie = 'galaxy_session=' + base64.urlsafe_b64encode(json.dumps({self.slug: record['session']}).encode()).decode().rstrip('=')
 
   def close(self):
@@ -69,7 +70,7 @@ class NavigationHttpTest(unittest.TestCase):
     def tile(*args):
       self.pairing.unpair()
       return b'fixture tile'
-    self.navigation.map_tile = tile
+    self.navigation.map_tile = Mock(side_effect=tile)
     connection = http.client.HTTPConnection('127.0.0.1', self.remote.server_port, timeout=2)
     try:
       connection.request('GET', '/api/navigation/map/tiles/0/0/0.png', headers={'Host': f'{self.slug}.devices.local', 'Cookie': self.remote_cookie})
@@ -227,7 +228,7 @@ class NavigationHttpTest(unittest.TestCase):
     self.assertEqual(list(self.navigation.transient_root.glob('*.json')),[])
 
   def test_search_checks_session_again_after_provider_returns(self):
-    self.navigation.search = lambda query: (self.pairing.unpair(), [PLACE])[1]
+    self.navigation.search = Mock(side_effect=lambda query: (self.pairing.unpair(), [PLACE])[1])
     result = self.request('/api/navigation/search', payload={'query': 'Library'}, remote=True, cookie=self.remote_cookie)
     self.assertEqual(result[0], 401)
     self.assertNotIn('Library', json.dumps(result[1]))

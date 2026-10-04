@@ -101,7 +101,8 @@ class TestGmFeatureRuntime(unittest.TestCase):
       params = Params()
       cp = configured(params, CAR.CHEVROLET_VOLT_CC)
       self.assertTrue(enabled(params, cp, 'conditional', {}))  # Readable factory CEM.
-      for feature in ('curve', 'slc', 'profile', 'vision'):
+      self.assertTrue(enabled(params, cp, 'profile', {}))  # Fresh Comfort is the readable missing-document default.
+      for feature in ('curve', 'slc', 'vision'):
         self.assertFalse(enabled(params, cp, feature, {}))
       params.put('ConditionalModeConfig', json.loads(encode_preferences(SavedPreferences(mode=ModeChoice.STOCK))), block=True)
       self.assertTrue(enabled(params, cp, 'conditional', {}))  # Owner retains Stock session lifecycle.

@@ -1,3 +1,4 @@
+from unittest.mock import Mock
 import pytest
 
 from openpilot.starpilot.system.android_auto.bluez_phone import BluezPhone, DEVICE_IFACE, HFP_HF_UUID
@@ -12,15 +13,15 @@ def phone(*, uuids, paired=True, connected=False, registered=True, call_error=No
   instance = BluezPhone.__new__(BluezPhone)
   props = {'Address': ADDRESS, 'Alias': 'AndroidAuto-8b83', 'UUIDs': uuids,
            'Paired': paired, 'Connected': connected, 'Trusted': True}
-  instance.managed_objects = lambda: {PATH: {DEVICE_IFACE: props}}
+  instance.managed_objects = Mock(side_effect=lambda: {PATH: {DEVICE_IFACE: props}})
   instance._profile_registered = registered
   events, calls = [], []
-  instance.log = lambda event, **details: events.append((event, details))
+  instance.log = Mock(side_effect=lambda event, **details: events.append((event, details)))
   def call(*args, **kwargs):
     calls.append((args, kwargs))
     if call_error:
       raise call_error
-  instance._call = call
+  instance._call = Mock(side_effect=call)
   return instance, props, calls, events
 
 

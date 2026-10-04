@@ -19,7 +19,7 @@ class CountedTransform:
 
 def renderer():
   view = object.__new__(ModelRenderer)
-  view._car_space_transform = CountedTransform()
+  vars(view)['_car_space_transform'] = CountedTransform()
   view._clip_region = SimpleNamespace(x=0, y=0, width=30, height=30)
   return view
 

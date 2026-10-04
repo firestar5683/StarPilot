@@ -86,8 +86,10 @@ class TestNonSccFamily(unittest.TestCase):
     parsers = CarState(kona).get_can_parsers(kona)
     self.assertIn("FCA11", parsers[Bus.pt].vl)
     self.assertNotIn("FCA11", parsers[Bus.cam].vl)
-    CarState(kona).update(parsers)  # lazy steering-button subscription
-    self.assertIn("BCM_PO_11", parsers[Bus.pt].vl)
+    state = CarState(kona)
+    state.update(parsers)
+    self.assertIsNotNone(state.forte_lkas_sources)
+    self.assertNotIn("BCM_PO_11", parsers[Bus.pt].vl)
     plain = params(CAR.HYUNDAI_KONA_NON_SCC)
     self.assertTrue(plain.radarUnavailable)
     self.assertFalse(plain.flags & HyundaiFlags.NON_SCC_RADAR_FCA)

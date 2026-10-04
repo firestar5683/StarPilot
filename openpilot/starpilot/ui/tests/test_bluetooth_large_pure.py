@@ -1,3 +1,4 @@
+from typing import Any
 import ast
 from concurrent.futures import Future
 from pathlib import Path
@@ -102,11 +103,11 @@ class TestBluetoothLarge(unittest.TestCase):
     tree = ast.parse(path.read_text())
     tree.body = [node for node in tree.body if not isinstance(node, (ast.Import, ast.ImportFrom))]
     self.app = App()
-    scope = dict(Callable=object, Future=Future, ThreadPoolExecutor=Executor, re=re, time=time, uuid=uuid,
-                 Widget=Widget, Scroller=Scroller, BluetoothOwner=Owner, BluetoothRejected=ValueError,
-                 BluetoothUnavailable=RuntimeError, gui_app=self.app, button_item=lambda *a, **kw: Row((a, kw)),
-                 text_item=lambda *a, **kw: Row((a, kw)), ConfirmDialog=Dialog, alert_dialog=Dialog,
-                 DialogResult=type('Result', (), dict(CONFIRM=1)), Keyboard=Dialog)
+    scope: dict[str, Any] = {'Callable': object, 'Future': Future, 'ThreadPoolExecutor': Executor, 're': re, 'time': time, 'uuid': uuid,
+                 'Widget': Widget, 'Scroller': Scroller, 'BluetoothOwner': Owner, 'BluetoothRejected': ValueError,
+                 'BluetoothUnavailable': RuntimeError, 'gui_app': self.app, 'button_item': lambda *a, **kw: Row((a, kw)),
+                 'text_item': lambda *a, **kw: Row((a, kw)), 'ConfirmDialog': Dialog, 'alert_dialog': Dialog,
+                 'DialogResult': type('Result', (), {'CONFIRM': 1}), 'Keyboard': Dialog}
     tree.body.insert(0, ast.ImportFrom(module='__future__', names=[ast.alias(name='annotations')], level=0))
     exec(compile(ast.fix_missing_locations(tree), str(path), 'exec'), scope)
     self.panel_type = scope['BluetoothLarge']
@@ -139,7 +140,7 @@ class TestBluetoothLarge(unittest.TestCase):
 
   def test_pairing_prompt_opens_once_and_expired_prompt_is_retired(self):
     prompt = {'id': 'a' * 32, 'kind': 'confirmation', 'value': '123456', 'displayOnly': False}
-    status = {'available': True, 'powered': True, 'parked': True, 'discovering': False,
+    status: dict[str, Any] = {'available': True, 'powered': True, 'parked': True, 'discovering': False,
               'pairing': {'state': 'pairing', 'prompt': prompt}}
     self.panel.show_event()
     self.panel.pending.set_result(status)
@@ -170,8 +171,8 @@ class TestBluetoothLarge(unittest.TestCase):
     self.assertEqual(job[3]['value'], '')
 
   def test_named_devices_and_disconnect_forget_presented(self):
-    self.panel.status = dict(available=True, powered=True, parked=True, devices=[
-      dict(address='AA:BB', name='Headphones', paired=True, connected=True)])
+    self.panel.status = {'available': True, 'powered': True, 'parked': True, 'devices': [
+      {'address': 'AA:BB', 'name': 'Headphones', 'paired': True, 'connected': True}]}
     self.panel._scroller = None
     self.panel._rebuild()
     rows = self.panel._scroller.rows
@@ -180,7 +181,7 @@ class TestBluetoothLarge(unittest.TestCase):
 
   def test_request_waits_for_snapshot_then_submits_async(self):
     self.panel.show_event()
-    self.panel.status = dict(available=True, powered=True, parked=True)
+    self.panel.status = {'available': True, 'powered': True, 'parked': True}
     self.panel._signature = repr((False, True, True, True, None, None, None, ()))
     self.panel._request('connect', address='AA:BB')
     self.assertIsNotNone(self.panel.queued)
@@ -191,11 +192,13 @@ class TestBluetoothLarge(unittest.TestCase):
     self.assertFalse(self.panel.pending.done())
 
   def test_refresh_preserves_scroller_and_defers_active_touch(self):
-    self.panel.status = dict(available=True, powered=True, parked=True, devices=[])
+    self.panel.status = {'available': True, 'powered': True, 'parked': True, 'devices': []}
     self.panel._rebuild()
     scroller = self.panel._scroller
     scroll = scroller.scroll_panel
-    self.panel.status['unshownTelemetry'] = 123
+    updated: dict[str, Any] = dict(self.panel.status)
+    updated['unshownTelemetry'] = 123
+    self.panel.status = updated
     self.panel._rebuild()
     self.assertIs(self.panel._scroller, scroller)
     self.panel._touch_held = True
@@ -207,9 +210,9 @@ class TestBluetoothLarge(unittest.TestCase):
     self.assertIs(self.panel._scroller.scroll_panel, scroll)
 
   def test_unnamed_unpaired_devices_not_presented(self):
-    self.panel.status = dict(available=True, powered=True, parked=True, devices=[
-      dict(address='AA:BB:CC:DD:EE:FF', name='AA:BB:CC:DD:EE:FF', paired=False),
-      dict(address='11:22:33:44:55:66', name='Bluetooth Device · 55:66', paired=False)])
+    self.panel.status = {'available': True, 'powered': True, 'parked': True, 'devices': [
+      {'address': 'AA:BB:CC:DD:EE:FF', 'name': 'AA:BB:CC:DD:EE:FF', 'paired': False},
+      {'address': '11:22:33:44:55:66', 'name': 'Bluetooth Device · 55:66', 'paired': False}]}
     self.panel._rebuild()
     self.assertEqual(len(self.panel._scroller.rows), 2)
 

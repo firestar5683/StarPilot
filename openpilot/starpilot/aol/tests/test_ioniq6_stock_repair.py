@@ -63,7 +63,7 @@ def cleanup(cp):
   cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'SelfdriveD')
   method = next(node for node in cls.body if isinstance(node, ast.FunctionDef) and node.name == '__init__')
   # Execute the real startup cleanup condition; constructor side effects stay absent.
-  nodes = [node for node in method.body if isinstance(node, ast.If) and any(
+  nodes: list[ast.stmt] = [node for node in method.body if isinstance(node, ast.If) and any(
     isinstance(call, ast.Call) and isinstance(call.func, ast.Attribute) and call.func.attr == 'remove'
     and call.args and isinstance(call.args[0], ast.Constant)
     and call.args[0].value in ('AlphaLongitudinalEnabled', 'ExperimentalMode') for call in ast.walk(node))]

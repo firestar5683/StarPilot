@@ -21,10 +21,10 @@ def geometry(profile, state, torque=.3, alpha=1.):
   bounds = data['bounds']
   rect = rl.Rectangle(*(bounds[key] for key in ('x', 'y', 'width', 'height')))
   widget = TorqueBarWidget()
-  widget._torque_filter.update = lambda value: torque
-  widget._alpha_filter.update = lambda value: alpha
   calls, dots = [], []
-  with patch('openpilot.starpilot.ui.onroad_torque.draw_polygon', side_effect=lambda rect, points, **kwargs: calls.append((rect, points.copy(), kwargs))), \
+  with patch.object(widget._torque_filter, 'update', return_value=torque), \
+       patch.object(widget._alpha_filter, 'update', return_value=alpha), \
+       patch('openpilot.starpilot.ui.onroad_torque.draw_polygon', side_effect=lambda rect, points, **kwargs: calls.append((rect, points.copy(), kwargs))), \
        patch('openpilot.starpilot.ui.onroad_torque.rl.draw_circle', side_effect=lambda x, y, radius, color: dots.append((x, y, radius))):
     widget.render(rect, state, data['width'])
   return calls, dots
@@ -127,28 +127,25 @@ class TestTorqueLayout(unittest.TestCase):
     self.assertGreater(widget._alpha_filter.x, 0)
 
   def test_unknown_source_or_inactive_lateral_resets_without_drawing(self):
-    from types import SimpleNamespace as NS
     widget = TorqueBarWidget()
     for lateral, source in ((True, False), (False, True)):
       widget._torque_filter.x = widget._alpha_filter.x = .8
-      state = NS(lateral_active=lateral, torque_source_available=source, customization=default_document())
+      state = replace(scene(), lateral_active=lateral, torque_source_available=source)
       with patch('openpilot.starpilot.ui.onroad_torque.draw_polygon') as draw:
         widget.render(rl.Rectangle(0, 0, 476, 240), state, 536)
         draw.assert_not_called()
       self.assertEqual((widget._torque_filter.x, widget._alpha_filter.x), (0, 0))
 
   def test_new_drive_resets_existing_filters_before_first_fresh_render(self):
-    from types import SimpleNamespace as NS
     widget = TorqueBarWidget()
-    state = NS(lateral_active=True, torque_source_available=True, torque_drive_frame=10,
-               torque_utilization=.8, customization=default_document())
+    state = replace(scene(), lateral_active=True, torque_source_available=True, torque_drive_frame=10, torque_utilization=.8)
     rect = rl.Rectangle(0, 0, 476, 240)
     with patch('openpilot.starpilot.ui.onroad_torque.draw_polygon'), patch('openpilot.starpilot.ui.onroad_torque.rl.draw_circle'):
       for _ in range(30):
         widget.render(rect, state, 536)
       self.assertGreater(widget._torque_filter.x, .7)
       self.assertGreater(widget._alpha_filter.x, .9)
-      state.torque_drive_frame = 100
+      state = replace(state, torque_drive_frame=100)
       widget.render(rect, state, 536)
       self.assertLess(widget._torque_filter.x, .2)
       self.assertLess(widget._alpha_filter.x, .2)

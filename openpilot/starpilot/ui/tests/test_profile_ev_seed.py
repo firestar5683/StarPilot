@@ -73,12 +73,13 @@ class NamedAccelerationSeedTests(unittest.TestCase):
       self.assertFalse(self.owner.apply(request))
     self.assertEqual(path.read_bytes(), original)
 
-  def test_dom_default_to_custom_keeps_existing_reference_and_no_cp_requirement(self):
+  def test_selected_profile_to_custom_requires_current_vehicle_seed(self):
     with patch.object(self, "cp", None):
-      row, request = self.select("custom")
+      row, request = self.select("Custom")
       self.assertIsNone(row.capability)
-      self.assertTrue(self.owner.apply(request))
-    self.assertEqual(self.curve()[-1], 0.55)
+      self.assertNotIn("Custom", row.choices)
+      self.assertFalse(self.owner.apply(request))
+    self.assertFalse(Path(self.params.get_param_path("LongitudinalPersonalityProfiles")).exists())
 
   def test_named_preset_restores_dormant_custom_without_new_vehicle_seed(self):
     self.assertTrue(self.owner.apply(self.select("custom")[1]))

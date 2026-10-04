@@ -1,3 +1,4 @@
+from unittest.mock import Mock
 import socket
 import ssl
 import struct
@@ -270,6 +271,7 @@ def test_frame_consumer_rejects_torn_write(tmp_path):
   consumer.demand()
   producer = FrameProducer(path)
   request = producer.pending_request()
+  assert request is not None
   producer.publish(request, bytes(16 * 16 * 4), time.monotonic_ns())
   struct.pack_into("<Q", consumer.mm, 8, 5)  # writer mid-update
   assert consumer.latest() is None
@@ -459,7 +461,8 @@ class FakeBluez:
     pass
 
   def device(self, address):
-    return {"address": address, "paired": True, "connected": self.connected, "name": "Civic", "android_auto": True}
+    return {"address": address, "paired": True, "connected": self.connected, "name": "Civic", "android_auto": True,
+            "uuids": ["0000111e-0000-1000-8000-00805f9b34fb"]}
 
   def devices(self):
     return [{**self.device(address), "name": name, "android_auto": aa} for address, name, aa in self.paired_devices]
@@ -528,7 +531,7 @@ def test_supervisor_full_wireless_session(identity, tmp_path, monkeypatch):
   sup.select_receiver("AA:BB:CC:DD:EE:01", "Civic")
   lease_holder = {}
   original_lease = sup._lease
-  sup._lease = lambda: lease_holder.setdefault("lease", original_lease())
+  sup._lease = Mock(side_effect=lambda: lease_holder.setdefault("lease", original_lease()))
 
   stop_producer = threading.Event()
 
@@ -596,16 +599,27 @@ def make_supervisor(identity, tmp_path, monkeypatch, rfcomm):
 
 def test_supervisor_retries_after_rejection(identity, tmp_path, monkeypatch):
   cars = []
+  threads = []
+  failures = []
+  stopping = threading.Event()
 
   def rfcomm(address, channel, timeout=15.0):
     hu = FakeHeadUnit(identity, reject_auth=True)
     cars.append(hu)
     phone, car = socket.socketpair()
     def car_side():
-      with car:
-        rfcomm_head_unit(car, ("127.0.0.1", hu.port), pings=False)
-        time.sleep(1.0)
-    threading.Thread(target=car_side, daemon=True).start()
+      try:
+        with car:
+          rfcomm_head_unit(car, ("127.0.0.1", hu.port), pings=False)
+          stopping.wait(1.0)
+      except EOFError as error:
+        if not stopping.is_set():
+          failures.append(error)
+      except Exception as error:
+        failures.append(error)
+    thread = threading.Thread(target=car_side, daemon=True)
+    threads.append(thread)
+    thread.start()
     return phone
 
   sup, leases = make_supervisor(identity, tmp_path, monkeypatch, rfcomm)
@@ -615,9 +629,14 @@ def test_supervisor_retries_after_rejection(identity, tmp_path, monkeypatch):
     assert time.monotonic() < deadline, sup.status()
     time.sleep(0.05)
   assert "rejected" in sup.status()["error"]
+  stopping.set()
   sup.stop()
   for hu in cars:
     hu.close()
+  for thread in threads:
+    thread.join(timeout=5)
+    assert not thread.is_alive(), "RFCOMM fixture did not finish after stop"
+  assert not failures, failures
   assert False in leases[0].releases and leases[0].releases[-1] is True  # retries keep the old Wi-Fi parked
   assert sup.status()["state"] == "idle"
 
@@ -654,7 +673,7 @@ class FakeNetworkManager:
     self.added = []
     self.calls = []
 
-  def call(self, path, interface, member, signature=None, body=(), timeout=10.0):
+  def call(self, path, interface, member, signature=None, body: tuple=(), timeout=10.0):
     from openpilot.starpilot.system.android_auto import network
     self.calls.append(member)
     if member == "GetDevices":
@@ -686,7 +705,7 @@ class FakeNetworkManager:
 def make_lease(nm):
   from openpilot.starpilot.system.android_auto.network import NetworkLease
   lease = NetworkLease(lambda *a, **k: None)
-  router = type("R", (), {"close": lambda self: None})()
+  router = Mock(wraps=type("R", (), {"close": lambda self: None})())
 
   def reopen(*args, **kwargs):  # the real lease reopens D-Bus lazily on its next call
     lease.router = router
@@ -699,8 +718,8 @@ def make_lease(nm):
     reopen()
     return nm.get(*args, **kwargs)
 
-  lease._call, lease._get = call, get
-  lease._delete_stale_profiles = lambda: None
+  lease._call, lease._get = Mock(side_effect=call), Mock(side_effect=get)
+  lease._delete_stale_profiles = Mock(side_effect=lambda: None)
   return lease
 
 

@@ -181,7 +181,7 @@ class TestLoggerd(OpenpilotTestCase):
 
     if os.path.isfile("/proc/cmdline"):
       with open("/proc/cmdline") as f:
-        assert list(initData.kernelArgs) == f.read().strip().split(" ")
+        assert list(initData.kernelArgs) == f.read().split()
 
       with open("/proc/version") as f:
         assert initData.kernelVersion == f.read()
@@ -198,7 +198,7 @@ class TestLoggerd(OpenpilotTestCase):
   def test_rotation(self):
     Params().put("RecordFront", True, block=True)
 
-    expected_files = {"rlog.zst", "qlog.zst", "qcamera.ts", "fcamera.hevc", "dcamera.hevc", "ecamera.hevc"}
+    expected_files = {"rlog.zst", "qlog.zst", "qcamera.ts", "fcamera.hevc", "dcamera.hevc", "ecamera.hevc", ".cloud-provider"}
 
     num_segs = random.randint(2, 3)
     length = random.randint(4, 5) # H264 encoder uses 40 lookahead frames and does B-frame reordering, so minimum 3 seconds before qcam output
@@ -208,6 +208,7 @@ class TestLoggerd(OpenpilotTestCase):
     route_path = str(self._get_latest_log_dir()).rsplit("--", 1)[0]
     for n in range(num_segs):
       p = Path(f"{route_path}--{n}")
+      self.assertEqual((p / ".cloud-provider").read_text(), "comma")
       logged = {f.name for f in p.iterdir() if f.is_file()}
       diff = logged ^ expected_files
       assert len(diff) == 0, f"didn't get all expected files. seg={n} {route_path=}, {diff=}\n{logged=} {expected_files=}"

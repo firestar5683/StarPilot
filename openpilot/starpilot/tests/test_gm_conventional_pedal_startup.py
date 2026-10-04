@@ -2,9 +2,7 @@
 
 import os
 import unittest
-from unittest.mock import patch
-from dataclasses import replace
-from types import SimpleNamespace
+from unittest.mock import Mock, patch
 
 from opendbc.car import gen_empty_fingerprint
 from opendbc.car.gm.interface import CarInterface
@@ -56,7 +54,7 @@ class TestGmConventionalPedalStartup(unittest.TestCase):
             self.assertTrue(qualified_gm(card.CP))
             self.assertEqual(longitudinal_supported(card.CP), not disabled)
             self.assertEqual(longitudinal_policy_for(card.CP) is not None, not disabled)
-            self.assertIsNotNone(lateral_policy_for(card.CP))
+            assert lateral_policy_for(card.CP) is not None
 
   def test_ui_disable_and_recovery_apply_only_to_next_startup(self):
     for identity in ORDINARY_CC_CAR:
@@ -84,34 +82,22 @@ class TestGmConventionalPedalStartup(unittest.TestCase):
         VehicleStartupPreferences.read(params, enabled=True).prepare(next_cp)
         self.assertTrue(next_cp.openpilotLongitudinalControl)
 
-  def test_parked_pedal_opt_in_cas_and_actual_next_startup_detection(self):
+  def test_pedal_hardware_is_automatic_and_old_toggle_cannot_disable_it(self):
     from opendbc.car.gm.tests.test_conventional_pedal import params as configured_with_sensor
-    from openpilot.starpilot.ui.feature_settings_state import row_change
     with OpenpilotPrefix():
       params = Params()
       cp = configured_with_sensor(next(iter(ORDINARY_CC_CAR)), enabled=False)
-      parked = [True]
-      owner = FeatureSettingsOwner(params, lambda _group: parked[0],
-                                   vehicle_fingerprint=lambda cp=cp: cp.carFingerprint, vehicle_params=lambda cp=cp: cp)
+      owner = FeatureSettingsOwner(params, lambda _group: True,
+                                   vehicle_fingerprint=lambda: cp.carFingerprint, vehicle_params=lambda: cp)
       row = next(r for r in owner.snapshot('vehicle', parked=True, system_long=True,
                   lateral_context=True, metric=False).rows if r.key == 'GMPedalLongitudinal')
-      self.assertTrue(row.available)
-      request = row_change(row, 1)
-      self.assertFalse(owner.apply(request))
-      self.assertIsNone(params.get('GMPedalLongitudinal'))
-      confirmed = replace(request, confirmation=True)
-      parked[0] = False
-      self.assertFalse(owner.apply(confirmed))
-      parked[0] = True
-      self.assertFalse(owner.apply(replace(confirmed, capability=('stale',))))
-      params.put_bool('GMPedalLongitudinal', False, block=True)
-      self.assertFalse(owner.apply(confirmed))
-      row = next(r for r in owner.snapshot('vehicle', parked=True, system_long=True,
-                  lateral_context=True, metric=False).rows if r.key == 'GMPedalLongitudinal')
-      self.assertTrue(owner.apply(replace(row_change(row, 1), confirmation=True)))
-      self.assertFalse(is_conventional_cc_pedal_profile(cp))
-      self.assertTrue(is_conventional_cc_pedal_profile(configured(cp.carFingerprint)))
-      self.assertFalse(is_conventional_cc_pedal_profile(configured_with_sensor(cp.carFingerprint, enabled=True, sensor=False)))
+      self.assertEqual(row.value, 'Automatic')
+      self.assertFalse(row.available)
+      self.assertTrue(is_conventional_cc_pedal_profile(cp))
+      for saved in (False, True):
+        params.put_bool('GMPedalLongitudinal', saved, block=True)
+        self.assertTrue(is_conventional_cc_pedal_profile(configured_with_sensor(cp.carFingerprint, enabled=saved)))
+      self.assertFalse(is_conventional_cc_pedal_profile(configured_with_sensor(cp.carFingerprint, sensor=False)))
 
   def test_actual_native_vehicle_buttons_confirm_cancel_and_revoke(self):
     from openpilot.starpilot.ui import feature_settings_compact as compact
@@ -131,9 +117,9 @@ class TestGmConventionalPedalStartup(unittest.TestCase):
       session.selected = large.Destination.DRIVING_CONTROLS
       session.feature_page = FeaturePage.VEHICLE
       session._lane_change_request_epoch = 1
-      session.feature_snapshot = lambda row=row: FeatureSettingsState(page=FeaturePage.VEHICLE, rows=(row,))
-      session.feature_request = lambda request, sent=sent: sent.append(request)
-      action = SimpleNamespace(kind='change', row=row, direction=1)
+      vars(session)['feature_snapshot'] = lambda row=row: FeatureSettingsState(page=FeaturePage.VEHICLE, rows=(row,))
+      vars(session)['feature_request'] = lambda request, sent=sent: sent.append(request)
+      action = large.FeatureUiAction(kind='change', row=row, direction=1)
       with patch('openpilot.system.ui.widgets.confirm_dialog.ConfirmDialog', Dialog), \
            patch.object(large.gui_app, 'push_widget', dialogs.append):
         session._feature_ui(action)
@@ -147,8 +133,8 @@ class TestGmConventionalPedalStartup(unittest.TestCase):
         session._feature_ui(action)
         dialogs.pop().callback(DialogResult.CONFIRM)
         self.assertTrue(sent.pop().confirmation)
-      page = object()
-      adapter = compact.FeatureSettingsCompact(SimpleNamespace(feature_request=lambda request, sent=sent: sent.append(request) or True))
+      page = Mock(spec=compact.NavScroller)
+      adapter = compact.FeatureSettingsCompact(Mock(feature_request=lambda request, sent=sent: sent.append(request) or True))
       with patch.object(compact, 'BigButton', Button), patch.object(compact, 'ConfirmDialog', Dialog), \
            patch.object(compact.gui_app, 'get_active_widget', return_value=page), \
            patch.object(compact.gui_app, 'push_widget', dialogs.append):

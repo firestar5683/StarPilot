@@ -34,8 +34,8 @@ class TrafficAccelerationPlannerTests(unittest.TestCase):
       profiles = default_personality_profiles(False)
       for category, value in (('acceleration', acceleration), ('braking', braking)):
         if value is not None:
-          profiles['traffic'][category] = {'preset': 'custom', 'curve': [value] * 10}
-      self.params.put('LongitudinalPersonalityProfiles', profile_document(profiles, enabled=True), block=True)
+          profiles['traffic'][category] = {'preset': 'custom', 'curve': [value] * 10, 'legacyActivation': True}
+      self.params.put('LongitudinalPersonalityProfiles', profile_document(profiles, enabled=True, global_braking_response='standard'), block=True)
     target = resolve(read_traffic_settings(self.params), log.LongitudinalPersonality.standard,
                      V_EGO, self.cp, traffic_mode=True)
     self.assertIsNotNone(target)

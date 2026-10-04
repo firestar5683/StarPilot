@@ -41,7 +41,7 @@ def load_fixtures(path=MANIFEST):
         type(f['segment']) is not int or not 0 <= f['segment'] <= 10000 or
         type(f['bytes']) is not int or not 0 < f['bytes'] <= MAX_FIXTURE_BYTES or
         not re.fullmatch(r'[0-9a-f]{64}', f['sha256']) or
-        type(f['longitudinal']) is not bool or type(f['pcm_cruise']) is not bool or
+        type(f['longitudinal']) is not bool or type(f['recorded_longitudinal']) is not bool or type(f['pcm_cruise']) is not bool or
         f['safety_model'] != 'tesla' or type(f['safety_param']) is not int or
         not f['variants'] or len(set(f['variants'])) != len(f['variants']) or
         not set(f['variants']) <= {'debug', 'release'}):
@@ -141,7 +141,11 @@ def make_cases(fixtures, paths, observed):
     @classmethod
     def get_testing_data(cls):
       verify_fixture(cls.local_path, cls.fixture)
-      return cls.get_testing_data_from_logreader(LogReader(str(cls.local_path), only_union_types=True, sort_by_time=True))
+      firmware, messages, recorded_long = cls.get_testing_data_from_logreader(
+        LogReader(str(cls.local_path), only_union_types=True, sort_by_time=True))
+      if recorded_long != cls.fixture['recorded_longitudinal']:
+        raise AssertionError('Recorded longitudinal configuration changed')
+      return firmware, messages, cls.fixture['longitudinal']
 
     @classmethod
     def setUpClass(cls):
@@ -157,6 +161,7 @@ def make_cases(fixtures, paths, observed):
         raise AssertionError('Recorded fixture no longer has its reviewed controller configuration')
       observed.append({'fixture': cls.fixture['id'], 'platform': str(cp.carFingerprint),
                        'can_batches': len(cls.can_msgs), 'duration_seconds': (cls.can_msgs[-1][0] - cls.can_msgs[0][0]) / 1e9,
+                       'recorded_longitudinal': cls.fixture['recorded_longitudinal'],
                        'longitudinal': cp.openpilotLongitudinalControl, 'pcm_cruise': cp.pcmCruise,
                        'safety_model': str(cp.safetyConfigs[0].safetyModel), 'safety_param': cp.safetyConfigs[0].safetyParam})
 
@@ -186,7 +191,8 @@ def run(variant, cache, output, download=False):
   started = time.monotonic()
   tests, records, errors, observed = [], [], [], []
   plan = {'schema_version': 1, 'suite': 'recorded-vehicles', 'variant': variant,
-          'scope': 'Recorded CAN parser/native RX agreement; synthetic TX and fuzzy checks use the recorded fingerprint.',
+          'scope': ('Recorded CAN parser/native RX agreement in explicit stock/alpha configurations; ' +
+                    'synthetic TX and fuzzy checks use the recorded fingerprint.'),
           'uncovered': ['user weekend drive', 'physical CAN/harness/device behavior', 'road and whole-fleet qualification',
                         'recordings with incompatible historical schemas'],
           'runner_sha256': vehicle.sha256(__file__), 'manifest_sha256': vehicle.sha256(MANIFEST),

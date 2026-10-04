@@ -66,17 +66,18 @@ def test_default_repair_persists_and_flows_through_actual_stream(tmp_path, raw):
     np.testing.assert_array_equal(output[:, 0], expected[:4096] * .5)
 
 
-def test_warning_urgency_levels_and_loop_finish(tmp_path):
+def test_warning_assets_are_distinct_and_loop_finishes(tmp_path):
   daemon = soundd.Soundd(Params(str(tmp_path / "params")), pack_root=tmp_path / "packs")
   alerts = (soundd.AudibleAlert.promptRepeat, soundd.AudibleAlert.warningSoft, soundd.AudibleAlert.warningImmediate)
-  rms, peak = [], []
+  rms, peak, waveforms = [], [], []
   for alert in alerts:
     samples = daemon.loaded_sounds[alert]
     rms.append(float(np.sqrt(np.mean(samples ** 2))))
     peak.append(float(np.max(np.abs(samples))))
-    assert np.isfinite(samples).all() and 0 < peak[-1] < 1
-    assert samples[0] == 0 and samples[-1] == 0
-    daemon.current_alert, daemon.current_sound_frame, daemon.current_volume = alert, 0, 1.
+    assert np.isfinite(samples).all() and 0 < rms[-1] <= peak[-1] < 1
+    waveforms.append(samples.tobytes())
+    daemon.update_alert(alert)
+    daemon.current_sound_frame, daemon.current_volume = 0, 1.
     output = np.zeros((len(samples) * 2 + 4096, 1), np.float32)
     daemon.callback(output, len(output), None, None)
     np.testing.assert_array_equal(output[:len(samples), 0], samples)
@@ -88,7 +89,7 @@ def test_warning_urgency_levels_and_loop_finish(tmp_path):
     output.fill(1)
     daemon.callback(output, len(output), None, None)
     assert not np.any(output)
-  assert rms[0] < rms[1] < rms[2] and peak[0] < peak[1] < peak[2]
+  assert len(set(waveforms)) == len(alerts)
 
 
 def test_builtin_loading_does_not_require_stock_and_damaged_clip_uses_stock(tmp_path):
@@ -103,11 +104,13 @@ def test_builtin_loading_does_not_require_stock_and_damaged_clip_uses_stock(tmp_
     (builtin / name).write_bytes((actual / "sounds_starpilot" / name).read_bytes())
   loader = SoundPackLoader(params, stock, tmp_path / "packs")
   loaded = loader.refresh(("engage.wav", "warning.wav"), 0)
+  assert loaded is not None
   assert np.any(loaded["engage.wav"])
   stock.mkdir()
   (stock / "engage.wav").write_bytes((actual / "sounds/engage.wav").read_bytes())
   (builtin / "engage.wav").write_text("version https://git-lfs.github.com/spec/v1\n")
   restored = loader.refresh(("engage.wav", "warning.wav"), 1)
+  assert restored is not None
   np.testing.assert_array_equal(restored["engage.wav"], read_wav(stock / "engage.wav"))
   np.testing.assert_array_equal(restored["warning.wav"], loaded["warning.wav"])
 

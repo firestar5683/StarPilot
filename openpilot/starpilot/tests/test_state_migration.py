@@ -230,8 +230,8 @@ class TestStateMigration(unittest.TestCase):
     marker, = (self.storage / 'profiles').iterdir()
     valid = marker.read_bytes()
     put_cache(self.params, 'CarParamsPersistent', car.CarParams.new_message(), block=True)
-    for replacement in (b'"version":true', b'"version":1,"version":1'):
-      marker.write_bytes(valid.replace(b'"version":1', replacement))
+    for replacement in (b'"version":true', b'"version":2,"version":2'):
+      marker.write_bytes(valid.replace(b'"version":2', replacement))
       with self.assertRaises(MigrationRequired):
         prepare_manager_start(self.params, self.storage)
 
@@ -294,6 +294,7 @@ class TestStateMigration(unittest.TestCase):
          patch.object(manager, 'starpilot_storage_root', return_value=self.storage), \
          patch.object(manager, 'save_bootlog') as bootlog, \
          patch.object(manager, 'register') as register, \
+         patch.object(manager, 'prepare_manager_start', side_effect=MigrationRequired('fixture incompatible state')), \
          patch.object(self.params, 'clear_all') as clear:
       with self.assertRaises(MigrationRequired):
         manager.manager_init()
@@ -309,6 +310,7 @@ class TestStateMigration(unittest.TestCase):
       openpilot=SimpleNamespace(version='test', git_commit='a' * 40, git_commit_date='test',
                                git_origin='local', git_normalized_origin='local', is_dirty=True),
     )
+    prepare_manager_start(self.params, self.storage)  # Current epoch before newly saved driver choice.
     self.params.put_bool('OpenpilotEnabledToggle', False, block=True)
     with patch.dict(os.environ), \
          patch.object(manager, 'Params', return_value=self.params), \

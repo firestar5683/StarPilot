@@ -105,10 +105,7 @@ class TestGmAscmIntercept(unittest.TestCase):
           self.assertIn(0x2CB, [msg[0] for msg in commands])
           self.assertIn(0x315, [msg[0] for msg in commands])
           self.assertIn(0x180, [msg[0] for msg in commands])
-          if radar and car != CAR.CHEVROLET_VOLT_ASCM:
-            self.assertEqual({msg[0] for msg in commands if msg[2] == 1}, {0xA1, 0x306, 0x308, 0x310})
-          else:
-            self.assertFalse(any(msg[2] == 1 for msg in commands))
+          self.assertFalse(any(msg[2] == 1 for msg in commands))
           # Native alpha arms on a real SET release, after healthy observed RX.
           self.assertTrue(self.safety.safety_rx_hook(self.packet(packer.make_can_msg("ASCMSteeringButton", 0, {"ACCButtons": 3}))))
           self.assertTrue(self.safety.safety_rx_hook(self.packet(packer.make_can_msg("ASCMSteeringButton", 0, {"ACCButtons": 1}))))

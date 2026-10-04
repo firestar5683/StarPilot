@@ -22,6 +22,12 @@ class TestCanFingerprint(unittest.TestCase):
       assert finger[1] == fingerprint
       assert finger[2] == {}
 
+  def test_automatic_candidates_require_observed_messages(self):
+    for candidate, variants in FINGERPRINTS.items():
+      with self.subTest(candidate=candidate):
+        self.assertTrue(variants)
+        self.assertTrue(all(variants))
+
   def test_timing(self):
     # just pick any CAN fingerprinting car
     car_model = "CHEVROLET_BOLT_EUV"

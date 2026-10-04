@@ -69,7 +69,7 @@ def test_intersection_exit_keeps_native_rate_after_crossing_lane_change_floor():
 def test_intersection_exemption_does_not_survive_disabled_turn_assist_or_lateral():
   for disable in ({"assist": False}, {"active": False}):
     smoother = LaneChangeSmoother()
-    def factor(speed, **kwargs):
+    def factor(speed, smoother=smoother, **kwargs):
       return smoother.factor(active=kwargs.get("active", True), lane_change_state=log.LaneChangeState.laneChangeStarting,
                              speed=speed, minimum_speed=0., duration=7., previous=-.005, desired=0.,
                              turn_assist=kwargs.get("assist", True))

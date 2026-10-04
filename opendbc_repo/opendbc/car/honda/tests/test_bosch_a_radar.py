@@ -160,3 +160,15 @@ def test_actual_card_startup_publishes_radar_preference_before_construction(iden
     finally:
       del controls, card, subscriber
       gc.collect()
+
+
+@pytest.mark.parametrize("candidate", (CAR.HONDA_CIVIC_BOSCH, CAR.HONDA_CRV_5G))
+def test_selected_bosch_a_direct_update_uses_its_actual_protocol(candidate):
+  cp = CarInterface.get_params(candidate, gen_empty_fingerprint(), [], False, False, False)
+  cp.radarUnavailable = False
+  radar = RadarInterface(cp)
+  assert radar.bosch_a is not None
+  assert radar.update([]) is None
+  result = radar._update([radar.trigger_msg])
+  assert result.errors.canError
+  assert not result.points

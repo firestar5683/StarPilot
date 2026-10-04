@@ -40,7 +40,7 @@ class TestGmVoltCc(unittest.TestCase):
   def feed(self, **kwargs):
     for frame in self.frames(**kwargs):
       self.assertTrue(self.safety.safety_rx_hook(self.packet(frame)))
-    self.safety.safety_tick_current_safety_config()
+    self.safety.safety_tick()
 
   def tx(self, counter=1, button=2):
     return self.safety.safety_tx_hook(self.packet(gmcan.create_buttons(self.packer, 0, counter, button)))
@@ -110,7 +110,7 @@ class TestGmVoltCc(unittest.TestCase):
           initial = self.frames()
           for frame in initial:
             self.safety.safety_rx_hook(self.packet(frame))
-          self.safety.safety_tick_current_safety_config()
+          self.safety.safety_tick()
           self.safety.set_controls_allowed(True)
           ci.update([(998_000_000, initial)])
           ci.CC.frame = 100

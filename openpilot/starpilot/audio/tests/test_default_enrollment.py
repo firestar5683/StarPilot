@@ -178,6 +178,7 @@ class SoundDefaultEnrollmentTests(unittest.TestCase):
     self.assertLess(line("enroll_default_sounds"), cleanup)
     guard = next(node for node in init.body if isinstance(node, ast.Try) and any(
       isinstance(call, ast.Call) and isinstance(call.func, ast.Name) and call.func.id == "enroll_default_sounds" for call in ast.walk(node)))
+    assert guard.handlers[0].type is not None
     self.assertEqual(ast.unparse(guard.handlers[0].type), "(OSError, ValueError)")
     self.assertTrue(any(isinstance(node, ast.Call) and isinstance(node.func, ast.Attribute) and node.func.attr == "warning"
                         for node in ast.walk(guard.handlers[0])))

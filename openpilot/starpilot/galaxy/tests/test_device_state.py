@@ -25,7 +25,7 @@ class Messages:
     self.updated = dict.fromkeys(('deviceState', 'pandaStates'), False)
     self.seen = dict(self.updated)
     self.valid = dict(self.updated)
-    self.logMonoTime = dict.fromkeys(self.updated, 0)
+    self.logMonoTime: dict[str, int | float] = dict.fromkeys(self.updated, 0)
     self.recv_time = dict(self.logMonoTime)
     self.values = {'deviceState': SimpleNamespace(started=False), 'pandaStates': []}
     self.timeouts = []
@@ -43,7 +43,7 @@ class Messages:
     self.updated = dict.fromkeys(self.updated, True)
     self.seen = dict.fromkeys(self.updated, True)
     self.valid = dict.fromkeys(self.updated, True)
-    self.logMonoTime = {'deviceState': clock.now - 250_000_000, 'pandaStates': clock.now + clock.offset - 100_000_000}
+    self.logMonoTime: dict[str, int | float] = {'deviceState': clock.now - 250_000_000, 'pandaStates': clock.now + clock.offset - 100_000_000}
     self.recv_time = dict.fromkeys(self.updated, (clock.now - 125_000_000) / 1e9)
     self.values = {'deviceState': SimpleNamespace(started=started),
                    'pandaStates': [SimpleNamespace(ignitionLine=ignition_line, ignitionCan=ignition_can)]}

@@ -126,11 +126,12 @@ class BluetoothOwnerTest(unittest.TestCase):
     self.assertFalse(self.owner.request('disconnect', address='AA:BB:CC:DD:EE:FF')['devices'][0]['connected'])
     fixture.ui.started = True
     before = list(FakeBlueZ.operations)
+    self.assertTrue(self.owner.request('connect', address='AA:BB:CC:DD:EE:FF')['devices'][0]['connected'])
+    self.assertEqual(FakeBlueZ.operations[len(before):], [('connect', 'AA:BB:CC:DD:EE:FF')])
     with self.assertRaises(BluetoothRejected):
-      self.owner.request('connect', address='AA:BB:CC:DD:EE:FF')
-    self.assertEqual(before, FakeBlueZ.operations)
+      self.owner.request('power', enabled=False)
 
-  def test_forced_offroad_pairing_confirmation_rechecks_effective_mode(self):
+  def test_pairing_survives_road_transition_but_not_session_revocation(self):
     fixture = self.connectivity_fixture()
     FakeBlueZ.devices.append({'address': '11:22:33:44:55:66', 'name': 'Nearby', 'paired': False,
                               'connected': False, 'trusted': False})
@@ -142,16 +143,19 @@ class BluetoothOwnerTest(unittest.TestCase):
       if prompt is not None:
         break
       time.sleep(.01)
-    self.assertIsNotNone(prompt)
+    assert prompt is not None
     with self.assertRaises(BluetoothRejected):
       self.owner.request('pairing_response', session=('wrong', b'generation'), prompt_id=prompt['id'], accepted=True)
     self.owner.request('pairing_response', session=identity, prompt_id=prompt['id'], accepted=True)
     self.assertTrue(self.owner.pairing.done.wait(1))
     self.assertTrue(FakeBlueZ.devices[-1]['paired'])
     FakeBlueZ.devices[-1]['paired'] = False
-    self.owner.request('pair', address='11:22:33:44:55:66', session=identity)
+    with self.owner.lock:
+      self.owner.request('pair', address='11:22:33:44:55:66', session=identity)
     pairing = self.owner.pairing
     fixture.ui.sm['deviceState'].started = True
+    self.assertEqual(self.owner.snapshot(session=identity)['pairing']['state'], 'pairing')
+    self.owner.session_valid = lambda _identity: False
     self.owner.snapshot(session=identity)
     self.assertTrue(pairing.done.wait(1))
     self.assertEqual(pairing.state, 'canceled')
@@ -295,10 +299,14 @@ class BluetoothOwnerTest(unittest.TestCase):
         self.assertEqual(rejected.exception.code, 'busy')
         return original_rollback()
 
-      change.rollback = rollback
+      replacement = patch.object(change, 'rollback', rollback)
+      replacement.start()
+      self.addCleanup(replacement.stop)
       return change
 
-    self.preference.begin = begin
+    replacement = patch.object(self.preference, 'begin', begin)
+    replacement.start()
+    self.addCleanup(replacement.stop)
     with patch.object(FakeBlueZ, 'set_powered', side_effect=OSError('BlueZ disappeared')):
       with self.assertRaises(BluetoothUnavailable):
         self.owner.request('power', enabled=True)
@@ -405,6 +413,9 @@ class BluetoothOwnerTest(unittest.TestCase):
     self.assertEqual(FakeBlueZ.closed, 1)
     self.parked[0] = False
     self.owner.snapshot()
+    self.assertEqual(FakeBlueZ.operations[-1], ('scan', None))
+    now[0] += self.owner.SCAN_SECONDS
+    self.owner.scan_timer.fire()
     self.assertEqual(FakeBlueZ.operations[-1], ('stop_scan', None))
 
   def test_power_bootstrap_rechecks_parked_before_bluez_action(self):
@@ -486,7 +497,7 @@ class BluetoothOwnerTest(unittest.TestCase):
       if prompt is not None:
         break
       time.sleep(0.01)
-    self.assertIsNotNone(prompt)
+    assert prompt is not None
     self.assertEqual(prompt['value'], '123456')
     self.assertIsNone(self.owner.snapshot(session=('session-b', b'generation'))['pairing'])
     with self.assertRaises(BluetoothRejected):
@@ -499,7 +510,7 @@ class BluetoothOwnerTest(unittest.TestCase):
     self.assertEqual(result['pairing']['state'], 'paired')
     self.assertTrue(next(device for device in result['devices'] if device['address'] == '11:22:33:44:55:66')['paired'])
 
-  def test_park_loss_logout_and_deadline_cancel_only_owned_pair(self):
+  def test_logout_cancels_only_owned_pair_and_new_session_can_pair(self):
     FakeBlueZ.devices.append({'address': '11:22:33:44:55:66', 'name': 'Nearby', 'paired': False,
                               'connected': False, 'trusted': False})
     identity = ('session-a', b'generation')
@@ -510,8 +521,9 @@ class BluetoothOwnerTest(unittest.TestCase):
     self.assertTrue(self.owner.pairing.done.wait(1))
     self.assertEqual(self.owner.snapshot(session=identity)['pairing']['state'], 'canceled')
     self.assertFalse(FakeBlueZ.devices[-1]['paired'])
-    self.owner.request('pair', address='11:22:33:44:55:66', session=identity)
-    self.parked[0] = False
+    with self.owner.lock:
+      self.owner.request('pair', address='11:22:33:44:55:66', session=identity)
+    self.owner.session_valid = lambda _identity: False
     self.owner.snapshot(session=identity)
     self.assertTrue(self.owner.pairing.done.wait(1))
     self.assertEqual(self.owner.pairing.state, 'canceled')
@@ -565,7 +577,7 @@ class BluetoothOwnerTest(unittest.TestCase):
       if session.prompt is not None:
         break
       time.sleep(0.01)
-    self.assertIsNotNone(session.prompt)
+    assert session.prompt is not None
     prompt = session.prompt
     if prompt is None:
       self.fail('pairing prompt was not created')
@@ -639,7 +651,7 @@ class BluetoothOwnerTest(unittest.TestCase):
       if session.prompt is not None:
         break
       time.sleep(0.01)
-    self.assertIsNotNone(session.prompt)
+    assert session.prompt is not None
     prompt = session.prompt
     if prompt is None:
       self.fail('pairing prompt was not created')

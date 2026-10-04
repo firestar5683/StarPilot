@@ -1,12 +1,11 @@
 """Volt 2019 SDGM stock and observed SASCM longitudinal ownership."""
 import unittest
-from unittest.mock import patch
 
 from opendbc.can import CANPacker
 from opendbc.car import Bus, gen_empty_fingerprint, structs
 from opendbc.car.gm.interface import CarInterface
 from opendbc.car.gm.longitudinal import volt_policy_for
-from opendbc.car.gm.tests.test_bolt_cc import Settings, setup, native
+from opendbc.car.gm.tests.test_bolt_cc import setup, native
 from opendbc.car.gm.tests.test_volt_camera_control import feed_camera
 from opendbc.car.gm.values import CAR, DBC, is_volt_sdgm_profile, requires_camera_state_sources
 from opendbc.safety.tests.libsafety import libsafety_py
@@ -20,8 +19,7 @@ def sdgm_params(alpha=True, release=False, sascm=True, brake_c9=False, radar=Fal
     fingerprint[0][0xBE] = 6
   if radar:
     fingerprint[1][0x460] = 8
-  with patch("opendbc.car.gm.interface.Params", return_value=Settings(False)):
-    return CarInterface.get_params(CAR.CHEVROLET_VOLT_2019, fingerprint, [], alpha, release, False)
+  return CarInterface.get_params(CAR.CHEVROLET_VOLT_2019, fingerprint, [], alpha, release, False)
 
 
 class TestVoltSdgmControl(unittest.TestCase):
@@ -63,7 +61,7 @@ class TestVoltSdgmControl(unittest.TestCase):
             native("rx", source, now // 1000)
           if cp.openpilotLongitudinalControl:
             native("rx", packer.make_can_msg("ASCMSteeringButton", 0, {"ACCButtons": 2}), now // 1000)
-          safety.safety_tick_current_safety_config()
+          safety.safety_tick()
           self.assertTrue(safety.safety_config_valid())
           cc = structs.CarControl(enabled=True, latActive=True, longActive=cp.openpilotLongitudinalControl and tick < 8)
           cc.actuators.accel = -2. if tick % 2 else 1.

@@ -74,6 +74,7 @@ class TestModelPage(unittest.TestCase):
     view.profile = Profile.LARGE
     view.models = mock.Mock()
     view.settings = mock.Mock()
+    view.onroad = mock.Mock()
     shell = mock.Mock(mode=ShellMode.SETTINGS, selected=Destination.DRIVING_MODEL, models=page, settings=mock.Mock())
     view.render(shell)
     view.models.render.assert_called_once_with(page)

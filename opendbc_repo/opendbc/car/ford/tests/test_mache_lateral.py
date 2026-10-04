@@ -184,7 +184,7 @@ def test_actual_controller_announces_before_full_physical_frame_and_resets_off()
   model = SimpleNamespace(orientationRate=SimpleNamespace(z=[.07]*33),
                           meta=SimpleNamespace(laneChangeState=0, laneChangeDirection=0))
   times = tuple(i*.1 for i in range(33))
-  cc.manual_turn_inputs = SimpleNamespace(update=lambda: None, enabled=True,
+  cc.manual_turn_inputs = SimpleNamespace(update=lambda: None, apply_blend_settings=lambda owner: None, enabled=True,
                                         lateral_snapshot=lambda speed: (model, times, .2, True))
   _, frames = cc.update(command.as_reader(), cs, 0)
   first = next(data for addr, data, _ in frames if addr == 0x3d6)

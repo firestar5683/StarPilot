@@ -63,5 +63,7 @@ class TestCurvaturePreview(unittest.TestCase):
 
     def unexpected(speed):
       raise AssertionError('neighbor queried Mach-E preview')
-    controller.manual_turn_inputs = SimpleNamespace(preview_curvature=unexpected)
+    controller.manual_turn_inputs = SimpleNamespace(update=lambda: None, apply_blend_settings=lambda owner: None,
+                                                  lateral_snapshot=lambda speed: None, enabled=True,
+                                                  preview_curvature=unexpected)
     controller.update(command.as_reader(), state, 0)

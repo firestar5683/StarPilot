@@ -383,7 +383,7 @@ class TestHyundaiMRR35AngleFour(unittest.TestCase):
           safety.safety_tick()
           self.assertFalse(safety.safety_config_valid())
 
-  def test_raw_angle_namespace_and_release_stock_ownership(self):
+  def test_raw_angle_namespace_release_stock_ownership_and_registered_firmware(self):
     safety = libsafety_py.libsafety
     for car in ANGLE_CARS:
       for topology in TOPOLOGIES:
@@ -397,10 +397,18 @@ class TestHyundaiMRR35AngleFour(unittest.TestCase):
           safety.init_tests()
           frame = CANPacker(DBC[car][Bus.pt]).make_can_msg("LKAS", 0, {})
           self.assertFalse(safety.safety_tx_hook(self.packet(frame)), (car, topology, bit))
-    # No firmware or CAN aliases were added for these manual identities.
     _, matched = match_fw_to_car([], "", log=False)
     self.assertFalse(set(ANGLE_CARS) & matched)
-    self.assertFalse(set(ANGLE_CARS) & FW_VERSIONS.keys())
+    self.assertTrue(set(ANGLE_CARS).issubset(FW_VERSIONS))
+    for car in ANGLE_CARS:
+      cohort = [structs.CarParams.CarFw(ecu=ecu, address=address, subAddress=sub or 0,
+                                       fwVersion=versions[0], brand="hyundai")
+                for (ecu, address, sub), versions in FW_VERSIONS[car].items()]
+      exact, discovered = match_fw_to_car(cohort, "", log=False)
+      self.assertTrue(exact)
+      self.assertEqual(discovered, {car})
+      for observed in ([item] for item in cohort):
+        self.assertFalse(set(ANGLE_CARS) & match_fw_to_car(observed, "", log=False)[1])
     self.assertFalse(set(ANGLE_CARS) & set(all_legacy_fingerprint_cars()))
 
   def test_angle_relay_and_forwarding_block(self):

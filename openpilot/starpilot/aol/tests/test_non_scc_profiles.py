@@ -72,7 +72,7 @@ class TestNonSccProfiles(unittest.TestCase):
         dbc = DBC[identity][Bus.pt]
         packer = CANPacker(dbc)
         parser = CANParser(dbc, [(name,0) for name in dict.fromkeys((available_msg,enabled_msg))], 0)
-        messages = {available_msg:{available_sig:1}}
+        messages: dict[str, dict[str, float]] = {available_msg:{available_sig:1}}
         messages.setdefault(enabled_msg,{})[enabled_sig] = 1
         frames = [packer.make_can_msg(name,0,values) for name,values in messages.items()]
         parser.update([(1_000_000_000,frames)])

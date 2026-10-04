@@ -6,6 +6,7 @@ from unittest.mock import patch
 import unittest
 
 from openpilot.cereal import log
+from openpilot.starpilot.controllers.mode_actions import SwitchbackCooldown
 from openpilot.selfdrive.selfdrived.alertmanager import AlertManager
 from openpilot.selfdrive.selfdrived.events import Alert, ET, EVENTS, Events, Priority
 from openpilot.selfdrive.selfdrived.selfdrived import EventName, SelfdriveD
@@ -14,7 +15,8 @@ from openpilot.starpilot.lateral.lane_change_status_wire import Direction, LaneC
 
 class FakeMaster:
   def __init__(self, model, raw=None):
-    self.values = {"modelV2": model, "laneChangeAssistWire": raw}
+    self.values = {"modelV2": model, "laneChangeAssistWire": raw,
+                   "deviceState": SimpleNamespace(started=False, startedMonoTime=0)}
     self.seen = {"laneChangeAssistWire": raw is not None}
     self.alive = {"laneChangeAssistWire": raw is not None}
     self.valid = {"laneChangeAssistWire": raw is not None, "modelV2": True}
@@ -49,6 +51,10 @@ class TestLaneChangeAlert(unittest.TestCase):
     drive.personality = next(iter(log.LongitudinalPersonality.schema.enumerants.values()))
     drive.is_metric = False
     drive.enabled = False
+    drive.switchback_capable = False
+    drive.switchback_setting_ns = 1_050_000_000
+    drive.switchback_cooldown_ns = 300_000_000_000
+    drive.switchback_cooldown = SwitchbackCooldown()
     self.enterContext(patch.object(drive, "sm", FakeMaster(model, raw), create=True))
     alerts = FakeAlerts()
     self.enterContext(patch.object(drive, "AM", alerts, create=True))

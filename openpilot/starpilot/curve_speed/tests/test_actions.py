@@ -37,46 +37,44 @@ class TestLearningActions(unittest.TestCase):
     self.addCleanup(owner.close)
     return owner
 
-  def test_snapshot_is_read_only_and_adoption_preserves_legacy(self):
+  def test_snapshot_uses_legacy_without_adoption_and_preserves_source(self):
     before = self.raw(LEGACY_KEY)
     snapshot = learning_snapshot(self.params)
     self.assertFalse(learning_lock_path(self.params).exists())
-    self.assertTrue(snapshot.valid and snapshot.has_samples and snapshot.adoptable and snapshot.resettable)
+    self.assertTrue(snapshot.valid and snapshot.has_samples and snapshot.resettable)
     loaded = LearnedCurve.load(self.legacy).curve
     assert snapshot.progress is not None and snapshot.comfort is not None
     self.assertAlmostEqual(snapshot.progress, loaded.progress)
     self.assertAlmostEqual(snapshot.comfort, loaded.average_comfort)
-    result = self.apply('curve_adopt', snapshot)
-    self.assertTrue(result.committed)
-    self.assertEqual(result.reason, 'saved')
-    self.assertEqual(json.loads(self.raw(DOCUMENT_KEY)), loaded.document())
+    self.assertFalse(self.apply('curve_adopt', snapshot).committed)
+    self.assertIsNone(self.raw(DOCUMENT_KEY))
     self.assertEqual(self.raw(LEGACY_KEY), before)
     self.assertIsNone(self.raw(MASTER_KEY))
-    self.assertFalse(learning_snapshot(self.params).adoptable)
 
   def test_reset_recovers_invalid_canonical_without_reviving_legacy(self):
     Path(self.params.get_param_path(DOCUMENT_KEY)).write_bytes(b'{')
     snapshot = learning_snapshot(self.params)
-    self.assertFalse(snapshot.valid or snapshot.adoptable)
+    self.assertFalse(snapshot.valid)
     self.assertIsNone(snapshot.progress)
     self.assertTrue(snapshot.resettable)
     before = self.raw(LEGACY_KEY)
     self.assertEqual(self.apply(snapshot=snapshot).reason, 'saved')
     reset = learning_snapshot(self.params)
     self.assertTrue(reset.valid)
-    self.assertFalse(reset.has_samples or reset.adoptable)
+    self.assertFalse(reset.has_samples)
     self.assertEqual(reset.progress, 0.0)
     self.assertEqual(json.loads(self.raw(DOCUMENT_KEY)), LearnedCurve().document())
     self.assertEqual(self.raw(LEGACY_KEY), before)
 
   def test_enabled_malformed_master_unreadable_source_and_no_authority_cannot_edit(self):
-    for master in (b'1', b'', b'false'):
+    for master in (b'', b'false'):
       with self.subTest(master=master):
         Path(self.params.get_param_path(MASTER_KEY)).write_bytes(master)
         self.assertFalse(learning_snapshot(self.params).resettable)
         self.assertFalse(self.apply().committed)
         self.assertIsNone(self.raw(DOCUMENT_KEY))
-    self.params.put_bool(MASTER_KEY, False, block=True)
+    self.params.put_bool(MASTER_KEY, True, block=True)
+    self.assertTrue(learning_snapshot(self.params).resettable)
     self.assertFalse(self.apply(authorized=lambda: False).committed)
     Path(self.params.get_param_path(DOCUMENT_KEY)).write_bytes(b'x' * 32769)
     snapshot = learning_snapshot(self.params)

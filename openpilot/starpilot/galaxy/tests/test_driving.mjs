@@ -16,9 +16,9 @@ for (const path of ["/driving", "/driving/unknown", "/driving/aol/extra", "/driv
 
 const app = readFileSync(new URL("../web/js/app.js", import.meta.url), "utf8")
 assert.match(app, /drivingSettingsPage\(\) \{ return drivingPage\(route\.path\) \}/)
-assert.match(app, /<SettingsPage v-else-if="drivingSettingsPage"[^>]*:initial-page="drivingSettingsPage"/)
-assert.match(app, /<DrivingPage v-else-if="route\.path === '\/driving'"/)
-assert.match(app, /<PlotsPage v-else-if="route\.path === '\/tuning\/plots'"/)
+assert.match(app, /<SettingsPage[^>]* v-else-if="drivingSettingsPage"[^>]*:initial-page="drivingSettingsPage"/)
+assert.match(app, /<DrivingPage[^>]* v-else-if="route\.path === '\/driving'"/)
+assert.match(app, /<PlotsPage[^>]* v-else-if="route\.path === '\/tuning\/plots'"/)
 
 for (const page of ["aol", "conditional", "curve", "slc", "torque", "profiles", "traffic"]) {
   const requests = []

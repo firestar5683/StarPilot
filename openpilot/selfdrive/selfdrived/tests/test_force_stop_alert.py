@@ -1,12 +1,14 @@
 """Force Stop hold uses fresh dedicated transport and clears on physical release."""
 from types import SimpleNamespace as NS
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from openpilot.cereal import messaging, log
+from openpilot.common.params import Params
 from opendbc.car import structs
 from openpilot.selfdrive.selfdrived.alertmanager import AlertManager
 from openpilot.selfdrive.selfdrived.events import Events, ET, Alert, Priority
+from openpilot.starpilot.controllers.mode_actions import SwitchbackCooldown
 from openpilot.selfdrive.selfdrived.selfdrived import SelfdriveD
 from openpilot.starpilot.longitudinal.force_stop_alert import HoldAlertState
 
@@ -36,8 +38,14 @@ def fixture():
   drive = SelfdriveD.__new__(SelfdriveD)
   drive.CP = structs.CarParams(openpilotLongitudinalControl=True)
   drive.enabled, drive.personality, drive.is_metric = True, log.LongitudinalPersonality.standard, False
-  drive.state_machine = NS(current_alert_types=[ET.WARNING], soft_disable_timer=0)
-  drive.events, drive.AM, drive.sm = Events(), AlertManager(), Sources()
+  vars(drive)['state_machine'] = NS(current_alert_types=[ET.WARNING], soft_disable_timer=0)
+  drive.events, drive.AM = Events(), AlertManager()
+  vars(drive)['sm'] = Sources()
+  drive.params = Mock(spec=Params, get=lambda _key: None)  # Missing advisory cooldown uses its real default.
+  drive.switchback_capable = False
+  drive.switchback_setting_ns = NOW
+  drive.switchback_cooldown_ns = 300_000_000_000
+  drive.switchback_cooldown = SwitchbackCooldown()
   drive.force_stop_hold_alert = HoldAlertState()
   drive.aol_car_state_log_ns, drive.conditional_car_state_valid = NOW - 10_000_000, True
   cs = structs.CarState(canValid=True, standstill=True)

@@ -63,7 +63,7 @@ def test_displayed_admission_is_not_reused_for_action_and_auth_revocation(fixtur
     f.control.cycle(status, lambda: False)
 
 
-def test_actual_native_small_and_big_dispatch_same_owner(fixture):
+def test_actual_native_small_and_big_dispatch_same_owner(fixture, monkeypatch):
   from openpilot.starpilot.ui.runtime_app import StarShellSession
   from openpilot.starpilot.ui.shell import ShellMode, ShellRequest
   from openpilot.starpilot.ui.presentation import Profile
@@ -90,9 +90,9 @@ def test_actual_native_small_and_big_dispatch_same_owner(fixture):
   native.profile = Profile.LARGE
   native.selected = Destination.SYSTEM
   native.display_scroll = 0
-  native.display_snapshot = lambda: FeatureSettingsState(rows=())
-  native.power_snapshot = lambda: FeatureSettingsState(rows=())
-  native.map_snapshot = lambda: NS(rows=())
+  monkeypatch.setattr(native, 'display_snapshot', lambda: FeatureSettingsState(rows=()), raising=False)
+  monkeypatch.setattr(native, 'power_snapshot', lambda: FeatureSettingsState(rows=()), raising=False)
+  monkeypatch.setattr(native, 'map_snapshot', lambda: NS(rows=()), raising=False)
   state = native.system_snapshot()
   row = state.rows[-1]
   native._display_ui(FeatureUiAction('change', row, 1))
@@ -101,7 +101,7 @@ def test_actual_native_small_and_big_dispatch_same_owner(fixture):
   assert f.owner.snapshot().mode == Mode.AUTO
 
 
-def test_actual_settings_gesture_tracks_pipeline_epoch_not_physical_parked_flag():
+def test_actual_settings_gesture_tracks_pipeline_epoch_not_physical_parked_flag(monkeypatch):
   from unittest.mock import patch
   from openpilot.starpilot.ui.runtime_app import StarShellSession
   from openpilot.starpilot.ui.settings_state import Destination
@@ -109,9 +109,9 @@ def test_actual_settings_gesture_tracks_pipeline_epoch_not_physical_parked_flag(
   native = object.__new__(StarShellSession)
   native.selected = Destination.STAR
   native.cancel = Mock()
-  native.confirmed_offroad = lambda: False
+  monkeypatch.setattr(native, 'confirmed_offroad', lambda: False, raising=False)
   snapshot = NS(selected=Destination.STAR, device=NS(offroad=False))
-  native._settings_touch = snapshot
+  monkeypatch.setattr(native, '_settings_touch', snapshot, raising=False)
   native._settings_pipeline = (False, 10)
   fake = NS(started=False, started_frame=10, is_offroad=lambda: True)
   with patch('openpilot.starpilot.ui.runtime_app.ui_state', fake):
@@ -155,8 +155,8 @@ def test_actual_manager_process_predicate_stops_park_producers_and_auto_recovers
   from openpilot.starpilot.drive_state.evidence import PhysicalSource
   from openpilot.system.manager.process_config import procs, only_onroad
 
-  assert only_onroad(True, None, None)
-  assert not only_onroad(False, None, None)
+  assert only_onroad(True, fixture.owner.params, None)
+  assert not only_onroad(False, fixture.owner.params, None)
   processes = {process.name: process for process in procs}
   assert processes['card'].should_run is only_onroad
   assert processes['selfdrived'].should_run is only_onroad
@@ -164,7 +164,9 @@ def test_actual_manager_process_predicate_stops_park_producers_and_auto_recovers
   now = [1_000_000_000]
   physical = PhysicalSource(messages, mono=lambda: now[0], boot=lambda: now[0] + 10_000_000_000)
   now[0] = 2_100_000_000
-  messages.values['pandaStates'][0].ignitionLine = True
+  pandas = messages.values['pandaStates']
+  assert isinstance(pandas, list)
+  pandas[0].ignitionLine = True
   control = DriveStateControl(fixture.owner, physical, effective=lambda: False, clock=lambda: now[0] / 1e9)
   control.cycle(control.snapshot(), lambda: True)
   now[0] += 500_000_000
@@ -234,6 +236,8 @@ def test_native_offroad_confirmation_preserves_revision_without_requiring_health
   fake = NS(started=True, started_frame=10)
   revision = f.owner.snapshot().revision
   with patch('openpilot.starpilot.ui.runtime_app.ui_state', fake), \
+       patch('openpilot.system.ui.widgets.confirm_dialog.ConfirmDialog',
+             side_effect=lambda *args, callback, **kwargs: NS(_callback=callback)), \
        patch('openpilot.starpilot.ui.runtime_app.gui_app.push_widget') as push:
     native._drive_change('offroad', revision)
     assert f.owner.snapshot().mode == Mode.AUTO

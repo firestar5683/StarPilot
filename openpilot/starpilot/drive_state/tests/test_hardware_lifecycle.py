@@ -1,5 +1,7 @@
 """Portable regression checks of the current hardware transition and power branches."""
 
+from typing import Any
+
 import ast
 from pathlib import Path
 from types import SimpleNamespace as NS
@@ -32,7 +34,7 @@ def test_forced_modes_poll_at_nominal_cadence_without_repeated_edges_and_observe
   for mode, started in ((Mode.ONROAD, True), (Mode.OFFROAD, False)):
     reads = []
     owner = NS(snapshot=lambda mode=mode, reads=reads: reads.append(True) or NS(mode=mode))
-    values = {
+    values: dict[str, Any] = {
       'Mode': Mode,
       'drive_mode': mode,
       'drive_state': owner,
@@ -71,7 +73,7 @@ def power_branch():
 
 
 def test_physical_shutdown_episode_survives_force_auto_and_clears_only_real_ignition():
-  values = {
+  values: dict[str, Any] = {
     'Mode': Mode,
     'off_ts': 100.0,
     'physical_off_ts': None,
@@ -105,10 +107,10 @@ def test_physical_shutdown_episode_survives_force_auto_and_clears_only_real_igni
   assert values['physical_off_ts'] == 301
 
 
-def test_real_shutdown_cutoff_and_timeout_remain_effective_with_physical_clock():
+def test_real_shutdown_cutoff_and_timeout_remain_effective_with_physical_clock(monkeypatch):
   monitor = object.__new__(PowerMonitoring)
-  monitor._power_policy = lambda now: PowerPolicy()
-  monitor.params = NS(get_bool=lambda key: False)
+  monkeypatch.setattr(monitor, '_power_policy', lambda now: PowerPolicy(), raising=False)
+  monkeypatch.setattr(monitor, 'params', NS(get_bool=lambda key: False), raising=False)
   monitor.car_battery_capacity_uWh = 100000
   monitor.car_voltage_mV = 11000
   with patch('openpilot.system.hardware.power_monitoring.time.monotonic', return_value=1000):
@@ -128,7 +130,7 @@ def test_default_auto_clock_and_explicit_startup_gates_remain_stock():
   assert not should_start(Mode.AUTO, {'ignition': True, 'device_temp_good': True}, {'terms': False}, already_started=False)
   assert should_start(Mode.AUTO, {'ignition': True, 'device_temp_good': True}, {'terms': False}, already_started=True)
   clock = Mock(return_value=120)
-  values = {
+  values: dict[str, Any] = {
     'Mode': Mode,
     'off_ts': 100,
     'physical_off_ts': None,
@@ -162,7 +164,7 @@ def test_manager_missing_native_key_registry_fails_closed_without_aborting_norma
   )
   owner = NS(initialize_manager=Mock(side_effect=UnknownKeyName('DriveStateRequest')))
   logger = Mock()
-  values = {'drive_state': owner, 'cloudlog': logger, 'UnknownKeyName': UnknownKeyName}
+  values: dict[str, Any] = {'drive_state': owner, 'cloudlog': logger, 'UnknownKeyName': UnknownKeyName}
   exec(executable([boundary]), values)
   logger.warning.assert_called_once_with('Force drive state is unavailable')
 
@@ -178,7 +180,7 @@ def test_effective_onroad_disables_power_save_before_started_publication_without
   def step(ignition, started, brightness, previous, count=1):
     events = []
     msg = NS(deviceState=NS(screenBrightnessPercent=brightness, started=False))
-    values = {
+    values: dict[str, Any] = {
       'onroad_conditions': {'ignition': ignition}, 'should_start': started,
       'started_ts': 1 if started else None, 'msg': msg, 'pwrsave': previous, 'count': count,
       'HARDWARE': NS(set_power_save=lambda enabled: events.append(('power_save', enabled))),
@@ -210,7 +212,7 @@ def test_forced_onroad_startup_blocked_uses_nominal_hardware_cadence_and_keeps_e
   end = next(i for i, node in enumerate(body) if isinstance(node, ast.Assign) and ast.unparse(node.targets[0]) == 'ign_edge')
   code = executable(body[start:end + 1])
   reads = []
-  values = {
+  values: dict[str, Any] = {
     'Mode': Mode, 'drive_mode': Mode.ONROAD,
     'drive_state': NS(snapshot=lambda: reads.append(True) or NS(mode=Mode.ONROAD)),
     'physical_ignition_prev': None, 'requested_onroad_prev': None,

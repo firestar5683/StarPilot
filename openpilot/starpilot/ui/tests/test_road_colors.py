@@ -101,13 +101,13 @@ def test_custom_lane_colors_keep_blue_correction_and_compact_torque_warning(modu
     assert colors[1][:3] == (170, 34, 187)
 
 
-def test_large_path_edges_preserve_outer_width_and_default_projection():
+def test_large_path_edges_preserve_outer_width_and_default_projection(monkeypatch):
   renderer = large.ModelRenderer.__new__(large.ModelRenderer)
   points = np.array([[1, 0, 0], [10, 1, 0], [50, 2, 0]], dtype=np.float32)
-  renderer._path = NS(raw_points=points)
-  renderer._lane_lines = [NS(raw_points=points.copy()) for _ in range(4)]
+  monkeypatch.setattr(renderer, '_path', NS(raw_points=points), raising=False)
+  monkeypatch.setattr(renderer, '_lane_lines', [NS(raw_points=points.copy()) for _ in range(4)], raising=False)
   renderer._road_edges = []
-  renderer._lane_line_probs = [1] * 4
+  monkeypatch.setattr(renderer, '_lane_line_probs', [1] * 4, raising=False)
   renderer._path_offset_z = 1.2
   renderer._update_experimental_gradient = Mock()
   renderer._map_lines_to_polygons = Mock(side_effect=lambda lines, *a, **k: [line.copy() for line in lines])

@@ -164,7 +164,7 @@ class TestOnroadLayoutHttp(unittest.TestCase):
     self.assertEqual(set(snapshot['metadata']['profiles']), {'large', 'compact'})
     request = {'revision': snapshot['revision'], 'document': snapshot['document']}
     covered_actions = copy.deepcopy(request)
-    covered_actions['document']['layouts']['compact']['speed_limit']['y'] = 80
+    covered_actions['document']['layouts']['compact']['speed_limit']['y'] = -1
     self.assertEqual(self.request('/api/ui/layout', covered_actions, cookie)[0], 400)
     self.assertIsNone(self.params.get(PARAM_KEY))
     code, saved, _ = self.request('/api/ui/layout', request, cookie)

@@ -1,3 +1,4 @@
+from unittest.mock import Mock
 """Real Galaxy HTTP/auth and file-owner regressions; radio/AA IPC replaced by fakes."""
 import copy
 import http.client
@@ -37,11 +38,16 @@ class Bluetooth:
   def cancel_session(self, identity): pass
 
 class AA:
-  def __init__(self): self.calls, self.result, self.error, self.http = [], {'handled': False}, None, None
+  def __init__(self):
+    self.calls = []
+    self.result: dict = {'handled': False}
+    self.error = None
+    self.http = None
   def call(self, command, **kwargs):
     self.calls.append((command, kwargs))
     assert command == 'bluetooth_action'
     assert set(kwargs) == {'source', 'operation', 'address'}
+    assert self.http is not None
     code, data, _ = self.http('/api/android-auto/source/' + kwargs['source'])
     assert code == 200 and data == {'valid': True}, 'Real minted source proof was not live'
     if self.error:
@@ -183,7 +189,7 @@ class ProjectionBluetoothHttpTest(unittest.TestCase):
     for error in (OSError('saved screen unavailable'), ValueError('invalid screen'), RuntimeError('projection owner unavailable')):
       def unavailable(error=error):
         raise error
-      self.layout.snapshot = unavailable
+      self.layout.snapshot = Mock(side_effect=unavailable)
       code, result, _ = self.http('/api/ui/layout', cookie=self.cookie)
       self.assertEqual(code, 200)
       self.assertFalse(result['projectionAvailable'])

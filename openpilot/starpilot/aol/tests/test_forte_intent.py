@@ -188,7 +188,7 @@ class TestForteIntent(unittest.TestCase):
   def test_unacknowledged_native_denial_and_wrong_request_remain_neutral(self):
     cs = state(main=True)
     intent = SimpleNamespace(pauseLateral=False, pauseLongitudinal=False, allowedLatch=True)
-    common = {'standard_lateral': False, 'standard_longitudinal': False, 'intent': intent, 'car_state': cs,
+    common: dict = {'standard_lateral': False, 'standard_longitudinal': False, 'intent': intent, 'car_state': cs,
               'initialized': True, 'model_ready': True, 'no_entry': False, 'immediate_disable': False, 'dm_lockout': False, 'pause_brake_mps': 0.}
     for native in (None, SimpleNamespace(requestedLateral=True, requestedLongitudinal=False, lateralAllowed=False),
                    SimpleNamespace(requestedLateral=False, requestedLongitudinal=False, lateralAllowed=True)):

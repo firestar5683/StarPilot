@@ -64,7 +64,7 @@ class TestGmOrdinaryCamera(unittest.TestCase):
       self.assertTrue(self.rx(name))
     for button in (3, 1):
       self.rx('ASCMSteeringButton', {'ACCButtons': button})
-    self.safety.safety_tick_current_safety_config()
+    self.safety.safety_tick()
     if self.release:
       self.safety.set_controls_allowed(True)
       self.assertFalse(self.safety.safety_tx_hook(self.gas(0.)))
@@ -83,7 +83,7 @@ class TestGmOrdinaryCamera(unittest.TestCase):
     self.assertEqual(self.safety.get_controls_allowed(), not self.release)
     self.assertFalse(self.safety.safety_tx_hook(self.gas(0.)))
     self.safety.set_timer(2_100_000)
-    self.safety.safety_tick_current_safety_config()
+    self.safety.safety_tick()
     self.assertFalse(self.safety.safety_config_valid())
 
   def test_forwarding_and_relay(self):
@@ -109,7 +109,7 @@ class TestGmOrdinaryCamera(unittest.TestCase):
       self.safety.set_aol_test_heartbeat(True)
       for name in ('PSCMStatus', 'EBCMWheelSpdRear', 'EBCMBrakePedalPosition', 'ECMEngineStatus', 'AcceleratorPedal2', 'ASCMSteeringButton'):
         self.rx(name, {'CruiseMainOn': 1} if name == 'ECMEngineStatus' else {})
-      self.safety.safety_tick_current_safety_config()
+      self.safety.safety_tick()
       self.rx('ECMEngineStatus', {'CruiseMainOn': 1})
       if word == 0xC171 or not self.release:
         self.assertTrue(self.safety.safety_config_valid())
@@ -129,16 +129,16 @@ class TestGmOrdinaryCamera(unittest.TestCase):
       self.mode(word)
       for name in ('PSCMStatus', 'EBCMWheelSpdRear', 'ECMAcceleratorPos', 'ECMEngineStatus', 'AcceleratorPedal2', 'ASCMSteeringButton'):
         self.rx(name)
-      self.safety.safety_tick_current_safety_config()
+      self.safety.safety_tick()
       self.assertFalse(self.safety.safety_config_valid())
       frame = self.packer.make_can_msg('EBCMBrakePedalPosition', 0, {})
       self.safety.safety_rx_hook(self.packet((frame[0], frame[1], 2)))
       self.safety.safety_rx_hook(self.packet((frame[0], frame[1][:-1], 0)))
-      self.safety.safety_tick_current_safety_config()
+      self.safety.safety_tick()
       self.assertFalse(self.safety.safety_config_valid())
       self.rx('EBCMBrakePedalPosition')
-      self.safety.safety_tick_current_safety_config()
+      self.safety.safety_tick()
       self.assertTrue(self.safety.safety_config_valid())
       self.safety.set_timer(2_100_000)
-      self.safety.safety_tick_current_safety_config()
+      self.safety.safety_tick()
       self.assertFalse(self.safety.safety_config_valid())

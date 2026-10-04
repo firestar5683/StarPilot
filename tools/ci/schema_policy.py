@@ -64,7 +64,20 @@ def validate(schemas, policy, sync):
   if sync['upstream']['commit'] != policy['upstream_commit'] or dependencies.get('opendbc_repo') != policy['opendbc_commit']:
     errors.append('Schema policy must be reviewed against the current upstream sync pins')
   for path, expected in policy['unchanged_schemas'].items():
-    if sha256(schemas[path]) != expected:
+    reviewed = policy.get('reviewed_enum_additions', {}).get(path)
+    candidate = schemas[path]
+    if reviewed:
+      source = candidate.decode()
+      pattern = rf'(enum {re.escape(reviewed["enum"])}\s*\{{)([^}}]*)(\}})'
+      match = re.search(pattern, source)
+      field = reviewed['field']
+      if match is None or len(re.findall(rf'(?m)^\s*{re.escape(field)}\s*$', match[2])) != 1:
+        errors.append(f'{path}: reviewed enum addition is missing or changed')
+      else:
+        body = re.sub(rf'(?m)^[ \t]*{re.escape(field)}[ \t]*\n', '', match[2])
+        source = source[:match.start(2)] + body + source[match.end(2):]
+        candidate = source.encode()
+    if sha256(candidate) != expected:
       errors.append(f'{path}: upstream-owned schema changed; use custom.capnp reserved structs')
   try:
     definitions, bodies, remainder = custom_structs(schemas['openpilot/cereal/custom.capnp'].decode())
@@ -89,6 +102,13 @@ def validate(schemas, policy, sync):
     slot = next((entry for entry in policy['reserved'] if entry['type_id'] == type_id), None)
     if slot is None or slot['ordinal'] != restored['ordinal']:
       errors.append(f'custom.capnp: historical slot {index} type ID or event ordinal changed')
+  def canonical(text):
+    return re.sub(r'\s+', '', re.sub(r'#[^\n]*', '', text))
+
+  for restored in policy.get('historical_prefixes', {}).values():
+    if (definitions.get(restored['type_id']) != restored['name'] or
+        not canonical(bodies.get(restored['type_id'], '')).startswith(canonical(restored['body']))):
+      errors.append('custom.capnp: historical occupied prefix changed')
   if remainder.strip() != policy['custom_header'].strip():
     errors.append('custom.capnp: edits outside the reserved structs')
   log = schemas['openpilot/cereal/log.capnp'].decode()
@@ -105,6 +125,18 @@ def validate(schemas, policy, sync):
     log, count = re.subn(rf'(?m)^(\s*)\w+ @{ordinal} :Data;', rf'\g<1>{name} @{ordinal} :Data;', log)
     if count != 1:
       errors.append(f'log.capnp: reserved raw event @{ordinal} changed type or ordinal')
+  for reviewed in policy.get('reviewed_log_additions', []):
+    pattern = rf'({re.escape(reviewed["scope"])}(?:\s+@0x[0-9a-fA-F]+)?\s*\{{)([^}}]*)(\}})'
+    match = re.search(pattern, log)
+    if match is None:
+      errors.append('log.capnp: reviewed addition scope missing')
+      continue
+    body = match[2]
+    for field in reviewed['fields']:
+      body, count = re.subn(rf'(?m)^[ \t]*{re.escape(field)}[ \t]*\n', '', body)
+      if count != 1:
+        errors.append('log.capnp: reviewed addition missing or changed')
+    log = log[:match.start(2)] + body + log[match.end(2):]
   if sha256(log.encode()) != policy['log_sha256']:
     errors.append('log.capnp: changes outside the permitted reserved-event aliases')
   return errors

@@ -1,11 +1,12 @@
 """Global inheritance, legacy retention and actual planner arbitration."""
+from unittest.mock import patch
+
 from copy import deepcopy
 import json
 from pathlib import Path
 import shutil
 import tempfile
 import unittest
-from unittest.mock import patch
 
 from openpilot.cereal import log
 from openpilot.common.params import Params
@@ -49,7 +50,9 @@ class SelectedProfilesTests(unittest.TestCase):
       document = self.document(braking=choice)
       raw = json.dumps(document).encode()
       Path(self.params.get_param_path('LongitudinalPersonalityProfiles')).write_bytes(raw)
-      self.assertEqual(migrate_profile_document(raw)['selectedDecelerationProfile'], choice)
+      migrated = migrate_profile_document(raw)
+      assert migrated is not None
+      self.assertEqual(migrated['selectedDecelerationProfile'], choice)
       self.assertEqual(ProfileHost(self.params).sample_global_braking(1_000_000_000), choice)
       self.assertEqual(Path(self.params.get_param_path('LongitudinalPersonalityProfiles')).read_bytes(), raw)
 
@@ -113,10 +116,11 @@ class SelectedProfilesTests(unittest.TestCase):
     document['profiles']['standard']['braking'] = {'preset': 'custom', 'curve': [0.8] * 10}
     original = deepcopy(document)
     migrated = migrate_profile_document(document)
+    assert migrated is not None
     self.assertEqual(document, original)
     self.assertEqual(migrated['profiles']['standard']['acceleration']['curve'], [0.9] * 10)
     follow = dict.fromkeys(('aggressive', 'standard', 'relaxed'), (1.45, 1.45))
-    jerk = dict.fromkeys(follow, (1.0,) * 5)
+    jerk = dict.fromkeys(follow, (1.0, 1.0, 1.0, 1.0, 1.0))
     for enabled in (False, True):
       settings = ProfileSettings(migrated, dict.fromkeys(follow, enabled), follow, jerk)
       legacy = resolve(settings, log.LongitudinalPersonality.standard, 10.0, self.cp)
@@ -124,12 +128,13 @@ class SelectedProfilesTests(unittest.TestCase):
       if enabled:
         self.assertEqual(legacy.cruise_brake_magnitude, 0.8)
         self.assertIsNone(selected.cruise_brake_magnitude)
-        self.assertIsNotNone(legacy.acceleration_max)
+        assert legacy.acceleration_max is not None
       else:
         self.assertIsNone(legacy.acceleration_max)
         self.assertEqual(selected.cruise_brake_magnitude, 2.4)
       self.assertIsNone(selected.acceleration_max)
     updated = update_personality_profile(migrated['profiles'], 'standard', 'acceleration', 'selected_profile', [], False)
+    assert updated is not None
     self.assertNotIn('legacyActivation', updated['standard']['acceleration'])
     self.assertEqual(updated['standard']['acceleration']['curve'], [0.9] * 10)
     self.assertTrue(updated['standard']['braking']['legacyActivation'])
@@ -147,7 +152,7 @@ class SelectedProfilesTests(unittest.TestCase):
         saved = {'schemaVersion': version, 'enabled': True, 'axes': deepcopy(_V1_PROFILE_AXES if version == 1 else PROFILE_AXES),
                  'profiles': profiles}
         migrated = migrate_profile_document(saved)
-        self.assertIsNotNone(migrated)
+        assert migrated is not None
         config = migrated['profiles']['standard']['acceleration']
         self.assertTrue(config['legacyActivation'])
         self.assertAlmostEqual(interpolate_category_curve('acceleration', 17.0, config, False),
@@ -192,17 +197,19 @@ class SelectedProfilesTests(unittest.TestCase):
     document = self.document('eco', 'sport')
     document['profiles']['aggressive']['acceleration'] = {'preset': 'sport', 'curve': [0.7] * 10}
     owner = FeatureSettingsOwner.__new__(FeatureSettingsOwner)
-    owner._document = lambda: (document, json.dumps(document).encode(), True)
+    self.enterContext(patch.object(owner, '_document', lambda: (document, json.dumps(document).encode(), True), create=True))
     owner.vehicle_fingerprint = lambda: str(self.cp.carFingerprint)
     owner.vehicle_params = lambda: self.cp
-    owner._value = lambda key: ('0', None, True)
+    self.enterContext(patch.object(owner, '_value', lambda key: ('0', None, True), create=True))
     encoded = owner._edit_document('profile:global_acceleration', preset_label('standard'))
     changed = migrate_profile_document(encoded)
+    assert changed is not None
     self.assertEqual(changed['selectedAccelerationProfile'], 'standard')
     self.assertEqual(changed['selectedDecelerationProfile'], 'sport')
     self.assertEqual(changed['profiles'], document['profiles'])
     encoded = owner._edit_document('profile:standard:acceleration', 'Sport')
     changed = migrate_profile_document(encoded)
+    assert changed is not None
     self.assertEqual(changed['selectedAccelerationProfile'], 'eco')
     self.assertEqual(changed['selectedDecelerationProfile'], 'sport')
     self.assertEqual(changed['profiles']['standard']['acceleration']['preset'], 'sport')

@@ -37,7 +37,7 @@ class TestGmAol(unittest.TestCase):
     for frame in frames:
       if frame[0] != missing:
         self.safety.safety_rx_hook(self.packet(frame))
-    self.safety.safety_tick_current_safety_config()
+    self.safety.safety_tick()
 
   def request(self, axes):
     self.safety.aol_set_host_request(axes)

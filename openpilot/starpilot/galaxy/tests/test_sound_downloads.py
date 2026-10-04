@@ -1,3 +1,4 @@
+from unittest.mock import Mock
 import hashlib
 import http.client
 import io
@@ -43,7 +44,7 @@ class SoundDownloadsHttpTest(unittest.TestCase):
       params = Params(str(root / 'params'))
       params.put('SoundPack', 'stock', block=True)
       context = SimpleNamespace(sample=lambda: AuthorityContext(parked[0], None, None))
-      settings = SettingsGateway(params, context)
+      settings = SettingsGateway(params, Mock(wraps=context))
       server = make_server(port=0, owner=GalaxyAccessOwner(root / 'access'), sounds=downloads, settings=settings)
       thread = threading.Thread(target=server.serve_forever, kwargs={'poll_interval': 0.01}, daemon=True)
       thread.start()
@@ -91,7 +92,7 @@ class SoundDownloadsHttpTest(unittest.TestCase):
           status, page = request('/api/settings/pages/sounds')
           self.assertEqual(status, 200)
           row = next(item for item in page['rows'] if item['label'] == 'Sound Pack')
-          self.assertEqual(row['value'], 'stock')
+          self.assertEqual(row['value'], 'Stock (openpilot)')
           self.assertIn('test', row['choices'])
         self.assertEqual(Path(params.get_param_path('SoundPack')).read_bytes(), b'stock')
         self.assertEqual(request('/api/sounds/download', {'pack': 'test'})[0], 409)

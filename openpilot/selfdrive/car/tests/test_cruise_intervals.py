@@ -24,15 +24,15 @@ class TestCruiseIntervals(unittest.TestCase):
     self.addCleanup(temp.cleanup)
     self.params = Params(temp.name)
 
-  def test_parent_toggle_and_pcm_gate(self):
+  def test_saved_children_ignore_retired_parent_and_keep_pcm_gate(self):
     self.params.put("CustomCruise", 5.0, block=True)
     self.params.put("CustomCruiseLong", 1.0, block=True)
-    self.assertEqual(read_cruise_intervals(self.params, pcm_cruise=False), CruiseIntervals())
+    self.assertEqual(read_cruise_intervals(self.params, pcm_cruise=False), CruiseIntervals(5, 1))
     self.params.put_bool("QOLLongitudinal", True, block=True)
     self.assertEqual(read_cruise_intervals(self.params, pcm_cruise=False), CruiseIntervals(5, 1))
     self.assertEqual(read_cruise_intervals(self.params, pcm_cruise=True), CruiseIntervals())
     self.params.put_bool("QOLLongitudinal", False, block=True)
-    self.assertEqual(read_cruise_intervals(self.params, pcm_cruise=False), CruiseIntervals())
+    self.assertEqual(read_cruise_intervals(self.params, pcm_cruise=False), CruiseIntervals(5, 1))
 
   def test_invalid_children_fall_back_without_enabling_other_features(self):
     self.params.put_bool("QOLLongitudinal", True, block=True)

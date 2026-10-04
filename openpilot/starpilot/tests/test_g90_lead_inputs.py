@@ -35,7 +35,7 @@ class RadarMessages(dict):
       self.logMonoTime[name] = self.now - 1000
       self.recv_time[name] = (self.now - 500) / 1e9
 
-  def update(self, timeout):
+  def update(self, *args, **kwargs):
     if self.auto:
       self.now += 10_000_000
       self.refresh(*self)
@@ -62,9 +62,9 @@ class TestG90LeadInputs(unittest.TestCase):
       messages.refresh(service)
       result = self.sample(provider, messages)
       self.assertEqual(provider.floor_ns, floor)
-    self.assertIsNotNone(result)
+    assert result is not None
     messages.now += 10_000_000
-    self.assertIsNotNone(self.sample(provider, messages))  # Retain fresh20Hz radar/1Hz device samples.
+    assert self.sample(provider, messages) is not None
     messages.valid['radarState'] = False
     self.assertIsNone(self.sample(provider, messages))
     revoked_floor = provider.floor_ns
@@ -74,14 +74,14 @@ class TestG90LeadInputs(unittest.TestCase):
       messages.refresh(service)
       result = self.sample(provider, messages)
       self.assertEqual(provider.floor_ns, revoked_floor)
-    self.assertIsNotNone(result)
+    assert result is not None
 
   def test_stale_invalid_and_expected_transport_errors_are_optional(self):
     for failure in ('stale', 'future', 'receipt', 'radar_fault', 'nonfinite', 'transport'):
       messages = RadarMessages(auto=True)
       provider = self.provider(messages)
       self.sample(provider, messages)
-      self.assertIsNotNone(self.sample(provider, messages))
+      assert self.sample(provider, messages) is not None
       messages.auto = False
       if failure == 'stale':
         messages.now += 150_000_001
@@ -94,7 +94,7 @@ class TestG90LeadInputs(unittest.TestCase):
       elif failure == 'nonfinite':
         messages['radarState'].leadOne.vRel = float('nan')
       else:
-        messages.update = lambda timeout: (_ for _ in ()).throw(OSError('explicit transport failure'))
+        vars(messages)['update'] = lambda timeout: (_ for _ in ()).throw(OSError('explicit transport failure'))
       self.assertIsNone(self.sample(provider, messages), failure)
     ci = CarInterface(params())
     with patch.object(radar_lead_context.messaging, 'SubMaster', side_effect=OSError('explicit constructor failure')), \
@@ -112,7 +112,7 @@ class TestG90LeadInputs(unittest.TestCase):
     messages = RadarMessages(auto=True)
     provider = self.provider(messages)
     self.sample(provider, messages)
-    self.assertIsNotNone(self.sample(provider, messages))
+    assert self.sample(provider, messages) is not None
     messages.auto = False
     offset = 40_000_000_000
     def sample_epoch():
@@ -126,7 +126,7 @@ class TestG90LeadInputs(unittest.TestCase):
       messages.refresh(service)
       result = sample_epoch()
       self.assertEqual(provider.floor_ns, floor)
-    self.assertIsNotNone(result)
+    assert result is not None
     messages.now += 10_000_000
     messages['deviceState'].startedMonoTime = messages.now-2000
     messages.refresh('deviceState')
@@ -137,7 +137,7 @@ class TestG90LeadInputs(unittest.TestCase):
       messages.refresh(service)
       result = sample_epoch()
       self.assertEqual(provider.floor_ns, floor)
-    self.assertIsNotNone(result)
+    assert result is not None
 
   def test_actual_controller_provider_bind_and_100hz_to_50hz_wire(self):
     cp = params()

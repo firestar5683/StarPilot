@@ -1,3 +1,5 @@
+
+from typing import Any
 import ast
 from pathlib import Path
 from types import SimpleNamespace as NS
@@ -9,7 +11,7 @@ import types
 import pytest
 
 from openpilot.starpilot.drive_state.owner import Mode, Rejected
-from openpilot.starpilot.drive_state.tests.test_transport import fixture
+from openpilot.starpilot.drive_state.tests.test_transport import fixture as fixture
 
 
 @pytest.mark.parametrize('profile', ['compact', 'large'])
@@ -29,8 +31,8 @@ def test_force_offroad_uses_profile_dialog_and_submits_once(fixture, profile):
   large = Mock(side_effect=lambda title, button, callback: NS(confirm=lambda: callback(result.CONFIRM), cancel=lambda: callback(result.CANCEL)))
   modules['openpilot.selfdrive.ui.mici.widgets.dialog'].BigConfirmationDialog = compact
   modules['openpilot.system.ui.widgets.confirm_dialog'].ConfirmDialog = large
-  namespace = dict(ui_state=ui, gui_app=gui, Profile=NS(COMPACT='compact'),
-                   ShellMode=NS(SETTINGS='settings'), DriveStateRejected=Rejected, time=time)
+  namespace: dict[str, Any] = {'ui_state': ui, 'gui_app': gui, 'Profile': NS(COMPACT='compact'),
+                               'ShellMode': NS(SETTINGS='settings'), 'DriveStateRejected': Rejected, 'time': time}
   exec(compile(ast.Module(body=[method], type_ignores=[]), str(source), 'exec'), namespace)
   native = NS(drive_state=fixture.control, profile=profile, selected='system', _mode='settings')
   native._drive_change = types.MethodType(namespace['_drive_change'], native)

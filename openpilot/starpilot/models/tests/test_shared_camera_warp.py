@@ -19,7 +19,7 @@ def make_runner(artifact=None, camera=(8, 8)):
   artifact = artifact_fixture() if artifact is None else artifact
   artifact[camera] = Mock(return_value=fake_warp())
   with Context(DEV="CPU:LLVM"), patch("openpilot.starpilot.models.runner.load_oob", return_value=artifact):
-    runner = CatalogModelState(*camera, Path("verified.pkl"), "v15", False)
+    runner = CatalogModelState(camera[0], camera[1], Path("verified.pkl"), "v15", False)
   return runner
 
 

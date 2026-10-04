@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 
 spec = importlib.util.spec_from_file_location('handoff_state_migration', Path(__file__).resolve().parents[1] / 'state_migration.py')
+assert spec is not None
 migration = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(migration)
 
@@ -39,7 +40,7 @@ class TestDomHandoff(unittest.TestCase):
       (self.namespace / key).write_bytes(raw)
 
   def mark_dom(self, token='a' * 32, **changes):
-    record = {'format': 'starpilot-dom-handoff', 'version': 1, 'namespace': str(self.namespace),
+    record: dict = {'format': 'starpilot-dom-handoff', 'version': 1, 'namespace': str(self.namespace),
               'target': str(self.namespace.resolve()), 'token': token}
     record.update(changes)
     migration._atomic_write(self.handoff, migration.canonical_json(record))

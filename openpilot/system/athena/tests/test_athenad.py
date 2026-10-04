@@ -97,6 +97,8 @@ class TestAthenadMethods(OpenpilotTestCase):
 
   @staticmethod
   def _create_file(file: str, parent: str | None = None, data: bytes = b'') -> str:
+    if parent is None and os.path.dirname(file) == "":
+      file = os.path.join("2026-10-04--00-00-00--0", file)
     fn = os.path.join(Paths.log_root() if parent is None else parent, file)
     os.makedirs(os.path.dirname(fn), exist_ok=True)
     with open(fn, 'wb') as f:
@@ -258,7 +260,7 @@ class TestAthenadMethods(OpenpilotTestCase):
   def test_upload_file_to_url(self, host):
     fn = self._create_file('qlog.zst')
 
-    resp = dispatcher["uploadFileToUrl"]("qlog.zst", f"{host}/qlog.zst", {})
+    resp = dispatcher["uploadFileToUrl"]("2026-10-04--00-00-00--0/qlog.zst", f"{host}/qlog.zst", {})
     assert resp['enqueued'] == 1
     assert 'failed' not in resp
     assert {"path": fn, "url": f"{host}/qlog.zst", "headers": {}}.items() <= resp['items'][0].items()
@@ -269,11 +271,11 @@ class TestAthenadMethods(OpenpilotTestCase):
     self._create_file('qlog.zst')
 
     url1 = f"{host}/qlog.zst?sig=sig1"
-    dispatcher["uploadFileToUrl"]("qlog.zst", url1, {})
+    dispatcher["uploadFileToUrl"]("2026-10-04--00-00-00--0/qlog.zst", url1, {})
 
     # Upload same file again, but with different signature
     url2 = f"{host}/qlog.zst?sig=sig2"
-    resp = dispatcher["uploadFileToUrl"]("qlog.zst", url2, {})
+    resp = dispatcher["uploadFileToUrl"]("2026-10-04--00-00-00--0/qlog.zst", url2, {})
     assert resp == {'enqueued': 0, 'items': []}
 
   def test_upload_file_to_url_does_not_exist(self, host):

@@ -6,7 +6,7 @@ import unittest
 
 from openpilot.starpilot.lateral.torque_runtime import read_settings
 from openpilot.starpilot.lateral.torque_tuning import TorqueSource, TorqueTuning
-from openpilot.starpilot.lateral.torque_settings import DOCUMENT_KEY, parse_document, resolve_document
+from openpilot.starpilot.lateral.torque_settings import DOCUMENT_KEY, parse_document
 from openpilot.starpilot.ui.torque_feature import TorqueFeature
 from openpilot.starpilot.ui.feature_settings_state import FeatureSettingsRequest
 

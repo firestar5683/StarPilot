@@ -25,7 +25,9 @@ class ForceStopTests(unittest.TestCase):
       # The existing 0.5s accumulator crosses .5 on frame 10 with binary floats.
       distance = 80. if tick < 10 else 80. - (tick - 9) * .5
       self.assertEqual(plan.forcing, tick >= 10)
+      assert plan.speed_ceiling_mps is not None
       self.assertAlmostEqual(plan.speed_ceiling_mps, math.sqrt(1.3 * (distance - 6)))
+      assert plan.obstacle_m is not None
       self.assertAlmostEqual(plan.obstacle_m, distance * .93)
       self.assertEqual(plan.jerk_scale, .32)
       self.assertFalse(plan.should_stop)
@@ -66,7 +68,7 @@ class ForceStopTests(unittest.TestCase):
       self.assertFalse(plan.forcing)
       self.assertIsNone(plan.speed_ceiling_mps)
     resumed = self.owner.step(frame(215), self.tune)
-    self.assertIsNotNone(resumed.speed_ceiling_mps)
+    assert resumed.speed_ceiling_mps is not None
 
   def test_resume_releases_standstill_hold_but_does_not_create_override_when_idle(self):
     self.owner.step(frame(0, light=False, horizon_m=190., resume_requested=True), self.tune)
@@ -98,6 +100,8 @@ class ForceStopTests(unittest.TestCase):
                                    light=False, perception_available=False), self.tune)
       self.assertTrue(plan.forcing)
       self.assertAlmostEqual(plan.tracked_distance_m, max(0., previous.tracked_distance_m - .5))
+      assert plan.speed_ceiling_mps is not None
+      assert previous.speed_ceiling_mps is not None
       self.assertLessEqual(plan.speed_ceiling_mps, previous.speed_ceiling_mps)
       previous = plan
     held = self.owner.step(frame(35, speed_mps=0., standstill=True, horizon_m=None,
@@ -194,7 +198,9 @@ class ForceStopTests(unittest.TestCase):
         for tick in range(15):
           plan = self.owner.step(frame(tick, horizon_m=12.), self.tune, offset)
         expected = max(0., plan.tracked_distance_m + offset * .3048 - 6)
+        assert plan.speed_ceiling_mps is not None
         self.assertAlmostEqual(plan.speed_ceiling_mps, math.sqrt(1.3 * expected))
+        assert plan.speed_ceiling_mps is not None
         self.assertEqual(plan.should_stop, plan.speed_ceiling_mps <= .5)
 
   def test_current_platform_rules(self):

@@ -1,4 +1,44 @@
-# Vehicle contract checks
+# Local and release checks
+
+On Linux, use the managed host runtime to run the same source, unit, vehicle and pinned
+recording checks as GitHub Actions:
+
+```sh
+./dev python tools/ci/run_predeploy.py --output /tmp/starpilot-predeploy --download
+```
+
+The default run first builds the host native graph, then also runs the native
+Panda protocol executables and required Go/Python IPC checks.
+Use a new output directory per run. `--download` permits only the pinned public
+recordings; omit it when they are already cached. Node.js 24 must be on PATH (or
+set `STARPILOT_NODE`), and the pinned Go toolchain/dependencies are needed for map
+provider checks. A failure stops the run with a named log and preserves its exit
+status in `results.json`. `--stage build`, `source`, `host`, `native`, `vehicles`, or `recorded` can
+select a stage while diagnosing a failure; a selected-stage pass is not a full
+release result.
+
+The full runner requires Linux: its USB/native transport and executable map
+IPC tests use Linux facilities. Run `tools/setup_dependencies.sh` first, provide
+the Node and Go versions above, and fetch the pinned map dependencies with
+`(cd mapd_repo && go mod download)`.
+
+On macOS, build host dependencies and run the source/host subset:
+
+```sh
+./dev python -m SCons -j4
+./dev python tools/ci/run_predeploy.py --stage source --stage host --output /tmp/starpilot-host-checks
+```
+
+This subset does not qualify Linux native transport, vehicle/recorded suites,
+or device artifacts. The full runner rejects an unsupported native-stage host
+before executing checks.
+
+Before shipping device artifacts, run `./build 4` in the source checkout after
+host validation. Host tests do not replace the device build, native firmware
+qualification, device startup checks, or physical vehicle testing. GitHub also
+runs platform-specific build, replay and rendering jobs.
+
+## Vehicle contract checks
 
 Run the rebuilt feature and CI tests locally after building native dependencies:
 
@@ -18,7 +58,8 @@ require Node.js 24 on PATH or selected with `STARPILOT_NODE`.
 
 The source-integrity job also enforces cereal's custom-fork guidance with
 `tools/ci/schema_policy.py`. The pinned `car.capnp` and other upstream schemas
-must remain unchanged. Fork fields belong inside the reserved `custom.capnp`
+must remain unchanged apart from the exact additive exceptions enumerated in
+`schema-policy.json`; those exceptions are checked against the pinned source. Fork fields belong inside the reserved `custom.capnp`
 structs; their type IDs stay fixed and `log.capnp` may rename only the associated
 reserved event aliases, keeping their ordinals and type associations. The check
 allows nested custom fields while rejecting edits to upstream-owned definitions,
@@ -28,10 +69,13 @@ upstream. Every `.capnp` file under `openpilot/cereal` and
 `opendbc_repo/opendbc/car` requires explicit policy coverage; new schemas fail
 until reviewed. This guard prevents upstream schema collisions; it does not replace
 append-only evolution and compatibility testing of already shipped custom fields.
-Slots 0–3, 5–8 and 10–11 in `custom.capnp` were used by older fork logs and remain
+Slots 1–3, 5–8 and 10–11 in `custom.capnp` were used by older fork logs and remain
 empty under their original names until a reviewed, append-compatible layout is
 restored. Keeping a type ID alone does not preserve the meaning of its fields;
 reusing one of these slots for a different event could misread older recordings.
+Slot0 preserves the historical car-control HUD and steering-limit prefix and
+appends versioned nested navigation fields. Navigation readers require version2;
+old car-control records do not become navigation commands.
 Slot4 restores `StarPilotModelDataV2` at Event111, including its original
 turn-direction field and enum, then appends a typed Vision observation. Slot9
 retains all six historical model-status fields and appends SLC fields at6–30.
@@ -137,7 +181,7 @@ this workflow does not fetch those routes or regenerate expected outputs.
 
 ## Recorded vehicle regressions
 
-`run_recorded_vehicle_tests.py` runs two pinned public Model Y recordings through
+`run_recorded_vehicle_tests.py` runs the pinned public Model Y CAN fixture through
 current parser, controller and native safety tests. DEBUG includes stock and
 alpha-long configurations; RELEASE includes stock only. Alpha-long exclusion is
 recorded explicitly, and missing, skipped or errored selected cases fail the run.
@@ -155,7 +199,7 @@ Each process owns temporary Params and IPC, disables replay networking, records
 actual controller configuration and native library identity, and rejects source
 changes during the run. Use a new result directory to retain earlier evidence.
 The hosted `recorded_vehicles` matrix runs both variants and retains reports even
-on failure. The workflow has not yet been run on GitHub.
+on failure. A local pass does not establish the result of a later GitHub run.
 
 The debug safety suite includes all top-level safety test files with `ALLOW_DEBUG`.
 The release safety suite compiles without that flag and checks the entire enum

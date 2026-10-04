@@ -1,5 +1,5 @@
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 from openpilot.system.manager import process
 
@@ -33,7 +33,7 @@ class TestProcessRecovery(unittest.TestCase):
     return process.PythonProcess("ui", "ui", lambda started, params, cp: started, restart_on_exit=restart)
 
   def step(self, p, started=True, ignored=None):
-    process.ensure_running([p], started, None, None, not_run=ignored)
+    process.ensure_running({p.name: p}.values(), started, Mock(), None, not_run=ignored)
 
   def test_crash_restarts_after_delay_and_reaps_child(self):
     p = self.make_process()

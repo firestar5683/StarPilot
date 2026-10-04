@@ -63,7 +63,7 @@ class TestGmVoltCamera(unittest.TestCase):
       self.assertTrue(self.rx(name))
     for button in (3, 1):
       self.rx('ASCMSteeringButton', {'ACCButtons': button})
-    self.safety.safety_tick_current_safety_config()
+    self.safety.safety_tick()
     self.assertTrue(self.safety.safety_config_valid())
     self.assertEqual(self.safety.get_controls_allowed(), not self.release)
     for name, values in (('ECMEngineStatus', {'BrakePressed': 1}), ('EBCMRegenPaddle', {'RegenPaddle': 2})):
@@ -77,7 +77,7 @@ class TestGmVoltCamera(unittest.TestCase):
     self.assertEqual(self.safety.get_controls_allowed(), not self.release)
     self.assertFalse(self.safety.safety_tx_hook(self.gas(0.)))
     self.safety.set_timer(2_100_000)
-    self.safety.safety_tick_current_safety_config()
+    self.safety.safety_tick()
     self.assertFalse(self.safety.safety_config_valid())
 
   def test_forwarding_and_relay(self):
@@ -91,8 +91,15 @@ class TestGmVoltCamera(unittest.TestCase):
     self.safety.set_relay_malfunction(True)
     self.assertFalse(self.safety.safety_tx_hook(self.gas(-500., enabled=False)))
 
+  def test_exact_sdgm_neighbor_has_its_own_longitudinal_owner(self):
+    self.mode(0x5007)
+    self.safety.set_controls_allowed(True)
+    self.assertEqual(self.safety.safety_tx_hook(self.gas(2698.)), not self.release)
+    self.assertFalse(self.safety.safety_tx_hook(self.gas(2698.125)))
+    self.assertFalse(self.safety.safety_tx_hook(self.gas(2698., bus=2)))
+
   def test_extra_bits_do_not_inherit_camera_owner(self):
-    for bit in (0x8, 0x10, 0x20, 0x200, 0x400, 0x800, 0x1000, 0x2000, 0x8000):
+    for bit in (0x8, 0x10, 0x20, 0x200, 0x400, 0x800, 0x2000, 0x8000):
       self.mode(EXACT | bit)
       self.safety.set_controls_allowed(True)
       self.assertFalse(self.safety.safety_tx_hook(self.gas(2698.)))

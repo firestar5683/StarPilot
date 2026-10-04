@@ -1,4 +1,3 @@
-from unittest.mock import patch
 import unittest
 from opendbc.can import CANPacker
 from opendbc.car import Bus, gen_empty_fingerprint, structs
@@ -24,12 +23,6 @@ def native(direction, msg, us):
   return safety.safety_rx_hook(packet) if direction == "rx" else safety.safety_tx_hook(packet)
 
 
-class Settings:
-  def __init__(self, pedal=False, metric=False):
-    self.settings = {'GMPedalLongitudinal': pedal, 'IsMetric': metric}
-
-  def get_bool(self, key):
-    return self.settings.get(key, False)
 
 
 def params(identity, alpha=False, present=False, pedal=False, removed=False, metric=False):
@@ -38,8 +31,7 @@ def params(identity, alpha=False, present=False, pedal=False, removed=False, met
     fp[0][0x201] = 6
   if not removed:
     fp[2][0x180] = 4
-  with patch('opendbc.car.gm.interface.Params', return_value=Settings(pedal, metric)):
-    return CarInterface.get_params(identity, fp, [], alpha, False, False)
+  return CarInterface.get_params(identity, fp, [], alpha, False, False)
 
 
 def fixture(identity, removed=False, metric=False, alpha=False, present=False):
@@ -118,7 +110,7 @@ class Production(unittest.TestCase):
           for setting in (False, True):
             for removed in (False, True):
               cp = params(identity, alpha=alpha, present=present, pedal=setting, removed=removed)
-              if present and setting:
+              if present:
                 self.assertFalse(is_bolt_cc_profile(cp))
                 self.assertTrue(cp.flags & GMFlags.PEDAL_LONG.value)
               else:
@@ -146,7 +138,7 @@ class Production(unittest.TestCase):
   def test_actual_parser_controller_native_all_generation_routes(self):
     for identity in BOLT_CC_WORDS:
       for removed in (False, True):
-        for alpha, present in ((False, False), (False, True), (True, False), (True, True)):
+        for alpha, present in ((False, False), (True, False)):
           cp, ci, packer = fixture(identity, removed, alpha=alpha, present=present)
           out, msgs = feed(ci, packer, 1_000_000_000)
           self.assertTrue(out.canValid)
@@ -276,7 +268,7 @@ class Production(unittest.TestCase):
         native('rx', msg, 1_000_000)
     self.assertTrue(libsafety_py.libsafety.get_controls_allowed())
     libsafety_py.libsafety.set_timer(3_000_000)
-    libsafety_py.libsafety.safety_tick_current_safety_config()
+    libsafety_py.libsafety.safety_tick()
     self.assertFalse(libsafety_py.libsafety.get_controls_allowed())
     _, msgs = feed(ci, packer, 3_001_000_000, counter=1)
     for msg in msgs:

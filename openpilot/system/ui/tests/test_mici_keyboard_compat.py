@@ -14,7 +14,7 @@ def layout():
   keyboard._txt_bg = SimpleNamespace(width=520, height=170)
   keys = [[Mock(rect=rl.Rectangle(0, 0, 30, 40), original_position=rl.Vector2(x * 40, y * 40)) for x in range(2)] for y in range(2)]
   keyboard._closest_key = (keys[0][0], 0)
-  keyboard._selected_key_filter = SimpleNamespace(x=0.45)
+  vars(keyboard)['_selected_key_filter'] = SimpleNamespace(x=0.45)
   return keyboard, keys
 
 

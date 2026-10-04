@@ -1,4 +1,7 @@
 """Offline service and Params fakes; no IPC, device, or settings writes."""
+from unittest.mock import Mock
+from openpilot.starpilot.ui.presentation import BitmapFonts
+
 
 from types import SimpleNamespace as NS
 import time
@@ -566,7 +569,7 @@ class TestRuntimeSnapshot(unittest.TestCase):
     ui.sm['carState'].canValid = True
     ui.sm['carState'].canTimeout = False
     adapter = RuntimeSnapshotAdapter(ui)
-    hud = CompactHudRenderer(NS(), Path('/unused'))
+    hud = CompactHudRenderer(Mock(spec=BitmapFonts, **vars(NS())), Path('/unused'))
     began = None
     for frame in range(240):
       now = NOW + frame * 50_000_000

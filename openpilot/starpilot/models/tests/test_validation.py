@@ -1,13 +1,18 @@
+import importlib.util
 import json
 from pathlib import Path
 import tempfile
 from types import SimpleNamespace
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 
-from scripts import validate_driving_model as validator
+_script_path = Path(__file__).resolve().parents[4] / "scripts" / "validate_driving_model.py"
+_script_spec = importlib.util.spec_from_file_location("starpilot_test_validate_driving_model", _script_path)
+assert _script_spec is not None and _script_spec.loader is not None
+validator = importlib.util.module_from_spec(_script_spec)
+_script_spec.loader.exec_module(validator)
 from openpilot.system.camerad.cameras.nv12_info import get_nv12_info
 
 
@@ -79,7 +84,7 @@ class TestDrivingValidation(unittest.TestCase):
       validator.check_outputs(missing_action, "v15")
     validator.check_outputs(missing_action, "v11")
     runner = FixtureRunner(8, 8)
-    runner.run = lambda *_: outputs()
+    runner.run = Mock(return_value=outputs())
     with self.assertRaisesRegex(ValueError, "unchanged"):
       validator.validate_camera(Path("fixture.pkl"), "v15", (8, 8), 3, 42, False,
                                 runner_factory=lambda *_: runner, action_update=update_action,

@@ -35,17 +35,17 @@ class TestGmVoltAlternateBrake(unittest.TestCase):
     for name in ('PSCMStatus', 'EBCMWheelSpdRear', 'ASCMSteeringButton', 'AcceleratorPedal2',
                  'ECMEngineStatus', 'EBCMRegenPaddle', brake_source):
       self.assertTrue(self.safety.safety_rx_hook(self.frame(name)))
-    self.safety.safety_tick_current_safety_config()
+    self.safety.safety_tick()
 
   def test_required_brake_input_and_timeout(self):
     self.mode()
     self.feed_sources('ECMAcceleratorPos')
     self.assertFalse(self.safety.safety_config_valid())
     self.safety.safety_rx_hook(self.frame('EBCMBrakePedalPosition', bus=2))
-    self.safety.safety_tick_current_safety_config()
+    self.safety.safety_tick()
     self.assertFalse(self.safety.safety_config_valid())
     self.safety.safety_rx_hook(self.frame('EBCMBrakePedalPosition'))
-    self.safety.safety_tick_current_safety_config()
+    self.safety.safety_tick()
     self.assertTrue(self.safety.safety_config_valid())
     self.safety.set_timer(2_100_000)
     self.feed_sources('ECMAcceleratorPos')

@@ -1,11 +1,12 @@
 """Saved display choices in real disposable Params and native UI adapters."""
+from unittest.mock import patch
+
 
 import os
 from types import SimpleNamespace as NS
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
 
 from openpilot.common.params import Params
 from openpilot.starpilot.ui import display_compact
@@ -201,8 +202,8 @@ class DisplaySettingsTests(unittest.TestCase):
     settings_input.release(x + width / 2, y + height / 2, snapshot.settings)
     self.assertEqual(emitted[0].destination.destination, Destination.SYSTEM)
     session = StarShellSession.__new__(StarShellSession)
-    session.drive_state = NS(snapshot=lambda: {"mode": "auto", "revision": None, "available": False,
-                                                    "effective": None, "overrideAllowed": False})
+    self.enterContext(patch.object(session, 'drive_state', NS(snapshot=lambda: {"mode": "auto", "revision": None, "available": False,
+                                                    "effective": None, "overrideAllowed": False}), create=True))
     session._mode = ShellMode.SETTINGS
     session.selected = Destination.SYSTEM
     session.display_owner = self.owner

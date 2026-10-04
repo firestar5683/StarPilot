@@ -39,6 +39,7 @@ class SoundPackTests(unittest.TestCase):
   def test_stock_samples_are_exact_and_cached(self):
     filenames = tuple({spec[0] for spec in sound_list.values()})
     loaded = self.loader.refresh(filenames, 0)
+    assert loaded is not None
     for filename in filenames:
       with wave.open(str(self.stock / filename), "rb") as source:
         expected = np.frombuffer(source.readframes(source.getnframes()), dtype=np.int16).astype(np.float32) / (2**16/2)
@@ -52,11 +53,14 @@ class SoundPackTests(unittest.TestCase):
     write_wav(self.pack / "prompt.wav")
     self.params.put("SoundPack", "custom", block=True)
     loaded = self.loader.refresh(("warning.wav", "critical.wav"), 0)
+    assert loaded is not None
     np.testing.assert_array_equal(loaded["warning.wav"], np.array((100, -200, 300), dtype=np.float32) / 32768)
     np.testing.assert_array_equal(loaded["critical.wav"], read_wav(self.stock / "critical.wav"))
     write_wav(self.pack / "prompt.wav", (500,))
     self.assertIsNone(self.loader.refresh(("warning.wav", "critical.wav"), 0.5))
-    self.assertEqual(len(self.loader.refresh(("warning.wav", "critical.wav"), 1)["warning.wav"]), 1)
+    refreshed = self.loader.refresh(("warning.wav", "critical.wav"), 1)
+    assert refreshed is not None
+    self.assertEqual(len(refreshed["warning.wav"]), 1)
 
   def test_invalid_custom_files_fall_back(self):
     path = self.pack / "engage.wav"
@@ -77,7 +81,9 @@ class SoundPackTests(unittest.TestCase):
           if kind == "truncated":
             path.write_bytes(path.read_bytes()[:-2])
         loader = SoundPackLoader(self.params, self.stock, self.root)
-        np.testing.assert_array_equal(loader.refresh(("engage.wav",), 0)["engage.wav"], read_wav(self.stock / "engage.wav"))
+        loaded = loader.refresh(("engage.wav",), 0)
+        assert loaded is not None
+        np.testing.assert_array_equal(loaded["engage.wav"], read_wav(self.stock / "engage.wav"))
 
   def test_missing_traversal_and_symlink_pack_fall_back(self):
     (self.root / "linked").symlink_to(self.root / "custom", target_is_directory=True)
@@ -86,7 +92,9 @@ class SoundPackTests(unittest.TestCase):
       self.params.put("SoundPack", name, block=True)
       loader = SoundPackLoader(self.params, self.stock, self.root)
       fallback = self.stock.parent / "sounds_starpilot" if name == "../custom" else self.stock
-      np.testing.assert_array_equal(loader.refresh(("engage.wav",), 0)["engage.wav"], read_wav(fallback / "engage.wav"))
+      loaded = loader.refresh(("engage.wav",), 0)
+      assert loaded is not None
+      np.testing.assert_array_equal(loaded["engage.wav"], read_wav(fallback / "engage.wav"))
 
   def test_owner_parked_saved_source_and_unavailable_repair(self):
     parked = [True]
@@ -105,13 +113,13 @@ class SoundPackTests(unittest.TestCase):
 
   def test_callback_does_not_read_files_or_params_and_keeps_chimes(self):
     sound = Soundd(self.params, pack_root=self.root)
-    sound.current_alert = AudibleAlert.engage
+    sound.update_alert(AudibleAlert.engage)
     output = np.zeros((32, 1), dtype=np.float32)
     with patch("pathlib.Path.open", side_effect=AssertionError("callback IO")), \
          patch.object(sound.pack_loader, "refresh", side_effect=AssertionError("callback refresh")):
       sound.callback(output, 32, None, None)
     self.assertTrue(np.any(output))
-    self.assertIsNotNone(sound.axis_alerts)
+    assert sound.axis_alerts is not None
 
   def test_service_swap_preserves_gain_and_callback_snapshot(self):
     write_wav(self.pack / "engage.wav", (1000, -1000))
@@ -119,7 +127,7 @@ class SoundPackTests(unittest.TestCase):
     sound = Soundd(self.params, pack_root=self.root)
     sound.pack_loader = self.loader
     sound.load_sounds()
-    sound.current_alert = AudibleAlert.engage
+    sound.update_alert(AudibleAlert.engage)
     sound.current_volume = 0.25
     sound.saved_volumes["EngageVolume"] = 50
     np.testing.assert_array_equal(sound.get_sound_data(2), np.array((1000, -1000), dtype=np.float32) / 65536)
@@ -147,9 +155,13 @@ class SoundPackTests(unittest.TestCase):
       with self.subTest(current=current):
         write_wav(self.pack / current, (700,))
         loader = SoundPackLoader(self.params, self.stock, self.root)
-        self.assertEqual(loader.refresh((current,), 0)[current][0], 700 / 32768)
+        selected = loader.refresh((current,), 0)
+        assert selected is not None
+        self.assertEqual(selected[current][0], 700 / 32768)
         write_wav(self.pack / legacy, (900,))
-        self.assertEqual(loader.refresh((current,), 1)[current][0], 900 / 32768)
+        selected = loader.refresh((current,), 1)
+        assert selected is not None
+        self.assertEqual(selected[current][0], 900 / 32768)
 
   def test_service_cache_gate_performs_no_filesystem_reads(self):
     self.loader.refresh(("engage.wav",), 0)

@@ -1,7 +1,13 @@
 """The support preset changes real saved inputs without claiming an active mode."""
 
+from openpilot.starpilot.ui.feature_settings_compact import FeatureSession, NavScroller
+from unittest.mock import Mock
+from openpilot.starpilot.galaxy.settings import ContextSource
 from dataclasses import replace
+import fcntl
 import os
+from threading import Timer
+from tempfile import TemporaryDirectory
 from pathlib import Path
 from types import SimpleNamespace
 import unittest
@@ -35,6 +41,11 @@ def cp_for(vehicle):
 
 class TestLateralSetup(unittest.TestCase):
   def setUp(self):
+    self.params_directory = TemporaryDirectory()
+    self.addCleanup(self.params_directory.cleanup)
+    environment = mock.patch.dict(os.environ, PARAMS_ROOT=self.params_directory.name)
+    environment.start()
+    self.addCleanup(environment.stop)
     self.prefix = OpenpilotPrefix()
     self.prefix.__enter__()
     self.addCleanup(self.prefix.__exit__, None, None, None)
@@ -65,6 +76,36 @@ class TestLateralSetup(unittest.TestCase):
     lane = LaneChangePolicy(False, 1.0, True, True, 3.0, 3.0, True, 0.9)
     self.params.put(LANE_KEY, to_value(lane), block=True)
 
+  def test_preparation_waits_for_brief_native_writer_contention(self):
+    self.seed()
+    request = self.request()
+    lock_path = Path(self.params.get_param_path(preparation.KEY)).parent.parent / '.lock'
+    with lock_path.open('a') as lock:
+      fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+      release = Timer(.05, lambda: fcntl.flock(lock, fcntl.LOCK_UN))
+      release.start()
+      try:
+        self.assertTrue(self.owner.apply(request))
+      finally:
+        release.cancel()
+        release.join()
+        fcntl.flock(lock, fcntl.LOCK_UN)
+    self.assertEqual(self.row().value, 'On')
+
+  def test_preparation_lock_deadline_preserves_every_saved_source(self):
+    self.seed()
+    request = self.request()
+    before = {key: Path(self.params.get_param_path(key)).read_bytes()
+              if Path(self.params.get_param_path(key)).exists() else None for key in controller_keys()}
+    lock_path = Path(self.params.get_param_path(preparation.KEY)).parent.parent / '.lock'
+    with lock_path.open('a') as lock:
+      fcntl.flock(lock, fcntl.LOCK_EX | fcntl.LOCK_NB)
+      self.assertFalse(self.owner.apply(request))
+    for key, raw in before.items():
+      path = Path(self.params.get_param_path(key))
+      self.assertEqual(path.read_bytes() if path.exists() else None, raw)
+    self.assertIsNone(self.params.get(preparation.KEY))
+
   def test_malformed_journal_is_displayed_unavailable_without_setting_changes(self):
     self.seed()
     prior = Path(self.params.get_param_path(DOCUMENT_KEY)).read_bytes()
@@ -82,7 +123,7 @@ class TestLateralSetup(unittest.TestCase):
     self.seed()
     before = Path(self.params.get_param_path(DOCUMENT_KEY)).read_bytes()
     state = self.owner.snapshot('torque', parked=True, system_long=True, lateral_context=True, metric=False)
-    session = SimpleNamespace(_mode=ShellMode.SETTINGS, selected=Destination.DRIVING_CONTROLS,
+    session = Mock(spec=StarShellSession, _mode=ShellMode.SETTINGS, selected=Destination.DRIVING_CONTROLS,
                               feature_snapshot=lambda: state, feature_request=self.owner.apply)
     StarShellSession._feature_ui(session, FeatureUiAction('change', self.row()))
     self.assertEqual(self.row().value, 'On')
@@ -94,10 +135,10 @@ class TestLateralSetup(unittest.TestCase):
       def set_click_callback(self, callback):
         self.click = callback
 
-    compact = FeatureSettingsCompact(SimpleNamespace(feature_request=self.owner.apply))
+    compact = FeatureSettingsCompact(Mock(spec=FeatureSession, feature_request=self.owner.apply))
     refreshed = []
     with mock.patch('openpilot.starpilot.ui.feature_settings_compact.BigButton', Button):
-      buttons = compact._editable(self.row(), lambda: refreshed.append(True), None)
+      buttons = compact._editable(self.row(), lambda: refreshed.append(True), Mock(spec=NavScroller))
     buttons[0].click()
     self.assertEqual(refreshed, [True])
     self.assertEqual(self.row().value, 'Off')
@@ -146,7 +187,7 @@ class TestLateralSetup(unittest.TestCase):
     self.assertFalse(self.owner.apply(request))
     self.parked = True
     self.cp = cp_for(HYUNDAI.KIA_EV6)
-    self.assertIsNone(self.row())
+    self.assertTrue(self.row().available)
     self.assertFalse(self.owner.apply(request))
     self.cp = cp_for(HYUNDAI.HYUNDAI_IONIQ_6)
     self.cp.passive = True
@@ -211,20 +252,29 @@ class TestLateralSetup(unittest.TestCase):
   def test_galaxy_preview_explains_persistent_setup_and_confirms_same_owner(self):
     self.seed()
     current = SimpleNamespace(parked=True, cp=self.cp, raw=b'current-cp')
-    gateway = SettingsGateway(self.params, SimpleNamespace(sample=lambda: AuthorityContext(current.parked, current.cp, current.raw)),
+    gateway = SettingsGateway(self.params, Mock(spec=ContextSource, sample=lambda: AuthorityContext(current.parked, current.cp, current.raw)),
                               clock=lambda: 10)
     page = gateway.page('torque', 'session', b'generation')
     index = next(i for i, row in enumerate(page['rows']) if row['label'] == 'Prep My Vehicle for Tuning')
-    intent = gateway.preview(page['view'], index, 0, 'session', b'generation', value='On')
+    intent = gateway.preview(page['view'], index, 0, 'session', b'generation')
     self.assertIn('restores your previous', intent['question'])
+    self.assertEqual(intent['proposed'], 'On')
     current.parked = False
     with self.assertRaises(SettingsChanged):
       gateway.confirm(intent['intent'], 'session', b'generation')
     current.parked = True
     page = gateway.page('torque', 'session', b'generation')
-    intent = gateway.preview(page['view'], index, 0, 'session', b'generation', value='On')
+    intent = gateway.preview(page['view'], index, 0, 'session', b'generation')
     self.assertTrue(gateway.confirm(intent['intent'], 'session', b'generation'))
     self.assertEqual(read_selection(self.params, self.cp).mode, ControllerMode.STARPILOT)
+    page = gateway.page('torque', 'session', b'generation')
+    index = next(i for i, row in enumerate(page['rows']) if row['label'] == 'Prep My Vehicle for Tuning')
+    intent = gateway.preview(page['view'], index, 0, 'session', b'generation')
+    self.assertEqual(intent['proposed'], 'Off')
+    self.assertTrue(gateway.confirm(intent['intent'], 'session', b'generation'))
+    self.assertEqual(read_selection(self.params, self.cp).mode, ControllerMode.STANDARD)
+    self.assertTrue(self.params.get_bool('AdvancedLateralTune'))
+    self.assertEqual(Path(self.params.get_param_path('SteerLatAccel')).read_bytes(), b'3.3')
 
 
 if __name__ == '__main__':

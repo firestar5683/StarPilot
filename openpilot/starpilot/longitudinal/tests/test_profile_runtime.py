@@ -66,7 +66,7 @@ class ProfileRuntimeTests(unittest.TestCase):
     for speed, expected in ((0.0, 0.75), (12.5, 1.175), (25.0, 1.6), (30.0, 1.6)):
       with self.subTest(speed=speed):
         tuning = resolve(settings, log.LongitudinalPersonality.aggressive, speed, self.cp, traffic_mode=True)
-        self.assertIsNotNone(tuning)
+        assert tuning is not None
         self.assertEqual(tuning.personality_id, 'traffic')
         self.assertAlmostEqual(tuning.follow_seconds, expected)
         self.assertEqual((tuning.acceleration_jerk, tuning.deceleration_jerk, tuning.speed_jerk,
@@ -133,7 +133,7 @@ class ProfileRuntimeTests(unittest.TestCase):
                                 (25.0, 1.7, 0.5), (30.0, 1.7, 0.5)):
       with self.subTest(speed=speed):
         tuning = resolve(settings, log.LongitudinalPersonality.relaxed, speed, self.cp, traffic_mode=True)
-        self.assertIsNotNone(tuning)
+        assert tuning is not None
         self.assertAlmostEqual(tuning.follow_seconds, follow)
         for component in (tuning.acceleration_jerk, tuning.deceleration_jerk, tuning.speed_jerk,
                           tuning.speed_decrease_jerk, tuning.danger_jerk):
@@ -143,7 +143,7 @@ class ProfileRuntimeTests(unittest.TestCase):
     self.params.put('LongitudinalPersonalityProfiles', legacy_document(profiles, enabled=True), block=True)
     document_tuning = resolve(read_traffic_settings(self.params), log.LongitudinalPersonality.relaxed,
                               12.5, self.cp, traffic_mode=True)
-    self.assertIsNotNone(document_tuning)
+    assert document_tuning is not None
     self.assertAlmostEqual(document_tuning.follow_seconds, 2.25)
 
   def test_traffic_acceleration_and_braking_saved_categories_require_enabled_owner(self):
@@ -156,12 +156,12 @@ class ProfileRuntimeTests(unittest.TestCase):
 
     tuning = resolve(read_traffic_settings(self.params), log.LongitudinalPersonality.standard,
                      12.5, self.cp, traffic_mode=True)
-    self.assertIsNotNone(tuning)
+    assert tuning is not None
     self.assertAlmostEqual(required_float(tuning.acceleration_max), 1.4)
     self.assertAlmostEqual(required_float(tuning.cruise_brake_magnitude), 0.35)
     self.assertTrue(tuning.traffic_braking_custom)
     applied = ProfileSmoother().sample(tuning, log.LongitudinalPersonality.standard, 0.05, traffic_mode=True)
-    self.assertIsNotNone(applied)  # Historical v3 braking value is admitted only in Traffic.
+    assert applied is not None
     self.assertLess(applied.cruise_brake_magnitude, 1.2)
 
     self.params.put('LongitudinalPersonalityProfiles', legacy_document(profiles, enabled=False), block=True)
@@ -197,7 +197,7 @@ class ProfileRuntimeTests(unittest.TestCase):
     settings = read_traffic_settings(self.params)
     self.assertTrue(settings.valid)
     tuning = resolve(settings, log.LongitudinalPersonality.standard, 12.5, self.cp, traffic_mode=True)
-    self.assertIsNotNone(tuning)
+    assert tuning is not None
     self.assertAlmostEqual(required_float(tuning.acceleration_max), 2.0)  # Native ACCEL_MAX; keep other valid categories.
     self.assertAlmostEqual(required_float(tuning.cruise_brake_magnitude), 0.35)
     self.assertAlmostEqual(tuning.follow_seconds, 2.25)
@@ -212,14 +212,14 @@ class ProfileRuntimeTests(unittest.TestCase):
     settings = read_traffic_settings(self.params)
     self.assertTrue(settings.valid)
     tuning = resolve(settings, log.LongitudinalPersonality.standard, 0.0, self.cp, traffic_mode=True)
-    self.assertIsNotNone(tuning)
+    assert tuning is not None
     self.assertAlmostEqual(tuning.follow_seconds, 0.5)
     self.assertEqual(self.params.get('TrafficFollow'), 0.5)
-    self.assertIsNotNone(read_settings(self.params))  # Traffic validation does not disable ordinary profiles.
+    assert read_settings(self.params) is not None
     self.params.put('TrafficFollow', 0.75, block=True)
     Path(self.params.get_param_path('TrafficJerkDanger')).write_bytes(b'nan')
     self.assertFalse(read_traffic_settings(self.params).valid)
-    self.assertIsNotNone(read_settings(self.params))
+    assert read_settings(self.params) is not None
     self.params.put_bool('CustomPersonalities', False, block=True)
     self.assertTrue(read_traffic_settings(self.params).valid)  # Saved custom bytes are inactive with master off.
 
@@ -227,27 +227,27 @@ class ProfileRuntimeTests(unittest.TestCase):
     self.params.put_bool('CustomPersonalities', True, block=True)
     host = ProfileHost(self.params)
     traffic = host.sample(1_000_000_000, log.LongitudinalPersonality.standard, 12.5, self.cp, traffic_mode=True)
-    self.assertIsNotNone(traffic)
+    assert traffic is not None
     smoother = ProfileSmoother()
-    self.assertIsNotNone(smoother.sample(traffic, log.LongitudinalPersonality.standard, 0.05, traffic_mode=True))
+    assert smoother.sample(traffic, log.LongitudinalPersonality.standard, 0.05, traffic_mode=True) is not None
     self.assertIsNone(host.sample(1_010_000_000, log.LongitudinalPersonality.standard, 12.5, self.cp, traffic_mode=None))
     self.assertIsNone(smoother.sample(None, log.LongitudinalPersonality.standard, 0.05, traffic_mode=None))
     self.assertIsNone(smoother.applied)
     ordinary = host.sample(1_020_000_000, log.LongitudinalPersonality.standard, 45 * 0.44704, self.cp, traffic_mode=False)
-    self.assertIsNotNone(ordinary)
+    assert ordinary is not None
     self.assertAlmostEqual(ordinary.follow_seconds, 1.45)
     self.params.put('TrafficFollow', 0.5, block=True)
     half_second = host.sample(1_030_000_000, log.LongitudinalPersonality.standard, 12.5, self.cp, traffic_mode=True)
-    self.assertIsNotNone(half_second)
+    assert half_second is not None
     self.assertAlmostEqual(half_second.follow_seconds, 1.05)
 
   def test_traffic_smoother_rejects_invalid_target_and_starts_from_native_personality(self):
     smoother = ProfileSmoother()
     target = resolve(read_traffic_settings(self.params), log.LongitudinalPersonality.standard,
                      25.0, self.cp, traffic_mode=True)
-    self.assertIsNotNone(target)
+    assert target is not None
     first = smoother.sample(target, log.LongitudinalPersonality.standard, 0.05, traffic_mode=True)
-    self.assertIsNotNone(first)
+    assert first is not None
     self.assertAlmostEqual(first.follow_seconds, 1.50)  # Ordinary standard starts at 1.45 s.
     self.assertGreaterEqual(first.follow_seconds, min(1.45, target.follow_seconds))
     invalid = ProfileTuning('traffic', 0.49, 1.0, 1.0, 1.0, 1.0, 1.0)
@@ -260,12 +260,12 @@ class ProfileRuntimeTests(unittest.TestCase):
   def test_fresh_traffic_off_fades_to_native_but_unknown_clears_immediately(self):
     traffic = resolve(read_traffic_settings(self.params), log.LongitudinalPersonality.standard,
                       0.0, self.cp, traffic_mode=True)
-    self.assertIsNotNone(traffic)
+    assert traffic is not None
     self.assertAlmostEqual(traffic.follow_seconds, 0.75)
     smoother = ProfileSmoother()
     for _ in range(20):
       active = smoother.sample(traffic, log.LongitudinalPersonality.standard, 0.05, traffic_mode=True)
-    self.assertIsNotNone(active)
+    assert active is not None
     self.assertAlmostEqual(active.follow_seconds, 0.75)
 
     previous = active.follow_seconds
@@ -283,7 +283,7 @@ class ProfileRuntimeTests(unittest.TestCase):
 
     for _ in range(20):
       active = smoother.sample(traffic, log.LongitudinalPersonality.standard, 0.05, traffic_mode=True)
-    self.assertIsNotNone(active)
+    assert active is not None
     self.assertIsNone(smoother.sample(None, log.LongitudinalPersonality.standard, 0.05, traffic_mode=None))
     self.assertIsNone(smoother.applied)
 
@@ -296,6 +296,7 @@ class ProfileRuntimeTests(unittest.TestCase):
     settings = read_settings(self.params)
     assert settings is not None
     self.assertTrue(settings.profile_enabled['standard'])
+    assert settings.document is not None
     self.assertEqual(settings.document['selectedDecelerationProfile'], 'eco')
     self.assertIsNone(self.params.get('LongitudinalPersonalityProfiles'))
     low = resolve(settings, log.LongitudinalPersonality.standard, 45 * 0.44704, self.cp)
@@ -334,9 +335,9 @@ class ProfileRuntimeTests(unittest.TestCase):
   def test_host_refresh_and_disable(self):
     self.params.put_bool('CustomPersonalities', True, block=True)
     host = ProfileHost(self.params)
-    self.assertIsNotNone(host.sample(1_000_000_000, log.LongitudinalPersonality.standard, V_EGO, self.cp))
+    assert host.sample(1_000_000_000, log.LongitudinalPersonality.standard, V_EGO, self.cp) is not None
     self.params.put_bool('CustomPersonalities', False, block=True)
-    self.assertIsNotNone(host.sample(1_100_000_000, log.LongitudinalPersonality.standard, V_EGO, self.cp))
+    assert host.sample(1_100_000_000, log.LongitudinalPersonality.standard, V_EGO, self.cp) is not None
     self.assertIsNone(host.sample(2_000_000_000, log.LongitudinalPersonality.standard, V_EGO, self.cp))
 
   def test_launch_profile_distinguishes_presets_manual_and_disabled(self):
@@ -347,7 +348,7 @@ class ProfileRuntimeTests(unittest.TestCase):
       self.params.put('LongitudinalPersonalityProfiles', legacy_document(profiles, enabled=True), block=True)
       host = ProfileHost(self.params)
       tuning = host.sample(1_000_000_000, log.LongitudinalPersonality.standard, 0.0, self.cp)
-      self.assertIsNotNone(tuning)
+      assert tuning is not None
       self.assertEqual(tuning.custom_acceleration, preset == 'custom')
       self.assertEqual(tuning.acceleration_max is None, preset == 'dom_default')
       self.assertFalse(host.disabled)
@@ -384,12 +385,12 @@ class ProfileRuntimeTests(unittest.TestCase):
         frame.valid[name] = frame.alive[name] = True
         frame.logMonoTime[name] = 1_000_000_000
       tuning = profile_for_frame(host, frame, cp, 1_000_000_000)
-      self.assertIsNotNone(tuning)
+      assert tuning is not None
       self.assertAlmostEqual(tuning.acceleration_max, 0.6)
       planner = LongitudinalPlanner(cp, init_v=V_EGO)
       for _ in range(40):
         planner.update(sm, profile_tuning=tuning)
-      self.assertIsNotNone(planner.last_profile)
+      assert planner.last_profile is not None
       self.assertAlmostEqual(planner.last_profile.acceleration_max, 0.6)
       self.assertAlmostEqual(planner.mpc.params[0, 4], 2.25)
       sm['carControl'].longActive = False
@@ -408,7 +409,7 @@ class ProfileRuntimeTests(unittest.TestCase):
     self.params.put('LongitudinalPersonalityProfiles', document, block=True)
     settings = read_settings(self.params)
     tuning = resolve(settings, log.LongitudinalPersonality.standard, 0.0, self.cp)
-    self.assertIsNotNone(tuning)
+    assert tuning is not None
     self.assertEqual(tuning.acceleration_max, 2.0)
     self.assertEqual(tuning.follow_seconds, 2.25)
     planner = LongitudinalPlanner(self.cp, init_v=0.0)
@@ -417,7 +418,7 @@ class ProfileRuntimeTests(unittest.TestCase):
       sm['carState'].vEgo = 0.0
       sm['carControl'].longActive = True
       planner.update(sm, profile_tuning=tuning)
-      self.assertIsNotNone(planner.last_profile)
+      assert planner.last_profile is not None
       self.assertEqual(planner.mpc.solution_status, 0)
       self.assertLessEqual(planner.mpc.params[0, 1], 2.0)
     self.assertAlmostEqual(planner.mpc.params[0, 4], 2.25)
@@ -432,7 +433,7 @@ class ProfileRuntimeTests(unittest.TestCase):
     for service in ('carState', 'carControl', 'selfdriveState', 'controlsState'):
       sm.valid[service] = sm.alive[service] = True
       sm.logMonoTime[service] = 1_000_000_000
-    self.assertIsNotNone(profile_for_frame(host, sm, self.cp, 1_000_000_000))
+    assert profile_for_frame(host, sm, self.cp, 1_000_000_000) is not None
     sm['carState'].canValid = False
     self.assertIsNone(profile_for_frame(host, sm, self.cp, 1_000_000_000))
     sm['carState'].canValid = True
@@ -505,9 +506,9 @@ class ProfileRuntimeTests(unittest.TestCase):
             mock.patch.object(plannerd, 'LeadApproachPreferences', return_value=None),
             mock.patch.object(plannerd.messaging, 'SubMaster', return_value=sm),
             mock.patch.object(plannerd.messaging, 'PubMaster', return_value=publisher),
-            mock.patch.object(plannerd.time, 'monotonic_ns', side_effect=lambda: sm.logMonoTime['modelV2']),
+            mock.patch.object(plannerd.time, 'monotonic_ns', side_effect=lambda source=sm: source.logMonoTime['modelV2']),
             mock.patch.object(plannerd, 'paired_clocks_ns',
-                              side_effect=lambda: (sm.logMonoTime['modelV2'], sm.logMonoTime['modelV2'], 0)),
+                              side_effect=lambda source=sm: (source.logMonoTime['modelV2'], source.logMonoTime['modelV2'], 0)),
             mock.patch.dict('os.environ', environment, clear=True)):
         with self.assertRaises(EndLoop):
           plannerd.main()
@@ -530,7 +531,7 @@ class ProfileRuntimeTests(unittest.TestCase):
       self.assertEqual(baseline.mpc.solution_status, 0)
       self.assertEqual(explicit_off.mpc.solution_status, 0)
       self.assertEqual(tuned.mpc.solution_status, 0)
-    self.assertIsNotNone(tuned.last_profile)
+    assert tuned.last_profile is not None
     self.assertGreater(tuned.mpc.params[0, 4], baseline.mpc.params[0, 4])
     self.assertLess(tuned.mpc.params[0, 1], baseline.mpc.params[0, 1])
     self.assertLessEqual(tuned.mpc.params[0, 1], 2.0)

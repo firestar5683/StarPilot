@@ -1,3 +1,4 @@
+from unittest.mock import Mock
 from pathlib import Path
 from types import SimpleNamespace as NS
 
@@ -13,7 +14,7 @@ def setup(tmp_path):
   params = Params(str(tmp_path))
   current = NS(parked=True, cp=None, raw=None)
   context = NS(sample=lambda: AuthorityContext(current.parked, current.cp, current.raw))
-  return params, current, SettingsGateway(params, context, clock=lambda: 10)
+  return params, current, SettingsGateway(params, Mock(wraps=context), clock=lambda: 10)
 
 
 def mode_row(page):

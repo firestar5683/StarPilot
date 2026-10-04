@@ -1,3 +1,4 @@
+from openpilot.starpilot.ui.runtime_app import StarShellSession
 from types import SimpleNamespace as NS
 from unittest.mock import Mock, PropertyMock, patch
 
@@ -19,13 +20,13 @@ class EmptyPage(Widget):
 
 
 @pytest.fixture
-def navigation():
+def navigation(monkeypatch):
   callback = Mock()
   with patch.object(road.gui_app, 'texture', return_value=NS(width=180, height=180)):
     bookmark = road.BookmarkIcon(callback)
     session = NS(profile=Profile.COMPACT, camera_owner=NS(_bookmark_icon=bookmark), render=Mock(), cancel=Mock(),
                  press=Mock(), move=Mock(), release=Mock(return_value=False))
-    page = StarShellPage(session, ShellMode.ONROAD)
+    page = StarShellPage(Mock(spec=StarShellSession, **vars(session)), ShellMode.ONROAD)
     layout = StarMiciMainLayout.__new__(StarMiciMainLayout)
     Scroller.__init__(layout, snap_items=True, spacing=0, pad=0, scroll_indicator=False, edge_shadows=False)
   home = EmptyPage()
@@ -35,7 +36,9 @@ def navigation():
   layout._setup = True
   layout._alerts_layout = Mock()
   layout._car_onroad_layout = page
-  layout._native_onroad = NS(_bookmark_icon=bookmark)
+  layout.star = Mock(spec=StarShellSession, camera_paint=True)
+  layout.__dict__["_settings_layout"] = NS(covers_camera=lambda _rect: False)
+  monkeypatch.setattr(layout, '_native_onroad', NS(_bookmark_icon=bookmark), raising=False)
   layout._scroller.add_widgets([home, page])
   layout._scroller.set_scrolling_enabled(lambda: not bookmark.is_swiping_left())
   layout._scroller.scroll_panel.set_offset(-536)

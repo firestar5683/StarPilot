@@ -182,8 +182,10 @@ class FeatureNavigationTests(unittest.TestCase):
 
     with tempfile.TemporaryDirectory() as directory:
       params = Params(directory)
-      cp = NS(carFingerprint="TOYOTA COROLLA TSS2", openpilotLongitudinalControl=True, pcmCruise=False,
-              passive=False, notCar=False, dashcamOnly=False, carVin="TEST", transmissionType=1)
+      cp = HondaCarInterface.get_non_essential_params("HONDA_CIVIC_BOSCH")
+      cp.openpilotLongitudinalControl = True
+      cp.pcmCruise = False
+      cp.carVin = "TEST"
       owner = FeatureSettingsOwner(params, lambda group: True, vehicle_fingerprint=lambda: "TOYOTA COROLLA TSS2",
                                    vehicle_params=lambda: cp)
       adapter = compact.FeatureSettingsCompact(Session(owner))
@@ -200,7 +202,7 @@ class FeatureNavigationTests(unittest.TestCase):
 
         adapter.open("aggressive/acceleration")
         curve = pushed[-1]
-        for _ in range(5):
+        for _ in range(6):
           card(curve, "preset").click()
         self.assertEqual(len([item for item in curve.items if item.text.endswith("mph point +")]), 10)
 
@@ -228,7 +230,7 @@ class FeatureNavigationTests(unittest.TestCase):
     session._feature_ui(FeatureUiAction("back"))
     self.assertEqual(session.selected, Destination.STAR)
 
-  def test_curve_adopt_confirmation_on_both_native_pages(self):
+  def test_curve_reset_confirmation_on_both_native_pages(self):
     from openpilot.starpilot.ui.runtime_app import StarShellSession
     from openpilot.system.ui.widgets import DialogResult
 
@@ -239,10 +241,10 @@ class FeatureNavigationTests(unittest.TestCase):
     with tempfile.TemporaryDirectory() as directory:
       params = Params(directory)
       legacy = Path(params.get_param_path("CurvatureData"))
-      legacy.write_bytes(b'{}')
+      legacy.write_bytes(b'{"0.001":{"average":2.0,"count":2}}')
       owner = FeatureSettingsOwner(params, lambda _group: True, vehicle_fingerprint=lambda: "TOYOTA COROLLA TSS2")
       row = next(row for row in owner.snapshot("curve", parked=True, system_long=True,
-                     lateral_context=True, metric=False).rows if row.key == "curve_adopt")
+                     lateral_context=True, metric=False).rows if row.key == "curve_reset")
       self.assertEqual(FeatureInput.target(1900, 285, FeatureSettingsState(page="curve", rows=(row,))).kind, "reset")
       large = StarShellSession.__new__(StarShellSession)
       self.enterContext(patch.object(large, "feature_request", owner.apply))
@@ -256,7 +258,7 @@ class FeatureNavigationTests(unittest.TestCase):
 
       params.remove("CurveComfortData")
       row = next(row for row in owner.snapshot("curve", parked=True, system_long=True,
-                     lateral_context=True, metric=False).rows if row.key == "curve_adopt")
+                     lateral_context=True, metric=False).rows if row.key == "curve_reset")
       class Session:
         def feature_snapshot(self, page):
           return owner.snapshot(page, parked=True, system_long=True, lateral_context=True, metric=False)
@@ -270,9 +272,9 @@ class FeatureNavigationTests(unittest.TestCase):
         adapter._confirm_reset(row, lambda: None)
         legacy.write_bytes(b'{"0.001":{"average":2.0,"count":2}}')
         pushed[-1].confirm()
-        self.assertIsNone(params.get("CurveComfortData"))
+        self.assertEqual(params.get("CurveComfortData"), {"version": 1, "buckets": {}})
         row = next(row for row in owner.snapshot("curve", parked=True, system_long=True,
-                       lateral_context=True, metric=False).rows if row.key == "curve_adopt")
+                       lateral_context=True, metric=False).rows if row.key == "curve_reset")
         adapter._confirm_reset(row, lambda: None)
         pushed[-1].confirm()
       self.assertIsNotNone(params.get("CurveComfortData"))

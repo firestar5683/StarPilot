@@ -65,14 +65,14 @@ class TestGmVoltSdgm(unittest.TestCase):
     if self.release:
       self.safety.set_controls_allowed(True)
       self.assertFalse(self.safety.safety_tx_hook(self.gas(0.)))
-      self.safety.safety_tick_current_safety_config()
+      self.safety.safety_tick()
       self.assertFalse(self.safety.safety_config_valid())
       return
     for name in ('PSCMStatus', 'EBCMWheelSpdRear', 'ECMAcceleratorPos', 'ECMEngineStatus', 'AcceleratorPedal2', 'EBCMRegenPaddle'):
       self.assertTrue(self.rx(name))
     for button in (3, 1):
       self.rx('ASCMSteeringButton', {'ACCButtons': button})
-    self.safety.safety_tick_current_safety_config()
+    self.safety.safety_tick()
     self.assertTrue(self.safety.safety_config_valid())
     self.assertEqual(self.safety.get_controls_allowed(), not self.release)
     for name, values in (self.brake_source, ('EBCMRegenPaddle', {'RegenPaddle': 2})):
@@ -86,7 +86,7 @@ class TestGmVoltSdgm(unittest.TestCase):
     self.assertEqual(self.safety.get_controls_allowed(), not self.release)
     self.assertFalse(self.safety.safety_tx_hook(self.gas(0.)))
     self.safety.set_timer(2_100_000)
-    self.safety.safety_tick_current_safety_config()
+    self.safety.safety_tick()
     self.assertFalse(self.safety.safety_config_valid())
 
   def test_selected_brake_source_and_regen_bus(self):

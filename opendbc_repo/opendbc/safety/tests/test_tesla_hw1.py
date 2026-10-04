@@ -220,7 +220,7 @@ class TestModelSHW1Safety(unittest.TestCase):
             assert lib.safety_rx_hook(packet((steer[0], steer[1], 2)))
           if index <= 20 or missing != 'DAS_control':
             assert lib.safety_rx_hook(packet((long[0], long[1], 2)))
-          lib.safety_tick_current_safety_config()
+          lib.safety_tick()
           if index == 20:
             assert lib.safety_config_valid()
             assert lib.get_controls_allowed(), 'complete positive feed must arm before omission'

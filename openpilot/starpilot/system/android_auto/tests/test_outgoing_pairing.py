@@ -1,3 +1,4 @@
+from unittest.mock import Mock
 """Exercise imported owner, real PairingSession and supervisor with fake BlueZ I/O."""
 import threading
 import time
@@ -210,12 +211,12 @@ def test_supervisor_never_selects_ordinary_hfp_as_projection_receiver(tmp_path, 
     supervisor._source_session = state['session']
     supervisor._shared_bluetooth_owner = shared
     supervisor._pairing_known = {bluez.paired[0]['address']}
-    supervisor._session_alive = lambda: False
-    supervisor._phone = lambda: phone
-    supervisor.log = lambda *args, **kwargs: None
+    supervisor._session_alive = Mock(side_effect=lambda: False)
+    supervisor._phone = Mock(side_effect=lambda: phone)
+    supervisor.log = Mock(side_effect=lambda *args, **kwargs: None)
     selected = []
-    supervisor.cancel_pairing = lambda: None
-    supervisor.select_receiver = lambda address, name: selected.append((address, name))
+    supervisor.cancel_pairing = Mock(side_effect=lambda: None)
+    supervisor.select_receiver = Mock(side_effect=lambda address, name: selected.append((address, name)))
     supervisor._select_new_car()
     assert bool(selected) == wireless_aa
   finally:

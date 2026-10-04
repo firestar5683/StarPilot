@@ -38,9 +38,9 @@ def native_session(tmp_path, monkeypatch):
   session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
   session._mode = ShellMode.ONROAD
   state = OnroadState(True, True, 15, 80, SpeedLimitObservation())
-  session.snapshot = lambda *_: NS(onroad=state)
-  session._favorite_authority = lambda: True
-  session._conditional_favorite_active = lambda: False
+  vars(session)['snapshot'] = lambda *_: NS(onroad=state)
+  vars(session)['_favorite_authority'] = lambda: True
+  vars(session)['_conditional_favorite_active'] = lambda: False
   session.mode_actions, session.cruise_actions = ModeActionPublisher(), CruiseActionPublisher()
   session._wheel_personality = None
   session._wheel_consumer, session._wheel_pending = WheelConsumer(), deque(maxlen=32)
@@ -65,7 +65,7 @@ def test_actual_favorite_value_callback_reads_units_and_publishes_absolute_recei
   event = messaging.log_from_bytes(sender.events[-1][1])
   assert str(event.slcAction.kind) == 'cruiseSet'
   assert event.slcAction.controllerCruise.targetSpeedMps == pytest.approx(55 / 3.6)
-  session._favorite_authority = lambda: False
+  vars(session)['_favorite_authority'] = lambda: False
   assert not owner.invoke(owner.snapshot().slots[0].request).success
   assert len(sender.events) == 1
 

@@ -1,5 +1,6 @@
 import importlib.util
 import unittest
+import tempfile
 from pathlib import Path
 
 
@@ -61,6 +62,23 @@ class InstalledDependencyBudgetTest(unittest.TestCase):
     self.assertFalse(installed_dependencies_within_limits(baseline | expanded_tooling, expanded_tooling))
     self.assertEqual(installed_dependency_counts(baseline | TOOLING_PACKAGES | {'unknown-package'}), (66, 15))
     self.assertFalse(installed_dependencies_within_limits(baseline | TOOLING_PACKAGES | {'unknown-package'}))
+
+
+class InstalledPayloadTest(unittest.TestCase):
+  def test_import_caches_do_not_change_payload_and_other_files_still_count(self):
+    with tempfile.TemporaryDirectory() as directory:
+      root = Path(directory)
+      (root / "package.py").write_bytes(b"source")
+      (root / "native.so").write_bytes(b"binary")
+      (root / "interpreter").symlink_to(root / "native.so")
+      self.assertEqual(CHECKER.installed_payload_bytes(root), 12)
+      cache = root / "__pycache__"
+      cache.mkdir()
+      (cache / "package.cpython-312.pyc").write_bytes(b"cache" * 100)
+      self.assertEqual(CHECKER.installed_payload_bytes(root), 12)
+      (cache / "payload.bin").write_bytes(b"data")
+      (root / "standalone.pyc").write_bytes(b"bytecode")
+      self.assertEqual(CHECKER.installed_payload_bytes(root), 24)
 
 
 if __name__ == '__main__':

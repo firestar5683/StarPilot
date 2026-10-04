@@ -24,6 +24,9 @@ class LeadInfoTests(unittest.TestCase):
     temporary = tempfile.TemporaryDirectory()
     self.addCleanup(temporary.cleanup)
     self.params = Params(temporary.name)
+    storage = tempfile.TemporaryDirectory()
+    self.addCleanup(storage.cleanup)
+    self.storage = Path(storage.name)
     self.parked = True
     self.owner = AppearanceOwner(self.params, lambda: self.parked)
 
@@ -67,7 +70,7 @@ class LeadInfoTests(unittest.TestCase):
 
     def initialize_defaults():
       with patch.object(manager, "Params", return_value=self.params), \
-           patch.object(manager, "prepare_manager_start"), patch.object(manager, "starpilot_storage_root"), \
+           patch.object(manager, "prepare_manager_start"), patch.object(manager, "starpilot_storage_root", return_value=self.storage), \
            patch.object(manager, "save_bootlog"), \
            patch.object(manager, "get_build_metadata", return_value=NS(release_channel=False)), \
            patch.object(manager.Paths, "shm_path", side_effect=AfterDefaults):

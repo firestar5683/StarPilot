@@ -40,7 +40,8 @@ class TorqueDocumentTests(unittest.TestCase):
       params.put(DOCUMENT_KEY, json.loads(raw), block=True)
       after = read_settings(params, host.vehicle)
       self.assertTrue(after.valid)
-      self.assertEqual(after.user_factor, basis[0])  # equality with CP is still intentional custom
+      self.assertIsNone(after.user_factor)
+      self.assertEqual(parse_document(raw)[host.vehicle.vehicle].factor.mode, "custom")
       self.assertEqual({key: Path(params.get_param_path(key)).read_bytes() if Path(params.get_param_path(key)).exists() else None
                         for key in LEGACY_KEYS}, before)
 

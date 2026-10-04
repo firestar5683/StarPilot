@@ -28,7 +28,7 @@ class TestHyundaiBlendedAlphaClosure(unittest.TestCase):
       self.assertTrue(self.safety.safety_rx_hook(self.tcs(False, 0)))
       self.assertTrue(self.safety.safety_rx_hook(self.button(4, 0)))
       self.safety.set_timer(1000001)
-      self.safety.safety_tick_current_safety_config()
+      self.safety.safety_tick()
       self.assertTrue(self.safety.safety_rx_hook(self.tcs(False, 1)))
       self.assertTrue(self.safety.safety_rx_hook(self.button(0, 1)))
       self.assertFalse(self.safety.get_controls_allowed())

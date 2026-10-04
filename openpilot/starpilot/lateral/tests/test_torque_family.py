@@ -45,8 +45,11 @@ class ToyotaTorqueFamilyTests(unittest.TestCase):
   def test_exact_registry_cohort_and_cp_guard(self):
     registry = {str(car.value) for car in CAR if (cp := params_for(str(car.value))).brand == 'toyota' and
                 cp.steerControlType == structs.CarParams.SteerControlType.torque and cp.lateralTuning.which() == 'torque'}
-    self.assertEqual(len(registry), 38)
-    self.assertEqual(TOYOTA_VEHICLES, registry)
+    self.assertEqual(len(TOYOTA_VEHICLES), 38)
+    self.assertEqual(registry - TOYOTA_VEHICLES, {'TOYOTA_PRIUS_RETROFIT', 'TOYOTA_MATRIX_RETROFIT'})
+    self.assertTrue(TOYOTA_VEHICLES <= registry)
+    for identity in registry - TOYOTA_VEHICLES:
+      self.assertFalse(supported_cp(params_for(identity)))
     self.assertFalse(supported_cp(params_for('TOYOTA_RAV4_TSS2_2023')))
     self.assertFalse(supported_cp(params_for('CHEVROLET_BOLT_EUV')))
     with mock.patch.dict(os.environ, {'TORQUE_REPLAY_RUNTIME': '1'}):

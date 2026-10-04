@@ -45,6 +45,7 @@ def test_original_vision_target_and_rise_release_rates():
   assert outputs[0] == pytest.approx(1.50)
   assert outputs[1] == pytest.approx(1.55)
   assert outputs[-1] == pytest.approx(1.73104381, abs=1e-7)
+  assert outputs[-1] is not None
   assert policy.step(KEY, frame(8, None), 1.45) == pytest.approx(outputs[-1] - 0.03)
   assert policy.step(KEY, frame(9, None), 1.45) == pytest.approx(outputs[-1] - 0.06)
 

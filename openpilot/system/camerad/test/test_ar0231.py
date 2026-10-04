@@ -52,15 +52,20 @@ class TestAR0231(unittest.TestCase):
     source = (CAMERA / 'cameras/spectra.cc').read_text()
     bps = function(source, 'void SpectraCamera::config_bps(')
     icp = function(source, 'void SpectraCamera::configICP()')
-    downscale = re.search(r'bool needs_downscale = ([^;]+);', bps)[1]
-    patches = re.search(r'int num_patches = ([^;]+);', bps)[1]
-    cycles = re.search(r'tmp.clk.frame_cycles = ([^;]+);', bps)[1]
-    striping = re.search(r'uint32_t striping_size = ([^;]+);', icp)[1]
-    striping_bl = re.search(r'bps_cdm_striping_bl.init\(m, ([^,]+),', icp)[1]
+    def match(pattern, source, flags=0):
+      found = re.search(pattern, source, flags)
+      assert found is not None
+      return found[1]
+
+    downscale = match(r'bool needs_downscale = ([^;]+);', bps)
+    patches = match(r'int num_patches = ([^;]+);', bps)
+    cycles = match(r'tmp.clk.frame_cycles = ([^;]+);', bps)
+    striping = match(r'uint32_t striping_size = ([^;]+);', icp)
+    striping_bl = match(r'bps_cdm_striping_bl.init\(m, ([^,]+),', icp)
     legacy = function(source, 'static bool uses_legacy_bps_config')
     knees = function(bps, 'if (legacy_bps)')
     probe = function(source, 'bool SpectraCamera::openSensor()')
-    condition = re.search(r'if \((!init_sensor_lambda\(new OS04C10\).*?)\) \{', probe, re.S)[1]
+    condition = match(r'if \((!init_sensor_lambda\(new OS04C10\).*?)\) \{', probe, re.S)
     for name, identity in (('OS04C10', 3), ('OX03C10', 2), ('AR0231', 1)):
       condition = condition.replace('new ' + name, str(identity))
     with tempfile.TemporaryDirectory(prefix='camera-sensor-contract-') as directory:

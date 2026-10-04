@@ -42,7 +42,7 @@ def test_inference_failure_uses_runner_identity(runner_chestnut, stored_active):
   params.get_bool.return_value = stored_active
   receipt = Mock()
   chestnut_state = SimpleNamespace(big=True)
-  env = {"model": failed_model, "small_model": small_model, "params": params, "receipt_owner": receipt,
+  env: dict = {"model": failed_model, "small_model": small_model, "params": params, "receipt_owner": receipt,
              "chestnut_state": chestnut_state, "run_count": 1, "ModelConstants": SimpleNamespace(MODEL_RUN_FREQ=20),
              "SERVICE_LIST": {"chestnutGpuState": SimpleNamespace(frequency=1)}, "bufs": {}, "transforms": {}, "inputs": {},
              "small_prepared": object(), "ModelVariant": ModelVariant, "cloudlog": Mock()}
@@ -93,7 +93,7 @@ def test_observed_availability_and_big_eligibility(monkeypatch, present, cable, 
   start = next(i for i, node in enumerate(body) if isinstance(node, ast.ImportFrom) and node.module == manager.__name__)
   end = next(i for i, node in enumerate(body) if ast.unparse(node) == "gc.disable()")
   params = Mock()
-  env = {"chestnut_present": Mock(return_value=present), "cable_connected": Mock(return_value=cable),
+  env: dict = {"chestnut_present": Mock(return_value=present), "cable_connected": Mock(return_value=cable),
          "chestnut_compiled": Mock(return_value=compiled), "Params": lambda: params}
   execute(body[start:end], env)
   available = present or cable
@@ -147,7 +147,7 @@ def test_big_worker_waits_before_load_and_timeout_preserves_small_fallback(custo
                               small_version=1, small_id="small", small_sha256="small-hash",
                               big_version=1, big_id="big", big_sha256="hash")
   from openpilot.starpilot.models.catalog import BY_ID, DEFAULT_SMALL, DEFAULT_SMALL_SHA256
-  env = {"BY_ID": BY_ID, "DEFAULT_SMALL": DEFAULT_SMALL, "DEFAULT_SMALL_SHA256": DEFAULT_SMALL_SHA256,
+  env: dict = {"BY_ID": BY_ID, "DEFAULT_SMALL": DEFAULT_SMALL, "DEFAULT_SMALL_SHA256": DEFAULT_SMALL_SHA256,
          "time": SimpleNamespace(monotonic=lambda: 0), "cloudlog": Mock(), "selection": selection,
          "CHESTNUT": True, "vipc_client_main": SimpleNamespace(width=1928, height=1208), "wait_for_chestnut": wait,
          "ModelState": state, "load_verified_model": verified, "modeld_pkl_path": lambda big: "bundled-big" if big else "bundled-small",
@@ -202,13 +202,15 @@ def test_native_ui_keeps_loading_during_enumeration_then_reports_failure(previou
   chestnut_enum = next(node for node in body if isinstance(node, ast.ClassDef) and node.name == "ChestnutState")
   ui_class = next(node for node in body if isinstance(node, ast.ClassDef) and node.name == "UIState")
   update = next(node for node in ui_class.body if isinstance(node, ast.FunctionDef) and node.name == "_update_chestnut_state")
-  env = {"Enum": Enum}
+  env: dict = {"Enum": Enum, "time": SimpleNamespace(monotonic_ns=lambda: 1_000_000_000)}
   execute([chestnut_enum, update], env)
   states = env["ChestnutState"]
 
   class Messages(dict):
     recv_frame = {"modelV2": 2}
     alive = {"modelV2": True}
+    valid = {"modelV2": True}
+    logMonoTime = {"modelV2": 1_000_000_000}
 
   ui = SimpleNamespace(sm=Messages(deviceState=SimpleNamespace(chestnutPresent=False), modelV2=SimpleNamespace(big=False)),
                        started=True, started_frame=1, chestnut_present=True, chestnut_compiled=True,
@@ -223,7 +225,12 @@ def test_native_ui_keeps_loading_during_enumeration_then_reports_failure(previou
   assert ui.chestnut_state is states.DISCONNECTED
   ui.chestnut_present, ui.chestnut_compiled = True, False
   env["_update_chestnut_state"](ui)
-  assert ui.chestnut_state is states.UNCOMPILED
+  assert ui.chestnut_state is states.FAILED
+  ui.sm["deviceState"].chestnutPresent = True
+  ui.sm["modelV2"].big = True
+  ui.chestnut_active = True
+  env["_update_chestnut_state"](ui)
+  assert ui.chestnut_state is states.ACTIVE
 
 
 def test_recovery_child_resolves_small_without_randomizer_or_amd(monkeypatch):
@@ -237,7 +244,7 @@ def test_recovery_child_resolves_small_without_randomizer_or_amd(monkeypatch):
   start = next(i for i, node in enumerate(body) if isinstance(node, ast.ImportFrom) and node.module == manager.__name__)
   end = next(i for i, node in enumerate(body) if ast.unparse(node) == "gc.disable()")
   params = Mock()
-  env = {"chestnut_present": lambda: True, "cable_connected": lambda: True,
+  env: dict = {"chestnut_present": lambda: True, "cable_connected": lambda: True,
          "chestnut_compiled": Mock(side_effect=AssertionError("Big compiled probe forbidden")),
          "Params": lambda: params, "os": SimpleNamespace(getenv=lambda key: "1")}
   execute(body[start:end], env)
@@ -252,7 +259,7 @@ def test_recovery_small_receipt_reports_runtime_stall_not_load_failure():
   statement = next(node for node in main_body() if isinstance(node, ast.Expr) and
                    isinstance(node.value, ast.Call) and ast.unparse(node.value.func) == 'receipt_owner.loaded')
   receipt = Mock()
-  env = {'model': SimpleNamespace(chestnut=False, model_id='bundled-current'), 'small_prepared': object(),
+  env: dict = {'model': SimpleNamespace(chestnut=False, model_id='bundled-current'), 'small_prepared': object(),
          'receipt_owner': receipt, 'ModelVariant': ModelVariant, 'initial_chestnut_fallback': False,
          'recovery_small_only': True, 'selected_small_failed': False, 'requested_model_id': 'requested-big'}
   execute([statement], env)
@@ -271,7 +278,7 @@ def test_failed_selected_small_uses_only_verified_rdf_or_refuses_startup(monkeyp
   monkeypatch.setattr(manager, 'shipped_default', lambda: None if fallback_failure == 'missing' else shipped)
   loader = Mock(side_effect=[RuntimeError('selected failed'), RuntimeError('RDF failed') if fallback_failure == 'load' else (rdf, 'rdf-prepared')])
   stock = Mock(side_effect=AssertionError('stock model must not load'))
-  env = {'selection': SimpleNamespace(small_path=Path('custom.pkl'), small_version='v15', small_id='gwm8223', small_sha256='custom'),
+  env: dict = {'selection': SimpleNamespace(small_path=Path('custom.pkl'), small_version='v15', small_id='gwm8223', small_sha256='custom'),
          'vipc_client_main': SimpleNamespace(width=1928, height=1208), 'load_verified_model': loader,
          'ModelState': stock, 'modeld_pkl_path': stock, 'cloudlog': Mock(), 'BY_ID': BY_ID,
          'DEFAULT_SMALL': DEFAULT_SMALL, 'DEFAULT_SMALL_SHA256': DEFAULT_SMALL_SHA256}

@@ -289,8 +289,7 @@ class SoftwareOperationsTest(unittest.TestCase):
     self.act("fast", "main")
     self.assertEqual(self.process.sent, ["fast"])
 
-  def test_fast_rejects_other_or_stale_installed_branch(self):
-    self.denied("fast", 409, "release")
+  def test_fast_rejects_stale_installed_identity(self):
     self.git[self.installed] = ("main", "b" * 40)
     self.denied("fast", 409, "main")
     self.git[self.installed] = ("release", "a" * 40)

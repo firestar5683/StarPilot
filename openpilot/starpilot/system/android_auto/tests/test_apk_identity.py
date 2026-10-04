@@ -166,10 +166,12 @@ def test_import_stops_when_master_switch_is_disabled(monkeypatch, tmp_path):
   def extract(*args, progress, **kwargs):
     enabled["value"] = False
     progress("reading")
-    pytest.fail("disabled import continued")
+    raise AssertionError("disabled import continued")
 
   monkeypatch.setattr(apk_identity, "extract_identity", extract)
-  monkeypatch.setattr(apk_identity, "install_identity", lambda *a: pytest.fail("disabled import installed a certificate"))
+  def unexpected_install(*args):
+    raise AssertionError("disabled import installed a certificate")
+  monkeypatch.setattr(apk_identity, "install_identity", unexpected_install)
   job = apk_identity.ImportJob(work_dir=tmp_path)
   job.start(path=source, enabled=lambda: enabled["value"])
   job.thread.join(timeout=5)
@@ -209,7 +211,7 @@ def test_import_job_from_upload_and_from_link(tmp_path, ident):
       self.end_headers()
       self.wfile.write(served)
 
-    def log_message(self, *args):
+    def log_message(self, *args, **kwargs):
       pass
 
   server = http.server.HTTPServer(("127.0.0.1", 0), Handler)

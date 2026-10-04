@@ -42,7 +42,7 @@ def test_full_lkas_long_only_actual_owners_output_and_presentation(alt, prearmed
         return cs
 
     class Radar(RadarInterfaceBase):
-      def update(self, _can):
+      def update(self, can_packets):
         return None
 
     card = Car(Interface(), Radar(cp))
@@ -58,9 +58,10 @@ def test_full_lkas_long_only_actual_owners_output_and_presentation(alt, prearmed
     def send(service, message):
       captured[service] = messaging.log_from_bytes(message.to_bytes())
 
-    card.pm, sd.pm = SimpleNamespace(send=send), SimpleNamespace(send=send)
+    vars(card)['pm'] = SimpleNamespace(send=send)
+    vars(sd)['pm'] = SimpleNamespace(send=send)
     card.CC_prev = car.CarControl(enabled=True, latActive=True, longActive=True)
-    card.aol_card_intent.allowed_latch = prearmed
+    vars(card.aol_card_intent)['allowed_latch'] = prearmed
 
     def tick(pressed, expected_lateral, *, native_lateral=True):
       nonlocal now

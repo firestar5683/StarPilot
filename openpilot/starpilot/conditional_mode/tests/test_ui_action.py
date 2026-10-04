@@ -1,5 +1,7 @@
 """Typed native UI requests joined to the existing planner manual owner."""
 
+from typing import Any
+
 from collections import deque
 import json
 from pathlib import Path
@@ -26,6 +28,11 @@ from openpilot.starpilot.conditional_mode.status import CHOICES, ModeObservation
 from openpilot.starpilot.conditional_mode.tests.test_projection import BOOT, MONO, FakeSubMaster, serialized_scene
 from openpilot.starpilot.conditional_mode.ui_action import ConditionalUiActionOwner, LIFETIME_NS, observation
 
+
+
+
+def changed_arguments(arguments: dict[str, Any], changes: dict[str, Any]) -> dict[str, Any]:
+  return {**arguments, **changes}
 
 class Publisher:
   def __init__(self):
@@ -92,7 +99,7 @@ class TestUiAction(unittest.TestCase):
     self.ack_sequence += 1
     code = self.owner.manual.code if code is None else code
     proposal = ModeObservation(self.owner.status.session, 1, stamp, stamp + LIFETIME_NS, MONO, stamp, stamp, 1,
-                               settings_fingerprint(self.owner.settings.current), self.choice, effective,
+                               settings_fingerprint(self.owner.settings.current) or "", self.choice, effective,
                                'proposed', 'manual' if code else 'automatic', code)
     event = publish_ack(session=session, sequence=self.ack_sequence if sequence is None else sequence,
                         observed_ns=stamp, selfdrive_state_ns=stamp, drive_id=MONO,
@@ -105,7 +112,7 @@ class TestUiAction(unittest.TestCase):
     self.ack(stamp, effective=effective, code=code)
     ui = self.ui if ui is None else ui
     context = ui.context(self.sm, self.cp, now_ns=stamp + 1000)
-    self.assertIsNotNone(context)
+    assert context is not None
     self.assertTrue(ui.dispatch(context, self.sm, self.cp, self.publisher, now_ns=stamp + 2000))
     return self.publisher.events[-1]
 
@@ -142,7 +149,7 @@ class TestUiAction(unittest.TestCase):
         self.assertEqual(self.owner.manual_state.intent, ManualIntent.FORCE_CHILL if effective else ManualIntent.FORCE_EXPERIMENTAL)
         self.assertIs(proposal.override_experimental, not effective)
         consumer = ModeConsumer()
-        arguments = {'now_ns': stamp + 21_000_000, 'now_boot_ns': BOOT + stamp - MONO + 21_000_000,
+        arguments: dict[str, Any] = {'now_ns': stamp + 21_000_000, 'now_boot_ns': BOOT + stamp - MONO + 21_000_000,
                      'sample_skew_ns': 1000, 'message_ns': stamp + 21_000_000, 'receipt_ns': stamp + 21_000_000,
                      'drive_id': MONO, 'model_ns': stamp + 20_000_000, 'car_state_ns': stamp + 20_000_000,
                      'authority': True, 'stock_experimental': False, 'choice': choice,
@@ -152,7 +159,7 @@ class TestUiAction(unittest.TestCase):
         proposal, snapshot = self.sample(later, effective=not effective)
         status = self.owner.status.attach(None, proposal, snapshot, now_ns=later + 1_000_000, drive_id=MONO,
                                           model_ns=later, car_state_ns=later)
-        result = consumer.sample(status.slcState, **(arguments | {'now_ns': later + 2_000_000,
+        result = consumer.sample(status.slcState, **changed_arguments(arguments, {'now_ns': later + 2_000_000,
           'now_boot_ns': BOOT + later - MONO + 2_000_000, 'message_ns': status.logMonoTime,
           'receipt_ns': later + 1_000_000, 'model_ns': later, 'car_state_ns': later}))
         self.assertTrue(result.accepted)
@@ -203,8 +210,8 @@ class TestUiAction(unittest.TestCase):
     stamp = MONO + 50_000_000
     event = self.request(stamp)
     observed = event.logMonoTime
-    self.assertIsNotNone(observation(event, observed))
-    self.assertIsNotNone(observation(event, observed + LIFETIME_NS))
+    assert observation(event, observed) is not None
+    assert observation(event, observed + LIFETIME_NS) is not None
     self.assertIsNone(observation(event, observed - 1))
     self.assertIsNone(observation(event, observed + LIFETIME_NS + 1))
     for field, value in (('version', 2), ('sessionId', 'bad'), ('sequence', 0), ('driveStartMonoTime', observed),
@@ -223,6 +230,7 @@ class TestUiAction(unittest.TestCase):
     stamp = MONO + 50_000_000
     self.ack(stamp)
     context = self.ui.context(self.sm, self.cp, now_ns=stamp + 1000)
+    assert context is not None
     self.ack(stamp + 10_000_000)
     current = self.ui.context(self.sm, self.cp, now_ns=stamp + 10_001_000)
     self.assertEqual(context.token, current.token)
@@ -241,6 +249,8 @@ class TestUiAction(unittest.TestCase):
     event = self.request(stamp)
     self.sources(stamp + 10_000_000)
     snapshot = self.owner.settings.current
+    assert snapshot is not None
+    assert snapshot.document_raw is not None
     def deliver():
       self.owner._ui_event(event, snapshot, self.choice, MONO, self.sm, self.cp, stamp + 11_000_000)
       self.assertEqual(self.owner.manual.code, 0)
@@ -279,14 +289,15 @@ class TestUiAction(unittest.TestCase):
     stamp = MONO + 50_000_000
     old = self.ack(stamp, sequence=10)
     context = self.ui.context(self.sm, self.cp, now_ns=stamp + 1000)
-    self.assertIsNotNone(context)
+    assert context is not None
+    assert context is not None
     self.assertTrue(self.ui.dispatch(context, self.sm, self.cp, self.publisher, now_ns=stamp + 2000))
     self.assertFalse(self.ui.dispatch(context, self.sm, self.cp, self.publisher, now_ns=stamp + 3000))
     self.ack(stamp + 10_000_000, sequence=9)
     self.assertIsNone(self.ui.context(self.sm, self.cp, now_ns=stamp + 10_001_000))
     self.ack(stamp + 20_000_000, sequence=1, session='c' * 32)
     self.assertIsNone(self.ui.context(self.sm, self.cp, now_ns=stamp + 20_001_000))
-    self.assertIsNotNone(self.ui.context(self.sm, self.cp, now_ns=stamp + 20_002_000))
+    assert self.ui.context(self.sm, self.cp, now_ns=stamp + 20_002_000) is not None
     self.install('starpilotSelfdriveState', old, stamp)
     self.assertIsNone(self.ui.context(self.sm, self.cp, now_ns=stamp + 20_003_000))
 

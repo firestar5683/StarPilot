@@ -23,8 +23,11 @@ class Provider:
 
 
 def tile_owner(tmp_path, provider, token='pk.fixture'):
-  owner = NavigationOwner(tmp_path, runtime_source=lambda: None, session=provider)
-  owner.read = lambda: {'token': token}
+  class TileOwner(NavigationOwner):
+    def read(self):
+      return {'token': token}
+
+  owner = TileOwner(tmp_path, runtime_source=lambda: None, session=provider)
   return owner
 
 

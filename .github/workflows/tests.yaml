@@ -33,6 +33,9 @@ jobs:
     - uses: actions/checkout@v7
     - name: Validate tracked dependencies
       run: python3 tools/vendor/check.py --revision HEAD
+    - run: ./tools/op.sh setup
+    - name: Build native dependencies for packaging tests
+      run: scons -j2 openpilot/common/libparams_c.so msgq_repo/msgq/ipc_pyx.so
     - name: Test dependency and packaging tools
       run: |
         python3 -m unittest discover -s tools/vendor/tests -v
@@ -47,17 +50,23 @@ jobs:
 
   build_release:
     name: build release
-    runs-on: ${{
-      (github.repository == 'commaai/openpilot') &&
-      ((github.event_name != 'pull_request') ||
-      (github.event.pull_request.head.repo.full_name == 'commaai/openpilot'))
-      && fromJSON('["namespace-profile-amd64-8x16"]')
-      || fromJSON('["ubuntu-24.04"]') }}
+    runs-on: ubuntu-24.04-arm
     env:
       STRIPPED_DIR: /tmp/releasepilot
       PYTHONPATH: /tmp/releasepilot
     steps:
     - uses: actions/checkout@v7
+    - uses: actions/setup-go@v7
+      with:
+        go-version: '1.25.1'
+        cache-dependency-path: mapd_repo/go.sum
+    - name: Build the pinned release map provider
+      env:
+        GOTOOLCHAIN: local
+      run: |
+        sudo apt-get update && sudo apt-get install -y --no-install-recommends pkg-config zlib1g-dev
+        (cd mapd_repo && go mod download)
+        PYTHONPATH="$GITHUB_WORKSPACE" python3 -m openpilot.starpilot.maps.package_shadow
     - name: Build devel
       timeout-minutes: 1
       run: TARGET_DIR=$STRIPPED_DIR tools/release/build_stripped.sh
@@ -188,9 +197,9 @@ jobs:
         STARPILOT_SHADOW_IPC_REQUIRED: '1'
         STARPILOT_SHADOW_EXEC_REQUIRED: '1'
         STARPILOT_PYTHON: ${{ github.workspace }}/.venv/bin/python
-      run: go test -mod=readonly -race -run '^TestShadow(GoPythonIPC|ExecutableHostGpsIPC)$' -count=1 -v
+      run: go test -mod=readonly -race -run '^Test(MsgqNativeLayout|Shadow(GoPythonIPC|ExecutableHostGpsIPC))$' -count=1 -v
     - name: Save complete unit test results
-      if: always()
+      if: ${{ always() && (hashFiles('unit-test-results.json') != '' || hashFiles('gm-test-results.json') != '') }}
       uses: actions/upload-artifact@v4
       with:
         name: unit-test-results
@@ -238,13 +247,15 @@ jobs:
     steps:
     - uses: actions/checkout@v7
     - run: ./tools/op.sh setup
+    - name: Build native host dependencies
+      run: scons
     - name: Run explicit vehicle suite and record every result
       timeout-minutes: 20
       run: python3 tools/ci/run_vehicle_tests.py --suite "${{ matrix.suite }}" --output "ci-results/${{ matrix.suite }}"
-    - name: Require complete fleet coverage
+    - name: Require current complete interface regression coverage
       if: ${{ always() && matrix.suite == 'interfaces' }}
       run: |
-        python3 tools/ci/fleet_coverage.py \
+        python3 tools/ci/fleet_coverage.py --require interfaces \
           --interface-coverage ci-results/interfaces/coverage.json \
           --interface-results ci-results/interfaces/results.json \
           --output ci-results/interfaces/fleet-coverage.json
@@ -341,10 +352,10 @@ jobs:
       run: openpilot/selfdrive/test/process_replay/test_processes.py -j$(nproc)
     - name: Print diff
       id: print-diff
-      if: always()
+      if: ${{ always() && hashFiles('openpilot/selfdrive/test/process_replay/diff.txt') != '' }}
       run: cat openpilot/selfdrive/test/process_replay/diff.txt
     - name: Print diff report
-      if: always()
+      if: ${{ always() && hashFiles('openpilot/selfdrive/test/process_replay/diff_report.txt') != '' }}
       run: cat openpilot/selfdrive/test/process_replay/diff_report.txt
     - uses: actions/upload-artifact@v7
       if: always()

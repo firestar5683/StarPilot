@@ -64,8 +64,9 @@ class TestTorqueLearning(unittest.TestCase):
           params.put_bool(LEARNING_OFF_KEY, False, block=True)
           self.assertTrue(learning_allowed(params, cp))
       params.put_bool(LEARNING_OFF_KEY, True, block=True)
-      for vehicle in (HYUNDAI.KIA_EV6, HYUNDAI.HYUNDAI_SONATA, TOYOTA.TOYOTA_RAV4_TSS2):
-        self.assertTrue(learning_allowed(params, cp_for(vehicle)))
+      for vehicle in (HYUNDAI.KIA_EV6, HYUNDAI.HYUNDAI_SONATA):
+        self.assertFalse(learning_allowed(params, cp_for(vehicle)))
+      self.assertTrue(learning_allowed(params, cp_for(TOYOTA.TOYOTA_RAV4_TSS2)))
 
   def test_learner_does_not_restore_collect_estimate_or_overwrite_disabled_cache(self):
     for vehicle in VEHICLES:
@@ -218,6 +219,7 @@ class TestTorqueLearning(unittest.TestCase):
       params.put_bool(LEARNING_OFF_KEY, True, block=True)
       host.settings = read_settings(params, base)
       self.assertTrue(host.settings.valid)
+      assert host.settings.user_friction is not None
       self.assertAlmostEqual(host.settings.user_friction, base.friction * 1.2)
       self.assertEqual(host._select(learned, now).source, TorqueSource.USER)
       self.assertFalse(TorqueHost(params, cp, allow_learning=learning_allowed(params, cp)).allow_learning)
@@ -229,7 +231,9 @@ class TestTorqueLearning(unittest.TestCase):
       params.put('CarParams', cp.to_bytes(), block=True)
       params.put_bool('AdvancedLateralTune', True, block=True)
       select(params, cp, ControllerMode.STANDARD)
+      params.put('SteerFriction', cp.lateralTuning.torque.friction * 1.2, block=True)
       controls = Controls()
+      params.remove('SteerFriction')
       host, base = controls.torque_host, controls.torque_host.vehicle
       now = 1_000_000_000
       learned = LearnedFrame(now, factor=base.lat_accel_factor * 1.2, offset=0.03, friction=base.friction * 1.1)
@@ -244,6 +248,7 @@ class TestTorqueLearning(unittest.TestCase):
       self.assertEqual(controls.LaC.controller_mode, ControllerMode.STANDARD)
       self.assertEqual(host.selected.source, TorqueSource.LEARNED)
       params.put('SteerLatAccel', base.lat_accel_factor * 1.1, block=True)
+      assert host is not None
       host.last_refresh_ns = None
       host.sample(learned, now_ns=stamp + 10_000_000, lat_active=True)
       self.assertEqual(host.selected.source, TorqueSource.USER)

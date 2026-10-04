@@ -1,4 +1,3 @@
-from unittest.mock import patch
 import unittest
 from types import SimpleNamespace
 
@@ -9,20 +8,9 @@ from opendbc.car.gm.carcontroller import CarController
 from opendbc.car.gm.carstate import CarState
 from opendbc.car.gm.gmcan import pedal_crc
 from opendbc.car.gm.interface import CarInterface
-from opendbc.car.gm.values import CAR, DBC, GMFlags, GMSafetyFlags, NO_ACC_BOLT_CAR, PEDAL_BOLT_CAR, BOLT_CC_WORDS
+from opendbc.car.gm.values import CAR, DBC, GMFlags, GMSafetyFlags, NO_ACC_BOLT_CAR, PEDAL_BOLT_CAR
 
 
-class SavedPedalSetting:
-  def __init__(self, enabled=False, missing=False):
-    self.enabled = enabled
-    self.missing = missing
-
-  def get_bool(self, key):
-    assert key == "GMPedalLongitudinal"
-    if self.missing:
-      from openpilot.common.params import UnknownKeyName
-      raise UnknownKeyName(key)
-    return self.enabled
 
 
 def params(candidate, setting=False, pedal=False, alpha_long=False, missing_key=False, camera=False):
@@ -31,25 +19,20 @@ def params(candidate, setting=False, pedal=False, alpha_long=False, missing_key=
     fingerprint[2][0x180] = 4
   if pedal:
     fingerprint[0][0x201] = 6
-  with patch("opendbc.car.gm.interface.Params", return_value=SavedPedalSetting(setting, missing_key)):
-    return CarInterface.get_params(candidate, fingerprint, [], alpha_long, False, False)
+  return CarInterface.get_params(candidate, fingerprint, [], alpha_long, False, False)
 
 
 class TestBoltPedalIdentity(unittest.TestCase):
-  def test_pedal_requires_platform_observation_and_saved_opt_in(self):
+  def test_pedal_requires_exact_hardware_not_saved_opt_in(self):
     for candidate in PEDAL_BOLT_CAR:
-      with self.subTest(candidate=candidate):
-        for setting, observed, missing in ((False, True, False), (True, False, False), (False, True, True)):
-          cp = params(candidate, setting, observed, alpha_long=True, missing_key=missing)
-          self.assertTrue(cp.openpilotLongitudinalControl)
-          self.assertFalse(cp.flags & GMFlags.PEDAL_LONG.value)
-          self.assertFalse(cp.safetyConfigs[0].safetyParam & GMSafetyFlags.PEDAL_LONG.value)
-
-        cp = params(candidate, True, True)
-        self.assertTrue(cp.openpilotLongitudinalControl)
-        self.assertTrue(cp.flags & GMFlags.PEDAL_LONG.value)
-        self.assertTrue(cp.safetyConfigs[0].safetyParam & GMSafetyFlags.PEDAL_LONG.value)
-        self.assertFalse(cp.pcmCruise)
+      for setting in (False, True):
+        for observed in (False, True):
+          for missing in (False, True):
+            with self.subTest(candidate=candidate, setting=setting, observed=observed, missing=missing):
+              cp = params(candidate, setting, observed, alpha_long=True, missing_key=missing)
+              self.assertEqual(bool(cp.flags & GMFlags.PEDAL_LONG), observed)
+              self.assertEqual(bool(cp.safetyConfigs[0].safetyParam & GMSafetyFlags.PEDAL_LONG), observed)
+              self.assertFalse(cp.pcmCruise)
 
   def test_ordinary_cruise_ownership_is_never_stock_acc(self):
     for candidate in NO_ACC_BOLT_CAR:
@@ -57,20 +40,16 @@ class TestBoltPedalIdentity(unittest.TestCase):
         with self.subTest(candidate=candidate, enabled=enabled):
           cp = params(candidate, enabled, True)
           self.assertFalse(cp.pcmCruise)
-          if enabled:
-            self.assertTrue(cp.safetyConfigs[0].safetyParam & GMSafetyFlags.NO_ACC.value)
-            self.assertFalse(cp.safetyConfigs[0].safetyParam & GMSafetyFlags.BOLT_ACC_PEDAL.value)
-          else:
-            self.assertEqual(cp.safetyConfigs[0].safetyParam, BOLT_CC_WORDS[candidate][1])
-            self.assertTrue(cp.flags & GMFlags.CC_LONG.value)
+          self.assertTrue(cp.safetyConfigs[0].safetyParam & GMSafetyFlags.NO_ACC)
+          self.assertFalse(cp.safetyConfigs[0].safetyParam & GMSafetyFlags.BOLT_ACC_PEDAL)
 
-  def test_existing_bolt_stock_acc_is_unaffected_by_pedal_setting(self):
-    without = params(CAR.CHEVROLET_BOLT_EUV, False, True)
-    with_setting = params(CAR.CHEVROLET_BOLT_EUV, True, True)
-    self.assertEqual(without.openpilotLongitudinalControl, with_setting.openpilotLongitudinalControl)
-    self.assertEqual(without.pcmCruise, with_setting.pcmCruise)
-    self.assertEqual(without.safetyConfigs[0].safetyParam, with_setting.safetyConfigs[0].safetyParam)
-    self.assertFalse(with_setting.flags & GMFlags.PEDAL_LONG.value)
+  def test_detected_stock_acc_bolt_selects_existing_pedal_owner(self):
+    for identity in (CAR.CHEVROLET_BOLT_EUV, CAR.CHEVROLET_BOLT_ACC_2022_2023):
+      cp = params(identity, False, True)
+      self.assertEqual(cp.carFingerprint, CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL)
+      self.assertTrue(cp.flags & GMFlags.PEDAL_LONG)
+      self.assertTrue(cp.openpilotLongitudinalControl)
+      self.assertFalse(cp.pcmCruise)
 
   def test_2022_pedal_variants_do_not_claim_automatic_fingerprint_identity(self):
     from opendbc.car.gm.fingerprints import FINGERPRINTS, FW_VERSIONS

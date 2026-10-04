@@ -14,7 +14,12 @@ python tools/ci/fleet_coverage.py \
   --output ci-results/fleet-coverage.json
 ```
 
-The command exits zero only when its coverage contract passes. It compares the
+The default `--require complete` exits zero only when both interface and independent
+mode coverage pass. CI and predeploy use `--require interfaces` to require every
+exact interface obligation and stable current execution provenance. That choice
+does not clear mode gaps: the full report remains `uncovered` when mode evidence
+is absent, and `vehicle_qualification` remains `not_established`. The separate
+`interface_gate` records only interface errors, failures and gaps. It compares the
 exact registry IDs and one concrete interface test per ID, checks every execution
 record, verifies the companion results hash, and compares the reported checkout,
 suite runner, test runner, dependency manifest, pinned opendbc commit, CAN sources,
@@ -26,8 +31,9 @@ becomes a current pass. Upstream additions remain independent obligations even i
 they disappear from a later registry.
 The command refuses to overwrite an existing output file, including a failed or
 uncovered report. Use a fresh path for each run. A matching HEAD alone is not
-enough for current execution: relevant vehicle, CAN and runner worktree changes
-are flagged. Unrelated UI source changes do not invalidate vehicle execution.
+enough for current execution: the recorded before/after source snapshots must
+match the current snapshot, including relevant dirty source and native bytes.
+Unrelated UI source changes do not invalidate vehicle execution.
 
 Recorded control evidence may be supplied through `--mode-evidence path.json`:
 

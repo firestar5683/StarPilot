@@ -36,9 +36,11 @@ def test_large_aol_light_uses_same_perception_without_control_authority():
   view.fonts = Mock(profile=Profile.LARGE)
   view.fonts.measure.return_value = NS(width=100, height=30)
   view.camera_layer = view.background_layer = view.extra_overlays = None
-  view.set_speed = Mock()
-  view.set_speed.bounds.return_value = rl.Rectangle(88, 75, 176, 196)
-  view.speed_limit = view.current_speed = view.steering_wheel = view.torque_bar = Mock()
+  view.projection_viewport = None
+  view._corner_cache = onroad.CornerHintCache()
+  view.unified_speed = Mock()
+  view.unified_speed.bounds.return_value = rl.Rectangle(88, 75, 176, 196)
+  view.current_speed = view.steering_wheel = view.torque_bar = Mock()
   view.navigation = view.alert = Mock()
   with ExitStack() as stack:
     for name in dir(rl):

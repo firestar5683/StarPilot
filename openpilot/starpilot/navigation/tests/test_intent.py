@@ -1,3 +1,4 @@
+from openpilot.starpilot.navigation.wire import navigation_envelope
 from types import SimpleNamespace as NS
 
 import pytest
@@ -19,7 +20,8 @@ def sm():
   instruction = NS(maneuverType='turn', maneuverModifier='right', distanceMeters=30.)
   nav = NS(enabled=True, controlValid=True, status='guiding', sessionId='producer', revision='one', frameMonoTime=NOW,
            startedMonoTime=10_000_000_000, locationMonoTime=NOW, instruction=instruction, nextManeuver=instruction)
-  return SM(starpilotNavigation=nav, deviceState=NS(started=True, startedMonoTime=10_000_000_000),
+  nav.version = 2
+  return SM(starpilotNavigation=NS(navigation=nav), deviceState=NS(started=True, startedMonoTime=10_000_000_000),
             carState=NS(canValid=True, canTimeout=False, gearShifter='drive', vEgo=5., standstill=False, leftBlinker=False,
                         rightBlinker=True, leftBlindspot=False, rightBlindspot=False, gasPressed=False, brakePressed=False),
             carControl=NS(latActive=True, longActive=True))
@@ -43,7 +45,7 @@ def test_no_turn_without_vehicle_admission(sm, field, value):
 @pytest.mark.parametrize('field,value', [('controlValid', False), ('enabled', False), ('frameMonoTime', NOW-3_000_000_000),
                                         ('locationMonoTime', NOW+1), ('startedMonoTime', 1), ('sessionId', '')])
 def test_stale_previous_drive_and_disabled_nav_are_inert(sm, field, value):
-  setattr(sm['starpilotNavigation'], field, value)
+  setattr(sm['starpilotNavigation'].navigation, field, value)
   assert current_instruction(sm, NOW) is None
 
 
@@ -67,14 +69,14 @@ def test_turn_target_matches_dom_table(kind, modifier, mph):
 
 def test_new_event_roundtrip_keeps_route_and_control_evidence():
   message = messaging.new_message('starpilotNavigation')
-  message.starpilotNavigation = {'sessionId': 'owner', 'frameMonoTime': NOW, 'startedMonoTime': 10_000_000_000,
+  message.starpilotNavigation = navigation_envelope({'sessionId': 'owner', 'frameMonoTime': NOW, 'startedMonoTime': 10_000_000_000,
                                     'enabled': True, 'revision': 'one', 'controlValid': True, 'status': 'guiding',
                                     'instruction': {'text': 'Turn right', 'maneuverType': 'turn', 'maneuverModifier': 'right', 'distanceMeters': 30.},
-                                    'route': [{'latitude': 1., 'longitude': 2.}], 'locationMonoTime': NOW}
+                                    'route': [{'latitude': 1., 'longitude': 2.}], 'locationMonoTime': NOW})
   with log.Event.from_bytes(message.to_bytes()) as received:
     assert received.which() == 'starpilotNavigation'
-    assert received.starpilotNavigation.route[0].latitude == 1.
-    assert received.starpilotNavigation.controlValid
+    assert received.starpilotNavigation.navigation.route[0].latitude == 1.
+    assert received.starpilotNavigation.navigation.controlValid
 
 
 def test_native_planner_navigation_cap_and_default_equivalence():
@@ -101,9 +103,9 @@ def test_native_planner_navigation_cap_and_default_equivalence():
     assert baseline.output_a_target == absent.output_a_target
     np.testing.assert_array_equal(baseline.mpc.params, absent.mpc.params)
     nav = messaging.new_message('starpilotNavigation')
-    nav.starpilotNavigation = {'enabled': True, 'controlValid': True, 'status': 'guiding', 'sessionId': 'test',
+    nav.starpilotNavigation = navigation_envelope({'enabled': True, 'controlValid': True, 'status': 'guiding', 'sessionId': 'test',
                               'revision': 'one', 'frameMonoTime': now, 'startedMonoTime': DRIVE, 'locationMonoTime': now,
-                              'instruction': {'maneuverType': 'turn', 'maneuverModifier': 'right', 'distanceMeters': 20.}}
+                              'instruction': {'maneuverType': 'turn', 'maneuverModifier': 'right', 'distanceMeters': 20.}})
     frame['starpilotNavigation'] = nav.starpilotNavigation
     frame.logMonoTime['starpilotNavigation'] = now
     frame.valid['starpilotNavigation'] = frame.alive['starpilotNavigation'] = True
@@ -125,7 +127,7 @@ def test_turn_stop_hold_reuses_planner_stop_until_standstill(sm):
   sm['longitudinalPlan'].shouldStop = True
   assert sample() == log.Desire.none
   sm['longitudinalPlan'].shouldStop = False
-  sm['starpilotNavigation'].revision = 'favorite-added'
+  sm['starpilotNavigation'].navigation.revision = 'favorite-added'
   assert sample() == log.Desire.none
   sm['carState'].standstill = True
   assert sample() == log.Desire.none

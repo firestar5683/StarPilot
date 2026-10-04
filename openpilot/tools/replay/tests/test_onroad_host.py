@@ -3,6 +3,7 @@
 from pathlib import Path
 from types import SimpleNamespace
 import os
+import select
 import signal
 import subprocess
 import sys
@@ -172,7 +173,8 @@ class TestOnroadHost(unittest.TestCase):
     receiver = """import time
 from openpilot.cereal import messaging
 from openpilot.starpilot.ui.runtime_snapshot import current_message, _alert
-sm = messaging.SubMaster(['selfdriveState'], ignore_alive=['selfdriveState'])
+sm = messaging.SubMaster(['selfdriveState'])
+print('READY', flush=True)
 seen = []
 deadline = time.monotonic() + 5
 while time.monotonic() < deadline:
@@ -194,10 +196,15 @@ assert seen[-2:] == ['full', 'clear'], seen
     with owned_ipc_namespace(prefix):
       subscriber = subprocess.Popen([sys.executable, "-c", receiver], env=env, stdout=subprocess.PIPE,
                                     stderr=subprocess.PIPE, text=True)
-      publisher = subprocess.Popen([sys.executable, "-m", "openpilot.tools.replay.alert_demo",
-                                    "--delay", ".2", "--hold", ".5"], env=env,
-                                   stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
+      publisher = None
       try:
+        assert subscriber.stdout is not None
+        readable, _, _ = select.select([subscriber.stdout], [], [], 5)
+        self.assertTrue(readable, "Alert subscriber must initialize before publishing")
+        self.assertEqual(subscriber.stdout.readline().strip(), "READY")
+        publisher = subprocess.Popen([sys.executable, "-m", "openpilot.tools.replay.alert_demo",
+                                      "--delay", ".2", "--hold", ".5"], env=env,
+                                     stdout=subprocess.PIPE, stderr=subprocess.PIPE, text=True)
         stdout, stderr = subscriber.communicate(timeout=7)
         self.assertEqual(subscriber.returncode, 0, stdout + stderr)
         self.assertIsNone(publisher.poll(), "Preview publisher must remain owned after clearing")
@@ -205,9 +212,10 @@ assert seen[-2:] == ['full', 'clear'], seen
         if subscriber.poll() is None:
           subscriber.kill()
           subscriber.wait(timeout=2)
-        if publisher.poll() is None:
-          publisher.terminate()
-        publisher.communicate(timeout=3)
+        if publisher is not None:
+          if publisher.poll() is None:
+            publisher.terminate()
+          publisher.communicate(timeout=3)
 
   def test_alert_module_refuses_unowned_namespace_before_publishing(self):
     env = dict(os.environ, SP_HOST_RUNTIME="1", OPENPILOT_PREFIX="replay-missing-namespace")

@@ -1,3 +1,4 @@
+from unittest.mock import Mock
 import pytest
 from openpilot.starpilot.bluetooth.owner import BluetoothOwner, BluetoothRejected
 from openpilot.starpilot.bluetooth.radio_preference import RadioPreference
@@ -418,14 +419,14 @@ def test_incoming_agent_is_registered_only_for_window_and_unregistered_on_close(
       return Filter()
 
   client = PhoneRoleBlueZ.__new__(PhoneRoleBlueZ)
-  client.router = Router()
-  client._call = lambda _path, _iface, name, _signature, body: calls.append((name, body))
+  client.router = Mock(wraps=Router())
+  client._call = Mock(side_effect=lambda _path, _iface, name, _signature, body: calls.append((name, body)))
 
   class Agent:
     def close(self):
       calls.append(('agent_closed',))
 
-  close = client.register_incoming_agent(Agent(), ':1.20')
+  close = client.register_incoming_agent(Mock(wraps=Agent()), ':1.20')
   assert calls[:2] == [('RegisterAgent', (AA_AGENT_PATH, 'KeyboardDisplay')), ('RequestDefaultAgent', (AA_AGENT_PATH,))]
   close()
   assert ('UnregisterAgent', (AA_AGENT_PATH,)) in calls
@@ -450,14 +451,14 @@ def test_default_agent_failure_cleans_registration_before_pairing_visibility():
       return Filter()
 
   client = PhoneRoleBlueZ.__new__(PhoneRoleBlueZ)
-  client.router = Router()
+  client.router = Mock(wraps=Router())
 
   def call(_path, _iface, name, _signature, _body):
     calls.append(name)
     if name == 'RequestDefaultAgent':
       raise BluetoothRejected('permission denied')
 
-  client._call = call
+  client._call = Mock(side_effect=call)
   with pytest.raises(BluetoothRejected, match='permission denied'):
-    client.register_incoming_agent(object(), ':1.20')
+    client.register_incoming_agent(Mock(wraps=object()), ':1.20')
   assert calls == ['RegisterAgent', 'RequestDefaultAgent', 'UnregisterAgent', 'filter_closed']

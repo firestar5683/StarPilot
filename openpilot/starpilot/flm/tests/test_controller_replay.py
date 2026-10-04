@@ -5,7 +5,7 @@ from pathlib import Path
 from types import SimpleNamespace
 import unittest
 
-from opendbc.car import structs
+from opendbc.car import structs, scale_rot_inertia, scale_tire_stiffness
 from opendbc.car.car_helpers import interfaces
 from opendbc.car.hyundai.values import CAR as HYUNDAI
 from opendbc.car.toyota.values import CAR as TOYOTA
@@ -34,6 +34,9 @@ def _params(*, firmware_2025=False):
   for name, value in (("mass", 2084.0), ("wheelbase", 2.97), ("centerToFront", 1.188),
                       ("steerRatio", 14.26), ("tireStiffnessFactor", 0.65)):
     setattr(cp, name, value)
+  cp.rotationalInertia = scale_rot_inertia(cp.mass, cp.wheelbase)
+  cp.tireStiffnessFront, cp.tireStiffnessRear = scale_tire_stiffness(
+    cp.mass, cp.wheelbase, cp.centerToFront, cp.tireStiffnessFactor)
   cp.lateralTuning.torque.latAccelFactor = 3.0
   cp.lateralTuning.torque.latAccelOffset = 0.0
   cp.lateralTuning.torque.friction = 0.09
@@ -45,12 +48,24 @@ def _params(*, firmware_2025=False):
   return cp
 
 
-def _controller(cp, surface=None):
+def _controller(cp, surface=None, *, original_constructor_context=False):
   controller = LatControlTorque(cp.as_reader(), interfaces[HYUNDAI.HYUNDAI_IONIQ_6](cp), DT_CTRL, turn_assist=True)
   if surface is not None:
     # Replace before the first update. The production constructor always uses None.
     controller.starpilot_extension.policy = Ioniq6TorquePolicy(controller, cp.as_reader(), surface=surface, turn_assist=True)
+  if original_constructor_context:
+    # These frozen vectors invoke the original constructor directly. Dom
+    # controlsd replaces this curve with the saved/default flat gain each tick;
+    # this is not a drive-loop replay. Keep the original literal context here.
+    controller.pid._k_p = [[1, 1.5, 2., 3., 5, 7.5, 10, 15, 30],
+                           [250, 120, 65, 30, 11.5, 5.5, 3.5, 2., .6]]
   return controller
+
+
+def _assert_rows(test, actual, expected):
+  for row, reference in zip(actual, expected, strict=True):
+    for value, frozen in zip(row, reference, strict=True):
+      test.assertAlmostEqual(value, frozen, places=8)
 
 
 def _trace(controller, cp, sequence):
@@ -92,11 +107,9 @@ class TestIoniq6ControllerReplay(unittest.TestCase):
         with self.subTest(firmware=firmware, mode=mode):
           cp = _params(firmware_2025=fw)
           surface = Ioniq6Surface.validated("firmware_2025" if fw else "standard", _TUNED_KNOBS) if mode == "tuned" else None
-          actual = _trace(_controller(cp, surface), cp, SEQUENCE)
+          actual = _trace(_controller(cp, surface, original_constructor_context=True), cp, SEQUENCE)
           expected = _GOLDEN["cases"][f"{firmware}_{mode}"]
-          for row, reference in zip(actual, expected, strict=True):
-            for value, frozen in zip(row, reference, strict=True):
-              self.assertAlmostEqual(value, frozen, places=8)
+          _assert_rows(self, actual, expected)
 
   def test_extended_frozen_filter_limit_override_and_reset_trace(self):
     self.assertEqual(_EXTENDED["sourceCommit"], "678af783")
@@ -113,11 +126,9 @@ class TestIoniq6ControllerReplay(unittest.TestCase):
         with self.subTest(firmware=firmware, mode=mode):
           cp = _params(firmware_2025=fw)
           surface = Ioniq6Surface.validated("firmware_2025" if fw else "standard", _TUNED_KNOBS) if mode == "tuned" else None
-          actual = _trace(_controller(cp, surface), cp, sequence)
+          actual = _trace(_controller(cp, surface, original_constructor_context=True), cp, sequence)
           expected = _EXTENDED["cases"][f"{firmware}_{mode}"]
-          for row, reference in zip(actual, expected, strict=True):
-            for value, frozen in zip(row, reference, strict=True):
-              self.assertAlmostEqual(value, frozen, places=8)
+          _assert_rows(self, actual, expected)
 
   def test_actual_torque_parameter_update_recalculates_frozen_pid_limits(self):
     self.assertEqual(_LIVE["sourceControllerSha256"], _GOLDEN["controllerSha256"])
@@ -127,7 +138,7 @@ class TestIoniq6ControllerReplay(unittest.TestCase):
         with self.subTest(firmware=firmware, mode=mode):
           cp = _params(firmware_2025=fw)
           surface = Ioniq6Surface.validated("firmware_2025" if fw else "standard", _TUNED_KNOBS) if mode == "tuned" else None
-          controller = _controller(cp, surface)
+          controller = _controller(cp, surface, original_constructor_context=True)
           expected = _LIVE["cases"][f"{firmware}_{mode}"]
           self.assertAlmostEqual(controller.pid.pos_limit, expected["before"]["posLimit"], places=8)
           self.assertAlmostEqual(controller.pid.neg_limit, expected["before"]["negLimit"], places=8)
@@ -135,9 +146,15 @@ class TestIoniq6ControllerReplay(unittest.TestCase):
           self.assertAlmostEqual(controller.pid.pos_limit, expected["after"]["posLimit"], places=8)
           self.assertAlmostEqual(controller.pid.neg_limit, expected["after"]["negLimit"], places=8)
           actual = _trace(controller, cp, _EXTENDED["sequence"])
-          for row, reference in zip(actual, expected["rows"], strict=True):
-            for value, frozen in zip(row, reference, strict=True):
-              self.assertAlmostEqual(value, frozen, places=8)
+          _assert_rows(self, actual, expected["rows"])
+
+  def test_curvature_delay_scales_at_current_speed_without_spurious_unwind(self):
+    cp = _params()
+    controller = _controller(cp)
+    sequence = [(True, 10., 0., .001, False, False)] * 30 + [(True, 20., 0., .001, False, False)] * 20
+    actual = _trace(controller, cp, sequence)
+    alpha = selected_policy(controller).jerk_filter.alpha
+    self.assertAlmostEqual(actual[30][2], actual[29][2] * (1.0 - alpha), places=8)
 
   def test_replay_surface_is_immutable_session_choice_and_neutral_matches_default(self):
     for variant, fw in (("standard", False), ("firmware_2025", True)):

@@ -639,7 +639,8 @@ def _replay_multi_process(
     params_config = generate_params_config(lr=lr, fingerprint=fingerprint, custom_params=custom_params)
     env_config = generate_environ_config(fingerprint=fingerprint)
   else:
-    CP = next((m.carParams for m in lr if m.which() == "carParams"), None)
+    needs_car_params = any(cfg.init_callback in (card_fingerprint_callback, get_car_params_callback) for cfg in cfgs)
+    CP = next((m.carParams for m in lr if m.which() == "carParams"), None) if needs_car_params else None
     params_config = generate_params_config(lr=lr, CP=CP, custom_params=custom_params)
     env_config = generate_environ_config(CP=CP)
 

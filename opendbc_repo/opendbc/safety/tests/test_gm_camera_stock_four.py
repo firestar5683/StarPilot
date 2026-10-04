@@ -23,6 +23,9 @@ class TestGmCameraStockFour(unittest.TestCase):
   @staticmethod
   def params(car, *, alpha=False, release=False, pedal=False):
     fingerprint = {CanBus.POWERTRAIN: {0x201: 6} if pedal else {}, CanBus.CAMERA: {}, CanBus.OBSTACLE: {}}
+    if car in (CAR.CHEVROLET_SUBURBAN_CAMERA, CAR.CHEVROLET_TRAX):
+      fingerprint[CanBus.POWERTRAIN].update({0xF1: 6, 0xBE: 6})
+      fingerprint[CanBus.CAMERA].update({0x320: 6, 0x180: 4})
     return CarInterface.get_params(car, fingerprint, [], alpha, release, False)
 
   @staticmethod
@@ -37,6 +40,7 @@ class TestGmCameraStockFour(unittest.TestCase):
       make('EBCMFrictionBrakeStatus', 0, {}),
       make('PSCMSteeringAngle', 0, {}),
       make('ECMAcceleratorPos', 0, {}),
+      make('EBCMBrakePedalPosition', 0, {'BrakePedalPosition': 20 if brake else 0}),
       make('ECMPRDNL2', 0, {}),
       make('AcceleratorPedal2', 0, {'CruiseState': 1 if cruise else 0, 'AcceleratorPedal2': 20 if gas else 0}),
       make('ECMEngineStatus', 0, {'CruiseMainOn': int(main), 'BrakePressed': int(brake)}),
@@ -62,7 +66,7 @@ class TestGmCameraStockFour(unittest.TestCase):
     self.safety.set_timer(1_000_000)
 
   def joined(self, car, *, main=True, cruise=True, brake=False, gas=False, lat=True, cancel=True, now=1_050_000_000):
-    cp = self.params(car, alpha=True)
+    cp = self.params(car, alpha=False)
     packer = CANPacker(DBC[car][Bus.pt])
     state = CarState(cp)
     parsers = state.get_can_parsers(cp)
@@ -98,12 +102,16 @@ class TestGmCameraStockFour(unittest.TestCase):
             cp = self.params(car, alpha=alpha, release=release, pedal=True)
             expected = GMSafetyFlags.HW_CAM | (GMSafetyFlags.EV if car in
                        (CAR.CHEVROLET_BOLT_ACC_2022_2023, CAR.CHEVROLET_VOLT_CAMERA) else 0)
+            promoted = car in (CAR.CHEVROLET_SUBURBAN_CAMERA, CAR.CHEVROLET_TRAX)
+            longitudinal = car == CAR.CHEVROLET_TRAX and alpha and not release
+            if promoted:
+              expected = 0xC170 if longitudinal else 0xC171
             self.assertEqual(cp.safetyConfigs[0].safetyParam, expected)
-            self.assertTrue(cp.pcmCruise)
-            self.assertFalse(cp.openpilotLongitudinalControl)
-            self.assertFalse(cp.alphaLongitudinalAvailable)
+            self.assertEqual(cp.pcmCruise, not longitudinal)
+            self.assertEqual(cp.openpilotLongitudinalControl, longitudinal)
+            self.assertEqual(cp.alphaLongitudinalAvailable, car == CAR.CHEVROLET_TRAX and not release)
             self.assertFalse(cp.flags & GMFlags.PEDAL_LONG)
-            self.assertTrue(cp.dashcamOnly)
+            self.assertEqual(cp.dashcamOnly, not promoted)
             self.assertNotIn(car, FINGERPRINTS)
             self.assertNotIn(car, FW_VERSIONS)
 
@@ -132,7 +140,7 @@ class TestGmCameraStockFour(unittest.TestCase):
         for addr, bus, length in ((0x315, 0, 5), (0x2CB, 0, 8), (0x370, 0, 6), (0x200, 0, 6), (0x409, 0, 7)):
           self.assertFalse(self.safety.safety_tx_hook(self.packet((addr, bytes(length), bus))), hex(addr))
         self.assertAlmostEqual(state.out.cruiseState.speed,
-                               64 / 3.6 if car == CAR.CHEVROLET_SUBURBAN_CAMERA else 88 / 3.6, places=5)
+                               88 / 3.6, places=5)
         self.assertFalse(state.out.cruiseState.nonAdaptive)
         self.assertFalse(state.out.regenBraking)
 
@@ -182,7 +190,7 @@ class TestGmCameraStockFour(unittest.TestCase):
         self.assertEqual(((steer[1][0] & 7) << 8) | steer[1][1], 0)
         self.assertTrue(self.safety.safety_tx_hook(self.packet(steer)))
 
-  def test_suburban_alt_set_speed_keeps_camera_adaptive_state(self):
+  def test_suburban_camera_set_speed_keeps_camera_adaptive_state(self):
     car = CAR.CHEVROLET_SUBURBAN_CAMERA
     cp = self.params(car)
     packer = CANPacker(DBC[car][Bus.pt])
@@ -192,18 +200,22 @@ class TestGmCameraStockFour(unittest.TestCase):
     parsers[Bus.pt].update([(1_000_000_000, pt)])
     parsers[Bus.cam].update([(1_000_000_000, cam)])
     state.out = state.update(parsers).as_reader()
-    self.assertAlmostEqual(state.out.cruiseState.speed, 64 / 3.6, places=5)
+    self.assertAlmostEqual(state.out.cruiseState.speed, 88 / 3.6, places=5)
     self.assertTrue(state.out.cruiseState.nonAdaptive)
 
   def test_host_neutral_on_inactive_brake_and_gas(self):
     for car in CAMERA_STOCK_CAR:
-      for scenario in ({'lat': False}, {'brake': True}, {'gas': True}, {'main': False}, {'cruise': False}):
+      for scenario in ({'lat': False}, {'brake': True}, {'gas': True}, {'gas': True, 'lat': False}, {'main': False}, {'cruise': False}):
         with self.subTest(car=car, scenario=scenario):
           _, _, _, state, _, _, commands = self.joined(car, **scenario)
           steer = next(msg for msg in commands if msg[0] == 0x180)
           if scenario in ({'brake': True}, {'cruise': False}):
             self.assertFalse(self.safety.get_controls_allowed())
-          self.assertEqual(((steer[1][0] & 7) << 8) | steer[1][1], 0)
+          if scenario == {'gas': True} and car in (CAR.CHEVROLET_TRAX, CAR.CHEVROLET_SUBURBAN_CAMERA):
+            # These ordinary stock profiles preserve lateral steering on gas.
+            self.assertGreater(((steer[1][0] & 7) << 8) | steer[1][1], 0)
+          else:
+            self.assertEqual(((steer[1][0] & 7) << 8) | steer[1][1], 0)
           self.assertTrue(self.safety.safety_tx_hook(self.packet(steer)))
 
   def test_missing_camera_or_pt_source_and_stale_status(self):

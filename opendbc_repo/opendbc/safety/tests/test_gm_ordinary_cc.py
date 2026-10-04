@@ -39,7 +39,7 @@ class TestGmOrdinaryCc(unittest.TestCase):
     for frame in sorted(frames, key=lambda frame: 2 if frame[0] == 0x1E1 else 1 if frame[0] == 0x3D1 else 0):
       if frame[0] != missing:
         self.assertTrue(self.safety.safety_rx_hook(self.packet(frame)))
-    self.safety.safety_tick_current_safety_config()
+    self.safety.safety_tick()
 
   def tx(self, counter=1, button=2):
     return self.safety.safety_tx_hook(self.packet(gmcan.create_buttons(self.packer, 0, counter, button)))

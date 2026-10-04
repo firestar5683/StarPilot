@@ -29,9 +29,9 @@ class TestHondaNidecSix(unittest.TestCase):
         self.assertEqual(STEER_THRESHOLD.get(car, 1200), 30 if car in (CAR.HONDA_ACCORD_9G, CAR.ACURA_MDX_3G,
                                                                          CAR.ACURA_MDX_3G_MMR, CAR.ACURA_TLX_1G) else 1200)
 
-  def test_manual_only_no_detection_alias(self):
-    for car in NIDEC_SIX:
-      self.assertNotIn(car, FW_VERSIONS)
+  def test_only_validated_clarity_has_firmware_discovery(self):
+    self.assertEqual(set(NIDEC_SIX) & set(FW_VERSIONS), {CAR.HONDA_CLARITY})
+    self.assertEqual(len(FW_VERSIONS[CAR.HONDA_CLARITY]), 6)
 
   def test_named_extended_dbc_control_contract(self):
     common = {

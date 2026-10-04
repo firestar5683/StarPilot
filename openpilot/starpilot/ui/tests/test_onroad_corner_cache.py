@@ -1,4 +1,5 @@
 """Synthetic GPU ownership tests; no context or visual acceptance is claimed."""
+
 from types import SimpleNamespace
 from unittest import TestCase
 from unittest.mock import Mock, patch
@@ -100,6 +101,7 @@ class TestCornerHintCache(TestCase):
 
   def test_application_teardown_releases_view_cache_before_window(self):
     from openpilot.system.ui.lib import application
+
     self.cache.get(self.rect)
     self.cache.prepare()
     app = GuiApplication.__new__(GuiApplication)
@@ -107,7 +109,9 @@ class TestCornerHintCache(TestCase):
     app.add_render_prepare(self.cache.prepare, self.cache.close)
     app.add_render_prepare(self.cache.prepare, self.cache.close)
     assert len(app._render_prepare) == 1
-    app._textures = {}; app._fonts = {}; app._fallback_fonts = {}
+    app._textures = {}
+    app._fonts = {}
+    app._fallback_fonts = {}
     app._render_texture = app._burn_in_shader = None
     app.close_ffmpeg = Mock()
     trace = []
@@ -123,20 +127,20 @@ class TestCornerHintCache(TestCase):
   def test_cached_premultiplied_composition_preserves_direct_rgb(self):
     # Independently compose overlapping straight-alpha primitives over a real
     # background; compare proper coverage with cached premultiplied blitting.
-    background = (.16, .31, .52)
-    layers = (((.05, .02, .10), .60), ((.75, .55, 1.), .35), ((1., 1., 1.), .80))
+    background = (0.16, 0.31, 0.52)
+    layers = (((0.05, 0.02, 0.10), 0.60), ((0.75, 0.55, 1.0), 0.35), ((1.0, 1.0, 1.0), 0.80))
     direct = list(background)
-    rgb, coverage, squared_alpha = [0., 0., 0.], 0., 0.
+    rgb, coverage, squared_alpha = [0.0, 0.0, 0.0], 0.0, 0.0
     for color, alpha in layers:
-      direct = [c * alpha + d * (1 - alpha) for c, d in zip(color, direct)]
-      rgb = [c * alpha + d * (1 - alpha) for c, d in zip(color, rgb)]
+      direct = [c * alpha + d * (1 - alpha) for c, d in zip(color, direct, strict=True)]
+      rgb = [c * alpha + d * (1 - alpha) for c, d in zip(color, rgb, strict=True)]
       coverage = alpha + coverage * (1 - alpha)
       squared_alpha = alpha * alpha + squared_alpha * (1 - alpha)
-    cached = [c + b * (1 - coverage) for c, b in zip(rgb, background)]
-    broken = [c + b * (1 - squared_alpha) for c, b in zip(rgb, background)]
-    for expected, actual in zip(direct, cached):
+    cached = [c + b * (1 - coverage) for c, b in zip(rgb, background, strict=True)]
+    broken = [c + b * (1 - squared_alpha) for c, b in zip(rgb, background, strict=True)]
+    for expected, actual in zip(direct, cached, strict=True):
       assert abs(expected - actual) < 1e-12
-    assert any(abs(a - b) > .01 for a, b in zip(direct, broken))
+    assert any(abs(a - b) > 0.01 for a, b in zip(direct, broken, strict=True))
     self.cache.get(self.rect)
     self.cache.prepare()
     corner.rl.rl.rlSetBlendFactorsSeparate.assert_called_once_with(0x0302, 0x0303, 1, 0x0303, 0x8006, 0x8006)

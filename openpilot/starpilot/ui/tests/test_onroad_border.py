@@ -51,7 +51,7 @@ class TestOnroadBorder(unittest.TestCase):
 
   def test_stale_or_invalid_car_clears_visual_signal(self):
     ui = ui_fake()
-    ui.CP = NS(openpilotLongitudinalControl=True, pcmCruise=False)
+    ui.CP = NS(openpilotLongitudinalControl=True, carFingerprint="OTHER", pcmCruise=False)
     car = ui.sm['carState']
     car.canValid = True
     car.canTimeout = False

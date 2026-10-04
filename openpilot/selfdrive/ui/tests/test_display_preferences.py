@@ -15,7 +15,8 @@ class DisplayDeviceTests(unittest.TestCase):
     temporary = tempfile.TemporaryDirectory()
     self.addCleanup(temporary.cleanup)
     self.params = Params(temporary.name)
-    self.state = NS(params=self.params, started=False, ignition=False, light_sensor=-1)
+    self.state = NS(params=self.params, started=False, ignition=False, light_sensor=-1,
+                    projection_read_only=False, sm=NS(valid={}, alive={}))
     self.patches = [patch.object(module, "ui_state", self.state),
                     patch.object(module.gui_app, "big_ui", return_value=True),
                     patch.object(module.HARDWARE, "set_display_power"),

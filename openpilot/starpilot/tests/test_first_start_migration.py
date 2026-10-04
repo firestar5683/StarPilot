@@ -8,6 +8,7 @@ from unittest.mock import patch
 
 SOURCE = Path(__file__).resolve().parents[1] / 'state_migration.py'
 spec = importlib.util.spec_from_file_location('isolated_state_migration', SOURCE)
+assert spec is not None
 migration = importlib.util.module_from_spec(spec)
 spec.loader.exec_module(migration)
 
@@ -72,14 +73,14 @@ class TestFirstStartMigration(unittest.TestCase):
   def test_fresh_driving_settings_leave_galaxy_tunnel_pairing_untouched(self):
     from openpilot.starpilot.galaxy.remote import RemotePairing
     pairing = RemotePairing(self.storage / 'galaxy')
-    self.assertIsNotNone(pairing.pair('a' * 64))
+    assert pairing.pair('a' * 64) is not None
     path = pairing.root / pairing.FILE
     saved = path.read_bytes()
     self.write({'CalibrationParams': b'old calibration', 'SteerFriction': b'0.2', 'DongleId': b'identity'})
     self.start()
     self.assertEqual(self.values(), {'DongleId': b'identity'})
     self.assertEqual(path.read_bytes(), saved)
-    self.assertIsNotNone(pairing.read())
+    assert pairing.read() is not None
 
   def test_default_and_dry_run_remain_strict_without_mutation(self):
     self.write({'SteerFriction': b'0.2'})
@@ -152,7 +153,7 @@ class TestFirstStartMigration(unittest.TestCase):
     for key, raw in (('OldDomSetting', b'1'), ('IsMetric', b'true'), ('ForceStops', b'true'),
                      ('LiveTorqueParameters', b'bad learner')):
       with self.subTest(key=key):
-        original = {'CarParamsPersistent': b'legacy car', key: raw}
+        original: dict = {'CarParamsPersistent': b'legacy car', key: raw}
         self.write(original)
         with self.assertRaises(migration.MigrationRequired):
           self.start()

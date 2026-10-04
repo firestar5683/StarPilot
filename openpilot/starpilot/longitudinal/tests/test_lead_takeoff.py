@@ -35,9 +35,9 @@ def test_creep_confirmation_and_profile_cap_remain_effective():
   assert result == (.05, True)
 
 
-@pytest.mark.parametrize('changes', [dict(mpc_accel=-.001), dict(blocked=True), dict(eligible=False),
-                                   dict(speed=2.01), dict(drive_id=0), dict(acceleration_max=0.),
-                                   dict(model_ns=NOW-150_000_001)])
+@pytest.mark.parametrize('changes', [{'mpc_accel': -.001}, {'blocked': True}, {'eligible': False},
+                                   {'speed': 2.01}, {'drive_id': 0}, {'acceleration_max': 0.},
+                                   {'model_ns': NOW-150_000_001}])
 def test_native_braking_and_unavailable_or_stopping_context_never_release(changes):
   policy = LeadTakeoff()
   for tick in range(10):
@@ -98,8 +98,8 @@ def test_native_planner_stopped_release_and_off_trajectory_equivalence(selected_
     lead.dRel, lead.vLead, lead.vLeadK, lead.vRel, lead.aLeadK = 7., 1., 1., 1., .3
     lead.yRel, lead.modelProb = 0., .99
     sm['radarState'].leadTwo.present = False
-    def stop(follow):
-      return StopPlan(model_ns=sm.logMonoTime['modelV2'], takeoff_light_observed=True)
+    def stop(follow, source=sm):
+      return StopPlan(model_ns=source.logMonoTime['modelV2'], takeoff_light_observed=True)
     native.update(sm, now_ns=now, force_stop_provider=stop)
     off.update(sm, now_ns=now, force_stop_provider=stop, faster_lead_takeoff=False, takeoff_drive_id=DRIVE)
     enabled.update(sm, now_ns=now, force_stop_provider=stop, faster_lead_takeoff=True, takeoff_drive_id=DRIVE,
@@ -151,7 +151,7 @@ def test_projection_red_light_missing_observation_and_offcenter_conflict_veto():
   sm.recv_time = dict.fromkeys(sm, (NOW-5_000_000)/1e9)
   sm['carState'].vEgo, sm['carState'].standstill = 0., True
   cp = NS(openpilotLongitudinalControl=True, passive=False, dashcamOnly=False, notCar=False)
-  args = dict(now_ns=NOW, drive_id=DRIVE, acceleration_max=1., mpc_accel=0., follow_seconds=1.45)
+  args = {'now_ns': NOW, 'drive_id': DRIVE, 'acceleration_max': 1., 'mpc_accel': 0., 'follow_seconds': 1.45}
   for plan in (StopPlan(), StopPlan(model_ns=NOW-5_000_000, takeoff_light_observed=True, takeoff_light=True),
                StopPlan(model_ns=NOW-10_000_000, takeoff_light_observed=True)):
     observed = project(sm, cp, stop_plan=plan, **args)

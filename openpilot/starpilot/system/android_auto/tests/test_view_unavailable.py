@@ -1,3 +1,4 @@
+from unittest.mock import Mock
 from openpilot.starpilot.system.android_auto.frame_source import FrameRequest
 from openpilot.starpilot.system.android_auto.view import ViewSource
 
@@ -26,7 +27,7 @@ def test_failed_car_renderer_withdraws_frames_and_reports_unavailable():
   source.view = 'car'
   source.fallback_reason = ''
   source.frames = 3
-  source.source = old
+  source.source = Mock(wraps=old)
   source.process = None
   source.touch = None
   source.log = lambda *_a, **_k: None

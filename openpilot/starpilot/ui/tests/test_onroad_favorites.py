@@ -1,3 +1,5 @@
+
+from unittest.mock import patch
 from dataclasses import replace
 from types import SimpleNamespace as NS
 from unittest.mock import Mock
@@ -59,13 +61,13 @@ class TestOnroadFavorites(unittest.TestCase):
       params = Params(directory)
       cp = CarInterface.get_non_essential_params(CAR.HONDA_CIVIC)
       session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
-      session._mode, session.profile, session.selected = runtime_app.ShellMode.ONROAD, Profile.COMPACT, 'star'
+      session._mode, session.profile, session.selected = runtime_app.ShellMode.ONROAD, Profile.COMPACT, runtime_app.Destination.STAR
       session.compact_y = session.compact_scroll_x = 0
       session.sidebar_expanded = True
       session._snapshot_cache = None
       state = OnroadState(True, True, 15, 80, SpeedLimitObservation())
       ui = NS(CP=cp, params=params, is_metric=False, sm=NS(frame=1))
-      session.adapter = NS(ui_state=ui, build=Mock(return_value=NS(onroad=state)))
+      self.enterContext(patch.object(session, 'adapter', NS(ui_state=ui, build=Mock(return_value=NS(onroad=state))), create=True))
       session.confirmed_offroad = Mock(return_value=False)
       session._native_favorite_actions = dict
       session._unavailable = Mock()
@@ -295,15 +297,16 @@ class TestOnroadFavorites(unittest.TestCase):
     from openpilot.starpilot.ui import runtime_app
     from openpilot.starpilot.favorites.actions import BOOKMARK, CYCLE_PERSONALITY, EXPERIMENTAL
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
-    session.selected = 'star'
+    self.enterContext(patch.object(session, 'selected', 'star', create=True))
     state = OnroadState(True, True, 15, 80, SpeedLimitObservation())
-    session.adapter = NS(build=Mock(return_value=NS(onroad=state)))
+    self.enterContext(patch.object(session, 'adapter', NS(build=Mock(return_value=NS(onroad=state))), create=True))
     session.snapshot = Mock(return_value=NS(onroad=state))
     session._favorite_authority = Mock(return_value=True)
     session._conditional_favorite_active = Mock(return_value=False)
-    session.conditional_actions = NS(context=Mock(return_value=None))
+    self.enterContext(patch.object(session, 'conditional_actions', NS(context=Mock(return_value=None)), create=True))
     bookmark, personality, experimental = Mock(return_value=True), Mock(return_value=True), Mock(return_value=True)
-    native = NS(CP=NS(carFingerprint='car', flags=0), has_longitudinal_control=True, started_frame=42, personality=1, sm=NS(),
+    native = NS(CP=NS(carFingerprint='car', flags=0, pcmCruise=True), has_longitudinal_control=True, started_frame=42, personality=1,
+                sm={"deviceState": NS(startedMonoTime=42)},
                 params=NS(get_bool=lambda key: key == 'ExperimentalModeConfirmed'))
     with patch.object(runtime_app, 'ui_state', native):
       actions = session.native_favorite_actions(bookmark, personality, experimental)
@@ -346,9 +349,10 @@ class TestOnroadFavorites(unittest.TestCase):
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
     session.favorites = controller
     session.profile = controller.profile
-    session.input = NS(press=Mock(), cancel=Mock(), onroad=NS(claimed=claimed))
+    self.enterContext(patch.object(session, 'input', NS(press=Mock(), cancel=Mock(), onroad=NS(claimed=claimed)), create=True))
     session.snapshot = Mock(return_value=NS(onroad=state))
     session._update_favorites = Mock()
+    session.view = Mock(onroad=NS(navigation=NS(press=lambda *args: False)))
     session.press(ShellMode.ONROAD, 80, 80)
     assert session._favorite_claimed is not claimed
     assert session.input.cancel.called is not claimed
@@ -363,9 +367,10 @@ class TestOnroadFavorites(unittest.TestCase):
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
     session.favorites = controller
     session.profile = controller.profile
-    session.input = NS(press=Mock(), cancel=Mock(), onroad=NS(claimed=claimed))
+    self.enterContext(patch.object(session, 'input', NS(press=Mock(), cancel=Mock(), onroad=NS(claimed=claimed)), create=True))
     session.snapshot = Mock(return_value=NS(onroad=state))
     session._update_favorites = Mock()
+    session.view = Mock(onroad=NS(navigation=NS(press=lambda *args: False)))
     session.press(ShellMode.ONROAD, 80, 80)
     assert session._favorite_claimed is not claimed
     assert session.input.cancel.called is not claimed
@@ -382,7 +387,7 @@ class TestOnroadFavorites(unittest.TestCase):
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
     session.favorites = controller
     session.profile = controller.profile
-    session.input = NS(press=Mock(), cancel=Mock())
+    self.enterContext(patch.object(session, 'input', NS(press=Mock(), cancel=Mock()), create=True))
     session.snapshot = Mock(return_value=NS(onroad=state))
     session._update_favorites = Mock()
     session.press(ShellMode.ONROAD, 1700, 900)
@@ -397,7 +402,7 @@ class TestOnroadFavorites(unittest.TestCase):
     from openpilot.selfdrive.ui.mici.layouts.settings import toggles
     owner = toggles.TogglesLayoutMici.__new__(toggles.TogglesLayoutMici)
     owner._update_toggles = Mock()
-    owner._personality_toggle = NS(request_index=Mock(return_value=True))
+    self.enterContext(patch.object(owner, '_personality_toggle', NS(request_index=Mock(return_value=True)), create=True))
     native = NS(CP=object(), has_longitudinal_control=False)
     with patch.object(toggles, 'ui_state', native):
       assert not owner.request_personality(2)
@@ -413,8 +418,8 @@ class TestOnroadFavorites(unittest.TestCase):
     from openpilot.starpilot.ui import runtime_app
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
     session._favorite_read_at = None
-    session.favorites_owner = NS(snapshot=Mock(return_value=object()))
-    session.favorites = NS(update=Mock())
+    self.enterContext(patch.object(session, 'favorites_owner', NS(snapshot=Mock(return_value=object())), create=True))
+    self.enterContext(patch.object(session, 'favorites', NS(update=Mock()), create=True))
     with patch.object(runtime_app, 'asdict', return_value={'revision': 'r'}) as serialize:
       session._update_favorites(object(), 10)
       for now in (10.01, 10.02, 10.9):
@@ -429,17 +434,17 @@ class TestOnroadFavorites(unittest.TestCase):
     from openpilot.starpilot.ui import runtime_app
     from openpilot.starpilot.favorites.actions import EXPERIMENTAL
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
-    session.selected = 'star'
+    self.enterContext(patch.object(session, 'selected', 'star', create=True))
     state = OnroadState(True, True, 15, 80, SpeedLimitObservation())
-    session.adapter = NS(build=Mock(return_value=NS(onroad=state)))
+    self.enterContext(patch.object(session, 'adapter', NS(build=Mock(return_value=NS(onroad=state))), create=True))
     session.snapshot = Mock(return_value=NS(onroad=state))
     session._favorite_authority = Mock(return_value=True)
     session._conditional_favorite_active = Mock(return_value=True)
     context = NS(token='drive-settings-planner-effective-manual')
-    session.conditional_actions = NS(context=Mock(return_value=context), dispatch=Mock(return_value=True))
+    self.enterContext(patch.object(session, 'conditional_actions', NS(context=Mock(return_value=context), dispatch=Mock(return_value=True)), create=True))
     experimental = Mock(return_value=True)
-    native = NS(CP=NS(carFingerprint='car', flags=0), has_longitudinal_control=True, started_frame=42,
-                personality=1, sm=NS(), params=NS(get_bool=lambda key: key == 'ExperimentalModeConfirmed'))
+    native = NS(CP=NS(carFingerprint='car', flags=0, pcmCruise=True), has_longitudinal_control=True, started_frame=42,
+                personality=1, sm={"deviceState": NS(startedMonoTime=42)}, params=NS(get_bool=lambda key: key == 'ExperimentalModeConfirmed'))
     with patch.object(runtime_app, 'ui_state', native), patch.object(runtime_app, '_slc_action_publisher') as publisher:
       action = session.native_favorite_actions(Mock(), Mock(), experimental)[EXPERIMENTAL]
       assert action.available and action.invoke()
@@ -468,7 +473,7 @@ class TestOnroadFavorites(unittest.TestCase):
     from openpilot.starpilot.ui.onroad_state import OnroadRequest
     from openpilot.starpilot.ui.shell import ShellMode, ShellRequest, ShellSnapshot
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
-    session.selected = 'star'
+    self.enterContext(patch.object(session, 'selected', 'star', create=True))
     session.profile = Profile.LARGE
     state = OnroadState(True, True, 15, 80, SpeedLimitObservation())
     snapshot = ShellSnapshot(ShellMode.ONROAD, Mock(), Mock(), state)

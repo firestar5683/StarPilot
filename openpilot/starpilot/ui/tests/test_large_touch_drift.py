@@ -1,3 +1,4 @@
+from typing import Any
 import ast
 from dataclasses import replace
 from enum import StrEnum
@@ -48,7 +49,7 @@ def snapshot_selection():
                                                    for target in child.targets)]
   function = ast.parse('def normalize(mode, selected):\n return selected, settings_pages').body[0]
   function.body = selected_nodes + function.body
-  namespace = {'Destination': settings.Destination, 'ShellMode': SimpleNamespace(SETTINGS='settings')}
+  namespace: dict[str, Any] = {'Destination': settings.Destination, 'ShellMode': SimpleNamespace(SETTINGS='settings')}
   exec(compile(ast.fix_missing_locations(ast.Module(body=[function], type_ignores=[])), 'snapshot_selection', 'exec'), namespace)
   return namespace['normalize']
 
@@ -63,7 +64,7 @@ class TestLargeTouchDrift(unittest.TestCase):
                                ((256, 573), settings.Destination.NETWORK),
                                ((241, 683), settings.Destination.BLUETOOTH)):
       actions = []
-      handler = settings.SettingsInput(profile.Profile.LARGE, actions.append, lambda: selected)
+      handler = settings.SettingsInput(profile.Profile.LARGE, actions.append, lambda selected=selected: selected)
       normalized, _ = normalize('settings', selected)
       self.assertEqual(normalized, selected)
       handler.press(*point, settings.SettingsState())
@@ -73,7 +74,7 @@ class TestLargeTouchDrift(unittest.TestCase):
     self.assertEqual(normalize('settings', selected)[0], settings.Destination.BLUETOOTH)
     for expected in (settings.Destination.STAR, 'home'):
       actions = []
-      handler = settings.SettingsInput(profile.Profile.LARGE, actions.append, lambda: selected)
+      handler = settings.SettingsInput(profile.Profile.LARGE, actions.append, lambda selected=selected: selected)
       self.assertEqual(normalize('settings', selected)[0], selected)
       handler.press(196, 188, settings.SettingsState())
       handler.release(216, 211, settings.SettingsState())

@@ -46,7 +46,8 @@ class TestSettingsRetirement(unittest.TestCase):
     self.params.put_bool('RelaxedPersonalityProfile', True)
     retire_settings(self.params)
     result = migrate_profile_document(self.params.get('LongitudinalPersonalityProfiles'))
-    self.assertIsNotNone(result)
+    assert result is not None
+    assert result is not None
     self.assertEqual(result['profiles']['standard']['following']['preset'], 'dom_default')
     self.assertEqual(result['profiles']['standard']['acceleration']['preset'], 'selected_profile')
     self.assertEqual(result['profiles']['relaxed']['following']['curve'], [2.5]*10)
@@ -83,6 +84,7 @@ class TestSettingsRetirement(unittest.TestCase):
     self.assertEqual(self.params.get('ForceStops'), b'0')
     self.assertEqual(self.params.get('ReverseCruise'), b'0')
     result = migrate_profile_document(self.params.get('LongitudinalPersonalityProfiles'))
+    assert result is not None
     self.assertEqual(result['profiles']['standard']['following']['preset'], 'dom_default')
     self.params.put_bool('ForceStops', True)
     self.params.put_bool('ReverseCruise', True)
@@ -91,6 +93,7 @@ class TestSettingsRetirement(unittest.TestCase):
     self.assertEqual(self.params.get('ForceStops'), b'1')
     self.assertEqual(self.params.get('ReverseCruise'), b'1')
     result = migrate_profile_document(self.params.get('LongitudinalPersonalityProfiles'))
+    assert result is not None
     self.assertEqual(result['profiles']['standard']['following']['curve'], [2.0]*10)
 
   def test_fresh_namespace_completes_and_preserves_later_choice(self):

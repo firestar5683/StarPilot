@@ -1,3 +1,4 @@
+import importlib.util
 import base64
 import json
 import os
@@ -12,7 +13,11 @@ from unittest.mock import patch
 
 import numpy as np
 
-from scripts import model_compiler
+_script_path = Path(__file__).resolve().parents[4] / "scripts" / "model_compiler.py"
+_script_spec = importlib.util.spec_from_file_location("starpilot_test_model_compiler", _script_path)
+assert _script_spec is not None and _script_spec.loader is not None
+model_compiler = importlib.util.module_from_spec(_script_spec)
+_script_spec.loader.exec_module(model_compiler)
 
 
 def varint(value):

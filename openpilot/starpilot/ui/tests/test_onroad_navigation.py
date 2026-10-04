@@ -16,7 +16,8 @@ DRIVE = 1_000_000_000
 
 
 def message():
-  result = messaging.new_message('starpilotNavigation').starpilotNavigation
+  result = messaging.new_message('starpilotNavigation').starpilotNavigation.navigation
+  result.version = 2
   result.enabled = True
   result.status = 'guiding'
   result.startedMonoTime = DRIVE
@@ -122,7 +123,7 @@ def test_original_maneuver_assets_and_fallback_are_bounded():
     assert hashlib.sha256(data).hexdigest() == row['sha256']
 
 
-def test_native_card_tap_is_consumed_before_favorites_or_background():
+def test_native_card_tap_is_consumed_before_favorites_or_background(monkeypatch):
   from openpilot.starpilot.ui.runtime_app import StarShellSession
   from openpilot.starpilot.ui.shell import ShellMode
   card, observed = NavigationCard(Mock(profile=Profile.COMPACT)), state()
@@ -132,7 +133,7 @@ def test_native_card_tap_is_consumed_before_favorites_or_background():
   session._update_favorites = Mock()
   session.input = Mock(onroad=NS(claimed=False))
   session.favorites = Mock(is_open=False)
-  session.view = NS(onroad=NS(navigation=card))
+  monkeypatch.setattr(session, 'view', NS(onroad=NS(navigation=card)), raising=False)
   session.press(ShellMode.ONROAD, 120, 40)
   session.favorites.press.assert_not_called()
   assert session.release(ShellMode.ONROAD, 120, 40)
@@ -140,7 +141,7 @@ def test_native_card_tap_is_consumed_before_favorites_or_background():
   session.input.release.assert_not_called()
 
 
-def test_existing_slc_or_wheel_touch_owner_keeps_priority():
+def test_existing_slc_or_wheel_touch_owner_keeps_priority(monkeypatch):
   from openpilot.starpilot.ui.runtime_app import StarShellSession
   from openpilot.starpilot.ui.shell import ShellMode
   card = Mock()
@@ -150,7 +151,7 @@ def test_existing_slc_or_wheel_touch_owner_keeps_priority():
   session._update_favorites = Mock()
   session.input = Mock(onroad=NS(claimed=True))
   session.favorites = Mock(is_open=False)
-  session.view = NS(onroad=NS(navigation=card))
+  monkeypatch.setattr(session, 'view', NS(onroad=NS(navigation=card)), raising=False)
   session.press(ShellMode.ONROAD, 120, 40)
   card.press.assert_not_called()
   session.favorites.press.assert_not_called()

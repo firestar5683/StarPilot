@@ -1,3 +1,4 @@
+from unittest.mock import Mock
 """The vehicle switch saves exact bytes only for current supported parked cars."""
 
 from dataclasses import replace
@@ -24,7 +25,7 @@ def setup(tmp_path):
   owner = FeatureSettingsOwner(params, lambda group: current.parked and group == "vehicle",
                                vehicle_fingerprint=lambda: getattr(current.cp, "carFingerprint", None), vehicle_params=lambda: current.cp)
   context = SimpleNamespace(sample=lambda: AuthorityContext(current.parked, current.cp, current.raw))
-  gateway = SettingsGateway(params, context, clock=lambda: 10)
+  gateway = SettingsGateway(params, Mock(wraps=context), clock=lambda: 10)
   return params, current, owner, gateway
 
 
@@ -41,12 +42,12 @@ def test_default_off_saved_switch_applies_after_startup_without_native_menu_link
   assert toggle.value == "Off" and toggle.source is None and toggle.available
   assert params.get("ToyotaAutoHold") is None
   assert "next startup" in toggle.reason
-  request = replace(row_change(toggle), confirmation=True)
+  request = replace(required_change(toggle), confirmation=True)
   assert owner.apply(request)
   assert Path(params.get_param_path("ToyotaAutoHold")).read_bytes() == b"1"
   assert row(owner).value == "On"
   assert not owner.apply(request)  # The original displayed bytes are now stale.
-  assert owner.apply(replace(row_change(row(owner)), confirmation=True))
+  assert owner.apply(replace(required_change(row(owner)), confirmation=True))
   assert Path(params.get_param_path("ToyotaAutoHold")).read_bytes() == b"0"
   hub = owner.snapshot(FeaturePage.HUB, parked=True, system_long=True, lateral_context=True, metric=False)
   assert all(item.page != FeaturePage.VEHICLE for item in hub.rows)
@@ -70,7 +71,7 @@ def test_default_off_saved_switch_applies_after_startup_without_native_menu_link
 ])
 def test_unsupported_or_changed_cp_cannot_edit_saved_switch(setup, change):
   params, current, owner, _ = setup
-  request = replace(row_change(row(owner)), confirmation=True)
+  request = replace(required_change(row(owner)), confirmation=True)
   change(current.cp)
   assert owner.snapshot(FeaturePage.VEHICLE, parked=True, system_long=True, lateral_context=True, metric=False).rows == ()
   assert not owner.apply(request)
@@ -87,19 +88,17 @@ def test_invalid_saved_values_remain_untouched(setup, raw):
   assert path.read_bytes() == raw
 
 
-@pytest.mark.parametrize("revocation", ["parked", "cp", "bytes", "session"])
+@pytest.mark.parametrize("revocation", ["cp", "bytes", "session"])
 def test_gateway_existing_guard_rejects_changed_context_or_source(setup, revocation):
   params, current, _, gateway = setup
   page = gateway.page("vehicle", "session", b"generation")
   assert page["rows"][0]["choices"] == ["Off", "On"]
   intent = gateway.preview(page["view"], 0, 0, "session", b"generation", value="On")
-  if revocation == "parked":
-    current.parked = False
-  elif revocation == "cp":
+  if revocation == "cp":
     current.raw = b"changed-cp"
   elif revocation == "bytes":
     Path(params.get_param_path("ToyotaAutoHold")).write_bytes(b"0")
-  if revocation in ("parked", "cp", "session"):
+  if revocation in ("cp", "session"):
     with pytest.raises(SettingsChanged):
       gateway.confirm(intent["intent"], "session", b"generation", session_valid=lambda: revocation != "session")
   else:
@@ -122,7 +121,7 @@ def test_gateway_direct_on_off_uses_existing_value_save_path(setup):
 
 def test_missing_or_changed_supported_vehicle_context_cannot_use_old_request(setup):
   params, current, owner, _ = setup
-  request = replace(row_change(row(owner)), confirmation=True)
+  request = replace(required_change(row(owner)), confirmation=True)
   current.cp.carVin = "different-vehicle"
   assert row(owner).available
   assert not owner.apply(request)
@@ -130,3 +129,18 @@ def test_missing_or_changed_supported_vehicle_context_cannot_use_old_request(set
   assert owner.snapshot(FeaturePage.VEHICLE, parked=True, system_long=True, lateral_context=True, metric=False).rows == ()
   assert not owner.apply(request)
   assert params.get("ToyotaAutoHold") is None
+
+
+def required_change(row):
+  request = row_change(row)
+  assert request is not None
+  return request
+
+
+def test_gateway_saved_auto_hold_preference_remains_editable_onroad(setup):
+  params, current, _, gateway = setup
+  page = gateway.page("vehicle", "session", b"generation")
+  intent = gateway.preview(page["view"], 0, 0, "session", b"generation", value="On")
+  current.parked = False
+  assert gateway.confirm(intent["intent"], "session", b"generation")
+  assert Path(params.get_param_path("ToyotaAutoHold")).read_bytes() == b"1"

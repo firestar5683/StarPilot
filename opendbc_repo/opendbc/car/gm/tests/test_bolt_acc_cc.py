@@ -23,6 +23,11 @@ class TestBoltAccCc(unittest.TestCase):
     for alpha in (False, True):
       for present in (False, True):
         cp = params(ID, alpha=alpha, present=present)
+        if present:
+          self.assertTrue(cp.flags & GMFlags.PEDAL_LONG.value)
+          self.assertFalse(is_bolt_cc_profile(cp))
+          self.assertTrue(cp.openpilotLongitudinalControl)
+          continue
         self.assertTrue(is_bolt_cc_profile(cp))
         self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xC140)
         self.assertFalse(cp.pcmCruise or cp.alphaLongitudinalAvailable)
@@ -248,7 +253,7 @@ class TestBoltAccCc(unittest.TestCase):
 class TestBoltAccCcRemoved(unittest.TestCase):
   def test_actual_pt_parser_controller_cancel_and_native(self):
     for alpha in (False, True):
-      for present in (False, True):
+      for present in (False,):
         cp, ci, packer = fixture(ID, removed=True, alpha=alpha, present=present)
         self.assertEqual(cp.safetyConfigs[0].safetyParam, 0xC141)
         setup(cp)

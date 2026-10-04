@@ -97,6 +97,7 @@ class SoundDownloadTests(unittest.TestCase):
     selected = self.base / "SoundPack"
     selected.write_bytes(b"duck")
     sounds = SoundPackLoader(Params(selected), stock, self.root).refresh(("engage.wav", "disengage.wav"), 1)
+    assert sounds is not None
     self.assertAlmostEqual(sounds["engage.wav"][0], 2000 / 32768)
     self.assertAlmostEqual(sounds["disengage.wav"][0], 1000 / 32768)
 

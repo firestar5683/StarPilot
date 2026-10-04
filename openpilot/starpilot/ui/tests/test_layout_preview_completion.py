@@ -1,3 +1,4 @@
+from typing import Any
 """Cold rendering must not publish until the owning UI collector advances."""
 import struct
 import zlib
@@ -13,7 +14,7 @@ def png():
 
 
 def scenario():
-  state = {'now': 0.0, 'parked': True, 'renders': 0}
+  state: dict[str, Any] = {'now': 0.0, 'parked': True, 'renders': 0}
   def render(payload):
     state['renders'] += 1
     state.update(now=.8, parked=False) # A cold render outlasts borrowed-message freshness.

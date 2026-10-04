@@ -26,7 +26,9 @@ def road(**changes):
 
 def test_confidence_uses_model_probabilities_and_marks_unknown_as_unknown():
   model = NS(meta=NS(disengagePredictions=NS(brakeDisengageProbs=[0.1, 0.2], steerOverrideProbs=[0.1])))
-  assert abs(_model_confidence(model) - 0.72) < 1e-9
+  confidence = _model_confidence(model)
+  assert confidence is not None
+  assert abs(confidence - 0.72) < 1e-9
   assert _model_confidence(NS()) is None
   assert _model_confidence(NS(meta=NS(disengagePredictions=NS(brakeDisengageProbs=[], steerOverrideProbs=[])))) is None
   assert _model_confidence(NS(meta=NS(disengagePredictions=NS(brakeDisengageProbs=[float('nan')],
@@ -46,13 +48,13 @@ def test_confidence_uses_model_probabilities_and_marks_unknown_as_unknown():
     assert gradient.call_args.args[4].r == 50
 
 
-def test_aol_model_geometry_uses_fresh_lateral_display_context():
+def test_aol_model_geometry_uses_fresh_lateral_display_context(monkeypatch):
   renderer = native_model.ModelRenderer.__new__(native_model.ModelRenderer)
   renderer._render_lateral_active = False
   renderer._torque_filter = Mock()
   renderer._transform_dirty = False
   renderer._lead_indicator_enabled = False
-  renderer._path = NS(raw_points=np.array([[1.0, 0.0, 0.0]], dtype=np.float32))
+  monkeypatch.setattr(renderer, '_path', NS(raw_points=np.array([[1.0, 0.0, 0.0]], dtype=np.float32)), raising=False)
   renderer._draw_lane_lines = Mock()
   renderer._draw_path = Mock()
   renderer._rect = rl.Rectangle(0, 0, 476, 240)
@@ -80,18 +82,18 @@ def test_aol_model_geometry_uses_fresh_lateral_display_context():
     assert renderer._visual_status() == UIStatus.DISENGAGED
 
 
-def test_aol_lane_and_path_colors_do_not_use_disengaged_black():
+def test_aol_lane_and_path_colors_do_not_use_disengaged_black(monkeypatch):
   renderer = native_model.ModelRenderer.__new__(native_model.ModelRenderer)
   renderer._render_lateral_active = False
-  renderer._torque_filter = NS(x=0.0)
+  monkeypatch.setattr(renderer, '_torque_filter', NS(x=0.0), raising=False)
   renderer._rect = rl.Rectangle(0, 0, 476, 240)
-  renderer._path = NS(projected_points=np.array([[10.0, 10.0], [20.0, 20.0]], dtype=np.float32))
+  monkeypatch.setattr(renderer, '_path', NS(projected_points=np.array([[10.0, 10.0], [20.0, 20.0]], dtype=np.float32)), raising=False)
   renderer._longitudinal_control = False
   renderer._blend_filter = Mock(x=1.0)
   renderer._rainbow_path = Mock()
   renderer._rainbow_path.refresh_enabled.return_value = False
   renderer._experimental_mode = True
-  renderer._exp_gradient = NS(colors=[])
+  monkeypatch.setattr(renderer, '_exp_gradient', NS(colors=[]), raising=False)
   ui = NS(status=UIStatus.DISENGAGED, params=Mock())
   with patch.object(native_model, 'ui_state', ui), patch.object(native_model, 'draw_polygon') as polygon:
     assert renderer._get_ll_color(0.7, True, True).r == 0

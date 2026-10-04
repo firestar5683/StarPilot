@@ -40,7 +40,7 @@ class TestBoltManualGain(unittest.TestCase):
           saved.put_bool("AdvancedLateralTune", True, block=True)
           saved.put(DOCUMENT_KEY, json.loads(serialize_document(replace_gain({}, str(identity), basis, "custom", .7))), block=True)
           selected = Controls()
-          self.assertIsNotNone(selected.lateral_gain_owner)
+          assert selected.lateral_gain_owner is not None
           self.assertIsNone(selected.torque_host)
           self.assertFalse(runtime_enabled(cp, saved))
           self.assertEqual(selected.torque_learning_allowed, baseline.torque_learning_allowed)
@@ -118,10 +118,10 @@ class TestBoltManualGain(unittest.TestCase):
       owner = FeatureSettingsOwner(saved, lambda _: True, vehicle_fingerprint=lambda: cp.carFingerprint, vehicle_params=lambda: cp)
       before = owner.snapshot("torque", parked=True, system_long=True, lateral_context=True, metric=False)
       edit = next(row for row in before.rows if row.key == "torque:gain:value")
-      omitted = FeatureSettingsRequest(edit.key, edit.source, .8, vehicle_fingerprint=cp.carFingerprint, capability=edit.capability)
+      omitted = FeatureSettingsRequest(edit.key, edit.source, "0.8", vehicle_fingerprint=cp.carFingerprint, capability=edit.capability)
       self.assertFalse(owner.apply(omitted))
       saved.put("LateralControllerSelection", json.loads(replace_mode(None, cp, ControllerMode.STANDARD)), block=True)
-      request = FeatureSettingsRequest(edit.key, edit.source, .8,
+      request = FeatureSettingsRequest(edit.key, edit.source, "0.8",
                                        vehicle_fingerprint=cp.carFingerprint, capability=edit.capability, dependencies=edit.dependencies)
       self.assertFalse(owner.apply(request))
       rows = owner.snapshot("torque", parked=True, system_long=True, lateral_context=True, metric=False).rows
@@ -130,7 +130,9 @@ class TestBoltManualGain(unittest.TestCase):
       request = FeatureSettingsRequest(withdrawal.key, withdrawal.source, "Selected controller",
                                        vehicle_fingerprint=cp.carFingerprint, capability=withdrawal.capability, dependencies=withdrawal.dependencies)
       self.assertTrue(owner.apply(request))
-      updated = parse_document(owner._raw(DOCUMENT_KEY))[str(cp.carFingerprint)]
+      raw = owner._raw(DOCUMENT_KEY)
+      assert raw is not None
+      updated = parse_document(raw)[str(cp.carFingerprint)]
       self.assertEqual(updated.proportional_gain.mode, "source")
       self.assertEqual(updated.friction, profiles[str(cp.carFingerprint)].friction)
 
@@ -183,7 +185,7 @@ class TestBoltManualGain(unittest.TestCase):
       function.returns = None
       for argument in function.args.args:
         argument.annotation = None
-      namespace = {"FeatureSettingsRequest": FeatureSettingsRequest, "FeatureRow": state.FeatureRow,
+      namespace: dict = {"FeatureSettingsRequest": FeatureSettingsRequest, "FeatureRow": state.FeatureRow,
                    "LANE_CHANGE_RESET": "lane_change:reset", "CONDITIONAL_CONFIRM_ACTIONS": frozenset(),
                    "SETUP_ACTION": "torque_prepare_firestar", "SETUP_QUESTION": "Prepare",
                    "long_confirm_question": lambda _: "Other action",

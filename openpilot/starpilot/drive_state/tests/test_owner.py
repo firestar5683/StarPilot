@@ -207,6 +207,8 @@ def test_crossprocess_revision_commit_and_nonblocking_hardware_snapshot(tmp_path
   result1, result2 = tmp_path / 'result1', tmp_path / 'result2'
   program = PROCESS_PROGRAM.replace('# FILE_PARAMS', inspect.getsource(FileParams))
   common = [sys.executable, '-c', program, str(source), str(native_source), str(params_root), str(lock_root), state.revision]
+  assert state.revision is not None
+  common = [str(value) for value in common]
   first = subprocess.Popen(common + ['onroad', str(ready), str(release), str(result1), '-', '-'])
   second = None
   second_ready, second_go = tmp_path / 'second-ready', tmp_path / 'second-go'

@@ -32,9 +32,9 @@ struct LiveCalibrationData {
 
 
 def calibration(**changes):
-  values = dict(calStatus="calibrated", calCycle=2, calPerc=100, validBlocks=37,
-                rpyCalib=[0, 0.02, -0.01], rpyCalibSpread=[0, 0.001, 0.002],
-                wideFromDeviceEuler=[0, 0.01, 0], height=[1.22], extrinsicMatrix=[])
+  values = {"calStatus": "calibrated", "calCycle": 2, "calPerc": 100, "validBlocks": 37,
+                "rpyCalib": [0, 0.02, -0.01], "rpyCalibSpread": [0, 0.001, 0.002],
+                "wideFromDeviceEuler": [0, 0.01, 0], "height": [1.22], "extrinsicMatrix": []}
   values.update(changes)
   return log.Event.new_message(logMonoTime=987654321, valid=True, extrinsicsCalibration=values)
 
@@ -79,8 +79,8 @@ class TestLegacyCacheMigration(unittest.TestCase):
       self.assertEqual(active_values(result.extrinsicsCalibration), active_values(source.extrinsicsCalibration))
 
   def test_invalid_calibration_is_never_silently_reset(self):
-    for changes in (dict(rpyCalib=[0, 0]), dict(rpyCalib=[0, math.nan, 0]), dict(height=[]),
-                    dict(validBlocks=51), dict(calPerc=-1), dict(rpyCalib=[0, 2, 0])):
+    for changes in ({"rpyCalib": [0, 0]}, {"rpyCalib": [0, math.nan, 0]}, {"height": []},
+                    {"validBlocks": 51}, {"calPerc": -1}, {"rpyCalib": [0, 2, 0]}):
       with self.subTest(changes=changes), self.assertRaises(LegacyCalibrationError):
         migrate_legacy_cache("CalibrationParams", calibration(**changes).to_bytes())
 

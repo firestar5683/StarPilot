@@ -1,15 +1,15 @@
+
+from unittest.mock import patch
 from pathlib import Path
 from types import SimpleNamespace as NS
 import tempfile
-import unittest
-from unittest.mock import patch
 from openpilot.starpilot.galaxy.tests import test_navigation_http as helpers
 from openpilot.starpilot.drive_state.owner import DriveStateOwner, Mode
 from openpilot.starpilot.drive_state.control import DriveStateControl
 from openpilot.starpilot.drive_state.tests.test_owner import Params, BOOT
 
 
-class ForceHttpTest(unittest.TestCase):
+class ForceHttpTest(helpers.NavigationHttpTest):
   close = helpers.NavigationHttpTest.close
   request = helpers.NavigationHttpTest.request
 
@@ -83,9 +83,11 @@ class ForceHttpTest(unittest.TestCase):
     messages = Messages()
     messages.after_mono_ns = 1_000_000_000
     messages.values['deviceState'] = NS(started=True)
-    messages.values['carState'].canValid = can_valid
-    messages.values['pandaStates'][0].ignitionLine = True
-    messages.values['pandaStates'][0].safetyModel = 'hyundai'
+    self.enterContext(patch.object(messages.values['carState'], 'canValid', can_valid, create=True))
+    pandas = messages.values['pandaStates']
+    assert isinstance(pandas, list)
+    pandas[0].ignitionLine = True
+    pandas[0].safetyModel = 'hyundai'
     physical = PhysicalSource(messages, mono=lambda: 2_100_000_000, boot=lambda: 12_100_000_000)
     self.addCleanup(physical.close)
     self.control.physical = physical

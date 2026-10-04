@@ -1,3 +1,4 @@
+from unittest.mock import Mock
 import pytest
 
 from openpilot.starpilot.galaxy.android_auto_source import GalaxySourceRegistry
@@ -56,11 +57,11 @@ def test_daemon_requires_galaxy_source_for_pairing_and_other_mutations(monkeypat
   obj = Supervisor()
   for command in ('prepare_pairing', 'pair_device', 'start', 'devices', 'select_receiver'):
     with pytest.raises(RuntimeError, match='Authenticated Galaxy'):
-      daemon.handle(obj, {'command': command}, Verifier())
-  assert daemon.handle(obj, {'command': 'prepare_pairing', 'source': source}, Verifier()) == {}
+      daemon.handle(Mock(wraps=obj), {'command': command}, Mock(wraps=Verifier()))
+  assert daemon.handle(Mock(wraps=obj), {'command': 'prepare_pairing', 'source': source}, Mock(wraps=Verifier())) == {}
   assert obj.calls == [('bind', ('galaxy', source)), ('pair',)]
-  assert daemon.handle(obj, {'command': 'status'}) == {'status': {'state': 'idle'}}
-  assert daemon.handle(obj, {'command': 'stop'}) == {}
+  assert daemon.handle(Mock(wraps=obj), {'command': 'status'}) == {'status': {'state': 'idle'}}
+  assert daemon.handle(Mock(wraps=obj), {'command': 'stop'}) == {}
 
 
 def test_daemon_park_gate_still_prevents_pairing(monkeypatch):
@@ -85,7 +86,7 @@ def test_daemon_park_gate_still_prevents_pairing(monkeypatch):
       raise AssertionError('pairing should not start')
 
   with pytest.raises(RuntimeError, match='Park before pairing'):
-    daemon.handle(Supervisor(), {'command': 'prepare_pairing', 'source': 'a' * 64}, Verifier())
+    daemon.handle(Mock(wraps=Supervisor()), {'command': 'prepare_pairing', 'source': 'a' * 64}, Mock(wraps=Verifier()))
 
 
 def test_pairing_prompt_commands_require_live_source_and_park(monkeypatch):
@@ -123,13 +124,13 @@ def test_pairing_prompt_commands_require_live_source_and_park(monkeypatch):
   obj = Supervisor()
   for command in ('pairing_status', 'pairing_response', 'cancel_pairing'):
     with pytest.raises(RuntimeError, match='Authenticated Galaxy'):
-      daemon.handle(obj, {'command': command})
-  assert daemon.handle(obj, {'command': 'pairing_status', 'source': source}, Verifier())['pairing']['active']
-  daemon.handle(obj, {'command': 'pairing_response', 'source': source, 'prompt_id': 'p', 'accepted': False, 'value': ''}, Verifier())
+      daemon.handle(Mock(wraps=obj), {'command': command})
+  assert daemon.handle(Mock(wraps=obj), {'command': 'pairing_status', 'source': source}, Mock(wraps=Verifier()))['pairing']['active']
+  daemon.handle(Mock(wraps=obj), {'command': 'pairing_response', 'source': source, 'prompt_id': 'p', 'accepted': False, 'value': ''}, Mock(wraps=Verifier()))
   assert ('response', 'p', False, '') in obj.calls
   parked[0] = False
   with pytest.raises(RuntimeError, match='Park before pairing'):
-    daemon.handle(obj, {'command': 'cancel_pairing', 'source': source}, Verifier())
+    daemon.handle(Mock(wraps=obj), {'command': 'cancel_pairing', 'source': source}, Mock(wraps=Verifier()))
   assert ('cancel',) not in obj.calls
 
 

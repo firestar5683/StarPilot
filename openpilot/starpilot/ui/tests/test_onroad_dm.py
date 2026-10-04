@@ -1,7 +1,10 @@
+from unittest.mock import Mock
+from openpilot.starpilot.ui.presentation import BitmapFonts
+
+from unittest.mock import patch
 import unittest
 from dataclasses import replace
 from types import SimpleNamespace as NS
-from unittest.mock import Mock, patch
 
 from openpilot.starpilot.ui.onroad_customization import default_document, validate_document
 from openpilot.starpilot.ui.onroad_dm import DriverMonitorLayer, StableDriverStateRenderer, monitor_bounds, monitor_visible, valid_observation
@@ -15,14 +18,16 @@ def road():
 
 
 def observation():
-  return NS(isRHD=False, activePolicy='vision', visionPolicyState=NS(faceDetected=True, awarenessPercent=100,
-                                                                  pose=NS(pitch=0., yaw=0.))), NS(leftDriverData=NS(), rightDriverData=NS())
+  return NS(isRHD=False, activePolicy='vision', visionPolicyState=NS(faceDetected=True, awarenessPercent=100, pose=NS(pitch=0.0, yaw=0.0))), NS(
+    leftDriverData=NS(), rightDriverData=NS()
+  )
 
 
 class TestDriverMonitor(unittest.TestCase):
   def test_monitor_uses_same_frame_observation_as_other_widgets(self):
     from openpilot.starpilot.ui import runtime_app
     from openpilot.starpilot.ui.tests.test_runtime_snapshot import ui_fake, NOW
+
     ui = ui_fake()
     ui.is_onroad = lambda: True
     monitor, driver = observation()
@@ -87,9 +92,11 @@ class TestDriverMonitor(unittest.TestCase):
     state = road()
     for profile in Profile:
       self.assertTrue(monitor_visible(profile, state, fresh=True, onroad=True, top_icons=False))
-      for changes, source in (({}, {'onroad': False}),
-                              ({'appearance': replace(state.appearance, hide_dm_icon=True)}, {}),
-                              ({'alert': OnroadAlert(size=AlertSize.FULL)}, {})):
+      for changes, source in (
+        ({}, {'onroad': False}),
+        ({'appearance': replace(state.appearance, hide_dm_icon=True)}, {}),
+        ({'alert': OnroadAlert(size=AlertSize.FULL)}, {}),
+      ):
         with self.subTest(profile=profile, changes=changes, source=source):
           self.assertFalse(monitor_visible(profile, replace(state, **changes), **{'fresh': True, 'onroad': True, 'top_icons': False, **source}))
       document = default_document()
@@ -99,9 +106,13 @@ class TestDriverMonitor(unittest.TestCase):
   def test_transient_sources_hud_and_small_alerts_do_not_remove_monitor(self):
     for profile in Profile:
       for camera in CameraViewChoice:
-        state = replace(road(), reversing=True, camera_available=False,
-                        appearance=replace(road().appearance, camera_view=camera),
-                        alert=OnroadAlert(size=AlertSize.SMALL, text1='Bookmark Saved'))
+        state = replace(
+          road(),
+          reversing=True,
+          camera_available=False,
+          appearance=replace(road().appearance, camera_view=camera),
+          alert=OnroadAlert(size=AlertSize.SMALL, text1='Bookmark Saved'),
+        )
         self.assertTrue(monitor_visible(profile, state, fresh=False, onroad=True, top_icons=False))
 
   def test_set_speed_occludes_only_overlapping_compact_monitor(self):
@@ -120,8 +131,14 @@ class TestDriverMonitor(unittest.TestCase):
     monitor.visionPolicyState.pose.pitch = float('nan')
     layer = DriverMonitorLayer.__new__(DriverMonitorLayer)
     layer.profile = Profile.LARGE
-    layer.renderer = NS(set_should_draw=Mock(), set_position=Mock(), _rect=object(), _is_active=True,
-                        _fade_filter=NS(update=Mock()), _update_state=Mock(), _render=Mock())
+    self.enterContext(
+      patch.object(
+        layer,
+        'renderer',
+        NS(set_should_draw=Mock(), set_position=Mock(), _rect=object(), _is_active=True, _fade_filter=NS(update=Mock()), _update_state=Mock(), _render=Mock()),
+        create=True,
+      )
+    )
     layer.render(road(), monitor=monitor, driver=driver, fresh=True, onroad=True)
     layer.renderer._update_state.assert_not_called()
     layer.renderer._render.assert_called_once()
@@ -133,7 +150,7 @@ class TestDriverMonitor(unittest.TestCase):
 
     renderer = StableDriverStateRenderer.__new__(StableDriverStateRenderer)
     renderer._should_draw = True
-    renderer._fade_filter = NS(x=0.35)
+    self.enterContext(patch.object(renderer, '_fade_filter', NS(x=0.35), create=True))
     renderer._face_detected = True
     renderer._is_active = False
     with patch.object(DriverStateRenderer, '_update_state'):
@@ -152,7 +169,9 @@ class TestDriverMonitor(unittest.TestCase):
     document['layouts']['large']['driver_monitor'].update(x=700.5, y=600.25)
     layer = DriverMonitorLayer.__new__(DriverMonitorLayer)
     layer.profile = Profile.LARGE
-    layer.renderer = NS(set_should_draw=Mock(), set_position=Mock(), _update_state=Mock(), _render=Mock(), _rect=object())
+    self.enterContext(
+      patch.object(layer, 'renderer', NS(set_should_draw=Mock(), set_position=Mock(), _update_state=Mock(), _render=Mock(), _rect=object()), create=True)
+    )
     layer.render(replace(road(), customization=document), monitor=monitor, driver=driver, fresh=True, onroad=True)
     layer.renderer.set_position.assert_called_once_with(732.5, 632.25)
     layer.renderer._update_state.assert_called_once()
@@ -162,12 +181,12 @@ class TestDriverMonitor(unittest.TestCase):
     from contextlib import ExitStack
     from pathlib import Path
     from openpilot.starpilot.ui import onroad
-    view = onroad.OnroadView(NS(profile=Profile.LARGE), Path('/unused'))
+
+    view = onroad.OnroadView(Mock(spec=BitmapFonts, **vars(NS(profile=Profile.LARGE))), Path('/unused'))
     order = []
     view.driver_monitor_layer = lambda rect, state: order.append('dm')
-    view.alert.render = lambda rect, alert: order.append('alert')
-    scene = replace(road(), camera_available=False, alert=OnroadAlert(size=AlertSize.FULL),
-                    appearance=replace(road().appearance, hide_speed=True))
+    self.enterContext(patch.object(view.alert, 'render', lambda rect, alert: order.append('alert'), create=True))
+    scene = replace(road(), camera_available=False, alert=OnroadAlert(size=AlertSize.FULL), appearance=replace(road().appearance, hide_speed=True))
     with ExitStack() as stack:
       for name in ('draw_rectangle_rec', 'draw_rectangle_gradient_v', 'draw_rectangle_lines_ex', 'draw_rectangle_rounded_lines_ex'):
         stack.enter_context(patch.object(onroad.rl, name))
@@ -179,9 +198,12 @@ class TestDriverMonitor(unittest.TestCase):
 
   def test_runtime_binding_requires_fresh_post_drive_dm_receipts(self):
     from openpilot.starpilot.ui import runtime_app
+
     monitor, driver = observation()
+
     class Sources(dict):
       pass
+
     now = 5_000_000_000
     sources = Sources(driverMonitoringState=monitor, driverStateV2=driver, selfdriveState=NS())
     sources.valid = dict.fromkeys(sources, True)
@@ -190,7 +212,7 @@ class TestDriverMonitor(unittest.TestCase):
     sources.recv_frame = dict.fromkeys(sources, 11)
     session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
     session.profile = Profile.LARGE
-    session._driver_monitor_layer = NS(render=Mock())
+    self.enterContext(patch.object(session, '_driver_monitor_layer', NS(render=Mock()), create=True))
     native = NS(sm=sources, started_frame=10, is_onroad=lambda: True)
     with patch.object(runtime_app, 'ui_state', native), patch.object(runtime_app.time, 'monotonic_ns', return_value=now):
       session._render_driver_monitor(None, road())
@@ -220,6 +242,7 @@ class TestDriverMonitor(unittest.TestCase):
     from openpilot.common.params import Params
     from openpilot.starpilot.galaxy.onroad_layout import LayoutChanged, OnroadLayoutOwner
     from openpilot.starpilot.ui.onroad_customization import PARAM_KEY
+
     old = default_document()
     for layout in old['layouts'].values():
       for key in ('driver_monitor', 'torque_bar', 'speed_limit_actions', 'model_confidence', 'conditional_mode', 'following_distance'):

@@ -108,19 +108,18 @@ class CameraSnapshotTest(unittest.TestCase):
   def test_native_frames_with_stale_future_or_reversed_timestamps_never_convert(self):
     for fault in ('stale', 'future', 'reversed'):
       with self.subTest(fault=fault):
-        now = 1_000_000_000
+        now = [1_000_000_000]
         frame = SimpleNamespace(width=4, height=4, stride=4, uv_offset=16,
                                 data=np.full(80, 128, dtype=np.uint8))
         class Client:
           valid = False
           timestamp_sof = timestamp_eof = 0
           def connect(self, blocking): return True
-          def recv(self, timeout_ms):
-            nonlocal now
-            now += 100_000_000
-            self.timestamp_sof = now - (600_000_000 if fault == 'stale' else 20_000_000)
-            self.timestamp_eof = now + 1 if fault == 'future' else self.timestamp_sof - 1 if fault == 'reversed' else now - 10_000_000
+          def recv(self, timeout_ms, *, fault=fault, frame=frame, now=now):
+            now[0] += 100_000_000
+            self.timestamp_sof = now[0] - (600_000_000 if fault == 'stale' else 20_000_000)
+            self.timestamp_eof = now[0] + 1 if fault == 'future' else self.timestamp_sof - 1 if fault == 'reversed' else now[0] - 10_000_000
             return frame
         with patch('openpilot.starpilot.galaxy.camera_snapshot_worker.extract_image') as convert:
-          self.assertIsNone(capture('cabin', client_factory=lambda *args: Client(), clock=lambda: now))
+          self.assertIsNone(capture('cabin', client_factory=lambda *args: Client(), clock=lambda now=now: now[0]))
           convert.assert_not_called()

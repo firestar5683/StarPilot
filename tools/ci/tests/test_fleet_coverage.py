@@ -10,6 +10,7 @@ import tempfile
 import unittest
 from typing import Any
 
+from tools.ci.run_vehicle_tests import SOURCE_INPUT_PATHS
 from tools.ci.fleet_coverage import ROOT, DEFAULT_MANIFEST, SCENARIOS, canonical_sha256, evaluate, sha256
 from openpilot.starpilot.validation.tests.test_control_modes import fixture
 
@@ -37,9 +38,15 @@ class FleetCoverageTest(unittest.TestCase):
                                 "pytest_runner_sha256": sha256(ROOT / "tools/ci/vehicle_pytest.py"),
                                 "dependencies": upstream["dependencies"]}}
 
-  def check(self, modes=None):
+    self.current_snapshot = {"revision": self.revision, "paths": list(SOURCE_INPUT_PATHS),
+                             "tracked_patch_sha256": "d" * 64, "untracked_sha256": {}}
+    self.coverage["source"]["inputs"] = copy.deepcopy(self.current_snapshot)
+    self.coverage["source_after"] = copy.deepcopy(self.coverage["source"])
+
+  def check(self, modes=None, *, dirty_relevant=None):
     return evaluate(self.manifest, self.coverage, self.results, modes,
-                    expected_revision=self.revision, hashes={"results": self.result_hash}, dirty_relevant=[])
+                    expected_revision=self.revision, hashes={"results": self.result_hash}, dirty_relevant=dirty_relevant or [],
+                    current_snapshot=self.current_snapshot)
 
   def test_checked_in_manifest_keeps_exact_source_and_addition_counts(self):
     manifest = json.loads(DEFAULT_MANIFEST.read_text())
@@ -89,7 +96,7 @@ class FleetCoverageTest(unittest.TestCase):
     self.assertTrue(any("results hash" in issue for issue in report["errors"]))
     self.coverage["result_sha256"] = self.result_hash
     report = evaluate(self.manifest, self.coverage, self.results, expected_revision="f" * 40,
-                      hashes={"results": self.result_hash})
+                      hashes={"results": self.result_hash}, dirty_relevant=[], current_snapshot=self.current_snapshot)
     self.assertIn("interface report source revision differs from requested checkout", report["uncovered"])
 
   def test_empty_required_manifest_and_malformed_ids_are_errors(self):
@@ -112,8 +119,10 @@ class FleetCoverageTest(unittest.TestCase):
     self.assertIn("interface report working-tree status missing or malformed", report["uncovered"])
 
   def test_dirty_relevant_source_and_empty_native_set_cannot_be_current(self):
+    self.coverage.pop("source_after")
     report = evaluate(self.manifest, self.coverage, self.results, expected_revision=self.revision,
-                      hashes={"results": self.result_hash}, dirty_relevant=[" M opendbc_repo/opendbc/car/example.py"])
+                      hashes={"results": self.result_hash}, dirty_relevant=[" M opendbc_repo/opendbc/car/example.py"],
+                      current_snapshot=self.current_snapshot)
     self.assertEqual(0, report["current_interface_counts"].get("passed", 0))
     self.assertIn("relevant vehicle/runner source differs from committed checkout", report["uncovered"])
     self.coverage["native"] = {"can_sources": {}, "pycapnp": {"path": __file__, "sha256": sha256(__file__)}}
@@ -121,6 +130,7 @@ class FleetCoverageTest(unittest.TestCase):
     self.assertIn("interface report native CAN source set incomplete or unexpected", report["uncovered"])
 
   def test_reported_dirty_vehicle_source_invalidates_current_pass(self):
+    self.coverage.pop("source_after")
     self.coverage["source"]["status"] = " M opendbc_repo/opendbc/car/honda/values.py\n M openpilot/starpilot/ui/device.py"
     report = self.check()
     self.assertEqual(0, report["current_interface_counts"].get("passed", 0))
@@ -138,6 +148,7 @@ class FleetCoverageTest(unittest.TestCase):
         self.assertEqual(0, report["current_interface_counts"].get("passed", 0))
 
   def test_reported_dirty_pytest_adapter_invalidates_current_evidence(self):
+    self.coverage.pop("source_after")
     self.coverage["source"]["status"] = " M tools/ci/vehicle_pytest.py"
     report = self.check()
     self.assertEqual(report["reported_relevant_dirty_paths"], [" M tools/ci/vehicle_pytest.py"])
@@ -186,6 +197,32 @@ class FleetCoverageTest(unittest.TestCase):
     report = self.check(modes)
     self.assertEqual("pass", report["status"], report)
     self.assertEqual("not_established", report["vehicle_qualification"])
+    interface_only = self.check()
+    self.assertEqual("pass", interface_only["interface_gate"]["status"])
+    self.assertEqual("uncovered", interface_only["status"])
+    self.assertIn("independent per-configuration mode evidence absent", interface_only["uncovered"])
+    for outcome in ("failed", "error", "skipped"):
+      self.records[0]["status"] = outcome
+      self.assertNotEqual("pass", self.check()["interface_gate"]["status"])
+    self.records[0]["status"] = "passed"
+    snapshot = copy.deepcopy(self.current_snapshot)
+    self.current_snapshot["tracked_patch_sha256"] = "e" * 64
+    self.assertNotEqual("pass", self.check()["interface_gate"]["status"])
+    self.current_snapshot = snapshot
+    self.manifest["platforms"].append({"id": "ABSENT", "family": "test", "source_declaration": "source_only"})
+    self.assertNotEqual("pass", self.check()["interface_gate"]["status"])
+    self.manifest["platforms"].pop()
+    self.coverage["source"]["status"] = " M opendbc_repo/opendbc/car/example.py\n M opendbc_repo/opendbc/can/parser.so"
+    dirty = self.coverage["source"]["status"].splitlines()
+    report = self.check(modes, dirty_relevant=dirty)
+    self.assertEqual("pass", report["status"], report)
+    self.assertEqual(1, report["current_interface_counts"]["passed"])
+    changed = copy.deepcopy(self.current_snapshot)
+    self.current_snapshot["tracked_patch_sha256"] = "e" * 64
+    report = self.check(modes, dirty_relevant=dirty)
+    self.assertEqual(0, report["current_interface_counts"].get("passed", 0))
+    self.assertTrue(any("source inputs" in issue for issue in report["uncovered"]))
+    self.current_snapshot = changed
     modes["traces"][0]["case_id"] = "changed-after-catalog-hash"
     report = self.check(modes)
     self.assertEqual("error", report["status"])

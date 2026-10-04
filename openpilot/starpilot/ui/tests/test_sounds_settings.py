@@ -3,12 +3,12 @@
 from pathlib import Path
 import tempfile
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import numpy as np
 
 from openpilot.common.params import Params
-from openpilot.selfdrive.ui.soundd import ALERT_VOLUME_KEYS, AudibleAlert, Soundd, sound_list
+from openpilot.selfdrive.ui.soundd import ALERT_VOLUME_KEYS, CRITICAL_MAX, AudibleAlert, Soundd, sound_list
 from openpilot.starpilot.audio.alert_volume import AUTO, VOLUMES, effective_volume, read_volume
 from openpilot.starpilot.ui import sounds_compact
 from openpilot.starpilot.ui.feature_settings_state import FeatureInput, FeatureSettingsRequest, FeatureUiAction, row_change
@@ -118,6 +118,7 @@ class SoundsSettingsTests(unittest.TestCase):
 
   def test_soundd_poll_reads_saved_values_without_touching_samples(self):
     sound = Soundd.__new__(Soundd)
+    sound.pack_loader = Mock(is_builtin=Mock(return_value=False))
     sound.volume_params = self.params
     sound.saved_volumes = {key: AUTO for key, _, _ in VOLUMES}
     sound.volume_read_at = 0.0
@@ -201,7 +202,9 @@ class SoundsSettingsTests(unittest.TestCase):
 
   def test_soundd_auto_samples_and_protected_warning_ramp(self):
     sound = Soundd.__new__(Soundd)
+    sound.pack_loader = Mock(is_builtin=Mock(return_value=False))
     sound.current_alert = AudibleAlert.engage
+    sound.current_sound = AudibleAlert.engage
     sound.current_sound_frame = 0
     sound.pending_stop = False
     sound.current_volume = 0.17
@@ -213,6 +216,7 @@ class SoundsSettingsTests(unittest.TestCase):
     sound.saved_volumes["EngageVolume"] = 0
     np.testing.assert_array_equal(sound.get_sound_data(2), np.zeros(2, dtype=np.float32))
     sound.current_alert = AudibleAlert.warningImmediate
+    sound.current_sound = AudibleAlert.warningImmediate
     sound.current_sound_frame = 0
     sound.saved_volumes["WarningImmediateVolume"] = 25
     np.testing.assert_array_equal(sound.get_sound_data(2), np.array([0.125, -0.125], dtype=np.float32))
@@ -223,18 +227,24 @@ class SoundsSettingsTests(unittest.TestCase):
 
   def test_auto_matches_prior_gain_for_every_stock_family_and_timeout(self):
     sound = Soundd.__new__(Soundd)
+    sound.pack_loader = Mock(is_builtin=Mock(return_value=False))
     waveform = np.array([0.5, -0.5], dtype=np.float32)
     sound.loaded_sounds = dict.fromkeys(sound_list, waveform)
     sound.saved_volumes = {key: AUTO for key, _, _ in VOLUMES}
     sound.current_volume = 0.17
     sound.pending_stop = False
     for alert in sound_list:
-      self.assertIn(alert, ALERT_VOLUME_KEYS)
+      if alert == CRITICAL_MAX:
+        self.assertNotIn(alert, ALERT_VOLUME_KEYS)
+      else:
+        self.assertIn(alert, ALERT_VOLUME_KEYS)
       sound.current_alert = alert
+      sound.current_sound = alert
       sound.current_sound_frame = 0
       np.testing.assert_array_equal(sound.get_sound_data(2), waveform * 0.17)
     # The existing timeout path produces the same immediate-warning alert.
     sound.current_alert = AudibleAlert.none
+    sound.current_sound = AudibleAlert.none
     sound.current_sound_frame = 0
     sound.selfdrive_timeout_alert = False
     sm = type("State", (), {"updated": {"selfdriveState": False}})()
@@ -249,7 +259,9 @@ class SoundsSettingsTests(unittest.TestCase):
 
   def test_looping_alert_final_chunk_keeps_producing_alert_gain(self):
     sound = Soundd.__new__(Soundd)
+    sound.pack_loader = Mock(is_builtin=Mock(return_value=False))
     sound.current_alert = AudibleAlert.promptRepeat
+    sound.current_sound = AudibleAlert.promptRepeat
     sound.current_sound_frame = 2
     sound.pending_stop = True
     sound.current_volume = 0.17
@@ -258,6 +270,7 @@ class SoundsSettingsTests(unittest.TestCase):
     np.testing.assert_array_equal(sound.get_sound_data(2), np.zeros(2, dtype=np.float32))
     self.assertEqual(sound.current_alert, AudibleAlert.none)
     sound.current_alert = AudibleAlert.promptRepeat
+    sound.current_sound = AudibleAlert.promptRepeat
     sound.current_sound_frame = 2
     sound.pending_stop = True
     sound.saved_volumes["PromptVolume"] = AUTO

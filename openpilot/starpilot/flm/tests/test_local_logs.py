@@ -78,6 +78,7 @@ def test_changes_during_read_never_return_a_receipt(tmp_path, change):
         other.replace(path)
       elif change == "mutate":
         path.write_bytes(b"X" * len(result))
+        os.utime(path, ns=(0, 0))
       elif change == "lock":
         path.with_name("rlog.lock").touch()
       elif change == "segment":

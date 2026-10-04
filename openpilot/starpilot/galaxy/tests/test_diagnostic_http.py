@@ -1,3 +1,4 @@
+from unittest.mock import Mock
 """Authenticated diagnostics over the same local and remote HTTP handler."""
 
 import http.client
@@ -100,13 +101,13 @@ class DiagnosticHTTPTest(unittest.TestCase):
     class NoRawParams:
       def __getattr__(self, name):
         raise AssertionError(f'Raw Params access: {name}')
-    gateway = SettingsGateway(NoRawParams(), SimpleNamespace(sample=lambda: context))
+    gateway = SettingsGateway(NoRawParams(), Mock(sample=lambda: context))
     pages = []
     def state(page, ctx):
       pages.append(page)
       self.assertIs(ctx, context)
       return SimpleNamespace(title=page, rows=[SimpleNamespace(label='Visible preference', value='On', source=b'private')])
-    gateway._state = state
+    gateway._state = Mock(side_effect=state)
     result = gateway.diagnostics()
     self.assertEqual(len(pages), 8)
     self.assertEqual(result['vehicle']['fingerprint'], 'TEST_CAR')

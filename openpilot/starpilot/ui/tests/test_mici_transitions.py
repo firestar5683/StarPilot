@@ -25,10 +25,10 @@ def navigation(monkeypatch):
   view._prev_onroad = False
   view._prev_standstill = False
   view._onroad_time_delay = None
-  view._onboarding_window = object()
-  view._home_layout = object()
-  view._car_onroad_layout = object()
-  view._body_onroad_layout = object()
+  monkeypatch.setattr(view, '_onboarding_window', object(), raising=False)
+  monkeypatch.setattr(view, '_home_layout', object(), raising=False)
+  monkeypatch.setattr(view, '_car_onroad_layout', object(), raising=False)
+  monkeypatch.setattr(view, '_body_onroad_layout', object(), raising=False)
   view._scroll_to = Mock()
   return NS(view=view, ui=ui, gui=gui, clock=clock, callbacks=callbacks)
 
@@ -170,7 +170,7 @@ def camera(monkeypatch):
   view.available_streams = [view._stream_type, view._target_stream_type]
   view.texture_y = NS(id=1)
   view.texture_uv = NS(id=2)
-  view.egl_images = {0: 'old-image'}
+  monkeypatch.setattr(view, 'egl_images', {0: 'old-image'}, raising=False)
   view.shader = NS(id=3)
   view.egl_texture = NS(id=4)
   view._texture_needs_update = False

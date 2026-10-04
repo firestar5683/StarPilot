@@ -119,22 +119,21 @@ class TestGMAutoIdentity(unittest.TestCase):
       present = 0x201 in variant
       for saved in (False, True):
         for alpha in (False, True):
-          for camera in ((True,) if present and saved else (False, True)):
+          for camera in ((True,) if present else (False, True)):
             for disabled in (False, True):
               with self.subTest(variant=variant_index, pedal=saved, alpha=alpha, camera=camera, disabled=disabled):
                 fp = gen_empty_fingerprint()
                 fp[0].update(variant)
                 if camera:
                   fp[2][0x180] = 4
-                with patch('opendbc.car.gm.interface.Params', return_value=pedal_fixture.SavedPedalSetting(saved)):
-                  cp = CarInterface.get_params(car, fp, [], alpha, False, False)
+                cp = CarInterface.get_params(car, fp, [], alpha, False, False)
                 VehicleStartupPreferences(disable_bolt_long=disabled).prepare(cp, fingerprints=fp)
-                self.assertEqual(bool(cp.flags & GMFlags.PEDAL_LONG), present and saved)
+                self.assertEqual(bool(cp.flags & GMFlags.PEDAL_LONG), present)
                 self.assertTrue(cp.flags & GMFlags.HAS_BSM)
                 ci, state = fixture.stream(cp, blindspot=True, pedal_present=present, camera_present=camera)
                 self.assertTrue(state.canValid, (variant_index, saved, alpha, camera, disabled, cp.to_dict()))
                 self.assertFalse(state.canTimeout)
-                self.assertEqual(ci.CS.pedal_sensor_healthy, present and saved)
+                self.assertEqual(ci.CS.pedal_sensor_healthy, present)
                 self.assertNotIn('ASCMActiveCruiseControlStatus', ci.can_parsers[Bus.cam].vl)
                 _, missing_bsm = fixture.stream(cp, missing=(0, 'BCMBlindSpotMonitor'), blindspot=True,
                                                pedal_present=present, camera_present=camera)

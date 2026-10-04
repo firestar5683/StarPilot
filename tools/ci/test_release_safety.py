@@ -6,7 +6,7 @@ from opendbc.safety.tests.libsafety import libsafety_py
 
 RELEASE_MODES = frozenset({
   "silent", "hondaNidec", "toyota", "elm327", "gm", "hondaBosch", "hyundai", "chrysler", "subaru", "volkswagen",
-  "volkswagenMeb", "nissan", "noOutput", "hyundaiLegacy", "mazda", "body", "ford", "rivian", "tesla", "hyundaiCanfd",
+  "volkswagenMeb", "nissan", "noOutput", "hyundaiLegacy", "mazda", "body", "ford", "rivian", "tesla", "hyundaiCanfd", "teslaPreap",
 })
 
 

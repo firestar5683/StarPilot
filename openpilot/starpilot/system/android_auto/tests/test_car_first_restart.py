@@ -1,5 +1,4 @@
 """Cold housekeeping starts the saved adapter only after confirmed car HFP."""
-from types import SimpleNamespace
 from unittest.mock import Mock
 from openpilot.starpilot.system.android_auto.auto_connect import AutoConnectPolicy
 from openpilot.starpilot.system.android_auto.supervisor import Supervisor
@@ -8,16 +7,16 @@ from openpilot.starpilot.system.android_auto.supervisor import Supervisor
 def fixture():
   unit = Supervisor.__new__(Supervisor)
   unit.config = {'receiver_address': 'adapter', 'companion_address': 'car', 'auto_connect': True, 'connection': 'wireless'}
-  unit._pairing_active = lambda: False
+  unit._pairing_active = Mock(return_value=False)
   unit._projection_enabled = lambda: True
-  unit._session_alive = lambda: False
+  unit._session_alive = Mock(return_value=False)
   unit._bluez_factory = None
   unit._bluez = None
   unit._car_seen_at = -10.0
   unit._companion_retry_at = 0.0
   phone = Mock()
   phone.snapshot.return_value = True, {'paired': True, 'connected': False}
-  unit._phone = lambda: phone
+  unit._phone = Mock(return_value=phone)
   unit._shared_bluetooth_owner = Mock()
   unit._onroad = lambda: False
   unit._set = Mock()

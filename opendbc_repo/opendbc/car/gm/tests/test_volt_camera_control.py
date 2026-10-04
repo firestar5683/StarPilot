@@ -1,13 +1,12 @@
 """Exact camera-present manual Volt owner; source conditioning is independent of SASCM."""
 import unittest
-from unittest.mock import patch
 
 from opendbc.can import CANPacker
 from opendbc.car import Bus, gen_empty_fingerprint, structs
 from opendbc.car.gm.interface import CarInterface
 from opendbc.car.gm.longitudinal import volt_policy_for
 from opendbc.car.gm.radar_interface import RadarInterface
-from opendbc.car.gm.tests.test_bolt_cc import Settings, feed, setup, native
+from opendbc.car.gm.tests.test_bolt_cc import feed, setup, native
 from opendbc.car.gm.values import (CAR, DBC, CarControllerParams, is_volt_camera_longitudinal,
                                   requires_camera_state_sources, uses_camera_stock_controls)
 from opendbc.safety.tests.libsafety import libsafety_py
@@ -23,8 +22,7 @@ def camera_params(alpha=True, release=False, camera_length=6, radar=False, sascm
     fingerprint[0][0x2FF] = 8
   if pedal:
     fingerprint[0][0x201] = 6
-  with patch("opendbc.car.gm.interface.Params", return_value=Settings(False)):
-    return CarInterface.get_params(CAR.CHEVROLET_VOLT_CAMERA, fingerprint, [], alpha, release, False)
+  return CarInterface.get_params(CAR.CHEVROLET_VOLT_CAMERA, fingerprint, [], alpha, release, False)
 
 
 def feed_camera(ci, packer, now, *, counter=0, speed=20., gas=False, brake=False, regen=False, low=False, active=True):
@@ -132,7 +130,7 @@ class TestVoltCameraControl(unittest.TestCase):
           native("rx", source, now // 1000)
         if cp.openpilotLongitudinalControl:
           native("rx", packer.make_can_msg("ASCMSteeringButton", 0, {"ACCButtons": 2}), now // 1000)
-        safety.safety_tick_current_safety_config()
+        safety.safety_tick()
         self.assertTrue(safety.safety_config_valid())
         cc = structs.CarControl(enabled=True, latActive=True, longActive=cp.openpilotLongitudinalControl)
         cc.actuators.accel = -2. if tick % 2 else 1.

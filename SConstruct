@@ -58,6 +58,8 @@ assert arch in [
 ]
 
 pkg_names = ['acados', 'capnproto', 'ffmpeg', 'json11', 'ncurses', 'zeromq', 'zstd']
+if arch != 'Darwin':
+  pkg_names.append('libusb')
 pkgs = [importlib.import_module(name) for name in pkg_names]
 acados = pkgs[pkg_names.index('acados')]
 ffmpeg = pkgs[pkg_names.index('ffmpeg')]

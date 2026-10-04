@@ -150,7 +150,7 @@ class TestHyundaiCcncAngleTwo(unittest.TestCase):
               self.assertFalse(any(f[0] in (0x160, 0x7C4, 0xEA, 0x730) for f in steering + displays))
     self.assertEqual(cases, 16)
 
-  def test_stock_ownership_and_documented_topology_boundaries(self):
+  def test_stock_ownership_topology_and_joint_firmware_discovery(self):
     for car in CARS:
       for release in (False, True):
         cp = params(car, "lfa", release=release, alpha=True)
@@ -163,7 +163,7 @@ class TestHyundaiCcncAngleTwo(unittest.TestCase):
       self.assertTrue(cp.dashcamOnly)
       self.assertEqual(cp.safetyConfigs[-1].safetyParam & CANFD_ANGLE_CCNC_MODEL_BANK_BIT, CANFD_ANGLE_CCNC_MODEL_BANK_BIT)
     self.assertTrue(params(CAR.KIA_SPORTAGE_2026, "lfa", hybrid=True).dashcamOnly)
-    self.assertTrue(set(CARS).isdisjoint(set(FW_VERSIONS)))
+    self.assertTrue(set(CARS).issubset(FW_VERSIONS))
     self.assertTrue(set(CARS).isdisjoint(set(all_legacy_fingerprint_cars())))
     frozen = {
       CAR.HYUNDAI_SANTA_FE_HEV_5TH_GEN: (
@@ -181,8 +181,11 @@ class TestHyundaiCcncAngleTwo(unittest.TestCase):
         fw = [structs.CarParams.CarFw(ecu=structs.CarParams.Ecu.fwdCamera if version == camera else structs.CarParams.Ecu.fwdRadar,
                                      address=0x7C4 if version == camera else 0x7D0, subAddress=0,
                                      fwVersion=version, brand="hyundai") for version in observations]
-        _, matches = match_fw_to_car(fw, "", log=False)
-        self.assertFalse(set(CARS) & matches, (car, observations, matches))
+        _, matches = match_fw_to_car(fw, "", allow_fuzzy=False, log=False)
+        expected = {car} if observations == (camera, radar) else set()
+        self.assertEqual(set(CARS) & matches, expected, (car, observations, matches))
+        _, production_matches = match_fw_to_car(fw, "", log=False)
+        self.assertEqual(set(CARS) & production_matches, expected, (car, observations, production_matches))
 
   def test_gear_brake_gas_and_missing_source_neutralize(self):
     for car in CARS:

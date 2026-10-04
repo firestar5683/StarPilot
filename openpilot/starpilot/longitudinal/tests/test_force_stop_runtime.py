@@ -50,7 +50,7 @@ class ForceStopRuntimeTests(unittest.TestCase):
     self.owner = ForceStopRuntime(self.params)
 
   def sample(self, sm, **changes):
-    args = {'now_ns': sm.stamp + 1_000_000, 'now_boot_ns': sm.stamp + 2_001_000_000,
+    args: dict = {'now_ns': sm.stamp + 1_000_000, 'now_boot_ns': sm.stamp + 2_001_000_000,
             'drive_id': DRIVE, 'follow_seconds': 1.45, 'traffic_mode': False}
     args.update(changes)
     return self.owner.sample(sm, self.cp, **args)
@@ -70,7 +70,7 @@ class ForceStopRuntimeTests(unittest.TestCase):
     for tick in range(40, 80):
       plan = self.sample(Frame(tick), traffic_mode=True)
       self.assertTrue(plan.forcing)
-      self.assertIsNotNone(plan.obstacle_m)
+      assert plan.obstacle_m is not None
     self.owner = ForceStopRuntime(self.params)
     for tick in range(80, 120):
       self.assertFalse(self.sample(Frame(tick), traffic_mode=True).forcing)
@@ -98,7 +98,7 @@ class ForceStopRuntimeTests(unittest.TestCase):
       self.assertFalse(output.forcing)
       self.assertIsNone(output.obstacle_m)
       self.assertIsNone(output.speed_ceiling_mps)
-    self.assertIsNotNone(self.sample(Frame(240)).speed_ceiling_mps)
+    assert self.sample(Frame(240)).speed_ceiling_mps is not None
 
   def test_resume_during_manual_brake_or_aol_does_not_carry_into_long_engagement(self):
     for manual in ('brake', 'aol'):
@@ -131,7 +131,7 @@ class ForceStopRuntimeTests(unittest.TestCase):
       plan = self.sample(sm)
       self.assertTrue(plan.forcing)
       self.assertLessEqual(plan.tracked_distance_m, previous_distance)
-      self.assertIsNotNone(plan.speed_ceiling_mps)
+      assert plan.speed_ceiling_mps is not None
       previous_distance = plan.tracked_distance_m
     for tick in range(70, 100):
       sm = Frame(tick, stopped=True)
@@ -160,7 +160,7 @@ class ForceStopRuntimeTests(unittest.TestCase):
 
   def test_actual_model_and_saved_gate_reach_active_force_stop(self):
     output = self.prime()
-    self.assertIsNotNone(output.obstacle_m)
+    assert output.obstacle_m is not None
     self.assertEqual(output.jerk_scale, .32)
     self.params.put_bool('QOLLongitudinal', False, block=True)
     self.assertFalse(self.sample(Frame(60)).forcing)
@@ -174,7 +174,7 @@ class ForceStopRuntimeTests(unittest.TestCase):
         self.owner = ForceStopRuntime(self.params)
         self.prime()
         sm = Frame(40)
-        args = {}
+        args: dict = {}
         if defect in ('gas', 'brake'):
           setattr(sm['carState'], defect + 'Pressed', True)
         elif defect == 'can':
@@ -277,7 +277,7 @@ class ForceStopRuntimeTests(unittest.TestCase):
           np.testing.assert_array_equal(original.mpc.params, inactive.mpc.params)
           np.testing.assert_array_equal(original.mpc.x_sol, inactive.mpc.x_sol)
           self.assertEqual(selected.mpc.solution_status, 0)
-          self.assertIsNotNone(selected.force_stop_plan.obstacle_m)
+          assert selected.force_stop_plan.obstacle_m is not None
           np.testing.assert_array_equal(selected.mpc.params[:, 2], selected.force_stop_plan.obstacle_m + 6.)
           self.assertLessEqual(selected.output_a_target, original.output_a_target)
         # Native stop handoff is explicit even before acceleration alone reaches its threshold.
@@ -297,7 +297,7 @@ class ForceStopRuntimeTests(unittest.TestCase):
                       force_stop_provider=lambda follow, frame=sm: self.sample(frame, follow_seconds=follow))
       plan = selected.force_stop_plan
       self.assertTrue(plan.forcing)
-      self.assertIsNotNone(plan.obstacle_m)
+      assert plan.obstacle_m is not None
       np.testing.assert_array_equal(selected.mpc.params[:, 2], plan.obstacle_m + 6.)
       self.assertEqual(selected.mpc.solution_status, 0)
       self.assertLess(selected.output_a_target, 0.)

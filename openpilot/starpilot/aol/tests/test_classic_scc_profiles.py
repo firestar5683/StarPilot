@@ -192,7 +192,7 @@ class TestClassicSccProfiles(unittest.TestCase):
     from openpilot.selfdrive.car.card import Car
     tree = ast.parse(textwrap.dedent(inspect.getsource(Car.state_update)))
     names = ('host_enabled', 'host_control_enabled')
-    statements = [node for node in tree.body[0].body if isinstance(node, ast.Assign) and
+    statements: list[ast.stmt] = [node for node in tree.body[0].body if isinstance(node, ast.Assign) and
                   any(isinstance(target, ast.Name) and target.id in names for target in node.targets)]
     self.assertEqual([node.targets[0].id for node in statements], list(names))
     code = compile(ast.Module(body=statements, type_ignores=[]), 'actual-card-host-observation', 'exec')
@@ -222,7 +222,7 @@ class TestClassicSccProfiles(unittest.TestCase):
       inputs.enabled = enabled
       inputs.valid, inputs.alive = sm.valid, sm.alive
       context = SimpleNamespace(CP=cp, CC_prev=SimpleNamespace(enabled=previous), sm=inputs)
-      scope = {'self':context, 'CS':SimpleNamespace(canValid=healthy, canTimeout=False),
+      scope: dict = {'self':context, 'CS':SimpleNamespace(canValid=healthy, canTimeout=False),
                'now_ns':1_000_000_000, 'control_log_ns':1_000_000_000-age,
                'slc_physical':SimpleNamespace(STATE_MAX_AGE_NS=150_000_000)}
       exec(code, scope)
