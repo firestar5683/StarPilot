@@ -110,6 +110,7 @@ def test_final_cp_publication_and_disabled_startup(identity, monkeypatch):
 
 
 @pytest.mark.parametrize("identity,version", (
+  (CAR.HONDA_CLARITY, b"39990-TRW,A020\x00\x00"),
   (CAR.HONDA_CIVIC, b"39990-TBA,A030\x00\x00"),
   (CAR.HONDA_ACCORD, b"39990-TVA,A150\x00\x00"),
   (CAR.HONDA_CIVIC_BOSCH, b"39990-TGG,A020\x00\x00"),
