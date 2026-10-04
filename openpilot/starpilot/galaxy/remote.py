@@ -4,6 +4,8 @@ from __future__ import annotations
 
 import base64
 import binascii
+from contextlib import contextmanager
+import fcntl
 import json
 import hmac
 import os
@@ -45,9 +47,33 @@ def gateway_cookie_valid(cookie: str | None, record: dict[str, str]) -> bool:
 
 class RemotePairing:
   FILE = "remote-v1.json"
+  UNPAIRED = "remote-unpaired-v1"
 
   def __init__(self, root: Path):
     self.root = root
+
+  @contextmanager
+  def _locked(self):
+    self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    info = self.root.lstat()
+    if not stat.S_ISDIR(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+      raise ValueError("Pairing directory is unsafe")
+    fd = os.open(self.root / '.remote.lock', os.O_RDWR | os.O_CREAT | os.O_NOFOLLOW, 0o600)
+    try:
+      info = os.fstat(fd)
+      if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+        raise ValueError("Pairing lock is unsafe")
+      fcntl.flock(fd, fcntl.LOCK_EX)
+      yield
+    finally:
+      os.close(fd)
+
+  def _sync_directory(self):
+    fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY | os.O_NOFOLLOW)
+    try:
+      os.fsync(fd)
+    finally:
+      os.close(fd)
 
   def read(self) -> dict[str, str] | None:
     try:
@@ -72,33 +98,59 @@ class RemotePairing:
       return None
 
   @staticmethod
-  def _legacy_record(root: Path, auth_hash: str) -> dict[str, str] | None:
+  def _legacy_record(root: Path, auth_hash: str | None = None) -> dict[str, str] | None:
     values = {}
     try:
+      directory = root.lstat()
+      if not stat.S_ISDIR(directory.st_mode) or directory.st_uid != os.geteuid() or directory.st_mode & 0o022:
+        return None
       for name in ('glxyauth', 'glxysession', 'glxyslug'):
-        fd = os.open(root / name, os.O_RDONLY | os.O_NOFOLLOW)
+        fd = os.open(root / name, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK)
         with os.fdopen(fd, 'r', encoding='ascii') as stream:
           info = os.fstat(stream.fileno())
-          if not stat.S_ISREG(info.st_mode) or info.st_size > 128:
+          if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o022 or info.st_size > 128:
             return None
-          values[name] = stream.read().strip()
-      if not hmac.compare_digest(values['glxyauth'], auth_hash) or \
+          values[name] = stream.read(129).strip()
+      if not HASH.fullmatch(values['glxyauth']) or (auth_hash is not None and not hmac.compare_digest(values['glxyauth'], auth_hash)) or \
          not SLUG.fullmatch(values['glxyslug']) or not HASH.fullmatch(values['glxysession']):
         return None
-      return {'version': 1, 'slug': values['glxyslug'], 'authHash': auth_hash, 'session': values['glxysession']}
+      return {'version': 1, 'slug': values['glxyslug'], 'authHash': values['glxyauth'], 'session': values['glxysession']}
     except (OSError, UnicodeError):
       return None
 
   def pair(self, auth_hash: str, *, legacy_root: Path | None = None) -> str | None:
-    if not HASH.fullmatch(auth_hash) or self.read() is not None:
+    if not HASH.fullmatch(auth_hash):
       return None
-    record = self._legacy_record(legacy_root, auth_hash) if legacy_root is not None else None
-    if record is None:
-      record = {"version": 1, "slug": ''.join(secrets.choice("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") for _ in range(16)),
-                "authHash": auth_hash, "session": secrets.token_hex(32)}
-    self.root.mkdir(mode=0o700, parents=True, exist_ok=True)
-    if self.root.stat().st_mode & 0o077:
+    try:
+      with self._locked():
+        if os.path.lexists(self.root / self.FILE):
+          return None
+        record = None
+        if legacy_root is not None and not os.path.lexists(self.root / self.UNPAIRED):
+          record = self._legacy_record(legacy_root, auth_hash)
+        if record is None:
+          record = {"version": 1, "slug": ''.join(secrets.choice("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789") for _ in range(16)),
+                    "authHash": auth_hash, "session": secrets.token_hex(32)}
+        return self._store(record)
+    except (OSError, ValueError):
       return None
+
+  def migrate_legacy(self, legacy_root: Path | None) -> bool:
+    from openpilot.starpilot.galaxy.access import GalaxyAccessOwner
+    if legacy_root is None:
+      return False
+    try:
+      with self._locked():
+        if any(os.path.lexists(self.root / name) for name in (self.FILE, self.UNPAIRED, GalaxyAccessOwner.FILE)):
+          return False
+        record = self._legacy_record(legacy_root)
+        if record is None or record != self._legacy_record(legacy_root):
+          return False
+        return self._store(record) is not None
+    except (OSError, ValueError):
+      return False
+
+  def _store(self, record: dict[str, str]) -> str | None:
     fd, temporary = tempfile.mkstemp(prefix=".remote-", dir=self.root)
     try:
       os.fchmod(fd, 0o600)
@@ -107,11 +159,7 @@ class RemotePairing:
         stream.flush()
         os.fsync(stream.fileno())
       os.link(temporary, self.root / self.FILE)
-      directory_fd = os.open(self.root, os.O_RDONLY | os.O_DIRECTORY)
-      try:
-        os.fsync(directory_fd)
-      finally:
-        os.close(directory_fd)
+      self._sync_directory()
       return record["slug"]
     except (OSError, ValueError):
       return None
@@ -121,9 +169,22 @@ class RemotePairing:
 
   def unpair(self) -> bool:
     try:
-      (self.root / self.FILE).unlink()
-      return True
-    except OSError:
+      with self._locked():
+        if not os.path.lexists(self.root / self.FILE):
+          return False
+        fd = os.open(self.root / self.UNPAIRED, os.O_WRONLY | os.O_CREAT | os.O_NOFOLLOW | os.O_NONBLOCK, 0o600)
+        try:
+          info = os.fstat(fd)
+          if not stat.S_ISREG(info.st_mode) or info.st_uid != os.geteuid() or info.st_mode & 0o077:
+            return False
+          os.fsync(fd)
+        finally:
+          os.close(fd)
+        self._sync_directory()
+        (self.root / self.FILE).unlink()
+        self._sync_directory()
+        return True
+    except (OSError, ValueError):
       return False
 
   @staticmethod
@@ -159,8 +220,11 @@ customDomains = ["auth-{slug}.devices.local"]
 
 
 def default_remote_pairing() -> RemotePairing:
+  from openpilot.starpilot.galaxy.access import legacy_galaxy_root
   from openpilot.starpilot.storage import galaxy_storage_root
-  return RemotePairing(galaxy_storage_root())
+  pairing = RemotePairing(galaxy_storage_root())
+  pairing.migrate_legacy(legacy_galaxy_root())
+  return pairing
 
 
 class _GatewayAuthServer(ThreadingHTTPServer):

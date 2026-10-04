@@ -84,6 +84,19 @@ class TestExternalPreferencesReset(unittest.TestCase):
     self.assertEqual(self.model_file.read_bytes(), b'new model choice')
     self.assertEqual(self.nav_file.read_bytes(), b'new navigation choice')
 
+  def test_fresh_profile_keeps_existing_galaxy_pairing_bytes(self):
+    galaxy = self.storage / 'galaxy'
+    galaxy.mkdir(mode=0o700)
+    values = {'remote-v1.json': b'{"version":1,"slug":"ExistingGalaxy01","authHash":"' + b'a' * 64 +
+              b'","session":"' + b'b' * 64 + b'"}', 'access-v1.json': b'existing password verifier',
+              'remote-unpaired-v1': b''}
+    for name, raw in values.items():
+      (galaxy / name).write_bytes(raw)
+      (galaxy / name).chmod(0o600)
+    self.run_reset()
+    self.assertEqual({path.name: path.read_bytes() for path in galaxy.iterdir()}, values)
+    self.assertFalse(self.model_file.exists())
+
   def test_invalid_navigation_archived_and_disabled(self):
     for raw in (b'broken JSON', b'{"token":"credential"}', self.original['navigation_settings'].replace(b'"token": "credential"', b'"token": 4')):
       with self.subTest(raw=raw):

@@ -219,7 +219,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
   device_name = DeviceName(pairing.root)
 
   def remote_generation(generation, record):
-    return hashlib.sha256(generation + bytes.fromhex(record['session'])).digest()
+    return hashlib.sha256((generation or b'') + bytes.fromhex(record['session'])).digest()
   evidence_source = None
   if parked is None:
     from openpilot.starpilot.galaxy.evidence import EvidenceSource
@@ -378,7 +378,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
       if (generation == local_generation or current == generation) and sessions.valid(token, generation):
         return True
       record = pairing.read()
-      return current is not None and record is not None and generation == remote_generation(current, record) and \
+      return record is not None and generation == remote_generation(current, record) and \
              (sessions.valid(token, generation) or gateway_cookie_valid(token, record))
 
   def bluetooth_owner():
@@ -681,6 +681,9 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
       if self.direct_local():
         self.json(401, {'error': 'Refresh the local Galaxy session'})
         return False
+      if getattr(self.server, 'remote_transport', False):
+        self.json(401, {'error': 'Sign in through the Galaxy gateway'})
+        return False
       status = self.credential_state()
       if status != AccessStatus.CONFIGURED_LOCAL:
         self.json(503, {'error': 'Local Galaxy access is unavailable' if status == AccessStatus.UNAVAILABLE else
@@ -698,7 +701,7 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
         generation = access.current_generation()
         if getattr(self.server, 'remote_transport', False):
           record = pairing.read()
-          if record is None or generation is None:
+          if record is None:
             return None
           paired_generation = remote_generation(generation, record)
           if gateway_cookie_valid(token, record):
@@ -747,6 +750,10 @@ def make_server(*, port=8082, host='127.0.0.1', monitor=None, owner=None, crashe
               token = sessions.create(local_generation, reset_failures=False)
           self.respond(200, b'{"authenticated":true,"state":"configured","localAccess":true}',
                        cookie=f'galaxy_session={token}; HttpOnly; SameSite=Strict; Path=/; Max-Age={sessions.LIFETIME}')
+          return
+        if getattr(self.server, 'remote_transport', False):
+          self.json(200, {'authenticated': self.authenticated(), 'localAccess': False, 'gatewayAccess': True,
+                          'state': 'configured' if pairing.read() is not None else 'setup_required'})
           return
         status = self.credential_state()
         self.json(200, {'authenticated': status == AccessStatus.CONFIGURED_LOCAL and self.authenticated(),

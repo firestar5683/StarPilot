@@ -268,16 +268,18 @@ class GalaxyAccessOwner:
       return False
 
 
-def default_owner() -> GalaxyAccessOwner:
-  """Share the native UI credential location without importing UI modules."""
+def legacy_galaxy_root() -> Path | None:
   from openpilot.common.hardware import PC
   from openpilot.common.hardware.hw import Paths
-  from openpilot.starpilot.storage import galaxy_storage_root
 
-  # An isolated desk namespace must never inspect the normal device's legacy
-  # credentials, even to offer an import action.
+  if os.environ.get("OPENPILOT_PREFIX"):
+    return None
   if PC:
-    legacy = Path(Paths.comma_home()) / "starpilot/data/galaxy"
-  else:
-    legacy = None if os.environ.get("OPENPILOT_PREFIX") else Path("/data/galaxy")
-  return GalaxyAccessOwner(galaxy_storage_root(), legacy_root=legacy)
+    return Path(Paths.comma_home()) / "starpilot/data/galaxy"
+  return Path("/data/galaxy")
+
+
+def default_owner() -> GalaxyAccessOwner:
+  """Share the native UI credential location without importing UI modules."""
+  from openpilot.starpilot.storage import galaxy_storage_root
+  return GalaxyAccessOwner(galaxy_storage_root(), legacy_root=legacy_galaxy_root())

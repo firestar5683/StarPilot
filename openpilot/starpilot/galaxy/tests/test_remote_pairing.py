@@ -108,6 +108,72 @@ class RemotePairingTest(unittest.TestCase):
     self.assertEqual(self.request(self.remote, '/api/system/monitor', host=f'{new_slug}.devices.local', cookie=remote_cookie)[0], 401)
     self.assertEqual(self.request(self.remote, '/api/system/monitor', host=f'{new_slug}.devices.local', cookie=gateway_cookie)[0], 401)
 
+  def test_imported_pairing_without_local_verifier_authorizes_gateway_and_revokes_async_session(self):
+    from openpilot.starpilot.galaxy.remote import default_remote_pairing
+    legacy = self.pairing.root.parent / 'legacy'
+    legacy.mkdir()
+    record = dict(version=1, slug='ExistingGalaxy01', authHash=hashlib.sha256(b'oldpw6').hexdigest(), session='b' * 64)
+    for filename, key in (('glxyauth', 'authHash'), ('glxysession', 'session'), ('glxyslug', 'slug')):
+      (legacy / filename).write_text(record[key])
+    with mock.patch('openpilot.starpilot.galaxy.access.legacy_galaxy_root', return_value=legacy), \
+         mock.patch('openpilot.starpilot.storage.galaxy_storage_root', return_value=self.pairing.root):
+      imported = default_remote_pairing()
+    self.assertEqual(imported.read(), record)
+    self.assertIsNone(self.owner.current_generation())
+    gateway = make_gateway_auth_server(imported, 'disposable-dongle', port=0)
+    worker = threading.Thread(target=gateway.serve_forever, kwargs={'poll_interval': .01}, daemon=True)
+    worker.start()
+    try:
+      connection = http.client.HTTPConnection('127.0.0.1', gateway.server_port, timeout=2)
+      connection.request('POST', '/glxylogin', body=record['authHash'])
+      response = connection.getresponse()
+      self.assertEqual(response.status, 200)
+      self.assertEqual(json.loads(response.read()), {'dongle_id': 'disposable-dongle', 'token': record['session']})
+      connection.close()
+    finally:
+      gateway.shutdown()
+      worker.join(timeout=2)
+      gateway.server_close()
+    host = record['slug'] + '.devices.local'
+    cookie = 'galaxy_session=' + record['slug'] + '%3A' + record['session']
+    status, body, headers = self.request(self.remote, '/api/auth/session', host=host, cookie=cookie)
+    self.assertEqual(status, 200)
+    self.assertEqual(json.loads(body), {'authenticated': True, 'localAccess': False, 'gatewayAccess': True, 'state': 'configured'})
+    self.assertNotIn('Set-Cookie', headers)
+    self.assertEqual(self.request(self.remote, '/api/galaxy/device-name', method='POST', host=host, cookie=cookie,
+                                  origin='https://galaxy.firestar.link', payload={'name': 'Migrated comma'})[0], 200)
+    self.assertEqual(json.loads(self.request(self.remote, '/api/galaxy/device-name', host=host, cookie=cookie)[1]),
+                     {'name': 'Migrated comma'})
+    wrong_cookie = 'galaxy_session=' + record['slug'] + '%3A' + 'a' * 64
+    self.assertEqual(self.request(self.remote, '/api/galaxy/device-name', host=host, cookie=wrong_cookie)[0], 401)
+    created = []
+    def bluetooth_factory(authority, session_valid):
+      owner = mock.Mock()
+      owner.session_valid = session_valid
+      owner.identities = []
+      def snapshot(*, session):
+        owner.identities.append(session)
+        return {'available': session_valid(session)}
+      owner.snapshot.side_effect = snapshot
+      created.append(owner)
+      return owner
+    with mock.patch('openpilot.starpilot.galaxy.server.BluetoothOwner', side_effect=bluetooth_factory), \
+         mock.patch('openpilot.starpilot.galaxy.settings.LiveContextSource'):
+      status, body, _ = self.request(self.remote, '/api/bluetooth/status', host=host, cookie=cookie)
+    self.assertEqual(status, 200)
+    self.assertEqual(json.loads(body), {'available': True})
+    bluetooth = created[0]
+    identity = bluetooth.identities[0]
+    self.assertTrue(bluetooth.session_valid(identity))
+    self.assertIsNone(self.owner.current_generation())
+    self.assertTrue(imported.unpair())
+    self.assertFalse(bluetooth.session_valid(identity))
+    self.assertEqual(self.request(self.remote, '/api/galaxy/device-name', host=host, cookie=cookie)[0], 403)
+    with mock.patch('openpilot.starpilot.galaxy.access.legacy_galaxy_root', return_value=legacy), \
+         mock.patch('openpilot.starpilot.storage.galaxy_storage_root', return_value=self.pairing.root):
+      self.assertIsNone(default_remote_pairing().read())
+    self.assertIsNone(self.owner.current_generation())
+
   def test_device_name_is_authenticated_persistent_and_independent_of_pairing(self):
     self.assertTrue(self.owner.configure('password123', lambda: True))
     slug = self.pairing.pair(hashlib.sha256(b'password123').hexdigest())

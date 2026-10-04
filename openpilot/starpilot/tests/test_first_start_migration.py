@@ -69,6 +69,18 @@ class TestFirstStartMigration(unittest.TestCase):
     self.assertEqual(self.values(), {'GsmMetered': b'1'})
     self.assertEqual(migration.load_snapshot(next((self.storage / 'snapshots').iterdir())), original)
 
+  def test_fresh_driving_settings_leave_galaxy_tunnel_pairing_untouched(self):
+    from openpilot.starpilot.galaxy.remote import RemotePairing
+    pairing = RemotePairing(self.storage / 'galaxy')
+    self.assertIsNotNone(pairing.pair('a' * 64))
+    path = pairing.root / pairing.FILE
+    saved = path.read_bytes()
+    self.write({'CalibrationParams': b'old calibration', 'SteerFriction': b'0.2', 'DongleId': b'identity'})
+    self.start()
+    self.assertEqual(self.values(), {'DongleId': b'identity'})
+    self.assertEqual(path.read_bytes(), saved)
+    self.assertIsNotNone(pairing.read())
+
   def test_default_and_dry_run_remain_strict_without_mutation(self):
     self.write({'SteerFriction': b'0.2'})
     with self.assertRaises(migration.MigrationRequired):
