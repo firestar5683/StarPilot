@@ -3,6 +3,7 @@ import numpy as np
 from opendbc.can import CANPacker
 from opendbc.car import Bus, DT_CTRL, rate_limit, make_tester_present_msg, structs
 from opendbc.car.honda import hondacan
+from opendbc.car.honda.accord_mvl_stock import AccordMvlStock, qualified as mvl_stock_qualified
 from opendbc.car.honda.modified_civic_steering import ModifiedCivicSteering
 from opendbc.car.honda.nidec_interceptor import NidecInterceptor, create_command, qualified as interceptor_qualified
 from opendbc.car.honda.bosch_longitudinal import BoschLongitudinal, qualified as bosch_long_qualified
@@ -100,6 +101,7 @@ class CarController(CarControllerBase):
     self.bosch_learning_params = None
     self.nidec_interceptor = NidecInterceptor(CP) if interceptor_qualified(CP) else None
     self.interceptor_learning_params = None
+    self.accord_mvl_stock = AccordMvlStock() if mvl_stock_qualified(CP) else None
     self.tja_control = bool(CP.flags & HondaFlags.BOSCH_TJA_CONTROL)
     self.modified_civic_steering = (ModifiedCivicSteering() if CP.carFingerprint == CAR.HONDA_CIVIC_BOSCH and
                                     CP.flags & HondaFlags.EPS_MODIFIED and not CP.passive and not CP.dashcamOnly and not CP.notCar else None)
@@ -255,6 +257,9 @@ class CarController(CarControllerBase):
           self.speed = pcm_speed
           self.gas = (self.nidec_interceptor.command if self.nidec_interceptor is not None else
                       pcm_accel / self.params.NIDEC_GAS_MAX)
+
+    if self.accord_mvl_stock is not None:
+      can_sends.extend(self.accord_mvl_stock.update(self.packer, self.CAN, self.CP, CC, CS, self.frame))
 
     if self.interceptor_learning_params is not None:
       self.interceptor_learning_params.persist(self.frame)

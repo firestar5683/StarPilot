@@ -34,6 +34,8 @@ static bool honda_fwd_brake = false;
 static bool honda_bosch_long = false;
 static bool honda_bosch_radarless = false;
 static bool honda_bosch_canfd = false;
+static bool honda_mvl_stock = false;
+static uint8_t honda_mvl_buttons_fresh = 0U;
 static bool honda_rdx_high_gas = false;
 static bool aol_honda_bosch_long = false;
 static uint32_t aol_honda_main_ts = 0U;
@@ -140,6 +142,9 @@ static void honda_rx_hook(const CANPacket_t *msg) {
   // 0x1A6 for the ILX, 0x296 for the Civic Touring
   if ((!aol_honda_bosch_long && (msg_matches(msg, 0x1A6U, pt_bus) || msg_matches(msg, 0x296U, pt_bus))) ||
       (aol_honda_bosch_long && msg_matches(msg, 0x296U, pt_bus, 4U))) {
+    if (honda_mvl_stock && msg_matches(msg, 0x296U, pt_bus, 4U) && (honda_mvl_buttons_fresh > 0U)) {
+      honda_mvl_buttons_fresh--;
+    }
     int button = (msg->data[0] & 0xE0U) >> 5;
 
     // enter controls on the falling edge of set or resume
@@ -312,7 +317,7 @@ static bool honda_tx_hook(const CANPacket_t *msg) {
   // FORCE CANCEL: safety check only relevant when spamming the cancel button in Bosch HW
   // ensuring that only the cancel button press is sent (VAL 2) when controls are off.
   // This avoids unintended engagements while still allowing resume spam
-  if (msg_matches(msg, 0x296U, bus_buttons) && !controls_allowed) {
+  if ((msg_matches(msg, 0x296U, bus_buttons) || (honda_mvl_stock && msg_matches(msg, 0x296U, 2U, 4U))) && !controls_allowed) {
     if (((msg->data[0] >> 5) & 0x7U) != 2U) {
       tx = false;
     }
@@ -329,10 +334,15 @@ static bool honda_tx_hook(const CANPacket_t *msg) {
     tx = tx && honda_interceptor_tx(msg);
   }
 
+  if (tx && honda_mvl_stock && msg_matches(msg, 0x296U, 2U, 4U)) {
+    honda_mvl_buttons_fresh = 10U;
+  }
   return tx;
 }
 
 static safety_config honda_nidec_init(uint16_t param) {
+  honda_mvl_stock = false;
+  honda_mvl_buttons_fresh = 0U;
   // 0x1FA is dynamically forwarded based on stock AEB
   // 0xE4 is steering on all cars except CRV and RDX, 0x194 for CRV and RDX,
   // 0x1FA is brake control, 0x30C is acc hud, 0x33D is lkas hud
@@ -406,6 +416,8 @@ static safety_config honda_nidec_init(uint16_t param) {
 }
 
 static safety_config honda_bosch_init(uint16_t param) {
+  honda_mvl_stock = ((param == 80U) || (param == 81U)) && (alternative_experience == 0);
+  honda_mvl_buttons_fresh = 0U;
   honda_interceptor_reset(false);
   // Bosch
   static CanMsg HONDA_BOSCH_TX_MSGS[] = {
@@ -431,6 +443,13 @@ static safety_config honda_bosch_init(uint16_t param) {
     {0x33DB, 1, 8, .check_relay = true},
     {0x39F, 1, 8, .check_relay = false},
     {0x18DAB0F1, 1, 8, .check_relay = false},
+  };
+
+  static const CanMsg HONDA_MVL_STOCK_TX_MSGS[] = {
+    {0xE4, 0, 5, .check_relay = true},
+    {0x296, 0, 4, .check_relay = false},
+    {0x296, 2, 4, .check_relay = false},
+    {0x33D, 0, 8, .check_relay = true},
   };
 
   // Bosch radarless
@@ -530,13 +549,24 @@ static safety_config honda_bosch_init(uint16_t param) {
       SET_TX_MSGS(HONDA_RADARLESS_TX_MSGS, ret);
     }
   } else if (honda_bosch_canfd) {
-    SET_TX_MSGS(HONDA_CANFD_TX_MSGS, ret);
+    if (honda_mvl_stock) {
+      SET_TX_MSGS(HONDA_MVL_STOCK_TX_MSGS, ret);
+    } else if ((param & 64U) == 0U) {
+      SET_TX_MSGS(HONDA_CANFD_TX_MSGS, ret);
+    } else {
+      ret.tx_msgs = NULL;
+      ret.tx_msgs_len = 0;
+    }
   } else {
     if (honda_bosch_long) {
       SET_TX_MSGS(HONDA_BOSCH_LONG_TX_MSGS, ret);
     } else {
       SET_TX_MSGS(HONDA_BOSCH_TX_MSGS, ret);
     }
+  }
+  if (((param & 64U) != 0U) && !honda_mvl_stock) {
+    ret.tx_msgs = NULL;
+    ret.tx_msgs_len = 0;
   }
   ret = honda_stock_aol_configure(param, false, false, honda_get_pt_bus(), ret);
   return ret;
@@ -564,7 +594,13 @@ const safety_hooks honda_nidec_hooks = {
   .compute_checksum = honda_compute_checksum,
 };
 
+static bool honda_mvl_stock_fwd_hook(int bus_num, int addr) {
+  return honda_mvl_stock && controls_allowed && (honda_mvl_buttons_fresh > 0U) &&
+         (bus_num == 0) && (addr == 0x296);
+}
+
 const safety_hooks honda_bosch_hooks = {
+  .fwd = honda_mvl_stock_fwd_hook,
   .init = honda_bosch_init,
   .rx = honda_rx_hook,
   .tx = honda_tx_hook,

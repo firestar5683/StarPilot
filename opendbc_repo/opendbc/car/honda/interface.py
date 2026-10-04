@@ -119,6 +119,16 @@ class CarInterface(CarInterfaceBase):
     elif candidate == CAR.HONDA_ACCORD:
       ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = ([[0.3], [0.09]] if eps_modified else [[0.6], [0.18]])
 
+    elif candidate == CAR.HONDA_ACCORD_11G:
+      ret.longitudinalActuatorDelay = 0.05
+      ret.steerActuatorDelay = 0.3
+      ret.lateralTuning.init("pid")
+      ret.lateralTuning.pid.kf = 0.000035
+      ret.lateralTuning.pid.kpBP = [0.0]
+      ret.lateralTuning.pid.kiBP = [0.0]
+      ret.lateralTuning.pid.kpV = [0.115]
+      ret.lateralTuning.pid.kiV = [0.052]
+
     elif candidate == CAR.ACURA_ILX:
       ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.8], [0.24]]
 
@@ -221,12 +231,16 @@ class CarInterface(CarInterfaceBase):
       ret.safetyConfigs[-1].safetyParam |= HondaSafetyFlags.RADARLESS.value
     if ret.flags & HondaFlags.BOSCH_CANFD:
       ret.safetyConfigs[-1].safetyParam |= HondaSafetyFlags.BOSCH_CANFD.value
+      if candidate == CAR.HONDA_ACCORD_11G:
+        ret.safetyConfigs[-1].safetyParam |= HondaSafetyFlags.BOSCH_CANFD_MVL.value
 
     # min speed to enable ACC. if car can do stop and go, then set enabling speed
     # to a negative value, so it won't matter. Otherwise, add 0.5 mph margin to not
     # conflict with PCM acc
     ret.autoResumeSng = (bool(ret.flags & HondaFlags.BOSCH) and not (candidate == CAR.HONDA_FIT_4G and not ret.openpilotLongitudinalControl)) or \
       candidate in (CAR.HONDA_CIVIC, CAR.HONDA_CLARITY) or bool(ret.flags & HondaFlags.GAS_INTERCEPTOR)
+    if ret.transmissionType == TransmissionType.manual and not ret.openpilotLongitudinalControl:
+      ret.autoResumeSng = False
     if ret.autoResumeSng:
       ret.minEnableSpeed = -1.
     elif candidate == CAR.HONDA_ODYSSEY_TWN:
