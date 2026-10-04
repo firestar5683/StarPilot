@@ -182,18 +182,24 @@ class CarState(CarStateBase):
     pt_messages = []
     if CP.flags & FordFlags.NEW_PORT:
       # Subscribe before the first update so the new ports cannot miss their first source frame.
-      pt_messages = [(name, math.nan) for name in (
-        "BrakeSysFeatures", "Yaw_Data_FD1", "DesiredTorqBrk", "EngVehicleSpThrottle",
-        "EngBrakeData", "EPAS_INFO", "Cluster_Info1_FD1", "Steering_Data_FD1",
-        "BodyInfo_3_FD1", "RCMStatusMessage2_FD1", "SteeringPinion_Data",
-      )]
-      if CP.flags & FordFlags.CANFD:
-        pt_messages += [("Gear_Shift_by_Wire_FD1", math.nan), ("Lane_Assist_Data3_FD1", 30)]
-      elif CP.flags & FordFlags.ALT_STEER_ANGLE:
-        pt_messages += [("ParkAid_Data", 50), ("SteeringPinion_Data_Alt", 100),
-                        ("TransGearData", math.nan), ("INSTRUMENT_PANEL", math.nan)]
+      pt_messages = [
+        ("BrakeSysFeatures", 50), ("Yaw_Data_FD1", 100), ("DesiredTorqBrk", 50),
+        ("EngVehicleSpThrottle", 100), ("EngBrakeData", 10), ("EPAS_INFO", 50),
+        ("Cluster_Info1_FD1", 10), ("Steering_Data_FD1", 10),
+        ("BodyInfo_3_FD1", 2), ("RCMStatusMessage2_FD1", 10),
+      ]
+      if CP.flags & FordFlags.ALT_STEER_ANGLE:
+        pt_messages += [("ParkAid_Data", 50), ("SteeringPinion_Data_Alt", 100)]
       else:
-        pt_messages += [(name, math.nan) for name in ("PowertrainData_10", "INSTRUMENT_PANEL")]
+        pt_messages.append(("SteeringPinion_Data", 100))
+      if CP.flags & FordFlags.CANFD:
+        pt_messages.append(("Lane_Assist_Data3_FD1", 30))
+      else:
+        pt_messages.append(("INSTRUMENT_PANEL", 1))
+      if CP.transmissionType == TransmissionType.automatic:
+        gear = ("Gear_Shift_by_Wire_FD1" if CP.flags & FordFlags.CANFD else
+                "TransGearData" if CP.flags & FordFlags.ALT_STEER_ANGLE else "PowertrainData_10")
+        pt_messages.append((gear, 10))
     if CP.flags & FordFlags.LKA_STEERING:
       pt_messages.append(("Lane_Assist_Data3_FD1", 30))
       cam_messages.append(("LateralMotionControl", 20))
