@@ -11,7 +11,7 @@ class TestMazdaBlindSpot(unittest.TestCase):
     for model in CAR:
       with self.subTest(model=model):
         cp = CarInterface.get_params(model, gen_empty_fingerprint(), [], False, False, False)
-        self.assertTrue(cp.enableBsm)
+        self.assertTrue(cp.deprecated.enableBsm)
         interface = CarInterface(cp)
         packer = CANPacker(DBC[model][Bus.pt])
         for frame, (left, right) in enumerate(((0, 0), (1, 0), (0, 1), (1, 1), (0, 0)), 1):

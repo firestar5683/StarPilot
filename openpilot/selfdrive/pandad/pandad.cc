@@ -3,6 +3,7 @@
 #include "selfdrive/pandad/aol_protocol.h"
 #include "selfdrive/pandad/aol_wire.h"
 #include "openpilot/starpilot/car/honda/aol_policy.h"
+#include "openpilot/starpilot/car/mazda/aol_policy.h"
 #include "openpilot/starpilot/car/hyundai/aol_policy.h"
 #include "starpilot/car/gm/aol_policy.h"
 
@@ -382,7 +383,7 @@ void pandad_run(Panda *panda) {
   PandaSafety panda_safety(panda);
   bool engaged = false;
   bool is_onroad = false;
-  constexpr AolSafetyProfile aol_profiles[] = {HONDA_AOL_PROFILE, HONDA_STOCK_AOL_PROFILE, HONDA_NIDEC_AOL_PROFILE, HYUNDAI_AOL_PROFILE, HYUNDAI_CLASSIC_AOL_PROFILE, HYUNDAI_LEGACY_AOL_PROFILE, GM_AOL_PROFILE, FORD_AOL_PROFILE};
+  constexpr AolSafetyProfile aol_profiles[] = {HONDA_AOL_PROFILE, HONDA_STOCK_AOL_PROFILE, HONDA_NIDEC_AOL_PROFILE, HYUNDAI_AOL_PROFILE, HYUNDAI_CLASSIC_AOL_PROFILE, HYUNDAI_LEGACY_AOL_PROFILE, GM_AOL_PROFILE, FORD_AOL_PROFILE, MAZDA_AOL_PROFILE};
   const AolProfileRegistry aol_registry{aol_profiles, std::size(aol_profiles)};
   AolAxisNegotiator aol_negotiator(aol_registry);
 

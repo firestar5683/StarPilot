@@ -36,6 +36,9 @@ from opendbc.car.honda.stock_aol import (
   qualified as qualified_honda_stock_aol, native_observation as honda_native_observation,
   temporary_restriction as honda_temporary_restriction,
 )
+from opendbc.car.mazda.stock_aol import (qualified as qualified_mazda_aol,
+                                        native_observation as mazda_native_observation,
+                                        temporary_restriction as mazda_temporary_restriction)
 from opendbc.car.ford.aol import (
   qualified as qualified_ford_aol, native_observation as ford_native_observation,
   temporary_restriction as ford_temporary_restriction,
@@ -441,7 +444,8 @@ class Car:
       angle_aol = qualified_angle_aol(self.CP, marked_only=True)
       ford_aol = qualified_ford_aol(self.CP, marked_only=True)
       honda_aol = qualified_honda_stock_aol(self.CP, marked_only=True)
-      permission_owner = angle_aol or ford_aol or honda_aol
+      mazda_aol = qualified_mazda_aol(self.CP, marked_only=True)
+      permission_owner = angle_aol or ford_aol or honda_aol or mazda_aol
       angle_panda_ready = not permission_owner or self.startup_panda_configured()
       native = (
         current_native(self.sm, self.CP, now_ns=now_ns, axis_session_id=self.slc_producer_session if permission_owner else None)
@@ -450,13 +454,15 @@ class Car:
       )
       native_reset = False
       if permission_owner:
-        observe = honda_native_observation if honda_aol else ford_native_observation if ford_aol else native_observation
-        restrict = honda_temporary_restriction if honda_aol else ford_temporary_restriction if ford_aol else temporary_restriction
+        observe = (mazda_native_observation if mazda_aol else honda_native_observation if honda_aol else
+                   ford_native_observation if ford_aol else native_observation)
+        restrict = (mazda_temporary_restriction if mazda_aol else honda_temporary_restriction if honda_aol else
+                    ford_temporary_restriction if ford_aol else temporary_restriction)
         pending_since, lost, native_reset = observe(
           native,
           latched=self.aol_card_intent.allowed_latch,
           panda_ready=angle_panda_ready,
-          restricted=restrict(self.CP, CS),
+          restricted=restrict(self.CP, CS) or (mazda_aol and self.aol_card_intent.pause_lateral),
           now_ns=now_ns,
           pending_since_ns=getattr(self, '_angle_aol_pending_since_ns', 0),
         )
