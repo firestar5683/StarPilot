@@ -74,6 +74,40 @@ class TestGMControlsStartup(unittest.TestCase):
            OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1'}):
         self.startup(identity, alpha=True, aol=aol, torque=torque)
 
+  def test_restored_gateway_discovery_card_publication_and_controls(self):
+    from opendbc.car.gm.fingerprints import FINGERPRINTS
+    from opendbc.car.gm.values import ORDINARY_CC_WORD, is_ordinary_cc_profile
+    identities = (CAR.CADILLAC_CT6_CC, CAR.CADILLAC_XT5_CC, CAR.CHEVROLET_EQUINOX_CC,
+                  CAR.CHEVROLET_SUBURBAN_CC, CAR.CHEVROLET_TRAILBLAZER_CC, CAR.CHEVROLET_MALIBU_CC)
+    for identity, disable in itertools.product(identities, (False, True)):
+      with self.subTest(identity=identity, disable=disable), OpenpilotPrefix(), \
+           patch.dict(os.environ, {'SIMULATION': '1'}):
+        params = Params()
+        for key, value in [('OpenpilotEnabledToggle', True), ('SafeMode', False), ('IsReleaseBranch', False),
+                           ('AlphaLongitudinalEnabled', False), ('GMPedalLongitudinal', False),
+                           ('DisableOpenpilotLongitudinal', disable), ('AlwaysOnLateral', False)]:
+          params.put_bool(key, value, block=True)
+        fingerprint = gen_empty_fingerprint()
+        fingerprint[0].update(FINGERPRINTS[identity][0])
+        result = (identity, fingerprint, '0' * 17, [], structs.CarParams.FingerprintSource.can, True)
+        with patch('opendbc.car.car_helpers.fingerprint', return_value=result), \
+             patch('openpilot.selfdrive.car.card.messaging.recv_one_retry',
+                   return_value=messaging.new_message('can', 1)):
+          card = Car()
+        self.assertTrue(is_ordinary_cc_profile(card.CP))
+        self.assertEqual(card.CP.openpilotLongitudinalControl, not disable)
+        self.assertEqual(card.CP.safetyConfigs[0].safetyParam, ORDINARY_CC_WORD)
+        self.assertFalse(card.CP.pcmCruise)
+        controls = Controls()
+        self.assertEqual(controls.CP.to_dict(), card.CP.to_dict())
+        self.assertIsNone(controls.torque_host)
+        command, lateral_log = controls.state_control()
+        self.assertFalse(command.enabled)
+        self.assertFalse(command.latActive)
+        self.assertFalse(command.longActive)
+        controls.publish(command, lateral_log)
+        self.assertFalse(params.get_bool('ControlsReady'))
+
   def test_live_disabled_controls_and_real_parser_unlock_initialization(self):
     with OpenpilotPrefix(), patch.dict(os.environ, {'SIMULATION': '1'}):
       card, controls = self.startup(CAR.CHEVROLET_BOLT_CC_2018_2021, camera=True)

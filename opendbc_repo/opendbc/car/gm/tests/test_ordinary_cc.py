@@ -1,13 +1,12 @@
 import unittest
 
 from opendbc.car.gm.tests.test_ascm_intercept import params
-from opendbc.car.gm.values import CAR, ORDINARY_CC_CAR, is_ordinary_cc_profile, CruiseButtons
+from opendbc.car.gm.values import CAR, ORDINARY_CC_CAR, is_ordinary_cc_profile, CruiseButtons, GMFlags
 from opendbc.car.gm.ordinary_cc import button_request, ButtonCadence, policy_for
 from opendbc.car.gm.feature_capabilities import longitudinal_supported
 from opendbc.car.gm.lateral import lane_centering_supported
 from opendbc.car.gm.aol import qualified_gm
 from openpilot.starpilot.lateral.controller_selection import policy_for as lateral_policy_for
-
 
 
 def qualified_frames(packer, counter):
@@ -39,6 +38,49 @@ class TestOrdinaryCc(unittest.TestCase):
           self.assertEqual(policy_for(cp).kp[1], (0, 20, 20) if identity == CAR.CHEVROLET_MALIBU_CC else (0, 5, 2))
           if identity in (CAR.CADILLAC_CT6_CC, CAR.CADILLAC_XT5_CC, CAR.CHEVROLET_SUBURBAN_CC, CAR.GMC_YUKON_CC):
             self.assertEqual(identity.config.specs.tireStiffnessFactor, 1.0)
+
+  def test_bsm_metadata_preserves_exact_control_profile_and_other_flags_deny(self):
+    for identity in ORDINARY_CC_CAR:
+      cp = params(identity)
+      word = cp.safetyConfigs[0].safetyParam
+      cp.flags |= int(GMFlags.HAS_BSM)
+      self.assertTrue(is_ordinary_cc_profile(cp), identity)
+      self.assertTrue(longitudinal_supported(cp), identity)
+      self.assertTrue(lane_centering_supported(cp), identity)
+      self.assertEqual(cp.safetyConfigs[0].safetyParam, word)
+      for flag in (GMFlags.PEDAL_LONG, GMFlags.NO_CAMERA, 1 << 30):
+        rejected = cp.as_reader().as_builder()
+        rejected.flags |= int(flag)
+        self.assertFalse(is_ordinary_cc_profile(rejected), (identity, flag))
+
+  def test_bsm_metadata_preserves_actual_interface_controller_can(self):
+    from opendbc.can import CANPacker
+    from opendbc.car import Bus, structs
+    from opendbc.car.gm.interface import CarInterface
+    from opendbc.car.gm.values import DBC
+    for identity in ORDINARY_CC_CAR:
+      plain = params(identity)
+      bsm = plain.as_reader().as_builder()
+      bsm.flags |= int(GMFlags.HAS_BSM)
+      interfaces = (CarInterface(plain), CarInterface(bsm))
+      for ci in interfaces:
+        ci.update([])
+      packer = CANPacker(DBC[identity][Bus.pt])
+      control = structs.CarControl(enabled=True, latActive=True, longActive=True)
+      control.actuators.torque = .1
+      control.actuators.accel = .5
+      control.hudControl.setSpeed = 35
+      for tick in range(40):
+        now = 1_000_000_000 + tick * 10_000_000
+        frames = qualified_frames(packer, tick % 4)
+        with_bsm = [*frames, packer.make_can_msg('BCMBlindSpotMonitor', 0, {})]
+        states = [ci.update([(now, inputs)]) for ci, inputs in zip(interfaces, (frames, with_bsm), strict=True)]
+        self.assertEqual(states[0].canValid, states[1].canValid, identity)
+        outputs = [ci.apply(control.as_reader(), now) for ci in interfaces]
+        self.assertEqual(outputs[0][0].to_dict(), outputs[1][0].to_dict(), identity)
+        self.assertEqual(outputs[0][1], outputs[1][1], (identity, tick))
+      self.assertTrue(states[0].canValid, identity)
+      self.assertTrue(states[1].canValid, identity)
 
   def test_button_request_and_observed_counter_burst(self):
     self.assertEqual(button_request(20, 19, .4, 10.72896, True)[0], CruiseButtons.RES_ACCEL)
