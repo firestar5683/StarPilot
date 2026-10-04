@@ -16,6 +16,10 @@ class TestGmCcGatewayStock(unittest.TestCase):
   def setUp(self):
     self.safety = libsafety_py.libsafety
 
+  def tearDown(self):
+    self.safety.set_alternative_experience(0)
+    self.safety.set_safety_hooks(CarParams.SafetyModel.noOutput, 0)
+
   @staticmethod
   def packet(msg):
     return libsafety_py.make_CANPacket(msg[0], msg[2], msg[1])
@@ -51,6 +55,11 @@ class TestGmCcGatewayStock(unittest.TestCase):
     self.assertTrue(state_out.canValid)
     state = interface.CS
     self.mode(cp.safetyConfigs[0].safetyParam)
+    # Establish required-source health before an advancing physical neutral
+    # observation earns cancel credit; cold incomplete RX must not grant it.
+    initial_frames = [gmcan.create_buttons(packer, 0, 1, 1) if frame[0] == 0x1E1 else frame for frame in frames]
+    self.feed(initial_frames)
+    self.safety.set_timer(1_010_000)
     self.feed(frames)
     controller = interface.CC
     controller.frame = 20
@@ -63,10 +72,11 @@ class TestGmCcGatewayStock(unittest.TestCase):
     control.actuators.torque = 0.03
     control.actuators.accel = 1.5
     _, commands = controller.update(control.as_reader(), state, now_nanos)
+    self.joined_cp, self.joined_interface, self.joined_state = cp, interface, state_out
     return packer, frames, commands
 
   def test_real_packed_controller_into_native_all_nine(self):
-    for car in CC_GATEWAY_STOCK_CAR:
+    for car in sorted(CC_GATEWAY_STOCK_CAR):
       with self.subTest(car=car):
         packer, frames, commands = self.joined(car)
         self.assertTrue(self.safety.get_controls_allowed())
@@ -76,7 +86,7 @@ class TestGmCcGatewayStock(unittest.TestCase):
         self.assertNotEqual(((steer[1][0] & 7) << 8) | steer[1][1], 0)
         self.assertEqual(cancel[2], 0)
         self.assertTrue(self.safety.safety_tx_hook(self.packet(steer)))
-        self.assertTrue(self.safety.safety_tx_hook(self.packet(cancel)))
+        self.assertTrue(self.safety.safety_tx_hook(self.packet(cancel)), (car, self.joined_cp.safetyConfigs[0].safetyParam, cancel))
         self.assertFalse(self.safety.safety_tx_hook(self.packet(cancel)))  # replay
         self.assertFalse(self.safety.safety_tx_hook(self.packet((cancel[0], cancel[1], 2))))
         self.assertFalse(self.safety.safety_tx_hook(self.packet((cancel[0], cancel[1][:-1], 0))))
@@ -106,12 +116,14 @@ class TestGmCcGatewayStock(unittest.TestCase):
         _, _, commands = self.joined(car, cruise=cruise, main=main,
                                      brake=brake, gas=gas, active=active)
         steer = next(m for m in commands if m[0] == 0x180)
-        if gas and active and is_ordinary_cc_profile(params(car)):
-          # Stock conventional cruise retains lateral authority on gas.
-          self.assertGreater(((steer[1][0] & 7) << 8) | steer[1][1], 0)
+        if active and main and cruise and is_ordinary_cc_profile(params(car)):
+          # C160 consumes the caller axis; native independently rejects brake.
+          # Arbitrary active requests are retained here as adversarial probes.
+          self.assertGreater(((steer[1][0] & 7) << 8) | steer[1][1], 0, (car, cruise, main, brake, gas, active))
         else:
           self.assertEqual(((steer[1][0] & 7) << 8) | steer[1][1], 0, (car, cruise, main, brake, gas, active))
-        self.assertTrue(self.safety.safety_tx_hook(self.packet(steer)))
+        self.assertEqual(self.safety.safety_tx_hook(self.packet(steer)),
+                         not (brake and active and main and cruise and is_ordinary_cc_profile(params(car))))
         if not cruise or not main or brake:
           self.assertFalse(self.safety.get_controls_allowed())
 
