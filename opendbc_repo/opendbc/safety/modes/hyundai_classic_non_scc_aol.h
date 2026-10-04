@@ -15,6 +15,13 @@
 
 static bool classic_scc_aol_enabled = false;
 static bool classic_scc_aol_camera = false;
+static bool classic_long_aol_enabled = false;
+static bool classic_long_main_neutral = false;
+static bool classic_long_main_pressed = false;
+
+static bool classic_long_aol_param(uint16_t param) {
+  return ((param & 0x0404U) == 0x0404U) && ((param & 0xF3B8U) == 0U) && ((param & 3U) != 3U);
+}
 
 static bool classic_scc_aol_param(uint16_t param) {
   // Stock SCC gas, torque limits and camera routing only. No LONG or NON_SCC.
@@ -56,6 +63,8 @@ static void classic_non_scc_aol_clear_authorization(void) {
     classic_non_scc_aol_source_neutral[i] = false;
     classic_non_scc_aol_source_ts[i] = 0U;
   }
+  classic_long_main_neutral = false;
+  classic_long_main_pressed = false;
   aol_host_axis_mask = 0U;
 }
 
@@ -64,6 +73,7 @@ static void classic_non_scc_aol_reset(void) {
   classic_non_scc_aol_enabled = false;
   classic_scc_aol_enabled = false;
   classic_scc_aol_camera = false;
+  classic_long_aol_enabled = false;
   classic_non_scc_aol_ev = false;
   classic_non_scc_aol_hev = false;
   classic_non_scc_aol_lda = false;
@@ -94,8 +104,9 @@ static uint8_t classic_non_scc_aol_request_mask(void) {
     classic_non_scc_aol_clear_authorization();
   } else if (heartbeat_engaged) {
     classic_non_scc_aol_session = true;
-    if (classic_scc_aol_enabled && classic_non_scc_aol_lda && controls_allowed &&
-        classic_non_scc_aol_main_seen && aol_rx_healthy() && ((aol_host_axis_mask & 1U) != 0U)) {
+    if (((classic_scc_aol_enabled && classic_non_scc_aol_lda) || classic_long_aol_enabled) && controls_allowed &&
+        classic_non_scc_aol_main_seen && (!classic_long_aol_enabled || classic_non_scc_aol_main) &&
+        aol_rx_healthy() && ((aol_host_axis_mask & 1U) != 0U)) {
       // Actual stock ACC activation can seed the host's LKAS-on-engage latch.
       classic_non_scc_aol_token = true;
       classic_non_scc_aol_token_ts = now;
@@ -103,7 +114,7 @@ static uint8_t classic_non_scc_aol_request_mask(void) {
     if (((aol_host_axis_mask & 1U) != 0U) && classic_non_scc_aol_token) {
       classic_non_scc_aol_claimed = true;
     }
-    result = aol_host_axis_mask & 1U;  // NON-SCC never grants an independent longitudinal axis.
+    result = aol_host_axis_mask & (classic_long_aol_enabled ? 3U : 1U);
   } else {
     // Physical evidence may precede heartbeat but grants no permission yet.
   }
@@ -116,10 +127,14 @@ static uint8_t classic_non_scc_aol_permission_mask(void) {
     classic_non_scc_aol_clear_authorization();
   } else {
     const uint8_t request = classic_non_scc_aol_request_mask();
-    const bool physical_authorized = (classic_scc_aol_enabled && classic_non_scc_aol_lda) ?
+    const bool physical_authorized = (classic_long_aol_enabled || (classic_scc_aol_enabled && classic_non_scc_aol_lda)) ?
       (classic_non_scc_aol_token || controls_allowed) :
       (classic_non_scc_aol_main || classic_non_scc_aol_token || controls_allowed);
-    result = (((request & 1U) != 0U) && classic_non_scc_aol_main_seen && physical_authorized) ? 1U : 0U;
+    result = (((request & 1U) != 0U) && classic_non_scc_aol_main_seen && physical_authorized &&
+              (!classic_long_aol_enabled || classic_non_scc_aol_main)) ? 1U : 0U;
+    if (classic_long_aol_enabled && classic_non_scc_aol_main && controls_allowed && ((request & 2U) != 0U)) {
+      result |= 2U;
+    }
   }
   return result;
 }
@@ -137,11 +152,31 @@ static void classic_non_scc_aol_rx(const CANPacket_t *msg) {
   if (classic_non_scc_aol_enabled && ((msg->bus == 0U) || (classic_scc_aol_enabled && classic_scc_aol_camera && (msg->bus == 2U)))) {
     const uint32_t now = microsecond_timer_get();
     const uint8_t scc_bus = classic_scc_aol_camera ? 2U : 0U;
+    if (classic_long_aol_enabled && (msg->bus == 0U) && (msg->addr == 0x394U) && (GET_LEN(msg) == 8U)) {
+      classic_non_scc_aol_main = ((msg->data[5] >> 3U) & 3U) == 0U;
+      classic_non_scc_aol_main_seen = true;
+      if (!classic_non_scc_aol_main) {
+        classic_non_scc_aol_token = false;
+        classic_non_scc_aol_claimed = false;
+      }
+    }
+    if (classic_long_aol_enabled && (msg->bus == 0U) && (msg->addr == 0x4F1U) && (GET_LEN(msg) == 4U)) {
+      const bool main_pressed = GET_BIT(msg, 3U);
+      if (!main_pressed) {
+        classic_long_main_neutral = true;
+      } else if (classic_long_main_neutral && !classic_long_main_pressed && (aol_host_axis_mask == 0U)) {
+        classic_non_scc_aol_token = true;
+        classic_non_scc_aol_claimed = false;
+        classic_non_scc_aol_token_ts = now;
+      } else {
+      }
+      classic_long_main_pressed = main_pressed;
+    }
     if (classic_scc_aol_enabled && (msg->bus == scc_bus) && (msg->addr == 0x420U) && (GET_LEN(msg) == 8U)) {
       classic_non_scc_aol_main = GET_BIT(msg, 0U);
       classic_non_scc_aol_main_seen = true;
     }
-    if (!classic_scc_aol_enabled && (GET_LEN(msg) == 8U) &&
+    if (!classic_scc_aol_enabled && !classic_long_aol_enabled && (GET_LEN(msg) == 8U) &&
         ((!classic_non_scc_aol_ev && !classic_non_scc_aol_hev && (msg->addr == 0x260U)) ||
          (classic_non_scc_aol_ev && (msg->addr == 0x592U)) ||
          (classic_non_scc_aol_hev && (msg->addr == 0x595U)))) {
@@ -192,13 +227,16 @@ static void classic_non_scc_aol_configure(uint16_t param, bool legacy) {
   classic_non_scc_aol_reset();
   classic_scc_aol_enabled = classic_scc_aol_param(param) && (!legacy || ((param & 8U) == 0U)) &&
     ((unsigned int)alternative_experience == 32U);
+#ifdef ALLOW_DEBUG
+  classic_long_aol_enabled = !legacy && classic_long_aol_param(param) && ((unsigned int)alternative_experience == 32U);
+#endif
   classic_scc_aol_camera = classic_scc_aol_enabled && ((param & 8U) != 0U);
   classic_non_scc_aol_enabled = ((!legacy && ((param == HYUNDAI_FORTE_AOL_MAIN) || (param == HYUNDAI_FORTE_AOL_LDA) ||
                                (param == HYUNDAI_KONA_AOL_MAIN) || (param == HYUNDAI_KONA_AOL_LDA) ||
                                (param == HYUNDAI_NON_SCC_HEV_AOL_MAIN) || (param == HYUNDAI_NON_SCC_HEV_AOL_LDA) ||
-                               (param == HYUNDAI_NON_SCC_EV_ALT_AOL_MAIN) || (param == HYUNDAI_NON_SCC_EV_ALT_AOL_LDA))) || classic_scc_aol_enabled) &&
+                               (param == HYUNDAI_NON_SCC_EV_ALT_AOL_MAIN) || (param == HYUNDAI_NON_SCC_EV_ALT_AOL_LDA))) || classic_scc_aol_enabled || classic_long_aol_enabled) &&
     ((unsigned int)alternative_experience == 32U);
-  classic_non_scc_aol_lda = classic_non_scc_aol_enabled && ((classic_scc_aol_enabled && ((param & 0x0800U) != 0U)) || (param == HYUNDAI_FORTE_AOL_LDA) || (param == HYUNDAI_KONA_AOL_LDA) ||
+  classic_non_scc_aol_lda = classic_non_scc_aol_enabled && (((classic_scc_aol_enabled || classic_long_aol_enabled) && ((param & 0x0800U) != 0U)) || (param == HYUNDAI_FORTE_AOL_LDA) || (param == HYUNDAI_KONA_AOL_LDA) ||
                                                           (param == HYUNDAI_NON_SCC_HEV_AOL_LDA) ||
                                                           (param == HYUNDAI_NON_SCC_EV_ALT_AOL_LDA));
   classic_non_scc_aol_ev = classic_non_scc_aol_enabled && ((param == HYUNDAI_NON_SCC_EV_ALT_AOL_MAIN) || (param == HYUNDAI_NON_SCC_EV_ALT_AOL_LDA));

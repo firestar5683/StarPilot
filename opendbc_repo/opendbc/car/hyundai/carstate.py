@@ -1,3 +1,4 @@
+from opendbc.car.hyundai.classic_long_aol import qualified as qualified_classic_long
 from opendbc.car.hyundai.classic_scc_aol import qualified as qualified_classic_scc, ClassicSccLkasSources
 from opendbc.car.hyundai.ev9_camera_lead import EV9CameraLead
 from opendbc.car.hyundai.ev9_longitudinal import qualified as ev9_long_qualified
@@ -54,7 +55,7 @@ class CarState(CarStateBase):
   def __init__(self, CP):
     super().__init__(CP)
     self.forte_lkas_sources = NonSccLkasSources() if qualified_non_scc(CP) and CP.flags & HyundaiFlags.HAS_LDA_BUTTON else None
-    if qualified_classic_scc(CP) and CP.flags & HyundaiFlags.HAS_LDA_BUTTON:
+    if (qualified_classic_scc(CP) or qualified_classic_long(CP)) and CP.flags & HyundaiFlags.HAS_LDA_BUTTON:
       self.forte_lkas_sources = ClassicSccLkasSources(CP.carFingerprint)
     self.ev9_long = ev9_long_qualified(CP)
     self.ev9_camera_lead = EV9CameraLead(CP) if self.ev9_long else None
@@ -538,6 +539,10 @@ class CarState(CarStateBase):
       ]
     elif not CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING and CP.safetyConfigs[-1].safetyParam & HyundaiSafetyFlags.CARNIVAL_ALT_RESUME:
       msgs.append(("CRUISE_BUTTONS_ALT", math.nan))
+    from opendbc.car.hyundai.canfd_stock_aol import qualified as stock_aol_qualified
+    if stock_aol_qualified(CP):
+      msgs = [(name, frequency) for name, frequency in msgs if name != "CRUISE_BUTTONS_ALT"]
+      msgs.append(("CRUISE_BUTTONS_ALT", 50 if CP.flags & HyundaiFlags.CANFD_ALT_BUTTONS else math.nan))
     if CP.flags & HyundaiFlags.CANFD_ANGLE_STEERING:
       # These are actual state and safety inputs, not DBC defaults. Keep this
       # subscription expansion scoped to the new angle profile.
@@ -575,7 +580,8 @@ class CarState(CarStateBase):
     from opendbc.car.hyundai.gv70_startup import eligible as gv70_eligible
     if ev6_eligible(CP) or gv70_eligible(CP):
       # Standard 1CF supplies buttons; alternate 1AA only holds optional units.
-      msgs.append(("CRUISE_BUTTONS_ALT", math.nan))
+      if not any(name == "CRUISE_BUTTONS_ALT" for name, _ in msgs):
+        msgs.append(("CRUISE_BUTTONS_ALT", math.nan))
       existing = {name for name, _ in msgs}
       for name, frequency in (("ACCELERATOR", 100), ("TCS", 50), ("WHEEL_SPEEDS", 100), ("MDPS", 100),
                               (self.gear_msg_canfd, 100)):
