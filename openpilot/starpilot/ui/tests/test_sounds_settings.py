@@ -145,12 +145,12 @@ class SoundsSettingsTests(unittest.TestCase):
     received = []
     native = FeatureInput(received.append)
     state = self.owner.snapshot()
-    native.press(1980, 165, state)
-    native.move(1800, 165, state)
-    native.release(1800, 165, state)
+    native.press(1980, 320, state)
+    native.move(1800, 320, state)
+    native.release(1800, 320, state)
     self.assertFalse(received)
-    native.press(1980, 165, state)
-    native.release(1980, 165, state)
+    native.press(1980, 320, state)
+    native.release(1980, 320, state)
     self.assertEqual(row_change(received[0].row).key, "WarningImmediateVolume")
 
   def test_large_session_routes_saved_edit_and_back(self):

@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from dataclasses import asdict, replace
 from functools import lru_cache
+from html import escape, unescape
 import os
 from pathlib import Path
 import time
@@ -38,7 +39,10 @@ from openpilot.starpilot.ui.pip_warning import PiPWarningSource
 from openpilot.starpilot.spot_monitor.preferences import read_preferences as read_vasm_preferences
 from openpilot.starpilot.speed_limits.vision.observation import clock_pair_ns
 from openpilot.starpilot.ui.sounds_owner import SoundsOwner
-from openpilot.starpilot.ui.feature_settings_state import FeaturePage, FeatureRow, FeatureSettingsRequest, FeatureUiAction, row_change
+from openpilot.starpilot.ui.feature_settings_state import (
+  FeaturePage, FeatureRow, FeatureSettingsRequest, FeatureUiAction, row_change,
+  feature_scroll, feature_parent_page, feature_parent_title,
+)
 from openpilot.starpilot.ui.lane_change_feature import KEYS as LANE_CHANGE_KEYS, RESET as LANE_CHANGE_RESET
 from openpilot.starpilot.models.runtime import ModelStatusSource
 from openpilot.starpilot.models.status import project_status
@@ -563,7 +567,7 @@ class StarShellSession:
       self.model_scroll = 0
       self.input.cancel()
     elif action.kind == "scroll":
-      self.model_scroll = max(0, min(max(0, len(state.rows) - 8), self.model_scroll + action.direction * 6))
+      self.model_scroll = feature_scroll(self.model_scroll, action.direction, len(state.rows))
     elif action.kind == "open" and action.row in state.rows and action.row.page in ("models:small", "models:big"):
       from openpilot.system.ui.lib.application import gui_app
       from openpilot.system.ui.widgets import DialogResult
@@ -618,7 +622,7 @@ class StarShellSession:
       self.display_scroll = 0
       self.input.cancel()
     elif action.kind == "scroll":
-      self.display_scroll = max(0, min(max(0, len(state.rows) - 8), self.display_scroll + action.direction * 6))
+      self.display_scroll = feature_scroll(self.display_scroll, action.direction, len(state.rows))
     elif action.kind == "change" and action.row is not None and action.row in state.rows:
       request = power_row_change(action.row, action.direction) if action.row.key in POWER_KEYS else row_change(action.row, action.direction)
       if request is not None:
@@ -683,7 +687,7 @@ class StarShellSession:
       self.appearance_scroll = 0
       self.input.cancel()
     elif action.kind == "scroll":
-      self.appearance_scroll = max(0, min(max(0, len(state.rows) - 8), self.appearance_scroll + action.direction * 6))
+      self.appearance_scroll = feature_scroll(self.appearance_scroll, action.direction, len(state.rows))
     elif action.kind == "change" and action.row is not None and action.row in state.rows:
       request = row_change(action.row, action.direction)
       if request is not None:
@@ -719,7 +723,7 @@ class StarShellSession:
       self.sounds_scroll = 0
       self.input.cancel()
     elif action.kind == "scroll":
-      self.sounds_scroll = max(0, min(max(0, len(state.rows) - 8), self.sounds_scroll + action.direction * 6))
+      self.sounds_scroll = feature_scroll(self.sounds_scroll, action.direction, len(state.rows))
     elif action.kind == "change" and action.row is not None and action.row in state.rows:
       request = row_change(action.row, action.direction)
       if request is not None:
@@ -732,18 +736,15 @@ class StarShellSession:
     state = self.feature_snapshot()
     if action.kind == "back":
       self._lane_change_request_epoch = getattr(self, "_lane_change_request_epoch", 0) + 1
-      if self.feature_page == FeaturePage.HUB:
+      parent = feature_parent_page(self.feature_page)
+      if parent is None:
         self.selected = Destination.STAR
-      elif "/" in self.feature_page:
-        self.feature_page = self.feature_page.split("/")[0]
-      elif self.feature_page in (FeaturePage.AGGRESSIVE, FeaturePage.STANDARD, FeaturePage.RELAXED, FeaturePage.TRAFFIC):
-        self.feature_page = FeaturePage.PROFILES
       else:
-        self.feature_page = FeaturePage.HUB
+        self.feature_page = parent
       self.feature_scroll = 0
       self.input.cancel()
     elif action.kind == "scroll":
-      self.feature_scroll = max(0, min(max(0, len(state.rows) - 8), self.feature_scroll + action.direction * 6))
+      self.feature_scroll = feature_scroll(self.feature_scroll, action.direction, len(state.rows))
     elif action.kind == "open" and action.row in state.rows and action.row.page:
       self._lane_change_request_epoch = getattr(self, "_lane_change_request_epoch", 0) + 1
       self.feature_page = action.row.page
@@ -922,19 +923,21 @@ class StarShellSession:
       snapshot = replace(snapshot, settings=replace(snapshot.settings, availability=availability, nav_bar_alpha=0,
                                                    force_drive_label=label))
     if self.profile == Profile.LARGE and mode == ShellMode.SETTINGS and self.selected == Destination.DRIVING_CONTROLS:
-      feature = replace(self.feature_snapshot(), scroll=self.feature_scroll)
+      feature = replace(self.feature_snapshot(), scroll=self.feature_scroll, sidebar_expanded=self.sidebar_expanded,
+                        parent_title=feature_parent_title(self.feature_page))
       snapshot = replace(snapshot, features=feature)
     if self.profile == Profile.LARGE and mode == ShellMode.SETTINGS and self.selected == Destination.SOUNDS:
-      sounds = replace(self.sounds_snapshot(), scroll=self.sounds_scroll)
+      sounds = replace(self.sounds_snapshot(), scroll=self.sounds_scroll, sidebar_expanded=self.sidebar_expanded)
       snapshot = replace(snapshot, sounds=sounds)
     if self.profile == Profile.LARGE and mode == ShellMode.SETTINGS and self.selected == Destination.APPEARANCE:
-      appearance = replace(self.appearance_snapshot(), scroll=self.appearance_scroll)
+      appearance = replace(self.appearance_snapshot(), scroll=self.appearance_scroll, sidebar_expanded=self.sidebar_expanded,
+                           parent_title="Appearance" if getattr(self, "appearance_page", "appearance") == "pip" else "StarPilot")
       snapshot = replace(snapshot, appearance=appearance)
     if self.profile == Profile.LARGE and mode == ShellMode.SETTINGS and self.selected == Destination.SYSTEM:
-      display = replace(self.system_snapshot(), scroll=self.display_scroll)
+      display = replace(self.system_snapshot(), scroll=self.display_scroll, sidebar_expanded=self.sidebar_expanded)
       snapshot = replace(snapshot, display=display)
     if self.profile == Profile.LARGE and mode == ShellMode.SETTINGS and self.selected == Destination.DRIVING_MODEL:
-      models = replace(self.model_snapshot(), scroll=self.model_scroll)
+      models = replace(self.model_snapshot(), scroll=self.model_scroll, sidebar_expanded=self.sidebar_expanded)
       snapshot = replace(snapshot, models=models)
     self._snapshot_cache = (key, snapshot)
     return snapshot
@@ -1060,6 +1063,8 @@ class StarShellSession:
     elif (request.source in ("toggles", "device", "software") and self._mode == ShellMode.SETTINGS and
           self.profile == Profile.LARGE and self._request_owner is not None and self._request_owner(action)):
       self._snapshot_cache = None  # the owner acknowledged; read its state on the next frame
+    elif request.source in ("features", "sounds", "appearance", "display", "models") and isinstance(action, FeatureUiAction) and action.kind == "details":
+      self._feature_details(request.source, action)
     elif request.source == "features" and isinstance(action, FeatureUiAction):
       self._feature_ui(action)
     elif request.source == "sounds" and isinstance(action, FeatureUiAction):
@@ -1082,6 +1087,32 @@ class StarShellSession:
       if self._on_destination_change is not None:
         self.input.cancel()
         self._on_destination_change(self.selected)
+
+  def _feature_details(self, source: str, action: FeatureUiAction) -> None:
+    destination, snapshot = {"features": (Destination.DRIVING_CONTROLS, self.feature_snapshot),
+                             "sounds": (Destination.SOUNDS, self.sounds_snapshot),
+                             "appearance": (Destination.APPEARANCE, self.appearance_snapshot),
+                             "display": (Destination.SYSTEM, self.system_snapshot),
+                             "models": (Destination.DRIVING_MODEL, self.model_snapshot)}[source]
+    if self._mode != ShellMode.SETTINGS or self.selected != destination:
+      return
+    state = snapshot()
+    row = action.row
+    if row is not None:
+      if row not in state.rows:
+        return
+      value = row.value + (" " + row.unit if row.unit and row.value != "Auto" else "")
+      parts = (row.label, value, row.reason, f"Set {row.repair_value}" if row.repair_value else "")
+    else:
+      parts = (state.title, state.subtitle)
+    from openpilot.system.ui.widgets.confirm_dialog import ConfirmDialog
+    dialog = ConfirmDialog("".join(f"<p>{escape(part)}</p>" for part in parts if part), "Close", cancel_text="", rich=True)
+    # Native scrolling preserves full explanations; decode literals after the HTML parser.
+    for element in dialog._html_renderer.elements:
+      element.content = unescape(element.content)
+      element.font_size = 62  # Match size-50 bitmap body text at the large profile scale.
+    self.input.cancel()
+    gui_app.push_widget(dialog)
 
   def _input_snapshot(self, mode: ShellMode) -> ShellSnapshot:
     snapshot = self.snapshot(mode)

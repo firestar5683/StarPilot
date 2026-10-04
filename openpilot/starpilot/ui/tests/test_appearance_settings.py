@@ -423,12 +423,12 @@ class AppearanceSettingsTests(unittest.TestCase):
     changed = []
     large = FeatureInput(changed.append)
     state = self.owner.snapshot(Profile.LARGE)
-    large.press(1980, 165, state)
-    large.move(1800, 165, state)
-    large.release(1800, 165, state)
+    large.press(1980, 300, state)
+    large.move(1800, 300, state)
+    large.release(1800, 300, state)
     self.assertFalse(changed)
-    large.press(1980, 165, state)
-    large.release(1980, 165, state)
+    large.press(1980, 300, state)
+    large.release(1980, 300, state)
     self.assertEqual(changed[0].row.key, "HideSpeed")
 
     class Button:

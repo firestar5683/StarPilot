@@ -30,6 +30,27 @@ from pathlib import Path
 
 
 class TestRuntimePanelActions(unittest.TestCase):
+  def test_feature_details_preserve_literals_and_reject_stale_rows(self):
+    from dataclasses import replace
+    from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsState, FeatureUiAction
+    session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+    session._mode, session.selected = ShellMode.SETTINGS, Destination.DRIVING_CONTROLS
+    session.input = Mock()
+    row = FeatureRow("saved", "A < B & C", "75", unit="%", reason="Full explanation " * 30)
+    session.feature_snapshot = Mock(return_value=FeatureSettingsState(rows=(row,)))
+    with patch("openpilot.starpilot.ui.runtime_app.gui_app.push_widget") as push, \
+         patch.object(runtime_app.gui_app, "font", return_value=runtime_app.rl.Font()):
+      session._feature_details("features", FeatureUiAction("details", row))
+      elements = push.call_args.args[0]._html_renderer.elements
+      self.assertEqual([element.content for element in elements], [row.label, "75 %", row.reason.strip()])
+      self.assertTrue(all(element.font_size == 62 for element in elements))
+      session.input.cancel.assert_called_once()
+      push.reset_mock()
+      session._feature_details("features", FeatureUiAction("details", replace(row, value="80")))
+      session.selected = Destination.STAR
+      session._feature_details("features", FeatureUiAction("details", row))
+      push.assert_not_called()
+
   def _adapter(self, owner=None):
     self._mono_now = NOW - 100_000_000
     adapter = runtime_app.RuntimeSnapshotAdapter(

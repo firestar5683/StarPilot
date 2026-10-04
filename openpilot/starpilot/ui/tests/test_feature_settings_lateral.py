@@ -1,5 +1,6 @@
 """Saved Torque/AOL UI actions against real Params, CarParams and runtime parsers."""
 
+from dataclasses import replace
 from pathlib import Path
 import tempfile
 import unittest
@@ -525,13 +526,15 @@ class LateralFeatureSettingsTests(unittest.TestCase):
     actions = []
     control = FeatureInput(actions.append)
     torque_index = next(i for i, row in enumerate(hub.rows) if row.page == "torque")
-    control.press(650, 135 + torque_index * 104, hub)
-    control.release(650, 135 + torque_index * 104, hub)
+    hub = replace(hub, scroll=torque_index)
+    control.press(650, 300, hub)
+    control.release(650, 300, hub)
     self.assertEqual(actions[0].row.page, "torque")
     torque_page = self.owner.snapshot("torque", parked=True, system_long=True, lateral_context=True, metric=False)
     adopt_index = next(i for i, row in enumerate(torque_page.rows) if row.key == "torque_adopt")
-    control.press(1900, 135 + adopt_index * 104, torque_page)
-    control.release(1900, 135 + adopt_index * 104, torque_page)
+    torque_page = replace(torque_page, scroll=adopt_index)
+    control.press(1900, 285, torque_page)
+    control.release(1900, 285, torque_page)
     self.assertEqual((actions[-1].kind, actions[-1].row.key), ("reset", "torque_adopt"))
 
     class Button:
@@ -636,13 +639,21 @@ class LateralFeatureSettingsTests(unittest.TestCase):
       def draw(self, value, *args, **kwargs):
         self.text.append(value)
 
+      def measure(self, value, _role, size):
+        return SimpleNamespace(width=len(value) * size * .5)
+
+      def vertical_ink(self, _value, _role, size):
+        return size * .2, size * .8
+
     fonts = Fonts()
     state = self.owner.snapshot("torque", parked=True, system_long=True, lateral_context=True, metric=False)
+    state = replace(state, scroll=next(i for i, row in enumerate(state.rows) if row.label == "Need Help With Steering?"))
     with patch.object(large.rl, "draw_rectangle_rounded"), patch.object(large.clip, "begin_scissor_mode"), \
          patch.object(large.clip, "end_scissor_mode"):
       large.FeatureSettingsView(fonts).render(state)
     self.assertIn("Need Help With Steering?", fonts.text)
-    self.assertTrue(any("Discord: https://firestar.link/discord" in text for text in fonts.text))
+    self.assertIn("Discord: https://firestar.link/discord", state.rows[state.scroll].reason)
+    self.assertEqual(FeatureInput.target(650, 300, state).row, state.rows[state.scroll])
     self.assertTrue(self.owner.apply(required_change(self.row("torque", "LateralControllerSelection"))))
     standard = self.owner.snapshot("torque", parked=True, system_long=True, lateral_context=True, metric=False)
     self.assertFalse(any(row.label == "Need Help With Steering?" for row in standard.rows))

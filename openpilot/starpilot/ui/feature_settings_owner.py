@@ -485,7 +485,7 @@ class FeatureSettingsOwner:
                       configure_while_driving: bool = False) -> FeatureSettingsState:
     del metric  # The persisted unit file, including invalid bytes, owns offset labels.
     configurable = parked or configure_while_driving
-    title = page.replace("_", " ").title()
+    title = {FeaturePage.HUB: "Driving Controls", FeaturePage.LANE: "Lane Centering"}.get(page, page.replace("_", " ").title())
     rows: list[FeatureRow] = []
     if page == "data":
       title = "Data Uploads"

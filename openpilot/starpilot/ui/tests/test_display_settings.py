@@ -149,12 +149,12 @@ class DisplaySettingsTests(unittest.TestCase):
     changed = []
     input_owner = FeatureInput(changed.append)
     state = self.owner.snapshot(Profile.LARGE)
-    input_owner.press(1980, 165, state)
-    input_owner.release(1980, 165, state)
+    input_owner.press(1980, 320, state)
+    input_owner.release(1980, 320, state)
     self.assertEqual(changed[0].row.key, MASTER)
-    input_owner.press(1980, 165, state)
+    input_owner.press(1980, 320, state)
     input_owner.cancel()
-    input_owner.release(1980, 165, state)
+    input_owner.release(1980, 320, state)
     self.assertEqual(len(changed), 1)
     class Button:
       def __init__(self, label, value):

@@ -100,7 +100,7 @@ class SettingsAction:
 def tile_rects(state: SettingsState) -> tuple[tuple[float, float, float, float], ...]:
   x, width = (520.0, 1620.0) if state.sidebar_expanded else (20.0, 2120.0)
   tile_width = (width - 32) / 3
-  return tuple((round(x + column * (tile_width + 16)), 92 + row * 487, round(tile_width), 471)
+  return tuple((round(x + column * (tile_width + 16)), 152 + row * 457, round(tile_width), 441)
                for row in range(2) for column in range(3))
 
 

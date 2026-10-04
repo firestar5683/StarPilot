@@ -14,7 +14,7 @@ from pathlib import Path
 import pyray as rl
 
 from openpilot.starpilot.ui.device_state import DeviceState
-from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsState
+from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsState, feature_parent_title
 from openpilot.starpilot.ui.onroad_state import AlertSize, OnroadAlert, OnroadState, SpeedLimitObservation
 from openpilot.starpilot.ui.presentation import BitmapFonts, Profile
 from openpilot.starpilot.ui.preview_home import reference_state
@@ -95,7 +95,8 @@ def reference_feature_scene(scene: str) -> tuple[Destination, str, FeatureSettin
                    for row in rows)
   state = FeatureSettingsState(page=page, title=title,
                                subtitle="Saved display preferences; changes remain governed by existing settings owners.",
-                               rows=rows, parked=True, scroll=6 if scene.endswith("_scrolled") else 0)
+                               parent_title=feature_parent_title(page) if field == "features" else "Appearance" if page == "pip" else "StarPilot",
+                               rows=rows, parked=True, scroll=5 if scene.endswith("_scrolled") else 0)
   return destination, field, state
 
 
