@@ -1,15 +1,18 @@
 Import('env', 'arch', 'common', 'messaging')
 
-if GetOption('extras'):
+if GetOption('extras') or any(target.startswith('openpilot/selfdrive/pandad/tests/') for target in COMMAND_LINE_TARGETS):
   # Header-only AOL USB/status negotiation test also builds on Darwin hosts.
+  if arch != "Darwin":
+    usb_test = env.Object('tests/panda_usb_test.o', 'panda_usb.cc')
+    env.Program('tests/test_panda_usb', ['tests/test_panda_usb.cc', usb_test], LIBS=[common, 'pthread'])
   env.Program('tests/test_aol_protocol', ['tests/test_aol_protocol.cc'])
   env.Program('tests/test_aol_wire', ['tests/test_aol_wire.cc'], LIBS=[messaging, 'capnp', 'kj'])
 
 if arch != "Darwin":
-  libs = [common, messaging, 'pthread']
-  panda = env.Library('panda', ['panda.cc', 'spi.cc'])
+  libs = [common, messaging, 'pthread', 'usb-1.0']
+  panda = env.Library('panda', ['panda.cc', 'panda_usb.cc', 'spi.cc'])
 
   env.Program('pandad', ['main.cc', 'pandad.cc', 'panda_safety.cc'], LIBS=[panda] + libs)
 
-  if GetOption('extras'):
+  if GetOption('extras') or any(target.startswith('openpilot/selfdrive/pandad/tests/') for target in COMMAND_LINE_TARGETS):
     env.Program('tests/test_pandad_canprotocol', ['tests/test_pandad_canprotocol.cc'], LIBS=[panda] + libs)

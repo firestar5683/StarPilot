@@ -108,7 +108,7 @@ class HardwareComma(HardwareBase):
       return int(f.read())
 
   def set_ir_power(self, percent: int):
-    if self.get_device_type() == "tizi":
+    if self.get_device_type() in ("tici", "tizi"):
       return
 
     value = int((percent / 100) * 300)

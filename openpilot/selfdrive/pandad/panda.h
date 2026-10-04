@@ -8,6 +8,7 @@
 #include <optional>
 #include <string>
 #include <vector>
+#include <utility>
 
 #include "openpilot/cereal/gen/cpp/car.capnp.h"
 #include "openpilot/cereal/gen/cpp/log.capnp.h"
@@ -45,7 +46,7 @@ struct can_frame {
 
 class Panda {
 private:
-  std::unique_ptr<PandaSpiHandle> handle;
+  std::unique_ptr<PandaCommsHandle> handle;
 
 public:
   Panda(std::string serial);
@@ -93,6 +94,8 @@ protected:
   uint32_t receive_buffer_size = 0;
 
   Panda() {}
+  Panda(std::unique_ptr<PandaCommsHandle> comms, cereal::PandaState::PandaType type)
+    : handle(std::move(comms)), hw_type(type) {}
   void pack_can_buffer(const capnp::List<cereal::CanData>::Reader &can_data_list,
                          std::function<void(uint8_t *, size_t)> write_func);
   bool unpack_can_buffer(uint8_t *data, uint32_t &size, std::vector<can_frame> &out_vec);

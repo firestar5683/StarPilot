@@ -85,7 +85,7 @@ exit "${HELPER_EXIT:-0}"
                                    "openpilot/cereal/libsocketmaster.a", "openpilot/cereal/messaging/bridge",
                                    "openpilot/cereal/services.h"])
     self.assertEqual(self.run_build("--panda", "8").returncode, 0)
-    self.assertEqual(self.args(), ["scons", "--no-scrub", "panda/board/obj/panda_h7.bin.signed",
+    self.assertEqual(self.args(), ["scons", "--no-scrub", "panda/board/obj/panda.bin.signed", "panda/board/obj/panda_h7.bin.signed",
                                    "panda/board/obj/body_h7.bin.signed", "-j8"])
 
   def test_default_and_passthrough(self):
@@ -114,7 +114,7 @@ exit "${HELPER_EXIT:-0}"
                             env=dict(self.env, RELEASE="1", CERT="certificate with spaces"), check=False)
     self.assertEqual(result.returncode, 0)
     self.assertEqual(self.args(), ["1", "certificate with spaces", "scons", "--no-scrub",
-                                  "panda/board/obj/panda_h7.bin.signed", "panda/board/obj/body_h7.bin.signed",
+                                  "panda/board/obj/panda.bin.signed", "panda/board/obj/panda_h7.bin.signed", "panda/board/obj/body_h7.bin.signed",
                                   "-j4", "FEATURE=value"])
 
   def test_mapd_is_explicit_and_cannot_be_mixed_with_scons(self):
@@ -147,7 +147,7 @@ exit "${HELPER_EXIT:-0}"
     fake_uname.chmod(0o755)
     self.env["PATH"] = f"{fake_uname.parent}:{self.env['PATH']}"
     self.assertEqual(self.run_build("--panda", "2").returncode, 0)
-    self.assertEqual(self.args(), ["native", "scons", "--no-scrub", "panda/board/obj/panda_h7.bin.signed",
+    self.assertEqual(self.args(), ["native", "scons", "--no-scrub", "panda/board/obj/panda.bin.signed", "panda/board/obj/panda_h7.bin.signed",
                                    "panda/board/obj/body_h7.bin.signed", "-j2"])
     self.assertEqual(self.run_build().returncode, 0)
     self.assertEqual(self.args(), ["native", "build"])
@@ -188,6 +188,10 @@ class NativeDeviceBuildTest(unittest.TestCase):
     validator = self.root / "tools/laptop_device_build/validate_artifacts.py"
     validator.parent.mkdir(parents=True)
     validator.write_text('import os, sys\nsys.exit(int(os.getenv("VALIDATOR_EXIT", "0")))\n')
+    (validator.parent / 'package_model_chunks.py').write_text('')
+    manifest = self.root / 'openpilot/common/prebuilt_manifest.py'
+    manifest.parent.mkdir(parents=True)
+    manifest.write_text('')
     self.env = dict(os.environ, PATH=f"{fake_uname.parent}:{os.environ['PATH']}",
                     SCONS_ARGS_FILE=str(self.root / "scons-args"),
                     SCONS_PYTHONPATH_FILE=str(self.root / "scons-pythonpath"))
@@ -371,7 +375,7 @@ class ArtifactCheckTest(unittest.TestCase):
     self.write("openpilot/selfdrive/modeld/models/rdf43_driving_tinygrad.pkl", shipped)
     self.write("openpilot/starpilot/models/catalog.py",
                (f"DEFAULT_SMALL='rdf43'\nDEFAULT_SMALL_SHA256='{hashlib.sha256(shipped).hexdigest()}'\n"
-                f"DEFAULT_SMALL_SIZE={len(shipped)}\n").encode())
+                + f"DEFAULT_SMALL_SIZE={len(shipped)}\n").encode())
 
     elf = bytearray(128)
     elf[:6] = b"\x7fELF\x02\x01"

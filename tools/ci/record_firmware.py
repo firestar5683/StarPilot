@@ -34,7 +34,9 @@ def main():
   parser.add_argument("--output", type=Path, required=True)
   args = parser.parse_args()
   commands = compile_commands(args.build_log.read_text(), args.variant)
-  files = [ROOT / path for path in ("panda/board/obj/panda_h7.bin.signed", "panda/board/obj/panda_h7/main.elf", "panda/board/obj/version")]
+  files = [ROOT / "panda/board/obj" / name for name in (
+    "panda.bin.signed", "panda/main.elf", "bootstub.panda.bin",
+    "panda_h7.bin.signed", "panda_h7/main.elf", "bootstub.panda_h7.bin", "version")]
   version = files[-1].read_text()
   if f"-{args.variant.upper()}" not in version:
     raise ValueError("Panda version stamp does not match the compiled variant")

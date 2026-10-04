@@ -1,4 +1,7 @@
 #include <climits>
+#include <filesystem>
+#include <fstream>
+#include <cstdlib>
 
 #include "common/tests/native_test.h"
 #include "openpilot/cereal/messaging/messaging.h"
@@ -19,7 +22,7 @@ struct PandaTest : public Panda {
 
 PandaTest::PandaTest(int can_list_size_, cereal::PandaState::PandaType hw_type_) : can_list_size(can_list_size_), Panda() {
   this->hw_type = hw_type_;
-  int data_limit = ((hw_type == cereal::PandaState::PandaType::RED_PANDA) ? std::size(dlc_to_len) : 8);
+  int data_limit = ((hw_type == cereal::PandaState::PandaType::RED_PANDA) ? std::size(dlc_to_len) : 9);
   // prepare test data
   for (int i = 0; i < data_limit; ++i) {
     int data_len = dlc_to_len[i];
@@ -46,6 +49,7 @@ PandaTest::PandaTest(int can_list_size_, cereal::PandaState::PandaType hw_type_)
 void PandaTest::test_can_send() {
   std::vector<uint8_t> unpacked_data;
   this->pack_can_buffer(can_data_list, [&](uint8_t *chunk, size_t size) {
+    CHECK(size > 0 && size < USB_TX_SOFT_LIMIT + sizeof(can_header) + 64);
     unpacked_data.insert(unpacked_data.end(), chunk, &chunk[size]);
   });
   CHECK(unpacked_data.size() == total_pakets_size);
@@ -58,6 +62,9 @@ void PandaTest::test_can_send() {
     pckt_len = sizeof(can_header) + data_len;
 
     CHECK(header.addr == cnt);
+    CHECK(header.bus == cnt % 3);
+    CHECK(!header.rejected && !header.returned && !header.extended);
+    CHECK(calculate_checksum(&unpacked_data[pos], pckt_len) == 0);
     CHECK(test_data.find(data_len) != test_data.end());
     const std::string &dat = test_data[data_len];
     CHECK(memcmp(dat.data(), &unpacked_data[pos + sizeof(can_header)], dat.size()) == 0);
@@ -95,9 +102,63 @@ void PandaTest::test_can_recv(uint32_t rx_chunk_size) {
   }
 }
 
+class FirmwareHandle : public PandaCommsHandle {
+public:
+  explicit FirmwareHandle(unsigned char value) : value(value) {}
+  int control_read(uint8_t request, uint16_t, uint16_t, unsigned char *data, uint16_t length, unsigned int) override {
+    if ((request != 0xd3 && request != 0xd4) || length != 64) return -1;
+    memset(data, value, length);
+    return length;
+  }
+  int control_write(uint8_t, uint16_t, uint16_t, unsigned int) override { return 0; }
+  int bulk_write(unsigned char, unsigned char *, int, unsigned int) override { return 0; }
+  int bulk_read(unsigned char, unsigned char *, int, unsigned int) override { return 0; }
+  void cleanup() override {}
+private:
+  unsigned char value;
+};
+
+class FirmwarePanda : public Panda {
+public:
+  FirmwarePanda(cereal::PandaState::PandaType type, unsigned char signature)
+    : Panda(std::make_unique<FirmwareHandle>(signature), type) {}
+};
+
+void test_firmware_selection() {
+  namespace fs = std::filesystem;
+  char directory[] = "/tmp/pandad-firmware-XXXXXX";
+  CHECK(mkdtemp(directory) != nullptr);
+  struct Restore {
+    fs::path cwd = fs::current_path();
+    fs::path directory;
+    ~Restore() { fs::current_path(cwd); fs::remove_all(directory); }
+  } restore{fs::current_path(), directory};
+  fs::create_directories(fs::path(directory) / "panda/board/obj");
+  fs::create_directories(fs::path(directory) / "work/a/b");
+  for (const auto &[filename, value] : std::vector<std::pair<std::string, unsigned char>>{
+         {"panda.bin.signed", 0x11}, {"panda_h7.bin.signed", 0x22}}) {
+    std::ofstream file(fs::path(directory) / "panda/board/obj" / filename, std::ios::binary);
+    std::string content(256, value);
+    file.write(content.data(), content.size());
+  }
+  fs::current_path(fs::path(directory) / "work/a/b");
+  using Type = cereal::PandaState::PandaType;
+  CHECK(FirmwarePanda(Type::DOS, 0x11).up_to_date());
+  CHECK(!FirmwarePanda(Type::DOS, 0x22).up_to_date());
+  for (auto type : {Type::RED_PANDA, Type::RED_PANDA_V2, Type::TRES, Type::CUATRO}) {
+    CHECK(FirmwarePanda(type, 0x22).up_to_date());
+    CHECK(!FirmwarePanda(type, 0x11).up_to_date());
+  }
+  CHECK(!FirmwarePanda(Type::UNKNOWN, 0x11).up_to_date());
+  CHECK(!FirmwarePanda(Type::UNKNOWN, 0x22).up_to_date());
+  fs::remove(fs::path(directory) / "panda/board/obj/panda.bin.signed");
+  CHECK(!FirmwarePanda(Type::DOS, 0x11).up_to_date());
+}
+
 void test_can_protocol() {
+  test_firmware_selection();
   for (auto hw_type : {cereal::PandaState::PandaType::DOS, cereal::PandaState::PandaType::RED_PANDA}) {
-    for (int can_list_size : {1, 3, 5, 10, 30, 60, 100, 200}) {
+    for (int can_list_size : {1, 3, 5, 9, 10, 18, 19, 20, 30, 60, 100, 200}) {
       PandaTest send_test(can_list_size, hw_type);
       send_test.test_can_send();
 
@@ -105,7 +166,7 @@ void test_can_protocol() {
       receive_test.test_can_recv();
 
       PandaTest chunked_receive_test(can_list_size, hw_type);
-      chunked_receive_test.test_can_recv(0x40);
+      for (uint32_t chunk_size : {1U, 63U, 64U, 65U}) chunked_receive_test.test_can_recv(chunk_size);
     }
   }
 }

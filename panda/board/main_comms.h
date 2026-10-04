@@ -48,8 +48,12 @@ static int get_health_pkt(void *dat) {
 
   health->sound_output_level_pkt = sound_output_level;
 
+#ifdef STM32H7
   float temperature_encoded = (CLAMP(dts_get_temperature(), -40.0f, 214.5f) + 40.0f) + 0.5f;
   health->temperature_pkt = (uint8_t)temperature_encoded;
+#else
+  health->temperature_pkt = 0U;
+#endif
 
   return sizeof(*health);
 }
@@ -108,7 +112,7 @@ int comms_control_handler(ControlPacket_t *req, uint8_t *resp) {
       resp_len = 2;
       break;
     // **** 0xb5: request deep sleep, wakes on CAN or SBU
-    #ifdef ALLOW_DEBUG
+    #if defined(ALLOW_DEBUG) && defined(STM32H7)
     case 0xb5:
       set_safety_mode(SAFETY_SILENT, 0U);
       set_power_save_state(true);

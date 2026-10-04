@@ -30,3 +30,7 @@ uint32_t microsecond_timer_get(void) {
 }
 
 typedef uint32_t GPIO_TypeDef;
+typedef uint32_t ADC_TypeDef;
+typedef uint32_t IRQn_Type;
+#define NUM_INTERRUPTS 163U
+#include "stm32h7/lladc_declarations.h"

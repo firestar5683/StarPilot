@@ -474,7 +474,7 @@ run_larch64_scons() {
   local arg
   for arg in "$@"; do
     case "${arg}" in
-      panda/board/obj/panda_h7.bin.signed|panda/board/obj/body_h7.bin.signed)
+      panda/board/obj/panda.bin.signed|panda/board/obj/panda_h7.bin.signed|panda/board/obj/body_h7.bin.signed|panda/board/obj/bootstub.panda.bin|panda/board/obj/bootstub.panda_h7.bin)
         firmware_targets=$((firmware_targets + 1)) ;;
       -j*|--jobs=*|--verbose|--cache-disable) ;;
       *) firmware_only=0 ;;

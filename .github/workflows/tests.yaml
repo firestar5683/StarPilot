@@ -176,6 +176,8 @@ jobs:
       run: tools/op.sh test opendbc_repo/opendbc/car/gm/tests --json-output gm-test-results.json
     - name: Test native independent-axis protocol
       run: |
+        openpilot/selfdrive/pandad/tests/test_panda_usb
+        openpilot/selfdrive/pandad/tests/test_pandad_canprotocol
         openpilot/selfdrive/pandad/tests/test_aol_protocol
         openpilot/selfdrive/pandad/tests/test_aol_wire
     - name: Test map provider to host messaging
@@ -311,7 +313,7 @@ jobs:
         else
           unset RELEASE
         fi
-        scons --verbose panda/board/obj/panda_h7.bin.signed 2>&1 | tee ci-results/firmware/build.log
+        scons --verbose panda/board/obj/panda.bin.signed panda/board/obj/bootstub.panda.bin panda/board/obj/panda_h7.bin.signed panda/board/obj/bootstub.panda_h7.bin 2>&1 | tee ci-results/firmware/build.log
         python3 tools/ci/record_firmware.py --variant "${{ matrix.variant }}" --build-log ci-results/firmware/build.log --output ci-results/firmware/provenance.json
     - name: Save compile evidence
       if: always()

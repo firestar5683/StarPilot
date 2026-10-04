@@ -12,7 +12,7 @@ Usage: ./build [jobs] [scons options]
 
 On AGNOS/aarch64, builds run natively. On laptops, builds use a Linux/ARM64 container.
 --params builds libparams_c.so; --cereal builds cereal outputs; --panda
-builds signed panda_h7 and body_h7 firmware only. Numeric jobs become -jN.
+builds signed panda (C3), panda_h7 and body_h7 firmware only. Numeric jobs become -jN.
 RELEASE and CERT are environment variables, not trailing SCons arguments:
   RELEASE=1 CERT=/path/to/certificate ./build --panda 4
 CERT must name a readable certificate file. Omit RELEASE for DEBUG firmware.
@@ -72,7 +72,7 @@ while [[ $# -gt 0 ]]; do
       ;;
     --panda|-panda)
       shortcut_includes_panda=1
-      shortcut_targets+=(panda/board/obj/panda_h7.bin.signed panda/board/obj/body_h7.bin.signed)
+      shortcut_targets+=(panda/board/obj/panda.bin.signed panda/board/obj/panda_h7.bin.signed panda/board/obj/body_h7.bin.signed)
       ;;
     --cereal|-cereal)
       shortcut_targets+=(openpilot/cereal/libcereal.a openpilot/cereal/libsocketmaster.a

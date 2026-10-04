@@ -13,13 +13,13 @@ from openpilot.common.hardware import HARDWARE
 from openpilot.common.swaglog import cloudlog
 
 
-def get_expected_signature() -> bytes:
-  fn = os.path.join(FW_PATH, McuType.H7.config.app_fn)
+def get_expected_signature(mcu_type: McuType) -> bytes:
+  fn = os.path.join(FW_PATH, mcu_type.config.app_fn)
   return Panda.get_signature_from_firmware(fn)
 
 def flash_panda(panda_serial: str):
   panda = Panda(panda_serial)
-  fw_signature = get_expected_signature()
+  fw_signature = get_expected_signature(panda.get_mcu_type())
   internal_panda = panda.is_internal()
 
   panda_version = "bootstub" if panda.bootstub else panda.get_version()
@@ -47,6 +47,10 @@ def flash_panda(panda_serial: str):
   if panda_signature != fw_signature:
     cloudlog.info("Version mismatch after flashing, exiting")
     raise AssertionError
+
+  if panda.get_packets_versions() != (Panda.HEALTH_PACKET_VERSION, Panda.CAN_PACKET_VERSION):
+    panda.close()
+    raise PandaProtocolMismatch("Panda CAN or health protocol hash mismatch after firmware validation")
 
   panda.close()
 
