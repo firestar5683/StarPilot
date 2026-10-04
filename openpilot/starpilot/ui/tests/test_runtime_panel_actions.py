@@ -19,9 +19,10 @@ with patch.object(Params, "__init__", lambda self, d="": _original_params_init(s
   from openpilot.selfdrive.ui.layouts.settings.settings import PanelType
 
 from openpilot.starpilot.ui.device_state import DeviceAction, DeviceRequest
+from openpilot.starpilot.ui.feature_settings_state import FEATURE_ROW_HEIGHT, FEATURE_ROW_TOP, FeaturePage, FeatureUiAction
 from openpilot.starpilot.ui.toggles_state import ToggleRequest, ToggleKey
-from openpilot.starpilot.ui.settings_state import Destination
-from openpilot.starpilot.ui.shell import ShellInput, ShellMode
+from openpilot.starpilot.ui.settings_state import Destination, SettingsAction, SettingsActionKind, tile_rects
+from openpilot.starpilot.ui.shell import ShellInput, ShellMode, ShellRequest, ShellView
 from openpilot.starpilot.ui.software_state import SoftwareAction, SoftwareRequest
 from openpilot.starpilot.ui.tests.test_runtime_snapshot import BOOT_OFFSET_NS, NOW, ui_fake
 from openpilot.starpilot.galaxy.access import AccessStatus, GalaxyAccessOwner
@@ -30,6 +31,240 @@ from pathlib import Path
 
 
 class TestRuntimePanelActions(unittest.TestCase):
+  def _vehicle_session(self, sidebar_expanded=True):
+    from opendbc.car import gen_empty_fingerprint
+    from opendbc.car.gm.interface import CarInterface
+    from opendbc.car.gm.values import CAR
+    directory = tempfile.TemporaryDirectory()
+    self.addCleanup(directory.cleanup)
+    self.ui.params = Params(directory.name)
+    self.ui.params.put_bool("LongPitch", False, block=True)
+    fingerprint = gen_empty_fingerprint()
+    fingerprint[1][0x460] = 8
+    self.ui.CP = CarInterface.get_params(CAR.CHEVROLET_SUBURBAN, fingerprint, [], False, False, False)
+    session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+    session.profile = runtime_app.Profile.LARGE
+    session.adapter = self._adapter()
+    session._mode, session.selected = ShellMode.SETTINGS, Destination.STAR
+    session.compact_y = session.compact_scroll_x = 0
+    session.sidebar_expanded = sidebar_expanded
+    session.feature_page = session.feature_root_page = FeaturePage.HUB
+    session.feature_scroll = 0
+    session._snapshot_cache = None
+    session._on_destination_change = Mock()
+    session._on_compact_destination = Mock()
+    session.input = ShellInput(session.profile, session._emit)
+    session.feature_owner = runtime_app.FeatureSettingsOwner(self.ui.params, session._feature_authority,
+                                                           vehicle_fingerprint=lambda: getattr(self.ui.CP, "carFingerprint", None),
+                                                           vehicle_params=lambda: self.ui.CP)
+    return session
+
+  def _settings_tap(self, session, x, y):
+    session.press(ShellMode.SETTINGS, x, y)
+    self.assertTrue(session.release(ShellMode.SETTINGS, x, y))
+
+  def _open_vehicle_picker(self, session, pushed):
+    self._settings_tap(session, 1800, 800)
+    self._settings_tap(session, 2000, FEATURE_ROW_TOP + FEATURE_ROW_HEIGHT * 1.5)
+    return pushed.call_args.args[0]
+
+  @staticmethod
+  def _option_dialog(title, options, current="", callback=None):
+    return NS(title=title, options=options, selection=current, callback=callback)
+
+  def test_large_manual_vehicle_selection_without_detected_vehicle_and_auto_restore(self):
+    from opendbc.car.hyundai.values import CAR
+    from openpilot.starpilot.vehicle_selection import choices, read_selection, startup_candidate
+    from openpilot.system.ui.widgets import DialogResult
+    session = self._vehicle_session()
+    self.ui.CP = None
+    choice = next(choice for choice in choices() if choice.platform == CAR.KIA_XCEED_PHEV)
+    with patch("openpilot.system.ui.widgets.option_dialog.MultiOptionDialog", side_effect=self._option_dialog), \
+         patch.object(runtime_app.gui_app, "push_widget") as pushed:
+      make = self._open_vehicle_picker(session, pushed)
+      self.assertIn("Auto detection", make.options)
+      shown = session.snapshot(ShellMode.SETTINGS).features
+      self.assertEqual([(row.label, row.value) for row in shown.rows],
+                       [("Reported vehicle", "Not detected"), ("Vehicle selection", "Auto detection")])
+      make.selection = choice.make
+      make.callback(DialogResult.CONFIRM)
+      model = pushed.call_args.args[0]
+      self.assertIn(choice.label, model.options)
+      model.selection = choice.label
+      model.callback(DialogResult.CONFIRM)
+      self.assertEqual(read_selection(self.ui.params).platform, choice.platform)
+      self.assertEqual(startup_candidate(self.ui.params), choice.platform)
+      self.assertIsNone(self.ui.CP)
+      self.assertEqual(session.snapshot(ShellMode.SETTINGS).features.rows[1].value, choice.label)
+      self._settings_tap(session, 2000, FEATURE_ROW_TOP + FEATURE_ROW_HEIGHT * 1.5)
+      auto = pushed.call_args.args[0]
+      auto.selection = "Auto detection"
+      auto.callback(DialogResult.CONFIRM)
+      self.assertIsNone(startup_candidate(self.ui.params))
+      self.assertEqual(session.snapshot(ShellMode.SETTINGS).features.rows[1].value, "Auto detection")
+
+  def test_large_vehicle_picker_uses_real_dialog_stack_and_returns_to_same_panel(self):
+    from opendbc.car.hyundai.values import CAR
+    from openpilot.starpilot.vehicle_selection import choices, startup_candidate
+    from openpilot.system.ui.widgets import DialogResult
+    from openpilot.system.ui.widgets.option_dialog import MultiOptionDialog
+    session = self._vehicle_session()
+    self.ui.CP = None
+    page = runtime_app.StarShellPage(session, ShellMode.SETTINGS)
+    choice = next(choice for choice in choices() if choice.platform == CAR.KIA_XCEED_PHEV)
+    with patch.object(runtime_app.gui_app, "_nav_stack", [page]), \
+         patch("openpilot.system.ui.widgets.button.Label"), patch.object(page, "hide_event") as hidden:
+      self._settings_tap(session, 1800, 800)
+      self._settings_tap(session, 2000, FEATURE_ROW_TOP + FEATURE_ROW_HEIGHT * 1.5)
+      make = runtime_app.gui_app.get_active_widget()
+      self.assertIsInstance(make, MultiOptionDialog)
+      self.assertFalse(page.enabled)
+      make._on_option_clicked(choice.make)
+      make._set_result(DialogResult.CONFIRM)
+      model = runtime_app.gui_app.get_active_widget()
+      self.assertIsInstance(model, MultiOptionDialog)
+      self.assertIsNot(model, make)
+      model._on_option_clicked(choice.label)
+      model._set_result(DialogResult.CONFIRM)
+      self.assertEqual(startup_candidate(self.ui.params), choice.platform)
+      self.assertIs(runtime_app.gui_app.get_active_widget(), page)
+      self.assertTrue(page.enabled)
+      self.assertEqual(session.snapshot(ShellMode.SETTINGS).features.page, FeaturePage.VEHICLE)
+      hidden.assert_not_called()
+
+  def test_large_vehicle_picker_rejects_cancel_stale_source_lost_parked_state_and_old_page(self):
+    from opendbc.car.hyundai.values import CAR
+    from openpilot.starpilot.vehicle_selection import VehicleSelectionOwner, choices, read_selection
+    from openpilot.system.ui.widgets import DialogResult
+    choice = next(choice for choice in choices() if choice.platform == CAR.KIA_XCEED_PHEV)
+    for failure in ("cancel", "source", "parked", "stale", "page", "missing"):
+      with self.subTest(failure=failure):
+        session = self._vehicle_session()
+        self.ui.CP = None
+        self.ui.started = False
+        self.ui.sm["deviceState"].started = False
+        if failure == "missing":
+          self.ui.sm.valid["deviceState"] = self.ui.sm.valid["pandaStates"] = False
+        with patch("openpilot.system.ui.widgets.option_dialog.MultiOptionDialog", side_effect=self._option_dialog), \
+             patch.object(runtime_app.gui_app, "push_widget") as pushed:
+          make = self._open_vehicle_picker(session, pushed)
+          make.selection = choice.make
+          make.callback(DialogResult.CONFIRM)
+          model = pushed.call_args.args[0]
+          model.selection = choice.label
+          if failure == "source":
+            owner = VehicleSelectionOwner(self.ui.params, lambda: True)
+            self.assertTrue(owner.choose(None, str(CAR.KIA_CEED)).verified)
+          elif failure == "parked":
+            self.ui.started = self.ui.sm["deviceState"].started = True
+          elif failure == "stale":
+            self.ui.sm.logMonoTime["deviceState"] -= 2_000_000_000
+          elif failure == "page":
+            self._settings_tap(session, 570, 50)
+            self._settings_tap(session, 1800, 800)
+          original = read_selection(self.ui.params)
+          model.callback(DialogResult.CANCEL if failure == "cancel" else DialogResult.CONFIRM)
+          self.assertEqual(read_selection(self.ui.params), original)
+
+  def test_large_vehicle_picker_repairs_invalid_selection_and_keeps_duplicate_labels(self):
+    from opendbc.car.hyundai.values import CAR
+    from openpilot.starpilot.vehicle_selection import KEY, VehicleChoice, read_selection
+    from openpilot.system.ui.widgets import DialogResult
+    session = self._vehicle_session()
+    self.ui.CP = None
+    Path(self.ui.params.get_param_path(KEY)).write_bytes(b"invalid")
+    catalog = (VehicleChoice(str(CAR.KIA_CEED), "Kia", "Same model"),
+               VehicleChoice(str(CAR.KIA_XCEED_PHEV), "Kia", "Same model"))
+    with patch("openpilot.starpilot.vehicle_selection.VehicleSelectionOwner.choices", return_value=catalog), \
+         patch("openpilot.system.ui.widgets.option_dialog.MultiOptionDialog", side_effect=self._option_dialog), \
+         patch.object(runtime_app.gui_app, "push_widget") as pushed:
+      make = self._open_vehicle_picker(session, pushed)
+      self.assertEqual(session.snapshot(ShellMode.SETTINGS).features.rows[1].value, "Needs review")
+      make.selection = "Auto detection"
+      make.callback(DialogResult.CONFIRM)
+      self.assertTrue(read_selection(self.ui.params).valid)
+      self._settings_tap(session, 2000, FEATURE_ROW_TOP + FEATURE_ROW_HEIGHT * 1.5)
+      make = pushed.call_args.args[0]
+      make.selection = "Kia"
+      make.callback(DialogResult.CONFIRM)
+      model = pushed.call_args.args[0]
+      self.assertEqual(len(model.options), 2)
+      model.selection = next(option for option in model.options if str(CAR.KIA_XCEED_PHEV) in option)
+      model.callback(DialogResult.CONFIRM)
+      self.assertEqual(read_selection(self.ui.params).platform, CAR.KIA_XCEED_PHEV)
+
+  def test_large_vehicle_tile_reuses_editor_and_preserves_both_back_paths(self):
+    for sidebar_expanded in (True, False):
+      with self.subTest(sidebar_expanded=sidebar_expanded):
+        session = self._vehicle_session(sidebar_expanded)
+        session.feature_scroll = 5
+        root = session.snapshot(ShellMode.SETTINGS)
+        self.assertTrue(root.settings.destination(Destination.VEHICLE).available)
+        x, y, width, height = tile_rects(root.settings)[5]
+        self._settings_tap(session, x + width / 2, y + height / 2)
+        shown = session.snapshot(ShellMode.SETTINGS)
+        self.assertEqual(shown.selected, Destination.DRIVING_CONTROLS)
+        self.assertEqual((shown.features.page, shown.features.title, shown.features.parent_title, shown.features.scroll),
+                         (FeaturePage.VEHICLE, "Vehicle Settings", "StarPilot", 0))
+        self.assertIn("LongPitch", [row.key for row in shown.features.rows])
+        session._on_compact_destination.assert_not_called()
+        view = ShellView.__new__(ShellView)
+        view.profile, view.onroad, view.settings, view.features = session.profile, Mock(), Mock(), Mock()
+        view.render(shown)
+        view.features.render.assert_called_once_with(shown.features)
+        view.settings.render.assert_not_called()
+        view.settings.render_rail.assert_called_once_with(shown.settings, selected=Destination.STAR)
+        left = 520 if sidebar_expanded else 20
+        self._settings_tap(session, left + 50, 50)
+        self.assertEqual(session.selected, Destination.STAR)
+
+        # Reopening through Driving Controls must reset the entry page.
+        root = session.snapshot(ShellMode.SETTINGS)
+        x, y, width, height = tile_rects(root.settings)[2]
+        self._settings_tap(session, x + width / 2, y + height / 2)
+        hub = session.snapshot(ShellMode.SETTINGS).features
+        self.assertEqual(hub.page, FeaturePage.HUB)
+        vehicle = next(row for row in hub.rows if row.page == FeaturePage.VEHICLE)
+        session._feature_ui(FeatureUiAction("open", vehicle))
+        shown = session.snapshot(ShellMode.SETTINGS)
+        self.assertEqual(shown.features.parent_title, "Driving Controls")
+        self._settings_tap(session, left + 50, 50)
+        self.assertEqual(session.snapshot(ShellMode.SETTINGS).features.page, FeaturePage.HUB)
+        self.assertEqual(session.selected, Destination.DRIVING_CONTROLS)
+        self._settings_tap(session, left + 50, 50)
+        self.assertEqual(session.selected, Destination.STAR)
+
+  def test_large_vehicle_control_uses_confirmation_and_cancels_after_leaving(self):
+    from openpilot.system.ui.widgets import DialogResult
+    session = self._vehicle_session()
+    self._settings_tap(session, 1800, 800)
+    with patch("openpilot.system.ui.widgets.confirm_dialog.ConfirmDialog", side_effect=lambda *a, **kw: NS(callback=kw["callback"])), \
+         patch.object(runtime_app.gui_app, "push_widget") as pushed:
+      shown = session.snapshot(ShellMode.SETTINGS).features
+      index = next(index for index, row in enumerate(shown.rows) if row.key == "LongPitch")
+      y = FEATURE_ROW_TOP + index * FEATURE_ROW_HEIGHT + FEATURE_ROW_HEIGHT / 2
+      self._settings_tap(session, 2000, y)
+      self.assertFalse(self.ui.params.get_bool("LongPitch"))
+      pushed.call_args.args[0].callback(DialogResult.CONFIRM)
+      self.assertTrue(self.ui.params.get_bool("LongPitch"))
+      self._settings_tap(session, 2000, y)
+      confirmation = pushed.call_args.args[0].callback
+      self._settings_tap(session, 570, 50)
+      self._settings_tap(session, 1800, 800)
+      confirmation(DialogResult.CONFIRM)
+      self.assertTrue(self.ui.params.get_bool("LongPitch"))
+
+  def test_compact_vehicle_destination_keeps_its_native_route(self):
+    session = self._vehicle_session()
+    session.profile = runtime_app.Profile.COMPACT
+    session.drive_state = NS(snapshot=lambda: {"mode": "auto", "revision": None, "available": False,
+                                             "effective": None, "overrideAllowed": False})
+    destination = session.snapshot(ShellMode.SETTINGS).settings.destination(Destination.VEHICLE)
+    session._emit(ShellRequest("settings", SettingsAction(SettingsActionKind.REQUEST_DESTINATION, destination)))
+    session._on_compact_destination.assert_called_once_with(Destination.VEHICLE)
+    self.assertEqual(session.selected, Destination.STAR)
+    self.assertEqual(session.feature_page, FeaturePage.HUB)
+
   def test_feature_details_preserve_literals_and_reject_stale_rows(self):
     from dataclasses import replace
     from openpilot.starpilot.ui.feature_settings_state import FeatureRow, FeatureSettingsState, FeatureUiAction

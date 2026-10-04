@@ -20,6 +20,7 @@ from openpilot.selfdrive.ui.layouts.main import MainLayout, MainState
 from openpilot.selfdrive.ui.mici.layouts.main import MiciMainLayout
 from openpilot.selfdrive.ui.ui_state import device as native_device, ui_state
 from openpilot.starpilot.ui.vehicle_bool import VEHICLE_BOOL_KEYS, confirmation_question as vehicle_question
+from openpilot.starpilot.ui.vehicle_large import SELECTION_PAGE, VehicleLarge
 from openpilot.starpilot.ui.clip import placed_at
 from openpilot.starpilot.ui.device_state import DeviceAction, DeviceRequest
 from openpilot.starpilot.drive_state.owner import DriveStateOwner, Rejected as DriveStateRejected
@@ -178,6 +179,7 @@ class StarShellSession:
     self._pip_request_epoch = 0
     self._lane_change_request_epoch = 0
     self.feature_page: str = FeaturePage.HUB
+    self.feature_root_page: str = FeaturePage.HUB
     self.feature_scroll = 0
     self.sounds_scroll = 0
     self.appearance_scroll = 0
@@ -526,11 +528,20 @@ class StarShellSession:
     return False
 
   def feature_snapshot(self, page: str | None = None, *, favorite: bool = False):
-    return self.feature_owner.snapshot(page or self.feature_page, parked=False if favorite else self.configuration_allowed(),
+    state = self.feature_owner.snapshot(page or self.feature_page, parked=False if favorite else self.configuration_allowed(),
                                        system_long=self._feature_authority("long"),
                                        lateral_context=self._feature_authority("lane"), metric=bool(ui_state.is_metric),
                                        configure_while_driving=self._settings_preference_authority() or
                                        (favorite and self._favorite_authority()))
+    if self.profile == Profile.LARGE and state.page == FeaturePage.VEHICLE:
+      state = replace(state, rows=self._vehicle_selector().rows() + state.rows,
+                      subtitle="Vehicle selection applies at the next startup.")
+    return state
+
+  def _vehicle_selector(self) -> VehicleLarge:
+    if getattr(self, "vehicle_selector", None) is None:
+      self.vehicle_selector = VehicleLarge(self)
+    return self.vehicle_selector
 
   def feature_request(self, request: FeatureSettingsRequest) -> bool:
     ok = self.feature_owner.apply(request)
@@ -833,7 +844,7 @@ class StarShellSession:
     if action.kind == "back":
       self._lane_change_request_epoch = getattr(self, "_lane_change_request_epoch", 0) + 1
       parent = feature_parent_page(self.feature_page)
-      if parent is None:
+      if parent is None or self.feature_page == self.feature_root_page:
         self.selected = Destination.STAR
       else:
         self.feature_page = parent
@@ -843,8 +854,11 @@ class StarShellSession:
       self.feature_scroll = feature_scroll(self.feature_scroll, action.direction, len(state.rows))
     elif action.kind == "open" and action.row in state.rows and action.row.page:
       self._lane_change_request_epoch = getattr(self, "_lane_change_request_epoch", 0) + 1
-      self.feature_page = action.row.page
-      self.feature_scroll = 0
+      if action.row.page == SELECTION_PAGE:
+        self._vehicle_selector().open(action.row.source)
+      else:
+        self.feature_page = action.row.page
+        self.feature_scroll = 0
       self.input.cancel()
     elif action.kind == "change" and action.row is not None and action.row in state.rows:
       request = row_change(action.row, action.direction)
@@ -1020,7 +1034,7 @@ class StarShellSession:
                                                    force_drive_label=label))
     if self.profile == Profile.LARGE and mode == ShellMode.SETTINGS and self.selected == Destination.DRIVING_CONTROLS:
       feature = replace(self.feature_snapshot(), scroll=self.feature_scroll, sidebar_expanded=self.sidebar_expanded,
-                        parent_title=feature_parent_title(self.feature_page))
+                        parent_title="StarPilot" if self.feature_page == self.feature_root_page else feature_parent_title(self.feature_page))
       snapshot = replace(snapshot, features=feature)
     if self.profile == Profile.LARGE and mode == ShellMode.SETTINGS and self.selected == Destination.SOUNDS:
       sounds = replace(self.sounds_snapshot(), scroll=self.sounds_scroll, sidebar_expanded=self.sidebar_expanded)
@@ -1142,8 +1156,10 @@ class StarShellSession:
           self.selected = Destination.STAR
         elif action.destination.available and self.profile == Profile.LARGE:
           self.selected = destination
-          if destination == Destination.DRIVING_CONTROLS:
-            self.feature_page, self.feature_scroll = FeaturePage.HUB, 0
+          if destination in (Destination.DRIVING_CONTROLS, Destination.VEHICLE):
+            self.selected = Destination.DRIVING_CONTROLS
+            self.feature_page = self.feature_root_page = FeaturePage.VEHICLE if destination == Destination.VEHICLE else FeaturePage.HUB
+            self.feature_scroll = 0
           elif destination == Destination.SOUNDS:
             self.sounds_scroll = 0
           elif destination == Destination.APPEARANCE:

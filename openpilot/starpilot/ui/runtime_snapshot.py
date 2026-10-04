@@ -591,7 +591,7 @@ class RuntimeSnapshotAdapter:
 
     settings_pages = (Destination.STAR, Destination.DEVICE, Destination.NETWORK, Destination.SOFTWARE, Destination.TOGGLES,
                       Destination.DRIVING_CONTROLS, Destination.SOUNDS, Destination.APPEARANCE,
-                      Destination.SYSTEM, Destination.DRIVING_MODEL, Destination.BLUETOOTH, Destination.DEVELOPER)
+                      Destination.SYSTEM, Destination.DRIVING_MODEL, Destination.BLUETOOTH, Destination.DEVELOPER, Destination.VEHICLE)
     availability = tuple(DestinationAvailability(item, item in settings_pages,
                           "Manage network connections" if item == Destination.NETWORK else
                           "Manage Bluetooth devices" if item == Destination.BLUETOOTH else
