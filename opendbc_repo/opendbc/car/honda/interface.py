@@ -4,7 +4,7 @@ from opendbc.car import get_safety_config, structs, uds
 from opendbc.car.common.conversions import Conversions as CV
 from opendbc.car.disable_ecu import disable_ecu
 from opendbc.car.honda.hondacan import CanBus
-from opendbc.car.honda.values import CarControllerParams, HondaFlags, CAR, HondaSafetyFlags, MANUAL_TRANS_CARS
+from opendbc.car.honda.values import CarControllerParams, HondaFlags, CAR, HondaSafetyFlags, MANUAL_TRANS_CARS, MODIFIED_EPS_FW
 from opendbc.car.honda.carcontroller import CarController
 from opendbc.car.honda.carstate import CarState
 from opendbc.car.honda.radar_interface import RadarInterface
@@ -90,13 +90,18 @@ class CarInterface(CarInterfaceBase):
       ret.longitudinalTuning.kiBP = [0., 5., 35.]
       ret.longitudinalTuning.kiV = [1.2, 0.8, 0.5]
 
-    # Disable control if EPS mod detected
-    for fw in car_fw:
-      if fw.ecu == "eps" and b"," in fw.fwVersion:
-        ret.dashcamOnly = True
+    eps_observations = [fw for fw in car_fw if fw.ecu == "eps"]
+    modified_eps = any(b"," in fw.fwVersion for fw in eps_observations)
+    eps_modified = bool(modified_eps) and all(
+      fw.address == 0x18DA30F1 and fw.subAddress == 0 and
+      fw.fwVersion in MODIFIED_EPS_FW.get(candidate, ()) for fw in eps_observations)
+    if eps_modified:
+      ret.flags |= HondaFlags.EPS_MODIFIED.value
+    elif modified_eps:
+      ret.dashcamOnly = True
 
     if candidate == CAR.HONDA_CIVIC:
-      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[1.1], [0.33]]
+      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = ([[0.3], [0.1]] if eps_modified else [[1.1], [0.33]])
 
     elif candidate in (CAR.HONDA_CIVIC_BOSCH, CAR.HONDA_CIVIC_BOSCH_DIESEL):
       ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.8], [0.24]]
@@ -106,7 +111,7 @@ class CarInterface(CarInterfaceBase):
       ret.lateralTuning.pid.kiBP, ret.lateralTuning.pid.kiV = [[0, 10], [0.0125, 0.125]]
 
     elif candidate == CAR.HONDA_ACCORD:
-      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.6], [0.18]]
+      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = ([[0.3], [0.09]] if eps_modified else [[0.6], [0.18]])
 
     elif candidate == CAR.ACURA_ILX:
       ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.8], [0.24]]
@@ -116,7 +121,7 @@ class CarInterface(CarInterfaceBase):
       ret.wheelSpeedFactor = 1.025
 
     elif candidate == CAR.HONDA_CRV_5G:
-      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = [[0.64], [0.192]]
+      ret.lateralTuning.pid.kpV, ret.lateralTuning.pid.kiV = ([[0.21], [0.07]] if eps_modified else [[0.64], [0.192]])
       ret.wheelSpeedFactor = 1.025
 
     elif candidate == CAR.HONDA_CRV_HYBRID:

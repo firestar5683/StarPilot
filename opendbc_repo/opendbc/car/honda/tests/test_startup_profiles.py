@@ -34,8 +34,7 @@ STARTUP_CASES = (
 )
 
 
-@pytest.mark.parametrize("identity", STARTUP_CASES)
-def test_final_cp_publication_and_disabled_startup(identity, monkeypatch):
+def exercise_final_cp_publication_and_disabled_startup(identity, monkeypatch, firmware=()):
   from opendbc.car import car_helpers
   from openpilot.cereal import messaging
   from openpilot.common.params import Params
@@ -58,9 +57,12 @@ def test_final_cp_publication_and_disabled_startup(identity, monkeypatch):
   selected_gear = messages.get("GEARBOX_AUTO") or messages.get("GEARBOX_CVT")
   assert selected_gear is not None
   fingerprint[pt_bus][selected_gear.address] = selected_gear.size
-  initial = CarInterface.get_params(identity, fingerprint, [], False, False, False)
+  initial = CarInterface.get_params(identity, fingerprint, list(firmware), False, False, False)
   initial.carVin = "0" * 17
-  initial.carFw = []
+  initial.carFw = list(firmware)
+  if firmware:
+    assert initial.flags & HondaFlags.EPS_MODIFIED
+    assert not initial.dashcamOnly
   expected = initial.to_dict()
   with OpenpilotPrefix():
     saved = Params()
@@ -69,7 +71,7 @@ def test_final_cp_publication_and_disabled_startup(identity, monkeypatch):
     subscriber = messaging.sub_sock("carParams", timeout=100, conflate=True)
     card = ci = controls = None
     try:
-      observed = (identity, fingerprint, initial.carVin, [], initial.fingerprintSource, True)
+      observed = (identity, fingerprint, initial.carVin, list(firmware), initial.fingerprintSource, True)
       with monkeypatch.context() as discovery:
         discovery.setattr(car_helpers, "fingerprint", lambda *args: observed)
         discovery.setattr(card_module, "can_comm_callbacks", lambda *args: (lambda *args: [], lambda frames: None))
@@ -100,3 +102,21 @@ def test_final_cp_publication_and_disabled_startup(identity, monkeypatch):
     finally:
       del controls, card, ci, subscriber
       gc.collect()
+
+
+@pytest.mark.parametrize("identity", STARTUP_CASES)
+def test_final_cp_publication_and_disabled_startup(identity, monkeypatch):
+  exercise_final_cp_publication_and_disabled_startup(identity, monkeypatch)
+
+
+@pytest.mark.parametrize("identity,version", (
+  (CAR.HONDA_CIVIC, b"39990-TBA,A030\x00\x00"),
+  (CAR.HONDA_ACCORD, b"39990-TVA,A150\x00\x00"),
+  (CAR.HONDA_CIVIC_BOSCH, b"39990-TGG,A020\x00\x00"),
+  (CAR.HONDA_CIVIC_BOSCH, b"39990-TGG,A120\x00\x00"),
+  (CAR.HONDA_CRV_5G, b"39990-TLA,A040\x00\x00"),
+))
+def test_known_modified_eps_final_cp_publication_and_disabled_startup(identity, version, monkeypatch):
+  firmware = (structs.CarParams.CarFw(ecu=structs.CarParams.Ecu.eps, address=0x18DA30F1,
+                                     subAddress=0, fwVersion=version, brand="honda"),)
+  exercise_final_cp_publication_and_disabled_startup(identity, monkeypatch, firmware)
