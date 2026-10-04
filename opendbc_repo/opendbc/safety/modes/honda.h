@@ -105,7 +105,8 @@ static void honda_rx_hook(const CANPacket_t *msg) {
 
   // check ACC main state
   // 0x326 for all Bosch and some Nidec, 0x1A6 for some Nidec
-  if ((msg->addr == 0x326U) || (msg->addr == 0x1A6U)) {
+  if ((!aol_honda_bosch_long && ((msg->addr == 0x326U) || (msg->addr == 0x1A6U))) ||
+      (aol_honda_bosch_long && msg_matches(msg, 0x326U, pt_bus, 8U))) {
     acc_main_on = GET_BIT(msg, ((msg->addr == 0x326U) ? 28U : 47U));
     if (aol_honda_bosch_long && (msg->addr == 0x326U)) {
       aol_honda_main_ts = microsecond_timer_get();
@@ -134,7 +135,8 @@ static void honda_rx_hook(const CANPacket_t *msg) {
 
   // state machine to enter and exit controls for button enabling
   // 0x1A6 for the ILX, 0x296 for the Civic Touring
-  if (msg_matches(msg, 0x1A6U, pt_bus) || msg_matches(msg, 0x296U, pt_bus)) {
+  if ((!aol_honda_bosch_long && (msg_matches(msg, 0x1A6U, pt_bus) || msg_matches(msg, 0x296U, pt_bus))) ||
+      (aol_honda_bosch_long && msg_matches(msg, 0x296U, pt_bus, 4U))) {
     int button = (msg->data[0] & 0xE0U) >> 5;
 
     // enter controls on the falling edge of set or resume
@@ -454,9 +456,7 @@ static safety_config honda_bosch_init(uint16_t param) {
 #ifdef ALLOW_DEBUG
   const uint16_t HONDA_PARAM_BOSCH_LONG = 2;
   honda_bosch_long = GET_FLAG(param, HONDA_PARAM_BOSCH_LONG);
-  const uint16_t HONDA_PARAM_AOL = 32;
-  aol_honda_bosch_long = honda_bosch_long && GET_FLAG(param, HONDA_PARAM_AOL) &&
-                         !honda_bosch_radarless && !honda_bosch_canfd;
+  aol_honda_bosch_long = honda_bosch_long && ((param == 34U) || (param == 35U));
 #endif
   if (aol_honda_bosch_long) {
     static const AolSafetyPolicy aol_honda_policy = {
