@@ -199,9 +199,14 @@ def get_lead(v_ego: float, ready: bool, tracks: dict[int, Track], lead_msg: capn
 
 
 class RadarD:
-  def __init__(self, delay: float = 0.0, *, adjacent_enabled: bool = False, radar_available: bool = False, clock_pair_fn=None):
+  def __init__(self, delay: float = 0.0, *, adjacent_enabled: bool = False, radar_available: bool = False,
+               clock_pair_fn=None, honda_bosch_a_radar: bool = False):
     self.tracks: dict[int, Track] = {}
-    self.kalman_params = KalmanParams(DT_MDL)
+    self.honda_bosch_a = None
+    if honda_bosch_a_radar:
+      from openpilot.starpilot.car.honda.radar import BoschALeadPolicy
+      self.honda_bosch_a = BoschALeadPolicy()
+    self.kalman_params = KalmanParams(1.0 / 15.0 if self.honda_bosch_a is not None else DT_MDL)
     self.lead_prob_filters = [FirstOrderFilter(0.0, 0.2, DT_MDL) for _ in range(2)]
 
     self.v_ego = 0.0
@@ -298,24 +303,27 @@ class RadarD:
       self.v_ego_hist.append(self.v_ego)
       self.last_v_ego_frame = sm.recv_frame['carState']
 
-    ar_pts = {pt.trackId: [pt.dRel, pt.yRel, pt.vRel] for pt in rr.points}
+    if self.honda_bosch_a is not None:
+      self.honda_bosch_a.update_tracks(sm, rr, self)
+    else:
+      ar_pts = {pt.trackId: [pt.dRel, pt.yRel, pt.vRel] for pt in rr.points}
 
-    # *** remove missing points from meta data ***
-    for ids in list(self.tracks.keys()):
-      if ids not in ar_pts:
-        self.tracks.pop(ids, None)
+      # *** remove missing points from meta data ***
+      for ids in list(self.tracks.keys()):
+        if ids not in ar_pts:
+          self.tracks.pop(ids, None)
 
-    # *** compute the tracks ***
-    for ids in ar_pts:
-      rpt = ar_pts[ids]
+      # *** compute the tracks ***
+      for ids in ar_pts:
+        rpt = ar_pts[ids]
 
-      # align v_ego by a fixed time to align it with the radar measurement
-      v_lead = rpt[2] + self.v_ego_hist[0]
+        # align v_ego by a fixed time to align it with the radar measurement
+        v_lead = rpt[2] + self.v_ego_hist[0]
 
-      # create the track if it doesn't exist or it's a new track
-      if ids not in self.tracks:
-        self.tracks[ids] = Track(ids, v_lead, self.kalman_params)
-      self.tracks[ids].update(rpt[0], rpt[1], rpt[2], v_lead)
+        # create the track if it doesn't exist or it's a new track
+        if ids not in self.tracks:
+          self.tracks[ids] = Track(ids, v_lead, self.kalman_params)
+        self.tracks[ids].update(rpt[0], rpt[1], rpt[2], v_lead)
 
     # *** publish radarState ***
     self.radar_state_valid = sm.all_checks()
@@ -337,8 +345,12 @@ class RadarD:
         else:
           self.lead_prob_filters[i].update(lead_prob)
 
-      self.radar_state.leadOne = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0], model_v_ego, self.lead_prob_filters[0].x, low_speed_override=True)
-      self.radar_state.leadTwo = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[1], model_v_ego, self.lead_prob_filters[1].x, low_speed_override=False)
+      if self.honda_bosch_a is not None:
+        self.radar_state.leadOne, self.radar_state.leadTwo = self.honda_bosch_a.leads(sm, self, model_v_ego)
+      else:
+        self.radar_state.leadOne = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[0], model_v_ego, self.lead_prob_filters[0].x, low_speed_override=True)
+        self.radar_state.leadTwo = get_lead(self.v_ego, self.ready, self.tracks, leads_v3[1], model_v_ego,
+                                          self.lead_prob_filters[1].x, low_speed_override=False)
     if self.adjacent_enabled:
       self._qualified_adjacent(sm, rr)
 
@@ -393,7 +405,10 @@ def main() -> None:
   adjacent_enabled = feature_enabled(params, CP, 'conditional', os.environ) and 'REPLAY' not in os.environ
   pm = messaging.PubMaster(['radarState', 'starpilotRadarState'] if adjacent_enabled else ['radarState'])
 
-  RD = RadarD(CP.radarDelay, adjacent_enabled=adjacent_enabled, radar_available=not CP.radarUnavailable)
+  from opendbc.car.honda.bosch_a_radar import VERIFIED_BOSCH_A_CARS
+  honda_bosch_a = CP.brand == "honda" and CP.carFingerprint in VERIFIED_BOSCH_A_CARS and not CP.radarUnavailable
+  RD = RadarD(CP.radarDelay, adjacent_enabled=adjacent_enabled, radar_available=not CP.radarUnavailable,
+              honda_bosch_a_radar=honda_bosch_a)
 
   while 1:
     sm.update()
