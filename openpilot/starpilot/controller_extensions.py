@@ -18,11 +18,35 @@ class ManualTurnInputs:
     self.sm = messaging.SubMaster(["modelV2", "lateralDelay"])
     self.enabled = bool(self.params.get("FordHumanTurnDetection", return_default=True))
     self.frames = 0
+    self.blend_settings = self._read_blend_settings()
+    self._applied_blends = {}
+
+  def _read_blend_settings(self):
+    settings = []
+    for key, default, low, high in (("FordCurvatureBlendLow", 0.4, 0.0, 1.0),
+                                    ("FordCurvatureBlendHigh", 0.4, 0.0, 1.0),
+                                    ("FordCurvatureLaneChangeFactor", 0.85, 0.5, 1.25)):
+      try:
+        value = float(self.params.get(key, return_default=True))
+        if not math.isfinite(value):
+          value = default
+      except (TypeError, ValueError, OverflowError, RuntimeError):
+        value = default
+      settings.append(float(np.clip(value, low, high)))
+    return tuple(settings)
+
+  def apply_blend_settings(self, controller):
+    for name in ("mache_lateral", "classic_lateral"):
+      owner = getattr(controller, name, None)
+      if owner is not None and self._applied_blends.get(owner) != self.blend_settings:
+        owner.set_blend_settings(*self.blend_settings)
+        self._applied_blends[owner] = self.blend_settings
 
   def update(self):
     self.sm.update(0)
     if self.frames % 100 == 0:
       self.enabled = bool(self.params.get("FordHumanTurnDetection", return_default=True))
+      self.blend_settings = self._read_blend_settings()
     self.frames += 1
     state = self.sm["modelV2"].meta.laneChangeState
     model_ready = self.sm.alive["modelV2"] and self.sm.valid["modelV2"]
@@ -78,6 +102,9 @@ def configure_controller(CI, params):
   from opendbc.car.ford.generic_canfd_lateral import qualified as generic_canfd_qualified
   if controller is not None and (classic_qualified(cp) or generic_canfd_qualified(cp)) and getattr(controller, "classic_lateral", None) is not None:
     controller.manual_turn_inputs = ManualTurnInputs(params)
+
+  if controller is not None and cp.brand == "ford" and getattr(controller, "manual_turn_inputs", None) is not None:
+    controller.manual_turn_inputs.apply_blend_settings(controller)
 
   from opendbc.car.hyundai.g90_lead import eligible as g90_lead_eligible
   if controller is not None and g90_lead_eligible(cp):
