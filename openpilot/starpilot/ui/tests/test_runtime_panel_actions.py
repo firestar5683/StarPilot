@@ -69,6 +69,15 @@ class TestRuntimePanelActions(unittest.TestCase):
     self.addCleanup(self.clock.stop)
     self.addCleanup(self.state.stop)
 
+  def test_connectivity_power_uses_native_offroad_without_panda_telemetry(self):
+    session = runtime_app.StarShellSession.__new__(runtime_app.StarShellSession)
+    session.adapter = self.layout.star.adapter
+    self.ui.sm.messages['pandaStates'] = []
+    self.assertFalse(session.adapter.connectivity_allowed())
+    self.assertTrue(session.connectivity_allowed())
+    self.ui.is_offroad = lambda: False
+    self.assertFalse(session.connectivity_allowed())
+
   def test_large_pairing_uses_native_dialog_only_while_unpaired_and_parked(self):
     with patch("openpilot.selfdrive.ui.widgets.pairing_dialog.PairingDialog", return_value="pairing") as dialog, \
          patch.object(runtime_app.gui_app, "push_widget") as pushed:

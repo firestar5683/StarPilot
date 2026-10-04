@@ -388,7 +388,8 @@ class StarShellSession:
     return bool(ui_state.is_offroad() and self.adapter.confirmed_offroad())
 
   def connectivity_allowed(self) -> bool:
-    return bool(ui_state.is_offroad() and self.adapter.connectivity_allowed())
+    # Connectivity setup also works on USB power without vehicle telemetry.
+    return ui_state.is_offroad()
 
   def configuration_allowed(self) -> bool:
     drive_state = getattr(self, 'drive_state', None)

@@ -679,6 +679,7 @@ class BluetoothOwnerTest(unittest.TestCase):
     path = '/org/bluez/hci0/dev_11_22_33_44_55_66'
     incoming = Queue()
     replies = []
+    calls = []
 
     class Router:
       @contextmanager
@@ -695,6 +696,7 @@ class BluetoothOwnerTest(unittest.TestCase):
     self.enterContext(patch.object(bluez, '_objects', lambda: None))
     self.enterContext(patch.object(bluez, '_devices', lambda _objects: [{'address': '11:22:33:44:55:66', 'paired': True}]))
     def call(_path, _interface, member, *_args, **_kwargs):
+      calls.append((_path, _interface, member, _args))
       if member == 'UnregisterAgent':
         message = new_method_call(DBusAddress(AGENT_PATH, bus_name=':1.9', interface=AGENT), 'Release')
         message.header.fields[HeaderFields.sender] = ':1.7'
@@ -707,6 +709,7 @@ class BluetoothOwnerTest(unittest.TestCase):
     self.enterContext(patch.object(bluez, '_call', call))
     session = PairingSession(('session', b'generation'), '11:22:33:44:55:66', path, lambda: True, time.monotonic)
     self.assertTrue(bluez.pair(session.address, path, session))
+    self.assertIn((path, 'org.freedesktop.DBus.Properties', 'Set', ('ssv', ('org.bluez.Device1', 'Trusted', ('b', True)))), calls)
     self.assertEqual([item.header.message_type for item in replies], [MessageType.method_return])
     session.finish(True)
     self.assertEqual(session.state, 'paired')

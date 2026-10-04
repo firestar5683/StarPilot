@@ -386,6 +386,9 @@ class BlueZ:
       self._call(path, DEVICE, 'Pair', timeout=70.0)
       paired = next((item['paired'] for item in self._devices(self._objects()) if item['address'] == address), False)
       if paired:
+        if session.state != 'pairing' or not session.parked() or session.clock() >= session.deadline:
+          return False
+        self._call(path, 'org.freedesktop.DBus.Properties', 'Set', 'ssv', (DEVICE, 'Trusted', ('b', True)))
         pair_succeeded.set()
       return paired
     finally:

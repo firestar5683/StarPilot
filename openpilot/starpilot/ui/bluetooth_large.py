@@ -1,5 +1,5 @@
 from collections.abc import Callable
-from concurrent.futures import Future, ThreadPoolExecutor
+from concurrent.futures import ThreadPoolExecutor
 import re
 import time
 import uuid
@@ -36,6 +36,8 @@ class BluetoothLarge(Widget):
     self.next_refresh = 0.0
     self.pair_dialog = None
     self.pair_dialog_id = None
+    self.last_prompt_id = None
+    self.scan_on_ready = False
     self._signature = None
     self._touch_held = False
     self._rebuild()
@@ -44,6 +46,7 @@ class BluetoothLarge(Widget):
     super().show_event()
     self.session = ('large', uuid.uuid4().hex)
     self.active = True
+    self.scan_on_ready = True
     gui_app.add_nav_stack_tick(self._tick)
     self.next_refresh = 0.0
     self._scroller.show_event()
@@ -62,6 +65,8 @@ class BluetoothLarge(Widget):
     self.return_to_root = False
     self.queued = None
     self.status = None
+    self.scan_on_ready = False
+    self.last_prompt_id = None
     self._retire_prompt()
     self._signature = None
     self._scroller.hide_event()
@@ -151,6 +156,8 @@ class BluetoothLarge(Widget):
       else:
         if operation != "close" and not stale:
           self.status = result
+          if operation == "power":
+            self.scan_on_ready = bool(result.get("powered"))
           self._retire_prompt()
           self._rebuild()
           if self.return_to_root:
@@ -162,6 +169,16 @@ class BluetoothLarge(Widget):
         queued = self.queued
         self.queued = None
         self._submit_request(*queued)
+        return
+    prompt = ((self.status or {}).get("pairing") or {}).get("prompt")
+    if prompt and self._pairing_ready() and prompt["id"] != self.last_prompt_id and not gui_app.mouse_events:
+      self.last_prompt_id = prompt["id"]
+      self._prompt(prompt)
+    if (self.active and self.scan_on_ready and self._ready() and
+        self.status.get("powered") and self.status.get("parked")):
+      self.scan_on_ready = False
+      if not self.status.get("discovering"):
+        self._request("scan")
         return
     if self.pending is None and time.monotonic() >= self.next_refresh:
       self._snapshot()
@@ -187,19 +204,24 @@ class BluetoothLarge(Widget):
       callback() if result == DialogResult.CONFIRM and self.active and self.session == session else None))
 
   def _prompt(self, prompt):
-    if prompt.get("kind") in ("pin", "passkey"):
+    if prompt.get("displayOnly"):
+      self._show_pair_dialog(prompt, alert_dialog(f"Bluetooth code: {prompt.get('value') or ''}"))
+    elif prompt.get("kind") in ("pin", "passkey"):
       session = self.session
       keyboard = Keyboard(max_text_size=6 if prompt["kind"] == "passkey" else 16, min_text_size=1, password_mode=True)
       keyboard.set_title("Bluetooth passkey" if prompt["kind"] == "passkey" else "Bluetooth PIN")
       def entered(result):
         value = keyboard.text
         valid = bool(re.fullmatch(r"[0-9]{1,6}", value)) if prompt["kind"] == "passkey" else value.isascii() and value.isprintable()
-        if result == DialogResult.CONFIRM and valid and self.active and self.session == session:
-          self._request("pairing_response", prompt_id=prompt["id"], accepted=True, value=value)
-      keyboard._callback = entered
+        accepted = result == DialogResult.CONFIRM and valid
+        if self.active and self.session == session:
+          self._request("pairing_response", prompt_id=prompt["id"], accepted=accepted, value=value if accepted else "")
+        keyboard.clear()
+      keyboard.set_callback(entered)
       self._show_pair_dialog(prompt, keyboard)
     else:
-      dialog = ConfirmDialog(f"Confirm Bluetooth code {prompt.get('value') or ''}?", "Confirm", callback=lambda result:
+      question = f"Confirm Bluetooth code {prompt['value']}?" if prompt.get("value") else "Allow Bluetooth pairing?"
+      dialog = ConfirmDialog(question, "Confirm", callback=lambda result:
         self._request("pairing_response", prompt_id=prompt["id"], accepted=result == DialogResult.CONFIRM))
       self._show_pair_dialog(prompt, dialog)
 
@@ -219,6 +241,16 @@ class BluetoothLarge(Widget):
       description=status.get("errorCode") or ("Checking adapter" if self.status is None else None),
       callback=lambda: self._request("power", enabled=not bool((self.status or {}).get("powered"))),
       enabled=lambda: self.active and self._ready() and bool((self.status or {}).get("parked")))]
+    error = {
+      "radio_unavailable": "Bluetooth radio support is not installed on this device.",
+      "adapter_unavailable": "No Bluetooth adapter detected. Turn Bluetooth on to start it.",
+      "service_unavailable": "Bluetooth service is not responding. Try turning Bluetooth on again.",
+      "radio_preference_unavailable": "The Bluetooth power setting could not be read.",
+    }.get(status.get("errorCode"))
+    if error:
+      rows.append(text_item("Bluetooth status", error))
+    elif self.status is not None and not status.get("parked"):
+      rows.append(text_item("Bluetooth status", "Switch to Offroad to change Bluetooth power."))
     if status.get("powered"):
       rows.append(button_item("Nearby devices", "Stop scan" if status.get("discovering") else "Scan",
         callback=lambda: self._request("stop_scan" if (self.status or {}).get("discovering") else "scan"),

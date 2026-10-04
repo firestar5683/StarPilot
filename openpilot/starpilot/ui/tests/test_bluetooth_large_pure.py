@@ -84,6 +84,16 @@ class Owner:
 class Dialog:
   def __init__(self, *args, **kwargs):
     self.callback = kwargs.get('callback')
+    self.text = ''
+
+  def set_title(self, *args):
+    pass
+
+  def set_callback(self, callback):
+    self.callback = callback
+
+  def clear(self):
+    self.text = ''
 
 
 class TestBluetoothLarge(unittest.TestCase):
@@ -114,6 +124,50 @@ class TestBluetoothLarge(unittest.TestCase):
     self.assertFalse(self.panel.pending.done())
     self.assertEqual(self.panel.executor.jobs[0][2], ())
     self.assertTrue(self.panel.owner.session_valid(self.panel.session))
+
+  def test_open_powered_panel_scans_once_and_stops_on_hide(self):
+    self.panel.show_event()
+    self.panel.pending.set_result({'available': True, 'powered': True, 'parked': True, 'discovering': False})
+    self.panel._tick()
+    self.assertEqual(self.panel.operation, 'scan')
+    self.panel.pending.set_result({'available': True, 'powered': True, 'parked': True, 'discovering': False})
+    self.panel._tick()
+    self.assertEqual(sum(job[2] == ('scan',) for job in self.panel.executor.jobs), 1)
+    executor = self.panel.executor
+    self.panel.hide_event()
+    self.assertEqual(executor.jobs[-1][1], self.panel.owner.close)
+
+  def test_pairing_prompt_opens_once_and_expired_prompt_is_retired(self):
+    prompt = {'id': 'a' * 32, 'kind': 'confirmation', 'value': '123456', 'displayOnly': False}
+    status = {'available': True, 'powered': True, 'parked': True, 'discovering': False,
+              'pairing': {'state': 'pairing', 'prompt': prompt}}
+    self.panel.show_event()
+    self.panel.pending.set_result(status)
+    self.panel._tick()
+    self.assertEqual(len(self.app.widgets), 1)
+    self.panel._snapshot()
+    self.panel.pending.set_result(status)
+    self.panel._tick()
+    self.assertEqual(len(self.app.widgets), 1)
+    self.panel._snapshot()
+    self.panel.pending.set_result({'available': True, 'powered': True, 'parked': True})
+    self.panel._tick()
+    self.assertEqual(len(self.app.widgets), 0)
+
+  def test_pin_cancel_rejects_prompt_and_clears_keyboard(self):
+    prompt = {'id': 'a' * 32, 'kind': 'pin', 'value': '', 'displayOnly': False}
+    self.panel.show_event()
+    self.panel.pending.set_result({'available': True, 'powered': True, 'parked': True,
+                                   'pairing': {'state': 'pairing', 'prompt': prompt}})
+    self.panel._tick()
+    keyboard = self.app.widgets[-1]
+    keyboard.text = '1234'
+    keyboard.callback(0)
+    self.assertEqual(keyboard.text, '')
+    job = self.panel.executor.jobs[-1]
+    self.assertEqual(job[2], ('pairing_response',))
+    self.assertFalse(job[3]['accepted'])
+    self.assertEqual(job[3]['value'], '')
 
   def test_named_devices_and_disconnect_forget_presented(self):
     self.panel.status = dict(available=True, powered=True, parked=True, devices=[
@@ -153,7 +207,7 @@ class TestBluetoothLarge(unittest.TestCase):
     self.assertIs(self.panel._scroller.scroll_panel, scroll)
 
   def test_unnamed_unpaired_devices_not_presented(self):
-    self.panel.status = dict(available=True, powered=True, devices=[
+    self.panel.status = dict(available=True, powered=True, parked=True, devices=[
       dict(address='AA:BB:CC:DD:EE:FF', name='AA:BB:CC:DD:EE:FF', paired=False),
       dict(address='11:22:33:44:55:66', name='Bluetooth Device · 55:66', paired=False)])
     self.panel._rebuild()
