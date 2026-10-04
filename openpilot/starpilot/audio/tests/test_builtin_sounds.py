@@ -17,9 +17,9 @@ def test_default_builtin_assets_flow_through_soundd_callback(tmp_path):
   sound = Soundd(params)
   root = Path(BASEDIR) / 'openpilot/selfdrive/assets/sounds_starpilot'
   for alert, (logical, _, _) in sound_list.items():
-    expected = read_wav(root / BUILTIN_FILES[logical])
+    expected = read_wav(root / BUILTIN_FILES[logical]) if logical in BUILTIN_FILES else read_wav(root.parent / "sounds" / logical)
     np.testing.assert_array_equal(sound.loaded_sounds[alert], expected)
-    sound.current_alert, sound.current_sound_frame, sound.current_volume = alert, 0, .5
+    sound.current_alert, sound.current_sound, sound.current_sound_frame, sound.current_volume = alert, alert, 0, .5
     output = np.zeros((len(expected), 1), dtype=np.float32)
     with patch('pathlib.Path.open', side_effect=AssertionError('callback file I/O')):
       sound.callback(output, len(expected), None, None)

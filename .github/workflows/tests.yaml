@@ -5,6 +5,7 @@ on:
     branches:
       - master
       - Domathon
+      - SecretGoodStarPilot
   pull_request:
   workflow_dispatch:
   workflow_call:

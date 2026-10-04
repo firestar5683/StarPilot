@@ -111,7 +111,8 @@ class SoundPackLoader:
     directory = pack_directory(name, self.root) if readable else None
     paths = tuple(directory / candidate for filename in filenames
                   for candidate in dict.fromkeys((LEGACY_NAMES.get(filename, filename), filename))) if directory else ()
-    paths += tuple(self.stock.parent / "sounds_starpilot" / BUILTIN_FILES[filename] for filename in filenames)
+    paths += tuple(self.stock.parent / "sounds_starpilot" / BUILTIN_FILES[filename]
+                   for filename in filenames if filename in BUILTIN_FILES)
     metadata = []
     for path in paths:
       try:
@@ -126,7 +127,7 @@ class SoundPackLoader:
     builtin_loaded = {}
     for filename in filenames:
       selected = None
-      if name == DEFAULT_PACK or not readable:
+      if (name == DEFAULT_PACK or not readable) and filename in BUILTIN_FILES:
         builtin = BUILTIN_FILES[filename]
         try:
           if builtin not in builtin_loaded:
