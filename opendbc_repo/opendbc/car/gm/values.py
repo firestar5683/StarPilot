@@ -616,7 +616,6 @@ SDGM_STOCK_CAR = {
 SDGM_CANCEL_PT_CAR = {CAR.CADILLAC_XT4, CAR.CADILLAC_XT5, CAR.CADILLAC_XT6, CAR.BUICK_BABYENCLAVE}
 SDGM_CAR = {CAR.CADILLAC_XT4, CAR.CHEVROLET_VOLT_2019, CAR.CHEVROLET_TRAVERSE} | SDGM_STOCK_CAR
 
-# Explicit selection only: frozen fingerprints alias ACC siblings, and no disjoint firmware exists.
 CC_GATEWAY_STOCK_CAR = {
   CAR.CADILLAC_CT6_CC, CAR.CADILLAC_XT4_CC, CAR.CADILLAC_XT5_CC,
   CAR.CHEVROLET_EQUINOX_CC, CAR.CHEVROLET_MALIBU_CC, CAR.CHEVROLET_SILVERADO_CC,
@@ -751,7 +750,7 @@ def is_ordinary_cc_profile(cp):
     return (cp.brand == 'gm' and cp.carFingerprint in ORDINARY_CC_CAR and
             cp.networkLocation == CarParams.NetworkLocation.gateway and cp.radarUnavailable and not cp.pcmCruise and
             not cp.alphaLongitudinalAvailable and not cp.passive and not cp.dashcamOnly and not cp.notCar and
-            cp.flags == int(GMFlags.CC_LONG) and len(configs) == 1 and
+            control_flags(cp) == int(GMFlags.CC_LONG) and len(configs) == 1 and
             configs[0].safetyModel == CarParams.SafetyModel.gm and int(configs[0].safetyParam) == ORDINARY_CC_WORD)
   except (AttributeError, IndexError, TypeError, ValueError):
     return False

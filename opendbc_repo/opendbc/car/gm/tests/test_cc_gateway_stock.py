@@ -5,7 +5,7 @@ from opendbc.car import Bus, gen_empty_fingerprint
 from opendbc.car.gm.carstate import CarState
 from opendbc.car.gm.fingerprints import FINGERPRINTS, FW_VERSIONS
 from opendbc.car.gm.interface import CarInterface
-from opendbc.car.gm.values import CC_GATEWAY_STOCK_CAR, ORDINARY_CC_CAR, DBC, GMSafetyFlags
+from opendbc.car.gm.values import CAR, CC_GATEWAY_STOCK_CAR, ORDINARY_CC_CAR, DBC, GMSafetyFlags
 from opendbc.car.fw_versions import match_fw_to_car
 from opendbc.car.structs import CarParams
 
@@ -50,7 +50,9 @@ class TestCcGatewayStock(unittest.TestCase):
     self.assertEqual(len(CC_GATEWAY_STOCK_CAR), 9)
     for car in CC_GATEWAY_STOCK_CAR:
       self.assertEqual(car.config.car_docs, [])
-      self.assertNotIn(car, FINGERPRINTS)
+      automatic = {CAR.CADILLAC_CT6_CC, CAR.CADILLAC_XT5_CC, CAR.CHEVROLET_EQUINOX_CC,
+                   CAR.CHEVROLET_MALIBU_CC, CAR.CHEVROLET_SUBURBAN_CC, CAR.CHEVROLET_TRAILBLAZER_CC}
+      self.assertEqual(car in FINGERPRINTS, car in automatic)
       self.assertNotIn(car, FW_VERSIONS)
       for alpha, release in ((False, False), (True, False), (True, True)):
         with self.subTest(car=car, alpha=alpha, release=release):

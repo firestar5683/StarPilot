@@ -217,20 +217,25 @@ class TestBoltPedalStartupParser(unittest.TestCase):
     'EBCMRegenPaddle': 40, 'ECMCruiseControl': 10, 'GAS_SENSOR': 50,
   }
 
-  def stream(self, cp, missing=None):
+  def stream(self, cp, missing=None, *, blindspot=False, pedal_present=True, camera_present=True):
     ci = CarInterface(cp)
     packer = CANPacker(DBC[cp.carFingerprint][Bus.pt])
-    camera = ['ASCMLKASteeringCmd', 'AEBCmd']
+    pt_messages = dict(self.PT_MESSAGES)
+    if blindspot:
+      pt_messages['BCMBlindSpotMonitor'] = 10
+    if not pedal_present:
+      pt_messages.pop('GAS_SENSOR')
+    camera = ['ASCMLKASteeringCmd', 'AEBCmd'] if camera_present else []
     if cp.carFingerprint == CAR.CHEVROLET_BOLT_ACC_2022_2023_PEDAL:
       camera.append('ASCMActiveCruiseControlStatus')
     sensor_counter = 0
     for index in range(250):
       frames = []
-      for bus, names in ((0, self.PT_MESSAGES), (2, camera), (128, ['ASCMLKASteeringCmd'])):
+      for bus, names in ((0, pt_messages), (2, camera), (128, ['ASCMLKASteeringCmd'])):
         for name in names:
           if (bus, name) == missing:
             continue
-          rate = self.PT_MESSAGES[name] if bus == 0 else 25 if name == 'ASCMActiveCruiseControlStatus' else 10
+          rate = pt_messages[name] if bus == 0 else 25 if name == 'ASCMActiveCruiseControlStatus' else 10
           if index and index * rate // 100 == (index - 1) * rate // 100:
             continue
           if name == 'GAS_SENSOR':
