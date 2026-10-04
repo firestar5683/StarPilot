@@ -404,7 +404,7 @@ class HardwareComma(HardwareBase):
 
     gpio_set(GPIO.STM_RST_N, True)
     gpio_set(GPIO.STM_BOOT0, False)
-    time.sleep(0.01)
+    time.sleep(1 if self.get_device_type() == "tici" else 0.01)
     gpio_set(GPIO.STM_RST_N, False)
 
   def recover_internal_panda(self):
@@ -413,9 +413,9 @@ class HardwareComma(HardwareBase):
 
     gpio_set(GPIO.STM_RST_N, True)
     gpio_set(GPIO.STM_BOOT0, True)
-    time.sleep(0.01)
+    time.sleep(0.5 if self.get_device_type() == "tici" else 0.01)
     gpio_set(GPIO.STM_RST_N, False)
-    time.sleep(0.01)
+    time.sleep(0.5 if self.get_device_type() == "tici" else 0.01)
     gpio_set(GPIO.STM_BOOT0, False)
 
   def booted(self):

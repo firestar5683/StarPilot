@@ -1,7 +1,7 @@
 import ast
 from pathlib import Path
 from types import SimpleNamespace
-from unittest.mock import Mock
+from unittest.mock import Mock, call
 
 import pytest
 
@@ -109,3 +109,59 @@ def test_startup_and_wake_write_model_registers(model, path_name):
   assert registers[0x3e] & 0x1f == (0x1c if model == 'tici' else 0x17)
   assert registers[0x49] & 2 == (2 if model == 'tici' else 0)
   assert len([register for register, _ in writes if register >= 0x84]) == (50 if model == 'tici' else 0)
+
+
+@pytest.mark.parametrize('device,reset_hold,recover_hold', [('tici', 1, 0.5), ('tizi', 0.01, 0.01), ('mici', 0.01, 0.01)])
+def test_internal_panda_reset_and_recovery_timing(device, reset_hold, recover_hold):
+  tree = ast.parse(SOURCE.read_text())
+  cls = next(node for node in tree.body if isinstance(node, ast.ClassDef) and node.name == 'HardwareComma')
+  methods = [node for node in cls.body if isinstance(node, ast.FunctionDef) and
+             node.name in {'reset_internal_panda', 'recover_internal_panda'}]
+  events = Mock()
+  namespace = {'gpio_init': Mock(), 'gpio_set': events.gpio, 'time': SimpleNamespace(sleep=events.sleep),
+               'GPIO': SimpleNamespace(STM_RST_N='reset', STM_BOOT0='boot0')}
+  exec(compile(ast.Module(body=methods, type_ignores=[]), str(SOURCE), 'exec'), namespace)
+  hardware = SimpleNamespace(get_device_type=lambda: device)
+  namespace['reset_internal_panda'](hardware)
+  assert events.mock_calls == [call.gpio('reset', True), call.gpio('boot0', False), call.sleep(reset_hold), call.gpio('reset', False)]
+  events.reset_mock()
+  namespace['recover_internal_panda'](hardware)
+  assert events.mock_calls == [call.gpio('reset', True), call.gpio('boot0', True), call.sleep(recover_hold),
+                               call.gpio('reset', False), call.sleep(recover_hold), call.gpio('boot0', False)]
+
+
+@pytest.mark.parametrize('device', ['tici', 'tizi', 'mici'])
+@pytest.mark.parametrize('failure', [None, 'missing', 'usb', 'protocol', 'multiple'])
+def test_pandad_enumeration_and_recovery(device, failure):
+  pandad_path = SOURCE.parents[3] / 'selfdrive/pandad/pandad.py'
+  tree = ast.parse(pandad_path.read_text())
+  main_fn = next(node for node in tree.body if isinstance(node, ast.FunctionDef) and node.name == 'main')
+  events = Mock()
+  first_discovery = {'missing': [], 'usb': OSError(), 'multiple': ['one', 'two']}.get(failure, ['serial'])
+  events.list.side_effect = [[], first_discovery, *([] if failure == 'multiple' else [['serial']]), KeyboardInterrupt()]
+  events.dfu_list.return_value = []
+  flash = Mock(side_effect=[RuntimeError(), None] if failure == 'protocol' else None)
+  process = Mock()
+  process.wait.side_effect = KeyboardInterrupt()
+  launch = Mock(return_value=process)
+  namespace = {'Panda': SimpleNamespace(list=events.list), 'PandaDFU': SimpleNamespace(list=events.dfu_list),
+               'HARDWARE': SimpleNamespace(get_device_type=lambda: device, reset_internal_panda=events.reset,
+                                           recover_internal_panda=events.recover),
+               'time': SimpleNamespace(sleep=events.sleep), 'cloudlog': Mock(), 'signal': Mock(),
+               'usb1': SimpleNamespace(USBErrorNoDevice=OSError, USBErrorPipe=BrokenPipeError), 'PandaProtocolMismatch': RuntimeError,
+               'flash_panda': flash, 'subprocess': SimpleNamespace(Popen=launch), 'BASEDIR': 'base',
+               'os': SimpleNamespace(environ={}, path=SimpleNamespace(join=lambda *parts: '/'.join(parts)))}
+  exec(compile(ast.Module(body=[main_fn], type_ignores=[]), str(pandad_path), 'exec'), namespace)
+  with pytest.raises(KeyboardInterrupt):
+    namespace['main']()
+
+  expected = [call.list()]  # Initial health inspection.
+  for reset in [call.reset()] if failure is None else [call.reset(), call.recover()]:
+    expected += [reset, *([call.sleep(3)] if device == 'tici' else []), call.dfu_list(), call.list()]
+  assert events.mock_calls == expected
+  if failure == 'multiple':
+    flash.assert_not_called()
+    launch.assert_not_called()
+  else:
+    assert flash.call_args_list == [call('serial')] * (2 if failure == 'protocol' else 1)
+    launch.assert_called_once_with(['./pandad', 'serial'], cwd='base/openpilot/selfdrive/pandad')
