@@ -4,6 +4,8 @@ import unittest
 from types import SimpleNamespace
 from unittest.mock import Mock, patch
 
+from openpilot.starpilot.vehicle_startup import VehicleStartupOwner
+
 from opendbc.car import gen_empty_fingerprint
 from opendbc.car.can_definitions import CanData
 from opendbc.car.car_helpers import get_car
@@ -550,7 +552,10 @@ class TestIoniq6PrepublicationHandoff(unittest.TestCase):
     class FakeSM:
       def __init__(self):
         self.valid = {'carControl': False, 'pandaStates': True}
-        self.alive = {'pandaStates': True}
+        self.alive = {'pandaStates': True, 'carControl': True}
+        self.seen = {'carControl': True}
+        self.logMonoTime = {'carControl': 1}
+        self.recv_time = {'carControl': 1e-9}
         self.panda = [SimpleNamespace(safetyModel=3, safetyParam=1, controlsAllowed=False)]
 
       def all_alive(self, services):
@@ -575,7 +580,8 @@ class TestIoniq6PrepublicationHandoff(unittest.TestCase):
     card.can_callbacks = (lambda wait_for_one=False: [], lambda messages: None)
     card.params = SimpleNamespace(put_bool=Mock())
     card.CP = SimpleNamespace(safetyConfigs=[object()])
-    card.CI = SimpleNamespace(init=Mock(), apply=Mock(return_value=(object(), [])))
+    card.CI = SimpleNamespace(CC=SimpleNamespace(), init=Mock(), apply=Mock(return_value=(object(), [])))
+    card.vehicle_startup = VehicleStartupOwner()
     card.sm = FakeSM()
     card.publish_sendcan = Mock()
     card.ioniq6_panda_matches = Mock(return_value=False)
@@ -778,6 +784,7 @@ class TestIoniq6PrepublicationHandoff(unittest.TestCase):
     cp = car.CarParams(openpilotLongitudinalControl=True, pcmCruise=False, passive=False)
     cp.init('safetyConfigs', 1)
     card_owner.CP = cp
+    card_owner.vehicle_startup = VehicleStartupOwner()
     card_owner.ci_initialized = False
     card_owner.initialized_prev = False
     card_owner.ioniq6_long_selected = True
@@ -797,13 +804,15 @@ class TestIoniq6PrepublicationHandoff(unittest.TestCase):
     card_owner.slc_replay = card_owner.curve_replay = card_owner.conditional_replay = card_owner.aol_replay = False
     card_owner.aol_card_intent = None
     card_owner.ioniq6_media = None
+    card_owner.switchback_button_tracker = None
+    card_owner.switchback_settings_owner = None
     card_owner.CC_prev = car.CarControl()
     card_owner.CS_prev = car.CarState()
     card_owner.last_actuators_output = structs.CarControl.Actuators()
     card_owner.rk = SimpleNamespace(remaining=0.0)
     card_owner.is_metric = True
     card_owner.experimental_mode = False
-    card_owner.v_cruise_helper = SimpleNamespace(update_v_cruise=lambda *_: None, initialize_v_cruise=lambda *_: None,
+    card_owner.v_cruise_helper = SimpleNamespace(update_v_cruise=lambda *_: None, initialize_v_cruise=lambda *_, **kwargs: None,
                                                  slc_consumed_button=None,
                                                  slc_cruise_change=None, v_cruise_kph=60.0, v_cruise_cluster_kph=60.0)
     card_owner.RI = SimpleNamespace(update=lambda _: None)
@@ -811,10 +820,11 @@ class TestIoniq6PrepublicationHandoff(unittest.TestCase):
 
     class SM:
       frame = 1
-      seen = {'onroadEvents': True}
+      seen = {'onroadEvents': True, 'carControl': True}
       valid = {'carControl': True}
       alive = {'carControl': True}
-      logMonoTime = {'carControl': 1}
+      logMonoTime = {'carControl': 1, 'onroadEvents': 0}
+      recv_time = {'carControl': 1e-9}
 
       def update(self, _timeout):
         pass
@@ -831,7 +841,7 @@ class TestIoniq6PrepublicationHandoff(unittest.TestCase):
     card_owner.sm = SM()
     sent = []
     card_owner.pm = SimpleNamespace(send=lambda service, packet: sent.append((service, packet)))
-    card_owner.CI = SimpleNamespace(CS=SimpleNamespace(),
+    card_owner.CI = SimpleNamespace(CC=SimpleNamespace(), CS=SimpleNamespace(),
                                     update=Mock(side_effect=lambda packets: car.CarState(canValid=True, canTimeout=False)),
                                     apply=Mock(return_value=(structs.CarControl.Actuators(), [CanData(0x1A0, b'\0' * 8, 1)])),
                                     init=Mock())

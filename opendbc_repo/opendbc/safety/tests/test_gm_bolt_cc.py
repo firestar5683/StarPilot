@@ -69,7 +69,7 @@ class TestGmBoltCcSafety(unittest.TestCase):
       safety = libsafety_py.libsafety
       self.assertTrue(safety.get_controls_allowed())
       safety.set_timer(3_000_000)
-      safety.safety_tick_current_safety_config()
+      safety.safety_tick()
       self.assertFalse(safety.get_controls_allowed())
       for address, data in frames:
         packet(address, button_bytes(1, 1) if address == 0x1E1 else data, 3_001_000)
